@@ -1,0 +1,58 @@
+{
+  "name": "mizukibot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MizukiBot Linux migration pack with LangGraph, local tools, and pluggable subagent bridge",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node index.js",
+    "start:post-reply-worker": "node scripts/post-reply-worker.js",
+    "lint": "node scripts/lint.js",
+    "test": "node scripts/run-tests.js",
+    "console": "node scripts/console.js",
+    "check:agent": "node scripts/check-agent.js",
+    "check:agent:static": "CHECK_RUN=0 node scripts/check-agent.js",
+    "diag:fallback": "node scripts/diagnose-main-model-fallback.js",
+    "diag:continuity": "node scripts/diagnose-continuity-state.js",
+    "check:prompts": "node scripts/check-prompts.js",
+    "linux:install": "bash scripts/install-linux.sh",
+    "linux:check": "bash scripts/check-linux.sh",
+    "linux:start": "bash scripts/mizukibot.sh start",
+    "linux:stop": "bash scripts/mizukibot.sh stop",
+    "linux:restart": "bash scripts/mizukibot.sh restart",
+    "linux:status": "bash scripts/mizukibot.sh status",
+    "linux:logs": "bash scripts/mizukibot.sh logs",
+    "linux:systemd": "bash scripts/setup-systemd.sh",
+    "linux:wireguard:setup": "bash scripts/setup-wireguard-jump-host.sh",
+    "win:daemon:install": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-daemon.ps1",
+    "win:daemon:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-daemon.ps1",
+    "win:daemon:status": "powershell -ExecutionPolicy Bypass -File scripts/status-windows-daemon.ps1",
+    "win:mgmt:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows-management-plane.ps1"
+  },
+  "dependencies": {
+    "@langchain/anthropic": "^0.3.34",
+    "@langchain/core": "^0.3.30",
+    "@langchain/langgraph": "^0.2.40",
+    "@langchain/openai": "^0.4.5",
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
+    "date-holidays": "^3.26.13",
+    "dayjs": "^1.11.13",
+    "express": "^4.21.2",
+    "https-proxy-agent": "^7.0.5",
+    "lunar-javascript": "^1.7.7",
+    "mineflayer": "^4.35.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "node-telegram-bot-api": "^0.67.0",
+    "vec3": "^0.1.10",
+    "ws": "^8.19.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

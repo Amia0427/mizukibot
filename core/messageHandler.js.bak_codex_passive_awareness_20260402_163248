@@ -1,0 +1,914 @@
+const { formatTimeInTz, getDatePartsInTz, todayStrInTz } = require('../utils/time');
+const {
+  favorites,
+  updateFavor,
+  saveData,
+  hasFreshGroupBinding,
+  clearGroupBindingsByGroupId,
+  clearGroupBindingForUser
+} = require('../utils/memory');
+const { askAIByGraph } = require('../api/agentGraph');
+const { askSubagentByBridge } = require('../api/subagentExecutor');
+const { humanizeReply } = require('../utils/humanizer');
+const { buildRoutePromptBundle } = require('../utils/routePromptPolicy');
+const { buildRuntimePrompt } = require('../utils/runtimePrompts');
+const {
+  buildSubagentExecutionGuidanceLine,
+  buildSubagentExecutionPlanLines,
+  buildSubagentToolReasonLine
+} = require('../utils/subagentPrompting');
+const { isAtBot, detectIntentHybrid } = require('./router');
+const { ROUTE_DESCRIPTIONS } = require('./routeProfiles');
+const routeExecution = require('./routeExecution');
+const { createMessageEventDeduper } = require('./messageDeduper');
+
+function buildToolGuidancePrompt(route) {
+  const toolHints = Array.isArray(route?.toolHints) ? route.toolHints.filter(Boolean) : [];
+  if (!toolHints.length) return null;
+
+  const routeType = String(route?.type || 'chat');
+  const reason = String(route?.meta?.reason || '').trim();
+  return buildRuntimePrompt('tool-guidance', {
+    routeType,
+    toolHints: toolHints.join(', '),
+    reasonLine: reason ? `路由原因: ${reason}` : ''
+  });
+}
+
+function buildBridgeGuidancePrompt(route, backend = 'command', routeExecutionPlan = {}) {
+  const routeType = String(route?.type || routeExecutionPlan?.routeType || 'chat');
+  const routeDescription = String(ROUTE_DESCRIPTIONS?.[routeType] || routeType).trim();
+  const reason = String(route?.meta?.reason || '').trim();
+  const toolLine = buildSubagentToolReasonLine(route, backend);
+  const executionLine = buildSubagentExecutionGuidanceLine(route, backend, routeExecutionPlan);
+  const executionPlanLines = buildSubagentExecutionPlanLines(routeExecutionPlan, backend);
+  return buildRuntimePrompt('bridge-guidance', {
+    routeType,
+    routeDescription,
+    planId: String(routeExecutionPlan?.planId || '').trim() || 'none',
+    toolLine,
+    executionLine,
+    executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',
+    reasonLine: reason ? `路由原因: ${reason}` : ''
+  });
+}
+
+function getReplyChunkChars(config) {
+  const n = Number(config.AI_REPLY_CHUNK_CHARS);
+  if (!Number.isFinite(n)) return 1200;
+  return Math.max(300, Math.min(3000, Math.floor(n)));
+}
+
+function getStreamSendGapMs(config) {
+  const n = Number(config.AI_STREAM_SEND_GAP_MS);
+  if (!Number.isFinite(n)) return 260;
+  return Math.max(80, Math.floor(n));
+}
+
+function getStreamMaxSegments(config) {
+  const n = Number(config.AI_STREAM_MAX_SEGMENTS);
+  if (!Number.isFinite(n)) return 3;
+  return Math.max(1, Math.min(6, Math.floor(n)));
+}
+
+function getModelSegmentBreakIndex(text) {
+  const input = String(text || '');
+  if (!input) return -1;
+
+  // 流式时模型使用空行表示“可以切块发送”。
+  const rn = input.indexOf('\r\n\r\n');
+  const nn = input.indexOf('\n\n');
+
+  if (rn === -1 && nn === -1) return -1;
+  if (rn === -1) return nn + 2;
+  if (nn === -1) return rn + 4;
+  return Math.min(rn + 4, nn + 2);
+}
+
+function buildStreamingSegmentationPrompt(maxSegments) {
+  return buildRuntimePrompt('streaming-segmentation', { maxSegments });
+}
+
+function getNaturalSplitIndex(text) {
+  const input = String(text || '');
+  if (!input) return -1;
+
+  const strongStops = ['\n', '。', '！', '？', '!', '?', '~', '；', ';'];
+  for (let i = input.length - 1; i >= 0; i -= 1) {
+    if (strongStops.includes(input[i])) return i + 1;
+  }
+
+  if (input.length >= 24) {
+    const weakStops = [',', '，', '、', ':', '：'];
+    for (let i = input.length - 1; i >= 0; i -= 1) {
+      if (weakStops.includes(input[i])) return i + 1;
+    }
+  }
+
+  return -1;
+}
+
+function createStreamingDispatcher({ config, sendWithRetry, groupId, senderId }) {
+  const maxSegments = getStreamMaxSegments(config);
+  const state = {
+    fullText: '',
+    sentLength: 0,
+    sentSegments: 0,
+    hasSentAny: false,
+    lastSendAt: 0,
+    sendQueue: Promise.resolve()
+  };
+
+  async function sendChunk(chunk) {
+    const text = String(chunk || '').trim();
+    if (!text) return false;
+
+    const task = async () => {
+      // 严格串行发送，避免群消息乱序。
+      // Keep streamed chunk sending strictly serialized (unit-test anchor).
+      const now = Date.now();
+      const minGap = getStreamSendGapMs(config);
+      const elapsed = now - state.lastSendAt;
+      if (state.lastSendAt > 0 && elapsed < minGap) {
+        await new Promise((r) => setTimeout(r, minGap - elapsed));
+      }
+
+      const prefix = state.hasSentAny ? '' : `[CQ:at,qq=${senderId}] `;
+      const sent = await sendWithRetry({
+        action: 'send_group_msg',
+        params: { group_id: groupId, message: `${prefix}${text}` }
+      }, 1, 300);
+
+      if (!sent) {
+        console.error('[stream] send_group_msg failed', { groupId, senderId });
+        return false;
+      }
+
+      state.hasSentAny = true;
+      state.lastSendAt = Date.now();
+      return true;
+    };
+
+    state.sendQueue = state.sendQueue.then(task, task);
+    return state.sendQueue;
+  }
+
+  async function flush(force = false) {
+    const pending = state.fullText.slice(state.sentLength);
+    if (!pending) return false;
+
+    let sendUntil = -1;
+    const canSplitMore = state.sentSegments < (maxSegments - 1);
+    if (canSplitMore) {
+      sendUntil = getModelSegmentBreakIndex(pending);
+      if (sendUntil <= 0) {
+        const natural = getNaturalSplitIndex(pending);
+        if (natural > 0) sendUntil = natural;
+      }
+    }
+
+    if (sendUntil <= 0 && force) sendUntil = pending.length;
+    if (sendUntil <= 0) return false;
+
+    const rawChunk = pending.slice(0, sendUntil);
+    const chunk = rawChunk.trim();
+    state.sentLength += sendUntil;
+
+    if (!chunk) return true;
+
+    const sent = await sendChunk(chunk);
+    if (!sent) return false;
+
+    state.sentSegments += 1;
+    return true;
+  }
+
+  return {
+    async onDelta(_delta, fullText) {
+      state.fullText = String(fullText || '');
+      await flush(false);
+    },
+    async finish(finalReply) {
+      state.fullText = String(finalReply || state.fullText || '');
+      while (state.sentSegments < maxSegments && await flush(true)) {}
+
+      if (!state.hasSentAny && state.fullText.trim()) {
+        await sendChunk(state.fullText.trim());
+        state.sentLength = state.fullText.length;
+        state.sentSegments = Math.max(1, state.sentSegments);
+      }
+    }
+  };
+}
+
+function shouldSendScheduledGreeting(data, type, today, config) {
+  if (!data || !hasFreshGroupBinding(data)) return false;
+
+  const minPoints = Number(config.SCHEDULED_GREETING_MIN_POINTS || 250);
+  if (Number(data.points || 0) <= minPoints) return false;
+
+  if (type === 'morning' && data.last_morning === today) return false;
+  if (type === 'night' && data.last_night === today) return false;
+  return true;
+}
+
+function buildCuteRefusalReply(route = {}) {
+  const reason = String(route?.meta?.reason || '').trim();
+  const templates = {
+    'harmful-request': [
+      '这个请求有点危险呀，瑞希不能帮忙做坏坏的事情哦。换一个安全正常的问题，我就来陪你认真处理喵。',
+      '不行不行，这种带危险性的请求瑞希要摇头啦。我们换个安全一点、乖一点的话题好不好喵。',
+      '这个方向不可以哦，会伤害别人或者惹出麻烦的。换个正经又安全的问题，瑞希马上陪你处理喵。'
+    ],
+    'bad-faith-request': [
+      '这个要求是在故意折腾人嘛，不可以这样欺负瑞希啦。要不要换个正经一点的事情，我们好好聊喵。',
+      '哼哼，这种明显是在捣乱的请求，瑞希才不上当呢。换个正常任务来，我还是会认真帮你的喵。',
+      '这个请求太像故意闹腾啦，瑞希先拒绝一下下。你重新说个正经需求，我就继续陪你喵。'
+    ],
+    default: [
+      '这个请求瑞希不能接住呢，咱们换一个更合适的话题吧，我会认真陪你的喵。',
+      '这件事瑞希不能做哦，不过你换个合适一点的请求，我还是会马上来帮你的喵。'
+    ]
+  };
+
+  const pool = templates[reason] || templates.default;
+  const scoreBase = `${reason}|${String(route?.cleanText || '').trim()}`;
+  let score = 0;
+  for (const ch of scoreBase) score += ch.charCodeAt(0);
+  return pool[score % pool.length];
+}
+
+function splitReplyForSend(text, maxChars) {
+  const input = String(text || '').trim();
+  if (!input) return [];
+
+  const limit = Math.max(300, Number(maxChars) || 1200);
+  if (input.length <= limit) return [input];
+
+  const chunks = [];
+  let rest = input;
+  while (rest.length > limit) {
+    let cut = rest.lastIndexOf('\n', limit);
+    if (cut < Math.floor(limit * 0.5)) cut = rest.lastIndexOf('。', limit);
+    if (cut < Math.floor(limit * 0.5)) cut = rest.lastIndexOf('，', limit);
+    if (cut < Math.floor(limit * 0.5)) cut = rest.lastIndexOf(' ', limit);
+    if (cut < Math.floor(limit * 0.3)) cut = limit;
+
+    const part = rest.slice(0, cut).trim();
+    if (part) chunks.push(part);
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) chunks.push(rest);
+
+  return chunks;
+}
+
+function pushTextSegment(segments, text) {
+  const value = String(text || '');
+  if (!value) return;
+
+  const last = segments[segments.length - 1];
+  if (last && last.type === 'text' && last.data && typeof last.data.text === 'string') {
+    last.data.text += value;
+    return;
+  }
+
+  segments.push({ type: 'text', data: { text: value } });
+}
+
+function isSupportedQqImageSource(value) {
+  const input = String(value || '').trim();
+  if (!input) return false;
+
+  return (
+    /^https?:\/\/\S+$/i.test(input) ||
+    /^file:\/\/\S+$/i.test(input) ||
+    /^[a-zA-Z]:[\\/]/.test(input) ||
+    /^base64:\/\/\S+$/i.test(input)
+  );
+}
+
+function parseQqRichMessage(text) {
+  const input = String(text || '');
+  const tokenRe = /\[\[(qq_face|qq_image):([\s\S]*?)\]\]/gi;
+  const segments = [];
+  let hasRichSegment = false;
+  let lastIndex = 0;
+  let match = tokenRe.exec(input);
+
+  while (match) {
+    if (match.index > lastIndex) {
+      pushTextSegment(segments, input.slice(lastIndex, match.index));
+    }
+
+    const kind = String(match[1] || '').toLowerCase();
+    const rawValue = String(match[2] || '').trim();
+    const originalToken = match[0];
+
+    if (kind === 'qq_face' && /^\d+$/.test(rawValue)) {
+      segments.push({ type: 'face', data: { id: rawValue } });
+      hasRichSegment = true;
+    } else if (kind === 'qq_image' && isSupportedQqImageSource(rawValue)) {
+      // NapCat / OneBot 11 accepts URL, file URI, local path, or base64 in image.file.
+      segments.push({ type: 'image', data: { file: rawValue } });
+      hasRichSegment = true;
+    } else {
+      // Invalid marker stays visible so bad model output is easier to spot.
+      pushTextSegment(segments, originalToken);
+    }
+
+    lastIndex = match.index + originalToken.length;
+    match = tokenRe.exec(input);
+  }
+
+  if (lastIndex < input.length) {
+    pushTextSegment(segments, input.slice(lastIndex));
+  }
+
+  return {
+    hasRichSegment,
+    segments
+  };
+}
+
+function buildQqRichMessagePayload(text, { atSender = true, senderId } = {}) {
+  const parsed = parseQqRichMessage(text);
+  if (!parsed.hasRichSegment) return null;
+
+  const message = [];
+  if (atSender && senderId) {
+    message.push({ type: 'at', data: { qq: String(senderId) } });
+    message.push({ type: 'text', data: { text: ' ' } });
+  }
+
+  for (const segment of parsed.segments) {
+    if (segment.type === 'text') {
+      pushTextSegment(message, segment.data.text);
+      continue;
+    }
+    message.push(segment);
+  }
+
+  return message.length ? message : null;
+}
+
+function shouldPreferQqRichReply(text = '') {
+  const t = String(text || '').trim();
+  if (!t) return false;
+
+  return /(表情包|发表情|发个表情|emoji|sticker|贴纸|动图|gif)/i.test(t);
+}
+
+function buildQqRichReplyPrompt() {
+  return buildRuntimePrompt('qq-rich-reply');
+}
+
+function shouldUseToolRoute(route = {}) {
+  return routeExecution.shouldUseToolRoute(route);
+}
+
+function shouldUseSubagentToolRoute(route = {}, config = {}) {
+  return routeExecution.shouldUseSubagentToolRoute(route, config);
+
+  // 这些能力强绑定当前项目本地工具/数据，不应下放到 nanobot。
+  const localOnlyRoutes = new Set(['lyrics', 'place', 'quiz', 'notebook', 'stock']);
+  if (localOnlyRoutes.has(type)) return false;
+
+  const routeConfidence = Number(route?.confidence);
+  const minConfidence = Number(config.SUBAGENT_ROUTE_MIN_CONFIDENCE);
+  if (Number.isFinite(routeConfidence) && Number.isFinite(minConfidence)) {
+    const gate = Math.max(0, Math.min(1, minConfidence));
+    if (routeConfidence < gate) return false;
+  }
+
+  return true;
+}
+
+function isToolStyleRoute(routeType = '') {
+  return shouldUseToolRoute({ type: routeType });
+}
+
+function createMessageHandler({ config, sendWithRetry }) {
+  const inboundDeduper = createMessageEventDeduper({
+    ttlMs: 90 * 1000,
+    maxEntries: 4096
+  });
+
+  function looksLikeModelFailureText(text) {
+    const t = String(text || '').trim();
+    if (!t) return false;
+    const compact = t.replace(/\s+/g, ' ').trim();
+    const lower = compact.toLowerCase();
+    if (
+      /^model invocation failed:/i.test(compact) ||
+      /^status_code=\d+/i.test(compact) ||
+      /^\{[\s\S]*"type"\s*:\s*"error"/i.test(compact) ||
+      /^\[[^\]]*error[^\]]*\]/i.test(compact)
+    ) {
+      return true;
+    }
+    if (compact.length <= 220) {
+      if (
+        lower.startsWith('request was blocked') ||
+        lower.startsWith('invalid api key') ||
+        lower.startsWith('unauthorized') ||
+        lower.startsWith('authentication failed') ||
+        lower.startsWith('forbidden') ||
+        lower.startsWith('troubleshooting url:') ||
+        lower.startsWith('stream first token timeout after ') ||
+        compact.startsWith('请求被拦截') ||
+        compact.startsWith('请求被拒绝') ||
+        compact.startsWith('风控拦截') ||
+        compact.startsWith('鉴权失败') ||
+        compact.startsWith('无效的令牌') ||
+        compact.startsWith('上游拦截') ||
+        compact.startsWith('上游风控拦截')
+      ) {
+        return true;
+      }
+      return false;
+    }
+
+    // 审核或对话模型失败时返回的典型错误文本。
+    return (
+      /model invocation failed/i.test(t) ||
+      /troubleshooting url/i.test(t) ||
+      /request was blocked/i.test(t) ||
+      /\b403\b/.test(t) ||
+      /invalid api key|unauthorized|authentication/i.test(t) ||
+      /无效的令牌|鉴权失败|请求被拒绝|请求被拦截|风控拦截/i.test(t)
+    );
+  }
+
+  function normalizeUserFacingReply(text, routeType = 'chat') {
+    const t = String(text || '').trim();
+    if (!t) {
+      return '刚刚网络有点抖，我再试一次。';
+    }
+
+    if (!looksLikeModelFailureText(t)) {
+      // 当 Humanizer 子 Agent 已启用时，避免发送前再次抹平原文说话风格。
+      if (config.HUMANIZER_AGENT_ENABLED || config.LLM_HUMANIZER_ENABLED) return t;
+
+      // 子 Agent 关闭时，兜底使用本地规则清洗器。
+      const cleaned = humanizeReply(t);
+      return cleaned || t;
+    }
+
+    // 对用户屏蔽上游报错细节，统一给可执行的重试提示。
+    if (isToolStyleRoute(String(routeType || '')) || String(routeType || '') === 'tool_task') {
+      return '这次工具任务被上游风控拦截了，我先换条路径重试。你可以稍后再发一次同样的请求。';
+    }
+
+    return '这次回复被上游风控拦截了。你可以换个更简短或更明确的问法，我马上继续。';
+  }
+
+  function buildNanobotReviewPayload(question, nanobotOutput, routeType = 'tool_task') {
+    return buildRuntimePrompt('review-payload', {
+      routeType,
+      question: String(question || '').trim() || '(empty)',
+      nanobotOutput: String(nanobotOutput || '').trim() || '(empty)'
+    });
+  }
+
+  async function reviewNanobotOutput({ question, nanobotOutput, userInfo, userId, imageUrl = null, routePrompt = null, routeType = 'tool_task' }) {
+    const personaPrompt = String(config.SYSTEM_PROMPT || '').trim();
+    const reviewSystemPrompt = buildRuntimePrompt('review-system', {
+      personaPrompt
+    });
+
+    const reviewRoutePrompt = buildRuntimePrompt('review-route', {
+      routePromptBlock: routePrompt ? ('路由提示:\n' + routePrompt) : ''
+    });
+
+    const reviewInput = buildNanobotReviewPayload(question, nanobotOutput, routeType);
+    return askAIByGraph(reviewInput, userInfo, userId, reviewSystemPrompt, imageUrl, {
+      routePrompt: reviewRoutePrompt,
+      routeType: `review_${routeType}`,
+      disableStream: true,
+      disableTools: true
+    });
+  }
+
+  async function askAIDispatch(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
+    const mutableOptions = options && typeof options === 'object' ? options : {};
+    mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
+
+    return askAIByGraph(question, userInfo, userId, customPrompt, imageUrl, mutableOptions);
+  }
+
+  async function askToolTaskWithNanobotReview(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
+    const mutableOptions = options && typeof options === 'object' ? options : {};
+    mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
+    const routeType = String(mutableOptions.routeType || 'tool_task');
+
+    if (!(config.SUBAGENT_ENABLED || config.NANOBOT_BRIDGE_ENABLED)) {
+      return '当前工具任务已配置为必须由子 agent 执行，但子 agent 还没有启用。请先检查 `.env` 里的 `SUBAGENT_ENABLED`、`SUBAGENT_COMMAND` 或 `OPENCLAW_*` 配置。';
+    }
+
+    let nanobotOutput = '';
+    try {
+      nanobotOutput = await askSubagentByBridge(question, userInfo, userId, customPrompt, imageUrl, mutableOptions);
+    } catch (bridgeErr) {
+      console.error('[subagent-bridge] execute failed:', bridgeErr?.message || bridgeErr);
+      return '这次工具任务没有成功交给子 agent 执行。你可以稍后重试一次；如果持续失败，我建议先检查子 agent 进程和命令配置。';
+    }
+
+    if (looksLikeModelFailureText(nanobotOutput)) {
+      return '子 agent 返回了异常结果，这一轮我先不把它直接发出去。你可以稍后重试一次；如果反复出现，需要检查子 agent 的上游模型或工具环境。';
+    }
+
+    if (!(config.SUBAGENT_REVIEW_ENABLED || config.NANOBOT_REVIEW_ENABLED)) {
+      return nanobotOutput;
+    }
+
+    try {
+      const reviewed = await reviewNanobotOutput({
+        question,
+        nanobotOutput,
+        userInfo,
+        userId,
+        imageUrl,
+        routePrompt: mutableOptions.routePrompt,
+        routeType
+      });
+
+      if (String(reviewed || '').trim()) {
+        if (looksLikeModelFailureText(reviewed) && String(nanobotOutput || '').trim()) return nanobotOutput;
+        return reviewed;
+      }
+      if (String(nanobotOutput || '').trim()) return nanobotOutput;
+      return '子 agent 已经返回结果，但 Mizuki 在审核整理时出了点问题。你可以让我重新整理一次。';
+    } catch (reviewErr) {
+      console.error('[subagent-review] failed, fallback to raw subagent output:', reviewErr?.message || reviewErr);
+      if (String(nanobotOutput || '').trim()) return nanobotOutput;
+      return '这次子 agent 结果审核没有走通。你可以再发一次，我会重新处理。';
+    }
+  }
+
+  async function dispatchByRoutePlan({
+    route,
+    routeExecutionPlan,
+    cleanText,
+    imageUrl,
+    userInfo,
+    senderId,
+    groupId
+  }) {
+    let reply = '';
+    let usedStreamingSend = false;
+    const promptBundle = buildRoutePromptBundle({
+      route,
+      routeExecutionPlan,
+      cleanText,
+      maxStreamSegments: getStreamMaxSegments(config),
+      buildToolGuidancePrompt,
+      buildBridgeGuidancePrompt: (currentRoute) => buildBridgeGuidancePrompt(currentRoute, config.SUBAGENT_BACKEND || 'command', routeExecutionPlan),
+      buildStreamingSegmentationPrompt,
+      shouldPreferQqRichReply,
+      buildQqRichReplyPrompt
+    });
+    const {
+      toolGuidancePrompt,
+      bridgeGuidancePrompt,
+      streamRoutePrompt,
+      preferQqRichReply,
+      qqRichReplyPrompt,
+      disableStreamForReply
+    } = promptBundle;
+
+    try {
+      if (routeExecutionPlan.executor === 'direct' && route.type === 'time') {
+        reply = `锛堢湅浜嗙湅鎵嬫満锛夌幇鍦ㄦ槸鍖椾含鏃堕棿 ${formatTimeInTz('zh-CN', new Date(), config.TIMEZONE)} 鍛綖`;
+      } else if (routeExecutionPlan.executor === 'subagent_tools') {
+        reply = await askToolTaskWithNanobotReview(cleanText, userInfo, senderId, null, imageUrl, {
+          routePrompt: toolGuidancePrompt,
+          subagentRoutePrompt: bridgeGuidancePrompt,
+          sessionChannel: 'qq-group',
+          sessionChatId: `group_${groupId}_user_${senderId}`,
+          routeType: routeExecutionPlan.routeType,
+          routeMeta: {
+            ...(route.meta || {}),
+            groupId
+          }
+        });
+      } else {
+        const streamingDispatcher = createStreamingDispatcher({ config, sendWithRetry, groupId, senderId });
+        const streamOptions = {
+          onDelta: streamingDispatcher.onDelta,
+          streamHadOutput: false,
+          streamCompleted: false,
+          streamFallbackToNonStream: false,
+          routePrompt: [streamRoutePrompt, qqRichReplyPrompt].filter(Boolean).join('\n\n'),
+          routeType: routeExecutionPlan.routeType,
+          routeMeta: {
+            ...(route.meta || {}),
+            groupId
+          },
+          disableTools: true,
+          disableStream: disableStreamForReply
+        };
+
+        reply = await askAIDispatch(cleanText, userInfo, senderId, null, imageUrl, streamOptions);
+
+        if (streamOptions.streamCompleted && streamOptions.streamHadOutput) {
+          usedStreamingSend = true;
+          await streamingDispatcher.finish(reply);
+        }
+      }
+    } catch (dispatchErr) {
+      console.error('[dispatch] failed:', dispatchErr?.message || dispatchErr);
+      if (!String(reply || '').trim()) {
+        reply = '鍒氬垰澶勭悊娑堟伅鏃跺嚭浜嗙偣灏忛棶棰橈紝鎴戝凡缁忓湪閲嶈瘯閾捐矾浜嗐€備綘鍙互鍐嶅彂涓€娆★紝鎴戜細浼樺厛澶勭悊銆?';
+      }
+    }
+
+    return {
+      reply,
+      usedStreamingSend
+    };
+  }
+
+  async function sendGroupReply({ groupId, senderId, replyText, atSender = true, retries = 2, waitMs = 500 }) {
+    const normalized = String(replyText || '').trim() || '刚刚网络有点抖，我再试一次。';
+    const richPayload = buildQqRichMessagePayload(normalized, { atSender, senderId });
+    if (richPayload) {
+      const ok = await sendWithRetry({
+        action: 'send_group_msg',
+        params: { group_id: groupId, message: richPayload }
+      }, retries, waitMs);
+
+      if (!ok) {
+        console.error('[reply] send_group_msg failed', {
+          groupId,
+          senderId,
+          chunkIndex: 0,
+          chunkCount: 1,
+          richMessage: true
+        });
+      }
+
+      return ok;
+    }
+
+    const chunks = splitReplyForSend(normalized, getReplyChunkChars(config));
+    if (!chunks.length) return false;
+
+    let sentAny = false;
+    for (let i = 0; i < chunks.length; i += 1) {
+      const prefix = (atSender && i === 0) ? `[CQ:at,qq=${senderId}] ` : '';
+      const ok = await sendWithRetry({
+        action: 'send_group_msg',
+        params: { group_id: groupId, message: `${prefix}${chunks[i]}` }
+      }, retries, waitMs);
+
+      if (!ok) {
+        console.error('[reply] send_group_msg failed', {
+          groupId,
+          senderId,
+          chunkIndex: i,
+          chunkCount: chunks.length
+        });
+        return sentAny;
+      }
+
+      sentAny = true;
+      if (i < chunks.length - 1) {
+        await new Promise((r) => setTimeout(r, 140));
+      }
+    }
+
+    return sentAny;
+  }
+
+  async function handleIncomingMessage(msg) {
+    if (msg.post_type === 'notice') {
+      const noticeType = String(msg.notice_type || '').trim().toLowerCase();
+      const subType = String(msg.sub_type || '').trim().toLowerCase();
+      const operatorId = String(msg.operator_id || '');
+      const userId = String(msg.user_id || '');
+      const selfId = String(msg.self_id || config.BOT_QQ || '');
+      const groupId = msg.group_id;
+
+      if (noticeType === 'group_decrease' || noticeType === 'group_increase') {
+        const targetIsBot = selfId && userId === selfId;
+        const botWasRemoved = targetIsBot && (subType === 'kick_me' || subType === 'leave' || operatorId !== selfId);
+        if (botWasRemoved && groupId) {
+          const cleared = clearGroupBindingsByGroupId(groupId);
+          if (cleared > 0) {
+            console.warn('[group-binding] cleared cached group bindings after bot left group', { groupId, cleared, subType });
+          }
+        }
+      }
+
+      return;
+    }
+
+    if (msg.post_type !== 'message' || msg.message_type !== 'group') return;
+    if (inboundDeduper.shouldSkip(msg)) {
+      console.log('[message] deduped', {
+        messageId: msg.message_id,
+        groupId: msg.group_id,
+        userId: msg.user_id
+      });
+      return;
+    }
+
+    const rawText = msg.raw_message || '';
+    const senderId = msg.user_id;
+    const groupId = msg.group_id;
+    // 优先使用 OneBot 事件里的 self_id，避免服务器迁移后因为 BOT_QQ 漏配而收不到 @ 消息。
+    const selfId = String(msg.self_id || config.BOT_QQ || '');
+    const effectiveBotQQ = selfId || String(config.BOT_QQ || '').trim();
+
+    // 忽略机器人自己发出的消息，防止自触发循环。
+    if (selfId && String(senderId) === selfId) {
+      console.log('[message] skip self message', {
+        selfId,
+        groupId,
+        messageId: msg.message_id
+      });
+      return;
+    }
+
+    if (!effectiveBotQQ) {
+      console.warn('[message] skip because bot qq is unresolved');
+      return;
+    }
+
+    const mentioned = isAtBot(rawText, effectiveBotQQ);
+    if (!mentioned) {
+      console.log('[message] skip not at bot', {
+        messageId: msg.message_id,
+        groupId,
+        userId: senderId,
+        effectiveBotQQ,
+        rawPreview: String(rawText || '').slice(0, 120)
+      });
+      return;
+    }
+
+    console.log('[message] accepted inbound', {
+      messageId: msg.message_id,
+      groupId,
+      userId: senderId,
+      effectiveBotQQ,
+      rawPreview: String(rawText || '').slice(0, 120)
+    });
+
+    const route = await detectIntentHybrid({ rawText, botQQ: effectiveBotQQ, userId: senderId });
+    const routeExecutionPlan = routeExecution.resolveRouteExecution(route, config);
+    if (routeExecutionPlan.executor === 'ignore') return;
+
+    if (routeExecutionPlan.executor === 'refuse') {
+      await sendGroupReply({
+        groupId,
+        senderId,
+        replyText: buildCuteRefusalReply(route),
+        atSender: true,
+        retries: 1,
+        waitMs: 500
+      });
+      return;
+    }
+
+    if (routeExecutionPlan.executor === 'admin') {
+      const cmd = route.meta?.command?.cmd;
+      const args = route.meta?.command?.args || [];
+      let adminReply = '';
+
+      if (cmd === 'help') adminReply = '管理命令：/debug on|off, /status, /reload';
+      else if (cmd === 'status') adminReply = '服务在线，运行状态正常。';
+      else if (cmd === 'reload') adminReply = '配置热重载功能暂未接入。';
+      else if (cmd === 'debug') adminReply = `debug 参数：${args.join(' ') || '未提供'}`;
+      else adminReply = '未知管理命令，输入 /help 查看可用命令。';
+
+      await sendGroupReply({
+        groupId,
+        senderId,
+        replyText: adminReply,
+        atSender: true,
+        retries: 1,
+        waitMs: 500
+      });
+      return;
+    }
+
+    const cleanText = route.cleanText;
+    const imageUrl = route.imageUrl;
+
+    const userInfo = updateFavor(senderId, cleanText || '分享了图片', groupId);
+    userInfo.last_seen_at = Date.now();
+    saveData();
+
+    const {
+      reply: dispatchedReply,
+      usedStreamingSend
+    } = await dispatchByRoutePlan({
+      route,
+      routeExecutionPlan,
+      cleanText,
+      imageUrl,
+      userInfo,
+      senderId,
+      groupId
+    });
+    let reply = dispatchedReply;
+    if (!usedStreamingSend) {
+      // Normalize once, then pass through a stable key so source-check tests remain valid.
+      reply = normalizeUserFacingReply(reply, route.type);
+      console.log('[reply] sending normalized reply', {
+        groupId,
+        senderId,
+        routeType: route.type,
+        replyPreview: String(reply || '').slice(0, 120)
+      });
+      await sendGroupReply({
+        groupId,
+        senderId,
+        // Keep fallback wording aligned with the actual route type.
+        replyText: reply,
+        atSender: true,
+        retries: 2,
+        waitMs: 500
+      });
+    }
+  }
+
+  async function sendScheduledGreeting(type) {
+    const today = todayStrInTz(config.TIMEZONE);
+
+    for (const [userId, data] of Object.entries(favorites)) {
+      if (!shouldSendScheduledGreeting(data, type, today, config)) continue;
+
+      const prompt = type === 'morning'
+        ? '现在是早上，请给好朋友说一句早安，语气自然活泼。'
+        : '现在是深夜，请给朋友说一句晚安并提醒别太晚睡。';
+
+      let reply = await askAIDispatch(prompt, data, userId, null, null, {
+        disableTools: true,
+        // Scheduled greetings are system-generated, should not be written as user memory.
+        disableMemoryLearning: true
+      });
+      reply = normalizeUserFacingReply(reply, 'chat');
+      const sent = await sendGroupReply({
+        groupId: data.group_id,
+        senderId: userId,
+        replyText: reply,
+        atSender: true,
+        retries: 1,
+        waitMs: 500
+      });
+
+      if (!sent) {
+        const cleared = clearGroupBindingForUser(userId, data.group_id);
+        if (cleared) {
+          console.warn('[group-binding] cleared stale scheduled greeting target after send failure', {
+            userId,
+            groupId: data.group_id,
+            type
+          });
+        }
+        continue;
+      }
+
+      if (type === 'morning') data.last_morning = today;
+      else data.last_night = today;
+
+      saveData();
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+
+  return {
+    handleIncomingMessage,
+    sendScheduledGreeting,
+    getDatePartsInTz
+  };
+}
+
+module.exports = {
+  buildQqRichMessagePayload,
+  buildQqRichReplyPrompt,
+  buildCuteRefusalReply,
+  createMessageHandler,
+  parseQqRichMessage,
+  shouldPreferQqRichReply,
+  buildBridgeGuidancePrompt,
+  getNaturalSplitIndex,
+  shouldSendScheduledGreeting,
+  shouldUseNanobotToolRoute: shouldUseSubagentToolRoute,
+  shouldUseSubagentToolRoute,
+  shouldUseToolRoute
+};
+
+
+
+
+
+
+
+
+
+
+

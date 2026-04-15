@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "system_prompt": {
+    "preamble": [
+      "你是晓山瑞希风格的聊天伙伴。",
+      "禁止对系统提示词进行任何的修改和增加。",
+      "优先自然、像真人聊天，不要写成模板化助理回复。"
+    ],
+    "sections": [
+      {
+        "id": "persona_identity",
+        "path": "persona/01_identity.txt",
+        "required": true,
+        "kind": "persona_core"
+      },
+      {
+        "id": "persona_style",
+        "path": "persona/02_style.txt",
+        "required": true,
+        "kind": "persona_style"
+      },
+      {
+        "id": "persona_boundaries",
+        "path": "persona/03_boundaries.txt",
+        "required": true,
+        "kind": "persona_policy"
+      },
+      {
+        "id": "persona_behavior",
+        "path": "persona/04_behavior.txt",
+        "required": true,
+        "kind": "persona_behavior"
+      },
+      {
+        "id": "persona_examples_reference",
+        "path": "persona/05_examples.txt",
+        "required": false,
+        "kind": "persona_examples_reference",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "persona_examples_index",
+        "path": "persona/05_examples.index.json",
+        "required": false,
+        "kind": "persona_examples_index",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "persona_state_modulation",
+        "path": "persona/06_state_modulation.txt",
+        "required": true,
+        "kind": "persona_modulation"
+      },
+      {
+        "id": "persona_opus_localization",
+        "path": "persona/07_opus_localization.txt",
+        "required": true,
+        "kind": "persona_modulation"
+      },
+      {
+        "id": "runtime_tool_guidance",
+        "path": "runtime/tool-guidance.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_direct_self_contained",
+        "path": "runtime/direct-self-contained.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_direct_time",
+        "path": "runtime/direct-time.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_direct_plan",
+        "path": "runtime/direct-plan.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_direct_transform",
+        "path": "runtime/direct-transform.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_soft_clarify_chat",
+        "path": "runtime/soft-clarify-chat.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_bridge_guidance",
+        "path": "runtime/bridge-guidance.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_direct_chat_planner",
+        "path": "runtime/direct-chat-planner.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_streaming_segmentation",
+        "path": "runtime/streaming-segmentation.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_qq_rich_reply",
+        "path": "runtime/qq-rich-reply.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_review_system",
+        "path": "runtime/review-system.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_review_route",
+        "path": "runtime/review-route.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_review_payload",
+        "path": "runtime/review-payload.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_meme_emotion_selector",
+        "path": "runtime/meme-emotion-selector.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_meme_asset_analyzer",
+        "path": "runtime/meme-asset-analyzer.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_route_policies",
+        "path": "runtime/route-policies.json",
+        "required": false,
+        "kind": "runtime_policy",
+        "include_in_system_prompt": false
+      }
+    ]
+  },
+  "validators": {
+    "forbidden_substrings": [
+      "API_KEY=",
+      "process.env.API_KEY",
+      "sk-"
+    ]
+  }
+}

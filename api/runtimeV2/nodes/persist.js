@@ -1,0 +1,176 @@
+function createPersistNode(deps = {}) {
+  const normalizeObject = typeof deps.normalizeObject === 'function'
+    ? deps.normalizeObject
+    : ((value, fallback = {}) => (value && typeof value === 'object' ? value : fallback));
+  const normalizeArray = typeof deps.normalizeArray === 'function'
+    ? deps.normalizeArray
+    : ((value) => (Array.isArray(value) ? value : []));
+  const createEvent = typeof deps.createEvent === 'function'
+    ? deps.createEvent
+    : ((type, payload = {}) => ({ type, ...payload }));
+  const isReviewMode = typeof deps.isReviewMode === 'function'
+    ? deps.isReviewMode
+    : (() => false);
+  const isChatLikeRoute = typeof deps.isChatLikeRoute === 'function'
+    ? deps.isChatLikeRoute
+    : (() => false);
+  const shouldAppendDailyJournalForV2 = typeof deps.shouldAppendDailyJournalForV2 === 'function'
+    ? deps.shouldAppendDailyJournalForV2
+    : (() => false);
+  const shouldQueueMemoryLearningForV2 = typeof deps.shouldQueueMemoryLearningForV2 === 'function'
+    ? deps.shouldQueueMemoryLearningForV2
+    : (() => false);
+  const shouldLearnSelfImprovement = typeof deps.shouldLearnSelfImprovement === 'function'
+    ? deps.shouldLearnSelfImprovement
+    : (() => false);
+  const appendShortTermHistory = typeof deps.appendShortTermHistory === 'function'
+    ? deps.appendShortTermHistory
+    : () => {};
+  const persistShortTermBridgeSnapshot = typeof deps.persistShortTermBridgeSnapshot === 'function'
+    ? deps.persistShortTermBridgeSnapshot
+    : () => {};
+  const addProfileItem = typeof deps.addProfileItem === 'function'
+    ? deps.addProfileItem
+    : () => {};
+  const pickRouteMetaForPostReplyJob = typeof deps.pickRouteMetaForPostReplyJob === 'function'
+    ? deps.pickRouteMetaForPostReplyJob
+    : ((routeMeta) => routeMeta || {});
+  const stableHash = typeof deps.stableHash === 'function'
+    ? deps.stableHash
+    : ((value) => JSON.stringify(value || {}));
+  const postReplyJobQueue = deps.postReplyJobQueue && typeof deps.postReplyJobQueue.enqueue === 'function'
+    ? deps.postReplyJobQueue
+    : { enqueue() { return { enqueued: false, job: null }; } };
+  const saveAndEmit = typeof deps.saveAndEmit === 'function'
+    ? deps.saveAndEmit
+    : ((state) => state);
+  const chatHistory = deps.chatHistory;
+  const shortTermMemory = deps.shortTermMemory;
+  const logPostReplyEnqueueError = typeof deps.logPostReplyEnqueueError === 'function'
+    ? deps.logPostReplyEnqueueError
+    : (() => {});
+
+  return async function persistNode(state) {
+    const request = normalizeObject(state.request, {});
+    const finalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
+    const userContent = request.imageUrl ? (request.question || '[shared an image]') : (request.question || '');
+    const shouldPersistChatArtifacts = (
+      !request.systemInitiated
+      && !state.output?.failure
+      && userContent
+      && finalReply
+      && !isReviewMode(request.reviewMode)
+    );
+    const shouldPersistBridge = shouldPersistChatArtifacts
+      && isChatLikeRoute(request);
+    const shouldPersistJournal = shouldPersistChatArtifacts
+      && shouldAppendDailyJournalForV2(request, finalReply);
+    const shouldLearn = shouldPersistChatArtifacts
+      && shouldQueueMemoryLearningForV2(request, finalReply);
+    const shouldLearnSelfImprovementValue = shouldPersistChatArtifacts
+      && shouldLearnSelfImprovement(request, finalReply);
+    const shouldEnqueuePostReplyJob = shouldPersistChatArtifacts
+      && (shouldLearn || shouldLearnSelfImprovementValue || shouldPersistJournal);
+    let enqueuedPostReplyJob = null;
+
+    if (shouldPersistChatArtifacts) {
+      appendShortTermHistory(request.userId, userContent, finalReply, request.userInfo, {
+        chatHistory,
+        shortTermMemory,
+        routeMeta: request.routeMeta,
+        sessionKey: request.sessionKey
+      });
+
+      if (shouldPersistBridge) {
+        persistShortTermBridgeSnapshot(request.userId, {
+          chatHistory,
+          shortTermMemory,
+          routeMeta: request.routeMeta,
+          sessionKey: request.sessionKey,
+          scope: state.thread?.sessionScope,
+          snapshotType: 'post_reply'
+        });
+      }
+
+      addProfileItem(request.userId, 'recent_topics', String(request.question || '').slice(0, 20), 12);
+      if (shouldEnqueuePostReplyJob) {
+        const routeMeta = pickRouteMetaForPostReplyJob(request.routeMeta);
+        const dedupeKey = stableHash({
+          threadId: String(state.thread?.threadId || '').trim(),
+          question: String(request.question || ''),
+          finalReply,
+          routePolicyKey: String(request.routePolicyKey || '').trim()
+        });
+        try {
+          const enqueueResult = postReplyJobQueue.enqueue({
+            type: 'post_reply',
+            dedupeKey,
+            userId: String(request.userId || '').trim(),
+            userInfo: normalizeObject(request.userInfo, {}),
+            question: String(request.question || ''),
+            finalReply,
+            routePolicyKey: String(request.routePolicyKey || '').trim(),
+            topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),
+            routeMeta,
+            sessionKey: String(request.sessionKey || '').trim(),
+            continuitySnapshot: {
+              activeTopic: String(state.memory?.continuityState?.payload?.active_topic || '').trim(),
+              openLoops: normalizeArray(state.memory?.continuityState?.payload?.open_loops),
+              assistantCommitments: normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments),
+              userConstraints: normalizeArray(state.memory?.continuityState?.payload?.user_constraints),
+              carryOverUserTurn: String(state.memory?.continuityState?.payload?.carry_over_user_turn || '').trim()
+            },
+            contextStats: {
+              usageRatio: Number(state.memory?.contextStats?.usageRatio || state.memory?.mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.usageRatio || 0) || 0,
+              compactionLevel: String(state.memory?.contextStats?.compactionLevel || state.memory?.mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
+            },
+            execLogs: normalizeArray(state.plan?.finalExecLogs),
+            tasks: {
+              memoryLearning: shouldLearn,
+              selfImprovement: shouldLearnSelfImprovementValue,
+              dailyJournal: shouldPersistJournal
+            },
+            threadId: String(state.thread?.threadId || '').trim()
+          });
+          enqueuedPostReplyJob = {
+            jobId: enqueueResult.job?.jobId || '',
+            dedupeKey,
+            enqueued: Boolean(enqueueResult.enqueued)
+          };
+        } catch (error) {
+          logPostReplyEnqueueError(error);
+        }
+      }
+    }
+
+    const events = [
+      createEvent('node_start', { node: 'persist' }),
+      createEvent('persist_complete', {
+        saved: shouldPersistChatArtifacts,
+        finalReplyPreview: finalReply.slice(0, 180),
+        postReplyJobId: enqueuedPostReplyJob?.jobId || '',
+        postReplyEnqueued: Boolean(enqueuedPostReplyJob?.enqueued)
+      }),
+      createEvent('node_complete', { node: 'persist' })
+    ];
+
+    return saveAndEmit({
+      ...state,
+      memory: {
+        ...state.memory,
+        persisted: true,
+        learningQueued: Boolean(enqueuedPostReplyJob?.jobId)
+      },
+      execution: {
+        ...state.execution,
+        currentNode: 'persist',
+        status: state.output?.failure ? 'failed' : 'completed'
+      },
+      events
+    }, 'persist', state.output?.failure ? 'failed' : 'completed', events);
+  };
+}
+
+module.exports = {
+  createPersistNode
+};

@@ -1,0 +1,725 @@
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
+const config = require('../config');
+const { postWithRetry } = require('../api/httpClient');
+const { extractMessageContent, extractJsonSafely } = require('../api/parser');
+const { getApiProvider } = require('../utils/modelProvider');
+const { buildRuntimePrompt } = require('../utils/runtimePrompts');
+const memeStore = require('../utils/memeStore');
+const { isAdmin } = require('./router');
+
+const uploadSessions = new Map();
+
+function ensureChatCompletionsUrl(url) {
+  const raw = String(url || '').replace(/\/+$/, '');
+  if (/\/chat\/completions$/i.test(raw)) return raw;
+  if (/\/v\d+$/i.test(raw)) return `${raw}/chat/completions`;
+  return raw;
+}
+
+function getSelectorBaseUrl() {
+  return String(config.AI_ROUTER_BASE_URL || config.API_BASE_URL || '').trim();
+}
+
+function getSelectorApiKey() {
+  return String(config.AI_ROUTER_API_KEY || config.API_KEY || '').trim() || null;
+}
+
+function getSelectorModel() {
+  return String(config.AI_ROUTER_MODEL || config.AI_MODEL || '').trim() || 'gpt-5.4';
+}
+
+function normalizeContentText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((item) => normalizeContentText(item)).join('');
+  }
+  if (!content || typeof content !== 'object') return String(content || '');
+
+  if (typeof content.text === 'string') return content.text;
+  if (content.text && typeof content.text === 'object') return normalizeContentText(content.text);
+  if (typeof content.value === 'string') return content.value;
+  if (typeof content.output_text === 'string') return content.output_text;
+  if (typeof content.content === 'string') return content.content;
+  if (Array.isArray(content.content)) return normalizeContentText(content.content);
+  if (content.content && typeof content.content === 'object') return normalizeContentText(content.content);
+  if (Array.isArray(content.parts)) return normalizeContentText(content.parts);
+
+  return '';
+}
+
+function previewSelectorText(rawText, limit = 240) {
+  const text = String(rawText || '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > limit ? `${text.slice(0, limit)}...` : text;
+}
+
+function extractSelectorResponseText(response) {
+  const message = extractMessageContent(response);
+  const rawData = response?.data;
+  const candidates = [
+    message?.content,
+    typeof rawData === 'string' ? rawData : '',
+    response?.data?.choices?.[0]?.message?.content,
+    response?.data?.output_text,
+    response?.data?.text,
+    response?.data?.output,
+    response?.data?.content
+  ];
+
+  for (const candidate of candidates) {
+    const text = normalizeContentText(candidate).trim();
+    if (text) return text;
+  }
+
+  return '';
+}
+
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseLooseSelectorOutput(rawText, categories = []) {
+  const text = String(rawText || '').trim();
+  if (!text) return null;
+
+  const allowedCategories = Array.from(new Set(
+    ['none', ...categories.map((item) => String(item?.name || '').trim()).filter(Boolean)]
+  ));
+
+  let category = '';
+  const categoryFieldMatch = text.match(/["']?category["']?\s*[:=]\s*["']?([^,"'\n}\]]+)/i);
+  if (categoryFieldMatch) {
+    category = String(categoryFieldMatch[1] || '').trim();
+  }
+
+  if (!category) {
+    const exactMentioned = allowedCategories.filter((name) => name && text.includes(name));
+    if (exactMentioned.length === 1) category = exactMentioned[0];
+  }
+
+  if (!category) return null;
+
+  if (!allowedCategories.includes(category)) {
+    const matchedAllowed = allowedCategories.find((name) => name.toLowerCase() === category.toLowerCase());
+    if (matchedAllowed) category = matchedAllowed;
+  }
+  if (!allowedCategories.includes(category)) return null;
+
+  let confidence = Number.NaN;
+  const confidenceMatch = text.match(/["']?confidence["']?\s*[:=]\s*["']?(-?\d+(?:\.\d+)?)/i)
+    || text.match(/\b(0(?:\.\d+)?|1(?:\.0+)?)\b/);
+  if (confidenceMatch) confidence = Number(confidenceMatch[1]);
+
+  let reason = '';
+  const reasonFieldMatch = text.match(/["']?reason["']?\s*[:=]\s*["']?([^"\n}]+)["']?/i);
+  if (reasonFieldMatch) {
+    reason = String(reasonFieldMatch[1] || '').trim();
+  } else if (category) {
+    const categoryPattern = new RegExp(`(?:^|\\b)${escapeRegex(category)}(?:\\b|$)`, 'i');
+    reason = text.replace(categoryPattern, '').replace(/\s+/g, ' ').trim();
+  }
+
+  return {
+    category,
+    confidence: Number.isFinite(confidence) ? confidence : 0,
+    reason
+  };
+}
+
+function isPositiveMemeTone(text = '') {
+  return /开心|高兴|快乐|夸|夸奖|夸夸|棒|超棒|真棒|厉害|优秀|可爱|喜欢|赞|好耶|太好了|不错|得意|轻松|认同|表扬|奖励|状态很好|心情很好|哈哈|笑|playful|praise|cute|great|awesome|nice|love/i.test(String(text || ''));
+}
+
+function shouldUseSingleCategoryPositiveFallback(category, userText = '', replyText = '') {
+  if (!category) return false;
+  const categoryHint = `${String(category.name || '')} ${String(category.description || '')}`;
+  if (!isPositiveMemeTone(categoryHint)) return false;
+  return isPositiveMemeTone(`${userText}\n${replyText}`);
+}
+
+function normalizeSurfaceList() {
+  const items = String(config.MEME_MANAGER_SURFACES || '')
+    .split(',')
+    .map((item) => String(item || '').trim().toLowerCase())
+    .filter(Boolean);
+  return new Set(items);
+}
+
+function isSurfaceEnabled(surface) {
+  const store = memeStore.getStore();
+  const surfaceSet = normalizeSurfaceList();
+  if (!store.enabled || !config.MEME_MANAGER_ENABLED) return false;
+  if (!surfaceSet.has(String(surface || '').trim().toLowerCase())) return false;
+  if (surface === 'direct') return store.surfaces.direct !== false;
+  if (surface === 'passive') return store.surfaces.passive !== false;
+  if (surface === 'scheduled') return store.surfaces.scheduled !== false;
+  return false;
+}
+
+function getSessionKey(groupId, userId) {
+  return `${String(groupId || '').trim()}:${String(userId || '').trim()}`;
+}
+
+function cleanupExpiredSessions(now = Date.now()) {
+  for (const [key, session] of uploadSessions.entries()) {
+    if (!session || Number(session.expiresAt || 0) <= now) {
+      uploadSessions.delete(key);
+    }
+  }
+}
+
+function startUploadSession({ groupId, userId, categoryName }) {
+  cleanupExpiredSessions();
+  const sessionKey = getSessionKey(groupId, userId);
+  const session = {
+    key: sessionKey,
+    groupId: String(groupId || '').trim(),
+    userId: String(userId || '').trim(),
+    categoryName: String(categoryName || '').trim(),
+    createdAt: Date.now(),
+    expiresAt: Date.now() + Math.max(1000, Number(config.MEME_MANAGER_UPLOAD_WINDOW_MS || 60000)),
+    importedCount: 0
+  };
+  uploadSessions.set(sessionKey, session);
+  return { ...session };
+}
+
+function getUploadSession(groupId, userId) {
+  cleanupExpiredSessions();
+  const session = uploadSessions.get(getSessionKey(groupId, userId));
+  return session ? { ...session } : null;
+}
+
+function endUploadSession(groupId, userId) {
+  uploadSessions.delete(getSessionKey(groupId, userId));
+}
+
+function listCategorySummaryLines() {
+  const categories = memeStore.listCategories();
+  if (!categories.length) return ['当前图库为空。'];
+  return categories.map((category) => (
+    `${category.name} | ${category.assetCount} 张 | ${category.description}`
+  ));
+}
+
+function formatFilesList(categoryName) {
+  const files = memeStore.listCategoryFiles(categoryName);
+  if (!files.length) return '该分类当前没有图片。';
+  return files
+    .map((file) => `${file.id} | ${file.mime || 'unknown'} | ${file.size}B | ${new Date(file.createdAt).toISOString()}`)
+    .join('\n');
+}
+
+function buildHelpText() {
+  return [
+    '可用命令：',
+    '/meme help',
+    '/meme status',
+    '/meme on',
+    '/meme off',
+    '/meme categories',
+    '/meme category add <分类> <描述>',
+    '/meme category desc <分类> <描述>',
+    '/meme category remove <分类>',
+    '/meme add <分类>',
+    '/meme done',
+    '/meme cancel',
+    '/meme files <分类>',
+    '/meme delete <分类> <assetId>'
+  ].join('\n');
+}
+
+function splitCommandArgs(text = '') {
+  return String(text || '').trim().split(/\s+/).filter(Boolean);
+}
+
+function parseMemeCommand(raw = '') {
+  const text = String(raw || '').trim();
+  if (!/^\/meme(?:\s|$)/i.test(text)) return null;
+
+  const args = splitCommandArgs(text);
+  if (args.length === 1) return { action: 'help' };
+  if (args[1] === 'help') return { action: 'help' };
+  if (args[1] === 'status') return { action: 'status' };
+  if (args[1] === 'on') return { action: 'on' };
+  if (args[1] === 'off') return { action: 'off' };
+  if (args[1] === 'categories') return { action: 'categories' };
+  if (args[1] === 'done') return { action: 'done' };
+  if (args[1] === 'cancel') return { action: 'cancel' };
+  if (args[1] === 'add') return { action: 'add-session', categoryName: String(args[2] || '').trim() };
+  if (args[1] === 'files') return { action: 'files', categoryName: String(args[2] || '').trim() };
+  if (args[1] === 'delete') {
+    return {
+      action: 'delete-file',
+      categoryName: String(args[2] || '').trim(),
+      assetId: String(args[3] || '').trim()
+    };
+  }
+  if (args[1] === 'category' && args[2] === 'add') {
+    const categoryName = String(args[3] || '').trim();
+    const description = text.split(/\s+/).slice(4).join(' ').trim();
+    return { action: 'category-add', categoryName, description };
+  }
+  if (args[1] === 'category' && args[2] === 'desc') {
+    const categoryName = String(args[3] || '').trim();
+    const description = text.split(/\s+/).slice(4).join(' ').trim();
+    return { action: 'category-desc', categoryName, description };
+  }
+  if (args[1] === 'category' && args[2] === 'remove') {
+    return { action: 'category-remove', categoryName: String(args[3] || '').trim() };
+  }
+  return { action: 'unknown' };
+}
+
+async function handleAdminCommand({ rawText, groupId, userId }) {
+  const command = parseMemeCommand(rawText);
+  if (!command) return null;
+
+  if (!isAdmin(userId)) {
+    return { handled: true, replyText: '仅管理员可用。' };
+  }
+
+  try {
+    if (command.action === 'help') {
+      return { handled: true, replyText: buildHelpText() };
+    }
+    if (command.action === 'status') {
+      const store = memeStore.getStore();
+      const session = getUploadSession(groupId, userId);
+      const categories = memeStore.listCategories();
+      const surfaceFlags = [
+        `direct=${store.surfaces.direct !== false}`,
+        `passive=${store.surfaces.passive !== false}`,
+        `scheduled=${store.surfaces.scheduled !== false}`
+      ].join(', ');
+      return {
+        handled: true,
+        replyText: [
+          `meme manager: ${store.enabled && config.MEME_MANAGER_ENABLED ? 'on' : 'off'}`,
+          `surfaces: ${surfaceFlags}`,
+          `categories: ${categories.length}`,
+          session ? `uploading: ${session.categoryName} (${Math.max(0, session.expiresAt - Date.now())}ms left)` : 'uploading: none'
+        ].join('\n')
+      };
+    }
+    if (command.action === 'on') {
+      memeStore.setEnabled(true);
+      return { handled: true, replyText: 'meme manager 已开启。' };
+    }
+    if (command.action === 'off') {
+      memeStore.setEnabled(false);
+      return { handled: true, replyText: 'meme manager 已关闭。' };
+    }
+    if (command.action === 'categories') {
+      return {
+        handled: true,
+        replyText: listCategorySummaryLines().join('\n')
+      };
+    }
+    if (command.action === 'category-add') {
+      memeStore.addCategory(command.categoryName, command.description);
+      return { handled: true, replyText: `已创建分类：${command.categoryName}` };
+    }
+    if (command.action === 'category-desc') {
+      memeStore.updateCategoryDescription(command.categoryName, command.description);
+      return { handled: true, replyText: `已更新分类描述：${command.categoryName}` };
+    }
+    if (command.action === 'category-remove') {
+      memeStore.removeCategory(command.categoryName);
+      return { handled: true, replyText: `已删除空分类：${command.categoryName}` };
+    }
+    if (command.action === 'add-session') {
+      if (!command.categoryName) {
+        return { handled: true, replyText: '请提供分类名。' };
+      }
+      const category = memeStore.getCategory(command.categoryName);
+      if (!category) {
+        return { handled: true, replyText: '分类不存在。' };
+      }
+      const session = startUploadSession({ groupId, userId, categoryName: command.categoryName });
+      return {
+        handled: true,
+        replyText: `已开启上传窗口：${session.categoryName}\n60 秒内直接发送图片即可导入，完成后发 /meme done。`
+      };
+    }
+    if (command.action === 'done') {
+      const session = getUploadSession(groupId, userId);
+      if (!session) return { handled: true, replyText: '当前没有进行中的上传窗口。' };
+      endUploadSession(groupId, userId);
+      return { handled: true, replyText: `已结束上传窗口：${session.categoryName}` };
+    }
+    if (command.action === 'cancel') {
+      const session = getUploadSession(groupId, userId);
+      if (!session) return { handled: true, replyText: '当前没有进行中的上传窗口。' };
+      endUploadSession(groupId, userId);
+      return { handled: true, replyText: `已取消上传窗口：${session.categoryName}` };
+    }
+    if (command.action === 'files') {
+      if (!command.categoryName) return { handled: true, replyText: '请提供分类名。' };
+      return { handled: true, replyText: formatFilesList(command.categoryName) };
+    }
+    if (command.action === 'delete-file') {
+      if (!command.categoryName || !command.assetId) {
+        return { handled: true, replyText: '请提供分类名和 assetId。' };
+      }
+      memeStore.deleteAsset(command.categoryName, command.assetId);
+      return { handled: true, replyText: `已删除：${command.assetId}` };
+    }
+    return { handled: true, replyText: '未知 meme 管理命令，输入 /meme help 查看。' };
+  } catch (error) {
+    return {
+      handled: true,
+      replyText: `操作失败：${error?.message || String(error)}`
+    };
+  }
+}
+
+function inferImageExtFromUrl(url = '') {
+  const clean = String(url || '').split('?')[0].trim();
+  const ext = path.extname(clean).toLowerCase();
+  return ext || '.jpg';
+}
+
+function inferMimeFromResponse(url = '', headers = {}) {
+  const contentType = String(headers?.['content-type'] || headers?.['Content-Type'] || '').trim().toLowerCase();
+  if (contentType.startsWith('image/')) return contentType;
+  const ext = inferImageExtFromUrl(url);
+  return memeStore.inferMimeFromExt(`file${ext}`);
+}
+
+async function consumePendingUploadFromMessage(msg = {}) {
+  cleanupExpiredSessions();
+  if (String(msg.post_type || '') !== 'message' || String(msg.message_type || '') !== 'group') {
+    return { consumed: false };
+  }
+
+  const groupId = String(msg.group_id || '').trim();
+  const userId = String(msg.user_id || '').trim();
+  const sessionKey = getSessionKey(groupId, userId);
+  const session = uploadSessions.get(sessionKey);
+  if (!session) return { consumed: false };
+
+  const rawText = String(msg.raw_message || '');
+  const match = rawText.match(/\[CQ:image,.*?url=([^,\]]+).*?\]/);
+  if (!match) return { consumed: false };
+
+  const imageUrl = String(match[1] || '').replace(/&amp;/g, '&').trim();
+  if (!imageUrl) return { consumed: false };
+
+  const maxImages = Math.max(1, Number(config.MEME_MANAGER_MAX_IMAGES_PER_SESSION || 20));
+  if (session.importedCount >= maxImages) {
+    uploadSessions.delete(sessionKey);
+    return {
+      consumed: true,
+      replyText: `上传窗口已达到上限 ${maxImages} 张，已自动结束。`
+    };
+  }
+
+  try {
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: Math.max(1000, Number(config.MEME_MANAGER_TIMEOUT_MS || 8000))
+    });
+    const buffer = Buffer.from(response.data || []);
+    const maxBytes = Math.max(1, Number(config.MEME_MANAGER_MAX_FILE_SIZE_MB || 10)) * 1024 * 1024;
+    if (buffer.length > maxBytes) {
+      return {
+        consumed: true,
+        replyText: `图片过大，超过 ${(maxBytes / (1024 * 1024)).toFixed(0)}MB 限制。`
+      };
+    }
+
+    const ext = inferImageExtFromUrl(imageUrl);
+    const asset = memeStore.importAsset(session.categoryName, buffer, {
+      ext,
+      mime: inferMimeFromResponse(imageUrl, response.headers || {})
+    });
+
+    session.importedCount += 1;
+    session.expiresAt = Date.now() + Math.max(1000, Number(config.MEME_MANAGER_UPLOAD_WINDOW_MS || 60000));
+    uploadSessions.set(sessionKey, session);
+
+    console.log('[meme-manager] asset imported', {
+      groupId,
+      userId,
+      category: session.categoryName,
+      assetId: asset.id,
+      size: asset.size
+    });
+
+    return {
+      consumed: true,
+      replyText: `已导入 ${session.categoryName}：${asset.id}`
+    };
+  } catch (error) {
+    return {
+      consumed: true,
+      replyText: `导入失败：${error?.message || String(error)}`
+    };
+  }
+}
+
+function shouldSkipFollowup(replyText = '') {
+  const text = String(replyText || '').trim();
+  if (!text) return 'empty-reply';
+  if (/刚才.*(小问题|网络)|请再发一次|重试链路/i.test(text)) return 'failure-reply';
+  return '';
+}
+
+function toBase64ImageFile(absolutePath) {
+  const data = fs.readFileSync(absolutePath);
+  return `base64://${data.toString('base64')}`;
+}
+
+function buildSelectorPrompt() {
+  return buildRuntimePrompt('meme-emotion-selector');
+}
+
+function buildSelectorPayload({
+  surface,
+  routePolicyKey,
+  topRouteType,
+  userText,
+  replyText,
+  categories
+}) {
+  return JSON.stringify({
+    surface,
+    routePolicyKey: String(routePolicyKey || '').trim() || 'chat/default',
+    topRouteType: String(topRouteType || '').trim() || 'chat',
+    userText: String(userText || '').trim(),
+    replyText: String(replyText || '').trim(),
+    categories: categories.map((item) => ({
+      name: item.name,
+      description: item.description,
+      assetCount: item.assetCount
+    }))
+  });
+}
+
+async function selectCategory({
+  surface,
+  routePolicyKey,
+  topRouteType,
+  userText,
+  replyText
+}) {
+  const categories = memeStore.getSelectorCategories();
+  const available = categories.filter((item) => item.assetCount > 0);
+  if (!available.length) {
+    return { skipped: true, reason: 'no-assets', selection: null };
+  }
+  if (!getSelectorBaseUrl() || !getSelectorModel()) {
+    return { skipped: true, reason: 'router-missing', selection: null };
+  }
+
+  const prompt = buildSelectorPrompt();
+  const apiBaseUrl = ensureChatCompletionsUrl(getSelectorBaseUrl());
+  const model = getSelectorModel();
+  const provider = getApiProvider(apiBaseUrl, model);
+
+  const response = await postWithRetry(
+    apiBaseUrl,
+    {
+      model,
+      temperature: Number(config.MEME_MANAGER_TEMPERATURE || 0.2),
+      max_tokens: Math.max(64, Number(config.MEME_MANAGER_MAX_TOKENS || 200)),
+      stream: false,
+      messages: [
+        { role: 'system', content: prompt },
+        {
+          role: 'user',
+          content: buildSelectorPayload({
+            surface,
+            routePolicyKey,
+            topRouteType,
+            userText,
+            replyText,
+            categories: available
+          })
+        }
+      ],
+      __timeoutMs: Math.max(1000, Number(config.MEME_MANAGER_TIMEOUT_MS || 8000)),
+      __trace: {
+        source: 'meme_manager',
+        phase: 'selector',
+        purpose: 'meme_emotion_selection',
+        routePolicyKey: String(routePolicyKey || '').trim(),
+        topRouteType: String(topRouteType || '').trim(),
+        userId: ''
+      }
+    },
+    1,
+    getSelectorApiKey()
+  );
+
+  const rawText = extractSelectorResponseText(response);
+  const parsed = extractJsonSafely(rawText) || parseLooseSelectorOutput(rawText, available);
+  if (!parsed || typeof parsed !== 'object') {
+    console.log('[meme-manager] selector raw response', {
+      surface,
+      provider,
+      rawTextPreview: previewSelectorText(rawText)
+    });
+    return { skipped: true, reason: 'invalid-json', selection: null, provider };
+  }
+
+  const category = String(parsed.category || '').trim();
+  const confidence = Number(parsed.confidence);
+  const reason = String(parsed.reason || '').trim();
+  const singleCategoryFallback = available.length === 1
+    && shouldUseSingleCategoryPositiveFallback(available[0], userText, replyText);
+  if (!category || category === 'none') {
+    if (singleCategoryFallback) {
+      return {
+        skipped: false,
+        reason: reason || 'single-category-positive-fallback',
+        selection: {
+          category: available[0].name,
+          confidence: Math.max(
+            Number(config.MEME_MANAGER_MIN_CONFIDENCE || 0.65),
+            Number.isFinite(confidence) ? confidence : 0.66
+          ),
+          reason: reason || 'single-category-positive-fallback'
+        },
+        provider
+      };
+    }
+    return {
+      skipped: true,
+      reason: reason || 'none-selected',
+      selection: { category: 'none', confidence: Number.isFinite(confidence) ? confidence : 0, reason },
+      provider
+    };
+  }
+
+  if (!Number.isFinite(confidence) || confidence < Number(config.MEME_MANAGER_MIN_CONFIDENCE || 0.65)) {
+    if (singleCategoryFallback) {
+      return {
+        skipped: false,
+        reason: reason || 'single-category-positive-fallback',
+        selection: {
+          category,
+          confidence: Math.max(
+            Number(config.MEME_MANAGER_MIN_CONFIDENCE || 0.65),
+            Number.isFinite(confidence) ? confidence : 0.66
+          ),
+          reason: reason || 'single-category-positive-fallback'
+        },
+        provider
+      };
+    }
+    return {
+      skipped: true,
+      reason: reason || 'below-threshold',
+      selection: { category, confidence: Number.isFinite(confidence) ? confidence : 0, reason },
+      provider
+    };
+  }
+
+  return {
+    skipped: false,
+    reason,
+    selection: { category, confidence, reason },
+    provider
+  };
+}
+
+async function maybeSendMemeFollowup({
+  surface,
+  groupId,
+  senderId,
+  sendWithRetry,
+  routePolicyKey,
+  topRouteType,
+  userText,
+  replyText
+}) {
+  try {
+    if (!isSurfaceEnabled(surface)) {
+      console.log('[meme-manager] selector skipped', { surface, reason: 'surface-disabled' });
+      return { sent: false, reason: 'surface-disabled' };
+    }
+
+    const skipReason = shouldSkipFollowup(replyText);
+    if (skipReason) {
+      console.log('[meme-manager] selector skipped', { surface, reason: skipReason });
+      return { sent: false, reason: skipReason };
+    }
+
+    const selectionResult = await selectCategory({
+      surface,
+      routePolicyKey,
+      topRouteType,
+      userText,
+      replyText
+    });
+
+    if (selectionResult.skipped || !selectionResult.selection || selectionResult.selection.category === 'none') {
+      console.log('[meme-manager] selector skipped', {
+        surface,
+        reason: selectionResult.reason,
+        selection: selectionResult.selection || null
+      });
+      return { sent: false, reason: selectionResult.reason || 'selector-skipped' };
+    }
+
+    const asset = memeStore.pickRandomAssetFromSelectedCategory(selectionResult.selection.category);
+    if (!asset || !asset.absolutePath) {
+      console.log('[meme-manager] selector skipped', { surface, reason: 'no-asset-for-category' });
+      return { sent: false, reason: 'no-asset-for-category' };
+    }
+
+    console.log('[meme-manager] selector selected', {
+      surface,
+      category: selectionResult.selection.category,
+      confidence: selectionResult.selection.confidence,
+      reason: selectionResult.selection.reason
+    });
+
+    const ok = await sendWithRetry({
+      action: 'send_group_msg',
+      params: {
+        group_id: groupId,
+        message: [{ type: 'image', data: { file: toBase64ImageFile(asset.absolutePath) } }]
+      }
+    }, 1, 300);
+
+    console.log('[meme-manager] followup send ' + (ok ? 'ok' : 'failed'), {
+      surface,
+      groupId,
+      senderId,
+      category: selectionResult.selection.category,
+      assetId: asset.id
+    });
+    return { sent: ok, reason: ok ? 'ok' : 'send-failed' };
+  } catch (error) {
+    console.log('[meme-manager] selector skipped', {
+      surface,
+      reason: error?.message || String(error)
+    });
+    return { sent: false, reason: error?.message || String(error) };
+  }
+}
+
+function initializeMemeManager() {
+  const current = memeStore.initializeStore();
+  console.log('[meme-manager] initialized', {
+    enabled: current.enabled,
+    categoryCount: Object.keys(current.categories || {}).length
+  });
+  return current;
+}
+
+module.exports = {
+  cleanupExpiredSessions,
+  consumePendingUploadFromMessage,
+  handleAdminCommand,
+  initializeMemeManager,
+  isSurfaceEnabled,
+  maybeSendMemeFollowup,
+  parseMemeCommand,
+  startUploadSession
+};

@@ -1,0 +1,7 @@
+QQ rich message rule:
+Only when the user explicitly asks you to send a QQ emoticon or sticker, you may embed these markers in the final reply.
+Do not output these markers for ordinary chat, formatting decoration, or without a clear user request.
+Built-in QQ face: [[qq_face:123]]
+Image or GIF sticker: [[qq_image:https://example.com/sticker.gif]]
+Do not invent unsupported marker types, and do not explain the marker syntax to the user.
+You may mix normal text with these markers, but keep the surrounding text natural and concise.
