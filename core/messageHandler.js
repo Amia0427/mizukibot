@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { getDatePartsInTz, todayStrInTz } = require('../utils/time');
 const {
   favorites,
@@ -10,7 +12,7 @@ const {
   clearGroupBindingForUser
 } = require('../utils/memory');
 const { recordMemoryScope } = require('../utils/memoryScopeIndex');
-const { askAIByGraph } = require('../api/agentGraph');
+const { askAIByGraph, runPersistInBackgroundFromCheckpoint } = require('../api/agentGraph');
 const { extractJsonSafely } = require('../api/parser');
 const {
   startSubagentBridgeCall
@@ -495,6 +497,24 @@ function getBackgroundTaskSessionTtlMs(config) {
   const n = Number(config.BACKGROUND_TASK_SESSION_TTL_MS);
   if (!Number.isFinite(n)) return 30 * 60 * 1000;
   return Math.max(60 * 1000, Math.floor(n));
+}
+
+function getRawMessageTimestampMs(msg = {}) {
+  const seconds = Number(msg?.time || 0);
+  return seconds > 0 ? (seconds * 1000) : 0;
+}
+
+function appendInboundTimingLog(logFilePath, enableDebugLog, payload = {}) {
+  if (!enableDebugLog) return;
+  try {
+    const normalized = payload && typeof payload === 'object' ? payload : {};
+    const line = JSON.stringify({
+      recordedAt: new Date().toISOString(),
+      processId: process.pid,
+      ...normalized
+    });
+    fs.appendFile(logFilePath, `${line}\n`, () => {});
+  } catch (_) {}
 }
 
 function createReplyTelemetryBridge(runtimeConfig = config) {
@@ -1459,6 +1479,7 @@ function createMessageHandler({
   generateSessionContextSummaryOverride = null,
   inboundConcurrencyControllerOverride = null
 }) {
+  const inboundTimingLogFile = path.join(config.DATA_DIR, 'inbound_timing.jsonl');
   const inboundDeduper = createMessageEventDeduper({
     ttlMs: 90 * 1000,
     maxEntries: 4096
@@ -1482,6 +1503,44 @@ function createMessageHandler({
     runtimeConfig: config
   });
   const buildReplyTelemetry = createReplyTelemetryBridge(config);
+
+  function maybeRunDeferredPersist(replyEnvelope = {}) {
+    const replyOptions = replyEnvelope?.replyOptions && typeof replyEnvelope.replyOptions === 'object'
+      ? replyEnvelope.replyOptions
+      : null;
+    if (replyOptions?.deferPersist !== true) return;
+    const routeMeta = replyOptions?.routeMeta && typeof replyOptions.routeMeta === 'object'
+      ? replyOptions.routeMeta
+      : {};
+    const userId = String(routeMeta.userId || routeMeta.user_id || '').trim();
+    const sessionKey = resolveShortTermSessionKey(userId, routeMeta);
+    const threadId = resolveThreadId({
+      userId,
+      routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
+      reviewMode: '',
+      routeMeta,
+      sessionKey,
+      imageUrl: null,
+      options: {
+        routeMeta
+      }
+    });
+    if (!threadId) return;
+
+    setTimeout(() => {
+      console.log('[persist-background] start', {
+        threadId,
+        routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
+        topRouteType: String(replyOptions?.topRouteType || '').trim()
+      });
+      runPersistInBackgroundFromCheckpoint(threadId).catch((error) => {
+        console.error('[persist-background] failed', {
+          threadId,
+          error: error?.message || String(error || '')
+        });
+      });
+    }, 0);
+  }
   const inboundConcurrency = inboundConcurrencyControllerOverride || createInboundConcurrencyController({
     globalLimit: config.INBOUND_GLOBAL_MAX_CONCURRENCY,
     generalLimit: config.INBOUND_GENERAL_MAX_CONCURRENCY,
@@ -2878,6 +2937,18 @@ function createMessageHandler({
   // source-compat anchor: return replyRuntime.sendGroupReply({
 
   async function handleIncomingMessage(msg) {
+    const handlerStartedAt = Date.now();
+    const rawMessageTimestampMs = getRawMessageTimestampMs(msg);
+    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      stage: 'handle_incoming_start',
+      messageId: String(msg?.message_id || '').trim(),
+      groupId: String(msg?.group_id || '').trim(),
+      userId: String(msg?.user_id || '').trim(),
+      chatType: String(msg?.message_type || '').trim(),
+      rawMessageTimestampMs,
+      lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, handlerStartedAt - rawMessageTimestampMs) : null
+    });
+
     if (shouldHandleNotice(msg, config).handled) return;
     if (shouldSkipNonGroupMessage(msg)) return;
     if (inboundDeduper.shouldSkip(msg)) {
@@ -2942,6 +3013,17 @@ function createMessageHandler({
     const preprocessed = await continuousMessagePreprocessor.handleMessage(msg, {
       effectiveBotQQ
     });
+    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      stage: 'continuous_preprocess_done',
+      messageId: String(msg?.message_id || '').trim(),
+      groupId: String(msg?.group_id || '').trim(),
+      userId: String(msg?.user_id || '').trim(),
+      preprocessMode: String(preprocessed?.mode || '').trim(),
+      flushReason: String(preprocessed?.meta?.flushReason || '').trim(),
+      rawMessageTimestampMs,
+      elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+      lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+    });
     if (preprocessed?.mode === 'deferred') {
       return;
     }
@@ -2954,6 +3036,7 @@ function createMessageHandler({
       ? 'admin'
       : (isAdminUser(senderId) ? 'admin' : 'general');
     const selectedInboundConcurrency = privilegedPrivateChat ? privateInboundConcurrency : inboundConcurrency;
+    const queueWaitStartedAt = Date.now();
     const inboundLock = await selectedInboundConcurrency.acquire({
       userId: senderId,
       lane: concurrencyLane,
@@ -2963,9 +3046,32 @@ function createMessageHandler({
       concurrencyScope,
       privilegedPrivateChat
     });
+    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      stage: 'inbound_lock_acquired',
+      messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+      groupId: String(groupId || '').trim(),
+      userId: String(senderId || '').trim(),
+      chatType,
+      concurrencyLane,
+      concurrencyScope,
+      privilegedPrivateChat,
+      queueWaitMs: Math.max(0, Date.now() - queueWaitStartedAt),
+      rawMessageTimestampMs,
+      lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+    });
     let inboundHadError = false;
 
     try {
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'inbound_route_entry',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+      });
       // source-compat anchor: msg: effectiveMsg,
 
       const slashCommandText = stripLeadingCqControlSegments(rawText, effectiveBotQQ);
@@ -3302,14 +3408,48 @@ function createMessageHandler({
 
     const routerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 180, directedContext });
     const plannerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 320, directedContext });
-    const route = await routeResolver({
-      rawText: routerRawText,
-      botQQ: effectiveBotQQ,
-      userId: senderId,
+    const routeResolverStartedAt = Date.now();
+    let route = null;
+    let routeResolverError = null;
+    try {
+      route = await routeResolver({
+        rawText: routerRawText,
+        botQQ: effectiveBotQQ,
+        userId: senderId,
+        chatType,
+        contextSummary: routerContextSummary,
+        directedContext,
+        effectiveIntentText
+      });
+    } catch (error) {
+      routeResolverError = error;
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'route_resolver_failed',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        durationMs: Math.max(0, Date.now() - routeResolverStartedAt),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        error: error?.message || String(error || '')
+      });
+      throw error;
+    }
+    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      stage: 'route_resolver_done',
+      messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+      groupId: String(groupId || '').trim(),
+      userId: String(senderId || '').trim(),
       chatType,
-      contextSummary: routerContextSummary,
-      directedContext,
-      effectiveIntentText
+      durationMs: Math.max(0, Date.now() - routeResolverStartedAt),
+      rawMessageTimestampMs,
+      elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+      lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+      topRouteType: String(route?.topRouteType || '').trim(),
+      routeReason: String(route?.meta?.reason || '').trim(),
+      routeResolverFailed: Boolean(routeResolverError)
     });
     route.meta = {
       ...(route.meta || {}),
@@ -3351,11 +3491,45 @@ function createMessageHandler({
     }
 
     if (route?.topRouteType === 'direct_chat') {
-      const plannerDecision = await planDirectChat(route, {
-        userId: senderId,
-        allowedTools: route?.meta?.allowedTools,
-        contextSummary: plannerContextSummary,
-        directedContext
+      const plannerStartedAt = Date.now();
+      let plannerDecision = null;
+      try {
+        plannerDecision = await planDirectChat(route, {
+          userId: senderId,
+          allowedTools: route?.meta?.allowedTools,
+          contextSummary: plannerContextSummary,
+          directedContext
+        });
+      } catch (error) {
+        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+          stage: 'direct_chat_planner_failed',
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          durationMs: Math.max(0, Date.now() - plannerStartedAt),
+          rawMessageTimestampMs,
+          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+          error: error?.message || String(error || '')
+        });
+        throw error;
+      }
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'direct_chat_planner_done',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        durationMs: Math.max(0, Date.now() - plannerStartedAt),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        shouldUseTools: plannerDecision?.shouldUseTools === true,
+        needsBackground: plannerDecision?.needsBackground === true,
+        plannerFallbackUsed: plannerDecision?.plannerFallbackUsed === true,
+        plannerModel: String(plannerDecision?.plannerModel || '').trim(),
+        allowedToolCount: Array.isArray(plannerDecision?.allowedToolNames) ? plannerDecision.allowedToolNames.length : 0
       });
       route.meta = {
         ...(route.meta || {}),
@@ -3468,6 +3642,7 @@ function createMessageHandler({
         })
       });
       if (sent) {
+        maybeRunDeferredPersist(replyEnvelope);
         markDirectSessionPresenceReplied({ groupId, senderId });
         replyRuntime.recordBotReply({
           chatType,
@@ -3491,6 +3666,7 @@ function createMessageHandler({
         }
       }
     } else {
+      maybeRunDeferredPersist(replyEnvelope);
       if (!isPrivateChatType(chatType)) {
         await sideEffects.runDirectReplyFollowup({
           groupId,

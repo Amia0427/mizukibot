@@ -91,6 +91,13 @@ function getGroupMainModelStreamPolicy(groupId = '') {
   return entry ? normalizeEntry(entry) : defaultEntry();
 }
 
+function hasExplicitGroupMainModelStreamPolicy(groupId = '') {
+  const normalizedGroupId = normalizeText(groupId);
+  if (!normalizedGroupId) return false;
+  const state = readState();
+  return Boolean(state.groups && Object.prototype.hasOwnProperty.call(state.groups, normalizedGroupId));
+}
+
 function setGroupPublic(groupId = '', isPublic = false, updatedBy = '', now = Date.now()) {
   const normalizedGroupId = normalizeText(groupId);
   if (!normalizedGroupId) {
@@ -208,6 +215,8 @@ function shouldForceDisableGroupMainModelStream(options = {}) {
   if (!groupId) return false;
   if (options.isQqGroup !== true) return false;
   if (options.isDirectMainModelReply !== true) return false;
+  if (!config.AI_STREAM_ENABLED) return true;
+  if (!hasExplicitGroupMainModelStreamPolicy(groupId)) return false;
 
   const policy = getGroupMainModelStreamPolicy(groupId);
   return !(policy.isPublic && policy.mainModelStreamEnabled);
@@ -229,5 +238,6 @@ module.exports = {
   getGroupMainModelStreamStatus,
   formatGroupMainModelStreamStatus,
   shouldForceDisableGroupMainModelStream,
+  hasExplicitGroupMainModelStreamPolicy,
   reloadGroupMainModelStreamPolicyStore
 };

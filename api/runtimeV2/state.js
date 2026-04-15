@@ -128,6 +128,7 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     streaming: Boolean(options.streaming),
     disableStream: Boolean(options.disableStream),
     disableDirectToolLoop: Boolean(options.disableDirectToolLoop),
+    deferPersist: Boolean(options.deferPersist),
     resumePolicy: String(options.resumePolicy || 'auto').trim().toLowerCase() || 'auto',
     forcePlanMode: Boolean(options.forcePlanMode),
     systemInitiated: Boolean(options.systemInitiated),

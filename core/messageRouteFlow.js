@@ -689,7 +689,8 @@ function createMessageRouteFlow(deps = {}) {
             toolPlanner: route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null,
             directChatPlanner: route?.meta?.directChatPlanner || null
           },
-          disableStream: disableStreamForReply
+          disableStream: disableStreamForReply,
+          deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat'
         };
         if (shouldForceDisableGroupMainModelStream({
           groupId,

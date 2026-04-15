@@ -821,6 +821,14 @@ function createContinuousMessagePreprocessor(options = {}) {
     options.debounceMs ?? config.CONTINUOUS_MESSAGE_DEBOUNCE_MS,
     2000
   );
+  const atBotDebounceMs = clampDebounceMs(
+    options.atBotDebounceMs ?? config.CONTINUOUS_MESSAGE_AT_BOT_DEBOUNCE_MS,
+    2000
+  );
+  const maxHoldMs = clampDebounceMs(
+    options.maxHoldMs ?? config.CONTINUOUS_MESSAGE_MAX_HOLD_MS,
+    12000
+  );
   const enabled = options.enabled ?? config.CONTINUOUS_MESSAGE_ENABLED;
   const sessions = new Map();
 
@@ -835,16 +843,23 @@ function createContinuousMessagePreprocessor(options = {}) {
     }
   }
 
+  function getSessionDebounceMs(session = {}) {
+    return session.mentionedBot === true ? atBotDebounceMs : debounceMs;
+  }
+
   function scheduleFlush(sessionKey) {
     const session = sessions.get(sessionKey);
     if (!session) return;
     clearTimer(session);
+    const elapsedMs = Math.max(0, Date.now() - Number(session.startedAt || Date.now()));
+    const remainingHoldMs = Math.max(0, maxHoldMs - elapsedMs);
+    const nextDelayMs = Math.min(getSessionDebounceMs(session), remainingHoldMs || getSessionDebounceMs(session));
     session.timer = setTimeout(() => {
       const current = sessions.get(sessionKey);
       if (!current) return;
-      current.flushReason = 'debounce';
+      current.flushReason = remainingHoldMs <= getSessionDebounceMs(session) ? 'max_hold' : 'debounce';
       current.flushResolve();
-    }, debounceMs);
+    }, nextDelayMs);
   }
 
   function flushSession(sessionKey, reason = 'manual') {
@@ -909,11 +924,13 @@ function createContinuousMessagePreprocessor(options = {}) {
     if (sessions.has(sessionKey)) {
       const session = sessions.get(sessionKey);
       session.entries.push(entry);
+      session.mentionedBot = session.mentionedBot || entry.mentionedBot;
       scheduleFlush(sessionKey);
       console.log('[continuous-message] session append', {
         sessionKey,
         messageId: entry.messageId,
-        size: session.entries.length
+        size: session.entries.length,
+        mentionedBot: session.mentionedBot === true
       });
       return {
         mode: 'deferred',
@@ -950,12 +967,15 @@ function createContinuousMessagePreprocessor(options = {}) {
       entries: [entry],
       timer: null,
       flushResolve,
-      flushReason: 'debounce'
+      flushReason: 'debounce',
+      startedAt: Date.now(),
+      mentionedBot: entry.mentionedBot === true
     });
     scheduleFlush(sessionKey);
     console.log('[continuous-message] session start', {
       sessionKey,
-      messageId: entry.messageId
+      messageId: entry.messageId,
+      mentionedBot: entry.mentionedBot === true
     });
 
     await flushPromise;
