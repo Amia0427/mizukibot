@@ -7,8 +7,14 @@ const { getNapCatActionClient } = require('./napcatActionClient');
 const { publishQzonePost, publishQzonePostWithImages } = require('./qzoneClient');
 const {
   generateBotDiaryDraft,
-  recordQzoneGenerationHistory
 } = require('./qzoneDiaryService');
+const {
+  appendQzoneGenerationLog,
+  evaluateImageConsistency,
+  finalizeSuccessfulQzoneRecord,
+  normalizeTelemetryPayload
+} = require('../core/qzoneGenerationPhase2');
+const { normalizeDailyShareFingerprint } = require('../core/qzoneGenerationState');
 const { getScheduledTaskStore } = require('../utils/scheduledTaskStore');
 const {
   describeCron,
@@ -204,6 +210,14 @@ function pickSeededSample(items = [], count = 1, random = Math.random) {
 }
 
 function buildBotDiaryImagePrompt(content = '', meta = {}) {
+  if (meta?.imagePromptHints && Array.isArray(meta.imagePromptHints) && meta.imagePromptHints.length) {
+    return [
+      'masterpiece, best quality, ultra-detailed, highres, 8k,',
+      'anime style, 2D illustration, soft cel shading,',
+      'Akiyama Mizuki, Project SEKAI, androgynous, long lavender hair, purple eyes,',
+      ...meta.imagePromptHints.map((item) => `${normalizeText(item)},`)
+    ].filter(Boolean).join('\n');
+  }
   const safeContent = sanitizeDiaryImageText(content);
   const safeMeta = sanitizeDiaryImageMeta(meta);
   const seed = createDeterministicSeed([
@@ -583,6 +597,23 @@ async function publishQzoneForContext(input = '', context = {}, options = {}) {
     };
     localImagePath = preparedImage.imagePath || '';
 
+    if (meta?.imageIntent) {
+      const imageConsistency = evaluateImageConsistency({
+        text: content,
+        plan: {
+          imageIntent: meta.imageIntent,
+          sceneAnchors: Array.isArray(meta.imagePromptHints) ? meta.imagePromptHints : []
+        }
+      });
+      imageMeta.imageConsistencyScore = imageConsistency.score;
+      imageMeta.imageVisualFingerprint = imageConsistency.visualFingerprint;
+      if (!imageConsistency.consistent) {
+        localImagePath = '';
+        imageMeta.imagePublishMode = 'image_degraded';
+        imageMeta.imageFallbackStage = 'image_consistency';
+      }
+    }
+
     if (localImagePath) {
       const imagePublish = await publishQzoneImages({
         content,
@@ -633,9 +664,10 @@ async function publishQzoneForContext(input = '', context = {}, options = {}) {
     };
   }
   const qzoneSource = normalizeText(options.qzoneSource || normalized.mode || 'manual_qzone_post').toLowerCase() || 'manual_qzone_post';
-  recordQzoneGenerationHistory({
+  finalizeSuccessfulQzoneRecord({
     source: qzoneSource === 'manual' ? 'manual_qzone_post' : qzoneSource,
     text: content,
+    type: normalizeText(options.qzoneType || normalized.mode || 'manual').toLowerCase(),
     topicKey: normalizeText(meta.topicKey || options.topicKey || ''),
     topicGroup: normalizeText(meta.topicGroup || options.topicGroup || ''),
     variationProfile: {
@@ -643,11 +675,52 @@ async function publishQzoneForContext(input = '', context = {}, options = {}) {
       emotion: normalizeText(meta.emotion || options.emotion || ''),
       anchor: normalizeText(meta.anchor || options.anchor || ''),
       structure: normalizeText(meta.structure || options.structure || ''),
-      ending: normalizeText(meta.ending || options.ending || '')
+      ending: normalizeText(meta.ending || options.ending || ''),
+      arc: normalizeText(meta.arc || options.arc || ''),
+      tempo: normalizeText(meta.tempo || options.tempo || ''),
+      distance: normalizeText(meta.distance || options.distance || '')
     },
-    type: normalizeText(options.qzoneType || normalized.mode || 'manual').toLowerCase(),
+    plan: meta.plan || {
+      type: normalizeText(options.qzoneType || normalized.mode || 'manual').toLowerCase(),
+      theme: meta.topicKey ? { key: normalizeText(meta.topicKey || '', 80).toLowerCase() } : null,
+      variationProfile: {
+        lens: normalizeText(meta.lens || options.lens || ''),
+        emotion: normalizeText(meta.emotion || options.emotion || ''),
+        anchor: normalizeText(meta.anchor || options.anchor || ''),
+        structure: normalizeText(meta.structure || options.structure || ''),
+        ending: normalizeText(meta.ending || options.ending || ''),
+        arc: normalizeText(meta.arc || options.arc || ''),
+        tempo: normalizeText(meta.tempo || options.tempo || ''),
+        distance: normalizeText(meta.distance || options.distance || '')
+      },
+      imageIntent: meta.imageIntent || null
+    },
     at: Date.now()
   });
+  appendQzoneGenerationLog(normalizeTelemetryPayload({
+    source: qzoneSource === 'manual' ? 'manual_qzone_post' : qzoneSource,
+    type: normalizeText(options.qzoneType || normalized.mode || 'manual').toLowerCase(),
+    groupId,
+    status: 'sent',
+    selectedFingerprint: normalizeDailyShareFingerprint ? normalizeDailyShareFingerprint(content) : '',
+    selectedScore: Number.isFinite(Number(meta.selectedScore)) ? Number(meta.selectedScore) : 0,
+    similarity: Number.isFinite(Number(meta.similarity)) ? Number(meta.similarity) : 0,
+    imagePublishMode: normalizeText(imageMeta.imagePublishMode || '', 32).toLowerCase(),
+    imageConsistencyScore: Number.isFinite(Number(imageMeta.imageConsistencyScore)) ? Number(imageMeta.imageConsistencyScore) : 0,
+    failureReasons: [],
+    planSummary: {
+      fingerprint: normalizeText(meta.planFingerprint || '', 200).toLowerCase(),
+      topicKey: normalizeText(meta.topicKey || options.topicKey || '', 80).toLowerCase(),
+      topicGroup: normalizeText(meta.topicGroup || options.topicGroup || '', 80).toLowerCase(),
+      lens: normalizeText(meta.lens || options.lens || '', 32).toLowerCase(),
+      anchor: normalizeText(meta.anchor || options.anchor || '', 32).toLowerCase(),
+      structure: normalizeText(meta.structure || options.structure || '', 32).toLowerCase(),
+      arc: normalizeText(meta.arc || options.arc || '', 32).toLowerCase(),
+      tempo: normalizeText(meta.tempo || options.tempo || '', 32).toLowerCase(),
+      distance: normalizeText(meta.distance || options.distance || '', 32).toLowerCase()
+    },
+    candidates: Array.isArray(meta.candidates) ? meta.candidates : []
+  }));
   return {
     ok: true,
     text: `success\nreason: ${publishResult.reason || 'QZone publish success'}\ngroup: ${groupId}`,

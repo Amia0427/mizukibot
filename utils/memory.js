@@ -1,7 +1,11 @@
 ﻿const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { loadProjection, saveProjection } = require('./memoryProjection');
+const {
+  flushScheduledProjectionSave,
+  loadProjection,
+  scheduleProjectionSave
+} = require('./memoryProjection');
 
 // Automatically create data directory for first run compatibility.
 const dataDir = path.join(__dirname, '..', 'data');
@@ -279,6 +283,7 @@ function flushAllSync() {
       clearTimeout(memoryFlushTimer);
       memoryFlushTimer = null;
     }
+    flushScheduledProjectionSave();
     atomicWriteJson(config.DATA_FILE, favorites);
     atomicWriteJson(config.MEMORY_FILE, memories);
   } catch (e) {
@@ -406,7 +411,7 @@ normalizeAll();
  * Persist favorites to disk.
  */
 function saveData() {
-  saveProjection();
+  scheduleProjectionSave();
   scheduleDataFlush();
 }
 
@@ -414,7 +419,7 @@ function saveData() {
  * Persist memories to disk.
  */
 function saveMemories() {
-  saveProjection();
+  scheduleProjectionSave();
   scheduleMemoryFlush();
 }
 

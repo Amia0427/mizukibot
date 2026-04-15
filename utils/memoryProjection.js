@@ -309,6 +309,38 @@ function saveProjection(projection = null) {
   return next;
 }
 
+let projectionFlushTimer = null;
+let projectionDirty = false;
+
+function scheduleProjectionSave(delayMs = 5000) {
+  const waitMs = Math.max(500, Number(delayMs) || 5000);
+  projectionDirty = true;
+  if (projectionFlushTimer) return false;
+  projectionFlushTimer = setTimeout(() => {
+    projectionFlushTimer = null;
+    if (!projectionDirty) return;
+    projectionDirty = false;
+    try {
+      saveProjection();
+    } catch (error) {
+      projectionDirty = true;
+      console.error('[memory_projection] scheduled save failed:', error?.message || error);
+    }
+  }, waitMs);
+  return true;
+}
+
+function flushScheduledProjectionSave() {
+  if (projectionFlushTimer) {
+    clearTimeout(projectionFlushTimer);
+    projectionFlushTimer = null;
+  }
+  if (!projectionDirty) return false;
+  projectionDirty = false;
+  saveProjection();
+  return true;
+}
+
 function loadProjection() {
   const fallback = {
     version: 1,
@@ -494,8 +526,10 @@ module.exports = {
   PROJECTION_FILE,
   buildProjection,
   buildMigrationReport,
+  flushScheduledProjectionSave,
   loadProjection,
   projectUserProfile,
   runMemoryMigration,
+  scheduleProjectionSave,
   saveProjection
 };

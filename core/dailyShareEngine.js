@@ -34,6 +34,20 @@ const {
   sampleVariationProfile
 } = require('./qzoneGenerationState');
 const {
+  CANDIDATE_COUNT,
+  PLAN_RETRY_LIMIT,
+  appendQzoneGenerationLog,
+  buildCandidatePrompt,
+  buildPlanPrompt,
+  buildQzonePlan,
+  finalizeSuccessfulQzoneRecord,
+  getRecentFailureLikeEntries,
+  normalizeTelemetryPayload,
+  pickBestCandidate,
+  summarizeQzoneDebug,
+  summarizeQzoneWindowStats
+} = require('./qzoneGenerationPhase2');
+const {
   buildDailyShareUserInfo,
   recordSystemGroupSend,
   sendGroupReply
@@ -252,6 +266,20 @@ function getAutoTypeForWindow(targetConfig, stateEntry, windowKey) {
   }
   const pointer = Math.max(0, Number(stateEntry?.sequencePointers?.[windowKey] || 0) || 0);
   return sequence[pointer % sequence.length];
+}
+
+function buildQzoneDailySharePromptFromPlan({ payload, plan, memoryBlock = '', retryNote = '' }) {
+  return [
+    typeof payload.buildPrompt === 'function'
+      ? payload.buildPrompt({
+        variationProfile: plan.variationProfile || {},
+        recentHistory: require('./qzoneGenerationState').getRecentQzoneHistory()
+      })
+      : payload.prompt,
+    buildPlanPrompt(plan, { type: payload.type || '' }),
+    memoryBlock,
+    retryNote
+  ].filter(Boolean).join('\n\n');
 }
 
 function advanceWindowPointer(targetConfig, stateEntry, windowKey) {
@@ -874,6 +902,147 @@ function createDailyShareEngine({
     }
 
     const recentQzoneHistory = normalizedSurface === 'qzone' ? getRecentQzoneHistory() : [];
+    const recentFailureHistory = normalizedSurface === 'qzone' ? getRecentFailureLikeEntries() : [];
+
+    if (normalizedSurface === 'qzone') {
+      for (let planAttempt = 0; planAttempt < PLAN_RETRY_LIMIT; planAttempt += 1) {
+        const plan = buildQzonePlan({
+          source: 'daily_share',
+          type,
+          windowKey,
+          groupId: targetId,
+          today: stateEntry?.today || '',
+          planAttempt,
+          now,
+          recentHistory: recentQzoneHistory,
+          recentFailures: recentFailureHistory,
+          allowImage: false,
+          targetLength: type === 'greeting' ? '18-60' : (type === 'mood' ? '24-90' : '30-100')
+        });
+        const candidates = [];
+        for (let candidateIndex = 0; candidateIndex < Math.max(1, CANDIDATE_COUNT); candidateIndex += 1) {
+          const prompt = buildCandidatePrompt(
+            buildQzoneDailySharePromptFromPlan({
+              payload,
+              plan,
+              memoryBlock: payload.prompt && payload.prompt.includes('[记忆证据块]') ? '' : payload.prompt,
+              retryNote: candidateIndex > 0
+                ? `这是第 ${candidateIndex + 1} 个候选，请明显拉开开头、叙事动势和收尾。`
+                : ''
+            }),
+            plan,
+            candidateIndex > 0 ? `上一个候选不够好，请重新组织语气和画面。` : ''
+          );
+          const reply = await askAIByGraph(prompt, userInfo, userId, prompt, null, {
+            systemInitiated: true,
+            topRouteType: 'proactive',
+            routePolicyKey: 'proactive/daily-share',
+            disableTools: true,
+            disableStream: true,
+            disableMemoryLearning: true,
+            modelConfig: getModelConfigForQzoneAttempt(candidateIndex > 0 ? 'similarity' : ''),
+            routeMeta: {
+              groupId: String(groupId || ''),
+              taskType: 'daily_share',
+              channelId: String(targetId),
+              windowKey,
+              shareType: type,
+              surface: normalizedSurface
+            }
+          });
+          const text = trimReplyText(reply, 260);
+          const validation = validateDailyShareOutput(text, type, normalizedSurface);
+          candidates.push({
+            plan,
+            text,
+            rejected: !validation.ok,
+            rejectionReason: validation.ok ? '' : validation.reason
+          });
+        }
+        const picked = pickBestCandidate(candidates, {
+          source: type,
+          recentHistory: recentQzoneHistory,
+          plan
+        });
+        if (picked.selected) {
+          appendQzoneGenerationLog(normalizeTelemetryPayload({
+            source: 'daily_share',
+            type,
+            groupId: targetId,
+            status: 'sent',
+            selectedFingerprint: picked.selected.fingerprint,
+            selectedScore: picked.selected.score,
+            similarity: picked.selected.similarity,
+            failureReasons: [],
+            planSummary: {
+              fingerprint: plan.fingerprint,
+              topicKey: plan.theme?.key || payload.topicKey || '',
+              topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : (payload.topicGroup || ''),
+              lens: plan.variationProfile?.lens || '',
+              anchor: plan.variationProfile?.anchor || '',
+              structure: plan.variationProfile?.structure || '',
+              arc: plan.variationProfile?.arc || '',
+              tempo: plan.variationProfile?.tempo || '',
+              distance: plan.variationProfile?.distance || ''
+            },
+            candidates: picked.ranked.map((item) => ({
+              fingerprint: item.fingerprint,
+              score: item.score,
+              similarity: item.similarity,
+              rejected: item.rejected,
+              rejectionReason: item.rejectionReason
+            }))
+          }));
+          return {
+            text: picked.selected.text,
+            fingerprint: picked.selected.fingerprint,
+            variationProfile: plan.variationProfile || null,
+            topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : (payload.topicGroup || ''),
+            plan,
+            candidates: picked.ranked,
+            meta: {
+              ...qzoneMemoryMeta,
+              similarity: picked.selected.similarity,
+              selectedScore: picked.selected.score,
+              memoryEvidenceSources: Array.isArray(qzoneMemoryMeta.memoryEvidenceSources) && qzoneMemoryMeta.memoryEvidenceSources.length
+                ? qzoneMemoryMeta.memoryEvidenceSources
+                : (Array.isArray(qzoneMemoryEvidence.sources) ? qzoneMemoryEvidence.sources : [])
+            }
+          };
+        }
+        lastFailure = picked.ranked[0]?.rejectionReason || 'qzone_phase2_candidate_rejected';
+        lastFailureClass = 'similarity';
+        appendQzoneGenerationLog(normalizeTelemetryPayload({
+          source: 'daily_share',
+          type,
+          groupId: targetId,
+          status: 'failed',
+          selectedFingerprint: '',
+          selectedScore: 0,
+          similarity: 0,
+          failureReasons: picked.ranked.map((item) => item.rejectionReason).filter(Boolean),
+          planSummary: {
+            fingerprint: plan.fingerprint,
+            topicKey: plan.theme?.key || payload.topicKey || '',
+            topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : (payload.topicGroup || ''),
+            lens: plan.variationProfile?.lens || '',
+            anchor: plan.variationProfile?.anchor || '',
+            structure: plan.variationProfile?.structure || '',
+            arc: plan.variationProfile?.arc || '',
+            tempo: plan.variationProfile?.tempo || '',
+            distance: plan.variationProfile?.distance || ''
+          },
+          candidates: picked.ranked.map((item) => ({
+            fingerprint: item.fingerprint,
+            score: item.score,
+            similarity: item.similarity,
+            rejected: item.rejected,
+            rejectionReason: item.rejectionReason
+          }))
+        }));
+      }
+      throw new Error(lastFailure || 'daily-share-validation-failed');
+    }
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
       const variationProfile = normalizedSurface === 'qzone'
@@ -961,40 +1130,6 @@ function createDailyShareEngine({
           event: attempt === 0 ? 'validator retry' : 'validator fail'
         });
         continue;
-      }
-
-      if (normalizedSurface === 'qzone') {
-        const similarityCheck = evaluateQzoneGenerationCandidate(text, {
-          fingerprint,
-          recentHistory: recentQzoneHistory,
-          variationProfile
-        });
-        if (!similarityCheck.ok) {
-          lastFailure = similarityCheck.reason;
-          lastFailureClass = 'similarity';
-          logDailyShare({
-            groupId: targetId,
-            windowKey,
-            type,
-            reason: similarityCheck.reason,
-            source: payload.source || '',
-            event: attempt === 0 ? 'similarity retry' : 'similarity fail'
-          });
-          continue;
-        }
-        return {
-          text,
-          fingerprint: similarityCheck.fingerprint || fingerprint,
-          variationProfile,
-          topicGroup: payload.topicGroup || '',
-          meta: {
-            ...qzoneMemoryMeta,
-            similarity: similarityCheck.similarity,
-            memoryEvidenceSources: Array.isArray(qzoneMemoryMeta.memoryEvidenceSources) && qzoneMemoryMeta.memoryEvidenceSources.length
-              ? qzoneMemoryMeta.memoryEvidenceSources
-              : (Array.isArray(qzoneMemoryEvidence.sources) ? qzoneMemoryEvidence.sources : [])
-          }
-        };
       }
 
       return {
@@ -1194,14 +1329,14 @@ function createDailyShareEngine({
     });
     appendRecentContentFingerprint(stateEntry, generated.fingerprint, now);
     if (normalizedSurface === 'qzone') {
-      recordQzoneGenerationHistory({
+      finalizeSuccessfulQzoneRecord({
         source: 'daily_share',
         text: generated.text,
-        fingerprint: generated.fingerprint,
+        type,
         topicKey: payload.topicKey || '',
         topicGroup: payload.topicGroup || generated.topicGroup || '',
         variationProfile: generated.variationProfile || {},
-        type,
+        plan: generated.plan || null,
         at: now
       });
     }
@@ -1384,6 +1519,14 @@ function createDailyShareEngine({
       return { handled: true, replyText: formatStatusForTarget(targetId, today, date) };
     }
 
+    if (isQzoneCommand && sub === 'debug') {
+      return { handled: true, replyText: summarizeQzoneDebug(20) };
+    }
+
+    if (isQzoneCommand && sub === 'summary') {
+      return { handled: true, replyText: summarizeQzoneWindowStats(7) };
+    }
+
     if (sub === 'enable') {
       target.enabled = true;
       flush();
@@ -1464,7 +1607,7 @@ function createDailyShareEngine({
     return {
       handled: true,
       replyText: isQzoneCommand
-        ? '可用命令：/dailyshare qzone status | enable | disable | run [auto|greeting|mood|recommendation] | reset'
+        ? '可用命令：/dailyshare qzone status | debug | summary | enable | disable | run [auto|greeting|mood|recommendation] | reset'
         : '可用命令：/dailyshare status | enable | disable | run [auto|greeting|mood|knowledge|recommendation] | reset'
     };
   }

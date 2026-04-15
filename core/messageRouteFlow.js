@@ -658,7 +658,10 @@ function createMessageRouteFlow(deps = {}) {
           chatType,
           groupId,
           userId: senderId,
-          senderId
+          senderId,
+          telemetry: {
+            onEvent: typeof inboundContext?.onEvent === 'function' ? inboundContext.onEvent : null
+          }
         });
         const replyOptions = {
           onDelta: streamingDispatcher.onDelta,
@@ -702,10 +705,21 @@ function createMessageRouteFlow(deps = {}) {
         }
         finalReplyOptions = replyOptions;
 
-        await markThinkingEmojiBeforeLlm?.({
+        const thinkingEmojiStartedAt = Date.now();
+        const thinkingEmojiApplied = await markThinkingEmojiBeforeLlm?.({
           messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           routeMeta: route.meta || {}
+        });
+        inboundContext?.onEvent?.({
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          ts: Date.now(),
+          type: 'thinking_emoji_done',
+          node: 'pre_model',
+          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+          topRouteType: String(routeExecutionPlan?.topRouteType || '').trim(),
+          applied: Boolean(thinkingEmojiApplied),
+          durationMs: Math.max(0, Date.now() - thinkingEmojiStartedAt)
         });
         reply = await askAIDispatch(cleanText, userInfo, senderId, null, imageUrl, replyOptions);
         if (replyOptions.streamCompleted && replyOptions.streamHadOutput) {
