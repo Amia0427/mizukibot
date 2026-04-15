@@ -9,6 +9,8 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'memory.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryProjection.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryConflictFilteringStable.test.js'),
+  path.join(__dirname, '..', 'tests', 'routerChineseKeywords.test.js'),
+  path.join(__dirname, '..', 'tests', 'messageCopyMojibake.test.js'),
   path.join(__dirname, '..', 'tests', 'sessionContextSummaryStore.test.js'),
   path.join(__dirname, '..', 'tests', 'memeStore.test.js'),
   path.join(__dirname, '..', 'tests', 'memeManager.test.js'),

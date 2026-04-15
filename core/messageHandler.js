@@ -183,7 +183,7 @@ function parseJsonTail(text = '') {
     }
     return parsed;
   } catch (error) {
-    throw new Error(`JSON 瑙ｆ瀽澶辫触: ${error.message || error}`);
+    throw new Error(`JSON 解析失败: ${error.message || error}`);
   }
 }
 
@@ -346,7 +346,7 @@ async function handleQqScheduleAdminCommand(command = {}, context = {}) {
       hint: payload.hint
     }, context);
   }
-  throw new Error('schedule_create.kind 浠呮敮鎸?message 鎴?command');
+  throw new Error('schedule_create.kind 仅支持 message 或 command');
 }
 
 function getRouteDisplayType(route = {}, routeExecutionPlan = {}) {
@@ -375,7 +375,7 @@ function buildToolGuidancePrompt(route) {
   return buildRuntimePrompt('tool-guidance', {
     routeKey,
     toolHints: toolHints.join(', '),
-    reasonLine: reason ? `璺敱鍘熷洜: ${reason}` : ''
+    reasonLine: reason ? `路由原因: ${reason}` : ''
   });
 }
 
@@ -392,8 +392,8 @@ function buildBridgeGuidancePrompt(route, backend = 'command', routeExecutionPla
     planId: 'none',
     toolLine,
     executionLine,
-    executionPlanBlock: executionPlanLines.length ? `鎵ц姝ラ:\n${executionPlanLines.join('\n')}` : '',
-    reasonLine: reason ? `璺敱鍘熷洜: ${reason}` : ''
+    executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',
+    reasonLine: reason ? `路由原因: ${reason}` : ''
   });
 }
 
@@ -1496,7 +1496,7 @@ function createMessageHandler({
     });
 
     const reviewRoutePrompt = buildRuntimePrompt('review-route', {
-      routePromptBlock: routePrompt ? `璺敱鎻愮ず:\n${routePrompt}` : '',
+      routePromptBlock: routePrompt ? `路由提示:\n${routePrompt}` : '',
       outputFormatInstruction
     });
 

@@ -296,7 +296,7 @@ const TOOL_SCHEMAS = [
     type: 'function',
     function: {
       name: 'notebook_search',
-      description: '妫€绱㈢煡璇嗗簱鐗囨',
+      description: '搜索知识库片段',
       parameters: {
         type: 'object',
         properties: {

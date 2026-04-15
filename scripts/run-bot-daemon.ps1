@@ -13,6 +13,7 @@ if (-not (Test-Path $logDir)) {
 }
 
 $logFile = Join-Path $logDir 'bot-daemon.log'
+$workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
 
 function Write-DaemonLog {
   param(
@@ -107,6 +108,30 @@ function Test-LockOwnedByRunningNode {
   }
 }
 
+function Test-WorkerOwnedByRunningNode {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$PidFile
+  )
+
+  if (-not (Test-Path $PidFile)) {
+    return $false
+  }
+
+  try {
+    $ownerPidText = (Get-Content -Path $PidFile -TotalCount 1 -Encoding utf8).Trim()
+    $ownerPid = [int]$ownerPidText
+    if ($ownerPid -le 0) {
+      return $false
+    }
+
+    $proc = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+    return ($null -ne $proc -and $proc.ProcessName -ieq 'node')
+  } catch {
+    return $false
+  }
+}
+
 Write-DaemonLog -Message 'daemon task started'
 
 $exitCode = 0
@@ -120,19 +145,28 @@ try {
 
   # If bot is already alive, report success to keep scheduled-task status healthy.
   $lockFile = Join-Path $repoRoot '.mizukibot.lock'
+  $nodeExe = Resolve-NodeExecutable
+  if (-not $nodeExe) {
+    throw 'node.exe not found in PATH or common install locations.'
+  }
+
+  Write-DaemonLog -Message "using node: $nodeExe"
   if (Test-LockOwnedByRunningNode -LockPath $lockFile) {
     Write-DaemonLog -Message 'bot already running, skip duplicate start.'
-    $exitCode = 0
   } else {
-    $nodeExe = Resolve-NodeExecutable
-    if (-not $nodeExe) {
-      throw 'node.exe not found in PATH or common install locations.'
-    }
-
-    Write-DaemonLog -Message "using node: $nodeExe"
     $cmdLine = "`"$nodeExe`" index.js >> `"$logFile`" 2>&1"
     & cmd.exe /d /c $cmdLine
-    $exitCode = $LASTEXITCODE
+    if ($LASTEXITCODE -ne 0) {
+      $exitCode = $LASTEXITCODE
+    }
+  }
+
+  if (Test-WorkerOwnedByRunningNode -PidFile $workerPidFile) {
+    Write-DaemonLog -Message 'post-reply worker already running, skip duplicate start.'
+  } else {
+    $workerProc = Start-Process -FilePath $nodeExe -ArgumentList 'scripts/post-reply-worker.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+    Set-Content -Path $workerPidFile -Value $workerProc.Id -Encoding utf8
+    Write-DaemonLog -Message "started post-reply worker pid=$($workerProc.Id)"
   }
 } catch {
   $exitCode = 1

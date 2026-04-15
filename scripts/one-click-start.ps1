@@ -15,6 +15,7 @@ if (-not $nodeCmd -or -not $nodeCmd.Source) {
 }
 
 $lockFile = Join-Path $repoRoot '.mizukibot.lock'
+$workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
 
 Write-Host '[1/4] 停止旧实例（如果存在）...'
 if (Test-Path $lockFile) {
@@ -29,10 +30,23 @@ if (Test-Path $lockFile) {
 } else {
   Write-Host '[INFO] 未发现 lock 文件，跳过停止。'
 }
+if (Test-Path $workerPidFile) {
+  $oldWorkerPidText = (Get-Content -Path $workerPidFile -TotalCount 1 -Encoding utf8).Trim()
+  $oldWorkerPid = 0
+  if ([int]::TryParse($oldWorkerPidText, [ref]$oldWorkerPid) -and $oldWorkerPid -gt 0) {
+    Stop-Process -Id $oldWorkerPid -Force -ErrorAction SilentlyContinue
+    Write-Host "[OK] 已尝试停止旧 Worker PID: $oldWorkerPid"
+  } else {
+    Write-Host '[INFO] worker pid 文件为空或无效，跳过停止。'
+  }
+}
 
 Write-Host '[2/4] 清理 lock 文件...'
 if (Test-Path $lockFile) {
   Set-Content -Path $lockFile -Value '' -Encoding utf8 -ErrorAction SilentlyContinue
+}
+if (Test-Path $workerPidFile) {
+  Set-Content -Path $workerPidFile -Value '' -Encoding utf8 -ErrorAction SilentlyContinue
 }
 Write-Host '[OK] lock 已清理。'
 
@@ -73,6 +87,8 @@ $loadedCount = Import-DotEnv -FilePath $envPath
 Write-Host "[INFO] 已加载环境变量: $loadedCount"
 
 $proc = Start-Process -FilePath $nodeCmd.Source -ArgumentList 'index.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+$workerProc = Start-Process -FilePath $nodeCmd.Source -ArgumentList 'scripts/post-reply-worker.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+Set-Content -Path $workerPidFile -Value $workerProc.Id -Encoding utf8
 Start-Sleep -Seconds 2
 
 if (Test-Path $lockFile) {
@@ -84,6 +100,11 @@ if (Test-Path $lockFile) {
   } else {
     Write-Host "[WARN] 未发现 lock 文件，但进程仍在运行（PID=$($proc.Id)）。" -ForegroundColor Yellow
   }
+}
+if ($workerProc.HasExited) {
+  Write-Host "[WARN] post-reply worker 已退出，ExitCode=$($workerProc.ExitCode)" -ForegroundColor Yellow
+} else {
+  Write-Host "[OK] WORKER_PID=$($workerProc.Id)"
 }
 
 Write-Host '[4/4] 触发守护任务自愈（可选）...'
