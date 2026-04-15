@@ -153,6 +153,7 @@ function createMessageRouteFlow(deps = {}) {
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
     generateBotDiaryDraft,
+    generateGenericQzoneDraft,
     normalizeGeneratedQzoneContent,
     publishQzoneForContext,
     backgroundTaskRuntime,
@@ -614,35 +615,24 @@ function createMessageRouteFlow(deps = {}) {
               : `bot 日记生成成功，但发布到 QQ 空间失败。\n\n原因：${publishResult?.text || '未知错误'}`;
           }
         } else if (qzoneDraftMode === 'generic_autodraft' || shouldAutoDraftQzonePostRequest?.(route, cleanText)) {
-          const draftedContent = normalizeGeneratedQzoneContent(
-            await askAIDispatch(
-              buildQzoneAutodraftPrompt(cleanText),
-              userInfo,
-              senderId,
-              null,
-              imageUrl,
-              {
-                disableTools: true,
-                disableStream: true,
-                routePrompt: null,
-                routePolicyKey: 'act/qq-publish-qzone-draft',
-                routeDebugKey: 'act/qq-publish-qzone-draft',
-                topRouteType: 'direct_chat',
-                routeMeta: {
-                  ...(route.meta || {}),
-                  groupId,
-                  topRouteType: 'direct_chat',
-                  routePolicyKey: 'act/qq-publish-qzone-draft'
-                }
-              }
-            )
-          );
+          const drafted = await generateGenericQzoneDraft({
+            requestText: cleanText,
+            groupId: String(groupId || '')
+          });
+          const draftedContent = drafted.ok ? normalizeGeneratedQzoneContent(drafted.content) : '';
 
           if (!draftedContent) {
             reply = '这次没能生成可发布的 QQ 空间草稿。';
           } else {
             const publishResult = await publishQzoneForContext(draftedContent, {
               userId: String(senderId || ''),
+              qzoneSource: 'generic_autodraft',
+              qzoneType: 'generic_autodraft',
+              lens: drafted?.meta?.lens,
+              emotion: drafted?.meta?.emotion,
+              anchor: drafted?.meta?.anchor,
+              structure: drafted?.meta?.structure,
+              ending: drafted?.meta?.ending,
               routeMeta: {
                 ...(route.meta || {}),
                 userId: String(senderId || ''),

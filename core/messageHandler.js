@@ -95,6 +95,7 @@ const {
 const {
   detectQzonePostDraftMode,
   generateBotDiaryDraft,
+  generateGenericQzoneDraft,
   normalizeGeneratedQzoneContent
 } = require('../api/qzoneDiaryService');
 const {
@@ -102,6 +103,7 @@ const {
   getShortTermPresence,
   updateShortTermPresence
 } = require('../utils/shortTermMemory');
+const { createCheckpointStore, resolveThreadId } = require('../utils/langgraphV2Store');
 const {
   saveSessionContextSummary,
   getSessionSummaryCooldownStatus
@@ -493,6 +495,60 @@ function getBackgroundTaskSessionTtlMs(config) {
   const n = Number(config.BACKGROUND_TASK_SESSION_TTL_MS);
   if (!Number.isFinite(n)) return 30 * 60 * 1000;
   return Math.max(60 * 1000, Math.floor(n));
+}
+
+function createReplyTelemetryBridge(runtimeConfig = config) {
+  const store = createCheckpointStore({
+    checkpointDir: runtimeConfig.LANGGRAPH_V2_CHECKPOINT_DIR,
+    eventDir: runtimeConfig.LANGGRAPH_V2_EVENT_DIR
+  });
+
+  return function buildReplyTelemetry({
+    senderId = '',
+    groupId = '',
+    chatType = 'group',
+    routePolicyKey = '',
+    topRouteType = '',
+    routeMeta = null
+  } = {}) {
+    const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object'
+      ? {
+          ...routeMeta,
+          groupId: String(groupId || routeMeta.groupId || routeMeta.group_id || '').trim(),
+          chatType: String(chatType || routeMeta.chatType || '').trim(),
+          topRouteType: String(topRouteType || routeMeta.topRouteType || '').trim(),
+          routePolicyKey: String(routePolicyKey || routeMeta.routePolicyKey || '').trim()
+        }
+      : {
+          groupId: String(groupId || '').trim(),
+          chatType: String(chatType || '').trim(),
+          topRouteType: String(topRouteType || '').trim(),
+          routePolicyKey: String(routePolicyKey || '').trim()
+        };
+    const sessionKey = resolveShortTermSessionKey(senderId, normalizedRouteMeta);
+    const threadId = resolveThreadId({
+      userId: senderId,
+      routePolicyKey,
+      reviewMode: '',
+      routeMeta: normalizedRouteMeta,
+      sessionKey,
+      imageUrl: null,
+      options: {
+        routeMeta: normalizedRouteMeta
+      }
+    });
+
+    return {
+      threadId,
+      routePolicyKey: String(routePolicyKey || '').trim(),
+      topRouteType: String(topRouteType || '').trim(),
+      onEvent(event = {}) {
+        if (!threadId) return;
+        const normalized = event && typeof event === 'object' ? event : {};
+        store.appendEvents(threadId, [normalized]);
+      }
+    };
+  };
 }
 
 function normalizeControlText(text = '') {
@@ -1425,6 +1481,7 @@ function createMessageHandler({
     sendWithRetry,
     runtimeConfig: config
   });
+  const buildReplyTelemetry = createReplyTelemetryBridge(config);
   const inboundConcurrency = inboundConcurrencyControllerOverride || createInboundConcurrencyController({
     globalLimit: config.INBOUND_GLOBAL_MAX_CONCURRENCY,
     generalLimit: config.INBOUND_GENERAL_MAX_CONCURRENCY,
@@ -2566,35 +2623,24 @@ function createMessageHandler({
               : `?? bot ????????? QQ ??????\n\n?????${publishResult?.text || '????'}`;
           }
         } else if (qzoneDraftMode === 'generic_autodraft') {
-          const draftedContent = normalizeGeneratedQzoneContent(
-            await askAIDispatch(
-              buildQzoneAutodraftPrompt(cleanText),
-              userInfo,
-              senderId,
-              null,
-              imageUrl,
-              {
-                disableTools: true,
-                disableStream: true,
-                routePrompt: null,
-                routePolicyKey: 'act/qq-publish-qzone-draft',
-                routeDebugKey: 'act/qq-publish-qzone-draft',
-                topRouteType: 'direct_chat',
-                routeMeta: {
-                  ...(route.meta || {}),
-                  groupId,
-                  topRouteType: 'direct_chat',
-                  routePolicyKey: 'act/qq-publish-qzone-draft'
-                }
-              }
-            )
-          );
+          const drafted = await generateGenericQzoneDraft({
+            requestText: cleanText,
+            groupId: String(groupId || '')
+          });
+          const draftedContent = drafted.ok ? normalizeGeneratedQzoneContent(drafted.content) : '';
 
           if (!draftedContent) {
             reply = '????????????????????????????????????';
           } else {
             const publishResult = await publishQzoneForContext(draftedContent, {
               userId: String(senderId || ''),
+              qzoneSource: 'generic_autodraft',
+              qzoneType: 'generic_autodraft',
+              lens: drafted?.meta?.lens,
+              emotion: drafted?.meta?.emotion,
+              anchor: drafted?.meta?.anchor,
+              structure: drafted?.meta?.structure,
+              ending: drafted?.meta?.ending,
               routeMeta: {
                 ...(route.meta || {}),
                 userId: String(senderId || ''),
@@ -2708,6 +2754,7 @@ function createMessageHandler({
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
     generateBotDiaryDraft,
+    generateGenericQzoneDraft,
     normalizeGeneratedQzoneContent,
     publishQzoneForContext,
     backgroundTaskRuntime,
@@ -2813,7 +2860,8 @@ function createMessageHandler({
     replyText,
     atSender = true,
     retries = 2,
-    waitMs = 500
+    waitMs = 500,
+    telemetry = null
   }) {
     return sendReply({
       chatType,
@@ -2823,7 +2871,8 @@ function createMessageHandler({
       replyText,
       atSender,
       retries,
-      waitMs
+      waitMs,
+      telemetry
     });
   };
   // source-compat anchor: return replyRuntime.sendGroupReply({
@@ -3408,7 +3457,15 @@ function createMessageHandler({
         replyText: replyEnvelope?.replyText || reply,
         atSender: !isPrivateChatType(chatType) && replyEnvelope?.atSender !== false,
         retries: 2,
-        waitMs: 500
+        waitMs: 500,
+        telemetry: buildReplyTelemetry({
+          senderId,
+          groupId: isPrivateChatType(chatType) ? '' : groupId,
+          chatType,
+          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+          topRouteType: routeExecutionPlan.topRouteType,
+          routeMeta: route.meta || {}
+        })
       });
       if (sent) {
         markDirectSessionPresenceReplied({ groupId, senderId });

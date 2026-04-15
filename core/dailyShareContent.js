@@ -1,6 +1,12 @@
 const config = require('../config');
 const { getRecentMessages, getGroupPresence } = require('../utils/groupAwarenessState');
 const { getDailyJournalRetrievalBundle } = require('../utils/dailyJournal');
+const {
+  buildVariationConstraintPrompt,
+  buildVariationProfilePrompt,
+  chooseQzoneTopic,
+  getRecentQzoneHistory
+} = require('./qzoneGenerationState');
 
 const KNOWLEDGE_LIBRARY = Object.freeze([
   { key: 'animal-behavior', label: '动物行为' },
@@ -450,18 +456,29 @@ function buildQzonePromptHeader({ type, windowKey, windowLabel, styleTag }) {
   ].join('\n');
 }
 
-function buildQzoneContextBlock({ stateEntry, windowKey }) {
+function buildQzoneContextBlock({ stateEntry, windowKey, topic }) {
   const recentShares = summarizeRecentShares(stateEntry);
   return [
     `【当前时段】${windowKey}`,
-    recentShares ? `【最近发过的说说】\n${recentShares}` : '【最近发过的说说】暂无'
+    recentShares ? `【最近发过的说说】\n${recentShares}` : '【最近发过的说说】暂无',
+    topic?.label
+      ? `【弱素材方向】${topic.label}${topic.hint ? `\n${topic.hint}` : ''}`
+      : '【弱素材方向】暂无，优先从我当下状态和眼前小事切入。'
   ].join('\n\n');
+}
+
+function buildQzonePromptShell(input, taskBlock) {
+  return [
+    buildQzonePromptHeader(input),
+    buildVariationProfilePrompt(input.variationProfile || {}),
+    buildVariationConstraintPrompt({ recentHistory: input.recentQzoneHistory || [] }),
+    buildQzoneContextBlock(input),
+    taskBlock
+  ].filter(Boolean).join('\n\n');
 }
 
 function buildQzoneGreetingPrompt(input) {
   return [
-    buildQzonePromptHeader(input),
-    buildQzoneContextBlock(input),
     [
       '任务: 写一条早晨状态说说。',
       '要求:',
@@ -472,10 +489,12 @@ function buildQzoneGreetingPrompt(input) {
   ].join('\n\n');
 }
 
+function buildQzoneGreetingPromptWithVariation(input) {
+  return buildQzonePromptShell(input, buildQzoneGreetingPrompt(input));
+}
+
 function buildQzoneMoodPrompt(input) {
   return [
-    buildQzonePromptHeader(input),
-    buildQzoneContextBlock(input),
     [
       '任务: 写一条午后或深夜的状态说说。',
       '要求:',
@@ -486,10 +505,12 @@ function buildQzoneMoodPrompt(input) {
   ].join('\n\n');
 }
 
+function buildQzoneMoodPromptWithVariation(input) {
+  return buildQzonePromptShell(input, buildQzoneMoodPrompt(input));
+}
+
 function buildQzoneRecommendationPrompt(input) {
   return [
-    buildQzonePromptHeader(input),
-    buildQzoneContextBlock(input),
     `【推荐方向】${input.topic?.label || ''}`,
     [
       '任务: 写一条第一人称顺手安利说说。',
@@ -501,11 +522,24 @@ function buildQzoneRecommendationPrompt(input) {
   ].join('\n\n');
 }
 
+function buildQzoneRecommendationPromptWithVariation(input) {
+  return buildQzonePromptShell(input, buildQzoneRecommendationPrompt(input));
+}
+
 function createDailyShareContent({ knowledgeProvider = {} } = {}) {
   return {
     async build({ type, groupId, windowKey, windowLabel, stateEntry, targetConfig, today, now = Date.now(), surface = 'group' }) {
       const normalizedSurface = String(surface || 'group').trim().toLowerCase() || 'group';
       const styleTag = normalizedSurface === 'qzone' ? 'casual' : getDailyShareStyleTag(groupId, now);
+      const recentQzoneHistory = normalizedSurface === 'qzone' ? getRecentQzoneHistory() : [];
+      const qzoneTopicSelection = normalizedSurface === 'qzone'
+        ? chooseQzoneTopic({
+          now,
+          recentHistory: recentQzoneHistory,
+          surface: normalizedSurface,
+          seed: `${today}:${windowKey}:${type}`
+        })
+        : null;
       const base = {
         type,
         groupId,
@@ -515,26 +549,53 @@ function createDailyShareContent({ knowledgeProvider = {} } = {}) {
         targetConfig,
         today,
         styleTag,
-        surface: normalizedSurface
+        surface: normalizedSurface,
+        topic: qzoneTopicSelection?.topic || null,
+        topicGroup: qzoneTopicSelection?.topicGroup || '',
+        recentQzoneHistory
       };
 
       if (type === 'greeting') {
         return {
-          prompt: normalizedSurface === 'qzone' ? buildQzoneGreetingPrompt(base) : buildGreetingPrompt(base),
-          topicKey: `${today}:${windowKey}:greeting`,
-          contentKey: `${today}:${windowKey}:greeting`,
+          prompt: normalizedSurface === 'qzone' ? '' : buildGreetingPrompt(base),
+          buildPrompt: normalizedSurface === 'qzone'
+            ? (options = {}) => buildQzoneGreetingPromptWithVariation({
+              ...base,
+              variationProfile: options.variationProfile || {},
+              recentQzoneHistory: options.recentHistory || recentQzoneHistory
+            })
+            : null,
+          topicKey: normalizedSurface === 'qzone'
+            ? (qzoneTopicSelection?.topic?.key || `${today}:${windowKey}:greeting`)
+            : `${today}:${windowKey}:greeting`,
+          topicGroup: normalizedSurface === 'qzone' ? (qzoneTopicSelection?.topicGroup || '') : '',
+          contentKey: normalizedSurface === 'qzone'
+            ? `${today}:${windowKey}:greeting:${qzoneTopicSelection?.topic?.key || 'state'}`
+            : `${today}:${windowKey}:greeting`,
           styleTag,
-          topicLabel: ''
+          topicLabel: qzoneTopicSelection?.topic?.label || ''
         };
       }
 
       if (type === 'mood') {
         return {
-          prompt: normalizedSurface === 'qzone' ? buildQzoneMoodPrompt(base) : buildMoodPrompt(base),
-          topicKey: `${today}:${windowKey}:mood`,
-          contentKey: `${today}:${windowKey}:mood`,
+          prompt: normalizedSurface === 'qzone' ? '' : buildMoodPrompt(base),
+          buildPrompt: normalizedSurface === 'qzone'
+            ? (options = {}) => buildQzoneMoodPromptWithVariation({
+              ...base,
+              variationProfile: options.variationProfile || {},
+              recentQzoneHistory: options.recentHistory || recentQzoneHistory
+            })
+            : null,
+          topicKey: normalizedSurface === 'qzone'
+            ? (qzoneTopicSelection?.topic?.key || `${today}:${windowKey}:mood`)
+            : `${today}:${windowKey}:mood`,
+          topicGroup: normalizedSurface === 'qzone' ? (qzoneTopicSelection?.topicGroup || '') : '',
+          contentKey: normalizedSurface === 'qzone'
+            ? `${today}:${windowKey}:mood:${qzoneTopicSelection?.topic?.key || 'state'}`
+            : `${today}:${windowKey}:mood`,
           styleTag,
-          topicLabel: ''
+          topicLabel: qzoneTopicSelection?.topic?.label || ''
         };
       }
 
@@ -572,15 +633,33 @@ function createDailyShareContent({ knowledgeProvider = {} } = {}) {
         const baike = normalizedSurface !== 'qzone' && selection.topic && typeof knowledgeProvider?.fetchBaike === 'function'
           ? await knowledgeProvider.fetchBaike({ keyword: selection.topic.label })
           : null;
+        const qzoneSelection = normalizedSurface === 'qzone' ? qzoneTopicSelection : null;
         return {
           prompt: normalizedSurface === 'qzone'
-            ? buildQzoneRecommendationPrompt({ ...base, topic: selection.topic })
+            ? ''
             : buildRecommendationPrompt({ ...base, topic: selection.topic, baike }),
-          topicKey: selection.topic?.key || '',
-          contentKey: `${today}:${windowKey}:recommendation:${selection.topic?.key || ''}`,
+          buildPrompt: normalizedSurface === 'qzone'
+            ? (options = {}) => buildQzoneRecommendationPromptWithVariation({
+              ...base,
+              topic: qzoneSelection?.topic || null,
+              variationProfile: options.variationProfile || {},
+              recentQzoneHistory: options.recentHistory || recentQzoneHistory
+            })
+            : null,
+          topicKey: normalizedSurface === 'qzone'
+            ? (qzoneSelection?.topic?.key || '')
+            : (selection.topic?.key || ''),
+          topicGroup: normalizedSurface === 'qzone' ? (qzoneSelection?.topicGroup || '') : '',
+          contentKey: normalizedSurface === 'qzone'
+            ? `${today}:${windowKey}:recommendation:${qzoneSelection?.topic?.key || ''}`
+            : `${today}:${windowKey}:recommendation:${selection.topic?.key || ''}`,
           styleTag,
-          topicLabel: selection.topic?.label || '',
-          topicRelaxed: selection.relaxed
+          topicLabel: normalizedSurface === 'qzone'
+            ? (qzoneSelection?.topic?.label || '')
+            : (selection.topic?.label || ''),
+          topicRelaxed: normalizedSurface === 'qzone'
+            ? Boolean(qzoneSelection?.relaxed)
+            : selection.relaxed
         };
       }
 

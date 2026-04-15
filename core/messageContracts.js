@@ -62,7 +62,9 @@ function buildReplyEnvelope(input = {}) {
     allowStream: Boolean(source.allowStream),
     atSender: source.atSender !== false,
     backgroundTaskState: source.backgroundTaskState || null,
-    postActions: Array.isArray(source.postActions) ? [...source.postActions] : []
+    postActions: Array.isArray(source.postActions) ? [...source.postActions] : [],
+    usedStreamingSend: Boolean(source.usedStreamingSend),
+    replyOptions: source.replyOptions || null
   };
 }
 
