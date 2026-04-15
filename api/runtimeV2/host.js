@@ -2425,7 +2425,8 @@ function createRuntime(options = {}) {
   });
   graph.addConditionalEdges('direct_reply', routeAfterDirectReplyImpl, {
     planner: 'planner',
-    persist: 'persist'
+    persist: 'persist',
+    __end__: END
   });
   graph.addEdge('planner', 'dispatch');
   graph.addEdge('dispatch', 'validate');
@@ -2463,12 +2464,28 @@ function createRuntime(options = {}) {
     return finalReply || 'The network was unstable just now. Please try again.';
   }
 
+  async function runPersistInBackgroundFromCheckpoint(threadId = '') {
+    const normalizedThreadId = String(threadId || '').trim();
+    if (!normalizedThreadId) return null;
+    const checkpoint = store.loadCheckpoint(normalizedThreadId);
+    const state = checkpoint?.state && typeof checkpoint.state === 'object' ? checkpoint.state : null;
+    if (!state) return null;
+    return persistNode({
+      ...state,
+      request: {
+        ...(state.request || {}),
+        deferPersist: false
+      }
+    });
+  }
+
   return {
     app,
     askAIByGraphV2,
     createInitialState,
     routeMode: routeAfterRoute,
-    store
+    store,
+    runPersistInBackgroundFromCheckpoint
   };
 }
 

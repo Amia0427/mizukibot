@@ -1,5 +1,6 @@
 function createRouteAfterDirectReply() {
   return function routeAfterDirectReply(state) {
+    if (state?.request?.deferPersist === true) return '__end__';
     return String(state.execution?.mode || '').trim() === 'tool_plan' ? 'planner' : 'persist';
   };
 }

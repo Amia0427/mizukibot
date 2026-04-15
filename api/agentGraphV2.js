@@ -21,9 +21,14 @@ function getRuntime() {
   return getHost().getRuntime();
 }
 
+async function runPersistInBackgroundFromCheckpoint(threadId = '') {
+  return getHost().getRuntime().runPersistInBackgroundFromCheckpoint(threadId);
+}
+
 module.exports = {
   askAIByGraphV2,
   createRuntime,
   createInitialState,
-  getRuntime
+  getRuntime,
+  runPersistInBackgroundFromCheckpoint
 };
