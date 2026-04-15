@@ -914,6 +914,7 @@ module.exports = {
   SOCIAL_CONTEXT_STORE_FILE: pick('SOCIAL_CONTEXT_STORE_FILE', path.join(DATA_DIR, 'social_context.json')),
   DAILY_SHARE_TARGETS_FILE: path.join(DATA_DIR, 'daily_share_targets.json'),
   DAILY_SHARE_STATE_FILE: path.join(DATA_DIR, 'daily_share_state.json'),
+  DAILY_SHARE_EVENT_LOG_FILE: pick('DAILY_SHARE_EVENT_LOG_FILE', path.join(DATA_DIR, 'daily_share_events.jsonl')),
   QZONE_GENERATION_HISTORY_FILE: pick('QZONE_GENERATION_HISTORY_FILE', path.join(DATA_DIR, 'qzone_generation_history.json')),
   QZONE_GENERATION_LOG_FILE: pick('QZONE_GENERATION_LOG_FILE', path.join(DATA_DIR, 'qzone_generation_log.json')),
   QZONE_VISUAL_HISTORY_FILE: pick('QZONE_VISUAL_HISTORY_FILE', path.join(DATA_DIR, 'qzone_visual_history.json')),

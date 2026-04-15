@@ -94,6 +94,19 @@ function logDailyShare({ groupId = '', windowKey = '', type = '', reason = '', s
   };
   if (source) payload.source = String(source);
   console.log(`[daily-share] ${String(event || 'event')}`, payload);
+  try {
+    const logLine = JSON.stringify({
+      ts: Date.now(),
+      day: formatDateInTz(new Date(), config.TIMEZONE),
+      event: String(event || 'event'),
+      groupId: String(groupId || ''),
+      windowKey: String(windowKey || ''),
+      type: String(type || ''),
+      reason: String(reason || ''),
+      source: String(source || '')
+    });
+    require('fs').appendFileSync(config.DAILY_SHARE_EVENT_LOG_FILE, `${logLine}\n`, 'utf-8');
+  } catch (_) {}
 }
 
 function parseTimeToMinutes(text = '', fallback = 0) {
