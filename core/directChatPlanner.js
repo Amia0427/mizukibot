@@ -24,7 +24,7 @@ const {
 
 const TOOL_BUCKETS = Object.freeze(['local_tools', 'global_tools', 'skills', 'mcp']);
 const TASK_SHAPES = Object.freeze(['fast_reply', 'tool_augmented_reply', 'background_tool_task']);
-const DEFAULT_PLANNER_MODEL = 'gpt-5.4-mini';
+const DEFAULT_PLANNER_MODEL = String(config.PLAN_MODEL || config.AI_ROUTER_MODEL || 'gpt-5.4-mini').trim() || 'gpt-5.4-mini';
 const DEFAULT_PLANNER_TEMPERATURE = 0.1;
 const DIRECT_CHAT_PLANNER_VERSION = 'direct_chat_single_authority_v1';
 const PLANNER_DECISION_VERSION = 'tool_planner_v1';

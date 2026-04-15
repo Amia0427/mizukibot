@@ -941,7 +941,8 @@ function createStreamingDispatcher({
   chatType = 'group',
   groupId,
   userId,
-  senderId
+  senderId,
+  telemetry = null
 } = {}) {
   const effectiveConfig = runtimeConfig && typeof runtimeConfig === 'object'
     ? runtimeConfig
@@ -956,9 +957,22 @@ function createStreamingDispatcher({
     sendQueue: Promise.resolve()
   };
 
+  function emitStreamingTelemetry(type = '', payload = {}) {
+    if (!telemetry || typeof telemetry.onEvent !== 'function') return;
+    try {
+      telemetry.onEvent({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        ts: Date.now(),
+        type: String(type || 'event').trim() || 'event',
+        ...payload
+      });
+    } catch (_) {}
+  }
+
   async function sendChunk(chunk) {
     const text = String(chunk || '').trim();
     if (!text) return false;
+    const chunkIndex = state.sentSegments + 1;
 
     const task = async () => {
       // Keep streamed chunk sending strictly serialized (unit-test anchor).
@@ -982,9 +996,29 @@ function createStreamingDispatcher({
               message: `${state.hasSentAny ? '' : `[CQ:at,qq=${senderId}] `}${text}`
             }
           };
+      const startedAt = Date.now();
+      emitStreamingTelemetry('reply_stream_chunk_start', {
+        node: 'reply_stream_send',
+        channel: isPrivate ? 'private' : 'group',
+        groupId: String(groupId || '').trim(),
+        userId: String(userId || '').trim(),
+        senderId: String(senderId || '').trim(),
+        chunkIndex,
+        chunkLength: text.length
+      });
       const sent = await sendWithRetry(payload, 1, 300);
 
       if (!sent) {
+        emitStreamingTelemetry('reply_stream_chunk_failure', {
+          node: 'reply_stream_send',
+          channel: isPrivate ? 'private' : 'group',
+          groupId: String(groupId || '').trim(),
+          userId: String(userId || '').trim(),
+          senderId: String(senderId || '').trim(),
+          chunkIndex,
+          chunkLength: text.length,
+          durationMs: Math.max(0, Date.now() - startedAt)
+        });
         console.error(isPrivate ? '[stream] send_private_msg failed' : '[stream] send_group_msg failed', {
           chatType: isPrivate ? 'private' : 'group',
           groupId,
@@ -994,6 +1028,16 @@ function createStreamingDispatcher({
         return false;
       }
 
+      emitStreamingTelemetry('reply_stream_chunk_success', {
+        node: 'reply_stream_send',
+        channel: isPrivate ? 'private' : 'group',
+        groupId: String(groupId || '').trim(),
+        userId: String(userId || '').trim(),
+        senderId: String(senderId || '').trim(),
+        chunkIndex,
+        chunkLength: text.length,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      });
       state.hasSentAny = true;
       state.lastSendAt = Date.now();
       return true;
@@ -1527,17 +1571,50 @@ function createMessageHandler({
     });
     if (!threadId) return;
 
+    const emitPersistBackgroundEvent = (type = '', payload = {}) => {
+      const telemetry = buildReplyTelemetry({
+        senderId: userId,
+        groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
+        chatType: String(routeMeta.chatType || '').trim(),
+        routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
+        topRouteType: String(replyOptions?.topRouteType || '').trim(),
+        routeMeta
+      });
+      if (typeof telemetry?.onEvent === 'function') {
+        telemetry.onEvent({
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          ts: Date.now(),
+          type: String(type || 'event').trim() || 'event',
+          node: 'persist_background',
+          threadId,
+          ...payload
+        });
+      }
+    };
+
     setTimeout(() => {
+      emitPersistBackgroundEvent('persist_background_start');
       console.log('[persist-background] start', {
         threadId,
         routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
         topRouteType: String(replyOptions?.topRouteType || '').trim()
       });
+      const startedAt = Date.now();
       runPersistInBackgroundFromCheckpoint(threadId).catch((error) => {
+        emitPersistBackgroundEvent('persist_background_failure', {
+          durationMs: Math.max(0, Date.now() - startedAt),
+          error: error?.message || String(error || '')
+        });
         console.error('[persist-background] failed', {
           threadId,
           error: error?.message || String(error || '')
         });
+      }).then((result) => {
+        if (result) {
+          emitPersistBackgroundEvent('persist_background_success', {
+            durationMs: Math.max(0, Date.now() - startedAt)
+          });
+        }
       });
     }, 0);
   }
@@ -1921,8 +1998,37 @@ function createMessageHandler({
   async function askAIDispatch(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
     const mutableOptions = options && typeof options === 'object' ? options : {};
     mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
+    const startedAt = Date.now();
+    if (typeof mutableOptions?.onEvent === 'function') {
+      try {
+        mutableOptions.onEvent({
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          ts: Date.now(),
+          type: 'ask_ai_dispatch_start',
+          node: 'pre_model',
+          routePolicyKey: String(mutableOptions.routePolicyKey || '').trim(),
+          topRouteType: String(mutableOptions.topRouteType || '').trim()
+        });
+      } catch (_) {}
+    }
 
-    return askAIByGraph(question, userInfo, userId, customPrompt, imageUrl, mutableOptions);
+    const reply = await askAIByGraph(question, userInfo, userId, customPrompt, imageUrl, mutableOptions);
+
+    if (typeof mutableOptions?.onEvent === 'function') {
+      try {
+        mutableOptions.onEvent({
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          ts: Date.now(),
+          type: 'ask_ai_dispatch_done',
+          node: 'pre_model',
+          routePolicyKey: String(mutableOptions.routePolicyKey || '').trim(),
+          topRouteType: String(mutableOptions.topRouteType || '').trim(),
+          durationMs: Math.max(0, Date.now() - startedAt)
+        });
+      } catch (_) {}
+    }
+
+    return reply;
   }
 
   async function markThinkingEmojiBeforeLlm({
@@ -3336,6 +3442,23 @@ function createMessageHandler({
       continuousMeta,
       directedContext
     });
+    inboundContext.onEvent = (event = {}) => {
+      const telemetry = buildReplyTelemetry({
+        senderId,
+        groupId: isPrivateChatType(chatType) ? '' : groupId,
+        chatType,
+        routePolicyKey: '',
+        topRouteType: '',
+        routeMeta: {
+          userId: String(senderId || '').trim(),
+          groupId: isPrivateChatType(chatType) ? '' : String(groupId || '').trim(),
+          chatType
+        }
+      });
+      if (typeof telemetry?.onEvent === 'function') {
+        telemetry.onEvent(event);
+      }
+    };
     inboundContext.effectiveIntentText = effectiveIntentText;
     inboundContext.quotePriority = directedContext?.quotePriority || null;
     if (!isPrivateChatType(chatType) && !directBotAnchor) {
@@ -3570,14 +3693,27 @@ function createMessageHandler({
     const imageUrl = route.imageUrl || effectiveVisualInput;
     route.imageUrl = imageUrl;
     const inboundTimestamp = Date.now();
+    const correctionStartedAt = Date.now();
     maybeCaptureUserCorrection({
       cleanText,
       senderId,
       groupId,
       routeExecutionPlan
     });
+    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      stage: 'capture_correction_done',
+      messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+      groupId: String(groupId || '').trim(),
+      userId: String(senderId || '').trim(),
+      chatType,
+      durationMs: Math.max(0, Date.now() - correctionStartedAt),
+      rawMessageTimestampMs,
+      elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+      lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+    });
 
     if (!isPrivateChatType(chatType)) {
+      const groupSideEffectsStartedAt = Date.now();
       sideEffects.recordInboundHumanMessage({
         groupId,
         senderId,
@@ -3589,10 +3725,43 @@ function createMessageHandler({
         replyToSenderId: String(directedContext?.quote?.senderId || '').trim(),
         replyToSenderName: String(directedContext?.quote?.senderName || '').trim()
       });
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'group_side_effects_done',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        durationMs: Math.max(0, Date.now() - groupSideEffectsStartedAt),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+      });
     }
 
+    const userPresenceStartedAt = Date.now();
     const userInfo = sideEffects.updateUserPresence(senderId, cleanText, isPrivateChatType(chatType) ? '' : groupId);
+    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      stage: 'user_presence_done',
+      messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+      groupId: String(groupId || '').trim(),
+      userId: String(senderId || '').trim(),
+      chatType,
+      durationMs: Math.max(0, Date.now() - userPresenceStartedAt),
+      rawMessageTimestampMs,
+      elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+      lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+    });
 
+    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      stage: 'formal_route_dispatch_start',
+      messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+      groupId: String(groupId || '').trim(),
+      userId: String(senderId || '').trim(),
+      chatType,
+      rawMessageTimestampMs,
+      elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+      lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+    });
     const replyEnvelope = await routeFlow.dispatchFormalRoute({
       route,
       executionPlan: routeExecutionPlan,

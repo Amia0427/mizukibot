@@ -3,16 +3,28 @@ const { getGroupPresence, getRecentMessages } = require('../utils/groupAwareness
 const { getDatePartsInTz } = require('../utils/time');
 const {
   MAX_RETRIES,
-  buildVariationConstraintPrompt,
-  buildVariationProfilePrompt,
   describeGenericAutodraftRandomness,
-  evaluateQzoneGenerationCandidate,
   getModelConfigForQzoneAttempt,
-  getRecentQzoneHistory,
-  normalizeDailyShareFingerprint,
   recordQzoneGenerationHistory,
+  normalizeDailyShareFingerprint,
   sampleVariationProfile
 } = require('../core/qzoneGenerationState');
+const {
+  CANDIDATE_COUNT,
+  PLAN_RETRY_LIMIT,
+  appendQzoneGenerationLog,
+  buildCandidatePrompt,
+  buildPlanPrompt,
+  buildQzonePlan,
+  buildVisualPromptHints,
+  evaluateImageConsistency,
+  finalizeSuccessfulQzoneRecord,
+  getRecentFailureLikeEntries,
+  normalizeTelemetryPayload,
+  pickBestCandidate,
+  summarizeQzoneDebug,
+  summarizeQzoneWindowStats
+} = require('../core/qzoneGenerationPhase2');
 
 const INTERNAL_LEAK_TERMS = [
   'ai',
@@ -42,6 +54,18 @@ const BOT_DIARY_MEMORY_OPEN_PRIORITY = [
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function uniqueBy(list = [], selector = (item) => item) {
+  const seen = new Set();
+  const out = [];
+  for (const item of Array.isArray(list) ? list : []) {
+    const key = String(selector(item) || '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
 }
 
 function safeJsonParse(text = '') {
@@ -611,6 +635,43 @@ function buildBotDiaryPrompt({ hint = '', signals = {}, strict = false, memoryEv
   return promptLines.join('\n');
 }
 
+function buildBotDiaryPromptFromPlan({ hint = '', signals = {}, strict = false, memoryEvidence = {}, plan = {}, recentHistory = [] } = {}) {
+  const compactPersona = buildCompactPersonaPrompt(1200);
+  const weakHint = normalizeText(hint);
+  const promptLines = [
+    '你现在只负责写一条可以直接发布到 QQ 空间的中文日记正文。',
+    '这不是代写用户日记，而是 bot 自己的日记。',
+    '必须使用第一人称“我”。',
+    '长度固定在 80 到 180 字之间，2 到 5 句自然短句。',
+    '内容重心必须放在我自己的感受、观察、别扭、轻微阴阳怪气和嘴硬式关怀。',
+    '允许轻轻提到群里的人或群聊氛围，但只能泛化提及，不得出现可识别的个人信息。',
+    '对他人的提及最多 1 到 2 个短分句，总占比不要超过约 30%。',
+    '不要写标题、标签、项目符号、引号、括号说明，也不要解释规则。',
+    '绝对禁止出现昵称、@、QQ号、手机号、链接、精确时间点、可回溯事件细节、用户原话或近似转述。'
+  ];
+  if (strict) {
+    promptLines.push('这次必须更保守：宁可更抽象、更像自言自语，也不要出现任何可识别对象或具体事件。');
+  }
+  promptLines.push('');
+  promptLines.push('[主人格摘要]');
+  promptLines.push(compactPersona || '自然、别扭、会关心人，但不直白邀功。');
+  promptLines.push('');
+  promptLines.push(buildPlanPrompt(plan, { type: 'bot_diary' }));
+  promptLines.push('');
+  promptLines.push('[当前群抽象信号]');
+  promptLines.push(...(Array.isArray(signals.summaryLines) ? signals.summaryLines : ['当前群信号不足，改写成偏自言自语的状态。']));
+  promptLines.push('');
+  promptLines.push('[管理员弱提示]');
+  promptLines.push(weakHint ? `${weakHint}（只可作为很弱的方向提示，不能把管理员写成叙事主角）` : '无。素材不足时改写成时间段驱动的自述。');
+  promptLines.push('');
+  promptLines.push(...buildMemoryEvidenceLines(memoryEvidence));
+  promptLines.push('');
+  promptLines.push(`最近失败原因: ${(Array.isArray(recentHistory) ? recentHistory : []).map((item) => item.reason).filter(Boolean).slice(-3).join(' / ') || '无'}`);
+  promptLines.push('');
+  promptLines.push('只输出最终正文。');
+  return promptLines.join('\n');
+}
+
 function splitSentenceLike(text = '') {
   return normalizeText(text)
     .split(/[。！？!?]/)
@@ -698,7 +759,8 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
 
   const hint = normalizeText(input.hint);
   const memoryUserId = normalizeText(options.memoryUserId || config.BOT_QQ);
-  const recentHistory = getRecentQzoneHistory();
+  const recentSuccessHistory = require('../core/qzoneGenerationState').getRecentQzoneHistory();
+  const recentFailureHistory = getRecentFailureLikeEntries();
   const signals = extractDiarySignals(groupId, {
     recentMessages: options.recentMessages,
     presence: options.presence,
@@ -712,11 +774,19 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
     signals
   }, options);
 
-  const memoryPrefetch = await runBotDiaryMemoryPrefetch({
-    groupId,
-    query: plannedQuery.query,
-    memoryUserId
-  }, options);
+  const memoryPrefetch = await (
+    typeof options.runBotDiaryMemoryPrefetch === 'function'
+      ? options.runBotDiaryMemoryPrefetch({
+        groupId,
+        query: plannedQuery.query,
+        memoryUserId
+      }, options)
+      : runBotDiaryMemoryPrefetch({
+        groupId,
+        query: plannedQuery.query,
+        memoryUserId
+      }, options)
+  );
 
   const baseMeta = buildBotDiaryMeta(signals, {
     memoryOwner: memoryPrefetch.memoryOwner || memoryUserId,
@@ -739,75 +809,168 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
     };
   }
 
-  const attempts = [
-    { strict: false, label: 'first_pass' },
-    { strict: true, label: 'strict_retry' }
-  ];
-
-  for (let index = 0; index < Math.max(attempts.length, MAX_RETRIES); index += 1) {
-    const attempt = attempts[index] || { strict: true, label: `retry_${index + 1}` };
-    const variationProfile = sampleVariationProfile({
+  let finalFailure = '日记草稿未通过安全过滤';
+  for (let planAttempt = 0; planAttempt < PLAN_RETRY_LIMIT; planAttempt += 1) {
+    const plan = buildQzonePlan({
       source: 'bot_diary',
       type: 'bot_diary',
       windowKey: signals.timeBucket || '',
       groupId,
       today: `${signals.weekday || ''}:${signals.timeBucket || ''}`,
-      attempt: index,
+      planAttempt,
       now: Date.now(),
-      recentHistory
+      recentHistory: recentSuccessHistory,
+      recentFailures: recentFailureHistory,
+      allowImage: true,
+      targetLength: '80-180'
     });
-    const prompt = buildBotDiaryPrompt({
-      hint,
-      signals,
-      strict: attempt.strict,
-      memoryEvidence: memoryPrefetch,
-      variationProfile,
-      recentHistory
+    const candidates = [];
+    for (let candidateIndex = 0; candidateIndex < Math.max(1, CANDIDATE_COUNT); candidateIndex += 1) {
+      const strict = candidateIndex > 0;
+      const prompt = buildCandidatePrompt(
+        buildBotDiaryPromptFromPlan({
+          hint,
+          signals,
+          strict,
+          memoryEvidence: memoryPrefetch,
+          plan,
+          recentHistory: recentFailureHistory
+        }),
+        plan,
+        candidateIndex > 0 ? `这是第 ${candidateIndex + 1} 个候选，请显著拉开与前一个版本的开头、节奏和落点。` : ''
+      );
+      const modelConfig = getModelConfigForQzoneAttempt(candidateIndex > 0 ? 'similarity' : '');
+      const content = await runDiaryDraftGeneration(prompt, {
+        ...options,
+        modelConfig
+      });
+      const issues = findDiarySafetyIssues(content, signals);
+      candidates.push({
+        plan,
+        text: content,
+        rejected: issues.length > 0,
+        rejectionReason: issues.join(','),
+        meta: {
+          lens: plan.variationProfile?.lens || '',
+          emotion: plan.variationProfile?.emotion || '',
+          anchor: plan.variationProfile?.anchor || '',
+          structure: plan.variationProfile?.structure || '',
+          ending: plan.variationProfile?.ending || '',
+          arc: plan.variationProfile?.arc || '',
+          tempo: plan.variationProfile?.tempo || '',
+          distance: plan.variationProfile?.distance || '',
+          topicKey: plan.theme?.key || '',
+          topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : ''
+        }
+      });
+    }
+
+    const picked = pickBestCandidate(candidates, {
+      source: 'bot_diary',
+      recentHistory: recentSuccessHistory,
+      plan
     });
-    const modelConfig = getModelConfigForQzoneAttempt(index > 0 ? 'similarity' : '');
-    const content = await runDiaryDraftGeneration(prompt, {
-      ...options,
-      modelConfig
-    });
-    const issues = findDiarySafetyIssues(content, signals);
-    const similarityCheck = !issues.length
-      ? evaluateQzoneGenerationCandidate(content, {
-        fingerprint: normalizeDailyShareFingerprint(content),
-        recentHistory,
-        variationProfile
-      })
-      : { ok: false, reason: issues.join(','), similarity: 0 };
-    const meta = {
-      ...baseMeta,
-      charCount: Array.from(content).length,
-      filterResult: issues.length
-        ? 'blocked'
-        : (!similarityCheck.ok ? 'similarity_retry' : (attempt.strict ? 'retry_pass' : 'pass')),
-      topicKey: '',
-      topicGroup: '',
-      lens: variationProfile.lens || '',
-      emotion: variationProfile.emotion || '',
-      anchor: variationProfile.anchor || '',
-      structure: variationProfile.structure || '',
-      ending: variationProfile.ending || ''
-    };
-    if (!issues.length && similarityCheck.ok) {
+    const selected = picked.selected;
+    if (selected) {
+      const imageConsistency = evaluateImageConsistency({
+        text: selected.text,
+        plan
+      });
+      const meta = {
+        ...baseMeta,
+        charCount: Array.from(selected.text).length,
+        filterResult: 'pass',
+        topicKey: plan.theme?.key || '',
+        topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : '',
+        lens: plan.variationProfile?.lens || '',
+        emotion: plan.variationProfile?.emotion || '',
+        anchor: plan.variationProfile?.anchor || '',
+        structure: plan.variationProfile?.structure || '',
+        ending: plan.variationProfile?.ending || '',
+        arc: plan.variationProfile?.arc || '',
+        tempo: plan.variationProfile?.tempo || '',
+        distance: plan.variationProfile?.distance || '',
+        imageIntent: plan.imageIntent || null,
+        imagePromptHints: buildVisualPromptHints(plan),
+        imageConsistencyScore: imageConsistency.score,
+        imageShouldDegrade: !imageConsistency.consistent,
+        imageDuplicateRisk: imageConsistency.duplicate,
+        planFingerprint: plan.fingerprint
+      };
+      appendQzoneGenerationLog(normalizeTelemetryPayload({
+        source: 'bot_diary',
+        type: 'bot_diary',
+        groupId,
+        status: 'sent',
+        selectedFingerprint: selected.fingerprint,
+        selectedScore: selected.score,
+        similarity: selected.similarity,
+        imageConsistencyScore: imageConsistency.score,
+        failureReasons: [],
+        planSummary: {
+          fingerprint: plan.fingerprint,
+          topicKey: plan.theme?.key || '',
+          topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : '',
+          lens: plan.variationProfile?.lens || '',
+          anchor: plan.variationProfile?.anchor || '',
+          structure: plan.variationProfile?.structure || '',
+          arc: plan.variationProfile?.arc || '',
+          tempo: plan.variationProfile?.tempo || '',
+          distance: plan.variationProfile?.distance || ''
+        },
+        candidates: picked.ranked.map((item) => ({
+          fingerprint: item.fingerprint,
+          score: item.score,
+          similarity: item.similarity,
+          rejected: item.rejected,
+          rejectionReason: item.rejectionReason
+        }))
+      }));
       console.log('[qzone-diary] generated', JSON.stringify(meta));
       return {
         ok: true,
-        content,
+        content: selected.text,
         meta
       };
     }
-    console.warn('[qzone-diary] blocked', JSON.stringify({
-      ...meta,
-      failureReason: issues.length ? issues.join(',') : similarityCheck.reason
+
+    finalFailure = picked.ranked[0]?.rejectionReason || 'plan-candidate-rejected';
+    appendQzoneGenerationLog(normalizeTelemetryPayload({
+      source: 'bot_diary',
+      type: 'bot_diary',
+      groupId,
+      status: 'failed',
+      selectedFingerprint: '',
+      selectedScore: 0,
+      similarity: 0,
+      failureReasons: uniqueBy(
+        picked.ranked.map((item) => item.rejectionReason).filter(Boolean),
+        (item) => item
+      ),
+      planSummary: {
+        fingerprint: plan.fingerprint,
+        topicKey: plan.theme?.key || '',
+        topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : '',
+        lens: plan.variationProfile?.lens || '',
+        anchor: plan.variationProfile?.anchor || '',
+        structure: plan.variationProfile?.structure || '',
+        arc: plan.variationProfile?.arc || '',
+        tempo: plan.variationProfile?.tempo || '',
+        distance: plan.variationProfile?.distance || ''
+      },
+      candidates: picked.ranked.map((item) => ({
+        fingerprint: item.fingerprint,
+        score: item.score,
+        similarity: item.similarity,
+        rejected: item.rejected,
+        rejectionReason: item.rejectionReason
+      }))
     }));
   }
 
   return {
     ok: false,
-    reason: '日记草稿未通过安全过滤',
+    reason: finalFailure || '日记草稿未通过安全过滤',
     meta: {
       ...baseMeta,
       filterResult: 'blocked'
@@ -818,6 +981,17 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
 function buildGenericAutodraftPrompt(requestText = '', options = {}) {
   const profile = options.variationProfile || {};
   const recentHistory = Array.isArray(options.recentHistory) ? options.recentHistory : [];
+  const plan = options.plan || {
+    type: 'generic_autodraft',
+    variationProfile: profile,
+    fingerprint: '',
+    sceneAnchors: [],
+    emotionalArc: '',
+    targetLength: '80-180',
+    theme: null,
+    microTheme: null,
+    bannedRepeats: { openings: [], planFingerprints: [] }
+  };
   const randomness = describeGenericAutodraftRandomness(requestText);
   return [
     '你现在只负责代写一条可以直接发布到 QQ 空间的中文正文。',
@@ -829,8 +1003,8 @@ function buildGenericAutodraftPrompt(requestText = '', options = {}) {
     randomness.useFullVariation
       ? '用户没有明确锁死主题/长度/口吻时，你要主动换写法，不要套固定句式。'
       : '如果用户已经明确指定主题、长度或口吻，只在未指定维度上保留变化。',
-    buildVariationProfilePrompt(profile),
-    buildVariationConstraintPrompt({ recentHistory }),
+    buildPlanPrompt(plan, { type: 'generic_autodraft' }),
+    `最近失败原因: ${recentHistory.map((item) => item.reason).filter(Boolean).slice(-3).join(' / ') || '无'}`,
     '只输出最终可发布正文。',
     `用户请求: ${String(requestText || '').trim()}`
   ].filter(Boolean).join('\n');
@@ -838,63 +1012,146 @@ function buildGenericAutodraftPrompt(requestText = '', options = {}) {
 
 async function generateGenericQzoneDraft(input = {}, options = {}) {
   const requestText = normalizeText(input.requestText || input.hint || '');
-  const recentHistory = getRecentQzoneHistory();
-  let lastFailure = '';
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
-    const variationProfile = sampleVariationProfile({
+  const recentHistory = require('../core/qzoneGenerationState').getRecentQzoneHistory();
+  const recentFailures = getRecentFailureLikeEntries();
+  let finalFailure = '';
+  for (let planAttempt = 0; planAttempt < PLAN_RETRY_LIMIT; planAttempt += 1) {
+    const plan = buildQzonePlan({
       source: 'generic_autodraft',
       type: 'generic_autodraft',
       windowKey: '',
       groupId: normalizeText(input.groupId),
       today: '',
-      attempt,
+      planAttempt,
       now: Date.now(),
-      recentHistory
-    });
-    const prompt = [
-      buildGenericAutodraftPrompt(requestText, { variationProfile, recentHistory }),
-      attempt > 0 ? `上一次结果不合格，失败原因：${lastFailure || 'unknown'}。这次必须换开头、意象或句式。` : ''
-    ].filter(Boolean).join('\n\n');
-    const response = await runDiaryDraftGeneration(prompt, {
-      ...options,
-      modelConfig: getModelConfigForQzoneAttempt(attempt > 0 ? 'similarity' : '')
-    });
-    const normalized = normalizeGeneratedQzoneContent(response);
-    const fingerprint = normalizeDailyShareFingerprint(normalized);
-    const similarityCheck = evaluateQzoneGenerationCandidate(normalized, {
-      fingerprint,
       recentHistory,
-      variationProfile
+      recentFailures,
+      allowImage: false,
+      targetLength: '80-180'
     });
-    if (!normalized) {
-      lastFailure = 'empty-output';
-      continue;
+    const candidates = [];
+    for (let candidateIndex = 0; candidateIndex < Math.max(1, CANDIDATE_COUNT); candidateIndex += 1) {
+      const prompt = buildCandidatePrompt(
+        buildGenericAutodraftPrompt(requestText, {
+          variationProfile: plan.variationProfile || {},
+          recentHistory: recentFailures,
+          plan
+        }),
+        plan,
+        candidateIndex > 0 ? `这是第 ${candidateIndex + 1} 个候选，请更换叙事节奏和切入角度。` : ''
+      );
+      const response = await runDiaryDraftGeneration(prompt, {
+        ...options,
+        modelConfig: getModelConfigForQzoneAttempt(candidateIndex > 0 ? 'similarity' : '')
+      });
+      const normalized = normalizeGeneratedQzoneContent(response);
+      const firstPerson = /我/.test(normalized);
+      candidates.push({
+        plan,
+        text: normalized,
+        rejected: !normalized || !firstPerson,
+        rejectionReason: !normalized ? 'empty-output' : (!firstPerson ? 'not_first_person' : ''),
+        meta: {
+          mode: 'generic_autodraft',
+          lens: plan.variationProfile?.lens || '',
+          emotion: plan.variationProfile?.emotion || '',
+          anchor: plan.variationProfile?.anchor || '',
+          structure: plan.variationProfile?.structure || '',
+          ending: plan.variationProfile?.ending || '',
+          arc: plan.variationProfile?.arc || '',
+          tempo: plan.variationProfile?.tempo || '',
+          distance: plan.variationProfile?.distance || ''
+        }
+      });
     }
-    if (!/我/.test(normalized)) {
-      lastFailure = 'not_first_person';
-      continue;
+    const picked = pickBestCandidate(candidates, {
+      source: 'generic_autodraft',
+      recentHistory,
+      plan
+    });
+    const selected = picked.selected;
+    if (selected) {
+      appendQzoneGenerationLog(normalizeTelemetryPayload({
+        source: 'generic_autodraft',
+        type: 'generic_autodraft',
+        groupId: normalizeText(input.groupId),
+        status: 'sent',
+        selectedFingerprint: selected.fingerprint,
+        selectedScore: selected.score,
+        similarity: selected.similarity,
+        failureReasons: [],
+        planSummary: {
+          fingerprint: plan.fingerprint,
+          topicKey: plan.theme?.key || '',
+          topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : '',
+          lens: plan.variationProfile?.lens || '',
+          anchor: plan.variationProfile?.anchor || '',
+          structure: plan.variationProfile?.structure || '',
+          arc: plan.variationProfile?.arc || '',
+          tempo: plan.variationProfile?.tempo || '',
+          distance: plan.variationProfile?.distance || ''
+        },
+        candidates: picked.ranked.map((item) => ({
+          fingerprint: item.fingerprint,
+          score: item.score,
+          similarity: item.similarity,
+          rejected: item.rejected,
+          rejectionReason: item.rejectionReason
+        }))
+      }));
+      return {
+        ok: true,
+        content: selected.text,
+        meta: {
+          mode: 'generic_autodraft',
+          lens: plan.variationProfile?.lens || '',
+          emotion: plan.variationProfile?.emotion || '',
+          anchor: plan.variationProfile?.anchor || '',
+          structure: plan.variationProfile?.structure || '',
+          ending: plan.variationProfile?.ending || '',
+          arc: plan.variationProfile?.arc || '',
+          tempo: plan.variationProfile?.tempo || '',
+          distance: plan.variationProfile?.distance || '',
+          similarity: selected.similarity,
+          topicKey: plan.theme?.key || '',
+          topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : '',
+          planFingerprint: plan.fingerprint
+        }
+      };
     }
-    if (!similarityCheck.ok) {
-      lastFailure = similarityCheck.reason;
-      continue;
-    }
-    return {
-      ok: true,
-      content: normalized,
-      meta: {
-        mode: 'generic_autodraft',
-        lens: variationProfile.lens || '',
-        emotion: variationProfile.emotion || '',
-        anchor: variationProfile.anchor || '',
-        structure: variationProfile.structure || '',
-        ending: variationProfile.ending || '',
-        similarity: similarityCheck.similarity
-      }
-    };
+    finalFailure = picked.ranked[0]?.rejectionReason || 'generic_autodraft_rejected';
+    appendQzoneGenerationLog(normalizeTelemetryPayload({
+      source: 'generic_autodraft',
+      type: 'generic_autodraft',
+      groupId: normalizeText(input.groupId),
+      status: 'failed',
+      selectedFingerprint: '',
+      selectedScore: 0,
+      similarity: 0,
+      failureReasons: uniqueBy(picked.ranked.map((item) => item.rejectionReason).filter(Boolean), (item) => item),
+      planSummary: {
+        fingerprint: plan.fingerprint,
+        topicKey: plan.theme?.key || '',
+        topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : '',
+        lens: plan.variationProfile?.lens || '',
+        anchor: plan.variationProfile?.anchor || '',
+        structure: plan.variationProfile?.structure || '',
+        arc: plan.variationProfile?.arc || '',
+        tempo: plan.variationProfile?.tempo || '',
+        distance: plan.variationProfile?.distance || ''
+      },
+      candidates: picked.ranked.map((item) => ({
+        fingerprint: item.fingerprint,
+        score: item.score,
+        similarity: item.similarity,
+        rejected: item.rejected,
+        rejectionReason: item.rejectionReason
+      }))
+    }));
   }
   return {
     ok: false,
-    reason: lastFailure || 'generic qzone draft generation failed',
+    reason: finalFailure || 'generic qzone draft generation failed',
     meta: {
       mode: 'generic_autodraft'
     }
