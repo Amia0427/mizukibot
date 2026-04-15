@@ -5,7 +5,10 @@ const axios = require('axios');
 const config = require('../config');
 const { getNapCatActionClient } = require('./napcatActionClient');
 const { publishQzonePost, publishQzonePostWithImages } = require('./qzoneClient');
-const { generateBotDiaryDraft } = require('./qzoneDiaryService');
+const {
+  generateBotDiaryDraft,
+  recordQzoneGenerationHistory
+} = require('./qzoneDiaryService');
 const { getScheduledTaskStore } = require('../utils/scheduledTaskStore');
 const {
   describeCron,
@@ -629,6 +632,22 @@ async function publishQzoneForContext(input = '', context = {}, options = {}) {
       }
     };
   }
+  const qzoneSource = normalizeText(options.qzoneSource || normalized.mode || 'manual_qzone_post').toLowerCase() || 'manual_qzone_post';
+  recordQzoneGenerationHistory({
+    source: qzoneSource === 'manual' ? 'manual_qzone_post' : qzoneSource,
+    text: content,
+    topicKey: normalizeText(meta.topicKey || options.topicKey || ''),
+    topicGroup: normalizeText(meta.topicGroup || options.topicGroup || ''),
+    variationProfile: {
+      lens: normalizeText(meta.lens || options.lens || ''),
+      emotion: normalizeText(meta.emotion || options.emotion || ''),
+      anchor: normalizeText(meta.anchor || options.anchor || ''),
+      structure: normalizeText(meta.structure || options.structure || ''),
+      ending: normalizeText(meta.ending || options.ending || '')
+    },
+    type: normalizeText(options.qzoneType || normalized.mode || 'manual').toLowerCase(),
+    at: Date.now()
+  });
   return {
     ok: true,
     text: `success\nreason: ${publishResult.reason || 'QZone publish success'}\ngroup: ${groupId}`,

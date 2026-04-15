@@ -24,6 +24,16 @@ const {
   validateDailyShareOutput
 } = require('./dailyShareContent');
 const {
+  MAX_RETRIES,
+  buildVariationConstraintPrompt,
+  chooseQzoneTypeByWeight,
+  evaluateQzoneGenerationCandidate,
+  getModelConfigForQzoneAttempt,
+  getRecentQzoneHistory,
+  recordQzoneGenerationHistory,
+  sampleVariationProfile
+} = require('./qzoneGenerationState');
+const {
   buildDailyShareUserInfo,
   recordSystemGroupSend,
   sendGroupReply
@@ -233,6 +243,13 @@ function shouldDeferOrSkip({ groupId, targetConfig, windowDef, stateEntry, now =
 function getAutoTypeForWindow(targetConfig, stateEntry, windowKey) {
   const sequence = Array.isArray(targetConfig?.sequences?.[windowKey]) ? targetConfig.sequences[windowKey] : [];
   if (!sequence.length) return null;
+  if (String(targetConfig?.surface || '').trim().toLowerCase() === 'qzone') {
+    return chooseQzoneTypeByWeight(
+      sequence,
+      getRecentQzoneHistory(),
+      `${windowKey}:${stateEntry?.today || ''}:${Math.max(0, Number(stateEntry?.dailyCount || 0) || 0)}`
+    );
+  }
   const pointer = Math.max(0, Number(stateEntry?.sequencePointers?.[windowKey] || 0) || 0);
   return sequence[pointer % sequence.length];
 }
@@ -821,6 +838,7 @@ function createDailyShareEngine({
       }
     );
     let lastFailure = '';
+    let lastFailureClass = '';
     let qzoneMemoryEvidence = { items: [], sources: [] };
     let qzoneMemoryMeta = {
       memoryOwner: '',
@@ -851,14 +869,42 @@ function createDailyShareEngine({
       qzoneMemoryMeta = prefetched.meta || qzoneMemoryMeta;
       const memoryBlock = buildQzoneMemoryPromptBlock(qzoneMemoryEvidence);
       if (memoryBlock) {
-        payload.prompt = `${payload.prompt}\n\n${memoryBlock}`;
+        payload.prompt = payload.prompt ? `${payload.prompt}\n\n${memoryBlock}` : memoryBlock;
       }
     }
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    const recentQzoneHistory = normalizedSurface === 'qzone' ? getRecentQzoneHistory() : [];
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt += 1) {
+      const variationProfile = normalizedSurface === 'qzone'
+        ? sampleVariationProfile({
+          source: 'daily_share',
+          type,
+          windowKey,
+          groupId: targetId,
+          today: stateEntry?.today || '',
+          attempt,
+          now,
+          recentHistory: recentQzoneHistory
+        })
+        : null;
+      const promptBase = normalizedSurface === 'qzone' && typeof payload.buildPrompt === 'function'
+        ? payload.buildPrompt({
+          variationProfile,
+          recentHistory: recentQzoneHistory
+        })
+        : payload.prompt;
       const prompt = attempt === 0
-        ? payload.prompt
-        : `${payload.prompt}\n\n上一次结果不合格，失败原因：${lastFailure || 'unknown'}。这次必须避开相同问题并重新生成。`;
+        ? [promptBase, payload.prompt].filter(Boolean).join('\n\n')
+        : [
+          promptBase,
+          payload.prompt,
+          buildVariationConstraintPrompt({ recentHistory: recentQzoneHistory }),
+          `上一次结果不合格，失败原因：${lastFailure || 'unknown'}。这次必须避开相同问题并重新生成。`
+        ].filter(Boolean).join('\n\n');
+      const modelConfig = normalizedSurface === 'qzone'
+        ? getModelConfigForQzoneAttempt(lastFailureClass)
+        : null;
       const reply = await askAIByGraph(prompt, userInfo, userId, prompt, null, {
         systemInitiated: true,
         topRouteType: 'proactive',
@@ -866,6 +912,7 @@ function createDailyShareEngine({
         disableTools: true,
         disableStream: true,
         disableMemoryLearning: true,
+        modelConfig,
         routeMeta: {
           groupId: String(groupId || ''),
           taskType: 'daily_share',
@@ -879,12 +926,14 @@ function createDailyShareEngine({
       const text = trimReplyText(reply, 260);
       if (!text) {
         lastFailure = 'empty-daily-share-reply';
+        lastFailureClass = 'validation';
         continue;
       }
 
       const validation = validateDailyShareOutput(text, type, normalizedSurface);
       if (!validation.ok) {
         lastFailure = validation.reason;
+        lastFailureClass = 'validation';
         logDailyShare({
           groupId: targetId,
           windowKey,
@@ -902,6 +951,7 @@ function createDailyShareEngine({
         .filter(Boolean);
       if (fingerprint && recentFingerprints.includes(fingerprint)) {
         lastFailure = 'recent-content-duplicate';
+        lastFailureClass = 'duplicate';
         logDailyShare({
           groupId: targetId,
           windowKey,
@@ -913,9 +963,45 @@ function createDailyShareEngine({
         continue;
       }
 
+      if (normalizedSurface === 'qzone') {
+        const similarityCheck = evaluateQzoneGenerationCandidate(text, {
+          fingerprint,
+          recentHistory: recentQzoneHistory,
+          variationProfile
+        });
+        if (!similarityCheck.ok) {
+          lastFailure = similarityCheck.reason;
+          lastFailureClass = 'similarity';
+          logDailyShare({
+            groupId: targetId,
+            windowKey,
+            type,
+            reason: similarityCheck.reason,
+            source: payload.source || '',
+            event: attempt === 0 ? 'similarity retry' : 'similarity fail'
+          });
+          continue;
+        }
+        return {
+          text,
+          fingerprint: similarityCheck.fingerprint || fingerprint,
+          variationProfile,
+          topicGroup: payload.topicGroup || '',
+          meta: {
+            ...qzoneMemoryMeta,
+            similarity: similarityCheck.similarity,
+            memoryEvidenceSources: Array.isArray(qzoneMemoryMeta.memoryEvidenceSources) && qzoneMemoryMeta.memoryEvidenceSources.length
+              ? qzoneMemoryMeta.memoryEvidenceSources
+              : (Array.isArray(qzoneMemoryEvidence.sources) ? qzoneMemoryEvidence.sources : [])
+          }
+        };
+      }
+
       return {
         text,
         fingerprint,
+        variationProfile: null,
+        topicGroup: payload.topicGroup || '',
         meta: {
           ...qzoneMemoryMeta,
           memoryEvidenceSources: Array.isArray(qzoneMemoryMeta.memoryEvidenceSources) && qzoneMemoryMeta.memoryEvidenceSources.length
@@ -1107,6 +1193,18 @@ function createDailyShareEngine({
       contentKey: payload.contentKey || ''
     });
     appendRecentContentFingerprint(stateEntry, generated.fingerprint, now);
+    if (normalizedSurface === 'qzone') {
+      recordQzoneGenerationHistory({
+        source: 'daily_share',
+        text: generated.text,
+        fingerprint: generated.fingerprint,
+        topicKey: payload.topicKey || '',
+        topicGroup: payload.topicGroup || generated.topicGroup || '',
+        variationProfile: generated.variationProfile || {},
+        type,
+        at: now
+      });
+    }
 
     if (payload.topicKey) {
       stateEntry.recentTopicKeys = appendRecentKey(stateEntry.recentTopicKeys, payload.topicKey, now, 120);

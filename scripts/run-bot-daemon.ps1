@@ -154,10 +154,11 @@ try {
   if (Test-LockOwnedByRunningNode -LockPath $lockFile) {
     Write-DaemonLog -Message 'bot already running, skip duplicate start.'
   } else {
-    $cmdLine = "`"$nodeExe`" index.js >> `"$logFile`" 2>&1"
-    & cmd.exe /d /c $cmdLine
-    if ($LASTEXITCODE -ne 0) {
-      $exitCode = $LASTEXITCODE
+    $mainProc = Start-Process -FilePath $nodeExe -ArgumentList 'index.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+    Write-DaemonLog -Message "started main bot pid=$($mainProc.Id)"
+    Start-Sleep -Seconds 2
+    if (-not (Test-LockOwnedByRunningNode -LockPath $lockFile)) {
+      throw 'main bot did not acquire lock after daemon start'
     }
   }
 

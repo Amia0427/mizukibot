@@ -17,6 +17,15 @@ const {
   resolveToolReplyFormattingPreferences
 } = require('../utils/toolReplyFormatting');
 
+function createReplyTelemetryEvent(type = '', payload = {}) {
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    ts: Date.now(),
+    type: String(type || 'event').trim() || 'event',
+    ...payload
+  };
+}
+
 function getEffectivePolicyKey(routeExecutionPlan = {}) {
   return String(
     routeExecutionPlan?.policyKey
@@ -319,15 +328,36 @@ function createStreamingDispatcher({
 }
 
 function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
+  function emitReplyTelemetry(telemetry = null, type = '', payload = {}) {
+    if (!telemetry || typeof telemetry.onEvent !== 'function') return;
+    try {
+      telemetry.onEvent(createReplyTelemetryEvent(type, payload));
+    } catch (_) {}
+  }
+
   async function sendGroupReply({
     groupId,
     senderId,
     replyText,
     atSender = true,
     retries = 2,
-    waitMs = 500
+    waitMs = 500,
+    telemetry = null
   }) {
-    return sendSystemGroupReply({
+    const startedAt = Date.now();
+    emitReplyTelemetry(telemetry, 'reply_send_start', {
+      node: 'reply_send',
+      channel: 'group',
+      threadId: String(telemetry?.threadId || '').trim(),
+      routePolicyKey: String(telemetry?.routePolicyKey || '').trim(),
+      topRouteType: String(telemetry?.topRouteType || '').trim(),
+      groupId: String(groupId || '').trim(),
+      senderId: String(senderId || '').trim(),
+      atSender: atSender !== false,
+      replyLength: String(replyText || '').trim().length
+    });
+
+    const sent = await sendSystemGroupReply({
       sendWithRetry,
       groupId,
       senderId,
@@ -337,15 +367,42 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
       waitMs,
       runtimeConfig
     });
+
+    emitReplyTelemetry(telemetry, sent ? 'reply_send_success' : 'reply_send_failure', {
+      node: 'reply_send',
+      channel: 'group',
+      threadId: String(telemetry?.threadId || '').trim(),
+      routePolicyKey: String(telemetry?.routePolicyKey || '').trim(),
+      topRouteType: String(telemetry?.topRouteType || '').trim(),
+      groupId: String(groupId || '').trim(),
+      senderId: String(senderId || '').trim(),
+      atSender: atSender !== false,
+      replyLength: String(replyText || '').trim().length,
+      durationMs: Math.max(0, Date.now() - startedAt)
+    });
+
+    return sent;
   }
 
   async function sendPrivateReply({
     userId,
     replyText,
     retries = 2,
-    waitMs = 500
+    waitMs = 500,
+    telemetry = null
   }) {
-    return sendSystemPrivateReply({
+    const startedAt = Date.now();
+    emitReplyTelemetry(telemetry, 'reply_send_start', {
+      node: 'reply_send',
+      channel: 'private',
+      threadId: String(telemetry?.threadId || '').trim(),
+      routePolicyKey: String(telemetry?.routePolicyKey || '').trim(),
+      topRouteType: String(telemetry?.topRouteType || '').trim(),
+      userId: String(userId || '').trim(),
+      replyLength: String(replyText || '').trim().length
+    });
+
+    const sent = await sendSystemPrivateReply({
       sendWithRetry,
       userId,
       replyText,
@@ -353,6 +410,19 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
       waitMs,
       runtimeConfig
     });
+
+    emitReplyTelemetry(telemetry, sent ? 'reply_send_success' : 'reply_send_failure', {
+      node: 'reply_send',
+      channel: 'private',
+      threadId: String(telemetry?.threadId || '').trim(),
+      routePolicyKey: String(telemetry?.routePolicyKey || '').trim(),
+      topRouteType: String(telemetry?.topRouteType || '').trim(),
+      userId: String(userId || '').trim(),
+      replyLength: String(replyText || '').trim().length,
+      durationMs: Math.max(0, Date.now() - startedAt)
+    });
+
+    return sent;
   }
 
   async function sendReply({
@@ -363,14 +433,16 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
     replyText,
     atSender = true,
     retries = 2,
-    waitMs = 500
+    waitMs = 500,
+    telemetry = null
   }) {
     if (String(chatType || '').trim() === 'private') {
       return sendPrivateReply({
         userId: userId || senderId,
         replyText,
         retries,
-        waitMs
+        waitMs,
+        telemetry
       });
     }
     return sendGroupReply({
@@ -379,7 +451,8 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
       replyText,
       atSender,
       retries,
-      waitMs
+      waitMs,
+      telemetry
     });
   }
 
