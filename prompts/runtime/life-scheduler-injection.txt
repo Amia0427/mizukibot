@@ -1,0 +1,6 @@
+<character_state>
+时间: {{timeDesc}}
+穿着: {{outfit}}
+日程: {{schedule}}
+</character_state>
+[上述状态仅供自然参考，不要主动背诵，不要机械复述，只有在对话自然相关时轻微体现]

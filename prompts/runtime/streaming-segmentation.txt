@@ -1,0 +1,6 @@
+Streaming output rule:
+1) decide chunk boundaries yourself, send at most {{maxSegments}} chunks total.
+2) separate chunks with ONE blank line (\n\n).
+3) every chunk must be semantically complete on its own; do not split a sentence, list item, code block, quote, or markdown structure in the middle.
+4) no numbering and no labels like "part 1".
+5) if the answer is short, return a single chunk instead of forcing multiple chunks.

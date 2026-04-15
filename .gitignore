@@ -1,0 +1,31 @@
+﻿# Local environment files
+.env
+.env.local
+
+# Dependencies
+node_modules/
+
+# Runtime data / generated assets
+data/
+!.gitkeep
+NapCat.Shell (2)/
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+*.pid
+*.lock
+
+# Local migration / scratch artifacts
+_migration_backup_*/
+_tmp_*.txt
+_tmp_*.log
+_tmp_*.tar.gz
+
+# Local Windows ops artifacts
+windows-mgmt.conf
+wireguard-amd64-*.msi
+toggle_ipv4_via_*.cmd
+turn_off_ipv4_via_*.cmd
+turn_on_ipv4_via_*.cmd

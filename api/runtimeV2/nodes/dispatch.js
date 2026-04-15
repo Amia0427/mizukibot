@@ -1,0 +1,341 @@
+function createDispatchNode(deps = {}) {
+  const normalizeObject = typeof deps.normalizeObject === 'function'
+    ? deps.normalizeObject
+    : ((value, fallback = {}) => (value && typeof value === 'object' ? value : fallback));
+  const normalizeArray = typeof deps.normalizeArray === 'function'
+    ? deps.normalizeArray
+    : ((value) => (Array.isArray(value) ? value : []));
+  const createEvent = typeof deps.createEvent === 'function'
+    ? deps.createEvent
+    : ((type, payload = {}) => ({ type, ...payload }));
+  const stableHash = typeof deps.stableHash === 'function'
+    ? deps.stableHash
+    : ((value) => JSON.stringify(value || {}));
+  const isCompletedSideEffectStep = typeof deps.isCompletedSideEffectStep === 'function'
+    ? deps.isCompletedSideEffectStep
+    : (() => false);
+  const findEvidenceEnvelope = typeof deps.findEvidenceEnvelope === 'function'
+    ? deps.findEvidenceEnvelope
+    : (() => null);
+  const isDirectChatRequest = typeof deps.isDirectChatRequest === 'function'
+    ? deps.isDirectChatRequest
+    : (() => false);
+  const buildDirectChatExecutionBatches = typeof deps.buildDirectChatExecutionBatches === 'function'
+    ? deps.buildDirectChatExecutionBatches
+    : (() => []);
+  const canRunStepsInParallel = typeof deps.canRunStepsInParallel === 'function'
+    ? deps.canRunStepsInParallel
+    : (() => false);
+  const buildLiveMainConversationSnapshot = typeof deps.buildLiveMainConversationSnapshot === 'function'
+    ? deps.buildLiveMainConversationSnapshot
+    : (() => null);
+  const computeEffectiveAllowedTools = typeof deps.computeEffectiveAllowedTools === 'function'
+    ? deps.computeEffectiveAllowedTools
+    : (() => []);
+  const createMemoryCliTurnState = typeof deps.createMemoryCliTurnState === 'function'
+    ? deps.createMemoryCliTurnState
+    : ((value) => value || null);
+  const persistCheckpoint = typeof deps.persistCheckpoint === 'function'
+    ? deps.persistCheckpoint
+    : () => {};
+  const appendRuntimeEvents = typeof deps.appendRuntimeEvents === 'function'
+    ? deps.appendRuntimeEvents
+    : () => {};
+  const updatePlanStepsWithEnvelope = typeof deps.updatePlanStepsWithEnvelope === 'function'
+    ? deps.updatePlanStepsWithEnvelope
+    : ((steps) => steps);
+  const getPolicy = typeof deps.getPolicy === 'function'
+    ? deps.getPolicy
+    : (() => ({}));
+  const isSideEffectPolicy = typeof deps.isSideEffectPolicy === 'function'
+    ? deps.isSideEffectPolicy
+    : (() => false);
+  const executeBatch = typeof deps.executeBatch === 'function'
+    ? deps.executeBatch
+    : (async () => []);
+  const rebuildFinalPlanFromSteps = typeof deps.rebuildFinalPlanFromSteps === 'function'
+    ? deps.rebuildFinalPlanFromSteps
+    : ((state) => state.plan || {});
+  const buildExecLogsFromSteps = typeof deps.buildExecLogsFromSteps === 'function'
+    ? deps.buildExecLogsFromSteps
+    : (() => []);
+  const mergeAllowedToolsWithMemoryCli = typeof deps.mergeAllowedToolsWithMemoryCli === 'function'
+    ? deps.mergeAllowedToolsWithMemoryCli
+    : ((allowed) => normalizeArray(allowed));
+  const saveAndEmit = typeof deps.saveAndEmit === 'function'
+    ? deps.saveAndEmit
+    : ((state) => state);
+  const config = deps.config || {};
+
+  return async function dispatchNode(state) {
+    const request = normalizeObject(state.request, {});
+    const allSteps = normalizeArray(state.plan?.steps).map((step) => ({ ...step }));
+    const toolSteps = allSteps.filter((step) => ['tool', 'memory_cli'].includes(String(step.kind || '').trim()));
+    const pendingSteps = toolSteps.filter((step) => {
+      const argsHash = stableHash(step.inputs || {});
+      if (isCompletedSideEffectStep(step) && findEvidenceEnvelope(step, argsHash)) return false;
+      return ['pending', 'failed'].includes(String(step.status || '').trim());
+    });
+    const retryQueueIds = new Set(normalizeArray(state.execution?.retryQueue).map((item) => String(item?.step_id || '').trim()).filter(Boolean));
+    const selectedBase = retryQueueIds.size > 0
+      ? pendingSteps.filter((step) => retryQueueIds.has(String(step.id || '').trim()))
+      : pendingSteps;
+    const selectedSteps = selectedBase.slice(0, Math.max(1, Number(config.PLAN_MAX_STEPS) || 5));
+    const directChatBatchExecution = isDirectChatRequest(request);
+    const directChatBatches = directChatBatchExecution
+      ? buildDirectChatExecutionBatches(selectedSteps, (step) => step)
+      : [];
+    const directChatBatchByStepId = new Map();
+    for (const batch of directChatBatches) {
+      for (const step of normalizeArray(batch.items)) {
+        const stepId = String(step?.id || '').trim();
+        if (!stepId) continue;
+        directChatBatchByStepId.set(stepId, {
+          batchId: String(batch.batchId || '').trim(),
+          batchIndex: Number.isFinite(Number(batch.batchIndex)) ? Number(batch.batchIndex) : null
+        });
+      }
+    }
+    const parallelExecution = directChatBatchExecution
+      ? directChatBatches.some((batch) => batch.mode === 'parallel' && normalizeArray(batch.items).length > 1)
+      : canRunStepsInParallel(selectedSteps);
+    const events = [createEvent('node_start', { node: 'dispatch', stepCount: selectedSteps.length, parallelExecution })];
+    const dispatchRuntimeOptions = {
+      node: 'dispatch',
+      mainConversationSnapshot: buildLiveMainConversationSnapshot(state, {
+        affinity: state.memory?.affinity,
+        allowedTools: computeEffectiveAllowedTools(request, state.execution?.memoryCliTurn),
+        source: 'dispatch'
+      })
+    };
+
+    const nextSteps = allSteps.map((step) => {
+      const stepId = String(step?.id || '').trim();
+      const batchMeta = directChatBatchByStepId.get(stepId);
+      return {
+        ...step,
+        ...(batchMeta?.batchId ? { batchId: batchMeta.batchId } : {}),
+        ...(batchMeta && batchMeta.batchIndex !== null ? { batchIndex: batchMeta.batchIndex } : {}),
+        evidence: normalizeArray(step.evidence).map((item) => ({ ...item }))
+      };
+    });
+    const toolResults = [];
+    let nextMemoryCliTurn = createMemoryCliTurnState(state.execution?.memoryCliTurn);
+    let memoryDirty = Boolean(state.memory?.dirty);
+
+    const buildDispatchState = () => ({
+      ...state,
+      plan: {
+        ...state.plan,
+        steps: nextSteps
+      },
+      execution: {
+        ...state.execution,
+        toolResults,
+        memoryCliTurn: nextMemoryCliTurn
+      }
+    });
+
+    const persistDispatchCheckpoint = (pendingInterrupt) => {
+      persistCheckpoint({
+        ...buildDispatchState(),
+        execution: {
+          ...state.execution,
+          toolResults,
+          memoryCliTurn: nextMemoryCliTurn,
+          currentNode: 'dispatch',
+          pendingInterrupt: Boolean(pendingInterrupt)
+        }
+      }, 'dispatch', 'running');
+    };
+
+    const checkpointBeforeSideEffect = (step) => {
+      const preEvents = [createEvent('checkpoint', {
+        node: 'dispatch',
+        stage: 'before_side_effect',
+        step_id: step.id,
+        tool_name: step.tool
+      })];
+      appendRuntimeEvents(state, preEvents);
+      persistDispatchCheckpoint(true);
+    };
+
+    const checkpointAfterSideEffect = (envelope) => {
+      const postEvents = [createEvent('checkpoint', {
+        node: 'dispatch',
+        stage: 'after_side_effect',
+        step_id: envelope.step_id,
+        tool_name: envelope.tool_name,
+        status: envelope.status
+      })];
+      appendRuntimeEvents(state, postEvents);
+      persistDispatchCheckpoint(false);
+    };
+
+    const applyEnvelope = (envelope) => {
+      toolResults.push(envelope);
+      const updatedSteps = updatePlanStepsWithEnvelope(nextSteps, envelope);
+      nextSteps.splice(0, nextSteps.length, ...updatedSteps);
+      if (envelope.memoryCliTurn) {
+        nextMemoryCliTurn = createMemoryCliTurnState(envelope.memoryCliTurn);
+      }
+      if (envelope.invalidateMemoryPrompt) {
+        memoryDirty = true;
+      }
+      if (envelope.side_effect) {
+        checkpointAfterSideEffect(envelope);
+      }
+    };
+
+    for (const step of selectedSteps) {
+      const policy = getPolicy(step.tool);
+      const argsHash = stableHash(step.inputs || {});
+      const reusableEnvelope = findEvidenceEnvelope(step, argsHash);
+      if (String(step.status || '').trim() === 'completed' && reusableEnvelope && reusableEnvelope.side_effect) {
+        toolResults.push({
+          ...reusableEnvelope,
+          ...(String(reusableEnvelope?.batch_id || step.batchId || '').trim()
+            ? { batch_id: String(reusableEnvelope?.batch_id || step.batchId).trim() }
+            : {}),
+          ...(
+            Number.isFinite(Number(reusableEnvelope?.batch_index))
+              ? { batch_index: Number(reusableEnvelope.batch_index) }
+              : (Number.isFinite(Number(step.batchIndex)) ? { batch_index: Number(step.batchIndex) } : {})
+          ),
+          reused: true
+        });
+        continue;
+      }
+
+      if (directChatBatchExecution) continue;
+      if (parallelExecution) continue;
+
+      if (isSideEffectPolicy(policy)) {
+        checkpointBeforeSideEffect(step);
+      }
+
+      const [envelope] = await executeBatch([step], buildDispatchState(), {
+        ...dispatchRuntimeOptions,
+        allowedTools: state.request?.allowedTools
+      });
+      applyEnvelope(envelope);
+    }
+
+    if (directChatBatchExecution && selectedSteps.length > 0) {
+      for (const batch of directChatBatches) {
+        const batchItems = normalizeArray(batch.items);
+        if (batchItems.length === 0) continue;
+        if (batch.mode !== 'parallel' || batchItems.length < 2) {
+          for (const step of batchItems) {
+            const runnableStep = {
+              ...step,
+              ...(String(batch.batchId || '').trim() ? { batchId: String(batch.batchId).trim() } : {}),
+              ...(Number.isFinite(Number(batch.batchIndex)) ? { batchIndex: Number(batch.batchIndex) } : {})
+            };
+            if (isSideEffectPolicy(getPolicy(step.tool))) {
+              checkpointBeforeSideEffect(runnableStep);
+            }
+            const [envelope] = await executeBatch([runnableStep], buildDispatchState(), {
+              ...dispatchRuntimeOptions,
+              allowedTools: state.request?.allowedTools,
+              batches: [{
+                mode: 'serial',
+                items: [runnableStep]
+              }]
+            });
+            applyEnvelope(envelope);
+          }
+          continue;
+        }
+        const runnableBatchItems = batchItems.map((step) => ({
+          ...step,
+          ...(String(batch.batchId || '').trim() ? { batchId: String(batch.batchId).trim() } : {}),
+          ...(Number.isFinite(Number(batch.batchIndex)) ? { batchIndex: Number(batch.batchIndex) } : {})
+        }));
+        const sideEffectSteps = runnableBatchItems.filter((step) => isSideEffectPolicy(getPolicy(step.tool)));
+        if (sideEffectSteps.length > 0) {
+          const preEvents = sideEffectSteps.map((step) => createEvent('checkpoint', {
+            node: 'dispatch',
+            stage: 'before_side_effect',
+            step_id: step.id,
+            tool_name: step.tool
+          }));
+          appendRuntimeEvents(state, preEvents);
+          persistDispatchCheckpoint(true);
+        }
+        const batchResults = await executeBatch(runnableBatchItems, buildDispatchState(), {
+          ...dispatchRuntimeOptions,
+          allowedTools: state.request?.allowedTools,
+          batches: [{
+            mode: 'parallel',
+            items: runnableBatchItems
+          }]
+        });
+        for (const envelope of batchResults) {
+          applyEnvelope(envelope);
+        }
+      }
+    } else if (parallelExecution && selectedSteps.length > 0) {
+      const parallelResults = await executeBatch(selectedSteps, buildDispatchState(), {
+        ...dispatchRuntimeOptions,
+        allowedTools: state.request?.allowedTools,
+        batches: [{
+          mode: 'parallel',
+          items: selectedSteps
+        }]
+      });
+      for (const envelope of parallelResults) {
+        applyEnvelope(envelope);
+      }
+    }
+
+    const nextEvents = events
+      .concat(toolResults.map((item) => createEvent('tool_result', item)))
+      .concat([createEvent('node_complete', { node: 'dispatch' })]);
+
+    return saveAndEmit({
+      ...state,
+      plan: {
+        ...state.plan,
+        steps: nextSteps,
+        currentStepId: nextSteps.find((step) => ['pending', 'failed'].includes(String(step.status || '').trim()))?.id || '',
+        status: toolResults.some((item) => item.status !== 'completed') ? 'dispatch_partial' : 'dispatch_completed',
+        finalPlan: rebuildFinalPlanFromSteps({
+          ...state,
+          plan: {
+            ...state.plan,
+            steps: nextSteps
+          }
+        }),
+        finalExecLogs: buildExecLogsFromSteps(nextSteps)
+      },
+      execution: {
+        ...state.execution,
+        status: 'dispatched',
+        currentNode: 'dispatch',
+        parallelExecution,
+        toolResults,
+        retryQueue: [],
+        memoryCliTurn: nextMemoryCliTurn
+      },
+      memory: {
+        ...state.memory,
+        dirty: memoryDirty
+      },
+      request: {
+        ...state.request,
+        allowedTools: mergeAllowedToolsWithMemoryCli(state.request?.allowedTools, {
+          ...state.request,
+          customPrompt: state.request?.customPrompt,
+          disableTools: !state.request?.allowTools,
+          memoryCliTurn: nextMemoryCliTurn
+        })
+      },
+      events: nextEvents
+    }, 'dispatch', 'running', nextEvents);
+  };
+}
+
+module.exports = {
+  createDispatchNode
+};
