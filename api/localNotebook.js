@@ -2,11 +2,23 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
-const { sanitizeUserId, mustStayInside } = require('../utils/toolPolicy');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 
+function getToolPolicyHelpers() {
+  const policy = require('../utils/toolPolicy');
+  return {
+    sanitizeUserId: typeof policy.sanitizeUserId === 'function'
+      ? policy.sanitizeUserId
+      : ((value, fallback = '') => String(value || fallback || '').trim()),
+    mustStayInside: typeof policy.mustStayInside === 'function'
+      ? policy.mustStayInside
+      : ((_root, target) => path.resolve(target))
+  };
+}
+
 function normalizeUserId(userId) {
+  const { sanitizeUserId } = getToolPolicyHelpers();
   return sanitizeUserId(userId, 'public') || 'public';
 }
 
@@ -128,6 +140,7 @@ function removeDocByPath(indexObj, sourcePath) {
 }
 
 async function notebook_reindex_folder(userId, folderPath, options = {}) {
+  const { mustStayInside } = getToolPolicyHelpers();
   const uid = normalizeUserId(userId);
   ensureUserNotebook(uid);
 
@@ -219,6 +232,7 @@ async function notebook_reindex_folder(userId, folderPath, options = {}) {
 }
 
 async function notebook_add_document(userId, title, content) {
+  const { mustStayInside } = getToolPolicyHelpers();
   const uid = normalizeUserId(userId);
   ensureUserNotebook(uid);
 

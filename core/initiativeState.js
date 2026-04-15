@@ -121,9 +121,13 @@ function flushAllSync() {
   } catch (_) {}
 }
 
-process.on('exit', flushAllSync);
-process.on('SIGINT', flushAllSync);
-process.on('SIGTERM', flushAllSync);
+const INITIATIVE_PROCESS_HOOK_KEY = '__mizuki_initiative_flush_hooks_registered__';
+if (!process[INITIATIVE_PROCESS_HOOK_KEY]) {
+  process[INITIATIVE_PROCESS_HOOK_KEY] = true;
+  process.on('exit', flushAllSync);
+  process.on('SIGINT', flushAllSync);
+  process.on('SIGTERM', flushAllSync);
+}
 
 function ensureGroupState(groupId, now = Date.now()) {
   const gid = String(groupId || '').trim();
