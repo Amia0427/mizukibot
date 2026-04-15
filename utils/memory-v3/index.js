@@ -3,6 +3,7 @@ const { materializeMemoryViews } = require('./materializer');
 const { queryMemory } = require('./query');
 const { assembleMemoryPacket } = require('./packet');
 const { restoreSessionState } = require('./session');
+const { migrateLegacyMemoryToV3 } = require('./migration');
 
 module.exports = {
   appendMemoryEvent,
@@ -11,5 +12,6 @@ module.exports = {
   materializeMemoryViews,
   queryMemory,
   assembleMemoryPacket,
-  restoreSessionState
+  restoreSessionState,
+  migrateLegacyMemoryToV3
 };
