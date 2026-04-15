@@ -18,7 +18,7 @@ const { appendMemoryEvent } = require('../utils/memory-v3/events');
 const { materializeMemoryViews } = require('../utils/memory-v3/materializer');
 const { runMemoryCli } = require('../utils/memoryCli');
 
-(async () => {
+module.exports = (async () => {
   await appendMemoryEvent({
     type: 'memory_confirmed',
     userId: 'u_cli',

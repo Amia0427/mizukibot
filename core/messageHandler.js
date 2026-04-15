@@ -64,6 +64,33 @@ const { runPassiveFlow } = require('./messagePassiveFlow');
 const { createMessageReplyRuntime } = require('./messageReplyRuntime');
 const { createMessageSideEffects } = require('./messageSideEffects');
 const { createMessageRouteFlow } = require('./messageRouteFlow');
+const { createMessageAdminCoordinator } = require('./messageAdminCommands');
+const { createMessageBackgroundTaskCoordinator } = require('./messageBackgroundTasks');
+const { createMessageDispatchCoordinator } = require('./messageDispatchCoordinator');
+const {
+  buildFullSubagentAllWorkersFailedReply,
+  buildFullSubagentCoordinatorPayload,
+  buildFullSubagentFallbackReply,
+  buildFullSubagentReviewPayload,
+  buildFullSubagentWorkerPrompt,
+  chooseBestFullSubagentWorkerOutput,
+  createMessageFullSubagentCoordinator,
+  normalizeFullSubagentPlan,
+  summarizeFullWorkerError
+} = require('./messageFullSubagent');
+const { createMessageTaskControlCoordinator } = require('./messageTaskControl');
+const {
+  appendInboundTimingLog,
+  createMessageTelemetryCoordinator,
+  createReplyTelemetryBridge,
+  getRawMessageTimestampMs
+} = require('./messageTelemetry');
+const {
+  buildDirectedConversationSummary,
+  createMessageVisualContext,
+  resolveVisualInputFromContinuousMeta,
+  resolveVisualInputFromContinuousMetaCore
+} = require('./messageVisualContext');
 const {
   buildBridgeGuidancePrompt: buildBridgeGuidancePromptOwner,
   buildQqRichReplyPrompt: buildQqRichReplyPromptOwner,
@@ -177,20 +204,6 @@ function getSafeLifeSchedulerEngine() {
   };
 }
 
-function parseJsonTail(text = '') {
-  const raw = String(text || '').trim();
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('JSON must be an object');
-    }
-    return parsed;
-  } catch (error) {
-    throw new Error(`JSON 解析失败: ${error.message || error}`);
-  }
-}
-
 function buildRouteContextForQqAction(route = {}, senderId = '', groupId = '') {
   const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
   const qqActionTools = Array.isArray(routeMeta.allowedTools) ? routeMeta.allowedTools : [];
@@ -219,138 +232,6 @@ function isPrivateChatUserAllowed(userId = '', runtimeConfig = {}) {
   const normalizedUserId = String(userId || '').trim();
   if (!normalizedUserId) return false;
   return allowlist.includes(normalizedUserId);
-}
-
-function formatSummaryCooldownReply(remainingMs = 0) {
-  const seconds = Math.max(1, Math.ceil((Number(remainingMs || 0) || 0) / 1000));
-  return `当前会话总结刚生成过，请 ${seconds} 秒后再试。`;
-}
-
-async function handleSessionSummaryCommand({
-  rawText = '',
-  senderId = '',
-  groupId = '',
-  summarizeSessionContext = generateSessionContextSummary
-} = {}) {
-  const text = String(rawText || '').trim();
-  if (!/^\s*\/sr(?:\s|$)/i.test(text)) return null;
-  if (!String(groupId || '').trim()) {
-    return { handled: true, replyText: '仅群聊会话支持 /sr。' };
-  }
-
-  const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
-  const cooldownStatus = getSessionSummaryCooldownStatus(sessionKey);
-  if (cooldownStatus.limited) {
-    return {
-      handled: true,
-      replyText: formatSummaryCooldownReply(cooldownStatus.remainingMs)
-    };
-  }
-
-  const summaryResult = await summarizeSessionContext({
-    userId: senderId,
-    sessionKey,
-    routeMeta: { groupId },
-    chatHistory,
-    shortTermMemory
-  });
-
-  const summaryText = String(summaryResult?.summary || '').trim();
-  if (!summaryText) {
-    return {
-      handled: true,
-      replyText: '当前会话总结生成失败，请稍后再试。'
-    };
-  }
-
-  const saved = saveSessionContextSummary({
-    sessionKey,
-    userId: senderId,
-    groupId,
-    trigger: 'manual_sr',
-    summary: summaryText
-  });
-
-  if (saved.cooldownLimited) {
-    return {
-      handled: true,
-      replyText: formatSummaryCooldownReply(saved.remainingMs)
-    };
-  }
-
-  if (saved.duplicate) {
-    return {
-      handled: true,
-      replyText: '当前会话总结已是最新，无需重复保存。'
-    };
-  }
-
-  if (!saved.saved) {
-    return {
-      handled: true,
-      replyText: '当前会话总结保存失败，请稍后再试。'
-    };
-  }
-
-  return {
-    handled: true,
-    replyText: '当前会话总结已保存。'
-  };
-}
-
-async function handleInitiativeAdminCommand({ rawText = '', groupId = '', userId = '' } = {}) {
-  const text = String(rawText || '').trim();
-  if (!/^\s*\/initiative(?:\s|$)/i.test(text)) return null;
-  if (!String(groupId || '').trim()) {
-    return { handled: true, replyText: '仅群聊可用。' };
-  }
-  if (!isAdminUser(userId)) {
-    return { handled: true, replyText: '仅管理员可用。' };
-  }
-  const parts = text.split(/\s+/).slice(1);
-  const sub = String(parts[0] || 'status').trim().toLowerCase();
-  if (sub === 'mute') {
-    const minutes = Math.max(1, Number(parts[1] || 30) || 30);
-    const until = Date.now() + (minutes * 60 * 1000);
-    setGroupMute(groupId, {
-      until,
-      by: userId,
-      at: Date.now()
-    });
-    return { handled: true, replyText: `当前群主动回复已静音 ${minutes} 分钟。` };
-  }
-  if (sub === 'resume' || sub === 'unmute') {
-    clearGroupMute(groupId, Date.now());
-    return { handled: true, replyText: '当前群主动回复已恢复。' };
-  }
-  const state = getGroupInitiativeState(groupId, Date.now());
-  const muteUntil = Number(state?.mute?.until || 0) || 0;
-  return {
-    handled: true,
-    replyText: [
-      `主动策略：${config.INITIATIVE_POLICY_ENABLED ? '已启用' : '已关闭'}`,
-      `静音状态：${muteUntil > Date.now() ? '静音中' : '正常'}`,
-      `今日主动次数：${Math.max(0, Number(state?.daily?.count || 0) || 0)}/${Math.max(1, Number(config.INITIATIVE_GROUP_MAX_PER_DAY || 8))}`,
-      `最近主动来源：${String(state?.daily?.lastSource || '无').trim() || '无'}`,
-      `最近跳过原因：${String(state?.lastSkipReason || '无').trim() || '无'}`
-    ].join('\n')
-  };
-}
-
-async function handleQqScheduleAdminCommand(command = {}, context = {}) {
-  const payload = parseJsonTail(command.payload);
-  const kind = String(payload.kind || '').trim().toLowerCase();
-  if (kind === 'message') {
-    return scheduleGroupMessage(payload.message, payload.when, context);
-  }
-  if (kind === 'command') {
-    return createScheduledCommand(payload.action, payload.when, {
-      content: payload.content,
-      mode: payload.mode,
-      hint: payload.hint
-    }, context);
-  }
-  throw new Error('schedule_create.kind 仅支持 message 或 command');
 }
 
 function getRouteDisplayType(route = {}, routeExecutionPlan = {}) {
@@ -499,78 +380,6 @@ function getBackgroundTaskSessionTtlMs(config) {
   return Math.max(60 * 1000, Math.floor(n));
 }
 
-function getRawMessageTimestampMs(msg = {}) {
-  const seconds = Number(msg?.time || 0);
-  return seconds > 0 ? (seconds * 1000) : 0;
-}
-
-function appendInboundTimingLog(logFilePath, enableDebugLog, payload = {}) {
-  if (!enableDebugLog) return;
-  try {
-    const normalized = payload && typeof payload === 'object' ? payload : {};
-    const line = JSON.stringify({
-      recordedAt: new Date().toISOString(),
-      processId: process.pid,
-      ...normalized
-    });
-    fs.appendFile(logFilePath, `${line}\n`, () => {});
-  } catch (_) {}
-}
-
-function createReplyTelemetryBridge(runtimeConfig = config) {
-  const store = createCheckpointStore({
-    checkpointDir: runtimeConfig.LANGGRAPH_V2_CHECKPOINT_DIR,
-    eventDir: runtimeConfig.LANGGRAPH_V2_EVENT_DIR
-  });
-
-  return function buildReplyTelemetry({
-    senderId = '',
-    groupId = '',
-    chatType = 'group',
-    routePolicyKey = '',
-    topRouteType = '',
-    routeMeta = null
-  } = {}) {
-    const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object'
-      ? {
-          ...routeMeta,
-          groupId: String(groupId || routeMeta.groupId || routeMeta.group_id || '').trim(),
-          chatType: String(chatType || routeMeta.chatType || '').trim(),
-          topRouteType: String(topRouteType || routeMeta.topRouteType || '').trim(),
-          routePolicyKey: String(routePolicyKey || routeMeta.routePolicyKey || '').trim()
-        }
-      : {
-          groupId: String(groupId || '').trim(),
-          chatType: String(chatType || '').trim(),
-          topRouteType: String(topRouteType || '').trim(),
-          routePolicyKey: String(routePolicyKey || '').trim()
-        };
-    const sessionKey = resolveShortTermSessionKey(senderId, normalizedRouteMeta);
-    const threadId = resolveThreadId({
-      userId: senderId,
-      routePolicyKey,
-      reviewMode: '',
-      routeMeta: normalizedRouteMeta,
-      sessionKey,
-      imageUrl: null,
-      options: {
-        routeMeta: normalizedRouteMeta
-      }
-    });
-
-    return {
-      threadId,
-      routePolicyKey: String(routePolicyKey || '').trim(),
-      topRouteType: String(topRouteType || '').trim(),
-      onEvent(event = {}) {
-        if (!threadId) return;
-        const normalized = event && typeof event === 'object' ? event : {};
-        store.appendEvents(threadId, [normalized]);
-      }
-    };
-  };
-}
-
 function normalizeControlText(text = '') {
   return String(text || '')
     .replace(/\s+/g, ' ')
@@ -662,240 +471,6 @@ function buildSupplementedTaskText(session = {}, supplement = '') {
   if (cleanSupplement) parts.push(`补充要求：${cleanSupplement}`);
 
   return parts.join('\n');
-}
-
-function clampFullSubagentWorkerCount(value, fallback = 2, maxWorkers = 2) {
-  const fallbackCount = Math.max(1, Math.min(2, Number(fallback) || 1));
-  const hardMax = Math.max(1, Math.min(2, Number(maxWorkers) || 2));
-  const parsed = Math.floor(Number(value));
-  if (!Number.isFinite(parsed)) return Math.min(fallbackCount, hardMax);
-  return Math.max(1, Math.min(hardMax, parsed));
-}
-
-function normalizeFullSubagentWorker(worker = {}, fallbackIndex = 0) {
-  const index = Math.max(1, Number(fallbackIndex) || 1);
-  const rawMustCover = Array.isArray(worker?.mustCover) ? worker.mustCover : [];
-  const mustCover = rawMustCover
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)
-    .slice(0, 8);
-
-  return {
-    id: String(worker?.id || `w${index}`).trim() || `w${index}`,
-    title: String(worker?.title || `Worker ${index}`).trim() || `Worker ${index}`,
-    objective: String(worker?.objective || '').trim(),
-    mustCover,
-    deliverable: String(worker?.deliverable || '').trim()
-  };
-}
-
-function buildSingleWorkerFallbackPlan(question = '') {
-  const cleanQuestion = String(question || '').trim() || '(empty)';
-  return {
-    workerCount: 1,
-    workers: [
-      {
-        id: 'w1',
-        title: 'Primary worker',
-        objective: cleanQuestion,
-        mustCover: ['Address the full original task directly.'],
-        deliverable: 'Produce the best complete answer possible for the original /full request.'
-      }
-    ],
-    reviewFocus: 'Merge carefully, keep failures and uncertainty visible, do not invent extra execution.'
-  };
-}
-
-function normalizeFullSubagentPlan(rawPlan, options = {}) {
-  const {
-    question = '',
-    maxWorkers = 2
-  } = options && typeof options === 'object' ? options : {};
-
-  const parsed = rawPlan && typeof rawPlan === 'object' && !Array.isArray(rawPlan)
-    ? rawPlan
-    : extractJsonSafely(rawPlan);
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return buildSingleWorkerFallbackPlan(question);
-  }
-
-  const hardMax = Math.max(1, Math.min(2, Number(maxWorkers) || 2));
-  const rawWorkers = Array.isArray(parsed.workers) ? parsed.workers : [];
-  const normalizedWorkers = rawWorkers
-    .slice(0, hardMax)
-    .map((worker, index) => normalizeFullSubagentWorker(worker, index + 1))
-    .filter((worker) => worker.objective || worker.mustCover.length || worker.deliverable);
-
-  const desiredCount = clampFullSubagentWorkerCount(
-    parsed.workerCount,
-    normalizedWorkers.length || 1,
-    hardMax
-  );
-
-  if (!normalizedWorkers.length) {
-    return buildSingleWorkerFallbackPlan(question);
-  }
-
-  const workers = normalizedWorkers.slice(0, desiredCount).map((worker, index) => ({
-    ...worker,
-    id: `w${index + 1}`
-  }));
-
-  if (!workers.length) {
-    return buildSingleWorkerFallbackPlan(question);
-  }
-
-  return {
-    workerCount: workers.length,
-    workers,
-    reviewFocus: String(parsed.reviewFocus || '').trim()
-      || 'Merge overlap, resolve conflicts conservatively, keep failures and uncertainty explicit.'
-  };
-}
-
-function buildFullSubagentCoordinatorPayload(question = '', routePrompt = null, maxWorkers = 2) {
-  const workerLimit = clampFullSubagentWorkerCount(maxWorkers, 2, 2);
-  const routePromptBlock = String(routePrompt || '').trim()
-    ? `Route guidance:\n${String(routePrompt || '').trim()}`
-    : '';
-
-  return [
-    'Return JSON only.',
-    'Plan a `/full` admin task into 1 or 2 worker assignments.',
-    'If splitting is weak or artificial, use exactly 1 worker.',
-    'Do not mention tools, sessions, or implementation internals in the plan.',
-    'Required JSON schema:',
-    '{"workerCount":1,"workers":[{"id":"w1","title":"string","objective":"string","mustCover":["string"],"deliverable":"string"}],"reviewFocus":"string"}',
-    `Max workers: ${workerLimit}`,
-    routePromptBlock,
-    'Original /full request:',
-    String(question || '').trim() || '(empty)'
-  ].filter(Boolean).join('\n\n');
-}
-
-function buildFullSubagentWorkerPrompt(question = '', worker = {}, plan = {}) {
-  const mustCover = Array.isArray(worker?.mustCover) ? worker.mustCover.filter(Boolean) : [];
-  const allWorkers = Array.isArray(plan?.workers) ? plan.workers : [];
-  const boundaryLines = allWorkers
-    .filter((entry) => entry && String(entry.id || '').trim() && String(entry.id || '').trim() !== String(worker?.id || '').trim())
-    .map((entry) => `- ${String(entry.id || '').trim()}: ${String(entry.title || '').trim() || 'other worker'} -> ${String(entry.objective || '').trim() || 'adjacent coverage'}`);
-
-  return [
-    'You are one worker in an admin `/full` multi-worker run.',
-    'Complete only your assigned scope. Do not assume the other worker completed your part.',
-    'Do not claim to have searched, read, verified, executed, or observed anything you did not actually do.',
-    'Output structured plain text that a local reviewer can merge directly.',
-    '',
-    `Original task:\n${String(question || '').trim() || '(empty)'}`,
-    `Worker id: ${String(worker?.id || '').trim() || 'w1'}`,
-    `Worker title: ${String(worker?.title || '').trim() || 'Worker'}`,
-    `Objective:\n${String(worker?.objective || '').trim() || 'Address the assigned part of the original task.'}`,
-    mustCover.length ? `Must cover:\n${mustCover.map((item) => `- ${item}`).join('\n')}` : '',
-    String(worker?.deliverable || '').trim() ? `Deliverable:\n${String(worker.deliverable).trim()}` : '',
-    boundaryLines.length ? `Other worker boundaries:\n${boundaryLines.join('\n')}` : '',
-    'Structure your output with these sections if applicable:',
-    '- Findings',
-    '- Evidence',
-    '- Gaps or limits',
-    '- Suggested final wording'
-  ].filter(Boolean).join('\n\n');
-}
-
-function summarizeFullWorkerError(error, worker = {}) {
-  const label = String(worker?.id || 'worker').trim() || 'worker';
-  const message = String(error?.message || error || 'unknown error').trim() || 'unknown error';
-  return `${label} failed: ${message}`;
-}
-
-function formatFullWorkerResultForReview(result = {}) {
-  const worker = result?.worker || {};
-  const status = String(result?.status || 'unknown').trim() || 'unknown';
-  const output = String(result?.output || '').trim();
-  const error = String(result?.error || '').trim();
-
-  return [
-    `Worker ${String(worker.id || '').trim() || 'unknown'} (${String(worker.title || '').trim() || 'untitled'})`,
-    `Status: ${status}`,
-    worker.objective ? `Objective: ${String(worker.objective).trim()}` : '',
-    output ? `Output:\n${output}` : '',
-    error ? `Error:\n${error}` : ''
-  ].filter(Boolean).join('\n');
-}
-
-function buildFullSubagentReviewPayload(question = '', plan = {}, workerResults = [], routePolicyKey = 'admin/full') {
-  const normalizedResults = Array.isArray(workerResults) ? workerResults : [];
-  const workerBlocks = normalizedResults.length
-    ? normalizedResults.map((entry) => formatFullWorkerResultForReview(entry)).join('\n\n---\n\n')
-    : 'No worker results.';
-
-  const workerPlanBlock = Array.isArray(plan?.workers) && plan.workers.length
-    ? plan.workers.map((worker) => [
-      `- ${String(worker.id || '').trim() || 'w?'}`,
-      String(worker.title || '').trim() || 'untitled',
-      String(worker.objective || '').trim() || 'no objective'
-    ].join(' | ')).join('\n')
-    : '- w1 | Primary worker | Address the original task directly';
-
-  return [
-    `Task policy: ${String(routePolicyKey || 'admin/full').trim() || 'admin/full'}`,
-    '',
-    'Original /full request:',
-    String(question || '').trim() || '(empty)',
-    '',
-    'Coordinator plan:',
-    `workerCount: ${Number(plan?.workerCount) || 1}`,
-    workerPlanBlock,
-    '',
-    `Review focus: ${String(plan?.reviewFocus || '').trim() || 'Merge carefully and keep limits visible.'}`,
-    '',
-    'Worker results:',
-    workerBlocks,
-    '',
-    'Return one final admin reply only.'
-  ].join('\n');
-}
-
-function chooseBestFullSubagentWorkerOutput(workerResults = []) {
-  const normalizedResults = Array.isArray(workerResults) ? workerResults : [];
-  const successes = normalizedResults.filter((entry) => String(entry?.status || '').trim() === 'fulfilled' && String(entry?.output || '').trim());
-  if (!successes.length) return '';
-
-  successes.sort((a, b) => String(b.output || '').trim().length - String(a.output || '').trim().length);
-  return String(successes[0]?.output || '').trim();
-}
-
-function buildFullSubagentFallbackReply(workerResults = []) {
-  const normalizedResults = Array.isArray(workerResults) ? workerResults : [];
-  const best = chooseBestFullSubagentWorkerOutput(normalizedResults);
-  if (best) return best;
-
-  const fragments = normalizedResults
-    .map((entry) => {
-      const workerId = String(entry?.worker?.id || '').trim();
-      const output = String(entry?.output || '').trim();
-      const error = String(entry?.error || '').trim();
-      if (output) return workerId ? `[${workerId}] ${output}` : output;
-      if (error) return workerId ? `[${workerId}] ${error}` : error;
-      return '';
-    })
-    .filter(Boolean);
-
-  if (fragments.length) return fragments.join('\n\n');
-  return 'This /full run did not produce a usable worker result.';
-}
-
-function buildFullSubagentAllWorkersFailedReply(workerResults = []) {
-  const normalizedResults = Array.isArray(workerResults) ? workerResults : [];
-  const failures = normalizedResults
-    .map((entry) => String(entry?.error || '').trim())
-    .filter(Boolean);
-  if (!failures.length) {
-    return '所有 worker 都失败了，而且没有产出可用结果。';
-  }
-  return [
-    '所有 worker 都失败了。',
-    failures.map((line) => `- ${line}`).join('\n')
-  ].join('\n');
 }
 
 function getModelSegmentBreakIndex(text) {
@@ -1325,134 +900,6 @@ function isCorrectionSignal(text = '') {
   return /(不是这样|你说错了|实际上应该是|你搞错了|不对|纠正一下|更准确地说)/i.test(input);
 }
 
-function getLastAssistantReplyForSession(senderId = '', groupId = '') {
-  const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
-  const historyStore = require('../utils/memory').chatHistory || {};
-  const history = Array.isArray(historyStore[sessionKey]) ? historyStore[sessionKey] : [];
-  for (let i = history.length - 1; i >= 0; i -= 1) {
-    const item = history[i];
-    if (String(item?.role || '').trim() === 'assistant' && String(item?.content || '').trim()) {
-      return String(item.content || '').trim();
-    }
-  }
-  return '';
-}
-
-function getLastUserMessageForSession(senderId = '', groupId = '') {
-  const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
-  const historyStore = require('../utils/memory').chatHistory || {};
-  const history = Array.isArray(historyStore[sessionKey]) ? historyStore[sessionKey] : [];
-  for (let i = history.length - 1; i >= 0; i -= 1) {
-    const item = history[i];
-    if (String(item?.role || '').trim() === 'user' && String(item?.content || '').trim()) {
-      return String(item.content || '').trim();
-    }
-  }
-  return '';
-}
-
-function sanitizeSubagentContextSnippet(text = '') {
-  return String(text || '')
-    .replace(/\[CQ:[^\]]+\]/g, ' ')
-    .replace(/\b(?:group|groupId|user|userId|session|sessionId)\s*[:=]\s*[A-Za-z0-9:_-]+\b/gi, ' ')
-    .replace(/\b\d{5,}\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function clipSubagentContextSummary(text = '', maxLength = 220) {
-  const normalized = sanitizeSubagentContextSnippet(text);
-  if (!normalized) return '';
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
-}
-
-function buildDirectedConversationSummary(directedContext = {}, { maxLength = 220 } = {}) {
-  const context = directedContext && typeof directedContext === 'object' ? directedContext : {};
-  const lines = [];
-  if (String(context.scene || '').trim()) lines.push(`Scene: ${String(context.scene || '').trim()}`);
-  const addressee = context.addressee && typeof context.addressee === 'object' ? context.addressee : {};
-  const addresseeText = String(
-    addressee.senderName
-    || addressee.userId
-    || addressee.kind
-    || ''
-  ).trim();
-  if (addresseeText) lines.push(`Current message to: ${addresseeText}`);
-  const quote = context.quote && typeof context.quote === 'object' ? context.quote : null;
-  if (quote) {
-    const quoteFrom = String(quote.senderName || quote.senderId || '').trim();
-    if (String(quote.origin || '').trim()) lines.push(`Quoted origin: ${String(quote.origin || '').trim()}`);
-    if (quoteFrom) lines.push(`Quoted message from: ${quoteFrom}`);
-    if (quote.hasImage === true) lines.push('Quoted message has image');
-    if (String(quote.text || '').trim()) lines.push(`Quoted text: ${String(quote.text || '').trim()}`);
-  }
-  const quotePriority = context.quotePriority && typeof context.quotePriority === 'object' ? context.quotePriority : null;
-  if (quotePriority?.enabled) {
-    if (String(quotePriority.mode || '').trim()) lines.push(`Quote priority mode: ${String(quotePriority.mode || '').trim()}`);
-    if (String(quotePriority.reason || '').trim()) lines.push(`Quote priority reason: ${String(quotePriority.reason || '').trim()}`);
-    if (String(quotePriority.quoteAnchoredText || '').trim()) lines.push(`Quote anchored text: ${String(quotePriority.quoteAnchoredText || '').trim()}`);
-  }
-  if (context.activePair?.userA && context.activePair?.userB) {
-    lines.push(`Active pair: ${context.activePair.userA}<->${context.activePair.userB}`);
-  }
-  return clipSubagentContextSummary(lines.join('\n'), maxLength);
-}
-
-function prefersQuotedImage(cleanText = '') {
-  const text = String(cleanText || '').trim();
-  if (!text) return false;
-  return /(上面那张|引用那张|前面那张|回复那张|那张图|引用图片|上面这张图|前面这张图)/i.test(text);
-}
-
-function prefersCurrentImage(cleanText = '') {
-  const text = String(cleanText || '').trim();
-  if (!text) return false;
-  return /(我发的这张|我这张|看我这张|我贴这张|我这图|这张图|这张图片)/i.test(text);
-}
-
-function resolveVisualInputFromContinuousMetaCore(continuousMeta = null, directedContext = null, cleanText = '') {
-  const meta = continuousMeta && typeof continuousMeta === 'object' ? continuousMeta : null;
-  if (!meta) return null;
-  const selected = String(meta.selectedImageUrl || '').trim();
-  const replyImages = Array.isArray(meta.replyContext?.imageUrls) ? meta.replyContext.imageUrls : [];
-  const quotePriority = directedContext?.quotePriority && typeof directedContext.quotePriority === 'object'
-    ? directedContext.quotePriority
-    : null;
-  const quoteWantsQuotedImage = quotePriority?.enabled
-    && quotePriority?.quoteFocus?.hasImage === true
-    && (
-      String(quotePriority.mode || '').trim() === 'anchored_rewrite'
-      || prefersQuotedImage(cleanText)
-    );
-  const currentImageRef = prefersCurrentImage(cleanText);
-
-  if (selected && !quoteWantsQuotedImage) return selected;
-  if (selected && currentImageRef) return selected;
-  for (const item of replyImages) {
-    const url = String(item || '').trim();
-    if (url) return url;
-  }
-  if (selected) return selected;
-  return null;
-}
-
-function resolveVisualInputFromContinuousMeta(continuousMeta = null) {
-  return resolveVisualInputFromContinuousMetaCore(continuousMeta, null, '');
-}
-
-// source-compat anchor: function buildSubagentContextSummary(senderId = '', groupId = '', { maxLength = 220 } = {}) {
-function buildSubagentContextSummary(senderId = '', groupId = '', { maxLength = 220, directedContext = null } = {}) {
-  const lastUserText = getLastUserMessageForSession(senderId, groupId);
-  const lastAssistantReply = getLastAssistantReplyForSession(senderId, groupId);
-  const lines = [];
-  const directedSummary = buildDirectedConversationSummary(directedContext, { maxLength });
-  if (directedSummary) lines.push(directedSummary);
-  if (lastUserText) lines.push(`Previous user: ${lastUserText}`);
-  if (lastAssistantReply) lines.push(`Previous assistant: ${lastAssistantReply}`);
-  return clipSubagentContextSummary(lines.join('\n'), maxLength);
-}
-
 function maybeCaptureUserCorrection({ cleanText, senderId, groupId, routeExecutionPlan }) {
   if (!isCorrectionSignal(cleanText)) return;
   const lastAssistantReply = getLastAssistantReplyForSession(senderId, groupId);
@@ -1547,77 +994,66 @@ function createMessageHandler({
     runtimeConfig: config
   });
   const buildReplyTelemetry = createReplyTelemetryBridge(config);
-
-  function maybeRunDeferredPersist(replyEnvelope = {}) {
-    const replyOptions = replyEnvelope?.replyOptions && typeof replyEnvelope.replyOptions === 'object'
-      ? replyEnvelope.replyOptions
-      : null;
-    if (replyOptions?.deferPersist !== true) return;
-    const routeMeta = replyOptions?.routeMeta && typeof replyOptions.routeMeta === 'object'
-      ? replyOptions.routeMeta
-      : {};
-    const userId = String(routeMeta.userId || routeMeta.user_id || '').trim();
-    const sessionKey = resolveShortTermSessionKey(userId, routeMeta);
-    const threadId = resolveThreadId({
-      userId,
-      routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
-      reviewMode: '',
-      routeMeta,
-      sessionKey,
-      imageUrl: null,
-      options: {
-        routeMeta
-      }
-    });
-    if (!threadId) return;
-
-    const emitPersistBackgroundEvent = (type = '', payload = {}) => {
-      const telemetry = buildReplyTelemetry({
-        senderId: userId,
-        groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
-        chatType: String(routeMeta.chatType || '').trim(),
-        routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
-        topRouteType: String(replyOptions?.topRouteType || '').trim(),
-        routeMeta
-      });
-      if (typeof telemetry?.onEvent === 'function') {
-        telemetry.onEvent({
-          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          ts: Date.now(),
-          type: String(type || 'event').trim() || 'event',
-          node: 'persist_background',
-          threadId,
-          ...payload
-        });
-      }
-    };
-
-    setTimeout(() => {
-      emitPersistBackgroundEvent('persist_background_start');
-      console.log('[persist-background] start', {
-        threadId,
-        routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
-        topRouteType: String(replyOptions?.topRouteType || '').trim()
-      });
-      const startedAt = Date.now();
-      runPersistInBackgroundFromCheckpoint(threadId).catch((error) => {
-        emitPersistBackgroundEvent('persist_background_failure', {
-          durationMs: Math.max(0, Date.now() - startedAt),
-          error: error?.message || String(error || '')
-        });
-        console.error('[persist-background] failed', {
-          threadId,
-          error: error?.message || String(error || '')
-        });
-      }).then((result) => {
-        if (result) {
-          emitPersistBackgroundEvent('persist_background_success', {
-            durationMs: Math.max(0, Date.now() - startedAt)
-          });
-        }
-      });
-    }, 0);
-  }
+  const telemetryCoordinator = createMessageTelemetryCoordinator({
+    buildReplyTelemetry,
+    runPersistInBackgroundFromCheckpoint
+  });
+  const adminCoordinator = createMessageAdminCoordinator({
+    config,
+    chatHistory,
+    shortTermMemory,
+    resolveShortTermSessionKey,
+    getSessionSummaryCooldownStatus,
+    saveSessionContextSummary,
+    generateSessionContextSummary,
+    isAdminUser,
+    getGroupInitiativeState,
+    clearGroupMute,
+    setGroupMute,
+    scheduleGroupMessage,
+    createScheduledCommand
+  });
+  const fullSubagentCoordinator = createMessageFullSubagentCoordinator({
+    config,
+    askAIByGraph,
+    extractJsonSafely,
+    cleanToolReplyText,
+    resolveToolReplyFormattingPreferences,
+    buildToolReplyFormatInstruction,
+    startSubagentBridgeCall,
+    buildRuntimePromptOverride: buildRuntimePrompt
+  });
+  const backgroundTaskCoordinator = createMessageBackgroundTaskCoordinator({
+    config,
+    buildSessionId,
+    backgroundTaskRuntime,
+    normalizeUserFacingReply: (...args) => replyRuntime.normalizeUserFacingReply(...args),
+    getEffectivePolicyKey,
+    summarizeBackgroundReply,
+    sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
+    maybeSendMemeFollowup,
+    sendWithRetry
+  });
+  const runBackgroundToolTask = (...args) => backgroundTaskCoordinator.runBackgroundToolTask(...args);
+  const visualContext = createMessageVisualContext({
+    chatHistory
+  });
+  const maybeRunDeferredPersist = telemetryCoordinator.maybeRunDeferredPersist;
+  const handleSessionSummaryCommand = (...args) => adminCoordinator.handleSessionSummaryCommand(...args);
+  const handleInitiativeAdminCommand = (...args) => adminCoordinator.handleInitiativeAdminCommand(...args);
+  const handleQqScheduleAdminCommand = (...args) => adminCoordinator.handleQqScheduleAdminCommand(...args);
+  const reviewSubagentOutput = (...args) => fullSubagentCoordinator.reviewSubagentOutput(...args);
+  const planFullSubagentWorkers = (...args) => fullSubagentCoordinator.planFullSubagentWorkers(...args);
+  const reviewFullMultiWorkerOutput = (...args) => fullSubagentCoordinator.reviewFullMultiWorkerOutput(...args);
+  const handleFullAdminCommand = (args) => fullSubagentCoordinator.handleFullAdminCommand({
+    ...args,
+    sendGroupReply,
+    normalizeUserFacingReply,
+    askToolTaskWithSubagentReview,
+    routeExecution,
+    runBackgroundToolTask,
+    executeFullSubagentTaskWithHandle
+  });
   const inboundConcurrency = inboundConcurrencyControllerOverride || createInboundConcurrencyController({
     globalLimit: config.INBOUND_GLOBAL_MAX_CONCURRENCY,
     generalLimit: config.INBOUND_GENERAL_MAX_CONCURRENCY,
@@ -1661,127 +1097,58 @@ function createMessageHandler({
     saveData,
     clearGroupBindingForUser
   });
+  const taskControlCoordinator = createMessageTaskControlCoordinator({
+    buildSessionId,
+    buildNoTaskControlText,
+    buildSessionStatusReply,
+    buildSupplementedTaskText,
+    buildSubagentContextSummary,
+    routeResolver,
+    planDirectChat,
+    routeExecution,
+    backgroundTaskRuntime,
+    buildRoutePromptBundle,
+    getStreamMaxSegments,
+    buildToolGuidancePrompt,
+    buildBridgeGuidancePrompt,
+    buildStreamingSegmentationPrompt,
+    shouldPreferQqRichReply,
+    buildQqRichReplyPrompt,
+    getEffectivePolicyKey,
+    sendGroupReply,
+    runBackgroundToolTask,
+    config
+  });
+  const dispatchCoordinator = createMessageDispatchCoordinator({
+    config,
+    buildRoutePromptBundle,
+    getStreamMaxSegments,
+    buildToolGuidancePrompt,
+    buildBridgeGuidancePrompt,
+    buildStreamingSegmentationPrompt,
+    shouldPreferQqRichReply,
+    buildQqRichReplyPrompt,
+    buildSafetyBoundaryRoutePrompt,
+    buildLlmPerception,
+    buildRoutePlanLogPayload,
+    maybeCaptureUnavailableFeatureRequest,
+    buildUnavailableRouteReply,
+    getEffectivePolicyKey,
+    runBackgroundToolTask,
+    detectQzonePostDraftMode,
+    generateBotDiaryDraft,
+    generateGenericQzoneDraft,
+    normalizeGeneratedQzoneContent,
+    publishQzoneForContext,
+    markThinkingEmojiBeforeLlm,
+    askToolTaskLocally,
+    createStreamingDispatcher,
+    composeDirectRoutePrompt,
+    askAIDispatch,
+    sendWithRetry
+  });
   let routeFlow = null;
-
-  function buildSubagentReviewPayload(question, subagentOutput, routePolicyKey = 'tool/review') {
-    return buildRuntimePrompt('review-payload', {
-      routeKey: routePolicyKey,
-      question: String(question || '').trim() || '(empty)',
-      subagentOutput: String(subagentOutput || '').trim() || '(empty)'
-    });
-  }
-
-  async function reviewSubagentOutput({
-    question,
-    subagentOutput,
-    userInfo,
-    userId,
-    imageUrl = null,
-    routePrompt = null,
-    routePolicyKey = 'tool/review'
-  }) {
-    const personaPrompt = String(config.SYSTEM_PROMPT || '').trim();
-    const formattingPreferences = resolveToolReplyFormattingPreferences(question);
-    const outputFormatInstruction = buildToolReplyFormatInstruction(formattingPreferences);
-    const reviewSystemPrompt = buildRuntimePrompt('review-system', {
-      personaPrompt,
-      outputFormatInstruction
-    });
-
-    const reviewRoutePrompt = buildRuntimePrompt('review-route', {
-      routePromptBlock: routePrompt ? `路由提示:\n${routePrompt}` : '',
-      outputFormatInstruction
-    });
-
-    const reviewInput = buildSubagentReviewPayload(question, subagentOutput, routePolicyKey);
-    return askAIByGraph(reviewInput, userInfo, userId, reviewSystemPrompt, imageUrl, {
-      routePrompt: reviewRoutePrompt,
-      routePolicyKey,
-      reviewMode: 'subagent_output',
-      disableStream: true,
-      disableTools: true,
-      routeMeta: {
-        requestText: question
-      }
-    });
-  }
-
-  async function planFullSubagentWorkers({
-    question,
-    userInfo,
-    userId,
-    imageUrl = null,
-    routePrompt = null,
-    routePolicyKey = 'admin/full'
-  }) {
-    const maxWorkers = clampFullSubagentWorkerCount(config.FULL_SUBAGENT_MAX_WORKERS, 2, 2);
-    const prompt = buildFullSubagentCoordinatorPayload(question, routePrompt, maxWorkers);
-    let rawPlan = '';
-
-    try {
-      rawPlan = await askAIByGraph(prompt, userInfo, userId, String(config.SYSTEM_PROMPT || '').trim(), imageUrl, {
-        routePrompt: 'Plan the admin `/full` task into up to two workers. Return JSON only.',
-        routePolicyKey,
-        topRouteType: 'admin',
-        reviewMode: 'full_subagent_plan',
-        disableTools: true,
-        disableStream: true,
-        modelConfig: {
-          model: 'gpt-5.4-mini'
-        },
-        routeMeta: {
-          requestText: question,
-          topRouteType: 'admin',
-          routePolicyKey
-        }
-      });
-    } catch (error) {
-      console.error('[full-subagent] coordinator failed, fallback to single worker:', error?.message || error);
-      return buildSingleWorkerFallbackPlan(question);
-    }
-
-    return normalizeFullSubagentPlan(rawPlan, {
-      question,
-      maxWorkers
-    });
-  }
-
-  async function reviewFullMultiWorkerOutput({
-    question,
-    plan,
-    workerResults,
-    userInfo,
-    userId,
-    imageUrl = null,
-    routePrompt = null,
-    routePolicyKey = 'admin/full'
-  }) {
-    const personaPrompt = String(config.SYSTEM_PROMPT || '').trim();
-    const formattingPreferences = resolveToolReplyFormattingPreferences(question);
-    const outputFormatInstruction = buildToolReplyFormatInstruction(formattingPreferences);
-    const reviewSystemPrompt = buildRuntimePrompt('review-system', {
-      personaPrompt,
-      outputFormatInstruction
-    });
-    const reviewRoutePrompt = buildRuntimePrompt('review-route', {
-      routePromptBlock: routePrompt ? `Routing guidance:\n${routePrompt}` : '',
-      outputFormatInstruction
-    });
-    const reviewInput = buildFullSubagentReviewPayload(question, plan, workerResults, routePolicyKey);
-    return askAIByGraph(reviewInput, userInfo, userId, reviewSystemPrompt, imageUrl, {
-      routePrompt: reviewRoutePrompt,
-      routePolicyKey,
-      topRouteType: 'admin',
-      reviewMode: 'full_subagent_multi_review',
-      disableTools: true,
-      disableStream: true,
-      routeMeta: {
-        requestText: question,
-        topRouteType: 'admin',
-        routePolicyKey
-      }
-    });
-  }
+  const buildSubagentContextSummary = (...args) => visualContext.buildSubagentContextSummary(...args);
 
   async function executeFullMultiWorkerTaskWithHandle(question, userInfo, userId, imageUrl = null, options = {}) {
     const mutableOptions = options && typeof options === 'object' ? { ...options } : {};
@@ -2383,116 +1750,6 @@ function createMessageHandler({
       replyOptions: null,
       backgroundHandled: true
     };
-  }
-
-  async function handleFullAdminCommand({
-    route,
-    groupId,
-    senderId,
-    userInfo,
-    rawText
-  }) {
-    const command = route?.meta?.command || {};
-    const payload = String(command.payload || command.args?.[0] || '').trim();
-    if (!route?.meta?.admin) {
-      await sendGroupReply({
-        groupId,
-        senderId,
-        replyText: '????????? /full?',
-        atSender: true,
-        retries: 1,
-        waitMs: 300
-      });
-      return true;
-    }
-
-    if (!payload) {
-      await sendGroupReply({
-        groupId,
-        senderId,
-        replyText: '/full ????????????',
-        atSender: true,
-        retries: 1,
-        waitMs: 300
-      });
-      return true;
-    }
-
-    const routeExecutionPlan = routeExecution.resolveRouteExecution(route, config, {});
-
-    const sessionChatId = `group_${groupId}_user_${senderId}`;
-    const fullExecutionHandleFactory = executeFullSubagentTaskWithHandle; // executionHandleFactory: executeFullSubagentTaskWithHandle
-    const fullPrompt = [
-      '??? /full ???????????????',
-      '?????? direct_chat?',
-      payload
-    ].join('\n\n');
-
-    if (config.BACKGROUND_TOOL_TASKS_ENABLED) {
-      await runBackgroundToolTask({
-        route,
-        routeExecutionPlan,
-        cleanText: payload,
-        imageUrl: route?.imageUrl || null,
-        userInfo,
-        senderId,
-        groupId,
-        toolTaskOptions: {
-          routePrompt: fullPrompt,
-          subagentRoutePrompt: fullPrompt,
-          sessionChannel: 'qq-group',
-          sessionChatId,
-          routePolicyKey: 'admin/full',
-          topRouteType: 'admin',
-          routeMeta: {
-            ...(route?.meta || {}),
-            groupId,
-            topRouteType: 'admin',
-            routePolicyKey: 'admin/full'
-          }
-        },
-        executionHandleFactory: config.FULL_SUBAGENT_MULTI_AGENT_ENABLED
-          ? executeFullMultiWorkerTaskWithHandle
-          : fullExecutionHandleFactory,
-        initialStage: config.FULL_SUBAGENT_MULTI_AGENT_ENABLED ? 'planning' : 'running'
-      });
-      return true;
-    }
-
-    const fullTaskOptions = {
-      routePrompt: fullPrompt,
-      subagentRoutePrompt: fullPrompt,
-      sessionChannel: 'qq-group',
-      sessionChatId,
-      routePolicyKey: 'admin/full',
-      topRouteType: 'admin',
-      routeMeta: {
-        ...(route?.meta || {}),
-        groupId,
-        topRouteType: 'admin',
-        routePolicyKey: 'admin/full',
-        rawText
-      }
-    };
-
-    const reply = config.FULL_SUBAGENT_MULTI_AGENT_ENABLED
-      ? await (await executeFullMultiWorkerTaskWithHandle(payload, userInfo, senderId, route?.imageUrl || null, fullTaskOptions)).promise
-      : await askToolTaskWithSubagentReview(payload, userInfo, senderId, null, route?.imageUrl || null, fullTaskOptions);
-
-    await sendGroupReply({
-      groupId,
-      senderId,
-      replyText: normalizeUserFacingReply(reply, {
-        routeDebugKey: 'admin/full',
-        topRouteType: 'admin',
-        allowTools: false,
-        requestText: payload
-      }),
-      atSender: true,
-      retries: 1,
-      waitMs: 300
-    });
-    return true;
   }
 
   async function handleBackgroundTaskControl({

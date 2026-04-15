@@ -18,7 +18,7 @@ const { appendMemoryEvent } = require('../utils/memory-v3/events');
 const { materializeMemoryViews } = require('../utils/memory-v3/materializer');
 const { queryMemory } = require('../utils/memory-v3/query');
 
-(async () => {
+module.exports = (async () => {
   await appendMemoryEvent({
     type: 'memory_candidate_extracted',
     userId: 'u_v3',

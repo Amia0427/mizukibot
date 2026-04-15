@@ -16,7 +16,7 @@ const { appendMemoryEvent } = require('../utils/memory-v3/events');
 const { materializeMemoryViews } = require('../utils/memory-v3/materializer');
 const { restoreSessionState } = require('../utils/memory-v3/session');
 
-(async () => {
+module.exports = (async () => {
   await appendMemoryEvent({
     type: 'session_checkpoint',
     userId: 'u_restore',

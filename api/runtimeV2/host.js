@@ -1,6 +1,5 @@
 // Primary LangGraph runtime host. New routing, recovery, eventing, and persist
 // behavior belongs here or in the neutral helper modules it composes.
-const crypto = require('crypto');
 const { StateGraph, END } = require('@langchain/langgraph');
 const config = require('../../config');
 const { getToolExecutors } = require('../toolRegistry');
@@ -152,6 +151,12 @@ const {
   shouldPrioritizeMemoryProbe
 } = require('../../utils/recallHeuristics');
 const { buildContinuityState } = require('../../utils/continuityState');
+const { createConversationContextHelpers } = require('./runtime/conversationContext');
+const { createContinuityProbeHelpers } = require('./runtime/continuityProbe');
+const { createDirectToolLoopHelpers } = require('./runtime/directToolLoop');
+const { createEvent, emitEvents, pickRouteMetaForPostReplyJob, stableHash, summarizeToolLogValue } = require('./runtime/events');
+const { createStreamingCoordinatorHelpers } = require('./runtime/streamingCoordinator');
+const { createToolExecutionHelpers } = require('./runtime/toolExecution');
 
 function nowTs() {
   return Date.now();
@@ -227,19 +232,6 @@ function buildV2CanonicalSegments(state, input = {}) {
   return {
     segments,
     compactionPlan
-  };
-}
-
-function pickRouteMetaForPostReplyJob(routeMeta = {}) {
-  const source = normalizeObject(routeMeta, {});
-  return {
-    groupId: String(source.groupId || source.group_id || '').trim(),
-    sessionId: String(source.sessionId || source.session_id || '').trim(),
-    taskType: String(source.taskType || source.task_type || '').trim(),
-    agentName: String(source.agentName || source.agent_name || '').trim(),
-    toolName: String(source.toolName || source.tool_name || '').trim(),
-    channelId: String(source.channelId || source.channel_id || '').trim(),
-    topRouteType: String(source.topRouteType || '').trim()
   };
 }
 
@@ -325,34 +317,6 @@ function shouldAppendDailyJournalForV2(request = {}, finalReply = '') {
   if (!topRouteType && !routePolicyKey) return true;
   if (topRouteType) return topRouteType === 'direct_chat';
   return routePolicyKey.startsWith('direct_chat/');
-}
-
-function createEvent(type, payload = {}) {
-  return {
-    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    ts: nowTs(),
-    type: String(type || 'event').trim() || 'event',
-    ...payload
-  };
-}
-
-function emitEvents(events = [], request = {}) {
-  if (typeof request.onEvent !== 'function') return;
-  for (const event of normalizeArray(events)) {
-    try {
-      request.onEvent(event);
-    } catch (_) {}
-  }
-}
-
-function summarizeToolLogValue(value, maxLen = 160) {
-  if (value === undefined) return '';
-  const text = typeof value === 'string' ? value : JSON.stringify(value);
-  return String(text || '').replace(/\s+/g, ' ').trim().slice(0, maxLen);
-}
-
-function stableHash(value) {
-  return crypto.createHash('sha1').update(JSON.stringify(value || {})).digest('hex').slice(0, 16);
 }
 
 function isWriteLikeCapability(capability = '') {
@@ -515,254 +479,22 @@ function createRuntime(options = {}) {
     };
   }
 
-  function computeEffectiveAllowedTools(request = {}, memoryCliTurn = null) {
-    if (isPlannerSingleAuthorityEnabled()) {
-      const planner = getRouteToolPlanner(request.routeMeta);
-      const plannedTools = normalizeToolNames(
-        Array.isArray(planner?.allowedToolNames) ? planner.allowedToolNames : []
-      );
-      return filterAllowedToolsForMemoryCliTurn(plannedTools, memoryCliTurn);
-    }
-    return mergeAllowedToolsWithMemoryCli(request.allowedTools, {
-      ...request,
-      disableTools: !request.allowTools,
-      memoryCliTurn
-    });
-  }
-
-  function resolveMainConversationModelName(request = {}) {
-    const modelConfig = normalizeObject(request.modelConfig, {});
-    return String(modelConfig.model || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
-  }
-
-  function resolveMainConversationTokenLimit(request = {}, affinity = null) {
-    const normalizedAffinity = normalizeObject(affinity, {});
-    const fallbackLimit = Math.max(
-      1,
-      Number(normalizedAffinity.contextWindowTokens || config.CONTEXT_WINDOW_MAX_TOKENS || 32000) || 32000
-    );
-    return resolveModelTokenLimit(resolveMainConversationModelName(request), fallbackLimit);
-  }
-
-  function buildContinuitySystemMessage(state) {
-    if (!config.CONTINUITY_STATE_PROMPT_ENABLED) return null;
-    const text = String(state.memory?.continuityState?.text || '').trim();
-    if (!text) return null;
-    return { role: 'system', content: text };
-  }
-
-  function buildSilentContinuityProbeSystemMessage(state) {
-    const probe = normalizeObject(state.memory?.continuityState?.probe, {});
-    if (probe.skipped || !String(probe.facet || '').trim()) return null;
-    return {
-      role: 'system',
-      content: [
-        '[ContinuityProbePolicy]',
-        'A read-only continuity probe may already have run before this reply.',
-        'Use any continuity digest silently as background context.',
-        'Do not mention tools, tool calls, tool results, memory_cli, probe steps, search commands, or retrieved snippets in the final answer.',
-        'Do not narrate hidden retrieval or command execution. Reply as if you already know the carry-over context.'
-      ].join('\n')
-    };
-  }
-
-  function stripMemoryCliInstruction(text = '') {
-    const raw = String(text || '');
-    if (!raw.includes('[MemoryCLI]')) return raw;
-    const lines = raw.split(/\r?\n/);
-    const kept = [];
-    let skipping = false;
-    for (const line of lines) {
-      if (line.startsWith('[MemoryCLI]')) {
-        skipping = true;
-        continue;
-      }
-      if (skipping && /^\[[A-Za-z]/.test(line)) {
-        skipping = false;
-      }
-      if (!skipping) kept.push(line);
-    }
-    return kept.join('\n').trim();
-  }
-
-  function getMainConversationSystemMessages(state, options = {}) {
-    const request = normalizeObject(state.request, {});
-    const isReviewRoute = Boolean(options.isReviewRoute);
-    const dynamicPrompt = Boolean(options.disableMemoryCliInstruction)
-      ? stripMemoryCliInstruction(String(state.memory?.dynamicPrompt || ''))
-      : String(state.memory?.dynamicPrompt || '').trim();
-    const continuityMessage = buildContinuitySystemMessage(state);
-    const continuityProbePolicyMessage = buildSilentContinuityProbeSystemMessage(state);
-    return [
-      ...(dynamicPrompt ? [{ role: 'system', content: dynamicPrompt }] : []),
-      ...(continuityMessage ? [continuityMessage] : []),
-      ...(continuityProbePolicyMessage ? [continuityProbePolicyMessage] : []),
-      ...((request.routePrompt && !isReviewRoute) ? [{ role: 'system', content: request.routePrompt }] : []),
-      ...(state.memory?.globalToolEvidence ? [{ role: 'system', content: state.memory.globalToolEvidence }] : [])
-    ];
-  }
-
-  function isContinuityProbeEligible(request = {}, mode = '') {
-    const routeMeta = normalizeObject(request.routeMeta, {});
-    const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
-    const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
-    const normalizedMode = String(mode || '').trim().toLowerCase();
-    const question = String(request.question || '').trim();
-    const facet = classifyRecallFacet(question);
-    const explicitContinuityCue = /(where did we leave off|what were we(?: just)? talking about|what were we doing|before|earlier|last time|continue|resume|pick back up|next step|next steps|\u4e0a\u6b21|\u521a\u624d|\u4e4b\u524d|\u7ee7\u7eed|\u63a5\u7740|\u505a\u5230\u54ea|\u804a\u5230\u54ea)/i.test(question);
-    if (!config.CONTINUITY_AUTO_PROBE_ENABLED) return false;
-    if (request.systemInitiated) return false;
-    if (String(request.customPrompt || '').trim()) return false;
-    if (request.imageUrl) return false;
-    if (isReviewMode(request.reviewMode)) return false;
-    if (!String(request.userId || '').trim() || !question) return false;
-    if (!new Set(['chat', 'tool_plan']).has(normalizedMode)) return false;
-    if (topRouteType === 'admin' || topRouteType === 'ignore' || topRouteType === 'refuse') return false;
-    if (topRouteType === 'vision' || routePolicyKey.startsWith('vision/')) return false;
-    if (!explicitContinuityCue && facet !== 'task_or_plan' && facet !== 'recent_continuity') return false;
-
-    return shouldPrioritizeMemoryProbe({
-      rawText: question,
-      cleanText: question,
-      facets: routeMeta.facets,
-      intent: routeMeta.intent,
-      meta: routeMeta.meta
-    });
-  }
-
-  function buildAutoContinuityProbeCommand(question = '') {
-    const facet = classifyRecallFacet(question);
-    const maxResults = Math.max(1, Math.min(8, Number(config.CONTINUITY_AUTO_PROBE_MAX_RESULTS) || 4));
-    if (facet === 'recent_continuity' || facet === 'default_continuity') {
-      return {
-        facet,
-        command: `mem search --query ${JSON.stringify('where did we leave off')} --source recent --limit ${maxResults}`
-      };
-    }
-    if (facet === 'task_or_plan') {
-      return {
-        facet,
-        command: `mem search --query ${JSON.stringify(String(question || '').trim())} --source all --limit ${Math.max(6, maxResults)}`
-      };
-    }
-    return { facet, command: '' };
-  }
-
-  async function maybeRunAutoContinuityProbe(state, runtimeOptions = {}) {
-    const request = normalizeObject(state.request, {});
-    const mode = String(state.execution?.mode || normalizeMode(request)).trim().toLowerCase();
-    if (request.allowTools === false) {
-      return {
-        skipped: true,
-        reason: 'tools_disabled',
-        probeResult: null,
-        probeMeta: null,
-        events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'tools_disabled', mode })]
-      };
-    }
-    if (!isContinuityProbeEligible(request, mode)) {
-      return {
-        skipped: true,
-        reason: 'route_not_eligible',
-        probeResult: null,
-        probeMeta: null,
-        events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'route_not_eligible', mode })]
-      };
-    }
-
-    const seeded = buildContinuityState({
-      request,
-      thread: state.thread,
-      shortTermMemory,
-      chatHistory,
-      maxChars: config.CONTINUITY_STATE_PROMPT_MAX_CHARS
-    });
-    if (seeded.hasSufficientEvidence) {
-      return {
-        skipped: true,
-        reason: 'local_evidence_sufficient',
-        probeResult: null,
-        probeMeta: null,
-        events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'local_evidence_sufficient', mode })]
-      };
-    }
-
-    const allowedTools = computeEffectiveAllowedTools(request, state.execution?.memoryCliTurn);
-    if (!normalizeArray(allowedTools).includes('memory_cli')) {
-      return {
-        skipped: true,
-        reason: 'memory_cli_unavailable',
-        probeResult: null,
-        probeMeta: null,
-        events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'memory_cli_unavailable', mode })]
-      };
-    }
-
-    const probeMeta = buildAutoContinuityProbeCommand(request.question || '');
-    if (!probeMeta.command || !shouldBiasToContinuity(probeMeta.facet)) {
-      return {
-        skipped: true,
-        reason: 'facet_not_supported',
-        probeResult: null,
-        probeMeta,
-        events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'facet_not_supported', facet: probeMeta.facet, mode })]
-      };
-    }
-
-    const probeStep = {
-      id: `continuity_probe_${Date.now()}`,
-      kind: 'memory_cli',
-      tool: 'memory_cli',
-      instruction: 'read-only continuity probe before reply generation',
-      inputs: { command: probeMeta.command },
-      successCriteria: 'continuity digest available',
-      attempts: 0,
-      evidence: [],
-      blockingReason: ''
-    };
-    const startEvents = [
-      createEvent('continuity_probe_triggered', {
-        node: 'prepare',
-        facet: probeMeta.facet,
-        mode,
-        command: probeMeta.command
-      })
-    ];
-
-    try {
-      const envelope = await runToolStep(probeStep, state, runtimeOptions);
-      const parsed = safeParseMemoryCliResult(envelope?.result);
-      return {
-        skipped: false,
-        reason: String(envelope?.status || '').trim() === 'completed' ? 'completed' : 'failed',
-        probeResult: String(envelope?.status || '').trim() === 'completed' ? parsed : null,
-        probeMeta,
-        events: startEvents.concat([
-          createEvent('continuity_probe_result', {
-            node: 'prepare',
-            facet: probeMeta.facet,
-            ok: String(envelope?.status || '').trim() === 'completed',
-            resultCount: Number(parsed?.count || normalizeArray(parsed?.results).length || 0) || 0
-          })
-        ])
-      };
-    } catch (error) {
-      return {
-        skipped: false,
-        reason: 'error',
-        probeResult: null,
-        probeMeta,
-        events: startEvents.concat([
-          createEvent('continuity_probe_result', {
-            node: 'prepare',
-            facet: probeMeta.facet,
-            ok: false,
-            error: String(error?.message || error).slice(0, 180)
-          })
-        ])
-      };
-    }
-  }
+  const {
+    buildContinuitySystemMessage,
+    computeEffectiveAllowedTools,
+    getMainConversationSystemMessages,
+    resolveMainConversationModelName,
+    resolveMainConversationTokenLimit,
+    stripMemoryCliInstruction
+  } = createConversationContextHelpers({
+    config,
+    normalizeToolNames,
+    filterAllowedToolsForMemoryCliTurn,
+    mergeAllowedToolsWithMemoryCli,
+    isPlannerSingleAuthorityEnabled,
+    getRouteToolPlanner,
+    resolveModelTokenLimit
+  });
 
   function buildMainConversationContextSnapshot(state, segmentedMessages = {}, options = {}) {
     const request = normalizeObject(state.request, {});
@@ -967,16 +699,6 @@ function createRuntime(options = {}) {
     const compact = String(text || '').replace(/\s+/g, ' ').trim();
     if (!compact) return '';
     return compact.slice(0, Math.max(80, Number(maxChars) || 480));
-  }
-
-  function cloneDirectToolLoopState(statePatch = {}) {
-    return {
-      messages: normalizeArray(statePatch.messages).map((item) => ({ ...normalizeObject(item, {}) })),
-      events: normalizeArray(statePatch.events).map((item) => ({ ...normalizeObject(item, {}) })),
-      memoryCliTurn: createMemoryCliTurnState(statePatch.memoryCliTurn),
-      executedToolEnvelopes: normalizeArray(statePatch.executedToolEnvelopes).map((item) => ({ ...normalizeObject(item, {}) })),
-      effectiveAllowedTools: normalizeArray(statePatch.effectiveAllowedTools)
-    };
   }
 
   function shouldAttemptMemoryRecovery(question = '', allowedTools = []) {
@@ -1184,165 +906,6 @@ function createRuntime(options = {}) {
 
   // Tool-plan answers still converge to one final text. When the graph is
   // streaming, emit only that final text so callers never see draft + final.
-  async function emitWholeReplyAsSingleStream(state, finalReply) {
-    const request = normalizeObject(state.request, {});
-    const text = sanitizeUserFacingText(finalReply).trim();
-    if (!request.streaming || typeof request.onDelta !== 'function' || !text) return text;
-    request.onDelta(text, text);
-    return text;
-  }
-
-  async function streamDirectReply(messagesToSend, state) {
-    const request = normalizeObject(state.request, {});
-    // Direct routes can reuse the mature V1 streaming helper. If humanizer is
-    // enabled, suppress raw deltas and let the humanized stream be the only
-    // user-visible output.
-    const useHumanizerStreaming = isHumanizerEnabledImpl() && !shouldBypassHumanizerForPolicy(request.routePolicyKey);
-    const upstreamStreamOptions = useHumanizerStreaming
-      ? {
-          onDelta() {},
-          streamHadOutput: false,
-          userId: request.userId,
-          routeMeta: normalizeObject(request.routeMeta, {})
-        }
-      : request;
-
-    try {
-      const streamedReply = await requestStreamingReplyImpl(messagesToSend, upstreamStreamOptions, request.modelConfig);
-      const finalReply = useHumanizerStreaming
-        ? await finalizeStreamingReplyWithHumanizerImpl(streamedReply, 'The network was unstable just now. Please try again.', {
-            question: request.question,
-            dynamicPrompt: state.memory?.dynamicPrompt || '',
-            modelConfig: request.modelConfig,
-            onDelta: request.onDelta,
-            streamHadOutput: Boolean(state.output?.stream?.hadOutput)
-          })
-        : sanitizeUserFacingText(streamedReply).trim();
-      const safeFinalReply = sanitizeUserFacingText(finalReply).trim() || 'The network was unstable just now. Please try again.';
-      return {
-        finalReply: safeFinalReply,
-        stream: {
-          ...markStreamCompleted(state.output, true),
-          ...mirrorStreamingFlags(state.output, safeFinalReply),
-          mode: 'direct'
-        }
-      };
-    } catch (error) {
-      if (String(error?.partialText || '').trim()) {
-        const finalReply = useHumanizerStreaming
-          ? await finalizeStreamingReplyWithHumanizerImpl(error.partialText, 'The network was unstable just now. Please try again.', {
-              question: request.question,
-              dynamicPrompt: state.memory?.dynamicPrompt || '',
-              modelConfig: request.modelConfig,
-              onDelta: request.onDelta,
-              streamHadOutput: Boolean(state.output?.stream?.hadOutput)
-            })
-          : sanitizeUserFacingText(error.partialText).trim();
-        const safeFinalReply = sanitizeUserFacingText(finalReply).trim() || 'The network was unstable just now. Please try again.';
-        return {
-          finalReply: safeFinalReply,
-          stream: {
-            ...markStreamCompleted(state.output, true),
-            ...mirrorStreamingFlags(state.output, safeFinalReply),
-            mode: 'direct'
-          }
-        };
-      }
-      error.outputStream = {
-        ...ensureOutputStream(state.output, 'direct'),
-        fallbackToNonStream: true,
-        completed: false
-      };
-      throw error;
-    }
-  }
-
-  async function maybeStreamFinalReply(state, finalReply) {
-    const request = normalizeObject(state.request, {});
-    if (!request.streaming || typeof request.onDelta !== 'function') {
-      return String(finalReply || '').trim();
-    }
-    return emitWholeReplyAsSingleStream(state, finalReply);
-  }
-
-  function buildDirectReplyMessages(state, messageContent, systemMessages = []) {
-    const request = normalizeObject(state.request, {});
-    const baseMessages = normalizeArray(systemMessages)
-      .filter((item) => item && typeof item === 'object');
-    const continuityStateMessages = baseMessages.filter((item) => String(item?.content || '').includes('[ContinuityState]'));
-    const globalToolEvidenceMessages = baseMessages.filter((item) => String(item?.content || '').includes('[GlobalToolEvidence]'));
-    const pureSystemMessages = baseMessages.filter((item) => !globalToolEvidenceMessages.includes(item) && !continuityStateMessages.includes(item));
-    const userTurnMessages = [{ role: 'user', content: messageContent }];
-
-    if (!isChatLikeRoute(request) || request.systemInitiated || String(request.customPrompt || '').trim()) {
-      const canonical = buildV2CanonicalSegments(state, {
-        systemPromptMessages: pureSystemMessages,
-        continuityMessages: continuityStateMessages,
-        shortTermSummaryMessages: [],
-        recentHistoryMessages: [],
-        userTurnMessages,
-        toolEvidenceMessages: globalToolEvidenceMessages,
-        source: 'direct_reply'
-      });
-      return {
-        messages: canonical.compactionPlan.compactedSegments.flatMap((segment) => segment.messages),
-        systemMessages: pureSystemMessages,
-        continuityStateMessages,
-        summaryMessages: [],
-        recentHistory: [],
-        userTurnMessages,
-        globalToolEvidenceMessages,
-        compactionPlan: canonical.compactionPlan,
-        canonicalSegments: canonical.segments
-      };
-    }
-
-    const routeMeta = normalizeObject(request.routeMeta, {});
-    const sessionKey = String(
-      request.sessionKey
-      || state.thread?.sessionKey
-      || resolveShortTermSessionKey(request.userId, routeMeta)
-      || ''
-    ).trim();
-    const recentContext = buildShortTermContextMessages(request.userId, request.userInfo, {
-      chatHistory,
-      shortTermMemory,
-      routeMeta,
-      sessionKey
-    });
-    const affinity = normalizeObject(state.memory, {}).affinity;
-    const sessionSummaryMessages = normalizeArray(recentContext.sessionSummaryMessages);
-    const summaryMessages = recentContext.summaryMessage ? [recentContext.summaryMessage] : [];
-    const recentHistory = normalizeArray(recentContext.recentHistory);
-    const canonical = buildV2CanonicalSegments(state, {
-      systemPromptMessages: pureSystemMessages,
-      routePromptMessages: [],
-      continuityMessages: continuityStateMessages,
-      shortTermSummaryMessages: sessionSummaryMessages.concat(summaryMessages),
-      recentHistoryMessages: recentHistory,
-      userTurnMessages,
-      toolEvidenceMessages: globalToolEvidenceMessages,
-      modelName: resolveMainConversationModelName(request),
-      modelWindowTokens: Math.max(2048, Number(affinity?.contextWindowTokens || 0) || 2048),
-      maxOutputTokens: Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || 3500),
-      source: 'direct_reply'
-    });
-    const trimmedRecentHistory = normalizeArray(
-      canonical.compactionPlan.compactedSegments.find((segment) => segment.name === 'recent_history')?.messages
-    );
-    return {
-      messages: canonical.compactionPlan.compactedSegments.flatMap((segment) => segment.messages),
-      systemMessages: pureSystemMessages,
-      continuityStateMessages,
-      summaryMessages: sessionSummaryMessages.concat(summaryMessages),
-      recentHistory: trimmedRecentHistory,
-      userTurnMessages,
-      globalToolEvidenceMessages,
-      compactionPlan: canonical.compactionPlan,
-      canonicalSegments: canonical.segments
-    };
-  }
-
   function persistCheckpoint(state, nodeName, status = 'running') {
     const threadId = String(state?.thread?.threadId || '').trim();
     if (!threadId) return;
@@ -1369,6 +932,99 @@ function createRuntime(options = {}) {
     persistCheckpoint(state, nodeName, status);
     return state;
   }
+
+  const {
+    buildBlockedToolEnvelope,
+    buildToolContext,
+    canRunStepsInParallel,
+    computeToolEnvelope,
+    isSideEffectPolicy,
+    logToolExecution,
+    maybeCaptureToolFailure,
+    runToolStep
+  } = createToolExecutionHelpers({
+    config,
+    stableHash,
+    summarizeToolLogValue,
+    getPolicy,
+    enforceToolPolicy,
+    shouldRunParallel,
+    capabilityRegistry,
+    buildLiveMainConversationSnapshot,
+    computeEffectiveAllowedTools,
+    createMemoryCliTurnState,
+    updateMemoryCliTurnStateAfterError,
+    updateMemoryCliTurnStateAfterResult,
+    decideMemoryCliTurnAction,
+    safeParseMemoryCliResult,
+    captureToolFailure,
+    isPlannerSingleAuthorityEnabled,
+    toolExecutors
+  });
+
+  const {
+    maybeRunAutoContinuityProbe
+  } = createContinuityProbeHelpers({
+    config,
+    createEvent,
+    buildContinuityState,
+    chatHistory,
+    shortTermMemory,
+    computeEffectiveAllowedTools,
+    classifyRecallFacet,
+    runToolStep,
+    safeParseMemoryCliResult,
+    shouldBiasToContinuity,
+    shouldPrioritizeMemoryProbe
+  });
+
+  const {
+    buildDirectReplyMessages,
+    emitWholeReplyAsSingleStream,
+    maybeStreamFinalReply,
+    streamDirectReply
+  } = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText,
+    isChatLikeRoute,
+    buildVisionMessageContent,
+    buildV2CanonicalSegments,
+    buildShortTermContextMessages,
+    resolveShortTermSessionKey,
+    resolveMainConversationModelName,
+    requestStreamingReplyImpl,
+    finalizeStreamingReplyWithHumanizerImpl,
+    isHumanizerEnabledImpl,
+    shouldBypassHumanizerForPolicy,
+    ensureOutputStream,
+    mirrorStreamingFlags,
+    requestReplyImpl,
+    markStreamCompleted,
+    resolveToolLoopReply,
+    config,
+    chatHistory,
+    shortTermMemory
+  });
+
+  const {
+    cloneDirectToolLoopState,
+    runDirectChatToolLoop
+  } = createDirectToolLoopHelpers({
+    createEvent,
+    normalizeMessageForToolLoop,
+    requestAssistantMessageImpl,
+    buildDirectChatToolStep,
+    buildDirectChatExecutionBatches,
+    parseToolCallArgs,
+    isExcludedDirectChatToolName,
+    computeEffectiveAllowedTools,
+    createMemoryCliTurnState,
+    updateMemoryCliTurnStateAfterError,
+    runToolStep,
+    computeToolEnvelope,
+    getPolicy,
+    logToolExecution,
+    resolveToolLoopReply
+  });
 
   const routeNode = createRouteNode({
     createEvent,
@@ -1621,761 +1277,6 @@ function createRuntime(options = {}) {
     saveAndEmit,
     config
   });
-
-
-  function computeToolEnvelope(step = {}, rawResult = '', policy = {}) {
-    const normalizedInputs = normalizeObject(step.inputs, {});
-    const argsHash = stableHash(normalizedInputs);
-    const resultText = typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult);
-    const batchId = String(step.batchId || step.batch_id || '').trim();
-    const batchIndex = Number.isFinite(Number(step.batchIndex ?? step.batch_index))
-      ? Number(step.batchIndex ?? step.batch_index)
-      : null;
-    const status = !resultText
-      ? 'failed'
-      : /^Tool error:/i.test(resultText) || /^Unknown tool:/i.test(resultText) || /^Tool not allowed:/i.test(resultText)
-        ? 'failed'
-        : 'completed';
-    return {
-      tool_call_id: `${step.id}_${argsHash}_${Date.now()}`,
-      step_id: String(step.id || '').trim(),
-      tool_name: String(step.tool || '').trim(),
-      args_hash: argsHash,
-      args: normalizedInputs,
-      status,
-      result: resultText,
-      side_effect: isSideEffectPolicy(policy),
-      retryable: status !== 'completed',
-      attempt: Number(step.attempts || 0) + 1,
-      ...(batchId ? { batch_id: batchId } : {}),
-      ...(batchIndex !== null ? { batch_index: batchIndex } : {})
-    };
-  }
-
-  function canRunStepsInParallel(steps = []) {
-    return shouldRunParallel(steps, capabilityRegistry);
-  }
-
-  function parseSearchResultRows(resultText = '') {
-    const rows = [];
-    const text = String(resultText || '').trim();
-    if (!text) return rows;
-    const blocks = text.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean);
-    for (const block of blocks) {
-      const lines = block.split('\n').map((item) => item.trim()).filter(Boolean);
-      const urlLine = lines.find((line) => /^https?:\/\//i.test(line));
-      if (!urlLine) continue;
-      const titleLine = lines.find((line) => /^\d+\.\s+/.test(line)) || '';
-      const title = titleLine.replace(/^\d+\.\s+/, '').trim();
-      const desc = lines.find((line) => line !== titleLine && line !== urlLine) || '';
-      rows.push({ title, url: urlLine, desc });
-    }
-    return rows;
-  }
-
-  function extractPreferredDomains(question = '') {
-    const text = String(question || '').trim();
-    const domains = new Set();
-    const matches = text.match(/\b(?:[a-z0-9-]+\.)+[a-z]{2,}\b/ig) || [];
-    for (const item of matches) {
-      const domain = String(item || '').trim().toLowerCase();
-      if (domain) domains.add(domain);
-    }
-    return [...domains];
-  }
-
-  function scoreSearchCandidate(row = {}, question = '', preferredDomains = []) {
-    const url = String(row?.url || '').trim().toLowerCase();
-    const title = String(row?.title || '').trim().toLowerCase();
-    const desc = String(row?.desc || '').trim().toLowerCase();
-    const text = String(question || '').trim().toLowerCase();
-    let score = 0;
-    if (preferredDomains.some((domain) => url.includes(domain))) score += 100;
-    if (/(\u5b98\u7f51|\u5b98\u65b9|official)/i.test(text) && /(official|docs|developer|help|support|api)/i.test(`${url} ${title}`)) score += 30;
-    if (/(\u6587\u6863|docs?|documentation|api)/i.test(text) && /(docs|doc|developer|api)/i.test(`${url} ${title}`)) score += 25;
-    if (/(latest|\u6700\u65b0|news|\u65b0\u95fb)/i.test(text) && /(news|blog|release|changelog|announc)/i.test(`${url} ${title} ${desc}`)) score += 10;
-    if (/^https?:\/\//i.test(url)) score += 5;
-    return score;
-  }
-
-  function resolveWebFetchArgs(step = {}, state = {}) {
-    const stepInputs = normalizeObject(step?.inputs, {});
-    const existingUrl = String(stepInputs.url || '').trim();
-    if (existingUrl) return stepInputs;
-
-    const previousEnvelopes = normalizeArray(state.execution?.toolResults);
-    const previousSteps = normalizeArray(state.plan?.steps);
-    const webSearchResult = [...previousEnvelopes].reverse().find((item) => String(item?.tool_name || '').trim() === 'web_search' && String(item?.status || '').trim() === 'completed')
-      || previousSteps
-        .filter((candidate) => String(candidate?.tool || '').trim() === 'web_search')
-        .flatMap((candidate) => normalizeArray(candidate?.evidence))
-        .reverse()
-        .find((item) => String(item?.status || '').trim() === 'completed');
-    const rows = parseSearchResultRows(webSearchResult?.result || '');
-    if (rows.length === 0) {
-      throw new Error('web_fetch could not resolve url from previous web_search result');
-    }
-
-    const question = String(state.request?.question || '').trim();
-    const preferredDomains = extractPreferredDomains(question);
-    const ranked = rows
-      .map((row, index) => ({ ...row, score: scoreSearchCandidate(row, question, preferredDomains), index }))
-      .sort((left, right) => right.score - left.score || left.index - right.index);
-    const selected = ranked[0] || null;
-    if (!selected?.url) {
-      throw new Error('web_fetch could not find a usable url from search results');
-    }
-    return {
-      ...stepInputs,
-      url: selected.url
-    };
-  }
-
-  function buildToolContext(state, overrides = {}) {
-    const request = normalizeObject(state.request, {});
-    const routeMeta = normalizeObject(request.routeMeta, {});
-    const toolName = String(overrides.toolName || '').trim();
-    const fallbackMainConversationSnapshot = toolName === 'get_context_stats'
-      ? buildLiveMainConversationSnapshot(state, {
-        affinity: state.memory?.affinity,
-        allowedTools: computeEffectiveAllowedTools(request, state.execution?.memoryCliTurn),
-        source: String(overrides.snapshotSource || 'tool_context').trim() || 'tool_context'
-      })
-      : null;
-    return {
-      userId: String(request.userId || '').trim(),
-      routePolicyKey: String(request.routePolicyKey || '').trim(),
-      topRouteType: String(request.topRouteType || '').trim(),
-      routeMeta,
-      reviewMode: String(request.reviewMode || '').trim(),
-      taskType: String(routeMeta.taskType || routeMeta.task_type || '').trim(),
-      sessionId: String(routeMeta.sessionId || routeMeta.session_id || '').trim(),
-      channelId: String(routeMeta.channelId || routeMeta.channel_id || '').trim(),
-      groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
-      mainConversationSnapshot: overrides.mainConversationSnapshot
-        && typeof overrides.mainConversationSnapshot === 'object'
-        && Array.isArray(overrides.mainConversationSnapshot.segments)
-        ? { ...overrides.mainConversationSnapshot }
-        : fallbackMainConversationSnapshot
-    };
-  }
-
-  function logToolExecution(envelope = {}, step = {}, state = {}, extra = {}) {
-    const request = normalizeObject(state.request, {});
-    const routeMeta = normalizeObject(request.routeMeta, {});
-    const args = normalizeObject(envelope.args, normalizeObject(step.inputs, {}));
-    const sanitizedArgs = { ...args };
-    delete sanitizedArgs.__context;
-    console.log('[graph-tool]', {
-      node: String(extra.node || state.execution?.currentNode || '').trim() || 'unknown',
-      topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),
-      routePolicyKey: String(request.routePolicyKey || '').trim(),
-      toolName: String(envelope.tool_name || step.tool || '').trim(),
-      stepId: String(envelope.step_id || step.id || '').trim(),
-      status: String(envelope.status || '').trim(),
-      batchId: String(envelope.batch_id || step.batchId || '').trim(),
-      batchIndex: Number.isFinite(Number(envelope.batch_index))
-        ? Number(envelope.batch_index)
-        : (Number.isFinite(Number(step.batchIndex)) ? Number(step.batchIndex) : null),
-      userId: String(request.userId || '').trim(),
-      groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
-      allowedTools: normalizeArray(extra.allowedTools || request.allowedTools),
-      argsPreview: summarizeToolLogValue(sanitizedArgs),
-      resultPreview: summarizeToolLogValue(envelope.result),
-      blockedReason: String(envelope.blockedReason || '').trim(),
-      retryable: Boolean(envelope.retryable)
-    });
-  }
-
-  function maybeCaptureToolFailure(envelope = {}, step = {}, state = {}) {
-    if (!config.SELF_IMPROVEMENT_ENABLED) return;
-    const status = String(envelope?.status || '').trim().toLowerCase();
-    if (status === 'completed') return;
-    const request = normalizeObject(state.request, {});
-    const routeMeta = normalizeObject(request.routeMeta, {});
-    try {
-      captureToolFailure({
-        envelope,
-        purpose: String(step?.instruction || step?.successCriteria || '').trim(),
-        details: String(step?.successCriteria || '').trim(),
-        routePolicyKey: String(request.routePolicyKey || '').trim(),
-        topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),
-        toolName: String(envelope.tool_name || step?.tool || routeMeta.toolName || routeMeta.tool_name || '').trim(),
-        taskType: String(routeMeta.taskType || routeMeta.task_type || '').trim(),
-        sessionId: String(routeMeta.sessionId || routeMeta.session_id || '').trim(),
-        channelId: String(routeMeta.channelId || routeMeta.channel_id || '').trim(),
-        groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
-        userId: String(request.userId || '').trim(),
-        evidence: [
-          { label: 'tool_result', excerpt: String(envelope?.result || '').trim() }
-        ]
-      });
-    } catch (error) {
-      console.error('[self-improvement] tool failure capture failed:', error?.message || error);
-    }
-  }
-
-  function buildBlockedToolEnvelope(step = {}, memoryCliTurn = null, reason = 'tool_not_allowed') {
-    const toolName = String(step?.tool || '').trim();
-    const policy = getPolicy(toolName);
-    const blockedResult = `Tool not allowed: ${toolName || 'unknown'}`;
-    let nextMemoryCliTurn = createMemoryCliTurnState(memoryCliTurn);
-    let invalidateMemoryPrompt = false;
-    if (toolName === 'memory_cli') {
-      nextMemoryCliTurn = createMemoryCliTurnState(
-        updateMemoryCliTurnStateAfterError(nextMemoryCliTurn, 'tool_error')
-      );
-      invalidateMemoryPrompt = true;
-    }
-    const baseEnvelope = computeToolEnvelope(step, blockedResult, policy);
-    const directToolCallId = String(step?.directToolCallId || step?.toolCallId || '').trim();
-    return {
-      ...baseEnvelope,
-      ...(directToolCallId ? { tool_call_id: directToolCallId } : {}),
-      status: 'blocked',
-      retryable: false,
-      result: blockedResult,
-      ...(toolName === 'memory_cli' ? { memoryCliTurn: nextMemoryCliTurn, invalidateMemoryPrompt } : {}),
-      blockedReason: String(reason || 'tool_not_allowed').trim() || 'tool_not_allowed'
-    };
-  }
-
-  async function runToolStep(step, state, runtimeOptions = {}) {
-    const toolName = String(step.tool || '').trim();
-    const policy = getPolicy(toolName);
-    const executionState = normalizeObject(state.execution, {});
-    const toolContextOverrides = {
-      ...runtimeOptions,
-      toolName
-    };
-
-    if (
-      String(step?.source || '').trim() === 'direct_chat'
-      && String(step?.blockingReason || '').trim() === 'tool_not_allowed'
-    ) {
-      const envelope = buildBlockedToolEnvelope(step, executionState.memoryCliTurn, 'tool_not_allowed');
-      maybeCaptureToolFailure(envelope, step, state);
-      logToolExecution(envelope, step, state, {
-        node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
-        allowedTools: state.request?.allowedTools
-      });
-      return envelope;
-    }
-
-    try {
-      let preparedArgs = step.inputs || {};
-      if (toolName === 'web_fetch') {
-        preparedArgs = resolveWebFetchArgs({
-          ...step,
-          inputs: preparedArgs
-        }, state);
-      }
-      let normalizedArgs = enforceToolPolicy(toolName, preparedArgs, {
-        userId: state.request.userId
-      });
-      if (toolName === 'memory_cli') {
-        if (isPlannerSingleAuthorityEnabled()) {
-          const commandText = String(normalizedArgs.command || '').trim();
-          if (/^mem open --ref\s+"mc_ref:planner_pending:/i.test(commandText)) {
-            const previousEnvelope = normalizeArray(state.plan?.steps)
-              .find((candidate) => String(candidate.id || '').trim() !== String(step.id || '').trim() && normalizeArray(candidate.evidence).length > 0);
-            const previousEvidence = normalizeArray(previousEnvelope?.evidence).slice(-1)[0] || null;
-            const previousResult = safeParseMemoryCliResult(previousEvidence?.result);
-            const previousRef = String(previousResult?.results?.[0]?.ref || '').trim();
-            if (previousRef) {
-              normalizedArgs = {
-                ...normalizedArgs,
-                command: `mem open --ref ${JSON.stringify(previousRef)}`
-              };
-            }
-          }
-        }
-        const decision = decideMemoryCliTurnAction(normalizedArgs.command, executionState.memoryCliTurn);
-        if (!decision.ok) {
-          const result = typeof decision.result === 'string' ? decision.result : JSON.stringify(decision.result);
-          const envelope = {
-            ...computeToolEnvelope({ ...step, inputs: { ...normalizedArgs, command: decision.preparedCommand || normalizedArgs.command } }, result, policy),
-            status: 'blocked',
-            retryable: decision.errorType !== 'tool_error',
-            result,
-            memoryCliTurn: decision.nextState,
-            invalidateMemoryPrompt: true,
-            repairApplied: Boolean(decision.repairApplied),
-            repairStrategy: normalizeArray(decision.repairStrategy),
-            blockedReason: String(decision.reason || '').trim()
-          };
-          maybeCaptureToolFailure(envelope, { ...step, inputs: normalizedArgs }, state);
-          return envelope;
-        }
-
-        const executor = toolExecutors[toolName];
-        if (!executor) {
-          const envelope = {
-            ...computeToolEnvelope(step, `Unknown tool: ${toolName}`, policy),
-            memoryCliTurn: executionState.memoryCliTurn
-          };
-          maybeCaptureToolFailure(envelope, step, state);
-          return envelope;
-        }
-
-        const out = await executor({
-          ...normalizedArgs,
-          command: decision.preparedCommand || normalizedArgs.command,
-          __context: buildToolContext(state, toolContextOverrides)
-        });
-        const envelope = computeToolEnvelope({
-          ...step,
-          inputs: {
-            ...normalizedArgs,
-            command: decision.preparedCommand || normalizedArgs.command
-          }
-        }, out, policy);
-        const resultEnvelope = {
-          ...envelope,
-          memoryCliTurn: createMemoryCliTurnState(
-            updateMemoryCliTurnStateAfterResult(executionState.memoryCliTurn, decision.parsed, out)
-          ),
-          invalidateMemoryPrompt: true,
-          repairApplied: Boolean(decision.repairApplied),
-          repairStrategy: normalizeArray(decision.repairStrategy)
-        };
-        maybeCaptureToolFailure(resultEnvelope, { ...step, inputs: normalizedArgs }, state);
-        logToolExecution(resultEnvelope, { ...step, inputs: normalizedArgs }, state, {
-          node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
-          allowedTools: state.request?.allowedTools
-        });
-        return resultEnvelope;
-      }
-
-      const executor = toolExecutors[toolName];
-      if (!executor) {
-        const envelope = computeToolEnvelope(step, `Unknown tool: ${toolName}`, policy);
-        maybeCaptureToolFailure(envelope, step, state);
-        return envelope;
-      }
-
-      const out = await executor({
-        ...normalizedArgs,
-        __context: buildToolContext(state, toolContextOverrides)
-      });
-      const envelope = computeToolEnvelope({ ...step, inputs: normalizedArgs }, out, policy);
-      maybeCaptureToolFailure(envelope, { ...step, inputs: normalizedArgs }, state);
-      logToolExecution(envelope, { ...step, inputs: normalizedArgs }, state, {
-        node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
-        allowedTools: state.request?.allowedTools
-      });
-      return envelope;
-    } catch (error) {
-      const base = computeToolEnvelope(step, `Tool error: ${error.message}`, policy);
-      maybeCaptureToolFailure(base, step, state);
-      logToolExecution(base, step, state, {
-        node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
-        allowedTools: state.request?.allowedTools
-      });
-      if (toolName === 'memory_cli') {
-        return {
-          ...base,
-          memoryCliTurn: createMemoryCliTurnState(
-            updateMemoryCliTurnStateAfterError(executionState.memoryCliTurn, 'tool_error')
-          ),
-          invalidateMemoryPrompt: true
-        };
-      }
-      return base;
-    }
-  }
-
-  async function runDirectChatToolLoop(messagesToSend, state, directContext, runtimeOptions = {}) {
-    const request = normalizeObject(state.request, {});
-    const initialAllowedTools = computeEffectiveAllowedTools(request, state.execution?.memoryCliTurn);
-    let nextMemoryCliTurn = createMemoryCliTurnState(state.execution?.memoryCliTurn);
-    let effectiveAllowedTools = initialAllowedTools;
-    let loopMessages = normalizeArray(messagesToSend).map((message) => ({ ...message }));
-    const loopEvents = [
-      createEvent('effectiveAllowedTools', {
-        node: 'direct_reply',
-        allowedTools: effectiveAllowedTools
-      }),
-      createEvent('memoryCliTurn', {
-        node: 'direct_reply',
-        memoryCliTurn: nextMemoryCliTurn
-      })
-    ];
-    const executedToolEnvelopes = [];
-
-    function throwWithDirectToolLoopState(error) {
-      const nextError = error instanceof Error ? error : new Error(String(error || ''));
-      nextError.directToolLoopState = cloneDirectToolLoopState({
-        messages: loopMessages,
-        events: loopEvents,
-        memoryCliTurn: nextMemoryCliTurn,
-        executedToolEnvelopes,
-        effectiveAllowedTools
-      });
-      throw nextError;
-    }
-
-    async function requestAssistantMessageForLoop(options = {}) {
-      try {
-        return normalizeMessageForToolLoop(await requestAssistantMessageImpl(loopMessages, {
-          ...directContext,
-          ...normalizeObject(options, {})
-        }));
-      } catch (error) {
-        throwWithDirectToolLoopState(error);
-      }
-    }
-
-    const firstAssistantMessage = runtimeOptions.firstAssistantMessage
-      ? normalizeMessageForToolLoop(runtimeOptions.firstAssistantMessage)
-      : await requestAssistantMessageForLoop({
-        disableTools: effectiveAllowedTools.length === 0,
-        allowedTools: effectiveAllowedTools
-      });
-    loopMessages.push(firstAssistantMessage);
-
-    let assistantMessage = firstAssistantMessage;
-    let toolCalls = normalizeArray(firstAssistantMessage.tool_calls);
-
-    if (toolCalls.length === 0) {
-      const replyResolution = await resolveToolLoopReply(firstAssistantMessage, loopMessages, directContext, 'tool_error', executedToolEnvelopes);
-      return {
-        reply: replyResolution.text,
-        noToolCalls: true,
-        messages: loopMessages,
-        events: loopEvents,
-        memoryCliTurn: nextMemoryCliTurn,
-        executedToolEnvelopes,
-        effectiveAllowedTools
-      };
-    }
-
-    for (const toolCall of toolCalls) {
-      loopEvents.push(createEvent('tool_call_detected', {
-        node: 'direct_reply',
-        tool_name: String(toolCall?.function?.name || '').trim(),
-        tool_call_id: String(toolCall?.id || '').trim()
-      }));
-    }
-
-    const toolCallItems = toolCalls.map((toolCall, index) => {
-      const built = buildDirectChatToolStep(toolCall, index + 1);
-      return {
-        index,
-        toolCall,
-        parsedArgs: built.parsedArgs,
-        toolName: built.toolName,
-        step: built.step,
-        allowed: shouldAllowDirectToolCall(toolCall, effectiveAllowedTools)
-      };
-    });
-    const allowedToolCallItems = toolCallItems.filter((item) => item.allowed);
-
-    const assignBatchMetaToItem = (item, batch = {}) => ({
-      ...item,
-      step: {
-        ...normalizeObject(item?.step, {}),
-        ...(String(batch.batchId || '').trim() ? { batchId: String(batch.batchId).trim() } : {}),
-        ...(Number.isFinite(Number(batch.batchIndex)) ? { batchIndex: Number(batch.batchIndex) } : {})
-      }
-    });
-
-    const recordDirectToolEnvelope = (envelope, toolCall) => {
-      const toolCallId = String(toolCall?.id || envelope?.tool_call_id || '').trim() || envelope?.tool_call_id;
-      const normalizedEnvelope = {
-        ...envelope,
-        tool_call_id: toolCallId
-      };
-      logToolExecution(normalizedEnvelope, {}, {
-        ...state,
-        request: {
-          ...request,
-          allowedTools: effectiveAllowedTools
-        },
-        execution: {
-          ...state.execution,
-          currentNode: 'direct_reply'
-        }
-      }, {
-        node: 'direct_reply',
-        allowedTools: effectiveAllowedTools
-      });
-      executedToolEnvelopes.push(normalizedEnvelope);
-      if (normalizedEnvelope.memoryCliTurn) {
-        nextMemoryCliTurn = createMemoryCliTurnState(normalizedEnvelope.memoryCliTurn);
-      }
-      effectiveAllowedTools = computeEffectiveAllowedTools(request, nextMemoryCliTurn);
-      loopEvents.push(createEvent('tool_result', {
-        ...normalizedEnvelope,
-        node: 'direct_reply',
-        tool_call_id: toolCallId
-      }));
-      loopEvents.push(createEvent('memoryCliTurn', {
-        node: 'direct_reply',
-        memoryCliTurn: nextMemoryCliTurn
-      }));
-      loopEvents.push(createEvent('effectiveAllowedTools', {
-        node: 'direct_reply',
-        allowedTools: effectiveAllowedTools
-      }));
-      loopMessages.push({
-        role: 'tool',
-        tool_call_id: toolCallId,
-        content: String(normalizedEnvelope.result || '')
-      });
-      return normalizedEnvelope;
-    };
-
-    const createBlockedDirectToolEnvelope = (item, failureType = 'tool_error') => {
-      const toolName = String(item?.toolName || '').trim();
-      const policy = getPolicy(toolName);
-      const blockedResult = `Tool not allowed: ${toolName || 'unknown'}`;
-      const baseEnvelope = computeToolEnvelope(item?.step || {}, blockedResult, policy);
-      if (toolName === 'memory_cli') {
-        nextMemoryCliTurn = createMemoryCliTurnState(
-          updateMemoryCliTurnStateAfterError(nextMemoryCliTurn, failureType)
-        );
-      }
-      return {
-        ...baseEnvelope,
-        status: 'blocked',
-        retryable: false,
-        result: blockedResult,
-        memoryCliTurn: nextMemoryCliTurn,
-        invalidateMemoryPrompt: toolName === 'memory_cli',
-        blockedReason: 'tool_not_allowed'
-      };
-    };
-
-    const runOneDirectTool = async (item) => {
-      const envelope = await runToolStep(item.step, {
-        ...state,
-        request: {
-          ...request,
-          allowedTools: effectiveAllowedTools
-        },
-        execution: {
-          ...state.execution,
-          memoryCliTurn: nextMemoryCliTurn
-        }
-      }, runtimeOptions);
-      return recordDirectToolEnvelope(envelope, item.toolCall);
-    };
-
-    const executeDirectToolBatch = async (items = []) => {
-      const ordered = [];
-      for (const item of normalizeArray(items)) {
-        if (!item?.allowed) {
-          ordered.push(recordDirectToolEnvelope(createBlockedDirectToolEnvelope(item), item.toolCall));
-          continue;
-        }
-        ordered.push(item);
-      }
-      const allowedItems = ordered.filter((item) => item && !item.tool_call_id);
-      if (allowedItems.length === 0) return ordered;
-      if (allowedItems.length === 1) {
-        const envelope = await runOneDirectTool(allowedItems[0]);
-        return ordered.map((item) => (item === allowedItems[0] ? envelope : item));
-      }
-      const settled = await Promise.allSettled(allowedItems.map((item) => runToolStep(item.step, {
-        ...state,
-        request: {
-          ...request,
-          allowedTools: effectiveAllowedTools
-        },
-        execution: {
-          ...state.execution,
-          memoryCliTurn: nextMemoryCliTurn
-        }
-      }, runtimeOptions)));
-      let allowedIndex = 0;
-      return ordered.map((item) => {
-        if (item && item.tool_call_id) return item;
-        const settledItem = settled[allowedIndex];
-        const sourceItem = allowedItems[allowedIndex];
-        allowedIndex += 1;
-        const envelope = settledItem?.status === 'fulfilled'
-          ? settledItem.value
-          : computeToolEnvelope(sourceItem.step, `Tool error: ${settledItem?.reason?.message || 'unknown error'}`, getPolicy(sourceItem.toolName));
-        return recordDirectToolEnvelope(envelope, sourceItem.toolCall);
-      });
-    };
-
-    let hadBlockedToolCall = false;
-    const directBatches = buildDirectChatExecutionBatches(toolCallItems, (item) => item.step);
-    const directBatchResults = [];
-    for (const batch of directBatches) {
-      const batchItems = normalizeArray(batch.items).map((item) => assignBatchMetaToItem(item, batch));
-      const results = await executeDirectToolBatch(batchItems);
-      directBatchResults.push(...results);
-      if (results.some((item) => String(item?.status || '').trim() === 'blocked')) {
-        hadBlockedToolCall = true;
-      }
-    }
-
-    if (allowedToolCallItems.length === 0) {
-      if (!hadBlockedToolCall) {
-        nextMemoryCliTurn = createMemoryCliTurnState(
-          updateMemoryCliTurnStateAfterError(nextMemoryCliTurn, 'tool_error')
-        );
-        effectiveAllowedTools = computeEffectiveAllowedTools(request, nextMemoryCliTurn);
-      }
-      loopEvents.push(createEvent('tool_loop_forced_answer', {
-        node: 'direct_reply',
-        reason: 'tool_not_allowed',
-        allowedTools: effectiveAllowedTools
-      }));
-      assistantMessage = await requestAssistantMessageForLoop({
-        disableTools: true,
-        allowedTools: []
-      });
-      loopMessages.push(assistantMessage);
-      const replyResolution = await resolveToolLoopReply(assistantMessage, loopMessages.slice(0, -1), directContext, 'tool_error', executedToolEnvelopes);
-      return {
-        reply: replyResolution.text,
-        noToolCalls: false,
-        messages: loopMessages,
-        events: loopEvents,
-        memoryCliTurn: nextMemoryCliTurn,
-        executedToolEnvelopes,
-        effectiveAllowedTools
-      };
-    }
-
-    const firstAllowedToolCall = allowedToolCallItems[0]?.toolCall || null;
-    const firstAllowedEnvelope = directBatchResults.find((item) => String(item?.status || '').trim() !== 'blocked') || null;
-    const firstToolName = String(firstAllowedToolCall?.function?.name || '').trim();
-    if (firstToolName === 'get_context_stats' && allowedToolCallItems.length === 1) {
-      assistantMessage = await requestAssistantMessageForLoop({
-        disableTools: true,
-        allowedTools: []
-      });
-      loopMessages.push(assistantMessage);
-      const replyResolution = await resolveToolLoopReply(assistantMessage, loopMessages.slice(0, -1), directContext, 'tool_error', executedToolEnvelopes);
-      loopEvents.push(createEvent('tool_loop_forced_answer', {
-        node: 'direct_reply',
-        reason: 'single_read_only_tool_complete',
-        allowedTools: []
-      }));
-      return {
-        reply: replyResolution.text,
-        noToolCalls: false,
-        messages: loopMessages,
-        events: loopEvents,
-        memoryCliTurn: nextMemoryCliTurn,
-        executedToolEnvelopes,
-        effectiveAllowedTools
-      };
-    }
-    const firstCommandWasSearch = String(nextMemoryCliTurn.lastSuccessCommand || '').trim() === 'search';
-    const mayOpenOneMoreTime = firstAllowedEnvelope && firstAllowedEnvelope.status === 'completed'
-      && firstCommandWasSearch
-      && nextMemoryCliTurn.lastResultHadHits
-      && !nextMemoryCliTurn.mustAnswer
-      && nextMemoryCliTurn.openCount < 1
-      && effectiveAllowedTools.includes('memory_cli');
-
-    assistantMessage = await requestAssistantMessageForLoop({
-      disableTools: !mayOpenOneMoreTime,
-      allowedTools: mayOpenOneMoreTime ? effectiveAllowedTools : []
-    });
-    loopMessages.push(assistantMessage);
-
-    if (!mayOpenOneMoreTime) {
-      const replyResolution = await resolveToolLoopReply(assistantMessage, loopMessages.slice(0, -1), directContext, 'post_tool_empty_reply', executedToolEnvelopes);
-      loopEvents.push(createEvent('tool_loop_forced_answer', {
-        node: 'direct_reply',
-        reason: nextMemoryCliTurn.mustAnswer ? 'must_answer' : 'single_tool_complete',
-        allowedTools: [],
-        failureType: replyResolution.source === 'controlled_failure' ? 'post_tool_empty_reply' : ''
-      }));
-      return {
-        reply: replyResolution.text,
-        noToolCalls: false,
-        messages: loopMessages,
-        events: loopEvents,
-        memoryCliTurn: nextMemoryCliTurn,
-        executedToolEnvelopes,
-        effectiveAllowedTools
-      };
-    }
-
-    toolCalls = normalizeArray(assistantMessage.tool_calls);
-    if (toolCalls.length === 0) {
-      const replyResolution = await resolveToolLoopReply(assistantMessage, loopMessages.slice(0, -1), directContext, 'tool_error', executedToolEnvelopes);
-      loopEvents.push(createEvent('tool_loop_forced_answer', {
-        node: 'direct_reply',
-        reason: 'no_followup_tool_call',
-        allowedTools: effectiveAllowedTools
-      }));
-      return {
-        reply: replyResolution.text,
-        noToolCalls: false,
-        messages: loopMessages,
-        events: loopEvents,
-        memoryCliTurn: nextMemoryCliTurn,
-        executedToolEnvelopes,
-        effectiveAllowedTools
-      };
-    }
-
-    for (const toolCall of toolCalls) {
-      loopEvents.push(createEvent('tool_call_detected', {
-        node: 'direct_reply',
-        tool_name: String(toolCall?.function?.name || '').trim(),
-        tool_call_id: String(toolCall?.id || '').trim()
-      }));
-    }
-
-    const secondToolCall = toolCalls[0] || null;
-    const secondArgs = parseToolCallArgs(secondToolCall);
-    const secondCommand = String(secondArgs?.command || '').trim().toLowerCase();
-    const secondIsOpen = shouldAllowDirectToolCall(secondToolCall, effectiveAllowedTools)
-      && secondCommand.startsWith('mem open');
-
-    if (secondIsOpen) {
-      await executeDirectToolBatch([{
-        index: 0,
-        toolCall: secondToolCall,
-        parsedArgs: secondArgs,
-        toolName: String(secondToolCall?.function?.name || '').trim(),
-        step: buildDirectChatToolStep(secondToolCall, 2).step,
-        allowed: true
-      }]);
-    } else {
-      nextMemoryCliTurn = createMemoryCliTurnState(
-        updateMemoryCliTurnStateAfterError(nextMemoryCliTurn, 'tool_loop_limit')
-      );
-      effectiveAllowedTools = computeEffectiveAllowedTools(request, nextMemoryCliTurn);
-      loopEvents.push(createEvent('tool_loop_forced_answer', {
-        node: 'direct_reply',
-        reason: 'followup_not_open',
-        allowedTools: effectiveAllowedTools
-      }));
-    }
-
-    assistantMessage = await requestAssistantMessageForLoop({
-      disableTools: true,
-      allowedTools: []
-    });
-    loopMessages.push(assistantMessage);
-    const replyResolution = await resolveToolLoopReply(assistantMessage, loopMessages.slice(0, -1), directContext, 'tool_error', executedToolEnvelopes);
-    loopEvents.push(createEvent('tool_loop_forced_answer', {
-      node: 'direct_reply',
-      reason: 'final_answer_required',
-      allowedTools: []
-    }));
-
-    return {
-      reply: replyResolution.text,
-      noToolCalls: false,
-      messages: loopMessages,
-      events: loopEvents,
-      memoryCliTurn: nextMemoryCliTurn,
-      executedToolEnvelopes,
-      effectiveAllowedTools
-    };
-  }
 
   function updatePlanStepsWithEnvelope(steps = [], envelope = {}) {
     return normalizeArray(steps).map((step) => {

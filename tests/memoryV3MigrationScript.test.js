@@ -38,7 +38,7 @@ fs.writeFileSync(process.env.DATA_FILE, JSON.stringify({
 }, null, 2));
 const { migrateLegacyMemoryToV3 } = require('../utils/memory-v3');
 
-(async () => {
+module.exports = (async () => {
   const result = await migrateLegacyMemoryToV3();
   assert.strictEqual(result.ok, true);
   const profileProjectionFile = path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'profile_projection.json');

@@ -2024,7 +2024,11 @@ async function runMemoryCli(commandText = '', context = {}) {
         }));
         return {
           results,
-          digest: result.digest || '',
+          digest: String(result.digest || '')
+            .split(/\r?\n/)
+            .map((item) => sanitizePreviewText(item, 140))
+            .filter(Boolean)
+            .slice(0, 4),
           sourceCoverage: result.sourceCoverage || {},
           queryFacet: result.facet || classifyRecallFacet(parsed.query),
           candidateCounts: { v3: Number(result.stats?.candidates || 0) || 0 },
