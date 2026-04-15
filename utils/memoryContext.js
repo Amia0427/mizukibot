@@ -24,6 +24,10 @@ const {
 const {
   trimTextByTokenBudget
 } = require('./contextBudget');
+const {
+  queryMemory,
+  assembleMemoryPacket
+} = require('./memory-v3');
 
 function sanitizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -590,6 +594,106 @@ function buildMemoryContext(userId, question = '', options = {}) {
 }
 
 async function buildMemoryContextAsync(userId, question = '', options = {}) {
+  if (config.MEMORY_V3_ENABLED) {
+    const resolvedGroupIds = resolveReadableGroupIds(userId, options);
+    const queryResult = await queryMemory({
+      userId,
+      query: question || '',
+      topK: options.topK || config.MEMORY_RAG_TOP_K || 8,
+      groupId: options.groupId,
+      groupIds: resolvedGroupIds,
+      sessionId: options.sessionId,
+      sessionKey: options.sessionKey,
+      routePolicyKey: options.routePolicyKey,
+      topRouteType: options.topRouteType,
+      taskType: options.taskType,
+      agentName: options.agentName,
+      toolName: options.toolName,
+      sharedShortTermSignature: options.sharedShortTermSignature
+    });
+    if (!Array.isArray(queryResult.results) || queryResult.results.length === 0) {
+      const resolvedGroupIds = resolveReadableGroupIds(userId, options);
+      const normalizedOptions = {
+        ...options,
+        userId,
+        resolvedGroupIds
+      };
+      const unifiedHits = await memoizeValue(
+        normalizedOptions,
+        buildMemoKey('unified-async-v3-fallback', userId, question || '', normalizedOptions),
+        () => retrieveUnifiedMemoriesAsync(userId, question || '', options.topK || config.MEMORY_RAG_TOP_K || 8, buildUnifiedRecallOptions({
+          ...normalizedOptions,
+          disableLegacyFactFallback: true,
+          question
+        }))
+      );
+      return buildContextPayload(userId, question, normalizedOptions, unifiedHits);
+    }
+    const packet = assembleMemoryPacket(queryResult, { userId });
+    const results = Array.isArray(queryResult.results) ? queryResult.results : [];
+    const journalHits = results.filter((item) => item.source === 'journal');
+    const taskHits = results.filter((item) => item.source === 'task');
+    const groupHits = results.filter((item) => item.source === 'group');
+    const styleHits = results.filter((item) => item.source === 'style');
+    const jargonHits = results.filter((item) => item.source === 'jargon');
+    const dailyJournalText = journalHits.map((item) => String(item.text || '')).filter(Boolean).join('\n');
+    const memoryForPrompt = [
+      packet.sessionContinuityText ? `[SessionContinuity]\n${packet.sessionContinuityText}` : '',
+      packet.relevantEvidenceText ? `[RelevantEvidence]\n${packet.relevantEvidenceText}` : '',
+      packet.styleSignalsText ? `[StyleSignals]\n${packet.styleSignalsText}` : ''
+    ].filter(Boolean).join('\n\n');
+
+    return {
+      memoryForPrompt,
+      retrievedMemoryForPrompt: packet.relevantEvidenceText,
+      promptRetrievedMemoryText: packet.relevantEvidenceText,
+      hits: results,
+      journalHits,
+      taskHits,
+      groupHits,
+      promptGroupHits: groupHits,
+      styleHits,
+      jargonHits,
+      core: [],
+      profile: getUserProfile(userId),
+      affinityState: queryResult.affinityState || getUserAffinityState(userId),
+      profileText: packet.stableProfileText,
+      impression: '',
+      impressionText: '',
+      summary: queryResult.digest || '',
+      promptSummaryText: queryResult.digest || '',
+      promptImpressionText: '',
+      taskMemoryText: packet.taskStrategyText,
+      groupMemoryText: packet.groupSharedContextText,
+      promptGroupMemoryText: packet.groupSharedContextText,
+      styleSignalText: packet.styleSignalsText,
+      promptStyleSignalText: packet.styleSignalsText,
+      longTermProfileText: packet.stableProfileText,
+      promptLongTermProfileText: packet.stableProfileText,
+      dailyJournalText,
+      promptDailyJournalText: dailyJournalText,
+      dailyJournalItems: journalHits,
+      dailyJournalBundle: { text: dailyJournalText, items: journalHits, byLayer: { daily: journalHits, fourDay: [], monthly: [] } },
+      factText: getUserMemories(userId),
+      stats: {
+        total: Number(queryResult?.stats?.selected || 0),
+        byType: {},
+        byTier: {},
+        byMemoryKind: {},
+        byStatus: {},
+        bySourceKind: {}
+      },
+      segments: {
+        retrievedMemory: packet.messages.relevantEvidence || [],
+        dailyJournal: [],
+        taskMemory: packet.messages.taskStrategy || [],
+        groupMemory: packet.messages.groupSharedContext || [],
+        styleSignals: packet.messages.styleSignals || [],
+        longTermProfile: packet.messages.stableProfile || [],
+        sessionContinuity: packet.messages.sessionContinuity || []
+      }
+    };
+  }
   const resolvedGroupIds = resolveReadableGroupIds(userId, options);
   const normalizedOptions = {
     ...options,

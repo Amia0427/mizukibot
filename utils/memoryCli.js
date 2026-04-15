@@ -43,6 +43,13 @@ const {
   getFacetSourceWeights,
   shouldBiasToContinuity
 } = require('./recallHeuristics');
+const { queryMemory } = require('./memory-v3');
+const {
+  loadSessionProjection,
+  loadProfileProjection,
+  loadMemoryNodes,
+  loadEpisodeProjection
+} = require('./memory-v3/storage');
 
 const VALID_SEARCH_SOURCES = new Set(['all', 'profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon']);
 const VALID_OPEN_SOURCES = new Set(['profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon']);
@@ -1560,6 +1567,119 @@ function openRecentSession(userId, sessionKey, context = {}) {
 }
 
 function openMemoryItemById(userId, source, id) {
+  if (config.MEMORY_V3_ENABLED && String(id || '').startsWith('session:')) {
+    return openRecentSession(userId, String(id || '').replace(/^session:/, ''), { userId });
+  }
+  if (config.MEMORY_V3_ENABLED && String(id || '').startsWith('profile:')) {
+    return {
+      source: 'profile',
+      id,
+      data: truncateProfileForOpen(getProfileResult(userId))
+    };
+  }
+  if (config.MEMORY_V3_ENABLED) {
+    const targetId = String(id || '').trim();
+    const sessionProjection = loadSessionProjection();
+    const profileProjection = loadProfileProjection();
+    const memoryNodes = loadMemoryNodes();
+    const episodeProjection = loadEpisodeProjection();
+    if (targetId.startsWith('profile:')) {
+      const profile = profileProjection.users?.[String(userId || '').trim()] || null;
+      if (profile) {
+        return {
+          source: 'profile',
+          id: targetId,
+          data: truncateProfileForOpen({
+            profile: {
+              identities: profile.identities || [],
+              personality_traits: profile.personality_traits || [],
+              hobbies: profile.hobbies || [],
+              likes: profile.likes || [],
+              dislikes: profile.dislikes || [],
+              goals: profile.goals || [],
+              recent_topics: profile.recent_topics || [],
+              relation_stage: profile.relation_stage || '陌生人'
+            },
+            summary: Array.isArray(profile.summaries) ? profile.summaries[0] || '' : '',
+            impression: Array.isArray(profile.impressions) ? profile.impressions[0] || '' : '',
+            facts: profile.facts || []
+          })
+        };
+      }
+    }
+    if (targetId.startsWith('session:')) {
+      const sessionKey = targetId.replace(/^session:/, '');
+      const session = sessionProjection.sessions?.[sessionKey];
+      if (session && String(session.userId || '') === String(userId || '')) {
+        return {
+          source: 'recent',
+          id: targetId,
+          data: {
+            sessionKey,
+            snapshotType: session.snapshotType || '',
+            updatedAt: session.updatedAt || 0,
+            shortTermSummary: session.summary || '',
+            shortTermState: {
+              summary: session.summary || '',
+              activeTopic: session.activeTopic || '',
+              openLoops: Array.isArray(session.openLoops) ? session.openLoops : [],
+              assistantCommitments: Array.isArray(session.assistantCommitments) ? session.assistantCommitments : [],
+              userConstraints: Array.isArray(session.userConstraints) ? session.userConstraints : [],
+              recentToolResults: [],
+              carryOverUserTurn: session.carryOverUserTurn || ''
+            },
+            recentMessages: Array.isArray(session.recentMessages) ? session.recentMessages : []
+          }
+        };
+      }
+    }
+    const node = memoryNodes.find((item) => String(item.id || '') === targetId);
+    if (node) {
+      return {
+        source: source || node.source || 'personal',
+        id: targetId,
+        data: {
+          id: node.id,
+          type: node.type,
+          text: sanitizePreviewText(node.text, Math.min(1600, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
+          confidence: node.confidence,
+          importance: node.importance,
+          tier: node.tier || '',
+          status: sanitizeText(node.status).toLowerCase() || 'active',
+          sourceKind: sanitizeText(node.sourceKind).toLowerCase() || 'runtime',
+          updatedAt: node.updatedAt || 0,
+          scopeType: node.scopeType || 'personal',
+          groupId: node.groupId || '',
+          taskType: node.taskType || '',
+          routePolicyKey: node.routePolicyKey || '',
+          topRouteType: node.topRouteType || '',
+          source: node.source || '',
+          participants: Array.isArray(node.participants) ? node.participants : [],
+          entities: Array.isArray(node.entities) ? node.entities : [],
+          relations: Array.isArray(node.relations) ? node.relations : [],
+          memoryKind: sanitizeText(node.memoryKind).toLowerCase(),
+          styleRole: '',
+          jargonRole: ''
+        }
+      };
+    }
+    for (const item of Array.isArray(episodeProjection.users?.[String(userId || '').trim()]?.items)
+      ? episodeProjection.users[String(userId || '').trim()].items
+      : []) {
+      if (`episode:${item.id}` !== targetId) continue;
+      return {
+        source: 'journal',
+        id: targetId,
+        data: {
+          id: item.id,
+          type: item.type,
+          title: item.episodeDay || item.yearMonth || item.type,
+          text: String(item.text || '').slice(0, Math.max(200, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
+          updatedAt: item.updatedAt || 0
+        }
+      };
+    }
+  }
   const targetId = String(id || '').trim();
   let items = [];
 
@@ -1707,6 +1827,13 @@ function openUnifiedMemory(target, options = {}, context = {}) {
     }
     if (ref.startsWith('mc_ref:recent:')) {
       return openRecentSession(userId, ref.replace(/^mc_ref:recent:/, ''), context);
+    }
+    if (ref.startsWith('mc_ref:profile:profile:')) {
+      return {
+        source: 'profile',
+        id: ref.replace(/^mc_ref:profile:/, ''),
+        data: truncateProfileForOpen(getProfileResult(userId))
+      };
     }
     if (parseJournalRawRef(ref)) {
       const openedJournal = openJournalByRef(userId, ref);
@@ -1858,10 +1985,59 @@ async function runMemoryCli(commandText = '', context = {}) {
   let payload = null;
 
   if (parsed.commandName === 'search') {
-    const search = searchUnifiedMemory(parsed.query, {
-      source: parsed.source,
-      limit: parsed.limit
-    }, context);
+    const search = config.MEMORY_V3_ENABLED
+      ? await (async () => {
+        let facet = classifyRecallFacet(parsed.query);
+        if (parsed.source === 'recent') facet = 'continuity';
+        else if (parsed.source === 'journal') facet = 'journal';
+        else if (parsed.source === 'task') facet = 'task';
+        else if (parsed.source === 'group') facet = 'group';
+        else if (parsed.source === 'style' || parsed.source === 'jargon') facet = 'style';
+        const result = await queryMemory({
+          userId,
+          query: parsed.query,
+          topK: parsed.limit,
+          facet,
+          source: parsed.source,
+          groupId: sanitizeText(context.groupId),
+          groupIds: getAccessibleGroupIdsForUser(userId),
+          sessionId: sanitizeText(context.sessionId),
+          sessionKey: sanitizeText(context.sessionKey),
+          routePolicyKey: sanitizeText(context.routePolicyKey),
+          topRouteType: sanitizeText(context.topRouteType),
+          taskType: sanitizeText(context.taskType)
+        });
+        const results = (Array.isArray(result.results) ? result.results : []).map((item) => ({
+          ref: `mc_ref:${item.source}:${item.id}`,
+          source: item.source,
+          type: item.type,
+          id: item.id,
+          title: sanitizePreviewText(item.text, 80),
+          preview: sanitizePreviewText(item.text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
+          text: sanitizePreviewText(item.text, Math.min(400, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
+          score: item.score,
+          tier: item.tier || '',
+          confidence: item.confidence,
+          status: item.status,
+          matchMode: item.embedding > 0 ? 'hybrid' : 'lexical',
+          updatedAt: item.updatedAt || 0
+        }));
+        return {
+          results,
+          digest: result.digest || '',
+          sourceCoverage: result.sourceCoverage || {},
+          queryFacet: result.facet || classifyRecallFacet(parsed.query),
+          candidateCounts: { v3: Number(result.stats?.candidates || 0) || 0 },
+          fallbackUsed: false,
+          outputChars: results.reduce((sum, item) => sum + String(item.preview || '').length, 0),
+          recentUsed: Boolean((result.sourceCoverage || {}).recent),
+          droppedResultCount: 0
+        };
+      })()
+      : searchUnifiedMemory(parsed.query, {
+        source: parsed.source,
+        limit: parsed.limit
+      }, context);
     payload = {
       ok: true,
       command: 'search',

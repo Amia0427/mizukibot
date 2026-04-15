@@ -53,4 +53,17 @@ assert.ok(items.some((item) => item.type === 'summary' && item.text.includes('�
 assert.ok(items.some((item) => item.type === 'impression' && item.text.includes('讲话直接')));
 assert.ok(items.some((item) => item.type === 'like' && item.text.includes('猫')));
 
+const {
+  scheduleProjectionSave,
+  flushScheduledProjectionSave,
+  PROJECTION_FILE
+} = require('../utils/memoryProjection');
+
+const beforeMtime = fs.statSync(PROJECTION_FILE).mtimeMs;
+scheduleProjectionSave(10);
+const flushed = flushScheduledProjectionSave();
+assert.strictEqual(flushed, true, 'expected scheduled projection save to flush');
+const afterMtime = fs.statSync(PROJECTION_FILE).mtimeMs;
+assert.ok(afterMtime >= beforeMtime, 'expected projection file mtime to advance after flush');
+
 console.log('memoryProjection.test.js passed');

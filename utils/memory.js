@@ -283,9 +283,9 @@ function flushAllSync() {
       clearTimeout(memoryFlushTimer);
       memoryFlushTimer = null;
     }
-    flushScheduledProjectionSave();
     atomicWriteJson(config.DATA_FILE, favorites);
     atomicWriteJson(config.MEMORY_FILE, memories);
+    flushScheduledProjectionSave();
   } catch (e) {
     console.error('[memory] failed to flush on exit:', e.message);
   }

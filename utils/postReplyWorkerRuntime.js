@@ -3,6 +3,7 @@ const { learnSomethingNew } = require('../api/memoryExtraction');
 const { appendDailyJournalEntry } = require('./dailyJournal');
 const { learnSelfImprovement } = require('./selfImprovementRuntime');
 const { createPostReplyJobQueue, getPostReplyJobQueue } = require('./postReplyJobQueue');
+const { appendMemoryEvent, materializeMemoryViews } = require('./memory-v3');
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
@@ -66,6 +67,28 @@ async function processPostReplyJob(job = {}, deps = {}) {
         taskType: normalizeText(job.routeMeta?.taskType || job.routeMeta?.task_type)
       }
     );
+  }
+  if (config.MEMORY_V3_ENABLED) {
+    await appendMemoryEvent({
+      type: 'memory_confirmed',
+      userId: job.userId,
+      sessionKey: normalizeText(job.sessionKey),
+      groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
+      channelId: normalizeText(job.routeMeta?.channelId || job.routeMeta?.channel_id),
+      sessionId: normalizeText(job.routeMeta?.sessionId || job.routeMeta?.session_id),
+      routePolicyKey: normalizeText(job.routePolicyKey),
+      topRouteType: normalizeText(job.topRouteType),
+      scopeType: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id) ? 'group' : 'personal',
+      source: 'post_reply_worker',
+      sourceKind: 'runtime',
+      memoryKind: 'turn_summary',
+      semanticSlot: 'turn_summary',
+      text: `Q: ${normalizeText(job.question)}\nA: ${normalizeText(job.finalReply)}`,
+      payload: {
+        type: 'fact'
+      }
+    });
+    materializeMemoryViews();
   }
   return {
     ok: true
