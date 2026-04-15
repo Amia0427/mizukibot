@@ -102,9 +102,61 @@ function Test-LockOwnedByRunningNode {
     }
 
     $proc = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
-    return ($null -ne $proc -and $proc.ProcessName -ieq 'node')
+    if ($null -eq $proc -or $proc.ProcessName -ine 'node') {
+      return $false
+    }
+
+    $commandLine = ''
+    try {
+      $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction Stop
+      $commandLine = [string]$cim.CommandLine
+    } catch {}
+
+    if (-not [string]::IsNullOrWhiteSpace($commandLine) -and $commandLine -match 'index\.js') {
+      return $true
+    }
+
+    return $false
   } catch {
     return $false
+  }
+}
+
+function Get-LockProcessDiagnostics {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LockPath
+  )
+
+  if (-not (Test-Path $LockPath)) {
+    return 'lock file missing'
+  }
+
+  try {
+    $ownerPidText = (Get-Content -Path $LockPath -TotalCount 1 -Encoding utf8).Trim()
+    $ownerPid = [int]$ownerPidText
+    if ($ownerPid -le 0) {
+      return "lock pid invalid: '$ownerPidText'"
+    }
+
+    $proc = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
+    if ($null -eq $proc) {
+      return "lock pid=$ownerPid not running"
+    }
+
+    $commandLine = ''
+    try {
+      $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction Stop
+      $commandLine = [string]$cim.CommandLine
+    } catch {}
+
+    if ([string]::IsNullOrWhiteSpace($commandLine)) {
+      return "lock pid=$ownerPid name=$($proc.ProcessName) path=$($proc.Path)"
+    }
+
+    return "lock pid=$ownerPid name=$($proc.ProcessName) cmd=$commandLine"
+  } catch {
+    return "lock diagnostics failed: $($_.Exception.Message)"
   }
 }
 
@@ -152,13 +204,19 @@ try {
 
   Write-DaemonLog -Message "using node: $nodeExe"
   if (Test-LockOwnedByRunningNode -LockPath $lockFile) {
-    Write-DaemonLog -Message 'bot already running, skip duplicate start.'
+    $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
+    Write-DaemonLog -Message "bot already running, skip duplicate start. $lockDiag"
   } else {
+    if (Test-Path $lockFile) {
+      $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
+      Write-DaemonLog -Message "lock present but not owned by active main bot. $lockDiag"
+    }
     $mainProc = Start-Process -FilePath $nodeExe -ArgumentList 'index.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
     Write-DaemonLog -Message "started main bot pid=$($mainProc.Id)"
     Start-Sleep -Seconds 2
     if (-not (Test-LockOwnedByRunningNode -LockPath $lockFile)) {
-      throw 'main bot did not acquire lock after daemon start'
+      $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
+      throw "main bot did not acquire lock after daemon start ($lockDiag)"
     }
   }
 
