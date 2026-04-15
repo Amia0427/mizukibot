@@ -455,7 +455,7 @@ function getSessionKeyForPresence(groupId, senderId) {
 function containsExitCue(text = '') {
   const t = normalizeText(text).toLowerCase();
   if (!t) return false;
-  return /(鎳備簡|鐭ラ亾浜唡琛寍濂絴ok|okay|鏀跺埌|璋㈣阿|璋簡|娌′簨浜唡瑙ｅ喅浜唡鍏堣繖鏍穦鏅氬畨|鐫′簡)/i.test(t);
+  return /(懂了|知道了|行|好|ok|okay|收到|谢谢|谢了|没事了|解决了|先这样|晚安|睡了)/i.test(t);
 }
 
 function hasStrongBotCue(addressee) {

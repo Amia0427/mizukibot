@@ -487,7 +487,7 @@ function shouldUseToolBackedSummary(text = '') {
   const t = String(text || '').trim();
   if (!t) return false;
   if (/(my notes|my notebook|notes about|\u6211\u7684\u7b14\u8bb0|\u6211\u7684\u8d44\u6599|\u7b14\u8bb0|\u77e5\u8bc6\u5e93)/i.test(t)) return false;
-  return /https?:\/\/|www\.|缃戦〉|閾炬帴|鏂囩珷|鏂伴椈|瑙嗛|鏂囦欢|pdf|notebook|notes?|鏂囨。|璧勬枡|缃戠珯|rss|youtube/i.test(t);
+  return /https?:\/\/|www\.|网页|链接|文章|新闻|视频|文件|pdf|notebook|notes?|文档|资料|网站|rss|youtube/i.test(t);
 }
 
 function isSelfContainedProductivityPlan(text = '') {
@@ -805,7 +805,7 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
     });
   }
 
-  if (imageUrl && /(鎬荤粨|鎻愮偧|姒傛嫭|鎻忚堪|瑙ｉ噴|summari[sz]e|describe|explain|杩欏紶鍥緗鍥剧墖)/i.test(cleanText)) {
+  if (imageUrl && /(总结|提炼|概括|描述|解释|summari[sz]e|describe|explain|这张图|图片)/i.test(cleanText)) {
     return makeRoute({
       confidence: 0.92,
       cleanText,
@@ -818,7 +818,7 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
     });
   }
 
-  if (imageUrl && (!cleanText || /(image|photo|picture|look at this|what is in this|analyze this image|杩欏紶鍥緗鍥剧墖閲寍鐪嬪浘)/i.test(cleanText))) {
+  if (imageUrl && (!cleanText || /(image|photo|picture|look at this|what is in this|analyze this image|这张图|图片里|看图)/i.test(cleanText))) {
     return makeRoute({
       confidence: 0.95,
       cleanText,
@@ -831,7 +831,7 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
     });
   }
 
-  if (/(install|run command|execute command|modify file|edit file|write file|save to|append to|delete file|create file|apply change|deploy|restart service|remote operation|ssh into|patch code|淇敼鏂囦欢|瀹夎渚濊禆|鎵ц鍛戒护|閮ㄧ讲|閲嶅惎鏈嶅姟)/i.test(cleanText)) {
+  if (/(install|run command|execute command|modify file|edit file|write file|save to|append to|delete file|create file|apply change|deploy|restart service|remote operation|ssh into|patch code|修改文件|安装依赖|执行命令|部署|重启服务)/i.test(cleanText)) {
     return makeRoute({
       confidence: 0.9,
       cleanText,

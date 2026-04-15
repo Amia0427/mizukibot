@@ -50,7 +50,7 @@ function createMessageSideEffects({
   }
 
   function updateUserPresence(senderId, cleanText, groupId) {
-    const userInfo = updateFavor(senderId, cleanText || '鍒嗕韩浜嗗浘鐗?', groupId);
+    const userInfo = updateFavor(senderId, cleanText || '分享了图片', groupId);
     userInfo.last_seen_at = Date.now();
     saveData();
     recordMemoryScope(senderId, { groupId });
