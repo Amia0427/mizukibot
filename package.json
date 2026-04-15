@@ -15,6 +15,7 @@
     "check:agent:static": "CHECK_RUN=0 node scripts/check-agent.js",
     "diag:fallback": "node scripts/diagnose-main-model-fallback.js",
     "diag:continuity": "node scripts/diagnose-continuity-state.js",
+    "memory:v3:migrate": "node scripts/migrate-memory-v3.js",
     "check:prompts": "node scripts/check-prompts.js",
     "linux:install": "bash scripts/install-linux.sh",
     "linux:check": "bash scripts/check-linux.sh",

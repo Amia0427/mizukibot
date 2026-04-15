@@ -41,6 +41,12 @@ function createPrepareNode(deps = {}) {
   const persistShortTermBridgeSnapshot = typeof deps.persistShortTermBridgeSnapshot === 'function'
     ? deps.persistShortTermBridgeSnapshot
     : () => {};
+  const appendMemoryEvent = typeof deps.appendMemoryEvent === 'function'
+    ? deps.appendMemoryEvent
+    : (async () => {});
+  const materializeMemoryViews = typeof deps.materializeMemoryViews === 'function'
+    ? deps.materializeMemoryViews
+    : (() => null);
   const maybeRunAutoContinuityProbe = typeof deps.maybeRunAutoContinuityProbe === 'function'
     ? deps.maybeRunAutoContinuityProbe
     : (async () => ({ skipped: true, reason: 'disabled', events: [], probeResult: null, probeMeta: null }));
@@ -109,6 +115,32 @@ function createPrepareNode(deps = {}) {
 
     if (shouldExposeMemoryCliInPrepare) {
       recordMemoryScope(request.userId, routeMeta);
+    }
+
+    if (
+      config.MEMORY_V3_ENABLED
+      && !request.systemInitiated
+      && String(request.userId || '').trim()
+      && String(request.question || '').trim()
+    ) {
+      await appendMemoryEvent({
+        type: 'turn_received',
+        userId: request.userId,
+        sessionKey: request.sessionKey,
+        groupId: routeMeta.groupId || routeMeta.group_id || '',
+        channelId: routeMeta.channelId || routeMeta.channel_id || '',
+        sessionId: routeMeta.sessionId || routeMeta.session_id || '',
+        routePolicyKey: request.routePolicyKey,
+        topRouteType: request.topRouteType,
+        scopeType: (routeMeta.groupId || routeMeta.group_id) ? 'group' : 'personal',
+        source: 'runtime_v2_prepare',
+        text: request.question,
+        payload: {
+          imageUrl: request.imageUrl || '',
+          customPrompt: Boolean(String(request.customPrompt || '').trim())
+        }
+      });
+      materializeMemoryViews();
     }
 
     let bridgeRestored = false;
@@ -182,6 +214,25 @@ function createPrepareNode(deps = {}) {
       && !String(request.customPrompt || '').trim()
       && isChatLikeRoute(request)
     ) {
+      if (config.MEMORY_V3_ENABLED) {
+        await appendMemoryEvent({
+          type: 'session_checkpoint',
+          userId: request.userId,
+          sessionKey: request.sessionKey,
+          groupId: routeMeta.groupId || routeMeta.group_id || '',
+          channelId: routeMeta.channelId || routeMeta.channel_id || '',
+          sessionId: routeMeta.sessionId || routeMeta.session_id || '',
+          routePolicyKey: request.routePolicyKey,
+          topRouteType: request.topRouteType,
+          scopeType: 'session',
+          source: 'runtime_v2_prepare',
+          payload: {
+            snapshotType: 'pre_reply',
+            carryOverUserTurn: request.imageUrl ? (request.question || '[shared an image]') : (request.question || '')
+          }
+        });
+        materializeMemoryViews();
+      }
       persistShortTermBridgeSnapshot(request.userId, {
         chatHistory,
         shortTermMemory,

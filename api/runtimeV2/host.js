@@ -127,6 +127,7 @@ const {
 } = require('../../utils/shortTermBridgeMemory');
 const { recordMemoryScope } = require('../../utils/memoryScopeIndex');
 const { learnSomethingNew } = require('../memoryExtraction');
+const { appendMemoryEvent, materializeMemoryViews } = require('../../utils/memory-v3');
 const { postWithRetry } = require('../httpClient');
 const { extractMessageContent } = require('../parser');
 const { isReplyFailure, classifyReplyFailure } = require('../../utils/replyFailure');
@@ -1494,6 +1495,8 @@ function createRuntime(options = {}) {
     },
     appendShortTermHistory,
     persistShortTermBridgeSnapshot,
+    appendMemoryEvent,
+    materializeMemoryViews,
     addProfileItem,
     pickRouteMetaForPostReplyJob,
     stableHash,
@@ -1523,6 +1526,8 @@ function createRuntime(options = {}) {
     extractMessageContent,
     isChatLikeRoute,
     persistShortTermBridgeSnapshot,
+    appendMemoryEvent,
+    materializeMemoryViews,
     maybeRunAutoContinuityProbe,
     buildContinuityState,
     createMemoryCliTurnState,

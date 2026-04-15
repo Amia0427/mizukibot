@@ -2337,7 +2337,10 @@ module.exports = {
   getMemoryItems,
   getMemoryItemsByFilter,
   getMemoryStats,
-  touchAccessStats
+  touchAccessStats,
+  shouldUseRemoteEmbedding,
+  requestEmbedding,
+  cosineArray
 };
 
 

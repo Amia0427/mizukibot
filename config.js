@@ -809,6 +809,40 @@ module.exports = {
   MEMORY_EMBEDDING_MODEL: pick('MEMORY_EMBEDDING_MODEL', ''),
   MEMORY_EMBEDDING_API_BASE_URL: pick('MEMORY_EMBEDDING_API_BASE_URL', ''),
   MEMORY_EMBEDDING_API_KEY: pick('MEMORY_EMBEDDING_API_KEY', ''),
+  MEMORY_V3_ENABLED: pickBool('MEMORY_V3_ENABLED', true),
+  MEMORY_V3_DIR: pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')),
+  MEMORY_V3_EVENTS_DIR: pick('MEMORY_V3_EVENTS_DIR', path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'events')),
+  MEMORY_V3_PROJECTIONS_DIR: pick('MEMORY_V3_PROJECTIONS_DIR', path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'projections')),
+  MEMORY_V3_SESSION_PROJECTION_FILE: pick(
+    'MEMORY_V3_SESSION_PROJECTION_FILE',
+    path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'projections', 'session_projection.json')
+  ),
+  MEMORY_V3_PROFILE_PROJECTION_FILE: pick(
+    'MEMORY_V3_PROFILE_PROJECTION_FILE',
+    path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'projections', 'profile_projection.json')
+  ),
+  MEMORY_V3_SCOPE_PROJECTION_FILE: pick(
+    'MEMORY_V3_SCOPE_PROJECTION_FILE',
+    path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'projections', 'scope_projection.json')
+  ),
+  MEMORY_V3_EPISODE_PROJECTION_FILE: pick(
+    'MEMORY_V3_EPISODE_PROJECTION_FILE',
+    path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'projections', 'episode_projection.json')
+  ),
+  MEMORY_V3_NODES_FILE: pick(
+    'MEMORY_V3_NODES_FILE',
+    path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'projections', 'memory_nodes.jsonl')
+  ),
+  MEMORY_V3_EMBEDDING_CACHE_FILE: pick(
+    'MEMORY_V3_EMBEDDING_CACHE_FILE',
+    path.join(pick('MEMORY_V3_DIR', path.join(DATA_DIR, 'memory-v3')), 'projections', 'embedding_cache.jsonl')
+  ),
+  MEMORY_V3_CANDIDATE_CONFIRMATIONS_REQUIRED: pickNum('MEMORY_V3_CANDIDATE_CONFIRMATIONS_REQUIRED', 2),
+  MEMORY_V3_RRF_K: pickNum('MEMORY_V3_RRF_K', 50),
+  MEMORY_V3_TOP_K: pickNum('MEMORY_V3_TOP_K', 8),
+  MEMORY_V3_QUERY_REWRITE_LIMIT: pickNum('MEMORY_V3_QUERY_REWRITE_LIMIT', 3),
+  MEMORY_V3_SESSION_RECENT_MESSAGES: pickNum('MEMORY_V3_SESSION_RECENT_MESSAGES', 6),
+  MEMORY_V3_EVENT_MAX_BYTES: pickNum('MEMORY_V3_EVENT_MAX_BYTES', 65536),
   MEMORY_RAG_MIN_SCORE: pickNum('MEMORY_RAG_MIN_SCORE', 0.16),
   MEMORY_RAG_CANDIDATE_LIMIT: pickNum('MEMORY_RAG_CANDIDATE_LIMIT', 24),
   MEMORY_RAG_MAX_PER_TYPE: pickNum('MEMORY_RAG_MAX_PER_TYPE', 2),

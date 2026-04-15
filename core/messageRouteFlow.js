@@ -664,6 +664,7 @@ function createMessageRouteFlow(deps = {}) {
           }
         });
         const replyOptions = {
+          onEvent: typeof inboundContext?.onEvent === 'function' ? inboundContext.onEvent : null,
           onDelta: streamingDispatcher.onDelta,
           streamHadOutput: false,
           streamCompleted: false,

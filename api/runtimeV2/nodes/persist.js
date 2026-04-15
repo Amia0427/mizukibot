@@ -29,6 +29,12 @@ function createPersistNode(deps = {}) {
   const persistShortTermBridgeSnapshot = typeof deps.persistShortTermBridgeSnapshot === 'function'
     ? deps.persistShortTermBridgeSnapshot
     : () => {};
+  const appendMemoryEvent = typeof deps.appendMemoryEvent === 'function'
+    ? deps.appendMemoryEvent
+    : (async () => {});
+  const materializeMemoryViews = typeof deps.materializeMemoryViews === 'function'
+    ? deps.materializeMemoryViews
+    : (() => null);
   const addProfileItem = typeof deps.addProfileItem === 'function'
     ? deps.addProfileItem
     : () => {};
@@ -74,6 +80,32 @@ function createPersistNode(deps = {}) {
     let enqueuedPostReplyJob = null;
 
     if (shouldPersistChatArtifacts) {
+      if (config.MEMORY_V3_ENABLED) {
+        await appendMemoryEvent({
+          type: 'turn_replied',
+          userId: request.userId,
+          sessionKey: request.sessionKey,
+          groupId: request.routeMeta?.groupId || request.routeMeta?.group_id || '',
+          channelId: request.routeMeta?.channelId || request.routeMeta?.channel_id || '',
+          sessionId: request.routeMeta?.sessionId || request.routeMeta?.session_id || '',
+          routePolicyKey: request.routePolicyKey,
+          topRouteType: request.topRouteType,
+          scopeType: (request.routeMeta?.groupId || request.routeMeta?.group_id) ? 'group' : 'personal',
+          source: 'runtime_v2_persist',
+          text: finalReply,
+          payload: {
+            question: userContent,
+            continuitySnapshot: {
+              activeTopic: String(state.memory?.continuityState?.payload?.active_topic || '').trim(),
+              openLoops: normalizeArray(state.memory?.continuityState?.payload?.open_loops),
+              assistantCommitments: normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments),
+              userConstraints: normalizeArray(state.memory?.continuityState?.payload?.user_constraints),
+              carryOverUserTurn: String(state.memory?.continuityState?.payload?.carry_over_user_turn || '').trim()
+            }
+          }
+        });
+        materializeMemoryViews();
+      }
       appendShortTermHistory(request.userId, userContent, finalReply, request.userInfo, {
         chatHistory,
         shortTermMemory,
@@ -82,6 +114,33 @@ function createPersistNode(deps = {}) {
       });
 
       if (shouldPersistBridge) {
+        if (config.MEMORY_V3_ENABLED) {
+          const stateSlice = shortTermMemory?.[request.sessionKey] || {};
+          const historySlice = Array.isArray(chatHistory?.[request.sessionKey]) ? chatHistory[request.sessionKey] : [];
+          await appendMemoryEvent({
+            type: 'session_checkpoint',
+            userId: request.userId,
+            sessionKey: request.sessionKey,
+            groupId: request.routeMeta?.groupId || request.routeMeta?.group_id || '',
+            channelId: request.routeMeta?.channelId || request.routeMeta?.channel_id || '',
+            sessionId: request.routeMeta?.sessionId || request.routeMeta?.session_id || '',
+            routePolicyKey: request.routePolicyKey,
+            topRouteType: request.topRouteType,
+            scopeType: 'session',
+            source: 'runtime_v2_persist',
+            payload: {
+              snapshotType: 'post_reply',
+              activeTopic: String(stateSlice.activeTopic || '').trim(),
+              summary: String(stateSlice.summary || '').trim(),
+              carryOverUserTurn: String(stateSlice.carryOverUserTurn || '').trim(),
+              openLoops: normalizeArray(stateSlice.openLoops),
+              assistantCommitments: normalizeArray(stateSlice.assistantCommitments),
+              userConstraints: normalizeArray(stateSlice.userConstraints),
+              recentMessages: historySlice.slice(-6)
+            }
+          });
+          materializeMemoryViews();
+        }
         persistShortTermBridgeSnapshot(request.userId, {
           chatHistory,
           shortTermMemory,
