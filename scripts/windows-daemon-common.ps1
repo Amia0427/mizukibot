@@ -75,13 +75,17 @@ function Register-DaemonScheduledTask {
   $daily.StartBoundary = (Get-Date).ToString("yyyy-MM-dd'T'HH:mm:ss")
   $daily.DaysInterval = 1
   $daily.Enabled = $true
-  $daily.Repetition.Interval = 'PT30M'
+  $daily.Repetition.Interval = 'PT5M'
   $daily.Repetition.Duration = 'P1D'
   $daily.Repetition.StopAtDurationEnd = $false
 
   $logon = $task.Triggers.Create(9)
   $logon.Enabled = $true
   $logon.UserId = $paths.UserId
+
+  $boot = $task.Triggers.Create(8)
+  $boot.Enabled = $true
+  $boot.Delay = 'PT30S'
 
   $action = $task.Actions.Create(0)
   $action.Path = $paths.PowerShellExe

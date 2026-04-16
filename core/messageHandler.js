@@ -1097,6 +1097,7 @@ function createMessageHandler({
     saveData,
     clearGroupBindingForUser
   });
+  const buildSubagentContextSummary = (...args) => visualContext.buildSubagentContextSummary(...args);
   const taskControlCoordinator = createMessageTaskControlCoordinator({
     buildSessionId,
     buildNoTaskControlText,
@@ -1115,7 +1116,7 @@ function createMessageHandler({
     shouldPreferQqRichReply,
     buildQqRichReplyPrompt,
     getEffectivePolicyKey,
-    sendGroupReply,
+    sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
     runBackgroundToolTask,
     config
   });
@@ -1150,7 +1151,6 @@ function createMessageHandler({
   });
   const dispatchByRoutePlan = (...args) => dispatchCoordinator.dispatchByRoutePlan(...args);
   let routeFlow = null;
-  const buildSubagentContextSummary = (...args) => visualContext.buildSubagentContextSummary(...args);
 
   async function executeFullMultiWorkerTaskWithHandle(question, userInfo, userId, imageUrl = null, options = {}) {
     const mutableOptions = options && typeof options === 'object' ? { ...options } : {};
