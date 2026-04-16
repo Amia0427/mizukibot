@@ -12,6 +12,31 @@ function parseJsonTail(text = '') {
   }
 }
 
+function normalizeText(value = '') {
+  return String(value || '').trim();
+}
+
+function createDefaultHapiControlClientFactory(runtimeConfig = {}) {
+  return function createDefaultHapiControlClient() {
+    const axios = require('axios');
+    const baseURL = normalizeText(runtimeConfig.HAPI_BASE_URL || '');
+    if (!baseURL) {
+      throw new Error('HAPI_BASE_URL is empty');
+    }
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+    const token = normalizeText(runtimeConfig.HAPI_AUTH_TOKEN || '');
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return axios.create({
+      baseURL: baseURL.replace(/\/+$/, ''),
+      headers,
+      timeout: Math.max(10000, Number(runtimeConfig.HAPI_TIMEOUT_MS) || 180000),
+      proxy: false
+    });
+  };
+}
+
 function formatSummaryCooldownReply(remainingMs = 0) {
   const seconds = Math.max(1, Math.ceil((Number(remainingMs || 0) || 0) / 1000));
   return `当前会话总结刚生成过，请 ${seconds} 秒后再试。`;
@@ -31,7 +56,9 @@ function createMessageAdminCoordinator(deps = {}) {
     clearGroupMute,
     setGroupMute,
     scheduleGroupMessage,
-    createScheduledCommand
+    createScheduledCommand,
+    hapiControlRuntime = null,
+    createHapiControlClient = null
   } = deps;
 
   async function handleSessionSummaryCommand({
@@ -161,7 +188,65 @@ function createMessageAdminCoordinator(deps = {}) {
     throw new Error('schedule_create.kind 仅支持 message 或 command');
   }
 
+  async function handleHapiAdminCommand({ rawText = '', groupId = '', userId = '' } = {}) {
+    const text = normalizeText(rawText);
+    if (!/^\/hapi(?:\s|$)/i.test(text)) return null;
+    if (!isAdminUser(userId)) {
+      return { handled: true, replyText: '仅管理员可用。' };
+    }
+    const payload = text.replace(/^\/hapi/i, '').trim();
+    const [sub, ...restParts] = payload.split(/\s+/).filter(Boolean);
+    const subcmd = normalizeText(sub || 'status').toLowerCase();
+    const arg = restParts.join(' ').trim();
+
+    if (subcmd === 'status') {
+      const sessions = hapiControlRuntime?.listSessions(5, {
+        groupId: normalizeText(groupId),
+        userId: normalizeText(userId)
+      }) || [];
+      const approvals = hapiControlRuntime?.listApprovals(5, {
+        groupId: normalizeText(groupId),
+        userId: normalizeText(userId),
+        status: 'pending'
+      }) || [];
+      if (!sessions.length && !approvals.length) {
+        return { handled: true, replyText: '当前没有远程 HAPI 会话或待处理审批。' };
+      }
+      return {
+        handled: true,
+        replyText: [
+          sessions.length ? `远程会话：\n${sessions.map((item) => `- ${item.session_id} | ${item.machine_id || 'unknown'} | ${item.status || 'idle'}`).join('\n')}` : '',
+          approvals.length ? `待处理审批：\n${approvals.map((item) => `- ${item.id} | ${item.summary || 'remote permission request'}`).join('\n')}` : ''
+        ].filter(Boolean).join('\n\n')
+      };
+    }
+
+    if ((subcmd === 'approve' || subcmd === 'deny') && createHapiControlClient) {
+      const approval = hapiControlRuntime?.getApproval(arg);
+      if (!approval) {
+        return { handled: true, replyText: '未找到对应的审批请求。' };
+      }
+      const client = createHapiControlClient();
+      const action = subcmd === 'approve' ? 'approve' : 'deny';
+      await client.post(
+        `/api/sessions/${encodeURIComponent(String(approval.session_id || '').trim())}/permissions/${encodeURIComponent(String(approval.request_id || approval.id || '').trim())}/${action}`,
+        { note: `${action}d by admin command` }
+      );
+      hapiControlRuntime?.resolveApproval(String(approval.id || '').trim(), action, 'resolved via /hapi');
+      return {
+        handled: true,
+        replyText: action === 'approve' ? '已批准该远程审批请求。' : '已拒绝该远程审批请求。'
+      };
+    }
+
+    return {
+      handled: true,
+      replyText: '支持的 HAPI 管理命令：`/hapi status`、`/hapi approve <id>`、`/hapi deny <id>`'
+    };
+  }
+
   return {
+    handleHapiAdminCommand,
     handleInitiativeAdminCommand,
     handleQqScheduleAdminCommand,
     handleSessionSummaryCommand,
@@ -170,5 +255,6 @@ function createMessageAdminCoordinator(deps = {}) {
 }
 
 module.exports = {
+  createDefaultHapiControlClientFactory,
   createMessageAdminCoordinator
 };

@@ -14,6 +14,7 @@ const { recordQzoneGenerationHistory } = require('../core/qzoneGenerationState')
 const {
   appendQzoneGenerationLog,
   buildQzonePlan,
+  CANDIDATE_VARIANT_TYPES,
   evaluateImageConsistency,
   pickBestCandidate,
   summarizeQzoneDebug,
@@ -57,17 +58,24 @@ assert.ok(plan.fingerprint);
 assert.ok(plan.variationProfile.arc);
 assert.ok(plan.variationProfile.tempo);
 assert.ok(plan.variationProfile.distance);
+assert.ok(plan.variationProfile.spark);
+assert.ok(plan.variationProfile.socialMask);
+assert.ok(plan.variationProfile.freshnessMode);
+assert.ok(plan.variationProfile.voiceEdge);
+assert.ok(plan.tropeFingerprint);
 assert.ok(plan.theme && plan.theme.key);
 
 const candidates = [
   {
     plan,
+    variantType: CANDIDATE_VARIANT_TYPES[0],
     text: '我把窗帘拉开一点以后，灯光刚好落在杯口上，整个人也没那么硬了。',
     rejected: false,
     rejectionReason: ''
   },
   {
     plan,
+    variantType: CANDIDATE_VARIANT_TYPES[1],
     text: '今天也想分享一下我的心情。',
     rejected: false,
     rejectionReason: ''
@@ -81,6 +89,8 @@ const picked = pickBestCandidate(candidates, {
 });
 assert.ok(picked.selected);
 assert.ok(picked.selected.text.includes('窗'));
+assert.ok(typeof picked.selected.circleNaturalnessScore === 'number');
+assert.ok(typeof picked.selected.tropeCollisionScore === 'number');
 
 const consistency = evaluateImageConsistency({
   text: '我把窗帘拉开一点以后，灯光刚好落在杯口上。',
@@ -96,6 +106,10 @@ appendQzoneGenerationLog({
   selectedFingerprint: picked.selected.fingerprint,
   selectedScore: picked.selected.score,
   similarity: picked.selected.similarity,
+  noveltyScore: picked.selected.noveltyScore,
+  tropeCollisionScore: picked.selected.tropeCollisionScore,
+  circleNaturalnessScore: picked.selected.circleNaturalnessScore,
+  edgeTensionScore: picked.selected.edgeTensionScore,
   imagePublishMode: 'image_attached',
   imageConsistencyScore: consistency.score,
   failureReasons: [],
@@ -108,18 +122,31 @@ appendQzoneGenerationLog({
     structure: plan.variationProfile.structure,
     arc: plan.variationProfile.arc,
     tempo: plan.variationProfile.tempo,
-    distance: plan.variationProfile.distance
+    distance: plan.variationProfile.distance,
+    spark: plan.variationProfile.spark,
+    socialMask: plan.variationProfile.socialMask,
+    freshnessMode: plan.variationProfile.freshnessMode,
+    voiceEdge: plan.variationProfile.voiceEdge,
+    tropeFingerprint: plan.tropeFingerprint
   },
   candidates: picked.ranked.map((item) => ({
     fingerprint: item.fingerprint,
     score: item.score,
     similarity: item.similarity,
+    noveltyScore: item.noveltyScore,
+    tropeCollisionScore: item.tropeCollisionScore,
+    circleNaturalnessScore: item.circleNaturalnessScore,
+    edgeTensionScore: item.edgeTensionScore,
+    variantType: item.variantType,
+    tropeFingerprint: item.tropeFingerprint,
     rejected: item.rejected,
     rejectionReason: item.rejectionReason
   }))
 });
 
 assert.ok(summarizeQzoneDebug(10).includes('来源分布'));
+assert.ok(summarizeQzoneDebug(10).includes('常见套路'));
+assert.ok(summarizeQzoneDebug(10).includes('候选风味'));
 assert.ok(summarizeQzoneWindowStats(7).includes('QZone phase2 统计'));
 
 console.log('qzoneGenerationPhase2.test.js passed');
