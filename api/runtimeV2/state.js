@@ -247,7 +247,13 @@ function translatePlan(rawPlan = {}, options = {}) {
         id: step.id,
         action: step.kind === 'reply' ? 'reply' : step.tool,
         args: step.inputs || {},
-        purpose: step.instruction || step.successCriteria || ''
+        purpose: step.instruction || step.successCriteria || '',
+        dependsOn: normalizeArray(step.dependsOn),
+        parallelGroup: String(step.parallelGroup || '').trim(),
+        sideEffect: Boolean(step.sideEffect),
+        evidenceRequirement: normalizeObject(step.evidenceRequirement, {}),
+        repairPolicy: normalizeObject(step.repairPolicy, {}),
+        runtimeBinding: step.runtimeBinding === null ? null : normalizeObject(step.runtimeBinding, {})
       }))
     },
     finalExecLogs: [],
@@ -265,7 +271,13 @@ function rebuildFinalPlanFromSteps(state) {
       id: step.id,
       action: step.kind === 'reply' ? 'reply' : step.tool,
       args: step.inputs || {},
-      purpose: step.instruction || step.successCriteria || ''
+      purpose: step.instruction || step.successCriteria || '',
+      dependsOn: normalizeArray(step.dependsOn),
+      parallelGroup: String(step.parallelGroup || '').trim(),
+      sideEffect: Boolean(step.sideEffect),
+      evidenceRequirement: normalizeObject(step.evidenceRequirement, {}),
+      repairPolicy: normalizeObject(step.repairPolicy, {}),
+      runtimeBinding: step.runtimeBinding === null ? null : normalizeObject(step.runtimeBinding, {})
     }))
   };
 }
@@ -317,6 +329,11 @@ function buildExecLogsFromSteps(steps = []) {
       error: latestEnvelope && latestEnvelope.status !== 'completed'
         ? String(latestEnvelope.result || step.blockingReason || 'tool failed')
         : '',
+      unsatisfiedRequirement: String(latestEnvelope?.unsatisfiedRequirement || '').trim(),
+      runtimeBinding: latestEnvelope?.runtimeBinding === null ? null : normalizeObject(latestEnvelope?.runtimeBinding, step.runtimeBinding),
+      dependsOn: normalizeArray(step.dependsOn),
+      evidenceRequirement: normalizeObject(step.evidenceRequirement, {}),
+      repairPolicy: normalizeObject(step.repairPolicy, {}),
       batchId: String(latestEnvelope?.batch_id || step.batchId || '').trim(),
       batchIndex: Number.isFinite(Number(latestEnvelope?.batch_index))
         ? Number(latestEnvelope.batch_index)

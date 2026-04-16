@@ -1297,6 +1297,9 @@ function createRuntime(options = {}) {
         blockingReason: envelope.status === 'completed'
           ? ''
           : String(envelope.blockedReason || envelope.result || '').slice(0, 240),
+        runtimeBinding: Object.prototype.hasOwnProperty.call(envelope, 'runtimeBinding')
+          ? (envelope.runtimeBinding === null ? null : normalizeObject(envelope.runtimeBinding, {}))
+          : step.runtimeBinding,
         batchId,
         batchIndex
       };

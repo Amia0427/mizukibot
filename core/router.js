@@ -165,6 +165,16 @@ function parseAdminCommand(cleanText = '') {
     };
   }
 
+  if (/^\/hapi(?:\s|$)/i.test(t)) {
+    const payload = t.replace(/^\/hapi/i, '').trim();
+    return {
+      cmd: 'hapi',
+      args: payload ? payload.split(/\s+/).filter(Boolean) : [],
+      raw: t,
+      payload
+    };
+  }
+
   if (/^\/learn(?:\s|$)/i.test(t)) {
     const payload = t.replace(/^\/learn/i, '').trim();
     const parts = payload.split(/\s+/).filter(Boolean);
@@ -234,7 +244,7 @@ function parseAdminCommand(cleanText = '') {
   const parts = t.slice(ADMIN_PREFIX.length).trim().split(/\s+/);
   const cmd = (parts[0] || '').toLowerCase();
   const args = parts.slice(1);
-  const supported = new Set(['debug', 'status', 'reload', 'help']);
+  const supported = new Set(['debug', 'status', 'reload', 'help', 'hapi']);
 
   if (!supported.has(cmd)) return { cmd: 'unknown', args, raw: t };
   return { cmd, args, raw: t };

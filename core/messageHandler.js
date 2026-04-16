@@ -39,7 +39,7 @@ const { isAtBot, detectIntentHybrid } = require('./router');
 const routeExecution = require('./routeExecution');
 const { createMessageEventDeduper } = require('./messageDeduper');
 const { createInboundConcurrencyController } = require('./inboundConcurrency');
-const { isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
+const { isPrivateChatTestUser, isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
 const { handlePassiveGroupAwareness } = require('./passiveGroupAwareness');
 const {
   createContinuousMessagePreprocessor,
@@ -230,12 +230,11 @@ function isPrivateChatType(chatType = '') {
 }
 
 function isPrivateChatUserAllowed(userId = '', runtimeConfig = {}) {
-  const allowlist = Array.isArray(runtimeConfig?.PRIVATE_CHAT_ALLOWED_USER_IDS)
-    ? runtimeConfig.PRIVATE_CHAT_ALLOWED_USER_IDS
-    : [];
-  const normalizedUserId = String(userId || '').trim();
-  if (!normalizedUserId) return false;
-  return allowlist.includes(normalizedUserId);
+  return isPrivateChatTestUser({
+    chatType: 'private',
+    userId,
+    config: runtimeConfig
+  });
 }
 
 function canBypassPrivateGroupOnly({ chatType = '', userId = '', runtimeConfig = {} } = {}) {
@@ -1834,11 +1833,12 @@ function createMessageHandler({
     const effectiveMsg = preprocessed?.effectiveMsg || msg;
     const continuousMeta = preprocessed?.meta || effectiveMsg.__continuousMessageMeta || null;
     const rawText = effectiveMsg.raw_message || '';
-    const concurrencyScope = privilegedPrivateChat ? 'private' : 'default';
-    const concurrencyLane = privilegedPrivateChat
-      ? 'admin'
+    const isPrivateInbound = isPrivateChatType(chatType);
+    const concurrencyScope = isPrivateInbound ? 'private' : 'default';
+    const concurrencyLane = isPrivateInbound
+      ? (isAdminUser(senderId) ? 'admin' : 'general')
       : (isAdminUser(senderId) ? 'admin' : 'general');
-    const selectedInboundConcurrency = privilegedPrivateChat ? privateInboundConcurrency : inboundConcurrency;
+    const selectedInboundConcurrency = isPrivateInbound ? privateInboundConcurrency : inboundConcurrency;
     const queueWaitStartedAt = Date.now();
     const inboundLock = await selectedInboundConcurrency.acquire({
       userId: senderId,

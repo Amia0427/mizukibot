@@ -3,6 +3,7 @@ const assert = require('assert');
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
 const { detectIntent } = require('../core/router');
+const { parseAdminCommand } = require('../core/router');
 
 const imageSummaryRoute = detectIntent({
   rawText: '请总结这张图片 [CQ:image,url=https://example.com/a.jpg]',
@@ -24,5 +25,9 @@ const actionRoute = detectIntent({
 
 assert.strictEqual(actionRoute.topRouteType, 'direct_chat');
 assert.strictEqual(actionRoute.meta.reason, 'explicit-act');
+
+const hapiCommand = parseAdminCommand('/hapi status');
+assert.strictEqual(hapiCommand.cmd, 'hapi');
+assert.strictEqual(hapiCommand.payload, 'status');
 
 console.log('routerChineseKeywords.test.js passed');

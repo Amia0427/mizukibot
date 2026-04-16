@@ -44,6 +44,7 @@ function normalizePlanStep(rawStep = {}, source = 'planner', index = 0) {
   const batchId = normalizeText(step.batchId || step.batch_id);
   const batchIndexRaw = step?.batchIndex ?? step?.batch_index;
   const batchIndex = Number.isFinite(Number(batchIndexRaw)) ? Number(batchIndexRaw) : null;
+  const dependsOn = normalizeArray(step.dependsOn ?? step.depends_on).map((item) => normalizeText(item)).filter(Boolean);
 
   return {
     id: normalizeStepId(step, source, index),
@@ -62,6 +63,14 @@ function normalizePlanStep(rawStep = {}, source = 'planner', index = 0) {
     evidence: normalizeArray(step.evidence).map((item) => normalizeObject(item, {})),
     blockingReason: normalizeText(step.blockingReason),
     optional: Boolean(step.optional),
+    dependsOn,
+    parallelGroup: normalizeText(step.parallelGroup || step.parallel_group),
+    sideEffect: Boolean(step.sideEffect ?? step.side_effect),
+    evidenceRequirement: normalizeObject(step.evidenceRequirement ?? step.evidence_requirement, {}),
+    repairPolicy: normalizeObject(step.repairPolicy ?? step.repair_policy, {}),
+    runtimeBinding: step.runtimeBinding === null
+      ? null
+      : normalizeObject(step.runtimeBinding ?? step.runtime_binding, null),
     source,
     routePreferredTools: source === 'route' ? preferredTools : normalizeArray(step.routePreferredTools).map((item) => normalizeText(item)).filter(Boolean),
     ...(batchId ? { batchId } : {}),
@@ -103,6 +112,14 @@ function normalizeExecutionEnvelope(rawEnvelope = {}, fallbackStep = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(envelope, 'blockedReason')) {
     normalized.blockedReason = normalizeText(envelope.blockedReason);
+  }
+  if (Object.prototype.hasOwnProperty.call(envelope, 'unsatisfiedRequirement')) {
+    normalized.unsatisfiedRequirement = normalizeText(envelope.unsatisfiedRequirement);
+  }
+  if (Object.prototype.hasOwnProperty.call(envelope, 'runtimeBinding')) {
+    normalized.runtimeBinding = envelope.runtimeBinding === null
+      ? null
+      : normalizeObject(envelope.runtimeBinding, {});
   }
   return normalized;
 }

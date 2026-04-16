@@ -16,7 +16,13 @@ function isPrivateChatType(chatType = '') {
   return normalizeText(chatType).toLowerCase() === 'private';
 }
 
-function isPrivilegedPrivateChatUser({
+function getPrivateChatTestUserIdSet(runtimeConfig = config) {
+  const preferred = normalizeIdSet(runtimeConfig?.PRIVATE_CHAT_TEST_USER_IDS);
+  if (preferred.size > 0) return preferred;
+  return normalizeIdSet(runtimeConfig?.PRIVATE_CHAT_ALLOWED_USER_IDS);
+}
+
+function isPrivateChatTestUser({
   chatType = '',
   userId = '',
   config: runtimeConfig = config
@@ -24,15 +30,25 @@ function isPrivilegedPrivateChatUser({
   if (!isPrivateChatType(chatType)) return false;
   const normalizedUserId = normalizeText(userId);
   if (!normalizedUserId) return false;
+  const allowSet = getPrivateChatTestUserIdSet(runtimeConfig);
+  return allowSet.has('*') || allowSet.has(normalizedUserId);
+}
 
-  const privateAllowSet = normalizeIdSet(runtimeConfig?.PRIVATE_CHAT_ALLOWED_USER_IDS);
-  if (!privateAllowSet.has(normalizedUserId)) return false;
+function isPrivilegedPrivateChatUser({
+  chatType = '',
+  userId = '',
+  config: runtimeConfig = config
+} = {}) {
+  if (!isPrivateChatTestUser({ chatType, userId, config: runtimeConfig })) return false;
+  const normalizedUserId = normalizeText(userId);
 
   const adminSet = normalizeIdSet(runtimeConfig?.ADMIN_USER_IDS);
   return adminSet.has(normalizedUserId);
 }
 
 module.exports = {
+  getPrivateChatTestUserIdSet,
+  isPrivateChatTestUser,
   isPrivateChatType,
   isPrivilegedPrivateChatUser
 };

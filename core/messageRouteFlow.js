@@ -154,6 +154,7 @@ function createMessageRouteFlow(deps = {}) {
     askToolTaskWithSubagentReview,
     runBackgroundToolTask,
     handleAdminCommand,
+    handleHapiAdminCommand,
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
     generateBotDiaryDraft,
@@ -806,6 +807,13 @@ function createMessageRouteFlow(deps = {}) {
         userId: senderId
       });
       adminReply = String(memeAdminResult?.replyText || '').trim() || 'meme 管理命令已处理。';
+    } else if (cmd === 'hapi') {
+      const hapiAdminResult = await handleHapiAdminCommand({
+        rawText: route?.meta?.command?.raw || route?.cleanText || rawText,
+        groupId,
+        userId: senderId
+      });
+      adminReply = String(hapiAdminResult?.replyText || '').trim() || 'HAPI 管理命令已处理。';
     } else if (cmd === 'qzone_post') {
       const payload = parseJsonTail(route?.meta?.command?.payload);
       adminReply = (await publishQzoneForContext({
@@ -857,7 +865,7 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /debug on|off, /status, /reload, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /debug on|off, /status, /reload, /hapi status|approve <id>|deny <id>, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
     } else if (cmd === 'status') {
       adminReply = '状态命令已收到。';
     } else if (cmd === 'reload') {
