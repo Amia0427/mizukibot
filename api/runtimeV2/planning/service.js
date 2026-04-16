@@ -335,9 +335,8 @@ function deriveToolArgs(toolName = '', route = {}) {
 }
 
 function deriveMemoryOpenArgs(route = {}) {
-  const safeQuery = getPlannerSearchSeed(route).slice(0, 120) || 'recent context';
   return {
-    command: `mem open --ref ${JSON.stringify(`mc_ref:planner_pending:${safeQuery}`)}`
+    command: ''
   };
 }
 
@@ -485,7 +484,7 @@ function buildPlannerStepGraphSequence(route = {}, allowedToolNames = [], toolCa
       buildExecutionStepGraph({
         tool: 'memory_cli',
         args: deriveMemoryOpenArgs(route),
-        purpose: 'Open the most relevant memory ref returned by the prior search result before composing the final reply.',
+        purpose: 'Only open the top memory ref from the prior search if the search digest is still insufficient for a grounded reply.',
         route,
         index: 1,
         options: {
@@ -723,7 +722,7 @@ function buildPlannerPrompt(toolCatalog = []) {
     'Do not invent tool names.',
     'If the request depends on freshness, memory, notebook retrieval, web facts, current time, or explicit action execution, prefer tool_plan.',
     'If the request needs write-capable or side-effect tools, taskShape must be background_tool_task.',
-    'If you choose memory_cli for recall or notebook continuity, plan two steps: memory_cli search then memory_cli open.',
+    'If you choose memory_cli for recall or notebook continuity, search first. Plan a follow-up memory_cli open only when the search result alone is likely insufficient.',
     'If the user asks for official docs, website details, key points, or asks to include links and both web_search and web_fetch are available, plan web_search first and web_fetch second.',
     'steps items must include: id, tool, args, kind, dependsOn, parallelGroup, sideEffect, successCriteria, evidenceRequirement, repairPolicy, runtimeBinding, purpose.',
     'Available tools right now:',
@@ -804,7 +803,7 @@ function normalizeRuntimeBindingDescriptor(step = {}, route = {}) {
 
   if (toolName === 'memory_cli') {
     const command = normalizeText(step?.args?.command);
-    if ((rawBinding && bindingEntries.length > 0) || /\{\{.*topRef.*\}\}/i.test(command) || /^mem open --ref\s+\"mc_ref:planner_pending:/i.test(command)) {
+    if ((rawBinding && bindingEntries.length > 0) || /\{\{.*topRef.*\}\}/i.test(command) || !command || /^mem open --ref\s*$/i.test(command)) {
       return {
         type: 'memory_ref_from_previous_search',
         sourceStepId: sourceStepId || 'planner_step_1',

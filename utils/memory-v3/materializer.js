@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const config = require('../../config');
 const { getUserAffinityState } = require('../memory');
 const {
@@ -17,18 +18,51 @@ const {
   defaultEpisodeProjection
 } = require('./storage');
 
-function createEmptyProfile() {
+const PERSONA_SUPPORT_FIELDS = new Set([
+  'persona_summary_support',
+  'persona_impression_support'
+]);
+
+const STRICT_PROFILE_FIELD_MAP = Object.freeze({
+  identity: 'identities',
+  personality: 'personality_traits',
+  preference_like: 'likes',
+  preference_dislike: 'dislikes',
+  goal: 'goals',
+  boundary: 'boundaries'
+});
+
+const WEAK_PROFILE_FIELD_MAP = Object.freeze({
+  preference_like: 'single_hit_preferences',
+  preference_dislike: 'single_hit_preferences',
+  personality: 'single_hit_traits',
+  topic: 'recent_topics'
+});
+
+function createEmptyProfileProjection() {
   return {
-    facts: [],
-    identities: [],
-    personality_traits: [],
-    hobbies: [],
-    likes: [],
-    dislikes: [],
-    goals: [],
-    recent_topics: [],
-    summaries: [],
-    impressions: [],
+    personaCore: {
+      summary: '',
+      impression: '',
+      replyStyle: '',
+      relationshipTone: '',
+      supportHash: '',
+      updatedAt: 0
+    },
+    strictProfile: {
+      identities: [],
+      personality_traits: [],
+      likes: [],
+      dislikes: [],
+      goals: [],
+      boundaries: []
+    },
+    weakProfile: {
+      single_hit_preferences: [],
+      single_hit_traits: [],
+      recent_topics: []
+    },
+    suppressed: [],
     relation_stage: '陌生人'
   };
 }
@@ -36,6 +70,21 @@ function createEmptyProfile() {
 function createNodeFromEvent(event) {
   const text = normalizeText(event.text);
   if (!text) return null;
+  const fieldKey = normalizeText(
+    event.payload?.fieldKey
+    || event.fieldKey
+    || event.payload?.type
+    || event.memoryKind
+    || event.payload?.memoryKind
+    || event.semanticSlot
+    || event.payload?.semanticSlot
+    || 'fact'
+  ).toLowerCase();
+  const normalizedFieldKey = fieldKey === 'like'
+    ? 'preference_like'
+    : fieldKey === 'dislike'
+      ? 'preference_dislike'
+      : fieldKey;
   return {
     id: String(event.id || '').trim(),
     userId: normalizeText(event.userId),
@@ -51,13 +100,17 @@ function createNodeFromEvent(event) {
     status: normalizeText(event.status || (event.type === 'memory_candidate_extracted' ? 'candidate' : 'active')).toLowerCase(),
     type: normalizeText(event.payload?.type || event.memoryKind || 'fact').toLowerCase() || 'fact',
     memoryKind: normalizeText(event.memoryKind || event.payload?.memoryKind).toLowerCase(),
-    semanticSlot: normalizeText(event.semanticSlot || event.payload?.semanticSlot).toLowerCase(),
+    fieldKey: normalizedFieldKey,
+    semanticSlot: normalizeText(event.semanticSlot || event.payload?.semanticSlot || normalizedFieldKey).toLowerCase(),
     conflictKey: normalizeText(event.conflictKey || event.payload?.conflictKey),
     canonicalKey: normalizeText(event.canonicalKey || canonicalizeText(text)).toLowerCase(),
     text,
     confidence: Number(event.confidence || event.payload?.confidence || 0) || 0,
     importance: Number(event.importance || event.payload?.importance || 0) || 0,
     evidenceCount: Math.max(1, Number(event.evidenceCount || event.payload?.evidenceCount || 1) || 1),
+    evidenceTier: 'weak',
+    stabilityScore: 0,
+    suppressedBy: '',
     participants: Array.isArray(event.participants) ? event.participants : [],
     entities: Array.isArray(event.entities) ? event.entities : [],
     relations: Array.isArray(event.relations) ? event.relations : [],
@@ -93,22 +146,106 @@ function pushUnique(list, value, limit = 8) {
   if (list.length > limit) list.shift();
 }
 
-function applyNodeToProfile(profile, node) {
-  const target = profile || createEmptyProfile();
-  const type = String(node.type || '').trim().toLowerCase();
-  const text = clampText(node.text, 320);
-  if (!text) return target;
-  if (type === 'identity') pushUnique(target.identities, text, 20);
-  else if (type === 'personality') pushUnique(target.personality_traits, text, 20);
-  else if (type === 'hobby') pushUnique(target.hobbies, text, 20);
-  else if (type === 'like') pushUnique(target.likes, text, 20);
-  else if (type === 'dislike') pushUnique(target.dislikes, text, 20);
-  else if (type === 'goal') pushUnique(target.goals, text, 20);
-  else if (type === 'topic') pushUnique(target.recent_topics, text, 12);
-  else if (type === 'summary') pushUnique(target.summaries, text, 4);
-  else if (type === 'impression') pushUnique(target.impressions, text, 4);
-  else pushUnique(target.facts, text, 30);
-  return target;
+function computeStabilityScore(node, supportCount = 1) {
+  const confidence = Math.max(0, Math.min(1, Number(node.confidence || 0)));
+  const support = Math.max(1, Number(supportCount || node.evidenceCount || 1));
+  const sourceBonus = node.sourceKind === 'explicit' ? 0.35 : (node.status === 'active' ? 0.18 : 0);
+  const importance = Math.max(0, Math.min(1, Number(node.importance || 0) / 2.5));
+  return Math.max(0, Math.min(1, (confidence * 0.45) + (Math.min(3, support) * 0.12) + sourceBonus + (importance * 0.1)));
+}
+
+function resolveEvidenceTier(node, supportCount = 1) {
+  if (node.sourceKind === 'explicit') return 'strict';
+  if (
+    supportCount >= Math.max(2, Number(config.MEMORY_V3_CANDIDATE_CONFIRMATIONS_REQUIRED || 2))
+    && Number(node.confidence || 0) >= Number(config.MEMORY_V3_STRICT_CONFIRM_CONFIDENCE || 0.82)
+  ) {
+    return 'strict';
+  }
+  if (Number(node.confidence || 0) >= Number(config.MEMORY_V3_WEAK_HIGH_CONFIDENCE || 0.9)) return 'weak';
+  return 'weak';
+}
+
+function buildPersonaSupportHash(supports = []) {
+  const payload = (Array.isArray(supports) ? supports : [])
+    .map((item) => `${item.fieldKey}|${item.canonicalKey}|${item.text}`)
+    .sort()
+    .join('\n');
+  return crypto.createHash('sha1').update(payload).digest('hex');
+}
+
+function buildPersonaCore(profileProjection, supportNodes = [], styleNodes = [], affinityState = {}, previousPersonaCore = {}) {
+  const supports = (Array.isArray(supportNodes) ? supportNodes : [])
+    .filter((item) => item.evidenceTier === 'strict')
+    .sort((a, b) => Number(b.stabilityScore || 0) - Number(a.stabilityScore || 0))
+    .slice(0, 6);
+  const supportHash = buildPersonaSupportHash(supports);
+  const next = {
+    summary: '',
+    impression: '',
+    replyStyle: '',
+    relationshipTone: '',
+    supportHash,
+    updatedAt: Date.now()
+  };
+
+  if (supports.length < Math.max(1, Number(config.MEMORY_V3_PERSONA_SUPPORT_MIN_ITEMS || 3))) {
+    return {
+      ...next,
+      summary: String(previousPersonaCore.summary || ''),
+      impression: String(previousPersonaCore.impression || ''),
+      replyStyle: String(previousPersonaCore.replyStyle || ''),
+      relationshipTone: String(previousPersonaCore.relationshipTone || '')
+    };
+  }
+
+  const summarySupports = supports
+    .filter((item) => item.fieldKey === 'persona_summary_support')
+    .map((item) => item.text)
+    .filter(Boolean)
+    .slice(0, 2);
+  const impressionSupports = supports
+    .filter((item) => item.fieldKey === 'persona_impression_support')
+    .map((item) => item.text)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (supportHash === String(previousPersonaCore.supportHash || '').trim()) {
+    return {
+      ...next,
+      summary: String(previousPersonaCore.summary || ''),
+      impression: String(previousPersonaCore.impression || ''),
+      replyStyle: String(previousPersonaCore.replyStyle || ''),
+      relationshipTone: String(previousPersonaCore.relationshipTone || '')
+    };
+  }
+
+  next.summary = clampText(summarySupports.join('；'), 220);
+  next.impression = clampText(impressionSupports.join('；'), 180);
+
+  const stylePatterns = (Array.isArray(styleNodes) ? styleNodes : [])
+    .filter((item) => item.fieldKey === 'style_pattern' && item.evidenceTier === 'strict')
+    .map((item) => item.text.replace(/^style:\s*/i, '').trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  const styleAvoids = (Array.isArray(styleNodes) ? styleNodes : [])
+    .filter((item) => item.fieldKey === 'style_avoid' && item.evidenceTier === 'strict')
+    .map((item) => item.text.replace(/^style:\s*/i, '').trim())
+    .filter(Boolean)
+    .slice(0, 1);
+
+  next.replyStyle = clampText([
+    stylePatterns.length ? `偏好：${stylePatterns.join('；')}` : '',
+    styleAvoids.length ? `避免：${styleAvoids.join('；')}` : ''
+  ].filter(Boolean).join(' | '), 180);
+
+  next.relationshipTone = clampText([
+    normalizeText(affinityState.relationship || ''),
+    normalizeText(affinityState.attitude || '')
+  ].filter(Boolean).join(' | '), 120);
+
+  void profileProjection;
+  return next;
 }
 
 function normalizeSessionScopeFromEvent(event = {}) {
@@ -142,6 +279,7 @@ function materializeMemoryViews(options = {}) {
   const events = Array.isArray(options.events) ? options.events : loadMemoryEvents();
   const now = Date.now();
   const sessionProjection = defaultSessionProjection();
+  const previousProfileProjection = options.previousProfileProjection || defaultProfileProjection();
   const profileProjection = defaultProfileProjection();
   const scopeProjection = defaultScopeProjection();
   const episodeProjection = defaultEpisodeProjection();
@@ -235,33 +373,73 @@ function materializeMemoryViews(options = {}) {
   const nodes = Array.from(nodeMap.values());
   const supportMap = new Map();
   for (const node of nodes) {
-    const slot = `${node.userId}|${node.scopeType}|${node.semanticSlot || node.type}|${node.canonicalKey}`;
+    const slot = `${node.userId}|${node.scopeType}|${node.fieldKey}|${node.canonicalKey}`;
     supportMap.set(slot, (supportMap.get(slot) || 0) + 1);
   }
   for (const node of nodes) {
-    if (node.status !== 'candidate') continue;
-    const slot = `${node.userId}|${node.scopeType}|${node.semanticSlot || node.type}|${node.canonicalKey}`;
-    const support = Number(supportMap.get(slot) || 0);
-    if (support >= Math.max(1, Number(config.MEMORY_V3_CANDIDATE_CONFIRMATIONS_REQUIRED || 2))) {
-      node.status = 'active';
-      node.evidenceCount = Math.max(Number(node.evidenceCount || 1), support);
+    const slot = `${node.userId}|${node.scopeType}|${node.fieldKey}|${node.canonicalKey}`;
+    const support = Number(supportMap.get(slot) || 1);
+    node.evidenceCount = Math.max(Number(node.evidenceCount || 1), support);
+    node.evidenceTier = resolveEvidenceTier(node, support);
+    node.stabilityScore = computeStabilityScore(node, support);
+  }
+  const activeNodes = nodes.filter((item) => item.status !== 'archived');
+  const winners = new Map();
+  const suppressed = [];
+  for (const node of activeNodes.slice().sort((a, b) => {
+    if ((b.evidenceTier === 'strict') !== (a.evidenceTier === 'strict')) return b.evidenceTier === 'strict' ? 1 : -1;
+    if (Number(b.stabilityScore || 0) !== Number(a.stabilityScore || 0)) return Number(b.stabilityScore || 0) - Number(a.stabilityScore || 0);
+    if (Number(b.updatedAt || 0) !== Number(a.updatedAt || 0)) return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  })) {
+    const slot = `${node.userId}|${node.scopeType}|${node.fieldKey}|${node.canonicalKey}`;
+    if (!winners.has(slot)) {
+      winners.set(slot, node);
+      continue;
     }
+    node.suppressedBy = String(winners.get(slot)?.id || '');
+    suppressed.push({
+      userId: node.userId,
+      fieldKey: node.fieldKey,
+      canonicalKey: node.canonicalKey,
+      id: node.id,
+      suppressedBy: node.suppressedBy,
+      text: node.text
+    });
   }
 
-  const resolvedNodes = resolveNodeConflicts(nodes.filter((item) => item.status !== 'archived'));
+  const resolvedNodes = Array.from(winners.values());
 
   for (const node of resolvedNodes) {
     const userId = normalizeText(node.userId);
     if (!userId || userId.startsWith('group:')) continue;
     if (!profileProjection.users[userId]) {
-      profileProjection.users[userId] = createEmptyProfile();
+      profileProjection.users[userId] = createEmptyProfileProjection();
     }
-    applyNodeToProfile(profileProjection.users[userId], node);
+    const profile = profileProjection.users[userId];
+    if (STRICT_PROFILE_FIELD_MAP[node.fieldKey] && node.evidenceTier === 'strict') {
+      pushUnique(profile.strictProfile[STRICT_PROFILE_FIELD_MAP[node.fieldKey]], node.text, 20);
+    } else if (WEAK_PROFILE_FIELD_MAP[node.fieldKey]) {
+      pushUnique(profile.weakProfile[WEAK_PROFILE_FIELD_MAP[node.fieldKey]], node.text, 12);
+    } else if (!PERSONA_SUPPORT_FIELDS.has(node.fieldKey) && node.fieldKey !== 'episode') {
+      pushUnique(profile.weakProfile.recent_topics, node.text, 12);
+    }
   }
 
   for (const [userId, profile] of Object.entries(profileProjection.users)) {
     const affinity = getUserAffinityState(userId);
     profile.relation_stage = normalizeText(affinity?.relationship || profile.relation_stage || '陌生人') || '陌生人';
+    const userNodes = resolvedNodes.filter((item) => item.userId === userId && item.scopeType !== 'group');
+    const personaSupports = userNodes.filter((item) => PERSONA_SUPPORT_FIELDS.has(item.fieldKey));
+    const styleNodes = userNodes.filter((item) => item.fieldKey === 'style_pattern' || item.fieldKey === 'style_avoid');
+    profile.personaCore = buildPersonaCore(
+      profile,
+      personaSupports,
+      styleNodes,
+      affinity,
+      previousProfileProjection.users?.[userId]?.personaCore || {}
+    );
+    profile.suppressed = suppressed.filter((item) => item.userId === userId);
   }
 
   for (const userId of Object.keys(episodeProjection.users)) {

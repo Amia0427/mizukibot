@@ -45,8 +45,9 @@ module.exports = (async () => {
   assert.ok(fs.existsSync(profileProjectionFile), 'expected profile projection to exist');
   const profileProjection = JSON.parse(fs.readFileSync(profileProjectionFile, 'utf8'));
   assert.ok(profileProjection.users.u_migrate, 'expected migrated user');
-  assert.ok(profileProjection.users.u_migrate.identities.includes('工程师'));
-  assert.ok(profileProjection.users.u_migrate.likes.includes('猫'));
+  assert.strictEqual(profileProjection.version, 2);
+  assert.ok(profileProjection.users.u_migrate.weakProfile.single_hit_preferences.includes('猫'));
+  assert.ok(profileProjection.users.u_migrate.relation_stage.includes('普通朋友'));
   console.log('memoryV3MigrationScript.test.js passed');
 })().catch((error) => {
   console.error(error);

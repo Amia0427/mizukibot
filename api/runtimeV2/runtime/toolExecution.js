@@ -6,6 +6,33 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function isToolFailureText(resultText = '') {
+  const text = String(resultText || '').trim();
+  if (!text) return true;
+  return /^Tool error:/i.test(text)
+    || /^Unknown tool:/i.test(text)
+    || /^Tool not allowed:/i.test(text)
+    || /^页面提取失败[:：]/i.test(text)
+    || /^MCP tool failed:/i.test(text)
+    || /^request was blocked/i.test(text)
+    || /^invalid api key$/i.test(text);
+}
+
+function isMemorySearchCommand(commandText = '') {
+  return /^mem search\b/i.test(normalizeText(commandText));
+}
+
+function isUnresolvedMemoryOpenCommand(commandText = '') {
+  const text = normalizeText(commandText);
+  if (!/^mem open --ref\s+/i.test(text)) return false;
+  return /^mem open --ref\s+\"mc_ref:planner_pending:/i.test(text)
+    || /^mem open --ref\s+\"<[^"]+>\"/i.test(text);
+}
+
 function createToolExecutionHelpers(deps = {}) {
   const {
     config,
@@ -43,11 +70,7 @@ function createToolExecutionHelpers(deps = {}) {
     const batchIndex = Number.isFinite(Number(step.batchIndex ?? step.batch_index))
       ? Number(step.batchIndex ?? step.batch_index)
       : null;
-    const status = !resultText
-      ? 'failed'
-      : /^Tool error:/i.test(resultText) || /^Unknown tool:/i.test(resultText) || /^Tool not allowed:/i.test(resultText)
-        ? 'failed'
-        : 'completed';
+    const status = isToolFailureText(resultText) ? 'failed' : 'completed';
     return {
       tool_call_id: `${step.id}_${argsHash}_${Date.now()}`,
       step_id: String(step.id || '').trim(),
@@ -203,6 +226,8 @@ function createToolExecutionHelpers(deps = {}) {
     if (!config.SELF_IMPROVEMENT_ENABLED) return;
     const status = String(envelope?.status || '').trim().toLowerCase();
     if (status === 'completed') return;
+    const blockedReason = normalizeText(envelope?.blockedReason).toLowerCase();
+    if (blockedReason.startsWith('runtime_binding_unresolved:')) return;
     const request = normalizeObject(state.request, {});
     const routeMeta = normalizeObject(request.routeMeta, {});
     try {
@@ -252,6 +277,47 @@ function createToolExecutionHelpers(deps = {}) {
     };
   }
 
+  function getPreviousMemorySearchResult(state = {}, currentStepId = '') {
+    const currentId = normalizeText(currentStepId);
+    const planEvidence = normalizeArray(state.plan?.steps)
+      .filter((candidate) => normalizeText(candidate?.id) !== currentId)
+      .flatMap((candidate) => normalizeArray(candidate?.evidence));
+    const executionEvidence = normalizeArray(state.execution?.toolResults);
+    const candidates = [...executionEvidence, ...planEvidence].reverse();
+    for (const envelope of candidates) {
+      const resultText = String(envelope?.result || '').trim();
+      if (!resultText) continue;
+      const parsed = safeParseMemoryCliResult(resultText);
+      if (normalizeText(parsed?.command) !== 'search') continue;
+      return resultText;
+    }
+    return '';
+  }
+
+  function buildUnresolvedMemoryRefEnvelope(step = {}, normalizedArgs = {}, policy = {}, executionState = {}) {
+    const blockedReason = 'runtime_binding_unresolved:memory_ref';
+    const result = `Tool error: ${blockedReason}`;
+    return {
+      ...computeToolEnvelope({ ...step, inputs: normalizedArgs }, result, policy),
+      status: 'blocked',
+      retryable: false,
+      result,
+      memoryCliTurn: createMemoryCliTurnState(executionState.memoryCliTurn),
+      invalidateMemoryPrompt: true,
+      blockedReason,
+      unsatisfiedRequirement: blockedReason
+    };
+  }
+
+  function buildReusedMemorySearchEnvelope(step = {}, normalizedArgs = {}, policy = {}, executionState = {}, previousResult = '') {
+    return {
+      ...computeToolEnvelope({ ...step, inputs: normalizedArgs }, previousResult, policy),
+      memoryCliTurn: createMemoryCliTurnState(executionState.memoryCliTurn),
+      invalidateMemoryPrompt: true,
+      reusedPreviousResult: true
+    };
+  }
+
   async function runToolStep(step, state, runtimeOptions = {}) {
     const toolName = String(step.tool || '').trim();
     const policy = getPolicy(toolName);
@@ -287,19 +353,41 @@ function createToolExecutionHelpers(deps = {}) {
       });
       if (toolName === 'memory_cli') {
         if (isPlannerSingleAuthorityEnabled()) {
-          const commandText = String(normalizedArgs.command || '').trim();
+          const commandText = normalizeText(normalizedArgs.command);
           if (/^mem open --ref\s+\"mc_ref:planner_pending:/i.test(commandText)) {
-            const previousEnvelope = normalizeArray(state.plan?.steps)
-              .find((candidate) => String(candidate.id || '').trim() !== String(step.id || '').trim() && normalizeArray(candidate.evidence).length > 0);
-            const previousEvidence = normalizeArray(previousEnvelope?.evidence).slice(-1)[0] || null;
-            const previousResult = safeParseMemoryCliResult(previousEvidence?.result);
-            const previousRef = String(previousResult?.results?.[0]?.ref || '').trim();
+            const previousResult = safeParseMemoryCliResult(getPreviousMemorySearchResult(state, step.id));
+            const previousRef = normalizeText(previousResult?.results?.[0]?.ref);
             if (previousRef) {
               normalizedArgs = {
                 ...normalizedArgs,
                 command: `mem open --ref ${JSON.stringify(previousRef)}`
               };
             }
+          }
+        }
+        if (isUnresolvedMemoryOpenCommand(normalizedArgs.command)) {
+          const envelope = buildUnresolvedMemoryRefEnvelope(step, normalizedArgs, policy, executionState);
+          logToolExecution(envelope, { ...step, inputs: normalizedArgs }, state, {
+            node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
+            allowedTools: state.request?.allowedTools
+          });
+          return envelope;
+        }
+        if (
+          isMemorySearchCommand(normalizedArgs.command)
+          && Number(executionState.memoryCliTurn?.searchCount || 0) >= 1
+          && normalizeText(executionState.memoryCliTurn?.lastSuccessCommand) === 'search'
+          && Boolean(executionState.memoryCliTurn?.lastResultHadHits)
+          && !Boolean(executionState.memoryCliTurn?.mustAnswer)
+        ) {
+          const previousResult = getPreviousMemorySearchResult(state, step.id);
+          if (previousResult) {
+            const envelope = buildReusedMemorySearchEnvelope(step, normalizedArgs, policy, executionState, previousResult);
+            logToolExecution(envelope, { ...step, inputs: normalizedArgs }, state, {
+              node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
+              allowedTools: state.request?.allowedTools
+            });
+            return envelope;
           }
         }
         const decision = decideMemoryCliTurnAction(normalizedArgs.command, executionState.memoryCliTurn);

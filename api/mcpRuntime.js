@@ -2,6 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 const config = require('../config');
+const {
+  callMcpViaBridge,
+  discoverMcpViaBridge,
+  isLocalCommandBridgeEnabled
+} = require('../utils/localCommandBridgeClient');
 
 const DEFAULT_MCP_DISCOVERY_TTL_MS = Math.max(
   10_000,
@@ -557,6 +562,22 @@ async function discoverServerTools(serverConfig = {}, options = {}) {
 }
 
 async function discoverMcpTools(options = {}) {
+  if (process.platform === 'win32' && isLocalCommandBridgeEnabled()) {
+    try {
+      const bridgeResult = await discoverMcpViaBridge({
+        configPath: resolveMcpConfigPath(options.configPath),
+        timeoutMs: Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, Number(options.timeoutMs || 0) || 0)
+      }, Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, Number(options.timeoutMs || 0) || 0));
+      return Array.isArray(bridgeResult?.tools) ? bridgeResult.tools : [];
+    } catch (error) {
+      logMcp('mcp_tool_error', {
+        stage: 'bridge_discover',
+        error: error?.message || String(error || '')
+      });
+      return [];
+    }
+  }
+
   const configuredServers = listConfiguredMcpServers(options);
   const all = [];
   for (const serverConfig of configuredServers) {
@@ -670,6 +691,25 @@ function extractTextFromMcpResult(result) {
 }
 
 async function callMcpTool(serverName = '', toolName = '', args = {}, context = {}) {
+  if (process.platform === 'win32' && isLocalCommandBridgeEnabled()) {
+    const bridgeResult = await callMcpViaBridge({
+      serverName,
+      toolName,
+      args,
+      configPath: resolveMcpConfigPath(context.configPath),
+      timeoutMs: Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, Number(context.timeoutMs || 0) || 0)
+    }, Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, Number(context.timeoutMs || 0) || 0));
+    if (!bridgeResult?.ok) {
+      throw normalizeMcpError(new Error(String(bridgeResult?.error || 'mcp bridge call failed')), 'MCP_TOOL_CALL_FAILED');
+    }
+    return {
+      ok: true,
+      text: extractTextFromMcpResult(bridgeResult.result),
+      safeArgs: bridgeResult.safeArgs || {},
+      result: bridgeResult.result
+    };
+  }
+
   const configuredServers = listConfiguredMcpServers(context);
   const serverConfig = configuredServers.find((item) => item.serverName === serverName);
   if (!serverConfig) {

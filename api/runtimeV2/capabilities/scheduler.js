@@ -117,17 +117,36 @@ function stableHash(value) {
   return JSON.stringify(value || {});
 }
 
+function isToolFailureText(resultText = '') {
+  const text = String(resultText || '').trim();
+  if (!text) return true;
+  return /^Tool error:/i.test(text)
+    || /^Unknown tool:/i.test(text)
+    || /^Tool not allowed:/i.test(text)
+    || /^页面提取失败[:：]/i.test(text)
+    || /^MCP tool failed:/i.test(text)
+    || /^request was blocked/i.test(text)
+    || /^invalid api key$/i.test(text);
+}
+
+function isMemorySearchCommand(commandText = '') {
+  return /^mem search\b/i.test(normalizeText(commandText));
+}
+
+function isUnresolvedMemoryOpenCommand(commandText = '') {
+  const text = normalizeText(commandText);
+  if (!/^mem open --ref\s+/i.test(text)) return false;
+  return /^mem open --ref\s+\"mc_ref:planner_pending:/i.test(text)
+    || /^mem open --ref\s+\"<[^"]+>\"/i.test(text);
+}
+
 function computeToolEnvelope(step = {}, rawResult = '', descriptor = null, helpers = {}) {
   const resultText = typeof rawResult === 'string' ? rawResult : JSON.stringify(rawResult ?? '');
   const args = normalizeObject(step.inputs, {});
   const argsHash = typeof helpers.stableHash === 'function'
     ? String(helpers.stableHash(args) || '').trim()
     : stableHash(args);
-  const status = !resultText
-    ? 'failed'
-    : /^Tool error:/i.test(resultText) || /^Unknown tool:/i.test(resultText) || /^Tool not allowed:/i.test(resultText)
-      ? 'failed'
-      : 'completed';
+  const status = isToolFailureText(resultText) ? 'failed' : 'completed';
   return normalizeExecutionEnvelope({
     tool_call_id: `${normalizeText(step.id)}_${argsHash}_${Date.now()}`,
     step_id: normalizeText(step.id),
@@ -287,6 +306,8 @@ function maybeCaptureToolFailure(envelope = {}, step = {}, state = {}, helpers =
   if (!config.SELF_IMPROVEMENT_ENABLED) return;
   const status = normalizeText(envelope?.status).toLowerCase();
   if (status === 'completed') return;
+  const blockedReason = normalizeText(envelope?.blockedReason).toLowerCase();
+  if (blockedReason.startsWith('runtime_binding_unresolved:')) return;
   if (typeof helpers.captureToolFailure !== 'function') return;
   const request = normalizeObject(state.request, {});
   const routeMeta = normalizeObject(request.routeMeta, {});
@@ -334,6 +355,47 @@ function buildBlockedToolEnvelope(step = {}, executionState = {}, descriptor = n
     result: blockedResult,
     ...(toolName === 'memory_cli' ? { memoryCliTurn: nextMemoryCliTurn, invalidateMemoryPrompt } : {}),
     blockedReason: normalizeText(reason) || 'tool_not_allowed'
+  }, step);
+}
+
+function getPreviousMemorySearchResult(state = {}, currentStepId = '') {
+  const currentId = normalizeText(currentStepId);
+  const planEvidence = normalizeArray(state.plan?.steps)
+    .filter((candidate) => normalizeText(candidate?.id) !== currentId)
+    .flatMap((candidate) => normalizeArray(candidate?.evidence));
+  const executionEvidence = normalizeArray(state.execution?.toolResults);
+  const candidates = [...executionEvidence, ...planEvidence].reverse();
+  for (const envelope of candidates) {
+    const resultText = normalizeText(envelope?.result);
+    if (!resultText) continue;
+    const parsed = safeParseMemoryCliResult(resultText);
+    if (normalizeText(parsed?.command) !== 'search') continue;
+    return resultText;
+  }
+  return '';
+}
+
+function buildUnresolvedMemoryRefEnvelope(step = {}, normalizedArgs = {}, descriptor = null, helpers = {}, executionState = {}) {
+  const blockedReason = 'runtime_binding_unresolved:memory_ref';
+  const result = `Tool error: ${blockedReason}`;
+  return normalizeExecutionEnvelope({
+    ...computeToolEnvelope({ ...step, inputs: normalizedArgs }, result, descriptor, helpers),
+    status: 'blocked',
+    retryable: false,
+    result,
+    memoryCliTurn: createMemoryCliTurnState(executionState.memoryCliTurn),
+    invalidateMemoryPrompt: true,
+    blockedReason,
+    unsatisfiedRequirement: blockedReason
+  }, step);
+}
+
+function buildReusedMemorySearchEnvelope(step = {}, normalizedArgs = {}, descriptor = null, helpers = {}, executionState = {}, previousResult = '') {
+  return normalizeExecutionEnvelope({
+    ...computeToolEnvelope({ ...step, inputs: normalizedArgs }, previousResult, descriptor, helpers),
+    memoryCliTurn: createMemoryCliTurnState(executionState.memoryCliTurn),
+    invalidateMemoryPrompt: true,
+    reusedPreviousResult: true
   }, step);
 }
 
@@ -388,6 +450,31 @@ async function executeStep(step = {}, state = {}, context = {}) {
     });
 
     if (toolName === 'memory_cli') {
+      if (isUnresolvedMemoryOpenCommand(normalizedArgs.command)) {
+        const unresolvedEnvelope = buildUnresolvedMemoryRefEnvelope(step, normalizedArgs, descriptor, helpers, executionState);
+        logToolExecution(unresolvedEnvelope, { ...step, inputs: normalizedArgs }, state, {
+          node: runtimeNode,
+          allowedTools: state.request?.allowedTools
+        });
+        return unresolvedEnvelope;
+      }
+      if (
+        isMemorySearchCommand(normalizedArgs.command)
+        && Number(executionState.memoryCliTurn?.searchCount || 0) >= 1
+        && normalizeText(executionState.memoryCliTurn?.lastSuccessCommand) === 'search'
+        && Boolean(executionState.memoryCliTurn?.lastResultHadHits)
+        && !Boolean(executionState.memoryCliTurn?.mustAnswer)
+      ) {
+        const previousResult = getPreviousMemorySearchResult(state, step.id);
+        if (previousResult) {
+          const reusedEnvelope = buildReusedMemorySearchEnvelope(step, normalizedArgs, descriptor, helpers, executionState, previousResult);
+          logToolExecution(reusedEnvelope, { ...step, inputs: normalizedArgs }, state, {
+            node: runtimeNode,
+            allowedTools: state.request?.allowedTools
+          });
+          return reusedEnvelope;
+        }
+      }
       const decision = decideMemoryCliTurnAction(normalizedArgs.command, executionState.memoryCliTurn);
       if (!decision.ok) {
         const result = typeof decision.result === 'string' ? decision.result : JSON.stringify(decision.result);

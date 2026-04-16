@@ -631,6 +631,8 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     }
     const packet = assembleMemoryPacket(queryResult, { userId });
     const results = Array.isArray(queryResult.results) ? queryResult.results : [];
+    const strictResults = Array.isArray(queryResult.strictResults) ? queryResult.strictResults : results;
+    const weakResults = Array.isArray(queryResult.weakResults) ? queryResult.weakResults : [];
     const journalHits = results.filter((item) => item.source === 'journal');
     const taskHits = results.filter((item) => item.source === 'task');
     const groupHits = results.filter((item) => item.source === 'group');
@@ -640,6 +642,7 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     const memoryForPrompt = [
       packet.sessionContinuityText ? `[SessionContinuity]\n${packet.sessionContinuityText}` : '',
       packet.relevantEvidenceText ? `[RelevantEvidence]\n${packet.relevantEvidenceText}` : '',
+      packet.weakEvidenceText ? `[WeakEvidence]\n${packet.weakEvidenceText}` : '',
       packet.styleSignalsText ? `[StyleSignals]\n${packet.styleSignalsText}` : ''
     ].filter(Boolean).join('\n\n');
 
@@ -648,6 +651,8 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       retrievedMemoryForPrompt: packet.relevantEvidenceText,
       promptRetrievedMemoryText: packet.relevantEvidenceText,
       hits: results,
+      strictResults,
+      weakResults,
       journalHits,
       taskHits,
       groupHits,
@@ -658,11 +663,11 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       profile: getUserProfile(userId),
       affinityState: queryResult.affinityState || getUserAffinityState(userId),
       profileText: packet.stableProfileText,
-      impression: '',
-      impressionText: '',
-      summary: queryResult.digest || '',
-      promptSummaryText: queryResult.digest || '',
-      promptImpressionText: '',
+      impression: String(queryResult.persona?.impression || ''),
+      impressionText: String(queryResult.persona?.impression || ''),
+      summary: String(queryResult.persona?.summary || queryResult.digest || ''),
+      promptSummaryText: String(queryResult.persona?.summary || queryResult.digest || ''),
+      promptImpressionText: String(queryResult.persona?.impression || ''),
       taskMemoryText: packet.taskStrategyText,
       groupMemoryText: packet.groupSharedContextText,
       promptGroupMemoryText: packet.groupSharedContextText,
@@ -685,6 +690,7 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       },
       segments: {
         retrievedMemory: packet.messages.relevantEvidence || [],
+        weakEvidence: packet.messages.weakEvidence || [],
         dailyJournal: [],
         taskMemory: packet.messages.taskStrategy || [],
         groupMemory: packet.messages.groupSharedContext || [],

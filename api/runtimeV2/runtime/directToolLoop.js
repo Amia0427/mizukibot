@@ -400,13 +400,9 @@ function createDirectToolLoopHelpers(deps = {}) {
         allowed: true
       }]);
     } else {
-      nextMemoryCliTurn = createMemoryCliTurnState(
-        updateMemoryCliTurnStateAfterError(nextMemoryCliTurn, 'tool_loop_limit')
-      );
-      effectiveAllowedTools = computeEffectiveAllowedTools(request, nextMemoryCliTurn);
       loopEvents.push(createEvent('tool_loop_forced_answer', {
         node: 'direct_reply',
-        reason: 'followup_not_open',
+        reason: 'followup_skipped_not_open',
         allowedTools: effectiveAllowedTools
       }));
     }

@@ -6,19 +6,22 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$codex = Get-Command codex -ErrorAction Stop
-$args = @()
+$codexCmd = 'C:\Users\Administrator\AppData\Roaming\npm\codex.cmd'
+if (-not (Test-Path $codexCmd)) {
+  throw "Codex CLI shim not found: $codexCmd"
+}
+$args = @('exec')
 
 if ($SessionId) {
-  $args += @('--session-id', $SessionId)
+  $args += @('-c', "experimental_resume=$SessionId")
 }
 
 if ($WorkspaceRoot) {
-  Set-Location -LiteralPath $WorkspaceRoot
+  $args += @('-C', $WorkspaceRoot)
 }
 
 if ($Message) {
   $args += $Message
 }
 
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& '$($codex.Source)' $($args | ForEach-Object { [Management.Automation.Language.CodeGeneration]::QuoteArgument($_) } | Out-String)"
+& $codexCmd @args

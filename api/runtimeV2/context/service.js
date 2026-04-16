@@ -120,6 +120,8 @@ function buildV2MemoryCliInstruction(memoryCliTurn = null) {
     'Use tool memory_cli only when the injected memory context is not enough and you need to verify long-term or recent bridge memory.',
     'The `command` field must contain only a bare command string. Do not add natural language, JSON, code fences, or a `command:` prefix.',
     'Prefer `mem search --query "..."` first. If search already gives enough digest evidence, answer directly without `open`.',
+    'Do not issue a second `mem search` in the same turn after one search has already succeeded.',
+    'Use `mem open --ref "mc_ref:..."` only with a real ref returned by the immediately preceding memory search. Never invent placeholders or temporary refs.',
     'If the user asks what they like or prefer, bias the search toward preference recall such as `mem search --query "what the user likes"`.',
     'If the user asks where you left off or what you were just discussing, prefer `mem search --query "where did we leave off" --source recent`.',
     'Valid examples: `mem search --query "what the user likes"`; `mem search --query "where did we leave off" --source recent`; `mem open --ref "mc_ref:..."`; `mem open --source profile`.',

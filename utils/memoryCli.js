@@ -1647,6 +1647,10 @@ function openMemoryItemById(userId, source, id) {
           tier: node.tier || '',
           status: sanitizeText(node.status).toLowerCase() || 'active',
           sourceKind: sanitizeText(node.sourceKind).toLowerCase() || 'runtime',
+          evidenceTier: sanitizeText(node.evidenceTier).toLowerCase() || 'weak',
+          stabilityScore: Number(node.stabilityScore || 0) || 0,
+          fieldKey: sanitizeText(node.fieldKey).toLowerCase(),
+          suppressedBy: sanitizeText(node.suppressedBy),
           updatedAt: node.updatedAt || 0,
           scopeType: node.scopeType || 'personal',
           groupId: node.groupId || '',
@@ -1819,6 +1823,35 @@ function openUnifiedMemory(target, options = {}, context = {}) {
 
   if (ref) {
     if (ref.startsWith('mc_ref:profile:')) {
+      if (config.MEMORY_V3_ENABLED) {
+        const profileProjection = loadProfileProjection();
+        const userProfile = profileProjection.users?.[userId] || null;
+        if (userProfile) {
+          return {
+            source: 'profile',
+            id: ref.replace(/^mc_ref:profile:/, ''),
+            data: {
+              profile: {
+                relation_stage: userProfile.relation_stage || '陌生人',
+                identities: Array.isArray(userProfile.strictProfile?.identities) ? userProfile.strictProfile.identities.slice(0, 4) : [],
+                personality_traits: Array.isArray(userProfile.strictProfile?.personality_traits) ? userProfile.strictProfile.personality_traits.slice(0, 4) : [],
+                hobbies: [],
+                likes: Array.isArray(userProfile.strictProfile?.likes) ? userProfile.strictProfile.likes.slice(0, 4) : [],
+                dislikes: Array.isArray(userProfile.strictProfile?.dislikes) ? userProfile.strictProfile.dislikes.slice(0, 4) : [],
+                goals: Array.isArray(userProfile.strictProfile?.goals) ? userProfile.strictProfile.goals.slice(0, 4) : [],
+                recent_topics: Array.isArray(userProfile.weakProfile?.recent_topics) ? userProfile.weakProfile.recent_topics.slice(0, 4) : []
+              },
+              summary: userProfile.personaCore?.summary || '',
+              impression: userProfile.personaCore?.impression || '',
+              facts: [],
+              personaCore: userProfile.personaCore || {},
+              strictProfile: userProfile.strictProfile || {},
+              weakProfile: userProfile.weakProfile || {},
+              suppressed: Array.isArray(userProfile.suppressed) ? userProfile.suppressed.slice(0, 10) : []
+            }
+          };
+        }
+      }
       return {
         source: 'profile',
         id: ref.replace(/^mc_ref:profile:/, ''),
