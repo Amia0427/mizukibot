@@ -234,6 +234,15 @@ function isPrivateChatUserAllowed(userId = '', runtimeConfig = {}) {
   return allowlist.includes(normalizedUserId);
 }
 
+function canBypassPrivateGroupOnly({ chatType = '', userId = '', runtimeConfig = {} } = {}) {
+  if (!isPrivateChatType(chatType)) return false;
+  return isPrivilegedPrivateChatUser({
+    chatType,
+    userId,
+    config: runtimeConfig
+  });
+}
+
 function getRouteDisplayType(route = {}, routeExecutionPlan = {}) {
   return String(
     routeExecutionPlan?.routeDebugKey
@@ -1862,7 +1871,11 @@ function createMessageHandler({
       }
 
     if (/^\s*\/meme(?:\s|$)/i.test(String(slashCommandText || '').trim())) {
-      if (isPrivateChatType(chatType)) {
+      if (isPrivateChatType(chatType) && !canBypassPrivateGroupOnly({
+        chatType,
+        userId: senderId,
+        runtimeConfig: config
+      })) {
         await sendGroupReply({
           chatType,
           groupId,
@@ -1896,7 +1909,11 @@ function createMessageHandler({
     }
 
     if (/^\s*\/dailyshare(?:\s|$)/i.test(String(slashCommandText || '').trim())) {
-      if (isPrivateChatType(chatType)) {
+      if (isPrivateChatType(chatType) && !canBypassPrivateGroupOnly({
+        chatType,
+        userId: senderId,
+        runtimeConfig: config
+      })) {
         await sendGroupReply({
           chatType,
           groupId,
@@ -1932,7 +1949,11 @@ function createMessageHandler({
     }
 
     if (/^\s*\/life(?:\s|$)/i.test(String(slashCommandText || '').trim())) {
-      if (isPrivateChatType(chatType)) {
+      if (isPrivateChatType(chatType) && !canBypassPrivateGroupOnly({
+        chatType,
+        userId: senderId,
+        runtimeConfig: config
+      })) {
         await sendGroupReply({
           chatType,
           groupId,
@@ -1968,7 +1989,11 @@ function createMessageHandler({
     }
 
     if (/^\s*\/sr(?:\s|$)/i.test(String(slashCommandText || '').trim())) {
-      if (isPrivateChatType(chatType)) {
+      if (isPrivateChatType(chatType) && !canBypassPrivateGroupOnly({
+        chatType,
+        userId: senderId,
+        runtimeConfig: config
+      })) {
         await sendGroupReply({
           chatType,
           groupId,
@@ -2003,7 +2028,11 @@ function createMessageHandler({
     }
 
     if (/^\s*\/initiative(?:\s|$)/i.test(String(slashCommandText || '').trim())) {
-      if (isPrivateChatType(chatType)) {
+      if (isPrivateChatType(chatType) && !canBypassPrivateGroupOnly({
+        chatType,
+        userId: senderId,
+        runtimeConfig: config
+      })) {
         await sendGroupReply({
           chatType,
           groupId,
@@ -2360,7 +2389,8 @@ function createMessageHandler({
         groupId,
         senderId,
         rawText,
-        userInfo: null
+        userInfo: null,
+        chatType
       });
       return;
     }
