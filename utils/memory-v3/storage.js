@@ -6,7 +6,11 @@ function defaultSessionProjection() {
 }
 
 function defaultProfileProjection() {
-  return { version: 1, updatedAt: 0, users: {} };
+  return {
+    version: 2,
+    updatedAt: 0,
+    users: {}
+  };
 }
 
 function defaultScopeProjection() {

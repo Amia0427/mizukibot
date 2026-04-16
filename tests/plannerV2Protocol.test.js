@@ -39,6 +39,7 @@ module.exports = (async () => {
   assert.strictEqual(memoryDecision.steps.length, 2);
   assert.strictEqual(memoryDecision.steps[0].tool, 'memory_cli');
   assert.strictEqual(memoryDecision.steps[1].tool, 'memory_cli');
+  assert.strictEqual(memoryDecision.steps[1].args.command, '');
   assert.strictEqual(memoryDecision.steps[1].runtimeBinding.type, 'memory_ref_from_previous_search');
   assert.deepStrictEqual(memoryDecision.steps[1].dependsOn, ['planner_step_1']);
 

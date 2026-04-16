@@ -19,7 +19,7 @@ const {
   loadEmbeddingCache
 } = require('./storage');
 
-const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default'];
+const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
 
 function classifyFacet(query = '', options = {}) {
   const text = normalizeText(query).toLowerCase();
@@ -31,6 +31,7 @@ function classifyFacet(query = '', options = {}) {
   if (/(群里|group|shared|大家|共同)/i.test(text)) return 'group';
   if (/(语气|风格|口吻|style|tone|jargon|黑话)/i.test(text)) return 'style';
   if (/(前几天|最近发生|journal|日记|那天|最近)/i.test(text)) return 'journal';
+  if (/(关系|态度|我们现在|亲密|distance|tone|relationship)/i.test(text)) return 'relationship';
   return 'default';
 }
 
@@ -44,7 +45,8 @@ function rewriteQuery(query = '', facet = 'default') {
   if (facet === 'task') out.push(`${base} strategy trigger avoid outcome task`);
   if (facet === 'style') out.push(`${base} style tone phrasing jargon`);
   if (facet === 'journal') out.push(`${base} 最近 发生 记录 journal episode`);
-  return uniqueBy(out.filter(Boolean).slice(0, Math.max(1, Number(config.MEMORY_V3_QUERY_REWRITE_LIMIT || 3))), (item) => canonicalizeText(item));
+  if (facet === 'relationship') out.push(`${base} relationship tone attitude distance`);
+  return uniqueBy(out.filter(Boolean).slice(0, Math.min(2, Math.max(1, Number(config.MEMORY_V3_QUERY_REWRITE_LIMIT || 2)))), (item) => canonicalizeText(item));
 }
 
 function resolveAllowedGroupIds(userId = '', options = {}) {
@@ -125,31 +127,30 @@ function collectCandidates(userId, options = {}) {
 
   const profile = profileProjection.users?.[String(userId || '').trim()];
   if (profile) {
-    const profileText = [
-      profile.relation_stage ? `relation: ${profile.relation_stage}` : '',
-      ...(Array.isArray(profile.identities) ? profile.identities.map((item) => `identity: ${item}`) : []),
-      ...(Array.isArray(profile.personality_traits) ? profile.personality_traits.map((item) => `personality: ${item}`) : []),
-      ...(Array.isArray(profile.hobbies) ? profile.hobbies.map((item) => `hobby: ${item}`) : []),
-      ...(Array.isArray(profile.likes) ? profile.likes.map((item) => `like: ${item}`) : []),
-      ...(Array.isArray(profile.dislikes) ? profile.dislikes.map((item) => `dislike: ${item}`) : []),
-      ...(Array.isArray(profile.goals) ? profile.goals.map((item) => `goal: ${item}`) : []),
-      ...(Array.isArray(profile.summaries) ? profile.summaries.map((item) => `summary: ${item}`) : []),
-      ...(Array.isArray(profile.impressions) ? profile.impressions.map((item) => `impression: ${item}`) : []),
-      ...(Array.isArray(profile.facts) ? profile.facts.map((item) => `fact: ${item}`) : [])
-    ].filter(Boolean).join('\n');
-    if (profileText) {
+    const personaCore = profile.personaCore || {};
+    const pseudoDocs = [
+      personaCore.summary ? { id: `profile:${userId}:summary`, source: 'profile', type: 'persona_summary', text: personaCore.summary, semanticSlot: 'persona_summary', fieldKey: 'persona_summary_support' } : null,
+      personaCore.impression ? { id: `profile:${userId}:impression`, source: 'profile', type: 'persona_impression', text: personaCore.impression, semanticSlot: 'persona_impression', fieldKey: 'persona_impression_support' } : null,
+      personaCore.replyStyle ? { id: `profile:${userId}:replyStyle`, source: 'profile', type: 'reply_style', text: personaCore.replyStyle, semanticSlot: 'style_pattern', fieldKey: 'style_pattern' } : null,
+      personaCore.relationshipTone ? { id: `profile:${userId}:relationshipTone`, source: 'profile', type: 'relationship_tone', text: personaCore.relationshipTone, semanticSlot: 'relationship', fieldKey: 'relationship' } : null,
+      ...(Array.isArray(profile.strictProfile?.identities) ? profile.strictProfile.identities.map((item, index) => ({ id: `profile:${userId}:identity:${index}`, source: 'profile', type: 'identity', text: item, semanticSlot: 'identity', fieldKey: 'identity' })) : []),
+      ...(Array.isArray(profile.strictProfile?.personality_traits) ? profile.strictProfile.personality_traits.map((item, index) => ({ id: `profile:${userId}:personality:${index}`, source: 'profile', type: 'personality', text: item, semanticSlot: 'personality', fieldKey: 'personality' })) : []),
+      ...(Array.isArray(profile.strictProfile?.likes) ? profile.strictProfile.likes.map((item, index) => ({ id: `profile:${userId}:like:${index}`, source: 'profile', type: 'like', text: item, semanticSlot: 'preference_like', fieldKey: 'preference_like' })) : []),
+      ...(Array.isArray(profile.strictProfile?.dislikes) ? profile.strictProfile.dislikes.map((item, index) => ({ id: `profile:${userId}:dislike:${index}`, source: 'profile', type: 'dislike', text: item, semanticSlot: 'preference_dislike', fieldKey: 'preference_dislike' })) : []),
+      ...(Array.isArray(profile.strictProfile?.goals) ? profile.strictProfile.goals.map((item, index) => ({ id: `profile:${userId}:goal:${index}`, source: 'profile', type: 'goal', text: item, semanticSlot: 'goal', fieldKey: 'goal' })) : []),
+      ...(Array.isArray(profile.strictProfile?.boundaries) ? profile.strictProfile.boundaries.map((item, index) => ({ id: `profile:${userId}:boundary:${index}`, source: 'profile', type: 'boundary', text: item, semanticSlot: 'boundary', fieldKey: 'boundary' })) : [])
+    ].filter(Boolean);
+    for (const doc of pseudoDocs) {
       candidates.push({
-        id: `profile:${userId}`,
-        source: 'profile',
-        type: 'profile',
+        ...doc,
         scopeType: 'personal',
-        text: profileText,
-        updatedAt: Number(profileProjection.updatedAt || 0) || 0,
+        updatedAt: Number(profile.personaCore?.updatedAt || profileProjection.updatedAt || 0) || 0,
         confidence: 1,
-        importance: 1.3,
+        importance: 1.2,
         evidenceCount: 1,
-        semanticSlot: 'profile',
-        canonicalKey: canonicalizeText(profileText)
+        canonicalKey: canonicalizeText(doc.text),
+        evidenceTier: 'strict',
+        stabilityScore: 0.92
       });
     }
   }
@@ -201,17 +202,33 @@ function facetSourceWeight(facet, source) {
     'group:group': 1.2,
     'style:style': 1.3,
     'style:jargon': 1.15,
-    'journal:journal': 1.25
+    'journal:journal': 1.25,
+    'relationship:profile': 1.25,
+    'relationship:personal': 1.0
   };
   return Number(table[key] || 1);
 }
 
 function sourceLimit(source) {
   if (source === 'recent') return 2;
-  if (source === 'profile') return 1;
+  if (source === 'profile') return 2;
   if (source === 'style' || source === 'jargon') return 1;
   if (source === 'journal') return 2;
   return 3;
+}
+
+function matchesFacetCandidate(facet, candidate = {}) {
+  const fieldKey = normalizeText(candidate.fieldKey || candidate.semanticSlot || candidate.type).toLowerCase();
+  const source = normalizeText(candidate.source).toLowerCase();
+  if (facet === 'preference') return ['preference_like', 'preference_dislike', 'like', 'dislike', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
+  if (facet === 'identity') return ['identity', 'fact', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
+  if (facet === 'relationship') return ['relationship', 'style_pattern', 'persona_impression_support'].includes(fieldKey) || source === 'profile';
+  if (facet === 'continuity') return source === 'recent' || source === 'journal' || source === 'task';
+  if (facet === 'style') return ['style_pattern', 'style_avoid', 'group_jargon'].includes(fieldKey) || source === 'style' || source === 'jargon' || fieldKey === 'relationship';
+  if (facet === 'task') return source === 'task';
+  if (facet === 'group') return source === 'group';
+  if (facet === 'journal') return source === 'journal';
+  return true;
 }
 
 function semanticSlotForCandidate(candidate) {
@@ -229,6 +246,7 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default') {
   }
   const scored = [];
   for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    if (!matchesFacetCandidate(facet, candidate)) continue;
     const text = normalizeText(candidate.text);
     if (!text) continue;
     const docTokens = tokenize(`${text} ${candidate.canonicalKey || canonicalizeText(text)}`);
@@ -239,11 +257,12 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default') {
     const confidence = Math.min(0.2, Number(candidate.confidence || 0) * 0.2);
     const importance = Math.min(0.22, Number(candidate.importance || 0) * 0.1);
     const sourceBoost = facetSourceWeight(facet, candidate.source);
+    const stabilityBoost = Math.min(0.24, Number(candidate.stabilityScore || 0) * 0.24);
     let embedding = 0;
     if (queryEmbedding && embeddingMap.has(candidate.canonicalKey)) {
       embedding = Math.max(0, cosineArray(queryEmbedding, embeddingMap.get(candidate.canonicalKey)));
     }
-    const score = ((lexical * 0.7) + (embedding * 0.35) + direct + (recency * 0.18) + support + confidence + importance) * sourceBoost;
+    const score = ((lexical * 0.68) + (embedding * 0.3) + direct + (recency * 0.14) + support + confidence + importance + stabilityBoost) * sourceBoost;
     if (score < Math.max(0.02, Number(config.MEMORY_RAG_MIN_SCORE || 0.16) * 0.5)) continue;
     scored.push({
       ...candidate,
@@ -314,6 +333,21 @@ function diversify(items = [], topK = 8) {
   return selected;
 }
 
+function splitStrictWeak(items = [], strictCap = 6, weakCap = 3) {
+  const strictResults = [];
+  const weakResults = [];
+  for (const item of stableSortByScore(items)) {
+    if (item.evidenceTier === 'strict' && strictResults.length < strictCap) {
+      strictResults.push(item);
+      continue;
+    }
+    if (item.evidenceTier !== 'strict' && weakResults.length < weakCap) {
+      weakResults.push(item);
+    }
+  }
+  return { strictResults, weakResults };
+}
+
 function buildDigest(items = [], maxChars = Number(config.MEMORY_CLI_DIGEST_MAX_CHARS || 480) || 480) {
   const lines = (Array.isArray(items) ? items : [])
     .slice(0, 4)
@@ -333,6 +367,13 @@ async function queryMemory(input = {}) {
   const scored = await scoreCandidates(candidates, query, facet);
   const conflictResolved = applyConflictResolution(scored);
   const selected = diversify(conflictResolved, topK);
+  const split = splitStrictWeak(
+    conflictResolved,
+    Math.max(1, Number(config.MEMORY_V3_STRICT_RESULTS_MAX || 6)),
+    Math.max(0, Number(config.MEMORY_V3_WEAK_RESULTS_MAX || 3))
+  );
+  const profileProjection = loadProfileProjection();
+  const persona = profileProjection.users?.[userId]?.personaCore || {};
   const affinityState = getUserAffinityState(userId);
   return {
     ok: true,
@@ -340,7 +381,10 @@ async function queryMemory(input = {}) {
     query,
     facet,
     rewrites: rewriteQuery(query, facet),
-    results: selected,
+    strictResults: split.strictResults,
+    weakResults: split.weakResults,
+    persona,
+    results: split.strictResults.concat(split.strictResults.length < 2 ? split.weakResults.slice(0, Math.max(0, topK - split.strictResults.length)) : []).slice(0, topK),
     digest: buildDigest(selected),
     sourceCoverage: selected.reduce((acc, item) => {
       acc[item.source] = (acc[item.source] || 0) + 1;

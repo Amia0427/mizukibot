@@ -1162,6 +1162,7 @@ function createRuntime(options = {}) {
     logPostReplyEnqueueError(error) {
       console.error('[post-reply] enqueue failed:', error?.message || error);
     },
+    config,
     saveAndEmit
   });
 

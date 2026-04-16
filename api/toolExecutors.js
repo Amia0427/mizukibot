@@ -21,6 +21,7 @@ const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { runLocalCommandViaBridge, isLocalCommandBridgeEnabled } = require('../utils/localCommandBridgeClient');
 const { isUnsafeHttpUrl } = require('../utils/networkSafety');
 const { formatContextStats } = require('../utils/contextInspector');
 const {
@@ -103,26 +104,22 @@ async function runFreeUrlExtract(args = {}) {
   // Block localhost/private targets to reduce SSRF risk from tool calls.
   if (isUnsafeHttpUrl(url)) return '出于安全策略，禁止访问本地或内网地址。';
 
-  try {
-    const resp = await axios.get(url, {
-      timeout: 12000,
-      maxRedirects: 5,
-      proxy: false,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MizukiBot/1.0',
-        Accept: 'text/html,application/xhtml+xml'
-      }
-    });
+  const buildReadableFallback = (targetUrl, reason = '') => {
+    const reasonText = String(reason || '').trim();
+    const lines = [
+      '标题：页面抓取受限',
+      `链接：${targetUrl}`
+    ];
+    if (reasonText) lines.push(`摘要：目标站点阻止了直接抓取，原因：${reasonText}`);
+    lines.push('正文摘录：该页面启用了反爬或访问限制，当前无法直接提取正文。你可以继续使用该链接进行人工查看，或改用站内搜索结果摘要。');
+    return lines.join('\n');
+  };
 
-    const html = String(resp?.data || '');
-    if (!html.trim()) {
-      return `链接可访问，但没有可提取的页面内容：${url}`;
-    }
-
-    const $ = cheerio.load(html);
+  const extractReadableText = (targetUrl, html = '') => {
+    const $ = cheerio.load(String(html || ''));
     $('script,style,noscript,iframe,svg').remove();
 
-    const title = $('title').first().text().replace(/\s+/g, ' ').trim() || url;
+    const title = $('title').first().text().replace(/\s+/g, ' ').trim() || targetUrl;
     const metaDesc = (
       $('meta[name="description"]').attr('content')
       || $('meta[property="og:description"]').attr('content')
@@ -140,7 +137,7 @@ async function runFreeUrlExtract(args = {}) {
 
     const lines = [
       `标题：${title}`,
-      `链接：${url}`
+      `链接：${targetUrl}`
     ];
     if (metaDesc) lines.push(`摘要：${metaDesc}`);
     if (excerpt) {
@@ -149,8 +146,39 @@ async function runFreeUrlExtract(args = {}) {
       lines.push('正文摘录：未提取到可读文本。');
     }
     return lines.join('\n');
+  };
+
+  const requestHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Cache-Control': 'no-cache',
+    Pragma: 'no-cache',
+    Referer: 'https://www.google.com/'
+  };
+
+  try {
+    const resp = await axios.get(url, {
+      timeout: 12000,
+      maxRedirects: 5,
+      proxy: false,
+      validateStatus: (status) => status >= 200 && status < 400,
+      headers: requestHeaders
+    });
+
+    const html = String(resp?.data || '');
+    if (!html.trim()) {
+      return `链接可访问，但没有可提取的页面内容：${url}`;
+    }
+    return extractReadableText(resp.request?.res?.responseUrl || url, html);
   } catch (e) {
-    return `页面提取失败：${e.code || e.message || String(e)}`;
+    const status = Number(e?.response?.status || 0);
+    const body = String(e?.response?.data || '');
+    const reason = e.code || e.message || String(e);
+    if (status === 403 || status === 429 || /cloudflare|attention required/i.test(body)) {
+      return buildReadableFallback(url, `${status || 'blocked'} ${reason}`.trim());
+    }
+    return `页面提取失败：${reason}`;
   }
 }
 
@@ -207,6 +235,26 @@ function runCommand(command, args = [], options = {}) {
   const timeoutMs = Number(options.timeoutMs || config.TOOL_TIMEOUT_MS || 15000);
   const cwd = options.cwd || path.resolve(__dirname, '..');
   const env = options.env || process.env;
+
+  if (process.platform === 'win32' && isLocalCommandBridgeEnabled()) {
+    return runLocalCommandViaBridge({
+      command: String(command || '').trim(),
+      args,
+      cwd,
+      timeoutMs,
+      env
+    }, timeoutMs).then((result) => {
+      if (result && result.ok) {
+        return {
+          stdout: String(result.stdout || '').trim(),
+          stderr: String(result.stderr || '').trim(),
+          code: Number(result.code || 0)
+        };
+      }
+      const errMsg = String(result?.stderr || result?.stdout || result?.error || 'bridge command failed').trim();
+      throw new Error(errMsg);
+    });
+  }
 
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {

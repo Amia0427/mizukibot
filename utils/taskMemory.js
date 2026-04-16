@@ -60,6 +60,8 @@ function addTaskMemory(userId, task = {}) {
       relations: Array.isArray(task.relations) ? task.relations : [],
       outcome,
       memoryKind: 'task',
+      fieldKey: 'task',
+      semanticSlot: 'task',
       trigger,
       strategy,
       avoid

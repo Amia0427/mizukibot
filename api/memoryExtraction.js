@@ -169,12 +169,14 @@ function getDefaultStatusForType(type = '', memoryKind = '') {
 
 function buildMemoryBaseMeta(type, confidence, options = {}) {
   const importanceTier = normalizeTier(inferExtractorTier(type, confidence)) || 'B';
+  const fieldKey = String(options.fieldKey || type || '').trim().toLowerCase();
   return {
     source: 'extractor',
     confidence,
     importanceTier,
     sourceKind: options.sourceKind || 'extractor',
     status: options.status || getDefaultStatusForType(type, options.memoryKind),
+    fieldKey,
     sourceSessionId: options.sessionId || '',
     participants: Array.isArray(options.participants) ? options.participants : [],
     entities: Array.isArray(options.entities) ? options.entities : [],
@@ -192,70 +194,68 @@ function parseExplicitRemember(text = '') {
 
 function persistLearnedMemories(userId, type, values, confidence = 0.8, options = {}) {
   const vectorItems = Array.isArray(options.vectorItems) ? options.vectorItems : [];
+  const fieldKey = String(options.fieldKey || type || '').trim().toLowerCase();
 
   for (const raw of values) {
     const value = String(raw || '').trim();
     if (!shouldPersistMemoryCandidate(type, value, confidence)) continue;
-    const meta = buildMemoryBaseMeta(type, confidence, options);
+    const meta = buildMemoryBaseMeta(type, confidence, { ...options, fieldKey });
 
     if (type === 'fact') {
-      vectorItems.push({ userId, text: value, type: 'fact', weight: 1.15, source: meta.source, confidence: meta.confidence, meta });
+      vectorItems.push({ userId, text: value, type: 'fact', weight: 1.15, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       addUserFact(userId, value, 30);
       continue;
     }
 
     if (type === 'identity') {
-      vectorItems.push({ userId, text: `identity: ${value}`, type: 'identity', weight: 1.25, source: meta.source, confidence: meta.confidence, meta });
+      vectorItems.push({ userId, text: `identity: ${value}`, type: 'identity', weight: 1.25, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       addProfileItem(userId, 'identities', value, 20);
       addUserFact(userId, value, 30);
       continue;
     }
 
     if (type === 'personality') {
-      vectorItems.push({ userId, text: `personality: ${value}`, type: 'personality', weight: 1.1, source: meta.source, confidence: meta.confidence, meta });
+      vectorItems.push({ userId, text: `personality: ${value}`, type: 'personality', weight: 1.1, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       addProfileItem(userId, 'personality_traits', value, 20);
       continue;
     }
 
     if (type === 'hobby') {
-      vectorItems.push({ userId, text: `hobby: ${value}`, type: 'hobby', weight: 1.08, source: meta.source, confidence: meta.confidence, meta });
+      vectorItems.push({ userId, text: `hobby: ${value}`, type: 'hobby', weight: 1.08, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       addProfileItem(userId, 'hobbies', value, 20);
       continue;
     }
 
     if (type === 'like') {
-      vectorItems.push({ userId, text: `likes: ${value}`, type: 'like', weight: 1.05, source: meta.source, confidence: meta.confidence, meta });
+      vectorItems.push({ userId, text: `likes: ${value}`, type: 'like', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       addProfileItem(userId, 'likes', value, 20);
       continue;
     }
 
     if (type === 'dislike') {
-      vectorItems.push({ userId, text: `dislikes: ${value}`, type: 'dislike', weight: 1.05, source: meta.source, confidence: meta.confidence, meta });
+      vectorItems.push({ userId, text: `dislikes: ${value}`, type: 'dislike', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       addProfileItem(userId, 'dislikes', value, 20);
       continue;
     }
 
     if (type === 'goal') {
-      vectorItems.push({ userId, text: `goal: ${value}`, type: 'goal', weight: 1.2, source: meta.source, confidence: meta.confidence, meta });
+      vectorItems.push({ userId, text: `goal: ${value}`, type: 'goal', weight: 1.2, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       addProfileItem(userId, 'goals', value, 20);
       continue;
     }
 
     if (type === 'impression') {
-      // Keep one concise, high-priority abstraction in both structured memory and vector retrieval.
-      vectorItems.push({ userId, text: `impression: ${value}`, type: 'impression', weight: 1.35, source: meta.source, confidence: meta.confidence, meta });
-      setUserImpression(userId, value);
+      vectorItems.push({ userId, text: `impression support: ${value}`, type: 'fact', weight: 1.18, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey || 'persona_impression_support', meta: { ...meta, fieldKey: fieldKey || 'persona_impression_support' } });
       continue;
     }
 
     if (type === 'summary') {
-      vectorItems.push({ userId, text: `summary: ${value}`, type: 'summary', weight: 1.3, source: meta.source, confidence: meta.confidence, meta });
-      setUserSummary(userId, value);
+      vectorItems.push({ userId, text: `summary support: ${value}`, type: 'fact', weight: 1.16, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey || 'persona_summary_support', meta: { ...meta, fieldKey: fieldKey || 'persona_summary_support' } });
       continue;
     }
 
     if (type === 'topic') {
-      vectorItems.push({ userId, text: `recent topic: ${value}`, type: 'topic', weight: 0.95, source: meta.source, confidence: meta.confidence, meta });
+      vectorItems.push({ userId, text: `recent topic: ${value}`, type: 'topic', weight: 0.95, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       addProfileItem(userId, 'recent_topics', value, 12);
     }
   }
@@ -310,23 +310,25 @@ function buildStyleMemoryItem(userId, text, role, confidence, options = {}) {
     topRouteType: options.topRouteType,
     agentName: options.agentName,
     toolName: options.toolName,
-    channelId: options.channelId,
-    status: 'active',
-    sourceKind: 'extractor',
-    sourceSessionId: options.sessionId,
-    participants,
-    entities,
-    relations,
+      channelId: options.channelId,
+      status: 'active',
+      sourceKind: 'extractor',
+      sourceSessionId: options.sessionId,
+      semanticSlot: role === 'avoid' ? 'style_avoid' : 'style_pattern',
+      participants,
+      entities,
+      relations,
     meta: {
       source: 'style_extractor',
       confidence,
       importanceTier: role === 'avoid' ? 'B' : 'C',
-      sourceKind: 'extractor',
-      status: 'active',
-      memoryKind: 'style',
-      styleRole: role,
-      participants,
-      entities,
+        sourceKind: 'extractor',
+        status: 'active',
+        memoryKind: 'style',
+        fieldKey: role === 'avoid' ? 'style_avoid' : 'style_pattern',
+        styleRole: role,
+        participants,
+        entities,
       relations
     }
   };
@@ -347,23 +349,25 @@ function buildJargonMemoryItem(groupId, text, role, confidence, options = {}) {
     groupId,
     routePolicyKey: options.routePolicyKey,
     topRouteType: options.topRouteType,
-    channelId: options.channelId,
-    status: 'active',
-    sourceKind: 'extractor',
-    sourceSessionId: options.sessionId,
-    participants,
-    entities,
-    relations,
+      channelId: options.channelId,
+      status: 'active',
+      sourceKind: 'extractor',
+      sourceSessionId: options.sessionId,
+      semanticSlot: 'group_jargon',
+      participants,
+      entities,
+      relations,
     meta: {
       source: 'group_jargon_extractor',
       confidence,
       importanceTier: 'C',
-      sourceKind: 'extractor',
-      status: 'active',
-      memoryKind: 'jargon',
-      jargonRole: role,
-      participants,
-      entities,
+        sourceKind: 'extractor',
+        status: 'active',
+        memoryKind: 'jargon',
+        fieldKey: 'group_jargon',
+        jargonRole: role,
+        participants,
+        entities,
       relations
     }
   };

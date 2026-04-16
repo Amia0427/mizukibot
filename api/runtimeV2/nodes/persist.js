@@ -50,6 +50,7 @@ function createPersistNode(deps = {}) {
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
+  const config = normalizeObject(deps.config, {});
   const chatHistory = deps.chatHistory;
   const shortTermMemory = deps.shortTermMemory;
   const logPostReplyEnqueueError = typeof deps.logPostReplyEnqueueError === 'function'
