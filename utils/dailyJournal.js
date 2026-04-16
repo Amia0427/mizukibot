@@ -23,6 +23,18 @@ const dailyJournalHotStores = {
 
 ensureDir(JOURNAL_ROOT);
 
+function toSafeJournalPathSegment(value = '') {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^\.+/, '')
+    .replace(/[. ]+$/g, '')
+    .slice(0, 180);
+}
+
 function ensureDir(dirPath) {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
@@ -136,7 +148,7 @@ function getMemoryApiKey() {
 }
 
 function getUserJournalDir(userId) {
-  return path.join(JOURNAL_ROOT, String(userId || '').trim());
+  return path.join(JOURNAL_ROOT, toSafeJournalPathSegment(userId));
 }
 
 function getJournalIndexFilePath(userId) {
@@ -1649,5 +1661,9 @@ module.exports = {
   listMonthlyRollups,
   summarizeJournalForDay,
   parseJournalEntries,
-  readSegmentSummaries
+  readSegmentSummaries,
+  _test: {
+    getUserJournalDir,
+    toSafeJournalPathSegment
+  }
 };

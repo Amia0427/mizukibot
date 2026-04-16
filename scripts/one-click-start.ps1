@@ -92,8 +92,17 @@ Set-Content -Path $workerPidFile -Value $workerProc.Id -Encoding utf8
 Start-Sleep -Seconds 2
 
 if (Test-Path $lockFile) {
-  $newPid = (Get-Content -Path $lockFile -TotalCount 1 -Encoding utf8).Trim()
-  Write-Host "[OK] LOCK_PID=$newPid"
+  $newPidRaw = Get-Content -Path $lockFile -TotalCount 1 -Encoding utf8 -ErrorAction SilentlyContinue
+  $newPid = if ($null -eq $newPidRaw) { '' } else { ([string]$newPidRaw).Trim() }
+  if ($newPid) {
+    Write-Host "[OK] LOCK_PID=$newPid"
+  } else {
+    if ($proc.HasExited) {
+      Write-Host "[ERROR] lock 文件为空，且主进程已退出，ExitCode=$($proc.ExitCode)" -ForegroundColor Red
+    } else {
+      Write-Host "[WARN] lock 文件存在但为空，主进程仍在运行（PID=$($proc.Id)）。" -ForegroundColor Yellow
+    }
+  }
 } else {
   if ($proc.HasExited) {
     Write-Host "[ERROR] 进程已退出，ExitCode=$($proc.ExitCode)" -ForegroundColor Red
