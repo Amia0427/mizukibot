@@ -1,10 +1,6 @@
 const config = require('../config');
 const { isPrivilegedPrivateChatUser } = require('./privilegedPrivateChat');
 
-function getAdminUserIds() {
-  return new Set((config.ADMIN_USER_IDS || []).map((id) => String(id).trim()).filter(Boolean));
-}
-
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -54,7 +50,6 @@ function getAffinityPoints(userInfo = {}) {
 
 function isHighAffinityUser(userInfo = {}, options = {}) {
   const userId = String(options && options.userId || '').trim();
-  if (Boolean(userId) && getAdminUserIds().has(userId)) return true;
   return isPrivilegedPrivateChatUser({
     chatType: options?.chatType,
     userId,

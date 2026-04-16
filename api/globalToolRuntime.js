@@ -671,6 +671,7 @@ function buildGlobalToolEvidenceMessage(results = [], context = {}) {
 }
 
 async function maybeRunGlobalToolRuntime(question = '', context = {}) {
+  const planningService = require('./runtimeV2/planning/service');
   const policy = normalizeObject(context.policy, {});
   const allowedGlobalTools = normalizeToolNames(policy.allowedGlobalTools || context.allowedGlobalTools);
   const runtimeContext = {
@@ -701,94 +702,86 @@ async function maybeRunGlobalToolRuntime(question = '', context = {}) {
     };
   }
 
-  const plannerMessages = buildPlannerMessages(question, runtimeContext);
-  const firstRound = await runGlobalToolPlannerRound(plannerMessages, runtimeContext);
-  if (!firstRound.ok) {
-    logGlobalTools('skipped', runtimeContext, {
-      reason: firstRound.skippedReason || 'planner-failed',
-      durationMs: firstRound.durationMs
+  let planned = null;
+  try {
+    planned = await planningService.planRequestV2({
+      question,
+      cleanText: question,
+      topRouteType: runtimeContext.topRouteType || 'direct_chat',
+      routeMeta: runtimeContext.routeMeta || {},
+      route: {
+        question,
+        cleanText: question,
+        topRouteType: runtimeContext.topRouteType || 'direct_chat',
+        meta: runtimeContext.routeMeta || {},
+        intent: {
+          executionMode: 'staged',
+          needsMemory: /(?:记得|记不记得|之前|回忆|日志|记录|remember|recall|log|history)/i.test(String(question || ''))
+        },
+        facets: {
+          sourceScope: /(?:官网|官方|文档|来源|网页|official|docs?|documentation|source|page|article|latest|最新|news)/i.test(String(question || ''))
+            ? 'web'
+            : '',
+          freshness: /(?:latest|最新|news|新闻)/i.test(String(question || '')) ? 'latest' : '',
+          domain: /(?:时间|几点|日期|time|date)/i.test(String(question || '')) ? 'time' : ''
+        }
+      },
+      allowedTools: allowedGlobalTools,
+      toolCatalog: planningService.collectAvailableToolSummary({
+        question,
+        cleanText: question,
+        meta: runtimeContext.routeMeta || {},
+        facets: {},
+        intent: {}
+      }, {
+        userId: runtimeContext.userId,
+        allowedTools: allowedGlobalTools
+      }).toolCatalog,
+      contextSummary: runtimeContext.routePrompt || '',
+      contextEvidence: true,
+      constraints: {
+        preflightOnly: true,
+        allowBackground: false
+      }
     });
+  } catch (error) {
+    logGlobalTools('skipped', runtimeContext, { reason: 'planner-failed', error: error?.message || String(error) });
     return {
       skipped: true,
-      reason: firstRound.skippedReason || 'planner-failed',
+      reason: 'planner-failed',
       results: [],
       evidenceMessage: '',
       memoryCliTurn: createMemoryCliTurnState(context.memoryCliTurn),
-      error: firstRound.error || null
+      error
     };
   }
 
-  const firstBatch = await executeGlobalToolBatch(firstRound.toolCalls, {
+  const preflightSteps = normalizeArray(planned?.steps)
+    .filter((step) => normalizeToolNames([step?.tool]).every((toolName) => allowedGlobalTools.includes(toolName)))
+    .map((step) => ({
+      toolName: String(step?.tool || '').trim(),
+      args: step?.args && typeof step.args === 'object' && !Array.isArray(step.args) ? step.args : {}
+    }));
+
+  if (preflightSteps.length === 0) {
+    logGlobalTools('planner returned no tool calls', runtimeContext, { toolCount: 0, durationMs: 0 });
+    return {
+      skipped: false,
+      reason: '',
+      results: [],
+      evidenceMessage: '',
+      memoryCliTurn: createMemoryCliTurnState(context.memoryCliTurn),
+      plannerDecisionV2: planned || null
+    };
+  }
+
+  const batch = await executeGlobalToolBatch(preflightSteps, {
     ...runtimeContext,
     question,
     memoryCliTurn: context.memoryCliTurn
   });
-  let results = [...firstBatch.results];
-  let nextMemoryCliTurn = createMemoryCliTurnState(firstBatch.memoryCliTurn);
-
-  const shouldRunMemoryFollowup = results.some((item) => item.tool === 'memory_cli' && isMemorySearchHit(item.rawResult))
-    && modelConfig.maxPlannerTurns > 1
-    && nextMemoryCliTurn.openCount < 1
-    && !nextMemoryCliTurn.mustAnswer;
-  const shouldRunWebFetchFollowup = modelConfig.maxPlannerTurns > 1
-    && allowedGlobalTools.includes('web_fetch')
-    && shouldPreferWebFetchFollowup(question, results);
-
-  if (shouldRunMemoryFollowup) {
-    const followupEvidence = buildGlobalToolEvidenceMessage(results, runtimeContext);
-    const preferMemoryOpen = results.some((item) => item.tool === 'memory_cli' && shouldPreferMemoryOpenFollowup(item.rawResult));
-    const secondRound = await runGlobalToolPlannerRound(
-      buildPlannerMessages(question, {
-        ...runtimeContext,
-        allowedGlobalTools: ['memory_cli'],
-        followupEvidence,
-        followupOnlyMemoryOpen: true,
-        preferMemoryOpen
-      }),
-      {
-        ...runtimeContext,
-        allowedGlobalTools: ['memory_cli'],
-        followupOnlyMemoryOpen: true,
-        preferMemoryOpen
-      }
-    );
-    if (secondRound.ok && secondRound.toolCalls.length > 0) {
-      const secondBatch = await executeGlobalToolBatch(secondRound.toolCalls, {
-        ...runtimeContext,
-        allowedGlobalTools: ['memory_cli'],
-        memoryCliTurn: nextMemoryCliTurn
-      });
-      results = results.concat(secondBatch.results);
-      nextMemoryCliTurn = createMemoryCliTurnState(secondBatch.memoryCliTurn);
-    }
-  }
-
-  if (shouldRunWebFetchFollowup) {
-    const followupEvidence = buildGlobalToolEvidenceMessage(results, runtimeContext);
-    const secondRound = await runGlobalToolPlannerRound(
-      buildPlannerMessages(question, {
-        ...runtimeContext,
-        allowedGlobalTools: ['web_fetch'],
-        followupEvidence,
-        followupOnlyWebFetch: true
-      }),
-      {
-        ...runtimeContext,
-        allowedGlobalTools: ['web_fetch'],
-        followupOnlyWebFetch: true
-      }
-    );
-    if (secondRound.ok && secondRound.toolCalls.length > 0) {
-      const secondBatch = await executeGlobalToolBatch(secondRound.toolCalls, {
-        ...runtimeContext,
-        question,
-        allowedGlobalTools: ['web_fetch'],
-        memoryCliTurn: nextMemoryCliTurn
-      });
-      results = results.concat(secondBatch.results);
-      nextMemoryCliTurn = createMemoryCliTurnState(secondBatch.memoryCliTurn);
-    }
-  }
+  const results = [...batch.results];
+  const nextMemoryCliTurn = createMemoryCliTurnState(batch.memoryCliTurn);
 
   const evidenceMessage = buildGlobalToolEvidenceMessage(results, runtimeContext);
   if (evidenceMessage) {
@@ -803,7 +796,8 @@ async function maybeRunGlobalToolRuntime(question = '', context = {}) {
     reason: '',
     results,
     evidenceMessage,
-    memoryCliTurn: nextMemoryCliTurn
+    memoryCliTurn: nextMemoryCliTurn,
+    plannerDecisionV2: planned || null
   };
 }
 

@@ -6,6 +6,14 @@ function normalizeArgs(value) {
   return value && typeof value === 'object' ? value : {};
 }
 
+function normalizeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeObject(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
 // Turn a user goal into explicit completion criteria so the task has a stable done condition.
 function deriveSuccessCriteria(question, plan = null) {
   const criteria = [];
@@ -84,7 +92,48 @@ function verifyExecutionResult({ question = '', plan = null, execLogs = [], roun
   const evidence = collectEvidenceFromLogs(execLogs);
   const failures = collectFailures(execLogs);
   const missingStepEvidence = collectMissingStepEvidence(executableSteps, evidence, failures);
-  const unresolved = [...failures, ...missingStepEvidence];
+  const unresolvedRequirements = [];
+  const stepStatuses = executableSteps.map((step) => {
+    const stepId = String(step.id);
+    const log = normalizeArray(execLogs).find((item) => String(item?.id) === stepId) || null;
+    const requirement = normalizeObject(step?.evidenceRequirement, {});
+    const runtimeBinding = step?.runtimeBinding === null ? null : normalizeObject(step?.runtimeBinding, null);
+    const unsatisfied = [];
+    if (!log) {
+      unsatisfied.push('missing_execution_log');
+    } else {
+      if (requirement.requireCompleted !== false && log.ok !== true) {
+        unsatisfied.push(log.unsatisfiedRequirement || log.error || 'tool_not_completed');
+      }
+      if (runtimeBinding && !log.ok && !normalizeText(log.runtimeBinding?.type)) {
+        unsatisfied.push('runtime_binding_unresolved');
+      }
+      if (runtimeBinding && normalizeText(log.unsatisfiedRequirement)) {
+        unsatisfied.push(normalizeText(log.unsatisfiedRequirement));
+      }
+    }
+    if (unsatisfied.length > 0) {
+      unresolvedRequirements.push({
+        step_id: stepId,
+        action: normalizeText(step.action),
+        purpose: normalizeText(step.purpose),
+        error: unsatisfied[0],
+        args: normalizeArgs(step.args),
+        requirement,
+        runtimeBinding
+      });
+    }
+    return {
+      step_id: stepId,
+      action: normalizeText(step.action),
+      ok: unsatisfied.length === 0,
+      requirement,
+      runtimeBinding,
+      unsatisfied_requirements: unsatisfied
+    };
+  });
+  const unresolved = [...failures, ...missingStepEvidence, ...unresolvedRequirements]
+    .filter((item, index, list) => list.findIndex((other) => String(other?.step_id) === String(item?.step_id) && String(other?.error) === String(item?.error)) === index);
   const hasToolWork = executableSteps.length > 0;
   const replyOnly = !hasToolWork;
   const done = replyOnly ? true : unresolved.length === 0 && evidence.length === executableSteps.length;
@@ -104,6 +153,10 @@ function verifyExecutionResult({ question = '', plan = null, execLogs = [], roun
 
   const nextFailure = unresolved[0] || null;
   const shouldRetry = !done && round < maxRounds && Boolean(nextFailure && nextFailure.action);
+  const retryableSteps = executableSteps
+    .filter((step) => normalizeObject(step?.repairPolicy, {}).strategy !== 'never_retry_completed_side_effect')
+    .map((step) => String(step.id))
+    .filter((stepId) => unresolved.some((item) => String(item?.step_id) === stepId));
 
   return {
     done,
@@ -120,14 +173,28 @@ function verifyExecutionResult({ question = '', plan = null, execLogs = [], roun
     evidence,
     failures: unresolved,
     missing_steps: missingStepEvidence,
-    question: normalizeText(question)
+    question: normalizeText(question),
+    step_statuses: stepStatuses,
+    unsatisfied_requirements: unresolvedRequirements,
+    retryable_steps: retryableSteps,
+    goal_coverage: {
+      goal: normalizeText(plan?.goal || question),
+      covered: done
+    },
+    repair_strategy: {
+      deterministicFirst: true,
+      allowModelRepair: retryableSteps.length === 0 && round < maxRounds
+    }
   };
 }
 
 // Minimal replanning: retry only the failed executable steps instead of rerunning the whole plan.
 function buildRepairPlan({ previousPlan = null, verification = null, round = 1 } = {}) {
   const failures = Array.isArray(verification?.failures) ? verification.failures : [];
-  const retryable = failures.filter((item) => item.action && !/unknown tool/i.test(item.error));
+  const retryableSteps = new Set(
+    normalizeArray(verification?.retryable_steps).map((item) => String(item || '').trim()).filter(Boolean)
+  );
+  const retryable = failures.filter((item) => item.action && !/unknown tool/i.test(item.error) && retryableSteps.has(String(item.step_id || '').trim()));
   if (retryable.length === 0) return null;
 
   return {

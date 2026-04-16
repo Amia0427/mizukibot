@@ -509,7 +509,25 @@ module.exports = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  // Empty allowlist means private chat ingress stays closed by default.
+  // Preferred private-chat test-user allowlist.
+  // Empty means open private-chat test-user access to everyone by default.
+  // Use '*' to make the intent explicit in env files.
+  PRIVATE_CHAT_TEST_USER_IDS: (() => {
+    const preferredRaw = pick('PRIVATE_CHAT_TEST_USER_IDS', '');
+    const preferred = preferredRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (preferred.length > 0) return preferred;
+    const legacy = (pick('PRIVATE_CHAT_ALLOWED_USER_IDS', ''))
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (legacy.length > 0) return legacy;
+    return ['*'];
+  })(),
+  // Legacy alias kept for backward compatibility with older env files.
+  // Semantics are the same as PRIVATE_CHAT_TEST_USER_IDS and should not be used for admin privilege checks.
   PRIVATE_CHAT_ALLOWED_USER_IDS: (pick('PRIVATE_CHAT_ALLOWED_USER_IDS', ''))
     .split(',')
     .map((s) => s.trim())
