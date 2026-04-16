@@ -29,6 +29,10 @@ function parseJsonTail(text = '') {
 function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}, { isAdminUser } = {}) {
   const unavailableReason = String(routeExecutionPlan?.unavailableReason || '').trim().toLowerCase();
   if (unavailableReason === 'private-group-only') {
+    const command = String(route?.meta?.command?.cmd || '').trim().toLowerCase();
+    if (command === 'full') {
+      return '私聊不支持 /full，请在目标群内 @我后使用。';
+    }
     return '该能力当前仅支持群聊中使用，请在目标群内 @我。';
   }
   if (unavailableReason === 'private-write-disabled') {
@@ -760,8 +764,10 @@ function createMessageRouteFlow(deps = {}) {
     groupId,
     senderId,
     rawText,
-    userInfo
+    userInfo,
+    chatType = 'group'
   }) {
+    const normalizedChatType = String(chatType || '').trim().toLowerCase() === 'private' ? 'private' : 'group';
     const cmd = route?.meta?.command?.cmd;
     const args = route?.meta?.command?.args || [];
     const adminContext = {
@@ -769,7 +775,8 @@ function createMessageRouteFlow(deps = {}) {
       routeMeta: {
         ...(route?.meta || {}),
         userId: String(senderId || ''),
-        groupId: String(groupId || '')
+        groupId: String(groupId || ''),
+        chatType: normalizedChatType
       }
     };
 
@@ -777,10 +784,12 @@ function createMessageRouteFlow(deps = {}) {
     if (!hasAdminAccess(route, senderId)) {
       adminReply = '仅管理员可用。';
       await sendGroupReply({
+        chatType: normalizedChatType,
         groupId,
+        userId: senderId,
         senderId,
         replyText: adminReply,
-        atSender: true,
+        atSender: normalizedChatType !== 'private',
         retries: 1,
         waitMs: 500
       });
@@ -860,10 +869,12 @@ function createMessageRouteFlow(deps = {}) {
     }
 
     await sendGroupReply({
+      chatType: normalizedChatType,
       groupId,
+      userId: senderId,
       senderId,
       replyText: adminReply,
-      atSender: true,
+      atSender: normalizedChatType !== 'private',
       retries: 1,
       waitMs: 500
     });

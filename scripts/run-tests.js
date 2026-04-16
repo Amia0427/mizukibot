@@ -128,6 +128,7 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'messageReplyRuntime.test.js'),
   path.join(__dirname, '..', 'tests', 'messageHandlerPrivateStreaming.test.js'),
   path.join(__dirname, '..', 'tests', 'privateChatWhitelist.test.js'),
+  path.join(__dirname, '..', 'tests', 'privateChatAdminRouting.test.js'),
   path.join(__dirname, '..', 'tests', 'messageRouteFlowAdminGuard.test.js'),
   path.join(__dirname, '..', 'tests', 'messagePassiveAwarenessSource.test.js'),
   path.join(__dirname, '..', 'tests', 'memeManagerSource.test.js'),
