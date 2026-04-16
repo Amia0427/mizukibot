@@ -35,10 +35,12 @@ const {
 } = require('./qzoneGenerationState');
 const {
   CANDIDATE_COUNT,
+  CANDIDATE_VARIANT_TYPES,
   PLAN_RETRY_LIMIT,
   appendQzoneGenerationLog,
   buildCandidatePrompt,
   buildPlanPrompt,
+  buildTropeFingerprint,
   buildQzonePlan,
   finalizeSuccessfulQzoneRecord,
   getRecentFailureLikeEntries,
@@ -293,6 +295,17 @@ function buildQzoneDailySharePromptFromPlan({ payload, plan, memoryBlock = '', r
     memoryBlock,
     retryNote
   ].filter(Boolean).join('\n\n');
+}
+
+function buildDailyShareVariantNote(variantType = '') {
+  const normalized = String(variantType || '').trim().toLowerCase();
+  if (normalized === 'edge_variant') {
+    return '这个候选允许一点坏劲和反差，但仍然要像真人会发圈，不要攻击人。';
+  }
+  if (normalized === 'image_variant') {
+    return '这个候选优先增强画面、动作和可截图感。';
+  }
+  return '这个候选优先像真人会随手发的状态碎片，自然、不装、能截图。';
 }
 
 function advanceWindowPointer(targetConfig, stateEntry, windowKey) {
@@ -934,6 +947,7 @@ function createDailyShareEngine({
         });
         const candidates = [];
         for (let candidateIndex = 0; candidateIndex < Math.max(1, CANDIDATE_COUNT); candidateIndex += 1) {
+          const variantType = CANDIDATE_VARIANT_TYPES[candidateIndex] || CANDIDATE_VARIANT_TYPES[0];
           const prompt = buildCandidatePrompt(
             buildQzoneDailySharePromptFromPlan({
               payload,
@@ -944,7 +958,10 @@ function createDailyShareEngine({
                 : ''
             }),
             plan,
-            candidateIndex > 0 ? `上一个候选不够好，请重新组织语气和画面。` : ''
+            [
+              buildDailyShareVariantNote(variantType),
+              candidateIndex > 0 ? `上一个候选不够好，请重新组织语气和画面。` : ''
+            ].filter(Boolean).join('\n')
           );
           const reply = await askAIByGraph(prompt, userInfo, userId, prompt, null, {
             systemInitiated: true,
@@ -967,6 +984,7 @@ function createDailyShareEngine({
           const validation = validateDailyShareOutput(text, type, normalizedSurface);
           candidates.push({
             plan,
+            variantType,
             text,
             rejected: !validation.ok,
             rejectionReason: validation.ok ? '' : validation.reason
@@ -986,6 +1004,10 @@ function createDailyShareEngine({
             selectedFingerprint: picked.selected.fingerprint,
             selectedScore: picked.selected.score,
             similarity: picked.selected.similarity,
+            noveltyScore: picked.selected.noveltyScore,
+            tropeCollisionScore: picked.selected.tropeCollisionScore,
+            circleNaturalnessScore: picked.selected.circleNaturalnessScore,
+            edgeTensionScore: picked.selected.edgeTensionScore,
             failureReasons: [],
             planSummary: {
               fingerprint: plan.fingerprint,
@@ -996,12 +1018,23 @@ function createDailyShareEngine({
               structure: plan.variationProfile?.structure || '',
               arc: plan.variationProfile?.arc || '',
               tempo: plan.variationProfile?.tempo || '',
-              distance: plan.variationProfile?.distance || ''
+              distance: plan.variationProfile?.distance || '',
+              spark: plan.variationProfile?.spark || '',
+              socialMask: plan.variationProfile?.socialMask || '',
+              freshnessMode: plan.variationProfile?.freshnessMode || '',
+              voiceEdge: plan.variationProfile?.voiceEdge || '',
+              tropeFingerprint: plan.tropeFingerprint || ''
             },
             candidates: picked.ranked.map((item) => ({
               fingerprint: item.fingerprint,
               score: item.score,
               similarity: item.similarity,
+              noveltyScore: item.noveltyScore,
+              tropeCollisionScore: item.tropeCollisionScore,
+              circleNaturalnessScore: item.circleNaturalnessScore,
+              edgeTensionScore: item.edgeTensionScore,
+              variantType: item.variantType,
+              tropeFingerprint: item.tropeFingerprint,
               rejected: item.rejected,
               rejectionReason: item.rejectionReason
             }))
@@ -1017,6 +1050,10 @@ function createDailyShareEngine({
               ...qzoneMemoryMeta,
               similarity: picked.selected.similarity,
               selectedScore: picked.selected.score,
+              noveltyScore: picked.selected.noveltyScore,
+              tropeCollisionScore: picked.selected.tropeCollisionScore,
+              circleNaturalnessScore: picked.selected.circleNaturalnessScore,
+              edgeTensionScore: picked.selected.edgeTensionScore,
               memoryEvidenceSources: Array.isArray(qzoneMemoryMeta.memoryEvidenceSources) && qzoneMemoryMeta.memoryEvidenceSources.length
                 ? qzoneMemoryMeta.memoryEvidenceSources
                 : (Array.isArray(qzoneMemoryEvidence.sources) ? qzoneMemoryEvidence.sources : [])
@@ -1043,12 +1080,23 @@ function createDailyShareEngine({
             structure: plan.variationProfile?.structure || '',
             arc: plan.variationProfile?.arc || '',
             tempo: plan.variationProfile?.tempo || '',
-            distance: plan.variationProfile?.distance || ''
+            distance: plan.variationProfile?.distance || '',
+            spark: plan.variationProfile?.spark || '',
+            socialMask: plan.variationProfile?.socialMask || '',
+            freshnessMode: plan.variationProfile?.freshnessMode || '',
+            voiceEdge: plan.variationProfile?.voiceEdge || '',
+            tropeFingerprint: plan.tropeFingerprint || ''
           },
           candidates: picked.ranked.map((item) => ({
             fingerprint: item.fingerprint,
             score: item.score,
             similarity: item.similarity,
+            noveltyScore: item.noveltyScore,
+            tropeCollisionScore: item.tropeCollisionScore,
+            circleNaturalnessScore: item.circleNaturalnessScore,
+            edgeTensionScore: item.edgeTensionScore,
+            variantType: item.variantType,
+            tropeFingerprint: item.tropeFingerprint,
             rejected: item.rejected,
             rejectionReason: item.rejectionReason
           }))
@@ -1350,6 +1398,7 @@ function createDailyShareEngine({
         topicGroup: payload.topicGroup || generated.topicGroup || '',
         variationProfile: generated.variationProfile || {},
         plan: generated.plan || null,
+        tropeFingerprint: generated.plan?.tropeFingerprint || '',
         at: now
       });
     }

@@ -139,6 +139,18 @@ function buildSessionStatusReply(session = {}, activeTask = null) {
       : '当前没有运行中的后台任务。如果要继续，可以发“任务补充 ...”。';
   }
 
+  if (session && String(session.status || '').trim()) {
+    const latestSummary = String(session.latest_summary || '').trim();
+    const latestError = String(session.latest_error || '').trim();
+    const summaryLine = latestSummary ? `最近摘要：${latestSummary}` : '';
+    const errorLine = latestError ? `最近错误：${latestError}` : '';
+    return [
+      `远程会话状态：${String(session.status || '').trim()}`,
+      summaryLine,
+      errorLine
+    ].filter(Boolean).join('\n');
+  }
+
   return buildNoTaskControlText();
 }
 
@@ -156,6 +168,30 @@ function parseBackgroundControlCommand(text = '') {
   if (plain === '任务状态') return { type: 'status', payload: '' };
   if (plain === '取消任务') return { type: 'cancel', payload: '' };
   if (plain === '结束任务') return { type: 'close', payload: '' };
+  if (/^批准(?:\s|$)/i.test(plain)) {
+    return {
+      type: 'approve',
+      payload: plain.replace(/^批准\s*/i, '').trim()
+    };
+  }
+  if (/^拒绝(?:\s|$)/i.test(plain)) {
+    return {
+      type: 'deny',
+      payload: plain.replace(/^拒绝\s*/i, '').trim()
+    };
+  }
+  if (/^切\s*agent(?:\s|$)/i.test(plain)) {
+    return {
+      type: 'switch_agent',
+      payload: plain.replace(/^切\s*agent\s*/i, '').trim()
+    };
+  }
+  if (/^重连会话(?:\s|$)/i.test(plain)) {
+    return {
+      type: 'resume_session',
+      payload: plain.replace(/^重连会话\s*/i, '').trim()
+    };
+  }
   if (/^任务(?:补充|继续)\s+/i.test(plain)) {
     return {
       type: 'supplement',

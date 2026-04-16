@@ -46,6 +46,9 @@ const { loadQzoneGenerationLog } = require('../core/qzoneGenerationPhase2');
   assert.strictEqual(botDiary.ok, true);
   assert.ok(botDiary.meta.planFingerprint);
   assert.ok(botDiary.meta.imageIntent);
+  assert.ok(botDiary.meta.spark || botDiary.meta.plan?.variationProfile?.spark);
+  assert.ok(botDiary.meta.tropeFingerprint);
+  assert.ok(botDiary.meta.variantType);
 
   const genericDraft = await generateGenericQzoneDraft({
     requestText: '写一条偏冷一点的空间说说',
@@ -56,6 +59,9 @@ const { loadQzoneGenerationLog } = require('../core/qzoneGenerationPhase2');
 
   assert.strictEqual(genericDraft.ok, true);
   assert.ok(genericDraft.meta.planFingerprint);
+  assert.ok(genericDraft.meta.tropeFingerprint);
+  assert.ok(genericDraft.meta.variantType);
+  assert.ok(typeof genericDraft.meta.circleNaturalnessScore === 'number');
 
   const logs = loadQzoneGenerationLog();
   assert.ok(logs.items.some((item) => item.source === 'bot_diary'));

@@ -24,6 +24,7 @@ const { sanitizeUserFacingText } = require('../utils/userFacingText');
 const { buildRoutePromptBundle } = require('../utils/routePromptPolicy');
 const { buildRuntimePrompt } = require('../utils/runtimePrompts');
 const { getBackgroundTaskRuntime, summarizeReply: summarizeBackgroundReply } = require('../utils/backgroundTaskRuntime');
+const { getHapiControlRuntime } = require('../utils/hapiControlRuntime');
 const {
   buildToolReplyFormatInstruction,
   cleanToolReplyText,
@@ -64,7 +65,10 @@ const { runPassiveFlow } = require('./messagePassiveFlow');
 const { createMessageReplyRuntime } = require('./messageReplyRuntime');
 const { createMessageSideEffects } = require('./messageSideEffects');
 const { createMessageRouteFlow } = require('./messageRouteFlow');
-const { createMessageAdminCoordinator } = require('./messageAdminCommands');
+const {
+  createDefaultHapiControlClientFactory,
+  createMessageAdminCoordinator
+} = require('./messageAdminCommands');
 const { createMessageBackgroundTaskCoordinator } = require('./messageBackgroundTasks');
 const { createMessageDispatchCoordinator } = require('./messageDispatchCoordinator');
 const {
@@ -991,6 +995,8 @@ function createMessageHandler({
   const dailyShareEngine = getDailyShareEngine();
   const lifeSchedulerEngine = getSafeLifeSchedulerEngine();
   const backgroundTaskRuntime = getBackgroundTaskRuntime();
+  const hapiControlRuntime = getHapiControlRuntime();
+  hapiControlRuntime.expireApprovals();
   backgroundTaskRuntime.expireSessions();
   const routeResolver = typeof detectIntentHybridOverride === 'function'
     ? detectIntentHybridOverride
@@ -1020,7 +1026,9 @@ function createMessageHandler({
     clearGroupMute,
     setGroupMute,
     scheduleGroupMessage,
-    createScheduledCommand
+    createScheduledCommand,
+    hapiControlRuntime,
+    createHapiControlClient: createDefaultHapiControlClientFactory(config)
   });
   const fullSubagentCoordinator = createMessageFullSubagentCoordinator({
     config,
@@ -1049,6 +1057,7 @@ function createMessageHandler({
   });
   const maybeRunDeferredPersist = telemetryCoordinator.maybeRunDeferredPersist;
   const handleSessionSummaryCommand = (...args) => adminCoordinator.handleSessionSummaryCommand(...args);
+  const handleHapiAdminCommand = (...args) => adminCoordinator.handleHapiAdminCommand(...args);
   const handleInitiativeAdminCommand = (...args) => adminCoordinator.handleInitiativeAdminCommand(...args);
   const handleQqScheduleAdminCommand = (...args) => adminCoordinator.handleQqScheduleAdminCommand(...args);
   const reviewSubagentOutput = (...args) => fullSubagentCoordinator.reviewSubagentOutput(...args);
@@ -1127,7 +1136,9 @@ function createMessageHandler({
     getEffectivePolicyKey,
     sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
     runBackgroundToolTask,
-    config
+    config,
+    hapiControlRuntime,
+    createHapiControlClient: createDefaultHapiControlClientFactory(config)
   });
   const handleBackgroundTaskControl = (...args) => taskControlCoordinator.handleBackgroundTaskControl(...args);
   const dispatchCoordinator = createMessageDispatchCoordinator({
@@ -1601,6 +1612,7 @@ function createMessageHandler({
     askToolTaskWithSubagentReview,
     runBackgroundToolTask,
     handleAdminCommand,
+    handleHapiAdminCommand,
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
     generateBotDiaryDraft,

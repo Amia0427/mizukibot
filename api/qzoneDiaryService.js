@@ -11,10 +11,12 @@ const {
 } = require('../core/qzoneGenerationState');
 const {
   CANDIDATE_COUNT,
+  CANDIDATE_VARIANT_TYPES,
   PLAN_RETRY_LIMIT,
   appendQzoneGenerationLog,
   buildCandidatePrompt,
   buildPlanPrompt,
+  buildTropeFingerprint,
   buildQzonePlan,
   buildVisualPromptHints,
   evaluateImageConsistency,
@@ -672,6 +674,17 @@ function buildBotDiaryPromptFromPlan({ hint = '', signals = {}, strict = false, 
   return promptLines.join('\n');
 }
 
+function buildQzoneVariantNote(variantType = '') {
+  const normalized = normalizeText(variantType, 32).toLowerCase();
+  if (normalized === 'edge_variant') {
+    return '这个候选要允许一点坏劲和嘴硬感，可以有轻微冷转、轻阴阳怪气或小反差，但不能攻击人。';
+  }
+  if (normalized === 'image_variant') {
+    return '这个候选优先增强画面、动作和可截图感，让图文 vibe 更一致。';
+  }
+  return '这个候选优先写得像真人会随手发圈的碎碎念，自然、不装、能被截图。';
+}
+
 function splitSentenceLike(text = '') {
   return normalizeText(text)
     .split(/[。！？!?]/)
@@ -827,6 +840,7 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
     const candidates = [];
     for (let candidateIndex = 0; candidateIndex < Math.max(1, CANDIDATE_COUNT); candidateIndex += 1) {
       const strict = candidateIndex > 0;
+      const variantType = CANDIDATE_VARIANT_TYPES[candidateIndex] || CANDIDATE_VARIANT_TYPES[0];
       const prompt = buildCandidatePrompt(
         buildBotDiaryPromptFromPlan({
           hint,
@@ -837,7 +851,10 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
           recentHistory: recentFailureHistory
         }),
         plan,
-        candidateIndex > 0 ? `这是第 ${candidateIndex + 1} 个候选，请显著拉开与前一个版本的开头、节奏和落点。` : ''
+        [
+          buildQzoneVariantNote(variantType),
+          candidateIndex > 0 ? `这是第 ${candidateIndex + 1} 个候选，请显著拉开与前一个版本的开头、节奏和落点。` : ''
+        ].filter(Boolean).join('\n')
       );
       const modelConfig = getModelConfigForQzoneAttempt(candidateIndex > 0 ? 'similarity' : '');
       const content = await runDiaryDraftGeneration(prompt, {
@@ -847,6 +864,7 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
       const issues = findDiarySafetyIssues(content, signals);
       candidates.push({
         plan,
+        variantType,
         text: content,
         rejected: issues.length > 0,
         rejectionReason: issues.join(','),
@@ -895,7 +913,16 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
         imageConsistencyScore: imageConsistency.score,
         imageShouldDegrade: !imageConsistency.consistent,
         imageDuplicateRisk: imageConsistency.duplicate,
-        planFingerprint: plan.fingerprint
+        planFingerprint: plan.fingerprint,
+        tropeFingerprint: plan.tropeFingerprint || '',
+        selectedScore: selected.score,
+        similarity: selected.similarity,
+        noveltyScore: selected.noveltyScore,
+        tropeCollisionScore: selected.tropeCollisionScore,
+        circleNaturalnessScore: selected.circleNaturalnessScore,
+        edgeTensionScore: selected.edgeTensionScore,
+        variantType: selected.variantType,
+        plan
       };
       appendQzoneGenerationLog(normalizeTelemetryPayload({
         source: 'bot_diary',
@@ -905,6 +932,10 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
         selectedFingerprint: selected.fingerprint,
         selectedScore: selected.score,
         similarity: selected.similarity,
+        noveltyScore: selected.noveltyScore,
+        tropeCollisionScore: selected.tropeCollisionScore,
+        circleNaturalnessScore: selected.circleNaturalnessScore,
+        edgeTensionScore: selected.edgeTensionScore,
         imageConsistencyScore: imageConsistency.score,
         failureReasons: [],
         planSummary: {
@@ -916,12 +947,23 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
           structure: plan.variationProfile?.structure || '',
           arc: plan.variationProfile?.arc || '',
           tempo: plan.variationProfile?.tempo || '',
-          distance: plan.variationProfile?.distance || ''
+          distance: plan.variationProfile?.distance || '',
+          spark: plan.variationProfile?.spark || '',
+          socialMask: plan.variationProfile?.socialMask || '',
+          freshnessMode: plan.variationProfile?.freshnessMode || '',
+          voiceEdge: plan.variationProfile?.voiceEdge || '',
+          tropeFingerprint: plan.tropeFingerprint || ''
         },
         candidates: picked.ranked.map((item) => ({
           fingerprint: item.fingerprint,
           score: item.score,
           similarity: item.similarity,
+          noveltyScore: item.noveltyScore,
+          tropeCollisionScore: item.tropeCollisionScore,
+          circleNaturalnessScore: item.circleNaturalnessScore,
+          edgeTensionScore: item.edgeTensionScore,
+          variantType: item.variantType,
+          tropeFingerprint: item.tropeFingerprint,
           rejected: item.rejected,
           rejectionReason: item.rejectionReason
         }))
@@ -956,12 +998,23 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
         structure: plan.variationProfile?.structure || '',
         arc: plan.variationProfile?.arc || '',
         tempo: plan.variationProfile?.tempo || '',
-        distance: plan.variationProfile?.distance || ''
+        distance: plan.variationProfile?.distance || '',
+        spark: plan.variationProfile?.spark || '',
+        socialMask: plan.variationProfile?.socialMask || '',
+        freshnessMode: plan.variationProfile?.freshnessMode || '',
+        voiceEdge: plan.variationProfile?.voiceEdge || '',
+        tropeFingerprint: plan.tropeFingerprint || ''
       },
       candidates: picked.ranked.map((item) => ({
         fingerprint: item.fingerprint,
         score: item.score,
         similarity: item.similarity,
+        noveltyScore: item.noveltyScore,
+        tropeCollisionScore: item.tropeCollisionScore,
+        circleNaturalnessScore: item.circleNaturalnessScore,
+        edgeTensionScore: item.edgeTensionScore,
+        variantType: item.variantType,
+        tropeFingerprint: item.tropeFingerprint,
         rejected: item.rejected,
         rejectionReason: item.rejectionReason
       }))
@@ -1031,6 +1084,7 @@ async function generateGenericQzoneDraft(input = {}, options = {}) {
     });
     const candidates = [];
     for (let candidateIndex = 0; candidateIndex < Math.max(1, CANDIDATE_COUNT); candidateIndex += 1) {
+      const variantType = CANDIDATE_VARIANT_TYPES[candidateIndex] || CANDIDATE_VARIANT_TYPES[0];
       const prompt = buildCandidatePrompt(
         buildGenericAutodraftPrompt(requestText, {
           variationProfile: plan.variationProfile || {},
@@ -1038,7 +1092,10 @@ async function generateGenericQzoneDraft(input = {}, options = {}) {
           plan
         }),
         plan,
-        candidateIndex > 0 ? `这是第 ${candidateIndex + 1} 个候选，请更换叙事节奏和切入角度。` : ''
+        [
+          buildQzoneVariantNote(variantType),
+          candidateIndex > 0 ? `这是第 ${candidateIndex + 1} 个候选，请更换叙事节奏和切入角度。` : ''
+        ].filter(Boolean).join('\n')
       );
       const response = await runDiaryDraftGeneration(prompt, {
         ...options,
@@ -1048,6 +1105,7 @@ async function generateGenericQzoneDraft(input = {}, options = {}) {
       const firstPerson = /我/.test(normalized);
       candidates.push({
         plan,
+        variantType,
         text: normalized,
         rejected: !normalized || !firstPerson,
         rejectionReason: !normalized ? 'empty-output' : (!firstPerson ? 'not_first_person' : ''),
@@ -1079,6 +1137,10 @@ async function generateGenericQzoneDraft(input = {}, options = {}) {
         selectedFingerprint: selected.fingerprint,
         selectedScore: selected.score,
         similarity: selected.similarity,
+        noveltyScore: selected.noveltyScore,
+        tropeCollisionScore: selected.tropeCollisionScore,
+        circleNaturalnessScore: selected.circleNaturalnessScore,
+        edgeTensionScore: selected.edgeTensionScore,
         failureReasons: [],
         planSummary: {
           fingerprint: plan.fingerprint,
@@ -1089,12 +1151,23 @@ async function generateGenericQzoneDraft(input = {}, options = {}) {
           structure: plan.variationProfile?.structure || '',
           arc: plan.variationProfile?.arc || '',
           tempo: plan.variationProfile?.tempo || '',
-          distance: plan.variationProfile?.distance || ''
+          distance: plan.variationProfile?.distance || '',
+          spark: plan.variationProfile?.spark || '',
+          socialMask: plan.variationProfile?.socialMask || '',
+          freshnessMode: plan.variationProfile?.freshnessMode || '',
+          voiceEdge: plan.variationProfile?.voiceEdge || '',
+          tropeFingerprint: plan.tropeFingerprint || ''
         },
         candidates: picked.ranked.map((item) => ({
           fingerprint: item.fingerprint,
           score: item.score,
           similarity: item.similarity,
+          noveltyScore: item.noveltyScore,
+          tropeCollisionScore: item.tropeCollisionScore,
+          circleNaturalnessScore: item.circleNaturalnessScore,
+          edgeTensionScore: item.edgeTensionScore,
+          variantType: item.variantType,
+          tropeFingerprint: item.tropeFingerprint,
           rejected: item.rejected,
           rejectionReason: item.rejectionReason
         }))
@@ -1113,9 +1186,17 @@ async function generateGenericQzoneDraft(input = {}, options = {}) {
           tempo: plan.variationProfile?.tempo || '',
           distance: plan.variationProfile?.distance || '',
           similarity: selected.similarity,
+          selectedScore: selected.score,
+          noveltyScore: selected.noveltyScore,
+          tropeCollisionScore: selected.tropeCollisionScore,
+          circleNaturalnessScore: selected.circleNaturalnessScore,
+          edgeTensionScore: selected.edgeTensionScore,
+          variantType: selected.variantType,
           topicKey: plan.theme?.key || '',
           topicGroup: plan.theme?.key ? String(plan.theme.key).split('.')[0] : '',
-          planFingerprint: plan.fingerprint
+          planFingerprint: plan.fingerprint,
+          tropeFingerprint: plan.tropeFingerprint || '',
+          plan
         }
       };
     }
@@ -1138,12 +1219,23 @@ async function generateGenericQzoneDraft(input = {}, options = {}) {
         structure: plan.variationProfile?.structure || '',
         arc: plan.variationProfile?.arc || '',
         tempo: plan.variationProfile?.tempo || '',
-        distance: plan.variationProfile?.distance || ''
+        distance: plan.variationProfile?.distance || '',
+        spark: plan.variationProfile?.spark || '',
+        socialMask: plan.variationProfile?.socialMask || '',
+        freshnessMode: plan.variationProfile?.freshnessMode || '',
+        voiceEdge: plan.variationProfile?.voiceEdge || '',
+        tropeFingerprint: plan.tropeFingerprint || ''
       },
       candidates: picked.ranked.map((item) => ({
         fingerprint: item.fingerprint,
         score: item.score,
         similarity: item.similarity,
+        noveltyScore: item.noveltyScore,
+        tropeCollisionScore: item.tropeCollisionScore,
+        circleNaturalnessScore: item.circleNaturalnessScore,
+        edgeTensionScore: item.edgeTensionScore,
+        variantType: item.variantType,
+        tropeFingerprint: item.tropeFingerprint,
         rejected: item.rejected,
         rejectionReason: item.rejectionReason
       }))

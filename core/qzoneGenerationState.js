@@ -278,6 +278,11 @@ function normalizeHistoryEntry(item = {}) {
     anchor: normalizeText(item?.anchor || '', 32).toLowerCase(),
     structure: normalizeText(item?.structure || '', 32).toLowerCase(),
     ending: normalizeText(item?.ending || '', 32).toLowerCase(),
+    spark: normalizeText(item?.spark || '', 32).toLowerCase(),
+    socialMask: normalizeText(item?.socialMask || item?.social_mask || '', 32).toLowerCase(),
+    freshnessMode: normalizeText(item?.freshnessMode || item?.freshness_mode || '', 32).toLowerCase(),
+    voiceEdge: normalizeText(item?.voiceEdge || item?.voice_edge || '', 32).toLowerCase(),
+    tropeFingerprint: normalizeText(item?.tropeFingerprint || item?.trope_fingerprint || '', 120).toLowerCase(),
     type: normalizeText(item?.type || '', 32).toLowerCase(),
     ngrams: Array.isArray(item?.ngrams)
       ? uniqueBy(
@@ -508,6 +513,11 @@ function buildHistoryEntryFromContent(input = {}) {
     anchor: input.variationProfile?.anchor || input.anchor || '',
     structure: input.variationProfile?.structure || input.structure || '',
     ending: input.variationProfile?.ending || input.variationProfile?.ending || input.ending || '',
+    spark: input.variationProfile?.spark || input.spark || '',
+    socialMask: input.variationProfile?.socialMask || input.variationProfile?.social_mask || input.socialMask || '',
+    freshnessMode: input.variationProfile?.freshnessMode || input.variationProfile?.freshness_mode || input.freshnessMode || '',
+    voiceEdge: input.variationProfile?.voiceEdge || input.variationProfile?.voice_edge || input.voiceEdge || '',
+    tropeFingerprint: input.tropeFingerprint || input.variationProfile?.tropeFingerprint || '',
     type: input.type || '',
     ngrams: toNgrams(text),
     at: Math.max(0, Number(input.at || Date.now()) || 0)

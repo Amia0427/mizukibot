@@ -10,6 +10,7 @@ const {
   askByBridge: askOpenclawByBridge,
   createBridgeCall: createOpenclawBridgeCall
 } = require('./subagentBackends/openclawBackend');
+const { createHapiBridgeCall } = require('./subagentBackends/hapiBackend');
 const { buildSessionId } = require('./subagentSessionManager');
 
 const SUBAGENT_MAX_CONCURRENCY = Math.max(1, Number(config.SUBAGENT_MAX_CONCURRENCY) || 2);
@@ -56,6 +57,9 @@ function createBridgeCall(params = {}) {
   }
   if (backend === 'gateway') {
     return createGatewayBridgeCall(normalizedParams);
+  }
+  if (backend === 'hapi') {
+    return createHapiBridgeCall(normalizedParams);
   }
 
   throw new Error(`unsupported SUBAGENT_BACKEND: ${backend}`);
