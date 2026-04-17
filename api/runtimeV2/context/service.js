@@ -14,6 +14,12 @@ const {
   getAffinitySettings,
   trimTextByTokenBudget
 } = require('../../../utils/contextBudget');
+const { buildPromptSnapshot } = require('../../../utils/promptCompiler');
+const {
+  buildMainStageBlocks,
+  buildPlannerStageSystemPrompt,
+  buildReviewStageSystemPrompt
+} = require('../../../utils/stagePromptContracts');
 const {
   buildSharedShortTermContextMessages
 } = require('../../../utils/shortTermMemory');
@@ -73,6 +79,24 @@ function buildDirectedContextPromptSnippet(directedContext = {}) {
     lines.push('instruction=Only lower quote priority when the current message is clearly a complete new request on its own.');
   }
   return lines.join('\n');
+}
+
+function createPromptBlock(id, label, content, options = {}) {
+  const text = String(content || '').trim();
+  if (!text) return null;
+  return {
+    id: String(id || label || 'block').trim() || 'block',
+    label: String(label || id || 'block').trim() || 'block',
+    content: text,
+    stage: String(options.stage || 'main').trim() || 'main',
+    priority: Number.isFinite(Number(options.priority)) ? Number(options.priority) : 100,
+    authority: String(options.authority || 'runtime').trim() || 'runtime',
+    budgetTokens: Math.max(0, Number(options.budgetTokens || 0) || 0),
+    conflictTags: Array.isArray(options.conflictTags) ? options.conflictTags.map((item) => String(item || '').trim()).filter(Boolean) : [],
+    kind: String(options.kind || 'runtime').trim() || 'runtime',
+    source: String(options.source || 'runtime').trim() || 'runtime',
+    meta: options.meta && typeof options.meta === 'object' ? { ...options.meta } : {}
+  };
 }
 
 function shouldExposeMemoryCli(options = {}) {
@@ -237,75 +261,225 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     personaMemoryState,
     topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat'
   );
+  const promptBlocks = [];
+  const promptSegments = {
+    systemPrompt: [],
+    routePrompt: options.routePrompt ? [{ role: 'system', content: String(options.routePrompt || '').trim() }] : [],
+    memoryContext: memoryContext?.segments || {},
+    personaMemory: personaMemoryPrompt.systemMessages || [],
+    assembledBlocks: [],
+    renderedSystemMessages: [],
+    tokenUsageByBlock: [],
+    trimDecisions: [],
+    securityLabels: []
+  };
 
   if (customPrompt) {
+    const reviewMode = String(options?.reviewMode || '').trim().toLowerCase();
+    const topRoute = String(topRouteType || '').trim().toLowerCase();
+    const customStage = reviewMode ? 'review' : (topRoute === 'plan' ? 'planner' : 'main');
+    const customPromptBlock = createPromptBlock('custom_prompt', 'Custom Prompt', customPrompt, {
+      stage: customStage,
+      priority: 10,
+      authority: 'custom_prompt',
+      kind: 'custom_prompt',
+      source: 'custom'
+    });
+    const customSnapshot = buildPromptSnapshot(customPromptBlock ? [customPromptBlock] : [], {
+      stage: customStage,
+      policyKey: String(options?.routePolicyKey || '').trim() || customStage
+    });
     return {
-      dynamicPrompt: customPrompt,
+      dynamicPrompt: customSnapshot.renderedSystemMessages.map((message) => String(message.content || '').trim()).filter(Boolean).join('\n\n'),
       promptSegments: {
-        systemPrompt: [{ role: 'system', content: customPrompt }],
-        routePrompt: options.routePrompt ? [{ role: 'system', content: String(options.routePrompt || '').trim() }] : [],
-        memoryContext: memoryContext?.segments || {},
-        personaMemory: personaMemoryPrompt.systemMessages || []
+        ...promptSegments,
+        systemPrompt: customSnapshot.renderedSystemMessages,
+        assembledBlocks: customSnapshot.assembledBlocks,
+        renderedSystemMessages: customSnapshot.renderedSystemMessages,
+        tokenUsageByBlock: customSnapshot.tokenUsageByBlock,
+        trimDecisions: customSnapshot.trimDecisions
       },
+      promptSnapshot: customSnapshot,
       memoryContext,
       personaMemoryState,
       affinity
     };
   }
-
-  const promptParts = [
-    config.SYSTEM_PROMPT,
-    ...personaMemoryPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean),
-    `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`,
-    `[AffinityPoints] ${affinity.points}`,
-    `[RetrievedMemoryLite] ${memoryContext.memoryForPrompt || 'none'}`,
-    `[LongTermProfile] ${memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText || 'none'}`,
-    `[Impression] ${memoryContext.promptImpressionText || trimTextByTokenBudget(memoryContext.impressionText || 'none', Math.max(96, Math.floor(affinity.shortTermMemoryTokens * 0.2)), 'tail') || 'none'}`,
+  promptBlocks.push(...buildMainStageBlocks({
+    systemPrompt: config.SYSTEM_PROMPT
+  }));
+  promptBlocks.push(
+    ...personaMemoryPrompt.systemMessages
+      .map((message, index) => createPromptBlock(
+        `persona_memory_${index + 1}`,
+        `Persona Memory ${index + 1}`,
+        message?.content,
+        {
+          stage: 'main',
+          priority: 360 + index,
+          authority: 'persona_memory',
+          kind: 'persona_memory',
+          source: 'persona_memory'
+        }
+      ))
+      .filter(Boolean)
+  );
+  promptBlocks.push(createPromptBlock('affinity_level', 'Affinity Level', `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`, {
+    stage: 'main',
+    priority: 320,
+    authority: 'memory_fact',
+    kind: 'affinity'
+  }));
+  promptBlocks.push(createPromptBlock('affinity_points', 'Affinity Points', `[AffinityPoints] ${affinity.points}`, {
+    stage: 'main',
+    priority: 321,
+    authority: 'memory_fact',
+    kind: 'affinity'
+  }));
+  promptBlocks.push(createPromptBlock('retrieved_memory_lite', 'Retrieved Memory Lite', `[RetrievedMemoryLite] ${memoryContext.memoryForPrompt || 'none'}`, {
+    stage: 'main',
+    priority: 260,
+    authority: 'memory_fact',
+    kind: 'memory'
+  }));
+  promptBlocks.push(createPromptBlock('long_term_profile', 'Long Term Profile', `[LongTermProfile] ${memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText || 'none'}`, {
+    stage: 'main',
+    priority: 270,
+    authority: 'memory_fact',
+    kind: 'memory'
+  }));
+  promptBlocks.push(createPromptBlock('impression', 'Impression', `[Impression] ${memoryContext.promptImpressionText || trimTextByTokenBudget(memoryContext.impressionText || 'none', Math.max(96, Math.floor(affinity.shortTermMemoryTokens * 0.2)), 'tail') || 'none'}`, {
+    stage: 'main',
+    priority: 271,
+    authority: 'memory_fact',
+    kind: 'memory'
+  }));
+  promptBlocks.push(
     ...buildRelationshipPromptLines(memoryContext)
-  ];
+      .map((line, index) => createPromptBlock(
+        `relationship_${index + 1}`,
+        `Relationship ${index + 1}`,
+        line,
+        {
+          stage: 'main',
+          priority: 272 + index,
+          authority: 'memory_fact',
+          kind: 'relationship'
+        }
+      ))
+      .filter(Boolean)
+  );
 
   const summaryText = memoryContext.promptSummaryText
     || trimTextByTokenBudget(memoryContext.summary || 'none', affinity.shortTermMemoryTokens, 'tail')
     || 'none';
-  promptParts.push(`[Summary] ${summaryText}`);
+  promptBlocks.push(createPromptBlock('summary', 'Summary', `[Summary] ${summaryText}`, {
+    stage: 'main',
+    priority: 280,
+    authority: 'memory_fact',
+    kind: 'summary'
+  }));
   if (shouldExposeMemoryCli({ ...options, customPrompt })) {
     const memoryCliInstruction = buildV2MemoryCliInstruction(options?.memoryCliTurn);
-    if (memoryCliInstruction) promptParts.push(memoryCliInstruction);
+    if (memoryCliInstruction) {
+      promptBlocks.push(createPromptBlock('memory_cli_instruction', 'Memory CLI Instruction', memoryCliInstruction, {
+        stage: 'main',
+        priority: 130,
+        authority: 'tool_policy',
+        kind: 'tool_policy',
+        source: 'memory_cli'
+      }));
+    }
   }
-  let dynamicPrompt = promptParts.join('\n');
   const dynamicFewShotPrompt = buildDynamicFewShotPrompt({
     question,
     routePolicyKey: options.routePolicyKey,
     topRouteType: options.topRouteType,
     routePrompt: options.routePrompt,
-    maxExamples: 3
+    maxExamples: 3,
+    continuitySignals: options?.continuitySignals,
+    contextDensity: estimateTokens(memoryContext.memoryForPrompt || '') + estimateTokens(summaryText || '')
   });
   if (dynamicFewShotPrompt) {
-    dynamicPrompt = [dynamicPrompt, dynamicFewShotPrompt].filter(Boolean).join('\n\n');
+    promptBlocks.push(createPromptBlock('dynamic_few_shot', 'Dynamic Few Shot', dynamicFewShotPrompt, {
+      stage: 'main',
+      priority: 620,
+      authority: 'few_shot',
+      budgetTokens: 220,
+      kind: 'few_shot',
+      source: 'few_shot',
+      conflictTags: ['few_shot']
+    }));
   }
+
+  let promptSnapshot = buildPromptSnapshot(promptBlocks.filter(Boolean), {
+    stage: 'main',
+    policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
+    budgetTokens: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens)
+  });
+  let dynamicPrompt = promptSnapshot.renderedSystemMessages.map((message) => String(message.content || '').trim()).filter(Boolean).join('\n\n');
   const promptBudget = Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens);
   if (estimateTokens(dynamicPrompt) > promptBudget) {
-    dynamicPrompt = [
-      config.SYSTEM_PROMPT,
-      ...personaMemoryPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean),
-      `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`,
-      `[AffinityPoints] ${affinity.points}`,
-      `[RetrievedMemoryLite] ${trimTextByTokenBudget(memoryContext.memoryForPrompt, Math.floor(promptBudget * 0.18), 'tail')}`,
-      `[LongTermProfile] ${trimTextByTokenBudget(memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText, Math.floor(promptBudget * 0.18), 'tail') || '暂无'}`,
-      `[Impression] ${trimTextByTokenBudget(memoryContext.promptImpressionText || memoryContext.impressionText || 'none', Math.floor(promptBudget * 0.08), 'tail') || 'none'}`,
-      `[Summary] ${trimTextByTokenBudget(memoryContext.promptSummaryText || memoryContext.summary || 'none', Math.floor(promptBudget * 0.12), 'tail') || 'none'}`,
-      ...buildRelationshipPromptLines(memoryContext)
-    ].join('\n');
+    const compactPromptBlocks = buildMainStageBlocks({
+      systemPrompt: config.SYSTEM_PROMPT
+    }).concat(
+      ...personaMemoryPrompt.systemMessages.map((message, index) => createPromptBlock(
+        `persona_memory_compact_${index + 1}`,
+        `Persona Memory Compact ${index + 1}`,
+        message?.content,
+        {
+          stage: 'main',
+          priority: 360 + index,
+          authority: 'persona_memory',
+          kind: 'persona_memory'
+        }
+      )).filter(Boolean),
+      [
+        createPromptBlock('retrieved_memory_compact', 'Retrieved Memory Compact', `[RetrievedMemoryLite] ${trimTextByTokenBudget(memoryContext.memoryForPrompt, Math.floor(promptBudget * 0.18), 'tail')}`, {
+          stage: 'main',
+          priority: 260,
+          authority: 'memory_fact',
+          kind: 'memory'
+        }),
+        createPromptBlock('long_term_profile_compact', 'Long Term Profile Compact', `[LongTermProfile] ${trimTextByTokenBudget(memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText, Math.floor(promptBudget * 0.18), 'tail') || '暂无'}`, {
+          stage: 'main',
+          priority: 270,
+          authority: 'memory_fact',
+          kind: 'memory'
+        }),
+        createPromptBlock('impression_compact', 'Impression Compact', `[Impression] ${trimTextByTokenBudget(memoryContext.promptImpressionText || memoryContext.impressionText || 'none', Math.floor(promptBudget * 0.08), 'tail') || 'none'}`, {
+          stage: 'main',
+          priority: 271,
+          authority: 'memory_fact',
+          kind: 'memory'
+        }),
+        createPromptBlock('summary_compact', 'Summary Compact', `[Summary] ${trimTextByTokenBudget(memoryContext.promptSummaryText || memoryContext.summary || 'none', Math.floor(promptBudget * 0.12), 'tail') || 'none'}`, {
+          stage: 'main',
+          priority: 280,
+          authority: 'memory_fact',
+          kind: 'summary'
+        })
+      ]
+    );
+    promptSnapshot = buildPromptSnapshot(compactPromptBlocks.filter(Boolean), {
+      stage: 'main',
+      policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main_compact',
+      budgetTokens: promptBudget
+    });
+    dynamicPrompt = promptSnapshot.renderedSystemMessages.map((message) => String(message.content || '').trim()).filter(Boolean).join('\n\n');
   }
+
+  promptSegments.systemPrompt = promptSnapshot.renderedSystemMessages;
+  promptSegments.assembledBlocks = promptSnapshot.assembledBlocks;
+  promptSegments.renderedSystemMessages = promptSnapshot.renderedSystemMessages;
+  promptSegments.tokenUsageByBlock = promptSnapshot.tokenUsageByBlock;
+  promptSegments.trimDecisions = promptSnapshot.trimDecisions;
+  promptSegments.securityLabels = Array.isArray(options?.securityLabels) ? options.securityLabels : [];
 
   return {
     dynamicPrompt,
-    promptSegments: {
-      systemPrompt: dynamicPrompt ? [{ role: 'system', content: dynamicPrompt }] : [],
-      routePrompt: options.routePrompt ? [{ role: 'system', content: String(options.routePrompt || '').trim() }] : [],
-      memoryContext: memoryContext?.segments || {},
-      personaMemory: personaMemoryPrompt.systemMessages || []
-    },
+    promptSegments,
+    promptSnapshot,
     memoryContext,
     personaMemoryState,
     affinity
@@ -332,8 +506,17 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       || (!topRouteType && !routePolicyKey)
     );
   const dynamicPromptParts = [String(base.dynamicPrompt || '').trim()];
+  const extraBlocks = [];
 
-  if (shouldInjectContextStatsInstruction) dynamicPromptParts.push(contextStatsInstruction);
+  if (shouldInjectContextStatsInstruction) {
+    dynamicPromptParts.push(contextStatsInstruction);
+    extraBlocks.push(createPromptBlock('context_stats_instruction', 'Context Stats Instruction', contextStatsInstruction, {
+      stage: 'main',
+      priority: 140,
+      authority: 'tool_policy',
+      kind: 'tool_policy'
+    }));
+  }
 
   if (shouldInjectLifeScheduler(options)) {
     const lifeSchedulerEngine = getLifeSchedulerEngine();
@@ -344,7 +527,15 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     const injectionEntry = injection?.entry || null;
     if (injectionEntry && String(injectionEntry.status || '').trim() === 'ok') {
       const injectionBlock = lifeSchedulerEngine.formatInjectionBlock(injectionEntry, new Date());
-      if (String(injectionBlock || '').trim()) dynamicPromptParts.push(injectionBlock);
+      if (String(injectionBlock || '').trim()) {
+        dynamicPromptParts.push(injectionBlock);
+        extraBlocks.push(createPromptBlock('life_scheduler', 'Life Scheduler', injectionBlock, {
+          stage: 'main',
+          priority: 700,
+          authority: 'optional_modulation',
+          kind: 'scheduler'
+        }));
+      }
     }
   }
 
@@ -353,11 +544,26 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
       maxChars: currentConfig.STYLE_PROFILE_PROMPT_MAX_CHARS
     });
-    if (styleSnippet) dynamicPromptParts.push(styleSnippet);
+    if (styleSnippet) {
+      dynamicPromptParts.push(styleSnippet);
+      extraBlocks.push(createPromptBlock('style_profile', 'Style Profile', styleSnippet, {
+        stage: 'main',
+        priority: 710,
+        authority: 'optional_modulation',
+        kind: 'style_profile'
+      }));
+    }
   }
 
   if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
-    dynamicPromptParts.push(buildDirectedContextPromptSnippet(options.routeMeta.directedContext));
+    const directedContextText = buildDirectedContextPromptSnippet(options.routeMeta.directedContext);
+    dynamicPromptParts.push(directedContextText);
+    extraBlocks.push(createPromptBlock('directed_context', 'Directed Context', directedContextText, {
+      stage: 'main',
+      priority: 210,
+      authority: 'continuity_context',
+      kind: 'continuity'
+    }));
   }
 
   if (shouldInjectSocialContext(options)) {
@@ -365,7 +571,15 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
       maxChars: currentConfig.SOCIAL_CONTEXT_PROMPT_MAX_CHARS
     });
-    if (socialSnippet) dynamicPromptParts.push(socialSnippet);
+    if (socialSnippet) {
+      dynamicPromptParts.push(socialSnippet);
+      extraBlocks.push(createPromptBlock('social_context', 'Social Context', socialSnippet, {
+        stage: 'main',
+        priority: 720,
+        authority: 'optional_modulation',
+        kind: 'social_context'
+      }));
+    }
   }
 
   if (shouldInjectSelfImprovement(options)) {
@@ -377,18 +591,69 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       topK: currentConfig.SELF_IMPROVEMENT_PROMPT_TOP_K,
       maxChars: currentConfig.SELF_IMPROVEMENT_PROMPT_MAX_CHARS
     });
-    if (snippet) dynamicPromptParts.push(snippet);
+    if (snippet) {
+      dynamicPromptParts.push(snippet);
+      extraBlocks.push(createPromptBlock('self_improvement', 'Self Improvement', snippet, {
+        stage: 'main',
+        priority: 730,
+        authority: 'optional_modulation',
+        kind: 'self_improvement'
+      }));
+    }
   }
 
   if (!shouldExposeMemoryCli(options)) {
     const nextDynamicPrompt = dynamicPromptParts.filter(Boolean).join('\n\n');
-    return nextDynamicPrompt ? { ...base, dynamicPrompt: nextDynamicPrompt } : base;
+    const mergedSnapshot = buildPromptSnapshot(
+      [...(base.promptSnapshot?.assembledBlocks || []), ...extraBlocks].filter(Boolean),
+      {
+        stage: 'main',
+        policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main'
+      }
+    );
+    return nextDynamicPrompt ? {
+      ...base,
+      dynamicPrompt: nextDynamicPrompt,
+      promptSnapshot: mergedSnapshot,
+      promptSegments: {
+        ...(base.promptSegments || {}),
+        systemPrompt: mergedSnapshot.renderedSystemMessages,
+        assembledBlocks: mergedSnapshot.assembledBlocks,
+        renderedSystemMessages: mergedSnapshot.renderedSystemMessages,
+        tokenUsageByBlock: mergedSnapshot.tokenUsageByBlock,
+        trimDecisions: mergedSnapshot.trimDecisions
+      }
+    } : base;
   }
 
   const memoryCliInstruction = buildV2MemoryCliInstruction(options?.memoryCliTurn);
+  const memoryCliBlock = memoryCliInstruction
+    ? createPromptBlock('memory_cli_followup', 'Memory CLI Followup', memoryCliInstruction, {
+      stage: 'main',
+      priority: 130,
+      authority: 'tool_policy',
+      kind: 'tool_policy'
+    })
+    : null;
+  const mergedSnapshot = buildPromptSnapshot(
+    [...(base.promptSnapshot?.assembledBlocks || []), ...extraBlocks, memoryCliBlock].filter(Boolean),
+    {
+      stage: 'main',
+      policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main'
+    }
+  );
   return {
     ...base,
-    dynamicPrompt: [...dynamicPromptParts, memoryCliInstruction].filter(Boolean).join('\n\n')
+    dynamicPrompt: [...dynamicPromptParts, memoryCliInstruction].filter(Boolean).join('\n\n'),
+    promptSnapshot: mergedSnapshot,
+    promptSegments: {
+      ...(base.promptSegments || {}),
+      systemPrompt: mergedSnapshot.renderedSystemMessages,
+      assembledBlocks: mergedSnapshot.assembledBlocks,
+      renderedSystemMessages: mergedSnapshot.renderedSystemMessages,
+      tokenUsageByBlock: mergedSnapshot.tokenUsageByBlock,
+      trimDecisions: mergedSnapshot.trimDecisions
+    }
   };
 }
 

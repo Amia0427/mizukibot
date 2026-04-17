@@ -11,6 +11,7 @@ const {
   normalizeToolIntent
 } = require('./routeSchema');
 const { isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
+const { buildRouterStageSystemPrompt } = require('../utils/stagePromptContracts');
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -105,6 +106,56 @@ function parseAdminCommand(cleanText = '') {
     const payload = t.replace(/^\/full/i, '').trim();
     return {
       cmd: 'full',
+      args: payload ? [payload] : [],
+      raw: t,
+      payload
+    };
+  }
+
+  if (/^\/claude(?:\s|$)/i.test(t)) {
+    const payload = t.replace(/^\/claude/i, '').trim();
+    return {
+      cmd: 'claude',
+      args: payload ? [payload] : [],
+      raw: t,
+      payload
+    };
+  }
+
+  if (/^\/claude-open(?:\s|$)/i.test(t)) {
+    const payload = t.replace(/^\/claude-open/i, '').trim();
+    return {
+      cmd: 'claude-open',
+      args: payload ? [payload] : [],
+      raw: t,
+      payload
+    };
+  }
+
+  if (/^\/claude-send(?:\s|$)/i.test(t)) {
+    const payload = t.replace(/^\/claude-send/i, '').trim();
+    return {
+      cmd: 'claude-send',
+      args: payload ? [payload] : [],
+      raw: t,
+      payload
+    };
+  }
+
+  if (/^\/claude-tail(?:\s|$)/i.test(t)) {
+    const payload = t.replace(/^\/claude-tail/i, '').trim();
+    return {
+      cmd: 'claude-tail',
+      args: payload ? [payload] : [],
+      raw: t,
+      payload
+    };
+  }
+
+  if (/^\/claude-stop(?:\s|$)/i.test(t)) {
+    const payload = t.replace(/^\/claude-stop/i, '').trim();
+    return {
+      cmd: 'claude-stop',
       args: payload ? [payload] : [],
       raw: t,
       payload
@@ -692,7 +743,14 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
         meta: { admin: false, command: adminCmd }
       });
     }
-    if (adminCmd.cmd === 'full') {
+    if (
+      adminCmd.cmd === 'full'
+      || adminCmd.cmd === 'claude'
+      || adminCmd.cmd === 'claude-open'
+      || adminCmd.cmd === 'claude-send'
+      || adminCmd.cmd === 'claude-tail'
+      || adminCmd.cmd === 'claude-stop'
+    ) {
       return makeRoute({
         confidence: 1,
         cleanText,
@@ -1073,6 +1131,7 @@ function sanitizeContextSummary(summary = '', maxLength = 220) {
 
 function buildRouterSubagentPrompt() {
   return [
+    buildRouterStageSystemPrompt(),
     'You are an in-process direct_chat router refiner.',
     'You must only return JSON. No markdown. No explanation.',
     'Terminal routes are frozen by local authority.',

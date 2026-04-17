@@ -1,7 +1,18 @@
 const fs = require('fs');
 const path = require('path');
-
 const RUNTIME_PROMPTS_DIR = path.join(__dirname, '..', 'prompts', 'runtime');
+
+function estimatePromptTokens(value) {
+  const text = String(value || '').trim();
+  if (!text) return 0;
+  let cjkChars = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    if (code >= 0x3400 && code <= 0x9fff) cjkChars += 1;
+  }
+  const latinChars = text.length - cjkChars;
+  return cjkChars + Math.ceil(Math.max(0, latinChars) / 4);
+}
 
 const RUNTIME_PROMPT_DEFAULTS = {
   'tool-guidance': [
@@ -123,17 +134,33 @@ function safeReadText(filePath, fallback = '') {
 
 function renderRuntimePromptTemplate(templateText, variables = {}) {
   const source = String(templateText || '');
+  const usedKeys = [];
   const rendered = source.replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    usedKeys.push(key);
     const value = variables[key];
-    return value === undefined || value === null ? '' : String(value);
+    if (value === undefined || value === null) {
+      throw new Error(`[runtime-prompts] Missing required template variable: ${key}`);
+    }
+    return String(value);
   });
+  const providedKeys = Object.keys(variables || {}).map((key) => String(key || '').trim()).filter(Boolean);
+  const unknownProvidedKeys = providedKeys.filter((key) => !usedKeys.includes(key));
 
-  return rendered
+  const normalizedText = rendered
     .replace(/\n{3,}/g, '\n\n')
     .split('\n')
     .filter((line, index, arr) => !(line.trim() === '' && arr[index - 1]?.trim() === ''))
     .join('\n')
     .trim();
+
+  return {
+    text: normalizedText,
+    meta: {
+      usedVariables: Array.from(new Set(usedKeys)),
+      unusedVariables: Array.from(new Set(unknownProvidedKeys)),
+      estimatedTokens: estimatePromptTokens(normalizedText)
+    }
+  };
 }
 
 function loadRuntimePromptTemplate(templateId) {
@@ -147,12 +174,33 @@ function loadRuntimePromptTemplate(templateId) {
 }
 
 function buildRuntimePrompt(templateId, variables = {}) {
-  return renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables);
+  return renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables).text;
+}
+
+function buildRuntimePromptBlock(templateId, variables = {}, options = {}) {
+  const rendered = renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables);
+  return {
+    id: String(options.id || `runtime_${templateId}`).trim() || `runtime_${templateId}`,
+    label: String(options.label || templateId).trim() || templateId,
+    stage: String(options.stage || 'shared').trim() || 'shared',
+    priority: Number.isFinite(Number(options.priority)) ? Number(options.priority) : 100,
+    authority: String(options.authority || 'runtime_template').trim() || 'runtime_template',
+    budgetTokens: Math.max(0, Number(options.budgetTokens || options.budget_tokens || 0) || 0),
+    conflictTags: Array.isArray(options.conflictTags || options.conflict_tags)
+      ? (options.conflictTags || options.conflict_tags).map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    kind: String(options.kind || 'runtime_template').trim() || 'runtime_template',
+    source: `runtime:${templateId}`,
+    content: rendered.text,
+    estimatedTokens: rendered.meta.estimatedTokens,
+    templateMeta: rendered.meta
+  };
 }
 
 module.exports = {
   RUNTIME_PROMPTS_DIR,
   RUNTIME_PROMPT_DEFAULTS,
+  buildRuntimePromptBlock,
   buildRuntimePrompt,
   loadRuntimePromptTemplate,
   renderRuntimePromptTemplate

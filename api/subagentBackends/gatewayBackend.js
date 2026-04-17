@@ -2,6 +2,7 @@ const axios = require('axios');
 const config = require('../../config');
 const { buildForwardPrompt } = require('./commandBackend');
 const { parseGatewayJsonResponse, parseGatewaySSEStream } = require('./gatewayResponseParser');
+const { detectSensitiveOutput } = require('../../utils/promptSecurity');
 
 function ensureResponsesUrl(url = '') {
   const normalized = String(url || '').replace(/\/+$/, '');
@@ -140,6 +141,7 @@ function createGatewayBridgeCall({ question, sessionId, customPrompt = null, ima
 
       const reply = parseGatewaySSEStream(raw);
       if (!reply) throw new Error('gateway returned empty reply');
+      if (detectSensitiveOutput(reply).blocked) throw new Error('gateway returned sensitive output');
       return reply;
     }
 
@@ -151,6 +153,7 @@ function createGatewayBridgeCall({ question, sessionId, customPrompt = null, ima
       }
       const reply = parseGatewayJsonResponse(response?.data || {});
       if (!reply) throw new Error('gateway returned empty reply');
+      if (detectSensitiveOutput(reply).blocked) throw new Error('gateway returned sensitive output');
       return reply;
     })().catch((error) => {
       throw normalizeGatewayError(error);

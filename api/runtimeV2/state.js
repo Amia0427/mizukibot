@@ -155,6 +155,11 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     },
     memory: {
       dynamicPrompt: '',
+      promptSnapshot: null,
+      promptSegments: null,
+      securityLabels: [],
+      blockedLearningEvents: [],
+      redactionEvents: [],
       affinity: null,
       context: null,
       dirty: false,

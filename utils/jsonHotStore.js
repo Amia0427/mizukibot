@@ -4,7 +4,7 @@ const path = require('path');
 const DEFAULT_DEBOUNCE_MS = 500;
 const DEFAULT_MAX_DELAY_MS = 3000;
 const STORE_REGISTRY = new Set();
-let flushHooksRegistered = false;
+const JSON_HOT_STORE_HOOK_KEY = '__mizuki_json_hot_store_flush_hooks_registered__';
 
 function ensureDir(filePath) {
   const dir = path.dirname(String(filePath || ''));
@@ -49,8 +49,8 @@ function defaultJsonSerialize(value) {
 }
 
 function registerFlushHooks() {
-  if (flushHooksRegistered) return;
-  flushHooksRegistered = true;
+  if (process[JSON_HOT_STORE_HOOK_KEY]) return;
+  process[JSON_HOT_STORE_HOOK_KEY] = true;
   const flushAll = () => flushAllHotStoresSync();
   process.once('beforeExit', flushAll);
   process.once('SIGINT', () => {

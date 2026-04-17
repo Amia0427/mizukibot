@@ -1662,6 +1662,7 @@ module.exports = {
   summarizeJournalForDay,
   parseJournalEntries,
   readSegmentSummaries,
+  collectRecentEntrySidecars,
   _test: {
     getUserJournalDir,
     toSafeJournalPathSegment

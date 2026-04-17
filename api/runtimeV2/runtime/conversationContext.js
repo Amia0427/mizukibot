@@ -14,7 +14,8 @@ function createConversationContextHelpers(deps = {}) {
     mergeAllowedToolsWithMemoryCli,
     isPlannerSingleAuthorityEnabled,
     getRouteToolPlanner,
-    resolveModelTokenLimit
+    resolveModelTokenLimit,
+    buildSecuritySystemPrompt
   } = deps;
 
   function computeEffectiveAllowedTools(request = {}, memoryCliTurn = null) {
@@ -96,6 +97,9 @@ function createConversationContextHelpers(deps = {}) {
     const continuityMessage = buildContinuitySystemMessage(state);
     const continuityProbePolicyMessage = buildSilentContinuityProbeSystemMessage(state);
     return [
+      ...(typeof buildSecuritySystemPrompt === 'function'
+        ? [{ role: 'system', content: buildSecuritySystemPrompt() }]
+        : []),
       ...(dynamicPrompt ? [{ role: 'system', content: dynamicPrompt }] : []),
       ...(continuityMessage ? [continuityMessage] : []),
       ...(continuityProbePolicyMessage ? [continuityProbePolicyMessage] : []),

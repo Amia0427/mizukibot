@@ -1,6 +1,25 @@
 ﻿const fs = require('fs');
 const path = require('path');
 
+function listTestFiles(rootDir) {
+  const discovered = [];
+  const stack = [rootDir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const fullPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        continue;
+      }
+      if (entry.isFile() && entry.name.endsWith('.test.js')) {
+        discovered.push(fullPath);
+      }
+    }
+  }
+  return discovered.sort((a, b) => a.localeCompare(b));
+}
+
 const testFiles = [
   path.join(__dirname, '..', 'tests', 'config.test.js'),
   path.join(__dirname, '..', 'tests', 'configEnvFallback.test.js'),
@@ -16,6 +35,7 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'memoryV3StyleFacet.test.js'),
   path.join(__dirname, '..', 'tests', 'personaMemoryState.test.js'),
   path.join(__dirname, '..', 'tests', 'personaMemoryPersistNode.test.js'),
+  path.join(__dirname, '..', 'tests', 'localKnowledge.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryV3IdentityFacet.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryV3ContinuityFacet.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryV3PreferenceFacet.test.js'),
@@ -31,15 +51,23 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'messageVisualContext.test.js'),
   path.join(__dirname, '..', 'tests', 'messageAdminCommands.test.js'),
   path.join(__dirname, '..', 'tests', 'messageReplyRuntimeControl.test.js'),
+  path.join(__dirname, '..', 'tests', 'claudeAdminRouting.test.js'),
+  path.join(__dirname, '..', 'tests', 'claudeSessionRuntime.test.js'),
   path.join(__dirname, '..', 'tests', 'messageTelemetry.test.js'),
   path.join(__dirname, '..', 'tests', 'messageBackgroundTasks.test.js'),
   path.join(__dirname, '..', 'tests', 'directToolLoop.test.js'),
   path.join(__dirname, '..', 'tests', 'plannerV2Protocol.test.js'),
+  path.join(__dirname, '..', 'tests', 'promptCompiler.test.js'),
+  path.join(__dirname, '..', 'tests', 'promptSecurity.test.js'),
+  path.join(__dirname, '..', 'tests', 'promptStageContracts.test.js'),
+  path.join(__dirname, '..', 'tests', 'promptGoldenSnapshots.test.js'),
+  path.join(__dirname, '..', 'tests', 'subagentPromptSecurity.test.js'),
   path.join(__dirname, '..', 'tests', 'agentLoopV2.test.js'),
   path.join(__dirname, '..', 'tests', 'dispatchRuntimeBinding.test.js'),
   path.join(__dirname, '..', 'tests', 'persistNodeConfig.test.js'),
   path.join(__dirname, '..', 'tests', 'toolFailureDetection.test.js'),
   path.join(__dirname, '..', 'tests', 'toolCallMarkupRetry.test.js'),
+  path.join(__dirname, '..', 'tests', 'httpClientQqImageInlining.test.js'),
   path.join(__dirname, '..', 'tests', 'webFetchFallback.test.js'),
   path.join(__dirname, '..', 'tests', 'nativeSkills.test.js'),
   path.join(__dirname, '..', 'tests', 'nativeSummarizeStock.test.js'),
@@ -208,7 +236,11 @@ function clearProjectModuleCache() {
 
 async function runAllTests() {
   let failed = 0;
-  for (const file of testFiles.filter((candidate) => fs.existsSync(candidate))) {
+  const discoveredTestFiles = listTestFiles(path.join(__dirname, '..', 'tests'));
+  const runnableFiles = discoveredTestFiles.length > 0
+    ? discoveredTestFiles
+    : testFiles.filter((candidate) => fs.existsSync(candidate));
+  for (const file of runnableFiles) {
     const envSnapshot = { ...process.env };
     clearProjectModuleCache();
     try {

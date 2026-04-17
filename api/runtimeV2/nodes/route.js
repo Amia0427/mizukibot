@@ -13,6 +13,10 @@ function createRouteNode(deps = {}) {
     const mode = String(state.execution?.mode || '').trim() || normalizeMode(state.request);
     const events = [
       createEvent('node_start', { node: 'route', mode }),
+      createEvent('security_route_context', {
+        node: 'route',
+        securityLabels: Array.isArray(state.memory?.securityLabels) ? state.memory.securityLabels : []
+      }),
       createEvent('node_complete', { node: 'route', mode })
     ];
     return saveAndEmit({

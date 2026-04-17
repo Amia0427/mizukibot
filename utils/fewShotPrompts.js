@@ -79,6 +79,34 @@ function shouldUseExtraFewShotSlot(context = {}) {
     || HIGH_EMOTION_PATTERNS.some((pattern) => pattern.test(question));
 }
 
+function classifyEmotionalIntensity(context = {}) {
+  const question = normalizeText(context.question || '').toLowerCase();
+  if (!question) return 'low';
+  if (HIGH_EMOTION_KEYWORDS.some((needle) => question.includes(needle))) return 'high';
+  if (HIGH_EMOTION_PATTERNS.some((pattern) => pattern.test(question))) return 'high';
+  if (/(难受|失眠|委屈|崩溃|压力|好累|撑不住|烦死|很痛苦)/i.test(question)) return 'medium';
+  return 'low';
+}
+
+function scoreContinuitySignals(context = {}) {
+  const continuitySignals = context.continuitySignals && typeof context.continuitySignals === 'object'
+    ? context.continuitySignals
+    : {};
+  let score = 0;
+  if (continuitySignals.hasCarryOverTopic) score += 10;
+  if (continuitySignals.hasOpenLoop) score += 10;
+  if (continuitySignals.quoteAnchored) score += 6;
+  return score;
+}
+
+function scoreContextDensity(context = {}) {
+  const density = Number(context.contextDensity || 0) || 0;
+  if (density >= 1200) return -18;
+  if (density >= 800) return -12;
+  if (density >= 400) return -6;
+  return 0;
+}
+
 function resolveFewShotMaxExamples(context = {}, index = null) {
   const baseMaxExamples = Math.max(
     0,
@@ -86,9 +114,11 @@ function resolveFewShotMaxExamples(context = {}, index = null) {
   );
   if (baseMaxExamples <= 0) return 0;
 
-  const cappedBase = Math.min(baseMaxExamples, 2);
-  if (!shouldUseExtraFewShotSlot(context)) return cappedBase;
-  return Math.min(cappedBase + 1, 3);
+  const emotionalIntensity = classifyEmotionalIntensity(context);
+  const cappedBase = Math.min(baseMaxExamples, emotionalIntensity === 'high' ? 2 : 1);
+  if (!shouldUseExtraFewShotSlot(context) && emotionalIntensity !== 'medium') return cappedBase;
+  if ((Number(context.contextDensity || 0) || 0) > 1200) return Math.min(cappedBase, 1);
+  return Math.min(cappedBase + 1, 2);
 }
 
 function scoreKeywords(text, keywords = [], weight = 14) {
@@ -137,6 +167,12 @@ function scoreFewShotExample(example = {}, context = {}) {
   score += scoreKeywords(text, match.keywords_any, 14);
   score += scoreKeywords(text, match.keywords_all, 10);
   score += scoreRegexes(rawQuestion, match.regex_any, 18);
+  score += scoreContinuitySignals(context);
+  score += scoreContextDensity(context);
+
+  const emotion = classifyEmotionalIntensity(context);
+  if (emotion === 'high') score += 12;
+  else if (emotion === 'medium') score += 5;
 
   const keywordsAll = Array.isArray(match.keywords_all)
     ? match.keywords_all.map((item) => normalizeText(item).toLowerCase()).filter(Boolean)

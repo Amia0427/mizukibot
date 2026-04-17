@@ -295,8 +295,8 @@ const MEMORY_PROCESS_HOOK_KEY = '__mizuki_memory_flush_hooks_registered__';
 if (!process[MEMORY_PROCESS_HOOK_KEY]) {
   process[MEMORY_PROCESS_HOOK_KEY] = true;
   process.on('exit', flushAllSync);
-  process.on('SIGINT', flushAllSync);
-  process.on('SIGTERM', flushAllSync);
+  if (!process.listeners('SIGINT').includes(flushAllSync)) process.on('SIGINT', flushAllSync);
+  if (!process.listeners('SIGTERM').includes(flushAllSync)) process.on('SIGTERM', flushAllSync);
 }
 
 /**

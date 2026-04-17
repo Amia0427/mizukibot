@@ -2,6 +2,7 @@ const axios = require('axios');
 const config = require('../../config');
 const { buildForwardPrompt } = require('./commandBackend');
 const { getHapiControlRuntime } = require('../../utils/hapiControlRuntime');
+const { detectSensitiveOutput } = require('../../utils/promptSecurity');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -340,6 +341,9 @@ function createHapiBridgeCall({ question, sessionId, customPrompt = null, imageU
       const finalText = chooseFinalText(events);
       if (!finalText) {
         throw new Error('hapi returned empty reply');
+      }
+      if (detectSensitiveOutput(finalText).blocked) {
+        throw new Error('hapi returned sensitive output');
       }
       controlRuntime.markSessionEvent(sessionId, {
         status: 'idle',

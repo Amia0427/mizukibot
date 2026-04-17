@@ -8,12 +8,17 @@ function createFinalValidateNode(deps = {}) {
   const classifyReplyFailure = typeof deps.classifyReplyFailure === 'function'
     ? deps.classifyReplyFailure
     : (() => ({ type: 'none' }));
+  const protectFinalOutput = typeof deps.protectFinalOutput === 'function'
+    ? deps.protectFinalOutput
+    : ((text) => ({ text, blocked: false, reason: '', matches: [] }));
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
 
   return async function finalValidateNode(state) {
-    const finalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
+    const rawFinalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
+    const protectedReply = protectFinalOutput(rawFinalReply);
+    const finalReply = String(protectedReply.text || '').trim();
     const failure = finalReply && isReplyFailure(finalReply, { emptyIsFailure: true })
       ? classifyReplyFailure(finalReply)
       : null;
@@ -23,6 +28,12 @@ function createFinalValidateNode(deps = {}) {
         node: 'final_validate',
         ok: !failure,
         type: failure?.type || ''
+      }),
+      createEvent('output_redaction', {
+        node: 'final_validate',
+        blocked: Boolean(protectedReply.blocked),
+        reason: String(protectedReply.reason || '').trim(),
+        matches: Array.isArray(protectedReply.matches) ? protectedReply.matches : []
       }),
       createEvent('final_output', {
         text: finalReply,
@@ -36,6 +47,16 @@ function createFinalValidateNode(deps = {}) {
         ...state.output,
         finalReply,
         failure
+      },
+      memory: {
+        ...state.memory,
+        redactionEvents: Boolean(protectedReply.blocked)
+          ? normalizeArray(state.memory?.redactionEvents).concat([{
+              node: 'final_validate',
+              reason: String(protectedReply.reason || '').trim(),
+              matches: Array.isArray(protectedReply.matches) ? protectedReply.matches : []
+            }])
+          : normalizeArray(state.memory?.redactionEvents)
       },
       execution: {
         ...state.execution,

@@ -1,341 +1,398 @@
 # MizukiBot
 
-面向 QQ 群聊场景的 Node.js 多阶段 Agent。当前主干不是单一聊天调用，而是完整的运行时系统：
+基于 **Node.js + LangGraph** 的 QQ 机器人运行时。当前主干已经不是“收到消息后直接调一次模型”的简单聊天机器人，而是一套带有 **消息接入、结构化路由、执行规划、工具调度、记忆检索、被动群感知、主动任务、子代理桥接、回复润色与持久化** 的多阶段系统。
 
-`NapCat/OneBot 群消息入口 -> 规则+AI 混合路由 -> 执行策略解析 -> LangGraph V2 主 Agent -> 工具/记忆/子代理/润色 -> 持久化与主动触发`
+当前主链可以概括为：
 
-本文基于当前仓库代码主干整理，目标是说明已经实现的机制、模块职责、调用链和主要边界。
+`NapCat / OneBot WebSocket -> 消息入口协调层 -> canonical route contract -> route execution plan -> LangGraph V2 runtime -> tool/memory/subagent/humanize -> persist/background jobs`
 
-## 1. 当前架构总览
+本文以当前仓库代码为准，重点说明：
 
-当前系统由 6 层组成：
+- 真实入口和运行链路
+- 当前仍在生效的核心模块
+- 各层职责边界
+- 开发、排障和接手时应该先看什么
 
-1. 接入层  
-   `index.js` 负责配置加载、单实例锁、Web 服务、NapCat WebSocket 连接、断线重连、定时任务启动。
+---
 
-2. 消息入口层  
-   `core/messageHandler.js` 负责群消息过滤、去重、@bot 判断、被动群感知、正式路由、结果发送。
+## 1. 先说结论：当前真正生效的主链
 
-3. 路由与执行策略层  
-   `core/router.js`、`core/routeSchema.js`、`core/routeProfiles.js`、`core/routeExecution.js` 把消息转换成结构化 route 和 executor 计划。
+### 1.1 运行时只有 V2
 
-4. 主 Agent 运行时  
-   `api/agentGraphV2.js` 是当前唯一实际生效的 LangGraph 运行时，负责 direct reply、tool plan、验证、修复、合成答复、持久化。
+当前对外仍保留：
 
-5. 工具与辅助 Agent 层  
-   包括本地工具、global tools、memory CLI、OpenClaw/命令子代理、humanizer agent、Minecraft agent。
+- `api/agentGraph.js`
+- `api/agentGraphFacade.js`
+- `api/agentGraphV2.js`
 
-6. 记忆与后台机制层  
-   包括长期画像、短期会话桥接、向量检索、daily journal、被动群感知、主动触发调度。
+但**真正执行逻辑**已经收敛到：
 
-## 2. 关键入口文件
+- `api/runtimeV2/host.js`
+
+也就是说：
+
+- `api/agentGraph.js` 是稳定外观层
+- `api/agentGraphFacade.js` 负责把旧入口统一转发到 V2
+- `api/agentGraphV2.js` 只是一个薄代理
+- `api/runtimeV2/host.js` 才是当前 LangGraph V2 主运行时
+
+`LANGGRAPH_RUNTIME_VERSION` 现在只是兼容字段，运行时实际上始终走 V2。
+
+### 1.2 顶层消息处理不是单文件硬写，而是协调多个子模块
+
+当前入口协调器是：
+
+- `core/messageHandler.js`
+
+但它本身已经被拆成多个职责明确的模块，例如：
+
+- `core/messageIngress.js`
+- `core/messageRouteFlow.js`
+- `core/messageDispatchCoordinator.js`
+- `core/messageReplyRuntime.js`
+- `core/messageBackgroundTasks.js`
+- `core/messageAdminCommands.js`
+- `core/messagePassiveFlow.js`
+- `core/messageTelemetry.js`
+
+所以理解系统时，不要把 `messageHandler.js` 当成一个“所有逻辑都堆在里面”的老式 handler；它现在更像是总协调层。
+
+---
+
+## 2. 项目整体结构
+
+## 2.1 启动与基础设施
 
 - `index.js`  
-  启动入口，创建单实例锁，连接 NapCat，启动 Web 服务、消息处理器、tick engine。
+  进程入口。负责：配置校验、单实例锁、Web 服务、NapCat WebSocket 连接、重连、tick engine、scheduler、post-reply worker 启动。
 
 - `config.js`  
-  加载 `.env`，校验必需配置，组装 persona prompt 与运行时能力开关。
+  加载 `.env` / 环境变量，校验必要配置，确定数据目录、prompt 资产目录、模型参数、记忆开关、调度开关、子代理后端等。
 
-- `core/messageHandler.js`  
-  当前主消息入口，决定消息如何进入被动感知或正式执行链。
+- `web/`  
+  本地 Web 服务与管理面能力。
 
-- `core/router.js`  
-  负责消息意图识别，采用“规则兜底 + AI Router 修正”的混合模式。
+## 2.2 核心消息链
 
-- `core/routeExecution.js`  
-  负责把 route 转成 executor、allowed tools、plan steps、stream policy。
+- `core/messageHandler.js`
+- `core/messageIngress.js`
+- `core/router.js`
+- `core/routeSchema.js`
+- `core/routeExecution.js`
+- `core/messageRouteFlow.js`
+- `core/messageDispatchCoordinator.js`
 
-- `api/agentGraph.js`  
-  稳定外观层，实际全部转发到 `api/agentGraphV2.js`。
+## 2.3 主 Agent 运行时
 
-- `api/agentGraphV2.js`  
-  当前主 Agent 运行时实现。
+- `api/runtimeV2/host.js`
+- `api/runtimeV2/state.js`
+- `api/runtimeV2/nodes/*`
+- `api/runtimeV2/planning/service.js`
+- `api/runtimeV2/context/service.js`
+- `api/runtimeV2/model/service.js`
+- `api/runtimeV2/capabilities/scheduler.js`
 
-## 3. 启动与运行时机制
+## 2.4 工具、技能与子代理
 
-### 3.1 单实例
+- `api/toolRegistry.js`
+- `api/toolExecutors.js`
+- `api/toolSchemas.js`
+- `utils/toolPolicy.js`
+- `utils/localToolAccess.js`
+- `api/subagentExecutor.js`
+- `api/openclawExecutor.js`
+- `core/messageFullSubagent.js`
 
-`index.js` 使用 `.mizukibot.lock` 防止同一目录启动多个实例竞争 OneBot 连接。
+## 2.5 记忆与本地知识
 
-已实现：
+- `utils/memory.js`
+- `utils/shortTermMemory.js`
+- `utils/shortTermBridgeMemory.js`
+- `utils/memoryContext.js`
+- `utils/memoryCli.js`
+- `utils/localKnowledge.js`
+- `api/localNotebook.js`
+- `utils/dailyJournal.js`
+- `api/memoryExtraction.js`
 
-- 进程存活检测
-- 过期锁文件替换
-- `SIGINT` / `SIGTERM` 时清理锁文件
-- 关闭时顺带 shutdown Minecraft agent
+## 2.6 主动行为与后台任务
 
-### 3.2 NapCat 接入
+- `core/tickEngine.js`
+- `core/proactiveGreetingFlow.js`
+- `utils/postReplyWorkerRuntime.js`
+- `utils/postReplyJobQueue.js`
+- `core/schedulerRuntime.js`
 
-当前通过 `NAPCAT_WS_URL` 连接 NapCat / OneBot WebSocket。
+---
 
-已实现：
+## 3. 启动链路
 
-- `Authorization: Bearer <token>` 鉴权
-- 连接失败日志
-- 关闭后退避重连
-- 统一 `safeSend/sendWithRetry`
+当前进程从 `index.js` 启动，核心步骤如下：
 
-### 3.3 定时机制
+1. `config.validateRequiredConfig()` 校验必要环境变量
+2. 创建 `.mizukibot.lock`，防止重复启动抢占 OneBot 连接
+3. 启动本地 Web 服务
+4. 初始化 meme manager
+5. 预热工具注册表
+6. 连接 `NAPCAT_WS_URL`
+7. WebSocket open 后启动：
+   - `tickEngine`
+   - `schedulerRuntime`
+   - 可选内联 `post-reply worker`
+8. 收到 OneBot 消息后交给 `createMessageHandler(...).handleIncomingMessage()`
 
-当前有两类定时动作：
+### 3.1 单实例机制
 
-- 每分钟检查早安/晚安问候
-- 后台 tick engine 做主动消息和日报汇总
+当前已实现：
 
-## 4. 消息主链
+- 锁文件抢占
+- 旧 PID 存活检测
+- stale lock 替换
+- `SIGINT` / `SIGTERM` 清理
+- 退出时连带 shutdown Minecraft agent
 
-主链入口在 `core/messageHandler.js` 的 `handleIncomingMessage()`。
+### 3.2 NapCat 接入特征
 
-### 4.1 处理顺序
+当前通过 WebSocket 接 NapCat / OneBot，支持：
 
-1. 处理 `notice` 事件，必要时清理失效群绑定
-2. 只接受群消息
-3. 用 `messageDeduper` 去重
-4. 忽略 bot 自己发的消息
-5. 判断是否 `@bot`
-6. 非 `@bot` 时尝试 `passiveGroupAwareness`
-7. `@bot` 时进入正式路由与执行链
-8. 统一归一化回复并发送回 QQ
+- Bearer token 鉴权
+- 断线退避重连
+- 统一 `safeSend` / `sendWithRetry`
+- NapCat action client 与普通消息分流
 
-### 4.2 已实现的入口能力
+---
 
-- OneBot 事件去重
-- bot 自消息跳过，避免自触发循环
-- QQ 富消息占位解析
-- 长回复自动分片
-- 流式发送节流与分段控制
-- 回复失败文本识别与用户态降级
+## 4. 消息入口：先做接入判断，再决定走哪条链
 
-## 5. 被动群感知机制
+主入口是 `core/messageHandler.js`。
 
-文件：`core/passiveGroupAwareness.js`
+但真正的入站前处理已经拆到 `core/messageIngress.js`，包括：
 
-这是一条独立于 `@bot` 的被动感知 agent 分支，不是简单关键词触发。
+- `notice` 事件处理
+- 非消息事件跳过
+- 群聊 / 私聊识别
+- bot 自己发出的消息跳过
+- 构建统一的 `InboundMessageContext`
 
-### 5.1 本地预判
+### 4.1 当前不仅支持群聊，也支持受限私聊
 
-每条非 `@bot` 群消息都会进入本地分析：
+仓库定位仍然是 QQ 群聊机器人，但当前代码不再是“只处理群消息”。
 
-- 文本清洗
-- 噪音消息过滤
-- bot 相关话题识别
-- question signal 检测
-- bot presence cue 检测
-- 最近对话窗口构建
-- 快速双人对话/多人快聊识别
-- 当前消息 addressee 判断
-- reply type 分类
+现状是：
 
-### 5.2 本地 gating
+- `message_type=group` 正常走主链
+- `message_type=private` 可以进入链路
+- 私聊会额外经过白名单 / 特权用户 / 能力限制判断
+- 私聊下很多写动作或群专属能力会被拒绝或降级
 
-会阻止以下情况插话：
+所以 README 不应该再写成“系统只接受群消息”。更准确的说法是：
 
-- 快速双人连续互聊
-- 多人高速闲聊且没有 bot 话题连续性
-- 单人连续刷屏但没有足够 bot signal
-- 低分消息
-- 群级 cooldown 未到
-- 全局 cooldown 未到
-- 每小时回复次数超限
+> 以群聊为主，私聊为受限接入模式。
 
-### 5.3 两阶段模型调用
+### 4.2 消息入口层现在负责什么
 
-通过本地 gating 后，才会调用两阶段模型：
+当前入口层大致负责：
 
-1. decision model  
-   只输出 JSON，判断 `should_reply/confidence/reason`
+- 事件去重
+- 并发控制
+- `@bot` 识别
+- 连续消息 / 指向性上下文整理
+- reply / quote / 图片上下文补全
+- 被动群感知入口
+- 正式 route flow 入口
+- telemetry / side effects / reply send 收口
 
-2. reply model  
-   生成极短、自然、不主导话题的插话
+---
 
-### 5.4 当前特征
-
-- 明确区分“是否该回”和“回什么”
-- reply 文本截断到短句
-- 支持群级与全局回复节流
-- 会把 bot 自己的插话再写回上下文窗口
-
-## 6. 路由机制
+## 5. 路由系统：先产出 canonical route contract，再由执行层翻译
 
 核心文件：
 
 - `core/router.js`
 - `core/routeSchema.js`
-- `core/routeProfiles.js`
-- `core/routeExecution.js`
 - `core/intentAI.js`
+- `core/routeExecution.js`
 
-### 6.1 顶层 route 类型
+## 5.1 当前顶层 route 只有 4 个
 
-系统固定使用以下顶层 route：
+当前 canonical top route type 是：
 
-- `chat`
-- `lookup`
-- `transform`
-- `plan`
-- `act`
-- `admin`
-- `refuse`
 - `ignore`
-
-### 6.2 route 结构
-
-每个 route 不只是分类，还会携带结构化意图：
-
-- `intent.risk`
-- `intent.toolNeed`
-- `intent.executionMode`
-- `intent.needsPlanning`
-- `intent.needsMemory`
-
-以及 facet：
-
-- `facets.modality`
-- `facets.sourceScope`
-- `facets.domain`
-- `facets.outputKind`
-- `facets.freshness`
-
-### 6.3 路由识别方式
-
-当前是“规则兜底 + AI Router 修正”。
-
-规则层已经覆盖：
-
-- 危险/恶意请求 -> `refuse`
-- 管理命令 -> `admin`
-- 时间直答 -> `lookup + time`
-- 自包含计划 -> `plan/general-direct`
-- 自包含总结/改写/翻译 -> `transform/self-contained-direct`
-- 图片问答/图片总结
-- notebook 查询
-- finance / weather / location / search / summarize / research / productivity 等场景
-
-AI Router 在 `ENABLE_AI_ROUTER=true` 时可进一步修正 route，但以下强规则不会轻易被覆盖：
-
-- `admin`
 - `refuse`
-- 图片类强判断
-- direct route 的不变式约束
+- `admin`
+- `direct_chat`
 
-### 6.4 canonical policy
+这和旧 README 里把顶层路由写成 `chat / lookup / transform / plan / act / ...` 不同。
 
-顶层 route 会继续映射到 canonical policy，例如：
+现在的做法是：
 
-- `lookup/notebook-answer`
-- `lookup/weather-live`
-- `lookup/finance-live`
-- `lookup/location-web`
-- `lookup/web-answer`
-- `transform/notebook-summary`
-- `transform/vision-summary`
-- `transform/self-contained-direct`
-- `transform/web-summary`
-- `transform/quiz`
-- `plan/general-direct`
-- `plan/general`
-- `plan/research`
-- `act/default`
+- 顶层先只区分是否忽略 / 拒绝 / 管理 / 直接对话
+- 再通过 `facets + intent + meta` 精细表达“这是 notebook 问答、网页总结、行动指导、图片问答、时间查询、研究规划”等场景
+- 最后由 `routeExecution` 翻译成真正执行计划
 
-## 7. 执行策略机制
+## 5.2 canonical route contract 长什么样
+
+`core/routeSchema.js` 负责把 route 规范成统一合同，核心字段包括：
+
+- `topRouteType`
+- `intent`
+  - `risk`
+  - `toolNeed`
+  - `executionMode`
+  - `needsPlanning`
+  - `needsMemory`
+- `facets`
+  - `modality`
+  - `sourceScope`
+  - `domain`
+  - `outputKind`
+  - `freshness`
+- `chatMode`
+- `toolIntent`
+- `responseIntent`
+
+这一步的意义是：
+
+- router 只负责“理解请求是什么”
+- execution 层才负责“接下来怎么执行”
+- profile / policy / planner 不再各自偷偷定义自己的路由真相
+
+## 5.3 路由识别方式
+
+`core/router.js` 当前使用：
+
+- 规则优先
+- 必要时 AI router 细化
+
+已经显式覆盖的高优先级场景包括：
+
+- 管理命令
+- 明显危险 / 滥用 / 骚扰请求
+- 图片问答 / 图片总结
+- 时间直答
+- notebook / 知识库相关请求
+- 搜索 / 总结 / 研究 / 计划 / action guidance 等意图
+
+安全边界相关模式也在 `router.js` 内被硬编码保护，例如：
+
+- 恶意构造物
+- 钓鱼 / 木马 / 爆破 / 绕过 / 盗取凭证
+- 刷屏 / 骚扰 / flood / spam
+
+AI router 在 `ENABLE_AI_ROUTER=true` 时可以参与 refinement，但不会轻易覆盖这些硬边界。
+
+---
+
+## 6. 执行策略层：route 不是直接拿来调用模型
 
 文件：`core/routeExecution.js`
 
-routeExecution 负责把 route 进一步变成真实执行计划。
+这层的职责不是继续分类，而是把 canonical route 翻译成**可执行计划**。
 
-### 7.1 产出内容
+## 6.1 当前 executor 集合
 
-每次 route 解析后会得到：
-
-- `executor`
-- `policyKey`
-- `capability`
-- `toolExecutionTarget`
-- `allowTools`
-- `allowedTools`
-- `allowGlobalTools`
-- `allowedGlobalTools`
-- `allowStream`
-- `planId`
-- `planSteps`
-
-### 7.2 executor 类型
-
-当前 executor 主要有：
+当前导出的 executor 集合是：
 
 - `ignore`
 - `refuse`
 - `admin`
 - `direct`
-- `chat`
-- `local_tools`
-- `subagent_tools`
-- `unavailable`
+- `background_direct`
+- `full_subagent`
 
-### 7.3 重要判断
+这说明当前执行层已经不再用旧式的 `chat / local_tools / subagent_tools / unavailable` 作为最终 executor 枚举。
 
-系统会区分：
+## 6.2 routeExecution 会产出什么
 
-- 是否 direct executor
-- 是否 tool route
-- 是否优先走本地工具
-- 是否优先走子代理工具
-- 当本地工具不可用时是否转为 unavailable
-- 是否还能只靠 global tools 保底
+当前会综合生成：
 
-当前不是“route = tool 就直接让模型乱调工具”，而是先明确允许哪些工具、走哪个执行目标。
+- `executor`
+- `topRouteType`
+- `policyKey`
+- `routeDebugKey`
+- `allowTools`
+- `allowedTools`
+- `allowedToolBuckets`
+- `allowStream`
+- `needsBackground`
+- `unavailableReason`
 
-## 8. messageHandler 中的正式分发链
+也就是说，系统并不是：
 
-### 8.1 `@bot` 后的处理
+> 判断出“像是查资料” -> 直接把所有工具扔给模型
 
-`@bot` 消息进入正式链后：
+而是：
 
-1. `detectIntentHybrid()` 生成 route
-2. `resolveRouteExecution()` 生成 execution plan
-3. 根据 executor 分别处理：
-   - `ignore` 直接结束
-   - `refuse` 发送拒绝文案
-   - `admin` 发送管理命令结果
-   - `direct/chat` 走主 Agent
-   - `local_tools/subagent_tools` 走工具任务链
+1. 先定义 route contract
+2. 再映射 policy key
+3. 再收束 allowed tools
+4. 再决定是否允许流式
+5. 再决定是否必须 background / subagent / direct
 
-### 8.2 工具路由
+## 6.3 policyKey 比旧顶层分类更重要
 
-工具路由会构造：
+虽然顶层 route 只剩 4 个，但 execution 层会继续映射成更具体的策略，例如：
 
-- routePrompt
-- bridge guidance
-- sessionChannel
-- sessionChatId
-- allowedTools
-- allowedGlobalTools
-- routeMeta.planId / planSteps
+- `chat/default`
+- `lookup/notebook-answer`
+- `lookup/weather-live`
+- `lookup/finance-live`
+- `lookup/location-web`
+- `transform/notebook-summary`
+- `transform/web-summary`
+- `transform/vision-summary`
+- `plan/general-direct`
+- `plan/general`
+- `plan/research`
+- `act/default`
+- `admin/full`
 
-然后根据目标执行：
+所以“lookup/transform/plan/act”现在更适合被理解成**policy 维度**，而不是顶层 route type。
 
-- 本地工具链：`askToolTaskLocally()`
-- 子代理桥接：`askToolTaskWithSubagentReview()`
+---
 
-### 8.3 普通聊天路由
+## 7. 正式消息链：由 route flow 和 dispatch coordinator 驱动
 
-普通聊天路由会进入 `askAIByGraph()`，支持：
+## 7.1 route flow
 
-- stream route prompt
-- soft clarify chat
-- QQ 富回复 prompt
-- direct policy prompt
-- global tools
+`core/messageRouteFlow.js` 负责正式的请求分流与路由后动作。
 
-## 9. LangGraph V2 主 Agent
+它处理的内容包括：
 
-文件：`api/agentGraphV2.js`
+- route 解析
+- admin command 分流
+- `/full` 管理链
+- 背景任务控制
+- QQ 空间 / 定时任务相关动作
+- direct route prompt 拼装
+- 工具路由与 direct chat 路由的不同分支
 
-当前仓库里真正运行的是 V2。`agentGraph.js` 和 `agentGraphFacade.js` 只是稳定入口外壳。
+## 7.2 dispatch coordinator
 
-### 9.1 图状态切片
+`core/messageDispatchCoordinator.js` 负责把已经确定的 `routeExecutionPlan` 真正落地：
 
-V2 显式维护以下状态切片：
+- 生成 route prompt bundle
+- 拼 perception prompt / safety prompt / streaming prompt / QQ rich reply prompt
+- direct chat 走 `askAIDispatch(...)`
+- 工具型请求走本地工具执行或后台工具任务
+- unavailable 场景统一给用户态回复
+- 跟踪是否已通过 streaming 发出内容
+
+这层很重要，因为它是“路由结果”到“真实执行行为”的最后一跳。
+
+---
+
+## 8. LangGraph V2：当前真正的主 Agent 运行时
+
+核心文件：
+
+- `api/runtimeV2/host.js`
+- `api/runtimeV2/state.js`
+- `api/runtimeV2/nodes/*`
+
+## 8.1 图状态切片
+
+`api/runtimeV2/state.js` 定义了当前运行时状态：
 
 - `request`
 - `thread`
@@ -346,215 +403,230 @@ V2 显式维护以下状态切片：
 - `messages`
 - `events`
 
-### 9.2 固定图结构
+这是当前主链的重要特征：
 
-当前图拓扑固定为：
+> 它是显式状态机，不是“在一个函数里边调模型边拼变量”。
+
+## 8.2 固定图拓扑
+
+`api/runtimeV2/host.js` 中当前固定图拓扑为：
 
 `prepare -> route -> direct_reply | planner -> dispatch -> validate -> repair_or_continue -> draft_reply -> humanize -> final_validate -> persist`
 
-### 9.3 各节点职责
+说明：
 
-#### `prepare`
+- 非工具型 / review / image / proactive / minecraft 请求可直接走 `direct_reply`
+- 需要规划时转到 `planner`
+- 工具执行后仍要经过 `validate / repair / synthesize / humanize / persist`
 
-- checkpoint resume
-- 恢复短期桥接记忆
-- 需要时做短期历史压缩
-- 构建 dynamic prompt
-- 决定是否暴露 memory_cli
-- 注入 global tool evidence
-- 记录 memory scope
+## 8.3 各节点职责
 
-#### `route`
+### `prepare`
 
-- 计算当前运行模式
-- 模式包括：
-  - `chat`
-  - `tool_plan`
-  - `review`
-  - `image`
-  - `proactive`
-  - `minecraft`
+负责：
 
-#### `direct_reply`
+- checkpoint 恢复
+- short-term bridge 恢复 / rehydrate
+- 短期历史压缩
+- dynamic prompt 构建
+- memory scope 记录
+- global tool preflight
+- continuity state 构建
+- allowed tools 与 memory_cli turn 状态初始化
 
-- chat/image/review/proactive/minecraft 等直接链路生成答案
-- 支持主模型 fallback
-- 支持 direct streaming
-- 支持 direct memory_cli turn
+### `route`
 
-#### `planner`
+负责确定当前运行模式，例如：
 
-- 把 route plan step 或 allowed tools 转成执行步骤
-- 规范化 step id / kind / tool / inputs / successCriteria
+- `chat`
+- `tool_plan`
+- `review`
+- `image`
+- `proactive`
+- `minecraft`
 
-#### `dispatch`
+### `direct_reply`
 
-- 真正执行工具步骤
-- 记录 toolCalls / toolResults / evidence
-- 跟踪 memory_cli turn state
-- 区分 side-effect step，避免修复时重复执行危险动作
+负责无需完整 planner-dispatch 回路的直接生成：
 
-#### `validate`
+- 普通聊天
+- 图片链路
+- review 模式
+- proactive 模式
+- Minecraft 模式
 
-- 校验 plan 是否完成
-- 判断缺失项和是否需要 repair
+并支持：
 
-#### `repair_or_continue`
+- direct stream
+- fallback
+- direct memory_cli turn
 
-- 仅重开失败步骤
-- 已完成且带副作用的步骤不会回滚重做
+### `planner`
 
-#### `draft_reply`
+负责把 route 提供的信息转成结构化 plan step：
 
-- 根据最终 plan 与 exec logs 合成答案草稿
+- 标准化 step id
+- kind / tool / inputs
+- success criteria
+- dependsOn / parallelGroup / sideEffect
 
-#### `humanize`
+### `dispatch`
 
-- 可选走 humanizer 子 agent 去 AI 腔
-- 某些 policy 或 review route 会跳过 humanizer
+负责真正执行工具步骤，并记录：
 
-#### `final_validate`
+- `toolCalls`
+- `toolResults`
+- `evidence`
+- `runtimeBinding`
+- `memoryCliTurn` 演进
 
-- 检查最终答案是否是 provider/tool loop/generic failure
+同时会特别保护 side-effect step，避免 repair 时重复执行危险动作。
 
-#### `persist`
+### `validate`
 
-- 写短期记忆
-- 写 daily journal
-- 异步触发 memory extraction
+检查计划是否完成、证据是否足够、是否需要 repair。
 
-### 9.4 当前运行时特征
+### `repair_or_continue`
 
-- 支持 checkpoint 恢复
-- 支持事件流
-- 支持 plan round 验证与 repair
-- 输出链固定为 `draft -> humanize -> validate -> persist`
-- streaming 与 non-streaming 最终都收敛到统一 final reply
+只重开必要步骤，不会粗暴重跑所有内容。
 
-## 10. 模型调用与 fallback
+### `draft_reply`
+
+根据 final plan 与 exec logs 组织回复草稿。
+
+### `humanize`
+
+可选调用 humanizer 子代理，去除明显 AI 腔，同时保留事实和执行证据。
+
+### `final_validate`
+
+拦截 provider failure / tool loop / generic failure 等不合格最终输出。
+
+### `persist`
+
+负责：
+
+- 短期记忆写入
+- daily journal 写入
+- 异步 memory extraction
+- 持久化收尾
+
+---
+
+## 9. 规划与执行：当前是结构化 planner，不是随手调工具
 
 文件：
 
-- `api/graphModelIO.js`
-- `utils/mainModelFallback.js`
-- `utils/modelProvider.js`
-- `utils/modelCompat.js`
+- `api/runtimeV2/planning/service.js`
+- `api/runtimeV2/capabilities/scheduler.js`
 
-已实现：
+当前 planner 负责把请求翻成结构化执行图，步骤具备：
 
-- 主模型配置解析
-- main model failure tracking
-- fallback 主模型自动切换
-- tool schema 校验错误时自动降级为无 tool schema 请求
-- streaming partial text 回收
-- provider auth/block/tool loop/generic failure 分类
+- `id`
+- `tool`
+- `kind`
+- `inputs`
+- `dependsOn`
+- `parallelGroup`
+- `sideEffect`
+- `evidenceRequirement`
+- `repairPolicy`
+- `runtimeBinding`
 
-## 11. Dynamic Prompt 机制
+这意味着系统的工具执行不是自由散弹式，而是：
 
-文件：
+- 有步骤图
+- 有证据要求
+- 有并行组
+- 有修复策略
+- 有副作用保护
 
-- `api/graphPrompting.js`
-- `utils/runtimePrompts.js`
-- `utils/routePromptPolicy.js`
-- `prompts/`
+在 direct chat 场景中，planner single authority 也已经进入主链：当启用后，某些工具型 direct_chat 请求必须先经过 planner 才能安全执行。
 
-当前 prompt 不是单文件拼死写，而是模块化资产：
+---
 
-- persona prompt 由 `prompt-manifest.json` + persona section 组装
-- runtime prompt 会按 route/policy 注入
-- 支持：
-  - `bridge-guidance`
-  - `direct-time`
-  - `direct-plan`
-  - `direct-transform`
-  - `soft-clarify-chat`
-  - `review-system`
-  - `review-route`
-  - `streaming-segmentation`
-  - `qq-rich-reply`
-
-## 12. 工具系统
+## 10. Prompt 系统：当前已经是“编译式 prompt 资产链”
 
 核心文件：
 
-- `api/toolSchemas.js`
-- `api/toolExecutors.js`
-- `api/toolRegistry.js`
-- `utils/toolPolicy.js`
-- `utils/localToolAccess.js`
+- `config.js`
+- `utils/promptManifest.js`
+- `utils/promptCompiler.js`
+- `utils/stagePromptContracts.js`
+- `utils/runtimePrompts.js`
+- `utils/routePromptPolicy.js`
+- `api/runtimeV2/context/service.js`
+- `prompts/`
 
-### 12.1 当前工具分层
+## 10.1 persona prompt 不再是手写大字符串拼接
 
-当前工具可以分成 4 类：
+当前优先从：
 
-1. 基础本地工具  
-   如 `web_search`、`get_current_time`、`getWeather`、`search_nearby_places`
+- `prompts/prompt-manifest.json`
 
-2. notebook / memory 工具  
-   如 `notebook_search`、`notebook_list_docs`、`notebook_add_document`、`memory_cli`
+读取 section 定义，再装配 `prompts/persona/*` 资产。
 
-3. skills/脚本工具  
-   如 summarize、weather、youtube transcript、stock analysis、research/study/ppt 等 skill 包装器
+manifest 支持：
 
-4. 特殊 agent 工具  
-   如 Minecraft agent 相关工具
+- `stage`
+- `priority`
+- `budget_tokens`
+- `conflict_tags`
+- `required_variables`
+- `include_in_system_prompt`
 
-### 12.2 工具执行器
+## 10.2 promptCompiler 做什么
 
-`api/toolExecutors.js` 已经接通大量 executor，而不是空 schema：
+`utils/promptCompiler.js` 会把 prompt block 进行：
 
-- Web/search/weather/location
-- notebook 系列
-- memory_cli
-- summarize / weather / youtube / stock / ontology / image generate 等 skill
-- assistant / research / study 系列结构化生成工具
-- Minecraft connect/status/move/follow/chat 等工具
+- stage 过滤
+- appliesWhen 过滤
+- priority 排序
+- conflict tag 冲突裁剪
+- budget trimming
+- snapshot 生成
 
-### 12.3 工具权限收束
+也就是说，当前 prompt 系统的核心不是“有哪些 txt 文件”，而是：
 
-`utils/toolPolicy.js` 已实现参数正规化和边界保护：
+> 这些 prompt 资产如何在不同 stage 下被编译成最终 system messages。
 
-- notebook user scope 不能越权到别的用户
-- notebook 路径必须留在 notebook root 内
-- summarize 本地文件必须留在 `DATA_DIR`
-- image 输出路径必须落在安全目录
-- memory_cli 命令长度受限
-- web_search query 长度受限
-- weather/location 字段过滤危险字符
+## 10.3 当前存在明确 stage contract
 
-## 13. Global Tool Runtime
+`utils/stagePromptContracts.js` 明确区分：
 
-文件：`api/globalToolRuntime.js`
+- main stage
+- review stage
+- planner stage
+- router stage
 
-这不是普通的工具调用，而是一个独立的“全局工具规划器”。
+这些 stage 不共享同一份人格合同：
 
-### 13.1 当前 global tools
+- main stage 使用完整 persona
+- review / planner / router stage 会故意避免直接继承完整 persona 口吻
+- review 阶段更强调证据保真和不新增事实
+- planner 阶段更强调任务判断与工具规划
 
-当前只允许以下全局工具：
+## 10.4 runtime prompt 模板
 
-- `memory_cli`
-- `web_search`
-- `get_current_time`
-- `skill_weather`
+`utils/runtimePrompts.js` 当前内置 / 装载的模板包括：
 
-### 13.2 工作方式
+- `tool-guidance`
+- `bridge-guidance`
+- `direct-chat-planner`
+- `streaming-segmentation`
+- `qq-rich-reply`
+- `llm-perception`
+- `soft-clarify-chat`
+- `review-system`
+- `review-route`
+- `review-payload`
+- `meme-emotion-selector`
 
-global tool runtime 会：
+README 应把这套机制理解为“运行时可组合 prompt 模板”，而不是只说“系统 prompt 在 prompts 目录里”。
 
-1. 根据当前 route 和 allowlist 构建 planner prompt
-2. 让模型先判断需不需要调用 global tools
-3. 执行少量受限工具调用
-4. 把结果整理成 evidence
-5. 再注入主 reply 链
+---
 
-### 13.3 当前特点
-
-- 只在允许的 route 中开放
-- `memory_cli` 有 follow-up open 模式
-- 每回合工具调用数受限
-- evidence 会截断、格式化
-
-## 14. 记忆系统
+## 11. 记忆系统：现在是分层记忆 + 本地知识融合
 
 核心文件：
 
@@ -562,286 +634,412 @@ global tool runtime 会：
 - `utils/shortTermMemory.js`
 - `utils/shortTermBridgeMemory.js`
 - `utils/memoryContext.js`
-- `utils/vectorMemory.js`
-- `utils/taskMemory.js`
-- `utils/groupMemory.js`
-- `utils/dailyJournal.js`
-- `api/memoryExtraction.js`
 - `utils/memoryCli.js`
+- `utils/localKnowledge.js`
+- `api/localNotebook.js`
+- `utils/dailyJournal.js`
+- `utils/memory-v3/*`
+- `api/memoryExtraction.js`
 
-当前记忆不是单一日志，而是分层系统。
+## 11.1 长期画像
 
-### 14.1 长期结构化画像
+`utils/memory.js` 维护用户层面的长期资料，例如：
 
-`utils/memory.js` 维护：
+- likes / dislikes
+- goals
+- recent topics
+- relation stage
+- summary / impression
+- facts / favorites / points
 
-- favorites / points / group binding
-- likes / dislikes / goals / recent_topics
-- relation_stage
-- summary
-- impression
-- facts
+## 11.2 短期记忆
 
-### 14.2 短期记忆
+`utils/shortTermMemory.js` 负责：
 
-`utils/shortTermMemory.js` 已实现：
+- session key
+- scope
+- 最近对话窗口
+- token budget trimming
+- structured compression
+- restart rehydrate
 
-- session key 与 scope
-- 最近对话保留
-- token budget 裁剪
-- 结构化压缩
-- 重启后 recall / rehydrate
+## 11.3 短期桥接快照
 
-### 14.3 桥接快照
+`utils/shortTermBridgeMemory.js` 提供：
 
-`utils/shortTermBridgeMemory.js` 已实现：
+- `pre_reply` / `post_reply` snapshot
+- 进程重启后的最近会话桥接恢复
 
-- pre_reply / post_reply snapshot
-- 重启恢复最近会话上下文
+## 11.4 Memory V3
 
-### 14.4 检索记忆
+当前 prepare 节点会在合适条件下写入 memory v3 event，并 materialize 视图。它已经不是“可选草稿系统”，而是主链的一部分。
 
-`utils/memoryContext.js` 会把以下内容整理进 prompt：
+## 11.5 memoryContext 已经融合 local knowledge
 
-- 用户画像
-- impression / summary
-- 向量召回记忆
-- daily journal retrieval bundle
+`utils/memoryContext.js` 当前不仅查长期记忆，也会调用：
 
-### 14.5 统一 Memory CLI
+- `queryLocalKnowledge(...)`
+- `queryMemory(...)`
 
-`utils/memoryCli.js` 已实现：
+也就是说，模型上下文里的“可检索内容”已经不是单一向量记忆，而是融合：
+
+- session projection
+- short-term bridge
+- session summary
+- daily journal continuity / rollup
+- memory v3 personal / task / group
+- notebook 文档
+
+## 11.6 localKnowledge 是新的本地知识层
+
+`utils/localKnowledge.js` 当前会统一处理本地可读知识源，优先级来源包括：
+
+- `session_projection`
+- `short_term_bridge`
+- `session_summary`
+- `journal_continuity`
+- `memory_v3_task`
+- `memory_v3_group`
+- `memory_v3_personal`
+- `notebook_doc`
+- `journal_rollup`
+- `journal_entry`
+
+这意味着“notebook / journal / session continuity / memory v3”已经开始被当作一个统一的本地知识检索面来处理。
+
+## 11.7 Memory CLI
+
+`utils/memoryCli.js` 是统一检索总线，不只是读 JSON。当前支持：
 
 - `mem search`
 - `mem open`
-- profile / recent session / personal memory / task memory / group memory / journal raw window 的统一搜索与打开
-- query facet 分类
+- profile / personal / task / group / journal / recent / style / jargon / notebook 等源
 - rerank
-- 去重与多样化
-- budget trimming
+- 多样化去重
+- budget trim
+- local knowledge 融合
 
-这部分已经是“统一记忆检索总线”，不是简单读 JSON。
+---
 
-### 14.6 自动学习
-
-`api/memoryExtraction.js` 已实现：
-
-- 从对话抽取 profile / summary / impression / fact
-- 根据置信度决定 tier
-- 写入向量记忆
-- 写入 task memory
-- 写入 group memory
-
-该学习过程在主回复完成后异步触发。
-
-## 15. Notebook 系统
+## 12. Notebook 系统
 
 文件：`api/localNotebook.js`
 
-当前 notebook 已接通：
+当前 notebook 不是摆设，已接入：
 
 - `notebook_reindex_folder`
 - `notebook_add_document`
 - `notebook_list_docs`
 - `notebook_search`
 
-机制：
+已实现机制包括：
 
-- 每个用户一个 notebook scope
-- 自动维护 `index.json`
+- 用户作用域 notebook 根目录
+- `index.json` 管理
 - 文档 chunking
 - content hash 去重
 - 增量 reindex
-- chunk 级检索打分
+- chunk 级打分检索
+- notebook 元数据带 scope 信息
 
-## 16. Humanizer 子 Agent
+---
 
-文件：`api/humanizerAgent.js`
+## 13. 工具系统
 
-humanizer 不是简单字符串替换器，而是独立子 agent。
+核心文件：
 
-当前实现：
+- `api/toolRegistry.js`
+- `api/toolExecutors.js`
+- `api/toolSchemas.js`
+- `utils/toolPolicy.js`
+- `utils/localToolAccess.js`
 
-- 保留原文风格和语气方向
-- 只去掉明显 AI 腔、客服腔、模板腔
-- 支持 streaming
-- 过度压缩检测
-- 子 agent 失败时回退本地 `humanizeReply`
+## 13.1 当前工具不是 schema 占位
 
-默认在以下情况会跳过 humanizer：
+工具执行器已经接通了真实能力，包括但不限于：
 
-- review route
-- 已判定 failure reply
-- 某些 direct/tool policy
-- humanizer 开关关闭
+- web / search / weather / location
+- notebook 系列
+- memory CLI
+- 各类 skill 包装器
+- structured generation / research / study
+- image / media 相关技能
+- Minecraft agent 工具
 
-## 17. 子代理桥接
+## 13.2 工具权限边界
 
-文件：
+`utils/toolPolicy.js` 负责做参数正规化和安全边界约束，例如：
+
+- notebook 路径必须留在 notebook root 内
+- 某些本地文件读写必须留在安全目录
+- image 输出路径受限
+- memory_cli / web_search query 长度受限
+- 天气 / 地点类参数字符过滤
+
+## 13.3 global tool preflight
+
+在 V2 `prepare` 节点里，当前还会做 capability preflight / global tool preflight，把少量高价值工具证据先注入上下文，而不是什么都等主模型自己临时决定。
+
+---
+
+## 14. 子代理与 full subagent
+
+相关文件：
 
 - `api/subagentExecutor.js`
 - `api/openclawExecutor.js`
+- `core/messageFullSubagent.js`
 
-### 17.1 支持的后端
+当前支持的子代理后端包括：
 
 - `command`
 - `openclaw`
 
-### 17.2 已实现机制
+已实现机制包括：
 
-- 并发槽限制
-- 稳定 sessionId
-- question/customPrompt/routePrompt/image 信息统一转发
-- stdout/stderr 清洗
-- 结果解析
-- 失败摘要
-- review model 对子代理输出二次整理
+- 会话 ID 统一
+- question / routePrompt / image / routeMeta 透传
+- stdout / stderr 清洗
+- JSON 结果提取
+- review 整理
+- 多 worker 协调
+- 失败摘要与 fallback
 
-### 17.3 当前行为
+当 routeExecution 产出 `full_subagent` executor 时，主链会明确走子代理分支，而不是把它伪装成普通 direct chat。
 
-- 白名单用户的工具型请求可优先走 subagent
-- subagent 失败不会静默吞掉，会回到明确错误或回退文案
+---
 
-## 18. OpenClaw 适配
+## 15. Humanizer
 
-文件：`api/openclawExecutor.js`
+文件：`api/humanizerAgent.js`
 
-当前适配层已实现：
+humanizer 当前是独立子能力，不是简单字符串替换函数。
 
-- OpenClaw CLI 参数组装
-- `--session-id`
-- `--message`
-- `--json` 输出兼容
-- 从 stdout 中提取最后一个 JSON block
-- 从 payload/result/reply/text 等多个路径读最终结果
+它的目标是：
 
-## 19. Minecraft Agent
+- 去掉明显 AI 腔 / 客服腔 / 模板腔
+- 保留原始事实、限制、证据和执行结论
+- 支持流式收尾
+- 失败时回退本地 humanize 逻辑
 
-文件：`api/minecraftAgent.js`
+在 review 路由、失败回复或某些特殊 policy 下会跳过 humanizer。
 
-当前 Minecraft 链路不是占位实现，已经接入：
+---
 
-- mineflayer
-- mineflayer-pathfinder
-- vec3
+## 16. 被动群感知与主动机制
 
-已实现工具：
+## 16.1 被动群感知
 
-- `minecraft_connect`
-- `minecraft_disconnect`
-- `minecraft_status`
-- `minecraft_chat`
-- `minecraft_move_to`
-- `minecraft_follow_player`
-- `minecraft_look_at`
-- `minecraft_stop`
+相关文件：
 
-并且有：
+- `core/passiveGroupAwareness.js`
+- `core/messagePassiveFlow.js`
+- `utils/groupAwarenessState.js`
 
-- 连接参数校验
-- spawn 等待
-- pathfinding timeout / goal reached / reset 处理
-- runtime follow state
+这是一条独立于 `@bot` 正式调用链之外的分支。
 
-## 20. 主动机制
+核心特征：
 
-文件：`core/tickEngine.js`
+- 非 `@bot` 群消息也会进入轻量分析
+- 本地 gating 决定是否值得插话
+- 命中过快双人对话 / 多人快聊 / cooldown / 低分场景时会压制
+- 通过 gating 后再调用 decision model 与 reply model
+- 回复偏短、轻、不主导话题
 
-当前主动机制包含：
+## 16.2 主动机制
 
-### 20.1 主动关心消息
+相关文件：
 
-触发条件包括：
+- `core/tickEngine.js`
+- `core/proactiveGreetingFlow.js`
+- `utils/dailyJournal.js`
+- `core/schedulerRuntime.js`
 
-- `PROACTIVE_REPLY_ENABLED=true`
-- 用户有新鲜群绑定
-- 好感度 points 达到阈值
-- 用户空闲达到时长
-- 每天触发次数不超过上限
-- 仅在白天/晚间时段运行
+当前主动链包含：
 
-### 20.2 定时问候
+- 主动关心 / 主动消息
+- 早安 / 晚安问候
+- daily journal 汇总触发
+- 定时任务调度
 
-在 `index.js` 中每分钟检查：
+---
 
-- 08:30 早安
-- 22:30 晚安
+## 17. 模型调用与 fallback
 
-### 20.3 Daily journal 汇总
+相关文件：
 
-tick engine 还会定期检查 daily summary 是否该运行。
+- `api/graphModelIO.js`
+- `utils/mainModelFallback.js`
+- `utils/modelProvider.js`
+- `utils/modelCompat.js`
 
-## 21. Prompt 资产
+当前已实现：
 
-目录：`prompts/`
-
-当前 prompt 资产分成两类：
-
-- `persona/`
-- `runtime/`
-
-`config.js` 会优先读取 `prompt-manifest.json`，再按 section 装配系统 prompt，而不是硬编码一整段字符串。
-
-## 22. 测试覆盖反映出的成熟机制
-
-`tests/` 覆盖很广，说明以下机制不是“概念存在”，而是当前主干重点维护对象：
-
-- route schema / route profile / hybrid router
-- LangGraph V2 runtime
-- global tool runtime
-- memory CLI
-- short-term compression / restart recall / bridge memory
-- daily journal retrieval / rollup
-- passive awareness
-- humanizer agent
+- 主模型配置解析
+- provider 兼容层
 - main model fallback
+- streaming / non-streaming 统一收口
+- provider auth / blocked / tool loop / generic failure 分类
+- tool schema 不兼容时的降级处理
+
+---
+
+## 18. 数据与运行目录
+
+默认主要数据都在 `DATA_DIR` 下，由 `config.js` 控制。常见内容包括：
+
+- 记忆数据
+- short-term / bridge / journal 数据
+- notebook 数据
+- LangGraph checkpoint / event 数据
+- 自我改进 / guide / rules 数据
+
+prompt 资产默认在：
+
+- `prompts/persona/`
+- `prompts/runtime/`
+- `prompts/prompt-manifest.json`
+
+---
+
+## 19. 常用命令
+
+来自 `package.json` 的主要命令：
+
+### 19.1 基础运行
+
+```bash
+npm start
+npm run start:post-reply-worker
+npm run console
+```
+
+### 19.2 测试与检查
+
+```bash
+npm test
+npm run lint
+npm run check:prompts
+npm run check:agent
+npm run check:agent:static
+```
+
+### 19.3 诊断与迁移
+
+```bash
+npm run diag:fallback
+npm run diag:continuity
+npm run memory:v3:migrate
+```
+
+### 19.4 Linux 运维
+
+```bash
+npm run linux:install
+npm run linux:check
+npm run linux:start
+npm run linux:stop
+npm run linux:restart
+npm run linux:status
+npm run linux:logs
+npm run linux:systemd
+npm run linux:wireguard:setup
+```
+
+### 19.5 Windows 运维
+
+```bash
+npm run win:daemon:install
+npm run win:daemon:uninstall
+npm run win:daemon:status
+npm run win:mgmt:setup
+```
+
+---
+
+## 20. 测试现状
+
+`scripts/run-tests.js` 当前会：
+
+1. 优先扫描 `tests/` 目录中的 `*.test.js`
+2. 如果扫描结果不可用，再回退到内置维护的显式测试列表
+
+这说明当前测试面不是摆设，仓库对以下区域都有明确覆盖：
+
+- routing / route execution
+- LangGraph V2 runtime
+- planner protocol
+- prompt compiler / prompt stage contract / prompt snapshot
+- memory / memory v3 / memory CLI / conflict filtering
+- local knowledge
+- short-term compression / bridge restore / continuity state
+- passive awareness
 - subagent bridge
-- streaming 次序与 suppress
-- reply failure 分类
-- tool reply formatting
+- streaming / fallback / reply failure
+- background task / scheduler / post-reply worker
 
-## 23. 关键模块关系图
+---
 
-### 23.1 正式 `@bot` 消息
+## 21. 推荐接手阅读顺序
 
-`NapCat -> messageHandler -> router -> routeExecution -> agentGraphV2 / tool route / subagent route -> normalize reply -> send_group_msg`
+如果第一次接手这个仓库，建议按下面顺序读：
 
-### 23.2 非 `@bot` 消息
+1. `package.json`
+2. `index.js`
+3. `config.js`
+4. `core/messageHandler.js`
+5. `core/messageIngress.js`
+6. `core/router.js`
+7. `core/routeSchema.js`
+8. `core/routeExecution.js`
+9. `core/messageRouteFlow.js`
+10. `core/messageDispatchCoordinator.js`
+11. `api/agentGraph.js`
+12. `api/agentGraphFacade.js`
+13. `api/agentGraphV2.js`
+14. `api/runtimeV2/host.js`
+15. `api/runtimeV2/state.js`
+16. `api/runtimeV2/nodes/prepare.js`
+17. `api/runtimeV2/planning/service.js`
+18. `api/runtimeV2/context/service.js`
+19. `utils/promptManifest.js`
+20. `utils/promptCompiler.js`
+21. `utils/stagePromptContracts.js`
+22. `utils/runtimePrompts.js`
+23. `utils/memoryContext.js`
+24. `utils/localKnowledge.js`
+25. `utils/memoryCli.js`
+26. `api/localNotebook.js`
 
-`NapCat -> messageHandler -> passiveGroupAwareness -> decision model -> reply model -> send_group_msg`
+---
 
-### 23.3 工具型请求
+## 22. 一句话概括当前系统
 
-`router -> routeExecution -> local_tools 或 subagent_tools -> review/clean format -> QQ reply`
+当前的 MizukiBot 已经是一个：
 
-### 23.4 计划型请求
+> **以 NapCat/OneBot 为接入层、以 canonical route contract + execution plan 为中枢、以 LangGraph V2 为主运行时、融合 prompt 编译链、分层记忆、本地知识、工具调度、被动感知、主动任务与子代理桥接的多阶段 Agent 系统。**
 
-`routeExecution(planSteps) -> agentGraphV2 planner -> dispatch -> validate -> repair -> synthesize -> humanize -> persist`
+它的核心不是“能聊天”，而是：
 
-## 24. 当前系统的一句话概括
+- 能把消息先结构化理解
+- 再根据策略决定是否用工具、是否规划、是否走后台、是否走子代理
+- 再在统一状态图中完成执行、验证、修复、润色与持久化
 
-当前 MizukiBot 已实现成一个“带结构化路由、规划执行、统一记忆、被动群感知、主动调度、工具规划器、子代理桥接和风格保护润色”的多阶段 agent 运行时，而不是普通聊天机器人。
+---
 
-## 25. 接手阅读顺序
+## 23. 备注
 
-如果要快速接手，建议按这个顺序读代码：
+仓库里存在较多诊断脚本、兼容外观层和历史保留接口。判断“当前正式主链”时，优先以以下文件为准：
 
-1. `index.js`
-2. `core/messageHandler.js`
-3. `core/router.js`
-4. `core/routeExecution.js`
-5. `core/routeProfiles.js`
-6. `api/agentGraphV2.js`
-7. `api/graphPrompting.js`
-8. `api/graphModelIO.js`
-9. `api/globalToolRuntime.js`
-10. `utils/memory.js`
-11. `utils/shortTermMemory.js`
-12. `utils/memoryCli.js`
-13. `core/passiveGroupAwareness.js`
-14. `api/subagentExecutor.js`
-15. `api/humanizerAgent.js`
+- `index.js`
+- `core/messageHandler.js` 及其拆分协作者
+- `core/router.js`
+- `core/routeSchema.js`
+- `core/routeExecution.js`
+- `api/agentGraphFacade.js`
+- `api/agentGraphV2.js`
+- `api/runtimeV2/host.js`
+- `api/runtimeV2/state.js`
+- `api/runtimeV2/nodes/*`
 
-## 26. 备注
-
-当前仓库里仍有较多历史备份文件、诊断脚本和临时验证脚本。判断“当前正式主链”时，优先以本文列出的入口和运行时文件为准，不要把 `.bak`、`codex_verify_*`、`tmp_*` 文件误当成主实现。
+如果这些文件与旧文档、旧注释、旧备份文件表达不一致，以这些主链文件的当前实现为准。

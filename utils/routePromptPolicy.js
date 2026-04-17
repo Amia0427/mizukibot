@@ -79,18 +79,6 @@ function resolveRoutePromptPolicy(routeKey = 'chat/default') {
       routeDebugPolicy.subagent
     )
   };
-
-  if (topRouteType !== 'admin' || type !== 'admin/full') {
-    return {
-      ...resolved,
-      subagent: {
-        ...resolved.subagent,
-        include_tool_guidance: false,
-        include_bridge_guidance: false
-      }
-    };
-  }
-
   return resolved;
 }
 

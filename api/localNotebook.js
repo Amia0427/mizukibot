@@ -367,6 +367,10 @@ async function notebook_search(userId, query, top_k = 5) {
 }
 
 module.exports = {
+  readIndex,
+  writeIndex,
+  chunkText,
+  scoreChunk,
   notebook_reindex_folder,
   notebook_add_document,
   notebook_list_docs,

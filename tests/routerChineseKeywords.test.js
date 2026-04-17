@@ -30,4 +30,15 @@ const hapiCommand = parseAdminCommand('/hapi status');
 assert.strictEqual(hapiCommand.cmd, 'hapi');
 assert.strictEqual(hapiCommand.payload, 'status');
 
+const claudeCommand = parseAdminCommand('/claude 帮我看下这个仓库');
+assert.strictEqual(claudeCommand.cmd, 'claude');
+assert.strictEqual(claudeCommand.payload, '帮我看下这个仓库');
+
+const claudeOpenCommand = parseAdminCommand('/claude-open');
+assert.strictEqual(claudeOpenCommand.cmd, 'claude-open');
+
+const claudeSendCommand = parseAdminCommand('/claude-send 继续');
+assert.strictEqual(claudeSendCommand.cmd, 'claude-send');
+assert.strictEqual(claudeSendCommand.payload, '继续');
+
 console.log('routerChineseKeywords.test.js passed');

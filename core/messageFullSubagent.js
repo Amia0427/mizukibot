@@ -1,4 +1,8 @@
 const { buildRuntimePrompt } = require('../utils/runtimePrompts');
+const {
+  buildReviewStageRoutePrompt,
+  buildReviewStageSystemPrompt
+} = require('../utils/stagePromptContracts');
 
 function clampFullSubagentWorkerCount(value, fallback = 2, maxWorkers = 2) {
   const fallbackCount = Math.max(1, Math.min(2, Number(fallback) || 1));
@@ -264,15 +268,13 @@ function createMessageFullSubagentCoordinator(deps = {}) {
     routePrompt = null,
     routePolicyKey = 'tool/review'
   }) {
-    const personaPrompt = String(config.SYSTEM_PROMPT || '').trim();
     const formattingPreferences = resolveToolReplyFormattingPreferences(question);
     const outputFormatInstruction = buildToolReplyFormatInstruction(formattingPreferences);
-    const reviewSystemPrompt = buildRuntimePromptOverride('review-system', {
-      personaPrompt,
-      outputFormatInstruction
+    const reviewSystemPrompt = buildReviewStageSystemPrompt({
+      extraInstruction: outputFormatInstruction
     });
 
-    const reviewRoutePrompt = buildRuntimePromptOverride('review-route', {
+    const reviewRoutePrompt = buildReviewStageRoutePrompt({
       routePromptBlock: routePrompt ? `路由提示:\n${routePrompt}` : '',
       outputFormatInstruction
     });
@@ -341,14 +343,12 @@ function createMessageFullSubagentCoordinator(deps = {}) {
     routePrompt = null,
     routePolicyKey = 'admin/full'
   }) {
-    const personaPrompt = String(config.SYSTEM_PROMPT || '').trim();
     const formattingPreferences = resolveToolReplyFormattingPreferences(question);
     const outputFormatInstruction = buildToolReplyFormatInstruction(formattingPreferences);
-    const reviewSystemPrompt = buildRuntimePromptOverride('review-system', {
-      personaPrompt,
-      outputFormatInstruction
+    const reviewSystemPrompt = buildReviewStageSystemPrompt({
+      extraInstruction: outputFormatInstruction
     });
-    const reviewRoutePrompt = buildRuntimePromptOverride('review-route', {
+    const reviewRoutePrompt = buildReviewStageRoutePrompt({
       routePromptBlock: routePrompt ? `Routing guidance:\n${routePrompt}` : '',
       outputFormatInstruction
     });

@@ -2330,6 +2330,39 @@ function createMessageHandler({
       if (handled) return;
     }
 
+    if (route?.topRouteType === 'admin' && String(route?.meta?.command?.cmd || '').trim() === 'claude') {
+      const userInfo = updateFavor(senderId, route.cleanText || rawText || '/claude', isPrivateChatType(chatType) ? '' : groupId);
+      userInfo.last_seen_at = Date.now();
+      saveData();
+      recordMemoryScope(senderId, { groupId: isPrivateChatType(chatType) ? '' : groupId });
+      const handled = await routeFlow.handleClaudeAdminCommand({
+        route,
+        groupId,
+        senderId,
+        userInfo,
+        rawText,
+        chatType
+      });
+      if (handled) return;
+    }
+
+    if (
+      route?.topRouteType === 'admin'
+      && ['claude-open', 'claude-send', 'claude-tail', 'claude-stop'].includes(String(route?.meta?.command?.cmd || '').trim())
+    ) {
+      const userInfo = updateFavor(senderId, route.cleanText || rawText || '/claude-open', isPrivateChatType(chatType) ? '' : groupId);
+      userInfo.last_seen_at = Date.now();
+      saveData();
+      recordMemoryScope(senderId, { groupId: isPrivateChatType(chatType) ? '' : groupId });
+      const handled = await routeFlow.handleClaudeSessionAdminCommand({
+        route,
+        groupId,
+        senderId,
+        chatType
+      });
+      if (handled) return;
+    }
+
     if (route?.topRouteType === 'direct_chat') {
       const plannerStartedAt = Date.now();
       let plannerDecision = null;
