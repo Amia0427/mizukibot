@@ -16,6 +16,11 @@ const { shortTermMemory } = require('../utils/memory');
 const { normalizeShortTermState, resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { loadBridgeStore } = require('../utils/shortTermBridgeMemory');
 const {
+  composePersonaMemoryState,
+  renderPersonaMemoryPrompt,
+  recordPersonaMemoryOutcome
+} = require('../utils/personaMemoryState');
+const {
   getDailyJournalRetrievalBundle,
   runDailyJournalSummaries,
   shouldRunDailySummaryNow
@@ -427,7 +432,7 @@ function buildTouchSignature(reason = '', primaryContext = '') {
   return crypto.createHash('sha1').update(payload).digest('hex').slice(0, 16);
 }
 
-function buildReasonAwarePrompt({
+async function buildReasonAwarePrompt({
   touchReason = '',
   primaryContext = '',
   secondaryContext = '',
@@ -435,6 +440,20 @@ function buildReasonAwarePrompt({
   userId = '',
   data = {}
 } = {}) {
+  const personaState = await composePersonaMemoryState({
+    userId,
+    question: `${touchReason || ''} ${primaryContext || ''} ${secondaryContext || ''}`.trim(),
+    groupId: String(data.group_id || '').trim(),
+    routeMeta: {
+      groupId: String(data.group_id || '').trim()
+    },
+    topRouteType: 'proactive',
+    routePolicyKey: 'proactive/default'
+  }, {
+    surface: 'proactive_touch',
+    groupId: String(data.group_id || '').trim()
+  });
+  const personaPrompt = renderPersonaMemoryPrompt(personaState, 'proactive_touch');
   const profile = getUserProfile(userId) || {};
   const summary = trimText(getUserSummary(userId), 220) || '暂无';
   const memories = trimText(getUserMemories(userId), 220) || '暂无';
@@ -460,8 +479,10 @@ function buildReasonAwarePrompt({
         'light care 不能写成早安晚安模板。'
       ];
 
-  return [
+  return {
+    prompt: [
     ...rules,
+    ...personaPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean),
     `touchReason: ${touchReason || fallbackGreetingType || 'light_care_ping'}`,
     fallbackGreetingType ? `fallbackGreetingType: ${fallbackGreetingType}` : '',
     `[PrimaryContext] ${primaryContext || '暂无'}`,
@@ -470,10 +491,12 @@ function buildReasonAwarePrompt({
     `[RecentTopics] ${recentTopics || '暂无'}`,
     `[UserSummary] ${summary}`,
     `[LongTermMemory] ${memories}`
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('\n'),
+    personaMemoryState: personaState
+  };
 }
 
-function buildProactivePrompt(userId, data, payload = {}) {
+async function buildProactivePrompt(userId, data, payload = {}) {
   return buildReasonAwarePrompt({
     userId,
     data,
@@ -769,7 +792,8 @@ async function sendTouchMessage({
         promptPayload?.fallbackGreetingType ? 35 : 60
       );
     } else {
-      const prompt = buildProactivePrompt(userId, data, promptPayload);
+      const promptBundle = await buildProactivePrompt(userId, data, promptPayload);
+      const prompt = String(promptBundle?.prompt || '').trim();
       replyModelCalled = true;
       const reply = await askAIByGraph(prompt, data, userId, prompt, null, {
         routePolicyKey: 'proactive/default',
@@ -817,6 +841,21 @@ async function sendTouchMessage({
       source,
       routePolicyKey: 'proactive/default'
     });
+    await recordPersonaMemoryOutcome('proactive_touch', {
+      state: promptBundle?.personaMemoryState || null,
+      userId,
+      groupId,
+      request: {
+        userId,
+        question: candidateReason || '',
+        routeMeta: { groupId },
+        routePolicyKey: 'proactive/default',
+        topRouteType: 'proactive'
+      },
+      activeTopic: promptPayload.primaryContext || candidateReason,
+      recentReplyFrame: text,
+      recentMessages: [{ role: 'assistant', content: text }]
+    }).catch(() => {});
     markInitiativeSent(groupId, {
       source,
       reason: candidateReason,

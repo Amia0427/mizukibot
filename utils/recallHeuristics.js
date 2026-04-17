@@ -100,6 +100,9 @@ function shouldBiasToContinuity(facet = '') {
 function isMemoryContinuationQuestion(text = '') {
   const normalized = sanitizeText(text);
   if (!normalized || isConversationalNoop(normalized)) return false;
+  if (/^(你觉得|你认为|你喜不喜欢|你喜歡|你怎么看|觉得.*好听吗|觉得.*怎么样|what do you think|how do you feel)/i.test(normalized)) {
+    return false;
+  }
   const facet = classifyRecallFacet(normalized);
   return facet !== 'group_context' || /(继续|上次|最近群里|刚刚|刚才|context|上下文)/i.test(normalized);
 }

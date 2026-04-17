@@ -27,6 +27,11 @@ const {
   summarizeQzoneDebug,
   summarizeQzoneWindowStats
 } = require('../core/qzoneGenerationPhase2');
+const {
+  composePersonaMemoryState,
+  renderPersonaMemoryPrompt,
+  recordPersonaMemoryOutcome
+} = require('../utils/personaMemoryState');
 
 const INTERNAL_LEAK_TERMS = [
   'ai',
@@ -598,8 +603,16 @@ function buildMemoryEvidenceLines(memoryEvidence = {}) {
   ];
 }
 
-function buildBotDiaryPrompt({ hint = '', signals = {}, strict = false, memoryEvidence = {}, variationProfile = {}, recentHistory = [] } = {}) {
-  const compactPersona = buildCompactPersonaPrompt(1200);
+async function buildBotDiaryPrompt({ hint = '', signals = {}, strict = false, memoryEvidence = {}, variationProfile = {}, recentHistory = [] } = {}) {
+  const personaState = await composePersonaMemoryState({
+    userId: String(config.BOT_QQ || 'mizuki').trim(),
+    question: String(hint || '').trim(),
+    topRouteType: 'qq_publish_qzone',
+    routePolicyKey: 'qq_publish_qzone.bot_diary'
+  }, {
+    surface: 'bot_diary'
+  });
+  const personaPrompt = renderPersonaMemoryPrompt(personaState, 'bot_diary');
   const weakHint = normalizeText(hint);
   const promptLines = [
     '你现在只负责写一条可以直接发布到 QQ 空间的中文日记正文。',
@@ -618,8 +631,7 @@ function buildBotDiaryPrompt({ hint = '', signals = {}, strict = false, memoryEv
     promptLines.push('如果想提别人，只能写成“群里有人”“某个夜猫子”“那个让我想翻白眼的人”这种泛化表达。');
   }
   promptLines.push('');
-  promptLines.push('[主人格摘要]');
-  promptLines.push(compactPersona || '自然、别扭、会关心人，但不直白邀功。');
+  promptLines.push(...personaPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean));
   promptLines.push('');
   promptLines.push(buildVariationProfilePrompt(variationProfile || {}));
   promptLines.push('');
@@ -634,11 +646,22 @@ function buildBotDiaryPrompt({ hint = '', signals = {}, strict = false, memoryEv
   promptLines.push(...buildMemoryEvidenceLines(memoryEvidence));
   promptLines.push('');
   promptLines.push('只输出最终正文。');
-  return promptLines.join('\n');
+  return {
+    prompt: promptLines.join('\n'),
+    personaMemoryState: personaState
+  };
 }
 
-function buildBotDiaryPromptFromPlan({ hint = '', signals = {}, strict = false, memoryEvidence = {}, plan = {}, recentHistory = [] } = {}) {
-  const compactPersona = buildCompactPersonaPrompt(1200);
+async function buildBotDiaryPromptFromPlan({ hint = '', signals = {}, strict = false, memoryEvidence = {}, plan = {}, recentHistory = [] } = {}) {
+  const personaState = await composePersonaMemoryState({
+    userId: String(config.BOT_QQ || 'mizuki').trim(),
+    question: String(hint || '').trim(),
+    topRouteType: 'qq_publish_qzone',
+    routePolicyKey: 'qq_publish_qzone.bot_diary'
+  }, {
+    surface: 'bot_diary'
+  });
+  const personaPrompt = renderPersonaMemoryPrompt(personaState, 'bot_diary');
   const weakHint = normalizeText(hint);
   const promptLines = [
     '你现在只负责写一条可以直接发布到 QQ 空间的中文日记正文。',
@@ -655,8 +678,7 @@ function buildBotDiaryPromptFromPlan({ hint = '', signals = {}, strict = false, 
     promptLines.push('这次必须更保守：宁可更抽象、更像自言自语，也不要出现任何可识别对象或具体事件。');
   }
   promptLines.push('');
-  promptLines.push('[主人格摘要]');
-  promptLines.push(compactPersona || '自然、别扭、会关心人，但不直白邀功。');
+  promptLines.push(...personaPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean));
   promptLines.push('');
   promptLines.push(buildPlanPrompt(plan, { type: 'bot_diary' }));
   promptLines.push('');
@@ -671,7 +693,10 @@ function buildBotDiaryPromptFromPlan({ hint = '', signals = {}, strict = false, 
   promptLines.push(`最近失败原因: ${(Array.isArray(recentHistory) ? recentHistory : []).map((item) => item.reason).filter(Boolean).slice(-3).join(' / ') || '无'}`);
   promptLines.push('');
   promptLines.push('只输出最终正文。');
-  return promptLines.join('\n');
+  return {
+    prompt: promptLines.join('\n'),
+    personaMemoryState: personaState
+  };
 }
 
 function buildQzoneVariantNote(variantType = '') {
@@ -842,7 +867,7 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
       const strict = candidateIndex > 0;
       const variantType = CANDIDATE_VARIANT_TYPES[candidateIndex] || CANDIDATE_VARIANT_TYPES[0];
       const prompt = buildCandidatePrompt(
-        buildBotDiaryPromptFromPlan({
+        await buildBotDiaryPromptFromPlan({
           hint,
           signals,
           strict,
@@ -969,6 +994,28 @@ async function generateBotDiaryDraft(input = {}, options = {}) {
         }))
       }));
       console.log('[qzone-diary] generated', JSON.stringify(meta));
+      await recordPersonaMemoryOutcome('bot_diary', {
+        state: await composePersonaMemoryState({
+          userId: String(config.BOT_QQ || 'mizuki').trim(),
+          question: String(hint || '').trim(),
+          routePolicyKey: 'qq_publish_qzone.bot_diary',
+          topRouteType: 'qq_publish_qzone'
+        }, {
+          surface: 'bot_diary'
+        }),
+        userId: String(config.BOT_QQ || 'mizuki').trim(),
+        request: {
+          userId: String(config.BOT_QQ || 'mizuki').trim(),
+          question: hint || '',
+          routePolicyKey: 'qq_publish_qzone.bot_diary',
+          topRouteType: 'qq_publish_qzone',
+          routeMeta: {}
+        },
+        activeTopic: meta.topicKey || signals.timeBucket || 'bot_diary',
+        recentReplyFrame: selected.text,
+        summary: selected.text,
+        recentMessages: [{ role: 'assistant', content: selected.text }]
+      }).catch(() => {});
       return {
         ok: true,
         content: selected.text,

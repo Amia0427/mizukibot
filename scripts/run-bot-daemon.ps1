@@ -84,6 +84,48 @@ function Resolve-NodeExecutable {
   return $null
 }
 
+function Get-ProcessCommandLine {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int]$ProcessId
+  )
+
+  if ($ProcessId -le 0) {
+    return ''
+  }
+
+  try {
+    $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction Stop
+    return [string]$cim.CommandLine
+  } catch {
+    return ''
+  }
+}
+
+function Test-LockPidMatchesProcessLifetime {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LockPath,
+
+    [Parameter(Mandatory = $true)]
+    [System.Diagnostics.Process]$Process
+  )
+
+  if (-not (Test-Path $LockPath)) {
+    return $false
+  }
+
+  try {
+    $lockInfo = Get-Item -LiteralPath $LockPath -ErrorAction Stop
+    $deltaSeconds = [math]::Abs(($lockInfo.LastWriteTime - $Process.StartTime).TotalSeconds)
+    # The main bot writes the lock at startup, so matching start/lock times are
+    # a strong fallback signal when CommandLine is unavailable.
+    return $deltaSeconds -le 300
+  } catch {
+    return $false
+  }
+}
+
 function Test-LockOwnedByRunningNode {
   param(
     [Parameter(Mandatory = $true)]
@@ -106,13 +148,13 @@ function Test-LockOwnedByRunningNode {
       return $false
     }
 
-    $commandLine = ''
-    try {
-      $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction Stop
-      $commandLine = [string]$cim.CommandLine
-    } catch {}
+    $commandLine = Get-ProcessCommandLine -ProcessId $ownerPid
 
     if (-not [string]::IsNullOrWhiteSpace($commandLine) -and $commandLine -match 'index\.js') {
+      return $true
+    }
+
+    if (Test-LockPidMatchesProcessLifetime -LockPath $LockPath -Process $proc) {
       return $true
     }
 
@@ -144,17 +186,14 @@ function Get-LockProcessDiagnostics {
       return "lock pid=$ownerPid not running"
     }
 
-    $commandLine = ''
-    try {
-      $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction Stop
-      $commandLine = [string]$cim.CommandLine
-    } catch {}
+    $commandLine = Get-ProcessCommandLine -ProcessId $ownerPid
+    $startMatchesLock = Test-LockPidMatchesProcessLifetime -LockPath $LockPath -Process $proc
 
     if ([string]::IsNullOrWhiteSpace($commandLine)) {
-      return "lock pid=$ownerPid name=$($proc.ProcessName) path=$($proc.Path)"
+      return "lock pid=$ownerPid name=$($proc.ProcessName) path=$($proc.Path) start_matches_lock=$startMatchesLock"
     }
 
-    return "lock pid=$ownerPid name=$($proc.ProcessName) cmd=$commandLine"
+    return "lock pid=$ownerPid name=$($proc.ProcessName) start_matches_lock=$startMatchesLock cmd=$commandLine"
   } catch {
     return "lock diagnostics failed: $($_.Exception.Message)"
   }

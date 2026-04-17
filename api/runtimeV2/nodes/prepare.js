@@ -294,7 +294,7 @@ function createPrepareNode(deps = {}) {
     const preflightMemoryCliTurn = createMemoryCliTurnState(globalPreflight?.memoryCliTurn || nextMemoryCliTurn);
     const executionMemoryCliTurn = createMemoryCliTurnState(nextMemoryCliTurn);
     const executionAllowedTools = computeEffectiveAllowedTools(request, executionMemoryCliTurn);
-    const { dynamicPrompt, affinity, memoryContext } = await buildDynamicPromptImpl(
+    const { dynamicPrompt, affinity, memoryContext, personaMemoryState } = await buildDynamicPromptImpl(
       request.userInfo,
       request.userId,
       request.question,
@@ -335,6 +335,7 @@ function createPrepareNode(deps = {}) {
         dynamicPrompt,
         affinity,
         context: memoryContext || null,
+        personaMemoryState: personaMemoryState || null,
         dirty: false,
         restoredBridge: bridgeRestored,
         memoryScopeRecorded: shouldExposeMemoryCliInPrepare,

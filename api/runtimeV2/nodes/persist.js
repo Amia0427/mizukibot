@@ -29,6 +29,9 @@ function createPersistNode(deps = {}) {
   const persistShortTermBridgeSnapshot = typeof deps.persistShortTermBridgeSnapshot === 'function'
     ? deps.persistShortTermBridgeSnapshot
     : () => {};
+  const recordPersonaMemoryOutcome = typeof deps.recordPersonaMemoryOutcome === 'function'
+    ? deps.recordPersonaMemoryOutcome
+    : (async () => ({ persisted: false, updatedSlots: {} }));
   const appendMemoryEvent = typeof deps.appendMemoryEvent === 'function'
     ? deps.appendMemoryEvent
     : (async () => {});
@@ -151,6 +154,24 @@ function createPersistNode(deps = {}) {
           snapshotType: 'post_reply'
         });
       }
+
+      await recordPersonaMemoryOutcome('direct_chat', {
+        state: state.memory?.personaMemoryState,
+        request,
+        routeMeta: request.routeMeta,
+        userId: request.userId,
+        sessionKey: request.sessionKey,
+        groupId: request.routeMeta?.groupId || request.routeMeta?.group_id || '',
+        routePolicyKey: request.routePolicyKey,
+        topRouteType: request.topRouteType,
+        summary: String(shortTermMemory?.[request.sessionKey]?.summary || '').trim(),
+        activeTopic: String(shortTermMemory?.[request.sessionKey]?.activeTopic || '').trim(),
+        openLoops: normalizeArray(shortTermMemory?.[request.sessionKey]?.openLoops),
+        assistantCommitments: normalizeArray(shortTermMemory?.[request.sessionKey]?.assistantCommitments),
+        userConstraints: normalizeArray(shortTermMemory?.[request.sessionKey]?.userConstraints),
+        carryOverUserTurn: String(shortTermMemory?.[request.sessionKey]?.carryOverUserTurn || '').trim(),
+        recentMessages: Array.isArray(chatHistory?.[request.sessionKey]) ? chatHistory[request.sessionKey].slice(-6) : []
+      });
 
       addProfileItem(request.userId, 'recent_topics', String(request.question || '').slice(0, 20), 12);
       if (shouldEnqueuePostReplyJob) {
