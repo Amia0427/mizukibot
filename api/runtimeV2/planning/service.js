@@ -16,6 +16,7 @@ const {
 } = require('../../../utils/recallHeuristics');
 const { getPolicyDefinition } = require('../../../core/routeProfiles');
 const { HUMANIZER_SYSTEM_PROMPT } = require('../../../utils/humanizer');
+const { buildPlannerStageSystemPrompt } = require('../../../utils/stagePromptContracts');
 const {
   buildReactiveRetryPayload,
   createContextCompactionHardBlockError,
@@ -351,13 +352,17 @@ function extractExplicitUrl(text = '') {
 }
 
 function extractTickerHint(text = '') {
-  const upper = String(text || '').toUpperCase();
-  const tickerMatch = upper.match(/\b[A-Z]{1,5}(?:\.[A-Z]{1,3})?\b/g);
-  const blacklist = new Set(['A', 'AN', 'AND', 'OR', 'THE', 'USD', 'CNY', 'HK', 'US', 'ETF']);
+  const raw = String(text || '');
+  const normalized = raw.trim();
+  if (!normalized) return '';
+  const financeCue = /(股票|美股|港股|a股|基金|加密|币圈|股价|分红|股息|观察列表|投资组合|行情|财报|ticker|quote|stock|stocks|portfolio|watchlist|dividend|crypto|price)/i.test(normalized);
+  if (!financeCue) return '';
+  const tickerMatch = normalized.match(/\b[A-Z]{2,5}(?:\.[A-Z]{1,3})?\b/g);
+  const blacklist = new Set(['AND', 'THE', 'USD', 'CNY', 'HK', 'ETF', 'STOCK', 'PRICE']);
   const candidate = Array.isArray(tickerMatch)
-    ? tickerMatch.find((item) => !blacklist.has(String(item || '').trim()))
+    ? tickerMatch.find((item) => !blacklist.has(String(item || '').trim().toUpperCase()))
     : '';
-  return String(candidate || '').trim();
+  return String(candidate || '').trim().toUpperCase();
 }
 
 function canonicalizeToolNames(toolNames = [], toolCatalogByName = new Map()) {
@@ -369,48 +374,40 @@ function resolveCanonicalPreferredTools(route = {}, available = {}) {
   const cleanText = getPlannerRequestText(route);
   const sourceScope = normalizeText(route?.facets?.sourceScope);
   const domain = normalizeText(route?.facets?.domain);
-  const preferred = [];
-
-  const addIfAllowed = (...toolNames) => {
+  const pickFirstAllowed = (...toolNames) => {
     for (const toolName of toolNames) {
       const normalized = normalizeText(toolName);
-      if (normalized && allowedToolNames.includes(normalized) && !preferred.includes(normalized)) {
-        preferred.push(normalized);
-      }
+      if (normalized && allowedToolNames.includes(normalized)) return [normalized];
     }
+    return [];
   };
 
   if (domain === 'time' || /现在几点|当前时间|北京时间|当地时间/i.test(cleanText)) {
-    addIfAllowed('get_current_time');
-    return preferred;
+    return pickFirstAllowed('get_current_time');
   }
 
   if (isContextStatsRequest(cleanText)) {
-    addIfAllowed('get_context_stats');
-    return preferred;
+    return pickFirstAllowed('get_context_stats');
   }
 
   if (isWeatherRequest(cleanText, route)) {
-    addIfAllowed('skill_weather', 'getWeather');
-    return preferred;
+    return pickFirstAllowed('skill_weather', 'getWeather');
   }
 
   if (sourceScope === 'notebook' || /知识库|笔记|notebook|我的文档|我的资料/i.test(cleanText)) {
-    if (isNotebookListingRequest(cleanText)) addIfAllowed('notebook_list_docs');
-    else addIfAllowed('notebook_search');
-    return preferred;
+    return isNotebookListingRequest(cleanText)
+      ? pickFirstAllowed('notebook_list_docs')
+      : pickFirstAllowed('notebook_search');
   }
 
   if (shouldPrioritizeMemoryProbe(route) || prefersMemoryRecall(cleanText)) {
-    addIfAllowed('memory_cli');
-    return preferred;
+    return pickFirstAllowed('memory_cli');
   }
 
   if (isArxivRequest(cleanText, route)) {
-    if (isArxivIdRequest(cleanText)) addIfAllowed('skill_arxiv_get');
-    else if (isArxivLatestRequest(cleanText)) addIfAllowed('skill_arxiv_latest', 'skill_arxiv_search');
-    else addIfAllowed('skill_arxiv_search');
-    return preferred;
+    if (isArxivIdRequest(cleanText)) return pickFirstAllowed('skill_arxiv_get');
+    if (isArxivLatestRequest(cleanText)) return pickFirstAllowed('skill_arxiv_latest', 'skill_arxiv_search');
+    return pickFirstAllowed('skill_arxiv_search');
   }
 
   if (
@@ -422,27 +419,25 @@ function resolveCanonicalPreferredTools(route = {}, available = {}) {
     || isFinancePortfolioRequest(cleanText)
     || isFinanceAnalysisRequest(cleanText, route)
   ) {
-    if (isFinanceWatchlistRequest(cleanText)) addIfAllowed('skill_stock_watchlist');
-    else if (isFinancePortfolioRequest(cleanText)) addIfAllowed('skill_stock_portfolio');
-    else if (isFinanceDividendRequest(cleanText)) addIfAllowed('skill_stock_dividend');
-    else if (isFinanceRumorRequest(cleanText)) addIfAllowed('skill_stock_rumor');
-    else if (isFinanceQuoteRequest(cleanText)) addIfAllowed('skill_stock_price_query');
-    else if (isFinanceAnalysisRequest(cleanText, route)) addIfAllowed('skill_stock_analyze');
-    if (preferred.length > 0) return preferred;
+    if (isFinanceWatchlistRequest(cleanText)) return pickFirstAllowed('skill_stock_watchlist');
+    if (isFinancePortfolioRequest(cleanText)) return pickFirstAllowed('skill_stock_portfolio');
+    if (isFinanceDividendRequest(cleanText)) return pickFirstAllowed('skill_stock_dividend');
+    if (isFinanceRumorRequest(cleanText)) return pickFirstAllowed('skill_stock_rumor');
+    if (isFinanceQuoteRequest(cleanText)) return pickFirstAllowed('skill_stock_price_query');
+    if (isFinanceAnalysisRequest(cleanText, route)) return pickFirstAllowed('skill_stock_analyze');
   }
 
   if (isExplicitUrlLookup(cleanText)) {
-    addIfAllowed('web_fetch');
-    return preferred;
+    return pickFirstAllowed('web_fetch');
   }
 
   if (sourceScope === 'web' || sourceScope === 'live' || normalizeText(route?.facets?.freshness) === 'latest') {
-    if (needsWebDetailFetch(route)) addIfAllowed('web_search', 'web_fetch');
-    else addIfAllowed('web_search');
-    return preferred;
+    return needsWebDetailFetch(route)
+      ? pickFirstAllowed('web_search')
+      : pickFirstAllowed('web_search');
   }
 
-  return preferred;
+  return [];
 }
 
 function choosePreferredToolSubset(route = {}, toolNames = [], toolCatalogByName = new Map()) {
@@ -452,6 +447,19 @@ function choosePreferredToolSubset(route = {}, toolNames = [], toolCatalogByName
     }),
     toolCatalogByName
   );
+  if (
+    canonical.length > 0
+    && (
+      canonical.includes('memory_cli')
+      || canonical.includes('notebook_search')
+      || canonical.includes('notebook_list_docs')
+      || canonical.includes('get_context_stats')
+      || canonical.includes('get_current_time')
+      || canonical.includes('skill_weather')
+    )
+  ) {
+    return canonical;
+  }
   if (canonical.length > 0) return canonical;
   return canonicalizeToolNames(toolNames, toolCatalogByName);
 }
@@ -554,13 +562,16 @@ function deriveToolArgs(toolName = '', route = {}) {
     return { max_results: 5 };
   }
   if (normalizedTool === 'skill_stock_price_query') {
-    return { ticker: extractTickerHint(requestText || cleanText) || requestText || cleanText };
+    const ticker = extractTickerHint(requestText || cleanText);
+    return ticker ? { ticker } : { ticker: '' };
   }
   if (normalizedTool === 'skill_stock_analyze') {
-    return { ticker: extractTickerHint(requestText || cleanText) || requestText || cleanText, output: 'text' };
+    const ticker = extractTickerHint(requestText || cleanText);
+    return { ticker: ticker || '', output: 'text' };
   }
   if (normalizedTool === 'skill_stock_dividend') {
-    return { ticker: extractTickerHint(requestText || cleanText) || requestText || cleanText, output: 'text' };
+    const ticker = extractTickerHint(requestText || cleanText);
+    return { ticker: ticker || '', output: 'text' };
   }
   if (normalizedTool === 'skill_stock_watchlist') {
     const lowerText = String(requestText || cleanText).toLowerCase();
@@ -991,9 +1002,8 @@ function sanitizePlannerContextSummary(summary = '', maxLength = 360) {
 function buildPlannerPrompt(toolCatalog = []) {
   const catalogBlock = summarizeToolCatalogForPrompt(toolCatalog);
   return [
-    'You are the planner single authority for direct_chat and preflight evidence requests.',
+    buildPlannerStageSystemPrompt(toolCatalog),
     'Decide the complete tool decision and execution graph in one pass.',
-    'You must only return JSON. No markdown. No explanation.',
     `"plannerMeta.decisionVersion" must be exactly "${PLANNER_DECISION_VERSION}".`,
     `"plannerMeta.plannerVersion" must be exactly "${DIRECT_CHAT_PLANNER_VERSION}".`,
     'mode must be exactly chat_only or tool_plan.',

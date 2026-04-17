@@ -142,8 +142,8 @@ const GROUP_AWARENESS_PROCESS_HOOK_KEY = '__mizuki_group_awareness_flush_hooks_r
 if (!process[GROUP_AWARENESS_PROCESS_HOOK_KEY]) {
   process[GROUP_AWARENESS_PROCESS_HOOK_KEY] = true;
   process.on('exit', flushAllSync);
-  process.on('SIGINT', flushAllSync);
-  process.on('SIGTERM', flushAllSync);
+  if (!process.listeners('SIGINT').includes(flushAllSync)) process.on('SIGINT', flushAllSync);
+  if (!process.listeners('SIGTERM').includes(flushAllSync)) process.on('SIGTERM', flushAllSync);
 }
 
 function ensureGroupState(groupId) {

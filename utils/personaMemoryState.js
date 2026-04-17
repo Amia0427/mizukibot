@@ -19,6 +19,7 @@ const {
   appendMemoryEvent,
   materializeMemoryViews
 } = require('./memory-v3');
+const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('./promptSecurity');
 
 const STATE_VERSION = 1;
 const DEFAULT_SURFACE = 'direct_chat';
@@ -787,6 +788,14 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
   const sessionId = normalizeText(routeMeta.sessionId || routeMeta.session_id || request.sessionId);
   const routePolicyKey = normalizeText(request.routePolicyKey || normalizedPayload.routePolicyKey);
   const topRouteType = normalizeText(request.topRouteType || normalizedPayload.topRouteType);
+  const expressionFingerprint = Object.entries(expression)
+    .map(([key, value]) => `${key}=${normalizeText(value, 32)}`)
+    .filter(Boolean)
+    .join(', ');
+  const expressionGate = shouldBlockMemoryLearning(expressionFingerprint, 'style_pattern', {
+    routePolicyKey,
+    topRouteType
+  });
   const checkpointPayload = deriveSessionCheckpointPayload(state, normalizedPayload);
 
   await appendMemoryEvent({
@@ -804,11 +813,7 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
     payload: checkpointPayload
   });
 
-  const expressionFingerprint = Object.entries(expression)
-    .map(([key, value]) => `${key}=${normalizeText(value, 32)}`)
-    .filter(Boolean)
-    .join(', ');
-  if (expressionFingerprint) {
+  if (expressionFingerprint && !expressionGate.blocked) {
     await appendMemoryEvent({
       type: 'memory_confirmed',
       userId,
@@ -824,7 +829,7 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
       status: 'active',
       memoryKind: 'style',
       semanticSlot: 'style_pattern',
-      text: `style: ${expressionFingerprint}`,
+      text: `style: ${sanitizeUntrustedContent(expressionFingerprint, 'memory')}`,
       payload: {
         fieldKey: 'style_pattern',
         type: 'fact'

@@ -2,7 +2,13 @@ const fs = require('fs');
 const path = require('path');
 
 const { PROMPTS_DIR, PROMPT_MANIFEST, PROMPT_MANIFEST_PATH } = require('../config');
-const { RUNTIME_PROMPT_DEFAULTS } = require('../utils/runtimePrompts');
+const { RUNTIME_PROMPT_DEFAULTS, renderRuntimePromptTemplate } = require('../utils/runtimePrompts');
+const { buildPromptSnapshot } = require('../utils/promptCompiler');
+const {
+  buildPlannerStageSystemPrompt,
+  buildReviewStageSystemPrompt
+} = require('../utils/stagePromptContracts');
+const { buildSecuritySystemPrompt } = require('../utils/promptSecurity');
 const {
   readRoutePromptPolicy,
   ROUTE_PROMPT_POLICY_PATH
@@ -46,6 +52,21 @@ function readManifestSections() {
 function collectTemplateVariables(templateText) {
   const matches = String(templateText || '').match(/\{\{(\w+)\}\}/g) || [];
   return Array.from(new Set(matches.map((token) => token.slice(2, -2))));
+}
+
+function collectConflictTags(sections = []) {
+  const seen = new Map();
+  const conflicts = [];
+  for (const section of sections) {
+    const tags = Array.isArray(section.conflictTags || section.conflict_tags)
+      ? (section.conflictTags || section.conflict_tags).map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    for (const tag of tags) {
+      if (seen.has(tag)) conflicts.push({ tag, sectionId: section.id, priorSectionId: seen.get(tag) });
+      else seen.set(tag, section.id);
+    }
+  }
+  return conflicts;
 }
 
 function main() {
@@ -97,6 +118,20 @@ function main() {
     const templateText = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf8') : fallbackText;
     const vars = collectTemplateVariables(templateText);
     ok(`runtime template variables ${templateId}: ${vars.join(', ') || '(none)'}`);
+    const sampleVariables = Object.fromEntries(vars.map((key) => [key, `${key}_sample`]));
+    try {
+      const rendered = renderRuntimePromptTemplate(templateText, sampleVariables);
+      if (rendered.meta.unusedVariables.length > 0) {
+        warn(`runtime template has unused sample variables ${templateId}: ${rendered.meta.unusedVariables.join(', ')}`);
+      }
+      if (!rendered.text) {
+        fail(`runtime template rendered empty block: ${templateId}`);
+        failureCount += 1;
+      }
+    } catch (error) {
+      fail(`runtime template render failed ${templateId}: ${error.message || error}`);
+      failureCount += 1;
+    }
   }
 
   if (!fs.existsSync(ROUTE_PROMPT_POLICY_PATH)) {
@@ -145,6 +180,51 @@ function main() {
         }
       }
     }
+  }
+
+  const manifestConflicts = collectConflictTags(Array.isArray(PROMPT_MANIFEST?.system_prompt?.sections) ? PROMPT_MANIFEST.system_prompt.sections : []);
+  for (const conflict of manifestConflicts) {
+    warn(`manifest conflict tag reused: ${conflict.tag} (${conflict.priorSectionId} -> ${conflict.sectionId})`);
+  }
+
+  const stageSnapshots = {
+    main: buildPromptSnapshot([
+      { id: 'policy', label: 'Policy', content: 'policy block', priority: 10 },
+      { id: 'memory', label: 'Memory', content: 'memory block', priority: 20 },
+      { id: 'persona', label: 'Persona', content: 'persona block', priority: 30 },
+      { id: 'few_shot', label: 'Few Shot', content: 'few shot block', priority: 40, conflictTags: ['few_shot'] }
+    ], { stage: 'main', policyKey: 'check/main', budgetTokens: 1000 }),
+    review: buildReviewStageSystemPrompt(),
+    planner: buildPlannerStageSystemPrompt([])
+  };
+
+  if (!stageSnapshots.main.assembledBlocks.length) {
+    fail('main prompt snapshot assembledBlocks empty');
+    failureCount += 1;
+  } else {
+    ok(`main prompt snapshot blocks: ${stageSnapshots.main.assembledBlocks.length}`);
+  }
+
+  if (!String(stageSnapshots.review || '').trim()) {
+    fail('review stage system prompt empty');
+    failureCount += 1;
+  } else {
+    ok('review stage system prompt present');
+  }
+
+  if (!String(stageSnapshots.planner || '').trim()) {
+    fail('planner stage system prompt empty');
+    failureCount += 1;
+  } else {
+    ok('planner stage system prompt present');
+  }
+
+  const securityBlock = buildSecuritySystemPrompt();
+  if (!String(securityBlock || '').trim()) {
+    fail('security system prompt missing');
+    failureCount += 1;
+  } else {
+    ok('security system prompt present');
   }
 
   if (failureCount > 0) {

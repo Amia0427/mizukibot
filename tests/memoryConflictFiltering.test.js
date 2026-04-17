@@ -50,7 +50,7 @@ const hits = retrieveUnifiedMemories('u_conflict', '猪猪 称呼 偏好', 8, {
 });
 
 assert.ok(hits.some((hit) => hit.text.includes('不喜欢被叫猪猪')), 'expected active dislike winner');
-assert.ok(!hits.some((hit) => hit.text.includes('喜欢被叫猪猪')), 'expected loser to be suppressed');
+assert.ok(!hits.some((hit) => hit.text === '喜欢被叫猪猪'), 'expected loser to be suppressed');
 
 const ctx = buildMemoryContext('u_conflict', '你喜欢别人叫你猪猪吗', {
   groupId: 'g1',
@@ -58,6 +58,6 @@ const ctx = buildMemoryContext('u_conflict', '你喜欢别人叫你猪猪吗', {
   routePolicyKey: 'chat/default'
 });
 assert.ok(String(ctx.memoryForPrompt || '').includes('不喜欢被叫猪猪'));
-assert.ok(!String(ctx.memoryForPrompt || '').includes('喜欢被叫猪猪'));
+assert.ok(!String(ctx.memoryForPrompt || '').includes('\n喜欢被叫猪猪'));
 
 console.log('memoryConflictFiltering.test.js passed');

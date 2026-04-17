@@ -427,6 +427,59 @@ function isQqImageUrl(url = '') {
   return /multimedia\.nt\.qq\.com\.cn\//i.test(String(url || '').trim());
 }
 
+async function resolveOpenAICompatibleImagePart(part = {}) {
+  const inlineData = String(
+    part?.data
+    || part?.image?.data
+    || part?.source?.data
+    || ''
+  ).trim();
+  const inlineMediaType = normalizeText(
+    part?.media_type
+    || part?.mime
+    || part?.image?.media_type
+    || part?.source?.media_type
+  ).toLowerCase();
+  const sourceType = normalizeText(part?.source?.type || '');
+
+  if (inlineData && (sourceType === 'base64' || part?.type === 'input_image' || part?.type === 'image')) {
+    return {
+      type: 'image_url',
+      image_url: {
+        url: `data:${inlineMediaType || 'image/jpeg'};base64,${inlineData}`
+      }
+    };
+  }
+
+  const imageUrl = String(part?.image_url?.url || part?.url || '').trim();
+  if (!imageUrl) return null;
+
+  try {
+    const resp = await axios.get(imageUrl, {
+      ...getAxiosOptions('openai_compatible', null, Math.min(getRequestTimeoutMs(), 20000)),
+      responseType: 'arraybuffer'
+    });
+    const mediaType = inferImageMediaType(imageUrl, resp?.headers || {});
+    const data = Buffer.from(resp.data).toString('base64');
+    if (!data) return null;
+    return {
+      type: 'image_url',
+      image_url: {
+        url: `data:${mediaType};base64,${data}`
+      }
+    };
+  } catch (error) {
+    const details = error?.response?.status ? ('status=' + error.response.status) : (error?.message || 'unknown-error');
+    console.warn('[vision] failed to fetch image url for openai-compatible block: ' + details);
+    return {
+      type: 'text',
+      text: isQqImageUrl(imageUrl)
+        ? '[Image unavailable: QQ image link expired or requires access.]'
+        : `[Image URL] ${imageUrl}`
+    };
+  }
+}
+
 async function resolveAnthropicImageBlock(part = {}) {
   const inlineData = String(
     part?.data
@@ -539,6 +592,42 @@ async function toAnthropicContentBlocks(content) {
 
   const fallback = String(content || '');
   return fallback ? [{ type: 'text', text: fallback }] : [];
+}
+
+async function preprocessOpenAICompatibleMessages(messages = []) {
+  const normalizedMessages = Array.isArray(messages) ? messages : [];
+  const out = [];
+
+  for (const message of normalizedMessages) {
+    if (!message || typeof message !== 'object') {
+      out.push(message);
+      continue;
+    }
+
+    const content = Array.isArray(message.content) ? message.content : null;
+    if (!content) {
+      out.push(message);
+      continue;
+    }
+
+    const nextContent = [];
+    for (const part of content) {
+      const partType = String(part?.type || '').toLowerCase();
+      if (partType === 'image_url' || partType === 'input_image' || partType === 'image') {
+        const resolvedPart = await resolveOpenAICompatibleImagePart(part);
+        if (resolvedPart) nextContent.push(resolvedPart);
+        continue;
+      }
+      nextContent.push(part);
+    }
+
+    out.push({
+      ...message,
+      content: nextContent
+    });
+  }
+
+  return out;
 }
 function mapToolSchemaToAnthropic(tool) {
   if (!tool || typeof tool !== 'object') return null;
@@ -752,10 +841,16 @@ async function buildAnthropicRequestBody(body = {}) {
 async function prepareRequest(url, body = {}) {
   const provider = getApiProvider(url, body?.model || config.AI_MODEL);
   if (provider !== 'anthropic') {
+    const requestBody = body && typeof body === 'object'
+      ? { ...body }
+      : body;
+    if (requestBody && Array.isArray(requestBody.messages)) {
+      requestBody.messages = await preprocessOpenAICompatibleMessages(requestBody.messages);
+    }
     return {
       provider,
       requestUrl: url,
-      requestBody: body
+      requestBody
     };
   }
 

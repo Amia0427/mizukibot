@@ -65,6 +65,9 @@ function createPrepareNode(deps = {}) {
   const buildDynamicPromptImpl = typeof deps.buildDynamicPromptImpl === 'function'
     ? deps.buildDynamicPromptImpl
     : (async () => ({ dynamicPrompt: '', affinity: null, memoryContext: null }));
+  const classifyPromptThreat = typeof deps.classifyPromptThreat === 'function'
+    ? deps.classifyPromptThreat
+    : (() => ({ labels: [], reasons: [], score: 0 }));
   const getToolPlannerExecutionPlan = typeof deps.getToolPlannerExecutionPlan === 'function'
     ? deps.getToolPlannerExecutionPlan
     : (() => null);
@@ -294,7 +297,12 @@ function createPrepareNode(deps = {}) {
     const preflightMemoryCliTurn = createMemoryCliTurnState(globalPreflight?.memoryCliTurn || nextMemoryCliTurn);
     const executionMemoryCliTurn = createMemoryCliTurnState(nextMemoryCliTurn);
     const executionAllowedTools = computeEffectiveAllowedTools(request, executionMemoryCliTurn);
-    const { dynamicPrompt, affinity, memoryContext, personaMemoryState } = await buildDynamicPromptImpl(
+    const threatMeta = classifyPromptThreat(request.question || '', {
+      routePolicyKey: request.routePolicyKey,
+      topRouteType: request.topRouteType
+    });
+
+    const { dynamicPrompt, affinity, memoryContext, personaMemoryState, promptSnapshot, promptSegments } = await buildDynamicPromptImpl(
       request.userInfo,
       request.userId,
       request.question,
@@ -309,6 +317,7 @@ function createPrepareNode(deps = {}) {
         disableTools: !request.allowTools,
         modelConfig: request.modelConfig,
         memoryCliTurn: executionMemoryCliTurn,
+        securityLabels: normalizeArray(threatMeta.labels),
         chatHistory,
         shortTermMemory,
         sessionKey: request.sessionKey
@@ -333,6 +342,11 @@ function createPrepareNode(deps = {}) {
       memory: {
         ...normalizeObject(restoredState.memory, state.memory),
         dynamicPrompt,
+        promptSnapshot: promptSnapshot || null,
+        promptSegments: promptSegments || null,
+        securityLabels: normalizeArray(threatMeta.labels),
+        blockedLearningEvents: normalizeArray(restoredState.memory?.blockedLearningEvents),
+        redactionEvents: normalizeArray(restoredState.memory?.redactionEvents),
         affinity,
         context: memoryContext || null,
         personaMemoryState: personaMemoryState || null,
@@ -389,6 +403,11 @@ function createPrepareNode(deps = {}) {
 
     const nextEvents = events.concat([
       ...normalizeArray(continuityProbe.events),
+      createEvent('prompt_security_labels', {
+        node: 'prepare',
+        labels: normalizeArray(threatMeta.labels),
+        score: Number(threatMeta.score || 0) || 0
+      }),
       createEvent('continuity_state_built', {
         node: 'prepare',
         hasText: Boolean(String(continuityBuilt.text || '').trim()),

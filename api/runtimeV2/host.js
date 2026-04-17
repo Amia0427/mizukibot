@@ -158,6 +158,7 @@ const { createDirectToolLoopHelpers } = require('./runtime/directToolLoop');
 const { createEvent, emitEvents, pickRouteMetaForPostReplyJob, stableHash, summarizeToolLogValue } = require('./runtime/events');
 const { createStreamingCoordinatorHelpers } = require('./runtime/streamingCoordinator');
 const { createToolExecutionHelpers } = require('./runtime/toolExecution');
+const { buildSecuritySystemPrompt, classifyPromptThreat, protectFinalOutput } = require('../../utils/promptSecurity');
 
 function nowTs() {
   return Date.now();
@@ -494,7 +495,8 @@ function createRuntime(options = {}) {
     mergeAllowedToolsWithMemoryCli,
     isPlannerSingleAuthorityEnabled,
     getRouteToolPlanner,
-    resolveModelTokenLimit
+    resolveModelTokenLimit,
+    buildSecuritySystemPrompt
   });
 
   function buildMainConversationContextSnapshot(state, segmentedMessages = {}, options = {}) {
@@ -1123,6 +1125,7 @@ function createRuntime(options = {}) {
     createEvent,
     isReplyFailure,
     classifyReplyFailure,
+    protectFinalOutput,
     saveAndEmit
   });
 
@@ -1229,6 +1232,7 @@ function createRuntime(options = {}) {
     computeEffectiveAllowedTools,
     runCapabilityPreflight,
     buildDynamicPromptImpl,
+    classifyPromptThreat,
     getToolPlannerExecutionPlan,
     isPlannerSingleAuthorityEnabled,
     normalizePlanForResume,

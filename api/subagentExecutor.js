@@ -21,6 +21,12 @@ function resolveBackendName() {
   return String(config.SUBAGENT_BACKEND || 'command').trim().toLowerCase() || 'command';
 }
 
+function resolveBackendNameForOptions(options = {}) {
+  const override = String(options?.backendOverride || '').trim().toLowerCase();
+  if (override) return override;
+  return resolveBackendName();
+}
+
 function acquireSubagentSlot() {
   return new Promise((resolve) => {
     const tryAcquire = () => {
@@ -42,7 +48,7 @@ function acquireSubagentSlot() {
 }
 
 function createBridgeCall(params = {}) {
-  const backend = resolveBackendName();
+  const backend = resolveBackendNameForOptions(params?.options);
   const sessionId = buildSessionId(params?.userId, params?.options);
   const normalizedParams = {
     ...params,
@@ -96,7 +102,7 @@ async function startSubagentBridgeCall(question, userInfo, userId, customPrompt 
 }
 
 async function askSubagentByBridge(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
-  if (resolveBackendName() === 'openclaw') {
+  if (resolveBackendNameForOptions(options) === 'openclaw') {
     return askOpenclawByBridge(question, userInfo, userId, customPrompt, imageUrl, options);
   }
   const call = await startSubagentBridgeCall(question, userInfo, userId, customPrompt, imageUrl, options);

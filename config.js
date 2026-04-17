@@ -1,6 +1,8 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { loadPromptManifest, readPromptAsset } = require('./utils/promptManifest');
+const { buildPromptSnapshot } = require('./utils/promptCompiler');
 
 function loadLocalEnvFallback() {
   const envPath = path.join(__dirname, '.env');
@@ -173,15 +175,7 @@ const PERSONA_FILES = [
 ];
 
 function readPromptManifest() {
-  const raw = safeReadText(PROMPT_MANIFEST_PATH, '').trim();
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch (error) {
-    throw new Error('[config] Invalid prompt manifest JSON: ' + String(error.message || error));
-  }
+  return loadPromptManifest(PROMPT_MANIFEST_PATH);
 }
 
 function validatePromptText(text, manifest = null) {
@@ -200,24 +194,34 @@ function validatePromptText(text, manifest = null) {
 }
 
 function loadPromptSectionsFromManifest(manifest) {
-  const sections = Array.isArray(manifest?.system_prompt?.sections)
-    ? manifest.system_prompt.sections
-    : [];
+  const sections = Array.isArray(manifest?.system_prompt?.sections) ? manifest.system_prompt.sections : [];
   const missing = [];
-  const loaded = [];
+  const blocks = [];
 
   for (const section of sections) {
     const relPath = String(section?.path || '').trim();
     if (!relPath) continue;
-
-    const fullPath = path.join(PROMPTS_DIR, ...relPath.split('/'));
-    const text = String(safeReadText(fullPath, '') || '').trim();
+    const asset = readPromptAsset(PROMPTS_DIR, relPath);
+    const text = String(asset.text || '').trim();
     if (!text) {
       if (section?.required !== false) missing.push(relPath);
       continue;
     }
-    if (section?.include_in_system_prompt === false) continue;
-    loaded.push(text);
+    if (section?.includeInSystemPrompt === false || section?.include_in_system_prompt === false) continue;
+    blocks.push({
+      id: String(section?.id || relPath).trim() || relPath,
+      label: String(section?.id || relPath).trim() || relPath,
+      stage: String(section?.stage || 'main').trim() || 'main',
+      priority: Number.isFinite(Number(section?.priority)) ? Number(section.priority) : 100,
+      authority: String(section?.authority || section?.kind || 'prompt_asset').trim() || 'prompt_asset',
+      budgetTokens: Math.max(0, Number(section?.budgetTokens || section?.budget_tokens || 0) || 0),
+      conflictTags: Array.isArray(section?.conflictTags || section?.conflict_tags)
+        ? (section.conflictTags || section.conflict_tags).map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      source: relPath,
+      kind: String(section?.kind || 'prompt_asset').trim() || 'prompt_asset',
+      content: text
+    });
   }
 
   if (missing.length > 0) {
@@ -228,7 +232,23 @@ function loadPromptSectionsFromManifest(manifest) {
     ? manifest.system_prompt.preamble.map((item) => String(item || '').trim()).filter(Boolean).join('\n')
     : '';
 
-  const fullPrompt = [preamble, ...loaded].filter(Boolean).join('\n');
+  const snapshot = buildPromptSnapshot([
+    ...(preamble ? [{
+      id: 'manifest_preamble',
+      label: 'Manifest Preamble',
+      stage: 'main',
+      priority: 0,
+      authority: 'system_preamble',
+      kind: 'preamble',
+      source: 'prompt-manifest.json',
+      content: preamble
+    }] : []),
+    ...blocks
+  ], {
+    stage: 'main',
+    policyKey: 'config/system_prompt'
+  });
+  const fullPrompt = snapshot.renderedSystemMessages.map((message) => String(message.content || '').trim()).filter(Boolean).join('\n');
   validatePromptText(fullPrompt, manifest);
   return fullPrompt;
 }

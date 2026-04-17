@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const config = require('../config');
 const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent } = require('../api/parser');
+const { classifyPromptThreat, sanitizeUntrustedContent } = require('./promptSecurity');
 
 const EVENT_KINDS = new Set(['error', 'correction', 'feature_request', 'strategy', 'knowledge_gap']);
 const EVENT_STATUSES = new Set(['open', 'promoted', 'ignored']);
@@ -318,6 +319,17 @@ function normalizePromptSource(value = '') {
   return normalized === 'patterns' ? 'patterns' : 'rules';
 }
 
+function shouldBlockSelfImprovementText(text = '') {
+  const threat = classifyPromptThreat(text, {});
+  if (threat.labels.length > 0) return { blocked: true, reason: `threat:${threat.labels.join(',')}` };
+  const value = String(text || '').trim();
+  if (!value) return { blocked: false, reason: '' };
+  if (/(忽略规则|绕过限制|泄露|system prompt|developer message|hidden prompt|internal policy)/i.test(value)) {
+    return { blocked: true, reason: 'blocked_pattern' };
+  }
+  return { blocked: false, reason: '' };
+}
+
 function detectToolIssue(summary = '', details = '', evidenceText = '') {
   const haystack = `${summary} ${details} ${evidenceText}`.toLowerCase();
   if (/(timeout|timed out|time out)/.test(haystack)) return 'timeout';
@@ -465,6 +477,7 @@ function normalizePatternRecord(input = {}) {
   const suggestedAction = redactSensitiveText(input.suggestedAction, 280);
   const ruleType = normalizeRuleType(input.ruleType, normalizeKind(input.kind) === 'strategy' ? 'prefer' : 'avoid');
   const runtimeRule = trimText(input.runtimeRule || input.injectionText || '', 320);
+  const safetyGate = shouldBlockSelfImprovementText(`${summary} ${suggestedAction} ${runtimeRule}`);
   return {
     patternKey: normalizePatternKey(input.patternKey, 'general.unknown.other'),
     kind: normalizeKind(input.kind),
@@ -473,7 +486,7 @@ function normalizePatternRecord(input = {}) {
     distinctContexts: normalizeShortList(input.distinctContexts || [], 8, 120),
     summary,
     suggestedAction,
-    injectionText: redactSensitiveText(input.injectionText || runtimeRule, 320),
+    injectionText: safetyGate.blocked ? '' : redactSensitiveText(input.injectionText || runtimeRule, 320),
     confidence: clampNumber(input.confidence, 0, 1, 0),
     topRouteType: trimText(input.topRouteType || '', 80),
     routePolicyKey: trimText(input.routePolicyKey || '', 120),
@@ -483,20 +496,24 @@ function normalizePatternRecord(input = {}) {
     lastSeenAt: trimText(input.lastSeenAt || now, 40) || now,
     taxonomyVersion: Math.max(1, Number(input.taxonomyVersion || config.SELF_IMPROVEMENT_PATTERN_TAXONOMY_VERSION || 3) || 3),
     ruleType,
-    runtimeRule,
-    priority: clampNumber(input.priority, 0, 1, derivePriority(input.kind))
+    runtimeRule: safetyGate.blocked ? '' : runtimeRule,
+    priority: clampNumber(input.priority, 0, 1, derivePriority(input.kind)),
+    blocked_reason: safetyGate.blocked ? safetyGate.reason : '',
+    safety_source: safetyGate.blocked ? 'prompt_security' : '',
+    learning_allowed: !safetyGate.blocked
   };
 }
 
 function normalizeRuleRecord(input = {}) {
   const now = nowIso();
+  const safetyGate = shouldBlockSelfImprovementText(`${input.ruleText || ''} ${input.patternKey || ''}`);
   return {
     ruleId: trimText(input.ruleId || `sir_${hashId({ patternKey: input.patternKey, kind: input.kind, ruleText: input.ruleText })}`, 48),
     patternKey: normalizePatternKey(input.patternKey, 'general.unknown.other'),
     kind: normalizeKind(input.kind),
     priority: clampNumber(input.priority, 0, 1, 0.9),
     ruleType: normalizeRuleType(input.ruleType, 'avoid'),
-    ruleText: trimText(input.ruleText, 280),
+    ruleText: safetyGate.blocked ? '' : trimText(input.ruleText, 280),
     toolName: trimText(input.toolName || '', 80),
     routePolicyKey: trimText(input.routePolicyKey || '', 120),
     topRouteType: trimText(input.topRouteType || '', 80),
@@ -504,19 +521,23 @@ function normalizeRuleRecord(input = {}) {
     occurrenceCount: Math.max(0, Number(input.occurrenceCount || 0) || 0),
     confidence: clampNumber(input.confidence, 0, 1, 0),
     sourcePatternUpdatedAt: trimText(input.sourcePatternUpdatedAt || input.updatedAt || now, 40) || now,
-    updatedAt: trimText(input.updatedAt || now, 40) || now
+    updatedAt: trimText(input.updatedAt || now, 40) || now,
+    blocked_reason: safetyGate.blocked ? safetyGate.reason : '',
+    safety_source: safetyGate.blocked ? 'prompt_security' : '',
+    learning_allowed: !safetyGate.blocked
   };
 }
 
 function normalizeGuideRecord(input = {}) {
   const now = nowIso();
+  const safetyGate = shouldBlockSelfImprovementText(`${input.ruleText || ''} ${input.summary || ''} ${input.example || ''}`);
   return {
     guideId: trimText(input.guideId || `sig_${hashId({ patternKey: input.patternKey, title: input.title })}`, 48),
     patternKey: normalizePatternKey(input.patternKey, 'general.unknown.other'),
     kind: normalizeKind(input.kind),
     title: trimText(input.title, 140),
     summary: normalizeSummary(input.summary),
-    ruleText: trimText(input.ruleText, 280),
+    ruleText: safetyGate.blocked ? '' : trimText(input.ruleText, 280),
     triggerHints: normalizeShortList(input.triggerHints || [], 4, 120),
     doList: normalizeShortList(input.doList || [], 4, 140),
     dontList: normalizeShortList(input.dontList || [], 4, 140),
@@ -524,7 +545,10 @@ function normalizeGuideRecord(input = {}) {
     occurrenceCount: Math.max(0, Number(input.occurrenceCount || 0) || 0),
     confidence: clampNumber(input.confidence, 0, 1, 0),
     status: trimText(input.status || GUIDE_ACTIVE_STATUS, 40) || GUIDE_ACTIVE_STATUS,
-    updatedAt: trimText(input.updatedAt || now, 40) || now
+    updatedAt: trimText(input.updatedAt || now, 40) || now,
+    blocked_reason: safetyGate.blocked ? safetyGate.reason : '',
+    safety_source: safetyGate.blocked ? 'prompt_security' : '',
+    learning_allowed: !safetyGate.blocked
   };
 }
 
@@ -726,6 +750,7 @@ function rebuildPromotedRules(patterns = []) {
   return normalizeArray(patterns)
     .map((item) => normalizePatternRecord(item))
     .filter((item) => item.status === PROMOTED_STATUS)
+    .filter((item) => item.learning_allowed !== false)
     .map((item) => {
       const runtimeRule = buildRuntimeRule(item);
       return normalizeRuleRecord({
@@ -764,6 +789,7 @@ function rebuildLocalSkillGuides(patterns = [], rules = []) {
   return normalizeArray(patterns)
     .map((item) => normalizePatternRecord(item))
     .filter((item) => item.status === PROMOTED_STATUS)
+    .filter((item) => item.learning_allowed !== false)
     .filter((item) => item.kind !== 'knowledge_gap')
     .filter((item) => Number(item.occurrenceCount || 0) >= getGuideMinOccurrences())
     .filter((item) => Number(item.confidence || 0) >= getGuideMinConfidence())
@@ -1095,6 +1121,7 @@ async function learnSelfImprovement(userId, userText, botReply, options = {}) {
   const question = trimText(userText, 2000);
   const answer = trimText(botReply, 3000);
   if (!uid || !question || !answer) return [];
+  if (shouldBlockSelfImprovementText(`${question}\n${answer}`).blocked) return [];
 
   const apiBaseUrl = getExtractionApiBaseUrl();
   const apiKey = getExtractionApiKey();
@@ -1139,9 +1166,9 @@ async function learnSelfImprovement(userId, userText, botReply, options = {}) {
         status: 'open',
         patternKey: item.pattern_key || item.patternKey || options.taskType || options.routePolicyKey || 'strategy',
         priority: clampNumber(item.priority, 0, 1, derivePriority(normalizeKind(item.kind))),
-        summary: item.summary,
-        details: item.details,
-        suggestedAction: item.suggested_action || item.suggestedAction,
+        summary: sanitizeUntrustedContent(item.summary, 'self_improvement'),
+        details: sanitizeUntrustedContent(item.details, 'self_improvement'),
+        suggestedAction: sanitizeUntrustedContent(item.suggested_action || item.suggestedAction, 'self_improvement'),
         confidence,
         routePolicyKey: options.routePolicyKey,
         topRouteType: options.topRouteType,
@@ -1151,7 +1178,7 @@ async function learnSelfImprovement(userId, userText, botReply, options = {}) {
         channelId: options.channelId,
         groupId: options.groupId,
         userId: uid,
-        evidence: normalizeArray(item.evidence).map((entry) => ({ excerpt: entry }))
+        evidence: normalizeArray(item.evidence).map((entry) => ({ excerpt: sanitizeUntrustedContent(entry, 'self_improvement') }))
       });
       if (event) stored.push(event);
     }

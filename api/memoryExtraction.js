@@ -12,6 +12,7 @@ const {
 } = require('../utils/memory');
 const { addTaskMemory } = require('../utils/taskMemory');
 const { addGroupMemory } = require('../utils/groupMemory');
+const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('../utils/promptSecurity');
 
 function ensureChatCompletionsUrl(url) {
   const u = String(url || '').replace(/\/+$/, '');
@@ -198,6 +199,8 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8, options 
 
   for (const raw of values) {
     const value = String(raw || '').trim();
+    const learningGate = shouldBlockMemoryLearning(value, fieldKey, options);
+    if (learningGate.blocked) continue;
     if (!shouldPersistMemoryCandidate(type, value, confidence)) continue;
     const meta = buildMemoryBaseMeta(type, confidence, { ...options, fieldKey });
 
@@ -644,6 +647,7 @@ Rules:
 
     for (const value of sharedFacts) {
       const text = String(value || '').trim();
+      if (shouldBlockMemoryLearning(text, 'group_fact', options).blocked) continue;
       if (text) addGroupMemory(groupId, text, 'fact', {
         confidence,
         routePolicyKey: options.routePolicyKey,
@@ -660,6 +664,7 @@ Rules:
     }
     for (const value of sharedGoals) {
       const text = String(value || '').trim();
+      if (shouldBlockMemoryLearning(text, 'group_goal', options).blocked) continue;
       if (text) addGroupMemory(groupId, `group goal: ${text}`, 'goal', {
         confidence,
         routePolicyKey: options.routePolicyKey,
@@ -676,6 +681,7 @@ Rules:
     }
     for (const value of sharedTopics) {
       const text = String(value || '').trim();
+      if (shouldBlockMemoryLearning(text, 'group_topic', options).blocked) continue;
       if (text && text.length >= 4) {
         addGroupMemory(groupId, `group topic: ${text}`, 'topic', {
           confidence,
@@ -775,20 +781,23 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
     ? parseExplicitRemember(userText)
     : '';
   if (explicitRemember) {
-    rememberExplicitMemory(userId, explicitRemember, {
-      scopeType: options.groupId ? 'group' : 'personal',
-      groupId: options.groupId || '',
-      sessionId: options.sessionId,
-      routePolicyKey: options.routePolicyKey,
-      topRouteType: options.topRouteType,
-      agentName: options.agentName,
-      toolName: options.toolName,
-      channelId: options.channelId,
-      participants,
-      entities,
-      relations,
-      sourceSessionId: options.sessionId
-    });
+    const explicitGate = shouldBlockMemoryLearning(explicitRemember, 'fact', options);
+    if (!explicitGate.blocked) {
+      rememberExplicitMemory(userId, sanitizeUntrustedContent(explicitRemember, 'memory'), {
+        scopeType: options.groupId ? 'group' : 'personal',
+        groupId: options.groupId || '',
+        sessionId: options.sessionId,
+        routePolicyKey: options.routePolicyKey,
+        topRouteType: options.topRouteType,
+        agentName: options.agentName,
+        toolName: options.toolName,
+        channelId: options.channelId,
+        participants,
+        entities,
+        relations,
+        sourceSessionId: options.sessionId
+      });
+    }
   }
 
   const extractPrompt = `

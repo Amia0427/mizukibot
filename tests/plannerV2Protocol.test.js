@@ -312,7 +312,7 @@ module.exports = (async () => {
     })
   });
 
-  assert.deepStrictEqual(weatherCorrection.allowedToolNames, ['skill_weather', 'getWeather']);
+  assert.deepStrictEqual(weatherCorrection.allowedToolNames, ['skill_weather']);
   assert.strictEqual(weatherCorrection.steps[0].tool, 'skill_weather');
   assert.strictEqual(weatherCorrection.steps[0].args.location, '北京今天天气怎么样');
 
@@ -464,7 +464,7 @@ module.exports = (async () => {
     })
   });
 
-  assert.deepStrictEqual(arxivCorrection.allowedToolNames, ['skill_arxiv_latest', 'skill_arxiv_search']);
+  assert.deepStrictEqual(arxivCorrection.allowedToolNames, ['skill_arxiv_latest']);
   assert.strictEqual(arxivCorrection.steps[0].tool, 'skill_arxiv_latest');
 
   const explicitUrlCorrection = await planRequestV2({
@@ -515,6 +515,7 @@ module.exports = (async () => {
 
   assert.deepStrictEqual(explicitUrlCorrection.allowedToolNames, ['web_fetch']);
   assert.strictEqual(explicitUrlCorrection.steps[0].tool, 'web_fetch');
+  assert.strictEqual(explicitUrlCorrection.steps[0].args.url, 'https://platform.openai.com/docs/models');
 
   const toolCatalog = buildDirectChatToolCatalog({ userId: 'u1' });
   const plannerPayload = buildPlannerUserPayload({
@@ -540,6 +541,56 @@ module.exports = (async () => {
   assert.strictEqual(weatherToolMeta.overlapGroup, 'weather');
   assert.ok(Array.isArray(weatherToolMeta.preferredOver));
   assert.ok(weatherToolMeta.preferredOver.includes('getWeather'));
+
+  const financeTickerGuard = await planRequestV2({
+    question: 'PLEASE 分析一下这个方案',
+    cleanText: 'PLEASE 分析一下这个方案',
+    topRouteType: 'direct_chat',
+    routeMeta: {
+      chatMode: 'chat',
+      toolIntent: 'maybe_tools',
+      responseIntent: 'answer'
+    },
+    route: {
+      question: 'PLEASE 分析一下这个方案',
+      cleanText: 'PLEASE 分析一下这个方案',
+      topRouteType: 'direct_chat',
+      meta: {
+        chatMode: 'chat',
+        toolIntent: 'maybe_tools',
+        responseIntent: 'answer'
+      },
+      intent: {},
+      facets: {
+        domain: 'finance',
+        sourceScope: 'live'
+      }
+    },
+    allowedTools: ['skill_stock_analyze'],
+    planner: async () => ({
+      mode: 'tool_plan',
+      taskShape: 'tool_augmented_reply',
+      allowedToolNames: ['skill_stock_analyze'],
+      steps: [
+        {
+          id: 'planner_step_1',
+          tool: 'skill_stock_analyze',
+          args: {},
+          purpose: 'Analyze stock'
+        }
+      ],
+      plannerMeta: {
+        decisionVersion: 'planner_decision_v2',
+        plannerVersion: 'direct_chat_single_authority_v2',
+        reason: 'planner chose finance analyze',
+        plannerModel: 'mock-planner',
+        decisionSource: 'planner'
+      }
+    })
+  });
+
+  assert.strictEqual(financeTickerGuard.steps[0].tool, 'skill_stock_analyze');
+  assert.notStrictEqual(financeTickerGuard.steps[0].args.ticker, 'PLEASE');
 
   console.log('plannerV2Protocol.test.js passed');
 })().catch((error) => {

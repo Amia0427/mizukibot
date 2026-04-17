@@ -125,8 +125,8 @@ const INITIATIVE_PROCESS_HOOK_KEY = '__mizuki_initiative_flush_hooks_registered_
 if (!process[INITIATIVE_PROCESS_HOOK_KEY]) {
   process[INITIATIVE_PROCESS_HOOK_KEY] = true;
   process.on('exit', flushAllSync);
-  process.on('SIGINT', flushAllSync);
-  process.on('SIGTERM', flushAllSync);
+  if (!process.listeners('SIGINT').includes(flushAllSync)) process.on('SIGINT', flushAllSync);
+  if (!process.listeners('SIGTERM').includes(flushAllSync)) process.on('SIGTERM', flushAllSync);
 }
 
 function ensureGroupState(groupId, now = Date.now()) {

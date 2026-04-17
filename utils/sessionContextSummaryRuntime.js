@@ -1,13 +1,14 @@
 const config = require('../config');
 const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent } = require('../api/parser');
+const { sanitizeUntrustedContent } = require('./promptSecurity');
 const {
   ensureShortTermMemoryState,
   normalizeShortTermState
 } = require('./shortTermMemory');
 
 function clampText(value, maxChars = config.SESSION_CONTEXT_SUMMARY_MAX_CHARS) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  const text = sanitizeUntrustedContent(String(value || '').replace(/\s+/g, ' ').trim(), 'summary');
   if (!text) return '';
   const limit = Math.max(1, Number(maxChars) || 1);
   return text.length > limit ? text.slice(0, limit) : text;

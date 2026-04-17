@@ -28,6 +28,7 @@ const {
   queryMemory,
   assembleMemoryPacket
 } = require('./memory-v3');
+const { queryLocalKnowledge } = require('./localKnowledge');
 
 function sanitizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -594,6 +595,21 @@ function buildMemoryContext(userId, question = '', options = {}) {
 }
 
 async function buildMemoryContextAsync(userId, question = '', options = {}) {
+  const localKnowledge = await queryLocalKnowledge({
+    userId,
+    query: question || '',
+    topK: options.topK || config.MEMORY_RAG_TOP_K || 8,
+    groupId: options.groupId,
+    groupIds: resolveReadableGroupIds(userId, options),
+    sessionId: options.sessionId,
+    sessionKey: options.sessionKey,
+    routePolicyKey: options.routePolicyKey,
+    topRouteType: options.topRouteType,
+    taskType: options.taskType,
+    agentName: options.agentName,
+    toolName: options.toolName,
+    lookbackDays: options.dailyLookbackDays || options.lookbackDays
+  });
   if (config.MEMORY_V3_ENABLED) {
     const resolvedGroupIds = resolveReadableGroupIds(userId, options);
     const queryResult = await queryMemory({
@@ -646,6 +662,11 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       packet.styleSignalsText ? `[StyleSignals]\n${packet.styleSignalsText}` : ''
     ].filter(Boolean).join('\n\n');
 
+    const notebookText = (localKnowledge.bySource?.notebook_doc || [])
+      .map((item) => String(item.preview || item.text || '').trim())
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('\n');
     return {
       memoryForPrompt,
       retrievedMemoryForPrompt: packet.relevantEvidenceText,
@@ -669,7 +690,7 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       promptSummaryText: String(queryResult.persona?.summary || queryResult.digest || ''),
       promptImpressionText: String(queryResult.persona?.impression || ''),
       taskMemoryText: packet.taskStrategyText,
-      groupMemoryText: packet.groupSharedContextText,
+      groupMemoryText: [packet.groupSharedContextText, notebookText].filter(Boolean).join('\n'),
       promptGroupMemoryText: packet.groupSharedContextText,
       styleSignalText: packet.styleSignalsText,
       promptStyleSignalText: packet.styleSignalsText,
@@ -686,7 +707,8 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
         byTier: {},
         byMemoryKind: {},
         byStatus: {},
-        bySourceKind: {}
+        bySourceKind: {},
+        localKnowledge: localKnowledge.diagnostics
       },
       segments: {
         retrievedMemory: packet.messages.relevantEvidence || [],

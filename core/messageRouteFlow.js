@@ -1,5 +1,6 @@
 const { buildRoutePromptBundle } = require('../utils/routePromptPolicy');
 const { buildSessionId } = require('../api/subagentSessionManager');
+const { getClaudeSessionRuntime } = require('../utils/claudeSessionRuntime');
 const {
   buildReplyEnvelope,
   buildRouteDecisionContext
@@ -203,6 +204,295 @@ function createMessageRouteFlow(deps = {}) {
     markThinkingEmojiBeforeLlm,
     buildSubagentContextSummary
   } = deps;
+  const claudeSessionRuntime = getClaudeSessionRuntime();
+
+  function isAdminPrivateChat(chatType = '', senderId = '') {
+    return String(chatType || '').trim().toLowerCase() === 'private'
+      && typeof isAdminUser === 'function'
+      && isAdminUser(senderId);
+  }
+
+  function buildClaudeSessionKey(chatType = '', senderId = '', groupId = '') {
+    return buildSessionId(senderId, {
+      sessionChannel: String(chatType || '').trim().toLowerCase() === 'private' ? 'qq-private' : 'qq-group',
+      sessionChatId: String(chatType || '').trim().toLowerCase() === 'private'
+        ? `direct_${senderId}`
+        : `group_${groupId}_user_${senderId}`
+    });
+  }
+
+  async function runClaudeWrapperMetadata(message = '', session = null) {
+    const child_process = require('child_process');
+    const scriptPath = 'D:/waifu/scripts/hapi-runners/run-claude.ps1';
+    const workspaceRoot = 'D:/waifu';
+    const args = [
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      scriptPath,
+      '-Message',
+      String(message || '').trim(),
+      '-WorkspaceRoot',
+      workspaceRoot,
+      '-ReturnMetadata'
+    ];
+    const resumeSessionId = String(session?.claude_session_id || '').trim();
+    if (resumeSessionId) {
+      args.push('-ResumeSessionId', resumeSessionId);
+    }
+
+    return new Promise((resolve, reject) => {
+      const child = child_process.spawn(
+        'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+        args,
+        {
+          cwd: workspaceRoot,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe']
+        }
+      );
+
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (buf) => { stdout += String(buf); });
+      child.stderr.on('data', (buf) => { stderr += String(buf); });
+      child.on('error', reject);
+      child.on('close', (code) => {
+        if (Number(code) !== 0) {
+          return reject(new Error(String(stderr || stdout || `claude wrapper exited with code ${code}`)));
+        }
+        try {
+          const parsed = JSON.parse(String(stdout || '').trim());
+          return resolve(parsed);
+        } catch (error) {
+          return reject(new Error(`claude metadata parse failed: ${error.message || error}`));
+        }
+      });
+    });
+  }
+
+  async function handleClaudeSessionAdminCommand({
+    route,
+    groupId,
+    senderId,
+    chatType = 'group'
+  }) {
+    const normalizedChatType = String(chatType || '').trim().toLowerCase() === 'private' ? 'private' : 'group';
+    if (!isAdminPrivateChat(normalizedChatType, senderId)) {
+      await sendGroupReply({
+        chatType: normalizedChatType,
+        groupId,
+        userId: senderId,
+        senderId,
+        replyText: '仅管理员私聊可用。',
+        atSender: false,
+        retries: 1,
+        waitMs: 300
+      });
+      return true;
+    }
+
+    const command = route?.meta?.command || {};
+    const cmd = String(command.cmd || '').trim().toLowerCase();
+    const payload = String(command.payload || '').trim();
+    const sessionKey = buildClaudeSessionKey(normalizedChatType, senderId, groupId);
+    const currentSession = claudeSessionRuntime.getSession(sessionKey);
+
+    if (cmd === 'claude-open') {
+      if (currentSession && ['open', 'running', 'idle'].includes(String(currentSession.status || '').trim().toLowerCase())) {
+        await sendGroupReply({
+          chatType: normalizedChatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: [
+            `Claude 会话已存在。`,
+            `session_id: ${String(currentSession.claude_session_id || 'unknown').trim() || 'unknown'}`,
+            `status: ${String(currentSession.status || 'unknown').trim() || 'unknown'}`
+          ].join('\n'),
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+        return true;
+      }
+
+      try {
+        const metadata = await runClaudeWrapperMetadata('进入会话，等待后续指令。', null);
+        const nextSession = claudeSessionRuntime.openSession({
+          sessionKey,
+          claudeSessionId: String(metadata.session_id || '').trim(),
+          transcriptPath: String(metadata.transcript_path || '').trim(),
+          status: 'open',
+          lastPrompt: '进入会话，等待后续指令。'
+        });
+        await sendGroupReply({
+          chatType: normalizedChatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: [
+            'Claude 会话已建立。',
+            `session_id: ${String(nextSession?.claude_session_id || 'unknown').trim() || 'unknown'}`,
+            `status: ${String(nextSession?.status || 'open').trim() || 'open'}`
+          ].join('\n'),
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+      } catch (error) {
+        await sendGroupReply({
+          chatType: normalizedChatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: `Claude 会话创建失败：${String(error?.message || error || 'unknown error').trim()}`,
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+      }
+      return true;
+    }
+
+    if (cmd === 'claude-send') {
+      if (!currentSession || !['open', 'running', 'idle'].includes(String(currentSession.status || '').trim().toLowerCase())) {
+        await sendGroupReply({
+          chatType: normalizedChatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: '当前没有活跃 Claude 会话，请先发送 /claude-open。',
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+        return true;
+      }
+      if (!payload) {
+        await sendGroupReply({
+          chatType: normalizedChatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: '/claude-send 后面需要跟具体内容。',
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+        return true;
+      }
+
+      try {
+        claudeSessionRuntime.updateSession(sessionKey, {
+          status: 'running',
+          last_prompt: payload,
+          active_run_id: `${Date.now()}`
+        });
+        void runClaudeWrapperMetadata(payload, currentSession)
+          .then((metadata) => {
+            claudeSessionRuntime.updateSession(sessionKey, {
+              claude_session_id: String(metadata.session_id || currentSession.claude_session_id || '').trim(),
+              transcript_path: String(metadata.transcript_path || currentSession.transcript_path || '').trim(),
+              status: 'idle',
+              last_error: ''
+            });
+          })
+          .catch((error) => {
+            claudeSessionRuntime.updateSession(sessionKey, {
+              status: 'failed',
+              last_error: String(error?.message || error || 'unknown error').trim()
+            });
+          });
+
+        await sendGroupReply({
+          chatType: normalizedChatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: '已发送到 Claude 会话，使用 /claude-tail 查看输出。',
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+      } catch (error) {
+        await sendGroupReply({
+          chatType: normalizedChatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: `Claude 会话发送失败：${String(error?.message || error || 'unknown error').trim()}`,
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+      }
+      return true;
+    }
+
+    if (cmd === 'claude-tail') {
+      if (!currentSession) {
+        await sendGroupReply({
+          chatType: normalizedChatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: '当前没有 Claude 会话，请先发送 /claude-open。',
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+        return true;
+      }
+      const tailResult = claudeSessionRuntime.readTail(sessionKey);
+      const replyText = !tailResult.ok
+        ? `Claude 会话输出不可读：${tailResult.reason}`
+        : (tailResult.hasNewOutput
+          ? tailResult.text
+          : '当前没有新的 Claude 输出。');
+      await sendGroupReply({
+        chatType: normalizedChatType,
+        groupId,
+        userId: senderId,
+        senderId,
+        replyText,
+        atSender: false,
+        retries: 1,
+        waitMs: 300
+      });
+      return true;
+    }
+
+    if (cmd === 'claude-stop') {
+      if (!currentSession) {
+        await sendGroupReply({
+          chatType: normalizedChatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: '当前没有可关闭的 Claude 会话。',
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+        return true;
+      }
+      claudeSessionRuntime.closeSession(sessionKey);
+      await sendGroupReply({
+        chatType: normalizedChatType,
+        groupId,
+        userId: senderId,
+        senderId,
+        replyText: 'Claude 会话已关闭。',
+        atSender: false,
+        retries: 1,
+        waitMs: 300
+      });
+      return true;
+    }
+
+    return false;
+  }
 
   function hasAdminAccess(route = {}, senderId = '') {
     if (typeof isAdminUser === 'function') {
@@ -264,6 +554,7 @@ function createMessageRouteFlow(deps = {}) {
         toolTaskOptions: {
           routePrompt: fullPrompt,
           subagentRoutePrompt: fullPrompt,
+          backendOverride: 'openclaw',
           sessionChannel: 'qq-group',
           sessionChatId,
           routePolicyKey: 'admin/full',
@@ -283,6 +574,7 @@ function createMessageRouteFlow(deps = {}) {
     const reply = await askToolTaskWithSubagentReview(payload, userInfo, senderId, null, route?.imageUrl || null, {
       routePrompt: fullPrompt,
       subagentRoutePrompt: fullPrompt,
+      backendOverride: 'openclaw',
       sessionChannel: 'qq-group',
       sessionChatId,
       routePolicyKey: 'admin/full',
@@ -307,6 +599,85 @@ function createMessageRouteFlow(deps = {}) {
         requestText: payload
       }),
       atSender: true,
+      retries: 1,
+      waitMs: 300
+    });
+    return true;
+  }
+
+  async function handleClaudeAdminCommand({
+    route,
+    groupId,
+    senderId,
+    userInfo,
+    rawText,
+    chatType = 'group'
+  }) {
+    const normalizedChatType = String(chatType || '').trim().toLowerCase() === 'private' ? 'private' : 'group';
+    const command = route?.meta?.command || {};
+    const payload = String(command.payload || command.args?.[0] || '').trim();
+    if (!hasAdminAccess(route, senderId)) {
+      await sendGroupReply({
+        chatType: normalizedChatType,
+        groupId,
+        userId: senderId,
+        senderId,
+        replyText: '仅管理员可用。',
+        atSender: normalizedChatType !== 'private',
+        retries: 1,
+        waitMs: 300
+      });
+      return true;
+    }
+
+    if (!payload) {
+      await sendGroupReply({
+        chatType: normalizedChatType,
+        groupId,
+        userId: senderId,
+        senderId,
+        replyText: '/claude 后面需要跟具体任务。',
+        atSender: normalizedChatType !== 'private',
+        retries: 1,
+        waitMs: 300
+      });
+      return true;
+    }
+
+    const sessionChatId = normalizedChatType === 'private'
+      ? `direct_${senderId}`
+      : `group_${groupId}_user_${senderId}`;
+    const reply = await askToolTaskWithSubagentReview(payload, userInfo, senderId, null, route?.imageUrl || null, {
+      routePrompt: payload,
+      subagentRoutePrompt: payload,
+      backendOverride: 'command',
+      sessionChannel: normalizedChatType === 'private' ? 'qq-private' : 'qq-group',
+      sessionChatId,
+      routePolicyKey: 'admin/claude',
+      topRouteType: 'admin',
+      routeMeta: {
+        ...(route?.meta || {}),
+        groupId,
+        chatType: normalizedChatType,
+        topRouteType: 'admin',
+        routePolicyKey: 'admin/claude',
+        rawText
+      }
+    });
+
+    await sendGroupReply({
+      chatType: normalizedChatType,
+      groupId,
+      userId: senderId,
+      senderId,
+      replyText: normalizeUserFacingReply(reply, {
+        policyKey: 'admin/claude',
+        routeDebugKey: 'admin/claude',
+        topRouteType: 'admin',
+        allowTools: false,
+        requestText: payload
+      }),
+      atSender: normalizedChatType !== 'private',
       retries: 1,
       waitMs: 300
     });
@@ -807,6 +1178,22 @@ function createMessageRouteFlow(deps = {}) {
         userId: senderId
       });
       adminReply = String(memeAdminResult?.replyText || '').trim() || 'meme 管理命令已处理。';
+    } else if (cmd === 'claude') {
+      return handleClaudeAdminCommand({
+        route,
+        groupId,
+        senderId,
+        userInfo,
+        rawText,
+        chatType: normalizedChatType
+      });
+    } else if (cmd === 'claude-open' || cmd === 'claude-send' || cmd === 'claude-tail' || cmd === 'claude-stop') {
+      return handleClaudeSessionAdminCommand({
+        route,
+        groupId,
+        senderId,
+        chatType: normalizedChatType
+      });
     } else if (cmd === 'hapi') {
       const hapiAdminResult = await handleHapiAdminCommand({
         rawText: route?.meta?.command?.raw || route?.cleanText || rawText,
@@ -865,7 +1252,7 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /debug on|off, /status, /reload, /hapi status|approve <id>|deny <id>, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /full <任务>, /debug on|off, /status, /reload, /hapi status|approve <id>|deny <id>, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
     } else if (cmd === 'status') {
       adminReply = '状态命令已收到。';
     } else if (cmd === 'reload') {
@@ -894,6 +1281,8 @@ function createMessageRouteFlow(deps = {}) {
   }
 
   return {
+    handleClaudeSessionAdminCommand,
+    handleClaudeAdminCommand,
     dispatchAdminRoute,
     dispatchByRoutePlan,
     dispatchFormalRoute: dispatchByRoutePlan,
