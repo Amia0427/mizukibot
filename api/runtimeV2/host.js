@@ -626,6 +626,15 @@ function createRuntime(options = {}) {
       || /^```[\s\S]*<tool_calls>[\s\S]*<\/tool_calls>[\s\S]*```$/i.test(raw);
   }
 
+  function shouldRetryWithoutToolsForMarkupOnly({
+    assistantMessage = null,
+    executedToolEnvelopes = []
+  } = {}) {
+    const content = String(assistantMessage?.content || '').trim();
+    if (!isPureToolCallMarkup(content)) return false;
+    return normalizeArray(executedToolEnvelopes).length === 0;
+  }
+
   function getControlledFailureReply(failureType = 'generic_model_failure') {
     if (failureType === 'tool_loop_limit') {
       return 'Model invocation failed: tool loop limit reached after the direct memory turn. Please ask again with a more specific memory target.';
@@ -645,7 +654,7 @@ function createRuntime(options = {}) {
     if (failureType === 'provider_blocked') {
       return 'request was blocked by upstream safety';
     }
-    return 'Tool error: tool call markup was returned without executing any tool.';
+    return '我刚才没有稳定组织出回复。你可以直接再说一次，或者把需求说得更具体一点。';
   }
 
   function classifyDirectReplyError(error) {
@@ -836,6 +845,33 @@ function createRuntime(options = {}) {
         text: primaryReply,
         source: 'assistant'
       };
+    }
+
+    if (shouldRetryWithoutToolsForMarkupOnly({
+      assistantMessage,
+      executedToolEnvelopes
+    })) {
+      try {
+        const retryMessages = normalizeArray(fallbackMessages).concat([{
+          role: 'system',
+          content: [
+            'Do not emit any <tool_calls> markup or function/tool call JSON.',
+            'No tool is available for this turn.',
+            'Reply with plain natural language only.'
+          ].join(' ')
+        }]);
+        const retryReply = String(await requestReplyImpl(retryMessages, {
+          ...directContext,
+          disableTools: true,
+          allowedTools: []
+        }) || '').trim();
+        if (isStableDirectReplyText(retryReply)) {
+          return {
+            text: retryReply,
+            source: 'markup_only_retry'
+          };
+        }
+      } catch (_) {}
     }
 
     const directExecLogs = buildDirectToolLoopExecLogs(executedToolEnvelopes);

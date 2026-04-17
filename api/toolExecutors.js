@@ -15,13 +15,28 @@ const tools4 = require('./tools_batch4');
 const toolsExtra = require('./tools_extra');
 const assistantSkills = require('./skills_assistant');
 const minecraftAgent = require('./minecraftAgent');
+const nativeArxiv = require('./skills_native/arxiv');
+const nativeWeather = require('./skills_native/weather');
+const nativeSkillValidation = require('./skills_native/skillValidation');
+const nativeClawddocs = require('./skills_native/clawddocs');
+const nativeSummarize = require('./skills_native/summarize');
+const nativeStockQuote = require('./skills_native/stocks/quote');
+const nativeStockDividend = require('./skills_native/stocks/dividend');
+const nativeStockPortfolio = require('./skills_native/stocks/portfolio');
+const nativeStockHot = require('./skills_native/stocks/hot');
+const nativeStockRumor = require('./skills_native/stocks/rumor');
+const nativeStockAnalyze = require('./skills_native/stocks/analyze');
+const nativeStockWatchlist = require('./skills_native/stocks/watchlist');
+const nativeOntology = require('./skills_native/ontology');
+const nativeYoutube = require('./skills_native/youtube');
+const nativePpt = require('./skills_native/ppt');
+const nativeImageGenerate = require('./skills_native/imageGenerate');
 const config = require('../config');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { runLocalCommandViaBridge, isLocalCommandBridgeEnabled } = require('../utils/localCommandBridgeClient');
 const { isUnsafeHttpUrl } = require('../utils/networkSafety');
 const { formatContextStats } = require('../utils/contextInspector');
 const {
@@ -89,6 +104,17 @@ function getMemoryCliRunner() {
 
 function normalizeWebQuery(args = {}) {
   return String(args.query ?? args.keyword ?? args.q ?? '').trim();
+}
+
+function checkNodeRuntimeCapability(name = '') {
+  const target = String(name || '').trim();
+  if (!target) return 'Missing runtime capability name.';
+  try {
+    require.resolve(target);
+    return `${target}:ok`;
+  } catch (error) {
+    return `${target}:missing (${error.message})`;
+  }
 }
 
 async function runFreeWebSearch(args = {}) {
@@ -235,26 +261,6 @@ function runCommand(command, args = [], options = {}) {
   const timeoutMs = Number(options.timeoutMs || config.TOOL_TIMEOUT_MS || 15000);
   const cwd = options.cwd || path.resolve(__dirname, '..');
   const env = options.env || process.env;
-
-  if (process.platform === 'win32' && isLocalCommandBridgeEnabled()) {
-    return runLocalCommandViaBridge({
-      command: String(command || '').trim(),
-      args,
-      cwd,
-      timeoutMs,
-      env
-    }, timeoutMs).then((result) => {
-      if (result && result.ok) {
-        return {
-          stdout: String(result.stdout || '').trim(),
-          stderr: String(result.stderr || '').trim(),
-          code: Number(result.code || 0)
-        };
-      }
-      const errMsg = String(result?.stderr || result?.stdout || result?.error || 'bridge command failed').trim();
-      throw new Error(errMsg);
-    });
-  }
 
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -967,131 +973,27 @@ const TOOL_EXECUTORS = {
   },
 
   skill_arxiv_search: async (args = {}) => {
-    const query = String(args.query ?? '').trim();
-    if (!query) return 'Missing query.';
-
-    const scriptPath = ensureSkillPath('arxiv', path.join('scripts', 'arxiv_tool.py'));
-    const maxResults = Math.max(1, Math.min(10, Number(args.max_results) || 5));
-    const categories = normalizeStringList(args.categories ?? []);
-    const tags = normalizeStringList(args.tags ?? []);
-    const cmdArgs = [
-      'search',
-      '--query', query,
-      '--max-results', String(maxResults)
-    ];
-    if (categories.length) cmdArgs.push('--categories', categories.join(','));
-    if (tags.length) cmdArgs.push('--tags', tags.join(','));
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs, {
-      PYTHONIOENCODING: 'utf-8'
-    });
-    return stdout || stderr || 'No arXiv search output.';
+    return nativeArxiv.searchArxiv(args);
   },
 
   skill_arxiv_get: async (args = {}) => {
-    const arxivId = String(args.arxiv_id ?? args.id ?? '').trim();
-    if (!arxivId) return 'Missing arxiv_id.';
-
-    const scriptPath = ensureSkillPath('arxiv', path.join('scripts', 'arxiv_tool.py'));
-    const includeAbstract = Boolean(args.include_abstract ?? true);
-    const cmdArgs = [
-      'get',
-      '--id', arxivId,
-      '--include-abstract', includeAbstract ? 'true' : 'false'
-    ];
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs, {
-      PYTHONIOENCODING: 'utf-8'
-    });
-    return stdout || stderr || 'No arXiv paper output.';
+    return nativeArxiv.getArxiv(args);
   },
 
   skill_arxiv_latest: async (args = {}) => {
-    const scriptPath = ensureSkillPath('arxiv', path.join('scripts', 'arxiv_tool.py'));
-    const maxResults = Math.max(1, Math.min(10, Number(args.max_results) || 5));
-    const categories = normalizeStringList(args.categories ?? []);
-    const tags = normalizeStringList(args.tags ?? []);
-    const cmdArgs = [
-      'latest',
-      '--max-results', String(maxResults)
-    ];
-    if (categories.length) cmdArgs.push('--categories', categories.join(','));
-    if (tags.length) cmdArgs.push('--tags', tags.join(','));
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs, {
-      PYTHONIOENCODING: 'utf-8'
-    });
-    return stdout || stderr || 'No arXiv latest output.';
+    return nativeArxiv.latestArxiv(args);
   },
 
   skill_weather: async (args = {}) => {
-    const location = String(args.location ?? args.city ?? args.text ?? '').trim();
-    if (!location) return '请提供 location，例如：location="Shanghai"';
-
-    const encodedLocation = encodeURIComponent(location).replace(/%20/g, '+');
-    const format = String(args.format || '%l:+%c+%t+%h+%w').trim() || '%l:+%c+%t+%h+%w';
-    const url = `https://wttr.in/${encodedLocation}?format=${encodeURIComponent(format)}`;
-    const curlCmd = process.platform === 'win32' ? 'curl.exe' : 'curl';
-
-    try {
-      const { stdout } = await runCommand(curlCmd, ['-s', url], {
-        env: process.env,
-        timeoutMs: 10000
-      });
-      return stdout || '未获取到天气信息';
-    } catch (e) {
-      // Keep a clear fallback message so the bot can recover gracefully.
-      return `天气查询失败：${e.message}`;
-    }
+    return nativeWeather.getWeatherSummary(args);
   },
 
   skill_youtube_transcript: async (args = {}) => {
-    const url = String(args.url ?? '').trim();
-    if (!url) return '请提供 YouTube 视频链接，例如：url="https://www.youtube.com/watch?v=..."';
-
-    const scriptPath = path.join(SKILLS_BASE_DIR, 'youtube-watcher', 'scripts', 'get_transcript.py');
-    if (!fs.existsSync(scriptPath)) {
-      return `未找到 youtube-watcher 脚本：${scriptPath}`;
-    }
-
-    const env = buildCommandEnv();
-    const ytDlpInVenv = fs.existsSync(path.join(getVenvBinDir(), process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp'));
-    const ytDlpInPath = commandExists('yt-dlp', env);
-    if (!ytDlpInVenv && !ytDlpInPath) {
-      return '缺少依赖 yt-dlp。请先安装：python -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple yt-dlp';
-    }
-
-    const { stdout } = await runSkillPython(scriptPath, [url], env);
-    return stdout || '未获取到视频字幕（可能视频无字幕）';
+    return nativeYoutube.getYoutubeTranscript(args);
   },
 
   skill_summarize: async (args = {}) => {
-    const input = String(args.input ?? args.url ?? args.file ?? '').trim();
-    if (!input) return '请提供 input（URL 或文件路径）。';
-
-    const summarizeInVenv = fs.existsSync(path.join(getVenvBinDir(), process.platform === 'win32' ? 'summarize.exe' : 'summarize'));
-    const summarizeInPath = commandExists('summarize', buildCommandEnv());
-    if (!summarizeInVenv && !summarizeInPath) {
-      return '未安装 summarize CLI。当前先使用内置总结能力完成摘要；如需该 CLI，可后续单独安装。';
-    }
-
-    const model = String(args.model || '').trim();
-    const length = String(args.length || 'short').trim() || 'short';
-    const useJson = Boolean(args.json);
-
-    const cmdArgs = [input, '--length', length];
-    if (model) cmdArgs.push('--model', model);
-    if (useJson) cmdArgs.push('--json');
-
-    const summarizeCmd = summarizeInVenv
-      ? path.join(getVenvBinDir(), process.platform === 'win32' ? 'summarize.exe' : 'summarize')
-      : 'summarize';
-
-    const { stdout } = await runCommand(summarizeCmd, cmdArgs, {
-      env: buildCommandEnv(),
-      timeoutMs: 45000
-    });
-    return stdout || 'summarize 已执行，但没有输出内容';
+    return nativeSummarize.summarizeInput(args, config.DATA_DIR);
   },
 
   skill_vetter_report: async (args = {}) => {
@@ -1161,25 +1063,12 @@ const TOOL_EXECUTORS = {
   },
 
   skill_qqbot_dep_check: async () => {
-    const imports = ['requests', 'aiohttp', 'websockets'];
-    const checks = [];
-    for (const mod of imports) {
-      try {
-        const python = await resolvePythonCommand();
-        const { stdout } = await runCommand(
-          python.command,
-          [...python.baseArgs, '-c', `import ${mod}; print("${mod}:ok")`],
-          {
-            env: buildCommandEnv(),
-            timeoutMs: 6000
-          }
-        );
-        checks.push(stdout || `${mod}:ok`);
-      } catch (e) {
-        checks.push(`${mod}:missing (${e.message})`);
-      }
-    }
-    return checks.join('\n');
+    return [
+      checkNodeRuntimeCapability('axios'),
+      checkNodeRuntimeCapability('cheerio'),
+      checkNodeRuntimeCapability('@langchain/core'),
+      checkNodeRuntimeCapability('@langchain/openai')
+    ].join('\n');
   },
 
   skill_brave_search: async (args = {}) => {
@@ -1203,233 +1092,48 @@ const TOOL_EXECUTORS = {
   },
 
   skill_stock_analyze: async (args = {}) => {
-    const raw = args.tickers ?? args.ticker ?? [];
-    const tickers = Array.isArray(raw)
-      ? raw.map((v) => String(v || '').trim()).filter(Boolean)
-      : String(raw || '').split(/[,\s]+/).map((v) => v.trim()).filter(Boolean);
-    if (!tickers.length) return 'Missing ticker or tickers.';
-
-    const scriptPath = ensureSkillPath('stock-analysis', path.join('scripts', 'analyze_stock.py'));
-    const output = String(args.output || 'text').trim() || 'text';
-    const cmdArgs = [...tickers, '--output', output];
-    if (Boolean(args.fast)) cmdArgs.push('--fast');
-    if (Boolean(args.no_insider)) cmdArgs.push('--no-insider');
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs);
-    return stdout || stderr || 'Command completed with no output.';
+    return nativeStockAnalyze.analyzeStocks(args);
   },
 
   skill_stock_dividend: async (args = {}) => {
-    const raw = args.tickers ?? args.ticker ?? [];
-    const tickers = Array.isArray(raw)
-      ? raw.map((v) => String(v || '').trim()).filter(Boolean)
-      : String(raw || '').split(/[,\s]+/).map((v) => v.trim()).filter(Boolean);
-    if (!tickers.length) return 'Missing ticker or tickers.';
-
-    const scriptPath = ensureSkillPath('stock-analysis', path.join('scripts', 'dividends.py'));
-    const output = String(args.output || 'text').trim() || 'text';
-    const { stdout, stderr } = await runSkillPython(scriptPath, [...tickers, '--output', output]);
-    return stdout || stderr || 'Command completed with no output.';
+    return nativeStockDividend.queryDividends(args);
   },
 
   skill_stock_price_query: async (args = {}) => {
-    const raw = args.codes ?? args.code ?? args.tickers ?? args.ticker ?? '';
-    const codes = Array.isArray(raw)
-      ? raw.map((v) => String(v || '').trim()).filter(Boolean)
-      : String(raw || '').split(/[,\s]+/).map((v) => v.trim()).filter(Boolean);
-    if (!codes.length) return 'Missing code or codes.';
-    if (codes.length > 20) return 'Too many codes. Maximum 20.';
-
-    const scriptPath = ensureSkillPath('stock-price-query', path.join('scripts', 'stock_query.py'));
-    const joined = codes.join(',');
-    const market = String(args.market || '').trim().toLowerCase();
-    const cmdArgs = [joined];
-    if (market) cmdArgs.push(market);
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs);
-    return stdout || stderr || 'No stock quote output.';
+    return nativeStockQuote.queryQuotes(args);
   },
 
   skill_ontology_graph: async (args = {}) => {
-    const action = String(args.action || '').trim().toLowerCase();
-    if (!action) return 'Missing action.';
-
-    const scriptPath = ensureSkillPath('ontology', path.join('scripts', 'ontology.py'));
-    const cacheDir = ensureSkillCacheDir('ontology');
-    const graphPath = path.join(cacheDir, 'graph.jsonl');
-    const schemaPath = path.join(cacheDir, 'schema.yaml');
-    const cmdArgs = [action];
-
-    if (action === 'create') {
-      const type = String(args.type || '').trim();
-      if (!type) return 'Missing type.';
-      cmdArgs.push('--type', type);
-      cmdArgs.push('--props', JSON.stringify(args.props || {}));
-      if (String(args.id || '').trim()) cmdArgs.push('--id', String(args.id).trim());
-    } else if (action === 'get' || action === 'delete') {
-      const id = String(args.id || '').trim();
-      if (!id) return 'Missing id.';
-      cmdArgs.push('--id', id);
-    } else if (action === 'query') {
-      if (String(args.type || '').trim()) cmdArgs.push('--type', String(args.type).trim());
-      cmdArgs.push('--where', JSON.stringify(args.where || {}));
-    } else if (action === 'list') {
-      if (String(args.type || '').trim()) cmdArgs.push('--type', String(args.type).trim());
-    } else if (action === 'update') {
-      const id = String(args.id || '').trim();
-      if (!id) return 'Missing id.';
-      cmdArgs.push('--id', id);
-      cmdArgs.push('--props', JSON.stringify(args.props || {}));
-    } else if (action === 'relate') {
-      const fromId = String(args.from_id ?? args.from ?? '').trim();
-      const rel = String(args.rel || '').trim();
-      const toId = String(args.to_id ?? args.to ?? '').trim();
-      if (!fromId || !rel || !toId) return 'Missing from_id, rel, or to_id.';
-      cmdArgs.push('--from', fromId, '--rel', rel, '--to', toId);
-      cmdArgs.push('--props', JSON.stringify(args.props || {}));
-    } else if (action === 'related') {
-      const id = String(args.id || '').trim();
-      if (!id) return 'Missing id.';
-      cmdArgs.push('--id', id);
-      if (String(args.rel || '').trim()) cmdArgs.push('--rel', String(args.rel).trim());
-      if (String(args.dir || '').trim()) cmdArgs.push('--dir', String(args.dir).trim());
-    } else if (action === 'validate') {
-      cmdArgs.push('--schema', schemaPath);
-    } else if (action === 'schema-append') {
-      const data = args.data || args.schema || null;
-      if (!data) return 'Missing data.';
-      cmdArgs.push('--schema', schemaPath, '--data', JSON.stringify(data));
-    } else {
-      return 'Unsupported action.';
-    }
-
-    if (action !== 'schema-append' && action !== 'validate') {
-      cmdArgs.push('--graph', graphPath);
-    } else if (action === 'validate') {
-      cmdArgs.push('--graph', graphPath);
-    }
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs, {
-      PYTHONIOENCODING: 'utf-8'
-    });
-    return stdout || stderr || 'No ontology output.';
+    return nativeOntology.mutateOntology(config.DATA_DIR, args);
   },
 
   skill_stock_watchlist: async (args = {}) => {
-    const action = String(args.action || '').trim().toLowerCase();
-    if (!action) return 'Missing action. Use add/remove/list/check.';
-
-    const scriptPath = ensureSkillPath('stock-analysis', path.join('scripts', 'watchlist.py'));
-    const cmdArgs = [action];
-    const ticker = String(args.ticker || '').trim();
-    if (ticker) cmdArgs.push(ticker);
-    if (Number.isFinite(Number(args.target))) cmdArgs.push('--target', String(args.target));
-    if (Number.isFinite(Number(args.stop))) cmdArgs.push('--stop', String(args.stop));
-    if (Boolean(args.alert_on_signal)) cmdArgs.push('--alert-on', 'signal');
-    if (Boolean(args.notify)) cmdArgs.push('--notify');
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs);
-    return stdout || stderr || 'Watchlist command completed with no output.';
+    return nativeStockWatchlist.mutateWatchlist(config.DATA_DIR, args);
   },
 
   skill_skill_validate: async (args = {}) => {
     const skillName = String(args.skill_name ?? args.name ?? '').trim();
-    if (!skillName) return 'Missing skill_name.';
-
-    const scriptPath = ensureSkillPath('skill-creator', path.join('scripts', 'quick_validate.py'));
-    const targetPath = ensureSkillPath(skillName);
-    const { stdout, stderr } = await runSkillPython(scriptPath, [targetPath]);
-    return stdout || stderr || 'Skill validation completed with no output.';
+    return nativeSkillValidation.validateSkillByName(SKILLS_BASE_DIR, skillName);
   },
 
   skill_stock_hot: async (args = {}) => {
-    const scriptPath = ensureSkillPath('stock-analysis', path.join('scripts', 'hot_scanner.py'));
-    const cmdArgs = [];
-    if (Boolean(args.no_social)) cmdArgs.push('--no-social');
-    if (Boolean(args.json)) cmdArgs.push('--json');
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs, {
-      CLAWDBOT_STATE_DIR: config.DATA_DIR
-    });
-    return stdout || stderr || 'Command completed with no output.';
+    return nativeStockHot.scanHot(args);
   },
 
   skill_stock_portfolio: async (args = {}) => {
-    const action = String(args.action || '').trim().toLowerCase();
-    if (!action) return 'Missing action. Use create/list/show/delete/rename/add/update/remove.';
-
-    const scriptPath = ensureSkillPath('stock-analysis', path.join('scripts', 'portfolio.py'));
-    const cmdArgs = [action];
-    if (action === 'create' || action === 'delete') {
-      const name = String(args.name || '').trim();
-      if (!name) return 'Missing name.';
-      cmdArgs.push(name);
-    } else if (action === 'rename') {
-      const oldName = String(args.old_name || '').trim();
-      const newName = String(args.new_name || '').trim();
-      if (!oldName || !newName) return 'Missing old_name or new_name.';
-      cmdArgs.push(oldName, newName);
-    } else if (action === 'show') {
-      const portfolio = String(args.portfolio || '').trim();
-      if (portfolio) cmdArgs.push('--portfolio', portfolio);
-    } else if (action === 'add' || action === 'update') {
-      const ticker = String(args.ticker || '').trim();
-      if (!ticker) return 'Missing ticker.';
-      cmdArgs.push(ticker);
-      if (Number.isFinite(Number(args.quantity))) cmdArgs.push('--quantity', String(args.quantity));
-      if (Number.isFinite(Number(args.cost))) cmdArgs.push('--cost', String(args.cost));
-      const portfolio = String(args.portfolio || '').trim();
-      if (portfolio) cmdArgs.push('--portfolio', portfolio);
-    } else if (action === 'remove') {
-      const ticker = String(args.ticker || '').trim();
-      if (!ticker) return 'Missing ticker.';
-      cmdArgs.push(ticker);
-      const portfolio = String(args.portfolio || '').trim();
-      if (portfolio) cmdArgs.push('--portfolio', portfolio);
-    } else if (action !== 'list') {
-      return 'Unsupported action. Use create/list/show/delete/rename/add/update/remove.';
-    }
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs, {
-      CLAWDBOT_STATE_DIR: config.DATA_DIR
-    });
-    return stdout || stderr || 'Command completed with no output.';
+    return nativeStockPortfolio.mutatePortfolio(config.DATA_DIR, args);
   },
 
   skill_stock_rumor: async () => {
-    const scriptPath = ensureSkillPath('stock-analysis', path.join('scripts', 'rumor_scanner.py'));
-    const { stdout, stderr } = await runSkillPython(scriptPath, [], {
-      CLAWDBOT_STATE_DIR: config.DATA_DIR
-    });
-    return stdout || stderr || 'Command completed with no output.';
+    return nativeStockRumor.scanRumors();
   },
 
   skill_ppt_generate: async (args = {}) => {
-    const query = String(args.query ?? args.topic ?? '').trim();
-    if (!query) return 'Missing query.';
-    if (!String(process.env.BAIDU_API_KEY || '').trim()) {
-      return 'Missing BAIDU_API_KEY. AI PPT skill is unavailable.';
-    }
-
-    const scriptPath = ensureSkillPath('ai-ppt-generator', path.join('scripts', 'generate_ppt.py'));
-    const cmdArgs = ['--query', query];
-    if (Number.isFinite(Number(args.style_id))) cmdArgs.push('--style_id', String(args.style_id));
-    if (Number.isFinite(Number(args.tpl_id))) cmdArgs.push('--tpl_id', String(args.tpl_id));
-    const webContent = String(args.web_content || '').trim();
-    if (webContent) cmdArgs.push('--web_content', webContent);
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs);
-    return stdout || stderr || 'PPT command completed with no output.';
+    return nativePpt.generatePpt(args);
   },
 
   skill_ppt_theme_list: async () => {
-    if (!String(process.env.BAIDU_API_KEY || '').trim()) {
-      return 'Missing BAIDU_API_KEY. AI PPT skill is unavailable.';
-    }
-
-    const scriptPath = ensureSkillPath('ai-ppt-generator', path.join('scripts', 'ppt_theme_list.py'));
-    const { stdout, stderr } = await runSkillPython(scriptPath, []);
-    return stdout || stderr || 'PPT command completed with no output.';
+    return nativePpt.listThemes();
   },
 
   skill_agent_browser_guide: async (args = {}) => {
@@ -1514,42 +1218,21 @@ const TOOL_EXECUTORS = {
 
   skill_clawddocs_search: async (args = {}) => {
     const query = String(args.query ?? args.keyword ?? '').trim();
+    const skillDir = ensureSkillPath('clawddocs');
     if (!query) return loadSkillReference('clawddocs', {});
-    const { stdout, stderr } = await runShellSkillScript('clawddocs', path.join('scripts', 'search.sh'), [query]);
-    return stdout || stderr || 'No clawddocs search output.';
+    const hits = nativeClawddocs.searchDocs(skillDir, query);
+    if (hits.length === 0) return `No clawddocs results for: ${query}`;
+    return hits.map((item, index) => `${index + 1}. ${item}`).join('\n');
   },
 
   skill_clawddocs_fetch: async (args = {}) => {
     const docPath = String(args.doc_path ?? args.path ?? '').trim();
-    if (!docPath) return 'Missing doc_path.';
-    const { stdout, stderr } = await runShellSkillScript('clawddocs', path.join('scripts', 'fetch-doc.sh'), [docPath]);
-    return stdout || stderr || 'No clawddocs document output.';
+    const skillDir = ensureSkillPath('clawddocs');
+    return nativeClawddocs.fetchDoc(skillDir, docPath);
   },
 
   skill_image_generate_pro: async (args = {}) => {
-    const prompt = String(args.prompt ?? '').trim();
-    if (!prompt) return 'Missing prompt.';
-    if (!String(process.env.GEMINI_API_KEY || args.api_key || '').trim()) {
-      return 'Missing GEMINI_API_KEY. Nano Banana Pro skill is unavailable.';
-    }
-
-    const scriptPath = ensureSkillPath('nano-banana-pro', path.join('scripts', 'generate_image.py'));
-    const outputDir = ensureSkillCacheDir('nano-banana-pro');
-    const defaultName = 'image-' + Date.now() + '.png';
-    const filename = String(args.filename || defaultName).trim() || defaultName;
-    const outputPath = path.isAbsolute(filename) ? filename : path.join(outputDir, filename);
-    const cmdArgs = ['--prompt', prompt, '--filename', outputPath];
-
-    const resolution = String(args.resolution || '1K').trim() || '1K';
-    cmdArgs.push('--resolution', resolution);
-
-    const inputImage = String(args.input_image || '').trim();
-    if (inputImage) cmdArgs.push('--input-image', inputImage);
-    const apiKey = String(args.api_key || '').trim();
-    if (apiKey) cmdArgs.push('--api-key', apiKey);
-
-    const { stdout, stderr } = await runSkillPython(scriptPath, cmdArgs);
-    return stdout || stderr || ('Image generated: ' + outputPath);
+    return nativeImageGenerate.generateImage(args, config.DATA_DIR);
   },
 
   // ===== minecraft tools =====

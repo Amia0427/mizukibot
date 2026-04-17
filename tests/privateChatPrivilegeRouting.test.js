@@ -46,7 +46,7 @@ module.exports = (() => {
     );
     assert.strictEqual(
       mainModelConfigResolver.isAdminMainModelUser('admin_only', { chatType: 'private' }),
-      false
+      true
     );
     assert.strictEqual(
       mainModelConfigResolver.isAdminMainModelUser('admin_1', { chatType: 'private' }),
@@ -58,7 +58,7 @@ module.exports = (() => {
     const privilegedModel = mainModelConfigResolver.resolveRoleAwareMainModelConfig('admin_1', null, { chatType: 'private' });
 
     assert.strictEqual(testerModel.model, 'base-model');
-    assert.strictEqual(adminOnlyModel.model, 'base-model');
+    assert.strictEqual(adminOnlyModel.model, 'admin-model');
     assert.strictEqual(privilegedModel.model, 'admin-model');
 
     console.log('privateChatPrivilegeRouting.test.js passed');

@@ -51,13 +51,16 @@ function rewriteQuery(query = '', facet = 'default') {
 
 function resolveAllowedGroupIds(userId = '', options = {}) {
   const explicit = Array.isArray(options.groupIds) ? options.groupIds : [];
-  if (explicit.length > 0) return explicit.map((item) => normalizeText(item)).filter(Boolean);
   const scope = loadScopeProjection();
   const groups = Array.isArray(scope.users?.[String(userId || '').trim()]?.groups)
-    ? scope.users[String(userId || '').trim()].groups
+    ? scope.users[String(userId || '').trim()].groups.map((item) => normalizeText(item)).filter(Boolean)
     : [];
   const current = normalizeText(options.groupId);
-  return uniqueBy([...groups, current].filter(Boolean), (item) => item);
+  const scoped = uniqueBy([...groups, current].filter(Boolean), (item) => item);
+  if (explicit.length === 0) return scoped;
+  const explicitNormalized = explicit.map((item) => normalizeText(item)).filter(Boolean);
+  const scopedSet = new Set(scoped);
+  return explicitNormalized.filter((item) => scopedSet.has(item));
 }
 
 function loadEmbeddingMap() {

@@ -1,8 +1,11 @@
 const path = require('path');
 const config = require('../config');
-const toolRegistry = require('../api/toolRegistry');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
+
+function getToolRegistry() {
+  return require('../api/toolRegistry');
+}
 
 const TOOL_POLICIES = {
   notebook_reindex_folder: { risk: 'high', capability: 'fs_read' },
@@ -367,7 +370,7 @@ function normalizeArxivLatestArgs(args = {}) {
 }
 
 function normalizeDynamicMcpArgs(toolName, args = {}) {
-  const descriptor = toolRegistry.getDynamicToolDescriptors().find((item) => item.functionName === String(toolName || '').trim());
+  const descriptor = getToolRegistry().getDynamicToolDescriptors().find((item) => item.functionName === String(toolName || '').trim());
   if (!descriptor) return {};
 
   const schema = descriptor.inputSchema && typeof descriptor.inputSchema === 'object'

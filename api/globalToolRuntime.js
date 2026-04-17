@@ -1,10 +1,6 @@
 const config = require('../config');
 const { postWithRetry } = require('./httpClient');
 const { extractMessageContent, safeParseArgs } = require('./parser');
-const {
-  getToolExecutors,
-  getToolSchemas
-} = require('./toolRegistry');
 const { normalizeToolNames } = require('../utils/localToolAccess');
 const { enforceToolPolicy } = require('../utils/toolPolicy');
 const {
@@ -13,6 +9,18 @@ const {
   updateMemoryCliTurnStateAfterError,
   updateMemoryCliTurnStateAfterResult
 } = require('../utils/memoryCliTurnPolicy');
+
+function getToolRegistry() {
+  return require('./toolRegistry');
+}
+
+function getToolExecutors() {
+  return getToolRegistry().getToolExecutors();
+}
+
+function getToolSchemas() {
+  return getToolRegistry().getToolSchemas();
+}
 
 const GLOBAL_TOOL_REGISTRY = [
   {

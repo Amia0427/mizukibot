@@ -2,12 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 const config = require('../config');
-const {
-  callMcpViaBridge,
-  discoverMcpViaBridge,
-  isLocalCommandBridgeEnabled
-} = require('../utils/localCommandBridgeClient');
-
 const DEFAULT_MCP_DISCOVERY_TTL_MS = Math.max(
   10_000,
   Number(process.env.MCP_DISCOVERY_TTL_MS || 5 * 60 * 1000) || 5 * 60 * 1000
@@ -48,6 +42,66 @@ let cachedDynamicRegistry = {
   tools: [],
   byName: new Map()
 };
+
+const STATIC_MCP_REPLACEMENTS = [
+  {
+    serverName: 'fetch',
+    toolName: 'fetch_url',
+    functionName: 'mcp_fetch_fetch_url',
+    description: 'Fetch and extract readable webpage content',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' }
+      },
+      required: ['url']
+    },
+    targetTool: 'web_fetch'
+  },
+  {
+    serverName: 'bing-search',
+    toolName: 'search_web',
+    functionName: 'mcp_bing_search_search_web',
+    description: 'Search the web',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' }
+      },
+      required: ['query']
+    },
+    targetTool: 'web_search'
+  },
+  {
+    serverName: 'amap-maps',
+    toolName: 'search_places',
+    functionName: 'mcp_amap_maps_search_places',
+    description: 'Search nearby places',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        keywords: { type: 'string' },
+        city: { type: 'string' }
+      },
+      required: ['keywords']
+    },
+    targetTool: 'search_nearby_places'
+  },
+  {
+    serverName: 'howtocook-mcp',
+    toolName: 'recipe_search',
+    functionName: 'mcp_howtocook_mcp_recipe_search',
+    description: 'Search local recipe/cooking docs',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' }
+      },
+      required: ['query']
+    },
+    targetTool: 'skill_clawddocs_search'
+  }
+];
 
 function logMcp(event, payload = {}) {
   try {
@@ -562,21 +616,15 @@ async function discoverServerTools(serverConfig = {}, options = {}) {
 }
 
 async function discoverMcpTools(options = {}) {
-  if (process.platform === 'win32' && isLocalCommandBridgeEnabled()) {
-    try {
-      const bridgeResult = await discoverMcpViaBridge({
-        configPath: resolveMcpConfigPath(options.configPath),
-        timeoutMs: Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, Number(options.timeoutMs || 0) || 0)
-      }, Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, Number(options.timeoutMs || 0) || 0));
-      return Array.isArray(bridgeResult?.tools) ? bridgeResult.tools : [];
-    } catch (error) {
-      logMcp('mcp_tool_error', {
-        stage: 'bridge_discover',
-        error: error?.message || String(error || '')
-      });
-      return [];
-    }
-  }
+  void options;
+  return STATIC_MCP_REPLACEMENTS.map((item) => ({
+    serverName: item.serverName,
+    toolName: item.toolName,
+    functionName: item.functionName,
+    description: item.description,
+    inputSchema: item.inputSchema,
+    targetTool: item.targetTool
+  }));
 
   const configuredServers = listConfiguredMcpServers(options);
   const all = [];
@@ -691,22 +739,20 @@ function extractTextFromMcpResult(result) {
 }
 
 async function callMcpTool(serverName = '', toolName = '', args = {}, context = {}) {
-  if (process.platform === 'win32' && isLocalCommandBridgeEnabled()) {
-    const bridgeResult = await callMcpViaBridge({
-      serverName,
-      toolName,
-      args,
-      configPath: resolveMcpConfigPath(context.configPath),
-      timeoutMs: Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, Number(context.timeoutMs || 0) || 0)
-    }, Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, Number(context.timeoutMs || 0) || 0));
-    if (!bridgeResult?.ok) {
-      throw normalizeMcpError(new Error(String(bridgeResult?.error || 'mcp bridge call failed')), 'MCP_TOOL_CALL_FAILED');
+  const replacement = STATIC_MCP_REPLACEMENTS.find((item) => item.serverName === serverName && item.toolName === toolName);
+  if (replacement) {
+    const { getToolExecutors } = require('./toolRegistry');
+    const executors = getToolExecutors();
+    const executor = executors[replacement.targetTool];
+    if (typeof executor !== 'function') {
+      throw normalizeMcpError(new Error(`replacement tool unavailable: ${replacement.targetTool}`), 'MCP_TOOL_CALL_FAILED');
     }
+    const result = await executor(args);
     return {
       ok: true,
-      text: extractTextFromMcpResult(bridgeResult.result),
-      safeArgs: bridgeResult.safeArgs || {},
-      result: bridgeResult.result
+      text: String(result || '').trim(),
+      safeArgs: args,
+      result
     };
   }
 
