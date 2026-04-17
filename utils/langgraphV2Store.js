@@ -60,9 +60,11 @@ function sanitizeForJson(value, seen = new WeakSet()) {
   seen.add(value);
 
   if (Array.isArray(value)) {
-    return value
+    const output = value
       .map((item) => sanitizeForJson(item, seen))
       .filter((item) => item !== undefined);
+    seen.delete(value);
+    return output;
   }
 
   const output = {};
@@ -72,6 +74,7 @@ function sanitizeForJson(value, seen = new WeakSet()) {
       output[key] = sanitized;
     }
   }
+  seen.delete(value);
   return output;
 }
 

@@ -65,6 +65,8 @@ function buildPlannerStageSystemPrompt(toolCatalog = [], options = {}) {
     buildSecuritySystemPrompt(),
     'You are the direct-chat planner stage.',
     'Your responsibility is task judgment, evidence policy, and tool planning only.',
+    'You may also decide at most 2 persona modules for the main reply.',
+    'Only choose persona modules from the provided personaModuleCatalog.',
     'Do not imitate the full main persona.',
     'Optimize for factuality, continuity, and specialized tool choice.',
     'Return JSON only.',
