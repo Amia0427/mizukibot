@@ -29,6 +29,11 @@ const {
   filterAllowedToolsForMemoryCliTurn,
   buildMemoryCliFollowupInstruction
 } = require('../../../utils/memoryCliTurnPolicy');
+const {
+  buildPersonaModuleCandidates,
+  loadPersonaModuleText,
+  selectPersonaModules
+} = require('../../../utils/personaModules');
 
 function getConfig() {
   try {
@@ -261,6 +266,25 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     personaMemoryState,
     topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat'
   );
+  const personaModuleCandidates = buildPersonaModuleCandidates({
+    question,
+    routePrompt: options.routePrompt,
+    routeMeta,
+    directedContext: routeMeta.directedContext,
+    continuitySignals: options?.continuitySignals,
+    personaPhase: routeMeta.personaPhase || ''
+  });
+  const personaModuleDecision = selectPersonaModules(
+    options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {},
+    {
+      question,
+      routePrompt: options.routePrompt,
+      routeMeta,
+      directedContext: routeMeta.directedContext,
+      continuitySignals: options?.continuitySignals,
+      personaPhase: routeMeta.personaPhase || ''
+    }
+  );
   const promptBlocks = [];
   const promptSegments = {
     systemPrompt: [],
@@ -271,7 +295,10 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     renderedSystemMessages: [],
     tokenUsageByBlock: [],
     trimDecisions: [],
-    securityLabels: []
+    securityLabels: [],
+    activatedPersonaModules: [],
+    personaModuleCandidates: [],
+    personaModuleTokenUsage: []
   };
 
   if (customPrompt) {
@@ -307,6 +334,14 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   }
   promptBlocks.push(...buildMainStageBlocks({
     systemPrompt: config.SYSTEM_PROMPT
+  }));
+  promptBlocks.push(createPromptBlock('core_baseline_patch', 'Core Baseline Patch', loadPersonaModuleText('core_baseline'), {
+    stage: 'main',
+    priority: 145,
+    authority: 'persona_module',
+    kind: 'persona_core_patch',
+    budgetTokens: 120,
+    source: 'persona_modules/core_baseline.txt'
   }));
   promptBlocks.push(
     ...personaMemoryPrompt.systemMessages
@@ -379,6 +414,24 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     authority: 'memory_fact',
     kind: 'summary'
   }));
+  const personaModuleBlocks = personaModuleDecision.selected.map((item, index) => createPromptBlock(
+    `persona_module_${item.id}`,
+    `Persona Module ${item.id}`,
+    loadPersonaModuleText(item.id),
+    {
+      stage: 'main',
+      priority: 520 + index,
+      authority: 'persona_module',
+      kind: 'persona_module',
+      budgetTokens: item.tokenCost,
+      conflictTags: item.conflictsWith,
+      source: item.path,
+      meta: {
+        moduleId: item.id
+      }
+    }
+  )).filter(Boolean);
+  promptBlocks.push(...personaModuleBlocks);
   if (shouldExposeMemoryCli({ ...options, customPrompt })) {
     const memoryCliInstruction = buildV2MemoryCliInstruction(options?.memoryCliTurn);
     if (memoryCliInstruction) {
@@ -475,11 +528,22 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   promptSegments.tokenUsageByBlock = promptSnapshot.tokenUsageByBlock;
   promptSegments.trimDecisions = promptSnapshot.trimDecisions;
   promptSegments.securityLabels = Array.isArray(options?.securityLabels) ? options.securityLabels : [];
+  promptSegments.activatedPersonaModules = personaModuleDecision.selected.map((item) => item.id);
+  promptSegments.personaModuleCandidates = personaModuleCandidates.map((item) => item.id);
+  promptSegments.personaModuleTokenUsage = personaModuleDecision.selected.map((item) => ({
+    id: item.id,
+    tokenCost: item.tokenCost
+  }));
 
   return {
     dynamicPrompt,
     promptSegments,
-    promptSnapshot,
+    promptSnapshot: {
+      ...promptSnapshot,
+      activatedPersonaModules: promptSegments.activatedPersonaModules,
+      personaModuleCandidates: promptSegments.personaModuleCandidates,
+      personaModuleTokenUsage: promptSegments.personaModuleTokenUsage
+    },
     memoryContext,
     personaMemoryState,
     affinity
@@ -604,6 +668,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
 
   if (!shouldExposeMemoryCli(options)) {
     const nextDynamicPrompt = dynamicPromptParts.filter(Boolean).join('\n\n');
+    const basePromptSegments = base.promptSegments || {};
     const mergedSnapshot = buildPromptSnapshot(
       [...(base.promptSnapshot?.assembledBlocks || []), ...extraBlocks].filter(Boolean),
       {
@@ -611,10 +676,16 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
         policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main'
       }
     );
+    const enrichedSnapshot = {
+      ...mergedSnapshot,
+      activatedPersonaModules: basePromptSegments.activatedPersonaModules || [],
+      personaModuleCandidates: basePromptSegments.personaModuleCandidates || [],
+      personaModuleTokenUsage: basePromptSegments.personaModuleTokenUsage || []
+    };
     return nextDynamicPrompt ? {
       ...base,
       dynamicPrompt: nextDynamicPrompt,
-      promptSnapshot: mergedSnapshot,
+      promptSnapshot: enrichedSnapshot,
       promptSegments: {
         ...(base.promptSegments || {}),
         systemPrompt: mergedSnapshot.renderedSystemMessages,
@@ -627,6 +698,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   }
 
   const memoryCliInstruction = buildV2MemoryCliInstruction(options?.memoryCliTurn);
+  const basePromptSegments = base.promptSegments || {};
   const memoryCliBlock = memoryCliInstruction
     ? createPromptBlock('memory_cli_followup', 'Memory CLI Followup', memoryCliInstruction, {
       stage: 'main',
@@ -642,10 +714,16 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main'
     }
   );
+  const enrichedSnapshot = {
+    ...mergedSnapshot,
+    activatedPersonaModules: basePromptSegments.activatedPersonaModules || [],
+    personaModuleCandidates: basePromptSegments.personaModuleCandidates || [],
+    personaModuleTokenUsage: basePromptSegments.personaModuleTokenUsage || []
+  };
   return {
     ...base,
     dynamicPrompt: [...dynamicPromptParts, memoryCliInstruction].filter(Boolean).join('\n\n'),
-    promptSnapshot: mergedSnapshot,
+    promptSnapshot: enrichedSnapshot,
     promptSegments: {
       ...(base.promptSegments || {}),
       systemPrompt: mergedSnapshot.renderedSystemMessages,

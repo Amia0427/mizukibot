@@ -73,7 +73,10 @@ function main() {
   let failureCount = 0;
   console.log('================ Prompt Check Start ================');
   const ignoredRelPaths = new Set([
-    'prompt-manifest.json'
+    'prompt-manifest.json',
+    'persona_modules/module-catalog.json',
+    'persona_modules/reference_anchor_map.json',
+    'persona_modules/distilled_sources.json'
   ]);
 
   if (!PROMPT_MANIFEST || typeof PROMPT_MANIFEST !== 'object') {

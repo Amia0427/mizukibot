@@ -8,6 +8,7 @@ const {
 const {
   buildDirectChatToolCatalog
 } = require('../core/directChatToolCatalog');
+const { getPersonaModuleCatalogSummary } = require('../utils/personaModules');
 
 module.exports = (async () => {
   const memoryDecision = await planRequestV2({
@@ -532,7 +533,8 @@ module.exports = (async () => {
       domain: 'weather'
     }
   }, toolCatalog, {
-    allowedTools: ['skill_weather', 'getWeather', 'web_search']
+    allowedTools: ['skill_weather', 'getWeather', 'web_search'],
+    personaModuleCatalog: getPersonaModuleCatalogSummary()
   });
 
   const weatherToolMeta = plannerPayload.tools.find((item) => item.name === 'skill_weather');
@@ -541,6 +543,8 @@ module.exports = (async () => {
   assert.strictEqual(weatherToolMeta.overlapGroup, 'weather');
   assert.ok(Array.isArray(weatherToolMeta.preferredOver));
   assert.ok(weatherToolMeta.preferredOver.includes('getWeather'));
+  assert.ok(Array.isArray(plannerPayload.personaModuleCatalog));
+  assert.ok(plannerPayload.personaModuleCatalog.some((item) => item.moduleId === 'daily_energy'));
 
   const financeTickerGuard = await planRequestV2({
     question: 'PLEASE 分析一下这个方案',
@@ -591,6 +595,53 @@ module.exports = (async () => {
 
   assert.strictEqual(financeTickerGuard.steps[0].tool, 'skill_stock_analyze');
   assert.notStrictEqual(financeTickerGuard.steps[0].args.ticker, 'PLEASE');
+
+  const personaPlannerDecision = await planRequestV2({
+    question: '真冬最近是不是又在硬撑，我不想逼她',
+    cleanText: '真冬最近是不是又在硬撑，我不想逼她',
+    topRouteType: 'direct_chat',
+    routeMeta: {
+      chatMode: 'chat',
+      toolIntent: 'none',
+      responseIntent: 'answer',
+      directedContext: {
+        addressee: { senderName: 'Yuki', userId: 'mafuyu', kind: 'user', confidence: 0.96 }
+      }
+    },
+    route: {
+      question: '真冬最近是不是又在硬撑，我不想逼她',
+      cleanText: '真冬最近是不是又在硬撑，我不想逼她',
+      topRouteType: 'direct_chat',
+      meta: {
+        chatMode: 'chat',
+        toolIntent: 'none',
+        responseIntent: 'answer',
+        directedContext: {
+          addressee: { senderName: 'Yuki', userId: 'mafuyu', kind: 'user', confidence: 0.96 }
+        }
+      },
+      intent: {},
+      facets: {}
+    },
+    allowedTools: [],
+    personaModuleCatalog: getPersonaModuleCatalogSummary(),
+    planner: async () => ({
+      mode: 'chat_only',
+      taskShape: 'fast_reply',
+      allowedToolNames: [],
+      steps: [],
+      plannerMeta: {
+        decisionVersion: 'planner_decision_v2',
+        plannerVersion: 'direct_chat_single_authority_v2',
+        reason: 'chat only with persona modules',
+        plannerModel: 'mock-planner',
+        decisionSource: 'planner',
+        personaModules: ['mafuyu_branch', 'care_light']
+      }
+    })
+  });
+
+  assert.deepStrictEqual(personaPlannerDecision.plannerMeta.personaModules, ['mafuyu_branch', 'care_light']);
 
   console.log('plannerV2Protocol.test.js passed');
 })().catch((error) => {

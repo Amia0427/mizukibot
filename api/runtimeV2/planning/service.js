@@ -17,6 +17,7 @@ const {
 const { getPolicyDefinition } = require('../../../core/routeProfiles');
 const { HUMANIZER_SYSTEM_PROMPT } = require('../../../utils/humanizer');
 const { buildPlannerStageSystemPrompt } = require('../../../utils/stagePromptContracts');
+const { getPersonaModuleCatalogSummary } = require('../../../utils/personaModules');
 const {
   buildReactiveRetryPayload,
   createContextCompactionHardBlockError,
@@ -1018,6 +1019,7 @@ function buildPlannerPrompt(toolCatalog = []) {
     'If an explicit URL is already known, prefer fetch/extract over search-first discovery.',
     'If you choose memory_cli for recall or notebook continuity, search first. Plan a follow-up memory_cli open only when the search result alone is likely insufficient.',
     'If the user asks for official docs, website details, key points, or asks to include links and both web_search and web_fetch are available, plan web_search first and web_fetch second.',
+    'You may output plannerMeta.personaModules as an array of module ids, but never more than 2.',
     'steps items must include: id, tool, args, kind, dependsOn, parallelGroup, sideEffect, successCriteria, evidenceRequirement, repairPolicy, runtimeBinding, purpose.',
     'Available tools right now:',
     catalogBlock,
@@ -1067,7 +1069,10 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
     continuitySignals: normalizeObject(options?.continuitySignals, {}),
     constraints: normalizeObject(options?.constraints, {}),
     explicitAllowlist: allowlist,
-    tools: buildDirectChatToolCatalogSummary(toolCatalog)
+    tools: buildDirectChatToolCatalogSummary(toolCatalog),
+    personaModuleCatalog: normalizeArray(options?.personaModuleCatalog).length > 0
+      ? normalizeArray(options.personaModuleCatalog)
+      : getPersonaModuleCatalogSummary()
   };
 }
 
@@ -1257,6 +1262,10 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
       toolBuckets: Array.from(new Set(
         normalizeToolNames(normalizedSteps.map((step) => step.tool)).map((toolName) => resolveToolBucket(toolName, toolCatalogByName))
       )),
+      personaModules: normalizeArray(rawDecision?.plannerMeta?.personaModules || rawDecision?.personaModules)
+        .map((item) => normalizeText(item))
+        .filter(Boolean)
+        .slice(0, 2),
       normalizedByRule,
       normalizationReason: normalizeText(normalizationReason)
     }
@@ -1332,6 +1341,7 @@ async function planRequestV2(input = {}) {
     continuitySignals: normalizeObject(input.continuitySignals, {}),
     constraints: normalizeObject(input.constraints, {}),
     directedContext: normalizeObject(input.directedContext, null),
+    personaModuleCatalog: normalizeArray(input.personaModuleCatalog),
     question: route.question,
     goal: normalizeText(input.goal || route.question || route.cleanText),
     topRouteType: route.topRouteType,

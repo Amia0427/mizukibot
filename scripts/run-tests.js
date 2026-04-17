@@ -61,6 +61,8 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'promptSecurity.test.js'),
   path.join(__dirname, '..', 'tests', 'promptStageContracts.test.js'),
   path.join(__dirname, '..', 'tests', 'promptGoldenSnapshots.test.js'),
+  path.join(__dirname, '..', 'tests', 'personaModules.test.js'),
+  path.join(__dirname, '..', 'tests', 'langgraphStoreSanitize.test.js'),
   path.join(__dirname, '..', 'tests', 'subagentPromptSecurity.test.js'),
   path.join(__dirname, '..', 'tests', 'agentLoopV2.test.js'),
   path.join(__dirname, '..', 'tests', 'dispatchRuntimeBinding.test.js'),

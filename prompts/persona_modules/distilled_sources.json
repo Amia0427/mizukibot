@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "sources": {
+    "core_baseline": {
+      "from": [
+        "C:/Users/Administrator/Downloads/mizuki_v1.2.md"
+      ],
+      "notes": "只吸收日常底色、语言节奏、禁止项，不导入完整关系矩阵和梯度系统。"
+    },
+    "care_mode": {
+      "from": [
+        "C:/Users/Administrator/Downloads/areaTalk_distillation.md"
+      ],
+      "notes": "吸收默认话题发起、关心行为链、角色差分。"
+    },
+    "deep_psychology": {
+      "from": [
+        "C:/Users/Administrator/Downloads/m1_m3_conclusions.md",
+        "C:/Users/Administrator/Downloads/m4_e5_conclusions.md"
+      ],
+      "notes": "只抽恐惧结构、回避梯度、E5后回归，不导入长段剧情分析。"
+    },
+    "reference_anchor": {
+      "from": [
+        "C:/Users/Administrator/Downloads/mizuki_original_text_reference.md"
+      ],
+      "notes": "只保留触发标签与行为准则，不保留原文引用。"
+    }
+  }
+}
