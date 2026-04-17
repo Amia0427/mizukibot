@@ -104,6 +104,14 @@ function createDirectReplyNode(deps = {}) {
   const classifyReplyFailure = typeof deps.classifyReplyFailure === 'function'
     ? deps.classifyReplyFailure
     : (() => ({ type: 'none' }));
+  const summarizeToolMarkupText = typeof deps.summarizeToolMarkupText === 'function'
+    ? deps.summarizeToolMarkupText
+    : ((text = '', maxChars = 240) => {
+        const compact = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!compact) return '';
+        const limit = Math.max(80, Number(maxChars) || 240);
+        return compact.length > limit ? `${compact.slice(0, limit - 3).trim()}...` : compact;
+      });
 
   return async function directReplyNode(state) {
     const request = normalizeObject(state.request, {});
@@ -365,6 +373,13 @@ function createDirectReplyNode(deps = {}) {
     }
 
     if (isPureToolCallMarkup(reply) && executedToolEnvelopes.length === 0) {
+      directLoopEvents = directLoopEvents.concat([
+        createEvent('tool_markup_blocked', {
+          node: 'direct_reply',
+          stage: 'initial_reply',
+          preview: summarizeToolMarkupText(reply, 320)
+        })
+      ]);
       let retriedReply = '';
       try {
         retriedReply = String(await requestReplyImpl(
@@ -390,6 +405,15 @@ function createDirectReplyNode(deps = {}) {
           })
         ]);
       } else {
+        if (retriedReply && isPureToolCallMarkup(retriedReply)) {
+          directLoopEvents = directLoopEvents.concat([
+            createEvent('tool_markup_blocked', {
+              node: 'direct_reply',
+              stage: 'plain_text_retry',
+              preview: summarizeToolMarkupText(retriedReply, 320)
+            })
+          ]);
+        }
         reply = getControlledFailureReply('tool_error');
         directLoopEvents = directLoopEvents.concat([
           createEvent('tool_loop_forced_answer', {

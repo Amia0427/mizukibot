@@ -24,6 +24,11 @@ const {
   buildPassiveAwarenessSocialSnippet,
   shouldLockPassiveReply
 } = require('../utils/socialContextRuntime');
+const {
+  composePersonaMemoryState,
+  renderPersonaMemoryPrompt,
+  recordPersonaMemoryOutcome
+} = require('../utils/personaMemoryState');
 const { buildDirectedContextPromptSnippet } = require('../api/graphPrompting');
 const { buildLlmPerception } = require('./llmPerception');
 
@@ -883,7 +888,7 @@ function buildDecisionPrompt({
   ].filter((item) => item !== null).join('\n');
 }
 
-function buildReplyPrompt({
+async function buildReplyPrompt({
   groupId,
   senderId,
   senderName,
@@ -900,7 +905,16 @@ function buildReplyPrompt({
   directedContext,
   now = Date.now()
 }) {
-  const compactPersona = buildCompactPersonaPrompt(600);
+  const personaState = await composePersonaMemoryState({
+    userId: String(senderId || '').trim(),
+    question: text || '',
+    groupId,
+    routeMeta: { groupId }
+  }, {
+    surface: 'passive_group_reply',
+    groupId
+  });
+  const personaPrompt = renderPersonaMemoryPrompt(personaState, 'passive_group_reply');
   const contextLines = recentMessages
     .slice(-12)
     .map((item) => {
@@ -921,7 +935,8 @@ function buildReplyPrompt({
     now
   });
 
-  return [
+  return {
+    prompt: [
     'You are generating a natural passive QQ group reply.',
     'Reply with one short line only.',
     'Rules:',
@@ -931,8 +946,7 @@ function buildReplyPrompt({
     '4. Sound like a light interjection, not a formal answer.',
     '5. If the type is presence_ack, acknowledge briefly. If the type is brief_clarify, ask at most one very light clarification.',
     '',
-    '[PersonaSummary]',
-    compactPersona || 'Natural, cute, restrained, low-pressure.',
+    ...personaPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean),
     '',
     `group_id: ${String(groupId || '')}`,
     `sender_name: ${senderName || 'unknown'}`,
@@ -954,7 +968,9 @@ function buildReplyPrompt({
     text || '(empty)',
     '',
     'Output only the final reply text.'
-  ].filter((item) => item !== null).join('\n');
+  ].filter((item) => item !== null).join('\n'),
+    personaMemoryState: personaState
+  };
 }
 
 function parseBooleanLike(value) {
@@ -1007,7 +1023,7 @@ function parseDecision(rawText = '') {
   };
 }
 
-function buildReplyPromptV2({
+async function buildReplyPromptV2({
   groupId,
   senderName,
   recentMessages,
@@ -1027,7 +1043,16 @@ function buildReplyPromptV2({
   senderId,
   now = Date.now()
 }) {
-  const compactPersona = buildCompactPersonaPrompt(600);
+  const personaState = await composePersonaMemoryState({
+    userId: String(senderId || '').trim(),
+    question: text || '',
+    groupId,
+    routeMeta: { groupId, directedContext }
+  }, {
+    surface: 'passive_group_reply',
+    groupId
+  });
+  const personaPrompt = renderPersonaMemoryPrompt(personaState, 'passive_group_reply');
   const socialSnippet = buildPassiveAwarenessSocialSnippet({
     groupId,
     recentMessages,
@@ -1055,7 +1080,8 @@ function buildReplyPromptV2({
   });
 
   const action = normalizePresenceAction(presenceAction, 'reply');
-  return [
+  return {
+    prompt: [
     'You are generating a passive QQ group reply.',
     'The presence state machine already decided that replying is allowed.',
     'Write one short natural line only.',
@@ -1067,8 +1093,7 @@ function buildReplyPromptV2({
       ? '4. This is a follow_up. Continue only one point from the current mini-conversation.'
       : '4. This is a reply. Speak like a one-time natural interjection.',
     '',
-    '[PersonaSummary]',
-    compactPersona || 'Natural, cute, restrained, low-pressure.',
+    ...personaPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean),
     '',
     `group_id: ${String(groupId || '')}`,
     `sender_name: ${senderName || 'unknown'}`,
@@ -1095,7 +1120,9 @@ function buildReplyPromptV2({
     text || '(empty)',
     '',
     'Output only the final reply text.'
-  ].filter((item) => item !== null).join('\n');
+  ].filter((item) => item !== null).join('\n'),
+    personaMemoryState: personaState
+  };
 }
 
 function shouldUseLocalDecisionFallback({ decision, addressee, score }) {
@@ -1286,7 +1313,7 @@ async function invokeReplyModel({
     return '';
   }
 
-  const prompt = buildReplyPromptV2({
+  const promptBundle = await buildReplyPromptV2({
     groupId,
     senderId,
     senderName,
@@ -1306,6 +1333,7 @@ async function invokeReplyModel({
     directedContext,
     now
   });
+  const prompt = String(promptBundle?.prompt || '').trim();
   let sseState = { buffer: '' };
   let streamedText = '';
   let rawStreamText = '';
@@ -1783,6 +1811,25 @@ async function handlePassiveGroupAwareness({
     now,
     cfg
   });
+  await recordPersonaMemoryOutcome('passive_group_reply', {
+    state: promptBundle?.personaMemoryState,
+    userId: String(senderId || '').trim(),
+    sessionKey,
+    groupId,
+    request: {
+      userId: String(senderId || '').trim(),
+      question: text || '',
+      routeMeta: { groupId, directedContext },
+      routePolicyKey: 'passive-awareness/reply',
+      topRouteType: 'chat'
+    },
+    activeTopic: text,
+    recentReplyFrame: replyText,
+    recentMessages: [
+      { role: 'user', content: text },
+      { role: 'assistant', content: replyText }
+    ]
+  }).catch(() => {});
   return {
     handled: true,
     reason: 'replied',

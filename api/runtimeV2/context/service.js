@@ -6,6 +6,10 @@ const { buildStyleProfileSnippet } = require('../../../utils/styleProfileRuntime
 const { buildSocialContextSnippet } = require('../../../utils/socialContextRuntime');
 const { buildMemoryContextAsync } = require('../../../utils/memoryContext');
 const {
+  composePersonaMemoryState,
+  renderPersonaMemoryPrompt
+} = require('../../../utils/personaMemoryState');
+const {
   estimateTokens,
   getAffinitySettings,
   trimTextByTokenBudget
@@ -216,6 +220,23 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     toolName: routeMeta.toolName || routeMeta.tool_name || '',
     sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
   });
+  const personaMemoryState = await composePersonaMemoryState({
+    userId,
+    question: question || '',
+    routeMeta,
+    routePolicyKey,
+    topRouteType
+  }, {
+    userInfo,
+    surface: topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat',
+    sessionKey: options.sessionKey,
+    shortTermMemory: options.shortTermMemory,
+    chatHistory: options.chatHistory
+  });
+  const personaMemoryPrompt = renderPersonaMemoryPrompt(
+    personaMemoryState,
+    topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat'
+  );
 
   if (customPrompt) {
     return {
@@ -223,15 +244,18 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       promptSegments: {
         systemPrompt: [{ role: 'system', content: customPrompt }],
         routePrompt: options.routePrompt ? [{ role: 'system', content: String(options.routePrompt || '').trim() }] : [],
-        memoryContext: memoryContext?.segments || {}
+        memoryContext: memoryContext?.segments || {},
+        personaMemory: personaMemoryPrompt.systemMessages || []
       },
       memoryContext,
+      personaMemoryState,
       affinity
     };
   }
 
   const promptParts = [
     config.SYSTEM_PROMPT,
+    ...personaMemoryPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean),
     `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`,
     `[AffinityPoints] ${affinity.points}`,
     `[RetrievedMemoryLite] ${memoryContext.memoryForPrompt || 'none'}`,
@@ -263,6 +287,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   if (estimateTokens(dynamicPrompt) > promptBudget) {
     dynamicPrompt = [
       config.SYSTEM_PROMPT,
+      ...personaMemoryPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean),
       `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`,
       `[AffinityPoints] ${affinity.points}`,
       `[RetrievedMemoryLite] ${trimTextByTokenBudget(memoryContext.memoryForPrompt, Math.floor(promptBudget * 0.18), 'tail')}`,
@@ -278,9 +303,11 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     promptSegments: {
       systemPrompt: dynamicPrompt ? [{ role: 'system', content: dynamicPrompt }] : [],
       routePrompt: options.routePrompt ? [{ role: 'system', content: String(options.routePrompt || '').trim() }] : [],
-      memoryContext: memoryContext?.segments || {}
+      memoryContext: memoryContext?.segments || {},
+      personaMemory: personaMemoryPrompt.systemMessages || []
     },
     memoryContext,
+    personaMemoryState,
     affinity
   };
 }

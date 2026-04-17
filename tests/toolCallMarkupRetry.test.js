@@ -4,6 +4,7 @@ const { createDirectReplyNode } = require('../api/runtimeV2/nodes/directReply');
 
 module.exports = (async () => {
   let replyCalls = 0;
+  let savedState = null;
 
   const directReplyNode = createDirectReplyNode({
     normalizeObject: (value, fallback = {}) => (value && typeof value === 'object' ? value : fallback),
@@ -46,7 +47,10 @@ module.exports = (async () => {
       if (/^tool error:/i.test(compact)) return { type: 'tool_error' };
       return { type: 'none' };
     },
-    saveAndEmit: (state) => state
+    saveAndEmit: (state) => {
+      savedState = state;
+      return state;
+    }
   });
 
   const result = await directReplyNode({
@@ -73,6 +77,8 @@ module.exports = (async () => {
 
   assert.strictEqual(result.output.finalReply, '这次直接正常回答，不调用工具。');
   assert.ok(replyCalls >= 2);
+  assert.ok(Array.isArray(savedState?.events));
+  assert.ok(savedState.events.some((event) => event.type === 'tool_markup_blocked' && event.stage === 'initial_reply'));
 
   console.log('toolCallMarkupRetry.test.js passed');
 })().catch((error) => {

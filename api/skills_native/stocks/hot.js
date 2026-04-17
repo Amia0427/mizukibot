@@ -1,4 +1,5 @@
 const axios = require('axios');
+const cheerio = require('cheerio');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -15,27 +16,35 @@ async function fetchCoinGeckoTrending() {
   return Array.isArray(response?.data?.coins) ? response.data.coins : [];
 }
 
-async function fetchStooqLeaders() {
-  const response = await axios.get('https://stooq.com/t/?i=528', {
+async function fetchCompaniesMarketCap() {
+  const response = await axios.get('https://companiesmarketcap.com/', {
     timeout: 15000,
     proxy: false,
     headers: {
       'User-Agent': 'MizukiBot/1.0 (stocks hot native client)'
     }
   });
-  const text = String(response.data || '');
-  const matches = [...text.matchAll(/\b([A-Z]{1,5})\.US\b/g)].slice(0, 8);
-  return matches.map((item) => ({
-    symbol: item[1],
-    shortName: '',
-    regularMarketChangePercent: null
-  }));
+  const html = String(response.data || '');
+  const $ = cheerio.load(html);
+  return $('table tbody tr').toArray().slice(0, 8).map((row) => {
+    const element = $(row);
+    const links = element.find('a').toArray().map((item) => $(item));
+    const href = normalizeText(links[0]?.attr('href'));
+    const symbol = normalizeText(links[0]?.text()).split(/\s+/)[0];
+    const name = normalizeText(links[1]?.text() || element.find('div').first().text());
+    return {
+      symbol: symbol.toUpperCase(),
+      name,
+      source: 'CompaniesMarketCap',
+      link: href ? `https://companiesmarketcap.com${href}` : ''
+    };
+  }).filter((item) => item.symbol);
 }
 
 async function scanHot({ json = false } = {}) {
   const [coins, movers] = await Promise.allSettled([
     fetchCoinGeckoTrending(),
-    fetchStooqLeaders()
+    fetchCompaniesMarketCap()
   ]);
 
   const result = {
@@ -54,13 +63,14 @@ async function scanHot({ json = false } = {}) {
   }
 
   if (movers.status === 'fulfilled') {
-      result.stock_highlights = movers.value.slice(0, 8).map((item) => ({
-        symbol: normalizeText(item?.symbol).toUpperCase(),
-        name: normalizeText(item?.shortName || item?.longName),
-        price: item?.regularMarketPrice,
-        change_pct: item?.regularMarketChangePercent,
-        source: 'Stooq Leaders'
-      }));
+    result.stock_highlights = movers.value.slice(0, 8).map((item) => ({
+      symbol: normalizeText(item?.symbol).toUpperCase(),
+      name: normalizeText(item?.name),
+      price: null,
+      change_pct: null,
+      source: item?.source || 'CompaniesMarketCap',
+      link: normalizeText(item?.link)
+    }));
   }
 
   if (json) {
@@ -83,7 +93,7 @@ async function scanHot({ json = false } = {}) {
     lines.push('  none');
   } else {
     result.stock_highlights.forEach((item, index) => {
-      lines.push(`  ${index + 1}. ${item.symbol} ${item.name} change=${Number(item.change_pct || 0).toFixed(2)}%`);
+      lines.push(`  ${index + 1}. ${item.symbol} ${item.name || ''}`.trim());
     });
   }
   return lines.join('\n');

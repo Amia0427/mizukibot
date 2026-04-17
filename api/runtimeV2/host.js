@@ -127,6 +127,7 @@ const {
 const { recordMemoryScope } = require('../../utils/memoryScopeIndex');
 const { learnSomethingNew } = require('../memoryExtraction');
 const { appendMemoryEvent, materializeMemoryViews } = require('../../utils/memory-v3');
+const { recordPersonaMemoryOutcome } = require('../../utils/personaMemoryState');
 const { postWithRetry } = require('../httpClient');
 const { extractMessageContent } = require('../parser');
 const { isReplyFailure, classifyReplyFailure } = require('../../utils/replyFailure');
@@ -1187,6 +1188,7 @@ function createRuntime(options = {}) {
     },
     appendShortTermHistory,
     persistShortTermBridgeSnapshot,
+    recordPersonaMemoryOutcome,
     appendMemoryEvent,
     materializeMemoryViews,
     addProfileItem,

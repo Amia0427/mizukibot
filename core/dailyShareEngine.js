@@ -69,6 +69,7 @@ const { isAdmin } = require('./router');
 const { runMemoryCli: defaultRunMemoryCli } = require('../utils/memoryCli');
 const { recordMemoryScope: defaultRecordMemoryScope } = require('../utils/memoryScopeIndex');
 const { requestAssistantMessage } = require('../api/graphModelIO');
+const { classifyReplyFailure, normalizeReplyText } = require('../utils/replyFailure');
 
 const WINDOW_LABELS = Object.freeze({
   morning: '鏃╅棿',
@@ -320,6 +321,35 @@ function trimReplyText(value, maxChars = 120) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
   return text.length > maxChars ? text.slice(0, maxChars).trim() : text;
+}
+
+function classifyDailyShareGenerationFailure(error = null) {
+  const message = normalizeReplyText(error?.message || error || '');
+  const replyFailure = classifyReplyFailure(message);
+  const isPureToolMarkupBlocked = /tool call markup was returned without executing any tool/i.test(message);
+  return {
+    message,
+    replyFailureType: replyFailure.type,
+    isPureToolMarkupBlocked,
+    shouldCooldownWindow: isPureToolMarkupBlocked || replyFailure.type === 'tool_error'
+  };
+}
+
+function getDailyShareFailureCooldownMs(targetConfig = {}, error = null) {
+  const configuredMinutes = Math.max(
+    1,
+    Number(
+      targetConfig?.failureCooldownMinutes
+      || config.DAILY_SHARE_FAILURE_COOLDOWN_MINUTES
+      || 30
+    ) || 30
+  );
+  const baseMs = configuredMinutes * 60 * 1000;
+  const message = normalizeReplyText(error?.message || error || '');
+  if (/tool call markup was returned without executing any tool/i.test(message)) {
+    return Math.max(baseMs, 60 * 60 * 1000);
+  }
+  return baseMs;
 }
 
 function summarizeRecentShares(stateEntry, maxItems = 3) {
@@ -790,6 +820,7 @@ function shouldRunWindowNow({ entry, windowDef, now, date }) {
   }
   if (status.status === 'skipped') return false;
   if (getWindowRemainingCapacity(schedule) <= 0) return false;
+  if (Math.max(0, Number(schedule.cooldownUntil || 0) || 0) > now) return false;
   if (schedule.deferred && schedule.deferredAt > now) return false;
   return schedule.plannedAt > 0 && now >= schedule.plannedAt;
 }
@@ -1363,6 +1394,7 @@ function createDailyShareEngine({
       schedule.lastSentAt = now;
       schedule.deferred = false;
       schedule.deferredAt = 0;
+      schedule.cooldownUntil = 0;
       schedule.completedAt = now;
       if (getWindowRemainingCapacity(schedule) > 0) {
         const nextPlan = now + (Math.max(1, Number(target.deferMinutes || 8)) * 60 * 1000);
@@ -1442,14 +1474,15 @@ function createDailyShareEngine({
       }
 
       for (const windowDef of getWindowDefinitions(target)) {
-        ensureWindowSchedule(freshState, groupId, windowDef, today, date);
-        if (!shouldRunWindowNow({ entry: freshState, windowDef, now, date })) continue;
+        const liveState = ensureStateEntry(state, groupId, today);
+        ensureWindowSchedule(liveState, groupId, windowDef, today, date);
+        if (!shouldRunWindowNow({ entry: liveState, windowDef, now, date })) continue;
 
         const gate = shouldDeferOrSkip({
           groupId,
           targetConfig: target,
           windowDef,
-          stateEntry: freshState,
+          stateEntry: liveState,
           now
         });
         if (!gate.allowed) {
@@ -1457,7 +1490,7 @@ function createDailyShareEngine({
           continue;
         }
 
-        const type = getAutoTypeForWindow(target, freshState, windowDef.key);
+        const type = getAutoTypeForWindow(target, liveState, windowDef.key);
         if (!type) continue;
 
         try {
@@ -1474,16 +1507,32 @@ function createDailyShareEngine({
             surface: 'group'
           });
         } catch (error) {
+          const currentState = ensureStateEntry(state, groupId, today);
+          const failure = classifyDailyShareGenerationFailure(error);
+          const schedule = currentState.scheduleByWindow[windowDef.key];
+          if (failure.shouldCooldownWindow) {
+            const cooldownMs = getDailyShareFailureCooldownMs(target, error);
+            schedule.deferred = true;
+            schedule.deferredAt = now + cooldownMs;
+            schedule.cooldownUntil = now + cooldownMs;
+            logDailyShare({
+              groupId,
+              windowKey: windowDef.key,
+              type,
+              reason: `cooldown:${failure.message || 'tool_error'}`,
+              event: 'failure cooldown'
+            });
+          }
           logDailyShare({
             groupId,
             windowKey: windowDef.key,
             type,
-            reason: error?.message || String(error),
-            event: 'send fail'
-          });
-          const status = freshState.windowStatus[windowDef.key];
+              reason: failure.message || error?.message || String(error),
+              event: 'send fail'
+            });
+          const status = currentState.windowStatus[windowDef.key];
           status.status = 'failed';
-          status.lastReason = error?.message || String(error);
+          status.lastReason = failure.message || error?.message || String(error);
           status.lastAttemptAt = now;
           flush();
         }
@@ -1507,10 +1556,11 @@ function createDailyShareEngine({
     }
 
     for (const windowDef of getWindowDefinitions(target)) {
-      ensureWindowSchedule(freshState, QZONE_TARGET_ID, windowDef, today, date);
-      if (!shouldRunWindowNow({ entry: freshState, windowDef, now, date })) continue;
+      const liveState = ensureStateEntry(state, QZONE_TARGET_ID, today);
+      ensureWindowSchedule(liveState, QZONE_TARGET_ID, windowDef, today, date);
+      if (!shouldRunWindowNow({ entry: liveState, windowDef, now, date })) continue;
 
-      const type = getAutoTypeForWindow(target, freshState, windowDef.key);
+      const type = getAutoTypeForWindow(target, liveState, windowDef.key);
       if (!type) continue;
 
       try {
@@ -1527,16 +1577,32 @@ function createDailyShareEngine({
           surface: 'qzone'
         });
       } catch (error) {
+        const currentState = ensureStateEntry(state, QZONE_TARGET_ID, today);
+        const failure = classifyDailyShareGenerationFailure(error);
+        const schedule = currentState.scheduleByWindow[windowDef.key];
+        if (failure.shouldCooldownWindow) {
+          const cooldownMs = getDailyShareFailureCooldownMs(target, error);
+          schedule.deferred = true;
+          schedule.deferredAt = now + cooldownMs;
+          schedule.cooldownUntil = now + cooldownMs;
+          logDailyShare({
+            groupId: QZONE_TARGET_ID,
+            windowKey: windowDef.key,
+            type,
+            reason: `cooldown:${failure.message || 'tool_error'}`,
+            event: 'failure cooldown'
+          });
+        }
         logDailyShare({
           groupId: QZONE_TARGET_ID,
           windowKey: windowDef.key,
           type,
-          reason: error?.message || String(error),
-          event: 'send fail'
-        });
-        const status = freshState.windowStatus[windowDef.key];
+            reason: failure.message || error?.message || String(error),
+            event: 'send fail'
+          });
+        const status = currentState.windowStatus[windowDef.key];
         status.status = 'failed';
-        status.lastReason = error?.message || String(error);
+        status.lastReason = failure.message || error?.message || String(error);
         status.lastAttemptAt = now;
         flush();
       }

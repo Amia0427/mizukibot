@@ -269,6 +269,207 @@ function prefersMemoryRecall(cleanText = '') {
   return /(记得|记不记得|前几天|之前|刚才|聊过|说过|我们.*(事情|聊)|回忆|日志)/i.test(text);
 }
 
+function isNotebookListingRequest(cleanText = '') {
+  const text = normalizeText(cleanText);
+  if (!text) return false;
+  return /(列出|列表|有哪些|都有什么|目录|文档列表|笔记列表|所有笔记|notebook list|list docs?|document list)/i.test(text);
+}
+
+function isWeatherRequest(cleanText = '', route = {}) {
+  const text = normalizeText(cleanText);
+  if (normalizeText(route?.facets?.domain) === 'weather') return true;
+  return /(天气|气温|温度|下雨|降温|湿度|风力|weather|temperature|forecast)/i.test(text);
+}
+
+function isContextStatsRequest(cleanText = '') {
+  const text = normalizeText(cleanText);
+  if (!text) return false;
+  return /(上下文|context|token|剩余上下文|context usage|remaining context|token usage|token count|context limit)/i.test(text);
+}
+
+function isArxivLatestRequest(cleanText = '') {
+  const text = normalizeText(cleanText);
+  return /(arxiv).*(最新|最近|latest|recent)|(?:最新|最近|latest|recent).*(arxiv)/i.test(text);
+}
+
+function isArxivIdRequest(cleanText = '') {
+  const text = normalizeText(cleanText);
+  return /\b\d{4}\.\d{4,5}(?:v\d+)?\b/i.test(text);
+}
+
+function isArxivRequest(cleanText = '', route = {}) {
+  const text = normalizeText(cleanText);
+  if (normalizeText(route?.facets?.domain) === 'research' && /\barxiv\b/i.test(text)) return true;
+  return /\barxiv\b/i.test(text);
+}
+
+function isFinanceQuoteRequest(cleanText = '') {
+  const text = normalizeText(cleanText);
+  if (!text) return false;
+  return /(实时股价|股价|报价|行情|价格|price|quote|ticker|盘前|盘后|现价)/i.test(text);
+}
+
+function isFinanceDividendRequest(cleanText = '') {
+  const text = normalizeText(cleanText);
+  return /(分红|股息|派息|dividend|yield)/i.test(text);
+}
+
+function isFinanceRumorRequest(cleanText = '') {
+  const text = normalizeText(cleanText);
+  return /(传闻|谣言|消息面|rumor|sentiment|headline|新闻情绪)/i.test(text);
+}
+
+function isFinanceWatchlistRequest(cleanText = '') {
+  const text = normalizeText(cleanText);
+  return /(自选|观察列表|watchlist|提醒|alert)/i.test(text);
+}
+
+function isFinancePortfolioRequest(cleanText = '') {
+  const text = normalizeText(cleanText);
+  return /(持仓|组合|仓位|portfolio|holdings)/i.test(text);
+}
+
+function isFinanceAnalysisRequest(cleanText = '', route = {}) {
+  const text = normalizeText(cleanText);
+  const isFinanceDomain = normalizeText(route?.facets?.domain) === 'finance'
+    || /(股票|美股|港股|a股|基金|加密|币圈|股价|分红|股息|观察列表|投资组合|行情|财报|stock|stocks|ticker|portfolio|watchlist|dividend|crypto)/i.test(text);
+  if (!isFinanceDomain) return false;
+  if (isFinanceQuoteRequest(text) || isFinanceDividendRequest(text) || isFinanceRumorRequest(text)
+    || isFinanceWatchlistRequest(text) || isFinancePortfolioRequest(text)) {
+    return false;
+  }
+  return /(分析|怎么看|看法|解读|分析一下|analyze|analysis|outlook|valuation|研判)/i.test(text);
+}
+
+function isExplicitUrlLookup(cleanText = '') {
+  return hasExplicitHttpUrl(cleanText);
+}
+
+function extractExplicitUrl(text = '') {
+  const match = String(text || '').match(/https?:\/\/\S+/i);
+  return String(match?.[0] || '').trim();
+}
+
+function extractTickerHint(text = '') {
+  const upper = String(text || '').toUpperCase();
+  const tickerMatch = upper.match(/\b[A-Z]{1,5}(?:\.[A-Z]{1,3})?\b/g);
+  const blacklist = new Set(['A', 'AN', 'AND', 'OR', 'THE', 'USD', 'CNY', 'HK', 'US', 'ETF']);
+  const candidate = Array.isArray(tickerMatch)
+    ? tickerMatch.find((item) => !blacklist.has(String(item || '').trim()))
+    : '';
+  return String(candidate || '').trim();
+}
+
+function canonicalizeToolNames(toolNames = [], toolCatalogByName = new Map()) {
+  return normalizeToolNames(toolNames).filter((toolName) => toolCatalogByName.has(toolName));
+}
+
+function resolveCanonicalPreferredTools(route = {}, available = {}) {
+  const allowedToolNames = normalizeToolNames(Array.isArray(available?.allowedToolNames) ? available.allowedToolNames : []);
+  const cleanText = getPlannerRequestText(route);
+  const sourceScope = normalizeText(route?.facets?.sourceScope);
+  const domain = normalizeText(route?.facets?.domain);
+  const preferred = [];
+
+  const addIfAllowed = (...toolNames) => {
+    for (const toolName of toolNames) {
+      const normalized = normalizeText(toolName);
+      if (normalized && allowedToolNames.includes(normalized) && !preferred.includes(normalized)) {
+        preferred.push(normalized);
+      }
+    }
+  };
+
+  if (domain === 'time' || /现在几点|当前时间|北京时间|当地时间/i.test(cleanText)) {
+    addIfAllowed('get_current_time');
+    return preferred;
+  }
+
+  if (isContextStatsRequest(cleanText)) {
+    addIfAllowed('get_context_stats');
+    return preferred;
+  }
+
+  if (isWeatherRequest(cleanText, route)) {
+    addIfAllowed('skill_weather', 'getWeather');
+    return preferred;
+  }
+
+  if (sourceScope === 'notebook' || /知识库|笔记|notebook|我的文档|我的资料/i.test(cleanText)) {
+    if (isNotebookListingRequest(cleanText)) addIfAllowed('notebook_list_docs');
+    else addIfAllowed('notebook_search');
+    return preferred;
+  }
+
+  if (shouldPrioritizeMemoryProbe(route) || prefersMemoryRecall(cleanText)) {
+    addIfAllowed('memory_cli');
+    return preferred;
+  }
+
+  if (isArxivRequest(cleanText, route)) {
+    if (isArxivIdRequest(cleanText)) addIfAllowed('skill_arxiv_get');
+    else if (isArxivLatestRequest(cleanText)) addIfAllowed('skill_arxiv_latest', 'skill_arxiv_search');
+    else addIfAllowed('skill_arxiv_search');
+    return preferred;
+  }
+
+  if (
+    domain === 'finance'
+    || isFinanceQuoteRequest(cleanText)
+    || isFinanceDividendRequest(cleanText)
+    || isFinanceRumorRequest(cleanText)
+    || isFinanceWatchlistRequest(cleanText)
+    || isFinancePortfolioRequest(cleanText)
+    || isFinanceAnalysisRequest(cleanText, route)
+  ) {
+    if (isFinanceWatchlistRequest(cleanText)) addIfAllowed('skill_stock_watchlist');
+    else if (isFinancePortfolioRequest(cleanText)) addIfAllowed('skill_stock_portfolio');
+    else if (isFinanceDividendRequest(cleanText)) addIfAllowed('skill_stock_dividend');
+    else if (isFinanceRumorRequest(cleanText)) addIfAllowed('skill_stock_rumor');
+    else if (isFinanceQuoteRequest(cleanText)) addIfAllowed('skill_stock_price_query');
+    else if (isFinanceAnalysisRequest(cleanText, route)) addIfAllowed('skill_stock_analyze');
+    if (preferred.length > 0) return preferred;
+  }
+
+  if (isExplicitUrlLookup(cleanText)) {
+    addIfAllowed('web_fetch');
+    return preferred;
+  }
+
+  if (sourceScope === 'web' || sourceScope === 'live' || normalizeText(route?.facets?.freshness) === 'latest') {
+    if (needsWebDetailFetch(route)) addIfAllowed('web_search', 'web_fetch');
+    else addIfAllowed('web_search');
+    return preferred;
+  }
+
+  return preferred;
+}
+
+function choosePreferredToolSubset(route = {}, toolNames = [], toolCatalogByName = new Map()) {
+  const canonical = canonicalizeToolNames(
+    resolveCanonicalPreferredTools(route, {
+      allowedToolNames: normalizeToolNames(toolNames)
+    }),
+    toolCatalogByName
+  );
+  if (canonical.length > 0) return canonical;
+  return canonicalizeToolNames(toolNames, toolCatalogByName);
+}
+
+function normalizePlannerReasonText(reason = '', additions = {}) {
+  const parts = [normalizeText(reason)].filter(Boolean);
+  if (additions.normalizedByRule) parts.push('normalizedByRule=true');
+  if (additions.normalizationReason) parts.push(`normalizationReason=${normalizeText(additions.normalizationReason)}`);
+  return clampReason(parts.filter(Boolean).join('; '), 240);
+}
+
+function isSubjectiveOpinionQuestion(route = {}) {
+  const cleanText = getPlannerRequestText(route);
+  return /^(你觉得|你认为|你喜不喜欢|你喜歡|你怎么看|你觉得.*好听吗|你觉得.*怎么样|how do you feel|what do you think)/i.test(cleanText)
+    && !Boolean(route?.intent?.needsMemory)
+    && !/latest|最新|official|官网|文档|docs?|documentation|source|来源|时间|date|time/i.test(cleanText);
+}
+
 function ensureChatCompletionsUrlLocal(url = '') {
   const normalized = String(url || '').replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(normalized)) return normalized;
@@ -304,6 +505,7 @@ function deriveToolArgs(toolName = '', route = {}) {
   const cleanText = normalizeText(route?.cleanText);
   const requestText = getPlannerRequestText(route);
   const searchSeed = getPlannerSearchSeed(route);
+  const userId = normalizeText(route?.meta?.userId || 'public') || 'public';
   const timezone = normalizeText(route?.meta?.timezone || route?.meta?.userTimezone || 'Asia/Shanghai') || 'Asia/Shanghai';
 
   if (normalizedTool === 'memory_cli') {
@@ -315,13 +517,69 @@ function deriveToolArgs(toolName = '', route = {}) {
     return { query: requestText || searchSeed };
   }
   if (normalizedTool === 'web_fetch') {
-    return { url: '', source: 'previous_search_best_match' };
+    const explicitUrl = extractExplicitUrl(requestText || cleanText);
+    return explicitUrl
+      ? { url: explicitUrl }
+      : { url: '', source: 'previous_search_best_match' };
   }
   if (normalizedTool === 'get_current_time') {
     return { timezone };
   }
   if (normalizedTool === 'get_context_stats') {
     return { format: 'text' };
+  }
+  if (normalizedTool === 'notebook_list_docs') {
+    return { userId };
+  }
+  if (normalizedTool === 'notebook_search') {
+    return { userId, query: requestText || searchSeed, top_k: 5 };
+  }
+  if (normalizedTool === 'skill_weather') {
+    return { location: requestText || cleanText };
+  }
+  if (normalizedTool === 'getWeather') {
+    return { text: requestText || cleanText };
+  }
+  if (normalizedTool === 'search_academic_paper') {
+    return { keywords: requestText || cleanText };
+  }
+  if (normalizedTool === 'skill_arxiv_search') {
+    return { query: requestText || cleanText, max_results: 5 };
+  }
+  if (normalizedTool === 'skill_arxiv_get') {
+    const arxivIdMatch = String(requestText || cleanText).match(/\b\d{4}\.\d{4,5}(?:v\d+)?\b/i);
+    return { arxiv_id: String(arxivIdMatch?.[0] || '').trim(), include_abstract: true };
+  }
+  if (normalizedTool === 'skill_arxiv_latest') {
+    return { max_results: 5 };
+  }
+  if (normalizedTool === 'skill_stock_price_query') {
+    return { ticker: extractTickerHint(requestText || cleanText) || requestText || cleanText };
+  }
+  if (normalizedTool === 'skill_stock_analyze') {
+    return { ticker: extractTickerHint(requestText || cleanText) || requestText || cleanText, output: 'text' };
+  }
+  if (normalizedTool === 'skill_stock_dividend') {
+    return { ticker: extractTickerHint(requestText || cleanText) || requestText || cleanText, output: 'text' };
+  }
+  if (normalizedTool === 'skill_stock_watchlist') {
+    const lowerText = String(requestText || cleanText).toLowerCase();
+    const action = /list|列表|清单/.test(lowerText) ? 'list'
+      : /remove|删除|移除/.test(lowerText) ? 'remove'
+      : /check|检查/.test(lowerText) ? 'check'
+      : 'add';
+    return { action, ticker: extractTickerHint(requestText || cleanText) || requestText || cleanText };
+  }
+  if (normalizedTool === 'skill_stock_portfolio') {
+    const lowerText = String(requestText || cleanText).toLowerCase();
+    const action = /list|列表|清单/.test(lowerText) ? 'list'
+      : /show|查看|显示/.test(lowerText) ? 'show'
+      : /delete|删除/.test(lowerText) ? 'delete'
+      : /rename|重命名/.test(lowerText) ? 'rename'
+      : /remove|移除/.test(lowerText) ? 'remove'
+      : /update|修改/.test(lowerText) ? 'update'
+      : 'add';
+    return { action, portfolio: 'default', ticker: extractTickerHint(requestText || cleanText) || requestText || cleanText };
   }
   if (normalizedTool === 'study_syllabus_plan') {
     return { subject: requestText || cleanText || 'study plan', level: 'beginner', weeks: 2, weekly_hours: 6 };
@@ -383,6 +641,7 @@ function requiresToolEvidence(route = {}) {
   const cleanText = getPlannerRequestText(route);
   if (!cleanText) return false;
   if (isConversationalNoop(cleanText)) return false;
+  if (isSubjectiveOpinionQuestion(route)) return false;
   if (shouldPrioritizeMemoryProbe(route)) return true;
   if (prefersMemoryRecall(cleanText)) return true;
   if (normalizeText(route?.facets?.domain) === 'time') return true;
@@ -686,7 +945,21 @@ function summarizeToolCatalogForPrompt(toolCatalog = []) {
     if (!bucket || !name) continue;
     const description = clampReason(normalizeText(item?.description) || name, 140);
     const access = item?.writeCapable ? 'write' : 'read';
-    const line = `- ${name}: ${description} [${access}]`;
+    const plannerRole = normalizeText(item?.plannerRole);
+    const overlapGroup = normalizeText(item?.overlapGroup);
+    const preferredOver = normalizeArray(item?.preferredOver).map((entry) => normalizeText(entry)).filter(Boolean).join(', ');
+    const preferWhen = normalizeArray(item?.preferWhen).map((entry) => normalizeText(entry)).filter(Boolean).join('; ');
+    const avoidWhen = normalizeArray(item?.avoidWhen).map((entry) => normalizeText(entry)).filter(Boolean).join('; ');
+    const annotations = [
+      plannerRole ? `role=${plannerRole}` : '',
+      overlapGroup ? `group=${overlapGroup}` : '',
+      preferredOver ? `preferred_over=${preferredOver}` : '',
+      preferWhen ? `prefer_when=${preferWhen}` : '',
+      avoidWhen ? `avoid_when=${avoidWhen}` : ''
+    ].filter(Boolean).join(' | ');
+    const line = annotations
+      ? `- ${name}: ${description} [${access}] | ${annotations}`
+      : `- ${name}: ${description} [${access}]`;
     if (!buckets.has(bucket)) buckets.set(bucket, []);
     buckets.get(bucket).push(line);
   }
@@ -729,6 +1002,10 @@ function buildPlannerPrompt(toolCatalog = []) {
     'Do not invent tool names.',
     'If the request depends on freshness, memory, notebook retrieval, web facts, current time, or explicit action execution, prefer tool_plan.',
     'If the request needs write-capable or side-effect tools, taskShape must be background_tool_task.',
+    'Keep the full candidate set, but choose the most specialized applicable tool when overlap exists.',
+    'Prefer notebook tools for notebook content, memory_cli for continuity recall, and never substitute one for the other.',
+    'Prefer specialist weather, finance, arxiv, time, and context tools over generic web search when the request clearly matches that domain.',
+    'If an explicit URL is already known, prefer fetch/extract over search-first discovery.',
     'If you choose memory_cli for recall or notebook continuity, search first. Plan a follow-up memory_cli open only when the search result alone is likely insufficient.',
     'If the user asks for official docs, website details, key points, or asks to include links and both web_search and web_fetch are available, plan web_search first and web_fetch second.',
     'steps items must include: id, tool, args, kind, dependsOn, parallelGroup, sideEffect, successCriteria, evidenceRequirement, repairPolicy, runtimeBinding, purpose.',
@@ -840,10 +1117,11 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   const available = collectAvailableToolSummary(route, options);
   const toolCatalogByName = buildToolCatalogByName(available.toolCatalog);
   const cleanText = getPlannerRequestText(route);
+  const canonicalPreferredTools = choosePreferredToolSubset(route, available.allowedToolNames, toolCatalogByName);
   const requestedAllowedNames = normalizeToolNames(
     Array.isArray(rawDecision?.allowedToolNames) ? rawDecision.allowedToolNames : fallback.allowedToolNames
   ).filter((toolName) => toolCatalogByName.has(toolName));
-  const normalizedAllowedToolNames = requestedAllowedNames.length > 0 ? requestedAllowedNames : fallback.allowedToolNames;
+  let normalizedAllowedToolNames = requestedAllowedNames.length > 0 ? requestedAllowedNames : fallback.allowedToolNames;
   const taskShape = TASK_SHAPES.includes(normalizeText(rawDecision?.taskShape))
     ? normalizeText(rawDecision.taskShape)
     : fallback.taskShape;
@@ -876,6 +1154,56 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     : buildPlannerStepGraphSequence(route, normalizedAllowedToolNames, available.toolCatalog, {
         contextEvidence: Boolean(options.contextEvidence)
       });
+  let normalizedByRule = false;
+  let normalizationReason = '';
+  const maybeApplyCanonicalNormalization = () => {
+    if (canonicalPreferredTools.length === 0) return;
+    const currentSet = new Set(normalizedAllowedToolNames);
+    const canonicalSet = new Set(canonicalPreferredTools);
+    const canonicalPrimary = normalizeText(canonicalPreferredTools[0]);
+    const currentPrimary = normalizeText(normalizedAllowedToolNames[0]);
+    const selectedGenericWebForSpecialized = currentSet.has('web_search')
+      && canonicalPreferredTools.some((toolName) => toolName !== 'web_search' && toolName !== 'web_fetch');
+    const notebookVsMemoryMismatch = (
+      canonicalSet.has('notebook_search') && currentSet.has('memory_cli')
+    ) || (
+      canonicalSet.has('memory_cli') && (currentSet.has('notebook_search') || currentSet.has('notebook_list_docs'))
+    );
+    const arxivMismatch = canonicalPreferredTools.some((toolName) => /^skill_arxiv_/i.test(toolName))
+      && currentSet.has('search_academic_paper');
+    const financeMismatch = canonicalPreferredTools.some((toolName) => /^skill_stock_/i.test(toolName))
+      && currentSet.has('web_search');
+    const weatherMismatch = canonicalSet.has('skill_weather') && (currentSet.has('web_search') || currentSet.has('getWeather'));
+    const contextMismatch = canonicalPrimary === 'get_context_stats' && currentPrimary !== canonicalPrimary;
+    const timeMismatch = canonicalPrimary === 'get_current_time' && currentPrimary !== canonicalPrimary;
+    const notebookMismatch = (canonicalPrimary === 'notebook_search' || canonicalPrimary === 'notebook_list_docs') && currentPrimary !== canonicalPrimary;
+    const continuityMismatch = canonicalPrimary === 'memory_cli' && currentPrimary !== canonicalPrimary;
+    const explicitUrlMismatch = canonicalPrimary === 'web_fetch' && currentPrimary !== canonicalPrimary;
+    if (
+      selectedGenericWebForSpecialized
+      || notebookVsMemoryMismatch
+      || arxivMismatch
+      || financeMismatch
+      || weatherMismatch
+      || contextMismatch
+      || timeMismatch
+      || notebookMismatch
+      || continuityMismatch
+      || explicitUrlMismatch
+    ) {
+      normalizedAllowedToolNames = canonicalPreferredTools;
+      normalizedByRule = true;
+      normalizationReason = normalizedAllowedToolNames.join(', ');
+      return true;
+    }
+    return false;
+  };
+  const canonicalApplied = maybeApplyCanonicalNormalization();
+  const rebuiltSteps = canonicalApplied
+    ? buildPlannerStepGraphSequence(route, normalizedAllowedToolNames, available.toolCatalog, {
+        contextEvidence: Boolean(options.contextEvidence)
+      })
+    : steps;
   const enforcedSteps = (() => {
     if (normalizedAllowedToolNames.length === 1 && normalizedAllowedToolNames[0] === 'memory_cli') {
       return buildPlannerStepGraphSequence(route, ['memory_cli'], available.toolCatalog, {
@@ -887,12 +1215,9 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
         contextEvidence: Boolean(options.contextEvidence)
       });
     }
-    return steps;
+    return rebuiltSteps;
   })();
-  const subjectiveOpinion = /^(你觉得|你认为|你喜不喜欢|你喜歡|你怎么看|你觉得.*好听吗|你觉得.*怎么样|how do you feel|what do you think)/i.test(cleanText)
-    && !requiresToolEvidence(route)
-    && !Boolean(route?.intent?.needsMemory)
-    && !/latest|最新|official|官网|文档|docs?|documentation|source|来源|时间|date|time/i.test(cleanText);
+  const subjectiveOpinion = isSubjectiveOpinionQuestion(route);
   const conversationalNoop = isConversationalNoop(cleanText) || subjectiveOpinion;
   const normalizedSteps = (conversationalNoop || taskShape === 'fast_reply') ? [] : enforcedSteps;
   const mode = normalizedSteps.length > 0 ? 'tool_plan' : 'chat_only';
@@ -912,13 +1237,18 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
       protocolVersion: PLANNER_PROTOCOL_VERSION,
       decisionVersion: normalizeText(rawDecision?.plannerMeta?.decisionVersion) || getPlannerDecisionVersion(),
       plannerVersion: normalizeText(rawDecision?.plannerMeta?.plannerVersion) || DIRECT_CHAT_PLANNER_VERSION,
-      reason: clampReason(normalizeText(rawDecision?.plannerMeta?.reason) || fallback?.plannerMeta?.reason || ''),
+      reason: normalizePlannerReasonText(normalizeText(rawDecision?.plannerMeta?.reason) || fallback?.plannerMeta?.reason || '', {
+        normalizedByRule,
+        normalizationReason
+      }),
       plannerModel: normalizeText(rawDecision?.plannerMeta?.plannerModel || getPlannerModel()) || getPlannerModel(),
       fallbackUsed: Boolean(options.fallbackUsed),
       decisionSource: normalizeText(rawDecision?.plannerMeta?.decisionSource) || (options.fallbackUsed ? 'rule' : 'planner'),
       toolBuckets: Array.from(new Set(
-        normalizeToolNames(steps.map((step) => step.tool)).map((toolName) => resolveToolBucket(toolName, toolCatalogByName))
-      ))
+        normalizeToolNames(normalizedSteps.map((step) => step.tool)).map((toolName) => resolveToolBucket(toolName, toolCatalogByName))
+      )),
+      normalizedByRule,
+      normalizationReason: normalizeText(normalizationReason)
     }
   };
 }

@@ -5,26 +5,62 @@ function normalizeText(value = '') {
   return String(value || '').trim();
 }
 
-async function fetchFinanceHeadlines() {
-  const response = await axios.get('https://news.google.com/rss/search', {
+async function fetchAlphaVantageRumors() {
+  const apiKey = normalizeText(process.env.ALPHAVANTAGE_API_KEY || 'demo') || 'demo';
+  const response = await axios.get('https://www.alphavantage.co/query', {
     params: {
-      q: 'stock market OR takeover OR insider buying OR analyst upgrade',
-      hl: 'en-US',
-      gl: 'US',
-      ceid: 'US:en'
+      function: 'NEWS_SENTIMENT',
+      topics: 'mergers_and_acquisitions,financial_markets,economy_macro',
+      sort: 'LATEST',
+      limit: 15,
+      apikey: apiKey
     },
-    timeout: 8000,
+    timeout: 12000,
     proxy: false,
     headers: {
       'User-Agent': 'MizukiBot/1.0 (stocks rumor native client)'
     }
   });
-  return String(response.data || '');
+  return Array.isArray(response?.data?.feed) ? response.data.feed : [];
+}
+
+async function fetchFinanceHeadlines() {
+  const feeds = [
+    'https://feeds.marketwatch.com/marketwatch/topstories/',
+    'https://www.cnbc.com/id/100003114/device/rss/rss.html',
+    'https://seekingalpha.com/feed.xml'
+  ];
+  for (const url of feeds) {
+    try {
+      const response = await axios.get(url, {
+        timeout: 8000,
+        proxy: false,
+        headers: {
+          'User-Agent': 'MizukiBot/1.0 (stocks rumor native client)'
+        }
+      });
+      return String(response.data || '');
+    } catch (_) {}
+  }
+  return '';
 }
 
 async function scanRumors() {
   try {
+    const avItems = await fetchAlphaVantageRumors();
+    const avFiltered = avItems
+      .map((item) => ({
+        title: normalizeText(item?.title),
+        link: normalizeText(item?.url)
+      }))
+      .filter((item) => /(rumor|takeover|acquisition|upgrade|downgrade|insider|probe|investigation|deal|merger)/i.test(item.title))
+      .slice(0, 8);
+    if (avFiltered.length > 0) {
+      return avFiltered.map((item, index) => `${index + 1}. ${item.title}\n   ${item.link}`).join('\n');
+    }
+
     const xml = await fetchFinanceHeadlines();
+    if (!xml) return 'No rumor signals found.';
     const $ = cheerio.load(xml, { xmlMode: true });
     const items = $('item').toArray().slice(0, 8).map((node) => {
       const element = $(node);
