@@ -81,6 +81,14 @@ function createDirectReplyNode(deps = {}) {
   const requestReplyImpl = typeof deps.requestReplyImpl === 'function'
     ? deps.requestReplyImpl
     : (async () => '');
+  const isStableDirectReplyText = typeof deps.isStableDirectReplyText === 'function'
+    ? deps.isStableDirectReplyText
+    : ((text = '') => {
+        const trimmed = String(text || '').trim();
+        if (!trimmed) return false;
+        if (isPureToolCallMarkup(trimmed)) return false;
+        return classifyReplyFailure(trimmed).type === 'none';
+      });
   const classifyDirectReplyError = typeof deps.classifyDirectReplyError === 'function'
     ? deps.classifyDirectReplyError
     : (() => 'generic_model_failure');
@@ -357,14 +365,40 @@ function createDirectReplyNode(deps = {}) {
     }
 
     if (isPureToolCallMarkup(reply) && executedToolEnvelopes.length === 0) {
-      reply = getControlledFailureReply('tool_error');
-      directLoopEvents = directLoopEvents.concat([
-        createEvent('tool_loop_forced_answer', {
-          node: 'direct_reply',
-          reason: 'pure_tool_markup_blocked',
-          failureType: 'tool_error'
-        })
-      ]);
+      let retriedReply = '';
+      try {
+        retriedReply = String(await requestReplyImpl(
+          messagesToSend.concat([{
+            role: 'system',
+            content: 'Do not emit any <tool_calls> markup or any tool/function call. No tool is available for this turn. Reply with plain natural language only.'
+          }]),
+          {
+            ...directContext,
+            disableTools: true,
+            allowedTools: []
+          }
+        ) || '').trim();
+      } catch (_) {}
+
+      if (isStableDirectReplyText(retriedReply)) {
+        reply = retriedReply;
+        directLoopEvents = directLoopEvents.concat([
+          createEvent('tool_loop_forced_answer', {
+            node: 'direct_reply',
+            reason: 'pure_tool_markup_retried_as_plain_text',
+            failureType: ''
+          })
+        ]);
+      } else {
+        reply = getControlledFailureReply('tool_error');
+        directLoopEvents = directLoopEvents.concat([
+          createEvent('tool_loop_forced_answer', {
+            node: 'direct_reply',
+            reason: 'pure_tool_markup_blocked',
+            failureType: 'tool_error'
+          })
+        ]);
+      }
     }
 
     if (!request.streaming) {

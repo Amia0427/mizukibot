@@ -5,11 +5,19 @@ const { StateGraph, END } = require('@langchain/langgraph');
 const { AIMessage } = require('@langchain/core/messages');
 const { ChatOpenAI } = require('@langchain/openai');
 const { askAIByGraphV2 } = require('../agentGraphV2');
-const {
-  getToolExecutors,
-  getToolSchemas
-} = require('../toolRegistry');
 const { normalizeToolNames } = require('../../utils/localToolAccess');
+
+function getToolRegistry() {
+  return require('../toolRegistry');
+}
+
+function getToolExecutors() {
+  return getToolRegistry().getToolExecutors();
+}
+
+function getToolSchemas() {
+  return getToolRegistry().getToolSchemas();
+}
 const { postWithRetry } = require('../httpClient');
 const { extractMessageContent } = require('../parser');
 

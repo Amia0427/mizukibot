@@ -1584,6 +1584,8 @@ function openMemoryItemById(userId, source, id) {
     const memoryNodes = loadMemoryNodes();
     const episodeProjection = loadEpisodeProjection();
     if (targetId.startsWith('profile:')) {
+      const profileUserId = targetId.split(':')[1] || '';
+      if (String(profileUserId || '').trim() !== String(userId || '').trim()) return null;
       const profile = profileProjection.users?.[String(userId || '').trim()] || null;
       if (profile) {
         return {
@@ -1635,6 +1637,13 @@ function openMemoryItemById(userId, source, id) {
     }
     const node = memoryNodes.find((item) => String(item.id || '') === targetId);
     if (node) {
+      const nodeScopeType = sanitizeText(node.scopeType).toLowerCase();
+      if (nodeScopeType === 'group') {
+        const allowedGroups = new Set(getAccessibleGroupIdsForUser(userId));
+        if (!allowedGroups.has(sanitizeText(node.groupId))) return null;
+      } else if (String(node.userId || '').trim() !== String(userId || '').trim()) {
+        return null;
+      }
       return {
         source: source || node.source || 'personal',
         id: targetId,
@@ -1824,6 +1833,9 @@ function openUnifiedMemory(target, options = {}, context = {}) {
   if (ref) {
     if (ref.startsWith('mc_ref:profile:')) {
       if (config.MEMORY_V3_ENABLED) {
+        const targetProfileId = ref.replace(/^mc_ref:profile:/, '');
+        const profileUserId = String(targetProfileId || '').split(':')[1] || '';
+        if (profileUserId && profileUserId !== userId) return null;
         const profileProjection = loadProfileProjection();
         const userProfile = profileProjection.users?.[userId] || null;
         if (userProfile) {
@@ -2045,6 +2057,8 @@ async function runMemoryCli(commandText = '', context = {}) {
           source: item.source,
           type: item.type,
           id: item.id,
+          evidenceTier: sanitizeText(item.evidenceTier).toLowerCase() || '',
+          fieldKey: sanitizeText(item.fieldKey).toLowerCase() || '',
           title: sanitizePreviewText(item.text, 80),
           preview: sanitizePreviewText(item.text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
           text: sanitizePreviewText(item.text, Math.min(400, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
@@ -2057,11 +2071,20 @@ async function runMemoryCli(commandText = '', context = {}) {
         }));
         return {
           results,
-          digest: String(result.digest || '')
-            .split(/\r?\n/)
-            .map((item) => sanitizePreviewText(item, 140))
-            .filter(Boolean)
-            .slice(0, 4),
+          digest: [
+            ...(result.persona?.summary
+              ? [`[persona|summary] ${sanitizePreviewText(result.persona.summary, 140)}`]
+              : []),
+            ...(result.persona?.impression
+              ? [`[persona|impression] ${sanitizePreviewText(result.persona.impression, 140)}`]
+              : []),
+            ...((Array.isArray(result.strictResults) ? result.strictResults : [])
+              .slice(0, 2)
+              .map((item) => `[strict|${String(item.source || 'memory').trim() || 'memory'}|${String(item.type || '').trim() || 'fact'}] ${sanitizePreviewText(item.text, 140)}`)),
+            ...((Array.isArray(result.weakResults) ? result.weakResults : [])
+              .slice(0, 1)
+              .map((item) => `[weak|${String(item.source || 'memory').trim() || 'memory'}|${String(item.type || '').trim() || 'fact'}] ${sanitizePreviewText(item.text, 140)}`))
+          ].filter(Boolean).slice(0, 4),
           sourceCoverage: result.sourceCoverage || {},
           queryFacet: result.facet || classifyRecallFacet(parsed.query),
           candidateCounts: { v3: Number(result.stats?.candidates || 0) || 0 },

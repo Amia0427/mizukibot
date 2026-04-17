@@ -23,7 +23,6 @@ const {
 } = require('../../../utils/contextCompaction');
 const { postWithRetry } = require('../../httpClient');
 const { extractJsonSafely, extractMessageContent } = require('../../parser');
-const { getToolExecutors } = require('../../toolRegistry');
 const { isReplyFailure } = require('../../../utils/replyFailure');
 const { runHumanizerAgent } = require('../../humanizerAgent');
 const {
@@ -38,6 +37,14 @@ const {
   normalizeTextContent,
   withMainModelFallback
 } = require('../model/shared');
+
+function getToolRegistry() {
+  return require('../../toolRegistry');
+}
+
+function getToolExecutors() {
+  return getToolRegistry().getToolExecutors();
+}
 
 function getConfig() {
   try {

@@ -22,11 +22,19 @@
 const config = require('../../config');
 const { normalizeTier } = require('../../utils/memoryTier');
 const { buildMemoryContext, buildMemoryContextAsync } = require('../../utils/memoryContext');
-const {
-  getToolExecutors,
-  getToolSchemas
-} = require('../toolRegistry');
 const { normalizeToolNames } = require('../../utils/localToolAccess');
+
+function getToolRegistry() {
+  return require('../toolRegistry');
+}
+
+function getToolExecutors() {
+  return getToolRegistry().getToolExecutors();
+}
+
+function getToolSchemas() {
+  return getToolRegistry().getToolSchemas();
+}
 
 const {
   chatHistory,

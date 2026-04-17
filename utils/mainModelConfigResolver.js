@@ -1,6 +1,5 @@
 const config = require('../config');
 const { resolveMainModelConfig } = require('./mainModelFallback');
-const { isPrivilegedPrivateChatUser } = require('./privilegedPrivateChat');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -16,12 +15,7 @@ function getAdminUserIdSet() {
 
 function isAdminMainModelUser(userId = '', options = {}) {
   const normalizedUserId = normalizeText(userId);
-  if (!getAdminUserIdSet().has(normalizedUserId)) return false;
-  return isPrivilegedPrivateChatUser({
-    chatType: options?.chatType || options?.routeMeta?.chatType || options?.routeMeta?.chat_type,
-    userId: normalizedUserId,
-    config
-  });
+  return getAdminUserIdSet().has(normalizedUserId);
 }
 
 function shouldBypassMainModelFallback(userId = '', options = {}) {
