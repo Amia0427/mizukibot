@@ -8,6 +8,7 @@ const {
  * @property {object} effectiveMsg
  * @property {string} groupId
  * @property {string} senderId
+ * @property {string} senderName
  * @property {string} rawText
  * @property {string} cleanText
  * @property {string|null} imageUrl
@@ -19,8 +20,22 @@ const {
  * @property {object|null} sessionTiming
  * @property {object|null} continuousMeta
  * @property {object|null} directedContext
+ * @property {object|null} visualContext
  * @property {object} messageMeta
  */
+
+function safeSenderName(msg = {}) {
+  const raw = String(
+    msg.sender?.card
+    || msg.sender?.nickname
+    || msg.sender?.nick
+    || msg.sender_name
+    || msg.user_id
+    || ''
+  ).trim();
+  if (!raw) return '';
+  return Array.from(raw).slice(0, 40).join('');
+}
 
 function shouldHandleNotice(msg = {}, runtimeConfig = {}) {
   if (msg.post_type !== 'notice') return { handled: false };
@@ -41,9 +56,34 @@ function shouldHandleNotice(msg = {}, runtimeConfig = {}) {
         console.warn('[group-binding] cleared cached group bindings after bot left group', { groupId, cleared, subType });
       }
     }
+    return {
+      handled: true,
+      type: 'group_membership',
+      meta: {
+        userId,
+        groupId: String(groupId || '').trim(),
+        eventType: '',
+        statusText: '',
+        isPrivate: false
+      }
+    };
   }
 
-  return { handled: true };
+  if (noticeType === 'notify' && subType === 'input_status') {
+    return {
+      handled: true,
+      type: 'input_status',
+      meta: {
+        userId,
+        groupId: String(groupId || '').trim(),
+        eventType: String(msg.event_type || '').trim(),
+        statusText: String(msg.status_text || '').trim(),
+        isPrivate: !String(groupId || '').trim()
+      }
+    };
+  }
+
+  return { handled: true, type: 'ignored_notice' };
 }
 
 function shouldSkipNonGroupMessage(msg = {}) {
@@ -93,7 +133,8 @@ function buildInboundMessageContext({
   botQQ = '',
   sessionTiming = null,
   continuousMeta = null,
-  directedContext = null
+  directedContext = null,
+  visualContext = null
 } = {}) {
   const nextMsg = effectiveMsg || msg || {};
   return {
@@ -101,6 +142,7 @@ function buildInboundMessageContext({
     effectiveMsg: nextMsg,
     groupId: String(nextMsg.group_id || msg?.group_id || '').trim(),
     senderId: String(nextMsg.user_id || msg?.user_id || '').trim(),
+    senderName: safeSenderName(nextMsg),
     rawText: String(rawText || ''),
     cleanText: String(cleanText || ''),
     imageUrl: imageUrl || null,
@@ -116,15 +158,12 @@ function buildInboundMessageContext({
     directedContext: directedContext && typeof directedContext === 'object'
       ? { ...directedContext }
       : null,
+    visualContext: visualContext && typeof visualContext === 'object'
+      ? { ...visualContext }
+      : null,
     messageMeta: {
       messageId: String(nextMsg.message_id || '').trim(),
-      senderName: String(
-        nextMsg.sender?.card
-        || nextMsg.sender?.nickname
-        || nextMsg.sender?.nick
-        || nextMsg.user_id
-        || ''
-      ).trim(),
+      senderName: safeSenderName(nextMsg),
       groupName: safeGroupName(nextMsg) || ''
     }
   };
@@ -133,6 +172,7 @@ function buildInboundMessageContext({
 module.exports = {
   buildInboundMessageContext,
   resolveEffectiveBotQQ,
+  safeSenderName,
   shouldHandleNotice,
   shouldSkipNonGroupMessage,
   shouldSkipSelfMessage

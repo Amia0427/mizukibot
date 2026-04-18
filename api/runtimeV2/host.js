@@ -208,6 +208,7 @@ function buildV2CanonicalSegments(state, input = {}) {
     continuity_state: continuityMessages,
     short_term_summary: shortTermSummaryMessages,
     recent_history: recentHistoryMessages,
+    assistant_only_context: normalizeArray(input.assistantOnlyContextMessages),
     current_user_turn: userTurnMessages,
     retrieved_memory: normalizeArray(memoryContext.segments?.retrievedMemory),
     daily_journal: normalizeArray(memoryContext.segments?.dailyJournal),
@@ -277,7 +278,7 @@ function shouldQueueMemoryLearningForV2(request = {}, finalReply = '') {
   if (isReviewMode(request.reviewMode)) return false;
 
   const uid = String(request.userId || '').trim();
-  const q = String(request.question || '').trim();
+  const q = String(request.persistUserText || request.runtimeQuestionText || request.question || '').trim();
   const a = String(finalReply || '').trim();
   if (!uid || !q || !a) return false;
   if (isReplyFailure(a, { emptyIsFailure: true })) return false;
@@ -308,7 +309,7 @@ function shouldAppendDailyJournalForV2(request = {}, finalReply = '') {
   if (String(request.customPrompt || '').trim()) return false;
 
   const uid = String(request.userId || '').trim();
-  const q = String(request.question || '').trim();
+  const q = String(request.persistUserText || request.runtimeQuestionText || request.question || '').trim();
   const a = String(finalReply || '').trim();
   if (!uid || !q || !a) return false;
   if (isReplyFailure(a, { emptyIsFailure: true })) return false;
@@ -482,6 +483,7 @@ function createRuntime(options = {}) {
   }
 
   const {
+    buildAssistantOnlyContextMessages,
     buildContinuitySystemMessage,
     computeEffectiveAllowedTools,
     getMainConversationSystemMessages,
@@ -508,6 +510,7 @@ function createRuntime(options = {}) {
       continuityMessages: normalizeArray(segmentedMessages.continuityStateMessages),
       shortTermSummaryMessages: normalizeArray(segmentedMessages.summaryMessages),
       recentHistoryMessages: normalizeArray(segmentedMessages.recentHistory),
+      assistantOnlyContextMessages: normalizeArray(segmentedMessages.assistantOnlyContextMessages),
       userTurnMessages: normalizeArray(segmentedMessages.userTurnMessages),
       toolEvidenceMessages: normalizeArray(segmentedMessages.globalToolEvidenceMessages),
       plannerArtifactMessages: normalizeArray(options.plannerArtifactMessages),
@@ -541,7 +544,14 @@ function createRuntime(options = {}) {
       ? buildVisionMessageContent(request.question || '', request.imageUrl)
       : (request.question || '');
     const baseSystemMessages = getMainConversationSystemMessages(state, { isReviewRoute });
+    const assistantOnlyContextMessages = buildAssistantOnlyContextMessages(state);
     const directReplyPayload = buildDirectReplyMessages(state, messageContent, baseSystemMessages);
+    if (assistantOnlyContextMessages.length > 0) {
+      directReplyPayload.messages = []
+        .concat(normalizeArray(directReplyPayload.messages))
+        .concat(assistantOnlyContextMessages);
+      directReplyPayload.assistantOnlyContextMessages = assistantOnlyContextMessages;
+    }
     return buildMainConversationContextSnapshot(state, directReplyPayload, {
       affinity: options.affinity,
       allowedTools: options.allowedTools,

@@ -44,6 +44,7 @@ function normalizeBlock(block = {}, index = 0) {
     appliesWhen: normalizeObject(block.appliesWhen || block.applies_when, {}),
     source: normalizeText(block.source, 'runtime'),
     kind: normalizeText(block.kind, 'runtime'),
+    lane: normalizeText(block.lane || block.cacheLane, 'dynamic_context'),
     meta: normalizeObject(block.meta, {}),
     estimatedTokens: Math.max(0, Number(block.estimatedTokens || estimateTextTokens(content)) || 0)
   };

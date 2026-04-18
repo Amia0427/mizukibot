@@ -42,6 +42,20 @@ function trimReplyText(value, maxChars = 80) {
   return Array.from(normalized).slice(0, Math.max(1, Number(maxChars) || 80)).join('');
 }
 
+function isPresenceAckReply(replyType = '', addressee = '') {
+  return String(replyType || '').trim() === 'presence_ack'
+    || String(addressee || '').trim() === 'bot_presence_check';
+}
+
+function shouldSuppressPresenceAck({ groupPresence, now, replyType, addressee }) {
+  if (!isPresenceAckReply(replyType, addressee)) return false;
+  const dedupMs = Math.max(0, Number(config.PASSIVE_AWARENESS_PRESENCE_ACK_DEDUP_MS || 0) || 0);
+  if (!dedupMs) return false;
+  const lastPresenceAckAt = Number(groupPresence?.last_presence_ack_at || 0) || 0;
+  if (!lastPresenceAckAt) return false;
+  return (Number(now || Date.now()) - lastPresenceAckAt) < dedupMs;
+}
+
 function ensureChatCompletionsUrl(url) {
   const raw = String(url || '').replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(raw)) return raw;
@@ -512,6 +526,7 @@ function buildPresenceSnapshot({ groupPresence, sessionPresence }) {
       lastAction: normalizePresenceAction(groupPresence?.last_action, 'no_reply'),
       waitingSince: Number(groupPresence?.waiting_since || 0) || 0,
       lastBotReplyAt: Number(groupPresence?.last_bot_reply_at || 0) || 0,
+      lastPresenceAckAt: Number(groupPresence?.last_presence_ack_at || 0) || 0,
       humanTurnsSinceBotReply: Math.max(0, Number(groupPresence?.human_turns_since_bot_reply || 0) || 0),
       coolingUntil: Number(groupPresence?.cooling_until || 0) || 0,
       closedAt: Number(groupPresence?.closed_at || 0) || 0,
@@ -700,6 +715,9 @@ function applyPresenceDecision({
     if (normalizedAction === 'reply' || normalizedAction === 'follow_up') {
       updated.state = 'cooling';
       updated.last_bot_reply_at = now;
+      if (isPresenceAckReply('', addressee)) {
+        updated.last_presence_ack_at = now;
+      }
       updated.human_turns_since_bot_reply = 0;
       updated.waiting_since = Number(groupPresence?.waiting_since || 0) || now;
       updated.cooling_until = now + cfg.replyCooldownMs;
@@ -1310,7 +1328,10 @@ async function invokeReplyModel({
   const apiKey = String(config.PASSIVE_AWARENESS_REPLY_API_KEY || config.PASSIVE_AWARENESS_API_KEY || '').trim();
   const model = String(config.PASSIVE_AWARENESS_REPLY_MODEL || config.PASSIVE_AWARENESS_MODEL || '').trim();
   if (!baseUrl || !apiKey || !model) {
-    return '';
+    return {
+      replyText: '',
+      personaMemoryState: null
+    };
   }
 
   const promptBundle = await buildReplyPromptV2({
@@ -1384,7 +1405,10 @@ async function invokeReplyModel({
     streamedText = String(fallbackMsg?.content || '');
   }
 
-  return trimReplyText(streamedText, 80);
+  return {
+    replyText: trimReplyText(streamedText, 80),
+    personaMemoryState: promptBundle?.personaMemoryState || null
+  };
 }
 
 async function handlePassiveGroupAwareness({
@@ -1666,13 +1690,14 @@ async function handlePassiveGroupAwareness({
   let replyText = allowDecisionFallback
     ? buildLocalReplyFallback({ addressee, replyType })
     : '';
+  let passivePersonaMemoryState = null;
   let replyModelCalled = false;
   if (!replyText) {
     const shouldCallReplyModel = canCallReplyModel();
     try {
       if (shouldCallReplyModel) {
         replyModelCalled = true;
-        replyText = await invokeReplyModel({
+        const replyResult = await invokeReplyModel({
           groupId,
           senderId,
           senderName,
@@ -1692,6 +1717,8 @@ async function handlePassiveGroupAwareness({
           directedContext,
           now
         });
+        replyText = trimReplyText(replyResult?.replyText || '', 80);
+        passivePersonaMemoryState = replyResult?.personaMemoryState || null;
       }
     } catch (e) {
       console.error('[group-awareness] reply model call failed:', e.message);
@@ -1747,6 +1774,26 @@ async function handlePassiveGroupAwareness({
       replyType,
       fallbackText: replyText
     });
+  }
+
+  if (shouldSuppressPresenceAck({
+    groupPresence,
+    now,
+    replyType,
+    addressee
+  })) {
+    return {
+      handled: false,
+      reason: 'presence-ack-dedup',
+      presenceState,
+      presenceAction,
+      presenceReason,
+      presence: presenceSnapshot,
+      ...gateResult,
+      decisionModelCalled,
+      decisionReason,
+      replyModelCalled
+    };
   }
 
   const sent = await sendGroupReply({
@@ -1812,7 +1859,7 @@ async function handlePassiveGroupAwareness({
     cfg
   });
   await recordPersonaMemoryOutcome('passive_group_reply', {
-    state: promptBundle?.personaMemoryState,
+    state: passivePersonaMemoryState,
     userId: String(senderId || '').trim(),
     sessionKey,
     groupId,
@@ -1859,6 +1906,7 @@ module.exports = {
   detectPassiveAddressee,
   classifyPassiveReplyType,
   shouldGatePassiveReply,
+  shouldSuppressPresenceAck,
   cheapRuleGate,
   isNoiseText,
   trimReplyText

@@ -1,6 +1,7 @@
 const { buildRoutePromptBundle } = require('../utils/routePromptPolicy');
 const { buildSessionId } = require('../api/subagentSessionManager');
 const { getClaudeSessionRuntime } = require('../utils/claudeSessionRuntime');
+const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
 const {
   buildReplyEnvelope,
   buildRouteDecisionContext
@@ -108,6 +109,15 @@ function composeDirectRoutePrompt({
     streamingSegmentationPrompt,
     qqRichReplyPrompt
   ].filter(Boolean).join('\n\n');
+}
+
+function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = '') {
+  if (!String(imageUrl || '').trim()) return null;
+  const visualContext = route?.meta?.visualContext && typeof route.meta.visualContext === 'object'
+    ? route.meta.visualContext
+    : null;
+  if (!visualContext || visualContext?.worker?.succeeded === true) return null;
+  return buildImageModelConfig(null, userId, { routeMeta: route?.meta || {} });
 }
 
 function parseToggleSubcommand(command = {}) {
@@ -942,6 +952,10 @@ function createMessageRouteFlow(deps = {}) {
             directChatPlanner: route?.meta?.directChatPlanner || null
           }
         };
+        const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
+        if (fallbackModelConfig) {
+          toolTaskOptions.modelConfig = fallbackModelConfig;
+        }
 
         if (config.BACKGROUND_TOOL_TASKS_ENABLED && routeExecutionPlan.executor === 'background_direct') {
           const backgroundResult = await runBackgroundToolTask({
@@ -1072,6 +1086,10 @@ function createMessageRouteFlow(deps = {}) {
           disableStream: disableStreamForReply,
           deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat'
         };
+        const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
+        if (fallbackModelConfig) {
+          replyOptions.modelConfig = fallbackModelConfig;
+        }
         if (shouldForceDisableGroupMainModelStream({
           groupId,
           routeMeta: replyOptions.routeMeta,

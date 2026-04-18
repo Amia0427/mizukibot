@@ -79,6 +79,28 @@ function inferGroupName(inboundContext = {}) {
   );
 }
 
+function inferSenderName(inboundContext = {}) {
+  const explicit = safeTrim(inboundContext.senderName);
+  if (explicit) return explicit;
+  const messageMeta = inboundContext.messageMeta && typeof inboundContext.messageMeta === 'object'
+    ? inboundContext.messageMeta
+    : {};
+  return safeTrim(
+    messageMeta.senderName
+    || inboundContext.effectiveMsg?.sender?.card
+    || inboundContext.effectiveMsg?.sender?.nickname
+    || inboundContext.effectiveMsg?.sender?.nick
+    || inboundContext.effectiveMsg?.sender_name
+    || inboundContext.effectiveMsg?.user_id
+    || inboundContext.msg?.sender?.card
+    || inboundContext.msg?.sender?.nickname
+    || inboundContext.msg?.sender?.nick
+    || inboundContext.msg?.sender_name
+    || inboundContext.msg?.user_id
+    || ''
+  );
+}
+
 function inferMediaFlags(inboundContext = {}) {
   const raw = String(
     inboundContext.rawText
@@ -174,6 +196,7 @@ function buildPlatformSection(inboundContext, options = {}) {
   const platform = inferPlatform(inboundContext);
   const chatType = inferChatType(inboundContext);
   const groupName = options.includeGroupName ? inferGroupName(inboundContext) : '';
+  const senderName = inferSenderName(inboundContext);
   const media = inferMediaFlags(inboundContext);
   const lines = [];
 
@@ -192,12 +215,17 @@ function buildPlatformSection(inboundContext, options = {}) {
   if (!mediaTypes.length) mediaTypes.push('纯文本');
   lines.push(`媒体类型：${mediaTypes.join('、')}`);
 
+  if (senderName) {
+    lines.push(`当前发送者：${senderName}`);
+  }
+
   return {
     lines,
     meta: {
       platform,
       chatType,
       groupName: groupName || null,
+      senderName: senderName || null,
       ...media
     }
   };

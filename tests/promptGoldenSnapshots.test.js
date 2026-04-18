@@ -33,14 +33,26 @@ module.exports = (async () => {
   assert.ok(Array.isArray(main.promptSnapshot.assembledBlocks));
   assert.ok(Array.isArray(main.promptSnapshot.trustedBlocks));
   assert.ok(Array.isArray(main.promptSnapshot.untrustedBlocks));
+  assert.ok(Array.isArray(main.stableSystemBlocks));
+  assert.ok(Array.isArray(main.dynamicContextBlocks));
+  assert.ok(Array.isArray(main.assistantOnlyContextBlocks));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'main_persona_system'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'core_baseline_patch'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
+  assert.ok(main.stableSystemBlocks.some((item) => item.id === 'security_contract'));
+  assert.ok(main.stableSystemBlocks.some((item) => item.id === 'main_persona_system'));
+  assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'directed_context'));
+  assert.ok(main.assistantOnlyContextBlocks.some((item) => item.id === 'dynamic_few_shot'));
   assert.ok(Array.isArray(main.promptSnapshot.activatedPersonaModules));
   assert.ok(Array.isArray(main.promptSnapshot.personaModuleCandidates));
   assert.ok(Array.isArray(main.promptSnapshot.personaModuleTokenUsage));
+  assert.ok(Array.isArray(main.promptSnapshot.stableBlockIds));
+  assert.ok(Array.isArray(main.promptSnapshot.dynamicBlockIds));
+  assert.ok(Array.isArray(main.promptSnapshot.assistantOnlyBlockIds));
+  assert.ok(main.promptSnapshot.cacheLanes && Array.isArray(main.promptSnapshot.cacheLanes.stable));
+  assert.ok(typeof main.promptSnapshot.cacheFriendlyFingerprint === 'string' && main.promptSnapshot.cacheFriendlyFingerprint.length > 0);
 
   const reviewPrompt = buildReviewStageSystemPrompt();
   const plannerPrompt = buildPlannerStageSystemPrompt([{ name: 'web_search', description: 'search web' }]);

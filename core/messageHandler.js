@@ -92,9 +92,12 @@ const {
 const {
   buildDirectedConversationSummary,
   createMessageVisualContext,
+  buildVisualImageCollection,
   resolveVisualInputFromContinuousMeta,
   resolveVisualInputFromContinuousMetaCore
 } = require('./messageVisualContext');
+const { runVisionCaptionWorker } = require('./visionCaptionWorker');
+const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
 const {
   buildBridgeGuidancePrompt: buildBridgeGuidancePromptOwner,
   buildQqRichReplyPrompt: buildQqRichReplyPromptOwner,
@@ -123,6 +126,7 @@ const {
   listScheduledTasks,
   publishQzoneForContext,
   scheduleGroupMessage,
+  sendPrivatePoke,
   setMessageEmojiLike
 } = require('../api/qqActionService');
 const {
@@ -292,6 +296,26 @@ function buildBridgeGuidancePrompt(route, backend = 'command', routeExecutionPla
     executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',
     reasonLine: reason ? `路由原因: ${reason}` : ''
   });
+}
+
+function normalizeVisualSummaryText(text = '') {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildVisionCaptionTelemetryEvent(type = '', payload = {}) {
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    ts: Date.now(),
+    type,
+    ...payload
+  };
+}
+
+function resolveLegacyVisionFallbackModelConfig(imageUrl = null, userId = '', routeMeta = {}) {
+  if (!String(imageUrl || '').trim()) return null;
+  return buildImageModelConfig(null, userId, { routeMeta });
 }
 
 function composeDirectRoutePrompt({
@@ -987,6 +1011,7 @@ function createMessageHandler({
     ttlMs: 90 * 1000,
     maxEntries: 4096
   });
+  const privateTypingPokeCooldownByUser = new Map();
   const continuousMessagePreprocessor = createContinuousMessagePreprocessor({
     enabled: config.CONTINUOUS_MESSAGE_ENABLED,
     debounceMs: config.CONTINUOUS_MESSAGE_DEBOUNCE_MS
@@ -1386,6 +1411,10 @@ function createMessageHandler({
   async function askAIDispatch(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
     const mutableOptions = options && typeof options === 'object' ? options : {};
     mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
+    if (!mutableOptions.modelConfig && imageUrl) {
+      const fallbackModelConfig = resolveLegacyVisionFallbackModelConfig(imageUrl, userId, mutableOptions.routeMeta || {});
+      if (fallbackModelConfig) mutableOptions.modelConfig = fallbackModelConfig;
+    }
     const startedAt = Date.now();
     if (typeof mutableOptions?.onEvent === 'function') {
       try {
@@ -1508,6 +1537,10 @@ function createMessageHandler({
     const plannerExecutionPlan = mutableOptions.plannerExecutionPlan && typeof mutableOptions.plannerExecutionPlan === 'object'
       ? mutableOptions.plannerExecutionPlan
       : null;
+    if (!mutableOptions.modelConfig && imageUrl) {
+      const fallbackModelConfig = resolveLegacyVisionFallbackModelConfig(imageUrl, userId, mutableOptions.routeMeta || {});
+      if (fallbackModelConfig) mutableOptions.modelConfig = fallbackModelConfig;
+    }
 
     const reply = await askAIByGraph(question, userInfo, userId, customPrompt, imageUrl, {
       ...mutableOptions,
@@ -1738,6 +1771,48 @@ function createMessageHandler({
   };
   // source-compat anchor: return replyRuntime.sendGroupReply({
 
+  async function maybeHandlePrivateTypingNotice(noticeResult = null) {
+    if (!noticeResult || noticeResult.type !== 'input_status') return false;
+    if (!config.PRIVATE_TYPING_POKE_ENABLED) return true;
+
+    const meta = noticeResult.meta && typeof noticeResult.meta === 'object' ? noticeResult.meta : {};
+    const userId = String(meta.userId || '').trim();
+    const statusText = String(meta.statusText || '').trim();
+    const eventType = String(meta.eventType || '').trim();
+    const isPrivate = meta.isPrivate === true;
+
+    if (!isPrivate || !userId) return true;
+    if (!isPrivateChatUserAllowed(userId, config)) return true;
+
+    const isTyping = eventType === '1' || /正在输入/.test(statusText);
+    if (!isTyping) return true;
+
+    const now = Date.now();
+    const cooldownMs = Math.max(0, Number(config.PRIVATE_TYPING_POKE_COOLDOWN_MS) || 0);
+    const lastTriggeredAt = Math.max(0, Number(privateTypingPokeCooldownByUser.get(userId) || 0) || 0);
+    if (cooldownMs > 0 && lastTriggeredAt > 0 && (now - lastTriggeredAt) < cooldownMs) {
+      return true;
+    }
+
+    privateTypingPokeCooldownByUser.set(userId, now);
+    try {
+      await sendPrivatePoke(userId);
+      console.log('[notice] private typing poke sent', {
+        userId,
+        eventType,
+        statusText
+      });
+    } catch (error) {
+      console.warn('[notice] private typing poke failed', {
+        userId,
+        eventType,
+        statusText,
+        error: error?.message || String(error || '')
+      });
+    }
+    return true;
+  }
+
   async function handleIncomingMessage(msg) {
     const handlerStartedAt = Date.now();
     const rawMessageTimestampMs = getRawMessageTimestampMs(msg);
@@ -1751,7 +1826,11 @@ function createMessageHandler({
       lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, handlerStartedAt - rawMessageTimestampMs) : null
     });
 
-    if (shouldHandleNotice(msg, config).handled) return;
+    const noticeResult = shouldHandleNotice(msg, config);
+    if (noticeResult.handled) {
+      await maybeHandlePrivateTypingNotice(noticeResult);
+      return;
+    }
     if (shouldSkipNonGroupMessage(msg)) return;
     if (inboundDeduper.shouldSkip(msg)) {
       console.log('[message] deduped', {
@@ -2111,6 +2190,12 @@ function createMessageHandler({
       historySummary: buildSubagentContextSummary(senderId, groupId, { maxLength: 180 })
     });
     const effectiveVisualInput = resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText);
+    const visualImageCollection = buildVisualImageCollection(
+      continuousMeta,
+      directedContext,
+      effectiveCleanText,
+      { maxImages: config.VISION_CAPTION_WORKER_MAX_IMAGES }
+    );
     const directedScene = String(directedContext?.scene || '').trim();
     const replyToBotRequested = directedScene === 'reply_to_bot';
     const replyToBotRecentWindowMs = Math.max(
@@ -2130,9 +2215,85 @@ function createMessageHandler({
       || effectiveCleanText
       || ''
     ).trim();
-    const routerRawText = effectiveVisualInput && !/\[CQ:image,.*?\]/i.test(effectiveRawText)
+    let routerRawText = effectiveVisualInput && !/\[CQ:image,.*?\]/i.test(effectiveRawText)
       ? `${effectiveRawText.trim()}\n[CQ:image,url=${effectiveVisualInput}]`
       : effectiveRawText;
+    let runtimeQuestionText = effectiveIntentText;
+    let persistUserText = effectiveIntentText;
+    let originalUserText = effectiveIntentText;
+    let visualContext = visualImageCollection.length > 0
+      ? {
+          hasVisualInput: true,
+          worker: {
+            name: 'vision-caption-worker',
+            succeeded: false,
+            fallbackUsed: true,
+            fallbackReason: 'not_started',
+            imageCount: visualImageCollection.length
+          },
+          images: visualImageCollection.map((item, index) => ({
+            imageIndex: index,
+            source: item.source,
+            url: item.url,
+            label: item.label
+          })),
+          captionJson: null,
+          summary: '',
+          recommendedPromptContext: '',
+          shortPersistSummary: '',
+          runtimeQuestionText: effectiveIntentText,
+          persistUserText: effectiveIntentText,
+          originalUserText: effectiveIntentText
+        }
+      : null;
+
+    if (visualImageCollection.length > 0) {
+      const visionStartedAt = Date.now();
+      const captionResult = await runVisionCaptionWorker({
+        originalUserText: effectiveIntentText,
+        images: visualImageCollection,
+        quotePriorityMode: String(directedContext?.quotePriority?.mode || '').trim(),
+        quotePriorityReason: String(directedContext?.quotePriority?.reason || '').trim()
+      });
+      if (captionResult.ok && captionResult.visualContext) {
+        visualContext = captionResult.visualContext;
+        runtimeQuestionText = normalizeVisualSummaryText(visualContext.runtimeQuestionText) || effectiveIntentText;
+        persistUserText = normalizeVisualSummaryText(visualContext.persistUserText) || effectiveIntentText;
+        originalUserText = normalizeVisualSummaryText(visualContext.originalUserText) || effectiveIntentText;
+        routerRawText = effectiveCleanText;
+        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+          stage: 'vision_caption_worker_done',
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          imageCount: visualImageCollection.length,
+          durationMs: Math.max(0, Date.now() - visionStartedAt),
+          fallbackUsed: false,
+          rawMessageTimestampMs,
+          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+        });
+      } else {
+        if (visualContext && visualContext.worker) {
+          visualContext.worker.fallbackUsed = true;
+          visualContext.worker.fallbackReason = String(captionResult.fallbackReason || 'worker_failed').trim() || 'worker_failed';
+        }
+        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+          stage: 'vision_caption_worker_fallback',
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          imageCount: visualImageCollection.length,
+          durationMs: Math.max(0, Date.now() - visionStartedAt),
+          fallbackReason: String(captionResult.fallbackReason || 'worker_failed').trim(),
+          rawMessageTimestampMs,
+          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+        });
+      }
+    }
     const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
     const previousPresence = getShortTermPresence(sessionKey, shortTermMemory, {});
     const sessionTiming = buildInboundSessionTiming({
@@ -2151,13 +2312,14 @@ function createMessageHandler({
       senderId,
       rawText: effectiveRawText,
       cleanText: effectiveCleanText,
-      imageUrl: effectiveVisualInput,
+      imageUrl: visualContext?.worker?.succeeded ? null : effectiveVisualInput,
       isAtBot: directBotAnchor,
       botQQ: effectiveBotQQ,
       chatType,
       sessionTiming,
       continuousMeta,
-      directedContext
+      directedContext,
+      visualContext
     });
     inboundContext.onEvent = (event = {}) => {
       const telemetry = buildReplyTelemetry({
@@ -2176,7 +2338,10 @@ function createMessageHandler({
         telemetry.onEvent(event);
       }
     };
-    inboundContext.effectiveIntentText = effectiveIntentText;
+    inboundContext.effectiveIntentText = runtimeQuestionText;
+    inboundContext.runtimeQuestionText = runtimeQuestionText;
+    inboundContext.persistUserText = persistUserText;
+    inboundContext.originalUserText = originalUserText;
     inboundContext.quotePriority = directedContext?.quotePriority || null;
     if (!isPrivateChatType(chatType) && !directBotAnchor) {
       const passiveFlowResult = await runPassiveFlow({
@@ -2259,7 +2424,7 @@ function createMessageHandler({
         chatType,
         contextSummary: routerContextSummary,
         directedContext,
-        effectiveIntentText
+        effectiveIntentText: runtimeQuestionText
       });
     } catch (error) {
       routeResolverError = error;
@@ -2298,9 +2463,19 @@ function createMessageHandler({
       chatType,
       directedContext,
       directedContextSummary: routerContextSummary,
-      effectiveIntentText,
+      effectiveIntentText: runtimeQuestionText,
       quotePriority: directedContext?.quotePriority || null
     };
+    if (visualContext) {
+      route.meta.visualContext = visualContext;
+      route.meta.persistUserText = persistUserText;
+      route.meta.originalUserText = originalUserText;
+    }
+    if (visualContext?.worker?.succeeded) {
+      route.question = runtimeQuestionText;
+      route.cleanText = runtimeQuestionText;
+      route.imageUrl = null;
+    }
 
     if (route?.topRouteType === 'admin' && String(route?.meta?.command?.cmd || '').trim() === 'full') {
       if (isPrivateChatType(chatType)) {
@@ -2441,7 +2616,7 @@ function createMessageHandler({
     }
 
     const cleanText = route.cleanText;
-    const imageUrl = route.imageUrl || effectiveVisualInput;
+    const imageUrl = visualContext?.worker?.succeeded ? null : (route.imageUrl || effectiveVisualInput);
     route.imageUrl = imageUrl;
     const inboundTimestamp = Date.now();
     const correctionStartedAt = Date.now();
@@ -2469,7 +2644,7 @@ function createMessageHandler({
         groupId,
         senderId,
         senderName: String(effectiveMsg.sender?.card || effectiveMsg.sender?.nickname || effectiveMsg.sender?.nick || senderId || '').trim(),
-        text: cleanText || rawText,
+        text: persistUserText || cleanText || rawText,
         timestamp: Number(continuousMeta?.firstTimestamp || inboundTimestamp),
         messageId: String(effectiveMsg.message_id || '').trim(),
         replyToMessageId: String(directedContext?.quote?.messageId || continuousMeta?.replyMessageId || '').trim(),
@@ -2490,7 +2665,7 @@ function createMessageHandler({
     }
 
     const userPresenceStartedAt = Date.now();
-    const userInfo = sideEffects.updateUserPresence(senderId, cleanText, isPrivateChatType(chatType) ? '' : groupId);
+    const userInfo = sideEffects.updateUserPresence(senderId, persistUserText || cleanText, isPrivateChatType(chatType) ? '' : groupId);
     appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
       stage: 'user_presence_done',
       messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
@@ -2516,7 +2691,7 @@ function createMessageHandler({
     const replyEnvelope = await routeFlow.dispatchFormalRoute({
       route,
       executionPlan: routeExecutionPlan,
-      requestText: cleanText,
+      requestText: runtimeQuestionText || cleanText,
       inboundContext,
       userInfo,
       senderId,
@@ -2533,7 +2708,7 @@ function createMessageHandler({
         routeDebugKey: routeExecutionPlan.routeDebugKey,
         topRouteType: routeExecutionPlan.topRouteType,
         allowTools: routeExecutionPlan.allowTools,
-        requestText: cleanText
+        requestText: runtimeQuestionText || cleanText
       });
       console.log('[reply] sending normalized reply', {
         chatType,
@@ -2577,7 +2752,7 @@ function createMessageHandler({
             sendWithRetry,
             routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
             topRouteType: routeExecutionPlan.topRouteType,
-            userText: cleanText,
+            userText: persistUserText || cleanText,
             replyText: reply,
             rawMessage: rawText,
             routeMeta: route.meta || {},
@@ -2594,7 +2769,7 @@ function createMessageHandler({
           sendWithRetry,
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           topRouteType: routeExecutionPlan.topRouteType,
-          userText: cleanText,
+          userText: persistUserText || cleanText,
           replyText: replyOptions?.streamCompleted ? reply : '',
           rawMessage: rawText,
           routeMeta: route.meta || {},

@@ -785,6 +785,13 @@ function cheapParseMessageEntry(msg = {}, options = {}) {
 }
 
 async function resolveContinuousEntryDetails(entry = {}, options = {}) {
+  if (!entry.expansionState || typeof entry.expansionState !== 'object') {
+    entry.expansionState = {
+      reply: Array.isArray(entry.replyMessageId) ? 'pending' : (entry.replyMessageId ? 'pending' : 'skipped'),
+      forward: Array.isArray(entry.forwardIds) && entry.forwardIds.length ? 'pending' : 'skipped',
+      card: Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length ? 'pending' : 'skipped'
+    };
+  }
   const qqCardLinksEnabled = options.qqCardLinksEnabled ?? config.CONTINUOUS_MESSAGE_QQ_CARD_LINKS_ENABLED;
   if (options.resolveReply !== false) {
     await enrichEntryFromReply(entry, options);
@@ -816,6 +823,41 @@ function isCommandBypass(msg = {}, options = {}) {
   return false;
 }
 
+function hasMeaningfulContinuousText(text = '') {
+  const lines = String(text || '')
+    .split(/\n+/)
+    .map((item) => normalizeText(item))
+    .filter(Boolean);
+  if (!lines.length) return false;
+  return lines.some((line) => line !== '[图片]');
+}
+
+function buildSessionFollowupState(entries = []) {
+  let hasAnchor = false;
+  let hasMeaningfulText = false;
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (!entry || typeof entry !== 'object') continue;
+    if ((Array.isArray(entry.imageUrls) && entry.imageUrls.length > 0) || normalizeText(entry.replyMessageId)) {
+      hasAnchor = true;
+    }
+    if (!hasMeaningfulText && hasMeaningfulContinuousText(entry.text)) {
+      hasMeaningfulText = true;
+    }
+    if (hasAnchor && hasMeaningfulText) break;
+  }
+  return {
+    hasAnchor,
+    hasMeaningfulText,
+    awaitingFollowup: hasAnchor && !hasMeaningfulText
+  };
+}
+
+function refreshSessionFollowupState(session = {}) {
+  const nextState = buildSessionFollowupState(session.entries);
+  session.awaitingFollowup = nextState.awaitingFollowup;
+  return nextState;
+}
+
 function createContinuousMessagePreprocessor(options = {}) {
   const debounceMs = clampDebounceMs(
     options.debounceMs ?? config.CONTINUOUS_MESSAGE_DEBOUNCE_MS,
@@ -824,6 +866,10 @@ function createContinuousMessagePreprocessor(options = {}) {
   const atBotDebounceMs = clampDebounceMs(
     options.atBotDebounceMs ?? config.CONTINUOUS_MESSAGE_AT_BOT_DEBOUNCE_MS,
     2000
+  );
+  const privateDebounceMs = clampDebounceMs(
+    options.privateDebounceMs ?? config.CONTINUOUS_MESSAGE_PRIVATE_DEBOUNCE_MS ?? 5000,
+    5000
   );
   const maxHoldMs = clampDebounceMs(
     options.maxHoldMs ?? config.CONTINUOUS_MESSAGE_MAX_HOLD_MS,
@@ -844,7 +890,11 @@ function createContinuousMessagePreprocessor(options = {}) {
   }
 
   function getSessionDebounceMs(session = {}) {
-    return session.mentionedBot === true ? atBotDebounceMs : debounceMs;
+    const baseDebounceMs = String(session.messageType || '').trim().toLowerCase() === 'private'
+      ? privateDebounceMs
+      : (session.mentionedBot === true ? atBotDebounceMs : debounceMs);
+    if (session.awaitingFollowup === true) return maxHoldMs;
+    return baseDebounceMs;
   }
 
   function scheduleFlush(sessionKey) {
@@ -925,12 +975,14 @@ function createContinuousMessagePreprocessor(options = {}) {
       const session = sessions.get(sessionKey);
       session.entries.push(entry);
       session.mentionedBot = session.mentionedBot || entry.mentionedBot;
+      refreshSessionFollowupState(session);
       scheduleFlush(sessionKey);
       console.log('[continuous-message] session append', {
         sessionKey,
         messageId: entry.messageId,
         size: session.entries.length,
-        mentionedBot: session.mentionedBot === true
+        mentionedBot: session.mentionedBot === true,
+        awaitingFollowup: session.awaitingFollowup === true
       });
       return {
         mode: 'deferred',
@@ -962,20 +1014,25 @@ function createContinuousMessagePreprocessor(options = {}) {
       flushResolve = resolve;
     });
 
-    sessions.set(sessionKey, {
+    const nextSession = {
       msg,
       entries: [entry],
       timer: null,
       flushResolve,
       flushReason: 'debounce',
       startedAt: Date.now(),
-      mentionedBot: entry.mentionedBot === true
-    });
+      mentionedBot: entry.mentionedBot === true,
+      messageType: normalizeText(msg?.message_type).toLowerCase(),
+      awaitingFollowup: false
+    };
+    refreshSessionFollowupState(nextSession);
+    sessions.set(sessionKey, nextSession);
     scheduleFlush(sessionKey);
     console.log('[continuous-message] session start', {
       sessionKey,
       messageId: entry.messageId,
-      mentionedBot: entry.mentionedBot === true
+      mentionedBot: entry.mentionedBot === true,
+      awaitingFollowup: nextSession.awaitingFollowup === true
     });
 
     await flushPromise;
@@ -992,6 +1049,12 @@ function createContinuousMessagePreprocessor(options = {}) {
     clearTimer(session);
     const merged = buildMergedMessagePayload(session.entries, { sessionKey });
     merged.flushReason = session.flushReason || 'debounce';
+    await resolveContinuousEntryDetails(merged, {
+      effectiveBotQQ,
+      resolveReply: Boolean(merged.replyMessageId),
+      resolveForward: Array.isArray(merged.forwardIds) && merged.forwardIds.length > 0,
+      resolveCards: Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length > 0
+    });
     const effectiveMsg = normalizeMessageForDownstream(session.msg, merged, effectiveBotQQ);
     console.log('[continuous-message] session flush', {
       sessionKey,
@@ -1007,6 +1070,7 @@ function createContinuousMessagePreprocessor(options = {}) {
   }
 
   return {
+    getSessionDebounceMs,
     handleMessage,
     flushSession,
     buildSessionKey

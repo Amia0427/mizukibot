@@ -78,6 +78,11 @@ function createDraftReplyNode(deps = {}) {
       nextMemory = {
         ...nextMemory,
         dynamicPrompt: refreshed.dynamicPrompt,
+        stableSystemBlocks: Array.isArray(refreshed.stableSystemBlocks) ? refreshed.stableSystemBlocks : [],
+        dynamicContextBlocks: Array.isArray(refreshed.dynamicContextBlocks) ? refreshed.dynamicContextBlocks : [],
+        assistantOnlyContextBlocks: Array.isArray(refreshed.assistantOnlyContextBlocks) ? refreshed.assistantOnlyContextBlocks : [],
+        promptSnapshot: refreshed.promptSnapshot || nextMemory.promptSnapshot || null,
+        promptSegments: refreshed.promptSegments || nextMemory.promptSegments || null,
         affinity: refreshed.affinity,
         context: refreshed.memoryContext || null,
         dirty: false

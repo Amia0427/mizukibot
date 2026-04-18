@@ -485,6 +485,19 @@ async function sendPrivateMessage(userId = '', message = '', options = {}) {
   };
 }
 
+async function sendPrivatePoke(userId = '', options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const targetUserId = normalizeText(userId);
+  if (!targetUserId) throw new Error('userId is required');
+  await actionClient.callAction('friend_poke', {
+    user_id: targetUserId
+  });
+  return {
+    success: true,
+    reason: 'private poke sent'
+  };
+}
+
 async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) {
   const actionClient = options.actionClient || getNapCatActionClient();
   const normalizedMessageId = normalizeMessageId(messageId);
@@ -886,6 +899,7 @@ module.exports = {
   sanitizeDiaryImageText,
   scheduleGroupMessage,
   sendGroupMessage,
+  sendPrivatePoke,
   sendPrivateMessage,
   setMessageEmojiLike,
   shouldAttemptBotDiaryImage,

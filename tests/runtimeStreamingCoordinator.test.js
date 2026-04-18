@@ -54,9 +54,18 @@ module.exports = (async () => {
   const replyMessages = helpers.buildDirectReplyMessages({
     request: { question: 'hello', userId: 'u1', routeMeta: {} },
     thread: {},
-    memory: {}
+    memory: {
+      assistantOnlyContextBlocks: [
+        { id: 'dynamic_few_shot', content: 'few shot example' }
+      ]
+    }
   }, 'hello', [{ role: 'system', content: 'sys' }]);
   assert.ok(Array.isArray(replyMessages.messages));
+  const assistantOnlyIndex = replyMessages.messages.findIndex((item) => item.role === 'assistant');
+  const lastUserIndex = replyMessages.messages.map((item) => item.role).lastIndexOf('user');
+  assert.ok(assistantOnlyIndex >= 0);
+  assert.ok(assistantOnlyIndex < lastUserIndex);
+  assert.ok(String(replyMessages.messages[assistantOnlyIndex].content || '').startsWith('[Context for assistant only]'));
 
   console.log('runtimeStreamingCoordinator.test.js passed');
 })().catch((error) => {

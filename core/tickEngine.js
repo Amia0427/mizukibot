@@ -783,6 +783,7 @@ async function sendTouchMessage({
     }
 
     let text = '';
+    let proactivePersonaMemoryState = null;
     const effectiveAtSender = fallbackAllowed ? Boolean(atSender) : Boolean(decision.atSender);
     if (fallbackAllowed) {
       text = trimText(
@@ -793,6 +794,7 @@ async function sendTouchMessage({
       );
     } else {
       const promptBundle = await buildProactivePrompt(userId, data, promptPayload);
+      proactivePersonaMemoryState = promptBundle?.personaMemoryState || null;
       const prompt = String(promptBundle?.prompt || '').trim();
       replyModelCalled = true;
       const reply = await askAIByGraph(prompt, data, userId, prompt, null, {
@@ -842,7 +844,7 @@ async function sendTouchMessage({
       routePolicyKey: 'proactive/default'
     });
     await recordPersonaMemoryOutcome('proactive_touch', {
-      state: promptBundle?.personaMemoryState || null,
+      state: proactivePersonaMemoryState,
       userId,
       groupId,
       request: {
@@ -1144,6 +1146,7 @@ module.exports = {
   selectTouchCandidate,
   shouldSendScheduledGreeting,
   shouldTriggerFallbackGreeting,
+  runGreetingFallbacks,
   runDailyShareTick,
   runLifeSchedulerTick,
   runTickCycle

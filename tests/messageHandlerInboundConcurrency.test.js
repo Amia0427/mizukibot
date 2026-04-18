@@ -73,19 +73,45 @@ function countEntersBeforeFirstLeave(events = []) {
   return events.slice(0, boundary).filter((event) => event.type === 'enter').length;
 }
 
+function countStartsBeforeFirstEnd(events = []) {
+  const firstEndIndex = events.findIndex((event) => event.type === 'send_end');
+  const boundary = firstEndIndex === -1 ? events.length : firstEndIndex;
+  return events.slice(0, boundary).filter((event) => event.type === 'send_start').length;
+}
+
 async function runScenario({ config, createMessageHandler, messages, routeDelayMs = 120 }) {
   const events = [];
   const sentPayloads = [];
+  const sendEvents = [];
   let active = 0;
   let maxActive = 0;
+  let activeSends = 0;
+  let maxActiveSends = 0;
 
   const { handleIncomingMessage } = createMessageHandler({
     config,
     sendWithRetry: async (payload) => {
+      const userId = String(payload?.params?.user_id || '').trim();
+      sendEvents.push({
+        type: 'send_start',
+        userId,
+        action: String(payload?.action || '').trim(),
+        at: Date.now()
+      });
+      activeSends += 1;
+      maxActiveSends = Math.max(maxActiveSends, activeSends);
+      await delay(120);
       sentPayloads.push({
         action: payload?.action,
-        userId: String(payload?.params?.user_id || '').trim()
+        userId
       });
+      sendEvents.push({
+        type: 'send_end',
+        userId,
+        action: String(payload?.action || '').trim(),
+        at: Date.now()
+      });
+      activeSends = Math.max(0, activeSends - 1);
       return true;
     },
     detectIntentHybridOverride: async ({ userId, rawText, chatType }) => {
@@ -118,7 +144,9 @@ async function runScenario({ config, createMessageHandler, messages, routeDelayM
   return {
     events,
     sentPayloads,
-    maxActive
+    sendEvents,
+    maxActive,
+    maxActiveSends
   };
 }
 
@@ -171,6 +199,16 @@ module.exports = (async () => {
       differentUsers.sentPayloads.every((payload) => payload.action === 'send_private_msg'),
       'private replies should be sent through send_private_msg'
     );
+    assert.strictEqual(
+      differentUsers.maxActiveSends,
+      2,
+      'different private users should be able to send replies in parallel'
+    );
+    assert.strictEqual(
+      countStartsBeforeFirstEnd(differentUsers.sendEvents),
+      2,
+      'different private users should both start send_private_msg before the first send ends'
+    );
 
     const sameUser = await runScenario({
       config,
@@ -197,6 +235,16 @@ module.exports = (async () => {
       'same private user should only have one route resolution running before the first leaves'
     );
     assert.strictEqual(sameUser.sentPayloads.length, 2);
+    assert.strictEqual(
+      sameUser.maxActiveSends,
+      1,
+      'same private user should not send two replies in parallel'
+    );
+    assert.deepStrictEqual(
+      sameUser.sendEvents.map((event) => event.type),
+      ['send_start', 'send_end', 'send_start', 'send_end'],
+      'same private user reply sending should stay serialized'
+    );
 
     console.log('messageHandlerInboundConcurrency.test.js passed');
   } finally {

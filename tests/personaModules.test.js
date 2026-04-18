@@ -2,6 +2,7 @@ const assert = require('assert');
 
 const {
   buildPersonaModuleCandidates,
+  diagnosePersonaModules,
   getPersonaModuleCatalogSummary,
   selectPersonaModules
 } = require('../utils/personaModules');
@@ -73,6 +74,13 @@ const {
     question: '来一下魔法少女那种朋友间搞怪扮演梗嘛'
   });
   assert.ok(friendRoleplayCandidates.some((item) => item.id === 'roleplay_friend_bit'));
+
+  const diagnosed = diagnosePersonaModules({
+    question: '今天逛街看到一个超可爱的限定发夹，包装字体也太会了'
+  });
+  assert.ok(Array.isArray(diagnosed.candidates));
+  assert.ok(Array.isArray(diagnosed.selected));
+  assert.ok(diagnosed.selectionReason && Array.isArray(diagnosed.selectionReason.fallbackIds));
 
   console.log('personaModules.test.js passed');
 })();

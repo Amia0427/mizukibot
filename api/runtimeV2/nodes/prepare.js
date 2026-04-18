@@ -97,6 +97,8 @@ function createPrepareNode(deps = {}) {
   return async function prepareNode(state) {
     const request = normalizeObject(state.request, {});
     const routeMeta = normalizeObject(request.routeMeta, {});
+    const requestQuestionText = String(request.runtimeQuestionText || request.question || '').trim();
+    const persistUserText = String(request.persistUserText || request.runtimeQuestionText || request.question || '').trim();
     const threadId = String(state.thread?.threadId || '').trim();
     const events = [createEvent('node_start', { node: 'prepare', threadId })];
 
@@ -124,7 +126,7 @@ function createPrepareNode(deps = {}) {
       config.MEMORY_V3_ENABLED
       && !request.systemInitiated
       && String(request.userId || '').trim()
-      && String(request.question || '').trim()
+      && persistUserText
     ) {
       await appendMemoryEvent({
         type: 'turn_received',
@@ -137,7 +139,7 @@ function createPrepareNode(deps = {}) {
         topRouteType: request.topRouteType,
         scopeType: (routeMeta.groupId || routeMeta.group_id) ? 'group' : 'personal',
         source: 'runtime_v2_prepare',
-        text: request.question,
+        text: persistUserText,
         payload: {
           imageUrl: request.imageUrl || '',
           customPrompt: Boolean(String(request.customPrompt || '').trim())
@@ -151,7 +153,7 @@ function createPrepareNode(deps = {}) {
       !request.systemInitiated
       && !String(request.customPrompt || '').trim()
       && String(request.userId || '').trim()
-      && String(request.question || '').trim()
+      && persistUserText
     ) {
       const bridgeRestore = restoreShortTermBridgeAfterRestartIfNeeded(request.userId, {
         chatHistory,
@@ -161,7 +163,7 @@ function createPrepareNode(deps = {}) {
       });
       bridgeRestored = Boolean(bridgeRestore.restored);
       if (!bridgeRestore.restored) {
-        rehydrateShortTermMemoryAfterRestartIfNeeded(request.userId, request.question, request.userInfo, {
+        rehydrateShortTermMemoryAfterRestartIfNeeded(request.userId, persistUserText, request.userInfo, {
           chatHistory,
           shortTermMemory,
           routeMeta,
@@ -213,7 +215,7 @@ function createPrepareNode(deps = {}) {
       config.SHORT_TERM_PENDING_SNAPSHOT_ENABLED
       && !request.systemInitiated
       && String(request.userId || '').trim()
-      && String(request.question || '').trim()
+      && persistUserText
       && !String(request.customPrompt || '').trim()
       && isChatLikeRoute(request)
     ) {
@@ -231,7 +233,7 @@ function createPrepareNode(deps = {}) {
           source: 'runtime_v2_prepare',
           payload: {
             snapshotType: 'pre_reply',
-            carryOverUserTurn: request.imageUrl ? (request.question || '[shared an image]') : (request.question || '')
+            carryOverUserTurn: persistUserText || (request.imageUrl ? '[shared an image]' : '')
           }
         });
         materializeMemoryViews();
@@ -244,7 +246,7 @@ function createPrepareNode(deps = {}) {
         scope: state.thread?.sessionScope,
         snapshotType: 'pre_reply',
         shortTermState: {
-          carryOverUserTurn: request.imageUrl ? (request.question || '[shared an image]') : (request.question || '')
+          carryOverUserTurn: persistUserText || (request.imageUrl ? '[shared an image]' : '')
         }
       });
       events.push(createEvent('checkpoint', {
@@ -279,6 +281,7 @@ function createPrepareNode(deps = {}) {
           memoryCliTurn: nextMemoryCliTurn
         }
       : await runCapabilityPreflight(request.question || '', {
+          question: requestQuestionText,
           userId: request.userId,
           routePolicyKey: request.routePolicyKey,
           topRouteType: request.topRouteType,
@@ -297,15 +300,25 @@ function createPrepareNode(deps = {}) {
     const preflightMemoryCliTurn = createMemoryCliTurnState(globalPreflight?.memoryCliTurn || nextMemoryCliTurn);
     const executionMemoryCliTurn = createMemoryCliTurnState(nextMemoryCliTurn);
     const executionAllowedTools = computeEffectiveAllowedTools(request, executionMemoryCliTurn);
-    const threatMeta = classifyPromptThreat(request.question || '', {
+    const threatMeta = classifyPromptThreat(requestQuestionText || '', {
       routePolicyKey: request.routePolicyKey,
       topRouteType: request.topRouteType
     });
 
-    const { dynamicPrompt, affinity, memoryContext, personaMemoryState, promptSnapshot, promptSegments } = await buildDynamicPromptImpl(
+    const {
+      dynamicPrompt,
+      stableSystemBlocks,
+      dynamicContextBlocks,
+      assistantOnlyContextBlocks,
+      affinity,
+      memoryContext,
+      personaMemoryState,
+      promptSnapshot,
+      promptSegments
+    } = await buildDynamicPromptImpl(
       request.userInfo,
       request.userId,
-      request.question,
+      requestQuestionText,
       request.customPrompt,
       {
         routePrompt: request.routePrompt,
@@ -342,6 +355,9 @@ function createPrepareNode(deps = {}) {
       memory: {
         ...normalizeObject(restoredState.memory, state.memory),
         dynamicPrompt,
+        stableSystemBlocks: normalizeArray(stableSystemBlocks),
+        dynamicContextBlocks: normalizeArray(dynamicContextBlocks),
+        assistantOnlyContextBlocks: normalizeArray(assistantOnlyContextBlocks),
         promptSnapshot: promptSnapshot || null,
         promptSegments: promptSegments || null,
         securityLabels: normalizeArray(threatMeta.labels),
