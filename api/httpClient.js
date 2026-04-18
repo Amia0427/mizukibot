@@ -19,6 +19,8 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+const OPENAI_IMAGE_DETAIL_VALUES = new Set(['auto', 'low', 'high']);
+
 function normalizeJsonObject(value) {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value;
   if (typeof value !== 'string') return {};
@@ -193,7 +195,9 @@ const ANTHROPIC_DYNAMIC_SYSTEM_MARKERS = [
 const ANTHROPIC_STABLE_SYSTEM_TEXTS = new Set(
   [
     String(config.SYSTEM_PROMPT || '').trim(),
-    String(HUMANIZER_SYSTEM_PROMPT || '').trim()
+    String(HUMANIZER_SYSTEM_PROMPT || '').trim(),
+    String(require('../utils/promptSecurity').buildSecuritySystemPrompt?.() || '').trim(),
+    String(require('../utils/personaModules').loadPersonaModuleText?.('core_baseline') || '').trim()
   ].filter(Boolean)
 );
 
@@ -427,31 +431,54 @@ function isQqImageUrl(url = '') {
   return /multimedia\.nt\.qq\.com\.cn\//i.test(String(url || '').trim());
 }
 
+function normalizeOpenAIImageDetail(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return OPENAI_IMAGE_DETAIL_VALUES.has(normalized) ? normalized : '';
+}
+
+function sanitizeOpenAICompatibleContentPart(part) {
+  if (!part || typeof part !== 'object' || Array.isArray(part)) return part;
+  if (!part.image_url || typeof part.image_url !== 'object' || Array.isArray(part.image_url)) return part;
+
+  const imageUrl = { ...part.image_url };
+  const detail = normalizeOpenAIImageDetail(imageUrl.detail);
+  if (detail) imageUrl.detail = detail;
+  else delete imageUrl.detail;
+
+  return {
+    ...part,
+    image_url: imageUrl
+  };
+}
+
 async function resolveOpenAICompatibleImagePart(part = {}) {
+  const normalizedPart = sanitizeOpenAICompatibleContentPart(part);
   const inlineData = String(
-    part?.data
-    || part?.image?.data
-    || part?.source?.data
+    normalizedPart?.data
+    || normalizedPart?.image?.data
+    || normalizedPart?.source?.data
     || ''
   ).trim();
   const inlineMediaType = normalizeText(
-    part?.media_type
-    || part?.mime
-    || part?.image?.media_type
-    || part?.source?.media_type
+    normalizedPart?.media_type
+    || normalizedPart?.mime
+    || normalizedPart?.image?.media_type
+    || normalizedPart?.source?.media_type
   ).toLowerCase();
-  const sourceType = normalizeText(part?.source?.type || '');
+  const sourceType = normalizeText(normalizedPart?.source?.type || '');
+  const imageDetail = normalizeOpenAIImageDetail(normalizedPart?.image_url?.detail);
 
-  if (inlineData && (sourceType === 'base64' || part?.type === 'input_image' || part?.type === 'image')) {
+  if (inlineData && (sourceType === 'base64' || normalizedPart?.type === 'input_image' || normalizedPart?.type === 'image')) {
     return {
       type: 'image_url',
       image_url: {
-        url: `data:${inlineMediaType || 'image/jpeg'};base64,${inlineData}`
+        url: `data:${inlineMediaType || 'image/jpeg'};base64,${inlineData}`,
+        ...(imageDetail ? { detail: imageDetail } : {})
       }
     };
   }
 
-  const imageUrl = String(part?.image_url?.url || part?.url || '').trim();
+  const imageUrl = String(normalizedPart?.image_url?.url || normalizedPart?.url || '').trim();
   if (!imageUrl) return null;
 
   try {
@@ -465,7 +492,8 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
     return {
       type: 'image_url',
       image_url: {
-        url: `data:${mediaType};base64,${data}`
+        url: `data:${mediaType};base64,${data}`,
+        ...(imageDetail ? { detail: imageDetail } : {})
       }
     };
   } catch (error) {
@@ -604,6 +632,14 @@ async function preprocessOpenAICompatibleMessages(messages = []) {
       continue;
     }
 
+    if (message.content && typeof message.content === 'object' && !Array.isArray(message.content)) {
+      out.push({
+        ...message,
+        content: sanitizeOpenAICompatibleContentPart(message.content)
+      });
+      continue;
+    }
+
     const content = Array.isArray(message.content) ? message.content : null;
     if (!content) {
       out.push(message);
@@ -612,13 +648,14 @@ async function preprocessOpenAICompatibleMessages(messages = []) {
 
     const nextContent = [];
     for (const part of content) {
-      const partType = String(part?.type || '').toLowerCase();
+      const sanitizedPart = sanitizeOpenAICompatibleContentPart(part);
+      const partType = String(sanitizedPart?.type || '').toLowerCase();
       if (partType === 'image_url' || partType === 'input_image' || partType === 'image') {
-        const resolvedPart = await resolveOpenAICompatibleImagePart(part);
+        const resolvedPart = await resolveOpenAICompatibleImagePart(sanitizedPart);
         if (resolvedPart) nextContent.push(resolvedPart);
         continue;
       }
-      nextContent.push(part);
+      nextContent.push(sanitizedPart);
     }
 
     out.push({

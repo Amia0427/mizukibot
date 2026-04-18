@@ -56,6 +56,7 @@ function normalizeSegmentLabel(name = '') {
   if (name === 'system') return 'system';
   if (name === 'short_term_summary') return 'short_term_summary';
   if (name === 'recent_history') return 'recent_history';
+  if (name === 'assistant_only_context') return 'assistant_only_context';
   if (name === 'current_user_turn') return 'current_user_turn';
   if (name === 'global_tool_evidence') return 'global_tool_evidence';
   return name || 'other';

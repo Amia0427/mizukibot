@@ -19,6 +19,11 @@ const { HUMANIZER_SYSTEM_PROMPT } = require('../../../utils/humanizer');
 const { buildPlannerStageSystemPrompt } = require('../../../utils/stagePromptContracts');
 const { getPersonaModuleCatalogSummary } = require('../../../utils/personaModules');
 const {
+  buildHeuristicDynamicPromptPlan,
+  buildMainReplyDynamicPromptGuide,
+  getMainReplyDynamicBlockCatalog
+} = require('../../../utils/mainReplyPromptBlocks');
+const {
   buildReactiveRetryPayload,
   createContextCompactionHardBlockError,
   isContextOverflowError
@@ -80,6 +85,53 @@ function clampReason(text = '', maxLength = 240) {
   if (!normalized) return '';
   if (normalized.length <= maxLength) return normalized;
   return `${normalized.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
+function normalizeDynamicPromptPlan(plan = {}, options = {}) {
+  const personaModuleCatalog = normalizeArray(options.personaModuleCatalog);
+  const blockCatalog = normalizeArray(options.dynamicPromptBlockCatalog);
+  const legacyPersonaModules = normalizeArray(options.legacyPersonaModules);
+  const validDynamicBlockIds = new Set(
+    blockCatalog
+      .map((item) => normalizeText(item?.blockId))
+      .filter((blockId) => blockId && !blockId.startsWith('persona_module:'))
+  );
+  const validPersonaModuleIds = new Set(
+    personaModuleCatalog
+      .map((item) => normalizeText(item?.moduleId))
+      .filter(Boolean)
+  );
+  const rationaleSource = normalizeObject(plan?.rationaleByBlock, {});
+  const enabledBlockIds = normalizeArray(plan?.enabledBlockIds)
+    .map((item) => normalizeText(item))
+    .filter((blockId) => validDynamicBlockIds.has(blockId));
+  const personaModules = normalizeArray(plan?.personaModules)
+    .concat(legacyPersonaModules)
+    .map((item) => normalizeText(item))
+    .filter((moduleId) => validPersonaModuleIds.has(moduleId))
+    .slice(0, 2);
+  const rationaleByBlock = {};
+
+  for (const blockId of enabledBlockIds) {
+    const reason = clampReason(normalizeText(rationaleSource[blockId]), 160);
+    if (reason) rationaleByBlock[blockId] = reason;
+  }
+  for (const moduleId of personaModules) {
+    const reason = clampReason(
+      normalizeText(
+        rationaleSource[moduleId]
+        || rationaleSource[`persona_module:${moduleId}`]
+      ),
+      160
+    );
+    if (reason) rationaleByBlock[moduleId] = reason;
+  }
+
+  return {
+    enabledBlockIds,
+    personaModules,
+    rationaleByBlock
+  };
 }
 
 function getPlannerDecisionVersion() {
@@ -815,6 +867,17 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
   const ruleTaskShape = chooseTaskShape(route);
   const domain = normalizeText(route?.facets?.domain);
   const goal = normalizeText(options.goal || cleanText || route?.question);
+  const personaModuleCatalog = normalizeArray(options.personaModuleCatalog).length > 0
+    ? normalizeArray(options.personaModuleCatalog)
+    : getPersonaModuleCatalogSummary();
+  const dynamicPromptBlockCatalog = normalizeArray(options.dynamicPromptBlockCatalog).length > 0
+    ? normalizeArray(options.dynamicPromptBlockCatalog)
+    : getMainReplyDynamicBlockCatalog(personaModuleCatalog);
+  const heuristicDynamicPromptPlan = buildHeuristicDynamicPromptPlan({
+    continuitySignals: options.continuitySignals,
+    directedContext: options.directedContext,
+    hasContextStatsInstruction: true
+  });
 
   if (isConversationalNoop(cleanText)) {
     return {
@@ -837,7 +900,12 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
         plannerModel: getPlannerModel(),
         fallbackUsed: true,
         decisionSource: 'rule',
-        toolBuckets: []
+        toolBuckets: [],
+        personaModules: heuristicDynamicPromptPlan.personaModules,
+        dynamicPromptPlan: normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
+          personaModuleCatalog,
+          dynamicPromptBlockCatalog
+        })
       }
     };
   }
@@ -944,7 +1012,12 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
       plannerModel: getPlannerModel(),
       fallbackUsed: true,
       decisionSource: 'rule',
-      toolBuckets
+      toolBuckets,
+      personaModules: heuristicDynamicPromptPlan.personaModules,
+      dynamicPromptPlan: normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
+        personaModuleCatalog,
+        dynamicPromptBlockCatalog
+      })
     }
   };
 }
@@ -1020,6 +1093,7 @@ function buildPlannerPrompt(toolCatalog = []) {
     'If you choose memory_cli for recall or notebook continuity, search first. Plan a follow-up memory_cli open only when the search result alone is likely insufficient.',
     'If the user asks for official docs, website details, key points, or asks to include links and both web_search and web_fetch are available, plan web_search first and web_fetch second.',
     'You may output plannerMeta.personaModules as an array of module ids, but never more than 2.',
+    'You must also output plannerMeta.dynamicPromptPlan for the main reply dynamic block selection.',
     'steps items must include: id, tool, args, kind, dependsOn, parallelGroup, sideEffect, successCriteria, evidenceRequirement, repairPolicy, runtimeBinding, purpose.',
     'Available tools right now:',
     catalogBlock,
@@ -1032,7 +1106,15 @@ function buildPlannerPrompt(toolCatalog = []) {
     '  "plannerMeta": {',
     `    "decisionVersion": "${PLANNER_DECISION_VERSION}",`,
     `    "plannerVersion": "${DIRECT_CHAT_PLANNER_VERSION}",`,
-    '    "reason": "short reason"',
+    '    "reason": "short reason",',
+    '    "dynamicPromptPlan": {',
+    '      "enabledBlockIds": ["directed_context"],',
+    '      "personaModules": ["scene_private_chat"],',
+    '      "rationaleByBlock": {',
+    '        "directed_context": "quoted reply needs disambiguation",',
+    '        "scene_private_chat": "private disclosure scene" ',
+    '      }',
+    '    }',
     '  }',
     '}'
   ].join('\n');
@@ -1072,7 +1154,20 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
     tools: buildDirectChatToolCatalogSummary(toolCatalog),
     personaModuleCatalog: normalizeArray(options?.personaModuleCatalog).length > 0
       ? normalizeArray(options.personaModuleCatalog)
-      : getPersonaModuleCatalogSummary()
+      : getPersonaModuleCatalogSummary(),
+    dynamicPromptBlockCatalog: normalizeArray(options?.dynamicPromptBlockCatalog).length > 0
+      ? normalizeArray(options.dynamicPromptBlockCatalog)
+      : getMainReplyDynamicBlockCatalog(
+          normalizeArray(options?.personaModuleCatalog).length > 0
+            ? normalizeArray(options.personaModuleCatalog)
+            : getPersonaModuleCatalogSummary()
+        ),
+    dynamicPromptGuide: normalizeText(options?.dynamicPromptGuide)
+      || buildMainReplyDynamicPromptGuide(
+        normalizeArray(options?.personaModuleCatalog).length > 0
+          ? normalizeArray(options.personaModuleCatalog)
+          : getPersonaModuleCatalogSummary()
+      )
   };
 }
 
@@ -1131,6 +1226,20 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   const fallback = buildRuleBasedPlannerDecision(route, options);
   const available = collectAvailableToolSummary(route, options);
   const toolCatalogByName = buildToolCatalogByName(available.toolCatalog);
+  const personaModuleCatalog = normalizeArray(options.personaModuleCatalog).length > 0
+    ? normalizeArray(options.personaModuleCatalog)
+    : getPersonaModuleCatalogSummary();
+  const dynamicPromptBlockCatalog = normalizeArray(options.dynamicPromptBlockCatalog).length > 0
+    ? normalizeArray(options.dynamicPromptBlockCatalog)
+    : getMainReplyDynamicBlockCatalog(personaModuleCatalog);
+  const normalizedDynamicPromptPlan = normalizeDynamicPromptPlan(
+    rawDecision?.plannerMeta?.dynamicPromptPlan || rawDecision?.dynamicPromptPlan,
+    {
+      personaModuleCatalog,
+      dynamicPromptBlockCatalog,
+      legacyPersonaModules: rawDecision?.plannerMeta?.personaModules || rawDecision?.personaModules
+    }
+  );
   const cleanText = getPlannerRequestText(route);
   const canonicalPreferredTools = choosePreferredToolSubset(route, available.allowedToolNames, toolCatalogByName);
   const requestedAllowedNames = normalizeToolNames(
@@ -1262,10 +1371,12 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
       toolBuckets: Array.from(new Set(
         normalizeToolNames(normalizedSteps.map((step) => step.tool)).map((toolName) => resolveToolBucket(toolName, toolCatalogByName))
       )),
-      personaModules: normalizeArray(rawDecision?.plannerMeta?.personaModules || rawDecision?.personaModules)
-        .map((item) => normalizeText(item))
-        .filter(Boolean)
-        .slice(0, 2),
+      personaModules: normalizedDynamicPromptPlan.personaModules,
+      dynamicPromptPlan: normalizedDynamicPromptPlan,
+      personaModuleReason: normalizeText(
+        rawDecision?.plannerMeta?.personaModuleReason
+        || rawDecision?.personaModuleReason
+      ),
       normalizedByRule,
       normalizationReason: normalizeText(normalizationReason)
     }
@@ -1342,6 +1453,8 @@ async function planRequestV2(input = {}) {
     constraints: normalizeObject(input.constraints, {}),
     directedContext: normalizeObject(input.directedContext, null),
     personaModuleCatalog: normalizeArray(input.personaModuleCatalog),
+    dynamicPromptBlockCatalog: normalizeArray(input.dynamicPromptBlockCatalog),
+    dynamicPromptGuide: normalizeText(input.dynamicPromptGuide),
     question: route.question,
     goal: normalizeText(input.goal || route.question || route.cleanText),
     topRouteType: route.topRouteType,

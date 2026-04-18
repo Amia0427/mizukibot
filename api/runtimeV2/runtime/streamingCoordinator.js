@@ -7,6 +7,7 @@ function normalizeArray(value) {
 }
 
 function createStreamingCoordinatorHelpers(deps = {}) {
+  const assistantOnlyPrefix = '[Context for assistant only]';
   const {
     sanitizeUserFacingText,
     isChatLikeRoute,
@@ -111,10 +112,39 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     const request = normalizeObject(state.request, {});
     const baseMessages = normalizeArray(systemMessages)
       .filter((item) => item && typeof item === 'object');
+    const assistantOnlyContextMessages = normalizeArray(state.memory?.assistantOnlyContextBlocks)
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => ({
+        role: 'assistant',
+        content: `${assistantOnlyPrefix}\n${String(item.content || '').trim()}`
+      }))
+      .filter((item) => String(item.content || '').trim() !== assistantOnlyPrefix);
     const continuityStateMessages = baseMessages.filter((item) => String(item?.content || '').includes('[ContinuityState]'));
     const globalToolEvidenceMessages = baseMessages.filter((item) => String(item?.content || '').includes('[GlobalToolEvidence]'));
     const pureSystemMessages = baseMessages.filter((item) => !globalToolEvidenceMessages.includes(item) && !continuityStateMessages.includes(item));
     const userTurnMessages = [{ role: 'user', content: messageContent }];
+    const appendAssistantOnlyBeforeUserTurn = (messages = []) => {
+      const base = normalizeArray(messages);
+      if (assistantOnlyContextMessages.length === 0) return base;
+      let lastUserIndex = -1;
+      for (let index = base.length - 1; index >= 0; index -= 1) {
+        if (String(base[index]?.role || '').trim().toLowerCase() === 'user') {
+          lastUserIndex = index;
+          break;
+        }
+      }
+      if (lastUserIndex >= 0) {
+        return [
+          ...base.slice(0, lastUserIndex),
+          ...assistantOnlyContextMessages,
+          ...base.slice(lastUserIndex)
+        ];
+      }
+      return [
+        ...assistantOnlyContextMessages,
+        ...base
+      ];
+    };
 
     if (!isChatLikeRoute(request) || request.systemInitiated || String(request.customPrompt || '').trim()) {
       const canonical = buildV2CanonicalSegments(state, {
@@ -127,11 +157,12 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         source: 'direct_reply'
       });
       return {
-        messages: canonical.compactionPlan.compactedSegments.flatMap((segment) => segment.messages),
+        messages: appendAssistantOnlyBeforeUserTurn(canonical.compactionPlan.compactedSegments.flatMap((segment) => segment.messages)),
         systemMessages: pureSystemMessages,
         continuityStateMessages,
         summaryMessages: [],
         recentHistory: [],
+        assistantOnlyContextMessages,
         userTurnMessages,
         globalToolEvidenceMessages,
         compactionPlan: canonical.compactionPlan,
@@ -173,11 +204,12 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       canonical.compactionPlan.compactedSegments.find((segment) => segment.name === 'recent_history')?.messages
     );
     return {
-      messages: canonical.compactionPlan.compactedSegments.flatMap((segment) => segment.messages),
+      messages: appendAssistantOnlyBeforeUserTurn(canonical.compactionPlan.compactedSegments.flatMap((segment) => segment.messages)),
       systemMessages: pureSystemMessages,
       continuityStateMessages,
       summaryMessages: sessionSummaryMessages.concat(summaryMessages),
       recentHistory: trimmedRecentHistory,
+      assistantOnlyContextMessages,
       userTurnMessages,
       globalToolEvidenceMessages,
       compactionPlan: canonical.compactionPlan,

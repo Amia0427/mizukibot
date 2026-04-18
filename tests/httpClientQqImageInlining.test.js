@@ -38,7 +38,7 @@ module.exports = (async () => {
           role: 'user',
           content: [
             { type: 'text', text: '看看这张图' },
-            { type: 'image_url', image_url: { url: 'https://multimedia.nt.qq.com.cn/test-image' } }
+            { type: 'image_url', image_url: { url: 'https://multimedia.nt.qq.com.cn/test-image', detail: '' } }
           ]
         }
       ],
@@ -49,6 +49,24 @@ module.exports = (async () => {
     const imagePart = capturedBody.messages[0].content[1];
     assert.strictEqual(imagePart.type, 'image_url');
     assert.ok(/^data:image\/png;base64,/i.test(String(imagePart.image_url?.url || '')));
+    assert.ok(!Object.prototype.hasOwnProperty.call(imagePart.image_url || {}, 'detail'));
+
+    await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
+      model: 'gpt-4.1-mini',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '保留合法 detail' },
+            { type: 'image_url', image_url: { url: 'https://multimedia.nt.qq.com.cn/test-image-2', detail: 'low' } }
+          ]
+        }
+      ],
+      stream: false
+    }, 0, 'test-key');
+
+    const secondImagePart = capturedBody.messages[0].content[1];
+    assert.strictEqual(secondImagePart.image_url?.detail, 'low');
 
     console.log('httpClientQqImageInlining.test.js passed');
   } finally {

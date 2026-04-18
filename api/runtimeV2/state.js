@@ -114,6 +114,9 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
   const useMinecraftModel = shouldUseMinecraftLLM(question, options.routePrompt);
   const request = {
     question: String(question || ''),
+    runtimeQuestionText: String(options.runtimeQuestionText || routeMeta?.runtimeQuestionText || question || ''),
+    persistUserText: String(options.persistUserText || routeMeta?.persistUserText || options.runtimeQuestionText || routeMeta?.runtimeQuestionText || question || ''),
+    originalUserText: String(options.originalUserText || routeMeta?.originalUserText || question || ''),
     userInfo: normalizeObject(userInfo, { level: 'stranger' }),
     userId: String(userId || ''),
     customPrompt,
@@ -123,6 +126,7 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     topRouteType: String(options.topRouteType || routeMeta?.topRouteType || '').trim(),
     reviewMode: String(options.reviewMode || '').trim(),
     routeMeta,
+    visualContext: normalizeObject(options.visualContext || routeMeta?.visualContext, null),
     allowedTools: normalizedAllowedTools,
     allowTools: options.disableTools ? false : true,
     streaming: Boolean(options.streaming),
@@ -155,6 +159,9 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     },
     memory: {
       dynamicPrompt: '',
+      stableSystemBlocks: [],
+      dynamicContextBlocks: [],
+      assistantOnlyContextBlocks: [],
       promptSnapshot: null,
       promptSegments: null,
       securityLabels: [],

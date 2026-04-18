@@ -88,27 +88,56 @@ function createConversationContextHelpers(deps = {}) {
     return kept.join('\n').trim();
   }
 
+  function mapBlocksToMessages(blocks = [], role = 'system') {
+    return normalizeArray(blocks)
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => ({
+        role,
+        content: String(item.content || '').trim()
+      }))
+      .filter((item) => item.content);
+  }
+
+  function buildAssistantOnlyContextMessages(state) {
+    return mapBlocksToMessages(state.memory?.assistantOnlyContextBlocks, 'assistant');
+  }
+
   function getMainConversationSystemMessages(state, options = {}) {
     const request = normalizeObject(state.request, {});
     const isReviewRoute = Boolean(options.isReviewRoute);
+    const stableSystemBlocks = normalizeArray(state.memory?.stableSystemBlocks);
+    const dynamicContextBlocks = normalizeArray(state.memory?.dynamicContextBlocks);
     const dynamicPrompt = Boolean(options.disableMemoryCliInstruction)
       ? stripMemoryCliInstruction(String(state.memory?.dynamicPrompt || ''))
       : String(state.memory?.dynamicPrompt || '').trim();
     const continuityMessage = buildContinuitySystemMessage(state);
     const continuityProbePolicyMessage = buildSilentContinuityProbeSystemMessage(state);
+    const dynamicPlan = normalizeObject(state.memory?.promptSnapshot?.dynamicPromptPlan, {});
+    const enabledDynamicIds = new Set(normalizeArray(dynamicPlan.enabledBlockIds).map((item) => String(item || '').trim()).filter(Boolean));
+    const forceIncludeContinuity = Boolean(
+      state.memory?.continuityState?.payload?.active_topic
+      || normalizeArray(state.memory?.continuityState?.payload?.open_loops).length > 0
+      || normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments).length > 0
+    );
+    const stableBlockMessages = mapBlocksToMessages(stableSystemBlocks);
+    const dynamicBlockMessages = mapBlocksToMessages(dynamicContextBlocks)
+      .filter((message) => String(message.content || '').trim());
+    const fallbackDynamicMessages = (!stableBlockMessages.length && dynamicPrompt)
+      ? [{ role: 'system', content: dynamicPrompt }]
+      : [];
     return [
-      ...(typeof buildSecuritySystemPrompt === 'function'
-        ? [{ role: 'system', content: buildSecuritySystemPrompt() }]
-        : []),
-      ...(dynamicPrompt ? [{ role: 'system', content: dynamicPrompt }] : []),
-      ...(continuityMessage ? [continuityMessage] : []),
+      ...stableBlockMessages,
+      ...((continuityMessage && (forceIncludeContinuity || enabledDynamicIds.has('continuity_state'))) ? [continuityMessage] : []),
       ...(continuityProbePolicyMessage ? [continuityProbePolicyMessage] : []),
       ...((request.routePrompt && !isReviewRoute) ? [{ role: 'system', content: request.routePrompt }] : []),
-      ...(state.memory?.globalToolEvidence ? [{ role: 'system', content: state.memory.globalToolEvidence }] : [])
+      ...(state.memory?.globalToolEvidence ? [{ role: 'system', content: state.memory.globalToolEvidence }] : []),
+      ...dynamicBlockMessages,
+      ...fallbackDynamicMessages
     ];
   }
 
   return {
+    buildAssistantOnlyContextMessages,
     buildContinuitySystemMessage,
     computeEffectiveAllowedTools,
     getMainConversationSystemMessages,

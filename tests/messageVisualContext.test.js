@@ -2,6 +2,7 @@ const assert = require('assert');
 
 const {
   buildDirectedConversationSummary,
+  buildVisualImageCollection,
   createMessageVisualContext,
   resolveVisualInputFromContinuousMetaCore
 } = require('../core/messageVisualContext');
@@ -48,5 +49,41 @@ const quoted = resolveVisualInputFromContinuousMetaCore({
   }
 }, '引用那张图');
 assert.strictEqual(quoted, 'https://example.com/reply.png');
+
+const collectedReplyFirst = buildVisualImageCollection({
+  imageUrls: ['https://example.com/current-a.png', 'https://example.com/shared.png'],
+  replyContext: { imageUrls: ['https://example.com/reply-a.png', 'https://example.com/shared.png'] },
+  forwardImageUrls: ['https://example.com/forward-a.png']
+}, {
+  quotePriority: {
+    enabled: true,
+    mode: 'anchored_rewrite',
+    quoteFocus: { hasImage: true }
+  }
+}, '引用那张图', { maxImages: 8 });
+
+assert.deepStrictEqual(
+  collectedReplyFirst.map((item) => ({ source: item.source, url: item.url })),
+  [
+    { source: 'reply', url: 'https://example.com/reply-a.png' },
+    { source: 'reply', url: 'https://example.com/shared.png' },
+    { source: 'current', url: 'https://example.com/current-a.png' },
+    { source: 'forward', url: 'https://example.com/forward-a.png' }
+  ]
+);
+
+const collectedCurrentFirst = buildVisualImageCollection({
+  imageUrls: ['https://example.com/current-a.png'],
+  replyContext: { imageUrls: ['https://example.com/reply-a.png'] },
+  forwardImageUrls: ['https://example.com/forward-a.png']
+}, null, '看我这张图', { maxImages: 2 });
+
+assert.deepStrictEqual(
+  collectedCurrentFirst.map((item) => ({ source: item.source, url: item.url })),
+  [
+    { source: 'current', url: 'https://example.com/current-a.png' },
+    { source: 'reply', url: 'https://example.com/reply-a.png' }
+  ]
+);
 
 console.log('messageVisualContext.test.js passed');

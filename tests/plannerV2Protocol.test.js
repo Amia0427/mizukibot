@@ -545,6 +545,9 @@ module.exports = (async () => {
   assert.ok(weatherToolMeta.preferredOver.includes('getWeather'));
   assert.ok(Array.isArray(plannerPayload.personaModuleCatalog));
   assert.ok(plannerPayload.personaModuleCatalog.some((item) => item.moduleId === 'daily_energy'));
+  assert.ok(Array.isArray(plannerPayload.dynamicPromptBlockCatalog));
+  assert.ok(plannerPayload.dynamicPromptBlockCatalog.some((item) => item.blockId === 'directed_context'));
+  assert.ok(String(plannerPayload.dynamicPromptGuide || '').includes('dynamic_few_shot'));
 
   const financeTickerGuard = await planRequestV2({
     question: 'PLEASE 分析一下这个方案',
@@ -636,12 +639,24 @@ module.exports = (async () => {
         reason: 'chat only with persona modules',
         plannerModel: 'mock-planner',
         decisionSource: 'planner',
-        personaModules: ['mafuyu_branch', 'care_light']
+        personaModules: ['mafuyu_branch', 'care_light'],
+        dynamicPromptPlan: {
+          enabledBlockIds: ['directed_context', 'continuity_state'],
+          personaModules: ['mafuyu_branch', 'care_light'],
+          rationaleByBlock: {
+            directed_context: 'addressing mafuyu',
+            continuity_state: 'carry over',
+            mafuyu_branch: 'mafuyu scene',
+            care_light: 'gentle support'
+          }
+        }
       }
     })
   });
 
   assert.deepStrictEqual(personaPlannerDecision.plannerMeta.personaModules, ['mafuyu_branch', 'care_light']);
+  assert.deepStrictEqual(personaPlannerDecision.plannerMeta.dynamicPromptPlan.enabledBlockIds, ['directed_context', 'continuity_state']);
+  assert.deepStrictEqual(personaPlannerDecision.plannerMeta.dynamicPromptPlan.personaModules, ['mafuyu_branch', 'care_light']);
 
   console.log('plannerV2Protocol.test.js passed');
 })().catch((error) => {

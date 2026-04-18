@@ -36,6 +36,7 @@ async function runStructuredSubagent({
   agentName = 'structured-subagent',
   systemPrompt = '',
   userPayload = {},
+  userMessageContent = null,
   modelResolver = null,
   validateOutput = null
 } = {}) {
@@ -73,7 +74,12 @@ async function runStructuredSubagent({
         temperature,
         messages: [
           { role: 'system', content: String(systemPrompt || '').trim() },
-          { role: 'user', content: JSON.stringify(userPayload || {}) }
+          {
+            role: 'user',
+            content: Array.isArray(userMessageContent) && userMessageContent.length > 0
+              ? userMessageContent
+              : JSON.stringify(userPayload || {})
+          }
         ],
         max_tokens: maxTokens,
         stream: false,

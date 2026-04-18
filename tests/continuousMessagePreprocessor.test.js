@@ -1,0 +1,108 @@
+const assert = require('assert');
+
+const { createContinuousMessagePreprocessor } = require('../core/continuousMessagePreprocessor');
+
+function makeMessage({
+  messageId,
+  userId = 'u1',
+  groupId = '',
+  messageType = 'private',
+  time = 1710000000,
+  message = [],
+  rawMessage = ''
+} = {}) {
+  return {
+    message_id: String(messageId || ''),
+    user_id: String(userId || ''),
+    group_id: String(groupId || ''),
+    message_type: messageType,
+    time,
+    message,
+    raw_message: rawMessage
+  };
+}
+
+async function testImageThenTextMergesIntoOneTurn() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 80,
+    atBotDebounceMs: 80,
+    privateDebounceMs: 80,
+    maxHoldMs: 260
+  });
+
+  const imageMsg = makeMessage({
+    messageId: 'img-1',
+    message: [{ type: 'image', data: { url: 'https://example.com/a.png' } }],
+    rawMessage: '[CQ:image,url=https://example.com/a.png]'
+  });
+  const textMsg = makeMessage({
+    messageId: 'txt-1',
+    time: 1710000001,
+    message: [{ type: 'text', data: { text: '你看这个怎么样' } }],
+    rawMessage: '你看这个怎么样'
+  });
+  const textMsg2 = makeMessage({
+    messageId: 'txt-2',
+    time: 1710000002,
+    message: [{ type: 'text', data: { text: '我刚刚是说包装好怪' } }],
+    rawMessage: '我刚刚是说包装好怪'
+  });
+
+  const firstPromise = preprocessor.handleMessage(imageMsg, {});
+  await new Promise((resolve) => setTimeout(resolve, 110));
+  const second = await preprocessor.handleMessage(textMsg, {});
+  assert.strictEqual(second.mode, 'deferred', 'follow-up text should join the pending image session');
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  const third = await preprocessor.handleMessage(textMsg2, {});
+  assert.strictEqual(third.mode, 'deferred', 'a second follow-up text should still join the same anchored session');
+
+  const first = await firstPromise;
+  assert.strictEqual(first.mode, 'ready');
+  assert.deepStrictEqual(first.meta.sourceMessageIds, ['img-1', 'txt-1', 'txt-2']);
+  assert.strictEqual(first.meta.selectedImageUrl, 'https://example.com/a.png');
+  assert.ok(String(first.effectiveMsg.raw_message || '').includes('你看这个怎么样'));
+  assert.ok(String(first.effectiveMsg.raw_message || '').includes('我刚刚是说包装好怪'));
+  assert.ok(String(first.effectiveMsg.raw_message || '').includes('[CQ:image,url=https://example.com/a.png]'));
+}
+
+async function testPlainTextStillFlushesOnBaseDebounce() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 60,
+    atBotDebounceMs: 60,
+    privateDebounceMs: 60,
+    maxHoldMs: 260
+  });
+
+  const firstMsg = makeMessage({
+    messageId: 'text-a',
+    message: [{ type: 'text', data: { text: '第一句' } }],
+    rawMessage: '第一句'
+  });
+  const secondMsg = makeMessage({
+    messageId: 'text-b',
+    time: 1710000001,
+    message: [{ type: 'text', data: { text: '第二句' } }],
+    rawMessage: '第二句'
+  });
+
+  const firstPromise = preprocessor.handleMessage(firstMsg, {});
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  const first = await firstPromise;
+  assert.strictEqual(first.mode, 'ready');
+  assert.deepStrictEqual(first.meta.sourceMessageIds, ['text-a']);
+
+  const second = await preprocessor.handleMessage(secondMsg, {});
+  assert.strictEqual(second.mode, 'ready');
+  assert.deepStrictEqual(second.meta.sourceMessageIds, ['text-b']);
+}
+
+(async () => {
+  await testImageThenTextMergesIntoOneTurn();
+  await testPlainTextStillFlushesOnBaseDebounce();
+  console.log('continuousMessagePreprocessor.test.js passed');
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

@@ -9,6 +9,9 @@ const {
   resolveUserScopedMainModelConfig,
   shouldBypassMainModelFallback
 } = require('../../../utils/mainModelConfigResolver');
+const {
+  buildImageModelConfig
+} = require('../../../utils/imageModelConfigResolver');
 
 function ensureChatCompletionsUrl(url) {
   const normalized = String(url || '').replace(/\/+$/, '');
@@ -103,6 +106,7 @@ function normalizeTextContent(content) {
 }
 
 module.exports = {
+  buildImageModelConfig,
   ensureChatCompletionsUrl,
   getApiBaseUrl,
   getApiKey,

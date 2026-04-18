@@ -63,7 +63,11 @@ function createPersistNode(deps = {}) {
   return async function persistNode(state) {
     const request = normalizeObject(state.request, {});
     const finalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
-    const userContent = request.imageUrl ? (request.question || '[shared an image]') : (request.question || '');
+    const userContent = String(
+      request.persistUserText
+      || request.runtimeQuestionText
+      || (request.imageUrl ? (request.question || '[shared an image]') : (request.question || ''))
+    ).trim();
     const shouldPersistChatArtifacts = (
       !request.systemInitiated
       && !state.output?.failure
@@ -188,7 +192,7 @@ function createPersistNode(deps = {}) {
             dedupeKey,
             userId: String(request.userId || '').trim(),
             userInfo: normalizeObject(request.userInfo, {}),
-            question: String(request.question || ''),
+            question: userContent,
             finalReply,
             routePolicyKey: String(request.routePolicyKey || '').trim(),
             topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),

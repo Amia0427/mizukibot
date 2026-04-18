@@ -70,16 +70,27 @@ module.exports = (async () => {
   assert.strictEqual(toolCalled, true);
 
   const chat = await coordinator.dispatchByRoutePlan({
-    route: { meta: {} },
+    route: {
+      meta: {
+        visualContext: {
+          worker: {
+            succeeded: false,
+            fallbackUsed: true
+          }
+        }
+      }
+    },
     routeExecutionPlan: { executor: 'direct', allowTools: false, topRouteType: 'direct_chat', allowedTools: [] },
     cleanText: 'task',
-    imageUrl: null,
+    imageUrl: 'https://example.com/fallback-image.png',
     userInfo: {},
     senderId: 'u1',
     groupId: 'g1'
   });
   assert.strictEqual(chat.reply, 'ai reply');
   assert.strictEqual(aiCalled, true);
+  assert.ok(chat.replyOptions.modelConfig);
+  assert.strictEqual(typeof chat.replyOptions.modelConfig.model, 'string');
 
   console.log('messageDispatchCoordinator.test.js passed');
 })().catch((error) => {

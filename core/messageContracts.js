@@ -11,9 +11,27 @@ function buildInboundMessageContext(input = {}) {
     effectiveMsg: source.effectiveMsg || source.msg || {},
     groupId: String(source.groupId || source.effectiveMsg?.group_id || source.msg?.group_id || '').trim(),
     senderId: String(source.senderId || source.effectiveMsg?.user_id || source.msg?.user_id || '').trim(),
+    senderName: String(
+      source.senderName
+      || source.messageMeta?.senderName
+      || source.effectiveMsg?.sender?.card
+      || source.effectiveMsg?.sender?.nickname
+      || source.effectiveMsg?.sender?.nick
+      || source.effectiveMsg?.sender_name
+      || source.effectiveMsg?.user_id
+      || source.msg?.sender?.card
+      || source.msg?.sender?.nickname
+      || source.msg?.sender?.nick
+      || source.msg?.sender_name
+      || source.msg?.user_id
+      || ''
+    ).trim(),
     rawText: String(source.rawText || ''),
     cleanText: String(source.cleanText || ''),
     imageUrl: source.imageUrl || null,
+    visualContext: source.visualContext && typeof source.visualContext === 'object'
+      ? { ...source.visualContext }
+      : null,
     isAtBot: Boolean(source.isAtBot),
     preprocessedText: String(source.preprocessedText || source.cleanText || ''),
     botQQ: String(source.botQQ || '').trim(),
@@ -47,7 +65,14 @@ function buildRouteDecisionContext(input = {}) {
     senderId: String(source.senderId || source.inboundContext?.senderId || '').trim(),
     groupId: String(source.groupId || source.inboundContext?.groupId || '').trim(),
     requestText: String(source.requestText || source.inboundContext?.cleanText || ''),
-    imageUrl: source.imageUrl || source.inboundContext?.imageUrl || null,
+    imageUrl: Object.prototype.hasOwnProperty.call(source, 'imageUrl')
+      ? (source.imageUrl || null)
+      : (source.inboundContext?.imageUrl || null),
+    visualContext: source.visualContext && typeof source.visualContext === 'object'
+      ? { ...source.visualContext }
+      : (source.inboundContext?.visualContext && typeof source.inboundContext.visualContext === 'object'
+        ? { ...source.inboundContext.visualContext }
+        : null),
     directedContext: source.directedContext || source.inboundContext?.directedContext || null
   };
 }
@@ -81,7 +106,14 @@ function buildPostActionEnvelope(input = {}) {
     groupId: String(source.groupId || source.inboundContext?.groupId || '').trim(),
     requestText: String(source.requestText || source.inboundContext?.cleanText || ''),
     rawText: String(source.rawText || source.inboundContext?.rawText || ''),
-    imageUrl: source.imageUrl || source.inboundContext?.imageUrl || null,
+    imageUrl: Object.prototype.hasOwnProperty.call(source, 'imageUrl')
+      ? (source.imageUrl || null)
+      : (source.inboundContext?.imageUrl || null),
+    visualContext: source.visualContext && typeof source.visualContext === 'object'
+      ? { ...source.visualContext }
+      : (source.inboundContext?.visualContext && typeof source.inboundContext.visualContext === 'object'
+        ? { ...source.inboundContext.visualContext }
+        : null),
     replyText: String(source.replyText || source.replyEnvelope?.replyText || '')
   };
 }

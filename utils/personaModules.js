@@ -245,13 +245,26 @@ function selectPersonaModules(decision = {}, context = {}) {
   const selected = [];
   const blocked = new Set();
   const usedSlots = new Set();
+  const skipped = [];
 
   for (const id of desiredIds) {
-    if (selected.length >= maxActive) break;
+    if (selected.length >= maxActive) {
+      skipped.push({ id, reason: 'max_active_reached' });
+      continue;
+    }
     const moduleItem = byId.get(id);
-    if (!moduleItem) continue;
-    if (blocked.has(id)) continue;
-    if (moduleItem.slot && moduleItem.slot !== 'general' && usedSlots.has(moduleItem.slot)) continue;
+    if (!moduleItem) {
+      skipped.push({ id, reason: 'not_found' });
+      continue;
+    }
+    if (blocked.has(id)) {
+      skipped.push({ id, reason: 'conflicted_by_selected' });
+      continue;
+    }
+    if (moduleItem.slot && moduleItem.slot !== 'general' && usedSlots.has(moduleItem.slot)) {
+      skipped.push({ id, reason: `slot_taken:${moduleItem.slot}` });
+      continue;
+    }
     selected.push(moduleItem);
     if (moduleItem.slot && moduleItem.slot !== 'general') usedSlots.add(moduleItem.slot);
     for (const conflictId of moduleItem.conflictsWith) blocked.add(conflictId);
@@ -260,7 +273,36 @@ function selectPersonaModules(decision = {}, context = {}) {
   return {
     selected,
     candidates,
-    maxActive
+    maxActive,
+    selectionReason: {
+      requestedIds: requested,
+      fallbackIds,
+      usedSlots: Array.from(usedSlots),
+      skipped
+    }
+  };
+}
+
+function diagnosePersonaModules(input = {}) {
+  const candidates = buildPersonaModuleCandidates(input);
+  const selection = selectPersonaModules(input?.decision || {}, input);
+  return {
+    question: normalizeText(input.question),
+    phase: inferPhase(input),
+    candidates: candidates.map((item) => ({
+      id: item.id,
+      slot: item.slot,
+      priority: item.priority,
+      tokenCost: item.tokenCost,
+      conflictsWith: item.conflictsWith
+    })),
+    selected: selection.selected.map((item) => ({
+      id: item.id,
+      slot: item.slot,
+      tokenCost: item.tokenCost
+    })),
+    selectionReason: selection.selectionReason,
+    totalTokenCost: selection.selected.reduce((sum, item) => sum + Number(item.tokenCost || 0), 0)
   };
 }
 
@@ -275,6 +317,7 @@ function loadPersonaModuleText(moduleId = '') {
 module.exports = {
   MODULE_CATALOG_PATH,
   buildPersonaModuleCandidates,
+  diagnosePersonaModules,
   getPersonaModuleCatalogSummary,
   loadPersonaModuleCatalog,
   loadPersonaModuleText,

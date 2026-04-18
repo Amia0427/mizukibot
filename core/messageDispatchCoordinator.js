@@ -27,6 +27,16 @@ function createMessageDispatchCoordinator(deps = {}) {
     askAIDispatch
   } = deps;
 
+  function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = '') {
+    if (!String(imageUrl || '').trim()) return null;
+    const visualContext = route?.meta?.visualContext && typeof route.meta.visualContext === 'object'
+      ? route.meta.visualContext
+      : null;
+    if (!visualContext || visualContext?.worker?.succeeded === true) return null;
+    const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
+    return buildImageModelConfig(null, userId, { routeMeta: route?.meta || {} });
+  }
+
   async function dispatchByRoutePlan({
     route,
     routeExecutionPlan,
@@ -100,6 +110,10 @@ function createMessageDispatchCoordinator(deps = {}) {
             allowedTools: routeExecutionPlan.allowedTools
           }
         };
+        const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
+        if (fallbackModelConfig) {
+          toolTaskOptions.modelConfig = fallbackModelConfig;
+        }
 
         console.log('[dispatch] tool route resolved', buildRoutePlanLogPayload(routeExecutionPlan, {
           groupId,
@@ -221,6 +235,10 @@ function createMessageDispatchCoordinator(deps = {}) {
           },
           disableStream: disableStreamForReply
         };
+        const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
+        if (fallbackModelConfig) {
+          streamOptions.modelConfig = fallbackModelConfig;
+        }
         const replyOptions = streamOptions;
         finalReplyOptions = replyOptions;
 
