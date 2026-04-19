@@ -6,6 +6,18 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function extractReplyText(value, preferredKey = 'persisted') {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object') return '';
+  const visibleText = String(value.visibleText || '').trim();
+  const persistedText = String(value.persistedText || '').trim();
+  const finalReply = String(value.finalReply || '').trim();
+  if (preferredKey === 'visible') {
+    return visibleText || persistedText || finalReply;
+  }
+  return persistedText || visibleText || finalReply;
+}
+
 function createStreamingCoordinatorHelpers(deps = {}) {
   const assistantOnlyPrefix = '[Context for assistant only]';
   const {
@@ -60,7 +72,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
             onDelta: request.onDelta,
             streamHadOutput: Boolean(state.output?.stream?.hadOutput)
           })
-        : sanitizeUserFacingText(streamedReply).trim();
+        : sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted')).trim();
       const safeFinalReply = sanitizeUserFacingText(finalReply).trim() || 'The network was unstable just now. Please try again.';
       return {
         finalReply: safeFinalReply,

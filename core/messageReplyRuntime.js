@@ -56,8 +56,24 @@ function isToolReplyRoute(routeContext = {}) {
   return allowTools || routeCapability === 'tool' || isToolStyleRoute(routePolicyKey);
 }
 
+function extractReplyTextValue(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => extractReplyTextValue(item)).join('');
+  }
+  if (!value || typeof value !== 'object') return '';
+  return String(
+    value.visibleText
+    || value.persistedText
+    || value.finalReply
+    || value.text
+    || value.content
+    || ''
+  );
+}
+
 function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
-  const t = sanitizeUserFacingText(text).trim();
+  const t = sanitizeUserFacingText(extractReplyTextValue(text)).trim();
   const routePolicyKey = typeof routeContext === 'string'
     ? String(routeContext || '').trim()
     : getEffectivePolicyKey(routeContext);
