@@ -134,6 +134,9 @@ function collectCandidates(userId, options = {}) {
     const pseudoDocs = [
       personaCore.summary ? { id: `profile:${userId}:summary`, source: 'profile', type: 'persona_summary', text: personaCore.summary, semanticSlot: 'persona_summary', fieldKey: 'persona_summary_support' } : null,
       personaCore.impression ? { id: `profile:${userId}:impression`, source: 'profile', type: 'persona_impression', text: personaCore.impression, semanticSlot: 'persona_impression', fieldKey: 'persona_impression_support' } : null,
+      personaCore.botBasePersona ? { id: `profile:${userId}:botBasePersona`, source: 'profile', type: 'bot_persona', text: personaCore.botBasePersona, semanticSlot: 'bot_persona', fieldKey: 'bot_persona_tone' } : null,
+      personaCore.userAdaptationPersona ? { id: `profile:${userId}:userAdaptationPersona`, source: 'profile', type: 'user_adaptation_persona', text: personaCore.userAdaptationPersona, semanticSlot: 'relationship', fieldKey: 'relationship_reply_style' } : null,
+      personaCore.relationshipStyle ? { id: `profile:${userId}:relationshipStyle`, source: 'profile', type: 'relationship_style', text: personaCore.relationshipStyle, semanticSlot: 'relationship', fieldKey: 'relationship_tone' } : null,
       personaCore.replyStyle ? { id: `profile:${userId}:replyStyle`, source: 'profile', type: 'reply_style', text: personaCore.replyStyle, semanticSlot: 'style_pattern', fieldKey: 'style_pattern' } : null,
       personaCore.relationshipTone ? { id: `profile:${userId}:relationshipTone`, source: 'profile', type: 'relationship_tone', text: personaCore.relationshipTone, semanticSlot: 'relationship', fieldKey: 'relationship' } : null,
       ...(Array.isArray(profile.strictProfile?.identities) ? profile.strictProfile.identities.map((item, index) => ({ id: `profile:${userId}:identity:${index}`, source: 'profile', type: 'identity', text: item, semanticSlot: 'identity', fieldKey: 'identity' })) : []),
@@ -225,9 +228,9 @@ function matchesFacetCandidate(facet, candidate = {}) {
   const source = normalizeText(candidate.source).toLowerCase();
   if (facet === 'preference') return ['preference_like', 'preference_dislike', 'like', 'dislike', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
   if (facet === 'identity') return ['identity', 'fact', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
-  if (facet === 'relationship') return ['relationship', 'style_pattern', 'persona_impression_support'].includes(fieldKey) || source === 'profile';
+  if (facet === 'relationship') return ['relationship', 'relationship_tone', 'relationship_distance', 'relationship_salutation', 'relationship_reply_style', 'relationship_engagement', 'relationship_boundaries', 'style_pattern', 'persona_impression_support'].includes(fieldKey) || source === 'profile';
   if (facet === 'continuity') return source === 'recent' || source === 'journal' || source === 'task';
-  if (facet === 'style') return ['style_pattern', 'style_avoid', 'group_jargon'].includes(fieldKey) || source === 'style' || source === 'jargon' || fieldKey === 'relationship';
+  if (facet === 'style') return ['style_pattern', 'style_avoid', 'group_jargon', 'bot_persona_tone', 'bot_persona_initiative', 'bot_persona_boundaries', 'bot_persona_playfulness', 'bot_persona_guardedness', 'bot_persona_verbosity', 'relationship_reply_style'].includes(fieldKey) || source === 'style' || source === 'jargon' || fieldKey === 'relationship';
   if (facet === 'task') return source === 'task';
   if (facet === 'group') return source === 'group';
   if (facet === 'journal') return source === 'journal';

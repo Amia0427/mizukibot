@@ -85,7 +85,8 @@ const WINDOW_STATUS_LABELS = Object.freeze({
   failed: '澶辫触'
 });
 
-const MAX_AUTO_SENDS_PER_WINDOW = 2;
+const GROUP_MAX_AUTO_SENDS_PER_WINDOW = 1;
+const QZONE_MAX_AUTO_SENDS_PER_WINDOW = 2;
 const QZONE_DAILY_SHARE_TYPES = Object.freeze(['greeting', 'mood', 'recommendation']);
 
 function logDailyShare({ groupId = '', windowKey = '', type = '', reason = '', source = '', event = '' } = {}) {
@@ -198,13 +199,21 @@ function formatWindowRange(windowDef) {
   return `${start}-${end}`;
 }
 
-function getWindowRemainingCapacity(schedule = {}) {
-  return Math.max(0, MAX_AUTO_SENDS_PER_WINDOW - Math.max(0, Number(schedule?.sentCount || 0) || 0));
+function getMaxAutoSendsPerWindow(targetConfig = {}) {
+  const surface = String(targetConfig?.surface || '').trim().toLowerCase();
+  return surface === 'qzone' ? QZONE_MAX_AUTO_SENDS_PER_WINDOW : GROUP_MAX_AUTO_SENDS_PER_WINDOW;
 }
 
-function ensureWindowSchedule(entry, targetId, windowDef, today, date) {
+function getWindowRemainingCapacity(schedule = {}, targetConfig = {}) {
+  return Math.max(
+    0,
+    getMaxAutoSendsPerWindow(targetConfig) - Math.max(0, Number(schedule?.sentCount || 0) || 0)
+  );
+}
+
+function ensureWindowSchedule(entry, targetId, windowDef, today, date, targetConfig = {}) {
   const schedule = entry.scheduleByWindow[windowDef.key];
-  if (schedule.plannedAt > 0 && getWindowRemainingCapacity(schedule) > 0) return schedule;
+  if (schedule.plannedAt > 0 && getWindowRemainingCapacity(schedule, targetConfig) > 0) return schedule;
   const minute = stableMinute(`${targetId}:${today}:${windowDef.key}`, windowDef.startMinutes, windowDef.endMinutes);
   schedule.plannedAt = minuteToTimestamp(date, minute);
   schedule.completedAt = 0;
@@ -325,14 +334,36 @@ function trimReplyText(value, maxChars = 120) {
 
 function classifyDailyShareGenerationFailure(error = null) {
   const message = normalizeReplyText(error?.message || error || '');
+  const explicitFailureType = normalizeReplyText(error?.dailyShareFailureType || '');
   const replyFailure = classifyReplyFailure(message);
+  const replyFailureType = explicitFailureType || replyFailure.type;
   const isPureToolMarkupBlocked = /tool call markup was returned without executing any tool/i.test(message);
   return {
     message,
-    replyFailureType: replyFailure.type,
+    replyFailureType,
     isPureToolMarkupBlocked,
-    shouldCooldownWindow: isPureToolMarkupBlocked || replyFailure.type === 'tool_error'
+    shouldCooldownWindow: isPureToolMarkupBlocked
+      || new Set(['tool_error', 'provider_auth', 'provider_blocked']).has(replyFailureType)
   };
+}
+
+function detectQzoneTerminalReplyFailureType(text = '') {
+  const message = normalizeReplyText(text);
+  if (!message) return '';
+  const replyFailure = classifyReplyFailure(message);
+  if (replyFailure.type === 'provider_auth' || replyFailure.type === 'provider_blocked') {
+    return replyFailure.type;
+  }
+  if (/^(?:sorry[\s,]+)?i can(?:'|’)t\b/i.test(message)) {
+    return 'provider_blocked';
+  }
+  return '';
+}
+
+function createDailyShareAbortError(message = '', failureType = '') {
+  const error = new Error(message || failureType || 'daily-share-aborted');
+  if (failureType) error.dailyShareFailureType = failureType;
+  return error;
 }
 
 function getDailyShareFailureCooldownMs(targetConfig = {}, error = null) {
@@ -787,7 +818,7 @@ function getNextWindowInfo(targetConfig, entry, date) {
       const status = entry.windowStatus[windowDef.key];
       return { windowDef, schedule, status };
     })
-    .filter((item) => item.status.status !== 'skipped' && getWindowRemainingCapacity(item.schedule) > 0)
+      .filter((item) => item.status.status !== 'skipped' && getWindowRemainingCapacity(item.schedule, targetConfig) > 0)
     .sort((a, b) => {
       const aTime = (a.schedule.deferred && a.schedule.deferredAt) ? a.schedule.deferredAt : a.schedule.plannedAt;
       const bTime = (b.schedule.deferred && b.schedule.deferredAt) ? b.schedule.deferredAt : b.schedule.plannedAt;
@@ -804,12 +835,12 @@ function getNextWindowInfo(targetConfig, entry, date) {
   };
 }
 
-function shouldRunWindowNow({ entry, windowDef, now, date }) {
+function shouldRunWindowNow({ entry, windowDef, now, date, targetConfig = {} }) {
   const schedule = entry.scheduleByWindow[windowDef.key];
   const status = entry.windowStatus[windowDef.key];
   const currentMinutes = getCurrentMinutes(date, config.TIMEZONE);
   if (currentMinutes > windowDef.endMinutes) {
-    if (getWindowRemainingCapacity(schedule) > 0 && status.status !== 'skipped') {
+    if (getWindowRemainingCapacity(schedule, targetConfig) > 0 && status.status !== 'skipped') {
       status.status = 'skipped';
       status.lastReason = 'window-expired';
       status.lastAttemptAt = now;
@@ -819,7 +850,7 @@ function shouldRunWindowNow({ entry, windowDef, now, date }) {
     return false;
   }
   if (status.status === 'skipped') return false;
-  if (getWindowRemainingCapacity(schedule) <= 0) return false;
+  if (getWindowRemainingCapacity(schedule, targetConfig) <= 0) return false;
   if (Math.max(0, Number(schedule.cooldownUntil || 0) || 0) > now) return false;
   if (schedule.deferred && schedule.deferredAt > now) return false;
   return schedule.plannedAt > 0 && now >= schedule.plannedAt;
@@ -872,7 +903,7 @@ function createDailyShareEngine({
     const { target, stateEntry } = ensureTargetState(targetId, today);
     const currentWindow = findCurrentWindow(target, date);
     const windows = getWindowDefinitions(target);
-    windows.forEach((windowDef) => ensureWindowSchedule(stateEntry, targetId, windowDef, today, date));
+    windows.forEach((windowDef) => ensureWindowSchedule(stateEntry, targetId, windowDef, today, date, target));
     const nextWindow = getNextWindowInfo(target, stateEntry, date);
     const title = String(target?.surface || '').trim().toLowerCase() === 'qzone' ? 'QZone Daily Share' : 'Daily Share';
 
@@ -1012,6 +1043,10 @@ function createDailyShareEngine({
             }
           });
           const text = trimReplyText(reply, 260);
+          const terminalFailureType = detectQzoneTerminalReplyFailureType(text);
+          if (terminalFailureType) {
+            throw createDailyShareAbortError(text, terminalFailureType);
+          }
           const validation = validateDailyShareOutput(text, type, normalizedSurface);
           candidates.push({
             plan,
@@ -1475,8 +1510,8 @@ function createDailyShareEngine({
 
       for (const windowDef of getWindowDefinitions(target)) {
         const liveState = ensureStateEntry(state, groupId, today);
-        ensureWindowSchedule(liveState, groupId, windowDef, today, date);
-        if (!shouldRunWindowNow({ entry: liveState, windowDef, now, date })) continue;
+        ensureWindowSchedule(liveState, groupId, windowDef, today, date, target);
+        if (-not (shouldRunWindowNow({ entry: liveState, windowDef, now, date, targetConfig: target }))) { continue; }
 
         const gate = shouldDeferOrSkip({
           groupId,
@@ -1557,8 +1592,8 @@ function createDailyShareEngine({
 
     for (const windowDef of getWindowDefinitions(target)) {
       const liveState = ensureStateEntry(state, QZONE_TARGET_ID, today);
-      ensureWindowSchedule(liveState, QZONE_TARGET_ID, windowDef, today, date);
-      if (!shouldRunWindowNow({ entry: liveState, windowDef, now, date })) continue;
+      ensureWindowSchedule(liveState, QZONE_TARGET_ID, windowDef, today, date, target);
+      if (-not (shouldRunWindowNow({ entry: liveState, windowDef, now, date, targetConfig: target }))) { continue; }
 
       const type = getAutoTypeForWindow(target, liveState, windowDef.key);
       if (!type) continue;

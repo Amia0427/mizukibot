@@ -1,4 +1,6 @@
-function stripTrailingThinkFragment(text = '') {
+function stripTrailingThinkFragment(text = '', options = {}) {
+  const preserveThink = options && typeof options === 'object' && options.preserveThink === true;
+  if (preserveThink) return String(text || '');
   const source = String(text || '');
   const lower = source.toLowerCase();
   const lastOpen = lower.lastIndexOf('<');
@@ -21,8 +23,10 @@ function stripTrailingThinkFragment(text = '') {
   return source;
 }
 
-function sanitizeUserFacingText(text = '') {
+function sanitizeUserFacingText(text = '', options = {}) {
+  const preserveThink = options && typeof options === 'object' && options.preserveThink === true;
   let next = String(text || '').replace(/\u200b/g, '');
+  if (preserveThink) return next;
   let previous = null;
 
   while (next !== previous) {
@@ -32,7 +36,7 @@ function sanitizeUserFacingText(text = '') {
 
   next = next.replace(/<think\b[^>]*>[\s\S]*$/i, '');
   next = next.replace(/<\/think\s*>/gi, '');
-  next = stripTrailingThinkFragment(next);
+  next = stripTrailingThinkFragment(next, options);
   return next;
 }
 

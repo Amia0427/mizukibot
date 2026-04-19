@@ -3,6 +3,7 @@ const assert = require('assert');
 const {
   buildDirectedConversationSummary,
   buildVisualImageCollection,
+  buildVisualImageCollectionDetails,
   createMessageVisualContext,
   resolveVisualInputFromContinuousMetaCore
 } = require('../core/messageVisualContext');
@@ -85,5 +86,29 @@ assert.deepStrictEqual(
     { source: 'reply', url: 'https://example.com/reply-a.png' }
   ]
 );
+
+const forcedReplyFirst = buildVisualImageCollectionDetails({
+  imageUrls: [],
+  replyContext: {
+    imageUrls: ['https://example.com/reply-only.png'],
+    imageRefMap: {
+      'https://example.com/reply-only.png': 'cached-image://reply-only'
+    }
+  },
+  forwardImageUrls: []
+}, {
+  scene: 'reply_to_user',
+  quote: { hasImage: true },
+  quotePriority: {
+    enabled: false,
+    mode: 'none',
+    quoteFocus: { hasImage: true }
+  }
+}, '这是谁', { maxImages: 8 });
+
+assert.strictEqual(forcedReplyFirst.images[0].source, 'reply');
+assert.strictEqual(forcedReplyFirst.images[0].url, 'cached-image://reply-only');
+assert.strictEqual(forcedReplyFirst.meta.forcedReplyPriority, true);
+assert.strictEqual(forcedReplyFirst.meta.replyPriorityReason, 'reply_scene_no_current_image');
 
 console.log('messageVisualContext.test.js passed');

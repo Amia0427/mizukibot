@@ -886,9 +886,11 @@ function createMessageRouteFlow(deps = {}) {
     const chatType = String(route?.meta?.chatType || inboundContext?.chatType || 'group').trim().toLowerCase() === 'private'
       ? 'private'
       : 'group';
+    const cotDisplayOnce = route?.meta?.cotDisplayOnce === true;
     let reply = '';
     let usedStreamingSend = false;
     let finalReplyOptions = null;
+    let persistedReplyText = '';
 
     const promptBundle = buildRoutePromptBundle({
       route,
@@ -1084,7 +1086,9 @@ function createMessageRouteFlow(deps = {}) {
             directChatPlanner: route?.meta?.directChatPlanner || null
           },
           disableStream: disableStreamForReply,
-          deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat'
+          deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat',
+          cotDisplayOnce,
+          disableHumanizer: cotDisplayOnce
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
         if (fallbackModelConfig) {
@@ -1096,6 +1100,12 @@ function createMessageRouteFlow(deps = {}) {
           isQqGroup: chatType === 'group',
           isDirectMainModelReply: true
         })) {
+          replyOptions.disableStream = true;
+        }
+        if (chatType === 'group') {
+          replyOptions.disableStream = true;
+        }
+        if (cotDisplayOnce) {
           replyOptions.disableStream = true;
         }
         finalReplyOptions = replyOptions;
@@ -1117,6 +1127,7 @@ function createMessageRouteFlow(deps = {}) {
           durationMs: Math.max(0, Date.now() - thinkingEmojiStartedAt)
         });
         reply = await askAIDispatch(cleanText, userInfo, senderId, null, imageUrl, replyOptions);
+        persistedReplyText = String(replyOptions?.persistedReplyText || reply || '').trim();
         if (replyOptions.streamCompleted && replyOptions.streamHadOutput) {
           usedStreamingSend = true;
           await streamingDispatcher.finish(reply);
@@ -1137,6 +1148,7 @@ function createMessageRouteFlow(deps = {}) {
 
     return buildReplyEnvelope({
       replyText: reply,
+      persistedReplyText: persistedReplyText || reply,
       allowStream: Boolean(routeExecutionPlan?.allowStream),
       atSender: true,
       routeContext: routeDecision,

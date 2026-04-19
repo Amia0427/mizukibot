@@ -52,12 +52,38 @@ module.exports = (async () => {
     text: '整体风格偏直接、收束、结果导向',
     payload: { fieldKey: 'persona_impression_support', type: 'fact' }
   });
+  await appendMemoryEvent({
+    type: 'memory_confirmed',
+    userId: 'u_persona',
+    scopeType: 'personal',
+    source: 'explicit',
+    sourceKind: 'explicit',
+    status: 'active',
+    memoryKind: 'bot_persona',
+    semanticSlot: 'bot_persona_tone',
+    text: 'bot_persona_tone: 直接、结论先行',
+    payload: { fieldKey: 'bot_persona_tone', type: 'fact' }
+  });
+  await appendMemoryEvent({
+    type: 'memory_confirmed',
+    userId: 'u_persona',
+    scopeType: 'personal',
+    source: 'explicit',
+    sourceKind: 'explicit',
+    status: 'active',
+    memoryKind: 'bot_persona',
+    semanticSlot: 'bot_persona_verbosity',
+    text: 'bot_persona_verbosity: terse',
+    payload: { fieldKey: 'bot_persona_verbosity', type: 'fact' }
+  });
 
   const result = materializeMemoryViews();
   const profile = result.profileProjection.users.u_persona;
   assert.ok(profile);
   assert.ok(String(profile.personaCore.summary || '').includes('直接'));
   assert.ok(String(profile.personaCore.impression || '').includes('结果导向'));
+  assert.ok(String(profile.personaCore.botBasePersona || '').includes('bot_persona_tone'));
+  assert.strictEqual(Number(profile.personaCore.personaVersion || 0), 2);
   console.log('memoryV3PersonaCore.test.js passed');
 })().catch((error) => {
   console.error(error);

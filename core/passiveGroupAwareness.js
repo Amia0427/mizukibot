@@ -56,6 +56,33 @@ function shouldSuppressPresenceAck({ groupPresence, now, replyType, addressee })
   return (Number(now || Date.now()) - lastPresenceAckAt) < dedupMs;
 }
 
+function isTrivialPresenceReply(replyText = '', addressee = '', replyType = '') {
+  const text = normalizeText(replyText);
+  if (!text) return false;
+  if (isPresenceAckReply(replyType, addressee)) return true;
+  return ['我在', '我在看', '还在，没坏'].includes(text);
+}
+
+function shouldSuppressTrivialPresenceReply({
+  groupPresence,
+  now,
+  replyText,
+  addressee,
+  replyType
+}) {
+  const text = normalizeText(replyText);
+  if (!isTrivialPresenceReply(text, addressee, replyType)) return false;
+  const dedupMs = Math.max(0, Number(config.PASSIVE_AWARENESS_PRESENCE_ACK_DEDUP_MS || 0) || 0);
+  if (!dedupMs) return false;
+  const lastAt = Math.max(
+    0,
+    Number(groupPresence?.last_trivial_presence_reply_at || 0) || 0
+  );
+  const lastText = normalizeText(groupPresence?.last_trivial_presence_reply_text || '');
+  if (!lastAt || !lastText) return false;
+  return lastText === text && (Number(now || Date.now()) - lastAt) < dedupMs;
+}
+
 function ensureChatCompletionsUrl(url) {
   const raw = String(url || '').replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(raw)) return raw;
@@ -527,6 +554,8 @@ function buildPresenceSnapshot({ groupPresence, sessionPresence }) {
       waitingSince: Number(groupPresence?.waiting_since || 0) || 0,
       lastBotReplyAt: Number(groupPresence?.last_bot_reply_at || 0) || 0,
       lastPresenceAckAt: Number(groupPresence?.last_presence_ack_at || 0) || 0,
+      lastTrivialPresenceReplyAt: Number(groupPresence?.last_trivial_presence_reply_at || 0) || 0,
+      lastTrivialPresenceReplyText: String(groupPresence?.last_trivial_presence_reply_text || '').trim(),
       humanTurnsSinceBotReply: Math.max(0, Number(groupPresence?.human_turns_since_bot_reply || 0) || 0),
       coolingUntil: Number(groupPresence?.cooling_until || 0) || 0,
       closedAt: Number(groupPresence?.closed_at || 0) || 0,
@@ -688,6 +717,7 @@ function applyPresenceDecision({
   action,
   nextState,
   addressee,
+  replyText = '',
   now,
   cfg
 }) {
@@ -717,6 +747,10 @@ function applyPresenceDecision({
       updated.last_bot_reply_at = now;
       if (isPresenceAckReply('', addressee)) {
         updated.last_presence_ack_at = now;
+      }
+      if (isTrivialPresenceReply(replyText, addressee, '')) {
+        updated.last_trivial_presence_reply_at = now;
+        updated.last_trivial_presence_reply_text = normalizeText(replyText);
       }
       updated.human_turns_since_bot_reply = 0;
       updated.waiting_since = Number(groupPresence?.waiting_since || 0) || now;
@@ -1071,6 +1105,9 @@ async function buildReplyPromptV2({
     groupId
   });
   const personaPrompt = renderPersonaMemoryPrompt(personaState, 'passive_group_reply');
+  const memoryContext = personaState?.evidence?.memoryContext && typeof personaState.evidence.memoryContext === 'object'
+    ? personaState.evidence.memoryContext
+    : {};
   const socialSnippet = buildPassiveAwarenessSocialSnippet({
     groupId,
     recentMessages,
@@ -1098,6 +1135,14 @@ async function buildReplyPromptV2({
   });
 
   const action = normalizePresenceAction(presenceAction, 'reply');
+  const retrievedMemoryText = normalizeText(memoryContext.promptRetrievedMemoryText || '', 1200);
+  const taskMemoryText = normalizeText(memoryContext.taskMemoryText || '', 700);
+  const groupMemoryText = normalizeText(memoryContext.groupMemoryText || '', 700);
+  const styleSignalText = normalizeText(memoryContext.styleSignalText || '', 500);
+  const longTermProfileText = normalizeText(memoryContext.promptLongTermProfileText || '', 900);
+  const dailyJournalText = normalizeText(memoryContext.dailyJournalText || '', 700);
+  const impressionText = normalizeText(memoryContext.impressionText || '', 320);
+  const summaryText = normalizeText(memoryContext.promptSummaryText || '', 320);
   return {
     prompt: [
     'You are generating a passive QQ group reply.',
@@ -1122,6 +1167,30 @@ async function buildReplyPromptV2({
     `presence_reason: ${normalizeText(presenceReason) || 'state-machine-allow'}`,
     getReplyTypeGuidance(replyType),
     '',
+    retrievedMemoryText ? '[RetrievedMemory]' : null,
+    retrievedMemoryText || null,
+    retrievedMemoryText ? '' : null,
+    longTermProfileText ? '[LongTermProfile]' : null,
+    longTermProfileText || null,
+    longTermProfileText ? '' : null,
+    styleSignalText ? '[StyleSignals]' : null,
+    styleSignalText || null,
+    styleSignalText ? '' : null,
+    taskMemoryText ? '[TaskMemory]' : null,
+    taskMemoryText || null,
+    taskMemoryText ? '' : null,
+    groupMemoryText ? '[GroupMemory]' : null,
+    groupMemoryText || null,
+    groupMemoryText ? '' : null,
+    dailyJournalText ? '[DailyJournal]' : null,
+    dailyJournalText || null,
+    dailyJournalText ? '' : null,
+    summaryText ? '[Summary]' : null,
+    summaryText || null,
+    summaryText ? '' : null,
+    impressionText ? '[Impression]' : null,
+    impressionText || null,
+    impressionText ? '' : null,
     '[LocalAnalysis]',
     formatLocalAnalysis({ addressee, replyType, analysis: localAnalysis, gate }),
     '',
@@ -1796,6 +1865,27 @@ async function handlePassiveGroupAwareness({
     };
   }
 
+  if (shouldSuppressTrivialPresenceReply({
+    groupPresence,
+    now,
+    replyText,
+    addressee,
+    replyType
+  })) {
+    return {
+      handled: false,
+      reason: 'trivial-presence-reply-dedup',
+      presenceState,
+      presenceAction,
+      presenceReason,
+      presence: presenceSnapshot,
+      ...gateResult,
+      decisionModelCalled,
+      decisionReason,
+      replyModelCalled
+    };
+  }
+
   const sent = await sendGroupReply({
     groupId,
     senderId,
@@ -1855,6 +1945,7 @@ async function handlePassiveGroupAwareness({
     action: presenceAction,
     nextState: presenceState,
     addressee,
+    replyText,
     now,
     cfg
   });
@@ -1893,7 +1984,211 @@ async function handlePassiveGroupAwareness({
   };
 }
 
+async function forcePassiveGroupInterjection({
+  msg,
+  inboundContext,
+  sendGroupReply,
+  reason = 'forced-interjection',
+  forceAtSender = null
+} = {}) {
+  const effectiveMsg = msg && typeof msg === 'object' ? msg : {};
+  const context = inboundContext && typeof inboundContext === 'object' ? inboundContext : {};
+  const groupId = String(effectiveMsg.group_id || context.groupId || '').trim();
+  const senderId = String(effectiveMsg.user_id || context.senderId || '').trim();
+  const senderName = getSenderName(effectiveMsg) || String(context.senderName || '').trim();
+  const rawText = String(context.rawText || effectiveMsg.raw_message || '').trim();
+  const directedContext = normalizeDirectedContext(
+    context.directedContext
+      || effectiveMsg.__directedContext
+      || null
+  );
+  const text = getEffectivePassiveText(context, rawText, directedContext);
+  const now = Number(effectiveMsg?.__continuousMessageMeta?.firstTimestamp || Date.now());
+  const sessionKey = getSessionKeyForPresence(groupId, senderId);
+
+  if (!groupId || !senderId) {
+    return { handled: false, reason: 'missing-group-or-sender' };
+  }
+  if (!text) {
+    appendGroupMessage(groupId, {
+      sender_id: senderId,
+      sender_name: senderName,
+      text: '',
+      timestamp: now
+    }, config.PASSIVE_AWARENESS_CONTEXT_SIZE);
+    return { handled: false, reason: 'empty-text' };
+  }
+
+  appendGroupMessage(groupId, {
+    sender_id: senderId,
+    sender_name: senderName,
+    text,
+    timestamp: now
+  }, config.PASSIVE_AWARENESS_CONTEXT_SIZE);
+
+  const recentMessages = getRecentMessages(groupId);
+  const conversationWindow = buildConversationWindow({ recentMessages, now });
+  const localAnalysis = analyzeConversationWindow({
+    window: conversationWindow,
+    senderId,
+    text
+  });
+  const addressee = detectPassiveAddressee({
+    text,
+    analysis: localAnalysis,
+    directedContext
+  });
+  const replyType = classifyPassiveReplyType({
+    text,
+    addressee,
+    analysis: localAnalysis
+  });
+  const initialGroupPresence = getGroupPresence(groupId);
+  const initialSessionPresence = getShortTermPresence(sessionKey, shortTermMemory, {});
+  const cfg = getPresenceConfig();
+  const presenceSnapshot = buildPresenceSnapshot({
+    groupPresence: initialGroupPresence,
+    sessionPresence: initialSessionPresence
+  });
+
+  if (!canCallReplyModel()) {
+    return {
+      handled: false,
+      reason: 'missing-reply-model-config',
+      addressee,
+      replyType,
+      localAnalysis
+    };
+  }
+
+  let replyText = '';
+  let passivePersonaMemoryState = null;
+  try {
+    const replyResult = await invokeReplyModel({
+      groupId,
+      senderId,
+      senderName,
+      recentMessages,
+      text,
+      rawText,
+      imageUrl: String(context.imageUrl || '').trim() || null,
+      score: Math.max(
+        Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60),
+        scoreMessageTrigger(text, recentMessages)
+      ),
+      decisionReason: reason,
+      localAnalysis,
+      addressee,
+      replyType,
+      gate: {
+        shouldSkip: false,
+        reason,
+        rhythm: String(localAnalysis?.rhythm || 'normal'),
+        presenceSnapshot
+      },
+      presenceAction: 'reply',
+      presenceState: 'interjecting',
+      presenceReason: reason,
+      directedContext,
+      now
+    });
+    replyText = trimReplyText(replyResult?.replyText || '', 80);
+    passivePersonaMemoryState = replyResult?.personaMemoryState || null;
+  } catch (error) {
+    return {
+      handled: false,
+      reason: `reply-model-call-failed:${error?.message || error}`,
+      addressee,
+      replyType,
+      localAnalysis
+    };
+  }
+
+  if (!replyText) {
+    return {
+      handled: false,
+      reason: 'empty-reply-text',
+      addressee,
+      replyType,
+      localAnalysis
+    };
+  }
+
+  const sent = await sendGroupReply({
+    groupId,
+    senderId,
+    replyText,
+    atSender: typeof forceAtSender === 'boolean'
+      ? forceAtSender
+      : Boolean(config.PASSIVE_AWARENESS_AT_SENDER),
+    retries: 1,
+    waitMs: 300
+  });
+
+  if (!sent) {
+    return {
+      handled: false,
+      reason: 'send-failed',
+      addressee,
+      replyType,
+      localAnalysis
+    };
+  }
+
+  const botSenderId = String(config.BOT_QQ || 'bot').trim() || 'bot';
+  appendGroupMessage(groupId, {
+    sender_id: botSenderId,
+    sender_name: '瑞希',
+    text: replyText,
+    timestamp: Date.now()
+  }, config.PASSIVE_AWARENESS_CONTEXT_SIZE);
+  recordReply(groupId, now);
+  const applied = applyPresenceDecision({
+    groupId,
+    sessionKey,
+    groupPresence: initialGroupPresence,
+    sessionPresence: initialSessionPresence,
+    action: 'reply',
+    nextState: 'interjecting',
+    addressee,
+    replyText,
+    now,
+    cfg
+  });
+  await recordPersonaMemoryOutcome('passive_group_reply', {
+    state: passivePersonaMemoryState,
+    userId: String(senderId || '').trim(),
+    sessionKey,
+    groupId,
+    request: {
+      userId: String(senderId || '').trim(),
+      question: text || '',
+      routeMeta: { groupId, directedContext },
+      routePolicyKey: 'passive-awareness/reply',
+      topRouteType: 'chat'
+    },
+    activeTopic: text,
+    recentReplyFrame: replyText,
+    recentMessages: [
+      { role: 'user', content: text },
+      { role: 'assistant', content: replyText }
+    ]
+  }).catch(() => {});
+
+  return {
+    handled: true,
+    reason,
+    replyText,
+    addressee,
+    replyType,
+    localAnalysis,
+    presenceState: applied.groupPresence.state,
+    presenceAction: 'reply'
+  };
+}
+
 module.exports = {
+  forcePassiveGroupInterjection,
   handlePassiveGroupAwareness,
   isEnabledForGroup,
   scoreMessageTrigger,
@@ -1907,6 +2202,7 @@ module.exports = {
   classifyPassiveReplyType,
   shouldGatePassiveReply,
   shouldSuppressPresenceAck,
+  shouldSuppressTrivialPresenceReply,
   cheapRuleGate,
   isNoiseText,
   trimReplyText

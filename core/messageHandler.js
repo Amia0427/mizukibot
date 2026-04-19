@@ -39,6 +39,7 @@ const { isAtBot, detectIntentHybrid } = require('./router');
 const routeExecution = require('./routeExecution');
 const { createMessageEventDeduper } = require('./messageDeduper');
 const { createInboundConcurrencyController } = require('./inboundConcurrency');
+const { createForegroundConcurrencyController } = require('./foregroundConcurrency');
 const { isPrivateChatTestUser, isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
 const { handlePassiveGroupAwareness } = require('./passiveGroupAwareness');
 const {
@@ -85,6 +86,7 @@ const {
 const { createMessageTaskControlCoordinator } = require('./messageTaskControl');
 const {
   appendInboundTimingLog,
+  createInboundTimingLogger,
   createMessageTelemetryCoordinator,
   createReplyTelemetryBridge,
   getRawMessageTimestampMs
@@ -93,6 +95,7 @@ const {
   buildDirectedConversationSummary,
   createMessageVisualContext,
   buildVisualImageCollection,
+  buildVisualImageCollectionDetails,
   resolveVisualInputFromContinuousMeta,
   resolveVisualInputFromContinuousMetaCore
 } = require('./messageVisualContext');
@@ -129,6 +132,11 @@ const {
   sendPrivatePoke,
   setMessageEmojiLike
 } = require('../api/qqActionService');
+const {
+  armCotOnce,
+  consumeCotOnce,
+  getCotOnceTtlMs
+} = require('../utils/cotOnceRuntime');
 const {
   detectQzonePostDraftMode,
   generateBotDiaryDraft,
@@ -1007,6 +1015,7 @@ function createMessageHandler({
   inboundConcurrencyControllerOverride = null
 }) {
   const inboundTimingLogFile = path.join(config.DATA_DIR, 'inbound_timing.jsonl');
+  const logInboundTiming = createInboundTimingLogger(inboundTimingLogFile, config.ENABLE_DEBUG_LOG);
   const inboundDeduper = createMessageEventDeduper({
     ttlMs: 90 * 1000,
     maxEntries: 4096
@@ -1030,7 +1039,8 @@ function createMessageHandler({
     : generateSessionContextSummary;
   const replyRuntime = createMessageReplyRuntime({
     sendWithRetry,
-    runtimeConfig: config
+    runtimeConfig: config,
+    inboundTimingLogger: logInboundTiming
   });
   const buildReplyTelemetry = createReplyTelemetryBridge(config);
   const telemetryCoordinator = createMessageTelemetryCoordinator({
@@ -1107,6 +1117,11 @@ function createMessageHandler({
     generalLimit: config.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY,
     adminLimit: config.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY,
     perUserLimit: config.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT
+  });
+  const foregroundConcurrency = createForegroundConcurrencyController({
+    globalLimit: config.FOREGROUND_GLOBAL_MAX_CONCURRENCY,
+    adminReservedSlots: config.FOREGROUND_ADMIN_RESERVED_SLOTS,
+    perUserLimit: config.FOREGROUND_PER_USER_MAX_INFLIGHT
   });
   // source-compat anchors for historical in-file normalizeUserFacingReply logic:
   // if (config.HUMANIZER_AGENT_ENABLED || config.LLM_HUMANIZER_ENABLED) return t;
@@ -1914,10 +1929,9 @@ function createMessageHandler({
     const rawText = effectiveMsg.raw_message || '';
     const isPrivateInbound = isPrivateChatType(chatType);
     const concurrencyScope = isPrivateInbound ? 'private' : 'default';
-    const concurrencyLane = isPrivateInbound
-      ? (isAdminUser(senderId) ? 'admin' : 'general')
-      : (isAdminUser(senderId) ? 'admin' : 'general');
+    const concurrencyLane = isAdminUser(senderId) ? 'admin' : 'general';
     const selectedInboundConcurrency = isPrivateInbound ? privateInboundConcurrency : inboundConcurrency;
+    const inboundPool = isPrivateInbound ? 'private' : 'default';
     const queueWaitStartedAt = Date.now();
     const inboundLock = await selectedInboundConcurrency.acquire({
       userId: senderId,
@@ -1928,6 +1942,7 @@ function createMessageHandler({
       concurrencyScope,
       privilegedPrivateChat
     });
+    const inboundSnapshot = selectedInboundConcurrency.getSnapshot();
     appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
       stage: 'inbound_lock_acquired',
       messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
@@ -1938,6 +1953,19 @@ function createMessageHandler({
       concurrencyScope,
       privilegedPrivateChat,
       queueWaitMs: Math.max(0, Date.now() - queueWaitStartedAt),
+      inbound_wait_ms: Number(inboundLock?.waitMs || 0) || 0,
+      inbound_lane: String(inboundLock?.lane || concurrencyLane).trim() || concurrencyLane,
+      inbound_pool: inboundPool,
+      inbound_request_id: String(inboundLock?.requestId || '').trim(),
+      inbound_active_total: Number(inboundSnapshot?.totalActive || 0) || 0,
+      inbound_active_general: Number(inboundSnapshot?.activeGeneral || 0) || 0,
+      inbound_active_admin: Number(inboundSnapshot?.activeAdmin || 0) || 0,
+      foreground_wait_ms: Number(inboundLock?.waitMs || 0) || 0,
+      foreground_lane: String(inboundLock?.lane || concurrencyLane).trim() || concurrencyLane,
+      foreground_request_id: String(inboundLock?.requestId || '').trim(),
+      foreground_active_total: Number(inboundSnapshot?.totalActive || 0) || 0,
+      foreground_active_general: Number(inboundSnapshot?.activeGeneral || 0) || 0,
+      foreground_active_admin: Number(inboundSnapshot?.activeAdmin || 0) || 0,
       rawMessageTimestampMs,
       lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
     });
@@ -2156,6 +2184,28 @@ function createMessageHandler({
       return;
     }
 
+    if (/^\s*\/cot(?:\s|$)/i.test(String(slashCommandText || '').trim())) {
+      const armed = armCotOnce({
+        chatType,
+        groupId: isPrivateChatType(chatType) ? '' : groupId,
+        userId: senderId
+      });
+      const ttlSeconds = Math.max(1, Math.ceil(getCotOnceTtlMs() / 1000));
+      await sendGroupReply({
+        chatType,
+        groupId,
+        userId: senderId,
+        senderId,
+        replyText: armed
+          ? `已开启一次性思维链显示。请在 ${ttlSeconds} 秒内发送下一条正常对话消息；仅该次回复生效。`
+          : '当前无法开启一次性思维链显示，请稍后再试。',
+        atSender: true,
+        retries: 1,
+        waitMs: 300
+      });
+      return;
+    }
+
     if (!effectiveBotQQ) {
       console.warn('[message] skip because bot qq is unresolved');
       return;
@@ -2190,12 +2240,13 @@ function createMessageHandler({
       historySummary: buildSubagentContextSummary(senderId, groupId, { maxLength: 180 })
     });
     const effectiveVisualInput = resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText);
-    const visualImageCollection = buildVisualImageCollection(
+    const visualImageCollectionResult = buildVisualImageCollectionDetails(
       continuousMeta,
       directedContext,
       effectiveCleanText,
       { maxImages: config.VISION_CAPTION_WORKER_MAX_IMAGES }
     );
+    const visualImageCollection = visualImageCollectionResult.images;
     const directedScene = String(directedContext?.scene || '').trim();
     const replyToBotRequested = directedScene === 'reply_to_bot';
     const replyToBotRecentWindowMs = Math.max(
@@ -2237,6 +2288,9 @@ function createMessageHandler({
             url: item.url,
             label: item.label
           })),
+          selectionMeta: {
+            ...(visualImageCollectionResult.meta || {})
+          },
           captionJson: null,
           summary: '',
           recommendedPromptContext: '',
@@ -2248,6 +2302,28 @@ function createMessageHandler({
       : null;
 
     if (visualImageCollection.length > 0) {
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'vision_input_selected',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        imageCount: visualImageCollection.length,
+        currentImageCount: Number(visualImageCollectionResult.meta?.currentImageCount || 0) || 0,
+        replyImageCount: Number(visualImageCollectionResult.meta?.replyImageCount || 0) || 0,
+        forwardImageCount: Number(visualImageCollectionResult.meta?.forwardImageCount || 0) || 0,
+        directedScene: String(visualImageCollectionResult.meta?.directedScene || '').trim(),
+        quotePriorityMode: String(visualImageCollectionResult.meta?.quotePriorityMode || '').trim(),
+        forcedReplyPriority: visualImageCollectionResult.meta?.forcedReplyPriority === true,
+        replyPriorityReason: String(visualImageCollectionResult.meta?.replyPriorityReason || '').trim(),
+        selectedPrimarySource: String(visualImageCollectionResult.meta?.selectedPrimarySource || '').trim(),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+      });
+    }
+
+    if (visualImageCollection.length > 0) {
       const visionStartedAt = Date.now();
       const captionResult = await runVisionCaptionWorker({
         originalUserText: effectiveIntentText,
@@ -2257,6 +2333,9 @@ function createMessageHandler({
       });
       if (captionResult.ok && captionResult.visualContext) {
         visualContext = captionResult.visualContext;
+        visualContext.selectionMeta = {
+          ...(visualImageCollectionResult.meta || {})
+        };
         runtimeQuestionText = normalizeVisualSummaryText(visualContext.runtimeQuestionText) || effectiveIntentText;
         persistUserText = normalizeVisualSummaryText(visualContext.persistUserText) || effectiveIntentText;
         originalUserText = normalizeVisualSummaryText(visualContext.originalUserText) || effectiveIntentText;
@@ -2322,6 +2401,25 @@ function createMessageHandler({
       visualContext
     });
     inboundContext.onEvent = (event = {}) => {
+      const normalizedEvent = event && typeof event === 'object' ? event : {};
+      if (String(normalizedEvent.type || '').trim() === 'direct_reply_failure') {
+        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+          stage: 'direct_reply_failure',
+          messageId: String(effectiveMsg?.message_id || msg?.message_id || '').trim(),
+          groupId: isPrivateChatType(chatType) ? '' : String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          routePolicyKey: String(normalizedEvent.routePolicyKey || '').trim(),
+          topRouteType: String(normalizedEvent.topRouteType || '').trim(),
+          failureType: String(normalizedEvent.failureType || '').trim(),
+          fallbackSource: String(normalizedEvent.fallbackSource || '').trim(),
+          failureStage: String(normalizedEvent.stage || '').trim(),
+          rawErrorMessage: String(normalizedEvent.rawErrorMessage || '').trim(),
+          rawMessageTimestampMs,
+          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+        });
+      }
       const telemetry = buildReplyTelemetry({
         senderId,
         groupId: isPrivateChatType(chatType) ? '' : groupId,
@@ -2372,6 +2470,12 @@ function createMessageHandler({
       return;
     }
 
+    const cotArmedState = consumeCotOnce({
+      chatType,
+      groupId: isPrivateChatType(chatType) ? '' : groupId,
+      userId: senderId
+    });
+
     console.log('[message] accepted inbound', {
       messageId: effectiveMsg.message_id,
       groupId,
@@ -2384,7 +2488,8 @@ function createMessageHandler({
       acceptedBy: isPrivateChatType(chatType)
         ? 'private_direct'
         : (mentioned ? 'at_bot' : 'reply_to_bot_recent'),
-      reply_to_bot_last_reply_at: lastBotReplyAt || 0
+      reply_to_bot_last_reply_at: lastBotReplyAt || 0,
+      cotDisplayOnce: Boolean(cotArmedState)
     });
 
     const cleanMentionText = String(rawText || '')
@@ -2464,7 +2569,9 @@ function createMessageHandler({
       directedContext,
       directedContextSummary: routerContextSummary,
       effectiveIntentText: runtimeQuestionText,
-      quotePriority: directedContext?.quotePriority || null
+      quotePriority: directedContext?.quotePriority || null,
+      cotDisplayOnce: Boolean(cotArmedState),
+      cotArmedAt: Number(cotArmedState?.armedAt || 0) || 0
     };
     if (visualContext) {
       route.meta.visualContext = visualContext;
@@ -2700,6 +2807,7 @@ function createMessageHandler({
       sourceMessageId: String(effectiveMsg.message_id || '').trim()
     });
     let reply = String(replyEnvelope?.replyText || '').trim();
+    const persistedReplyText = String(replyEnvelope?.persistedReplyText || replyEnvelope?.replyText || '').trim();
     const usedStreamingSend = Boolean(replyEnvelope?.sendStrategy === 'stream' || replyEnvelope?.usedStreamingSend);
     const replyOptions = replyEnvelope?.replyOptions || null;
     if (!usedStreamingSend) {
@@ -2743,7 +2851,7 @@ function createMessageHandler({
           chatType,
           groupId: isPrivateChatType(chatType) ? '' : groupId,
           senderId,
-          replyText: reply
+          replyText: persistedReplyText || reply
         });
         if (!isPrivateChatType(chatType)) {
           await sideEffects.runDirectReplyFollowup({
@@ -2753,7 +2861,7 @@ function createMessageHandler({
             routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
             topRouteType: routeExecutionPlan.topRouteType,
             userText: persistUserText || cleanText,
-            replyText: reply,
+            replyText: persistedReplyText || reply,
             rawMessage: rawText,
             routeMeta: route.meta || {},
             replyToMessageId: String(effectiveMsg.message_id || '').trim()
@@ -2770,7 +2878,7 @@ function createMessageHandler({
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           topRouteType: routeExecutionPlan.topRouteType,
           userText: persistUserText || cleanText,
-          replyText: replyOptions?.streamCompleted ? reply : '',
+          replyText: replyOptions?.streamCompleted ? (persistedReplyText || reply) : '',
           rawMessage: rawText,
           routeMeta: route.meta || {},
           replyToMessageId: String(effectiveMsg.message_id || '').trim()

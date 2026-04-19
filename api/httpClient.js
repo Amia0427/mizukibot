@@ -1,6 +1,7 @@
 const axios = require('axios');
 const config = require('../config');
 const { getApiProvider, ensureAnthropicMessagesUrl } = require('../utils/modelProvider');
+const { parseCacheRef, readCachedImagePayload } = require('../utils/imageInputCache');
 const { HUMANIZER_SYSTEM_PROMPT } = require('../utils/humanizer');
 const {
   startModelCall,
@@ -480,6 +481,16 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
 
   const imageUrl = String(normalizedPart?.image_url?.url || normalizedPart?.url || '').trim();
   if (!imageUrl) return null;
+  const cachedImage = parseCacheRef(imageUrl) ? readCachedImagePayload(imageUrl) : null;
+  if (cachedImage?.data) {
+    return {
+      type: 'image_url',
+      image_url: {
+        url: `data:${cachedImage.mediaType || 'image/jpeg'};base64,${cachedImage.data}`,
+        ...(imageDetail ? { detail: imageDetail } : {})
+      }
+    };
+  }
 
   try {
     const resp = await axios.get(imageUrl, {
@@ -535,6 +546,17 @@ async function resolveAnthropicImageBlock(part = {}) {
 
   const imageUrl = String(part?.image_url?.url || part?.url || '').trim();
   if (!imageUrl) return null;
+  const cachedImage = parseCacheRef(imageUrl) ? readCachedImagePayload(imageUrl) : null;
+  if (cachedImage?.data) {
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: cachedImage.mediaType || 'image/jpeg',
+        data: cachedImage.data
+      }
+    };
+  }
 
   try {
     const resp = await axios.get(imageUrl, {

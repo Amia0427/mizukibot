@@ -3,6 +3,7 @@ const {
   getMessageByIdCached,
   getForwardMessagesByIdCached
 } = require('../api/napcatMessageReader');
+const { ensureCachedImageRef } = require('../utils/imageInputCache');
 
 const URL_KEY_HINTS = new Set(['jumpurl', 'qqdocurl', 'url', 'musicurl']);
 const KNOWN_CARD_PLATFORM_LABELS = Object.freeze({
@@ -454,8 +455,25 @@ function cloneReplyContext(replyContext = null) {
   if (!replyContext || typeof replyContext !== 'object') return null;
   return {
     ...replyContext,
-    imageUrls: Array.isArray(replyContext.imageUrls) ? replyContext.imageUrls.slice() : []
+    imageUrls: Array.isArray(replyContext.imageUrls) ? replyContext.imageUrls.slice() : [],
+    imageRefMap: replyContext.imageRefMap && typeof replyContext.imageRefMap === 'object'
+      ? { ...replyContext.imageRefMap }
+      : {}
   };
+}
+
+async function buildImageRefMap(urls = [], options = {}) {
+  const out = {};
+  for (const url of uniqueStrings(Array.isArray(urls) ? urls : [])) {
+    const cached = await ensureCachedImageRef(url, {
+      timeoutMs: options.imageCacheTimeoutMs,
+      maxBytes: options.imageCacheMaxBytes
+    });
+    if (cached.ok && cached.ref) {
+      out[url] = cached.ref;
+    }
+  }
+  return out;
 }
 
 function buildReplyContextPromptLines(replyContext = null) {
@@ -535,6 +553,10 @@ function normalizeMessageForDownstream(baseMsg = {}, merged = {}, effectiveBotQQ
   const selectedImageUrl = Array.isArray(merged.imageUrls) && merged.imageUrls.length
     ? merged.imageUrls[merged.imageUrls.length - 1]
     : null;
+  const imageRefMap = merged.imageRefMap && typeof merged.imageRefMap === 'object'
+    ? { ...merged.imageRefMap }
+    : {};
+  const selectedImageRef = normalizeText(imageRefMap[selectedImageUrl] || '');
   const rawParts = [];
   if (atPrefix) rawParts.push(atPrefix.trimEnd());
   rawParts.push(...buildReplyContextPromptLines(merged.replyContext));
@@ -560,13 +582,18 @@ function normalizeMessageForDownstream(baseMsg = {}, merged = {}, effectiveBotQQ
       sourceMessageIds: merged.sourceMessageIds,
       mentionedBot: Boolean(merged.mentionedBot),
       imageUrls: merged.imageUrls,
+      imageRefMap,
       selectedImageUrl,
+      selectedImageRef,
       flushReason: merged.flushReason,
       replyMessageId: normalizeText(merged.replyMessageId),
       replyContext: cloneReplyContext(merged.replyContext),
       forwardIds: Array.isArray(merged.forwardIds) ? merged.forwardIds.slice() : [],
       forwardSummaryText: normalizeText(merged.forwardSummaryText || ''),
       forwardImageUrls: Array.isArray(merged.forwardImageUrls) ? merged.forwardImageUrls.slice() : [],
+      forwardImageRefMap: merged.forwardImageRefMap && typeof merged.forwardImageRefMap === 'object'
+        ? { ...merged.forwardImageRefMap }
+        : {},
       qqCardUrls: Array.isArray(merged.qqCardUrls) ? merged.qqCardUrls.slice() : [],
       expansionState: {
         reply: merged.replyContext ? 'resolved' : (merged.replyMessageId ? 'pending' : 'skipped'),
@@ -590,11 +617,14 @@ function buildMergedMessagePayload(entries = [], options = {}) {
   const qqCardUrls = [];
   const forwardSummaryTexts = [];
   const forwardImageUrls = [];
+  const imageRefMap = {};
+  const forwardImageRefMap = {};
 
   for (const entry of entries) {
     if (!entry) continue;
     if (entry.text) texts.push(entry.text);
     if (Array.isArray(entry.imageUrls)) imageUrls.push(...entry.imageUrls.filter(Boolean));
+    if (entry.imageRefMap && typeof entry.imageRefMap === 'object') Object.assign(imageRefMap, entry.imageRefMap);
     if (entry.messageId) sourceMessageIds.push(String(entry.messageId));
     if (entry.mentionedBot) mentionedBot = true;
     if (!replyMessageId && entry.replyMessageId) replyMessageId = String(entry.replyMessageId);
@@ -605,6 +635,7 @@ function buildMergedMessagePayload(entries = [], options = {}) {
     if (Array.isArray(entry.qqCardUrls)) qqCardUrls.push(...entry.qqCardUrls.filter(Boolean));
     if (entry.forwardSummaryText) forwardSummaryTexts.push(String(entry.forwardSummaryText));
     if (Array.isArray(entry.forwardImageUrls)) forwardImageUrls.push(...entry.forwardImageUrls.filter(Boolean));
+    if (entry.forwardImageRefMap && typeof entry.forwardImageRefMap === 'object') Object.assign(forwardImageRefMap, entry.forwardImageRefMap);
     const currentTs = Number(entry.timestamp || 0) || Date.now();
     if (!firstTimestamp || currentTs < firstTimestamp) firstTimestamp = currentTs;
     if (!lastTimestamp || currentTs > lastTimestamp) lastTimestamp = currentTs;
@@ -641,6 +672,8 @@ function buildMergedMessagePayload(entries = [], options = {}) {
     forwardIds: Array.from(new Set(forwardIds)),
     forwardSummaryText: forwardSummaryTexts.filter(Boolean).join('\n').trim(),
     forwardImageUrls: Array.from(new Set(forwardImageUrls)),
+    imageRefMap,
+    forwardImageRefMap,
     qqCardUrls: Array.from(new Set(qqCardUrls))
   };
 }
@@ -675,7 +708,10 @@ async function enrichEntryFromReply(entry, options = {}) {
       origin: 'reply_quote',
       hasImage: Array.isArray(originalParsed.imageUrls) && originalParsed.imageUrls.length > 0,
       text: fullText,
-      imageUrls: Array.isArray(originalParsed.imageUrls) ? originalParsed.imageUrls.slice() : []
+      imageUrls: Array.isArray(originalParsed.imageUrls) ? originalParsed.imageUrls.slice() : [],
+      imageRefMap: Array.isArray(originalParsed.imageUrls)
+        ? await buildImageRefMap(originalParsed.imageUrls, options)
+        : {}
     };
     console.log('[continuous-message] reply expand success', {
       replyMessageId,
@@ -729,6 +765,7 @@ async function enrichEntryFromForward(entry, options = {}) {
     entry.text = [entry.forwardSummaryText, entry.text].filter(Boolean).join('\n').trim();
   }
   entry.forwardImageUrls = uniqueStrings(forwardImageUrls);
+  entry.forwardImageRefMap = await buildImageRefMap(entry.forwardImageUrls, options);
   return entry;
 }
 
@@ -754,11 +791,13 @@ function cheapParseMessageEntry(msg = {}, options = {}) {
       ...extracted.imageUrls,
       ...parseRawImageUrls(rawText)
     ],
+    imageRefMap: {},
     replyMessageId: extracted.replyMessageId || parseRawReplyId(rawText),
     replyContext: null,
     forwardIds: extracted.forwardIds.length ? extracted.forwardIds : parseRawForwardIds(rawText),
     forwardSummaryText: '',
     forwardImageUrls: [],
+    forwardImageRefMap: {},
     mentionedBot: Boolean(options.effectiveBotQQ) && String(rawText).includes(`[CQ:at,qq=${options.effectiveBotQQ}]`),
     qqCardUrls: qqCardLinksEnabled
       ? uniqueStrings([
@@ -804,6 +843,13 @@ async function resolveContinuousEntryDetails(entry = {}, options = {}) {
   if (options.resolveCards !== false && qqCardLinksEnabled) {
     entry.text = appendCardUrlsToText(entry.text, entry.qqCardUrls || [], { qqCardLinksEnabled });
     entry.expansionState.card = Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length ? 'resolved' : 'skipped';
+  }
+  entry.imageRefMap = await buildImageRefMap(entry.imageUrls, options);
+  if (entry.replyContext && typeof entry.replyContext === 'object' && (!entry.replyContext.imageRefMap || Object.keys(entry.replyContext.imageRefMap).length === 0)) {
+    entry.replyContext.imageRefMap = await buildImageRefMap(entry.replyContext.imageUrls, options);
+  }
+  if (Array.isArray(entry.forwardImageUrls) && (!entry.forwardImageRefMap || Object.keys(entry.forwardImageRefMap).length === 0)) {
+    entry.forwardImageRefMap = await buildImageRefMap(entry.forwardImageUrls, options);
   }
   return entry;
 }
@@ -960,11 +1006,16 @@ function createContinuousMessagePreprocessor(options = {}) {
           sourceMessageIds: entry.messageId ? [entry.messageId] : [],
           mentionedBot: entry.mentionedBot,
           imageUrls: entry.imageUrls,
+          imageRefMap: entry.imageRefMap,
           selectedImageUrl: entry.imageUrls.length ? entry.imageUrls[entry.imageUrls.length - 1] : null,
+          selectedImageRef: normalizeText((entry.imageRefMap || {})[entry.imageUrls.length ? entry.imageUrls[entry.imageUrls.length - 1] : ''] || ''),
           flushReason: 'command_bypass',
           replyMessageId: entry.replyMessageId || '',
           replyContext: cloneReplyContext(entry.replyContext),
           forwardIds: Array.isArray(entry.forwardIds) ? entry.forwardIds.slice() : [],
+          forwardImageRefMap: entry.forwardImageRefMap && typeof entry.forwardImageRefMap === 'object'
+            ? { ...entry.forwardImageRefMap }
+            : {},
           qqCardUrls: Array.isArray(entry.qqCardUrls) ? entry.qqCardUrls.slice() : [],
           expansionState: { ...(entry.expansionState || {}) }
         }
@@ -994,11 +1045,14 @@ function createContinuousMessagePreprocessor(options = {}) {
           sourceMessageIds: session.entries.map((item) => item.messageId).filter(Boolean),
           mentionedBot: session.entries.some((item) => item.mentionedBot),
           imageUrls: session.entries.flatMap((item) => item.imageUrls || []),
+          imageRefMap: {},
           selectedImageUrl: null,
+          selectedImageRef: '',
           flushReason: 'deferred',
           replyMessageId: session.entries.find((item) => item.replyMessageId)?.replyMessageId || '',
           replyContext: null,
           forwardIds: Array.from(new Set(session.entries.flatMap((item) => item.forwardIds || []).filter(Boolean))),
+          forwardImageRefMap: {},
           qqCardUrls: Array.from(new Set(session.entries.flatMap((item) => item.qqCardUrls || []).filter(Boolean))),
           expansionState: {
             reply: session.entries.some((item) => item.replyMessageId) ? 'pending' : 'skipped',

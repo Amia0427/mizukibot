@@ -55,15 +55,41 @@ function finalizeStreamingReplyText(rawReply, fallbackText) {
   return text || String(fallbackText || '').trim();
 }
 
+function buildReplyTextVariants(rawReply, fallbackText, options = {}) {
+  const normalizedRaw = normalizeTextContent(rawReply);
+  const visibleText = sanitizeUserFacingText(normalizedRaw, {
+    preserveThink: options.preserveThink === true
+  }).trim() || String(fallbackText || '').trim();
+  const persistedText = sanitizeUserFacingText(normalizedRaw).trim() || String(fallbackText || '').trim();
+  return {
+    visibleText,
+    persistedText
+  };
+}
+
 async function finalizeReplyText(rawReply, fallbackText, options = {}) {
-  const base = finalizeStreamingReplyText(rawReply, fallbackText);
-  if (!base) return '';
-  if (isReplyFailure(base, { emptyIsFailure: true })) return base;
-  if (typeof options.shouldBypassHumanizerForPolicy === 'function' && options.shouldBypassHumanizerForPolicy(options?.routePolicyKey)) {
-    return base;
+  const variants = buildReplyTextVariants(rawReply, fallbackText, options);
+  const base = variants.persistedText;
+  if (!base) return { visibleText: '', persistedText: '' };
+  if (isReplyFailure(base, { emptyIsFailure: true })) {
+    return {
+      visibleText: options.preserveThink === true ? variants.visibleText : base,
+      persistedText: base
+    };
   }
-  if (options.disableHumanizer) return base;
-  return runHumanizerAgent(base, {
+  if (typeof options.shouldBypassHumanizerForPolicy === 'function' && options.shouldBypassHumanizerForPolicy(options?.routePolicyKey)) {
+    return {
+      visibleText: options.preserveThink === true ? variants.visibleText : base,
+      persistedText: base
+    };
+  }
+  if (options.disableHumanizer) {
+    return {
+      visibleText: options.preserveThink === true ? variants.visibleText : base,
+      persistedText: base
+    };
+  }
+  const humanized = await runHumanizerAgent(base, {
     question: options.question,
     dynamicPrompt: options.dynamicPrompt,
     model: getModelName(options.modelConfig),
@@ -71,6 +97,11 @@ async function finalizeReplyText(rawReply, fallbackText, options = {}) {
     apiKey: getApiKey(options.modelConfig),
     retries: getRetries(1, options.modelConfig)
   });
+  const persistedText = String(humanized || '').trim() || base;
+  return {
+    visibleText: options.preserveThink === true ? variants.visibleText : persistedText,
+    persistedText
+  };
 }
 
 async function requestAssistantMessage(messagesToSend, context = {}) {
@@ -149,7 +180,7 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
     disableTools: true,
     allowedTools: []
   });
-  return finalizeReplyText(
+  const reply = await finalizeReplyText(
     responseMessage?.content,
     'The model response format was malformed. Please try again.',
     {
@@ -157,6 +188,7 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
       disableHumanizer: true
     }
   );
+  return reply;
 }
 
 async function requestStreamingReply(messagesToSend, options = {}, modelConfig = null) {
@@ -184,9 +216,13 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
               parserState.buffer = parsed.state.buffer;
               for (const event of parsed.events) {
                 if (!event || event.done || !event.delta) continue;
-                const previousVisible = sanitizeUserFacingText(collected);
+                const previousVisible = sanitizeUserFacingText(collected, {
+                  preserveThink: options.preserveThink === true
+                });
                 collected += event.delta;
-                const visibleCollected = sanitizeUserFacingText(collected);
+                const visibleCollected = sanitizeUserFacingText(collected, {
+                  preserveThink: options.preserveThink === true
+                });
                 const visibleDelta = extractUserFacingDelta(previousVisible, visibleCollected);
                 if (visibleCollected !== previousVisible) {
                   options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
@@ -232,7 +268,9 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
       }
     }, modelConfig, userId, { routeMeta: options?.routeMeta });
   } catch (error) {
-    const visiblePartial = sanitizeUserFacingText(collected).trim();
+    const visiblePartial = sanitizeUserFacingText(collected, {
+      preserveThink: options.preserveThink === true
+    }).trim();
     if (visiblePartial) {
       error.partialText = visiblePartial;
       error.streamHadOutput = true;
@@ -243,9 +281,13 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
   const tailEvents = flushSSEState(parserState);
   for (const event of tailEvents) {
     if (!event || event.done || !event.delta) continue;
-    const previousVisible = sanitizeUserFacingText(collected);
+    const previousVisible = sanitizeUserFacingText(collected, {
+      preserveThink: options.preserveThink === true
+    });
     collected += event.delta;
-    const visibleCollected = sanitizeUserFacingText(collected);
+    const visibleCollected = sanitizeUserFacingText(collected, {
+      preserveThink: options.preserveThink === true
+    });
     const visibleDelta = extractUserFacingDelta(previousVisible, visibleCollected);
     if (visibleCollected !== previousVisible) {
       options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
@@ -255,7 +297,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
     }
   }
 
-  return sanitizeUserFacingText(collected);
+  return buildReplyTextVariants(collected, '', options);
 }
 
 function finalizeStreamingReplyWithHumanizer(rawReply, fallbackText, options = {}) {
@@ -292,6 +334,7 @@ function shouldUseStreamingReply(question = '', customPrompt = null, imageUrl = 
 }
 
 module.exports = {
+  buildReplyTextVariants,
   finalizeReplyText,
   finalizeStreamingReplyText,
   finalizeStreamingReplyWithHumanizer,

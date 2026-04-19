@@ -60,11 +60,24 @@ function prefersCurrentImage(cleanText = '') {
   return /(我发的这张|我这张|看我这张|我贴这张|我这图|这张图|这张图片)/i.test(text);
 }
 
+function resolveImageValue(url = '', refMap = {}) {
+  const normalizedUrl = String(url || '').trim();
+  if (!normalizedUrl) return '';
+  const mapped = refMap && typeof refMap === 'object'
+    ? String(refMap[normalizedUrl] || '').trim()
+    : '';
+  return mapped || normalizedUrl;
+}
+
 function resolveVisualInputFromContinuousMetaCore(continuousMeta = null, directedContext = null, cleanText = '') {
   const meta = continuousMeta && typeof continuousMeta === 'object' ? continuousMeta : null;
   if (!meta) return null;
   const selected = String(meta.selectedImageUrl || '').trim();
+  const selectedRef = String(meta.selectedImageRef || '').trim();
   const replyImages = Array.isArray(meta.replyContext?.imageUrls) ? meta.replyContext.imageUrls : [];
+  const replyImageRefMap = meta.replyContext?.imageRefMap && typeof meta.replyContext.imageRefMap === 'object'
+    ? meta.replyContext.imageRefMap
+    : {};
   const quotePriority = directedContext?.quotePriority && typeof directedContext.quotePriority === 'object'
     ? directedContext.quotePriority
     : null;
@@ -76,13 +89,13 @@ function resolveVisualInputFromContinuousMetaCore(continuousMeta = null, directe
     );
   const currentImageRef = prefersCurrentImage(cleanText);
 
-  if (selected && !quoteWantsQuotedImage) return selected;
-  if (selected && currentImageRef) return selected;
+  if (selected && !quoteWantsQuotedImage) return selectedRef || selected;
+  if (selected && currentImageRef) return selectedRef || selected;
   for (const item of replyImages) {
-    const url = String(item || '').trim();
+    const url = resolveImageValue(String(item || '').trim(), replyImageRefMap);
     if (url) return url;
   }
-  if (selected) return selected;
+  if (selected) return selectedRef || selected;
   return null;
 }
 
@@ -99,6 +112,7 @@ function uniqueVisualItems(items = []) {
     seen.add(url);
     out.push({
       url,
+      originalUrl: String(item?.originalUrl || url).trim(),
       source: String(item?.source || '').trim() || 'current',
       label: String(item?.label || '').trim()
     });
@@ -106,30 +120,43 @@ function uniqueVisualItems(items = []) {
   return out;
 }
 
-function buildVisualImageCollection(continuousMeta = null, directedContext = null, cleanText = '', options = {}) {
+function buildVisualImageCollectionDetails(continuousMeta = null, directedContext = null, cleanText = '', options = {}) {
   const meta = continuousMeta && typeof continuousMeta === 'object' ? continuousMeta : {};
   const quotePriority = directedContext?.quotePriority && typeof directedContext.quotePriority === 'object'
     ? directedContext.quotePriority
     : null;
+  const directedScene = String(directedContext?.scene || '').trim();
   const maxImages = Math.max(1, Math.min(8, Number(options.maxImages || 8) || 8));
+  const currentImageRefMap = meta.imageRefMap && typeof meta.imageRefMap === 'object'
+    ? meta.imageRefMap
+    : {};
+  const replyImageRefMap = meta.replyContext?.imageRefMap && typeof meta.replyContext.imageRefMap === 'object'
+    ? meta.replyContext.imageRefMap
+    : {};
+  const forwardImageRefMap = meta.forwardImageRefMap && typeof meta.forwardImageRefMap === 'object'
+    ? meta.forwardImageRefMap
+    : {};
 
   const currentImages = Array.isArray(meta.imageUrls)
     ? meta.imageUrls.map((url, index) => ({
-        url: String(url || '').trim(),
+        url: resolveImageValue(url, currentImageRefMap),
+        originalUrl: String(url || '').trim(),
         source: 'current',
         label: `current_${index + 1}`
       }))
     : [];
   const replyImages = Array.isArray(meta.replyContext?.imageUrls)
     ? meta.replyContext.imageUrls.map((url, index) => ({
-        url: String(url || '').trim(),
+        url: resolveImageValue(url, replyImageRefMap),
+        originalUrl: String(url || '').trim(),
         source: 'reply',
         label: `reply_${index + 1}`
       }))
     : [];
   const forwardImages = Array.isArray(meta.forwardImageUrls)
     ? meta.forwardImageUrls.map((url, index) => ({
-        url: String(url || '').trim(),
+        url: resolveImageValue(url, forwardImageRefMap),
+        originalUrl: String(url || '').trim(),
         source: 'forward',
         label: `forward_${index + 1}`
       }))
@@ -141,12 +168,37 @@ function buildVisualImageCollection(continuousMeta = null, directedContext = nul
       String(quotePriority.mode || '').trim() === 'anchored_rewrite'
       || prefersQuotedImage(cleanText)
     );
+  const forcedReplyPriority = !quoteWantsReplyFirst
+    && currentImages.length === 0
+    && replyImages.length > 0
+    && ['reply_to_bot', 'reply_to_user'].includes(directedScene)
+    && (directedContext?.quote?.hasImage === true || quotePriority?.quoteFocus?.hasImage === true);
 
-  const ordered = quoteWantsReplyFirst
+  const useReplyFirst = quoteWantsReplyFirst || forcedReplyPriority;
+  const ordered = useReplyFirst
     ? uniqueVisualItems([...replyImages, ...currentImages, ...forwardImages])
     : uniqueVisualItems([...currentImages, ...replyImages, ...forwardImages]);
 
-  return ordered.slice(0, maxImages);
+  const images = ordered.slice(0, maxImages);
+  return {
+    images,
+    meta: {
+      directedScene,
+      currentImageCount: currentImages.length,
+      replyImageCount: replyImages.length,
+      forwardImageCount: forwardImages.length,
+      quotePriorityMode: String(quotePriority?.mode || '').trim() || 'none',
+      forcedReplyPriority,
+      replyPriorityReason: quoteWantsReplyFirst
+        ? 'quote_priority'
+        : (forcedReplyPriority ? 'reply_scene_no_current_image' : 'current_first_default'),
+      selectedPrimarySource: String(images[0]?.source || '').trim() || 'none'
+    }
+  };
+}
+
+function buildVisualImageCollection(continuousMeta = null, directedContext = null, cleanText = '', options = {}) {
+  return buildVisualImageCollectionDetails(continuousMeta, directedContext, cleanText, options).images;
 }
 
 function createMessageVisualContext(deps = {}) {
@@ -193,6 +245,7 @@ function createMessageVisualContext(deps = {}) {
 
   return {
     buildVisualImageCollection,
+    buildVisualImageCollectionDetails,
     buildSubagentContextSummary,
     getLastAssistantReplyForSession,
     getLastUserMessageForSession
@@ -201,6 +254,7 @@ function createMessageVisualContext(deps = {}) {
 
 module.exports = {
   buildVisualImageCollection,
+  buildVisualImageCollectionDetails,
   buildDirectedConversationSummary,
   clipSubagentContextSummary,
   createMessageVisualContext,

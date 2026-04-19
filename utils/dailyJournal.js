@@ -1310,6 +1310,26 @@ async function maybeSegmentJournal(userId, day, state, options = {}) {
   return true;
 }
 
+async function maybeSegmentJournalByThreshold(userId, day, options = {}) {
+  const uid = String(userId || '').trim();
+  if (!uid || !day || !config.DAILY_JOURNAL_ENABLED) return false;
+  const state = loadSummaryState();
+  const pendingEntries = readUnsegmentedEntries(uid, day, state);
+  if (pendingEntries.length === 0) return false;
+
+  const minPendingEntries = Math.max(1, Number(config.DAILY_JOURNAL_SEGMENT_MIN_PENDING_ENTRIES) || 1);
+  const maxPendingAgeMs = Math.max(0, Number(config.DAILY_JOURNAL_SEGMENT_MAX_PENDING_AGE_MS) || 0);
+  const oldestTs = Date.parse(String(pendingEntries[0]?.ts || ''));
+  const oldestAgeMs = Number.isFinite(oldestTs) ? Math.max(0, Date.now() - oldestTs) : 0;
+  if (pendingEntries.length < minPendingEntries && (!maxPendingAgeMs || oldestAgeMs < maxPendingAgeMs)) {
+    return false;
+  }
+
+  const segmented = await maybeSegmentJournal(uid, day, state, options);
+  saveSummaryState(state);
+  return segmented;
+}
+
 async function appendDailyJournalEntry(userId, question, reply, userInfo = {}, options = {}) {
   if (!config.DAILY_JOURNAL_ENABLED) return false;
 
@@ -1663,6 +1683,7 @@ module.exports = {
   parseJournalEntries,
   readSegmentSummaries,
   collectRecentEntrySidecars,
+  maybeSegmentJournalByThreshold,
   _test: {
     getUserJournalDir,
     toSafeJournalPathSegment

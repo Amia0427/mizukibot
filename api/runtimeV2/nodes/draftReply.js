@@ -170,7 +170,15 @@ function createDraftReplyNode(deps = {}) {
         followupMessages,
         normalizeObject(directChatCompileMeta.directContext, {}),
         'post_tool_empty_reply',
-        normalizeArray(state.execution?.toolResults)
+        normalizeArray(state.execution?.toolResults),
+        {
+          telemetry: {
+            onEvent(event) {
+              if (event) events.push(event);
+            },
+            rawErrorMessage: ''
+          }
+        }
       );
       draftReply = String(resolvedReply.text || '').trim();
       events.push(createEvent('tool_loop_forced_answer', {

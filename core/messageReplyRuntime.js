@@ -363,7 +363,8 @@ function createStreamingDispatcher({
   };
 }
 
-function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
+function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundTimingLogger = null } = {}) {
+  const logInboundTiming = typeof inboundTimingLogger === 'function' ? inboundTimingLogger : null;
   function emitReplyTelemetry(telemetry = null, type = '', payload = {}) {
     if (!telemetry || typeof telemetry.onEvent !== 'function') return;
     try {
@@ -381,6 +382,18 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
     telemetry = null
   }) {
     const startedAt = Date.now();
+    if (logInboundTiming) {
+      logInboundTiming({
+        stage: 'reply_send_start',
+        channel: 'group',
+        groupId: String(groupId || '').trim(),
+        senderId: String(senderId || '').trim(),
+        replyLength: String(replyText || '').trim().length,
+        routePolicyKey: String(telemetry?.routePolicyKey || '').trim(),
+        topRouteType: String(telemetry?.topRouteType || '').trim(),
+        threadId: String(telemetry?.threadId || '').trim()
+      });
+    }
     emitReplyTelemetry(telemetry, 'reply_send_start', {
       node: 'reply_send',
       channel: 'group',
@@ -416,6 +429,19 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
       replyLength: String(replyText || '').trim().length,
       durationMs: Math.max(0, Date.now() - startedAt)
     });
+    if (logInboundTiming) {
+      logInboundTiming({
+        stage: sent ? 'reply_send_success' : 'reply_send_failure',
+        channel: 'group',
+        groupId: String(groupId || '').trim(),
+        senderId: String(senderId || '').trim(),
+        replyLength: String(replyText || '').trim().length,
+        routePolicyKey: String(telemetry?.routePolicyKey || '').trim(),
+        topRouteType: String(telemetry?.topRouteType || '').trim(),
+        threadId: String(telemetry?.threadId || '').trim(),
+        durationMs: Math.max(0, Date.now() - startedAt)
+      });
+    }
 
     return sent;
   }
@@ -428,6 +454,17 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
     telemetry = null
   }) {
     const startedAt = Date.now();
+    if (logInboundTiming) {
+      logInboundTiming({
+        stage: 'reply_send_start',
+        channel: 'private',
+        userId: String(userId || '').trim(),
+        replyLength: String(replyText || '').trim().length,
+        routePolicyKey: String(telemetry?.routePolicyKey || '').trim(),
+        topRouteType: String(telemetry?.topRouteType || '').trim(),
+        threadId: String(telemetry?.threadId || '').trim()
+      });
+    }
     emitReplyTelemetry(telemetry, 'reply_send_start', {
       node: 'reply_send',
       channel: 'private',
@@ -457,6 +494,18 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {} } = {}) {
       replyLength: String(replyText || '').trim().length,
       durationMs: Math.max(0, Date.now() - startedAt)
     });
+    if (logInboundTiming) {
+      logInboundTiming({
+        stage: sent ? 'reply_send_success' : 'reply_send_failure',
+        channel: 'private',
+        userId: String(userId || '').trim(),
+        replyLength: String(replyText || '').trim().length,
+        routePolicyKey: String(telemetry?.routePolicyKey || '').trim(),
+        topRouteType: String(telemetry?.topRouteType || '').trim(),
+        threadId: String(telemetry?.threadId || '').trim(),
+        durationMs: Math.max(0, Date.now() - startedAt)
+      });
+    }
 
     return sent;
   }

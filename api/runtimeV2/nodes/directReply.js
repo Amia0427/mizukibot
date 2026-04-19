@@ -92,6 +92,9 @@ function createDirectReplyNode(deps = {}) {
   const classifyDirectReplyError = typeof deps.classifyDirectReplyError === 'function'
     ? deps.classifyDirectReplyError
     : (() => 'generic_model_failure');
+  const summarizeDirectReplyError = typeof deps.summarizeDirectReplyError === 'function'
+    ? deps.summarizeDirectReplyError
+    : ((error) => String(error?.message || error || '').trim());
   const attemptDirectMemoryRecovery = typeof deps.attemptDirectMemoryRecovery === 'function'
     ? deps.attemptDirectMemoryRecovery
     : (async () => null);
@@ -146,7 +149,8 @@ function createDirectReplyNode(deps = {}) {
       customPrompt: request.customPrompt,
       disableTools: !request.allowTools,
       allowedTools: normalizeArray(request.allowedTools),
-      source: 'direct_reply'
+      source: 'direct_reply',
+      preserveThink: request.cotDisplayOnce === true
     };
     const baseSystemMessages = getMainConversationSystemMessages(state, {
       isReviewRoute,
@@ -166,6 +170,7 @@ function createDirectReplyNode(deps = {}) {
       compactionLevel: String(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
     };
     let reply = '';
+    let displayReply = '';
     let nextStream = ensureOutputStream(state.output, request.imageUrl ? 'none' : 'direct');
     let nextMemoryCliTurn = createMemoryCliTurnState(state.execution?.memoryCliTurn);
     let nextAllowedTools = directEffectiveAllowedTools;
@@ -257,10 +262,11 @@ function createDirectReplyNode(deps = {}) {
               routePolicyKey: directContext.routePolicyKey
             }
           });
-          reply = streamed.finalReply;
+          reply = streamed.persistedText || streamed.finalReply || '';
+          displayReply = streamed.visibleText || streamed.finalReply || '';
           nextStream = streamed.stream;
         } else {
-          reply = await requestReplyImpl(
+          const replyResult = await requestReplyImpl(
             messagesToSend,
             {
               ...directContext,
@@ -268,6 +274,8 @@ function createDirectReplyNode(deps = {}) {
               allowedTools: []
             }
           );
+          reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
+          displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
         }
       } catch (error) {
         const failureType = classifyDirectReplyError(error);
@@ -283,17 +291,26 @@ function createDirectReplyNode(deps = {}) {
             );
         if (recovered) {
           reply = String(recovered.reply || '');
+          displayReply = String(recovered.reply || '');
           nextMemoryCliTurn = createMemoryCliTurnState(recovered.memoryCliTurn);
           nextAllowedTools = normalizeArray(recovered.effectiveAllowedTools);
           directLoopEvents = normalizeArray(recovered.events);
           executedToolEnvelopes = normalizeArray(recovered.executedToolEnvelopes);
         } else {
           reply = getControlledFailureReply(failureType);
+          displayReply = reply;
           nextMemoryCliTurn = createMemoryCliTurnState(
             updateMemoryCliTurnStateAfterError(nextMemoryCliTurn, failureType === 'tool_loop_limit' ? 'tool_loop_limit' : 'tool_error')
           );
           nextAllowedTools = computeEffectiveAllowedTools(request, nextMemoryCliTurn);
           directLoopEvents = [
+            createEvent('direct_reply_failure', {
+              node: 'direct_reply',
+              stage: 'request_reply',
+              failureType,
+              fallbackSource: 'controlled_failure',
+              rawErrorMessage: summarizeDirectReplyError(error)
+            }),
             createEvent('effectiveAllowedTools', {
               node: 'direct_reply',
               allowedTools: nextAllowedTools
@@ -312,7 +329,7 @@ function createDirectReplyNode(deps = {}) {
       }
     } else if (plannerSingleAuthority) {
       try {
-        reply = await requestReplyImpl(
+        const replyResult = await requestReplyImpl(
           messagesToSend,
           {
             ...directContext,
@@ -320,8 +337,21 @@ function createDirectReplyNode(deps = {}) {
             allowedTools: []
           }
         );
+        reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
+        displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
       } catch (error) {
-        reply = getControlledFailureReply(classifyDirectReplyError(error));
+        const failureType = classifyDirectReplyError(error);
+        directLoopEvents = directLoopEvents.concat([
+          createEvent('direct_reply_failure', {
+            node: 'direct_reply',
+            stage: 'planner_single_authority',
+            failureType,
+            fallbackSource: 'controlled_failure',
+            rawErrorMessage: summarizeDirectReplyError(error)
+          })
+        ]);
+        reply = getControlledFailureReply(failureType);
+        displayReply = reply;
       }
       directLoopEvents = [
         createEvent('direct_chat_execution_mode', {
@@ -338,14 +368,15 @@ function createDirectReplyNode(deps = {}) {
             routePolicyKey: directContext.routePolicyKey
           }
         });
-        reply = streamed.finalReply;
+        reply = streamed.persistedText || streamed.finalReply || '';
+        displayReply = streamed.visibleText || streamed.finalReply || '';
         nextStream = streamed.stream;
       } catch (error) {
         nextStream = error?.outputStream
           ? { ...ensureOutputStream(state.output, 'direct'), ...normalizeObject(error.outputStream, {}) }
           : { ...ensureOutputStream(state.output, 'direct'), fallbackToNonStream: true };
         try {
-          reply = await requestReplyImpl(
+          const replyResult = await requestReplyImpl(
             messagesToSend,
             {
               ...directContext,
@@ -353,13 +384,26 @@ function createDirectReplyNode(deps = {}) {
               allowedTools: []
             }
           );
+          reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
+          displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
         } catch (fallbackError) {
-          reply = getControlledFailureReply(classifyDirectReplyError(fallbackError));
+          const failureType = classifyDirectReplyError(fallbackError);
+          directLoopEvents = directLoopEvents.concat([
+            createEvent('direct_reply_failure', {
+              node: 'direct_reply',
+              stage: 'stream_non_stream_fallback',
+              failureType,
+              fallbackSource: 'controlled_failure',
+              rawErrorMessage: summarizeDirectReplyError(fallbackError)
+            })
+          ]);
+          reply = getControlledFailureReply(failureType);
+          displayReply = reply;
         }
       }
     } else {
       try {
-        reply = await requestReplyImpl(
+        const replyResult = await requestReplyImpl(
           messagesToSend,
           {
             ...directContext,
@@ -367,9 +411,26 @@ function createDirectReplyNode(deps = {}) {
             allowedTools: []
           }
         );
+        reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
+        displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
       } catch (error) {
-        reply = getControlledFailureReply(classifyDirectReplyError(error));
+        const failureType = classifyDirectReplyError(error);
+        directLoopEvents = directLoopEvents.concat([
+          createEvent('direct_reply_failure', {
+            node: 'direct_reply',
+            stage: 'request_reply',
+            failureType,
+            fallbackSource: 'controlled_failure',
+            rawErrorMessage: summarizeDirectReplyError(error)
+          })
+        ]);
+        reply = getControlledFailureReply(failureType);
+        displayReply = reply;
       }
+    }
+
+    if (!displayReply) {
+      displayReply = reply;
     }
 
     if (isPureToolCallMarkup(reply) && executedToolEnvelopes.length === 0) {
@@ -473,13 +534,15 @@ function createDirectReplyNode(deps = {}) {
         toolResults: executedToolEnvelopes,
         memoryCliTurn: nextMemoryCliTurn
       },
-      output: {
-        ...state.output,
-        draftReply: String(reply || ''),
-        finalReply: String(reply || ''),
-        failure,
-        stream: nextStream
-      },
+        output: {
+          ...state.output,
+          draftReply: String(reply || ''),
+          finalReply: String(reply || ''),
+          displayReply: String(displayReply || reply || ''),
+          persistedReplyText: String(reply || ''),
+          failure,
+          stream: nextStream
+        },
       events: nextEvents
     }, 'direct_reply', 'running', nextEvents);
   };

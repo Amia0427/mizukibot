@@ -107,7 +107,8 @@ module.exports = (async () => {
 
   assert.strictEqual(state.continuityState.activeTopic, '部署');
   assert.ok(state.continuityState.openLoops.includes('补充 systemd 配置'));
-  assert.strictEqual(state.expressionState.jargon, 'group_only');
+  assert.strictEqual(state.expressionState.jargon.value, 'group_only');
+  assert.strictEqual(state.expressionState.jargon.source, 'surface_policy');
 
   const rendered = renderPersonaMemoryPrompt(state, 'qzone_diary');
   const renderedText = rendered.systemMessages.map((item) => item.content).join('\n');

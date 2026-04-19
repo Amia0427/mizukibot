@@ -26,7 +26,8 @@ module.exports = (async () => {
     clearProjectCache();
 
     const {
-      shouldSuppressPresenceAck
+      shouldSuppressPresenceAck,
+      shouldSuppressTrivialPresenceReply
     } = require('../core/passiveGroupAwareness');
 
     assert.strictEqual(
@@ -66,6 +67,36 @@ module.exports = (async () => {
       }),
       false,
       'non presence_ack replies should not be suppressed by the presence deduper'
+    );
+
+    assert.strictEqual(
+      shouldSuppressTrivialPresenceReply({
+        groupPresence: {
+          last_trivial_presence_reply_at: 2_000_000,
+          last_trivial_presence_reply_text: '我在'
+        },
+        now: 2_000_000 + 60_000,
+        replyText: '我在',
+        replyType: 'light_answer',
+        addressee: 'bot_direct'
+      }),
+      true,
+      'bot_direct fallback text "我在" should be suppressed within the dedup window'
+    );
+
+    assert.strictEqual(
+      shouldSuppressTrivialPresenceReply({
+        groupPresence: {
+          last_trivial_presence_reply_at: 2_000_000,
+          last_trivial_presence_reply_text: '我在'
+        },
+        now: 2_000_000 + 60_000,
+        replyText: '我在看',
+        replyType: 'presence_ack',
+        addressee: 'bot_presence_check'
+      }),
+      false,
+      'different trivial presence texts should not dedup each other'
     );
 
     console.log('passiveAwarenessPresenceAckDedup.test.js passed');
