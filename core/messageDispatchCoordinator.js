@@ -240,6 +240,9 @@ function createMessageDispatchCoordinator(deps = {}) {
           streamOptions.modelConfig = fallbackModelConfig;
         }
         const replyOptions = streamOptions;
+        if (String(route?.meta?.chatType || 'group').trim().toLowerCase() === 'group') {
+          replyOptions.disableStream = true;
+        }
         finalReplyOptions = replyOptions;
 
         await markThinkingEmojiBeforeLlm({

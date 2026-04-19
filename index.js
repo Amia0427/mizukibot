@@ -16,6 +16,7 @@ const { getNapCatActionClient } = require('./api/napcatActionClient');
 const { getSchedulerRuntime } = require('./core/schedulerRuntime');
 const { sendGroupMessage } = require('./api/qqActionService');
 const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime');
+const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/napcatLogFollower');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
@@ -130,6 +131,23 @@ const { handleIncomingMessage } = createMessageHandler({
   config,
   sendWithRetry
 });
+const napcatLogFollower = createNapcatLogFollower({
+  sendWithRetry,
+  sendGroupReply: async ({
+    groupId,
+    senderId,
+    replyText,
+    atSender = true,
+    retries = 1,
+    waitMs = 300
+  } = {}) => sendWithRetry({
+    action: 'send_group_msg',
+    params: {
+      group_id: groupId,
+      message: `${atSender ? `[CQ:at,qq=${senderId}] ` : ''}${String(replyText || '').trim()}`
+    }
+  }, retries, waitMs)
+});
 
 const schedulerRuntime = getSchedulerRuntime({
   sendGroupMessage: async (groupId, message) => {
@@ -169,6 +187,7 @@ function connectNapCat() {
     if (postReplyWorkerRuntime) {
       postReplyWorkerRuntime.start();
     }
+    napcatLogFollower.start();
   });
 
   ws.on('error', (err) => {
@@ -187,6 +206,7 @@ function connectNapCat() {
   ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data);
+      appendNapcatPacketToLog(msg);
       if (napcatActionClient.handleMessage(msg)) return;
       await handleIncomingMessage(msg);
     } catch (e) {

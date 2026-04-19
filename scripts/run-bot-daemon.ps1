@@ -102,6 +102,27 @@ function Get-ProcessCommandLine {
   }
 }
 
+function Read-PidFileText {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$FilePath
+  )
+
+  if (-not (Test-Path $FilePath)) {
+    return ''
+  }
+
+  try {
+    $raw = Get-Content -Path $FilePath -TotalCount 1 -Encoding utf8 -ErrorAction Stop
+    if ($null -eq $raw) {
+      return ''
+    }
+    return [string]$raw
+  } catch {
+    return ''
+  }
+}
+
 function Test-LockPidMatchesProcessLifetime {
   param(
     [Parameter(Mandatory = $true)]
@@ -137,7 +158,7 @@ function Test-LockOwnedByRunningNode {
   }
 
   try {
-    $ownerPidText = (Get-Content -Path $LockPath -TotalCount 1 -Encoding utf8).Trim()
+    $ownerPidText = (Read-PidFileText -FilePath $LockPath).Trim()
     $ownerPid = [int]$ownerPidText
     if ($ownerPid -le 0) {
       return $false
@@ -175,7 +196,7 @@ function Get-LockProcessDiagnostics {
   }
 
   try {
-    $ownerPidText = (Get-Content -Path $LockPath -TotalCount 1 -Encoding utf8).Trim()
+    $ownerPidText = (Read-PidFileText -FilePath $LockPath).Trim()
     $ownerPid = [int]$ownerPidText
     if ($ownerPid -le 0) {
       return "lock pid invalid: '$ownerPidText'"
@@ -210,7 +231,7 @@ function Test-WorkerOwnedByRunningNode {
   }
 
   try {
-    $ownerPidText = (Get-Content -Path $PidFile -TotalCount 1 -Encoding utf8).Trim()
+    $ownerPidText = (Read-PidFileText -FilePath $PidFile).Trim()
     $ownerPid = [int]$ownerPidText
     if ($ownerPid -le 0) {
       return $false

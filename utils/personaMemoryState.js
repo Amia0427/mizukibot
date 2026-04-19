@@ -295,19 +295,54 @@ function inferInitiative(surface = '') {
   return 'reply';
 }
 
-function buildExpressionState({ surface, relationshipState, styleProfile, socialContext, memoryContext }) {
+function parsePersonaPreference(text = '', key = '') {
+  const source = normalizeText(text, 320);
+  const normalizedKey = normalizeText(key).toLowerCase();
+  if (!source || !normalizedKey) return '';
+  const lines = source.split(/\r?\n/).map((line) => normalizeText(line)).filter(Boolean);
+  const line = lines.find((item) => item.toLowerCase().startsWith(`${normalizedKey}:`));
+  if (!line) return '';
+  return normalizeText(line.slice(normalizedKey.length + 1), 120);
+}
+
+function buildExpressionValue(value = '', source = 'runtime_inference') {
   return {
-    warmth: inferWarmth(relationshipState.relationship, relationshipState.attitude, surface),
-    playfulness: inferPlayfulness(styleProfile, socialContext, surface),
-    tease: inferTease(styleProfile, socialContext, surface),
-    initiative: inferInitiative(surface),
-    jargon: inferJargon(surface, relationshipState.groupId, memoryContext?.styleSignalText),
-    verbosity: inferVerbosity(surface, styleProfile),
-    guardedness: inferGuardedness(surface, relationshipState.relationship)
+    value: normalizeText(value, 48),
+    source: normalizeText(source, 32) || 'runtime_inference'
+  };
+}
+
+function buildExpressionState({ surface, relationshipState, styleProfile, socialContext, memoryContext }) {
+  const persona = normalizeObject(memoryContext.persona, {});
+  const relationshipStyle = normalizeText(persona.relationshipStyle || persona.userAdaptationPersona, 320);
+  const botBasePersona = normalizeText(persona.botBasePersona, 320);
+  const warmth = parsePersonaPreference(relationshipStyle, 'relationship_tone')
+    || parsePersonaPreference(botBasePersona, 'bot_persona_tone')
+    || inferWarmth(relationshipState.relationship, relationshipState.attitude, surface);
+  const playfulness = parsePersonaPreference(botBasePersona, 'bot_persona_playfulness')
+    || inferPlayfulness(styleProfile, socialContext, surface);
+  const initiative = parsePersonaPreference(botBasePersona, 'bot_persona_initiative')
+    || parsePersonaPreference(relationshipStyle, 'relationship_engagement')
+    || inferInitiative(surface);
+  const guardedness = parsePersonaPreference(relationshipStyle, 'relationship_distance')
+    || parsePersonaPreference(botBasePersona, 'bot_persona_guardedness')
+    || inferGuardedness(surface, relationshipState.relationship);
+  const verbosity = parsePersonaPreference(botBasePersona, 'bot_persona_verbosity')
+    || inferVerbosity(surface, styleProfile);
+  return {
+    warmth: buildExpressionValue(warmth, parsePersonaPreference(relationshipStyle, 'relationship_tone') ? 'relationship_memory' : (parsePersonaPreference(botBasePersona, 'bot_persona_tone') ? 'persona_memory' : 'runtime_inference')),
+    playfulness: buildExpressionValue(playfulness, parsePersonaPreference(botBasePersona, 'bot_persona_playfulness') ? 'persona_memory' : 'runtime_inference'),
+    tease: buildExpressionValue(inferTease(styleProfile, socialContext, surface), 'runtime_inference'),
+    initiative: buildExpressionValue(initiative, parsePersonaPreference(botBasePersona, 'bot_persona_initiative') ? 'persona_memory' : (parsePersonaPreference(relationshipStyle, 'relationship_engagement') ? 'relationship_memory' : 'surface_policy')),
+    jargon: buildExpressionValue(inferJargon(surface, relationshipState.groupId, memoryContext?.styleSignalText), 'surface_policy'),
+    verbosity: buildExpressionValue(verbosity, parsePersonaPreference(botBasePersona, 'bot_persona_verbosity') ? 'persona_memory' : 'runtime_inference'),
+    guardedness: buildExpressionValue(guardedness, parsePersonaPreference(relationshipStyle, 'relationship_distance') ? 'relationship_memory' : (parsePersonaPreference(botBasePersona, 'bot_persona_guardedness') ? 'persona_memory' : 'surface_policy'))
   };
 }
 
 function buildRelationshipState({ userId, groupId, memoryContext, affinityState, profile }) {
+  const persona = normalizeObject(memoryContext.persona, {});
+  const relationshipStyle = normalizeText(persona.relationshipStyle || persona.userAdaptationPersona, 320);
   const relation = normalizeText(
     profile?.relation_stage
     || memoryContext?.profile?.relation_stage
@@ -322,13 +357,26 @@ function buildRelationshipState({ userId, groupId, memoryContext, affinityState,
     || '中立、保持距离',
     160
   ) || '中立、保持距离';
+  const inferredDistance = relation === '亲密伙伴' ? 'close' : (relation === '普通朋友' ? 'friendly' : 'reserved');
   return {
     userId: normalizeText(userId),
     groupId: normalizeText(groupId),
     relationship: relation,
     attitude,
-    replyStylePolicy: normalizeText(memoryContext?.affinityState?.replyStylePolicy || '', 200),
-    salutationPolicy: relation === '亲密伙伴' ? 'close' : (relation === '普通朋友' ? 'friendly' : 'reserved')
+    replyStylePolicy: normalizeText(
+      parsePersonaPreference(relationshipStyle, 'relationship_reply_style')
+      || persona.replyStyle
+      || memoryContext?.affinityState?.replyStylePolicy
+      || '',
+      220
+    ),
+    salutationPolicy: relation === '亲密伙伴' ? 'close' : (relation === '普通朋友' ? 'friendly' : 'reserved'),
+    distanceMode: normalizeText(
+      parsePersonaPreference(relationshipStyle, 'relationship_distance')
+      || inferredDistance,
+      64
+    ),
+    salutationStyle: normalizeText(parsePersonaPreference(relationshipStyle, 'relationship_salutation') || '', 120)
   };
 }
 
@@ -344,10 +392,23 @@ function buildMemoryDigest(memoryContext = {}, options = {}) {
   push('task_memory', 'task', memoryContext.taskMemoryText, 0.66);
   push('group_memory', 'group', memoryContext.groupMemoryText, 0.62);
   push('generic_recall', 'profile', memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText, 0.7);
+  push('bot_persona', 'bot_persona', memoryContext.persona?.botBasePersona, 0.82);
+  push('relationship_style', 'relationship_style', memoryContext.persona?.relationshipStyle || memoryContext.persona?.userAdaptationPersona, 0.84);
   push('same_session_journal', 'journal', memoryContext.promptDailyJournalText || memoryContext.dailyJournalText, 0.58);
 
-  const selected = uniqueBy(items, (item) => `${item.source}:${item.text}`)
-    .slice(0, Math.max(1, Number(surfacePolicy.maxMemoryDigestItems) || 1));
+  const selected = uniqueBy(
+    items.sort((a, b) => {
+      const priorityBoost = (source) => {
+        if (source === 'relationship_style') return 3;
+        if (source === 'bot_persona') return 2;
+        return 0;
+      };
+      const boostDiff = priorityBoost(b.source) - priorityBoost(a.source);
+      if (boostDiff !== 0) return boostDiff;
+      return Number(b.confidence || 0) - Number(a.confidence || 0);
+    }),
+    (item) => `${item.source}:${item.text}`
+  ).slice(0, Math.max(1, Number(surfacePolicy.maxMemoryDigestItems) || 1));
 
   return {
     items: selected,
@@ -390,9 +451,10 @@ function sanitizePromptBlocks(blocks = [], totalBudget = 2400) {
 function formatRelationshipStateText(state = {}) {
   const lines = [];
   if (state.relationship) lines.push(`relationship=${state.relationship}`);
-  if (state.attitude) lines.push(`attitude=${state.attitude}`);
-  if (state.replyStylePolicy) lines.push(`reply_style_policy=${state.replyStylePolicy}`);
-  if (state.salutationPolicy) lines.push(`salutation=${state.salutationPolicy}`);
+  if (state.distanceMode) lines.push(`distance=${state.distanceMode}`);
+  if (state.attitude) lines.push(`tone=${normalizeText(state.attitude, 72)}`);
+  if (state.replyStylePolicy) lines.push(`reply=${normalizeText(state.replyStylePolicy, 72)}`);
+  if (state.salutationStyle || state.salutationPolicy) lines.push(`salutation=${normalizeText(state.salutationStyle || state.salutationPolicy, 48)}`);
   return lines.join('\n');
 }
 
@@ -416,14 +478,20 @@ function formatContinuityStateText(state = {}, options = {}) {
 }
 
 function formatExpressionStateText(state = {}) {
+  const compact = (entry, fallback = '') => {
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      return normalizeText(entry.value || fallback, 24);
+    }
+    return normalizeText(entry || fallback, 24);
+  };
   return [
-    `warmth=${state.warmth || 'mid'}`,
-    `playfulness=${state.playfulness || 'low'}`,
-    `tease=${state.tease || 'off'}`,
-    `initiative=${state.initiative || 'reply'}`,
-    `jargon=${state.jargon || 'off'}`,
-    `verbosity=${state.verbosity || 'normal'}`,
-    `guardedness=${state.guardedness || 'guarded'}`
+    `warmth=${compact(state.warmth, 'mid')}`,
+    `play=${compact(state.playfulness, 'low')}`,
+    `tease=${compact(state.tease, 'off')}`,
+    `initiative=${compact(state.initiative, 'reply')}`,
+    `jargon=${compact(state.jargon, 'off')}`,
+    `verbosity=${compact(state.verbosity, 'normal')}`,
+    `guarded=${compact(state.guardedness, 'guarded')}`
   ].join('\n');
 }
 
@@ -689,7 +757,8 @@ async function composePersonaMemoryState(request = {}, options = {}) {
       styleSignalText: memoryContext.styleSignalText || '',
       taskMemoryText: memoryContext.taskMemoryText || '',
       groupMemoryText: memoryContext.groupMemoryText || '',
-      dailyJournalText: memoryContext.promptDailyJournalText || memoryContext.dailyJournalText || ''
+      dailyJournalText: memoryContext.promptDailyJournalText || memoryContext.dailyJournalText || '',
+      persona: normalizeObject(memoryContext.persona)
     },
     styleProfile,
     socialContext,
@@ -765,6 +834,83 @@ function deriveSessionCheckpointPayload(state = {}, payload = {}) {
   };
 }
 
+function flattenExpressionState(expression = {}) {
+  const normalized = normalizeObject(expression);
+  return Object.entries(normalized).reduce((acc, [key, value]) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      acc[key] = normalizeText(value.value || '', 32);
+      acc[`${key}Source`] = normalizeText(value.source || '', 32);
+      return acc;
+    }
+    acc[key] = normalizeText(value, 32);
+    return acc;
+  }, {});
+}
+
+function detectExplicitPersonaFeedback(text = '') {
+  const normalized = normalizeText(text, 800);
+  if (!normalized) return { isFeedback: false, polarity: '', text: '' };
+  if (/(你这样说更好|你这样就对了|这样说挺好|保持这样|就按这个风格|这样回复我喜欢)/i.test(normalized)) {
+    return { isFeedback: true, polarity: 'positive', text: normalized };
+  }
+  if (/(别这么说|不要这么说|你太.*了|你别.*语气|别那么.*|不要这么回复|你这样说我不喜欢)/i.test(normalized)) {
+    return { isFeedback: true, polarity: 'negative', text: normalized };
+  }
+  return { isFeedback: false, polarity: '', text: normalized };
+}
+
+function buildBotPersonaSlots(state = {}, payload = {}) {
+  const expression = flattenExpressionState(state.expressionState);
+  const personaText = normalizeText(state.evidence?.memoryContext?.persona?.botBasePersona || '', 320);
+  const out = [];
+  const push = (fieldKey, value, confidence = 0.78, sourceKind = 'runtime') => {
+    const normalized = normalizeText(value, 140);
+    if (!normalized) return;
+    out.push({ fieldKey, value: normalized, confidence, sourceKind });
+  };
+
+  if (expression.warmth) push('bot_persona_tone', `基础语气偏${expression.warmth}`, 0.78);
+  if (expression.initiative) push('bot_persona_initiative', `互动主动性=${expression.initiative}`, 0.8);
+  if (expression.guardedness) push('bot_persona_guardedness', `边界感=${expression.guardedness}`, 0.8);
+  if (expression.playfulness) push('bot_persona_playfulness', `玩笑感=${expression.playfulness}`, 0.78);
+  if (expression.verbosity) push('bot_persona_verbosity', `回复详细度=${expression.verbosity}`, 0.78);
+  if (personaText) push('bot_persona_boundaries', personaText, 0.84);
+
+  const feedback = detectExplicitPersonaFeedback(
+    `${normalizeText(payload.question || payload.userText || '', 320)} ${normalizeText(payload.finalReply || payload.reply || '', 320)}`
+  );
+  if (feedback.isFeedback) {
+    push('bot_persona_tone', `用户对基础语气的${feedback.polarity === 'positive' ? '正向' : '负向'}反馈：${feedback.text}`, 0.9, 'explicit_feedback');
+  }
+  return out;
+}
+
+function buildRelationshipStyleSlots(state = {}, payload = {}) {
+  const relationship = normalizeObject(state.relationshipState);
+  const expression = flattenExpressionState(state.expressionState);
+  const relationshipText = normalizeText(state.evidence?.memoryContext?.persona?.relationshipStyle || state.evidence?.memoryContext?.persona?.userAdaptationPersona || '', 320);
+  const out = [];
+  const push = (fieldKey, value, confidence = 0.8, sourceKind = 'runtime') => {
+    const normalized = normalizeText(value, 160);
+    if (!normalized) return;
+    out.push({ fieldKey, value: normalized, confidence, sourceKind });
+  };
+
+  if (relationshipText) push('relationship_reply_style', relationshipText.replace(/relationship_[a-z_]+:\s*/gi, ''), 0.84);
+  if (relationship.attitude) push('relationship_tone', relationship.attitude, 0.8);
+  if (relationship.distanceMode) push('relationship_distance', relationship.distanceMode, 0.82);
+  if (relationship.salutationStyle || relationship.salutationPolicy) push('relationship_salutation', relationship.salutationStyle || relationship.salutationPolicy, 0.8);
+  if (relationship.replyStylePolicy) push('relationship_reply_style', relationship.replyStylePolicy, 0.82);
+  if (expression.initiative) push('relationship_engagement', `互动积极度=${expression.initiative}`, 0.76);
+  if (expression.guardedness) push('relationship_boundaries', `关系边界=${expression.guardedness}`, 0.76);
+
+  const feedback = detectExplicitPersonaFeedback(normalizeText(payload.question || payload.userText || '', 320));
+  if (feedback.isFeedback) {
+    push('relationship_reply_style', `用户对相处语气的${feedback.polarity === 'positive' ? '正向' : '负向'}反馈：${feedback.text}`, 0.92, 'explicit_feedback');
+  }
+  return out;
+}
+
 async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
   const normalizedPayload = normalizeObject(payload);
   const state = normalizeObject(normalizedPayload.state);
@@ -788,7 +934,8 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
   const sessionId = normalizeText(routeMeta.sessionId || routeMeta.session_id || request.sessionId);
   const routePolicyKey = normalizeText(request.routePolicyKey || normalizedPayload.routePolicyKey);
   const topRouteType = normalizeText(request.topRouteType || normalizedPayload.topRouteType);
-  const expressionFingerprint = Object.entries(expression)
+  const flattenedExpression = flattenExpressionState(expression);
+  const expressionFingerprint = Object.entries(flattenedExpression)
     .map(([key, value]) => `${key}=${normalizeText(value, 32)}`)
     .filter(Boolean)
     .join(', ');
@@ -813,6 +960,48 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
     payload: checkpointPayload
   });
 
+  const botPersonaSlots = buildBotPersonaSlots(state, {
+    ...normalizedPayload,
+    question: request.question || normalizedPayload.question || '',
+    finalReply: normalizedPayload.finalReply || normalizedPayload.reply || ''
+  });
+  const relationshipSlots = buildRelationshipStyleSlots(state, {
+    ...normalizedPayload,
+    question: request.question || normalizedPayload.question || '',
+    finalReply: normalizedPayload.finalReply || normalizedPayload.reply || ''
+  });
+
+  const sourceName = normalizeText(surface || state.surface || DEFAULT_SURFACE);
+  const writePersonaSlot = async (memoryKind, fieldKey, value, options = {}) => {
+    const sanitizedValue = sanitizeUntrustedContent(value, 'memory');
+    if (!sanitizedValue) return false;
+    await appendMemoryEvent({
+      type: 'memory_confirmed',
+      userId,
+      sessionKey,
+      groupId,
+      channelId,
+      sessionId,
+      routePolicyKey,
+      topRouteType,
+      scopeType: 'personal',
+      source: sourceName,
+      sourceKind: options.sourceKind || 'runtime',
+      status: 'active',
+      memoryKind,
+      semanticSlot: fieldKey,
+      text: sanitizedValue,
+      payload: {
+        fieldKey,
+        type: 'fact'
+      },
+      confidence: Number(options.confidence || 0.8) || 0.8,
+      importance: Number(options.importance || 0.72) || 0.72,
+      evidenceCount: Math.max(2, Number(options.evidenceCount || 2) || 2)
+    });
+    return true;
+  };
+
   if (expressionFingerprint && !expressionGate.blocked) {
     await appendMemoryEvent({
       type: 'memory_confirmed',
@@ -823,8 +1012,8 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
       sessionId,
       routePolicyKey,
       topRouteType,
-      scopeType: groupId ? 'group' : 'personal',
-      source: normalizeText(surface || state.surface || DEFAULT_SURFACE),
+      scopeType: 'personal',
+      source: sourceName,
       sourceKind: 'runtime',
       status: 'active',
       memoryKind: 'style',
@@ -840,6 +1029,28 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
     });
   }
 
+  const personaSlotsUpdated = [];
+  for (const slot of botPersonaSlots) {
+    const wrote = await writePersonaSlot('bot_persona', slot.fieldKey, slot.value, {
+      confidence: slot.confidence,
+      importance: slot.sourceKind === 'explicit_feedback' ? 0.88 : 0.72,
+      sourceKind: slot.sourceKind,
+      evidenceCount: slot.sourceKind === 'explicit_feedback' ? 3 : 2
+    });
+    if (wrote) personaSlotsUpdated.push(slot.fieldKey);
+  }
+
+  const relationshipSlotsUpdated = [];
+  for (const slot of relationshipSlots) {
+    const wrote = await writePersonaSlot('relationship_style', slot.fieldKey, slot.value, {
+      confidence: slot.confidence,
+      importance: slot.sourceKind === 'explicit_feedback' ? 0.9 : 0.76,
+      sourceKind: slot.sourceKind,
+      evidenceCount: slot.sourceKind === 'explicit_feedback' ? 3 : 2
+    });
+    if (wrote) relationshipSlotsUpdated.push(slot.fieldKey);
+  }
+
   materializeMemoryViews();
   return {
     updatedSlots: {
@@ -848,7 +1059,9 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
       assistantCommitments: checkpointPayload.assistantCommitments,
       userConstraints: checkpointPayload.userConstraints,
       carryOverUserTurn: checkpointPayload.carryOverUserTurn,
-      recentReplyFrame: continuity.recentReplyFrame || ''
+      recentReplyFrame: continuity.recentReplyFrame || '',
+      personaSlotsUpdated: uniqueStrings(personaSlotsUpdated, 12, 80),
+      relationshipSlotsUpdated: uniqueStrings(relationshipSlotsUpdated, 12, 80)
     },
     persisted: true
   };

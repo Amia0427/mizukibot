@@ -10,6 +10,14 @@ function normalizeNonNegativeInt(value, fallback) {
   return num;
 }
 
+function buildRequestId(request = {}) {
+  const messageId = String(request.messageId || '').trim();
+  const userId = String(request.userId || '').trim();
+  const groupId = String(request.groupId || '').trim();
+  const chatType = String(request.chatType || '').trim();
+  return `${chatType}:${groupId}:${userId}:${messageId || Date.now()}`;
+}
+
 function createInboundConcurrencyController(options = {}) {
   const globalLimit = normalizeNonNegativeInt(options.globalLimit, 3);
   const generalLimit = normalizeNonNegativeInt(options.generalLimit, 2);
@@ -82,9 +90,11 @@ function createInboundConcurrencyController(options = {}) {
 
     const acquiredAt = Date.now();
     const waitMs = Math.max(0, acquiredAt - (Number(request.enqueuedAt || 0) || acquiredAt));
+    const requestId = buildRequestId(request);
     console.log('[inbound-concurrency] acquired', {
       lane,
       userId,
+      requestId,
       groupId: String(request.groupId || '').trim(),
       messageId: String(request.messageId || '').trim(),
       chatType: String(request.chatType || '').trim(),
@@ -96,6 +106,10 @@ function createInboundConcurrencyController(options = {}) {
 
     let released = false;
     return {
+      requestId,
+      lane,
+      acquiredAt,
+      waitMs,
       release(meta = {}) {
         if (released) return;
         released = true;
@@ -108,6 +122,7 @@ function createInboundConcurrencyController(options = {}) {
         console.log('[inbound-concurrency] released', {
           lane,
           userId,
+          requestId,
           groupId: String(request.groupId || '').trim(),
           messageId: String(request.messageId || '').trim(),
           chatType: String(request.chatType || '').trim(),
@@ -176,6 +191,7 @@ function createInboundConcurrencyController(options = {}) {
       console.log('[inbound-concurrency] queued', {
         lane: normalized.lane,
         userId: normalized.userId,
+        requestId: buildRequestId(normalized),
         groupId: normalized.groupId,
         messageId: normalized.messageId,
         chatType: normalized.chatType,

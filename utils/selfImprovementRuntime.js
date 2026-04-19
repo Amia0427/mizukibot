@@ -1190,6 +1190,39 @@ async function learnSelfImprovement(userId, userText, botReply, options = {}) {
   }
 }
 
+function storeExtractedSelfImprovementItems(userId, items = [], options = {}) {
+  const uid = trimText(userId, 120);
+  if (!uid) return [];
+  const stored = [];
+  for (const raw of normalizeArray(items).slice(0, 3)) {
+    const item = normalizeObject(raw, {});
+    const confidence = clampNumber(item.confidence, 0, 1, 0);
+    if (confidence < Number(config.SELF_IMPROVEMENT_EXTRACT_MIN_CONFIDENCE || 0.78)) continue;
+    const event = appendEvent({
+      kind: item.kind,
+      source: 'llm_extraction',
+      status: 'open',
+      patternKey: item.pattern_key || item.patternKey || options.taskType || options.routePolicyKey || 'strategy',
+      priority: clampNumber(item.priority, 0, 1, derivePriority(normalizeKind(item.kind))),
+      summary: sanitizeUntrustedContent(item.summary, 'self_improvement'),
+      details: sanitizeUntrustedContent(item.details, 'self_improvement'),
+      suggestedAction: sanitizeUntrustedContent(item.suggested_action || item.suggestedAction, 'self_improvement'),
+      confidence,
+      routePolicyKey: options.routePolicyKey,
+      topRouteType: options.topRouteType,
+      toolName: options.toolName,
+      taskType: options.taskType,
+      sessionId: options.sessionId,
+      channelId: options.channelId,
+      groupId: options.groupId,
+      userId: uid,
+      evidence: normalizeArray(item.evidence).map((entry) => ({ excerpt: sanitizeUntrustedContent(entry, 'self_improvement') }))
+    });
+    if (event) stored.push(event);
+  }
+  return stored;
+}
+
 function listRecentEvents(limit = 10, filters = {}) {
   return readEvents()
     .filter((item) => !filters.kind || item.kind === normalizeKind(filters.kind))
@@ -1370,6 +1403,7 @@ module.exports = {
   formatPatternsAsText,
   formatRulesAsText,
   learnSelfImprovement,
+  storeExtractedSelfImprovementItems,
   listGuides,
   listPatterns,
   listRecentEvents,

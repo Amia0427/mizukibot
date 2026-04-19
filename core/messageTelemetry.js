@@ -20,6 +20,12 @@ function appendInboundTimingLog(logFilePath, enableDebugLog, payload = {}) {
   } catch (_) {}
 }
 
+function createInboundTimingLogger(logFilePath, enableDebugLog) {
+  return function logInboundTiming(payload = {}) {
+    appendInboundTimingLog(logFilePath, enableDebugLog, payload);
+  };
+}
+
 function createReplyTelemetryBridge(runtimeConfig = {}) {
   const store = createCheckpointStore({
     checkpointDir: runtimeConfig.LANGGRAPH_V2_CHECKPOINT_DIR,
@@ -158,6 +164,7 @@ function createMessageTelemetryCoordinator(deps = {}) {
 
 module.exports = {
   appendInboundTimingLog,
+  createInboundTimingLogger,
   createMessageTelemetryCoordinator,
   createReplyTelemetryBridge,
   getRawMessageTimestampMs

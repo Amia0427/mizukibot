@@ -23,9 +23,16 @@ function buildVisionCaptionSystemPrompt() {
     '你只负责高精度视觉理解，并且只能输出 JSON。',
     '不要输出 markdown，不要输出解释，不要输出多余前后缀。',
     '必须综合全部输入图片，并保持 image_index 与输入顺序一致。',
+    '描述必须尽量具体，优先说清楚主体外观、服饰、颜色、材质、姿态、表情、构图、背景、光照、氛围、可见文字与可能用途。',
+    '如果是插画、头像、表情包、截图、商品图、聊天记录、游戏画面、照片等，要明确判断媒介类型和用途猜测。',
+    '如果图像里有人物，尽量拆出发色、瞳色、年龄感、风格感、朝向、动作、情绪、配饰、服装要点。',
+    '如果图像里有界面、UI、按钮、边框、裁切、头像框、贴纸、水印、logo、文字区域，也要写出来。',
+    '如果图像可能对应某个角色、IP、作品、游戏、平台头像风格或常见表情包风格，可以给出低置信度 identity hints，但不要把猜测写成确定事实。',
+    '如果图像存在裁切、模糊、压缩、低清晰度、过曝、暗部丢失、遮挡、水印、边缘缺失，也要明确写出来。',
+    '如果图像细节不足，不要硬编，改为把不确定项写进 uncertainties。',
     '如果存在不确定性，明确写入 uncertainties，不要伪造细节。',
     '如果图片里有文字，尽量提取到 visible_text 和 ocr_text。',
-    'recommended_prompt_context 必须是适合后续主回复模型消费的中文文本摘要。',
+    'recommended_prompt_context 必须是适合后续主回复模型消费的中文细节摘要，要比 summary 更丰富，但仍然是自然中文，不是键值堆砌。',
     'short_persist_summary 必须比 recommended_prompt_context 更短，只保留后续连续对话最需要的视觉信息。',
     '输出 JSON shape:',
     '{',
@@ -34,15 +41,27 @@ function buildVisionCaptionSystemPrompt() {
     '    {',
     '      "image_index": 0,',
     '      "source": "current|reply|forward",',
-    '      "global_description": "string",',
-    '      "subjects": ["string"],',
-    '      "actions": ["string"],',
-    '      "relationships": ["string"],',
-    '      "visible_text": ["string"],',
+    '      "media_type": "illustration|photo|screenshot|ui|meme|document|unknown",',
+      '      "global_description": "string",',
+    '      "focus_subject": "string",',
+      '      "subjects": ["string"],',
+      '      "actions": ["string"],',
+      '      "relationships": ["string"],',
+    '      "appearance_details": ["string"],',
+    '      "object_details": ["string"],',
+      '      "visible_text": ["string"],',
+    '      "scene_context": ["string"],',
     '      "layout": ["string"],',
+    '      "composition": ["string"],',
+    '      "cropping_and_quality_notes": ["string"],',
+    '      "lighting": ["string"],',
+    '      "color_palette": ["string"],',
+    '      "emotion_tone": ["string"],',
     '      "style": "string",',
-    '      "safety_signals": ["string"],',
-    '      "uncertainties": ["string"]',
+    '      "character_identity_hints": ["string"],',
+    '      "probable_purpose": ["string"],',
+      '      "safety_signals": ["string"],',
+      '      "uncertainties": ["string"]',
     '    }',
     '  ],',
     '  "cross_image_relations": ["string"],',
@@ -70,13 +89,25 @@ function validateVisionCaptionOutput(output = {}) {
     && !Array.isArray(item)
     && Number(item.image_index) === index
     && ALLOWED_IMAGE_SOURCES.has(normalizeSource(item.source))
+    && typeof item.media_type === 'string'
     && typeof item.global_description === 'string'
+    && typeof item.focus_subject === 'string'
     && Array.isArray(item.subjects)
     && Array.isArray(item.actions)
     && Array.isArray(item.relationships)
+    && Array.isArray(item.appearance_details)
+    && Array.isArray(item.object_details)
     && Array.isArray(item.visible_text)
+    && Array.isArray(item.scene_context)
     && Array.isArray(item.layout)
+    && Array.isArray(item.composition)
+    && Array.isArray(item.cropping_and_quality_notes)
+    && Array.isArray(item.lighting)
+    && Array.isArray(item.color_palette)
+    && Array.isArray(item.emotion_tone)
     && typeof item.style === 'string'
+    && Array.isArray(item.character_identity_hints)
+    && Array.isArray(item.probable_purpose)
     && Array.isArray(item.safety_signals)
     && Array.isArray(item.uncertainties)
   ));
@@ -129,13 +160,25 @@ function sanitizeVisionCaptionOutput(output = {}) {
     images: normalizeArray(output.images).map((item, index) => ({
       image_index: index,
       source: normalizeSource(item?.source),
+      media_type: normalizeText(item?.media_type || 'unknown'),
       global_description: normalizeText(item?.global_description),
+      focus_subject: normalizeText(item?.focus_subject),
       subjects: sanitizeStringList(item?.subjects),
       actions: sanitizeStringList(item?.actions),
       relationships: sanitizeStringList(item?.relationships),
+      appearance_details: sanitizeStringList(item?.appearance_details),
+      object_details: sanitizeStringList(item?.object_details),
       visible_text: sanitizeStringList(item?.visible_text),
+      scene_context: sanitizeStringList(item?.scene_context),
       layout: sanitizeStringList(item?.layout),
+      composition: sanitizeStringList(item?.composition),
+      cropping_and_quality_notes: sanitizeStringList(item?.cropping_and_quality_notes),
+      lighting: sanitizeStringList(item?.lighting),
+      color_palette: sanitizeStringList(item?.color_palette),
+      emotion_tone: sanitizeStringList(item?.emotion_tone),
       style: normalizeText(item?.style),
+      character_identity_hints: sanitizeStringList(item?.character_identity_hints),
+      probable_purpose: sanitizeStringList(item?.probable_purpose),
       safety_signals: sanitizeStringList(item?.safety_signals),
       uncertainties: sanitizeStringList(item?.uncertainties)
     })),

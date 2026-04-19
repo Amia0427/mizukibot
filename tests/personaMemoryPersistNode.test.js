@@ -41,7 +41,14 @@ module.exports = (async () => {
     },
     recordPersonaMemoryOutcome: async (surface, payload) => {
       calls.push({ surface, payload });
-      return { persisted: true, updatedSlots: { activeTopic: '部署' } };
+      return {
+        persisted: true,
+        updatedSlots: {
+          activeTopic: '部署',
+          personaSlotsUpdated: ['bot_persona_tone'],
+          relationshipSlotsUpdated: ['relationship_reply_style']
+        }
+      };
     }
   });
 
@@ -67,13 +74,20 @@ module.exports = (async () => {
           carryOverUserTurn: '继续上次部署'
         },
         expressionState: {
-          warmth: 'mid',
-          playfulness: 'low',
-          tease: 'off',
-          initiative: 'reply',
-          jargon: 'off',
-          verbosity: 'normal',
-          guardedness: 'guarded'
+          warmth: { value: 'mid', source: 'persona_memory' },
+          playfulness: { value: 'low', source: 'runtime_inference' },
+          tease: { value: 'off', source: 'runtime_inference' },
+          initiative: { value: 'reply', source: 'surface_policy' },
+          jargon: { value: 'off', source: 'surface_policy' },
+          verbosity: { value: 'normal', source: 'persona_memory' },
+          guardedness: { value: 'guarded', source: 'relationship_memory' }
+        },
+        relationshipState: {
+          relationship: '普通朋友',
+          attitude: '自然接话',
+          replyStylePolicy: '更像熟人聊天',
+          distanceMode: 'friendly',
+          salutationStyle: 'friendly'
         }
       },
       continuityState: {
@@ -104,6 +118,7 @@ module.exports = (async () => {
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(calls[0].surface, 'direct_chat');
   assert.strictEqual(calls[0].payload.state.continuityState.activeTopic, '部署');
+  assert.strictEqual(calls[0].payload.state.relationshipState.distanceMode, 'friendly');
   console.log('personaMemoryPersistNode.test.js passed');
 })().catch((error) => {
   console.error(error);

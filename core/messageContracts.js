@@ -81,6 +81,7 @@ function buildReplyEnvelope(input = {}) {
   const source = input && typeof input === 'object' ? input : {};
   return {
     replyText: String(source.replyText || ''),
+    persistedReplyText: String(source.persistedReplyText || source.replyText || ''),
     replySegments: Array.isArray(source.replySegments) ? [...source.replySegments] : [],
     routeContext: source.routeContext || null,
     sendStrategy: source.sendStrategy || null,

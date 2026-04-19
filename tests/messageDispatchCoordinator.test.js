@@ -91,6 +91,23 @@ module.exports = (async () => {
   assert.strictEqual(aiCalled, true);
   assert.ok(chat.replyOptions.modelConfig);
   assert.strictEqual(typeof chat.replyOptions.modelConfig.model, 'string');
+  assert.strictEqual(chat.replyOptions.disableStream, true, 'group chat should force non-streaming replies');
+
+  const privateChat = await coordinator.dispatchByRoutePlan({
+    route: {
+      meta: {
+        chatType: 'private'
+      }
+    },
+    routeExecutionPlan: { executor: 'direct', allowTools: false, topRouteType: 'direct_chat', allowedTools: [] },
+    cleanText: 'task',
+    imageUrl: null,
+    userInfo: {},
+    senderId: 'u1',
+    groupId: ''
+  });
+  assert.strictEqual(privateChat.reply, 'ai reply');
+  assert.strictEqual(privateChat.replyOptions.disableStream, false, 'private chat should keep the original stream setting');
 
   console.log('messageDispatchCoordinator.test.js passed');
 })().catch((error) => {

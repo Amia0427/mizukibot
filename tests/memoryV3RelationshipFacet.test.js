@@ -52,6 +52,28 @@ module.exports = (async () => {
     text: 'style: 关系近时可以自然接话，但不要装腔。',
     payload: { fieldKey: 'style_pattern', type: 'fact' }
   });
+  await appendMemoryEvent({
+    type: 'memory_confirmed',
+    userId: 'u_rel',
+    scopeType: 'personal',
+    source: 'explicit',
+    sourceKind: 'explicit',
+    status: 'active',
+    memoryKind: 'relationship_style',
+    text: 'relationship_tone: 熟人感、自然接话',
+    payload: { fieldKey: 'relationship_tone', type: 'fact' }
+  });
+  await appendMemoryEvent({
+    type: 'memory_confirmed',
+    userId: 'u_rel',
+    scopeType: 'personal',
+    source: 'explicit',
+    sourceKind: 'explicit',
+    status: 'active',
+    memoryKind: 'relationship_style',
+    text: 'relationship_reply_style: 更像熟人聊天，不突然客套',
+    payload: { fieldKey: 'relationship_reply_style', type: 'fact' }
+  });
 
   const result = materializeMemoryViews();
   const queryResult = await queryMemory({
@@ -63,6 +85,8 @@ module.exports = (async () => {
 
   assert.ok(queryResult.strictResults.some((item) => String(item.text || '').includes('熟人') || String(item.text || '').includes('边界')));
   assert.ok(String(packet.stableProfileText || '').includes('关系'));
+  assert.ok(String(packet.stableProfileText || '').includes('关系风格'));
+  assert.ok(String(result.profileProjection.users.u_rel.personaCore.relationshipStyle || '').includes('relationship_tone'));
   assert.ok(result.profileProjection.users.u_rel.personaCore.relationshipTone !== undefined);
   console.log('memoryV3RelationshipFacet.test.js passed');
 })().catch((error) => {

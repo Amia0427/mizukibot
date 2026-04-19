@@ -149,6 +149,189 @@ module.exports = (async () => {
 
   assert.strictEqual(appendCalls.length, 1);
   assert.strictEqual(appendCalls[0].question, 'hello\n视觉摘要：cat');
+
+  let enqueueCount = 0;
+  let mergeCount = 0;
+  let queuedJob = null;
+  const persistNodeWithPostReplyGate = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {},
+    persistShortTermBridgeSnapshot() {},
+    async appendMemoryEvent() {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      findQueuedJobByAggregateKey() {
+        return queuedJob;
+      },
+      mergeQueuedJob(job, patch) {
+        mergeCount += 1;
+        queuedJob = {
+          ...job,
+          ...patch,
+          turns: [...(Array.isArray(job.turns) ? job.turns : []), ...(Array.isArray(patch.turns) ? patch.turns : [])]
+        };
+        return queuedJob;
+      },
+      enqueue() {
+        enqueueCount += 1;
+        queuedJob = {
+          jobId: 'job_1',
+          dedupeKey: 'dedupe_1',
+          tasks: {},
+          turns: []
+        };
+        return { enqueued: true, job: queuedJob };
+      }
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: false,
+      POST_REPLY_WORKER_GROUP_IDS: ['1083095371'],
+      POST_REPLY_MIN_CONTENT_CHARS: 10,
+      POST_REPLY_USER_COOLDOWN_MS: 300000
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  const gatedState = {
+    request: {
+      userId: 'u1',
+      question: 'hello there',
+      runtimeQuestionText: 'hello there',
+      persistUserText: 'hello there',
+      routeMeta: { groupId: '1083095371' },
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat'
+    },
+    output: {
+      finalReply: 'reply text'
+    },
+    memory: {},
+    thread: { threadId: 't1' },
+    plan: {}
+  };
+
+  await persistNodeWithPostReplyGate(gatedState);
+  await persistNodeWithPostReplyGate(gatedState);
+  assert.strictEqual(enqueueCount, 1, 'post-reply enqueue should respect per-user cooldown');
+  assert.strictEqual(mergeCount, 0, 'cooldown should prevent merge in the strict cooldown case');
+
+  let aggregateEnqueueCount = 0;
+  let aggregateMergeCount = 0;
+  let aggregateQueuedJob = null;
+  const persistNodeWithAggregate = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {},
+    persistShortTermBridgeSnapshot() {},
+    async appendMemoryEvent() {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      findQueuedJobByAggregateKey() {
+        return aggregateQueuedJob;
+      },
+      mergeQueuedJob(job, patch) {
+        aggregateMergeCount += 1;
+        aggregateQueuedJob = {
+          ...job,
+          ...patch,
+          turns: [...(Array.isArray(job.turns) ? job.turns : []), ...(Array.isArray(patch.turns) ? patch.turns : [])]
+        };
+        return aggregateQueuedJob;
+      },
+      enqueue(job) {
+        aggregateEnqueueCount += 1;
+        aggregateQueuedJob = {
+          ...job,
+          jobId: 'agg_job_1',
+          dedupeKey: 'agg_dedupe_1'
+        };
+        return { enqueued: true, job: aggregateQueuedJob };
+      }
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: false,
+      POST_REPLY_WORKER_GROUP_IDS: ['1083095371'],
+      POST_REPLY_MIN_CONTENT_CHARS: 10,
+      POST_REPLY_USER_COOLDOWN_MS: 0,
+      POST_REPLY_AGGREGATE_WINDOW_MS: 300000,
+      POST_REPLY_IDLE_FLUSH_MS: 90000
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  await persistNodeWithAggregate(gatedState);
+  await persistNodeWithAggregate(gatedState);
+  assert.strictEqual(aggregateEnqueueCount, 1, 'windowed aggregate should enqueue once');
+  assert.strictEqual(aggregateMergeCount, 1, 'second turn in window should merge into queued core job');
+  assert.strictEqual(Array.isArray(aggregateQueuedJob.turns) ? aggregateQueuedJob.turns.length : 0, 2);
   console.log('persistNodeConfig.test.js passed');
 })().catch((error) => {
   console.error(error);

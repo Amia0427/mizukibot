@@ -17,8 +17,11 @@ function createFinalValidateNode(deps = {}) {
 
   return async function finalValidateNode(state) {
     const rawFinalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
+    const rawDisplayReply = String(state.output?.displayReply || rawFinalReply || '').trim();
     const protectedReply = protectFinalOutput(rawFinalReply);
+    const protectedDisplayReply = protectFinalOutput(rawDisplayReply);
     const finalReply = String(protectedReply.text || '').trim();
+    const displayReply = String(protectedDisplayReply.text || '').trim() || finalReply;
     const failure = finalReply && isReplyFailure(finalReply, { emptyIsFailure: true })
       ? classifyReplyFailure(finalReply)
       : null;
@@ -31,9 +34,11 @@ function createFinalValidateNode(deps = {}) {
       }),
       createEvent('output_redaction', {
         node: 'final_validate',
-        blocked: Boolean(protectedReply.blocked),
-        reason: String(protectedReply.reason || '').trim(),
-        matches: Array.isArray(protectedReply.matches) ? protectedReply.matches : []
+        blocked: Boolean(protectedReply.blocked || protectedDisplayReply.blocked),
+        reason: String(protectedDisplayReply.reason || protectedReply.reason || '').trim(),
+        matches: Array.isArray(protectedDisplayReply.matches) && protectedDisplayReply.matches.length > 0
+          ? protectedDisplayReply.matches
+          : (Array.isArray(protectedReply.matches) ? protectedReply.matches : [])
       }),
       createEvent('final_output', {
         text: finalReply,
@@ -46,6 +51,8 @@ function createFinalValidateNode(deps = {}) {
       output: {
         ...state.output,
         finalReply,
+        displayReply,
+        persistedReplyText: finalReply,
         failure
       },
       memory: {

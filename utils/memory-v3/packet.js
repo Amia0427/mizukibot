@@ -31,6 +31,9 @@ function assembleMemoryPacket(result = {}, options = {}) {
     profile.relation_stage ? `关系阶段：${profile.relation_stage}` : '',
     persona.summary ? `总结：${persona.summary}` : '',
     persona.impression ? `印象：${persona.impression}` : '',
+    persona.botBasePersona ? `基础人格：${persona.botBasePersona}` : '',
+    persona.userAdaptationPersona ? `用户修正：${persona.userAdaptationPersona}` : '',
+    persona.relationshipStyle ? `关系风格：${persona.relationshipStyle}` : '',
     persona.replyStyle ? `表达风格：${persona.replyStyle}` : '',
     persona.relationshipTone ? `关系语气：${persona.relationshipTone}` : ''
   ].filter(Boolean).join('\n');

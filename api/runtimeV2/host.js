@@ -679,6 +679,23 @@ function createRuntime(options = {}) {
     return 'generic_model_failure';
   }
 
+  function summarizeDirectReplyError(error) {
+    if (!error) return '';
+    const directMessage = String(error?.message || error || '').replace(/\s+/g, ' ').trim();
+    const status = Number(error?.response?.status || 0);
+    const responseData = error?.response?.data;
+    const responseText = typeof responseData === 'string'
+      ? responseData.replace(/\s+/g, ' ').trim()
+      : (responseData && typeof responseData === 'object'
+        ? JSON.stringify(responseData).replace(/\s+/g, ' ').trim()
+        : '');
+    const parts = [];
+    if (Number.isFinite(status) && status > 0) parts.push(`status=${status}`);
+    if (directMessage) parts.push(`message=${directMessage}`);
+    if (responseText) parts.push(`response=${responseText.slice(0, 400)}`);
+    return parts.join(' | ').slice(0, 800);
+  }
+
   function isStableDirectReplyText(text = '') {
     const trimmed = String(text || '').trim();
     if (!trimmed) return false;
@@ -850,8 +867,10 @@ function createRuntime(options = {}) {
     fallbackMessages,
     directContext,
     failureType = 'tool_error',
-    executedToolEnvelopes = []
+    executedToolEnvelopes = [],
+    options = {}
   ) {
+    const telemetry = normalizeObject(options.telemetry);
     const primaryReply = String(assistantMessage?.content || '').trim();
     if (isStableDirectReplyText(primaryReply)) {
       return {
@@ -884,7 +903,17 @@ function createRuntime(options = {}) {
             source: 'markup_only_retry'
           };
         }
-      } catch (_) {}
+      } catch (error) {
+        if (typeof telemetry.onEvent === 'function') {
+          telemetry.onEvent(createEvent('direct_reply_failure', {
+            node: 'direct_reply',
+            stage: 'markup_only_retry',
+            failureType,
+            fallbackSource: 'markup_only_retry',
+            rawErrorMessage: summarizeDirectReplyError(error)
+          }));
+        }
+      }
     }
 
     const directExecLogs = buildDirectToolLoopExecLogs(executedToolEnvelopes);
@@ -908,7 +937,17 @@ function createRuntime(options = {}) {
             source: 'tool_result_synthesis'
           };
         }
-      } catch (_) {}
+      } catch (error) {
+        if (typeof telemetry.onEvent === 'function') {
+          telemetry.onEvent(createEvent('direct_reply_failure', {
+            node: 'direct_reply',
+            stage: 'tool_result_synthesis',
+            failureType,
+            fallbackSource: 'tool_result_synthesis',
+            rawErrorMessage: summarizeDirectReplyError(error)
+          }));
+        }
+      }
     }
 
     try {
@@ -923,16 +962,44 @@ function createRuntime(options = {}) {
           source: 'non_stream_fallback'
         };
       }
-    } catch (_) {}
+    } catch (error) {
+      if (typeof telemetry.onEvent === 'function') {
+        telemetry.onEvent(createEvent('direct_reply_failure', {
+          node: 'direct_reply',
+          stage: 'non_stream_fallback',
+          failureType,
+          fallbackSource: 'non_stream_fallback',
+          rawErrorMessage: summarizeDirectReplyError(error)
+        }));
+      }
+    }
 
     const toolEvidenceFallback = buildDirectToolEvidenceFallback(executedToolEnvelopes);
     if (toolEvidenceFallback) {
+      if (typeof telemetry.onEvent === 'function') {
+        telemetry.onEvent(createEvent('direct_reply_failure', {
+          node: 'direct_reply',
+          stage: 'tool_result_fallback',
+          failureType,
+          fallbackSource: 'tool_result_fallback',
+          rawErrorMessage: ''
+        }));
+      }
       return {
         text: toolEvidenceFallback,
         source: 'tool_result_fallback'
       };
     }
 
+    if (typeof telemetry.onEvent === 'function') {
+      telemetry.onEvent(createEvent('direct_reply_failure', {
+        node: 'direct_reply',
+        stage: 'controlled_failure',
+        failureType,
+        fallbackSource: 'controlled_failure',
+        rawErrorMessage: normalizeText(telemetry.rawErrorMessage || '', 800)
+      }));
+    }
     return {
       text: getControlledFailureReply(failureType),
       source: 'controlled_failure'
@@ -1286,6 +1353,7 @@ function createRuntime(options = {}) {
     streamDirectReply,
     requestReplyImpl,
     classifyDirectReplyError,
+    summarizeDirectReplyError,
     attemptDirectMemoryRecovery,
     getControlledFailureReply,
     updateMemoryCliTurnStateAfterError,
@@ -1422,7 +1490,11 @@ function createRuntime(options = {}) {
     options.streamHadOutput = Boolean(out?.output?.stream?.hadOutput);
     options.streamCompleted = Boolean(out?.output?.stream?.completed);
     options.streamFallbackToNonStream = Boolean(out?.output?.stream?.fallbackToNonStream);
-    const finalReply = sanitizeUserFacingText(out?.output?.finalReply || out?.output?.draftReply || '').trim();
+    options.persistedReplyText = String(out?.output?.persistedReplyText || out?.output?.finalReply || out?.output?.draftReply || '').trim();
+    options.displayReplyText = String(out?.output?.displayReply || '').trim();
+    const finalReply = sanitizeUserFacingText(out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '', {
+      preserveThink: requestOptions?.cotDisplayOnce === true
+    }).trim();
     return finalReply || 'The network was unstable just now. Please try again.';
   }
 

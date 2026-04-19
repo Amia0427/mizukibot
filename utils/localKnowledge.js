@@ -15,7 +15,6 @@ const { loadSessionProjection } = require('./memory-v3/storage');
 const { readFileSync } = require('fs');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
-
 const SOURCE_PRIORITY = Object.freeze({
   session_projection: 500,
   short_term_bridge: 420,

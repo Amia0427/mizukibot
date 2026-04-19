@@ -69,6 +69,14 @@ function getRetries(fallback = 1) {
   return Math.max(0, Math.min(1, Math.floor(n)));
 }
 
+function resolvePostReplyMemoryMode(options = {}) {
+  if (options && options.lightweight === true) return 'core';
+  const raw = String(options.postReplyMemoryMode || config.POST_REPLY_MEMORY_MODE || 'full').trim().toLowerCase();
+  if (raw === 'off' || raw === 'disabled' || raw === 'none') return 'off';
+  if (raw === 'core' || raw === 'basic' || raw === 'lite') return 'core';
+  return 'full';
+}
+
 function shouldPersistMemoryCandidate(type, value, confidence) {
   const text = String(value || '').trim();
   if (!text) return false;
@@ -774,6 +782,8 @@ Rules:
 }
 
 async function learnSomethingNew(userId, userText, botReply, options = {}) {
+  const postReplyMemoryMode = resolvePostReplyMemoryMode(options);
+  if (postReplyMemoryMode === 'off') return;
   const participants = extractParticipantsFromText(userText, botReply, { ...options, userId });
   const entities = extractEntitiesFromConversation(userText, botReply);
   const relations = inferRelations(entities, participants);
@@ -896,6 +906,7 @@ Rules:
     persistLearnedMemories(userId, 'impression', impressions.slice(0, 1), Math.max(confidence, 0.82), { vectorItems, ...sharedMeta });
     persistLearnedMemories(userId, 'topic', topics, Math.min(confidence, 0.9), { vectorItems, ...sharedMeta });
     if (vectorItems.length > 0) addMemoryItemsBatch(vectorItems);
+    if (postReplyMemoryMode === 'core') return;
     const affinityProposal = await extractAffinityProposal(userId, userText, botReply, options);
     if (affinityProposal) {
       applyAffinityProposal(userId, affinityProposal, {
@@ -917,6 +928,133 @@ Rules:
   }
 }
 
+async function extractPostReplyEnrichment(userId, turns = [], options = {}) {
+  const uid = String(userId || '').trim();
+  const items = Array.isArray(turns) ? turns : [];
+  if (!uid || items.length === 0) {
+    return {
+      affinity: null,
+      taskMemory: null,
+      groupMemory: null,
+      styleMemory: null,
+      jargonMemory: null,
+      selfImprovement: null
+    };
+  }
+
+  const conversation = items
+    .map((item, index) => {
+      const question = String(item?.question || '').trim();
+      const answer = String(item?.finalReply || '').trim();
+      if (!question && !answer) return '';
+      return [`Turn ${index + 1}`, `User: ${question}`, `Assistant: ${answer}`].filter(Boolean).join('\n');
+    })
+    .filter(Boolean)
+    .join('\n\n');
+  if (!conversation) {
+    return {
+      affinity: null,
+      taskMemory: null,
+      groupMemory: null,
+      styleMemory: null,
+      jargonMemory: null,
+      selfImprovement: null
+    };
+  }
+
+  const prompt = `
+You are a post-reply enrichment extractor. Return JSON only:
+{
+  "affinity": {
+    "relationship": "",
+    "attitude": "",
+    "favor_delta": 0,
+    "trust_delta": 0,
+    "reason": "",
+    "confidence": 0
+  },
+  "task_memory": {
+    "task_type": "",
+    "trigger": "",
+    "strategy": "",
+    "avoid": "",
+    "outcome": "success",
+    "confidence": 0
+  },
+  "group_memory": {
+    "shared_facts": [],
+    "shared_goals": [],
+    "shared_topics": [],
+    "confidence": 0
+  },
+  "style_memory": {
+    "style_patterns": [],
+    "style_avoid": [],
+    "confidence": 0
+  },
+  "jargon_memory": {
+    "jargon_terms": [],
+    "jargon_patterns": [],
+    "confidence": 0
+  },
+  "self_improvement": {
+    "items": []
+  }
+}
+Rules:
+- return empty objects/arrays with confidence 0 when unsure
+- only extract stable, reusable signals
+- do not fabricate facts or sensitive content
+- self_improvement.items should follow the existing self-improvement extraction shape
+  `.trim();
+
+  const resp = await postWithRetry(
+    ensureChatCompletionsUrl(getMemoryApiBaseUrl()),
+    {
+      model: getMemoryModelName(),
+      temperature: Math.min(getTemperature(), 0.35),
+      top_p: Math.min(getTopP(), 0.9),
+      messages: [
+        { role: 'system', content: prompt },
+        {
+          role: 'user',
+          content: [
+            conversation,
+            `RoutePolicyKey: ${String(options.routePolicyKey || '')}`,
+            `TopRouteType: ${String(options.topRouteType || '')}`,
+            `GroupId: ${String(options.groupId || '')}`
+          ].join('\n')
+        }
+      ],
+      max_tokens: getMaxTokens(700),
+      stream: false,
+      __trace: {
+        source: 'memory_extraction',
+        phase: 'extract_post_reply_enrichment',
+        purpose: 'post_reply_enrichment',
+        userId: uid,
+        routePolicyKey: String(options.routePolicyKey || ''),
+        topRouteType: String(options.topRouteType || ''),
+        memoryInjected: false
+      }
+    },
+    getRetries(1),
+    getMemoryApiKey()
+  );
+
+  const msg = extractMessageContent(resp);
+  const obj = extractJsonSafely(normalizeTextContent(msg?.content));
+  return (obj && typeof obj === 'object') ? obj : {
+    affinity: null,
+    taskMemory: null,
+    groupMemory: null,
+    styleMemory: null,
+    jargonMemory: null,
+    selfImprovement: null
+  };
+}
+
 module.exports = {
-  learnSomethingNew
+  learnSomethingNew,
+  extractPostReplyEnrichment
 };

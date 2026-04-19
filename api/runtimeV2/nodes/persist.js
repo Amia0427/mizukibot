@@ -59,6 +59,27 @@ function createPersistNode(deps = {}) {
   const logPostReplyEnqueueError = typeof deps.logPostReplyEnqueueError === 'function'
     ? deps.logPostReplyEnqueueError
     : (() => {});
+  const postReplyLastEnqueueAtByUser = new Map();
+
+  function normalizeText(value) {
+    return String(value || '').trim();
+  }
+
+  function buildCoreAggregateKey({ userId, sessionKey, groupId }) {
+    return ['core', normalizeText(userId) || 'unknown', normalizeText(sessionKey) || 'unknown', normalizeText(groupId) || 'nogroup'].join('|');
+  }
+
+  function buildAggregateAvailableAt(firstQueuedAt, lastMergedAt) {
+    const aggregateWindowMs = Math.max(0, Number(config.POST_REPLY_AGGREGATE_WINDOW_MS) || 0);
+    const idleFlushMs = Math.max(0, Number(config.POST_REPLY_IDLE_FLUSH_MS) || 0);
+    const firstTs = Date.parse(String(firstQueuedAt || ''));
+    const lastTs = Date.parse(String(lastMergedAt || ''));
+    const candidates = [];
+    if (Number.isFinite(firstTs) && aggregateWindowMs > 0) candidates.push(firstTs + aggregateWindowMs);
+    if (Number.isFinite(lastTs) && idleFlushMs > 0) candidates.push(lastTs + idleFlushMs);
+    if (candidates.length === 0) return normalizeText(lastMergedAt) || normalizeText(firstQueuedAt) || new Date().toISOString();
+    return new Date(Math.min(...candidates)).toISOString();
+  }
 
   return async function persistNode(state) {
     const request = normalizeObject(state.request, {});
@@ -83,7 +104,28 @@ function createPersistNode(deps = {}) {
       && shouldQueueMemoryLearningForV2(request, finalReply);
     const shouldLearnSelfImprovementValue = shouldPersistChatArtifacts
       && shouldLearnSelfImprovement(request, finalReply);
+    const normalizedUserId = String(request.userId || '').trim();
+    const postReplyContentChars = Array.from(`${userContent}\n${finalReply}`.replace(/\s+/g, '')).length;
+    const minPostReplyContentChars = Math.max(0, Number(config.POST_REPLY_MIN_CONTENT_CHARS) || 0);
+    const hasEnoughPostReplyContent = postReplyContentChars >= minPostReplyContentChars;
+    const postReplyUserCooldownMs = Math.max(0, Number(config.POST_REPLY_USER_COOLDOWN_MS) || 0);
+    const lastPostReplyEnqueueAt = Math.max(0, Number(postReplyLastEnqueueAtByUser.get(normalizedUserId) || 0) || 0);
+    const now = Date.now();
+    const postReplyCooldownReady = !normalizedUserId
+      || !postReplyUserCooldownMs
+      || !lastPostReplyEnqueueAt
+      || (now - lastPostReplyEnqueueAt) >= postReplyUserCooldownMs;
+    const routeGroupId = String(request.routeMeta?.groupId || request.routeMeta?.group_id || '').trim();
+    const allowedPostReplyGroupIds = Array.isArray(config.POST_REPLY_WORKER_GROUP_IDS)
+      ? config.POST_REPLY_WORKER_GROUP_IDS.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    const shouldAllowPostReplyForGroup = routeGroupId
+      && allowedPostReplyGroupIds.length > 0
+      && allowedPostReplyGroupIds.includes(routeGroupId);
     const shouldEnqueuePostReplyJob = shouldPersistChatArtifacts
+      && hasEnoughPostReplyContent
+      && postReplyCooldownReady
+      && shouldAllowPostReplyForGroup
       && (shouldLearn || shouldLearnSelfImprovementValue || shouldPersistJournal);
     let enqueuedPostReplyJob = null;
 
@@ -180,46 +222,97 @@ function createPersistNode(deps = {}) {
       addProfileItem(request.userId, 'recent_topics', String(request.question || '').slice(0, 20), 12);
       if (shouldEnqueuePostReplyJob) {
         const routeMeta = pickRouteMetaForPostReplyJob(request.routeMeta);
-        const dedupeKey = stableHash({
-          threadId: String(state.thread?.threadId || '').trim(),
-          question: String(request.question || ''),
-          finalReply,
-          routePolicyKey: String(request.routePolicyKey || '').trim()
+        const aggregateKey = buildCoreAggregateKey({
+          userId: normalizedUserId,
+          sessionKey: String(request.sessionKey || '').trim(),
+          groupId: routeGroupId
         });
+        const coreTurn = {
+          question: userContent,
+          finalReply,
+          createdAt: new Date(now).toISOString(),
+          routeMeta,
+          continuitySnapshot: {
+            activeTopic: String(state.memory?.continuityState?.payload?.active_topic || '').trim(),
+            openLoops: normalizeArray(state.memory?.continuityState?.payload?.open_loops),
+            assistantCommitments: normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments),
+            userConstraints: normalizeArray(state.memory?.continuityState?.payload?.user_constraints),
+            carryOverUserTurn: String(state.memory?.continuityState?.payload?.carry_over_user_turn || '').trim()
+          },
+          contextStats: {
+            usageRatio: Number(state.memory?.contextStats?.usageRatio || state.memory?.mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.usageRatio || 0) || 0,
+            compactionLevel: String(state.memory?.contextStats?.compactionLevel || state.memory?.mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
+          }
+        };
         try {
-          const enqueueResult = postReplyJobQueue.enqueue({
-            type: 'post_reply',
-            dedupeKey,
+          const existingQueuedCoreJob = typeof postReplyJobQueue.findQueuedJobByAggregateKey === 'function'
+            ? postReplyJobQueue.findQueuedJobByAggregateKey(aggregateKey, 'core')
+            : null;
+          const enqueueResult = existingQueuedCoreJob
+            ? {
+                enqueued: false,
+                job: typeof postReplyJobQueue.mergeQueuedJob === 'function'
+                  ? postReplyJobQueue.mergeQueuedJob(existingQueuedCoreJob, {
+                      routeMeta,
+                      continuitySnapshot: coreTurn.continuitySnapshot,
+                      contextStats: coreTurn.contextStats,
+                      lastMergedAt: coreTurn.createdAt,
+                      turns: [coreTurn],
+                      tasks: {
+                        memoryLearning: Boolean(existingQueuedCoreJob.tasks?.memoryLearning) || shouldLearn,
+                        selfImprovement: Boolean(existingQueuedCoreJob.tasks?.selfImprovement) || shouldLearnSelfImprovementValue,
+                        dailyJournal: Boolean(existingQueuedCoreJob.tasks?.dailyJournal) || shouldPersistJournal
+                      },
+                      userInfo: normalizeObject(request.userInfo, {})
+                    }, {
+                      aggregateWindowMs: Number(config.POST_REPLY_AGGREGATE_WINDOW_MS) || 0,
+                      idleFlushMs: Number(config.POST_REPLY_IDLE_FLUSH_MS) || 0
+                    })
+                  : existingQueuedCoreJob
+              }
+            : postReplyJobQueue.enqueue({
+                type: 'post_reply',
+                phase: 'core',
+                aggregateKey,
+                dedupeKey: stableHash({
+                  aggregateKey,
+                  firstTurnAt: coreTurn.createdAt
+                }),
+                userId: String(request.userId || '').trim(),
+                userInfo: normalizeObject(request.userInfo, {}),
+                question: userContent,
+                finalReply,
+                routePolicyKey: String(request.routePolicyKey || '').trim(),
+                topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),
+                routeMeta,
+                sessionKey: String(request.sessionKey || '').trim(),
+                continuitySnapshot: coreTurn.continuitySnapshot,
+                contextStats: coreTurn.contextStats,
+                execLogs: normalizeArray(state.plan?.finalExecLogs),
+                turns: [coreTurn],
+                firstQueuedAt: coreTurn.createdAt,
+                lastMergedAt: coreTurn.createdAt,
+                mergeCount: 1,
+                availableAt: buildAggregateAvailableAt(coreTurn.createdAt, coreTurn.createdAt),
+                tasks: {
+                  memoryLearning: shouldLearn,
+                  selfImprovement: shouldLearnSelfImprovementValue,
+                  dailyJournal: shouldPersistJournal
+                },
+                threadId: String(state.thread?.threadId || '').trim()
+              });
+          console.log('[post-reply] enqueued', {
+            jobId: enqueueResult.job?.jobId || '',
+            aggregateKey,
             userId: String(request.userId || '').trim(),
-            userInfo: normalizeObject(request.userInfo, {}),
-            question: userContent,
-            finalReply,
-            routePolicyKey: String(request.routePolicyKey || '').trim(),
-            topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),
-            routeMeta,
-            sessionKey: String(request.sessionKey || '').trim(),
-            continuitySnapshot: {
-              activeTopic: String(state.memory?.continuityState?.payload?.active_topic || '').trim(),
-              openLoops: normalizeArray(state.memory?.continuityState?.payload?.open_loops),
-              assistantCommitments: normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments),
-              userConstraints: normalizeArray(state.memory?.continuityState?.payload?.user_constraints),
-              carryOverUserTurn: String(state.memory?.continuityState?.payload?.carry_over_user_turn || '').trim()
-            },
-            contextStats: {
-              usageRatio: Number(state.memory?.contextStats?.usageRatio || state.memory?.mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.usageRatio || 0) || 0,
-              compactionLevel: String(state.memory?.contextStats?.compactionLevel || state.memory?.mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
-            },
-            execLogs: normalizeArray(state.plan?.finalExecLogs),
-            tasks: {
-              memoryLearning: shouldLearn,
-              selfImprovement: shouldLearnSelfImprovementValue,
-              dailyJournal: shouldPersistJournal
-            },
-            threadId: String(state.thread?.threadId || '').trim()
+            enqueued: Boolean(enqueueResult.enqueued)
           });
+          if (enqueueResult.enqueued && normalizedUserId) {
+            postReplyLastEnqueueAtByUser.set(normalizedUserId, now);
+          }
           enqueuedPostReplyJob = {
             jobId: enqueueResult.job?.jobId || '',
-            dedupeKey,
+            dedupeKey: String(enqueueResult.job?.dedupeKey || ''),
             enqueued: Boolean(enqueueResult.enqueued)
           };
         } catch (error) {

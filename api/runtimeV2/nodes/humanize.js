@@ -51,6 +51,7 @@ function createHumanizeNode(deps = {}) {
       const finalReply = request.streaming
         ? await maybeStreamFinalReply(state, draftReply)
         : draftReply;
+      const displayReply = String(state.output?.displayReply || finalReply || '').trim() || finalReply;
       const nextStream = request.streaming && String(finalReply || '').trim()
         ? {
           ...ensureOutputStream(state.output, state.execution?.mode === 'tool_plan' ? 'final_only' : 'direct'),
@@ -67,6 +68,8 @@ function createHumanizeNode(deps = {}) {
         output: {
           ...state.output,
           finalReply,
+          displayReply,
+          persistedReplyText: String(finalReply || '').trim(),
           stream: nextStream
         },
         execution: {
@@ -109,6 +112,8 @@ function createHumanizeNode(deps = {}) {
       output: {
         ...state.output,
         finalReply: String(finalReply || ''),
+        displayReply: String(finalReply || ''),
+        persistedReplyText: String(finalReply || ''),
         stream: nextStream
       },
       execution: {

@@ -126,6 +126,40 @@ function buildQqRichMessagePayload(text, { atSender = true, senderId } = {}) {
   return message.length ? message : null;
 }
 
+const groupReplySendQueueByGroupId = new Map();
+
+function enqueueGroupSend(groupId = '', task = async () => false) {
+  const normalizedGroupId = String(groupId || '').trim();
+  if (!normalizedGroupId) {
+    return Promise.resolve().then(task);
+  }
+
+  const previous = groupReplySendQueueByGroupId.get(normalizedGroupId) || Promise.resolve();
+  let cleanupAttached = false;
+  const runTask = async () => task();
+  const next = previous
+    .catch(() => {})
+    .then(runTask, runTask);
+
+  const cleanup = () => {
+    if (cleanupAttached) return;
+    cleanupAttached = true;
+    next.finally(() => {
+      if (groupReplySendQueueByGroupId.get(normalizedGroupId) === next) {
+        groupReplySendQueueByGroupId.delete(normalizedGroupId);
+      }
+    });
+  };
+
+  groupReplySendQueueByGroupId.set(normalizedGroupId, next);
+  cleanup();
+  return next;
+}
+
+function getGroupReplySendQueueSize() {
+  return groupReplySendQueueByGroupId.size;
+}
+
 async function sendGroupReply({
   sendWithRetry,
   groupId,
@@ -136,55 +170,57 @@ async function sendGroupReply({
   waitMs = 500,
   runtimeConfig = config
 }) {
-  const normalized = String(replyText || '').trim() || '刚才网络有点抖，我再试一次。';
-  const richPayload = buildQqRichMessagePayload(normalized, { atSender, senderId });
-  if (richPayload) {
-    const ok = await sendWithRetry({
-      action: 'send_group_msg',
-      params: { group_id: groupId, message: richPayload }
-    }, retries, waitMs);
+  return enqueueGroupSend(groupId, async () => {
+    const normalized = String(replyText || '').trim() || '刚才网络有点抖，我再试一次。';
+    const richPayload = buildQqRichMessagePayload(normalized, { atSender, senderId });
+    if (richPayload) {
+      const ok = await sendWithRetry({
+        action: 'send_group_msg',
+        params: { group_id: groupId, message: richPayload }
+      }, retries, waitMs);
 
-    if (!ok) {
-      console.error('[reply] send_group_msg failed', {
-        groupId,
-        senderId,
-        chunkIndex: 0,
-        chunkCount: 1,
-        richMessage: true
-      });
+      if (!ok) {
+        console.error('[reply] send_group_msg failed', {
+          groupId,
+          senderId,
+          chunkIndex: 0,
+          chunkCount: 1,
+          richMessage: true
+        });
+      }
+
+      return ok;
     }
 
-    return ok;
-  }
+    const chunks = splitReplyForSend(normalized, getReplyChunkChars(runtimeConfig));
+    if (!chunks.length) return false;
 
-  const chunks = splitReplyForSend(normalized, getReplyChunkChars(runtimeConfig));
-  if (!chunks.length) return false;
+    let sentAny = false;
+    for (let i = 0; i < chunks.length; i += 1) {
+      const prefix = (atSender && i === 0 && senderId) ? `[CQ:at,qq=${senderId}] ` : '';
+      const ok = await sendWithRetry({
+        action: 'send_group_msg',
+        params: { group_id: groupId, message: `${prefix}${chunks[i]}` }
+      }, retries, waitMs);
 
-  let sentAny = false;
-  for (let i = 0; i < chunks.length; i += 1) {
-    const prefix = (atSender && i === 0 && senderId) ? `[CQ:at,qq=${senderId}] ` : '';
-    const ok = await sendWithRetry({
-      action: 'send_group_msg',
-      params: { group_id: groupId, message: `${prefix}${chunks[i]}` }
-    }, retries, waitMs);
+      if (!ok) {
+        console.error('[reply] send_group_msg failed', {
+          groupId,
+          senderId,
+          chunkIndex: i,
+          chunkCount: chunks.length
+        });
+        return sentAny;
+      }
 
-    if (!ok) {
-      console.error('[reply] send_group_msg failed', {
-        groupId,
-        senderId,
-        chunkIndex: i,
-        chunkCount: chunks.length
-      });
-      return sentAny;
+      sentAny = true;
+      if (i < chunks.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 140));
+      }
     }
 
-    sentAny = true;
-    if (i < chunks.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 140));
-    }
-  }
-
-  return sentAny;
+    return sentAny;
+  });
 }
 
 async function sendPrivateReply({
@@ -344,6 +380,7 @@ function buildDailyShareUserInfo(groupId, extra = {}) {
 module.exports = {
   buildQqRichMessagePayload,
   buildDailyShareUserInfo,
+  getGroupReplySendQueueSize,
   getReplyChunkChars,
   parseQqRichMessage,
   recordSystemGroupSend,
