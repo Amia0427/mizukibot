@@ -44,6 +44,7 @@ const { isPrivateChatTestUser, isPrivilegedPrivateChatUser } = require('../utils
 const { handlePassiveGroupAwareness } = require('./passiveGroupAwareness');
 const {
   createContinuousMessagePreprocessor,
+  cheapParseMessageEntry,
   resolveContinuousEntryDetails
 } = require('./continuousMessagePreprocessor');
 const {
@@ -319,6 +320,12 @@ function buildVisionCaptionTelemetryEvent(type = '', payload = {}) {
     type,
     ...payload
   };
+}
+
+function countCachedVisualRefs(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => String(item?.url || '').trim().startsWith('cached-image://'))
+    .length;
 }
 
 function resolveLegacyVisionFallbackModelConfig(imageUrl = null, userId = '', routeMeta = {}) {
@@ -1012,7 +1019,8 @@ function createMessageHandler({
   sendWithRetry,
   detectIntentHybridOverride = null,
   generateSessionContextSummaryOverride = null,
-  inboundConcurrencyControllerOverride = null
+  inboundConcurrencyControllerOverride = null,
+  runVisionCaptionWorkerOverride = null
 }) {
   const inboundTimingLogFile = path.join(config.DATA_DIR, 'inbound_timing.jsonl');
   const logInboundTiming = createInboundTimingLogger(inboundTimingLogFile, config.ENABLE_DEBUG_LOG);
@@ -1034,6 +1042,9 @@ function createMessageHandler({
   const routeResolver = typeof detectIntentHybridOverride === 'function'
     ? detectIntentHybridOverride
     : detectIntentHybrid;
+  const visionCaptionWorkerRunner = typeof runVisionCaptionWorkerOverride === 'function'
+    ? runVisionCaptionWorkerOverride
+    : runVisionCaptionWorker;
   const sessionSummaryGenerator = typeof generateSessionContextSummaryOverride === 'function'
     ? generateSessionContextSummaryOverride
     : generateSessionContextSummary;
@@ -1925,7 +1936,27 @@ function createMessageHandler({
     }
 
     const effectiveMsg = preprocessed?.effectiveMsg || msg;
-    const continuousMeta = preprocessed?.meta || effectiveMsg.__continuousMessageMeta || null;
+    let continuousMeta = preprocessed?.meta || effectiveMsg.__continuousMessageMeta || null;
+    if (!continuousMeta) {
+      const syntheticContinuousMeta = cheapParseMessageEntry(effectiveMsg, {
+        effectiveBotQQ
+      });
+      await resolveContinuousEntryDetails(syntheticContinuousMeta, {
+        effectiveBotQQ,
+        resolveReply: Boolean(syntheticContinuousMeta.replyMessageId),
+        resolveForward: Array.isArray(syntheticContinuousMeta.forwardIds) && syntheticContinuousMeta.forwardIds.length > 0,
+        resolveCards: Array.isArray(syntheticContinuousMeta.qqCardUrls) && syntheticContinuousMeta.qqCardUrls.length > 0
+      });
+      syntheticContinuousMeta.sessionKey = '';
+      syntheticContinuousMeta.firstTimestamp = syntheticContinuousMeta.firstTimestamp || syntheticContinuousMeta.timestamp || Date.now();
+      syntheticContinuousMeta.lastTimestamp = syntheticContinuousMeta.lastTimestamp || syntheticContinuousMeta.timestamp || Date.now();
+      syntheticContinuousMeta.sourceMessageIds = Array.isArray(syntheticContinuousMeta.sourceMessageIds) && syntheticContinuousMeta.sourceMessageIds.length
+        ? syntheticContinuousMeta.sourceMessageIds
+        : (syntheticContinuousMeta.messageId ? [syntheticContinuousMeta.messageId] : []);
+      syntheticContinuousMeta.flushReason = String(syntheticContinuousMeta.flushReason || 'single_message').trim() || 'single_message';
+      continuousMeta = syntheticContinuousMeta;
+      effectiveMsg.__continuousMessageMeta = continuousMeta;
+    }
     const rawText = effectiveMsg.raw_message || '';
     const inboundSessionKey = resolveShortTermSessionKey(senderId, isPrivateChatType(chatType) ? {} : { groupId });
     const isPrivateInbound = isPrivateChatType(chatType);
@@ -2241,7 +2272,6 @@ function createMessageHandler({
       continuousMeta,
       historySummary: buildSubagentContextSummary(senderId, groupId, { maxLength: 180 })
     });
-    const effectiveVisualInput = resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText);
     const visualImageCollectionResult = buildVisualImageCollectionDetails(
       continuousMeta,
       directedContext,
@@ -2249,6 +2279,9 @@ function createMessageHandler({
       { maxImages: config.VISION_CAPTION_WORKER_MAX_IMAGES }
     );
     const visualImageCollection = visualImageCollectionResult.images;
+    const effectiveVisualInput = String(visualImageCollection[0]?.url || '').trim()
+      || resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText);
+    const visualCacheRefCount = countCachedVisualRefs(visualImageCollection);
     const directedScene = String(directedContext?.scene || '').trim();
     const replyToBotRequested = directedScene === 'reply_to_bot';
     const replyToBotRecentWindowMs = Math.max(
@@ -2319,6 +2352,8 @@ function createMessageHandler({
         forcedReplyPriority: visualImageCollectionResult.meta?.forcedReplyPriority === true,
         replyPriorityReason: String(visualImageCollectionResult.meta?.replyPriorityReason || '').trim(),
         selectedPrimarySource: String(visualImageCollectionResult.meta?.selectedPrimarySource || '').trim(),
+        cacheRefCount: visualCacheRefCount,
+        selectedVisualInput: effectiveVisualInput,
         rawMessageTimestampMs,
         elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
         lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
@@ -2327,7 +2362,7 @@ function createMessageHandler({
 
     if (visualImageCollection.length > 0) {
       const visionStartedAt = Date.now();
-      const captionResult = await runVisionCaptionWorker({
+      const captionResult = await visionCaptionWorkerRunner({
         originalUserText: effectiveIntentText,
         images: visualImageCollection,
         quotePriorityMode: String(directedContext?.quotePriority?.mode || '').trim(),
@@ -2349,6 +2384,7 @@ function createMessageHandler({
           userId: String(senderId || '').trim(),
           chatType,
           imageCount: visualImageCollection.length,
+          cacheRefCount: visualCacheRefCount,
           durationMs: Math.max(0, Date.now() - visionStartedAt),
           fallbackUsed: false,
           rawMessageTimestampMs,
@@ -2367,8 +2403,10 @@ function createMessageHandler({
           userId: String(senderId || '').trim(),
           chatType,
           imageCount: visualImageCollection.length,
+          cacheRefCount: visualCacheRefCount,
           durationMs: Math.max(0, Date.now() - visionStartedAt),
           fallbackReason: String(captionResult.fallbackReason || 'worker_failed').trim(),
+          fallbackImageUrl: effectiveVisualInput,
           rawMessageTimestampMs,
           elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
           lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null

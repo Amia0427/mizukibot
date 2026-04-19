@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
+const { createJsonHotStore } = require('./jsonHotStore');
 const {
   compareDateTimeText,
   computeNextCronRun,
@@ -212,11 +213,16 @@ function validateTaskInput(input = {}) {
 function createScheduledTaskStore(options = {}) {
   const filePath = resolveStoreFile(options);
   const tasksById = new Map();
+  const hotStore = createJsonHotStore(filePath, {
+    fallback: () => ({ version: 1, tasks: [] }),
+    debounceMs: Math.max(0, Number(options.debounceMs || config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
+    maxDelayMs: Math.max(0, Number(options.maxDelayMs || config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
+  });
 
   function persist() {
     const tasks = Array.from(tasksById.values())
       .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
-    atomicWriteJson(filePath, {
+    hotStore.replace({
       version: 1,
       tasks
     });
@@ -224,7 +230,7 @@ function createScheduledTaskStore(options = {}) {
 
   function restore() {
     tasksById.clear();
-    const data = safeReadJson(filePath, { version: 1, tasks: [] });
+    const data = hotStore.read({ forceReload: true });
     for (const item of Array.isArray(data?.tasks) ? data.tasks : []) {
       const normalized = normalizeTask(item);
       if (!normalized.id) continue;
@@ -367,6 +373,9 @@ function createScheduledTaskStore(options = {}) {
     cancelTask,
     createTask,
     deleteTask,
+    flushSync() {
+      return hotStore.flushSync();
+    },
     getDueTasks,
     getTask,
     listTasks,

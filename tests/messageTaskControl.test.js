@@ -4,6 +4,7 @@ const { createMessageTaskControlCoordinator } = require('../core/messageTaskCont
 
 const sent = [];
 let backgroundTriggered = false;
+let resolvedRouteMeta = null;
 
 const runtime = {
   getSessionState() {
@@ -35,12 +36,15 @@ module.exports = (async () => {
     routeResolver: async () => ({ topRouteType: 'direct_chat', meta: {} }),
     planDirectChat: async () => ({ executionPlan: {} }),
     routeExecution: {
-      resolveRouteExecution: () => ({
+      resolveRouteExecution: (route) => {
+        resolvedRouteMeta = route?.meta || null;
+        return ({
         executor: 'background_direct',
         allowTools: true,
         topRouteType: 'direct_chat',
         allowedTools: ['memory_cli']
-      })
+        });
+      }
     },
     backgroundTaskRuntime: runtime,
     buildRoutePromptBundle: () => ({ toolGuidancePrompt: 'prompt' }),
@@ -75,6 +79,9 @@ module.exports = (async () => {
   });
   assert.strictEqual(supplement, true);
   assert.strictEqual(backgroundTriggered, true);
+  assert.ok(resolvedRouteMeta);
+  assert.ok(resolvedRouteMeta.toolPlanner);
+  assert.ok(resolvedRouteMeta.directChatPlanner);
 
   console.log('messageTaskControl.test.js passed');
 })().catch((error) => {

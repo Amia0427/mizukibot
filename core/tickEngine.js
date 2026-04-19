@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { createJsonHotStore } = require('../utils/jsonHotStore');
 const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent, extractJsonSafely } = require('../api/parser');
 const { formatDateInTz, getDatePartsInTz } = require('../utils/time');
@@ -38,6 +39,11 @@ const { getDailyShareEngine } = require('./dailyShareEngine');
 const { getLifeSchedulerEngine } = require('./lifeSchedulerEngine');
 
 const TICK_STATE_FILE = path.join(config.DATA_DIR, 'tick_state.json');
+const tickStateStore = createJsonHotStore(TICK_STATE_FILE, {
+  fallback: () => ({}),
+  debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
+  maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
+});
 const RANDOM_WINDOW_DEFS = Object.freeze([
   { key: 'morning', configKey: 'PROACTIVE_TOUCH_WINDOWS_MORNING' },
   { key: 'afternoon', configKey: 'PROACTIVE_TOUCH_WINDOWS_AFTERNOON' },
@@ -57,7 +63,7 @@ function safeReadJson(filePath, fallback = {}) {
 
 function saveTickState(state) {
   try {
-    fs.writeFileSync(TICK_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+    tickStateStore.replace(state);
   } catch (error) {
     console.error('[tick] failed to save state:', error?.message || error);
   }
@@ -86,7 +92,7 @@ function normalizeUserTickState(raw = {}, today = '') {
 }
 
 function loadTickState() {
-  const raw = safeReadJson(TICK_STATE_FILE, {});
+  const raw = tickStateStore.read({ forceReload: true });
   const next = {};
   for (const [userId, value] of Object.entries(raw || {})) {
     next[String(userId)] = normalizeUserTickState(value, String(value?.day || '').trim());
@@ -1075,12 +1081,19 @@ async function runLifeSchedulerTick(ws, askAIByGraph, date = new Date()) {
 
 function startTickEngine(ws, askAIByGraph) {
   const state = loadTickState();
+  const timers = {
+    proactive: null,
+    dailyShare: null,
+    lifeScheduler: null
+  };
 
   async function runOnce() {
     try {
       await runTickCycle(ws, askAIByGraph, state, new Date());
     } catch (error) {
       console.error('[tick] execution failed:', error?.message || error);
+    } finally {
+      scheduleProactiveTick(getProactiveScanIntervalMs());
     }
   }
 
@@ -1089,6 +1102,8 @@ function startTickEngine(ws, askAIByGraph) {
       await runDailyShareTick(ws, askAIByGraph, new Date());
     } catch (error) {
       console.error('[tick] daily share execution failed:', error?.message || error);
+    } finally {
+      scheduleDailyShareTick(getDailyShareScanIntervalMs());
     }
   }
 
@@ -1097,7 +1112,33 @@ function startTickEngine(ws, askAIByGraph) {
       await runLifeSchedulerTick(ws, askAIByGraph, new Date());
     } catch (error) {
       console.error('[tick] life scheduler execution failed:', error?.message || error);
+    } finally {
+      scheduleLifeSchedulerTick(getLifeSchedulerScanIntervalMs());
     }
+  }
+
+  function armTimer(slot, delayMs, runner) {
+    if (timers[slot]) {
+      clearTimeout(timers[slot]);
+      timers[slot] = null;
+    }
+    timers[slot] = setTimeout(() => {
+      timers[slot] = null;
+      void runner();
+    }, Math.max(0, Number(delayMs) || 0));
+    if (typeof timers[slot].unref === 'function') timers[slot].unref();
+  }
+
+  function scheduleProactiveTick(delayMs) {
+    armTimer('proactive', delayMs, runOnce);
+  }
+
+  function scheduleDailyShareTick(delayMs) {
+    armTimer('dailyShare', delayMs, runDailyShareOnce);
+  }
+
+  function scheduleLifeSchedulerTick(delayMs) {
+    armTimer('lifeScheduler', delayMs, runLifeSchedulerOnce);
   }
 
   const startDelayMs = getProactiveStartDelayMs();
@@ -1105,16 +1146,9 @@ function startTickEngine(ws, askAIByGraph) {
   const dailyShareIntervalMs = getDailyShareScanIntervalMs();
   const lifeSchedulerIntervalMs = getLifeSchedulerScanIntervalMs();
 
-  setTimeout(() => {
-    runOnce();
-    setInterval(runOnce, intervalMs);
-  }, startDelayMs);
-
-  runDailyShareOnce();
-  setInterval(runDailyShareOnce, dailyShareIntervalMs);
-
-  runLifeSchedulerOnce();
-  setInterval(runLifeSchedulerOnce, lifeSchedulerIntervalMs);
+  scheduleProactiveTick(startDelayMs);
+  void runDailyShareOnce();
+  void runLifeSchedulerOnce();
 
   console.log(
     `[tick] proactive scheduler armed: first scan in ${Math.floor(startDelayMs / 60000)}m, interval ${Math.floor(intervalMs / 60000)}m`

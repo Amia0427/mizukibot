@@ -254,9 +254,7 @@ function resolveDirectChatExecution(route = {}) {
         unavailableReason: ''
       };
     }
-    if (toolIntent === 'force_tools' || (shouldRequirePlanner && !plannerDecision?.shouldUseTools)) {
-      // source-compat anchor:
-      // unavailableReason: shouldRequirePlanner && !plannerDecision?.shouldUseTools ? 'planner-missing' : 'no-allowed-tools'
+    if (toolIntent === 'force_tools') {
       return {
         ...base,
         executor: needsBackground ? 'background_direct' : 'direct',
@@ -264,7 +262,7 @@ function resolveDirectChatExecution(route = {}) {
         routeDebugKey,
         allowStream: false,
         needsBackground,
-        unavailableReason: privateRestrictionReason || (shouldRequirePlanner && !plannerDecision?.shouldUseTools ? 'planner-missing' : 'no-allowed-tools')
+        unavailableReason: privateRestrictionReason || 'no-allowed-tools'
       };
     }
     return {

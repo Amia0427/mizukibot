@@ -17,6 +17,7 @@ const { getSchedulerRuntime } = require('./core/schedulerRuntime');
 const { sendGroupMessage } = require('./api/qqActionService');
 const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime');
 const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/napcatLogFollower');
+const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
@@ -157,6 +158,14 @@ const schedulerRuntime = getSchedulerRuntime({
     return true;
   }
 });
+const resourceSnapshotLoop = startResourceSnapshotLoop(() => ({
+  component: 'main_process',
+  wsReadyState: ws ? ws.readyState : -1,
+  reconnectAttempts,
+  schedulerStarted,
+  tickStarted,
+  postReplyInline: Boolean(postReplyWorkerRuntime)
+}));
 
 function connectNapCat() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
@@ -207,6 +216,9 @@ function connectNapCat() {
     try {
       const msg = JSON.parse(data);
       appendNapcatPacketToLog(msg);
+      void napcatLogFollower.handleLivePacket(msg).catch((error) => {
+        console.error('[NapCat follower live packet error]', error?.message || error);
+      });
       if (napcatActionClient.handleMessage(msg)) return;
       await handleIncomingMessage(msg);
     } catch (e) {

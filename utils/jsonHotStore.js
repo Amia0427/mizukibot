@@ -250,6 +250,92 @@ function createTextHotStore(filePath, options = {}) {
   });
 }
 
+function createJsonLineHotWriter(filePath, options = {}) {
+  registerFlushHooks();
+  const writer = {
+    filePath,
+    encoding: options.encoding || 'utf8',
+    debounceMs: Math.max(0, Number(options.debounceMs) || DEFAULT_DEBOUNCE_MS),
+    maxDelayMs: Math.max(0, Number(options.maxDelayMs) || DEFAULT_MAX_DELAY_MS),
+    serializeLine: typeof options.serializeLine === 'function'
+      ? options.serializeLine
+      : ((value) => JSON.stringify(value)),
+    pendingLines: [],
+    dirty: false,
+    firstDirtyAt: 0,
+    timer: null,
+    flushCount: 0
+  };
+
+  function clearTimer() {
+    if (writer.timer) {
+      clearTimeout(writer.timer);
+      writer.timer = null;
+    }
+  }
+
+  function flushSync() {
+    if (!writer.dirty || writer.pendingLines.length === 0) return false;
+    ensureDir(writer.filePath);
+    const lines = writer.pendingLines.splice(0, writer.pendingLines.length);
+    writer.dirty = false;
+    writer.firstDirtyAt = 0;
+    clearTimer();
+    try {
+      fs.appendFileSync(writer.filePath, `${lines.join('\n')}\n`, writer.encoding);
+      writer.flushCount += 1;
+      return true;
+    } catch (error) {
+      writer.pendingLines.unshift(...lines);
+      writer.dirty = writer.pendingLines.length > 0;
+      if (writer.dirty && !writer.firstDirtyAt) writer.firstDirtyAt = Date.now();
+      throw error;
+    }
+  }
+
+  function scheduleFlush() {
+    clearTimer();
+    const elapsed = writer.firstDirtyAt ? (Date.now() - writer.firstDirtyAt) : 0;
+    const remaining = Math.max(0, writer.maxDelayMs - elapsed);
+    const waitMs = Math.min(writer.debounceMs, remaining);
+    writer.timer = setTimeout(() => {
+      try {
+        flushSync();
+      } catch (error) {
+        console.error('[jsonHotStore] jsonl flush failed:', error?.message || error);
+      }
+    }, waitMs);
+  }
+
+  function append(value) {
+    const line = writer.serializeLine(value);
+    if (!line) return 0;
+    writer.pendingLines.push(String(line));
+    writer.dirty = true;
+    if (!writer.firstDirtyAt) writer.firstDirtyAt = Date.now();
+    scheduleFlush();
+    return writer.pendingLines.length;
+  }
+
+  function getMeta() {
+    return {
+      filePath: writer.filePath,
+      dirty: writer.dirty,
+      pendingLines: writer.pendingLines.length,
+      flushCount: writer.flushCount
+    };
+  }
+
+  const api = {
+    append,
+    flushSync,
+    getMeta
+  };
+
+  STORE_REGISTRY.add(api);
+  return api;
+}
+
 function flushAllHotStoresSync() {
   let flushed = 0;
   for (const store of STORE_REGISTRY) {
@@ -265,6 +351,7 @@ function flushAllHotStoresSync() {
 module.exports = {
   DEFAULT_DEBOUNCE_MS,
   DEFAULT_MAX_DELAY_MS,
+  createJsonLineHotWriter,
   createJsonHotStore,
   createTextHotStore,
   flushAllHotStoresSync
