@@ -279,6 +279,7 @@ function createMessageTaskControlCoordinator(deps = {}) {
         });
         route.meta = {
           ...(route.meta || {}),
+          toolPlanner: plannerDecision,
           directChatPlanner: plannerDecision
         };
       }

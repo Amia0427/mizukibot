@@ -463,9 +463,12 @@ function cloneReplyContext(replyContext = null) {
 }
 
 async function buildImageRefMap(urls = [], options = {}) {
+  const ensureImageRef = typeof options.ensureCachedImageRef === 'function'
+    ? options.ensureCachedImageRef
+    : ensureCachedImageRef;
   const out = {};
   for (const url of uniqueStrings(Array.isArray(urls) ? urls : [])) {
-    const cached = await ensureCachedImageRef(url, {
+    const cached = await ensureImageRef(url, {
       timeoutMs: options.imageCacheTimeoutMs,
       maxBytes: options.imageCacheMaxBytes
     });
@@ -851,6 +854,16 @@ async function resolveContinuousEntryDetails(entry = {}, options = {}) {
   if (Array.isArray(entry.forwardImageUrls) && (!entry.forwardImageRefMap || Object.keys(entry.forwardImageRefMap).length === 0)) {
     entry.forwardImageRefMap = await buildImageRefMap(entry.forwardImageUrls, options);
   }
+  const selectedImageUrl = normalizeText(
+    entry.selectedImageUrl
+    || (Array.isArray(entry.imageUrls) && entry.imageUrls.length ? entry.imageUrls[entry.imageUrls.length - 1] : '')
+  );
+  if (selectedImageUrl || Object.prototype.hasOwnProperty.call(entry, 'selectedImageRef')) {
+    entry.selectedImageUrl = selectedImageUrl || null;
+    entry.selectedImageRef = selectedImageUrl
+      ? normalizeText((entry.imageRefMap || {})[selectedImageUrl] || '')
+      : '';
+  }
   return entry;
 }
 
@@ -922,6 +935,12 @@ function createContinuousMessagePreprocessor(options = {}) {
     12000
   );
   const enabled = options.enabled ?? config.CONTINUOUS_MESSAGE_ENABLED;
+  const sharedResolveOptions = {
+    ensureCachedImageRef: typeof options.ensureCachedImageRef === 'function' ? options.ensureCachedImageRef : undefined,
+    imageCacheTimeoutMs: options.imageCacheTimeoutMs,
+    imageCacheMaxBytes: options.imageCacheMaxBytes,
+    qqCardLinksEnabled: options.qqCardLinksEnabled
+  };
   const sessions = new Map();
 
   function buildSessionKey(msg = {}) {
@@ -984,7 +1003,10 @@ function createContinuousMessagePreprocessor(options = {}) {
     }
 
     const effectiveBotQQ = normalizeText(context.effectiveBotQQ);
-    const entry = cheapParseMessageEntry(msg, { effectiveBotQQ });
+    const entry = cheapParseMessageEntry(msg, {
+      ...sharedResolveOptions,
+      effectiveBotQQ
+    });
     const bypass = isCommandBypass(msg, { effectiveBotQQ });
 
     if (bypass && sessions.has(sessionKey)) {
@@ -996,6 +1018,13 @@ function createContinuousMessagePreprocessor(options = {}) {
     }
 
     if (bypass) {
+      await resolveContinuousEntryDetails(entry, {
+        ...sharedResolveOptions,
+        effectiveBotQQ,
+        resolveReply: Boolean(entry.replyMessageId),
+        resolveForward: Array.isArray(entry.forwardIds) && entry.forwardIds.length > 0,
+        resolveCards: Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length > 0
+      });
       return {
         mode: 'ready',
         effectiveMsg: msg,
@@ -1104,6 +1133,7 @@ function createContinuousMessagePreprocessor(options = {}) {
     const merged = buildMergedMessagePayload(session.entries, { sessionKey });
     merged.flushReason = session.flushReason || 'debounce';
     await resolveContinuousEntryDetails(merged, {
+      ...sharedResolveOptions,
       effectiveBotQQ,
       resolveReply: Boolean(merged.replyMessageId),
       resolveForward: Array.isArray(merged.forwardIds) && merged.forwardIds.length > 0,

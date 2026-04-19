@@ -452,6 +452,15 @@ function sanitizeOpenAICompatibleContentPart(part) {
   };
 }
 
+function buildUnavailableImageText(imageUrl = '') {
+  if (parseCacheRef(imageUrl)) {
+    return '[Image unavailable: cached image payload missing.]';
+  }
+  return isQqImageUrl(imageUrl)
+    ? '[Image unavailable: QQ image link expired or requires access.]'
+    : `[Image URL] ${imageUrl}`;
+}
+
 async function resolveOpenAICompatibleImagePart(part = {}) {
   const normalizedPart = sanitizeOpenAICompatibleContentPart(part);
   const inlineData = String(
@@ -481,7 +490,8 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
 
   const imageUrl = String(normalizedPart?.image_url?.url || normalizedPart?.url || '').trim();
   if (!imageUrl) return null;
-  const cachedImage = parseCacheRef(imageUrl) ? readCachedImagePayload(imageUrl) : null;
+  const cacheRef = parseCacheRef(imageUrl);
+  const cachedImage = cacheRef ? readCachedImagePayload(imageUrl) : null;
   if (cachedImage?.data) {
     return {
       type: 'image_url',
@@ -489,6 +499,12 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
         url: `data:${cachedImage.mediaType || 'image/jpeg'};base64,${cachedImage.data}`,
         ...(imageDetail ? { detail: imageDetail } : {})
       }
+    };
+  }
+  if (cacheRef) {
+    return {
+      type: 'text',
+      text: buildUnavailableImageText(imageUrl)
     };
   }
 
@@ -512,9 +528,7 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
     console.warn('[vision] failed to fetch image url for openai-compatible block: ' + details);
     return {
       type: 'text',
-      text: isQqImageUrl(imageUrl)
-        ? '[Image unavailable: QQ image link expired or requires access.]'
-        : `[Image URL] ${imageUrl}`
+      text: buildUnavailableImageText(imageUrl)
     };
   }
 }
@@ -546,7 +560,8 @@ async function resolveAnthropicImageBlock(part = {}) {
 
   const imageUrl = String(part?.image_url?.url || part?.url || '').trim();
   if (!imageUrl) return null;
-  const cachedImage = parseCacheRef(imageUrl) ? readCachedImagePayload(imageUrl) : null;
+  const cacheRef = parseCacheRef(imageUrl);
+  const cachedImage = cacheRef ? readCachedImagePayload(imageUrl) : null;
   if (cachedImage?.data) {
     return {
       type: 'image',
@@ -555,6 +570,12 @@ async function resolveAnthropicImageBlock(part = {}) {
         media_type: cachedImage.mediaType || 'image/jpeg',
         data: cachedImage.data
       }
+    };
+  }
+  if (cacheRef) {
+    return {
+      type: 'text',
+      text: buildUnavailableImageText(imageUrl)
     };
   }
 
@@ -579,9 +600,7 @@ async function resolveAnthropicImageBlock(part = {}) {
     console.warn('[vision] failed to fetch image url for anthropic block: ' + details);
     return {
       type: 'text',
-      text: isQqImageUrl(imageUrl)
-        ? '[Image unavailable: QQ image link expired or requires access.]'
-        : `[Image URL] ${imageUrl}`
+      text: buildUnavailableImageText(imageUrl)
     };
   }
 }
@@ -1300,6 +1319,7 @@ module.exports = {
   postWithRetry,
   postStreamWithRetry,
   prepareRequest,
-  mapMessagesToAnthropic
+  mapMessagesToAnthropic,
+  preprocessOpenAICompatibleMessages
 };
 

@@ -76,6 +76,22 @@ module.exports = (async () => {
     assert.strictEqual(sentReplies[0].groupId, 'g1');
     assert.strictEqual(sentReplies[0].senderId, '10001');
 
+    await follower.handleLivePacket({
+      post_type: 'message',
+      message_type: 'group',
+      self_id: '3326471600',
+      group_id: 'g1',
+      user_id: '10001',
+      message_id: 'm1-live',
+      raw_message: '实时直通',
+      sender: {
+        card: '管理员甲',
+        nickname: '管理员甲'
+      }
+    });
+
+    assert.strictEqual(sentReplies.length, 2, 'live packet should trigger the same follower path');
+
     await follower.handlePacketFromLog({
       post_type: 'message',
       message_type: 'group',
@@ -90,7 +106,7 @@ module.exports = (async () => {
       }
     });
 
-    assert.strictEqual(sentReplies.length, 1, 'direct @bot message should not be handled by follower');
+    assert.strictEqual(sentReplies.length, 2, 'direct @bot message should not be handled by follower');
 
     appendNapcatPacketToLog({
       post_type: 'message',
@@ -105,6 +121,8 @@ module.exports = (async () => {
         nickname: '管理员甲'
       }
     });
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
 
     const lines = fs.readFileSync(logPath, 'utf8').trim().split(/\r?\n/);
     assert.strictEqual(lines.length, 1, 'message log appender should write one json line');

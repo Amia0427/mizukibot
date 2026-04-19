@@ -98,9 +98,46 @@ async function testPlainTextStillFlushesOnBaseDebounce() {
   assert.deepStrictEqual(second.meta.sourceMessageIds, ['text-b']);
 }
 
+async function testImageRefsPreferCachedHandles() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 60,
+    atBotDebounceMs: 60,
+    privateDebounceMs: 60,
+    maxHoldMs: 240,
+    ensureCachedImageRef: async (url) => ({
+      ok: true,
+      ref: `cached-image://${String(url || '').split('/').pop().replace(/\W+/g, '-')}`
+    })
+  });
+
+  const imageMsg = makeMessage({
+    messageId: 'img-cache-1',
+    message: [{ type: 'image', data: { url: 'https://example.com/current.png' } }],
+    rawMessage: '[CQ:image,url=https://example.com/current.png]'
+  });
+  const textMsg = makeMessage({
+    messageId: 'txt-cache-1',
+    time: 1710000010,
+    message: [{ type: 'text', data: { text: '看这个' } }],
+    rawMessage: '看这个'
+  });
+
+  const firstPromise = preprocessor.handleMessage(imageMsg, {});
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  const second = await preprocessor.handleMessage(textMsg, {});
+  assert.strictEqual(second.mode, 'deferred');
+
+  const first = await firstPromise;
+  assert.strictEqual(first.mode, 'ready');
+  assert.strictEqual(first.meta.selectedImageRef, 'cached-image://current-png');
+  assert.strictEqual(first.meta.imageRefMap['https://example.com/current.png'], 'cached-image://current-png');
+}
+
 (async () => {
   await testImageThenTextMergesIntoOneTurn();
   await testPlainTextStillFlushesOnBaseDebounce();
+  await testImageRefsPreferCachedHandles();
   console.log('continuousMessagePreprocessor.test.js passed');
 })().catch((error) => {
   console.error(error);

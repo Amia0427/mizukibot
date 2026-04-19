@@ -52,7 +52,7 @@ module.exports = new Promise((resolve, reject) => {
     } catch (error) {
       reject(error);
     }
-  }, 30);
+  }, 250);
 }).catch((error) => {
   console.error(error);
   process.exit(1);

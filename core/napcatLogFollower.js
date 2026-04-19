@@ -4,6 +4,9 @@ const config = require('../config');
 const { isAtBot } = require('./router');
 const { buildInboundMessageContext } = require('./messageIngress');
 const { forcePassiveGroupInterjection } = require('./passiveGroupAwareness');
+const { createJsonLineHotWriter } = require('../utils/jsonHotStore');
+
+let packetLogWriter = null;
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -131,9 +134,13 @@ function appendNapcatPacketToLog(packet = {}, options = {}) {
   if (String(normalized.post_type || '').trim().toLowerCase() !== 'message') return;
 
   try {
-    const dir = path.dirname(targetPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(targetPath, `${JSON.stringify(normalized)}\n`, 'utf8');
+    if (!packetLogWriter || packetLogWriter.getMeta?.().filePath !== targetPath) {
+      packetLogWriter = createJsonLineHotWriter(targetPath, {
+        debounceMs: Math.max(0, Number(config.FOLLOWER_LOG_WRITE_DEBOUNCE_MS || 150) || 150),
+        maxDelayMs: Math.max(0, Number(config.FOLLOWER_LOG_WRITE_MAX_DELAY_MS || 1500) || 1500)
+      });
+    }
+    packetLogWriter.append(normalized);
   } catch (_) {}
 }
 
@@ -376,7 +383,10 @@ function createNapcatLogFollower({
   return {
     start,
     stop,
-    handlePacketFromLog: handlePacket
+    handlePacketFromLog: handlePacket,
+    handleLivePacket(packet = {}) {
+      return handlePacket(packet);
+    }
   };
 }
 

@@ -1,6 +1,10 @@
 const fs = require('fs');
 const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { createCheckpointStore, resolveThreadId } = require('../utils/langgraphV2Store');
+const { appendPerfEvent } = require('../utils/perfRuntime');
+const { createJsonLineHotWriter } = require('../utils/jsonHotStore');
+
+const timingLogWriters = new Map();
 
 function getRawMessageTimestampMs(msg = {}) {
   const seconds = Number(msg?.time || 0);
@@ -11,18 +15,29 @@ function appendInboundTimingLog(logFilePath, enableDebugLog, payload = {}) {
   if (!enableDebugLog) return;
   try {
     const normalized = payload && typeof payload === 'object' ? payload : {};
-    const line = JSON.stringify({
+    const writerKey = String(logFilePath || '').trim();
+    if (!writerKey) return;
+    if (!timingLogWriters.has(writerKey)) {
+      timingLogWriters.set(writerKey, createJsonLineHotWriter(writerKey, {
+        debounceMs: 150,
+        maxDelayMs: 1500
+      }));
+    }
+    timingLogWriters.get(writerKey).append({
       recordedAt: new Date().toISOString(),
       processId: process.pid,
       ...normalized
     });
-    fs.appendFile(logFilePath, `${line}\n`, () => {});
   } catch (_) {}
 }
 
 function createInboundTimingLogger(logFilePath, enableDebugLog) {
   return function logInboundTiming(payload = {}) {
     appendInboundTimingLog(logFilePath, enableDebugLog, payload);
+    appendPerfEvent({
+      category: 'inbound_timing',
+      ...payload
+    });
   };
 }
 
@@ -75,6 +90,13 @@ function createReplyTelemetryBridge(runtimeConfig = {}) {
         if (!threadId) return;
         const normalized = event && typeof event === 'object' ? event : {};
         store.appendEvents(threadId, [normalized]);
+        appendPerfEvent({
+          category: 'reply_event',
+          threadId,
+          routePolicyKey: String(routePolicyKey || '').trim(),
+          topRouteType: String(topRouteType || '').trim(),
+          ...normalized
+        });
       }
     };
   };

@@ -27,6 +27,7 @@ function createSchedulerRuntime(options = {}) {
   let timer = null;
   let isRunning = false;
   let isScanning = false;
+  let nextPlannedAt = '';
 
   async function executeTask(task = {}) {
     const commandType = String(task.commandType || '').trim();
@@ -113,29 +114,62 @@ function createSchedulerRuntime(options = {}) {
       return executed;
     } finally {
       isScanning = false;
+      if (isRunning) scheduleNextScan();
     }
+  }
+
+  function getNextWakeDelayMs(nowText = nowDateTimeText()) {
+    const dueTasks = store.getDueTasks(nowText);
+    if (dueTasks.length > 0) return 0;
+    const allActive = store.listTasks({ statuses: ['active'] });
+    const nextTask = allActive
+      .filter((task) => String(task.nextRunAt || '').trim())
+      .sort((a, b) => String(a.nextRunAt || '').localeCompare(String(b.nextRunAt || '')))[0];
+    if (!nextTask) return scanIntervalMs;
+    nextPlannedAt = String(nextTask.nextRunAt || '').trim();
+    const now = new Date(String(nowText).replace(' ', 'T') + ':00').getTime();
+    const target = new Date(String(nextTask.nextRunAt).replace(' ', 'T') + ':00').getTime();
+    if (!Number.isFinite(now) || !Number.isFinite(target)) return scanIntervalMs;
+    return Math.max(0, Math.min(scanIntervalMs, target - now));
+  }
+
+  function scheduleNextScan() {
+    if (!isRunning) return;
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    const nowText = nowDateTimeText();
+    const delayMs = getNextWakeDelayMs(nowText);
+    timer = setTimeout(() => {
+      timer = null;
+      void scan().catch((error) => {
+        console.error('[scheduler] scan failed', error?.message || error);
+        if (isRunning) scheduleNextScan();
+      });
+    }, delayMs);
+    if (typeof timer.unref === 'function') timer.unref();
   }
 
   function start() {
     if (isRunning) return;
     isRunning = true;
-    timer = setInterval(() => {
-      void scan().catch((error) => {
-        console.error('[scheduler] scan failed', error?.message || error);
-      });
-    }, scanIntervalMs);
+    scheduleNextScan();
   }
 
   function stop() {
     isRunning = false;
     if (timer) {
-      clearInterval(timer);
+      clearTimeout(timer);
       timer = null;
     }
   }
 
   return {
     executeTask,
+    getNextPlannedAt() {
+      return nextPlannedAt;
+    },
     scan,
     start,
     stop

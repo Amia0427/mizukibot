@@ -74,6 +74,10 @@ function resolveVisualInputFromContinuousMetaCore(continuousMeta = null, directe
   if (!meta) return null;
   const selected = String(meta.selectedImageUrl || '').trim();
   const selectedRef = String(meta.selectedImageRef || '').trim();
+  const currentImageRefMap = meta.imageRefMap && typeof meta.imageRefMap === 'object'
+    ? meta.imageRefMap
+    : {};
+  const selectedResolved = resolveImageValue(selected, currentImageRefMap);
   const replyImages = Array.isArray(meta.replyContext?.imageUrls) ? meta.replyContext.imageUrls : [];
   const replyImageRefMap = meta.replyContext?.imageRefMap && typeof meta.replyContext.imageRefMap === 'object'
     ? meta.replyContext.imageRefMap
@@ -89,13 +93,13 @@ function resolveVisualInputFromContinuousMetaCore(continuousMeta = null, directe
     );
   const currentImageRef = prefersCurrentImage(cleanText);
 
-  if (selected && !quoteWantsQuotedImage) return selectedRef || selected;
-  if (selected && currentImageRef) return selectedRef || selected;
+  if (selected && !quoteWantsQuotedImage) return selectedRef || selectedResolved || selected;
+  if (selected && currentImageRef) return selectedRef || selectedResolved || selected;
   for (const item of replyImages) {
     const url = resolveImageValue(String(item || '').trim(), replyImageRefMap);
     if (url) return url;
   }
-  if (selected) return selectedRef || selected;
+  if (selected) return selectedRef || selectedResolved || selected;
   return null;
 }
 
