@@ -3,6 +3,109 @@ const assert = require('assert');
 const { createPersistNode } = require('../api/runtimeV2/nodes/persist');
 
 module.exports = (async () => {
+  const deferredPersistNode = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {
+      throw new Error('deferred persist should not synchronously append short-term history');
+    },
+    persistShortTermBridgeSnapshot() {
+      throw new Error('deferred persist should not synchronously persist bridge snapshot');
+    },
+    async appendMemoryEvent() {
+      throw new Error('deferred persist should not synchronously append memory event');
+    },
+    materializeMemoryViews() {
+      throw new Error('deferred persist should not synchronously materialize memory views');
+    },
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      enqueue() {
+        throw new Error('deferred persist should not synchronously enqueue post-reply work');
+      }
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: true
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  const deferredResult = await deferredPersistNode({
+    request: {
+      userId: 'u1',
+      question: '我们刚才聊到哪了',
+      runtimeQuestionText: '我们刚才聊到哪了',
+      persistUserText: '我们刚才聊到哪了',
+      routeMeta: { groupId: 'g1' },
+      sessionKey: 's1',
+      routePolicyKey: 'direct_chat/default',
+      topRouteType: 'direct_chat',
+      deferPersist: true
+    },
+    output: {
+      finalReply: '我们刚才聊到旅行计划。'
+    },
+    memory: {
+      continuityState: {
+        payload: {
+          active_topic: '旅行计划',
+          open_loops: ['订酒店'],
+          assistant_commitments: ['明天继续补攻略'],
+          user_constraints: ['预算有限']
+        }
+      }
+    },
+    execution: {
+      latencyDecision: {
+        deferPersist: true
+      },
+      deferredJobs: []
+    },
+    thread: { threadId: 't_deferred' },
+    plan: {
+      finalExecLogs: [{ action: 'memory_cli', ok: true }]
+    }
+  });
+
+  assert.strictEqual(deferredResult.execution.currentNode, 'persist');
+  assert.strictEqual(deferredResult.execution.pendingReplySnapshot.activeTopic, '旅行计划');
+  assert.deepStrictEqual(deferredResult.execution.pendingReplySnapshot.openLoops, ['订酒店']);
+  assert.strictEqual(Array.isArray(deferredResult.execution.deferredJobs), true);
+  assert.strictEqual(deferredResult.execution.deferredJobs.length, 1);
+  assert.ok((deferredResult.events || []).some((item) => item.type === 'persist_deferred'));
+
   const persistNode = createPersistNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;

@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { createInboundConcurrencyController } = require('../core/inboundConcurrency');
 
 function clearProjectCache() {
   const projectRoot = path.resolve(__dirname, '..') + path.sep;
@@ -245,6 +246,29 @@ module.exports = (async () => {
       ['send_start', 'send_end', 'send_start', 'send_end'],
       'same private user reply sending should stay serialized'
     );
+
+    const controller = createInboundConcurrencyController({
+      globalLimit: 2,
+      generalLimit: 2,
+      adminLimit: 1,
+      perUserLimit: 1
+    });
+    const lockA = await controller.acquire({
+      userId: 'user_multi',
+      sessionKey: 'direct:user_multi',
+      lane: 'general',
+      chatType: 'private'
+    });
+    const lockB = await controller.acquire({
+      userId: 'user_multi',
+      sessionKey: 'qq-group:group_x:user:user_multi',
+      lane: 'general',
+      chatType: 'group',
+      groupId: 'group_x'
+    });
+    assert.ok(lockA && lockB, 'different session keys for the same user should both acquire');
+    lockA.release();
+    lockB.release();
 
     console.log('messageHandlerInboundConcurrency.test.js passed');
   } finally {

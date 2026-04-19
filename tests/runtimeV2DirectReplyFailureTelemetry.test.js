@@ -3,6 +3,159 @@ const assert = require('assert');
 const { createDirectReplyNode } = require('../api/runtimeV2/nodes/directReply');
 
 module.exports = (async () => {
+  let requestAssistantCalls = 0;
+  let requestReplyCalls = 0;
+  const directReplyReuseNode = createDirectReplyNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    shouldBypassHumanizerForPolicy() {
+      return false;
+    },
+    computeEffectiveAllowedTools() {
+      return ['memory_cli'];
+    },
+    getToolPlannerExecutionPlan() {
+      return null;
+    },
+    isPlannerSingleAuthorityEnabled() {
+      return false;
+    },
+    getRouteToolPlanner() {
+      return null;
+    },
+    buildVisionMessageContent(text) {
+      return text;
+    },
+    stripMemoryCliInstruction(text) {
+      return String(text || '');
+    },
+    getMainConversationSystemMessages() {
+      return [];
+    },
+    buildDirectReplyMessages(_state, messageContent) {
+      return {
+        messages: [{ role: 'user', content: String(messageContent || '') }]
+      };
+    },
+    buildLiveMainConversationSnapshot() {
+      return null;
+    },
+    ensureOutputStream(output = {}, mode = 'direct') {
+      return {
+        ...(output.stream || {}),
+        mode,
+        hadOutput: false,
+        completed: false,
+        fallbackToNonStream: false
+      };
+    },
+    createMemoryCliTurnState(value) {
+      return value || {};
+    },
+    cloneDirectToolLoopState(value) {
+      return { ...(value || {}) };
+    },
+    normalizeMessageForToolLoop(message) {
+      return message;
+    },
+    async requestAssistantMessageImpl() {
+      requestAssistantCalls += 1;
+      return {
+        role: 'assistant',
+        content: '这是直接复用的首条回复。',
+        tool_calls: []
+      };
+    },
+    compileDirectChatToolCallsToPlan(toolCalls, plan) {
+      return { ...(plan || {}), steps: toolCalls };
+    },
+    saveAndEmit(state) {
+      return state;
+    },
+    mirrorStreamingFlags() {
+      return {};
+    },
+    isPureToolCallMarkup() {
+      return false;
+    },
+    async streamDirectReply() {
+      throw new Error('stream path should not be used when first assistant is reusable');
+    },
+    async requestReplyImpl() {
+      requestReplyCalls += 1;
+      return 'fallback should not run';
+    },
+    buildReplyTextVariants(text = '') {
+      return {
+        visibleText: String(text || '').trim(),
+        persistedText: String(text || '').trim()
+      };
+    },
+    classifyDirectReplyError() {
+      return 'generic_model_failure';
+    },
+    summarizeDirectReplyError(error) {
+      return String(error?.message || error || '');
+    },
+    async attemptDirectMemoryRecovery() {
+      return null;
+    },
+    getControlledFailureReply() {
+      return 'controlled failure';
+    },
+    updateMemoryCliTurnStateAfterError(state = {}) {
+      return state;
+    },
+    classifyReplyFailure() {
+      return { type: 'none' };
+    }
+  });
+
+  const reuseResult = await directReplyReuseNode({
+    request: {
+      question: '你好吗',
+      routePolicyKey: 'direct_chat/default',
+      routeMeta: {},
+      topRouteType: 'direct_chat',
+      customPrompt: '',
+      allowTools: true,
+      allowedTools: ['memory_cli'],
+      modelConfig: {},
+      imageUrl: '',
+      streaming: false,
+      reviewMode: ''
+    },
+    execution: {
+      mode: 'chat',
+      memoryCliTurn: null,
+      latencyBreakdown: {}
+    },
+    memory: {
+      dynamicPrompt: '',
+      affinity: null
+    },
+    output: {
+      stream: {}
+    },
+    plan: {}
+  });
+
+  assert.strictEqual(requestAssistantCalls, 1);
+  assert.strictEqual(requestReplyCalls, 0, 'stable first assistant should be reused without a second model request');
+  assert.strictEqual(reuseResult.output.finalReply, '这是直接复用的首条回复。');
+  assert.strictEqual(reuseResult.execution.firstAssistantReused, true);
+  assert.ok((reuseResult.events || []).some((item) => item.type === 'first_assistant_reused'));
+
   const directReplyNode = createDirectReplyNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;

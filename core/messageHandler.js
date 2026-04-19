@@ -1927,6 +1927,7 @@ function createMessageHandler({
     const effectiveMsg = preprocessed?.effectiveMsg || msg;
     const continuousMeta = preprocessed?.meta || effectiveMsg.__continuousMessageMeta || null;
     const rawText = effectiveMsg.raw_message || '';
+    const inboundSessionKey = resolveShortTermSessionKey(senderId, isPrivateChatType(chatType) ? {} : { groupId });
     const isPrivateInbound = isPrivateChatType(chatType);
     const concurrencyScope = isPrivateInbound ? 'private' : 'default';
     const concurrencyLane = isAdminUser(senderId) ? 'admin' : 'general';
@@ -1935,6 +1936,7 @@ function createMessageHandler({
     const queueWaitStartedAt = Date.now();
     const inboundLock = await selectedInboundConcurrency.acquire({
       userId: senderId,
+      sessionKey: inboundSessionKey,
       lane: concurrencyLane,
       messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
       groupId,
