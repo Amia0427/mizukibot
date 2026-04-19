@@ -84,6 +84,7 @@ function createPersistNode(deps = {}) {
   return async function persistNode(state) {
     const request = normalizeObject(state.request, {});
     const finalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
+    const latencyDecision = normalizeObject(state.execution?.latencyDecision, {});
     const userContent = String(
       request.persistUserText
       || request.runtimeQuestionText
@@ -128,6 +129,50 @@ function createPersistNode(deps = {}) {
       && shouldAllowPostReplyForGroup
       && (shouldLearn || shouldLearnSelfImprovementValue || shouldPersistJournal);
     let enqueuedPostReplyJob = null;
+    const pendingReplySnapshot = {
+      finalReply,
+      activeTopic: String(state.memory?.continuityState?.payload?.active_topic || '').trim(),
+      openLoops: normalizeArray(state.memory?.continuityState?.payload?.open_loops),
+      assistantCommitments: normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments),
+      userConstraints: normalizeArray(state.memory?.continuityState?.payload?.user_constraints),
+      toolSummary: normalizeArray(state.plan?.finalExecLogs)
+        .map((item) => {
+          const action = String(item?.action || '').trim();
+          const ok = item?.ok === true ? 'ok' : 'fail';
+          return action ? `${action}:${ok}` : '';
+        })
+        .filter(Boolean)
+        .join(', ')
+    };
+
+    if (latencyDecision.deferPersist === true || request.deferPersist === true) {
+      const deferredEvents = [
+        createEvent('node_start', { node: 'persist' }),
+        createEvent('persist_deferred', {
+          node: 'persist',
+          finalReplyPreview: finalReply.slice(0, 180)
+        }),
+        createEvent('node_complete', { node: 'persist' })
+      ];
+      return saveAndEmit({
+        ...state,
+        execution: {
+          ...state.execution,
+          currentNode: 'persist',
+          pendingReplySnapshot,
+          deferredJobs: normalizeArray(state.execution?.deferredJobs).concat([{
+            type: 'persist',
+            status: 'queued',
+            queuedAt: new Date(now).toISOString()
+          }])
+        },
+        memory: {
+          ...state.memory,
+          pendingReplySnapshot
+        },
+        events: deferredEvents
+      }, 'persist', 'completed', deferredEvents);
+    }
 
     if (shouldPersistChatArtifacts) {
       if (config.MEMORY_V3_ENABLED) {
@@ -342,7 +387,14 @@ function createPersistNode(deps = {}) {
       execution: {
         ...state.execution,
         currentNode: 'persist',
-        status: state.output?.failure ? 'failed' : 'completed'
+        status: state.output?.failure ? 'failed' : 'completed',
+        pendingReplySnapshot
+      },
+      memory: {
+        ...state.memory,
+        persisted: true,
+        learningQueued: Boolean(enqueuedPostReplyJob?.jobId),
+        pendingReplySnapshot
       },
       events
     }, 'persist', state.output?.failure ? 'failed' : 'completed', events);

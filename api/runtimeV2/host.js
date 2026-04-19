@@ -172,6 +172,47 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function clampLatencyBudget(value, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return Math.max(0, Number(fallback) || 0);
+  return Math.max(0, Math.floor(num));
+}
+
+function buildLatencyDecision(request = {}, options = {}) {
+  const routeMeta = normalizeObject(request.routeMeta, {});
+  const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
+  const allowTools = request.allowTools !== false && normalizeArray(request.allowedTools).length > 0;
+  const profile = request.systemInitiated
+    ? 'full_fidelity'
+    : (
+      topRouteType === 'direct_chat'
+      || routePolicyKey.startsWith('direct_chat/')
+      || (!topRouteType && !routePolicyKey)
+    )
+      ? (allowTools ? 'tool_fast' : 'chat_fast')
+      : 'full_fidelity';
+  const humanizerMode = String(
+    options.humanizeMode
+    || request.humanizeMode
+    || config.HUMANIZER_MODE
+    || 'auto'
+  ).trim().toLowerCase() || 'auto';
+  const deferPersist = options.deferPersist !== undefined
+    ? Boolean(options.deferPersist)
+    : (request.deferPersist !== undefined ? Boolean(request.deferPersist) : true);
+  return {
+    profile,
+    prepareSoftBudgetMs: clampLatencyBudget(options.prepareSoftBudgetMs ?? request.prepareSoftBudgetMs, config.PREPARE_SOFT_BUDGET_MS || 600),
+    memoryBudgetMs: clampLatencyBudget(options.memoryBudgetMs ?? request.memoryBudgetMs, config.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
+    continuityBudgetMs: clampLatencyBudget(options.continuityBudgetMs ?? request.continuityBudgetMs, config.CONTINUITY_PROBE_SOFT_BUDGET_MS || 250),
+    preflightBudgetMs: clampLatencyBudget(options.preflightBudgetMs ?? request.preflightBudgetMs, config.CAPABILITY_PREFLIGHT_SOFT_BUDGET_MS || 350),
+    humanizeBudgetMs: clampLatencyBudget(options.humanizeBudgetMs ?? request.humanizeBudgetMs, config.HUMANIZER_SOFT_BUDGET_MS || 500),
+    humanizeMode: humanizerMode,
+    deferPersist
+  };
+}
+
 function buildContinuitySnapshotPayload(state) {
   const payload = normalizeObject(state.memory?.continuityState?.payload, {});
   return {
@@ -383,8 +424,18 @@ function isPlannerSingleAuthorityEnabled() {
 }
 
 function createInitialState(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
+  const normalizedOptions = normalizeObject(options, {});
+  const latencyDecision = buildLatencyDecision({
+    routeMeta: normalizedOptions.routeMeta,
+    topRouteType: normalizedOptions.topRouteType,
+    routePolicyKey: normalizedOptions.routePolicyKey,
+    allowedTools: normalizedOptions.allowedTools,
+    allowTools: normalizedOptions.disableTools ? false : true,
+    systemInitiated: normalizedOptions.systemInitiated,
+    deferPersist: normalizedOptions.deferPersist
+  }, normalizedOptions);
   return createInitialStateBase(question, userInfo, userId, customPrompt, imageUrl, {
-    ...normalizeObject(options, {}),
+    ...normalizedOptions,
     resolveThreadId,
     resolveShortTermSessionKey,
     resolveShortTermScope,
@@ -393,7 +444,8 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     getMinecraftModelOverrides,
     createMemoryCliTurnState,
     buildInitialPlanSlice,
-    nowTs
+    nowTs,
+    latencyDecision
   });
 }
 
@@ -1043,10 +1095,30 @@ function createRuntime(options = {}) {
     emitEvents(normalized, state?.request || {});
   }
 
+  function withLatencyBreakdown(state, nodeName, meta = {}) {
+    const nextState = {
+      ...state,
+      execution: {
+        ...normalizeObject(state.execution, {}),
+        latencyBreakdown: {
+          ...normalizeObject(state.execution?.latencyBreakdown, {}),
+          [String(nodeName || 'unknown').trim() || 'unknown']: {
+            ...(normalizeObject(state.execution?.latencyBreakdown?.[nodeName], {})),
+            ...normalizeObject(meta, {})
+          }
+        }
+      }
+    };
+    return nextState;
+  }
+
   function saveAndEmit(state, nodeName, status = 'running', events = []) {
-    appendRuntimeEvents(state, events);
-    persistCheckpoint(state, nodeName, status);
-    return state;
+    const nextState = withLatencyBreakdown(state, nodeName, {
+      completedAt: nowTs()
+    });
+    appendRuntimeEvents(nextState, events);
+    persistCheckpoint(nextState, nodeName, status);
+    return nextState;
   }
 
   const {
@@ -1315,6 +1387,33 @@ function createRuntime(options = {}) {
     normalizePlanForResume,
     normalizeMode,
     ensureOutputStream,
+    buildLatencyDecision,
+    withSoftTimeout(taskFactory, timeoutMs, fallbackValue) {
+      const budget = Math.max(0, Number(timeoutMs) || 0);
+      if (!budget) return Promise.resolve().then(() => taskFactory());
+      return new Promise((resolve) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          resolve(fallbackValue);
+        }, budget);
+        Promise.resolve()
+          .then(() => taskFactory())
+          .then((value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(value);
+          })
+          .catch(() => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(fallbackValue);
+          });
+      });
+    },
     nowTs,
     saveAndEmit,
     config,
@@ -1378,6 +1477,7 @@ function createRuntime(options = {}) {
     updatePlanStepsWithEnvelope,
     getPolicy,
     isSideEffectPolicy,
+    runCapabilityPreflight,
     executeBatch(steps, dispatchState, runtimeContext) {
       return executeCapabilityBatch(steps, dispatchState, {
         ...runtimeContext,
@@ -1509,6 +1609,13 @@ function createRuntime(options = {}) {
       request: {
         ...(state.request || {}),
         deferPersist: false
+      },
+      execution: {
+        ...(state.execution || {}),
+        latencyDecision: {
+          ...normalizeObject(state.execution?.latencyDecision, {}),
+          deferPersist: false
+        }
       }
     });
   }

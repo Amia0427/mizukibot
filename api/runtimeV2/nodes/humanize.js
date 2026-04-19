@@ -36,16 +36,39 @@ function createHumanizeNode(deps = {}) {
     ? deps.saveAndEmit
     : ((state) => state);
 
+  function countSentenceLikeUnits(text = '') {
+    return Math.max(
+      (String(text || '').match(/[。！？!?]/g) || []).length,
+      String(text || '').split(/\n+/).filter(Boolean).length
+    );
+  }
+
+  function shouldInvokeModelHumanizer(state, draftReply = '', request = {}) {
+    const latencyDecision = normalizeObject(state.execution?.latencyDecision, {});
+    const mode = String(latencyDecision.humanizeMode || '').trim().toLowerCase() || 'auto';
+    if (mode === 'skip') return false;
+    if (mode === 'force') return true;
+    const text = String(draftReply || '').trim();
+    if (!text) return false;
+    if (String(state.execution?.mode || '').trim() === 'tool_plan') return true;
+    if (text.length > 120) return true;
+    if (countSentenceLikeUnits(text) >= 3) return true;
+    if (String(request.routePolicyKey || '').trim().toLowerCase().startsWith('direct_chat/style_')) return true;
+    return false;
+  }
+
   return async function humanizeNode(state) {
     const request = normalizeObject(state.request, {});
     const draftReply = String(state.output?.draftReply || '').trim();
     const events = [createEvent('node_start', { node: 'humanize' })];
     const isReviewRoute = isReviewMode(request.reviewMode);
+    const shouldUseModelHumanizer = shouldInvokeModelHumanizer(state, draftReply, request);
     const shouldSkip = !draftReply
       || isReplyFailure(draftReply, { emptyIsFailure: true })
       || !isHumanizerEnabledImpl()
       || isReviewRoute
-      || shouldBypassHumanizerForPolicy(request.routePolicyKey);
+      || shouldBypassHumanizerForPolicy(request.routePolicyKey)
+      || !shouldUseModelHumanizer;
 
     if (shouldSkip) {
       const finalReply = request.streaming
@@ -74,7 +97,8 @@ function createHumanizeNode(deps = {}) {
         },
         execution: {
           ...state.execution,
-          currentNode: 'humanize'
+          currentNode: 'humanize',
+          humanizerInvoked: false
         },
         events: skippedEvents
       }, 'humanize', 'running', skippedEvents);
@@ -118,7 +142,8 @@ function createHumanizeNode(deps = {}) {
       },
       execution: {
         ...state.execution,
-        currentNode: 'humanize'
+        currentNode: 'humanize',
+        humanizerInvoked: true
       },
       events: nextEvents
     }, 'humanize', 'running', nextEvents);

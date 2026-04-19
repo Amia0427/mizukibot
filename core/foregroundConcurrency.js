@@ -12,10 +12,11 @@ function normalizeNonNegativeInt(value, fallback) {
 
 function buildRequestId(request = {}) {
   const messageId = String(request.messageId || '').trim();
+  const sessionKey = String(request.sessionKey || '').trim();
   const userId = String(request.userId || '').trim();
   const groupId = String(request.groupId || '').trim();
   const chatType = String(request.chatType || '').trim();
-  return `${chatType}:${groupId}:${userId}:${messageId || Date.now()}`;
+  return `${chatType}:${groupId}:${sessionKey || userId}:${messageId || Date.now()}`;
 }
 
 function createForegroundConcurrencyController(options = {}) {
@@ -32,10 +33,10 @@ function createForegroundConcurrencyController(options = {}) {
     general: 0,
     admin: 0
   };
-  const activeByUser = new Map();
+  const activeBySession = new Map();
 
-  function getActiveForUser(userId = '') {
-    return Math.max(0, Number(activeByUser.get(String(userId || '').trim()) || 0) || 0);
+  function getActiveForSession(sessionKey = '') {
+    return Math.max(0, Number(activeBySession.get(String(sessionKey || '').trim()) || 0) || 0);
   }
 
   function getTotalActive() {
@@ -71,18 +72,19 @@ function createForegroundConcurrencyController(options = {}) {
 
   function canAcquire(request = {}) {
     const lane = String(request.lane || '').trim().toLowerCase() === 'admin' ? 'admin' : 'general';
-    const userId = String(request.userId || '').trim();
-    if (!userId) return false;
+    const sessionKey = String(request.sessionKey || request.userId || '').trim();
+    if (!sessionKey) return false;
     if (!hasLaneCapacity(lane)) return false;
-    if (getActiveForUser(userId) >= perUserLimit) return false;
+    if (getActiveForSession(sessionKey) >= perUserLimit) return false;
     return true;
   }
 
   function reserveSlot(request = {}) {
     const lane = String(request.lane || '').trim().toLowerCase() === 'admin' ? 'admin' : 'general';
+    const sessionKey = String(request.sessionKey || request.userId || '').trim();
     const userId = String(request.userId || '').trim();
     activeByLane[lane] += 1;
-    activeByUser.set(userId, getActiveForUser(userId) + 1);
+    activeBySession.set(sessionKey, getActiveForSession(sessionKey) + 1);
     const acquiredAt = Date.now();
     const requestId = buildRequestId(request);
     const waitMs = Math.max(0, acquiredAt - (Number(request.enqueuedAt || 0) || acquiredAt));
@@ -90,6 +92,7 @@ function createForegroundConcurrencyController(options = {}) {
     console.log('[foreground-concurrency] acquired', {
       lane,
       userId,
+      sessionKey,
       requestId,
       groupId: String(request.groupId || '').trim(),
       messageId: String(request.messageId || '').trim(),
@@ -109,13 +112,14 @@ function createForegroundConcurrencyController(options = {}) {
         released = true;
 
         activeByLane[lane] = Math.max(0, activeByLane[lane] - 1);
-        const remainingForUser = Math.max(0, getActiveForUser(userId) - 1);
-        if (remainingForUser > 0) activeByUser.set(userId, remainingForUser);
-        else activeByUser.delete(userId);
+        const remainingForSession = Math.max(0, getActiveForSession(sessionKey) - 1);
+        if (remainingForSession > 0) activeBySession.set(sessionKey, remainingForSession);
+        else activeBySession.delete(sessionKey);
 
         console.log('[foreground-concurrency] released', {
           lane,
           userId,
+          sessionKey,
           requestId,
           groupId: String(request.groupId || '').trim(),
           messageId: String(request.messageId || '').trim(),
@@ -158,6 +162,7 @@ function createForegroundConcurrencyController(options = {}) {
   async function acquire(request = {}) {
     const normalized = {
       userId: String(request.userId || '').trim(),
+      sessionKey: String(request.sessionKey || request.userId || '').trim(),
       lane: String(request.lane || '').trim().toLowerCase() === 'admin' ? 'admin' : 'general',
       messageId: String(request.messageId || '').trim(),
       groupId: String(request.groupId || '').trim(),
@@ -165,8 +170,8 @@ function createForegroundConcurrencyController(options = {}) {
       enqueuedAt: Date.now()
     };
 
-    if (!normalized.userId) {
-      throw new Error('[foreground-concurrency] userId is required');
+    if (!normalized.sessionKey) {
+      throw new Error('[foreground-concurrency] sessionKey is required');
     }
 
     if (canAcquire(normalized)) {
@@ -181,6 +186,7 @@ function createForegroundConcurrencyController(options = {}) {
       console.log('[foreground-concurrency] queued', {
         lane: normalized.lane,
         userId: normalized.userId,
+        sessionKey: normalized.sessionKey,
         requestId: buildRequestId(normalized),
         groupId: normalized.groupId,
         messageId: normalized.messageId,

@@ -213,6 +213,67 @@ function buildCacheFriendlyFingerprint(stableSystemBlocks = []) {
   );
 }
 
+function withSoftTimeout(taskFactory, timeoutMs, fallbackValue) {
+  const budget = Math.max(0, Number(timeoutMs) || 0);
+  if (!budget) return Promise.resolve(typeof taskFactory === 'function' ? taskFactory() : fallbackValue);
+  return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(typeof fallbackValue === 'function' ? fallbackValue() : fallbackValue);
+    }, budget);
+    Promise.resolve()
+      .then(() => (typeof taskFactory === 'function' ? taskFactory() : taskFactory))
+      .then((value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(typeof fallbackValue === 'function' ? fallbackValue() : fallbackValue);
+      });
+  });
+}
+
+const promptLayerCache = {
+  stable: new Map(),
+  session: new Map()
+};
+
+function prunePromptLayerCache(cache = new Map(), now = Date.now()) {
+  for (const [key, entry] of cache.entries()) {
+    if (!entry || Number(entry.expiresAt || 0) <= now) {
+      cache.delete(key);
+    }
+  }
+}
+
+function buildPromptCacheKeys(userId = '', routeMeta = {}, options = {}) {
+  const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
+  const stableKey = hashText([
+    normalizeText(options.routePolicyKey),
+    normalizeText(options.topRouteType),
+    normalizeText(options.reviewMode),
+    normalizeText(options.customPrompt),
+    normalizeText(options.question),
+    normalizeText(userId),
+    normalizeText(normalizedRouteMeta.groupId || normalizedRouteMeta.group_id),
+    normalizeText(normalizedRouteMeta.sessionId || normalizedRouteMeta.session_id)
+  ].join('|'));
+  const sessionKey = hashText([
+    stableKey,
+    normalizeText(options.sessionKey),
+    normalizeText(normalizedRouteMeta.groupId || normalizedRouteMeta.group_id),
+    normalizeText(options.sharedShortTermSignature)
+  ].join('|'));
+  return { stableKey, sessionKey };
+}
+
 function shouldExposeMemoryCli(options = {}) {
   const currentConfig = getConfig();
   if (!currentConfig.MEMORY_CLI_ENABLED || !currentConfig.MEMORY_CLI_CHAT_ENABLED) return false;
@@ -811,10 +872,34 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
 
 async function buildDynamicPrompt(userInfo, userId, question, customPrompt = null, options = {}) {
   const currentConfig = getConfig();
-  const base = await buildBaseDynamicPrompt(userInfo, userId, question, customPrompt, options);
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const cacheKeys = buildPromptCacheKeys(userId, routeMeta, {
+    ...options,
+    question
+  });
+  const now = Date.now();
+  prunePromptLayerCache(promptLayerCache.stable, now);
+  prunePromptLayerCache(promptLayerCache.session, now);
+  const stableCacheHit = promptLayerCache.stable.get(cacheKeys.stableKey) || null;
+  const sessionCacheHit = promptLayerCache.session.get(cacheKeys.sessionKey) || null;
+  const base = await withSoftTimeout(
+    () => buildBaseDynamicPrompt(userInfo, userId, question, customPrompt, options),
+    Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
+    () => sessionCacheHit?.base || stableCacheHit?.base || {
+      dynamicPrompt: '',
+      stableSystemBlocks: [],
+      dynamicContextBlocks: [],
+      assistantOnlyContextBlocks: [],
+      promptSegments: {},
+      promptSnapshot: null,
+      memoryContext: null,
+      personaMemoryState: null,
+      affinity: getAffinitySettings(userInfo, { userId }),
+      dynamicPromptPlan: normalizeDynamicPromptPlan(options)
+    }
+  );
 
   const contextStatsInstruction = 'If the user asks about current context usage, remaining context, token usage, or whether the chat is close to the context limit, you may call get_context_stats.';
-  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
   const reviewMode = String(options?.reviewMode || '').trim().toLowerCase();
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
@@ -829,6 +914,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     ...options,
     dynamicPromptPlan: base.dynamicPromptPlan
   });
+  const criticalBlocks = [];
+  const optionalBlocks = [];
   const extraBlocks = [];
 
   if (shouldInjectContextStatsInstruction) {
@@ -854,7 +941,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     if (injectionEntry && String(injectionEntry.status || '').trim() === 'ok') {
       const injectionBlock = lifeSchedulerEngine.formatInjectionBlock(injectionEntry, new Date());
       if (String(injectionBlock || '').trim()) {
-        extraBlocks.push(createPromptBlock('life_scheduler', 'Life Scheduler', injectionBlock, {
+      extraBlocks.push(createPromptBlock('life_scheduler', 'Life Scheduler', injectionBlock, {
           stage: 'main',
           priority: 700,
           authority: 'optional_modulation',
@@ -1001,6 +1088,22 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     requiredIds: normalizeArray(base.promptSnapshot?.stableBlockIds)
       .concat(normalizeArray(base.promptSnapshot?.dynamicBlockIds).filter((id) => normalizeText(id).startsWith('persona_memory')))
   });
+  const criticalBlockIdPrefixes = new Set([
+    'retrieved_memory',
+    'long_term_profile',
+    'impression',
+    'summary',
+    'relationship',
+    'persona_memory'
+  ]);
+  for (const block of selectedBlocks) {
+    const blockId = normalizeText(block?.id);
+    const isCritical = block?.lane === 'stable_system'
+      || blockId === 'context_stats_instruction'
+      || [...criticalBlockIdPrefixes].some((prefix) => blockId.startsWith(prefix));
+    if (isCritical) criticalBlocks.push(block);
+    else optionalBlocks.push(block);
+  }
   const laneSplit = splitBlocksByLane(selectedBlocks);
   const mergedSnapshot = buildPromptSnapshot(
     [
@@ -1041,6 +1144,24 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     },
     dynamicPromptPlan: finalDynamicPromptPlan
   };
+  const freshness = {
+    stableSystem: stableCacheHit ? 'cache' : 'fresh',
+    sessionContext: sessionCacheHit ? 'cache' : (stableCacheHit ? 'partial' : 'fresh'),
+    continuity: String(options?.continuitySignals ? 'fresh' : 'skipped')
+  };
+  const cacheMeta = {
+    stableKey: cacheKeys.stableKey,
+    sessionKey: cacheKeys.sessionKey,
+    hit: Boolean(stableCacheHit || sessionCacheHit)
+  };
+  promptLayerCache.stable.set(cacheKeys.stableKey, {
+    expiresAt: now + Math.max(0, Number(currentConfig.PROMPT_STABLE_CACHE_TTL_MS || 0)),
+    base
+  });
+  promptLayerCache.session.set(cacheKeys.sessionKey, {
+    expiresAt: now + Math.max(0, Number(currentConfig.PROMPT_SESSION_CACHE_TTL_MS || 0)),
+    base
+  });
   return {
     ...base,
     dynamicPrompt: serializePromptBlocks([
@@ -1053,7 +1174,11 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     assistantOnlyContextBlocks: laneSplit.assistantOnlyContextBlocks,
     promptSnapshot: enrichedSnapshot,
     promptSegments,
-    dynamicPromptPlan: finalDynamicPromptPlan
+    dynamicPromptPlan: finalDynamicPromptPlan,
+    criticalBlocks,
+    optionalBlocks,
+    freshness,
+    cacheMeta
   };
 }
 

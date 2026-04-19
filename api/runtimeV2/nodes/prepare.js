@@ -86,6 +86,12 @@ function createPrepareNode(deps = {}) {
   const nowTs = typeof deps.nowTs === 'function'
     ? deps.nowTs
     : (() => Date.now());
+  const buildLatencyDecision = typeof deps.buildLatencyDecision === 'function'
+    ? deps.buildLatencyDecision
+    : ((request = {}) => normalizeObject(request.latencyDecision, {}));
+  const withSoftTimeout = typeof deps.withSoftTimeout === 'function'
+    ? deps.withSoftTimeout
+    : (async (task) => task());
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
@@ -95,11 +101,13 @@ function createPrepareNode(deps = {}) {
   const runtimeOptions = normalizeObject(deps.runtimeOptions, {});
 
   return async function prepareNode(state) {
+    const startedAt = nowTs();
     const request = normalizeObject(state.request, {});
     const routeMeta = normalizeObject(request.routeMeta, {});
     const requestQuestionText = String(request.runtimeQuestionText || request.question || '').trim();
     const persistUserText = String(request.persistUserText || request.runtimeQuestionText || request.question || '').trim();
     const threadId = String(state.thread?.threadId || '').trim();
+    const latencyDecision = buildLatencyDecision(request, state.execution?.latencyDecision || {});
     const events = [createEvent('node_start', { node: 'prepare', threadId })];
 
     let resumeUsed = false;
@@ -120,32 +128,6 @@ function createPrepareNode(deps = {}) {
 
     if (shouldExposeMemoryCliInPrepare) {
       recordMemoryScope(request.userId, routeMeta);
-    }
-
-    if (
-      config.MEMORY_V3_ENABLED
-      && !request.systemInitiated
-      && String(request.userId || '').trim()
-      && persistUserText
-    ) {
-      await appendMemoryEvent({
-        type: 'turn_received',
-        userId: request.userId,
-        sessionKey: request.sessionKey,
-        groupId: routeMeta.groupId || routeMeta.group_id || '',
-        channelId: routeMeta.channelId || routeMeta.channel_id || '',
-        sessionId: routeMeta.sessionId || routeMeta.session_id || '',
-        routePolicyKey: request.routePolicyKey,
-        topRouteType: request.topRouteType,
-        scopeType: (routeMeta.groupId || routeMeta.group_id) ? 'group' : 'personal',
-        source: 'runtime_v2_prepare',
-        text: persistUserText,
-        payload: {
-          imageUrl: request.imageUrl || '',
-          customPrompt: Boolean(String(request.customPrompt || '').trim())
-        }
-      });
-      materializeMemoryViews();
     }
 
     let bridgeRestored = false;
@@ -172,43 +154,6 @@ function createPrepareNode(deps = {}) {
       }
     }
 
-    await compressShortTermHistoryIfNeeded(request.userId, request.userInfo, {
-      chatHistory,
-      shortTermMemory,
-      routeMeta,
-      sessionKey: request.sessionKey,
-      summarizeChunk: async ({ existingSummary, existingState, chunkText, summaryTokens }) => {
-        const memoryUrl = String(config.MEMORY_API_BASE_URL || config.API_BASE_URL || '').replace(/\/+$/, '');
-        const completionsUrl = /\/chat\/completions$/i.test(memoryUrl)
-          ? memoryUrl
-          : (/\/v\d+$/i.test(memoryUrl) ? `${memoryUrl}/chat/completions` : memoryUrl);
-        const resp = await postWithRetry(
-          completionsUrl,
-          {
-            model: String(config.MEMORY_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4',
-            temperature: 0.2,
-            top_p: 0.9,
-            messages: [
-              {
-                role: 'system',
-                content: [
-                  buildStructuredCompressionPrompt(existingState || { summary: existingSummary }, summaryTokens),
-                  '濡傛灉鏃犳硶绋冲畾杈撳嚭 JSON锛岄€€鍥炶緭鍑虹函鏂囨湰鐭湡鎽樿銆?'
-                ].join('\n')
-              },
-              { role: 'user', content: chunkText }
-            ],
-            max_tokens: Math.max(96, Math.min(400, summaryTokens)),
-            stream: false
-          },
-          Math.max(0, Number(config.AI_RETRIES) || 0),
-          String(config.MEMORY_API_KEY || config.API_KEY || '').trim()
-        );
-        const msg = extractMessageContent(resp);
-        return String(msg?.content || msg?.text || '').trim();
-      }
-    });
-
     const restoredState = resumeUsed ? normalizeObject(restored?.state, {}) : {};
 
     if (
@@ -219,25 +164,6 @@ function createPrepareNode(deps = {}) {
       && !String(request.customPrompt || '').trim()
       && isChatLikeRoute(request)
     ) {
-      if (config.MEMORY_V3_ENABLED) {
-        await appendMemoryEvent({
-          type: 'session_checkpoint',
-          userId: request.userId,
-          sessionKey: request.sessionKey,
-          groupId: routeMeta.groupId || routeMeta.group_id || '',
-          channelId: routeMeta.channelId || routeMeta.channel_id || '',
-          sessionId: routeMeta.sessionId || routeMeta.session_id || '',
-          routePolicyKey: request.routePolicyKey,
-          topRouteType: request.topRouteType,
-          scopeType: 'session',
-          source: 'runtime_v2_prepare',
-          payload: {
-            snapshotType: 'pre_reply',
-            carryOverUserTurn: persistUserText || (request.imageUrl ? '[shared an image]' : '')
-          }
-        });
-        materializeMemoryViews();
-      }
       persistShortTermBridgeSnapshot(request.userId, {
         chatHistory,
         shortTermMemory,
@@ -256,7 +182,23 @@ function createPrepareNode(deps = {}) {
       }));
     }
 
-    const continuityProbe = await maybeRunAutoContinuityProbe(state);
+    const continuityProbe = await withSoftTimeout(
+      () => maybeRunAutoContinuityProbe({
+        ...state,
+        execution: {
+          ...state.execution,
+          latencyDecision
+        }
+      }),
+      latencyDecision.continuityBudgetMs,
+      {
+        skipped: true,
+        reason: 'soft_timeout',
+        events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'soft_timeout' })],
+        probeResult: null,
+        probeMeta: null
+      }
+    );
     const continuityBuilt = buildContinuityState({
       request,
       thread: state.thread,
@@ -269,35 +211,14 @@ function createPrepareNode(deps = {}) {
     const restoredExecution = normalizeObject(restoredState.execution, state.execution);
     const nextMemoryCliTurn = createMemoryCliTurnState(restoredExecution.memoryCliTurn);
     const effectiveAllowedTools = computeEffectiveAllowedTools(request, nextMemoryCliTurn);
-    const plannerExecutionPlan = getToolPlannerExecutionPlan(request.routeMeta);
-    const plannerOwnsToolExecution = isPlannerSingleAuthorityEnabled()
-      && normalizeArray(plannerExecutionPlan?.steps).length > 0;
-    const globalPreflight = plannerOwnsToolExecution
-      ? {
-          skipped: true,
-          reason: 'planner_single_authority',
-          results: [],
-          evidenceMessage: '',
-          memoryCliTurn: nextMemoryCliTurn
-        }
-      : await runCapabilityPreflight(request.question || '', {
-          question: requestQuestionText,
-          userId: request.userId,
-          routePolicyKey: request.routePolicyKey,
-          topRouteType: request.topRouteType,
-          routePrompt: request.routePrompt,
-          routeMeta: request.routeMeta,
-          reviewMode: request.reviewMode,
-          allowedGlobalTools: effectiveAllowedTools,
-          memoryCliTurn: nextMemoryCliTurn,
-          toolExecutors: deps.toolExecutors,
-          postWithRetry: runtimeOptions.postWithRetry,
-          policy: {
-            allowGlobalTools: Boolean(request.allowTools),
-            allowedGlobalTools: effectiveAllowedTools
-          }
-        });
-    const preflightMemoryCliTurn = createMemoryCliTurnState(globalPreflight?.memoryCliTurn || nextMemoryCliTurn);
+    const globalPreflight = {
+      skipped: true,
+      reason: 'deferred_to_dispatch',
+      results: [],
+      evidenceMessage: '',
+      memoryCliTurn: nextMemoryCliTurn
+    };
+    const preflightMemoryCliTurn = createMemoryCliTurnState(nextMemoryCliTurn);
     const executionMemoryCliTurn = createMemoryCliTurnState(nextMemoryCliTurn);
     const executionAllowedTools = computeEffectiveAllowedTools(request, executionMemoryCliTurn);
     const threatMeta = classifyPromptThreat(requestQuestionText || '', {
@@ -315,25 +236,52 @@ function createPrepareNode(deps = {}) {
       personaMemoryState,
       promptSnapshot,
       promptSegments
-    } = await buildDynamicPromptImpl(
-      request.userInfo,
-      request.userId,
-      requestQuestionText,
-      request.customPrompt,
+    } = await withSoftTimeout(
+      () => buildDynamicPromptImpl(
+        request.userInfo,
+        request.userId,
+        requestQuestionText,
+        request.customPrompt,
+        {
+          routePrompt: request.routePrompt,
+          routePolicyKey: request.routePolicyKey,
+          topRouteType: request.topRouteType,
+          reviewMode: request.reviewMode,
+          routeMeta: request.routeMeta,
+          customPrompt: request.customPrompt,
+          disableTools: !request.allowTools,
+          modelConfig: request.modelConfig,
+          memoryCliTurn: executionMemoryCliTurn,
+          securityLabels: normalizeArray(threatMeta.labels),
+          chatHistory,
+          shortTermMemory,
+          sessionKey: request.sessionKey,
+          latencyDecision
+        }
+      ),
+      latencyDecision.prepareSoftBudgetMs,
       {
-        routePrompt: request.routePrompt,
-        routePolicyKey: request.routePolicyKey,
-        topRouteType: request.topRouteType,
-        reviewMode: request.reviewMode,
-        routeMeta: request.routeMeta,
-        customPrompt: request.customPrompt,
-        disableTools: !request.allowTools,
-        modelConfig: request.modelConfig,
-        memoryCliTurn: executionMemoryCliTurn,
-        securityLabels: normalizeArray(threatMeta.labels),
-        chatHistory,
-        shortTermMemory,
-        sessionKey: request.sessionKey
+        dynamicPrompt: String(state.memory?.dynamicPrompt || ''),
+        stableSystemBlocks: normalizeArray(state.memory?.stableSystemBlocks),
+        dynamicContextBlocks: normalizeArray(state.memory?.dynamicContextBlocks),
+        assistantOnlyContextBlocks: normalizeArray(state.memory?.assistantOnlyContextBlocks),
+        affinity: state.memory?.affinity || null,
+        memoryContext: state.memory?.context || null,
+        personaMemoryState: state.memory?.personaMemoryState || null,
+        promptSnapshot: state.memory?.promptSnapshot || null,
+        promptSegments: state.memory?.promptSegments || null,
+        freshness: {
+          stableSystem: 'cache',
+          sessionContext: 'partial',
+          continuity: 'skipped'
+        },
+        cacheMeta: {
+          stableKey: '',
+          sessionKey: '',
+          hit: false
+        },
+        criticalBlocks: [],
+        optionalBlocks: []
       }
     );
 
@@ -400,7 +348,22 @@ function createPrepareNode(deps = {}) {
         currentNode: 'prepare',
         resumedFromNode: resumeUsed ? String(restored?.node || '').trim() : '',
         retryQueue: normalizeArray(restoredState.execution?.retryQueue),
-        memoryCliTurn: executionMemoryCliTurn
+        memoryCliTurn: executionMemoryCliTurn,
+        latencyDecision,
+        cacheStats: {
+          ...normalizeObject(restoredState.execution?.cacheStats, state.execution?.cacheStats),
+          promptCacheHit: Boolean(promptSnapshot?.cacheMeta?.hit || promptSegments?.cacheMeta?.hit),
+          memoryCacheHit: Boolean(memoryContext?.cacheMeta?.hit),
+          toolCacheHitCount: Number(restoredState.execution?.cacheStats?.toolCacheHitCount || 0) || 0
+        },
+        latencyBreakdown: {
+          ...normalizeObject(restoredState.execution?.latencyBreakdown, state.execution?.latencyBreakdown),
+          prepare: {
+            durationMs: Math.max(0, nowTs() - startedAt),
+            timedOut: Boolean(String(promptSnapshot?.freshness?.sessionContext || promptSegments?.freshness?.sessionContext || '').trim() === 'partial'),
+            deferred: true
+          }
+        }
       },
       output: resumeUsed && restoredState.output
         ? {
@@ -433,22 +396,15 @@ function createPrepareNode(deps = {}) {
         node: 'prepare',
         allowedTools: executionAllowedTools
       }),
+      createEvent('latency_profile', {
+        node: 'prepare',
+        profile: latencyDecision.profile,
+        deferPersist: Boolean(latencyDecision.deferPersist)
+      }),
       createEvent('memoryCliTurn', {
         node: 'prepare',
         memoryCliTurn: executionMemoryCliTurn
       }),
-      ...(String(globalPreflight?.evidenceMessage || '').trim() || globalPreflight?.memoryCliTurn
-        ? [createEvent('global_tool_memoryCliTurn', {
-            node: 'prepare',
-            memoryCliTurn: preflightMemoryCliTurn
-          })]
-        : []),
-      ...(String(globalPreflight?.evidenceMessage || '').trim()
-        ? [createEvent('global_tool_preflight', {
-            node: 'prepare',
-            resultCount: normalizeArray(globalPreflight?.results).length
-          })]
-        : []),
       createEvent('checkpoint', { node: 'prepare', resumeUsed, threadId }),
       createEvent('node_complete', { node: 'prepare', threadId })
     ]);

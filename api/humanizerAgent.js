@@ -183,9 +183,15 @@ async function runHumanizerAgent(text, options = {}) {
   // 子 Agent 关闭时，退回本地规则清洗器。
   if (!isHumanizerAgentEnabled()) return fallbackHumanize(original);
 
-  const model = String(config.HUMANIZER_AGENT_MODEL || options.model || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
-  const apiBaseUrl = ensureChatCompletionsUrl(options.apiBaseUrl || config.API_BASE_URL);
-  const apiKey = String(options.apiKey || config.API_KEY || '').trim();
+  const model = String(
+    config.HUMANIZER_AGENT_MODEL
+    || config.AUX_MODEL
+    || options.model
+    || config.AI_MODEL
+    || 'gpt-5.4'
+  ).trim() || 'gpt-5.4';
+  const apiBaseUrl = ensureChatCompletionsUrl(options.apiBaseUrl || config.AUX_MODEL_API_BASE_URL || config.API_BASE_URL);
+  const apiKey = String(options.apiKey || config.AUX_MODEL_API_KEY || config.API_KEY || '').trim();
   const retries = Math.max(0, Number.isFinite(Number(options.retries))
     ? Number(options.retries)
     : (Number(config.AI_RETRIES) || 0));

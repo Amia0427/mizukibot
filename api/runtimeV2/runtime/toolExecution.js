@@ -33,6 +33,16 @@ function isUnresolvedMemoryOpenCommand(commandText = '') {
     || /^mem open --ref\s+\"<[^"]+>\"/i.test(text);
 }
 
+const readOnlyToolCache = new Map();
+
+function pruneReadOnlyToolCache(now = Date.now()) {
+  for (const [key, value] of readOnlyToolCache.entries()) {
+    if (!value || Number(value.expiresAt || 0) <= now) {
+      readOnlyToolCache.delete(key);
+    }
+  }
+}
+
 function createToolExecutionHelpers(deps = {}) {
   const {
     config,
@@ -53,6 +63,75 @@ function createToolExecutionHelpers(deps = {}) {
     isPlannerSingleAuthorityEnabled,
     toolExecutors
   } = deps;
+
+  function getReadOnlyToolCacheTtl(toolName = '', normalizedArgs = {}) {
+    const name = normalizeText(toolName);
+    if (name === 'get_context_stats') {
+      return Math.max(0, Number(config.CONTEXT_STATS_CACHE_TTL_MS || 0) || 0);
+    }
+    if (name === 'web_search' || name === 'web_fetch') {
+      return Math.max(0, Number(config.READONLY_TOOL_CACHE_TTL_MS || 0) || 0);
+    }
+    if (name === 'memory_cli') {
+      const commandText = normalizeText(normalizedArgs.command);
+      if (/^mem (search|open)\b/i.test(commandText)) {
+        return Math.max(0, Number(config.READONLY_TOOL_CACHE_TTL_MS || 0) || 0);
+      }
+    }
+    return 0;
+  }
+
+  function buildReadOnlyToolCacheKey(step = {}, state = {}, normalizedArgs = {}) {
+    const request = normalizeObject(state.request, {});
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    return [
+      normalizeText(step.tool),
+      normalizeText(request.userId),
+      normalizeText(request.sessionKey),
+      normalizeText(routeMeta.groupId || routeMeta.group_id),
+      stableHash(normalizedArgs)
+    ].join('|');
+  }
+
+  function invalidateSessionReadOnlyCache(state = {}) {
+    const request = normalizeObject(state.request, {});
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const sessionNeedle = [
+      normalizeText(request.userId),
+      normalizeText(request.sessionKey),
+      normalizeText(routeMeta.groupId || routeMeta.group_id)
+    ].join('|');
+    for (const key of readOnlyToolCache.keys()) {
+      if (String(key || '').includes(sessionNeedle)) {
+        readOnlyToolCache.delete(key);
+      }
+    }
+  }
+
+  function readCachedEnvelope(step = {}, state = {}, normalizedArgs = {}) {
+    pruneReadOnlyToolCache();
+    const ttlMs = getReadOnlyToolCacheTtl(step.tool, normalizedArgs);
+    if (ttlMs <= 0) return null;
+    const key = buildReadOnlyToolCacheKey(step, state, normalizedArgs);
+    const entry = readOnlyToolCache.get(key);
+    if (!entry) return null;
+    return {
+      ...normalizeObject(entry.envelope, {}),
+      cacheHit: true
+    };
+  }
+
+  function writeCachedEnvelope(step = {}, state = {}, normalizedArgs = {}, envelope = {}) {
+    const ttlMs = getReadOnlyToolCacheTtl(step.tool, normalizedArgs);
+    if (ttlMs <= 0) return;
+    const key = buildReadOnlyToolCacheKey(step, state, normalizedArgs);
+    readOnlyToolCache.set(key, {
+      expiresAt: Date.now() + ttlMs,
+      envelope: {
+        ...normalizeObject(envelope, {})
+      }
+    });
+  }
 
   function isWriteLikeCapability(capability = '') {
     return /write/i.test(String(capability || ''));
@@ -351,6 +430,14 @@ function createToolExecutionHelpers(deps = {}) {
       let normalizedArgs = enforceToolPolicy(toolName, preparedArgs, {
         userId: state.request.userId
       });
+      const cachedEnvelope = readCachedEnvelope(step, state, normalizedArgs);
+      if (cachedEnvelope) {
+        logToolExecution(cachedEnvelope, { ...step, inputs: normalizedArgs }, state, {
+          node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
+          allowedTools: state.request?.allowedTools
+        });
+        return cachedEnvelope;
+      }
       if (toolName === 'memory_cli') {
         if (isPlannerSingleAuthorityEnabled()) {
           const commandText = normalizeText(normalizedArgs.command);
@@ -444,6 +531,12 @@ function createToolExecutionHelpers(deps = {}) {
           node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
           allowedTools: state.request?.allowedTools
         });
+        if (String(resultEnvelope.status || '').trim() === 'completed') {
+          if (isSideEffectPolicy(policy)) {
+            invalidateSessionReadOnlyCache(state);
+          }
+          writeCachedEnvelope(step, state, normalizedArgs, resultEnvelope);
+        }
         return resultEnvelope;
       }
 
@@ -464,6 +557,11 @@ function createToolExecutionHelpers(deps = {}) {
         node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
         allowedTools: state.request?.allowedTools
       });
+      if (String(envelope.status || '').trim() === 'completed' && !isSideEffectPolicy(policy)) {
+        writeCachedEnvelope(step, state, normalizedArgs, envelope);
+      } else if (String(envelope.status || '').trim() === 'completed' && isSideEffectPolicy(policy)) {
+        invalidateSessionReadOnlyCache(state);
+      }
       return envelope;
     } catch (error) {
       const base = computeToolEnvelope(step, `Tool error: ${error.message}`, policy);

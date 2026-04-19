@@ -115,6 +115,12 @@ function createDirectReplyNode(deps = {}) {
         const limit = Math.max(80, Number(maxChars) || 240);
         return compact.length > limit ? `${compact.slice(0, limit - 3).trim()}...` : compact;
       });
+  const buildReplyTextVariants = typeof deps.buildReplyTextVariants === 'function'
+    ? deps.buildReplyTextVariants
+    : ((text = '') => ({
+      visibleText: String(text || '').trim(),
+      persistedText: String(text || '').trim()
+    }));
 
   return async function directReplyNode(state) {
     const request = normalizeObject(state.request, {});
@@ -177,6 +183,7 @@ function createDirectReplyNode(deps = {}) {
     let directLoopEvents = [];
     let executedToolEnvelopes = [];
     let compiledToolPlan = null;
+    let firstAssistantReused = false;
     const initialDirectLoopState = cloneDirectToolLoopState({
       messages: messagesToSend,
       events: [
@@ -254,7 +261,31 @@ function createDirectReplyNode(deps = {}) {
             events: compiledEvents
           }, 'direct_reply', 'running', compiledEvents);
         }
-        if (request.streaming) {
+        const assistantText = String(firstAssistantMessage?.content || '').trim();
+        if (isStableDirectReplyText(assistantText)) {
+          const variants = buildReplyTextVariants(assistantText);
+          reply = String(variants.persistedText || assistantText || '').trim();
+          displayReply = String(variants.visibleText || reply || '').trim();
+          firstAssistantReused = true;
+          directLoopEvents.push(createEvent('first_assistant_reused', {
+            node: 'direct_reply',
+            reused: true,
+            hadToolCalls: false
+          }));
+          if (request.streaming) {
+            if (typeof request.onDelta === 'function' && displayReply) {
+              try {
+                request.onDelta(displayReply, displayReply);
+              } catch (_) {}
+            }
+            nextStream = {
+              ...ensureOutputStream(state.output, 'direct'),
+              ...mirrorStreamingFlags(state.output, reply),
+              completed: Boolean(reply),
+              mode: 'direct'
+            };
+          }
+        } else if (request.streaming) {
           const streamed = await streamDirectReply(messagesToSend, {
             ...state,
             request: {
@@ -532,7 +563,16 @@ function createDirectReplyNode(deps = {}) {
         status: failure ? 'failed' : 'completed',
         currentNode: 'direct_reply',
         toolResults: executedToolEnvelopes,
-        memoryCliTurn: nextMemoryCliTurn
+        memoryCliTurn: nextMemoryCliTurn,
+        firstAssistantReused,
+        latencyBreakdown: {
+          ...normalizeObject(state.execution?.latencyBreakdown, {}),
+          model: {
+            firstAssistantReused,
+            hadToolCalls: Boolean(compiledToolPlan),
+            mode: request.streaming ? 'streaming' : 'non_stream'
+          }
+        }
       },
         output: {
           ...state.output,

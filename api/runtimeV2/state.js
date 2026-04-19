@@ -112,6 +112,16 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     options
   });
   const useMinecraftModel = shouldUseMinecraftLLM(question, options.routePrompt);
+  const latencyDecision = normalizeObject(options.latencyDecision, {
+    profile: 'chat_fast',
+    prepareSoftBudgetMs: 600,
+    memoryBudgetMs: 300,
+    continuityBudgetMs: 250,
+    preflightBudgetMs: 350,
+    humanizeBudgetMs: 500,
+    humanizeMode: 'auto',
+    deferPersist: true
+  });
   const request = {
     question: String(question || ''),
     runtimeQuestionText: String(options.runtimeQuestionText || routeMeta?.runtimeQuestionText || question || ''),
@@ -190,7 +200,25 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
       parallelExecution: false,
       memoryCliTurn: createMemoryCliTurnState(),
       resumedFromNode: '',
-      pendingInterrupt: false
+      pendingInterrupt: false,
+      latencyDecision,
+      pendingReplySnapshot: {
+        finalReply: '',
+        activeTopic: '',
+        openLoops: [],
+        assistantCommitments: [],
+        userConstraints: [],
+        toolSummary: ''
+      },
+      cacheStats: {
+        promptCacheHit: false,
+        memoryCacheHit: false,
+        toolCacheHitCount: 0
+      },
+      latencyBreakdown: {},
+      deferredJobs: [],
+      firstAssistantReused: false,
+      humanizerInvoked: false
     },
     output: {
       draftReply: '',

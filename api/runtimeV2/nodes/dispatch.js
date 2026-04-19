@@ -53,6 +53,9 @@ function createDispatchNode(deps = {}) {
   const executeBatch = typeof deps.executeBatch === 'function'
     ? deps.executeBatch
     : (async () => []);
+  const runCapabilityPreflight = typeof deps.runCapabilityPreflight === 'function'
+    ? deps.runCapabilityPreflight
+    : (async () => ({ skipped: true, results: [], evidenceMessage: '', memoryCliTurn: null }));
   const rebuildFinalPlanFromSteps = typeof deps.rebuildFinalPlanFromSteps === 'function'
     ? deps.rebuildFinalPlanFromSteps
     : ((state) => state.plan || {});
@@ -134,6 +137,26 @@ function createDispatchNode(deps = {}) {
       ? pendingSteps.filter((step) => retryQueueIds.has(String(step.id || '').trim()))
       : pendingSteps;
     const selectedSteps = selectedBase.slice(0, Math.max(1, Number(config.PLAN_MAX_STEPS) || 5));
+    const selectedStepToolNames = Array.from(new Set(
+      selectedSteps
+        .map((step) => String(step?.tool || '').trim())
+        .filter(Boolean)
+    ));
+    const preflight = await runCapabilityPreflight(request.question || '', {
+      question: String(request.question || '').trim(),
+      userId: request.userId,
+      routePolicyKey: request.routePolicyKey,
+      topRouteType: request.topRouteType,
+      routePrompt: request.routePrompt,
+      routeMeta: request.routeMeta,
+      reviewMode: request.reviewMode,
+      allowedGlobalTools: selectedStepToolNames,
+      memoryCliTurn: state.execution?.memoryCliTurn,
+      policy: {
+        allowGlobalTools: Boolean(request.allowTools),
+        allowedGlobalTools: selectedStepToolNames
+      }
+    });
     const hasExplicitDependencies = selectedSteps.some((step) => normalizeArray(step.dependsOn).length > 0);
     const directChatBatchExecution = isDirectChatRequest(request) && !hasExplicitDependencies;
     const directChatBatches = directChatBatchExecution
@@ -154,6 +177,12 @@ function createDispatchNode(deps = {}) {
       ? directChatBatches.some((batch) => batch.mode === 'parallel' && normalizeArray(batch.items).length > 1)
       : (!hasExplicitDependencies && canRunStepsInParallel(selectedSteps));
     const events = [createEvent('node_start', { node: 'dispatch', stepCount: selectedSteps.length, parallelExecution })];
+    if (String(preflight?.evidenceMessage || '').trim()) {
+      events.push(createEvent('dispatch_preflight', {
+        node: 'dispatch',
+        resultCount: normalizeArray(preflight?.results).length
+      }));
+    }
     const dispatchRuntimeOptions = {
       node: 'dispatch',
       mainConversationSnapshot: buildLiveMainConversationSnapshot(state, {
@@ -410,7 +439,11 @@ function createDispatchNode(deps = {}) {
       },
       memory: {
         ...state.memory,
-        dirty: memoryDirty
+        dirty: memoryDirty,
+        globalToolEvidence: String(preflight?.evidenceMessage || state.memory?.globalToolEvidence || '').trim(),
+        globalToolResults: normalizeArray(preflight?.results).length > 0
+          ? normalizeArray(preflight.results).map((item) => ({ ...item }))
+          : normalizeArray(state.memory?.globalToolResults)
       },
       request: {
         ...state.request,
