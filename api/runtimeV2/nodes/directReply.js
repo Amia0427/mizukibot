@@ -122,6 +122,22 @@ function createDirectReplyNode(deps = {}) {
       persistedText: String(text || '').trim()
     }));
 
+  function extractAssistantContentText(content) {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content.map((part) => {
+        if (typeof part === 'string') return part;
+        if (typeof part?.text === 'string') return part.text;
+        return '';
+      }).join('');
+    }
+    if (content && typeof content === 'object') {
+      if (typeof content.text === 'string') return content.text;
+      if (typeof content.content === 'string') return content.content;
+    }
+    return '';
+  }
+
   return async function directReplyNode(state) {
     const request = normalizeObject(state.request, {});
     const events = [createEvent('node_start', { node: 'direct_reply', mode: state.execution.mode })];
@@ -261,7 +277,7 @@ function createDirectReplyNode(deps = {}) {
             events: compiledEvents
           }, 'direct_reply', 'running', compiledEvents);
         }
-        const assistantText = String(firstAssistantMessage?.content || '').trim();
+        const assistantText = extractAssistantContentText(firstAssistantMessage?.content).trim();
         if (isStableDirectReplyText(assistantText)) {
           const variants = buildReplyTextVariants(assistantText);
           reply = String(variants.persistedText || assistantText || '').trim();

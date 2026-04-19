@@ -11,6 +11,20 @@
 - 改不同功能时应该去哪里下手
 - 排障时先查哪一层
 
+目录整理约定见：
+
+- `docs/workspace-layout.md`
+- `docs/local-dev.md`
+- `scripts/README.md`
+- `deploy/README.md`
+
+常见非代码文件的位置：
+
+- 临时产物：`artifacts/tmp/`
+- 本地备份：`artifacts/backups/`
+- Windows 运维资产：`ops/windows/`
+- 诊断模板：`docs/templates/`
+
 ---
 
 ## 1. 先建立正确心智模型

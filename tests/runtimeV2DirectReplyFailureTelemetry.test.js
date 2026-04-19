@@ -156,6 +156,150 @@ module.exports = (async () => {
   assert.strictEqual(reuseResult.execution.firstAssistantReused, true);
   assert.ok((reuseResult.events || []).some((item) => item.type === 'first_assistant_reused'));
 
+  const directReplyObjectContentNode = createDirectReplyNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    shouldBypassHumanizerForPolicy() {
+      return false;
+    },
+    computeEffectiveAllowedTools() {
+      return ['memory_cli'];
+    },
+    getToolPlannerExecutionPlan() {
+      return null;
+    },
+    isPlannerSingleAuthorityEnabled() {
+      return false;
+    },
+    getRouteToolPlanner() {
+      return null;
+    },
+    buildVisionMessageContent(text) {
+      return text;
+    },
+    stripMemoryCliInstruction(text) {
+      return String(text || '');
+    },
+    getMainConversationSystemMessages() {
+      return [];
+    },
+    buildDirectReplyMessages(_state, messageContent) {
+      return {
+        messages: [{ role: 'user', content: String(messageContent || '') }]
+      };
+    },
+    buildLiveMainConversationSnapshot() {
+      return null;
+    },
+    ensureOutputStream(output = {}, mode = 'direct') {
+      return {
+        ...(output.stream || {}),
+        mode,
+        hadOutput: false,
+        completed: false,
+        fallbackToNonStream: false
+      };
+    },
+    createMemoryCliTurnState(value) {
+      return value || {};
+    },
+    cloneDirectToolLoopState(value) {
+      return { ...(value || {}) };
+    },
+    normalizeMessageForToolLoop(message) {
+      return message;
+    },
+    async requestAssistantMessageImpl() {
+      return {
+        role: 'assistant',
+        content: [{ type: 'text', text: '对象内容也应该被正确复用。' }],
+        tool_calls: []
+      };
+    },
+    compileDirectChatToolCallsToPlan(toolCalls, plan) {
+      return { ...(plan || {}), steps: toolCalls };
+    },
+    saveAndEmit(state) {
+      return state;
+    },
+    mirrorStreamingFlags() {
+      return {};
+    },
+    isPureToolCallMarkup() {
+      return false;
+    },
+    async streamDirectReply() {
+      throw new Error('stream path should not be used for reusable assistant object content');
+    },
+    async requestReplyImpl() {
+      throw new Error('fallback should not run for reusable assistant object content');
+    },
+    buildReplyTextVariants(text = '') {
+      return {
+        visibleText: String(text || '').trim(),
+        persistedText: String(text || '').trim()
+      };
+    },
+    classifyDirectReplyError() {
+      return 'generic_model_failure';
+    },
+    summarizeDirectReplyError(error) {
+      return String(error?.message || error || '');
+    },
+    async attemptDirectMemoryRecovery() {
+      return null;
+    },
+    getControlledFailureReply() {
+      return 'controlled failure';
+    },
+    updateMemoryCliTurnStateAfterError(state = {}) {
+      return state;
+    },
+    classifyReplyFailure() {
+      return { type: 'none' };
+    }
+  });
+
+  const objectContentResult = await directReplyObjectContentNode({
+    request: {
+      question: '对象内容测试',
+      routePolicyKey: 'direct_chat/default',
+      routeMeta: {},
+      topRouteType: 'direct_chat',
+      customPrompt: '',
+      allowTools: true,
+      allowedTools: ['memory_cli'],
+      modelConfig: {},
+      imageUrl: '',
+      streaming: false,
+      reviewMode: ''
+    },
+    execution: {
+      mode: 'chat',
+      memoryCliTurn: null,
+      latencyBreakdown: {}
+    },
+    memory: {
+      dynamicPrompt: '',
+      affinity: null
+    },
+    output: {
+      stream: {}
+    },
+    plan: {}
+  });
+  assert.strictEqual(objectContentResult.output.finalReply, '对象内容也应该被正确复用。');
+
   const directReplyNode = createDirectReplyNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;

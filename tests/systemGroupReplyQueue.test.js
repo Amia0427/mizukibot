@@ -117,6 +117,37 @@ module.exports = (async () => {
 
   assert.ok(peakPrivate >= 2, 'private replies should not be forced through the group send queue');
 
+  const payloads = [];
+  async function payloadCaptureSendWithRetry(payload) {
+    payloads.push(payload);
+    return true;
+  }
+
+  await sendPrivateReply({
+    sendWithRetry: payloadCaptureSendWithRetry,
+    userId: 'private_object',
+    replyText: {
+      visibleText: '对象可见文本',
+      persistedText: '对象持久文本'
+    }
+  });
+  assert.strictEqual(
+    String(payloads[payloads.length - 1]?.params?.message || ''),
+    '对象持久文本',
+    'object reply payloads should be normalized to their text fields before sending'
+  );
+
+  await sendPrivateReply({
+    sendWithRetry: payloadCaptureSendWithRetry,
+    userId: 'private_guard',
+    replyText: '[object Object]'
+  });
+  assert.strictEqual(
+    String(payloads[payloads.length - 1]?.params?.message || ''),
+    '刚才回复出了点格式问题，你再发一次，我马上接住。',
+    'stringified object payloads should be blocked before sending to the user'
+  );
+
   console.log('systemGroupReplyQueue.test.js passed');
 })().catch((error) => {
   console.error(error);

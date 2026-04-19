@@ -56,6 +56,33 @@ function pushTextSegment(message, text) {
   message.push({ type: 'text', data: { text: value } });
 }
 
+function extractReplyTextValue(value) {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => extractReplyTextValue(item)).join('');
+  }
+  if (!value || typeof value !== 'object') return '';
+  return String(
+    value.persistedText
+    || value.visibleText
+    || value.finalReply
+    || value.text
+    || value.content
+    || ''
+  );
+}
+
+function sanitizeReplyPayloadText(replyText) {
+  const extracted = extractReplyTextValue(replyText);
+  const normalized = String(extracted || '').trim();
+  if (!normalized) return '刚才网络有点抖，我再试一次。';
+  if (/^\[object Object\]$/i.test(normalized)) {
+    console.error('[reply-guard] blocked object-stringified payload');
+    return '刚才回复出了点格式问题，你再发一次，我马上接住。';
+  }
+  return normalized;
+}
+
 function parseQqRichMessage(text = '') {
   const input = String(text || '');
   const pattern = /\[\[(qq_face|qq_image|qq_record|qq_video):([\s\S]*?)\]\]/gi;
@@ -171,7 +198,7 @@ async function sendGroupReply({
   runtimeConfig = config
 }) {
   return enqueueGroupSend(groupId, async () => {
-    const normalized = String(replyText || '').trim() || '刚才网络有点抖，我再试一次。';
+    const normalized = sanitizeReplyPayloadText(replyText);
     const richPayload = buildQqRichMessagePayload(normalized, { atSender, senderId });
     if (richPayload) {
       const ok = await sendWithRetry({
@@ -231,7 +258,7 @@ async function sendPrivateReply({
   waitMs = 500,
   runtimeConfig = config
 }) {
-  const normalized = String(replyText || '').trim() || '刚才网络有点抖，我再试一次。';
+  const normalized = sanitizeReplyPayloadText(replyText);
   const richPayload = buildQqRichMessagePayload(normalized, { atSender: false, senderId: '' });
   if (richPayload) {
     const ok = await sendWithRetry({

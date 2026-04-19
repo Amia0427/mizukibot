@@ -22,6 +22,8 @@ _migration_backup_*/
 _tmp_*.txt
 _tmp_*.log
 _tmp_*.tar.gz
+artifacts/tmp/
+artifacts/logs/
 
 # Local Windows ops artifacts
 windows-mgmt.conf
@@ -29,3 +31,4 @@ wireguard-amd64-*.msi
 toggle_ipv4_via_*.cmd
 turn_off_ipv4_via_*.cmd
 turn_on_ipv4_via_*.cmd
+ops/windows/
