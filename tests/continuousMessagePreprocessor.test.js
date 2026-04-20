@@ -134,10 +134,63 @@ async function testImageRefsPreferCachedHandles() {
   assert.strictEqual(first.meta.imageRefMap['https://example.com/current.png'], 'cached-image://current-png');
 }
 
+async function testSentenceWindowWaitsForContinuation() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 40,
+    atBotDebounceMs: 40,
+    privateDebounceMs: 40,
+    maxHoldMs: 220,
+    sentenceWindowMs: 60,
+    sentenceMinChars: 6
+  });
+
+  const msg = makeMessage({
+    messageId: 'sentence-a',
+    message: [{ type: 'text', data: { text: '我还没说完' } }],
+    rawMessage: '我还没说完'
+  });
+
+  const startedAt = Date.now();
+  const result = await preprocessor.handleMessage(msg, {});
+  assert.strictEqual(result.mode, 'ready');
+  assert.ok(Date.now() - startedAt >= 90, 'incomplete sentence should delay flush for an extra sentence window');
+  assert.ok(
+    result.meta.semanticDecision === 'continuation_tail' || result.meta.semanticDecision === 'max_hold_fallback',
+    'incomplete sentence should either stay in the sentence window or flush on max-hold fallback'
+  );
+  assert.strictEqual(result.meta.flushVersion, 1);
+}
+
+async function testSentenceStableTailFlushesWithoutExtraWait() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 30,
+    atBotDebounceMs: 30,
+    privateDebounceMs: 30,
+    maxHoldMs: 180,
+    sentenceWindowMs: 60,
+    sentenceMinChars: 6
+  });
+
+  const msg = makeMessage({
+    messageId: 'sentence-b',
+    message: [{ type: 'text', data: { text: '这一句已经说完。' } }],
+    rawMessage: '这一句已经说完。'
+  });
+
+  const result = await preprocessor.handleMessage(msg, {});
+  assert.strictEqual(result.mode, 'ready');
+  assert.strictEqual(result.meta.semanticDecision, 'complete');
+  assert.strictEqual(result.meta.semanticScore, null);
+}
+
 (async () => {
   await testImageThenTextMergesIntoOneTurn();
   await testPlainTextStillFlushesOnBaseDebounce();
   await testImageRefsPreferCachedHandles();
+  await testSentenceWindowWaitsForContinuation();
+  await testSentenceStableTailFlushesWithoutExtraWait();
   console.log('continuousMessagePreprocessor.test.js passed');
 })().catch((error) => {
   console.error(error);

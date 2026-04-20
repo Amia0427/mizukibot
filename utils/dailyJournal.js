@@ -6,6 +6,7 @@ const { favorites, getUserProfile, getUserSummary, getUserImpression } = require
 const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent } = require('../api/parser');
 const { addEpisodeMemory } = require('./vectorMemory');
+const { getBackgroundPressureDelayMs, appendPerfEvent } = require('./perfRuntime');
 const {
   createJsonHotStore,
   createTextHotStore
@@ -1056,8 +1057,11 @@ function formatJournalEntries(entries = []) {
 }
 
 function appendJsonLine(filePath, payload) {
-  ensureDir(path.dirname(filePath));
-  fs.appendFileSync(filePath, `${JSON.stringify(payload)}\n`, 'utf-8');
+  const { getJsonLineWriter } = require('./storeRegistry');
+  getJsonLineWriter(filePath, {
+    debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
+    maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
+  }).append(payload);
 }
 
 function readJsonLines(filePath) {
@@ -1313,6 +1317,17 @@ async function maybeSegmentJournal(userId, day, state, options = {}) {
 async function maybeSegmentJournalByThreshold(userId, day, options = {}) {
   const uid = String(userId || '').trim();
   if (!uid || !day || !config.DAILY_JOURNAL_ENABLED) return false;
+  const pressureDelayMs = getBackgroundPressureDelayMs();
+  if (pressureDelayMs > 0) {
+    appendPerfEvent({
+      category: 'background_pressure',
+      type: 'daily_journal_segment_deferred',
+      delayMs: pressureDelayMs,
+      userId: uid,
+      day
+    });
+    return false;
+  }
   const state = loadSummaryState();
   const pendingEntries = readUnsegmentedEntries(uid, day, state);
   if (pendingEntries.length === 0) return false;
@@ -1602,6 +1617,15 @@ function shouldRunDailySummaryNow(date = new Date()) {
 
 async function runDailyJournalSummaries(options = {}) {
   if (!config.DAILY_JOURNAL_ENABLED) return { ran: false, count: 0 };
+  const pressureDelayMs = getBackgroundPressureDelayMs();
+  if (pressureDelayMs > 0 && !options.force) {
+    appendPerfEvent({
+      category: 'background_pressure',
+      type: 'daily_journal_summary_deferred',
+      delayMs: pressureDelayMs
+    });
+    return { ran: false, count: 0, reason: 'resource_pressure_deferred', deferMs: pressureDelayMs };
+  }
 
   const state = loadSummaryState();
   const today = formatDateInTz(new Date(), config.TIMEZONE);

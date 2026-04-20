@@ -3,7 +3,7 @@ const path = require('path');
 const config = require('../config');
 const { createMessageHandler } = require('../core/messageHandler');
 const { createNapcatLogFollower, parsePacketFromLine } = require('../core/napcatLogFollower');
-const { appendPerfEvent, appendResourceSnapshot, flushPerfLogsSync } = require('../utils/perfRuntime');
+const { appendPerfEvent, appendResourceSnapshot, flushPerfLogsSync, getResourcePressureState } = require('../utils/perfRuntime');
 
 async function main() {
   const inputPath = String(process.argv[2] || config.FOLLOWER_NAPCAT_LOG_PATH || '').trim();
@@ -38,10 +38,13 @@ async function main() {
   const startedAt = Date.now();
   const lines = fs.readFileSync(inputPath, 'utf8').split(/\r?\n/).filter(Boolean);
   let replayed = 0;
+  const latencyStats = [];
+  let deferredBackgroundCount = 0;
   for (const line of lines) {
     const packet = parsePacketFromLine(line);
     if (!packet) continue;
     replayed += 1;
+    const itemStartedAt = Date.now();
     appendPerfEvent({
       category: 'replay',
       type: 'replay_message_start',
@@ -49,7 +52,13 @@ async function main() {
     });
     await follower.handleLivePacket(packet);
     await handleIncomingMessage(packet);
+    if (getResourcePressureState().level !== 'normal') deferredBackgroundCount += 1;
+    latencyStats.push(Math.max(0, Date.now() - itemStartedAt));
   }
+
+  const sortedLatency = latencyStats.slice().sort((a, b) => a - b);
+  const p50 = sortedLatency.length ? sortedLatency[Math.floor(sortedLatency.length * 0.5)] : 0;
+  const p95 = sortedLatency.length ? sortedLatency[Math.floor(sortedLatency.length * 0.95)] : 0;
 
   appendResourceSnapshot({
     component: 'replay_script',
@@ -64,7 +73,13 @@ async function main() {
     inputPath: path.resolve(inputPath),
     replayed,
     sentPayloads: sentPayloads.length,
-    durationMs: Math.max(0, Date.now() - startedAt)
+    durationMs: Math.max(0, Date.now() - startedAt),
+    latencyP50Ms: p50,
+    latencyP95Ms: p95,
+    deferredBackgroundCount,
+    bufferedWriterFlushCount: 0,
+    pressureLevel: getResourcePressureState().level,
+    pressureReasons: getResourcePressureState().reasons
   }, null, 2));
 }
 

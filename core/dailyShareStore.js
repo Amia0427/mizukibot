@@ -1,7 +1,7 @@
 const fs = require('fs');
-const path = require('path');
 const config = require('../config');
 const { formatDateInTz } = require('../utils/time');
+const { createJsonHotStore } = require('../utils/jsonHotStore');
 
 const QZONE_TARGET_ID = '__qzone__';
 const WINDOW_KEYS = Object.freeze(['morning', 'afternoon', 'night']);
@@ -31,28 +31,19 @@ function safeReadJson(filePath, fallback) {
   }
 }
 
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
+const jsonStoreRegistry = new Map();
 
-function atomicWriteJson(filePath, data) {
-  ensureDir(path.dirname(filePath));
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-    fs.renameSync(tempPath, filePath);
-  } catch (error) {
-    try {
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } finally {
-      try {
-        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-      } catch (_) {}
-    }
-    if (error && error.code !== 'EPERM') throw error;
+function getJsonStore(filePath) {
+  const key = String(filePath || '').trim();
+  if (!key) return null;
+  if (!jsonStoreRegistry.has(key)) {
+    jsonStoreRegistry.set(key, createJsonHotStore(key, {
+      fallback: () => ({}),
+      debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
+      maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
+    }));
   }
+  return jsonStoreRegistry.get(key);
 }
 
 function normalizeWindowValue(value, fallback = '') {
@@ -321,7 +312,7 @@ function normalizeStateEntry(value = {}, today = formatDateInTz(new Date(), conf
 }
 
 function loadTargets() {
-  const raw = safeReadJson(config.DAILY_SHARE_TARGETS_FILE, {});
+  const raw = getJsonStore(config.DAILY_SHARE_TARGETS_FILE)?.read({ forceReload: true }) || safeReadJson(config.DAILY_SHARE_TARGETS_FILE, {});
   const next = {};
   for (const [groupId, value] of Object.entries(raw || {})) {
     next[String(groupId)] = normalizeTargetEntry(value, String(groupId));
@@ -330,11 +321,12 @@ function loadTargets() {
 }
 
 function saveTargets(targets = {}) {
-  atomicWriteJson(config.DAILY_SHARE_TARGETS_FILE, targets);
+  const store = getJsonStore(config.DAILY_SHARE_TARGETS_FILE);
+  if (store) store.replace(targets);
 }
 
 function loadState(today = formatDateInTz(new Date(), config.TIMEZONE)) {
-  const raw = safeReadJson(config.DAILY_SHARE_STATE_FILE, {});
+  const raw = getJsonStore(config.DAILY_SHARE_STATE_FILE)?.read({ forceReload: true }) || safeReadJson(config.DAILY_SHARE_STATE_FILE, {});
   const next = {};
   for (const [groupId, value] of Object.entries(raw || {})) {
     next[String(groupId)] = normalizeStateEntry(value, today);
@@ -343,7 +335,8 @@ function loadState(today = formatDateInTz(new Date(), config.TIMEZONE)) {
 }
 
 function saveState(state = {}) {
-  atomicWriteJson(config.DAILY_SHARE_STATE_FILE, state);
+  const store = getJsonStore(config.DAILY_SHARE_STATE_FILE);
+  if (store) store.replace(state);
 }
 
 function ensureTarget(targets, groupId) {

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { getJsonLineWriter } = require('../storeRegistry');
 
 function ensureDir(dirPath) {
   const dir = String(dirPath || '').trim();
@@ -43,8 +44,7 @@ function atomicWriteJson(filePath, value) {
 }
 
 function appendLine(filePath, line) {
-  ensureDir(path.dirname(filePath));
-  fs.appendFileSync(filePath, `${String(line || '')}\n`, 'utf8');
+  getJsonLineWriter(filePath).append(String(line || ''));
 }
 
 function safeReadJsonLines(filePath) {

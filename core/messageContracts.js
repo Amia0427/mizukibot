@@ -90,7 +90,10 @@ function buildReplyEnvelope(input = {}) {
     backgroundTaskState: source.backgroundTaskState || null,
     postActions: Array.isArray(source.postActions) ? [...source.postActions] : [],
     usedStreamingSend: Boolean(source.usedStreamingSend),
-    replyOptions: source.replyOptions || null
+    replyOptions: source.replyOptions || null,
+    freshness: source.freshness && typeof source.freshness === 'object'
+      ? { ...source.freshness }
+      : null
   };
 }
 

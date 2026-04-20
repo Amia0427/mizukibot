@@ -70,6 +70,7 @@ const { runMemoryCli: defaultRunMemoryCli } = require('../utils/memoryCli');
 const { recordMemoryScope: defaultRecordMemoryScope } = require('../utils/memoryScopeIndex');
 const { requestAssistantMessage } = require('../api/graphModelIO');
 const { classifyReplyFailure, normalizeReplyText } = require('../utils/replyFailure');
+const { getBackgroundPressureDelayMs, appendPerfEvent } = require('../utils/perfRuntime');
 
 const WINDOW_LABELS = Object.freeze({
   morning: '鏃╅棿',
@@ -99,17 +100,33 @@ function logDailyShare({ groupId = '', windowKey = '', type = '', reason = '', s
   if (source) payload.source = String(source);
   console.log(`[daily-share] ${String(event || 'event')}`, payload);
   try {
-    const logLine = JSON.stringify({
-      ts: Date.now(),
-      day: formatDateInTz(new Date(), config.TIMEZONE),
-      event: String(event || 'event'),
-      groupId: String(groupId || ''),
-      windowKey: String(windowKey || ''),
-      type: String(type || ''),
-      reason: String(reason || ''),
-      source: String(source || '')
-    });
-    require('fs').appendFileSync(config.DAILY_SHARE_EVENT_LOG_FILE, `${logLine}\n`, 'utf-8');
+    if (!config.BUFFERED_EVENT_LOG_ENABLED) {
+      const logLine = JSON.stringify({
+        ts: Date.now(),
+        day: formatDateInTz(new Date(), config.TIMEZONE),
+        event: String(event || 'event'),
+        groupId: String(groupId || ''),
+        windowKey: String(windowKey || ''),
+        type: String(type || ''),
+        reason: String(reason || ''),
+        source: String(source || '')
+      });
+      require('fs').appendFileSync(config.DAILY_SHARE_EVENT_LOG_FILE, `${logLine}\n`, 'utf-8');
+    } else {
+      require('../utils/storeRegistry').getJsonLineWriter(config.DAILY_SHARE_EVENT_LOG_FILE, {
+        debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
+        maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
+      }).append({
+        ts: Date.now(),
+        day: formatDateInTz(new Date(), config.TIMEZONE),
+        event: String(event || 'event'),
+        groupId: String(groupId || ''),
+        windowKey: String(windowKey || ''),
+        type: String(type || ''),
+        reason: String(reason || ''),
+        source: String(source || '')
+      });
+    }
   } catch (_) {}
 }
 
@@ -1511,7 +1528,7 @@ function createDailyShareEngine({
       for (const windowDef of getWindowDefinitions(target)) {
         const liveState = ensureStateEntry(state, groupId, today);
         ensureWindowSchedule(liveState, groupId, windowDef, today, date, target);
-        if (-not (shouldRunWindowNow({ entry: liveState, windowDef, now, date, targetConfig: target }))) { continue; }
+        if (!shouldRunWindowNow({ entry: liveState, windowDef, now, date, targetConfig: target })) { continue; }
 
         const gate = shouldDeferOrSkip({
           groupId,
@@ -1593,7 +1610,7 @@ function createDailyShareEngine({
     for (const windowDef of getWindowDefinitions(target)) {
       const liveState = ensureStateEntry(state, QZONE_TARGET_ID, today);
       ensureWindowSchedule(liveState, QZONE_TARGET_ID, windowDef, today, date, target);
-      if (-not (shouldRunWindowNow({ entry: liveState, windowDef, now, date, targetConfig: target }))) { continue; }
+      if (!shouldRunWindowNow({ entry: liveState, windowDef, now, date, targetConfig: target })) { continue; }
 
       const type = getAutoTypeForWindow(target, liveState, windowDef.key);
       if (!type) continue;
@@ -1646,6 +1663,15 @@ function createDailyShareEngine({
 
   async function runDailyShareCycle({ sendWithRetry, askAIByGraph, date = new Date() }) {
     if (!config.DAILY_SHARE_ENABLED) return { ran: false, reason: 'disabled' };
+    const pressureDelayMs = getBackgroundPressureDelayMs();
+    if (pressureDelayMs > 0) {
+      appendPerfEvent({
+        category: 'background_pressure',
+        type: 'daily_share_deferred',
+        delayMs: pressureDelayMs
+      });
+      return { ran: false, reason: 'resource_pressure_deferred', deferMs: pressureDelayMs };
+    }
 
     const today = getToday(date);
     const now = date.getTime();

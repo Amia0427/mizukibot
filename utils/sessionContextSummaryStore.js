@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { getJsonStore } = require('./storeRegistry');
 
 function ensureParentDir(filePath = '') {
   const dir = path.dirname(String(filePath || ''));
@@ -24,20 +25,9 @@ function safeReadJson(filePath, fallback = {}) {
 
 function atomicWriteJson(targetFile, obj) {
   ensureParentDir(targetFile);
-  const tempFile = `${targetFile}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(tempFile, JSON.stringify(obj, null, 2), 'utf8');
-    fs.renameSync(tempFile, targetFile);
-  } catch (error) {
-    try {
-      fs.writeFileSync(targetFile, JSON.stringify(obj, null, 2), 'utf8');
-    } finally {
-      try {
-        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-      } catch (_) {}
-    }
-    if (error?.code !== 'EPERM') throw error;
-  }
+  getJsonStore(targetFile, {
+    fallback: () => ({ sessions: {} })
+  }).replace(obj, { flushNow: true });
 }
 
 function clampText(value, maxChars) {

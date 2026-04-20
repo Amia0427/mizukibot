@@ -140,7 +140,9 @@ function createSchedulerRuntime(options = {}) {
       timer = null;
     }
     const nowText = nowDateTimeText();
-    const delayMs = getNextWakeDelayMs(nowText);
+    const delayMs = config.SCHEDULER_ADAPTIVE_SCAN_ENABLED
+      ? getNextWakeDelayMs(nowText)
+      : scanIntervalMs;
     timer = setTimeout(() => {
       timer = null;
       void scan().catch((error) => {

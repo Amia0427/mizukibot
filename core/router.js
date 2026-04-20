@@ -51,7 +51,17 @@ const BAD_FAITH_PATTERNS = Object.freeze([
   /(帮我|替我|去).{0,12}(群里|聊天里|对话里|the chat).{0,8}(刷屏|连发|轰炸)/i,
   /(帮我|替我).{0,10}(刷屏|轰炸|骚扰).{0,12}(他们|对方|别人|某人|那个人|someone|him|her|them)/i,
   /(spam|flood).{0,16}(the chat|someone|him|her|them)/i,
-  /(harass|spam|flood).{0,12}(someone|the chat|them)/i
+  /(harass|spam|flood).{0,12}(someone|the chat|them)/i,
+  /(?:我要|我想|我要把|我会把|把|将).{0,6}(?:你|你的).{0,8}(?:工具调用|工具|能力|功能).{0,10}(?:全删了|删了|删掉|关掉|禁用|移除|废掉)/i,
+  /(?:delete|remove|disable|turn off).{0,12}(?:your|the bot'?s).{0,12}(?:tool calls|tools|abilities|capabilities)/i
+]);
+const EXPLICIT_ACT_PATTERN = /(install|run command|execute command|modify file|edit file|write file|save to|append to|delete file|create file|apply change|deploy|restart service|remote operation|ssh into|patch code|修改文件|安装依赖|执行命令|部署|重启服务)/i;
+const AI_ROUTE_SAFE_META_KEYS = new Set([
+  'reason',
+  'chatMode',
+  'toolIntent',
+  'responseIntent',
+  'safetyBoundary'
 ]);
 const SAFETY_BOUNDARY_PATTERNS = Object.freeze([
   /(钓鱼网站|钓鱼页|木马|病毒|勒索软件?|后门|僵尸网络|恶意软件|botnet|malware|ransomware|backdoor|trojan|ddos|sql injection|credential stuffing|bruteforce|brute force|doxx|人肉|诈骗|scam|炸弹|bomb)/i,
@@ -565,6 +575,10 @@ function isStrictTimeDirectQuestion(text = '') {
   return !/(timezone|鏃跺尯|convert|schedule|agenda|calendar|plan|summary|research|latest|news|weather|stock)/i.test(t);
 }
 
+function hasExplicitActSignal(text = '') {
+  return EXPLICIT_ACT_PATTERN.test(String(text || '').trim());
+}
+
 function shouldPreferToolAssistance(text = '', imageUrl = null) {
   const t = String(text || '').trim();
   if (!t || imageUrl) return false;
@@ -899,7 +913,7 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
     });
   }
 
-  if (/(install|run command|execute command|modify file|edit file|write file|save to|append to|delete file|create file|apply change|deploy|restart service|remote operation|ssh into|patch code|修改文件|安装依赖|执行命令|部署|重启服务)/i.test(cleanText)) {
+  if (hasExplicitActSignal(cleanText)) {
     return makeRoute({
       confidence: 0.9,
       cleanText,
@@ -1117,6 +1131,37 @@ function isDirectRouteInvariantSatisfied(route = {}) {
   return true;
 }
 
+function sanitizeAiMeta(aiMeta = {}, fallbackMeta = {}) {
+  const rawAiMeta = aiMeta && typeof aiMeta === 'object' ? aiMeta : {};
+  const nextMeta = {};
+  for (const key of Object.keys(rawAiMeta)) {
+    if (!AI_ROUTE_SAFE_META_KEYS.has(key)) continue;
+    nextMeta[key] = rawAiMeta[key];
+  }
+
+  const fallbackToolIntent = normalizeToolIntent(fallbackMeta?.toolIntent, 'none');
+  const fallbackResponseIntent = normalizeResponseIntent(fallbackMeta?.responseIntent, 'answer');
+  const nextToolIntent = normalizeToolIntent(nextMeta.toolIntent, fallbackToolIntent);
+  const nextResponseIntent = normalizeResponseIntent(nextMeta.responseIntent, fallbackResponseIntent);
+  const fallbackIsExplicitAct = hasExplicitActSignal(fallbackMeta?.effectiveIntentText || fallbackMeta?.reason || '');
+  const aiIsExplicitAct = hasExplicitActSignal(rawAiMeta?.reason || '');
+  const canEscalateToForceTools = fallbackToolIntent === 'force_tools' || fallbackIsExplicitAct || aiIsExplicitAct;
+
+  nextMeta.chatMode = normalizeChatMode(nextMeta.chatMode, normalizeChatMode(fallbackMeta?.chatMode, 'text_chat'));
+  nextMeta.toolIntent = nextToolIntent === 'force_tools' && !canEscalateToForceTools
+    ? fallbackToolIntent
+    : nextToolIntent;
+  nextMeta.responseIntent = nextResponseIntent === 'action_guidance' && !canEscalateToForceTools
+    ? fallbackResponseIntent
+    : nextResponseIntent;
+  if (fallbackMeta?.safetyBoundary === true) {
+    nextMeta.safetyBoundary = true;
+  } else {
+    nextMeta.safetyBoundary = nextMeta.safetyBoundary === true;
+  }
+  return nextMeta;
+}
+
 function sanitizeContextSummary(summary = '', maxLength = 220) {
   const text = String(summary || '')
     .replace(/\[CQ:[^\]]+\]/g, ' ')
@@ -1326,8 +1371,11 @@ function sanitizeAiRoute(aiRoute, fallbackRoute, { userId, imageUrl }) {
     facets: normalizedFacets,
     meta: {
       ...fallbackMeta,
-      ...aiMeta,
-      ...(fallbackMeta.safetyBoundary === true ? { safetyBoundary: true } : {})
+      ...sanitizeAiMeta(aiMeta, {
+        ...fallbackMeta,
+        cleanText,
+        effectiveIntentText: String(fallbackMeta.effectiveIntentText || cleanText).trim()
+      })
     }
   });
 

@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { getJsonStore } = require('./storeRegistry');
 
 const DEFAULT_INDEX = Object.freeze({
   version: 1,
@@ -34,20 +35,9 @@ function safeReadJson(filePath, fallback) {
 }
 
 function atomicWriteJson(filePath, data) {
-  const tempFile = `${filePath}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tempFile, filePath);
-  } catch (error) {
-    try {
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-    } finally {
-      try {
-        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-      } catch (_) {}
-    }
-    if (error && error.code !== 'EPERM' && error.code !== 'EXDEV') throw error;
-  }
+  getJsonStore(filePath, {
+    fallback: () => DEFAULT_INDEX
+  }).replace(data, { flushNow: true });
 }
 
 function normalizeEntryList(items = [], key) {

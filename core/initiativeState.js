@@ -1,6 +1,6 @@
 const fs = require('fs');
-const path = require('path');
 const config = require('../config');
+const { createJsonHotStore } = require('../utils/jsonHotStore');
 
 function safeReadJson(filePath, fallback = {}) {
   try {
@@ -86,38 +86,22 @@ function normalizeState(raw = {}, now = Date.now()) {
   };
 }
 
-let state = normalizeState(safeReadJson(config.INITIATIVE_STATE_FILE, {}));
-let flushTimer = null;
+const stateStore = createJsonHotStore(config.INITIATIVE_STATE_FILE, {
+  fallback: () => ({ groups: {} }),
+  debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
+  maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
+});
+let state = normalizeState(stateStore.read({ forceReload: true }));
 
 function scheduleFlush() {
-  if (flushTimer) return;
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    try {
-      const filePath = config.INITIATIVE_STATE_FILE;
-      const dir = path.dirname(filePath);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const tmp = `${filePath}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf8');
-      fs.renameSync(tmp, filePath);
-    } catch (_) {
-      try {
-        fs.writeFileSync(config.INITIATIVE_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
-      } catch (_) {}
-    }
-  }, 80);
+  try {
+    stateStore.replace(state);
+  } catch (_) {}
 }
 
 function flushAllSync() {
   try {
-    if (flushTimer) {
-      clearTimeout(flushTimer);
-      flushTimer = null;
-    }
-    const filePath = config.INITIATIVE_STATE_FILE;
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf8');
+    stateStore.replace(state, { flushNow: true });
   } catch (_) {}
 }
 

@@ -271,7 +271,8 @@ function createStreamingDispatcher({
   chatType = 'group',
   groupId,
   userId,
-  senderId
+  senderId,
+  shouldSend = null
 }) {
   const effectiveConfig = runtimeConfig && Object.keys(runtimeConfig).length ? runtimeConfig : (config || {});
   const maxSegments = getStreamMaxSegments(effectiveConfig);
@@ -289,6 +290,7 @@ function createStreamingDispatcher({
     if (!text) return false;
 
     const task = async () => {
+      if (typeof shouldSend === 'function' && shouldSend() === false) return false;
       const now = Date.now();
       const minGap = getStreamSendGapMs(effectiveConfig);
       const elapsed = now - state.lastSendAt;
@@ -366,6 +368,7 @@ function createStreamingDispatcher({
       await flush(false);
     },
     async finish(finalReply) {
+      if (typeof shouldSend === 'function' && shouldSend() === false) return;
       const visibleFinalReply = sanitizeUserFacingText(finalReply).trim();
       state.fullText = visibleFinalReply || state.fullText || '';
       while (state.sentSegments < maxSegments && await flush(true)) {}
@@ -395,8 +398,10 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     atSender = true,
     retries = 2,
     waitMs = 500,
-    telemetry = null
+    telemetry = null,
+    shouldSend = null
   }) {
+    if (typeof shouldSend === 'function' && shouldSend() === false) return false;
     const startedAt = Date.now();
     if (logInboundTiming) {
       logInboundTiming({
@@ -467,8 +472,10 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     replyText,
     retries = 2,
     waitMs = 500,
-    telemetry = null
+    telemetry = null,
+    shouldSend = null
   }) {
+    if (typeof shouldSend === 'function' && shouldSend() === false) return false;
     const startedAt = Date.now();
     if (logInboundTiming) {
       logInboundTiming({
@@ -535,7 +542,8 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     atSender = true,
     retries = 2,
     waitMs = 500,
-    telemetry = null
+    telemetry = null,
+    shouldSend = null
   }) {
     if (String(chatType || '').trim() === 'private') {
       return sendPrivateReply({
@@ -543,7 +551,8 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
         replyText,
         retries,
         waitMs,
-        telemetry
+        telemetry,
+        shouldSend
       });
     }
     return sendGroupReply({
@@ -553,7 +562,8 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       atSender,
       retries,
       waitMs,
-      telemetry
+      telemetry,
+      shouldSend
     });
   }
 

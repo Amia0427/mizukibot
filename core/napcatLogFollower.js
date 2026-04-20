@@ -169,6 +169,12 @@ function createNapcatLogFollower({
         state.recentMessageIds.delete(messageId);
       }
     }
+    const maxItems = Math.max(32, Number(config.FOLLOWER_RECENT_MESSAGE_ID_LIMIT || 2048) || 2048);
+    while (state.recentMessageIds.size > maxItems) {
+      const oldestKey = state.recentMessageIds.keys().next().value;
+      if (!oldestKey) break;
+      state.recentMessageIds.delete(oldestKey);
+    }
   }
 
   function shouldHandlePacket(packet = {}) {

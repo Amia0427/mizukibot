@@ -1,7 +1,7 @@
 const fs = require('fs');
-const path = require('path');
 const config = require('../config');
 const { formatDateInTz } = require('../utils/time');
+const { getJsonStore } = require('../utils/storeRegistry');
 
 function safeReadJson(filePath, fallback) {
   try {
@@ -11,28 +11,6 @@ function safeReadJson(filePath, fallback) {
     return JSON.parse(raw);
   } catch (_) {
     return fallback;
-  }
-}
-
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
-}
-
-function atomicWriteJson(filePath, data) {
-  ensureDir(path.dirname(filePath));
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
-    fs.renameSync(tempPath, filePath);
-  } catch (error) {
-    try {
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-    } finally {
-      try {
-        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-      } catch (_) {}
-    }
-    if (error && error.code !== 'EPERM') throw error;
   }
 }
 
@@ -143,7 +121,16 @@ function normalizeState(input = {}) {
 }
 
 function loadLifeState() {
-  return normalizeState(safeReadJson(config.LIFE_SCHEDULER_STATE_FILE, {
+  const raw = getJsonStore(config.LIFE_SCHEDULER_STATE_FILE, {
+    fallback: () => ({
+      version: 1,
+      settings: {},
+      days: {},
+      broadcasts: {},
+      targets: {}
+    })
+  }).read({ forceReload: true });
+  return normalizeState(raw || safeReadJson(config.LIFE_SCHEDULER_STATE_FILE, {
     version: 1,
     settings: {},
     days: {},
@@ -153,12 +140,16 @@ function loadLifeState() {
 }
 
 function saveLifeState(state = {}) {
-  atomicWriteJson(config.LIFE_SCHEDULER_STATE_FILE, normalizeState(state));
+  getJsonStore(config.LIFE_SCHEDULER_STATE_FILE, {
+    fallback: () => ({ version: 1, settings: {}, days: {}, broadcasts: {}, targets: {} })
+  }).replace(normalizeState(state), { flushNow: true });
 }
 
 function loadLifeTargets() {
   return normalizeState({
-    targets: safeReadJson(config.LIFE_SCHEDULER_TARGETS_FILE, {})
+    targets: getJsonStore(config.LIFE_SCHEDULER_TARGETS_FILE, {
+      fallback: () => ({})
+    }).read({ forceReload: true })
   }).targets;
 }
 
@@ -167,7 +158,9 @@ function saveLifeTargets(targets = {}) {
   for (const [groupId, target] of Object.entries(targets || {})) {
     next[String(groupId)] = normalizeTarget(target);
   }
-  atomicWriteJson(config.LIFE_SCHEDULER_TARGETS_FILE, next);
+  getJsonStore(config.LIFE_SCHEDULER_TARGETS_FILE, {
+    fallback: () => ({})
+  }).replace(next, { flushNow: true });
 }
 
 function ensureLifeDay(state, date = formatDateInTz(new Date(), config.TIMEZONE)) {

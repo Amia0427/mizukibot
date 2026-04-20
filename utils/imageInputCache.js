@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 const config = require('../config');
+const { getJsonStore } = require('./storeRegistry');
 
 const CACHE_DIR = path.join(config.DATA_DIR, 'inbound_image_cache');
 const CACHE_REF_PREFIX = 'cached-image://';
@@ -62,7 +63,9 @@ function readJsonFile(filePath = '') {
 }
 
 function writeJsonFile(filePath = '', value = {}) {
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf8');
+  getJsonStore(filePath, {
+    fallback: () => ({})
+  }).replace(value, { flushNow: true });
 }
 
 async function ensureCachedImageRef(url = '', options = {}) {
