@@ -1735,6 +1735,9 @@ async function askAI(question, userInfo, userId, customPrompt = null, imageUrl =
   const sessionKey = resolveShortTermSessionKey(userId, routeMeta);
   const sessionScope = resolveShortTermScope(userId, routeMeta, sessionKey);
   if (!chatHistory[sessionKey]) chatHistory[sessionKey] = [];
+  if (typeof require('../../utils/memory').pruneChatHistoryStore === 'function') {
+    require('../../utils/memory').pruneChatHistoryStore(chatHistory);
+  }
   if (shouldRestoreShortTermAfterRestart(question, userId, customPrompt, options)) {
     const bridgeRestore = restoreShortTermBridgeAfterRestartIfNeeded(userId, {
       chatHistory,

@@ -216,9 +216,11 @@ function connectNapCat() {
     try {
       const msg = JSON.parse(data);
       appendNapcatPacketToLog(msg);
-      void napcatLogFollower.handleLivePacket(msg).catch((error) => {
-        console.error('[NapCat follower live packet error]', error?.message || error);
-      });
+      if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
+        void napcatLogFollower.handleLivePacket(msg).catch((error) => {
+          console.error('[NapCat follower live packet error]', error?.message || error);
+        });
+      }
       if (napcatActionClient.handleMessage(msg)) return;
       await handleIncomingMessage(msg);
     } catch (e) {

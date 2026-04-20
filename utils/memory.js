@@ -33,6 +33,27 @@ let memories = safeReadJson(config.MEMORY_FILE, {});
 const chatHistory = {};
 const shortTermMemory = {};
 
+function pruneChatHistoryStore(store = chatHistory) {
+  const sessions = Object.keys(store || {});
+  const maxSessions = Math.max(1, Number(config.CHAT_HISTORY_MAX_SESSIONS || 500) || 500);
+  const maxMessages = Math.max(1, Number(config.CHAT_HISTORY_MAX_MESSAGES_PER_SESSION || 80) || 80);
+
+  for (const sessionKey of sessions) {
+    const items = Array.isArray(store[sessionKey]) ? store[sessionKey] : [];
+    if (items.length > maxMessages) {
+      store[sessionKey] = items.slice(items.length - maxMessages);
+    }
+  }
+
+  if (sessions.length > maxSessions) {
+    const overflow = sessions.length - maxSessions;
+    for (const sessionKey of sessions.slice().sort().slice(0, overflow)) {
+      delete store[sessionKey];
+    }
+  }
+  return store;
+}
+
 // Flush scheduler to reduce high-frequency sync writes.
 let dataFlushTimer = null;
 let memoryFlushTimer = null;
@@ -732,6 +753,7 @@ module.exports = {
   memories,
   chatHistory,
   shortTermMemory,
+  pruneChatHistoryStore,
   saveData,
   saveMemories,
   getUserMemories,

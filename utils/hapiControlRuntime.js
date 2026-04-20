@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
+const { getJsonStore } = require('./storeRegistry');
 
 function ensureDir(filePath = '') {
   const dir = path.dirname(String(filePath || '').trim() || '.');
@@ -94,12 +95,13 @@ function createHapiControlRuntime(options = {}) {
   };
 
   function persist() {
-    ensureDir(filePath);
     const payload = {
       approvals: Array.from(state.approvals.values()),
       sessions: Array.from(state.sessions.values())
     };
-    fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+    getJsonStore(filePath, {
+      fallback: () => ({ approvals: [], sessions: [] })
+    }).replace(payload, { flushNow: true });
   }
 
   function load() {

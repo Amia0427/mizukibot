@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { getJsonStore } = require('./storeRegistry');
 const { normalizeMessageContent, trimTextByTokenBudget } = require('./contextBudget');
 const {
   defaultShortTermState,
@@ -29,20 +30,9 @@ function ensureBridgeDir() {
 }
 
 function atomicWriteJson(targetFile, obj) {
-  const tempFile = `${targetFile}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(tempFile, JSON.stringify(obj, null, 2), 'utf-8');
-    fs.renameSync(tempFile, targetFile);
-  } catch (error) {
-    try {
-      fs.writeFileSync(targetFile, JSON.stringify(obj, null, 2), 'utf-8');
-    } finally {
-      try {
-        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-      } catch (_) {}
-    }
-    if (error && error.code !== 'EPERM') throw error;
-  }
+  getJsonStore(targetFile, {
+    fallback: () => defaultBridgeStore()
+  }).replace(obj, { flushNow: true });
 }
 
 function getBridgeTtlMs() {

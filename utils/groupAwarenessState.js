@@ -1,6 +1,6 @@
 const fs = require('fs');
-const path = require('path');
 const config = require('../config');
+const { createJsonHotStore } = require('./jsonHotStore');
 
 const GROUP_PRESENCE_STATES = new Set([
   'observing',
@@ -106,39 +106,24 @@ function normalizeState(state) {
   };
 }
 
-let state = normalizeState(safeReadJson(config.GROUP_AWARENESS_STATE_FILE, {}));
-let flushTimer = null;
+const stateStore = createJsonHotStore(config.GROUP_AWARENESS_STATE_FILE, {
+  fallback: () => ({}),
+  debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
+  maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
+});
+let state = normalizeState(stateStore.read({ forceReload: true }));
 
 function scheduleFlush() {
-  if (flushTimer) return;
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    try {
-      const targetFile = config.GROUP_AWARENESS_STATE_FILE;
-      const dir = path.dirname(targetFile);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const tempFile = `${targetFile}.${process.pid}.tmp`;
-      fs.writeFileSync(tempFile, JSON.stringify(state, null, 2), 'utf-8');
-      fs.renameSync(tempFile, targetFile);
-    } catch (e) {
-      console.error('[group-awareness] failed to flush state:', e.message);
-      try {
-        fs.writeFileSync(config.GROUP_AWARENESS_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
-      } catch (_) {}
-    }
-  }, 120);
+  try {
+    stateStore.replace(state);
+  } catch (e) {
+    console.error('[group-awareness] failed to flush state:', e.message);
+  }
 }
 
 function flushAllSync() {
   try {
-    if (flushTimer) {
-      clearTimeout(flushTimer);
-      flushTimer = null;
-    }
-    const targetFile = config.GROUP_AWARENESS_STATE_FILE;
-    const dir = path.dirname(targetFile);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(targetFile, JSON.stringify(state, null, 2), 'utf-8');
+    stateStore.replace(state, { flushNow: true });
   } catch (e) {
     console.error('[group-awareness] failed to flush on exit:', e.message);
   }

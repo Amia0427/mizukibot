@@ -8,6 +8,7 @@ const { applyAffinityProposal } = require('./memory');
 const { addTaskMemory } = require('./taskMemory');
 const { addGroupMemory } = require('./groupMemory');
 const { addMemoryItemsBatch } = require('./vectorMemory');
+const { getResourcePressureState, appendPerfEvent } = require('./perfRuntime');
 
 function normalizePhase(value = '') {
   const phase = String(value || '').trim().toLowerCase();
@@ -531,6 +532,12 @@ function createPostReplyWorkerRuntime(options = {}) {
     });
   }
 
+  function getPressureDeferMs() {
+    const pressure = getResourcePressureState();
+    if (!pressure || pressure.level === 'normal') return 0;
+    return Math.max(1000, Number(config.BACKGROUND_PRESSURE_DEFER_MS || 15000) || 15000);
+  }
+
   async function runOneJob(job) {
     if (!job) return null;
     if (!job) return null;
@@ -599,6 +606,19 @@ function createPostReplyWorkerRuntime(options = {}) {
 
   async function tick() {
     if (stopped) return;
+
+    const pressureDeferMs = getPressureDeferMs();
+    if (pressureDeferMs > 0) {
+      appendPerfEvent({
+        category: 'background_pressure',
+        type: 'post_reply_deferred',
+        delayMs: pressureDeferMs,
+        activeCount,
+        pressureLevel: getResourcePressureState().level
+      });
+      scheduleTick(pressureDeferMs);
+      return;
+    }
 
     const slots = Math.max(0, getEffectiveConcurrency() - activeCount);
     let startedJobs = 0;

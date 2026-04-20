@@ -20,6 +20,56 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function stripSemanticClassifierNoise(text = '') {
+  return String(text || '')
+    .split(/\n+/)
+    .map((line) => normalizeText(line))
+    .filter((line) => line && line !== '[图片]' && !/^\[(引用消息|转发消息|引用图片|转发图片|分享链接)\]/.test(line))
+    .filter((line) => !/^\[CQ:image,/i.test(line))
+    .join('\n')
+    .trim();
+}
+
+function seemsSentenceComplete(text = '', options = {}) {
+  const clean = stripSemanticClassifierNoise(text);
+  if (!clean) {
+    return { complete: false, reason: 'empty' };
+  }
+
+  const minChars = Math.max(1, Number(options.minChars || 6) || 6);
+  const tail = clean.slice(-1);
+  const trimmedLen = clean.replace(/\s+/g, '').length;
+
+  if (/[。！？!?；;~～…]$/.test(clean)) {
+    return { complete: true, reason: 'terminal_punctuation' };
+  }
+
+  if (/[，,、：:]$/.test(clean)) {
+    return { complete: false, reason: 'weak_punctuation' };
+  }
+
+  if (/(然后|还有|等下|等等|先|就是|我还没说完|补一句|继续说|如果|但是|不过)$/.test(clean)) {
+    return { complete: false, reason: 'continuation_tail' };
+  }
+
+  if (clean.includes('(') && !clean.includes(')')) {
+    return { complete: false, reason: 'open_paren' };
+  }
+  if (clean.includes('（') && !clean.includes('）')) {
+    return { complete: false, reason: 'open_zh_paren' };
+  }
+  if (/[“‘「『《]$/.test(clean)) {
+    return { complete: false, reason: 'opening_quote' };
+  }
+  if (trimmedLen < minChars) {
+    return { complete: false, reason: 'too_short' };
+  }
+  if (tail && /[a-zA-Z0-9\u4e00-\u9fa5]/.test(tail)) {
+    return { complete: true, reason: 'stable_tail' };
+  }
+  return { complete: false, reason: 'unknown' };
+}
+
 function clampDebounceMs(value, fallback = 2000) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -664,6 +714,7 @@ function buildMergedMessagePayload(entries = [], options = {}) {
   return {
     sessionKey: options.sessionKey || '',
     text,
+    semanticText: stripSemanticClassifierNoise(text),
     message,
     imageUrls: dedupedImages,
     firstTimestamp,
@@ -935,6 +986,11 @@ function createContinuousMessagePreprocessor(options = {}) {
     12000
   );
   const enabled = options.enabled ?? config.CONTINUOUS_MESSAGE_ENABLED;
+  const sentenceWindowMs = clampDebounceMs(
+    options.sentenceWindowMs ?? config.CONTINUOUS_MESSAGE_SENTENCE_WINDOW_MS,
+    1200
+  );
+  const sentenceMinChars = Math.max(1, Number(options.sentenceMinChars ?? config.CONTINUOUS_MESSAGE_SENTENCE_MIN_CHARS) || 6);
   const sharedResolveOptions = {
     ensureCachedImageRef: typeof options.ensureCachedImageRef === 'function' ? options.ensureCachedImageRef : undefined,
     imageCacheTimeoutMs: options.imageCacheTimeoutMs,
@@ -942,9 +998,18 @@ function createContinuousMessagePreprocessor(options = {}) {
     qqCardLinksEnabled: options.qqCardLinksEnabled
   };
   const sessions = new Map();
+  const sessionActivityVersion = new Map();
 
   function buildSessionKey(msg = {}) {
     return `${normalizeText(msg?.group_id)}:${normalizeText(msg?.user_id)}`;
+  }
+
+  function bumpSessionActivityVersion(sessionKey = '') {
+    const normalized = normalizeText(sessionKey);
+    if (!normalized) return 0;
+    const next = (Number(sessionActivityVersion.get(normalized) || 0) || 0) + 1;
+    sessionActivityVersion.set(normalized, next);
+    return next;
   }
 
   function clearTimer(session = {}) {
@@ -1002,6 +1067,7 @@ function createContinuousMessagePreprocessor(options = {}) {
       };
     }
 
+    const activityVersion = bumpSessionActivityVersion(sessionKey);
     const effectiveBotQQ = normalizeText(context.effectiveBotQQ);
     const entry = cheapParseMessageEntry(msg, {
       ...sharedResolveOptions,
@@ -1030,6 +1096,7 @@ function createContinuousMessagePreprocessor(options = {}) {
         effectiveMsg: msg,
         meta: {
           sessionKey,
+          flushVersion: activityVersion,
           firstTimestamp: entry.timestamp,
           lastTimestamp: entry.timestamp,
           sourceMessageIds: entry.messageId ? [entry.messageId] : [],
@@ -1055,6 +1122,7 @@ function createContinuousMessagePreprocessor(options = {}) {
       const session = sessions.get(sessionKey);
       session.entries.push(entry);
       session.mentionedBot = session.mentionedBot || entry.mentionedBot;
+      session.activityVersion = activityVersion;
       refreshSessionFollowupState(session);
       scheduleFlush(sessionKey);
       console.log('[continuous-message] session append', {
@@ -1069,6 +1137,7 @@ function createContinuousMessagePreprocessor(options = {}) {
         effectiveMsg: null,
         meta: {
           sessionKey,
+          flushVersion: session.activityVersion,
           firstTimestamp: session.entries[0]?.timestamp || entry.timestamp,
           lastTimestamp: entry.timestamp,
           sourceMessageIds: session.entries.map((item) => item.messageId).filter(Boolean),
@@ -1106,7 +1175,8 @@ function createContinuousMessagePreprocessor(options = {}) {
       startedAt: Date.now(),
       mentionedBot: entry.mentionedBot === true,
       messageType: normalizeText(msg?.message_type).toLowerCase(),
-      awaitingFollowup: false
+      awaitingFollowup: false,
+      activityVersion
     };
     refreshSessionFollowupState(nextSession);
     sessions.set(sessionKey, nextSession);
@@ -1128,10 +1198,61 @@ function createContinuousMessagePreprocessor(options = {}) {
       };
     }
 
-    sessions.delete(sessionKey);
-    clearTimer(session);
     const merged = buildMergedMessagePayload(session.entries, { sessionKey });
     merged.flushReason = session.flushReason || 'debounce';
+    merged.flushVersion = session.activityVersion;
+    merged.semanticScore = null;
+    merged.semanticDecision = 'not_checked';
+    if (!session.awaitingFollowup) {
+      const sentenceDecision = seemsSentenceComplete(merged.semanticText || merged.text || '', {
+        minChars: sentenceMinChars
+      });
+      merged.semanticDecision = sentenceDecision.complete ? 'complete' : sentenceDecision.reason;
+      if (!sentenceDecision.complete) {
+        const elapsedMs = Math.max(0, Date.now() - Number(session.startedAt || Date.now()));
+        if (elapsedMs + sentenceWindowMs < maxHoldMs) {
+          session.flushReason = 'sentence_window';
+          clearTimer(session);
+          await new Promise((resolve) => {
+            session.flushResolve = resolve;
+            session.timer = setTimeout(() => {
+              const current = sessions.get(sessionKey);
+              if (!current) return;
+              current.flushReason = 'sentence_window';
+              current.flushResolve();
+            }, sentenceWindowMs);
+          });
+          const resumed = sessions.get(sessionKey);
+          if (resumed) {
+            sessions.delete(sessionKey);
+            clearTimer(resumed);
+            const resumedMerged = buildMergedMessagePayload(resumed.entries, { sessionKey });
+            resumedMerged.flushReason = resumed.flushReason || 'sentence_window';
+            resumedMerged.flushVersion = resumed.activityVersion;
+            resumedMerged.semanticScore = null;
+            resumedMerged.semanticDecision = 'max_hold_fallback';
+            await resolveContinuousEntryDetails(resumedMerged, {
+              ...sharedResolveOptions,
+              effectiveBotQQ,
+              resolveReply: Boolean(resumedMerged.replyMessageId),
+              resolveForward: Array.isArray(resumedMerged.forwardIds) && resumedMerged.forwardIds.length > 0,
+              resolveCards: Array.isArray(resumedMerged.qqCardUrls) && resumedMerged.qqCardUrls.length > 0
+            });
+            const resumedEffectiveMsg = normalizeMessageForDownstream(resumed.msg, resumedMerged, effectiveBotQQ);
+            resumedEffectiveMsg.__continuousMessageMeta.flushVersion = resumedMerged.flushVersion;
+            resumedEffectiveMsg.__continuousMessageMeta.semanticScore = resumedMerged.semanticScore;
+            resumedEffectiveMsg.__continuousMessageMeta.semanticDecision = resumedMerged.semanticDecision;
+            return {
+              mode: 'ready',
+              effectiveMsg: resumedEffectiveMsg,
+              meta: resumedEffectiveMsg.__continuousMessageMeta
+            };
+          }
+        }
+      }
+    }
+    sessions.delete(sessionKey);
+    clearTimer(session);
     await resolveContinuousEntryDetails(merged, {
       ...sharedResolveOptions,
       effectiveBotQQ,
@@ -1140,6 +1261,9 @@ function createContinuousMessagePreprocessor(options = {}) {
       resolveCards: Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length > 0
     });
     const effectiveMsg = normalizeMessageForDownstream(session.msg, merged, effectiveBotQQ);
+    effectiveMsg.__continuousMessageMeta.flushVersion = merged.flushVersion;
+    effectiveMsg.__continuousMessageMeta.semanticScore = merged.semanticScore;
+    effectiveMsg.__continuousMessageMeta.semanticDecision = merged.semanticDecision;
     console.log('[continuous-message] session flush', {
       sessionKey,
       count: session.entries.length,
@@ -1177,5 +1301,6 @@ module.exports = {
   normalizeMessageForDownstream,
   parseMessageEntry,
   resolveContinuousEntryDetails,
+  stripSemanticClassifierNoise,
   stripCqControlSegments
 };

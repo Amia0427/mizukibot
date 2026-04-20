@@ -881,7 +881,8 @@ function createMessageRouteFlow(deps = {}) {
       userInfo,
       senderId,
       groupId,
-      inboundContext
+      inboundContext,
+      freshness = null
     } = routeDecision;
     const chatType = String(route?.meta?.chatType || inboundContext?.chatType || 'group').trim().toLowerCase() === 'private'
       ? 'private'
@@ -1051,6 +1052,9 @@ function createMessageRouteFlow(deps = {}) {
           groupId,
           userId: senderId,
           senderId,
+          shouldSend: freshness && typeof freshness.shouldSend === 'function'
+            ? freshness.shouldSend
+            : null,
           telemetry: {
             onEvent: typeof inboundContext?.onEvent === 'function' ? inboundContext.onEvent : null
           }
@@ -1157,7 +1161,8 @@ function createMessageRouteFlow(deps = {}) {
       backgroundTaskState: null,
       replySegments: [],
       usedStreamingSend,
-      replyOptions: finalReplyOptions
+      replyOptions: finalReplyOptions,
+      freshness
     });
   }
 

@@ -1,6 +1,12 @@
 const fs = require('fs');
 const path = require('path');
+const config = require('../config');
+const { BoundedCache } = require('./boundedCache');
 const RUNTIME_PROMPTS_DIR = path.join(__dirname, '..', 'prompts', 'runtime');
+const runtimePromptCache = new BoundedCache({
+  maxEntries: 256,
+  ttlMs: Math.max(0, Number(config.EPHEMERAL_CACHE_TTL_MS || 30 * 60 * 1000) || (30 * 60 * 1000))
+});
 
 function estimatePromptTokens(value) {
   const text = String(value || '').trim();
@@ -174,6 +180,14 @@ function loadRuntimePromptTemplate(templateId) {
 }
 
 function buildRuntimePrompt(templateId, variables = {}) {
+  const stableKey = buildStablePromptCacheKey(templateId, variables);
+  if (stableKey) {
+    const cached = runtimePromptCache.get(stableKey);
+    if (cached) return cached;
+    const rendered = renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables).text;
+    runtimePromptCache.set(stableKey, rendered);
+    return rendered;
+  }
   return renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables).text;
 }
 
@@ -205,3 +219,17 @@ module.exports = {
   loadRuntimePromptTemplate,
   renderRuntimePromptTemplate
 };
+
+function buildStablePromptCacheKey(templateId, variables = {}) {
+  const id = String(templateId || '').trim();
+  const keys = Object.keys(variables || {}).sort();
+  const stable = {};
+  for (const key of keys) {
+    const value = variables[key];
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string' && value.length > 240) return '';
+    if (Array.isArray(value) || (value && typeof value === 'object')) return '';
+    stable[key] = value;
+  }
+  return `${id}::${JSON.stringify(stable)}`;
+}

@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const config = require('../../config');
+const { getBackgroundPressureDelayMs, appendPerfEvent } = require('../perfRuntime');
 const { getUserAffinityState } = require('../memory');
 const {
   ensureDir,
@@ -418,6 +419,19 @@ function resolveNodeConflicts(nodes = []) {
 }
 
 function materializeMemoryViews(options = {}) {
+  const pressureDelayMs = getBackgroundPressureDelayMs();
+  if (pressureDelayMs > 0 && options.force !== true) {
+    appendPerfEvent({
+      category: 'background_pressure',
+      type: 'memory_v3_materialize_deferred',
+      delayMs: pressureDelayMs
+    });
+    return {
+      deferred: true,
+      reason: 'resource_pressure_deferred',
+      deferMs: pressureDelayMs
+    };
+  }
   ensureDir(config.MEMORY_V3_DIR);
   ensureDir(config.MEMORY_V3_PROJECTIONS_DIR);
   const events = Array.isArray(options.events) ? options.events : loadMemoryEvents();

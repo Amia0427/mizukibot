@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { getJsonStore } = require('./storeRegistry');
 const {
   getMemoryItems,
   getMemoryItemsByFilter,
@@ -33,21 +34,9 @@ function ensureDir(dirPath) {
 
 function atomicWriteJson(filePath, payload) {
   ensureDir(path.dirname(filePath));
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  const text = JSON.stringify(payload, null, 2);
-  try {
-    fs.writeFileSync(tmp, text, 'utf8');
-    fs.renameSync(tmp, filePath);
-  } catch (error) {
-    try {
-      fs.writeFileSync(filePath, text, 'utf8');
-    } finally {
-      try {
-        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
-      } catch (_) {}
-    }
-    if (error && error.code !== 'EPERM' && error.code !== 'EXDEV') throw error;
-  }
+  getJsonStore(filePath, {
+    fallback: () => ({})
+  }).replace(payload, { flushNow: true });
 }
 
 function safeReadJson(filePath, fallback) {

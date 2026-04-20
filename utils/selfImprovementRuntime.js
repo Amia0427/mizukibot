@@ -5,6 +5,8 @@ const config = require('../config');
 const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent } = require('../api/parser');
 const { classifyPromptThreat, sanitizeUntrustedContent } = require('./promptSecurity');
+const { getJsonLineWriter } = require('./storeRegistry');
+const { getBackgroundPressureDelayMs, appendPerfEvent } = require('./perfRuntime');
 
 const EVENT_KINDS = new Set(['error', 'correction', 'feature_request', 'strategy', 'knowledge_gap']);
 const EVENT_STATUSES = new Set(['open', 'promoted', 'ignored']);
@@ -170,7 +172,10 @@ function atomicWriteJson(filePath, value) {
 }
 
 function appendJsonLine(filePath, value) {
-  fs.appendFileSync(filePath, `${JSON.stringify(value)}\n`, 'utf8');
+  getJsonLineWriter(filePath, {
+    debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
+    maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
+  }).append(value);
 }
 
 function getStorePaths() {
@@ -1117,6 +1122,16 @@ function buildExtractionConversation(userText, botReply, options = {}) {
 
 async function learnSelfImprovement(userId, userText, botReply, options = {}) {
   if (!ensureEnabled() || !config.SELF_IMPROVEMENT_EXTRACTION_ENABLED) return [];
+  const pressureDelayMs = getBackgroundPressureDelayMs();
+  if (pressureDelayMs > 0) {
+    appendPerfEvent({
+      category: 'background_pressure',
+      type: 'self_improvement_deferred',
+      delayMs: pressureDelayMs,
+      userId: trimText(userId, 120)
+    });
+    return [];
+  }
   const uid = trimText(userId, 120);
   const question = trimText(userText, 2000);
   const answer = trimText(botReply, 3000);

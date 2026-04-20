@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const { getJsonStore } = require('../utils/storeRegistry');
 
 const HISTORY_LIMIT = Math.max(1, Number(config.QZONE_HISTORY_LIMIT || 40) || 40);
 const LOOKBACK = Math.max(1, Number(config.QZONE_VARIATION_LOOKBACK || 8) || 8);
@@ -180,21 +181,9 @@ function ensureDir(dirPath) {
 }
 
 function atomicWriteJson(filePath, data) {
-  ensureDir(path.dirname(filePath));
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  try {
-    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
-    fs.renameSync(tempPath, filePath);
-  } catch (error) {
-    try {
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } finally {
-      try {
-        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-      } catch (_) {}
-    }
-    if (error && error.code !== 'EPERM') throw error;
-  }
+  getJsonStore(filePath, {
+    fallback: () => ({ items: [] })
+  }).replace(data, { flushNow: true });
 }
 
 function normalizeText(value = '', maxChars = 120) {

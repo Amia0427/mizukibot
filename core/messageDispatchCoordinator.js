@@ -46,7 +46,8 @@ function createMessageDispatchCoordinator(deps = {}) {
     senderId,
     groupId,
     sourceMessageId = '',
-    inboundContext = null
+    inboundContext = null,
+    freshness = null
   }) {
     let reply = '';
     let usedStreamingSend = false;
@@ -206,7 +207,10 @@ function createMessageDispatchCoordinator(deps = {}) {
           chatType: String(route?.meta?.chatType || 'group'),
           groupId,
           userId: senderId,
-          senderId
+          senderId,
+          shouldSend: freshness && typeof freshness.shouldSend === 'function'
+            ? freshness.shouldSend
+            : null
         });
         const streamOptions = {
           onDelta: streamingDispatcher.onDelta,
@@ -279,7 +283,8 @@ function createMessageDispatchCoordinator(deps = {}) {
     return {
       reply,
       usedStreamingSend,
-      replyOptions: finalReplyOptions
+      replyOptions: finalReplyOptions,
+      freshness
     };
   }
 

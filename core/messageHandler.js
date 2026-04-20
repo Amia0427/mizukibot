@@ -307,6 +307,23 @@ function buildBridgeGuidancePrompt(route, backend = 'command', routeExecutionPla
   });
 }
 
+function createRequestScopeCache(options = {}) {
+  const maxEntries = Math.max(16, Number(options.maxEntries || 128) || 128);
+  const store = new Map();
+  return {
+    getOrCompute(key, factory) {
+      if (store.has(key)) return store.get(key);
+      const value = typeof factory === 'function' ? factory() : undefined;
+      store.set(key, value);
+      if (store.size > maxEntries) {
+        const oldestKey = store.keys().next().value;
+        if (oldestKey !== undefined) store.delete(oldestKey);
+      }
+      return value;
+    }
+  };
+}
+
 function normalizeVisualSummaryText(text = '') {
   return String(text || '')
     .replace(/\s+/g, ' ')
@@ -1029,9 +1046,40 @@ function createMessageHandler({
     maxEntries: 4096
   });
   const privateTypingPokeCooldownByUser = new Map();
+  const sessionFreshnessVersionByKey = new Map();
+  function updateSessionFreshnessVersion(sessionKey = '', version = 0) {
+    const normalized = String(sessionKey || '').trim();
+    if (!normalized) return;
+    const next = Math.max(
+      Number(sessionFreshnessVersionByKey.get(normalized) || 0) || 0,
+      Number(version || 0) || 0
+    );
+    sessionFreshnessVersionByKey.set(normalized, next);
+  }
+  function buildFreshnessGuard(continuousMeta = null) {
+    const sessionKey = String(continuousMeta?.sessionKey || '').trim();
+    const flushVersion = Number(continuousMeta?.flushVersion || 0) || 0;
+    if (!sessionKey || flushVersion <= 0 || config.CONTINUOUS_MESSAGE_CANCEL_ON_NEW_MESSAGE !== true) {
+      return {
+        sessionKey,
+        flushVersion,
+        shouldSend: () => true
+      };
+    }
+    return {
+      sessionKey,
+      flushVersion,
+      shouldSend() {
+        const latest = Number(sessionFreshnessVersionByKey.get(sessionKey) || 0) || 0;
+        return latest <= flushVersion;
+      }
+    };
+  }
   const continuousMessagePreprocessor = createContinuousMessagePreprocessor({
     enabled: config.CONTINUOUS_MESSAGE_ENABLED,
-    debounceMs: config.CONTINUOUS_MESSAGE_DEBOUNCE_MS
+    debounceMs: config.CONTINUOUS_MESSAGE_DEBOUNCE_MS,
+    sentenceWindowMs: config.CONTINUOUS_MESSAGE_SENTENCE_WINDOW_MS,
+    sentenceMinChars: config.CONTINUOUS_MESSAGE_SENTENCE_MIN_CHARS
   });
   const dailyShareEngine = getDailyShareEngine();
   const lifeSchedulerEngine = getSafeLifeSchedulerEngine();
@@ -1042,6 +1090,79 @@ function createMessageHandler({
   const routeResolver = typeof detectIntentHybridOverride === 'function'
     ? detectIntentHybridOverride
     : detectIntentHybrid;
+  const routePromptCache = createRequestScopeCache({ maxEntries: 128 });
+  const formattingPreferenceCache = new Map();
+  function getFormattingPreferences(question = '') {
+    if (!config.MESSAGE_ROUTE_CACHE_ENABLED) {
+      return resolveToolReplyFormattingPreferences(question);
+    }
+    const key = String(question || '');
+    if (formattingPreferenceCache.has(key)) return formattingPreferenceCache.get(key);
+    const value = resolveToolReplyFormattingPreferences(question);
+    formattingPreferenceCache.set(key, value);
+    if (formattingPreferenceCache.size > 128) {
+      const oldestKey = formattingPreferenceCache.keys().next().value;
+      if (oldestKey !== undefined) formattingPreferenceCache.delete(oldestKey);
+    }
+    return value;
+  }
+  function buildCachedRuntimePrompt(templateId, variables = {}) {
+    if (!config.MESSAGE_ROUTE_CACHE_ENABLED) {
+      return buildRuntimePrompt(templateId, variables);
+    }
+    const cacheKey = `runtime_prompt:${String(templateId || '')}:${JSON.stringify(variables || {})}`;
+    return routePromptCache.getOrCompute(cacheKey, () => buildRuntimePrompt(templateId, variables));
+  }
+  function getCachedRouteValue(key, factory) {
+    if (!config.MESSAGE_ROUTE_CACHE_ENABLED) {
+      return typeof factory === 'function' ? factory() : undefined;
+    }
+    return routePromptCache.getOrCompute(`route_value:${String(key || '')}`, factory);
+  }
+  const cachedPromptHelpers = {
+    buildToolGuidancePrompt(route) {
+      const planner = route?.meta?.toolPlanner && typeof route.meta.toolPlanner === 'object'
+        ? route.meta.toolPlanner
+        : (route?.meta?.directChatPlanner && typeof route.meta.directChatPlanner === 'object'
+          ? route.meta.directChatPlanner
+          : null);
+      const toolHints = Array.isArray(planner?.allowedToolNames)
+        ? planner.allowedToolNames.filter(Boolean)
+        : [];
+      if (!toolHints.length) return null;
+
+      const routeKey = getRouteDisplayType(route);
+      const reason = String(route?.meta?.reason || '').trim();
+      return buildCachedRuntimePrompt('tool-guidance', {
+        routeKey,
+        toolHints: toolHints.join(', '),
+        reasonLine: reason ? `路由原因: ${reason}` : ''
+      });
+    },
+    buildBridgeGuidancePrompt(route, backend = 'command', routeExecutionPlan = {}) {
+      const routeKey = getRouteDisplayType(route, routeExecutionPlan);
+      const routeDescription = String(routeKey || '').trim();
+      const reason = String(route?.meta?.reason || '').trim();
+      const toolLine = buildSubagentToolReasonLine(route, backend);
+      const executionLine = buildSubagentExecutionGuidanceLine(route, backend, routeExecutionPlan);
+      const executionPlanLines = buildSubagentExecutionPlanLines(routeExecutionPlan, backend);
+      return buildCachedRuntimePrompt('bridge-guidance', {
+        routeKey,
+        routeDescription,
+        planId: 'none',
+        toolLine,
+        executionLine,
+        executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',
+        reasonLine: reason ? `路由原因: ${reason}` : ''
+      });
+    },
+    buildStreamingSegmentationPrompt(maxSegments) {
+      return buildCachedRuntimePrompt('streaming-segmentation', { maxSegments });
+    },
+    buildQqRichReplyPrompt() {
+      return buildCachedRuntimePrompt('qq-rich-reply');
+    }
+  };
   const visionCaptionWorkerRunner = typeof runVisionCaptionWorkerOverride === 'function'
     ? runVisionCaptionWorkerOverride
     : runVisionCaptionWorker;
@@ -1058,57 +1179,91 @@ function createMessageHandler({
     buildReplyTelemetry,
     runPersistInBackgroundFromCheckpoint
   });
-  const adminCoordinator = createMessageAdminCoordinator({
-    config,
-    chatHistory,
-    shortTermMemory,
-    resolveShortTermSessionKey,
-    getSessionSummaryCooldownStatus,
-    saveSessionContextSummary,
-    generateSessionContextSummary,
-    isAdminUser,
-    getGroupInitiativeState,
-    clearGroupMute,
-    setGroupMute,
-    scheduleGroupMessage,
-    createScheduledCommand,
-    hapiControlRuntime,
-    createHapiControlClient: createDefaultHapiControlClientFactory(config)
-  });
-  const fullSubagentCoordinator = createMessageFullSubagentCoordinator({
-    config,
-    askAIByGraph,
-    extractJsonSafely,
-    cleanToolReplyText,
-    resolveToolReplyFormattingPreferences,
-    buildToolReplyFormatInstruction,
-    startSubagentBridgeCall,
-    buildRuntimePromptOverride: buildRuntimePrompt
-  });
-  const backgroundTaskCoordinator = createMessageBackgroundTaskCoordinator({
-    config,
-    buildSessionId,
-    backgroundTaskRuntime,
-    normalizeUserFacingReply: (...args) => replyRuntime.normalizeUserFacingReply(...args),
-    getEffectivePolicyKey,
-    summarizeBackgroundReply,
-    sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
-    maybeSendMemeFollowup,
-    sendWithRetry
-  });
-  const runBackgroundToolTask = (...args) => backgroundTaskCoordinator.runBackgroundToolTask(...args);
-  const visualContext = createMessageVisualContext({
-    chatHistory
-  });
+  let adminCoordinator = null;
+  let fullSubagentCoordinator = null;
+  let backgroundTaskCoordinator = null;
+  let visualContextTools = null;
+  function getAdminCoordinator() {
+    if (!config.LAZY_COORDINATOR_INIT_ENABLED && adminCoordinator) return adminCoordinator;
+    if (!adminCoordinator) {
+      adminCoordinator = createMessageAdminCoordinator({
+        config,
+        chatHistory,
+        shortTermMemory,
+        resolveShortTermSessionKey,
+        getSessionSummaryCooldownStatus,
+        saveSessionContextSummary,
+        generateSessionContextSummary,
+        isAdminUser,
+        getGroupInitiativeState,
+        clearGroupMute,
+        setGroupMute,
+        scheduleGroupMessage,
+        createScheduledCommand,
+        hapiControlRuntime,
+        createHapiControlClient: createDefaultHapiControlClientFactory(config)
+      });
+    }
+    return adminCoordinator;
+  }
+  function getFullSubagentCoordinator() {
+    if (!config.LAZY_COORDINATOR_INIT_ENABLED && fullSubagentCoordinator) return fullSubagentCoordinator;
+    if (!fullSubagentCoordinator) {
+      fullSubagentCoordinator = createMessageFullSubagentCoordinator({
+        config,
+        askAIByGraph,
+        extractJsonSafely,
+        cleanToolReplyText,
+        resolveToolReplyFormattingPreferences,
+        buildToolReplyFormatInstruction,
+        startSubagentBridgeCall,
+        buildRuntimePromptOverride: buildRuntimePrompt
+      });
+    }
+    return fullSubagentCoordinator;
+  }
+  function getBackgroundTaskCoordinator() {
+    if (!config.LAZY_COORDINATOR_INIT_ENABLED && backgroundTaskCoordinator) return backgroundTaskCoordinator;
+    if (!backgroundTaskCoordinator) {
+      backgroundTaskCoordinator = createMessageBackgroundTaskCoordinator({
+        config,
+        buildSessionId,
+        backgroundTaskRuntime,
+        normalizeUserFacingReply: (...args) => replyRuntime.normalizeUserFacingReply(...args),
+        getEffectivePolicyKey,
+        summarizeBackgroundReply,
+        sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
+        maybeSendMemeFollowup,
+        sendWithRetry
+      });
+    }
+    return backgroundTaskCoordinator;
+  }
+  function getVisualContextTools() {
+    if (!config.LAZY_COORDINATOR_INIT_ENABLED && visualContextTools) return visualContextTools;
+    if (!visualContextTools) {
+      visualContextTools = createMessageVisualContext({
+        chatHistory
+      });
+    }
+    return visualContextTools;
+  }
+  if (!config.LAZY_COORDINATOR_INIT_ENABLED) {
+    void getAdminCoordinator();
+    void getFullSubagentCoordinator();
+    void getBackgroundTaskCoordinator();
+    void getVisualContextTools();
+  }
+  const runBackgroundToolTask = (...args) => getBackgroundTaskCoordinator().runBackgroundToolTask(...args);
   const maybeRunDeferredPersist = telemetryCoordinator.maybeRunDeferredPersist;
-  const handleSessionSummaryCommand = (...args) => adminCoordinator.handleSessionSummaryCommand(...args);
-  const handleHapiAdminCommand = (...args) => adminCoordinator.handleHapiAdminCommand(...args);
-  const handleInitiativeAdminCommand = (...args) => adminCoordinator.handleInitiativeAdminCommand(...args);
-  const handleQqScheduleAdminCommand = (...args) => adminCoordinator.handleQqScheduleAdminCommand(...args);
-  const reviewSubagentOutput = (...args) => fullSubagentCoordinator.reviewSubagentOutput(...args);
-  const planFullSubagentWorkers = (...args) => fullSubagentCoordinator.planFullSubagentWorkers(...args);
-  const reviewFullMultiWorkerOutput = (...args) => fullSubagentCoordinator.reviewFullMultiWorkerOutput(...args);
-  const handleFullAdminCommand = (args) => fullSubagentCoordinator.handleFullAdminCommand({
+  const handleSessionSummaryCommand = (...args) => getAdminCoordinator().handleSessionSummaryCommand(...args);
+  const handleHapiAdminCommand = (...args) => getAdminCoordinator().handleHapiAdminCommand(...args);
+  const handleInitiativeAdminCommand = (...args) => getAdminCoordinator().handleInitiativeAdminCommand(...args);
+  const handleQqScheduleAdminCommand = (...args) => getAdminCoordinator().handleQqScheduleAdminCommand(...args);
+  const reviewSubagentOutput = (...args) => getFullSubagentCoordinator().reviewSubagentOutput(...args);
+  const planFullSubagentWorkers = (...args) => getFullSubagentCoordinator().planFullSubagentWorkers(...args);
+  const reviewFullMultiWorkerOutput = (...args) => getFullSubagentCoordinator().reviewFullMultiWorkerOutput(...args);
+  const handleFullAdminCommand = (args) => getFullSubagentCoordinator().handleFullAdminCommand({
     ...args,
     sendGroupReply,
     normalizeUserFacingReply,
@@ -1165,7 +1320,7 @@ function createMessageHandler({
     saveData,
     clearGroupBindingForUser
   });
-  const buildSubagentContextSummary = (...args) => visualContext.buildSubagentContextSummary(...args);
+  const buildSubagentContextSummary = (...args) => getVisualContextTools().buildSubagentContextSummary(...args);
   const taskControlCoordinator = createMessageTaskControlCoordinator({
     buildSessionId,
     buildNoTaskControlText,
@@ -1178,11 +1333,11 @@ function createMessageHandler({
     backgroundTaskRuntime,
     buildRoutePromptBundle,
     getStreamMaxSegments,
-    buildToolGuidancePrompt,
-    buildBridgeGuidancePrompt,
-    buildStreamingSegmentationPrompt,
+    buildToolGuidancePrompt: cachedPromptHelpers.buildToolGuidancePrompt,
+    buildBridgeGuidancePrompt: cachedPromptHelpers.buildBridgeGuidancePrompt,
+    buildStreamingSegmentationPrompt: cachedPromptHelpers.buildStreamingSegmentationPrompt,
     shouldPreferQqRichReply,
-    buildQqRichReplyPrompt,
+    buildQqRichReplyPrompt: cachedPromptHelpers.buildQqRichReplyPrompt,
     getEffectivePolicyKey,
     sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
     runBackgroundToolTask,
@@ -1195,11 +1350,11 @@ function createMessageHandler({
     config,
     buildRoutePromptBundle,
     getStreamMaxSegments,
-    buildToolGuidancePrompt,
-    buildBridgeGuidancePrompt,
-    buildStreamingSegmentationPrompt,
+    buildToolGuidancePrompt: cachedPromptHelpers.buildToolGuidancePrompt,
+    buildBridgeGuidancePrompt: cachedPromptHelpers.buildBridgeGuidancePrompt,
+    buildStreamingSegmentationPrompt: cachedPromptHelpers.buildStreamingSegmentationPrompt,
     shouldPreferQqRichReply,
-    buildQqRichReplyPrompt,
+    buildQqRichReplyPrompt: cachedPromptHelpers.buildQqRichReplyPrompt,
     buildSafetyBoundaryRoutePrompt,
     buildLlmPerception,
     buildRoutePlanLogPayload,
@@ -1226,7 +1381,7 @@ function createMessageHandler({
     const mutableOptions = options && typeof options === 'object' ? { ...options } : {};
     mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
     const routePolicyKey = String(mutableOptions.routePolicyKey || 'admin/full').trim() || 'admin/full';
-    const formattingPreferences = resolveToolReplyFormattingPreferences(question);
+    const formattingPreferences = getFormattingPreferences(question);
     const backgroundTaskId = String(mutableOptions.backgroundTaskId || '').trim();
     const shouldContinue = typeof mutableOptions?.shouldContinue === 'function'
       ? mutableOptions.shouldContinue
@@ -1508,7 +1663,7 @@ function createMessageHandler({
     const mutableOptions = options && typeof options === 'object' ? options : {};
     mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
     const routePolicyKey = String(mutableOptions.routePolicyKey || 'admin/full').trim() || 'admin/full';
-    const formattingPreferences = resolveToolReplyFormattingPreferences(question);
+    const formattingPreferences = getFormattingPreferences(question);
 
     if (!(config.SUBAGENT_ENABLED || config.NANOBOT_BRIDGE_ENABLED)) {
       return '?????????????? agent ????? agent ?????????? `.env` ?? `SUBAGENT_ENABLED`?`SUBAGENT_COMMAND` ? `OPENCLAW_*` ???';
@@ -1557,7 +1712,7 @@ function createMessageHandler({
 
   async function askToolTaskLocally(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
     const mutableOptions = options && typeof options === 'object' ? options : {};
-    const formattingPreferences = resolveToolReplyFormattingPreferences(question);
+    const formattingPreferences = getFormattingPreferences(question);
     const outputFormatInstruction = buildToolReplyFormatInstruction(formattingPreferences);
     mutableOptions.routePrompt = [String(mutableOptions.routePrompt || '').trim(), outputFormatInstruction].filter(Boolean).join('\n\n') || null;
     const plannerExecutionPlan = mutableOptions.plannerExecutionPlan && typeof mutableOptions.plannerExecutionPlan === 'object'
@@ -1588,7 +1743,7 @@ function createMessageHandler({
     const mutableOptions = options && typeof options === 'object' ? { ...options } : {};
     mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
     const routePolicyKey = String(mutableOptions.routePolicyKey || 'admin/full').trim() || 'admin/full';
-    const formattingPreferences = resolveToolReplyFormattingPreferences(question);
+    const formattingPreferences = getFormattingPreferences(question);
 
       if (!(config.SUBAGENT_ENABLED || config.NANOBOT_BRIDGE_ENABLED)) {
         return {
@@ -1957,6 +2112,11 @@ function createMessageHandler({
       continuousMeta = syntheticContinuousMeta;
       effectiveMsg.__continuousMessageMeta = continuousMeta;
     }
+    updateSessionFreshnessVersion(
+      String(continuousMeta?.sessionKey || '').trim(),
+      Number(continuousMeta?.flushVersion || 0) || 0
+    );
+    const freshnessGuard = buildFreshnessGuard(continuousMeta);
     const rawText = effectiveMsg.raw_message || '';
     const inboundSessionKey = resolveShortTermSessionKey(senderId, isPrivateChatType(chatType) ? {} : { groupId });
     const isPrivateInbound = isPrivateChatType(chatType);
@@ -2244,8 +2404,8 @@ function createMessageHandler({
       return;
     }
 
-    const mentioned = isAtBot(rawText, effectiveBotQQ);
-    const cleanTextWithoutControls = stripLeadingCqControlSegments(rawText, effectiveBotQQ);
+    const mentioned = getCachedRouteValue(`mentioned:${String(rawText || '')}:${effectiveBotQQ}`, () => isAtBot(rawText, effectiveBotQQ));
+    const cleanTextWithoutControls = getCachedRouteValue(`cleanTextWithoutControls:${String(rawText || '')}:${effectiveBotQQ}`, () => stripLeadingCqControlSegments(rawText, effectiveBotQQ));
     if (continuousMeta && typeof continuousMeta === 'object') {
       await resolveContinuousEntryDetails(continuousMeta, {
         effectiveBotQQ,
@@ -2258,8 +2418,8 @@ function createMessageHandler({
       effectiveMsg.__continuousMessageMeta = continuousMeta;
     }
     // source-compat anchor: const effectiveVisualInput = resolveVisualInputFromContinuousMeta(continuousMeta);
-    const effectiveRawText = String(effectiveMsg?.raw_message || rawText || '');
-    const effectiveCleanText = stripLeadingCqControlSegments(effectiveRawText, effectiveBotQQ);
+    const effectiveRawText = getCachedRouteValue(`effectiveRawText:${String(effectiveMsg?.raw_message || rawText || '')}`, () => String(effectiveMsg?.raw_message || rawText || ''));
+    const effectiveCleanText = getCachedRouteValue(`effectiveCleanText:${effectiveRawText}:${effectiveBotQQ}`, () => stripLeadingCqControlSegments(effectiveRawText, effectiveBotQQ));
     const directedContext = await resolveMessageDirectedContext({
       msg,
       effectiveMsg,
@@ -2272,15 +2432,25 @@ function createMessageHandler({
       continuousMeta,
       historySummary: buildSubagentContextSummary(senderId, groupId, { maxLength: 180 })
     });
-    const visualImageCollectionResult = buildVisualImageCollectionDetails(
-      continuousMeta,
-      directedContext,
-      effectiveCleanText,
-      { maxImages: config.VISION_CAPTION_WORKER_MAX_IMAGES }
+    const hasPotentialVisualInput = Boolean(
+      Array.isArray(continuousMeta?.currentImageUrls) && continuousMeta.currentImageUrls.length > 0
+      || String(directedContext?.replyImageUrl || '').trim()
+      || (Array.isArray(continuousMeta?.forwardImages) && continuousMeta.forwardImages.length > 0)
+      || (Array.isArray(continuousMeta?.qqCardUrls) && continuousMeta.qqCardUrls.length > 0)
     );
-    const visualImageCollection = visualImageCollectionResult.images;
-    const effectiveVisualInput = String(visualImageCollection[0]?.url || '').trim()
-      || resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText);
+    const visualImageCollectionResult = hasPotentialVisualInput
+      ? getCachedRouteValue(`visualCollection:${String(effectiveMsg?.message_id || msg?.message_id || '')}`, () => buildVisualImageCollectionDetails(
+        continuousMeta,
+        directedContext,
+        effectiveCleanText,
+        { maxImages: config.VISION_CAPTION_WORKER_MAX_IMAGES }
+      ))
+      : { images: [], meta: {} };
+    const visualImageCollection = Array.isArray(visualImageCollectionResult?.images) ? visualImageCollectionResult.images : [];
+    const effectiveVisualInput = visualImageCollection.length > 0
+      ? (String(visualImageCollection[0]?.url || '').trim()
+        || resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText))
+      : '';
     const visualCacheRefCount = countCachedVisualRefs(visualImageCollection);
     const directedScene = String(directedContext?.scene || '').trim();
     const replyToBotRequested = directedScene === 'reply_to_bot';
@@ -2844,13 +3014,26 @@ function createMessageHandler({
       senderId,
       groupId: isPrivateChatType(chatType) ? '' : groupId,
       imageUrl,
-      sourceMessageId: String(effectiveMsg.message_id || '').trim()
+      sourceMessageId: String(effectiveMsg.message_id || '').trim(),
+      freshness: freshnessGuard
     });
     let reply = String(replyEnvelope?.replyText || '').trim();
     const persistedReplyText = String(replyEnvelope?.persistedReplyText || replyEnvelope?.replyText || '').trim();
     const usedStreamingSend = Boolean(replyEnvelope?.sendStrategy === 'stream' || replyEnvelope?.usedStreamingSend);
     const replyOptions = replyEnvelope?.replyOptions || null;
     if (!usedStreamingSend) {
+      if (!freshnessGuard.shouldSend()) {
+        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+          stage: 'reply_discarded_stale',
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          sessionKey: String(freshnessGuard.sessionKey || '').trim(),
+          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0
+        });
+        return;
+      }
       reply = normalizeUserFacingReply(reply, {
         policyKey: getEffectivePolicyKey(routeExecutionPlan),
         routeDebugKey: routeExecutionPlan.routeDebugKey,
@@ -2875,6 +3058,7 @@ function createMessageHandler({
         atSender: !isPrivateChatType(chatType) && replyEnvelope?.atSender !== false,
         retries: 2,
         waitMs: 500,
+        shouldSend: freshnessGuard.shouldSend,
         telemetry: buildReplyTelemetry({
           senderId,
           groupId: isPrivateChatType(chatType) ? '' : groupId,
@@ -2909,6 +3093,18 @@ function createMessageHandler({
         }
       }
     } else {
+      if (!freshnessGuard.shouldSend()) {
+        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+          stage: 'reply_discarded_stale',
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          sessionKey: String(freshnessGuard.sessionKey || '').trim(),
+          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0
+        });
+        return;
+      }
       maybeRunDeferredPersist(replyEnvelope);
       if (!isPrivateChatType(chatType)) {
         await sideEffects.runDirectReplyFollowup({
