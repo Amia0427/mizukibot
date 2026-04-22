@@ -45,6 +45,11 @@ const {
 } = require('./recallHeuristics');
 const { queryMemory } = require('./memory-v3');
 const {
+  schedulePreload,
+  searchMemoryCliFast,
+  openMemoryCliFast
+} = require('./memory-v3/cliSearchRuntime');
+const {
   queryLocalKnowledge,
   readNotebookDoc
 } = require('./localKnowledge');
@@ -72,6 +77,8 @@ const JOURNAL_RAW_FALLBACK_DAYS = 10;
 const JOURNAL_RAW_FALLBACK_MAX_CANDIDATES = 8;
 const JOURNAL_RAW_FALLBACK_WINDOW_RADIUS = 2;
 const JOURNAL_BUNDLE_WEAK_SCORE = 0.48;
+
+schedulePreload();
 
 function sanitizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -1999,6 +2006,178 @@ function getUnifiedMemoryStats(context = {}) {
   };
 }
 
+async function runLegacyMemorySearch(parsed, prepared, context = {}) {
+  const userId = sanitizeText(context.userId);
+  let payload = null;
+
+  const localKnowledge = await queryLocalKnowledge({
+    userId,
+    query: parsed.query,
+    topK: parsed.limit,
+    groupId: sanitizeText(context.groupId),
+    groupIds: getAccessibleGroupIdsForUser(userId),
+    sessionId: sanitizeText(context.sessionId),
+    sessionKey: sanitizeText(context.sessionKey),
+    routePolicyKey: sanitizeText(context.routePolicyKey),
+    topRouteType: sanitizeText(context.topRouteType),
+    taskType: sanitizeText(context.taskType)
+  });
+  const notebookOnlyResults = parsed.source === 'notebook'
+    ? (localKnowledge.bySource?.notebook_doc || [])
+    : [];
+  if (parsed.source === 'notebook') {
+    payload = {
+      ok: true,
+      command: 'search',
+      rawCommandText: prepared.rawCommandText,
+      normalizedCommandText: prepared.normalizedCommandText,
+      repairApplied: prepared.repairApplied,
+      repairStrategy: prepared.repairStrategy,
+      count: notebookOnlyResults.length,
+      results: notebookOnlyResults.map((item) => ({
+        ref: `mc_ref:notebook:${item.ref.docId}:${item.ref.chunkIndex}`,
+        source: 'notebook',
+        type: 'notebook_doc',
+        id: item.ref.docId,
+        title: item.title,
+        preview: item.preview,
+        text: item.preview,
+        score: item.score,
+        updatedAt: item.updatedAt
+      })),
+      digest: notebookOnlyResults.map((item) => `[notebook] ${sanitizePreviewText(item.preview, 140)}`).slice(0, 4),
+      sourceCoverage: { notebook: notebookOnlyResults.length },
+      queryFacet: 'notebook',
+      candidateCounts: { local: localKnowledge.diagnostics.candidates || 0 },
+      fallbackUsed: false,
+      outputChars: notebookOnlyResults.reduce((sum, item) => sum + String(item.preview || '').length, 0),
+      recentUsed: false,
+      droppedResultCount: 0
+    };
+  } else if (parsed.source === 'journal') {
+    const journalOnly = (localKnowledge.bySource?.journal_entry || [])
+      .concat(localKnowledge.bySource?.journal_continuity || [])
+      .slice(0, parsed.limit);
+    payload = {
+      ok: true,
+      command: 'search',
+      rawCommandText: prepared.rawCommandText,
+      normalizedCommandText: prepared.normalizedCommandText,
+      repairApplied: prepared.repairApplied,
+      repairStrategy: prepared.repairStrategy,
+      count: journalOnly.length,
+      results: journalOnly.map((item) => ({
+        ref: `mc_ref:journal:${item.id}`,
+        source: 'journal',
+        type: 'journal_entry',
+        id: item.id,
+        title: item.source,
+        preview: item.preview,
+        text: item.preview,
+        score: item.score,
+        updatedAt: item.updatedAt
+      })),
+      digest: journalOnly.map((item) => `[journal] ${sanitizePreviewText(item.preview, 140)}`).slice(0, 4),
+      sourceCoverage: { journal: journalOnly.length },
+      queryFacet: 'journal',
+      candidateCounts: { local: localKnowledge.diagnostics.candidates || 0 },
+      fallbackUsed: false,
+      outputChars: journalOnly.reduce((sum, item) => sum + String(item.preview || '').length, 0),
+      recentUsed: false,
+      droppedResultCount: 0
+    };
+  }
+
+  if (payload) return payload;
+
+  const search = config.MEMORY_V3_ENABLED
+    ? await (async () => {
+      let facet = classifyRecallFacet(parsed.query);
+      if (parsed.source === 'recent') facet = 'continuity';
+      else if (parsed.source === 'journal') facet = 'journal';
+      else if (parsed.source === 'task') facet = 'task';
+      else if (parsed.source === 'group') facet = 'group';
+      else if (parsed.source === 'style' || parsed.source === 'jargon') facet = 'style';
+      const result = await queryMemory({
+        userId,
+        query: parsed.query,
+        topK: parsed.limit,
+        facet,
+        source: parsed.source,
+        groupId: sanitizeText(context.groupId),
+        groupIds: getAccessibleGroupIdsForUser(userId),
+        sessionId: sanitizeText(context.sessionId),
+        sessionKey: sanitizeText(context.sessionKey),
+        routePolicyKey: sanitizeText(context.routePolicyKey),
+        topRouteType: sanitizeText(context.topRouteType),
+        taskType: sanitizeText(context.taskType)
+      });
+      const results = (Array.isArray(result.results) ? result.results : []).map((item) => ({
+        ref: `mc_ref:${item.source}:${item.id}`,
+        source: item.source,
+        type: item.type,
+        id: item.id,
+        evidenceTier: sanitizeText(item.evidenceTier).toLowerCase() || '',
+        fieldKey: sanitizeText(item.fieldKey).toLowerCase() || '',
+        title: sanitizePreviewText(item.text, 80),
+        preview: sanitizePreviewText(item.text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
+        text: sanitizePreviewText(item.text, Math.min(400, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
+        score: item.score,
+        tier: item.tier || '',
+        confidence: item.confidence,
+        status: item.status,
+        matchMode: item.embedding > 0 ? 'hybrid' : 'lexical',
+        updatedAt: item.updatedAt || 0
+      }));
+      return {
+        results,
+        digest: [
+          ...(result.persona?.summary
+            ? [`[persona|summary] ${sanitizePreviewText(result.persona.summary, 140)}`]
+            : []),
+          ...(result.persona?.impression
+            ? [`[persona|impression] ${sanitizePreviewText(result.persona.impression, 140)}`]
+            : []),
+          ...((Array.isArray(result.strictResults) ? result.strictResults : [])
+            .slice(0, 2)
+            .map((item) => `[strict|${String(item.source || 'memory').trim() || 'memory'}|${String(item.type || '').trim() || 'fact'}] ${sanitizePreviewText(item.text, 140)}`)),
+          ...((Array.isArray(result.weakResults) ? result.weakResults : [])
+            .slice(0, 1)
+            .map((item) => `[weak|${String(item.source || 'memory').trim() || 'memory'}|${String(item.type || '').trim() || 'fact'}] ${sanitizePreviewText(item.text, 140)}`))
+        ].filter(Boolean).slice(0, 4),
+        sourceCoverage: result.sourceCoverage || {},
+        queryFacet: result.facet || classifyRecallFacet(parsed.query),
+        candidateCounts: { v3: Number(result.stats?.candidates || 0) || 0 },
+        fallbackUsed: false,
+        outputChars: results.reduce((sum, item) => sum + String(item.preview || '').length, 0),
+        recentUsed: Boolean((result.sourceCoverage || {}).recent),
+        droppedResultCount: 0
+      };
+    })()
+    : searchUnifiedMemory(parsed.query, {
+      source: parsed.source,
+      limit: parsed.limit
+    }, context);
+  return {
+    ok: true,
+    command: 'search',
+    rawCommandText: prepared.rawCommandText,
+    normalizedCommandText: prepared.normalizedCommandText,
+    repairApplied: prepared.repairApplied,
+    repairStrategy: prepared.repairStrategy,
+    count: search.results.length,
+    results: search.results,
+    digest: search.digest,
+    sourceCoverage: search.sourceCoverage,
+    queryFacet: search.queryFacet,
+    candidateCounts: search.candidateCounts,
+    fallbackUsed: search.fallbackUsed,
+    outputChars: search.outputChars,
+    recentUsed: search.recentUsed,
+    droppedResultCount: search.droppedResultCount
+  };
+}
+
 async function runMemoryCli(commandText = '', context = {}) {
   const startedAt = Date.now();
   const prepared = prepareMemoryCliCommand(commandText);
@@ -2034,172 +2213,43 @@ async function runMemoryCli(commandText = '', context = {}) {
   let payload = null;
 
   if (parsed.commandName === 'search') {
-    const localKnowledge = await queryLocalKnowledge({
-      userId,
-      query: parsed.query,
-      topK: parsed.limit,
-      groupId: sanitizeText(context.groupId),
-      groupIds: getAccessibleGroupIdsForUser(userId),
-      sessionId: sanitizeText(context.sessionId),
-      sessionKey: sanitizeText(context.sessionKey),
-      routePolicyKey: sanitizeText(context.routePolicyKey),
-      topRouteType: sanitizeText(context.topRouteType),
-      taskType: sanitizeText(context.taskType)
-    });
-    const notebookOnlyResults = parsed.source === 'notebook'
-      ? (localKnowledge.bySource?.notebook_doc || [])
-      : [];
-    if (parsed.source === 'notebook') {
-      payload = {
-        ok: true,
-        command: 'search',
-        rawCommandText: prepared.rawCommandText,
-        normalizedCommandText: prepared.normalizedCommandText,
-        repairApplied: prepared.repairApplied,
-        repairStrategy: prepared.repairStrategy,
-        count: notebookOnlyResults.length,
-        results: notebookOnlyResults.map((item) => ({
-          ref: `mc_ref:notebook:${item.ref.docId}:${item.ref.chunkIndex}`,
-          source: 'notebook',
-          type: 'notebook_doc',
-          id: item.ref.docId,
-          title: item.title,
-          preview: item.preview,
-          text: item.preview,
-          score: item.score,
-          updatedAt: item.updatedAt
-        })),
-        digest: notebookOnlyResults.map((item) => `[notebook] ${sanitizePreviewText(item.preview, 140)}`).slice(0, 4),
-        sourceCoverage: { notebook: notebookOnlyResults.length },
-        queryFacet: 'notebook',
-        candidateCounts: { local: localKnowledge.diagnostics.candidates || 0 },
-        fallbackUsed: false,
-        outputChars: notebookOnlyResults.reduce((sum, item) => sum + String(item.preview || '').length, 0),
-        recentUsed: false,
-        droppedResultCount: 0
-      };
-    } else if (parsed.source === 'journal') {
-      const journalOnly = (localKnowledge.bySource?.journal_entry || [])
-        .concat(localKnowledge.bySource?.journal_continuity || [])
-        .slice(0, parsed.limit);
-      payload = {
-        ok: true,
-        command: 'search',
-        rawCommandText: prepared.rawCommandText,
-        normalizedCommandText: prepared.normalizedCommandText,
-        repairApplied: prepared.repairApplied,
-        repairStrategy: prepared.repairStrategy,
-        count: journalOnly.length,
-        results: journalOnly.map((item) => ({
-          ref: `mc_ref:journal:${item.id}`,
-          source: 'journal',
-          type: 'journal_entry',
-          id: item.id,
-          title: item.source,
-          preview: item.preview,
-          text: item.preview,
-          score: item.score,
-          updatedAt: item.updatedAt
-        })),
-        digest: journalOnly.map((item) => `[journal] ${sanitizePreviewText(item.preview, 140)}`).slice(0, 4),
-        sourceCoverage: { journal: journalOnly.length },
-        queryFacet: 'journal',
-        candidateCounts: { local: localKnowledge.diagnostics.candidates || 0 },
-        fallbackUsed: false,
-        outputChars: journalOnly.reduce((sum, item) => sum + String(item.preview || '').length, 0),
-        recentUsed: false,
-        droppedResultCount: 0
-      };
-    }
-  }
-
-  if (!payload && parsed.commandName === 'search') {
-    const search = config.MEMORY_V3_ENABLED
-      ? await (async () => {
-        let facet = classifyRecallFacet(parsed.query);
-        if (parsed.source === 'recent') facet = 'continuity';
-        else if (parsed.source === 'journal') facet = 'journal';
-        else if (parsed.source === 'task') facet = 'task';
-        else if (parsed.source === 'group') facet = 'group';
-        else if (parsed.source === 'style' || parsed.source === 'jargon') facet = 'style';
-        const result = await queryMemory({
-          userId,
-          query: parsed.query,
-          topK: parsed.limit,
-          facet,
+    if (String(config.MEMORY_CLI_SEARCH_ENGINE || 'fast').trim().toLowerCase() === 'legacy') {
+      payload = await runLegacyMemorySearch(parsed, prepared, context);
+    } else {
+      try {
+        const fastSearch = await searchMemoryCliFast(parsed.query, {
           source: parsed.source,
-          groupId: sanitizeText(context.groupId),
-          groupIds: getAccessibleGroupIdsForUser(userId),
-          sessionId: sanitizeText(context.sessionId),
-          sessionKey: sanitizeText(context.sessionKey),
-          routePolicyKey: sanitizeText(context.routePolicyKey),
-          topRouteType: sanitizeText(context.topRouteType),
-          taskType: sanitizeText(context.taskType)
+          limit: parsed.limit
+        }, {
+          ...context,
+          userId,
+          groupIds: getAccessibleGroupIdsForUser(userId)
         });
-        const results = (Array.isArray(result.results) ? result.results : []).map((item) => ({
-          ref: `mc_ref:${item.source}:${item.id}`,
-          source: item.source,
-          type: item.type,
-          id: item.id,
-          evidenceTier: sanitizeText(item.evidenceTier).toLowerCase() || '',
-          fieldKey: sanitizeText(item.fieldKey).toLowerCase() || '',
-          title: sanitizePreviewText(item.text, 80),
-          preview: sanitizePreviewText(item.text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
-          text: sanitizePreviewText(item.text, Math.min(400, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
-          score: item.score,
-          tier: item.tier || '',
-          confidence: item.confidence,
-          status: item.status,
-          matchMode: item.embedding > 0 ? 'hybrid' : 'lexical',
-          updatedAt: item.updatedAt || 0
-        }));
-        return {
-          results,
-          digest: [
-            ...(result.persona?.summary
-              ? [`[persona|summary] ${sanitizePreviewText(result.persona.summary, 140)}`]
-              : []),
-            ...(result.persona?.impression
-              ? [`[persona|impression] ${sanitizePreviewText(result.persona.impression, 140)}`]
-              : []),
-            ...((Array.isArray(result.strictResults) ? result.strictResults : [])
-              .slice(0, 2)
-              .map((item) => `[strict|${String(item.source || 'memory').trim() || 'memory'}|${String(item.type || '').trim() || 'fact'}] ${sanitizePreviewText(item.text, 140)}`)),
-            ...((Array.isArray(result.weakResults) ? result.weakResults : [])
-              .slice(0, 1)
-              .map((item) => `[weak|${String(item.source || 'memory').trim() || 'memory'}|${String(item.type || '').trim() || 'fact'}] ${sanitizePreviewText(item.text, 140)}`))
-          ].filter(Boolean).slice(0, 4),
-          sourceCoverage: result.sourceCoverage || {},
-          queryFacet: result.facet || classifyRecallFacet(parsed.query),
-          candidateCounts: { v3: Number(result.stats?.candidates || 0) || 0 },
-          fallbackUsed: false,
-          outputChars: results.reduce((sum, item) => sum + String(item.preview || '').length, 0),
-          recentUsed: Boolean((result.sourceCoverage || {}).recent),
-          droppedResultCount: 0
+        payload = {
+          ok: true,
+          command: 'search',
+          rawCommandText: prepared.rawCommandText,
+          normalizedCommandText: prepared.normalizedCommandText,
+          repairApplied: prepared.repairApplied,
+          repairStrategy: prepared.repairStrategy,
+          count: fastSearch.results.length,
+          results: fastSearch.results,
+          digest: fastSearch.digest,
+          sourceCoverage: fastSearch.sourceCoverage,
+          queryFacet: fastSearch.queryFacet,
+          candidateCounts: fastSearch.candidateCounts,
+          fallbackUsed: fastSearch.fallbackUsed,
+          outputChars: fastSearch.outputChars,
+          recentUsed: fastSearch.recentUsed,
+          droppedResultCount: fastSearch.droppedResultCount
         };
-      })()
-      : searchUnifiedMemory(parsed.query, {
-        source: parsed.source,
-        limit: parsed.limit
-      }, context);
-    payload = {
-      ok: true,
-      command: 'search',
-      rawCommandText: prepared.rawCommandText,
-      normalizedCommandText: prepared.normalizedCommandText,
-      repairApplied: prepared.repairApplied,
-      repairStrategy: prepared.repairStrategy,
-      count: search.results.length,
-      results: search.results,
-      digest: search.digest,
-      sourceCoverage: search.sourceCoverage,
-      queryFacet: search.queryFacet,
-      candidateCounts: search.candidateCounts,
-      fallbackUsed: search.fallbackUsed,
-      outputChars: search.outputChars,
-      recentUsed: search.recentUsed,
-      droppedResultCount: search.droppedResultCount
-    };
+      } catch (error) {
+        if (config.ENABLE_DEBUG_LOG) {
+          console.warn('[memory_cli_fast] search fallback to legacy:', error?.message || error);
+        }
+        payload = await runLegacyMemorySearch(parsed, prepared, context);
+      }
+    }
   }
 
   if (!payload && parsed.commandName === 'remember') {
@@ -2242,29 +2292,34 @@ async function runMemoryCli(commandText = '', context = {}) {
   }
 
   if (!payload && parsed.commandName === 'open') {
-    if (parsed.source === 'notebook' || String(parsed.ref || '').startsWith('mc_ref:notebook:')) {
+    let opened = null;
+    if (String(config.MEMORY_CLI_SEARCH_ENGINE || 'fast').trim().toLowerCase() !== 'legacy') {
+      try {
+        opened = await openMemoryCliFast(parsed, context);
+      } catch (error) {
+        if (config.ENABLE_DEBUG_LOG) {
+          console.warn('[memory_cli_fast] open fallback to legacy:', error?.message || error);
+        }
+      }
+    }
+    if (!opened && (parsed.source === 'notebook' || String(parsed.ref || '').startsWith('mc_ref:notebook:'))) {
       const refParts = String(parsed.ref || '').replace(/^mc_ref:notebook:/, '').split(':');
       const openedNotebook = readNotebookDoc({ userId }, {
         userId,
         docId: refParts[0] || parsed.id,
         chunkIndex: Number(refParts[1] || 0) || 0
       });
-      payload = {
-        ok: Boolean(openedNotebook?.ok),
-        command: 'open',
-        rawCommandText: prepared.rawCommandText,
-        normalizedCommandText: prepared.normalizedCommandText,
-        repairApplied: prepared.repairApplied,
-        repairStrategy: prepared.repairStrategy,
-        source: 'notebook',
-        id: refParts[0] || parsed.id,
-        data: openedNotebook?.ok ? openedNotebook : null
-      };
+      if (openedNotebook?.ok) {
+        opened = {
+          source: 'notebook',
+          id: refParts[0] || parsed.id,
+          data: openedNotebook
+        };
+      }
     }
-  }
-
-  if (!payload && parsed.commandName === 'open') {
-    let opened = openUnifiedMemory(parsed, parsed, context);
+    if (!opened) {
+      opened = openUnifiedMemory(parsed, parsed, context);
+    }
     if (!opened && parseJournalRawRef(parsed.ref)) {
       const openedJournal = openJournalByRef(sanitizeText(context.userId), parsed.ref);
       if (openedJournal && openedJournal.data && typeof openedJournal.data === 'object') {

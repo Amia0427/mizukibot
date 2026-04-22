@@ -32,6 +32,61 @@ function getOntologyPaths(dataDir) {
   };
 }
 
+function buildDefaultSchema() {
+  return {
+    types: {
+      Note: {
+        description: 'Generic note or knowledge entity',
+        properties: {
+          title: 'string',
+          summary: 'string',
+          tags: 'array<string>'
+        }
+      },
+      Person: {
+        description: 'Person profile entity',
+        properties: {
+          name: 'string',
+          role: 'string',
+          status: 'string'
+        }
+      },
+      Task: {
+        description: 'Task or work item',
+        properties: {
+          title: 'string',
+          status: 'string',
+          priority: 'string'
+        }
+      }
+    },
+    relations: {
+      related_to: {
+        from: '*',
+        to: '*',
+        description: 'Generic relation between two entities'
+      },
+      assigned_to: {
+        from: 'Task',
+        to: 'Person',
+        description: 'Task owner relation'
+      }
+    }
+  };
+}
+
+function ensureSchema(paths) {
+  const fallback = buildDefaultSchema();
+  const current = readJson(paths.schemaFile, null);
+  if (current && typeof current === 'object') {
+    if (!current.types || typeof current.types !== 'object') current.types = {};
+    if (!current.relations || typeof current.relations !== 'object') current.relations = {};
+    return { schema: current, created: false };
+  }
+  writeJson(paths.schemaFile, fallback);
+  return { schema: fallback, created: true };
+}
+
 function ensureState(dataDir) {
   const paths = getOntologyPaths(dataDir);
   const state = readJson(paths.graphFile, { entities: [], relations: [] });
@@ -149,11 +204,14 @@ function mutateOntology(dataDir, args = {}) {
   }
 
   if (action === 'validate') {
-    return fs.existsSync(paths.schemaFile) ? 'schema: ok' : 'schema: missing';
+    const { schema, created } = ensureSchema(paths);
+    return created
+      ? `schema: ok (initialized default schema with ${Object.keys(schema.types || {}).length} types)`
+      : 'schema: ok';
   }
 
   if (action === 'schema-append') {
-    const schema = readJson(paths.schemaFile, { types: {}, relations: {} });
+    const schema = ensureSchema(paths).schema;
     const data = args.data || args.schema || null;
     if (!data || typeof data !== 'object') return 'Missing data.';
     if (data.types && typeof data.types === 'object') {

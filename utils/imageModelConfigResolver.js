@@ -1,42 +1,87 @@
 const config = require('../config');
-const { isAdminMainModelUser } = require('./mainModelConfigResolver');
+const { isAdminMainModelUser, resolveUserScopedMainModelConfig } = require('./mainModelConfigResolver');
 
 function normalizeText(value) {
   return String(value || '').trim();
 }
 
-function getImageModelName(overrides = null, userId = '', options = {}) {
-  const model = overrides && typeof overrides === 'object'
-    ? (overrides.imageModel || '')
-    : '';
-  const fallbackModel = overrides && typeof overrides === 'object'
-    ? overrides.model
-    : '';
+function resolveAdminImageConfig(overrides = null, userId = '', options = {}) {
   const isAdmin = isAdminMainModelUser(userId, options);
+  if (!isAdmin) return null;
+
+  const baseUrl = normalizeText(
+    (overrides && typeof overrides === 'object' ? overrides.adminImageApiBaseUrl : '')
+    || config.ADMIN_IMAGE_API_BASE_URL
+    || ''
+  );
+  const apiKey = normalizeText(
+    (overrides && typeof overrides === 'object' ? overrides.adminImageApiKey : '')
+    || config.ADMIN_IMAGE_API_KEY
+    || ''
+  );
+  if (!baseUrl || !apiKey) return null;
+
+  return {
+    model: normalizeText(
+      (overrides && typeof overrides === 'object' ? overrides.adminImageModel : '')
+      || config.ADMIN_IMAGE_MODEL
+      || config.ADMIN_AI_MODEL
+      || config.IMAGE_MODEL
+      || config.AI_MODEL
+      || 'gpt-5.4'
+    ) || 'gpt-5.4',
+    apiBaseUrl: baseUrl,
+    apiKey
+  };
+}
+
+function resolveDedicatedImageConfig(overrides = null) {
+  const baseUrl = normalizeText(
+    (overrides && typeof overrides === 'object' ? overrides.imageApiBaseUrl : '')
+    || config.IMAGE_API_BASE_URL
+    || ''
+  );
+  const apiKey = normalizeText(
+    (overrides && typeof overrides === 'object' ? overrides.imageApiKey : '')
+    || config.IMAGE_API_KEY
+    || ''
+  );
+  if (!baseUrl || !apiKey) return null;
+
+  return {
+    apiBaseUrl: baseUrl,
+    apiKey
+  };
+}
+
+function getImageModelName(overrides = null, userId = '', options = {}) {
+  const adminImageConfig = resolveAdminImageConfig(overrides, userId, options);
+  if (adminImageConfig?.model) return adminImageConfig.model;
+  const model = overrides && typeof overrides === 'object' ? (overrides.imageModel || '') : '';
+  const fallbackModel = overrides && typeof overrides === 'object' ? overrides.model : '';
+  const dedicatedImageConfig = resolveDedicatedImageConfig(overrides);
+  if (!dedicatedImageConfig) {
+    const mainConfig = resolveUserScopedMainModelConfig(userId, overrides, options);
+    return normalizeText(mainConfig?.model || fallbackModel || config.AI_MODEL || 'gpt-5.4') || 'gpt-5.4';
+  }
   return normalizeText(
     model
-    || (isAdmin ? config.ADMIN_IMAGE_MODEL : '')
     || config.IMAGE_MODEL
     || fallbackModel
-    || (isAdmin ? config.ADMIN_AI_MODEL : '')
     || config.AI_MODEL
     || 'gpt-5.4'
   ) || 'gpt-5.4';
 }
 
 function getImageApiBaseUrl(overrides = null, userId = '', options = {}) {
-  const raw = overrides && typeof overrides === 'object'
-    ? overrides.imageApiBaseUrl
-    : '';
-  const isAdmin = isAdminMainModelUser(userId, options);
-  return normalizeText(
-    raw
-    || config.IMAGE_API_BASE_URL
-    || (isAdmin ? config.ADMIN_API_BASE_URL : '')
-    || (overrides && typeof overrides === 'object' ? overrides.apiBaseUrl : '')
-    || config.API_BASE_URL
-    || ''
-  );
+  const adminImageConfig = resolveAdminImageConfig(overrides, userId, options);
+  if (adminImageConfig?.apiBaseUrl) return adminImageConfig.apiBaseUrl;
+
+  const dedicatedImageConfig = resolveDedicatedImageConfig(overrides);
+  if (dedicatedImageConfig?.apiBaseUrl) return dedicatedImageConfig.apiBaseUrl;
+
+  const mainConfig = resolveUserScopedMainModelConfig(userId, overrides, options);
+  return normalizeText(mainConfig?.apiBaseUrl || config.API_BASE_URL || '');
 }
 
 function getImageApiKey(overrides = null, userId = '', options = {}) {
@@ -45,19 +90,14 @@ function getImageApiKey(overrides = null, userId = '', options = {}) {
     : '';
   if (normalizeText(raw)) return normalizeText(raw);
 
-  const dedicatedBaseUrl = overrides && typeof overrides === 'object'
-    ? overrides.imageApiBaseUrl
-    : '';
-  if (normalizeText(dedicatedBaseUrl || config.IMAGE_API_BASE_URL || '')) {
-    return normalizeText(config.IMAGE_API_KEY || (overrides && typeof overrides === 'object' ? overrides.apiKey : '') || config.API_KEY || '');
-  }
+  const adminImageConfig = resolveAdminImageConfig(overrides, userId, options);
+  if (adminImageConfig?.apiKey) return adminImageConfig.apiKey;
 
-  const isAdmin = isAdminMainModelUser(userId, options);
-  if (isAdmin && normalizeText(config.ADMIN_API_BASE_URL || '')) {
-    return normalizeText(config.ADMIN_API_KEY || (overrides && typeof overrides === 'object' ? overrides.apiKey : '') || config.API_KEY || '');
-  }
+  const dedicatedImageConfig = resolveDedicatedImageConfig(overrides);
+  if (dedicatedImageConfig?.apiKey) return dedicatedImageConfig.apiKey;
 
-  return normalizeText((overrides && typeof overrides === 'object' ? overrides.apiKey : '') || config.API_KEY || '');
+  const mainConfig = resolveUserScopedMainModelConfig(userId, overrides, options);
+  return normalizeText(mainConfig?.apiKey || config.API_KEY || '');
 }
 
 function buildImageModelConfig(overrides = null, userId = '', options = {}) {

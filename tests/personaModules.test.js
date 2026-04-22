@@ -25,6 +25,16 @@ const {
   assert.ok(deepCandidates.some((item) => item.id === 'deep_pain'));
   assert.ok(deepCandidates.some((item) => item.id === 'boundary_touch'));
 
+  const boundaryCandidates = buildPersonaModuleCandidates({
+    question: '你到底是什么，非要我给你定性的话你算男还是女'
+  });
+  assert.ok(boundaryCandidates.some((item) => item.id === 'boundary_touch'));
+
+  const playfulMisreadCandidates = buildPersonaModuleCandidates({
+    question: '宝你认错了，还是说你就是初音未来'
+  });
+  assert.ok(!playfulMisreadCandidates.some((item) => item.id === 'boundary_touch'));
+
   const selected = selectPersonaModules({
     plannerMeta: {},
     personaModules: ['deep_pain', 'boundary_touch']

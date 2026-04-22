@@ -104,6 +104,20 @@ Recent smoke validation confirmed:
 - `skill_stock_rumor` works and returns live headlines
 - `skill_youtube_transcript` now degrades cleanly when no HTTP transcript provider is configured
 
+## Optional Skill Env Template
+
+The remaining provider-backed native skills now use a dedicated example file:
+
+- `.env.skills.example`
+
+It documents the optional env vars for:
+
+- `skill_image_generate_pro`
+- `skill_ppt_generate`
+- `skill_ppt_theme_list`
+- `skill_youtube_transcript`
+- stock-data fallbacks (`TWELVEDATA_API_KEY`, `ALPHAVANTAGE_API_KEY`)
+
 ## Remaining Cleanup
 
 The following files were part of a previous abandoned system-proxy experiment and appear

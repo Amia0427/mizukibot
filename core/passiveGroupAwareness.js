@@ -2,7 +2,7 @@
 const { postWithRetry, postStreamWithRetry } = require('../api/httpClient');
 const { extractMessageContent, extractJsonSafely, extractSSEEvents, flushSSEState } = require('../api/parser');
 const { maybeSendMemeFollowup } = require('./memeManager');
-const { shortTermMemory } = require('../utils/memory');
+const { shortTermMemory, chatHistory } = require('../utils/memory');
 const {
   resolveShortTermSessionKey,
   getShortTermPresence,
@@ -964,7 +964,9 @@ async function buildReplyPrompt({
     routeMeta: { groupId }
   }, {
     surface: 'passive_group_reply',
-    groupId
+    groupId,
+    shortTermMemory,
+    chatHistory
   });
   const personaPrompt = renderPersonaMemoryPrompt(personaState, 'passive_group_reply');
   const contextLines = recentMessages
@@ -1102,7 +1104,9 @@ async function buildReplyPromptV2({
     routeMeta: { groupId, directedContext }
   }, {
     surface: 'passive_group_reply',
-    groupId
+    groupId,
+    shortTermMemory,
+    chatHistory
   });
   const personaPrompt = renderPersonaMemoryPrompt(personaState, 'passive_group_reply');
   const memoryContext = personaState?.evidence?.memoryContext && typeof personaState.evidence.memoryContext === 'object'

@@ -42,6 +42,34 @@ function buildFallbackSummary(state = {}, history = []) {
   return clampText(segments.join('；'));
 }
 
+function buildStructuredSummaryPayload(state = {}, history = []) {
+  const normalized = normalizeShortTermState(state);
+  return {
+    activeTopic: normalized.interaction.activeTopic || normalized.activeTopic,
+    carryOverUserTurn: normalized.interaction.carryOverUserTurn || normalized.carryOverUserTurn,
+    openLoops: normalized.interaction.openLoops.length > 0 ? normalized.interaction.openLoops : normalized.openLoops,
+    assistantCommitments: normalized.interaction.assistantCommitments.length > 0 ? normalized.interaction.assistantCommitments : normalized.assistantCommitments,
+    userConstraints: normalized.interaction.userConstraints.length > 0 ? normalized.interaction.userConstraints : normalized.userConstraints,
+    recentTurns: (Array.isArray(history) ? history : [])
+      .slice(-4)
+      .map((item) => ({
+        role: String(item?.role || '').trim().toLowerCase(),
+        content: clampText(item?.content, 140)
+      }))
+      .filter((item) => (item.role === 'user' || item.role === 'assistant') && item.content),
+    interaction: normalized.interaction,
+    scene: normalized.scene,
+    expression: normalized.expression,
+    moduleState: normalized.moduleState,
+    sourceFlags: normalized.interaction.sourceFlags || [],
+    confidence: Math.max(
+      Number(normalized.confidence || 0) || 0,
+      Number(normalized.interaction?.confidence || 0) || 0,
+      Number(normalized.expression?.confidence || 0) || 0
+    )
+  };
+}
+
 function buildSummaryPrompt(existingState, recentHistoryText) {
   const state = normalizeShortTermState(existingState);
   const compactState = {
@@ -122,7 +150,8 @@ async function generateSessionContextSummary({
       return {
         ok: true,
         summary,
-        source: 'model'
+        source: 'model',
+        structured: buildStructuredSummaryPayload(state, history)
       };
     }
   } catch (_) {}
@@ -131,7 +160,8 @@ async function generateSessionContextSummary({
   return {
     ok: Boolean(fallbackSummary),
     summary: fallbackSummary,
-    source: 'fallback'
+    source: 'fallback',
+    structured: buildStructuredSummaryPayload(state, history)
   };
 }
 

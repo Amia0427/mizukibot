@@ -291,6 +291,165 @@ function parseBingResults(html, maxResults = 5) {
   return rows;
 }
 
+function normalizeSearchText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractSearchTokens(query = '') {
+  const normalized = normalizeSearchText(query);
+  if (!normalized) return [];
+  const latin = normalized
+    .split(/[^a-z0-9._-]+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 2);
+  const cjk = normalized.match(/[\u4e00-\u9fff]{2,}/g) || [];
+  return Array.from(new Set([...latin, ...cjk])).slice(0, 8);
+}
+
+function extractHostname(url = '') {
+  try {
+    return new URL(String(url || '').trim()).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch (_) {
+    return '';
+  }
+}
+
+function scoreSearchRow(row = {}, query = '') {
+  const normalizedQuery = normalizeSearchText(query);
+  const tokens = extractSearchTokens(query);
+  const title = normalizeSearchText(row.title);
+  const desc = normalizeSearchText(row.desc);
+  const link = normalizeSearchText(row.link);
+  const host = extractHostname(row.link);
+  const haystack = [title, desc, link, host].filter(Boolean).join('\n');
+  const officialIntent = /官网|official|docs?|documentation|api|platform/i.test(String(query || ''));
+
+  let score = 0;
+  if (normalizedQuery && title.includes(normalizedQuery)) score += 18;
+  else if (normalizedQuery && haystack.includes(normalizedQuery)) score += 10;
+
+  let matchedTokens = 0;
+  for (const token of tokens) {
+    if (!token) continue;
+    if (title.includes(token)) {
+      score += token.length >= 4 ? 6 : 4;
+      matchedTokens += 1;
+      continue;
+    }
+    if (desc.includes(token)) {
+      score += token.length >= 4 ? 3 : 2;
+      matchedTokens += 1;
+      continue;
+    }
+    if (host.includes(token) || link.includes(token)) {
+      score += token.length >= 4 ? 4 : 2;
+      matchedTokens += 1;
+    }
+  }
+
+  if (matchedTokens === 0) {
+    score -= 16;
+  } else {
+    score += Math.min(6, matchedTokens * 2);
+  }
+
+  if (tokens.length > 1 && matchedTokens >= Math.min(2, tokens.length)) {
+    score += 4;
+  }
+
+  if (tokens.some((token) => token && host.includes(token))) {
+    score += 4;
+  }
+
+  if (/wikipedia\.org$|baike\.baidu\.com$/i.test(host)) score += 2;
+
+  if (/zhidao\.baidu\.com$|guba\.sina\.com\.cn$/i.test(host)) score -= 8;
+  else if (/zhihu\.com$|zhuanlan\.zhihu\.com$|csdn\.net$/i.test(host)) score -= 3;
+
+  if (officialIntent) {
+    if (tokens.some((token) => token && host.includes(token))) score += 10;
+    if (/(docs|documentation|official|官网|api|platform)/i.test(`${title}\n${desc}\n${host}`)) score += 4;
+    if (/zhihu\.com$|zhidao\.baidu\.com$|guba\.sina\.com\.cn$/i.test(host)) score -= 6;
+  }
+
+  return score;
+}
+
+function rerankSearchRows(rows = [], query = '', options = {}) {
+  const limit = Math.max(1, Math.min(10, Number(options.limit) || 5));
+  const minScore = Number.isFinite(Number(options.minScore)) ? Number(options.minScore) : 4;
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => ({ ...row, __score: scoreSearchRow(row, query) }))
+    .filter((row) => row.__score >= minScore)
+    .sort((a, b) => Number(b.__score || 0) - Number(a.__score || 0))
+    .slice(0, limit)
+    .map(({ __score, ...row }) => row);
+}
+
+function isOfficialSearchIntent(query = '') {
+  return /官网|official|docs?|documentation|api|platform/i.test(String(query || ''));
+}
+
+function buildOfficialProbeCandidates(query = '') {
+  const brandTokens = extractSearchTokens(query)
+    .filter((token) => /[a-z]/i.test(token))
+    .filter((token) => !['official', 'docs', 'doc', 'api', 'platform', 'bot', 'ai'].includes(token))
+    .filter((token) => token.length >= 4);
+  const brand = brandTokens[0] || '';
+  if (!brand) return [];
+
+  const candidates = [
+    `https://www.${brand}.com/`,
+    `https://${brand}.com/`,
+    `https://www.${brand}.ai/`,
+    `https://${brand}.ai/`,
+    `https://platform.${brand}.com/`,
+    `https://docs.${brand}.com/`,
+    `https://api.${brand}.com/`
+  ];
+  return Array.from(new Set(candidates));
+}
+
+async function probeOfficialSearchCandidates(query = '', options = {}) {
+  const timeoutMs = Math.max(1200, Math.min(5000, Number(options.timeoutMs) || 3500));
+  const candidates = buildOfficialProbeCandidates(query).slice(0, 5);
+  if (!candidates.length) return [];
+
+  const checks = await Promise.allSettled(candidates.map(async (url) => {
+    const response = await http.get(url, {
+      timeout: timeoutMs,
+      maxRedirects: 4,
+      validateStatus: (status) => status >= 200 && status < 400,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MizukiBot/1.0'
+      }
+    });
+    const finalUrl = String(response?.request?.res?.responseUrl || url || '').trim();
+    const html = String(response?.data || '');
+    const $ = cheerio.load(html);
+    const title = $('title').first().text().replace(/\s+/g, ' ').trim() || extractHostname(finalUrl) || finalUrl;
+    const metaDesc = (
+      $('meta[name="description"]').attr('content')
+      || $('meta[property="og:description"]').attr('content')
+      || '官方候选站点'
+    ).replace(/\s+/g, ' ').trim();
+    return {
+      title,
+      desc: metaDesc,
+      link: finalUrl || url
+    };
+  }));
+
+  return checks
+    .filter((item) => item.status === 'fulfilled' && item.value?.link)
+    .map((item) => item.value)
+    .slice(0, 3);
+}
+
 function formatSearchRows(rows = [], title = '搜索结果') {
   if (!Array.isArray(rows) || rows.length === 0) return '';
   const out = rows.map((row, i) => {
@@ -337,27 +496,52 @@ async function web_search(query) {
     return '请先告诉我要搜索什么。';
   }
 
+  const deadline = Date.now() + 16_000;
+  const remainingTimeout = (preferredMs = 8000, minimumMs = 1200) => {
+    const left = deadline - Date.now();
+    if (left <= minimumMs) return 0;
+    return Math.max(minimumMs, Math.min(preferredMs, left));
+  };
+
   let mainErr = null;
   let backupErr = null;
   let tertiaryErr = null;
   let quaternaryErr = null;
   let quinaryErr = null;
+  let mainCandidateCount = 0;
+  let backupCandidateCount = 0;
+
+  if (isOfficialSearchIntent(q)) {
+    try {
+      const officialRows = await probeOfficialSearchCandidates(q, {
+        timeoutMs: remainingTimeout(3500, 1500)
+      });
+      if (officialRows.length > 0) {
+        return formatSearchRows(officialRows, `关于“${q}”的官方候选结果`);
+      }
+    } catch (_) {}
+  }
 
   try {
     const localMain = await withRetry(
       () => http.get('https://www.baidu.com/s', {
         params: { wd: q, rn: 6 },
-        timeout: 10000,
+        timeout: remainingTimeout(5000, 1500),
         headers: {
           Referer: 'https://www.baidu.com/',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MizukiBot/1.0'
         }
       }),
-      1,
+      0,
       600
     );
 
-    const mainRows = parseBaiduResults(localMain.data, 5);
+    const rawMainRows = parseBaiduResults(localMain.data, 8);
+    mainCandidateCount = rawMainRows.length;
+    const mainRows = rerankSearchRows(rawMainRows, q, {
+      limit: 5,
+      minScore: 4
+    });
     if (mainRows.length > 0) {
       return formatSearchRows(mainRows, `关于“${q}”的搜索结果`);
     }
@@ -368,20 +552,32 @@ async function web_search(query) {
       const localBackup = await withRetry(
         () => http.get('https://www.bing.com/search', {
           params: { q, count: 6, setlang: 'zh-Hans' },
-          timeout: 10000
+          timeout: remainingTimeout(5000, 1500)
         }),
-        1,
+        0,
         600
       );
 
-      const backupRows = parseBingResults(localBackup.data, 5);
+      const rawBackupRows = parseBingResults(localBackup.data, 8);
+      backupCandidateCount = rawBackupRows.length;
+      const backupRows = rerankSearchRows(rawBackupRows, q, {
+        limit: 5,
+        minScore: 4
+      });
       if (backupRows.length > 0) {
         return formatSearchRows(backupRows, `关于“${q}”的备用结果`);
+      }
+      if (mainCandidateCount > 0 || backupCandidateCount > 0) {
+        return `没有搜到与“${q}”明显相关的高置信公开结果，建议换个更具体的关键词。`;
       }
       throw new Error('BING_EMPTY_RESULT');
     } catch (e2) {
       backupErr = e2;
     }
+  }
+
+  if (remainingTimeout(1, 1000) === 0) {
+    return '搜索服务暂时不可用，请稍后再试。';
   }
 
   try {
@@ -393,9 +589,9 @@ async function web_search(query) {
           no_html: 1,
           skip_disambig: 1
         },
-        timeout: 12000
+        timeout: remainingTimeout(4000, 1200)
       }),
-      1,
+      0,
       900
     );
 
@@ -429,13 +625,16 @@ async function web_search(query) {
       const lite = await withRetry(
         () => http.get('https://lite.duckduckgo.com/lite/', {
           params: { q },
-          timeout: 12000
+          timeout: remainingTimeout(3500, 1200)
         }),
-        1,
+        0,
         900
       );
 
-      const rows = parseDuckDuckGoLiteResults(lite.data, 5);
+      const rows = rerankSearchRows(parseDuckDuckGoLiteResults(lite.data, 10), q, {
+        limit: 5,
+        minScore: 3
+      });
       if (rows.length > 0) {
         const formatted = rows.map((row, i) => `${i + 1}. ${row.title}\n   ${row.link}`);
         return `关于“${q}”的备用结果：\n\n${formatted.join('\n\n')}`;
@@ -452,7 +651,7 @@ async function web_search(query) {
         }
 
         if (!wikiRows.length) {
-          return `没有搜到“${q}”的公开结果，建议换个关键词。`;
+          return `没有搜到与“${q}”明显相关的高置信公开结果，建议换个更具体的关键词。`;
         }
 
         const out = wikiRows.map((row, i) => `${i + 1}. ${row.title}\n   ${row.desc}\n   ${row.link}`);

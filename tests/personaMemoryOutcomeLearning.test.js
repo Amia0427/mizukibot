@@ -37,7 +37,11 @@ module.exports = (async () => {
         openLoops: ['保持直接风格'],
         assistantCommitments: ['先给结论'],
         userConstraints: ['不要铺垫'],
-        carryOverUserTurn: '保持直接风格'
+        carryOverUserTurn: '保持直接风格',
+        replyPosture: 'focused',
+        styleAnchors: ['先给结论', '不要铺垫'],
+        activePersonaModules: ['scene_private_chat'],
+        phaseHint: 'phase2'
       },
       relationshipState: {
         relationship: '普通朋友',
@@ -47,6 +51,7 @@ module.exports = (async () => {
         salutationStyle: 'friendly'
       },
       expressionState: {
+        replyPosture: { value: 'focused', source: 'continuity_state' },
         warmth: { value: 'mid', source: 'relationship_memory' },
         playfulness: { value: 'low', source: 'runtime_inference' },
         tease: { value: 'off', source: 'runtime_inference' },
@@ -73,6 +78,10 @@ module.exports = (async () => {
   assert.ok(recorded.some((event) => event.type === 'session_checkpoint'));
   assert.ok(recorded.some((event) => event.memoryKind === 'bot_persona'));
   assert.ok(recorded.some((event) => event.memoryKind === 'relationship_style'));
+  const checkpoint = recorded.find((event) => event.type === 'session_checkpoint');
+  assert.ok(checkpoint?.payload?.expressionState?.replyPosture === 'focused');
+  assert.ok(Array.isArray(checkpoint?.payload?.moduleState?.activePersonaModules));
+  assert.ok(checkpoint?.payload?.interactionState?.phaseHint === 'phase2');
   console.log('personaMemoryOutcomeLearning.test.js passed');
 })().catch((error) => {
   console.error(error);

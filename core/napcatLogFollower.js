@@ -141,6 +141,7 @@ function appendNapcatPacketToLog(packet = {}, options = {}) {
       });
     }
     packetLogWriter.append(normalized);
+    packetLogWriter.flushSync();
   } catch (_) {}
 }
 

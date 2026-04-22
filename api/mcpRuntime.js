@@ -91,17 +91,37 @@ const STATIC_MCP_REPLACEMENTS = [
     serverName: 'howtocook-mcp',
     toolName: 'recipe_search',
     functionName: 'mcp_howtocook_mcp_recipe_search',
-    description: 'Search local recipe/cooking docs',
+    description: 'Search local recipe records from the cached howtocook dataset',
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string' }
+        query: { type: 'string' },
+        limit: { type: 'number' }
       },
       required: ['query']
     },
-    targetTool: 'skill_clawddocs_search'
+    targetTool: 'local_howtocook_recipe_search'
   }
 ];
+
+function getStaticReplacementDescriptors(configuredServers = []) {
+  const configuredNames = new Set(
+    (Array.isArray(configuredServers) ? configuredServers : [])
+      .map((item) => String(item?.serverName || '').trim())
+      .filter(Boolean)
+  );
+
+  return STATIC_MCP_REPLACEMENTS
+    .filter((item) => configuredNames.size === 0 || configuredNames.has(item.serverName))
+    .map((item) => ({
+      serverName: item.serverName,
+      toolName: item.toolName,
+      functionName: item.functionName,
+      description: item.description,
+      inputSchema: item.inputSchema,
+      targetTool: item.targetTool
+    }));
+}
 
 function logMcp(event, payload = {}) {
   try {
@@ -135,19 +155,111 @@ function readMcpConfig(options = {}) {
   };
 }
 
+function splitPathEntries(rawPath = '') {
+  return String(rawPath || '')
+    .split(path.delimiter)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
+function resolveCommandForSpawn(command = '', env = process.env) {
+  const normalized = String(command || '').trim();
+  if (!normalized) return '';
+  if (path.isAbsolute(normalized) && fs.existsSync(normalized)) return normalized;
+
+  const ext = path.extname(normalized).toLowerCase();
+  const candidates = [];
+  if (process.platform === 'win32') {
+    if (ext) {
+      candidates.push(normalized);
+    } else {
+      candidates.push(`${normalized}.cmd`, `${normalized}.exe`, `${normalized}.bat`, normalized);
+    }
+  } else {
+    candidates.push(normalized);
+  }
+
+  const pathEntries = splitPathEntries(env?.PATH || process.env.PATH || '');
+  for (const candidate of candidates) {
+    if (path.isAbsolute(candidate) && fs.existsSync(candidate)) return candidate;
+    for (const dir of pathEntries) {
+      const abs = path.join(dir, candidate);
+      try {
+        if (fs.existsSync(abs)) return abs;
+      } catch (_) {}
+    }
+  }
+
+  return normalized;
+}
+
+function shouldUseShellSpawn(command = '') {
+  if (process.platform !== 'win32') return false;
+  const ext = path.extname(String(command || '').trim()).toLowerCase();
+  return ext === '.cmd' || ext === '.bat';
+}
+
+function quoteWindowsArg(value = '') {
+  const text = String(value || '');
+  if (!text) return '""';
+  if (!/[\s"]/g.test(text)) return text;
+  return `"${text.replace(/"/g, '\\"')}"`;
+}
+
+function buildSpawnConfig(serverConfig = {}) {
+  const resolvedCommand = String(serverConfig.command || '').trim();
+  const resolvedArgs = Array.isArray(serverConfig.args) ? [...serverConfig.args] : [];
+  if (!shouldUseShellSpawn(resolvedCommand)) {
+    return {
+      command: resolvedCommand,
+      args: resolvedArgs,
+      options: {
+        shell: false
+      }
+    };
+  }
+
+  const cmdExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+  const commandLine = [resolvedCommand, ...resolvedArgs].map((item) => quoteWindowsArg(item)).join(' ');
+  return {
+    command: cmdExe,
+    args: ['/d', '/s', '/c', commandLine],
+    options: {
+      shell: false
+    }
+  };
+}
+
+function normalizeSpawnFailure(error, serverName = '') {
+  const code = String(error?.code || '').trim().toUpperCase();
+  if (code === 'EPERM') {
+    return normalizeMcpError(new Error(
+      `failed to start mcp server ${serverName}: child_process spawn is blocked by the current environment (${error.message || 'spawn EPERM'})`
+    ), 'MCP_PROCESS_ERROR');
+  }
+  return normalizeMcpError(error, 'MCP_PROCESS_ERROR', {
+    fallbackMessage: `failed to start mcp server ${serverName}`
+  });
+}
+
 function listConfiguredMcpServers(options = {}) {
   const { config: parsed, configPath } = readMcpConfig(options);
   const servers = parsed && parsed.mcpServers && typeof parsed.mcpServers === 'object'
     ? parsed.mcpServers
     : {};
 
-  return Object.entries(servers).map(([serverName, definition]) => ({
-    serverName,
-    configPath,
-    command: String(definition?.command || '').trim(),
-    args: Array.isArray(definition?.args) ? definition.args.map((item) => String(item)) : [],
-    env: definition?.env && typeof definition.env === 'object' ? { ...definition.env } : {}
-  })).filter((item) => item.serverName && item.command);
+  return Object.entries(servers).map(([serverName, definition]) => {
+    const serverEnv = definition?.env && typeof definition.env === 'object' ? { ...definition.env } : {};
+    const mergedEnv = { ...process.env, ...serverEnv };
+    const command = resolveCommandForSpawn(String(definition?.command || '').trim(), mergedEnv);
+    return {
+      serverName,
+      configPath,
+      command,
+      args: Array.isArray(definition?.args) ? definition.args.map((item) => String(item)) : [],
+      env: serverEnv
+    };
+  }).filter((item) => item.serverName && item.command);
 }
 
 function sanitizeMcpNamePart(value = '', fallback = 'tool') {
@@ -376,12 +488,19 @@ function ensureSessionEntry(serverConfig = {}) {
     return existing;
   }
 
-  const child = childProcess.spawn(serverConfig.command, serverConfig.args || [], {
-    cwd: path.dirname(serverConfig.configPath || resolveMcpConfigPath()),
-    env: { ...process.env, ...(serverConfig.env || {}) },
-    stdio: ['pipe', 'pipe', 'pipe'],
-    windowsHide: true
-  });
+  const spawnConfig = buildSpawnConfig(serverConfig);
+  let child = null;
+  try {
+    child = childProcess.spawn(spawnConfig.command, spawnConfig.args, {
+      cwd: path.dirname(serverConfig.configPath || resolveMcpConfigPath()),
+      env: { ...process.env, ...(serverConfig.env || {}) },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+      ...spawnConfig.options
+    });
+  } catch (error) {
+    throw normalizeSpawnFailure(error, serverConfig.serverName);
+  }
 
   const entry = {
     serverName: serverConfig.serverName,
@@ -423,9 +542,7 @@ function ensureSessionEntry(serverConfig = {}) {
     const pendingErrors = Array.from(entry.pending.values());
     entry.pending.clear();
     for (const pending of pendingErrors) {
-      pending.reject(normalizeMcpError(error, 'MCP_PROCESS_ERROR', {
-        fallbackMessage: `failed to start mcp server ${entry.serverName}`
-      }));
+      pending.reject(normalizeSpawnFailure(error, entry.serverName));
     }
     invalidateServerCache(entry.serverName);
   });
@@ -616,22 +733,16 @@ async function discoverServerTools(serverConfig = {}, options = {}) {
 }
 
 async function discoverMcpTools(options = {}) {
-  void options;
-  return STATIC_MCP_REPLACEMENTS.map((item) => ({
-    serverName: item.serverName,
-    toolName: item.toolName,
-    functionName: item.functionName,
-    description: item.description,
-    inputSchema: item.inputSchema,
-    targetTool: item.targetTool
-  }));
-
   const configuredServers = listConfiguredMcpServers(options);
   const all = [];
+  const discoveredKeys = new Set();
   for (const serverConfig of configuredServers) {
     try {
       const tools = await discoverServerTools(serverConfig, options);
       all.push(...tools);
+      for (const descriptor of tools) {
+        discoveredKeys.add(`${descriptor.serverName}:${descriptor.toolName}`);
+      }
     } catch (error) {
       logMcp('mcp_tool_error', {
         serverName: serverConfig.serverName,
@@ -640,7 +751,10 @@ async function discoverMcpTools(options = {}) {
       });
     }
   }
-  return all;
+
+  const fallbacks = getStaticReplacementDescriptors(configuredServers)
+    .filter((item) => !discoveredKeys.has(`${item.serverName}:${item.toolName}`));
+  return [...all, ...fallbacks];
 }
 
 function sanitizeMcpArgumentValue(value, depth = 0) {
@@ -739,8 +853,30 @@ function extractTextFromMcpResult(result) {
 }
 
 async function callMcpTool(serverName = '', toolName = '', args = {}, context = {}) {
+  const configuredServers = listConfiguredMcpServers(context);
+  const serverConfig = configuredServers.find((item) => item.serverName === serverName);
   const replacement = STATIC_MCP_REPLACEMENTS.find((item) => item.serverName === serverName && item.toolName === toolName);
-  if (replacement) {
+
+  let descriptor = null;
+  let discoveryError = null;
+  if (serverConfig) {
+    try {
+      const tools = await discoverServerTools(serverConfig, context);
+      descriptor = tools.find((item) => item.toolName === toolName) || null;
+    } catch (error) {
+      discoveryError = normalizeMcpError(error, 'MCP_DISCOVERY_FAILED', {
+        fallbackMessage: `failed to discover mcp tools from ${serverName}`
+      });
+      logMcp('mcp_tool_error', {
+        serverName,
+        toolName,
+        stage: 'discover_for_call',
+        error: discoveryError.message
+      });
+    }
+  }
+
+  if (!descriptor && replacement) {
     const { getToolExecutors } = require('./toolRegistry');
     const executors = getToolExecutors();
     const executor = executors[replacement.targetTool];
@@ -748,23 +884,35 @@ async function callMcpTool(serverName = '', toolName = '', args = {}, context = 
       throw normalizeMcpError(new Error(`replacement tool unavailable: ${replacement.targetTool}`), 'MCP_TOOL_CALL_FAILED');
     }
     const result = await executor(args);
+    logMcp('mcp_tool_fallback', {
+      serverName,
+      toolName,
+      targetTool: replacement.targetTool,
+      reason: discoveryError?.message || (serverConfig ? 'tool_not_found' : 'server_not_found')
+    });
     return {
       ok: true,
       text: String(result || '').trim(),
       safeArgs: args,
-      result
+      result,
+      fallback: true,
+      diagnostic: {
+        mode: 'static_replacement',
+        serverName,
+        toolName,
+        targetTool: replacement.targetTool,
+        reason: discoveryError?.message || (serverConfig ? 'tool_not_found' : 'server_not_found'),
+        errorCode: discoveryError?.code || ''
+      }
     };
   }
 
-  const configuredServers = listConfiguredMcpServers(context);
-  const serverConfig = configuredServers.find((item) => item.serverName === serverName);
   if (!serverConfig) {
     throw normalizeMcpError(new Error(`mcp server not found: ${serverName}`), 'MCP_SERVER_NOT_FOUND');
   }
 
-  const tools = await discoverServerTools(serverConfig, context);
-  const descriptor = tools.find((item) => item.toolName === toolName);
   if (!descriptor) {
+    if (discoveryError) throw discoveryError;
     throw normalizeMcpError(new Error(`mcp tool not found: ${serverName}/${toolName}`), 'MCP_TOOL_NOT_FOUND');
   }
 
@@ -795,7 +943,16 @@ async function callMcpTool(serverName = '', toolName = '', args = {}, context = 
       ok: true,
       text,
       safeArgs,
-      result
+      result,
+      fallback: false,
+      diagnostic: {
+        mode: 'mcp_stdio',
+        serverName,
+        toolName,
+        targetTool: '',
+        reason: '',
+        errorCode: ''
+      }
     };
   } catch (error) {
     const normalized = normalizeMcpError(error, 'MCP_TOOL_CALL_FAILED', {

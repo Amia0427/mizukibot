@@ -235,7 +235,8 @@ function createPrepareNode(deps = {}) {
       memoryContext,
       personaMemoryState,
       promptSnapshot,
-      promptSegments
+      promptSegments,
+      latencyMeta
     } = await withSoftTimeout(
       () => buildDynamicPromptImpl(
         request.userInfo,
@@ -281,7 +282,14 @@ function createPrepareNode(deps = {}) {
           hit: false
         },
         criticalBlocks: [],
-        optionalBlocks: []
+        optionalBlocks: [],
+        latencyMeta: {
+          essentialDurationMs: 0,
+          optionalDurationMs: 0,
+          optionalBuildEnabled: false,
+          optionalBudgetMs: 0,
+          optionalBudgetExceeded: false
+        }
       }
     );
 
@@ -361,7 +369,10 @@ function createPrepareNode(deps = {}) {
           prepare: {
             durationMs: Math.max(0, nowTs() - startedAt),
             timedOut: Boolean(String(promptSnapshot?.freshness?.sessionContext || promptSegments?.freshness?.sessionContext || '').trim() === 'partial'),
-            deferred: true
+            deferred: true,
+            prompt_build_essential_ms: Number(latencyMeta?.essentialDurationMs || 0) || 0,
+            prompt_build_optional_ms: Number(latencyMeta?.optionalDurationMs || 0) || 0,
+            mcp_warm_wait_ms: 0
           }
         }
       },

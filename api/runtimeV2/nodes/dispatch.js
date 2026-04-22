@@ -65,6 +65,9 @@ function createDispatchNode(deps = {}) {
   const mergeAllowedToolsWithMemoryCli = typeof deps.mergeAllowedToolsWithMemoryCli === 'function'
     ? deps.mergeAllowedToolsWithMemoryCli
     : ((allowed) => normalizeArray(allowed));
+  const requiresToolEvidence = typeof deps.requiresToolEvidence === 'function'
+    ? deps.requiresToolEvidence
+    : (() => false);
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
@@ -72,6 +75,7 @@ function createDispatchNode(deps = {}) {
 
   return async function dispatchNode(state) {
     const request = normalizeObject(state.request, {});
+    const dispatchStartedAt = Date.now();
     const allSteps = normalizeArray(state.plan?.steps).map((step) => ({ ...step }));
     const resolveRuntimeBoundStep = (step, currentSteps = allSteps) => {
       const binding = normalizeObject(step?.runtimeBinding, null);
@@ -142,21 +146,44 @@ function createDispatchNode(deps = {}) {
         .map((step) => String(step?.tool || '').trim())
         .filter(Boolean)
     ));
-    const preflight = await runCapabilityPreflight(request.question || '', {
-      question: String(request.question || '').trim(),
-      userId: request.userId,
-      routePolicyKey: request.routePolicyKey,
-      topRouteType: request.topRouteType,
-      routePrompt: request.routePrompt,
-      routeMeta: request.routeMeta,
-      reviewMode: request.reviewMode,
-      allowedGlobalTools: selectedStepToolNames,
-      memoryCliTurn: state.execution?.memoryCliTurn,
-      policy: {
-        allowGlobalTools: Boolean(request.allowTools),
-        allowedGlobalTools: selectedStepToolNames
-      }
-    });
+    const latencyProfile = String(state.execution?.latencyDecision?.profile || '').trim().toLowerCase();
+    const mustRunPreflight = Boolean(
+      config.GLOBAL_TOOL_PREFLIGHT_CHAT_FAST === true
+      || latencyProfile !== 'chat_fast'
+      || requiresToolEvidence({
+        question: String(request.question || '').trim(),
+        cleanText: String(request.question || '').trim(),
+        topRouteType: request.topRouteType,
+        facets: normalizeObject(request.routeMeta?.facets, request.facets),
+        intent: normalizeObject(request.routeMeta?.intent, request.intent),
+        meta: normalizeObject(request.routeMeta, {})
+      })
+    );
+    const preflightStartedAt = Date.now();
+    const preflight = mustRunPreflight
+      ? await runCapabilityPreflight(request.question || '', {
+        question: String(request.question || '').trim(),
+        userId: request.userId,
+        routePolicyKey: request.routePolicyKey,
+        topRouteType: request.topRouteType,
+        routePrompt: request.routePrompt,
+        routeMeta: request.routeMeta,
+        reviewMode: request.reviewMode,
+        allowedGlobalTools: selectedStepToolNames,
+        memoryCliTurn: state.execution?.memoryCliTurn,
+        policy: {
+          allowGlobalTools: Boolean(request.allowTools),
+          allowedGlobalTools: selectedStepToolNames
+        }
+      })
+      : {
+        skipped: true,
+        reason: 'chat_fast_skip',
+        results: [],
+        evidenceMessage: '',
+        memoryCliTurn: state.execution?.memoryCliTurn || null
+      };
+    const preflightDurationMs = Math.max(0, Date.now() - preflightStartedAt);
     const hasExplicitDependencies = selectedSteps.some((step) => normalizeArray(step.dependsOn).length > 0);
     const directChatBatchExecution = isDirectChatRequest(request) && !hasExplicitDependencies;
     const directChatBatches = directChatBatchExecution
@@ -435,7 +462,15 @@ function createDispatchNode(deps = {}) {
         parallelExecution,
         toolResults,
         retryQueue: [],
-        memoryCliTurn: nextMemoryCliTurn
+        memoryCliTurn: nextMemoryCliTurn,
+        latencyBreakdown: {
+          ...normalizeObject(state.execution?.latencyBreakdown, {}),
+          dispatch: {
+            tool_exec_ms: Math.max(0, Date.now() - dispatchStartedAt - preflightDurationMs),
+            capability_preflight_ms: preflightDurationMs,
+            tool_result_count: toolResults.length
+          }
+        }
       },
       memory: {
         ...state.memory,

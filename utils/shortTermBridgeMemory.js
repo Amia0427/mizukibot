@@ -6,12 +6,16 @@ const { normalizeMessageContent, trimTextByTokenBudget } = require('./contextBud
 const {
   defaultShortTermState,
   normalizeShortTermState,
+  normalizeInteractionState,
+  normalizeSceneState,
+  normalizeExpressionState,
+  normalizeModuleState,
   ensureShortTermMemoryState,
   resolveShortTermSessionKey,
   resolveShortTermScope
 } = require('./shortTermMemory');
 
-const BRIDGE_FILE_VERSION = 2;
+const BRIDGE_FILE_VERSION = 3;
 const BRIDGE_ALLOWED_ROLES = new Set(['user', 'assistant']);
 const BRIDGE_SNAPSHOT_TYPES = new Set(['pre_reply', 'post_reply']);
 
@@ -112,6 +116,10 @@ function sanitizeBridgeSessionEntry(sessionKey, entry, now = Date.now()) {
       ? entry.shortTermState
       : { summary: String(entry.shortTermSummary || '').trim() })
   });
+  const interactionState = normalizeInteractionState(entry.interactionState || shortTermState.interaction);
+  const sceneState = normalizeSceneState(entry.sceneState || shortTermState.scene);
+  const expressionState = normalizeExpressionState(entry.expressionState || shortTermState.expression);
+  const moduleState = normalizeModuleState(entry.moduleState || shortTermState.moduleState);
 
   if (!hasMeaningfulShortTermState(shortTermState) && recentMessages.length === 0) {
     return null;
@@ -124,6 +132,10 @@ function sanitizeBridgeSessionEntry(sessionKey, entry, now = Date.now()) {
     expiresAt,
     snapshotType,
     shortTermState,
+    interactionState,
+    sceneState,
+    expressionState,
+    moduleState,
     recentMessages
   };
 }
@@ -259,6 +271,10 @@ function buildBridgeSnapshotPayload(userId, deps = {}) {
         'tail'
       )
     }),
+    interactionState: normalizeInteractionState(shortTermState.interaction),
+    sceneState: normalizeSceneState(shortTermState.scene),
+    expressionState: normalizeExpressionState(shortTermState.expression),
+    moduleState: normalizeModuleState(shortTermState.moduleState),
     recentMessages
   };
 }
@@ -293,7 +309,13 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
     return { restored: false, restoredMessages: 0, summaryLength: 0, snapshotType: '', carryOverRestored: false };
   }
 
-  Object.assign(state, normalizeShortTermState(entry.shortTermState));
+  Object.assign(state, normalizeShortTermState({
+    ...entry.shortTermState,
+    interaction: entry.interactionState,
+    scene: entry.sceneState,
+    expression: entry.expressionState,
+    moduleState: entry.moduleState
+  }));
   state.lastCompressedAt = Date.now();
 
   const recentMessages = normalizeRecentMessages(entry.recentMessages);
@@ -353,6 +375,10 @@ function persistShortTermBridgeSnapshot(userId, deps = {}) {
     expiresAt: now + getBridgeTtlMs(),
     snapshotType,
     shortTermState: payload.shortTermState,
+    interactionState: payload.interactionState,
+    sceneState: payload.sceneState,
+    expressionState: payload.expressionState,
+    moduleState: payload.moduleState,
     recentMessages: payload.recentMessages
   };
   saveBridgeStore(store);

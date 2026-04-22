@@ -45,6 +45,24 @@ function getCarryOverMaxChars() {
   return 220;
 }
 
+function getStyleAnchorMaxItems() {
+  return 4;
+}
+
+function getRecentTurnsMaxItems() {
+  return Math.max(2, Math.min(6, Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 4) || 4));
+}
+
+const DEFAULT_REPLY_POSTURE = 'light';
+const REPLY_POSTURES = new Set([
+  'light',
+  'playful',
+  'gentle',
+  'reserved',
+  'focused',
+  'comforting'
+]);
+
 function trimShortText(value, maxChars = 220) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
@@ -64,6 +82,135 @@ function normalizeStringList(values = [], limit = 4, itemMaxChars = 140) {
   }
 
   return output;
+}
+
+function normalizeConfidence(value, fallback = 0) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(1, num));
+}
+
+function normalizeRecentTurns(values = [], limit = getRecentTurnsMaxItems()) {
+  return (Array.isArray(values) ? values : [])
+    .map((item) => {
+      const role = String(item?.role || '').trim().toLowerCase();
+      const content = trimShortText(item?.content || item?.text || '', 220);
+      if ((role !== 'user' && role !== 'assistant') || !content) return null;
+      return { role, content };
+    })
+    .filter(Boolean)
+    .slice(-Math.max(1, Number(limit) || 1));
+}
+
+function normalizeReplyPosture(value, fallback = DEFAULT_REPLY_POSTURE) {
+  const posture = trimShortText(value, 24);
+  return REPLY_POSTURES.has(posture) ? posture : fallback;
+}
+
+function defaultExpressionState() {
+  return {
+    replyPosture: DEFAULT_REPLY_POSTURE,
+    warmth: '',
+    guardedness: '',
+    initiative: '',
+    jargonMode: '',
+    cadenceHint: '',
+    styleAnchors: [],
+    confidence: 0
+  };
+}
+
+function normalizeExpressionState(input = {}) {
+  const raw = input && typeof input === 'object' ? input : {};
+  return {
+    replyPosture: normalizeReplyPosture(raw.replyPosture, DEFAULT_REPLY_POSTURE),
+    warmth: trimShortText(raw.warmth, 32),
+    guardedness: trimShortText(raw.guardedness, 32),
+    initiative: trimShortText(raw.initiative, 32),
+    jargonMode: trimShortText(raw.jargonMode, 32),
+    cadenceHint: trimShortText(raw.cadenceHint, 48),
+    styleAnchors: normalizeStringList(raw.styleAnchors, getStyleAnchorMaxItems(), 96),
+    confidence: normalizeConfidence(raw.confidence, 0)
+  };
+}
+
+function defaultModuleState() {
+  return {
+    activePersonaModules: [],
+    stickyTurnsRemaining: 0,
+    switchReason: '',
+    lastSurface: '',
+    lastTopicFingerprint: '',
+    lastUpdatedAt: 0
+  };
+}
+
+function normalizeModuleState(input = {}) {
+  const raw = input && typeof input === 'object' ? input : {};
+  return {
+    activePersonaModules: normalizeStringList(raw.activePersonaModules || raw.personaModules, 2, 64),
+    stickyTurnsRemaining: Math.max(0, Math.min(5, Number(raw.stickyTurnsRemaining || 0) || 0)),
+    switchReason: trimShortText(raw.switchReason, 160),
+    lastSurface: trimShortText(raw.lastSurface, 32),
+    lastTopicFingerprint: trimShortText(raw.lastTopicFingerprint, 96),
+    lastUpdatedAt: Number(raw.lastUpdatedAt || 0) || 0
+  };
+}
+
+function defaultSceneState() {
+  return {
+    sceneKey: '',
+    activeTopic: '',
+    atmosphere: '',
+    activePair: '',
+    quoteAnchor: '',
+    jargonHints: [],
+    recentTurns: [],
+    confidence: 0
+  };
+}
+
+function normalizeSceneState(input = {}) {
+  const raw = input && typeof input === 'object' ? input : {};
+  return {
+    sceneKey: trimShortText(raw.sceneKey, 96),
+    activeTopic: trimShortText(raw.activeTopic, 180),
+    atmosphere: trimShortText(raw.atmosphere, 120),
+    activePair: trimShortText(raw.activePair, 120),
+    quoteAnchor: trimShortText(raw.quoteAnchor, 180),
+    jargonHints: normalizeStringList(raw.jargonHints, 4, 80),
+    recentTurns: normalizeRecentTurns(raw.recentTurns, 4),
+    confidence: normalizeConfidence(raw.confidence, 0)
+  };
+}
+
+function defaultInteractionState() {
+  return {
+    activeTopic: '',
+    carryOverUserTurn: '',
+    openLoops: [],
+    assistantCommitments: [],
+    userConstraints: [],
+    recentTurns: [],
+    phaseHint: '',
+    sourceFlags: [],
+    confidence: 0
+  };
+}
+
+function normalizeInteractionState(input = {}) {
+  const raw = input && typeof input === 'object' ? input : {};
+  return {
+    activeTopic: trimShortText(raw.activeTopic, 180),
+    carryOverUserTurn: trimShortText(raw.carryOverUserTurn, getCarryOverMaxChars()),
+    openLoops: normalizeStringList(raw.openLoops, getStateMaxItems(), 120),
+    assistantCommitments: normalizeStringList(raw.assistantCommitments, getStateMaxItems(), 120),
+    userConstraints: normalizeStringList(raw.userConstraints, getStateMaxItems(), 120),
+    recentTurns: normalizeRecentTurns(raw.recentTurns, getRecentTurnsMaxItems()),
+    phaseHint: trimShortText(raw.phaseHint, 48),
+    sourceFlags: normalizeStringList(raw.sourceFlags, 8, 80),
+    confidence: normalizeConfidence(raw.confidence, 0)
+  };
 }
 
 const SESSION_PRESENCE_STATES = new Set([
@@ -127,6 +274,7 @@ function normalizeShortTermPresence(input = {}) {
 
 function defaultShortTermState() {
   return {
+    schemaVersion: 2,
     summary: '',
     activeTopic: '',
     openLoops: [],
@@ -134,6 +282,13 @@ function defaultShortTermState() {
     userConstraints: [],
     recentToolResults: [],
     carryOverUserTurn: '',
+    interaction: defaultInteractionState(),
+    scene: defaultSceneState(),
+    expression: defaultExpressionState(),
+    moduleState: defaultModuleState(),
+    phaseHint: '',
+    sceneRef: '',
+    confidence: 0,
     presence: defaultShortTermPresence(),
     lastCompressedAt: 0,
     rounds: 0
@@ -142,18 +297,170 @@ function defaultShortTermState() {
 
 function normalizeShortTermState(input = {}) {
   const old = input && typeof input === 'object' ? input : {};
+  const normalizedInteraction = normalizeInteractionState({
+    ...defaultInteractionState(),
+    ...(old.interaction && typeof old.interaction === 'object' ? old.interaction : {}),
+    activeTopic: old.interaction?.activeTopic || old.activeTopic,
+    carryOverUserTurn: old.interaction?.carryOverUserTurn || old.carryOverUserTurn,
+    openLoops: old.interaction?.openLoops || old.openLoops,
+    assistantCommitments: old.interaction?.assistantCommitments || old.assistantCommitments,
+    userConstraints: old.interaction?.userConstraints || old.userConstraints,
+    recentTurns: old.interaction?.recentTurns || old.recentTurns,
+    phaseHint: old.interaction?.phaseHint || old.phaseHint,
+    sourceFlags: old.interaction?.sourceFlags || old.sourceFlags,
+    confidence: old.interaction?.confidence || old.confidence
+  });
+  const normalizedScene = normalizeSceneState({
+    ...defaultSceneState(),
+    ...(old.scene && typeof old.scene === 'object' ? old.scene : {}),
+    sceneKey: old.scene?.sceneKey || old.sceneKey || old.sceneRef,
+    activeTopic: old.scene?.activeTopic || '',
+    recentTurns: old.scene?.recentTurns || []
+  });
+  const normalizedExpression = normalizeExpressionState({
+    ...defaultExpressionState(),
+    ...(old.expression && typeof old.expression === 'object' ? old.expression : {})
+  });
+  const normalizedModuleState = normalizeModuleState({
+    ...defaultModuleState(),
+    ...(old.moduleState && typeof old.moduleState === 'object' ? old.moduleState : {})
+  });
   return {
+    schemaVersion: Math.max(2, Number(old.schemaVersion || 2) || 2),
     summary: trimShortText(old.summary, 2400),
-    activeTopic: trimShortText(old.activeTopic, 180),
-    openLoops: normalizeStringList(old.openLoops, getStateMaxItems(), 120),
-    assistantCommitments: normalizeStringList(old.assistantCommitments, getStateMaxItems(), 120),
-    userConstraints: normalizeStringList(old.userConstraints, getStateMaxItems(), 120),
+    activeTopic: normalizedInteraction.activeTopic || trimShortText(old.activeTopic, 180),
+    openLoops: normalizedInteraction.openLoops.length > 0
+      ? normalizedInteraction.openLoops
+      : normalizeStringList(old.openLoops, getStateMaxItems(), 120),
+    assistantCommitments: normalizedInteraction.assistantCommitments.length > 0
+      ? normalizedInteraction.assistantCommitments
+      : normalizeStringList(old.assistantCommitments, getStateMaxItems(), 120),
+    userConstraints: normalizedInteraction.userConstraints.length > 0
+      ? normalizedInteraction.userConstraints
+      : normalizeStringList(old.userConstraints, getStateMaxItems(), 120),
     recentToolResults: normalizeStringList(old.recentToolResults, getToolResultMaxItems(), 160),
-    carryOverUserTurn: trimShortText(old.carryOverUserTurn, getCarryOverMaxChars()),
+    carryOverUserTurn: normalizedInteraction.carryOverUserTurn || trimShortText(old.carryOverUserTurn, getCarryOverMaxChars()),
+    interaction: normalizedInteraction,
+    scene: normalizedScene,
+    expression: normalizedExpression,
+    moduleState: normalizedModuleState,
+    phaseHint: normalizedInteraction.phaseHint || trimShortText(old.phaseHint, 48),
+    sceneRef: normalizedScene.sceneKey || trimShortText(old.sceneRef || old.sceneKey, 96),
+    confidence: Math.max(
+      normalizeConfidence(old.confidence, 0),
+      normalizedInteraction.confidence,
+      normalizedExpression.confidence,
+      normalizedScene.confidence
+    ),
     presence: normalizeShortTermPresence(old.presence),
     lastCompressedAt: Number(old.lastCompressedAt || 0) || 0,
     rounds: Number(old.rounds || 0) || 0
   };
+}
+
+function resolveShortTermSceneKey(routeMeta = {}) {
+  const meta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
+  const explicitSceneId = String(meta.sceneKey || meta.scene_id || meta.sceneId || '').trim();
+  if (explicitSceneId) return explicitSceneId;
+  const groupId = String(meta.groupId || meta.group_id || '').trim();
+  if (groupId) return `qq-group:${groupId}:scene`;
+  const channelId = String(meta.channelId || meta.channel_id || '').trim();
+  if (channelId) return `channel:${channelId}:scene`;
+  return '';
+}
+
+function deriveShortTermSummaryFromContinuity(state = {}) {
+  const normalized = normalizeShortTermState(state);
+  return buildStructuredSummaryText({
+    summary: normalized.summary,
+    activeTopic: normalized.interaction.activeTopic || normalized.activeTopic,
+    openLoops: normalized.interaction.openLoops.length > 0 ? normalized.interaction.openLoops : normalized.openLoops,
+    assistantCommitments: normalized.interaction.assistantCommitments.length > 0 ? normalized.interaction.assistantCommitments : normalized.assistantCommitments,
+    userConstraints: normalized.interaction.userConstraints.length > 0 ? normalized.interaction.userConstraints : normalized.userConstraints,
+    recentToolResults: normalized.recentToolResults,
+    carryOverUserTurn: normalized.interaction.carryOverUserTurn || normalized.carryOverUserTurn
+  }, Math.max(96, Number(config.SHORT_TERM_MEMORY_SUMMARY_MAX_TOKENS || 320)));
+}
+
+function deriveShortTermFieldsFromContinuity(state = {}) {
+  const normalized = normalizeShortTermState(state);
+  return {
+    activeTopic: normalized.interaction.activeTopic || normalized.activeTopic,
+    carryOverUserTurn: normalized.interaction.carryOverUserTurn || normalized.carryOverUserTurn,
+    openLoops: normalized.interaction.openLoops.length > 0 ? normalized.interaction.openLoops : normalized.openLoops,
+    assistantCommitments: normalized.interaction.assistantCommitments.length > 0 ? normalized.interaction.assistantCommitments : normalized.assistantCommitments,
+    userConstraints: normalized.interaction.userConstraints.length > 0 ? normalized.interaction.userConstraints : normalized.userConstraints,
+    phaseHint: normalized.interaction.phaseHint || normalized.phaseHint,
+    sceneRef: normalized.scene.sceneKey || normalized.sceneRef,
+    confidence: normalized.confidence,
+    summary: normalized.summary || deriveShortTermSummaryFromContinuity(normalized)
+  };
+}
+
+function applyPersonaContinuityDelta(targetState = {}, delta = {}) {
+  const current = normalizeShortTermState(targetState);
+  const patch = delta && typeof delta === 'object' ? delta : {};
+  const nextInteraction = normalizeInteractionState({
+    ...current.interaction,
+    ...(patch.interaction && typeof patch.interaction === 'object' ? patch.interaction : {}),
+    activeTopic: patch.activeTopic || patch.interaction?.activeTopic || current.interaction.activeTopic,
+    carryOverUserTurn: patch.carryOverUserTurn || patch.interaction?.carryOverUserTurn || current.interaction.carryOverUserTurn,
+    openLoops: patch.openLoops || patch.interaction?.openLoops || current.interaction.openLoops,
+    assistantCommitments: patch.assistantCommitments || patch.interaction?.assistantCommitments || current.interaction.assistantCommitments,
+    userConstraints: patch.userConstraints || patch.interaction?.userConstraints || current.interaction.userConstraints,
+    recentTurns: patch.recentTurns || patch.interaction?.recentTurns || current.interaction.recentTurns,
+    phaseHint: patch.phaseHint || patch.interaction?.phaseHint || current.interaction.phaseHint,
+    sourceFlags: patch.sourceFlags || patch.interaction?.sourceFlags || current.interaction.sourceFlags,
+    confidence: patch.confidence ?? patch.interaction?.confidence ?? current.interaction.confidence
+  });
+  const nextScene = normalizeSceneState({
+    ...current.scene,
+    ...(patch.scene && typeof patch.scene === 'object' ? patch.scene : {}),
+    sceneKey: patch.sceneRef || patch.sceneKey || patch.scene?.sceneKey || current.scene.sceneKey,
+    activeTopic: patch.scene?.activeTopic || current.scene.activeTopic,
+    recentTurns: patch.scene?.recentTurns || current.scene.recentTurns,
+    confidence: patch.scene?.confidence ?? current.scene.confidence
+  });
+  const nextExpression = normalizeExpressionState({
+    ...current.expression,
+    ...(patch.expression && typeof patch.expression === 'object' ? patch.expression : {}),
+    replyPosture: patch.replyPosture || patch.expression?.replyPosture || current.expression.replyPosture,
+    warmth: patch.warmth || patch.expression?.warmth || current.expression.warmth,
+    guardedness: patch.guardedness || patch.expression?.guardedness || current.expression.guardedness,
+    initiative: patch.initiative || patch.expression?.initiative || current.expression.initiative,
+    jargonMode: patch.jargonMode || patch.expression?.jargonMode || current.expression.jargonMode,
+    cadenceHint: patch.cadenceHint || patch.expression?.cadenceHint || current.expression.cadenceHint,
+    styleAnchors: patch.styleAnchors || patch.expression?.styleAnchors || current.expression.styleAnchors,
+    confidence: patch.expression?.confidence ?? current.expression.confidence
+  });
+  const nextModuleState = normalizeModuleState({
+    ...current.moduleState,
+    ...(patch.moduleState && typeof patch.moduleState === 'object' ? patch.moduleState : {}),
+    activePersonaModules: patch.activePersonaModules || patch.moduleState?.activePersonaModules || current.moduleState.activePersonaModules,
+    switchReason: patch.switchReason || patch.moduleState?.switchReason || current.moduleState.switchReason
+  });
+
+  const next = normalizeShortTermState({
+    ...current,
+    ...patch,
+    interaction: nextInteraction,
+    scene: nextScene,
+    expression: nextExpression,
+    moduleState: nextModuleState,
+    phaseHint: nextInteraction.phaseHint || current.phaseHint,
+    sceneRef: nextScene.sceneKey || current.sceneRef,
+    confidence: Math.max(
+      normalizeConfidence(patch.confidence, current.confidence),
+      nextInteraction.confidence,
+      nextExpression.confidence,
+      nextScene.confidence
+    )
+  });
+  const derived = deriveShortTermFieldsFromContinuity(next);
+  return normalizeShortTermState({
+    ...next,
+    ...derived
+  });
 }
 
 function resolveShortTermSessionKey(userId, routeMeta = {}) {
@@ -356,25 +663,41 @@ function rehydrateShortTermMemoryAfterRestartIfNeeded(userId, question = '', use
 
 function buildStructuredSummaryText(shortTermState, summaryTokens) {
   const state = normalizeShortTermState(shortTermState);
+  const interaction = normalizeInteractionState(state.interaction);
+  const expression = normalizeExpressionState(state.expression);
+  const moduleState = normalizeModuleState(state.moduleState);
+  const scene = normalizeSceneState(state.scene);
   const sections = [];
 
-  if (state.carryOverUserTurn) {
-    sections.push(`[UnresolvedUserTurn] ${state.carryOverUserTurn}`);
+  if (interaction.carryOverUserTurn || state.carryOverUserTurn) {
+    sections.push(`[UnresolvedUserTurn] ${interaction.carryOverUserTurn || state.carryOverUserTurn}`);
   }
-  if (state.activeTopic) {
-    sections.push(`[ActiveTopic] ${state.activeTopic}`);
+  if (interaction.activeTopic || state.activeTopic) {
+    sections.push(`[ActiveTopic] ${interaction.activeTopic || state.activeTopic}`);
   }
-  if (state.openLoops.length > 0) {
-    sections.push(`[OpenLoops] ${state.openLoops.join(' | ')}`);
+  if (interaction.openLoops.length > 0 || state.openLoops.length > 0) {
+    sections.push(`[OpenLoops] ${(interaction.openLoops.length > 0 ? interaction.openLoops : state.openLoops).join(' | ')}`);
   }
-  if (state.assistantCommitments.length > 0) {
-    sections.push(`[AssistantCommitments] ${state.assistantCommitments.join(' | ')}`);
+  if (interaction.assistantCommitments.length > 0 || state.assistantCommitments.length > 0) {
+    sections.push(`[AssistantCommitments] ${(interaction.assistantCommitments.length > 0 ? interaction.assistantCommitments : state.assistantCommitments).join(' | ')}`);
   }
-  if (state.userConstraints.length > 0) {
-    sections.push(`[UserConstraints] ${state.userConstraints.join(' | ')}`);
+  if (interaction.userConstraints.length > 0 || state.userConstraints.length > 0) {
+    sections.push(`[UserConstraints] ${(interaction.userConstraints.length > 0 ? interaction.userConstraints : state.userConstraints).join(' | ')}`);
   }
   if (state.recentToolResults.length > 0) {
     sections.push(`[RecentToolResults] ${state.recentToolResults.join(' | ')}`);
+  }
+  if (expression.replyPosture) {
+    sections.push(`[ReplyPosture] ${expression.replyPosture}`);
+  }
+  if (expression.styleAnchors.length > 0) {
+    sections.push(`[StyleAnchors] ${expression.styleAnchors.join(' | ')}`);
+  }
+  if (moduleState.activePersonaModules.length > 0) {
+    sections.push(`[ActivePersonaModules] ${moduleState.activePersonaModules.join(' | ')}`);
+  }
+  if (scene.activeTopic) {
+    sections.push(`[SceneTopic] ${scene.activeTopic}`);
   }
   if (state.summary) {
     sections.push(`[Summary] ${state.summary}`);
@@ -572,6 +895,72 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
     userConstraints: mergeSharedStringList(sessionEntries, (state) => state.userConstraints, getStateMaxItems(), 120),
     recentToolResults: mergeSharedStringList(sessionEntries, (state) => state.recentToolResults, getToolResultMaxItems(), 160),
     carryOverUserTurn: pickSharedField(sessionEntries, (state) => state.carryOverUserTurn, getCarryOverMaxChars()),
+    interaction: {
+      activeTopic: pickSharedField(sessionEntries, (state) => state.interaction?.activeTopic || state.activeTopic, 180),
+      carryOverUserTurn: pickSharedField(sessionEntries, (state) => state.interaction?.carryOverUserTurn || state.carryOverUserTurn, getCarryOverMaxChars()),
+      openLoops: mergeSharedStringList(sessionEntries, (state) => state.interaction?.openLoops || state.openLoops, getStateMaxItems(), 120),
+      assistantCommitments: mergeSharedStringList(sessionEntries, (state) => state.interaction?.assistantCommitments || state.assistantCommitments, getStateMaxItems(), 120),
+      userConstraints: mergeSharedStringList(sessionEntries, (state) => state.interaction?.userConstraints || state.userConstraints, getStateMaxItems(), 120),
+      recentTurns: normalizeRecentTurns(
+        sessionEntries.flatMap((entry) => entry?.state?.interaction?.recentTurns || []),
+        getRecentTurnsMaxItems()
+      ),
+      phaseHint: pickSharedField(sessionEntries, (state) => state.interaction?.phaseHint || state.phaseHint, 48),
+      sourceFlags: mergeSharedStringList(sessionEntries, (state) => state.interaction?.sourceFlags || [], 8, 80),
+      confidence: Math.max(
+        ...sessionEntries.map((entry) => normalizeConfidence(entry?.state?.interaction?.confidence, 0)),
+        0
+      )
+    },
+    expression: {
+      replyPosture: pickSharedField(sessionEntries, (state) => state.expression?.replyPosture, 24) || DEFAULT_REPLY_POSTURE,
+      warmth: pickSharedField(sessionEntries, (state) => state.expression?.warmth, 32),
+      guardedness: pickSharedField(sessionEntries, (state) => state.expression?.guardedness, 32),
+      initiative: pickSharedField(sessionEntries, (state) => state.expression?.initiative, 32),
+      jargonMode: pickSharedField(sessionEntries, (state) => state.expression?.jargonMode, 32),
+      cadenceHint: pickSharedField(sessionEntries, (state) => state.expression?.cadenceHint, 48),
+      styleAnchors: mergeSharedStringList(sessionEntries, (state) => state.expression?.styleAnchors || [], getStyleAnchorMaxItems(), 96),
+      confidence: Math.max(
+        ...sessionEntries.map((entry) => normalizeConfidence(entry?.state?.expression?.confidence, 0)),
+        0
+      )
+    },
+    moduleState: {
+      activePersonaModules: mergeSharedStringList(sessionEntries, (state) => state.moduleState?.activePersonaModules || [], 2, 64),
+      stickyTurnsRemaining: Math.max(
+        ...sessionEntries.map((entry) => Math.max(0, Number(entry?.state?.moduleState?.stickyTurnsRemaining || 0) || 0)),
+        0
+      ),
+      switchReason: pickSharedField(sessionEntries, (state) => state.moduleState?.switchReason, 160),
+      lastSurface: pickSharedField(sessionEntries, (state) => state.moduleState?.lastSurface, 32),
+      lastTopicFingerprint: pickSharedField(sessionEntries, (state) => state.moduleState?.lastTopicFingerprint, 96),
+      lastUpdatedAt: Math.max(
+        ...sessionEntries.map((entry) => Number(entry?.state?.moduleState?.lastUpdatedAt || 0) || 0),
+        0
+      )
+    },
+    scene: {
+      sceneKey: pickSharedField(sessionEntries, (state) => state.scene?.sceneKey || state.sceneRef, 96),
+      activeTopic: pickSharedField(sessionEntries, (state) => state.scene?.activeTopic, 180),
+      atmosphere: pickSharedField(sessionEntries, (state) => state.scene?.atmosphere, 120),
+      activePair: pickSharedField(sessionEntries, (state) => state.scene?.activePair, 120),
+      quoteAnchor: pickSharedField(sessionEntries, (state) => state.scene?.quoteAnchor, 180),
+      jargonHints: mergeSharedStringList(sessionEntries, (state) => state.scene?.jargonHints || [], 4, 80),
+      recentTurns: normalizeRecentTurns(
+        sessionEntries.flatMap((entry) => entry?.state?.scene?.recentTurns || []),
+        4
+      ),
+      confidence: Math.max(
+        ...sessionEntries.map((entry) => normalizeConfidence(entry?.state?.scene?.confidence, 0)),
+        0
+      )
+    },
+    phaseHint: pickSharedField(sessionEntries, (state) => state.phaseHint || state.interaction?.phaseHint, 48),
+    sceneRef: pickSharedField(sessionEntries, (state) => state.sceneRef || state.scene?.sceneKey, 96),
+    confidence: Math.max(
+      ...sessionEntries.map((entry) => normalizeConfidence(entry?.state?.confidence, 0)),
+      0
+    ),
     presence: (sessionEntries.find((entry) => entry?.isCurrent)?.state || defaultShortTermState()).presence
   });
   const summaryText = buildStructuredSummaryText(sharedState, settings.summaryMaxTokens);
@@ -715,7 +1104,7 @@ function parseStructuredCompressionOutput(output = '') {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
-    return normalizeShortTermState(parsed);
+    return applyPersonaContinuityDelta(defaultShortTermState(), parsed);
   } catch (_) {
     return null;
   }
@@ -723,35 +1112,14 @@ function parseStructuredCompressionOutput(output = '') {
 
 function mergeStructuredState(currentState, nextState, summaryTokens) {
   const current = normalizeShortTermState(currentState);
-  const next = normalizeShortTermState(nextState);
-  return {
+  const next = applyPersonaContinuityDelta(current, nextState);
+  return normalizeShortTermState({
     ...current,
-    activeTopic: next.activeTopic || current.activeTopic,
-    openLoops: normalizeStringList(
-      [...(next.openLoops || []), ...(current.openLoops || [])],
-      getStateMaxItems(),
-      120
-    ),
-    assistantCommitments: normalizeStringList(
-      [...(next.assistantCommitments || []), ...(current.assistantCommitments || [])],
-      getStateMaxItems(),
-      120
-    ),
-    userConstraints: normalizeStringList(
-      [...(next.userConstraints || []), ...(current.userConstraints || [])],
-      getStateMaxItems(),
-      120
-    ),
-    recentToolResults: normalizeStringList(
-      [...(next.recentToolResults || []), ...(current.recentToolResults || [])],
-      getToolResultMaxItems(),
-      160
-    ),
-    carryOverUserTurn: next.carryOverUserTurn || current.carryOverUserTurn,
+    ...next,
     summary: mergeCompressedSummary(current.summary, next.summary, summaryTokens),
     lastCompressedAt: Date.now(),
     rounds: Number(current.rounds || 0)
-  };
+  });
 }
 
 async function compressShortTermHistoryIfNeeded(userId, userInfo = {}, deps = {}) {
@@ -841,6 +1209,17 @@ function appendShortTermHistory(userId, userContent, assistantContent, userInfo 
 
   const state = ensureShortTermMemoryState(key, deps.shortTermMemory);
   state.carryOverUserTurn = '';
+  state.interaction = normalizeInteractionState({
+    ...state.interaction,
+    activeTopic: state.interaction?.activeTopic || state.activeTopic || trimShortText(userContent, 180),
+    carryOverUserTurn: '',
+    recentTurns: normalizeRecentTurns(
+      [...(state.interaction?.recentTurns || []), { role: 'user', content: userContent }, { role: 'assistant', content: assistantContent }],
+      getRecentTurnsMaxItems()
+    )
+  });
+  state.expression = normalizeExpressionState(state.expression);
+  state.moduleState = normalizeModuleState(state.moduleState);
 
   return historyStore[key];
 }
@@ -854,13 +1233,23 @@ function buildStructuredCompressionPrompt(existingState, summaryTokens) {
     assistantCommitments: state.assistantCommitments,
     userConstraints: state.userConstraints,
     recentToolResults: state.recentToolResults,
-    carryOverUserTurn: state.carryOverUserTurn
+    carryOverUserTurn: state.carryOverUserTurn,
+    interaction: state.interaction,
+    scene: state.scene,
+    expression: state.expression,
+    moduleState: state.moduleState,
+    phaseHint: state.phaseHint,
+    sceneRef: state.sceneRef,
+    confidence: state.confidence
   };
   return [
     '你是对话短期上下文压缩器。',
-    '优先保留：用户约束、助手承诺、未完成事项、最近工具结论、最近主线话题。',
+    '优先保留：用户约束、助手承诺、未完成事项、最近工具结论、最近主线话题、当前回复姿态、当前场景气氛、当前 persona modules。',
     '返回严格 JSON，不要解释，不要 markdown。',
-    '字段固定：summary, activeTopic, openLoops, assistantCommitments, userConstraints, recentToolResults, carryOverUserTurn。',
+    '字段固定：summary, activeTopic, openLoops, assistantCommitments, userConstraints, recentToolResults, carryOverUserTurn, interaction, scene, expression, moduleState, phaseHint, sceneRef, confidence。',
+    'expression.replyPosture 只能是 light, playful, gentle, reserved, focused, comforting 之一。',
+    'styleAnchors 只保留 2 到 4 条短语级锚点。',
+    '一次偶发玩笑或角色扮演不要直接写成稳定表达态，除非多轮稳定或有显式反馈。',
     `summary 控制在约 ${summaryTokens} tokens 内。`,
     'openLoops / assistantCommitments / userConstraints 最多 4 条，recentToolResults 最多 3 条。',
     `已有结构化状态：${JSON.stringify(compactState)}`
@@ -891,5 +1280,16 @@ module.exports = {
   appendShortTermHistory,
   getShortTermCompressionSettings,
   rehydrateShortTermMemoryAfterRestartIfNeeded,
-  buildSharedShortTermSignature
+  buildSharedShortTermSignature,
+  resolveShortTermSceneKey,
+  defaultInteractionState,
+  normalizeInteractionState,
+  defaultSceneState,
+  normalizeSceneState,
+  defaultExpressionState,
+  normalizeExpressionState,
+  defaultModuleState,
+  normalizeModuleState,
+  deriveShortTermFieldsFromContinuity,
+  applyPersonaContinuityDelta
 };

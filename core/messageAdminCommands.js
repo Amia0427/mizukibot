@@ -103,7 +103,8 @@ function createMessageAdminCoordinator(deps = {}) {
       userId: senderId,
       groupId,
       trigger: 'manual_sr',
-      summary: summaryText
+      summary: summaryText,
+      structured: summaryResult?.structured || null
     });
 
     if (saved.cooldownLimited) {

@@ -39,6 +39,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { isUnsafeHttpUrl } = require('../utils/networkSafety');
 const { formatContextStats } = require('../utils/contextInspector');
+const { searchRecipes } = require('../utils/howtocookLocalSearch');
 const {
   formatEventsAsText,
   formatGuidesAsText,
@@ -548,6 +549,10 @@ const TOOL_EXECUTORS = {
     const keywords = args.keywords ?? args.query ?? '椁愬巺';
     const city = args.city ?? '閲嶅簡';
     return tools1.search_nearby_places(keywords, city);
+  },
+
+  local_howtocook_recipe_search: async (args = {}) => {
+    return searchRecipes(args);
   },
 
   search_academic_paper: async (args = {}) => {
