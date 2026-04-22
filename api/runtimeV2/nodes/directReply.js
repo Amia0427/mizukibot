@@ -139,6 +139,7 @@ function createDirectReplyNode(deps = {}) {
   }
 
   return async function directReplyNode(state) {
+    const directReplyStartedAt = Date.now();
     const request = normalizeObject(state.request, {});
     const events = [createEvent('node_start', { node: 'direct_reply', mode: state.execution.mode })];
     const isReviewRoute = isReviewMode(request.reviewMode);
@@ -217,7 +218,9 @@ function createDirectReplyNode(deps = {}) {
       effectiveAllowedTools: directEffectiveAllowedTools
     });
 
+    let toolProbeDurationMs = 0;
     if (shouldProbeToolCalls) {
+      const toolProbeStartedAt = Date.now();
       try {
         const firstAssistantMessage = normalizeMessageForToolLoop(await requestAssistantMessageImpl(messagesToSend, {
           ...directContext,
@@ -263,6 +266,17 @@ function createDirectReplyNode(deps = {}) {
               currentNode: 'direct_reply',
               toolResults: [],
               memoryCliTurn: nextMemoryCliTurn,
+              latencyBreakdown: {
+                ...normalizeObject(state.execution?.latencyBreakdown, {}),
+                model: {
+                  ...(normalizeObject(state.execution?.latencyBreakdown?.model, {})),
+                  firstAssistantReused: false,
+                  hadToolCalls: true,
+                  mode: request.streaming ? 'streaming' : 'non_stream',
+                  tool_probe_ms: Math.max(0, Date.now() - toolProbeStartedAt),
+                  total_direct_reply_ms: Math.max(0, Date.now() - directReplyStartedAt)
+                }
+              },
               directChatToolCompile: {
                 enabled: true,
                 assistantMessage: firstAssistantMessage,
@@ -373,6 +387,8 @@ function createDirectReplyNode(deps = {}) {
             })
           ];
         }
+      } finally {
+        toolProbeDurationMs = Math.max(0, Date.now() - toolProbeStartedAt);
       }
     } else if (plannerSingleAuthority) {
       try {
@@ -586,7 +602,9 @@ function createDirectReplyNode(deps = {}) {
           model: {
             firstAssistantReused,
             hadToolCalls: Boolean(compiledToolPlan),
-            mode: request.streaming ? 'streaming' : 'non_stream'
+            mode: request.streaming ? 'streaming' : 'non_stream',
+            tool_probe_ms: toolProbeDurationMs,
+            total_direct_reply_ms: Math.max(0, Date.now() - directReplyStartedAt)
           }
         }
       },

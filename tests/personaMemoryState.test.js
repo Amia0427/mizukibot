@@ -63,9 +63,20 @@ module.exports = (async () => {
       activeTopic: '部署',
       carryOverUserTurn: '上次还没回答部署步骤',
       summary: '在讨论 Linux 服务器部署',
+      phaseHint: 'phase2',
       openLoops: ['补充 systemd 配置'],
       assistantCommitments: ['给出部署命令'],
       userConstraints: ['先给结论'],
+      expressionState: {
+        replyPosture: 'focused',
+        styleAnchors: ['先给结论', '直接一点'],
+        confidence: 0.86
+      },
+      moduleState: {
+        activePersonaModules: ['scene_private_chat'],
+        stickyTurnsRemaining: 3,
+        switchReason: 'new_activation'
+      },
       recentMessages: [
         { role: 'user', content: '继续上次部署问题' },
         { role: 'assistant', content: '我先给你结论' }
@@ -107,8 +118,13 @@ module.exports = (async () => {
 
   assert.strictEqual(state.continuityState.activeTopic, '部署');
   assert.ok(state.continuityState.openLoops.includes('补充 systemd 配置'));
+  assert.ok(String(state.continuityState.replyPosture || '').trim());
+  assert.ok(state.continuityState.styleAnchors.includes('先给结论'));
+  assert.ok(state.moduleState.activePersonaModules.includes('scene_private_chat'));
+  assert.ok(String(state.expressionState.replyPosture.value || '').trim());
   assert.strictEqual(state.expressionState.jargon.value, 'group_only');
   assert.strictEqual(state.expressionState.jargon.source, 'surface_policy');
+  assert.ok(renderPersonaMemoryPrompt(state, 'direct_chat').systemMessages.some((item) => item.content.includes('reply_posture=')));
 
   const rendered = renderPersonaMemoryPrompt(state, 'qzone_diary');
   const renderedText = rendered.systemMessages.map((item) => item.content).join('\n');

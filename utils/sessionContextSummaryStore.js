@@ -2,6 +2,28 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { getJsonStore } = require('./storeRegistry');
+function clampList(values = [], limit = 4, itemMaxChars = 120) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(values) ? values : []) {
+    const text = clampText(raw, itemMaxChars);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+    if (out.length >= Math.max(1, Number(limit) || 1)) break;
+  }
+  return out;
+}
+
+function normalizeRecentTurns(values = []) {
+  return (Array.isArray(values) ? values : [])
+    .map((item) => ({
+      role: String(item?.role || '').trim().toLowerCase(),
+      content: clampText(item?.content || item?.text, 220)
+    }))
+    .filter((item) => (item.role === 'user' || item.role === 'assistant') && item.content)
+    .slice(-4);
+}
 
 function ensureParentDir(filePath = '') {
   const dir = path.dirname(String(filePath || ''));
@@ -38,13 +60,63 @@ function clampText(value, maxChars) {
 }
 
 function normalizeSummaryItem(item = {}) {
+  const structured = item.structured && typeof item.structured === 'object' ? item.structured : {};
   return {
     sessionKey: String(item.sessionKey || '').trim(),
     userId: String(item.userId || '').trim(),
     groupId: String(item.groupId || '').trim(),
     createdAt: Math.max(0, Number(item.createdAt || 0) || 0),
     trigger: String(item.trigger || 'manual_sr').trim() || 'manual_sr',
-    summary: clampText(item.summary, config.SESSION_CONTEXT_SUMMARY_MAX_CHARS)
+    summary: clampText(item.summary, config.SESSION_CONTEXT_SUMMARY_MAX_CHARS),
+    structured: {
+      activeTopic: clampText(structured.activeTopic, 180),
+      carryOverUserTurn: clampText(structured.carryOverUserTurn, 220),
+      openLoops: clampList(structured.openLoops, 4, 120),
+      assistantCommitments: clampList(structured.assistantCommitments, 4, 120),
+      userConstraints: clampList(structured.userConstraints, 4, 120),
+      recentTurns: normalizeRecentTurns(structured.recentTurns),
+      interaction: {
+        activeTopic: clampText(structured.interaction?.activeTopic, 180),
+        carryOverUserTurn: clampText(structured.interaction?.carryOverUserTurn, 220),
+        openLoops: clampList(structured.interaction?.openLoops, 4, 120),
+        assistantCommitments: clampList(structured.interaction?.assistantCommitments, 4, 120),
+        userConstraints: clampList(structured.interaction?.userConstraints, 4, 120),
+        recentTurns: normalizeRecentTurns(structured.interaction?.recentTurns),
+        phaseHint: clampText(structured.interaction?.phaseHint, 48),
+        sourceFlags: clampList(structured.interaction?.sourceFlags, 8, 80),
+        confidence: Math.max(0, Math.min(1, Number(structured.interaction?.confidence || 0) || 0))
+      },
+      scene: {
+        sceneKey: clampText(structured.scene?.sceneKey, 96),
+        activeTopic: clampText(structured.scene?.activeTopic, 180),
+        atmosphere: clampText(structured.scene?.atmosphere, 120),
+        activePair: clampText(structured.scene?.activePair, 120),
+        quoteAnchor: clampText(structured.scene?.quoteAnchor, 180),
+        jargonHints: clampList(structured.scene?.jargonHints, 4, 80),
+        recentTurns: normalizeRecentTurns(structured.scene?.recentTurns),
+        confidence: Math.max(0, Math.min(1, Number(structured.scene?.confidence || 0) || 0))
+      },
+      expression: {
+        replyPosture: clampText(structured.expression?.replyPosture, 24),
+        warmth: clampText(structured.expression?.warmth, 24),
+        guardedness: clampText(structured.expression?.guardedness, 24),
+        initiative: clampText(structured.expression?.initiative, 24),
+        jargonMode: clampText(structured.expression?.jargonMode, 24),
+        cadenceHint: clampText(structured.expression?.cadenceHint, 48),
+        styleAnchors: clampList(structured.expression?.styleAnchors, 4, 96),
+        confidence: Math.max(0, Math.min(1, Number(structured.expression?.confidence || 0) || 0))
+      },
+      moduleState: {
+        activePersonaModules: clampList(structured.moduleState?.activePersonaModules, 2, 64),
+        stickyTurnsRemaining: Math.max(0, Math.min(5, Number(structured.moduleState?.stickyTurnsRemaining || 0) || 0)),
+        switchReason: clampText(structured.moduleState?.switchReason, 160),
+        lastSurface: clampText(structured.moduleState?.lastSurface, 32),
+        lastTopicFingerprint: clampText(structured.moduleState?.lastTopicFingerprint, 96),
+        lastUpdatedAt: Math.max(0, Number(structured.moduleState?.lastUpdatedAt || 0) || 0)
+      },
+      sourceFlags: clampList(structured.sourceFlags, 8, 80),
+      confidence: Math.max(0, Math.min(1, Number(structured.confidence || 0) || 0))
+    }
   };
 }
 

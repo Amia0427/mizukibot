@@ -1,32 +1,33 @@
 {
   "mcpServers": {
     "fetch": {
-      "command": "uvx",
+      "command": "node",
       "args": [
-        "mcp-server-fetch"
+        "scripts/local-mcp-server.js",
+        "fetch"
       ]
     },
     "amap-maps": {
-      "command": "npx",
+      "command": "node",
       "args": [
-        "-y",
-        "@amap/amap-maps-mcp-server"
+        "scripts/local-mcp-server.js",
+        "amap-maps"
       ],
       "env": {
         "AMAP_MAPS_API_KEY": "e9fda05366ed433e82dbdef2f20ccf43"
       }
     },
     "bing-search": {
-      "command": "npx",
+      "command": "node",
       "args": [
-        "-y",
-        "bing-cn-mcp"
+        "scripts/local-mcp-server.js",
+        "bing-search"
       ]
     },
     "howtocook-mcp": {
-      "command": "npx",
+      "command": "node",
       "args": [
-        "-y",
+        "scripts/local-mcp-server.js",
         "howtocook-mcp"
       ]
     }

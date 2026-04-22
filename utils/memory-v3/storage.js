@@ -2,7 +2,7 @@ const config = require('../../config');
 const { safeReadJson, safeReadJsonLines } = require('./helpers');
 
 function defaultSessionProjection() {
-  return { version: 1, updatedAt: 0, sessions: {} };
+  return { version: 2, updatedAt: 0, sessions: {} };
 }
 
 function defaultProfileProjection() {

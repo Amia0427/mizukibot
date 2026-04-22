@@ -48,6 +48,12 @@ function buildInboundMessageContext(input = {}) {
     directedContext: source.directedContext && typeof source.directedContext === 'object'
       ? { ...source.directedContext }
       : null,
+    threadId: String(
+      source.threadId
+      || source.messageMeta?.threadId
+      || source.messageMeta?.thread_id
+      || ''
+    ).trim(),
     messageMeta: source.messageMeta && typeof source.messageMeta === 'object'
       ? { ...source.messageMeta }
       : {}

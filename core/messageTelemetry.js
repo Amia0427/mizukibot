@@ -55,6 +55,11 @@ function createReplyTelemetryBridge(runtimeConfig = {}) {
     topRouteType = '',
     routeMeta = null
   } = {}) {
+    const explicitThreadId = String(
+      routeMeta?.threadId
+      || routeMeta?.thread_id
+      || ''
+    ).trim();
     const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object'
       ? {
           ...routeMeta,
@@ -70,7 +75,7 @@ function createReplyTelemetryBridge(runtimeConfig = {}) {
           routePolicyKey: String(routePolicyKey || '').trim()
         };
     const sessionKey = resolveShortTermSessionKey(senderId, normalizedRouteMeta);
-    const threadId = resolveThreadId({
+    const threadId = explicitThreadId || resolveThreadId({
       userId: senderId,
       routePolicyKey,
       reviewMode: '',
@@ -118,7 +123,13 @@ function createMessageTelemetryCoordinator(deps = {}) {
       : {};
     const userId = String(routeMeta.userId || routeMeta.user_id || '').trim();
     const sessionKey = resolveShortTermSessionKey(userId, routeMeta);
-    const threadId = resolveThreadId({
+    const explicitThreadId = String(
+      replyOptions?.threadId
+      || routeMeta.threadId
+      || routeMeta.thread_id
+      || ''
+    ).trim();
+    const threadId = explicitThreadId || resolveThreadId({
       userId,
       routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
       reviewMode: '',

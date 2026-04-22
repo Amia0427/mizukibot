@@ -106,10 +106,13 @@ function createMessageDispatchCoordinator(deps = {}) {
           routeMeta: {
             ...(route.meta || {}),
             groupId,
+            messageId: String(sourceMessageId || '').trim(),
+            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
             topRouteType: routeExecutionPlan.topRouteType,
             routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
             allowedTools: routeExecutionPlan.allowedTools
-          }
+          },
+          threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
         if (fallbackModelConfig) {
@@ -234,10 +237,13 @@ function createMessageDispatchCoordinator(deps = {}) {
           routeMeta: {
             ...(route.meta || {}),
             groupId,
+            messageId: String(sourceMessageId || '').trim(),
+            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
             topRouteType: routeExecutionPlan.topRouteType,
             routePolicyKey: getEffectivePolicyKey(routeExecutionPlan)
           },
-          disableStream: disableStreamForReply
+          disableStream: disableStreamForReply,
+          threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
         if (fallbackModelConfig) {

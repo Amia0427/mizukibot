@@ -12,7 +12,8 @@ const {
 } = require('./context/service');
 const {
   buildPlan,
-  synthesizeFromPlan
+  synthesizeFromPlan,
+  requiresToolEvidence
 } = require('./planning/service');
 const { sanitizeUserFacingText } = require('../../utils/userFacingText');
 const {
@@ -146,6 +147,7 @@ const {
   updateMemoryCliTurnStateAfterError,
   updateMemoryCliTurnStateAfterResult
 } = require('../../utils/memoryCliTurnPolicy');
+const { warmMcpRegistry } = require('../toolRegistry');
 const {
   classifyRecallFacet,
   shouldBiasToContinuity,
@@ -503,6 +505,16 @@ function createRuntime(options = {}) {
   const verifyExecutionImpl = runtimeOptions.verifyExecutionResult || verifyExecutionResult;
   const buildRepairPlanImpl = runtimeOptions.buildRepairPlan || buildRepairPlan;
   const postReplyJobQueue = runtimeOptions.postReplyJobQueue || getPostReplyJobQueue();
+
+  let mcpWarmPromise = null;
+  if (config.MCP_WARM_ON_RUNTIME_INIT) {
+    mcpWarmPromise = warmMcpRegistry({ source: 'runtime_init' });
+    if (!config.MCP_WARM_BLOCKING) {
+      mcpWarmPromise.catch((error) => {
+        console.error('[mcp] runtime warmup failed:', error?.message || error);
+      });
+    }
+  }
 
   function ensureOutputStream(output = {}, mode = 'none') {
     const current = normalizeObject(output.stream, {});
@@ -1495,6 +1507,7 @@ function createRuntime(options = {}) {
     rebuildFinalPlanFromSteps,
     buildExecLogsFromSteps,
     mergeAllowedToolsWithMemoryCli,
+    requiresToolEvidence,
     saveAndEmit,
     config
   });
@@ -1586,6 +1599,23 @@ function createRuntime(options = {}) {
       streaming: Boolean(!options.disableStream && typeof options.onDelta === 'function')
     };
     const init = createInitialState(question, userInfo, userId, customPrompt, imageUrl, requestOptions);
+    const mcpWarmWaitStartedAt = Date.now();
+    if (config.MCP_WARM_BLOCKING && mcpWarmPromise) {
+      try {
+        await mcpWarmPromise;
+      } catch (_) {}
+    }
+    const mcpWarmWaitMs = Math.max(0, Date.now() - mcpWarmWaitStartedAt);
+    init.execution = {
+      ...normalizeObject(init.execution, {}),
+      latencyBreakdown: {
+        ...normalizeObject(init.execution?.latencyBreakdown, {}),
+        prepare: {
+          ...normalizeObject(init.execution?.latencyBreakdown?.prepare, {}),
+          mcp_warm_wait_ms: mcpWarmWaitMs
+        }
+      }
+    };
     const out = await app.invoke(init);
     options.streamHadOutput = Boolean(out?.output?.stream?.hadOutput);
     options.streamCompleted = Boolean(out?.output?.stream?.completed);
@@ -1626,7 +1656,8 @@ function createRuntime(options = {}) {
     createInitialState,
     routeMode: routeAfterRoute,
     store,
-    runPersistInBackgroundFromCheckpoint
+    runPersistInBackgroundFromCheckpoint,
+    mcpWarmPromise
   };
 }
 
@@ -1639,6 +1670,11 @@ function getRuntime() {
   return runtimeSingleton;
 }
 
+function resetRuntime() {
+  runtimeSingleton = null;
+  return getRuntime();
+}
+
 async function askAIByGraphV2(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
   return getRuntime().askAIByGraphV2(question, userInfo, userId, customPrompt, imageUrl, options);
 }
@@ -1647,5 +1683,6 @@ module.exports = {
   askAIByGraphV2,
   createRuntime,
   createInitialState,
-  getRuntime
+  getRuntime,
+  resetRuntime
 };

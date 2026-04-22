@@ -1,7 +1,14 @@
 const hostPath = require.resolve('./runtimeV2/host');
-delete require.cache[hostPath];
+const config = require('../config');
+
+if (config.AGENT_DEV_HOT_RELOAD) {
+  delete require.cache[hostPath];
+}
 
 function getHost() {
+  if (config.AGENT_DEV_HOT_RELOAD) {
+    delete require.cache[hostPath];
+  }
   return require('./runtimeV2/host');
 }
 
@@ -21,6 +28,10 @@ function getRuntime() {
   return getHost().getRuntime();
 }
 
+function resetRuntime() {
+  return getHost().resetRuntime();
+}
+
 async function runPersistInBackgroundFromCheckpoint(threadId = '') {
   return getHost().getRuntime().runPersistInBackgroundFromCheckpoint(threadId);
 }
@@ -30,5 +41,6 @@ module.exports = {
   createRuntime,
   createInitialState,
   getRuntime,
+  resetRuntime,
   runPersistInBackgroundFromCheckpoint
 };

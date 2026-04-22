@@ -3,12 +3,12 @@ const crypto = require('crypto');
 const config = require('../../config');
 const {
   ensureDir,
-  appendLine,
   safeReadJsonLines,
   normalizeText,
   clampText,
   normalizeArray
 } = require('./helpers');
+const { getJsonLineWriter } = require('../storeRegistry');
 
 const EVENT_TYPES = new Set([
   'turn_received',
@@ -99,7 +99,10 @@ function normalizeMemoryEvent(input = {}) {
 
 async function appendMemoryEvent(event = {}) {
   const normalized = normalizeMemoryEvent(event);
-  appendLine(eventFileForTs(normalized.ts), JSON.stringify(normalized));
+  const filePath = eventFileForTs(normalized.ts);
+  const writer = getJsonLineWriter(filePath);
+  writer.append(normalized);
+  writer.flushSync();
   return normalized;
 }
 

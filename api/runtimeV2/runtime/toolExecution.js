@@ -34,11 +34,20 @@ function isUnresolvedMemoryOpenCommand(commandText = '') {
 }
 
 const readOnlyToolCache = new Map();
+const readOnlyToolInflight = new Map();
 
 function pruneReadOnlyToolCache(now = Date.now()) {
   for (const [key, value] of readOnlyToolCache.entries()) {
     if (!value || Number(value.expiresAt || 0) <= now) {
       readOnlyToolCache.delete(key);
+    }
+  }
+}
+
+function pruneReadOnlyToolInflight() {
+  for (const [key, entry] of readOnlyToolInflight.entries()) {
+    if (!entry || entry.settled === true) {
+      readOnlyToolInflight.delete(key);
     }
   }
 }
@@ -131,6 +140,47 @@ function createToolExecutionHelpers(deps = {}) {
         ...normalizeObject(envelope, {})
       }
     });
+  }
+
+  function canInflightDedupe(step = {}, normalizedArgs = {}, policy = {}) {
+    if (!config.READONLY_TOOL_INFLIGHT_DEDUP_ENABLED) return false;
+    if (isSideEffectPolicy(policy)) return false;
+    const toolName = normalizeText(step.tool);
+    if (toolName === 'web_search' || toolName === 'web_fetch' || toolName === 'get_context_stats') {
+      return true;
+    }
+    if (toolName === 'memory_cli') {
+      const commandText = normalizeText(normalizedArgs.command);
+      return /^mem (search|open)\b/i.test(commandText);
+    }
+    return false;
+  }
+
+  async function runWithInflightDedupe(step = {}, state = {}, normalizedArgs = {}, policy = {}, taskFactory = null) {
+    if (!canInflightDedupe(step, normalizedArgs, policy) || typeof taskFactory !== 'function') {
+      return taskFactory();
+    }
+    pruneReadOnlyToolInflight();
+    const key = buildReadOnlyToolCacheKey(step, state, normalizedArgs);
+    const existing = readOnlyToolInflight.get(key);
+    if (existing?.promise) {
+      const envelope = await existing.promise;
+      return {
+        ...normalizeObject(envelope, {}),
+        inflightDedupHit: true
+      };
+    }
+    const entry = {
+      settled: false,
+      promise: Promise.resolve()
+        .then(() => taskFactory())
+        .finally(() => {
+          entry.settled = true;
+          readOnlyToolInflight.delete(key);
+        })
+    };
+    readOnlyToolInflight.set(key, entry);
+    return entry.promise;
   }
 
   function isWriteLikeCapability(capability = '') {
@@ -505,27 +555,36 @@ function createToolExecutionHelpers(deps = {}) {
           return envelope;
         }
 
-        const out = await executor({
+        const preparedInputs = {
           ...normalizedArgs,
-          command: decision.preparedCommand || normalizedArgs.command,
-          __context: buildToolContext(state, toolContextOverrides)
-        });
-        const envelope = computeToolEnvelope({
-          ...step,
-          inputs: {
-            ...normalizedArgs,
-            command: decision.preparedCommand || normalizedArgs.command
-          }
-        }, out, policy);
-        const resultEnvelope = {
-          ...envelope,
-          memoryCliTurn: createMemoryCliTurnState(
-            updateMemoryCliTurnStateAfterResult(executionState.memoryCliTurn, decision.parsed, out)
-          ),
-          invalidateMemoryPrompt: true,
-          repairApplied: Boolean(decision.repairApplied),
-          repairStrategy: normalizeArray(decision.repairStrategy)
+          command: decision.preparedCommand || normalizedArgs.command
         };
+        const resultEnvelope = await runWithInflightDedupe(
+          { ...step, inputs: preparedInputs },
+          state,
+          preparedInputs,
+          policy,
+          async () => {
+            const out = await executor({
+              ...normalizedArgs,
+              command: decision.preparedCommand || normalizedArgs.command,
+              __context: buildToolContext(state, toolContextOverrides)
+            });
+            const envelope = computeToolEnvelope({
+              ...step,
+              inputs: preparedInputs
+            }, out, policy);
+            return {
+              ...envelope,
+              memoryCliTurn: createMemoryCliTurnState(
+                updateMemoryCliTurnStateAfterResult(executionState.memoryCliTurn, decision.parsed, out)
+              ),
+              invalidateMemoryPrompt: true,
+              repairApplied: Boolean(decision.repairApplied),
+              repairStrategy: normalizeArray(decision.repairStrategy)
+            };
+          }
+        );
         maybeCaptureToolFailure(resultEnvelope, { ...step, inputs: normalizedArgs }, state);
         logToolExecution(resultEnvelope, { ...step, inputs: normalizedArgs }, state, {
           node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
@@ -547,11 +606,19 @@ function createToolExecutionHelpers(deps = {}) {
         return envelope;
       }
 
-      const out = await executor({
-        ...normalizedArgs,
-        __context: buildToolContext(state, toolContextOverrides)
-      });
-      const envelope = computeToolEnvelope({ ...step, inputs: normalizedArgs }, out, policy);
+      const envelope = await runWithInflightDedupe(
+        { ...step, inputs: normalizedArgs },
+        state,
+        normalizedArgs,
+        policy,
+        async () => {
+          const out = await executor({
+            ...normalizedArgs,
+            __context: buildToolContext(state, toolContextOverrides)
+          });
+          return computeToolEnvelope({ ...step, inputs: normalizedArgs }, out, policy);
+        }
+      );
       maybeCaptureToolFailure(envelope, { ...step, inputs: normalizedArgs }, state);
       logToolExecution(envelope, { ...step, inputs: normalizedArgs }, state, {
         node: runtimeOptions.node || state.execution?.currentNode || 'unknown',

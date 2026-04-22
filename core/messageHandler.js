@@ -2447,11 +2447,27 @@ function createMessageHandler({
       ))
       : { images: [], meta: {} };
     const visualImageCollection = Array.isArray(visualImageCollectionResult?.images) ? visualImageCollectionResult.images : [];
+    const currentMessageImageUrl = String(
+      effectiveMsg?.message?.find?.((item) => String(item?.type || '').trim() === 'image')?.data?.url
+      || ''
+    ).trim();
+    const effectiveVisualCollection = visualImageCollection.length > 0
+      ? visualImageCollection
+      : (
+        currentMessageImageUrl
+          ? [{
+              imageIndex: 0,
+              source: 'current',
+              url: currentMessageImageUrl,
+              label: 'current_1'
+            }]
+          : []
+      );
     const effectiveVisualInput = visualImageCollection.length > 0
       ? (String(visualImageCollection[0]?.url || '').trim()
         || resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText))
-      : '';
-    const visualCacheRefCount = countCachedVisualRefs(visualImageCollection);
+      : currentMessageImageUrl;
+    const visualCacheRefCount = countCachedVisualRefs(effectiveVisualCollection);
     const directedScene = String(directedContext?.scene || '').trim();
     const replyToBotRequested = directedScene === 'reply_to_bot';
     const replyToBotRecentWindowMs = Math.max(
@@ -2480,14 +2496,14 @@ function createMessageHandler({
     let visualContext = visualImageCollection.length > 0
       ? {
           hasVisualInput: true,
-          worker: {
-            name: 'vision-caption-worker',
-            succeeded: false,
-            fallbackUsed: true,
-            fallbackReason: 'not_started',
-            imageCount: visualImageCollection.length
-          },
-          images: visualImageCollection.map((item, index) => ({
+        worker: {
+          name: 'vision-caption-worker',
+          succeeded: false,
+          fallbackUsed: true,
+          fallbackReason: 'not_started',
+          imageCount: effectiveVisualCollection.length
+        },
+          images: effectiveVisualCollection.map((item, index) => ({
             imageIndex: index,
             source: item.source,
             url: item.url,
@@ -2506,14 +2522,14 @@ function createMessageHandler({
         }
       : null;
 
-    if (visualImageCollection.length > 0) {
+    if (effectiveVisualCollection.length > 0) {
       appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
         stage: 'vision_input_selected',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
         groupId: String(groupId || '').trim(),
         userId: String(senderId || '').trim(),
         chatType,
-        imageCount: visualImageCollection.length,
+        imageCount: effectiveVisualCollection.length,
         currentImageCount: Number(visualImageCollectionResult.meta?.currentImageCount || 0) || 0,
         replyImageCount: Number(visualImageCollectionResult.meta?.replyImageCount || 0) || 0,
         forwardImageCount: Number(visualImageCollectionResult.meta?.forwardImageCount || 0) || 0,
@@ -2530,11 +2546,11 @@ function createMessageHandler({
       });
     }
 
-    if (visualImageCollection.length > 0) {
+    if (effectiveVisualCollection.length > 0) {
       const visionStartedAt = Date.now();
       const captionResult = await visionCaptionWorkerRunner({
         originalUserText: effectiveIntentText,
-        images: visualImageCollection,
+        images: effectiveVisualCollection,
         quotePriorityMode: String(directedContext?.quotePriority?.mode || '').trim(),
         quotePriorityReason: String(directedContext?.quotePriority?.reason || '').trim()
       });
@@ -2553,7 +2569,7 @@ function createMessageHandler({
           groupId: String(groupId || '').trim(),
           userId: String(senderId || '').trim(),
           chatType,
-          imageCount: visualImageCollection.length,
+          imageCount: effectiveVisualCollection.length,
           cacheRefCount: visualCacheRefCount,
           durationMs: Math.max(0, Date.now() - visionStartedAt),
           fallbackUsed: false,
@@ -2572,7 +2588,7 @@ function createMessageHandler({
           groupId: String(groupId || '').trim(),
           userId: String(senderId || '').trim(),
           chatType,
-          imageCount: visualImageCollection.length,
+          imageCount: effectiveVisualCollection.length,
           cacheRefCount: visualCacheRefCount,
           durationMs: Math.max(0, Date.now() - visionStartedAt),
           fallbackReason: String(captionResult.fallbackReason || 'worker_failed').trim(),
@@ -2584,6 +2600,27 @@ function createMessageHandler({
       }
     }
     const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
+    const stableThreadId = resolveThreadId({
+      userId: senderId,
+      routePolicyKey: '',
+      reviewMode: '',
+      routeMeta: {
+        userId: String(senderId || '').trim(),
+        groupId: isPrivateChatType(chatType) ? '' : String(groupId || '').trim(),
+        chatType,
+        messageId: String(effectiveMsg?.message_id || msg?.message_id || '').trim()
+      },
+      sessionKey,
+      imageUrl: effectiveVisualInput,
+      options: {
+        threadId: [
+          String(senderId || '').trim() || 'anonymous',
+          String(sessionKey || 'default').trim() || 'default',
+          String(effectiveMsg?.message_id || msg?.message_id || '').trim() || 'message',
+          String(effectiveVisualInput || '').trim() ? 'image' : 'chat'
+        ].join(':')
+      }
+    });
     const previousPresence = getShortTermPresence(sessionKey, shortTermMemory, {});
     const sessionTiming = buildInboundSessionTiming({
       continuousMeta,
@@ -2608,7 +2645,12 @@ function createMessageHandler({
       sessionTiming,
       continuousMeta,
       directedContext,
-      visualContext
+      visualContext,
+      threadId: stableThreadId,
+      messageMeta: {
+        messageId: String(effectiveMsg?.message_id || msg?.message_id || '').trim(),
+        threadId: stableThreadId
+      }
     });
     inboundContext.onEvent = (event = {}) => {
       const normalizedEvent = event && typeof event === 'object' ? event : {};
@@ -2639,7 +2681,9 @@ function createMessageHandler({
         routeMeta: {
           userId: String(senderId || '').trim(),
           groupId: isPrivateChatType(chatType) ? '' : String(groupId || '').trim(),
-          chatType
+          chatType,
+          threadId: stableThreadId,
+          messageId: String(effectiveMsg?.message_id || msg?.message_id || '').trim()
         }
       });
       if (typeof telemetry?.onEvent === 'function') {
@@ -2650,6 +2694,10 @@ function createMessageHandler({
     inboundContext.runtimeQuestionText = runtimeQuestionText;
     inboundContext.persistUserText = persistUserText;
     inboundContext.originalUserText = originalUserText;
+    if (visualContext?.worker?.succeeded) {
+      inboundContext.cleanText = runtimeQuestionText;
+      inboundContext.rawText = runtimeQuestionText;
+    }
     inboundContext.quotePriority = directedContext?.quotePriority || null;
     if (!isPrivateChatType(chatType) && !directBotAnchor) {
       const passiveFlowResult = await runPassiveFlow({
@@ -3065,7 +3113,11 @@ function createMessageHandler({
           chatType,
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           topRouteType: routeExecutionPlan.topRouteType,
-          routeMeta: route.meta || {}
+          routeMeta: {
+            ...(route.meta || {}),
+            threadId: String(replyOptions?.threadId || inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
+            messageId: String(effectiveMsg.message_id || msg.message_id || '').trim()
+          }
         })
       });
       if (sent) {

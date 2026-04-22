@@ -1084,6 +1084,8 @@ function createMessageRouteFlow(deps = {}) {
             ...(route.meta || {}),
             groupId,
             chatType,
+            messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
+            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
             topRouteType: routeExecutionPlan.topRouteType,
             routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
             toolPlanner: route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null,
@@ -1092,7 +1094,8 @@ function createMessageRouteFlow(deps = {}) {
           disableStream: disableStreamForReply,
           deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat',
           cotDisplayOnce,
-          disableHumanizer: cotDisplayOnce
+          disableHumanizer: cotDisplayOnce,
+          threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
         if (fallbackModelConfig) {

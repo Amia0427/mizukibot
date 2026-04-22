@@ -322,7 +322,7 @@ function loadTargets() {
 
 function saveTargets(targets = {}) {
   const store = getJsonStore(config.DAILY_SHARE_TARGETS_FILE);
-  if (store) store.replace(targets);
+  if (store) store.replace(targets, { flushNow: true });
 }
 
 function loadState(today = formatDateInTz(new Date(), config.TIMEZONE)) {
@@ -336,7 +336,7 @@ function loadState(today = formatDateInTz(new Date(), config.TIMEZONE)) {
 
 function saveState(state = {}) {
   const store = getJsonStore(config.DAILY_SHARE_STATE_FILE);
-  if (store) store.replace(state);
+  if (store) store.replace(state, { flushNow: true });
 }
 
 function ensureTarget(targets, groupId) {

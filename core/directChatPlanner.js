@@ -2,6 +2,9 @@ const planning = require('../api/runtimeV2/planning/service');
 
 async function planDirectChat(route = {}, options = {}) {
   const available = planning.collectAvailableToolSummary(route, options);
+  const explicitAllowedTools = Array.isArray(options?.allowedTools)
+    ? options.allowedTools
+    : (Array.isArray(route?.meta?.allowedTools) ? route.meta.allowedTools : undefined);
   const decision = await planning.planRequestV2({
     question: route?.question || route?.cleanText || '',
     cleanText: route?.cleanText || route?.question || '',
@@ -16,7 +19,7 @@ async function planDirectChat(route = {}, options = {}) {
     intent: route?.intent || {},
     facets: route?.facets || {},
     userId: options?.userId || route?.meta?.userId || '',
-    allowedTools: options?.allowedTools || route?.meta?.allowedTools || [],
+    ...(explicitAllowedTools ? { allowedTools: explicitAllowedTools } : {}),
     toolCatalog: available.toolCatalog,
     contextSummary: options?.contextSummary || route?.meta?.contextSummary || route?.meta?.conversationSummary || '',
     directedContext: options?.directedContext || route?.meta?.directedContext || null,

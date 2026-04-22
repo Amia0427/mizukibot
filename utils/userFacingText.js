@@ -23,6 +23,56 @@ function stripTrailingThinkFragment(text = '', options = {}) {
   return source;
 }
 
+const NARRATIVE_LEAD_IN_CUES = [
+  '笑着',
+  '笑了下',
+  '干笑',
+  '轻轻',
+  '低声',
+  '小声',
+  '顿了顿',
+  '停了停',
+  '慢半拍',
+  '沉默了下',
+  '想了想',
+  '想了下',
+  '怔了下',
+  '抿了抿嘴',
+  '偏开视线',
+  '别开眼',
+  '话题一跳',
+  '话锋一转',
+  '转开话题',
+  '岔开',
+  '改口',
+  '收住',
+  '半句停住',
+  '故作轻松'
+];
+
+function looksLikeNarrativeLeadIn(prefix = '') {
+  const text = String(prefix || '').trim();
+  if (!text || text.length > 24) return false;
+  if (!/[：:]/.test(`${text}:`)) return false;
+  if (/[A-Za-z0-9]/.test(text)) return false;
+  if (/[“”"'`]/.test(text)) return false;
+  return NARRATIVE_LEAD_IN_CUES.some((cue) => text.includes(cue));
+}
+
+function stripNarrativeLeadIn(text = '') {
+  return String(text || '')
+    .split('\n')
+    .map((line) => {
+      const colonIndex = line.search(/[：:]/);
+      if (colonIndex <= 0) return line;
+      const prefix = line.slice(0, colonIndex).trim();
+      const suffix = line.slice(colonIndex + 1).trimStart();
+      if (!suffix) return line;
+      return looksLikeNarrativeLeadIn(prefix) ? suffix : line;
+    })
+    .join('\n');
+}
+
 function sanitizeUserFacingText(text = '', options = {}) {
   const preserveThink = options && typeof options === 'object' && options.preserveThink === true;
   let next = String(text || '').replace(/\u200b/g, '');
@@ -37,6 +87,7 @@ function sanitizeUserFacingText(text = '', options = {}) {
   next = next.replace(/<think\b[^>]*>[\s\S]*$/i, '');
   next = next.replace(/<\/think\s*>/gi, '');
   next = stripTrailingThinkFragment(next, options);
+  next = stripNarrativeLeadIn(next);
   return next;
 }
 

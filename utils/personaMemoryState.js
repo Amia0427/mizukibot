@@ -6,7 +6,12 @@ const { getStyleProfile } = require('./styleProfileRuntime');
 const { getGroupSocialContext } = require('./socialContextRuntime');
 const {
   resolveShortTermSessionKey,
+  resolveShortTermSceneKey,
   normalizeShortTermState,
+  normalizeInteractionState,
+  normalizeSceneState,
+  normalizeExpressionState,
+  normalizeModuleState,
   buildSharedShortTermContextMessages
 } = require('./shortTermMemory');
 const { loadBridgeStore } = require('./shortTermBridgeMemory');
@@ -21,7 +26,7 @@ const {
 } = require('./memory-v3');
 const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('./promptSecurity');
 
-const STATE_VERSION = 1;
+const STATE_VERSION = 2;
 const DEFAULT_SURFACE = 'direct_chat';
 
 const CONTINUITY_PRIORITY = Object.freeze({
@@ -234,6 +239,35 @@ function createRecentReplyFrameFromMessages(messages = []) {
     summary: turns.map((item) => `${item.role === 'assistant' ? 'A' : 'U'}:${item.content}`).join(' | '),
     turns
   };
+}
+
+function normalizeReplyPosture(value = '') {
+  const posture = normalizeText(value, 24);
+  return ['light', 'playful', 'gentle', 'reserved', 'focused', 'comforting'].includes(posture)
+    ? posture
+    : '';
+}
+
+function inferReplyPostureFromSignals({ surface = '', expressionState = {}, continuityState = {}, question = '' } = {}) {
+  const explicit = normalizeReplyPosture(expressionState?.replyPosture?.value || expressionState?.replyPosture || continuityState?.replyPosture);
+  if (explicit) return explicit;
+  const text = normalizeText(question, 240);
+  if (/难受|低落|撑不住|安慰|抱抱|陪我/i.test(text)) return 'comforting';
+  if (/认真|排查|修|部署|配置|步骤|先给结论/i.test(text)) return 'focused';
+  if (/玩笑|搞怪|扮演|可爱|发夹|逛街/i.test(text)) return 'playful';
+  if (String(surface || '').trim().toLowerCase() === 'passive_group_reply') return 'light';
+  return 'gentle';
+}
+
+function computeTopicFingerprint(parts = []) {
+  const joined = normalizeArray(parts).map((item) => normalizeText(item, 80)).filter(Boolean).join('|');
+  if (!joined) return '';
+  let hash = 0;
+  for (const ch of joined) {
+    hash = ((hash << 5) - hash) + ch.charCodeAt(0);
+    hash |= 0;
+  }
+  return String(hash >>> 0);
 }
 
 function inferWarmth(relationship = '', attitude = '', surface = '') {
@@ -465,6 +499,12 @@ function formatContinuityStateText(state = {}, options = {}) {
   if (normalizeArray(state.openLoops).length) lines.push(`open_loops=${state.openLoops.join(' | ')}`);
   if (normalizeArray(state.assistantCommitments).length) lines.push(`assistant_commitments=${state.assistantCommitments.join(' | ')}`);
   if (normalizeArray(state.userConstraints).length) lines.push(`user_constraints=${state.userConstraints.join(' | ')}`);
+  if (state.phaseHint) lines.push(`phase_hint=${state.phaseHint}`);
+  if (state.replyPosture) lines.push(`reply_posture=${state.replyPosture}`);
+  if (normalizeArray(state.activePersonaModules).length) lines.push(`active_persona_modules=${state.activePersonaModules.join(' | ')}`);
+  if (normalizeArray(state.styleAnchors).length) lines.push(`style_anchors=${state.styleAnchors.join(' | ')}`);
+  if (state.sceneTopic) lines.push(`scene_topic=${state.sceneTopic}`);
+  if (state.sceneAtmosphere) lines.push(`scene_atmosphere=${state.sceneAtmosphere}`);
   if (state.recentReplyFrame && options.includeRecentReplyFrame !== false) lines.push(`recent_reply_frame=${state.recentReplyFrame}`);
   if (state.summary) lines.push(`summary=${state.summary}`);
   if (normalizeObject(state.sources) && Object.keys(state.sources).length > 0) {
@@ -485,6 +525,7 @@ function formatExpressionStateText(state = {}) {
     return normalizeText(entry || fallback, 24);
   };
   return [
+    `reply_posture=${compact(state.replyPosture, 'light')}`,
     `warmth=${compact(state.warmth, 'mid')}`,
     `play=${compact(state.playfulness, 'low')}`,
     `tease=${compact(state.tease, 'off')}`,
@@ -519,9 +560,15 @@ function resolveContinuitySlots(candidates = {}, policy = {}) {
   const carryOver = chooseBestScalar(normalized.carryOver);
   const summary = chooseBestScalar(normalized.summary);
   const recentReplyFrame = chooseBestScalar(normalized.recentReplyFrame);
+  const phaseHint = chooseBestScalar(normalized.phaseHint);
+  const replyPosture = chooseBestScalar(normalized.replyPosture);
+  const sceneTopic = chooseBestScalar(normalized.sceneTopic);
+  const sceneAtmosphere = chooseBestScalar(normalized.sceneAtmosphere);
   const openLoops = mergeListCandidates(normalized.openLoops, 4);
   const assistantCommitments = mergeListCandidates(normalized.assistantCommitments, 4);
   const userConstraints = mergeListCandidates(normalized.userConstraints, 4);
+  const styleAnchors = mergeListCandidates(normalized.styleAnchors, 4);
+  const activePersonaModules = mergeListCandidates(normalized.activePersonaModules, 2);
 
   return {
     activeTopic: activeTopic?.text || '',
@@ -531,19 +578,38 @@ function resolveContinuitySlots(candidates = {}, policy = {}) {
     carryOverUserTurn: carryOver?.text || '',
     summary: summary?.text || '',
     recentReplyFrame: recentReplyFrame?.text || '',
+    phaseHint: phaseHint?.text || '',
+    replyPosture: replyPosture?.text || '',
+    sceneTopic: sceneTopic?.text || '',
+    sceneAtmosphere: sceneAtmosphere?.text || '',
+    styleAnchors,
+    activePersonaModules,
+    confidence: Math.max(
+      Number(activeTopic?.confidence || 0) || 0,
+      Number(summary?.confidence || 0) || 0,
+      Number(replyPosture?.confidence || 0) || 0,
+      Number(sceneTopic?.confidence || 0) || 0
+    ),
     sources: {
       activeTopic: activeTopic?.source || '',
       carryOverUserTurn: carryOver?.source || '',
       summary: summary?.source || '',
+      phaseHint: phaseHint?.source || '',
+      replyPosture: replyPosture?.source || '',
+      sceneTopic: sceneTopic?.source || '',
+      sceneAtmosphere: sceneAtmosphere?.source || '',
       openLoops: normalizeArray(normalized.openLoops).map((item) => item?.source).filter(Boolean),
       assistantCommitments: normalizeArray(normalized.assistantCommitments).map((item) => item?.source).filter(Boolean),
       userConstraints: normalizeArray(normalized.userConstraints).map((item) => item?.source).filter(Boolean),
-      recentReplyFrame: recentReplyFrame?.source || ''
+      recentReplyFrame: recentReplyFrame?.source || '',
+      styleAnchors: normalizeArray(normalized.styleAnchors).map((item) => item?.source).filter(Boolean),
+      activePersonaModules: normalizeArray(normalized.activePersonaModules).map((item) => item?.source).filter(Boolean)
     },
     conflicts: {
       activeTopic: normalizeArray(normalized.activeTopic).length > 1,
       carryOverUserTurn: normalizeArray(normalized.carryOver).length > 1,
-      summary: normalizeArray(normalized.summary).length > 1
+      summary: normalizeArray(normalized.summary).length > 1,
+      replyPosture: normalizeArray(normalized.replyPosture).length > 1
     },
     policy: normalizeObject(policy)
   };
@@ -575,6 +641,12 @@ function buildContinuityCandidates({
   const carryOver = [];
   const summary = [];
   const recentReplyFrame = [];
+  const phaseHint = [];
+  const replyPosture = [];
+  const sceneTopic = [];
+  const sceneAtmosphere = [];
+  const styleAnchors = [];
+  const activePersonaModules = [];
 
   const pushScalar = (bucket, source, value, extras = {}) => {
     const candidate = buildCandidate(source, value, extras);
@@ -591,6 +663,12 @@ function buildContinuityCandidates({
   pushScalar(activeTopic, 'session_projection', projection.activeTopic, { confidence: 0.98 });
   pushScalar(carryOver, 'session_projection', projection.carryOverUserTurn, { confidence: 0.98 });
   pushScalar(summary, 'session_projection', projection.summary, { confidence: 0.96 });
+  pushScalar(phaseHint, 'session_projection', projection.phaseHint, { confidence: 0.92 });
+  pushScalar(replyPosture, 'session_projection', projection.expressionState?.replyPosture, { confidence: 0.94 });
+  pushScalar(sceneTopic, 'session_projection', projection.sceneState?.activeTopic, { confidence: 0.92 });
+  pushScalar(sceneAtmosphere, 'session_projection', projection.sceneState?.atmosphere, { confidence: 0.9 });
+  pushList(styleAnchors, 'session_projection', projection.expressionState?.styleAnchors, { confidence: 0.9 });
+  pushList(activePersonaModules, 'session_projection', projection.moduleState?.activePersonaModules, { confidence: 0.92 });
   pushList(openLoops, 'session_projection', projection.openLoops, { confidence: 0.96 });
   pushList(assistantCommitments, 'session_projection', projection.assistantCommitments, { confidence: 0.96 });
   pushList(userConstraints, 'session_projection', projection.userConstraints, { confidence: 0.94 });
@@ -602,6 +680,12 @@ function buildContinuityCandidates({
   pushScalar(activeTopic, 'short_term_bridge', normalizedBridgeState.activeTopic, { confidence: 0.88 });
   pushScalar(carryOver, 'short_term_bridge', normalizedBridgeState.carryOverUserTurn, { confidence: 0.92 });
   pushScalar(summary, 'short_term_bridge', normalizedBridgeState.summary, { confidence: 0.84 });
+  pushScalar(phaseHint, 'short_term_bridge', normalizedBridgeState.phaseHint, { confidence: 0.84 });
+  pushScalar(replyPosture, 'short_term_bridge', normalizedBridgeState.expression?.replyPosture, { confidence: 0.88 });
+  pushScalar(sceneTopic, 'short_term_bridge', normalizedBridgeState.scene?.activeTopic, { confidence: 0.82 });
+  pushScalar(sceneAtmosphere, 'short_term_bridge', normalizedBridgeState.scene?.atmosphere, { confidence: 0.8 });
+  pushList(styleAnchors, 'short_term_bridge', normalizedBridgeState.expression?.styleAnchors, { confidence: 0.82 });
+  pushList(activePersonaModules, 'short_term_bridge', normalizedBridgeState.moduleState?.activePersonaModules, { confidence: 0.86 });
   pushList(openLoops, 'short_term_bridge', normalizedBridgeState.openLoops, { confidence: 0.86 });
   pushList(assistantCommitments, 'short_term_bridge', normalizedBridgeState.assistantCommitments, { confidence: 0.86 });
   pushList(userConstraints, 'short_term_bridge', normalizedBridgeState.userConstraints, { confidence: 0.84 });
@@ -613,6 +697,12 @@ function buildContinuityCandidates({
   pushScalar(activeTopic, 'short_term_state', normalizedShortTerm.activeTopic, { confidence: 0.82 });
   pushScalar(carryOver, 'short_term_state', normalizedShortTerm.carryOverUserTurn, { confidence: 0.82 });
   pushScalar(summary, 'short_term_state', normalizedShortTerm.summary, { confidence: 0.78 });
+  pushScalar(phaseHint, 'short_term_state', normalizedShortTerm.phaseHint, { confidence: 0.76 });
+  pushScalar(replyPosture, 'short_term_state', normalizedShortTerm.expression?.replyPosture, { confidence: 0.76 });
+  pushScalar(sceneTopic, 'short_term_state', normalizedShortTerm.scene?.activeTopic, { confidence: 0.72 });
+  pushScalar(sceneAtmosphere, 'short_term_state', normalizedShortTerm.scene?.atmosphere, { confidence: 0.7 });
+  pushList(styleAnchors, 'short_term_state', normalizedShortTerm.expression?.styleAnchors, { confidence: 0.74 });
+  pushList(activePersonaModules, 'short_term_state', normalizedShortTerm.moduleState?.activePersonaModules, { confidence: 0.76 });
   pushList(openLoops, 'short_term_state', normalizedShortTerm.openLoops, { confidence: 0.78 });
   pushList(assistantCommitments, 'short_term_state', normalizedShortTerm.assistantCommitments, { confidence: 0.78 });
   pushList(userConstraints, 'short_term_state', normalizedShortTerm.userConstraints, { confidence: 0.76 });
@@ -622,6 +712,11 @@ function buildContinuityCandidates({
 
   const latestSessionSummary = normalizeArray(sessionSummaries)[0];
   pushScalar(summary, 'same_session_summary', latestSessionSummary?.summary, { confidence: 0.72 });
+  pushScalar(activeTopic, 'same_session_summary', latestSessionSummary?.structured?.activeTopic, { confidence: 0.72 });
+  pushScalar(carryOver, 'same_session_summary', latestSessionSummary?.structured?.carryOverUserTurn, { confidence: 0.72 });
+  pushScalar(replyPosture, 'same_session_summary', latestSessionSummary?.structured?.expression?.replyPosture, { confidence: 0.68 });
+  pushList(styleAnchors, 'same_session_summary', latestSessionSummary?.structured?.expression?.styleAnchors, { confidence: 0.66 });
+  pushList(activePersonaModules, 'same_session_summary', latestSessionSummary?.structured?.moduleState?.activePersonaModules, { confidence: 0.66 });
 
   const sameSessionJournal = normalizeArray(journalBundle?.continuity?.sameSession);
   const journalEntry = sameSessionJournal[0] || normalizeArray(journalBundle?.continuity?.sameTopic)[0];
@@ -645,7 +740,13 @@ function buildContinuityCandidates({
     userConstraints,
     carryOver,
     summary,
-    recentReplyFrame
+    recentReplyFrame,
+    phaseHint,
+    replyPosture,
+    sceneTopic,
+    sceneAtmosphere,
+    styleAnchors,
+    activePersonaModules
   };
 }
 
@@ -655,6 +756,12 @@ async function composePersonaMemoryState(request = {}, options = {}) {
   const userId = normalizeText(normalizedRequest.userId || options.userId);
   const surface = normalizeText(options.surface || normalizedRequest.surface || DEFAULT_SURFACE).toLowerCase() || DEFAULT_SURFACE;
   const groupId = normalizeText(options.groupId || normalizedRequest.groupId || routeMeta.groupId || routeMeta.group_id);
+  const sceneKey = normalizeText(
+    options.sceneKey
+    || normalizedRequest.sceneKey
+    || routeMeta.sceneKey
+    || resolveShortTermSceneKey(routeMeta)
+  );
   const sessionKey = normalizeText(
     options.sessionKey
     || normalizedRequest.sessionKey
@@ -676,6 +783,7 @@ async function composePersonaMemoryState(request = {}, options = {}) {
   const bridgeEntry = normalizeObject(bridgeStore.sessions?.[sessionKey]);
   const bridgeState = normalizeShortTermState(bridgeEntry.shortTermState);
   const bridgeRecentMessages = normalizeArray(bridgeEntry.recentMessages);
+  const sceneEntry = sceneKey ? normalizeShortTermState(shortTermStore?.[sceneKey]) : normalizeShortTermState({});
   const sessionProjection = await readSessionProjectionState(userId, sessionKey, {
     ...normalizedRequest,
     groupId
@@ -724,6 +832,22 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     memoryContext
   });
   const continuityState = resolveContinuitySlots(continuityCandidates, getSurfacePolicy(surface));
+  if (!continuityState.sceneTopic && sceneEntry?.scene?.activeTopic) {
+    continuityState.sceneTopic = sceneEntry.scene.activeTopic;
+    continuityState.sources.sceneTopic = continuityState.sources.sceneTopic || 'scene_state';
+  }
+  if (!continuityState.sceneAtmosphere && sceneEntry?.scene?.atmosphere) {
+    continuityState.sceneAtmosphere = sceneEntry.scene.atmosphere;
+    continuityState.sources.sceneAtmosphere = continuityState.sources.sceneAtmosphere || 'scene_state';
+  }
+  if (normalizeArray(continuityState.styleAnchors).length === 0 && normalizeArray(sceneEntry?.expression?.styleAnchors).length > 0) {
+    continuityState.styleAnchors = uniqueStrings(sceneEntry.expression.styleAnchors, 4, 96);
+    continuityState.sources.styleAnchors = continuityState.sources.styleAnchors || ['scene_state'];
+  }
+  if (normalizeArray(continuityState.activePersonaModules).length === 0 && normalizeArray(shortTermState?.moduleState?.activePersonaModules).length > 0) {
+    continuityState.activePersonaModules = uniqueStrings(shortTermState.moduleState.activePersonaModules, 2, 64);
+    continuityState.sources.activePersonaModules = continuityState.sources.activePersonaModules || ['short_term_state'];
+  }
   const recentReplyFrame = createRecentReplyFrameFromMessages(
     normalizeArray(sessionProjection.session?.recentMessages).length
       ? sessionProjection.session.recentMessages
@@ -740,6 +864,104 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     socialContext,
     memoryContext
   });
+  const inheritedReplyPosture = normalizeReplyPosture(
+    shortTermState.expression?.replyPosture
+    || bridgeState.expression?.replyPosture
+    || continuityState.replyPosture
+  );
+  expressionState.replyPosture = buildExpressionValue(
+    inheritedReplyPosture || inferReplyPostureFromSignals({
+      surface,
+      expressionState: shortTermState.expression || {},
+      continuityState,
+      question
+    }),
+    inheritedReplyPosture ? 'short_term_state' : 'runtime_inference'
+  );
+  if (normalizeArray(continuityState.styleAnchors).length > 0) {
+    expressionState.styleAnchors = {
+      value: continuityState.styleAnchors.join(' | '),
+      source: normalizeArray(continuityState.sources?.styleAnchors).length > 0
+        ? continuityState.sources.styleAnchors[0]
+        : 'continuity_state'
+    };
+  }
+
+  const currentModuleState = normalizeModuleState(shortTermState.moduleState || bridgeState.moduleState || {});
+  const requestedModuleIds = normalizeArray(options.personaModules || normalizedRequest.personaModules).map((item) => normalizeText(item)).filter(Boolean);
+  const candidateModuleIds = requestedModuleIds.length > 0 ? requestedModuleIds : normalizeArray(continuityState.activePersonaModules);
+  let nextModuleState = normalizeModuleState({
+    ...currentModuleState,
+    activePersonaModules: candidateModuleIds.length > 0 ? candidateModuleIds : currentModuleState.activePersonaModules,
+    lastSurface: surface,
+    lastTopicFingerprint: computeTopicFingerprint([continuityState.activeTopic, continuityState.sceneTopic, question]),
+    lastUpdatedAt: Date.now()
+  });
+  const previousTopicFingerprint = normalizeText(currentModuleState.lastTopicFingerprint);
+  const currentTopicFingerprint = normalizeText(nextModuleState.lastTopicFingerprint);
+  const explicitFeedback = detectExplicitPersonaFeedback(question);
+  const sameSurface = normalizeText(currentModuleState.lastSurface) === surface;
+  const topicStable = previousTopicFingerprint && previousTopicFingerprint === currentTopicFingerprint;
+  const currentModules = uniqueStrings(currentModuleState.activePersonaModules, 2, 64);
+  const requestedModules = uniqueStrings(candidateModuleIds, 2, 64);
+  const requestedChanged = JSON.stringify(currentModules) !== JSON.stringify(requestedModules);
+  if (currentModules.length > 0 && sameSurface && topicStable && !explicitFeedback.isFeedback && !requestedChanged && Number(continuityState.confidence || 0) >= 0.55) {
+    nextModuleState = normalizeModuleState({
+      ...nextModuleState,
+      activePersonaModules: currentModules,
+      stickyTurnsRemaining: Math.max(0, Math.min(5, Number(currentModuleState.stickyTurnsRemaining || 3) || 3)),
+      switchReason: currentModuleState.switchReason || 'sticky_continue'
+    });
+  } else if (currentModules.length > 0 && requestedChanged) {
+    nextModuleState = normalizeModuleState({
+      ...nextModuleState,
+      activePersonaModules: requestedModules,
+      stickyTurnsRemaining: 3,
+      switchReason: 'requested_switch'
+    });
+  } else if (currentModules.length > 0 && !sameSurface) {
+    nextModuleState = normalizeModuleState({
+      ...nextModuleState,
+      stickyTurnsRemaining: 3,
+      switchReason: 'surface_changed'
+    });
+  } else if (currentModules.length > 0 && previousTopicFingerprint && previousTopicFingerprint !== currentTopicFingerprint) {
+    nextModuleState = normalizeModuleState({
+      ...nextModuleState,
+      activePersonaModules: requestedModules.length > 0 ? requestedModules : currentModules,
+      stickyTurnsRemaining: 3,
+      switchReason: 'topic_shift'
+    });
+  } else if (explicitFeedback.isFeedback) {
+    nextModuleState = normalizeModuleState({
+      ...nextModuleState,
+      stickyTurnsRemaining: 3,
+      switchReason: explicitFeedback.polarity === 'negative' ? 'explicit_negative_feedback' : 'explicit_positive_feedback'
+    });
+  } else if (currentModules.length === 0 && requestedModules.length > 0) {
+    nextModuleState = normalizeModuleState({
+      ...nextModuleState,
+      activePersonaModules: requestedModules,
+      stickyTurnsRemaining: 3,
+      switchReason: 'new_activation'
+    });
+  }
+
+  continuityState.phaseHint = continuityState.phaseHint || shortTermState.phaseHint || shortTermState.interaction?.phaseHint || '';
+  continuityState.replyPosture = expressionState.replyPosture.value || continuityState.replyPosture;
+  continuityState.activePersonaModules = uniqueStrings(
+    nextModuleState.activePersonaModules.length > 0 ? nextModuleState.activePersonaModules : continuityState.activePersonaModules,
+    2,
+    64
+  );
+  continuityState.styleAnchors = uniqueStrings(
+    normalizeArray(continuityState.styleAnchors).length > 0
+      ? continuityState.styleAnchors
+      : normalizeArray(shortTermState.expression?.styleAnchors),
+    4,
+    96
+  );
+
   const memoryDigest = buildMemoryDigest(memoryContext, { surface });
   const personaCore = {
     text: loadPersonaCoreText(),
@@ -768,6 +990,7 @@ async function composePersonaMemoryState(request = {}, options = {}) {
   return {
     version: STATE_VERSION,
     surface,
+    sceneKey,
     sessionKey,
     userId,
     groupId,
@@ -775,6 +998,7 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     relationshipState,
     continuityState,
     expressionState,
+    moduleState: nextModuleState,
     memoryDigest,
     evidence
   };
@@ -809,6 +1033,8 @@ function renderPersonaMemoryPrompt(state = {}, surface = '') {
 
 function deriveSessionCheckpointPayload(state = {}, payload = {}) {
   const continuity = normalizeObject(state.continuityState);
+  const expression = normalizeObject(state.expressionState);
+  const moduleState = normalizeObject(state.moduleState);
   const recentReplyFrame = normalizeText(payload.recentReplyFrame || continuity.recentReplyFrame, 320);
   const recentMessages = normalizeArray(payload.recentMessages)
     .map((item) => ({
@@ -830,7 +1056,47 @@ function deriveSessionCheckpointPayload(state = {}, payload = {}) {
     openLoops: uniqueStrings(payload.openLoops || continuity.openLoops, 4, 120),
     assistantCommitments: uniqueStrings(payload.assistantCommitments || continuity.assistantCommitments, 4, 120),
     userConstraints: uniqueStrings(payload.userConstraints || continuity.userConstraints, 4, 120),
-    recentMessages
+    recentMessages,
+    phaseHint: normalizeText(payload.phaseHint || continuity.phaseHint, 48),
+    interactionState: {
+      activeTopic: normalizeText(payload.activeTopic || continuity.activeTopic, 180),
+      carryOverUserTurn: normalizeText(payload.carryOverUserTurn || continuity.carryOverUserTurn, 220),
+      openLoops: uniqueStrings(payload.openLoops || continuity.openLoops, 4, 120),
+      assistantCommitments: uniqueStrings(payload.assistantCommitments || continuity.assistantCommitments, 4, 120),
+      userConstraints: uniqueStrings(payload.userConstraints || continuity.userConstraints, 4, 120),
+      recentTurns: recentMessages,
+      phaseHint: normalizeText(payload.phaseHint || continuity.phaseHint, 48),
+      sourceFlags: uniqueStrings(continuity.sources?.activePersonaModules || continuity.sources?.styleAnchors || [], 8, 80),
+      confidence: Math.max(0, Math.min(1, Number(continuity.confidence || 0) || 0))
+    },
+    sceneState: {
+      sceneKey: normalizeText(payload.sceneKey || state.sceneKey, 96),
+      activeTopic: normalizeText(payload.sceneTopic || continuity.sceneTopic, 180),
+      atmosphere: normalizeText(payload.sceneAtmosphere || continuity.sceneAtmosphere, 120),
+      activePair: normalizeText(payload.activePair || '', 120),
+      quoteAnchor: normalizeText(payload.quoteAnchor || '', 180),
+      jargonHints: uniqueStrings(payload.jargonHints || [], 4, 80),
+      recentTurns: recentMessages.slice(-4),
+      confidence: Math.max(0, Math.min(1, Number(payload.sceneConfidence || continuity.confidence || 0) || 0))
+    },
+    expressionState: {
+      replyPosture: normalizeText(payload.replyPosture || continuity.replyPosture || expression.replyPosture?.value || expression.replyPosture, 24),
+      warmth: normalizeText(payload.warmth || expression.warmth?.value || expression.warmth, 24),
+      guardedness: normalizeText(payload.guardedness || expression.guardedness?.value || expression.guardedness, 24),
+      initiative: normalizeText(payload.initiative || expression.initiative?.value || expression.initiative, 24),
+      jargonMode: normalizeText(payload.jargonMode || expression.jargon?.value || expression.jargon, 24),
+      cadenceHint: normalizeText(payload.cadenceHint || '', 48),
+      styleAnchors: uniqueStrings(payload.styleAnchors || continuity.styleAnchors || [], 4, 96),
+      confidence: Math.max(0, Math.min(1, Number(payload.expressionConfidence || continuity.confidence || 0) || 0))
+    },
+    moduleState: {
+      activePersonaModules: uniqueStrings(payload.activePersonaModules || moduleState.activePersonaModules || continuity.activePersonaModules || [], 2, 64),
+      stickyTurnsRemaining: Math.max(0, Math.min(5, Number(payload.stickyTurnsRemaining || moduleState.stickyTurnsRemaining || 0) || 0)),
+      switchReason: normalizeText(payload.switchReason || moduleState.switchReason, 160),
+      lastSurface: normalizeText(payload.lastSurface || state.surface, 32),
+      lastTopicFingerprint: normalizeText(payload.lastTopicFingerprint || computeTopicFingerprint([continuity.activeTopic, continuity.sceneTopic]), 96),
+      lastUpdatedAt: Date.now()
+    }
   };
 }
 
@@ -1059,6 +1325,8 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
       assistantCommitments: checkpointPayload.assistantCommitments,
       userConstraints: checkpointPayload.userConstraints,
       carryOverUserTurn: checkpointPayload.carryOverUserTurn,
+      replyPosture: checkpointPayload.expressionState?.replyPosture || '',
+      activePersonaModules: uniqueStrings(checkpointPayload.moduleState?.activePersonaModules || [], 2, 64),
       recentReplyFrame: continuity.recentReplyFrame || '',
       personaSlotsUpdated: uniqueStrings(personaSlotsUpdated, 12, 80),
       relationshipSlotsUpdated: uniqueStrings(relationshipSlotsUpdated, 12, 80)

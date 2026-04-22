@@ -51,12 +51,13 @@ function filterAllowedCapabilityNames(allowedTools = [], options = {}) {
   return names;
 }
 
-function buildExecutionBatches(steps = [], descriptorRegistry = buildCapabilityRegistry()) {
+function buildExecutionBatches(steps = [], descriptorRegistry = null) {
+  const registry = descriptorRegistry || buildCapabilityRegistry();
   const batches = [];
   let currentParallelBatch = [];
 
   for (const step of normalizeArray(steps)) {
-    const descriptor = resolveCapability(descriptorRegistry, step?.tool);
+    const descriptor = resolveCapability(registry, step?.tool);
     if (!descriptor || !isParallelSafeCapability(descriptor)) {
       if (currentParallelBatch.length > 0) {
         batches.push({
@@ -100,7 +101,7 @@ async function runCapabilityPreflight(question = '', context = {}) {
 }
 
 function getCapabilityExecutors(runtimeOptions = {}) {
-  const registry = buildCapabilityRegistry();
+  const registry = runtimeOptions.capabilityRegistry || buildCapabilityRegistry();
   const runtimeExecutors = normalizeObject(runtimeOptions.toolExecutors, {});
   const executors = {};
   for (const descriptor of registry.descriptors) {
@@ -400,7 +401,7 @@ function buildReusedMemorySearchEnvelope(step = {}, normalizedArgs = {}, descrip
 }
 
 async function executeStep(step = {}, state = {}, context = {}) {
-  const descriptorRegistry = context.registry || buildCapabilityRegistry();
+  const descriptorRegistry = context.registry || context.capabilityRegistry || buildCapabilityRegistry();
   const descriptor = resolveCapability(descriptorRegistry, step.tool);
   const helpers = normalizeObject(context.helpers, {});
   const executionState = normalizeObject(state.execution, {});
@@ -591,7 +592,7 @@ async function executeStep(step = {}, state = {}, context = {}) {
 }
 
 async function executeBatch(steps = [], state = {}, context = {}) {
-  const descriptorRegistry = context.registry || buildCapabilityRegistry();
+  const descriptorRegistry = context.registry || context.capabilityRegistry || buildCapabilityRegistry();
   const batches = context.batches || buildExecutionBatches(steps, descriptorRegistry);
   const results = [];
 
@@ -633,12 +634,13 @@ async function executeBatch(steps = [], state = {}, context = {}) {
   return results.map((item, index) => normalizeExecutionEnvelope(item, steps[index] || {}));
 }
 
-function shouldRunParallel(steps = [], descriptorRegistry = buildCapabilityRegistry()) {
+function shouldRunParallel(steps = [], descriptorRegistry = null) {
   if (!config.AGENT_PARALLEL_SAFE_TOOLS) return false;
   const normalized = normalizeArray(steps);
   if (normalized.length < 2) return false;
+  const registry = descriptorRegistry || buildCapabilityRegistry();
   return normalized.every((step) => {
-    const descriptor = resolveCapability(descriptorRegistry, step?.tool);
+    const descriptor = resolveCapability(registry, step?.tool);
     return isParallelSafeCapability(descriptor);
   });
 }

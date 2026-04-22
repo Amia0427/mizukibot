@@ -177,13 +177,20 @@ function normalizeDynamicPromptPlan(options = {}) {
 function filterBlocksByPlan(blocks = [], dynamicPromptPlan = {}, options = {}) {
   const requiredIds = new Set(normalizeArray(options.requiredIds).map((item) => normalizeText(item)).filter(Boolean));
   const enabledIds = new Set(normalizeArray(dynamicPromptPlan.enabledBlockIds).map((item) => normalizeText(item)).filter(Boolean));
+  const enabledPersonaModules = new Set(normalizeArray(dynamicPromptPlan.personaModules).map((item) => normalizeText(item)).filter(Boolean));
   return normalizeArray(blocks).filter((block) => {
     const blockId = normalizeText(block?.id);
+    const aliasId = normalizeText(block?.meta?.blockId);
+    const moduleId = normalizeText(block?.meta?.moduleId);
     if (!blockId) return false;
     const optional = block?.meta?.optional === true;
     if (!optional) return true;
     if (requiredIds.has(blockId)) return true;
-    return enabledIds.has(blockId);
+    if (aliasId && requiredIds.has(aliasId)) return true;
+    if (enabledIds.has(blockId)) return true;
+    if (aliasId && enabledIds.has(aliasId)) return true;
+    if (moduleId && enabledPersonaModules.has(moduleId)) return true;
+    return false;
   });
 }
 
@@ -259,19 +266,38 @@ function buildPromptCacheKeys(userId = '', routeMeta = {}, options = {}) {
     normalizeText(options.routePolicyKey),
     normalizeText(options.topRouteType),
     normalizeText(options.reviewMode),
-    normalizeText(options.customPrompt),
-    normalizeText(options.question),
-    normalizeText(userId),
-    normalizeText(normalizedRouteMeta.groupId || normalizedRouteMeta.group_id),
-    normalizeText(normalizedRouteMeta.sessionId || normalizedRouteMeta.session_id)
+    normalizeText(options.featureFingerprint),
+    normalizeText(options.promptManifestFingerprint),
+    normalizeText(options.systemPromptFingerprint)
   ].join('|'));
   const sessionKey = hashText([
-    stableKey,
     normalizeText(options.sessionKey),
     normalizeText(normalizedRouteMeta.groupId || normalizedRouteMeta.group_id),
     normalizeText(options.sharedShortTermSignature)
   ].join('|'));
   return { stableKey, sessionKey };
+}
+
+function getCachedPromptLayer(cache = new Map(), key = '', ttlMs = 0, factory = null) {
+  const now = Date.now();
+  const entry = cache.get(key);
+  if (entry && Number(entry.expiresAt || 0) > now) {
+    return {
+      value: entry.value,
+      hit: true
+    };
+  }
+  const value = typeof factory === 'function' ? factory() : null;
+  if (key && Number(ttlMs || 0) > 0 && value) {
+    cache.set(key, {
+      expiresAt: now + Math.max(0, Number(ttlMs || 0) || 0),
+      value
+    });
+  }
+  return {
+    value,
+    hit: false
+  };
 }
 
 function shouldExposeMemoryCli(options = {}) {
@@ -404,12 +430,17 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   const dynamicPromptPlan = normalizeDynamicPromptPlan(options);
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
-  const sharedShortTermContext = buildSharedShortTermContextMessages(userId, userInfo, {
-    chatHistory: options.chatHistory,
-    shortTermMemory: options.shortTermMemory,
-    routeMeta,
-    sessionKey: options.sessionKey
-  });
+  const includeOptionalContextBlocks = options.includeOptionalContextBlocks !== false;
+  const includePersonaModuleBlocks = options.includePersonaModuleBlocks !== false;
+  const includeDynamicFewShotBlock = options.includeDynamicFewShotBlock !== false;
+  const sharedShortTermContext = options.sharedShortTermContext && typeof options.sharedShortTermContext === 'object'
+    ? options.sharedShortTermContext
+    : buildSharedShortTermContextMessages(userId, userInfo, {
+      chatHistory: options.chatHistory,
+      shortTermMemory: options.shortTermMemory,
+      routeMeta,
+      sessionKey: options.sessionKey
+    });
   const memoryContext = await buildMemoryContextAsync(userId, question || '', {
     routePolicyKey,
     topRouteType,
@@ -428,39 +459,47 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     topRouteType
   }, {
     userInfo,
-    surface: topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat',
+    surface: topRouteType === 'proactive'
+      ? 'proactive_touch'
+      : ((String(routeMeta.groupId || routeMeta.group_id || '').trim() && routeMeta.directedContext) ? 'passive_group_reply' : 'direct_chat'),
     sessionKey: options.sessionKey,
     shortTermMemory: options.shortTermMemory,
-    chatHistory: options.chatHistory
+    chatHistory: options.chatHistory,
+    personaModules: dynamicPromptPlan.personaModules
   });
   const personaMemoryPrompt = renderPersonaMemoryPrompt(
     personaMemoryState,
     topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat'
   );
-  const personaModuleCandidates = buildPersonaModuleCandidates({
-    question,
-    routePrompt: options.routePrompt,
-    routeMeta,
-    directedContext: routeMeta.directedContext,
-    continuitySignals: options?.continuitySignals,
-    personaPhase: routeMeta.personaPhase || ''
-  });
-  const personaModuleDecision = selectPersonaModules(
-    {
-      ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
-      personaModules: dynamicPromptPlan.personaModules.length > 0
-        ? dynamicPromptPlan.personaModules
-        : normalizeArray(options?.personaModuleDecision?.personaModules || routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules)
-    },
-    {
+  const shouldResolvePersonaModules = options.resolvePersonaModules !== false;
+  const personaModuleCandidates = shouldResolvePersonaModules
+    ? buildPersonaModuleCandidates({
       question,
       routePrompt: options.routePrompt,
       routeMeta,
       directedContext: routeMeta.directedContext,
       continuitySignals: options?.continuitySignals,
       personaPhase: routeMeta.personaPhase || ''
-    }
-  );
+    })
+    : [];
+  const personaModuleDecision = shouldResolvePersonaModules
+    ? selectPersonaModules(
+      {
+        ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
+        personaModules: dynamicPromptPlan.personaModules.length > 0
+          ? dynamicPromptPlan.personaModules
+          : normalizeArray(options?.personaModuleDecision?.personaModules || routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules)
+      },
+      {
+        question,
+        routePrompt: options.routePrompt,
+        routeMeta,
+        directedContext: routeMeta.directedContext,
+        continuitySignals: options?.continuitySignals,
+        personaPhase: routeMeta.personaPhase || ''
+      }
+    )
+    : { selected: [], rejected: [] };
   const promptBlocks = [];
   const promptSegments = {
     systemPrompt: [],
@@ -512,22 +551,25 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       dynamicPromptPlan
     };
   }
-  const stablePromptBlocks = buildMainStageBlocks({
-    systemPrompt: config.SYSTEM_PROMPT
-  }).map((block) => ({
-    ...block,
-    lane: 'stable_system'
-  }));
+  const stablePromptBlocks = normalizeArray(options.cachedStableSystemBlocks).length > 0
+    ? normalizeArray(options.cachedStableSystemBlocks).map((block) => ({ ...block }))
+    : buildMainStageBlocks({
+      systemPrompt: config.SYSTEM_PROMPT
+    }).map((block) => ({
+      ...block,
+      lane: 'stable_system'
+    })).concat(
+      createPromptBlock('core_baseline_patch', 'Core Baseline Patch', loadPersonaModuleText('core_baseline'), {
+        stage: 'main',
+        priority: 145,
+        authority: 'persona_module',
+        kind: 'persona_core_patch',
+        budgetTokens: 120,
+        source: 'persona_modules/core_baseline.txt',
+        lane: 'stable_system'
+      })
+    ).filter(Boolean);
   promptBlocks.push(...stablePromptBlocks);
-  promptBlocks.push(createPromptBlock('core_baseline_patch', 'Core Baseline Patch', loadPersonaModuleText('core_baseline'), {
-    stage: 'main',
-    priority: 145,
-    authority: 'persona_module',
-    kind: 'persona_core_patch',
-    budgetTokens: 120,
-    source: 'persona_modules/core_baseline.txt',
-    lane: 'stable_system'
-  }));
   promptBlocks.push(
     ...personaMemoryPrompt.systemMessages
       .map((message, index) => createPromptBlock(
@@ -549,26 +591,6 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       ))
       .filter(Boolean)
   );
-  promptBlocks.push(createPromptBlock('affinity_level', 'Affinity Level', `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`, {
-    stage: 'main',
-    priority: 320,
-    authority: 'memory_fact',
-    kind: 'affinity',
-    lane: 'dynamic_context',
-    meta: {
-      optional: true
-    }
-  }));
-  promptBlocks.push(createPromptBlock('affinity_points', 'Affinity Points', `[AffinityPoints] ${affinity.points}`, {
-    stage: 'main',
-    priority: 321,
-    authority: 'memory_fact',
-    kind: 'affinity',
-    lane: 'dynamic_context',
-    meta: {
-      optional: true
-    }
-  }));
   promptBlocks.push(createPromptBlock('retrieved_memory_lite', 'Retrieved Memory Lite', `[RetrievedMemoryLite] ${memoryContext.memoryForPrompt || 'none'}`, {
     stage: 'main',
     priority: 260,
@@ -579,79 +601,106 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       optional: true
     }
   }));
-  promptBlocks.push(createPromptBlock('long_term_profile', 'Long Term Profile', `[LongTermProfile] ${memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText || 'none'}`, {
-    stage: 'main',
-    priority: 270,
-    authority: 'memory_fact',
-    kind: 'memory',
-    lane: 'dynamic_context',
-    meta: {
-      optional: true
-    }
-  }));
-  promptBlocks.push(createPromptBlock('impression', 'Impression', `[Impression] ${memoryContext.promptImpressionText || trimTextByTokenBudget(memoryContext.impressionText || 'none', Math.max(96, Math.floor(affinity.shortTermMemoryTokens * 0.2)), 'tail') || 'none'}`, {
-    stage: 'main',
-    priority: 271,
-    authority: 'memory_fact',
-    kind: 'memory',
-    lane: 'dynamic_context',
-    meta: {
-      optional: true
-    }
-  }));
-  promptBlocks.push(
-    ...buildRelationshipPromptLines(memoryContext)
-      .map((line, index) => createPromptBlock(
-        `relationship_${index + 1}`,
-        `Relationship ${index + 1}`,
-        line,
-        {
-          stage: 'main',
-          priority: 272 + index,
-          authority: 'memory_fact',
-          kind: 'relationship',
-          lane: 'dynamic_context',
-          meta: {
-            optional: true,
-            blockId: 'relationship_state'
-          }
-        }
-      ))
-      .filter(Boolean)
-  );
-
   const summaryText = memoryContext.promptSummaryText
     || trimTextByTokenBudget(memoryContext.summary || 'none', affinity.shortTermMemoryTokens, 'tail')
     || 'none';
-  promptBlocks.push(createPromptBlock('summary', 'Summary', `[Summary] ${summaryText}`, {
-    stage: 'main',
-    priority: 280,
-    authority: 'memory_fact',
-    kind: 'summary',
-    lane: 'dynamic_context',
-    meta: {
-      optional: true
-    }
-  }));
-  const personaModuleBlocks = personaModuleDecision.selected.map((item, index) => createPromptBlock(
-    `persona_module_${item.id}`,
-    `Persona Module ${item.id}`,
-    loadPersonaModuleText(item.id),
-    {
+  if (includeOptionalContextBlocks) {
+    promptBlocks.push(createPromptBlock('affinity_level', 'Affinity Level', `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`, {
       stage: 'main',
-      priority: 520 + index,
-      authority: 'persona_module',
-      kind: 'persona_module',
-      budgetTokens: item.tokenCost,
-      conflictTags: item.conflictsWith,
-      source: item.path,
+      priority: 320,
+      authority: 'memory_fact',
+      kind: 'affinity',
       lane: 'dynamic_context',
       meta: {
-        moduleId: item.id,
         optional: true
       }
-    }
-  )).filter(Boolean);
+    }));
+    promptBlocks.push(createPromptBlock('affinity_points', 'Affinity Points', `[AffinityPoints] ${affinity.points}`, {
+      stage: 'main',
+      priority: 321,
+      authority: 'memory_fact',
+      kind: 'affinity',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true
+      }
+    }));
+    promptBlocks.push(createPromptBlock('long_term_profile', 'Long Term Profile', `[LongTermProfile] ${memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText || 'none'}`, {
+      stage: 'main',
+      priority: 270,
+      authority: 'memory_fact',
+      kind: 'memory',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true,
+        evidenceOnly: true
+      }
+    }));
+    promptBlocks.push(createPromptBlock('impression', 'Impression', `[Impression] ${memoryContext.promptImpressionText || trimTextByTokenBudget(memoryContext.impressionText || 'none', Math.max(96, Math.floor(affinity.shortTermMemoryTokens * 0.2)), 'tail') || 'none'}`, {
+      stage: 'main',
+      priority: 271,
+      authority: 'memory_fact',
+      kind: 'memory',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true,
+        evidenceOnly: true
+      }
+    }));
+    promptBlocks.push(
+      ...buildRelationshipPromptLines(memoryContext)
+        .map((line, index) => createPromptBlock(
+          `relationship_${index + 1}`,
+          `Relationship ${index + 1}`,
+          line,
+          {
+            stage: 'main',
+            priority: 272 + index,
+            authority: 'memory_fact',
+            kind: 'relationship',
+            lane: 'dynamic_context',
+            meta: {
+              optional: true,
+              blockId: 'relationship_state',
+              evidenceOnly: true
+            }
+          }
+        ))
+        .filter(Boolean)
+    );
+    promptBlocks.push(createPromptBlock('summary', 'Summary', `[Summary] ${summaryText}`, {
+      stage: 'main',
+      priority: 280,
+      authority: 'memory_fact',
+      kind: 'summary',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true,
+        evidenceOnly: true
+      }
+    }));
+  }
+  const personaModuleBlocks = includePersonaModuleBlocks
+    ? personaModuleDecision.selected.map((item, index) => createPromptBlock(
+      `persona_module_${item.id}`,
+      `Persona Module ${item.id}`,
+      loadPersonaModuleText(item.id),
+      {
+        stage: 'main',
+        priority: 520 + index,
+        authority: 'persona_module',
+        kind: 'persona_module',
+        budgetTokens: item.tokenCost,
+        conflictTags: item.conflictsWith,
+        source: item.path,
+        lane: 'dynamic_context',
+        meta: {
+          moduleId: item.id,
+          optional: true
+        }
+      }
+    )).filter(Boolean)
+    : [];
   promptBlocks.push(...personaModuleBlocks);
   if (shouldExposeMemoryCli({ ...options, customPrompt })) {
     const memoryCliInstruction = buildV2MemoryCliInstruction(options?.memoryCliTurn);
@@ -669,15 +718,17 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       }));
     }
   }
-  const dynamicFewShotPrompt = buildDynamicFewShotPrompt({
-    question,
-    routePolicyKey: options.routePolicyKey,
-    topRouteType: options.topRouteType,
-    routePrompt: options.routePrompt,
-    maxExamples: 3,
-    continuitySignals: options?.continuitySignals,
-    contextDensity: estimateTokens(memoryContext.memoryForPrompt || '') + estimateTokens(summaryText || '')
-  });
+  const dynamicFewShotPrompt = includeDynamicFewShotBlock
+    ? buildDynamicFewShotPrompt({
+      question,
+      routePolicyKey: options.routePolicyKey,
+      topRouteType: options.topRouteType,
+      routePrompt: options.routePrompt,
+      maxExamples: 3,
+      continuitySignals: options?.continuitySignals,
+      contextDensity: estimateTokens(memoryContext.memoryForPrompt || '') + estimateTokens(summaryText || '')
+    })
+    : '';
   if (dynamicFewShotPrompt) {
     promptBlocks.push(createPromptBlock('dynamic_few_shot', 'Dynamic Few Shot', dynamicFewShotPrompt, {
       stage: 'main',
@@ -731,11 +782,19 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   const selectedPromptBlocks = filterBlocksByPlan(promptBlocks, effectiveBaseDynamicPromptPlan, {
     requiredIds: ['persona_memory']
   });
+  const dedupedPromptBlocks = selectedPromptBlocks.filter((block) => {
+    const blockId = normalizeText(block?.id);
+    const evidenceOnly = block?.meta?.evidenceOnly === true;
+    if (!evidenceOnly) return true;
+    return !normalizeArray(selectedPromptBlocks)
+      .some((item) => normalizeText(item?.id).startsWith('persona_memory_'));
+  });
   const laneSplit = splitBlocksByLane(selectedPromptBlocks);
+  const normalizedLaneSplit = splitBlocksByLane(dedupedPromptBlocks);
   const snapshotBlocks = [
-    ...laneSplit.stableSystemBlocks,
-    ...laneSplit.dynamicContextBlocks,
-    ...laneSplit.assistantOnlyContextBlocks
+    ...normalizedLaneSplit.stableSystemBlocks,
+    ...normalizedLaneSplit.dynamicContextBlocks,
+    ...normalizedLaneSplit.assistantOnlyContextBlocks
   ];
 
   let promptSnapshot = buildPromptSnapshot(snapshotBlocks.filter(Boolean), {
@@ -866,43 +925,156 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     memoryContext,
     personaMemoryState,
     affinity,
-    dynamicPromptPlan: effectiveBaseDynamicPromptPlan
+    dynamicPromptPlan: effectiveBaseDynamicPromptPlan,
+    personaMemoryPrompt,
+    personaModuleCandidates,
+    personaModuleDecision,
+    sharedShortTermSignature: String(sharedShortTermContext?.sharedShortTermSignature || '').trim(),
+    summaryText,
+    promptBudget: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens),
+    dynamicFewShotPrompt,
+    optionalContextBlocksIncluded: includeOptionalContextBlocks,
+    optionalPersonaModuleBlocksIncluded: includePersonaModuleBlocks,
+    optionalDynamicFewShotIncluded: includeDynamicFewShotBlock,
+    dynamicPromptBlockCatalog: blockCatalog
   };
 }
 
 async function buildDynamicPrompt(userInfo, userId, question, customPrompt = null, options = {}) {
   const currentConfig = getConfig();
   const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
-  const cacheKeys = buildPromptCacheKeys(userId, routeMeta, {
-    ...options,
-    question
-  });
-  const now = Date.now();
-  prunePromptLayerCache(promptLayerCache.stable, now);
-  prunePromptLayerCache(promptLayerCache.session, now);
-  const stableCacheHit = promptLayerCache.stable.get(cacheKeys.stableKey) || null;
-  const sessionCacheHit = promptLayerCache.session.get(cacheKeys.sessionKey) || null;
-  const base = await withSoftTimeout(
-    () => buildBaseDynamicPrompt(userInfo, userId, question, customPrompt, options),
-    Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
-    () => sessionCacheHit?.base || stableCacheHit?.base || {
-      dynamicPrompt: '',
-      stableSystemBlocks: [],
-      dynamicContextBlocks: [],
-      assistantOnlyContextBlocks: [],
-      promptSegments: {},
-      promptSnapshot: null,
-      memoryContext: null,
-      personaMemoryState: null,
-      affinity: getAffinitySettings(userInfo, { userId }),
-      dynamicPromptPlan: normalizeDynamicPromptPlan(options)
-    }
-  );
-
-  const contextStatsInstruction = 'If the user asks about current context usage, remaining context, token usage, or whether the chat is close to the context limit, you may call get_context_stats.';
   const reviewMode = String(options?.reviewMode || '').trim().toLowerCase();
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  const baseDynamicPromptPlan = normalizeDynamicPromptPlan(options);
+  const fallbackAffinity = getAffinitySettings(userInfo, { userId });
+  const featureFingerprint = hashText([
+    String(currentConfig.MEMORY_CLI_ENABLED),
+    String(currentConfig.MEMORY_CLI_CHAT_ENABLED),
+    String(currentConfig.STYLE_PROFILE_ENABLED),
+    String(currentConfig.SOCIAL_CONTEXT_ENABLED),
+    String(currentConfig.SELF_IMPROVEMENT_ENABLED),
+    String(currentConfig.SELF_IMPROVEMENT_PROMPT_ENABLED),
+    String(currentConfig.LIFE_SCHEDULER_ENABLED),
+    String(currentConfig.PROMPT_OPTIONAL_BUILD_ENABLED)
+  ].join('|'));
+  const systemPromptFingerprint = hashText(String(config.SYSTEM_PROMPT || ''));
+  const sharedShortTermContext = buildSharedShortTermContextMessages(userId, userInfo, {
+    chatHistory: options.chatHistory,
+    shortTermMemory: options.shortTermMemory,
+    routeMeta,
+    sessionKey: options.sessionKey
+  });
+  const cacheKeys = buildPromptCacheKeys(userId, routeMeta, {
+    ...options,
+    featureFingerprint,
+    promptManifestFingerprint: systemPromptFingerprint,
+    systemPromptFingerprint,
+    sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
+  });
+  const now = Date.now();
+  const essentialStartedAt = now;
+  prunePromptLayerCache(promptLayerCache.stable, now);
+  prunePromptLayerCache(promptLayerCache.session, now);
+  const stableCacheHit = promptLayerCache.stable.get(cacheKeys.stableKey)?.value || null;
+  const sessionCacheHit = promptLayerCache.session.get(cacheKeys.sessionKey)?.value || null;
+
+  if (String(customPrompt || '').trim()) {
+    const customBuilt = await withSoftTimeout(
+      () => buildBaseDynamicPrompt(userInfo, userId, question, customPrompt, {
+        ...options,
+        sharedShortTermContext
+      }),
+      Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
+      () => ({
+        dynamicPrompt: '',
+        stableSystemBlocks: [],
+        dynamicContextBlocks: [],
+        assistantOnlyContextBlocks: [],
+        promptSegments: {},
+        promptSnapshot: null,
+        memoryContext: null,
+        personaMemoryState: null,
+        affinity: fallbackAffinity,
+        dynamicPromptPlan: baseDynamicPromptPlan
+      })
+    );
+    const essentialDurationMs = Math.max(0, Date.now() - essentialStartedAt);
+    return {
+      ...customBuilt,
+      freshness: {
+        stableSystem: 'bypass',
+        sessionContext: 'bypass',
+        continuity: String(options?.continuitySignals ? 'fresh' : 'skipped')
+      },
+      cacheMeta: {
+        stableKey: '',
+        sessionKey: '',
+        hit: false,
+        stableHit: false,
+        sessionHit: false
+      },
+      latencyMeta: {
+        essentialDurationMs,
+        optionalDurationMs: 0,
+        optionalBuildEnabled: false,
+        optionalBudgetMs: 0,
+        optionalBudgetExceeded: false
+      }
+    };
+  }
+
+  const base = await withSoftTimeout(
+    async () => {
+      const stableLayer = stableCacheHit || await buildBaseDynamicPrompt(userInfo, userId, question, null, {
+        ...options,
+        sharedShortTermContext,
+        includeOptionalContextBlocks: false,
+        includePersonaModuleBlocks: false,
+        includeDynamicFewShotBlock: false,
+        resolvePersonaModules: false
+      });
+      const sessionLayer = await buildBaseDynamicPrompt(userInfo, userId, question, null, {
+        ...options,
+        sharedShortTermContext,
+        cachedStableSystemBlocks: stableLayer.stableSystemBlocks,
+        includeOptionalContextBlocks: true,
+        includePersonaModuleBlocks: false,
+        includeDynamicFewShotBlock: false,
+        resolvePersonaModules: false
+      });
+      return {
+        stableLayer,
+        sessionLayer
+      };
+    },
+    Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
+    () => ({
+      stableLayer: stableCacheHit || {
+        stableSystemBlocks: [],
+        promptSnapshot: null,
+        promptSegments: {},
+        affinity: fallbackAffinity,
+        dynamicPromptPlan: baseDynamicPromptPlan,
+        sharedShortTermSignature: String(sharedShortTermContext?.sharedShortTermSignature || '').trim()
+      },
+      sessionLayer: {
+        dynamicContextBlocks: [],
+        assistantOnlyContextBlocks: [],
+        promptSnapshot: null,
+        promptSegments: {},
+        memoryContext: null,
+        personaMemoryState: null,
+        affinity: fallbackAffinity,
+        dynamicPromptPlan: baseDynamicPromptPlan,
+        sharedShortTermSignature: String(sharedShortTermContext?.sharedShortTermSignature || '').trim(),
+        dynamicPromptBlockCatalog: []
+      }
+    })
+  );
+  const essentialDurationMs = Math.max(0, Date.now() - essentialStartedAt);
+  const stableLayer = base?.stableLayer && typeof base.stableLayer === 'object' ? base.stableLayer : {};
+  const sessionLayer = base?.sessionLayer && typeof base.sessionLayer === 'object' ? base.sessionLayer : {};
   const shouldInjectContextStatsInstruction = !options?.disableTools
     && !reviewMode
     && (
@@ -912,11 +1084,12 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     );
   const dynamicPromptPlan = normalizeDynamicPromptPlan({
     ...options,
-    dynamicPromptPlan: base.dynamicPromptPlan
+    dynamicPromptPlan: sessionLayer.dynamicPromptPlan || stableLayer.dynamicPromptPlan || baseDynamicPromptPlan
   });
   const criticalBlocks = [];
   const optionalBlocks = [];
   const extraBlocks = [];
+  const contextStatsInstruction = 'If the user asks about current context usage, remaining context, token usage, or whether the chat is close to the context limit, you may call get_context_stats.';
 
   if (shouldInjectContextStatsInstruction) {
     extraBlocks.push(createPromptBlock('context_stats_instruction', 'Context Stats Instruction', contextStatsInstruction, {
@@ -931,7 +1104,32 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }));
   }
 
-  if (shouldInjectLifeScheduler(options)) {
+  const optionalBuildStartedAt = Date.now();
+  const optionalBuildEnabled = currentConfig.PROMPT_OPTIONAL_BUILD_ENABLED !== false;
+  const optionalBudgetMs = Math.max(0, Number(currentConfig.PROMPT_OPTIONAL_BUILD_BUDGET_MS || 0) || 0);
+  const optionalBudgetExceeded = optionalBuildEnabled
+    ? (optionalBudgetMs > 0 && essentialDurationMs >= optionalBudgetMs)
+    : true;
+
+  let optionalLayer = null;
+  if (!optionalBudgetExceeded) {
+    optionalLayer = await withSoftTimeout(
+      () => buildBaseDynamicPrompt(userInfo, userId, question, null, {
+        ...options,
+        sharedShortTermContext,
+        cachedStableSystemBlocks: stableLayer.stableSystemBlocks,
+        includeOptionalContextBlocks: true,
+        includePersonaModuleBlocks: true,
+        includeDynamicFewShotBlock: true,
+        resolvePersonaModules: true
+      }),
+      Math.max(0, optionalBudgetMs - essentialDurationMs),
+      null
+    );
+  }
+  const effectiveOptionalLayer = optionalLayer && typeof optionalLayer === 'object' ? optionalLayer : null;
+
+  if (!optionalBudgetExceeded && shouldInjectLifeScheduler(options)) {
     const lifeSchedulerEngine = getLifeSchedulerEngine();
     if (lifeSchedulerEngine && typeof lifeSchedulerEngine.ensureCaches === 'function') {
       lifeSchedulerEngine.ensureCaches();
@@ -941,7 +1139,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     if (injectionEntry && String(injectionEntry.status || '').trim() === 'ok') {
       const injectionBlock = lifeSchedulerEngine.formatInjectionBlock(injectionEntry, new Date());
       if (String(injectionBlock || '').trim()) {
-      extraBlocks.push(createPromptBlock('life_scheduler', 'Life Scheduler', injectionBlock, {
+        extraBlocks.push(createPromptBlock('life_scheduler', 'Life Scheduler', injectionBlock, {
           stage: 'main',
           priority: 700,
           authority: 'optional_modulation',
@@ -955,7 +1153,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }
   }
 
-  if (shouldInjectStyleProfile(options)) {
+  if (!optionalBudgetExceeded && shouldInjectStyleProfile(options)) {
     const styleSnippet = buildStyleProfileSnippet({
       groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
       maxChars: currentConfig.STYLE_PROFILE_PROMPT_MAX_CHARS
@@ -988,7 +1186,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }));
   }
 
-  if (shouldInjectSocialContext(options)) {
+  if (!optionalBudgetExceeded && shouldInjectSocialContext(options)) {
     const socialSnippet = buildSocialContextSnippet({
       groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
       maxChars: currentConfig.SOCIAL_CONTEXT_PROMPT_MAX_CHARS
@@ -1007,7 +1205,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }
   }
 
-  if (shouldInjectSelfImprovement(options)) {
+  if (!optionalBudgetExceeded && shouldInjectSelfImprovement(options)) {
     const snippet = buildPromptSnippet({
       query: question,
       routePolicyKey: String(options?.routePolicyKey || routeMeta.routePolicyKey || '').trim(),
@@ -1030,37 +1228,38 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }
   }
 
-  const memoryCliInstruction = buildV2MemoryCliInstruction(options?.memoryCliTurn);
+  const memoryCliInstruction = !optionalBudgetExceeded ? buildV2MemoryCliInstruction(options?.memoryCliTurn) : '';
+  const combinedStableBlocks = normalizeArray(stableLayer.stableSystemBlocks).map((item) => ({ ...item }));
+  const combinedDynamicBlocks = normalizeArray(sessionLayer.dynamicContextBlocks)
+    .concat(normalizeArray(effectiveOptionalLayer?.dynamicContextBlocks))
+    .map((item) => ({ ...item }));
+  const combinedAssistantOnlyBlocks = normalizeArray(sessionLayer.assistantOnlyContextBlocks)
+    .concat(normalizeArray(effectiveOptionalLayer?.assistantOnlyContextBlocks))
+    .map((item) => ({ ...item }));
+  const heuristicDynamicPlan = buildHeuristicDynamicPromptPlan({
+    continuitySignals: options?.continuitySignals,
+    directedContext: options?.routeMeta?.directedContext,
+    personaModules: dynamicPromptPlan.personaModules,
+    hasAffinityState: true,
+    hasLongTermProfile: combinedDynamicBlocks.some((item) => item?.id === 'long_term_profile'),
+    hasImpression: combinedDynamicBlocks.some((item) => item?.id === 'impression'),
+    hasRelationshipState: combinedDynamicBlocks.some((item) => normalizeText(item?.meta?.blockId) === 'relationship_state'),
+    hasDynamicFewShot: combinedAssistantOnlyBlocks.some((item) => item?.id === 'dynamic_few_shot'),
+    hasStyleProfile: combinedDynamicBlocks.some((item) => item?.id === 'style_profile') || extraBlocks.some((item) => item?.id === 'style_profile'),
+    hasSocialContext: combinedDynamicBlocks.some((item) => item?.id === 'social_context') || extraBlocks.some((item) => item?.id === 'social_context'),
+    hasSelfImprovement: combinedDynamicBlocks.some((item) => item?.id === 'self_improvement') || extraBlocks.some((item) => item?.id === 'self_improvement'),
+    hasLifeScheduler: combinedDynamicBlocks.some((item) => item?.id === 'life_scheduler') || extraBlocks.some((item) => item?.id === 'life_scheduler'),
+    hasContextStatsInstruction: extraBlocks.some((item) => item?.id === 'context_stats_instruction'),
+    hasMemoryCliInstruction: Boolean(memoryCliInstruction && shouldExposeMemoryCli(options))
+  });
   const finalDynamicPromptPlan = {
     ...dynamicPromptPlan,
     enabledBlockIds: Array.from(new Set([
-      ...normalizeArray(buildHeuristicDynamicPromptPlan({
-        continuitySignals: options?.continuitySignals,
-        directedContext: options?.routeMeta?.directedContext,
-        personaModules: dynamicPromptPlan.personaModules,
-        hasAffinityState: true,
-        hasStyleProfile: extraBlocks.some((item) => item?.id === 'style_profile'),
-        hasSocialContext: extraBlocks.some((item) => item?.id === 'social_context'),
-        hasSelfImprovement: extraBlocks.some((item) => item?.id === 'self_improvement'),
-        hasLifeScheduler: extraBlocks.some((item) => item?.id === 'life_scheduler'),
-        hasContextStatsInstruction: extraBlocks.some((item) => item?.id === 'context_stats_instruction'),
-        hasMemoryCliInstruction: Boolean(memoryCliInstruction && shouldExposeMemoryCli(options))
-      }).enabledBlockIds),
+      ...normalizeArray(heuristicDynamicPlan.enabledBlockIds),
       ...normalizeArray(dynamicPromptPlan.enabledBlockIds)
     ])),
     rationaleByBlock: {
-      ...(buildHeuristicDynamicPromptPlan({
-        continuitySignals: options?.continuitySignals,
-        directedContext: options?.routeMeta?.directedContext,
-        personaModules: dynamicPromptPlan.personaModules,
-        hasAffinityState: true,
-        hasStyleProfile: extraBlocks.some((item) => item?.id === 'style_profile'),
-        hasSocialContext: extraBlocks.some((item) => item?.id === 'social_context'),
-        hasSelfImprovement: extraBlocks.some((item) => item?.id === 'self_improvement'),
-        hasLifeScheduler: extraBlocks.some((item) => item?.id === 'life_scheduler'),
-        hasContextStatsInstruction: extraBlocks.some((item) => item?.id === 'context_stats_instruction'),
-        hasMemoryCliInstruction: Boolean(memoryCliInstruction && shouldExposeMemoryCli(options))
-      }).rationaleByBlock || {}),
+      ...(heuristicDynamicPlan.rationaleByBlock || {}),
       ...(dynamicPromptPlan.rationaleByBlock || {})
     }
   };
@@ -1078,15 +1277,16 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     })
     : null;
   const combinedBlocks = [
-    ...normalizeArray(base.stableSystemBlocks),
-    ...normalizeArray(base.dynamicContextBlocks),
-    ...normalizeArray(base.assistantOnlyContextBlocks),
+    ...combinedStableBlocks,
+    ...combinedDynamicBlocks,
+    ...combinedAssistantOnlyBlocks,
     ...extraBlocks,
     ...(memoryCliBlock ? [memoryCliBlock] : [])
   ];
+  const requiredIds = normalizeArray(stableLayer.promptSnapshot?.stableBlockIds)
+    .concat(normalizeArray(sessionLayer.promptSnapshot?.dynamicBlockIds).filter((id) => normalizeText(id).startsWith('persona_memory')));
   const selectedBlocks = filterBlocksByPlan(combinedBlocks, finalDynamicPromptPlan, {
-    requiredIds: normalizeArray(base.promptSnapshot?.stableBlockIds)
-      .concat(normalizeArray(base.promptSnapshot?.dynamicBlockIds).filter((id) => normalizeText(id).startsWith('persona_memory')))
+    requiredIds
   });
   const criticalBlockIdPrefixes = new Set([
     'retrieved_memory',
@@ -1100,11 +1300,17 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     const blockId = normalizeText(block?.id);
     const isCritical = block?.lane === 'stable_system'
       || blockId === 'context_stats_instruction'
+      || blockId === 'memory_cli_followup'
+      || blockId === 'memory_cli_instruction'
       || [...criticalBlockIdPrefixes].some((prefix) => blockId.startsWith(prefix));
     if (isCritical) criticalBlocks.push(block);
     else optionalBlocks.push(block);
   }
-  const laneSplit = splitBlocksByLane(selectedBlocks);
+
+  const includedOptionalBlocks = (!optionalBuildEnabled || optionalBudgetExceeded)
+    ? []
+    : optionalBlocks;
+  const laneSplit = splitBlocksByLane(criticalBlocks.concat(includedOptionalBlocks));
   const mergedSnapshot = buildPromptSnapshot(
     [
       ...laneSplit.stableSystemBlocks,
@@ -1117,7 +1323,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }
   );
   const promptSegments = {
-    ...(base.promptSegments || {}),
+    ...(sessionLayer.promptSegments || {}),
     systemPrompt: blocksToMessages(laneSplit.stableSystemBlocks.concat(laneSplit.dynamicContextBlocks)),
     assembledBlocks: mergedSnapshot.assembledBlocks,
     renderedSystemMessages: mergedSnapshot.renderedSystemMessages,
@@ -1125,13 +1331,17 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     trimDecisions: mergedSnapshot.trimDecisions,
     stableSystemBlocks: laneSplit.stableSystemBlocks,
     dynamicContextBlocks: laneSplit.dynamicContextBlocks,
-    assistantOnlyContextBlocks: laneSplit.assistantOnlyContextBlocks
+    assistantOnlyContextBlocks: laneSplit.assistantOnlyContextBlocks,
+    securityLabels: Array.isArray(options?.securityLabels) ? options.securityLabels : [],
+    activatedPersonaModules: normalizeArray(effectiveOptionalLayer?.promptSegments?.activatedPersonaModules),
+    personaModuleCandidates: normalizeArray(effectiveOptionalLayer?.promptSegments?.personaModuleCandidates),
+    personaModuleTokenUsage: normalizeArray(effectiveOptionalLayer?.promptSegments?.personaModuleTokenUsage)
   };
   const enrichedSnapshot = {
     ...mergedSnapshot,
-    activatedPersonaModules: base.promptSegments?.activatedPersonaModules || [],
-    personaModuleCandidates: base.promptSegments?.personaModuleCandidates || [],
-    personaModuleTokenUsage: base.promptSegments?.personaModuleTokenUsage || [],
+    activatedPersonaModules: promptSegments.activatedPersonaModules,
+    personaModuleCandidates: promptSegments.personaModuleCandidates,
+    personaModuleTokenUsage: promptSegments.personaModuleTokenUsage,
     stableBlockIds: laneSplit.stableSystemBlocks.map((item) => item.id),
     dynamicBlockIds: laneSplit.dynamicContextBlocks.map((item) => item.id),
     assistantOnlyBlockIds: laneSplit.assistantOnlyContextBlocks.map((item) => item.id),
@@ -1142,28 +1352,46 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       dynamic: laneSplit.dynamicContextBlocks.map((item) => item.id),
       assistantOnly: laneSplit.assistantOnlyContextBlocks.map((item) => item.id)
     },
+    dynamicPromptBlockCatalog: effectiveOptionalLayer?.dynamicPromptBlockCatalog || sessionLayer.dynamicPromptBlockCatalog || [],
     dynamicPromptPlan: finalDynamicPromptPlan
   };
   const freshness = {
     stableSystem: stableCacheHit ? 'cache' : 'fresh',
-    sessionContext: sessionCacheHit ? 'cache' : (stableCacheHit ? 'partial' : 'fresh'),
+    sessionContext: 'fresh',
     continuity: String(options?.continuitySignals ? 'fresh' : 'skipped')
   };
   const cacheMeta = {
     stableKey: cacheKeys.stableKey,
     sessionKey: cacheKeys.sessionKey,
-    hit: Boolean(stableCacheHit || sessionCacheHit)
+    hit: Boolean(stableCacheHit),
+    stableHit: Boolean(stableCacheHit),
+    sessionHit: false
   };
-  promptLayerCache.stable.set(cacheKeys.stableKey, {
-    expiresAt: now + Math.max(0, Number(currentConfig.PROMPT_STABLE_CACHE_TTL_MS || 0)),
-    base
-  });
+
+  if (!stableCacheHit && normalizeArray(stableLayer.stableSystemBlocks).length > 0) {
+    promptLayerCache.stable.set(cacheKeys.stableKey, {
+      expiresAt: now + Math.max(0, Number(currentConfig.PROMPT_STABLE_CACHE_TTL_MS || 0)),
+      value: {
+        stableSystemBlocks: normalizeArray(stableLayer.stableSystemBlocks).map((item) => ({ ...item })),
+        promptSnapshot: stableLayer.promptSnapshot || null,
+        promptSegments: {
+          stableSystemBlocks: normalizeArray(stableLayer.promptSegments?.stableSystemBlocks).map((item) => ({ ...item }))
+        },
+        dynamicPromptPlan: stableLayer.dynamicPromptPlan || baseDynamicPromptPlan
+      }
+    });
+  }
   promptLayerCache.session.set(cacheKeys.sessionKey, {
     expiresAt: now + Math.max(0, Number(currentConfig.PROMPT_SESSION_CACHE_TTL_MS || 0)),
-    base
+    value: {
+      sharedShortTermSignature: String(sharedShortTermContext?.sharedShortTermSignature || '').trim(),
+      sessionKey: String(options?.sessionKey || '').trim(),
+      groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim()
+    }
   });
+
+  const optionalDurationMs = Math.max(0, Date.now() - optionalBuildStartedAt);
   return {
-    ...base,
     dynamicPrompt: serializePromptBlocks([
       ...laneSplit.stableSystemBlocks,
       ...laneSplit.dynamicContextBlocks,
@@ -1176,9 +1404,19 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     promptSegments,
     dynamicPromptPlan: finalDynamicPromptPlan,
     criticalBlocks,
-    optionalBlocks,
+    optionalBlocks: includedOptionalBlocks,
+    memoryContext: effectiveOptionalLayer?.memoryContext || sessionLayer.memoryContext || null,
+    personaMemoryState: effectiveOptionalLayer?.personaMemoryState || sessionLayer.personaMemoryState || null,
+    affinity: effectiveOptionalLayer?.affinity || sessionLayer.affinity || stableLayer.affinity || fallbackAffinity,
     freshness,
-    cacheMeta
+    cacheMeta,
+    latencyMeta: {
+      essentialDurationMs,
+      optionalDurationMs,
+      optionalBuildEnabled,
+      optionalBudgetMs,
+      optionalBudgetExceeded
+    }
   };
 }
 
@@ -1201,6 +1439,7 @@ module.exports = {
   buildDynamicPrompt,
   buildVisionMessageContent,
   mergeAllowedToolsWithMemoryCli,
+  promptLayerCache,
   shouldBypassHumanizerForPolicy,
   shouldExposeMemoryCli
 };

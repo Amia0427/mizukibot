@@ -463,7 +463,12 @@ function materializeMemoryViews(options = {}) {
           userConstraints: [],
           recentMessages: [],
           carryOverUserTurn: '',
-          summary: ''
+          summary: '',
+          phaseHint: '',
+          interactionState: {},
+          sceneState: {},
+          expressionState: {},
+          moduleState: {}
         };
         const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
         sessionProjection.sessions[sessionKey] = {
@@ -474,9 +479,22 @@ function materializeMemoryViews(options = {}) {
           activeTopic: normalizeText(payload.activeTopic || existing.activeTopic),
           carryOverUserTurn: normalizeText(payload.carryOverUserTurn || existing.carryOverUserTurn),
           summary: clampText(payload.summary || existing.summary, 2400),
+          phaseHint: normalizeText(payload.phaseHint || existing.phaseHint),
           openLoops: Array.isArray(payload.openLoops) ? payload.openLoops.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.openLoops,
           assistantCommitments: Array.isArray(payload.assistantCommitments) ? payload.assistantCommitments.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.assistantCommitments,
           userConstraints: Array.isArray(payload.userConstraints) ? payload.userConstraints.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.userConstraints,
+          interactionState: payload.interactionState && typeof payload.interactionState === 'object'
+            ? payload.interactionState
+            : existing.interactionState,
+          sceneState: payload.sceneState && typeof payload.sceneState === 'object'
+            ? payload.sceneState
+            : existing.sceneState,
+          expressionState: payload.expressionState && typeof payload.expressionState === 'object'
+            ? payload.expressionState
+            : existing.expressionState,
+          moduleState: payload.moduleState && typeof payload.moduleState === 'object'
+            ? payload.moduleState
+            : existing.moduleState,
           recentMessages: Array.isArray(payload.recentMessages)
             ? payload.recentMessages
               .map((item) => ({

@@ -41,4 +41,18 @@ const claudeSendCommand = parseAdminCommand('/claude-send 继续');
 assert.strictEqual(claudeSendCommand.cmd, 'claude-send');
 assert.strictEqual(claudeSendCommand.payload, '继续');
 
+const notebookLookupRoute = detectIntent({
+  rawText: '宝我昨天给你发了什么图',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+
+assert.strictEqual(notebookLookupRoute.topRouteType, 'direct_chat');
+assert.strictEqual(notebookLookupRoute.meta.responseIntent, 'answer');
+assert.strictEqual(notebookLookupRoute.facets.sourceScope, 'notebook');
+assert.strictEqual(notebookLookupRoute.meta.reason, 'recall-needs-tool-assistance');
+assert.strictEqual(notebookLookupRoute.meta.toolIntent, 'maybe_tools');
+assert.deepStrictEqual(notebookLookupRoute.meta.allowedTools, ['notebook_search', 'notebook_list_docs']);
+
 console.log('routerChineseKeywords.test.js passed');

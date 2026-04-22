@@ -166,7 +166,7 @@ function pickCandidateIds(context = {}) {
     candidates.add('vsinger_branch');
   }
 
-  if (/(秘密|分类|身份|被发现|被看见|关系变了|说不出口|接纳|认同)/i.test(combined)) {
+  if (/(秘密|被发现|被看见|关系变了|说不出口|你到底是什么|你究竟是什么|真实身份|真实的你|给自己定性|给你定性|把你归类|算男还是女|算女生还是男生|到底是男是女|自我认同)/i.test(combined)) {
     candidates.add('boundary_touch');
   }
 

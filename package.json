@@ -12,7 +12,7 @@
     "test": "node scripts/run-tests.js",
     "console": "node scripts/console.js",
     "check:agent": "node scripts/check-agent.js",
-    "check:agent:static": "CHECK_RUN=0 node scripts/check-agent.js",
+    "check:agent:static": "cross-env CHECK_RUN=0 node scripts/check-agent.js",
     "diag:fallback": "node scripts/diagnose-main-model-fallback.js",
     "diag:continuity": "node scripts/diagnose-continuity-state.js",
     "memory:v3:migrate": "node scripts/migrate-memory-v3.js",

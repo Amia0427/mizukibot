@@ -584,7 +584,7 @@ function shouldPreferToolAssistance(text = '', imageUrl = null) {
   if (!t || imageUrl) return false;
   if (isSimpleTransformTask(t, imageUrl)) return false;
   if (isSelfContainedProductivityPlan(t)) return false;
-  return /(search|look up|find|google|latest|news|official|docs?|documentation|source|link|links|log|logs|history|timeline|remember|recall|earlier|previous|before|web|website|\u641c\u7d22|\u67e5\u4e00\u4e0b|\u67e5\u67e5|\u5e2e\u6211\u67e5|\u7f51\u9875|\u5b98\u7f51|\u94fe\u63a5|\u8d44\u6599|\u6587\u6863|\u65e5\u5fd7|\u8bb0\u5f55|\u4e4b\u524d|\u524d\u51e0\u5929|\u8bb0\u5f97|\u8bb0\u4e0d\u8bb0\u5f97|\u56de\u5fc6)/i.test(t);
+  return /(search|look up|find|google|latest|news|official|docs?|documentation|source|link|links|log|logs|history|timeline|remember|recall|earlier|previous|before|web|website|\u641c\u7d22|\u67e5\u4e00\u4e0b|\u67e5\u67e5|\u5e2e\u6211\u67e5|\u7f51\u9875|\u5b98\u7f51|\u94fe\u63a5|\u8d44\u6599|\u6587\u6863|\u65e5\u5fd7|\u8bb0\u5f55|\u4e4b\u524d|\u6628\u5929|\u524d\u51e0\u5929|\u8bb0\u5f97|\u8bb0\u4e0d\u8bb0\u5f97|\u56de\u5fc6|\u53d1\u8fc7|\u56fe|\u56fe\u7247)/i.test(t);
 }
 
 function buildPreferredToolRoute({
@@ -596,7 +596,8 @@ function buildPreferredToolRoute({
   sourceScope = 'mixed',
   toolNeed = ['mixed'],
   needsMemory = false,
-  freshness = 'unknown'
+  freshness = 'unknown',
+  allowedTools = undefined
 } = {}) {
   return makeRoute({
     confidence,
@@ -606,7 +607,7 @@ function buildPreferredToolRoute({
     topRouteType: 'direct_chat',
     intent: { risk: 'low', toolNeed, executionMode: 'staged', needsPlanning: false, needsMemory },
     facets: { modality: 'text', sourceScope, domain: needsMemory ? 'personal' : 'general', outputKind: 'answer', freshness },
-    meta: { reason, chatMode: 'text_chat', toolIntent: 'maybe_tools', responseIntent: 'answer' }
+    meta: { reason, allowedTools, chatMode: 'text_chat', toolIntent: 'maybe_tools', responseIntent: 'answer' }
   });
 }
 
@@ -854,6 +855,7 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
     !imageUrl &&
     /(\bhow\b|\bwhat\b|\bwhich\b|\bwhere\b|\bhelp\b|\bcan you\b|\u600e\u4e48|\u54ea\u4e2a|\u54ea\u91cc|\u4ec0\u4e48|\u8fd9\u4e2a|\u90a3\u4e2a|\u600e\u4e48\u5f04|\u5e2e\u6211\u770b\u770b)/i.test(cleanText) &&
     !/(https?:\/\/|www\.|\u7f51\u9875|\u94fe\u63a5|\u6587\u7ae0|\u89c6\u9891|\u6587\u4ef6|\u7b14\u8bb0|notebook|notes?)/i.test(cleanText) &&
+    !/(remember|recall|earlier|previous|before|history|timeline|log|logs|\u8bb0\u5f97|\u8bb0\u4e0d\u8bb0\u5f97|\u4e4b\u524d|\u6628\u5929|\u524d\u51e0\u5929|\u56de\u5fc6|\u8bb0\u5f55|\u53d1\u8fc7|\u56fe|\u56fe\u7247)/i.test(cleanText) &&
     !/[\u3002\uff01\uff1f.!?]\s*.+/.test(cleanText) &&
     String(cleanText || '').trim().length <= 24 &&
     !/(\u8ba1\u5212|\u603b\u7ed3|\u6458\u8981|\u6982\u62ec|\u63d0\u70bc|\u6539\u5199|\u7ffb\u8bd1|\u90ae\u4ef6|\u5f85\u529e|\u8bae\u7a0b|\u90e8\u7f72|\u5b89\u88c5|\u4fee\u6539|\u5199\u5165)/i.test(cleanText) &&
@@ -872,7 +874,7 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
   }
 
   if (shouldPreferToolAssistance(cleanText, imageUrl)) {
-    const prefersMemory = /(remember|recall|earlier|previous|before|history|timeline|log|logs|\u8bb0\u5f97|\u8bb0\u4e0d\u8bb0\u5f97|\u4e4b\u524d|\u524d\u51e0\u5929|\u56de\u5fc6|\u8bb0\u5f55)/i.test(cleanText);
+    const prefersMemory = /(remember|recall|earlier|previous|before|history|timeline|log|logs|\u8bb0\u5f97|\u8bb0\u4e0d\u8bb0\u5f97|\u4e4b\u524d|\u6628\u5929|\u524d\u51e0\u5929|\u56de\u5fc6|\u8bb0\u5f55|\u53d1\u8fc7|\u56fe|\u56fe\u7247)/i.test(cleanText);
     const prefersWeb = /(search|look up|find|google|latest|news|official|docs?|documentation|source|link|links|web|website|\u641c\u7d22|\u67e5\u4e00\u4e0b|\u67e5\u67e5|\u5e2e\u6211\u67e5|\u7f51\u9875|\u5b98\u7f51|\u94fe\u63a5|\u8d44\u6599|\u6587\u6863)/i.test(cleanText);
     return buildPreferredToolRoute({
       confidence: prefersMemory && prefersWeb ? 0.9 : 0.86,
@@ -883,7 +885,8 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
       sourceScope: prefersMemory && prefersWeb ? 'mixed' : (prefersMemory ? 'notebook' : 'web'),
       toolNeed: prefersMemory && prefersWeb ? ['mixed'] : (prefersMemory ? ['local-read'] : ['web']),
       needsMemory: prefersMemory,
-      freshness: prefersWeb ? 'latest' : 'unknown'
+      freshness: prefersWeb ? 'latest' : 'unknown',
+      allowedTools: prefersMemory ? ['notebook_search', 'notebook_list_docs'] : undefined
     });
   }
 
@@ -1097,6 +1100,9 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
         ? 'live'
         : 'web';
     const toolNeed = domain === 'personal' ? ['local-read'] : (imageUrl ? ['image'] : ['web']);
+    const allowedTools = domain === 'personal'
+      ? ['notebook_search', 'notebook_list_docs']
+      : undefined;
 
     return makeRoute({
       confidence: lookupScore,
@@ -1112,7 +1118,13 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
         outputKind: 'answer',
         freshness: domain === 'weather' || domain === 'finance' || sourceScope === 'live' ? 'latest' : 'unknown'
       },
-      meta: { reason: 'scored-lookup', chatMode: imageUrl ? 'image_qa' : 'text_chat', toolIntent: 'maybe_tools', responseIntent: 'answer' }
+      meta: {
+        reason: 'scored-lookup',
+        allowedTools,
+        chatMode: imageUrl ? 'image_qa' : 'text_chat',
+        toolIntent: 'maybe_tools',
+        responseIntent: 'answer'
+      }
     });
   }
 
