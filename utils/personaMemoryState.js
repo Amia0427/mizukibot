@@ -771,12 +771,14 @@ async function composePersonaMemoryState(request = {}, options = {}) {
   const question = normalizeText(normalizedRequest.question || normalizedRequest.text || options.question, 1000);
   const shortTermStore = normalizeObject(options.shortTermMemory || options.shortTermStore);
   const chatHistory = normalizeObject(options.chatHistory || options.historyStore);
-  const sharedShortTermContext = buildSharedShortTermContextMessages(userId, normalizeObject(options.userInfo), {
-    chatHistory,
-    shortTermMemory: shortTermStore,
-    routeMeta,
-    sessionKey
-  });
+  const sharedShortTermContext = options.sharedShortTermContext && typeof options.sharedShortTermContext === 'object'
+    ? options.sharedShortTermContext
+    : buildSharedShortTermContextMessages(userId, normalizeObject(options.userInfo), {
+      chatHistory,
+      shortTermMemory: shortTermStore,
+      routeMeta,
+      sessionKey
+    });
   const shortTermState = normalizeShortTermState(sharedShortTermContext.shortTermState);
   const shortTermRecentMessages = normalizeArray(sharedShortTermContext.recentHistory);
   const bridgeStore = loadBridgeStore();
@@ -795,19 +797,20 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     topic: shortTermState.activeTopic || bridgeState.activeTopic || question,
     lookbackDays: options.lookbackDays
   });
-  const memoryContextBuilder = options.useSyncMemoryContext ? buildMemoryContext : buildMemoryContextAsync;
-  const memoryContext = await memoryContextBuilder(userId, question, {
-    routePolicyKey: normalizeText(normalizedRequest.routePolicyKey || options.routePolicyKey),
-    topRouteType: normalizeText(normalizedRequest.topRouteType || options.topRouteType),
-    groupId,
-    sessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id || normalizedRequest.sessionId),
-    sessionKey,
-    channelId: normalizeText(routeMeta.channelId || routeMeta.channel_id || normalizedRequest.channelId),
-    taskType: normalizeText(routeMeta.taskType || routeMeta.task_type || normalizedRequest.taskType),
-    agentName: normalizeText(routeMeta.agentName || routeMeta.agent_name),
-    toolName: normalizeText(routeMeta.toolName || routeMeta.tool_name),
-    sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
-  });
+  const memoryContext = options.memoryContext && typeof options.memoryContext === 'object'
+    ? options.memoryContext
+    : await (options.useSyncMemoryContext ? buildMemoryContext : buildMemoryContextAsync)(userId, question, {
+      routePolicyKey: normalizeText(normalizedRequest.routePolicyKey || options.routePolicyKey),
+      topRouteType: normalizeText(normalizedRequest.topRouteType || options.topRouteType),
+      groupId,
+      sessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id || normalizedRequest.sessionId),
+      sessionKey,
+      channelId: normalizeText(routeMeta.channelId || routeMeta.channel_id || normalizedRequest.channelId),
+      taskType: normalizeText(routeMeta.taskType || routeMeta.task_type || normalizedRequest.taskType),
+      agentName: normalizeText(routeMeta.agentName || routeMeta.agent_name),
+      toolName: normalizeText(routeMeta.toolName || routeMeta.tool_name),
+      sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
+    });
   const styleProfile = getStyleProfile(groupId);
   const socialContext = groupId ? getGroupSocialContext(groupId) : {};
   const affinityState = normalizeObject(memoryContext.affinityState) && Object.keys(normalizeObject(memoryContext.affinityState)).length

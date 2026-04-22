@@ -65,6 +65,9 @@ function createPrepareNode(deps = {}) {
   const buildDynamicPromptImpl = typeof deps.buildDynamicPromptImpl === 'function'
     ? deps.buildDynamicPromptImpl
     : (async () => ({ dynamicPrompt: '', affinity: null, memoryContext: null }));
+  const buildPreparedMainConversationContext = typeof deps.buildPreparedMainConversationContext === 'function'
+    ? deps.buildPreparedMainConversationContext
+    : (() => null);
   const classifyPromptThreat = typeof deps.classifyPromptThreat === 'function'
     ? deps.classifyPromptThreat
     : (() => ({ labels: [], reasons: [], score: 0 }));
@@ -292,6 +295,27 @@ function createPrepareNode(deps = {}) {
         }
       }
     );
+    const preparedMainConversationContext = buildPreparedMainConversationContext({
+      ...state,
+      request: {
+        ...normalizeObject(restoredState.request, {}),
+        ...state.request,
+        allowedTools: executionAllowedTools
+      },
+      memory: {
+        ...normalizeObject(restoredState.memory, state.memory),
+        dynamicPrompt,
+        stableSystemBlocks: normalizeArray(stableSystemBlocks),
+        dynamicContextBlocks: normalizeArray(dynamicContextBlocks),
+        assistantOnlyContextBlocks: normalizeArray(assistantOnlyContextBlocks),
+        affinity,
+        context: memoryContext || null
+      },
+      execution: {
+        ...restoredExecution,
+        memoryCliTurn: executionMemoryCliTurn
+      }
+    });
 
     const nextState = {
       ...state,
@@ -340,7 +364,15 @@ function createPrepareNode(deps = {}) {
               }
             : null,
           hasSufficientEvidence: continuityBuilt.hasSufficientEvidence
-        }
+        },
+        preparedMainConversationContext: preparedMainConversationContext || null,
+        mainConversationMessages: normalizeArray(preparedMainConversationContext?.messages),
+        assistantOnlyContextMessagesPrepared: normalizeArray(preparedMainConversationContext?.assistantOnlyContextMessages),
+        canonicalSegmentsPrepared: preparedMainConversationContext?.canonicalSegments || null,
+        compactionPlanPrepared: preparedMainConversationContext?.compactionPlan || null,
+        mainConversationSnapshot: preparedMainConversationContext?.mainConversationSnapshot || null,
+        contextStats: preparedMainConversationContext?.contextStats || null,
+        mainConversationSnapshotSignature: String(preparedMainConversationContext?.signature || '').trim()
       },
       plan: resumeUsed
         ? normalizePlanForResume({
@@ -372,6 +404,8 @@ function createPrepareNode(deps = {}) {
             deferred: true,
             prompt_build_essential_ms: Number(latencyMeta?.essentialDurationMs || 0) || 0,
             prompt_build_optional_ms: Number(latencyMeta?.optionalDurationMs || 0) || 0,
+            prompt_collect_ms: Number(latencyMeta?.promptCollectMs || 0) || 0,
+            prompt_render_ms: Number(latencyMeta?.promptRenderMs || 0) || 0,
             mcp_warm_wait_ms: 0
           }
         }

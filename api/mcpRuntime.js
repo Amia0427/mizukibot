@@ -37,6 +37,7 @@ const DEFAULT_MCP_MAX_DEPTH = Math.max(
 
 const sessionPool = new Map();
 const initializePromisePool = new Map();
+const discoveryFailureCooldowns = new Map();
 let cachedDynamicRegistry = {
   generatedAt: 0,
   tools: [],
@@ -127,6 +128,50 @@ function logMcp(event, payload = {}) {
   try {
     console.log(`[${event}]`, payload);
   } catch (_) {}
+}
+
+function getDiscoveryFailureTtlMs() {
+  return Math.max(1000, Number(config.MCP_DISCOVERY_FAILURE_TTL_MS || 30000) || 30000);
+}
+
+function readDiscoveryFailure(serverName = '') {
+  const key = String(serverName || '').trim();
+  if (!key) return null;
+  const entry = discoveryFailureCooldowns.get(key);
+  if (!entry) return null;
+  if (Number(entry.expiresAt || 0) <= Date.now()) {
+    discoveryFailureCooldowns.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+function clearDiscoveryFailure(serverName = '') {
+  const key = String(serverName || '').trim();
+  if (!key) return;
+  discoveryFailureCooldowns.delete(key);
+}
+
+function writeDiscoveryFailure(serverName = '', error = null, stage = 'discover') {
+  const key = String(serverName || '').trim();
+  if (!key) return;
+  const normalized = normalizeMcpError(error, 'MCP_DISCOVERY_FAILED', {
+    fallbackMessage: `mcp ${stage} failed for ${key}`
+  });
+  discoveryFailureCooldowns.set(key, {
+    code: String(normalized.code || '').trim(),
+    message: String(normalized.message || '').trim(),
+    stage,
+    expiresAt: Date.now() + getDiscoveryFailureTtlMs()
+  });
+}
+
+function maybeThrowDiscoveryFailureCooldown(serverName = '', stage = 'discover') {
+  const entry = readDiscoveryFailure(serverName);
+  if (!entry) return;
+  throw normalizeMcpError(new Error(entry.message || `mcp ${stage} cooldown active for ${serverName}`), entry.code || 'MCP_DISCOVERY_COOLDOWN', {
+    fallbackMessage: `mcp ${stage} cooldown active for ${serverName}`
+  });
 }
 
 function resolveMcpConfigPath(explicitPath = '') {
@@ -611,6 +656,7 @@ function sendJsonRpc(entry, method, params = {}, options = {}) {
 }
 
 async function initializeServer(entry) {
+  maybeThrowDiscoveryFailureCooldown(entry?.serverName, 'initialize');
   if (entry.initialized) return entry;
   if (initializePromisePool.has(entry.serverName)) return initializePromisePool.get(entry.serverName);
 
@@ -648,6 +694,7 @@ async function initializeServer(entry) {
           status: 'ok',
           protocolMode
         });
+        clearDiscoveryFailure(activeEntry.serverName);
         return activeEntry;
       } catch (error) {
         lastError = error;
@@ -677,6 +724,7 @@ async function initializeServer(entry) {
       stage: 'initialize',
       error: lastError?.message || String(lastError || '')
     });
+    writeDiscoveryFailure(activeEntry.serverName, lastError, 'initialize');
     throw normalizeMcpError(lastError, 'MCP_INIT_FAILED', {
       fallbackMessage: `failed to initialize mcp server ${activeEntry.serverName}`
     });
@@ -709,6 +757,7 @@ function normalizeMcpToolDescriptor(serverName = '', rawTool = {}) {
 }
 
 async function discoverServerTools(serverConfig = {}, options = {}) {
+  maybeThrowDiscoveryFailureCooldown(serverConfig?.serverName, 'discover');
   const entry = await initializeServer(ensureSessionEntry(serverConfig));
 
   const ttlMs = Math.max(1, Number(options.ttlMs || DEFAULT_MCP_DISCOVERY_TTL_MS) || DEFAULT_MCP_DISCOVERY_TTL_MS);
@@ -717,19 +766,25 @@ async function discoverServerTools(serverConfig = {}, options = {}) {
     return entry.toolsCache;
   }
 
-  const result = await sendJsonRpc(entry, 'tools/list', {}, {
-    timeoutMs: Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, ttlMs)
-  });
-  const tools = Array.isArray(result?.tools) ? result.tools : [];
-  entry.toolsCache = tools
-    .map((tool) => normalizeMcpToolDescriptor(serverConfig.serverName, tool))
-    .filter(Boolean);
-  entry.toolsFetchedAt = now;
-  logMcp('mcp_tools_discovered', {
-    serverName: serverConfig.serverName,
-    count: entry.toolsCache.length
-  });
-  return entry.toolsCache;
+  try {
+    const result = await sendJsonRpc(entry, 'tools/list', {}, {
+      timeoutMs: Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, ttlMs)
+    });
+    const tools = Array.isArray(result?.tools) ? result.tools : [];
+    entry.toolsCache = tools
+      .map((tool) => normalizeMcpToolDescriptor(serverConfig.serverName, tool))
+      .filter(Boolean);
+    entry.toolsFetchedAt = now;
+    clearDiscoveryFailure(serverConfig.serverName);
+    logMcp('mcp_tools_discovered', {
+      serverName: serverConfig.serverName,
+      count: entry.toolsCache.length
+    });
+    return entry.toolsCache;
+  } catch (error) {
+    writeDiscoveryFailure(serverConfig.serverName, error, 'discover');
+    throw error;
+  }
 }
 
 async function discoverMcpTools(options = {}) {
@@ -853,6 +908,7 @@ function extractTextFromMcpResult(result) {
 }
 
 async function callMcpTool(serverName = '', toolName = '', args = {}, context = {}) {
+  maybeThrowDiscoveryFailureCooldown(serverName, 'call');
   const configuredServers = listConfiguredMcpServers(context);
   const serverConfig = configuredServers.find((item) => item.serverName === serverName);
   const replacement = STATIC_MCP_REPLACEMENTS.find((item) => item.serverName === serverName && item.toolName === toolName);
@@ -933,6 +989,7 @@ async function callMcpTool(serverName = '', toolName = '', args = {}, context = 
       timeoutMs: Math.max(DEFAULT_MCP_CALL_TIMEOUT_MS, Number(context.timeoutMs || 0) || 0)
     });
     const text = extractTextFromMcpResult(result);
+    clearDiscoveryFailure(serverName);
     logMcp('mcp_tool_result', {
       serverName,
       toolName,
@@ -958,6 +1015,7 @@ async function callMcpTool(serverName = '', toolName = '', args = {}, context = 
     const normalized = normalizeMcpError(error, 'MCP_TOOL_CALL_FAILED', {
       fallbackMessage: `mcp tool call failed: ${serverName}/${toolName}`
     });
+    writeDiscoveryFailure(serverName, normalized, 'call');
     logMcp('mcp_tool_error', {
       serverName,
       toolName,
@@ -1035,6 +1093,7 @@ function clearMcpRuntimeCaches() {
     byName: new Map()
   };
   initializePromisePool.clear();
+  discoveryFailureCooldowns.clear();
   for (const entry of sessionPool.values()) {
     try {
       entry.process?.kill();

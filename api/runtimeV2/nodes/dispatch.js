@@ -212,11 +212,13 @@ function createDispatchNode(deps = {}) {
     }
     const dispatchRuntimeOptions = {
       node: 'dispatch',
-      mainConversationSnapshot: buildLiveMainConversationSnapshot(state, {
-        affinity: state.memory?.affinity,
-        allowedTools: computeEffectiveAllowedTools(request, state.execution?.memoryCliTurn),
-        source: 'dispatch'
-      })
+      mainConversationSnapshot: state.memory?.mainConversationSnapshot && typeof state.memory.mainConversationSnapshot === 'object'
+        ? state.memory.mainConversationSnapshot
+        : buildLiveMainConversationSnapshot(state, {
+            affinity: state.memory?.affinity,
+            allowedTools: computeEffectiveAllowedTools(request, state.execution?.memoryCliTurn),
+            source: 'dispatch'
+          })
     };
 
     const nextSteps = allSteps.map((step) => {

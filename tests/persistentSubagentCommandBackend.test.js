@@ -105,6 +105,9 @@ module.exports = (async () => {
     process.env.SUBAGENT_COMMAND_MODE = 'persistent';
     process.env.SUBAGENT_WORKER_IDLE_TTL_MS = '1000';
     process.env.SUBAGENT_WORKER_MAX_REUSE = '2';
+    process.env.SUBAGENT_WORKER_HEALTHCHECK_TTL_MS = '5000';
+    process.env.SUBAGENT_PERSISTENT_BUSY_QUEUE_ENABLED = 'true';
+    process.env.SUBAGENT_PERSISTENT_BUSY_QUEUE_MAX = '1';
     process.env.SUBAGENT_TIMEOUT_MS = '120';
 
     clearProjectCache();
@@ -202,9 +205,35 @@ module.exports = (async () => {
     assert.ok(String(fallbackReply).includes('fallback path works'));
     assert.strictEqual(backendFallback.__persistentWorkerStats.fallbacks >= 1, true);
 
+    clearProjectCache();
+    process.env.SUBAGENT_WORKER_MAX_REUSE = '10';
+    process.env.SUBAGENT_TIMEOUT_MS = '800';
+    const backendQueue = require('../api/subagentBackends/commandBackend');
+    backendQueue.resetPersistentWorkerState();
+    const queueFactory = createFakeWorkerFactory();
+    backendQueue.setCommandBackendTestHooks({
+      createPersistentWorker: (sessionId, spec) => queueFactory.createEntry(sessionId, spec)
+    });
+    const slowCall = backendQueue.createCommandBridgeCall({
+      question: 'slow worker [delay:120]',
+      sessionId: 'sess-queue',
+      options: {}
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const queuedReply = await runCall(backendQueue, {
+      question: 'queued worker',
+      sessionId: 'sess-queue',
+      options: {}
+    });
+    const slowReply = await slowCall.promise;
+    assert.ok(String(queuedReply).includes('queued worker'));
+    assert.ok(String(slowReply).includes('slow worker'));
+    assert.strictEqual(backendQueue.__persistentWorkerStats.fallbacks, 0, 'busy queue should avoid spawn fallback for simple contention');
+
     backend.setCommandBackendTestHooks({});
     backendForCancel.setCommandBackendTestHooks({});
     backendFallback.setCommandBackendTestHooks({});
+    backendQueue.setCommandBackendTestHooks({});
 
     console.log('persistentSubagentCommandBackend.test.js passed');
   } finally {
