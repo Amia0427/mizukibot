@@ -300,6 +300,261 @@ function getCachedPromptLayer(cache = new Map(), key = '', ttlMs = 0, factory = 
   };
 }
 
+function clonePromptBlocks(blocks = []) {
+  return normalizeArray(blocks).map((block) => {
+    if (!block || typeof block !== 'object') return block;
+    return {
+      ...block,
+      conflictTags: normalizeArray(block.conflictTags),
+      meta: block.meta && typeof block.meta === 'object' ? { ...block.meta } : {}
+    };
+  });
+}
+
+function clonePromptMessages(messages = []) {
+  return normalizeArray(messages).map((message) => (
+    message && typeof message === 'object' ? { ...message } : message
+  ));
+}
+
+function clonePromptLayerValue(value = {}) {
+  if (!value || typeof value !== 'object') return null;
+  const normalized = value;
+  const promptSnapshot = normalized.promptSnapshot && typeof normalized.promptSnapshot === 'object'
+    ? {
+        ...normalized.promptSnapshot,
+        assembledBlocks: clonePromptBlocks(normalized.promptSnapshot.assembledBlocks),
+        renderedSystemMessages: clonePromptMessages(normalized.promptSnapshot.renderedSystemMessages),
+        tokenUsageByBlock: normalizeArray(normalized.promptSnapshot.tokenUsageByBlock).map((item) => ({ ...item })),
+        trimDecisions: normalizeArray(normalized.promptSnapshot.trimDecisions).map((item) => ({ ...item })),
+        stableBlockIds: normalizeArray(normalized.promptSnapshot.stableBlockIds),
+        dynamicBlockIds: normalizeArray(normalized.promptSnapshot.dynamicBlockIds),
+        assistantOnlyBlockIds: normalizeArray(normalized.promptSnapshot.assistantOnlyBlockIds),
+        plannerChosenDynamicBlocks: normalizeArray(normalized.promptSnapshot.plannerChosenDynamicBlocks),
+        cacheLanes: normalized.promptSnapshot.cacheLanes && typeof normalized.promptSnapshot.cacheLanes === 'object'
+          ? {
+              stable: normalizeArray(normalized.promptSnapshot.cacheLanes.stable),
+              dynamic: normalizeArray(normalized.promptSnapshot.cacheLanes.dynamic),
+              assistantOnly: normalizeArray(normalized.promptSnapshot.cacheLanes.assistantOnly)
+            }
+          : undefined
+      }
+    : (normalized.promptSnapshot || null);
+  return {
+    ...normalized,
+    stableSystemBlocks: clonePromptBlocks(normalized.stableSystemBlocks),
+    dynamicContextBlocks: clonePromptBlocks(normalized.dynamicContextBlocks),
+    assistantOnlyContextBlocks: clonePromptBlocks(normalized.assistantOnlyContextBlocks),
+    promptSnapshot,
+    promptSegments: normalized.promptSegments && typeof normalized.promptSegments === 'object'
+      ? {
+          ...normalized.promptSegments,
+          systemPrompt: clonePromptMessages(normalized.promptSegments.systemPrompt),
+          routePrompt: clonePromptMessages(normalized.promptSegments.routePrompt),
+          personaMemory: clonePromptMessages(normalized.promptSegments.personaMemory),
+          assembledBlocks: clonePromptBlocks(normalized.promptSegments.assembledBlocks),
+          renderedSystemMessages: clonePromptMessages(normalized.promptSegments.renderedSystemMessages),
+          tokenUsageByBlock: normalizeArray(normalized.promptSegments.tokenUsageByBlock).map((item) => ({ ...item })),
+          trimDecisions: normalizeArray(normalized.promptSegments.trimDecisions).map((item) => ({ ...item })),
+          stableSystemBlocks: clonePromptBlocks(normalized.promptSegments.stableSystemBlocks),
+          dynamicContextBlocks: clonePromptBlocks(normalized.promptSegments.dynamicContextBlocks),
+          assistantOnlyContextBlocks: clonePromptBlocks(normalized.promptSegments.assistantOnlyContextBlocks),
+          activatedPersonaModules: normalizeArray(normalized.promptSegments.activatedPersonaModules),
+          personaModuleCandidates: normalizeArray(normalized.promptSegments.personaModuleCandidates),
+          personaModuleTokenUsage: normalizeArray(normalized.promptSegments.personaModuleTokenUsage).map((item) => ({ ...item })),
+          securityLabels: normalizeArray(normalized.promptSegments.securityLabels)
+        }
+      : {},
+    dynamicPromptPlan: normalized.dynamicPromptPlan && typeof normalized.dynamicPromptPlan === 'object'
+      ? {
+          enabledBlockIds: normalizeArray(normalized.dynamicPromptPlan.enabledBlockIds),
+          personaModules: normalizeArray(normalized.dynamicPromptPlan.personaModules),
+          rationaleByBlock: normalized.dynamicPromptPlan.rationaleByBlock && typeof normalized.dynamicPromptPlan.rationaleByBlock === 'object'
+            ? { ...normalized.dynamicPromptPlan.rationaleByBlock }
+            : {}
+        }
+      : {},
+    dynamicPromptBlockCatalog: normalizeArray(normalized.dynamicPromptBlockCatalog).map((item) => ({ ...item })),
+    personaModuleCandidates: normalizeArray(normalized.personaModuleCandidates).map((item) => ({ ...item })),
+    personaModuleDecision: normalized.personaModuleDecision && typeof normalized.personaModuleDecision === 'object'
+      ? {
+          ...normalized.personaModuleDecision,
+          selected: normalizeArray(normalized.personaModuleDecision.selected).map((item) => ({ ...item })),
+          rejected: normalizeArray(normalized.personaModuleDecision.rejected).map((item) => ({ ...item }))
+        }
+      : { selected: [], rejected: [] },
+    cacheMeta: normalized.cacheMeta && typeof normalized.cacheMeta === 'object'
+      ? { ...normalized.cacheMeta }
+      : {}
+  };
+}
+
+function buildPromptSurface(topRouteType = '', routeMeta = {}) {
+  const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
+  if (String(topRouteType || '').trim().toLowerCase() === 'proactive') return 'proactive_touch';
+  return String(normalizedRouteMeta.groupId || normalizedRouteMeta.group_id || '').trim() && normalizedRouteMeta.directedContext
+    ? 'passive_group_reply'
+    : 'direct_chat';
+}
+
+function dedupePromptBlocks(blocks = []) {
+  const seen = new Set();
+  const out = [];
+  for (const block of normalizeArray(blocks)) {
+    if (!block || typeof block !== 'object') continue;
+    const key = `${normalizeText(block.id)}::${normalizeText(block.content)}`;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(block);
+  }
+  return out;
+}
+
+function buildPromptBlockFingerprint(block = {}) {
+  return `${normalizeText(block?.id)}::${normalizeText(block?.content)}`;
+}
+
+function extractSessionStablePromptBlocks(blocks = []) {
+  return normalizeArray(blocks).filter((block) => {
+    const blockId = normalizeText(block?.id);
+    if (!blockId) return false;
+    return blockId === 'affinity_level'
+      || blockId === 'affinity_points'
+      || blockId.startsWith('relationship_');
+  });
+}
+
+function excludePromptBlocks(blocks = [], excludedBlocks = []) {
+  const excluded = new Set(normalizeArray(excludedBlocks).map((block) => buildPromptBlockFingerprint(block)).filter(Boolean));
+  if (excluded.size === 0) return normalizeArray(blocks);
+  return normalizeArray(blocks).filter((block) => !excluded.has(buildPromptBlockFingerprint(block)));
+}
+
+async function collectPromptInputs(userInfo, userId, question, customPrompt = null, options = {}) {
+  const routeMeta = options.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const dynamicPromptPlan = normalizeDynamicPromptPlan(options);
+  const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
+  const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  const surface = buildPromptSurface(topRouteType, routeMeta);
+  const affinity = options.affinity && typeof options.affinity === 'object'
+    ? options.affinity
+    : getAffinitySettings(userInfo, { userId });
+  const sharedShortTermContext = options.sharedShortTermContext && typeof options.sharedShortTermContext === 'object'
+    ? options.sharedShortTermContext
+    : buildSharedShortTermContextMessages(userId, userInfo, {
+      chatHistory: options.chatHistory,
+      shortTermMemory: options.shortTermMemory,
+      routeMeta,
+      sessionKey: options.sessionKey
+    });
+  const memoryContext = options.memoryContext && typeof options.memoryContext === 'object'
+    ? options.memoryContext
+    : await buildMemoryContextAsync(userId, question || '', {
+      routePolicyKey,
+      topRouteType,
+      groupId: routeMeta.groupId || routeMeta.group_id || '',
+      sessionId: routeMeta.sessionId || routeMeta.session_id || '',
+      taskType: routeMeta.taskType || routeMeta.task_type || '',
+      agentName: routeMeta.agentName || routeMeta.agent_name || '',
+      toolName: routeMeta.toolName || routeMeta.tool_name || '',
+      sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
+    });
+  const personaMemoryState = options.personaMemoryState && typeof options.personaMemoryState === 'object'
+    ? options.personaMemoryState
+    : await composePersonaMemoryState({
+      userId,
+      question: question || '',
+      routeMeta,
+      routePolicyKey,
+      topRouteType
+    }, {
+      userInfo,
+      surface,
+      sessionKey: options.sessionKey,
+      shortTermMemory: options.shortTermMemory,
+      chatHistory: options.chatHistory,
+      personaModules: dynamicPromptPlan.personaModules,
+      sharedShortTermContext,
+      memoryContext
+    });
+  const personaMemoryPrompt = options.personaMemoryPrompt && typeof options.personaMemoryPrompt === 'object'
+    ? options.personaMemoryPrompt
+    : renderPersonaMemoryPrompt(personaMemoryState, topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat');
+  const personaModuleCandidates = buildPersonaModuleCandidates({
+    question,
+    routePrompt: options.routePrompt,
+    routeMeta,
+    directedContext: routeMeta.directedContext,
+    continuitySignals: options?.continuitySignals,
+    personaPhase: routeMeta.personaPhase || ''
+  });
+  const personaModuleDecision = selectPersonaModules(
+    {
+      ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
+      personaModules: dynamicPromptPlan.personaModules.length > 0
+        ? dynamicPromptPlan.personaModules
+        : normalizeArray(options?.personaModuleDecision?.personaModules || routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules)
+    },
+    {
+      question,
+      routePrompt: options.routePrompt,
+      routeMeta,
+      directedContext: routeMeta.directedContext,
+      continuitySignals: options?.continuitySignals,
+      personaPhase: routeMeta.personaPhase || ''
+    }
+  );
+  const summaryText = memoryContext?.promptSummaryText
+    || trimTextByTokenBudget(memoryContext?.summary || 'none', affinity.shortTermMemoryTokens, 'tail')
+    || 'none';
+  const dynamicFewShotPrompt = buildDynamicFewShotPrompt({
+    question,
+    routePolicyKey: options.routePolicyKey,
+    topRouteType: options.topRouteType,
+    routePrompt: options.routePrompt,
+    maxExamples: 3,
+    continuitySignals: options?.continuitySignals,
+    contextDensity: estimateTokens(memoryContext?.memoryForPrompt || '') + estimateTokens(summaryText || '')
+  });
+  return {
+    userInfo,
+    userId,
+    question,
+    customPrompt,
+    routeMeta,
+    routePolicyKey,
+    topRouteType,
+    surface,
+    affinity,
+    sharedShortTermContext,
+    memoryContext,
+    personaMemoryState,
+    personaMemoryPrompt,
+    personaModuleCandidates,
+    personaModuleDecision,
+    dynamicPromptPlan,
+    summaryText,
+    dynamicFewShotPrompt
+  };
+}
+
+async function renderPromptLayers(materials = {}, policy = {}) {
+  const normalizedMaterials = materials && typeof materials === 'object' ? materials : {};
+  return buildBaseDynamicPrompt(
+    normalizedMaterials.userInfo,
+    normalizedMaterials.userId,
+    normalizedMaterials.question,
+    normalizedMaterials.customPrompt,
+    {
+      ...policy,
+      routeMeta: policy.routeMeta || normalizedMaterials.routeMeta,
+      routePolicyKey: policy.routePolicyKey || normalizedMaterials.routePolicyKey,
+      topRouteType: policy.topRouteType || normalizedMaterials.topRouteType,
+      promptMaterials: normalizedMaterials
+    }
+  );
+}
+
 function shouldExposeMemoryCli(options = {}) {
   const currentConfig = getConfig();
   if (!currentConfig.MEMORY_CLI_ENABLED || !currentConfig.MEMORY_CLI_CHAT_ENABLED) return false;
@@ -425,65 +680,80 @@ function shouldInjectSocialContext(options = {}) {
 }
 
 async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt = null, options = {}) {
-  const affinity = getAffinitySettings(userInfo, { userId });
+  const promptMaterials = options.promptMaterials && typeof options.promptMaterials === 'object'
+    ? options.promptMaterials
+    : null;
+  const affinity = promptMaterials?.affinity && typeof promptMaterials.affinity === 'object'
+    ? promptMaterials.affinity
+    : getAffinitySettings(userInfo, { userId });
   const routeMeta = options.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
-  const dynamicPromptPlan = normalizeDynamicPromptPlan(options);
+  const dynamicPromptPlan = promptMaterials?.dynamicPromptPlan && typeof promptMaterials.dynamicPromptPlan === 'object'
+    ? promptMaterials.dynamicPromptPlan
+    : normalizeDynamicPromptPlan(options);
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
   const includeOptionalContextBlocks = options.includeOptionalContextBlocks !== false;
   const includePersonaModuleBlocks = options.includePersonaModuleBlocks !== false;
   const includeDynamicFewShotBlock = options.includeDynamicFewShotBlock !== false;
-  const sharedShortTermContext = options.sharedShortTermContext && typeof options.sharedShortTermContext === 'object'
-    ? options.sharedShortTermContext
-    : buildSharedShortTermContextMessages(userId, userInfo, {
-      chatHistory: options.chatHistory,
-      shortTermMemory: options.shortTermMemory,
-      routeMeta,
-      sessionKey: options.sessionKey
+  const sharedShortTermContext = promptMaterials?.sharedShortTermContext && typeof promptMaterials.sharedShortTermContext === 'object'
+    ? promptMaterials.sharedShortTermContext
+    : (options.sharedShortTermContext && typeof options.sharedShortTermContext === 'object'
+      ? options.sharedShortTermContext
+      : buildSharedShortTermContextMessages(userId, userInfo, {
+        chatHistory: options.chatHistory,
+        shortTermMemory: options.shortTermMemory,
+        routeMeta,
+        sessionKey: options.sessionKey
+      }));
+  const memoryContext = promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object'
+    ? promptMaterials.memoryContext
+    : await buildMemoryContextAsync(userId, question || '', {
+      routePolicyKey,
+      topRouteType,
+      groupId: routeMeta.groupId || routeMeta.group_id || '',
+      sessionId: routeMeta.sessionId || routeMeta.session_id || '',
+      taskType: routeMeta.taskType || routeMeta.task_type || '',
+      agentName: routeMeta.agentName || routeMeta.agent_name || '',
+      toolName: routeMeta.toolName || routeMeta.tool_name || '',
+      sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
     });
-  const memoryContext = await buildMemoryContextAsync(userId, question || '', {
-    routePolicyKey,
-    topRouteType,
-    groupId: routeMeta.groupId || routeMeta.group_id || '',
-    sessionId: routeMeta.sessionId || routeMeta.session_id || '',
-    taskType: routeMeta.taskType || routeMeta.task_type || '',
-    agentName: routeMeta.agentName || routeMeta.agent_name || '',
-    toolName: routeMeta.toolName || routeMeta.tool_name || '',
-    sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
-  });
-  const personaMemoryState = await composePersonaMemoryState({
-    userId,
-    question: question || '',
-    routeMeta,
-    routePolicyKey,
-    topRouteType
-  }, {
-    userInfo,
-    surface: topRouteType === 'proactive'
-      ? 'proactive_touch'
-      : ((String(routeMeta.groupId || routeMeta.group_id || '').trim() && routeMeta.directedContext) ? 'passive_group_reply' : 'direct_chat'),
-    sessionKey: options.sessionKey,
-    shortTermMemory: options.shortTermMemory,
-    chatHistory: options.chatHistory,
-    personaModules: dynamicPromptPlan.personaModules
-  });
-  const personaMemoryPrompt = renderPersonaMemoryPrompt(
-    personaMemoryState,
-    topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat'
-  );
+  const personaMemoryState = promptMaterials?.personaMemoryState && typeof promptMaterials.personaMemoryState === 'object'
+    ? promptMaterials.personaMemoryState
+    : await composePersonaMemoryState({
+      userId,
+      question: question || '',
+      routeMeta,
+      routePolicyKey,
+      topRouteType
+    }, {
+      userInfo,
+      surface: promptMaterials?.surface || buildPromptSurface(topRouteType, routeMeta),
+      sessionKey: options.sessionKey,
+      shortTermMemory: options.shortTermMemory,
+      chatHistory: options.chatHistory,
+      personaModules: dynamicPromptPlan.personaModules,
+      sharedShortTermContext,
+      memoryContext
+    });
+  const personaMemoryPrompt = promptMaterials?.personaMemoryPrompt && typeof promptMaterials.personaMemoryPrompt === 'object'
+    ? promptMaterials.personaMemoryPrompt
+    : renderPersonaMemoryPrompt(
+      personaMemoryState,
+      topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat'
+    );
   const shouldResolvePersonaModules = options.resolvePersonaModules !== false;
   const personaModuleCandidates = shouldResolvePersonaModules
-    ? buildPersonaModuleCandidates({
+    ? (promptMaterials?.personaModuleCandidates || buildPersonaModuleCandidates({
       question,
       routePrompt: options.routePrompt,
       routeMeta,
       directedContext: routeMeta.directedContext,
       continuitySignals: options?.continuitySignals,
       personaPhase: routeMeta.personaPhase || ''
-    })
+    }))
     : [];
   const personaModuleDecision = shouldResolvePersonaModules
-    ? selectPersonaModules(
+    ? (promptMaterials?.personaModuleDecision || selectPersonaModules(
       {
         ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
         personaModules: dynamicPromptPlan.personaModules.length > 0
@@ -498,7 +768,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         continuitySignals: options?.continuitySignals,
         personaPhase: routeMeta.personaPhase || ''
       }
-    )
+    ))
     : { selected: [], rejected: [] };
   const promptBlocks = [];
   const promptSegments = {
@@ -601,7 +871,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       optional: true
     }
   }));
-  const summaryText = memoryContext.promptSummaryText
+  const summaryText = promptMaterials?.summaryText
+    || memoryContext.promptSummaryText
     || trimTextByTokenBudget(memoryContext.summary || 'none', affinity.shortTermMemoryTokens, 'tail')
     || 'none';
   if (includeOptionalContextBlocks) {
@@ -719,15 +990,17 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     }
   }
   const dynamicFewShotPrompt = includeDynamicFewShotBlock
-    ? buildDynamicFewShotPrompt({
-      question,
-      routePolicyKey: options.routePolicyKey,
-      topRouteType: options.topRouteType,
-      routePrompt: options.routePrompt,
-      maxExamples: 3,
-      continuitySignals: options?.continuitySignals,
-      contextDensity: estimateTokens(memoryContext.memoryForPrompt || '') + estimateTokens(summaryText || '')
-    })
+    ? (promptMaterials?.dynamicFewShotPrompt !== undefined
+      ? promptMaterials.dynamicFewShotPrompt
+      : buildDynamicFewShotPrompt({
+        question,
+        routePolicyKey: options.routePolicyKey,
+        topRouteType: options.topRouteType,
+        routePrompt: options.routePrompt,
+        maxExamples: 3,
+        continuitySignals: options?.continuitySignals,
+        contextDensity: estimateTokens(memoryContext.memoryForPrompt || '') + estimateTokens(summaryText || '')
+      }))
     : '';
   if (dynamicFewShotPrompt) {
     promptBlocks.push(createPromptBlock('dynamic_few_shot', 'Dynamic Few Shot', dynamicFewShotPrompt, {
@@ -976,12 +1249,42 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const essentialStartedAt = now;
   prunePromptLayerCache(promptLayerCache.stable, now);
   prunePromptLayerCache(promptLayerCache.session, now);
-  const stableCacheHit = promptLayerCache.stable.get(cacheKeys.stableKey)?.value || null;
-  const sessionCacheHit = promptLayerCache.session.get(cacheKeys.sessionKey)?.value || null;
+  const stableCacheHit = clonePromptLayerValue(promptLayerCache.stable.get(cacheKeys.stableKey)?.value || null);
+  const sessionCacheHit = clonePromptLayerValue(promptLayerCache.session.get(cacheKeys.sessionKey)?.value || null);
+  const collectStartedAt = Date.now();
+  const promptMaterials = await withSoftTimeout(
+    () => collectPromptInputs(userInfo, userId, question, customPrompt, {
+      ...options,
+      sharedShortTermContext
+    }),
+    Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
+    () => ({
+      userInfo,
+      userId,
+      question,
+      customPrompt,
+      routeMeta,
+      routePolicyKey,
+      topRouteType,
+      surface: buildPromptSurface(topRouteType, routeMeta),
+      affinity: fallbackAffinity,
+      sharedShortTermContext,
+      memoryContext: {},
+      personaMemoryState: {},
+      personaMemoryPrompt: { systemMessages: [], promptBlocks: [], policy: {} },
+      personaModuleCandidates: [],
+      personaModuleDecision: { selected: [], rejected: [] },
+      dynamicPromptPlan: baseDynamicPromptPlan,
+      summaryText: 'none',
+      dynamicFewShotPrompt: ''
+    })
+  );
+  const promptCollectMs = Math.max(0, Date.now() - collectStartedAt);
 
   if (String(customPrompt || '').trim()) {
+    const customRenderStartedAt = Date.now();
     const customBuilt = await withSoftTimeout(
-      () => buildBaseDynamicPrompt(userInfo, userId, question, customPrompt, {
+      () => renderPromptLayers(promptMaterials, {
         ...options,
         sharedShortTermContext
       }),
@@ -993,12 +1296,13 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
         assistantOnlyContextBlocks: [],
         promptSegments: {},
         promptSnapshot: null,
-        memoryContext: null,
-        personaMemoryState: null,
-        affinity: fallbackAffinity,
-        dynamicPromptPlan: baseDynamicPromptPlan
+        memoryContext: promptMaterials.memoryContext || null,
+        personaMemoryState: promptMaterials.personaMemoryState || null,
+        affinity: promptMaterials.affinity || fallbackAffinity,
+        dynamicPromptPlan: promptMaterials.dynamicPromptPlan || baseDynamicPromptPlan
       })
     );
+    const promptRenderMs = Math.max(0, Date.now() - customRenderStartedAt);
     const essentialDurationMs = Math.max(0, Date.now() - essentialStartedAt);
     return {
       ...customBuilt,
@@ -1019,62 +1323,41 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
         optionalDurationMs: 0,
         optionalBuildEnabled: false,
         optionalBudgetMs: 0,
-        optionalBudgetExceeded: false
+        optionalBudgetExceeded: false,
+        promptCollectMs,
+        promptRenderMs
       }
     };
   }
 
-  const base = await withSoftTimeout(
-    async () => {
-      const stableLayer = stableCacheHit || await buildBaseDynamicPrompt(userInfo, userId, question, null, {
-        ...options,
-        sharedShortTermContext,
-        includeOptionalContextBlocks: false,
-        includePersonaModuleBlocks: false,
-        includeDynamicFewShotBlock: false,
-        resolvePersonaModules: false
-      });
-      const sessionLayer = await buildBaseDynamicPrompt(userInfo, userId, question, null, {
-        ...options,
-        sharedShortTermContext,
-        cachedStableSystemBlocks: stableLayer.stableSystemBlocks,
-        includeOptionalContextBlocks: true,
-        includePersonaModuleBlocks: false,
-        includeDynamicFewShotBlock: false,
-        resolvePersonaModules: false
-      });
-      return {
-        stableLayer,
-        sessionLayer
-      };
-    },
-    Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
-    () => ({
-      stableLayer: stableCacheHit || {
-        stableSystemBlocks: [],
-        promptSnapshot: null,
-        promptSegments: {},
-        affinity: fallbackAffinity,
-        dynamicPromptPlan: baseDynamicPromptPlan,
-        sharedShortTermSignature: String(sharedShortTermContext?.sharedShortTermSignature || '').trim()
-      },
-      sessionLayer: {
-        dynamicContextBlocks: [],
-        assistantOnlyContextBlocks: [],
-        promptSnapshot: null,
-        promptSegments: {},
-        memoryContext: null,
-        personaMemoryState: null,
-        affinity: fallbackAffinity,
-        dynamicPromptPlan: baseDynamicPromptPlan,
-        sharedShortTermSignature: String(sharedShortTermContext?.sharedShortTermSignature || '').trim(),
-        dynamicPromptBlockCatalog: []
-      }
-    })
+  const essentialRenderStartedAt = Date.now();
+  const stableLayer = stableCacheHit || await renderPromptLayers(promptMaterials, {
+    ...options,
+    sharedShortTermContext,
+    includeOptionalContextBlocks: false,
+    includePersonaModuleBlocks: false,
+    includeDynamicFewShotBlock: false,
+    resolvePersonaModules: false
+  });
+  const sessionCandidateLayer = await renderPromptLayers(promptMaterials, {
+    ...options,
+    sharedShortTermContext,
+    cachedStableSystemBlocks: stableLayer.stableSystemBlocks,
+    includeOptionalContextBlocks: true,
+    includePersonaModuleBlocks: false,
+    includeDynamicFewShotBlock: false,
+    resolvePersonaModules: false
+  });
+  const freshlyRenderedSessionStableBlocks = extractSessionStablePromptBlocks(sessionCandidateLayer.dynamicContextBlocks);
+  const sessionReusedBlocks = normalizeArray(sessionCacheHit?.dynamicContextBlocks).length > 0
+    ? clonePromptBlocks(sessionCacheHit.dynamicContextBlocks)
+    : clonePromptBlocks(freshlyRenderedSessionStableBlocks);
+  const sessionQueryBlocks = excludePromptBlocks(
+    normalizeArray(sessionCandidateLayer.dynamicContextBlocks),
+    freshlyRenderedSessionStableBlocks
   );
+  const essentialRenderMs = Math.max(0, Date.now() - essentialRenderStartedAt);
   const essentialDurationMs = Math.max(0, Date.now() - essentialStartedAt);
-  const stableLayer = base?.stableLayer && typeof base.stableLayer === 'object' ? base.stableLayer : {};
-  const sessionLayer = base?.sessionLayer && typeof base.sessionLayer === 'object' ? base.sessionLayer : {};
   const shouldInjectContextStatsInstruction = !options?.disableTools
     && !reviewMode
     && (
@@ -1084,7 +1367,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     );
   const dynamicPromptPlan = normalizeDynamicPromptPlan({
     ...options,
-    dynamicPromptPlan: sessionLayer.dynamicPromptPlan || stableLayer.dynamicPromptPlan || baseDynamicPromptPlan
+    dynamicPromptPlan: sessionCandidateLayer.dynamicPromptPlan || stableLayer.dynamicPromptPlan || promptMaterials.dynamicPromptPlan || baseDynamicPromptPlan
   });
   const criticalBlocks = [];
   const optionalBlocks = [];
@@ -1114,7 +1397,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   let optionalLayer = null;
   if (!optionalBudgetExceeded) {
     optionalLayer = await withSoftTimeout(
-      () => buildBaseDynamicPrompt(userInfo, userId, question, null, {
+      () => renderPromptLayers(promptMaterials, {
         ...options,
         sharedShortTermContext,
         cachedStableSystemBlocks: stableLayer.stableSystemBlocks,
@@ -1230,12 +1513,25 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
 
   const memoryCliInstruction = !optionalBudgetExceeded ? buildV2MemoryCliInstruction(options?.memoryCliTurn) : '';
   const combinedStableBlocks = normalizeArray(stableLayer.stableSystemBlocks).map((item) => ({ ...item }));
-  const combinedDynamicBlocks = normalizeArray(sessionLayer.dynamicContextBlocks)
-    .concat(normalizeArray(effectiveOptionalLayer?.dynamicContextBlocks))
-    .map((item) => ({ ...item }));
-  const combinedAssistantOnlyBlocks = normalizeArray(sessionLayer.assistantOnlyContextBlocks)
-    .concat(normalizeArray(effectiveOptionalLayer?.assistantOnlyContextBlocks))
-    .map((item) => ({ ...item }));
+  const sessionDynamicFingerprints = new Set(
+    normalizeArray(sessionCandidateLayer.dynamicContextBlocks).map((item) => buildPromptBlockFingerprint(item)).filter(Boolean)
+  );
+  const sessionAssistantOnlyFingerprints = new Set(
+    normalizeArray(sessionCandidateLayer.assistantOnlyContextBlocks).map((item) => buildPromptBlockFingerprint(item)).filter(Boolean)
+  );
+  const optionalUniqueDynamicBlocks = normalizeArray(effectiveOptionalLayer?.dynamicContextBlocks)
+    .filter((item) => !sessionDynamicFingerprints.has(buildPromptBlockFingerprint(item)));
+  const optionalUniqueAssistantOnlyBlocks = normalizeArray(effectiveOptionalLayer?.assistantOnlyContextBlocks)
+    .filter((item) => !sessionAssistantOnlyFingerprints.has(buildPromptBlockFingerprint(item)));
+  const combinedDynamicBlocks = dedupePromptBlocks(
+    clonePromptBlocks(sessionReusedBlocks)
+      .concat(clonePromptBlocks(sessionQueryBlocks))
+      .concat(clonePromptBlocks(optionalUniqueDynamicBlocks))
+  );
+  const combinedAssistantOnlyBlocks = dedupePromptBlocks(
+    clonePromptBlocks(sessionCandidateLayer.assistantOnlyContextBlocks)
+      .concat(clonePromptBlocks(optionalUniqueAssistantOnlyBlocks))
+  );
   const heuristicDynamicPlan = buildHeuristicDynamicPromptPlan({
     continuitySignals: options?.continuitySignals,
     directedContext: options?.routeMeta?.directedContext,
@@ -1284,7 +1580,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     ...(memoryCliBlock ? [memoryCliBlock] : [])
   ];
   const requiredIds = normalizeArray(stableLayer.promptSnapshot?.stableBlockIds)
-    .concat(normalizeArray(sessionLayer.promptSnapshot?.dynamicBlockIds).filter((id) => normalizeText(id).startsWith('persona_memory')));
+    .concat(normalizeArray(sessionCandidateLayer.promptSnapshot?.dynamicBlockIds).filter((id) => normalizeText(id).startsWith('persona_memory')));
   const selectedBlocks = filterBlocksByPlan(combinedBlocks, finalDynamicPromptPlan, {
     requiredIds
   });
@@ -1323,7 +1619,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }
   );
   const promptSegments = {
-    ...(sessionLayer.promptSegments || {}),
+    ...(sessionCandidateLayer.promptSegments || {}),
     systemPrompt: blocksToMessages(laneSplit.stableSystemBlocks.concat(laneSplit.dynamicContextBlocks)),
     assembledBlocks: mergedSnapshot.assembledBlocks,
     renderedSystemMessages: mergedSnapshot.renderedSystemMessages,
@@ -1352,45 +1648,58 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       dynamic: laneSplit.dynamicContextBlocks.map((item) => item.id),
       assistantOnly: laneSplit.assistantOnlyContextBlocks.map((item) => item.id)
     },
-    dynamicPromptBlockCatalog: effectiveOptionalLayer?.dynamicPromptBlockCatalog || sessionLayer.dynamicPromptBlockCatalog || [],
+    dynamicPromptBlockCatalog: effectiveOptionalLayer?.dynamicPromptBlockCatalog || sessionCandidateLayer.dynamicPromptBlockCatalog || [],
     dynamicPromptPlan: finalDynamicPromptPlan
   };
+  const stableHit = Boolean(stableCacheHit);
+  const sessionHit = Boolean(sessionCacheHit && normalizeArray(sessionCacheHit.dynamicContextBlocks).length > 0);
   const freshness = {
-    stableSystem: stableCacheHit ? 'cache' : 'fresh',
-    sessionContext: 'fresh',
+    stableSystem: stableHit ? 'cache' : 'fresh',
+    sessionContext: sessionHit ? 'cache' : 'fresh',
     continuity: String(options?.continuitySignals ? 'fresh' : 'skipped')
   };
   const cacheMeta = {
     stableKey: cacheKeys.stableKey,
     sessionKey: cacheKeys.sessionKey,
-    hit: Boolean(stableCacheHit),
-    stableHit: Boolean(stableCacheHit),
-    sessionHit: false
+    hit: stableHit || sessionHit,
+    stableHit: stableHit,
+    sessionHit: sessionHit
   };
 
-  if (!stableCacheHit && normalizeArray(stableLayer.stableSystemBlocks).length > 0) {
+  if (!stableHit && normalizeArray(stableLayer.stableSystemBlocks).length > 0) {
     promptLayerCache.stable.set(cacheKeys.stableKey, {
       expiresAt: now + Math.max(0, Number(currentConfig.PROMPT_STABLE_CACHE_TTL_MS || 0)),
-      value: {
+      value: clonePromptLayerValue({
         stableSystemBlocks: normalizeArray(stableLayer.stableSystemBlocks).map((item) => ({ ...item })),
         promptSnapshot: stableLayer.promptSnapshot || null,
         promptSegments: {
           stableSystemBlocks: normalizeArray(stableLayer.promptSegments?.stableSystemBlocks).map((item) => ({ ...item }))
         },
         dynamicPromptPlan: stableLayer.dynamicPromptPlan || baseDynamicPromptPlan
-      }
+      })
     });
   }
-  promptLayerCache.session.set(cacheKeys.sessionKey, {
-    expiresAt: now + Math.max(0, Number(currentConfig.PROMPT_SESSION_CACHE_TTL_MS || 0)),
-    value: {
-      sharedShortTermSignature: String(sharedShortTermContext?.sharedShortTermSignature || '').trim(),
-      sessionKey: String(options?.sessionKey || '').trim(),
-      groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim()
-    }
-  });
+  if (normalizeArray(freshlyRenderedSessionStableBlocks).length > 0) {
+    promptLayerCache.session.set(cacheKeys.sessionKey, {
+      expiresAt: now + Math.max(0, Number(currentConfig.PROMPT_SESSION_CACHE_TTL_MS || 0)),
+      value: clonePromptLayerValue({
+        dynamicContextBlocks: freshlyRenderedSessionStableBlocks,
+        assistantOnlyContextBlocks: [],
+        promptSnapshot: {
+          dynamicBlockIds: freshlyRenderedSessionStableBlocks.map((item) => item.id)
+        },
+        promptSegments: {
+          dynamicContextBlocks: freshlyRenderedSessionStableBlocks
+        },
+        cacheMeta: {
+          sessionKey: cacheKeys.sessionKey
+        }
+      })
+    });
+  }
 
   const optionalDurationMs = Math.max(0, Date.now() - optionalBuildStartedAt);
+  const promptRenderMs = essentialRenderMs + optionalDurationMs;
   return {
     dynamicPrompt: serializePromptBlocks([
       ...laneSplit.stableSystemBlocks,
@@ -1405,9 +1714,9 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     dynamicPromptPlan: finalDynamicPromptPlan,
     criticalBlocks,
     optionalBlocks: includedOptionalBlocks,
-    memoryContext: effectiveOptionalLayer?.memoryContext || sessionLayer.memoryContext || null,
-    personaMemoryState: effectiveOptionalLayer?.personaMemoryState || sessionLayer.personaMemoryState || null,
-    affinity: effectiveOptionalLayer?.affinity || sessionLayer.affinity || stableLayer.affinity || fallbackAffinity,
+    memoryContext: promptMaterials.memoryContext || effectiveOptionalLayer?.memoryContext || sessionCandidateLayer.memoryContext || null,
+    personaMemoryState: promptMaterials.personaMemoryState || effectiveOptionalLayer?.personaMemoryState || sessionCandidateLayer.personaMemoryState || null,
+    affinity: promptMaterials.affinity || effectiveOptionalLayer?.affinity || sessionCandidateLayer.affinity || stableLayer.affinity || fallbackAffinity,
     freshness,
     cacheMeta,
     latencyMeta: {
@@ -1415,7 +1724,9 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       optionalDurationMs,
       optionalBuildEnabled,
       optionalBudgetMs,
-      optionalBudgetExceeded
+      optionalBudgetExceeded,
+      promptCollectMs,
+      promptRenderMs
     }
   };
 }

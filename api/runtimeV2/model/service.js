@@ -40,14 +40,29 @@ function getAllowedToolNames(context = {}) {
   return normalizeToolNames(context.allowedTools);
 }
 
+const filteredToolSchemaCache = new Map();
+
 function getFilteredToolSchemas(context = {}) {
   const allowedNames = getAllowedToolNames(context);
   if (context.disableTools || allowedNames.length === 0) return [];
+  const cacheKey = JSON.stringify({
+    allowedTools: allowedNames,
+    disableTools: Boolean(context.disableTools)
+  });
+  const cached = filteredToolSchemaCache.get(cacheKey);
+  if (cached) {
+    return cached.map((schema) => ({ ...schema, function: schema.function ? { ...schema.function } : schema.function }));
+  }
   const allowedSet = new Set(allowedNames);
-  return getToolSchemas().filter((schema) => {
+  const filtered = getToolSchemas().filter((schema) => {
     const toolName = String(schema?.function?.name || '').trim();
     return allowedSet.has(toolName);
   });
+  filteredToolSchemaCache.set(cacheKey, filtered.map((schema) => ({
+    ...schema,
+    function: schema.function ? { ...schema.function } : schema.function
+  })));
+  return filtered.map((schema) => ({ ...schema, function: schema.function ? { ...schema.function } : schema.function }));
 }
 
 function finalizeStreamingReplyText(rawReply, fallbackText) {

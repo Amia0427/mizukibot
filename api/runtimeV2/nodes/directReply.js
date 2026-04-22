@@ -179,19 +179,31 @@ function createDirectReplyNode(deps = {}) {
       isReviewRoute,
       disableMemoryCliInstruction: !shouldProbeToolCalls
     });
-    const directReplyPayload = buildDirectReplyMessages(state, messageContent, baseSystemMessages);
+    const preparedContext = normalizeObject(state.memory?.preparedMainConversationContext, {});
+    const directReplyPayload = normalizeArray(preparedContext.messages).length > 0
+      ? {
+          messages: normalizeArray(preparedContext.messages),
+          assistantOnlyContextMessages: normalizeArray(preparedContext.assistantOnlyContextMessages),
+          compactionPlan: preparedContext.compactionPlan || null,
+          canonicalSegments: preparedContext.canonicalSegments || null
+        }
+      : buildDirectReplyMessages(state, messageContent, baseSystemMessages);
     const messagesToSend = normalizeArray(directReplyPayload.messages);
     directContext.compactionPlan = directReplyPayload.compactionPlan || null;
     directContext.canonicalSegments = directReplyPayload.canonicalSegments || null;
-    const mainConversationSnapshot = buildLiveMainConversationSnapshot(state, {
-      affinity: state.memory?.affinity,
-      allowedTools: directEffectiveAllowedTools,
-      source: 'direct_reply'
-    });
-    const contextStats = {
-      usageRatio: Number(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.usageRatio || 0) || 0,
-      compactionLevel: String(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
-    };
+    const mainConversationSnapshot = preparedContext.mainConversationSnapshot && typeof preparedContext.mainConversationSnapshot === 'object'
+      ? preparedContext.mainConversationSnapshot
+      : buildLiveMainConversationSnapshot(state, {
+        affinity: state.memory?.affinity,
+        allowedTools: directEffectiveAllowedTools,
+        source: 'direct_reply'
+      });
+    const contextStats = preparedContext.contextStats && typeof preparedContext.contextStats === 'object'
+      ? preparedContext.contextStats
+      : {
+          usageRatio: Number(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.usageRatio || 0) || 0,
+          compactionLevel: String(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
+        };
     let reply = '';
     let displayReply = '';
     let nextStream = ensureOutputStream(state.output, request.imageUrl ? 'none' : 'direct');

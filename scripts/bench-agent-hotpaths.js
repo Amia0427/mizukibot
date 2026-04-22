@@ -31,7 +31,8 @@ async function sample(fn, count = 8) {
 
 async function benchDirectReplyNoTool() {
   const { createDirectReplyNode } = require('../api/runtimeV2/nodes/directReply');
-  let assistantCalls = 0;
+  let modelCalls = 0;
+  let lastRunModelCalls = 0;
   const node = createDirectReplyNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;
@@ -96,12 +97,7 @@ async function benchDirectReplyNoTool() {
       return message;
     },
     async requestAssistantMessageImpl() {
-      assistantCalls += 1;
-      return {
-        role: 'assistant',
-        content: 'bench direct reply',
-        tool_calls: []
-      };
+      throw new Error('no-tool benchmark should not use assistant probe path');
     },
     compileDirectChatToolCallsToPlan(toolCalls, plan) {
       return { ...(plan || {}), steps: toolCalls };
@@ -119,7 +115,11 @@ async function benchDirectReplyNoTool() {
       throw new Error('should not stream in benchmark');
     },
     async requestReplyImpl() {
-      throw new Error('should not issue second request in benchmark');
+      modelCalls += 1;
+      return {
+        persistedText: 'bench direct reply',
+        visibleText: 'bench direct reply'
+      };
     },
     buildReplyTextVariants(text = '') {
       return {
@@ -148,7 +148,8 @@ async function benchDirectReplyNoTool() {
   });
 
   const run = async () => {
-    await node({
+    const beforeCalls = modelCalls;
+    const result = await node({
       request: {
         question: 'bench',
         routePolicyKey: 'direct_chat/default',
@@ -176,14 +177,28 @@ async function benchDirectReplyNoTool() {
       },
       plan: {}
     });
+    lastRunModelCalls = modelCalls - beforeCalls;
+    return result;
   };
 
-  const cold = await timeRun(run);
-  const warm = await sample(run, 12);
+  let coldResult = null;
+  const coldStartedAt = Date.now();
+  coldResult = await run();
+  const cold = Date.now() - coldStartedAt;
+  const warm = [];
+  let lastWarmResult = coldResult;
+  for (let i = 0; i < 12; i += 1) {
+    const startedAt = Date.now();
+    lastWarmResult = await run();
+    warm.push(Date.now() - startedAt);
+  }
   return {
     coldMs: cold,
     warm: summarize(warm),
-    assistantCalls
+    modelCallsPerRun: lastRunModelCalls,
+    totalModelCalls: modelCalls,
+    promptCollectMs: Number(lastWarmResult?.execution?.latencyBreakdown?.prepare?.prompt_collect_ms || 0) || 0,
+    promptRenderMs: Number(lastWarmResult?.execution?.latencyBreakdown?.prepare?.prompt_render_ms || 0) || 0
   };
 }
 
@@ -269,7 +284,7 @@ async function benchReadonlyTool() {
   };
 
   const run = async () => {
-    await helpers.runToolStep({
+    return helpers.runToolStep({
       id: `step_${Date.now()}`,
       tool: 'web_search',
       inputs: { query: 'same' }
@@ -310,7 +325,7 @@ async function benchSubagentSequentialCalls() {
       sessionId: 'bench-session',
       options: {}
     });
-    await call.promise;
+    return call.promise;
   };
 
   try {
@@ -341,6 +356,9 @@ async function main() {
     direct_chat_one_readonly_tool: await benchReadonlyTool(),
     subagent_sequential_calls: await benchSubagentSequentialCalls()
   };
+  if (results.direct_chat_no_tool.modelCallsPerRun !== 1) {
+    throw new Error('direct_chat_no_tool benchmark is invalid: expected at least 1 model call');
+  }
   console.log(JSON.stringify(results, null, 2));
 }
 

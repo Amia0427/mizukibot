@@ -601,7 +601,69 @@ function createRuntime(options = {}) {
     };
   }
 
+  function buildMainConversationSnapshotSignature(state, options = {}) {
+    const request = normalizeObject(state.request, {});
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const memory = normalizeObject(state.memory, {});
+    const execution = normalizeObject(state.execution, {});
+    return stableHash({
+      sessionKey: String(request.sessionKey || state.thread?.sessionKey || '').trim(),
+      question: String(request.question || '').trim(),
+      imageUrl: String(request.imageUrl || '').trim(),
+      routePolicyKey: String(request.routePolicyKey || '').trim(),
+      topRouteType: String(request.topRouteType || '').trim(),
+      reviewMode: String(request.reviewMode || '').trim(),
+      groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
+      allowedTools: normalizeArray(options.allowedTools || request.allowedTools),
+      source: String(options.source || 'direct_reply').trim() || 'direct_reply',
+      memoryCliTurn: execution.memoryCliTurn,
+      promptFingerprint: normalizeText(memory.promptSnapshot?.cacheFriendlyFingerprint),
+      dynamicPromptHash: stableHash(normalizeArray(memory.dynamicContextBlocks).map((item) => item?.id)),
+      assistantOnlyHash: stableHash(normalizeArray(memory.assistantOnlyContextBlocks).map((item) => item?.id)),
+      toolEvidence: String(memory.globalToolEvidence || '').trim()
+    });
+  }
+
+  function buildPreparedMainConversationContext(state, options = {}) {
+    const request = normalizeObject(state.request, {});
+    const isReviewRoute = isReviewMode(request.reviewMode);
+    const messageContent = request.imageUrl
+      ? buildVisionMessageContent(request.question || '', request.imageUrl)
+      : (request.question || '');
+    const baseSystemMessages = getMainConversationSystemMessages(state, { isReviewRoute });
+    const directReplyPayload = buildDirectReplyMessages(state, messageContent, baseSystemMessages);
+    const mainConversationSnapshot = buildMainConversationContextSnapshot(state, directReplyPayload, {
+      affinity: options.affinity || state.memory?.affinity,
+      allowedTools: options.allowedTools || request.allowedTools,
+      source: String(options.source || 'prepare').trim() || 'prepare',
+      plannerArtifactMessages: normalizeArray(options.plannerArtifactMessages)
+    });
+    return {
+      messages: normalizeArray(directReplyPayload.messages),
+      assistantOnlyContextMessages: normalizeArray(directReplyPayload.assistantOnlyContextMessages),
+      canonicalSegments: directReplyPayload.canonicalSegments || null,
+      compactionPlan: directReplyPayload.compactionPlan || null,
+      mainConversationSnapshot,
+      contextStats: {
+        usageRatio: Number(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.usageRatio || 0) || 0,
+        compactionLevel: String(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
+      },
+      signature: buildMainConversationSnapshotSignature(state, options)
+    };
+  }
+
   function buildLiveMainConversationSnapshot(state, options = {}) {
+    const prepared = normalizeObject(state.memory?.preparedMainConversationContext, {});
+    const preparedSnapshot = prepared.mainConversationSnapshot && typeof prepared.mainConversationSnapshot === 'object'
+      ? prepared.mainConversationSnapshot
+      : (state.memory?.mainConversationSnapshot && typeof state.memory.mainConversationSnapshot === 'object'
+        ? state.memory.mainConversationSnapshot
+        : null);
+    const nextSignature = buildMainConversationSnapshotSignature(state, options);
+    const preparedSignature = String(prepared.signature || state.memory?.mainConversationSnapshotSignature || '').trim();
+    if (preparedSnapshot && preparedSignature && preparedSignature === nextSignature) {
+      return preparedSnapshot;
+    }
     const request = normalizeObject(state.request, {});
     const isReviewRoute = isReviewMode(request.reviewMode);
     const messageContent = request.imageUrl
@@ -1393,6 +1455,7 @@ function createRuntime(options = {}) {
     computeEffectiveAllowedTools,
     runCapabilityPreflight,
     buildDynamicPromptImpl,
+    buildPreparedMainConversationContext,
     classifyPromptThreat,
     getToolPlannerExecutionPlan,
     isPlannerSingleAuthorityEnabled,

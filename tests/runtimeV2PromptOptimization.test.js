@@ -33,6 +33,8 @@ module.exports = (async () => {
 
     assert.strictEqual(first.cacheMeta.stableHit, false);
     assert.strictEqual(first.latencyMeta.optionalBudgetExceeded, true);
+    assert.ok(Number(first.latencyMeta.promptCollectMs || 0) >= 0);
+    assert.ok(Number(first.latencyMeta.promptRenderMs || 0) >= 0);
     assert.ok(first.promptSnapshot.assembledBlocks.some((item) => item.id === 'main_persona_system'));
     assert.ok(!first.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
 
@@ -49,9 +51,16 @@ module.exports = (async () => {
     );
 
     assert.strictEqual(second.cacheMeta.stableHit, true, 'stable cache should survive question text changes');
-    assert.strictEqual(second.cacheMeta.sessionHit, false, 'session cache should not claim question-sensitive reuse');
+    assert.ok(typeof second.cacheMeta.sessionHit === 'boolean');
     assert.ok(service.promptLayerCache.stable.size >= 1);
     assert.ok(service.promptLayerCache.session.size >= 1);
+    const cachedSessionEntry = [...service.promptLayerCache.session.values()][0]?.value || {};
+    assert.ok(Array.isArray(cachedSessionEntry.dynamicContextBlocks), 'session cache should store reusable session blocks');
+    assert.strictEqual(
+      second.cacheMeta.sessionHit,
+      cachedSessionEntry.dynamicContextBlocks.length > 0,
+      'sessionHit should only be true when reusable session blocks were actually reused'
+    );
 
     console.log('runtimeV2PromptOptimization.test.js passed');
   } finally {

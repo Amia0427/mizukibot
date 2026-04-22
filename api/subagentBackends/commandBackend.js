@@ -274,7 +274,7 @@ function clearWorkerIdleTimer(entry = null) {
 }
 
 function scheduleWorkerIdleRetire(entry = null) {
-  if (!entry || entry.broken || entry.closing || entry.busy) return;
+  if (!entry || entry.broken || entry.closing || entry.busy || (Array.isArray(entry.waitQueue) && entry.waitQueue.length > 0)) return;
   clearWorkerIdleTimer(entry);
   const ttlMs = Math.max(1000, Number(config.SUBAGENT_WORKER_IDLE_TTL_MS) || 300000);
   entry.idleTimer = setTimeout(() => {
@@ -501,6 +501,7 @@ function createPersistentWorker(sessionId = '', spec = {}) {
     if (typeof entry.requestSequence !== 'number') entry.requestSequence = 0;
     if (typeof entry.lastUsedAt !== 'number') entry.lastUsedAt = Date.now();
     if (typeof entry.lastHealthCheckAt !== 'number') entry.lastHealthCheckAt = 0;
+    if (!Array.isArray(entry.waitQueue)) entry.waitQueue = [];
     if (!entry.sessionId) entry.sessionId = sessionId;
     if (typeof entry.busy !== 'boolean') entry.busy = false;
     if (typeof entry.broken !== 'boolean') entry.broken = false;
@@ -530,6 +531,7 @@ function createPersistentWorker(sessionId = '', spec = {}) {
     key,
     lastHealthCheckAt: 0,
     lastUsedAt: Date.now(),
+    waitQueue: [],
     pending: new Map(),
     ready: false,
     readyPromise: null,
@@ -597,9 +599,59 @@ async function pingWorker(entry = null) {
   return entry;
 }
 
+function shouldSkipHealthcheck(entry = null) {
+  if (!entry) return false;
+  const ttlMs = Math.max(0, Number(config.SUBAGENT_WORKER_HEALTHCHECK_TTL_MS) || 5000);
+  if (ttlMs <= 0) return false;
+  return (Date.now() - Number(entry.lastHealthCheckAt || 0)) < ttlMs;
+}
+
+function enqueueWorkerWait(entry = null, timeoutMs = 0) {
+  if (!entry) {
+    return Promise.reject(createPersistentWorkerError('persistent subagent worker missing', 'PERSISTENT_SUBAGENT_WORKER_MISSING'));
+  }
+  const enabled = config.SUBAGENT_PERSISTENT_BUSY_QUEUE_ENABLED !== false;
+  const maxQueue = Math.max(0, Number(config.SUBAGENT_PERSISTENT_BUSY_QUEUE_MAX || 0) || 0);
+  if (!enabled || maxQueue <= 0) {
+    return Promise.reject(createPersistentWorkerError('persistent subagent worker busy', 'PERSISTENT_SUBAGENT_WORKER_BUSY'));
+  }
+  if (!Array.isArray(entry.waitQueue)) entry.waitQueue = [];
+  if (entry.waitQueue.length >= maxQueue) {
+    return Promise.reject(createPersistentWorkerError('persistent subagent worker queue full', 'PERSISTENT_SUBAGENT_WORKER_BUSY'));
+  }
+  return new Promise((resolve, reject) => {
+    const token = {
+      timer: null,
+      resolve() {
+        if (token.timer) clearTimeout(token.timer);
+        resolve(true);
+      },
+      reject(error) {
+        if (token.timer) clearTimeout(token.timer);
+        reject(error);
+      }
+    };
+    const waitTimeoutMs = Math.max(1000, Math.min(Math.max(1000, Number(timeoutMs) || 120000), 15000));
+    token.timer = setTimeout(() => {
+      entry.waitQueue = Array.isArray(entry.waitQueue) ? entry.waitQueue.filter((item) => item !== token) : [];
+      reject(createPersistentWorkerError('persistent subagent worker queue timeout', 'PERSISTENT_SUBAGENT_BUSY_QUEUE_TIMEOUT'));
+    }, waitTimeoutMs);
+    entry.waitQueue.push(token);
+  });
+}
+
+function releaseWorkerQueue(entry = null) {
+  if (!entry || !Array.isArray(entry.waitQueue) || entry.waitQueue.length === 0) return;
+  const next = entry.waitQueue.shift();
+  if (next && typeof next.resolve === 'function') {
+    next.resolve();
+  }
+}
+
 async function acquirePersistentWorker(spec = {}) {
   const key = [normalizeText(spec.sessionId), normalizeText(spec.command), normalizeText(spec.workDir)].join('|');
   let entry = persistentWorkerRegistry.get(key);
+  let healthcheckMs = 0;
 
   const childExited = Boolean(entry?.child) && entry.child.exitCode !== null;
   if (entry && (entry.broken || entry.closing || childExited)) {
@@ -616,12 +668,16 @@ async function acquirePersistentWorker(spec = {}) {
     entry = createPersistentWorker(spec.sessionId, spec);
     await awaitWorkerReady(entry);
     scheduleWorkerIdleRetire(entry);
-    return { entry, reused: false };
+    return { entry, reused: false, healthcheckMs };
   }
 
   clearWorkerIdleTimer(entry);
-  await pingWorker(entry);
-  return { entry, reused: true };
+  if (!shouldSkipHealthcheck(entry)) {
+    const healthcheckStartedAt = Date.now();
+    await pingWorker(entry);
+    healthcheckMs = Math.max(0, Date.now() - healthcheckStartedAt);
+  }
+  return { entry, reused: true, healthcheckMs };
 }
 
 function createPersistentBridgeCall(spec = {}) {
@@ -630,6 +686,7 @@ function createPersistentBridgeCall(spec = {}) {
   let activeRequestId = '';
 
   const promise = (async () => {
+    let queueWaitMs = 0;
     const acquired = await acquirePersistentWorker(spec);
     activeEntry = acquired.entry;
     if (acquired.reused) {
@@ -637,7 +694,9 @@ function createPersistentBridgeCall(spec = {}) {
     }
 
     if (activeEntry.busy) {
-      throw createPersistentWorkerError('persistent subagent worker busy', 'PERSISTENT_SUBAGENT_WORKER_BUSY');
+      const queueWaitStartedAt = Date.now();
+      await enqueueWorkerWait(activeEntry, spec.timeoutMs);
+      queueWaitMs = Math.max(0, Date.now() - queueWaitStartedAt);
     }
 
     activeEntry.busy = true;
@@ -680,11 +739,16 @@ function createPersistentBridgeCall(spec = {}) {
       if (cancelled) {
         throw createSubagentError('subagent cancelled', 'SUBAGENT_CANCELLED');
       }
-      return result;
+      return {
+        result,
+        queueWaitMs,
+        healthcheckMs: Number(acquired.healthcheckMs || 0) || 0
+      };
     } finally {
       if (activeEntry) {
         activeEntry.busy = false;
         activeEntry.lastUsedAt = Date.now();
+        releaseWorkerQueue(activeEntry);
         if (!acquired.reused) {
           activeEntry.reuseCount += 1;
         }
@@ -769,10 +833,16 @@ function createCommandBridgeCall({ question, sessionId, customPrompt = null, ima
     const rawStartedAt = Date.now();
     const acquireStartedAt = Date.now();
     let rawResult = null;
+    let queueWaitMs = 0;
+    let healthcheckMs = 0;
+    let spawnFallbackCount = 0;
     try {
       if (shouldUsePersistentMode(options)) {
         activeCall = createPersistentBridgeCall(spec);
-        rawResult = await activeCall.promise;
+        const persistentResult = await activeCall.promise;
+        rawResult = persistentResult?.result ?? persistentResult;
+        queueWaitMs = Number(persistentResult?.queueWaitMs || 0) || 0;
+        healthcheckMs = Number(persistentResult?.healthcheckMs || 0) || 0;
       } else {
         activeCall = createSpawnBridgeCall(spec);
         rawResult = await activeCall.promise;
@@ -785,6 +855,7 @@ function createCommandBridgeCall({ question, sessionId, customPrompt = null, ima
         persistentWorkerStats.fallbacks += 1;
         activeCall = createSpawnBridgeCall(spec);
         rawResult = await activeCall.promise;
+        spawnFallbackCount = 1;
       } else {
         throw error;
       }
@@ -796,7 +867,10 @@ function createCommandBridgeCall({ question, sessionId, customPrompt = null, ima
 
     writeLatencyMeta(options, {
       subagent_acquire_ms: Math.max(0, Date.now() - acquireStartedAt),
-      subagent_exec_ms: Math.max(0, Date.now() - rawStartedAt)
+      subagent_exec_ms: Math.max(0, Date.now() - rawStartedAt),
+      subagent_healthcheck_ms: healthcheckMs,
+      subagent_queue_wait_ms: queueWaitMs,
+      subagent_spawn_fallback_count: spawnFallbackCount
     });
     return finalizeSubagentResult(rawResult, {
       requestText: question

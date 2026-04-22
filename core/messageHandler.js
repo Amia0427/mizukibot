@@ -92,6 +92,7 @@ const {
   createReplyTelemetryBridge,
   getRawMessageTimestampMs
 } = require('./messageTelemetry');
+const { ensureCachedImageRef } = require('../utils/imageInputCache');
 const {
   buildDirectedConversationSummary,
   createMessageVisualContext,
@@ -343,6 +344,20 @@ function countCachedVisualRefs(items = []) {
   return (Array.isArray(items) ? items : [])
     .filter((item) => String(item?.url || '').trim().startsWith('cached-image://'))
     .length;
+}
+
+async function resolveStableVisualUrl(url = '', refMap = null) {
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl) return '';
+  if (rawUrl.startsWith('cached-image://')) return rawUrl;
+
+  const mapped = refMap && typeof refMap === 'object'
+    ? String(refMap[rawUrl] || '').trim()
+    : '';
+  if (mapped) return mapped;
+
+  const cached = await ensureCachedImageRef(rawUrl);
+  return cached?.ok && cached.ref ? cached.ref : rawUrl;
 }
 
 function resolveLegacyVisionFallbackModelConfig(imageUrl = null, userId = '', routeMeta = {}) {
@@ -2432,11 +2447,19 @@ function createMessageHandler({
       continuousMeta,
       historySummary: buildSubagentContextSummary(senderId, groupId, { maxLength: 180 })
     });
+    const currentMessageImageRawUrl = String(
+      effectiveMsg?.message?.find?.((item) => String(item?.type || '').trim() === 'image')?.data?.url
+      || ''
+    ).trim();
     const hasPotentialVisualInput = Boolean(
-      Array.isArray(continuousMeta?.currentImageUrls) && continuousMeta.currentImageUrls.length > 0
+      Array.isArray(continuousMeta?.imageUrls) && continuousMeta.imageUrls.length > 0
+      || Array.isArray(continuousMeta?.currentImageUrls) && continuousMeta.currentImageUrls.length > 0
+      || (Array.isArray(continuousMeta?.replyContext?.imageUrls) && continuousMeta.replyContext.imageUrls.length > 0)
       || String(directedContext?.replyImageUrl || '').trim()
+      || (Array.isArray(continuousMeta?.forwardImageUrls) && continuousMeta.forwardImageUrls.length > 0)
       || (Array.isArray(continuousMeta?.forwardImages) && continuousMeta.forwardImages.length > 0)
       || (Array.isArray(continuousMeta?.qqCardUrls) && continuousMeta.qqCardUrls.length > 0)
+      || currentMessageImageRawUrl
     );
     const visualImageCollectionResult = hasPotentialVisualInput
       ? getCachedRouteValue(`visualCollection:${String(effectiveMsg?.message_id || msg?.message_id || '')}`, () => buildVisualImageCollectionDetails(
@@ -2447,25 +2470,45 @@ function createMessageHandler({
       ))
       : { images: [], meta: {} };
     const visualImageCollection = Array.isArray(visualImageCollectionResult?.images) ? visualImageCollectionResult.images : [];
-    const currentMessageImageUrl = String(
-      effectiveMsg?.message?.find?.((item) => String(item?.type || '').trim() === 'image')?.data?.url
-      || ''
+    const currentImageRefMap = continuousMeta?.imageRefMap && typeof continuousMeta.imageRefMap === 'object'
+      ? continuousMeta.imageRefMap
+      : {};
+    const stableVisualImageCollection = [];
+    for (const item of visualImageCollection) {
+      const itemUrl = String(item?.url || '').trim();
+      if (!itemUrl) continue;
+      const stableUrl = await resolveStableVisualUrl(itemUrl);
+      stableVisualImageCollection.push({
+        ...item,
+        url: stableUrl,
+        originalUrl: String(item?.originalUrl || itemUrl).trim() || itemUrl
+      });
+    }
+    const currentMessageImageUrl = currentMessageImageRawUrl
+      ? await resolveStableVisualUrl(currentMessageImageRawUrl, currentImageRefMap)
+      : '';
+    const continuousPrimaryImageUrl = String(
+      resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText) || ''
     ).trim();
-    const effectiveVisualCollection = visualImageCollection.length > 0
-      ? visualImageCollection
+    const stableContinuousPrimaryImageUrl = continuousPrimaryImageUrl
+      ? await resolveStableVisualUrl(continuousPrimaryImageUrl, currentImageRefMap)
+      : '';
+    const effectiveVisualCollection = stableVisualImageCollection.length > 0
+      ? stableVisualImageCollection
       : (
         currentMessageImageUrl
           ? [{
               imageIndex: 0,
               source: 'current',
               url: currentMessageImageUrl,
+              originalUrl: currentMessageImageRawUrl || currentMessageImageUrl,
               label: 'current_1'
             }]
           : []
       );
-    const effectiveVisualInput = visualImageCollection.length > 0
-      ? (String(visualImageCollection[0]?.url || '').trim()
-        || resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText))
+    const effectiveVisualInput = stableVisualImageCollection.length > 0
+      ? (String(stableVisualImageCollection[0]?.url || '').trim()
+        || stableContinuousPrimaryImageUrl)
       : currentMessageImageUrl;
     const visualCacheRefCount = countCachedVisualRefs(effectiveVisualCollection);
     const directedScene = String(directedContext?.scene || '').trim();

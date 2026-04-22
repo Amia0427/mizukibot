@@ -243,14 +243,19 @@ function buildToolContext(state, overrides = {}, helpers = {}) {
   const request = normalizeObject(state.request, {});
   const routeMeta = normalizeObject(request.routeMeta, {});
   const toolName = normalizeText(overrides.toolName);
+  const preparedSnapshot = state.memory?.mainConversationSnapshot
+    && typeof state.memory.mainConversationSnapshot === 'object'
+    && Array.isArray(state.memory.mainConversationSnapshot.segments)
+    ? state.memory.mainConversationSnapshot
+    : null;
   const fallbackMainConversationSnapshot = toolName === 'get_context_stats'
     && typeof helpers.buildLiveMainConversationSnapshot === 'function'
     && typeof helpers.computeEffectiveAllowedTools === 'function'
-    ? helpers.buildLiveMainConversationSnapshot(state, {
+    ? (preparedSnapshot || helpers.buildLiveMainConversationSnapshot(state, {
         affinity: state.memory?.affinity,
         allowedTools: helpers.computeEffectiveAllowedTools(request, state.execution?.memoryCliTurn),
         source: normalizeText(overrides.snapshotSource || 'tool_context') || 'tool_context'
-      })
+      }))
     : null;
   return {
     userId: normalizeText(request.userId),
@@ -277,6 +282,10 @@ function summarizeToolLogValue(value, maxLen = 160) {
 }
 
 function logToolExecution(envelope = {}, step = {}, state = {}, extra = {}) {
+  const status = normalizeText(envelope.status).toLowerCase();
+  if (status === 'completed' && config.GRAPH_TOOL_SUCCESS_LOG_ENABLED === false) {
+    return;
+  }
   const request = normalizeObject(state.request, {});
   const routeMeta = normalizeObject(request.routeMeta, {});
   const args = normalizeObject(envelope.args, normalizeObject(step.inputs, {}));
