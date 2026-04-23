@@ -9,10 +9,27 @@ process.env.QZONE_GENERATION_HISTORY_FILE = path.join(tempRoot, 'qzone_generatio
 process.env.ADMIN_USER_IDS = 'u-admin';
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
-const { publishQzoneForContext } = require('../api/qqActionService');
+const { publishQzoneForContext, sendGroupImageMessage } = require('../api/qqActionService');
 const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
 
 (async () => {
+  const actionCalls = [];
+  const imageResult = await sendGroupImageMessage('g-img', Buffer.from('test-image'), {
+    actionClient: {
+      async callAction(action, params) {
+        actionCalls.push({ action, params });
+        return { ok: true };
+      }
+    }
+  });
+
+  assert.strictEqual(imageResult.success, true);
+  assert.strictEqual(actionCalls.length, 1);
+  assert.strictEqual(actionCalls[0].action, 'send_group_msg');
+  assert.ok(Array.isArray(actionCalls[0].params.message));
+  assert.strictEqual(actionCalls[0].params.message[0].type, 'image');
+  assert.ok(String(actionCalls[0].params.message[0].data.file || '').startsWith('base64://'));
+
   const result = await publishQzoneForContext('我把消息框关掉之后，房间突然安静得有点认真。', {
     userId: 'u-admin',
     routeMeta: {

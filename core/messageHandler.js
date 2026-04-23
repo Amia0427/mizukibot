@@ -134,6 +134,7 @@ const {
   sendPrivatePoke,
   setMessageEmojiLike
 } = require('../api/qqActionService');
+const createAgentExecutor = require('../api/createAgentExecutor');
 const {
   armCotOnce,
   consumeCotOnce,
@@ -2045,6 +2046,32 @@ function createMessageHandler({
       userId: senderId,
       config
     });
+    const rawMessageText = String(msg?.raw_message || '').trim();
+    const createCommandText = stripLeadingCqControlSegments(rawMessageText, resolveEffectiveBotQQ(msg, config));
+    if (/^\s*\/create(?:\s|$)/i.test(createCommandText)) {
+      const prompt = createCommandText.replace(/^\s*\/create/i, '').trim();
+      const createResult = await createAgentExecutor.executeCreateCommand({
+        prompt,
+        chatType,
+        groupId,
+        senderId,
+        rawText: rawMessageText
+      });
+
+      if (!createResult?.ok) {
+        await sendGroupReply({
+          chatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: String(createResult?.replyText || '生图失败，请稍后重试').trim(),
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+      }
+      return;
+    }
 
     if (isPrivateChatType(chatType) && !isPrivateChatUserAllowed(senderId, config)) {
       console.log('[message] private chat rejected by allowlist', {

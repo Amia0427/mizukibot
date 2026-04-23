@@ -478,7 +478,9 @@ function materializeMemoryViews(options = {}) {
           snapshotType: normalizeText(payload.snapshotType || existing.snapshotType),
           activeTopic: normalizeText(payload.activeTopic || existing.activeTopic),
           carryOverUserTurn: normalizeText(payload.carryOverUserTurn || existing.carryOverUserTurn),
-          summary: clampText(payload.summary || existing.summary, 2400),
+          summary: Object.prototype.hasOwnProperty.call(payload, 'summary')
+            ? clampText(payload.summary, 2400)
+            : clampText(existing.summary, 2400),
           phaseHint: normalizeText(payload.phaseHint || existing.phaseHint),
           openLoops: Array.isArray(payload.openLoops) ? payload.openLoops.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.openLoops,
           assistantCommitments: Array.isArray(payload.assistantCommitments) ? payload.assistantCommitments.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.assistantCommitments,

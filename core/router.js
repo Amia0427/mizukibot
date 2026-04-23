@@ -172,6 +172,16 @@ function parseAdminCommand(cleanText = '') {
     };
   }
 
+  if (/^\/create(?:\s|$)/i.test(t)) {
+    const payload = t.replace(/^\/create/i, '').trim();
+    return {
+      cmd: 'create',
+      args: payload ? [payload] : [],
+      raw: t,
+      payload
+    };
+  }
+
   if (/^\/meme(?:\s|$)/i.test(t)) {
     return { cmd: 'meme', args: t.split(/\s+/).slice(1), raw: t };
   }

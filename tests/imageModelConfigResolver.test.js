@@ -29,17 +29,52 @@ try {
   process.env.ADMIN_API_BASE_URL = 'https://admin-main.example/v1/messages';
   process.env.ADMIN_API_KEY = 'admin-main-key';
   process.env.ADMIN_AI_MODEL = 'admin-main-model';
+  process.env.ADMIN_AI_FALLBACK_ENABLED = 'true';
+  process.env.ADMIN_AI_FALLBACK_MODEL = 'admin-fallback-model';
+  process.env.ADMIN_AI_FALLBACK_API_BASE_URL = 'https://admin-fallback.example/v1/chat/completions';
+  process.env.ADMIN_AI_FALLBACK_API_KEY = 'admin-fallback-key';
+  process.env.ADMIN_AI_FALLBACK_FAILURE_THRESHOLD = '3';
+  process.env.ADMIN_AI_FALLBACK_COOLDOWN_MS = '900000';
   process.env.ADMIN_IMAGE_API_BASE_URL = 'https://admin-image.example/v1/messages';
   process.env.ADMIN_IMAGE_API_KEY = 'admin-image-key';
   process.env.ADMIN_IMAGE_MODEL = 'admin-image-model';
 
   clearProjectCache();
   const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
+  const {
+    ADMIN_SHARED_FALLBACK_SCOPE,
+    recordMainModelFailure,
+    resetMainModelFallbackState
+  } = require('../utils/mainModelFallback');
+
+  resetMainModelFallbackState();
+  resetMainModelFallbackState({ scope: ADMIN_SHARED_FALLBACK_SCOPE });
 
   const adminConfig = buildImageModelConfig(null, 'admin-1', {});
   assert.strictEqual(adminConfig.model, 'admin-image-model');
   assert.strictEqual(adminConfig.apiBaseUrl, 'https://admin-image.example/v1/messages');
   assert.strictEqual(adminConfig.apiKey, 'admin-image-key');
+
+  const adminError = (status, message) => ({
+    response: {
+      status,
+      data: {
+        error: {
+          message
+        }
+      }
+    },
+    message
+  });
+  const baseTime = Date.now();
+  recordMainModelFailure(adminError(500, 'admin-image-1'), { scope: ADMIN_SHARED_FALLBACK_SCOPE, now: baseTime });
+  recordMainModelFailure(adminError(500, 'admin-image-2'), { scope: ADMIN_SHARED_FALLBACK_SCOPE, now: baseTime + 1 });
+  recordMainModelFailure(adminError(500, 'admin-image-3'), { scope: ADMIN_SHARED_FALLBACK_SCOPE, now: baseTime + 2 });
+
+  const adminFallbackConfig = buildImageModelConfig(null, 'admin-1', {});
+  assert.strictEqual(adminFallbackConfig.model, 'admin-fallback-model');
+  assert.strictEqual(adminFallbackConfig.apiBaseUrl, 'https://admin-fallback.example/v1/chat/completions');
+  assert.strictEqual(adminFallbackConfig.apiKey, 'admin-fallback-key');
 
   const normalConfig = buildImageModelConfig(null, 'user-1', {});
   assert.strictEqual(normalConfig.model, 'main-model');

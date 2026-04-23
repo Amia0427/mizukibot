@@ -646,7 +646,10 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       );
       return buildContextPayload(userId, question, normalizedOptions, unifiedHits);
     }
-    const packet = assembleMemoryPacket(queryResult, { userId });
+    const packet = assembleMemoryPacket(queryResult, {
+      userId,
+      sessionKey: options.sessionKey
+    });
     const results = Array.isArray(queryResult.results) ? queryResult.results : [];
     const strictResults = Array.isArray(queryResult.strictResults) ? queryResult.strictResults : results;
     const weakResults = Array.isArray(queryResult.weakResults) ? queryResult.weakResults : [];
@@ -656,10 +659,26 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     const styleHits = results.filter((item) => item.source === 'style');
     const jargonHits = results.filter((item) => item.source === 'jargon');
     const dailyJournalText = journalHits.map((item) => String(item.text || '')).filter(Boolean).join('\n');
+    const continuityFacet = String(queryResult.facet || '').trim().toLowerCase() === 'continuity';
+    const retrievedPromptText = limitPromptText(
+      packet.relevantEvidenceText || packet.sessionContinuityText || '',
+      getPromptTokenLimit('MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', 420),
+      'tail'
+    );
+    const summaryText = String(
+      queryResult.persona?.summary
+      || (continuityFacet
+        ? limitPromptText(
+            packet.sessionContinuityText || queryResult.digest || '',
+            getPromptTokenLimit('MAIN_PROMPT_SUMMARY_MAX_TOKENS', 180),
+            'tail'
+          )
+        : (queryResult.digest || ''))
+    );
     const memoryForPrompt = [
       packet.sessionContinuityText ? `[SessionContinuity]\n${packet.sessionContinuityText}` : '',
       packet.relevantEvidenceText ? `[RelevantEvidence]\n${packet.relevantEvidenceText}` : '',
-      packet.weakEvidenceText ? `[WeakEvidence]\n${packet.weakEvidenceText}` : '',
+      (!continuityFacet || !packet.sessionContinuityText) && packet.weakEvidenceText ? `[WeakEvidence]\n${packet.weakEvidenceText}` : '',
       packet.styleSignalsText ? `[StyleSignals]\n${packet.styleSignalsText}` : ''
     ].filter(Boolean).join('\n\n');
 
@@ -670,8 +689,8 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       .join('\n');
     return {
       memoryForPrompt,
-      retrievedMemoryForPrompt: packet.relevantEvidenceText,
-      promptRetrievedMemoryText: packet.relevantEvidenceText,
+      retrievedMemoryForPrompt: retrievedPromptText,
+      promptRetrievedMemoryText: retrievedPromptText,
       hits: results,
       strictResults,
       weakResults,
@@ -688,8 +707,8 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       profileText: packet.stableProfileText,
       impression: String(queryResult.persona?.impression || ''),
       impressionText: String(queryResult.persona?.impression || ''),
-      summary: String(queryResult.persona?.summary || queryResult.digest || ''),
-      promptSummaryText: String(queryResult.persona?.summary || queryResult.digest || ''),
+      summary: summaryText,
+      promptSummaryText: summaryText,
       promptImpressionText: String(queryResult.persona?.impression || ''),
       taskMemoryText: packet.taskStrategyText,
       groupMemoryText: [packet.groupSharedContextText, notebookText].filter(Boolean).join('\n'),
@@ -713,7 +732,9 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
         localKnowledge: localKnowledge.diagnostics
       },
       segments: {
-        retrievedMemory: packet.messages.relevantEvidence || [],
+        retrievedMemory: packet.messages.relevantEvidence?.length > 0
+          ? packet.messages.relevantEvidence
+          : (packet.messages.sessionContinuity || []),
         weakEvidence: packet.messages.weakEvidence || [],
         dailyJournal: [],
         taskMemory: packet.messages.taskStrategy || [],

@@ -212,6 +212,10 @@ function createPersistNode(deps = {}) {
         if (config.MEMORY_V3_ENABLED) {
           const stateSlice = shortTermMemory?.[request.sessionKey] || {};
           const historySlice = Array.isArray(chatHistory?.[request.sessionKey]) ? chatHistory[request.sessionKey] : [];
+          const summarySource = String(stateSlice.summarySource || '').trim().toLowerCase();
+          const persistedSummary = summarySource === 'restart_recall'
+            ? ''
+            : String(stateSlice.summary || '').trim();
           await appendMemoryEvent({
             type: 'session_checkpoint',
             userId: request.userId,
@@ -226,7 +230,7 @@ function createPersistNode(deps = {}) {
             payload: {
               snapshotType: 'post_reply',
               activeTopic: String(stateSlice.activeTopic || '').trim(),
-              summary: String(stateSlice.summary || '').trim(),
+              summary: persistedSummary,
               carryOverUserTurn: String(stateSlice.carryOverUserTurn || '').trim(),
               openLoops: normalizeArray(stateSlice.openLoops),
               assistantCommitments: normalizeArray(stateSlice.assistantCommitments),

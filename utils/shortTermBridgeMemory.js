@@ -19,6 +19,12 @@ const BRIDGE_FILE_VERSION = 3;
 const BRIDGE_ALLOWED_ROLES = new Set(['user', 'assistant']);
 const BRIDGE_SNAPSHOT_TYPES = new Set(['pre_reply', 'post_reply']);
 
+function looksLikePollutedBridgeSummary(text = '') {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return false;
+  return /\[(KnownSummary|KnownImpression|Identity|Likes|Dislikes|Goals|KnownFacts|RelevantRecall|RecentTopics)\]/i.test(normalized);
+}
+
 function defaultBridgeStore() {
   return {
     version: BRIDGE_FILE_VERSION,
@@ -114,8 +120,15 @@ function sanitizeBridgeSessionEntry(sessionKey, entry, now = Date.now()) {
     ...defaultShortTermState(),
     ...(entry.shortTermState && typeof entry.shortTermState === 'object'
       ? entry.shortTermState
-      : { summary: String(entry.shortTermSummary || '').trim() })
+      : {
+          summary: String(entry.shortTermSummary || '').trim(),
+          summarySource: String(entry.shortTermSummary ? 'bridge_legacy' : '').trim()
+        })
   });
+  if (looksLikePollutedBridgeSummary(shortTermState.summary)) {
+    shortTermState.summary = '';
+    shortTermState.summarySource = '';
+  }
   const interactionState = normalizeInteractionState(entry.interactionState || shortTermState.interaction);
   const sceneState = normalizeSceneState(entry.sceneState || shortTermState.scene);
   const expressionState = normalizeExpressionState(entry.expressionState || shortTermState.expression);
@@ -154,7 +167,8 @@ function migrateV1UsersStoreToV2Sessions(users = {}, now = Date.now()) {
       snapshotType: 'post_reply',
       shortTermState: {
         ...defaultShortTermState(),
-        summary: String(entry?.shortTermSummary || '').trim()
+        summary: String(entry?.shortTermSummary || '').trim(),
+        summarySource: String(entry?.shortTermSummary ? 'bridge_legacy' : '').trim()
       },
       recentMessages: entry?.recentMessages
     }, now);
@@ -269,7 +283,8 @@ function buildBridgeSnapshotPayload(userId, deps = {}) {
         String(shortTermState.summary || '').trim(),
         Math.max(96, Number(config.SHORT_TERM_MEMORY_SUMMARY_MAX_TOKENS || 320)),
         'tail'
-      )
+      ),
+      summarySource: String(shortTermState.summarySource || '').trim()
     }),
     interactionState: normalizeInteractionState(shortTermState.interaction),
     sceneState: normalizeSceneState(shortTermState.scene),

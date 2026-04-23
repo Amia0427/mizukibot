@@ -21,6 +21,12 @@ const {
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
 
+function looksLikePollutedSessionSummary(text = '') {
+  const normalized = normalizeText(text);
+  if (!normalized) return false;
+  return /\[(KnownSummary|KnownImpression|Identity|Likes|Dislikes|Goals|KnownFacts|RelevantRecall|RecentTopics)\]/i.test(normalized);
+}
+
 function classifyFacet(query = '', options = {}) {
   const text = normalizeText(query).toLowerCase();
   if (String(options.facet || '').trim()) return String(options.facet).trim().toLowerCase();
@@ -94,7 +100,7 @@ function collectCandidates(userId, options = {}) {
       text: [
         session.carryOverUserTurn ? `pending: ${session.carryOverUserTurn}` : '',
         session.activeTopic ? `topic: ${session.activeTopic}` : '',
-        session.summary ? `summary: ${session.summary}` : '',
+        session.summary && !looksLikePollutedSessionSummary(session.summary) ? `summary: ${session.summary}` : '',
         Array.isArray(session.openLoops) && session.openLoops.length ? `open: ${session.openLoops.join(' | ')}` : '',
         Array.isArray(session.assistantCommitments) && session.assistantCommitments.length ? `commitments: ${session.assistantCommitments.join(' | ')}` : '',
         Array.isArray(session.userConstraints) && session.userConstraints.length ? `constraints: ${session.userConstraints.join(' | ')}` : '',
@@ -106,6 +112,8 @@ function collectCandidates(userId, options = {}) {
       confidence: 1,
       importance: session.sessionKey === currentSessionKey ? 1.6 : 1.2,
       evidenceCount: 1,
+      evidenceTier: session.sessionKey === currentSessionKey ? 'strict' : 'weak',
+      stabilityScore: session.sessionKey === currentSessionKey ? 0.98 : 0.72,
       semanticSlot: 'continuity',
       canonicalKey: canonicalizeText(`${session.activeTopic || ''} ${session.summary || ''} ${session.carryOverUserTurn || ''}`)
     });

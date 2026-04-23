@@ -15,6 +15,7 @@ function toMessage(label, text, tokenBudget) {
 
 function assembleMemoryPacket(result = {}, options = {}) {
   const userId = normalizeText(result.userId || options.userId);
+  const currentSessionKey = normalizeText(options.sessionKey || result.sessionKey);
   const profileProjection = loadProfileProjection();
   const profile = profileProjection.users?.[userId] || {};
   const results = Array.isArray(result.results) ? result.results : [];
@@ -22,6 +23,10 @@ function assembleMemoryPacket(result = {}, options = {}) {
   const weakResults = Array.isArray(result.weakResults) ? result.weakResults : [];
   const persona = result.persona || profile.personaCore || {};
   const continuity = results.filter((item) => item.source === 'recent');
+  const prioritizedContinuity = currentSessionKey
+    ? continuity.filter((item) => normalizeText(item.sessionKey) === currentSessionKey)
+    : [];
+  const effectiveContinuity = prioritizedContinuity.length > 0 ? prioritizedContinuity : continuity;
   const evidence = strictResults.filter((item) => item.source !== 'recent' && item.source !== 'task' && item.source !== 'group' && item.source !== 'style' && item.source !== 'jargon').slice(0, 3);
   const weakEvidence = weakResults.filter((item) => item.source !== 'recent').slice(0, 2);
   const task = results.filter((item) => item.source === 'task');
@@ -39,7 +44,7 @@ function assembleMemoryPacket(result = {}, options = {}) {
   ].filter(Boolean).join('\n');
 
   const packet = {
-    sessionContinuityText: continuity.map((item) => clampText(item.text, 600)).filter(Boolean).join('\n\n'),
+    sessionContinuityText: effectiveContinuity.map((item) => clampText(item.text, 600)).filter(Boolean).join('\n\n'),
     relevantEvidenceText: evidence.map((item) => `[${item.source}|${item.type}] ${clampText(item.text, 220)}`).filter(Boolean).join('\n'),
     weakEvidenceText: weakEvidence.map((item) => `[${item.source}|${item.type}] ${clampText(item.text, 120)}`).filter(Boolean).join('\n'),
     stableProfileText: profileLines,
