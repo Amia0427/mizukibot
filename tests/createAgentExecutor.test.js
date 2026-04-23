@@ -42,6 +42,7 @@ module.exports = (async () => {
 
     const {
       buildCreateAgentGenerationUrl,
+      buildCreateAgentGenerationUrlCandidates,
       detectImageExtension,
       downloadImageFromUrl,
       executeCreateCommand,
@@ -59,6 +60,10 @@ module.exports = (async () => {
     assert.strictEqual(normalizeCreateAgentBaseUrl('https://mynav.website/v1/chat/completions'), 'https://mynav.website/v1');
     assert.strictEqual(normalizeCreateAgentBaseUrl('https://tokenflux.dev/v1/images/generations'), 'https://tokenflux.dev/v1');
     assert.strictEqual(buildCreateAgentGenerationUrl('https://mynav.website/v1/chat/completions'), 'https://mynav.website/v1/images/generations');
+    assert.deepStrictEqual(
+      buildCreateAgentGenerationUrlCandidates('https://www.packyapi.com'),
+      ['https://www.packyapi.com/images/generations', 'https://www.packyapi.com/v1/images/generations']
+    );
 
     assert.deepStrictEqual(
       extractImageFromGenerationResponse({ data: [{ b64_json: 'Zm9v' }] }),
@@ -148,7 +153,38 @@ module.exports = (async () => {
     assert.strictEqual(requestPayloads[0].body.background, 'auto');
     assert.strictEqual(requestPayloads[0].body.output_format, 'png');
     assert.strictEqual(requestPayloads[0].body.response_format, 'b64_json');
-    assert.deepStrictEqual(requestResponse, { data: [{ b64_json: pngBase64 }] });
+    assert.deepStrictEqual(requestResponse, {
+      payload: { data: [{ b64_json: pngBase64 }] },
+      requestUrl: 'https://mynav.website/v1/images/generations'
+    });
+
+    const fallbackUrls = [];
+    const fallbackRequestResponse = await requestImageGeneration('draw a fox again', {
+      ...runtimeConfig,
+      apiBaseUrl: 'https://www.packyapi.com'
+    }, {
+      httpClient: {
+        async post(url) {
+          fallbackUrls.push(url);
+          if (url === 'https://www.packyapi.com/images/generations') {
+            return { data: { ok: true, message: 'not image payload' } };
+          }
+          return {
+            data: {
+              data: [{ b64_json: pngBase64 }]
+            }
+          };
+        }
+      }
+    });
+    assert.deepStrictEqual(fallbackUrls, [
+      'https://www.packyapi.com/images/generations',
+      'https://www.packyapi.com/v1/images/generations'
+    ]);
+    assert.deepStrictEqual(fallbackRequestResponse, {
+      payload: { data: [{ b64_json: pngBase64 }] },
+      requestUrl: 'https://www.packyapi.com/v1/images/generations'
+    });
 
     const generatedFromB64 = await generateImageWithOpenAICompatibleApi('b64 sample', runtimeConfig, {
       httpClient: {

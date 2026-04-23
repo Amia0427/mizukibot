@@ -143,6 +143,17 @@ function buildCreateAgentGenerationUrl(baseUrl = '') {
   return `${normalizedBaseUrl}/images/generations`;
 }
 
+function buildCreateAgentGenerationUrlCandidates(baseUrl = '') {
+  const normalizedBaseUrl = normalizeCreateAgentBaseUrl(baseUrl);
+  if (!normalizedBaseUrl) return [];
+  const baseWithoutSlash = normalizedBaseUrl.replace(/\/+$/g, '');
+  const candidates = [`${baseWithoutSlash}/images/generations`];
+  if (!/\/v1$/i.test(baseWithoutSlash)) {
+    candidates.push(`${baseWithoutSlash}/v1/images/generations`);
+  }
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
 function resolveConfig(overrides = {}) {
   return {
     enabled: overrides.enabled ?? config.CREATE_AGENT_ENABLED,
@@ -313,6 +324,19 @@ function stringifyBody(body = null) {
   }
 }
 
+function summarizePayloadShape(payload = null) {
+  if (payload === null || payload === undefined) return '';
+  if (typeof payload === 'string') {
+    return payload.replace(/\s+/g, ' ').trim().slice(0, 400);
+  }
+  try {
+    const text = JSON.stringify(payload);
+    return text.slice(0, 400);
+  } catch (_) {
+    return String(payload || '').trim().slice(0, 400);
+  }
+}
+
 function normalizeRequestError(error = null) {
   const status = Number(error?.response?.status || 0) || 0;
   const body = stringifyBody(error?.response?.data);
@@ -346,8 +370,9 @@ function logCreateAgentError(runtimeConfig = {}, context = {}, error = null) {
     senderId: String(context.senderId || '').trim(),
     model: String(runtimeConfig.model || '').trim(),
     apiBaseUrl: String(runtimeConfig.apiBaseUrl || '').trim(),
-    requestUrl: buildCreateAgentGenerationUrl(runtimeConfig.apiBaseUrl),
+    requestUrl: String(context.requestUrl || buildCreateAgentGenerationUrl(runtimeConfig.apiBaseUrl)).trim(),
     backend: 'openai_images',
+    responsePreview: String(context.responsePreview || '').trim(),
     error: String(error?.message || error || '').trim()
   });
   appendTextFileSafe(runtimeConfig.errorLogFile, `${line}\n`);
@@ -429,44 +454,66 @@ function extractImageFromGenerationResponse(payload = {}) {
 
 async function requestImageGeneration(prompt = '', runtimeConfig = {}, deps = {}) {
   validateCreateAgentPrerequisites(runtimeConfig);
-  const requestUrl = buildCreateAgentGenerationUrl(runtimeConfig.apiBaseUrl);
-  if (!requestUrl) {
+  const requestUrls = buildCreateAgentGenerationUrlCandidates(runtimeConfig.apiBaseUrl);
+  if (!requestUrls.length) {
     throw new Error('CREATE_AGENT_API_BASE_URL is not configured');
   }
 
   const httpClient = deps.httpClient || axios;
-  try {
-    const response = await httpClient.post(
-      requestUrl,
-      {
-        model: runtimeConfig.model,
-        prompt,
-        size: runtimeConfig.imageSize,
-        quality: runtimeConfig.imageQuality,
-        background: runtimeConfig.imageBackground,
-        output_format: runtimeConfig.outputFormat,
-        response_format: runtimeConfig.responseFormat
-      },
-      {
-        timeout: runtimeConfig.timeoutMs,
-        maxContentLength: MAX_IMAGE_BYTES,
-        maxBodyLength: MAX_IMAGE_BYTES,
-        proxy: false,
-        headers: {
-          Authorization: `Bearer ${runtimeConfig.apiKey}`,
-          'Content-Type': 'application/json',
-          'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
+  let lastError = null;
+  for (const requestUrl of requestUrls) {
+    try {
+      const response = await httpClient.post(
+        requestUrl,
+        {
+          model: runtimeConfig.model,
+          prompt,
+          size: runtimeConfig.imageSize,
+          quality: runtimeConfig.imageQuality,
+          background: runtimeConfig.imageBackground,
+          output_format: runtimeConfig.outputFormat,
+          response_format: runtimeConfig.responseFormat
+        },
+        {
+          timeout: runtimeConfig.timeoutMs,
+          maxContentLength: MAX_IMAGE_BYTES,
+          maxBodyLength: MAX_IMAGE_BYTES,
+          proxy: false,
+          headers: {
+            Authorization: `Bearer ${runtimeConfig.apiKey}`,
+            'Content-Type': 'application/json',
+            'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
+          }
         }
+      );
+      const payload = response?.data || {};
+      try {
+        extractImageFromGenerationResponse(payload);
+      } catch (shapeError) {
+        lastError = new Error(`${shapeError.message} response_preview=${summarizePayloadShape(payload)}`);
+        lastError.requestUrl = requestUrl;
+        continue;
       }
-    );
-    return response?.data || {};
-  } catch (error) {
-    throw new Error(normalizeRequestError(error));
+      return {
+        payload,
+        requestUrl
+      };
+    } catch (error) {
+      const normalized = new Error(normalizeRequestError(error));
+      normalized.requestUrl = requestUrl;
+      lastError = normalized;
+      const lower = String(normalized.message || '').toLowerCase();
+      if (!(lower.includes('404') || lower.includes('generation response missing image data'))) {
+        break;
+      }
+    }
   }
+  throw lastError || new Error('generation response missing image data');
 }
 
 async function generateImageWithOpenAICompatibleApi(prompt = '', runtimeConfig = {}, deps = {}) {
-  const payload = await requestImageGeneration(prompt, runtimeConfig, deps);
+  const generationResult = await requestImageGeneration(prompt, runtimeConfig, deps);
+  const payload = generationResult?.payload || {};
   const imageResult = extractImageFromGenerationResponse(payload);
 
   if (imageResult.kind === 'b64_json') {
@@ -498,7 +545,7 @@ function buildUserFacingFailureReply(error = null, runtimeConfig = {}) {
   if (lower.includes('http_error') && (lower.includes('401') || lower.includes('403'))) return '生图鉴权失败';
   if (lower.includes('http_error') && lower.includes('429')) return '生图接口限流，请稍后重试';
   if (lower.includes('http_error') && lower.includes('5')) return '生图供应商暂时异常';
-  if (lower.includes('generation response missing image data')) return '生图结果为空';
+  if (lower.includes('generation response missing image data')) return '生图结果为空，当前接口返回格式不兼容';
   if (lower.includes('image buffer empty')) return '生图结果为空';
   if (lower.includes('timeout') || lower.includes('timed out')) return '生图超时，请稍后重试';
   if (lower.includes('network_error')) return '生图网络异常，请稍后重试';
@@ -559,7 +606,13 @@ async function executeCreateCommand(context = {}, deps = {}) {
       imagePath: materialized.filePath
     };
   } catch (error) {
-    logCreateAgentError(runtimeConfig, context, error);
+    logCreateAgentError(runtimeConfig, {
+      ...context,
+      requestUrl: String(error?.requestUrl || '').trim(),
+      responsePreview: String(error?.message || '').includes('response_preview=')
+        ? String(error.message).split('response_preview=').slice(1).join('response_preview=').trim()
+        : ''
+    }, error);
     return {
       ok: false,
       replyText: quotaConsumed
@@ -575,6 +628,7 @@ async function executeCreateCommand(context = {}, deps = {}) {
 
 module.exports = {
   buildCreateAgentGenerationUrl,
+  buildCreateAgentGenerationUrlCandidates,
   buildCreateAgentPrompt,
   consumeQuota,
   detectImageExtension,

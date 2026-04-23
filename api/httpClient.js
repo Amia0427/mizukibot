@@ -105,6 +105,30 @@ function applyAnthropicCacheControl(target, cacheControl) {
   };
 }
 
+function stripCacheControlFields(target) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
+  const next = { ...target };
+  delete next.cache_control;
+  delete next.cacheControl;
+  delete next.cache;
+  return next;
+}
+
+function stripAnthropicCacheControlFromBlocks(blocks = []) {
+  const items = Array.isArray(blocks) ? blocks : [];
+  return items.map((block) => {
+    if (!block || typeof block !== 'object' || Array.isArray(block)) return block;
+    const nextBlock = stripCacheControlFields(block);
+    if (Array.isArray(nextBlock.content)) {
+      return {
+        ...nextBlock,
+        content: stripAnthropicCacheControlFromBlocks(nextBlock.content)
+      };
+    }
+    return nextBlock;
+  });
+}
+
 function applyAnthropicCacheControlToLastBlock(blocks, cacheControl) {
   const normalized = normalizeAnthropicCacheControl(cacheControl);
   const items = Array.isArray(blocks) ? blocks : [];
@@ -410,6 +434,73 @@ function buildAnthropicRequestHeaders(requestBody = {}) {
   };
 }
 
+function stripPromptCachingBetaHeaderValue(headerValue = '') {
+  return String(headerValue || '')
+    .split(',')
+    .map((part) => normalizeText(part))
+    .filter((part) => part && part.toLowerCase() !== 'prompt-caching-2024-07-31')
+    .join(',');
+}
+
+function stripAnthropicPromptCaching(requestBody = {}, requestHeaders = null) {
+  if (!requestBody || typeof requestBody !== 'object') {
+    return {
+      requestBody,
+      requestHeaders: requestHeaders && typeof requestHeaders === 'object' ? { ...requestHeaders } : requestHeaders
+    };
+  }
+
+  const nextBody = stripCacheControlFields({ ...requestBody });
+  if (Array.isArray(nextBody.system)) {
+    nextBody.system = stripAnthropicCacheControlFromBlocks(nextBody.system);
+  } else if (nextBody.system && typeof nextBody.system === 'object') {
+    nextBody.system = stripCacheControlFields(nextBody.system);
+  }
+  if (Array.isArray(nextBody.messages)) {
+    nextBody.messages = nextBody.messages.map((message) => {
+      if (!message || typeof message !== 'object') return message;
+      const nextMessage = stripCacheControlFields(message);
+      if (Array.isArray(nextMessage.content)) {
+        return {
+          ...nextMessage,
+          content: stripAnthropicCacheControlFromBlocks(nextMessage.content)
+        };
+      }
+      return nextMessage;
+    });
+  }
+  if (Array.isArray(nextBody.tools)) {
+    nextBody.tools = nextBody.tools.map((tool) => {
+      if (!tool || typeof tool !== 'object') return tool;
+      const nextTool = stripCacheControlFields(tool);
+      if (nextTool.function && typeof nextTool.function === 'object' && !Array.isArray(nextTool.function)) {
+        return {
+          ...nextTool,
+          function: stripCacheControlFields(nextTool.function)
+        };
+      }
+      return nextTool;
+    });
+  }
+
+  const nextHeaders = requestHeaders && typeof requestHeaders === 'object'
+    ? { ...requestHeaders }
+    : {};
+  const headerKey = Object.prototype.hasOwnProperty.call(nextHeaders, 'anthropic-beta')
+    ? 'anthropic-beta'
+    : (Object.prototype.hasOwnProperty.call(nextHeaders, 'Anthropic-Beta') ? 'Anthropic-Beta' : '');
+  if (headerKey) {
+    const strippedHeader = stripPromptCachingBetaHeaderValue(nextHeaders[headerKey]);
+    if (strippedHeader) nextHeaders[headerKey] = strippedHeader;
+    else delete nextHeaders[headerKey];
+  }
+
+  return {
+    requestBody: nextBody,
+    requestHeaders: Object.keys(nextHeaders).length > 0 ? nextHeaders : null
+  };
+}
+
 function clampTemperatureForProvider(provider, value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
@@ -439,17 +530,32 @@ function normalizeOpenAIImageDetail(value) {
 
 function sanitizeOpenAICompatibleContentPart(part) {
   if (!part || typeof part !== 'object' || Array.isArray(part)) return part;
-  if (!part.image_url || typeof part.image_url !== 'object' || Array.isArray(part.image_url)) return part;
+  const normalizedCacheControl = extractAnthropicCacheControl(part);
+  const nextPart = stripCacheControlFields(part);
+  if (!nextPart.image_url || typeof nextPart.image_url !== 'object' || Array.isArray(nextPart.image_url)) {
+    return normalizedCacheControl
+      ? {
+          ...nextPart,
+          cache_control: normalizedCacheControl
+        }
+      : nextPart;
+  }
 
-  const imageUrl = { ...part.image_url };
+  const imageUrl = { ...nextPart.image_url };
   const detail = normalizeOpenAIImageDetail(imageUrl.detail);
   if (detail) imageUrl.detail = detail;
   else delete imageUrl.detail;
 
-  return {
-    ...part,
+  const sanitized = {
+    ...nextPart,
     image_url: imageUrl
   };
+  return normalizedCacheControl
+    ? {
+        ...sanitized,
+        cache_control: normalizedCacheControl
+      }
+    : sanitized;
 }
 
 function buildUnavailableImageText(imageUrl = '') {
@@ -707,6 +813,64 @@ async function preprocessOpenAICompatibleMessages(messages = []) {
 
   return out;
 }
+
+function requestUsesOpenAICompatiblePromptCaching(requestBody = {}) {
+  const topLevel = Boolean(extractAnthropicCacheControl(requestBody));
+  if (topLevel) return true;
+  return (Array.isArray(requestBody.messages) ? requestBody.messages : []).some((message) => {
+    const content = message?.content;
+    if (Array.isArray(content)) {
+      return content.some((part) => Boolean(extractAnthropicCacheControl(part)));
+    }
+    return Boolean(extractAnthropicCacheControl(content));
+  });
+}
+
+function stripOpenAICompatiblePromptCaching(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return requestBody;
+  const nextBody = stripCacheControlFields(requestBody);
+  if (!Array.isArray(nextBody.messages)) return nextBody;
+  return {
+    ...nextBody,
+    messages: nextBody.messages.map((message) => {
+      if (!message || typeof message !== 'object') return message;
+      const nextMessage = stripCacheControlFields(message);
+      if (Array.isArray(nextMessage.content)) {
+        return {
+          ...nextMessage,
+          content: nextMessage.content.map((part) => sanitizeOpenAICompatibleContentPart(stripCacheControlFields(part)))
+        };
+      }
+      if (nextMessage.content && typeof nextMessage.content === 'object' && !Array.isArray(nextMessage.content)) {
+        return {
+          ...nextMessage,
+          content: sanitizeOpenAICompatibleContentPart(stripCacheControlFields(nextMessage.content))
+        };
+      }
+      return nextMessage;
+    })
+  };
+}
+
+function isOpenAICompatiblePromptCacheSchemaError(error) {
+  const status = Number(error?.response?.status || 0);
+  if (![400, 404, 415, 422].includes(status)) return false;
+  const responseData = error?.response?.data;
+  const bodyText = typeof responseData === 'string'
+    ? responseData
+    : JSON.stringify(responseData || {});
+  return /cache[_-]?control|prompt[_-]?cache|unknown field|extra inputs|additional properties/i.test(bodyText);
+}
+
+function isAnthropicPromptCacheSchemaError(error) {
+  const status = Number(error?.response?.status || 0);
+  if (![400, 404, 415, 422].includes(status)) return false;
+  const responseData = error?.response?.data;
+  const bodyText = typeof responseData === 'string'
+    ? responseData
+    : JSON.stringify(responseData || {});
+  return /cache[_-]?control|prompt[_-]?cache|prompt-caching-2024-07-31|anthropic-beta|unknown field|unsupported beta|extra inputs|additional properties/i.test(bodyText);
+}
 function mapToolSchemaToAnthropic(tool) {
   if (!tool || typeof tool !== 'object') return null;
   if (tool.type !== 'function') return null;
@@ -788,7 +952,10 @@ async function mapMessagesToAnthropic(messages) {
         );
         if (stableBlocks.length > 0) systemBlocks.push(...stableBlocks);
 
-        const dynamicBlocks = await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${splitSystem.dynamicText}`);
+        const dynamicBlocks = applyAnthropicCacheControlToLastBlock(
+          await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${splitSystem.dynamicText}`),
+          extractAnthropicCacheControl(item)
+        );
         if (dynamicBlocks.length > 0) {
           out.push({
             role: 'assistant',
@@ -799,7 +966,10 @@ async function mapMessagesToAnthropic(messages) {
       }
 
       if (isAnthropicDynamicSystemContextText(rawSystemText)) {
-        const contextBlocks = await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${rawSystemText}`);
+        const contextBlocks = applyAnthropicCacheControlToLastBlock(
+          await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${rawSystemText}`),
+          extractAnthropicCacheControl(item)
+        );
         if (contextBlocks.length > 0) {
           out.push({
             role: 'assistant',
@@ -920,8 +1090,12 @@ async function prepareRequest(url, body = {}) {
   const provider = getApiProvider(url, body?.model || config.AI_MODEL);
   if (provider !== 'anthropic') {
     const requestBody = body && typeof body === 'object'
-      ? { ...body }
+      ? stripCacheControlFields({ ...body })
       : body;
+    const normalizedTopLevelCacheControl = extractAnthropicCacheControl(body);
+    if (normalizedTopLevelCacheControl) {
+      requestBody.cache_control = normalizedTopLevelCacheControl;
+    }
     if (requestBody && Array.isArray(requestBody.messages)) {
       requestBody.messages = await preprocessOpenAICompatibleMessages(requestBody.messages);
     }
@@ -1126,6 +1300,8 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
 
   for (let i = 0; i <= maxRetry; i++) {
     let callId = '';
+    let prepared = null;
+    let timeoutMs = getRequestTimeoutMs();
     try {
       const timeoutBase = Number.isFinite(requestedTimeoutMs)
         ? Math.max(1000, Math.floor(requestedTimeoutMs))
@@ -1133,8 +1309,8 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       const timeoutCap = Number.isFinite(requestedTimeoutMs)
         ? Math.max(timeoutBase, timeoutBase + (15000 * Math.max(0, maxRetry)))
         : 180000;
-      const timeoutMs = getRetryTimeoutMs(timeoutBase, i, 15000, timeoutCap);
-      const prepared = await prepareRequest(url, body);
+      timeoutMs = getRetryTimeoutMs(timeoutBase, i, 15000, timeoutCap);
+      prepared = await prepareRequest(url, body);
       callId = startModelCall({
         source: trace.source || 'httpClient',
         phase: trace.phase || '',
@@ -1158,6 +1334,65 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       finishModelCall(callId, { response, attempts: i + 1 });
       return response;
     } catch (e) {
+      if (
+        callId
+        && prepared?.provider === 'openai_compatible'
+        && requestUsesOpenAICompatiblePromptCaching(prepared.requestBody)
+        && isOpenAICompatiblePromptCacheSchemaError(e)
+      ) {
+        try {
+          const strippedRequestBody = stripOpenAICompatiblePromptCaching(prepared.requestBody);
+          const response = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+          );
+          finishModelCall(callId, { response, attempts: i + 1 });
+          return response;
+        } catch (retryWithoutCacheError) {
+          if (callId) failModelCall(callId, retryWithoutCacheError, { attempts: i + 1 });
+          lastErr = retryWithoutCacheError;
+          if (i >= maxRetry || !shouldRetry(retryWithoutCacheError)) break;
+          const delayMs = getRetryDelayMs(retryWithoutCacheError, i);
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+      }
+      if (
+        callId
+        && prepared?.provider === 'anthropic'
+        && anthropicRequestUsesPromptCaching(prepared.requestBody)
+        && isAnthropicPromptCacheSchemaError(e)
+      ) {
+        try {
+          const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
+          const response = await axios.post(
+            prepared.requestUrl,
+            downgraded.requestBody,
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders)
+          );
+          finishModelCall(callId, {
+            response,
+            attempts: i + 1,
+            request: downgraded.requestBody,
+            requestHeaders: downgraded.requestHeaders
+          });
+          return response;
+        } catch (retryWithoutCacheError) {
+          if (callId) {
+            failModelCall(callId, retryWithoutCacheError, {
+              attempts: i + 1,
+              request: prepared.requestBody,
+              requestHeaders: prepared.requestHeaders
+            });
+          }
+          lastErr = retryWithoutCacheError;
+          if (i >= maxRetry || !shouldRetry(retryWithoutCacheError)) break;
+          const delayMs = getRetryDelayMs(retryWithoutCacheError, i);
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+      }
       if (callId) failModelCall(callId, e, { attempts: i + 1 });
       lastErr = e;
       if (i >= maxRetry || !shouldRetry(e)) break;
@@ -1187,12 +1422,13 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
   for (let i = 0; i <= maxRetry; i++) {
     let stream = null;
     let callId = '';
+    let prepared = null;
     const usageParserState = { buffer: '' };
     let streamUsage = null;
 
     try {
       const timeoutMs = getRetryTimeoutMs(getStreamTimeoutMs(), i, 30000, 300000);
-      const prepared = await prepareRequest(url, body);
+      prepared = await prepareRequest(url, body);
       callId = startModelCall({
         source: trace.source || 'httpClient',
         phase: trace.phase || '',
@@ -1208,11 +1444,44 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
         requestHeaders: prepared.requestHeaders,
         memoryInjected: trace.memoryInjected
       });
-      const resp = await axios.post(
-        prepared.requestUrl,
-        prepared.requestBody,
-        getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
-      );
+      let resp;
+      try {
+        resp = await axios.post(
+          prepared.requestUrl,
+          prepared.requestBody,
+          getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+        );
+        } catch (error) {
+        if (
+          prepared?.provider === 'openai_compatible'
+          && requestUsesOpenAICompatiblePromptCaching(prepared.requestBody)
+          && isOpenAICompatiblePromptCacheSchemaError(error)
+        ) {
+          resp = await axios.post(
+            prepared.requestUrl,
+            stripOpenAICompatiblePromptCaching(prepared.requestBody),
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+          );
+        } else if (
+          prepared?.provider === 'anthropic'
+          && anthropicRequestUsesPromptCaching(prepared.requestBody)
+          && isAnthropicPromptCacheSchemaError(error)
+        ) {
+          const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
+          resp = await axios.post(
+            prepared.requestUrl,
+            downgraded.requestBody,
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders)
+          );
+          prepared = {
+            ...prepared,
+            requestBody: downgraded.requestBody,
+            requestHeaders: downgraded.requestHeaders
+          };
+        } else {
+          throw error;
+        }
+      }
       stream = resp?.data;
       if (!stream || typeof stream.on !== 'function') {
         throw new Error('Streaming response is not a readable stream');
@@ -1300,7 +1569,13 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
 
       return true;
     } catch (e) {
-      if (callId) failModelCall(callId, e, { attempts: i + 1 });
+      if (callId) {
+        failModelCall(callId, e, {
+          attempts: i + 1,
+          request: prepared?.requestBody,
+          requestHeaders: prepared?.requestHeaders
+        });
+      }
       lastErr = e;
       if (stream && typeof stream.destroy === 'function') {
         try { stream.destroy(); } catch (_) {}

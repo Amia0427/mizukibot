@@ -6,7 +6,26 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function hasMessageContent(message = {}) {
+  if (typeof message?.content === 'string') return Boolean(String(message.content || '').trim());
+  if (Array.isArray(message?.content)) {
+    return message.content.some((part) => {
+      if (typeof part === 'string') return Boolean(String(part || '').trim());
+      if (part && typeof part.text === 'string') return Boolean(String(part.text || '').trim());
+      return false;
+    });
+  }
+  if (message?.content && typeof message.content === 'object') {
+    return Boolean(String(message.content.text || message.content.content || '').trim());
+  }
+  return false;
+}
+
 function createConversationContextHelpers(deps = {}) {
+  const OPENAI_COMPATIBLE_CACHE_CONTROL = Object.freeze({
+    type: 'ephemeral',
+    ttl: '5m'
+  });
   const {
     config,
     normalizeToolNames,
@@ -95,11 +114,85 @@ function createConversationContextHelpers(deps = {}) {
         role,
         content: String(item.content || '').trim()
       }))
-      .filter((item) => item.content);
+      .filter((item) => hasMessageContent(item));
+  }
+
+  function attachCacheControlToMessage(message = {}, cacheControl = null) {
+    const content = String(message?.content || '').trim();
+    if (!content || !cacheControl) return message;
+    return {
+      ...message,
+      content: [
+        {
+          type: 'text',
+          text: content,
+          cache_control: cacheControl
+        }
+      ]
+    };
+  }
+
+  function shouldCacheStableSystemBlock(block = {}) {
+    const blockId = String(block?.id || '').trim();
+    if (!blockId) return false;
+    return [
+      'main_persona_system',
+      'security_contract',
+      'core_baseline_patch'
+    ].includes(blockId);
+  }
+
+  function shouldCacheSessionContextBlock(block = {}) {
+    const blockId = String(block?.id || '').trim();
+    return blockId === 'affinity_level'
+      || blockId === 'affinity_points'
+      || blockId.startsWith('relationship_');
+  }
+
+  function mapStableSystemBlocksToMessages(blocks = []) {
+    return normalizeArray(blocks)
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => {
+        const base = {
+          role: 'system',
+          content: String(item.content || '').trim()
+        };
+        return shouldCacheStableSystemBlock(item)
+          ? attachCacheControlToMessage(base, OPENAI_COMPATIBLE_CACHE_CONTROL)
+          : base;
+      })
+      .filter((item) => hasMessageContent(item));
+  }
+
+  function mapDynamicContextBlocksToMessages(blocks = []) {
+    return normalizeArray(blocks)
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => {
+        const base = {
+          role: 'system',
+          content: String(item.content || '').trim()
+        };
+        return shouldCacheSessionContextBlock(item)
+          ? attachCacheControlToMessage(base, OPENAI_COMPATIBLE_CACHE_CONTROL)
+          : base;
+      })
+      .filter((item) => hasMessageContent(item));
   }
 
   function buildAssistantOnlyContextMessages(state) {
-    return mapBlocksToMessages(state.memory?.assistantOnlyContextBlocks, 'assistant');
+    return normalizeArray(state.memory?.assistantOnlyContextBlocks)
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => {
+        const message = {
+          role: 'assistant',
+          content: String(item.content || '').trim()
+        };
+        if (String(item?.id || '').trim() === 'dynamic_few_shot') {
+          return attachCacheControlToMessage(message, OPENAI_COMPATIBLE_CACHE_CONTROL);
+        }
+        return message;
+      })
+      .filter((item) => hasMessageContent(item));
   }
 
   function getMainConversationSystemMessages(state, options = {}) {
@@ -119,9 +212,9 @@ function createConversationContextHelpers(deps = {}) {
       || normalizeArray(state.memory?.continuityState?.payload?.open_loops).length > 0
       || normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments).length > 0
     );
-    const stableBlockMessages = mapBlocksToMessages(stableSystemBlocks);
-    const dynamicBlockMessages = mapBlocksToMessages(dynamicContextBlocks)
-      .filter((message) => String(message.content || '').trim());
+    const stableBlockMessages = mapStableSystemBlocksToMessages(stableSystemBlocks);
+    const dynamicBlockMessages = mapDynamicContextBlocksToMessages(dynamicContextBlocks)
+      .filter((message) => hasMessageContent(message));
     const fallbackDynamicMessages = (!stableBlockMessages.length && dynamicPrompt)
       ? [{ role: 'system', content: dynamicPrompt }]
       : [];

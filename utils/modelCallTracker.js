@@ -144,10 +144,14 @@ function normalizeUsage(raw) {
   const cacheReadInputTokens = Number(
     raw.cache_read_input_tokens
     ?? raw.cacheReadInputTokens
+    ?? raw.prompt_tokens_details?.cached_tokens
+    ?? raw.promptTokensDetails?.cachedTokens
   );
   const cacheCreationInputTokens = Number(
     raw.cache_creation_input_tokens
     ?? raw.cacheCreationInputTokens
+    ?? raw.prompt_tokens_details?.cache_write_tokens
+    ?? raw.promptTokensDetails?.cacheWriteTokens
   );
   const cacheCreation = raw.cache_creation && typeof raw.cache_creation === 'object'
     ? safeClone(raw.cache_creation, {})
@@ -264,6 +268,16 @@ function finalizeRecord(id, patch = {}) {
     : null;
   record.attempts = Math.max(1, Number(patch.attempts || record.attempts || 1));
   record.error = normalizeText(patch.error);
+
+  if (
+    Object.prototype.hasOwnProperty.call(patch, 'request')
+    || Object.prototype.hasOwnProperty.call(patch, 'requestHeaders')
+  ) {
+    record.prompt_caching = summarizePromptCaching(
+      patch.request || {},
+      patch.requestHeaders || {}
+    );
+  }
 
   const usage = patch.usage || extractUsage(patch.response);
   if (usage) record.usage = usage;

@@ -220,6 +220,21 @@ function buildCacheFriendlyFingerprint(stableSystemBlocks = []) {
   );
 }
 
+function buildSessionCacheFingerprint(userInfo = {}, promptMaterials = {}) {
+  const relationshipState = promptMaterials?.personaMemoryState?.relationshipState || {};
+  const affinity = promptMaterials?.affinity && typeof promptMaterials.affinity === 'object'
+    ? promptMaterials.affinity
+    : getAffinitySettings(userInfo, { userId: promptMaterials?.userId });
+  return hashText([
+    normalizeText(userInfo?.level || ''),
+    String(Number(userInfo?.points || affinity?.points || 0) || 0),
+    normalizeText(relationshipState.relationship || promptMaterials?.memoryContext?.profile?.relation_stage || ''),
+    normalizeText(relationshipState.attitude || promptMaterials?.memoryContext?.affinityState?.attitude || ''),
+    normalizeText(relationshipState.replyStylePolicy || promptMaterials?.memoryContext?.affinityState?.replyStylePolicy || ''),
+    normalizeText(promptMaterials?.memoryContext?.persona?.relationshipStyle || promptMaterials?.memoryContext?.persona?.userAdaptationPersona || '')
+  ].join('|'));
+}
+
 function withSoftTimeout(taskFactory, timeoutMs, fallbackValue) {
   const budget = Math.max(0, Number(timeoutMs) || 0);
   if (!budget) return Promise.resolve(typeof taskFactory === 'function' ? taskFactory() : fallbackValue);
@@ -273,7 +288,7 @@ function buildPromptCacheKeys(userId = '', routeMeta = {}, options = {}) {
   const sessionKey = hashText([
     normalizeText(options.sessionKey),
     normalizeText(normalizedRouteMeta.groupId || normalizedRouteMeta.group_id),
-    normalizeText(options.sharedShortTermSignature)
+    normalizeText(options.sessionCacheFingerprint || options.sharedShortTermSignature)
   ].join('|'));
   return { stableKey, sessionKey };
 }
@@ -1244,19 +1259,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     routeMeta,
     sessionKey: options.sessionKey
   });
-  const cacheKeys = buildPromptCacheKeys(userId, routeMeta, {
-    ...options,
-    featureFingerprint,
-    promptManifestFingerprint: systemPromptFingerprint,
-    systemPromptFingerprint,
-    sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
-  });
   const now = Date.now();
   const essentialStartedAt = now;
-  prunePromptLayerCache(promptLayerCache.stable, now);
-  prunePromptLayerCache(promptLayerCache.session, now);
-  const stableCacheHit = clonePromptLayerValue(promptLayerCache.stable.get(cacheKeys.stableKey)?.value || null);
-  const sessionCacheHit = clonePromptLayerValue(promptLayerCache.session.get(cacheKeys.sessionKey)?.value || null);
   const collectStartedAt = Date.now();
   const promptMaterials = await withSoftTimeout(
     () => collectPromptInputs(userInfo, userId, question, customPrompt, {
@@ -1286,6 +1290,22 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     })
   );
   const promptCollectMs = Math.max(0, Date.now() - collectStartedAt);
+  const sessionCacheFingerprint = buildSessionCacheFingerprint(userInfo, {
+    ...promptMaterials,
+    userId
+  });
+  const cacheKeys = buildPromptCacheKeys(userId, routeMeta, {
+    ...options,
+    featureFingerprint,
+    promptManifestFingerprint: systemPromptFingerprint,
+    systemPromptFingerprint,
+    sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
+    sessionCacheFingerprint
+  });
+  prunePromptLayerCache(promptLayerCache.stable, now);
+  prunePromptLayerCache(promptLayerCache.session, now);
+  const stableCacheHit = clonePromptLayerValue(promptLayerCache.stable.get(cacheKeys.stableKey)?.value || null);
+  const sessionCacheHit = clonePromptLayerValue(promptLayerCache.session.get(cacheKeys.sessionKey)?.value || null);
 
   if (String(customPrompt || '').trim()) {
     const customRenderStartedAt = Date.now();
