@@ -41,6 +41,12 @@ const CONTINUITY_PRIORITY = Object.freeze({
   fallback: 0
 });
 
+function looksLikePollutedContinuitySummary(text = '') {
+  const normalized = normalizeText(text, 2400);
+  if (!normalized) return false;
+  return /\[(KnownSummary|KnownImpression|Identity|Likes|Dislikes|Goals|KnownFacts|RelevantRecall|RecentTopics)\]/i.test(normalized);
+}
+
 const SURFACE_POLICIES = Object.freeze({
   direct_chat: {
     includeContinuity: true,
@@ -662,7 +668,9 @@ function buildContinuityCandidates({
   const projection = normalizeObject(sessionProjection.session);
   pushScalar(activeTopic, 'session_projection', projection.activeTopic, { confidence: 0.98 });
   pushScalar(carryOver, 'session_projection', projection.carryOverUserTurn, { confidence: 0.98 });
-  pushScalar(summary, 'session_projection', projection.summary, { confidence: 0.96 });
+  if (!looksLikePollutedContinuitySummary(projection.summary)) {
+    pushScalar(summary, 'session_projection', projection.summary, { confidence: 0.96 });
+  }
   pushScalar(phaseHint, 'session_projection', projection.phaseHint, { confidence: 0.92 });
   pushScalar(replyPosture, 'session_projection', projection.expressionState?.replyPosture, { confidence: 0.94 });
   pushScalar(sceneTopic, 'session_projection', projection.sceneState?.activeTopic, { confidence: 0.92 });
@@ -679,7 +687,9 @@ function buildContinuityCandidates({
   const normalizedBridgeState = normalizeShortTermState(bridgeState);
   pushScalar(activeTopic, 'short_term_bridge', normalizedBridgeState.activeTopic, { confidence: 0.88 });
   pushScalar(carryOver, 'short_term_bridge', normalizedBridgeState.carryOverUserTurn, { confidence: 0.92 });
-  pushScalar(summary, 'short_term_bridge', normalizedBridgeState.summary, { confidence: 0.84 });
+  if (!looksLikePollutedContinuitySummary(normalizedBridgeState.summary)) {
+    pushScalar(summary, 'short_term_bridge', normalizedBridgeState.summary, { confidence: 0.84 });
+  }
   pushScalar(phaseHint, 'short_term_bridge', normalizedBridgeState.phaseHint, { confidence: 0.84 });
   pushScalar(replyPosture, 'short_term_bridge', normalizedBridgeState.expression?.replyPosture, { confidence: 0.88 });
   pushScalar(sceneTopic, 'short_term_bridge', normalizedBridgeState.scene?.activeTopic, { confidence: 0.82 });
@@ -696,7 +706,9 @@ function buildContinuityCandidates({
   const normalizedShortTerm = normalizeShortTermState(shortTermState);
   pushScalar(activeTopic, 'short_term_state', normalizedShortTerm.activeTopic, { confidence: 0.82 });
   pushScalar(carryOver, 'short_term_state', normalizedShortTerm.carryOverUserTurn, { confidence: 0.82 });
-  pushScalar(summary, 'short_term_state', normalizedShortTerm.summary, { confidence: 0.78 });
+  if (!looksLikePollutedContinuitySummary(normalizedShortTerm.summary)) {
+    pushScalar(summary, 'short_term_state', normalizedShortTerm.summary, { confidence: 0.78 });
+  }
   pushScalar(phaseHint, 'short_term_state', normalizedShortTerm.phaseHint, { confidence: 0.76 });
   pushScalar(replyPosture, 'short_term_state', normalizedShortTerm.expression?.replyPosture, { confidence: 0.76 });
   pushScalar(sceneTopic, 'short_term_state', normalizedShortTerm.scene?.activeTopic, { confidence: 0.72 });
@@ -729,7 +741,6 @@ function buildContinuityCandidates({
     pushList(userConstraints, 'same_session_journal', snapshot.userConstraints, { confidence: 0.64 });
   }
 
-  pushScalar(summary, 'generic_recall', memoryContext.promptSummaryText || memoryContext.summary, { confidence: 0.48 });
   pushScalar(activeTopic, 'task_memory', memoryContext.taskMemoryText, { confidence: 0.44 });
   pushScalar(activeTopic, 'group_memory', memoryContext.groupMemoryText, { confidence: 0.42 });
 

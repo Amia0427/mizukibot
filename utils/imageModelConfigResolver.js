@@ -1,5 +1,9 @@
 const config = require('../config');
 const { isAdminMainModelUser, resolveUserScopedMainModelConfig } = require('./mainModelConfigResolver');
+const {
+  ADMIN_SHARED_FALLBACK_SCOPE,
+  isFallbackActive
+} = require('./mainModelFallback');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -8,6 +12,15 @@ function normalizeText(value) {
 function resolveAdminImageConfig(overrides = null, userId = '', options = {}) {
   const isAdmin = isAdminMainModelUser(userId, options);
   if (!isAdmin) return null;
+
+  if (isFallbackActive({ scope: ADMIN_SHARED_FALLBACK_SCOPE })) {
+    const fallbackMainConfig = resolveUserScopedMainModelConfig(userId, overrides, options);
+    return {
+      model: normalizeText(fallbackMainConfig?.model || config.ADMIN_AI_FALLBACK_MODEL || config.ADMIN_AI_MODEL || config.AI_MODEL || 'gpt-5.4') || 'gpt-5.4',
+      apiBaseUrl: normalizeText(fallbackMainConfig?.apiBaseUrl || config.ADMIN_AI_FALLBACK_API_BASE_URL || config.ADMIN_API_BASE_URL || config.API_BASE_URL || ''),
+      apiKey: normalizeText(fallbackMainConfig?.apiKey || config.ADMIN_AI_FALLBACK_API_KEY || config.ADMIN_API_KEY || config.API_KEY || '')
+    };
+  }
 
   const baseUrl = normalizeText(
     (overrides && typeof overrides === 'object' ? overrides.adminImageApiBaseUrl : '')

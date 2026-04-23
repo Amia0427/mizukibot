@@ -1,5 +1,6 @@
 const config = require('../../../config');
 const {
+  ADMIN_SHARED_FALLBACK_SCOPE,
   resolveForcedFallbackMainModelConfig,
   recordMainModelFailure,
   recordMainModelSuccess
@@ -7,7 +8,8 @@ const {
 const {
   resolveRoleAwareMainModelConfig,
   resolveUserScopedMainModelConfig,
-  shouldBypassMainModelFallback
+  shouldBypassMainModelFallback,
+  isAdminMainModelUser
 } = require('../../../utils/mainModelConfigResolver');
 const {
   buildImageModelConfig
@@ -77,24 +79,34 @@ function buildPrimaryMainModelConfig(overrides = null, userId = '', options = {}
 
 async function withMainModelFallback(action, modelConfig = null, userId = '', options = {}) {
   const bypassFallback = shouldBypassMainModelFallback(userId, options);
+  const scope = options?.fallbackScope
+    || (String(userId || '').trim() && !options?.forceDefaultFallbackScope && shouldUseAdminSharedFallbackScope(userId, options)
+      ? ADMIN_SHARED_FALLBACK_SCOPE
+      : undefined);
   const resolvedConfig = resolveUserScopedMainModelConfig(userId, modelConfig, options);
   try {
     const result = await action(resolvedConfig);
-    recordMainModelSuccess({ usingFallback: resolvedConfig.__mainFallbackActive });
+    recordMainModelSuccess({ usingFallback: resolvedConfig.__mainFallbackActive }, { scope });
     return result;
   } catch (error) {
     if (bypassFallback) throw error;
-    const failureState = recordMainModelFailure(error);
+    if (resolvedConfig.__mainFallbackActive) throw error;
+    const failureState = recordMainModelFailure(error, { scope });
     if (failureState.activated && !resolvedConfig.__mainFallbackActive) {
       const forcedFallbackConfig = resolveForcedFallbackMainModelConfig(
-        buildPrimaryMainModelConfig(modelConfig, userId, options)
+        buildPrimaryMainModelConfig(modelConfig, userId, options),
+        { scope }
       );
       const fallbackResult = await action(forcedFallbackConfig);
-      recordMainModelSuccess({ usingFallback: true });
+      recordMainModelSuccess({ usingFallback: true }, { scope });
       return fallbackResult;
     }
     throw error;
   }
+}
+
+function shouldUseAdminSharedFallbackScope(userId = '', options = {}) {
+  return isAdminMainModelUser(userId, options);
 }
 
 function normalizeTextContent(content) {

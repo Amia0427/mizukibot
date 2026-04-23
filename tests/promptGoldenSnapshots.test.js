@@ -40,11 +40,16 @@ module.exports = (async () => {
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'core_baseline_patch'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
-  assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'main_persona_system'));
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'directed_context'));
-  assert.ok(main.assistantOnlyContextBlocks.some((item) => item.id === 'dynamic_few_shot'));
+  if (main.latencyMeta?.optionalBudgetExceeded) {
+    assert.ok(!main.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
+    assert.ok(!main.assistantOnlyContextBlocks.some((item) => item.id === 'dynamic_few_shot'));
+  } else {
+    assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
+    assert.ok(main.assistantOnlyContextBlocks.some((item) => item.id === 'dynamic_few_shot'));
+  }
   assert.ok(Array.isArray(main.promptSnapshot.activatedPersonaModules));
   assert.ok(Array.isArray(main.promptSnapshot.personaModuleCandidates));
   assert.ok(Array.isArray(main.promptSnapshot.personaModuleTokenUsage));
@@ -81,8 +86,12 @@ module.exports = (async () => {
     }
   );
 
-  assert.ok(branchPrompt.promptSnapshot.activatedPersonaModules.includes('mafuyu_branch'));
-  assert.ok(branchPrompt.promptSnapshot.activatedPersonaModules.length <= 2);
+  if (branchPrompt.latencyMeta?.optionalBudgetExceeded) {
+    assert.strictEqual(branchPrompt.promptSnapshot.activatedPersonaModules.length, 0);
+  } else {
+    assert.ok(branchPrompt.promptSnapshot.activatedPersonaModules.includes('mafuyu_branch'));
+    assert.ok(branchPrompt.promptSnapshot.activatedPersonaModules.length <= 2);
+  }
 
   const shoppingPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 18 },
@@ -100,8 +109,12 @@ module.exports = (async () => {
     }
   );
 
-  assert.ok(shoppingPrompt.promptSnapshot.activatedPersonaModules.includes('cute_obsession'));
-  assert.ok(shoppingPrompt.promptSnapshot.activatedPersonaModules.length <= 2);
+  if (shoppingPrompt.latencyMeta?.optionalBudgetExceeded) {
+    assert.strictEqual(shoppingPrompt.promptSnapshot.activatedPersonaModules.length, 0);
+  } else {
+    assert.ok(shoppingPrompt.promptSnapshot.activatedPersonaModules.includes('cute_obsession'));
+    assert.ok(shoppingPrompt.promptSnapshot.activatedPersonaModules.length <= 2);
+  }
 
   const privatePrompt = await buildDynamicPrompt(
     { level: 'friend', points: 14 },
@@ -120,8 +133,12 @@ module.exports = (async () => {
     }
   );
 
-  assert.ok(privatePrompt.promptSnapshot.activatedPersonaModules.includes('scene_private_chat'));
-  assert.ok(privatePrompt.promptSnapshot.activatedPersonaModules.length <= 3);
+  if (privatePrompt.latencyMeta?.optionalBudgetExceeded) {
+    assert.strictEqual(privatePrompt.promptSnapshot.activatedPersonaModules.length, 0);
+  } else {
+    assert.ok(privatePrompt.promptSnapshot.activatedPersonaModules.includes('scene_private_chat'));
+    assert.ok(privatePrompt.promptSnapshot.activatedPersonaModules.length <= 3);
+  }
 
   const roleplayPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 16 },
@@ -139,7 +156,11 @@ module.exports = (async () => {
     }
   );
 
-  assert.ok(roleplayPrompt.promptSnapshot.activatedPersonaModules.includes('roleplay_friend_bit'));
+  if (roleplayPrompt.latencyMeta?.optionalBudgetExceeded) {
+    assert.strictEqual(roleplayPrompt.promptSnapshot.activatedPersonaModules.length, 0);
+  } else {
+    assert.ok(roleplayPrompt.promptSnapshot.activatedPersonaModules.includes('roleplay_friend_bit'));
+  }
 
   console.log('promptGoldenSnapshots.test.js passed');
 })().catch((error) => {

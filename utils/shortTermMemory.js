@@ -328,6 +328,7 @@ function normalizeShortTermState(input = {}) {
   return {
     schemaVersion: Math.max(2, Number(old.schemaVersion || 2) || 2),
     summary: trimShortText(old.summary, 2400),
+    summarySource: trimShortText(old.summarySource, 48),
     activeTopic: normalizedInteraction.activeTopic || trimShortText(old.activeTopic, 180),
     openLoops: normalizedInteraction.openLoops.length > 0
       ? normalizedInteraction.openLoops
@@ -393,7 +394,8 @@ function deriveShortTermFieldsFromContinuity(state = {}) {
     phaseHint: normalized.interaction.phaseHint || normalized.phaseHint,
     sceneRef: normalized.scene.sceneKey || normalized.sceneRef,
     confidence: normalized.confidence,
-    summary: normalized.summary || deriveShortTermSummaryFromContinuity(normalized)
+    summary: normalized.summary || deriveShortTermSummaryFromContinuity(normalized),
+    summarySource: normalized.summarySource || (normalized.summary ? 'continuity' : '')
   };
 }
 
@@ -643,6 +645,7 @@ function rehydrateShortTermMemoryAfterRestartIfNeeded(userId, question = '', use
   }
 
   state.summary = summaryText;
+  state.summarySource = 'restart_recall';
   state.lastCompressedAt = Date.now();
 
   if (config.ENABLE_DEBUG_LOG) {
@@ -1165,10 +1168,12 @@ async function compressShortTermHistoryIfNeeded(userId, userInfo = {}, deps = {}
     if (structured) {
       const merged = mergeStructuredState(state, structured, settings.summaryMaxTokens);
       Object.assign(state, merged);
+      state.summarySource = 'compression';
     } else {
       const normalizedSummary = trimTextByTokenBudget(normalizedOutput, settings.summaryMaxTokens, 'tail');
       if (!normalizedSummary) break;
       state.summary = mergeCompressedSummary(state.summary, normalizedSummary, settings.summaryMaxTokens);
+      state.summarySource = 'compression';
       state.lastCompressedAt = Date.now();
     }
 

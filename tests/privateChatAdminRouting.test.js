@@ -52,6 +52,7 @@ module.exports = (async () => {
   assert.strictEqual(sent[0].chatType, 'private');
   assert.strictEqual(sent[0].userId, 'admin_1');
   assert.strictEqual(sent[0].atSender, false);
+  assert.ok(String(sent[0].replyText || '').includes('/create <prompt>'));
 
   const unavailableReply = buildUnavailableRouteReply(
     {

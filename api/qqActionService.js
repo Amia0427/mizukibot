@@ -469,6 +469,55 @@ async function sendGroupMessage(groupId = '', message = '', options = {}) {
   };
 }
 
+async function sendGroupImageMessage(groupId = '', imageInput = null, options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const targetGroupId = normalizeText(groupId);
+  if (!targetGroupId) throw new Error('groupId is required');
+
+  let base64Body = '';
+  if (Buffer.isBuffer(imageInput)) {
+    base64Body = imageInput.toString('base64');
+  } else if (typeof imageInput === 'string') {
+    const trimmed = String(imageInput || '').trim();
+    if (trimmed.startsWith('base64://')) {
+      base64Body = trimmed.slice('base64://'.length).trim();
+    } else {
+      base64Body = trimmed.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, '').replace(/\s+/g, '');
+    }
+  } else if (imageInput && typeof imageInput === 'object') {
+    if (Buffer.isBuffer(imageInput.buffer)) {
+      base64Body = imageInput.buffer.toString('base64');
+    } else if (typeof imageInput.base64 === 'string') {
+      base64Body = String(imageInput.base64 || '').trim()
+        .replace(/^base64:\/\//i, '')
+        .replace(/^data:image\/[a-z0-9.+-]+;base64,/i, '')
+        .replace(/\s+/g, '');
+    } else if (typeof imageInput.file === 'string') {
+      const filePath = path.resolve(String(imageInput.file || '').trim());
+      if (filePath && fs.existsSync(filePath)) {
+        base64Body = fs.readFileSync(filePath).toString('base64');
+      }
+    }
+  }
+
+  if (!base64Body) throw new Error('image content is required');
+
+  await actionClient.callAction('send_group_msg', {
+    group_id: targetGroupId,
+    message: [{
+      type: 'image',
+      data: {
+        file: `base64://${base64Body}`
+      }
+    }]
+  });
+
+  return {
+    success: true,
+    reason: 'group image sent'
+  };
+}
+
 async function sendPrivateMessage(userId = '', message = '', options = {}) {
   const actionClient = options.actionClient || getNapCatActionClient();
   const targetUserId = normalizeText(userId);
@@ -897,6 +946,7 @@ module.exports = {
   requireGroupContext,
   sanitizeDiaryImageMeta,
   sanitizeDiaryImageText,
+  sendGroupImageMessage,
   scheduleGroupMessage,
   sendGroupMessage,
   sendPrivatePoke,

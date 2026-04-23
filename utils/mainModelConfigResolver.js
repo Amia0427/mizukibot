@@ -1,5 +1,8 @@
 const config = require('../config');
-const { resolveMainModelConfig } = require('./mainModelFallback');
+const {
+  ADMIN_SHARED_FALLBACK_SCOPE,
+  resolveMainModelConfig
+} = require('./mainModelFallback');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -19,7 +22,7 @@ function isAdminMainModelUser(userId = '', options = {}) {
 }
 
 function shouldBypassMainModelFallback(userId = '', options = {}) {
-  return isAdminMainModelUser(userId, options);
+  return false;
 }
 
 function resolveRoleAwareMainModelConfig(userId = '', overrides = null, options = {}) {
@@ -51,13 +54,10 @@ function resolveRoleAwareMainModelConfig(userId = '', overrides = null, options 
 
 function resolveUserScopedMainModelConfig(userId = '', overrides = null, options = {}) {
   const primaryConfig = resolveRoleAwareMainModelConfig(userId, overrides, options);
-  if (shouldBypassMainModelFallback(userId, options)) {
-    return {
-      ...primaryConfig,
-      __mainFallbackActive: false
-    };
-  }
-  return resolveMainModelConfig(primaryConfig);
+  const scope = isAdminMainModelUser(userId, options)
+    ? ADMIN_SHARED_FALLBACK_SCOPE
+    : undefined;
+  return resolveMainModelConfig(primaryConfig, { scope });
 }
 
 module.exports = {

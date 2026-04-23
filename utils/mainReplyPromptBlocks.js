@@ -74,7 +74,7 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
   {
     blockId: 'retrieved_memory_lite',
     label: 'Retrieved Memory Lite',
-    lane: 'assistant_only',
+    lane: 'dynamic_context',
     category: 'memory_summary',
     defaultPolicy: 'high_value_only',
     useWhen: 'Use when the turn depends on specific recalled facts, prior preferences, or continuity anchors.',
@@ -208,6 +208,9 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
     push('continuity_state', 'carry-over topic or open loop detected');
     push('summary', 'continuity benefits from a compact carry-over summary');
     push('retrieved_memory_lite', 'continuity may need recalled memory anchors');
+  }
+  if (input.hasRetrievedMemory) {
+    push('retrieved_memory_lite', 'retrieved memory candidates are available for this turn');
   }
   if (input.hasLongTermProfile) push('long_term_profile', 'long-term profile is available and may help continuity');
   if (input.hasImpression) push('impression', 'prior impression can shape reply tone');

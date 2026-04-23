@@ -3,6 +3,7 @@ const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent } = require('../api/parser');
 const { listRecentModelCalls } = require('../utils/modelCallTracker');
 const {
+  ADMIN_SHARED_FALLBACK_SCOPE,
   getMainModelFallbackStatus,
   resolveMainModelConfig,
   resolveForcedFallbackMainModelConfig
@@ -11,6 +12,7 @@ const {
 function parseArgs(argv = []) {
   const flags = new Set(argv.slice(2));
   return {
+    admin: flags.has('--admin'),
     probeMain: flags.has('--probe-main') || flags.has('--probe-both'),
     probeFallback: flags.has('--probe-fallback') || flags.has('--probe-both'),
     json: flags.has('--json')
@@ -122,34 +124,62 @@ function summarizeRecentCalls() {
 
 function buildAdvice(status, probes = {}) {
   const advice = [];
+  const label = status.scope === ADMIN_SHARED_FALLBACK_SCOPE ? '管理员' : '主模型';
 
-  if (!status.enabled) advice.push('未开启 AI_FALLBACK_ENABLED，主模型失败不会自动切备用。');
-  if (!status.configured) advice.push('备用模型未完整配置，当前降级机制不可用。');
-  if (status.enabled && status.configured && !status.active) advice.push('当前未处于备用模型状态，说明最近失败次数还没达到阈值或已经被成功请求清零。');
-  if (status.active && status.permanent) advice.push('当前已进入永久备用模式，除非手动调整配置或重置状态，否则不会自动回主模型。');
-  if (status.active && !status.permanent) advice.push('当前处于临时备用模式，冷却结束后会自动回主模型。');
-  if (probes.main && !probes.main.ok) advice.push('主模型探测失败，建议检查主模型渠道、WAF、模型名或供应商可用性。');
-  if (probes.fallback && !probes.fallback.ok) advice.push('备用模型探测失败，当前降级链路不可靠，应优先修复备用模型配置。');
-  if (probes.main && probes.main.ok && probes.fallback && probes.fallback.ok) advice.push('主模型和备用模型探测都成功，当前更应关注失败计数触发条件和业务链路中的实际报错点。');
+  if (!status.enabled) advice.push(`未开启${label} fallback，失败不会自动切备用。`);
+  if (!status.configured) advice.push(`${label}备用模型未完整配置，当前降级机制不可用。`);
+  if (status.enabled && status.configured && !status.active) advice.push(`当前${label}未处于备用状态，说明最近失败次数还没达到阈值或已经被成功请求清零。`);
+  if (status.active && status.permanent) advice.push(`当前${label}已进入永久备用模式，除非手动调整配置或重置状态，否则不会自动回主模型。`);
+  if (status.active && !status.permanent) advice.push(`当前${label}处于临时备用模式，冷却结束后会自动回主模型。`);
+  if (probes.main && !probes.main.ok) advice.push(`${label}主模型探测失败，建议检查主模型渠道、WAF、模型名或供应商可用性。`);
+  if (probes.fallback && !probes.fallback.ok) advice.push(`${label}备用模型探测失败，当前降级链路不可靠，应优先修复备用模型配置。`);
+  if (probes.main && probes.main.ok && probes.fallback && probes.fallback.ok) advice.push(`${label}主模型和备用模型探测都成功，当前更应关注失败计数触发条件和业务链路中的实际报错点。`);
 
   return advice;
 }
 
 async function main() {
   const args = parseArgs(process.argv);
+  const result = await runDiagnose(args);
+
+  if (args.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+
+  console.log(`=== ${args.admin ? 'Admin' : 'Main'} Model Fallback Diagnose ===`);
+  console.log('[config]');
+  console.log(JSON.stringify(result.config, null, 2));
+  console.log('[fallbackStatus]');
+  console.log(JSON.stringify(result.fallbackStatus, null, 2));
+  console.log('[recentCalls]');
+  console.log(JSON.stringify(result.recentCalls, null, 2));
+  if (args.probeMain || args.probeFallback) {
+    console.log('[probes]');
+    console.log(JSON.stringify(result.probes, null, 2));
+  }
+  console.log('[advice]');
+  for (const line of result.advice) {
+    console.log(`- ${line}`);
+  }
+}
+
+async function runDiagnose(args = {}) {
   const primaryConfig = {
-    model: String(config.AI_MODEL || '').trim(),
-    apiBaseUrl: String(config.API_BASE_URL || '').trim(),
-    apiKey: String(config.API_KEY || '').trim(),
+    model: String(args.admin ? (config.ADMIN_AI_MODEL || config.AI_MODEL) : config.AI_MODEL || '').trim(),
+    apiBaseUrl: String(args.admin ? (config.ADMIN_API_BASE_URL || config.API_BASE_URL) : config.API_BASE_URL || '').trim(),
+    apiKey: String(args.admin ? (config.ADMIN_API_KEY || config.API_KEY) : config.API_KEY || '').trim(),
     __mainFallbackActive: false
   };
-  const effectiveConfig = resolveMainModelConfig(primaryConfig);
-  const fallbackConfig = resolveForcedFallbackMainModelConfig(primaryConfig);
-  const fallbackStatus = getMainModelFallbackStatus();
+  const scope = args.admin ? ADMIN_SHARED_FALLBACK_SCOPE : undefined;
+  const effectiveConfig = resolveMainModelConfig(primaryConfig, { scope });
+  const fallbackConfig = resolveForcedFallbackMainModelConfig(primaryConfig, { scope });
+  const fallbackStatus = getMainModelFallbackStatus({ scope });
 
   const result = {
     now: new Date().toISOString(),
     config: {
+      scope: fallbackStatus.scope,
       primary: buildProbeRequestSummary('primary', primaryConfig),
       effective: buildProbeRequestSummary('effective', effectiveConfig),
       fallback: buildProbeRequestSummary('fallback', fallbackConfig),
@@ -169,30 +199,21 @@ async function main() {
   }
 
   result.advice = buildAdvice(fallbackStatus, result.probes);
-
-  if (args.json) {
-    console.log(JSON.stringify(result, null, 2));
-    return;
-  }
-
-  console.log('=== Main Model Fallback Diagnose ===');
-  console.log('[config]');
-  console.log(JSON.stringify(result.config, null, 2));
-  console.log('[fallbackStatus]');
-  console.log(JSON.stringify(result.fallbackStatus, null, 2));
-  console.log('[recentCalls]');
-  console.log(JSON.stringify(result.recentCalls, null, 2));
-  if (args.probeMain || args.probeFallback) {
-    console.log('[probes]');
-    console.log(JSON.stringify(result.probes, null, 2));
-  }
-  console.log('[advice]');
-  for (const line of result.advice) {
-    console.log(`- ${line}`);
-  }
+  return result;
 }
 
-main().catch((error) => {
-  console.error('[FAIL]', error?.stack || error?.message || error);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('[FAIL]', error?.stack || error?.message || error);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  buildAdvice,
+  buildProbeRequestSummary,
+  parseArgs,
+  probeModel,
+  runDiagnose,
+  summarizeRecentCalls
+};

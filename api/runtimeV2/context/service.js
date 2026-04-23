@@ -453,6 +453,7 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       routePolicyKey,
       topRouteType,
       groupId: routeMeta.groupId || routeMeta.group_id || '',
+      sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
       sessionId: routeMeta.sessionId || routeMeta.session_id || '',
       taskType: routeMeta.taskType || routeMeta.task_type || '',
       agentName: routeMeta.agentName || routeMeta.agent_name || '',
@@ -711,6 +712,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       routePolicyKey,
       topRouteType,
       groupId: routeMeta.groupId || routeMeta.group_id || '',
+      sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
       sessionId: routeMeta.sessionId || routeMeta.session_id || '',
       taskType: routeMeta.taskType || routeMeta.task_type || '',
       agentName: routeMeta.agentName || routeMeta.agent_name || '',
@@ -866,7 +868,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     priority: 260,
     authority: 'memory_fact',
     kind: 'memory',
-    lane: 'assistant_only',
+    lane: 'dynamic_context',
     meta: {
       optional: true
     }
@@ -1022,6 +1024,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     directedContext: options?.routeMeta?.directedContext,
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
+    hasRetrievedMemory: Boolean(memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt),
     hasLongTermProfile: Boolean(memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText),
     hasImpression: Boolean(memoryContext.promptImpressionText || memoryContext.impressionText),
     hasRelationshipState: true,
@@ -1059,6 +1062,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     const blockId = normalizeText(block?.id);
     const evidenceOnly = block?.meta?.evidenceOnly === true;
     if (!evidenceOnly) return true;
+    if (blockId === 'long_term_profile' || blockId === 'impression' || blockId.startsWith('relationship_') || blockId === 'summary') {
+      return true;
+    }
     return !normalizeArray(selectedPromptBlocks)
       .some((item) => normalizeText(item?.id).startsWith('persona_memory_'));
   });
@@ -1106,7 +1112,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
           priority: 260,
           authority: 'memory_fact',
           kind: 'memory',
-          lane: 'assistant_only',
+          lane: 'dynamic_context',
           meta: {
             optional: true
           }
@@ -1537,6 +1543,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     directedContext: options?.routeMeta?.directedContext,
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
+    hasRetrievedMemory: combinedDynamicBlocks.some((item) => item?.id === 'retrieved_memory_lite'),
     hasLongTermProfile: combinedDynamicBlocks.some((item) => item?.id === 'long_term_profile'),
     hasImpression: combinedDynamicBlocks.some((item) => item?.id === 'impression'),
     hasRelationshipState: combinedDynamicBlocks.some((item) => normalizeText(item?.meta?.blockId) === 'relationship_state'),
@@ -1586,6 +1593,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   });
   const criticalBlockIdPrefixes = new Set([
     'retrieved_memory',
+    'directed_context',
     'long_term_profile',
     'impression',
     'summary',
