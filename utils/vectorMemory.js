@@ -1,4 +1,4 @@
-const fs = require('fs');
+﻿const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { postWithRetry } = require('../api/httpClient');
@@ -302,8 +302,6 @@ function isAssistantPersonaPollution(doc = {}) {
   if (String(doc.sourceKind || '').toLowerCase() === 'explicit') return false;
   const lowered = text.toLowerCase();
   return [
-    '你是晓山瑞希',
-    '你是瑞希',
     'assistant',
     'system prompt',
     'developer message',
@@ -362,7 +360,7 @@ function getStaleCandidatePenalty(item, now = nowTs()) {
 function isImplicitJournalCue(question = '') {
   const q = sanitizeText(question);
   if (!q) return false;
-  return /(之前|前几天|上次|最近|那天|回忆|回想|记得|last time|recently|the other day|remember)/i.test(q);
+  return /(涔嬪墠|鍓嶅嚑澶﹟涓婃|鏈€杩憒閭ｅぉ|鍥炲繂|鍥炴兂|璁板緱|last time|recently|the other day|remember)/i.test(q);
 }
 
 function getItemMemoryKind(item = {}) {
@@ -393,12 +391,7 @@ function isStyleOrJargonMemory(item = {}) {
 
 function stripTypePrefix(text) {
   return String(text || '')
-    .replace(/^喜欢(?:[:：]|\s)*/i, '')
-    .replace(/^不喜欢(?:[:：]|\s)*/i, '')
-    .replace(/^目标(?:[:：]|\s)*/i, '')
-    .replace(/^用户印象(?:[:：]|\s)*/i, '')
-    .replace(/^impression(?:[:：]|\s)*/i, '')
-    .replace(/^最近话题(?:[:：]|\s)*/i, '')
+    .replace(/^(likes?|dislikes?|goal|impression|recent topic|喜欢|不喜欢|目标|用户印象|最近话题)(?:[:：|\s])*/i, '')
     .trim();
 }
 
@@ -406,9 +399,7 @@ function stripTypePrefix(text) {
 function canonicalizeText(text) {
   return stripTypePrefix(text)
     .toLowerCase()
-    .replace(/炸薯条/g, '薯条')
-    .replace(/马铃薯条/g, '薯条')
-    .replace(/[^\u4e00-\u9fa5a-z0-9\s]/g, ' ')
+        .replace(/[^\u4e00-\u9fa5a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -635,7 +626,12 @@ function normalizeMemoryItem(raw) {
     createdAt,
     updatedAt,
     lastAccessAt: Number(raw.lastAccessAt || raw.last_access_at || 0) || 0,
+    lastRecalledAt: Number(raw.lastRecalledAt || raw.last_recalled_at || raw.meta?.lastRecalledAt || 0) || 0,
     accessCount: Math.max(0, Math.floor(Number(raw.accessCount || raw.access_count || 0) || 0)),
+    recallCount: Math.max(0, Math.floor(Number(raw.recallCount || raw.recall_count || raw.meta?.recallCount || 0) || 0)),
+    stabilityScore: clamp(raw.stabilityScore ?? raw.stability_score ?? raw.meta?.stabilityScore ?? 0, 0, 1),
+    memoryStrength: clamp(raw.memoryStrength ?? raw.memory_strength ?? raw.meta?.memoryStrength ?? 0, 0, 1.5),
+    nextReviewAt: Number(raw.nextReviewAt || raw.next_review_at || raw.meta?.nextReviewAt || 0) || 0,
     mentionCount: Math.max(1, Math.floor(Number(raw.mentionCount || raw.mention_count || 1) || 1)),
     evidenceCount,
     lastConfirmedAt,
@@ -914,7 +910,12 @@ function materializeShardIndex(items = [], meta = {}) {
       status: normalizeStatus(item.status, STATUS_ACTIVE),
       evidenceCount: Number(item.evidenceCount || 1) || 1,
       lastConfirmedAt: Number(item.lastConfirmedAt || item.updatedAt || item.createdAt || 0) || 0,
+      lastRecalledAt: item.lastRecalledAt || 0,
       accessCount: item.accessCount,
+      recallCount: item.recallCount || 0,
+      stabilityScore: item.stabilityScore || 0,
+      memoryStrength: item.memoryStrength || 0,
+      nextReviewAt: item.nextReviewAt || 0,
       scopeType: item.scopeType,
       groupId: item.groupId,
       sessionId: item.sessionId,
@@ -1475,6 +1476,60 @@ function addMemoryItemsBatch(items = []) {
   return ids;
 }
 
+function getMemoryLayer(doc = {}) {
+  const type = normalizeType(doc.type);
+  const kind = normalizeMemoryKind(doc.memoryKind ?? doc.meta?.memoryKind);
+  const source = classifyDocSource(doc);
+  if (type === 'identity' || type === 'summary' || type === 'impression' || kind === 'persona_core') return 'stable_profile';
+  if (type === 'like' || type === 'dislike' || type === 'personality' || type === 'hobby' || kind === 'style' || kind === 'jargon') return 'preference_relationship';
+  if (source === 'task' || kind === 'task' || type === 'goal') return 'task_commitment';
+  if (source === 'recent' || type === 'episode' || type === 'topic') return 'recent_continuity';
+  if (normalizeStatus(doc.status, STATUS_ACTIVE) === STATUS_CANDIDATE) return 'candidate';
+  return 'personal_fact';
+}
+
+function getLayerHalfLifeDays(doc = {}) {
+  const layer = getMemoryLayer(doc);
+  const rule = getTypeRule(doc.type);
+  if (layer === 'stable_profile') return Math.max(Number(rule.halfLifeDays || 0), 1200);
+  if (layer === 'preference_relationship') return Math.max(Number(rule.halfLifeDays || 0), 900);
+  if (layer === 'task_commitment') return Math.min(Math.max(Number(rule.halfLifeDays || 0), 90), 240);
+  if (layer === 'recent_continuity') return normalizeType(doc.type) === 'topic' ? Math.max(3, Number(config.MEMORY_TOPIC_TTL_DAYS) || 21) / 2 : 90;
+  if (layer === 'candidate') return 45;
+  return Math.max(1, Number(rule.halfLifeDays) || 180);
+}
+
+function calcMemoryStrength(doc = {}, options = {}) {
+  const enabled = config.MEMORY_FORGETTING_CURVE_ENABLED !== false;
+  const now = nowTs();
+  const rule = getTypeRule(doc.type);
+  const minRecency = enabled ? Math.max(0, Math.min(1, Number(rule.minRecency ?? 0.5))) : Math.max(0, Math.min(1, Number(rule.minRecency ?? 0.5)));
+  const anchor = Number(doc.lastRecalledAt || doc.lastAccessAt || doc.lastConfirmedAt || doc.updatedAt || doc.createdAt || doc.ts || now) || now;
+  const ageDays = Math.max(0, (now - anchor) / (24 * 3600 * 1000));
+  const halfLife = enabled ? getLayerHalfLifeDays(doc) : Math.max(1, Number(rule.halfLifeDays) || 180);
+  const decayScore = minRecency + ((1 - minRecency) * Math.exp(-ageDays / Math.max(1, halfLife)));
+  const recallCount = Math.max(0, Number(doc.recallCount ?? doc.accessCount ?? 0) || 0);
+  const stabilityScore = Math.max(0, Math.min(1, Number(doc.stabilityScore ?? doc.meta?.stabilityScore ?? 0) || 0));
+  const rehearsalBoost = config.MEMORY_REHEARSAL_ENABLED === false
+    ? 0
+    : Math.min(0.18, (Math.log1p(recallCount) * 0.03) + (stabilityScore * 0.08));
+  const layer = getMemoryLayer(doc);
+  const continuityBonus = shouldBiasToContinuity(String(options.queryFacet || ''))
+    && (layer === 'recent_continuity' || layer === 'task_commitment')
+    ? Math.max(0, Number(config.MEMORY_CONTINUITY_RECALL_BONUS || 0.18) || 0.18)
+    : 0;
+  const memoryStrength = Math.max(0, Math.min(1.5, decayScore + rehearsalBoost + continuityBonus));
+  const intervalDays = Math.max(1, Math.round(halfLife * Math.max(0.15, Math.min(1, 1 - stabilityScore))));
+  return {
+    layer,
+    decayScore,
+    rehearsalBoost,
+    continuityBonus,
+    memoryStrength,
+    forgettingReason: ageDays > halfLife ? 'past_half_life' : (recallCount > 0 ? 'rehearsed' : 'fresh_or_unrehearsed'),
+    nextReviewAt: anchor + (intervalDays * 24 * 3600 * 1000)
+  };
+}
 function calcRecencyScore(doc) {
   const rule = getTypeRule(doc.type);
   const ageDays = Math.max(0, (nowTs() - (doc.updatedAt || doc.ts || nowTs())) / (24 * 3600 * 1000));
@@ -1682,7 +1737,7 @@ function isStyleOrToneQuery(question = '', options = {}) {
   if (options.forceSignalRecall) return true;
   const text = sanitizeText(question).toLowerCase();
   if (!text) return false;
-  return /(\bstyle\b|\btone\b|\bvoice\b|\bjargon\b|\bslang\b|\bphrase\b|\bphrasing\b|\bsound like\b|\blike the user\b|\blike the group\b|语气|风格|说话方式|表达方式|口吻|黑话|群话|群友|像本人|像群里)/i.test(text);
+  return /(\bstyle\b|\btone\b|\bvoice\b|\bjargon\b|\bslang\b|\bphrase\b|\bphrasing\b|\bsound like\b|\blike the user\b|\blike the group\b|语气|风格|说话方式|表达方式|口头禅|黑话|群话|群友|像本人|像群里)/i.test(text);
 }
 
 function applySignalRecallAdjustments(score, doc, question = '', options = {}) {
@@ -1706,8 +1761,15 @@ function touchAccessStats(userId, ids) {
     for (const item of entry.items.items) {
       if (String(item.userId) !== String(userId)) continue;
       if (!wanted.has(String(item.id))) continue;
-      item.lastAccessAt = nowTs();
+      const touchedAt = nowTs();
+      item.lastAccessAt = touchedAt;
+      if (config.MEMORY_RECALL_TOUCH_ENABLED !== false) item.lastRecalledAt = touchedAt;
       item.accessCount = Math.max(0, Number(item.accessCount || 0)) + 1;
+      item.recallCount = Math.max(0, Number(item.recallCount || 0)) + 1;
+      item.stabilityScore = clamp((Number(item.stabilityScore || 0) || 0) + 0.03, 0, 1);
+      const strength = calcMemoryStrength(item, {});
+      item.memoryStrength = strength.memoryStrength;
+      item.nextReviewAt = strength.nextReviewAt;
       shardChanged = true;
       changed = true;
     }
@@ -1895,6 +1957,7 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
     const overlap = calcOverlapBoost(queryTokens, doc);
     const direct = calcDirectBoost(queryCanonical, doc);
     const recencyScore = calcRecencyScore(doc);
+    const strength = calcMemoryStrength(doc, { ...options, queryFacet });
     const tier = normalizeTier(doc.tier) || importanceToTier(doc.importance, doc.confidence, doc.type);
     const confidenceBoost = calcConfidenceBoost(doc);
     const tierBoost = calcTierBoost(doc);
@@ -1930,7 +1993,8 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
       ? ((source === 'profile' ? 0.12 : 0) + (source === 'personal' ? 0.06 : 0) + (source === 'recent' ? 0.04 : 0))
       : 0;
     const additiveScore = baseScore
-      + (recencyScore * 0.12)
+      + (recencyScore * 0.08)
+      + (strength.memoryStrength * 0.1)
       + tierBoost
       + confidenceBoost
       + scopeBoost
@@ -1979,6 +2043,13 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
       conflictKey: String(doc.conflictKey || ''),
       graphBoost,
       recencyScore,
+      memoryLayer: strength.layer,
+      memoryStrength: strength.memoryStrength,
+      decayScore: strength.decayScore,
+      rehearsalBoost: strength.rehearsalBoost,
+      continuityRecallBonus: strength.continuityBonus,
+      forgettingReason: strength.forgettingReason,
+      nextReviewAt: strength.nextReviewAt,
       journalBoost,
       sourceSessionId: String(doc.sourceSessionId || ''),
       rollupLevel: String(doc.rollupLevel || ''),

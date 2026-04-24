@@ -1,4 +1,4 @@
-const path = require('path');
+﻿const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { loadPromptManifest, readPromptAsset } = require('./utils/promptManifest');
@@ -305,7 +305,7 @@ function buildSystemPrompt() {
   return loadPromptSectionsFromLegacyFiles();
 }
 
-// 兼容旧变量 LLM_HUMANIZER_ENABLED，新变量 HUMANIZER_AGENT_ENABLED 优先。
+// 鍏煎鏃у彉閲?LLM_HUMANIZER_ENABLED锛屾柊鍙橀噺 HUMANIZER_AGENT_ENABLED 浼樺厛銆?
 const humanizerAgentEnabled = pickBool('HUMANIZER_AGENT_ENABLED', pickBool('LLM_HUMANIZER_ENABLED', false));
 
 module.exports = {
@@ -347,17 +347,17 @@ module.exports = {
   HTTP_ACCEPT_LANGUAGE: pick('HTTP_ACCEPT_LANGUAGE', 'zh-CN,zh;q=0.9,en;q=0.8'),
 
   // ===== Subagent Bridge (multi-agent) =====
-  // 开关为 true 时，mizuki 会把工具型任务转发给可替换的外部子 agent。
+  // 寮€鍏充负 true 鏃讹紝mizuki 浼氭妸宸ュ叿鍨嬩换鍔¤浆鍙戠粰鍙浛鎹㈢殑澶栭儴瀛?agent銆?
   SUBAGENT_ENABLED: pickBool('SUBAGENT_ENABLED', pickBool('NANOBOT_BRIDGE_ENABLED', false)),
-  // 支持 `command`、`openclaw`、`gateway`、`hapi` 四种后端，默认保持通用命令模式。
+  // 鏀寔 `command`銆乣openclaw`銆乣gateway`銆乣hapi` 鍥涚鍚庣锛岄粯璁や繚鎸侀€氱敤鍛戒护妯″紡銆?
   SUBAGENT_BACKEND: pick('SUBAGENT_BACKEND', 'command').toLowerCase(),
-  // 子 agent 名称只用于日志和文档展示。
+  // 瀛?agent 鍚嶇О鍙敤浜庢棩蹇楀拰鏂囨。灞曠ず銆?
   SUBAGENT_NAME: pick('SUBAGENT_NAME', 'external-subagent'),
-  // 低置信度路由不进入外部子 agent，优先走本地链路降低误分流成本。
+  // 浣庣疆淇″害璺敱涓嶈繘鍏ュ閮ㄥ瓙 agent锛屼紭鍏堣蛋鏈湴閾捐矾闄嶄綆璇垎娴佹垚鏈€?
   SUBAGENT_ROUTE_MIN_CONFIDENCE: pickNum('SUBAGENT_ROUTE_MIN_CONFIDENCE', pickNum('NANOBOT_ROUTE_MIN_CONFIDENCE', 0.62)),
-  // 可按需关闭二次审核，减少一次额外模型调用延迟。
+  // 鍙寜闇€鍏抽棴浜屾瀹℃牳锛屽噺灏戜竴娆￠澶栨ā鍨嬭皟鐢ㄥ欢杩熴€?
   SUBAGENT_REVIEW_ENABLED: pickBool('SUBAGENT_REVIEW_ENABLED', pickBool('NANOBOT_REVIEW_ENABLED', true)),
-  // 执行子 agent 的命令与工作目录。
+  // 鎵ц瀛?agent 鐨勫懡浠や笌宸ヤ綔鐩綍銆?
   SUBAGENT_COMMAND: pick('SUBAGENT_COMMAND', defaultSubagentCommand()),
   SUBAGENT_WORKDIR: pick('SUBAGENT_WORKDIR', pick('NANOBOT_WORKDIR', defaultSubagentWorkdir())),
   SUBAGENT_MAX_CONCURRENCY: Math.max(1, pickNum('SUBAGENT_MAX_CONCURRENCY', 2)),
@@ -372,7 +372,7 @@ module.exports = {
   FULL_SUBAGENT_MAX_WORKERS: Math.max(1, Math.min(2, pickNum('FULL_SUBAGENT_MAX_WORKERS', 2))),
   FULL_SUBAGENT_WORKER_TIMEOUT_MS: Math.max(0, pickNum('FULL_SUBAGENT_WORKER_TIMEOUT_MS', 180000)),
   FULL_SUBAGENT_REVIEW_TIMEOUT_MS: Math.max(0, pickNum('FULL_SUBAGENT_REVIEW_TIMEOUT_MS', 120000)),
-  // 支持 JSON 数组格式参数，使用 {message} / {sessionId} 占位符。
+  // 鏀寔 JSON 鏁扮粍鏍煎紡鍙傛暟锛屼娇鐢?{message} / {sessionId} 鍗犱綅绗︺€?
   SUBAGENT_ARGS: (() => {
     const raw = pick('SUBAGENT_ARGS', '');
     if (!raw) return defaultSubagentArgs();
@@ -695,7 +695,7 @@ module.exports = {
 
   // ===== Plan-and-Solve =====
   ENABLE_PLAN_SOLVE: pickBool('ENABLE_PLAN_SOLVE', true),
-  // 仅对低风险工具调用启用并发执行，兼顾吞吐与安全。
+  // 浠呭浣庨闄╁伐鍏疯皟鐢ㄥ惎鐢ㄥ苟鍙戞墽琛岋紝鍏奸【鍚炲悙涓庡畨鍏ㄣ€?
   AGENT_PARALLEL_SAFE_TOOLS: pickBool('AGENT_PARALLEL_SAFE_TOOLS', true),
   AGENT_DEPENDENCY_AWARE_BATCHING: pickBool('AGENT_DEPENDENCY_AWARE_BATCHING', true),
   AGENT_BATCH_MAX_CONCURRENCY: Math.max(1, pickNum('AGENT_BATCH_MAX_CONCURRENCY', 4)),
@@ -1100,7 +1100,11 @@ module.exports = {
   MEMORY_STRICT_PROMPT_INJECTION_ENABLED: pickBool('MEMORY_STRICT_PROMPT_INJECTION_ENABLED', false),
   MEMORY_STRONG_RECALL_MIN_SCORE: pickNum('MEMORY_STRONG_RECALL_MIN_SCORE', 0.2),
   MEMORY_WEAK_RECALL_MIN_SCORE: pickNum('MEMORY_WEAK_RECALL_MIN_SCORE', 0.08),
-  MEMORY_TOPIC_TTL_DAYS: pickNum('MEMORY_TOPIC_TTL_DAYS', 21),
+  MEMORY_FORGETTING_CURVE_ENABLED: pickBool('MEMORY_FORGETTING_CURVE_ENABLED', true),
+  MEMORY_REHEARSAL_ENABLED: pickBool('MEMORY_REHEARSAL_ENABLED', true),
+  MEMORY_RECALL_TOUCH_ENABLED: pickBool('MEMORY_RECALL_TOUCH_ENABLED', true),
+  MEMORY_CONTINUITY_RECALL_BONUS: pickNum('MEMORY_CONTINUITY_RECALL_BONUS', 0.18),
+  MEMORY_RECALL_MAX_PROMPT_STRONG: pickNum('MEMORY_RECALL_MAX_PROMPT_STRONG', 6),  MEMORY_TOPIC_TTL_DAYS: pickNum('MEMORY_TOPIC_TTL_DAYS', 21),
   MEMORY_EXTRACT_MIN_CONFIDENCE: pickNum('MEMORY_EXTRACT_MIN_CONFIDENCE', 0.72),
   MEMORY_CLI_ENABLED: pickBool('MEMORY_CLI_ENABLED', true),
   MEMORY_CLI_CHAT_ENABLED: pickBool('MEMORY_CLI_CHAT_ENABLED', true),
