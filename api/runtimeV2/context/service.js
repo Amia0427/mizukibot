@@ -912,7 +912,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   if (researchBriefText) {
     promptBlocks.push(createPromptBlock('background_research', 'Background Research', researchBriefText, {
       stage: 'main',
-      priority: 255,
+      priority: 320,
       authority: 'session_research',
       kind: 'research_context',
       lane: 'dynamic_context',

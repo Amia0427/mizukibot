@@ -1,4 +1,4 @@
-const config = require('../config');
+﻿const config = require('../config');
 const {
   getUserMemories,
   getUserProfile,
@@ -214,7 +214,7 @@ function isStyleQuery(question = '', options = {}) {
   if (options.forceSignalRecall) return true;
   const text = sanitizeText(question).toLowerCase();
   if (!text) return false;
-  return /(\bstyle\b|\btone\b|\bvoice\b|\bjargon\b|\bslang\b|\bphrase\b|\blike the user\b|\blike the group\b|语气|风格|说话方式|表达方式|口吻|黑话|群话|群友|像本人|像群里)/i.test(text);
+  return /(\bstyle\b|\btone\b|\bvoice\b|\bjargon\b|\bslang\b|\bphrase\b|\blike the user\b|\blike the group\b|语气|风格|说话方式|表达方式|口头禅|黑话|群话|群友|像本人|像群里)/i.test(text);
 }
 
 function normalizeSignalKey(hit = {}) {
@@ -296,11 +296,19 @@ function splitUnifiedHits(allHits = [], options = {}) {
 }
 
 function buildRetrievedMemoryText(hits = [], core = [], factText = '', options = {}) {
-  if (Array.isArray(hits) && hits.length > 0) {
-    const mainText = formatRetrievedMemories(hits, { showScore: false, showReason: false });
-    const coreText = core.length > 0
-      ? formatRetrievedMemories(core, {
-        emptyText: '',
+  const relevantHits = Array.isArray(hits) ? hits : [];
+  const coreHits = Array.isArray(core) ? core : [];
+  if (relevantHits.length > 0 || coreHits.length > 0) {
+    const mainText = relevantHits.length > 0
+      ? formatRetrievedMemories(relevantHits, {
+        showScore: options.showMemoryScores === true,
+        showReason: options.showMemoryReasons === true,
+        showImportance: true,
+        showStatus: false
+      })
+      : '';
+    const coreText = coreHits.length > 0
+      ? formatRetrievedMemories(coreHits, {
         showScore: false,
         showReason: false,
         showImportance: true,
@@ -309,11 +317,7 @@ function buildRetrievedMemoryText(hits = [], core = [], factText = '', options =
       : '';
     return [mainText, coreText].filter(Boolean).join('\n');
   }
-
-  if (options.disableLegacyFactFallback) {
-    return '暂无与当前问题强相关的长期记忆';
-  }
-
+  if (options.disableLegacyFactFallback) return '暂无与当前问题强相关的长期记忆';
   const compactFacts = compactFactText(factText, Math.max(1, Number(options.fallbackFactLines || 8)));
   return compactFacts && compactFacts !== '目前没有特别记忆。'
     ? `[NoStrongMatch]\n${compactFacts}`
@@ -443,6 +447,11 @@ function buildMemoryTrace({ hits = [], injected = {}, options = {} } = {}) {
       groupId: String(hit.groupId || ''),
       score: Number(hit.score || 0),
       tier: classifyRecallHitForPrompt(hit),
+      finalTier: classifyRecallHitForPrompt(hit),
+      decayScore: Number(hit.decayScore || 0),
+      rehearsalBoost: Number(hit.rehearsalBoost || 0),
+      memoryStrength: Number(hit.memoryStrength || 0),
+      forgettingReason: String(hit.forgettingReason || ''),
       traceReason: String(hit.traceReason || hit.reason || hit.meta?.traceReason || ''),
       injected: classifyRecallHitForPrompt(hit) === 'strong' || !config.MEMORY_STRICT_PROMPT_INJECTION_ENABLED,
       preview: String(hit.text || '').slice(0, 180)
@@ -488,7 +497,8 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     return promptGroupIds.length > 0 && promptGroupIds.includes(hitGroupId);
   });
   const strictPromptInjection = Boolean(config.MEMORY_STRICT_PROMPT_INJECTION_ENABLED);
-  const strongHits = hits.filter((hit) => classifyRecallHitForPrompt(hit) === 'strong');
+  const maxPromptStrong = Math.max(1, Number(config.MEMORY_RECALL_MAX_PROMPT_STRONG || 6) || 6);
+  const strongHits = hits.filter((hit) => classifyRecallHitForPrompt(hit) === 'strong').slice(0, maxPromptStrong);
   const promptSourceHits = strictPromptInjection ? strongHits : hits;
   const promptRetrievedHits = promptSourceHits.filter((hit) => {
     const scopeType = String(hit?.scopeType || '').trim().toLowerCase();

@@ -1,4 +1,4 @@
-const config = require('../../config');
+﻿const config = require('../../config');
 const { getUserAffinityState } = require('../memory');
 const { shouldUseRemoteEmbedding, requestEmbedding, cosineArray } = require('../vectorMemory');
 const {
@@ -30,27 +30,62 @@ function looksLikePollutedSessionSummary(text = '') {
 function classifyFacet(query = '', options = {}) {
   const text = normalizeText(query).toLowerCase();
   if (String(options.facet || '').trim()) return String(options.facet).trim().toLowerCase();
-  if (/(刚才|刚刚|继续|接着|上次|left off|where.*leave|continue|刚聊到)/i.test(text)) return 'continuity';
+  if (/(刚才|刚刚|继续|接着|上次|之前|记得|left off|where.*leave|continue|remember)/i.test(text)) return 'continuity';
   if (/(喜欢|不喜欢|偏好|prefer|like|dislike|nickname|称呼)/i.test(text)) return 'preference';
   if (/(是谁|身份|背景|identity|occupation|profile)/i.test(text)) return 'identity';
   if (/(策略|怎么做|task|workflow|strategy|avoid)/i.test(text)) return 'task';
   if (/(群里|group|shared|大家|共同)/i.test(text)) return 'group';
-  if (/(语气|风格|口吻|style|tone|jargon|黑话)/i.test(text)) return 'style';
+  if (/(语气|风格|口癖|style|tone|jargon|黑话)/i.test(text)) return 'style';
   if (/(前几天|最近发生|journal|日记|那天|最近)/i.test(text)) return 'journal';
   if (/(关系|态度|我们现在|亲密|distance|tone|relationship)/i.test(text)) return 'relationship';
   return 'default';
 }
 
+function sourceHalfLifeDays(source = '', type = '') {
+  const normalizedSource = normalizeText(source).toLowerCase();
+  const normalizedType = normalizeText(type).toLowerCase();
+  if (normalizedSource === 'recent') return 14;
+  if (normalizedSource === 'task') return 90;
+  if (normalizedSource === 'journal') return 120;
+  if (normalizedSource === 'profile' || normalizedType === 'identity' || normalizedType === 'impression') return 1200;
+  if (normalizedType === 'topic') return Math.max(3, Number(config.MEMORY_TOPIC_TTL_DAYS || 21) || 21) / 2;
+  return 360;
+}
+
+function calcMemoryStrength(candidate = {}, facet = 'default') {
+  const now = Date.now();
+  const anchor = Number(candidate.lastRecalledAt || candidate.lastAccessAt || candidate.lastConfirmedAt || candidate.updatedAt || candidate.createdAt || 0) || now;
+  const ageDays = Math.max(0, (now - anchor) / (24 * 3600 * 1000));
+  const halfLife = Math.max(1, sourceHalfLifeDays(candidate.source, candidate.type));
+  const minRecency = candidate.source === 'profile' ? 0.95 : (candidate.source === 'recent' ? 0.35 : 0.65);
+  const decayScore = minRecency + ((1 - minRecency) * Math.exp(-ageDays / halfLife));
+  const recallCount = Math.max(0, Number(candidate.recallCount || candidate.accessCount || 0) || 0);
+  const stabilityScore = Math.max(0, Math.min(1, Number(candidate.stabilityScore || 0) || 0));
+  const rehearsalBoost = config.MEMORY_REHEARSAL_ENABLED === false
+    ? 0
+    : Math.min(0.18, (Math.log1p(recallCount) * 0.03) + (stabilityScore * 0.08));
+  const continuityBonus = facet === 'continuity' && (candidate.source === 'recent' || candidate.source === 'task' || candidate.source === 'journal')
+    ? Math.max(0, Number(config.MEMORY_CONTINUITY_RECALL_BONUS || 0.18) || 0.18)
+    : 0;
+  const memoryStrength = Math.max(0, Math.min(1.5, decayScore + rehearsalBoost + continuityBonus));
+  return {
+    decayScore,
+    rehearsalBoost,
+    continuityRecallBonus: continuityBonus,
+    memoryStrength,
+    forgettingReason: ageDays > halfLife ? 'past_half_life' : (recallCount > 0 ? 'rehearsed' : 'fresh_or_unrehearsed')
+  };
+}
 function rewriteQuery(query = '', facet = 'default') {
   const base = normalizeText(query);
   const out = [base];
   if (!base) return out;
-  if (facet === 'preference') out.push(`${base} 喜欢 偏好 dislike like preference`);
-  if (facet === 'continuity') out.push(`${base} 刚才 上次 继续 recent continuity pending`);
-  if (facet === 'identity') out.push(`${base} 身份 背景 自我介绍 identity profile`);
+  if (facet === 'preference') out.push(`${base} 鍠滄 鍋忓ソ dislike like preference`);
+  if (facet === 'continuity') out.push(`${base} 鍒氭墠 涓婃 缁х画 recent continuity pending`);
+  if (facet === 'identity') out.push(`${base} 韬唤 鑳屾櫙 鑷垜浠嬬粛 identity profile`);
   if (facet === 'task') out.push(`${base} strategy trigger avoid outcome task`);
   if (facet === 'style') out.push(`${base} style tone phrasing jargon`);
-  if (facet === 'journal') out.push(`${base} 最近 发生 记录 journal episode`);
+  if (facet === 'journal') out.push(`${base} 鏈€杩?鍙戠敓 璁板綍 journal episode`);
   if (facet === 'relationship') out.push(`${base} relationship tone attitude distance`);
   return uniqueBy(out.filter(Boolean).slice(0, Math.min(2, Math.max(1, Number(config.MEMORY_V3_QUERY_REWRITE_LIMIT || 2)))), (item) => canonicalizeText(item));
 }
@@ -272,17 +307,23 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default') {
     const importance = Math.min(0.22, Number(candidate.importance || 0) * 0.1);
     const sourceBoost = facetSourceWeight(facet, candidate.source);
     const stabilityBoost = Math.min(0.24, Number(candidate.stabilityScore || 0) * 0.24);
+    const strength = calcMemoryStrength(candidate, facet);
     let embedding = 0;
     if (queryEmbedding && embeddingMap.has(candidate.canonicalKey)) {
       embedding = Math.max(0, cosineArray(queryEmbedding, embeddingMap.get(candidate.canonicalKey)));
     }
-    const score = ((lexical * 0.68) + (embedding * 0.3) + direct + (recency * 0.14) + support + confidence + importance + stabilityBoost) * sourceBoost;
+    const score = ((lexical * 0.68) + (embedding * 0.3) + direct + (recency * 0.08) + (strength.memoryStrength * 0.1) + support + confidence + importance + stabilityBoost) * sourceBoost;
     if (score < Math.max(0.02, Number(config.MEMORY_RAG_MIN_SCORE || 0.16) * 0.5)) continue;
     scored.push({
       ...candidate,
       score,
       lexical,
       embedding,
+      decayScore: strength.decayScore,
+      rehearsalBoost: strength.rehearsalBoost,
+      continuityRecallBonus: strength.continuityRecallBonus,
+      memoryStrength: strength.memoryStrength,
+      forgettingReason: strength.forgettingReason,
       facet
     });
   }
@@ -382,7 +423,7 @@ async function queryMemory(input = {}) {
   const conflictResolved = applyConflictResolution(scored);
   const selected = diversify(conflictResolved, topK);
   const split = splitStrictWeak(
-    conflictResolved,
+    selected,
     Math.max(1, Number(config.MEMORY_V3_STRICT_RESULTS_MAX || 6)),
     Math.max(0, Number(config.MEMORY_V3_WEAK_RESULTS_MAX || 3))
   );
@@ -398,7 +439,7 @@ async function queryMemory(input = {}) {
     strictResults: split.strictResults,
     weakResults: split.weakResults,
     persona,
-    results: split.strictResults.concat(split.strictResults.length < 2 ? split.weakResults.slice(0, Math.max(0, topK - split.strictResults.length)) : []).slice(0, topK),
+    results: selected,
     digest: buildDigest(selected),
     sourceCoverage: selected.reduce((acc, item) => {
       acc[item.source] = (acc[item.source] || 0) + 1;
