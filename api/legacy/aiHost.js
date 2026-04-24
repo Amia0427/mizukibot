@@ -112,6 +112,7 @@ const { recordMemoryScope } = require('../../utils/memoryScopeIndex');
 const { isToolSchemaValidationError } = require('../../utils/modelCompat');
 const { getPolicy, enforceToolPolicy } = require('../../utils/toolPolicy');
 const { getPolicyDefinition } = require('../../core/routeProfiles');
+const { buildExecutablePlanFromLegacyPlan } = require('../../core/executablePlan');
 const { deriveSuccessCriteria, verifyExecutionResult, buildRepairPlan } = require('../../utils/agentLoop');
 const agentRuntime = require('../../utils/agentRuntime');
 
@@ -496,10 +497,14 @@ function buildImageModelConfig(overrides = null, userId = '', options = {}) {
 }
 
 function fallbackReplyPlan(question = '') {
-  return {
+  const plan = {
     goal: String(question || '').trim(),
     need_tools: false,
     steps: [{ id: 1, action: 'reply', args: {}, purpose: 'Reply directly' }]
+  };
+  return {
+    ...plan,
+    executablePlan: buildExecutablePlanFromLegacyPlan(plan, { source: 'legacy_fallback' })
   };
 }
 
@@ -529,10 +534,17 @@ function sanitizePlan(rawPlan, question = '') {
 
   const hasToolStep = steps.some((step) => step.action !== 'reply');
 
-  return {
+  const plan = {
     goal: String(rawPlan.goal || question),
     need_tools: hasToolStep && Boolean(rawPlan.need_tools !== false),
     steps
+  };
+  return {
+    ...plan,
+    executablePlan: buildExecutablePlanFromLegacyPlan(plan, {
+      policyKey: rawPlan.routePolicyKey || rawPlan.policyKey || '',
+      source: rawPlan.source || 'legacy_planner'
+    })
   };
 }
 

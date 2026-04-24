@@ -578,6 +578,13 @@ function isSelfContainedProductivityPlan(text = '') {
   return !/(research|paper|literature|experiment|论文|研究|文献|实验|latest|news|网页|链接|资料|notebook|notes?)/i.test(t);
 }
 
+function isTextOnlyPlanRequest(text = '') {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (!/(规划|计划|方案|步骤|拆解|怎么做|如何做|roadmap|proposal|strategy|plan|planning|step by step)/i.test(t)) return false;
+  return !/(执行|运行|创建|生成文件|写入|修改|部署|安装|搜索|查找|联网|最新|网页|链接|资料|notebook|notes?|execute|run|create|write|modify|deploy|install|search|look up|latest|web|link)/i.test(t);
+}
+
 function isStrictTimeDirectQuestion(text = '') {
   const t = String(text || '').trim();
   if (!t) return false;
@@ -954,15 +961,16 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
 
   if (/(plan|planning|todo|task|agenda|schedule|roadmap|weekly study plan|璁″垝|寰呭姙|璁▼|鎷嗚В)/i.test(cleanText)) {
     const isResearch = /(research|paper|literature|experiment|鐮旂┒|璁烘枃|鏂囩尞|瀹為獙)/i.test(cleanText);
+    const textOnlyPlan = !isResearch && isTextOnlyPlanRequest(cleanText);
     return makeRoute({
       confidence: 0.86,
       cleanText,
       rawText,
       imageUrl,
       topRouteType: 'direct_chat',
-      intent: { risk: 'low', toolNeed: [isResearch ? 'web' : 'mixed'], executionMode: 'staged', needsPlanning: true, needsMemory: false },
-      facets: { modality: 'text', sourceScope: isResearch ? 'web' : 'mixed', domain: isResearch ? 'research' : 'general', outputKind: isResearch ? 'report' : 'plan', freshness: isResearch ? 'latest' : 'unknown' },
-      meta: { reason: 'explicit-plan', chatMode: 'text_chat', toolIntent: 'force_tools', responseIntent: 'plan' }
+      intent: { risk: 'low', toolNeed: [isResearch ? 'web' : (textOnlyPlan ? 'none' : 'mixed')], executionMode: 'staged', needsPlanning: true, needsMemory: false },
+      facets: { modality: 'text', sourceScope: isResearch ? 'web' : (textOnlyPlan ? 'none' : 'mixed'), domain: isResearch ? 'research' : 'general', outputKind: isResearch ? 'report' : 'plan', freshness: isResearch ? 'latest' : 'unknown' },
+      meta: { reason: 'explicit-plan', chatMode: 'text_chat', toolIntent: textOnlyPlan ? 'none' : 'force_tools', responseIntent: 'plan' }
     });
   }
 
@@ -1059,15 +1067,16 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
 
   if (researchScore >= 0.45 || productivityScore >= 0.45) {
     const isResearch = researchScore >= productivityScore;
+    const textOnlyPlan = !isResearch && isTextOnlyPlanRequest(cleanText);
     return makeRoute({
       confidence: Math.max(researchScore, productivityScore),
       cleanText,
       rawText,
       imageUrl,
       topRouteType: 'direct_chat',
-      intent: { risk: 'low', toolNeed: [isResearch ? 'web' : 'mixed'], executionMode: 'staged', needsPlanning: true, needsMemory: false },
-      facets: { modality: 'text', sourceScope: isResearch ? 'web' : 'mixed', domain: isResearch ? 'research' : 'general', outputKind: isResearch ? 'report' : 'plan', freshness: isResearch ? 'latest' : 'unknown' },
-      meta: { reason: 'scored-plan', chatMode: 'text_chat', toolIntent: 'force_tools', responseIntent: 'plan' }
+      intent: { risk: 'low', toolNeed: [isResearch ? 'web' : (textOnlyPlan ? 'none' : 'mixed')], executionMode: 'staged', needsPlanning: true, needsMemory: false },
+      facets: { modality: 'text', sourceScope: isResearch ? 'web' : (textOnlyPlan ? 'none' : 'mixed'), domain: isResearch ? 'research' : 'general', outputKind: isResearch ? 'report' : 'plan', freshness: isResearch ? 'latest' : 'unknown' },
+      meta: { reason: 'scored-plan', chatMode: 'text_chat', toolIntent: textOnlyPlan ? 'none' : 'force_tools', responseIntent: 'plan' }
     });
   }
 
@@ -1358,6 +1367,22 @@ function sanitizeAiRoute(aiRoute, fallbackRoute, { userId, imageUrl }) {
   const topRouteType = sanitizeTopRouteType(aiRoute.topRouteType || aiRoute.type);
   const confidence = Number.isFinite(aiRoute.confidence) ? Math.max(0, Math.min(1, aiRoute.confidence)) : 0.5;
   if (confidence < (config.AI_ROUTER_MIN_CONFIDENCE || 0.55)) return fallbackRoute;
+  const rawAiMeta = aiRoute.meta && typeof aiRoute.meta === 'object' ? aiRoute.meta : {};
+  const aiToolIntent = normalizeToolIntent(rawAiMeta.toolIntent, 'none');
+  const highRiskRoute = topRouteType === 'admin'
+    || topRouteType === 'refuse'
+    || aiToolIntent === 'force_tools'
+    || normalizeFacets(aiRoute.facets, fallbackRoute.facets, imageUrl ?? fallbackRoute.imageUrl).outputKind === 'action';
+  if (highRiskRoute && confidence < Math.max(config.AI_ROUTER_MIN_CONFIDENCE || 0.55, 0.75)) {
+    return makeRoute({
+      ...fallbackRoute,
+      confidence: Number.isFinite(Number(fallbackRoute?.confidence)) ? Number(fallbackRoute.confidence) : 0.6,
+      meta: {
+        ...(fallbackRoute.meta || {}),
+        fallbackReason: 'ai-router-low-confidence-high-risk'
+      }
+    });
+  }
 
   // Terminal refusal remains authoritative local policy only.
   // AI router and router subagent may refine direct_chat, but must not create refuse routes.

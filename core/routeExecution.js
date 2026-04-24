@@ -5,6 +5,7 @@ const {
 const { normalizeToolNames } = require('../utils/localToolAccess');
 const { getPolicyDefinition: getPolicyDefinitionFromProfiles } = require('./routeProfiles');
 const { getPolicy } = require('../utils/toolPolicy');
+const { summarizeExecutablePlan } = require('./executablePlan');
 const config = require('../config');
 
 // routeExecution consumes only canonical contract data plus planner output.
@@ -180,17 +181,60 @@ function resolvePrivateRestrictionReason(route = {}, normalizedAllowedTools = []
 
 function buildBasePlan(route = {}) {
   const topRouteType = sanitizeTopRouteType(route?.topRouteType || 'direct_chat');
+  const policyKey = resolvePolicyKey(route);
+  const routeDebugKey = buildRouteDebugKey(route);
   return {
     executor: 'direct',
     topRouteType,
-    policyKey: resolvePolicyKey(route),
-    routeDebugKey: buildRouteDebugKey(route),
+    policyKey,
+    routeDebugKey,
     allowTools: false,
     allowedTools: [],
     allowedToolBuckets: [],
     allowStream: topRouteType === 'direct_chat' && !route?.imageUrl,
     needsBackground: false,
-    unavailableReason: ''
+    unavailableReason: '',
+    routeTrace: buildRouteTrace(route, {
+      executor: 'direct',
+      topRouteType,
+      policyKey,
+      routeDebugKey
+    })
+  };
+}
+
+function resolvePlannerSource(route = {}) {
+  const planner = getToolPlanner(route);
+  return String(
+    planner?.executablePlan?.source
+    || planner?.plannerSource
+    || planner?.decisionSource
+    || planner?.plannerMeta?.decisionSource
+    || (planner ? 'planner' : '')
+  ).trim();
+}
+
+function buildRouteTrace(route = {}, plan = {}) {
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  const topRouteType = String(plan.topRouteType || sanitizeTopRouteType(route?.topRouteType || 'direct_chat')).trim();
+  const policyKey = String(plan.policyKey || resolvePolicyKey(route)).trim();
+  const executor = String(plan.executor || 'direct').trim();
+  const planner = getToolPlanner(route);
+  return {
+    topRouteType,
+    policyKey,
+    plannerSource: resolvePlannerSource(route),
+    executor,
+    confidence: Number.isFinite(Number(route?.confidence)) ? Number(route.confidence) : 0,
+    fallbackReason: String(plan.unavailableReason || routeMeta.fallbackReason || routeMeta.reason || '').trim(),
+    executablePlan: summarizeExecutablePlan(planner?.executablePlan || routeMeta.executablePlan || null)
+  };
+}
+
+function withRouteTrace(route = {}, plan = {}) {
+  return {
+    ...plan,
+    routeTrace: buildRouteTrace(route, plan)
   };
 }
 
@@ -212,7 +256,7 @@ function resolveDirectChatExecution(route = {}) {
       toolIntent,
       responseIntent: String(route?.meta?.responseIntent || '').trim()
     });
-    return {
+    return withRouteTrace(route, {
       ...base,
       executor: 'direct',
       policyKey: resolvePolicyKey(route),
@@ -220,7 +264,7 @@ function resolveDirectChatExecution(route = {}) {
       allowStream: false,
       needsBackground: false,
       unavailableReason: 'planner-missing'
-    };
+    });
   }
 
   const plannerAllowedTools = normalizeToolNames(
@@ -244,7 +288,7 @@ function resolveDirectChatExecution(route = {}) {
 
   if (!shouldUseTools) {
     if (visionDirectReply) {
-      return {
+      return withRouteTrace(route, {
         ...base,
         executor: needsBackground ? 'background_direct' : 'direct',
         policyKey,
@@ -252,10 +296,10 @@ function resolveDirectChatExecution(route = {}) {
         allowStream: false,
         needsBackground,
         unavailableReason: ''
-      };
+      });
     }
     if (toolIntent === 'force_tools') {
-      return {
+      return withRouteTrace(route, {
         ...base,
         executor: needsBackground ? 'background_direct' : 'direct',
         policyKey,
@@ -263,19 +307,19 @@ function resolveDirectChatExecution(route = {}) {
         allowStream: false,
         needsBackground,
         unavailableReason: privateRestrictionReason || 'no-allowed-tools'
-      };
+      });
     }
-    return {
+    return withRouteTrace(route, {
       ...base,
       executor: needsBackground ? 'background_direct' : 'direct',
       policyKey,
       routeDebugKey,
       allowStream: !needsBackground && !route?.imageUrl,
       needsBackground
-    };
+    });
   }
 
-  return {
+  return withRouteTrace(route, {
     ...base,
     executor: needsBackground ? 'background_direct' : 'direct',
     policyKey,
@@ -286,7 +330,7 @@ function resolveDirectChatExecution(route = {}) {
     allowStream: false,
     needsBackground,
     unavailableReason: ''
-  };
+  });
 }
 
 function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
@@ -295,60 +339,60 @@ function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
   const chatType = normalizeChatType(route);
 
   if (contract.topRouteType === 'ignore') {
-    return {
+    return withRouteTrace(route, {
       ...base,
       executor: 'ignore',
       allowStream: false
-    };
+    });
   }
 
   if (contract.topRouteType === 'refuse') {
-    return {
+    return withRouteTrace(route, {
       ...base,
       executor: 'refuse',
       allowStream: false
-    };
+    });
   }
 
   if (contract.topRouteType === 'admin') {
     if (chatType === 'private') {
-      return {
+      return withRouteTrace(route, {
         ...base,
         executor: 'direct',
         routeDebugKey: buildRouteDebugKey(route),
         allowStream: false,
         unavailableReason: 'private-group-only'
-      };
+      });
     }
     const command = String(route?.meta?.command?.cmd || '').trim().toLowerCase();
     if (command === 'full' && route?.meta?.admin === true) {
-      return {
+      return withRouteTrace(route, {
         ...base,
         executor: 'full_subagent',
         policyKey: 'admin/full',
         routeDebugKey: 'admin/full',
         allowStream: false,
         needsBackground: true
-      };
+      });
     }
 
-    return {
+    return withRouteTrace(route, {
       ...base,
       executor: 'admin',
       routeDebugKey: buildRouteDebugKey(route),
       allowStream: false
-    };
+    });
   }
 
   if (contract.topRouteType === 'direct_chat') {
     return resolveDirectChatExecution(route);
   }
 
-  return {
+  return withRouteTrace(route, {
     ...base,
     executor: 'direct',
     routeDebugKey: buildRouteDebugKey(route)
-  };
+  });
 }
 
 function shouldUseToolRoute(route = {}) {
@@ -376,6 +420,7 @@ function getPolicyDefinition(policyKey = '') {
 module.exports = {
   EXECUTORS,
   buildRouteDebugKey,
+  buildRouteTrace,
   getPolicyDefinition,
   resolvePolicyKey,
   resolveRouteExecution,

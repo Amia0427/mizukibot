@@ -7,6 +7,8 @@ const { getLatestReasoning } = require('../api/ai');
 const { listTasks, loadTask } = require('../utils/agentRuntime');
 const { listRecentModelCalls } = require('../utils/modelCallTracker');
 const { setEnvPairs, maskSecret } = require('../utils/envFile');
+const { isUnsafeHttpUrl } = require('../utils/networkSafety');
+const { collectSecurityDiagnostics, logStartupSecurityWarnings } = require('../utils/securityDiagnostics');
 const {
   listMemoryItems,
   getGovernanceStats,
@@ -88,6 +90,16 @@ function escapeHtml(value) {
 function resolveSecretInput(submitted, current) {
   const next = String(submitted || '').trim();
   return next || String(current || '').trim();
+}
+
+function validateExternalApiBaseUrl(label, value, { required = false } = {}) {
+  const url = String(value || '').trim();
+  if (!url) {
+    return required ? `${label} cannot be empty` : '';
+  }
+  if (!/^https?:\/\//i.test(url)) return `${label} must start with http/https`;
+  if (isUnsafeHttpUrl(url)) return `${label} cannot point to localhost, private, or metadata networks`;
+  return '';
 }
 
 function persistSettings(next) {
@@ -227,6 +239,8 @@ function startServer() {
   const port = config.WEB_PORT || 3005;
   const host = config.WEB_BIND_HOST || '127.0.0.1';
 
+  logStartupSecurityWarnings(config, console.warn);
+
   app.disable('x-powered-by');
   app.use(express.json({ limit: '300kb' }));
 
@@ -272,6 +286,10 @@ function startServer() {
     return res.json({ ok: true, settings: getCurrentSettings() });
   });
 
+  app.get('/api/security-status', (req, res) => {
+    return res.json({ ok: true, security: collectSecurityDiagnostics(config) });
+  });
+
   app.post('/api/settings', (req, res) => {
     try {
       const body = req.body || {};
@@ -305,17 +323,22 @@ function startServer() {
       };
 
       if (!next.api_key) return res.status(400).json({ ok: false, error: 'API_KEY cannot be empty' });
-      if (!/^https?:\/\//i.test(next.api_base_url)) return res.status(400).json({ ok: false, error: 'API_BASE_URL must start with http/https' });
+      const apiBaseError = validateExternalApiBaseUrl('API_BASE_URL', next.api_base_url, { required: true });
+      if (apiBaseError) return res.status(400).json({ ok: false, error: apiBaseError });
       if (!next.ai_model) return res.status(400).json({ ok: false, error: 'AI_MODEL cannot be empty' });
-      if (next.ai_fallback_api_base_url && !/^https?:\/\//i.test(next.ai_fallback_api_base_url)) return res.status(400).json({ ok: false, error: 'AI_FALLBACK_API_BASE_URL must start with http/https' });
+      const fallbackBaseError = validateExternalApiBaseUrl('AI_FALLBACK_API_BASE_URL', next.ai_fallback_api_base_url);
+      if (fallbackBaseError) return res.status(400).json({ ok: false, error: fallbackBaseError });
       if (next.ai_fallback_enabled && !next.ai_fallback_model) return res.status(400).json({ ok: false, error: 'AI_FALLBACK_MODEL cannot be empty when fallback is enabled' });
       if (!Number.isFinite(next.ai_fallback_failure_threshold) || next.ai_fallback_failure_threshold < 1 || next.ai_fallback_failure_threshold > 100) return res.status(400).json({ ok: false, error: 'AI_FALLBACK_FAILURE_THRESHOLD must be in 1~100' });
       if (!Number.isFinite(next.ai_fallback_cooldown_ms) || next.ai_fallback_cooldown_ms < 0 || next.ai_fallback_cooldown_ms > 31536000000) return res.status(400).json({ ok: false, error: 'AI_FALLBACK_COOLDOWN_MS must be in 0~31536000000' });
-      if (next.ai_router_base_url && !/^https?:\/\//i.test(next.ai_router_base_url)) return res.status(400).json({ ok: false, error: 'AI_ROUTER_BASE_URL must start with http/https' });
+      const routerBaseError = validateExternalApiBaseUrl('AI_ROUTER_BASE_URL', next.ai_router_base_url);
+      if (routerBaseError) return res.status(400).json({ ok: false, error: routerBaseError });
       if (!next.memory_model) return res.status(400).json({ ok: false, error: 'MEMORY_MODEL cannot be empty' });
       if (!next.image_model) return res.status(400).json({ ok: false, error: 'IMAGE_MODEL cannot be empty' });
-      if (next.memory_api_base_url && !/^https?:\/\//i.test(next.memory_api_base_url)) return res.status(400).json({ ok: false, error: 'MEMORY_API_BASE_URL must start with http/https' });
-      if (next.image_api_base_url && !/^https?:\/\//i.test(next.image_api_base_url)) return res.status(400).json({ ok: false, error: 'IMAGE_API_BASE_URL must start with http/https' });
+      const memoryBaseError = validateExternalApiBaseUrl('MEMORY_API_BASE_URL', next.memory_api_base_url);
+      if (memoryBaseError) return res.status(400).json({ ok: false, error: memoryBaseError });
+      const imageBaseError = validateExternalApiBaseUrl('IMAGE_API_BASE_URL', next.image_api_base_url);
+      if (imageBaseError) return res.status(400).json({ ok: false, error: imageBaseError });
       if (!Number.isFinite(next.ai_temperature) || next.ai_temperature < 0 || next.ai_temperature > 2) return res.status(400).json({ ok: false, error: 'AI_TEMPERATURE must be in 0~2' });
       if (!Number.isFinite(next.ai_top_p) || next.ai_top_p < 0 || next.ai_top_p > 1) return res.status(400).json({ ok: false, error: 'AI_TOP_P must be in 0~1' });
       if (!Number.isFinite(next.ai_max_tokens) || next.ai_max_tokens < 64) return res.status(400).json({ ok: false, error: 'AI_MAX_TOKENS must be >= 64' });
@@ -566,6 +589,8 @@ function startServer() {
 
   <div class="card"><h3>Agent 当前思考</h3><div id="thinking-content">等待中...</div></div>
 
+  <div class="card"><h3>安全状态</h3><div id="security-status">加载中...</div></div>
+
   <div class="card">
     <h3>最近模型调用</h3>
     <div class="hint">可直接看到主对话调用、是否注入长期记忆，以及异步长期记忆提取调用。</div>
@@ -689,6 +714,34 @@ function startServer() {
         document.getElementById('ai_stream_chunk_ms').value = String(s.ai_stream_chunk_ms ?? 900);
         document.getElementById('llm_humanizer_enabled').checked = Boolean(s.llm_humanizer_enabled);
       } catch (_) {}
+    }
+
+    async function loadSecurityStatus() {
+      const el = document.getElementById('security-status');
+      try {
+        const res = await authedFetch('/api/security-status');
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          el.textContent = '加载失败：' + (data.error || 'unknown error');
+          return;
+        }
+        const s = data.security || {};
+        const posture = (s.sections && s.sections.tokenPosture) || {};
+        const apiBase = (s.sections && s.sections.apiBaseUrls) || {};
+        const unsafeApiCount = Array.isArray(apiBase.items)
+          ? apiBase.items.filter(function (item) { return item.status === 'warn'; }).length
+          : 0;
+        el.innerHTML = [
+          '<div>overall: <strong>' + escapeCell(s.status || '-') + '</strong></div>',
+          '<div>WEB_TOKEN: ' + escapeCell(posture.webToken || '-') + '</div>',
+          '<div>LOCAL_COMMAND_BRIDGE_TOKEN: ' + escapeCell(posture.localCommandBridgeToken || '-') + '</div>',
+          '<div>WEB_BIND_HOST: ' + escapeCell(posture.webBindHost || '-') + '</div>',
+          '<div>command bridge: ' + (posture.localCommandBridgeEnabled ? 'enabled' : 'disabled') + '</div>',
+          '<div>API Base URL risks: ' + unsafeApiCount + '</div>'
+        ].join('');
+      } catch (e) {
+        el.textContent = '加载失败：' + e.message;
+      }
     }
 
     async function saveSettings(ev) {
@@ -1076,6 +1129,7 @@ function startServer() {
     });
 
     loadSettings();
+    loadSecurityStatus();
     loadGovernanceStats();
     loadMemoryItems();
     loadSnapshots();
@@ -1095,4 +1149,4 @@ function startServer() {
   });
 }
 
-module.exports = { startServer };
+module.exports = { startServer, validateExternalApiBaseUrl };

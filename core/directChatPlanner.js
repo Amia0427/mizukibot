@@ -1,7 +1,13 @@
 const planning = require('../api/runtimeV2/planning/service');
+const { resolvePolicyKey } = require('./routeExecution');
+const {
+  attachExecutablePlanToPlannerDecision,
+  buildExecutablePlanFromPolicy
+} = require('./executablePlan');
 
 async function planDirectChat(route = {}, options = {}) {
   const available = planning.collectAvailableToolSummary(route, options);
+  const policyKey = resolvePolicyKey(route);
   const explicitAllowedTools = Array.isArray(options?.allowedTools)
     ? options.allowedTools
     : (Array.isArray(route?.meta?.allowedTools) ? route.meta.allowedTools : undefined);
@@ -27,9 +33,13 @@ async function planDirectChat(route = {}, options = {}) {
     constraints: options?.constraints || {},
     planner: options?.planner
   });
-  return planning.convertPlannerDecisionToDirectChatDecision(decision, route, {
+  const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, {
     toolCatalog: available.toolCatalog
   });
+  return attachExecutablePlanToPlannerDecision(
+    directChatDecision,
+    buildExecutablePlanFromPolicy(policyKey, { goal: route?.question || route?.cleanText || '' })
+  );
 }
 
 module.exports = {
@@ -46,6 +56,7 @@ module.exports = {
         : []
     );
   },
+  buildExecutablePlanFromPolicy,
   collectAvailableToolSummary: planning.collectAvailableToolSummary,
   deriveToolArgs: planning.deriveToolArgs,
   deriveMemoryOpenArgs: planning.deriveMemoryOpenArgs,
