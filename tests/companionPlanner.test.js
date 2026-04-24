@@ -45,6 +45,8 @@ module.exports = (async () => {
   assert.strictEqual(normalizedWeb.mode, 'chat_only');
   assert.deepStrictEqual(normalizedWeb.allowedToolNames, []);
   assert.deepStrictEqual(normalizedWeb.steps, []);
+  assert.strictEqual(normalizedWeb.plannerMeta.backgroundResearchRequested, true);
+  assert.ok(normalizedWeb.plannerMeta.backgroundResearchQuery);
 
   const weatherDecision = await planRequestV2({
     question: '??????',

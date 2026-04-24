@@ -6,9 +6,11 @@ const nativeImage = require('../api/skills_native/imageGenerate');
 module.exports = (async () => {
   const oldBaidu = process.env.BAIDU_API_KEY;
   const oldGemini = process.env.GEMINI_API_KEY;
+  const oldQzoneImageKey = process.env.BOT_DIARY_QZONE_IMAGE_PROVIDER_API_KEY;
 
   delete process.env.BAIDU_API_KEY;
   delete process.env.GEMINI_API_KEY;
+  delete process.env.BOT_DIARY_QZONE_IMAGE_PROVIDER_API_KEY;
 
   const pptList = await nativePpt.listThemes();
   assert.ok(String(pptList).includes('BAIDU_API_KEY') || String(pptList).includes('not configured'));
@@ -21,6 +23,7 @@ module.exports = (async () => {
 
   if (oldBaidu !== undefined) process.env.BAIDU_API_KEY = oldBaidu;
   if (oldGemini !== undefined) process.env.GEMINI_API_KEY = oldGemini;
+  if (oldQzoneImageKey !== undefined) process.env.BOT_DIARY_QZONE_IMAGE_PROVIDER_API_KEY = oldQzoneImageKey;
 
   console.log('nativePptImage.test.js passed');
 })().catch((error) => {

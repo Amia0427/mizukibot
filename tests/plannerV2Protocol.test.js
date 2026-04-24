@@ -1,5 +1,8 @@
 const assert = require('assert');
 
+const oldBotToolMode = process.env.BOT_TOOL_MODE;
+process.env.BOT_TOOL_MODE = 'full';
+
 const {
   planRequestV2,
   convertPlannerDecisionToDirectChatDecision,
@@ -659,7 +662,11 @@ module.exports = (async () => {
   assert.deepStrictEqual(personaPlannerDecision.plannerMeta.dynamicPromptPlan.personaModules, ['mafuyu_branch', 'care_light']);
 
   console.log('plannerV2Protocol.test.js passed');
+  if (oldBotToolMode === undefined) delete process.env.BOT_TOOL_MODE;
+  else process.env.BOT_TOOL_MODE = oldBotToolMode;
 })().catch((error) => {
+  if (oldBotToolMode === undefined) delete process.env.BOT_TOOL_MODE;
+  else process.env.BOT_TOOL_MODE = oldBotToolMode;
   console.error(error);
   process.exit(1);
 });

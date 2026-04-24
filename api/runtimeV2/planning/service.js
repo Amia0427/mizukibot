@@ -344,6 +344,44 @@ function isCompanionPlannerToolUseAllowed(route = {}, toolNames = [], options = 
   return false;
 }
 
+
+function hasAnyResearchCue(text = '') {
+  const lower = normalizeText(text).toLowerCase();
+  if (!lower) return false;
+  const cues = [
+    'search', 'google', 'web', 'browse', 'news', 'latest', 'current', 'today', 'recent', 'source', 'link', 'url',
+    '?', '?', '??', '??', '??', '??', '??', '??', '??', '??', '??'
+  ];
+  return cues.some((cue) => lower.includes(cue));
+}
+
+function shouldRequestBackgroundResearch(route = {}, options = {}) {
+  const currentConfig = getConfig();
+  if (currentConfig.RESEARCH_SUBAGENT_ENABLED === false) return false;
+  const cleanText = getPlannerRequestText(route);
+  if (!cleanText) return false;
+  if (isConversationalNoop(cleanText)) return false;
+  const sourceScope = normalizeText(route?.facets?.sourceScope);
+  const freshness = normalizeText(route?.facets?.freshness);
+  const domain = normalizeText(route?.facets?.domain);
+  const responseIntent = normalizeResponseIntent(route?.meta?.responseIntent);
+  if (isExplicitUrlLookup(cleanText)) return true;
+  if (sourceScope === 'web' || sourceScope === 'live' || freshness === 'latest') return true;
+  if (['finance', 'research', 'location', 'music'].includes(domain)) return true;
+  if (responseIntent === 'summary' && hasAnyResearchCue(cleanText)) return true;
+  return hasAnyResearchCue(cleanText);
+}
+
+function buildBackgroundResearchMeta(route = {}, options = {}) {
+  const requested = shouldRequestBackgroundResearch(route, options);
+  const query = clampReason(getPlannerRequestText(route), 240);
+  return {
+    backgroundResearchRequested: requested,
+    backgroundResearchQuery: requested ? query : '',
+    backgroundResearchReason: requested ? 'background web research requested without exposing web tools to main bot' : ''
+  };
+}
+
 function chooseTaskShape(route = {}) {
   const executionMode = normalizeText(route?.intent?.executionMode);
   if (executionMode === 'background' || executionMode === 'delegated') return 'background_tool_task';
@@ -939,7 +977,8 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
         dynamicPromptPlan: normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
           personaModuleCatalog,
           dynamicPromptBlockCatalog
-        })
+        }),
+        ...buildBackgroundResearchMeta(route, options)
       }
     };
   }
@@ -1056,7 +1095,8 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
       dynamicPromptPlan: normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
         personaModuleCatalog,
         dynamicPromptBlockCatalog
-      })
+      }),
+      ...buildBackgroundResearchMeta(route, options)
     }
   };
 }
@@ -1430,7 +1470,8 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
         || rawDecision?.personaModuleReason
       ),
       normalizedByRule,
-      normalizationReason: normalizeText(normalizationReason)
+      normalizationReason: normalizeText(normalizationReason),
+      ...buildBackgroundResearchMeta(route, options)
     }
   };
 }
@@ -1562,6 +1603,9 @@ function convertPlannerDecisionToDirectChatDecision(decision = {}, route = {}, o
     reason: clampReason(normalizeText(decision?.plannerMeta?.reason)),
     plannerModel: normalizeText(decision?.plannerMeta?.plannerModel) || getPlannerModel(),
     plannerFallbackUsed: Boolean(decision?.plannerMeta?.fallbackUsed),
+    backgroundResearchRequested: decision?.plannerMeta?.backgroundResearchRequested === true,
+    backgroundResearchQuery: normalizeText(decision?.plannerMeta?.backgroundResearchQuery),
+    backgroundResearchReason: normalizeText(decision?.plannerMeta?.backgroundResearchReason),
     plannerDecisionV2: decision,
     plannerProtocolVersion: normalizeText(decision?.plannerMeta?.protocolVersion) || PLANNER_PROTOCOL_VERSION
   };
@@ -1909,6 +1953,7 @@ module.exports = {
   buildPlannerStepGraphSequence,
   buildPlannerUserPayload,
   buildRuleBasedPlannerDecision,
+  buildBackgroundResearchMeta,
   callPlannerModelV2,
   callPlannerSubagentV2,
   collectAvailableToolSummary,
@@ -1934,6 +1979,7 @@ module.exports = {
   TASK_SHAPES,
   TOOL_BUCKETS,
   sanitizePlan,
+  shouldRequestBackgroundResearch,
   shouldUsePlanAndSolve,
   shouldUsePlanModeForRequest,
   synthesizeFromPlan

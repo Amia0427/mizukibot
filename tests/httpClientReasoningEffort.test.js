@@ -41,14 +41,15 @@ module.exports = (async () => {
     const anthropicPrepared = await httpClient.prepareRequest('https://api.anthropic.com/v1/messages', {
       model: 'claude-sonnet-4-5',
       messages: [{ role: 'user', content: 'hi' }],
-      max_tokens: 3500,
+      max_tokens: 900,
       reasoning_effort: 'high',
       stream: false
     });
     assert.strictEqual(anthropicPrepared.provider, 'anthropic');
+    assert.strictEqual(anthropicPrepared.requestBody.max_tokens, 1200);
     assert.deepStrictEqual(anthropicPrepared.requestBody.thinking, {
       type: 'enabled',
-      budget_tokens: 2100
+      budget_tokens: 1024
     });
 
     let attemptCount = 0;

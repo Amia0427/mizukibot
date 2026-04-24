@@ -901,7 +901,7 @@ function getAnthropicThinkingBudget(maxTokens, effort) {
   const normalized = normalizeReasoningEffort(effort);
   if (!normalized) return 0;
   const outputTokens = Number(maxTokens);
-  if (!Number.isFinite(outputTokens) || outputTokens < 1200) return 0;
+  if (!Number.isFinite(outputTokens) || outputTokens <= 0) return 0;
   const defaults = {
     minimal: 1024,
     low: 1024,
@@ -1152,6 +1152,9 @@ async function buildAnthropicRequestBody(body = {}) {
     }
   }
 
+  if (normalizeReasoningEffort(body.reasoning_effort)) {
+    requestBody.max_tokens = Math.max(Number(requestBody.max_tokens) || 0, 1200);
+  }
   const thinkingBudget = getAnthropicThinkingBudget(requestBody.max_tokens, body.reasoning_effort);
   if (thinkingBudget > 0) {
     requestBody.thinking = {

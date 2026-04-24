@@ -25,6 +25,7 @@ const {
   buildSharedShortTermContextMessages
 } = require('../../../utils/shortTermMemory');
 const { buildReplyStylePolicy } = require('../../../utils/memory');
+const { getRecentResearchBriefs } = require('../../../utils/sessionResearchCache');
 const { buildDynamicFewShotPrompt } = require('../../../utils/fewShotPrompts');
 const {
   filterAllowedToolsForMemoryCliTurn,
@@ -699,6 +700,18 @@ function shouldInjectSocialContext(options = {}) {
   return Boolean(groupId);
 }
 
+
+function formatResearchBriefsForPrompt(briefs = []) {
+  const list = Array.isArray(briefs) ? briefs : [];
+  if (list.length === 0) return '';
+  return ['[BackgroundResearch]', ...list.map((brief, index) => {
+    const sources = Array.isArray(brief.sources)
+      ? brief.sources.slice(0, 3).map((source) => String(source.url || source.title || '').trim()).filter(Boolean)
+      : [];
+    return `${index + 1}. query=${brief.query || ''}\nsummary=${brief.summary || ''}${sources.length ? `\nsources=${sources.join(' | ')}` : ''}`;
+  })].join('\n');
+}
+
 async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt = null, options = {}) {
   const promptMaterials = options.promptMaterials && typeof options.promptMaterials === 'object'
     ? options.promptMaterials
@@ -892,6 +905,22 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       optional: true
     }
   }));
+  const researchBriefText = formatResearchBriefsForPrompt(getRecentResearchBriefs(
+    options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+    { query: question || '', limit: 2 }
+  ));
+  if (researchBriefText) {
+    promptBlocks.push(createPromptBlock('background_research', 'Background Research', researchBriefText, {
+      stage: 'main',
+      priority: 255,
+      authority: 'session_research',
+      kind: 'research_context',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true
+      }
+    }));
+  }
   const summaryText = promptMaterials?.summaryText
     || memoryContext.promptSummaryText
     || trimTextByTokenBudget(memoryContext.summary || 'none', affinity.shortTermMemoryTokens, 'tail')
@@ -1804,6 +1833,7 @@ module.exports = {
   buildDirectedContextPromptSnippet,
   buildDynamicPrompt,
   buildVisionMessageContent,
+  formatResearchBriefsForPrompt,
   mergeAllowedToolsWithMemoryCli,
   promptLayerCache,
   shouldBypassHumanizerForPolicy,
