@@ -41,6 +41,10 @@ function createInboundConcurrencyController(options = {}) {
     admin: 0
   };
   const activeBySession = new Map();
+  const lastReleasedSessionByLane = {
+    general: '',
+    admin: ''
+  };
 
   function getActiveForSession(sessionKey = '') {
     return Math.max(0, Number(activeBySession.get(String(sessionKey || '').trim()) || 0) || 0);
@@ -130,6 +134,7 @@ function createInboundConcurrencyController(options = {}) {
         const remainingForSession = Math.max(0, getActiveForSession(sessionKey) - 1);
         if (remainingForSession > 0) activeBySession.set(sessionKey, remainingForSession);
         else activeBySession.delete(sessionKey);
+        lastReleasedSessionByLane[lane] = sessionKey;
 
         console.log('[inbound-concurrency] released', {
           lane,
@@ -153,19 +158,31 @@ function createInboundConcurrencyController(options = {}) {
 
   function takeNextEligible(lane) {
     const queue = queues[lane];
+    const avoidSessionKey = String(lastReleasedSessionByLane[lane] || '').trim();
     const seenSessions = new Set();
     const startIndex = lane === 'general' && queue.length > 0 ? nextGeneralSessionCursor % queue.length : 0;
+    let fallback = null;
     for (let offset = 0; offset < queue.length; offset += 1) {
       const i = (startIndex + offset) % queue.length;
       const sessionKey = String(queue[i]?.sessionKey || '').trim();
       if (seenSessions.has(sessionKey)) continue;
       seenSessions.add(sessionKey);
       if (canAcquire(queue[i])) {
+        if (avoidSessionKey && sessionKey === avoidSessionKey && queue.some((item) => String(item?.sessionKey || '').trim() !== avoidSessionKey && canAcquire(item))) {
+          fallback = fallback || { index: i, item: queue[i] };
+          continue;
+        }
         const item = queue.splice(i, 1)[0];
         clearQueuedRequest(item);
         if (lane === 'general') nextGeneralSessionCursor = i;
         return item;
       }
+    }
+    if (fallback) {
+      const item = queue.splice(fallback.index, 1)[0];
+      clearQueuedRequest(item);
+      if (lane === 'general') nextGeneralSessionCursor = fallback.index;
+      return item;
     }
     return null;
   }
