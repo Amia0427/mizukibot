@@ -68,6 +68,15 @@ function buildExecutablePlanFromPlannerDecision(decision = {}, policyKey = '', r
   const sourceSteps = executionSteps.length > 0 ? executionSteps : v2Steps;
   const fallback = buildExecutablePlanFromPolicy(policyKey, { goal: route?.question || route?.cleanText || '' });
   if (sourceSteps.length === 0) {
+    if (decision?.shouldUseTools === false) {
+      return createExecutablePlan({
+        goal: decision?.goal || route?.question || route?.cleanText || fallback.goal,
+        policyKey,
+        needsTools: false,
+        steps: [],
+        source: decision?.plannerFallbackUsed ? 'planner_fallback_chat_only' : 'planner_chat_only'
+      });
+    }
     return createExecutablePlan({
       ...fallback,
       source: decision?.plannerFallbackUsed ? 'route_profile_fallback' : fallback.source

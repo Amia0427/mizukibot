@@ -1076,7 +1076,12 @@ function createMessageHandler({
   function buildFreshnessGuard(continuousMeta = null) {
     const sessionKey = String(continuousMeta?.sessionKey || '').trim();
     const flushVersion = Number(continuousMeta?.flushVersion || 0) || 0;
-    if (!sessionKey || flushVersion <= 0 || config.CONTINUOUS_MESSAGE_CANCEL_ON_NEW_MESSAGE !== true) {
+    if (
+      !sessionKey
+      || flushVersion <= 0
+      || continuousMeta?.mentionedBot === true
+      || config.CONTINUOUS_MESSAGE_CANCEL_ON_NEW_MESSAGE !== true
+    ) {
       return {
         sessionKey,
         flushVersion,

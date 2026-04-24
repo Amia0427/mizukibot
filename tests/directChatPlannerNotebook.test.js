@@ -15,15 +15,12 @@ module.exports = (async () => {
   assert.strictEqual(route.meta.toolIntent, 'maybe_tools');
 
   const plannerDecision = await planDirectChat(route, { userId: 'u1' });
-  assert.strictEqual(plannerDecision.shouldUseTools, true);
-  assert.ok(plannerDecision.allowedToolNames.includes('notebook_search'));
-  assert.strictEqual(plannerDecision.executionPlan.mode, 'tool_plan');
-  assert.ok(plannerDecision.executionPlan.steps.length >= 1);
-  assert.strictEqual(plannerDecision.executionPlan.steps[0].action, 'notebook_search');
+  assert.strictEqual(plannerDecision.shouldUseTools, false);
+  assert.ok(!plannerDecision.allowedToolNames.includes('notebook_search'));
+  assert.strictEqual(plannerDecision.executionPlan.mode, 'chat_only');
+  assert.strictEqual(plannerDecision.executionPlan.steps.length, 0);
   assert.strictEqual(plannerDecision.executablePlan.policyKey, 'lookup/notebook-answer');
-  assert.strictEqual(plannerDecision.executablePlan.steps.length, plannerDecision.executionPlan.steps.length);
-  assert.strictEqual(plannerDecision.executablePlan.steps[0].action, plannerDecision.executionPlan.steps[0].action);
-  assert.deepStrictEqual(plannerDecision.planSteps, plannerDecision.executablePlan.steps);
+  assert.ok(plannerDecision.executablePlan.steps.every((step) => step.action !== 'notebook_search'));
 
   console.log('directChatPlannerNotebook.test.js passed');
 })();

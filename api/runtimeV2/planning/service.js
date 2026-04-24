@@ -1,5 +1,9 @@
 const config = require('../../../config');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
+const {
+  filterCompanionAllowedTools,
+  isCompanionToolModeEnabled
+} = require('../../../utils/companionTools');
 const { runStructuredSubagent } = require('../../../core/structuredSubagent');
 const {
   normalizeChatMode,
@@ -288,6 +292,7 @@ function buildValidationEnvelope({
 }
 
 function collectAvailableToolSummary(route = {}, options = {}) {
+  const currentConfig = getConfig();
   const rawToolCatalog = normalizeArray(options.toolCatalog).length > 0
     ? normalizeArray(options.toolCatalog).map((item) => ({ ...item }))
     : buildDirectChatToolCatalog({
@@ -298,9 +303,14 @@ function collectAvailableToolSummary(route = {}, options = {}) {
   const routeAllowedTools = normalizeToolNames(
     Array.isArray(options.allowedTools) ? options.allowedTools : route?.meta?.allowedTools
   );
-  const toolCatalog = hasExplicitAllowedTools
+  const explicitFilteredCatalog = hasExplicitAllowedTools
     ? rawToolCatalog.filter((item) => routeAllowedTools.includes(normalizeText(item?.name)))
     : rawToolCatalog;
+  const allowedByCompanionMode = new Set(filterCompanionAllowedTools(
+    explicitFilteredCatalog.map((item) => item.name),
+    currentConfig
+  ));
+  const toolCatalog = explicitFilteredCatalog.filter((item) => allowedByCompanionMode.has(normalizeText(item?.name)));
   return {
     toolCatalog,
     toolBuckets: Array.from(new Set(
@@ -308,6 +318,30 @@ function collectAvailableToolSummary(route = {}, options = {}) {
     )),
     allowedToolNames: normalizeToolNames(toolCatalog.map((item) => item.name))
   };
+}
+
+function isCompanionPlannerMode(options = {}) {
+  return isCompanionToolModeEnabled(getConfig())
+    || isCompanionToolModeEnabled(normalizeObject(options.config, {}));
+}
+
+function isCompanionPlannerToolUseAllowed(route = {}, toolNames = [], options = {}) {
+  if (!isCompanionPlannerMode(options)) return true;
+  const allowed = normalizeToolNames(toolNames);
+  if (allowed.length === 0) return false;
+  const cleanText = getPlannerRequestText(route);
+  const domain = normalizeText(route?.facets?.domain);
+  const sourceScope = normalizeText(route?.facets?.sourceScope);
+  const responseIntent = normalizeResponseIntent(route?.meta?.responseIntent);
+  const toolIntent = normalizeToolIntent(route?.meta?.toolIntent);
+  if (domain === 'time' && allowed.includes('get_current_time')) return true;
+  if (isContextStatsRequest(cleanText) && allowed.includes('get_context_stats')) return true;
+  if (isWeatherRequest(cleanText, route) && allowed.includes('getWeather')) return true;
+  if ((shouldPrioritizeMemoryProbe(route) || prefersMemoryRecall(cleanText)) && allowed.includes('memory_cli')) return true;
+  if ((sourceScope === 'notebook' || responseIntent === 'summary') && allowed.some((toolName) => /^notebook_/.test(toolName) || toolName === 'memory_cli')) return true;
+  if ((responseIntent === 'action_guidance' || toolIntent === 'force_tools') && allowed.some((toolName) => /scheduled|schedule|task/i.test(toolName))) return true;
+  if (allowed.includes('url_safety_check') && /https?:\/\//i.test(cleanText)) return true;
+  return false;
 }
 
 function chooseTaskShape(route = {}) {
@@ -924,6 +958,9 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
       shouldUseTools = available.allowedToolNames.some((toolName) => /summarize|extract|context_stats/i.test(toolName));
     }
   }
+  if (shouldUseTools && isCompanionPlannerMode(options)) {
+    shouldUseTools = isCompanionPlannerToolUseAllowed(route, available.allowedToolNames, options);
+  }
 
   let allowedToolNames = [];
   if (domain === 'time') {
@@ -967,7 +1004,9 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
     allowedToolNames = writeToolNames.length > 0 ? writeToolNames : selectedToolNames;
   }
 
-  const normalizedAllowedToolNames = normalizeToolNames(allowedToolNames).filter((toolName) => toolCatalogByName.has(toolName));
+  const normalizedAllowedToolNames = normalizeToolNames(allowedToolNames)
+    .filter((toolName) => toolCatalogByName.has(toolName))
+    .filter((toolName) => !isCompanionPlannerMode(options) || isCompanionPlannerToolUseAllowed(route, [toolName], options));
   const writeToolNames = normalizedAllowedToolNames.filter((toolName) => isWriteCapableTool(toolCatalogByName, toolName));
   const taskShape = normalizedAllowedToolNames.length === 0
     ? 'fast_reply'
@@ -1246,6 +1285,14 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     Array.isArray(rawDecision?.allowedToolNames) ? rawDecision.allowedToolNames : fallback.allowedToolNames
   ).filter((toolName) => toolCatalogByName.has(toolName));
   let normalizedAllowedToolNames = requestedAllowedNames.length > 0 ? requestedAllowedNames : fallback.allowedToolNames;
+  if (isCompanionPlannerMode(options)) {
+    normalizedAllowedToolNames = normalizedAllowedToolNames.filter((toolName) => (
+      isCompanionPlannerToolUseAllowed(route, [toolName], options)
+    ));
+    if (!isCompanionPlannerToolUseAllowed(route, normalizedAllowedToolNames, options)) {
+      normalizedAllowedToolNames = [];
+    }
+  }
   const taskShape = TASK_SHAPES.includes(normalizeText(rawDecision?.taskShape))
     ? normalizeText(rawDecision.taskShape)
     : fallback.taskShape;
@@ -1323,6 +1370,11 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     return false;
   };
   const canonicalApplied = maybeApplyCanonicalNormalization();
+  if (isCompanionPlannerMode(options) && !isCompanionPlannerToolUseAllowed(route, normalizedAllowedToolNames, options)) {
+    normalizedAllowedToolNames = [];
+    normalizedByRule = true;
+    normalizationReason = 'companion tool mode: chat-only for non-companion tool intent';
+  }
   const rebuiltSteps = canonicalApplied
     ? buildPlannerStepGraphSequence(route, normalizedAllowedToolNames, available.toolCatalog, {
         contextEvidence: Boolean(options.contextEvidence)
