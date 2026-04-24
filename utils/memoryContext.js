@@ -1,4 +1,4 @@
-﻿const config = require('../config');
+const config = require('../config');
 const {
   getUserMemories,
   getUserProfile,
@@ -404,6 +404,53 @@ function pickStyleSignals(styleHits = [], jargonHits = [], question = '', option
   };
 }
 
+function estimateTraceTokens(text = '') {
+  const raw = String(text || '');
+  if (!raw) return 0;
+  return Math.ceil(raw.length / 4);
+}
+
+function classifyRecallHitForPrompt(hit = {}) {
+  const score = Number(hit.score || 0);
+  const strongMin = Number(config.MEMORY_STRONG_RECALL_MIN_SCORE ?? 0.2);
+  const weakMin = Number(config.MEMORY_WEAK_RECALL_MIN_SCORE ?? 0.08);
+  if (score >= strongMin) return 'strong';
+  if (score >= weakMin) return 'weak';
+  return 'background';
+}
+
+function buildMemoryTrace({ hits = [], injected = {}, options = {} } = {}) {
+  if (!config.MEMORY_TRACE_ENABLED) return null;
+  const injectedEntries = Object.entries(injected || {}).map(([name, text]) => ({
+    name,
+    chars: String(text || '').length,
+    approxTokens: estimateTraceTokens(text),
+    preview: String(text || '').slice(0, 180)
+  })).filter((item) => item.chars > 0);
+  const injectedTokens = injectedEntries.reduce((sum, item) => sum + item.approxTokens, 0);
+  return {
+    enabled: true,
+    strictPromptInjection: Boolean(config.MEMORY_STRICT_PROMPT_INJECTION_ENABLED),
+    groupId: sanitizeText(options.groupId),
+    routePolicyKey: sanitizeText(options.routePolicyKey),
+    topRouteType: sanitizeText(options.topRouteType),
+    hits: (Array.isArray(hits) ? hits : []).map((hit) => ({
+      id: String(hit.id || ''),
+      type: String(hit.type || hit.memoryKind || ''),
+      source: String(hit.source || hit.sourceKind || hit.meta?.sourceKind || ''),
+      status: String(hit.status || ''),
+      scopeType: String(hit.scopeType || ''),
+      groupId: String(hit.groupId || ''),
+      score: Number(hit.score || 0),
+      tier: classifyRecallHitForPrompt(hit),
+      traceReason: String(hit.traceReason || hit.reason || hit.meta?.traceReason || ''),
+      injected: classifyRecallHitForPrompt(hit) === 'strong' || !config.MEMORY_STRICT_PROMPT_INJECTION_ENABLED,
+      preview: String(hit.text || '').slice(0, 180)
+    })),
+    injected: injectedEntries,
+    injectedApproxTokens: injectedTokens
+  };
+}
 function buildContextPayload(userId, question = '', options = {}, unifiedHits = []) {
   const resolvedGroupIds = Array.isArray(options.resolvedGroupIds)
     ? options.resolvedGroupIds.map((item) => sanitizeText(item)).filter(Boolean)
@@ -440,7 +487,10 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     const hitGroupId = sanitizeText(hit?.groupId);
     return promptGroupIds.length > 0 && promptGroupIds.includes(hitGroupId);
   });
-  const promptRetrievedHits = hits.filter((hit) => {
+  const strictPromptInjection = Boolean(config.MEMORY_STRICT_PROMPT_INJECTION_ENABLED);
+  const strongHits = hits.filter((hit) => classifyRecallHitForPrompt(hit) === 'strong');
+  const promptSourceHits = strictPromptInjection ? strongHits : hits;
+  const promptRetrievedHits = promptSourceHits.filter((hit) => {
     const scopeType = String(hit?.scopeType || '').trim().toLowerCase();
     if (scopeType !== 'group') return true;
     const hitGroupId = sanitizeText(hit?.groupId);
@@ -534,6 +584,18 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     styleSignals: clampPromptMessage('StyleSignals', promptStyleSignalsText, getPromptTokenLimit('MAIN_PROMPT_STYLE_SIGNALS_MAX_TOKENS', 80), 'tail'),
     longTermProfile: clampPromptMessage('LongTermProfile', promptLongTermProfileText, getPromptTokenLimit('MAIN_PROMPT_LONG_TERM_PROFILE_MAX_TOKENS', 220), 'tail')
   };
+  const memoryTrace = buildMemoryTrace({
+    hits,
+    injected: {
+      retrievedMemory: promptRetrievedMemoryText,
+      styleSignals: promptStyleSignalsText,
+      taskMemory: promptTaskMemoryText,
+      groupMemory: promptGroupMemoryTrimmedText,
+      dailyJournal: promptDailyJournalTrimmedText,
+      longTermProfile: promptLongTermProfileText
+    },
+    options
+  });
 
   return {
     memoryForPrompt: memorySections.filter(Boolean).join('\n\n') || promptRetrievedMemoryText,
@@ -569,6 +631,7 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     dailyJournalBundle,
     factText,
     stats: getMemoryStats(userId),
+    diagnostics: memoryTrace ? { memoryTrace } : {},
     segments
   };
 }
@@ -730,6 +793,21 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
         byStatus: {},
         bySourceKind: {},
         localKnowledge: localKnowledge.diagnostics
+      },
+      diagnostics: {
+        memoryTrace: buildMemoryTrace({
+          hits: results,
+          injected: {
+            retrievedMemory: retrievedPromptText,
+            weakEvidence: packet.weakEvidenceText,
+            styleSignals: packet.styleSignalsText,
+            taskMemory: packet.taskStrategyText,
+            groupMemory: packet.groupSharedContextText,
+            dailyJournal: dailyJournalText,
+            longTermProfile: packet.stableProfileText
+          },
+          options
+        })
       },
       segments: {
         retrievedMemory: packet.messages.relevantEvidence?.length > 0

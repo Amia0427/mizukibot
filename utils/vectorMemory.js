@@ -1,7 +1,8 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { postWithRetry } = require('../api/httpClient');
+const { commitMemoryWrites } = require('./memoryWritePipeline');
 const {
   normalizeTier,
   maxTier,
@@ -1437,6 +1438,21 @@ function addMemoryItemsBatch(items = []) {
     .filter(Boolean);
 
   if (normalizedItems.length === 0) return [];
+
+  const pipelineEnabled = config.MEMORY_WRITE_PIPELINE_ENABLED !== false;
+  if (pipelineEnabled && !addMemoryItemsBatch.__pipelineActive) {
+    addMemoryItemsBatch.__pipelineActive = true;
+    try {
+      const result = commitMemoryWrites(
+        normalizedItems,
+        (accepted) => addMemoryItemsBatch(accepted),
+        { minConfidence: config.MEMORY_EXTRACT_MIN_CONFIDENCE }
+      );
+      return result.ids;
+    } finally {
+      addMemoryItemsBatch.__pipelineActive = false;
+    }
+  }
 
   ensureShardStateHydrated();
   const ids = [];
