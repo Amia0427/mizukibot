@@ -54,6 +54,17 @@ function getMaxTokens(defaultValue = 3500, overrides = null) {
   return Math.max(64, Math.floor(n));
 }
 
+function getReasoningEffort(overrides = null) {
+  const raw = overrides && typeof overrides === 'object' && overrides.reasoningEffort !== undefined
+    ? overrides.reasoningEffort
+    : config.AI_REASONING_EFFORT;
+  const normalized = String(raw == null ? 'high' : raw).trim().toLowerCase();
+  if (!normalized) return 'high';
+  if (['0', 'false', 'no', 'off', 'none', 'disabled', 'disable'].includes(normalized)) return '';
+  if (['minimal', 'low', 'medium', 'high'].includes(normalized)) return normalized;
+  return 'high';
+}
+
 function getRetries(defaultValue = 1, overrides = null) {
   const raw = overrides && typeof overrides === 'object' && overrides.retries !== undefined
     ? overrides.retries
@@ -124,6 +135,7 @@ module.exports = {
   getApiKey,
   getMaxTokens,
   getModelName,
+  getReasoningEffort,
   getRetries,
   getTemperature,
   getTopP,

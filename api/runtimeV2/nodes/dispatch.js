@@ -26,6 +26,9 @@ function createDispatchNode(deps = {}) {
   const canRunStepsInParallel = typeof deps.canRunStepsInParallel === 'function'
     ? deps.canRunStepsInParallel
     : (() => false);
+  const buildExecutionBatches = typeof deps.buildExecutionBatches === 'function'
+    ? deps.buildExecutionBatches
+    : ((steps) => [{ mode: canRunStepsInParallel(steps) ? 'parallel' : 'serial', items: normalizeArray(steps) }]);
   const buildLiveMainConversationSnapshot = typeof deps.buildLiveMainConversationSnapshot === 'function'
     ? deps.buildLiveMainConversationSnapshot
     : (() => null);
@@ -140,7 +143,24 @@ function createDispatchNode(deps = {}) {
     const selectedBase = retryQueueIds.size > 0
       ? pendingSteps.filter((step) => retryQueueIds.has(String(step.id || '').trim()))
       : pendingSteps;
-    const selectedSteps = selectedBase.slice(0, Math.max(1, Number(config.PLAN_MAX_STEPS) || 5));
+    const dependencyCompletedIds = new Set(
+      allSteps
+        .filter((step) => String(step.status || '').trim() === 'completed')
+        .map((step) => String(step.id || '').trim())
+        .filter(Boolean)
+    );
+    const selectedSteps = [];
+    const selectedIds = new Set();
+    for (const step of selectedBase) {
+      const deps = normalizeArray(step.dependsOn || step.depends_on || step.dependencies)
+        .map((item) => String(typeof item === 'string' ? item : item?.id || item?.step_id || '').trim())
+        .filter(Boolean);
+      if (!deps.every((dep) => dependencyCompletedIds.has(dep) || selectedIds.has(dep))) continue;
+      selectedSteps.push(step);
+      const stepId = String(step.id || '').trim();
+      if (stepId) selectedIds.add(stepId);
+      if (selectedSteps.length >= Math.max(1, Number(config.PLAN_MAX_STEPS) || 5)) break;
+    }
     const selectedStepToolNames = Array.from(new Set(
       selectedSteps
         .map((step) => String(step?.tool || '').trim())
@@ -200,9 +220,10 @@ function createDispatchNode(deps = {}) {
         });
       }
     }
+    const scheduledBatches = directChatBatchExecution ? [] : buildExecutionBatches(selectedSteps);
     const parallelExecution = directChatBatchExecution
       ? directChatBatches.some((batch) => batch.mode === 'parallel' && normalizeArray(batch.items).length > 1)
-      : (!hasExplicitDependencies && canRunStepsInParallel(selectedSteps));
+      : scheduledBatches.some((batch) => batch.mode === 'parallel' && normalizeArray(batch.items).length > 1);
     const events = [createEvent('node_start', { node: 'dispatch', stepCount: selectedSteps.length, parallelExecution })];
     if (String(preflight?.evidenceMessage || '').trim()) {
       events.push(createEvent('dispatch_preflight', {
@@ -424,16 +445,25 @@ function createDispatchNode(deps = {}) {
         }
       }
     } else if (parallelExecution && selectedSteps.length > 0) {
-      const parallelResults = await executeBatch(selectedSteps, buildDispatchState(), {
-        ...dispatchRuntimeOptions,
-        allowedTools: state.request?.allowedTools,
-        batches: [{
-          mode: 'parallel',
-          items: selectedSteps
-        }]
-      });
-      for (const envelope of parallelResults) {
-        applyEnvelope(envelope);
+      for (const batch of scheduledBatches) {
+        const runnableBatchItems = normalizeArray(batch.items)
+          .map((step) => resolveRuntimeBoundStep(step, nextSteps))
+          .filter((step) => !String(step.blockingReason || '').trim().startsWith('runtime_binding_unresolved:'));
+        if (runnableBatchItems.length === 0) continue;
+        for (const step of runnableBatchItems.filter((item) => isSideEffectPolicy(getPolicy(item.tool)))) {
+          checkpointBeforeSideEffect(step);
+        }
+        const batchResults = await executeBatch(runnableBatchItems, buildDispatchState(), {
+          ...dispatchRuntimeOptions,
+          allowedTools: state.request?.allowedTools,
+          batches: [{
+            mode: batch.mode,
+            items: runnableBatchItems
+          }]
+        });
+        for (const envelope of batchResults) {
+          applyEnvelope(envelope);
+        }
       }
     }
 
@@ -470,7 +500,9 @@ function createDispatchNode(deps = {}) {
           dispatch: {
             tool_exec_ms: Math.max(0, Date.now() - dispatchStartedAt - preflightDurationMs),
             capability_preflight_ms: preflightDurationMs,
-            tool_result_count: toolResults.length
+            tool_result_count: toolResults.length,
+            scheduled_batch_count: scheduledBatches.length,
+            parallel_batch_count: scheduledBatches.filter((batch) => batch.mode === 'parallel').length
           }
         }
       },

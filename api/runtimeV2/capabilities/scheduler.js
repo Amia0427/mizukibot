@@ -51,38 +51,183 @@ function filterAllowedCapabilityNames(allowedTools = [], options = {}) {
   return names;
 }
 
+function normalizePositiveInt(value, fallback) {
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 1) return fallback;
+  return num;
+}
+
+function normalizeNonNegativeInt(value, fallback) {
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 0) return fallback;
+  return num;
+}
+
+function normalizeStepId(step = {}, index = 0) {
+  return normalizeText(step?.id || step?.step_id || `step_${index}`);
+}
+
+function normalizeDependencyIds(step = {}) {
+  return normalizeArray(step.dependsOn || step.depends_on || step.dependencies)
+    .map((item) => normalizeText(typeof item === 'string' ? item : item?.id || item?.step_id))
+    .filter(Boolean);
+}
+
+function resolveCapabilityResource(descriptor = null, step = {}) {
+  const explicit = normalizeText(
+    step.resourceKey
+    || step.resource_key
+    || descriptor?.resourceKey
+    || descriptor?.resource_key
+    || descriptor?.metadata?.resourceKey
+    || descriptor?.metadata?.resource_key
+  );
+  if (explicit) return explicit;
+  return normalizeText(step.tool || descriptor?.name || 'unknown');
+}
+
+function isCacheableCapability(descriptor = null, step = {}) {
+  if (!descriptor) return false;
+  if (!isParallelSafeCapability(descriptor)) return false;
+  if (step.cacheable === false || step.noCache === true || step.no_cache === true) return false;
+  if (descriptor.cacheable === false || descriptor.metadata?.cacheable === false) return false;
+  return true;
+}
+
+function buildToolCacheKey(step = {}, descriptor = null) {
+  return stableHash({
+    tool: normalizeText(step.tool || descriptor?.name),
+    inputs: normalizeObject(step.inputs, {})
+  });
+}
+
+function createCacheStore(context = {}) {
+  const ttlMs = normalizeNonNegativeInt(
+    context.toolResultCacheTtlMs ?? config.AGENT_TOOL_RESULT_CACHE_TTL_MS,
+    0
+  );
+  if (ttlMs <= 0) return null;
+  const store = context.toolResultCache instanceof Map ? context.toolResultCache : null;
+  return store ? { store, ttlMs } : null;
+}
+
+function getCachedEnvelope(cache, key = '') {
+  if (!cache || !key) return null;
+  const hit = cache.store.get(key);
+  if (!hit) return null;
+  if (Date.now() - Number(hit.createdAt || 0) > cache.ttlMs) {
+    cache.store.delete(key);
+    return null;
+  }
+  return { ...hit.envelope, cached: true };
+}
+
+function setCachedEnvelope(cache, key = '', envelope = null) {
+  if (!cache || !key || !envelope) return;
+  if (String(envelope.status || '').trim() !== 'completed') return;
+  cache.store.set(key, {
+    createdAt: Date.now(),
+    envelope: { ...envelope }
+  });
+}
+
+function hasCompletedDependency(stepId = '', completedIds = new Set()) {
+  return stepId && completedIds.has(stepId);
+}
+
 function buildExecutionBatches(steps = [], descriptorRegistry = null) {
   const registry = descriptorRegistry || buildCapabilityRegistry();
-  const batches = [];
-  let currentParallelBatch = [];
+  if (config.AGENT_DEPENDENCY_AWARE_BATCHING === false) {
+    const batches = [];
+    let currentParallelBatch = [];
 
-  for (const step of normalizeArray(steps)) {
-    const descriptor = resolveCapability(registry, step?.tool);
-    if (!descriptor || !isParallelSafeCapability(descriptor)) {
-      if (currentParallelBatch.length > 0) {
+    for (const step of normalizeArray(steps)) {
+      const descriptor = resolveCapability(registry, step?.tool);
+      if (!descriptor || !isParallelSafeCapability(descriptor)) {
+        if (currentParallelBatch.length > 0) {
+          batches.push({
+            mode: currentParallelBatch.length > 1 ? 'parallel' : 'serial',
+            items: currentParallelBatch
+          });
+          currentParallelBatch = [];
+        }
         batches.push({
-          mode: currentParallelBatch.length > 1 ? 'parallel' : 'serial',
-          items: currentParallelBatch
+          mode: 'serial',
+          items: [step]
         });
-        currentParallelBatch = [];
+        continue;
       }
+      currentParallelBatch.push(step);
+    }
+
+    if (currentParallelBatch.length > 0) {
       batches.push({
-        mode: 'serial',
-        items: [step]
+        mode: currentParallelBatch.length > 1 ? 'parallel' : 'serial',
+        items: currentParallelBatch
       });
+    }
+
+    return batches;
+  }
+
+  const normalizedSteps = normalizeArray(steps).map((step, index) => ({
+    ...step,
+    __batchIndex: index,
+    __stepId: normalizeStepId(step, index)
+  }));
+  const batches = [];
+  const completedIds = new Set();
+  const pending = normalizedSteps.slice();
+
+  while (pending.length > 0) {
+    const ready = [];
+    for (const step of pending) {
+      const deps = normalizeDependencyIds(step);
+      if (deps.every((dep) => hasCompletedDependency(dep, completedIds))) {
+        ready.push(step);
+      }
+    }
+
+    const candidates = ready.length > 0 ? ready : [pending[0]];
+    const firstSerialIndex = candidates.findIndex((step) => {
+      const descriptor = resolveCapability(registry, step?.tool);
+      return !descriptor || !isParallelSafeCapability(descriptor);
+    });
+
+    if (firstSerialIndex === 0) {
+      const serialStep = candidates[0];
+      batches.push({ mode: 'serial', items: [serialStep] });
+      pending.splice(pending.indexOf(serialStep), 1);
+      completedIds.add(serialStep.__stepId);
       continue;
     }
-    currentParallelBatch.push(step);
-  }
 
-  if (currentParallelBatch.length > 0) {
+    const resources = new Set();
+    const parallelItems = [];
+    const parallelCandidates = firstSerialIndex > 0 ? candidates.slice(0, firstSerialIndex) : candidates;
+    for (const step of parallelCandidates) {
+      const descriptor = resolveCapability(registry, step?.tool);
+      const resource = resolveCapabilityResource(descriptor, step);
+      if (resources.has(resource)) continue;
+      resources.add(resource);
+      parallelItems.push(step);
+    }
+
+    const items = parallelItems.length > 0 ? parallelItems : [candidates[0]];
     batches.push({
-      mode: currentParallelBatch.length > 1 ? 'parallel' : 'serial',
-      items: currentParallelBatch
+      mode: items.length > 1 ? 'parallel' : 'serial',
+      items
     });
+    for (const item of items) {
+      pending.splice(pending.indexOf(item), 1);
+      completedIds.add(item.__stepId);
+    }
   }
 
-  return batches;
+  return batches.map((batch) => ({
+    ...batch,
+    items: normalizeArray(batch.items).map(({ __batchIndex, __stepId, ...step }) => step)
+  }));
 }
 
 async function runCapabilityPreflight(question = '', context = {}) {
@@ -604,39 +749,95 @@ async function executeBatch(steps = [], state = {}, context = {}) {
   const descriptorRegistry = context.registry || context.capabilityRegistry || buildCapabilityRegistry();
   const batches = context.batches || buildExecutionBatches(steps, descriptorRegistry);
   const results = [];
+  const cache = createCacheStore(context);
+  const maxConcurrency = normalizePositiveInt(
+    context.maxConcurrency ?? config.AGENT_BATCH_MAX_CONCURRENCY,
+    4
+  );
+  const timeoutMs = normalizeNonNegativeInt(
+    context.timeoutMs ?? config.AGENT_BATCH_TOOL_TIMEOUT_MS ?? config.TOOL_TIMEOUT_MS,
+    0
+  );
+
+  const executeItem = async (item) => {
+    const descriptor = resolveCapability(descriptorRegistry, item.tool);
+    const cacheKey = isCacheableCapability(descriptor, item) ? buildToolCacheKey(item, descriptor) : '';
+    const cached = getCachedEnvelope(cache, cacheKey);
+    if (cached) return cached;
+    const startedAt = Date.now();
+    const run = executeStep(item, state, {
+      ...context,
+      registry: descriptorRegistry
+    });
+    const envelope = timeoutMs > 0
+      ? await Promise.race([
+        run,
+        new Promise((resolve) => setTimeout(() => resolve(computeToolEnvelope(
+          item,
+          `Tool error: timeout after ${timeoutMs}ms`,
+          descriptor,
+          normalizeObject(context.helpers, {})
+        )), timeoutMs))
+      ])
+      : await run;
+    const finalEnvelope = {
+      ...envelope,
+      duration_ms: Number.isFinite(Number(envelope?.duration_ms))
+        ? Number(envelope.duration_ms)
+        : Math.max(0, Date.now() - startedAt)
+    };
+    setCachedEnvelope(cache, cacheKey, finalEnvelope);
+    return finalEnvelope;
+  };
+
+  const executeLimited = async (items) => {
+    const output = new Array(items.length);
+    let nextIndex = 0;
+    const workerCount = Math.min(maxConcurrency, items.length);
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        try {
+          output[currentIndex] = await executeItem(items[currentIndex]);
+        } catch (error) {
+          const item = items[currentIndex];
+          const descriptor = resolveCapability(descriptorRegistry, item.tool);
+          output[currentIndex] = computeToolEnvelope(
+            item,
+            `Tool error: ${error?.message || 'unknown error'}`,
+            descriptor,
+            normalizeObject(context.helpers, {})
+          );
+        }
+      }
+    }));
+    return output;
+  };
 
   for (const batch of normalizeArray(batches)) {
     const items = normalizeArray(batch.items).map((step) => ({ ...step }));
     if (items.length === 0) continue;
+    const batchStartedAt = Date.now();
 
     if (batch.mode !== 'parallel' || items.length < 2) {
       for (const item of items) {
-        results.push(await executeStep(item, state, {
-          ...context,
-          registry: descriptorRegistry
-        }));
+        results.push(await executeItem(item));
       }
       continue;
     }
 
-    const settled = await Promise.allSettled(items.map((item) => executeStep(item, state, {
-      ...context,
-      registry: descriptorRegistry
-    })));
-    for (let index = 0; index < items.length; index += 1) {
-      const settledResult = settled[index];
-      if (settledResult?.status === 'fulfilled') {
-        results.push(settledResult.value);
-        continue;
-      }
-      const item = items[index];
-      const descriptor = resolveCapability(descriptorRegistry, item.tool);
-      results.push(computeToolEnvelope(
-        item,
-        `Tool error: ${settledResult?.reason?.message || 'unknown error'}`,
-        descriptor,
-        normalizeObject(context.helpers, {})
-      ));
+    const parallelResults = await executeLimited(items);
+    results.push(...parallelResults);
+    if (config.AGENT_RUNTIME_METRICS_ENABLED) {
+      console.log('[agent-runtime] capability_batch', {
+        mode: batch.mode,
+        itemCount: items.length,
+        maxConcurrency,
+        durationMs: Math.max(0, Date.now() - batchStartedAt),
+        completed: parallelResults.filter((item) => String(item?.status || '') === 'completed').length,
+        failed: parallelResults.filter((item) => String(item?.status || '') !== 'completed').length
+      });
     }
   }
 

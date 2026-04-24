@@ -631,7 +631,8 @@ function enqueueWorkerWait(entry = null, timeoutMs = 0) {
         reject(error);
       }
     };
-    const waitTimeoutMs = Math.max(1000, Math.min(Math.max(1000, Number(timeoutMs) || 120000), 15000));
+    const configuredTimeoutMs = Math.max(0, Number(config.SUBAGENT_PERSISTENT_BUSY_QUEUE_TIMEOUT_MS) || 0);
+    const waitTimeoutMs = Math.max(1000, configuredTimeoutMs || Math.min(Math.max(1000, Number(timeoutMs) || 120000), 15000));
     token.timer = setTimeout(() => {
       entry.waitQueue = Array.isArray(entry.waitQueue) ? entry.waitQueue.filter((item) => item !== token) : [];
       reject(createPersistentWorkerError('persistent subagent worker queue timeout', 'PERSISTENT_SUBAGENT_BUSY_QUEUE_TIMEOUT'));

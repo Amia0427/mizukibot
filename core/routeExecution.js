@@ -11,6 +11,7 @@ const {
   validateExecutablePlanTools
 } = require('./executablePlan');
 const config = require('../config');
+const { filterCompanionAllowedTools } = require('../utils/companionTools');
 
 // routeExecution consumes only canonical contract data plus planner output.
 // It must not infer a new top route type or treat routeProfiles as routing truth.
@@ -164,7 +165,7 @@ function isPrivateSafeTool(toolName = '') {
 }
 
 function filterAllowedToolsForChatType(route = {}, allowedTools = []) {
-  const normalizedTools = normalizeToolNames(allowedTools);
+  const normalizedTools = filterCompanionAllowedTools(normalizeToolNames(allowedTools), config);
   if (normalizeChatType(route) !== 'private') return normalizedTools;
   return normalizedTools.filter((toolName) => isPrivateSafeTool(toolName));
 }

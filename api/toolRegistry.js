@@ -2,6 +2,11 @@
 // Thin compatibility layer after registry split.
 const { TOOL_EXECUTORS: STATIC_TOOL_EXECUTORS } = require('./toolExecutors');
 const { TOOL_SCHEMAS: STATIC_TOOL_SCHEMAS } = require('./toolSchemas');
+const config = require('../config');
+const {
+  filterCompanionToolExecutors,
+  filterCompanionToolSchemas
+} = require('../utils/companionTools');
 const {
   callMcpTool,
   getCachedDynamicMcpToolRegistry,
@@ -53,7 +58,7 @@ function getStaticToolExecutors() {
 
 function getToolSchemas() {
   refreshDynamicCachesFromRegistry();
-  return [...getStaticToolSchemas(), ...dynamicSchemaCache];
+  return filterCompanionToolSchemas([...getStaticToolSchemas(), ...dynamicSchemaCache], config);
 }
 
 
@@ -65,10 +70,10 @@ function getToolSchemaByName(toolName = '') {
 
 function getToolExecutors() {
   refreshDynamicCachesFromRegistry();
-  return {
+  return filterCompanionToolExecutors({
     ...getStaticToolExecutors(),
     ...dynamicExecutorCache
-  };
+  }, config);
 }
 
 function getToolNames() {

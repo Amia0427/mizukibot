@@ -67,6 +67,7 @@ async function runStructuredSubagent({
   }
 
   try {
+    const startedAt = Date.now();
     const response = await postWithRetry(
       ensureChatCompletionsUrl(baseUrl),
       {
@@ -121,14 +122,23 @@ async function runStructuredSubagent({
       ok: true,
       output: parsed,
       rawText,
+      durationMs: Math.max(0, Date.now() - startedAt),
       failureReason: ''
     };
   } catch (error) {
+    const failureReason = isTimeoutError(error) ? 'timeout' : 'fallback';
+    console.error('[structured-subagent] failed', {
+      agentName: String(agentName || 'structured-subagent').trim() || 'structured-subagent',
+      failureReason,
+      timeoutMs: timeoutMs || null,
+      retries,
+      error: String(error?.message || error || '').slice(0, 300)
+    });
     return {
       ok: false,
       output: null,
       rawText: '',
-      failureReason: isTimeoutError(error) ? 'timeout' : 'fallback'
+      failureReason
     };
   }
 }

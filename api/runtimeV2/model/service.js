@@ -3,6 +3,7 @@ const { postWithRetry, postStreamWithRetry } = require('../../httpClient');
 const { extractMessageContent, extractSSEEvents, flushSSEState } = require('../../parser');
 const { getToolSchemas } = require('../../toolRegistry');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
+const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
 const { isToolSchemaValidationError } = require('../../../utils/modelCompat');
 const {
   extractUserFacingDelta,
@@ -22,6 +23,7 @@ const {
   getApiKey,
   getMaxTokens,
   getModelName,
+  getReasoningEffort,
   getRetries,
   getTemperature,
   getTopP,
@@ -37,7 +39,7 @@ const { shouldUsePlanModeForRequest } = require('../planning/service');
 
 function getAllowedToolNames(context = {}) {
   if (!Array.isArray(context.allowedTools)) return [];
-  return normalizeToolNames(context.allowedTools);
+  return filterCompanionAllowedTools(normalizeToolNames(context.allowedTools), config);
 }
 
 const filteredToolSchemaCache = new Map();
@@ -131,6 +133,7 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
       top_p: getTopP(resolvedConfig),
       messages,
       max_tokens: getMaxTokens(3500, resolvedConfig),
+      reasoning_effort: getReasoningEffort(resolvedConfig),
       stream: false
     };
     if (includeTools) {
@@ -223,6 +226,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
             top_p: getTopP(resolvedConfig),
             messages,
             max_tokens: getMaxTokens(3500, resolvedConfig),
+            reasoning_effort: getReasoningEffort(resolvedConfig),
             stream: true
           },
           {
