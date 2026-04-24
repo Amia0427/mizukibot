@@ -5,7 +5,11 @@ const {
 const { normalizeToolNames } = require('../utils/localToolAccess');
 const { getPolicyDefinition: getPolicyDefinitionFromProfiles } = require('./routeProfiles');
 const { getPolicy } = require('../utils/toolPolicy');
-const { summarizeExecutablePlan } = require('./executablePlan');
+const {
+  buildExecutablePlanFromPlannerDecision,
+  summarizeExecutablePlan,
+  validateExecutablePlanTools
+} = require('./executablePlan');
 const config = require('../config');
 
 // routeExecution consumes only canonical contract data plus planner output.
@@ -268,15 +272,18 @@ function resolveDirectChatExecution(route = {}) {
   }
 
   const plannerAllowedTools = normalizeToolNames(
-    Array.isArray(executionPlan?.steps)
-      ? executionPlan.steps.map((step) => step?.action)
-      : plannerDecision?.allowedToolNames || []
+    Array.isArray(plannerDecision?.allowedToolNames) && plannerDecision.allowedToolNames.length > 0
+      ? plannerDecision.allowedToolNames
+      : (Array.isArray(executionPlan?.steps) ? executionPlan.steps.map((step) => step?.action) : [])
   );
   const rawAllowedTools = qqActionTools.length > 0
     ? plannerAllowedTools.filter((toolName) => qqActionTools.includes(toolName))
     : plannerAllowedTools;
   const allowedTools = filterAllowedToolsForChatType(route, rawAllowedTools);
-  const shouldUseTools = String(executionPlan?.mode || '').trim() === 'tool_plan' && allowedTools.length > 0;
+  const executablePlan = plannerDecision?.executablePlan || buildExecutablePlanFromPlannerDecision(plannerDecision || {}, resolvePolicyKey(route), route);
+  const validation = validateExecutablePlanTools(executablePlan, allowedTools);
+  const toolPlanAllowedSteps = validation.allowedPlanSteps.filter((step) => step.action && step.action !== 'reply');
+  const shouldUseTools = String(executionPlan?.mode || '').trim() === 'tool_plan' && toolPlanAllowedSteps.length > 0;
   const needsBackground = Boolean(plannerDecision?.needsBackground);
   const routeDebugKey = buildRouteDebugKey(route);
   const policyKey = resolvePolicyKey(route);
@@ -293,10 +300,13 @@ function resolveDirectChatExecution(route = {}) {
         executor: needsBackground ? 'background_direct' : 'direct',
         policyKey,
         routeDebugKey,
-        allowStream: false,
-        needsBackground,
-        unavailableReason: ''
-      });
+      allowStream: false,
+      needsBackground,
+      executablePlan: validation.executablePlan,
+      allowedPlanSteps: validation.allowedPlanSteps,
+      blockedPlanSteps: validation.blockedPlanSteps,
+      unavailableReason: ''
+    });
     }
     if (toolIntent === 'force_tools') {
       return withRouteTrace(route, {
@@ -306,6 +316,9 @@ function resolveDirectChatExecution(route = {}) {
         routeDebugKey,
         allowStream: false,
         needsBackground,
+        executablePlan: validation.executablePlan,
+        allowedPlanSteps: validation.allowedPlanSteps,
+        blockedPlanSteps: validation.blockedPlanSteps,
         unavailableReason: privateRestrictionReason || 'no-allowed-tools'
       });
     }
@@ -315,7 +328,10 @@ function resolveDirectChatExecution(route = {}) {
       policyKey,
       routeDebugKey,
       allowStream: !needsBackground && !route?.imageUrl,
-      needsBackground
+      needsBackground,
+      executablePlan: validation.executablePlan,
+      allowedPlanSteps: validation.allowedPlanSteps,
+      blockedPlanSteps: validation.blockedPlanSteps
     });
   }
 
@@ -326,6 +342,9 @@ function resolveDirectChatExecution(route = {}) {
     routeDebugKey,
     allowTools: true,
     allowedTools,
+    executablePlan: validation.executablePlan,
+    allowedPlanSteps: validation.allowedPlanSteps,
+    blockedPlanSteps: validation.blockedPlanSteps,
     allowedToolBuckets: normalizeAllowedToolBuckets(route, allowedTools),
     allowStream: false,
     needsBackground,
@@ -396,9 +415,7 @@ function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
 }
 
 function shouldUseToolRoute(route = {}) {
-  const topRouteType = sanitizeTopRouteType(route?.topRouteType || 'direct_chat');
-  if (topRouteType !== 'direct_chat') return false;
-  return String(getToolPlanner(route)?.executionPlan?.mode || '').trim() === 'tool_plan';
+  return resolveRouteExecution(route).allowTools === true;
 }
 
 function shouldUseSubagentToolRoute(route = {}) {

@@ -1,3 +1,5 @@
+const { buildRouteMetaEnvelope } = require('./executablePlan');
+
 function createMessageDispatchCoordinator(deps = {}) {
   const {
     config,
@@ -103,15 +105,11 @@ function createMessageDispatchCoordinator(deps = {}) {
           topRouteType: routeExecutionPlan.topRouteType,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
-          routeMeta: {
-            ...(route.meta || {}),
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             groupId,
             messageId: String(sourceMessageId || '').trim(),
-            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
-            topRouteType: routeExecutionPlan.topRouteType,
-            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-            allowedTools: routeExecutionPlan.allowedTools
-          },
+            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
+          }),
           threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
@@ -234,14 +232,11 @@ function createMessageDispatchCoordinator(deps = {}) {
           disableTools: !routeExecutionPlan.allowTools,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
-          routeMeta: {
-            ...(route.meta || {}),
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             groupId,
             messageId: String(sourceMessageId || '').trim(),
-            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
-            topRouteType: routeExecutionPlan.topRouteType,
-            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan)
-          },
+            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
+          }),
           disableStream: disableStreamForReply,
           threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
         };

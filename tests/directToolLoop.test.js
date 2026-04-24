@@ -121,6 +121,91 @@ module.exports = (async () => {
   assert.ok(followupNonOpen.events.some((event) => event.reason === 'followup_skipped_not_open'));
   assert.ok(!followupNonOpen.events.some((event) => event.reason === 'followup_not_open'));
 
+
+  let duplicateRunCount = 0;
+  const duplicateHelpers = createDirectToolLoopHelpers({
+    createEvent: (type, payload = {}) => ({ type, ...payload }),
+    normalizeMessageForToolLoop: (message) => message,
+    requestAssistantMessageImpl: async () => ({ role: 'assistant', content: 'done', tool_calls: [] }),
+    buildDirectChatToolStep: (toolCall, index) => ({
+      parsedArgs: { query: 'same' },
+      toolName: String(toolCall?.function?.name || '').trim(),
+      step: { id: `dup_${index}`, tool: String(toolCall?.function?.name || '').trim(), inputs: { query: 'same' } }
+    }),
+    buildDirectChatExecutionBatches: (items) => [{ items, mode: 'parallel', batchId: 'dup', batchIndex: 0 }],
+    parseToolCallArgs: () => ({ query: 'same' }),
+    isExcludedDirectChatToolName: () => false,
+    computeEffectiveAllowedTools: () => ['search_tool'],
+    createMemoryCliTurnState: (value) => value || { allowedTools: ['search_tool'] },
+    updateMemoryCliTurnStateAfterError: (state) => state,
+    runToolStep: async (step) => {
+      duplicateRunCount += 1;
+      return { status: 'completed', result: `ran ${step.inputs.query}`, tool_name: step.tool, tool_call_id: step.id };
+    },
+    computeToolEnvelope: (step, result) => ({ tool_call_id: step.id, tool_name: step.tool, result }),
+    getPolicy: () => ({}),
+    logToolExecution: () => {},
+    resolveToolLoopReply: async (message) => ({ text: message.content || 'resolved reply', source: 'assistant' }),
+    config: { DIRECT_TOOL_DUPLICATE_CALL_GUARD_ENABLED: true, DIRECT_TOOL_MAX_CALLS_PER_TURN: 4 }
+  });
+  const duplicateResult = await duplicateHelpers.runDirectChatToolLoop([], {
+    request: {},
+    execution: { memoryCliTurn: { allowedTools: ['search_tool'] } }
+  }, { question: 'dedupe' }, {
+    firstAssistantMessage: {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        { id: 'dup1', function: { name: 'search_tool', arguments: '{"query":"same"}' } },
+        { id: 'dup2', function: { name: 'search_tool', arguments: '{"query":"same"}' } }
+      ]
+    }
+  });
+  assert.strictEqual(duplicateRunCount, 1);
+  assert.ok(duplicateResult.executedToolEnvelopes.some((item) => item.blockedReason === 'duplicate_tool_call'));
+
+  let limitRunCount = 0;
+  const limitHelpers = createDirectToolLoopHelpers({
+    createEvent: (type, payload = {}) => ({ type, ...payload }),
+    normalizeMessageForToolLoop: (message) => message,
+    requestAssistantMessageImpl: async () => ({ role: 'assistant', content: 'limited final', tool_calls: [] }),
+    buildDirectChatToolStep: (toolCall, index) => ({
+      parsedArgs: { query: String(index) },
+      toolName: String(toolCall?.function?.name || '').trim(),
+      step: { id: `limit_${index}`, tool: String(toolCall?.function?.name || '').trim(), inputs: { query: String(index) } }
+    }),
+    buildDirectChatExecutionBatches: (items) => [{ items, mode: 'parallel', batchId: 'limit', batchIndex: 0 }],
+    parseToolCallArgs: () => ({}),
+    isExcludedDirectChatToolName: () => false,
+    computeEffectiveAllowedTools: () => ['search_tool'],
+    createMemoryCliTurnState: (value) => value || { allowedTools: ['search_tool'] },
+    updateMemoryCliTurnStateAfterError: (state) => state,
+    runToolStep: async (step) => {
+      limitRunCount += 1;
+      return { status: 'completed', result: step.id, tool_name: step.tool, tool_call_id: step.id };
+    },
+    computeToolEnvelope: (step, result) => ({ tool_call_id: step.id, tool_name: step.tool, result }),
+    getPolicy: () => ({}),
+    logToolExecution: () => {},
+    resolveToolLoopReply: async (message) => ({ text: message.content || 'resolved reply', source: 'assistant' }),
+    config: { DIRECT_TOOL_MAX_CALLS_PER_TURN: 1 }
+  });
+  const limitResult = await limitHelpers.runDirectChatToolLoop([], {
+    request: {},
+    execution: { memoryCliTurn: { allowedTools: ['search_tool'] } }
+  }, { question: 'limit' }, {
+    firstAssistantMessage: {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        { id: 'limit1', function: { name: 'search_tool', arguments: '{"query":"1"}' } },
+        { id: 'limit2', function: { name: 'search_tool', arguments: '{"query":"2"}' } }
+      ]
+    }
+  });
+  assert.strictEqual(limitRunCount, 1);
+  assert.ok(limitResult.executedToolEnvelopes.some((item) => item.blockedReason === 'tool_call_limit_reached'));
+
   console.log('directToolLoop.test.js passed');
 })().catch((error) => {
   console.error(error);

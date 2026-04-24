@@ -7,6 +7,7 @@ const {
   buildRouteDecisionContext
 } = require('./messageContracts');
 const { buildLlmPerception } = require('./llmPerception');
+const { buildRouteMetaEnvelope } = require('./executablePlan');
 const {
   formatGroupMainModelStreamStatus,
   setGroupMainModelStreamEnabled,
@@ -858,13 +859,7 @@ function createMessageRouteFlow(deps = {}) {
         routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
         topRouteType: routeExecutionPlan.topRouteType,
         allowedTools: routeExecutionPlan.allowedTools,
-        routeMeta: {
-          ...(route.meta || {}),
-          groupId,
-          topRouteType: routeExecutionPlan.topRouteType,
-          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-          allowedTools: routeExecutionPlan.allowedTools
-        }
+        routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, { groupId })
       },
       sendAckOnly: false
     });
@@ -944,16 +939,7 @@ function createMessageRouteFlow(deps = {}) {
           allowedTools: routeExecutionPlan.allowedTools,
           plannerExecutionPlan: route?.meta?.toolPlanner?.executionPlan || route?.meta?.directChatPlanner?.executionPlan || null,
           disableDirectToolLoop: true,
-          routeMeta: {
-            ...(route.meta || {}),
-            groupId,
-            chatType,
-            topRouteType: routeExecutionPlan.topRouteType,
-            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-            allowedTools: routeExecutionPlan.allowedTools,
-            toolPlanner: route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null,
-            directChatPlanner: route?.meta?.directChatPlanner || null
-          }
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, { groupId, chatType })
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
         if (fallbackModelConfig) {
@@ -1080,17 +1066,12 @@ function createMessageRouteFlow(deps = {}) {
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
           disableDirectToolLoop: true,
-          routeMeta: {
-            ...(route.meta || {}),
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             groupId,
             chatType,
             messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
-            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
-            topRouteType: routeExecutionPlan.topRouteType,
-            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-            toolPlanner: route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null,
-            directChatPlanner: route?.meta?.directChatPlanner || null
-          },
+            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
+          }),
           disableStream: disableStreamForReply,
           deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat',
           cotDisplayOnce,

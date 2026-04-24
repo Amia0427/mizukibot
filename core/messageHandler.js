@@ -37,6 +37,7 @@ const {
 } = require('../utils/subagentPrompting');
 const { isAtBot, detectIntentHybrid } = require('./router');
 const routeExecution = require('./routeExecution');
+const { buildRouteMetaEnvelope } = require('./executablePlan');
 const { createMessageEventDeduper } = require('./messageDeduper');
 const { createInboundConcurrencyController } = require('./inboundConcurrency');
 const { createForegroundConcurrencyController } = require('./foregroundConcurrency');
@@ -3183,11 +3184,10 @@ function createMessageHandler({
           chatType,
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           topRouteType: routeExecutionPlan.topRouteType,
-          routeMeta: {
-            ...(route.meta || {}),
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             threadId: String(replyOptions?.threadId || inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
             messageId: String(effectiveMsg.message_id || msg.message_id || '').trim()
-          }
+          })
         })
       });
       if (sent) {
