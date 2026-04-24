@@ -1107,6 +1107,32 @@ function parseStructuredCompressionOutput(output = '') {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
+    const allowedKeys = new Set([
+      'summary',
+      'activeTopic',
+      'openLoops',
+      'assistantCommitments',
+      'userConstraints',
+      'recentToolResults',
+      'carryOverUserTurn',
+      'interaction',
+      'scene',
+      'expression',
+      'moduleState',
+      'phaseHint',
+      'sceneRef',
+      'confidence'
+    ]);
+    const hasKnownKey = Object.keys(parsed).some((key) => allowedKeys.has(key));
+    if (!hasKnownKey) return null;
+    if ('summary' in parsed && typeof parsed.summary !== 'string') return null;
+    for (const key of ['openLoops', 'assistantCommitments', 'userConstraints', 'recentToolResults']) {
+      if (key in parsed && !Array.isArray(parsed[key])) return null;
+    }
+    if ('confidence' in parsed) {
+      const confidence = Number(parsed.confidence);
+      if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return null;
+    }
     return applyPersonaContinuityDelta(defaultShortTermState(), parsed);
   } catch (_) {
     return null;
@@ -1249,7 +1275,7 @@ function buildStructuredCompressionPrompt(existingState, summaryTokens) {
   };
   return [
     '你是对话短期上下文压缩器。',
-    '优先保留：用户约束、助手承诺、未完成事项、最近工具结论、最近主线话题、当前回复姿态、当前场景气氛、当前 persona modules。',
+    '优先保留：用户约束、助手承诺、未完成事项、最近工具结论、最近主线话题、当前回复姿态、当前场景气氛、persona modules。',
     '返回严格 JSON，不要解释，不要 markdown。',
     '字段固定：summary, activeTopic, openLoops, assistantCommitments, userConstraints, recentToolResults, carryOverUserTurn, interaction, scene, expression, moduleState, phaseHint, sceneRef, confidence。',
     'expression.replyPosture 只能是 light, playful, gentle, reserved, focused, comforting 之一。',
@@ -1260,7 +1286,6 @@ function buildStructuredCompressionPrompt(existingState, summaryTokens) {
     `已有结构化状态：${JSON.stringify(compactState)}`
   ].join('\n');
 }
-
 module.exports = {
   defaultShortTermState,
   normalizeShortTermState,
