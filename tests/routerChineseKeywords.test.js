@@ -2,7 +2,7 @@ const assert = require('assert');
 
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
-const { detectIntent } = require('../core/router');
+const { detectIntent, sanitizeAiRoute } = require('../core/router');
 const { parseAdminCommand } = require('../core/router');
 
 const imageSummaryRoute = detectIntent({
@@ -54,5 +54,35 @@ assert.strictEqual(notebookLookupRoute.facets.sourceScope, 'notebook');
 assert.strictEqual(notebookLookupRoute.meta.reason, 'recall-needs-tool-assistance');
 assert.strictEqual(notebookLookupRoute.meta.toolIntent, 'maybe_tools');
 assert.deepStrictEqual(notebookLookupRoute.meta.allowedTools, ['notebook_search', 'notebook_list_docs']);
+
+const textOnlyPlanRoute = detectIntent({
+  rawText: 'plan a study roadmap',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+
+assert.strictEqual(textOnlyPlanRoute.topRouteType, 'direct_chat');
+assert.strictEqual(textOnlyPlanRoute.meta.responseIntent, 'plan');
+assert.strictEqual(textOnlyPlanRoute.meta.toolIntent, 'none');
+assert.strictEqual(textOnlyPlanRoute.facets.outputKind, 'plan');
+assert.strictEqual(textOnlyPlanRoute.facets.sourceScope, 'none');
+
+const fallbackChatRoute = detectIntent({
+  rawText: 'hello there',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+const downgradedHighRiskRoute = sanitizeAiRoute({
+  confidence: 0.6,
+  topRouteType: 'direct_chat',
+  intent: { risk: 'medium', toolNeed: ['local-write'], executionMode: 'delegated', needsPlanning: true, needsMemory: false },
+  facets: { modality: 'text', sourceScope: 'mixed', domain: 'general', outputKind: 'action', freshness: 'unknown' },
+  meta: { toolIntent: 'force_tools', responseIntent: 'action_guidance' }
+}, fallbackChatRoute, { userId: 'u1', imageUrl: null });
+
+assert.strictEqual(downgradedHighRiskRoute.meta.fallbackReason, 'ai-router-low-confidence-high-risk');
+assert.notStrictEqual(downgradedHighRiskRoute.meta.toolIntent, 'force_tools');
 
 console.log('routerChineseKeywords.test.js passed');
