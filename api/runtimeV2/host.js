@@ -1606,6 +1606,7 @@ function createRuntime(options = {}) {
     isDirectChatRequest,
     buildDirectChatExecutionBatches,
     canRunStepsInParallel,
+    buildExecutionBatches,
     buildLiveMainConversationSnapshot,
     computeEffectiveAllowedTools,
     createMemoryCliTurnState,

@@ -1,5 +1,6 @@
 const config = require('../../../config');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
+const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
 const { getLifeSchedulerEngine } = require('../../../core/lifeSchedulerEngine');
 const { buildPromptSnippet } = require('../../../utils/selfImprovementRuntime');
 const { buildStyleProfileSnippet } = require('../../../utils/styleProfileRuntime');
@@ -609,7 +610,10 @@ function mergeAllowedToolsWithMemoryCli(allowedTools, options = {}) {
   const withMemoryCli = (!shouldExposeMemoryCli(options) || withContextStats.includes('memory_cli'))
     ? withContextStats
     : [...withContextStats, 'memory_cli'];
-  return filterAllowedToolsForMemoryCliTurn(withMemoryCli, options?.memoryCliTurn);
+  return filterCompanionAllowedTools(
+    filterAllowedToolsForMemoryCliTurn(withMemoryCli, options?.memoryCliTurn),
+    currentConfig
+  );
 }
 
 function buildV2MemoryCliInstruction(memoryCliTurn = null) {

@@ -888,6 +888,57 @@ function isAnthropicPromptCacheSchemaError(error) {
     : JSON.stringify(responseData || {});
   return /cache[_-]?control|prompt[_-]?cache|prompt-caching-2024-07-31|anthropic-beta|unknown field|unsupported beta|extra inputs|additional properties/i.test(bodyText);
 }
+
+function normalizeReasoningEffort(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) return '';
+  if (['0', 'false', 'no', 'off', 'none', 'disabled', 'disable'].includes(normalized)) return '';
+  if (['minimal', 'low', 'medium', 'high'].includes(normalized)) return normalized;
+  return 'high';
+}
+
+function getAnthropicThinkingBudget(maxTokens, effort) {
+  const normalized = normalizeReasoningEffort(effort);
+  if (!normalized) return 0;
+  const outputTokens = Number(maxTokens);
+  if (!Number.isFinite(outputTokens) || outputTokens < 1200) return 0;
+  const defaults = {
+    minimal: 1024,
+    low: 1024,
+    medium: 2048,
+    high: 4096
+  };
+  return Math.min(
+    defaults[normalized] || defaults.high,
+    Math.max(1024, Math.floor(outputTokens * 0.6)),
+    Math.max(0, Math.floor(outputTokens) - 1)
+  );
+}
+
+function requestUsesReasoning(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return false;
+  return Boolean(requestBody.reasoning_effort || requestBody.reasoning || requestBody.thinking);
+}
+
+function stripReasoningFields(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return requestBody;
+  const nextBody = { ...requestBody };
+  delete nextBody.reasoning_effort;
+  delete nextBody.reasoning;
+  delete nextBody.thinking;
+  return nextBody;
+}
+
+function isReasoningSchemaError(error) {
+  const status = Number(error?.response?.status || 0);
+  if (![400, 404, 415, 422].includes(status)) return false;
+  const responseData = error?.response?.data;
+  const bodyText = typeof responseData === 'string'
+    ? responseData
+    : JSON.stringify(responseData || {});
+  return /reasoning|reasoning[_-]?effort|thinking|budget[_-]?tokens|unsupported.*(?:field|parameter)|unknown field|extra inputs|additional properties/i.test(bodyText);
+}
+
 function mapToolSchemaToAnthropic(tool) {
   if (!tool || typeof tool !== 'object') return null;
   if (tool.type !== 'function') return null;
@@ -1101,6 +1152,14 @@ async function buildAnthropicRequestBody(body = {}) {
     }
   }
 
+  const thinkingBudget = getAnthropicThinkingBudget(requestBody.max_tokens, body.reasoning_effort);
+  if (thinkingBudget > 0) {
+    requestBody.thinking = {
+      type: 'enabled',
+      budget_tokens: thinkingBudget
+    };
+  }
+
   return applyAutoAnthropicPromptCaching(requestBody);
 }
 
@@ -1116,6 +1175,11 @@ async function prepareRequest(url, body = {}) {
     }
     if (requestBody && Array.isArray(requestBody.messages)) {
       requestBody.messages = await preprocessOpenAICompatibleMessages(requestBody.messages);
+    }
+    const reasoningEffort = normalizeReasoningEffort(requestBody?.reasoning_effort);
+    if (requestBody && typeof requestBody === 'object') {
+      if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
+      else delete requestBody.reasoning_effort;
     }
     return {
       provider,
@@ -1357,6 +1421,36 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       });
       return response;
     } catch (e) {
+      if (callId && requestUsesReasoning(prepared?.requestBody) && isReasoningSchemaError(e)) {
+        try {
+          const strippedRequestBody = stripReasoningFields(prepared.requestBody);
+          const response = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+          );
+          finishModelCall(callId, {
+            response,
+            attempts: i + 1,
+            request: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          });
+          return response;
+        } catch (retryWithoutReasoningError) {
+          if (callId) {
+            failModelCall(callId, retryWithoutReasoningError, {
+              attempts: i + 1,
+              request: stripReasoningFields(prepared.requestBody),
+              requestHeaders: prepared.requestHeaders
+            });
+          }
+          lastErr = retryWithoutReasoningError;
+          if (i >= maxRetry || !shouldRetry(retryWithoutReasoningError)) break;
+          const delayMs = getRetryDelayMs(retryWithoutReasoningError, i);
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+      }
       if (
         callId
         && prepared?.provider === 'openai_compatible'
@@ -1493,7 +1587,19 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
         );
         } catch (error) {
-        if (
+        if (requestUsesReasoning(prepared?.requestBody) && isReasoningSchemaError(error)) {
+          const strippedRequestBody = stripReasoningFields(prepared.requestBody);
+          resp = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+          );
+          prepared = {
+            ...prepared,
+            requestBody: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          };
+        } else if (
           prepared?.provider === 'openai_compatible'
           && requestUsesOpenAICompatiblePromptCaching(prepared.requestBody)
           && isOpenAICompatiblePromptCacheSchemaError(error)

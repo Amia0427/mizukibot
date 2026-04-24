@@ -46,6 +46,30 @@ function buildSingleWorkerFallbackPlan(question = '') {
   };
 }
 
+function normalizeNonNegativeInt(value, fallback) {
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 0) return fallback;
+  return num;
+}
+
+function withTimeout(promise, timeoutMs, onTimeout) {
+  if (!timeoutMs || timeoutMs <= 0) return promise;
+  let timer = null;
+  return Promise.race([
+    promise.finally(() => {
+      if (timer) clearTimeout(timer);
+    }),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        try {
+          if (typeof onTimeout === 'function') onTimeout();
+        } catch (_) {}
+        reject(new Error(`full subagent worker timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    })
+  ]);
+}
+
 function normalizeFullSubagentPlan(rawPlan, options = {}) {
   const {
     question = '',
@@ -250,6 +274,8 @@ function createMessageFullSubagentCoordinator(deps = {}) {
     startSubagentBridgeCall,
     buildRuntimePromptOverride = buildRuntimePrompt
   } = deps;
+  const workerTimeoutMs = normalizeNonNegativeInt(config.FULL_SUBAGENT_WORKER_TIMEOUT_MS, 0);
+  const reviewTimeoutMs = normalizeNonNegativeInt(config.FULL_SUBAGENT_REVIEW_TIMEOUT_MS, 0);
 
   function buildSubagentReviewPayload(question, subagentOutput, routePolicyKey = 'tool/review') {
     return buildRuntimePromptOverride('review-payload', {
@@ -448,7 +474,7 @@ function createMessageFullSubagentCoordinator(deps = {}) {
             topRouteType: 'admin'
           });
           workerCancels.push((reason) => bridgeCall.cancel(reason));
-          const output = await bridgeCall.promise;
+          const output = await withTimeout(bridgeCall.promise, workerTimeoutMs, () => bridgeCall.cancel('timeout'));
           const cleanOutput = cleanToolReplyText(output, formattingPreferences);
           console.log('[full-subagent] worker completed', {
             executor: 'full_subagent',
@@ -523,7 +549,7 @@ function createMessageFullSubagentCoordinator(deps = {}) {
         workerCount
       });
       try {
-        const reviewed = await reviewFullMultiWorkerOutput({
+        const reviewed = await withTimeout(reviewFullMultiWorkerOutput({
           question,
           plan,
           workerResults,
@@ -532,7 +558,7 @@ function createMessageFullSubagentCoordinator(deps = {}) {
           imageUrl,
           routePrompt: mutableOptions.routePrompt,
           routePolicyKey
-        });
+        }), reviewTimeoutMs);
         if (!shouldContinue()) return '';
         if (String(reviewed || '').trim()) {
           const cleanReviewed = cleanToolReplyText(reviewed, formattingPreferences);
