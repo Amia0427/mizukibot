@@ -14,6 +14,39 @@ function clampText(value, maxChars = config.SESSION_CONTEXT_SUMMARY_MAX_CHARS) {
   return text.length > limit ? text.slice(0, limit) : text;
 }
 
+function stripMarkdownFence(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw) return '';
+  const fenced = raw.match(/^```(?:json)?\s*([\s\S]*?)```$/i);
+  return fenced ? String(fenced[1] || '').trim() : raw;
+}
+
+function normalizeGeneratedSummaryText(value = '', state = {}, history = []) {
+  const raw = stripMarkdownFence(value);
+  if (!raw) return '';
+
+  const normalized = clampText(raw);
+  if (!normalized) return '';
+  if (!/^[{\[]/.test(raw)) return normalized;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return normalized;
+    }
+
+    const explicitSummary = clampText(parsed.summary || parsed.text || '');
+    if (explicitSummary) return explicitSummary;
+
+    return buildFallbackSummary({
+      ...state,
+      ...parsed
+    }, history);
+  } catch (_) {
+    return normalized;
+  }
+}
+
 function serializeRecentHistory(history = [], limit = 12, itemMaxChars = 160) {
   return (Array.isArray(history) ? history : [])
     .slice(-Math.max(1, Number(limit) || 1))
@@ -145,7 +178,7 @@ async function generateSessionContextSummary({
       String(config.MEMORY_API_KEY || config.API_KEY || '').trim()
     );
     const msg = extractMessageContent(response);
-    const summary = clampText(msg?.content || msg?.text || '');
+    const summary = normalizeGeneratedSummaryText(msg?.content || msg?.text || '', state, history);
     if (summary) {
       return {
         ok: true,

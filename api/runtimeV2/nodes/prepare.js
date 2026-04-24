@@ -26,6 +26,9 @@ function createPrepareNode(deps = {}) {
   const compressShortTermHistoryIfNeeded = typeof deps.compressShortTermHistoryIfNeeded === 'function'
     ? deps.compressShortTermHistoryIfNeeded
     : (async () => {});
+  const summarizeShortTermChunk = typeof deps.summarizeShortTermChunk === 'function'
+    ? deps.summarizeShortTermChunk
+    : null;
   const buildStructuredCompressionPrompt = typeof deps.buildStructuredCompressionPrompt === 'function'
     ? deps.buildStructuredCompressionPrompt
     : (() => '');
@@ -155,6 +158,29 @@ function createPrepareNode(deps = {}) {
           sessionKey: request.sessionKey
         });
       }
+    }
+
+    if (
+      isChatLikeRoute(request)
+      && !request.systemInitiated
+      && !String(request.customPrompt || '').trim()
+      && String(request.userId || '').trim()
+      && typeof summarizeShortTermChunk === 'function'
+    ) {
+      await withSoftTimeout(
+        () => compressShortTermHistoryIfNeeded(request.userId, request.userInfo, {
+          chatHistory,
+          shortTermMemory,
+          routeMeta,
+          sessionKey: request.sessionKey,
+          summarizeChunk: (payload = {}) => summarizeShortTermChunk({
+            ...payload,
+            request
+          })
+        }),
+        latencyDecision.memoryBudgetMs,
+        { compressed: false }
+      );
     }
 
     const restoredState = resumeUsed ? normalizeObject(restored?.state, {}) : {};

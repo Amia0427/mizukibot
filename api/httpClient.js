@@ -335,6 +335,23 @@ function messageContentHasAnthropicCacheControl(message) {
   return content.some((block) => blockHasAnthropicCacheControl(block));
 }
 
+function extractAnthropicMessageCacheControl(message = {}) {
+  const topLevel = extractAnthropicCacheControl(message);
+  if (topLevel) return topLevel;
+
+  const content = message?.content;
+  if (Array.isArray(content)) {
+    if (content.length !== 1) return null;
+    return extractAnthropicCacheControl(content[0]);
+  }
+
+  if (content && typeof content === 'object') {
+    return extractAnthropicCacheControl(content);
+  }
+
+  return null;
+}
+
 function anthropicRequestUsesPromptCaching(requestBody = {}) {
   if ((Array.isArray(requestBody.tools) ? requestBody.tools : []).some((tool) => toolHasAnthropicCacheControl(tool))) {
     return true;
@@ -936,6 +953,7 @@ async function mapMessagesToAnthropic(messages) {
   const items = Array.isArray(messages) ? messages : [];
   for (const item of items) {
     const role = inferMessageRole(item);
+    const messageCacheControl = extractAnthropicMessageCacheControl(item);
 
     if (role === 'system') {
       const rawSystemText = typeof item?.content === 'string'
@@ -948,13 +966,13 @@ async function mapMessagesToAnthropic(messages) {
         const stableBlocks = applyAnthropicCacheControlToLastBlock(
           (await toAnthropicContentBlocks(splitSystem.stableText))
             .filter((block) => block?.type === 'text'),
-          extractAnthropicCacheControl(item) || true
+          messageCacheControl || true
         );
         if (stableBlocks.length > 0) systemBlocks.push(...stableBlocks);
 
         const dynamicBlocks = applyAnthropicCacheControlToLastBlock(
           await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${splitSystem.dynamicText}`),
-          extractAnthropicCacheControl(item)
+          messageCacheControl
         );
         if (dynamicBlocks.length > 0) {
           out.push({
@@ -968,7 +986,7 @@ async function mapMessagesToAnthropic(messages) {
       if (isAnthropicDynamicSystemContextText(rawSystemText)) {
         const contextBlocks = applyAnthropicCacheControlToLastBlock(
           await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${rawSystemText}`),
-          extractAnthropicCacheControl(item)
+          messageCacheControl
         );
         if (contextBlocks.length > 0) {
           out.push({
@@ -982,7 +1000,7 @@ async function mapMessagesToAnthropic(messages) {
       const blocks = applyAnthropicCacheControlToLastBlock(
         (await toAnthropicContentBlocks(item?.content))
           .filter((block) => block?.type === 'text'),
-        extractAnthropicCacheControl(item)
+        messageCacheControl
       );
       if (blocks.length > 0) systemBlocks.push(...blocks);
       continue;
@@ -999,7 +1017,7 @@ async function mapMessagesToAnthropic(messages) {
             type: 'tool_result',
             tool_use_id: toolUseId,
             content: serializeAnthropicToolResultContent(toolResultBlocks)
-          }, extractAnthropicCacheControl(item))
+          }, messageCacheControl)
         ]
       });
       continue;
@@ -1021,7 +1039,7 @@ async function mapMessagesToAnthropic(messages) {
         });
       }
 
-      blocks = applyAnthropicCacheControlToLastBlock(blocks, extractAnthropicCacheControl(item));
+      blocks = applyAnthropicCacheControlToLastBlock(blocks, messageCacheControl);
 
       out.push({
         role: 'assistant',
@@ -1032,7 +1050,7 @@ async function mapMessagesToAnthropic(messages) {
 
     const userBlocks = applyAnthropicCacheControlToLastBlock(
       await toAnthropicContentBlocks(item?.content),
-      extractAnthropicCacheControl(item)
+      messageCacheControl
     );
     out.push({
       role: 'user',
@@ -1331,7 +1349,12 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         prepared.requestBody,
         getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
       );
-      finishModelCall(callId, { response, attempts: i + 1 });
+      finishModelCall(callId, {
+        response,
+        attempts: i + 1,
+        request: prepared.requestBody,
+        requestHeaders: prepared.requestHeaders
+      });
       return response;
     } catch (e) {
       if (
@@ -1347,10 +1370,21 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
           );
-          finishModelCall(callId, { response, attempts: i + 1 });
+          finishModelCall(callId, {
+            response,
+            attempts: i + 1,
+            request: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          });
           return response;
         } catch (retryWithoutCacheError) {
-          if (callId) failModelCall(callId, retryWithoutCacheError, { attempts: i + 1 });
+          if (callId) {
+            failModelCall(callId, retryWithoutCacheError, {
+              attempts: i + 1,
+              request: stripOpenAICompatiblePromptCaching(prepared.requestBody),
+              requestHeaders: prepared.requestHeaders
+            });
+          }
           lastErr = retryWithoutCacheError;
           if (i >= maxRetry || !shouldRetry(retryWithoutCacheError)) break;
           const delayMs = getRetryDelayMs(retryWithoutCacheError, i);
@@ -1380,10 +1414,11 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           return response;
         } catch (retryWithoutCacheError) {
           if (callId) {
+            const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
             failModelCall(callId, retryWithoutCacheError, {
               attempts: i + 1,
-              request: prepared.requestBody,
-              requestHeaders: prepared.requestHeaders
+              request: downgraded.requestBody,
+              requestHeaders: downgraded.requestHeaders
             });
           }
           lastErr = retryWithoutCacheError;
@@ -1393,7 +1428,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           continue;
         }
       }
-      if (callId) failModelCall(callId, e, { attempts: i + 1 });
+      if (callId) {
+        failModelCall(callId, e, {
+          attempts: i + 1,
+          request: prepared?.requestBody,
+          requestHeaders: prepared?.requestHeaders
+        });
+      }
       lastErr = e;
       if (i >= maxRetry || !shouldRetry(e)) break;
 
@@ -1462,6 +1503,11 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             stripOpenAICompatiblePromptCaching(prepared.requestBody),
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
           );
+          prepared = {
+            ...prepared,
+            requestBody: stripOpenAICompatiblePromptCaching(prepared.requestBody),
+            requestHeaders: prepared.requestHeaders
+          };
         } else if (
           prepared?.provider === 'anthropic'
           && anthropicRequestUsesPromptCaching(prepared.requestBody)
@@ -1520,7 +1566,13 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             if (!event?.usage) continue;
             streamUsage = mergeUsageObjects(streamUsage, event.usage);
           }
-          finishModelCall(callId, { response: resp, attempts: i + 1, usage: streamUsage });
+          finishModelCall(callId, {
+            response: resp,
+            attempts: i + 1,
+            usage: streamUsage,
+            request: prepared?.requestBody,
+            requestHeaders: prepared?.requestHeaders
+          });
           resolve();
         };
 

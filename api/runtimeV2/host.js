@@ -154,6 +154,13 @@ const {
   shouldPrioritizeMemoryProbe
 } = require('../../utils/recallHeuristics');
 const { buildContinuityState } = require('../../utils/continuityState');
+const {
+  getSessionSummaryCooldownStatus,
+  saveSessionContextSummary
+} = require('../../utils/sessionContextSummaryStore');
+const {
+  generateSessionContextSummary
+} = require('../../utils/sessionContextSummaryRuntime');
 const { createConversationContextHelpers } = require('./runtime/conversationContext');
 const { createContinuityProbeHelpers } = require('./runtime/continuityProbe');
 const { createDirectToolLoopHelpers } = require('./runtime/directToolLoop');
@@ -178,6 +185,55 @@ function clampLatencyBudget(value, fallback) {
   const num = Number(value);
   if (!Number.isFinite(num) || num < 0) return Math.max(0, Number(fallback) || 0);
   return Math.max(0, Math.floor(num));
+}
+
+function resolveMemoryCompletionsUrl() {
+  const memoryUrl = String(config.MEMORY_API_BASE_URL || config.API_BASE_URL || '').replace(/\/+$/, '');
+  if (/\/chat\/completions$/i.test(memoryUrl)) return memoryUrl;
+  if (/\/v\d+$/i.test(memoryUrl)) return `${memoryUrl}/chat/completions`;
+  return memoryUrl;
+}
+
+function resolveMemoryModelName() {
+  return String(config.MEMORY_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
+}
+
+function resolveMemoryApiKey() {
+  return String(config.MEMORY_API_KEY || config.API_KEY || '').trim();
+}
+
+async function summarizeShortTermChunk(payload = {}) {
+  const summaryTokens = Math.max(96, Math.min(400, Number(payload.summaryTokens || 0) || 400));
+  const response = await postWithRetry(
+    resolveMemoryCompletionsUrl(),
+    {
+      model: resolveMemoryModelName(),
+      temperature: 0.2,
+      top_p: 0.9,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            buildStructuredCompressionPrompt(
+              payload.existingState || { summary: payload.existingSummary },
+              summaryTokens
+            ),
+            '如果无法稳定输出 JSON，退回输出纯文本短期摘要。'
+          ].join('\n')
+        },
+        {
+          role: 'user',
+          content: String(payload.chunkText || '').trim()
+        }
+      ],
+      max_tokens: summaryTokens,
+      stream: false
+    },
+    Math.max(0, Number(config.AI_RETRIES) || 0),
+    resolveMemoryApiKey()
+  );
+  const message = extractMessageContent(response);
+  return String(message?.content || message?.text || '').trim();
 }
 
 function buildLatencyDecision(request = {}, options = {}) {
@@ -1412,6 +1468,11 @@ function createRuntime(options = {}) {
         && !isReplyFailure(finalReply, { emptyIsFailure: true })
       );
     },
+    compressShortTermHistoryIfNeeded,
+    summarizeShortTermChunk,
+    getSessionSummaryCooldownStatus,
+    saveSessionContextSummary,
+    generateSessionContextSummary,
     appendShortTermHistory,
     persistShortTermBridgeSnapshot,
     recordPersonaMemoryOutcome,
@@ -1442,6 +1503,7 @@ function createRuntime(options = {}) {
     restoreShortTermBridgeAfterRestartIfNeeded,
     rehydrateShortTermMemoryAfterRestartIfNeeded,
     compressShortTermHistoryIfNeeded,
+    summarizeShortTermChunk,
     buildStructuredCompressionPrompt,
     postWithRetry,
     extractMessageContent,
