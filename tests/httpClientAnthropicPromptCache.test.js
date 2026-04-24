@@ -9,14 +9,16 @@ function clearProjectCache() {
 }
 
 module.exports = (async () => {
-  const axios = require('axios');
-  const originalPost = axios.post;
   const snapshot = { ...process.env };
+  let axios = null;
+  let originalPost = null;
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.ANTHROPIC_BETA = 'tools-2024-04-04';
     clearProjectCache();
+    axios = require('axios');
+    originalPost = axios.post;
 
     const httpClient = require('../api/httpClient');
     const {

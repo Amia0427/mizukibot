@@ -1071,7 +1071,14 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     slot: item.slot
   })));
   const selectedPromptBlocks = filterBlocksByPlan(promptBlocks, effectiveBaseDynamicPromptPlan, {
-    requiredIds: ['persona_memory']
+    requiredIds: [
+      'persona_memory',
+      'retrieved_memory_lite',
+      'long_term_profile',
+      'impression',
+      'relationship_state',
+      'summary'
+    ]
   });
   const dedupedPromptBlocks = selectedPromptBlocks.filter((block) => {
     const blockId = normalizeText(block?.id);
@@ -1165,7 +1172,15 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       ]
     );
     const compactSelectedBlocks = filterBlocksByPlan(compactPromptBlocks, effectiveBaseDynamicPromptPlan, {
-      requiredIds: ['persona_memory_compact_1', 'persona_memory_compact_2', 'persona_memory_compact_3']
+      requiredIds: [
+        'persona_memory_compact_1',
+        'persona_memory_compact_2',
+        'persona_memory_compact_3',
+        'retrieved_memory_compact',
+        'long_term_profile_compact',
+        'impression_compact',
+        'summary_compact'
+      ]
     });
     promptSnapshot = buildPromptSnapshot(compactSelectedBlocks.filter(Boolean), {
       stage: 'main',
@@ -1607,7 +1622,15 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     ...(memoryCliBlock ? [memoryCliBlock] : [])
   ];
   const requiredIds = normalizeArray(stableLayer.promptSnapshot?.stableBlockIds)
-    .concat(normalizeArray(sessionCandidateLayer.promptSnapshot?.dynamicBlockIds).filter((id) => normalizeText(id).startsWith('persona_memory')));
+    .concat(normalizeArray(sessionCandidateLayer.promptSnapshot?.dynamicBlockIds).filter((id) => {
+      const normalizedId = normalizeText(id);
+      return normalizedId.startsWith('persona_memory')
+        || normalizedId === 'retrieved_memory_lite'
+        || normalizedId === 'long_term_profile'
+        || normalizedId === 'impression'
+        || normalizedId === 'summary'
+        || normalizedId.startsWith('relationship_');
+    }));
   const selectedBlocks = filterBlocksByPlan(combinedBlocks, finalDynamicPromptPlan, {
     requiredIds
   });

@@ -3051,7 +3051,7 @@ function createMessageHandler({
     }
 
     const cleanText = route.cleanText;
-    const imageUrl = visualContext?.worker?.succeeded ? null : (route.imageUrl || effectiveVisualInput);
+    const imageUrl = visualContext?.worker?.succeeded ? null : (effectiveVisualInput || route.imageUrl);
     route.imageUrl = imageUrl;
     const inboundTimestamp = Date.now();
     const correctionStartedAt = Date.now();

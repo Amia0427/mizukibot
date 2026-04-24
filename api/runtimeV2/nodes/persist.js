@@ -23,6 +23,21 @@ function createPersistNode(deps = {}) {
   const shouldLearnSelfImprovement = typeof deps.shouldLearnSelfImprovement === 'function'
     ? deps.shouldLearnSelfImprovement
     : (() => false);
+  const compressShortTermHistoryIfNeeded = typeof deps.compressShortTermHistoryIfNeeded === 'function'
+    ? deps.compressShortTermHistoryIfNeeded
+    : (async () => ({ compressed: false }));
+  const summarizeShortTermChunk = typeof deps.summarizeShortTermChunk === 'function'
+    ? deps.summarizeShortTermChunk
+    : null;
+  const getSessionSummaryCooldownStatus = typeof deps.getSessionSummaryCooldownStatus === 'function'
+    ? deps.getSessionSummaryCooldownStatus
+    : (() => ({ limited: false, remainingMs: 0 }));
+  const saveSessionContextSummary = typeof deps.saveSessionContextSummary === 'function'
+    ? deps.saveSessionContextSummary
+    : (() => ({ saved: false }));
+  const generateSessionContextSummary = typeof deps.generateSessionContextSummary === 'function'
+    ? deps.generateSessionContextSummary
+    : (async () => ({ ok: false, summary: '', structured: null }));
   const appendShortTermHistory = typeof deps.appendShortTermHistory === 'function'
     ? deps.appendShortTermHistory
     : () => {};
@@ -208,6 +223,19 @@ function createPersistNode(deps = {}) {
         sessionKey: request.sessionKey
       });
 
+      if (typeof summarizeShortTermChunk === 'function') {
+        await compressShortTermHistoryIfNeeded(request.userId, request.userInfo, {
+          chatHistory,
+          shortTermMemory,
+          routeMeta: request.routeMeta,
+          sessionKey: request.sessionKey,
+          summarizeChunk: (payload = {}) => summarizeShortTermChunk({
+            ...payload,
+            request
+          })
+        });
+      }
+
       if (shouldPersistBridge) {
         if (config.MEMORY_V3_ENABLED) {
           const stateSlice = shortTermMemory?.[request.sessionKey] || {};
@@ -248,6 +276,34 @@ function createPersistNode(deps = {}) {
           scope: state.thread?.sessionScope,
           snapshotType: 'post_reply'
         });
+      }
+
+      if (shouldPersistBridge) {
+        const summaryCooldown = getSessionSummaryCooldownStatus(request.sessionKey, now);
+        if (!summaryCooldown.limited) {
+          try {
+            const summaryResult = await generateSessionContextSummary({
+              userId: request.userId,
+              sessionKey: request.sessionKey,
+              routeMeta: request.routeMeta,
+              chatHistory,
+              shortTermMemory
+            });
+            const summaryText = String(summaryResult?.summary || '').trim();
+            if (summaryText) {
+              saveSessionContextSummary({
+                sessionKey: request.sessionKey,
+                userId: request.userId,
+                groupId: routeGroupId,
+                trigger: 'auto_post_reply',
+                summary: summaryText,
+                structured: summaryResult?.structured || null
+              }, {
+                now
+              });
+            }
+          } catch (_) {}
+        }
       }
 
       await recordPersonaMemoryOutcome('direct_chat', {
