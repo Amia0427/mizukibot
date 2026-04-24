@@ -1,6 +1,7 @@
-锘縞onst assert = require('assert');
+const assert = require('assert');
 
 process.env.PLANNER_SINGLE_AUTHORITY_ENABLED = 'true';
+process.env.BOT_TOOL_MODE = 'full';
 
 const { buildRouteMetaEnvelope } = require('../core/executablePlan');
 const { detectIntent } = require('../core/router');
@@ -65,7 +66,7 @@ const refuseEnvelope = buildRouteMetaEnvelope(refuseRoute, resolveRouteExecution
 assertEnvelopeBasics(refuseEnvelope, { topRouteType: 'refuse' });
 assert.strictEqual(refuseEnvelope.routePolicyKey, 'refuse/default');
 
-const notebookRoute = detectIntent({ rawText: '瀹濇垜鏄ㄥぉ缁欎綘鍙戜簡浠�涔堝浘', botQQ: '123456', userId: 'u1', chatType: 'group' });
+const notebookRoute = detectIntent({ rawText: '宝我昨天给你发了什么图', botQQ: '123456', userId: 'u1', chatType: 'group' });
 notebookRoute.meta.toolPlanner = {
   allowedToolNames: ['notebook_search'],
   executablePlan: {
@@ -80,7 +81,8 @@ notebookRoute.meta.toolPlanner = {
 const notebookExec = resolveRouteExecution(notebookRoute);
 const notebookEnvelope = buildRouteMetaEnvelope(notebookRoute, notebookExec, notebookRoute.meta.toolPlanner, {});
 assertEnvelopeBasics(notebookEnvelope);
-assert.strictEqual(notebookEnvelope.routePolicyKey, 'lookup/notebook-answer');
+assert.strictEqual(notebookEnvelope.routePolicyKey, 'chat/default');
+assert.strictEqual(notebookEnvelope.executablePlan.policyKey, 'lookup/notebook-answer');
 
 console.log('routeMetaEnvelope.test.js passed');
 

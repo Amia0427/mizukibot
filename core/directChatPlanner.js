@@ -1,10 +1,26 @@
 const planning = require('../api/runtimeV2/planning/service');
+const { enqueueResearchTask } = require('./researchTaskQueue');
+const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { resolvePolicyKey } = require('./routeExecution');
 const {
   attachExecutablePlanToPlannerDecision,
   buildExecutablePlanFromPlannerDecision,
   buildExecutablePlanFromPolicy
 } = require('./executablePlan');
+
+
+function maybeEnqueueBackgroundResearch(route = {}, decision = {}, options = {}) {
+  const meta = decision?.plannerMeta && typeof decision.plannerMeta === 'object' ? decision.plannerMeta : {};
+  if (meta.backgroundResearchRequested !== true) return { enqueued: false, reason: 'not-requested' };
+  const userId = String(options?.userId || route?.meta?.userId || '').trim();
+  const sessionKey = String(options?.sessionKey || route?.meta?.sessionKey || route?.meta?.session_key || resolveShortTermSessionKey(userId, route?.meta || {}) || '').trim();
+  return enqueueResearchTask({
+    query: meta.backgroundResearchQuery || route?.cleanText || route?.question || '',
+    sessionKey,
+    userId,
+    routeMeta: route?.meta || {}
+  });
+}
 
 async function planDirectChat(route = {}, options = {}) {
   const available = planning.collectAvailableToolSummary(route, options);
@@ -37,9 +53,14 @@ async function planDirectChat(route = {}, options = {}) {
   const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, {
     toolCatalog: available.toolCatalog
   });
+  const backgroundResearch = maybeEnqueueBackgroundResearch(route, decision, options);
+  const decisionWithResearch = {
+    ...directChatDecision,
+    backgroundResearch
+  };
   return attachExecutablePlanToPlannerDecision(
-    directChatDecision,
-    buildExecutablePlanFromPlannerDecision(directChatDecision, policyKey, route)
+    decisionWithResearch,
+    buildExecutablePlanFromPlannerDecision(decisionWithResearch, policyKey, route)
   );
 }
 
@@ -109,6 +130,7 @@ module.exports = {
       buildExecutablePlanFromPlannerDecision(directChatDecision, resolvePolicyKey(route), route)
     );
   },
+  maybeEnqueueBackgroundResearch,
   planDirectChat,
   prefersMemoryRecall: planning.prefersMemoryRecall,
   requiresToolEvidence: planning.requiresToolEvidence,
