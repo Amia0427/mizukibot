@@ -56,6 +56,13 @@ function getToolSchemas() {
   return [...getStaticToolSchemas(), ...dynamicSchemaCache];
 }
 
+
+function getToolSchemaByName(toolName = '') {
+  const name = String(toolName || '').trim();
+  if (!name) return null;
+  return getToolSchemas().find((schema) => String(schema?.function?.name || '').trim() === name) || null;
+}
+
 function getToolExecutors() {
   refreshDynamicCachesFromRegistry();
   return {
@@ -102,6 +109,7 @@ module.exports = {
   getStaticToolSchemas,
   getToolExecutors,
   getToolNames,
+  getToolSchemaByName,
   getToolSchemas,
   refreshDynamicToolRegistry,
   warmMcpRegistry

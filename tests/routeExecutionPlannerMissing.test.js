@@ -87,4 +87,30 @@ assert.strictEqual(forceToolsPlan.allowTools, false);
 assert.strictEqual(forceToolsPlan.unavailableReason, 'no-allowed-tools');
 assert.strictEqual(forceToolsPlan.allowStream, false);
 
+const blockedToolRoute = buildDirectChatRoute({
+  toolIntent: 'force_tools',
+  toolPlanner: {
+    shouldUseTools: true,
+    needsBackground: false,
+    allowedToolNames: ['web_search'],
+    executablePlan: {
+      goal: 'blocked tool test',
+      policyKey: 'lookup/web-answer',
+      source: 'planner',
+      needsTools: true,
+      steps: [{ id: 'blocked', action: 'not_allowed_tool', purpose: 'bad' }]
+    },
+    executionPlan: {
+      mode: 'tool_plan',
+      steps: [{ id: 'blocked', action: 'not_allowed_tool', args: {}, purpose: 'bad' }]
+    }
+  }
+});
+
+const blockedToolPlan = resolveRouteExecution(blockedToolRoute);
+assert.strictEqual(blockedToolPlan.allowTools, false);
+assert.strictEqual(blockedToolPlan.unavailableReason, 'no-allowed-tools');
+assert.strictEqual(blockedToolPlan.blockedPlanSteps.length, 1);
+assert.strictEqual(blockedToolPlan.blockedPlanSteps[0].blockedReason, 'tool-not-allowed');
+
 console.log('routeExecutionPlannerMissing.test.js passed');

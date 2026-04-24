@@ -1,9 +1,11 @@
 ﻿const assert = require('assert');
 
 const {
+  buildExecutablePlanFromPlannerDecision,
   buildExecutablePlanFromLegacyPlan,
   buildExecutablePlanFromPolicy,
-  createExecutablePlan
+  createExecutablePlan,
+  validateExecutablePlanTools
 } = require('../core/executablePlan');
 const { sanitizePlan } = require('../api/legacy/aiHost');
 
@@ -31,6 +33,29 @@ const normalized = createExecutablePlan({
 });
 assert.strictEqual(normalized.steps[0].id, 'draft');
 assert.strictEqual(normalized.steps[0].action, 'reply');
+
+const plannerDecisionPlan = buildExecutablePlanFromPlannerDecision({
+  decisionSource: 'planner',
+  shouldUseTools: true,
+  executionPlan: {
+    mode: 'tool_plan',
+    steps: [{ id: 'search', action: 'web_search', args: { q: 'x' }, purpose: 'search web' }]
+  }
+}, 'lookup/web-answer', { cleanText: 'x' });
+assert.strictEqual(plannerDecisionPlan.source, 'planner');
+assert.strictEqual(plannerDecisionPlan.steps[0].action, 'web_search');
+
+const validation = validateExecutablePlanTools(createExecutablePlan({
+  policyKey: 'lookup/web-answer',
+  steps: [
+    { id: 'allowed', action: 'web_search', purpose: 'ok' },
+    { id: 'blocked', action: 'not_allowed_tool', purpose: 'bad' }
+  ]
+}), ['web_search']);
+assert.deepStrictEqual(validation.allowedToolNames, ['web_search']);
+assert.strictEqual(validation.allowedPlanSteps.length, 1);
+assert.strictEqual(validation.blockedPlanSteps.length, 1);
+assert.strictEqual(validation.blockedPlanSteps[0].blockedReason, 'tool-not-allowed');
 
 const sanitized = sanitizePlan({
   goal: 'safe',

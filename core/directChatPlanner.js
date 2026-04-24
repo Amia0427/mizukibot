@@ -2,6 +2,7 @@ const planning = require('../api/runtimeV2/planning/service');
 const { resolvePolicyKey } = require('./routeExecution');
 const {
   attachExecutablePlanToPlannerDecision,
+  buildExecutablePlanFromPlannerDecision,
   buildExecutablePlanFromPolicy
 } = require('./executablePlan');
 
@@ -38,7 +39,7 @@ async function planDirectChat(route = {}, options = {}) {
   });
   return attachExecutablePlanToPlannerDecision(
     directChatDecision,
-    buildExecutablePlanFromPolicy(policyKey, { goal: route?.question || route?.cleanText || '' })
+    buildExecutablePlanFromPlannerDecision(directChatDecision, policyKey, route)
   );
 }
 
@@ -57,6 +58,7 @@ module.exports = {
     );
   },
   buildExecutablePlanFromPolicy,
+  buildExecutablePlanFromPlannerDecision,
   collectAvailableToolSummary: planning.collectAvailableToolSummary,
   deriveToolArgs: planning.deriveToolArgs,
   deriveMemoryOpenArgs: planning.deriveMemoryOpenArgs,
@@ -87,7 +89,11 @@ module.exports = {
       toolCatalog,
       fallbackUsed: Boolean(options?.plannerFallbackUsed)
     });
-    return planning.convertPlannerDecisionToDirectChatDecision(decision, route, { toolCatalog });
+    const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, { toolCatalog });
+    return attachExecutablePlanToPlannerDecision(
+      directChatDecision,
+      buildExecutablePlanFromPlannerDecision(directChatDecision, resolvePolicyKey(route), route)
+    );
   },
   getPlannerDecisionVersion: planning.getPlannerDecisionVersion,
   normalizePlannerOutput(output = {}, route = {}, options = {}) {
@@ -97,7 +103,11 @@ module.exports = {
       toolCatalog,
       fallbackUsed: false
     });
-    return planning.convertPlannerDecisionToDirectChatDecision(decision, route, { toolCatalog });
+    const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, { toolCatalog });
+    return attachExecutablePlanToPlannerDecision(
+      directChatDecision,
+      buildExecutablePlanFromPlannerDecision(directChatDecision, resolvePolicyKey(route), route)
+    );
   },
   planDirectChat,
   prefersMemoryRecall: planning.prefersMemoryRecall,

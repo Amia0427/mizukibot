@@ -1,3 +1,5 @@
+const { buildToolCallFingerprint } = require('./toolExecution');
+
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
 }
@@ -59,6 +61,14 @@ function createDirectToolLoopHelpers(deps = {}) {
       })
     ];
     const executedToolEnvelopes = [];
+    const duplicateToolResults = new Map();
+    let executedToolCallCount = 0;
+    const maxToolCallsPerTurn = Math.max(1, Math.floor(Number(runtimeOptions.maxToolCallsPerTurn
+      || request.directToolMaxCallsPerTurn
+      || deps.config?.DIRECT_TOOL_MAX_CALLS_PER_TURN
+      || 4)));
+    const duplicateGuardEnabled = runtimeOptions.duplicateToolGuardEnabled !== false
+      && deps.config?.DIRECT_TOOL_DUPLICATE_CALL_GUARD_ENABLED !== false;
 
     function throwWithDirectToolLoopState(error) {
       const nextError = error instanceof Error ? error : new Error(String(error || ''));
@@ -186,7 +196,8 @@ function createDirectToolLoopHelpers(deps = {}) {
     const createBlockedDirectToolEnvelope = (item, failureType = 'tool_error') => {
       const toolName = String(item?.toolName || '').trim();
       const policy = getPolicy(toolName);
-      const blockedResult = `Tool not allowed: ${toolName || 'unknown'}`;
+      const allowedList = normalizeArray(effectiveAllowedTools).join(', ') || 'none';
+      const blockedResult = `Tool not allowed: ${toolName || 'unknown'}. Allowed tools this turn: ${allowedList}. Do not call blocked tools again; answer directly or retry with an allowed tool only if necessary.`;
       const baseEnvelope = computeToolEnvelope(item?.step || {}, blockedResult, policy);
       if (toolName === 'memory_cli') {
         nextMemoryCliTurn = createMemoryCliTurnState(
@@ -204,7 +215,30 @@ function createDirectToolLoopHelpers(deps = {}) {
       };
     };
 
+    const createToolLimitEnvelope = (item) => ({
+      ...computeToolEnvelope(item?.step || {}, `Tool call limit reached: max ${maxToolCallsPerTurn} tool calls per turn. Answer with the evidence already available instead of calling more tools.`, getPolicy(item?.toolName)),
+      status: 'blocked',
+      retryable: false,
+      blockedReason: 'tool_call_limit_reached'
+    });
+
+    const createDuplicateToolEnvelope = (item, previousEnvelope = {}) => ({
+      ...computeToolEnvelope(item?.step || {}, `Duplicate tool call skipped for ${item?.toolName || 'unknown'}; reused previous result.\n${String(previousEnvelope.result || '')}`, getPolicy(item?.toolName)),
+      status: String(previousEnvelope.status || '').trim() || 'completed',
+      retryable: false,
+      duplicateOfToolCallId: previousEnvelope.tool_call_id || '',
+      blockedReason: 'duplicate_tool_call'
+    });
+
     const runOneDirectTool = async (item) => {
+      const fingerprint = buildToolCallFingerprint(item.toolName, item.step?.inputs || item.parsedArgs || {});
+      if (duplicateGuardEnabled && duplicateToolResults.has(fingerprint)) {
+        return recordDirectToolEnvelope(createDuplicateToolEnvelope(item, duplicateToolResults.get(fingerprint)), item.toolCall);
+      }
+      if (executedToolCallCount >= maxToolCallsPerTurn) {
+        return recordDirectToolEnvelope(createToolLimitEnvelope(item), item.toolCall);
+      }
+      executedToolCallCount += 1;
       const envelope = await runToolStep(item.step, {
         ...state,
         request: {
@@ -216,7 +250,11 @@ function createDirectToolLoopHelpers(deps = {}) {
           memoryCliTurn: nextMemoryCliTurn
         }
       }, runtimeOptions);
-      return recordDirectToolEnvelope(envelope, item.toolCall);
+      const recorded = recordDirectToolEnvelope(envelope, item.toolCall);
+      if (duplicateGuardEnabled && fingerprint) {
+        duplicateToolResults.set(fingerprint, recorded);
+      }
+      return recorded;
     };
 
     const executeDirectToolBatch = async (items = []) => {
@@ -234,27 +272,26 @@ function createDirectToolLoopHelpers(deps = {}) {
         const envelope = await runOneDirectTool(allowedItems[0]);
         return ordered.map((item) => (item === allowedItems[0] ? envelope : item));
       }
-      const settled = await Promise.allSettled(allowedItems.map((item) => runToolStep(item.step, {
-        ...state,
-        request: {
-          ...request,
-          allowedTools: effectiveAllowedTools
-        },
-        execution: {
-          ...state.execution,
-          memoryCliTurn: nextMemoryCliTurn
+      const settled = [];
+      for (const item of allowedItems) {
+        try {
+          settled.push({ status: 'fulfilled', value: await runOneDirectTool(item) });
+        } catch (error) {
+          settled.push({ status: 'rejected', reason: error });
         }
-      }, runtimeOptions)));
+      }
       let allowedIndex = 0;
       return ordered.map((item) => {
         if (item && item.tool_call_id) return item;
         const settledItem = settled[allowedIndex];
         const sourceItem = allowedItems[allowedIndex];
         allowedIndex += 1;
-        const envelope = settledItem?.status === 'fulfilled'
+        return settledItem?.status === 'fulfilled'
           ? settledItem.value
-          : computeToolEnvelope(sourceItem.step, `Tool error: ${settledItem?.reason?.message || 'unknown error'}`, getPolicy(sourceItem.toolName));
-        return recordDirectToolEnvelope(envelope, sourceItem.toolCall);
+          : recordDirectToolEnvelope(
+            computeToolEnvelope(sourceItem.step, `Tool error: ${settledItem?.reason?.message || 'unknown error'}`, getPolicy(sourceItem.toolName)),
+            sourceItem.toolCall
+          );
       });
     };
 

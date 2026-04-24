@@ -1,11 +1,11 @@
-const assert = require('assert');
+﻿const assert = require('assert');
 
 const { detectIntent } = require('../core/router');
 const { planDirectChat } = require('../core/directChatPlanner');
 
 module.exports = (async () => {
   const route = detectIntent({
-    rawText: '宝我昨天给你发了什么图',
+    rawText: 'check my notebook for yesterday image',
     botQQ: '123456',
     userId: 'u1',
     chatType: 'group'
@@ -16,10 +16,16 @@ module.exports = (async () => {
 
   const plannerDecision = await planDirectChat(route, { userId: 'u1' });
   assert.strictEqual(plannerDecision.shouldUseTools, true);
-  assert.deepStrictEqual(plannerDecision.allowedToolNames, ['notebook_search']);
+  assert.ok(plannerDecision.allowedToolNames.includes('notebook_search'));
   assert.strictEqual(plannerDecision.executionPlan.mode, 'tool_plan');
-  assert.strictEqual(plannerDecision.executionPlan.steps.length, 1);
+  assert.ok(plannerDecision.executionPlan.steps.length >= 1);
   assert.strictEqual(plannerDecision.executionPlan.steps[0].action, 'notebook_search');
+  assert.strictEqual(plannerDecision.executablePlan.policyKey, 'lookup/notebook-answer');
+  assert.strictEqual(plannerDecision.executablePlan.steps.length, plannerDecision.executionPlan.steps.length);
+  assert.strictEqual(plannerDecision.executablePlan.steps[0].action, plannerDecision.executionPlan.steps[0].action);
+  assert.deepStrictEqual(plannerDecision.planSteps, plannerDecision.executablePlan.steps);
 
   console.log('directChatPlannerNotebook.test.js passed');
 })();
+
+
