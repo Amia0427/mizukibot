@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const axios = require('axios');
 const config = require('../config');
 const { todayStrInTz } = require('../utils/time');
+const { extractSSEEvents, flushSSEState } = require('./parser');
 const { sendGroupImageMessage } = require('./qqActionService');
 
 const CREATE_AGENT_DIR = path.join(config.DATA_DIR, 'create-agent');
@@ -12,6 +13,8 @@ const CREATE_AGENT_RUNTIME_FILE = path.join(CREATE_AGENT_DIR, 'runtime.json');
 const CREATE_AGENT_ERROR_LOG_FILE = path.join(CREATE_AGENT_DIR, 'errors.log');
 const DEFAULT_IMAGE_EXTENSION = '.png';
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+const CREATE_AGENT_STREAM_PARTIAL_IMAGES = 1;
+const CREATE_AGENT_ADMIN_USER_IDS = new Set((config.ADMIN_USER_IDS || []).map((item) => String(item || '').trim()).filter(Boolean));
 
 function ensureDirSync(dirPath = '') {
   const fullPath = path.resolve(String(dirPath || '').trim());
@@ -53,19 +56,89 @@ function normalizePromptText(prompt = '') {
     .trim();
 }
 
-function buildCreateAgentPrompt(rawPrompt = '') {
+function normalizeIdList(list = []) {
+  return Array.from(new Set(
+    (Array.isArray(list) ? list : [list])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  ));
+}
+
+function buildCreateAgentAllowedUserIds(overrides = {}) {
+  const configAllowUserIds = normalizeIdList(overrides.allowUserIds ?? config.CREATE_AGENT_ALLOW_USER_IDS ?? []);
+  return new Set([
+    ...CREATE_AGENT_ADMIN_USER_IDS,
+    ...configAllowUserIds
+  ]);
+}
+
+function isCreateAgentUserAllowed(userId = '', overrides = {}) {
+  const normalizedUserId = String(userId || '').trim();
+  if (!normalizedUserId) return false;
+  return buildCreateAgentAllowedUserIds(overrides).has(normalizedUserId);
+}
+
+function normalizeRequestedImageSize(value = '') {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw || raw === 'auto') return 'auto';
+
+  const sizeMatch = raw.match(/^(\d{2,5})x(\d{2,5})$/i);
+  if (!sizeMatch) return '1024x1024';
+
+  const width = Number(sizeMatch[1] || 0);
+  const height = Number(sizeMatch[2] || 0);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return '1024x1024';
+  }
+  return `${width}x${height}`;
+}
+
+function buildResolutionQualityClause(imageSize = '') {
+  const normalizedSize = normalizeRequestedImageSize(imageSize);
+  const sizeMatch = normalizedSize.match(/^(\d{2,5})x(\d{2,5})$/i);
+  if (!sizeMatch) {
+    return 'Target native high-resolution clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
+  }
+
+  const width = Number(sizeMatch[1] || 0);
+  const height = Number(sizeMatch[2] || 0);
+  const longestEdge = Math.max(width, height);
+  if (longestEdge >= 3840) {
+    return 'Target true 4K-class clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
+  }
+  if (longestEdge >= 2048) {
+    return 'Target true 2K-class clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
+  }
+  if (longestEdge >= 1536) {
+    return 'Target high-resolution clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
+  }
+  return 'Target clean high-resolution clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
+}
+
+function buildCreateAgentPrompt(rawPrompt = '', options = {}) {
   const prompt = normalizePromptText(rawPrompt);
   if (!prompt) return '';
 
+  const effectiveSize = normalizeRequestedImageSize(options.imageSize || '');
   const hasSizeHint = /(1024|1536|2048|4096|1k|2k|4k|1080p|high[- ]?res|high resolution|ultra)/i.test(prompt);
   const hasPhotoHint = /(照片|摄影|真实|写实|photoreal|photo[- ]?real|iphone photo|realistic)/i.test(prompt);
   const hasNoTextHint = /(不要文字|无文字|no text|without text|不要水印|no watermark)/i.test(prompt);
   const hasCompositionHint = /(竖图|横图|方图|portrait|landscape|square|9:16|16:9|手机截图|海报|poster|screenshot)/i.test(prompt);
+  const hasSharpnessHint = /(清晰|锐利|锐度|sharp|crisp|high detail|fine detail|ultra detailed|detailed skin|clean lineart|clean linework)/i.test(prompt);
+  const hasAntiBlurHint = /(不要模糊|避免模糊|no blur|avoid blur|sharp focus|in focus|clear edges|anti[- ]blur)/i.test(prompt);
 
   const clauses = [prompt];
   if (!hasPhotoHint) {
     clauses.push('Use clean composition and natural lighting with coherent details.');
   }
+  if (!hasSharpnessHint) {
+    clauses.push('Prioritize crisp focus, sharp edges, clean linework, high local contrast, and dense fine details.');
+  }
+  if (!hasAntiBlurHint) {
+    clauses.push('Avoid blur, softness, haze, washed-out textures, smeared details, and low-detail backgrounds.');
+  }
+  clauses.push(buildResolutionQualityClause(effectiveSize));
+  clauses.push('Preserve facial features, eyes, hands, hair strands, clothing textures, object edges, and small foreground details without mushiness.');
   if (!hasNoTextHint) {
     clauses.push('No text, watermark, UI, screenshot, or logo.');
   }
@@ -73,7 +146,7 @@ function buildCreateAgentPrompt(rawPrompt = '') {
     clauses.push('Render it as a polished single-image composition.');
   }
   if (!hasSizeHint) {
-    clauses.push('Prefer a polished single-image composition suitable for a 1024x1024 output.');
+    clauses.push(`Prefer a polished single-image composition suitable for a ${effectiveSize === 'auto' ? 'native high-quality image output' : effectiveSize + ' output'}.`);
   }
   return clauses.join(' ');
 }
@@ -155,18 +228,25 @@ function buildCreateAgentGenerationUrlCandidates(baseUrl = '') {
 }
 
 function resolveConfig(overrides = {}) {
+  const requestedImageSize = String((overrides.imageSize ?? config.CREATE_AGENT_IMAGE_SIZE) || '1024x1024').trim() || '1024x1024';
   return {
     enabled: overrides.enabled ?? config.CREATE_AGENT_ENABLED,
     apiBaseUrl: normalizeCreateAgentBaseUrl(overrides.apiBaseUrl ?? config.CREATE_AGENT_API_BASE_URL),
     apiKey: String((overrides.apiKey ?? config.CREATE_AGENT_API_KEY) || '').trim(),
     model: String((overrides.model ?? config.CREATE_AGENT_MODEL) || '').trim(),
+    allowUserIds: normalizeIdList(overrides.allowUserIds ?? config.CREATE_AGENT_ALLOW_USER_IDS ?? []),
     dailyLimit: Math.max(0, Number(overrides.dailyLimit ?? config.CREATE_AGENT_DAILY_LIMIT ?? 20) || 0),
     timeoutMs: Math.max(1000, Number(overrides.timeoutMs ?? config.CREATE_AGENT_TIMEOUT_MS ?? 120000) || 120000),
     groupOnly: overrides.groupOnly ?? config.CREATE_AGENT_GROUP_ONLY,
     maxConcurrency: Math.max(1, Number(overrides.maxConcurrency ?? config.CREATE_AGENT_MAX_CONCURRENCY ?? 1) || 1),
-    imageSize: String((overrides.imageSize ?? config.CREATE_AGENT_IMAGE_SIZE) || '1024x1024').trim() || '1024x1024',
+    requestedImageSize,
+    imageSize: normalizeRequestedImageSize(requestedImageSize),
     imageQuality: String((overrides.imageQuality ?? config.CREATE_AGENT_IMAGE_QUALITY) || 'high').trim() || 'high',
     imageBackground: String((overrides.imageBackground ?? config.CREATE_AGENT_IMAGE_BACKGROUND) || 'auto').trim() || 'auto',
+    imageStyle: String((overrides.imageStyle ?? config.CREATE_AGENT_IMAGE_STYLE) || 'vivid').trim() || 'vivid',
+    imageOutputCompression: Math.max(0, Math.min(100, Number(
+      overrides.imageOutputCompression ?? config.CREATE_AGENT_IMAGE_OUTPUT_COMPRESSION ?? 0
+    ) || 0)),
     responseFormat: String((overrides.responseFormat ?? config.CREATE_AGENT_RESPONSE_FORMAT) || 'b64_json').trim() || 'b64_json',
     outputFormat: String((overrides.outputFormat ?? config.CREATE_AGENT_OUTPUT_FORMAT) || 'png').trim() || 'png',
     outputDir: path.resolve(String((overrides.outputDir ?? config.CREATE_AGENT_OUTPUT_DIR) || path.join(config.DATA_DIR, 'create-agent', 'output')).trim()),
@@ -324,6 +404,23 @@ function stringifyBody(body = null) {
   }
 }
 
+function parseJsonTextSafe(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
+function getCreateAgentStreamTimeoutMs(runtimeConfig = {}) {
+  const configuredTimeoutMs = Math.max(1000, Number(runtimeConfig.timeoutMs || 0) || 0);
+  const requestStreamTimeoutMs = Math.max(1000, Number(config.REQUEST_STREAM_TIMEOUT_MS || 0) || 0);
+  const firstTokenTimeoutMs = Math.max(1000, Number(config.AI_STREAM_FIRST_TOKEN_TIMEOUT_MS || 0) || 0);
+  return Math.max(configuredTimeoutMs, requestStreamTimeoutMs, firstTokenTimeoutMs, 420000);
+}
+
 function summarizePayloadShape(payload = null) {
   if (payload === null || payload === undefined) return '';
   if (typeof payload === 'string') {
@@ -370,6 +467,8 @@ function logCreateAgentError(runtimeConfig = {}, context = {}, error = null) {
     senderId: String(context.senderId || '').trim(),
     model: String(runtimeConfig.model || '').trim(),
     apiBaseUrl: String(runtimeConfig.apiBaseUrl || '').trim(),
+    requestedImageSize: String(runtimeConfig.requestedImageSize || '').trim(),
+    effectiveImageSize: String(runtimeConfig.imageSize || '').trim(),
     requestUrl: String(context.requestUrl || buildCreateAgentGenerationUrl(runtimeConfig.apiBaseUrl)).trim(),
     backend: 'openai_images',
     responsePreview: String(context.responsePreview || '').trim(),
@@ -381,6 +480,45 @@ function logCreateAgentError(runtimeConfig = {}, context = {}, error = null) {
 function buildImageOutputPath(runtimeConfig = {}, prompt = '', buffer = Buffer.alloc(0), mimeType = '') {
   const extension = detectImageExtension(buffer, DEFAULT_IMAGE_EXTENSION, mimeType);
   return path.join(runtimeConfig.outputDir, `${buildOutputBasename(prompt)}${extension}`);
+}
+
+function buildImageGenerationRequestBody(prompt = '', runtimeConfig = {}, options = {}) {
+  const body = {
+    model: runtimeConfig.model,
+    prompt,
+    size: runtimeConfig.imageSize,
+    quality: runtimeConfig.imageQuality,
+    style: runtimeConfig.imageStyle,
+    background: runtimeConfig.imageBackground,
+    output_format: runtimeConfig.outputFormat,
+    output_compression: runtimeConfig.imageOutputCompression,
+    response_format: runtimeConfig.responseFormat
+  };
+
+  if (options.stream) {
+    body.stream = true;
+    body.partial_images = Math.max(
+      0,
+      Math.min(3, Number(options.partialImages ?? CREATE_AGENT_STREAM_PARTIAL_IMAGES) || 0)
+    );
+  }
+  return body;
+}
+
+function buildImageGenerationRequestOptions(runtimeConfig = {}, options = {}) {
+  return {
+    timeout: options.stream ? getCreateAgentStreamTimeoutMs(runtimeConfig) : runtimeConfig.timeoutMs,
+    maxContentLength: MAX_IMAGE_BYTES,
+    maxBodyLength: MAX_IMAGE_BYTES,
+    proxy: false,
+    responseType: options.responseType || 'json',
+    headers: {
+      Authorization: `Bearer ${runtimeConfig.apiKey}`,
+      'Content-Type': 'application/json',
+      Accept: options.stream ? 'text/event-stream, application/json' : 'application/json, text/plain, */*',
+      'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
+    }
+  };
 }
 
 function writeImageBuffer(runtimeConfig = {}, prompt = '', buffer = Buffer.alloc(0), mimeType = '') {
@@ -452,6 +590,74 @@ function extractImageFromGenerationResponse(payload = {}) {
   throw new Error('generation response missing image data');
 }
 
+function extractImageFromStreamEventPayload(payload = {}) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const b64Json = String(payload.b64_json || payload.partial_image_b64 || '').trim();
+  if (b64Json) {
+    return {
+      kind: 'b64_json',
+      value: b64Json,
+      eventType: String(payload.type || '').trim()
+    };
+  }
+
+  const url = String(payload.url || '').trim();
+  if (url) {
+    return {
+      kind: 'url',
+      value: url,
+      eventType: String(payload.type || '').trim()
+    };
+  }
+
+  try {
+    const nestedImage = extractImageFromGenerationResponse(payload);
+    return {
+      ...nestedImage,
+      eventType: String(payload.type || '').trim()
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function extractStreamFailureMessage(payload = {}) {
+  if (!payload || typeof payload !== 'object') return '';
+
+  const type = String(payload.type || '').trim().toLowerCase();
+  const errorMessage = String(
+    payload?.error?.message
+    || payload?.error?.detail
+    || payload?.message
+    || ''
+  ).trim();
+
+  if (type === 'error' || type.endsWith('.failed')) {
+    return errorMessage || summarizePayloadShape(payload);
+  }
+
+  return '';
+}
+
+async function materializeGeneratedImage(imageResult = null, prompt = '', runtimeConfig = {}, deps = {}) {
+  if (!imageResult || typeof imageResult !== 'object') {
+    throw new Error('generation response missing image data');
+  }
+
+  if (imageResult.kind === 'b64_json') {
+    const buffer = Buffer.from(String(imageResult.value || '').trim(), 'base64');
+    const filePath = writeImageBuffer(runtimeConfig, prompt, buffer);
+    return { filePath, buffer };
+  }
+
+  if (imageResult.kind === 'url') {
+    return downloadImageFromUrl(imageResult.value, prompt, runtimeConfig, deps);
+  }
+
+  throw new Error('generation response missing image data');
+}
+
 async function requestImageGeneration(prompt = '', runtimeConfig = {}, deps = {}) {
   validateCreateAgentPrerequisites(runtimeConfig);
   const requestUrls = buildCreateAgentGenerationUrlCandidates(runtimeConfig.apiBaseUrl);
@@ -465,26 +671,8 @@ async function requestImageGeneration(prompt = '', runtimeConfig = {}, deps = {}
     try {
       const response = await httpClient.post(
         requestUrl,
-        {
-          model: runtimeConfig.model,
-          prompt,
-          size: runtimeConfig.imageSize,
-          quality: runtimeConfig.imageQuality,
-          background: runtimeConfig.imageBackground,
-          output_format: runtimeConfig.outputFormat,
-          response_format: runtimeConfig.responseFormat
-        },
-        {
-          timeout: runtimeConfig.timeoutMs,
-          maxContentLength: MAX_IMAGE_BYTES,
-          maxBodyLength: MAX_IMAGE_BYTES,
-          proxy: false,
-          headers: {
-            Authorization: `Bearer ${runtimeConfig.apiKey}`,
-            'Content-Type': 'application/json',
-            'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
-          }
-        }
+        buildImageGenerationRequestBody(prompt, runtimeConfig),
+        buildImageGenerationRequestOptions(runtimeConfig)
       );
       const payload = response?.data || {};
       try {
@@ -511,18 +699,207 @@ async function requestImageGeneration(prompt = '', runtimeConfig = {}, deps = {}
   throw lastError || new Error('generation response missing image data');
 }
 
-async function generateImageWithOpenAICompatibleApi(prompt = '', runtimeConfig = {}, deps = {}) {
-  const generationResult = await requestImageGeneration(prompt, runtimeConfig, deps);
-  const payload = generationResult?.payload || {};
-  const imageResult = extractImageFromGenerationResponse(payload);
-
-  if (imageResult.kind === 'b64_json') {
-    const buffer = Buffer.from(imageResult.value, 'base64');
-    const filePath = writeImageBuffer(runtimeConfig, prompt, buffer);
-    return { filePath, buffer };
+async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, deps = {}) {
+  validateCreateAgentPrerequisites(runtimeConfig);
+  const requestUrls = buildCreateAgentGenerationUrlCandidates(runtimeConfig.apiBaseUrl);
+  if (!requestUrls.length) {
+    throw new Error('CREATE_AGENT_API_BASE_URL is not configured');
   }
 
-  return downloadImageFromUrl(imageResult.value, prompt, runtimeConfig, deps);
+  const httpClient = deps.httpClient || axios;
+  let lastError = null;
+
+  for (const requestUrl of requestUrls) {
+    try {
+      const response = await httpClient.post(
+        requestUrl,
+        buildImageGenerationRequestBody(prompt, runtimeConfig, {
+          stream: true,
+          partialImages: CREATE_AGENT_STREAM_PARTIAL_IMAGES
+        }),
+        buildImageGenerationRequestOptions(runtimeConfig, { responseType: 'stream', stream: true })
+      );
+
+      const responseStream = response?.data;
+      if (!responseStream || typeof responseStream.on !== 'function') {
+        const directPayload = response?.data || {};
+        const directImage = extractImageFromStreamEventPayload(directPayload);
+        if (directImage) {
+          return {
+            imageResult: directImage,
+            requestUrl,
+            streamMode: false
+          };
+        }
+        try {
+          return {
+            imageResult: extractImageFromGenerationResponse(directPayload),
+            requestUrl,
+            streamMode: false
+          };
+        } catch (shapeError) {
+          lastError = new Error(`${shapeError.message} response_preview=${summarizePayloadShape(directPayload)}`);
+          lastError.requestUrl = requestUrl;
+          continue;
+        }
+      }
+
+      const parserState = { buffer: '' };
+      const rawChunks = [];
+      let sawSseEvents = false;
+      let finalImage = null;
+
+      await new Promise((resolve, reject) => {
+        let settled = false;
+
+        const cleanup = () => {
+          responseStream.removeListener('data', handleData);
+          responseStream.removeListener('end', handleEnd);
+          responseStream.removeListener('close', handleClose);
+          responseStream.removeListener('error', handleError);
+        };
+
+        const finish = (error = null) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (error) reject(error);
+          else resolve();
+        };
+
+        const consumeEvents = (events = []) => {
+          for (const event of events) {
+            if (!event?.json || typeof event.json !== 'object') continue;
+            sawSseEvents = true;
+
+            const streamFailure = extractStreamFailureMessage(event.json);
+            if (streamFailure) {
+              const error = new Error(streamFailure);
+              error.requestUrl = requestUrl;
+              finish(error);
+              return false;
+            }
+
+            const imageResult = extractImageFromStreamEventPayload(event.json);
+            if (!imageResult) continue;
+
+            const eventType = String(imageResult.eventType || event.json.type || '').trim().toLowerCase();
+            if (eventType.endsWith('.partial_image')) {
+              continue;
+            }
+            finalImage = imageResult;
+          }
+          return true;
+        };
+
+        const handleData = (chunk) => {
+          rawChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk || ''), 'utf8'));
+          const parsed = extractSSEEvents(parserState, chunk);
+          parserState.buffer = parsed.state.buffer;
+          consumeEvents(parsed.events || []);
+        };
+
+        const finalizeTail = () => {
+          const tailEvents = flushSSEState(parserState);
+          consumeEvents(tailEvents || []);
+        };
+
+        const handleEnd = () => {
+          finalizeTail();
+          finish();
+        };
+
+        const handleClose = () => {
+          if (settled) return;
+          finalizeTail();
+          finish();
+        };
+
+        const handleError = (error) => {
+          const normalizedError = error instanceof Error ? error : new Error(String(error || 'unknown error'));
+          normalizedError.requestUrl = requestUrl;
+          finish(normalizedError);
+        };
+
+        responseStream.on('data', handleData);
+        responseStream.once('end', handleEnd);
+        responseStream.once('close', handleClose);
+        responseStream.once('error', handleError);
+      });
+
+      if (finalImage) {
+        return {
+          imageResult: finalImage,
+          requestUrl,
+          streamMode: true
+        };
+      }
+
+      const rawText = Buffer.concat(rawChunks).toString('utf8').trim();
+      if (!sawSseEvents && rawText) {
+        const rawPayload = parseJsonTextSafe(rawText);
+        if (rawPayload) {
+          const fallbackImage = extractImageFromStreamEventPayload(rawPayload);
+          if (fallbackImage) {
+            return {
+              imageResult: fallbackImage,
+              requestUrl,
+              streamMode: false
+            };
+          }
+          try {
+            return {
+              imageResult: extractImageFromGenerationResponse(rawPayload),
+              requestUrl,
+              streamMode: false
+            };
+          } catch (shapeError) {
+            lastError = new Error(`${shapeError.message} response_preview=${summarizePayloadShape(rawPayload)}`);
+            lastError.requestUrl = requestUrl;
+            continue;
+          }
+        }
+      }
+
+      lastError = new Error(
+        `generation stream missing image data${rawText ? ` response_preview=${rawText.replace(/\s+/g, ' ').trim().slice(0, 400)}` : ''}`
+      );
+      lastError.requestUrl = requestUrl;
+    } catch (error) {
+      const normalized = error?.response
+        ? new Error(normalizeRequestError(error))
+        : (error instanceof Error ? error : new Error(String(error || 'unknown error')));
+      normalized.requestUrl = error?.requestUrl || requestUrl;
+      lastError = normalized;
+      const lower = String(normalized.message || '').toLowerCase();
+      if (!(lower.includes('404') || lower.includes('generation stream missing image data') || lower.includes('generation response missing image data'))) {
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error('generation stream missing image data');
+}
+
+async function generateImageWithOpenAICompatibleApi(prompt = '', runtimeConfig = {}, deps = {}) {
+  let streamError = null;
+  try {
+    const streamedResult = await requestImageGenerationStream(prompt, runtimeConfig, deps);
+    return materializeGeneratedImage(streamedResult?.imageResult, prompt, runtimeConfig, deps);
+  } catch (error) {
+    streamError = error;
+  }
+
+  try {
+    const generationResult = await requestImageGeneration(prompt, runtimeConfig, deps);
+    const payload = generationResult?.payload || {};
+    return materializeGeneratedImage(extractImageFromGenerationResponse(payload), prompt, runtimeConfig, deps);
+  } catch (error) {
+    if (streamError) {
+      error.message = `${String(error?.message || error || '').trim()} stream_attempt=${String(streamError?.message || streamError || '').trim()}`.trim();
+    }
+    throw error;
+  }
 }
 
 function buildUserFacingFailureReply(error = null, runtimeConfig = {}) {
@@ -537,6 +914,9 @@ function buildUserFacingFailureReply(error = null, runtimeConfig = {}) {
   if (message.includes('系统网关次数不足') || message.includes('网关次数不足')) {
     return '生图供应商额度不足，请联系服务商';
   }
+  if (lower.includes('error 524') || lower.includes('origin_response_timeout') || lower.includes('cloudflare') && lower.includes('524')) {
+    return '生图上游超时，请稍后重试或更换供应商';
+  }
   if (lower.includes('unknown provider for model')) {
     return `当前生图供应商不支持 ${providerModel || '该模型'}`;
   }
@@ -545,6 +925,7 @@ function buildUserFacingFailureReply(error = null, runtimeConfig = {}) {
   if (lower.includes('http_error') && (lower.includes('401') || lower.includes('403'))) return '生图鉴权失败';
   if (lower.includes('http_error') && lower.includes('429')) return '生图接口限流，请稍后重试';
   if (lower.includes('http_error') && lower.includes('5')) return '生图供应商暂时异常';
+  if (lower.includes('generation stream missing image data')) return '生图结果为空，当前接口返回格式不兼容';
   if (lower.includes('generation response missing image data')) return '生图结果为空，当前接口返回格式不兼容';
   if (lower.includes('image buffer empty')) return '生图结果为空';
   if (lower.includes('timeout') || lower.includes('timed out')) return '生图超时，请稍后重试';
@@ -592,7 +973,9 @@ async function executeCreateCommand(context = {}, deps = {}) {
     consumeQuota(runtimeConfig);
     quotaConsumed = true;
 
-    const normalizedPrompt = buildCreateAgentPrompt(prompt);
+    const normalizedPrompt = buildCreateAgentPrompt(prompt, {
+      imageSize: runtimeConfig.imageSize
+    });
     const materialized = await (deps.generateImage || generateImageWithOpenAICompatibleApi)(
       normalizedPrompt,
       runtimeConfig,
@@ -629,21 +1012,27 @@ async function executeCreateCommand(context = {}, deps = {}) {
 module.exports = {
   buildCreateAgentGenerationUrl,
   buildCreateAgentGenerationUrlCandidates,
+  buildCreateAgentAllowedUserIds,
   buildCreateAgentPrompt,
   consumeQuota,
   detectImageExtension,
   downloadImageFromUrl,
   executeCreateCommand,
   extractImageFromGenerationResponse,
+  extractImageFromStreamEventPayload,
   generateImageWithOpenAICompatibleApi,
   getQuotaStatus,
   loadQuotaState,
   loadRuntimeState,
   isRuntimeStateStale,
+  isCreateAgentUserAllowed,
   normalizeCreateAgentBaseUrl,
+  normalizeIdList,
+  normalizeRequestedImageSize,
   normalizeRequestError,
   readJsonFileSafe,
   requestImageGeneration,
+  requestImageGenerationStream,
   resolveConfig,
   tryAcquireRuntimeSlot,
   releaseRuntimeSlot,

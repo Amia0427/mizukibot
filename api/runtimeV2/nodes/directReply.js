@@ -163,6 +163,7 @@ function createDirectReplyNode(deps = {}) {
       : String(state.memory?.dynamicPrompt || '');
     const directContext = {
       question: request.question,
+      userId: request.userId,
       dynamicPrompt,
       modelConfig: request.modelConfig,
       routePolicyKey: request.routePolicyKey,

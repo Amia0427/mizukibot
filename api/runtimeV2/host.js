@@ -846,6 +846,9 @@ function createRuntime(options = {}) {
     if (failureType === 'provider_auth') {
       return 'invalid api key';
     }
+    if (failureType === 'provider_quota') {
+      return '上游模型额度不足，暂时没法正常回答。';
+    }
     if (failureType === 'provider_blocked') {
       return 'request was blocked by upstream safety';
     }
@@ -856,6 +859,9 @@ function createRuntime(options = {}) {
     if (error?.isContextHardBlock) return 'context_overflow';
     const failure = classifyReplyFailure(String(error?.message || error || ''));
     if (failure.type !== 'none') return failure.type;
+    const responseText = summarizeDirectReplyError(error);
+    const responseFailure = classifyReplyFailure(responseText);
+    if (responseFailure.type !== 'none') return responseFailure.type;
     const status = Number(error?.response?.status || 0);
     if (status === 401 || status === 403) return 'provider_auth';
     return 'generic_model_failure';

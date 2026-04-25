@@ -1,19 +1,50 @@
 const assert = require('assert');
 
 const oldBotToolMode = process.env.BOT_TOOL_MODE;
+const oldPlanApiBaseUrl = process.env.PLAN_API_BASE_URL;
+const oldPlanApiKey = process.env.PLAN_API_KEY;
+const oldPlanModel = process.env.PLAN_MODEL;
+const oldPlanReasoningEffort = process.env.PLAN_REASONING_EFFORT;
 process.env.BOT_TOOL_MODE = 'full';
+process.env.PLAN_API_BASE_URL = 'https://planner.example.test/v1';
+process.env.PLAN_API_KEY = 'planner-test-key';
+process.env.PLAN_MODEL = 'planner-test-model';
+process.env.PLAN_REASONING_EFFORT = 'high';
 
 const {
   planRequestV2,
   convertPlannerDecisionToDirectChatDecision,
-  buildPlannerUserPayload
+  buildPlannerUserPayload,
+  buildPlannerModelRequestBody,
+  getPlannerApiBaseUrl,
+  getPlannerApiBaseUrlV2,
+  getPlannerApiKey,
+  getPlannerApiKeyV2,
+  getPlannerModelName,
+  getPlannerReasoningEffort
 } = require('../api/runtimeV2/planning/service');
 const {
   buildDirectChatToolCatalog
 } = require('../core/directChatToolCatalog');
+const config = require('../config');
 const { getPersonaModuleCatalogSummary } = require('../utils/personaModules');
 
 module.exports = (async () => {
+  assert.strictEqual(getPlannerApiBaseUrl(), 'https://planner.example.test/v1');
+  assert.strictEqual(getPlannerApiKey(), 'planner-test-key');
+  assert.strictEqual(getPlannerModelName(), 'planner-test-model');
+  assert.strictEqual(getPlannerApiBaseUrlV2(), 'https://planner.example.test/v1');
+  assert.strictEqual(getPlannerApiKeyV2(), 'planner-test-key');
+  assert.strictEqual(getPlannerReasoningEffort(), 'high');
+  assert.strictEqual(buildPlannerModelRequestBody({ question: 'test', cleanText: 'test' }).requestBody.reasoning_effort, 'high');
+  assert.strictEqual(buildPlannerModelRequestBody({ question: 'test', cleanText: 'test' }, { plannerReasoningEffort: 'low' }).requestBody.reasoning_effort, 'low');
+  assert.ok(!Object.prototype.hasOwnProperty.call(buildPlannerModelRequestBody({ question: 'test', cleanText: 'test' }, { plannerReasoningEffort: 'off' }).requestBody, 'reasoning_effort'));
+
+  const originalConfigPlanApiBaseUrl = config.PLAN_API_BASE_URL;
+  config.PLAN_API_BASE_URL = 'https://api.anthropic.com/v1/messages';
+  assert.ok(!Object.prototype.hasOwnProperty.call(buildPlannerModelRequestBody({ question: 'test', cleanText: 'test' }).requestBody, 'reasoning_effort'));
+  config.PLAN_API_BASE_URL = originalConfigPlanApiBaseUrl;
+
   const memoryDecision = await planRequestV2({
     question: '你还记得我们之前聊到哪了吗',
     cleanText: '你还记得我们之前聊到哪了吗',
@@ -642,31 +673,48 @@ module.exports = (async () => {
         reason: 'chat only with persona modules',
         plannerModel: 'mock-planner',
         decisionSource: 'planner',
-        personaModules: ['mafuyu_branch', 'care_light'],
+        personaModules: ['mafuyu_branch', 'care_light', 'wb_mizuki_care_chains'],
         dynamicPromptPlan: {
           enabledBlockIds: ['directed_context', 'continuity_state'],
-          personaModules: ['mafuyu_branch', 'care_light'],
+          personaModules: ['mafuyu_branch', 'care_light', 'wb_mizuki_care_chains'],
           rationaleByBlock: {
             directed_context: 'addressing mafuyu',
             continuity_state: 'carry over',
             mafuyu_branch: 'mafuyu scene',
-            care_light: 'gentle support'
+            care_light: 'gentle support',
+            wb_mizuki_care_chains: 'worldbook care chain'
           }
         }
       }
     })
   });
 
-  assert.deepStrictEqual(personaPlannerDecision.plannerMeta.personaModules, ['mafuyu_branch', 'care_light']);
+  assert.deepStrictEqual(personaPlannerDecision.plannerMeta.personaModules, ['mafuyu_branch', 'care_light', 'wb_mizuki_care_chains']);
   assert.deepStrictEqual(personaPlannerDecision.plannerMeta.dynamicPromptPlan.enabledBlockIds, ['directed_context', 'continuity_state']);
-  assert.deepStrictEqual(personaPlannerDecision.plannerMeta.dynamicPromptPlan.personaModules, ['mafuyu_branch', 'care_light']);
+  assert.deepStrictEqual(personaPlannerDecision.plannerMeta.dynamicPromptPlan.personaModules, ['mafuyu_branch', 'care_light', 'wb_mizuki_care_chains']);
 
   console.log('plannerV2Protocol.test.js passed');
   if (oldBotToolMode === undefined) delete process.env.BOT_TOOL_MODE;
   else process.env.BOT_TOOL_MODE = oldBotToolMode;
+  if (oldPlanApiBaseUrl === undefined) delete process.env.PLAN_API_BASE_URL;
+  else process.env.PLAN_API_BASE_URL = oldPlanApiBaseUrl;
+  if (oldPlanApiKey === undefined) delete process.env.PLAN_API_KEY;
+  else process.env.PLAN_API_KEY = oldPlanApiKey;
+  if (oldPlanModel === undefined) delete process.env.PLAN_MODEL;
+  else process.env.PLAN_MODEL = oldPlanModel;
+  if (oldPlanReasoningEffort === undefined) delete process.env.PLAN_REASONING_EFFORT;
+  else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
 })().catch((error) => {
   if (oldBotToolMode === undefined) delete process.env.BOT_TOOL_MODE;
   else process.env.BOT_TOOL_MODE = oldBotToolMode;
+  if (oldPlanApiBaseUrl === undefined) delete process.env.PLAN_API_BASE_URL;
+  else process.env.PLAN_API_BASE_URL = oldPlanApiBaseUrl;
+  if (oldPlanApiKey === undefined) delete process.env.PLAN_API_KEY;
+  else process.env.PLAN_API_KEY = oldPlanApiKey;
+  if (oldPlanModel === undefined) delete process.env.PLAN_MODEL;
+  else process.env.PLAN_MODEL = oldPlanModel;
+  if (oldPlanReasoningEffort === undefined) delete process.env.PLAN_REASONING_EFFORT;
+  else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
   console.error(error);
   process.exit(1);
 });

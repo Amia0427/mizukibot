@@ -1,4 +1,5 @@
 const config = require('../../../config');
+const { getApiProvider } = require('../../../utils/modelProvider');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const {
   filterCompanionAllowedTools,
@@ -109,11 +110,17 @@ function normalizeDynamicPromptPlan(plan = {}, options = {}) {
   const enabledBlockIds = normalizeArray(plan?.enabledBlockIds)
     .map((item) => normalizeText(item))
     .filter((blockId) => validDynamicBlockIds.has(blockId));
+  const personaModuleLimit = Math.max(
+    1,
+    Number(options.maxActivePersonaModules || options.maxActiveModules || 0)
+    || Math.min(8, Math.max(1, personaModuleCatalog.length || 1))
+  );
   const personaModules = normalizeArray(plan?.personaModules)
     .concat(legacyPersonaModules)
     .map((item) => normalizeText(item))
     .filter((moduleId) => validPersonaModuleIds.has(moduleId))
-    .slice(0, 2);
+    .filter((moduleId, index, list) => list.indexOf(moduleId) === index)
+    .slice(0, personaModuleLimit);
   const rationaleByBlock = {};
 
   for (const blockId of enabledBlockIds) {
@@ -616,21 +623,75 @@ function getPlannerModel() {
 }
 
 function getPlannerApiBaseUrlV2() {
+  const currentConfig = getConfig();
   return normalizeText(
-    config.AI_ROUTER_BASE_URL
-    || config.PASSIVE_AWARENESS_REPLY_API_BASE_URL
-    || config.PASSIVE_AWARENESS_API_BASE_URL
-    || config.API_BASE_URL
+    currentConfig.PLAN_API_BASE_URL
+    || process.env.PLANNER_API_BASE_URL
+    || process.env.PLAN_API_BASEURI
+    || process.env.PLANNER_API_BASEURI
+    || currentConfig.AI_ROUTER_BASE_URL
+    || currentConfig.PASSIVE_AWARENESS_REPLY_API_BASE_URL
+    || currentConfig.PASSIVE_AWARENESS_API_BASE_URL
+    || currentConfig.API_BASE_URL
   );
 }
 
 function getPlannerApiKeyV2() {
+  const currentConfig = getConfig();
   return normalizeText(
-    config.AI_ROUTER_API_KEY
-    || config.PASSIVE_AWARENESS_REPLY_API_KEY
-    || config.PASSIVE_AWARENESS_API_KEY
-    || config.API_KEY
+    currentConfig.PLAN_API_KEY
+    || process.env.PLANNER_API_KEY
+    || process.env.PLAN_APIKEY
+    || process.env.PLANNER_APIKEY
+    || currentConfig.AI_ROUTER_API_KEY
+    || currentConfig.PASSIVE_AWARENESS_REPLY_API_KEY
+    || currentConfig.PASSIVE_AWARENESS_API_KEY
+    || currentConfig.API_KEY
   );
+}
+
+function normalizePlannerReasoningEffort(value = '') {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) return '';
+  if (['0', 'false', 'no', 'off', 'none', 'disabled', 'disable'].includes(normalized)) return '';
+  if (['minimal', 'low', 'medium', 'high'].includes(normalized)) return normalized;
+  return 'high';
+}
+
+function getPlannerReasoningEffort(overrides = null) {
+  const currentConfig = getConfig();
+  const overridden = overrides && typeof overrides === 'object'
+    ? (overrides.plannerReasoningEffort ?? overrides.reasoningEffort ?? overrides.reasoning_effort)
+    : undefined;
+  if (overridden !== undefined && overridden !== null && overridden !== '') {
+    return normalizePlannerReasoningEffort(overridden);
+  }
+  return normalizePlannerReasoningEffort(
+    currentConfig.PLAN_REASONING_EFFORT
+    || process.env.PLANNER_REASONING_EFFORT
+    || 'high'
+  );
+}
+
+function buildPlannerModelRequestBody(route = {}, options = {}) {
+  const apiBaseUrl = getPlannerApiBaseUrlV2();
+  const model = getPlannerModel();
+  const toolCatalog = collectAvailableToolSummary(route, options).toolCatalog;
+  const requestBody = {
+    model,
+    temperature: DEFAULT_PLANNER_TEMPERATURE,
+    messages: [
+      { role: 'system', content: buildPlannerPrompt(toolCatalog) },
+      { role: 'user', content: JSON.stringify(buildPlannerUserPayload(route, toolCatalog, options)) }
+    ],
+    max_tokens: 1000,
+    stream: false
+  };
+  if (getApiProvider(ensureChatCompletionsUrlLocal(apiBaseUrl), model) === 'openai_compatible') {
+    const effort = getPlannerReasoningEffort(options);
+    if (effort) requestBody.reasoning_effort = effort;
+  }
+  return { requestBody, toolCatalog };
 }
 
 function deriveToolArgs(toolName = '', route = {}) {
@@ -1311,12 +1372,18 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   const dynamicPromptBlockCatalog = normalizeArray(options.dynamicPromptBlockCatalog).length > 0
     ? normalizeArray(options.dynamicPromptBlockCatalog)
     : getMainReplyDynamicBlockCatalog(personaModuleCatalog);
+  const maxActivePersonaModules = Math.max(
+    1,
+    ...personaModuleCatalog.map((item) => Number(item?.maxActiveModules || 0) || 0),
+    3
+  );
   const normalizedDynamicPromptPlan = normalizeDynamicPromptPlan(
     rawDecision?.plannerMeta?.dynamicPromptPlan || rawDecision?.dynamicPromptPlan,
     {
       personaModuleCatalog,
       dynamicPromptBlockCatalog,
-      legacyPersonaModules: rawDecision?.plannerMeta?.personaModules || rawDecision?.personaModules
+      legacyPersonaModules: rawDecision?.plannerMeta?.personaModules || rawDecision?.personaModules,
+      maxActivePersonaModules
     }
   );
   const cleanText = getPlannerRequestText(route);
@@ -1480,19 +1547,10 @@ async function callPlannerModelV2(route = {}, options = {}) {
   const apiBaseUrl = getPlannerApiBaseUrlV2();
   const apiKey = getPlannerApiKeyV2();
   if (!apiBaseUrl || !apiKey) return null;
-  const toolCatalog = collectAvailableToolSummary(route, options).toolCatalog;
+  const { requestBody } = buildPlannerModelRequestBody(route, options);
   const response = await postWithRetry(
     ensureChatCompletionsUrlLocal(apiBaseUrl),
-    {
-      model: getPlannerModel(),
-      temperature: DEFAULT_PLANNER_TEMPERATURE,
-      messages: [
-        { role: 'system', content: buildPlannerPrompt(toolCatalog) },
-        { role: 'user', content: JSON.stringify(buildPlannerUserPayload(route, toolCatalog, options)) }
-      ],
-      max_tokens: 1000,
-      stream: false
-    },
+    requestBody,
     1,
     apiKey
   );
@@ -1699,7 +1757,7 @@ function getPlannerModelName(overrides = null) {
   const plannerModel = overrides && typeof overrides === 'object'
     ? (overrides.plannerModel || overrides.model)
     : '';
-  return String(plannerModel || currentConfig.PLAN_MODEL || currentConfig.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
+  return String(plannerModel || currentConfig.PLAN_MODEL || process.env.PLANNER_MODEL || currentConfig.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
 }
 
 function getPlannerTemperature(overrides = null) {
@@ -1725,6 +1783,10 @@ function getPlannerApiBaseUrl(overrides = null) {
     : '';
   return String(
     plannerApiBaseUrl
+    || currentConfig.PLAN_API_BASE_URL
+    || process.env.PLANNER_API_BASE_URL
+    || process.env.PLAN_API_BASEURI
+    || process.env.PLANNER_API_BASEURI
     || currentConfig.PASSIVE_AWARENESS_REPLY_API_BASE_URL
     || currentConfig.PASSIVE_AWARENESS_API_BASE_URL
     || currentConfig.API_BASE_URL
@@ -1739,6 +1801,10 @@ function getPlannerApiKey(overrides = null) {
     : '';
   return String(
     plannerApiKey
+    || currentConfig.PLAN_API_KEY
+    || process.env.PLANNER_API_KEY
+    || process.env.PLAN_APIKEY
+    || process.env.PLANNER_APIKEY
     || currentConfig.PASSIVE_AWARENESS_REPLY_API_KEY
     || currentConfig.PASSIVE_AWARENESS_API_KEY
     || currentConfig.API_KEY
@@ -1950,6 +2016,7 @@ module.exports = {
   buildPlan,
   buildLegacyExecutionPlanFromSteps,
   buildPlannerPrompt,
+  buildPlannerModelRequestBody,
   buildPlannerStepGraphSequence,
   buildPlannerUserPayload,
   buildRuleBasedPlannerDecision,
@@ -1964,9 +2031,12 @@ module.exports = {
   executePlanLoop,
   fallbackReplyPlan,
   getPlannerApiBaseUrl,
+  getPlannerApiBaseUrlV2,
   getPlannerApiKey,
+  getPlannerApiKeyV2,
   getPlannerDecisionVersion,
   getPlannerModelName,
+  getPlannerReasoningEffort,
   getPlannerTemperature,
   normalizePlannerDecisionV2,
   planRequestV2,

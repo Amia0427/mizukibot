@@ -73,6 +73,28 @@ module.exports = (async () => {
   assert.strictEqual(hapiStatus.handled, true);
   assert.ok(String(hapiStatus.replyText).includes('sess_1'));
 
+  const restart = await coordinator.handleRestartAdminCommand({
+    rawText: '/restart',
+    userId: 'admin_1'
+  });
+  assert.strictEqual(restart.handled, true);
+  assert.strictEqual(restart.restartRequested, true);
+  assert.ok(String(restart.replyText).includes('重启'));
+
+  const restartDenied = await coordinator.handleRestartAdminCommand({
+    rawText: '/restart',
+    userId: 'u1'
+  });
+  assert.strictEqual(restartDenied.handled, true);
+  assert.strictEqual(restartDenied.restartRequested, undefined);
+  assert.strictEqual(restartDenied.replyText, '仅管理员可用。');
+
+  const restartWithTail = await coordinator.handleRestartAdminCommand({
+    rawText: '/restart now',
+    userId: 'admin_1'
+  });
+  assert.strictEqual(restartWithTail, null);
+
   console.log('messageAdminCommands.test.js passed');
 })().catch((error) => {
   console.error(error);

@@ -547,6 +547,22 @@ async function sendPrivatePoke(userId = '', options = {}) {
   };
 }
 
+async function sendGroupPoke(groupId = '', userId = '', options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const targetGroupId = normalizeText(groupId);
+  const targetUserId = normalizeText(userId);
+  if (!targetGroupId) throw new Error('groupId is required');
+  if (!targetUserId) throw new Error('userId is required');
+  await actionClient.callAction('group_poke', {
+    group_id: targetGroupId,
+    user_id: targetUserId
+  });
+  return {
+    success: true,
+    reason: 'group poke sent'
+  };
+}
+
 async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) {
   const actionClient = options.actionClient || getNapCatActionClient();
   const normalizedMessageId = normalizeMessageId(messageId);
@@ -947,6 +963,7 @@ module.exports = {
   sanitizeDiaryImageMeta,
   sanitizeDiaryImageText,
   sendGroupImageMessage,
+  sendGroupPoke,
   scheduleGroupMessage,
   sendGroupMessage,
   sendPrivatePoke,

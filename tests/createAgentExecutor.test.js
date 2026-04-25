@@ -2,6 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { Readable } = require('stream');
 
 function clearProjectCache() {
   const projectRoot = path.resolve(__dirname, '..') + path.sep;
@@ -33,33 +34,53 @@ module.exports = (async () => {
     process.env.CREATE_AGENT_IMAGE_SIZE = '1024x1024';
     process.env.CREATE_AGENT_IMAGE_QUALITY = 'high';
     process.env.CREATE_AGENT_IMAGE_BACKGROUND = 'auto';
+    process.env.CREATE_AGENT_IMAGE_STYLE = 'vivid';
+    process.env.CREATE_AGENT_IMAGE_OUTPUT_COMPRESSION = '0';
     process.env.CREATE_AGENT_RESPONSE_FORMAT = 'b64_json';
     process.env.CREATE_AGENT_OUTPUT_FORMAT = 'png';
     process.env.CREATE_AGENT_DAILY_LIMIT = '2';
     process.env.CREATE_AGENT_OUTPUT_DIR = path.join(tempRoot, 'output');
+    process.env.ADMIN_USER_IDS = '1960901788';
 
     clearProjectCache();
 
     const {
+      buildCreateAgentAllowedUserIds,
       buildCreateAgentGenerationUrl,
       buildCreateAgentGenerationUrlCandidates,
       detectImageExtension,
       downloadImageFromUrl,
       executeCreateCommand,
       extractImageFromGenerationResponse,
+      extractImageFromStreamEventPayload,
       generateImageWithOpenAICompatibleApi,
       getQuotaStatus,
+      isCreateAgentUserAllowed,
       isRuntimeStateStale,
       normalizeCreateAgentBaseUrl,
+      normalizeIdList,
+      normalizeRequestedImageSize,
       normalizeRequestError,
       requestImageGeneration,
+      requestImageGenerationStream,
       writeJsonFileSafe,
       resolveConfig
     } = require('../api/createAgentExecutor');
 
     assert.strictEqual(normalizeCreateAgentBaseUrl('https://mynav.website/v1/chat/completions'), 'https://mynav.website/v1');
     assert.strictEqual(normalizeCreateAgentBaseUrl('https://tokenflux.dev/v1/images/generations'), 'https://tokenflux.dev/v1');
+    assert.deepStrictEqual(normalizeIdList(['u1', 'u1', ' ', 'u2']), ['u1', 'u2']);
     assert.strictEqual(buildCreateAgentGenerationUrl('https://mynav.website/v1/chat/completions'), 'https://mynav.website/v1/images/generations');
+    assert.strictEqual(normalizeRequestedImageSize('4096x4096'), '4096x4096');
+    assert.strictEqual(normalizeRequestedImageSize('4096x2304'), '4096x2304');
+    assert.strictEqual(normalizeRequestedImageSize('2304x4096'), '2304x4096');
+    assert.deepStrictEqual(
+      Array.from(buildCreateAgentAllowedUserIds({ allowUserIds: ['u_extra', 'u_extra'] })).sort(),
+      ['1960901788', 'u_extra']
+    );
+    assert.strictEqual(isCreateAgentUserAllowed('1960901788'), true);
+    assert.strictEqual(isCreateAgentUserAllowed('u_extra', { allowUserIds: ['u_extra'] }), true);
+    assert.strictEqual(isCreateAgentUserAllowed('u_other', { allowUserIds: ['u_extra'] }), false);
     assert.deepStrictEqual(
       buildCreateAgentGenerationUrlCandidates('https://www.packyapi.com'),
       ['https://www.packyapi.com/images/generations', 'https://www.packyapi.com/v1/images/generations']
@@ -73,9 +94,16 @@ module.exports = (async () => {
       extractImageFromGenerationResponse({ data: [{ url: 'https://example.com/test.png' }] }),
       { kind: 'url', value: 'https://example.com/test.png' }
     );
+    assert.deepStrictEqual(
+      extractImageFromStreamEventPayload({ type: 'image_generation.completed', b64_json: 'Zm9v' }),
+      { kind: 'b64_json', value: 'Zm9v', eventType: 'image_generation.completed' }
+    );
     assert.strictEqual(detectImageExtension(Buffer.from('89504E470D0A1A0A', 'hex')), '.png');
 
     const runtimeConfig = resolveConfig();
+    assert.strictEqual(runtimeConfig.requestedImageSize, '1024x1024');
+    assert.strictEqual(runtimeConfig.imageSize, '1024x1024');
+    assert.deepStrictEqual(runtimeConfig.allowUserIds, []);
     const pngBase64 = 'iVBORw0KGgo=';
     const sentImages = [];
 
@@ -90,6 +118,10 @@ module.exports = (async () => {
         assert.ok(String(prompt).includes('small orange cat in space'));
         assert.strictEqual(receivedConfig.apiBaseUrl, 'https://mynav.website/v1');
         assert.strictEqual(receivedConfig.model, 'gpt-image-2');
+        assert.ok(String(prompt).includes('Prioritize crisp focus'));
+        assert.ok(String(prompt).includes('Avoid blur, softness, haze'));
+        assert.ok(String(prompt).includes('Target clean high-resolution clarity'));
+        assert.ok(String(prompt).includes('Preserve facial features, eyes, hands, hair strands'));
         return {
           filePath: path.join(tempRoot, 'output', 'b64-test.png'),
           buffer: Buffer.from(pngBase64, 'base64')
@@ -150,12 +182,66 @@ module.exports = (async () => {
     assert.strictEqual(requestPayloads[0].body.prompt, 'draw a fox');
     assert.strictEqual(requestPayloads[0].body.size, '1024x1024');
     assert.strictEqual(requestPayloads[0].body.quality, 'high');
+    assert.strictEqual(requestPayloads[0].body.style, 'vivid');
     assert.strictEqual(requestPayloads[0].body.background, 'auto');
     assert.strictEqual(requestPayloads[0].body.output_format, 'png');
+    assert.strictEqual(requestPayloads[0].body.output_compression, 0);
     assert.strictEqual(requestPayloads[0].body.response_format, 'b64_json');
     assert.deepStrictEqual(requestResponse, {
       payload: { data: [{ b64_json: pngBase64 }] },
       requestUrl: 'https://mynav.website/v1/images/generations'
+    });
+
+    const largeSizeConfig = resolveConfig({ imageSize: '4096x4096' });
+    assert.strictEqual(largeSizeConfig.requestedImageSize, '4096x4096');
+    assert.strictEqual(largeSizeConfig.imageSize, '4096x4096');
+    assert.ok(
+      String(require('../api/createAgentExecutor').buildCreateAgentPrompt('sharp portrait', {
+        imageSize: '2048x2048'
+      })).includes('Target true 2K-class clarity')
+    );
+
+    const streamRequestPayloads = [];
+    const streamedResponse = await requestImageGenerationStream('stream fox', runtimeConfig, {
+      httpClient: {
+        async post(url, body, options) {
+          streamRequestPayloads.push({ url, body, options });
+          const stream = Readable.from([
+            'data: {"type":"image_generation.partial_image","partial_image_b64":"Zm9v"}\n\n',
+            `data: {"type":"image_generation.completed","b64_json":"${pngBase64}"}\n\n`,
+            'data: [DONE]\n\n'
+          ]);
+          return { data: stream };
+        }
+      }
+    });
+    assert.strictEqual(streamRequestPayloads.length, 1);
+    assert.strictEqual(streamRequestPayloads[0].body.stream, true);
+    assert.strictEqual(streamRequestPayloads[0].body.partial_images, 1);
+    assert.strictEqual(streamRequestPayloads[0].options.responseType, 'stream');
+    assert.deepStrictEqual(streamedResponse, {
+      imageResult: {
+        kind: 'b64_json',
+        value: pngBase64,
+        eventType: 'image_generation.completed'
+      },
+      requestUrl: 'https://mynav.website/v1/images/generations',
+      streamMode: true
+    });
+
+    const streamedJsonFallback = await requestImageGenerationStream('buffered fox', runtimeConfig, {
+      httpClient: {
+        async post() {
+          return {
+            data: Readable.from([JSON.stringify({ data: [{ b64_json: pngBase64 }] })])
+          };
+        }
+      }
+    });
+    assert.deepStrictEqual(streamedJsonFallback, {
+      imageResult: { kind: 'b64_json', value: pngBase64, eventType: '' },
+      requestUrl: 'https://mynav.website/v1/images/generations',
+      streamMode: false
     });
 
     const fallbackUrls = [];
@@ -188,7 +274,10 @@ module.exports = (async () => {
 
     const generatedFromB64 = await generateImageWithOpenAICompatibleApi('b64 sample', runtimeConfig, {
       httpClient: {
-        async post() {
+        async post(url, body, options) {
+          if (options?.responseType === 'stream') {
+            throw new Error('stream unsupported');
+          }
           return { data: { data: [{ b64_json: pngBase64 }] } };
         }
       }
@@ -201,7 +290,15 @@ module.exports = (async () => {
       responseFormat: 'url'
     }, {
       httpClient: {
-        async post() {
+        async post(url, body, options) {
+          if (options?.responseType === 'stream') {
+            return {
+              data: Readable.from([
+                'data: {"type":"image_generation.completed","url":"https://example.com/out.png"}\n\n',
+                'data: [DONE]\n\n'
+              ])
+            };
+          }
           return { data: { data: [{ url: 'https://example.com/out.png' }] } };
         },
         async get(url, options) {
@@ -402,6 +499,25 @@ module.exports = (async () => {
     });
     assert.strictEqual(gatewayQuotaFailure.ok, false);
     assert.strictEqual(gatewayQuotaFailure.replyText, '生图供应商额度不足，请联系服务商');
+
+    const upstreamTimeoutFailure = await executeCreateCommand({
+      prompt: 'upstream timeout failure',
+      chatType: 'group',
+      groupId: 'g11',
+      senderId: 'u11'
+    }, {
+      config: {
+        ...runtimeConfig,
+        quotaFile: path.join(tempRoot, 'quota-upstream-timeout.json'),
+        runtimeFile: path.join(tempRoot, 'runtime-upstream-timeout.json'),
+        errorLogFile: path.join(tempRoot, 'errors-upstream-timeout.log')
+      },
+      generateImage: async () => {
+        throw new Error('http_error status=524 body={"title":"Error 524: A timeout occurred","error_name":"origin_response_timeout","cloudflare_error":true}');
+      }
+    });
+    assert.strictEqual(upstreamTimeoutFailure.ok, false);
+    assert.strictEqual(upstreamTimeoutFailure.replyText, '生图上游超时，请稍后重试或更换供应商');
 
     assert.strictEqual(
       normalizeRequestError({ response: { status: 429, data: { error: 'rate_limited' } } }),

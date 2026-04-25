@@ -77,6 +77,8 @@ module.exports = (async () => {
     process.env.CREATE_AGENT_API_BASE_URL = 'https://image.example.com/v1';
     process.env.CREATE_AGENT_API_KEY = 'create-test-key';
     process.env.CREATE_AGENT_MODEL = 'gpt-image-1.5';
+    process.env.ADMIN_USER_IDS = 'admin_user';
+    process.env.CREATE_AGENT_ALLOW_USER_IDS = 'allowed_user';
 
     clearProjectCache();
 
@@ -85,6 +87,7 @@ module.exports = (async () => {
     const createAgentExecutor = require('../api/createAgentExecutor');
 
     const sentPayloads = [];
+    const sendCalls = [];
     let executorCalls = 0;
     const originalExecuteCreateCommand = createAgentExecutor.executeCreateCommand;
     createAgentExecutor.executeCreateCommand = async ({ chatType }) => {
@@ -99,6 +102,7 @@ module.exports = (async () => {
       const { handleIncomingMessage } = createMessageHandler({
         config,
         sendWithRetry: async (payload) => {
+          sendCalls.push(payload);
           sentPayloads.push(payload);
           return true;
         },
@@ -108,7 +112,7 @@ module.exports = (async () => {
       });
 
       await handleIncomingMessage(buildGroupMessage({
-        userId: 'user_1',
+        userId: 'admin_user',
         groupId: 'group_1',
         messageId: 'create_1',
         rawText: '/create blue fox under moonlight'
@@ -116,6 +120,47 @@ module.exports = (async () => {
 
       assert.strictEqual(executorCalls, 1);
       assert.strictEqual(sentPayloads.length, 0, 'successful /create should not send extra text');
+      assert.strictEqual(sendCalls.length, 0);
+
+      await handleIncomingMessage(buildGroupMessage({
+        userId: 'allowed_user',
+        groupId: 'group_1',
+        messageId: 'create_1b',
+        rawText: '/create white tiger in snow'
+      }));
+
+      assert.strictEqual(executorCalls, 2, 'allowlisted non-admin should execute create');
+      assert.strictEqual(sendCalls.length, 0);
+
+      await handleIncomingMessage(buildGroupMessage({
+        userId: 'not_allowed_user',
+        groupId: 'group_1',
+        messageId: 'create_unauthorized_1',
+        rawText: '/create blue fox under moonlight'
+      }));
+
+      assert.strictEqual(executorCalls, 2, 'unauthorized group user should not execute create');
+      assert.strictEqual(sendCalls.length, 1, 'unauthorized group /create should send one poke');
+      assert.strictEqual(sendCalls[0]?.action, 'group_poke');
+      assert.deepStrictEqual(sendCalls[0]?.params, {
+        group_id: 'group_1',
+        user_id: 'not_allowed_user'
+      });
+
+      await handleIncomingMessage(buildGroupMessage({
+        userId: 'not_allowed_user',
+        groupId: 'group_1',
+        messageId: 'create_unauthorized_2',
+        rawText: '/create'
+      }));
+
+      assert.strictEqual(executorCalls, 2, 'unauthorized empty-prompt group user should not execute create');
+      assert.strictEqual(sendCalls.length, 2, 'unauthorized empty-prompt /create should still only poke');
+      assert.strictEqual(sendCalls[1]?.action, 'group_poke');
+      assert.deepStrictEqual(sendCalls[1]?.params, {
+        group_id: 'group_1',
+        user_id: 'not_allowed_user'
+      });
 
       await handleIncomingMessage(buildPrivateMessage({
         userId: 'user_private',
@@ -124,8 +169,9 @@ module.exports = (async () => {
       }));
 
       assert.strictEqual(executorCalls, 2);
-      assert.strictEqual(sentPayloads.length, 1, 'private /create should send one short rejection');
-      assert.ok(String(sentPayloads[0]?.params?.message || '').includes('仅群聊可用'));
+      assert.strictEqual(sentPayloads.length, 3, 'private /create should send one short rejection');
+      assert.strictEqual(sendCalls[2]?.action, 'send_private_msg');
+      assert.ok(String(sentPayloads[2]?.params?.message || '').includes('仅群聊可用'));
     } finally {
       createAgentExecutor.executeCreateCommand = originalExecuteCreateCommand;
     }
