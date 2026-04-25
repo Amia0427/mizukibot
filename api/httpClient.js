@@ -584,6 +584,24 @@ function buildUnavailableImageText(imageUrl = '') {
     : `[Image URL] ${imageUrl}`;
 }
 
+function getOpenAICompatibleImageMode() {
+  const raw = normalizeText(process.env.OPENAI_COMPAT_IMAGE_INPUT_MODE || '').toLowerCase();
+  if (!raw) return 'data_url';
+  if (['data_url', 'data-url', 'dataurl', 'inline'].includes(raw)) return 'data_url';
+  if (['text_fallback', 'text-fallback', 'text', 'fallback', 'disabled', 'off'].includes(raw)) return 'text_fallback';
+  return 'data_url';
+}
+
+function buildOpenAICompatibleImageFallbackText(imageUrl = '') {
+  if (parseCacheRef(imageUrl)) {
+    return '[Image attached but current model endpoint does not support inline cached image payloads. Please use a vision-capable provider or enable compatible image transport.]';
+  }
+  if (isQqImageUrl(imageUrl)) {
+    return '[Image attached but current model endpoint does not support this image transport, and the QQ image link may be ephemeral.]';
+  }
+  return '[Image attached but current model endpoint does not support inline image transport.]';
+}
+
 async function resolveOpenAICompatibleImagePart(part = {}) {
   const normalizedPart = sanitizeOpenAICompatibleContentPart(part);
   const inlineData = String(
@@ -602,6 +620,12 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
   const imageDetail = normalizeOpenAIImageDetail(normalizedPart?.image_url?.detail);
 
   if (inlineData && (sourceType === 'base64' || normalizedPart?.type === 'input_image' || normalizedPart?.type === 'image')) {
+    if (getOpenAICompatibleImageMode() !== 'data_url') {
+      return {
+        type: 'text',
+        text: buildOpenAICompatibleImageFallbackText(String(normalizedPart?.image_url?.url || normalizedPart?.url || ''))
+      };
+    }
     return {
       type: 'image_url',
       image_url: {
@@ -616,6 +640,12 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
   const cacheRef = parseCacheRef(imageUrl);
   const cachedImage = cacheRef ? readCachedImagePayload(imageUrl) : null;
   if (cachedImage?.data) {
+    if (getOpenAICompatibleImageMode() !== 'data_url') {
+      return {
+        type: 'text',
+        text: buildOpenAICompatibleImageFallbackText(imageUrl)
+      };
+    }
     return {
       type: 'image_url',
       image_url: {
@@ -639,6 +669,12 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
     const mediaType = inferImageMediaType(imageUrl, resp?.headers || {});
     const data = Buffer.from(resp.data).toString('base64');
     if (!data) return null;
+    if (getOpenAICompatibleImageMode() !== 'data_url') {
+      return {
+        type: 'text',
+        text: buildOpenAICompatibleImageFallbackText(imageUrl)
+      };
+    }
     return {
       type: 'image_url',
       image_url: {
@@ -1758,4 +1794,3 @@ module.exports = {
   mapMessagesToAnthropic,
   preprocessOpenAICompatibleMessages
 };
-

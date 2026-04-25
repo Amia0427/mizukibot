@@ -16,6 +16,11 @@ const {
   cleanToolReplyText,
   resolveToolReplyFormattingPreferences
 } = require('../utils/toolReplyFormatting');
+const {
+  findExplicitSegmentBreakIndex,
+  findNaturalSplitIndex,
+  getStreamingSplitIndex
+} = require('./streamingSegmentation');
 
 function createReplyTelemetryEvent(type = '', payload = {}) {
   return {
@@ -116,6 +121,10 @@ function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
 
   if (failure.type === 'provider_auth') {
     return '当前上游模型鉴权或配置有问题，暂时没法正常回答，需要先检查配置。';
+  }
+
+  if (failure.type === 'provider_quota') {
+    return '当前上游模型额度不足，暂时没法正常回答，需要先切换模型或补额度。';
   }
 
   if (failure.type === 'generic_model_failure') {
@@ -221,35 +230,11 @@ function parseBackgroundControlCommand(text = '') {
 }
 
 function getModelSegmentBreakIndex(text) {
-  const input = String(text || '');
-  if (!input) return -1;
-
-  const rn = input.indexOf('\r\n\r\n');
-  const nn = input.indexOf('\n\n');
-
-  if (rn === -1 && nn === -1) return -1;
-  if (rn === -1) return nn + 2;
-  if (nn === -1) return rn + 4;
-  return Math.min(rn + 4, nn + 2);
+  return findExplicitSegmentBreakIndex(text);
 }
 
 function getNaturalSplitIndex(text) {
-  const input = String(text || '');
-  if (!input) return -1;
-
-  const strongStops = ['\n', '?', '？', '。', '!', '！', '~', '～', ';', '；'];
-  for (let i = input.length - 1; i >= 0; i -= 1) {
-    if (strongStops.includes(input[i])) return i + 1;
-  }
-
-  if (input.length >= 24) {
-    const weakStops = [',', '，', '、', ':', '：'];
-    for (let i = input.length - 1; i >= 0; i -= 1) {
-      if (weakStops.includes(input[i])) return i + 1;
-    }
-  }
-
-  return -1;
+  return findNaturalSplitIndex(text);
 }
 
 function getStreamSendGapMs(runtimeConfig = {}) {
@@ -339,14 +324,10 @@ function createStreamingDispatcher({
     let sendUntil = -1;
     const canSplitMore = state.sentSegments < (maxSegments - 1);
     if (canSplitMore) {
-      sendUntil = getModelSegmentBreakIndex(pending);
-      if (sendUntil <= 0) {
-        const natural = getNaturalSplitIndex(pending);
-        if (natural > 0) sendUntil = natural;
-      }
+      sendUntil = getStreamingSplitIndex(pending);
     }
 
-    if (sendUntil <= 0 && force) sendUntil = pending.length;
+    if (sendUntil <= 0 && force) sendUntil = getStreamingSplitIndex(pending, { force: true });
     if (sendUntil <= 0) return false;
 
     const rawChunk = pending.slice(0, sendUntil);

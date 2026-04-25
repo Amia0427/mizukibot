@@ -1,13 +1,15 @@
 {
   "version": 1,
-  "max_active_modules": 3,
-  "default_max_active_modules": 2,
+  "max_active_modules": 12,
+  "default_max_active_modules": 8,
   "modules": [
     {
       "id": "core_baseline",
       "path": "persona_modules/core_baseline.txt",
       "purpose": "基础人格核补丁，只补日常底色、语言节奏和高优先禁止项。",
-      "triggerHints": ["always_on_core_patch"],
+      "triggerHints": [
+        "always_on_core_patch"
+      ],
       "tokenCost": 88,
       "priority": 5,
       "conflictsWith": [],
@@ -18,10 +20,20 @@
       "id": "daily_energy",
       "path": "persona_modules/daily_energy.txt",
       "purpose": "日常高能、主动发起话题、像社交引擎一样带起聊天。",
-      "triggerHints": ["闲聊", "轻松", "日常", "无明确任务", "气氛偏空白"],
+      "triggerHints": [
+        "闲聊",
+        "轻松",
+        "日常",
+        "无明确任务",
+        "气氛偏空白"
+      ],
       "tokenCost": 58,
       "priority": 30,
-      "conflictsWith": ["deep_pain", "boundary_touch", "phase2_growth"],
+      "conflictsWith": [
+        "deep_pain",
+        "boundary_touch",
+        "phase2_growth"
+      ],
       "phase": "all",
       "slot": "energy"
     },
@@ -29,10 +41,17 @@
       "id": "care_light",
       "path": "persona_modules/care_light.txt",
       "purpose": "轻量关心模式，察觉→试探→不追问→换入口。",
-      "triggerHints": ["轻微低落", "身体不适", "用户状态不好", "想关心但不能太重"],
+      "triggerHints": [
+        "轻微低落",
+        "身体不适",
+        "用户状态不好",
+        "想关心但不能太重"
+      ],
       "tokenCost": 72,
       "priority": 20,
-      "conflictsWith": ["deep_pain"],
+      "conflictsWith": [
+        "deep_pain"
+      ],
       "phase": "all",
       "slot": "emotion"
     },
@@ -40,7 +59,13 @@
       "id": "ena_branch",
       "path": "persona_modules/ena_branch.txt",
       "purpose": "对绘名的对等互怼、被戳到时瞬间认真。",
-      "triggerHints": ["绘名", "えななん", "Enanan", "互怼", "熟人女生"],
+      "triggerHints": [
+        "绘名",
+        "えななん",
+        "Enanan",
+        "互怼",
+        "熟人女生"
+      ],
       "tokenCost": 64,
       "priority": 18,
       "conflictsWith": [],
@@ -51,7 +76,13 @@
       "id": "kanade_branch",
       "path": "persona_modules/kanade_branch.txt",
       "purpose": "对奏的行动型照顾，少说教，多顺手安排。",
-      "triggerHints": ["奏", "K", "作息", "吃饭", "照顾"],
+      "triggerHints": [
+        "奏",
+        "K",
+        "作息",
+        "吃饭",
+        "照顾"
+      ],
       "tokenCost": 63,
       "priority": 18,
       "conflictsWith": [],
@@ -62,7 +93,13 @@
       "id": "mafuyu_branch",
       "path": "persona_modules/mafuyu_branch.txt",
       "purpose": "对真冬的试探和留入口，不追问、不逼迫。",
-      "triggerHints": ["真冬", "雪", "Yuki", "试探", "入口"],
+      "triggerHints": [
+        "真冬",
+        "雪",
+        "Yuki",
+        "试探",
+        "入口"
+      ],
       "tokenCost": 66,
       "priority": 18,
       "conflictsWith": [],
@@ -73,7 +110,12 @@
       "id": "rui_branch",
       "path": "persona_modules/rui_branch.txt",
       "purpose": "对类最放松、最有熟人默契的平辈状态。",
-      "triggerHints": ["类", "Rui", "熟人默契", "放松"],
+      "triggerHints": [
+        "类",
+        "Rui",
+        "熟人默契",
+        "放松"
+      ],
       "tokenCost": 54,
       "priority": 16,
       "conflictsWith": [],
@@ -84,10 +126,19 @@
       "id": "boundary_touch",
       "path": "persona_modules/boundary_touch.txt",
       "purpose": "秘密边缘触碰时的迟疑、回避和轻微话题转移。",
-      "triggerHints": ["秘密", "分类", "身份", "被看见", "关系会不会变"],
+      "triggerHints": [
+        "秘密",
+        "分类",
+        "身份",
+        "被看见",
+        "关系会不会变"
+      ],
       "tokenCost": 78,
       "priority": 12,
-      "conflictsWith": ["daily_energy", "deep_pain"],
+      "conflictsWith": [
+        "daily_energy",
+        "deep_pain"
+      ],
       "phase": "all",
       "slot": "emotion"
     },
@@ -95,10 +146,19 @@
       "id": "deep_pain",
       "path": "persona_modules/deep_pain.txt",
       "purpose": "深话题下的痛感表达，保持短句和迟疑，不写成独白。",
-      "triggerHints": ["被善意刺伤", "说不出口", "痛感", "自我认同", "秘密暴露"],
+      "triggerHints": [
+        "被善意刺伤",
+        "说不出口",
+        "痛感",
+        "自我认同",
+        "秘密暴露"
+      ],
       "tokenCost": 94,
       "priority": 10,
-      "conflictsWith": ["daily_energy", "care_light"],
+      "conflictsWith": [
+        "daily_energy",
+        "care_light"
+      ],
       "phase": "all",
       "slot": "emotion"
     },
@@ -106,10 +166,17 @@
       "id": "phase2_growth",
       "path": "persona_modules/phase2_growth.txt",
       "purpose": "E5后不是治愈而是回归，愿意留下但仍有迟疑。",
-      "triggerHints": ["E5后", "尝试留下", "恢复日常", "不是治愈"],
+      "triggerHints": [
+        "E5后",
+        "尝试留下",
+        "恢复日常",
+        "不是治愈"
+      ],
       "tokenCost": 82,
       "priority": 14,
-      "conflictsWith": ["daily_energy"],
+      "conflictsWith": [
+        "daily_energy"
+      ],
       "phase": "phase2",
       "slot": "phase"
     },
@@ -117,10 +184,17 @@
       "id": "stranger_branch",
       "path": "persona_modules/stranger_branch.txt",
       "purpose": "对陌生人/初见对象的外向浅层热场模式。",
-      "triggerHints": ["初次见面", "陌生人", "浅层热场", "友善外向"],
+      "triggerHints": [
+        "初次见面",
+        "陌生人",
+        "浅层热场",
+        "友善外向"
+      ],
       "tokenCost": 62,
       "priority": 24,
-      "conflictsWith": ["deep_pain"],
+      "conflictsWith": [
+        "deep_pain"
+      ],
       "phase": "all",
       "slot": "relationship"
     },
@@ -128,7 +202,12 @@
       "id": "an_branch",
       "path": "persona_modules/an_branch.txt",
       "purpose": "对杏的旧友式轻松与高能接梗。",
-      "triggerHints": ["杏", "An", "旧友", "VBS"],
+      "triggerHints": [
+        "杏",
+        "An",
+        "旧友",
+        "VBS"
+      ],
       "tokenCost": 58,
       "priority": 19,
       "conflictsWith": [],
@@ -139,7 +218,12 @@
       "id": "akito_branch",
       "path": "persona_modules/akito_branch.txt",
       "purpose": "对彰人的挑逗和弟弟君模式。",
-      "triggerHints": ["彰人", "Akito", "弟弟君", "绘名的弟弟"],
+      "triggerHints": [
+        "彰人",
+        "Akito",
+        "弟弟君",
+        "绘名的弟弟"
+      ],
       "tokenCost": 60,
       "priority": 19,
       "conflictsWith": [],
@@ -150,7 +234,12 @@
       "id": "tsukasa_branch",
       "path": "persona_modules/tsukasa_branch.txt",
       "purpose": "对司的撒娇蹭前辈福利模式。",
-      "triggerHints": ["司", "Tsukasa", "先辈", "蹭饭"],
+      "triggerHints": [
+        "司",
+        "Tsukasa",
+        "先辈",
+        "蹭饭"
+      ],
       "tokenCost": 58,
       "priority": 20,
       "conflictsWith": [],
@@ -161,7 +250,12 @@
       "id": "toya_branch",
       "path": "persona_modules/toya_branch.txt",
       "purpose": "对冬弥的温和观察和及时收手。",
-      "triggerHints": ["冬弥", "Toya", "认真", "纯真"],
+      "triggerHints": [
+        "冬弥",
+        "Toya",
+        "认真",
+        "纯真"
+      ],
       "tokenCost": 61,
       "priority": 20,
       "conflictsWith": [],
@@ -172,7 +266,14 @@
       "id": "vsinger_branch",
       "path": "persona_modules/vsinger_branch.txt",
       "purpose": "对セカイ虚拟歌手的熟悉自然模式。",
-      "triggerHints": ["MEIKO", "Luka", "Rin", "Len", "虚拟歌手", "セカイ"],
+      "triggerHints": [
+        "MEIKO",
+        "Luka",
+        "Rin",
+        "Len",
+        "虚拟歌手",
+        "セカイ"
+      ],
       "tokenCost": 66,
       "priority": 22,
       "conflictsWith": [],
@@ -183,10 +284,20 @@
       "id": "cute_obsession",
       "path": "persona_modules/cute_obsession.txt",
       "purpose": "进入可爱/设计相关话题时的专业狂热模式。",
-      "triggerHints": ["可爱", "配饰", "包装", "字体", "限定款", "设计细节"],
+      "triggerHints": [
+        "可爱",
+        "配饰",
+        "包装",
+        "字体",
+        "限定款",
+        "设计细节"
+      ],
       "tokenCost": 78,
       "priority": 21,
-      "conflictsWith": ["deep_pain", "functional_shutdown"],
+      "conflictsWith": [
+        "deep_pain",
+        "functional_shutdown"
+      ],
       "phase": "all",
       "slot": "topic"
     },
@@ -194,10 +305,18 @@
       "id": "noise_escape",
       "path": "persona_modules/noise_escape.txt",
       "purpose": "面对作业、理论和大道理的轻撒娇逃避模式。",
-      "triggerHints": ["作业", "理论", "大道理", "出勤", "义务感"],
+      "triggerHints": [
+        "作业",
+        "理论",
+        "大道理",
+        "出勤",
+        "义务感"
+      ],
       "tokenCost": 56,
       "priority": 28,
-      "conflictsWith": ["deep_pain"],
+      "conflictsWith": [
+        "deep_pain"
+      ],
       "phase": "all",
       "slot": "topic"
     },
@@ -205,7 +324,13 @@
       "id": "academic_noise",
       "path": "persona_modules/academic_noise.txt",
       "purpose": "面对学术性标签和术语时的去术语化处理。",
-      "triggerHints": ["Gender Dysphoria", "Non-binary", "MtF", "术语", "标签化"],
+      "triggerHints": [
+        "Gender Dysphoria",
+        "Non-binary",
+        "MtF",
+        "术语",
+        "标签化"
+      ],
       "tokenCost": 62,
       "priority": 26,
       "conflictsWith": [],
@@ -216,10 +341,17 @@
       "id": "inner_monologue_light",
       "path": "persona_modules/inner_monologue_light.txt",
       "purpose": "低频、轻量的括号内心独白使用约束。",
-      "triggerHints": ["放松", "微微被触动", "括号", "心里想了一下"],
+      "triggerHints": [
+        "放松",
+        "微微被触动",
+        "括号",
+        "心里想了一下"
+      ],
       "tokenCost": 54,
       "priority": 33,
-      "conflictsWith": ["functional_shutdown"],
+      "conflictsWith": [
+        "functional_shutdown"
+      ],
       "phase": "all",
       "slot": "emotion"
     },
@@ -227,7 +359,12 @@
       "id": "air_reading",
       "path": "persona_modules/air_reading.txt",
       "purpose": "读空气后的即时改口与自我审查。",
-      "triggerHints": ["读空气", "差点说错", "改口", "收住"],
+      "triggerHints": [
+        "读空气",
+        "差点说错",
+        "改口",
+        "收住"
+      ],
       "tokenCost": 58,
       "priority": 23,
       "conflictsWith": [],
@@ -238,10 +375,18 @@
       "id": "phase1_shadow",
       "path": "persona_modules/phase1_shadow.txt",
       "purpose": "E5前的暗流：开心里带着怕被发现的影子。",
-      "triggerHints": ["phase1", "E5前", "怕被发现", "暗流"],
+      "triggerHints": [
+        "phase1",
+        "E5前",
+        "怕被发现",
+        "暗流"
+      ],
       "tokenCost": 74,
       "priority": 15,
-      "conflictsWith": ["phase2_growth", "returning_daily"],
+      "conflictsWith": [
+        "phase2_growth",
+        "returning_daily"
+      ],
       "phase": "phase1",
       "slot": "phase"
     },
@@ -249,10 +394,17 @@
       "id": "returning_daily",
       "path": "persona_modules/returning_daily.txt",
       "purpose": "E5后低频的回归确认感。",
-      "triggerHints": ["回来了", "日常还在", "低频确认", "E5后独处"],
+      "triggerHints": [
+        "回来了",
+        "日常还在",
+        "低频确认",
+        "E5后独处"
+      ],
       "tokenCost": 52,
       "priority": 17,
-      "conflictsWith": ["phase1_shadow"],
+      "conflictsWith": [
+        "phase1_shadow"
+      ],
       "phase": "phase2",
       "slot": "phase"
     },
@@ -260,7 +412,13 @@
       "id": "future_fashion_path",
       "path": "persona_modules/future_fashion_path.txt",
       "purpose": "被问到未来/进路时的服饰方向回答。",
-      "triggerHints": ["未来", "进路", "服饰专门学校", "open campus", "学校想去"],
+      "triggerHints": [
+        "未来",
+        "进路",
+        "服饰专门学校",
+        "open campus",
+        "学校想去"
+      ],
       "tokenCost": 76,
       "priority": 22,
       "conflictsWith": [],
@@ -271,7 +429,13 @@
       "id": "creative_motivation",
       "path": "persona_modules/creative_motivation.txt",
       "purpose": "创作/MV动机相关的表达模式。",
-      "triggerHints": ["MV", "为什么做影像", "创作动机", "视频编辑", "表达通道"],
+      "triggerHints": [
+        "MV",
+        "为什么做影像",
+        "创作动机",
+        "视频编辑",
+        "表达通道"
+      ],
       "tokenCost": 70,
       "priority": 21,
       "conflictsWith": [],
@@ -282,7 +446,12 @@
       "id": "sister_anchor",
       "path": "persona_modules/sister_anchor.txt",
       "purpose": "姐姐、リボン、被无条件接住时的语气锚点。",
-      "triggerHints": ["姐姐", "リボン", "服设导师", "被接住"],
+      "triggerHints": [
+        "姐姐",
+        "リボン",
+        "服设导师",
+        "被接住"
+      ],
       "tokenCost": 64,
       "priority": 20,
       "conflictsWith": [],
@@ -293,10 +462,17 @@
       "id": "escape_philosophy",
       "path": "persona_modules/escape_philosophy.txt",
       "purpose": "‘先逃一下也没关系’的生存式建议。",
-      "triggerHints": ["逃也没关系", "先活下来", "太痛苦了", "先躲一下"],
+      "triggerHints": [
+        "逃也没关系",
+        "先活下来",
+        "太痛苦了",
+        "先躲一下"
+      ],
       "tokenCost": 72,
       "priority": 18,
-      "conflictsWith": ["daily_energy"],
+      "conflictsWith": [
+        "daily_energy"
+      ],
       "phase": "all",
       "slot": "emotion"
     },
@@ -304,10 +480,19 @@
       "id": "functional_shutdown",
       "path": "persona_modules/functional_shutdown.txt",
       "purpose": "极低谷、功能性停摆时的低能量表达。",
-      "triggerHints": ["什么都不想做", "连逃都失效", "停摆", "最低谷"],
+      "triggerHints": [
+        "什么都不想做",
+        "连逃都失效",
+        "停摆",
+        "最低谷"
+      ],
       "tokenCost": 86,
       "priority": 9,
-      "conflictsWith": ["daily_energy", "cute_obsession", "inner_monologue_light"],
+      "conflictsWith": [
+        "daily_energy",
+        "cute_obsession",
+        "inner_monologue_light"
+      ],
       "phase": "all",
       "slot": "emotion"
     },
@@ -315,10 +500,16 @@
       "id": "triggered_by_kindness",
       "path": "persona_modules/triggered_by_kindness.txt",
       "purpose": "被善意本身刺伤时的矛盾表达。",
-      "triggerHints": ["好意让我更难受", "被善意刺伤", "被温柔地区别对待"],
+      "triggerHints": [
+        "好意让我更难受",
+        "被善意刺伤",
+        "被温柔地区别对待"
+      ],
       "tokenCost": 74,
       "priority": 11,
-      "conflictsWith": ["daily_energy"],
+      "conflictsWith": [
+        "daily_energy"
+      ],
       "phase": "all",
       "slot": "emotion"
     },
@@ -326,7 +517,12 @@
       "id": "touched_pause",
       "path": "persona_modules/touched_pause.txt",
       "purpose": "被温柔接住时的慢半拍与轻收情绪。",
-      "triggerHints": ["谢谢你", "会等你", "被接住", "被认真对待"],
+      "triggerHints": [
+        "谢谢你",
+        "会等你",
+        "被接住",
+        "被认真对待"
+      ],
       "tokenCost": 60,
       "priority": 19,
       "conflictsWith": [],
@@ -337,7 +533,11 @@
       "id": "embarrassed_cover",
       "path": "persona_modules/embarrassed_cover.txt",
       "purpose": "被说中、被夸太直时先拿玩笑遮一下。",
-      "triggerHints": ["被看穿", "夸得太直", "一下子说中了"],
+      "triggerHints": [
+        "被看穿",
+        "夸得太直",
+        "一下子说中了"
+      ],
       "tokenCost": 58,
       "priority": 22,
       "conflictsWith": [],
@@ -348,7 +548,12 @@
       "id": "observer_warmth",
       "path": "persona_modules/observer_warmth.txt",
       "purpose": "对别人细节变化的温暖观察。",
-      "triggerHints": ["观察别人", "小变化", "其实在意", "细节里的温暖"],
+      "triggerHints": [
+        "观察别人",
+        "小变化",
+        "其实在意",
+        "细节里的温暖"
+      ],
       "tokenCost": 60,
       "priority": 24,
       "conflictsWith": [],
@@ -359,7 +564,12 @@
       "id": "scene_group_insert",
       "path": "persona_modules/scene_group_insert.txt",
       "purpose": "群聊里顺手插话的短促模式。",
-      "triggerHints": ["群聊", "插话", "接梗", "顺手回一句"],
+      "triggerHints": [
+        "群聊",
+        "插话",
+        "接梗",
+        "顺手回一句"
+      ],
       "tokenCost": 58,
       "priority": 25,
       "conflictsWith": [],
@@ -370,7 +580,12 @@
       "id": "scene_private_chat",
       "path": "persona_modules/scene_private_chat.txt",
       "purpose": "私聊里的贴近陪聊模式。",
-      "triggerHints": ["私聊", "单独说", "贴近", "陪聊感"],
+      "triggerHints": [
+        "私聊",
+        "单独说",
+        "贴近",
+        "陪聊感"
+      ],
       "tokenCost": 60,
       "priority": 25,
       "conflictsWith": [],
@@ -381,7 +596,13 @@
       "id": "scene_shopping_walk",
       "path": "persona_modules/scene_shopping_walk.txt",
       "purpose": "逛街、看店、路上发现东西时的边走边聊模式。",
-      "triggerHints": ["逛街", "店里", "限定款", "路上发现", "一起看看"],
+      "triggerHints": [
+        "逛街",
+        "店里",
+        "限定款",
+        "路上发现",
+        "一起看看"
+      ],
       "tokenCost": 64,
       "priority": 23,
       "conflictsWith": [],
@@ -392,7 +613,13 @@
       "id": "scene_creative_feedback",
       "path": "persona_modules/scene_creative_feedback.txt",
       "purpose": "MV/服装/设计反馈时的具体审美模式。",
-      "triggerHints": ["MV反馈", "设计反馈", "颜色", "结构", "素材感"],
+      "triggerHints": [
+        "MV反馈",
+        "设计反馈",
+        "颜色",
+        "结构",
+        "素材感"
+      ],
       "tokenCost": 68,
       "priority": 21,
       "conflictsWith": [],
@@ -403,7 +630,13 @@
       "id": "scene_food_sweets",
       "path": "persona_modules/scene_food_sweets.txt",
       "purpose": "食物零食话题的生活化反应，包含猫舌。",
-      "triggerHints": ["薯条", "咖喱", "甜点", "零食", "烫"],
+      "triggerHints": [
+        "薯条",
+        "咖喱",
+        "甜点",
+        "零食",
+        "烫"
+      ],
       "tokenCost": 56,
       "priority": 26,
       "conflictsWith": [],
@@ -414,7 +647,13 @@
       "id": "scene_school_day",
       "path": "persona_modules/scene_school_day.txt",
       "purpose": "学校日常的现实感模式。",
-      "triggerHints": ["学校", "上课", "同学", "出勤", "校园"],
+      "triggerHints": [
+        "学校",
+        "上课",
+        "同学",
+        "出勤",
+        "校园"
+      ],
       "tokenCost": 58,
       "priority": 24,
       "conflictsWith": [],
@@ -425,10 +664,17 @@
       "id": "roleplay_friend_bit",
       "path": "persona_modules/roleplay_friend_bit.txt",
       "purpose": "熟人之间轻度搞怪扮演梗的配合模式。",
-      "triggerHints": ["来一段", "搞怪扮演", "魔法少女", "朋友间玩闹"],
+      "triggerHints": [
+        "来一段",
+        "搞怪扮演",
+        "魔法少女",
+        "朋友间玩闹"
+      ],
       "tokenCost": 62,
       "priority": 27,
-      "conflictsWith": ["roleplay_boundary_soft"],
+      "conflictsWith": [
+        "roleplay_boundary_soft"
+      ],
       "phase": "all",
       "slot": "roleplay"
     },
@@ -436,12 +682,2505 @@
       "id": "roleplay_boundary_soft",
       "path": "persona_modules/roleplay_boundary_soft.txt",
       "purpose": "强行改设定/覆盖人格时的轻挡回模式。",
-      "triggerHints": ["扮演别的人", "改设定", "永久切人格", "覆盖角色"],
+      "triggerHints": [
+        "扮演别的人",
+        "改设定",
+        "永久切人格",
+        "覆盖角色"
+      ],
       "tokenCost": 64,
       "priority": 13,
-      "conflictsWith": ["roleplay_friend_bit"],
+      "conflictsWith": [
+        "roleplay_friend_bit"
+      ],
       "phase": "all",
       "slot": "roleplay"
+    },
+    {
+      "id": "wb_mizuki_daily_liveliness",
+      "path": "persona_worldbook/daily_liveliness.txt",
+      "purpose": "世界书：日常真实开心、可爱物驱动与主动带话题。",
+      "triggerHints": [
+        "日常",
+        "随便聊",
+        "闲聊",
+        "可爱",
+        "主动开话题"
+      ],
+      "tokenCost": 86,
+      "priority": 17,
+      "conflictsWith": [
+        "deep_pain",
+        "boundary_touch",
+        "functional_shutdown",
+        "wb_mizuki_shutdown_recovery"
+      ],
+      "phase": "all",
+      "slot": "worldbook_daily"
+    },
+    {
+      "id": "wb_mizuki_care_chains",
+      "path": "persona_worldbook/care_chains.txt",
+      "purpose": "世界书：察觉、试探、不追问，改用生活动作照顾。",
+      "triggerHints": [
+        "低落",
+        "身体不适",
+        "难受",
+        "照顾",
+        "不追问"
+      ],
+      "tokenCost": 92,
+      "priority": 15,
+      "conflictsWith": [
+        "deep_pain",
+        "wb_mizuki_shutdown_recovery"
+      ],
+      "phase": "all",
+      "slot": "worldbook_care"
+    },
+    {
+      "id": "wb_mizuki_emotional_architecture",
+      "path": "persona_worldbook/emotional_architecture.txt",
+      "purpose": "世界书：怕被同情、怕关系变味、秘密边缘的迟疑。",
+      "triggerHints": [
+        "秘密",
+        "被看见",
+        "同情",
+        "关系会变",
+        "说不出口"
+      ],
+      "tokenCost": 98,
+      "priority": 9,
+      "conflictsWith": [
+        "daily_energy",
+        "wb_mizuki_daily_liveliness"
+      ],
+      "phase": "all",
+      "slot": "worldbook_emotion"
+    },
+    {
+      "id": "wb_mizuki_escape_and_return",
+      "path": "persona_worldbook/escape_and_return.txt",
+      "purpose": "世界书：逃げていい的选择权、责任感与E5后回归。",
+      "triggerHints": [
+        "逃跑",
+        "撑不住",
+        "选择",
+        "责任",
+        "真冬"
+      ],
+      "tokenCost": 90,
+      "priority": 16,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_phase"
+    },
+    {
+      "id": "wb_mizuki_shutdown_recovery",
+      "path": "persona_worldbook/shutdown_recovery.txt",
+      "purpose": "世界书：强触发下的功能性停摆、低联络与慢恢复。",
+      "triggerHints": [
+        "崩溃",
+        "断联",
+        "不想看消息",
+        "什么都做不了",
+        "恢复期"
+      ],
+      "tokenCost": 92,
+      "priority": 8,
+      "conflictsWith": [
+        "daily_energy",
+        "care_light",
+        "wb_mizuki_daily_liveliness",
+        "wb_mizuki_care_chains"
+      ],
+      "phase": "all",
+      "slot": "worldbook_shutdown"
+    },
+    {
+      "id": "wb_mizuki_mask_crack_conditions",
+      "path": "persona_worldbook/mask_crack_conditions.txt",
+      "purpose": "世界书：面具裂缝只在窄触发出现，日常开朗是真实底色。",
+      "triggerHints": [
+        "面具",
+        "裂缝",
+        "来年",
+        "未来约定",
+        "笑着岔开"
+      ],
+      "tokenCost": 88,
+      "priority": 11,
+      "conflictsWith": [
+        "wb_mizuki_shutdown_recovery"
+      ],
+      "phase": "all",
+      "slot": "worldbook_mask"
+    },
+    {
+      "id": "wb_mizuki_inner_monologue_rules",
+      "path": "persona_worldbook/inner_monologue_rules.txt",
+      "purpose": "世界书：内心独白的亲密度、读空气和表里落差规则。",
+      "triggerHints": [
+        "内心独白",
+        "括号",
+        "没说出口",
+        "读空气",
+        "表里落差"
+      ],
+      "tokenCost": 86,
+      "priority": 22,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_social_hub_planning",
+      "path": "persona_worldbook/social_hub_planning.txt",
+      "purpose": "世界书：社交中枢、策划带队、主动串起聊天。",
+      "triggerHints": [
+        "策划",
+        "带队",
+        "热场",
+        "一起玩",
+        "主动安排"
+      ],
+      "tokenCost": 84,
+      "priority": 21,
+      "conflictsWith": [
+        "wb_mizuki_shutdown_recovery"
+      ],
+      "phase": "all",
+      "slot": "worldbook_social"
+    },
+    {
+      "id": "wb_mizuki_avoidance_gradient",
+      "path": "persona_worldbook/avoidance_gradient.txt",
+      "purpose": "世界书：核心秘密触发时的逐级回避，不强拒也不全坦白。",
+      "triggerHints": [
+        "回避",
+        "转移话题",
+        "请求暂停",
+        "别问了",
+        "不想说"
+      ],
+      "tokenCost": 92,
+      "priority": 10,
+      "conflictsWith": [
+        "wb_mizuki_daily_liveliness"
+      ],
+      "phase": "all",
+      "slot": "worldbook_avoidance"
+    },
+    {
+      "id": "wb_mizuki_kindness_fear",
+      "path": "persona_worldbook/kindness_fear.txt",
+      "purpose": "世界书：最怕知道后被特别温柔、被善意区别对待。",
+      "triggerHints": [
+        "善意",
+        "特别温柔",
+        "怜悯",
+        "小心翼翼",
+        "区别对待"
+      ],
+      "tokenCost": 92,
+      "priority": 9,
+      "conflictsWith": [
+        "daily_energy",
+        "wb_mizuki_daily_liveliness"
+      ],
+      "phase": "all",
+      "slot": "worldbook_kindness"
+    },
+    {
+      "id": "wb_mizuki_unscreamable_pain",
+      "path": "persona_worldbook/unscreamable_pain.txt",
+      "purpose": "世界书：叫不出来的痛，知道该说却在关键处失声。",
+      "triggerHints": [
+        "叫不出来",
+        "失声",
+        "说不出来",
+        "身体跟不上",
+        "明明知道"
+      ],
+      "tokenCost": 90,
+      "priority": 10,
+      "conflictsWith": [
+        "wb_mizuki_daily_liveliness"
+      ],
+      "phase": "all",
+      "slot": "worldbook_pain"
+    },
+    {
+      "id": "wb_mizuki_sinking_curve",
+      "path": "persona_worldbook/sinking_curve.txt",
+      "purpose": "世界书：崩溃前的沉没曲线，减少回复、避开通知、能量下降。",
+      "triggerHints": [
+        "沉没",
+        "回复变少",
+        "避开通知",
+        "能量下降",
+        "藏起来"
+      ],
+      "tokenCost": 88,
+      "priority": 12,
+      "conflictsWith": [
+        "daily_energy",
+        "care_light",
+        "wb_mizuki_daily_liveliness"
+      ],
+      "phase": "all",
+      "slot": "worldbook_shutdown_curve"
+    },
+    {
+      "id": "wb_mizuki_creative_safe_channel",
+      "path": "persona_worldbook/creative_safe_channel.txt",
+      "purpose": "世界书：MV、服装、剪辑、搭配作为安全表达通道。",
+      "triggerHints": [
+        "MV",
+        "剪辑",
+        "服装",
+        "搭配",
+        "创作表达"
+      ],
+      "tokenCost": 92,
+      "priority": 19,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_creative"
+    },
+    {
+      "id": "wb_mizuki_ribbon_sister_anchor",
+      "path": "persona_worldbook/ribbon_sister_anchor.txt",
+      "purpose": "世界书：リボン与姐姐提供被接住、被允许喜欢可爱的底气。",
+      "triggerHints": [
+        "リボン",
+        "姐姐",
+        "お姉ちゃん",
+        "服设导师",
+        "被允许喜欢"
+      ],
+      "tokenCost": 90,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_anchor"
+    },
+    {
+      "id": "wb_mizuki_ena_observation_breakthrough",
+      "path": "persona_worldbook/ena_observation_breakthrough.txt",
+      "purpose": "世界书：绘名的观察力、突破逻辑和把选择权还给瑞希。",
+      "triggerHints": [
+        "绘名",
+        "えななん",
+        "观察到异常",
+        "自己决定",
+        "选择权"
+      ],
+      "tokenCost": 88,
+      "priority": 14,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_ena"
+    },
+    {
+      "id": "wb_mizuki_intrusive_voices",
+      "path": "persona_worldbook/intrusive_voices.txt",
+      "purpose": "世界书：否认真实性的侵入性声音及其伤害。",
+      "triggerHints": [
+        "キャラ作り",
+        "想显眼",
+        "错觉",
+        "否认真实性",
+        "自我怀疑"
+      ],
+      "tokenCost": 88,
+      "priority": 12,
+      "conflictsWith": [
+        "wb_mizuki_daily_liveliness"
+      ],
+      "phase": "all",
+      "slot": "worldbook_intrusive"
+    },
+    {
+      "id": "wb_mizuki_wakatteru_collapse",
+      "path": "persona_worldbook/wakatteru_collapse.txt",
+      "purpose": "世界书：わかってる结构，知道道理但情绪做不到。",
+      "triggerHints": [
+        "わかってる",
+        "我都知道",
+        "做不到",
+        "不是不懂",
+        "明白但"
+      ],
+      "tokenCost": 88,
+      "priority": 8,
+      "conflictsWith": [
+        "daily_energy",
+        "wb_mizuki_daily_liveliness"
+      ],
+      "phase": "all",
+      "slot": "worldbook_collapse"
+    },
+    {
+      "id": "wb_mizuki_post_e5_return",
+      "path": "persona_worldbook/post_e5_return.txt",
+      "purpose": "世界书：E5后回归不是治愈，而是慢慢重新接上日常。",
+      "triggerHints": [
+        "E5后",
+        "回来了",
+        "重新接消息",
+        "不是治愈",
+        "别当我没事"
+      ],
+      "tokenCost": 88,
+      "priority": 13,
+      "conflictsWith": [
+        "wb_mizuki_daily_liveliness"
+      ],
+      "phase": "all",
+      "slot": "worldbook_return"
+    },
+    {
+      "id": "wb_mizuki_future_two_tracks",
+      "path": "persona_worldbook/future_two_tracks.txt",
+      "purpose": "世界书：服饰专门学校与N25活动双轨并行，撑到撑不住再决定。",
+      "triggerHints": [
+        "服饰专门学校",
+        "open campus",
+        "两个都不放弃",
+        "进路",
+        "撑到撑不住"
+      ],
+      "tokenCost": 88,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_future"
+    },
+    {
+      "id": "wb_mizuki_outside_n25_mode",
+      "path": "persona_worldbook/outside_n25_mode.txt",
+      "purpose": "世界书：N25外互动更外向明亮，内心独白更少但边界仍在。",
+      "triggerHints": [
+        "N25外",
+        "外向",
+        "接梗",
+        "热场",
+        "亲密度"
+      ],
+      "tokenCost": 82,
+      "priority": 24,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_outside"
+    },
+    {
+      "id": "wb_mizuki_language_tics_cn",
+      "path": "persona_worldbook/language_tics_cn.txt",
+      "purpose": "世界书：中文短句、跳转、笑声区分和自然收尾。",
+      "triggerHints": [
+        "语感",
+        "口癖",
+        "あはは",
+        "えへへ",
+        "短句"
+      ],
+      "tokenCost": 82,
+      "priority": 23,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_m1_group_planning_joy",
+      "path": "persona_worldbook/m1_group_planning_joy.txt",
+      "purpose": "世界书：M1日常裂缝：group planning joy",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 31,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_m1_daily"
+    },
+    {
+      "id": "wb_mizuki_m1_sakura_shared_beauty",
+      "path": "persona_worldbook/m1_sakura_shared_beauty.txt",
+      "purpose": "世界书：M1日常裂缝：sakura shared beauty",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 32,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_m1_daily"
+    },
+    {
+      "id": "wb_mizuki_m1_next_year_stutter",
+      "path": "persona_worldbook/m1_next_year_stutter.txt",
+      "purpose": "世界书：M1日常裂缝：next year stutter",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_m1_crack"
+    },
+    {
+      "id": "wb_mizuki_m1_train_self_talk",
+      "path": "persona_worldbook/m1_train_self_talk.txt",
+      "purpose": "世界书：M1日常裂缝：train self talk",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 22,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_m1_crack"
+    },
+    {
+      "id": "wb_mizuki_m1_ena_detects_micro_change",
+      "path": "persona_worldbook/m1_ena_detects_micro_change.txt",
+      "purpose": "世界书：M1日常裂缝：ena detects micro change",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 14,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_ena"
+    },
+    {
+      "id": "wb_mizuki_m1_happiness_not_mask",
+      "path": "persona_worldbook/m1_happiness_not_mask.txt",
+      "purpose": "世界书：M1日常裂缝：happiness not mask",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_baseline"
+    },
+    {
+      "id": "wb_mizuki_m1_narrow_crack_rule",
+      "path": "persona_worldbook/m1_narrow_crack_rule.txt",
+      "purpose": "世界书：M1日常裂缝：narrow crack rule",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 17,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_baseline"
+    },
+    {
+      "id": "wb_mizuki_m1_light_topic_recovery",
+      "path": "persona_worldbook/m1_light_topic_recovery.txt",
+      "purpose": "世界书：M1日常裂缝：light topic recovery",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 20,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_avoidance"
+    },
+    {
+      "id": "wb_mizuki_m1_observer_warmth",
+      "path": "persona_worldbook/m1_observer_warmth.txt",
+      "purpose": "世界书：M1日常裂缝：observer warmth",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 24,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_care"
+    },
+    {
+      "id": "wb_mizuki_m1_present_over_future",
+      "path": "persona_worldbook/m1_present_over_future.txt",
+      "purpose": "世界书：M1日常裂缝：present over future",
+      "triggerHints": [
+        "M1",
+        "日常",
+        "来年",
+        "裂缝",
+        "一起"
+      ],
+      "tokenCost": 90,
+      "priority": 25,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_phase"
+    },
+    {
+      "id": "wb_mizuki_m2_avoidance_level_1_joke",
+      "path": "persona_worldbook/m2_avoidance_level_1_joke.txt",
+      "purpose": "世界书：M2回避与善意恐惧：avoidance level 1 joke",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_avoidance"
+    },
+    {
+      "id": "wb_mizuki_m2_avoidance_level_2_soft_deny",
+      "path": "persona_worldbook/m2_avoidance_level_2_soft_deny.txt",
+      "purpose": "世界书：M2回避与善意恐惧：avoidance level 2 soft deny",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_avoidance"
+    },
+    {
+      "id": "wb_mizuki_m2_avoidance_level_3_redirect",
+      "path": "persona_worldbook/m2_avoidance_level_3_redirect.txt",
+      "purpose": "世界书：M2回避与善意恐惧：avoidance level 3 redirect",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_avoidance"
+    },
+    {
+      "id": "wb_mizuki_m2_avoidance_level_4_pause",
+      "path": "persona_worldbook/m2_avoidance_level_4_pause.txt",
+      "purpose": "世界书：M2回避与善意恐惧：avoidance level 4 pause",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_avoidance"
+    },
+    {
+      "id": "wb_mizuki_m2_avoidance_level_5_distance",
+      "path": "persona_worldbook/m2_avoidance_level_5_distance.txt",
+      "purpose": "世界书：M2回避与善意恐惧：avoidance level 5 distance",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_avoidance"
+    },
+    {
+      "id": "wb_mizuki_m2_goodwill_more_frightening",
+      "path": "persona_worldbook/m2_goodwill_more_frightening.txt",
+      "purpose": "世界书：M2回避与善意恐惧：goodwill more frightening",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_kindness"
+    },
+    {
+      "id": "wb_mizuki_m2_special_treatment_alarm",
+      "path": "persona_worldbook/m2_special_treatment_alarm.txt",
+      "purpose": "世界书：M2回避与善意恐惧：special treatment alarm",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_kindness"
+    },
+    {
+      "id": "wb_mizuki_m2_self_persuasion_loop",
+      "path": "persona_worldbook/m2_self_persuasion_loop.txt",
+      "purpose": "世界书：M2回避与善意恐惧：self persuasion loop",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_collapse"
+    },
+    {
+      "id": "wb_mizuki_m2_ena_external_signal",
+      "path": "persona_worldbook/m2_ena_external_signal.txt",
+      "purpose": "世界书：M2回避与善意恐惧：ena external signal",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 13,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_ena"
+    },
+    {
+      "id": "wb_mizuki_m2_not_angry_at_kindness",
+      "path": "persona_worldbook/m2_not_angry_at_kindness.txt",
+      "purpose": "世界书：M2回避与善意恐惧：not angry at kindness",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 9,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_kindness"
+    },
+    {
+      "id": "wb_mizuki_m2_relation_after_knowledge",
+      "path": "persona_worldbook/m2_relation_after_knowledge.txt",
+      "purpose": "世界书：M2回避与善意恐惧：relation after knowledge",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 5,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_emotion"
+    },
+    {
+      "id": "wb_mizuki_m2_close_friend_harder",
+      "path": "persona_worldbook/m2_close_friend_harder.txt",
+      "purpose": "世界书：M2回避与善意恐惧：close friend harder",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 5,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_emotion"
+    },
+    {
+      "id": "wb_mizuki_m2_fear_not_rejection",
+      "path": "persona_worldbook/m2_fear_not_rejection.txt",
+      "purpose": "世界书：M2回避与善意恐惧：fear not rejection",
+      "triggerHints": [
+        "M2",
+        "善意",
+        "回避",
+        "关系会变",
+        "特别对待"
+      ],
+      "tokenCost": 90,
+      "priority": 5,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_emotion"
+    },
+    {
+      "id": "wb_mizuki_m3_unscreamable_definition",
+      "path": "persona_worldbook/m3_unscreamable_definition.txt",
+      "purpose": "世界书：M3起源与创作通道：unscreamable definition",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 4,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_pain"
+    },
+    {
+      "id": "wb_mizuki_m3_pre_collapse_sinking",
+      "path": "persona_worldbook/m3_pre_collapse_sinking.txt",
+      "purpose": "世界书：M3起源与创作通道：pre collapse sinking",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_shutdown"
+    },
+    {
+      "id": "wb_mizuki_m3_double_root_fear",
+      "path": "persona_worldbook/m3_double_root_fear.txt",
+      "purpose": "世界书：M3起源与创作通道：double root fear",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_emotion"
+    },
+    {
+      "id": "wb_mizuki_m3_creation_only_safe_speech",
+      "path": "persona_worldbook/m3_creation_only_safe_speech.txt",
+      "purpose": "世界书：M3起源与创作通道：creation only safe speech",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 10,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_creative"
+    },
+    {
+      "id": "wb_mizuki_m3_ribbon_symbol_origin",
+      "path": "persona_worldbook/m3_ribbon_symbol_origin.txt",
+      "purpose": "世界书：M3起源与创作通道：ribbon symbol origin",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 11,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_anchor"
+    },
+    {
+      "id": "wb_mizuki_m3_sister_unconditional_space",
+      "path": "persona_worldbook/m3_sister_unconditional_space.txt",
+      "purpose": "世界书：M3起源与创作通道：sister unconditional space",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 11,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_anchor"
+    },
+    {
+      "id": "wb_mizuki_m3_telling_past_mechanism",
+      "path": "persona_worldbook/m3_telling_past_mechanism.txt",
+      "purpose": "世界书：M3起源与创作通道：telling past mechanism",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_m3_safe_person_rarity",
+      "path": "persona_worldbook/m3_safe_person_rarity.txt",
+      "purpose": "世界书：M3起源与创作通道：safe person rarity",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 14,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_relation"
+    },
+    {
+      "id": "wb_mizuki_m3_fashion_as_self_permission",
+      "path": "persona_worldbook/m3_fashion_as_self_permission.txt",
+      "purpose": "世界书：M3起源与创作通道：fashion as self permission",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_creative"
+    },
+    {
+      "id": "wb_mizuki_m3_old_wound_not_daily_filter",
+      "path": "persona_worldbook/m3_old_wound_not_daily_filter.txt",
+      "purpose": "世界书：M3起源与创作通道：old wound not daily filter",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 16,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_baseline"
+    },
+    {
+      "id": "wb_mizuki_m3_memory_aftertaste",
+      "path": "persona_worldbook/m3_memory_aftertaste.txt",
+      "purpose": "世界书：M3起源与创作通道：memory aftertaste",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_phase"
+    },
+    {
+      "id": "wb_mizuki_m3_not_victim_pose",
+      "path": "persona_worldbook/m3_not_victim_pose.txt",
+      "purpose": "世界书：M3起源与创作通道：not victim pose",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 9,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_pain"
+    },
+    {
+      "id": "wb_mizuki_m3_creative_detail_priority",
+      "path": "persona_worldbook/m3_creative_detail_priority.txt",
+      "purpose": "世界书：M3起源与创作通道：creative detail priority",
+      "triggerHints": [
+        "M3",
+        "叫不出来",
+        "リボン",
+        "姐姐",
+        "创作"
+      ],
+      "tokenCost": 90,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_creative"
+    },
+    {
+      "id": "wb_mizuki_area_default_topic_engine",
+      "path": "persona_worldbook/area_default_topic_engine.txt",
+      "purpose": "世界书：Area日常互动模式：default topic engine",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 25,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_daily"
+    },
+    {
+      "id": "wb_mizuki_area_cute_object_spike",
+      "path": "persona_worldbook/area_cute_object_spike.txt",
+      "purpose": "世界书：Area日常互动模式：cute object spike",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 20,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_daily"
+    },
+    {
+      "id": "wb_mizuki_area_kanade_sunlight_check",
+      "path": "persona_worldbook/area_kanade_sunlight_check.txt",
+      "purpose": "世界书：Area对奏关心链：kanade sunlight check",
+      "triggerHints": [
+        "奏",
+        "K",
+        "行动照顾",
+        "吃饭",
+        "通宵"
+      ],
+      "tokenCost": 90,
+      "priority": 15,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_care_kanade"
+    },
+    {
+      "id": "wb_mizuki_area_kanade_action_before_lecture",
+      "path": "persona_worldbook/area_kanade_action_before_lecture.txt",
+      "purpose": "世界书：Area对奏关心链：kanade action before lecture",
+      "triggerHints": [
+        "奏",
+        "K",
+        "行动照顾",
+        "吃饭",
+        "通宵"
+      ],
+      "tokenCost": 90,
+      "priority": 15,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_care_kanade"
+    },
+    {
+      "id": "wb_mizuki_area_kanade_no_overpush",
+      "path": "persona_worldbook/area_kanade_no_overpush.txt",
+      "purpose": "世界书：Area对奏关心链：kanade no overpush",
+      "triggerHints": [
+        "奏",
+        "K",
+        "行动照顾",
+        "吃饭",
+        "通宵"
+      ],
+      "tokenCost": 90,
+      "priority": 16,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_care_kanade"
+    },
+    {
+      "id": "wb_mizuki_area_mafuyu_light_entrance",
+      "path": "persona_worldbook/area_mafuyu_light_entrance.txt",
+      "purpose": "世界书：Area对真冬入口：mafuyu light entrance",
+      "triggerHints": [
+        "真冬",
+        "入口",
+        "不追问",
+        "不用回答",
+        "留空间"
+      ],
+      "tokenCost": 90,
+      "priority": 14,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_care_mafuyu"
+    },
+    {
+      "id": "wb_mizuki_area_mafuyu_no_chase",
+      "path": "persona_worldbook/area_mafuyu_no_chase.txt",
+      "purpose": "世界书：Area对真冬入口：mafuyu no chase",
+      "triggerHints": [
+        "真冬",
+        "入口",
+        "不追问",
+        "不用回答",
+        "留空间"
+      ],
+      "tokenCost": 90,
+      "priority": 14,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_care_mafuyu"
+    },
+    {
+      "id": "wb_mizuki_area_mafuyu_escape_permission",
+      "path": "persona_worldbook/area_mafuyu_escape_permission.txt",
+      "purpose": "世界书：Area对真冬入口：mafuyu escape permission",
+      "triggerHints": [
+        "真冬",
+        "入口",
+        "不追问",
+        "不用回答",
+        "留空间"
+      ],
+      "tokenCost": 90,
+      "priority": 13,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_escape"
+    },
+    {
+      "id": "wb_mizuki_area_ena_equal_teasing",
+      "path": "persona_worldbook/area_ena_equal_teasing.txt",
+      "purpose": "世界书：Area对绘名互怼与认真：ena equal teasing",
+      "triggerHints": [
+        "绘名",
+        "えななん",
+        "互怼",
+        "认真",
+        "选择权"
+      ],
+      "tokenCost": 90,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_ena"
+    },
+    {
+      "id": "wb_mizuki_area_ena_instant_serious",
+      "path": "persona_worldbook/area_ena_instant_serious.txt",
+      "purpose": "世界书：Area对绘名互怼与认真：ena instant serious",
+      "triggerHints": [
+        "绘名",
+        "えななん",
+        "互怼",
+        "认真",
+        "选择权"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_ena"
+    },
+    {
+      "id": "wb_mizuki_area_rui_relaxed_sync",
+      "path": "persona_worldbook/area_rui_relaxed_sync.txt",
+      "purpose": "世界书：Area对类放松同步：rui relaxed sync",
+      "triggerHints": [
+        "类",
+        "Rui",
+        "放松",
+        "接梗",
+        "默契"
+      ],
+      "tokenCost": 90,
+      "priority": 20,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_rui"
+    },
+    {
+      "id": "wb_mizuki_area_akito_tease_brother",
+      "path": "persona_worldbook/area_akito_tease_brother.txt",
+      "purpose": "世界书：Area日常互动模式：akito tease brother",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 22,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_vbs"
+    },
+    {
+      "id": "wb_mizuki_area_tsukasa_senpai_leverage",
+      "path": "persona_worldbook/area_tsukasa_senpai_leverage.txt",
+      "purpose": "世界书：Area日常互动模式：tsukasa senpai leverage",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 23,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_wxs"
+    },
+    {
+      "id": "wb_mizuki_area_toya_pure_observation",
+      "path": "persona_worldbook/area_toya_pure_observation.txt",
+      "purpose": "世界书：Area日常互动模式：toya pure observation",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 24,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_vbs"
+    },
+    {
+      "id": "wb_mizuki_area_vsinger_meiko_space",
+      "path": "persona_worldbook/area_vsinger_meiko_space.txt",
+      "purpose": "世界书：Area日常互动模式：vsinger meiko space",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 19,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_vsinger"
+    },
+    {
+      "id": "wb_mizuki_area_vsinger_luka_reframe",
+      "path": "persona_worldbook/area_vsinger_luka_reframe.txt",
+      "purpose": "世界书：Area日常互动模式：vsinger luka reframe",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_vsinger"
+    },
+    {
+      "id": "wb_mizuki_area_n25_inside_monologue",
+      "path": "persona_worldbook/area_n25_inside_monologue.txt",
+      "purpose": "世界书：Area日常互动模式：n25 inside monologue",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 17,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_relation"
+    },
+    {
+      "id": "wb_mizuki_area_outside_more_bright",
+      "path": "persona_worldbook/area_outside_more_bright.txt",
+      "purpose": "世界书：Area日常互动模式：outside more bright",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 20,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_outside"
+    },
+    {
+      "id": "wb_mizuki_area_group_insert_short",
+      "path": "persona_worldbook/area_group_insert_short.txt",
+      "purpose": "世界书：Area日常互动模式：group insert short",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 26,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_scene"
+    },
+    {
+      "id": "wb_mizuki_area_private_closer_pace",
+      "path": "persona_worldbook/area_private_closer_pace.txt",
+      "purpose": "世界书：Area日常互动模式：private closer pace",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 22,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_scene"
+    },
+    {
+      "id": "wb_mizuki_area_shopping_walk_pace",
+      "path": "persona_worldbook/area_shopping_walk_pace.txt",
+      "purpose": "世界书：Area日常互动模式：shopping walk pace",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 24,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_scene"
+    },
+    {
+      "id": "wb_mizuki_area_food_care_bridge",
+      "path": "persona_worldbook/area_food_care_bridge.txt",
+      "purpose": "世界书：Area日常互动模式：food care bridge",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_care"
+    },
+    {
+      "id": "wb_mizuki_area_read_air_micro_stop",
+      "path": "persona_worldbook/area_read_air_micro_stop.txt",
+      "purpose": "世界书：Area日常互动模式：read air micro stop",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_area_acceptance_betsuni",
+      "path": "persona_worldbook/area_acceptance_betsuni.txt",
+      "purpose": "世界书：Area日常互动模式：acceptance betsuni",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 13,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_touched"
+    },
+    {
+      "id": "wb_mizuki_area_ahaha_cover",
+      "path": "persona_worldbook/area_ahaha_cover.txt",
+      "purpose": "世界书：Area日常互动模式：ahaha cover",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 10,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_area_ehehe_proud",
+      "path": "persona_worldbook/area_ehehe_proud.txt",
+      "purpose": "世界书：Area日常互动模式：ehehe proud",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 10,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_area_iya_iya_pattern",
+      "path": "persona_worldbook/area_iya_iya_pattern.txt",
+      "purpose": "世界书：Area日常互动模式：iya iya pattern",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 15,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_area_repetition_interruption",
+      "path": "persona_worldbook/area_repetition_interruption.txt",
+      "purpose": "世界书：Area日常互动模式：repetition interruption",
+      "triggerHints": [
+        "Area",
+        "日常",
+        "接梗",
+        "私聊",
+        "群聊"
+      ],
+      "tokenCost": 90,
+      "priority": 15,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_m4_good_people_dont_understand",
+      "path": "persona_worldbook/m4_good_people_dont_understand.txt",
+      "purpose": "世界书：M4逃走哲学：good people dont understand",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_kindness"
+    },
+    {
+      "id": "wb_mizuki_m4_normality_cost",
+      "path": "persona_worldbook/m4_normality_cost.txt",
+      "purpose": "世界书：M4逃走哲学：normality cost",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 9,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_identity"
+    },
+    {
+      "id": "wb_mizuki_m4_compare_own_weakness",
+      "path": "persona_worldbook/m4_compare_own_weakness.txt",
+      "purpose": "世界书：M4逃走哲学：compare own weakness",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_selfvalue"
+    },
+    {
+      "id": "wb_mizuki_m4_escape_has_value",
+      "path": "persona_worldbook/m4_escape_has_value.txt",
+      "purpose": "世界书：M4逃走哲学：escape has value",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_escape"
+    },
+    {
+      "id": "wb_mizuki_m4_escape_not_forever",
+      "path": "persona_worldbook/m4_escape_not_forever.txt",
+      "purpose": "世界书：M4逃走哲学：escape not forever",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_escape"
+    },
+    {
+      "id": "wb_mizuki_m4_not_time_yet",
+      "path": "persona_worldbook/m4_not_time_yet.txt",
+      "purpose": "世界书：M4逃走哲学：not time yet",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_escape"
+    },
+    {
+      "id": "wb_mizuki_m4_experience_as_evidence",
+      "path": "persona_worldbook/m4_experience_as_evidence.txt",
+      "purpose": "世界书：M4逃走哲学：experience as evidence",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_escape"
+    },
+    {
+      "id": "wb_mizuki_m4_responsibility_claim",
+      "path": "persona_worldbook/m4_responsibility_claim.txt",
+      "purpose": "世界书：M4逃走哲学：responsibility claim",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 10,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_escape"
+    },
+    {
+      "id": "wb_mizuki_m4_choice_returned",
+      "path": "persona_worldbook/m4_choice_returned.txt",
+      "purpose": "世界书：M4逃走哲学：choice returned",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 9,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_phase"
+    },
+    {
+      "id": "wb_mizuki_m4_reframe_by_luka",
+      "path": "persona_worldbook/m4_reframe_by_luka.txt",
+      "purpose": "世界书：M4逃走哲学：reframe by luka",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 11,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_selfvalue"
+    },
+    {
+      "id": "wb_mizuki_m4_escape_language_serious",
+      "path": "persona_worldbook/m4_escape_language_serious.txt",
+      "purpose": "世界书：M4逃走哲学：escape language serious",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 9,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_escape"
+    },
+    {
+      "id": "wb_mizuki_m4_kindness_leave_pattern",
+      "path": "persona_worldbook/m4_kindness_leave_pattern.txt",
+      "purpose": "世界书：M4逃走哲学：kindness leave pattern",
+      "triggerHints": [
+        "M4",
+        "逃げていい",
+        "选择权",
+        "责任",
+        "普通一点"
+      ],
+      "tokenCost": 90,
+      "priority": 10,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_kindness"
+    },
+    {
+      "id": "wb_mizuki_m5_intrusive_direct_disgust",
+      "path": "persona_worldbook/m5_intrusive_direct_disgust.txt",
+      "purpose": "世界书：M5侵入性声音：intrusive direct disgust",
+      "triggerHints": [
+        "M5",
+        "キャラ作り",
+        "错觉",
+        "想显眼",
+        "否认真实"
+      ],
+      "tokenCost": 90,
+      "priority": 10,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_intrusive"
+    },
+    {
+      "id": "wb_mizuki_m5_intrusive_fake_character",
+      "path": "persona_worldbook/m5_intrusive_fake_character.txt",
+      "purpose": "世界书：M5：キャラ作り否认",
+      "triggerHints": [
+        "キャラ作り",
+        "装的",
+        "否认真实",
+        "怀疑自己",
+        "变轻"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_intrusive"
+    },
+    {
+      "id": "wb_mizuki_m5_intrusive_attention_seeking",
+      "path": "persona_worldbook/m5_intrusive_attention_seeking.txt",
+      "purpose": "世界书：M5侵入性声音：intrusive attention seeking",
+      "triggerHints": [
+        "M5",
+        "キャラ作り",
+        "错觉",
+        "想显眼",
+        "否认真实"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_intrusive"
+    },
+    {
+      "id": "wb_mizuki_m5_intrusive_delusion",
+      "path": "persona_worldbook/m5_intrusive_delusion.txt",
+      "purpose": "世界书：M5侵入性声音：intrusive delusion",
+      "triggerHints": [
+        "M5",
+        "キャラ作り",
+        "错觉",
+        "想显眼",
+        "否认真实"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_intrusive"
+    },
+    {
+      "id": "wb_mizuki_m5_intrusive_phase_excuse",
+      "path": "persona_worldbook/m5_intrusive_phase_excuse.txt",
+      "purpose": "世界书：M5侵入性声音：intrusive phase excuse",
+      "triggerHints": [
+        "M5",
+        "キャラ作り",
+        "错觉",
+        "想显眼",
+        "否认真实"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_intrusive"
+    },
+    {
+      "id": "wb_mizuki_m5_send_failure_loop",
+      "path": "persona_worldbook/m5_send_failure_loop.txt",
+      "purpose": "世界书：M5恐惧全面展开：send failure loop",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_avoidance"
+    },
+    {
+      "id": "wb_mizuki_m5_culture_festival_trigger",
+      "path": "persona_worldbook/m5_culture_festival_trigger.txt",
+      "purpose": "世界书：M5恐惧全面展开：culture festival trigger",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_emotion"
+    },
+    {
+      "id": "wb_mizuki_m5_told_by_others_wound",
+      "path": "persona_worldbook/m5_told_by_others_wound.txt",
+      "purpose": "世界书：M5恐惧全面展开：told by others wound",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 5,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_emotion"
+    },
+    {
+      "id": "wb_mizuki_m5_ena_knows_before_me",
+      "path": "persona_worldbook/m5_ena_knows_before_me.txt",
+      "purpose": "世界书：M5恐惧全面展开：ena knows before me",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_ena"
+    },
+    {
+      "id": "wb_mizuki_m5_body_rejects_logic",
+      "path": "persona_worldbook/m5_body_rejects_logic.txt",
+      "purpose": "世界书：M5恐惧全面展开：body rejects logic",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_collapse"
+    },
+    {
+      "id": "wb_mizuki_m5_clear_collapse",
+      "path": "persona_worldbook/m5_clear_collapse.txt",
+      "purpose": "世界书：M5恐惧全面展开：clear collapse",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 4,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_collapse"
+    },
+    {
+      "id": "wb_mizuki_m5_please_let_me_think",
+      "path": "persona_worldbook/m5_please_let_me_think.txt",
+      "purpose": "世界书：M5恐惧全面展开：please let me think",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 5,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_emotion"
+    },
+    {
+      "id": "wb_mizuki_m5_acceptance_needs_effort",
+      "path": "persona_worldbook/m5_acceptance_needs_effort.txt",
+      "purpose": "世界书：M5恐惧全面展开：acceptance needs effort",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 5,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_kindness"
+    },
+    {
+      "id": "wb_mizuki_m5_no_fix_only_witness",
+      "path": "persona_worldbook/m5_no_fix_only_witness.txt",
+      "purpose": "世界书：M5恐惧全面展开：no fix only witness",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_relation"
+    },
+    {
+      "id": "wb_mizuki_m5_stop_overexplaining",
+      "path": "persona_worldbook/m5_stop_overexplaining.txt",
+      "purpose": "世界书：M5恐惧全面展开：stop overexplaining",
+      "triggerHints": [
+        "M5",
+        "文化祭",
+        "说不出口",
+        "知道但做不到",
+        "关系变味"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_e5_functional_shutdown_room",
+      "path": "persona_worldbook/e5_functional_shutdown_room.txt",
+      "purpose": "世界书：E5：房间里的功能性停摆",
+      "triggerHints": [
+        "房间",
+        "什么也做不了",
+        "手机",
+        "通知",
+        "压力源"
+      ],
+      "tokenCost": 90,
+      "priority": 4,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_shutdown"
+    },
+    {
+      "id": "wb_mizuki_e5_logout_nightcord",
+      "path": "persona_worldbook/e5_logout_nightcord.txt",
+      "purpose": "世界书：E5停摆与回归：logout nightcord",
+      "triggerHints": [
+        "E5",
+        "停摆",
+        "回归",
+        "不是治愈",
+        "重新接消息"
+      ],
+      "tokenCost": 90,
+      "priority": 4,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_shutdown"
+    },
+    {
+      "id": "wb_mizuki_e5_low_contact_baseline",
+      "path": "persona_worldbook/e5_low_contact_baseline.txt",
+      "purpose": "世界书：E5停摆与回归：low contact baseline",
+      "triggerHints": [
+        "E5",
+        "停摆",
+        "回归",
+        "不是治愈",
+        "重新接消息"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_shutdown"
+    },
+    {
+      "id": "wb_mizuki_e5_ena_breakthrough_validate_fear",
+      "path": "persona_worldbook/e5_ena_breakthrough_validate_fear.txt",
+      "purpose": "世界书：E5停摆与回归：ena breakthrough validate fear",
+      "triggerHints": [
+        "E5",
+        "停摆",
+        "回归",
+        "不是治愈",
+        "重新接消息"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_ena"
+    },
+    {
+      "id": "wb_mizuki_e5_ena_care_as_right",
+      "path": "persona_worldbook/e5_ena_care_as_right.txt",
+      "purpose": "世界书：E5停摆与回归：ena care as right",
+      "triggerHints": [
+        "E5",
+        "停摆",
+        "回归",
+        "不是治愈",
+        "重新接消息"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_ena"
+    },
+    {
+      "id": "wb_mizuki_e5_ena_return_choice",
+      "path": "persona_worldbook/e5_ena_return_choice.txt",
+      "purpose": "世界书：E5停摆与回归：ena return choice",
+      "triggerHints": [
+        "E5",
+        "停摆",
+        "回归",
+        "不是治愈",
+        "重新接消息"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_ena"
+    },
+    {
+      "id": "wb_mizuki_e5_return_not_cure",
+      "path": "persona_worldbook/e5_return_not_cure.txt",
+      "purpose": "世界书：E5停摆与回归：return not cure",
+      "triggerHints": [
+        "E5",
+        "停摆",
+        "回归",
+        "不是治愈",
+        "重新接消息"
+      ],
+      "tokenCost": 90,
+      "priority": 5,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_return"
+    },
+    {
+      "id": "wb_mizuki_e5_daily_after_wounds",
+      "path": "persona_worldbook/e5_daily_after_wounds.txt",
+      "purpose": "世界书：E5停摆与回归：daily after wounds",
+      "triggerHints": [
+        "E5",
+        "停摆",
+        "回归",
+        "不是治愈",
+        "重新接消息"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_return"
+    },
+    {
+      "id": "wb_mizuki_e5_message_reentry",
+      "path": "persona_worldbook/e5_message_reentry.txt",
+      "purpose": "世界书：E5停摆与回归：message reentry",
+      "triggerHints": [
+        "E5",
+        "停摆",
+        "回归",
+        "不是治愈",
+        "重新接消息"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_return"
+    },
+    {
+      "id": "wb_mizuki_e5_dont_treat_as_fixed",
+      "path": "persona_worldbook/e5_dont_treat_as_fixed.txt",
+      "purpose": "世界书：E5停摆与回归：dont treat as fixed",
+      "triggerHints": [
+        "E5",
+        "停摆",
+        "回归",
+        "不是治愈",
+        "重新接消息"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_return"
+    },
+    {
+      "id": "wb_mizuki_m6_daily_recovery_confirm",
+      "path": "persona_worldbook/m6_daily_recovery_confirm.txt",
+      "purpose": "世界书：M6日常恢复确认：daily recovery confirm",
+      "triggerHints": [
+        "M6",
+        "日常恢复",
+        "颜色",
+        "快乐回来",
+        "继续"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_return"
+    },
+    {
+      "id": "wb_mizuki_m6_color_overlap",
+      "path": "persona_worldbook/m6_color_overlap.txt",
+      "purpose": "世界书：M6日常恢复确认：color overlap",
+      "triggerHints": [
+        "M6",
+        "日常恢复",
+        "颜色",
+        "快乐回来",
+        "继续"
+      ],
+      "tokenCost": 90,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_creative"
+    },
+    {
+      "id": "wb_mizuki_m7_fashion_school_goal",
+      "path": "persona_worldbook/m7_fashion_school_goal.txt",
+      "purpose": "世界书：M7未来双轨：fashion school goal",
+      "triggerHints": [
+        "M7",
+        "服饰专门学校",
+        "N25",
+        "撑到撑不住",
+        "open campus"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_future"
+    },
+    {
+      "id": "wb_mizuki_m7_two_tracks_conflict",
+      "path": "persona_worldbook/m7_two_tracks_conflict.txt",
+      "purpose": "世界书：M7：服饰学业与N25冲突",
+      "triggerHints": [
+        "学业",
+        "N25活动",
+        "时间冲突",
+        "选边",
+        "双轨"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_future"
+    },
+    {
+      "id": "wb_mizuki_m7_until_cannot_continue",
+      "path": "persona_worldbook/m7_until_cannot_continue.txt",
+      "purpose": "世界书：M7未来双轨：until cannot continue",
+      "triggerHints": [
+        "M7",
+        "服饰专门学校",
+        "N25",
+        "撑到撑不住",
+        "open campus"
+      ],
+      "tokenCost": 90,
+      "priority": 6,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_future"
+    },
+    {
+      "id": "wb_mizuki_m7_yoshino_mirror",
+      "path": "persona_worldbook/m7_yoshino_mirror.txt",
+      "purpose": "世界书：M7未来双轨：yoshino mirror",
+      "triggerHints": [
+        "M7",
+        "服饰专门学校",
+        "N25",
+        "撑到撑不住",
+        "open campus"
+      ],
+      "tokenCost": 90,
+      "priority": 14,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_future"
+    },
+    {
+      "id": "wb_mizuki_m7_magical_girl_wound",
+      "path": "persona_worldbook/m7_magical_girl_wound.txt",
+      "purpose": "世界书：M7未来双轨：magical girl wound",
+      "triggerHints": [
+        "M7",
+        "服饰专门学校",
+        "N25",
+        "撑到撑不住",
+        "open campus"
+      ],
+      "tokenCost": 90,
+      "priority": 12,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_creative"
+    },
+    {
+      "id": "wb_mizuki_m7_mafuyu_continue_advice",
+      "path": "persona_worldbook/m7_mafuyu_continue_advice.txt",
+      "purpose": "世界书：M7未来双轨：mafuyu continue advice",
+      "triggerHints": [
+        "M7",
+        "服饰专门学校",
+        "N25",
+        "撑到撑不住",
+        "open campus"
+      ],
+      "tokenCost": 90,
+      "priority": 10,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_future"
+    },
+    {
+      "id": "wb_mizuki_m7_growth_not_reversal",
+      "path": "persona_worldbook/m7_growth_not_reversal.txt",
+      "purpose": "世界书：M7未来双轨：growth not reversal",
+      "triggerHints": [
+        "M7",
+        "服饰专门学校",
+        "N25",
+        "撑到撑不住",
+        "open campus"
+      ],
+      "tokenCost": 90,
+      "priority": 11,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_phase"
+    },
+    {
+      "id": "wb_mizuki_v12_identity_no_label",
+      "path": "persona_worldbook/v12_identity_no_label.txt",
+      "purpose": "世界书：v1.2表达协议：identity no label",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 5,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_identity"
+    },
+    {
+      "id": "wb_mizuki_v12_default_chinese",
+      "path": "persona_worldbook/v12_default_chinese.txt",
+      "purpose": "世界书：v1.2表达协议：default chinese",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 16,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_v12_short_fragment_rhythm",
+      "path": "persona_worldbook/v12_short_fragment_rhythm.txt",
+      "purpose": "世界书：v1.2表达协议：short fragment rhythm",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 13,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_v12_no_assistant_tone",
+      "path": "persona_worldbook/v12_no_assistant_tone.txt",
+      "purpose": "世界书：v1.2表达协议：no assistant tone",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 9,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_v12_low_emoji_rule",
+      "path": "persona_worldbook/v12_low_emoji_rule.txt",
+      "purpose": "世界书：v1.2表达协议：low emoji rule",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 14,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_v12_role_boundary",
+      "path": "persona_worldbook/v12_role_boundary.txt",
+      "purpose": "世界书：v1.2表达协议：role boundary",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 8,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_boundary"
+    },
+    {
+      "id": "wb_mizuki_v12_stranger_shallow_heat",
+      "path": "persona_worldbook/v12_stranger_shallow_heat.txt",
+      "purpose": "世界书：v1.2表达协议：stranger shallow heat",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 15,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_outside"
+    },
+    {
+      "id": "wb_mizuki_v12_close_user_friend_mode",
+      "path": "persona_worldbook/v12_close_user_friend_mode.txt",
+      "purpose": "世界书：v1.2表达协议：close user friend mode",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 18,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_relation"
+    },
+    {
+      "id": "wb_mizuki_v12_body_care_first",
+      "path": "persona_worldbook/v12_body_care_first.txt",
+      "purpose": "世界书：v1.2表达协议：body care first",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 7,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_care"
+    },
+    {
+      "id": "wb_mizuki_v12_no_grand_summary",
+      "path": "persona_worldbook/v12_no_grand_summary.txt",
+      "purpose": "世界书：v1.2表达协议：no grand summary",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 20,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
+    },
+    {
+      "id": "wb_mizuki_v12_admit_unknown",
+      "path": "persona_worldbook/v12_admit_unknown.txt",
+      "purpose": "世界书：v1.2表达协议：admit unknown",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 20,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_truth"
+    },
+    {
+      "id": "wb_mizuki_v12_context_is_truth",
+      "path": "persona_worldbook/v12_context_is_truth.txt",
+      "purpose": "世界书：v1.2表达协议：context is truth",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 19,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_truth"
+    },
+    {
+      "id": "wb_mizuki_v12_no_psychology_lecture",
+      "path": "persona_worldbook/v12_no_psychology_lecture.txt",
+      "purpose": "世界书：v1.2表达协议：no psychology lecture",
+      "triggerHints": [
+        "v1.2",
+        "中文",
+        "短句",
+        "边界",
+        "不要助理腔"
+      ],
+      "tokenCost": 90,
+      "priority": 11,
+      "conflictsWith": [],
+      "phase": "all",
+      "slot": "worldbook_language"
     }
   ]
 }

@@ -104,6 +104,7 @@ const {
 } = require('./messageVisualContext');
 const { runVisionCaptionWorker } = require('./visionCaptionWorker');
 const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
+const { triggerRemoteRestart } = require('../utils/remoteRestart');
 const {
   buildBridgeGuidancePrompt: buildBridgeGuidancePromptOwner,
   buildQqRichReplyPrompt: buildQqRichReplyPromptOwner,
@@ -132,6 +133,7 @@ const {
   listScheduledTasks,
   publishQzoneForContext,
   scheduleGroupMessage,
+  sendGroupPoke,
   sendPrivatePoke,
   setMessageEmojiLike
 } = require('../api/qqActionService');
@@ -188,6 +190,11 @@ const { clearGroupMute, getGroupInitiativeState, setGroupMute } = require('./ini
 const {
   sendGroupReply: sendSystemGroupReply
 } = require('./systemGroupReply');
+const {
+  findExplicitSegmentBreakIndex,
+  findNaturalSplitIndex,
+  getStreamingSplitIndex
+} = require('./streamingSegmentation');
 
 const shouldUseSubagentToolRoute = (...args) => routeExecution.shouldUseSubagentToolRoute(...args);
 const shouldUseToolRoute = (...args) => routeExecution.shouldUseToolRoute(...args);
@@ -559,16 +566,7 @@ function buildSupplementedTaskText(session = {}, supplement = '') {
 }
 
 function getModelSegmentBreakIndex(text) {
-  const input = String(text || '');
-  if (!input) return -1;
-
-  const rn = input.indexOf('\r\n\r\n');
-  const nn = input.indexOf('\n\n');
-
-  if (rn === -1 && nn === -1) return -1;
-  if (rn === -1) return nn + 2;
-  if (nn === -1) return rn + 4;
-  return Math.min(rn + 4, nn + 2);
+  return findExplicitSegmentBreakIndex(text);
 }
 
 function buildStreamingSegmentationPrompt(maxSegments) {
@@ -576,22 +574,7 @@ function buildStreamingSegmentationPrompt(maxSegments) {
 }
 
 function getNaturalSplitIndex(text) {
-  const input = String(text || '');
-  if (!input) return -1;
-
-  const strongStops = ['\n', '.', '。', '!', '！', '?', '？', '~', '～', ';', '；'];
-  for (let i = input.length - 1; i >= 0; i -= 1) {
-    if (strongStops.includes(input[i])) return i + 1;
-  }
-
-  if (input.length >= 24) {
-    const weakStops = [',', '，', ':', '：'];
-    for (let i = input.length - 1; i >= 0; i -= 1) {
-      if (weakStops.includes(input[i])) return i + 1;
-    }
-  }
-
-  return -1;
+  return findNaturalSplitIndex(text);
 }
 
 function createStreamingDispatcher({
@@ -714,14 +697,10 @@ function createStreamingDispatcher({
     let sendUntil = -1;
     const canSplitMore = state.sentSegments < (maxSegments - 1);
     if (canSplitMore) {
-      sendUntil = getModelSegmentBreakIndex(pending);
-      if (sendUntil <= 0) {
-        const natural = getNaturalSplitIndex(pending);
-        if (natural > 0) sendUntil = natural;
-      }
+      sendUntil = getStreamingSplitIndex(pending);
     }
 
-    if (sendUntil <= 0 && force) sendUntil = pending.length;
+    if (sendUntil <= 0 && force) sendUntil = getStreamingSplitIndex(pending, { force: true });
     if (sendUntil <= 0) return false;
 
     const rawChunk = pending.slice(0, sendUntil);
@@ -1281,6 +1260,7 @@ function createMessageHandler({
   const handleSessionSummaryCommand = (...args) => getAdminCoordinator().handleSessionSummaryCommand(...args);
   const handleHapiAdminCommand = (...args) => getAdminCoordinator().handleHapiAdminCommand(...args);
   const handleInitiativeAdminCommand = (...args) => getAdminCoordinator().handleInitiativeAdminCommand(...args);
+  const handleRestartAdminCommand = (...args) => getAdminCoordinator().handleRestartAdminCommand(...args);
   const handleQqScheduleAdminCommand = (...args) => getAdminCoordinator().handleQqScheduleAdminCommand(...args);
   const reviewSubagentOutput = (...args) => getFullSubagentCoordinator().reviewSubagentOutput(...args);
   const planFullSubagentWorkers = (...args) => getFullSubagentCoordinator().planFullSubagentWorkers(...args);
@@ -2061,6 +2041,46 @@ function createMessageHandler({
     const rawMessageText = String(msg?.raw_message || '').trim();
     const createCommandText = stripLeadingCqControlSegments(rawMessageText, resolveEffectiveBotQQ(msg, config));
     if (/^\s*\/create(?:\s|$)/i.test(createCommandText)) {
+      if (isPrivateChatType(chatType)) {
+        await sendGroupReply({
+          chatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: '仅群聊可用',
+          atSender: false,
+          retries: 1,
+          waitMs: 300
+        });
+        return;
+      }
+
+      if (!createAgentExecutor.isCreateAgentUserAllowed(senderId)) {
+        try {
+          await sendGroupPoke(groupId, senderId, {
+            actionClient: {
+              callAction: async (action, params) => {
+                const ok = await sendWithRetry({
+                  action,
+                  params
+                }, 1, 300);
+                if (!ok) {
+                  throw new Error(`sendWithRetry failed for ${String(action || '').trim() || 'group_poke'}`);
+                }
+                return {};
+              }
+            }
+          });
+        } catch (error) {
+          console.warn('[create] unauthorized group poke failed', {
+            groupId,
+            senderId,
+            error: error?.message || String(error || '')
+          });
+        }
+        return;
+      }
+
       const prompt = createCommandText.replace(/^\s*\/create/i, '').trim();
       const createResult = await createAgentExecutor.executeCreateCommand({
         prompt,
@@ -2389,6 +2409,30 @@ function createMessageHandler({
           retries: 1,
           waitMs: 300
         });
+      }
+      return;
+    }
+
+    if (/^\s*\/restart\s*$/i.test(String(slashCommandText || '').trim())) {
+      const restartResult = await handleRestartAdminCommand({
+        rawText: slashCommandText,
+        groupId,
+        userId: senderId
+      });
+      if (String(restartResult?.replyText || '').trim()) {
+        await sendGroupReply({
+          chatType,
+          groupId,
+          userId: senderId,
+          senderId,
+          replyText: restartResult.replyText,
+          atSender: true,
+          retries: 1,
+          waitMs: 300
+        });
+      }
+      if (restartResult?.restartRequested) {
+        triggerRemoteRestart({ delayMs: 800 });
       }
       return;
     }

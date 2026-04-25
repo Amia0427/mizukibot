@@ -173,6 +173,19 @@ function createMessageAdminCoordinator(deps = {}) {
     };
   }
 
+  async function handleRestartAdminCommand({ rawText = '', userId = '' } = {}) {
+    const text = normalizeText(rawText);
+    if (!/^\/restart$/i.test(text)) return null;
+    if (!isAdminUser(userId)) {
+      return { handled: true, replyText: '仅管理员可用。' };
+    }
+    return {
+      handled: true,
+      restartRequested: true,
+      replyText: '收到，正在重启 bot 和所有子 agent 进程。'
+    };
+  }
+
   async function handleQqScheduleAdminCommand(command = {}, context = {}) {
     const payload = parseJsonTail(command.payload);
     const kind = String(payload.kind || '').trim().toLowerCase();
@@ -250,6 +263,7 @@ function createMessageAdminCoordinator(deps = {}) {
     handleHapiAdminCommand,
     handleInitiativeAdminCommand,
     handleQqScheduleAdminCommand,
+    handleRestartAdminCommand,
     handleSessionSummaryCommand,
     parseJsonTail
   };

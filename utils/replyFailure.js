@@ -13,6 +13,18 @@ function classifyReplyFailure(text = '') {
 
   const lower = compact.toLowerCase();
 
+  if (
+    /insufficient[_\s-]?user[_\s-]?quota/i.test(compact)
+    || /insufficient[_\s-]?quota/i.test(compact)
+    || /quota[_\s-]?(?:exceeded|failed|error)/i.test(compact)
+    || /预扣费额度失败|用户剩余额度|余额不足|额度不足|额度失败/i.test(compact)
+  ) {
+    return {
+      type: 'provider_quota',
+      text: compact
+    };
+  }
+
   if (/^model invocation failed:\s*tool loop limit reached\b/i.test(compact)) {
     return {
       type: 'tool_loop_limit',
