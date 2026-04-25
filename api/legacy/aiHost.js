@@ -20,6 +20,7 @@
  * - 若是默认聊天行为、记忆注入展示、LangGraph 主链路能力，优先修改 agentGraph.js。
  */
 const config = require('../../config');
+const MODEL_RESPONSE_MALFORMED_REPLY = '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。';
 const { normalizeTier } = require('../../utils/memoryTier');
 const { buildMemoryContext, buildMemoryContextAsync } = require('../../utils/memoryContext');
 const { normalizeToolNames } = require('../../utils/localToolAccess');
@@ -1655,7 +1656,7 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
   let responseMessage = extractMessageContent(firstResp);
   if (!responseMessage) {
     console.error('AI response malformed(first):', String(firstResp?.data).slice(0, 500));
-    return 'The model response format was malformed. Please try again.';
+    return MODEL_RESPONSE_MALFORMED_REPLY;
   }
 
   if (Array.isArray(responseMessage.tool_calls) && responseMessage.tool_calls.length > 0) {

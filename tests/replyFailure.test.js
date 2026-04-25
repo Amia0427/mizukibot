@@ -8,6 +8,21 @@ assert.strictEqual(
 );
 
 assert.strictEqual(
+  classifyReplyFailure('status=429 | response={"error":{"message":"You have exhausted your capacity on this model. Your quota will reset after 159h55m54s."}}').type,
+  'provider_quota'
+);
+
+assert.strictEqual(
+  classifyReplyFailure('status=529 | response={"error":{"message":"All available accounts exhausted","type":"server_error"}}').type,
+  'provider_quota'
+);
+
+assert.strictEqual(
+  classifyReplyFailure('status=402 | response={"error":{"message":"insufficient balance","type":"server_error"}}').type,
+  'provider_quota'
+);
+
+assert.strictEqual(
   classifyReplyFailure('invalid api key').type,
   'provider_auth'
 );

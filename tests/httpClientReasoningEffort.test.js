@@ -29,6 +29,20 @@ module.exports = (async () => {
     assert.strictEqual(openaiPrepared.provider, 'openai_compatible');
     assert.strictEqual(openaiPrepared.requestBody.reasoning_effort, 'high');
 
+    const tracedPrepared = await httpClient.prepareRequest('https://example.com/v1/chat/completions', {
+      model: 'gpt-5.4',
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 3500,
+      stream: false,
+      __trace: {
+        source: 'test',
+        userId: 'u1'
+      },
+      __timeoutMs: 1234
+    });
+    assert.ok(!Object.prototype.hasOwnProperty.call(tracedPrepared.requestBody, '__trace'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(tracedPrepared.requestBody, '__timeoutMs'));
+
     const disabledPrepared = await httpClient.prepareRequest('https://example.com/v1/chat/completions', {
       model: 'gpt-4o',
       messages: [{ role: 'user', content: 'hi' }],

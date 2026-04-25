@@ -36,6 +36,7 @@ const { shouldUsePlanModeForRequest } = require('../planning/service');
 // function buildPrimaryMainModelConfig(overrides = null, userId = '') {
 // const resolvedConfig = resolveUserScopedMainModelConfig(userId, modelConfig, options);
 // const bypassFallback = shouldBypassMainModelFallback(userId, options);
+const MODEL_RESPONSE_MALFORMED_REPLY = '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。';
 
 function getAllowedToolNames(context = {}) {
   if (!Array.isArray(context.allowedTools)) return [];
@@ -81,6 +82,19 @@ function buildReplyTextVariants(rawReply, fallbackText, options = {}) {
   return {
     visibleText,
     persistedText
+  };
+}
+
+function buildModelCallTrace(context = {}, source = 'v2_model') {
+  return {
+    source: String(context?.source || source).trim() || source,
+    phase: String(context?.phase || '').trim(),
+    purpose: String(context?.purpose || '').trim(),
+    userId: String(context?.userId || context?.routeMeta?.userId || context?.routeMeta?.user_id || '').trim(),
+    taskId: String(context?.taskId || '').trim(),
+    routePolicyKey: String(context?.routePolicyKey || context?.routeMeta?.routePolicyKey || '').trim(),
+    topRouteType: String(context?.topRouteType || context?.routeMeta?.topRouteType || '').trim(),
+    memoryInjected: context?.memoryInjected
   };
 }
 
@@ -134,7 +148,8 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
       messages,
       max_tokens: getMaxTokens(3500, resolvedConfig),
       reasoning_effort: getReasoningEffort(resolvedConfig),
-      stream: false
+      stream: false,
+      __trace: buildModelCallTrace(context, 'v2_assistant_message')
     };
     if (includeTools) {
       body.tools = toolSchemas;
@@ -188,7 +203,7 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
   console.error('AI response malformed(raw assistant):', String(response?.data).slice(0, 500));
   return {
     role: 'assistant',
-    content: 'The model response format was malformed. Please try again.'
+    content: MODEL_RESPONSE_MALFORMED_REPLY
   };
 }
 
@@ -200,7 +215,7 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
   });
   const reply = await finalizeReplyText(
     responseMessage?.content,
-    'The model response format was malformed. Please try again.',
+    MODEL_RESPONSE_MALFORMED_REPLY,
     {
       ...context,
       disableHumanizer: true
@@ -227,7 +242,8 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
             messages,
             max_tokens: getMaxTokens(3500, resolvedConfig),
             reasoning_effort: getReasoningEffort(resolvedConfig),
-            stream: true
+            stream: true,
+            __trace: buildModelCallTrace(options, 'v2_streaming_reply')
           },
           {
             onData(chunk) {
