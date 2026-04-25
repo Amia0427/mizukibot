@@ -1224,9 +1224,6 @@ function shouldUseLocalDecisionFallback({ decision, addressee, score }) {
 }
 
 function buildLocalReplyFallback({ addressee, replyType }) {
-  if (addressee === 'bot_presence_check') return '我在看';
-  if (replyType === 'light_tease') return '还在，没坏';
-  if (addressee === 'bot_direct') return '我在';
   return '';
 }
 

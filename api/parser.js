@@ -22,6 +22,73 @@ function textFromAnthropicContent(content) {
     .join('');
 }
 
+function textFromOutputContent(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (!part || typeof part !== 'object') return '';
+      if (typeof part.text === 'string') return part.text;
+      if (typeof part.content === 'string') return part.content;
+      if (typeof part.output_text === 'string') return part.output_text;
+      if (Array.isArray(part.content)) return textFromOutputContent(part.content);
+      return '';
+    })
+    .join('');
+}
+
+function textFromResponsesOutput(output) {
+  if (!Array.isArray(output)) return '';
+  return output
+    .map((item) => {
+      if (typeof item === 'string') return item;
+      if (!item || typeof item !== 'object') return '';
+      if (typeof item.text === 'string') return item.text;
+      if (typeof item.content === 'string') return item.content;
+      if (typeof item.output_text === 'string') return item.output_text;
+      if (Array.isArray(item.content)) return textFromOutputContent(item.content);
+      return '';
+    })
+    .join('');
+}
+
+function extractTextFromObject(value, depth = 0) {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object' || depth > 3) return '';
+  const direct = String(
+    value.output_text
+    || value.outputText
+    || value.response_text
+    || value.responseText
+    || value.answer
+    || value.reply
+    || ''
+  ).trim();
+  if (direct) return direct;
+  const contentText = textFromOutputContent(value.content).trim();
+  if (contentText) return contentText;
+  const outputText = textFromResponsesOutput(value.output).trim();
+  if (outputText) return outputText;
+  if (value.message && typeof value.message === 'object') {
+    const messageText = extractTextFromObject(value.message, depth + 1).trim();
+    if (messageText) return messageText;
+  }
+  if (value.response && typeof value.response === 'object') {
+    const responseText = extractTextFromObject(value.response, depth + 1).trim();
+    if (responseText) return responseText;
+  }
+  if (value.result && typeof value.result === 'object') {
+    const resultText = extractTextFromObject(value.result, depth + 1).trim();
+    if (resultText) return resultText;
+  }
+  if (typeof value.text === 'string') return value.text;
+  if (typeof value.message === 'string') return value.message;
+  if (typeof value.response === 'string') return value.response;
+  if (typeof value.result === 'string') return value.result;
+  return '';
+}
+
 function toolCallsFromAnthropicContent(content) {
   if (!Array.isArray(content)) return [];
 
@@ -314,7 +381,12 @@ function extractJsonSafely(text) {
 function extractMessageContent(resp) {
   let data = resp?.data;
   if (typeof data === 'string') {
-    try { data = JSON.parse(data); } catch (_) {}
+    try { data = JSON.parse(data); } catch (_) {
+      const sseText = parseSSEToText(data);
+      if (sseText) return { role: 'assistant', content: sseText };
+      const text = String(data || '').trim();
+      return text ? { role: 'assistant', content: text } : null;
+    }
   }
 
   // Anthropic non-stream response format.
@@ -335,6 +407,14 @@ function extractMessageContent(resp) {
     latestReasoning = msg.reasoning_content || msg.reasoning || '';
     return msg;
   }
+
+  const choice = data?.choices?.[0];
+  const choiceText = extractDeltaText({ choices: [choice] }).trim();
+  if (choiceText) return { role: 'assistant', content: choiceText };
+
+  // OpenAI Responses API / common proxy response formats.
+  const fallbackText = extractTextFromObject(data).trim();
+  if (fallbackText) return { role: 'assistant', content: fallbackText };
 
   const sseText = parseSSEToText(resp?.data);
   if (sseText) return { content: sseText };

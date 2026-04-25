@@ -17,6 +17,7 @@ const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
 const ADMIN_PREFIX = '/';
 const TOP_ROUTE_TYPE_SET = new Set(TOP_ROUTE_TYPES);
+const LOCAL_ROUTE_SOURCE = 'local_rule';
 // router infers the canonical route contract only; planner/execution/policy live downstream.
 const INTENT_ALIASES = Object.freeze({
   place: [
@@ -505,6 +506,10 @@ function isAdmin(userId) {
   return ADMIN_USER_IDS.has(String(userId));
 }
 
+function getLocalRouteUserRole(userId = '') {
+  return isAdmin(userId) ? 'admin' : 'user';
+}
+
 function shouldUseSubagentByWhitelist(userId) {
   return isAdmin(userId);
 }
@@ -743,7 +748,35 @@ function shouldIgnoreUnsafeOrBadFaithRequest(text = '') {
   return { matched: false };
 }
 
-function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = null, userId = '', chatType = '' }) {
+function resolveLocalRuleId(route = {}) {
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  const existingRuleId = String(routeMeta.localRuleId || '').trim();
+  if (existingRuleId) return existingRuleId;
+
+  const reason = String(routeMeta.reason || '').trim();
+  if (reason) return reason;
+
+  const topRouteType = sanitizeTopRouteType(route?.topRouteType || '');
+  if (topRouteType === 'ignore') return 'empty-message';
+  if (topRouteType === 'refuse') return 'refuse-local-policy';
+  if (topRouteType === 'admin') return 'admin-command';
+  return route?.imageUrl ? 'default-image-chat' : 'default-chat';
+}
+
+function markLocalRuleRoute(route = {}, userId = '') {
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  return {
+    ...route,
+    meta: {
+      ...routeMeta,
+      routeSource: LOCAL_ROUTE_SOURCE,
+      localRuleId: resolveLocalRuleId(route),
+      userRole: getLocalRouteUserRole(userId)
+    }
+  };
+}
+
+function matchTerminalLocalRoute({ rawText = '', cleanText = '', imageUrl = null, userId = '', chatType = '' }) {
   const bypassRouteRefuse = shouldBypassRouteRefuse(userId, { chatType });
 
   if (!cleanText && !imageUrl) {
@@ -829,6 +862,10 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
     });
   }
 
+  return null;
+}
+
+function matchActionLocalRoute({ rawText = '', cleanText = '', imageUrl = null, userId = '' }) {
   const qqActionIntent = detectQqActionIntent(cleanText, imageUrl);
   if (qqActionIntent) {
     const adjustedAllowedTools = (() => {
@@ -868,6 +905,11 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
     });
   }
 
+  return null;
+}
+
+function matchDirectLocalRoute({ rawText = '', cleanText = '', imageUrl = null }) {
+  // Direct local rules: light heuristics for common chat/tool/vision intents.
   if (
     !imageUrl &&
     /(\bhow\b|\bwhat\b|\bwhich\b|\bwhere\b|\bhelp\b|\bcan you\b|\u600e\u4e48|\u54ea\u4e2a|\u54ea\u91cc|\u4ec0\u4e48|\u8fd9\u4e2a|\u90a3\u4e2a|\u600e\u4e48\u5f04|\u5e2e\u6211\u770b\u770b)/i.test(cleanText) &&
@@ -1147,6 +1189,7 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
     });
   }
 
+  // Default local rule: ordinary chat.
   return makeRoute({
     confidence: imageUrl ? 0.72 : 0.6,
     cleanText,
@@ -1155,6 +1198,21 @@ function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = 
     topRouteType: 'direct_chat',
     meta: { chatMode: imageUrl ? 'image_qa' : 'text_chat', toolIntent: 'none', responseIntent: 'answer' }
   });
+}
+
+const LOCAL_ROUTE_RULE_GROUPS = Object.freeze([
+  matchTerminalLocalRoute,
+  matchActionLocalRoute,
+  matchDirectLocalRoute
+]);
+
+function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = null, userId = '', chatType = '' }) {
+  const input = { rawText, cleanText, imageUrl, userId, chatType };
+  for (const matchRuleGroup of LOCAL_ROUTE_RULE_GROUPS) {
+    const route = matchRuleGroup(input);
+    if (route) return route;
+  }
+  return matchDirectLocalRoute(input);
 }
 
 function isDirectRouteInvariantSatisfied(route = {}) {
@@ -1369,6 +1427,9 @@ function sanitizeAiRoute(aiRoute, fallbackRoute, { userId, imageUrl }) {
   if (confidence < (config.AI_ROUTER_MIN_CONFIDENCE || 0.55)) return fallbackRoute;
   const rawAiMeta = aiRoute.meta && typeof aiRoute.meta === 'object' ? aiRoute.meta : {};
   const aiToolIntent = normalizeToolIntent(rawAiMeta.toolIntent, 'none');
+  if (topRouteType !== 'direct_chat') {
+    return fallbackRoute;
+  }
   const highRiskRoute = topRouteType === 'admin'
     || topRouteType === 'refuse'
     || aiToolIntent === 'force_tools'
@@ -1439,7 +1500,7 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
     intentText,
     quotePriority
   } = resolveIntentInputs({ rawText, botQQ, directedContext, effectiveIntentText });
-  const route = buildCanonicalFallbackRoute({ rawText, cleanText: intentText, imageUrl, userId, chatType });
+  let route = buildCanonicalFallbackRoute({ rawText, cleanText: intentText, imageUrl, userId, chatType });
   route.cleanText = cleanText;
   route.rawText = rawText;
   route.meta = {
@@ -1447,9 +1508,10 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
     effectiveIntentText: intentText || cleanText,
     quotePriority
   };
+  route = markLocalRuleRoute(route, userId);
   if (sanitizeTopRouteType(route?.topRouteType) !== 'direct_chat') return route;
   if (!detectSafetyBoundaryCaution(intentText)) return route;
-  return makeRoute({
+  return markLocalRuleRoute(makeRoute({
     ...route,
     meta: {
       ...(route.meta || {}),
@@ -1457,7 +1519,7 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
       effectiveIntentText: intentText || cleanText,
       quotePriority
     }
-  });
+  }), userId);
 }
 
 async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, effectiveIntentText = '', chatType = '' }, options = {}) {

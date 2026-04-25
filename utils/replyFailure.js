@@ -16,6 +16,9 @@ function classifyReplyFailure(text = '') {
   if (
     /insufficient[_\s-]?user[_\s-]?quota/i.test(compact)
     || /insufficient[_\s-]?quota/i.test(compact)
+    || /insufficient\s+balance/i.test(compact)
+    || /exhausted\s+your\s+capacity/i.test(compact)
+    || /all\s+available\s+accounts\s+exhausted/i.test(compact)
     || /quota[_\s-]?(?:exceeded|failed|error)/i.test(compact)
     || /预扣费额度失败|用户剩余额度|余额不足|额度不足|额度失败/i.test(compact)
   ) {

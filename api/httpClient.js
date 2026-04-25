@@ -965,6 +965,14 @@ function stripReasoningFields(requestBody = {}) {
   return nextBody;
 }
 
+function stripInternalRequestFields(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return requestBody;
+  const nextBody = { ...requestBody };
+  delete nextBody.__trace;
+  delete nextBody.__timeoutMs;
+  return nextBody;
+}
+
 function isReasoningSchemaError(error) {
   const status = Number(error?.response?.status || 0);
   if (![400, 404, 415, 422].includes(status)) return false;
@@ -1206,7 +1214,7 @@ async function prepareRequest(url, body = {}) {
   const provider = getApiProvider(url, body?.model || config.AI_MODEL);
   if (provider !== 'anthropic') {
     const requestBody = body && typeof body === 'object'
-      ? stripCacheControlFields({ ...body })
+      ? stripInternalRequestFields(stripCacheControlFields({ ...body }))
       : body;
     const normalizedTopLevelCacheControl = extractAnthropicCacheControl(body);
     if (normalizedTopLevelCacheControl) {
@@ -1227,7 +1235,7 @@ async function prepareRequest(url, body = {}) {
     };
   }
 
-  const requestBody = await buildAnthropicRequestBody(body);
+  const requestBody = await buildAnthropicRequestBody(stripInternalRequestFields(body));
   return {
     provider,
     requestUrl: ensureAnthropicMessagesUrl(url),

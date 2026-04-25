@@ -713,7 +713,7 @@ module.exports = {
   AGENT_MAX_ROUNDS: pickNum('AGENT_MAX_ROUNDS', 3),
 
   // ===== Behavior =====
-  ENABLE_AI_ROUTER: pickBool('ENABLE_AI_ROUTER', true),
+  ENABLE_AI_ROUTER: pickBool('ENABLE_AI_ROUTER', false),
   AI_ROUTER_MIN_CONFIDENCE: pickNum('AI_ROUTER_MIN_CONFIDENCE', 0.55),
   // Passive group awareness listens to normal group traffic and decides whether to naturally chime in.
   PASSIVE_AWARENESS_ENABLED: pickBool('PASSIVE_AWARENESS_ENABLED', false),
