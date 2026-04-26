@@ -44,6 +44,10 @@ function defaultJsonDeserialize(raw = '', fallback) {
   return JSON.parse(raw);
 }
 
+function hasNulBytes(raw = '') {
+  return String(raw || '').includes('\u0000');
+}
+
 function defaultJsonSerialize(value) {
   return JSON.stringify(value, null, 2);
 }
@@ -115,7 +119,19 @@ function createHotStore(filePath, options = {}) {
       return store.data;
     }
     const raw = fs.readFileSync(store.filePath, store.encoding);
-    store.data = store.deserialize(raw, fallbackValue());
+    const fallback = fallbackValue();
+    try {
+      if (hasNulBytes(raw)) {
+        throw new Error('file contains NUL bytes');
+      }
+      store.data = store.deserialize(raw, fallback);
+    } catch (error) {
+      console.error('[jsonHotStore] failed to read store, using fallback:', {
+        filePath: store.filePath,
+        error: error?.message || String(error || '')
+      });
+      store.data = fallback;
+    }
     store.loaded = true;
     store.lastLoadedAt = Date.now();
     store.lastLoadedMtimeMs = Number(stat.mtimeMs || 0) || Date.now();

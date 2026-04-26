@@ -8,6 +8,9 @@ const {
   resolveMainModelConfig,
   resolveForcedFallbackMainModelConfig
 } = require('../utils/mainModelFallback');
+const {
+  resolveRoleAwareMainModelConfig
+} = require('../utils/mainModelConfigResolver');
 
 function parseArgs(argv = []) {
   const flags = new Set(argv.slice(2));
@@ -51,7 +54,17 @@ function buildProbeRequestSummary(name, modelConfig) {
     model: String(modelConfig?.model || '').trim(),
     apiBaseUrl: String(modelConfig?.apiBaseUrl || '').trim(),
     apiKeyMasked: maskSecret(modelConfig?.apiKey || ''),
-    activeFlag: Boolean(modelConfig?.__mainFallbackActive)
+    activeFlag: Boolean(modelConfig?.__mainFallbackActive),
+    userRole: String(modelConfig?.__mainModelUserRole || '').trim(),
+    modelSource: String(modelConfig?.__mainModelSource || '').trim(),
+    apiBaseUrlSource: String(modelConfig?.__mainApiBaseUrlSource || '').trim(),
+    fallbackScope: String(modelConfig?.__mainFallbackScope || '').trim(),
+    adminDedicatedModelConfigured: modelConfig?.__adminDedicatedModelConfigured === undefined
+      ? null
+      : Boolean(modelConfig.__adminDedicatedModelConfigured),
+    adminConfigWarnings: Array.isArray(modelConfig?.__adminConfigWarnings)
+      ? modelConfig.__adminConfigWarnings
+      : []
   };
 }
 
@@ -165,12 +178,10 @@ async function main() {
 }
 
 async function runDiagnose(args = {}) {
-  const primaryConfig = {
-    model: String(args.admin ? (config.ADMIN_AI_MODEL || config.AI_MODEL) : config.AI_MODEL || '').trim(),
-    apiBaseUrl: String(args.admin ? (config.ADMIN_API_BASE_URL || config.API_BASE_URL) : config.API_BASE_URL || '').trim(),
-    apiKey: String(args.admin ? (config.ADMIN_API_KEY || config.API_KEY) : config.API_KEY || '').trim(),
-    __mainFallbackActive: false
-  };
+  const diagnosticUserId = args.admin
+    ? String((config.ADMIN_USER_IDS || [])[0] || '__diagnose_admin__').trim()
+    : '__diagnose_user__';
+  const primaryConfig = resolveRoleAwareMainModelConfig(diagnosticUserId, null, {});
   const scope = args.admin ? ADMIN_SHARED_FALLBACK_SCOPE : undefined;
   const effectiveConfig = resolveMainModelConfig(primaryConfig, { scope });
   const fallbackConfig = resolveForcedFallbackMainModelConfig(primaryConfig, { scope });

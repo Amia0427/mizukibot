@@ -22,6 +22,7 @@ function restoreEnv(snapshot = {}) {
 module.exports = (async () => {
   const snapshot = { ...process.env };
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-tick-'));
+  let runtime = null;
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
@@ -34,11 +35,19 @@ module.exports = (async () => {
     const state = tickEngine.loadTickState();
     assert.deepStrictEqual(state, {}, 'tick state should load from empty hot-store fallback');
 
-    tickEngine.startTickEngine({ readyState: 1, send() {} }, async () => 'ok');
+    runtime = tickEngine.startTickEngine({ readyState: 1, send() {} }, async () => 'ok');
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     console.log('tickEngineAdaptive.test.js passed');
   } finally {
+    try {
+      runtime?.stop?.();
+    } catch (_) {}
+    for (const listener of process.listeners('exit')) {
+      if (listener && listener.name === 'flushAllSync') {
+        process.removeListener('exit', listener);
+      }
+    }
     restoreEnv(snapshot);
     clearProjectCache();
     try {

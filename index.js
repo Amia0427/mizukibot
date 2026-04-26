@@ -10,8 +10,11 @@ const { startTickEngine } = require('./core/tickEngine');
 const { createMessageHandler } = require('./core/messageHandler');
 const { initializeMemeManager } = require('./core/memeManager');
 const { askAIByGraph } = require('./api/agentGraph');
+const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
 const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
 const { warmMcpRegistry } = require('./api/toolRegistry');
+const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
+const { shutdownSubagentExecutor } = require('./api/subagentExecutor');
 const { getNapCatActionClient } = require('./api/napcatActionClient');
 const { getSchedulerRuntime } = require('./core/schedulerRuntime');
 const { sendGroupMessage } = require('./api/qqActionService');
@@ -75,25 +78,19 @@ function acquireSingleInstanceLock() {
   };
 
   process.on('exit', cleanup);
-  process.on('SIGINT', () => {
-    void shutdownMinecraftAgent();
-    cleanup();
-    process.exit(130);
-  });
-  process.on('SIGTERM', () => {
-    void shutdownMinecraftAgent();
-    cleanup();
-    process.exit(143);
-  });
+  return cleanup;
 }
 
-acquireSingleInstanceLock();
-startServer();
+const cleanupSingleInstanceLock = acquireSingleInstanceLock();
+const webServer = startServer();
 initializeMemeManager();
 void warmMcpRegistry();
 
 let ws = null;
+let shuttingDown = false;
+let shutdownInProgress = false;
 let tickStarted = false;
+let tickRuntime = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let schedulerStarted = false;
@@ -101,6 +98,7 @@ const napcatActionClient = getNapCatActionClient();
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
 
 function scheduleReconnect() {
+  if (shuttingDown) return;
   if (reconnectTimer) return;
   const delay = Math.min(30000, 1500 * Math.max(1, reconnectAttempts));
   reconnectAttempts += 1;
@@ -112,6 +110,7 @@ function scheduleReconnect() {
 }
 
 function safeSend(payload) {
+  if (shuttingDown) return false;
   if (!ws || ws.readyState !== WebSocket.OPEN) return false;
   ws.send(JSON.stringify(payload));
   return true;
@@ -168,6 +167,7 @@ const resourceSnapshotLoop = startResourceSnapshotLoop(() => ({
 }));
 
 function connectNapCat() {
+  if (shuttingDown) return;
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
   const headers = {};
@@ -184,7 +184,7 @@ function connectNapCat() {
     console.log('✅ 瑞希上线啦！已连接到 NapCat');
 
     if (!tickStarted) {
-      startTickEngine(ws, askAIByGraph);
+      tickRuntime = startTickEngine(ws, askAIByGraph);
       tickStarted = true;
     }
 
@@ -209,10 +209,11 @@ function connectNapCat() {
       console.warn('[NapCat ws close]', { code, reason });
     }
     napcatActionClient.handleDisconnect('NapCat websocket closed');
-    scheduleReconnect();
+    if (!shuttingDown) scheduleReconnect();
   });
 
   ws.on('message', async (data) => {
+    if (shuttingDown) return;
     try {
       const msg = JSON.parse(data);
       appendNapcatPacketToLog(msg);
@@ -230,3 +231,115 @@ function connectNapCat() {
 }
 
 connectNapCat();
+
+async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
+  if (shutdownInProgress) return;
+  shutdownInProgress = true;
+  shuttingDown = true;
+  const reason = String(signal || 'shutdown').trim() || 'shutdown';
+  console.log('[shutdown] begin', { reason, pid: process.pid });
+
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  try {
+    if (ws) {
+      ws.removeAllListeners('message');
+      ws.removeAllListeners('open');
+      ws.removeAllListeners('error');
+      ws.removeAllListeners('close');
+      try { ws.close(1001, 'mizuki shutdown'); } catch (_) {}
+      try { ws.terminate(); } catch (_) {}
+      ws = null;
+    }
+  } catch (error) {
+    console.error('[shutdown] websocket cleanup failed:', error?.message || error);
+  }
+
+  try {
+    napcatActionClient.handleDisconnect('MizukiBot shutdown');
+    napcatActionClient.setWebSocket(null);
+  } catch (_) {}
+
+  try { schedulerRuntime.stop(); } catch (error) {
+    console.error('[shutdown] scheduler stop failed:', error?.message || error);
+  }
+  try { tickRuntime?.stop?.(); } catch (error) {
+    console.error('[shutdown] tick stop failed:', error?.message || error);
+  }
+  try { napcatLogFollower.stop(); } catch (error) {
+    console.error('[shutdown] follower stop failed:', error?.message || error);
+  }
+  try { postReplyWorkerRuntime?.stop?.(); } catch (error) {
+    console.error('[shutdown] post-reply worker stop failed:', error?.message || error);
+  }
+  try { resourceSnapshotLoop.stop(); } catch (error) {
+    console.error('[shutdown] resource snapshot stop failed:', error?.message || error);
+  }
+  try { webServer?.close?.(); } catch (error) {
+    console.error('[shutdown] web server close failed:', error?.message || error);
+  }
+
+  try { shutdownSubagentExecutor(reason); } catch (error) {
+    console.error('[shutdown] subagent cleanup failed:', error?.message || error);
+  }
+  try { clearMcpRuntimeCaches(); } catch (error) {
+    console.error('[shutdown] mcp cleanup failed:', error?.message || error);
+  }
+  try { clearRuntimeSlotsForCurrentProcess(); } catch (error) {
+    console.error('[shutdown] create-agent runtime cleanup failed:', error?.message || error);
+  }
+  try { await shutdownMinecraftAgent(); } catch (error) {
+    console.error('[shutdown] minecraft cleanup failed:', error?.message || error);
+  }
+
+  cleanupSingleInstanceLock();
+  console.log('[shutdown] complete', { reason, pid: process.pid });
+  process.exit(exitCode);
+}
+
+function drainForScheduledRestart(meta = {}) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const delayMs = Math.max(0, Number(meta?.delayMs || 0) || 0);
+  console.log('[restart] drain old instance before external restart', {
+    pid: process.pid,
+    delayMs
+  });
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  try { schedulerRuntime.stop(); } catch (_) {}
+  try { tickRuntime?.stop?.(); } catch (_) {}
+  try { napcatLogFollower.stop(); } catch (_) {}
+  try { postReplyWorkerRuntime?.stop?.(); } catch (_) {}
+  try { resourceSnapshotLoop.stop(); } catch (_) {}
+  try {
+    if (ws) {
+      ws.removeAllListeners('message');
+      ws.removeAllListeners('open');
+      ws.removeAllListeners('error');
+      ws.removeAllListeners('close');
+      try { ws.close(1001, 'mizuki restart draining'); } catch (_) {}
+      try { ws.terminate(); } catch (_) {}
+      ws = null;
+    }
+  } catch (_) {}
+  try {
+    napcatActionClient.handleDisconnect('MizukiBot restart draining');
+    napcatActionClient.setWebSocket(null);
+  } catch (_) {}
+  try { shutdownSubagentExecutor('restart_draining'); } catch (_) {}
+}
+
+process.on('mizuki:restartScheduled', drainForScheduledRestart);
+
+process.on('SIGINT', () => {
+  void shutdownMainProcess('SIGINT', 130);
+});
+process.on('SIGTERM', () => {
+  void shutdownMainProcess('SIGTERM', 143);
+});

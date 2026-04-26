@@ -17,6 +17,7 @@ const {
 const {
   createJsonHotStore
 } = require('./jsonHotStore');
+const { rerankMemoryCandidates } = require('./memoryReranker');
 
 const ITEMS_FILE = path.join(config.DATA_DIR, 'memory_items.json');
 const LEGACY_LIB_FILE = path.join(config.DATA_DIR, 'memory_library.json');
@@ -2076,6 +2077,30 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
   return selected;
 }
 
+async function scoreDocsAsync(userId, ids, docs, index, question, topK, options = {}, embeddingQueryVec = null) {
+  const rerankCandidateLimit = Math.max(
+    Number(topK) || 8,
+    Number(config.MEMORY_RERANK_MAX_CANDIDATES || 40) || 40
+  );
+  const baseHits = scoreDocs(userId, ids, docs, index, question, rerankCandidateLimit, {
+    ...options,
+    trackAccess: false
+  }, embeddingQueryVec);
+  const reranked = await rerankMemoryCandidates(question, baseHits, {
+    ...options,
+    userId,
+    phase: 'vector_memory'
+  });
+  const selected = selectDiverseHits(reranked, Math.max(1, Math.min(20, Number(topK) || 8)));
+
+  const shouldTrackAccess = options.trackAccess ?? config.MEMORY_RAG_TRACK_ACCESS ?? false;
+  if (shouldTrackAccess) {
+    touchAccessStats(userId, selected.map((item) => item.id));
+  }
+
+  return selected;
+}
+
 function selectDiverseHits(scored, topK) {
   const maxPerType = Math.max(1, Number(config.MEMORY_RAG_MAX_PER_TYPE) || 2);
   // Avoid flooding the prompt with low-importance (tier C) memories.
@@ -2212,7 +2237,7 @@ async function retrieveRelevantMemoriesAsync(userId, query, topK = 8, options = 
     ? await requestEmbedding(question)
     : null;
 
-  return scoreDocs(userId, ids, docs, index, question, topK, options, embeddingQueryVec);
+  return scoreDocsAsync(userId, ids, docs, index, question, topK, options, embeddingQueryVec);
 }
 
 function getMemoryItems(userId = null) {
@@ -2323,7 +2348,7 @@ async function retrieveUnifiedMemoriesAsync(userId, query, topK = 8, options = {
     ? await requestEmbedding(question)
     : null;
 
-  return scoreDocs(userId, ids, docs, { ...index, docs }, question, topK, unifiedOptions, embeddingQueryVec);
+  return scoreDocsAsync(userId, ids, docs, { ...index, docs }, question, topK, unifiedOptions, embeddingQueryVec);
 }
 
 function getMemoryStats(userId = null) {

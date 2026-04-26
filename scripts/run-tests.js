@@ -83,6 +83,7 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'runtimeStreamingCoordinator.test.js'),
   path.join(__dirname, '..', 'tests', 'fullSubagentCoordinator.test.js'),
   path.join(__dirname, '..', 'tests', 'persistentSubagentCommandBackend.test.js'),
+  path.join(__dirname, '..', 'tests', 'subagentShutdown.test.js'),
   path.join(__dirname, '..', 'tests', 'messageTaskControl.test.js'),
   path.join(__dirname, '..', 'tests', 'messageDispatchCoordinator.test.js'),
   path.join(__dirname, '..', 'tests', 'sessionContextSummaryStore.test.js'),

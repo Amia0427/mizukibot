@@ -236,6 +236,15 @@ function startModelCall(meta = {}) {
     task_id: normalizeText(meta.taskId),
     route_policy_key: normalizeText(meta.routePolicyKey),
     top_route_type: normalizeText(meta.topRouteType),
+    user_role: normalizeText(meta.userRole),
+    model_source: normalizeText(meta.modelSource),
+    api_base_url_source: normalizeText(meta.apiBaseUrlSource),
+    api_key_source: normalizeText(meta.apiKeySource),
+    main_fallback_scope: normalizeText(meta.mainFallbackScope),
+    main_fallback_active: Boolean(meta.mainFallbackActive),
+    admin_dedicated_model_configured: meta.adminDedicatedModelConfigured === undefined
+      ? null
+      : Boolean(meta.adminDedicatedModelConfigured),
     attempts: 0,
     usage: null,
     error: '',

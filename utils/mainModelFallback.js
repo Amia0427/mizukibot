@@ -5,9 +5,17 @@ const DEFAULT_FALLBACK_SCOPE = 'default';
 const ADMIN_SHARED_FALLBACK_SCOPE = 'admin_shared';
 
 const scopeStates = new Map();
+const warnedFallbackConfigKeys = new Set();
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function warnOnce(key = '', message = '', details = {}) {
+  const normalizedKey = normalizeText(key);
+  if (!normalizedKey || warnedFallbackConfigKeys.has(normalizedKey)) return;
+  warnedFallbackConfigKeys.add(normalizedKey);
+  console.warn(message, details);
 }
 
 function createEmptyState() {
@@ -126,6 +134,15 @@ function isFallbackConfigured(scope = DEFAULT_FALLBACK_SCOPE) {
   return Boolean(scopeConfig.enabled) && Boolean(getFallbackModelName(scope));
 }
 
+function warnIfFallbackEnabledButIncomplete(scope = DEFAULT_FALLBACK_SCOPE) {
+  const normalizedScope = normalizeScope(scope);
+  const scopeConfig = getScopeConfig(normalizedScope);
+  if (!scopeConfig.enabled || getFallbackModelName(normalizedScope)) return;
+  warnOnce(`fallback-config:${normalizedScope}`, `[main-model-fallback:${normalizedScope}] enabled but fallback model is empty`, {
+    scope: normalizedScope
+  });
+}
+
 function resetMainModelFallbackState(options = null) {
   const normalized = normalizeScopeOptions(options);
   resetScopeState(normalized.scope);
@@ -189,6 +206,7 @@ function buildPrimaryConfig(baseConfig = null) {
 function resolveMainModelConfig(baseConfig = null, options = null) {
   const normalized = normalizeScopeOptions(options);
   const primaryConfig = buildPrimaryConfig(baseConfig);
+  warnIfFallbackEnabledButIncomplete(normalized.scope);
   if (!isFallbackActive(normalized)) {
     return {
       ...primaryConfig,
@@ -202,6 +220,9 @@ function resolveMainModelConfig(baseConfig = null, options = null) {
     model: getFallbackModelName(normalized.scope) || primaryConfig.model,
     apiBaseUrl: getFallbackApiBaseUrl(normalized.scope) || primaryConfig.apiBaseUrl,
     apiKey: getFallbackApiKey(normalized.scope) || primaryConfig.apiKey,
+    __mainModelSource: getFallbackModelName(normalized.scope) ? `${normalized.scope}.fallbackModel` : primaryConfig.__mainModelSource,
+    __mainApiBaseUrlSource: getFallbackApiBaseUrl(normalized.scope) ? `${normalized.scope}.fallbackApiBaseUrl` : primaryConfig.__mainApiBaseUrlSource,
+    __mainApiKeySource: getFallbackApiKey(normalized.scope) ? `${normalized.scope}.fallbackApiKey` : primaryConfig.__mainApiKeySource,
     __mainFallbackActive: true,
     __mainFallbackScope: normalized.scope
   };
@@ -210,11 +231,15 @@ function resolveMainModelConfig(baseConfig = null, options = null) {
 function resolveForcedFallbackMainModelConfig(baseConfig = null, options = null) {
   const normalized = normalizeScopeOptions(options);
   const primaryConfig = buildPrimaryConfig(baseConfig);
+  warnIfFallbackEnabledButIncomplete(normalized.scope);
   return {
     ...primaryConfig,
     model: getFallbackModelName(normalized.scope) || primaryConfig.model,
     apiBaseUrl: getFallbackApiBaseUrl(normalized.scope) || primaryConfig.apiBaseUrl,
     apiKey: getFallbackApiKey(normalized.scope) || primaryConfig.apiKey,
+    __mainModelSource: getFallbackModelName(normalized.scope) ? `${normalized.scope}.fallbackModel` : primaryConfig.__mainModelSource,
+    __mainApiBaseUrlSource: getFallbackApiBaseUrl(normalized.scope) ? `${normalized.scope}.fallbackApiBaseUrl` : primaryConfig.__mainApiBaseUrlSource,
+    __mainApiKeySource: getFallbackApiKey(normalized.scope) ? `${normalized.scope}.fallbackApiKey` : primaryConfig.__mainApiKeySource,
     __mainFallbackActive: true,
     __mainFallbackForced: true,
     __mainFallbackScope: normalized.scope
@@ -270,7 +295,12 @@ function recordMainModelFailure(error, options = null) {
     state.fallbackUntil = cooldownMs > 0 ? (now + cooldownMs) : PERMANENT_FALLBACK_UNTIL;
     state.lastActivatedAt = now;
     activated = true;
-    console.warn(`[main-model-fallback:${normalized.scope}] activated backup model after repeated request failures`);
+    console.warn(`[main-model-fallback:${normalized.scope}] activated backup model after repeated request failures`, {
+      scope: normalized.scope,
+      fallbackModel: getFallbackModelName(normalized.scope),
+      failureThreshold: getFailureThreshold(normalized.scope),
+      cooldownMs
+    });
   }
 
   return {

@@ -382,6 +382,29 @@ function releaseRuntimeSlot(runtimeConfig = {}) {
   });
 }
 
+function clearRuntimeSlotsForCurrentProcess(runtimeConfig = resolveConfig()) {
+  const current = loadRuntimeState(runtimeConfig.runtimeFile);
+  if (Number(current.ownerPid || 0) !== process.pid) {
+    return {
+      cleared: false,
+      state: current
+    };
+  }
+  saveRuntimeState(runtimeConfig.runtimeFile, {
+    running: 0,
+    updatedAt: Date.now(),
+    ownerPid: 0
+  });
+  console.log('[create-agent] cleared runtime slots for shutdown', {
+    pid: process.pid,
+    previousRunning: Math.max(0, Number(current.running || 0) || 0)
+  });
+  return {
+    cleared: true,
+    state: current
+  };
+}
+
 function validateCreateAgentPrerequisites(runtimeConfig = {}) {
   if (!runtimeConfig.apiBaseUrl) {
     throw new Error('CREATE_AGENT_API_BASE_URL is not configured');
@@ -1036,5 +1059,6 @@ module.exports = {
   resolveConfig,
   tryAcquireRuntimeSlot,
   releaseRuntimeSlot,
+  clearRuntimeSlotsForCurrentProcess,
   writeJsonFileSafe
 };

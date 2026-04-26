@@ -1131,6 +1131,10 @@ function createMessageRouteFlow(deps = {}) {
       });
       if (!String(reply || '').trim()) {
         reply = '这次处理过程中出了点问题。你可以稍后再试一次。';
+        persistedReplyText = reply;
+        finalReplyOptions = finalReplyOptions
+          ? { ...finalReplyOptions, deferPersist: false, __dispatchFailed: true }
+          : { deferPersist: false, __dispatchFailed: true };
       }
     }
 

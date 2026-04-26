@@ -753,14 +753,18 @@ function resolveLocalRuleId(route = {}) {
   const existingRuleId = String(routeMeta.localRuleId || '').trim();
   if (existingRuleId) return existingRuleId;
 
-  const reason = String(routeMeta.reason || '').trim();
-  if (reason) return reason;
-
   const topRouteType = sanitizeTopRouteType(route?.topRouteType || '');
   if (topRouteType === 'ignore') return 'empty-message';
   if (topRouteType === 'refuse') return 'refuse-local-policy';
   if (topRouteType === 'admin') return 'admin-command';
-  return route?.imageUrl ? 'default-image-chat' : 'default-chat';
+  if (String(routeMeta.qqActionKey || '').trim()) return 'qq-action';
+  if (
+    String(routeMeta.responseIntent || '').trim() === 'action_guidance'
+    || String(routeMeta.toolIntent || '').trim() === 'force_tools'
+  ) {
+    return 'explicit-action';
+  }
+  return 'direct-chat';
 }
 
 function markLocalRuleRoute(route = {}, userId = '') {
@@ -896,6 +900,7 @@ function matchActionLocalRoute({ rawText = '', cleanText = '', imageUrl = null, 
       },
       meta: {
         reason: qqActionIntent.reason,
+        localRuleId: 'qq-action',
         qqActionKey: qqActionIntent.key,
         allowedTools: adjustedAllowedTools,
         chatMode: 'text_chat',
@@ -908,7 +913,7 @@ function matchActionLocalRoute({ rawText = '', cleanText = '', imageUrl = null, 
   return null;
 }
 
-function matchDirectLocalRoute({ rawText = '', cleanText = '', imageUrl = null }) {
+function matchLegacyFineDirectLocalRoute({ rawText = '', cleanText = '', imageUrl = null }) {
   // Direct local rules: light heuristics for common chat/tool/vision intents.
   if (
     !imageUrl &&
@@ -1197,6 +1202,129 @@ function matchDirectLocalRoute({ rawText = '', cleanText = '', imageUrl = null }
     imageUrl,
     topRouteType: 'direct_chat',
     meta: { chatMode: imageUrl ? 'image_qa' : 'text_chat', toolIntent: 'none', responseIntent: 'answer' }
+  });
+}
+
+function extractDirectRouteSignals(cleanText = '', imageUrl = null) {
+  const text = String(cleanText || '').trim();
+  const hasImage = Boolean(imageUrl);
+  const isExplicitAction = hasExplicitActSignal(text);
+  const hasSafetyBoundary = detectSafetyBoundaryCaution(text);
+  const isStrictTime = isStrictTimeDirectQuestion(text);
+  const needsMemory = !hasImage && /(remember|recall|earlier|previous|before|history|timeline|log|logs|my notes|my notebook|notes about|我的资料|我的笔记|之前记录|之前记过|知识库|笔记|记得|记不记得|之前|昨天|前几天|回忆|记录|发过|图|图片)/i.test(text);
+  const needsFreshInfo = !isStrictTime && !hasImage && (
+    shouldUseToolBackedSummary(text)
+    || /(search|look up|find|google|latest|news|official|docs?|documentation|source|link|links|web|website|weather|stock|stocks|ticker|shares|portfolio|fund|crypto|etf|搜索|查一下|查查|帮我查|网页|官网|链接|资料|文档|最新|新闻|来源|实时|当前|今天|天气|气温|下雨|温度|股票|股价|行情|财报|基金|币圈)/i.test(text)
+  );
+  const isTransformLike = hasImage
+    ? /(总结|提炼|概括|描述|解释|summari[sz]e|describe|explain|这张图|图片)/i.test(text)
+    : /(总结|摘要|概括|提炼|梳理|改写|润色|翻译|简化|压缩|summari[sz]e|summary|recap|outline|rewrite|rephrase|translate)/i.test(text);
+  const isPlanLike = !isExplicitAction && (
+    isSelfContainedProductivityPlan(text)
+    || isTextOnlyPlanRequest(text)
+    || /(plan|planning|todo|task|agenda|roadmap|proposal|strategy|step by step|计划|待办|议程|拆解|规划|方案|步骤|怎么做|如何做)/i.test(text)
+  );
+  const needsTools = isExplicitAction || needsMemory || needsFreshInfo;
+  return {
+    hasImage,
+    needsTools,
+    needsMemory,
+    needsFreshInfo,
+    isTransformLike,
+    isPlanLike,
+    isExplicitAction,
+    hasSafetyBoundary
+  };
+}
+
+function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = null, signals = null } = {}) {
+  const s = signals || extractDirectRouteSignals(cleanText, imageUrl);
+  const chatMode = s.hasImage
+    ? (s.isTransformLike ? 'image_summary' : 'image_qa')
+    : 'text_chat';
+  const responseIntent = s.isExplicitAction
+    ? 'action_guidance'
+    : s.isPlanLike
+      ? 'plan'
+      : s.isTransformLike
+        ? 'summary'
+        : 'answer';
+  const sourceScope = s.isExplicitAction
+    ? 'mixed'
+    : s.hasImage
+      ? 'vision'
+      : s.needsMemory && s.needsFreshInfo
+        ? 'mixed'
+        : s.needsMemory
+          ? 'notebook'
+          : s.needsFreshInfo
+            ? 'web'
+            : 'none';
+  const toolNeed = s.isExplicitAction
+    ? ['local-write']
+    : s.hasImage
+      ? ['image']
+      : sourceScope === 'mixed'
+        ? ['mixed']
+        : sourceScope === 'notebook'
+          ? ['local-read']
+          : sourceScope === 'web'
+            ? ['web']
+            : ['none'];
+  const toolIntent = s.isExplicitAction
+    ? 'force_tools'
+    : s.needsTools || (s.hasImage && chatMode === 'image_summary')
+      ? 'maybe_tools'
+      : 'none';
+  const outputKind = responseIntent === 'action_guidance'
+    ? 'action'
+    : responseIntent === 'plan'
+      ? 'plan'
+      : responseIntent === 'summary'
+        ? 'summary'
+        : 'answer';
+  const allowedTools = sourceScope === 'notebook'
+    ? ['notebook_search', 'notebook_list_docs']
+    : undefined;
+
+  return makeRoute({
+    confidence: s.isExplicitAction || s.hasImage || s.needsTools || s.isPlanLike || s.isTransformLike ? 0.86 : 0.6,
+    cleanText,
+    rawText,
+    imageUrl,
+    topRouteType: 'direct_chat',
+    intent: {
+      risk: s.isExplicitAction ? 'medium' : 'low',
+      toolNeed,
+      executionMode: s.isExplicitAction ? 'delegated' : (s.needsTools || s.isPlanLike || s.isTransformLike ? 'staged' : 'immediate'),
+      needsPlanning: s.isExplicitAction || s.isPlanLike,
+      needsMemory: s.needsMemory
+    },
+    facets: {
+      modality: s.hasImage ? 'image' : 'text',
+      sourceScope,
+      domain: 'general',
+      outputKind,
+      freshness: s.needsFreshInfo ? 'latest' : 'unknown'
+    },
+    meta: {
+      reason: s.isExplicitAction ? 'explicit-action' : 'direct-chat',
+      localRuleId: s.isExplicitAction ? 'explicit-action' : 'direct-chat',
+      ...(allowedTools ? { allowedTools } : {}),
+      ...(s.hasSafetyBoundary ? { safetyBoundary: true } : {}),
+      chatMode,
+      toolIntent,
+      responseIntent
+    }
+  });
+}
+
+function matchDirectLocalRoute({ rawText = '', cleanText = '', imageUrl = null }) {
+  return buildDirectRouteFromSignals({
+    rawText,
+    cleanText,
+    imageUrl,
+    signals: extractDirectRouteSignals(cleanText, imageUrl)
   });
 }
 

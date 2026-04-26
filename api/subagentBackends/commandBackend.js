@@ -9,6 +9,7 @@ const {
 } = require('../../utils/promptSecurity');
 
 const persistentWorkerRegistry = new Map();
+const activeOneShotChildren = new Set();
 const persistentWorkerStats = {
   directSpawns: 0,
   fallbacks: 0,
@@ -39,6 +40,38 @@ function createSubagentError(message = 'subagent failed', code = 'SUBAGENT_ERROR
 
 function createPersistentWorkerError(message = 'persistent subagent worker failed', code = 'PERSISTENT_SUBAGENT_ERROR', extra = {}) {
   return createSubagentError(message, code, extra);
+}
+
+function terminateChildProcessTree(child = null, reason = 'cancelled') {
+  if (!child || !Number(child.pid)) return false;
+  if (child.exitCode !== null || child.killed) return false;
+
+  const pid = Number(child.pid);
+  if (process.platform === 'win32') {
+    try {
+      const killer = spawn('taskkill.exe', ['/pid', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore'
+      });
+      if (typeof killer.unref === 'function') killer.unref();
+      return true;
+    } catch (_) {}
+  }
+
+  try {
+    child.kill('SIGTERM');
+  } catch (_) {
+    return false;
+  }
+
+  const timer = setTimeout(() => {
+    try {
+      if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+    } catch (_) {}
+  }, 1500);
+  if (typeof timer.unref === 'function') timer.unref();
+  void reason;
+  return true;
 }
 
 function shouldDropLine(line) {
@@ -145,11 +178,13 @@ function getSubagentArgs(message, sessionId) {
 
 function runSubagentOnce({ command, args, workDir, timeoutMs, onSpawn = null }) {
   return new Promise((resolve, reject) => {
+    installCleanupHooks();
     const child = spawn(command, args, {
       cwd: workDir,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
+    activeOneShotChildren.add(child);
     if (typeof onSpawn === 'function') {
       try { onSpawn(child); } catch (_) {}
     }
@@ -161,7 +196,7 @@ function runSubagentOnce({ command, args, workDir, timeoutMs, onSpawn = null }) 
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try { child.kill(); } catch (_) {}
+      terminateChildProcessTree(child, 'timeout');
       reject(createSubagentError(`subagent timeout after ${timeoutMs}ms`, 'SUBAGENT_TIMEOUT'));
     }, timeoutMs);
 
@@ -172,10 +207,12 @@ function runSubagentOnce({ command, args, workDir, timeoutMs, onSpawn = null }) 
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      activeOneShotChildren.delete(child);
       reject(err);
     });
 
     child.on('close', (code) => {
+      activeOneShotChildren.delete(child);
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -240,7 +277,7 @@ function createSpawnBridgeCall(spec = {}) {
     cancel(reason = 'cancelled') {
       cancelled = true;
       if (spawnedChild) {
-        try { spawnedChild.kill(); } catch (_) {}
+        terminateChildProcessTree(spawnedChild, reason);
       }
       return reason;
     }
@@ -251,8 +288,13 @@ function installCleanupHooks() {
   if (cleanupHooksInstalled) return;
   cleanupHooksInstalled = true;
   const cleanup = () => {
+    for (const child of activeOneShotChildren) {
+      try { terminateChildProcessTree(child, 'process_exit'); } catch (_) {}
+    }
+    activeOneShotChildren.clear();
     for (const entry of persistentWorkerRegistry.values()) {
       try { retirePersistentWorker(entry, 'process_exit'); } catch (_) {}
+      try { terminateChildProcessTree(entry.child, 'process_exit'); } catch (_) {}
     }
     persistentWorkerRegistry.clear();
   };
@@ -907,10 +949,43 @@ function resetPersistentWorkerState() {
     retirePersistentWorker(entry, 'reset');
   }
   persistentWorkerRegistry.clear();
+  for (const child of activeOneShotChildren) {
+    terminateChildProcessTree(child, 'reset');
+  }
+  activeOneShotChildren.clear();
   persistentWorkerStats.directSpawns = 0;
   persistentWorkerStats.fallbacks = 0;
   persistentWorkerStats.retired = 0;
   persistentWorkerStats.spawned = 0;
+}
+
+function shutdownCommandBackend(reason = 'shutdown') {
+  const activeSpawnPids = [...activeOneShotChildren]
+    .map((child) => Number(child?.pid || 0) || 0)
+    .filter(Boolean);
+  const persistentSnapshot = getPersistentWorkerSnapshot();
+
+  for (const child of activeOneShotChildren) {
+    terminateChildProcessTree(child, reason);
+  }
+  activeOneShotChildren.clear();
+
+  for (const entry of persistentWorkerRegistry.values()) {
+    retirePersistentWorker(entry, reason);
+    terminateChildProcessTree(entry.child, reason);
+  }
+  persistentWorkerRegistry.clear();
+
+  console.log('[subagent-command] shutdown cleanup', {
+    reason: String(reason || '').trim() || 'shutdown',
+    activeSpawnPids,
+    persistentWorkerPids: persistentSnapshot.map((item) => item.pid).filter(Boolean)
+  });
+
+  return {
+    activeSpawnPids,
+    persistentWorkerPids: persistentSnapshot.map((item) => item.pid).filter(Boolean)
+  };
 }
 
 function setCommandBackendTestHooks(hooks = {}) {
@@ -934,6 +1009,7 @@ module.exports = {
   resetPersistentWorkerState,
   runSubagentOnce,
   setCommandBackendTestHooks,
+  shutdownCommandBackend,
   summarizeProcessFailure,
   __persistentWorkerStats: persistentWorkerStats
 };

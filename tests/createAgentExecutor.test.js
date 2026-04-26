@@ -55,6 +55,7 @@ module.exports = (async () => {
       extractImageFromStreamEventPayload,
       generateImageWithOpenAICompatibleApi,
       getQuotaStatus,
+      loadRuntimeState,
       isCreateAgentUserAllowed,
       isRuntimeStateStale,
       normalizeCreateAgentBaseUrl,
@@ -64,6 +65,7 @@ module.exports = (async () => {
       requestImageGeneration,
       requestImageGenerationStream,
       writeJsonFileSafe,
+      clearRuntimeSlotsForCurrentProcess,
       resolveConfig
     } = require('../api/createAgentExecutor');
 
@@ -401,6 +403,34 @@ module.exports = (async () => {
       sendGroupImageMessage: async () => ({ success: true })
     });
     assert.strictEqual(staleRecovered.ok, true);
+
+    const ownedRuntimeFile = path.join(tempRoot, 'runtime-owned.json');
+    const ownedRuntimeConfig = {
+      ...runtimeConfig,
+      runtimeFile: ownedRuntimeFile
+    };
+    writeJsonFileSafe(ownedRuntimeFile, {
+      running: 1,
+      updatedAt: Date.now(),
+      ownerPid: process.pid
+    });
+    const clearedOwned = clearRuntimeSlotsForCurrentProcess(ownedRuntimeConfig);
+    assert.strictEqual(clearedOwned.cleared, true);
+    assert.strictEqual(loadRuntimeState(ownedRuntimeFile).running, 0);
+
+    const foreignRuntimeFile = path.join(tempRoot, 'runtime-foreign.json');
+    const foreignRuntimeConfig = {
+      ...runtimeConfig,
+      runtimeFile: foreignRuntimeFile
+    };
+    writeJsonFileSafe(foreignRuntimeFile, {
+      running: 1,
+      updatedAt: Date.now(),
+      ownerPid: process.pid + 9999
+    });
+    const clearedForeign = clearRuntimeSlotsForCurrentProcess(foreignRuntimeConfig);
+    assert.strictEqual(clearedForeign.cleared, false);
+    assert.strictEqual(loadRuntimeState(foreignRuntimeFile).running, 1);
 
     const disabled = await executeCreateCommand({
       prompt: 'disabled case',

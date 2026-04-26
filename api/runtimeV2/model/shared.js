@@ -45,6 +45,45 @@ function getTopP(overrides = null) {
   return Math.max(0, Math.min(1, n));
 }
 
+function getOptionalPositiveInteger(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.floor(n);
+}
+
+function getOptionalUnitFloat(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(0, Math.min(1, n));
+}
+
+function getOptionalPositiveNumber(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}
+
+function getTopK(overrides = null) {
+  const raw = overrides && typeof overrides === 'object' && overrides.topK !== undefined
+    ? overrides.topK
+    : config.AI_TOP_K;
+  return getOptionalPositiveInteger(raw);
+}
+
+function getTopA(overrides = null) {
+  const raw = overrides && typeof overrides === 'object' && overrides.topA !== undefined
+    ? overrides.topA
+    : config.AI_TOP_A;
+  return getOptionalUnitFloat(raw);
+}
+
+function getRepetitionPenalty(overrides = null) {
+  const raw = overrides && typeof overrides === 'object' && overrides.repetitionPenalty !== undefined
+    ? overrides.repetitionPenalty
+    : config.AI_REPETITION_PENALTY;
+  return getOptionalPositiveNumber(raw);
+}
+
 function getMaxTokens(defaultValue = 3500, overrides = null) {
   const raw = overrides && typeof overrides === 'object' && overrides.maxTokens !== undefined
     ? overrides.maxTokens
@@ -82,6 +121,33 @@ function getApiBaseUrl(overrides = null) {
 function getApiKey(overrides = null) {
   const raw = overrides && typeof overrides === 'object' ? overrides.apiKey : '';
   return String(raw || config.API_KEY || '').trim();
+}
+
+function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
+  const body = {
+    model: getModelName(resolvedConfig),
+    temperature: getTemperature(resolvedConfig),
+    top_p: getTopP(resolvedConfig),
+    messages: Array.isArray(options.messages) ? options.messages : [],
+    max_tokens: getMaxTokens(options.defaultMaxTokens || 3500, resolvedConfig),
+    reasoning_effort: getReasoningEffort(resolvedConfig),
+    stream: Boolean(options.stream)
+  };
+
+  const topK = getTopK(resolvedConfig);
+  if (topK !== undefined) body.top_k = topK;
+
+  const topA = getTopA(resolvedConfig);
+  if (topA !== undefined) body.top_a = topA;
+
+  const repetitionPenalty = getRepetitionPenalty(resolvedConfig);
+  if (repetitionPenalty !== undefined) body.repetition_penalty = repetitionPenalty;
+
+  if (options.trace && typeof options.trace === 'object') {
+    body.__trace = options.trace;
+  }
+
+  return body;
 }
 
 function buildPrimaryMainModelConfig(overrides = null, userId = '', options = {}) {
@@ -129,15 +195,19 @@ function normalizeTextContent(content) {
 }
 
 module.exports = {
+  buildGenerationRequestBody,
   buildImageModelConfig,
   ensureChatCompletionsUrl,
   getApiBaseUrl,
   getApiKey,
   getMaxTokens,
   getModelName,
+  getRepetitionPenalty,
   getReasoningEffort,
   getRetries,
   getTemperature,
+  getTopA,
+  getTopK,
   getTopP,
   normalizeTextContent,
   withMainModelFallback
