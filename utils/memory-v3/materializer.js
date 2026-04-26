@@ -18,6 +18,7 @@ const {
   defaultScopeProjection,
   defaultEpisodeProjection
 } = require('./storage');
+const { enqueueMissingEmbeddings } = require('./embeddingIndex');
 
 const PERSONA_SUPPORT_FIELDS = new Set([
   'persona_summary_support',
@@ -643,13 +644,17 @@ function materializeMemoryViews(options = {}) {
   atomicWriteJson(config.MEMORY_V3_SCOPE_PROJECTION_FILE, scopeProjection);
   atomicWriteJson(config.MEMORY_V3_EPISODE_PROJECTION_FILE, episodeProjection);
   writeJsonLines(config.MEMORY_V3_NODES_FILE, resolvedNodes);
-  writeJsonLines(config.MEMORY_V3_EMBEDDING_CACHE_FILE, []);
+  const embeddingIndex = enqueueMissingEmbeddings(resolvedNodes, {
+    schedule: options.scheduleEmbeddingBackfill !== false,
+    delayMs: options.embeddingBackfillDelayMs
+  });
 
   return {
     ok: true,
     stats: {
       events: events.length,
       nodes: resolvedNodes.length,
+      embeddings: embeddingIndex,
       sessions: Object.keys(sessionProjection.sessions).length,
       profiles: Object.keys(profileProjection.users).length,
       episodeUsers: Object.keys(episodeProjection.users).length

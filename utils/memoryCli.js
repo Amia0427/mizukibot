@@ -2126,7 +2126,8 @@ async function runLegacyMemorySearch(parsed, prepared, context = {}) {
         tier: item.tier || '',
         confidence: item.confidence,
         status: item.status,
-        matchMode: item.embedding > 0 ? 'hybrid' : 'lexical',
+        matchMode: sanitizeText(item.matchMode || '') || (item.embedding > 0 ? 'hybrid' : 'lexical'),
+        scoreParts: item.scoreParts && typeof item.scoreParts === 'object' ? item.scoreParts : {},
         updatedAt: item.updatedAt || 0
       }));
       return {

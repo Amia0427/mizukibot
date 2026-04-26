@@ -451,6 +451,8 @@ async function queryLocalKnowledge(input = {}) {
       text: normalizeText(item.text, 1200),
       preview: normalizeText(item.text, 240),
       score: Number(item.score || 0) + (SOURCE_PRIORITY[source] || 0),
+      matchMode: normalizeText(item.matchMode || '') || (Number(item.embedding || 0) > 0 ? 'hybrid' : 'lexical'),
+      scoreParts: item.scoreParts && typeof item.scoreParts === 'object' ? item.scoreParts : {},
       priority: SOURCE_PRIORITY[source] || 0,
       updatedAt: Number(item.updatedAt || 0) || 0,
       raw: item

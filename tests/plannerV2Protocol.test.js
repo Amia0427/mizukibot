@@ -21,7 +21,8 @@ const {
   getPlannerApiKey,
   getPlannerApiKeyV2,
   getPlannerModelName,
-  getPlannerReasoningEffort
+  getPlannerReasoningEffort,
+  DYNAMIC_CONTEXT_PLAN_VERSION
 } = require('../api/runtimeV2/planning/service');
 const {
   buildDirectChatToolCatalog
@@ -568,7 +569,23 @@ module.exports = (async () => {
     }
   }, toolCatalog, {
     allowedTools: ['skill_weather', 'getWeather', 'web_search'],
-    personaModuleCatalog: getPersonaModuleCatalogSummary()
+    personaModuleCatalog: getPersonaModuleCatalogSummary(),
+    directedContext: {
+      scene: 'group_reply',
+      addressee: { senderName: 'A', userId: 'u_a' }
+    },
+    continuitySignals: {
+      hasCarryOverTopic: true
+    },
+    memoryContext: {
+      memoryForPrompt: 'likes direct answers',
+      promptLongTermProfileText: 'prefers concise plans',
+      promptImpressionText: 'curious and playful',
+      summary: 'previous topic exists'
+    },
+    dynamicFewShotPrompt: 'example',
+    memoryCliTurn: { exposed: true },
+    schedulerInjection: 'fresh injection'
   });
 
   const weatherToolMeta = plannerPayload.tools.find((item) => item.name === 'skill_weather');
@@ -581,6 +598,16 @@ module.exports = (async () => {
   assert.ok(plannerPayload.personaModuleCatalog.some((item) => item.moduleId === 'daily_energy'));
   assert.ok(Array.isArray(plannerPayload.dynamicPromptBlockCatalog));
   assert.ok(plannerPayload.dynamicPromptBlockCatalog.some((item) => item.blockId === 'directed_context'));
+  assert.ok(plannerPayload.dynamicPromptBlockCatalog.every((item) => item.lane && item.category && item.defaultPolicy));
+  assert.strictEqual(plannerPayload.availableContextSignals.directedContext, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.continuity, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.retrievedMemory, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.longTermProfile, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.impression, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.summary, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.dynamicFewShot, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.memoryCliInstruction, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.schedulerInjection, true);
   assert.ok(String(plannerPayload.dynamicPromptGuide || '').includes('dynamic_few_shot'));
 
   const financeTickerGuard = await planRequestV2({
@@ -690,8 +717,75 @@ module.exports = (async () => {
   });
 
   assert.deepStrictEqual(personaPlannerDecision.plannerMeta.personaModules, ['mafuyu_branch', 'care_light', 'wb_mizuki_care_chains']);
+  assert.deepStrictEqual(personaPlannerDecision.personaModules, ['mafuyu_branch', 'care_light', 'wb_mizuki_care_chains']);
+  assert.strictEqual(personaPlannerDecision.dynamicPromptPlan.schemaVersion, DYNAMIC_CONTEXT_PLAN_VERSION);
   assert.deepStrictEqual(personaPlannerDecision.plannerMeta.dynamicPromptPlan.enabledBlockIds, ['directed_context', 'continuity_state']);
   assert.deepStrictEqual(personaPlannerDecision.plannerMeta.dynamicPromptPlan.personaModules, ['mafuyu_branch', 'care_light', 'wb_mizuki_care_chains']);
+  assert.ok(personaPlannerDecision.dynamicPromptPlan.blockDecisions.some((item) => item.blockId === 'directed_context' && item.decision === 'include'));
+  const directChatPersonaDecision = convertPlannerDecisionToDirectChatDecision(personaPlannerDecision, {
+    cleanText: '真冬最近是不是又在硬撑，我不想逼她',
+    meta: {}
+  }, { toolCatalog: [] });
+  assert.strictEqual(directChatPersonaDecision.dynamicPromptPlan.schemaVersion, DYNAMIC_CONTEXT_PLAN_VERSION);
+  assert.deepStrictEqual(directChatPersonaDecision.dynamicPromptPlan.enabledBlockIds, ['directed_context', 'continuity_state']);
+  assert.deepStrictEqual(directChatPersonaDecision.personaModules, ['mafuyu_branch', 'care_light', 'wb_mizuki_care_chains']);
+
+  const invalidDynamicPlanDecision = await planRequestV2({
+    question: '只测试动态上下文协议',
+    cleanText: '只测试动态上下文协议',
+    topRouteType: 'direct_chat',
+    routeMeta: {
+      chatMode: 'chat',
+      toolIntent: 'none',
+      responseIntent: 'answer'
+    },
+    route: {
+      question: '只测试动态上下文协议',
+      cleanText: '只测试动态上下文协议',
+      topRouteType: 'direct_chat',
+      meta: {
+        chatMode: 'chat',
+        toolIntent: 'none',
+        responseIntent: 'answer'
+      },
+      intent: {},
+      facets: {}
+    },
+    allowedTools: [],
+    personaModuleCatalog: getPersonaModuleCatalogSummary(),
+    planner: async () => ({
+      mode: 'chat_only',
+      taskShape: 'fast_reply',
+      allowedToolNames: [],
+      steps: [],
+      dynamicPromptPlan: {
+        schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+        enabledBlockIds: ['fake_block', 'directed_context'],
+        personaModules: ['fake_module', 'care_light'],
+        blockDecisions: [
+          { blockId: 'fake_block', decision: 'include', confidence: 0.9, priority: 1, reason: 'invalid' },
+          { blockId: 'directed_context', decision: 'include', confidence: 0.9, priority: 1, reason: 'valid block' },
+          { moduleId: 'fake_module', decision: 'include', confidence: 0.9, priority: 1, reason: 'invalid module' },
+          { moduleId: 'care_light', decision: 'include', confidence: 0.9, priority: 1, reason: 'valid module' }
+        ],
+        rationaleByBlock: {
+          directed_context: 'valid block',
+          care_light: 'valid module'
+        }
+      },
+      plannerMeta: {
+        decisionVersion: 'planner_decision_v2',
+        plannerVersion: 'direct_chat_single_authority_v2',
+        reason: 'invalid plan normalization',
+        plannerModel: 'mock-planner',
+        decisionSource: 'planner'
+      }
+    })
+  });
+
+  assert.deepStrictEqual(invalidDynamicPlanDecision.dynamicPromptPlan.enabledBlockIds, ['directed_context']);
+  assert.deepStrictEqual(invalidDynamicPlanDecision.dynamicPromptPlan.personaModules, ['care_light']);
+  assert.ok(!invalidDynamicPlanDecision.dynamicPromptPlan.blockDecisions.some((item) => item.blockId === 'fake_block' || item.moduleId === 'fake_module'));
 
   console.log('plannerV2Protocol.test.js passed');
   if (oldBotToolMode === undefined) delete process.env.BOT_TOOL_MODE;

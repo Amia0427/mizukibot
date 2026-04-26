@@ -43,7 +43,7 @@ module.exports = (async () => {
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'main_persona_system'));
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'directed_context'));
-  if (main.latencyMeta?.optionalBudgetExceeded) {
+  if (main.latencyMeta?.optionalBudgetExceeded || !String(main.dynamicFewShotPrompt || '').trim()) {
     assert.ok(!main.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
     assert.ok(!main.assistantOnlyContextBlocks.some((item) => item.id === 'dynamic_few_shot'));
   } else {
@@ -56,8 +56,188 @@ module.exports = (async () => {
   assert.ok(Array.isArray(main.promptSnapshot.stableBlockIds));
   assert.ok(Array.isArray(main.promptSnapshot.dynamicBlockIds));
   assert.ok(Array.isArray(main.promptSnapshot.assistantOnlyBlockIds));
+  assert.ok(Array.isArray(main.promptSnapshot.plannerIncludedBlocks));
+  assert.ok(Array.isArray(main.promptSnapshot.plannerSkippedBlocks));
+  assert.ok(Array.isArray(main.promptSnapshot.runtimeAddedBlocks));
+  assert.ok(Array.isArray(main.promptSnapshot.runtimeRejectedBlocks));
+  assert.ok(main.promptSnapshot.plannerDynamicContextPlan);
   assert.ok(main.promptSnapshot.cacheLanes && Array.isArray(main.promptSnapshot.cacheLanes.stable));
   assert.ok(typeof main.promptSnapshot.cacheFriendlyFingerprint === 'string' && main.promptSnapshot.cacheFriendlyFingerprint.length > 0);
+
+  const directedMustUsePrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 8 },
+    'u_prompt_directed_must_use',
+    '这句是在回谁呀',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        directedContext: {
+          scene: 'group_reply',
+          addressee: { senderName: 'A', userId: '1', kind: 'user', confidence: 0.9 },
+          quote: { senderName: 'B', text: '刚才那句不是这个意思' }
+        },
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: [],
+            personaModules: [],
+            blockDecisions: [
+              { blockId: 'directed_context', decision: 'skip', confidence: 0.8, priority: 10, reason: 'planner miss' }
+            ],
+            rationaleByBlock: {}
+          }
+        }
+      }
+    }
+  );
+  assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'directed_context'));
+
+  const plannerIncludedMemoryPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 9 },
+    'u_prompt_memory_include',
+    '我们之前说的计划还继续吗',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      memoryContext: {
+        memoryForPrompt: '用户之前决定先做 planner 动态上下文增强。',
+        promptLongTermProfileText: '用户偏好直接结论和小步补丁。',
+        promptImpressionText: '用户正在并行开发，重视不覆盖改动。',
+        summary: '正在实现 planner 主导的动态上下文选择。'
+      },
+      routeMeta: {
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: ['retrieved_memory_lite', 'long_term_profile', 'impression', 'summary'],
+            personaModules: [],
+            blockDecisions: [
+              { blockId: 'retrieved_memory_lite', decision: 'include', confidence: 0.9, priority: 20, reason: 'specific prior plan' },
+              { blockId: 'long_term_profile', decision: 'include', confidence: 0.8, priority: 30, reason: 'stable preference matters' },
+              { blockId: 'impression', decision: 'include', confidence: 0.8, priority: 40, reason: 'parallel work caution matters' },
+              { blockId: 'summary', decision: 'include', confidence: 0.8, priority: 50, reason: 'continuity summary matters' }
+            ],
+            rationaleByBlock: {}
+          }
+        }
+      }
+    }
+  );
+  assert.ok(plannerIncludedMemoryPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(plannerIncludedMemoryPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'long_term_profile'));
+  assert.ok(plannerIncludedMemoryPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'impression'));
+  assert.ok(plannerIncludedMemoryPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
+
+  const emptyContentPrompt = await buildDynamicPrompt(
+    { level: '', points: 0 },
+    'u_prompt_empty_include',
+    '讲个完全新的问题',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      memoryContext: {
+        memoryForPrompt: '',
+        promptLongTermProfileText: '',
+        promptImpressionText: '',
+        summary: ''
+      },
+      routeMeta: {
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: ['retrieved_memory_lite', 'long_term_profile', 'impression', 'summary'],
+            personaModules: [],
+            blockDecisions: [
+              { blockId: 'retrieved_memory_lite', decision: 'include', confidence: 0.9, priority: 20, reason: 'should be rejected empty' },
+              { blockId: 'long_term_profile', decision: 'include', confidence: 0.8, priority: 30, reason: 'should be rejected empty' },
+              { blockId: 'impression', decision: 'include', confidence: 0.8, priority: 40, reason: 'should be rejected empty' },
+              { blockId: 'summary', decision: 'include', confidence: 0.8, priority: 50, reason: 'should be rejected empty' }
+            ],
+            rationaleByBlock: {}
+          }
+        }
+      }
+    }
+  );
+  assert.ok(!emptyContentPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!emptyContentPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'long_term_profile'));
+  assert.ok(!emptyContentPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'impression'));
+  assert.ok(!emptyContentPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
+  assert.ok(emptyContentPrompt.promptSnapshot.runtimeRejectedBlocks.some((item) => item.id === 'retrieved_memory_lite' && /empty|content/i.test(item.reason)));
+
+  const selfContainedPrompt = await buildDynamicPrompt(
+    { level: '', points: 0 },
+    'u_prompt_self_contained',
+    '2+2等于几',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      memoryContext: {
+        memoryForPrompt: 'irrelevant memory should not load',
+        promptLongTermProfileText: 'irrelevant profile should not load',
+        promptImpressionText: 'irrelevant impression should not load',
+        summary: 'irrelevant summary should not load'
+      },
+      routeMeta: {
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: [],
+            personaModules: [],
+            blockDecisions: [
+              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.9, priority: 20, reason: 'self-contained' },
+              { blockId: 'long_term_profile', decision: 'skip', confidence: 0.9, priority: 30, reason: 'self-contained' },
+              { blockId: 'summary', decision: 'skip', confidence: 0.9, priority: 40, reason: 'self-contained' }
+            ],
+            rationaleByBlock: {}
+          }
+        }
+      }
+    }
+  );
+  assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'long_term_profile'));
+  assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
+
+  const personaRejectedPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 14 },
+    'u_prompt_persona_rejected',
+    '我有点难受，但不用说太重',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      latencyDecision: {
+        memoryBudgetMs: 5000
+      },
+      routeMeta: {
+        directChatPlanner: {
+          maxActiveModules: 1,
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: [],
+            personaModules: ['care_light', 'deep_pain'],
+            blockDecisions: [
+              { moduleId: 'care_light', decision: 'include', confidence: 0.9, priority: 20, reason: 'light care' },
+              { moduleId: 'deep_pain', decision: 'include', confidence: 0.8, priority: 30, reason: 'conflicting heavy tone' }
+            ],
+            rationaleByBlock: {}
+          }
+        }
+      }
+    }
+  );
+  if (!personaRejectedPrompt.latencyMeta?.optionalBudgetExceeded) {
+    assert.ok(personaRejectedPrompt.promptSnapshot.activatedPersonaModules.includes('care_light'));
+    assert.ok(personaRejectedPrompt.promptSnapshot.activatedPersonaModules.length <= 1);
+    assert.ok(personaRejectedPrompt.promptSnapshot.runtimeRejectedBlocks.some((item) => item.id === 'persona_module:deep_pain'));
+  }
 
   const reviewPrompt = buildReviewStageSystemPrompt();
   const plannerPrompt = buildPlannerStageSystemPrompt([{ name: 'web_search', description: 'search web' }]);

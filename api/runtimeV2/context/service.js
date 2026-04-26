@@ -41,6 +41,8 @@ const {
   getMainReplyDynamicBlockCatalog
 } = require('../../../utils/mainReplyPromptBlocks');
 
+const DYNAMIC_CONTEXT_PLAN_VERSION = 'dynamic_context_plan_v2';
+
 function getConfig() {
   try {
     return require('../../../config');
@@ -95,6 +97,25 @@ function buildDirectedContextPromptSnippet(directedContext = {}) {
   return lines.join('\n');
 }
 
+function buildContinuityStatePromptSnippet(continuitySignals = {}) {
+  const signals = continuitySignals && typeof continuitySignals === 'object' ? continuitySignals : {};
+  const lines = [];
+  const push = (key, value) => {
+    const text = normalizeText(value);
+    if (value === true) lines.push(`${key}=true`);
+    else if (text) lines.push(`${key}=${text}`);
+  };
+  push('has_carry_over_topic', signals.hasCarryOverTopic);
+  push('has_open_loop', signals.hasOpenLoop);
+  push('quote_anchored', signals.quoteAnchored);
+  push('topic', signals.topic || signals.currentTopic || signals.carryOverTopic);
+  push('open_loop', signals.openLoop || signals.pendingTask || signals.unresolvedThread);
+  push('last_user_intent', signals.lastUserIntent);
+  push('last_assistant_commitment', signals.lastAssistantCommitment);
+  if (lines.length === 0) return '';
+  return ['[ContinuityState]', ...lines].join('\n');
+}
+
 function createPromptBlock(id, label, content, options = {}) {
   const text = String(content || '').trim();
   if (!text) return null;
@@ -147,53 +168,286 @@ function serializePromptBlocks(blocks = []) {
     .join('\n\n');
 }
 
-function normalizeDynamicPromptPlan(options = {}) {
-  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
-  const plannerDecision = options?.dynamicPromptPlan && typeof options.dynamicPromptPlan === 'object'
-    ? options.dynamicPromptPlan
-    : (
-      routeMeta?.directChatPlanner?.dynamicPromptPlan && typeof routeMeta.directChatPlanner.dynamicPromptPlan === 'object'
-        ? routeMeta.directChatPlanner.dynamicPromptPlan
-        : (
-          routeMeta?.toolPlanner?.dynamicPromptPlan && typeof routeMeta.toolPlanner.dynamicPromptPlan === 'object'
-            ? routeMeta.toolPlanner.dynamicPromptPlan
-            : {}
-        )
-    );
-  const normalized = {
-    enabledBlockIds: normalizeArray(plannerDecision.enabledBlockIds).map((item) => normalizeText(item)).filter(Boolean),
-    personaModules: normalizeArray(plannerDecision.personaModules).map((item) => normalizeText(item)).filter(Boolean).slice(0, 2),
-    rationaleByBlock: plannerDecision.rationaleByBlock && typeof plannerDecision.rationaleByBlock === 'object'
-      ? { ...plannerDecision.rationaleByBlock }
-      : {}
+function cloneDynamicPromptPlan(plan = {}) {
+  const normalized = plan && typeof plan === 'object' ? plan : {};
+  return {
+    schemaVersion: normalizeText(normalized.schemaVersion, DYNAMIC_CONTEXT_PLAN_VERSION),
+    enabledBlockIds: normalizeArray(normalized.enabledBlockIds).map((item) => normalizeText(item)).filter(Boolean),
+    personaModules: normalizeArray(normalized.personaModules).map((item) => normalizeText(item)).filter(Boolean),
+    blockDecisions: normalizeArray(normalized.blockDecisions)
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => ({ ...item })),
+    rationaleByBlock: normalized.rationaleByBlock && typeof normalized.rationaleByBlock === 'object'
+      ? { ...normalized.rationaleByBlock }
+      : {},
+    plannerProvided: normalized.plannerProvided === true,
+    source: normalizeText(normalized.source || normalized._source || (normalized.plannerProvided ? 'planner' : 'heuristic')),
+    _source: normalizeText(normalized._source || normalized.source || (normalized.plannerProvided ? 'planner' : 'heuristic'))
   };
-  if (normalized.enabledBlockIds.length > 0 || normalized.personaModules.length > 0) return normalized;
-  return buildHeuristicDynamicPromptPlan({
+}
+
+function findPlannerDynamicPromptPlan(options = {}) {
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const candidates = [
+    options?.dynamicPromptPlan,
+    routeMeta?.directChatPlanner?.dynamicPromptPlan,
+    routeMeta?.toolPlanner?.dynamicPromptPlan,
+    routeMeta?.directChatPlanner?.plannerDecisionV2?.dynamicPromptPlan,
+    routeMeta?.toolPlanner?.plannerDecisionV2?.dynamicPromptPlan,
+    routeMeta?.directChatPlanner?.plannerDecisionV2?.plannerMeta?.dynamicPromptPlan,
+    routeMeta?.toolPlanner?.plannerDecisionV2?.plannerMeta?.dynamicPromptPlan
+  ];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) return candidate;
+  }
+  return null;
+}
+
+function normalizePlannerBlockDecisions(plan = {}) {
+  const decisions = [];
+  const byKey = new Map();
+  const addDecision = (raw = {}, fallback = {}) => {
+    let blockId = normalizeText(raw.blockId || fallback.blockId);
+    let moduleId = normalizeText(raw.moduleId || fallback.moduleId);
+    if (!moduleId && blockId.startsWith('persona_module:')) {
+      moduleId = normalizeText(blockId.slice('persona_module:'.length));
+      blockId = '';
+    }
+    if (!blockId && !moduleId) return;
+    const decision = normalizeText(raw.decision || fallback.decision).toLowerCase() === 'skip' ? 'skip' : 'include';
+    const confidence = Number.isFinite(Number(raw.confidence)) ? Math.max(0, Math.min(1, Number(raw.confidence))) : (decision === 'include' ? 0.8 : 0.5);
+    const priority = Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 100;
+    const reason = normalizeText(raw.reason || fallback.reason);
+    const key = moduleId ? `persona_module:${moduleId}` : blockId;
+    if (byKey.has(key)) return;
+    byKey.set(key, {
+      ...(moduleId ? { moduleId } : { blockId }),
+      decision,
+      confidence,
+      priority,
+      reason
+    });
+  };
+
+  for (const decision of normalizeArray(plan.blockDecisions)) addDecision(decision);
+  for (const blockId of normalizeArray(plan.enabledBlockIds).map((item) => normalizeText(item)).filter(Boolean)) {
+    addDecision({ blockId }, {
+      decision: 'include',
+      reason: normalizeText(plan?.rationaleByBlock?.[blockId])
+    });
+  }
+  for (const moduleId of normalizeArray(plan.personaModules).map((item) => normalizeText(item)).filter(Boolean)) {
+    addDecision({ moduleId }, {
+      decision: 'include',
+      reason: normalizeText(plan?.rationaleByBlock?.[moduleId] || plan?.rationaleByBlock?.[`persona_module:${moduleId}`])
+    });
+  }
+
+  decisions.push(...byKey.values());
+  return decisions;
+}
+
+function normalizePlannerDynamicContextPlan(options = {}) {
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const plannerPlan = findPlannerDynamicPromptPlan(options);
+  if (plannerPlan) {
+    const blockDecisions = normalizePlannerBlockDecisions(plannerPlan);
+    const skippedBlocks = new Set(blockDecisions.filter((item) => item.decision === 'skip' && item.blockId).map((item) => item.blockId));
+    const skippedModules = new Set(blockDecisions.filter((item) => item.decision === 'skip' && item.moduleId).map((item) => item.moduleId));
+    const enabledBlockIds = Array.from(new Set(
+      normalizeArray(plannerPlan.enabledBlockIds)
+        .map((item) => normalizeText(item))
+        .filter((item) => item && !item.startsWith('persona_module:') && !skippedBlocks.has(item))
+        .concat(blockDecisions.filter((item) => item.decision === 'include' && item.blockId).map((item) => item.blockId))
+    )).filter((item) => !skippedBlocks.has(item));
+    const personaModules = Array.from(new Set(
+      normalizeArray(plannerPlan.personaModules)
+        .concat(normalizeArray(routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules))
+        .map((item) => normalizeText(item))
+        .filter((item) => item && !skippedModules.has(item))
+        .concat(blockDecisions.filter((item) => item.decision === 'include' && item.moduleId).map((item) => item.moduleId))
+    )).filter((item) => !skippedModules.has(item));
+    return {
+      schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+      enabledBlockIds,
+      personaModules,
+      blockDecisions,
+      rationaleByBlock: plannerPlan.rationaleByBlock && typeof plannerPlan.rationaleByBlock === 'object'
+        ? { ...plannerPlan.rationaleByBlock }
+        : {},
+      plannerProvided: !['heuristic', 'rule', 'fallback'].includes(normalizeText(plannerPlan._source || plannerPlan.source)),
+      source: normalizeText(plannerPlan._source || plannerPlan.source) || 'planner',
+      _source: normalizeText(plannerPlan._source || plannerPlan.source) || 'planner'
+    };
+  }
+
+  const heuristicPlan = buildHeuristicDynamicPromptPlan({
     continuitySignals: options?.continuitySignals,
     directedContext: options?.routeMeta?.directedContext,
     personaModules: normalizeArray(options?.routeMeta?.directChatPlanner?.personaModules || options?.routeMeta?.toolPlanner?.personaModules),
     hasAffinityState: true
   });
+  return {
+    schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+    ...heuristicPlan,
+    blockDecisions: normalizePlannerBlockDecisions(heuristicPlan),
+    plannerProvided: false,
+    source: 'heuristic',
+    _source: 'heuristic'
+  };
+}
+
+function normalizeDynamicPromptPlan(options = {}) {
+  return normalizePlannerDynamicContextPlan(options);
+}
+
+function createDynamicContextAudit(dynamicPromptPlan = {}) {
+  const included = [];
+  const skipped = [];
+  for (const decision of normalizeArray(dynamicPromptPlan.blockDecisions)) {
+    const id = normalizeText(decision.blockId || (decision.moduleId ? `persona_module:${decision.moduleId}` : ''));
+    if (!id) continue;
+    const entry = {
+      id,
+      ...(decision.blockId ? { blockId: decision.blockId } : {}),
+      ...(decision.moduleId ? { moduleId: decision.moduleId } : {}),
+      confidence: Number.isFinite(Number(decision.confidence)) ? Number(decision.confidence) : undefined,
+      priority: Number.isFinite(Number(decision.priority)) ? Number(decision.priority) : undefined,
+      reason: normalizeText(decision.reason)
+    };
+    if (decision.decision === 'skip') skipped.push(entry);
+    else included.push(entry);
+  }
+  return {
+    plannerDynamicContextPlan: cloneDynamicPromptPlan(dynamicPromptPlan),
+    plannerIncludedBlocks: included,
+    plannerSkippedBlocks: skipped,
+    runtimeAddedBlocks: [],
+    runtimeRejectedBlocks: []
+  };
+}
+
+function pushUniqueAuditEntry(list = [], entry = {}) {
+  const id = normalizeText(entry.id || entry.blockId || (entry.moduleId ? `persona_module:${entry.moduleId}` : ''));
+  const reason = normalizeText(entry.reason);
+  if (!id) return;
+  if (list.some((item) => normalizeText(item.id || item.blockId || (item.moduleId ? `persona_module:${item.moduleId}` : '')) === id && normalizeText(item.reason) === reason)) return;
+  list.push({ id, ...entry });
+}
+
+function getPromptBlockPlanIds(block = {}) {
+  const blockId = normalizeText(block?.id);
+  const aliasId = normalizeText(block?.meta?.blockId);
+  const moduleId = normalizeText(block?.meta?.moduleId);
+  return {
+    blockId,
+    aliasId,
+    moduleId,
+    ids: [blockId, aliasId].filter(Boolean)
+  };
+}
+
+function blockHasUsableContent(block = {}) {
+  const content = normalizeText(block?.content);
+  if (!content) return false;
+  const { blockId, aliasId } = getPromptBlockPlanIds(block);
+  const key = aliasId || blockId;
+  const emptyPatternByBlock = {
+    retrieved_memory_lite: /\[RetrievedMemoryLite\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
+    long_term_profile: /\[LongTermProfile\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
+    impression: /\[Impression\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
+    summary: /\[Summary\]\s*(?:none|null|undefined|暂无|无)?\s*$/i
+  };
+  const pattern = emptyPatternByBlock[key];
+  if (pattern && pattern.test(content)) return false;
+  return true;
 }
 
 function filterBlocksByPlan(blocks = [], dynamicPromptPlan = {}, options = {}) {
+  const audit = options.audit && typeof options.audit === 'object' ? options.audit : null;
   const requiredIds = new Set(normalizeArray(options.requiredIds).map((item) => normalizeText(item)).filter(Boolean));
+  const runtimeAddedIds = new Set(normalizeArray(options.runtimeAddedIds).map((item) => normalizeText(item)).filter(Boolean));
   const enabledIds = new Set(normalizeArray(dynamicPromptPlan.enabledBlockIds).map((item) => normalizeText(item)).filter(Boolean));
   const enabledPersonaModules = new Set(normalizeArray(dynamicPromptPlan.personaModules).map((item) => normalizeText(item)).filter(Boolean));
-  return normalizeArray(blocks).filter((block) => {
-    const blockId = normalizeText(block?.id);
-    const aliasId = normalizeText(block?.meta?.blockId);
-    const moduleId = normalizeText(block?.meta?.moduleId);
-    if (!blockId) return false;
+  const skippedIds = new Set();
+  const skippedPersonaModules = new Set();
+  for (const decision of normalizeArray(dynamicPromptPlan.blockDecisions)) {
+    if (normalizeText(decision.decision).toLowerCase() !== 'skip') continue;
+    if (normalizeText(decision.blockId)) skippedIds.add(normalizeText(decision.blockId));
+    if (normalizeText(decision.moduleId)) skippedPersonaModules.add(normalizeText(decision.moduleId));
+  }
+
+  const selected = [];
+  const availablePlanIds = new Set();
+  const selectedPlanIds = new Set();
+  const rejectedPlanIds = new Set();
+  for (const block of normalizeArray(blocks)) {
+    const { blockId, aliasId, moduleId, ids } = getPromptBlockPlanIds(block);
+    if (!blockId) continue;
+    ids.forEach((id) => availablePlanIds.add(id));
+    if (moduleId) availablePlanIds.add(`persona_module:${moduleId}`);
     const optional = block?.meta?.optional === true;
-    if (!optional) return true;
-    if (requiredIds.has(blockId)) return true;
-    if (aliasId && requiredIds.has(aliasId)) return true;
-    if (enabledIds.has(blockId)) return true;
-    if (aliasId && enabledIds.has(aliasId)) return true;
-    if (moduleId && enabledPersonaModules.has(moduleId)) return true;
-    return false;
-  });
+    const required = ids.some((id) => requiredIds.has(id)) || (moduleId && requiredIds.has(`persona_module:${moduleId}`));
+    const runtimeAdded = ids.some((id) => runtimeAddedIds.has(id)) || (moduleId && runtimeAddedIds.has(`persona_module:${moduleId}`));
+    const includedByPlanner = ids.some((id) => enabledIds.has(id)) || (moduleId && enabledPersonaModules.has(moduleId));
+    const skippedByPlanner = ids.some((id) => skippedIds.has(id)) || (moduleId && skippedPersonaModules.has(moduleId));
+    const includeBlock = !optional
+      || required
+      || runtimeAdded
+      || (includedByPlanner && !skippedByPlanner);
+
+    if (!includeBlock) continue;
+    const usable = blockHasUsableContent(block);
+    if (!usable && optional) {
+      const rejectedId = aliasId || (moduleId ? `persona_module:${moduleId}` : blockId);
+      rejectedPlanIds.add(rejectedId);
+      if (audit && includedByPlanner) {
+        pushUniqueAuditEntry(audit.runtimeRejectedBlocks, {
+          id: rejectedId,
+          ...(moduleId ? { moduleId } : { blockId: aliasId || blockId }),
+          reason: 'no_real_content'
+        });
+      }
+      continue;
+    }
+    selected.push(block);
+    ids.forEach((id) => selectedPlanIds.add(id));
+    if (moduleId) selectedPlanIds.add(`persona_module:${moduleId}`);
+    if (audit && runtimeAdded && !includedByPlanner) {
+      const addedId = aliasId || blockId;
+      pushUniqueAuditEntry(audit.runtimeAddedBlocks, {
+        id: addedId,
+        blockId: addedId,
+        reason: addedId === 'directed_context'
+          ? 'directed context exists and is required to resolve current turn'
+          : 'runtime must-use block'
+      });
+    }
+  }
+
+  if (audit) {
+    for (const blockId of enabledIds) {
+      if (selectedPlanIds.has(blockId) || rejectedPlanIds.has(blockId)) continue;
+      if (availablePlanIds.has(blockId)) continue;
+      pushUniqueAuditEntry(audit.runtimeRejectedBlocks, {
+        id: blockId,
+        blockId,
+        reason: 'unavailable_or_empty'
+      });
+    }
+    for (const moduleId of enabledPersonaModules) {
+      const id = `persona_module:${moduleId}`;
+      if (selectedPlanIds.has(id) || rejectedPlanIds.has(id)) continue;
+      if (availablePlanIds.has(id)) continue;
+      pushUniqueAuditEntry(audit.runtimeRejectedBlocks, {
+        id,
+        moduleId,
+        reason: 'unavailable_or_rejected'
+      });
+    }
+  }
+
+  return selected;
 }
 
 function splitBlocksByLane(blocks = []) {
@@ -348,6 +602,11 @@ function clonePromptLayerValue(value = {}) {
         dynamicBlockIds: normalizeArray(normalized.promptSnapshot.dynamicBlockIds),
         assistantOnlyBlockIds: normalizeArray(normalized.promptSnapshot.assistantOnlyBlockIds),
         plannerChosenDynamicBlocks: normalizeArray(normalized.promptSnapshot.plannerChosenDynamicBlocks),
+        plannerDynamicContextPlan: cloneDynamicPromptPlan(normalized.promptSnapshot.plannerDynamicContextPlan),
+        plannerIncludedBlocks: normalizeArray(normalized.promptSnapshot.plannerIncludedBlocks).map((item) => ({ ...item })),
+        plannerSkippedBlocks: normalizeArray(normalized.promptSnapshot.plannerSkippedBlocks).map((item) => ({ ...item })),
+        runtimeAddedBlocks: normalizeArray(normalized.promptSnapshot.runtimeAddedBlocks).map((item) => ({ ...item })),
+        runtimeRejectedBlocks: normalizeArray(normalized.promptSnapshot.runtimeRejectedBlocks).map((item) => ({ ...item })),
         cacheLanes: normalized.promptSnapshot.cacheLanes && typeof normalized.promptSnapshot.cacheLanes === 'object'
           ? {
               stable: normalizeArray(normalized.promptSnapshot.cacheLanes.stable),
@@ -383,13 +642,7 @@ function clonePromptLayerValue(value = {}) {
         }
       : {},
     dynamicPromptPlan: normalized.dynamicPromptPlan && typeof normalized.dynamicPromptPlan === 'object'
-      ? {
-          enabledBlockIds: normalizeArray(normalized.dynamicPromptPlan.enabledBlockIds),
-          personaModules: normalizeArray(normalized.dynamicPromptPlan.personaModules),
-          rationaleByBlock: normalized.dynamicPromptPlan.rationaleByBlock && typeof normalized.dynamicPromptPlan.rationaleByBlock === 'object'
-            ? { ...normalized.dynamicPromptPlan.rationaleByBlock }
-            : {}
-        }
+      ? cloneDynamicPromptPlan(normalized.dynamicPromptPlan)
       : {},
     dynamicPromptBlockCatalog: normalizeArray(normalized.dynamicPromptBlockCatalog).map((item) => ({ ...item })),
     personaModuleCandidates: normalizeArray(normalized.personaModuleCandidates).map((item) => ({ ...item })),
@@ -1067,6 +1320,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       }
     }));
   }
+  const baseDynamicContextAudit = createDynamicContextAudit(dynamicPromptPlan);
   const defaultDynamicPromptPlan = buildHeuristicDynamicPromptPlan({
     continuitySignals: options?.continuitySignals,
     directedContext: options?.routeMeta?.directedContext,
@@ -1079,18 +1333,26 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     hasDynamicFewShot: Boolean(dynamicFewShotPrompt),
     hasMemoryCliInstruction: shouldExposeMemoryCli({ ...options, customPrompt })
   });
+  const useHeuristicBasePlan = dynamicPromptPlan.plannerProvided !== true;
   const effectiveBaseDynamicPromptPlan = {
-    enabledBlockIds: Array.from(new Set([
-      ...normalizeArray(defaultDynamicPromptPlan.enabledBlockIds),
-      ...normalizeArray(dynamicPromptPlan.enabledBlockIds)
-    ])),
+    ...cloneDynamicPromptPlan(useHeuristicBasePlan ? defaultDynamicPromptPlan : dynamicPromptPlan),
+    schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+    enabledBlockIds: Array.from(new Set(
+      useHeuristicBasePlan
+        ? normalizeArray(defaultDynamicPromptPlan.enabledBlockIds)
+        : normalizeArray(dynamicPromptPlan.enabledBlockIds)
+    )),
     personaModules: normalizeArray(dynamicPromptPlan.personaModules).length > 0
       ? dynamicPromptPlan.personaModules
       : defaultDynamicPromptPlan.personaModules,
     rationaleByBlock: {
-      ...(defaultDynamicPromptPlan.rationaleByBlock || {}),
+      ...(useHeuristicBasePlan ? (defaultDynamicPromptPlan.rationaleByBlock || {}) : {}),
       ...(dynamicPromptPlan.rationaleByBlock || {})
-    }
+    },
+    blockDecisions: normalizeArray(useHeuristicBasePlan ? defaultDynamicPromptPlan.blockDecisions : dynamicPromptPlan.blockDecisions),
+    plannerProvided: dynamicPromptPlan.plannerProvided === true,
+    source: useHeuristicBasePlan ? 'heuristic' : normalizeText(dynamicPromptPlan.source, 'planner'),
+    _source: useHeuristicBasePlan ? 'heuristic' : normalizeText(dynamicPromptPlan._source, 'planner')
   };
 
   const blockCatalog = getMainReplyDynamicBlockCatalog(personaModuleCandidates.map((item) => ({
@@ -1103,15 +1365,14 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     phase: item.phase,
     slot: item.slot
   })));
+  const baseRuntimeAddedIds = [];
+  if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
+    baseRuntimeAddedIds.push('directed_context');
+  }
   const selectedPromptBlocks = filterBlocksByPlan(promptBlocks, effectiveBaseDynamicPromptPlan, {
-    requiredIds: [
-      'persona_memory',
-      'retrieved_memory_lite',
-      'long_term_profile',
-      'impression',
-      'relationship_state',
-      'summary'
-    ]
+    requiredIds: [],
+    runtimeAddedIds: baseRuntimeAddedIds,
+    audit: baseDynamicContextAudit
   });
   const dedupedPromptBlocks = selectedPromptBlocks.filter((block) => {
     const blockId = normalizeText(block?.id);
@@ -1205,15 +1466,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       ]
     );
     const compactSelectedBlocks = filterBlocksByPlan(compactPromptBlocks, effectiveBaseDynamicPromptPlan, {
-      requiredIds: [
-        'persona_memory_compact_1',
-        'persona_memory_compact_2',
-        'persona_memory_compact_3',
-        'retrieved_memory_compact',
-        'long_term_profile_compact',
-        'impression_compact',
-        'summary_compact'
-      ]
+      requiredIds: [],
+      runtimeAddedIds: baseRuntimeAddedIds,
+      audit: baseDynamicContextAudit
     });
     promptSnapshot = buildPromptSnapshot(compactSelectedBlocks.filter(Boolean), {
       stage: 'main',
@@ -1255,6 +1510,11 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       dynamicBlockIds: compiledLaneSplit.dynamicContextBlocks.map((item) => item.id),
       assistantOnlyBlockIds: compiledLaneSplit.assistantOnlyContextBlocks.map((item) => item.id),
       plannerChosenDynamicBlocks: effectiveBaseDynamicPromptPlan.enabledBlockIds,
+      plannerDynamicContextPlan: baseDynamicContextAudit.plannerDynamicContextPlan,
+      plannerIncludedBlocks: baseDynamicContextAudit.plannerIncludedBlocks,
+      plannerSkippedBlocks: baseDynamicContextAudit.plannerSkippedBlocks,
+      runtimeAddedBlocks: baseDynamicContextAudit.runtimeAddedBlocks,
+      runtimeRejectedBlocks: baseDynamicContextAudit.runtimeRejectedBlocks,
       cacheFriendlyFingerprint: buildCacheFriendlyFingerprint(compiledLaneSplit.stableSystemBlocks),
       cacheLanes: {
         stable: compiledLaneSplit.stableSystemBlocks.map((item) => item.id),
@@ -1307,6 +1567,30 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     routeMeta,
     sessionKey: options.sessionKey
   });
+  const fallbackPersonaModuleCandidates = buildPersonaModuleCandidates({
+    question,
+    routePrompt: options.routePrompt,
+    routeMeta,
+    directedContext: routeMeta.directedContext,
+    continuitySignals: options?.continuitySignals,
+    personaPhase: routeMeta.personaPhase || ''
+  });
+  const fallbackPersonaModuleDecision = selectPersonaModules(
+    {
+      ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
+      personaModules: normalizeArray(baseDynamicPromptPlan.personaModules).length > 0
+        ? baseDynamicPromptPlan.personaModules
+        : normalizeArray(options?.personaModuleDecision?.personaModules || routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules)
+    },
+    {
+      question,
+      routePrompt: options.routePrompt,
+      routeMeta,
+      directedContext: routeMeta.directedContext,
+      continuitySignals: options?.continuitySignals,
+      personaPhase: routeMeta.personaPhase || ''
+    }
+  );
   const now = Date.now();
   const essentialStartedAt = now;
   const collectStartedAt = Date.now();
@@ -1330,8 +1614,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       memoryContext: {},
       personaMemoryState: {},
       personaMemoryPrompt: { systemMessages: [], promptBlocks: [], policy: {} },
-      personaModuleCandidates: [],
-      personaModuleDecision: { selected: [], rejected: [] },
+      personaModuleCandidates: fallbackPersonaModuleCandidates,
+      personaModuleDecision: fallbackPersonaModuleDecision,
       dynamicPromptPlan: baseDynamicPromptPlan,
       summaryText: 'none',
       dynamicFewShotPrompt: ''
@@ -1443,6 +1727,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     ...options,
     dynamicPromptPlan: sessionCandidateLayer.dynamicPromptPlan || stableLayer.dynamicPromptPlan || promptMaterials.dynamicPromptPlan || baseDynamicPromptPlan
   });
+  const dynamicContextAudit = createDynamicContextAudit(dynamicPromptPlan);
   const criticalBlocks = [];
   const optionalBlocks = [];
   const extraBlocks = [];
@@ -1543,6 +1828,20 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }));
   }
 
+  const continuityStateText = buildContinuityStatePromptSnippet(options?.continuitySignals);
+  if (continuityStateText) {
+    extraBlocks.push(createPromptBlock('continuity_state', 'Continuity State', continuityStateText, {
+      stage: 'main',
+      priority: 220,
+      authority: 'continuity_context',
+      kind: 'continuity',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true
+      }
+    }));
+  }
+
   if (!optionalBudgetExceeded && shouldInjectSocialContext(options)) {
     const socialSnippet = buildSocialContextSnippet({
       groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
@@ -1623,16 +1922,28 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     hasContextStatsInstruction: extraBlocks.some((item) => item?.id === 'context_stats_instruction'),
     hasMemoryCliInstruction: Boolean(memoryCliInstruction && shouldExposeMemoryCli(options))
   });
+  const plannerProvidedDynamicPlan = dynamicPromptPlan.plannerProvided === true;
+  const shouldUseHeuristicDynamicPlan = !plannerProvidedDynamicPlan;
+  const runtimeAddedIds = [];
+  if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
+    runtimeAddedIds.push('directed_context');
+  }
   const finalDynamicPromptPlan = {
-    ...dynamicPromptPlan,
-    enabledBlockIds: Array.from(new Set([
-      ...normalizeArray(heuristicDynamicPlan.enabledBlockIds),
-      ...normalizeArray(dynamicPromptPlan.enabledBlockIds)
-    ])),
+    ...cloneDynamicPromptPlan(shouldUseHeuristicDynamicPlan ? heuristicDynamicPlan : dynamicPromptPlan),
+    schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+    enabledBlockIds: Array.from(new Set(
+      shouldUseHeuristicDynamicPlan
+        ? normalizeArray(heuristicDynamicPlan.enabledBlockIds)
+        : normalizeArray(dynamicPromptPlan.enabledBlockIds)
+    )),
     rationaleByBlock: {
-      ...(heuristicDynamicPlan.rationaleByBlock || {}),
+      ...(shouldUseHeuristicDynamicPlan ? (heuristicDynamicPlan.rationaleByBlock || {}) : {}),
       ...(dynamicPromptPlan.rationaleByBlock || {})
-    }
+    },
+    blockDecisions: normalizeArray(shouldUseHeuristicDynamicPlan ? heuristicDynamicPlan.blockDecisions : dynamicPromptPlan.blockDecisions),
+    plannerProvided: plannerProvidedDynamicPlan,
+    source: shouldUseHeuristicDynamicPlan ? 'heuristic' : normalizeText(dynamicPromptPlan.source, plannerProvidedDynamicPlan ? 'planner' : 'heuristic'),
+    _source: shouldUseHeuristicDynamicPlan ? 'heuristic' : normalizeText(dynamicPromptPlan._source, plannerProvidedDynamicPlan ? 'planner' : 'heuristic')
   };
   const memoryCliBlock = memoryCliInstruction
     && shouldExposeMemoryCli(options)
@@ -1654,18 +1965,11 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     ...extraBlocks,
     ...(memoryCliBlock ? [memoryCliBlock] : [])
   ];
-  const requiredIds = normalizeArray(stableLayer.promptSnapshot?.stableBlockIds)
-    .concat(normalizeArray(sessionCandidateLayer.promptSnapshot?.dynamicBlockIds).filter((id) => {
-      const normalizedId = normalizeText(id);
-      return normalizedId.startsWith('persona_memory')
-        || normalizedId === 'retrieved_memory_lite'
-        || normalizedId === 'long_term_profile'
-        || normalizedId === 'impression'
-        || normalizedId === 'summary'
-        || normalizedId.startsWith('relationship_');
-    }));
+  const requiredIds = normalizeArray(stableLayer.promptSnapshot?.stableBlockIds);
   const selectedBlocks = filterBlocksByPlan(combinedBlocks, finalDynamicPromptPlan, {
-    requiredIds
+    requiredIds,
+    runtimeAddedIds,
+    audit: dynamicContextAudit
   });
   const criticalBlockIdPrefixes = new Set([
     'retrieved_memory',
@@ -1717,6 +2021,15 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     personaModuleCandidates: normalizeArray(effectiveOptionalLayer?.promptSegments?.personaModuleCandidates),
     personaModuleTokenUsage: normalizeArray(effectiveOptionalLayer?.promptSegments?.personaModuleTokenUsage)
   };
+  for (const skippedModule of normalizeArray(effectiveOptionalLayer?.personaModuleDecision?.selectionReason?.skipped)) {
+    const moduleId = normalizeText(skippedModule?.id);
+    if (!moduleId) continue;
+    pushUniqueAuditEntry(dynamicContextAudit.runtimeRejectedBlocks, {
+      id: `persona_module:${moduleId}`,
+      moduleId,
+      reason: normalizeText(skippedModule?.reason, 'persona_module_selection_rejected')
+    });
+  }
   const enrichedSnapshot = {
     ...mergedSnapshot,
     activatedPersonaModules: promptSegments.activatedPersonaModules,
@@ -1726,6 +2039,11 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     dynamicBlockIds: laneSplit.dynamicContextBlocks.map((item) => item.id),
     assistantOnlyBlockIds: laneSplit.assistantOnlyContextBlocks.map((item) => item.id),
     plannerChosenDynamicBlocks: finalDynamicPromptPlan.enabledBlockIds,
+    plannerDynamicContextPlan: dynamicContextAudit.plannerDynamicContextPlan,
+    plannerIncludedBlocks: dynamicContextAudit.plannerIncludedBlocks,
+    plannerSkippedBlocks: dynamicContextAudit.plannerSkippedBlocks,
+    runtimeAddedBlocks: dynamicContextAudit.runtimeAddedBlocks,
+    runtimeRejectedBlocks: dynamicContextAudit.runtimeRejectedBlocks,
     cacheFriendlyFingerprint: buildCacheFriendlyFingerprint(laneSplit.stableSystemBlocks),
     cacheLanes: {
       stable: laneSplit.stableSystemBlocks.map((item) => item.id),

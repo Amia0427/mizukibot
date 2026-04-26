@@ -1,6 +1,6 @@
 ﻿const config = require('../../config');
 const { getUserAffinityState } = require('../memory');
-const { shouldUseRemoteEmbedding, requestEmbedding, cosineArray } = require('../vectorMemory');
+const { shouldUseRemoteEmbedding, requestEmbedding } = require('../vectorMemory');
 const {
   normalizeText,
   clampText,
@@ -15,10 +15,13 @@ const {
   loadProfileProjection,
   loadScopeProjection,
   loadEpisodeProjection,
-  loadMemoryNodes,
-  loadEmbeddingCache
+  loadMemoryNodes
 } = require('./storage');
 const { rerankMemoryCandidates } = require('../memoryReranker');
+const {
+  loadEmbeddingIndex,
+  calcEmbeddingSimilarity
+} = require('./embeddingIndex');
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
 
@@ -103,16 +106,6 @@ function resolveAllowedGroupIds(userId = '', options = {}) {
   const explicitNormalized = explicit.map((item) => normalizeText(item)).filter(Boolean);
   const scopedSet = new Set(scoped);
   return explicitNormalized.filter((item) => scopedSet.has(item));
-}
-
-function loadEmbeddingMap() {
-  const map = new Map();
-  for (const row of loadEmbeddingCache()) {
-    const key = String(row?.canonicalKey || '').trim().toLowerCase();
-    if (!key || !Array.isArray(row?.embedding)) continue;
-    map.set(key, row.embedding);
-  }
-  return map;
 }
 
 function collectCandidates(userId, options = {}) {
@@ -288,12 +281,16 @@ function semanticSlotForCandidate(candidate) {
 async function scoreCandidates(candidates = [], query = '', facet = 'default') {
   const rewrites = rewriteQuery(query, facet);
   const queryTokens = uniqueBy(rewrites.flatMap((item) => tokenize(item)), (item) => item);
-  const embeddingMap = loadEmbeddingMap();
+  const embeddingIndex = loadEmbeddingIndex();
   const useEmbedding = shouldUseRemoteEmbedding();
   let queryEmbedding = null;
   if (useEmbedding) {
     queryEmbedding = await requestEmbedding(rewrites.join('\n'));
   }
+  const semanticWeight = Math.max(0, Number(config.MEMORY_SEMANTIC_RECALL_WEIGHT || 0.3) || 0.3);
+  const lexicalWeight = Math.max(0, Number(config.MEMORY_LEXICAL_RECALL_WEIGHT || 0.45) || 0.45);
+  const minScore = Math.max(0.02, Number(config.MEMORY_RAG_MIN_SCORE || 0.16) * 0.5);
+  const semanticMinScore = Math.max(0.18, minScore * 1.5);
   const scored = [];
   for (const candidate of Array.isArray(candidates) ? candidates : []) {
     if (!matchesFacetCandidate(facet, candidate)) continue;
@@ -309,17 +306,30 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default') {
     const sourceBoost = facetSourceWeight(facet, candidate.source);
     const stabilityBoost = Math.min(0.24, Number(candidate.stabilityScore || 0) * 0.24);
     const strength = calcMemoryStrength(candidate, facet);
-    let embedding = 0;
-    if (queryEmbedding && embeddingMap.has(candidate.canonicalKey)) {
-      embedding = Math.max(0, cosineArray(queryEmbedding, embeddingMap.get(candidate.canonicalKey)));
-    }
-    const score = ((lexical * 0.68) + (embedding * 0.3) + direct + (recency * 0.08) + (strength.memoryStrength * 0.1) + support + confidence + importance + stabilityBoost) * sourceBoost;
-    if (score < Math.max(0.02, Number(config.MEMORY_RAG_MIN_SCORE || 0.16) * 0.5)) continue;
+    const embedding = queryEmbedding
+      ? calcEmbeddingSimilarity(queryEmbedding, candidate, embeddingIndex)
+      : 0;
+    const score = ((lexical * lexicalWeight) + (embedding * semanticWeight) + direct + (recency * 0.08) + (strength.memoryStrength * 0.1) + support + confidence + importance + stabilityBoost) * sourceBoost;
+    const semanticOnly = embedding >= semanticMinScore && lexical < 0.04 && direct <= 0;
+    if (score < minScore && !semanticOnly) continue;
+    const matchMode = embedding > 0 && lexical > 0.04
+      ? 'hybrid'
+      : embedding > 0
+        ? 'semantic'
+        : 'lexical';
     scored.push({
       ...candidate,
-      score,
+      score: semanticOnly ? Math.max(score, minScore + (embedding * semanticWeight)) : score,
       lexical,
       embedding,
+      matchMode,
+      scoreParts: {
+        lexical,
+        embedding,
+        direct,
+        recency,
+        sourceBoost
+      },
       decayScore: strength.decayScore,
       rehearsalBoost: strength.rehearsalBoost,
       continuityRecallBonus: strength.continuityRecallBonus,
@@ -426,7 +436,12 @@ async function queryMemory(input = {}) {
     ...input,
     userId,
     phase: 'memory_v3'
-  });
+  }).then((items) => items.map((item) => ({
+    ...item,
+    matchMode: Number(item.rerankScore || 0) > 0
+      ? (item.matchMode === 'semantic' ? 'semantic_rerank' : item.matchMode === 'hybrid' ? 'hybrid_rerank' : 'rerank')
+      : item.matchMode
+  })));
   const selected = diversify(reranked, topK);
   const split = splitStrictWeak(
     selected,
