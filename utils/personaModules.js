@@ -1,6 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const {
+  searchPersonaWorldbook,
+  searchPersonaWorldbookLexical
+} = require('./personaWorldbookSearch');
 
 const MODULE_CATALOG_PATH = path.join(config.PROMPTS_DIR, 'persona_modules', 'module-catalog.json');
 
@@ -313,12 +317,98 @@ function buildPersonaModuleCandidates(context = {}) {
     .sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
 }
 
+function mergeCandidateIdsWithWorldbookSearch(ruleCandidates = [], worldbookResults = []) {
+  const ids = new Set(normalizeArray(ruleCandidates).map((item) => normalizeText(item?.id)).filter(Boolean));
+  for (const item of normalizeArray(worldbookResults)) {
+    const moduleId = normalizeText(item?.moduleId || item?.id);
+    if (moduleId) ids.add(moduleId);
+  }
+  return ids;
+}
+
+function sortCandidatesWithWorldbookScores(candidates = [], worldbookResults = []) {
+  const scoreById = new Map(
+    normalizeArray(worldbookResults)
+      .map((item) => [normalizeText(item?.moduleId || item?.id), item])
+      .filter(([id]) => Boolean(id))
+  );
+  return normalizeArray(candidates)
+    .map((item) => {
+      const hit = scoreById.get(item.id);
+      if (!hit) return item;
+      return {
+        ...item,
+        worldbookScore: Number(hit.score || 0) || 0,
+        worldbookMatchMode: normalizeText(hit.matchMode),
+        worldbookReason: normalizeText(hit.reason)
+      };
+    })
+    .sort((a, b) => {
+      const aScore = Number(a.worldbookScore || 0) || 0;
+      const bScore = Number(b.worldbookScore || 0) || 0;
+      if (bScore !== aScore) return bScore - aScore;
+      return a.priority - b.priority || a.id.localeCompare(b.id);
+    });
+}
+
+async function buildPersonaModuleCandidatesAsync(context = {}) {
+  const catalog = loadPersonaModuleCatalog();
+  const phase = inferPhase(context);
+  const ruleCandidates = buildPersonaModuleCandidates(context);
+  const query = normalizeText(context.question || context.routePrompt || '');
+  const worldbookSearch = await searchPersonaWorldbook(catalog, {
+    query,
+    limit: context.worldbookLimit || config.PERSONA_WORLDBOOK_SELECTED_MAX,
+    lexicalLimit: context.worldbookLexicalLimit,
+    semanticLimit: context.worldbookSemanticLimit,
+    hotPath: context.worldbookEmbeddingHotPath,
+    embeddingIndex: context.worldbookEmbeddingIndex,
+    queryEmbedding: context.worldbookQueryEmbedding,
+    requestEmbedding: context.requestEmbedding,
+    shouldUseRemoteEmbedding: context.shouldUseRemoteEmbedding,
+    rerankCandidates: context.rerankCandidates,
+    maxCandidates: context.worldbookRerankMaxCandidates,
+    rerankTimeoutMs: context.worldbookRerankTimeoutMs
+  });
+  const candidateIds = mergeCandidateIdsWithWorldbookSearch(ruleCandidates, worldbookSearch.results);
+  const candidates = catalog.modules
+    .filter((item) => candidateIds.has(item.id))
+    .filter((item) => item.phase === 'all' || item.phase === phase);
+  const sorted = sortCandidatesWithWorldbookScores(candidates, worldbookSearch.results);
+  sorted.personaWorldbookSearch = worldbookSearch.diagnostics;
+  return sorted;
+}
+
+function buildPlannerPersonaModuleCatalog(personaModuleCatalog = [], context = {}, options = {}) {
+  const catalog = loadPersonaModuleCatalog();
+  const ruleCandidates = buildPersonaModuleCandidates(context);
+  const lexicalResults = searchPersonaWorldbookLexical(catalog, normalizeText(context.question || context.routePrompt || ''), {
+    limit: options.limit || config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT
+  });
+  const limit = Math.max(0, Number(options.limit || config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT || 20) || 20);
+  const rankedWorldbookIds = new Set(
+    ruleCandidates
+      .filter((item) => normalizeText(item.id).startsWith('wb_mizuki_'))
+      .map((item) => item.id)
+      .concat(lexicalResults.map((item) => item.moduleId || item.id))
+      .filter((id, index, list) => id && list.indexOf(id) === index)
+      .slice(0, limit)
+  );
+  return normalizeArray(personaModuleCatalog).filter((item) => {
+    const moduleId = normalizeText(item?.moduleId || item?.id);
+    if (!moduleId.startsWith('wb_mizuki_')) return true;
+    return rankedWorldbookIds.has(moduleId);
+  });
+}
+
 function selectPersonaModules(decision = {}, context = {}) {
   const catalog = loadPersonaModuleCatalog();
   const byId = new Map(catalog.modules.map((item) => [item.id, item]));
   const maxActive = Math.max(0, Number(decision?.maxActiveModules || catalog.defaultMaxActiveModules || 1) || 1);
   const requested = normalizeArray(decision?.personaModules).map((item) => normalizeText(item)).filter(Boolean);
-  const candidates = buildPersonaModuleCandidates(context);
+  const candidates = normalizeArray(context.personaModuleCandidates).length > 0
+    ? normalizeArray(context.personaModuleCandidates)
+    : buildPersonaModuleCandidates(context);
   const fallbackIds = candidates.map((item) => item.id);
   const desiredIds = requested.length > 0 ? requested : fallbackIds;
   const selected = [];
@@ -395,7 +485,9 @@ function loadPersonaModuleText(moduleId = '') {
 
 module.exports = {
   MODULE_CATALOG_PATH,
+  buildPersonaModuleCandidatesAsync,
   buildPersonaModuleCandidates,
+  buildPlannerPersonaModuleCatalog,
   diagnosePersonaModules,
   getPersonaModuleCatalogSummary,
   loadPersonaModuleCatalog,
