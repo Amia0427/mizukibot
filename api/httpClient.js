@@ -965,6 +965,22 @@ function stripReasoningFields(requestBody = {}) {
   return nextBody;
 }
 
+function requestUsesExtendedSampling(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return false;
+  return Object.prototype.hasOwnProperty.call(requestBody, 'top_k')
+    || Object.prototype.hasOwnProperty.call(requestBody, 'top_a')
+    || Object.prototype.hasOwnProperty.call(requestBody, 'repetition_penalty');
+}
+
+function stripExtendedSamplingFields(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return requestBody;
+  const nextBody = { ...requestBody };
+  delete nextBody.top_k;
+  delete nextBody.top_a;
+  delete nextBody.repetition_penalty;
+  return nextBody;
+}
+
 function stripInternalRequestFields(requestBody = {}) {
   if (!requestBody || typeof requestBody !== 'object') return requestBody;
   const nextBody = { ...requestBody };
@@ -981,6 +997,16 @@ function isReasoningSchemaError(error) {
     ? responseData
     : JSON.stringify(responseData || {});
   return /reasoning|reasoning[_-]?effort|thinking|budget[_-]?tokens|unsupported.*(?:field|parameter)|unknown field|extra inputs|additional properties/i.test(bodyText);
+}
+
+function isExtendedSamplingSchemaError(error) {
+  const status = Number(error?.response?.status || 0);
+  if (![400, 404, 415, 422].includes(status)) return false;
+  const responseData = error?.response?.data;
+  const bodyText = typeof responseData === 'string'
+    ? responseData
+    : JSON.stringify(responseData || {});
+  return /top[_-]?k|top[_-]?a|repetition[_-]?penalty|unsupported.*(?:field|parameter)|unknown field|unknown parameter|extra inputs|additional properties/i.test(bodyText);
 }
 
 function mapToolSchemaToAnthropic(tool) {
@@ -1179,6 +1205,9 @@ async function buildAnthropicRequestBody(body = {}) {
 
   const topP = Number(body.top_p);
   if (Number.isFinite(topP)) requestBody.top_p = topP;
+
+  const topK = Number(body.top_k);
+  if (Number.isFinite(topK) && topK > 0) requestBody.top_k = Math.floor(topK);
 
   if (Array.isArray(body.stop)) {
     const stops = body.stop.map((x) => String(x || '').trim()).filter(Boolean);
@@ -1448,6 +1477,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         taskId: trace.taskId || '',
         routePolicyKey: trace.routePolicyKey || '',
         topRouteType: trace.topRouteType || '',
+        userRole: trace.userRole || '',
+        modelSource: trace.modelSource || '',
+        apiBaseUrlSource: trace.apiBaseUrlSource || '',
+        apiKeySource: trace.apiKeySource || '',
+        mainFallbackScope: trace.mainFallbackScope || '',
+        mainFallbackActive: trace.mainFallbackActive === true,
+        adminDedicatedModelConfigured: trace.adminDedicatedModelConfigured,
         url: prepared.requestUrl,
         provider: prepared.provider,
         model: prepared.requestBody?.model || body?.model,
@@ -1494,6 +1530,36 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           lastErr = retryWithoutReasoningError;
           if (i >= maxRetry || !shouldRetry(retryWithoutReasoningError)) break;
           const delayMs = getRetryDelayMs(retryWithoutReasoningError, i);
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+      }
+      if (callId && requestUsesExtendedSampling(prepared?.requestBody) && isExtendedSamplingSchemaError(e)) {
+        try {
+          const strippedRequestBody = stripExtendedSamplingFields(prepared.requestBody);
+          const response = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+          );
+          finishModelCall(callId, {
+            response,
+            attempts: i + 1,
+            request: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          });
+          return response;
+        } catch (retryWithoutSamplingError) {
+          if (callId) {
+            failModelCall(callId, retryWithoutSamplingError, {
+              attempts: i + 1,
+              request: stripExtendedSamplingFields(prepared.requestBody),
+              requestHeaders: prepared.requestHeaders
+            });
+          }
+          lastErr = retryWithoutSamplingError;
+          if (i >= maxRetry || !shouldRetry(retryWithoutSamplingError)) break;
+          const delayMs = getRetryDelayMs(retryWithoutSamplingError, i);
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
         }
@@ -1619,6 +1685,13 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
         taskId: trace.taskId || '',
         routePolicyKey: trace.routePolicyKey || '',
         topRouteType: trace.topRouteType || '',
+        userRole: trace.userRole || '',
+        modelSource: trace.modelSource || '',
+        apiBaseUrlSource: trace.apiBaseUrlSource || '',
+        apiKeySource: trace.apiKeySource || '',
+        mainFallbackScope: trace.mainFallbackScope || '',
+        mainFallbackActive: trace.mainFallbackActive === true,
+        adminDedicatedModelConfigured: trace.adminDedicatedModelConfigured,
         url: prepared.requestUrl,
         provider: prepared.provider,
         model: prepared.requestBody?.model || body?.model,
@@ -1636,6 +1709,18 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
         } catch (error) {
         if (requestUsesReasoning(prepared?.requestBody) && isReasoningSchemaError(error)) {
           const strippedRequestBody = stripReasoningFields(prepared.requestBody);
+          resp = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+          );
+          prepared = {
+            ...prepared,
+            requestBody: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          };
+        } else if (requestUsesExtendedSampling(prepared?.requestBody) && isExtendedSamplingSchemaError(error)) {
+          const strippedRequestBody = stripExtendedSamplingFields(prepared.requestBody);
           resp = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,

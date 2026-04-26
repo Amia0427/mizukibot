@@ -69,6 +69,72 @@ is_worker_running() {
   return 1
 }
 
+list_child_tree_pids() {
+  local root_pid="$1"
+  local child
+  if [[ -z "$root_pid" ]] || ! [[ "$root_pid" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+
+  for child in $(pgrep -P "$root_pid" 2>/dev/null || true); do
+    list_child_tree_pids "$child"
+    echo "$child"
+  done
+}
+
+stop_pid_tree() {
+  local root_pid="$1"
+  local label="${2:-process}"
+  if [[ -z "$root_pid" ]] || ! [[ "$root_pid" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+
+  local children
+  children="$(list_child_tree_pids "$root_pid" | awk '!seen[$0]++' || true)"
+  if [[ -n "$children" ]]; then
+    echo "[mizukibot] stopping ${label} children: $(echo "$children" | tr '\n' ' ')"
+    while IFS= read -r child_pid; do
+      [[ -z "$child_pid" || "$child_pid" == "$$" ]] && continue
+      kill "$child_pid" 2>/dev/null || true
+    done <<< "$children"
+  fi
+
+  if [[ "$root_pid" != "$$" ]]; then
+    echo "[mizukibot] stopping ${label} pid=$root_pid"
+    kill "$root_pid" 2>/dev/null || true
+  fi
+
+  for _ in {1..15}; do
+    local alive=0
+    if kill -0 "$root_pid" 2>/dev/null; then
+      alive=1
+    fi
+    while IFS= read -r child_pid; do
+      [[ -z "$child_pid" ]] && continue
+      if kill -0 "$child_pid" 2>/dev/null; then
+        alive=1
+        break
+      fi
+    done <<< "$children"
+    if [[ "$alive" -eq 0 ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  if [[ -n "$children" ]]; then
+    echo "[mizukibot] force killing ${label} children"
+    while IFS= read -r child_pid; do
+      [[ -z "$child_pid" || "$child_pid" == "$$" ]] && continue
+      kill -9 "$child_pid" 2>/dev/null || true
+    done <<< "$children"
+  fi
+  if [[ "$root_pid" != "$$" ]] && kill -0 "$root_pid" 2>/dev/null; then
+    echo "[mizukibot] force killing ${label} pid=$root_pid"
+    kill -9 "$root_pid" 2>/dev/null || true
+  fi
+}
+
 start_app() {
   if has_systemd_service; then
     echo "[mizukibot] systemd service detected, delegating to systemctl start ${SERVICE_NAME}"
@@ -142,39 +208,13 @@ stop_app() {
   local pid
   pid="$(cat "$PID_FILE")"
 
-  echo "[mizukibot] stopping pid=$pid"
-  kill "$pid" 2>/dev/null || true
-
-  for _ in {1..15}; do
-    if kill -0 "$pid" 2>/dev/null; then
-      sleep 1
-    else
-      break
-    fi
-  done
-
-  if kill -0 "$pid" 2>/dev/null; then
-    echo "[mizukibot] force killing pid=$pid"
-    kill -9 "$pid" 2>/dev/null || true
-  fi
+  stop_pid_tree "$pid" "main"
 
   rm -f "$PID_FILE"
   if is_worker_running; then
     local worker_pid
     worker_pid="$(cat "$WORKER_PID_FILE")"
-    echo "[mizukibot] stopping post-reply worker pid=$worker_pid"
-    kill "$worker_pid" 2>/dev/null || true
-    for _ in {1..15}; do
-      if kill -0 "$worker_pid" 2>/dev/null; then
-        sleep 1
-      else
-        break
-      fi
-    done
-    if kill -0 "$worker_pid" 2>/dev/null; then
-      echo "[mizukibot] force killing post-reply worker pid=$worker_pid"
-      kill -9 "$worker_pid" 2>/dev/null || true
-    fi
+    stop_pid_tree "$worker_pid" "post-reply worker"
   fi
   rm -f "$WORKER_PID_FILE"
   echo "[mizukibot] stopped"

@@ -19,14 +19,12 @@ const { isReplyFailure } = require('../../../utils/replyFailure');
 const { runHumanizerAgent } = require('../../humanizerAgent');
 const {
   ensureChatCompletionsUrl,
+  buildGenerationRequestBody,
   getApiBaseUrl,
   getApiKey,
   getMaxTokens,
   getModelName,
-  getReasoningEffort,
   getRetries,
-  getTemperature,
-  getTopP,
   normalizeTextContent,
   withMainModelFallback
 } = require('./shared');
@@ -98,6 +96,49 @@ function buildModelCallTrace(context = {}, source = 'v2_model') {
   };
 }
 
+function buildResolvedModelTrace(context = {}, resolvedConfig = null, source = 'v2_model') {
+  const trace = buildModelCallTrace(context, source);
+  const role = String(resolvedConfig?.__mainModelUserRole || '').trim();
+  const warnings = Array.isArray(resolvedConfig?.__adminConfigWarnings)
+    ? resolvedConfig.__adminConfigWarnings
+    : [];
+  return {
+    ...trace,
+    userRole: role,
+    modelSource: String(resolvedConfig?.__mainModelSource || '').trim(),
+    apiBaseUrlSource: String(resolvedConfig?.__mainApiBaseUrlSource || '').trim(),
+    apiKeySource: String(resolvedConfig?.__mainApiKeySource || '').trim(),
+    mainFallbackScope: String(resolvedConfig?.__mainFallbackScope || '').trim(),
+    mainFallbackActive: resolvedConfig?.__mainFallbackActive === true,
+    adminDedicatedModelConfigured: resolvedConfig?.__adminDedicatedModelConfigured,
+    adminConfigWarnings: warnings
+  };
+}
+
+function logResolvedModelCall(context = {}, resolvedConfig = null, source = 'v2_model') {
+  const trace = buildResolvedModelTrace(context, resolvedConfig, source);
+  const logPayload = {
+    source: trace.source,
+    userId: trace.userId,
+    userRole: trace.userRole || 'user',
+    routePolicyKey: trace.routePolicyKey,
+    topRouteType: trace.topRouteType,
+    model: getModelName(resolvedConfig),
+    modelSource: trace.modelSource,
+    apiBaseUrlSource: trace.apiBaseUrlSource,
+    fallbackScope: trace.mainFallbackScope,
+    fallbackActive: trace.mainFallbackActive,
+    adminDedicatedModelConfigured: trace.adminDedicatedModelConfigured,
+    adminConfigWarnings: trace.adminConfigWarnings
+  };
+  if (trace.userRole !== 'admin') {
+    delete logPayload.adminDedicatedModelConfigured;
+    delete logPayload.adminConfigWarnings;
+  }
+  console.log('[main-model] resolved call target', logPayload);
+  return trace;
+}
+
 async function finalizeReplyText(rawReply, fallbackText, options = {}) {
   const variants = buildReplyTextVariants(rawReply, fallbackText, options);
   const base = variants.persistedText;
@@ -141,16 +182,13 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
   const toolSchemas = getFilteredToolSchemas(context);
 
   const requestOnce = async (resolvedConfig, includeTools = toolSchemas.length > 0, messages = messagesToSend) => {
-    const body = {
-      model: getModelName(resolvedConfig),
-      temperature: getTemperature(resolvedConfig),
-      top_p: getTopP(resolvedConfig),
+    const callTrace = logResolvedModelCall(context, resolvedConfig, 'v2_assistant_message');
+    const body = buildGenerationRequestBody(resolvedConfig, {
       messages,
-      max_tokens: getMaxTokens(3500, resolvedConfig),
-      reasoning_effort: getReasoningEffort(resolvedConfig),
       stream: false,
-      __trace: buildModelCallTrace(context, 'v2_assistant_message')
-    };
+      defaultMaxTokens: 3500,
+      trace: callTrace
+    });
     if (includeTools) {
       body.tools = toolSchemas;
       body.tool_choice = 'auto';
@@ -233,18 +271,15 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
     await withMainModelFallback(async (resolvedConfig) => {
       const mainUrl = ensureChatCompletionsUrl(getApiBaseUrl(resolvedConfig));
       const requestStreamOnce = async (messages) => {
+        const callTrace = logResolvedModelCall(options, resolvedConfig, 'v2_streaming_reply');
         await postStreamWithRetry(
           mainUrl,
-          {
-            model: getModelName(resolvedConfig),
-            temperature: getTemperature(resolvedConfig),
-            top_p: getTopP(resolvedConfig),
+          buildGenerationRequestBody(resolvedConfig, {
             messages,
-            max_tokens: getMaxTokens(3500, resolvedConfig),
-            reasoning_effort: getReasoningEffort(resolvedConfig),
             stream: true,
-            __trace: buildModelCallTrace(options, 'v2_streaming_reply')
-          },
+            defaultMaxTokens: 3500,
+            trace: callTrace
+          }),
           {
             onData(chunk) {
               const parsed = extractSSEEvents(parserState, chunk);

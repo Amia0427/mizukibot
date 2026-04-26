@@ -57,6 +57,9 @@ try {
   assert.strictEqual(adminConfig.apiKey, 'admin-key');
   assert.strictEqual(adminConfig.__mainFallbackActive, false);
   assert.strictEqual(adminConfig.__mainFallbackScope, ADMIN_SHARED_FALLBACK_SCOPE);
+  assert.strictEqual(adminConfig.__mainModelUserRole, 'admin');
+  assert.strictEqual(adminConfig.__mainModelSource, 'ADMIN_AI_MODEL');
+  assert.strictEqual(adminConfig.__adminDedicatedModelConfigured, true);
 
   const adminError = (status, message) => ({
     response: {
@@ -84,6 +87,9 @@ try {
   const normalConfig = mainModelConfigResolver.resolveUserScopedMainModelConfig('user-1', null, {});
   assert.strictEqual(normalConfig.model, 'main-model');
   assert.strictEqual(normalConfig.__mainFallbackScope, 'default');
+  assert.strictEqual(normalConfig.__mainModelUserRole, 'user');
+  assert.strictEqual(normalConfig.__mainModelSource, 'AI_MODEL');
+  assert.strictEqual(normalConfig.__adminDedicatedModelConfigured, null);
 
   console.log('adminSharedFallbackRouting.test.js passed');
   restoreEnv(snapshot);

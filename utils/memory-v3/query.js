@@ -18,6 +18,7 @@ const {
   loadMemoryNodes,
   loadEmbeddingCache
 } = require('./storage');
+const { rerankMemoryCandidates } = require('../memoryReranker');
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
 
@@ -421,7 +422,12 @@ async function queryMemory(input = {}) {
   const candidates = filterCandidatesBySource(collectCandidates(userId, input), input.source);
   const scored = await scoreCandidates(candidates, query, facet);
   const conflictResolved = applyConflictResolution(scored);
-  const selected = diversify(conflictResolved, topK);
+  const reranked = await rerankMemoryCandidates(query, stableSortByScore(conflictResolved), {
+    ...input,
+    userId,
+    phase: 'memory_v3'
+  });
+  const selected = diversify(reranked, topK);
   const split = splitStrictWeak(
     selected,
     Math.max(1, Number(config.MEMORY_V3_STRICT_RESULTS_MAX || 6)),
@@ -449,6 +455,7 @@ async function queryMemory(input = {}) {
     stats: {
       candidates: candidates.length,
       scored: scored.length,
+      reranked: reranked.length,
       selected: selected.length
     }
   };

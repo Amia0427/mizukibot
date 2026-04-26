@@ -3,6 +3,40 @@ const config = require('../config');
 const { buildSessionId } = require('./subagentSessionManager');
 const { detectSensitiveOutput, sanitizeUntrustedContent } = require('../utils/promptSecurity');
 
+const activeOpenclawChildren = new Set();
+
+function terminateChildProcessTree(child = null, reason = 'cancelled') {
+  if (!child || !Number(child.pid)) return false;
+  if (child.exitCode !== null || child.killed) return false;
+
+  const pid = Number(child.pid);
+  if (process.platform === 'win32') {
+    try {
+      const killer = spawn('taskkill.exe', ['/pid', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore'
+      });
+      if (typeof killer.unref === 'function') killer.unref();
+      return true;
+    } catch (_) {}
+  }
+
+  try {
+    child.kill('SIGTERM');
+  } catch (_) {
+    return false;
+  }
+
+  const timer = setTimeout(() => {
+    try {
+      if (child.exitCode === null && !child.killed) child.kill('SIGKILL');
+    } catch (_) {}
+  }, 1500);
+  if (typeof timer.unref === 'function') timer.unref();
+  void reason;
+  return true;
+}
+
 function stripAnsi(text) {
   return String(text || '').replace(/\x1B\[[0-9;]*m/g, '');
 }
@@ -220,6 +254,7 @@ function runOpenclawOnce({ command, args, workDir, timeoutMs, onSpawn = null }) 
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
+    activeOpenclawChildren.add(child);
     if (typeof onSpawn === 'function') {
       try { onSpawn(child); } catch (_) {}
     }
@@ -231,7 +266,7 @@ function runOpenclawOnce({ command, args, workDir, timeoutMs, onSpawn = null }) 
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try { child.kill(); } catch (_) {}
+      terminateChildProcessTree(child, 'timeout');
       reject(new Error(`openclaw timeout after ${timeoutMs}ms`));
     }, timeoutMs);
 
@@ -242,10 +277,12 @@ function runOpenclawOnce({ command, args, workDir, timeoutMs, onSpawn = null }) 
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      activeOpenclawChildren.delete(child);
       reject(err);
     });
 
     child.on('close', (code) => {
+      activeOpenclawChildren.delete(child);
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -306,7 +343,7 @@ function createOpenclawBridgeCall(question, userInfo, userId, customPrompt = nul
     cancel(reason = 'cancelled') {
       cancelled = true;
       if (spawnedChild) {
-        try { spawnedChild.kill(); } catch (_) {}
+        terminateChildProcessTree(spawnedChild, reason);
       }
       return reason;
     }
@@ -318,10 +355,33 @@ async function askOpenclawByBridge(question, userInfo, userId, customPrompt = nu
   return call.promise;
 }
 
+function shutdownOpenclawExecutor(reason = 'shutdown') {
+  const activePids = [...activeOpenclawChildren]
+    .map((child) => Number(child?.pid || 0) || 0)
+    .filter(Boolean);
+  for (const child of activeOpenclawChildren) {
+    terminateChildProcessTree(child, reason);
+  }
+  activeOpenclawChildren.clear();
+  console.log('[openclaw] shutdown cleanup', {
+    reason: String(reason || '').trim() || 'shutdown',
+    activePids
+  });
+  return { activePids };
+}
+
+process.once('exit', () => {
+  for (const child of activeOpenclawChildren) {
+    try { terminateChildProcessTree(child, 'process_exit'); } catch (_) {}
+  }
+  activeOpenclawChildren.clear();
+});
+
 module.exports = {
   askOpenclawByBridge,
   buildOpenclawArgs,
   createOpenclawBridgeCall,
   parseOpenclawReply,
+  shutdownOpenclawExecutor,
   summarizeOpenclawFailure
 };

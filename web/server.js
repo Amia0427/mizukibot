@@ -1144,9 +1144,10 @@ function startServer() {
     `);
   });
 
-  app.listen(port, host, () => {
+  const server = app.listen(port, host, () => {
     console.log(`Console started: http://${host}:${port}`);
   });
+  return server;
 }
 
 module.exports = { startServer, validateExternalApiBaseUrl };

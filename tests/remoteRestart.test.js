@@ -19,6 +19,9 @@ module.exports = (async () => {
   assert.deepStrictEqual(winSpec.args, []);
 
   const spawned = [];
+  const restartEvents = [];
+  const onRestartScheduled = (event) => restartEvents.push(event);
+  process.on('mizuki:restartScheduled', onRestartScheduled);
   const first = triggerRemoteRestart({
     platform: 'win32',
     delayMs: 1,
@@ -42,6 +45,8 @@ module.exports = (async () => {
   assert.strictEqual(first.scheduled, true);
   assert.strictEqual(second.scheduled, false);
   assert.strictEqual(second.alreadyScheduled, true);
+  assert.strictEqual(restartEvents.length, 1);
+  assert.strictEqual(restartEvents[0].delayMs, 1);
 
   await wait(20);
 
@@ -53,6 +58,7 @@ module.exports = (async () => {
   assert.strictEqual(spawned[0].unrefCalled, true);
 
   resetRemoteRestartForTest();
+  process.removeListener('mizuki:restartScheduled', onRestartScheduled);
   console.log('remoteRestart.test.js passed');
 })().catch((error) => {
   console.error(error);

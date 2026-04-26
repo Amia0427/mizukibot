@@ -14,6 +14,21 @@ const imageSummaryRoute = detectIntent({
 
 assert.strictEqual(imageSummaryRoute.topRouteType, 'direct_chat');
 assert.strictEqual(imageSummaryRoute.meta.chatMode, 'image_summary');
+assert.strictEqual(imageSummaryRoute.meta.localRuleId, 'direct-chat');
+assert.strictEqual(imageSummaryRoute.meta.responseIntent, 'summary');
+assert.strictEqual(imageSummaryRoute.facets.sourceScope, 'vision');
+
+const summaryRoute = detectIntent({
+  rawText: '帮我总结这段文字：项目完成路由压平，后续补回归测试。',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+
+assert.strictEqual(summaryRoute.topRouteType, 'direct_chat');
+assert.strictEqual(summaryRoute.meta.localRuleId, 'direct-chat');
+assert.strictEqual(summaryRoute.meta.responseIntent, 'summary');
+assert.strictEqual(summaryRoute.meta.toolIntent, 'none');
 
 const actionRoute = detectIntent({
   rawText: '帮我执行命令重启服务',
@@ -24,7 +39,8 @@ const actionRoute = detectIntent({
 });
 
 assert.strictEqual(actionRoute.topRouteType, 'direct_chat');
-assert.strictEqual(actionRoute.meta.reason, 'explicit-act');
+assert.strictEqual(actionRoute.meta.localRuleId, 'explicit-action');
+assert.strictEqual(actionRoute.meta.responseIntent, 'action_guidance');
 
 const hapiCommand = parseAdminCommand('/hapi status');
 assert.strictEqual(hapiCommand.cmd, 'hapi');
@@ -51,7 +67,7 @@ const notebookLookupRoute = detectIntent({
 assert.strictEqual(notebookLookupRoute.topRouteType, 'direct_chat');
 assert.strictEqual(notebookLookupRoute.meta.responseIntent, 'answer');
 assert.strictEqual(notebookLookupRoute.facets.sourceScope, 'notebook');
-assert.strictEqual(notebookLookupRoute.meta.reason, 'recall-needs-tool-assistance');
+assert.strictEqual(notebookLookupRoute.meta.localRuleId, 'direct-chat');
 assert.strictEqual(notebookLookupRoute.meta.toolIntent, 'maybe_tools');
 assert.deepStrictEqual(notebookLookupRoute.meta.allowedTools, ['notebook_search', 'notebook_list_docs']);
 

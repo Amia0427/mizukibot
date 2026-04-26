@@ -29,6 +29,9 @@ function triggerRemoteRestart(options = {}) {
   }
 
   restartScheduled = true;
+  try {
+    process.emit('mizuki:restartScheduled', { delayMs: options.delayMs ?? 800 });
+  } catch (_) {}
   const spawn = options.spawn || defaultSpawn;
   const platform = options.platform || process.platform;
   const delayMs = Math.max(0, Number(options.delayMs ?? 800) || 0);

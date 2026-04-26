@@ -17,6 +17,7 @@ function restoreEnv(snapshot = {}) {
   }
 }
 
+module.exports = (async () => {
 try {
   const snapshot = { ...process.env };
   process.env.API_KEY = 'main-key';
@@ -28,7 +29,7 @@ try {
   process.env.ADMIN_API_KEY = 'admin-key';
   process.env.AI_FALLBACK_ENABLED = 'false';
   process.env.ADMIN_AI_FALLBACK_ENABLED = 'false';
-  process.env.ENABLE_AI_ROUTER = '';
+  process.env.ENABLE_AI_ROUTER = 'false';
 
   clearProjectCache();
   const router = require('../core/router');
@@ -58,6 +59,8 @@ try {
   assert.strictEqual(adminConfig.model, 'admin-model');
   assert.strictEqual(adminConfig.apiBaseUrl, 'https://admin.example/v1/chat/completions');
   assert.strictEqual(adminConfig.apiKey, 'admin-key');
+  assert.strictEqual(adminConfig.__mainModelUserRole, 'admin');
+  assert.strictEqual(adminConfig.__mainModelSource, 'ADMIN_AI_MODEL');
 
   const userConfig = modelResolver.resolveUserScopedMainModelConfig('user-1', null, {
     routeMeta: userRoute.meta
@@ -65,6 +68,8 @@ try {
   assert.strictEqual(userConfig.model, 'main-model');
   assert.strictEqual(userConfig.apiBaseUrl, 'https://main.example/v1/chat/completions');
   assert.strictEqual(userConfig.apiKey, 'main-key');
+  assert.strictEqual(userConfig.__mainModelUserRole, 'user');
+  assert.strictEqual(userConfig.__mainModelSource, 'AI_MODEL');
 
   const spoofedRouteMetaConfig = modelResolver.resolveUserScopedMainModelConfig('user-1', null, {
     routeMeta: {
@@ -74,6 +79,28 @@ try {
   });
   assert.strictEqual(spoofedRouteMetaConfig.model, 'main-model');
 
+  const adminCommandRoute = router.detectIntent({
+    rawText: '/status',
+    botQQ: '123456',
+    userId: 'admin-1',
+    chatType: 'group'
+  });
+  assert.strictEqual(adminCommandRoute.topRouteType, 'admin');
+  assert.strictEqual(adminCommandRoute.meta.admin, true);
+
+  const adminHybridRoute = await router.detectIntentHybrid({
+    rawText: '/status',
+    botQQ: '123456',
+    userId: 'admin-1',
+    chatType: 'group'
+  }, {
+    detectIntentByAI() {
+      throw new Error('AI router must not run for admin terminal routes');
+    }
+  });
+  assert.strictEqual(adminHybridRoute.topRouteType, 'admin');
+  assert.strictEqual(adminHybridRoute.meta.admin, true);
+
   console.log('mainModelRoleRoutingLocalRouter.test.js passed');
   restoreEnv(snapshot);
   clearProjectCache();
@@ -81,3 +108,4 @@ try {
   console.error(error);
   process.exit(1);
 }
+})();

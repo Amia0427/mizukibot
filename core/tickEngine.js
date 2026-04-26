@@ -1081,6 +1081,7 @@ async function runLifeSchedulerTick(ws, askAIByGraph, date = new Date()) {
 
 function startTickEngine(ws, askAIByGraph) {
   const state = loadTickState();
+  let stopped = false;
   const timers = {
     proactive: null,
     dailyShare: null,
@@ -1088,36 +1089,40 @@ function startTickEngine(ws, askAIByGraph) {
   };
 
   async function runOnce() {
+    if (stopped) return;
     try {
       await runTickCycle(ws, askAIByGraph, state, new Date());
     } catch (error) {
       console.error('[tick] execution failed:', error?.message || error);
     } finally {
-      scheduleProactiveTick(getProactiveScanIntervalMs());
+      if (!stopped) scheduleProactiveTick(getProactiveScanIntervalMs());
     }
   }
 
   async function runDailyShareOnce() {
+    if (stopped) return;
     try {
       await runDailyShareTick(ws, askAIByGraph, new Date());
     } catch (error) {
       console.error('[tick] daily share execution failed:', error?.message || error);
     } finally {
-      scheduleDailyShareTick(getDailyShareScanIntervalMs());
+      if (!stopped) scheduleDailyShareTick(getDailyShareScanIntervalMs());
     }
   }
 
   async function runLifeSchedulerOnce() {
+    if (stopped) return;
     try {
       await runLifeSchedulerTick(ws, askAIByGraph, new Date());
     } catch (error) {
       console.error('[tick] life scheduler execution failed:', error?.message || error);
     } finally {
-      scheduleLifeSchedulerTick(getLifeSchedulerScanIntervalMs());
+      if (!stopped) scheduleLifeSchedulerTick(getLifeSchedulerScanIntervalMs());
     }
   }
 
   function armTimer(slot, delayMs, runner) {
+    if (stopped) return;
     if (timers[slot]) {
       clearTimeout(timers[slot]);
       timers[slot] = null;
@@ -1159,6 +1164,19 @@ function startTickEngine(ws, askAIByGraph) {
   console.log(
     `[tick] life scheduler armed: immediate first scan, interval ${Math.floor(lifeSchedulerIntervalMs / 60000)}m`
   );
+
+  return {
+    stop() {
+      stopped = true;
+      for (const slot of Object.keys(timers)) {
+        if (timers[slot]) {
+          clearTimeout(timers[slot]);
+          timers[slot] = null;
+        }
+      }
+      console.log('[tick] scheduler stopped');
+    }
+  };
 }
 
 module.exports = {

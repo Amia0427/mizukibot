@@ -11,7 +11,7 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
 $lockFile = Join-Path $repoRoot '.mizukibot.lock'
 $workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
 
-function Get-ChildProcessTreeIds {
+function Get-ChildProcessTreeEntries {
   param(
     [Parameter(Mandatory = $true)]
     [int[]]$RootPids,
@@ -29,27 +29,70 @@ function Get-ChildProcessTreeIds {
   }
 
   $seen = @{}
-  $result = New-Object System.Collections.Generic.List[int]
+  $result = New-Object System.Collections.Generic.List[object]
   $queue = New-Object System.Collections.Queue
   foreach ($pidNum in $RootPids) {
     if ($pidNum -gt 0) {
       $seen[$pidNum] = $true
-      $queue.Enqueue($pidNum)
+      $queue.Enqueue([pscustomobject]@{
+        ProcessId = $pidNum
+        Depth = 0
+      })
     }
   }
 
   while ($queue.Count -gt 0) {
-    $parentPid = [int]$queue.Dequeue()
+    $current = $queue.Dequeue()
+    $parentPid = [int]$current.ProcessId
+    $nextDepth = [int]$current.Depth + 1
     if (-not $childrenByParent.ContainsKey($parentPid)) { continue }
     foreach ($childPid in $childrenByParent[$parentPid]) {
       if ($seen.ContainsKey($childPid)) { continue }
       $seen[$childPid] = $true
-      $result.Add($childPid)
-      $queue.Enqueue($childPid)
+      $result.Add([pscustomobject]@{
+        ProcessId = [int]$childPid
+        ParentProcessId = $parentPid
+        Depth = $nextDepth
+      })
+      $queue.Enqueue([pscustomobject]@{
+        ProcessId = [int]$childPid
+        Depth = $nextDepth
+      })
     }
   }
 
   return @($result)
+}
+
+function Stop-PidList {
+  param(
+    [int[]]$Pids,
+    [string]$Stage
+  )
+
+  foreach ($pidNum in @($Pids | Where-Object { $_ -gt 0 -and $_ -ne $PID } | Select-Object -Unique)) {
+    try {
+      Stop-Process -Id $pidNum -Force -ErrorAction Stop
+      $script:killed += $pidNum
+      Write-Host "[restart] stopped $Stage PID $pidNum"
+    } catch {
+      Write-Warning "Failed to stop $Stage PID ${pidNum}: $($_.Exception.Message)"
+    }
+  }
+}
+
+function Get-TreeChildPids {
+  param(
+    [int[]]$RootPids
+  )
+
+  if ($RootPids.Count -le 0) { return @() }
+  $snapshot = @(Get-CimInstance Win32_Process)
+  return @(
+    Get-ChildProcessTreeEntries -RootPids $RootPids -Processes $snapshot |
+      Sort-Object Depth -Descending |
+      Select-Object -ExpandProperty ProcessId
+  )
 }
 
 $targetPids = @()
@@ -62,20 +105,23 @@ foreach ($file in @($lockFile, $workerPidFile)) {
   }
 }
 $targetPids = $targetPids | Sort-Object -Unique
-$processSnapshot = @(Get-CimInstance Win32_Process)
-$childPids = @()
-if ($targetPids.Count -gt 0) {
-  $childPids = @(Get-ChildProcessTreeIds -RootPids $targetPids -Processes $processSnapshot | Sort-Object -Unique)
-}
-$allStopPids = @($childPids + $targetPids) | Where-Object { $_ -gt 0 } | Select-Object -Unique
-
 $killed = @()
-foreach ($pidNum in $allStopPids) {
-  try {
-    Stop-Process -Id $pidNum -Force -ErrorAction Stop
-    $killed += $pidNum
-  } catch {
-    Write-Warning "Failed to stop PID ${pidNum}: $($_.Exception.Message)"
+$childPids = @(Get-TreeChildPids -RootPids $targetPids)
+Stop-PidList -Pids $childPids -Stage 'child'
+Stop-PidList -Pids $targetPids -Stage 'root'
+
+for ($pass = 1; $pass -le 2; $pass++) {
+  Start-Sleep -Milliseconds 700
+  $residualChildPids = @(Get-TreeChildPids -RootPids $targetPids)
+  if ($residualChildPids.Count -le 0) { break }
+  Write-Host "[restart] residual child cleanup pass ${pass}: $($residualChildPids -join ', ')"
+  Stop-PidList -Pids $residualChildPids -Stage "residual-child-$pass"
+}
+
+$oldRootAlivePids = @()
+foreach ($pidNum in $targetPids) {
+  if (Get-Process -Id $pidNum -ErrorAction SilentlyContinue) {
+    $oldRootAlivePids += $pidNum
   }
 }
 
@@ -88,6 +134,7 @@ Write-Host ("TaskName : " + $TaskName)
 Write-Host ("Roots    : " + ($(if ($targetPids) { $targetPids -join ', ' } else { '(none)' })))
 Write-Host ("Children : " + ($(if ($childPids) { $childPids -join ', ' } else { '(none)' })))
 Write-Host ("Killed   : " + ($(if ($killed) { $killed -join ', ' } else { '(none)' })))
+Write-Host ("OldAlive : " + ($(if ($oldRootAlivePids) { $oldRootAlivePids -join ', ' } else { '(none)' })))
 Write-Host ""
 Write-Host "=== Lock Files ==="
 foreach ($file in @($lockFile, $workerPidFile)) {
