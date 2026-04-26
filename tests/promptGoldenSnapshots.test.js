@@ -60,6 +60,7 @@ module.exports = (async () => {
   assert.ok(Array.isArray(main.promptSnapshot.plannerSkippedBlocks));
   assert.ok(Array.isArray(main.promptSnapshot.runtimeAddedBlocks));
   assert.ok(Array.isArray(main.promptSnapshot.runtimeRejectedBlocks));
+  assert.ok(main.promptSnapshot.personaWorldbookSearch && typeof main.promptSnapshot.personaWorldbookSearch === 'object');
   assert.ok(main.promptSnapshot.plannerDynamicContextPlan);
   assert.ok(main.promptSnapshot.cacheLanes && Array.isArray(main.promptSnapshot.cacheLanes.stable));
   assert.ok(typeof main.promptSnapshot.cacheFriendlyFingerprint === 'string' && main.promptSnapshot.cacheFriendlyFingerprint.length > 0);

@@ -596,6 +596,7 @@ module.exports = (async () => {
   assert.ok(weatherToolMeta.preferredOver.includes('getWeather'));
   assert.ok(Array.isArray(plannerPayload.personaModuleCatalog));
   assert.ok(plannerPayload.personaModuleCatalog.some((item) => item.moduleId === 'daily_energy'));
+  assert.ok(plannerPayload.personaModuleCatalog.filter((item) => String(item.moduleId || '').startsWith('wb_mizuki_')).length <= config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT);
   assert.ok(Array.isArray(plannerPayload.dynamicPromptBlockCatalog));
   assert.ok(plannerPayload.dynamicPromptBlockCatalog.some((item) => item.blockId === 'directed_context'));
   assert.ok(plannerPayload.dynamicPromptBlockCatalog.every((item) => item.lane && item.category && item.defaultPolicy));

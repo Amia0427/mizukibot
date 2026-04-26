@@ -32,6 +32,7 @@ const {
   buildMemoryCliFollowupInstruction
 } = require('../../../utils/memoryCliTurnPolicy');
 const {
+  buildPersonaModuleCandidatesAsync,
   buildPersonaModuleCandidates,
   loadPersonaModuleText,
   selectPersonaModules
@@ -607,6 +608,9 @@ function clonePromptLayerValue(value = {}) {
         plannerSkippedBlocks: normalizeArray(normalized.promptSnapshot.plannerSkippedBlocks).map((item) => ({ ...item })),
         runtimeAddedBlocks: normalizeArray(normalized.promptSnapshot.runtimeAddedBlocks).map((item) => ({ ...item })),
         runtimeRejectedBlocks: normalizeArray(normalized.promptSnapshot.runtimeRejectedBlocks).map((item) => ({ ...item })),
+        personaWorldbookSearch: normalized.promptSnapshot.personaWorldbookSearch && typeof normalized.promptSnapshot.personaWorldbookSearch === 'object'
+          ? { ...normalized.promptSnapshot.personaWorldbookSearch }
+          : undefined,
         cacheLanes: normalized.promptSnapshot.cacheLanes && typeof normalized.promptSnapshot.cacheLanes === 'object'
           ? {
               stable: normalizeArray(normalized.promptSnapshot.cacheLanes.stable),
@@ -751,14 +755,16 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
   const personaMemoryPrompt = options.personaMemoryPrompt && typeof options.personaMemoryPrompt === 'object'
     ? options.personaMemoryPrompt
     : renderPersonaMemoryPrompt(personaMemoryState, topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat');
-  const personaModuleCandidates = buildPersonaModuleCandidates({
+  const personaModuleContext = {
     question,
     routePrompt: options.routePrompt,
     routeMeta,
     directedContext: routeMeta.directedContext,
     continuitySignals: options?.continuitySignals,
     personaPhase: routeMeta.personaPhase || ''
-  });
+  };
+  const personaModuleCandidates = await buildPersonaModuleCandidatesAsync(personaModuleContext);
+  const personaWorldbookSearch = personaModuleCandidates.personaWorldbookSearch || {};
   const personaModuleDecision = selectPersonaModules(
     {
       ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
@@ -772,7 +778,8 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       routeMeta,
       directedContext: routeMeta.directedContext,
       continuitySignals: options?.continuitySignals,
-      personaPhase: routeMeta.personaPhase || ''
+      personaPhase: routeMeta.personaPhase || '',
+      personaModuleCandidates
     }
   );
   const summaryText = memoryContext?.promptSummaryText
@@ -802,6 +809,7 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     personaMemoryState,
     personaMemoryPrompt,
     personaModuleCandidates,
+    personaWorldbookSearch,
     personaModuleDecision,
     dynamicPromptPlan,
     summaryText,
@@ -1039,6 +1047,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       personaPhase: routeMeta.personaPhase || ''
     }))
     : [];
+  const personaWorldbookSearch = promptMaterials?.personaWorldbookSearch && typeof promptMaterials.personaWorldbookSearch === 'object'
+    ? promptMaterials.personaWorldbookSearch
+    : {};
   const personaModuleDecision = shouldResolvePersonaModules
     ? (promptMaterials?.personaModuleDecision || selectPersonaModules(
       {
@@ -1053,7 +1064,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         routeMeta,
         directedContext: routeMeta.directedContext,
         continuitySignals: options?.continuitySignals,
-        personaPhase: routeMeta.personaPhase || ''
+        personaPhase: routeMeta.personaPhase || '',
+        personaModuleCandidates
       }
     ))
     : { selected: [], rejected: [] };
@@ -1515,6 +1527,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       plannerSkippedBlocks: baseDynamicContextAudit.plannerSkippedBlocks,
       runtimeAddedBlocks: baseDynamicContextAudit.runtimeAddedBlocks,
       runtimeRejectedBlocks: baseDynamicContextAudit.runtimeRejectedBlocks,
+      personaWorldbookSearch,
       cacheFriendlyFingerprint: buildCacheFriendlyFingerprint(compiledLaneSplit.stableSystemBlocks),
       cacheLanes: {
         stable: compiledLaneSplit.stableSystemBlocks.map((item) => item.id),
@@ -1530,6 +1543,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     dynamicPromptPlan: effectiveBaseDynamicPromptPlan,
     personaMemoryPrompt,
     personaModuleCandidates,
+    personaWorldbookSearch,
     personaModuleDecision,
     sharedShortTermSignature: String(sharedShortTermContext?.sharedShortTermSignature || '').trim(),
     summaryText,
@@ -1594,6 +1608,12 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const now = Date.now();
   const essentialStartedAt = now;
   const collectStartedAt = Date.now();
+  const fallbackMemoryContext = options.memoryContext && typeof options.memoryContext === 'object'
+    ? options.memoryContext
+    : {};
+  const fallbackSummaryText = fallbackMemoryContext.promptSummaryText
+    || trimTextByTokenBudget(fallbackMemoryContext.summary || 'none', fallbackAffinity.shortTermMemoryTokens, 'tail')
+    || 'none';
   const promptMaterials = await withSoftTimeout(
     () => collectPromptInputs(userInfo, userId, question, customPrompt, {
       ...options,
@@ -1611,13 +1631,14 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       surface: buildPromptSurface(topRouteType, routeMeta),
       affinity: fallbackAffinity,
       sharedShortTermContext,
-      memoryContext: {},
+      memoryContext: fallbackMemoryContext,
       personaMemoryState: {},
       personaMemoryPrompt: { systemMessages: [], promptBlocks: [], policy: {} },
       personaModuleCandidates: fallbackPersonaModuleCandidates,
+      personaWorldbookSearch: {},
       personaModuleDecision: fallbackPersonaModuleDecision,
       dynamicPromptPlan: baseDynamicPromptPlan,
-      summaryText: 'none',
+      summaryText: fallbackSummaryText,
       dynamicFewShotPrompt: ''
     })
   );
@@ -2044,6 +2065,12 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     plannerSkippedBlocks: dynamicContextAudit.plannerSkippedBlocks,
     runtimeAddedBlocks: dynamicContextAudit.runtimeAddedBlocks,
     runtimeRejectedBlocks: dynamicContextAudit.runtimeRejectedBlocks,
+    personaWorldbookSearch: (
+      effectiveOptionalLayer?.promptSnapshot?.personaWorldbookSearch
+      || sessionCandidateLayer?.promptSnapshot?.personaWorldbookSearch
+      || promptMaterials?.personaWorldbookSearch
+      || {}
+    ),
     cacheFriendlyFingerprint: buildCacheFriendlyFingerprint(laneSplit.stableSystemBlocks),
     cacheLanes: {
       stable: laneSplit.stableSystemBlocks.map((item) => item.id),

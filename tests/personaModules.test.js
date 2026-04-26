@@ -1,13 +1,17 @@
 const assert = require('assert');
 
 const {
+  buildPersonaModuleCandidatesAsync,
   buildPersonaModuleCandidates,
   diagnosePersonaModules,
   getPersonaModuleCatalogSummary,
   selectPersonaModules
 } = require('../utils/personaModules');
+const {
+  searchPersonaWorldbook
+} = require('../utils/personaWorldbookSearch');
 
-(() => {
+(async () => {
   const catalog = getPersonaModuleCatalogSummary();
   assert.ok(catalog.some((item) => item.moduleId === 'daily_energy'));
   assert.ok(catalog.some((item) => item.moduleId === 'deep_pain'));
@@ -162,5 +166,125 @@ const {
   assert.ok(Array.isArray(diagnosed.selected));
   assert.ok(diagnosed.selectionReason && Array.isArray(diagnosed.selectionReason.fallbackIds));
 
+  const fallbackAsyncCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '我不想说，但有点难受，你不用追问我',
+    worldbookEmbeddingHotPath: false
+  });
+  assert.ok(fallbackAsyncCandidates.some((item) => item.id === 'wb_mizuki_care_chains'));
+  assert.ok(fallbackAsyncCandidates.personaWorldbookSearch);
+  assert.strictEqual(fallbackAsyncCandidates.personaWorldbookSearch.embedding.hotPathUsed, false);
+
+  const fakeCatalog = {
+    modules: [
+      {
+        id: 'wb_mizuki_alpha',
+        path: 'persona_worldbook/care_chains.txt',
+        purpose: 'alpha unrelated',
+        triggerHints: [],
+        tokenCost: 10,
+        priority: 30,
+        conflictsWith: [],
+        phase: 'all',
+        slot: 'general'
+      },
+      {
+        id: 'wb_mizuki_beta',
+        path: 'persona_worldbook/m7_two_tracks_conflict.txt',
+        purpose: 'beta semantic fashion school conflict',
+        triggerHints: [],
+        tokenCost: 10,
+        priority: 20,
+        conflictsWith: [],
+        phase: 'all',
+        slot: 'general'
+      }
+    ]
+  };
+  const semanticWorldbook = await searchPersonaWorldbook(fakeCatalog, {
+    query: '服饰学业和活动冲突',
+    lexicalLimit: 0,
+    semanticLimit: 2,
+    limit: 2,
+    hotPath: true,
+    shouldUseRemoteEmbedding: () => true,
+    queryEmbedding: [1, 0],
+    embeddingIndex: {
+      rows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      readyRows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      byKey: new Map(),
+      byModuleId: new Map()
+    }
+  });
+  assert.strictEqual(semanticWorldbook.results[0].moduleId, 'wb_mizuki_beta');
+  assert.ok(semanticWorldbook.diagnostics.embedding.semanticCandidates >= 1);
+
+  const rerankedWorldbook = await searchPersonaWorldbook(fakeCatalog, {
+    query: '冲突',
+    lexicalLimit: 2,
+    semanticLimit: 0,
+    limit: 2,
+    rerankCandidates: async (_query, candidates) => candidates.slice().reverse().map((item, index) => ({
+      ...item,
+      rerankScore: 1 - (index * 0.1),
+      score: 1 - (index * 0.1)
+    }))
+  });
+  assert.ok(rerankedWorldbook.diagnostics.rerank.candidates <= 24);
+
+  const rerankCatalog = {
+    modules: ['care_chains', 'kindness_fear', 'unscreamable_pain', 'avoidance_gradient'].map((name, index) => ({
+      id: `wb_mizuki_rerank_${index}`,
+      path: `persona_worldbook/${name}.txt`,
+      purpose: '好意 关系 说不出口',
+      triggerHints: ['好意', '关系'],
+      tokenCost: 10,
+      priority: index + 1,
+      conflictsWith: [],
+      phase: 'all',
+      slot: 'general'
+    }))
+  };
+  const forcedReranked = await searchPersonaWorldbook(rerankCatalog, {
+    query: '好意关系说不出口',
+    lexicalLimit: 4,
+    semanticLimit: 0,
+    limit: 4,
+    rerankCandidates: async (_query, candidates) => candidates.slice().reverse().map((item, index) => ({
+      ...item,
+      rerankScore: 1 - (index * 0.1),
+      score: 1 - (index * 0.1)
+    }))
+  });
+  assert.strictEqual(forcedReranked.diagnostics.rerank.applied, true);
+
+  const slotSelection = selectPersonaModules({
+    maxActiveModules: 2,
+    personaModules: ['deep_pain', 'care_light']
+  }, {
+    question: '我很难受',
+    personaModuleCandidates: catalog
+      .filter((item) => ['deep_pain', 'care_light'].includes(item.moduleId))
+      .map((item) => ({
+        id: item.moduleId,
+        slot: item.slot,
+        priority: item.priority,
+        tokenCost: item.tokenCost,
+        conflictsWith: item.conflictsWith,
+        phase: item.phase,
+        path: 'persona_modules/test.txt'
+      }))
+  });
+  assert.strictEqual(slotSelection.selected.length, 1);
+  assert.ok(slotSelection.selectionReason.skipped.some((item) => item.id === 'care_light' || item.id === 'deep_pain'));
+
   console.log('personaModules.test.js passed');
-})();
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

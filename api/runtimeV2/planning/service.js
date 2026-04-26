@@ -22,7 +22,10 @@ const {
 const { getPolicyDefinition } = require('../../../core/routeProfiles');
 const { HUMANIZER_SYSTEM_PROMPT } = require('../../../utils/humanizer');
 const { buildPlannerStageSystemPrompt } = require('../../../utils/stagePromptContracts');
-const { getPersonaModuleCatalogSummary } = require('../../../utils/personaModules');
+const {
+  buildPlannerPersonaModuleCatalog,
+  getPersonaModuleCatalogSummary
+} = require('../../../utils/personaModules');
 const {
   buildHeuristicDynamicPromptPlan,
   buildMainReplyDynamicPromptGuide,
@@ -1485,9 +1488,19 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
   const personaModuleCatalog = normalizeArray(options?.personaModuleCatalog).length > 0
     ? normalizeArray(options.personaModuleCatalog)
     : getPersonaModuleCatalogSummary();
+  const plannerPersonaModuleCatalog = buildPlannerPersonaModuleCatalog(personaModuleCatalog, {
+    question: normalizeText(options.question || route?.question || route?.cleanText),
+    routePrompt: options.routePrompt,
+    routeMeta,
+    directedContext: options?.directedContext || routeMeta.directedContext,
+    continuitySignals: options?.continuitySignals || routeMeta.continuitySignals,
+    personaPhase: routeMeta.personaPhase || ''
+  }, {
+    limit: config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT
+  });
   const dynamicPromptBlockCatalog = normalizeArray(options?.dynamicPromptBlockCatalog).length > 0
     ? normalizeArray(options.dynamicPromptBlockCatalog)
-    : getMainReplyDynamicBlockCatalog(personaModuleCatalog);
+    : getMainReplyDynamicBlockCatalog(plannerPersonaModuleCatalog);
   return {
     question: normalizeText(options.question || route?.question || route?.cleanText),
     cleanText: normalizeText(route?.cleanText),
@@ -1514,11 +1527,11 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
     constraints: normalizeObject(options?.constraints, {}),
     explicitAllowlist: allowlist,
     tools: buildDirectChatToolCatalogSummary(toolCatalog),
-    personaModuleCatalog,
+    personaModuleCatalog: plannerPersonaModuleCatalog,
     dynamicPromptBlockCatalog: normalizeDynamicPromptBlockCatalogForPlanner(dynamicPromptBlockCatalog),
     dynamicPromptGuide: normalizeText(options?.dynamicPromptGuide)
       || buildMainReplyDynamicPromptGuide(
-        personaModuleCatalog
+        plannerPersonaModuleCatalog
       )
   };
 }

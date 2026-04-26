@@ -23,13 +23,13 @@ function Get-ChildProcessTreeEntries {
   foreach ($proc in $Processes) {
     $parentId = [int]$proc.ParentProcessId
     if (-not $childrenByParent.ContainsKey($parentId)) {
-      $childrenByParent[$parentId] = New-Object System.Collections.Generic.List[int]
+      $childrenByParent[$parentId] = New-Object System.Collections.ArrayList
     }
-    $childrenByParent[$parentId].Add([int]$proc.ProcessId)
+    [void]$childrenByParent[$parentId].Add([int]$proc.ProcessId)
   }
 
   $seen = @{}
-  $result = New-Object System.Collections.Generic.List[object]
+  $result = New-Object System.Collections.ArrayList
   $queue = New-Object System.Collections.Queue
   foreach ($pidNum in $RootPids) {
     if ($pidNum -gt 0) {
@@ -49,7 +49,7 @@ function Get-ChildProcessTreeEntries {
     foreach ($childPid in $childrenByParent[$parentPid]) {
       if ($seen.ContainsKey($childPid)) { continue }
       $seen[$childPid] = $true
-      $result.Add([pscustomobject]@{
+      [void]$result.Add([pscustomobject]@{
         ProcessId = [int]$childPid
         ParentProcessId = $parentPid
         Depth = $nextDepth
