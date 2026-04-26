@@ -1703,7 +1703,12 @@ async function requestEmbedding(text) {
       getEmbeddingApiKey()
     );
 
-    const list = Array.isArray(resp?.data?.data) ? resp.data.data : [];
+    const payload = typeof resp?.data === 'string'
+      ? (() => {
+          try { return JSON.parse(resp.data); } catch (_) { return {}; }
+        })()
+      : (resp?.data || {});
+    const list = Array.isArray(payload?.data) ? payload.data : [];
     const first = list[0];
     requestEmbedding.disabledUntil = 0;
     return Array.isArray(first?.embedding) ? first.embedding : null;

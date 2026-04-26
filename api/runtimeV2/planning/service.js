@@ -71,6 +71,7 @@ const TASK_SHAPES = Object.freeze(['fast_reply', 'tool_augmented_reply', 'backgr
 const DIRECT_CHAT_PLANNER_VERSION = 'direct_chat_single_authority_v2';
 const PLANNER_DECISION_VERSION = 'planner_decision_v2';
 const PLANNER_PROTOCOL_VERSION = 'planner_request_v2';
+const DYNAMIC_CONTEXT_PLAN_VERSION = 'dynamic_context_plan_v2';
 const DEFAULT_PLANNER_TEMPERATURE = 0.1;
 
 function normalizeObject(value, fallback = {}) {
@@ -92,10 +93,20 @@ function clampReason(text = '', maxLength = 240) {
   return `${normalized.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
 }
 
+function clampNumber(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, number));
+}
+
 function normalizeDynamicPromptPlan(plan = {}, options = {}) {
   const personaModuleCatalog = normalizeArray(options.personaModuleCatalog);
   const blockCatalog = normalizeArray(options.dynamicPromptBlockCatalog);
   const legacyPersonaModules = normalizeArray(options.legacyPersonaModules);
+  const planSource = normalizeText(options.source || plan?.source || plan?._source || 'planner');
+  const plannerProvided = options.plannerProvided !== undefined
+    ? options.plannerProvided === true
+    : !['heuristic', 'rule', 'fallback'].includes(planSource);
   const validDynamicBlockIds = new Set(
     blockCatalog
       .map((item) => normalizeText(item?.blockId))
@@ -107,7 +118,12 @@ function normalizeDynamicPromptPlan(plan = {}, options = {}) {
       .filter(Boolean)
   );
   const rationaleSource = normalizeObject(plan?.rationaleByBlock, {});
-  const enabledBlockIds = normalizeArray(plan?.enabledBlockIds)
+  const explicitDecisions = new Map();
+  const enabledBlockSet = new Set();
+  const skippedBlockSet = new Set();
+  const personaModuleSet = new Set();
+  const skippedPersonaModuleSet = new Set();
+  const legacyEnabledBlockIds = normalizeArray(plan?.enabledBlockIds)
     .map((item) => normalizeText(item))
     .filter((blockId) => validDynamicBlockIds.has(blockId));
   const personaModuleLimit = Math.max(
@@ -115,12 +131,81 @@ function normalizeDynamicPromptPlan(plan = {}, options = {}) {
     Number(options.maxActivePersonaModules || options.maxActiveModules || 0)
     || Math.min(8, Math.max(1, personaModuleCatalog.length || 1))
   );
-  const personaModules = normalizeArray(plan?.personaModules)
+  const legacyPlanPersonaModules = normalizeArray(plan?.personaModules)
     .concat(legacyPersonaModules)
     .map((item) => normalizeText(item))
     .filter((moduleId) => validPersonaModuleIds.has(moduleId))
-    .filter((moduleId, index, list) => list.indexOf(moduleId) === index)
-    .slice(0, personaModuleLimit);
+    .filter((moduleId, index, list) => list.indexOf(moduleId) === index);
+
+  for (const rawDecision of normalizeArray(plan?.blockDecisions)) {
+    if (!rawDecision || typeof rawDecision !== 'object') continue;
+    let blockId = normalizeText(rawDecision.blockId);
+    let moduleId = normalizeText(rawDecision.moduleId);
+    if (!moduleId && blockId.startsWith('persona_module:')) {
+      moduleId = normalizeText(blockId.slice('persona_module:'.length));
+    }
+    const isPersonaModule = Boolean(moduleId);
+    if (isPersonaModule && !validPersonaModuleIds.has(moduleId)) continue;
+    if (!isPersonaModule && !validDynamicBlockIds.has(blockId)) continue;
+    if (isPersonaModule) blockId = normalizeText(blockId) || `persona_module:${moduleId}`;
+    const decision = normalizeText(rawDecision.decision).toLowerCase() === 'skip' ? 'skip' : 'include';
+    const key = isPersonaModule ? `persona_module:${moduleId}` : blockId;
+    explicitDecisions.set(key, {
+      ...(isPersonaModule ? { moduleId } : { blockId }),
+      decision,
+      confidence: clampNumber(rawDecision.confidence, 0, 1, decision === 'include' ? 0.75 : 0.5),
+      priority: Number.isFinite(Number(rawDecision.priority)) ? Number(rawDecision.priority) : 100,
+      reason: clampReason(normalizeText(rawDecision.reason), 180)
+    });
+  }
+
+  for (const decision of explicitDecisions.values()) {
+    if (decision.moduleId) {
+      if (decision.decision === 'skip') skippedPersonaModuleSet.add(decision.moduleId);
+      else personaModuleSet.add(decision.moduleId);
+    } else if (decision.blockId) {
+      if (decision.decision === 'skip') skippedBlockSet.add(decision.blockId);
+      else enabledBlockSet.add(decision.blockId);
+    }
+  }
+
+  for (const blockId of legacyEnabledBlockIds) {
+    if (skippedBlockSet.has(blockId)) continue;
+    enabledBlockSet.add(blockId);
+    if (!explicitDecisions.has(blockId)) {
+      explicitDecisions.set(blockId, {
+        blockId,
+        decision: 'include',
+        confidence: 0.8,
+        priority: 100,
+        reason: clampReason(normalizeText(rationaleSource[blockId]), 180)
+      });
+    }
+  }
+
+  for (const moduleId of legacyPlanPersonaModules) {
+    if (skippedPersonaModuleSet.has(moduleId)) continue;
+    personaModuleSet.add(moduleId);
+    const key = `persona_module:${moduleId}`;
+    if (!explicitDecisions.has(key)) {
+      explicitDecisions.set(key, {
+        moduleId,
+        decision: 'include',
+        confidence: 0.8,
+        priority: 100,
+        reason: clampReason(
+          normalizeText(rationaleSource[moduleId] || rationaleSource[key]),
+          180
+        )
+      });
+    }
+  }
+
+  for (const blockId of skippedBlockSet) enabledBlockSet.delete(blockId);
+  for (const moduleId of skippedPersonaModuleSet) personaModuleSet.delete(moduleId);
+
+  const enabledBlockIds = Array.from(enabledBlockSet);
+  const personaModules = Array.from(personaModuleSet).slice(0, personaModuleLimit);
   const rationaleByBlock = {};
 
   for (const blockId of enabledBlockIds) {
@@ -139,9 +224,16 @@ function normalizeDynamicPromptPlan(plan = {}, options = {}) {
   }
 
   return {
+    schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
     enabledBlockIds,
     personaModules,
-    rationaleByBlock
+    blockDecisions: Array.from(explicitDecisions.values()).filter((decision) => (
+      !decision.moduleId || personaModules.includes(decision.moduleId) || decision.decision === 'skip'
+    )),
+    rationaleByBlock,
+    plannerProvided,
+    source: planSource,
+    _source: planSource
   };
 }
 
@@ -1013,11 +1105,19 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
   });
 
   if (isConversationalNoop(cleanText)) {
+    const dynamicPromptPlan = normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
+      personaModuleCatalog,
+      dynamicPromptBlockCatalog,
+      source: 'rule',
+      plannerProvided: false
+    });
     return {
       mode: 'chat_only',
       taskShape: 'fast_reply',
       allowedToolNames: [],
       steps: [],
+      personaModules: dynamicPromptPlan.personaModules,
+      dynamicPromptPlan,
       validation: buildValidationEnvelope({
         mode: 'chat_only',
         taskShape: 'fast_reply',
@@ -1034,11 +1134,8 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
         fallbackUsed: true,
         decisionSource: 'rule',
         toolBuckets: [],
-        personaModules: heuristicDynamicPromptPlan.personaModules,
-        dynamicPromptPlan: normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
-          personaModuleCatalog,
-          dynamicPromptBlockCatalog
-        }),
+        personaModules: dynamicPromptPlan.personaModules,
+        dynamicPromptPlan,
         ...buildBackgroundResearchMeta(route, options)
       }
     };
@@ -1126,12 +1223,20 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
     `toolIntent=${toolIntent}`
   ];
   if (cleanText) reasonParts.push(`request=${cleanText.slice(0, 80)}`);
+  const dynamicPromptPlan = normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
+    personaModuleCatalog,
+    dynamicPromptBlockCatalog,
+    source: 'rule',
+    plannerProvided: false
+  });
 
   return {
     mode,
     taskShape,
     allowedToolNames: normalizedAllowedToolNames,
     steps,
+    personaModules: dynamicPromptPlan.personaModules,
+    dynamicPromptPlan,
     validation: buildValidationEnvelope({
       mode,
       taskShape,
@@ -1152,11 +1257,8 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
       fallbackUsed: true,
       decisionSource: 'rule',
       toolBuckets,
-      personaModules: heuristicDynamicPromptPlan.personaModules,
-      dynamicPromptPlan: normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
-        personaModuleCatalog,
-        dynamicPromptBlockCatalog
-      }),
+      personaModules: dynamicPromptPlan.personaModules,
+      dynamicPromptPlan,
       ...buildBackgroundResearchMeta(route, options)
     }
   };
@@ -1213,6 +1315,103 @@ function sanitizePlannerContextSummary(summary = '', maxLength = 360) {
   return `${text.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
 }
 
+function hasMeaningfulText(value) {
+  return normalizeText(value) && !/^(?:none|null|undefined|暂无|无)$/i.test(normalizeText(value));
+}
+
+function hasMeaningfulObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value).some((entry) => {
+    if (entry && typeof entry === 'object') return hasMeaningfulObject(entry);
+    return hasMeaningfulText(entry) || entry === true || (Number.isFinite(Number(entry)) && Number(entry) !== 0);
+  });
+}
+
+function buildAvailableContextSignals(route = {}, options = {}) {
+  const routeMeta = normalizeObject(route?.meta, {});
+  const memoryContext = normalizeObject(options.memoryContext, {});
+  const directedContext = normalizeObject(options.directedContext || routeMeta.directedContext, null);
+  const continuitySignals = normalizeObject(options.continuitySignals || routeMeta.continuitySignals, {});
+  const explicitSignals = normalizeObject(options.availableContextSignals, {});
+  const signal = (key, fallback) => (
+    Object.prototype.hasOwnProperty.call(explicitSignals, key)
+      ? explicitSignals[key] === true
+      : Boolean(fallback)
+  );
+  return {
+    directedContext: signal('directedContext', directedContext && (
+      hasMeaningfulText(directedContext.scene)
+      || hasMeaningfulObject(directedContext.addressee)
+      || hasMeaningfulObject(directedContext.quote)
+      || hasMeaningfulObject(directedContext.quotePriority)
+    )),
+    continuity: signal('continuity', hasMeaningfulObject(continuitySignals)),
+    retrievedMemory: signal('retrievedMemory', (
+      hasMeaningfulText(memoryContext.promptRetrievedMemoryText)
+      || hasMeaningfulText(memoryContext.memoryForPrompt)
+      || hasMeaningfulText(options.retrievedMemoryText)
+    )),
+    longTermProfile: signal('longTermProfile', (
+      hasMeaningfulText(memoryContext.promptLongTermProfileText)
+      || hasMeaningfulText(memoryContext.longTermProfileText)
+      || hasMeaningfulText(memoryContext.profileText)
+    )),
+    impression: signal('impression', (
+      hasMeaningfulText(memoryContext.promptImpressionText)
+      || hasMeaningfulText(memoryContext.impressionText)
+    )),
+    relationship: signal('relationship', (
+      hasMeaningfulObject(memoryContext.relationshipState)
+      || hasMeaningfulObject(memoryContext.affinityState)
+      || hasMeaningfulText(memoryContext?.profile?.relation_stage)
+      || hasMeaningfulText(options?.userInfo?.level)
+    )),
+    summary: signal('summary', (
+      hasMeaningfulText(options.contextSummary)
+      || hasMeaningfulText(routeMeta.sessionContextSummary)
+      || hasMeaningfulText(routeMeta.contextSummary)
+      || hasMeaningfulText(routeMeta.conversationSummary)
+      || hasMeaningfulText(memoryContext.promptSummaryText)
+      || hasMeaningfulText(memoryContext.summary)
+    )),
+    styleProfile: signal('styleProfile', (
+      hasMeaningfulText(options.styleProfileSnippet)
+      || hasMeaningfulText(routeMeta.styleProfile)
+      || hasMeaningfulObject(routeMeta.styleProfile)
+    )),
+    socialContext: signal('socialContext', (
+      hasMeaningfulText(options.socialContextSnippet)
+      || hasMeaningfulObject(routeMeta.socialContext)
+      || hasMeaningfulText(routeMeta.groupId || routeMeta.group_id)
+    )),
+    dynamicFewShot: signal('dynamicFewShot', hasMeaningfulText(options.dynamicFewShotPrompt)),
+    memoryCliInstruction: signal('memoryCliInstruction', (
+      hasMeaningfulObject(options.memoryCliTurn)
+      || normalizeArray(options.allowedTools || routeMeta.allowedTools).includes('memory_cli')
+    )),
+    schedulerInjection: signal('schedulerInjection', (
+      hasMeaningfulText(options.schedulerInjection)
+      || hasMeaningfulObject(routeMeta.schedulerInjection)
+      || hasMeaningfulObject(routeMeta.lifeSchedulerInjection)
+    ))
+  };
+}
+
+function normalizeDynamicPromptBlockCatalogForPlanner(blockCatalog = []) {
+  return normalizeArray(blockCatalog)
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => ({
+      ...item,
+      blockId: normalizeText(item.blockId),
+      lane: normalizeText(item.lane || item.cacheLane || 'dynamic_context'),
+      category: normalizeText(item.category || 'general'),
+      defaultPolicy: normalizeText(item.defaultPolicy || 'situational'),
+      useWhen: normalizeText(item.useWhen || item.purpose || ''),
+      avoidWhen: normalizeText(item.avoidWhen || '')
+    }))
+    .filter((item) => item.blockId);
+}
+
 function buildPlannerPrompt(toolCatalog = []) {
   const catalogBlock = summarizeToolCatalogForPrompt(toolCatalog);
   return [
@@ -1232,8 +1431,14 @@ function buildPlannerPrompt(toolCatalog = []) {
     'If an explicit URL is already known, prefer fetch/extract over search-first discovery.',
     'If you choose memory_cli for recall or notebook continuity, search first. Plan a follow-up memory_cli open only when the search result alone is likely insufficient.',
     'If the user asks for official docs, website details, key points, or asks to include links and both web_search and web_fetch are available, plan web_search first and web_fetch second.',
-    'You may output plannerMeta.personaModules as an array of module ids, but never more than 2.',
-    'You must also output plannerMeta.dynamicPromptPlan for the main reply dynamic block selection.',
+    'You may output personaModules as a top-level array and/or plannerMeta.personaModules; respect catalog/runtime limits and prefer a small useful set.',
+    'You must output dynamicPromptPlan as a top-level object and may mirror it under plannerMeta.dynamicPromptPlan for compatibility.',
+    `dynamicPromptPlan.schemaVersion must be exactly "${DYNAMIC_CONTEXT_PLAN_VERSION}".`,
+    'Coverage-first rule: include every block with real information gain for the current turn, but never include empty, unavailable, conflicting, or purely noisy blocks.',
+    'Prefer include for directed/quoted context, continuity, real memory/profile/summary, group social context, private emotional context, strong style scenes, and useful persona scene modules.',
+    'For ordinary self-contained questions, skip memory/profile blocks unless availableContextSignals shows real content and the block helps the answer.',
+    'Use enabledBlockIds only for non-persona dynamic blocks. Use personaModules only for persona modules.',
+    'For every important include or skip, add a blockDecisions item with decision, confidence, priority, and a short reason.',
     'steps items must include: id, tool, args, kind, dependsOn, parallelGroup, sideEffect, successCriteria, evidenceRequirement, repairPolicy, runtimeBinding, purpose.',
     'Available tools right now:',
     catalogBlock,
@@ -1242,14 +1447,24 @@ function buildPlannerPrompt(toolCatalog = []) {
     '  "mode": "tool_plan",',
     '  "taskShape": "tool_augmented_reply",',
     '  "allowedToolNames": ["tool_name"],',
+    '  "dynamicPromptPlan": {',
+    `    "schemaVersion": "${DYNAMIC_CONTEXT_PLAN_VERSION}",`,
+    '    "enabledBlockIds": ["directed_context"],',
+    '    "personaModules": ["scene_private_chat"],',
+    '    "blockDecisions": [{"blockId":"directed_context","decision":"include","confidence":0.92,"priority":10,"reason":"quoted reply needs disambiguation"},{"moduleId":"scene_private_chat","decision":"include","confidence":0.84,"priority":40,"reason":"private disclosure scene"}],',
+    '    "rationaleByBlock": {"directed_context":"quoted reply needs disambiguation","scene_private_chat":"private disclosure scene"}',
+    '  },',
+    '  "personaModules": ["scene_private_chat"],',
     '  "steps": [{"id":"planner_step_1","tool":"tool_name","args":{},"kind":"tool","dependsOn":[],"parallelGroup":"","sideEffect":false,"successCriteria":"...","evidenceRequirement":{"type":"tool_result","minCount":1,"requireCompleted":true},"repairPolicy":{"strategy":"retry_step","allowModelRepair":true},"runtimeBinding":null,"purpose":"..."}],',
     '  "plannerMeta": {',
     `    "decisionVersion": "${PLANNER_DECISION_VERSION}",`,
     `    "plannerVersion": "${DIRECT_CHAT_PLANNER_VERSION}",`,
     '    "reason": "short reason",',
     '    "dynamicPromptPlan": {',
+    `      "schemaVersion": "${DYNAMIC_CONTEXT_PLAN_VERSION}",`,
     '      "enabledBlockIds": ["directed_context"],',
     '      "personaModules": ["scene_private_chat"],',
+    '      "blockDecisions": [{"blockId":"directed_context","decision":"include","confidence":0.92,"priority":10,"reason":"quoted reply needs disambiguation"}],',
     '      "rationaleByBlock": {',
     '        "directed_context": "quoted reply needs disambiguation",',
     '        "scene_private_chat": "private disclosure scene" ',
@@ -1267,6 +1482,12 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
       ? options.allowedTools
       : routeMeta.allowedTools
   );
+  const personaModuleCatalog = normalizeArray(options?.personaModuleCatalog).length > 0
+    ? normalizeArray(options.personaModuleCatalog)
+    : getPersonaModuleCatalogSummary();
+  const dynamicPromptBlockCatalog = normalizeArray(options?.dynamicPromptBlockCatalog).length > 0
+    ? normalizeArray(options.dynamicPromptBlockCatalog)
+    : getMainReplyDynamicBlockCatalog(personaModuleCatalog);
   return {
     question: normalizeText(options.question || route?.question || route?.cleanText),
     cleanText: normalizeText(route?.cleanText),
@@ -1287,26 +1508,17 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
       || '',
       360
     ),
-    directedContext: normalizeObject(options?.directedContext, null),
-    continuitySignals: normalizeObject(options?.continuitySignals, {}),
+    directedContext: normalizeObject(options?.directedContext || routeMeta.directedContext, null),
+    continuitySignals: normalizeObject(options?.continuitySignals || routeMeta.continuitySignals, {}),
+    availableContextSignals: buildAvailableContextSignals(route, options),
     constraints: normalizeObject(options?.constraints, {}),
     explicitAllowlist: allowlist,
     tools: buildDirectChatToolCatalogSummary(toolCatalog),
-    personaModuleCatalog: normalizeArray(options?.personaModuleCatalog).length > 0
-      ? normalizeArray(options.personaModuleCatalog)
-      : getPersonaModuleCatalogSummary(),
-    dynamicPromptBlockCatalog: normalizeArray(options?.dynamicPromptBlockCatalog).length > 0
-      ? normalizeArray(options.dynamicPromptBlockCatalog)
-      : getMainReplyDynamicBlockCatalog(
-          normalizeArray(options?.personaModuleCatalog).length > 0
-            ? normalizeArray(options.personaModuleCatalog)
-            : getPersonaModuleCatalogSummary()
-        ),
+    personaModuleCatalog,
+    dynamicPromptBlockCatalog: normalizeDynamicPromptBlockCatalogForPlanner(dynamicPromptBlockCatalog),
     dynamicPromptGuide: normalizeText(options?.dynamicPromptGuide)
       || buildMainReplyDynamicPromptGuide(
-        normalizeArray(options?.personaModuleCatalog).length > 0
-          ? normalizeArray(options.personaModuleCatalog)
-          : getPersonaModuleCatalogSummary()
+        personaModuleCatalog
       )
   };
 }
@@ -1377,13 +1589,19 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     ...personaModuleCatalog.map((item) => Number(item?.maxActiveModules || 0) || 0),
     3
   );
+  const rawDynamicPromptPlan = rawDecision?.dynamicPromptPlan || rawDecision?.plannerMeta?.dynamicPromptPlan;
+  const hasRawDynamicPromptPlan = rawDynamicPromptPlan && typeof rawDynamicPromptPlan === 'object' && !Array.isArray(rawDynamicPromptPlan);
   const normalizedDynamicPromptPlan = normalizeDynamicPromptPlan(
-    rawDecision?.plannerMeta?.dynamicPromptPlan || rawDecision?.dynamicPromptPlan,
+    hasRawDynamicPromptPlan
+      ? rawDynamicPromptPlan
+      : (fallback?.dynamicPromptPlan || fallback?.plannerMeta?.dynamicPromptPlan || {}),
     {
       personaModuleCatalog,
       dynamicPromptBlockCatalog,
       legacyPersonaModules: rawDecision?.plannerMeta?.personaModules || rawDecision?.personaModules,
-      maxActivePersonaModules
+      maxActivePersonaModules,
+      source: hasRawDynamicPromptPlan ? 'planner' : 'rule',
+      plannerProvided: hasRawDynamicPromptPlan
     }
   );
   const cleanText = getPlannerRequestText(route);
@@ -1509,6 +1727,8 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     taskShape: normalizedSteps.length > 0 ? taskShape : 'fast_reply',
     allowedToolNames: normalizedSteps.length > 0 ? normalizedAllowedToolNames : [],
     steps: normalizedSteps,
+    personaModules: normalizedDynamicPromptPlan.personaModules,
+    dynamicPromptPlan: normalizedDynamicPromptPlan,
     validation: buildValidationEnvelope({
       mode,
       taskShape: normalizedSteps.length > 0 ? taskShape : 'fast_reply',
@@ -1649,6 +1869,12 @@ function convertPlannerDecisionToDirectChatDecision(decision = {}, route = {}, o
   const toolBuckets = Array.from(new Set(
     allowedToolNames.map((toolName) => resolveToolBucket(toolName, toolCatalogByName)).filter((bucket) => TOOL_BUCKETS.includes(bucket))
   ));
+  const dynamicPromptPlan = normalizeObject(decision?.dynamicPromptPlan || decision?.plannerMeta?.dynamicPromptPlan, {});
+  const personaModules = normalizeArray(
+    decision?.personaModules && normalizeArray(decision.personaModules).length > 0
+      ? decision.personaModules
+      : (dynamicPromptPlan.personaModules || decision?.plannerMeta?.personaModules)
+  ).map((item) => normalizeText(item)).filter(Boolean);
   return {
     decisionVersion: getPlannerDecisionVersion(),
     decisionSource: normalizeText(decision?.plannerMeta?.decisionSource) || 'planner',
@@ -1664,6 +1890,8 @@ function convertPlannerDecisionToDirectChatDecision(decision = {}, route = {}, o
     backgroundResearchRequested: decision?.plannerMeta?.backgroundResearchRequested === true,
     backgroundResearchQuery: normalizeText(decision?.plannerMeta?.backgroundResearchQuery),
     backgroundResearchReason: normalizeText(decision?.plannerMeta?.backgroundResearchReason),
+    personaModules,
+    dynamicPromptPlan,
     plannerDecisionV2: decision,
     plannerProtocolVersion: normalizeText(decision?.plannerMeta?.protocolVersion) || PLANNER_PROTOCOL_VERSION
   };
@@ -2021,6 +2249,7 @@ module.exports = {
   buildPlannerUserPayload,
   buildRuleBasedPlannerDecision,
   buildBackgroundResearchMeta,
+  buildAvailableContextSignals,
   callPlannerModelV2,
   callPlannerSubagentV2,
   collectAvailableToolSummary,
@@ -2043,6 +2272,7 @@ module.exports = {
   pickMinimalToolAllowlist,
   PLANNER_DECISION_VERSION,
   PLANNER_PROTOCOL_VERSION,
+  DYNAMIC_CONTEXT_PLAN_VERSION,
   prefersMemoryRecall,
   requiresToolEvidence,
   DIRECT_CHAT_PLANNER_VERSION,
