@@ -397,6 +397,7 @@ module.exports = {
   reconcileEmbeddingCache,
   enqueueMissingEmbeddings,
   backfillMissingEmbeddings,
+  collectEmbeddingBackfillNodes,
   getEmbeddingForCandidate,
   calcEmbeddingSimilarity
 };

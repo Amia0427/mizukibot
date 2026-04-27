@@ -33,6 +33,7 @@
     "win:mgmt:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows-management-plane.ps1"
   },
   "dependencies": {
+    "@lancedb/lancedb": "^0.27.2",
     "@langchain/anthropic": "^0.3.34",
     "@langchain/core": "^0.3.30",
     "@langchain/langgraph": "^0.2.40",

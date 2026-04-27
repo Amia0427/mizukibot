@@ -24,10 +24,12 @@ module.exports = (async () => {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.ADMIN_USER_IDS = 'admin_1,admin_2';
     process.env.CREATE_AGENT_ALLOW_USER_IDS = 'user_1,user_2,user_1';
+    process.env.CREATE_AGENT_PROTOCOL = 'chat_completions';
 
     clearProjectCache();
     let config = require('../config');
     assert.deepStrictEqual(config.CREATE_AGENT_ALLOW_USER_IDS, ['user_1', 'user_2', 'user_1']);
+    assert.strictEqual(config.CREATE_AGENT_PROTOCOL, 'chat_completions');
 
     clearProjectCache();
     const createAgentExecutor = require('../api/createAgentExecutor');
@@ -40,10 +42,12 @@ module.exports = (async () => {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.ADMIN_USER_IDS = 'admin_1';
     delete process.env.CREATE_AGENT_ALLOW_USER_IDS;
+    process.env.CREATE_AGENT_PROTOCOL = 'images';
 
     clearProjectCache();
     config = require('../config');
     assert.deepStrictEqual(config.CREATE_AGENT_ALLOW_USER_IDS, []);
+    assert.strictEqual(config.CREATE_AGENT_PROTOCOL, 'images');
 
     console.log('createAgentConfig.test.js passed');
   } finally {

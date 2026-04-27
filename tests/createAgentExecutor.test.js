@@ -31,6 +31,7 @@ module.exports = (async () => {
     process.env.CREATE_AGENT_API_BASE_URL = 'https://mynav.website/v1/chat/completions';
     process.env.CREATE_AGENT_API_KEY = 'create-test-key';
     process.env.CREATE_AGENT_MODEL = 'gpt-image-2';
+    process.env.CREATE_AGENT_PROTOCOL = 'images';
     process.env.CREATE_AGENT_IMAGE_SIZE = '1024x1024';
     process.env.CREATE_AGENT_IMAGE_QUALITY = 'high';
     process.env.CREATE_AGENT_IMAGE_BACKGROUND = 'auto';
@@ -43,11 +44,16 @@ module.exports = (async () => {
     process.env.ADMIN_USER_IDS = '1960901788';
 
     clearProjectCache();
+    const pngBase64 = 'iVBORw0KGgo=';
 
     const {
       buildCreateAgentAllowedUserIds,
+      buildCreateAgentChatCompletionsUrl,
+      buildCreateAgentChatCompletionsUrlCandidates,
       buildCreateAgentGenerationUrl,
       buildCreateAgentGenerationUrlCandidates,
+      extractImageFromChatCompletionsResponse,
+      buildImageGenerationRequestBodyVariants,
       detectImageExtension,
       downloadImageFromUrl,
       executeCreateCommand,
@@ -57,11 +63,14 @@ module.exports = (async () => {
       getQuotaStatus,
       loadRuntimeState,
       isCreateAgentUserAllowed,
+      isImageGenerationParameterCompatibilityError,
       isRuntimeStateStale,
       normalizeCreateAgentBaseUrl,
+      normalizeCreateAgentProtocol,
       normalizeIdList,
       normalizeRequestedImageSize,
       normalizeRequestError,
+      postImageGenerationWithCompatibilityFallback,
       requestImageGeneration,
       requestImageGenerationStream,
       writeJsonFileSafe,
@@ -71,8 +80,16 @@ module.exports = (async () => {
 
     assert.strictEqual(normalizeCreateAgentBaseUrl('https://mynav.website/v1/chat/completions'), 'https://mynav.website/v1');
     assert.strictEqual(normalizeCreateAgentBaseUrl('https://tokenflux.dev/v1/images/generations'), 'https://tokenflux.dev/v1');
+    assert.strictEqual(normalizeCreateAgentProtocol('chat'), 'chat_completions');
+    assert.strictEqual(normalizeCreateAgentProtocol('chat_completions'), 'chat_completions');
+    assert.strictEqual(normalizeCreateAgentProtocol('images'), 'images');
     assert.deepStrictEqual(normalizeIdList(['u1', 'u1', ' ', 'u2']), ['u1', 'u2']);
     assert.strictEqual(buildCreateAgentGenerationUrl('https://mynav.website/v1/chat/completions'), 'https://mynav.website/v1/images/generations');
+    assert.strictEqual(buildCreateAgentChatCompletionsUrl('https://mynav.website/v1'), 'https://mynav.website/v1/chat/completions');
+    assert.deepStrictEqual(
+      buildCreateAgentChatCompletionsUrlCandidates('https://mynav.website'),
+      ['https://mynav.website/v1/chat/completions']
+    );
     assert.strictEqual(normalizeRequestedImageSize('4096x4096'), '4096x4096');
     assert.strictEqual(normalizeRequestedImageSize('4096x2304'), '4096x2304');
     assert.strictEqual(normalizeRequestedImageSize('2304x4096'), '2304x4096');
@@ -83,6 +100,38 @@ module.exports = (async () => {
     assert.strictEqual(isCreateAgentUserAllowed('1960901788'), true);
     assert.strictEqual(isCreateAgentUserAllowed('u_extra', { allowUserIds: ['u_extra'] }), true);
     assert.strictEqual(isCreateAgentUserAllowed('u_other', { allowUserIds: ['u_extra'] }), false);
+    assert.strictEqual(
+      isImageGenerationParameterCompatibilityError({
+        response: {
+          status: 400,
+          data: {
+            error: {
+              message: "Unknown parameter: 'tools[0].style'.",
+              type: 'invalid_request_error',
+              param: 'tools[0].style',
+              code: 'unknown_parameter'
+            }
+          }
+        }
+      }),
+      true
+    );
+    assert.strictEqual(
+      isImageGenerationParameterCompatibilityError({
+        response: {
+          status: 400,
+          data: {
+            error: {
+              message: 'Compression less than 100 is not supported for PNG output format',
+              type: 'image_generation_user_error',
+              param: 'tools',
+              code: 'invalid_png_output_compression'
+            }
+          }
+        }
+      }),
+      true
+    );
     assert.deepStrictEqual(
       buildCreateAgentGenerationUrlCandidates('https://www.packyapi.com'),
       ['https://www.packyapi.com/images/generations', 'https://www.packyapi.com/v1/images/generations']
@@ -97,6 +146,24 @@ module.exports = (async () => {
       { kind: 'url', value: 'https://example.com/test.png' }
     );
     assert.deepStrictEqual(
+      extractImageFromChatCompletionsResponse({
+        choices: [{ message: { content: [{ type: 'output_image', image_url: { url: 'https://example.com/chat-image.png' } }] } }]
+      }),
+      { kind: 'url', value: 'https://example.com/chat-image.png' }
+    );
+    assert.deepStrictEqual(
+      extractImageFromChatCompletionsResponse({
+        choices: [{ message: { content: [{ type: 'output_text', text: `data:image/png;base64,${pngBase64}` }] } }]
+      }),
+      { kind: 'url', value: `data:image/png;base64,${pngBase64}` }
+    );
+    assert.deepStrictEqual(
+      extractImageFromChatCompletionsResponse({
+        choices: [{ message: { content: JSON.stringify({ b64_json: pngBase64 }) } }]
+      }),
+      { kind: 'b64_json', value: pngBase64 }
+    );
+    assert.deepStrictEqual(
       extractImageFromStreamEventPayload({ type: 'image_generation.completed', b64_json: 'Zm9v' }),
       { kind: 'b64_json', value: 'Zm9v', eventType: 'image_generation.completed' }
     );
@@ -105,8 +172,13 @@ module.exports = (async () => {
     const runtimeConfig = resolveConfig();
     assert.strictEqual(runtimeConfig.requestedImageSize, '1024x1024');
     assert.strictEqual(runtimeConfig.imageSize, '1024x1024');
+    assert.strictEqual(runtimeConfig.protocol, 'images');
     assert.deepStrictEqual(runtimeConfig.allowUserIds, []);
-    const pngBase64 = 'iVBORw0KGgo=';
+    const bodyVariants = buildImageGenerationRequestBodyVariants('draw a fox', runtimeConfig, {});
+    assert.ok(bodyVariants.length >= 3);
+    assert.strictEqual(bodyVariants[0].style, 'vivid');
+    assert.ok(bodyVariants.some((body) => !Object.prototype.hasOwnProperty.call(body, 'style')));
+    assert.ok(bodyVariants.some((body) => Object.keys(body).join(',') === 'model,prompt'));
     const sentImages = [];
 
     const okResult = await executeCreateCommand({
@@ -194,6 +266,47 @@ module.exports = (async () => {
       requestUrl: 'https://mynav.website/v1/images/generations'
     });
 
+    const compatibilityFallbackBodies = [];
+    const compatibilityFallbackResult = await postImageGenerationWithCompatibilityFallback(
+      'https://mynav.website/v1/images/generations',
+      'draw a fox with fallback',
+      runtimeConfig,
+      {
+        httpClient: {
+          async post(url, body) {
+            compatibilityFallbackBodies.push(body);
+            if (Object.prototype.hasOwnProperty.call(body, 'style')) {
+              const error = new Error('bad request');
+              error.response = {
+                status: 400,
+                data: {
+                  error: {
+                    message: "Unknown parameter: 'tools[0].style'.",
+                    type: 'invalid_request_error',
+                    param: 'tools[0].style',
+                    code: 'unknown_parameter'
+                  }
+                }
+              };
+              throw error;
+            }
+            return {
+              data: {
+                data: [{ b64_json: pngBase64 }]
+              }
+            };
+          }
+        }
+      },
+      {}
+    );
+    assert.strictEqual(compatibilityFallbackBodies.length >= 2, true);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(compatibilityFallbackBodies[0], 'style'), true);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(compatibilityFallbackBodies[1], 'style'), false);
+    assert.deepStrictEqual(compatibilityFallbackResult.response.data, {
+      data: [{ b64_json: pngBase64 }]
+    });
+
     const largeSizeConfig = resolveConfig({ imageSize: '4096x4096' });
     assert.strictEqual(largeSizeConfig.requestedImageSize, '4096x4096');
     assert.strictEqual(largeSizeConfig.imageSize, '4096x4096');
@@ -246,6 +359,153 @@ module.exports = (async () => {
       streamMode: false
     });
 
+    const chatProtocolConfig = resolveConfig({
+      protocol: 'chat_completions',
+      apiBaseUrl: 'https://superapi.buzz',
+      quotaFile: path.join(tempRoot, 'quota-chat.json'),
+      runtimeFile: path.join(tempRoot, 'runtime-chat.json'),
+      errorLogFile: path.join(tempRoot, 'errors-chat.log')
+    });
+    assert.strictEqual(chatProtocolConfig.protocol, 'chat_completions');
+
+    const chatRequestPayloads = [];
+    const chatRequestResponse = await requestImageGeneration('draw a fox in chat mode', chatProtocolConfig, {
+      httpClient: {
+        async post(url, body, options) {
+          chatRequestPayloads.push({ url, body, options });
+          return {
+            data: {
+              choices: [
+                {
+                  message: {
+                    content: [
+                      { type: 'output_image', image_url: { url: 'https://example.com/chat-request.png' } }
+                    ]
+                  }
+                }
+              ]
+            }
+          };
+        }
+      }
+    });
+    assert.strictEqual(chatRequestPayloads.length, 1);
+    assert.strictEqual(chatRequestPayloads[0].url, 'https://superapi.buzz/v1/chat/completions');
+    assert.strictEqual(chatRequestPayloads[0].body.model, 'gpt-image-2');
+    assert.strictEqual(chatRequestPayloads[0].body.stream, false);
+    assert.ok(String(chatRequestPayloads[0].body.messages[0].content).includes('draw a fox in chat mode'));
+    assert.deepStrictEqual(chatRequestResponse, {
+      payload: {
+        choices: [
+          {
+            message: {
+              content: [
+                { type: 'output_image', image_url: { url: 'https://example.com/chat-request.png' } }
+              ]
+            }
+          }
+        ]
+      },
+      requestUrl: 'https://superapi.buzz/v1/chat/completions'
+    });
+
+    const chatStreamPayloads = [];
+    const chatStreamResponse = await requestImageGenerationStream('stream chat fox', chatProtocolConfig, {
+      httpClient: {
+        async post(url, body, options) {
+          chatStreamPayloads.push({ url, body, options });
+          const stream = Readable.from([
+            `data: {"choices":[{"delta":{"content":[{"type":"output_text","text":"https://example.com/stream-chat.png"}]}}]}\n\n`,
+            'data: [DONE]\n\n'
+          ]);
+          return { data: stream };
+        }
+      }
+    });
+    assert.strictEqual(chatStreamPayloads.length, 1);
+    assert.strictEqual(chatStreamPayloads[0].url, 'https://superapi.buzz/v1/chat/completions');
+    assert.strictEqual(chatStreamPayloads[0].body.stream, true);
+    assert.deepStrictEqual(chatStreamResponse, {
+      imageResult: {
+        kind: 'url',
+        value: 'https://example.com/stream-chat.png',
+        eventType: ''
+      },
+      requestUrl: 'https://superapi.buzz/v1/chat/completions',
+      streamMode: true
+    });
+
+    const chatJsonStringResponse = await requestImageGeneration('chat string json mode', chatProtocolConfig, {
+      httpClient: {
+        async post() {
+          return {
+            data: {
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({ b64_json: pngBase64 })
+                  }
+                }
+              ]
+            }
+          };
+        }
+      }
+    });
+    assert.deepStrictEqual(chatJsonStringResponse, {
+      payload: {
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ b64_json: pngBase64 })
+            }
+          }
+        ]
+      },
+      requestUrl: 'https://superapi.buzz/v1/chat/completions'
+    });
+
+    const chatGeneratedFromUrl = await generateImageWithOpenAICompatibleApi('chat image sample', {
+      ...chatProtocolConfig,
+      responseFormat: 'url'
+    }, {
+      httpClient: {
+        async post(url, body, options) {
+          if (options?.responseType === 'stream') {
+            return {
+              data: Readable.from([
+                `data: {"choices":[{"delta":{"content":[{"type":"output_text","text":"https://example.com/chat-final.png"}]}}]}\n\n`,
+                'data: [DONE]\n\n'
+              ])
+            };
+          }
+          return {
+            data: {
+              choices: [
+                {
+                  message: {
+                    content: [
+                      { type: 'output_image', image_url: { url: 'https://example.com/chat-final.png' } }
+                    ]
+                  }
+                }
+              ]
+            }
+          };
+        },
+        async get(url, options) {
+          assert.strictEqual(url, 'https://example.com/chat-final.png');
+          assert.strictEqual(options.responseType, 'arraybuffer');
+          return {
+            data: Buffer.from(pngBase64, 'base64'),
+            headers: { 'content-type': 'image/png' }
+          };
+        }
+      }
+    });
+    assert.ok(fs.existsSync(chatGeneratedFromUrl.filePath));
+    assert.ok(Buffer.isBuffer(chatGeneratedFromUrl.buffer));
+
     const fallbackUrls = [];
     const fallbackRequestResponse = await requestImageGeneration('draw a fox again', {
       ...runtimeConfig,
@@ -286,6 +546,34 @@ module.exports = (async () => {
     });
     assert.ok(fs.existsSync(generatedFromB64.filePath));
     assert.ok(Buffer.isBuffer(generatedFromB64.buffer));
+
+    const generatedWithCompatibilityFallback = await generateImageWithOpenAICompatibleApi('compat fallback sample', runtimeConfig, {
+      httpClient: {
+        async post(url, body, options) {
+          if (options?.responseType === 'stream') {
+            throw new Error('stream unsupported');
+          }
+          if (Object.prototype.hasOwnProperty.call(body, 'style')) {
+            const error = new Error('bad request');
+            error.response = {
+              status: 400,
+              data: {
+                error: {
+                  message: "Unknown parameter: 'tools[0].style'.",
+                  type: 'invalid_request_error',
+                  param: 'tools[0].style',
+                  code: 'unknown_parameter'
+                }
+              }
+            };
+            throw error;
+          }
+          return { data: { data: [{ b64_json: pngBase64 }] } };
+        }
+      }
+    });
+    assert.ok(fs.existsSync(generatedWithCompatibilityFallback.filePath));
+    assert.ok(Buffer.isBuffer(generatedWithCompatibilityFallback.buffer));
 
     const generatedFromUrl = await generateImageWithOpenAICompatibleApi('url sample', {
       ...runtimeConfig,
