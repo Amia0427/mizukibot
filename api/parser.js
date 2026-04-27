@@ -53,6 +53,21 @@ function textFromResponsesOutput(output) {
     .join('');
 }
 
+function toolCallsFromResponsesOutput(output) {
+  if (!Array.isArray(output)) return [];
+  return output
+    .filter((item) => item && typeof item === 'object' && item.type === 'function_call')
+    .map((item) => ({
+      id: String(item.call_id || item.id || `call_${Date.now()}`),
+      type: 'function',
+      function: {
+        name: String(item.name || '').trim(),
+        arguments: String(item.arguments || '{}')
+      }
+    }))
+    .filter((item) => item.function.name);
+}
+
 function extractTextFromObject(value, depth = 0) {
   if (typeof value === 'string') return value;
   if (!value || typeof value !== 'object' || depth > 3) return '';
@@ -159,12 +174,16 @@ function normalizeUsageObject(raw) {
     ?? raw.cacheReadInputTokens
     ?? raw.prompt_tokens_details?.cached_tokens
     ?? raw.promptTokensDetails?.cachedTokens
+    ?? raw.input_tokens_details?.cached_tokens
+    ?? raw.inputTokensDetails?.cachedTokens
   );
   const cacheCreationInputTokens = Number(
     raw.cache_creation_input_tokens
     ?? raw.cacheCreationInputTokens
     ?? raw.prompt_tokens_details?.cache_write_tokens
     ?? raw.promptTokensDetails?.cacheWriteTokens
+    ?? raw.input_tokens_details?.cache_write_tokens
+    ?? raw.inputTokensDetails?.cacheWriteTokens
   );
   const cacheCreation = raw.cache_creation && typeof raw.cache_creation === 'object'
     ? JSON.parse(JSON.stringify(raw.cache_creation))
@@ -219,6 +238,7 @@ function extractUsageFromSSEObject(obj) {
     normalizeUsageObject(obj.usage)
     || normalizeUsageObject(obj?.message?.usage)
     || normalizeUsageObject(obj?.delta?.usage)
+    || normalizeUsageObject(obj?.response?.usage)
     || null
   );
 }
@@ -313,6 +333,15 @@ function extractDeltaText(obj) {
     if (obj?.content_block?.type === 'text' && typeof obj?.content_block?.text === 'string') {
       return obj.content_block.text;
     }
+  }
+
+  if (obj.type === 'response.output_text.delta' && typeof obj.delta === 'string') return obj.delta;
+  if (obj.type === 'response.output_text.done' && typeof obj.text === 'string') return obj.text;
+  if (obj.type === 'response.completed') {
+    return extractTextFromObject(obj.response).trim();
+  }
+  if (obj.type === 'response.incomplete') {
+    return extractTextFromObject(obj.response).trim();
   }
 
   if (typeof obj.delta === 'string') return obj.delta;
@@ -413,6 +442,16 @@ function extractMessageContent(resp) {
   if (choiceText) return { role: 'assistant', content: choiceText };
 
   // OpenAI Responses API / common proxy response formats.
+  if (data && Array.isArray(data.output)) {
+    const msg = {
+      role: 'assistant',
+      content: textFromResponsesOutput(data.output)
+    };
+    const toolCalls = toolCallsFromResponsesOutput(data.output);
+    if (toolCalls.length > 0) msg.tool_calls = toolCalls;
+    if (msg.content || toolCalls.length > 0) return msg;
+  }
+
   const fallbackText = extractTextFromObject(data).trim();
   if (fallbackText) return { role: 'assistant', content: fallbackText };
 

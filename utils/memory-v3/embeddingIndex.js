@@ -68,6 +68,17 @@ function buildEmbeddingIdentity(node = {}) {
   };
 }
 
+function isJournalEmbeddingDoc(value = {}) {
+  const source = normalizeText(value.source).toLowerCase();
+  const type = normalizeText(value.type || value.memoryKind).toLowerCase();
+  const nodeId = normalizeText(value.nodeId || value.id);
+  return source === 'journal'
+    || type === 'daily_journal'
+    || type === 'daily_journal_segment'
+    || nodeId.startsWith('journal-day:')
+    || nodeId.startsWith('journal-segment:');
+}
+
 function normalizeCacheRow(row = {}) {
   if (!row || typeof row !== 'object') return null;
   const key = normalizeText(row.key);
@@ -81,6 +92,7 @@ function normalizeCacheRow(row = {}) {
     nodeId,
     canonicalKey,
     model,
+    source: normalizeText(row.source),
     textHash: normalizeText(row.textHash),
     embedding: Array.isArray(row.embedding) ? row.embedding : [],
     updatedAt: Number(row.updatedAt || 0) || 0,
@@ -143,6 +155,7 @@ function makePendingRow(identity) {
     nodeId: identity.nodeId,
     canonicalKey: identity.canonicalKey,
     model: identity.model,
+    source: identity.source,
     textHash: identity.textHash,
     embedding: [],
     updatedAt: identity.updatedAt,
@@ -167,6 +180,18 @@ function reconcileEmbeddingCache(nodes = []) {
   const rows = [];
   let reused = 0;
   let created = 0;
+  const includesJournalDocs = activeNodes.some(isJournalEmbeddingDoc);
+  const includesMemoryDocs = activeNodes.some((node) => !isJournalEmbeddingDoc(node));
+  const shouldPreserveExisting = (row) => {
+    if (activeNodes.length === 0) return isJournalEmbeddingDoc(row);
+    if (includesJournalDocs && !includesMemoryDocs) return !isJournalEmbeddingDoc(row);
+    if (includesMemoryDocs && !includesJournalDocs) return isJournalEmbeddingDoc(row);
+    return false;
+  };
+
+  for (const row of index.rows) {
+    if (shouldPreserveExisting(row)) rows.push(row);
+  }
 
   for (const node of activeNodes) {
     const identity = buildEmbeddingIdentity(node);
@@ -180,6 +205,7 @@ function reconcileEmbeddingCache(nodes = []) {
         nodeId: identity.nodeId,
         canonicalKey: identity.canonicalKey,
         model: identity.model,
+        source: identity.source,
         textHash: identity.textHash,
         updatedAt: identity.updatedAt
       });
@@ -200,11 +226,26 @@ function reconcileEmbeddingCache(nodes = []) {
   };
 }
 
-function loadNodeMapByEmbeddingKey() {
+function collectEmbeddingBackfillNodes() {
   const { loadMemoryNodes } = require('./storage');
-  const map = new Map();
+  const nodes = [];
   for (const node of loadMemoryNodes()) {
     if (!node || normalizeText(node.status).toLowerCase() === 'archived') continue;
+    nodes.push(node);
+  }
+  if (config.MEMORY_JOURNAL_EMBEDDING_BACKFILL_ENABLED !== false) {
+    const { buildDailyJournalDocsForAllUsers } = require('./journalDocs');
+    for (const doc of buildDailyJournalDocsForAllUsers({ includeSegments: true })) {
+      if (!doc || normalizeText(doc.status).toLowerCase() === 'archived') continue;
+      nodes.push(doc);
+    }
+  }
+  return nodes;
+}
+
+function loadNodeMapByEmbeddingKey() {
+  const map = new Map();
+  for (const node of collectEmbeddingBackfillNodes()) {
     const identity = buildEmbeddingIdentity(node);
     map.set(identity.key, { node, identity });
   }
@@ -245,8 +286,10 @@ async function backfillMissingEmbeddings(options = {}) {
   }
 
   backfillState.running = true;
+  let continueOptions = null;
   try {
     const now = Date.now();
+    reconcileEmbeddingCache(collectEmbeddingBackfillNodes());
     const rows = loadEmbeddingRows();
     const nodeMap = loadNodeMapByEmbeddingKey();
     const batchSize = Math.max(1, Math.floor(Number(options.batchSize || config.MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE || 32) || 32));
@@ -256,6 +299,15 @@ async function backfillMissingEmbeddings(options = {}) {
     const pending = rows
       .map((row, index) => ({ row, index }))
       .filter(({ row }) => row.status !== 'ready' && (force || !row.nextRetryAt || row.nextRetryAt <= now))
+      .sort((a, b) => {
+        const journalA = isJournalEmbeddingDoc(a.row) ? 1 : 0;
+        const journalB = isJournalEmbeddingDoc(b.row) ? 1 : 0;
+        if (journalA !== journalB) return journalB - journalA;
+        if (Number(a.row.nextRetryAt || 0) !== Number(b.row.nextRetryAt || 0)) {
+          return Number(a.row.nextRetryAt || 0) - Number(b.row.nextRetryAt || 0);
+        }
+        return Number(b.row.updatedAt || 0) - Number(a.row.updatedAt || 0);
+      })
       .slice(0, limit);
 
     let embedded = 0;
@@ -296,15 +348,26 @@ async function backfillMissingEmbeddings(options = {}) {
     }
 
     writeJsonLines(config.MEMORY_V3_EMBEDDING_CACHE_FILE, rows);
+    const remaining = rows.filter((row) => row.status !== 'ready').length;
+    const journalRemaining = rows.filter((row) => isJournalEmbeddingDoc(row) && row.status !== 'ready').length;
+    if (journalRemaining > 0 && options.continue !== false && embedded > 0) {
+      continueOptions = {
+        ...options,
+        force: false,
+        delayMs: Math.max(1000, Number(options.continueDelayMs ?? 60000) || 60000)
+      };
+    }
     return {
       ok: true,
       considered: pending.length,
       embedded,
       failed,
-      remaining: rows.filter((row) => row.status !== 'ready').length
+      remaining,
+      journalRemaining
     };
   } finally {
     backfillState.running = false;
+    if (continueOptions) scheduleEmbeddingBackfill(continueOptions);
   }
 }
 

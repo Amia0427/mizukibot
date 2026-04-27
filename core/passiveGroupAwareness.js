@@ -36,6 +36,85 @@ function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeVisualUrl(value = '') {
+  return String(value || '').trim();
+}
+
+function collectPassiveVisualInputs(inboundContext = {}, fallbackImageUrl = null) {
+  if (config.PASSIVE_AWARENESS_VISION_INPUT_ENABLED === false) return [];
+  const maxImages = Math.max(1, Math.min(4, Number(config.PASSIVE_AWARENESS_VISION_MAX_IMAGES || 2) || 2));
+  const out = [];
+  const seen = new Set();
+  const add = (url, source = 'current') => {
+    const normalized = normalizeVisualUrl(url);
+    if (!normalized || seen.has(normalized) || out.length >= maxImages) return;
+    seen.add(normalized);
+    out.push({ url: normalized, source: normalizeText(source) || 'current' });
+  };
+
+  add(fallbackImageUrl || inboundContext?.imageUrl, 'selected');
+
+  const visualContext = inboundContext?.visualContext && typeof inboundContext.visualContext === 'object'
+    ? inboundContext.visualContext
+    : null;
+  if (Array.isArray(visualContext?.images)) {
+    for (const item of visualContext.images) {
+      add(item?.url, item?.source || 'visual_context');
+    }
+  }
+
+  const directedContext = inboundContext?.directedContext && typeof inboundContext.directedContext === 'object'
+    ? inboundContext.directedContext
+    : null;
+  add(directedContext?.replyImageUrl, 'reply');
+
+  const meta = inboundContext?.continuousMeta && typeof inboundContext.continuousMeta === 'object'
+    ? inboundContext.continuousMeta
+    : null;
+  for (const url of Array.isArray(meta?.currentImageUrls) ? meta.currentImageUrls : []) add(url, 'current');
+  for (const url of Array.isArray(meta?.imageUrls) ? meta.imageUrls : []) add(url, 'current');
+  for (const url of Array.isArray(meta?.replyContext?.imageUrls) ? meta.replyContext.imageUrls : []) add(url, 'reply');
+
+  return out;
+}
+
+function buildPassiveModelUserContent(prompt = '', visualInputs = []) {
+  const text = String(prompt || '').trim();
+  const images = Array.isArray(visualInputs) ? visualInputs : [];
+  if (!images.length) return text;
+
+  const content = [
+    { type: 'text', text }
+  ];
+  const detail = normalizeText(config.PASSIVE_AWARENESS_VISION_IMAGE_DETAIL || '').toLowerCase();
+  for (const image of images) {
+    const url = normalizeVisualUrl(image?.url);
+    if (!url) continue;
+    const imageUrl = { url };
+    if (['low', 'high', 'auto'].includes(detail)) imageUrl.detail = detail;
+    content.push({
+      type: 'image_url',
+      image_url: imageUrl
+    });
+  }
+  return content;
+}
+
+function buildPassiveVisualPromptSection(visualInputs = []) {
+  const images = Array.isArray(visualInputs) ? visualInputs : [];
+  if (!images.length) return '';
+  const lines = images.map((item, index) => {
+    const source = normalizeText(item?.source || 'current');
+    return `- image_${index + 1}: ${source}`;
+  });
+  return [
+    '[VisualInput]',
+    'Images are attached to this model call. Use them as direct visual evidence when deciding or replying.',
+    'Do not say you cannot see the image unless the model input explicitly lacks an image.',
+    ...lines
+  ].join('\n');
+}
+
 function trimReplyText(value, maxChars = 80) {
   const normalized = normalizeText(value);
   if (!normalized) return '';
@@ -883,6 +962,7 @@ function buildDecisionPrompt({
   text,
   rawText = '',
   imageUrl = null,
+  visualInputs = [],
   score,
   localAnalysis,
   addressee,
@@ -927,6 +1007,8 @@ function buildDecisionPrompt({
     '',
     perceptionPrompt || '',
     perceptionPrompt ? '' : null,
+    buildPassiveVisualPromptSection(visualInputs),
+    visualInputs.length ? '' : null,
     directedContext ? buildDirectedContextPromptSnippet(directedContext) : '',
     directedContext ? '' : null,
     '[RecentContext]',
@@ -948,6 +1030,7 @@ async function buildReplyPrompt({
   text,
   rawText = '',
   imageUrl = null,
+  visualInputs = [],
   score,
   decisionReason,
   localAnalysis,
@@ -1013,6 +1096,8 @@ async function buildReplyPrompt({
     '',
     perceptionPrompt || '',
     perceptionPrompt ? '' : null,
+    buildPassiveVisualPromptSection(visualInputs),
+    visualInputs.length ? '' : null,
     directedContext ? buildDirectedContextPromptSnippet(directedContext) : '',
     directedContext ? '' : null,
     '[RecentContext]',
@@ -1084,6 +1169,7 @@ async function buildReplyPromptV2({
   text,
   rawText = '',
   imageUrl = null,
+  visualInputs = [],
   score,
   decisionReason,
   localAnalysis,
@@ -1200,6 +1286,8 @@ async function buildReplyPromptV2({
     '',
     perceptionPrompt || '',
     perceptionPrompt ? '' : null,
+    buildPassiveVisualPromptSection(visualInputs),
+    visualInputs.length ? '' : null,
     directedContext ? buildDirectedContextPromptSnippet(directedContext) : '',
     directedContext ? '' : null,
     socialSnippet || '',
@@ -1291,6 +1379,7 @@ async function invokeDecisionModel({
   text,
   rawText = '',
   imageUrl = null,
+  visualInputs = [],
   score,
   localAnalysis,
   addressee,
@@ -1325,6 +1414,7 @@ async function invokeDecisionModel({
     text,
     rawText,
     imageUrl,
+    visualInputs,
     score,
     localAnalysis,
     addressee,
@@ -1341,7 +1431,7 @@ async function invokeDecisionModel({
       top_p: Number(config.PASSIVE_AWARENESS_TOP_P || 0.9),
       messages: [
         { role: 'system', content: 'You are a QQ passive reply decision model. Return JSON only with should_reply, confidence, reason.' },
-        { role: 'user', content: prompt }
+        { role: 'user', content: buildPassiveModelUserContent(prompt, visualInputs) }
       ],
       max_tokens: Math.max(120, Number(config.PASSIVE_AWARENESS_MAX_TOKENS || 300)),
       stream: false,
@@ -1381,6 +1471,7 @@ async function invokeReplyModel({
   text,
   rawText = '',
   imageUrl = null,
+  visualInputs = [],
   score,
   decisionReason,
   localAnalysis,
@@ -1412,6 +1503,7 @@ async function invokeReplyModel({
     text,
     rawText,
     imageUrl,
+    visualInputs,
     score,
     decisionReason,
     localAnalysis,
@@ -1437,7 +1529,7 @@ async function invokeReplyModel({
       top_p: Number(config.PASSIVE_AWARENESS_REPLY_TOP_P || 0.92),
       messages: [
         { role: 'system', content: 'You generate a final passive QQ group reply. Output only the reply text.' },
-        { role: 'user', content: prompt }
+        { role: 'user', content: buildPassiveModelUserContent(prompt, visualInputs) }
       ],
       max_tokens: Math.max(160, Number(config.PASSIVE_AWARENESS_REPLY_MAX_TOKENS || 320)),
       stream: true,
@@ -1499,6 +1591,7 @@ async function handlePassiveGroupAwareness({
   );
   const text = getEffectivePassiveText(inboundContext, rawText, directedContext);
   const imageUrl = String(inboundContext?.imageUrl || '').trim() || null;
+  const visualInputs = collectPassiveVisualInputs(inboundContext, imageUrl);
   const now = Number(msg?.__continuousMessageMeta?.firstTimestamp || Date.now());
   const botSenderId = String(config.BOT_QQ || 'bot').trim() || 'bot';
   const sessionKey = getSessionKeyForPresence(groupId, senderId);
@@ -1719,6 +1812,7 @@ async function handlePassiveGroupAwareness({
       text,
       rawText,
       imageUrl,
+      visualInputs,
       score,
       localAnalysis,
       addressee,
@@ -1775,6 +1869,7 @@ async function handlePassiveGroupAwareness({
           text,
           rawText,
           imageUrl,
+          visualInputs,
           score,
           decisionReason,
           localAnalysis,
@@ -2004,6 +2099,8 @@ async function forcePassiveGroupInterjection({
       || null
   );
   const text = getEffectivePassiveText(context, rawText, directedContext);
+  const imageUrl = String(context.imageUrl || '').trim() || null;
+  const visualInputs = collectPassiveVisualInputs(context, imageUrl);
   const now = Number(effectiveMsg?.__continuousMessageMeta?.firstTimestamp || Date.now());
   const sessionKey = getSessionKeyForPresence(groupId, senderId);
 
@@ -2072,7 +2169,8 @@ async function forcePassiveGroupInterjection({
       recentMessages,
       text,
       rawText,
-      imageUrl: String(context.imageUrl || '').trim() || null,
+      imageUrl,
+      visualInputs,
       score: Math.max(
         Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60),
         scoreMessageTrigger(text, recentMessages)

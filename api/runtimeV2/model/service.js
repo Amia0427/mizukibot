@@ -18,8 +18,7 @@ const {
 const { isReplyFailure } = require('../../../utils/replyFailure');
 const { runHumanizerAgent } = require('../../humanizerAgent');
 const {
-  ensureChatCompletionsUrl,
-  buildGenerationRequestBody,
+  buildMainModelRequest,
   getApiBaseUrl,
   getApiKey,
   getMaxTokens,
@@ -183,18 +182,22 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
 
   const requestOnce = async (resolvedConfig, includeTools = toolSchemas.length > 0, messages = messagesToSend) => {
     const callTrace = logResolvedModelCall(context, resolvedConfig, 'v2_assistant_message');
-    const body = buildGenerationRequestBody(resolvedConfig, {
+    const request = buildMainModelRequest(resolvedConfig, {
       messages,
       stream: false,
       defaultMaxTokens: 3500,
-      trace: callTrace
+      trace: callTrace,
+      routeMeta: context?.routeMeta,
+      topRouteType: context?.topRouteType,
+      tools: includeTools ? toolSchemas : []
     });
+    const body = request.body;
     if (includeTools) {
       body.tools = toolSchemas;
       body.tool_choice = 'auto';
     }
     return postWithRetry(
-      ensureChatCompletionsUrl(getApiBaseUrl(resolvedConfig)),
+      request.url,
       body,
       getRetries(1, resolvedConfig),
       getApiKey(resolvedConfig)
@@ -269,17 +272,19 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
 
   try {
     await withMainModelFallback(async (resolvedConfig) => {
-      const mainUrl = ensureChatCompletionsUrl(getApiBaseUrl(resolvedConfig));
       const requestStreamOnce = async (messages) => {
         const callTrace = logResolvedModelCall(options, resolvedConfig, 'v2_streaming_reply');
+        const request = buildMainModelRequest(resolvedConfig, {
+          messages,
+          stream: true,
+          defaultMaxTokens: 3500,
+          trace: callTrace,
+          routeMeta: options?.routeMeta,
+          topRouteType: options?.topRouteType
+        });
         await postStreamWithRetry(
-          mainUrl,
-          buildGenerationRequestBody(resolvedConfig, {
-            messages,
-            stream: true,
-            defaultMaxTokens: 3500,
-            trace: callTrace
-          }),
+          request.url,
+          request.body,
           {
             onData(chunk) {
               const parsed = extractSSEEvents(parserState, chunk);

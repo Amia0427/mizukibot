@@ -23,10 +23,22 @@ const {
   safeReadJson,
   tokenize
 } = require('./helpers');
+const { shouldUseRemoteEmbedding, requestEmbedding } = require('../vectorMemory');
+const { rerankMemoryCandidates } = require('../memoryReranker');
+const {
+  loadEmbeddingIndex,
+  calcEmbeddingSimilarity
+} = require('./embeddingIndex');
+const {
+  buildDailyJournalDocsForAllUsers,
+  getDailyJournalFileStats,
+  journalDateMatchBoost,
+  resolveJournalTargetDays
+} = require('./journalDocs');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 const NOTEBOOK_TRIGGER_RE = /(?:\bnotebook\b|笔记|文档|markdown|\bmd\b)/i;
-const JOURNAL_TRIGGER_RE = /(?:日记|\bjournal\b|前几天|那天|最近发生)/i;
+const JOURNAL_TRIGGER_RE = /(?:日记|\bjournal\b|前几天|那天|最近发生|昨天|昨日|前天|今天|回忆|记得|聊了什么)/i;
 const SOURCE_SET = new Set(['recent', 'profile', 'personal', 'task', 'group', 'style', 'jargon', 'journal', 'notebook']);
 const FACET_SET = new Set(RECALL_FACETS);
 const SLOW_QUERY_LOG_MS = 120;
@@ -484,6 +496,10 @@ function buildEpisodeDocs(snapshot = {}) {
   return docs;
 }
 
+function buildDailyJournalDocs() {
+  return buildDailyJournalDocsForAllUsers().map((item) => makeDocBase(item)).filter(Boolean);
+}
+
 function buildNotebookDocs(snapshot = {}) {
   const docs = [];
   for (const [userId, index] of snapshot?.notebookIndexes || new Map()) {
@@ -557,7 +573,8 @@ function buildSnapshot() {
     scopeProjection: safeStat(config.MEMORY_V3_SCOPE_PROJECTION_FILE),
     episodeProjection: safeStat(config.MEMORY_V3_EPISODE_PROJECTION_FILE),
     memoryNodes: safeStat(config.MEMORY_V3_NODES_FILE),
-    embeddingCache: safeStat(config.MEMORY_V3_EMBEDDING_CACHE_FILE)
+    embeddingCache: safeStat(config.MEMORY_V3_EMBEDDING_CACHE_FILE),
+    dailyJournalFiles: getDailyJournalFileStats()
   };
   const sessionProjection = loadSessionProjection();
   const profileProjection = loadProfileProjection();
@@ -580,11 +597,13 @@ function buildSnapshot() {
     notebookIndexes: notebookData.indexes
   };
 
+  const dailyJournalDocs = buildDailyJournalDocs();
   const docs = []
     .concat(buildSessionDocs(rawSnapshot))
     .concat(buildProfileDocs(rawSnapshot))
     .concat(buildNodeDocs(rawSnapshot))
     .concat(buildEpisodeDocs(rawSnapshot))
+    .concat(dailyJournalDocs)
     .concat(buildNotebookDocs(rawSnapshot));
 
   const docsById = new Map();
@@ -641,6 +660,7 @@ function shouldReloadSnapshot(current = null) {
     episodeProjection: safeStat(config.MEMORY_V3_EPISODE_PROJECTION_FILE),
     memoryNodes: safeStat(config.MEMORY_V3_NODES_FILE),
     embeddingCache: safeStat(config.MEMORY_V3_EMBEDDING_CACHE_FILE),
+    dailyJournalFiles: getDailyJournalFileStats(),
     notebookIndexes: readNotebookIndexStats(notebookUsers)
   };
   return snapshotSignature(meta) !== String(current.signature || '');
@@ -853,11 +873,19 @@ function scopeBoost(doc = {}, context = {}, queryFacet = 'default_continuity') {
   return boost;
 }
 
-function scoreDoc(query = '', queryTokens = [], doc = {}, context = {}, queryFacet = 'default_continuity') {
+function scoreDoc(query = '', queryTokens = [], doc = {}, context = {}, queryFacet = 'default_continuity', scoring = {}) {
   const lexical = overlapRatio(queryTokens, normalizeArray(doc.tokens));
   const direct = directMatchBoost(query, doc);
+  const dateBoost = journalDateMatchBoost(doc, resolveJournalTargetDays(query));
+  const embedding = scoring.queryEmbedding
+    ? calcEmbeddingSimilarity(scoring.queryEmbedding, doc, scoring.embeddingIndex)
+    : 0;
+  const semanticWeight = Math.max(0, Number(config.MEMORY_SEMANTIC_RECALL_WEIGHT || 0.3) || 0.3);
+  const lexicalWeight = 0.72;
   const score = (lexical * 0.72)
+    + (embedding * semanticWeight)
     + direct
+    + dateBoost
     + recencyBoost(doc.updatedAt)
     + confidenceBoost(doc)
     + tierBoost(doc)
@@ -866,7 +894,22 @@ function scoreDoc(query = '', queryTokens = [], doc = {}, context = {}, queryFac
     doc,
     score,
     lexical,
-    direct
+    direct,
+    dateBoost,
+    embedding,
+    matchMode: embedding > 0 && lexical > 0.04
+      ? 'hybrid'
+      : embedding > 0
+        ? 'semantic'
+        : 'lexical',
+    scoreParts: {
+      lexical,
+      lexicalWeight,
+      embedding,
+      semanticWeight,
+      direct,
+      dateBoost
+    }
   };
 }
 
@@ -917,7 +960,7 @@ function trimPackedResults(rows = [], limit = 8) {
       updatedAt: doc.updatedAt || 0,
       confidence: doc.confidence || 0,
       tier: doc.tier || '',
-      matchMode: 'lexical',
+      matchMode: row.matchMode || 'lexical',
       status: doc.status || 'active',
       sourceKind: doc.sourceKind || '',
       evidenceTier: doc.evidenceTier || '',
@@ -979,7 +1022,7 @@ function sortRows(rows = []) {
   });
 }
 
-function gatherRowsForSources(snapshot, sources = [], query = '', limit = 8, context = {}, queryFacet = 'default_continuity') {
+function gatherRowsForSources(snapshot, sources = [], query = '', limit = 8, context = {}, queryFacet = 'default_continuity', scoring = {}) {
   const queryTokens = tokenize(`${normalizeText(query)} ${canonicalizeText(query)}`);
   const rows = [];
   const candidateCounts = {};
@@ -989,13 +1032,64 @@ function gatherRowsForSources(snapshot, sources = [], query = '', limit = 8, con
     for (const id of ids) {
       const doc = snapshot.docsById.get(id);
       if (!doc || !doc.text) continue;
-      rows.push(scoreDoc(query, queryTokens, doc, context, queryFacet));
+      rows.push(scoreDoc(query, queryTokens, doc, context, queryFacet, scoring));
     }
   }
   return {
     rows: sortRows(rows),
     candidateCounts
   };
+}
+
+function applyJournalTargetDayPriorityToRows(rows = [], query = '') {
+  const targetDays = resolveJournalTargetDays(query);
+  if (!targetDays.length) return rows;
+  const hardBoost = Math.max(4, Number(config.MEMORY_JOURNAL_TARGET_DATE_HARD_BOOST || 8) || 8);
+  return normalizeArray(rows).map((row) => {
+    const doc = row.doc || {};
+    if (doc.source !== 'journal' || !targetDays.includes(String(doc.episodeDay || doc.title || '').trim())) return row;
+    return {
+      ...row,
+      score: Number(row.score || 0) + hardBoost,
+      journalTargetDayPriority: true,
+      scoreParts: {
+        ...(row.scoreParts || {}),
+        targetDatePriorityBoost: hardBoost
+      }
+    };
+  });
+}
+
+async function rerankRows(query = '', rows = [], context = {}) {
+  const list = normalizeArray(rows);
+  if (list.length < 2 || config.MEMORY_CLI_RERANK_ENABLED === false) return list;
+  const candidates = list.map((row) => ({
+    ...row.doc,
+    score: row.score,
+    finalScore: row.score,
+    matchMode: row.matchMode,
+    lexical: row.lexical,
+    embedding: row.embedding,
+    dateBoost: row.dateBoost
+  }));
+  const reranked = await rerankMemoryCandidates(query, candidates, {
+    userId: context.userId,
+    phase: 'memory_cli_fast',
+    maxCandidates: config.MEMORY_RERANK_MAX_CANDIDATES
+  });
+  return normalizeArray(reranked).map((item) => ({
+    doc: item,
+    score: Number(item.score || item.finalScore || 0) || 0,
+    lexical: Number(item.lexical || 0) || 0,
+    direct: directMatchBoost(query, item),
+    dateBoost: Number(item.dateBoost || item.scoreParts?.dateBoost || 0) || 0,
+    embedding: Number(item.embedding || 0) || 0,
+    rerankScore: Number(item.rerankScore || 0) || 0,
+    matchMode: Number(item.rerankScore || 0) > 0
+      ? (item.matchMode === 'semantic' ? 'semantic_rerank' : item.matchMode === 'hybrid' ? 'hybrid_rerank' : 'rerank')
+      : (item.matchMode || 'lexical'),
+    scoreParts: item.scoreParts || {}
+  }));
 }
 
 function mergeCandidateCounts(base = {}, extra = {}) {
@@ -1051,18 +1145,22 @@ async function searchMemoryCliFast(query = '', options = {}, context = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || config.MEMORY_CLI_MAX_RESULTS || 8) || 8));
   const requestedSource = normalizeText(options.source || 'all').toLowerCase() || 'all';
   const plan = chooseSourcePlan(queryText, requestedSource);
+  const scoring = {
+    embeddingIndex: loadEmbeddingIndex(),
+    queryEmbedding: shouldUseRemoteEmbedding() ? await requestEmbedding(queryText) : null
+  };
   const selectStartedAt = nowMs();
   const selectedPrimarySources = normalizeArray(plan.primary).filter((item) => SOURCE_SET.has(item));
   const selectedSecondarySources = normalizeArray(plan.secondary).filter((item) => SOURCE_SET.has(item) && !selectedPrimarySources.includes(item));
   const selectMs = nowMs() - selectStartedAt;
 
   const gatherStartedAt = nowMs();
-  const primary = gatherRowsForSources(snapshot, selectedPrimarySources, queryText, limit, context, plan.queryFacet);
+  const primary = gatherRowsForSources(snapshot, selectedPrimarySources, queryText, limit, context, plan.queryFacet, scoring);
   let candidateCounts = primary.candidateCounts;
   let ranked = primary.rows;
   let fallbackUsed = false;
   if (requestedSource === 'all' && shouldExpandSelection(ranked, limit) && selectedSecondarySources.length > 0) {
-    const secondary = gatherRowsForSources(snapshot, selectedSecondarySources, queryText, limit, context, plan.queryFacet);
+    const secondary = gatherRowsForSources(snapshot, selectedSecondarySources, queryText, limit, context, plan.queryFacet, scoring);
     ranked = sortRows(ranked.concat(secondary.rows));
     candidateCounts = mergeCandidateCounts(candidateCounts, secondary.candidateCounts);
     fallbackUsed = true;
@@ -1070,6 +1168,7 @@ async function searchMemoryCliFast(query = '', options = {}, context = {}) {
   const gatherMs = nowMs() - gatherStartedAt;
 
   const scoreStartedAt = nowMs();
+  ranked = sortRows(applyJournalTargetDayPriorityToRows(await rerankRows(queryText, ranked, context), queryText));
   const selectedRows = selectDiverseRows(ranked, limit, plan.queryFacet);
   const scoreMs = nowMs() - scoreStartedAt;
 

@@ -427,20 +427,22 @@ async function queryLocalKnowledge(input = {}) {
     });
   }
 
-  const memoryResult = await queryMemory({
-    userId,
-    query,
-    topK,
-    groupId,
-    groupIds: normalizeArray(input.groupIds).length ? input.groupIds : getAccessibleGroupIdsForUser(userId),
-    sessionKey,
-    sessionId: input.sessionId,
-    routePolicyKey: input.routePolicyKey,
-    topRouteType: input.topRouteType,
-    taskType: input.taskType,
-    agentName: input.agentName,
-    toolName: input.toolName
-  });
+  const memoryResult = input.skipMemoryV3
+    ? { ok: true, results: [], skipped: true }
+    : await queryMemory({
+      userId,
+      query,
+      topK,
+      groupId,
+      groupIds: normalizeArray(input.groupIds).length ? input.groupIds : getAccessibleGroupIdsForUser(userId),
+      sessionKey,
+      sessionId: input.sessionId,
+      routePolicyKey: input.routePolicyKey,
+      topRouteType: input.topRouteType,
+      taskType: input.taskType,
+      agentName: input.agentName,
+      toolName: input.toolName
+    });
   for (const item of normalizeArray(memoryResult.results)) {
     const source = normalizeSourceForMemoryResult(item);
     results.push({

@@ -116,6 +116,9 @@ const { getPolicyDefinition } = require('../../core/routeProfiles');
 const { buildExecutablePlanFromLegacyPlan } = require('../../core/executablePlan');
 const { deriveSuccessCriteria, verifyExecutionResult, buildRepairPlan } = require('../../utils/agentLoop');
 const agentRuntime = require('../../utils/agentRuntime');
+const {
+  buildMainModelRequest
+} = require('../runtimeV2/model/shared');
 
 function getConfig() {
   try {
@@ -1544,18 +1547,17 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
 
   try {
     await withMainModelFallback(async (resolvedConfig) => {
-      const mainUrl = ensureChatCompletionsUrl(getApiBaseUrl(resolvedConfig));
       const requestStreamOnce = async (messages) => {
+        const request = buildMainModelRequest(resolvedConfig, {
+          messages,
+          stream: true,
+          defaultMaxTokens: 3500,
+          routeMeta: options?.routeMeta,
+          topRouteType: options?.topRouteType
+        });
         await postStreamWithRetry(
-          mainUrl,
-          {
-            model: getModelName(resolvedConfig),
-            temperature: getTemperature(resolvedConfig),
-            top_p: getTopP(resolvedConfig),
-            messages,
-            max_tokens: getMaxTokens(3500, resolvedConfig),
-            stream: true
-          },
+          request.url,
+          request.body,
           {
             onData(chunk) {
               const parsed = extractSSEEvents(parserState, chunk);
@@ -1613,22 +1615,22 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
   const userId = String(context.userId || context.routeMeta?.userId || context.routeMeta?.user_id || '').trim();
   const toolSchemas = getFilteredToolSchemas(context);
   const firstResp = await withMainModelFallback(async (resolvedConfig) => {
-    const mainUrl = ensureChatCompletionsUrl(getApiBaseUrl(resolvedConfig));
     const requestOnce = async (messages, includeTools = toolSchemas.length > 0) => {
-      const requestBody = {
-        model: getModelName(resolvedConfig),
-        temperature: getTemperature(resolvedConfig),
-        top_p: getTopP(resolvedConfig),
+      const request = buildMainModelRequest(resolvedConfig, {
         messages,
-        max_tokens: getMaxTokens(3500, resolvedConfig),
-        stream: false
-      };
+        stream: false,
+        defaultMaxTokens: 3500,
+        routeMeta: context?.routeMeta,
+        topRouteType: context?.topRouteType,
+        tools: includeTools ? toolSchemas : []
+      });
+      const requestBody = request.body;
       if (includeTools) {
         requestBody.tools = toolSchemas;
         requestBody.tool_choice = 'auto';
       }
       return postWithRetry(
-        mainUrl,
+        request.url,
         requestBody,
         getRetries(1, resolvedConfig),
         getApiKey(resolvedConfig)
@@ -1692,20 +1694,21 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
     }
 
     const secondResp = await withMainModelFallback(async (resolvedConfig) => {
-      const mainUrl = ensureChatCompletionsUrl(getApiBaseUrl(resolvedConfig));
-      const requestOnce = (messages) => postWithRetry(
-        mainUrl,
-        {
-          model: getModelName(resolvedConfig),
-          temperature: getTemperature(resolvedConfig),
-          top_p: getTopP(resolvedConfig),
+      const requestOnce = (messages) => {
+        const request = buildMainModelRequest(resolvedConfig, {
           messages,
-          max_tokens: getMaxTokens(3500, resolvedConfig),
-          stream: false
-        },
-        getRetries(1, resolvedConfig),
-        getApiKey(resolvedConfig)
-      );
+          stream: false,
+          defaultMaxTokens: 3500,
+          routeMeta: context?.routeMeta,
+          topRouteType: context?.topRouteType
+        });
+        return postWithRetry(
+          request.url,
+          request.body,
+          getRetries(1, resolvedConfig),
+          getApiKey(resolvedConfig)
+        );
+      };
       try {
         return await requestOnce(messagesToSend);
       } catch (error) {
