@@ -1,0 +1,139 @@
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const assert = require('assert');
+
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-memory-v3-lancedb-'));
+process.env.DATA_DIR = tempRoot;
+process.env.MEMORY_V3_DIR = path.join(tempRoot, 'memory-v3');
+process.env.MEMORY_V3_EVENTS_DIR = path.join(process.env.MEMORY_V3_DIR, 'events');
+process.env.MEMORY_V3_PROJECTIONS_DIR = path.join(process.env.MEMORY_V3_DIR, 'projections');
+process.env.MEMORY_V3_NODES_FILE = path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'memory_nodes.jsonl');
+process.env.MEMORY_V3_EMBEDDING_CACHE_FILE = path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'embedding_cache.jsonl');
+process.env.MEMORY_EMBEDDING_INDEX_ENABLED = 'true';
+process.env.MEMORY_EMBEDDING_MODEL = 'test-embedding-model';
+process.env.MEMORY_EMBEDDING_API_BASE_URL = 'https://embedding.example/v1';
+process.env.MEMORY_EMBEDDING_API_KEY = 'test-key';
+process.env.MEMORY_RERANK_ENABLED = 'false';
+process.env.MEMORY_VECTOR_STORE = 'lancedb';
+process.env.MEMORY_LANCEDB_READ_ENABLED = 'true';
+process.env.MEMORY_LANCEDB_TIMEOUT_MS = '500';
+process.env.MEMORY_SEMANTIC_RECALL_WEIGHT = '0.4';
+process.env.MEMORY_LEXICAL_RECALL_WEIGHT = '0.2';
+
+fs.mkdirSync(process.env.MEMORY_V3_PROJECTIONS_DIR, { recursive: true });
+
+const httpClient = require('../api/httpClient');
+httpClient.postWithRetry = async () => ({
+  data: {
+    data: [{ embedding: [1, 0, 0] }]
+  }
+});
+
+const { writeJsonLines } = require('../utils/memory-v3/helpers');
+const lancedbStore = require('../utils/lancedbMemoryStore');
+lancedbStore.searchMemoryVectors = async () => ({
+  ok: true,
+  rows: [{
+    id: 'memory:node_vector',
+    nodeId: 'node_vector',
+    userId: 'u_lancedb',
+    source: 'personal',
+    scopeType: 'personal',
+    groupId: '',
+    sessionKey: '',
+    fieldKey: 'fact',
+    type: 'fact',
+    status: 'active',
+    evidenceTier: 'strict',
+    updatedAt: Date.now(),
+    canonicalKey: 'violet drawer',
+    textHash: 'hash_vector',
+    model: 'test-embedding-model',
+    _distance: 0.01
+  }, {
+    id: 'memory:node_other_user',
+    nodeId: 'node_other_user',
+    userId: 'u_other',
+    source: 'personal',
+    scopeType: 'personal',
+    groupId: '',
+    sessionKey: '',
+    fieldKey: 'fact',
+    type: 'fact',
+    status: 'active',
+    evidenceTier: 'strict',
+    updatedAt: Date.now(),
+    canonicalKey: 'blocked',
+    textHash: 'hash_blocked',
+    model: 'test-embedding-model',
+    _distance: 0.001
+  }],
+  filter: lancedbStore.buildMemoryFilter({ userId: 'u_lancedb' })
+});
+
+const { queryMemory } = require('../utils/memory-v3/query');
+
+const vectorTarget = {
+  id: 'node_vector',
+  userId: 'u_lancedb',
+  scopeType: 'personal',
+  source: 'extractor',
+  sourceKind: 'extractor',
+  status: 'active',
+  type: 'fact',
+  memoryKind: 'fact',
+  fieldKey: 'fact',
+  semanticSlot: 'fact',
+  canonicalKey: 'violet drawer',
+  text: 'keeps the spare cable inside the violet drawer',
+  confidence: 0.9,
+  importance: 0.8,
+  evidenceCount: 1,
+  evidenceTier: 'strict',
+  stabilityScore: 0.8,
+  updatedAt: Date.now()
+};
+const lexical = {
+  ...vectorTarget,
+  id: 'node_lexical',
+  canonicalKey: 'rain gear',
+  text: 'rain gear is near the front door',
+  stabilityScore: 0.7
+};
+const blocked = {
+  ...vectorTarget,
+  id: 'node_other_user',
+  userId: 'u_other',
+  canonicalKey: 'blocked',
+  text: 'blocked other user memory'
+};
+writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [vectorTarget, lexical, blocked]);
+
+module.exports = queryMemory({
+  userId: 'u_lancedb',
+  query: 'where is that cable',
+  facet: 'default',
+  topK: 4
+}).then((result) => {
+  assert.ok(result.results.some((item) => item.id === 'node_vector'), 'lancedb vector target should be included');
+  assert.ok(!result.results.some((item) => item.id === 'node_other_user'), 'other user vector row must be filtered');
+  assert.strictEqual(result.stats.lancedb.fused, true);
+
+  process.env.MEMORY_VECTOR_STORE = 'shadow';
+  const config = require('../config');
+  config.MEMORY_VECTOR_STORE = 'shadow';
+  return queryMemory({
+    userId: 'u_lancedb',
+    query: 'rain gear',
+    facet: 'default',
+    topK: 1
+  });
+}).then((shadowResult) => {
+  assert.strictEqual(shadowResult.results[0].id, 'node_lexical', 'shadow mode should keep local ranking');
+  assert.strictEqual(shadowResult.stats.lancedb.fused, false);
+  console.log('memoryV3LanceDbRecall.test.js passed');
+}).catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

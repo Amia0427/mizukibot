@@ -216,6 +216,28 @@ function buildCreateAgentGenerationUrl(baseUrl = '') {
   return `${normalizedBaseUrl}/images/generations`;
 }
 
+function normalizeCreateAgentProtocol(value = '') {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  if (
+    normalized === 'chat'
+    || normalized === 'chat_completion'
+    || normalized === 'chat_completions'
+    || normalized === 'completions'
+  ) {
+    return 'chat_completions';
+  }
+  return 'images';
+}
+
+function buildCreateAgentChatCompletionsUrl(baseUrl = '') {
+  const normalizedBaseUrl = normalizeCreateAgentBaseUrl(baseUrl);
+  if (!normalizedBaseUrl) return '';
+  const baseWithoutSlash = normalizedBaseUrl.replace(/\/+$/g, '');
+  if (/\/chat\/completions$/i.test(baseWithoutSlash)) return baseWithoutSlash;
+  if (/\/v\d+$/i.test(baseWithoutSlash)) return `${baseWithoutSlash}/chat/completions`;
+  return `${baseWithoutSlash}/v1/chat/completions`;
+}
+
 function buildCreateAgentGenerationUrlCandidates(baseUrl = '') {
   const normalizedBaseUrl = normalizeCreateAgentBaseUrl(baseUrl);
   if (!normalizedBaseUrl) return [];
@@ -227,6 +249,22 @@ function buildCreateAgentGenerationUrlCandidates(baseUrl = '') {
   return Array.from(new Set(candidates.filter(Boolean)));
 }
 
+function buildCreateAgentChatCompletionsUrlCandidates(baseUrl = '') {
+  const normalizedBaseUrl = normalizeCreateAgentBaseUrl(baseUrl);
+  if (!normalizedBaseUrl) return [];
+  const baseWithoutSlash = normalizedBaseUrl.replace(/\/+$/g, '');
+
+  if (/\/chat\/completions$/i.test(baseWithoutSlash)) {
+    return [baseWithoutSlash];
+  }
+
+  if (/\/v\d+$/i.test(baseWithoutSlash)) {
+    return [`${baseWithoutSlash}/chat/completions`];
+  }
+
+  return [`${baseWithoutSlash}/v1/chat/completions`];
+}
+
 function resolveConfig(overrides = {}) {
   const requestedImageSize = String((overrides.imageSize ?? config.CREATE_AGENT_IMAGE_SIZE) || '1024x1024').trim() || '1024x1024';
   return {
@@ -234,6 +272,7 @@ function resolveConfig(overrides = {}) {
     apiBaseUrl: normalizeCreateAgentBaseUrl(overrides.apiBaseUrl ?? config.CREATE_AGENT_API_BASE_URL),
     apiKey: String((overrides.apiKey ?? config.CREATE_AGENT_API_KEY) || '').trim(),
     model: String((overrides.model ?? config.CREATE_AGENT_MODEL) || '').trim(),
+    protocol: normalizeCreateAgentProtocol(overrides.protocol ?? config.CREATE_AGENT_PROTOCOL),
     allowUserIds: normalizeIdList(overrides.allowUserIds ?? config.CREATE_AGENT_ALLOW_USER_IDS ?? []),
     dailyLimit: Math.max(0, Number(overrides.dailyLimit ?? config.CREATE_AGENT_DAILY_LIMIT ?? 20) || 0),
     timeoutMs: Math.max(1000, Number(overrides.timeoutMs ?? config.CREATE_AGENT_TIMEOUT_MS ?? 120000) || 120000),
@@ -437,6 +476,17 @@ function parseJsonTextSafe(text = '') {
   }
 }
 
+function extractUrlFromText(value = '') {
+  const match = String(value || '').match(/(?:data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+|https?:\/\/[^\s"'`<>]+)/i);
+  return String(match ? match[0] : '').trim();
+}
+
+function looksLikeHtmlDocument(value = '') {
+  const text = String(value || '').trim().toLowerCase();
+  if (!text) return false;
+  return text.startsWith('<!doctype html') || text.startsWith('<html') || text.includes('<head>') && text.includes('<body>');
+}
+
 function getCreateAgentStreamTimeoutMs(runtimeConfig = {}) {
   const configuredTimeoutMs = Math.max(1000, Number(runtimeConfig.timeoutMs || 0) || 0);
   const requestStreamTimeoutMs = Math.max(1000, Number(config.REQUEST_STREAM_TIMEOUT_MS || 0) || 0);
@@ -483,6 +533,9 @@ function normalizeRequestError(error = null) {
 }
 
 function logCreateAgentError(runtimeConfig = {}, context = {}, error = null) {
+  const fallbackRequestUrl = runtimeConfig.protocol === 'chat_completions'
+    ? buildCreateAgentChatCompletionsUrl(runtimeConfig.apiBaseUrl)
+    : buildCreateAgentGenerationUrl(runtimeConfig.apiBaseUrl);
   const line = JSON.stringify({
     ts: new Date().toISOString(),
     prompt: normalizePromptText(context.prompt || context.payload || '').slice(0, 500),
@@ -490,10 +543,11 @@ function logCreateAgentError(runtimeConfig = {}, context = {}, error = null) {
     senderId: String(context.senderId || '').trim(),
     model: String(runtimeConfig.model || '').trim(),
     apiBaseUrl: String(runtimeConfig.apiBaseUrl || '').trim(),
+    protocol: String(runtimeConfig.protocol || 'images').trim(),
     requestedImageSize: String(runtimeConfig.requestedImageSize || '').trim(),
     effectiveImageSize: String(runtimeConfig.imageSize || '').trim(),
-    requestUrl: String(context.requestUrl || buildCreateAgentGenerationUrl(runtimeConfig.apiBaseUrl)).trim(),
-    backend: 'openai_images',
+    requestUrl: String(context.requestUrl || fallbackRequestUrl).trim(),
+    backend: runtimeConfig.protocol === 'chat_completions' ? 'openai_chat_completions' : 'openai_images',
     responsePreview: String(context.responsePreview || '').trim(),
     error: String(error?.message || error || '').trim()
   });
@@ -526,6 +580,153 @@ function buildImageGenerationRequestBody(prompt = '', runtimeConfig = {}, option
     );
   }
   return body;
+}
+
+function buildChatCompletionsImagePrompt(prompt = '', runtimeConfig = {}) {
+  const lines = [
+    'Generate exactly one high-quality image that follows the prompt below.',
+    `Prompt: ${String(prompt || '').trim()}`,
+    `Image size: ${String(runtimeConfig.imageSize || '1024x1024').trim()}`,
+    `Quality: ${String(runtimeConfig.imageQuality || 'high').trim()}`,
+    `Style: ${String(runtimeConfig.imageStyle || 'vivid').trim()}`,
+    `Background: ${String(runtimeConfig.imageBackground || 'auto').trim()}`,
+    `Output format: ${String(runtimeConfig.outputFormat || 'png').trim()}`,
+    `Response format preference: ${String(runtimeConfig.responseFormat || 'b64_json').trim()}`,
+    'Return image output only.'
+  ];
+  return lines.join('\n');
+}
+
+function buildChatCompletionsImageRequestBody(prompt = '', runtimeConfig = {}, options = {}) {
+  return {
+    model: runtimeConfig.model,
+    messages: [
+      {
+        role: 'user',
+        content: buildChatCompletionsImagePrompt(prompt, runtimeConfig)
+      }
+    ],
+    stream: Boolean(options.stream)
+  };
+}
+
+function omitObjectKeys(source = {}, keys = []) {
+  const next = { ...(source && typeof source === 'object' ? source : {}) };
+  for (const key of (Array.isArray(keys) ? keys : [])) {
+    delete next[String(key || '').trim()];
+  }
+  return next;
+}
+
+function pickObjectKeys(source = {}, keys = []) {
+  const next = {};
+  const rawSource = source && typeof source === 'object' ? source : {};
+  for (const key of (Array.isArray(keys) ? keys : [])) {
+    const normalizedKey = String(key || '').trim();
+    if (!normalizedKey) continue;
+    if (!Object.prototype.hasOwnProperty.call(rawSource, normalizedKey)) continue;
+    next[normalizedKey] = rawSource[normalizedKey];
+  }
+  return next;
+}
+
+function buildImageGenerationRequestBodyVariants(prompt = '', runtimeConfig = {}, options = {}) {
+  const fullBody = buildImageGenerationRequestBody(prompt, runtimeConfig, options);
+  const variants = [
+    fullBody,
+    omitObjectKeys(fullBody, ['style']),
+    omitObjectKeys(fullBody, ['style', 'background']),
+    omitObjectKeys(fullBody, ['style', 'background', 'output_format', 'output_compression']),
+    omitObjectKeys(fullBody, ['style', 'background', 'output_format', 'output_compression', 'quality']),
+    omitObjectKeys(fullBody, ['style', 'background', 'output_format', 'output_compression', 'quality', 'response_format'])
+  ];
+
+  if (options.stream) {
+    variants.push(
+      omitObjectKeys(fullBody, [
+        'style',
+        'background',
+        'output_format',
+        'output_compression',
+        'quality',
+        'response_format',
+        'partial_images'
+      ])
+    );
+    variants.push(pickObjectKeys(fullBody, ['model', 'prompt', 'size', 'stream']));
+    variants.push(pickObjectKeys(fullBody, ['model', 'prompt', 'stream']));
+  } else {
+    variants.push(pickObjectKeys(fullBody, ['model', 'prompt', 'size']));
+    variants.push(pickObjectKeys(fullBody, ['model', 'prompt']));
+  }
+
+  const seen = new Set();
+  return variants.filter((variant) => {
+    const key = JSON.stringify(variant);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function isImageGenerationParameterCompatibilityError(error = null) {
+  const status = Number(error?.response?.status || 0) || 0;
+  if (status !== 400) return false;
+
+  const payload = error?.response?.data;
+  const message = String(
+    payload?.error?.message
+    || payload?.message
+    || summarizePayloadShape(payload)
+    || ''
+  ).trim().toLowerCase();
+  const code = String(payload?.error?.code || payload?.code || '').trim().toLowerCase();
+  const param = String(payload?.error?.param || payload?.param || '').trim().toLowerCase();
+
+  if (code === 'unknown_parameter') return true;
+  if (code === 'invalid_png_output_compression') return true;
+  if (message.includes('unknown parameter')) return true;
+  if (message.includes('unsupported parameter')) return true;
+  if (message.includes('invalid parameter')) return true;
+  if (message.includes('unsupported field')) return true;
+  if (message.includes('compression less than 100 is not supported for png output format')) return true;
+  if (message.includes('png output format') && message.includes('compression')) return true;
+  if (message.includes('output compression')) return true;
+  if (param.includes('style') || param.includes('background') || param.includes('output_format') || param.includes('response_format')) {
+    return true;
+  }
+  return false;
+}
+
+async function postImageGenerationWithCompatibilityFallback(requestUrl = '', prompt = '', runtimeConfig = {}, deps = {}, options = {}) {
+  const httpClient = deps.httpClient || axios;
+  const requestBodies = buildImageGenerationRequestBodyVariants(prompt, runtimeConfig, options);
+  let lastError = null;
+
+  for (let index = 0; index < requestBodies.length; index += 1) {
+    const requestBody = requestBodies[index];
+    try {
+      const response = await httpClient.post(
+        requestUrl,
+        requestBody,
+        buildImageGenerationRequestOptions(runtimeConfig, options)
+      );
+      return {
+        response,
+        requestBody
+      };
+    } catch (error) {
+      lastError = error;
+      if (!isImageGenerationParameterCompatibilityError(error)) {
+        throw error;
+      }
+      if (index >= requestBodies.length - 1) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error('generation request failed');
 }
 
 function buildImageGenerationRequestOptions(runtimeConfig = {}, options = {}) {
@@ -613,6 +814,148 @@ function extractImageFromGenerationResponse(payload = {}) {
   throw new Error('generation response missing image data');
 }
 
+function extractImageResultFromChatContentPart(part = {}) {
+  if (!part || typeof part !== 'object') return null;
+
+  const b64Json = String(
+    part.b64_json
+    || part.base64
+    || part.image_base64
+    || part.output_b64
+    || part.result_b64
+    || ''
+  ).trim();
+  if (b64Json) {
+    return {
+      kind: 'b64_json',
+      value: b64Json
+    };
+  }
+
+  const imageUrl = String(
+    part?.image_url?.url
+    || part?.image_url
+    || part?.url
+    || part?.file_url
+    || extractUrlFromText(part?.text || part?.content || '')
+    || ''
+  ).trim();
+  if (imageUrl) {
+    if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(imageUrl)) {
+      return {
+        kind: 'url',
+        value: imageUrl
+      };
+    }
+    return {
+      kind: 'url',
+      value: imageUrl
+    };
+  }
+
+  return null;
+}
+
+function extractImageResultFromTextBlob(value = '') {
+  const text = String(value || '').trim();
+  if (!text) return null;
+
+  const directDataUrl = extractUrlFromText(text);
+  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(directDataUrl)) {
+    return {
+      kind: 'url',
+      value: directDataUrl
+    };
+  }
+
+  const parsedJson = parseJsonTextSafe(text);
+  if (parsedJson && typeof parsedJson === 'object') {
+    const parsedDirect = extractImageResultFromChatContentPart(parsedJson);
+    if (parsedDirect) return parsedDirect;
+    try {
+      return extractImageFromGenerationResponse(parsedJson);
+    } catch (_) {}
+  }
+
+  const b64Match = text.match(/"b64_json"\s*:\s*"([A-Za-z0-9+/=\s]+)"/);
+  if (b64Match?.[1]) {
+    return {
+      kind: 'b64_json',
+      value: String(b64Match[1] || '').replace(/\s+/g, '')
+    };
+  }
+
+  const urlMatch = extractUrlFromText(text);
+  if (urlMatch) {
+    return {
+      kind: 'url',
+      value: urlMatch
+    };
+  }
+
+  return null;
+}
+
+function extractImageFromChatCompletionsResponse(payload = {}) {
+  const directCandidates = [
+    Array.isArray(payload?.data) ? payload.data : [],
+    Array.isArray(payload?.images) ? payload.images : [],
+    Array.isArray(payload?.output) ? payload.output : []
+  ];
+  for (const candidateList of directCandidates) {
+    for (const item of candidateList) {
+      const directImage = extractImageResultFromChatContentPart(item);
+      if (directImage) return directImage;
+
+      const nestedParts = Array.isArray(item?.content) ? item.content : [];
+      for (const part of nestedParts) {
+        const partImage = extractImageResultFromChatContentPart(part);
+        if (partImage) return partImage;
+      }
+    }
+  }
+
+  const choices = Array.isArray(payload?.choices) ? payload.choices : [];
+  for (const choice of choices) {
+    const directImage = extractImageResultFromChatContentPart(choice);
+    if (directImage) return directImage;
+
+    const message = choice?.message && typeof choice.message === 'object' ? choice.message : {};
+    const messageImage = extractImageResultFromChatContentPart(message);
+    if (messageImage) return messageImage;
+    const messageTextImage = extractImageResultFromTextBlob(message?.content);
+    if (messageTextImage) return messageTextImage;
+
+    const delta = choice?.delta && typeof choice.delta === 'object' ? choice.delta : {};
+    const deltaImage = extractImageResultFromChatContentPart(delta);
+    if (deltaImage) return deltaImage;
+    const deltaTextImage = extractImageResultFromTextBlob(delta?.content);
+    if (deltaTextImage) return deltaTextImage;
+
+    const content = message?.content;
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        const partImage = extractImageResultFromChatContentPart(part);
+        if (partImage) return partImage;
+        const partTextImage = extractImageResultFromTextBlob(part?.text || part?.content || '');
+        if (partTextImage) return partTextImage;
+      }
+    }
+
+    const deltaContent = delta?.content;
+    if (Array.isArray(deltaContent)) {
+      for (const part of deltaContent) {
+        const partImage = extractImageResultFromChatContentPart(part);
+        if (partImage) return partImage;
+        const partTextImage = extractImageResultFromTextBlob(part?.text || part?.content || '');
+        if (partTextImage) return partTextImage;
+      }
+    }
+  }
+
+  throw new Error('chat completions response missing image data');
+}
+
 function extractImageFromStreamEventPayload(payload = {}) {
   if (!payload || typeof payload !== 'object') return null;
 
@@ -641,7 +984,15 @@ function extractImageFromStreamEventPayload(payload = {}) {
       eventType: String(payload.type || '').trim()
     };
   } catch (_) {
-    return null;
+    try {
+      const nestedChatImage = extractImageFromChatCompletionsResponse(payload);
+      return {
+        ...nestedChatImage,
+        eventType: String(payload.type || '').trim()
+      };
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -683,6 +1034,9 @@ async function materializeGeneratedImage(imageResult = null, prompt = '', runtim
 
 async function requestImageGeneration(prompt = '', runtimeConfig = {}, deps = {}) {
   validateCreateAgentPrerequisites(runtimeConfig);
+  if (runtimeConfig.protocol === 'chat_completions') {
+    return requestChatCompletionsImageGeneration(prompt, runtimeConfig, deps);
+  }
   const requestUrls = buildCreateAgentGenerationUrlCandidates(runtimeConfig.apiBaseUrl);
   if (!requestUrls.length) {
     throw new Error('CREATE_AGENT_API_BASE_URL is not configured');
@@ -692,10 +1046,12 @@ async function requestImageGeneration(prompt = '', runtimeConfig = {}, deps = {}
   let lastError = null;
   for (const requestUrl of requestUrls) {
     try {
-      const response = await httpClient.post(
+      const { response } = await postImageGenerationWithCompatibilityFallback(
         requestUrl,
-        buildImageGenerationRequestBody(prompt, runtimeConfig),
-        buildImageGenerationRequestOptions(runtimeConfig)
+        prompt,
+        runtimeConfig,
+        { ...deps, httpClient },
+        {}
       );
       const payload = response?.data || {};
       try {
@@ -724,6 +1080,9 @@ async function requestImageGeneration(prompt = '', runtimeConfig = {}, deps = {}
 
 async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, deps = {}) {
   validateCreateAgentPrerequisites(runtimeConfig);
+  if (runtimeConfig.protocol === 'chat_completions') {
+    return requestChatCompletionsImageGenerationStream(prompt, runtimeConfig, deps);
+  }
   const requestUrls = buildCreateAgentGenerationUrlCandidates(runtimeConfig.apiBaseUrl);
   if (!requestUrls.length) {
     throw new Error('CREATE_AGENT_API_BASE_URL is not configured');
@@ -734,13 +1093,12 @@ async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, dep
 
   for (const requestUrl of requestUrls) {
     try {
-      const response = await httpClient.post(
+      const { response } = await postImageGenerationWithCompatibilityFallback(
         requestUrl,
-        buildImageGenerationRequestBody(prompt, runtimeConfig, {
-          stream: true,
-          partialImages: CREATE_AGENT_STREAM_PARTIAL_IMAGES
-        }),
-        buildImageGenerationRequestOptions(runtimeConfig, { responseType: 'stream', stream: true })
+        prompt,
+        runtimeConfig,
+        { ...deps, httpClient },
+        { responseType: 'stream', stream: true }
       );
 
       const responseStream = response?.data;
@@ -904,6 +1262,241 @@ async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, dep
   throw lastError || new Error('generation stream missing image data');
 }
 
+async function requestChatCompletionsImageGeneration(prompt = '', runtimeConfig = {}, deps = {}) {
+  validateCreateAgentPrerequisites(runtimeConfig);
+  const requestUrls = buildCreateAgentChatCompletionsUrlCandidates(runtimeConfig.apiBaseUrl);
+  if (!requestUrls.length) {
+    throw new Error('CREATE_AGENT_API_BASE_URL is not configured');
+  }
+
+  const httpClient = deps.httpClient || axios;
+  let lastError = null;
+
+  for (const requestUrl of requestUrls) {
+    try {
+      const response = await httpClient.post(
+        requestUrl,
+        buildChatCompletionsImageRequestBody(prompt, runtimeConfig, {}),
+        buildImageGenerationRequestOptions(runtimeConfig, {})
+      );
+      const payload = response?.data || {};
+      if (typeof payload === 'string' && looksLikeHtmlDocument(payload)) {
+        lastError = new Error(`chat completions endpoint returned html response_preview=${summarizePayloadShape(payload)}`);
+        lastError.requestUrl = requestUrl;
+        continue;
+      }
+      try {
+        extractImageFromChatCompletionsResponse(payload);
+      } catch (shapeError) {
+        lastError = new Error(`${shapeError.message} response_preview=${summarizePayloadShape(payload)}`);
+        lastError.requestUrl = requestUrl;
+        continue;
+      }
+      return {
+        payload,
+        requestUrl
+      };
+    } catch (error) {
+      const normalized = new Error(normalizeRequestError(error));
+      normalized.requestUrl = requestUrl;
+      lastError = normalized;
+      const lower = String(normalized.message || '').toLowerCase();
+      if (!(lower.includes('404') || lower.includes('chat completions response missing image data'))) {
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error('chat completions response missing image data');
+}
+
+async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeConfig = {}, deps = {}) {
+  validateCreateAgentPrerequisites(runtimeConfig);
+  const requestUrls = buildCreateAgentChatCompletionsUrlCandidates(runtimeConfig.apiBaseUrl);
+  if (!requestUrls.length) {
+    throw new Error('CREATE_AGENT_API_BASE_URL is not configured');
+  }
+
+  const httpClient = deps.httpClient || axios;
+  let lastError = null;
+
+  for (const requestUrl of requestUrls) {
+    try {
+      const response = await httpClient.post(
+        requestUrl,
+        buildChatCompletionsImageRequestBody(prompt, runtimeConfig, { stream: true }),
+        buildImageGenerationRequestOptions(runtimeConfig, { responseType: 'stream', stream: true })
+      );
+
+      const responseStream = response?.data;
+      if (!responseStream || typeof responseStream.on !== 'function') {
+        const directPayload = response?.data || {};
+        if (typeof directPayload === 'string' && looksLikeHtmlDocument(directPayload)) {
+          lastError = new Error(`chat completions endpoint returned html response_preview=${summarizePayloadShape(directPayload)}`);
+          lastError.requestUrl = requestUrl;
+          continue;
+        }
+        const directImage = extractImageFromStreamEventPayload(directPayload);
+        if (directImage) {
+          return {
+            imageResult: directImage,
+            requestUrl,
+            streamMode: false
+          };
+        }
+        try {
+          return {
+            imageResult: extractImageFromChatCompletionsResponse(directPayload),
+            requestUrl,
+            streamMode: false
+          };
+        } catch (shapeError) {
+          lastError = new Error(`${shapeError.message} response_preview=${summarizePayloadShape(directPayload)}`);
+          lastError.requestUrl = requestUrl;
+          continue;
+        }
+      }
+
+      const parserState = { buffer: '' };
+      const rawChunks = [];
+      let sawSseEvents = false;
+      let finalImage = null;
+
+      await new Promise((resolve, reject) => {
+        let settled = false;
+
+        const cleanup = () => {
+          responseStream.removeListener('data', handleData);
+          responseStream.removeListener('end', handleEnd);
+          responseStream.removeListener('close', handleClose);
+          responseStream.removeListener('error', handleError);
+        };
+
+        const finish = (error = null) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          if (error) reject(error);
+          else resolve();
+        };
+
+        const consumeEvents = (events = []) => {
+          for (const event of events) {
+            if (!event?.json || typeof event.json !== 'object') continue;
+            sawSseEvents = true;
+
+            const streamFailure = extractStreamFailureMessage(event.json);
+            if (streamFailure) {
+              const error = new Error(streamFailure);
+              error.requestUrl = requestUrl;
+              finish(error);
+              return false;
+            }
+
+            const imageResult = extractImageFromStreamEventPayload(event.json);
+            if (!imageResult) continue;
+
+            const eventType = String(imageResult.eventType || event.json.type || '').trim().toLowerCase();
+            if (eventType.endsWith('.partial_image')) continue;
+            finalImage = imageResult;
+          }
+          return true;
+        };
+
+        const handleData = (chunk) => {
+          rawChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk || ''), 'utf8'));
+          const parsed = extractSSEEvents(parserState, chunk);
+          parserState.buffer = parsed.state.buffer;
+          consumeEvents(parsed.events || []);
+        };
+
+        const finalizeTail = () => {
+          const tailEvents = flushSSEState(parserState);
+          consumeEvents(tailEvents || []);
+        };
+
+        const handleEnd = () => {
+          finalizeTail();
+          finish();
+        };
+
+        const handleClose = () => {
+          if (settled) return;
+          finalizeTail();
+          finish();
+        };
+
+        const handleError = (error) => {
+          const normalizedError = error instanceof Error ? error : new Error(String(error || 'unknown error'));
+          normalizedError.requestUrl = requestUrl;
+          finish(normalizedError);
+        };
+
+        responseStream.on('data', handleData);
+        responseStream.once('end', handleEnd);
+        responseStream.once('close', handleClose);
+        responseStream.once('error', handleError);
+      });
+
+      if (finalImage) {
+        return {
+          imageResult: finalImage,
+          requestUrl,
+          streamMode: true
+        };
+      }
+
+      const rawText = Buffer.concat(rawChunks).toString('utf8').trim();
+      if (!sawSseEvents && rawText) {
+        if (looksLikeHtmlDocument(rawText)) {
+          lastError = new Error(`chat completions endpoint returned html response_preview=${summarizePayloadShape(rawText)}`);
+          lastError.requestUrl = requestUrl;
+          continue;
+        }
+        const rawPayload = parseJsonTextSafe(rawText);
+        if (rawPayload) {
+          const fallbackImage = extractImageFromStreamEventPayload(rawPayload);
+          if (fallbackImage) {
+            return {
+              imageResult: fallbackImage,
+              requestUrl,
+              streamMode: false
+            };
+          }
+          try {
+            return {
+              imageResult: extractImageFromChatCompletionsResponse(rawPayload),
+              requestUrl,
+              streamMode: false
+            };
+          } catch (shapeError) {
+            lastError = new Error(`${shapeError.message} response_preview=${summarizePayloadShape(rawPayload)}`);
+            lastError.requestUrl = requestUrl;
+            continue;
+          }
+        }
+      }
+
+      lastError = new Error(
+        `chat completions stream missing image data${rawText ? ` response_preview=${rawText.replace(/\s+/g, ' ').trim().slice(0, 400)}` : ''}`
+      );
+      lastError.requestUrl = requestUrl;
+    } catch (error) {
+      const normalized = error?.response
+        ? new Error(normalizeRequestError(error))
+        : (error instanceof Error ? error : new Error(String(error || 'unknown error')));
+      normalized.requestUrl = error?.requestUrl || requestUrl;
+      lastError = normalized;
+      const lower = String(normalized.message || '').toLowerCase();
+      if (!(lower.includes('404') || lower.includes('chat completions stream missing image data') || lower.includes('chat completions response missing image data'))) {
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error('chat completions stream missing image data');
+}
+
 async function generateImageWithOpenAICompatibleApi(prompt = '', runtimeConfig = {}, deps = {}) {
   let streamError = null;
   try {
@@ -916,7 +1509,10 @@ async function generateImageWithOpenAICompatibleApi(prompt = '', runtimeConfig =
   try {
     const generationResult = await requestImageGeneration(prompt, runtimeConfig, deps);
     const payload = generationResult?.payload || {};
-    return materializeGeneratedImage(extractImageFromGenerationResponse(payload), prompt, runtimeConfig, deps);
+    const extractedImage = runtimeConfig.protocol === 'chat_completions'
+      ? extractImageFromChatCompletionsResponse(payload)
+      : extractImageFromGenerationResponse(payload);
+    return materializeGeneratedImage(extractedImage, prompt, runtimeConfig, deps);
   } catch (error) {
     if (streamError) {
       error.message = `${String(error?.message || error || '').trim()} stream_attempt=${String(streamError?.message || streamError || '').trim()}`.trim();
@@ -943,6 +1539,7 @@ function buildUserFacingFailureReply(error = null, runtimeConfig = {}) {
   if (lower.includes('unknown provider for model')) {
     return `当前生图供应商不支持 ${providerModel || '该模型'}`;
   }
+  if (lower.includes('chat completions endpoint returned html')) return '当前生图接口路径不兼容，供应商返回了网页页面';
   if (lower.includes('http_error') && lower.includes('400')) return '生图请求参数无效';
   if (lower.includes('http_error') && lower.includes('404')) return '当前生图接口不存在';
   if (lower.includes('http_error') && (lower.includes('401') || lower.includes('403'))) return '生图鉴权失败';
@@ -1033,14 +1630,18 @@ async function executeCreateCommand(context = {}, deps = {}) {
 }
 
 module.exports = {
+  buildCreateAgentChatCompletionsUrl,
+  buildCreateAgentChatCompletionsUrlCandidates,
   buildCreateAgentGenerationUrl,
   buildCreateAgentGenerationUrlCandidates,
   buildCreateAgentAllowedUserIds,
   buildCreateAgentPrompt,
+  buildImageGenerationRequestBodyVariants,
   consumeQuota,
   detectImageExtension,
   downloadImageFromUrl,
   executeCreateCommand,
+  extractImageFromChatCompletionsResponse,
   extractImageFromGenerationResponse,
   extractImageFromStreamEventPayload,
   generateImageWithOpenAICompatibleApi,
@@ -1049,10 +1650,13 @@ module.exports = {
   loadRuntimeState,
   isRuntimeStateStale,
   isCreateAgentUserAllowed,
+  isImageGenerationParameterCompatibilityError,
   normalizeCreateAgentBaseUrl,
+  normalizeCreateAgentProtocol,
   normalizeIdList,
   normalizeRequestedImageSize,
   normalizeRequestError,
+  postImageGenerationWithCompatibilityFallback,
   readJsonFileSafe,
   requestImageGeneration,
   requestImageGenerationStream,

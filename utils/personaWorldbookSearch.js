@@ -12,6 +12,11 @@ const {
   cosineFromTokenSets,
   uniqueBy
 } = require('./memory-v3/helpers');
+const {
+  isLanceDbReadEnabled,
+  normalizeVectorStoreMode,
+  searchWorldbookVectors
+} = require('./lancedbMemoryStore');
 
 const CACHE_VERSION = 1;
 const DEFAULT_DOC_MAX_CHARS = 1200;
@@ -436,6 +441,14 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
     pending: 0,
     semanticCandidates: 0,
     hotPathUsed: false,
+    lancedb: {
+      enabled: isLanceDbReadEnabled(config),
+      mode: normalizeVectorStoreMode(config.MEMORY_VECTOR_STORE),
+      ok: false,
+      rows: 0,
+      semanticCandidates: 0,
+      reason: ''
+    },
     fallbackReason: ''
   };
   if (!diagnostics.enabled) {
@@ -459,7 +472,9 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
     diagnostics.fallbackReason = 'remote_embedding_unavailable';
     return { results: [], diagnostics };
   }
-  const allowHotPath = options.hotPath === true || config.PERSONA_WORLDBOOK_EMBEDDING_HOT_PATH === true;
+  const allowHotPath = options.hotPath === true
+    || config.PERSONA_WORLDBOOK_EMBEDDING_HOT_PATH === true
+    || diagnostics.lancedb.enabled;
   if (!allowHotPath) {
     diagnostics.fallbackReason = 'hot_path_disabled';
     return { results: [], diagnostics };
@@ -478,6 +493,36 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
     : Number(config.PERSONA_WORLDBOOK_SEMANTIC_LIMIT || 24);
   const limit = Math.max(0, Math.floor(Number.isFinite(rawLimit) ? rawLimit : 24));
   if (limit <= 0) return { results: [], diagnostics };
+  if (diagnostics.lancedb.enabled) {
+    const vectorResult = await searchWorldbookVectors(queryEmbedding, {}, {
+      limit,
+      timeoutMs: options.lancedbTimeoutMs || config.MEMORY_LANCEDB_TIMEOUT_MS
+    });
+    const vectorResults = (Array.isArray(vectorResult.rows) ? vectorResult.rows : [])
+      .map((row) => {
+        const moduleId = normalizeText(row.nodeId || row.id);
+        const doc = docsByModuleId.get(moduleId);
+        if (!doc) return null;
+        const score = Number.isFinite(Number(row._distance))
+          ? 1 / (1 + Math.max(0, Number(row._distance)))
+          : Number(row.score || 0);
+        return normalizeCandidate(doc, Math.max(0, score), 'semantic_lancedb', 'local LanceDB worldbook match');
+      })
+      .filter((item) => item && item.score > 0.05)
+      .sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || Number(a.priority || 0) - Number(b.priority || 0))
+      .slice(0, limit);
+    diagnostics.lancedb = {
+      ...diagnostics.lancedb,
+      ok: vectorResult.ok === true,
+      rows: Array.isArray(vectorResult.rows) ? vectorResult.rows.length : 0,
+      semanticCandidates: vectorResults.length,
+      reason: vectorResult.reason || ''
+    };
+    if (diagnostics.lancedb.mode === 'lancedb' && vectorResults.length > 0) {
+      diagnostics.semanticCandidates = vectorResults.length;
+      return { results: vectorResults, diagnostics };
+    }
+  }
   const results = index.readyRows
     .map((row) => {
       const doc = docsByModuleId.get(row.moduleId);

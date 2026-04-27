@@ -28,6 +28,13 @@ const {
   journalDateMatchBoost,
   resolveJournalTargetDays
 } = require('./journalDocs');
+const {
+  fuseRecallCandidates,
+  isLanceDbReadEnabled,
+  normalizeVectorStoreMode,
+  resolveVectorCandidates,
+  searchMemoryVectors
+} = require('../lancedbMemoryStore');
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
 
@@ -318,7 +325,7 @@ function applyJournalTargetDayPriority(items = [], targetDays = []) {
 }
 
 async function scoreCandidates(candidates = [], query = '', facet = 'default', options = {}) {
-  const rewrites = rewriteQuery(query, facet);
+  const rewrites = Array.isArray(options.rewrites) ? options.rewrites : rewriteQuery(query, facet);
   const queryTokens = uniqueBy(rewrites.flatMap((item) => tokenize(item)), (item) => item);
   const journalTargetDays = resolveJournalTargetDays(query, {
     today: options.journalToday,
@@ -326,8 +333,8 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
   });
   const embeddingIndex = loadEmbeddingIndex();
   const useEmbedding = shouldUseRemoteEmbedding();
-  let queryEmbedding = null;
-  if (useEmbedding) {
+  let queryEmbedding = Array.isArray(options.queryEmbedding) ? options.queryEmbedding : null;
+  if (!queryEmbedding && useEmbedding) {
     queryEmbedding = await requestEmbedding(rewrites.join('\n'));
   }
   const semanticWeight = Math.max(0, Number(config.MEMORY_SEMANTIC_RECALL_WEIGHT || 0.3) || 0.3);
@@ -384,6 +391,13 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
     });
   }
   return scored;
+}
+
+async function resolveQueryEmbedding(query = '', facet = 'default', options = {}) {
+  if (Array.isArray(options.queryEmbedding) && options.queryEmbedding.length > 0) return options.queryEmbedding;
+  if (!shouldUseRemoteEmbedding()) return null;
+  const rewrites = Array.isArray(options.rewrites) ? options.rewrites : rewriteQuery(query, facet);
+  return requestEmbedding(rewrites.join('\n'));
 }
 
 function applyConflictResolution(items = []) {
@@ -478,9 +492,62 @@ async function queryMemory(input = {}) {
   const facet = FACETS.includes(String(input.facet || '').trim().toLowerCase())
     ? String(input.facet || '').trim().toLowerCase()
     : classifyFacet(query, input);
+  const rewrites = rewriteQuery(query, facet);
+  const queryEmbedding = await resolveQueryEmbedding(query, facet, {
+    ...input,
+    rewrites
+  });
   const candidates = filterCandidatesBySource(collectCandidates(userId, input), input.source);
-  const scored = await scoreCandidates(candidates, query, facet, input);
-  const conflictResolved = applyConflictResolution(scored);
+  const scored = await scoreCandidates(candidates, query, facet, {
+    ...input,
+    rewrites,
+    queryEmbedding
+  });
+  const vectorStoreMode = normalizeVectorStoreMode(config.MEMORY_VECTOR_STORE);
+  let lancedbDiagnostics = {
+    enabled: isLanceDbReadEnabled(config),
+    mode: vectorStoreMode,
+    rows: 0,
+    vectorCandidates: 0,
+    fused: false,
+    reason: ''
+  };
+  let rankedForRerank = scored;
+  if (lancedbDiagnostics.enabled && Array.isArray(queryEmbedding) && queryEmbedding.length > 0) {
+    const allowedGroupIds = uniqueBy(
+      candidates
+        .filter((item) => normalizeText(item.scopeType).toLowerCase() === 'group')
+        .map((item) => normalizeText(item.groupId))
+        .filter(Boolean),
+      (item) => item
+    );
+    const vectorResult = await searchMemoryVectors(queryEmbedding, {
+      ...input,
+      userId,
+      allowedGroupIds
+    });
+    const vectorCandidates = resolveVectorCandidates(vectorResult.rows || [], candidates, {
+      ...input,
+      userId,
+      allowedGroupIds,
+      filter: vectorResult.filter
+    }).filter((item) => matchesFacetCandidate(facet, item));
+    lancedbDiagnostics = {
+      enabled: true,
+      mode: vectorStoreMode,
+      ok: vectorResult.ok === true,
+      rows: Array.isArray(vectorResult.rows) ? vectorResult.rows.length : 0,
+      vectorCandidates: vectorCandidates.length,
+      fused: vectorStoreMode === 'lancedb' && vectorCandidates.length > 0,
+      reason: vectorResult.reason || ''
+    };
+    if (vectorStoreMode === 'lancedb' && vectorCandidates.length > 0) {
+      rankedForRerank = fuseRecallCandidates(scored, vectorCandidates, {
+        rrfK: config.MEMORY_V3_RRF_K
+      });
+    }
+  }
+  const conflictResolved = applyConflictResolution(rankedForRerank);
   const reranked = await rerankMemoryCandidates(query, stableSortByScore(conflictResolved), {
     ...input,
     userId,
@@ -505,7 +572,7 @@ async function queryMemory(input = {}) {
     userId,
     query,
     facet,
-    rewrites: rewriteQuery(query, facet),
+    rewrites,
     strictResults: split.strictResults,
     weakResults: split.weakResults,
     persona,
@@ -519,8 +586,10 @@ async function queryMemory(input = {}) {
     stats: {
       candidates: candidates.length,
       scored: scored.length,
+      ranked: rankedForRerank.length,
       reranked: reranked.length,
-      selected: selected.length
+      selected: selected.length,
+      lancedb: lancedbDiagnostics
     }
   };
 }
