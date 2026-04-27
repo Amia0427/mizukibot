@@ -964,14 +964,24 @@ function isCorrectionSignal(text = '') {
   return /(不是这样|你说错了|实际上应该是|你搞错了|不对|纠正一下|更准确地说)/i.test(input);
 }
 
-function maybeCaptureUserCorrection({ cleanText, senderId, groupId, routeExecutionPlan }) {
-  if (!isCorrectionSignal(cleanText)) return;
-  const lastAssistantReply = getLastAssistantReplyForSession(senderId, groupId);
-  if (!lastAssistantReply) return;
+function maybeCaptureUserCorrection({
+  cleanText,
+  signalText = '',
+  senderId,
+  groupId,
+  routeExecutionPlan,
+  getLastAssistantReply = null
+}) {
+  const userMessage = String(cleanText || '').trim();
+  const triggerText = String(signalText || userMessage || '').trim();
+  if (!isCorrectionSignal(triggerText)) return;
+  if (typeof getLastAssistantReply !== 'function') return;
   const timer = setTimeout(() => {
     try {
+      const lastAssistantReply = getLastAssistantReply(senderId, groupId);
+      if (!lastAssistantReply) return;
       captureCorrection({
-        userMessage: cleanText,
+        userMessage,
         assistantReply: lastAssistantReply,
         routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
         topRouteType: routeExecutionPlan?.topRouteType || 'direct_chat',
@@ -1332,6 +1342,7 @@ function createMessageHandler({
     clearGroupBindingForUser
   });
   const buildSubagentContextSummary = (...args) => getVisualContextTools().buildSubagentContextSummary(...args);
+  const getLastAssistantReplyForSession = (...args) => getVisualContextTools().getLastAssistantReplyForSession(...args);
   const taskControlCoordinator = createMessageTaskControlCoordinator({
     buildSessionId,
     buildNoTaskControlText,
@@ -3164,17 +3175,45 @@ function createMessageHandler({
       return;
     }
 
-    const cleanText = route.cleanText;
-    const imageUrl = visualContext?.worker?.succeeded ? null : (effectiveVisualInput || route.imageUrl);
-    route.imageUrl = imageUrl;
+    const cleanText = String(route?.cleanText || effectiveCleanText || rawText || '').trim();
+    const imageUrl = visualContext?.worker?.succeeded ? null : (effectiveVisualInput || route?.imageUrl || '');
+    if (route && typeof route === 'object') route.imageUrl = imageUrl;
     const inboundTimestamp = Date.now();
     const correctionStartedAt = Date.now();
-    maybeCaptureUserCorrection({
-      cleanText,
-      senderId,
-      groupId,
-      routeExecutionPlan
-    });
+    try {
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'capture_correction_start',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+      });
+      maybeCaptureUserCorrection({
+        cleanText,
+        signalText: effectiveCleanText,
+        senderId,
+        groupId,
+        routeExecutionPlan,
+        getLastAssistantReply: getLastAssistantReplyForSession
+      });
+    } catch (error) {
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'capture_correction_failed',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        durationMs: Math.max(0, Date.now() - correctionStartedAt),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        error: error?.message || String(error || '')
+      });
+      console.error('[self-improvement] correction capture scheduling failed:', error?.message || error);
+    }
     appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
       stage: 'capture_correction_done',
       messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
@@ -3189,43 +3228,77 @@ function createMessageHandler({
 
     if (!isPrivateChatType(chatType)) {
       const groupSideEffectsStartedAt = Date.now();
-      sideEffects.recordInboundHumanMessage({
-        groupId,
-        senderId,
-        senderName: String(effectiveMsg.sender?.card || effectiveMsg.sender?.nickname || effectiveMsg.sender?.nick || senderId || '').trim(),
-        text: persistUserText || cleanText || rawText,
-        timestamp: Number(continuousMeta?.firstTimestamp || inboundTimestamp),
-        messageId: String(effectiveMsg.message_id || '').trim(),
-        replyToMessageId: String(directedContext?.quote?.messageId || continuousMeta?.replyMessageId || '').trim(),
-        replyToSenderId: String(directedContext?.quote?.senderId || '').trim(),
-        replyToSenderName: String(directedContext?.quote?.senderName || '').trim()
-      });
+      try {
+        sideEffects.recordInboundHumanMessage({
+          groupId,
+          senderId,
+          senderName: String(effectiveMsg.sender?.card || effectiveMsg.sender?.nickname || effectiveMsg.sender?.nick || senderId || '').trim(),
+          text: persistUserText || cleanText || rawText,
+          timestamp: Number(continuousMeta?.firstTimestamp || inboundTimestamp),
+          messageId: String(effectiveMsg.message_id || '').trim(),
+          replyToMessageId: String(directedContext?.quote?.messageId || continuousMeta?.replyMessageId || '').trim(),
+          replyToSenderId: String(directedContext?.quote?.senderId || '').trim(),
+          replyToSenderName: String(directedContext?.quote?.senderName || '').trim()
+        });
+        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+          stage: 'group_side_effects_done',
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          durationMs: Math.max(0, Date.now() - groupSideEffectsStartedAt),
+          rawMessageTimestampMs,
+          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+        });
+      } catch (error) {
+        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+          stage: 'group_side_effects_failed',
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          durationMs: Math.max(0, Date.now() - groupSideEffectsStartedAt),
+          rawMessageTimestampMs,
+          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+          error: error?.message || String(error || '')
+        });
+        console.error('[message] group side effects failed:', error?.message || error);
+      }
+    }
+
+    const userPresenceStartedAt = Date.now();
+    let userInfo = null;
+    try {
+      userInfo = sideEffects.updateUserPresence(senderId, persistUserText || cleanText, isPrivateChatType(chatType) ? '' : groupId);
       appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
-        stage: 'group_side_effects_done',
+        stage: 'user_presence_done',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
         groupId: String(groupId || '').trim(),
         userId: String(senderId || '').trim(),
         chatType,
-        durationMs: Math.max(0, Date.now() - groupSideEffectsStartedAt),
+        durationMs: Math.max(0, Date.now() - userPresenceStartedAt),
         rawMessageTimestampMs,
         elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
         lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
       });
+    } catch (error) {
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'user_presence_failed',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        durationMs: Math.max(0, Date.now() - userPresenceStartedAt),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        error: error?.message || String(error || '')
+      });
+      console.error('[message] user presence update failed:', error?.message || error);
+      userInfo = {};
     }
-
-    const userPresenceStartedAt = Date.now();
-    const userInfo = sideEffects.updateUserPresence(senderId, persistUserText || cleanText, isPrivateChatType(chatType) ? '' : groupId);
-    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
-      stage: 'user_presence_done',
-      messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
-      groupId: String(groupId || '').trim(),
-      userId: String(senderId || '').trim(),
-      chatType,
-      durationMs: Math.max(0, Date.now() - userPresenceStartedAt),
-      rawMessageTimestampMs,
-      elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
-      lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
-    });
 
     appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
       stage: 'formal_route_dispatch_start',
@@ -3358,6 +3431,18 @@ function createMessageHandler({
     }
     } catch (error) {
       inboundHadError = true;
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'inbound_handler_failed',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        error: error?.message || String(error || ''),
+        stack: String(error?.stack || '').split('\n').slice(0, 4).join(' | ')
+      });
       throw error;
     } finally {
       inboundLock.release({ hadError: inboundHadError });
