@@ -76,6 +76,7 @@ function resolveRoleAwareMainModelConfig(userId = '', overrides = null, options 
   applyIfOverrideMissing(resolved, 'temperature', isAdmin ? pickConfiguredNumber(config.ADMIN_AI_TEMPERATURE, config.AI_TEMPERATURE) : config.AI_TEMPERATURE);
   applyIfOverrideMissing(resolved, 'topP', isAdmin ? pickConfiguredNumber(config.ADMIN_AI_TOP_P, config.AI_TOP_P) : config.AI_TOP_P);
   applyIfOverrideMissing(resolved, 'maxTokens', isAdmin ? pickConfiguredNumber(config.ADMIN_AI_MAX_TOKENS, config.AI_MAX_TOKENS) : config.AI_MAX_TOKENS);
+  applyIfOverrideMissing(resolved, 'retries', isAdmin ? pickConfiguredNumber(config.ADMIN_AI_RETRIES, config.AI_RETRIES) : config.AI_RETRIES);
   applyIfOverrideMissing(resolved, 'reasoningEffort', isAdmin ? pickConfiguredText(config.ADMIN_AI_REASONING_EFFORT, config.AI_REASONING_EFFORT) : config.AI_REASONING_EFFORT);
   applyIfOverrideMissing(resolved, 'topK', isAdmin ? pickConfiguredNumber(config.ADMIN_AI_TOP_K, config.AI_TOP_K) : config.AI_TOP_K);
   applyIfOverrideMissing(resolved, 'topA', isAdmin ? pickConfiguredNumber(config.ADMIN_AI_TOP_A, config.AI_TOP_A) : config.AI_TOP_A);

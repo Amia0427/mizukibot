@@ -55,6 +55,7 @@ module.exports = (async () => {
     process.env.ADMIN_AI_TEMPERATURE = '0.91';
     process.env.ADMIN_AI_TOP_P = '0.77';
     process.env.ADMIN_AI_MAX_TOKENS = '4321';
+    process.env.ADMIN_AI_RETRIES = '0';
     process.env.ADMIN_AI_REASONING_EFFORT = 'low';
     process.env.ADMIN_AI_TOP_K = '64.8';
     process.env.ADMIN_AI_TOP_A = '0.66';

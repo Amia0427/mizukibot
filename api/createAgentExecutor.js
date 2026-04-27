@@ -536,6 +536,7 @@ function logCreateAgentError(runtimeConfig = {}, context = {}, error = null) {
   const fallbackRequestUrl = runtimeConfig.protocol === 'chat_completions'
     ? buildCreateAgentChatCompletionsUrl(runtimeConfig.apiBaseUrl)
     : buildCreateAgentGenerationUrl(runtimeConfig.apiBaseUrl);
+  const napcatRetcode = Number.isFinite(Number(error?.retcode)) ? Number(error.retcode) : null;
   const line = JSON.stringify({
     ts: new Date().toISOString(),
     prompt: normalizePromptText(context.prompt || context.payload || '').slice(0, 500),
@@ -549,7 +550,13 @@ function logCreateAgentError(runtimeConfig = {}, context = {}, error = null) {
     requestUrl: String(context.requestUrl || fallbackRequestUrl).trim(),
     backend: runtimeConfig.protocol === 'chat_completions' ? 'openai_chat_completions' : 'openai_images',
     responsePreview: String(context.responsePreview || '').trim(),
-    error: String(error?.message || error || '').trim()
+    error: String(error?.message || error || '').trim(),
+    errorName: String(error?.name || '').trim(),
+    errorCode: String(error?.code || '').trim(),
+    napcatAction: String(error?.action || '').trim(),
+    napcatStatus: String(error?.status || '').trim(),
+    napcatRetcode,
+    napcatData: error?.data === undefined ? '' : summarizePayloadShape(error.data)
   });
   appendTextFileSafe(runtimeConfig.errorLogFile, `${line}\n`);
 }
@@ -583,6 +590,7 @@ function buildImageGenerationRequestBody(prompt = '', runtimeConfig = {}, option
 }
 
 function buildChatCompletionsImagePrompt(prompt = '', runtimeConfig = {}) {
+  const responseFormat = String(runtimeConfig.responseFormat || 'b64_json').trim().toLowerCase();
   const lines = [
     'Generate exactly one high-quality image that follows the prompt below.',
     `Prompt: ${String(prompt || '').trim()}`,
@@ -591,7 +599,10 @@ function buildChatCompletionsImagePrompt(prompt = '', runtimeConfig = {}) {
     `Style: ${String(runtimeConfig.imageStyle || 'vivid').trim()}`,
     `Background: ${String(runtimeConfig.imageBackground || 'auto').trim()}`,
     `Output format: ${String(runtimeConfig.outputFormat || 'png').trim()}`,
-    `Response format preference: ${String(runtimeConfig.responseFormat || 'b64_json').trim()}`,
+    `Response format preference: ${responseFormat}`,
+    responseFormat === 'url'
+      ? 'Return only a direct image URL or a data:image/... URL when possible. Do not return prose.'
+      : 'If returning JSON, return one complete final image payload such as {"b64_json":"..."} without truncation or splitting across content blocks.',
     'Return image output only.'
   ];
   return lines.join('\n');
@@ -745,10 +756,121 @@ function buildImageGenerationRequestOptions(runtimeConfig = {}, options = {}) {
   };
 }
 
-function writeImageBuffer(runtimeConfig = {}, prompt = '', buffer = Buffer.alloc(0), mimeType = '') {
+function normalizeBase64ImageData(value = '') {
+  return String(value || '').replace(/\s+/g, '').trim();
+}
+
+function detectImageKind(buffer = Buffer.alloc(0), mimeType = '') {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  if (Buffer.isBuffer(buffer) && buffer.length >= 12) {
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'png';
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpeg';
+    if (
+      buffer[0] === 0x52
+      && buffer[1] === 0x49
+      && buffer[2] === 0x46
+      && buffer[3] === 0x46
+      && buffer[8] === 0x57
+      && buffer[9] === 0x45
+      && buffer[10] === 0x42
+      && buffer[11] === 0x50
+    ) return 'webp';
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'gif';
+  } else if (Buffer.isBuffer(buffer) && buffer.length >= 3) {
+    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpeg';
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'gif';
+  }
+
+  if (mime.includes('png')) return 'png';
+  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpeg';
+  if (mime.includes('webp')) return 'webp';
+  if (mime.includes('gif')) return 'gif';
+  return 'unknown';
+}
+
+function validatePngBuffer(buffer = Buffer.alloc(0)) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 33) return 'png shorter than minimal valid structure';
+  if (buffer.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') return 'png signature mismatch';
+
+  let offset = 8;
+  let sawIHDR = false;
+  let sawIEND = false;
+  while (offset < buffer.length) {
+    if (offset + 8 > buffer.length) return 'png chunk header truncated';
+    const chunkLength = buffer.readUInt32BE(offset);
+    const chunkType = buffer.subarray(offset + 4, offset + 8).toString('ascii');
+    const chunkEnd = offset + 12 + chunkLength;
+    if (!/^[A-Za-z]{4}$/.test(chunkType)) return 'png chunk type invalid';
+    if (chunkEnd > buffer.length) return `png chunk ${chunkType} truncated`;
+
+    if (chunkType === 'IHDR') {
+      sawIHDR = true;
+      if (chunkLength !== 13) return 'png IHDR length invalid';
+    }
+    if (chunkType === 'IEND') {
+      sawIEND = true;
+      if (chunkLength !== 0) return 'png IEND length invalid';
+      if (chunkEnd !== buffer.length) return 'png has trailing bytes after IEND';
+      break;
+    }
+
+    offset = chunkEnd;
+  }
+
+  if (!sawIHDR) return 'png missing IHDR';
+  if (!sawIEND) return 'png missing IEND';
+  return '';
+}
+
+function validateJpegBuffer(buffer = Buffer.alloc(0)) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return 'jpeg shorter than minimal valid structure';
+  if (!(buffer[0] === 0xff && buffer[1] === 0xd8)) return 'jpeg start marker missing';
+  if (!(buffer[buffer.length - 2] === 0xff && buffer[buffer.length - 1] === 0xd9)) return 'jpeg end marker missing';
+  return '';
+}
+
+function validateGifBuffer(buffer = Buffer.alloc(0)) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 14) return 'gif shorter than minimal valid structure';
+  const header = buffer.subarray(0, 6).toString('ascii');
+  if (!(header === 'GIF87a' || header === 'GIF89a')) return 'gif signature mismatch';
+  if (buffer[buffer.length - 1] !== 0x3b) return 'gif trailer missing';
+  return '';
+}
+
+function validateWebpBuffer(buffer = Buffer.alloc(0)) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return 'webp shorter than minimal valid structure';
+  if (buffer.subarray(0, 4).toString('ascii') !== 'RIFF') return 'webp RIFF signature missing';
+  if (buffer.subarray(8, 12).toString('ascii') !== 'WEBP') return 'webp signature mismatch';
+
+  const declaredSize = buffer.readUInt32LE(4) + 8;
+  if (declaredSize > buffer.length) return 'webp container truncated';
+  return '';
+}
+
+function validateImageBuffer(buffer = Buffer.alloc(0), mimeType = '') {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     throw new Error('image buffer empty');
   }
+
+  const kind = detectImageKind(buffer, mimeType);
+  let reason = '';
+  if (kind === 'png') reason = validatePngBuffer(buffer);
+  else if (kind === 'jpeg') reason = validateJpegBuffer(buffer);
+  else if (kind === 'gif') reason = validateGifBuffer(buffer);
+  else if (kind === 'webp') reason = validateWebpBuffer(buffer);
+  else reason = 'unrecognized image signature';
+
+  if (reason) {
+    const error = new Error(`image buffer invalid or truncated format=${kind} reason=${reason}`);
+    error.imageFormat = kind;
+    throw error;
+  }
+
+  return { kind };
+}
+
+function writeImageBuffer(runtimeConfig = {}, prompt = '', buffer = Buffer.alloc(0), mimeType = '') {
+  validateImageBuffer(buffer, mimeType);
   const outputPath = buildImageOutputPath(runtimeConfig, prompt, buffer, mimeType);
   fs.writeFileSync(outputPath, buffer);
   return outputPath;
@@ -762,7 +884,7 @@ async function downloadImageFromUrl(imageUrl = '', prompt = '', runtimeConfig = 
 
   const dataUrlMatch = rawUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i);
   if (dataUrlMatch) {
-    const buffer = Buffer.from(String(dataUrlMatch[2] || '').replace(/\s+/g, ''), 'base64');
+    const buffer = Buffer.from(normalizeBase64ImageData(dataUrlMatch[2] || ''), 'base64');
     const filePath = writeImageBuffer(runtimeConfig, prompt, buffer, dataUrlMatch[1]);
     return { filePath, buffer };
   }
@@ -877,14 +999,6 @@ function extractImageResultFromTextBlob(value = '') {
     } catch (_) {}
   }
 
-  const b64Match = text.match(/"b64_json"\s*:\s*"([A-Za-z0-9+/=\s]+)"/);
-  if (b64Match?.[1]) {
-    return {
-      kind: 'b64_json',
-      value: String(b64Match[1] || '').replace(/\s+/g, '')
-    };
-  }
-
   const urlMatch = extractUrlFromText(text);
   if (urlMatch) {
     return {
@@ -894,6 +1008,38 @@ function extractImageResultFromTextBlob(value = '') {
   }
 
   return null;
+}
+
+function collectChatCompletionsTextFragments(payload = {}) {
+  const fragments = [];
+  if (!payload || typeof payload !== 'object') return fragments;
+
+  const collectFromValue = (value) => {
+    if (typeof value === 'string') {
+      fragments.push(value);
+      return;
+    }
+    if (!Array.isArray(value)) return;
+    for (const part of value) {
+      if (typeof part === 'string') {
+        fragments.push(part);
+        continue;
+      }
+      if (!part || typeof part !== 'object') continue;
+      if (typeof part.text === 'string') fragments.push(part.text);
+      else if (typeof part.content === 'string') fragments.push(part.content);
+    }
+  };
+
+  const choices = Array.isArray(payload?.choices) ? payload.choices : [];
+  for (const choice of choices) {
+    collectFromValue(choice?.message?.content);
+    collectFromValue(choice?.delta?.content);
+  }
+
+  collectFromValue(payload?.message?.content);
+  collectFromValue(payload?.delta?.content);
+  return fragments;
 }
 
 function extractImageFromChatCompletionsResponse(payload = {}) {
@@ -951,6 +1097,12 @@ function extractImageFromChatCompletionsResponse(payload = {}) {
         if (partTextImage) return partTextImage;
       }
     }
+  }
+
+  const aggregatedText = collectChatCompletionsTextFragments(payload).join('').trim();
+  if (aggregatedText) {
+    const aggregatedImage = extractImageResultFromTextBlob(aggregatedText);
+    if (aggregatedImage) return aggregatedImage;
   }
 
   throw new Error('chat completions response missing image data');
@@ -1020,7 +1172,7 @@ async function materializeGeneratedImage(imageResult = null, prompt = '', runtim
   }
 
   if (imageResult.kind === 'b64_json') {
-    const buffer = Buffer.from(String(imageResult.value || '').trim(), 'base64');
+    const buffer = Buffer.from(normalizeBase64ImageData(imageResult.value || ''), 'base64');
     const filePath = writeImageBuffer(runtimeConfig, prompt, buffer);
     return { filePath, buffer };
   }
@@ -1129,6 +1281,7 @@ async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, dep
       const rawChunks = [];
       let sawSseEvents = false;
       let finalImage = null;
+      const textFragments = [];
 
       await new Promise((resolve, reject) => {
         let settled = false;
@@ -1160,6 +1313,8 @@ async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, dep
               finish(error);
               return false;
             }
+
+            textFragments.push(...collectChatCompletionsTextFragments(event.json));
 
             const imageResult = extractImageFromStreamEventPayload(event.json);
             if (!imageResult) continue;
@@ -1214,6 +1369,18 @@ async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, dep
           requestUrl,
           streamMode: true
         };
+      }
+
+      const aggregatedText = textFragments.join('').trim();
+      if (aggregatedText) {
+        const aggregatedImage = extractImageResultFromTextBlob(aggregatedText);
+        if (aggregatedImage) {
+          return {
+            imageResult: aggregatedImage,
+            requestUrl,
+            streamMode: true
+          };
+        }
       }
 
       const rawText = Buffer.concat(rawChunks).toString('utf8').trim();
@@ -1361,6 +1528,7 @@ async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeC
       const rawChunks = [];
       let sawSseEvents = false;
       let finalImage = null;
+      const textFragments = [];
 
       await new Promise((resolve, reject) => {
         let settled = false;
@@ -1392,6 +1560,8 @@ async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeC
               finish(error);
               return false;
             }
+
+            textFragments.push(...collectChatCompletionsTextFragments(event.json));
 
             const imageResult = extractImageFromStreamEventPayload(event.json);
             if (!imageResult) continue;
@@ -1444,6 +1614,18 @@ async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeC
           requestUrl,
           streamMode: true
         };
+      }
+
+      const aggregatedText = textFragments.join('').trim();
+      if (aggregatedText) {
+        const aggregatedImage = extractImageResultFromTextBlob(aggregatedText);
+        if (aggregatedImage) {
+          return {
+            imageResult: aggregatedImage,
+            requestUrl,
+            streamMode: true
+          };
+        }
       }
 
       const rawText = Buffer.concat(rawChunks).toString('utf8').trim();
@@ -1501,24 +1683,71 @@ async function generateImageWithOpenAICompatibleApi(prompt = '', runtimeConfig =
   let streamError = null;
   try {
     const streamedResult = await requestImageGenerationStream(prompt, runtimeConfig, deps);
-    return materializeGeneratedImage(streamedResult?.imageResult, prompt, runtimeConfig, deps);
+    try {
+      return await materializeGeneratedImage(streamedResult?.imageResult, prompt, runtimeConfig, deps);
+    } catch (error) {
+      error.requestUrl = error.requestUrl || streamedResult?.requestUrl || '';
+      streamError = error;
+    }
   } catch (error) {
     streamError = error;
   }
 
+  let generationError = null;
   try {
     const generationResult = await requestImageGeneration(prompt, runtimeConfig, deps);
     const payload = generationResult?.payload || {};
     const extractedImage = runtimeConfig.protocol === 'chat_completions'
       ? extractImageFromChatCompletionsResponse(payload)
       : extractImageFromGenerationResponse(payload);
-    return materializeGeneratedImage(extractedImage, prompt, runtimeConfig, deps);
-  } catch (error) {
-    if (streamError) {
-      error.message = `${String(error?.message || error || '').trim()} stream_attempt=${String(streamError?.message || streamError || '').trim()}`.trim();
+    try {
+      return await materializeGeneratedImage(extractedImage, prompt, runtimeConfig, deps);
+    } catch (error) {
+      error.requestUrl = error.requestUrl || generationResult?.requestUrl || '';
+      generationError = error;
     }
-    throw error;
+  } catch (error) {
+    generationError = generationError || error;
   }
+
+  const shouldTryUrlFallback = runtimeConfig.protocol === 'chat_completions'
+    && String(runtimeConfig.responseFormat || '').trim().toLowerCase() !== 'url'
+    && (() => {
+      const combinedMessage = String(generationError?.message || streamError?.message || '').toLowerCase();
+      return combinedMessage.includes('image buffer invalid or truncated')
+        || combinedMessage.includes('image buffer empty')
+        || combinedMessage.includes('chat completions response missing image data')
+        || combinedMessage.includes('chat completions stream missing image data')
+        || combinedMessage.includes('generation response missing image data')
+        || combinedMessage.includes('generation stream missing image data');
+    })();
+
+  if (shouldTryUrlFallback) {
+    const urlFallbackConfig = {
+      ...runtimeConfig,
+      responseFormat: 'url'
+    };
+    try {
+      const fallbackResult = await requestImageGeneration(prompt, urlFallbackConfig, deps);
+      const payload = fallbackResult?.payload || {};
+      const extractedImage = extractImageFromChatCompletionsResponse(payload);
+      return await materializeGeneratedImage(extractedImage, prompt, urlFallbackConfig, deps);
+    } catch (error) {
+      if (generationError && !String(error.message || '').includes('generation_attempt=')) {
+        error.message = `${String(error.message || '').trim()} generation_attempt=${String(generationError.message || generationError).trim()}`.trim();
+      }
+      if (streamError && !String(error.message || '').includes('stream_attempt=')) {
+        error.message = `${String(error.message || '').trim()} stream_attempt=${String(streamError.message || streamError).trim()}`.trim();
+      }
+      throw error;
+    }
+  }
+
+  const finalError = generationError || streamError || new Error('generation response missing image data');
+  if (streamError && finalError !== streamError && !String(finalError.message || '').includes('stream_attempt=')) {
+    finalError.message = `${String(finalError.message || '').trim()} stream_attempt=${String(streamError.message || streamError).trim()}`.trim();
+  }
+  throw finalError;
 }
 
 function buildUserFacingFailureReply(error = null, runtimeConfig = {}) {
@@ -1547,7 +1776,9 @@ function buildUserFacingFailureReply(error = null, runtimeConfig = {}) {
   if (lower.includes('http_error') && lower.includes('5')) return '生图供应商暂时异常';
   if (lower.includes('generation stream missing image data')) return '生图结果为空，当前接口返回格式不兼容';
   if (lower.includes('generation response missing image data')) return '生图结果为空，当前接口返回格式不兼容';
+  if (lower.includes('image buffer invalid or truncated')) return '生图结果损坏，供应商返回了不完整图片';
   if (lower.includes('image buffer empty')) return '生图结果为空';
+  if (lower.includes('napcat action send_group_msg')) return '图片发送失败，请稍后重试';
   if (lower.includes('timeout') || lower.includes('timed out')) return '生图超时，请稍后重试';
   if (lower.includes('network_error')) return '生图网络异常，请稍后重试';
   return '生图失败，请稍后重试';
