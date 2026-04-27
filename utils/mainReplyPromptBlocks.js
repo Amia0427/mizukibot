@@ -81,6 +81,15 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
     avoidWhen: 'Skip for generic small talk or when it would add noisy turn-local detail.'
   },
   {
+    blockId: 'daily_journal',
+    label: 'Daily Journal',
+    lane: 'dynamic_context',
+    category: 'memory_summary',
+    defaultPolicy: 'high_value_only',
+    useWhen: 'Use when the user asks about yesterday, a specific date, recent days, or what happened in prior conversation.',
+    avoidWhen: 'Skip when the turn is self-contained and day-level recall is not useful.'
+  },
+  {
     blockId: 'continuity_state',
     label: 'Continuity State',
     lane: 'dynamic_context',
@@ -212,6 +221,9 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   if (input.hasRetrievedMemory) {
     push('retrieved_memory_lite', 'retrieved memory candidates are available for this turn');
   }
+  if (input.hasDailyJournal) {
+    push('daily_journal', 'daily journal recall is available for this turn');
+  }
   if (input.hasLongTermProfile) push('long_term_profile', 'long-term profile is available and may help continuity');
   if (input.hasImpression) push('impression', 'prior impression can shape reply tone');
   if (input.hasRelationshipState) push('relationship_state', 'relationship state helps social distance calibration');
@@ -275,6 +287,7 @@ function buildMainReplyDynamicPromptGuide(personaModuleCatalog = []) {
     '- `self_improvement`: enable only when the learned snippet is likely to improve this exact reply pattern. Disable if it looks generic, stale, or likely to overfit.',
     '- `dynamic_few_shot`: enable only for hard style matching, nuanced scene control, or when examples clearly outperform rules. Disable for normal chat or when examples would mostly waste context.',
     '- `retrieved_memory_lite`: enable when specific recalled facts help answer the current turn. Disable when the turn is self-contained or the retrieved facts are weak/noisy.',
+    '- `daily_journal`: enable when the user asks about yesterday, a specific date, recent days, or what happened in prior conversation.',
     '- `long_term_profile`, `impression`, `relationship_state`, `summary`: enable the ones that materially help continuity or tone. Do not include all of them mechanically if the scene does not need them.',
     '- `memory_cli_instruction` and `context_stats_instruction`: enable only if those tools are actually exposed this turn.',
     '- `life_scheduler`: enable only if the current runtime really provided a fresh scheduler injection.',

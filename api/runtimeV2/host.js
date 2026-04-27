@@ -187,6 +187,27 @@ function clampLatencyBudget(value, fallback) {
   return Math.max(0, Math.floor(num));
 }
 
+const MEMORY_RECALL_LATENCY_RE = /(昨天|昨日|前天|大前天|今天|今日|刚才|刚刚|上次|之前|前面|前几天|那天|聊了什么|聊过什么|聊到哪|说了什么|讲了什么|还记得|记得|记不记得|回忆|想起来|接着|继续|断片|失忆|\byesterday\b|\bremember\b|\blast time\b|\bearlier\b|what did we talk|where did we leave)/i;
+const MEMORY_RECALL_MIN_MEMORY_BUDGET_MS = 6000;
+const MEMORY_RECALL_MIN_PREPARE_BUDGET_MS = 8000;
+
+function isMemoryRecallLatencyRequest(request = {}) {
+  const routeMeta = normalizeObject(request.routeMeta, {});
+  const text = String(
+    request.runtimeQuestionText
+    || request.question
+    || request.persistUserText
+    || request.originalUserText
+    || routeMeta.effectiveIntentText
+    || routeMeta.cleanText
+    || routeMeta.rawText
+    || ''
+  ).trim();
+  if (!text) return false;
+  if (/^(查一下|搜索|搜一下|最新|新闻|官网|search|look up|google)\b/i.test(text)) return false;
+  return MEMORY_RECALL_LATENCY_RE.test(text);
+}
+
 function resolveMemoryCompletionsUrl() {
   const memoryUrl = String(config.MEMORY_API_BASE_URL || config.API_BASE_URL || '').replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(memoryUrl)) return memoryUrl;
@@ -259,10 +280,27 @@ function buildLatencyDecision(request = {}, options = {}) {
   const deferPersist = options.deferPersist !== undefined
     ? Boolean(options.deferPersist)
     : (request.deferPersist !== undefined ? Boolean(request.deferPersist) : true);
+  const recallNeedsMemory = isMemoryRecallLatencyRequest(request);
+  const memoryBudgetFallback = Math.max(0, Number(config.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300) || 300);
+  const recallMemoryBudget = Math.max(
+    memoryBudgetFallback,
+    MEMORY_RECALL_MIN_MEMORY_BUDGET_MS,
+    Number(config.MEMORY_RECALL_PROMPT_SOFT_BUDGET_MS || 0) || 0,
+    Number(config.MEMORY_RETRIEVAL_RECALL_SOFT_BUDGET_MS || 0) || 0
+  );
+  const prepareBudgetFallback = Math.max(0, Number(config.PREPARE_SOFT_BUDGET_MS || 600) || 600);
+  const recallPrepareBudget = Math.max(
+    prepareBudgetFallback,
+    MEMORY_RECALL_MIN_PREPARE_BUDGET_MS,
+    recallMemoryBudget + 1000,
+    Number(config.PREPARE_MEMORY_RECALL_SOFT_BUDGET_MS || 0) || 0
+  );
+  const prepareSoftBudgetMs = clampLatencyBudget(options.prepareSoftBudgetMs ?? request.prepareSoftBudgetMs, prepareBudgetFallback);
+  const memoryBudgetMs = clampLatencyBudget(options.memoryBudgetMs ?? request.memoryBudgetMs, memoryBudgetFallback);
   return {
     profile,
-    prepareSoftBudgetMs: clampLatencyBudget(options.prepareSoftBudgetMs ?? request.prepareSoftBudgetMs, config.PREPARE_SOFT_BUDGET_MS || 600),
-    memoryBudgetMs: clampLatencyBudget(options.memoryBudgetMs ?? request.memoryBudgetMs, config.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
+    prepareSoftBudgetMs: recallNeedsMemory ? Math.max(prepareSoftBudgetMs, recallPrepareBudget) : prepareSoftBudgetMs,
+    memoryBudgetMs: recallNeedsMemory ? Math.max(memoryBudgetMs, recallMemoryBudget) : memoryBudgetMs,
     continuityBudgetMs: clampLatencyBudget(options.continuityBudgetMs ?? request.continuityBudgetMs, config.CONTINUITY_PROBE_SOFT_BUDGET_MS || 250),
     preflightBudgetMs: clampLatencyBudget(options.preflightBudgetMs ?? request.preflightBudgetMs, config.CAPABILITY_PREFLIGHT_SOFT_BUDGET_MS || 350),
     humanizeBudgetMs: clampLatencyBudget(options.humanizeBudgetMs ?? request.humanizeBudgetMs, config.HUMANIZER_SOFT_BUDGET_MS || 500),
@@ -484,6 +522,8 @@ function isPlannerSingleAuthorityEnabled() {
 function createInitialState(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
   const normalizedOptions = normalizeObject(options, {});
   const latencyDecision = buildLatencyDecision({
+    question,
+    runtimeQuestionText: question,
     routeMeta: normalizedOptions.routeMeta,
     topRouteType: normalizedOptions.topRouteType,
     routePolicyKey: normalizedOptions.routePolicyKey,

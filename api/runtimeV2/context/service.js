@@ -5,7 +5,10 @@ const { getLifeSchedulerEngine } = require('../../../core/lifeSchedulerEngine');
 const { buildPromptSnippet } = require('../../../utils/selfImprovementRuntime');
 const { buildStyleProfileSnippet } = require('../../../utils/styleProfileRuntime');
 const { buildSocialContextSnippet } = require('../../../utils/socialContextRuntime');
-const { buildMemoryContextAsync } = require('../../../utils/memoryContext');
+const {
+  buildMemoryContext,
+  buildMemoryContextAsync
+} = require('../../../utils/memoryContext');
 const {
   composePersonaMemoryState,
   renderPersonaMemoryPrompt
@@ -43,6 +46,8 @@ const {
 } = require('../../../utils/mainReplyPromptBlocks');
 
 const DYNAMIC_CONTEXT_PLAN_VERSION = 'dynamic_context_plan_v2';
+const MEMORY_RECALL_PROMPT_MIN_BUDGET_MS = 6000;
+const MEMORY_RECALL_QUERY_RE = /(昨天|昨日|前天|大前天|今天|今日|刚才|刚刚|上次|之前|前面|前几天|那天|聊了什么|聊过什么|聊到哪|说了什么|讲了什么|还记得|记得|记不记得|回忆|想起来|接着|继续|断片|失忆|\byesterday\b|\bremember\b|\blast time\b|\bearlier\b|what did we talk|where did we leave)/i;
 
 function getConfig() {
   try {
@@ -143,6 +148,61 @@ function normalizeArray(value) {
 function normalizeText(value, fallback = '') {
   const text = String(value || '').trim();
   return text || fallback;
+}
+
+function shouldForceMemoryContextForQuestion(question = '', options = {}) {
+  if (options?.forceMemoryContext === true) return true;
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  if (options?.intent?.needsMemory === true || routeMeta?.intent?.needsMemory === true) return true;
+  const text = normalizeText(
+    question
+    || options?.cleanText
+    || options?.rawText
+    || routeMeta.cleanText
+    || routeMeta.rawText
+    || routeMeta.userText
+  );
+  if (!text) return false;
+  if (/^(查一下|搜索|搜一下|最新|新闻|官网|search|look up|google)\b/i.test(text)) return false;
+  return MEMORY_RECALL_QUERY_RE.test(text);
+}
+
+function resolveMemoryPromptBudgetMs(options = {}, question = '') {
+  const currentConfig = getConfig();
+  const base = Math.max(0, Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300) || 0);
+  if (!shouldForceMemoryContextForQuestion(question, options)) return base;
+  const recallBudget = Math.max(
+    MEMORY_RECALL_PROMPT_MIN_BUDGET_MS,
+    Number(currentConfig.MEMORY_RECALL_PROMPT_SOFT_BUDGET_MS || 0) || 0,
+    Number(currentConfig.MEMORY_RETRIEVAL_RECALL_SOFT_BUDGET_MS || 0) || 0
+  );
+  return Math.max(base, recallBudget);
+}
+
+function buildFallbackMemoryContext(userId, question = '', options = {}, routeMeta = {}) {
+  if (options.memoryContext && typeof options.memoryContext === 'object') return options.memoryContext;
+  if (!shouldForceMemoryContextForQuestion(question, { ...options, routeMeta })) return {};
+  try {
+    return buildMemoryContext(userId, question || '', {
+      routePolicyKey: options.routePolicyKey,
+      topRouteType: options.topRouteType || routeMeta.topRouteType || '',
+      groupId: routeMeta.groupId || routeMeta.group_id || '',
+      sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+      sessionId: routeMeta.sessionId || routeMeta.session_id || '',
+      taskType: routeMeta.taskType || routeMeta.task_type || '',
+      agentName: options.agentName || routeMeta.agentName || routeMeta.agent_name || '',
+      toolName: routeMeta.toolName || routeMeta.tool_name || '',
+      journalToday: options.journalToday,
+      journalNow: options.journalNow,
+      dailyJournalTimestamp: options.dailyJournalTimestamp,
+      dailyJournalYearMonth: options.dailyJournalYearMonth,
+      dailyJournalMaxFourDayFiles: 1,
+      dailyJournalMaxMonthlyFiles: 0,
+      ragEnabled: false
+    });
+  } catch (_) {
+    return {};
+  }
 }
 
 function hashText(value = '') {
@@ -355,6 +415,7 @@ function blockHasUsableContent(block = {}) {
   const key = aliasId || blockId;
   const emptyPatternByBlock = {
     retrieved_memory_lite: /\[RetrievedMemoryLite\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
+    daily_journal: /\[DailyJournal\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     long_term_profile: /\[LongTermProfile\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     impression: /\[Impression\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     summary: /\[Summary\]\s*(?:none|null|undefined|暂无|无)?\s*$/i
@@ -1012,6 +1073,10 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       toolName: routeMeta.toolName || routeMeta.tool_name || '',
       sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
     });
+  const forceMemoryContext = shouldForceMemoryContextForQuestion(question, {
+    ...options,
+    routeMeta
+  });
   const personaMemoryState = promptMaterials?.personaMemoryState && typeof promptMaterials.personaMemoryState === 'object'
     ? promptMaterials.personaMemoryState
     : await composePersonaMemoryState({
@@ -1168,6 +1233,18 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     lane: 'dynamic_context',
     meta: {
       optional: true
+    }
+  }));
+  const dailyJournalPromptText = memoryContext.promptDailyJournalText || memoryContext.dailyJournalText || '';
+  promptBlocks.push(createPromptBlock('daily_journal', 'Daily Journal', `[DailyJournal]\n${dailyJournalPromptText || 'none'}`, {
+    stage: 'main',
+    priority: 261,
+    authority: 'memory_fact',
+    kind: 'memory',
+    lane: 'dynamic_context',
+    meta: {
+      optional: true,
+      evidenceOnly: true
     }
   }));
   const researchBriefText = formatResearchBriefsForPrompt(getRecentResearchBriefs(
@@ -1339,6 +1416,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
     hasRetrievedMemory: Boolean(memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt),
+    hasDailyJournal: Boolean(dailyJournalPromptText),
     hasLongTermProfile: Boolean(memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText),
     hasImpression: Boolean(memoryContext.promptImpressionText || memoryContext.impressionText),
     hasRelationshipState: true,
@@ -1380,6 +1458,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   const baseRuntimeAddedIds = [];
   if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
     baseRuntimeAddedIds.push('directed_context');
+  }
+  if (forceMemoryContext) {
+    baseRuntimeAddedIds.push('retrieved_memory_lite', 'daily_journal');
   }
   const selectedPromptBlocks = filterBlocksByPlan(promptBlocks, effectiveBaseDynamicPromptPlan, {
     requiredIds: [],
@@ -1443,6 +1524,18 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
           lane: 'dynamic_context',
           meta: {
             optional: true
+          }
+        }),
+        createPromptBlock('daily_journal_compact', 'Daily Journal Compact', `[DailyJournal]\n${trimTextByTokenBudget(dailyJournalPromptText, Math.floor(promptBudget * 0.12), 'tail') || 'none'}`, {
+          stage: 'main',
+          priority: 261,
+          authority: 'memory_fact',
+          kind: 'memory',
+          lane: 'dynamic_context',
+          meta: {
+            optional: true,
+            blockId: 'daily_journal',
+            evidenceOnly: true
           }
         }),
         createPromptBlock('long_term_profile_compact', 'Long Term Profile Compact', `[LongTermProfile] ${trimTextByTokenBudget(memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText, Math.floor(promptBudget * 0.18), 'tail') || '暂无'}`, {
@@ -1608,18 +1701,17 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const now = Date.now();
   const essentialStartedAt = now;
   const collectStartedAt = Date.now();
-  const fallbackMemoryContext = options.memoryContext && typeof options.memoryContext === 'object'
-    ? options.memoryContext
-    : {};
+  const fallbackMemoryContext = buildFallbackMemoryContext(userId, question, options, routeMeta);
   const fallbackSummaryText = fallbackMemoryContext.promptSummaryText
     || trimTextByTokenBudget(fallbackMemoryContext.summary || 'none', fallbackAffinity.shortTermMemoryTokens, 'tail')
     || 'none';
+  const memoryPromptBudgetMs = resolveMemoryPromptBudgetMs(options, question);
   const promptMaterials = await withSoftTimeout(
     () => collectPromptInputs(userInfo, userId, question, customPrompt, {
       ...options,
       sharedShortTermContext
     }),
-    Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
+    memoryPromptBudgetMs,
     () => ({
       userInfo,
       userId,
@@ -1667,7 +1759,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
         ...options,
         sharedShortTermContext
       }),
-      Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300),
+      memoryPromptBudgetMs,
       () => ({
         dynamicPrompt: '',
         stableSystemBlocks: [],
@@ -1906,6 +1998,10 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   }
 
   const memoryCliInstruction = !optionalBudgetExceeded ? buildV2MemoryCliInstruction(options?.memoryCliTurn) : '';
+  const forceMemoryContext = shouldForceMemoryContextForQuestion(question, {
+    ...options,
+    routeMeta
+  });
   const combinedStableBlocks = normalizeArray(stableLayer.stableSystemBlocks).map((item) => ({ ...item }));
   const sessionDynamicFingerprints = new Set(
     normalizeArray(sessionCandidateLayer.dynamicContextBlocks).map((item) => buildPromptBlockFingerprint(item)).filter(Boolean)
@@ -1932,6 +2028,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
     hasRetrievedMemory: combinedDynamicBlocks.some((item) => item?.id === 'retrieved_memory_lite'),
+    hasDailyJournal: combinedDynamicBlocks.some((item) => item?.id === 'daily_journal' || normalizeText(item?.meta?.blockId) === 'daily_journal'),
     hasLongTermProfile: combinedDynamicBlocks.some((item) => item?.id === 'long_term_profile'),
     hasImpression: combinedDynamicBlocks.some((item) => item?.id === 'impression'),
     hasRelationshipState: combinedDynamicBlocks.some((item) => normalizeText(item?.meta?.blockId) === 'relationship_state'),
@@ -1948,6 +2045,9 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const runtimeAddedIds = [];
   if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
     runtimeAddedIds.push('directed_context');
+  }
+  if (forceMemoryContext) {
+    runtimeAddedIds.push('retrieved_memory_lite', 'daily_journal');
   }
   const finalDynamicPromptPlan = {
     ...cloneDynamicPromptPlan(shouldUseHeuristicDynamicPlan ? heuristicDynamicPlan : dynamicPromptPlan),
@@ -1994,6 +2094,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   });
   const criticalBlockIdPrefixes = new Set([
     'retrieved_memory',
+    'daily_journal',
     'directed_context',
     'long_term_profile',
     'impression',
@@ -2156,7 +2257,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       optionalBudgetExceeded,
       promptCollectMs,
       promptRenderMs
-    }
+    },
+    dynamicFewShotPrompt: effectiveOptionalLayer?.dynamicFewShotPrompt || sessionCandidateLayer.dynamicFewShotPrompt || promptMaterials.dynamicFewShotPrompt || ''
   };
 }
 

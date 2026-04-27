@@ -20,6 +20,19 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function isTopPEnabled() {
+  const raw = normalizeText(config.MODEL_TOP_P_ENABLED || process.env.MODEL_TOP_P_ENABLED).toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(raw);
+}
+
+function stripTopPField(requestBody = {}) {
+  if (isTopPEnabled()) return requestBody;
+  if (!requestBody || typeof requestBody !== 'object' || Array.isArray(requestBody)) return requestBody;
+  const nextBody = { ...requestBody };
+  delete nextBody.top_p;
+  return nextBody;
+}
+
 const OPENAI_IMAGE_DETAIL_VALUES = new Set(['auto', 'low', 'high']);
 
 function normalizeJsonObject(value) {
@@ -111,6 +124,21 @@ function stripCacheControlFields(target) {
   delete next.cache_control;
   delete next.cacheControl;
   delete next.cache;
+  return next;
+}
+
+function stripOpenAIPromptCacheFields(target) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
+  const next = { ...target };
+  delete next.prompt_cache_key;
+  delete next.prompt_cache_retention;
+  return next;
+}
+
+function stripOpenAIPromptCacheRetention(target) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
+  const next = { ...target };
+  delete next.prompt_cache_retention;
   return next;
 }
 
@@ -575,6 +603,42 @@ function sanitizeOpenAICompatibleContentPart(part) {
     : sanitized;
 }
 
+function sanitizeOpenAICompatibleContentPartWithoutCache(part) {
+  const sanitized = sanitizeOpenAICompatibleContentPart(part);
+  if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) return sanitized;
+  return stripCacheControlFields(sanitized);
+}
+
+function sanitizeOpenAICompatibleMessageWithoutCache(message = {}) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return message;
+  const nextMessage = stripCacheControlFields(message);
+  if (Array.isArray(nextMessage.content)) {
+    return {
+      ...nextMessage,
+      content: nextMessage.content.map((part) => sanitizeOpenAICompatibleContentPartWithoutCache(part))
+    };
+  }
+  if (nextMessage.content && typeof nextMessage.content === 'object' && !Array.isArray(nextMessage.content)) {
+    return {
+      ...nextMessage,
+      content: sanitizeOpenAICompatibleContentPartWithoutCache(nextMessage.content)
+    };
+  }
+  return nextMessage;
+}
+
+function sanitizeOpenAICompatibleToolWithoutCache(tool = {}) {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool;
+  const nextTool = stripCacheControlFields(tool);
+  if (nextTool.function && typeof nextTool.function === 'object' && !Array.isArray(nextTool.function)) {
+    return {
+      ...nextTool,
+      function: stripCacheControlFields(nextTool.function)
+    };
+  }
+  return nextTool;
+}
+
 function buildUnavailableImageText(imageUrl = '') {
   if (parseCacheRef(imageUrl)) {
     return '[Image unavailable: cached image payload missing.]';
@@ -867,8 +931,49 @@ async function preprocessOpenAICompatibleMessages(messages = []) {
   return out;
 }
 
+async function preprocessOpenAICompatibleMessagesWithoutCache(messages = []) {
+  const normalizedMessages = Array.isArray(messages) ? messages : [];
+  const out = [];
+
+  for (const message of normalizedMessages) {
+    if (!message || typeof message !== 'object') {
+      out.push(message);
+      continue;
+    }
+
+    const strippedMessage = sanitizeOpenAICompatibleMessageWithoutCache(message);
+    const content = Array.isArray(strippedMessage?.content) ? strippedMessage.content : null;
+    if (!content) {
+      out.push(strippedMessage);
+      continue;
+    }
+
+    const nextContent = [];
+    for (const part of content) {
+      const partType = String(part?.type || '').toLowerCase();
+      if (partType === 'image_url' || partType === 'input_image' || partType === 'image') {
+        const resolvedPart = await resolveOpenAICompatibleImagePart(part);
+        if (resolvedPart) nextContent.push(stripCacheControlFields(resolvedPart));
+        continue;
+      }
+      nextContent.push(part);
+    }
+
+    out.push({
+      ...strippedMessage,
+      content: nextContent
+    });
+  }
+
+  return out;
+}
+
 function requestUsesOpenAICompatiblePromptCaching(requestBody = {}) {
-  const topLevel = Boolean(extractAnthropicCacheControl(requestBody));
+  const topLevel = Boolean(
+    requestBody?.prompt_cache_key
+    || requestBody?.prompt_cache_retention
+    || extractAnthropicCacheControl(requestBody)
+  );
   if (topLevel) return true;
   return (Array.isArray(requestBody.messages) ? requestBody.messages : []).some((message) => {
     const content = message?.content;
@@ -879,12 +984,27 @@ function requestUsesOpenAICompatiblePromptCaching(requestBody = {}) {
   });
 }
 
+function requestUsesOpenAIPromptCacheRetention(requestBody = {}) {
+  return Boolean(requestBody && typeof requestBody === 'object' && requestBody.prompt_cache_retention);
+}
+
+function stripOpenAIPromptCacheRetentionFromRequest(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return requestBody;
+  return stripOpenAIPromptCacheRetention(requestBody);
+}
+
 function stripOpenAICompatiblePromptCaching(requestBody = {}) {
   if (!requestBody || typeof requestBody !== 'object') return requestBody;
-  const nextBody = stripCacheControlFields(requestBody);
-  if (!Array.isArray(nextBody.messages)) return nextBody;
-  return {
+  const nextBody = stripOpenAIPromptCacheFields(stripCacheControlFields(requestBody));
+  const strippedBody = {
     ...nextBody,
+    tools: Array.isArray(nextBody.tools)
+      ? nextBody.tools.map((tool) => sanitizeOpenAICompatibleToolWithoutCache(tool))
+      : nextBody.tools
+  };
+  if (!Array.isArray(nextBody.messages)) return strippedBody;
+  return {
+    ...strippedBody,
     messages: nextBody.messages.map((message) => {
       if (!message || typeof message !== 'object') return message;
       const nextMessage = stripCacheControlFields(message);
@@ -905,6 +1025,16 @@ function stripOpenAICompatiblePromptCaching(requestBody = {}) {
   };
 }
 
+function isOpenAIPromptCacheRetentionSchemaError(error) {
+  const status = Number(error?.response?.status || 0);
+  if (![400, 404, 415, 422].includes(status)) return false;
+  const responseData = error?.response?.data;
+  const bodyText = typeof responseData === 'string'
+    ? responseData
+    : JSON.stringify(responseData || {});
+  return /prompt[_-]?cache[_-]?retention/i.test(bodyText);
+}
+
 function isOpenAICompatiblePromptCacheSchemaError(error) {
   const status = Number(error?.response?.status || 0);
   if (![400, 404, 415, 422].includes(status)) return false;
@@ -912,7 +1042,178 @@ function isOpenAICompatiblePromptCacheSchemaError(error) {
   const bodyText = typeof responseData === 'string'
     ? responseData
     : JSON.stringify(responseData || {});
-  return /cache[_-]?control|prompt[_-]?cache|unknown field|extra inputs|additional properties/i.test(bodyText);
+  return /cache[_-]?control|prompt[_-]?cache|prompt[_-]?cache[_-]?key|unknown field|extra inputs|additional properties/i.test(bodyText);
+}
+
+function isResponsesUrl(url = '') {
+  return /\/responses(?:\/)?$/i.test(String(url || '').trim());
+}
+
+function normalizeResponsesTextContent(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === 'string') return part;
+      if (!part || typeof part !== 'object') return '';
+      return String(part.text || part.content || part.output_text || '');
+    }).join('');
+  }
+  if (content && typeof content === 'object') return String(content.text || content.content || '');
+  return String(content || '');
+}
+
+function mapContentPartToResponsesInput(part) {
+  if (typeof part === 'string') return { type: 'input_text', text: part };
+  if (!part || typeof part !== 'object' || Array.isArray(part)) return null;
+  const type = String(part.type || '').trim().toLowerCase();
+  if (type === 'image_url') {
+    const url = String(part?.image_url?.url || part.url || '').trim();
+    if (!url) return null;
+    const mapped = { type: 'input_image', image_url: url };
+    const detail = normalizeOpenAIImageDetail(part?.image_url?.detail || part.detail);
+    if (detail) mapped.detail = detail;
+    return mapped;
+  }
+  if (type === 'input_image') {
+    const url = String(part.image_url || part.url || '').trim();
+    if (!url) return null;
+    const mapped = { type: 'input_image', image_url: url };
+    const detail = normalizeOpenAIImageDetail(part.detail);
+    if (detail) mapped.detail = detail;
+    return mapped;
+  }
+  if (type === 'input_text' || type === 'text') {
+    return { type: 'input_text', text: String(part.text || part.content || '') };
+  }
+  const text = normalizeResponsesTextContent(part);
+  return text ? { type: 'input_text', text } : null;
+}
+
+function mapMessageContentToResponsesInput(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map(mapContentPartToResponsesInput).filter(Boolean);
+  }
+  if (content && typeof content === 'object') {
+    const mapped = mapContentPartToResponsesInput(content);
+    return mapped ? [mapped] : '';
+  }
+  return String(content || '');
+}
+
+function mapChatMessageToResponsesInput(message = {}) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return null;
+  const role = String(message.role || '').trim().toLowerCase();
+  if (role === 'tool') {
+    const callId = String(message.tool_call_id || message.call_id || '').trim();
+    if (!callId) return null;
+    return {
+      type: 'function_call_output',
+      call_id: callId,
+      output: typeof message.content === 'string' ? message.content : JSON.stringify(message.content || '')
+    };
+  }
+  if (role === 'assistant' && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+    return message.tool_calls.map((toolCall) => ({
+      type: 'function_call',
+      call_id: String(toolCall.id || toolCall.call_id || '').trim(),
+      name: String(toolCall?.function?.name || toolCall.name || '').trim(),
+      arguments: String(toolCall?.function?.arguments || toolCall.arguments || '{}')
+    })).filter((item) => item.call_id && item.name);
+  }
+  const allowedRole = role === 'developer' || role === 'system' || role === 'assistant'
+    ? role
+    : 'user';
+  return {
+    type: 'message',
+    role: allowedRole,
+    content: mapMessageContentToResponsesInput(message.content)
+  };
+}
+
+function mapChatMessagesToResponsesInput(messages = []) {
+  const input = [];
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const mapped = mapChatMessageToResponsesInput(message);
+    if (Array.isArray(mapped)) input.push(...mapped);
+    else if (mapped) input.push(mapped);
+  }
+  return input;
+}
+
+function mapChatToolsToResponsesTools(tools = []) {
+  return (Array.isArray(tools) ? tools : [])
+    .map((tool) => {
+      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return null;
+      if (String(tool.type || '').trim() !== 'function' || !tool.function) return tool;
+      const fn = tool.function;
+      const mapped = {
+        type: 'function',
+        name: String(fn.name || '').trim(),
+        parameters: fn.parameters && typeof fn.parameters === 'object' ? fn.parameters : null
+      };
+      if (typeof fn.description === 'string') mapped.description = fn.description;
+      if (typeof fn.strict === 'boolean') mapped.strict = fn.strict;
+      return mapped.name ? mapped : null;
+    })
+    .filter(Boolean);
+}
+
+function mapToolChoiceToResponses(toolChoice) {
+  if (!toolChoice || typeof toolChoice === 'string') return toolChoice;
+  if (typeof toolChoice !== 'object') return toolChoice;
+  if (toolChoice.type === 'function') {
+    return {
+      type: 'function',
+      name: String(toolChoice?.function?.name || toolChoice.name || '').trim()
+    };
+  }
+  return toolChoice;
+}
+
+function mapReasoningEffortToResponses(value) {
+  const effort = normalizeReasoningEffort(value);
+  return effort ? { effort } : null;
+}
+
+function buildResponsesRequestBody(openAICompatibleBody = {}) {
+  const body = openAICompatibleBody && typeof openAICompatibleBody === 'object'
+    ? stripTopPField({ ...openAICompatibleBody })
+    : {};
+  const requestBody = {
+    model: body.model,
+    input: Array.isArray(body.input) || typeof body.input === 'string'
+      ? body.input
+      : mapChatMessagesToResponsesInput(body.messages),
+    stream: Boolean(body.stream)
+  };
+
+  if (Number.isFinite(Number(body.temperature))) requestBody.temperature = Number(body.temperature);
+  if (Number.isFinite(Number(body.top_p))) requestBody.top_p = Number(body.top_p);
+  if (Number.isFinite(Number(body.max_output_tokens))) {
+    requestBody.max_output_tokens = Math.floor(Number(body.max_output_tokens));
+  } else if (Number.isFinite(Number(body.max_tokens))) {
+    requestBody.max_output_tokens = Math.floor(Number(body.max_tokens));
+  }
+  const reasoning = body.reasoning && typeof body.reasoning === 'object'
+    ? body.reasoning
+    : mapReasoningEffortToResponses(body.reasoning_effort);
+  if (reasoning) requestBody.reasoning = reasoning;
+  if (Array.isArray(body.tools)) {
+    const tools = mapChatToolsToResponsesTools(body.tools);
+    if (tools.length > 0) requestBody.tools = tools;
+  }
+  const toolChoice = mapToolChoiceToResponses(body.tool_choice);
+  if (toolChoice) requestBody.tool_choice = toolChoice;
+  if (body.prompt_cache_key) requestBody.prompt_cache_key = body.prompt_cache_key;
+  if (body.prompt_cache_retention) requestBody.prompt_cache_retention = body.prompt_cache_retention;
+  if (body.user) requestBody.user = body.user;
+  if (body.service_tier) requestBody.service_tier = body.service_tier;
+  if (body.text) requestBody.text = body.text;
+  if (body.truncation) requestBody.truncation = body.truncation;
+  if (Array.isArray(body.include)) requestBody.include = body.include;
+  if (body.previous_response_id) requestBody.previous_response_id = body.previous_response_id;
+  return requestBody;
 }
 
 function isAnthropicPromptCacheSchemaError(error) {
@@ -1188,47 +1489,48 @@ async function mapMessagesToAnthropic(messages) {
 }
 
 async function buildAnthropicRequestBody(body = {}) {
-  const mapped = await mapMessagesToAnthropic(body.messages);
-  const maxTokens = Number(body.max_tokens);
+  const inputBody = stripTopPField(body);
+  const mapped = await mapMessagesToAnthropic(inputBody.messages);
+  const maxTokens = Number(inputBody.max_tokens);
 
   const requestBody = {
-    model: normalizeText(body.model) || normalizeText(config.AI_MODEL) || 'claude-3-5-sonnet-latest',
+    model: normalizeText(inputBody.model) || normalizeText(config.AI_MODEL) || 'claude-3-5-sonnet-latest',
     max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : 1024,
     messages: mapped.messages,
-    stream: Boolean(body.stream)
+    stream: Boolean(inputBody.stream)
   };
 
   if (mapped.system.length > 0) requestBody.system = mapped.system;
 
-  const temperature = clampTemperatureForProvider('anthropic', body.temperature);
+  const temperature = clampTemperatureForProvider('anthropic', inputBody.temperature);
   if (temperature !== null) requestBody.temperature = temperature;
 
-  const topP = Number(body.top_p);
+  const topP = Number(inputBody.top_p);
   if (Number.isFinite(topP)) requestBody.top_p = topP;
 
-  const topK = Number(body.top_k);
+  const topK = Number(inputBody.top_k);
   if (Number.isFinite(topK) && topK > 0) requestBody.top_k = Math.floor(topK);
 
-  if (Array.isArray(body.stop)) {
-    const stops = body.stop.map((x) => String(x || '').trim()).filter(Boolean);
+  if (Array.isArray(inputBody.stop)) {
+    const stops = inputBody.stop.map((x) => String(x || '').trim()).filter(Boolean);
     if (stops.length) requestBody.stop_sequences = stops;
   }
 
-  if (Array.isArray(body.tools)) {
-    const tools = body.tools
+  if (Array.isArray(inputBody.tools)) {
+    const tools = inputBody.tools
       .map(mapToolSchemaToAnthropic)
       .filter(Boolean);
     if (tools.length) {
       requestBody.tools = tools;
-      const choice = mapToolChoiceToAnthropic(body.tool_choice);
+      const choice = mapToolChoiceToAnthropic(inputBody.tool_choice);
       if (choice) requestBody.tool_choice = choice;
     }
   }
 
-  if (normalizeReasoningEffort(body.reasoning_effort)) {
+  if (normalizeReasoningEffort(inputBody.reasoning_effort)) {
     requestBody.max_tokens = Math.max(Number(requestBody.max_tokens) || 0, 1200);
   }
-  const thinkingBudget = getAnthropicThinkingBudget(requestBody.max_tokens, body.reasoning_effort);
+  const thinkingBudget = getAnthropicThinkingBudget(requestBody.max_tokens, inputBody.reasoning_effort);
   if (thinkingBudget > 0) {
     requestBody.thinking = {
       type: 'enabled',
@@ -1243,24 +1545,37 @@ async function prepareRequest(url, body = {}) {
   const provider = getApiProvider(url, body?.model || config.AI_MODEL);
   if (provider !== 'anthropic') {
     const requestBody = body && typeof body === 'object'
-      ? stripInternalRequestFields(stripCacheControlFields({ ...body }))
+      ? stripTopPField(stripInternalRequestFields(stripCacheControlFields({ ...body })))
       : body;
+    const shouldUseOpenAIPromptCache = Boolean(
+      requestBody
+      && typeof requestBody === 'object'
+      && (requestBody.prompt_cache_key || requestBody.prompt_cache_retention)
+    );
     const normalizedTopLevelCacheControl = extractAnthropicCacheControl(body);
-    if (normalizedTopLevelCacheControl) {
+    if (normalizedTopLevelCacheControl && !shouldUseOpenAIPromptCache) {
       requestBody.cache_control = normalizedTopLevelCacheControl;
     }
     if (requestBody && Array.isArray(requestBody.messages)) {
-      requestBody.messages = await preprocessOpenAICompatibleMessages(requestBody.messages);
+      requestBody.messages = shouldUseOpenAIPromptCache
+        ? await preprocessOpenAICompatibleMessagesWithoutCache(requestBody.messages)
+        : await preprocessOpenAICompatibleMessages(requestBody.messages);
+    }
+    if (requestBody && shouldUseOpenAIPromptCache && Array.isArray(requestBody.tools)) {
+      requestBody.tools = requestBody.tools.map((tool) => sanitizeOpenAICompatibleToolWithoutCache(tool));
     }
     const reasoningEffort = normalizeReasoningEffort(requestBody?.reasoning_effort);
     if (requestBody && typeof requestBody === 'object') {
       if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
       else delete requestBody.reasoning_effort;
     }
+    const finalRequestBody = isResponsesUrl(url)
+      ? buildResponsesRequestBody(requestBody)
+      : requestBody;
     return {
       provider,
       requestUrl: url,
-      requestBody
+      requestBody: finalRequestBody
     };
   }
 
@@ -1567,6 +1882,75 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       if (
         callId
         && prepared?.provider === 'openai_compatible'
+        && requestUsesOpenAIPromptCacheRetention(prepared.requestBody)
+        && isOpenAIPromptCacheRetentionSchemaError(e)
+      ) {
+        try {
+          const strippedRequestBody = stripOpenAIPromptCacheRetentionFromRequest(prepared.requestBody);
+          const response = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+          );
+          finishModelCall(callId, {
+            response,
+            attempts: i + 1,
+            request: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          });
+          return response;
+        } catch (retryWithoutRetentionError) {
+          const strippedRetentionRequestBody = stripOpenAIPromptCacheRetentionFromRequest(prepared.requestBody);
+          if (
+            requestUsesOpenAICompatiblePromptCaching(strippedRetentionRequestBody)
+            && isOpenAICompatiblePromptCacheSchemaError(retryWithoutRetentionError)
+          ) {
+            try {
+              const strippedCacheRequestBody = stripOpenAICompatiblePromptCaching(strippedRetentionRequestBody);
+              const response = await axios.post(
+                prepared.requestUrl,
+                strippedCacheRequestBody,
+                getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+              );
+              finishModelCall(callId, {
+                response,
+                attempts: i + 1,
+                request: strippedCacheRequestBody,
+                requestHeaders: prepared.requestHeaders
+              });
+              return response;
+            } catch (retryWithoutCacheError) {
+              if (callId) {
+                failModelCall(callId, retryWithoutCacheError, {
+                  attempts: i + 1,
+                  request: stripOpenAICompatiblePromptCaching(strippedRetentionRequestBody),
+                  requestHeaders: prepared.requestHeaders
+                });
+              }
+              lastErr = retryWithoutCacheError;
+              if (i >= maxRetry || !shouldRetry(retryWithoutCacheError)) break;
+              const delayMs = getRetryDelayMs(retryWithoutCacheError, i);
+              await new Promise((r) => setTimeout(r, delayMs));
+              continue;
+            }
+          }
+          if (callId) {
+            failModelCall(callId, retryWithoutRetentionError, {
+              attempts: i + 1,
+              request: strippedRetentionRequestBody,
+              requestHeaders: prepared.requestHeaders
+            });
+          }
+          lastErr = retryWithoutRetentionError;
+          if (i >= maxRetry || !shouldRetry(retryWithoutRetentionError)) break;
+          const delayMs = getRetryDelayMs(retryWithoutRetentionError, i);
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+      }
+      if (
+        callId
+        && prepared?.provider === 'openai_compatible'
         && requestUsesOpenAICompatiblePromptCaching(prepared.requestBody)
         && isOpenAICompatiblePromptCacheSchemaError(e)
       ) {
@@ -1731,6 +2115,43 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             requestBody: strippedRequestBody,
             requestHeaders: prepared.requestHeaders
           };
+        } else if (
+          prepared?.provider === 'openai_compatible'
+          && requestUsesOpenAIPromptCacheRetention(prepared.requestBody)
+          && isOpenAIPromptCacheRetentionSchemaError(error)
+        ) {
+          const strippedRequestBody = stripOpenAIPromptCacheRetentionFromRequest(prepared.requestBody);
+          try {
+            resp = await axios.post(
+              prepared.requestUrl,
+              strippedRequestBody,
+              getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+            );
+            prepared = {
+              ...prepared,
+              requestBody: strippedRequestBody,
+              requestHeaders: prepared.requestHeaders
+            };
+          } catch (retryWithoutRetentionError) {
+            if (
+              requestUsesOpenAICompatiblePromptCaching(strippedRequestBody)
+              && isOpenAICompatiblePromptCacheSchemaError(retryWithoutRetentionError)
+            ) {
+              const strippedCacheRequestBody = stripOpenAICompatiblePromptCaching(strippedRequestBody);
+              resp = await axios.post(
+                prepared.requestUrl,
+                strippedCacheRequestBody,
+                getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+              );
+              prepared = {
+                ...prepared,
+                requestBody: strippedCacheRequestBody,
+                requestHeaders: prepared.requestHeaders
+              };
+            } else {
+              throw retryWithoutRetentionError;
+            }
+          }
         } else if (
           prepared?.provider === 'openai_compatible'
           && requestUsesOpenAICompatiblePromptCaching(prepared.requestBody)

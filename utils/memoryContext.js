@@ -28,6 +28,9 @@ const {
   queryMemory,
   assembleMemoryPacket
 } = require('./memory-v3');
+const {
+  resolveJournalTargetDays
+} = require('./memory-v3/journalDocs');
 const { queryLocalKnowledge } = require('./localKnowledge');
 
 function sanitizeText(value) {
@@ -191,6 +194,7 @@ function buildMemoKey(prefix, userId, question = '', options = {}) {
     sanitizeText(options.sharedShortTermSignature) ? `shared:${sanitizeText(options.sharedShortTermSignature)}` : ''
   ].filter(Boolean).join('|') || 'default';
   const lookback = String(options.dailyLookbackDays || options.lookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS || '');
+  const journalTarget = sanitizeText(options.dailyJournalTimestamp || options.dailyJournalYearMonth || '');
   return [
     prefix,
     sanitizeText(userId),
@@ -198,7 +202,8 @@ function buildMemoKey(prefix, userId, question = '', options = {}) {
     sanitizeText(options.taskType),
     sanitizeText(question),
     kindMask,
-    lookback
+    lookback,
+    journalTarget
   ].join('|');
 }
 
@@ -208,6 +213,32 @@ function memoizeValue(options, key, factory) {
   const value = factory();
   memo.set(key, value);
   return value;
+}
+
+function resolveDailyJournalTimestamp(question = '', options = {}) {
+  const explicit = sanitizeText(options.dailyJournalTimestamp);
+  if (explicit) return explicit;
+  const targetDays = resolveJournalTargetDays(question, {
+    today: options.journalToday,
+    now: options.journalNow
+  });
+  return targetDays[0] || '';
+}
+
+function formatDailyJournalPromptItem(item = {}) {
+  if (!item || !item.text) return '';
+  if (item.kind === 'four_day_rollup') return `[4day ${item.startDay}..${item.endDay}]\n${item.text}`;
+  if (item.kind === 'monthly_rollup') return `[month ${item.yearMonth} ${item.part || ''}]\n${item.text}`.trim();
+  return `[${item.day || item.episodeDay || item.title || 'daily'}]\n${item.text}`;
+}
+
+function buildPromptJournalItems(bundle = {}) {
+  const daily = Array.isArray(bundle?.byLayer?.daily) ? bundle.byLayer.daily : [];
+  const fourDay = Array.isArray(bundle?.byLayer?.fourDay) ? bundle.byLayer.fourDay : [];
+  const monthly = Array.isArray(bundle?.byLayer?.monthly) ? bundle.byLayer.monthly : [];
+  if (daily.length > 0) return daily.concat(fourDay.slice(-1), monthly.slice(-1));
+  if (fourDay.length > 0) return fourDay.concat(monthly.slice(-1));
+  return monthly;
 }
 
 function isStyleQuery(question = '', options = {}) {
@@ -469,12 +500,16 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
   const impression = getUserImpression(userId);
   const affinityState = getUserAffinityState(userId, options);
   const factText = getUserMemories(userId);
+  const dailyJournalTimestamp = resolveDailyJournalTimestamp(question, options);
   const dailyJournalBundle = memoizeValue(
     options,
-    buildMemoKey('journal-bundle', userId, question || '', options),
+    buildMemoKey('journal-bundle', userId, question || '', {
+      ...options,
+      dailyJournalTimestamp
+    }),
     () => getDailyJournalRetrievalBundle(userId, {
       lookbackDays: options.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
-      timestamp: options.dailyJournalTimestamp,
+      timestamp: dailyJournalTimestamp,
       yearMonth: options.dailyJournalYearMonth,
       maxFourDayFiles: options.dailyJournalMaxFourDayFiles,
       maxMonthlyFiles: options.dailyJournalMaxMonthlyFiles
@@ -506,19 +541,10 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     const hitGroupId = sanitizeText(hit?.groupId);
     return promptGroupIds.length > 0 && promptGroupIds.includes(hitGroupId);
   });
-  const promptJournalItems = dailyJournalBundle?.byLayer?.fourDay?.length > 0
-    ? dailyJournalBundle.byLayer.fourDay
-    : (dailyJournalBundle?.byLayer?.monthly?.length > 0
-      ? dailyJournalBundle.byLayer.monthly
-      : dailyJournalBundle?.byLayer?.daily || []);
+  const promptJournalItems = buildPromptJournalItems(dailyJournalBundle);
   const promptDailyJournalText = Array.isArray(promptJournalItems)
     ? promptJournalItems
-      .map((item) => {
-        if (!item || !item.text) return '';
-        if (item.kind === 'four_day_rollup') return `[4day ${item.startDay}..${item.endDay}]\n${item.text}`;
-        if (item.kind === 'monthly_rollup') return `[month ${item.yearMonth} ${item.part || ''}]\n${item.text}`.trim();
-        return `[${item.day}]\n${item.text}`;
-      })
+      .map(formatDailyJournalPromptItem)
       .filter(Boolean)
       .join('\n\n')
     : '';
@@ -563,10 +589,17 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     getPromptTokenLimit('MAIN_PROMPT_GROUP_MEMORY_MAX_TOKENS', 160),
     'tail'
   );
+  const dailyJournalTokenLimit = dailyJournalTimestamp
+    ? Math.max(
+      getPromptTokenLimit('MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS', 160),
+      getPromptTokenLimit('MAIN_PROMPT_TARGET_DAILY_JOURNAL_MAX_TOKENS', 420)
+    )
+    : getPromptTokenLimit('MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS', 160);
+  const dailyJournalTrimStrategy = dailyJournalTimestamp ? 'head' : 'tail';
   const promptDailyJournalTrimmedText = limitPromptText(
     promptDailyJournalText,
-    getPromptTokenLimit('MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS', 160),
-    'tail'
+    dailyJournalTokenLimit,
+    dailyJournalTrimStrategy
   );
   const promptLongTermProfileText = limitPromptText(
     promptLongTermProfileSourceText,
@@ -588,7 +621,7 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
   if (promptStyleSignalsText) memorySections.push(`[StyleSignals]\n${promptStyleSignalsText}`);
   const segments = {
     retrievedMemory: clampPromptMessage('RetrievedMemory', promptRetrievedMemoryText, getPromptTokenLimit('MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', 420), 'tail'),
-    dailyJournal: clampPromptMessage('DailyJournal', promptDailyJournalTrimmedText, getPromptTokenLimit('MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS', 160), 'tail'),
+    dailyJournal: clampPromptMessage('DailyJournal', promptDailyJournalTrimmedText, dailyJournalTokenLimit, dailyJournalTrimStrategy),
     taskMemory: clampPromptMessage('TaskMemory', promptTaskMemoryText, getPromptTokenLimit('MAIN_PROMPT_TASK_MEMORY_MAX_TOKENS', 160), 'tail'),
     groupMemory: clampPromptMessage('GroupMemory', promptGroupMemoryTrimmedText, getPromptTokenLimit('MAIN_PROMPT_GROUP_MEMORY_MAX_TOKENS', 160), 'tail'),
     styleSignals: clampPromptMessage('StyleSignals', promptStyleSignalsText, getPromptTokenLimit('MAIN_PROMPT_STYLE_SIGNALS_MAX_TOKENS', 80), 'tail'),
@@ -682,7 +715,8 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     taskType: options.taskType,
     agentName: options.agentName,
     toolName: options.toolName,
-    lookbackDays: options.dailyLookbackDays || options.lookbackDays
+    lookbackDays: options.dailyLookbackDays || options.lookbackDays,
+    skipMemoryV3: true
   });
   if (config.MEMORY_V3_ENABLED) {
     const resolvedGroupIds = resolveReadableGroupIds(userId, options);

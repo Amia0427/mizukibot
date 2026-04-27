@@ -335,7 +335,19 @@ function createPrepareNode(deps = {}) {
         dynamicContextBlocks: normalizeArray(dynamicContextBlocks),
         assistantOnlyContextBlocks: normalizeArray(assistantOnlyContextBlocks),
         affinity,
-        context: memoryContext || null
+        context: memoryContext || null,
+        continuityState: {
+          payload: continuityBuilt.payload,
+          text: continuityBuilt.text,
+          probe: continuityProbe.probeMeta
+            ? {
+                facet: continuityProbe.probeMeta.facet,
+                skipped: Boolean(continuityProbe.skipped),
+                reason: continuityProbe.reason
+              }
+            : null,
+          hasSufficientEvidence: continuityBuilt.hasSufficientEvidence
+        }
       },
       execution: {
         ...restoredExecution,

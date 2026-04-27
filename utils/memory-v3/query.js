@@ -22,6 +22,12 @@ const {
   loadEmbeddingIndex,
   calcEmbeddingSimilarity
 } = require('./embeddingIndex');
+const {
+  buildDailyJournalDocsForUser,
+  getJournalDocDay,
+  journalDateMatchBoost,
+  resolveJournalTargetDays
+} = require('./journalDocs');
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
 
@@ -34,6 +40,7 @@ function looksLikePollutedSessionSummary(text = '') {
 function classifyFacet(query = '', options = {}) {
   const text = normalizeText(query).toLowerCase();
   if (String(options.facet || '').trim()) return String(options.facet).trim().toLowerCase();
+  if (/(昨天|昨日|前天|今天|聊了什么|回忆|日记|journal|前几天|那天|最近发生)/i.test(text)) return 'journal';
   if (/(刚才|刚刚|继续|接着|上次|之前|记得|left off|where.*leave|continue|remember)/i.test(text)) return 'continuity';
   if (/(喜欢|不喜欢|偏好|prefer|like|dislike|nickname|称呼)/i.test(text)) return 'preference';
   if (/(是谁|身份|背景|identity|occupation|profile)/i.test(text)) return 'identity';
@@ -218,6 +225,13 @@ function collectCandidates(userId, options = {}) {
     });
   }
 
+  for (const doc of buildDailyJournalDocsForUser(userId, { includeSegments: true })) {
+    candidates.push({
+      ...doc,
+      canonicalKey: canonicalizeText(doc.text)
+    });
+  }
+
   return candidates.filter((item) => normalizeText(item.text));
 }
 
@@ -278,9 +292,38 @@ function semanticSlotForCandidate(candidate) {
   return normalizeText(candidate.semanticSlot || candidate.type || '').toLowerCase() || 'fact';
 }
 
-async function scoreCandidates(candidates = [], query = '', facet = 'default') {
+function isJournalTargetDayCandidate(candidate = {}, targetDays = []) {
+  if (!Array.isArray(targetDays) || targetDays.length === 0) return false;
+  if (String(candidate.source || '').toLowerCase() !== 'journal') return false;
+  const day = getJournalDocDay(candidate);
+  return Boolean(day && targetDays.includes(day));
+}
+
+function applyJournalTargetDayPriority(items = [], targetDays = []) {
+  if (!Array.isArray(targetDays) || targetDays.length === 0) return items;
+  const hardBoost = Math.max(4, Number(config.MEMORY_JOURNAL_TARGET_DATE_HARD_BOOST || 8) || 8);
+  return (Array.isArray(items) ? items : []).map((item) => {
+    if (!isJournalTargetDayCandidate(item, targetDays)) return item;
+    const score = Number(item.score || 0) || 0;
+    return {
+      ...item,
+      score: score + hardBoost,
+      journalTargetDayPriority: true,
+      scoreParts: {
+        ...(item.scoreParts || {}),
+        targetDatePriorityBoost: hardBoost
+      }
+    };
+  });
+}
+
+async function scoreCandidates(candidates = [], query = '', facet = 'default', options = {}) {
   const rewrites = rewriteQuery(query, facet);
   const queryTokens = uniqueBy(rewrites.flatMap((item) => tokenize(item)), (item) => item);
+  const journalTargetDays = resolveJournalTargetDays(query, {
+    today: options.journalToday,
+    now: options.journalNow
+  });
   const embeddingIndex = loadEmbeddingIndex();
   const useEmbedding = shouldUseRemoteEmbedding();
   let queryEmbedding = null;
@@ -303,13 +346,14 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default') {
     const support = Math.min(0.3, (Number(candidate.evidenceCount || 1) - 1) * 0.05);
     const confidence = Math.min(0.2, Number(candidate.confidence || 0) * 0.2);
     const importance = Math.min(0.22, Number(candidate.importance || 0) * 0.1);
+    const dateBoost = journalDateMatchBoost(candidate, journalTargetDays);
     const sourceBoost = facetSourceWeight(facet, candidate.source);
     const stabilityBoost = Math.min(0.24, Number(candidate.stabilityScore || 0) * 0.24);
     const strength = calcMemoryStrength(candidate, facet);
     const embedding = queryEmbedding
       ? calcEmbeddingSimilarity(queryEmbedding, candidate, embeddingIndex)
       : 0;
-    const score = ((lexical * lexicalWeight) + (embedding * semanticWeight) + direct + (recency * 0.08) + (strength.memoryStrength * 0.1) + support + confidence + importance + stabilityBoost) * sourceBoost;
+    const score = ((lexical * lexicalWeight) + (embedding * semanticWeight) + direct + dateBoost + (recency * 0.08) + (strength.memoryStrength * 0.1) + support + confidence + importance + stabilityBoost) * sourceBoost;
     const semanticOnly = embedding >= semanticMinScore && lexical < 0.04 && direct <= 0;
     if (score < minScore && !semanticOnly) continue;
     const matchMode = embedding > 0 && lexical > 0.04
@@ -327,6 +371,7 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default') {
         lexical,
         embedding,
         direct,
+        dateBoost,
         recency,
         sourceBoost
       },
@@ -425,23 +470,27 @@ function buildDigest(items = [], maxChars = Number(config.MEMORY_CLI_DIGEST_MAX_
 async function queryMemory(input = {}) {
   const userId = normalizeText(input.userId);
   const query = normalizeText(input.query);
+  const journalTargetDays = resolveJournalTargetDays(query, {
+    today: input.journalToday,
+    now: input.journalNow
+  });
   const topK = Math.max(1, Math.min(20, Number(input.topK || config.MEMORY_V3_TOP_K || config.MEMORY_RAG_TOP_K || 8) || 8));
   const facet = FACETS.includes(String(input.facet || '').trim().toLowerCase())
     ? String(input.facet || '').trim().toLowerCase()
     : classifyFacet(query, input);
   const candidates = filterCandidatesBySource(collectCandidates(userId, input), input.source);
-  const scored = await scoreCandidates(candidates, query, facet);
+  const scored = await scoreCandidates(candidates, query, facet, input);
   const conflictResolved = applyConflictResolution(scored);
   const reranked = await rerankMemoryCandidates(query, stableSortByScore(conflictResolved), {
     ...input,
     userId,
     phase: 'memory_v3'
-  }).then((items) => items.map((item) => ({
+  }).then((items) => applyJournalTargetDayPriority(items.map((item) => ({
     ...item,
     matchMode: Number(item.rerankScore || 0) > 0
       ? (item.matchMode === 'semantic' ? 'semantic_rerank' : item.matchMode === 'hybrid' ? 'hybrid_rerank' : 'rerank')
       : item.matchMode
-  })));
+  })), journalTargetDays));
   const selected = diversify(reranked, topK);
   const split = splitStrictWeak(
     selected,

@@ -21,6 +21,7 @@ const { sendGroupMessage } = require('./api/qqActionService');
 const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime');
 const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/napcatLogFollower');
 const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
+const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
@@ -85,6 +86,11 @@ const cleanupSingleInstanceLock = acquireSingleInstanceLock();
 const webServer = startServer();
 initializeMemeManager();
 void warmMcpRegistry();
+enqueueMissingEmbeddings(null, {
+  schedule: true,
+  delayMs: 15000,
+  continueDelayMs: 60000
+});
 
 let ws = null;
 let shuttingDown = false;

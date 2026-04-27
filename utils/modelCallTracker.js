@@ -146,12 +146,16 @@ function normalizeUsage(raw) {
     ?? raw.cacheReadInputTokens
     ?? raw.prompt_tokens_details?.cached_tokens
     ?? raw.promptTokensDetails?.cachedTokens
+    ?? raw.input_tokens_details?.cached_tokens
+    ?? raw.inputTokensDetails?.cachedTokens
   );
   const cacheCreationInputTokens = Number(
     raw.cache_creation_input_tokens
     ?? raw.cacheCreationInputTokens
     ?? raw.prompt_tokens_details?.cache_write_tokens
     ?? raw.promptTokensDetails?.cacheWriteTokens
+    ?? raw.input_tokens_details?.cache_write_tokens
+    ?? raw.inputTokensDetails?.cacheWriteTokens
   );
   const cacheCreation = raw.cache_creation && typeof raw.cache_creation === 'object'
     ? safeClone(raw.cache_creation, {})

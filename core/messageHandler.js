@@ -968,18 +968,21 @@ function maybeCaptureUserCorrection({ cleanText, senderId, groupId, routeExecuti
   if (!isCorrectionSignal(cleanText)) return;
   const lastAssistantReply = getLastAssistantReplyForSession(senderId, groupId);
   if (!lastAssistantReply) return;
-  try {
-    captureCorrection({
-      userMessage: cleanText,
-      assistantReply: lastAssistantReply,
-      routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-      topRouteType: routeExecutionPlan?.topRouteType || 'direct_chat',
-      groupId,
-      userId: senderId
-    });
-  } catch (error) {
-    console.error('[self-improvement] correction capture failed:', error?.message || error);
-  }
+  const timer = setTimeout(() => {
+    try {
+      captureCorrection({
+        userMessage: cleanText,
+        assistantReply: lastAssistantReply,
+        routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+        topRouteType: routeExecutionPlan?.topRouteType || 'direct_chat',
+        groupId,
+        userId: senderId
+      });
+    } catch (error) {
+      console.error('[self-improvement] correction capture failed:', error?.message || error);
+    }
+  }, 0);
+  if (typeof timer.unref === 'function') timer.unref();
 }
 
 function maybeCaptureUnavailableFeatureRequest({ routeExecutionPlan, cleanText, senderId, groupId, route }) {
@@ -3077,8 +3080,63 @@ function createMessageHandler({
       };
     }
 
-    const routeExecutionPlan = routeExecution.resolveRouteExecution(route, config, {});
-    if (routeExecutionPlan.executor === 'ignore') return;
+    const routeExecutionStartedAt = Date.now();
+    let routeExecutionPlan = null;
+    try {
+      routeExecutionPlan = routeExecution.resolveRouteExecution(route, config, {});
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'route_execution_done',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        durationMs: Math.max(0, Date.now() - routeExecutionStartedAt),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
+    } catch (error) {
+      routeExecutionPlan = {
+        executor: 'direct',
+        topRouteType: 'direct_chat',
+        policyKey: 'chat/default',
+        routeDebugKey: 'direct_chat/text_chat/answer',
+        allowTools: false,
+        allowedTools: [],
+        allowedToolBuckets: [],
+        allowStream: !route?.imageUrl,
+        needsBackground: false,
+        unavailableReason: 'route-execution-failed'
+      };
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'route_execution_failed',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        durationMs: Math.max(0, Date.now() - routeExecutionStartedAt),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        error: error?.message || String(error || '')
+      });
+      console.error('[routeExecution] resolve failed, fallback to direct chat:', error?.message || error);
+    }
+    if (routeExecutionPlan.executor === 'ignore') {
+      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        stage: 'route_execution_ignored',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
+      return;
+    }
 
     if (routeExecutionPlan.executor === 'refuse') {
       await sendGroupReply({

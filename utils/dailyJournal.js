@@ -130,6 +130,28 @@ function syncEpisodeMemory(userId, text, options = {}) {
   });
 }
 
+function scheduleDailyJournalEmbeddingBackfill(userId, options = {}) {
+  const uid = String(userId || '').trim();
+  if (!uid || config.MEMORY_JOURNAL_EMBEDDING_BACKFILL_ENABLED === false) return false;
+  try {
+    const { buildDailyJournalDocsForUser } = require('./memory-v3/journalDocs');
+    const { enqueueMissingEmbeddings } = require('./memory-v3/embeddingIndex');
+    const docs = buildDailyJournalDocsForUser(uid, {
+      includeSegments: true,
+      days: Array.isArray(options.days) ? options.days : undefined
+    });
+    if (!docs.length) return false;
+    enqueueMissingEmbeddings(docs, {
+      schedule: true,
+      delayMs: options.delayMs
+    });
+    return true;
+  } catch (error) {
+    console.warn('[daily_journal] failed to schedule embedding backfill:', error?.message || error);
+    return false;
+  }
+}
+
 function getMemoryChatCompletionsUrl() {
   const raw = String(config.MEMORY_API_BASE_URL || config.API_BASE_URL || '').replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(raw)) return raw;
@@ -598,6 +620,21 @@ function getDailySummaryItem(userId, day) {
     const merged = segments.map((item) => item.text).join('\n').trim();
     if (merged) {
       return { day, text: merged, kind: 'segments', segments, sidecarEntries };
+    }
+  }
+
+  const rawEntries = parseJournalEntries(safeReadText(getJournalFilePath(uid, day), ''));
+  if (rawEntries.length > 0) {
+    const keepTail = Math.max(1, Number(config.DAILY_JOURNAL_ACTIVE_RAW_MAX_ENTRIES) || 8);
+    const rawText = strictClampText(formatJournalEntries(rawEntries.slice(-keepTail)), Math.max(600, Number(config.MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS || 160) * 12));
+    if (rawText) {
+      return {
+        day,
+        text: rawText,
+        kind: 'raw_journal',
+        rawEntries: rawEntries.length,
+        sidecarEntries
+      };
     }
   }
 
@@ -1306,6 +1343,7 @@ async function maybeSegmentJournal(userId, day, state, options = {}) {
     entry_count: batch.length,
     summary
   });
+  scheduleDailyJournalEmbeddingBackfill(userId, { days: [day] });
 
   segmentState.journal_offset = Math.max(0, Number(segmentState.journal_offset) || 0) + batch.length;
   segmentState.segment_count = Math.max(0, Number(segmentState.segment_count) || 0) + 1;
@@ -1665,6 +1703,7 @@ async function runDailyJournalSummaries(options = {}) {
             yearMonth: getYearMonthFromDay(targetDay),
             maxChars: config.DAILY_JOURNAL_SUMMARY_MAX_TOKENS
           });
+          scheduleDailyJournalEmbeddingBackfill(userId, { days: [targetDay] });
           count += 1;
         }
       }
