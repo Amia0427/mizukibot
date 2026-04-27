@@ -44,7 +44,8 @@ module.exports = (async () => {
     process.env.ADMIN_USER_IDS = '1960901788';
 
     clearProjectCache();
-    const pngBase64 = 'iVBORw0KGgo=';
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aK1cAAAAASUVORK5CYII=';
+    const invalidPngBase64 = 'iVBORw0KGgo=';
 
     const {
       buildCreateAgentAllowedUserIds,
@@ -160,6 +161,20 @@ module.exports = (async () => {
     assert.deepStrictEqual(
       extractImageFromChatCompletionsResponse({
         choices: [{ message: { content: JSON.stringify({ b64_json: pngBase64 }) } }]
+      }),
+      { kind: 'b64_json', value: pngBase64 }
+    );
+    assert.deepStrictEqual(
+      extractImageFromChatCompletionsResponse({
+        choices: [{
+          message: {
+            content: [
+              { type: 'output_text', text: '{"b64_json":"' },
+              { type: 'output_text', text: pngBase64 },
+              { type: 'output_text', text: '"}' }
+            ]
+          }
+        }]
       }),
       { kind: 'b64_json', value: pngBase64 }
     );
@@ -506,6 +521,67 @@ module.exports = (async () => {
     assert.ok(fs.existsSync(chatGeneratedFromUrl.filePath));
     assert.ok(Buffer.isBuffer(chatGeneratedFromUrl.buffer));
 
+    const fallbackBodies = [];
+    const chatGeneratedFromCorruptB64Fallback = await generateImageWithOpenAICompatibleApi('chat fallback sample', {
+      ...chatProtocolConfig,
+      responseFormat: 'b64_json'
+    }, {
+      httpClient: {
+        async post(url, body, options) {
+          fallbackBodies.push({ url, body, options });
+          if (options?.responseType === 'stream') {
+            return {
+              data: Readable.from([
+                `data: {"choices":[{"delta":{"content":[{"type":"output_text","text":"{\\"b64_json\\":\\"${invalidPngBase64}\\"}"}]}}]}\n\n`,
+                'data: [DONE]\n\n'
+              ])
+            };
+          }
+
+          if (String(body?.messages?.[0]?.content || '').includes('Return only a direct image URL')) {
+            return {
+              data: {
+                choices: [
+                  {
+                    message: {
+                      content: [
+                        { type: 'output_text', text: 'https://example.com/fallback-image.png' }
+                      ]
+                    }
+                  }
+                ]
+              }
+            };
+          }
+
+          return {
+            data: {
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({ b64_json: invalidPngBase64 })
+                  }
+                }
+              ]
+            }
+          };
+        },
+        async get(url) {
+          assert.strictEqual(url, 'https://example.com/fallback-image.png');
+          return {
+            data: Buffer.from(pngBase64, 'base64'),
+            headers: { 'content-type': 'image/png' }
+          };
+        }
+      }
+    });
+    assert.ok(fs.existsSync(chatGeneratedFromCorruptB64Fallback.filePath));
+    assert.ok(Buffer.isBuffer(chatGeneratedFromCorruptB64Fallback.buffer));
+    assert.strictEqual(
+      fallbackBodies.some((item) => String(item?.body?.messages?.[0]?.content || '').includes('Return only a direct image URL')),
+      true
+    );
+
     const fallbackUrls = [];
     const fallbackRequestResponse = await requestImageGeneration('draw a fox again', {
       ...runtimeConfig,
@@ -798,6 +874,25 @@ module.exports = (async () => {
     });
     assert.strictEqual(authFailure.ok, false);
     assert.strictEqual(authFailure.replyText, '生图鉴权失败');
+
+    const corruptImageFailure = await executeCreateCommand({
+      prompt: 'corrupt image failure',
+      chatType: 'group',
+      groupId: 'g9b',
+      senderId: 'u9b'
+    }, {
+      config: {
+        ...runtimeConfig,
+        quotaFile: path.join(tempRoot, 'quota-corrupt.json'),
+        runtimeFile: path.join(tempRoot, 'runtime-corrupt.json'),
+        errorLogFile: path.join(tempRoot, 'errors-corrupt.log')
+      },
+      generateImage: async () => {
+        throw new Error('image buffer invalid or truncated format=png reason=png missing IEND');
+      }
+    });
+    assert.strictEqual(corruptImageFailure.ok, false);
+    assert.strictEqual(corruptImageFailure.replyText, '生图结果损坏，供应商返回了不完整图片');
 
     const gatewayQuotaFailure = await executeCreateCommand({
       prompt: 'gateway quota failure',
