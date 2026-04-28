@@ -22,6 +22,7 @@ function createMessageBackgroundTaskCoordinator(deps = {}) {
     routeExecutionPlan,
     cleanText,
     imageUrl,
+    imageUrls = [],
     userInfo,
     senderId,
     groupId,
@@ -46,8 +47,23 @@ function createMessageBackgroundTaskCoordinator(deps = {}) {
       topRouteType: routeExecutionPlan.topRouteType
     });
 
-    const executionHandle = await executionHandleFactory(cleanText, userInfo, senderId, imageUrl, {
+    const runExecution = typeof executionHandleFactory === 'function'
+      ? executionHandleFactory
+      : async (nextText, nextUserInfo, nextSenderId, nextImageUrl, nextOptions) => ({
+          promise: Promise.resolve(deps.askToolTaskLocally(nextText, nextUserInfo, nextSenderId, null, nextImageUrl, nextOptions)),
+          cancel() {}
+        });
+    if (typeof executionHandleFactory !== 'function' && typeof deps.askToolTaskLocally !== 'function') {
+      throw new Error('background tool task requires executionHandleFactory or askToolTaskLocally');
+    }
+
+    const backgroundImageUrls = Array.isArray(imageUrls) && imageUrls.length > 0
+      ? imageUrls
+      : (Array.isArray(toolTaskOptions?.imageUrls) ? toolTaskOptions.imageUrls : []);
+    const executionHandle = await runExecution(cleanText, userInfo, senderId, imageUrl, {
       ...toolTaskOptions,
+      imageUrls: backgroundImageUrls,
+      deferPersist: false,
       backgroundTaskId: task.id,
       shouldContinue: () => backgroundTaskRuntime.shouldContinue(task.id)
     });

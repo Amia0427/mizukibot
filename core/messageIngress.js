@@ -12,6 +12,7 @@ const {
  * @property {string} rawText
  * @property {string} cleanText
  * @property {string|null} imageUrl
+ * @property {string[]} imageUrls
  * @property {boolean} isAtBot
  * @property {string} botQQ
  * @property {string} platform
@@ -129,6 +130,7 @@ function buildInboundMessageContext({
   rawText = '',
   cleanText = '',
   imageUrl = null,
+  imageUrls = [],
   isAtBot = false,
   botQQ = '',
   sessionTiming = null,
@@ -146,6 +148,9 @@ function buildInboundMessageContext({
     rawText: String(rawText || ''),
     cleanText: String(cleanText || ''),
     imageUrl: imageUrl || null,
+    imageUrls: Array.isArray(imageUrls)
+      ? imageUrls.map((url) => String(url || '').trim()).filter(Boolean)
+      : [],
     isAtBot: Boolean(isAtBot),
     botQQ: String(botQQ || '').trim(),
     platform: safePlatform(nextMsg),

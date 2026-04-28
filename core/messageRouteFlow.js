@@ -873,6 +873,7 @@ function createMessageRouteFlow(deps = {}) {
       executionPlan: routeExecutionPlan,
       requestText: cleanText,
       imageUrl,
+      imageUrls,
       userInfo,
       senderId,
       groupId,
@@ -937,8 +938,10 @@ function createMessageRouteFlow(deps = {}) {
           topRouteType: routeExecutionPlan.topRouteType,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
+          imageUrls,
           plannerExecutionPlan: route?.meta?.toolPlanner?.executionPlan || route?.meta?.directChatPlanner?.executionPlan || null,
           disableDirectToolLoop: true,
+          deferPersist: false,
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, { groupId, chatType })
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
@@ -952,6 +955,7 @@ function createMessageRouteFlow(deps = {}) {
             routeExecutionPlan,
             cleanText,
             imageUrl,
+            imageUrls,
             userInfo,
             senderId,
             groupId,
@@ -1065,6 +1069,7 @@ function createMessageRouteFlow(deps = {}) {
           disableTools: !routeExecutionPlan.allowTools,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
+          imageUrls,
           disableDirectToolLoop: true,
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             groupId,

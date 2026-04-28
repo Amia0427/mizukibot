@@ -96,6 +96,34 @@ function createPersistNode(deps = {}) {
     return new Date(Math.min(...candidates)).toISOString();
   }
 
+  function buildPersistGateReasons({
+    request,
+    state,
+    userContent,
+    finalReply,
+    routeGroupId,
+    allowedPostReplyGroupIds,
+    hasEnoughPostReplyContent,
+    postReplyCooldownReady,
+    shouldAllowPostReplyForGroup
+  }) {
+    const reasons = [];
+    if (request.systemInitiated) reasons.push('system_initiated');
+    if (state.output?.failure) reasons.push('output_failure');
+    if (!userContent) reasons.push('empty_user_content');
+    if (!finalReply) reasons.push('empty_final_reply');
+    if (isReviewMode(request.reviewMode)) reasons.push('review_mode');
+    if (String(request.customPrompt || '').trim()) reasons.push('custom_prompt');
+    if (!hasEnoughPostReplyContent) reasons.push('post_reply_min_chars');
+    if (!postReplyCooldownReady) reasons.push('post_reply_cooldown');
+    if (!routeGroupId) reasons.push('post_reply_no_group');
+    if (allowedPostReplyGroupIds.length === 0) reasons.push('post_reply_no_group_allowlist');
+    if (routeGroupId && allowedPostReplyGroupIds.length > 0 && !shouldAllowPostReplyForGroup) {
+      reasons.push('post_reply_group_not_allowed');
+    }
+    return reasons;
+  }
+
   return async function persistNode(state) {
     const request = normalizeObject(state.request, {});
     const finalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
@@ -143,6 +171,35 @@ function createPersistNode(deps = {}) {
       && postReplyCooldownReady
       && shouldAllowPostReplyForGroup
       && (shouldLearn || shouldLearnSelfImprovementValue || shouldPersistJournal);
+    const persistDecisionPayload = {
+      userId: normalizedUserId,
+      sessionKey: String(request.sessionKey || '').trim(),
+      groupId: routeGroupId,
+      channelId: String(request.routeMeta?.channelId || request.routeMeta?.channel_id || '').trim(),
+      sessionId: String(request.routeMeta?.sessionId || request.routeMeta?.session_id || '').trim(),
+      threadId: String(state.thread?.threadId || '').trim(),
+      routePolicyKey: String(request.routePolicyKey || '').trim(),
+      topRouteType: String(request.topRouteType || request.routeMeta?.topRouteType || '').trim(),
+      saved: Boolean(shouldPersistChatArtifacts),
+      shouldPersistBridge: Boolean(shouldPersistBridge),
+      shouldPersistJournal: Boolean(shouldPersistJournal),
+      shouldLearn: Boolean(shouldLearn),
+      shouldLearnSelfImprovement: Boolean(shouldLearnSelfImprovementValue),
+      shouldEnqueuePostReplyJob: Boolean(shouldEnqueuePostReplyJob),
+      userContentChars: Array.from(userContent).length,
+      finalReplyChars: Array.from(finalReply).length,
+      gateReasons: buildPersistGateReasons({
+        request,
+        state,
+        userContent,
+        finalReply,
+        routeGroupId,
+        allowedPostReplyGroupIds,
+        hasEnoughPostReplyContent,
+        postReplyCooldownReady,
+        shouldAllowPostReplyForGroup
+      })
+    };
     let enqueuedPostReplyJob = null;
     const pendingReplySnapshot = {
       finalReply,
@@ -161,10 +218,15 @@ function createPersistNode(deps = {}) {
     };
 
     if (latencyDecision.deferPersist === true || request.deferPersist === true) {
+      console.log('[memory-write] persist deferred', {
+        ...persistDecisionPayload,
+        deferPersist: true
+      });
       const deferredEvents = [
         createEvent('node_start', { node: 'persist' }),
         createEvent('persist_deferred', {
           node: 'persist',
+          ...persistDecisionPayload,
           finalReplyPreview: finalReply.slice(0, 180)
         }),
         createEvent('node_complete', { node: 'persist' })
@@ -188,6 +250,8 @@ function createPersistNode(deps = {}) {
         events: deferredEvents
       }, 'persist', 'completed', deferredEvents);
     }
+
+    console.log('[memory-write] persist decision', persistDecisionPayload);
 
     if (shouldPersistChatArtifacts) {
       if (config.MEMORY_V3_ENABLED) {
@@ -428,8 +492,19 @@ function createPersistNode(deps = {}) {
 
     const events = [
       createEvent('node_start', { node: 'persist' }),
+      createEvent('persist_write_decision', {
+        node: 'persist',
+        ...persistDecisionPayload,
+        postReplyJobId: enqueuedPostReplyJob?.jobId || '',
+        postReplyEnqueued: Boolean(enqueuedPostReplyJob?.enqueued)
+      }),
       createEvent('persist_complete', {
         saved: shouldPersistChatArtifacts,
+        shouldPersistBridge,
+        shouldPersistJournal,
+        shouldLearn,
+        shouldEnqueuePostReplyJob,
+        gateReasons: persistDecisionPayload.gateReasons,
         finalReplyPreview: finalReply.slice(0, 180),
         postReplyJobId: enqueuedPostReplyJob?.jobId || '',
         postReplyEnqueued: Boolean(enqueuedPostReplyJob?.enqueued)

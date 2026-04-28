@@ -64,6 +64,46 @@ const coordinator = createMessageBackgroundTaskCoordinator({
 });
 
 module.exports = (async () => {
+  const fallbackOptionsSeen = [];
+  const fallbackCoordinator = createMessageBackgroundTaskCoordinator({
+    config: {
+      BACKGROUND_TASK_ACK_DELAY_MS: 20
+    },
+    buildSessionId: (senderId, { sessionChatId }) => `${senderId}:${sessionChatId}`,
+    backgroundTaskRuntime,
+    normalizeUserFacingReply: (text) => String(text || '').trim(),
+    askToolTaskLocally: async (_text, _userInfo, _senderId, _customPrompt, _imageUrl, options) => {
+      fallbackOptionsSeen.push({ ...(options || {}) });
+      return 'fallback done';
+    },
+    getEffectivePolicyKey: () => 'direct_chat/default',
+    summarizeBackgroundReply: (text) => String(text || '').slice(0, 20),
+    sendGroupReply: async (payload) => {
+      sentReplies.push(payload);
+      return true;
+    },
+    maybeSendMemeFollowup: async () => {},
+    sendWithRetry: async () => true
+  });
+  const fallback = await fallbackCoordinator.runBackgroundToolTask({
+    route: { meta: {} },
+    routeExecutionPlan: {
+      executor: 'background_direct',
+      topRouteType: 'direct_chat',
+      allowTools: true
+    },
+    cleanText: 'task fallback',
+    imageUrl: null,
+    userInfo: {},
+    senderId: 'u1',
+    groupId: 'g1',
+    toolTaskOptions: {}
+  });
+  assert.strictEqual(fallback.reply, 'fallback done');
+  assert.strictEqual(fallbackOptionsSeen.length, 1);
+  assert.strictEqual(fallbackOptionsSeen[0].deferPersist, false, 'background fallback executor must not leave persist deferred');
+
+  const handleOptionsSeen = [];
   const immediate = await coordinator.runBackgroundToolTask({
     route: { meta: {} },
     routeExecutionPlan: {
@@ -77,13 +117,17 @@ module.exports = (async () => {
     senderId: 'u1',
     groupId: 'g1',
     toolTaskOptions: {},
-    executionHandleFactory: async () => ({
-      promise: Promise.resolve('done now'),
-      cancel() {}
-    })
+    executionHandleFactory: async (_text, _userInfo, _senderId, _imageUrl, options) => {
+      handleOptionsSeen.push({ ...(options || {}) });
+      return {
+        promise: Promise.resolve('done now'),
+        cancel() {}
+      };
+    }
   });
   assert.strictEqual(immediate.backgroundHandled, false);
   assert.strictEqual(immediate.reply, 'done now');
+  assert.strictEqual(handleOptionsSeen[0].deferPersist, false, 'background execution handle must force inline persist');
 
   const delayed = await coordinator.runBackgroundToolTask({
     route: { meta: {} },

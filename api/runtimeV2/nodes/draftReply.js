@@ -125,7 +125,7 @@ function createDraftReplyNode(deps = {}) {
             ...state,
             memory: nextMemory
           }, request.imageUrl
-            ? buildVisionMessageContent(request.question || '', request.imageUrl)
+            ? buildVisionMessageContent(request.question || '', request.imageUrl, request.imageUrls)
             : (request.question || ''), []).messages.filter((item) => String(item?.role || '').trim() !== 'system'),
           compiledAssistantMessage,
           ...toolResultMessages

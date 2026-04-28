@@ -44,6 +44,7 @@ function createMessageDispatchCoordinator(deps = {}) {
     routeExecutionPlan,
     cleanText,
     imageUrl,
+    imageUrls = [],
     userInfo,
     senderId,
     groupId,
@@ -105,6 +106,8 @@ function createMessageDispatchCoordinator(deps = {}) {
           topRouteType: routeExecutionPlan.topRouteType,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
+          imageUrls,
+          deferPersist: false,
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             groupId,
             messageId: String(sourceMessageId || '').trim(),
@@ -128,6 +131,7 @@ function createMessageDispatchCoordinator(deps = {}) {
             routeExecutionPlan,
             cleanText,
             imageUrl,
+            imageUrls,
             userInfo,
             senderId,
             groupId,
@@ -232,12 +236,14 @@ function createMessageDispatchCoordinator(deps = {}) {
           disableTools: !routeExecutionPlan.allowTools,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
+          imageUrls,
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             groupId,
             messageId: String(sourceMessageId || '').trim(),
             threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
           }),
           disableStream: disableStreamForReply,
+          deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat',
           threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);

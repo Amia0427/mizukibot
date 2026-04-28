@@ -1244,6 +1244,7 @@ function createMessageHandler({
         buildSessionId,
         backgroundTaskRuntime,
         normalizeUserFacingReply: (...args) => replyRuntime.normalizeUserFacingReply(...args),
+        askToolTaskLocally,
         getEffectivePolicyKey,
         summarizeBackgroundReply,
         sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
@@ -2066,6 +2067,7 @@ function createMessageHandler({
           retries: 1,
           waitMs: 300
         });
+        logMemoryWriteSkip('special_command_private_blocked', { command: 'meme' });
         return;
       }
 
@@ -2266,6 +2268,22 @@ function createMessageHandler({
       // source-compat anchor: msg: effectiveMsg,
 
       const slashCommandText = stripLeadingCqControlSegments(rawText, effectiveBotQQ);
+      const logMemoryWriteSkip = (reason = '', extra = {}) => {
+        const payload = {
+          stage: 'memory_write_skipped',
+          reason: String(reason || '').trim(),
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          rawMessageTimestampMs,
+          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+          ...extra
+        };
+        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, payload);
+        console.log('[memory-write] skipped', payload);
+      };
       if (!isPrivateChatType(chatType)) {
         recordHumanInbound(groupId, senderId, Number(effectiveMsg?.time ? Number(effectiveMsg.time) * 1000 : Date.now()));
       }
@@ -2286,6 +2304,7 @@ function createMessageHandler({
           retries: 1,
           waitMs: 300
         });
+        logMemoryWriteSkip('special_command_private_blocked', { command: 'dailyshare' });
         return;
       }
       const memeAdminResult = await handleAdminCommand({
@@ -2305,6 +2324,7 @@ function createMessageHandler({
           waitMs: 300
         });
       }
+      logMemoryWriteSkip('special_command', { command: 'meme' });
       return;
     }
 
@@ -2324,6 +2344,7 @@ function createMessageHandler({
           retries: 1,
           waitMs: 300
         });
+        logMemoryWriteSkip('special_command_private_blocked', { command: 'life' });
         return;
       }
       const dailyShareResult = await dailyShareEngine.handleAdminCommand({
@@ -2345,6 +2366,7 @@ function createMessageHandler({
           waitMs: 300
         });
       }
+      logMemoryWriteSkip('special_command', { command: 'dailyshare' });
       return;
     }
 
@@ -2364,6 +2386,7 @@ function createMessageHandler({
           retries: 1,
           waitMs: 300
         });
+        logMemoryWriteSkip('special_command_private_blocked', { command: 'sr' });
         return;
       }
       const lifeResult = await lifeSchedulerEngine.handleAdminCommand({
@@ -2385,6 +2408,7 @@ function createMessageHandler({
           waitMs: 300
         });
       }
+      logMemoryWriteSkip('special_command', { command: 'life' });
       return;
     }
 
@@ -2404,6 +2428,7 @@ function createMessageHandler({
           retries: 1,
           waitMs: 300
         });
+        logMemoryWriteSkip('special_command_private_blocked', { command: 'initiative' });
         return;
       }
       const srResult = await handleSessionSummaryCommand({
@@ -2424,6 +2449,7 @@ function createMessageHandler({
           waitMs: 300
         });
       }
+      logMemoryWriteSkip('special_command', { command: 'sr' });
       return;
     }
 
@@ -2448,6 +2474,7 @@ function createMessageHandler({
       if (restartResult?.restartRequested) {
         triggerRemoteRestart({ delayMs: 800 });
       }
+      logMemoryWriteSkip('special_command', { command: 'restart' });
       return;
     }
 
@@ -2486,6 +2513,7 @@ function createMessageHandler({
           waitMs: 300
         });
       }
+      logMemoryWriteSkip('special_command', { command: 'initiative' });
       return;
     }
 
@@ -2508,6 +2536,7 @@ function createMessageHandler({
         retries: 1,
         waitMs: 300
       });
+      logMemoryWriteSkip('special_command', { command: 'cot' });
       return;
     }
 
@@ -2544,10 +2573,13 @@ function createMessageHandler({
       continuousMeta,
       historySummary: buildSubagentContextSummary(senderId, groupId, { maxLength: 180 })
     });
-    const currentMessageImageRawUrl = String(
-      effectiveMsg?.message?.find?.((item) => String(item?.type || '').trim() === 'image')?.data?.url
-      || ''
-    ).trim();
+    const currentMessageImageRawUrls = Array.isArray(effectiveMsg?.message)
+      ? effectiveMsg.message
+          .filter((item) => String(item?.type || '').trim() === 'image')
+          .map((item) => String(item?.data?.url || '').trim())
+          .filter(Boolean)
+      : [];
+    const currentMessageImageRawUrl = currentMessageImageRawUrls[0] || '';
     const hasPotentialVisualInput = Boolean(
       Array.isArray(continuousMeta?.imageUrls) && continuousMeta.imageUrls.length > 0
       || Array.isArray(continuousMeta?.currentImageUrls) && continuousMeta.currentImageUrls.length > 0
@@ -2556,7 +2588,7 @@ function createMessageHandler({
       || (Array.isArray(continuousMeta?.forwardImageUrls) && continuousMeta.forwardImageUrls.length > 0)
       || (Array.isArray(continuousMeta?.forwardImages) && continuousMeta.forwardImages.length > 0)
       || (Array.isArray(continuousMeta?.qqCardUrls) && continuousMeta.qqCardUrls.length > 0)
-      || currentMessageImageRawUrl
+      || currentMessageImageRawUrls.length > 0
     );
     const visualImageCollectionResult = hasPotentialVisualInput
       ? getCachedRouteValue(`visualCollection:${String(effectiveMsg?.message_id || msg?.message_id || '')}`, () => buildVisualImageCollectionDetails(
@@ -2581,9 +2613,12 @@ function createMessageHandler({
         originalUrl: String(item?.originalUrl || itemUrl).trim() || itemUrl
       });
     }
-    const currentMessageImageUrl = currentMessageImageRawUrl
-      ? await resolveStableVisualUrl(currentMessageImageRawUrl, currentImageRefMap)
-      : '';
+    const currentMessageImageUrls = [];
+    for (const rawUrl of currentMessageImageRawUrls) {
+      const stableUrl = await resolveStableVisualUrl(rawUrl, currentImageRefMap);
+      if (stableUrl) currentMessageImageUrls.push({ rawUrl, stableUrl });
+    }
+    const currentMessageImageUrl = currentMessageImageUrls[0]?.stableUrl || '';
     const continuousPrimaryImageUrl = String(
       resolveVisualInputFromContinuousMetaCore(continuousMeta, directedContext, effectiveCleanText) || ''
     ).trim();
@@ -2593,20 +2628,23 @@ function createMessageHandler({
     const effectiveVisualCollection = stableVisualImageCollection.length > 0
       ? stableVisualImageCollection
       : (
-        currentMessageImageUrl
-          ? [{
-              imageIndex: 0,
+        currentMessageImageUrls.length > 0
+          ? currentMessageImageUrls.map((item, index) => ({
+              imageIndex: index,
               source: 'current',
-              url: currentMessageImageUrl,
-              originalUrl: currentMessageImageRawUrl || currentMessageImageUrl,
-              label: 'current_1'
-            }]
+              url: item.stableUrl,
+              originalUrl: item.rawUrl || item.stableUrl,
+              label: `current_${index + 1}`
+            }))
           : []
       );
     const effectiveVisualInput = stableVisualImageCollection.length > 0
       ? (String(stableVisualImageCollection[0]?.url || '').trim()
         || stableContinuousPrimaryImageUrl)
       : currentMessageImageUrl;
+    const effectiveVisualInputUrls = effectiveVisualCollection
+      .map((item) => String(item?.url || '').trim())
+      .filter(Boolean);
     const visualCacheRefCount = countCachedVisualRefs(effectiveVisualCollection);
     const directedScene = String(directedContext?.scene || '').trim();
     const replyToBotRequested = directedScene === 'reply_to_bot';
@@ -2779,6 +2817,7 @@ function createMessageHandler({
       rawText: effectiveRawText,
       cleanText: effectiveCleanText,
       imageUrl: visualContext?.worker?.succeeded ? null : effectiveVisualInput,
+      imageUrls: visualContext?.worker?.succeeded ? [] : effectiveVisualInputUrls,
       isAtBot: directBotAnchor,
       botQQ: effectiveBotQQ,
       chatType,
@@ -2973,6 +3012,7 @@ function createMessageHandler({
     };
     if (visualContext) {
       route.meta.visualContext = visualContext;
+      route.meta.imageUrls = effectiveVisualInputUrls;
       route.meta.persistUserText = persistUserText;
       route.meta.originalUserText = originalUserText;
     }
@@ -3007,7 +3047,10 @@ function createMessageHandler({
         userInfo,
         rawText
       });
-      if (handled) return;
+      if (handled) {
+        logMemoryWriteSkip('admin_command_route_bypassed', { command: 'full' });
+        return;
+      }
     }
 
     if (route?.topRouteType === 'admin' && String(route?.meta?.command?.cmd || '').trim() === 'claude') {
@@ -3023,7 +3066,10 @@ function createMessageHandler({
         rawText,
         chatType
       });
-      if (handled) return;
+      if (handled) {
+        logMemoryWriteSkip('admin_command_route_bypassed', { command: 'claude' });
+        return;
+      }
     }
 
     if (
@@ -3040,7 +3086,12 @@ function createMessageHandler({
         senderId,
         chatType
       });
-      if (handled) return;
+      if (handled) {
+        logMemoryWriteSkip('admin_command_route_bypassed', {
+          command: String(route?.meta?.command?.cmd || '').trim()
+        });
+        return;
+      }
     }
 
     if (route?.topRouteType === 'direct_chat') {
@@ -3135,6 +3186,9 @@ function createMessageHandler({
       console.error('[routeExecution] resolve failed, fallback to direct chat:', error?.message || error);
     }
     if (routeExecutionPlan.executor === 'ignore') {
+      logMemoryWriteSkip('route_executor_ignore', {
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
       appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
         stage: 'route_execution_ignored',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
@@ -3160,6 +3214,9 @@ function createMessageHandler({
         retries: 1,
         waitMs: 500
       });
+      logMemoryWriteSkip('route_executor_refuse', {
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
       return;
     }
 
@@ -3172,11 +3229,16 @@ function createMessageHandler({
         userInfo: null,
         chatType
       });
+      logMemoryWriteSkip('route_executor_admin', {
+        command: String(route?.meta?.command?.cmd || '').trim(),
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
       return;
     }
 
     const cleanText = String(route?.cleanText || effectiveCleanText || rawText || '').trim();
     const imageUrl = visualContext?.worker?.succeeded ? null : (effectiveVisualInput || route?.imageUrl || '');
+    const imageUrls = visualContext?.worker?.succeeded ? [] : effectiveVisualInputUrls;
     if (route && typeof route === 'object') route.imageUrl = imageUrl;
     const inboundTimestamp = Date.now();
     const correctionStartedAt = Date.now();
@@ -3319,6 +3381,7 @@ function createMessageHandler({
       senderId,
       groupId: isPrivateChatType(chatType) ? '' : groupId,
       imageUrl,
+      imageUrls,
       sourceMessageId: String(effectiveMsg.message_id || '').trim(),
       freshness: freshnessGuard
     });
