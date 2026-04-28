@@ -288,6 +288,14 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
     body.__trace = options.trace;
   }
 
+  const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || '').trim();
+  const apiKey = getApiKey(resolvedConfig);
+  if (userAgent || apiKey) {
+    body.__requestHeaders = {};
+    if (apiKey) body.__requestHeaders.Authorization = `Bearer ${apiKey}`;
+    if (userAgent) body.__requestHeaders['User-Agent'] = userAgent;
+  }
+
   return applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig, options);
 }
 

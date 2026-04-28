@@ -344,6 +344,8 @@ module.exports = {
   PROXY_URL: pick('PROXY_URL', ''),
   // Some reverse proxies/CDN rules block requests without browser-like headers.
   HTTP_USER_AGENT: pick('HTTP_USER_AGENT', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'),
+  MAIN_REPLY_USER_AGENT: pick('MAIN_REPLY_USER_AGENT', 'codex_cli_rs/0.77.0 (Windows 10.0.26100; x86_64) WindowsTerminal'),
+  MODEL_HTTP_USER_AGENT: pick('MODEL_HTTP_USER_AGENT', pick('MAIN_REPLY_USER_AGENT', 'codex_cli_rs/0.77.0 (Windows 10.0.26100; x86_64) WindowsTerminal')),
   HTTP_ACCEPT_LANGUAGE: pick('HTTP_ACCEPT_LANGUAGE', 'zh-CN,zh;q=0.9,en;q=0.8'),
   MODEL_TOP_P_ENABLED: pickBool('MODEL_TOP_P_ENABLED', false),
 

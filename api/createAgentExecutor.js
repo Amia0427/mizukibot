@@ -751,7 +751,12 @@ function buildImageGenerationRequestOptions(runtimeConfig = {}, options = {}) {
       Authorization: `Bearer ${runtimeConfig.apiKey}`,
       'Content-Type': 'application/json',
       Accept: options.stream ? 'text/event-stream, application/json' : 'application/json, text/plain, */*',
-      'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
+      'User-Agent': String(
+        config.MODEL_HTTP_USER_AGENT
+        || config.MAIN_REPLY_USER_AGENT
+        || config.HTTP_USER_AGENT
+        || ''
+      ).trim() || 'Mozilla/5.0'
     }
   };
 }
