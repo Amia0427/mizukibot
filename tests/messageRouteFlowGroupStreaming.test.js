@@ -2,8 +2,10 @@ const assert = require('assert');
 
 const { createMessageRouteFlow } = require('../core/messageRouteFlow');
 
-function createBaseDeps() {
+function createBaseDeps(overrides = {}) {
   const replyOptionsSeen = [];
+  const toolOptionsSeen = [];
+  const backgroundCallsSeen = [];
   const deps = {
     config: {
       BACKGROUND_TOOL_TASKS_ENABLED: false,
@@ -17,9 +19,15 @@ function createBaseDeps() {
       replyOptions.persistedReplyText = replyOptions.cotDisplayOnce ? 'clean reply' : 'ai reply';
       return 'ai reply';
     },
-    askToolTaskLocally: async () => 'tool reply',
+    askToolTaskLocally: async (_cleanText, _userInfo, _senderId, _customPrompt, _imageUrl, options) => {
+      toolOptionsSeen.push({ ...(options || {}) });
+      return 'tool reply';
+    },
     askToolTaskWithSubagentReview: async () => 'subagent reply',
-    runBackgroundToolTask: async () => ({ backgroundHandled: false, reply: '' }),
+    runBackgroundToolTask: async (payload) => {
+      backgroundCallsSeen.push(payload);
+      return { backgroundHandled: false, reply: 'background reply' };
+    },
     handleAdminCommand: async () => ({ handled: false }),
     handleHapiAdminCommand: async () => ({ handled: false }),
     handleQqScheduleAdminCommand: async () => ({ handled: false }),
@@ -83,9 +91,20 @@ function createBaseDeps() {
     })
   };
 
+  const mergedDeps = {
+    ...deps,
+    ...overrides,
+    config: {
+      ...deps.config,
+      ...(overrides.config || {})
+    }
+  };
+
   return {
-    routeFlow: createMessageRouteFlow(deps),
-    replyOptionsSeen
+    routeFlow: createMessageRouteFlow(mergedDeps),
+    replyOptionsSeen,
+    toolOptionsSeen,
+    backgroundCallsSeen
   };
 }
 
@@ -144,6 +163,47 @@ module.exports = (async () => {
   assert.strictEqual(cotCase.replyOptionsSeen[0].disableStream, true, 'cot reply should force non-streaming');
   assert.strictEqual(cotCase.replyOptionsSeen[0].disableHumanizer, true, 'cot reply should disable humanizer');
   assert.strictEqual(cotCase.replyOptionsSeen[0].cotDisplayOnce, true, 'cot reply should propagate the one-shot display flag');
+
+  const toolCase = createBaseDeps();
+  const toolEnvelope = await toolCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('group'),
+    executionPlan: {
+      executor: 'direct',
+      allowTools: true,
+      allowStream: false,
+      topRouteType: 'direct_chat',
+      routeDebugKey: 'direct_chat/tool',
+      allowedTools: ['memory_cli']
+    }
+  });
+  assert.strictEqual(toolEnvelope.replyText, 'tool reply');
+  assert.strictEqual(toolCase.toolOptionsSeen.length, 1);
+  assert.strictEqual(toolCase.toolOptionsSeen[0].deferPersist, false, 'tool routes must persist inline because no outer deferred persist callback sees their graph checkpoint');
+
+  const backgroundCallsSeen = [];
+  const backgroundCase = createBaseDeps({
+    config: {
+      BACKGROUND_TOOL_TASKS_ENABLED: true
+    },
+    runBackgroundToolTask: async (payload) => {
+      backgroundCallsSeen.push(payload);
+      return { backgroundHandled: false, reply: 'background reply' };
+    }
+  });
+  const backgroundEnvelope = await backgroundCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('group'),
+    executionPlan: {
+      executor: 'background_direct',
+      allowTools: true,
+      allowStream: false,
+      topRouteType: 'direct_chat',
+      routeDebugKey: 'direct_chat/background',
+      allowedTools: ['memory_cli']
+    }
+  });
+  assert.strictEqual(backgroundEnvelope.replyText, 'background reply');
+  assert.strictEqual(backgroundCallsSeen.length, 1);
+  assert.strictEqual(backgroundCallsSeen[0].toolTaskOptions.deferPersist, false, 'background direct routes must persist inline before returning/following up');
 
   console.log('messageRouteFlowGroupStreaming.test.js passed');
 })().catch((error) => {

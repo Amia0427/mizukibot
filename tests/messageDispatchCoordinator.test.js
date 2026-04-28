@@ -92,6 +92,7 @@ module.exports = (async () => {
   assert.ok(chat.replyOptions.modelConfig);
   assert.strictEqual(typeof chat.replyOptions.modelConfig.model, 'string');
   assert.strictEqual(chat.replyOptions.disableStream, true, 'group chat should force non-streaming replies');
+  assert.strictEqual(chat.replyOptions.deferPersist, true, 'direct chat replies should defer persist until send succeeds');
 
   const privateChat = await coordinator.dispatchByRoutePlan({
     route: {
@@ -108,6 +109,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(privateChat.reply, 'ai reply');
   assert.strictEqual(privateChat.replyOptions.disableStream, false, 'private chat should keep the original stream setting');
+  assert.strictEqual(privateChat.replyOptions.deferPersist, true, 'private direct chat replies should also use deferred persist');
 
   console.log('messageDispatchCoordinator.test.js passed');
 })().catch((error) => {

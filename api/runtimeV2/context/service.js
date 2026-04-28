@@ -2262,12 +2262,36 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   };
 }
 
+function normalizeVisionImageUrls(imageUrl = null, imageUrlsOrOptions = null) {
+  const values = [];
+  if (Array.isArray(imageUrl)) {
+    values.push(...imageUrl);
+  } else if (imageUrl) {
+    values.push(imageUrl);
+  }
+  if (Array.isArray(imageUrlsOrOptions)) {
+    values.push(...imageUrlsOrOptions);
+  } else if (imageUrlsOrOptions && typeof imageUrlsOrOptions === 'object' && Array.isArray(imageUrlsOrOptions.imageUrls)) {
+    values.push(...imageUrlsOrOptions.imageUrls);
+  }
+
+  const seen = new Set();
+  return values
+    .map((url) => String(url || '').trim())
+    .filter((url) => {
+      if (!url || seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    });
+}
+
 function buildVisionMessageContent(...args) {
-  const [question = '', imageUrl = null] = args;
-  if (!imageUrl) return question || '';
+  const [question = '', imageUrl = null, imageUrlsOrOptions = null] = args;
+  const imageUrls = normalizeVisionImageUrls(imageUrl, imageUrlsOrOptions);
+  if (imageUrls.length === 0) return question || '';
   return [
     { type: 'text', text: question || 'Please answer with the provided image context.' },
-    { type: 'image_url', image_url: { url: imageUrl } }
+    ...imageUrls.map((url) => ({ type: 'image_url', image_url: { url } }))
   ];
 }
 

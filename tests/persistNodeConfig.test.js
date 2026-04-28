@@ -105,6 +105,10 @@ module.exports = (async () => {
   assert.strictEqual(Array.isArray(deferredResult.execution.deferredJobs), true);
   assert.strictEqual(deferredResult.execution.deferredJobs.length, 1);
   assert.ok((deferredResult.events || []).some((item) => item.type === 'persist_deferred'));
+  const deferredEvent = (deferredResult.events || []).find((item) => item.type === 'persist_deferred');
+  assert.strictEqual(deferredEvent.shouldPersistBridge, true);
+  assert.strictEqual(deferredEvent.shouldPersistJournal, true);
+  assert.strictEqual(deferredEvent.shouldLearn, true);
 
   const persistNode = createPersistNode({
     normalizeObject(value, fallback = {}) {
@@ -177,6 +181,12 @@ module.exports = (async () => {
   });
 
   assert.strictEqual(result.execution.status, 'completed');
+  const writeDecision = (result.events || []).find((item) => item.type === 'persist_write_decision');
+  assert.ok(writeDecision, 'persist should emit an auditable write decision event');
+  assert.strictEqual(writeDecision.saved, true);
+  assert.strictEqual(writeDecision.shouldPersistBridge, true);
+  assert.strictEqual(writeDecision.shouldPersistJournal, false);
+  assert.strictEqual(writeDecision.shouldLearn, false);
   const appendCalls = [];
   const persistNodeWithSpy = createPersistNode({
     normalizeObject(value, fallback = {}) {

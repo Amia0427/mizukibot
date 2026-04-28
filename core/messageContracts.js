@@ -6,6 +6,9 @@
 
 function buildInboundMessageContext(input = {}) {
   const source = input && typeof input === 'object' ? input : {};
+  const imageUrls = Array.isArray(source.imageUrls)
+    ? source.imageUrls.map((url) => String(url || '').trim()).filter(Boolean)
+    : [];
   return {
     msg: source.msg || {},
     effectiveMsg: source.effectiveMsg || source.msg || {},
@@ -29,6 +32,7 @@ function buildInboundMessageContext(input = {}) {
     rawText: String(source.rawText || ''),
     cleanText: String(source.cleanText || ''),
     imageUrl: source.imageUrl || null,
+    imageUrls,
     visualContext: source.visualContext && typeof source.visualContext === 'object'
       ? { ...source.visualContext }
       : null,
@@ -62,6 +66,9 @@ function buildInboundMessageContext(input = {}) {
 
 function buildRouteDecisionContext(input = {}) {
   const source = input && typeof input === 'object' ? input : {};
+  const sourceImageUrls = Array.isArray(source.imageUrls)
+    ? source.imageUrls
+    : (Array.isArray(source.inboundContext?.imageUrls) ? source.inboundContext.imageUrls : []);
   return {
     inboundContext: source.inboundContext || null,
     route: source.route || null,
@@ -74,6 +81,7 @@ function buildRouteDecisionContext(input = {}) {
     imageUrl: Object.prototype.hasOwnProperty.call(source, 'imageUrl')
       ? (source.imageUrl || null)
       : (source.inboundContext?.imageUrl || null),
+    imageUrls: sourceImageUrls.map((url) => String(url || '').trim()).filter(Boolean),
     visualContext: source.visualContext && typeof source.visualContext === 'object'
       ? { ...source.visualContext }
       : (source.inboundContext?.visualContext && typeof source.inboundContext.visualContext === 'object'
@@ -105,6 +113,9 @@ function buildReplyEnvelope(input = {}) {
 
 function buildPostActionEnvelope(input = {}) {
   const source = input && typeof input === 'object' ? input : {};
+  const sourceImageUrls = Array.isArray(source.imageUrls)
+    ? source.imageUrls
+    : (Array.isArray(source.inboundContext?.imageUrls) ? source.inboundContext.imageUrls : []);
   return {
     inboundContext: source.inboundContext || null,
     routeContext: source.routeContext || null,
@@ -119,6 +130,7 @@ function buildPostActionEnvelope(input = {}) {
     imageUrl: Object.prototype.hasOwnProperty.call(source, 'imageUrl')
       ? (source.imageUrl || null)
       : (source.inboundContext?.imageUrl || null),
+    imageUrls: sourceImageUrls.map((url) => String(url || '').trim()).filter(Boolean),
     visualContext: source.visualContext && typeof source.visualContext === 'object'
       ? { ...source.visualContext }
       : (source.inboundContext?.visualContext && typeof source.inboundContext.visualContext === 'object'

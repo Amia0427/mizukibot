@@ -53,10 +53,31 @@ function buildPrivateImageMessage() {
     self_id: 'bot_test',
     user_id: 'vision_user',
     message_id: 'vision_msg_1',
-    raw_message: '[CQ:image,url=https://example.com/current.png] 这是谁',
+    raw_message: '[CQ:image,url=cached-image://current] 这是谁',
     message: [
-      { type: 'image', data: { url: 'https://example.com/current.png' } },
+      { type: 'image', data: { url: 'cached-image://current' } },
       { type: 'text', data: { text: '这是谁' } }
+    ],
+    time: Math.floor(Date.now() / 1000),
+    sender: {
+      user_id: 'vision_user',
+      nickname: 'vision_user'
+    }
+  };
+}
+
+function buildPrivateMultiImageMessage() {
+  return {
+    post_type: 'message',
+    message_type: 'private',
+    self_id: 'bot_test',
+    user_id: 'vision_user',
+    message_id: 'vision_msg_multi',
+    raw_message: '[CQ:image,url=cached-image://current-a][CQ:image,url=cached-image://current-b] 对比这两张',
+    message: [
+      { type: 'image', data: { url: 'cached-image://current-a' } },
+      { type: 'image', data: { url: 'cached-image://current-b' } },
+      { type: 'text', data: { text: '对比这两张' } }
     ],
     time: Math.floor(Date.now() / 1000),
     sender: {
@@ -70,6 +91,7 @@ module.exports = (async () => {
   const snapshot = { ...process.env };
   const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-vision-flow-'));
   let originalAskAIByGraph = null;
+  let originalRunPersistInBackground = null;
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
@@ -83,20 +105,24 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_MODEL = ' ';
     process.env.PRIVATE_CHAT_TEST_USER_IDS = '*';
 
-    async function runScenario(workerResult) {
+    async function runScenario(workerResult, message = buildPrivateImageMessage()) {
       const observed = {
         askQuestion: '',
-        askImageUrl: undefined
+        askImageUrl: undefined,
+        askImageUrls: undefined
       };
 
       clearProjectCache();
       const agentGraph = require('../api/agentGraph');
       if (!originalAskAIByGraph) originalAskAIByGraph = agentGraph.askAIByGraph;
-      agentGraph.askAIByGraph = async (question, _userInfo, _userId, _customPrompt, imageUrl) => {
+      if (!originalRunPersistInBackground) originalRunPersistInBackground = agentGraph.runPersistInBackgroundFromCheckpoint;
+      agentGraph.askAIByGraph = async (question, _userInfo, _userId, _customPrompt, imageUrl, options = {}) => {
         observed.askQuestion = String(question || '');
         observed.askImageUrl = imageUrl;
+        observed.askImageUrls = options.imageUrls;
         return 'ok';
       };
+      agentGraph.runPersistInBackgroundFromCheckpoint = async () => true;
 
       const config = require('../config');
       const { createMessageHandler } = require('../core/messageHandler');
@@ -110,7 +136,7 @@ module.exports = (async () => {
         runVisionCaptionWorkerOverride: async () => workerResult
       });
 
-      await handleIncomingMessage(buildPrivateImageMessage());
+      await handleIncomingMessage(message);
       return observed;
     }
 
@@ -155,7 +181,22 @@ module.exports = (async () => {
     });
 
     assert.ok(failureObserved.askQuestion.includes('这是谁'));
-    assert.strictEqual(failureObserved.askImageUrl, 'https://example.com/current.png');
+    assert.strictEqual(failureObserved.askImageUrl, 'cached-image://current');
+    assert.deepStrictEqual(failureObserved.askImageUrls, ['cached-image://current']);
+
+    clearProjectCache();
+    const multiFailureObserved = await runScenario({
+      ok: false,
+      fallbackReason: 'timeout',
+      visualContext: null
+    }, buildPrivateMultiImageMessage());
+
+    assert.ok(multiFailureObserved.askQuestion.includes('对比这两张'));
+    assert.strictEqual(multiFailureObserved.askImageUrl, 'cached-image://current-a');
+    assert.deepStrictEqual(multiFailureObserved.askImageUrls, [
+      'cached-image://current-a',
+      'cached-image://current-b'
+    ]);
 
     console.log('messageHandlerVisionFlow.test.js passed');
   } finally {
@@ -163,6 +204,9 @@ module.exports = (async () => {
       const agentGraph = require('../api/agentGraph');
       if (agentGraph && originalAskAIByGraph) {
         agentGraph.askAIByGraph = originalAskAIByGraph;
+      }
+      if (agentGraph && originalRunPersistInBackground) {
+        agentGraph.runPersistInBackgroundFromCheckpoint = originalRunPersistInBackground;
       }
     } catch (_) {}
     restoreEnv(snapshot);

@@ -47,8 +47,8 @@ function looksLikePollutedSessionSummary(text = '') {
 function classifyFacet(query = '', options = {}) {
   const text = normalizeText(query).toLowerCase();
   if (String(options.facet || '').trim()) return String(options.facet).trim().toLowerCase();
-  if (/(昨天|昨日|前天|今天|聊了什么|回忆|日记|journal|前几天|那天|最近发生)/i.test(text)) return 'journal';
   if (/(刚才|刚刚|继续|接着|上次|之前|记得|left off|where.*leave|continue|remember)/i.test(text)) return 'continuity';
+  if (/(昨天|昨日|前天|今天|聊了什么|回忆|日记|journal|前几天|那天|最近发生)/i.test(text)) return 'journal';
   if (/(喜欢|不喜欢|偏好|prefer|like|dislike|nickname|称呼)/i.test(text)) return 'preference';
   if (/(是谁|身份|背景|identity|occupation|profile)/i.test(text)) return 'identity';
   if (/(策略|怎么做|task|workflow|strategy|avoid)/i.test(text)) return 'task';

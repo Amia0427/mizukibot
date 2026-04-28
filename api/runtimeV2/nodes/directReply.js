@@ -156,7 +156,7 @@ function createDirectReplyNode(deps = {}) {
       && !enforcePlannerSingleAuthority
       && request.allowTools !== false;
     const messageContent = request.imageUrl
-      ? buildVisionMessageContent(request.question || '', request.imageUrl)
+      ? buildVisionMessageContent(request.question || '', request.imageUrl, request.imageUrls)
       : (request.question || '');
     const dynamicPrompt = (!shouldProbeToolCalls || request.allowTools === false)
       ? stripMemoryCliInstruction(String(state.memory?.dynamicPrompt || ''))

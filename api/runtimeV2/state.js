@@ -70,6 +70,20 @@ function buildInitialPlanSlice(request = {}, options = {}) {
   };
 }
 
+function normalizeImageUrls(imageUrl = null, imageUrls = []) {
+  const seen = new Set();
+  const values = [];
+  if (imageUrl) values.push(imageUrl);
+  if (Array.isArray(imageUrls)) values.push(...imageUrls);
+  return values
+    .map((url) => String(url || '').trim())
+    .filter((url) => {
+      if (!url || seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    });
+}
+
 function createInitialState(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
   const routeMeta = normalizeObject(options.routeMeta, null);
   const normalizeToolNames = typeof options.normalizeToolNames === 'function'
@@ -112,6 +126,7 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     options
   });
   const useMinecraftModel = shouldUseMinecraftLLM(question, options.routePrompt);
+  const imageUrls = normalizeImageUrls(imageUrl, options.imageUrls);
   const latencyDecision = normalizeObject(options.latencyDecision, {
     profile: 'chat_fast',
     prepareSoftBudgetMs: 600,
@@ -131,6 +146,7 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     userId: String(userId || ''),
     customPrompt,
     imageUrl,
+    imageUrls,
     routePrompt: String(options.routePrompt || '').trim(),
     routePolicyKey: String(options.routePolicyKey || '').trim(),
     topRouteType: String(options.topRouteType || routeMeta?.topRouteType || '').trim(),

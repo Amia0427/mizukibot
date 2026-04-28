@@ -62,6 +62,7 @@ const REPLY_POSTURES = new Set([
   'focused',
   'comforting'
 ]);
+const shortTermScopeLogCache = new Map();
 
 function trimShortText(value, maxChars = 220) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -752,6 +753,7 @@ function listUserSessionKeys(userId, chatHistory = {}, shortTermMemory = {}) {
     const sessionKey = String(key || '').trim();
     if (
       sessionKey === `direct:${uid}`
+      || sessionKey === uid
       || sessionKey.startsWith(`qq-group:`) && sessionKey.endsWith(`:user:${uid}`)
       || sessionKey.startsWith(`channel:`) && sessionKey.endsWith(`:user:${uid}`)
     ) {
@@ -762,6 +764,7 @@ function listUserSessionKeys(userId, chatHistory = {}, shortTermMemory = {}) {
     const sessionKey = String(key || '').trim();
     if (
       sessionKey === `direct:${uid}`
+      || sessionKey === uid
       || sessionKey.startsWith(`qq-group:`) && sessionKey.endsWith(`:user:${uid}`)
       || sessionKey.startsWith(`channel:`) && sessionKey.endsWith(`:user:${uid}`)
     ) {
@@ -783,17 +786,68 @@ function buildSharedShortTermSignature(sessionEntries = []) {
     .join('|');
 }
 
+function shouldIncludeSiblingShortTermSessions(deps = {}) {
+  if (deps.isolateSession === true || deps.currentSessionOnly === true) return false;
+  const raw = deps.includeSiblingSessions ?? deps.includeSharedSessions ?? deps.shareAcrossSessions;
+  if (raw === undefined || raw === null || raw === '') return true;
+  if (raw === false || raw === 0) return false;
+  if (raw === true || raw === 1) return true;
+  const text = String(raw || '').trim().toLowerCase();
+  if (text === 'false' || text === '0' || text === 'no') return false;
+  return text === 'true' || text === '1' || text === 'yes';
+}
+
+function pruneShortTermScopeLogCache(now = Date.now()) {
+  if (shortTermScopeLogCache.size <= 200) return;
+  const cutoff = now - 60 * 1000;
+  for (const [key, value] of shortTermScopeLogCache.entries()) {
+    if (Number(value || 0) < cutoff) shortTermScopeLogCache.delete(key);
+  }
+}
+
+function logShortTermScopeDecision(userId, sessionKey, scopeMeta = {}) {
+  if (!config.ENABLE_DEBUG_LOG) return;
+  const selectedSessionKeys = Array.isArray(scopeMeta.selectedSessionKeys) ? scopeMeta.selectedSessionKeys : [];
+  const ignoredSessionKeys = Array.isArray(scopeMeta.ignoredSessionKeys) ? scopeMeta.ignoredSessionKeys : [];
+  if (selectedSessionKeys.length <= 1 && ignoredSessionKeys.length === 0) return;
+
+  const mode = String(scopeMeta.mode || '').trim() || 'session';
+  const now = Date.now();
+  const signature = [
+    String(userId || '').trim(),
+    String(sessionKey || '').trim(),
+    mode,
+    selectedSessionKeys.join(','),
+    ignoredSessionKeys.join(',')
+  ].join('|');
+  const previousAt = Number(shortTermScopeLogCache.get(signature) || 0) || 0;
+  if (previousAt && now - previousAt < 60 * 1000) return;
+  shortTermScopeLogCache.set(signature, now);
+  pruneShortTermScopeLogCache(now);
+
+  console.log('[short-term-memory] session scope decision', {
+    userId: String(userId || '').trim(),
+    sessionKey: String(sessionKey || '').trim(),
+    mode,
+    selectedSessionKeys,
+    selectedSessions: Array.isArray(scopeMeta.selectedSessions) ? scopeMeta.selectedSessions : [],
+    ignoredSessionKeys
+  });
+}
+
 function collectSharedShortTermSessionEntries(userId, deps = {}) {
   const uid = String(userId || '').trim();
   const historyStore = deps.chatHistory || {};
   const shortTermStore = deps.shortTermMemory || {};
   const currentSessionKey = String(deps.sessionKey || resolveShortTermSessionKey(uid, deps.routeMeta) || '').trim();
-  const allSessionKeys = listUserSessionKeys(uid, historyStore, shortTermStore);
-  if (currentSessionKey && !allSessionKeys.includes(currentSessionKey)) {
-    allSessionKeys.push(currentSessionKey);
+  const includeSiblingSessions = shouldIncludeSiblingShortTermSessions(deps);
+  const availableSessionKeys = listUserSessionKeys(uid, historyStore, shortTermStore);
+  const selectedKeys = includeSiblingSessions ? availableSessionKeys.slice() : [];
+  if (currentSessionKey && !selectedKeys.includes(currentSessionKey)) {
+    selectedKeys.push(currentSessionKey);
   }
 
-  const entries = allSessionKeys.map((sessionKey) => {
+  const entries = selectedKeys.map((sessionKey) => {
     const state = ensureShortTermMemoryState(sessionKey, shortTermStore);
     const history = normalizeHistoryMessages(historyStore[sessionKey]);
     const presence = normalizeShortTermPresence(state.presence);
@@ -818,6 +872,21 @@ function collectSharedShortTermSessionEntries(userId, deps = {}) {
     if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt;
     return String(a.sessionKey || '').localeCompare(String(b.sessionKey || ''));
   });
+  const selectedSessionKeys = entries.map((entry) => entry.sessionKey);
+  const selectedSessions = entries.map((entry) => ({
+    sessionKey: entry.sessionKey,
+    current: Boolean(entry.isCurrent),
+    updatedAt: Number(entry.updatedAt || 0) || 0,
+    historyLength: Number(entry.historyLength || 0) || 0
+  }));
+  entries.scopeMeta = {
+    mode: includeSiblingSessions ? 'shared' : 'session',
+    currentSessionKey,
+    availableSessionKeys,
+    selectedSessionKeys,
+    selectedSessions,
+    ignoredSessionKeys: availableSessionKeys.filter((sessionKey) => !selectedSessionKeys.includes(sessionKey))
+  };
   return entries;
 }
 
@@ -874,13 +943,28 @@ function buildSharedRecentHistory(entries = [], tokenBudget = 0) {
     }
   };
 
-  pushHistory(current?.history || []);
   for (const entry of entries) {
     if (!entry || entry.isCurrent) continue;
     pushHistory(entry.history || []);
   }
+  pushHistory(current?.history || []);
 
   return trimMessagesByTokenBudget(combined, tokenBudget);
+}
+
+function collectSharedRecentTurns(entries = [], selector, limit = getRecentTurnsMaxItems()) {
+  const ordered = [];
+  for (const entry of entries) {
+    if (!entry || entry.isCurrent) continue;
+    const turns = typeof selector === 'function' ? selector(entry.state || {}) : [];
+    ordered.push(...normalizeRecentTurns(turns, limit));
+  }
+  const current = entries.find((entry) => entry?.isCurrent);
+  if (current) {
+    const turns = typeof selector === 'function' ? selector(current.state || {}) : [];
+    ordered.push(...normalizeRecentTurns(turns, limit));
+  }
+  return normalizeRecentTurns(ordered, limit);
 }
 
 function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
@@ -890,6 +974,20 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
     ...deps,
     sessionKey: key
   });
+  const scopeMeta = sessionEntries.scopeMeta || {
+    mode: 'session',
+    currentSessionKey: key,
+    availableSessionKeys: sessionEntries.map((entry) => entry.sessionKey),
+    selectedSessionKeys: sessionEntries.map((entry) => entry.sessionKey),
+    selectedSessions: sessionEntries.map((entry) => ({
+      sessionKey: entry.sessionKey,
+      current: Boolean(entry.isCurrent),
+      updatedAt: Number(entry.updatedAt || 0) || 0,
+      historyLength: Number(entry.historyLength || 0) || 0
+    })),
+    ignoredSessionKeys: []
+  };
+  logShortTermScopeDecision(userId, key, scopeMeta);
   const sharedState = normalizeShortTermState({
     summary: pickSharedField(sessionEntries, (state) => state.summary, 2400),
     activeTopic: pickSharedField(sessionEntries, (state) => state.activeTopic, 180),
@@ -904,8 +1002,9 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
       openLoops: mergeSharedStringList(sessionEntries, (state) => state.interaction?.openLoops || state.openLoops, getStateMaxItems(), 120),
       assistantCommitments: mergeSharedStringList(sessionEntries, (state) => state.interaction?.assistantCommitments || state.assistantCommitments, getStateMaxItems(), 120),
       userConstraints: mergeSharedStringList(sessionEntries, (state) => state.interaction?.userConstraints || state.userConstraints, getStateMaxItems(), 120),
-      recentTurns: normalizeRecentTurns(
-        sessionEntries.flatMap((entry) => entry?.state?.interaction?.recentTurns || []),
+      recentTurns: collectSharedRecentTurns(
+        sessionEntries,
+        (state) => state.interaction?.recentTurns || [],
         getRecentTurnsMaxItems()
       ),
       phaseHint: pickSharedField(sessionEntries, (state) => state.interaction?.phaseHint || state.phaseHint, 48),
@@ -949,8 +1048,9 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
       activePair: pickSharedField(sessionEntries, (state) => state.scene?.activePair, 120),
       quoteAnchor: pickSharedField(sessionEntries, (state) => state.scene?.quoteAnchor, 180),
       jargonHints: mergeSharedStringList(sessionEntries, (state) => state.scene?.jargonHints || [], 4, 80),
-      recentTurns: normalizeRecentTurns(
-        sessionEntries.flatMap((entry) => entry?.state?.scene?.recentTurns || []),
+      recentTurns: collectSharedRecentTurns(
+        sessionEntries,
+        (state) => state.scene?.recentTurns || [],
         4
       ),
       confidence: Math.max(
@@ -988,7 +1088,8 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
     shortTermState: sharedState,
     sessionKey: key,
     sharedSessionKeys: sessionEntries.map((entry) => entry.sessionKey),
-    sharedShortTermSignature: buildSharedShortTermSignature(sessionEntries)
+    sharedShortTermSignature: buildSharedShortTermSignature(sessionEntries),
+    shortTermScope: scopeMeta
   };
 }
 

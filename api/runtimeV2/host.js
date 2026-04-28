@@ -706,6 +706,7 @@ function createRuntime(options = {}) {
       sessionKey: String(request.sessionKey || state.thread?.sessionKey || '').trim(),
       question: String(request.question || '').trim(),
       imageUrl: String(request.imageUrl || '').trim(),
+      imageUrls: normalizeArray(request.imageUrls).map((url) => String(url || '').trim()).filter(Boolean),
       routePolicyKey: String(request.routePolicyKey || '').trim(),
       topRouteType: String(request.topRouteType || '').trim(),
       reviewMode: String(request.reviewMode || '').trim(),
@@ -724,7 +725,7 @@ function createRuntime(options = {}) {
     const request = normalizeObject(state.request, {});
     const isReviewRoute = isReviewMode(request.reviewMode);
     const messageContent = request.imageUrl
-      ? buildVisionMessageContent(request.question || '', request.imageUrl)
+      ? buildVisionMessageContent(request.question || '', request.imageUrl, request.imageUrls)
       : (request.question || '');
     const baseSystemMessages = getMainConversationSystemMessages(state, { isReviewRoute });
     const directReplyPayload = buildDirectReplyMessages(state, messageContent, baseSystemMessages);
@@ -763,7 +764,7 @@ function createRuntime(options = {}) {
     const request = normalizeObject(state.request, {});
     const isReviewRoute = isReviewMode(request.reviewMode);
     const messageContent = request.imageUrl
-      ? buildVisionMessageContent(request.question || '', request.imageUrl)
+      ? buildVisionMessageContent(request.question || '', request.imageUrl, request.imageUrls)
       : (request.question || '');
     const baseSystemMessages = getMainConversationSystemMessages(state, { isReviewRoute });
     const assistantOnlyContextMessages = buildAssistantOnlyContextMessages(state);
