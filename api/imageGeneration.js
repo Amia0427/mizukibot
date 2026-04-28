@@ -58,7 +58,12 @@ function buildBotDiaryQzoneImageHeaders(apiKey = '') {
   const key = normalizeText(apiKey);
   const headers = {
     'Content-Type': 'application/json',
-    'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
+    'User-Agent': String(
+      config.MODEL_HTTP_USER_AGENT
+      || config.MAIN_REPLY_USER_AGENT
+      || config.HTTP_USER_AGENT
+      || ''
+    ).trim() || 'Mozilla/5.0'
   };
   if (key) {
     headers.Authorization = `Bearer ${key}`;

@@ -1287,7 +1287,24 @@ function stripInternalRequestFields(requestBody = {}) {
   const nextBody = { ...requestBody };
   delete nextBody.__trace;
   delete nextBody.__timeoutMs;
+  delete nextBody.__requestHeaders;
   return nextBody;
+}
+
+function extractInternalRequestHeaders(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object' || Array.isArray(requestBody)) return null;
+  const rawHeaders = requestBody.__requestHeaders;
+  if (!rawHeaders || typeof rawHeaders !== 'object' || Array.isArray(rawHeaders)) return null;
+
+  const headers = {};
+  for (const [rawKey, rawValue] of Object.entries(rawHeaders)) {
+    const key = String(rawKey || '').trim();
+    const value = String(rawValue || '').trim();
+    if (!key || !value) continue;
+    headers[key] = value;
+  }
+
+  return Object.keys(headers).length > 0 ? headers : null;
 }
 
 function isReasoningSchemaError(error) {
@@ -1543,6 +1560,7 @@ async function buildAnthropicRequestBody(body = {}) {
 
 async function prepareRequest(url, body = {}) {
   const provider = getApiProvider(url, body?.model || config.AI_MODEL);
+  const internalRequestHeaders = extractInternalRequestHeaders(body);
   if (provider !== 'anthropic') {
     const requestBody = body && typeof body === 'object'
       ? stripTopPField(stripInternalRequestFields(stripCacheControlFields({ ...body })))
@@ -1575,16 +1593,23 @@ async function prepareRequest(url, body = {}) {
     return {
       provider,
       requestUrl: url,
-      requestBody: finalRequestBody
+      requestBody: finalRequestBody,
+      requestHeaders: internalRequestHeaders
     };
   }
 
   const requestBody = await buildAnthropicRequestBody(stripInternalRequestFields(body));
+  const anthropicRequestHeaders = buildAnthropicRequestHeaders(requestBody);
   return {
     provider,
     requestUrl: ensureAnthropicMessagesUrl(url),
     requestBody,
-    requestHeaders: buildAnthropicRequestHeaders(requestBody)
+    requestHeaders: internalRequestHeaders || anthropicRequestHeaders
+      ? {
+        ...(anthropicRequestHeaders || {}),
+        ...(internalRequestHeaders || {})
+      }
+      : null
   };
 }
 
@@ -1679,7 +1704,9 @@ function getRetryDelayMs(err, attempt) {
 function getHeaders(provider, specificKey = null, extraHeaders = null) {
   const apiKey = specificKey || config.API_KEY;
   const userAgent = String(
-    config.HTTP_USER_AGENT
+    config.MODEL_HTTP_USER_AGENT
+      || config.MAIN_REPLY_USER_AGENT
+      || config.HTTP_USER_AGENT
       || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
   ).trim();
   const acceptLanguage = String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim();
