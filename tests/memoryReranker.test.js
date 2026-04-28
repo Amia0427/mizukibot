@@ -50,5 +50,17 @@ assert.deepStrictEqual(
   });
   assert.deepStrictEqual(fallback.map((item) => item.id), candidates.map((item) => item.id));
 
+  const started = Date.now();
+  const timeoutFallback = await rerankMemoryCandidates('memory reranker', candidates, {
+    timeoutMs: 120,
+    requestRerank: async (_query, _documents, options = {}) => {
+      assert.ok(options.abortSignal);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return [{ index: 1, score: 1 }];
+    }
+  });
+  assert.deepStrictEqual(timeoutFallback.map((item) => item.id), candidates.map((item) => item.id));
+  assert.ok(Date.now() - started < 350);
+
   console.log('memoryReranker.test.js passed');
 })();

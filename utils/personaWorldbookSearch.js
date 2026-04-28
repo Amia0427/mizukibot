@@ -461,6 +461,14 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
   const index = options.embeddingIndex || loadWorldbookEmbeddingIndex();
   diagnostics.ready = index.readyRows.length;
   diagnostics.pending = index.rows.filter((row) => row.status !== 'ready').length;
+  const rawLimit = Object.prototype.hasOwnProperty.call(options, 'limit')
+    ? Number(options.limit)
+    : Number(config.PERSONA_WORLDBOOK_SEMANTIC_LIMIT || 24);
+  const limit = Math.max(0, Math.floor(Number.isFinite(rawLimit) ? rawLimit : 24));
+  if (limit <= 0) {
+    diagnostics.fallbackReason = 'semantic_limit_zero';
+    return { results: [], diagnostics };
+  }
   if (index.readyRows.length === 0) {
     diagnostics.fallbackReason = 'no_ready_embeddings';
     return { results: [], diagnostics };
@@ -488,11 +496,6 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
     return { results: [], diagnostics };
   }
   const docsByModuleId = new Map(buildWorldbookDocuments(catalog).map((doc) => [doc.moduleId, doc]));
-  const rawLimit = Object.prototype.hasOwnProperty.call(options, 'limit')
-    ? Number(options.limit)
-    : Number(config.PERSONA_WORLDBOOK_SEMANTIC_LIMIT || 24);
-  const limit = Math.max(0, Math.floor(Number.isFinite(rawLimit) ? rawLimit : 24));
-  if (limit <= 0) return { results: [], diagnostics };
   if (diagnostics.lancedb.enabled) {
     const vectorResult = await searchWorldbookVectors(queryEmbedding, {}, {
       limit,
@@ -560,6 +563,10 @@ async function rerankPersonaWorldbookCandidates(query = '', candidates = [], opt
     2,
     Math.floor(Number(options.maxCandidates || config.PERSONA_WORLDBOOK_RERANK_MAX_CANDIDATES || 24) || 24)
   );
+  const rerankTimeoutMs = Math.max(
+    0,
+    Math.floor(Number(options.rerankTimeoutMs || config.PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS || config.MEMORY_RERANK_TIMEOUT_MS || 2000) || 0)
+  );
   const head = candidates.slice(0, maxCandidates);
   diagnostics.candidates = head.length;
   try {
@@ -574,6 +581,7 @@ async function rerankPersonaWorldbookCandidates(query = '', candidates = [], opt
       ...options,
       phase: 'persona_worldbook',
       maxCandidates,
+      timeoutMs: rerankTimeoutMs,
       disableRerank: config.PERSONA_WORLDBOOK_RERANK_ENABLED === false
     });
     if (Array.isArray(reranked) && reranked.length > 0 && reranked !== head) {

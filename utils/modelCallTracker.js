@@ -1,6 +1,10 @@
+const fs = require('fs');
+const path = require('path');
+const config = require('../config');
 const { getApiProvider } = require('./modelProvider');
 
 const MAX_RECENT_MODEL_CALLS = 200;
+const MODEL_CALL_LOG_FILE = path.join(config.DATA_DIR || path.join(process.cwd(), 'data'), 'model-calls.ndjson');
 
 let recentModelCalls = [];
 let sequence = 0;
@@ -11,6 +15,21 @@ function normalizeText(value) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function appendModelCallLog(record = {}) {
+  try {
+    fs.mkdirSync(path.dirname(MODEL_CALL_LOG_FILE), { recursive: true });
+    fs.appendFileSync(MODEL_CALL_LOG_FILE, `${JSON.stringify(record)}\n`, 'utf8');
+  } catch (_) {}
+}
+
+function safeHost(url = '') {
+  try {
+    return new URL(String(url || '')).host || '';
+  } catch (_) {
+    return '';
+  }
 }
 
 function safeClone(value, fallback = null) {
@@ -298,7 +317,38 @@ function finalizeRecord(id, patch = {}) {
   const actualModel = extractResponseModel(patch.response);
   if (actualModel) record.model = actualModel;
 
-  return safeClone(record, {});
+  const cloned = safeClone(record, {});
+  appendModelCallLog({
+    ts: cloned.completed_at || nowIso(),
+    id: cloned.id,
+    status: cloned.status,
+    source: cloned.source,
+    phase: cloned.phase,
+    purpose: cloned.purpose,
+    provider: cloned.provider,
+    host: safeHost(patch?.url || patch?.requestUrl || ''),
+    model: cloned.model,
+    user_id: cloned.user_id,
+    user_role: cloned.user_role,
+    route_policy_key: cloned.route_policy_key,
+    top_route_type: cloned.top_route_type,
+    model_source: cloned.model_source,
+    api_base_url_source: cloned.api_base_url_source,
+    api_key_source: cloned.api_key_source,
+    main_fallback_scope: cloned.main_fallback_scope,
+    main_fallback_active: cloned.main_fallback_active,
+    admin_dedicated_model_configured: cloned.admin_dedicated_model_configured,
+    attempts: cloned.attempts,
+    duration_ms: cloned.duration_ms,
+    error: cloned.error,
+    status_code: Number(
+      patch?.response?.status
+      || patch?.status
+      || patch?.error?.response?.status
+      || 0
+    ) || null
+  });
+  return cloned;
 }
 
 function finishModelCall(id, meta = {}) {
