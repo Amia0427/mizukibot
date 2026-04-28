@@ -11,6 +11,90 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
+class RerankTimeoutError extends Error {
+  constructor(timeoutMs) {
+    super(`rerank request timed out after ${timeoutMs}ms`);
+    this.name = 'RerankTimeoutError';
+    this.code = 'ERR_MEMORY_RERANK_TIMEOUT';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+function resolveRerankTimeoutMs(options = {}) {
+  const raw = options.timeoutMs ?? options.rerankTimeoutMs ?? config.MEMORY_RERANK_TIMEOUT_MS ?? 8000;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.max(100, Math.floor(n));
+}
+
+function isAbortLikeError(error) {
+  const code = String(error?.code || '').toUpperCase();
+  const name = String(error?.name || '').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+  return code === 'ERR_CANCELED'
+    || code === 'ECONNABORTED'
+    || code === 'ERR_MEMORY_RERANK_TIMEOUT'
+    || name.includes('abort')
+    || name.includes('timeout')
+    || message.includes('canceled')
+    || message.includes('aborted')
+    || message.includes('timed out')
+    || message.includes('timeout');
+}
+
+async function withHardTimeout(factory, timeoutMs, upstreamSignal = null) {
+  const budget = Math.max(0, Math.floor(Number(timeoutMs) || 0));
+  if (!budget) return factory({ signal: upstreamSignal || null });
+  if (upstreamSignal?.aborted) throw new RerankTimeoutError(budget);
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  let timer = null;
+  let timeoutError = null;
+  let removeUpstreamAbort = null;
+
+  const abort = (reason) => {
+    timeoutError = reason instanceof Error ? reason : new RerankTimeoutError(budget);
+    if (controller && !controller.signal.aborted) {
+      try {
+        controller.abort(timeoutError);
+      } catch (_) {
+        controller.abort();
+      }
+    }
+  };
+
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new RerankTimeoutError(budget);
+      abort(error);
+      reject(error);
+    }, budget);
+    if (typeof timer.unref === 'function') timer.unref();
+  });
+
+  if (upstreamSignal && controller) {
+    removeUpstreamAbort = () => {};
+    const onAbort = () => abort(upstreamSignal.reason || new RerankTimeoutError(budget));
+    if (upstreamSignal.aborted) {
+      onAbort();
+    } else if (typeof upstreamSignal.addEventListener === 'function') {
+      upstreamSignal.addEventListener('abort', onAbort, { once: true });
+      removeUpstreamAbort = () => upstreamSignal.removeEventListener('abort', onAbort);
+    }
+  }
+
+  try {
+    const signal = controller?.signal || upstreamSignal || null;
+    return await Promise.race([
+      Promise.resolve().then(() => factory({ signal, timeoutError: () => timeoutError })),
+      timeoutPromise
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (removeUpstreamAbort) removeUpstreamAbort();
+  }
+}
+
 function clampText(value, maxChars = config.MEMORY_RERANK_MAX_DOC_CHARS) {
   const text = normalizeText(value);
   const limit = Math.max(80, Math.floor(Number(maxChars) || 900));
@@ -125,13 +209,14 @@ async function requestMemoryRerank(query, documents = [], options = {}) {
   if (docs.length < 2) return null;
 
   const model = String(config.MEMORY_RERANK_MODEL || '').trim();
+  const timeoutMs = resolveRerankTimeoutMs(options);
   const body = {
     model,
     query: normalizeText(query),
     documents: docs,
     top_n: Math.max(1, Math.min(docs.length, Number(options.topN || docs.length) || docs.length)),
     return_documents: false,
-    __timeoutMs: Math.max(1000, Number(config.MEMORY_RERANK_TIMEOUT_MS || 8000) || 8000),
+    __timeoutMs: timeoutMs || Math.max(1000, Number(config.MEMORY_RERANK_TIMEOUT_MS || 8000) || 8000),
     __trace: {
       source: 'memoryReranker',
       phase: options.phase || '',
@@ -145,11 +230,24 @@ async function requestMemoryRerank(query, documents = [], options = {}) {
   }
 
   try {
-    const resp = await postWithRetry(getRerankApiBaseUrl(), body, 0, getRerankApiKey());
+    const resp = await withHardTimeout(
+      ({ signal }) => postWithRetry(
+        getRerankApiBaseUrl(),
+        signal ? { ...body, __abortSignal: signal } : body,
+        0,
+        getRerankApiKey()
+      ),
+      timeoutMs,
+      options.abortSignal || null
+    );
     requestMemoryRerank.disabledUntil = 0;
     return extractRerankResults(resp);
   } catch (error) {
     const status = Number(error?.response?.status || 0) || 0;
+    if (isAbortLikeError(error)) {
+      console.warn(`[memoryReranker] rerank request timed out after ${timeoutMs || 'unknown'}ms, fallback to base recall`);
+      return null;
+    }
     if (status === 400 || status === 401 || status === 403 || status === 404) {
       requestMemoryRerank.disabledUntil = Date.now() + (30 * 60 * 1000);
       console.warn('[memoryReranker] rerank endpoint unavailable, fallback to base recall for 30 minutes');
@@ -169,12 +267,26 @@ async function rerankMemoryCandidates(query, candidates = [], options = {}) {
   const tail = list.slice(maxCandidates);
   const documents = head.map(buildMemoryRerankDocument);
   const request = typeof options.requestRerank === 'function' ? options.requestRerank : requestMemoryRerank;
+  const timeoutMs = resolveRerankTimeoutMs(options);
 
   let rows = null;
   try {
-    rows = await request(query, documents, { ...options, topN: head.length });
+    rows = await withHardTimeout(
+      ({ signal }) => request(query, documents, {
+        ...options,
+        topN: head.length,
+        timeoutMs,
+        abortSignal: signal || options.abortSignal || null
+      }),
+      timeoutMs,
+      options.abortSignal || null
+    );
   } catch (error) {
-    console.warn('[memoryReranker] injected rerank request failed, fallback to base recall:', error.message);
+    if (isAbortLikeError(error)) {
+      console.warn(`[memoryReranker] rerank candidate scoring timed out after ${timeoutMs || 'unknown'}ms, fallback to base recall`);
+    } else {
+      console.warn('[memoryReranker] injected rerank request failed, fallback to base recall:', error.message);
+    }
     return list;
   }
 
@@ -234,6 +346,7 @@ module.exports = {
   shouldUseMemoryRerank,
   extractRerankResults,
   buildMemoryRerankDocument,
+  resolveRerankTimeoutMs,
   requestMemoryRerank,
   rerankMemoryCandidates
 };

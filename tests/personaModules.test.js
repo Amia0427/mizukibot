@@ -168,7 +168,8 @@ const {
 
   const fallbackAsyncCandidates = await buildPersonaModuleCandidatesAsync({
     question: '我不想说，但有点难受，你不用追问我',
-    worldbookEmbeddingHotPath: false
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
   });
   assert.ok(fallbackAsyncCandidates.some((item) => item.id === 'wb_mizuki_care_chains'));
   assert.ok(fallbackAsyncCandidates.personaWorldbookSearch);
@@ -255,6 +256,7 @@ const {
     lexicalLimit: 4,
     semanticLimit: 0,
     limit: 4,
+    rerankTimeoutMs: 2000,
     rerankCandidates: async (_query, candidates) => candidates.slice().reverse().map((item, index) => ({
       ...item,
       rerankScore: 1 - (index * 0.1),
@@ -262,6 +264,21 @@ const {
     }))
   });
   assert.strictEqual(forcedReranked.diagnostics.rerank.applied, true);
+
+  let observedWorldbookTimeout = 0;
+  const timeoutWorldbook = await searchPersonaWorldbook(rerankCatalog, {
+    query: '好意关系说不出口',
+    lexicalLimit: 4,
+    semanticLimit: 0,
+    limit: 4,
+    rerankTimeoutMs: 2000,
+    rerankCandidates: async (_query, candidates, options = {}) => {
+      observedWorldbookTimeout = Number(options.timeoutMs || 0);
+      return candidates;
+    }
+  });
+  assert.strictEqual(observedWorldbookTimeout, 2000);
+  assert.strictEqual(timeoutWorldbook.diagnostics.rerank.candidates, 4);
 
   const slotSelection = selectPersonaModules({
     maxActiveModules: 2,

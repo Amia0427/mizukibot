@@ -1287,6 +1287,7 @@ function stripInternalRequestFields(requestBody = {}) {
   const nextBody = { ...requestBody };
   delete nextBody.__trace;
   delete nextBody.__timeoutMs;
+  delete nextBody.__abortSignal;
   delete nextBody.__requestHeaders;
   return nextBody;
 }
@@ -1741,13 +1742,14 @@ function getHeaders(provider, specificKey = null, extraHeaders = null) {
   return headers;
 }
 
-function getAxiosOptions(provider = 'openai_compatible', specificKey = null, timeoutMs = null, extraHeaders = null) {
+function getAxiosOptions(provider = 'openai_compatible', specificKey = null, timeoutMs = null, extraHeaders = null, abortSignal = null) {
   const options = {
     headers: getHeaders(provider, specificKey, extraHeaders),
     timeout: Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : getRequestTimeoutMs(),
     proxy: false,
     responseType: 'text'
   };
+  if (abortSignal) options.signal = abortSignal;
 
   if (config.PROXY_URL && HttpsProxyAgentCtor) {
     options.httpsAgent = new HttpsProxyAgentCtor(config.PROXY_URL);
@@ -1797,6 +1799,9 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
   const requestedTimeoutMs = body && typeof body === 'object'
     ? Number(body.__timeoutMs)
     : NaN;
+  const abortSignal = body && typeof body === 'object' && body.__abortSignal
+    ? body.__abortSignal
+    : null;
 
   for (let i = 0; i <= maxRetry; i++) {
     let callId = '';
@@ -1836,11 +1841,12 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       const response = await axios.post(
         prepared.requestUrl,
         prepared.requestBody,
-        getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+        getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
       );
       finishModelCall(callId, {
         response,
         attempts: i + 1,
+        requestUrl: prepared.requestUrl,
         request: prepared.requestBody,
         requestHeaders: prepared.requestHeaders
       });
@@ -1852,11 +1858,12 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
           finishModelCall(callId, {
             response,
             attempts: i + 1,
+            requestUrl: prepared.requestUrl,
             request: strippedRequestBody,
             requestHeaders: prepared.requestHeaders
           });
@@ -1865,6 +1872,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           if (callId) {
             failModelCall(callId, retryWithoutReasoningError, {
               attempts: i + 1,
+              requestUrl: prepared.requestUrl,
               request: stripReasoningFields(prepared.requestBody),
               requestHeaders: prepared.requestHeaders
             });
@@ -1882,11 +1890,12 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
           finishModelCall(callId, {
             response,
             attempts: i + 1,
+            requestUrl: prepared.requestUrl,
             request: strippedRequestBody,
             requestHeaders: prepared.requestHeaders
           });
@@ -1895,6 +1904,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           if (callId) {
             failModelCall(callId, retryWithoutSamplingError, {
               attempts: i + 1,
+              requestUrl: prepared.requestUrl,
               request: stripExtendedSamplingFields(prepared.requestBody),
               requestHeaders: prepared.requestHeaders
             });
@@ -1917,11 +1927,12 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
           finishModelCall(callId, {
             response,
             attempts: i + 1,
+            requestUrl: prepared.requestUrl,
             request: strippedRequestBody,
             requestHeaders: prepared.requestHeaders
           });
@@ -1937,11 +1948,12 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
               const response = await axios.post(
                 prepared.requestUrl,
                 strippedCacheRequestBody,
-                getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+                getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
               );
               finishModelCall(callId, {
                 response,
                 attempts: i + 1,
+                requestUrl: prepared.requestUrl,
                 request: strippedCacheRequestBody,
                 requestHeaders: prepared.requestHeaders
               });
@@ -1950,6 +1962,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
               if (callId) {
                 failModelCall(callId, retryWithoutCacheError, {
                   attempts: i + 1,
+                  requestUrl: prepared.requestUrl,
                   request: stripOpenAICompatiblePromptCaching(strippedRetentionRequestBody),
                   requestHeaders: prepared.requestHeaders
                 });
@@ -1964,6 +1977,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           if (callId) {
             failModelCall(callId, retryWithoutRetentionError, {
               attempts: i + 1,
+              requestUrl: prepared.requestUrl,
               request: strippedRetentionRequestBody,
               requestHeaders: prepared.requestHeaders
             });
@@ -1986,11 +2000,12 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
           finishModelCall(callId, {
             response,
             attempts: i + 1,
+            requestUrl: prepared.requestUrl,
             request: strippedRequestBody,
             requestHeaders: prepared.requestHeaders
           });
@@ -1999,6 +2014,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           if (callId) {
             failModelCall(callId, retryWithoutCacheError, {
               attempts: i + 1,
+              requestUrl: prepared.requestUrl,
               request: stripOpenAICompatiblePromptCaching(prepared.requestBody),
               requestHeaders: prepared.requestHeaders
             });
@@ -2021,11 +2037,12 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             downgraded.requestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal)
           );
           finishModelCall(callId, {
             response,
             attempts: i + 1,
+            requestUrl: prepared.requestUrl,
             request: downgraded.requestBody,
             requestHeaders: downgraded.requestHeaders
           });
@@ -2035,6 +2052,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
             failModelCall(callId, retryWithoutCacheError, {
               attempts: i + 1,
+              requestUrl: prepared.requestUrl,
               request: downgraded.requestBody,
               requestHeaders: downgraded.requestHeaders
             });
@@ -2049,6 +2067,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       if (callId) {
         failModelCall(callId, e, {
           attempts: i + 1,
+          requestUrl: prepared?.requestUrl,
           request: prepared?.requestBody,
           requestHeaders: prepared?.requestHeaders
         });
@@ -2243,7 +2262,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           settled = true;
           cleanup();
           if (err) {
-            failModelCall(callId, err, { attempts: i + 1 });
+            failModelCall(callId, err, { attempts: i + 1, requestUrl: prepared?.requestUrl });
             reject(err);
             return;
           }
@@ -2256,6 +2275,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             response: resp,
             attempts: i + 1,
             usage: streamUsage,
+            requestUrl: prepared?.requestUrl,
             request: prepared?.requestBody,
             requestHeaders: prepared?.requestHeaders
           });
@@ -2310,6 +2330,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
       if (callId) {
         failModelCall(callId, e, {
           attempts: i + 1,
+          requestUrl: prepared?.requestUrl,
           request: prepared?.requestBody,
           requestHeaders: prepared?.requestHeaders
         });
