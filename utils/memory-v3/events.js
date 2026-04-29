@@ -25,16 +25,17 @@ function nowTs() {
   return Date.now();
 }
 
-function toMonthKey(ts = nowTs()) {
+function toDayKey(ts = nowTs()) {
   const date = new Date(Number(ts) || nowTs());
   const year = date.getUTCFullYear();
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-  return `${year}-${month}`;
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function eventFileForTs(ts = nowTs()) {
   ensureDir(config.MEMORY_V3_EVENTS_DIR);
-  return path.join(config.MEMORY_V3_EVENTS_DIR, `${toMonthKey(ts)}.ndjson`);
+  return path.join(config.MEMORY_V3_EVENTS_DIR, `${toDayKey(ts)}.ndjson`);
 }
 
 function buildEventId(event = {}) {
@@ -110,7 +111,7 @@ function listMemoryEventFiles() {
   ensureDir(config.MEMORY_V3_EVENTS_DIR);
   const fs = require('fs');
   return fs.readdirSync(config.MEMORY_V3_EVENTS_DIR)
-    .filter((name) => /^\d{4}-\d{2}\.ndjson$/i.test(name))
+    .filter((name) => /^\d{4}-\d{2}(?:-\d{2})?\.ndjson$/i.test(name))
     .sort()
     .map((name) => path.join(config.MEMORY_V3_EVENTS_DIR, name));
 }

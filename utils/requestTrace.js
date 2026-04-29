@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { appendFileWithRotation } = require('./logRotation');
 
 let sequence = 0;
 const phaseSeqByRequestId = new Map();
@@ -137,13 +138,14 @@ function appendRequestTraceEvent(event = {}) {
   }
   try {
     const logFile = resolveTraceLogFile();
-    fs.mkdirSync(path.dirname(logFile), { recursive: true });
-    fs.appendFileSync(logFile, `${JSON.stringify({
+    appendFileWithRotation(logFile, `${JSON.stringify({
       recordedAt: new Date().toISOString(),
       processId: process.pid,
       ...payload,
       requestId
-    })}\n`, 'utf8');
+    })}\n`, {
+      encoding: 'utf8'
+    });
   } catch (_) {}
 }
 

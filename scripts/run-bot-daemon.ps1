@@ -15,6 +15,58 @@ if (-not (Test-Path $logDir)) {
 $logFile = Join-Path $logDir 'bot-daemon.log'
 $workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
 
+function Get-PositiveInt64Env {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name,
+
+    [Parameter(Mandatory = $true)]
+    [Int64]$DefaultValue
+  )
+
+  $raw = [Environment]::GetEnvironmentVariable($Name, 'Process')
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    return $DefaultValue
+  }
+
+  [Int64]$parsed = 0
+  if ([Int64]::TryParse($raw.Trim(), [ref]$parsed) -and $parsed -ge 0) {
+    return $parsed
+  }
+
+  return $DefaultValue
+}
+
+function Rotate-DaemonLogIfNeeded {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$IncomingText
+  )
+
+  $maxBytes = Get-PositiveInt64Env -Name 'BOT_DAEMON_LOG_ROTATE_MAX_BYTES' -DefaultValue ([Int64](100MB))
+  if ($maxBytes -le 0) {
+    return
+  }
+
+  if (-not (Test-Path $logFile)) {
+    return
+  }
+
+  try {
+    $current = Get-Item -LiteralPath $logFile -ErrorAction Stop
+    $incomingBytes = [System.Text.Encoding]::UTF8.GetByteCount($IncomingText)
+    if (($current.Length + $incomingBytes) -le $maxBytes) {
+      return
+    }
+
+    $archiveStamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+    $archivePath = "$logFile.$archiveStamp"
+    Move-Item -LiteralPath $logFile -Destination $archivePath -Force
+  } catch {
+    # Logging must never stop the daemon from starting the bot.
+  }
+}
+
 function Write-DaemonLog {
   param(
     [Parameter(Mandatory = $true)]
@@ -22,7 +74,9 @@ function Write-DaemonLog {
   )
 
   $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-  "[$stamp] $Message" | Out-File -FilePath $logFile -Append -Encoding utf8
+  $line = "[$stamp] $Message`r`n"
+  Rotate-DaemonLogIfNeeded -IncomingText $line
+  [System.IO.File]::AppendAllText($logFile, $line, [System.Text.Encoding]::UTF8)
 }
 
 function Import-DotEnv {

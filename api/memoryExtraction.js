@@ -6,12 +6,11 @@ const { normalizeTier } = require('../utils/memoryTier');
 const {
   addUserFact,
   addProfileItem,
-  setUserImpression,
-  setUserSummary,
   applyAffinityProposal
 } = require('../utils/memory');
 const { addTaskMemory } = require('../utils/taskMemory');
 const { addGroupMemory } = require('../utils/groupMemory');
+const { appendMemoryEvent } = require('../utils/memory-v3/events');
 const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('../utils/promptSecurity');
 
 function ensureChatCompletionsUrl(url) {
@@ -179,18 +178,135 @@ function getDefaultStatusForType(type = '', memoryKind = '') {
 function buildMemoryBaseMeta(type, confidence, options = {}) {
   const importanceTier = normalizeTier(inferExtractorTier(type, confidence)) || 'B';
   const fieldKey = String(options.fieldKey || type || '').trim().toLowerCase();
+  const extractionClass = classifyProfileExtraction(type, options.value || options.text || '', options);
+  const conflictKey = buildProfileConflictKeyForExtraction(options.userId, type, options.value || options.text || '', {
+    ...options,
+    fieldKey
+  });
+  const defaultStatus = extractionClass === 'episodic_observation' || extractionClass === 'journal_only'
+    ? 'candidate'
+    : getDefaultStatusForType(type, options.memoryKind);
   return {
     source: 'extractor',
     confidence,
     importanceTier,
     sourceKind: options.sourceKind || 'extractor',
-    status: options.status || getDefaultStatusForType(type, options.memoryKind),
+    status: options.status || defaultStatus,
     fieldKey,
+    extractionClass,
+    conflictKey,
     sourceSessionId: options.sessionId || '',
     participants: Array.isArray(options.participants) ? options.participants : [],
     entities: Array.isArray(options.entities) ? options.entities : [],
     relations: Array.isArray(options.relations) ? options.relations : []
   };
+}
+
+function canonicalProfileText(text = '') {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/^(likes?|dislikes?|identity|personality|hobby|goal|topic|recent topic|喜欢|不喜欢|身份|性格|爱好|目标|最近话题)(?:[:：\s])*/i, '')
+    .replace(/[^\u4e00-\u9fa5a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isEpisodicProfileObservation(type = '', value = '') {
+  const t = String(type || '').trim().toLowerCase();
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (t === 'topic') return true;
+  if (/(今天|刚刚|刚才|这次|这把|这局|今晚|上午|下午|昨天|临时|一会儿|等下|打算|准备|去打|去听|刷|冲[abcs]|master|expert|fc|ap)/i.test(text)) return true;
+  if (/(歌曲|歌|曲|谱面|游戏|音游|maimai|中二|chunithm|ongeki|arcaea|pjsk|邦邦|梗|谐音|段子|表情包|活动|成绩|等级|rank|kitty|移动恋话)/i.test(text)) {
+    return t === 'like' || t === 'hobby' || t === 'topic' || t === 'fact';
+  }
+  return false;
+}
+
+function classifyProfileExtraction(type = '', value = '', options = {}) {
+  const sourceKind = String(options.sourceKind || '').trim().toLowerCase();
+  const status = String(options.status || '').trim().toLowerCase();
+  const memoryKind = String(options.memoryKind || '').trim().toLowerCase();
+  if (sourceKind === 'explicit' || status === 'active') return 'stable_profile_candidate';
+  if (memoryKind === 'style' || type === 'style') return 'style_signal';
+  if (memoryKind === 'journal' || memoryKind === 'episode') return 'journal_only';
+  if (isEpisodicProfileObservation(type, value)) return type === 'topic' ? 'journal_only' : 'episodic_observation';
+  if (['identity', 'personality', 'hobby', 'like', 'dislike', 'goal', 'summary', 'impression'].includes(String(type || '').toLowerCase())) {
+    return 'stable_profile_candidate';
+  }
+  return 'journal_only';
+}
+
+function buildProfileConflictKeyForExtraction(userId, type = '', value = '', options = {}) {
+  const uid = String(userId || options.userId || '').trim();
+  const canonical = canonicalProfileText(value);
+  const fieldKey = resolveV3ProfileFieldKey(type, options.fieldKey);
+  if (!uid || !canonical) return '';
+  if (fieldKey === 'preference_like' || fieldKey === 'preference_dislike') return `${uid}|personal|preference|${canonical}`;
+  if (fieldKey === 'identity') return `${uid}|personal|identity|${canonical}`;
+  if (fieldKey === 'goal') return `${uid}|personal|goal|${canonical}`;
+  if (/^relationship_/.test(fieldKey)) return `${uid}|personal|relationship_style|${fieldKey}`;
+  return '';
+}
+
+function resolveV3ProfileFieldKey(type = '', fallback = '') {
+  const key = String(fallback || type || '').trim().toLowerCase();
+  if (type === 'like' || key === 'like') return 'preference_like';
+  if (type === 'dislike' || key === 'dislike') return 'preference_dislike';
+  if (type === 'summary') return 'persona_summary_support';
+  if (type === 'impression') return 'persona_impression_support';
+  if (type === 'identity') return 'identity';
+  if (type === 'personality') return 'personality';
+  if (type === 'hobby') return 'hobby';
+  if (type === 'goal') return 'goal';
+  if (type === 'topic') return 'topic';
+  return key || 'fact';
+}
+
+function appendV3LearnedMemoryEvent(userId, type, value, meta = {}, options = {}) {
+  if (config.MEMORY_V3_ENABLED === false) return;
+  const text = String(value || '').trim();
+  if (!text) return;
+  const fieldKey = resolveV3ProfileFieldKey(type, meta.fieldKey);
+  const status = String(meta.status || '').trim().toLowerCase() || getDefaultStatusForType(type, options.memoryKind);
+  const sourceKind = String(meta.sourceKind || 'extractor').trim().toLowerCase() || 'extractor';
+  const extractionClass = meta.extractionClass || classifyProfileExtraction(type, text, { ...options, fieldKey, status, sourceKind });
+  const conflictKey = meta.conflictKey || buildProfileConflictKeyForExtraction(userId, type, text, { ...options, fieldKey });
+  const eventType = status === 'active' || sourceKind === 'explicit'
+    ? 'memory_confirmed'
+    : 'memory_candidate_extracted';
+  void appendMemoryEvent({
+    type: eventType,
+    userId,
+    sessionKey: options.sessionKey,
+    groupId: options.groupId,
+    channelId: options.channelId,
+    sessionId: options.sessionId,
+    routePolicyKey: options.routePolicyKey,
+    topRouteType: options.topRouteType,
+    scopeType: 'personal',
+    source: meta.source || 'extractor',
+    sourceKind,
+    status,
+    confidence: meta.confidence,
+    importance: meta.importance,
+    memoryKind: type === 'summary' || type === 'impression' ? fieldKey : type,
+    semanticSlot: fieldKey,
+    conflictKey,
+    text,
+    payload: {
+      type: type === 'summary' || type === 'impression' ? 'fact' : type,
+      fieldKey,
+      memoryKind: type,
+      extractionClass,
+      conflictKey
+    },
+    participants: meta.participants,
+    entities: meta.entities,
+    relations: meta.relations
+  }).catch((error) => {
+    console.error('memory v3 event append failed:', error?.message || error);
+  });
 }
 
 function parseExplicitRemember(text = '') {
@@ -201,25 +317,40 @@ function parseExplicitRemember(text = '') {
   return String(match[1] || '').trim();
 }
 
+function inferExplicitProfileType(text = '') {
+  const value = String(text || '').trim();
+  if (!value) return 'fact';
+  if (/(不喜欢|讨厌|反感|不要.*(?:风格|称呼|方式)|别再)/.test(value)) return 'dislike';
+  if (/(喜欢|偏好|爱吃|爱看|爱听|爱玩)/.test(value)) return 'like';
+  if (/(目标|想要|打算|计划|希望以后|正在准备)/.test(value)) return 'goal';
+  if (/(我是|我的身份|职业|学生|老师|工程师|开发者|作者|玩家)/.test(value)) return 'identity';
+  if (/(爱好|兴趣|经常玩|常玩|长期玩|平时会)/.test(value)) return 'hobby';
+  if (/(性格|习惯|说话.*(?:直接|委婉|急|慢)|我这个人)/.test(value)) return 'personality';
+  return 'fact';
+}
+
 function persistLearnedMemories(userId, type, values, confidence = 0.8, options = {}) {
   const vectorItems = Array.isArray(options.vectorItems) ? options.vectorItems : [];
   const fieldKey = String(options.fieldKey || type || '').trim().toLowerCase();
+  const legacyProfileWriteEnabled = options.legacyProfileWriteEnabled === true;
 
   for (const raw of values) {
     const value = String(raw || '').trim();
     const learningGate = shouldBlockMemoryLearning(value, fieldKey, options);
     if (learningGate.blocked) continue;
     if (!shouldPersistMemoryCandidate(type, value, confidence)) continue;
-    const meta = buildMemoryBaseMeta(type, confidence, { ...options, fieldKey });
+    const meta = buildMemoryBaseMeta(type, confidence, { ...options, fieldKey, value, userId });
 
     if (type === 'fact') {
       vectorItems.push({ userId, text: value, type: 'fact', weight: 1.15, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
       addUserFact(userId, value, 30);
       continue;
     }
 
     if (type === 'identity') {
       vectorItems.push({ userId, text: `identity: ${value}`, type: 'identity', weight: 1.25, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
       addProfileItem(userId, 'identities', value, 20);
       addUserFact(userId, value, 30);
       continue;
@@ -227,47 +358,55 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8, options 
 
     if (type === 'personality') {
       vectorItems.push({ userId, text: `personality: ${value}`, type: 'personality', weight: 1.1, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      addProfileItem(userId, 'personality_traits', value, 20);
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      if (legacyProfileWriteEnabled) addProfileItem(userId, 'personality_traits', value, 20);
       continue;
     }
 
     if (type === 'hobby') {
       vectorItems.push({ userId, text: `hobby: ${value}`, type: 'hobby', weight: 1.08, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      addProfileItem(userId, 'hobbies', value, 20);
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      if (legacyProfileWriteEnabled) addProfileItem(userId, 'hobbies', value, 20);
       continue;
     }
 
     if (type === 'like') {
       vectorItems.push({ userId, text: `likes: ${value}`, type: 'like', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      addProfileItem(userId, 'likes', value, 20);
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      if (legacyProfileWriteEnabled) addProfileItem(userId, 'likes', value, 20);
       continue;
     }
 
     if (type === 'dislike') {
       vectorItems.push({ userId, text: `dislikes: ${value}`, type: 'dislike', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      addProfileItem(userId, 'dislikes', value, 20);
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      if (legacyProfileWriteEnabled) addProfileItem(userId, 'dislikes', value, 20);
       continue;
     }
 
     if (type === 'goal') {
       vectorItems.push({ userId, text: `goal: ${value}`, type: 'goal', weight: 1.2, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
       addProfileItem(userId, 'goals', value, 20);
       continue;
     }
 
     if (type === 'impression') {
       vectorItems.push({ userId, text: `impression support: ${value}`, type: 'fact', weight: 1.18, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey || 'persona_impression_support', meta: { ...meta, fieldKey: fieldKey || 'persona_impression_support' } });
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
       continue;
     }
 
     if (type === 'summary') {
       vectorItems.push({ userId, text: `summary support: ${value}`, type: 'fact', weight: 1.16, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey || 'persona_summary_support', meta: { ...meta, fieldKey: fieldKey || 'persona_summary_support' } });
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
       continue;
     }
 
     if (type === 'topic') {
       vectorItems.push({ userId, text: `recent topic: ${value}`, type: 'topic', weight: 0.95, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      addProfileItem(userId, 'recent_topics', value, 12);
+      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      if (legacyProfileWriteEnabled) addProfileItem(userId, 'recent_topics', value, 12);
     }
   }
 
@@ -793,6 +932,7 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
   if (explicitRemember) {
     const explicitGate = shouldBlockMemoryLearning(explicitRemember, 'fact', options);
     if (!explicitGate.blocked) {
+      const explicitType = inferExplicitProfileType(explicitRemember);
       rememberExplicitMemory(userId, sanitizeUntrustedContent(explicitRemember, 'memory'), {
         scopeType: options.groupId ? 'group' : 'personal',
         groupId: options.groupId || '',
@@ -806,6 +946,22 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
         entities,
         relations,
         sourceSessionId: options.sessionId
+      });
+      appendV3LearnedMemoryEvent(userId, explicitType, sanitizeUntrustedContent(explicitRemember, 'memory'), {
+        source: 'explicit',
+        sourceKind: 'explicit',
+        status: 'active',
+        confidence: 1,
+        importance: 2,
+        fieldKey: explicitType,
+        participants,
+        entities,
+        relations
+      }, {
+        ...options,
+        userId,
+        sessionKey: options.sessionKey,
+        sessionId: options.sessionId
       });
     }
   }

@@ -19,6 +19,7 @@ const {
   defaultEpisodeProjection
 } = require('./storage');
 const { enqueueMissingEmbeddings } = require('./embeddingIndex');
+const { acquireMaterializeLock, DEFAULT_STALE_MS: DEFAULT_MATERIALIZE_LOCK_STALE_MS } = require('./materializeLock');
 
 const PERSONA_SUPPORT_FIELDS = new Set([
   'persona_summary_support',
@@ -46,6 +47,7 @@ const RELATIONSHIP_STYLE_FIELDS = new Set([
 const STRICT_PROFILE_FIELD_MAP = Object.freeze({
   identity: 'identities',
   personality: 'personality_traits',
+  hobby: 'hobbies',
   preference_like: 'likes',
   preference_dislike: 'dislikes',
   goal: 'goals',
@@ -55,6 +57,7 @@ const STRICT_PROFILE_FIELD_MAP = Object.freeze({
 const WEAK_PROFILE_FIELD_MAP = Object.freeze({
   preference_like: 'single_hit_preferences',
   preference_dislike: 'single_hit_preferences',
+  hobby: 'single_hit_preferences',
   personality: 'single_hit_traits',
   topic: 'recent_topics'
 });
@@ -83,6 +86,7 @@ function createEmptyProfileProjection() {
     strictProfile: {
       identities: [],
       personality_traits: [],
+      hobbies: [],
       likes: [],
       dislikes: [],
       goals: [],
@@ -93,7 +97,10 @@ function createEmptyProfileProjection() {
       single_hit_traits: [],
       recent_topics: []
     },
+    profileMeta: {},
     suppressed: [],
+    conflicts: [],
+    expiresSoon: [],
     relation_stage: '陌生人'
   };
 }
@@ -146,6 +153,7 @@ function createNodeFromEvent(event) {
     entities: Array.isArray(event.entities) ? event.entities : [],
     relations: Array.isArray(event.relations) ? event.relations : [],
     taskType: normalizeText(event.taskType || event.payload?.taskType),
+    extractionClass: normalizeText(event.payload?.extractionClass || event.payload?.classification || event.extractionClass).toLowerCase(),
     toolName: normalizeText(event.toolName || event.payload?.toolName),
     agentName: normalizeText(event.agentName || event.payload?.agentName),
     updatedAt: Number(event.ts || 0) || 0,
@@ -177,12 +185,136 @@ function pushUnique(list, value, limit = 8) {
   if (list.length > limit) list.shift();
 }
 
+function pushProfileItem(profile, tier, field, node, limit = 8) {
+  if (!profile || !profile[tier] || !field || !node) return;
+  pushUnique(profile[tier][field], node.text, limit);
+  if (!profile.profileMeta || typeof profile.profileMeta !== 'object') profile.profileMeta = {};
+  if (!profile.profileMeta[tier] || typeof profile.profileMeta[tier] !== 'object') profile.profileMeta[tier] = {};
+  if (!profile.profileMeta[tier][field] || typeof profile.profileMeta[tier][field] !== 'object') profile.profileMeta[tier][field] = {};
+  const key = canonicalizeText(node.text);
+  if (!key) return;
+  const existing = profile.profileMeta[tier][field][key] || {};
+  const sourceIds = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds.slice() : [];
+  if (node.id && !sourceIds.includes(node.id)) sourceIds.push(node.id);
+  const sourceKinds = Array.isArray(existing.sourceKinds) ? existing.sourceKinds.slice() : [];
+  if (node.sourceKind && !sourceKinds.includes(node.sourceKind)) sourceKinds.push(node.sourceKind);
+  profile.profileMeta[tier][field][key] = {
+    text: node.text,
+    fieldKey: node.fieldKey,
+    field,
+    tier: tier === 'strictProfile' ? 'strict' : 'weak',
+    sourceEventIds: sourceIds.slice(0, 12),
+    evidenceCount: Math.max(Number(existing.evidenceCount || 0), Number(node.evidenceCount || 1)),
+    confidence: Math.max(Number(existing.confidence || 0), Number(node.confidence || 0)),
+    stabilityScore: Math.max(Number(existing.stabilityScore || 0), Number(node.stabilityScore || 0)),
+    firstSeenAt: existing.firstSeenAt
+      ? Math.min(Number(existing.firstSeenAt || 0), Number(node.createdAt || node.updatedAt || 0) || 0)
+      : (Number(node.createdAt || node.updatedAt || 0) || 0),
+    lastSeenAt: Math.max(Number(existing.lastSeenAt || 0), Number(node.updatedAt || node.createdAt || 0) || 0),
+    sourceKinds: sourceKinds.slice(0, 8),
+    conflictKey: normalizeText(node.conflictKey),
+    extractionClass: normalizeText(node.extractionClass),
+    expiresAt: Number(node.expiresAt || 0) || 0
+  };
+}
+
 function computeStabilityScore(node, supportCount = 1) {
   const confidence = Math.max(0, Math.min(1, Number(node.confidence || 0)));
   const support = Math.max(1, Number(supportCount || node.evidenceCount || 1));
   const sourceBonus = node.sourceKind === 'explicit' ? 0.35 : (node.status === 'active' ? 0.18 : 0);
   const importance = Math.max(0, Math.min(1, Number(node.importance || 0) / 2.5));
   return Math.max(0, Math.min(1, (confidence * 0.45) + (Math.min(3, support) * 0.12) + sourceBonus + (importance * 0.1)));
+}
+
+function buildProfileConflictKey(node = {}) {
+  if (node.conflictKey) return normalizeText(node.conflictKey).toLowerCase();
+  const userId = normalizeText(node.userId);
+  const scope = normalizeText(node.scopeType || 'personal').toLowerCase() || 'personal';
+  const fieldKey = normalizeText(node.fieldKey).toLowerCase();
+  const semanticSlot = normalizeText(node.semanticSlot || fieldKey).toLowerCase();
+  const canonical = canonicalizeText(node.text);
+  if (!userId || !canonical) return '';
+  if (fieldKey === 'preference_like' || fieldKey === 'preference_dislike') {
+    return `${userId}|${scope}|preference|${canonical}`;
+  }
+  if (fieldKey === 'identity') return `${userId}|${scope}|identity|${semanticSlot || 'identity'}`;
+  if (fieldKey === 'goal') return `${userId}|${scope}|goal|${semanticSlot || 'goal'}`;
+  if (RELATIONSHIP_STYLE_FIELDS.has(fieldKey)) return `${userId}|${scope}|relationship_style|${fieldKey}`;
+  if (BOT_PERSONA_FIELDS.has(fieldKey)) return `${userId}|${scope}|bot_persona|${fieldKey}`;
+  return '';
+}
+
+function rankProfileNode(node = {}) {
+  const statusRank = node.status === 'active' ? 2 : 1;
+  const sourceRank = node.sourceKind === 'explicit' ? 4 : (node.sourceKind === 'migration_bootstrap' ? 2 : 1);
+  const tierRank = node.evidenceTier === 'strict' ? 3 : 1;
+  const typeRank = String(node.type || '').toLowerCase() === 'dislike' ? 0.2 : 0;
+  return (sourceRank * 1000)
+    + (tierRank * 100)
+    + (statusRank * 20)
+    + (Number(node.stabilityScore || 0) * 10)
+    + Number(node.confidence || 0)
+    + typeRank;
+}
+
+function resolveProfileNodeConflicts(nodes = []) {
+  const sorted = (Array.isArray(nodes) ? nodes : []).slice().sort((a, b) => {
+    if (rankProfileNode(b) !== rankProfileNode(a)) return rankProfileNode(b) - rankProfileNode(a);
+    return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+  });
+  const winners = new Map();
+  const selected = [];
+  const conflicts = [];
+  for (const node of sorted) {
+    const key = buildProfileConflictKey(node);
+    if (!key) {
+      selected.push(node);
+      continue;
+    }
+    if (!winners.has(key)) {
+      winners.set(key, node);
+      selected.push(node);
+      continue;
+    }
+    const winner = winners.get(key);
+    node.suppressedBy = String(winner?.id || '');
+    conflicts.push({
+      userId: node.userId,
+      conflictKey: key,
+      fieldKey: node.fieldKey,
+      canonicalKey: node.canonicalKey,
+      id: node.id,
+      text: node.text,
+      suppressedBy: node.suppressedBy,
+      winnerText: winner?.text || '',
+      winnerId: winner?.id || '',
+      reason: 'profile_conflict'
+    });
+  }
+  return { selected, conflicts };
+}
+
+function getRecentTopicTtlMs() {
+  const days = Math.max(0, Number(config.MEMORY_PROFILE_RECENT_TOPIC_TTL_DAYS || 14) || 0);
+  return days > 0 ? days * 24 * 3600 * 1000 : 0;
+}
+
+function isExpiredRecentTopic(node = {}, now = Date.now()) {
+  if (node.fieldKey !== 'topic' && node.type !== 'topic') return false;
+  const ttlMs = getRecentTopicTtlMs();
+  if (!ttlMs) return false;
+  const ts = Number(node.updatedAt || node.createdAt || 0) || 0;
+  return ts > 0 && now - ts > ttlMs;
+}
+
+function isExpiringSoonRecentTopic(node = {}, now = Date.now()) {
+  if (node.fieldKey !== 'topic' && node.type !== 'topic') return false;
+  const ttlMs = getRecentTopicTtlMs();
+  if (!ttlMs) return false;
+  const ts = Number(node.updatedAt || node.createdAt || 0) || 0;
+  if (!ts) return false;
+  const age = now - ts;
+  return age >= ttlMs * 0.75 && age <= ttlMs;
 }
 
 function applyPersonaRecencyDecay(node, now = Date.now()) {
@@ -435,6 +567,25 @@ function materializeMemoryViews(options = {}) {
   }
   ensureDir(config.MEMORY_V3_DIR);
   ensureDir(config.MEMORY_V3_PROJECTIONS_DIR);
+  const lock = acquireMaterializeLock(
+    config.MEMORY_V3_MATERIALIZE_LOCK_FILE || `${config.MEMORY_V3_PROJECTIONS_DIR}.materialize.lock`,
+    {
+      staleMs: Number(config.MEMORY_V3_MATERIALIZE_LOCK_STALE_MS || DEFAULT_MATERIALIZE_LOCK_STALE_MS)
+        || DEFAULT_MATERIALIZE_LOCK_STALE_MS
+    }
+  );
+  if (!lock.acquired) {
+    appendPerfEvent({
+      category: 'memory_v3',
+      type: 'materialize_deferred',
+      reason: lock.reason || 'busy'
+    });
+    return {
+      deferred: true,
+      reason: 'materialize_lock_busy'
+    };
+  }
+  try {
   const events = Array.isArray(options.events) ? options.events : loadMemoryEvents();
   const now = Date.now();
   const sessionProjection = defaultSessionProjection();
@@ -472,6 +623,10 @@ function materializeMemoryViews(options = {}) {
           moduleState: {}
         };
         const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+        const clearsRestartRecallTopic = event.type === 'session_checkpoint'
+          && Object.prototype.hasOwnProperty.call(payload, 'activeTopic')
+          && (normalizeText(event.sourceKind).toLowerCase() === 'restart_recall_clear'
+            || normalizeText(payload.summarySource || payload.source || '').toLowerCase() === 'restart_recall_clear');
         sessionProjection.sessions[sessionKey] = {
           ...existing,
           ...normalizeSessionScopeFromEvent(event),
@@ -490,8 +645,13 @@ function materializeMemoryViews(options = {}) {
           openLoops: Array.isArray(payload.openLoops) ? payload.openLoops.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.openLoops,
           assistantCommitments: Array.isArray(payload.assistantCommitments) ? payload.assistantCommitments.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.assistantCommitments,
           userConstraints: Array.isArray(payload.userConstraints) ? payload.userConstraints.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.userConstraints,
-          interactionState: payload.interactionState && typeof payload.interactionState === 'object'
-            ? payload.interactionState
+          interactionState: clearsRestartRecallTopic
+            ? {
+                ...(existing.interactionState && typeof existing.interactionState === 'object' ? existing.interactionState : {}),
+                activeTopic: normalizeText(payload.activeTopic)
+              }
+            : payload.interactionState && typeof payload.interactionState === 'object'
+              ? payload.interactionState
             : existing.interactionState,
           sceneState: payload.sceneState && typeof payload.sceneState === 'object'
             ? payload.sceneState
@@ -565,6 +725,13 @@ function materializeMemoryViews(options = {}) {
     node.evidenceCount = Math.max(Number(node.evidenceCount || 1), support);
     node.evidenceTier = resolveEvidenceTier(node, support);
     node.stabilityScore = computeStabilityScore(node, support);
+    node.conflictKey = node.conflictKey || buildProfileConflictKey(node);
+    if (node.fieldKey === 'topic' || node.type === 'topic') {
+      const ttlMs = getRecentTopicTtlMs();
+      node.expiresAt = ttlMs && Number(node.updatedAt || node.createdAt || 0)
+        ? Number(node.updatedAt || node.createdAt || 0) + ttlMs
+        : 0;
+    }
   }
   const activeNodes = nodes.filter((item) => item.status !== 'archived');
   const winners = new Map();
@@ -592,20 +759,52 @@ function materializeMemoryViews(options = {}) {
   }
 
   const resolvedNodes = Array.from(winners.values());
+  const profileConflictResolution = resolveProfileNodeConflicts(resolvedNodes);
+  const profileNodes = profileConflictResolution.selected;
+  const profileConflicts = profileConflictResolution.conflicts;
+  const expiredProfileNodes = [];
+  const expiringProfileNodes = [];
 
-  for (const node of resolvedNodes) {
+  for (const node of profileNodes) {
     const userId = normalizeText(node.userId);
     if (!userId || userId.startsWith('group:')) continue;
     if (!profileProjection.users[userId]) {
       profileProjection.users[userId] = createEmptyProfileProjection();
     }
     const profile = profileProjection.users[userId];
+    if (isExpiredRecentTopic(node, now)) {
+      expiredProfileNodes.push({
+        userId,
+        fieldKey: node.fieldKey,
+        canonicalKey: node.canonicalKey,
+        id: node.id,
+        text: node.text,
+        reason: 'recent_topic_expired',
+        expiresAt: node.expiresAt || 0
+      });
+      continue;
+    }
+    if (isExpiringSoonRecentTopic(node, now)) {
+      expiringProfileNodes.push({
+        userId,
+        fieldKey: node.fieldKey,
+        canonicalKey: node.canonicalKey,
+        id: node.id,
+        text: node.text,
+        expiresAt: node.expiresAt || 0
+      });
+    }
     if (STRICT_PROFILE_FIELD_MAP[node.fieldKey] && node.evidenceTier === 'strict') {
-      pushUnique(profile.strictProfile[STRICT_PROFILE_FIELD_MAP[node.fieldKey]], node.text, 20);
+      pushProfileItem(profile, 'strictProfile', STRICT_PROFILE_FIELD_MAP[node.fieldKey], node, 20);
     } else if (WEAK_PROFILE_FIELD_MAP[node.fieldKey]) {
-      pushUnique(profile.weakProfile[WEAK_PROFILE_FIELD_MAP[node.fieldKey]], node.text, 12);
-    } else if (!PERSONA_SUPPORT_FIELDS.has(node.fieldKey) && node.fieldKey !== 'episode') {
-      pushUnique(profile.weakProfile.recent_topics, node.text, 12);
+      pushProfileItem(profile, 'weakProfile', WEAK_PROFILE_FIELD_MAP[node.fieldKey], node, 12);
+    } else if (
+      !PERSONA_SUPPORT_FIELDS.has(node.fieldKey)
+      && node.fieldKey !== 'episode'
+      && node.fieldKey !== 'topic'
+      && node.type !== 'topic'
+    ) {
+      pushProfileItem(profile, 'weakProfile', 'recent_topics', node, 12);
     }
   }
 
@@ -626,7 +825,13 @@ function materializeMemoryViews(options = {}) {
       botPersonaNodes,
       relationshipNodes
     );
-    profile.suppressed = suppressed.filter((item) => item.userId === userId);
+    profile.suppressed = [
+      ...suppressed.filter((item) => item.userId === userId),
+      ...expiredProfileNodes.filter((item) => item.userId === userId),
+      ...profileConflicts.filter((item) => item.userId === userId)
+    ];
+    profile.conflicts = profileConflicts.filter((item) => item.userId === userId);
+    profile.expiresSoon = expiringProfileNodes.filter((item) => item.userId === userId);
   }
 
   for (const userId of Object.keys(episodeProjection.users)) {
@@ -669,6 +874,9 @@ function materializeMemoryViews(options = {}) {
     episodeProjection,
     nodes: resolvedNodes
   };
+  } finally {
+    lock.release();
+  }
 }
 
 module.exports = {

@@ -321,6 +321,7 @@ function shouldStartAsCandidate(type, memoryKind, sourceKind, rawStatus, confide
   if (memoryKind === 'episode') return false;
   const t = normalizeType(type);
   if (t === 'identity' || t === 'goal' || t === 'summary' || t === 'impression') return false;
+  if (t === 'like' || t === 'dislike' || t === 'personality' || t === 'hobby' || t === 'topic') return true;
   if (memoryKind === 'style' || memoryKind === 'jargon') return false;
   return Number(confidence || 0) < 0.98;
 }

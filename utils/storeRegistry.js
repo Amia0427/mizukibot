@@ -32,6 +32,8 @@ function getJsonLineWriter(filePath, options = {}) {
   return jsonLineWriterCache.getOrCompute(key, () => createJsonLineHotWriter(key, {
     debounceMs: Math.max(0, Number(options.debounceMs || config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
     maxDelayMs: Math.max(0, Number(options.maxDelayMs || config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000),
+    rotateMaxBytes: options.rotateMaxBytes,
+    rotateMaxFiles: options.rotateMaxFiles,
     serializeLine: options.serializeLine
   }));
 }

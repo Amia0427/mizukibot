@@ -192,6 +192,7 @@ function collectCandidates(userId, options = {}) {
       personaCore.relationshipTone ? { id: `profile:${userId}:relationshipTone`, source: 'profile', type: 'relationship_tone', text: personaCore.relationshipTone, semanticSlot: 'relationship', fieldKey: 'relationship' } : null,
       ...(Array.isArray(profile.strictProfile?.identities) ? profile.strictProfile.identities.map((item, index) => ({ id: `profile:${userId}:identity:${index}`, source: 'profile', type: 'identity', text: item, semanticSlot: 'identity', fieldKey: 'identity' })) : []),
       ...(Array.isArray(profile.strictProfile?.personality_traits) ? profile.strictProfile.personality_traits.map((item, index) => ({ id: `profile:${userId}:personality:${index}`, source: 'profile', type: 'personality', text: item, semanticSlot: 'personality', fieldKey: 'personality' })) : []),
+      ...(Array.isArray(profile.strictProfile?.hobbies) ? profile.strictProfile.hobbies.map((item, index) => ({ id: `profile:${userId}:hobby:${index}`, source: 'profile', type: 'hobby', text: item, semanticSlot: 'hobby', fieldKey: 'hobby' })) : []),
       ...(Array.isArray(profile.strictProfile?.likes) ? profile.strictProfile.likes.map((item, index) => ({ id: `profile:${userId}:like:${index}`, source: 'profile', type: 'like', text: item, semanticSlot: 'preference_like', fieldKey: 'preference_like' })) : []),
       ...(Array.isArray(profile.strictProfile?.dislikes) ? profile.strictProfile.dislikes.map((item, index) => ({ id: `profile:${userId}:dislike:${index}`, source: 'profile', type: 'dislike', text: item, semanticSlot: 'preference_dislike', fieldKey: 'preference_dislike' })) : []),
       ...(Array.isArray(profile.strictProfile?.goals) ? profile.strictProfile.goals.map((item, index) => ({ id: `profile:${userId}:goal:${index}`, source: 'profile', type: 'goal', text: item, semanticSlot: 'goal', fieldKey: 'goal' })) : []),
@@ -284,7 +285,7 @@ function sourceLimit(source) {
 function matchesFacetCandidate(facet, candidate = {}) {
   const fieldKey = normalizeText(candidate.fieldKey || candidate.semanticSlot || candidate.type).toLowerCase();
   const source = normalizeText(candidate.source).toLowerCase();
-  if (facet === 'preference') return ['preference_like', 'preference_dislike', 'like', 'dislike', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
+  if (facet === 'preference') return ['preference_like', 'preference_dislike', 'like', 'dislike', 'hobby', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
   if (facet === 'identity') return ['identity', 'fact', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
   if (facet === 'relationship') return ['relationship', 'relationship_tone', 'relationship_distance', 'relationship_salutation', 'relationship_reply_style', 'relationship_engagement', 'relationship_boundaries', 'style_pattern', 'persona_impression_support'].includes(fieldKey) || source === 'profile';
   if (facet === 'continuity') return source === 'recent' || source === 'journal' || source === 'task';
