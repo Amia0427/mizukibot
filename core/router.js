@@ -12,7 +12,7 @@ const {
 } = require('./routeSchema');
 const { isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
 const { buildRouterStageSystemPrompt } = require('../utils/stagePromptContracts');
-const { isConversationRecapQuery } = require('../utils/recallHeuristics');
+const { isRecentRecallQuery } = require('../utils/recallHeuristics');
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -1212,7 +1212,7 @@ function extractDirectRouteSignals(cleanText = '', imageUrl = null) {
   const isExplicitAction = hasExplicitActSignal(text);
   const hasSafetyBoundary = detectSafetyBoundaryCaution(text);
   const isStrictTime = isStrictTimeDirectQuestion(text);
-  const recapQuery = !hasImage && isConversationRecapQuery(text);
+  const recapQuery = !hasImage && isRecentRecallQuery(text);
   const needsMemory = !hasImage && (recapQuery || /(remember|recall|earlier|previous|before|history|timeline|log|logs|my notes|my notebook|notes about|我的资料|我的笔记|之前记录|之前记过|知识库|笔记|记得|记不记得|之前|昨天|前几天|回忆|记录|发过|图|图片)/i.test(text));
   const needsFreshInfo = !isStrictTime && !hasImage && !recapQuery && (
     shouldUseToolBackedSummary(text)

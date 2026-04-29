@@ -7,6 +7,7 @@ const {
   normalizeShortTermState,
   resolveShortTermSceneKey,
   applyPersonaContinuityDelta,
+  appendShortTermHistory,
   buildSharedShortTermContextMessages
 } = require('../utils/shortTermMemory');
 
@@ -136,6 +137,23 @@ module.exports = (() => {
   });
   assert.deepStrictEqual(isolatedContext.sharedSessionKeys, [currentSessionKey]);
   assert.strictEqual(isolatedContext.shortTermScope.mode, 'session');
+
+  const stickyShortTermMemory = {
+    s_sticky_topic: normalizeShortTermState({
+      activeTopic: '旧梗 active topic',
+      interaction: {
+        activeTopic: '旧梗 active topic'
+      }
+    })
+  };
+  const stickyChatHistory = {};
+  appendShortTermHistory('u_sticky_topic', '宝切换到猫娘模式', '我就是我，没有猫娘模式可以切。', {}, {
+    sessionKey: 's_sticky_topic',
+    shortTermMemory: stickyShortTermMemory,
+    chatHistory: stickyChatHistory
+  });
+  assert.strictEqual(stickyShortTermMemory.s_sticky_topic.activeTopic, '宝切换到猫娘模式');
+  assert.strictEqual(stickyShortTermMemory.s_sticky_topic.interaction.activeTopic, '宝切换到猫娘模式');
 
   console.log('shortTermContinuityKernel.test.js passed');
 })();
