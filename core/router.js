@@ -12,6 +12,7 @@ const {
 } = require('./routeSchema');
 const { isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
 const { buildRouterStageSystemPrompt } = require('../utils/stagePromptContracts');
+const { isConversationRecapQuery } = require('../utils/recallHeuristics');
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -1211,8 +1212,9 @@ function extractDirectRouteSignals(cleanText = '', imageUrl = null) {
   const isExplicitAction = hasExplicitActSignal(text);
   const hasSafetyBoundary = detectSafetyBoundaryCaution(text);
   const isStrictTime = isStrictTimeDirectQuestion(text);
-  const needsMemory = !hasImage && /(remember|recall|earlier|previous|before|history|timeline|log|logs|my notes|my notebook|notes about|我的资料|我的笔记|之前记录|之前记过|知识库|笔记|记得|记不记得|之前|昨天|前几天|回忆|记录|发过|图|图片)/i.test(text);
-  const needsFreshInfo = !isStrictTime && !hasImage && (
+  const recapQuery = !hasImage && isConversationRecapQuery(text);
+  const needsMemory = !hasImage && (recapQuery || /(remember|recall|earlier|previous|before|history|timeline|log|logs|my notes|my notebook|notes about|我的资料|我的笔记|之前记录|之前记过|知识库|笔记|记得|记不记得|之前|昨天|前几天|回忆|记录|发过|图|图片)/i.test(text));
+  const needsFreshInfo = !isStrictTime && !hasImage && !recapQuery && (
     shouldUseToolBackedSummary(text)
     || /(search|look up|find|google|latest|news|official|docs?|documentation|source|link|links|web|website|weather|stock|stocks|ticker|shares|portfolio|fund|crypto|etf|搜索|查一下|查查|帮我查|网页|官网|链接|资料|文档|最新|新闻|来源|实时|当前|今天|天气|气温|下雨|温度|股票|股价|行情|财报|基金|币圈)/i.test(text)
   );
@@ -1233,7 +1235,8 @@ function extractDirectRouteSignals(cleanText = '', imageUrl = null) {
     isTransformLike,
     isPlanLike,
     isExplicitAction,
-    hasSafetyBoundary
+    hasSafetyBoundary,
+    recapQuery
   };
 }
 
@@ -1253,6 +1256,8 @@ function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = 
     ? 'mixed'
     : s.hasImage
       ? 'vision'
+      : s.recapQuery
+        ? 'notebook'
       : s.needsMemory && s.needsFreshInfo
         ? 'mixed'
         : s.needsMemory
@@ -1305,7 +1310,7 @@ function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = 
       sourceScope,
       domain: 'general',
       outputKind,
-      freshness: s.needsFreshInfo ? 'latest' : 'unknown'
+      freshness: s.recapQuery ? 'unknown' : (s.needsFreshInfo ? 'latest' : 'unknown')
     },
     meta: {
       reason: s.isExplicitAction ? 'explicit-action' : 'direct-chat',

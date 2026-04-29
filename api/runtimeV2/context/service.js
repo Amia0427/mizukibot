@@ -150,6 +150,54 @@ function normalizeText(value, fallback = '') {
   return text || fallback;
 }
 
+function getRouteMetaGroupId(routeMeta = {}) {
+  const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
+  return String(normalizedRouteMeta.groupId || normalizedRouteMeta.group_id || '').trim();
+}
+
+function isGroupDirectChatRoute(options = {}) {
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  return topRouteType === 'direct_chat' && Boolean(getRouteMetaGroupId(routeMeta));
+}
+
+function ensureGroupDirectPersonaModulePlan(plan = {}, options = {}) {
+  const cloned = cloneDynamicPromptPlan(plan);
+  if (!isGroupDirectChatRoute(options)) return cloned;
+  if (!cloned.personaModules.includes('scene_group_insert')) {
+    cloned.personaModules = ['scene_group_insert', ...cloned.personaModules];
+  }
+  const hasDecision = cloned.blockDecisions.some((item) => normalizeText(item?.moduleId) === 'scene_group_insert');
+  if (!hasDecision) {
+    cloned.blockDecisions = [
+      {
+        moduleId: 'scene_group_insert',
+        decision: 'include',
+        confidence: 1,
+        priority: 1,
+        reason: 'group_direct_chat_requires_short_group_reply_style'
+      },
+      ...cloned.blockDecisions
+    ];
+  }
+  cloned.rationaleByBlock = {
+    ...cloned.rationaleByBlock,
+    scene_group_insert: cloned.rationaleByBlock.scene_group_insert || 'group direct chat should stay short and casual',
+    'persona_module:scene_group_insert': cloned.rationaleByBlock['persona_module:scene_group_insert'] || 'group direct chat should stay short and casual'
+  };
+  return cloned;
+}
+
+function buildGroupDirectChatStyleGuardPrompt() {
+  return [
+    '[GroupDirectChatStyleGuard]',
+    '当前是QQ群里的直接问答，不是一对一长教程。',
+    '最终回复默认1到3句，目标80到180个中文字，硬上限220字。',
+    '先像群友顺手接话，再只给最关键的一两个点；不要标题、编号、分点、教程提纲、总结段。',
+    '遇到“如何学习/怎么入门/推荐路线”这类问题，只给最短起步路径，不展开完整课程。'
+  ].join('\n');
+}
+
 function shouldForceMemoryContextForQuestion(question = '', options = {}) {
   if (options?.forceMemoryContext === true) return true;
   const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
@@ -328,7 +376,7 @@ function normalizePlannerDynamicContextPlan(options = {}) {
         .filter((item) => item && !skippedModules.has(item))
         .concat(blockDecisions.filter((item) => item.decision === 'include' && item.moduleId).map((item) => item.moduleId))
     )).filter((item) => !skippedModules.has(item));
-    return {
+    const plannerNormalized = {
       schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
       enabledBlockIds,
       personaModules,
@@ -340,6 +388,7 @@ function normalizePlannerDynamicContextPlan(options = {}) {
       source: normalizeText(plannerPlan._source || plannerPlan.source) || 'planner',
       _source: normalizeText(plannerPlan._source || plannerPlan.source) || 'planner'
     };
+    return ensureGroupDirectPersonaModulePlan(plannerNormalized, options);
   }
 
   const heuristicPlan = buildHeuristicDynamicPromptPlan({
@@ -348,7 +397,7 @@ function normalizePlannerDynamicContextPlan(options = {}) {
     personaModules: normalizeArray(options?.routeMeta?.directChatPlanner?.personaModules || options?.routeMeta?.toolPlanner?.personaModules),
     hasAffinityState: true
   });
-  return {
+  const fallbackPlan = {
     schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
     ...heuristicPlan,
     blockDecisions: normalizePlannerBlockDecisions(heuristicPlan),
@@ -356,6 +405,7 @@ function normalizePlannerDynamicContextPlan(options = {}) {
     source: 'heuristic',
     _source: 'heuristic'
   };
+  return ensureGroupDirectPersonaModulePlan(fallbackPlan, options);
 }
 
 function normalizeDynamicPromptPlan(options = {}) {
@@ -727,7 +777,7 @@ function clonePromptLayerValue(value = {}) {
 function buildPromptSurface(topRouteType = '', routeMeta = {}) {
   const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
   if (String(topRouteType || '').trim().toLowerCase() === 'proactive') return 'proactive_touch';
-  return String(normalizedRouteMeta.groupId || normalizedRouteMeta.group_id || '').trim() && normalizedRouteMeta.directedContext
+  return getRouteMetaGroupId(normalizedRouteMeta) && normalizedRouteMeta.directedContext
     ? 'passive_group_reply'
     : 'direct_chat';
 }
@@ -822,7 +872,8 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     routeMeta,
     directedContext: routeMeta.directedContext,
     continuitySignals: options?.continuitySignals,
-    personaPhase: routeMeta.personaPhase || ''
+    personaPhase: routeMeta.personaPhase || '',
+    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
   };
   const personaModuleCandidates = await buildPersonaModuleCandidatesAsync(personaModuleContext);
   const personaWorldbookSearch = personaModuleCandidates.personaWorldbookSearch || {};
@@ -840,6 +891,7 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       directedContext: routeMeta.directedContext,
       continuitySignals: options?.continuitySignals,
       personaPhase: routeMeta.personaPhase || '',
+      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
       personaModuleCandidates
     }
   );
@@ -1109,7 +1161,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       routeMeta,
       directedContext: routeMeta.directedContext,
       continuitySignals: options?.continuitySignals,
-      personaPhase: routeMeta.personaPhase || ''
+      personaPhase: routeMeta.personaPhase || '',
+      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
     }))
     : [];
   const personaWorldbookSearch = promptMaterials?.personaWorldbookSearch && typeof promptMaterials.personaWorldbookSearch === 'object'
@@ -1130,6 +1183,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         directedContext: routeMeta.directedContext,
         continuitySignals: options?.continuitySignals,
         personaPhase: routeMeta.personaPhase || '',
+        chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
         personaModuleCandidates
       }
     ))
@@ -1456,6 +1510,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     slot: item.slot
   })));
   const baseRuntimeAddedIds = [];
+  if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
+    baseRuntimeAddedIds.push('persona_module:scene_group_insert');
+  }
   if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
     baseRuntimeAddedIds.push('directed_context');
   }
@@ -1680,7 +1737,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     routeMeta,
     directedContext: routeMeta.directedContext,
     continuitySignals: options?.continuitySignals,
-    personaPhase: routeMeta.personaPhase || ''
+    personaPhase: routeMeta.personaPhase || '',
+    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
   });
   const fallbackPersonaModuleDecision = selectPersonaModules(
     {
@@ -1695,7 +1753,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       routeMeta,
       directedContext: routeMeta.directedContext,
       continuitySignals: options?.continuitySignals,
-      personaPhase: routeMeta.personaPhase || ''
+      personaPhase: routeMeta.personaPhase || '',
+      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
     }
   );
   const now = Date.now();
@@ -1859,6 +1918,19 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }));
   }
 
+  if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
+    extraBlocks.push(createPromptBlock('group_direct_chat_style_guard', 'Group Direct Chat Style Guard', buildGroupDirectChatStyleGuardPrompt(), {
+      stage: 'main',
+      priority: 150,
+      authority: 'route_style_policy',
+      kind: 'style_policy',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true
+      }
+    }));
+  }
+
   const optionalBuildStartedAt = Date.now();
   const optionalBuildEnabled = currentConfig.PROMPT_OPTIONAL_BUILD_ENABLED !== false;
   const optionalBudgetMs = Math.max(0, Number(currentConfig.PROMPT_OPTIONAL_BUILD_BUDGET_MS || 0) || 0);
@@ -1997,6 +2069,26 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }
   }
 
+  if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
+    const optionalLayerHasGroupModule = normalizeArray(effectiveOptionalLayer?.dynamicContextBlocks)
+      .some((item) => normalizeText(item?.meta?.moduleId) === 'scene_group_insert');
+    if (!optionalLayerHasGroupModule) {
+      extraBlocks.push(createPromptBlock('persona_module_scene_group_insert', 'Persona Module scene_group_insert', loadPersonaModuleText('scene_group_insert'), {
+        stage: 'main',
+        priority: 520,
+        authority: 'persona_module',
+        kind: 'persona_module',
+        budgetTokens: 58,
+        source: 'persona_modules/scene_group_insert.txt',
+        lane: 'dynamic_context',
+        meta: {
+          moduleId: 'scene_group_insert',
+          optional: true
+        }
+      }));
+    }
+  }
+
   const memoryCliInstruction = !optionalBudgetExceeded ? buildV2MemoryCliInstruction(options?.memoryCliTurn) : '';
   const forceMemoryContext = shouldForceMemoryContextForQuestion(question, {
     ...options,
@@ -2043,6 +2135,9 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const plannerProvidedDynamicPlan = dynamicPromptPlan.plannerProvided === true;
   const shouldUseHeuristicDynamicPlan = !plannerProvidedDynamicPlan;
   const runtimeAddedIds = [];
+  if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
+    runtimeAddedIds.push('group_direct_chat_style_guard', 'persona_module:scene_group_insert');
+  }
   if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
     runtimeAddedIds.push('directed_context');
   }
@@ -2106,6 +2201,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     const blockId = normalizeText(block?.id);
     const isCritical = block?.lane === 'stable_system'
       || blockId === 'context_stats_instruction'
+      || blockId === 'group_direct_chat_style_guard'
+      || normalizeText(block?.meta?.moduleId) === 'scene_group_insert'
       || blockId === 'memory_cli_followup'
       || blockId === 'memory_cli_instruction'
       || [...criticalBlockIdPrefixes].some((prefix) => blockId.startsWith(prefix));

@@ -1,5 +1,7 @@
 const assert = require('assert');
 const {
+  classifyRecallFacet,
+  isConversationRecapQuery,
   shouldPrioritizeMemoryProbe,
   isMemoryContinuationQuestion
 } = require('../utils/recallHeuristics');
@@ -20,6 +22,10 @@ module.exports = (() => {
     intent: {},
     meta: { chatMode: 'chat' }
   }), true);
+
+  assert.strictEqual(classifyRecallFacet('宝说一下我今天和你说的'), 'recent_continuity');
+  assert.strictEqual(isConversationRecapQuery('今天我们聊了啥'), true);
+  assert.strictEqual(isConversationRecapQuery('今天天气怎么样'), false);
 
   console.log('recallHeuristics.test.js passed');
 })()

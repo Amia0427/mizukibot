@@ -19,7 +19,8 @@ const { getDailyJournalRetrievalBundle } = require('./dailyJournal');
 const { formatGroupMemories } = require('./groupMemory');
 const { formatTaskMemories } = require('./taskMemory');
 const {
-  classifyRecallFacet
+  classifyRecallFacet,
+  isConversationRecapQuery
 } = require('./recallHeuristics');
 const {
   trimTextByTokenBudget
@@ -195,6 +196,7 @@ function buildMemoKey(prefix, userId, question = '', options = {}) {
   ].filter(Boolean).join('|') || 'default';
   const lookback = String(options.dailyLookbackDays || options.lookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS || '');
   const journalTarget = sanitizeText(options.dailyJournalTimestamp || options.dailyJournalYearMonth || '');
+  const rawMode = options.includeActiveRaw ? 'active_raw' : '';
   return [
     prefix,
     sanitizeText(userId),
@@ -203,7 +205,8 @@ function buildMemoKey(prefix, userId, question = '', options = {}) {
     sanitizeText(question),
     kindMask,
     lookback,
-    journalTarget
+    journalTarget,
+    rawMode
   ].join('|');
 }
 
@@ -233,9 +236,11 @@ function formatDailyJournalPromptItem(item = {}) {
 }
 
 function buildPromptJournalItems(bundle = {}) {
+  const activeRaw = Array.isArray(bundle?.byLayer?.activeRaw) ? bundle.byLayer.activeRaw : [];
   const daily = Array.isArray(bundle?.byLayer?.daily) ? bundle.byLayer.daily : [];
   const fourDay = Array.isArray(bundle?.byLayer?.fourDay) ? bundle.byLayer.fourDay : [];
   const monthly = Array.isArray(bundle?.byLayer?.monthly) ? bundle.byLayer.monthly : [];
+  if (activeRaw.length > 0) return activeRaw.concat(daily.slice(-1), fourDay.slice(-1), monthly.slice(-1));
   if (daily.length > 0) return daily.concat(fourDay.slice(-1), monthly.slice(-1));
   if (fourDay.length > 0) return fourDay.concat(monthly.slice(-1));
   return monthly;
@@ -328,7 +333,7 @@ function splitUnifiedHits(allHits = [], options = {}) {
 
 function buildRetrievedMemoryText(hits = [], core = [], factText = '', options = {}) {
   const relevantHits = Array.isArray(hits) ? hits : [];
-  const coreHits = Array.isArray(core) ? core : [];
+  const coreHits = options.disableLegacyFactFallback ? [] : (Array.isArray(core) ? core : []);
   if (relevantHits.length > 0 || coreHits.length > 0) {
     const mainText = relevantHits.length > 0
       ? formatRetrievedMemories(relevantHits, {
@@ -492,6 +497,7 @@ function buildMemoryTrace({ hits = [], injected = {}, options = {} } = {}) {
   };
 }
 function buildContextPayload(userId, question = '', options = {}, unifiedHits = []) {
+  const recapQuery = isConversationRecapQuery(question);
   const resolvedGroupIds = Array.isArray(options.resolvedGroupIds)
     ? options.resolvedGroupIds.map((item) => sanitizeText(item)).filter(Boolean)
     : resolveReadableGroupIds(userId, options);
@@ -505,14 +511,20 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     options,
     buildMemoKey('journal-bundle', userId, question || '', {
       ...options,
-      dailyJournalTimestamp
+      dailyJournalTimestamp,
+      includeActiveRaw: options.includeActiveRaw || recapQuery
     }),
     () => getDailyJournalRetrievalBundle(userId, {
       lookbackDays: options.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
       timestamp: dailyJournalTimestamp,
       yearMonth: options.dailyJournalYearMonth,
       maxFourDayFiles: options.dailyJournalMaxFourDayFiles,
-      maxMonthlyFiles: options.dailyJournalMaxMonthlyFiles
+      maxMonthlyFiles: options.dailyJournalMaxMonthlyFiles,
+      sessionKey: options.sessionKey,
+      question,
+      topic: question,
+      includeActiveRaw: options.includeActiveRaw || recapQuery,
+      activeRawMaxEntries: options.activeRawMaxEntries || 8
     })
   );
   const ragEnabled = options.ragEnabled ?? config.MEMORY_RAG_ENABLED;
@@ -681,10 +693,14 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
 
 function buildMemoryContext(userId, question = '', options = {}) {
   const resolvedGroupIds = resolveReadableGroupIds(userId, options);
+  const recapQuery = isConversationRecapQuery(question);
   const normalizedOptions = {
     ...options,
     userId,
-    resolvedGroupIds
+    resolvedGroupIds,
+    includeActiveRaw: options.includeActiveRaw || recapQuery,
+    activeRawMaxEntries: options.activeRawMaxEntries || 8,
+    disableLegacyFactFallback: options.disableLegacyFactFallback || recapQuery
   };
   const ragEnabled = options.ragEnabled ?? config.MEMORY_RAG_ENABLED;
   const unifiedHits = ragEnabled
@@ -702,50 +718,57 @@ function buildMemoryContext(userId, question = '', options = {}) {
 }
 
 async function buildMemoryContextAsync(userId, question = '', options = {}) {
+  const recapQuery = isConversationRecapQuery(question);
+  const baseOptions = {
+    ...options,
+    includeActiveRaw: options.includeActiveRaw || recapQuery,
+    activeRawMaxEntries: options.activeRawMaxEntries || 8,
+    disableLegacyFactFallback: options.disableLegacyFactFallback || recapQuery
+  };
   const localKnowledge = await queryLocalKnowledge({
     userId,
     query: question || '',
-    topK: options.topK || config.MEMORY_RAG_TOP_K || 8,
-    groupId: options.groupId,
-    groupIds: resolveReadableGroupIds(userId, options),
-    sessionId: options.sessionId,
-    sessionKey: options.sessionKey,
-    routePolicyKey: options.routePolicyKey,
-    topRouteType: options.topRouteType,
-    taskType: options.taskType,
-    agentName: options.agentName,
-    toolName: options.toolName,
-    lookbackDays: options.dailyLookbackDays || options.lookbackDays,
+    topK: baseOptions.topK || config.MEMORY_RAG_TOP_K || 8,
+    groupId: baseOptions.groupId,
+    groupIds: resolveReadableGroupIds(userId, baseOptions),
+    sessionId: baseOptions.sessionId,
+    sessionKey: baseOptions.sessionKey,
+    routePolicyKey: baseOptions.routePolicyKey,
+    topRouteType: baseOptions.topRouteType,
+    taskType: baseOptions.taskType,
+    agentName: baseOptions.agentName,
+    toolName: baseOptions.toolName,
+    lookbackDays: baseOptions.dailyLookbackDays || baseOptions.lookbackDays,
     skipMemoryV3: true
   });
   if (config.MEMORY_V3_ENABLED) {
-    const resolvedGroupIds = resolveReadableGroupIds(userId, options);
+    const resolvedGroupIds = resolveReadableGroupIds(userId, baseOptions);
     const queryResult = await queryMemory({
       userId,
       query: question || '',
-      topK: options.topK || config.MEMORY_RAG_TOP_K || 8,
-      groupId: options.groupId,
+      topK: baseOptions.topK || config.MEMORY_RAG_TOP_K || 8,
+      groupId: baseOptions.groupId,
       groupIds: resolvedGroupIds,
-      sessionId: options.sessionId,
-      sessionKey: options.sessionKey,
-      routePolicyKey: options.routePolicyKey,
-      topRouteType: options.topRouteType,
-      taskType: options.taskType,
-      agentName: options.agentName,
-      toolName: options.toolName,
-      sharedShortTermSignature: options.sharedShortTermSignature
+      sessionId: baseOptions.sessionId,
+      sessionKey: baseOptions.sessionKey,
+      routePolicyKey: baseOptions.routePolicyKey,
+      topRouteType: baseOptions.topRouteType,
+      taskType: baseOptions.taskType,
+      agentName: baseOptions.agentName,
+      toolName: baseOptions.toolName,
+      sharedShortTermSignature: baseOptions.sharedShortTermSignature
     });
     if (!Array.isArray(queryResult.results) || queryResult.results.length === 0) {
-      const resolvedGroupIds = resolveReadableGroupIds(userId, options);
+      const resolvedGroupIds = resolveReadableGroupIds(userId, baseOptions);
       const normalizedOptions = {
-        ...options,
+        ...baseOptions,
         userId,
         resolvedGroupIds
       };
       const unifiedHits = await memoizeValue(
         normalizedOptions,
         buildMemoKey('unified-async-v3-fallback', userId, question || '', normalizedOptions),
-        () => retrieveUnifiedMemoriesAsync(userId, question || '', options.topK || config.MEMORY_RAG_TOP_K || 8, buildUnifiedRecallOptions({
+        () => retrieveUnifiedMemoriesAsync(userId, question || '', baseOptions.topK || config.MEMORY_RAG_TOP_K || 8, buildUnifiedRecallOptions({
           ...normalizedOptions,
           disableLegacyFactFallback: true,
           question
@@ -755,7 +778,7 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     }
     const packet = assembleMemoryPacket(queryResult, {
       userId,
-      sessionKey: options.sessionKey
+      sessionKey: baseOptions.sessionKey
     });
     const results = Array.isArray(queryResult.results) ? queryResult.results : [];
     const strictResults = Array.isArray(queryResult.strictResults) ? queryResult.strictResults : results;
@@ -765,7 +788,24 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     const groupHits = results.filter((item) => item.source === 'group');
     const styleHits = results.filter((item) => item.source === 'style');
     const jargonHits = results.filter((item) => item.source === 'jargon');
-    const dailyJournalText = journalHits.map((item) => String(item.text || '')).filter(Boolean).join('\n');
+    const activeRawBundle = baseOptions.includeActiveRaw
+      ? getDailyJournalRetrievalBundle(userId, {
+        lookbackDays: baseOptions.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
+        timestamp: resolveDailyJournalTimestamp(question, baseOptions),
+        yearMonth: baseOptions.dailyJournalYearMonth,
+        maxFourDayFiles: baseOptions.dailyJournalMaxFourDayFiles,
+        maxMonthlyFiles: baseOptions.dailyJournalMaxMonthlyFiles,
+        sessionKey: baseOptions.sessionKey,
+        question,
+        topic: question,
+        includeActiveRaw: true,
+        activeRawMaxEntries: baseOptions.activeRawMaxEntries || 8
+      })
+      : null;
+    const dailyJournalText = [
+      activeRawBundle?.text,
+      journalHits.map((item) => String(item.text || '')).filter(Boolean).join('\n')
+    ].filter(Boolean).join('\n\n');
     const continuityFacet = String(queryResult.facet || '').trim().toLowerCase() === 'continuity';
     const retrievedPromptText = limitPromptText(
       packet.relevantEvidenceText || packet.sessionContinuityText || '',
@@ -826,8 +866,8 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       promptLongTermProfileText: packet.stableProfileText,
       dailyJournalText,
       promptDailyJournalText: dailyJournalText,
-      dailyJournalItems: journalHits,
-      dailyJournalBundle: { text: dailyJournalText, items: journalHits, byLayer: { daily: journalHits, fourDay: [], monthly: [] } },
+      dailyJournalItems: activeRawBundle?.items?.length ? activeRawBundle.items : journalHits,
+      dailyJournalBundle: activeRawBundle || { text: dailyJournalText, items: journalHits, byLayer: { daily: journalHits, fourDay: [], monthly: [] } },
       factText: getUserMemories(userId),
       stats: {
         total: Number(queryResult?.stats?.selected || 0),
@@ -867,18 +907,18 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       }
     };
   }
-  const resolvedGroupIds = resolveReadableGroupIds(userId, options);
+  const resolvedGroupIds = resolveReadableGroupIds(userId, baseOptions);
   const normalizedOptions = {
-    ...options,
+    ...baseOptions,
     userId,
     resolvedGroupIds
   };
-  const ragEnabled = options.ragEnabled ?? config.MEMORY_RAG_ENABLED;
+  const ragEnabled = baseOptions.ragEnabled ?? config.MEMORY_RAG_ENABLED;
   const unifiedHits = ragEnabled
     ? await memoizeValue(
       normalizedOptions,
       buildMemoKey('unified-async', userId, question || '', normalizedOptions),
-      () => retrieveUnifiedMemoriesAsync(userId, question || '', options.topK || config.MEMORY_RAG_TOP_K || 8, buildUnifiedRecallOptions({
+      () => retrieveUnifiedMemoriesAsync(userId, question || '', baseOptions.topK || config.MEMORY_RAG_TOP_K || 8, buildUnifiedRecallOptions({
         ...normalizedOptions,
         disableLegacyFactFallback: true,
         question
