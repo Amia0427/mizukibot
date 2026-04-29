@@ -6,6 +6,7 @@ const {
 } = require('./shortTermMemory');
 const { getDailyJournalRetrievalBundle } = require('./dailyJournal');
 const { buildMemoryContext } = require('./memoryContext');
+const { isConversationRecapQuery } = require('./recallHeuristics');
 
 function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -74,11 +75,14 @@ function summarizeProbeDigest(probeResult = null, maxItems = 3) {
   return opened ? [opened] : [];
 }
 
-function collectDigestLines(snapshot = {}, prefix = '') {
+function collectDigestLines(snapshot = {}, prefix = '', options = {}) {
   const state = normalizeObject(snapshot, {});
   const lines = [];
   const activeTopic = trimLine(state.activeTopic || state.active_topic, 180);
-  if (activeTopic) lines.push(`${prefix}${activeTopic}`);
+  const activeTopicFirst = options.activeTopicFirst !== false;
+  if (activeTopic && activeTopicFirst) lines.push(`${prefix}${activeTopic}`);
+  const summary = trimLine(state.summary || '', 180);
+  if (summary && options.includeSummary) lines.push(`${prefix}${summary}`);
   const openLoops = normalizeStringList(state.openLoops || state.open_loops, 2, 160);
   const commitments = normalizeStringList(state.assistantCommitments || state.assistant_commitments, 2, 160);
   const constraints = normalizeStringList(state.userConstraints || state.user_constraints, 2, 160);
@@ -87,22 +91,47 @@ function collectDigestLines(snapshot = {}, prefix = '') {
   for (const value of openLoops) lines.push(`${prefix}${value}`);
   for (const value of commitments) lines.push(`${prefix}${value}`);
   for (const value of constraints) lines.push(`${prefix}${value}`);
+  if (activeTopic && !activeTopicFirst) lines.push(`${prefix}${activeTopic}`);
   return normalizeStringList(lines, 6, 180);
+}
+
+function buildActiveRawDigestLines(activeRawItems = []) {
+  const lines = [];
+  for (const item of normalizeArray(activeRawItems)) {
+    const entries = normalizeArray(item?.entries);
+    if (entries.length > 0) {
+      for (const entry of entries) {
+        const userText = trimLine(entry?.user, 110);
+        const assistantText = trimLine(entry?.assistant, 110);
+        const merged = [userText ? `User: ${userText}` : '', assistantText ? `Assistant: ${assistantText}` : ''].filter(Boolean).join(' / ');
+        if (merged) lines.push(merged);
+      }
+      continue;
+    }
+    const text = trimLine(item?.text, 180);
+    if (text) lines.push(text);
+  }
+  return normalizeStringList(lines, 8, 180);
 }
 
 function buildDailyJournalDigest(bundle = {}) {
   const continuity = normalizeObject(bundle.continuity, {});
+  const activeRaw = normalizeArray(bundle.byLayer?.activeRaw);
   const sameSession = normalizeArray(continuity.sameSession);
   const sameTopic = normalizeArray(continuity.sameTopic);
   const preferred = sameSession.length > 0 ? sameSession : sameTopic;
+  const activeRawDigestLines = buildActiveRawDigestLines(activeRaw);
   const digestLines = normalizeStringList(preferred.flatMap((entry) => collectDigestLines(entry.continuitySnapshot)), 6, 180);
   return {
     digestLines,
+    activeRawDigestLines,
     sourceFlags: [
+      ...(activeRaw.length > 0 ? ['journal_active_raw'] : []),
       ...(sameSession.length > 0 ? ['journal_same_session'] : []),
       ...(sameTopic.length > 0 ? ['journal_same_topic'] : [])
     ],
     payload: {
+      activeRaw,
       sameSession,
       sameTopic
     }
@@ -124,6 +153,7 @@ function buildMemoryContextDigest(memoryContext = {}) {
 function getContinuityEvidenceBundle(userId, question, options = {}) {
   const request = normalizeObject(options.request, {});
   const routeMeta = normalizeObject(request.routeMeta, {});
+  const recapQuery = isConversationRecapQuery(question || request.question || '');
   const sessionKey = String(
     options.sessionKey
     || request.sessionKey
@@ -155,6 +185,9 @@ function getContinuityEvidenceBundle(userId, question, options = {}) {
       sessionId: options.sessionId || routeMeta.sessionId || routeMeta.session_id,
       channelId: options.channelId || routeMeta.channelId || routeMeta.channel_id,
       taskType: options.taskType || routeMeta.taskType || routeMeta.task_type,
+      includeActiveRaw: recapQuery,
+      activeRawMaxEntries: options.activeRawMaxEntries || 8,
+      disableLegacyFactFallback: options.disableLegacyFactFallback || recapQuery,
       sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
     });
   const journalBundle = options.dailyJournalBundle
@@ -162,19 +195,48 @@ function getContinuityEvidenceBundle(userId, question, options = {}) {
       lookbackDays: options.journalLookbackDays,
       sessionKey,
       question,
-      topic: shortTermState.activeTopic || bridgeState.activeTopic || question
+      topic: shortTermState.activeTopic || bridgeState.activeTopic || question,
+      includeActiveRaw: recapQuery,
+      activeRawMaxEntries: options.activeRawMaxEntries || 8
     });
   const journalDigest = buildDailyJournalDigest(journalBundle);
   const memoryDigestLines = buildMemoryContextDigest(memoryContext);
+  const recentDigestLines = normalizeStringList(
+    [...recentMessages, ...bridgeRecentMessages].map((turn) => {
+      const role = turn.role === 'assistant' ? 'Assistant' : 'User';
+      return `${role}: ${turn.content}`;
+    }),
+    6,
+    160
+  );
   const hasPositiveGenericRecall = isPositiveMemoryRecallText(memoryContext.retrievedMemoryForPrompt);
-  const digestLines = normalizeStringList([
-    ...collectDigestLines(shortTermState, ''),
-    ...collectDigestLines(bridgeState, ''),
-    ...journalDigest.digestLines,
-    ...probeDigest,
-    ...memoryDigestLines
-  ], 6, 160);
+  const shortTermDigestLines = recapQuery
+    ? [
+        ...collectDigestLines(shortTermState, '', { includeSummary: true, activeTopicFirst: false }),
+        ...collectDigestLines(bridgeState, '', { includeSummary: true, activeTopicFirst: false })
+      ]
+    : [
+        ...collectDigestLines(shortTermState, ''),
+        ...collectDigestLines(bridgeState, '')
+      ];
+  const digestSourceLines = recapQuery
+    ? [
+        ...journalDigest.activeRawDigestLines,
+        ...recentDigestLines,
+        ...journalDigest.digestLines,
+        ...shortTermDigestLines,
+        ...probeDigest,
+        ...memoryDigestLines
+      ]
+    : [
+        ...shortTermDigestLines,
+        ...journalDigest.digestLines,
+        ...probeDigest,
+        ...memoryDigestLines
+      ];
+  const digestLines = normalizeStringList(digestSourceLines, recapQuery ? 8 : 6, 160);
   const sourceFlags = normalizeStringList([
+    ...(recapQuery ? ['recap_query'] : []),
     ...(shortTermState.summary ? ['short_term_summary'] : []),
     ...(shortTermState.activeTopic ? ['short_term_active_topic'] : []),
     ...(shortTermState.openLoops.length > 0 ? ['short_term_open_loops'] : []),
@@ -189,7 +251,13 @@ function getContinuityEvidenceBundle(userId, question, options = {}) {
   ], 12, 80);
 
   let source = 'none';
-  if (shortTermState.summary || shortTermState.activeTopic || shortTermState.openLoops.length > 0) {
+  if (recapQuery && journalDigest.payload.activeRaw.length > 0) {
+    source = 'active_raw_daily_journal';
+  } else if (recapQuery && recentDigestLines.length > 0) {
+    source = 'recent_turns';
+  } else if (recapQuery && journalDigest.payload.sameSession.length > 0) {
+    source = 'same_session_daily_journal';
+  } else if (shortTermState.summary || shortTermState.activeTopic || shortTermState.openLoops.length > 0) {
     source = 'short_term_state';
   } else if (bridgeState.summary || bridgeState.activeTopic || bridgeState.openLoops.length > 0) {
     source = 'short_term_bridge';
@@ -214,6 +282,8 @@ function getContinuityEvidenceBundle(userId, question, options = {}) {
     shortTermState.activeTopic,
     bridgeState.summary,
     bridgeState.activeTopic,
+    journalDigest.payload.activeRaw.length > 0 ? 'active_raw' : '',
+    recentDigestLines.length > 0 ? 'recent_turns' : '',
     journalDigest.payload.sameSession.length > 0 ? 'journal' : '',
     String(memoryContext.taskMemoryText || '').trim(),
     String(memoryContext.groupMemoryText || '').trim()
@@ -233,6 +303,7 @@ function getContinuityEvidenceBundle(userId, question, options = {}) {
       memoryContext,
       recentMessages,
       bridgeRecentMessages,
+      recentDigestLines,
       continuityProbeDigest: probeDigest,
       sharedShortTermContext
     }
@@ -241,6 +312,17 @@ function getContinuityEvidenceBundle(userId, question, options = {}) {
 
 function hasSufficientLocalContinuityEvidence(payload = {}) {
   const normalized = payload && typeof payload === 'object' ? payload : {};
+  const sourceFlags = normalizeStringList(normalized.source_flags, 12, 80);
+  if (sourceFlags.includes('recap_query')) {
+    return Boolean(
+      sourceFlags.includes('journal_active_raw')
+      || sourceFlags.includes('journal_same_session')
+      || normalizeArray(normalized.recent_turns).length >= 2
+      || String(normalized.carry_over_user_turn || '').trim()
+      || normalizeArray(normalized.open_loops).length > 0
+      || normalizeArray(normalized.assistant_commitments).length > 0
+    );
+  }
   return Boolean(
     String(normalized.summary || '').trim()
     || normalizeArray(normalized.open_loops).length > 0
@@ -253,6 +335,10 @@ function hasSufficientLocalContinuityEvidence(payload = {}) {
 function formatContinuityStateMessage(continuityState = {}, maxChars = config.MAIN_PROMPT_CONTINUITY_MAX_CHARS || 800) {
   const state = continuityState && typeof continuityState === 'object' ? continuityState : {};
   const lines = ['[ContinuityState]'];
+  const sourceFlags = normalizeStringList(state.source_flags, 10, 80);
+  const recapQuery = sourceFlags.includes('recap_query');
+  const evidenceDigest = normalizeStringList(state.evidence_digest, 4, 180);
+  if (recapQuery && evidenceDigest.length > 0) lines.push(`[EvidenceDigest] ${evidenceDigest.join(' | ')}`);
 
   const activeTopic = trimLine(state.active_topic, 180);
   if (activeTopic) lines.push(`[ActiveTopic] ${activeTopic}`);
@@ -272,8 +358,7 @@ function formatContinuityStateMessage(continuityState = {}, maxChars = config.MA
   const probeDigest = normalizeStringList(state.continuity_probe_digest, 3, 180);
   if (probeDigest.length > 0) lines.push(`[ContinuityProbeDigest] ${probeDigest.join(' | ')}`);
 
-  const evidenceDigest = normalizeStringList(state.evidence_digest, 4, 180);
-  if (evidenceDigest.length > 0) lines.push(`[EvidenceDigest] ${evidenceDigest.join(' | ')}`);
+  if (!recapQuery && evidenceDigest.length > 0) lines.push(`[EvidenceDigest] ${evidenceDigest.join(' | ')}`);
 
   const includeRecentTurns = Boolean(state.include_recent_turns);
   const recentTurns = includeRecentTurns ? normalizeRecentTurns(state.recent_turns, 4) : [];
@@ -284,7 +369,6 @@ function formatContinuityStateMessage(continuityState = {}, maxChars = config.MA
     }
   }
 
-  const sourceFlags = normalizeStringList(state.source_flags, 6, 80);
   if (sourceFlags.length > 0 && lines.length > 1) lines.push(`[SourceFlags] ${sourceFlags.join(', ')}`);
 
   const text = lines.join('\n').trim();

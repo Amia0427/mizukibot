@@ -22,9 +22,25 @@ function isConversationalNoop(text = '') {
   return /^(谢谢|感谢|辛苦了|收到|好的|好滴|ok|okay|nice|cool|哈哈|hhh|233|晚安|早安|拜拜|bye|晚点聊|回头说)[!！?？~]*$/i.test(normalized);
 }
 
+function isConversationRecapQuery(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q) return false;
+  if (/(今天天气|今天.{0,8}(天气|气温|下雨|温度|股价|股票|行情|新闻|日期|星期|几点)|today.{0,12}(weather|temperature|stock|news|date|time))/i.test(q)) {
+    return false;
+  }
+  if (/(今天|今日).{0,10}(和你|我们|我).{0,14}(说|聊|讲|提).{0,10}(什么|啥|哪些|过|了|的)/i.test(q)) return true;
+  if (/(今天|今日).{0,10}(聊天|对话|说的|聊的|说过|聊过).{0,10}(总结|回顾|复述|说一下|讲一下|什么|啥|哪些)/i.test(q)) return true;
+  if (/(总结|回顾|复述|说一下|讲一下).{0,12}(今天|今日).{0,14}(聊天|对话|说的|聊的|说过|聊过|说了什么|聊了什么|说了啥|聊了啥|和你说|和你聊|我们说|我们聊)/i.test(q)) return true;
+  if (/(刚刚|刚才|刚).{0,10}(我|我们).{0,10}(说|聊|讲|提).{0,10}(什么|啥|了|过|的)/i.test(q)) return true;
+  if (/(我|我们).{0,10}(刚刚|刚才|刚).{0,10}(说|聊|讲|提).{0,10}(什么|啥|了|过|的)/i.test(q)) return true;
+  if (/(what did (?:i|we) (?:just )?(?:say|talk about|discuss)|what (?:were|did) we (?:just )?(?:talking about|discuss)|recap (?:today|our chat|the chat))/i.test(q)) return true;
+  return false;
+}
+
 function classifyRecallFacet(question = '') {
   const q = sanitizeText(question).toLowerCase();
   if (!q) return 'default_continuity';
+  if (isConversationRecapQuery(q)) return 'recent_continuity';
   if (/(where did we leave off|what were we(?: just)? talking about|what were we doing|what was the thing from before|from before|earlier|previously|last time|continuity|recent|上次|刚才|刚刚|聊到哪|做到哪|接上)/i.test(q)) return 'recent_continuity';
   if (/(continue|continue with|resume|pick back up|next step|next steps|what should we do next|plan|task|todo|roadmap|继续|接着|接上|计划|任务|待办|推进)/i.test(q)) return 'task_or_plan';
   if (/(喜欢|不喜欢|偏好|爱好|口味|习惯|风格|like|likes|prefer|preference|favorite|favourite|dislike|hobby)/i.test(q)) return 'preference';
@@ -103,6 +119,7 @@ function isMemoryContinuationQuestion(text = '') {
   if (/^(你觉得|你认为|你喜不喜欢|你喜歡|你怎么看|觉得.*好听吗|觉得.*怎么样|what do you think|how do you feel)/i.test(normalized)) {
     return false;
   }
+  if (isConversationRecapQuery(normalized)) return true;
   const facet = classifyRecallFacet(normalized);
   return facet !== 'group_context' || /(继续|上次|最近群里|刚刚|刚才|context|上下文)/i.test(normalized);
 }
@@ -128,6 +145,7 @@ module.exports = {
   getFacetPerSourceLimit,
   getFacetSourceWeights,
   isConversationalNoop,
+  isConversationRecapQuery,
   isMemoryContinuationQuestion,
   sanitizeText,
   shouldBiasToContinuity,

@@ -149,6 +149,12 @@ const {
   });
   assert.ok(privateCandidates.some((item) => item.id === 'scene_private_chat'));
 
+  const groupDirectCandidates = buildPersonaModuleCandidates({
+    question: '会四川麻将，如何学习日麻？',
+    chatType: 'group'
+  });
+  assert.ok(groupDirectCandidates.some((item) => item.id === 'scene_group_insert'));
+
   const vsingerCandidates = buildPersonaModuleCandidates({
     question: 'MEIKO今天又一个人跑来找你了吗'
   });

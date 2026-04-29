@@ -5,6 +5,95 @@ function createRouteAfterDirectReply() {
   };
 }
 
+const GROUP_DIRECT_REPLY_CHAR_LIMIT = 220;
+const GROUP_DIRECT_TEACHING_PATTERNS = [
+  /最先要记(?:的)?/,
+  /然后/,
+  /还有一个坑/,
+  /推荐的入门路子/,
+  /推荐路线/,
+  /怎么入门/,
+  /如何学习/,
+  /先搞定/
+];
+
+function getRouteMetaGroupId(routeMeta = {}) {
+  const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
+  return String(normalizedRouteMeta.groupId || normalizedRouteMeta.group_id || '').trim();
+}
+
+function isGroupDirectChatRequest(request = {}) {
+  const normalizedRequest = request && typeof request === 'object' ? request : {};
+  const routeMeta = normalizedRequest.routeMeta && typeof normalizedRequest.routeMeta === 'object'
+    ? normalizedRequest.routeMeta
+    : {};
+  const topRouteType = String(normalizedRequest.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  return topRouteType === 'direct_chat' && Boolean(getRouteMetaGroupId(routeMeta));
+}
+
+function splitChineseSentences(text = '') {
+  const compact = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!compact) return [];
+  const sentences = compact.match(/[^。！？!?；;]+[。！？!?；;]?/g) || [compact];
+  return sentences.map((item) => item.trim()).filter(Boolean);
+}
+
+function trimGroupDirectReplyText(text = '', limit = GROUP_DIRECT_REPLY_CHAR_LIMIT) {
+  const compact = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!compact || compact.length <= limit) return compact;
+  const sentences = splitChineseSentences(compact);
+  const kept = [];
+  let current = '';
+  for (const sentence of sentences) {
+    if (kept.length >= 3) break;
+    const next = `${current}${sentence}`;
+    if (next.length > limit) break;
+    kept.push(sentence);
+    current = next;
+  }
+  const sentenceTrimmed = kept.join('').trim();
+  if (sentenceTrimmed) return sentenceTrimmed;
+  return compact.slice(0, limit).trim();
+}
+
+function applyGroupDirectStyleGuard(reply = '', request = {}) {
+  const original = String(reply || '').trim();
+  if (!original || !isGroupDirectChatRequest(request)) {
+    return {
+      text: original,
+      applied: false,
+      reasons: [],
+      originalChars: original.length,
+      finalChars: original.length
+    };
+  }
+  const reasons = [];
+  if (original.length > GROUP_DIRECT_REPLY_CHAR_LIMIT) reasons.push('too_long');
+  for (const pattern of GROUP_DIRECT_TEACHING_PATTERNS) {
+    if (pattern.test(original)) {
+      reasons.push('teaching_structure');
+      break;
+    }
+  }
+  if (reasons.length === 0) {
+    return {
+      text: original,
+      applied: false,
+      reasons,
+      originalChars: original.length,
+      finalChars: original.length
+    };
+  }
+  const text = trimGroupDirectReplyText(original, GROUP_DIRECT_REPLY_CHAR_LIMIT);
+  return {
+    text,
+    applied: true,
+    reasons,
+    originalChars: original.length,
+    finalChars: text.length
+  };
+}
+
 function createDirectReplyNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
     ? deps.normalizeObject
@@ -563,6 +652,21 @@ function createDirectReplyNode(deps = {}) {
       }
     }
 
+    const groupDirectStyleGuard = applyGroupDirectStyleGuard(reply || displayReply || '', request);
+    if (groupDirectStyleGuard.applied) {
+      reply = groupDirectStyleGuard.text;
+      displayReply = groupDirectStyleGuard.text;
+      directLoopEvents = directLoopEvents.concat([
+        createEvent('group_direct_style_guard', {
+          node: 'direct_reply',
+          groupDirectStyleGuardApplied: true,
+          originalChars: groupDirectStyleGuard.originalChars,
+          finalChars: groupDirectStyleGuard.finalChars,
+          reasons: groupDirectStyleGuard.reasons
+        })
+      ]);
+    }
+
     if (!request.streaming) {
       nextStream = {
         ...ensureOutputStream(state.output, request.imageUrl ? 'none' : 'direct'),
@@ -637,6 +741,7 @@ function createDirectReplyNode(deps = {}) {
 }
 
 module.exports = {
+  applyGroupDirectStyleGuard,
   createDirectReplyNode,
   createRouteAfterDirectReply
 };

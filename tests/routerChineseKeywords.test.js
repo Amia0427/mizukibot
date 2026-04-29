@@ -71,6 +71,20 @@ assert.strictEqual(notebookLookupRoute.meta.localRuleId, 'direct-chat');
 assert.strictEqual(notebookLookupRoute.meta.toolIntent, 'maybe_tools');
 assert.deepStrictEqual(notebookLookupRoute.meta.allowedTools, ['notebook_search', 'notebook_list_docs']);
 
+const recapRoute = detectIntent({
+  rawText: '宝说一下我今天和你说的',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+
+assert.strictEqual(recapRoute.topRouteType, 'direct_chat');
+assert.strictEqual(recapRoute.facets.sourceScope, 'notebook');
+assert.strictEqual(recapRoute.facets.freshness, 'unknown');
+assert.strictEqual(recapRoute.intent.needsMemory, true);
+assert.deepStrictEqual(recapRoute.meta.allowedTools, ['notebook_search', 'notebook_list_docs']);
+assert.strictEqual(recapRoute.meta.toolIntent, 'maybe_tools');
+
 const textOnlyPlanRoute = detectIntent({
   rawText: 'plan a study roadmap',
   botQQ: '123456',

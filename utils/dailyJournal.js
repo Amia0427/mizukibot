@@ -428,6 +428,9 @@ function formatDailyJournalBundleText(items = []) {
   return (Array.isArray(items) ? items : [])
     .map((item) => {
       if (!item || !item.text) return '';
+      if (item.kind === 'active_raw') {
+        return `[active_raw ${item.day}]\n${item.text}`;
+      }
       if (item.kind === 'four_day_rollup') {
         return `[4day ${item.startDay}..${item.endDay}]\n${item.text}`;
       }
@@ -878,14 +881,23 @@ async function maintainDailyJournalRollups(userId, options = {}) {
 }
 
 function buildEmptyRetrievalBundle(options = {}) {
+  const byLayer = {
+    daily: [],
+    fourDay: [],
+    monthly: []
+  };
+  if (options.includeActiveRaw) byLayer.activeRaw = [];
+  const stats = {
+    dailyCount: 0,
+    fourDayCount: 0,
+    monthlyCount: 0,
+    totalChars: 0
+  };
+  if (options.includeActiveRaw) stats.activeRawCount = 0;
   return {
     text: '',
     items: [],
-    byLayer: {
-      daily: [],
-      fourDay: [],
-      monthly: []
-    },
+    byLayer,
     continuity: {
       sameSession: [],
       sameTopic: []
@@ -898,12 +910,55 @@ function buildEmptyRetrievalBundle(options = {}) {
       day: options.day || '',
       yearMonth: options.yearMonth || ''
     },
-    stats: {
-      dailyCount: 0,
-      fourDayCount: 0,
-      monthlyCount: 0,
-      totalChars: 0
-    }
+    stats
+  };
+}
+
+function buildActiveRawJournalItem(userId, day, options = {}) {
+  const uid = String(userId || '').trim();
+  if (!uid || !isValidDayString(day)) return null;
+  const rawEntries = parseJournalEntries(safeReadText(getJournalFilePath(uid, day), ''));
+  if (rawEntries.length === 0) return null;
+
+  const maxEntries = Math.max(1, Number(options.activeRawMaxEntries) || Number(config.DAILY_JOURNAL_ACTIVE_RAW_MAX_ENTRIES) || 8);
+  const sessionKey = String(options.sessionKey || '').trim();
+  const sidecars = readEntrySidecar(uid, day);
+  const alignedSidecars = sidecars.length >= rawEntries.length
+    ? sidecars.slice(-rawEntries.length)
+    : Array.from({ length: rawEntries.length - sidecars.length }, () => null).concat(sidecars);
+  const merged = rawEntries.map((entry, index) => {
+    const sidecar = alignedSidecars[index] && typeof alignedSidecars[index] === 'object'
+      ? alignedSidecars[index]
+      : {};
+    return {
+      time: entry.time,
+      user: entry.user,
+      assistant: entry.assistant,
+      ts: String(sidecar.ts || '').trim(),
+      sessionKey: String(sidecar.sessionKey || '').trim(),
+      source: 'journal_active_raw'
+    };
+  });
+
+  const sessionEntries = sessionKey
+    ? merged.filter((entry) => entry.sessionKey === sessionKey).slice(-maxEntries)
+    : [];
+  const selectedKeys = new Set(sessionEntries.map((entry) => `${entry.ts}|${entry.time}|${entry.user}|${entry.assistant}`));
+  const backfillEntries = merged
+    .filter((entry) => !selectedKeys.has(`${entry.ts}|${entry.time}|${entry.user}|${entry.assistant}`))
+    .slice(-Math.max(0, maxEntries - sessionEntries.length));
+  const selected = sessionEntries.concat(backfillEntries).slice(0, maxEntries);
+  const text = strictClampText(
+    formatJournalEntries(selected),
+    Math.max(600, Number(config.MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS || 160) * 12)
+  );
+  if (!text) return null;
+  return {
+    kind: 'active_raw',
+    day,
+    text,
+    entries: selected,
+    source: 'journal_active_raw'
   };
 }
 
@@ -919,7 +974,10 @@ function getDailyJournalRetrievalBundle(userId, options = {}) {
   const maxMonthlyFiles = Math.max(0, Number(options.maxMonthlyFiles) || Number(config.DAILY_JOURNAL_MONTHLY_PROMPT_MAX_FILES) || 0);
   const targetDay = normalizeTimestampToDay(options.timestamp);
   const targetYearMonth = normalizeYearMonth(options.yearMonth);
+  const includeActiveRaw = Boolean(options.includeActiveRaw);
+  const activeRawDay = targetDay || formatDateInTz(new Date(), config.TIMEZONE);
 
+  let activeRawItems = [];
   let dailyItems = [];
   let fourDayItems = [];
   let monthlyItems = [];
@@ -961,21 +1019,34 @@ function getDailyJournalRetrievalBundle(userId, options = {}) {
   dailyItems = dailyItems.slice().sort((a, b) => a.day.localeCompare(b.day));
   fourDayItems = fourDayItems.slice().sort(compareFourDayRollups);
   monthlyItems = monthlyItems.slice().sort(compareMonthlyRollups);
+  if (includeActiveRaw) {
+    const activeRawItem = buildActiveRawJournalItem(uid, activeRawDay, options);
+    activeRawItems = activeRawItem ? [activeRawItem] : [];
+  }
 
-  const items = [...dailyItems, ...fourDayItems, ...monthlyItems];
+  const items = [...activeRawItems, ...dailyItems, ...fourDayItems, ...monthlyItems];
   const continuityEntries = items.flatMap((item) => Array.isArray(item.sidecarEntries) ? item.sidecarEntries : []);
   const continuity = matchSidecarEntries(continuityEntries, {
     sessionKey: options.sessionKey,
     topic: options.topic || options.question || ''
   });
+  const byLayer = {
+    daily: dailyItems,
+    fourDay: fourDayItems,
+    monthly: monthlyItems
+  };
+  if (includeActiveRaw) byLayer.activeRaw = activeRawItems;
+  const resultStats = {
+    dailyCount: dailyItems.length,
+    fourDayCount: fourDayItems.length,
+    monthlyCount: monthlyItems.length,
+    totalChars: items.reduce((sum, item) => sum + String(item.text || '').length, 0)
+  };
+  if (includeActiveRaw) resultStats.activeRawCount = activeRawItems.length;
   const result = {
     text: formatDailyJournalBundleText(items),
     items,
-    byLayer: {
-      daily: dailyItems,
-      fourDay: fourDayItems,
-      monthly: monthlyItems
-    },
+    byLayer,
     continuity,
     query: {
       lookbackDays,
@@ -985,12 +1056,7 @@ function getDailyJournalRetrievalBundle(userId, options = {}) {
       day: targetDay,
       yearMonth: targetYearMonth || getYearMonthFromDay(targetDay)
     },
-    stats: {
-      dailyCount: dailyItems.length,
-      fourDayCount: fourDayItems.length,
-      monthlyCount: monthlyItems.length,
-      totalChars: items.reduce((sum, item) => sum + String(item.text || '').length, 0)
-    }
+    stats: resultStats
   };
 
   const stats = getDailyJournalStats(uid, lookbackDays);
@@ -1010,6 +1076,7 @@ function getDailyJournalRetrievalBundle(userId, options = {}) {
     summaryChars: stats.summaryChars,
     segmentChars: stats.segmentChars,
     rawTailChars: stats.rawTailChars,
+    activeRawCount: activeRawItems.length,
     fourDayCount: fourDayItems.length,
     monthlyCount: monthlyItems.length
   });
