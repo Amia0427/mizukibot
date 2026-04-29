@@ -111,7 +111,9 @@ function logDailyShare({ groupId = '', windowKey = '', type = '', reason = '', s
         reason: String(reason || ''),
         source: String(source || '')
       });
-      require('fs').appendFileSync(config.DAILY_SHARE_EVENT_LOG_FILE, `${logLine}\n`, 'utf-8');
+      require('../utils/logRotation').appendFileWithRotation(config.DAILY_SHARE_EVENT_LOG_FILE, `${logLine}\n`, {
+        encoding: 'utf-8'
+      });
     } else {
       require('../utils/storeRegistry').getJsonLineWriter(config.DAILY_SHARE_EVENT_LOG_FILE, {
         debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),

@@ -2,6 +2,7 @@ const config = require('../../config');
 const { trimTextByTokenBudget } = require('../contextBudget');
 const { normalizeText, clampText } = require('./helpers');
 const { loadProfileProjection } = require('./storage');
+const { buildStableProfileText } = require('../memoryProfileSurface');
 
 function budget(name, fallback) {
   return Math.max(0, Number(config[name] || fallback) || fallback || 0);
@@ -21,7 +22,6 @@ function assembleMemoryPacket(result = {}, options = {}) {
   const results = Array.isArray(result.results) ? result.results : [];
   const strictResults = Array.isArray(result.strictResults) ? result.strictResults : results;
   const weakResults = Array.isArray(result.weakResults) ? result.weakResults : [];
-  const persona = result.persona || profile.personaCore || {};
   const continuity = results.filter((item) => item.source === 'recent');
   const prioritizedContinuity = currentSessionKey
     ? continuity.filter((item) => normalizeText(item.sessionKey) === currentSessionKey)
@@ -32,22 +32,21 @@ function assembleMemoryPacket(result = {}, options = {}) {
   const task = results.filter((item) => item.source === 'task');
   const group = results.filter((item) => item.source === 'group');
   const style = results.filter((item) => item.source === 'style' || item.source === 'jargon');
-  const profileLines = [
-    profile.relation_stage ? `关系阶段：${profile.relation_stage}` : '',
-    persona.summary ? `总结：${persona.summary}` : '',
-    persona.impression ? `印象：${persona.impression}` : '',
-    persona.botBasePersona ? `基础人格：${persona.botBasePersona}` : '',
-    persona.userAdaptationPersona ? `用户修正：${persona.userAdaptationPersona}` : '',
-    persona.relationshipStyle ? `关系风格：${persona.relationshipStyle}` : '',
-    persona.replyStyle ? `表达风格：${persona.replyStyle}` : '',
-    persona.relationshipTone ? `关系语气：${persona.relationshipTone}` : ''
-  ].filter(Boolean).join('\n');
+  const profileSurface = buildStableProfileText(userId, {
+    question: options.question || result.query || '',
+    profileProjection,
+    forceStableProfile: options.forceStableProfile,
+    disableStableProfile: options.disableStableProfile,
+    legacyFallbackEnabled: options.legacyProfileFallbackEnabled
+  });
 
   const packet = {
     sessionContinuityText: effectiveContinuity.map((item) => clampText(item.text, 600)).filter(Boolean).join('\n\n'),
     relevantEvidenceText: evidence.map((item) => `[${item.source}|${item.type}] ${clampText(item.text, 220)}`).filter(Boolean).join('\n'),
     weakEvidenceText: weakEvidence.map((item) => `[${item.source}|${item.type}] ${clampText(item.text, 120)}`).filter(Boolean).join('\n'),
-    stableProfileText: profileLines,
+    stableProfileText: profileSurface.text,
+    stableProfileSource: profileSurface.source,
+    stableProfile: profileSurface,
     taskStrategyText: task.map((item) => clampText(item.text, 220)).filter(Boolean).join('\n'),
     groupSharedContextText: group.map((item) => clampText(item.text, 220)).filter(Boolean).join('\n'),
     styleSignalsText: style.map((item) => clampText(item.text.replace(/^style:\s*/i, '').replace(/^group jargon:\s*/i, ''), 160)).filter(Boolean).join('\n'),

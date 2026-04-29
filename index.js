@@ -22,6 +22,7 @@ const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime
 const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/napcatLogFollower');
 const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
 const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
+const { cleanupStaleDataTmpFiles, DEFAULT_MAX_AGE_MS } = require('./utils/dataTmpCleanup');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
@@ -83,6 +84,29 @@ function acquireSingleInstanceLock() {
 }
 
 const cleanupSingleInstanceLock = acquireSingleInstanceLock();
+try {
+  const tmpCleanupEnabled = !['0', 'false', 'no', 'off'].includes(
+    String(process.env.DATA_TMP_CLEANUP_ENABLED || '').toLowerCase().trim()
+  );
+  if (tmpCleanupEnabled) {
+    const configuredMaxAgeMs = Number(process.env.DATA_TMP_CLEANUP_MAX_AGE_MS);
+    const summary = cleanupStaleDataTmpFiles({
+      dataDir: config.DATA_DIR,
+      maxAgeMs: Number.isFinite(configuredMaxAgeMs) ? configuredMaxAgeMs : DEFAULT_MAX_AGE_MS,
+      excludeDirs: [path.join(config.DATA_DIR, 'inbound_image_cache')]
+    });
+    if (summary.deletedFiles > 0 || summary.failedFiles > 0) {
+      console.log('[Startup] stale tmp cleanup', {
+        deletedFiles: summary.deletedFiles,
+        deletedMB: Math.round((summary.deletedBytes / 1024 / 1024) * 10) / 10,
+        skippedFreshFiles: summary.skippedFreshFiles,
+        failedFiles: summary.failedFiles
+      });
+    }
+  }
+} catch (error) {
+  console.warn('[Startup] stale tmp cleanup failed:', error?.message || error);
+}
 const webServer = startServer();
 initializeMemeManager();
 void warmMcpRegistry();

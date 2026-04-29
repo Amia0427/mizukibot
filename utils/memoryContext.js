@@ -23,6 +23,9 @@ const {
   isRecentRecallQuery
 } = require('./recallHeuristics');
 const {
+  buildStableProfileText
+} = require('./memoryProfileSurface');
+const {
   trimTextByTokenBudget
 } = require('./contextBudget');
 const {
@@ -461,6 +464,9 @@ function classifyRecallHitForPrompt(hit = {}) {
 
 function buildMemoryTrace({ hits = [], injected = {}, options = {} } = {}) {
   if (!config.MEMORY_TRACE_ENABLED) return null;
+  const profileTrace = options.memoryProfileTrace && typeof options.memoryProfileTrace === 'object'
+    ? options.memoryProfileTrace
+    : {};
   const injectedEntries = Object.entries(injected || {}).map(([name, text]) => ({
     name,
     chars: String(text || '').length,
@@ -493,7 +499,16 @@ function buildMemoryTrace({ hits = [], injected = {}, options = {} } = {}) {
       preview: String(hit.text || '').slice(0, 180)
     })),
     injected: injectedEntries,
-    injectedApproxTokens: injectedTokens
+    injectedApproxTokens: injectedTokens,
+    profile_source: String(profileTrace.profile_source || profileTrace.source || ''),
+    profile_injected: Boolean(profileTrace.profile_injected),
+    profile_trace_items: Array.isArray(profileTrace.traceItems) ? profileTrace.traceItems.slice(0, 12) : [],
+    profile_conflicts: Array.isArray(profileTrace.conflicts) ? profileTrace.conflicts.slice(0, 12) : [],
+    profile_suppressed: Array.isArray(profileTrace.suppressed) ? profileTrace.suppressed.slice(0, 12) : [],
+    profile_expires_soon: Array.isArray(profileTrace.expiresSoon) ? profileTrace.expiresSoon.slice(0, 12) : [],
+    legacy_fallback_used: Boolean(profileTrace.legacyFallbackUsed || profileTrace.legacy_fallback_used),
+    legacy_fallback_disabled: Boolean(profileTrace.legacy_fallback_disabled),
+    profile_disabled_reason: String(profileTrace.profile_disabled_reason || profileTrace.reason || '')
   };
 }
 function buildContextPayload(userId, question = '', options = {}, unifiedHits = []) {
@@ -504,6 +519,23 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
   const profile = getUserProfile(userId);
   const summary = getUserSummary(userId);
   const impression = getUserImpression(userId);
+  const stableProfile = buildStableProfileText(userId, {
+    question,
+    includeWeakForProfileQuery: true,
+    disableStableProfile: options.disableStableProfile,
+    forceStableProfile: options.forceStableProfile,
+    legacyFallbackEnabled: options.legacyProfileFallbackEnabled
+  });
+  const profilePersona = stableProfile.persona && typeof stableProfile.persona === 'object'
+    ? stableProfile.persona
+    : {};
+  const profileDisabled = stableProfile.disabled === true;
+  const effectiveSummary = profileDisabled
+    ? ''
+    : sanitizeText(profilePersona.summary || (stableProfile.legacyFallbackUsed ? stableProfile.summary : ''));
+  const effectiveImpression = profileDisabled
+    ? ''
+    : sanitizeText(profilePersona.impression || (stableProfile.legacyFallbackUsed ? stableProfile.impression : ''));
   const affinityState = getUserAffinityState(userId, options);
   const factText = getUserMemories(userId);
   const dailyJournalTimestamp = resolveDailyJournalTimestamp(question, options);
@@ -575,12 +607,8 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     resolvedGroupIds
   });
   const styleSignalText = styleSignal.text;
-  const longTermProfileText = [
-    formatProfile(profile),
-    `总体总结：${summary || '暂无'}`,
-    `总体印象：${formatImpression(impression)}`
-  ].join('\n');
-  const promptLongTermProfileSourceText = formatProfile(profile);
+  const longTermProfileText = stableProfile.text || '';
+  const promptLongTermProfileSourceText = stableProfile.text || '';
   const promptRetrievedMemoryText = limitPromptText(
     promptRetrievedMemorySourceText,
     getPromptTokenLimit('MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', 420),
@@ -619,12 +647,12 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     'tail'
   );
   const promptSummaryText = limitPromptText(
-    summary || '',
+    effectiveSummary,
     getPromptTokenLimit('MAIN_PROMPT_SUMMARY_MAX_TOKENS', 180),
     'tail'
   );
   const promptImpressionText = limitPromptText(
-    formatImpression(impression),
+    effectiveImpression,
     getPromptTokenLimit('MAIN_PROMPT_IMPRESSION_MAX_TOKENS', 96),
     'tail'
   );
@@ -649,7 +677,20 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
       dailyJournal: promptDailyJournalTrimmedText,
       longTermProfile: promptLongTermProfileText
     },
-    options
+    options: {
+      ...options,
+      memoryProfileTrace: {
+        profile_source: stableProfile.source,
+        profile_injected: Boolean(promptLongTermProfileText),
+        traceItems: stableProfile.traceItems || [],
+        conflicts: stableProfile.conflicts || [],
+        suppressed: stableProfile.suppressed || [],
+        expiresSoon: stableProfile.expiresSoon || [],
+        legacyFallbackUsed: Boolean(stableProfile.legacyFallbackUsed),
+        legacy_fallback_disabled: Boolean(options.disableLegacyFactFallback || recapQuery),
+        profile_disabled_reason: stableProfile.reason || ''
+      }
+    }
   });
 
   return {
@@ -665,12 +706,13 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     jargonHits,
     core,
     profile,
-    persona: profile?.personaCore && typeof profile.personaCore === 'object' ? profile.personaCore : {},
+    stableProfile,
+    persona: profilePersona,
     affinityState,
-    profileText: formatProfile(profile),
-    impression: impression || '',
-    impressionText: formatImpression(impression),
-    summary: summary || '',
+    profileText: stableProfile.text || '',
+    impression: effectiveImpression,
+    impressionText: effectiveImpression,
+    summary: effectiveSummary,
     promptSummaryText,
     promptImpressionText,
     taskMemoryText,
@@ -778,7 +820,11 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     }
     const packet = assembleMemoryPacket(queryResult, {
       userId,
-      sessionKey: baseOptions.sessionKey
+      sessionKey: baseOptions.sessionKey,
+      question,
+      disableStableProfile: baseOptions.disableStableProfile,
+      forceStableProfile: baseOptions.forceStableProfile,
+      legacyProfileFallbackEnabled: baseOptions.legacyProfileFallbackEnabled
     });
     const results = Array.isArray(queryResult.results) ? queryResult.results : [];
     const strictResults = Array.isArray(queryResult.strictResults) ? queryResult.strictResults : results;
@@ -812,16 +858,26 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       getPromptTokenLimit('MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', 420),
       'tail'
     );
+    const profileDisabled = packet.stableProfile?.disabled === true;
+    const continuitySummaryText = continuityFacet
+      ? limitPromptText(
+          packet.sessionContinuityText || queryResult.digest || '',
+          getPromptTokenLimit('MAIN_PROMPT_SUMMARY_MAX_TOKENS', 180),
+          'tail'
+        )
+      : '';
     const summaryText = String(
-      queryResult.persona?.summary
-      || (continuityFacet
+      !profileDisabled && queryResult.persona?.summary
+        ? queryResult.persona.summary
+        : (continuityFacet
         ? limitPromptText(
-            packet.sessionContinuityText || queryResult.digest || '',
+            continuitySummaryText || packet.sessionContinuityText || queryResult.digest || '',
             getPromptTokenLimit('MAIN_PROMPT_SUMMARY_MAX_TOKENS', 180),
             'tail'
           )
         : (queryResult.digest || ''))
     );
+    const impressionText = profileDisabled ? '' : String(queryResult.persona?.impression || '');
     const memoryForPrompt = [
       packet.sessionContinuityText ? `[SessionContinuity]\n${packet.sessionContinuityText}` : '',
       packet.relevantEvidenceText ? `[RelevantEvidence]\n${packet.relevantEvidenceText}` : '',
@@ -849,14 +905,17 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       jargonHits,
       core: [],
       profile: getUserProfile(userId),
-      persona: queryResult.persona && typeof queryResult.persona === 'object' ? queryResult.persona : {},
+      stableProfile: packet.stableProfile,
+      persona: profileDisabled
+        ? {}
+        : (queryResult.persona && typeof queryResult.persona === 'object' ? queryResult.persona : {}),
       affinityState: queryResult.affinityState || getUserAffinityState(userId),
       profileText: packet.stableProfileText,
-      impression: String(queryResult.persona?.impression || ''),
-      impressionText: String(queryResult.persona?.impression || ''),
+      impression: impressionText,
+      impressionText,
       summary: summaryText,
       promptSummaryText: summaryText,
-      promptImpressionText: String(queryResult.persona?.impression || ''),
+      promptImpressionText: impressionText,
       taskMemoryText: packet.taskStrategyText,
       groupMemoryText: [packet.groupSharedContextText, notebookText].filter(Boolean).join('\n'),
       promptGroupMemoryText: packet.groupSharedContextText,
@@ -890,7 +949,20 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
             dailyJournal: dailyJournalText,
             longTermProfile: packet.stableProfileText
           },
-          options
+          options: {
+            ...options,
+            memoryProfileTrace: {
+              profile_source: packet.stableProfileSource,
+              profile_injected: Boolean(packet.stableProfileText),
+              traceItems: packet.stableProfile?.traceItems || [],
+              conflicts: packet.stableProfile?.conflicts || [],
+              suppressed: packet.stableProfile?.suppressed || [],
+              expiresSoon: packet.stableProfile?.expiresSoon || [],
+              legacyFallbackUsed: Boolean(packet.stableProfile?.legacyFallbackUsed),
+              legacy_fallback_disabled: Boolean(baseOptions.disableLegacyFactFallback || recapQuery),
+              profile_disabled_reason: packet.stableProfile?.reason || ''
+            }
+          }
         })
       },
       segments: {

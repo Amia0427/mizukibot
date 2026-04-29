@@ -30,12 +30,46 @@ module.exports = (async () => {
       activeTopic: '部署'
     }
   });
+  await appendMemoryEvent({
+    type: 'session_checkpoint',
+    ts: 2000,
+    userId: 'u_clear',
+    sessionKey: 'direct:u_clear',
+    scopeType: 'session',
+    source: 'test',
+    payload: {
+      snapshotType: 'post_reply',
+      activeTopic: '旧梗 active topic',
+      interactionState: {
+        activeTopic: '旧梗 active topic'
+      }
+    }
+  });
+  await appendMemoryEvent({
+    type: 'session_checkpoint',
+    ts: 2001,
+    userId: 'u_clear',
+    sessionKey: 'direct:u_clear',
+    scopeType: 'session',
+    source: 'test',
+    sourceKind: 'restart_recall_clear',
+    payload: {
+      snapshotType: 'post_reply',
+      activeTopic: '',
+      interactionState: {
+        activeTopic: ''
+      }
+    }
+  });
   materializeMemoryViews();
 
   const restored = await restoreSessionState('direct:u_restore', { userId: 'u_restore' });
   assert.strictEqual(restored.restored, true);
   assert.strictEqual(restored.mode, 'pending');
   assert.ok(String(restored.session.carryOverUserTurn || '').includes('部署问题'));
+  const projection = JSON.parse(fs.readFileSync(path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'session_projection.json'), 'utf8'));
+  assert.strictEqual(projection.sessions['direct:u_clear'].activeTopic, '');
+  assert.strictEqual(projection.sessions['direct:u_clear'].interactionState.activeTopic, '');
   console.log('memoryV3SessionRestore.test.js passed');
 })().catch((error) => {
   console.error(error);

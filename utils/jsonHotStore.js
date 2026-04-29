@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { rotateFileIfNeeded } = require('./logRotation');
 
 const DEFAULT_DEBOUNCE_MS = 500;
 const DEFAULT_MAX_DELAY_MS = 3000;
@@ -273,6 +274,8 @@ function createJsonLineHotWriter(filePath, options = {}) {
     encoding: options.encoding || 'utf8',
     debounceMs: Math.max(0, Number(options.debounceMs) || DEFAULT_DEBOUNCE_MS),
     maxDelayMs: Math.max(0, Number(options.maxDelayMs) || DEFAULT_MAX_DELAY_MS),
+    rotateMaxBytes: options.rotateMaxBytes,
+    rotateMaxFiles: options.rotateMaxFiles,
     serializeLine: typeof options.serializeLine === 'function'
       ? options.serializeLine
       : ((value) => JSON.stringify(value)),
@@ -298,7 +301,12 @@ function createJsonLineHotWriter(filePath, options = {}) {
     writer.firstDirtyAt = 0;
     clearTimer();
     try {
-      fs.appendFileSync(writer.filePath, `${lines.join('\n')}\n`, writer.encoding);
+      const body = `${lines.join('\n')}\n`;
+      rotateFileIfNeeded(writer.filePath, Buffer.byteLength(body, writer.encoding), {
+        maxBytes: writer.rotateMaxBytes,
+        maxFiles: writer.rotateMaxFiles
+      });
+      fs.appendFileSync(writer.filePath, body, writer.encoding);
       writer.flushCount += 1;
       return true;
     } catch (error) {

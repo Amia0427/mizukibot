@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { getApiProvider } = require('./modelProvider');
+const { appendFileWithRotation } = require('./logRotation');
 
 const MAX_RECENT_MODEL_CALLS = 200;
 const MODEL_CALL_LOG_FILE = path.join(config.DATA_DIR || path.join(process.cwd(), 'data'), 'model-calls.ndjson');
@@ -31,7 +32,9 @@ function nowIso() {
 function appendModelCallLog(record = {}) {
   try {
     fs.mkdirSync(path.dirname(MODEL_CALL_LOG_FILE), { recursive: true });
-    fs.appendFileSync(MODEL_CALL_LOG_FILE, `${JSON.stringify(record)}\n`, 'utf8');
+    appendFileWithRotation(MODEL_CALL_LOG_FILE, `${JSON.stringify(record)}\n`, {
+      encoding: 'utf8'
+    });
   } catch (_) {}
 }
 
