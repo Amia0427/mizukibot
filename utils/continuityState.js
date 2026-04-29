@@ -6,7 +6,7 @@ const {
 } = require('./shortTermMemory');
 const { getDailyJournalRetrievalBundle } = require('./dailyJournal');
 const { buildMemoryContext } = require('./memoryContext');
-const { isConversationRecapQuery } = require('./recallHeuristics');
+const { isRecentRecallQuery } = require('./recallHeuristics');
 
 function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -153,7 +153,7 @@ function buildMemoryContextDigest(memoryContext = {}) {
 function getContinuityEvidenceBundle(userId, question, options = {}) {
   const request = normalizeObject(options.request, {});
   const routeMeta = normalizeObject(request.routeMeta, {});
-  const recapQuery = isConversationRecapQuery(question || request.question || '');
+  const recapQuery = isRecentRecallQuery(question || request.question || '');
   const sessionKey = String(
     options.sessionKey
     || request.sessionKey

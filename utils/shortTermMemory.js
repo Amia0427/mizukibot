@@ -70,6 +70,14 @@ function trimShortText(value, maxChars = 220) {
   return text.length > maxChars ? text.slice(0, maxChars) : text;
 }
 
+function deriveActiveTopicFromTurn(userContent = '', assistantContent = '') {
+  const userText = trimShortText(userContent, 180);
+  const assistantText = trimShortText(assistantContent, 180);
+  if (!userText && !assistantText) return '';
+  if (userText && userText.length <= 180) return userText;
+  return trimShortText([userText, assistantText].filter(Boolean).join(' / '), 180);
+}
+
 function normalizeStringList(values = [], limit = 4, itemMaxChars = 140) {
   const output = [];
   const seen = new Set();
@@ -1340,16 +1348,18 @@ function appendShortTermHistory(userId, userContent, assistantContent, userInfo 
   }
 
   const state = ensureShortTermMemoryState(key, deps.shortTermMemory);
+  const turnTopic = deriveActiveTopicFromTurn(userContent, assistantContent);
   state.carryOverUserTurn = '';
   state.interaction = normalizeInteractionState({
     ...state.interaction,
-    activeTopic: state.interaction?.activeTopic || state.activeTopic || trimShortText(userContent, 180),
+    activeTopic: turnTopic || state.interaction?.activeTopic || state.activeTopic,
     carryOverUserTurn: '',
     recentTurns: normalizeRecentTurns(
       [...(state.interaction?.recentTurns || []), { role: 'user', content: userContent }, { role: 'assistant', content: assistantContent }],
       getRecentTurnsMaxItems()
     )
   });
+  state.activeTopic = state.interaction.activeTopic || state.activeTopic;
   state.expression = normalizeExpressionState(state.expression);
   state.moduleState = normalizeModuleState(state.moduleState);
 

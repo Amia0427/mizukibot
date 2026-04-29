@@ -477,8 +477,12 @@ function materializeMemoryViews(options = {}) {
           ...normalizeSessionScopeFromEvent(event),
           updatedAt: Math.max(Number(existing.updatedAt || 0), Number(event.ts || 0)),
           snapshotType: normalizeText(payload.snapshotType || existing.snapshotType),
-          activeTopic: normalizeText(payload.activeTopic || existing.activeTopic),
-          carryOverUserTurn: normalizeText(payload.carryOverUserTurn || existing.carryOverUserTurn),
+          activeTopic: Object.prototype.hasOwnProperty.call(payload, 'activeTopic')
+            ? normalizeText(payload.activeTopic)
+            : normalizeText(existing.activeTopic),
+          carryOverUserTurn: Object.prototype.hasOwnProperty.call(payload, 'carryOverUserTurn')
+            ? normalizeText(payload.carryOverUserTurn)
+            : normalizeText(existing.carryOverUserTurn),
           summary: Object.prototype.hasOwnProperty.call(payload, 'summary')
             ? clampText(payload.summary, 2400)
             : clampText(existing.summary, 2400),

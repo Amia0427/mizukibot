@@ -347,6 +347,9 @@ function createPersistNode(deps = {}) {
           const persistedSummary = summarySource === 'restart_recall'
             ? ''
             : String(stateSlice.summary || '').trim();
+          const persistedActiveTopic = summarySource === 'restart_recall'
+            ? ''
+            : String(stateSlice.activeTopic || '').trim();
           await appendMemoryEvent({
             type: 'session_checkpoint',
             userId: request.userId,
@@ -360,7 +363,7 @@ function createPersistNode(deps = {}) {
             source: 'runtime_v2_persist',
             payload: {
               snapshotType: 'post_reply',
-              activeTopic: String(stateSlice.activeTopic || '').trim(),
+              activeTopic: persistedActiveTopic,
               summary: persistedSummary,
               carryOverUserTurn: String(stateSlice.carryOverUserTurn || '').trim(),
               openLoops: normalizeArray(stateSlice.openLoops),

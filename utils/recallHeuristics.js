@@ -37,10 +37,34 @@ function isConversationRecapQuery(text = '') {
   return false;
 }
 
+function isRecentPersonalActivityRecallQuery(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q) return false;
+  if (/(今天天气|今天.{0,8}(天气|气温|下雨|温度|股价|股票|行情|新闻|日期|星期|几点)|today.{0,12}(weather|temperature|stock|news|date|time))/i.test(q)) {
+    return false;
+  }
+  const recent = '(?:今天|今日|刚刚|刚才|刚)';
+  const actor = '(?:我|我们)?';
+  const activity = '(?:打|玩|听|看|刷|做|去了|去过|去|发|发过|提到|说过|聊过|买|吃|喝|练|跑|测|试)';
+  const objectQuestion = '(?:哪些|哪几|哪几个|哪几张|哪几首|哪首|什么|啥)';
+  const objectNoun = '(?:歌|曲|谱|图|图片|照片|东西|内容|题|游戏|本|活动|记录)?';
+  const patterns = [
+    new RegExp(`${recent}.{0,8}${actor}.{0,8}${activity}.{0,10}${objectQuestion}${objectNoun}`, 'i'),
+    new RegExp(`${actor}.{0,8}${recent}.{0,8}${activity}.{0,10}${objectQuestion}${objectNoun}`, 'i'),
+    new RegExp(`${recent}.{0,8}${actor}.{0,8}${objectQuestion}${objectNoun}.{0,8}${activity}`, 'i'),
+    new RegExp(`${actor}.{0,8}${recent}.{0,8}${objectQuestion}${objectNoun}.{0,8}${activity}`, 'i')
+  ];
+  return patterns.some((pattern) => pattern.test(q));
+}
+
+function isRecentRecallQuery(text = '') {
+  return isConversationRecapQuery(text) || isRecentPersonalActivityRecallQuery(text);
+}
+
 function classifyRecallFacet(question = '') {
   const q = sanitizeText(question).toLowerCase();
   if (!q) return 'default_continuity';
-  if (isConversationRecapQuery(q)) return 'recent_continuity';
+  if (isRecentRecallQuery(q)) return 'recent_continuity';
   if (/(where did we leave off|what were we(?: just)? talking about|what were we doing|what was the thing from before|from before|earlier|previously|last time|continuity|recent|上次|刚才|刚刚|聊到哪|做到哪|接上)/i.test(q)) return 'recent_continuity';
   if (/(continue|continue with|resume|pick back up|next step|next steps|what should we do next|plan|task|todo|roadmap|继续|接着|接上|计划|任务|待办|推进)/i.test(q)) return 'task_or_plan';
   if (/(喜欢|不喜欢|偏好|爱好|口味|习惯|风格|like|likes|prefer|preference|favorite|favourite|dislike|hobby)/i.test(q)) return 'preference';
@@ -119,7 +143,7 @@ function isMemoryContinuationQuestion(text = '') {
   if (/^(你觉得|你认为|你喜不喜欢|你喜歡|你怎么看|觉得.*好听吗|觉得.*怎么样|what do you think|how do you feel)/i.test(normalized)) {
     return false;
   }
-  if (isConversationRecapQuery(normalized)) return true;
+  if (isRecentRecallQuery(normalized)) return true;
   const facet = classifyRecallFacet(normalized);
   return facet !== 'group_context' || /(继续|上次|最近群里|刚刚|刚才|context|上下文)/i.test(normalized);
 }
@@ -146,6 +170,8 @@ module.exports = {
   getFacetSourceWeights,
   isConversationalNoop,
   isConversationRecapQuery,
+  isRecentPersonalActivityRecallQuery,
+  isRecentRecallQuery,
   isMemoryContinuationQuestion,
   sanitizeText,
   shouldBiasToContinuity,

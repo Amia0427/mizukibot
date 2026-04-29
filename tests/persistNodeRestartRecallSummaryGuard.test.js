@@ -109,7 +109,9 @@ module.exports = (async () => {
   const checkpoint = events.find((event) => event.type === 'session_checkpoint');
   assert.ok(checkpoint);
   assert.strictEqual(String(checkpoint.payload?.summary || ''), '');
+  assert.strictEqual(String(checkpoint.payload?.activeTopic || ''), '');
   assert.strictEqual(String(materializeSnapshot?.sessionProjection?.sessions?.s_restart_guard?.summary || ''), '');
+  assert.strictEqual(String(materializeSnapshot?.sessionProjection?.sessions?.s_restart_guard?.activeTopic || ''), '');
   console.log('persistNodeRestartRecallSummaryGuard.test.js passed');
 })().catch((error) => {
   console.error(error);

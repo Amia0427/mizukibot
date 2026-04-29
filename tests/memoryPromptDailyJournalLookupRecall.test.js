@@ -106,6 +106,53 @@ module.exports = (async () => {
     'recap ContinuityState should put active raw evidence before stale ActiveTopic'
   );
 
+  const activityContinuityState = buildContinuityState({
+    request: {
+      userId: 'u_prompt_daily_journal_lookup',
+      question: '宝我今天打了哪些歌',
+      routeMeta: { groupId: 'g1' }
+    },
+    memoryContext: {
+      retrievedMemoryForPrompt: '暂无与当前问题强相关的长期记忆',
+      taskMemoryText: '',
+      groupMemoryText: '',
+      dailyJournalText: ''
+    },
+    dailyJournalBundle: {
+      text: '[active_raw 2026-04-29]\nUser: 今天打了 Kitty 和 移动恋话。Assistant: 我记录到了这两首。',
+      items: [],
+      byLayer: {
+        activeRaw: [{
+          kind: 'active_raw',
+          day: '2026-04-29',
+          text: 'User: 今天打了 Kitty 和 移动恋话。Assistant: 我记录到了这两首。',
+          entries: [{
+            user: '今天打了 Kitty 和 移动恋话。',
+            assistant: '我记录到了这两首。',
+            sessionKey: 's1'
+          }]
+        }],
+        daily: [],
+        fourDay: [],
+        monthly: []
+      },
+      continuity: { sameSession: [], sameTopic: [] }
+    },
+    bridgeShortTermState: {
+      activeTopic: '旧梗 active topic',
+      summary: '旧 summary'
+    },
+    maxChars: 1600
+  });
+
+  assert.ok(activityContinuityState.payload.source_flags.includes('recap_query'));
+  assert.ok(activityContinuityState.payload.source_flags.includes('journal_active_raw'));
+  assert.ok(
+    activityContinuityState.text.indexOf('今天打了 Kitty 和 移动恋话') >= 0
+      && activityContinuityState.text.indexOf('今天打了 Kitty 和 移动恋话') < activityContinuityState.text.indexOf('旧梗 active topic'),
+    'same-day activity recall should put active raw evidence before stale ActiveTopic'
+  );
+
   console.log('memoryPromptDailyJournalLookupRecall.test.js passed');
 })().catch((error) => {
   console.error(error);

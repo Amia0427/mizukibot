@@ -20,7 +20,7 @@ const { formatGroupMemories } = require('./groupMemory');
 const { formatTaskMemories } = require('./taskMemory');
 const {
   classifyRecallFacet,
-  isConversationRecapQuery
+  isRecentRecallQuery
 } = require('./recallHeuristics');
 const {
   trimTextByTokenBudget
@@ -497,7 +497,7 @@ function buildMemoryTrace({ hits = [], injected = {}, options = {} } = {}) {
   };
 }
 function buildContextPayload(userId, question = '', options = {}, unifiedHits = []) {
-  const recapQuery = isConversationRecapQuery(question);
+  const recapQuery = isRecentRecallQuery(question);
   const resolvedGroupIds = Array.isArray(options.resolvedGroupIds)
     ? options.resolvedGroupIds.map((item) => sanitizeText(item)).filter(Boolean)
     : resolveReadableGroupIds(userId, options);
@@ -693,7 +693,7 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
 
 function buildMemoryContext(userId, question = '', options = {}) {
   const resolvedGroupIds = resolveReadableGroupIds(userId, options);
-  const recapQuery = isConversationRecapQuery(question);
+  const recapQuery = isRecentRecallQuery(question);
   const normalizedOptions = {
     ...options,
     userId,
@@ -718,7 +718,7 @@ function buildMemoryContext(userId, question = '', options = {}) {
 }
 
 async function buildMemoryContextAsync(userId, question = '', options = {}) {
-  const recapQuery = isConversationRecapQuery(question);
+  const recapQuery = isRecentRecallQuery(question);
   const baseOptions = {
     ...options,
     includeActiveRaw: options.includeActiveRaw || recapQuery,
