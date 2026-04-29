@@ -84,7 +84,14 @@ function getRouterModel() {
   return String(config.AI_ROUTER_MODEL || config.PLAN_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
 }
 
-async function detectIntentByAI({ rawText = '', cleanText = '', effectiveIntentText = '', imageUrl = null, userId = '' }) {
+async function detectIntentByAI({
+  rawText = '',
+  cleanText = '',
+  effectiveIntentText = '',
+  imageUrl = null,
+  userId = '',
+  requestTrace = null
+}) {
   const prompt = buildRouterPrompt();
   const routedText = String(effectiveIntentText || cleanText || '').trim();
 
@@ -108,7 +115,15 @@ async function detectIntentByAI({ rawText = '', cleanText = '', effectiveIntentT
         }
       ],
       max_tokens: 900,
-      stream: false
+      stream: false,
+      __trace: {
+        ...(requestTrace && typeof requestTrace === 'object' ? requestTrace : {}),
+        source: 'router',
+        phase: 'router_ai',
+        purpose: 'intent_route',
+        userId: String(userId || '').trim(),
+        topRouteType: 'direct_chat'
+      }
     },
     1,
     getRouterApiKey()

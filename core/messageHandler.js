@@ -160,6 +160,12 @@ const {
   getSessionSummaryCooldownStatus
 } = require('../utils/sessionContextSummaryStore');
 const {
+  cloneTraceForMeta,
+  createRequestTrace,
+  extractErrorCode,
+  nextTracePhase
+} = require('../utils/requestTrace');
+const {
   generateSessionContextSummary
 } = require('../utils/sessionContextSummaryRuntime');
 const {
@@ -2020,12 +2026,41 @@ function createMessageHandler({
   async function handleIncomingMessage(msg) {
     const handlerStartedAt = Date.now();
     const rawMessageTimestampMs = getRawMessageTimestampMs(msg);
-    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+    const requestTrace = createRequestTrace({
+      source: 'message_ingress',
+      messageId: String(msg?.message_id || '').trim(),
+      groupId: String(msg?.group_id || '').trim(),
+      userId: String(msg?.user_id || '').trim(),
+      chatType: String(msg?.message_type || '').trim(),
+      isAdmin: isAdminUser(String(msg?.user_id || '').trim())
+    });
+    const appendTraceTiming = (phase, payload = {}) => appendInboundTimingLog(
+      inboundTimingLogFile,
+      config.ENABLE_DEBUG_LOG,
+      nextTracePhase(requestTrace, phase, payload)
+    );
+    const buildTraceBase = () => ({
+      messageId: String(msg?.message_id || '').trim(),
+      groupId: String(msg?.group_id || '').trim(),
+      userId: String(msg?.user_id || '').trim(),
+      chatType: String(msg?.message_type || '').trim().toLowerCase() === 'private' ? 'private' : 'group',
+      rawMessageTimestampMs,
+      elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+      lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+    });
+    const appendRequestCompleteTrace = (payload = {}) => appendTraceTiming('request_complete', {
+      stage: 'request_complete',
+      ...buildTraceBase(),
+      durationMs: Math.max(0, Date.now() - handlerStartedAt),
+      ...payload
+    });
+    appendTraceTiming('message_ingress', {
       stage: 'handle_incoming_start',
       messageId: String(msg?.message_id || '').trim(),
       groupId: String(msg?.group_id || '').trim(),
       userId: String(msg?.user_id || '').trim(),
       chatType: String(msg?.message_type || '').trim(),
+      isAdmin: isAdminUser(String(msg?.user_id || '').trim()),
       rawMessageTimestampMs,
       lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, handlerStartedAt - rawMessageTimestampMs) : null
     });
@@ -2057,6 +2092,14 @@ function createMessageHandler({
     const createCommandText = stripLeadingCqControlSegments(rawMessageText, resolveEffectiveBotQQ(msg, config));
     if (/^\s*\/create(?:\s|$)/i.test(createCommandText)) {
       if (isPrivateChatType(chatType)) {
+        const sendStartedAt = Date.now();
+        appendTraceTiming('final_reply_send_start', {
+          stage: 'final_reply_send_start',
+          ...buildTraceBase(),
+          routePolicyKey: 'admin/create',
+          topRouteType: 'admin',
+          replyPath: 'create_private_blocked'
+        });
         await sendGroupReply({
           chatType,
           groupId,
@@ -2067,7 +2110,20 @@ function createMessageHandler({
           retries: 1,
           waitMs: 300
         });
-        logMemoryWriteSkip('special_command_private_blocked', { command: 'meme' });
+        appendTraceTiming('final_reply_send_done', {
+          stage: 'final_reply_send_done',
+          ...buildTraceBase(),
+          routePolicyKey: 'admin/create',
+          topRouteType: 'admin',
+          replyPath: 'create_private_blocked',
+          sent: true,
+          durationMs: Math.max(0, Date.now() - sendStartedAt)
+        });
+        appendRequestCompleteTrace({
+          routePolicyKey: 'admin/create',
+          topRouteType: 'admin',
+          finalErrorCode: 'group_only'
+        });
         return;
       }
 
@@ -2094,20 +2150,51 @@ function createMessageHandler({
             error: error?.message || String(error || '')
           });
         }
+        appendRequestCompleteTrace({
+          routePolicyKey: 'admin/create',
+          topRouteType: 'admin',
+          finalErrorCode: 'unauthorized',
+          sent: false
+        });
         return;
       }
 
       const prompt = createCommandText.replace(/^\s*\/create/i, '').trim();
+      appendTraceTiming('admin_route_dispatch_start', {
+        stage: 'admin_route_dispatch_start',
+        ...buildTraceBase(),
+        routePolicyKey: 'admin/create',
+        topRouteType: 'admin',
+        command: 'create'
+      });
       const createResult = await createAgentExecutor.executeCreateCommand({
         prompt,
         chatType,
         groupId,
         senderId,
-        rawText: rawMessageText
+        rawText: rawMessageText,
+        requestTrace: cloneTraceForMeta(requestTrace)
+      });
+      appendTraceTiming('admin_route_dispatch_done', {
+        stage: 'admin_route_dispatch_done',
+        ...buildTraceBase(),
+        routePolicyKey: 'admin/create',
+        topRouteType: 'admin',
+        command: 'create',
+        ok: createResult?.ok === true,
+        finalErrorCode: createResult?.ok ? '' : String(createResult?.code || '').trim()
       });
 
       if (!createResult?.ok) {
-        await sendGroupReply({
+        const sendStartedAt = Date.now();
+        appendTraceTiming('final_reply_send_start', {
+          stage: 'final_reply_send_start',
+          ...buildTraceBase(),
+          routePolicyKey: 'admin/create',
+          topRouteType: 'admin',
+          replyPath: 'create_failure'
+        });
+        const sent = await sendGroupReply({
           chatType,
           groupId,
           userId: senderId,
@@ -2117,7 +2204,23 @@ function createMessageHandler({
           retries: 1,
           waitMs: 300
         });
+        appendTraceTiming('final_reply_send_done', {
+          stage: 'final_reply_send_done',
+          ...buildTraceBase(),
+          routePolicyKey: 'admin/create',
+          topRouteType: 'admin',
+          replyPath: 'create_failure',
+          sent: Boolean(sent),
+          durationMs: Math.max(0, Date.now() - sendStartedAt),
+          finalErrorCode: String(createResult?.code || '').trim()
+        });
       }
+      appendRequestCompleteTrace({
+        routePolicyKey: 'admin/create',
+        topRouteType: 'admin',
+        sent: createResult?.ok === true,
+        finalErrorCode: createResult?.ok ? '' : String(createResult?.code || '').trim()
+      });
       return;
     }
 
@@ -2226,7 +2329,7 @@ function createMessageHandler({
       privilegedPrivateChat
     });
     const inboundSnapshot = selectedInboundConcurrency.getSnapshot();
-    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+    appendTraceTiming('message_ingress_lock_acquired', {
       stage: 'inbound_lock_acquired',
       messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
       groupId: String(groupId || '').trim(),
@@ -2255,7 +2358,7 @@ function createMessageHandler({
     let inboundHadError = false;
 
     try {
-      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      appendTraceTiming('message_ingress_route_entry', {
         stage: 'inbound_route_entry',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
         groupId: String(groupId || '').trim(),
@@ -2826,15 +2929,18 @@ function createMessageHandler({
       directedContext,
       visualContext,
       threadId: stableThreadId,
+      requestTrace: cloneTraceForMeta(requestTrace),
       messageMeta: {
         messageId: String(effectiveMsg?.message_id || msg?.message_id || '').trim(),
         threadId: stableThreadId
       }
     });
+    inboundContext.requestTrace = cloneTraceForMeta(requestTrace);
     inboundContext.onEvent = (event = {}) => {
       const normalizedEvent = event && typeof event === 'object' ? event : {};
       if (String(normalizedEvent.type || '').trim() === 'direct_reply_failure') {
         appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+          ...nextTracePhase(requestTrace, 'runtime_direct_reply_failure', {}),
           stage: 'direct_reply_failure',
           messageId: String(effectiveMsg?.message_id || msg?.message_id || '').trim(),
           groupId: isPrivateChatType(chatType) ? '' : String(groupId || '').trim(),
@@ -2862,7 +2968,8 @@ function createMessageHandler({
           groupId: isPrivateChatType(chatType) ? '' : String(groupId || '').trim(),
           chatType,
           threadId: stableThreadId,
-          messageId: String(effectiveMsg?.message_id || msg?.message_id || '').trim()
+          messageId: String(effectiveMsg?.message_id || msg?.message_id || '').trim(),
+          requestTrace: cloneTraceForMeta(requestTrace)
         }
       });
       if (typeof telemetry?.onEvent === 'function') {
@@ -2959,6 +3066,16 @@ function createMessageHandler({
     let route = null;
     let routeResolverError = null;
     try {
+      appendTraceTiming('router_start', {
+        stage: 'route_resolver_start',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+      });
       route = await routeResolver({
         rawText: routerRawText,
         botQQ: effectiveBotQQ,
@@ -2967,10 +3084,10 @@ function createMessageHandler({
         contextSummary: routerContextSummary,
         directedContext,
         effectiveIntentText: runtimeQuestionText
-      });
+      }, { requestTrace: cloneTraceForMeta(requestTrace) });
     } catch (error) {
       routeResolverError = error;
-      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      appendTraceTiming('router_failed', {
         stage: 'route_resolver_failed',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
         groupId: String(groupId || '').trim(),
@@ -2980,11 +3097,12 @@ function createMessageHandler({
         rawMessageTimestampMs,
         elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
         lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        finalErrorCode: extractErrorCode(error),
         error: error?.message || String(error || '')
       });
       throw error;
     }
-    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+    appendTraceTiming('router_done', {
       stage: 'route_resolver_done',
       messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
       groupId: String(groupId || '').trim(),
@@ -3000,6 +3118,7 @@ function createMessageHandler({
     });
     route.meta = {
       ...(route.meta || {}),
+      requestTrace: cloneTraceForMeta(requestTrace),
       userId: String(senderId || ''),
       groupId: isPrivateChatType(chatType) ? '' : String(groupId || ''),
       chatType,
@@ -3098,14 +3217,26 @@ function createMessageHandler({
       const plannerStartedAt = Date.now();
       let plannerDecision = null;
       try {
+        appendTraceTiming('planner_start', {
+          stage: 'direct_chat_planner_start',
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          topRouteType: String(route?.topRouteType || '').trim(),
+          rawMessageTimestampMs,
+          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+        });
         plannerDecision = await planDirectChat(route, {
           userId: senderId,
           allowedTools: route?.meta?.allowedTools,
           contextSummary: plannerContextSummary,
-          directedContext
+          directedContext,
+          requestTrace: cloneTraceForMeta(requestTrace)
         });
       } catch (error) {
-        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        appendTraceTiming('planner_failed', {
           stage: 'direct_chat_planner_failed',
           messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
           groupId: String(groupId || '').trim(),
@@ -3115,11 +3246,12 @@ function createMessageHandler({
           rawMessageTimestampMs,
           elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
           lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+          finalErrorCode: extractErrorCode(error),
           error: error?.message || String(error || '')
         });
         throw error;
       }
-      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      appendTraceTiming('planner_done', {
         stage: 'direct_chat_planner_done',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
         groupId: String(groupId || '').trim(),
@@ -3146,7 +3278,7 @@ function createMessageHandler({
     let routeExecutionPlan = null;
     try {
       routeExecutionPlan = routeExecution.resolveRouteExecution(route, config, {});
-      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      appendTraceTiming('route_execution_done', {
         stage: 'route_execution_done',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
         groupId: String(groupId || '').trim(),
@@ -3171,7 +3303,7 @@ function createMessageHandler({
         needsBackground: false,
         unavailableReason: 'route-execution-failed'
       };
-      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      appendTraceTiming('route_execution_failed', {
         stage: 'route_execution_failed',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
         groupId: String(groupId || '').trim(),
@@ -3181,6 +3313,7 @@ function createMessageHandler({
         rawMessageTimestampMs,
         elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
         lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        finalErrorCode: extractErrorCode(error),
         error: error?.message || String(error || '')
       });
       console.error('[routeExecution] resolve failed, fallback to direct chat:', error?.message || error);
@@ -3189,7 +3322,7 @@ function createMessageHandler({
       logMemoryWriteSkip('route_executor_ignore', {
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
-      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      appendTraceTiming('route_execution_ignored', {
         stage: 'route_execution_ignored',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
         groupId: String(groupId || '').trim(),
@@ -3221,6 +3354,15 @@ function createMessageHandler({
     }
 
     if (routeExecutionPlan.executor === 'admin') {
+      appendTraceTiming('admin_route_dispatch_start', {
+        stage: 'admin_route_dispatch_start',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        command: String(route?.meta?.command?.cmd || '').trim(),
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
       await routeFlow.dispatchAdminRoute({
         route,
         groupId,
@@ -3229,9 +3371,35 @@ function createMessageHandler({
         userInfo: null,
         chatType
       });
+      appendTraceTiming('admin_route_dispatch_done', {
+        stage: 'admin_route_dispatch_done',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        command: String(route?.meta?.command?.cmd || '').trim(),
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
+      appendTraceTiming('final_reply_send_done', {
+        stage: 'final_reply_send_done',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        sent: true,
+        replyPath: 'admin_route',
+        command: String(route?.meta?.command?.cmd || '').trim(),
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
       logMemoryWriteSkip('route_executor_admin', {
         command: String(route?.meta?.command?.cmd || '').trim(),
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
+      appendRequestCompleteTrace({
+        routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+        topRouteType: routeExecutionPlan.topRouteType,
+        sent: true,
+        command: String(route?.meta?.command?.cmd || '').trim()
       });
       return;
     }
@@ -3362,7 +3530,8 @@ function createMessageHandler({
       userInfo = {};
     }
 
-    appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+    const formalDispatchStartedAt = Date.now();
+    appendTraceTiming('runtime_dispatch_start', {
       stage: 'formal_route_dispatch_start',
       messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
       groupId: String(groupId || '').trim(),
@@ -3372,33 +3541,71 @@ function createMessageHandler({
       elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
       lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
     });
-    const replyEnvelope = await routeFlow.dispatchFormalRoute({
-      route,
-      executionPlan: routeExecutionPlan,
-      requestText: runtimeQuestionText || cleanText,
-      inboundContext,
-      userInfo,
-      senderId,
-      groupId: isPrivateChatType(chatType) ? '' : groupId,
-      imageUrl,
-      imageUrls,
-      sourceMessageId: String(effectiveMsg.message_id || '').trim(),
-      freshness: freshnessGuard
-    });
+    let replyEnvelope = null;
+    try {
+      replyEnvelope = await routeFlow.dispatchFormalRoute({
+        route,
+        executionPlan: routeExecutionPlan,
+        requestText: runtimeQuestionText || cleanText,
+        inboundContext,
+        userInfo,
+        senderId,
+        groupId: isPrivateChatType(chatType) ? '' : groupId,
+        imageUrl,
+        imageUrls,
+        sourceMessageId: String(effectiveMsg.message_id || '').trim(),
+        freshness: freshnessGuard
+      });
+      appendTraceTiming('runtime_dispatch_done', {
+        stage: 'formal_route_dispatch_done',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        durationMs: Math.max(0, Date.now() - formalDispatchStartedAt),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
+    } catch (error) {
+      appendTraceTiming('runtime_dispatch_failed', {
+        stage: 'formal_route_dispatch_failed',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        durationMs: Math.max(0, Date.now() - formalDispatchStartedAt),
+        rawMessageTimestampMs,
+        elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+        lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        finalErrorCode: extractErrorCode(error),
+        error: error?.message || String(error || ''),
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
+      throw error;
+    }
     let reply = String(replyEnvelope?.replyText || '').trim();
     const persistedReplyText = String(replyEnvelope?.persistedReplyText || replyEnvelope?.replyText || '').trim();
     const usedStreamingSend = Boolean(replyEnvelope?.sendStrategy === 'stream' || replyEnvelope?.usedStreamingSend);
     const replyOptions = replyEnvelope?.replyOptions || null;
     if (!usedStreamingSend) {
       if (!freshnessGuard.shouldSend()) {
-        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        appendTraceTiming('final_reply_discarded_stale', {
           stage: 'reply_discarded_stale',
           messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
           groupId: String(groupId || '').trim(),
           userId: String(senderId || '').trim(),
           chatType,
           sessionKey: String(freshnessGuard.sessionKey || '').trim(),
-          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0
+          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0,
+          ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+        });
+        appendRequestCompleteTrace({
+          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+          topRouteType: routeExecutionPlan.topRouteType,
+          sent: false,
+          finalErrorCode: 'stale_reply_discarded'
         });
         return;
       }
@@ -3414,8 +3621,18 @@ function createMessageHandler({
         groupId,
         senderId,
         routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-        topRouteType: routeExecutionPlan.topRouteType,
-        replyPreview: String(reply || '').slice(0, 120)
+          topRouteType: routeExecutionPlan.topRouteType,
+          replyPreview: String(reply || '').slice(0, 120)
+        });
+      const sendStartedAt = Date.now();
+      appendTraceTiming('final_reply_send_start', {
+        stage: 'final_reply_send_start',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        replyChars: Array.from(String(replyEnvelope?.replyText || reply || '')).length,
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       const sent = await sendGroupReply({
         chatType,
@@ -3435,9 +3652,21 @@ function createMessageHandler({
           topRouteType: routeExecutionPlan.topRouteType,
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             threadId: String(replyOptions?.threadId || inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
-            messageId: String(effectiveMsg.message_id || msg.message_id || '').trim()
+            messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+            requestTrace: cloneTraceForMeta(requestTrace)
           })
         })
+      });
+      appendTraceTiming('final_reply_send_done', {
+        stage: 'final_reply_send_done',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        sent: Boolean(sent),
+        durationMs: Math.max(0, Date.now() - sendStartedAt),
+        finalErrorCode: sent ? '' : 'reply_send_failed',
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       if (sent) {
         maybeRunDeferredPersist(replyEnvelope);
@@ -3465,17 +3694,36 @@ function createMessageHandler({
       }
     } else {
       if (!freshnessGuard.shouldSend()) {
-        appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+        appendTraceTiming('final_reply_discarded_stale', {
           stage: 'reply_discarded_stale',
           messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
           groupId: String(groupId || '').trim(),
           userId: String(senderId || '').trim(),
           chatType,
           sessionKey: String(freshnessGuard.sessionKey || '').trim(),
-          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0
+          flushVersion: Number(freshnessGuard.flushVersion || 0) || 0,
+          ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+        });
+        appendRequestCompleteTrace({
+          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+          topRouteType: routeExecutionPlan.topRouteType,
+          sent: false,
+          stream: true,
+          finalErrorCode: 'stale_reply_discarded'
         });
         return;
       }
+      appendTraceTiming('final_reply_send_done', {
+        stage: 'final_reply_send_done',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        sent: true,
+        stream: true,
+        streamCompleted: replyOptions?.streamCompleted === true,
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
       maybeRunDeferredPersist(replyEnvelope);
       if (!isPrivateChatType(chatType)) {
         await sideEffects.runDirectReplyFollowup({
@@ -3492,9 +3740,16 @@ function createMessageHandler({
         });
       }
     }
+    appendRequestCompleteTrace({
+      routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+      topRouteType: routeExecutionPlan.topRouteType,
+      sent: true,
+      stream: usedStreamingSend,
+      finalErrorCode: ''
+    });
     } catch (error) {
       inboundHadError = true;
-      appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
+      appendTraceTiming('inbound_handler_failed', {
         stage: 'inbound_handler_failed',
         messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
         groupId: String(groupId || '').trim(),
@@ -3503,8 +3758,15 @@ function createMessageHandler({
         rawMessageTimestampMs,
         elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
         lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null,
+        durationMs: Math.max(0, Date.now() - handlerStartedAt),
+        finalErrorCode: extractErrorCode(error),
         error: error?.message || String(error || ''),
         stack: String(error?.stack || '').split('\n').slice(0, 4).join(' | ')
+      });
+      appendRequestCompleteTrace({
+        sent: false,
+        finalErrorCode: extractErrorCode(error),
+        error: error?.message || String(error || '')
       });
       throw error;
     } finally {

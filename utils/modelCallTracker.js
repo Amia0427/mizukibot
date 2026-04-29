@@ -13,6 +13,17 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function normalizeErrorCode(error = null) {
+  const status = Number(error?.response?.status || error?.status || error?.statusCode || 0);
+  if (Number.isFinite(status) && status > 0) return `http_${Math.floor(status)}`;
+  const code = normalizeText(error?.code || error?.errorCode || error?.error_code);
+  if (code) return code;
+  const message = normalizeText(error?.message || error).toLowerCase();
+  if (message.includes('timeout') || message.includes('timed out')) return 'timeout';
+  if (message.includes('network')) return 'network_error';
+  return message ? 'error' : '';
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -243,6 +254,8 @@ function startModelCall(meta = {}) {
     source: normalizeText(meta.source || 'app') || 'app',
     phase: normalizeText(meta.phase),
     purpose: normalizeText(meta.purpose),
+    request_id: normalizeText(meta.requestId),
+    trace_phase_seq: Number.isFinite(Number(meta.phaseSeq)) ? Math.max(0, Math.floor(Number(meta.phaseSeq))) : null,
     provider,
     model,
     stream: requestSummary.stream,
@@ -271,6 +284,7 @@ function startModelCall(meta = {}) {
     attempts: 0,
     usage: null,
     error: '',
+    final_error_code: '',
     started_at: nowIso(),
     completed_at: null,
     duration_ms: null
@@ -300,6 +314,7 @@ function finalizeRecord(id, patch = {}) {
     : null;
   record.attempts = Math.max(1, Number(patch.attempts || record.attempts || 1));
   record.error = normalizeText(patch.error);
+  record.final_error_code = normalizeText(patch.final_error_code || patch.finalErrorCode || record.final_error_code);
 
   if (
     Object.prototype.hasOwnProperty.call(patch, 'request')
@@ -325,6 +340,8 @@ function finalizeRecord(id, patch = {}) {
     source: cloned.source,
     phase: cloned.phase,
     purpose: cloned.purpose,
+    request_id: cloned.request_id,
+    trace_phase_seq: cloned.trace_phase_seq,
     provider: cloned.provider,
     host: safeHost(patch?.url || patch?.requestUrl || ''),
     model: cloned.model,
@@ -341,6 +358,7 @@ function finalizeRecord(id, patch = {}) {
     attempts: cloned.attempts,
     duration_ms: cloned.duration_ms,
     error: cloned.error,
+    final_error_code: cloned.final_error_code,
     status_code: Number(
       patch?.response?.status
       || patch?.status
@@ -371,7 +389,8 @@ function failModelCall(id, error, meta = {}) {
   return finalizeRecord(id, {
     ...meta,
     status: 'failed',
-    error: message
+    error: message,
+    final_error_code: normalizeErrorCode(error)
   });
 }
 

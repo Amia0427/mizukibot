@@ -8,6 +8,7 @@ const {
 } = require('./messageContracts');
 const { buildLlmPerception } = require('./llmPerception');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
+const { cloneTraceForMeta, normalizeRequestTrace } = require('../utils/requestTrace');
 const {
   formatGroupMainModelStreamStatus,
   setGroupMainModelStreamEnabled,
@@ -883,6 +884,8 @@ function createMessageRouteFlow(deps = {}) {
     const chatType = String(route?.meta?.chatType || inboundContext?.chatType || 'group').trim().toLowerCase() === 'private'
       ? 'private'
       : 'group';
+    const requestTrace = normalizeRequestTrace(route?.meta?.requestTrace)
+      || normalizeRequestTrace(inboundContext?.requestTrace);
     const cotDisplayOnce = route?.meta?.cotDisplayOnce === true;
     let reply = '';
     let usedStreamingSend = false;
@@ -942,7 +945,12 @@ function createMessageRouteFlow(deps = {}) {
           plannerExecutionPlan: route?.meta?.toolPlanner?.executionPlan || route?.meta?.directChatPlanner?.executionPlan || null,
           disableDirectToolLoop: true,
           deferPersist: false,
-          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, { groupId, chatType })
+          requestTrace: cloneTraceForMeta(requestTrace),
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+            groupId,
+            chatType,
+            requestTrace: cloneTraceForMeta(requestTrace)
+          })
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
         if (fallbackModelConfig) {
@@ -1075,8 +1083,10 @@ function createMessageRouteFlow(deps = {}) {
             groupId,
             chatType,
             messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
-            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
+            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
+            requestTrace: cloneTraceForMeta(requestTrace)
           }),
+          requestTrace: cloneTraceForMeta(requestTrace),
           disableStream: disableStreamForReply,
           deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat',
           cotDisplayOnce,

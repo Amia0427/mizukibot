@@ -1,11 +1,17 @@
 const config = require('../../../config');
 const crypto = require('crypto');
+const { getApiProvider, isOpenAICompatibleProvider } = require('../../../utils/modelProvider');
 const {
   ADMIN_SHARED_FALLBACK_SCOPE,
   resolveForcedFallbackMainModelConfig,
   recordMainModelFailure,
   recordMainModelSuccess
 } = require('../../../utils/mainModelFallback');
+const {
+  appendRequestTraceEvent,
+  extractErrorCode,
+  nextTracePhase
+} = require('../../../utils/requestTrace');
 const {
   resolveRoleAwareMainModelConfig,
   resolveUserScopedMainModelConfig,
@@ -55,6 +61,10 @@ function ensureOpenAIMainUrl(apiBaseUrl = '', options = {}) {
   return protocol === 'responses'
     ? ensureResponsesUrl(apiBaseUrl)
     : ensureChatCompletionsUrl(apiBaseUrl);
+}
+
+function resolveMainProvider(apiBaseUrl = '', model = '') {
+  return getApiProvider(apiBaseUrl, model || config.AI_MODEL);
 }
 
 function getModelName(overrides = null) {
@@ -248,6 +258,7 @@ function buildOpenAIPromptCacheKey(protocol, resolvedConfig = null, options = {}
 function applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig = null, options = {}) {
   if (!body || typeof body !== 'object') return body;
   if (config.OPENAI_PROMPT_CACHE_ENABLED === false) return body;
+  if (!isOpenAICompatibleProvider(options.provider)) return body;
 
   const nextBody = {
     ...body,
@@ -290,7 +301,7 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
 
   const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || '').trim();
   const apiKey = getApiKey(resolvedConfig);
-  if (userAgent || apiKey) {
+  if (isOpenAICompatibleProvider(options.provider) && (userAgent || apiKey)) {
     body.__requestHeaders = {};
     if (apiKey) body.__requestHeaders.Authorization = `Bearer ${apiKey}`;
     if (userAgent) body.__requestHeaders['User-Agent'] = userAgent;
@@ -301,12 +312,15 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
 
 function buildMainModelRequest(resolvedConfig = null, options = {}) {
   const apiBaseUrl = getApiBaseUrl(resolvedConfig);
+  const provider = resolveMainProvider(apiBaseUrl, getModelName(resolvedConfig));
   const protocol = resolveOpenAIMainProtocol(apiBaseUrl, options);
   return {
+    provider,
     protocol,
     url: ensureOpenAIMainUrl(apiBaseUrl, { apiMode: protocol }),
     body: buildGenerationRequestBody(resolvedConfig, {
       ...options,
+      provider,
       protocol
     })
   };
@@ -323,11 +337,39 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
       ? ADMIN_SHARED_FALLBACK_SCOPE
       : undefined);
   const resolvedConfig = resolveUserScopedMainModelConfig(userId, modelConfig, options);
+  const requestTrace = options?.requestTrace || options?.routeMeta?.requestTrace || null;
+  const traceRequestId = String(requestTrace?.requestId || requestTrace?.request_id || '').trim();
+  const emitFallbackTrace = (phase, payload = {}) => {
+    if (!traceRequestId) return;
+    appendRequestTraceEvent(nextTracePhase(requestTrace, phase, {
+      tracePhase: phase,
+      stage: phase,
+      source: 'main_model_fallback',
+      userId: String(userId || '').trim(),
+      fallbackScope: scope || '',
+      ...payload
+    }));
+  };
   try {
     const result = await action(resolvedConfig);
     recordMainModelSuccess({ usingFallback: resolvedConfig.__mainFallbackActive }, { scope });
+    if (resolvedConfig.__mainFallbackActive) {
+      emitFallbackTrace('fallback_success', {
+        fallbackActive: true,
+        fallbackForced: resolvedConfig.__mainFallbackForced === true,
+        model: getModelName(resolvedConfig),
+        provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig))
+      });
+    }
     return result;
   } catch (error) {
+    emitFallbackTrace('fallback_primary_failure', {
+      fallbackActive: false,
+      model: getModelName(resolvedConfig),
+      provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig)),
+      finalErrorCode: extractErrorCode(error),
+      error: String(error?.message || error || '').slice(0, 400)
+    });
     if (bypassFallback) throw error;
     if (resolvedConfig.__mainFallbackActive) throw error;
     const failureState = recordMainModelFailure(error, { scope });
@@ -336,8 +378,21 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
         buildPrimaryMainModelConfig(modelConfig, userId, options),
         { scope }
       );
+      emitFallbackTrace('fallback_activated', {
+        fallbackActive: true,
+        fallbackScope: scope || '',
+        model: getModelName(forcedFallbackConfig),
+        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig)),
+        finalErrorCode: extractErrorCode(error)
+      });
       const fallbackResult = await action(forcedFallbackConfig);
       recordMainModelSuccess({ usingFallback: true }, { scope });
+      emitFallbackTrace('fallback_success', {
+        fallbackActive: true,
+        fallbackForced: true,
+        model: getModelName(forcedFallbackConfig),
+        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig))
+      });
       return fallbackResult;
     }
     throw error;
@@ -375,6 +430,7 @@ module.exports = {
   getTopK,
   getTopP,
   normalizeTextContent,
+  resolveMainProvider,
   resolveOpenAIMainProtocol,
   withMainModelFallback
 };

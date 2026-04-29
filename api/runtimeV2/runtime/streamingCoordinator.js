@@ -58,6 +58,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
           onDelta() {},
           streamHadOutput: false,
           userId: request.userId,
+          requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
           routeMeta: normalizeObject(request.routeMeta, {})
         }
       : request;

@@ -65,6 +65,12 @@ function createPersistNode(deps = {}) {
   const postReplyJobQueue = deps.postReplyJobQueue && typeof deps.postReplyJobQueue.enqueue === 'function'
     ? deps.postReplyJobQueue
     : { enqueue() { return { enqueued: false, job: null }; } };
+  const appendRequestTraceEvent = typeof deps.appendRequestTraceEvent === 'function'
+    ? deps.appendRequestTraceEvent
+    : (() => {});
+  const normalizeRequestTrace = typeof deps.normalizeRequestTrace === 'function'
+    ? deps.normalizeRequestTrace
+    : ((value) => (value && typeof value === 'object' && String(value.requestId || value.request_id || '').trim() ? value : null));
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
@@ -126,6 +132,33 @@ function createPersistNode(deps = {}) {
 
   return async function persistNode(state) {
     const request = normalizeObject(state.request, {});
+    const requestTrace = normalizeRequestTrace(request.requestTrace)
+      || normalizeRequestTrace(request.routeMeta?.requestTrace);
+    const persistStartedAt = Date.now();
+    const emitPersistTrace = (stage = '', payload = {}) => {
+      if (!requestTrace) return;
+      const buildTracePayload = typeof deps.nextTracePhase === 'function'
+        ? deps.nextTracePhase
+        : ((trace, phase, value = {}) => ({
+            requestId: String(trace?.requestId || trace?.request_id || '').trim(),
+            phaseSeq: Number.isFinite(Number(trace?.phaseSeq || trace?.phase_seq))
+              ? Math.max(0, Math.floor(Number(trace.phaseSeq || trace.phase_seq)))
+              : null,
+            tracePhase: phase,
+            ...value
+          }));
+      appendRequestTraceEvent(buildTracePayload(requestTrace, stage || 'persist', {
+        tracePhase: stage || 'persist',
+        stage: stage || 'persist',
+        source: 'runtimeV2.persist',
+        userId: String(request.userId || '').trim(),
+        routePolicyKey: String(request.routePolicyKey || request.routeMeta?.routePolicyKey || '').trim(),
+        topRouteType: String(request.topRouteType || request.routeMeta?.topRouteType || '').trim(),
+        durationMs: Math.max(0, Date.now() - persistStartedAt),
+        ...payload
+      }));
+    };
+    emitPersistTrace('persist_start');
     const finalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
     const latencyDecision = normalizeObject(state.execution?.latencyDecision, {});
     const userContent = String(
@@ -231,6 +264,12 @@ function createPersistNode(deps = {}) {
         }),
         createEvent('node_complete', { node: 'persist' })
       ];
+      emitPersistTrace('persist_deferred', {
+        saved: Boolean(shouldPersistChatArtifacts),
+        shouldPersistBridge: Boolean(shouldPersistBridge),
+        shouldLearn: Boolean(shouldLearn),
+        gateReasons: persistDecisionPayload.gateReasons
+      });
       return saveAndEmit({
         ...state,
         execution: {
@@ -485,6 +524,10 @@ function createPersistNode(deps = {}) {
             enqueued: Boolean(enqueueResult.enqueued)
           };
         } catch (error) {
+          emitPersistTrace('persist_post_reply_enqueue_failed', {
+            finalErrorCode: 'post_reply_enqueue_failed',
+            error: String(error?.message || error || '').slice(0, 400)
+          });
           logPostReplyEnqueueError(error);
         }
       }
@@ -511,6 +554,14 @@ function createPersistNode(deps = {}) {
       }),
       createEvent('node_complete', { node: 'persist' })
     ];
+    emitPersistTrace('persist_complete', {
+      saved: Boolean(shouldPersistChatArtifacts),
+      shouldPersistBridge: Boolean(shouldPersistBridge),
+      shouldPersistJournal: Boolean(shouldPersistJournal),
+      shouldLearn: Boolean(shouldLearn),
+      shouldEnqueuePostReplyJob: Boolean(shouldEnqueuePostReplyJob),
+      postReplyJobId: enqueuedPostReplyJob?.jobId || ''
+    });
 
     return saveAndEmit({
       ...state,

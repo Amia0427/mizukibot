@@ -415,6 +415,7 @@ function createToolExecutionHelpers(deps = {}) {
       routePolicyKey: String(request.routePolicyKey || '').trim(),
       topRouteType: String(request.topRouteType || '').trim(),
       routeMeta,
+      requestTrace: request.requestTrace || routeMeta.requestTrace || overrides.requestTrace || null,
       reviewMode: String(request.reviewMode || '').trim(),
       taskType: String(routeMeta.taskType || routeMeta.task_type || '').trim(),
       sessionId: String(routeMeta.sessionId || routeMeta.session_id || '').trim(),

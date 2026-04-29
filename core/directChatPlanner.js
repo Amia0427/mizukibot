@@ -48,6 +48,7 @@ async function planDirectChat(route = {}, options = {}) {
     directedContext: options?.directedContext || route?.meta?.directedContext || null,
     continuitySignals: options?.continuitySignals || {},
     constraints: options?.constraints || {},
+    requestTrace: options?.requestTrace || route?.meta?.requestTrace || null,
     planner: options?.planner
   });
   const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, {

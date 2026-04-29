@@ -780,7 +780,16 @@ function buildPlannerModelRequestBody(route = {}, options = {}) {
       { role: 'user', content: JSON.stringify(buildPlannerUserPayload(route, toolCatalog, options)) }
     ],
     max_tokens: 1000,
-    stream: false
+    stream: false,
+    __trace: {
+      ...(options.requestTrace && typeof options.requestTrace === 'object' ? options.requestTrace : {}),
+      source: 'planner',
+      phase: 'planner_model',
+      purpose: 'direct_chat_plan',
+      userId: normalizeText(options.userId || route?.meta?.userId),
+      routePolicyKey: normalizeText(route?.meta?.routePolicyKey),
+      topRouteType: normalizeText(route?.topRouteType || route?.meta?.topRouteType || 'direct_chat') || 'direct_chat'
+    }
   };
   if (getApiProvider(ensureChatCompletionsUrlLocal(apiBaseUrl), model) === 'openai_compatible') {
     const effort = getPlannerReasoningEffort(options);
@@ -1809,6 +1818,15 @@ async function callPlannerSubagentV2(route = {}, options = {}) {
       retries: 0,
       timeoutMs: Number(config.PLANNER_SUBAGENT_TIMEOUT_MS || config.REQUEST_TIMEOUT_MS || 8000)
     }),
+    trace: {
+      ...(options.requestTrace && typeof options.requestTrace === 'object' ? options.requestTrace : {}),
+      source: 'planner',
+      phase: 'planner_subagent',
+      purpose: 'direct_chat_plan',
+      userId: normalizeText(options.userId || route?.meta?.userId),
+      routePolicyKey: normalizeText(route?.meta?.routePolicyKey),
+      topRouteType: normalizeText(route?.topRouteType || route?.meta?.topRouteType || 'direct_chat') || 'direct_chat'
+    },
     validateOutput: (output) => {
       const normalized = normalizePlannerDecisionV2(output, route, options);
       return normalizeText(normalized?.plannerMeta?.decisionVersion) === PLANNER_DECISION_VERSION;
@@ -1839,6 +1857,7 @@ async function planRequestV2(input = {}) {
     personaModuleCatalog: normalizeArray(input.personaModuleCatalog),
     dynamicPromptBlockCatalog: normalizeArray(input.dynamicPromptBlockCatalog),
     dynamicPromptGuide: normalizeText(input.dynamicPromptGuide),
+    requestTrace: input.requestTrace || route?.meta?.requestTrace || null,
     question: route.question,
     goal: normalizeText(input.goal || route.question || route.cleanText),
     topRouteType: route.topRouteType,

@@ -6,6 +6,13 @@ const config = require('../config');
 const { todayStrInTz } = require('../utils/time');
 const { extractSSEEvents, flushSSEState } = require('./parser');
 const { sendGroupImageMessage } = require('./qqActionService');
+const {
+  appendRequestTraceEvent,
+  extractErrorCode,
+  extractHttpStatus,
+  nextTracePhase,
+  normalizeRequestTrace
+} = require('../utils/requestTrace');
 
 const CREATE_AGENT_DIR = path.join(config.DATA_DIR, 'create-agent');
 const CREATE_AGENT_QUOTA_FILE = path.join(CREATE_AGENT_DIR, 'quota.json');
@@ -532,6 +539,35 @@ function normalizeRequestError(error = null) {
   return message || 'unknown error';
 }
 
+function getCreateAgentRequestTrace(deps = {}, context = {}) {
+  return normalizeRequestTrace(deps.requestTrace)
+    || normalizeRequestTrace(context.requestTrace)
+    || normalizeRequestTrace(context.routeMeta?.requestTrace);
+}
+
+function emitCreateAgentTrace(trace = null, stage = '', payload = {}) {
+  const requestTrace = normalizeRequestTrace(trace);
+  if (!requestTrace) return;
+  appendRequestTraceEvent(nextTracePhase(requestTrace, stage || 'create_agent', {
+    tracePhase: stage || 'create_agent',
+    stage: stage || 'create_agent',
+    source: 'createAgentExecutor',
+    ...payload
+  }));
+}
+
+function buildCreateAgentTracePayload(runtimeConfig = {}, requestUrl = '', extra = {}) {
+  return {
+    provider: 'openai_compatible',
+    model: String(runtimeConfig.model || '').trim(),
+    requestUrl: String(requestUrl || '').trim(),
+    protocol: String(runtimeConfig.protocol || 'images').trim(),
+    cache: null,
+    fallbackActive: false,
+    ...extra
+  };
+}
+
 function logCreateAgentError(runtimeConfig = {}, context = {}, error = null) {
   const fallbackRequestUrl = runtimeConfig.protocol === 'chat_completions'
     ? buildCreateAgentChatCompletionsUrl(runtimeConfig.apiBaseUrl)
@@ -713,27 +749,56 @@ async function postImageGenerationWithCompatibilityFallback(requestUrl = '', pro
   const httpClient = deps.httpClient || axios;
   const requestBodies = buildImageGenerationRequestBodyVariants(prompt, runtimeConfig, options);
   let lastError = null;
+  const requestTrace = getCreateAgentRequestTrace(deps, {});
 
   for (let index = 0; index < requestBodies.length; index += 1) {
     const requestBody = requestBodies[index];
+    const startedAt = Date.now();
+    emitCreateAgentTrace(requestTrace, 'create_agent_http_start', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+      attempt: index + 1,
+      maxAttempts: requestBodies.length,
+      stream: Boolean(options.stream),
+      compatibilityVariant: index + 1
+    }));
     try {
       const response = await httpClient.post(
         requestUrl,
         requestBody,
         buildImageGenerationRequestOptions(runtimeConfig, options)
       );
+      emitCreateAgentTrace(requestTrace, 'create_agent_http_success', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+        attempt: index + 1,
+        stream: Boolean(options.stream),
+        statusCode: Number(response?.status || 0) || null,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      }));
       return {
         response,
         requestBody
       };
     } catch (error) {
       lastError = error;
+      emitCreateAgentTrace(requestTrace, 'create_agent_http_failure', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+        attempt: index + 1,
+        stream: Boolean(options.stream),
+        statusCode: extractHttpStatus(error) || null,
+        finalErrorCode: extractErrorCode(error),
+        durationMs: Math.max(0, Date.now() - startedAt),
+        error: String(error?.message || error || '').slice(0, 400),
+        retryable: isImageGenerationParameterCompatibilityError(error) && index < requestBodies.length - 1
+      }));
       if (!isImageGenerationParameterCompatibilityError(error)) {
         throw error;
       }
       if (index >= requestBodies.length - 1) {
         throw error;
       }
+      emitCreateAgentTrace(requestTrace, 'create_agent_http_downgrade', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+        reason: 'strip_unsupported_image_params',
+        attempt: index + 1,
+        stream: Boolean(options.stream),
+        statusCode: extractHttpStatus(error) || null
+      }));
     }
   }
 
@@ -1443,14 +1508,26 @@ async function requestChatCompletionsImageGeneration(prompt = '', runtimeConfig 
 
   const httpClient = deps.httpClient || axios;
   let lastError = null;
+  const requestTrace = getCreateAgentRequestTrace(deps, {});
 
   for (const requestUrl of requestUrls) {
+    const startedAt = Date.now();
+    emitCreateAgentTrace(requestTrace, 'create_agent_http_start', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+      stream: false,
+      backend: 'chat_completions'
+    }));
     try {
       const response = await httpClient.post(
         requestUrl,
         buildChatCompletionsImageRequestBody(prompt, runtimeConfig, {}),
         buildImageGenerationRequestOptions(runtimeConfig, {})
       );
+      emitCreateAgentTrace(requestTrace, 'create_agent_http_success', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+        stream: false,
+        backend: 'chat_completions',
+        statusCode: Number(response?.status || 0) || null,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      }));
       const payload = response?.data || {};
       if (typeof payload === 'string' && looksLikeHtmlDocument(payload)) {
         lastError = new Error(`chat completions endpoint returned html response_preview=${summarizePayloadShape(payload)}`);
@@ -1472,6 +1549,14 @@ async function requestChatCompletionsImageGeneration(prompt = '', runtimeConfig 
       const normalized = new Error(normalizeRequestError(error));
       normalized.requestUrl = requestUrl;
       lastError = normalized;
+      emitCreateAgentTrace(requestTrace, 'create_agent_http_failure', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+        stream: false,
+        backend: 'chat_completions',
+        statusCode: extractHttpStatus(error) || null,
+        finalErrorCode: extractErrorCode(error),
+        durationMs: Math.max(0, Date.now() - startedAt),
+        error: String(normalized.message || error?.message || error || '').slice(0, 400)
+      }));
       const lower = String(normalized.message || '').toLowerCase();
       if (!(lower.includes('404') || lower.includes('chat completions response missing image data'))) {
         break;
@@ -1491,14 +1576,26 @@ async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeC
 
   const httpClient = deps.httpClient || axios;
   let lastError = null;
+  const requestTrace = getCreateAgentRequestTrace(deps, {});
 
   for (const requestUrl of requestUrls) {
+    const startedAt = Date.now();
+    emitCreateAgentTrace(requestTrace, 'create_agent_http_start', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+      stream: true,
+      backend: 'chat_completions'
+    }));
     try {
       const response = await httpClient.post(
         requestUrl,
         buildChatCompletionsImageRequestBody(prompt, runtimeConfig, { stream: true }),
         buildImageGenerationRequestOptions(runtimeConfig, { responseType: 'stream', stream: true })
       );
+      emitCreateAgentTrace(requestTrace, 'create_agent_http_success', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+        stream: true,
+        backend: 'chat_completions',
+        statusCode: Number(response?.status || 0) || null,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      }));
 
       const responseStream = response?.data;
       if (!responseStream || typeof responseStream.on !== 'function') {
@@ -1674,6 +1771,14 @@ async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeC
         : (error instanceof Error ? error : new Error(String(error || 'unknown error')));
       normalized.requestUrl = error?.requestUrl || requestUrl;
       lastError = normalized;
+      emitCreateAgentTrace(requestTrace, 'create_agent_http_failure', buildCreateAgentTracePayload(runtimeConfig, requestUrl, {
+        stream: true,
+        backend: 'chat_completions',
+        statusCode: extractHttpStatus(error) || null,
+        finalErrorCode: extractErrorCode(error),
+        durationMs: Math.max(0, Date.now() - startedAt),
+        error: String(normalized.message || error?.message || error || '').slice(0, 400)
+      }));
       const lower = String(normalized.message || '').toLowerCase();
       if (!(lower.includes('404') || lower.includes('chat completions stream missing image data') || lower.includes('chat completions response missing image data'))) {
         break;
@@ -1732,6 +1837,10 @@ async function generateImageWithOpenAICompatibleApi(prompt = '', runtimeConfig =
       ...runtimeConfig,
       responseFormat: 'url'
     };
+    emitCreateAgentTrace(getCreateAgentRequestTrace(deps, {}), 'create_agent_http_downgrade', buildCreateAgentTracePayload(runtimeConfig, '', {
+      reason: 'url_response_format_fallback',
+      stream: false
+    }));
     try {
       const fallbackResult = await requestImageGeneration(prompt, urlFallbackConfig, deps);
       const payload = fallbackResult?.payload || {};
@@ -1794,6 +1903,20 @@ async function executeCreateCommand(context = {}, deps = {}) {
   const prompt = normalizePromptText(context.prompt || context.payload || '');
   const chatType = String(context.chatType || '').trim().toLowerCase();
   const groupId = String(context.groupId || '').trim();
+  const senderId = String(context.senderId || context.userId || '').trim();
+  const requestTrace = getCreateAgentRequestTrace(deps, context);
+  const commandStartedAt = Date.now();
+  const emitCommandTrace = (stage = '', payload = {}) => emitCreateAgentTrace(requestTrace, stage, {
+    userId: senderId,
+    groupId,
+    chatType,
+    model: String(runtimeConfig.model || '').trim(),
+    provider: 'openai_compatible',
+    protocol: String(runtimeConfig.protocol || 'images').trim(),
+    durationMs: Math.max(0, Date.now() - commandStartedAt),
+    ...payload
+  });
+  emitCommandTrace('create_agent_runtime_start');
 
   ensureDirSync(path.dirname(runtimeConfig.quotaFile));
   ensureDirSync(path.dirname(runtimeConfig.runtimeFile));
@@ -1801,20 +1924,25 @@ async function executeCreateCommand(context = {}, deps = {}) {
   ensureDirSync(runtimeConfig.outputDir);
 
   if (!runtimeConfig.enabled) {
+    emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'disabled' });
     return { ok: false, replyText: '生图 worker 未开启', code: 'disabled' };
   }
   if (!prompt) {
+    emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'empty_prompt' });
     return { ok: false, replyText: '用法: /create <prompt>', code: 'empty_prompt' };
   }
   if (runtimeConfig.groupOnly && chatType === 'private') {
+    emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'group_only' });
     return { ok: false, replyText: '仅群聊可用', code: 'group_only' };
   }
   if (!groupId) {
+    emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'missing_group' });
     return { ok: false, replyText: '仅群聊可用', code: 'missing_group' };
   }
 
   const runtimeSlot = tryAcquireRuntimeSlot(runtimeConfig);
   if (!runtimeSlot.ok) {
+    emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'busy' });
     return { ok: false, replyText: '生图 worker 正忙，请稍后重试', code: 'busy' };
   }
 
@@ -1822,6 +1950,7 @@ async function executeCreateCommand(context = {}, deps = {}) {
   try {
     const quotaStatus = getQuotaStatus(runtimeConfig);
     if (quotaStatus.remaining <= 0) {
+      emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'quota_exceeded' });
       return { ok: false, replyText: '今日生图额度已用完', code: 'quota_exceeded' };
     }
 
@@ -1835,9 +1964,12 @@ async function executeCreateCommand(context = {}, deps = {}) {
     const materialized = await (deps.generateImage || generateImageWithOpenAICompatibleApi)(
       normalizedPrompt,
       runtimeConfig,
-      deps
+      { ...deps, requestTrace }
     );
     await (deps.sendGroupImageMessage || sendGroupImageMessage)(groupId, materialized.buffer, deps.sendOptions || {});
+    emitCommandTrace('create_agent_runtime_success', {
+      imagePath: String(materialized.filePath || '').trim()
+    });
 
     return {
       ok: true,
@@ -1845,6 +1977,11 @@ async function executeCreateCommand(context = {}, deps = {}) {
       imagePath: materialized.filePath
     };
   } catch (error) {
+    emitCommandTrace('create_agent_runtime_failure', {
+      finalErrorCode: extractErrorCode(error) || 'failed',
+      requestUrl: String(error?.requestUrl || '').trim(),
+      error: String(error?.message || error || '').slice(0, 400)
+    });
     logCreateAgentError(runtimeConfig, {
       ...context,
       requestUrl: String(error?.requestUrl || '').trim(),

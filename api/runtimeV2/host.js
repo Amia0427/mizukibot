@@ -165,6 +165,11 @@ const { createConversationContextHelpers } = require('./runtime/conversationCont
 const { createContinuityProbeHelpers } = require('./runtime/continuityProbe');
 const { createDirectToolLoopHelpers } = require('./runtime/directToolLoop');
 const { createEvent, emitEvents, pickRouteMetaForPostReplyJob, stableHash, summarizeToolLogValue } = require('./runtime/events');
+const {
+  appendRequestTraceEvent,
+  nextTracePhase,
+  normalizeRequestTrace
+} = require('../../utils/requestTrace');
 const { createStreamingCoordinatorHelpers } = require('./runtime/streamingCoordinator');
 const { createToolExecutionHelpers } = require('./runtime/toolExecution');
 const { buildSecuritySystemPrompt, classifyPromptThreat, protectFinalOutput } = require('../../utils/promptSecurity');
@@ -1266,8 +1271,25 @@ function createRuntime(options = {}) {
     const normalized = normalizeArray(events).filter(Boolean);
     if (normalized.length === 0) return;
     const threadId = String(state?.thread?.threadId || '').trim();
+    const requestTrace = normalizeRequestTrace(state?.request?.requestTrace)
+      || normalizeRequestTrace(state?.request?.routeMeta?.requestTrace);
     if (threadId) {
       store.appendEvents(threadId, normalized);
+    }
+    if (requestTrace) {
+      for (const event of normalized) {
+        appendRequestTraceEvent(nextTracePhase(requestTrace, `runtime_v2_${String(event?.type || 'event').trim() || 'event'}`, {
+          tracePhase: `runtime_v2_${String(event?.type || 'event').trim() || 'event'}`,
+          stage: String(event?.type || 'runtime_v2_event').trim() || 'runtime_v2_event',
+          source: 'runtimeV2',
+          node: String(event?.node || state?.thread?.currentNode || '').trim(),
+          routePolicyKey: String(state?.request?.routePolicyKey || state?.request?.routeMeta?.routePolicyKey || '').trim(),
+          topRouteType: String(state?.request?.topRouteType || state?.request?.routeMeta?.topRouteType || '').trim(),
+          durationMs: Number.isFinite(Number(event?.durationMs)) ? Math.max(0, Math.floor(Number(event.durationMs))) : null,
+          finalErrorCode: String(event?.finalErrorCode || event?.errorCode || '').trim(),
+          error: String(event?.error || event?.rawErrorMessage || '').trim().slice(0, 400)
+        }));
+      }
     }
     emitEvents(normalized, state?.request || {});
   }
@@ -1480,6 +1502,8 @@ function createRuntime(options = {}) {
   const humanizeNode = createHumanizeNode({
     normalizeObject,
     createEvent,
+    appendRequestTraceEvent,
+    normalizeRequestTrace,
     isReviewMode,
     isReplyFailure,
     isHumanizerEnabledImpl,
@@ -1529,6 +1553,9 @@ function createRuntime(options = {}) {
     pickRouteMetaForPostReplyJob,
     stableHash,
     postReplyJobQueue,
+    appendRequestTraceEvent,
+    nextTracePhase,
+    normalizeRequestTrace,
     chatHistory,
     shortTermMemory,
     logPostReplyEnqueueError(error) {
@@ -1771,6 +1798,14 @@ function createRuntime(options = {}) {
       ...options,
       streaming: Boolean(!options.disableStream && typeof options.onDelta === 'function')
     };
+    const requestTrace = normalizeRequestTrace(requestOptions.requestTrace)
+      || normalizeRequestTrace(requestOptions.routeMeta?.requestTrace);
+    if (requestTrace && requestOptions.routeMeta && typeof requestOptions.routeMeta === 'object') {
+      requestOptions.routeMeta = {
+        ...requestOptions.routeMeta,
+        requestTrace
+      };
+    }
     const init = createInitialState(question, userInfo, userId, customPrompt, imageUrl, requestOptions);
     const mcpWarmWaitStartedAt = Date.now();
     if (config.MCP_WARM_BLOCKING && mcpWarmPromise) {

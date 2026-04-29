@@ -1,5 +1,6 @@
 const { Annotation } = require('@langchain/langgraph');
 const { normalizePlanStep, normalizeArray, normalizeObject } = require('./contracts');
+const { cloneTraceForMeta, normalizeRequestTrace } = require('../../utils/requestTrace');
 
 function appendReducer(left, right) {
   const base = Array.isArray(left) ? left : [];
@@ -85,7 +86,12 @@ function normalizeImageUrls(imageUrl = null, imageUrls = []) {
 }
 
 function createInitialState(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
-  const routeMeta = normalizeObject(options.routeMeta, null);
+  const inputRouteMeta = normalizeObject(options.routeMeta, null);
+  const requestTrace = normalizeRequestTrace(options.requestTrace)
+    || normalizeRequestTrace(inputRouteMeta?.requestTrace);
+  const routeMeta = inputRouteMeta && requestTrace
+    ? { ...inputRouteMeta, requestTrace: cloneTraceForMeta(requestTrace) }
+    : inputRouteMeta;
   const normalizeToolNames = typeof options.normalizeToolNames === 'function'
     ? options.normalizeToolNames
     : (value) => (Array.isArray(value) ? value : []);
@@ -152,6 +158,7 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     topRouteType: String(options.topRouteType || routeMeta?.topRouteType || '').trim(),
     reviewMode: String(options.reviewMode || '').trim(),
     routeMeta,
+    requestTrace: cloneTraceForMeta(requestTrace),
     visualContext: normalizeObject(options.visualContext || routeMeta?.visualContext, null),
     allowedTools: normalizedAllowedTools,
     allowTools: options.disableTools ? false : true,

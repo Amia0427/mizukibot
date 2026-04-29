@@ -1,6 +1,13 @@
 const axios = require('axios');
 const config = require('../config');
-const { getApiProvider, ensureAnthropicMessagesUrl } = require('../utils/modelProvider');
+const {
+  getApiProvider,
+  ensureAnthropicMessagesUrl,
+  isOpenAICompatibleProvider,
+  isAnthropicProvider,
+  isGeminiNativeProvider,
+  normalizeProviderRequestHeaders
+} = require('../utils/modelProvider');
 const { parseCacheRef, readCachedImagePayload } = require('../utils/imageInputCache');
 const { HUMANIZER_SYSTEM_PROMPT } = require('../utils/humanizer');
 const {
@@ -8,6 +15,12 @@ const {
   finishModelCall,
   failModelCall
 } = require('../utils/modelCallTracker');
+const {
+  appendRequestTraceEvent,
+  extractErrorCode,
+  extractHttpStatus,
+  nextTracePhase
+} = require('../utils/requestTrace');
 const { extractSSEEvents, flushSSEState, mergeUsageObjects } = require('./parser');
 
 let HttpsProxyAgentCtor = null;
@@ -127,12 +140,50 @@ function stripCacheControlFields(target) {
   return next;
 }
 
+const CACHE_FIELD_SCHEMA_RECURSION_STOP_KEYS = new Set([
+  'additionalProperties',
+  'definitions',
+  '$defs',
+  'enum',
+  'items',
+  'json_schema',
+  'parameters',
+  'properties',
+  'required',
+  'schema',
+  'input_schema'
+]);
+
+function stripCacheControlFieldsDeep(target) {
+  if (Array.isArray(target)) {
+    return target.map((item) => stripCacheControlFieldsDeep(item));
+  }
+  if (!target || typeof target !== 'object') return target;
+
+  const next = stripCacheControlFields(target);
+  for (const [key, value] of Object.entries(next)) {
+    if (CACHE_FIELD_SCHEMA_RECURSION_STOP_KEYS.has(key)) continue;
+    if (Array.isArray(value) || (value && typeof value === 'object')) {
+      next[key] = stripCacheControlFieldsDeep(value);
+    }
+  }
+  return next;
+}
+
 function stripOpenAIPromptCacheFields(target) {
   if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
   const next = { ...target };
   delete next.prompt_cache_key;
   delete next.prompt_cache_retention;
   return next;
+}
+
+function providerAllowsOpenAIPromptCache(provider = '') {
+  return isOpenAICompatibleProvider(provider);
+}
+
+function providerAllowsCacheControl(provider = '') {
+  return isAnthropicProvider(provider) || isOpenAICompatibleProvider(provider);
 }
 
 function stripOpenAIPromptCacheRetention(target) {
@@ -1282,6 +1333,18 @@ function stripExtendedSamplingFields(requestBody = {}) {
   return nextBody;
 }
 
+function stripProviderCacheFields(provider = 'openai_compatible', requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object' || Array.isArray(requestBody)) return requestBody;
+  let nextBody = requestBody;
+  if (!providerAllowsOpenAIPromptCache(provider)) {
+    nextBody = stripOpenAIPromptCacheFields(nextBody);
+  }
+  if (!providerAllowsCacheControl(provider)) {
+    nextBody = stripCacheControlFieldsDeep(nextBody);
+  }
+  return nextBody;
+}
+
 function stripInternalRequestFields(requestBody = {}) {
   if (!requestBody || typeof requestBody !== 'object') return requestBody;
   const nextBody = { ...requestBody };
@@ -1290,6 +1353,101 @@ function stripInternalRequestFields(requestBody = {}) {
   delete nextBody.__abortSignal;
   delete nextBody.__requestHeaders;
   return nextBody;
+}
+
+function countCacheControlBlocks(value) {
+  if (Array.isArray(value)) {
+    return value.reduce((total, item) => total + countCacheControlBlocks(item), 0);
+  }
+  if (!value || typeof value !== 'object') return 0;
+  let total = extractAnthropicCacheControl(value) ? 1 : 0;
+  total += countCacheControlBlocks(value.content);
+  total += countCacheControlBlocks(value.function);
+  return total;
+}
+
+function buildRequestCacheTrace(requestBody = {}, requestHeaders = {}) {
+  const body = requestBody && typeof requestBody === 'object' ? requestBody : {};
+  const promptCaching = {
+    openaiPromptCacheKey: normalizeText(body.prompt_cache_key),
+    openaiPromptCacheRetention: normalizeText(body.prompt_cache_retention),
+    anthropicCacheBreakpoints: 0,
+    anthropicPromptCacheTtl: '',
+    anthropicBeta: normalizeText((requestHeaders || {})['anthropic-beta'] || (requestHeaders || {})['Anthropic-Beta'])
+  };
+
+  promptCaching.anthropicCacheBreakpoints += countCacheControlBlocks(body.system);
+  promptCaching.anthropicCacheBreakpoints += countCacheControlBlocks(body.messages);
+  promptCaching.anthropicCacheBreakpoints += countCacheControlBlocks(body.tools);
+
+  const findTtl = (value) => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const ttl = findTtl(item);
+        if (ttl) return ttl;
+      }
+      return '';
+    }
+    if (!value || typeof value !== 'object') return '';
+    if (value.cache_control && typeof value.cache_control === 'object') {
+      return normalizeText(value.cache_control.ttl);
+    }
+    return findTtl(value.content) || findTtl(value.function);
+  };
+  promptCaching.anthropicPromptCacheTtl = findTtl(body.system) || findTtl(body.messages) || findTtl(body.tools);
+  return promptCaching;
+}
+
+function emitHttpTrace(trace = {}, phase = '', payload = {}) {
+  const requestId = normalizeText(trace?.requestId || trace?.request_id);
+  if (!requestId) return;
+  appendRequestTraceEvent(nextTracePhase(trace, phase, {
+    tracePhase: normalizeText(phase || trace.phase || 'httpClient') || 'httpClient',
+    stage: normalizeText(payload.stage || phase || trace.phase || 'http_client'),
+    source: normalizeText(trace.source || 'httpClient') || 'httpClient',
+    purpose: normalizeText(trace.purpose),
+    userId: normalizeText(trace.userId || trace.user_id),
+    routePolicyKey: normalizeText(trace.routePolicyKey || trace.route_policy_key),
+    topRouteType: normalizeText(trace.topRouteType || trace.top_route_type),
+    ...payload
+  }));
+}
+
+function emitHttpSuccessTrace(trace = {}, prepared = {}, body = {}, payload = {}) {
+  emitHttpTrace(trace, 'http_client_success', {
+    stage: 'http_client_success',
+    provider: prepared?.provider,
+    model: prepared?.requestBody?.model || body?.model || '',
+    requestUrl: prepared?.requestUrl,
+    fallbackActive: trace?.mainFallbackActive === true,
+    ...payload
+  });
+}
+
+function emitHttpFailureTrace(trace = {}, prepared = {}, body = {}, error = null, payload = {}) {
+  emitHttpTrace(trace, 'http_client_failure', {
+    stage: 'http_client_failure',
+    provider: prepared?.provider,
+    model: prepared?.requestBody?.model || body?.model || '',
+    requestUrl: prepared?.requestUrl,
+    statusCode: extractHttpStatus(error) || null,
+    finalErrorCode: extractErrorCode(error),
+    error: normalizeText(error?.message || error).slice(0, 400),
+    fallbackActive: trace?.mainFallbackActive === true,
+    ...payload
+  });
+}
+
+function emitHttpDowngradeTrace(trace = {}, prepared = {}, body = {}, reason = '', error = null, payload = {}) {
+  emitHttpTrace(trace, 'http_client_request_downgrade', {
+    stage: 'http_client_request_downgrade',
+    reason,
+    provider: prepared?.provider,
+    model: prepared?.requestBody?.model || body?.model || '',
+    requestUrl: prepared?.requestUrl,
+    statusCode: extractHttpStatus(error) || null,
+    ...payload
+  });
 }
 
 function extractInternalRequestHeaders(requestBody = {}) {
@@ -1306,6 +1464,10 @@ function extractInternalRequestHeaders(requestBody = {}) {
   }
 
   return Object.keys(headers).length > 0 ? headers : null;
+}
+
+function extractProviderRequestHeaders(provider = 'openai_compatible', requestBody = {}) {
+  return normalizeProviderRequestHeaders(provider, extractInternalRequestHeaders(requestBody));
 }
 
 function isReasoningSchemaError(error) {
@@ -1561,26 +1723,42 @@ async function buildAnthropicRequestBody(body = {}) {
 
 async function prepareRequest(url, body = {}) {
   const provider = getApiProvider(url, body?.model || config.AI_MODEL);
-  const internalRequestHeaders = extractInternalRequestHeaders(body);
-  if (provider !== 'anthropic') {
+  const internalRequestHeaders = extractProviderRequestHeaders(provider, body);
+  if (!isAnthropicProvider(provider)) {
     const requestBody = body && typeof body === 'object'
-      ? stripTopPField(stripInternalRequestFields(stripCacheControlFields({ ...body })))
+      ? stripTopPField(stripProviderCacheFields(provider, stripInternalRequestFields({ ...body })))
       : body;
     const shouldUseOpenAIPromptCache = Boolean(
-      requestBody
+      providerAllowsOpenAIPromptCache(provider)
+      && requestBody
       && typeof requestBody === 'object'
       && (requestBody.prompt_cache_key || requestBody.prompt_cache_retention)
     );
+    const shouldUseAnthropicCompatibleCache = Boolean(
+      requestBody
+      && typeof requestBody === 'object'
+      && !shouldUseOpenAIPromptCache
+      && providerAllowsCacheControl(provider)
+    );
     const normalizedTopLevelCacheControl = extractAnthropicCacheControl(body);
-    if (normalizedTopLevelCacheControl && !shouldUseOpenAIPromptCache) {
+    if (normalizedTopLevelCacheControl && shouldUseAnthropicCompatibleCache) {
       requestBody.cache_control = normalizedTopLevelCacheControl;
     }
     if (requestBody && Array.isArray(requestBody.messages)) {
+      const shouldPreserveCacheControl = !shouldUseOpenAIPromptCache && providerAllowsCacheControl(provider);
       requestBody.messages = shouldUseOpenAIPromptCache
         ? await preprocessOpenAICompatibleMessagesWithoutCache(requestBody.messages)
-        : await preprocessOpenAICompatibleMessages(requestBody.messages);
+        : (
+            shouldPreserveCacheControl
+              ? await preprocessOpenAICompatibleMessages(requestBody.messages)
+              : await preprocessOpenAICompatibleMessagesWithoutCache(requestBody.messages)
+          );
     }
-    if (requestBody && shouldUseOpenAIPromptCache && Array.isArray(requestBody.tools)) {
+    if (
+      requestBody
+      && (shouldUseOpenAIPromptCache || !providerAllowsCacheControl(provider))
+      && Array.isArray(requestBody.tools)
+    ) {
       requestBody.tools = requestBody.tools.map((tool) => sanitizeOpenAICompatibleToolWithoutCache(tool));
     }
     const reasoningEffort = normalizeReasoningEffort(requestBody?.reasoning_effort);
@@ -1605,12 +1783,10 @@ async function prepareRequest(url, body = {}) {
     provider,
     requestUrl: ensureAnthropicMessagesUrl(url),
     requestBody,
-    requestHeaders: internalRequestHeaders || anthropicRequestHeaders
-      ? {
-        ...(anthropicRequestHeaders || {}),
-        ...(internalRequestHeaders || {})
-      }
-      : null
+    requestHeaders: normalizeProviderRequestHeaders(provider, {
+      ...(anthropicRequestHeaders || {}),
+      ...(internalRequestHeaders || {})
+    })
   };
 }
 
@@ -1711,14 +1887,13 @@ function getHeaders(provider, specificKey = null, extraHeaders = null) {
       || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
   ).trim();
   const acceptLanguage = String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim();
-  if (provider === 'anthropic') {
+  if (isAnthropicProvider(provider)) {
     const headers = {
       'x-api-key': apiKey,
       'anthropic-version': config.ANTHROPIC_VERSION || '2023-06-01',
       'Content-Type': 'application/json',
       Accept: 'application/json, text/plain, */*',
-      'Accept-Language': acceptLanguage,
-      'User-Agent': userAgent
+      'Accept-Language': acceptLanguage
     };
     if (config.ANTHROPIC_BETA) {
       headers['anthropic-beta'] = String(config.ANTHROPIC_BETA).trim();
@@ -1726,7 +1901,24 @@ function getHeaders(provider, specificKey = null, extraHeaders = null) {
     if (extraHeaders && typeof extraHeaders === 'object') {
       Object.assign(headers, extraHeaders);
     }
-    return headers;
+    const normalizedHeaders = normalizeProviderRequestHeaders(provider, headers) || {};
+    normalizedHeaders['User-Agent'] = false;
+    return normalizedHeaders;
+  }
+
+  if (isGeminiNativeProvider(provider)) {
+    const headers = {
+      'x-goog-api-key': apiKey,
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/plain, */*',
+      'Accept-Language': acceptLanguage
+    };
+    if (extraHeaders && typeof extraHeaders === 'object') {
+      Object.assign(headers, extraHeaders);
+    }
+    const normalizedHeaders = normalizeProviderRequestHeaders(provider, headers) || {};
+    normalizedHeaders['User-Agent'] = false;
+    return normalizedHeaders;
   }
 
   const headers = {
@@ -1739,7 +1931,7 @@ function getHeaders(provider, specificKey = null, extraHeaders = null) {
   if (extraHeaders && typeof extraHeaders === 'object') {
     Object.assign(headers, extraHeaders);
   }
-  return headers;
+  return normalizeProviderRequestHeaders(provider, headers) || {};
 }
 
 function getAxiosOptions(provider = 'openai_compatible', specificKey = null, timeoutMs = null, extraHeaders = null, abortSignal = null) {
@@ -1807,6 +1999,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
     let callId = '';
     let prepared = null;
     let timeoutMs = getRequestTimeoutMs();
+    const attemptStartedAt = Date.now();
     try {
       const timeoutBase = Number.isFinite(requestedTimeoutMs)
         ? Math.max(1000, Math.floor(requestedTimeoutMs))
@@ -1816,10 +2009,24 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         : 180000;
       timeoutMs = getRetryTimeoutMs(timeoutBase, i, 15000, timeoutCap);
       prepared = await prepareRequest(url, body);
+      emitHttpTrace(trace, 'http_client_start', {
+        stage: 'http_client_start',
+        attempt: i + 1,
+        maxAttempts: maxRetry + 1,
+        provider: prepared.provider,
+        model: prepared.requestBody?.model || body?.model || '',
+        requestUrl: prepared.requestUrl,
+        stream: Boolean(prepared.requestBody?.stream || body?.stream),
+        cache: buildRequestCacheTrace(prepared.requestBody, prepared.requestHeaders),
+        fallbackActive: trace.mainFallbackActive === true,
+        fallbackScope: trace.mainFallbackScope || ''
+      });
       callId = startModelCall({
         source: trace.source || 'httpClient',
         phase: trace.phase || '',
         purpose: trace.purpose || '',
+        requestId: trace.requestId || '',
+        phaseSeq: trace.phaseSeq,
         userId: trace.userId || '',
         taskId: trace.taskId || '',
         routePolicyKey: trace.routePolicyKey || '',
@@ -1843,6 +2050,16 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         prepared.requestBody,
         getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
       );
+      emitHttpTrace(trace, 'http_client_success', {
+        stage: 'http_client_success',
+        attempt: i + 1,
+        provider: prepared.provider,
+        model: prepared.requestBody?.model || body?.model || '',
+        requestUrl: prepared.requestUrl,
+        statusCode: Number(response?.status || 0) || null,
+        durationMs: Math.max(0, Date.now() - attemptStartedAt),
+        fallbackActive: trace.mainFallbackActive === true
+      });
       finishModelCall(callId, {
         response,
         attempts: i + 1,
@@ -1852,7 +2069,29 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       });
       return response;
     } catch (e) {
+      emitHttpTrace(trace, 'http_client_failure', {
+        stage: 'http_client_failure',
+        attempt: i + 1,
+        provider: prepared?.provider,
+        model: prepared?.requestBody?.model || body?.model || '',
+        requestUrl: prepared?.requestUrl,
+        statusCode: extractHttpStatus(e) || null,
+        finalErrorCode: extractErrorCode(e),
+        error: normalizeText(e?.message || e).slice(0, 400),
+        retryable: i < maxRetry && shouldRetry(e),
+        durationMs: Math.max(0, Date.now() - attemptStartedAt),
+        fallbackActive: trace.mainFallbackActive === true
+      });
       if (callId && requestUsesReasoning(prepared?.requestBody) && isReasoningSchemaError(e)) {
+        emitHttpTrace(trace, 'http_client_request_downgrade', {
+          stage: 'http_client_request_downgrade',
+          reason: 'strip_reasoning_fields',
+          provider: prepared?.provider,
+          model: prepared?.requestBody?.model || body?.model || '',
+          requestUrl: prepared?.requestUrl,
+          statusCode: extractHttpStatus(e) || null,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt)
+        });
         try {
           const strippedRequestBody = stripReasoningFields(prepared.requestBody);
           const response = await axios.post(
@@ -1860,6 +2099,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
+          emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
+            attempt: i + 1,
+            statusCode: Number(response?.status || 0) || null,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_reasoning_fields'
+          });
           finishModelCall(callId, {
             response,
             attempts: i + 1,
@@ -1869,6 +2115,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           });
           return response;
         } catch (retryWithoutReasoningError) {
+          emitHttpFailureTrace(trace, { ...prepared, requestBody: stripReasoningFields(prepared.requestBody) }, body, retryWithoutReasoningError, {
+            attempt: i + 1,
+            retryable: i < maxRetry && shouldRetry(retryWithoutReasoningError),
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_reasoning_fields'
+          });
           if (callId) {
             failModelCall(callId, retryWithoutReasoningError, {
               attempts: i + 1,
@@ -1885,6 +2138,15 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         }
       }
       if (callId && requestUsesExtendedSampling(prepared?.requestBody) && isExtendedSamplingSchemaError(e)) {
+        emitHttpTrace(trace, 'http_client_request_downgrade', {
+          stage: 'http_client_request_downgrade',
+          reason: 'strip_extended_sampling_fields',
+          provider: prepared?.provider,
+          model: prepared?.requestBody?.model || body?.model || '',
+          requestUrl: prepared?.requestUrl,
+          statusCode: extractHttpStatus(e) || null,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt)
+        });
         try {
           const strippedRequestBody = stripExtendedSamplingFields(prepared.requestBody);
           const response = await axios.post(
@@ -1892,6 +2154,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
+          emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
+            attempt: i + 1,
+            statusCode: Number(response?.status || 0) || null,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_extended_sampling_fields'
+          });
           finishModelCall(callId, {
             response,
             attempts: i + 1,
@@ -1901,6 +2170,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           });
           return response;
         } catch (retryWithoutSamplingError) {
+          emitHttpFailureTrace(trace, { ...prepared, requestBody: stripExtendedSamplingFields(prepared.requestBody) }, body, retryWithoutSamplingError, {
+            attempt: i + 1,
+            retryable: i < maxRetry && shouldRetry(retryWithoutSamplingError),
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_extended_sampling_fields'
+          });
           if (callId) {
             failModelCall(callId, retryWithoutSamplingError, {
               attempts: i + 1,
@@ -1922,6 +2198,15 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         && requestUsesOpenAIPromptCacheRetention(prepared.requestBody)
         && isOpenAIPromptCacheRetentionSchemaError(e)
       ) {
+        emitHttpTrace(trace, 'http_client_request_downgrade', {
+          stage: 'http_client_request_downgrade',
+          reason: 'strip_openai_prompt_cache_retention',
+          provider: prepared?.provider,
+          model: prepared?.requestBody?.model || body?.model || '',
+          requestUrl: prepared?.requestUrl,
+          statusCode: extractHttpStatus(e) || null,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt)
+        });
         try {
           const strippedRequestBody = stripOpenAIPromptCacheRetentionFromRequest(prepared.requestBody);
           const response = await axios.post(
@@ -1929,6 +2214,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
+          emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
+            attempt: i + 1,
+            statusCode: Number(response?.status || 0) || null,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_openai_prompt_cache_retention'
+          });
           finishModelCall(callId, {
             response,
             attempts: i + 1,
@@ -1943,6 +2235,14 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             requestUsesOpenAICompatiblePromptCaching(strippedRetentionRequestBody)
             && isOpenAICompatiblePromptCacheSchemaError(retryWithoutRetentionError)
           ) {
+            emitHttpTrace(trace, 'http_client_request_downgrade', {
+              stage: 'http_client_request_downgrade',
+              reason: 'strip_openai_prompt_cache',
+              provider: prepared?.provider,
+              model: prepared?.requestBody?.model || body?.model || '',
+              requestUrl: prepared?.requestUrl,
+              statusCode: extractHttpStatus(retryWithoutRetentionError) || null
+            });
             try {
               const strippedCacheRequestBody = stripOpenAICompatiblePromptCaching(strippedRetentionRequestBody);
               const response = await axios.post(
@@ -1950,6 +2250,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
                 strippedCacheRequestBody,
                 getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
               );
+              emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedCacheRequestBody }, body, {
+                attempt: i + 1,
+                statusCode: Number(response?.status || 0) || null,
+                durationMs: Math.max(0, Date.now() - attemptStartedAt),
+                downgraded: true,
+                downgradeReason: 'strip_openai_prompt_cache'
+              });
               finishModelCall(callId, {
                 response,
                 attempts: i + 1,
@@ -1959,6 +2266,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
               });
               return response;
             } catch (retryWithoutCacheError) {
+              emitHttpFailureTrace(trace, { ...prepared, requestBody: stripOpenAICompatiblePromptCaching(strippedRetentionRequestBody) }, body, retryWithoutCacheError, {
+                attempt: i + 1,
+                retryable: i < maxRetry && shouldRetry(retryWithoutCacheError),
+                durationMs: Math.max(0, Date.now() - attemptStartedAt),
+                downgraded: true,
+                downgradeReason: 'strip_openai_prompt_cache'
+              });
               if (callId) {
                 failModelCall(callId, retryWithoutCacheError, {
                   attempts: i + 1,
@@ -1975,6 +2289,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             }
           }
           if (callId) {
+            emitHttpFailureTrace(trace, { ...prepared, requestBody: strippedRetentionRequestBody }, body, retryWithoutRetentionError, {
+              attempt: i + 1,
+              retryable: i < maxRetry && shouldRetry(retryWithoutRetentionError),
+              durationMs: Math.max(0, Date.now() - attemptStartedAt),
+              downgraded: true,
+              downgradeReason: 'strip_openai_prompt_cache_retention'
+            });
             failModelCall(callId, retryWithoutRetentionError, {
               attempts: i + 1,
               requestUrl: prepared.requestUrl,
@@ -1995,6 +2316,15 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         && requestUsesOpenAICompatiblePromptCaching(prepared.requestBody)
         && isOpenAICompatiblePromptCacheSchemaError(e)
       ) {
+        emitHttpTrace(trace, 'http_client_request_downgrade', {
+          stage: 'http_client_request_downgrade',
+          reason: 'strip_openai_prompt_cache',
+          provider: prepared?.provider,
+          model: prepared?.requestBody?.model || body?.model || '',
+          requestUrl: prepared?.requestUrl,
+          statusCode: extractHttpStatus(e) || null,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt)
+        });
         try {
           const strippedRequestBody = stripOpenAICompatiblePromptCaching(prepared.requestBody);
           const response = await axios.post(
@@ -2002,6 +2332,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
+          emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
+            attempt: i + 1,
+            statusCode: Number(response?.status || 0) || null,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_openai_prompt_cache'
+          });
           finishModelCall(callId, {
             response,
             attempts: i + 1,
@@ -2011,6 +2348,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           });
           return response;
         } catch (retryWithoutCacheError) {
+          emitHttpFailureTrace(trace, { ...prepared, requestBody: stripOpenAICompatiblePromptCaching(prepared.requestBody) }, body, retryWithoutCacheError, {
+            attempt: i + 1,
+            retryable: i < maxRetry && shouldRetry(retryWithoutCacheError),
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_openai_prompt_cache'
+          });
           if (callId) {
             failModelCall(callId, retryWithoutCacheError, {
               attempts: i + 1,
@@ -2032,6 +2376,15 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         && anthropicRequestUsesPromptCaching(prepared.requestBody)
         && isAnthropicPromptCacheSchemaError(e)
       ) {
+        emitHttpTrace(trace, 'http_client_request_downgrade', {
+          stage: 'http_client_request_downgrade',
+          reason: 'strip_anthropic_prompt_cache',
+          provider: prepared?.provider,
+          model: prepared?.requestBody?.model || body?.model || '',
+          requestUrl: prepared?.requestUrl,
+          statusCode: extractHttpStatus(e) || null,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt)
+        });
         try {
           const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
           const response = await axios.post(
@@ -2039,6 +2392,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             downgraded.requestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal)
           );
+          emitHttpSuccessTrace(trace, { ...prepared, requestBody: downgraded.requestBody, requestHeaders: downgraded.requestHeaders }, body, {
+            attempt: i + 1,
+            statusCode: Number(response?.status || 0) || null,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_anthropic_prompt_cache'
+          });
           finishModelCall(callId, {
             response,
             attempts: i + 1,
@@ -2048,8 +2408,15 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           });
           return response;
         } catch (retryWithoutCacheError) {
+          const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
+          emitHttpFailureTrace(trace, { ...prepared, requestBody: downgraded.requestBody, requestHeaders: downgraded.requestHeaders }, body, retryWithoutCacheError, {
+            attempt: i + 1,
+            retryable: i < maxRetry && shouldRetry(retryWithoutCacheError),
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_anthropic_prompt_cache'
+          });
           if (callId) {
-            const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
             failModelCall(callId, retryWithoutCacheError, {
               attempts: i + 1,
               requestUrl: prepared.requestUrl,
@@ -2096,6 +2463,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
   const trace = body && typeof body === 'object' && body.__trace && typeof body.__trace === 'object'
     ? body.__trace
     : {};
+  const streamFailureTraceEmitted = new WeakSet();
 
   for (let i = 0; i <= maxRetry; i++) {
     let stream = null;
@@ -2103,14 +2471,29 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
     let prepared = null;
     const usageParserState = { buffer: '' };
     let streamUsage = null;
+    const attemptStartedAt = Date.now();
 
     try {
       const timeoutMs = getRetryTimeoutMs(getStreamTimeoutMs(), i, 30000, 300000);
       prepared = await prepareRequest(url, body);
+      emitHttpTrace(trace, 'http_client_start', {
+        stage: 'http_client_start',
+        attempt: i + 1,
+        maxAttempts: maxRetry + 1,
+        provider: prepared.provider,
+        model: prepared.requestBody?.model || body?.model || '',
+        requestUrl: prepared.requestUrl,
+        stream: true,
+        cache: buildRequestCacheTrace(prepared.requestBody, prepared.requestHeaders),
+        fallbackActive: trace.mainFallbackActive === true,
+        fallbackScope: trace.mainFallbackScope || ''
+      });
       callId = startModelCall({
         source: trace.source || 'httpClient',
         phase: trace.phase || '',
         purpose: trace.purpose || '',
+        requestId: trace.requestId || '',
+        phaseSeq: trace.phaseSeq,
         userId: trace.userId || '',
         taskId: trace.taskId || '',
         routePolicyKey: trace.routePolicyKey || '',
@@ -2138,6 +2521,10 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
         );
         } catch (error) {
         if (requestUsesReasoning(prepared?.requestBody) && isReasoningSchemaError(error)) {
+          emitHttpDowngradeTrace(trace, prepared, body, 'strip_reasoning_fields', error, {
+            attempt: i + 1,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt)
+          });
           const strippedRequestBody = stripReasoningFields(prepared.requestBody);
           resp = await axios.post(
             prepared.requestUrl,
@@ -2150,6 +2537,10 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             requestHeaders: prepared.requestHeaders
           };
         } else if (requestUsesExtendedSampling(prepared?.requestBody) && isExtendedSamplingSchemaError(error)) {
+          emitHttpDowngradeTrace(trace, prepared, body, 'strip_extended_sampling_fields', error, {
+            attempt: i + 1,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt)
+          });
           const strippedRequestBody = stripExtendedSamplingFields(prepared.requestBody);
           resp = await axios.post(
             prepared.requestUrl,
@@ -2166,6 +2557,10 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           && requestUsesOpenAIPromptCacheRetention(prepared.requestBody)
           && isOpenAIPromptCacheRetentionSchemaError(error)
         ) {
+          emitHttpDowngradeTrace(trace, prepared, body, 'strip_openai_prompt_cache_retention', error, {
+            attempt: i + 1,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt)
+          });
           const strippedRequestBody = stripOpenAIPromptCacheRetentionFromRequest(prepared.requestBody);
           try {
             resp = await axios.post(
@@ -2183,6 +2578,10 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
               requestUsesOpenAICompatiblePromptCaching(strippedRequestBody)
               && isOpenAICompatiblePromptCacheSchemaError(retryWithoutRetentionError)
             ) {
+              emitHttpDowngradeTrace(trace, prepared, body, 'strip_openai_prompt_cache', retryWithoutRetentionError, {
+                attempt: i + 1,
+                durationMs: Math.max(0, Date.now() - attemptStartedAt)
+              });
               const strippedCacheRequestBody = stripOpenAICompatiblePromptCaching(strippedRequestBody);
               resp = await axios.post(
                 prepared.requestUrl,
@@ -2203,6 +2602,10 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           && requestUsesOpenAICompatiblePromptCaching(prepared.requestBody)
           && isOpenAICompatiblePromptCacheSchemaError(error)
         ) {
+          emitHttpDowngradeTrace(trace, prepared, body, 'strip_openai_prompt_cache', error, {
+            attempt: i + 1,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt)
+          });
           resp = await axios.post(
             prepared.requestUrl,
             stripOpenAICompatiblePromptCaching(prepared.requestBody),
@@ -2218,6 +2621,10 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           && anthropicRequestUsesPromptCaching(prepared.requestBody)
           && isAnthropicPromptCacheSchemaError(error)
         ) {
+          emitHttpDowngradeTrace(trace, prepared, body, 'strip_anthropic_prompt_cache', error, {
+            attempt: i + 1,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt)
+          });
           const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
           resp = await axios.post(
             prepared.requestUrl,
@@ -2262,6 +2669,12 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           settled = true;
           cleanup();
           if (err) {
+            emitHttpFailureTrace(trace, prepared, body, err, {
+              attempt: i + 1,
+              retryable: i < maxRetry && shouldRetryStreamRequest(err, handlers),
+              durationMs: Math.max(0, Date.now() - attemptStartedAt)
+            });
+            if (err && typeof err === 'object') streamFailureTraceEmitted.add(err);
             failModelCall(callId, err, { attempts: i + 1, requestUrl: prepared?.requestUrl });
             reject(err);
             return;
@@ -2278,6 +2691,12 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             requestUrl: prepared?.requestUrl,
             request: prepared?.requestBody,
             requestHeaders: prepared?.requestHeaders
+          });
+          emitHttpSuccessTrace(trace, prepared, body, {
+            attempt: i + 1,
+            statusCode: Number(resp?.status || 0) || null,
+            stream: true,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           resolve();
         };
@@ -2327,6 +2746,13 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
 
       return true;
     } catch (e) {
+      if (!e || typeof e !== 'object' || !streamFailureTraceEmitted.has(e)) {
+        emitHttpFailureTrace(trace, prepared, body, e, {
+          attempt: i + 1,
+          retryable: i < maxRetry && shouldRetryStreamRequest(e, handlers),
+          durationMs: Math.max(0, Date.now() - attemptStartedAt)
+        });
+      }
       if (callId) {
         failModelCall(callId, e, {
           attempts: i + 1,
