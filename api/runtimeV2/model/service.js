@@ -28,6 +28,7 @@ const {
   withMainModelFallback
 } = require('./shared');
 const { shouldUsePlanModeForRequest } = require('../planning/service');
+const { normalizeRequestTrace } = require('../../../utils/requestTrace');
 // source-compat anchors for role-aware main model routing:
 // require('../../../utils/mainModelConfigResolver');
 // function buildPrimaryMainModelConfig(overrides = null, userId = '') {
@@ -83,10 +84,16 @@ function buildReplyTextVariants(rawReply, fallbackText, options = {}) {
 }
 
 function buildModelCallTrace(context = {}, source = 'v2_model') {
+  const requestTrace = normalizeRequestTrace(context?.requestTrace)
+    || normalizeRequestTrace(context?.routeMeta?.requestTrace);
   return {
     source: String(context?.source || source).trim() || source,
     phase: String(context?.phase || '').trim(),
     purpose: String(context?.purpose || '').trim(),
+    requestId: String(requestTrace?.requestId || '').trim(),
+    phaseSeq: Number.isFinite(Number(requestTrace?.phaseSeq || requestTrace?.phase_seq))
+      ? Math.max(0, Math.floor(Number(requestTrace.phaseSeq || requestTrace.phase_seq)))
+      : undefined,
     userId: String(context?.userId || context?.routeMeta?.userId || context?.routeMeta?.user_id || '').trim(),
     taskId: String(context?.taskId || '').trim(),
     routePolicyKey: String(context?.routePolicyKey || context?.routeMeta?.routePolicyKey || '').trim(),
@@ -236,7 +243,10 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
         throw retryError;
       }
     }
-  }, modelConfig, userId, { routeMeta: context?.routeMeta });
+  }, modelConfig, userId, {
+    routeMeta: context?.routeMeta,
+    requestTrace: context?.requestTrace || context?.routeMeta?.requestTrace
+  });
 
   const message = extractMessageContent(response);
   if (message) return message;
@@ -341,7 +351,10 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
           throw retryError;
         }
       }
-    }, modelConfig, userId, { routeMeta: options?.routeMeta });
+    }, modelConfig, userId, {
+      routeMeta: options?.routeMeta,
+      requestTrace: options?.requestTrace || options?.routeMeta?.requestTrace
+    });
   } catch (error) {
     const visiblePartial = sanitizeUserFacingText(collected, {
       preserveThink: options.preserveThink === true

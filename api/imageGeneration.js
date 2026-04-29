@@ -1,6 +1,7 @@
 const axios = require('axios');
 const config = require('../config');
 const { drawPicture } = require('./legacy/aiHost');
+const { getApiProvider, normalizeProviderRequestHeaders } = require('../utils/modelProvider');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -54,21 +55,29 @@ function resolveBotDiaryQzoneImageRequestUrl(apiBaseUrl = '', model = '') {
   return `${base}/models/${encodeURIComponent(safeModel)}:generateContent`;
 }
 
-function buildBotDiaryQzoneImageHeaders(apiKey = '') {
+function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '') {
   const key = normalizeText(apiKey);
+  const provider = getApiProvider(apiBaseUrl, '');
   const headers = {
     'Content-Type': 'application/json',
-    'User-Agent': String(
+    Accept: 'application/json, text/plain, */*'
+  };
+  if (provider === 'gemini_native') {
+    if (key) headers['x-goog-api-key'] = key;
+  } else if (key) {
+    headers.Authorization = `Bearer ${key}`;
+  }
+  if (provider === 'openai_compatible') {
+    headers['User-Agent'] = String(
       config.MODEL_HTTP_USER_AGENT
       || config.MAIN_REPLY_USER_AGENT
       || config.HTTP_USER_AGENT
       || ''
-    ).trim() || 'Mozilla/5.0'
-  };
-  if (key) {
-    headers.Authorization = `Bearer ${key}`;
+    ).trim() || 'Mozilla/5.0';
   }
-  return headers;
+  const normalizedHeaders = normalizeProviderRequestHeaders(provider, headers) || headers;
+  if (provider !== 'openai_compatible') normalizedHeaders['User-Agent'] = false;
+  return normalizedHeaders;
 }
 
 function buildBotDiaryQzoneImageRequestBody(prompt = '') {
@@ -213,7 +222,7 @@ async function drawBotDiaryQzonePicture(prompt = '', options = {}) {
       {
         timeout: timeoutMs,
         proxy: false,
-        headers: buildBotDiaryQzoneImageHeaders(provider.apiKey)
+        headers: buildBotDiaryQzoneImageHeaders(provider.apiKey, requestUrl)
       }
     );
     const imageSource = extractBotDiaryQzoneImageSource(response?.data);
@@ -231,6 +240,7 @@ async function drawBotDiaryQzonePicture(prompt = '', options = {}) {
 
 module.exports = {
   buildBotDiaryQzoneImageProviderConfig,
+  buildBotDiaryQzoneImageHeaders,
   buildBotDiaryQzoneImageRequestBody,
   drawBotDiaryQzonePicture,
   drawPicture,

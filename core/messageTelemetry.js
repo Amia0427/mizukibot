@@ -3,6 +3,11 @@ const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { createCheckpointStore, resolveThreadId } = require('../utils/langgraphV2Store');
 const { appendPerfEvent } = require('../utils/perfRuntime');
 const { createJsonLineHotWriter } = require('../utils/jsonHotStore');
+const {
+  appendRequestTraceEvent,
+  nextTracePhase,
+  normalizeRequestTrace
+} = require('../utils/requestTrace');
 
 const timingLogWriters = new Map();
 
@@ -12,9 +17,10 @@ function getRawMessageTimestampMs(msg = {}) {
 }
 
 function appendInboundTimingLog(logFilePath, enableDebugLog, payload = {}) {
-  if (!enableDebugLog) return;
+  const normalized = payload && typeof payload === 'object' ? payload : {};
+  const hasRequestTrace = Boolean(String(normalized.requestId || normalized.request_id || '').trim());
+  if (!enableDebugLog && !hasRequestTrace) return;
   try {
-    const normalized = payload && typeof payload === 'object' ? payload : {};
     const writerKey = String(logFilePath || '').trim();
     if (!writerKey) return;
     if (!timingLogWriters.has(writerKey)) {
@@ -28,6 +34,7 @@ function appendInboundTimingLog(logFilePath, enableDebugLog, payload = {}) {
       processId: process.pid,
       ...normalized
     });
+    if (hasRequestTrace) appendRequestTraceEvent(normalized);
   } catch (_) {}
 }
 
@@ -121,6 +128,7 @@ function createMessageTelemetryCoordinator(deps = {}) {
     const routeMeta = replyOptions?.routeMeta && typeof replyOptions.routeMeta === 'object'
       ? replyOptions.routeMeta
       : {};
+    const requestTrace = normalizeRequestTrace(routeMeta.requestTrace);
     const userId = String(routeMeta.userId || routeMeta.user_id || '').trim();
     const sessionKey = resolveShortTermSessionKey(userId, routeMeta);
     const explicitThreadId = String(
@@ -151,15 +159,27 @@ function createMessageTelemetryCoordinator(deps = {}) {
         topRouteType: String(replyOptions?.topRouteType || '').trim(),
         routeMeta
       });
-      if (typeof telemetry?.onEvent === 'function') {
-        telemetry.onEvent({
+      const eventPayload = {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           ts: Date.now(),
           type: String(type || 'event').trim() || 'event',
           node: 'persist_background',
           threadId,
+          requestId: String(requestTrace?.requestId || '').trim(),
+          phaseSeq: Number(requestTrace?.phaseSeq || 0) || 0,
           ...payload
-        });
+      };
+      if (typeof telemetry?.onEvent === 'function') {
+        telemetry.onEvent(eventPayload);
+      }
+      if (requestTrace) {
+        const { requestId: _requestId, phaseSeq: _phaseSeq, ...traceEventPayload } = eventPayload;
+        appendRequestTraceEvent(nextTracePhase(requestTrace, String(type || 'persist_background').trim() || 'persist_background', {
+          ...traceEventPayload,
+          tracePhase: String(type || 'persist_background').trim() || 'persist_background',
+          stage: String(type || 'persist_background').trim() || 'persist_background',
+          source: 'persist_background'
+        }));
       }
     };
 

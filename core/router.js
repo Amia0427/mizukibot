@@ -1437,7 +1437,8 @@ function buildRouterSubagentPayload({
   imageUrl = null,
   fallbackRoute = null,
   contextSummary = '',
-  directedContext = null
+  directedContext = null,
+  requestTrace = null
 } = {}) {
   const fallbackContract = buildCanonicalRouteContract(fallbackRoute || {});
   return {
@@ -1540,7 +1541,15 @@ async function detectIntentBySubagent({
       directedContext
     }),
     modelResolver: getRouterSubagentModelConfig,
-    validateOutput: validateRouterSubagentOutput
+    validateOutput: validateRouterSubagentOutput,
+    trace: {
+      ...(requestTrace && typeof requestTrace === 'object' ? requestTrace : {}),
+      source: 'router',
+      phase: 'router_subagent',
+      purpose: 'intent_route',
+      userId: String(fallbackRoute?.meta?.userId || '').trim(),
+      topRouteType: 'direct_chat'
+    }
   });
 
   if (!result.ok) return null;
@@ -1672,7 +1681,8 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
         imageUrl,
         fallbackRoute,
         contextSummary,
-        directedContext
+        directedContext,
+        requestTrace: options.requestTrace
       });
       if (subagentRoute && typeof subagentRoute === 'object') {
         return sanitizeAiRoute(subagentRoute, fallbackRoute, { userId, imageUrl });
@@ -1689,7 +1699,8 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
       imageUrl,
       userId,
       contextSummary,
-      directedContext
+      directedContext,
+      requestTrace: options.requestTrace
     });
     const sanitizedRoute = sanitizeAiRoute(aiRoute, fallbackRoute, { userId, imageUrl });
     sanitizedRoute.meta = {

@@ -169,6 +169,7 @@ function createDirectReplyNode(deps = {}) {
       routePolicyKey: request.routePolicyKey,
       reviewMode: request.reviewMode,
       routeMeta: request.routeMeta,
+      requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
       topRouteType: request.topRouteType,
       customPrompt: request.customPrompt,
       disableTools: !request.allowTools,

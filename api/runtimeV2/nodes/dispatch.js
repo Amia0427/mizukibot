@@ -233,6 +233,8 @@ function createDispatchNode(deps = {}) {
     }
     const dispatchRuntimeOptions = {
       node: 'dispatch',
+      requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
+      routeMeta: request.routeMeta,
       mainConversationSnapshot: state.memory?.mainConversationSnapshot && typeof state.memory.mainConversationSnapshot === 'object'
         ? state.memory.mainConversationSnapshot
         : buildLiveMainConversationSnapshot(state, {

@@ -38,7 +38,8 @@ async function runStructuredSubagent({
   userPayload = {},
   userMessageContent = null,
   modelResolver = null,
-  validateOutput = null
+  validateOutput = null,
+  trace = null
 } = {}) {
   const modelConfig = resolveModelConfig(modelResolver);
   const baseUrl = String(modelConfig.baseUrl || '').trim();
@@ -86,8 +87,12 @@ async function runStructuredSubagent({
         stream: false,
         ...(timeoutMs ? { __timeoutMs: timeoutMs } : {}),
         __trace: {
+          ...(trace && typeof trace === 'object' ? trace : {}),
           feature: 'structured_subagent',
-          agentName: String(agentName || 'structured-subagent').trim() || 'structured-subagent'
+          agentName: String(agentName || 'structured-subagent').trim() || 'structured-subagent',
+          source: String(trace?.source || agentName || 'structured_subagent').trim() || 'structured_subagent',
+          phase: String(trace?.phase || agentName || 'structured_subagent').trim() || 'structured_subagent',
+          purpose: String(trace?.purpose || 'structured_json').trim() || 'structured_json'
         }
       },
       retries,
