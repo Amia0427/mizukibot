@@ -11,10 +11,7 @@
       "args": [
         "-y",
         "@amap/amap-maps-mcp-server"
-      ],
-      "env": {
-        "AMAP_MAPS_API_KEY": "e9fda05366ed433e82dbdef2f20ccf43"
-      }
+      ]
     },
     "bing-search": {
       "command": "npx",

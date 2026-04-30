@@ -286,9 +286,12 @@ function flushAllSync() {
   }
 }
 
-process.on('exit', flushAllSync);
-process.on('SIGINT', flushAllSync);
-process.on('SIGTERM', flushAllSync);
+if (!globalThis.__mizukiMemoryFlushListenersRegistered) {
+  globalThis.__mizukiMemoryFlushListenersRegistered = true;
+  process.on('exit', flushAllSync);
+  process.on('SIGINT', flushAllSync);
+  process.on('SIGTERM', flushAllSync);
+}
 
 /**
  * Default favorite state.

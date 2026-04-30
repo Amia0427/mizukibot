@@ -1,7 +1,12 @@
+const dns = require('dns');
 const net = require('net');
 
 function normalizeHost(hostname = '') {
-  return String(hostname || '').trim().toLowerCase();
+  return String(hostname || '')
+    .trim()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.+$/g, '')
+    .toLowerCase();
 }
 
 function isPrivateIpv4(host) {
@@ -23,6 +28,8 @@ function isPrivateIpv6(host) {
   const h = normalizeHost(host);
   if (!h) return true;
   if (h === '::1' || h === '::') return true;
+  const mappedIpv4 = h.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (mappedIpv4) return isPrivateIpv4(mappedIpv4[1]);
   // Unique local fc00::/7 and link-local fe80::/10.
   if (/^f[cd][0-9a-f]*:/i.test(h)) return true;
   if (/^fe[89ab][0-9a-f]*:/i.test(h)) return true;
@@ -51,19 +58,68 @@ function isUnsafeHost(hostname = '') {
   return false;
 }
 
-function isUnsafeHttpUrl(rawUrl = '') {
+function parseHttpUrl(rawUrl = '') {
   let parsed = null;
   try {
     parsed = new URL(String(rawUrl || '').trim());
   } catch (_) {
-    return true;
+    return null;
   }
+  if (!/^https?:$/i.test(parsed.protocol)) return null;
+  return parsed;
+}
 
-  if (!/^https?:$/i.test(parsed.protocol)) return true;
+function isUnsafeHttpUrl(rawUrl = '') {
+  const parsed = parseHttpUrl(rawUrl);
+  if (!parsed) return true;
   return isUnsafeHost(parsed.hostname);
 }
 
+async function assertSafeHttpUrl(rawUrl = '', options = {}) {
+  const parsed = parseHttpUrl(rawUrl);
+  if (!parsed) throw new Error('URL must use http or https');
+
+  const hostname = normalizeHost(parsed.hostname);
+  if (isUnsafeHost(hostname)) throw new Error('URL host is not allowed');
+
+  const lookup = typeof options.lookup === 'function'
+    ? options.lookup
+    : dns.promises.lookup.bind(dns.promises);
+  const addresses = await lookup(hostname, { all: true });
+  const resolved = Array.isArray(addresses) ? addresses : [addresses];
+  if (!resolved.length) throw new Error('URL host could not be resolved');
+
+  for (const entry of resolved) {
+    const address = normalizeHost(entry && entry.address ? entry.address : entry);
+    if (isUnsafeHost(address)) throw new Error('URL resolves to a disallowed address');
+  }
+
+  return parsed;
+}
+
+function isLoopbackHost(hostname = '') {
+  const host = normalizeHost(hostname);
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+async function assertSafeModelEndpoint(rawUrl = '', options = {}) {
+  const parsed = parseHttpUrl(rawUrl);
+  if (!parsed) throw new Error('endpoint must use http or https');
+
+  const allowLocalHttp = Boolean(options.allowLocalHttp);
+  if (parsed.protocol === 'http:') {
+    if (!allowLocalHttp || !isLoopbackHost(parsed.hostname)) {
+      throw new Error('endpoint must use https');
+    }
+    return parsed;
+  }
+
+  return assertSafeHttpUrl(rawUrl, options);
+}
+
 module.exports = {
+  assertSafeHttpUrl,
+  assertSafeModelEndpoint,
   isUnsafeHost,
   isUnsafeHttpUrl
 };

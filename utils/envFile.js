@@ -12,10 +12,17 @@ function sanitizeEnvKey(key) {
 }
 
 function sanitizeEnvValue(value) {
-  // Flatten CR/LF/NUL to stop line-break based env injection.
+  // Flatten CR/LF/NUL to stop line-break based env injection while preserving intentional spaces.
   return String(value ?? '')
-    .replace(/[\r\n\0]+/g, ' ')
-    .trim();
+    .replace(/[\r\n\0]+/g, ' ');
+}
+
+function serializeEnvValue(value) {
+  const safe = sanitizeEnvValue(value);
+  if (safe === '' || /[\s#"\\]/.test(safe)) {
+    return `"${safe.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  }
+  return safe;
 }
 
 function readEnvRaw(envPath = DEFAULT_ENV_PATH) {
@@ -29,7 +36,7 @@ function readEnvRaw(envPath = DEFAULT_ENV_PATH) {
 
 function upsertEnv(raw, key, value) {
   const safeKey = sanitizeEnvKey(key);
-  const safeValue = sanitizeEnvValue(value);
+  const safeValue = serializeEnvValue(value);
   const lines = String(raw || '').split(/\r?\n/);
   const output = [];
   let replaced = false;
@@ -80,6 +87,7 @@ module.exports = {
   readEnvRaw,
   sanitizeEnvKey,
   sanitizeEnvValue,
+  serializeEnvValue,
   upsertEnv,
   setEnvPairs,
   maskSecret

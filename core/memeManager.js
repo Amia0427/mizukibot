@@ -11,6 +11,7 @@ const { classifyReplyFailure } = require('../utils/replyFailure');
 const { getRecentMessages } = require('../utils/groupAwarenessState');
 const { normalizeResponseIntent } = require('./routeSchema');
 const { isAdmin } = require('./router');
+const { assertSafeHttpUrl } = require('../utils/networkSafety');
 
 const uploadSessions = new Map();
 const followupRuntime = new Map();
@@ -1072,9 +1073,20 @@ async function consumePendingUploadFromMessage(msg = {}) {
   }
 
   try {
+    try {
+      await assertSafeHttpUrl(imageUrl);
+    } catch (_) {
+      return {
+        consumed: true,
+        replyText: '图片来源地址不安全，已拒绝导入。'
+      };
+    }
+
     const response = await axios.get(imageUrl, {
       responseType: 'arraybuffer',
-      timeout: Math.max(1000, Number(config.MEME_MANAGER_TIMEOUT_MS || 8000))
+      timeout: Math.max(1000, Number(config.MEME_MANAGER_TIMEOUT_MS || 8000)),
+      proxy: false,
+      maxRedirects: 0
     });
     const buffer = Buffer.from(response.data || []);
     const maxBytes = Math.max(1, Number(config.MEME_MANAGER_MAX_FILE_SIZE_MB || 10)) * 1024 * 1024;

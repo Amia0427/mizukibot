@@ -43,7 +43,7 @@ WEB_BIND_HOST=127.0.0.1
 WEB_TOKEN=your_strong_token
 
 PROXY_URL=
-AMAP_KEY=e9fda05366ed433e82dbdef2f20ccf43
+AMAP_KEY=your_amap_key
 ```
 
 说明：

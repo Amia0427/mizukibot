@@ -2,6 +2,7 @@ const axios = require('axios');
 const config = require('../config');
 const { getApiProvider, ensureAnthropicMessagesUrl } = require('../utils/modelProvider');
 const { HUMANIZER_SYSTEM_PROMPT } = require('../utils/humanizer');
+const { assertSafeHttpUrl, assertSafeModelEndpoint } = require('../utils/networkSafety');
 const {
   startModelCall,
   finishModelCall,
@@ -412,6 +413,8 @@ function clampTemperatureForProvider(provider, value) {
   return Math.max(0, Math.min(2, n));
 }
 
+const MAX_REMOTE_IMAGE_BYTES = 10 * 1024 * 1024;
+
 function inferImageMediaType(url = '', headers = {}) {
   const contentType = normalizeText(headers?.['content-type'] || headers?.['Content-Type']).toLowerCase();
   if (contentType.startsWith('image/')) return contentType;
@@ -421,6 +424,44 @@ function inferImageMediaType(url = '', headers = {}) {
   if (lowerUrl.includes('.webp')) return 'image/webp';
   if (lowerUrl.includes('.gif')) return 'image/gif';
   return 'image/jpeg';
+}
+
+function getHttpUserAgent() {
+  return String(
+    config.HTTP_USER_AGENT
+      || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+  ).trim();
+}
+
+function getHttpAcceptLanguage() {
+  return String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim();
+}
+
+function getImageFetchOptions() {
+  return {
+    headers: {
+      Accept: 'image/*,*/*;q=0.8',
+      'Accept-Language': getHttpAcceptLanguage(),
+      'User-Agent': getHttpUserAgent()
+    },
+    timeout: Math.min(getRequestTimeoutMs(), 20000),
+    proxy: false,
+    responseType: 'arraybuffer',
+    maxRedirects: 0,
+    validateStatus: (status) => status >= 200 && status < 300
+  };
+}
+
+async function fetchRemoteImage(imageUrl) {
+  await assertSafeHttpUrl(imageUrl);
+  const resp = await axios.get(imageUrl, getImageFetchOptions());
+  const contentType = normalizeText(resp?.headers?.['content-type'] || resp?.headers?.['Content-Type']).toLowerCase();
+  if (contentType && !contentType.startsWith('image/')) throw new Error('remote resource is not an image');
+
+  const buffer = Buffer.from(resp.data || Buffer.alloc(0));
+  if (buffer.length > MAX_REMOTE_IMAGE_BYTES) throw new Error('remote image is too large');
+  if (buffer.length === 0) throw new Error('remote image is empty');
+  return { buffer, headers: resp?.headers || {} };
 }
 
 function isQqImageUrl(url = '') {
@@ -456,12 +497,9 @@ async function resolveAnthropicImageBlock(part = {}) {
   if (!imageUrl) return null;
 
   try {
-    const resp = await axios.get(imageUrl, {
-      ...getAxiosOptions('openai_compatible', null, Math.min(getRequestTimeoutMs(), 20000)),
-      responseType: 'arraybuffer'
-    });
-    const mediaType = inferImageMediaType(imageUrl, resp?.headers || {});
-    const data = Buffer.from(resp.data).toString('base64');
+    const resp = await fetchRemoteImage(imageUrl);
+    const mediaType = inferImageMediaType(imageUrl, resp.headers);
+    const data = resp.buffer.toString('base64');
     if (!data) return null;
     return {
       type: 'image',
@@ -858,11 +896,8 @@ function getRetryDelayMs(err, attempt) {
 
 function getHeaders(provider, specificKey = null, extraHeaders = null) {
   const apiKey = specificKey || config.API_KEY;
-  const userAgent = String(
-    config.HTTP_USER_AGENT
-      || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-  ).trim();
-  const acceptLanguage = String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim();
+  const userAgent = getHttpUserAgent();
+  const acceptLanguage = getHttpAcceptLanguage();
   if (provider === 'anthropic') {
     const headers = {
       'x-api-key': apiKey,
@@ -920,6 +955,12 @@ function getStreamAxiosOptions(provider = 'openai_compatible', specificKey = nul
   };
 }
 
+async function validatePreparedEndpoint(requestUrl) {
+  await assertSafeModelEndpoint(requestUrl, {
+    allowLocalHttp: Boolean(config.MODEL_ENDPOINT_ALLOW_LOCAL_HTTP)
+  });
+}
+
 function shouldRetry(err) {
   const code = String(err?.code || '').toUpperCase();
   if (['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND'].includes(code)) return true;
@@ -962,6 +1003,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         : 180000;
       const timeoutMs = getRetryTimeoutMs(timeoutBase, i, 15000, timeoutCap);
       const prepared = await prepareRequest(url, body);
+      await validatePreparedEndpoint(prepared.requestUrl);
       callId = startModelCall({
         source: trace.source || 'httpClient',
         phase: trace.phase || '',
@@ -1020,6 +1062,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
     try {
       const timeoutMs = getRetryTimeoutMs(getStreamTimeoutMs(), i, 30000, 300000);
       const prepared = await prepareRequest(url, body);
+      await validatePreparedEndpoint(prepared.requestUrl);
       callId = startModelCall({
         source: trace.source || 'httpClient',
         phase: trace.phase || '',

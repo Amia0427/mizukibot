@@ -1,6 +1,7 @@
 const path = require('path');
 const config = require('../config');
 const toolRegistry = require('../api/toolRegistry');
+const { sanitizeUserId, normalizeInsideRoot, mustStayInside } = require('./pathSafety');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 
@@ -50,28 +51,6 @@ const TOOL_POLICIES = {
   minecraft_look_at: { risk: 'low', capability: 'network' },
   minecraft_stop: { risk: 'low', capability: 'network' }
 };
-
-function sanitizeUserId(value, fallback = '') {
-  const raw = String(value || fallback || '').trim();
-  const cleaned = raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
-  return cleaned || '';
-}
-
-function normalizeInsideRoot(root, target) {
-  const rootAbs = path.resolve(root);
-  const targetAbs = path.resolve(target);
-  const rel = path.relative(rootAbs, targetAbs);
-  const inside = rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
-  return { rootAbs, targetAbs, inside };
-}
-
-function mustStayInside(root, target, label) {
-  const checked = normalizeInsideRoot(root, target);
-  if (!checked.inside) {
-    throw new Error(`${label} must stay inside ${checked.rootAbs}`);
-  }
-  return checked.targetAbs;
-}
 
 function getPolicy(toolName) {
   if (String(toolName || '').startsWith('mcp_')) {

@@ -138,9 +138,12 @@ function flushAllSync() {
   }
 }
 
-process.on('exit', flushAllSync);
-process.on('SIGINT', flushAllSync);
-process.on('SIGTERM', flushAllSync);
+if (!globalThis.__mizukiGroupAwarenessFlushListenersRegistered) {
+  globalThis.__mizukiGroupAwarenessFlushListenersRegistered = true;
+  process.on('exit', flushAllSync);
+  process.on('SIGINT', flushAllSync);
+  process.on('SIGTERM', flushAllSync);
+}
 
 function ensureGroupState(groupId) {
   const gid = String(groupId || '').trim();
