@@ -31,6 +31,13 @@ function isHumanizerFirstTokenTimeout(error) {
   );
 }
 
+const EMPTY_STREAM_FALLBACK_REPLY = '刚才网络有点不稳，你再发一次我接着回。';
+
+function getHumanizerFailureReason(error) {
+  if (isHumanizerFirstTokenTimeout(error)) return 'humanizer_first_token_timeout';
+  return String(error?.code || error?.reason || error?.message || 'humanizer_failed').trim() || 'humanizer_failed';
+}
+
 function createStreamingCoordinatorHelpers(deps = {}) {
   const assistantOnlyPrefix = '[Context for assistant only]';
   const {
@@ -76,6 +83,36 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     return text;
   }
 
+  function createHumanizerDeltaForwarder(request, shouldGuardStreamBeforeSend) {
+    const state = {
+      userVisibleOutput: false,
+      fullText: ''
+    };
+    const forward = (delta, fullText) => {
+      const visibleDelta = String(delta || '');
+      const visibleFullText = String(fullText || '');
+      if (visibleDelta.trim() || visibleFullText.trim()) {
+        state.userVisibleOutput = !shouldGuardStreamBeforeSend;
+        state.fullText = visibleFullText || state.fullText;
+      }
+      if (!shouldGuardStreamBeforeSend && typeof request.onDelta === 'function') {
+        request.onDelta(delta, fullText);
+      }
+    };
+    return { state, forward };
+  }
+
+  function emitHumanizerFallbackEvent(state, error, stage, fallbackSource) {
+    const firstTokenTimeout = isHumanizerFirstTokenTimeout(error);
+    emitRuntimeEvent(state, firstTokenTimeout ? 'humanizer_first_token_timeout' : 'humanizer_failed_fallback', {
+      node: 'direct_reply',
+      stage,
+      fallbackSource,
+      reason: getHumanizerFailureReason(error)
+    });
+    return firstTokenTimeout;
+  }
+
   async function streamDirectReply(messagesToSend, state) {
     const request = normalizeObject(state.request, {});
     const shouldGuardStreamBeforeSend = isGroupDirectChatRequest(request);
@@ -112,13 +149,16 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       const originalReply = sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted')).trim();
       let finalReply = originalReply;
       let humanizerTimedOut = false;
+      let humanizerFailed = false;
+      let humanizerFailureReason = '';
+      const humanizerForwarder = createHumanizerDeltaForwarder(request, shouldGuardStreamBeforeSend);
       if (useHumanizerStreaming) {
         try {
-          finalReply = await finalizeStreamingReplyWithHumanizerImpl(streamedReply, 'The network was unstable just now. Please try again.', {
+          finalReply = await finalizeStreamingReplyWithHumanizerImpl(originalReply, '', {
             question: request.question,
             dynamicPrompt: state.memory?.dynamicPrompt || '',
             modelConfig: request.modelConfig,
-            onDelta: shouldGuardStreamBeforeSend ? (() => {}) : request.onDelta,
+            onDelta: humanizerForwarder.forward,
             streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput),
             routeMeta: normalizeObject(request.routeMeta, {}),
             routePolicyKey: request.routePolicyKey,
@@ -128,28 +168,33 @@ function createStreamingCoordinatorHelpers(deps = {}) {
             triggerBranch: 'direct_reply.streaming_humanizer'
           });
         } catch (error) {
-          if (!isHumanizerFirstTokenTimeout(error)) throw error;
-          humanizerTimedOut = true;
+          humanizerFailureReason = getHumanizerFailureReason(error);
+          humanizerFailed = true;
+          humanizerTimedOut = emitHumanizerFallbackEvent(state, error, 'streaming_humanizer', 'original_streamed_reply');
           finalReply = originalReply;
-          emitRuntimeEvent(state, 'humanizer_first_token_timeout', {
-            node: 'direct_reply',
-            stage: 'streaming_humanizer',
-            fallbackSource: 'original_streamed_reply'
-          });
         }
       }
       const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
-      const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || 'The network was unstable just now. Please try again.';
-      if ((shouldGuardStreamBeforeSend || humanizerTimedOut) && typeof request.onDelta === 'function' && safeFinalReply) {
+      const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
+      const shouldEmitFinalOnce = (
+        shouldGuardStreamBeforeSend
+        || humanizerTimedOut
+        || (useHumanizerStreaming && !humanizerForwarder.state.userVisibleOutput)
+      );
+      if (shouldEmitFinalOnce && typeof request.onDelta === 'function' && safeFinalReply) {
         request.onDelta(safeFinalReply, safeFinalReply);
       }
       return {
         finalReply: safeFinalReply,
         humanizerTimedOut,
+        humanizerFailed,
+        humanizerFailureReason,
         stream: {
           ...markStreamCompleted(state.output, true),
           ...mirrorStreamingFlags(state.output, safeFinalReply),
           humanizerTimedOut,
+          humanizerFailed,
+          humanizerFailureReason,
           fallbackToNonStream: false,
           mode: 'direct'
         }
@@ -159,13 +204,16 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         const originalPartialReply = sanitizeUserFacingText(error.partialText).trim();
         let finalReply = originalPartialReply;
         let humanizerTimedOut = false;
+        let humanizerFailed = false;
+        let humanizerFailureReason = '';
+        const humanizerForwarder = createHumanizerDeltaForwarder(request, shouldGuardStreamBeforeSend);
         if (useHumanizerStreaming) {
           try {
-            finalReply = await finalizeStreamingReplyWithHumanizerImpl(error.partialText, 'The network was unstable just now. Please try again.', {
+            finalReply = await finalizeStreamingReplyWithHumanizerImpl(originalPartialReply, '', {
               question: request.question,
               dynamicPrompt: state.memory?.dynamicPrompt || '',
               modelConfig: request.modelConfig,
-              onDelta: shouldGuardStreamBeforeSend ? (() => {}) : request.onDelta,
+              onDelta: humanizerForwarder.forward,
               streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput),
               routeMeta: normalizeObject(request.routeMeta, {}),
               routePolicyKey: request.routePolicyKey,
@@ -175,28 +223,33 @@ function createStreamingCoordinatorHelpers(deps = {}) {
               triggerBranch: 'direct_reply.streaming_partial_humanizer'
             });
           } catch (humanizerError) {
-            if (!isHumanizerFirstTokenTimeout(humanizerError)) throw humanizerError;
-            humanizerTimedOut = true;
+            humanizerFailureReason = getHumanizerFailureReason(humanizerError);
+            humanizerFailed = true;
+            humanizerTimedOut = emitHumanizerFallbackEvent(state, humanizerError, 'streaming_partial_humanizer', 'original_partial_reply');
             finalReply = originalPartialReply;
-            emitRuntimeEvent(state, 'humanizer_first_token_timeout', {
-              node: 'direct_reply',
-              stage: 'streaming_partial_humanizer',
-              fallbackSource: 'original_partial_reply'
-            });
           }
         }
         const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
-        const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || 'The network was unstable just now. Please try again.';
-        if ((shouldGuardStreamBeforeSend || humanizerTimedOut) && typeof request.onDelta === 'function' && safeFinalReply) {
+        const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
+        const shouldEmitFinalOnce = (
+          shouldGuardStreamBeforeSend
+          || humanizerTimedOut
+          || (useHumanizerStreaming && !humanizerForwarder.state.userVisibleOutput)
+        );
+        if (shouldEmitFinalOnce && typeof request.onDelta === 'function' && safeFinalReply) {
           request.onDelta(safeFinalReply, safeFinalReply);
         }
         return {
           finalReply: safeFinalReply,
           humanizerTimedOut,
+          humanizerFailed,
+          humanizerFailureReason,
           stream: {
             ...markStreamCompleted(state.output, true),
             ...mirrorStreamingFlags(state.output, safeFinalReply),
             humanizerTimedOut,
+            humanizerFailed,
+            humanizerFailureReason,
             fallbackToNonStream: false,
             mode: 'direct'
           }

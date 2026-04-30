@@ -1838,7 +1838,7 @@ function createRuntime(options = {}) {
     const finalReply = sanitizeUserFacingText(out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '', {
       preserveThink: requestOptions?.cotDisplayOnce === true
     }).trim();
-    return finalReply || 'The network was unstable just now. Please try again.';
+    return finalReply || '刚才网络有点不稳，你再发一次我接着回。';
   }
 
   async function runPersistInBackgroundFromCheckpoint(threadId = '') {
