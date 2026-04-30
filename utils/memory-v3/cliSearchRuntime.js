@@ -35,6 +35,7 @@ const {
   journalDateMatchBoost,
   resolveJournalTargetDays
 } = require('./journalDocs');
+const { diagnoseProjectionFreshness } = require('./diagnostics');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 const NOTEBOOK_TRIGGER_RE = /(?:\bnotebook\b|笔记|文档|markdown|\bmd\b)/i;
@@ -1174,6 +1175,14 @@ async function searchMemoryCliFast(query = '', options = {}, context = {}) {
 
   const packStartedAt = nowMs();
   const payload = buildSearchResponse(selectedRows, candidateCounts, plan.queryFacet, fallbackUsed, limit);
+  payload.diagnostics = {
+    projectionFreshness: diagnoseProjectionFreshness({
+      ...context,
+      userId: normalizeText(context.userId),
+      groupId: normalizeText(context.groupId),
+      sessionKey: normalizeText(context.sessionKey)
+    })
+  };
   const packMs = nowMs() - packStartedAt;
 
   logSlowQuery({

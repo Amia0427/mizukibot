@@ -816,7 +816,12 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
           question
         }))
       );
-      return buildContextPayload(userId, question, normalizedOptions, unifiedHits);
+      const fallbackPayload = buildContextPayload(userId, question, normalizedOptions, unifiedHits);
+      fallbackPayload.diagnostics = {
+        ...(fallbackPayload.diagnostics || {}),
+        projectionFreshness: queryResult?.diagnostics?.projectionFreshness || null
+      };
+      return fallbackPayload;
     }
     const packet = assembleMemoryPacket(queryResult, {
       userId,
@@ -938,6 +943,7 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
         localKnowledge: localKnowledge.diagnostics
       },
       diagnostics: {
+        projectionFreshness: queryResult?.diagnostics?.projectionFreshness || null,
         memoryTrace: buildMemoryTrace({
           hits: results,
           injected: {

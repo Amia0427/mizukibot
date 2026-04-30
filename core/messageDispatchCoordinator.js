@@ -1,4 +1,7 @@
 const { buildRouteMetaEnvelope } = require('./executablePlan');
+const {
+  applyGroupDirectStyleGuard
+} = require('../api/runtimeV2/guards/groupDirectReplyStyleGuard');
 
 function createMessageDispatchCoordinator(deps = {}) {
   const {
@@ -37,6 +40,18 @@ function createMessageDispatchCoordinator(deps = {}) {
     if (!visualContext || visualContext?.worker?.succeeded === true) return null;
     const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
     return buildImageModelConfig(null, userId, { routeMeta: route?.meta || {} });
+  }
+
+  function applyGroupDirectGuardToReply(reply = '', route = {}, routeExecutionPlan = {}, groupId = '') {
+    const routeMeta = buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+      groupId,
+      chatType: route?.meta?.chatType || 'group'
+    });
+    const guard = applyGroupDirectStyleGuard(reply, {
+      topRouteType: routeExecutionPlan?.topRouteType || routeMeta.topRouteType,
+      routeMeta
+    });
+    return guard.applied ? guard.text : String(reply || '').trim();
   }
 
   async function dispatchByRoutePlan({
@@ -288,7 +303,7 @@ function createMessageDispatchCoordinator(deps = {}) {
     }
 
     return {
-      reply,
+      reply: applyGroupDirectGuardToReply(reply, route, routeExecutionPlan, groupId),
       usedStreamingSend,
       replyOptions: finalReplyOptions,
       freshness

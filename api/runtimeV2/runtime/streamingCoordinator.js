@@ -1,3 +1,8 @@
+const {
+  applyGroupDirectStyleGuard,
+  isGroupDirectChatRequest
+} = require('../guards/groupDirectReplyStyleGuard');
+
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
 }
@@ -44,7 +49,8 @@ function createStreamingCoordinatorHelpers(deps = {}) {
 
   async function emitWholeReplyAsSingleStream(state, finalReply) {
     const request = normalizeObject(state.request, {});
-    const text = sanitizeUserFacingText(finalReply).trim();
+    const guard = applyGroupDirectStyleGuard(finalReply, request);
+    const text = sanitizeUserFacingText(guard.text).trim();
     if (!request.streaming || typeof request.onDelta !== 'function' || !text) return text;
     request.onDelta(text, text);
     return text;
@@ -52,6 +58,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
 
   async function streamDirectReply(messagesToSend, state) {
     const request = normalizeObject(state.request, {});
+    const shouldGuardStreamBeforeSend = isGroupDirectChatRequest(request);
     const useHumanizerStreaming = isHumanizerEnabledImpl() && !shouldBypassHumanizerForPolicy(request.routePolicyKey);
     const upstreamStreamOptions = useHumanizerStreaming
       ? {
@@ -61,6 +68,12 @@ function createStreamingCoordinatorHelpers(deps = {}) {
           requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
           routeMeta: normalizeObject(request.routeMeta, {})
         }
+      : shouldGuardStreamBeforeSend
+        ? {
+            ...request,
+            onDelta() {},
+            streamHadOutput: false
+          }
       : request;
 
     try {
@@ -70,11 +83,15 @@ function createStreamingCoordinatorHelpers(deps = {}) {
             question: request.question,
             dynamicPrompt: state.memory?.dynamicPrompt || '',
             modelConfig: request.modelConfig,
-            onDelta: request.onDelta,
-            streamHadOutput: Boolean(state.output?.stream?.hadOutput)
+            onDelta: shouldGuardStreamBeforeSend ? (() => {}) : request.onDelta,
+            streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput)
           })
         : sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted')).trim();
-      const safeFinalReply = sanitizeUserFacingText(finalReply).trim() || 'The network was unstable just now. Please try again.';
+      const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
+      const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || 'The network was unstable just now. Please try again.';
+      if (shouldGuardStreamBeforeSend && typeof request.onDelta === 'function' && safeFinalReply) {
+        request.onDelta(safeFinalReply, safeFinalReply);
+      }
       return {
         finalReply: safeFinalReply,
         stream: {
@@ -90,11 +107,15 @@ function createStreamingCoordinatorHelpers(deps = {}) {
               question: request.question,
               dynamicPrompt: state.memory?.dynamicPrompt || '',
               modelConfig: request.modelConfig,
-              onDelta: request.onDelta,
-              streamHadOutput: Boolean(state.output?.stream?.hadOutput)
+              onDelta: shouldGuardStreamBeforeSend ? (() => {}) : request.onDelta,
+              streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput)
             })
           : sanitizeUserFacingText(error.partialText).trim();
-        const safeFinalReply = sanitizeUserFacingText(finalReply).trim() || 'The network was unstable just now. Please try again.';
+        const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
+        const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || 'The network was unstable just now. Please try again.';
+        if (shouldGuardStreamBeforeSend && typeof request.onDelta === 'function' && safeFinalReply) {
+          request.onDelta(safeFinalReply, safeFinalReply);
+        }
         return {
           finalReply: safeFinalReply,
           stream: {

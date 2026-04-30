@@ -551,6 +551,14 @@ function resolveNodeConflicts(nodes = []) {
   return Array.from(winners.values());
 }
 
+function getLatestEventTs(events = []) {
+  let latest = 0;
+  for (const event of Array.isArray(events) ? events : []) {
+    latest = Math.max(latest, Number(event?.ts || 0) || 0);
+  }
+  return latest;
+}
+
 function materializeMemoryViews(options = {}) {
   const pressureDelayMs = getBackgroundPressureDelayMs();
   if (pressureDelayMs > 0 && options.force !== true) {
@@ -588,6 +596,7 @@ function materializeMemoryViews(options = {}) {
   try {
   const events = Array.isArray(options.events) ? options.events : loadMemoryEvents();
   const now = Date.now();
+  const eventHighWatermarkTs = getLatestEventTs(events);
   const sessionProjection = defaultSessionProjection();
   const previousProfileProjection = options.previousProfileProjection || defaultProfileProjection();
   const profileProjection = defaultProfileProjection();
@@ -847,6 +856,10 @@ function materializeMemoryViews(options = {}) {
   profileProjection.updatedAt = now;
   scopeProjection.updatedAt = now;
   episodeProjection.updatedAt = now;
+  for (const projection of [sessionProjection, profileProjection, scopeProjection, episodeProjection]) {
+    projection.materializedAt = now;
+    projection.eventHighWatermarkTs = eventHighWatermarkTs;
+  }
 
   atomicWriteJson(config.MEMORY_V3_SESSION_PROJECTION_FILE, sessionProjection);
   atomicWriteJson(config.MEMORY_V3_PROFILE_PROJECTION_FILE, profileProjection);
@@ -862,6 +875,7 @@ function materializeMemoryViews(options = {}) {
     ok: true,
     stats: {
       events: events.length,
+      latestEventTs: eventHighWatermarkTs,
       nodes: resolvedNodes.length,
       embeddings: embeddingIndex,
       sessions: Object.keys(sessionProjection.sessions).length,
