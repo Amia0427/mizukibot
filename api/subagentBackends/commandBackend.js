@@ -2,6 +2,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const config = require('../../config');
 const { cleanToolReplyText, resolveToolReplyFormattingPreferences } = require('../../utils/toolReplyFormatting');
+const { buildSubagentStyleGuardInstruction } = require('../../utils/subagentStyleGuard');
 const {
   classifyPromptThreat,
   detectSensitiveOutput,
@@ -153,6 +154,7 @@ function buildForwardPrompt(question, customPrompt = null, imageUrl = null, rout
   if (routePrompt) {
     parts.push('Trusted routing guidance from mizuki:\n' + String(routePrompt));
   }
+  parts.push(buildSubagentStyleGuardInstruction());
   if (imageUrl) {
     parts.push('Image URL (forwarded from mizuki): ' + String(imageUrl));
   }

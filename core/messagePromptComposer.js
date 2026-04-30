@@ -1,5 +1,6 @@
 const { buildRuntimePrompt } = require('../utils/runtimePrompts');
 const {
+  buildSubagentStyleGuardInstruction,
   buildSubagentExecutionGuidanceLine,
   buildSubagentExecutionPlanLines,
   buildSubagentToolReasonLine
@@ -38,10 +39,12 @@ function buildBridgeGuidancePrompt(route = {}, backend = 'command', routeExecuti
   const toolLine = buildSubagentToolReasonLine(route, backend);
   const executionLine = buildSubagentExecutionGuidanceLine(route, backend, routeExecutionPlan);
   const executionPlanLines = buildSubagentExecutionPlanLines(routeExecutionPlan, backend);
+  const styleGuardLine = buildSubagentStyleGuardInstruction();
   return buildRuntimePrompt('bridge-guidance', {
     routeKey,
     routeDescription,
     planId: 'none',
+    styleGuardLine,
     toolLine,
     executionLine,
     executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',

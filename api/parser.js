@@ -6,6 +6,12 @@ function textFromContentArray(content) {
     .map((part) => {
       if (typeof part === 'string') return part;
       if (typeof part?.text === 'string') return part.text;
+      if (typeof part?.content === 'string') return part.content;
+      if (typeof part?.output_text === 'string') return part.output_text;
+      if (typeof part?.outputText === 'string') return part.outputText;
+      if (Array.isArray(part?.content)) return textFromContentArray(part.content);
+      if (part?.content && typeof part.content === 'object') return extractTextFromObject(part.content);
+      if (part && typeof part === 'object') return extractTextFromObject(part);
       return '';
     })
     .join('');
@@ -361,9 +367,15 @@ function extractDeltaText(obj) {
   if (Array.isArray(choice?.message?.content)) {
     return textFromContentArray(choice.message.content);
   }
+  if (choice?.message?.content && typeof choice.message.content === 'object') {
+    return extractTextFromObject(choice.message.content);
+  }
 
   if (Array.isArray(obj.content)) {
     return textFromContentArray(obj.content);
+  }
+  if (obj.content && typeof obj.content === 'object') {
+    return extractTextFromObject(obj.content);
   }
 
   return '';
@@ -434,7 +446,13 @@ function extractMessageContent(resp) {
   const msg = data?.choices?.[0]?.message;
   if (msg) {
     latestReasoning = msg.reasoning_content || msg.reasoning || '';
-    return msg;
+    const normalized = { ...msg };
+    if (Array.isArray(normalized.content)) {
+      normalized.content = textFromContentArray(normalized.content);
+    } else if (normalized.content && typeof normalized.content === 'object') {
+      normalized.content = extractTextFromObject(normalized.content);
+    }
+    return normalized;
   }
 
   const choice = data?.choices?.[0];

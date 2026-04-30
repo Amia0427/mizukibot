@@ -5,6 +5,10 @@ const { PROMPTS_DIR, PROMPT_MANIFEST, PROMPT_MANIFEST_PATH } = require('../confi
 const { RUNTIME_PROMPT_DEFAULTS, renderRuntimePromptTemplate } = require('../utils/runtimePrompts');
 const { buildPromptSnapshot } = require('../utils/promptCompiler');
 const {
+  collectAgentPromptFilesFromRoots,
+  readAgentPromptFile
+} = require('../utils/agentPrompts');
+const {
   buildPlannerStageSystemPrompt,
   buildReviewStageSystemPrompt
 } = require('../utils/stagePromptContracts');
@@ -69,9 +73,17 @@ function collectConflictTags(sections = []) {
   return conflicts;
 }
 
+function collectExtraAgentPromptRoots() {
+  return String(process.env.AGENT_PROMPT_EXTRA_ROOTS || '')
+    .split(path.delimiter)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
 function main() {
   let failureCount = 0;
   console.log('================ Prompt Check Start ================');
+  const projectRoot = path.join(__dirname, '..');
   const ignoredRelPaths = new Set([
     'prompt-manifest.json',
     'persona_modules/module-catalog.json',
@@ -89,6 +101,12 @@ function main() {
   const referencedRelPaths = new Set(sections.map((section) => section.path).filter(Boolean));
   const promptFiles = collectPromptFiles(PROMPTS_DIR);
   const runtimePolicy = readRoutePromptPolicy();
+  const agentPromptFiles = collectAgentPromptFilesFromRoots([
+    PROMPTS_DIR,
+    path.join(projectRoot, 'skills'),
+    path.join(projectRoot, 'artifacts'),
+    ...collectExtraAgentPromptRoots()
+  ]);
 
   for (const section of sections) {
     const fullPath = path.join(PROMPTS_DIR, ...section.path.split('/'));
@@ -133,6 +151,26 @@ function main() {
       }
     } catch (error) {
       fail(`runtime template render failed ${templateId}: ${error.message || error}`);
+      failureCount += 1;
+    }
+  }
+
+  if (agentPromptFiles.length === 0) {
+    warn('no agent prompt files found under prompts/, skills/, or artifacts/');
+  }
+
+  for (const filePath of agentPromptFiles) {
+    try {
+      const parsed = readAgentPromptFile(filePath, { rootDir: projectRoot });
+      if (!parsed.ok) {
+        fail(`agent prompt invalid ${parsed.relativePath}: ${(parsed.problems || []).join('; ')}`);
+        failureCount += 1;
+        continue;
+      }
+      ok(`agent prompt parsed ${parsed.relativePath}: ${parsed.displayName}`);
+    } catch (error) {
+      const rel = path.relative(projectRoot, filePath).split(path.sep).join('/');
+      fail(`agent prompt parse failed ${rel}: ${error.message || error}`);
       failureCount += 1;
     }
   }
@@ -232,10 +270,17 @@ function main() {
 
   if (failureCount > 0) {
     console.log('================ Prompt Check Failed ================');
-    process.exit(1);
+    return 1;
   }
 
   console.log('================ Prompt Check Passed ================');
+  return 0;
 }
 
-main();
+if (require.main === module) {
+  process.exit(main());
+}
+
+module.exports = {
+  main
+};

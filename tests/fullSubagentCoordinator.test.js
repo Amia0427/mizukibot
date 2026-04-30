@@ -50,6 +50,22 @@ module.exports = (async () => {
   ]);
   assert.ok(String(fallback).includes('failed once'));
 
+  const noisyFallback = coordinator.buildFullSubagentFallbackReply([
+    {
+      worker: { id: 'w1' },
+      status: 'fulfilled',
+      output: [
+        '当然可以，以下是完整教程。',
+        '首先，你需要先做 A。你是不是还想继续？你是不是还想我展开？',
+        '其次，这里继续写很多无关铺垫。'.repeat(120)
+      ].join('\n'),
+      error: ''
+    }
+  ]);
+  assert.ok(noisyFallback.length <= 1400, 'full-subagent fallback should be clipped before main reply refill');
+  assert.ok(!/当然可以|以下是|首先|其次|你需要先/.test(noisyFallback), 'full-subagent fallback should not reintroduce tutorial tone');
+  assert.ok((noisyFallback.match(/[？?]/g) || []).length <= 1, 'full-subagent fallback should limit question stacking');
+
   console.log('fullSubagentCoordinator.test.js passed');
 })().catch((error) => {
   console.error(error);
