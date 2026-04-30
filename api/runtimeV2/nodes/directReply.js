@@ -172,6 +172,7 @@ function createDirectReplyNode(deps = {}) {
       dynamicPrompt,
       modelConfig: request.modelConfig,
       routePolicyKey: request.routePolicyKey,
+      routeDebugKey: request.routeDebugKey || request.routeMeta?.routeDebugKey,
       reviewMode: request.reviewMode,
       routeMeta: request.routeMeta,
       requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
@@ -180,6 +181,7 @@ function createDirectReplyNode(deps = {}) {
       disableTools: !request.allowTools,
       allowedTools: normalizeArray(request.allowedTools),
       source: 'direct_reply',
+      dispatchBranch: 'direct_reply',
       preserveThink: request.cotDisplayOnce === true
     };
     const baseSystemMessages = getMainConversationSystemMessages(state, {
@@ -220,6 +222,7 @@ function createDirectReplyNode(deps = {}) {
     let executedToolEnvelopes = [];
     let compiledToolPlan = null;
     let firstAssistantReused = false;
+    let humanizerTimedOut = false;
     const initialDirectLoopState = cloneDirectToolLoopState({
       messages: messagesToSend,
       events: [
@@ -243,6 +246,7 @@ function createDirectReplyNode(deps = {}) {
       try {
         const firstAssistantMessage = normalizeMessageForToolLoop(await requestAssistantMessageImpl(messagesToSend, {
           ...directContext,
+          triggerBranch: 'direct_reply.tool_probe',
           disableTools: directEffectiveAllowedTools.length === 0,
           allowedTools: directEffectiveAllowedTools
         }));
@@ -340,17 +344,20 @@ function createDirectReplyNode(deps = {}) {
             ...state,
             request: {
               ...request,
-              routePolicyKey: directContext.routePolicyKey
+              routePolicyKey: directContext.routePolicyKey,
+              routeDebugKey: directContext.routeDebugKey
             }
           });
           reply = streamed.persistedText || streamed.finalReply || '';
           displayReply = streamed.visibleText || streamed.finalReply || '';
           nextStream = streamed.stream;
+          humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
         } else {
           const replyResult = await requestReplyImpl(
             messagesToSend,
             {
               ...directContext,
+              triggerBranch: 'direct_reply.tool_probe_non_stream_fallback',
               disableTools: true,
               allowedTools: []
             }
@@ -416,6 +423,7 @@ function createDirectReplyNode(deps = {}) {
           messagesToSend,
           {
             ...directContext,
+            triggerBranch: 'direct_reply.planner_single_authority',
             disableTools: true,
             allowedTools: []
           }
@@ -448,12 +456,14 @@ function createDirectReplyNode(deps = {}) {
           ...state,
           request: {
             ...request,
-            routePolicyKey: directContext.routePolicyKey
+            routePolicyKey: directContext.routePolicyKey,
+            routeDebugKey: directContext.routeDebugKey
           }
         });
         reply = streamed.persistedText || streamed.finalReply || '';
         displayReply = streamed.visibleText || streamed.finalReply || '';
         nextStream = streamed.stream;
+        humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
       } catch (error) {
         nextStream = error?.outputStream
           ? { ...ensureOutputStream(state.output, 'direct'), ...normalizeObject(error.outputStream, {}) }
@@ -463,6 +473,7 @@ function createDirectReplyNode(deps = {}) {
             messagesToSend,
             {
               ...directContext,
+              triggerBranch: 'direct_reply.stream_non_stream_fallback',
               disableTools: true,
               allowedTools: []
             }
@@ -490,6 +501,7 @@ function createDirectReplyNode(deps = {}) {
           messagesToSend,
           {
             ...directContext,
+            triggerBranch: 'direct_reply.non_stream',
             disableTools: true,
             allowedTools: []
           }
@@ -533,6 +545,7 @@ function createDirectReplyNode(deps = {}) {
           }]),
           {
             ...directContext,
+            triggerBranch: 'direct_reply.pure_tool_markup_retry',
             disableTools: true,
             allowedTools: []
           }
@@ -598,6 +611,10 @@ function createDirectReplyNode(deps = {}) {
       : null;
 
     const nextEvents = events.concat(directLoopEvents).concat([
+      ...(humanizerTimedOut ? [createEvent('humanizer_first_token_timeout', {
+        node: 'direct_reply',
+        fallbackSource: 'original_streamed_reply'
+      })] : []),
       createEvent('model_reply', {
         node: 'direct_reply',
         preview: String(reply || '').slice(0, 180)
@@ -632,6 +649,7 @@ function createDirectReplyNode(deps = {}) {
             firstAssistantReused,
             hadToolCalls: Boolean(compiledToolPlan),
             mode: request.streaming ? 'streaming' : 'non_stream',
+            humanizerFirstTokenTimeout: humanizerTimedOut,
             tool_probe_ms: toolProbeDurationMs,
             total_direct_reply_ms: Math.max(0, Date.now() - directReplyStartedAt)
           }

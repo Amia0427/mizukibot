@@ -23,6 +23,14 @@ function extractReplyText(value, preferredKey = 'persisted') {
   return persistedText || visibleText || finalReply;
 }
 
+function isHumanizerFirstTokenTimeout(error) {
+  return Boolean(
+    error?.humanizerFirstTokenTimeout
+    || String(error?.code || '').trim() === 'HUMANIZER_FIRST_TOKEN_TIMEOUT'
+    || String(error?.reason || '').trim() === 'humanizer_first_token_timeout'
+  );
+}
+
 function createStreamingCoordinatorHelpers(deps = {}) {
   const assistantOnlyPrefix = '[Context for assistant only]';
   const {
@@ -44,8 +52,20 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     resolveToolLoopReply,
     config,
     chatHistory,
-    shortTermMemory
+    shortTermMemory,
+    createEvent
   } = deps;
+
+  function emitRuntimeEvent(state, type = '', payload = {}) {
+    const request = normalizeObject(state.request, {});
+    const event = typeof createEvent === 'function'
+      ? createEvent(type, payload)
+      : { type, ...payload };
+    if (typeof request.onEvent === 'function') {
+      try { request.onEvent(event); } catch (_) {}
+    }
+    return event;
+  }
 
   async function emitWholeReplyAsSingleStream(state, finalReply) {
     const request = normalizeObject(state.request, {});
@@ -66,61 +86,118 @@ function createStreamingCoordinatorHelpers(deps = {}) {
           streamHadOutput: false,
           userId: request.userId,
           requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
-          routeMeta: normalizeObject(request.routeMeta, {})
+          routeMeta: normalizeObject(request.routeMeta, {}),
+          routeDebugKey: request.routeDebugKey || request.routeMeta?.routeDebugKey,
+          routePolicyKey: request.routePolicyKey,
+          topRouteType: request.topRouteType,
+          dispatchBranch: 'direct_reply',
+          triggerBranch: 'direct_reply.streaming_humanizer_upstream'
         }
       : shouldGuardStreamBeforeSend
         ? {
             ...request,
             onDelta() {},
-            streamHadOutput: false
+            streamHadOutput: false,
+            dispatchBranch: 'direct_reply',
+            triggerBranch: 'direct_reply.streaming_guarded_upstream'
           }
-      : request;
+      : {
+          ...request,
+          dispatchBranch: 'direct_reply',
+          triggerBranch: 'direct_reply.streaming_upstream'
+        };
 
     try {
       const streamedReply = await requestStreamingReplyImpl(messagesToSend, upstreamStreamOptions, request.modelConfig);
-      const finalReply = useHumanizerStreaming
-        ? await finalizeStreamingReplyWithHumanizerImpl(streamedReply, 'The network was unstable just now. Please try again.', {
+      const originalReply = sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted')).trim();
+      let finalReply = originalReply;
+      let humanizerTimedOut = false;
+      if (useHumanizerStreaming) {
+        try {
+          finalReply = await finalizeStreamingReplyWithHumanizerImpl(streamedReply, 'The network was unstable just now. Please try again.', {
             question: request.question,
             dynamicPrompt: state.memory?.dynamicPrompt || '',
             modelConfig: request.modelConfig,
             onDelta: shouldGuardStreamBeforeSend ? (() => {}) : request.onDelta,
-            streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput)
-          })
-        : sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted')).trim();
+            streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput),
+            routeMeta: normalizeObject(request.routeMeta, {}),
+            routePolicyKey: request.routePolicyKey,
+            routeDebugKey: request.routeDebugKey || request.routeMeta?.routeDebugKey,
+            topRouteType: request.topRouteType,
+            dispatchBranch: 'direct_reply',
+            triggerBranch: 'direct_reply.streaming_humanizer'
+          });
+        } catch (error) {
+          if (!isHumanizerFirstTokenTimeout(error)) throw error;
+          humanizerTimedOut = true;
+          finalReply = originalReply;
+          emitRuntimeEvent(state, 'humanizer_first_token_timeout', {
+            node: 'direct_reply',
+            stage: 'streaming_humanizer',
+            fallbackSource: 'original_streamed_reply'
+          });
+        }
+      }
       const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
       const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || 'The network was unstable just now. Please try again.';
-      if (shouldGuardStreamBeforeSend && typeof request.onDelta === 'function' && safeFinalReply) {
+      if ((shouldGuardStreamBeforeSend || humanizerTimedOut) && typeof request.onDelta === 'function' && safeFinalReply) {
         request.onDelta(safeFinalReply, safeFinalReply);
       }
       return {
         finalReply: safeFinalReply,
+        humanizerTimedOut,
         stream: {
           ...markStreamCompleted(state.output, true),
           ...mirrorStreamingFlags(state.output, safeFinalReply),
+          humanizerTimedOut,
+          fallbackToNonStream: false,
           mode: 'direct'
         }
       };
     } catch (error) {
       if (String(error?.partialText || '').trim()) {
-        const finalReply = useHumanizerStreaming
-          ? await finalizeStreamingReplyWithHumanizerImpl(error.partialText, 'The network was unstable just now. Please try again.', {
+        const originalPartialReply = sanitizeUserFacingText(error.partialText).trim();
+        let finalReply = originalPartialReply;
+        let humanizerTimedOut = false;
+        if (useHumanizerStreaming) {
+          try {
+            finalReply = await finalizeStreamingReplyWithHumanizerImpl(error.partialText, 'The network was unstable just now. Please try again.', {
               question: request.question,
               dynamicPrompt: state.memory?.dynamicPrompt || '',
               modelConfig: request.modelConfig,
               onDelta: shouldGuardStreamBeforeSend ? (() => {}) : request.onDelta,
-              streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput)
-            })
-          : sanitizeUserFacingText(error.partialText).trim();
+              streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput),
+              routeMeta: normalizeObject(request.routeMeta, {}),
+              routePolicyKey: request.routePolicyKey,
+              routeDebugKey: request.routeDebugKey || request.routeMeta?.routeDebugKey,
+              topRouteType: request.topRouteType,
+              dispatchBranch: 'direct_reply',
+              triggerBranch: 'direct_reply.streaming_partial_humanizer'
+            });
+          } catch (humanizerError) {
+            if (!isHumanizerFirstTokenTimeout(humanizerError)) throw humanizerError;
+            humanizerTimedOut = true;
+            finalReply = originalPartialReply;
+            emitRuntimeEvent(state, 'humanizer_first_token_timeout', {
+              node: 'direct_reply',
+              stage: 'streaming_partial_humanizer',
+              fallbackSource: 'original_partial_reply'
+            });
+          }
+        }
         const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
         const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || 'The network was unstable just now. Please try again.';
-        if (shouldGuardStreamBeforeSend && typeof request.onDelta === 'function' && safeFinalReply) {
+        if ((shouldGuardStreamBeforeSend || humanizerTimedOut) && typeof request.onDelta === 'function' && safeFinalReply) {
           request.onDelta(safeFinalReply, safeFinalReply);
         }
         return {
           finalReply: safeFinalReply,
+          humanizerTimedOut,
           stream: {
             ...markStreamCompleted(state.output, true),
             ...mirrorStreamingFlags(state.output, safeFinalReply),
+            humanizerTimedOut,
+            fallbackToNonStream: false,
             mode: 'direct'
           }
         };
@@ -266,5 +343,6 @@ function createStreamingCoordinatorHelpers(deps = {}) {
 }
 
 module.exports = {
-  createStreamingCoordinatorHelpers
+  createStreamingCoordinatorHelpers,
+  isHumanizerFirstTokenTimeout
 };

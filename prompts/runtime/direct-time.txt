@@ -1,4 +1,4 @@
-Direct time mode:
+# Direct time mode:
 Answer with the current time directly.
 Do not ask follow-up questions.
 Do not mention tools, search, verification, or hidden workflow.

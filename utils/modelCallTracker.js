@@ -3,6 +3,10 @@ const path = require('path');
 const config = require('../config');
 const { getApiProvider } = require('./modelProvider');
 const { appendFileWithRotation } = require('./logRotation');
+const {
+  pickModelRouteDiagnosticFields,
+  safeHost
+} = require('./modelRouteDiagnostics');
 
 const MAX_RECENT_MODEL_CALLS = 200;
 const MODEL_CALL_LOG_FILE = path.join(config.DATA_DIR || path.join(process.cwd(), 'data'), 'model-calls.ndjson');
@@ -36,14 +40,6 @@ function appendModelCallLog(record = {}) {
       encoding: 'utf8'
     });
   } catch (_) {}
-}
-
-function safeHost(url = '') {
-  try {
-    return new URL(String(url || '')).host || '';
-  } catch (_) {
-    return '';
-  }
 }
 
 function safeClone(value, fallback = null) {
@@ -250,6 +246,25 @@ function startModelCall(meta = {}) {
     meta.provider
     || getApiProvider(meta.url || '', model)
   ) || 'openai_compatible';
+  const routeDiagnostics = pickModelRouteDiagnosticFields({
+    ...(meta.modelRouteDiagnostic && typeof meta.modelRouteDiagnostic === 'object' ? meta.modelRouteDiagnostic : {}),
+    routeDebugKey: meta.routeDebugKey,
+    routePolicyKey: meta.routePolicyKey,
+    topRouteType: meta.topRouteType,
+    branch: meta.dispatchBranch,
+    triggerBranch: meta.triggerBranch,
+    provider,
+    apiBaseUrl: meta.apiBaseUrl || meta.url,
+    apiBaseUrlHost: meta.apiBaseUrlHost || safeHost(meta.apiBaseUrl || meta.url),
+    model,
+    modelSource: meta.modelSource,
+    apiBaseUrlSource: meta.apiBaseUrlSource,
+    apiKeySource: meta.apiKeySource,
+    fallbackReason: meta.fallbackReason,
+    fallbackScope: meta.mainFallbackScope,
+    fallbackActive: meta.mainFallbackActive === true,
+    fallbackForced: meta.mainFallbackForced === true
+  });
 
   const record = {
     id: `model_call_${Date.now()}_${sequence}`,
@@ -273,14 +288,22 @@ function startModelCall(meta = {}) {
     prompt_caching: promptCaching,
     user_id: normalizeText(meta.userId),
     task_id: normalizeText(meta.taskId),
-    route_policy_key: normalizeText(meta.routePolicyKey),
-    top_route_type: normalizeText(meta.topRouteType),
+    route_policy_key: routeDiagnostics.routePolicyKey,
+    route_debug_key: routeDiagnostics.routeDebugKey,
+    top_route_type: routeDiagnostics.topRouteType,
+    dispatch_branch: routeDiagnostics.branch,
+    trigger_branch: routeDiagnostics.triggerBranch,
+    api_base_url: routeDiagnostics.apiBaseUrl,
+    api_base_url_host: routeDiagnostics.apiBaseUrlHost,
+    fallback_reason: routeDiagnostics.fallbackReason,
+    model_route_diagnostic: routeDiagnostics,
     user_role: normalizeText(meta.userRole),
-    model_source: normalizeText(meta.modelSource),
-    api_base_url_source: normalizeText(meta.apiBaseUrlSource),
-    api_key_source: normalizeText(meta.apiKeySource),
-    main_fallback_scope: normalizeText(meta.mainFallbackScope),
-    main_fallback_active: Boolean(meta.mainFallbackActive),
+    model_source: routeDiagnostics.modelSource,
+    api_base_url_source: routeDiagnostics.apiBaseUrlSource,
+    api_key_source: routeDiagnostics.apiKeySource,
+    main_fallback_scope: routeDiagnostics.fallbackScope,
+    main_fallback_active: routeDiagnostics.fallbackActive,
+    main_fallback_forced: routeDiagnostics.fallbackForced,
     admin_dedicated_model_configured: meta.adminDedicatedModelConfigured === undefined
       ? null
       : Boolean(meta.adminDedicatedModelConfigured),
@@ -351,12 +374,20 @@ function finalizeRecord(id, patch = {}) {
     user_id: cloned.user_id,
     user_role: cloned.user_role,
     route_policy_key: cloned.route_policy_key,
+    route_debug_key: cloned.route_debug_key,
     top_route_type: cloned.top_route_type,
+    dispatch_branch: cloned.dispatch_branch,
+    trigger_branch: cloned.trigger_branch,
+    api_base_url: cloned.api_base_url,
+    api_base_url_host: cloned.api_base_url_host,
+    fallback_reason: cloned.fallback_reason,
+    model_route_diagnostic: cloned.model_route_diagnostic,
     model_source: cloned.model_source,
     api_base_url_source: cloned.api_base_url_source,
     api_key_source: cloned.api_key_source,
     main_fallback_scope: cloned.main_fallback_scope,
     main_fallback_active: cloned.main_fallback_active,
+    main_fallback_forced: cloned.main_fallback_forced,
     admin_dedicated_model_configured: cloned.admin_dedicated_model_configured,
     attempts: cloned.attempts,
     duration_ms: cloned.duration_ms,

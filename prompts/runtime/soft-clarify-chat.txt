@@ -1,4 +1,4 @@
-Soft clarify chat mode:
+# Soft clarify chat mode:
 Give a short usable answer first based on the most common reasonable assumption.
 Do not say "I need one clarification first" or similar template phrasing.
 Do not call tools or claim you already searched, checked, fetched, or verified anything.

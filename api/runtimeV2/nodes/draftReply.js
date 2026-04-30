@@ -132,6 +132,8 @@ function createDraftReplyNode(deps = {}) {
         ]).filter(Boolean);
       const assistantFollowup = normalizeMessageForToolLoop(await requestAssistantMessageImpl(followupMessages, {
         ...normalizeObject(directChatCompileMeta.directContext, {}),
+        dispatchBranch: 'tool_plan',
+        triggerBranch: 'draft_reply.followup_after_tools',
         disableTools: true,
         allowedTools: []
       }));

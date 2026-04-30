@@ -109,8 +109,14 @@ module.exports = (async () => {
           phase: 'runtime_model',
           purpose: 'unit_test',
           provider: 'openai_compatible',
+          routeDebugKey: 'direct_chat/text_chat/answer',
           routePolicyKey: 'direct_chat/default',
-          topRouteType: 'direct_chat'
+          topRouteType: 'direct_chat',
+          dispatchBranch: 'direct_reply',
+          triggerBranch: 'direct_reply.final_send',
+          modelSource: 'AI_MODEL',
+          apiBaseUrlSource: 'API_BASE_URL',
+          apiKeySource: 'API_KEY'
         }
       }, 0, 'test-key'),
       /rate limited/
@@ -123,6 +129,14 @@ module.exports = (async () => {
     assert.strictEqual(httpFailure.model, 'trace-test-model');
     assert.strictEqual(httpFailure.statusCode, 429);
     assert.strictEqual(httpFailure.finalErrorCode, 'http_429');
+    assert.strictEqual(httpFailure.routeDebugKey, 'direct_chat/text_chat/answer');
+    assert.strictEqual(httpFailure.routePolicyKey, 'direct_chat/default');
+    assert.strictEqual(httpFailure.dispatchBranch, 'direct_reply');
+    assert.strictEqual(httpFailure.triggerBranch, 'direct_reply.final_send');
+    assert.strictEqual(httpFailure.apiBaseUrlHost, 'example.com');
+    assert.strictEqual(httpFailure.modelSource, 'AI_MODEL');
+    assert.strictEqual(httpFailure.apiBaseUrlSource, 'API_BASE_URL');
+    assert.strictEqual(httpFailure.modelRouteDiagnostic.routeDebugKey, 'direct_chat/text_chat/answer');
     assert.ok(traceEvents.some((event) => event.stage === 'http_client_start' && event.cache));
 
     const phaseSeqs = traceEvents
@@ -136,6 +150,14 @@ module.exports = (async () => {
     assert.strictEqual(failedCall.final_error_code, 'http_429');
     assert.strictEqual(failedCall.provider, 'openai_compatible');
     assert.strictEqual(failedCall.model, 'trace-test-model');
+    assert.strictEqual(failedCall.route_debug_key, 'direct_chat/text_chat/answer');
+    assert.strictEqual(failedCall.route_policy_key, 'direct_chat/default');
+    assert.strictEqual(failedCall.dispatch_branch, 'direct_reply');
+    assert.strictEqual(failedCall.trigger_branch, 'direct_reply.final_send');
+    assert.strictEqual(failedCall.api_base_url_host, 'example.com');
+    assert.strictEqual(failedCall.model_source, 'AI_MODEL');
+    assert.strictEqual(failedCall.api_base_url_source, 'API_BASE_URL');
+    assert.strictEqual(failedCall.model_route_diagnostic.routeDebugKey, 'direct_chat/text_chat/answer');
     assert.ok(Number(failedCall.trace_phase_seq) > 0);
 
     console.log('requestTrace.test.js passed');

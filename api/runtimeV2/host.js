@@ -691,6 +691,7 @@ function createRuntime(options = {}) {
       allowedTools: normalizeArray(options.allowedTools || request.allowedTools),
       snapshotMeta: {
         routePolicyKey: String(request.routePolicyKey || '').trim(),
+        routeDebugKey: String(request.routeDebugKey || routeMeta.routeDebugKey || '').trim(),
         topRouteType: String(request.topRouteType || '').trim(),
         source: String(options.source || 'direct_reply').trim() || 'direct_reply',
         compactionDiagnostics: canonical.compactionPlan.diagnostics
@@ -713,6 +714,7 @@ function createRuntime(options = {}) {
       imageUrl: String(request.imageUrl || '').trim(),
       imageUrls: normalizeArray(request.imageUrls).map((url) => String(url || '').trim()).filter(Boolean),
       routePolicyKey: String(request.routePolicyKey || '').trim(),
+      routeDebugKey: String(request.routeDebugKey || routeMeta.routeDebugKey || '').trim(),
       topRouteType: String(request.topRouteType || '').trim(),
       reviewMode: String(request.reviewMode || '').trim(),
       groupId: String(routeMeta.groupId || routeMeta.group_id || '').trim(),
@@ -1284,7 +1286,10 @@ function createRuntime(options = {}) {
           source: 'runtimeV2',
           node: String(event?.node || state?.thread?.currentNode || '').trim(),
           routePolicyKey: String(state?.request?.routePolicyKey || state?.request?.routeMeta?.routePolicyKey || '').trim(),
+          routeDebugKey: String(state?.request?.routeDebugKey || state?.request?.routeMeta?.routeDebugKey || '').trim(),
           topRouteType: String(state?.request?.topRouteType || state?.request?.routeMeta?.topRouteType || '').trim(),
+          dispatchBranch: String(state?.request?.dispatchBranch || event?.dispatchBranch || '').trim(),
+          triggerBranch: String(event?.triggerBranch || '').trim(),
           durationMs: Number.isFinite(Number(event?.durationMs)) ? Math.max(0, Math.floor(Number(event.durationMs))) : null,
           finalErrorCode: String(event?.finalErrorCode || event?.errorCode || '').trim(),
           error: String(event?.error || event?.rawErrorMessage || '').trim().slice(0, 400)

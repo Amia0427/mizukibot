@@ -8,7 +8,12 @@ const {
 } = require('./messageContracts');
 const { buildLlmPerception } = require('./llmPerception');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
-const { cloneTraceForMeta, normalizeRequestTrace } = require('../utils/requestTrace');
+const {
+  appendRequestTraceEvent,
+  cloneTraceForMeta,
+  nextTracePhase,
+  normalizeRequestTrace
+} = require('../utils/requestTrace');
 const {
   formatGroupMainModelStreamStatus,
   setGroupMainModelStreamEnabled,
@@ -157,6 +162,20 @@ function handleMainStreamAdminCommand(command = {}, groupId = '', senderId = '')
     return result.ok ? '已关闭当前群主模型流式。' : '请先 /group_public on';
   }
   return '用法: /main_stream on|off|status';
+}
+
+function buildRouteDiagPayload(routeExecutionPlan = {}, branch = '', extra = {}) {
+  return {
+    routeDebugKey: String(routeExecutionPlan?.routeDebugKey || '').trim(),
+    routePolicyKey: String(routeExecutionPlan?.policyKey || routeExecutionPlan?.routePolicyKey || routeExecutionPlan?.routeDebugKey || '').trim(),
+    topRouteType: String(routeExecutionPlan?.topRouteType || '').trim(),
+    executor: String(routeExecutionPlan?.executor || '').trim(),
+    dispatchBranch: String(branch || '').trim(),
+    fallbackReason: String(routeExecutionPlan?.unavailableReason || routeExecutionPlan?.routeTrace?.fallbackReason || '').trim(),
+    allowTools: routeExecutionPlan?.allowTools === true,
+    needsBackground: routeExecutionPlan?.needsBackground === true,
+    ...extra
+  };
 }
 
 function createMessageRouteFlow(deps = {}) {
@@ -920,6 +939,17 @@ function createMessageRouteFlow(deps = {}) {
       : 'group';
     const requestTrace = normalizeRequestTrace(route?.meta?.requestTrace)
       || normalizeRequestTrace(inboundContext?.requestTrace);
+    const emitRouteDiag = (phase = '', payload = {}) => {
+      if (!requestTrace) return;
+      appendRequestTraceEvent(nextTracePhase(requestTrace, phase, {
+        stage: phase,
+        source: 'route_dispatch',
+        userId: String(senderId || '').trim(),
+        groupId: String(groupId || '').trim(),
+        chatType,
+        ...payload
+      }));
+    };
     const cotDisplayOnce = route?.meta?.cotDisplayOnce === true;
     let reply = '';
     let usedStreamingSend = false;
@@ -957,6 +987,7 @@ function createMessageRouteFlow(deps = {}) {
 
     try {
       if (routeExecutionPlan.unavailableReason) {
+        emitRouteDiag('dispatch_unavailable', buildRouteDiagPayload(routeExecutionPlan, 'unavailable'));
         maybeCaptureUnavailableFeatureRequest?.({
           routeExecutionPlan,
           cleanText,
@@ -966,6 +997,10 @@ function createMessageRouteFlow(deps = {}) {
         });
         reply = buildUnavailableRouteReply(route, routeExecutionPlan, { isAdminUser });
       } else if (routeExecutionPlan.allowTools || routeExecutionPlan.executor === 'background_direct') {
+        const dispatchBranch = routeExecutionPlan.executor === 'background_direct'
+          ? 'background_direct'
+          : 'tool_plan';
+        emitRouteDiag('dispatch_branch_selected', buildRouteDiagPayload(routeExecutionPlan, dispatchBranch));
         const toolTaskOptions = {
           routePrompt: [toolGuidancePrompt, bridgeGuidancePrompt, perceptionPrompt].filter(Boolean).join('\n\n') || null,
           sessionChannel: chatType === 'private' ? 'qq-private' : 'qq-group',
@@ -973,6 +1008,8 @@ function createMessageRouteFlow(deps = {}) {
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           routeDebugKey: routeExecutionPlan.routeDebugKey,
           topRouteType: routeExecutionPlan.topRouteType,
+          dispatchBranch,
+          triggerBranch: `${dispatchBranch}.final_send`,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
           imageUrls,
@@ -983,6 +1020,7 @@ function createMessageRouteFlow(deps = {}) {
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             groupId,
             chatType,
+            dispatchBranch,
             requestTrace: cloneTraceForMeta(requestTrace)
           })
         };
@@ -1077,6 +1115,7 @@ function createMessageRouteFlow(deps = {}) {
           reply = await askToolTaskLocally(cleanText, userInfo, senderId, null, imageUrl, toolTaskOptions);
         }
       } else {
+        emitRouteDiag('dispatch_branch_selected', buildRouteDiagPayload(routeExecutionPlan, 'direct_reply'));
         const streamingDispatcher = createStreamingDispatcher({
           runtimeConfig: config,
           sendWithRetry,
@@ -1108,6 +1147,8 @@ function createMessageRouteFlow(deps = {}) {
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           routeDebugKey: routeExecutionPlan.routeDebugKey,
           topRouteType: routeExecutionPlan.topRouteType,
+          dispatchBranch: 'direct_reply',
+          triggerBranch: 'direct_reply.final_send',
           disableTools: !routeExecutionPlan.allowTools,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
@@ -1118,6 +1159,7 @@ function createMessageRouteFlow(deps = {}) {
             chatType,
             messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
             threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim(),
+            dispatchBranch: 'direct_reply',
             requestTrace: cloneTraceForMeta(requestTrace)
           }),
           requestTrace: cloneTraceForMeta(requestTrace),

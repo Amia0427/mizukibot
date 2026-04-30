@@ -1,14 +1,14 @@
-你上一次输出没有通过校验，需要严格重写。
+# 你上一次输出没有通过校验，需要严格重写。
 
 失败原因：{{reason}}
 必须使用的穿搭风格：{{outfitStyle}}
 
-要求：
+## 要求
 1. 只能输出 JSON 对象本体。
 2. 必须包含字段：outfitStyle, outfit, schedule, broadcastText。
 3. outfitStyle 必须严格等于 "{{outfitStyle}}"。
 4. outfit 第一行必须以“风格：{{outfitStyle}}”开头。
 5. broadcastText 必须是一条自然的人格化群聊短消息。
 
-上一次输出：
+## 上一次输出
 {{previousOutput}}

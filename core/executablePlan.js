@@ -164,11 +164,15 @@ function buildRouteMetaEnvelope(route = {}, routeExecutionPlan = {}, plannerDeci
     ? planner.planSteps
     : (Array.isArray(executablePlan?.steps) ? executablePlan.steps : []);
   const routePolicyKey = normalizeText(routeExecutionPlan.policyKey || routeExecutionPlan.routePolicyKey || routeMeta.routePolicyKey);
+  const routeDebugKey = normalizeText(routeExecutionPlan.routeDebugKey || routeMeta.routeDebugKey || routePolicyKey);
   return {
     ...routeMeta,
     ...extraMeta,
     topRouteType: normalizeText(routeExecutionPlan.topRouteType || route?.topRouteType || routeMeta.topRouteType || 'direct_chat'),
     routePolicyKey,
+    routeDebugKey,
+    routeExecutor: normalizeText(routeExecutionPlan.executor || routeMeta.routeExecutor || 'direct'),
+    routeFallbackReason: normalizeText(routeExecutionPlan.unavailableReason || routeMeta.routeFallbackReason || routeMeta.fallbackReason || ''),
     routeTrace: routeExecutionPlan.routeTrace || routeMeta.routeTrace || null,
     executablePlan: executablePlan ? createExecutablePlan(executablePlan, { policyKey: routePolicyKey }) : null,
     planId: normalizeText(planner?.planId || routeMeta.planId || (routePolicyKey ? `${routePolicyKey}:route` : '')),

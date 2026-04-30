@@ -7,10 +7,14 @@ const {
   hasVisibleUserFacingText,
   sanitizeUserFacingText
 } = require('../utils/userFacingText');
+const {
+  buildModelRouteDiagnostics,
+  createModelRouteTracePatch
+} = require('../utils/modelRouteDiagnostics');
 
 const HUMANIZER_AGENT_SYSTEM_PROMPT = [
   '你是“风格保护型 Humanizer 子 Agent”。',
-  '任务：去掉明显 AI 腔/模板腔，但必须保留原文说话风格。',
+  '任务：去掉明显 AI 腔/模板腔，并根据当前语境决定更自然的流式分段。',
   '硬性约束：',
   '1. 不改变事实、结论、称呼、角色设定与核心语气方向。',
   '2. 必须保留原文的说话风格：语气词、节奏、口头习惯、角色味道。',
@@ -18,7 +22,8 @@ const HUMANIZER_AGENT_SYSTEM_PROMPT = [
   '4. 不新增事实，不删减关键信息。',
   '5. 如果原文已经自然，只做最小改动。',
   '6. 默认保持原文篇幅，除非有明显重复；通常不应压缩超过 20%。',
-  '7. 只输出最终回复正文，不要解释。'
+  '7. 如果需要流式分段，只在语义完整的位置插入一个空行作为段落边界。',
+  '8. 只输出最终回复正文，不要解释，不要编号，不要写“第一段/第二段”。'
 ].join('\n');
 
 function getHumanizerStreamMaxSegments(options = {}) {
@@ -31,9 +36,10 @@ function buildHumanizerStreamingPrompt(options = {}) {
   const maxSegments = getHumanizerStreamMaxSegments(options);
   return [
     'Streaming output rule:',
-    `1) decide chunk boundaries yourself, send at most ${maxSegments} chunks total.`,
-    '2) separate chunks with ONE blank line (\\n\\n).',
-    '3) no numbering and no labels like "part 1".'
+    `1) decide semantic chunk boundaries yourself, output at most ${maxSegments} chunks total.`,
+    '2) separate chunks with exactly ONE blank line (\\n\\n); that blank line is the stream boundary.',
+    '3) every chunk must be independently readable; never split a sentence, quote, code block, markdown structure, or emotional beat in the middle.',
+    '4) no numbering and no labels like "part 1".'
   ].join('\n');
 }
 
@@ -60,8 +66,30 @@ function sanitizeAgentOutput(text) {
   return sanitizeUserFacingText(text).trim();
 }
 
+function sanitizeAgentStreamText(text) {
+  return sanitizeUserFacingText(text).replace(/^\s+/, '');
+}
+
 function fallbackHumanize(text) {
   return humanizeReply(text) || sanitizeAgentOutput(text);
+}
+
+function getHumanizerFirstTokenTimeoutMs(options = {}) {
+  const raw = Number(
+    options.firstTokenTimeoutMs !== undefined
+      ? options.firstTokenTimeoutMs
+      : config.HUMANIZER_AGENT_FIRST_TOKEN_TIMEOUT_MS
+  );
+  if (!Number.isFinite(raw)) return 10000;
+  return Math.max(0, Math.floor(raw));
+}
+
+function isHumanizerFirstTokenTimeoutError(error) {
+  return Boolean(
+    error?.humanizerFirstTokenTimeout
+    || String(error?.code || '').trim() === 'HUMANIZER_FIRST_TOKEN_TIMEOUT'
+    || String(error?.reason || '').trim() === 'humanizer_first_token_timeout'
+  );
 }
 
 function shouldUseHumanizerStreaming(options = {}) {
@@ -76,6 +104,32 @@ function getRewriteMaxTokens(text) {
 
 function isHumanizerAgentEnabled() {
   return Boolean(config.HUMANIZER_AGENT_ENABLED || config.LLM_HUMANIZER_ENABLED);
+}
+
+function resolveHumanizerModelConfig(options = {}) {
+  const dedicatedModel = String(config.HUMANIZER_AGENT_MODEL || '').trim();
+  const dedicatedApiBaseUrl = String(config.HUMANIZER_AGENT_API_BASE_URL || '').trim();
+  const dedicatedApiKey = String(config.HUMANIZER_AGENT_API_KEY || '').trim();
+  const optionModel = String(options.model || '').trim();
+  const optionApiBaseUrl = String(options.apiBaseUrl || '').trim();
+  const optionApiKey = String(options.apiKey || '').trim();
+  const mainModel = String(config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
+  const mainApiBaseUrl = String(config.API_BASE_URL || '').trim();
+  const mainApiKey = String(config.API_KEY || '').trim();
+
+  const model = dedicatedModel || optionModel || mainModel;
+  const apiBaseUrl = ensureChatCompletionsUrl(dedicatedApiBaseUrl || optionApiBaseUrl || mainApiBaseUrl);
+  const apiKey = dedicatedApiKey || optionApiKey || mainApiKey;
+
+  return {
+    model,
+    apiBaseUrl,
+    apiKey,
+    modelSource: dedicatedModel ? 'HUMANIZER_AGENT_MODEL' : (optionModel ? 'caller_model_compat' : 'AI_MODEL_FALLBACK'),
+    apiBaseUrlSource: dedicatedApiBaseUrl ? 'HUMANIZER_AGENT_API_BASE_URL' : (optionApiBaseUrl ? 'caller_apiBaseUrl_compat' : 'API_BASE_URL_FALLBACK'),
+    apiKeySource: dedicatedApiKey ? 'HUMANIZER_AGENT_API_KEY' : (optionApiKey ? 'caller_apiKey_compat' : 'API_KEY_FALLBACK'),
+    usedDedicatedConfig: Boolean(dedicatedModel || dedicatedApiBaseUrl || dedicatedApiKey)
+  };
 }
 
 function countSentenceLikeUnits(text) {
@@ -126,33 +180,123 @@ function buildHumanizerMessages(original, options = {}) {
 async function requestHumanizerStreaming(apiBaseUrl, payload, options = {}, retries = 0, apiKey = '') {
   const parserState = { buffer: '' };
   let collected = '';
+  let emitted = '';
+  let pendingVisible = '';
+  let firstVisibleTokenSeen = false;
+  let settled = false;
+  let timeout = null;
+  const abortController = typeof AbortController === 'function' ? new AbortController() : null;
+  const firstTokenTimeoutMs = getHumanizerFirstTokenTimeoutMs(options);
+
+  const createFirstTokenTimeoutError = () => {
+    const error = new Error(`Humanizer first visible token timeout after ${firstTokenTimeoutMs}ms`);
+    error.code = 'HUMANIZER_FIRST_TOKEN_TIMEOUT';
+    error.reason = 'humanizer_first_token_timeout';
+    error.humanizerFirstTokenTimeout = true;
+    error.partialText = sanitizeAgentOutput(collected);
+    error.streamHadOutput = false;
+    return error;
+  };
+
+  const clearFirstTokenTimeout = () => {
+    if (!timeout) return;
+    clearTimeout(timeout);
+    timeout = null;
+  };
+
+  const emitVisibleText = (nextVisible) => {
+    const visible = sanitizeAgentOutput(nextVisible);
+    if (!visible || visible === emitted) return;
+    const visibleDelta = extractUserFacingDelta(emitted, visible);
+    if (!visibleDelta) return;
+    emitted = visible;
+    options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visible));
+    options.onDelta(visibleDelta, visible);
+  };
+
+  const flushCompletedSegments = () => {
+    const normalized = String(pendingVisible || '').replace(/\r\n/g, '\n');
+    const parts = normalized.split(/\n{2,}/);
+    if (parts.length < 2) {
+      pendingVisible = normalized;
+      return;
+    }
+
+    const completedSegments = parts.slice(0, -1).map((part) => part.trim()).filter(Boolean);
+    const rest = parts[parts.length - 1] || '';
+    for (const segment of completedSegments) {
+      const nextVisible = emitted ? `${emitted}\n\n${segment}` : segment;
+      emitVisibleText(nextVisible);
+    }
+    pendingVisible = rest;
+  };
+
+  let rejectFirstTokenTimeout = null;
+  const firstTokenTimeoutPromise = firstTokenTimeoutMs > 0
+    ? new Promise((_, reject) => {
+        rejectFirstTokenTimeout = reject;
+      })
+    : null;
+
+  if (firstTokenTimeoutMs > 0) {
+    timeout = setTimeout(() => {
+      if (settled || firstVisibleTokenSeen) return;
+      if (abortController) {
+        try { abortController.abort(); } catch (_) {}
+      }
+      if (typeof rejectFirstTokenTimeout === 'function') {
+        rejectFirstTokenTimeout(createFirstTokenTimeoutError());
+      }
+    }, firstTokenTimeoutMs);
+  }
 
   try {
-    await postStreamWithRetry(
+    const streamRequest = typeof options.postStreamWithRetryImpl === 'function'
+      ? options.postStreamWithRetryImpl
+      : postStreamWithRetry;
+    const streamPromise = streamRequest(
       apiBaseUrl,
-      { ...payload, stream: true },
+      {
+        ...payload,
+        stream: true,
+        ...(abortController ? { __abortSignal: abortController.signal } : {})
+      },
       {
         onData(chunk) {
+          if (abortController?.signal?.aborted && !firstVisibleTokenSeen) return;
           const parsed = extractSSEEvents(parserState, chunk);
           parserState.buffer = parsed.state.buffer;
 
           for (const event of parsed.events) {
             if (!event || event.done || !event.delta) continue;
-            const previousVisible = sanitizeAgentOutput(collected);
             collected += event.delta;
-            const visibleCollected = sanitizeAgentOutput(collected);
-            const visibleDelta = extractUserFacingDelta(previousVisible, visibleCollected);
-            if (visibleCollected !== previousVisible) {
-              options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
-              options.onDelta(visibleDelta, visibleCollected);
+            const visibleCollected = sanitizeAgentStreamText(collected);
+            if (!firstVisibleTokenSeen && hasVisibleUserFacingText(visibleCollected)) {
+              firstVisibleTokenSeen = true;
+              clearFirstTokenTimeout();
             }
+            pendingVisible = sanitizeAgentStreamText(visibleCollected.slice(emitted.length));
+            flushCompletedSegments();
           }
         }
       },
       retries,
       apiKey
     );
+    if (firstTokenTimeoutPromise && !firstVisibleTokenSeen) {
+      await Promise.race([streamPromise, firstTokenTimeoutPromise]);
+    } else {
+      await streamPromise;
+    }
   } catch (error) {
+    settled = true;
+    clearFirstTokenTimeout();
+    if (isHumanizerFirstTokenTimeoutError(error)) {
+      throw error;
+    }
+    if (abortController?.signal?.aborted && !firstVisibleTokenSeen) {
+      throw createFirstTokenTimeoutError();
+    }
     if (sanitizeAgentOutput(collected)) {
       error.partialText = sanitizeAgentOutput(collected);
       error.streamHadOutput = true;
@@ -163,17 +307,14 @@ async function requestHumanizerStreaming(apiBaseUrl, payload, options = {}, retr
   const tailEvents = flushSSEState(parserState);
   for (const event of tailEvents) {
     if (!event || event.done || !event.delta) continue;
-    const previousVisible = sanitizeAgentOutput(collected);
     collected += event.delta;
-    const visibleCollected = sanitizeAgentOutput(collected);
-    const visibleDelta = extractUserFacingDelta(previousVisible, visibleCollected);
-    if (visibleCollected !== previousVisible) {
-      options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
-      options.onDelta(visibleDelta, visibleCollected);
-    }
   }
 
-  return sanitizeAgentOutput(collected);
+  settled = true;
+  clearFirstTokenTimeout();
+  const finalVisible = sanitizeAgentOutput(collected);
+  if (finalVisible) emitVisibleText(finalVisible);
+  return finalVisible;
 }
 
 async function runHumanizerAgent(text, options = {}) {
@@ -183,15 +324,8 @@ async function runHumanizerAgent(text, options = {}) {
   // 子 Agent 关闭时，退回本地规则清洗器。
   if (!isHumanizerAgentEnabled()) return fallbackHumanize(original);
 
-  const model = String(
-    config.HUMANIZER_AGENT_MODEL
-    || config.AUX_MODEL
-    || options.model
-    || config.AI_MODEL
-    || 'gpt-5.4'
-  ).trim() || 'gpt-5.4';
-  const apiBaseUrl = ensureChatCompletionsUrl(options.apiBaseUrl || config.AUX_MODEL_API_BASE_URL || config.API_BASE_URL);
-  const apiKey = String(options.apiKey || config.AUX_MODEL_API_KEY || config.API_KEY || '').trim();
+  const resolvedHumanizerConfig = resolveHumanizerModelConfig(options);
+  const { model, apiBaseUrl, apiKey } = resolvedHumanizerConfig;
   const retries = Math.max(0, Number.isFinite(Number(options.retries))
     ? Number(options.retries)
     : (Number(config.AI_RETRIES) || 0));
@@ -202,6 +336,30 @@ async function runHumanizerAgent(text, options = {}) {
     messages,
     max_tokens: getRewriteMaxTokens(original)
   };
+  const trace = createModelRouteTracePatch(buildModelRouteDiagnostics({
+    routeMeta: options.routeMeta,
+    routePolicyKey: options.routePolicyKey,
+    routeDebugKey: options.routeDebugKey,
+    topRouteType: options.topRouteType,
+    branch: options.dispatchBranch || 'humanizer',
+    triggerBranch: options.triggerBranch || 'humanizer.rewrite',
+    apiBaseUrl,
+    model,
+    modelSource: resolvedHumanizerConfig.modelSource,
+    apiBaseUrlSource: resolvedHumanizerConfig.apiBaseUrlSource,
+    apiKeySource: resolvedHumanizerConfig.apiKeySource
+  }));
+  if (options.requestTrace) {
+    requestBody.__trace = {
+      ...trace,
+      requestId: String(options.requestTrace?.requestId || options.requestTrace?.request_id || '').trim(),
+      phaseSeq: Number(options.requestTrace?.phaseSeq || options.requestTrace?.phase_seq || 0) || undefined,
+      source: 'humanizer_agent',
+      phase: 'humanizer',
+      purpose: 'rewrite_reply',
+      userId: String(options.userId || options.routeMeta?.userId || options.routeMeta?.user_id || '').trim()
+    };
+  }
 
   try {
     if (shouldUseHumanizerStreaming(options)) {
@@ -211,7 +369,10 @@ async function runHumanizerAgent(text, options = {}) {
       return rewritten;
     }
 
-    const resp = await postWithRetry(apiBaseUrl, { ...requestBody, stream: false }, retries, apiKey);
+    const postRequest = typeof options.postWithRetryImpl === 'function'
+      ? options.postWithRetryImpl
+      : postWithRetry;
+    const resp = await postRequest(apiBaseUrl, { ...requestBody, stream: false }, retries, apiKey);
 
     const msg = extractMessageContent(resp);
     const rewritten = sanitizeAgentOutput(normalizeTextContent(msg?.content));
@@ -222,6 +383,10 @@ async function runHumanizerAgent(text, options = {}) {
 
     return rewritten;
   } catch (e) {
+    if (e?.humanizerFirstTokenTimeout) {
+      throw e;
+    }
+
     if (shouldUseHumanizerStreaming(options) && sanitizeAgentOutput(e.partialText)) {
       return sanitizeAgentOutput(e.partialText);
     }
@@ -234,6 +399,8 @@ async function runHumanizerAgent(text, options = {}) {
 
 module.exports = {
   HUMANIZER_AGENT_SYSTEM_PROMPT,
+  getHumanizerFirstTokenTimeoutMs,
   isHumanizerAgentEnabled,
+  resolveHumanizerModelConfig,
   runHumanizerAgent
 };

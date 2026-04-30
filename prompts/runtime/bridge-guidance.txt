@@ -1,3 +1,5 @@
+# Bridge Guidance
+
 当前任务策略: {{routeKey}}
 任务说明: {{routeDescription}}
 优先用当前工作区真实可用的工具或技能完成任务，不要假设隐藏能力存在。

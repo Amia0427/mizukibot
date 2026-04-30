@@ -207,11 +207,13 @@ function resolveMainModelConfig(baseConfig = null, options = null) {
   const normalized = normalizeScopeOptions(options);
   const primaryConfig = buildPrimaryConfig(baseConfig);
   warnIfFallbackEnabledButIncomplete(normalized.scope);
+  const state = getScopeState(normalized.scope);
   if (!isFallbackActive(normalized)) {
     return {
       ...primaryConfig,
       __mainFallbackActive: false,
-      __mainFallbackScope: normalized.scope
+      __mainFallbackScope: normalized.scope,
+      __mainFallbackReason: normalizeText(state.lastError)
     };
   }
 
@@ -224,7 +226,8 @@ function resolveMainModelConfig(baseConfig = null, options = null) {
     __mainApiBaseUrlSource: getFallbackApiBaseUrl(normalized.scope) ? `${normalized.scope}.fallbackApiBaseUrl` : primaryConfig.__mainApiBaseUrlSource,
     __mainApiKeySource: getFallbackApiKey(normalized.scope) ? `${normalized.scope}.fallbackApiKey` : primaryConfig.__mainApiKeySource,
     __mainFallbackActive: true,
-    __mainFallbackScope: normalized.scope
+    __mainFallbackScope: normalized.scope,
+    __mainFallbackReason: normalizeText(state.lastError)
   };
 }
 
@@ -232,6 +235,7 @@ function resolveForcedFallbackMainModelConfig(baseConfig = null, options = null)
   const normalized = normalizeScopeOptions(options);
   const primaryConfig = buildPrimaryConfig(baseConfig);
   warnIfFallbackEnabledButIncomplete(normalized.scope);
+  const state = getScopeState(normalized.scope);
   return {
     ...primaryConfig,
     model: getFallbackModelName(normalized.scope) || primaryConfig.model,
@@ -242,7 +246,8 @@ function resolveForcedFallbackMainModelConfig(baseConfig = null, options = null)
     __mainApiKeySource: getFallbackApiKey(normalized.scope) ? `${normalized.scope}.fallbackApiKey` : primaryConfig.__mainApiKeySource,
     __mainFallbackActive: true,
     __mainFallbackForced: true,
-    __mainFallbackScope: normalized.scope
+    __mainFallbackScope: normalized.scope,
+    __mainFallbackReason: normalizeText(state.lastError)
   };
 }
 
