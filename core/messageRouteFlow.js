@@ -15,6 +15,9 @@ const {
   setGroupPublic,
   shouldForceDisableGroupMainModelStream
 } = require('../utils/groupMainModelStreamPolicy');
+const {
+  applyGroupDirectStyleGuard
+} = require('../api/runtimeV2/guards/groupDirectReplyStyleGuard');
 
 function parseJsonTail(text = '') {
   const raw = String(text || '').trim();
@@ -231,6 +234,37 @@ function createMessageRouteFlow(deps = {}) {
         ? `direct_${senderId}`
         : `group_${groupId}_user_${senderId}`
     });
+  }
+
+  function buildGroupDirectGuardRequest(route = {}, routeExecutionPlan = {}, chatType = 'group', groupId = '') {
+    const routeMeta = buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+      groupId,
+      chatType
+    });
+    return {
+      topRouteType: routeExecutionPlan?.topRouteType || routeMeta.topRouteType,
+      routeMeta
+    };
+  }
+
+  function applyGroupDirectGuardToReplyEnvelopeInput(input = {}, route = {}, routeExecutionPlan = {}, chatType = 'group', groupId = '') {
+    const replyText = String(input?.replyText || '').trim();
+    if (!replyText) return input;
+    const guardRequest = buildGroupDirectGuardRequest(route, routeExecutionPlan, chatType, groupId);
+    const guard = applyGroupDirectStyleGuard(
+      replyText,
+      guardRequest
+    );
+    const persistedText = String(input?.persistedReplyText || '').trim();
+    const persistedGuard = persistedText
+      ? applyGroupDirectStyleGuard(persistedText, guardRequest)
+      : null;
+    if (!guard.applied && !persistedGuard?.applied) return input;
+    return {
+      ...input,
+      replyText: guard.applied ? guard.text : input.replyText,
+      persistedReplyText: persistedGuard?.applied ? persistedGuard.text : input.persistedReplyText
+    };
   }
 
   async function runClaudeWrapperMetadata(message = '', session = null) {
@@ -969,7 +1003,7 @@ function createMessageRouteFlow(deps = {}) {
             groupId,
             toolTaskOptions
           });
-          return buildReplyEnvelope({
+          return buildReplyEnvelope(applyGroupDirectGuardToReplyEnvelopeInput({
             replyText: backgroundResult.reply || '',
             allowStream: false,
             atSender: true,
@@ -978,7 +1012,7 @@ function createMessageRouteFlow(deps = {}) {
             backgroundTaskState: {
               handled: Boolean(backgroundResult.backgroundHandled)
             }
-          });
+          }, route, routeExecutionPlan, chatType, groupId));
         }
 
         const qzoneDraftMode = detectQzonePostDraftMode(route, cleanText);
@@ -1153,7 +1187,7 @@ function createMessageRouteFlow(deps = {}) {
       }
     }
 
-    return buildReplyEnvelope({
+    return buildReplyEnvelope(applyGroupDirectGuardToReplyEnvelopeInput({
       replyText: reply,
       persistedReplyText: persistedReplyText || reply,
       allowStream: Boolean(routeExecutionPlan?.allowStream),
@@ -1166,7 +1200,7 @@ function createMessageRouteFlow(deps = {}) {
       usedStreamingSend,
       replyOptions: finalReplyOptions,
       freshness
-    });
+    }, route, routeExecutionPlan, chatType, groupId));
   }
 
   async function dispatchAdminRoute({

@@ -116,24 +116,112 @@ function listMemoryEventFiles() {
     .map((name) => path.join(config.MEMORY_V3_EVENTS_DIR, name));
 }
 
-function loadMemoryEvents(options = {}) {
+function classifyEventFileName(filePath = '') {
+  const name = path.basename(String(filePath || ''));
+  if (/^\d{4}-\d{2}-\d{2}\.ndjson$/i.test(name)) return 'daily';
+  if (/^\d{4}-\d{2}\.ndjson$/i.test(name)) return 'legacy_month';
+  return 'unknown';
+}
+
+function compactFileNames(files = [], limit = 24) {
+  const names = (Array.isArray(files) ? files : []).map((file) => path.basename(String(file || ''))).filter(Boolean);
+  const max = Math.max(4, Number(limit) || 24);
+  if (names.length <= max) return { files: names, truncated: false };
+  const edge = Math.max(2, Math.floor(max / 2));
+  return {
+    files: [
+      ...names.slice(0, edge),
+      `...${names.length - (edge * 2)} omitted...`,
+      ...names.slice(-edge)
+    ],
+    truncated: true
+  };
+}
+
+function buildEventReadDiagnostics(files = [], options = {}) {
+  const names = compactFileNames(files, options.fileNameLimit);
+  const dailyFiles = (Array.isArray(files) ? files : []).filter((file) => classifyEventFileName(file) === 'daily');
+  const legacyMonthFiles = (Array.isArray(files) ? files : []).filter((file) => classifyEventFileName(file) === 'legacy_month');
+  const compactDaily = compactFileNames(dailyFiles, options.fileNameLimit);
+  const compactLegacy = compactFileNames(legacyMonthFiles, options.fileNameLimit);
+  return {
+    eventDir: config.MEMORY_V3_EVENTS_DIR,
+    fileCount: files.length,
+    firstFile: files.length > 0 ? path.basename(files[0]) : '',
+    lastFile: files.length > 0 ? path.basename(files[files.length - 1]) : '',
+    files: names.files,
+    filesTruncated: names.truncated,
+    dailyFileCount: dailyFiles.length,
+    legacyMonthFileCount: legacyMonthFiles.length,
+    dailyFiles: compactDaily.files,
+    legacyMonthFiles: compactLegacy.files,
+    fromTs: Math.max(0, Number(options.fromTs || 0) || 0),
+    toTs: Math.max(0, Number(options.toTs || 0) || 0),
+    totalRows: 0,
+    loadedEvents: 0,
+    latestEventTs: 0,
+    latestEventFile: '',
+    latestEventId: '',
+    latestRelevantEventTs: 0,
+    latestRelevantEventFile: '',
+    latestRelevantEventId: ''
+  };
+}
+
+function matchesDiagnosticScope(event = {}, options = {}) {
+  const userId = normalizeText(options.userId);
+  const sessionKey = normalizeText(options.sessionKey);
+  const groupId = normalizeText(options.groupId);
+  const eventTypes = Array.isArray(options.eventTypes)
+    ? new Set(options.eventTypes.map((item) => normalizeText(item).toLowerCase()).filter(Boolean))
+    : null;
+  if (eventTypes && !eventTypes.has(normalizeText(event.type).toLowerCase())) return false;
+  const scopes = [];
+  if (userId) scopes.push(normalizeText(event.userId) === userId);
+  if (sessionKey) scopes.push(normalizeText(event.sessionKey) === sessionKey);
+  if (groupId) scopes.push(normalizeText(event.groupId) === groupId);
+  return scopes.length === 0 || scopes.some(Boolean);
+}
+
+function loadMemoryEventsWithDiagnostics(options = {}) {
   const files = listMemoryEventFiles();
   const results = [];
+  const diagnostics = buildEventReadDiagnostics(files, options);
   const fromTs = Math.max(0, Number(options.fromTs || 0) || 0);
   const toTs = Math.max(0, Number(options.toTs || 0) || 0);
   for (const file of files) {
     const rows = safeReadJsonLines(file);
+    diagnostics.totalRows += rows.length;
     for (const row of rows) {
       try {
         const event = normalizeMemoryEvent(row);
         if (fromTs && event.ts < fromTs) continue;
         if (toTs && event.ts > toTs) continue;
         results.push(event);
+        if (Number(event.ts || 0) >= Number(diagnostics.latestEventTs || 0)) {
+          diagnostics.latestEventTs = Number(event.ts || 0) || 0;
+          diagnostics.latestEventFile = path.basename(file);
+          diagnostics.latestEventId = String(event.id || '');
+        }
+        if (matchesDiagnosticScope(event, options) && Number(event.ts || 0) >= Number(diagnostics.latestRelevantEventTs || 0)) {
+          diagnostics.latestRelevantEventTs = Number(event.ts || 0) || 0;
+          diagnostics.latestRelevantEventFile = path.basename(file);
+          diagnostics.latestRelevantEventId = String(event.id || '');
+        }
       } catch (_) {}
     }
   }
   results.sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0) || String(a.id || '').localeCompare(String(b.id || '')));
-  return results;
+  diagnostics.loadedEvents = results.length;
+  return { events: results, diagnostics };
+}
+
+function loadMemoryEvents(options = {}) {
+  return loadMemoryEventsWithDiagnostics(options).events;
+}
+
+function inspectMemoryEventReadSet(options = {}) {
+  return loadMemoryEventsWithDiagnostics(options).diagnostics;
 }
 
 module.exports = {
@@ -141,6 +229,9 @@ module.exports = {
   appendMemoryEvent,
   normalizeMemoryEvent,
   loadMemoryEvents,
+  loadMemoryEventsWithDiagnostics,
+  inspectMemoryEventReadSet,
   listMemoryEventFiles,
-  eventFileForTs
+  eventFileForTs,
+  classifyEventFileName
 };

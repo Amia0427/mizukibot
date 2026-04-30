@@ -44,6 +44,11 @@ const {
   buildHeuristicDynamicPromptPlan,
   getMainReplyDynamicBlockCatalog
 } = require('../../../utils/mainReplyPromptBlocks');
+const {
+  GROUP_DIRECT_REPLY_CHAR_LIMIT,
+  GROUP_DIRECT_REPLY_TARGET_MAX_CHARS,
+  GROUP_DIRECT_REPLY_TARGET_MIN_CHARS
+} = require('../guards/groupDirectReplyStyleGuard');
 
 const DYNAMIC_CONTEXT_PLAN_VERSION = 'dynamic_context_plan_v2';
 const MEMORY_RECALL_PROMPT_MIN_BUDGET_MS = 6000;
@@ -192,7 +197,7 @@ function buildGroupDirectChatStyleGuardPrompt() {
   return [
     '[GroupDirectChatStyleGuard]',
     '当前是QQ群里的直接问答，不是一对一长教程。',
-    '最终回复默认1到3句，目标80到180个中文字，硬上限220字。',
+    `最终回复默认1到3句，目标${GROUP_DIRECT_REPLY_TARGET_MIN_CHARS}到${GROUP_DIRECT_REPLY_TARGET_MAX_CHARS}个中文字，硬上限${GROUP_DIRECT_REPLY_CHAR_LIMIT}字。`,
     '先像群友顺手接话，再只给最关键的一两个点；不要标题、编号、分点、教程提纲、总结段。',
     '遇到“如何学习/怎么入门/推荐路线”这类问题，只给最短起步路径，不展开完整课程。'
   ].join('\n');

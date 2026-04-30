@@ -4,6 +4,7 @@ const { queryMemory } = require('./query');
 const { assembleMemoryPacket } = require('./packet');
 const { restoreSessionState } = require('./session');
 const { migrateLegacyMemoryToV3 } = require('./migration');
+const { diagnoseProjectionFreshness } = require('./diagnostics');
 
 module.exports = {
   appendMemoryEvent,
@@ -13,5 +14,6 @@ module.exports = {
   queryMemory,
   assembleMemoryPacket,
   restoreSessionState,
-  migrateLegacyMemoryToV3
+  migrateLegacyMemoryToV3,
+  diagnoseProjectionFreshness
 };

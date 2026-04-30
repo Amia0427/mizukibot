@@ -86,5 +86,6 @@ function acquireMaterializeLock(lockFile, options = {}) {
 module.exports = {
   DEFAULT_STALE_MS,
   acquireMaterializeLock,
+  readMaterializeLock: readLock,
   isProcessAlive
 };

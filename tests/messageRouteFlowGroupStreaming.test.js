@@ -205,6 +205,23 @@ module.exports = (async () => {
   assert.strictEqual(backgroundCallsSeen.length, 1);
   assert.strictEqual(backgroundCallsSeen[0].toolTaskOptions.deferPersist, false, 'background direct routes must persist inline before returning/following up');
 
+  const longTeachingReply = '川麻玩家转日麻最大的坑其实是思维方式——川麻是缺一门，日麻是四门全留，听牌要考虑役种，不然赢了也是无役和，没有点数。最先要记的：役是什么、哪些役最常见。平和、断幺、立直、门清摸和，这几个先搞定就能打了。然后立直的概念要理解。川麻不需要宣告，日麻立直是明示听牌且不换牌，押1000点进去，赢了有额外收益。还有一个坑——振听。自己打出去的牌、别人打过你没吃碰的牌，你再去听，就是振听，赢不了别人，只能自摸。有个推荐的入门路子：先下天凤或雀魂，段位最低的对局开打，输了就复盘看系统提示为什么无役或振听。';
+  const toolFallbackGuardCase = createBaseDeps({
+    askToolTaskLocally: async () => longTeachingReply
+  });
+  const guardedToolEnvelope = await toolFallbackGuardCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('group'),
+    executionPlan: {
+      executor: 'direct',
+      allowTools: true,
+      allowStream: false,
+      topRouteType: 'direct_chat',
+      routeDebugKey: 'direct_chat/tool',
+      allowedTools: ['memory_cli']
+    }
+  });
+  assert.ok(guardedToolEnvelope.replyText.length <= 220, 'group direct tool fallback should be guarded before final send');
+
   console.log('messageRouteFlowGroupStreaming.test.js passed');
 })().catch((error) => {
   console.error(error);

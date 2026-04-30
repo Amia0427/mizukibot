@@ -35,6 +35,7 @@ const {
   resolveVectorCandidates,
   searchMemoryVectors
 } = require('../lancedbMemoryStore');
+const { diagnoseProjectionFreshness } = require('./diagnostics');
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
 
@@ -568,6 +569,10 @@ async function queryMemory(input = {}) {
   const profileProjection = loadProfileProjection();
   const persona = profileProjection.users?.[userId]?.personaCore || {};
   const affinityState = getUserAffinityState(userId);
+  const projectionFreshness = diagnoseProjectionFreshness({
+    ...input,
+    userId
+  });
   return {
     ok: true,
     userId,
@@ -591,6 +596,9 @@ async function queryMemory(input = {}) {
       reranked: reranked.length,
       selected: selected.length,
       lancedb: lancedbDiagnostics
+    },
+    diagnostics: {
+      projectionFreshness
     }
   };
 }

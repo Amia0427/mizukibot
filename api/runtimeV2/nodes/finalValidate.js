@@ -1,3 +1,12 @@
+const {
+  applyGroupDirectStyleGuard,
+  createGroupDirectStyleGuardEvent
+} = require('../guards/groupDirectReplyStyleGuard');
+
+function normalizeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function createFinalValidateNode(deps = {}) {
   const createEvent = typeof deps.createEvent === 'function'
     ? deps.createEvent
@@ -20,8 +29,10 @@ function createFinalValidateNode(deps = {}) {
     const rawDisplayReply = String(state.output?.displayReply || rawFinalReply || '').trim();
     const protectedReply = protectFinalOutput(rawFinalReply);
     const protectedDisplayReply = protectFinalOutput(rawDisplayReply);
-    const finalReply = String(protectedReply.text || '').trim();
-    const displayReply = String(protectedDisplayReply.text || '').trim() || finalReply;
+    const guardedReply = applyGroupDirectStyleGuard(protectedReply.text, state.request);
+    const guardedDisplayReply = applyGroupDirectStyleGuard(protectedDisplayReply.text, state.request);
+    const finalReply = String(guardedReply.text || '').trim();
+    const displayReply = String(guardedDisplayReply.text || '').trim() || finalReply;
     const failure = finalReply && isReplyFailure(finalReply, { emptyIsFailure: true })
       ? classifyReplyFailure(finalReply)
       : null;
@@ -46,6 +57,17 @@ function createFinalValidateNode(deps = {}) {
       }),
       createEvent('node_complete', { node: 'final_validate' })
     ];
+    if (guardedReply.applied || guardedDisplayReply.applied) {
+      events.splice(
+        events.length - 2,
+        0,
+        createGroupDirectStyleGuardEvent(
+          createEvent,
+          'final_validate',
+          guardedDisplayReply.applied ? guardedDisplayReply : guardedReply
+        )
+      );
+    }
     return saveAndEmit({
       ...state,
       output: {
