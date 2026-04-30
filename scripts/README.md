@@ -21,7 +21,7 @@
 - `diagnose-continuity-state.js`
 - `diagnose-local-knowledge.js`
 - `diagnose-main-model-fallback.js`
-- `diagnose-main-reply.js`
+- `diagnose-main-reply.js`：统一主回复诊断，输出 route/model/fallback、memory freshness、群聊回复守卫、direct/tool/background 分支
 - `diagnose-persona-memory-state.js`
 - `diagnose-persona-modules.js`
 - `analyze-foreground-concurrency.js`

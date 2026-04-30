@@ -14,16 +14,17 @@ const {
 
 const HUMANIZER_AGENT_SYSTEM_PROMPT = [
   '你是“风格保护型 Humanizer 子 Agent”。',
-  '任务：去掉明显 AI 腔/模板腔，并根据当前语境决定更自然的流式分段。',
+  '任务：只做人味化修饰、去掉明显 AI 腔/模板腔，并根据当前语境决定更自然的流式分段。',
   '硬性约束：',
   '1. 不改变事实、结论、称呼、角色设定与核心语气方向。',
   '2. 必须保留原文的说话风格：语气词、节奏、口头习惯、角色味道。',
   '3. 只去除明显 AI 套话、客服腔、总结腔；不要把原文改成统一模板口吻。',
-  '4. 不新增事实，不删减关键信息。',
-  '5. 如果原文已经自然，只做最小改动。',
-  '6. 默认保持原文篇幅，除非有明显重复；通常不应压缩超过 20%。',
-  '7. 如果需要流式分段，只在语义完整的位置插入一个空行作为段落边界。',
-  '8. 只输出最终回复正文，不要解释，不要编号，不要写“第一段/第二段”。'
+  '4. 禁止扩写：不新增理由、例子、背景、建议、设定、情绪解释或总结句。',
+  '5. 不新增事实，不删减关键信息，不把含糊处改成确定结论。',
+  '6. 如果原文已经自然，只做标点、停顿、少量词序和语气的最小调整。',
+  '7. 默认保持原文篇幅；通常不应比原文更长，绝对不要超过原文约 15%。',
+  '8. 如果需要流式分段，只在语义完整的位置插入一个空行作为段落边界。',
+  '9. 只输出最终回复正文，不要解释，不要编号，不要写“第一段/第二段”。'
 ].join('\n');
 
 function getHumanizerStreamMaxSegments(options = {}) {
@@ -56,8 +57,24 @@ function normalizeTextContent(content) {
     return content.map((part) => {
       if (typeof part === 'string') return part;
       if (typeof part?.text === 'string') return part.text;
+      if (typeof part?.content === 'string') return part.content;
+      if (typeof part?.output_text === 'string') return part.output_text;
+      if (Array.isArray(part?.content)) return normalizeTextContent(part.content);
+      if (part?.content && typeof part.content === 'object') return normalizeTextContent(part.content);
       return '';
     }).join('');
+  }
+  if (content && typeof content === 'object') {
+    if (typeof content.text === 'string') return content.text;
+    if (typeof content.content === 'string') return content.content;
+    if (typeof content.output_text === 'string') return content.output_text;
+    if (typeof content.outputText === 'string') return content.outputText;
+    if (Array.isArray(content.content)) return normalizeTextContent(content.content);
+    if (Array.isArray(content.output)) return normalizeTextContent(content.output);
+    if (content.message && typeof content.message === 'object') return normalizeTextContent(content.message);
+    if (content.response && typeof content.response === 'object') return normalizeTextContent(content.response);
+    if (content.result && typeof content.result === 'object') return normalizeTextContent(content.result);
+    return '';
   }
   return String(content || '');
 }
@@ -157,6 +174,17 @@ function isLikelyOverCompressed(original, rewritten) {
   return false;
 }
 
+function isLikelyOverExpanded(original, rewritten) {
+  const source = sanitizeAgentOutput(original);
+  const target = sanitizeAgentOutput(rewritten);
+  if (!source || !target) return false;
+
+  const ratio = target.length / Math.max(1, source.length);
+  if (source.length < 20) return ratio > 1.8 && target.length - source.length > 18;
+  if (source.length < 80) return ratio > 1.45 && target.length - source.length > 24;
+  return ratio > 1.18 && target.length - source.length > 40;
+}
+
 function buildHumanizerMessages(original, options = {}) {
   const question = String(options.question || '').trim();
   const dynamicPrompt = String(options.dynamicPrompt || '').trim();
@@ -170,14 +198,15 @@ function buildHumanizerMessages(original, options = {}) {
       role: 'user',
       content: [
         question ? `用户原问题：${question}` : '',
-        '请在保留原文说话风格的前提下，润色下面这段回复：',
+        '请在保留原文说话风格的前提下，轻微润色下面这段回复。',
+        '只做拟人化修饰、去 AI 味和必要的语义分段；不要扩写，不要新增信息：',
         original
       ].filter(Boolean).join('\n\n')
     }
   ].filter(Boolean);
 }
 
-async function requestHumanizerStreaming(apiBaseUrl, payload, options = {}, retries = 0, apiKey = '') {
+async function requestHumanizerStreaming(apiBaseUrl, payload, options = {}, retries = 0, apiKey = '', original = '') {
   const parserState = { buffer: '' };
   let collected = '';
   let emitted = '';
@@ -313,6 +342,9 @@ async function requestHumanizerStreaming(apiBaseUrl, payload, options = {}, retr
   settled = true;
   clearFirstTokenTimeout();
   const finalVisible = sanitizeAgentOutput(collected);
+  if (isLikelyOverExpanded(original, finalVisible)) {
+    return fallbackHumanize(original);
+  }
   if (finalVisible) emitVisibleText(finalVisible);
   return finalVisible;
 }
@@ -363,9 +395,10 @@ async function runHumanizerAgent(text, options = {}) {
 
   try {
     if (shouldUseHumanizerStreaming(options)) {
-      const rewritten = await requestHumanizerStreaming(apiBaseUrl, requestBody, options, retries, apiKey);
+      const rewritten = await requestHumanizerStreaming(apiBaseUrl, requestBody, options, retries, apiKey, original);
       if (!rewritten) return fallbackHumanize(original);
       if (isLikelyOverCompressed(original, rewritten)) return fallbackHumanize(original);
+      if (isLikelyOverExpanded(original, rewritten)) return fallbackHumanize(original);
       return rewritten;
     }
 
@@ -380,6 +413,8 @@ async function runHumanizerAgent(text, options = {}) {
 
     // 防止子 Agent 过度压缩导致“回复字数异常偏少”。
     if (isLikelyOverCompressed(original, rewritten)) return fallbackHumanize(original);
+    // 防止子 Agent 自行扩写，改变原意或引入额外表达。
+    if (isLikelyOverExpanded(original, rewritten)) return fallbackHumanize(original);
 
     return rewritten;
   } catch (e) {

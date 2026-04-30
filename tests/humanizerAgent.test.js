@@ -70,6 +70,48 @@ module.exports = (async () => {
     assert.strictEqual(slowAfterFirstToken, '先这样。');
     assert.deepStrictEqual(slowAfterFirstTokenDeltas, [{ delta: '先这样。', fullText: '先这样。' }]);
 
+    const compactOriginal = '好，我知道了。';
+    const overExpanded = await humanizer.runHumanizerAgent(compactOriginal, {
+      postWithRetryImpl: async () => ({
+        data: {
+          choices: [{
+            message: {
+              content: '好，我知道了。我会先帮你整理一下整体思路，然后再一步步拆开解释，避免你后面看起来太累。'
+            }
+          }]
+        }
+      })
+    });
+    assert.strictEqual(overExpanded, compactOriginal);
+
+    const objectContentRewrite = await humanizer.runHumanizerAgent('原文', {
+      postWithRetryImpl: async () => ({
+        data: {
+          choices: [{
+            message: {
+              content: { type: 'text', text: '润色后文本' }
+            }
+          }]
+        }
+      })
+    });
+    assert.strictEqual(objectContentRewrite, '润色后文本');
+    assert.notStrictEqual(objectContentRewrite, '[object Object]');
+
+    const overExpandedStreamDeltas = [];
+    const overExpandedStream = await humanizer.runHumanizerAgent(compactOriginal, {
+      stream: true,
+      onDelta(delta, fullText) {
+        overExpandedStreamDeltas.push({ delta, fullText });
+      },
+      firstTokenTimeoutMs: 1000,
+      postStreamWithRetryImpl: async (_url, _body, handlers) => {
+        handlers.onData(sse('好，我知道了。我会先帮你整理一下整体思路，然后再一步步拆开解释，避免你后面看起来太累。'));
+      }
+    });
+    assert.strictEqual(overExpandedStream, compactOriginal);
+    assert.deepStrictEqual(overExpandedStreamDeltas, []);
+
     let timeoutSignal = null;
     await assert.rejects(
       () => humanizer.runHumanizerAgent('原文', {

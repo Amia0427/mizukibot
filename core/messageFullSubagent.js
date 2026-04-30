@@ -1,4 +1,5 @@
 const { buildRuntimePrompt } = require('../utils/runtimePrompts');
+const { buildSubagentStyleGuardInstruction, prepareSubagentFallbackReply, prepareSubagentOutputForReview } = require('../utils/subagentStyleGuard');
 const {
   buildReviewStageRoutePrompt,
   buildReviewStageSystemPrompt
@@ -150,6 +151,7 @@ function buildFullSubagentWorkerPrompt(question = '', worker = {}, plan = {}) {
     'Complete only your assigned scope. Do not assume the other worker completed your part.',
     'Do not claim to have searched, read, verified, executed, or observed anything you did not actually do.',
     'Output structured plain text that a local reviewer can merge directly.',
+    buildSubagentStyleGuardInstruction({ maxChars: 1600 }),
     '',
     `Original task:\n${String(question || '').trim() || '(empty)'}`,
     `Worker id: ${String(worker?.id || '').trim() || 'w1'}`,
@@ -175,7 +177,7 @@ function summarizeFullWorkerError(error, worker = {}) {
 function formatFullWorkerResultForReview(result = {}) {
   const worker = result?.worker || {};
   const status = String(result?.status || 'unknown').trim() || 'unknown';
-  const output = String(result?.output || '').trim();
+  const output = prepareSubagentOutputForReview(result?.output || '', { maxChars: 2400 });
   const error = String(result?.error || '').trim();
 
   return [
@@ -232,7 +234,7 @@ function chooseBestFullSubagentWorkerOutput(workerResults = []) {
 function buildFullSubagentFallbackReply(workerResults = []) {
   const normalizedResults = Array.isArray(workerResults) ? workerResults : [];
   const best = chooseBestFullSubagentWorkerOutput(normalizedResults);
-  if (best) return best;
+  if (best) return prepareSubagentFallbackReply(best);
 
   const fragments = normalizedResults
     .map((entry) => {
@@ -245,7 +247,7 @@ function buildFullSubagentFallbackReply(workerResults = []) {
     })
     .filter(Boolean);
 
-  if (fragments.length) return fragments.join('\n\n');
+  if (fragments.length) return prepareSubagentFallbackReply(fragments.join('\n\n'));
   return 'This /full run did not produce a usable worker result.';
 }
 
@@ -305,7 +307,8 @@ function createMessageFullSubagentCoordinator(deps = {}) {
       outputFormatInstruction
     });
 
-    const reviewInput = buildSubagentReviewPayload(question, subagentOutput, routePolicyKey);
+    const guardedSubagentOutput = prepareSubagentOutputForReview(subagentOutput, { requestText: question });
+    const reviewInput = buildSubagentReviewPayload(question, guardedSubagentOutput, routePolicyKey);
     return askAIByGraph(reviewInput, userInfo, userId, reviewSystemPrompt, imageUrl, {
       routePrompt: reviewRoutePrompt,
       routePolicyKey,
@@ -378,7 +381,11 @@ function createMessageFullSubagentCoordinator(deps = {}) {
       routePromptBlock: routePrompt ? `Routing guidance:\n${routePrompt}` : '',
       outputFormatInstruction
     });
-    const reviewInput = buildFullSubagentReviewPayload(question, plan, workerResults, routePolicyKey);
+    const guardedWorkerResults = (Array.isArray(workerResults) ? workerResults : []).map((entry) => ({
+      ...entry,
+      output: prepareSubagentOutputForReview(entry?.output || '', { requestText: question })
+    }));
+    const reviewInput = buildFullSubagentReviewPayload(question, plan, guardedWorkerResults, routePolicyKey);
     return askAIByGraph(reviewInput, userInfo, userId, reviewSystemPrompt, imageUrl, {
       routePrompt: reviewRoutePrompt,
       routePolicyKey,
@@ -475,7 +482,10 @@ function createMessageFullSubagentCoordinator(deps = {}) {
           });
           workerCancels.push((reason) => bridgeCall.cancel(reason));
           const output = await withTimeout(bridgeCall.promise, workerTimeoutMs, () => bridgeCall.cancel('timeout'));
-          const cleanOutput = cleanToolReplyText(output, formattingPreferences);
+          const cleanOutput = prepareSubagentOutputForReview(
+            cleanToolReplyText(output, formattingPreferences),
+            { requestText: question }
+          );
           console.log('[full-subagent] worker completed', {
             executor: 'full_subagent',
             multiAgent: true,
@@ -561,7 +571,10 @@ function createMessageFullSubagentCoordinator(deps = {}) {
         }), reviewTimeoutMs);
         if (!shouldContinue()) return '';
         if (String(reviewed || '').trim()) {
-          const cleanReviewed = cleanToolReplyText(reviewed, formattingPreferences);
+          const cleanReviewed = prepareSubagentFallbackReply(
+            cleanToolReplyText(reviewed, formattingPreferences),
+            { requestText: question }
+          );
           if (cleanReviewed && !(typeof looksLikeModelFailureText === 'function' && looksLikeModelFailureText(cleanReviewed))) {
             console.log('[full-subagent] review completed', {
               executor: 'full_subagent',
@@ -723,6 +736,7 @@ function createMessageFullSubagentCoordinator(deps = {}) {
           routeDebugKey: 'admin/full',
           topRouteType: 'admin',
           allowTools: false,
+          subagentRefill: true,
           requestText: payload
         }),
         atSender: true,

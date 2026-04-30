@@ -10,6 +10,14 @@ function looksLikeInvocationFailure(reply) {
   return /^Model invocation failed:/i.test(text);
 }
 
+function collectExtraAgentPromptRoots() {
+  const path = require('path');
+  return String(process.env.AGENT_PROMPT_EXTRA_ROOTS || '')
+    .split(path.delimiter)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
 async function main() {
   console.log('================ LangGraph 自检开始 ================');
 
@@ -19,7 +27,7 @@ async function main() {
     ok('config.js 加载成功');
   } catch (e) {
     fail(`config.js 加载失败: ${e.message}`);
-    process.exit(1);
+    return 1;
   }
 
   for (const d of ['@langchain/core', '@langchain/langgraph', '@langchain/openai', 'zod']) {
@@ -28,8 +36,33 @@ async function main() {
       ok(`依赖已安装: ${d}`);
     } catch (_) {
       fail(`缺少依赖: ${d}`);
-      process.exit(1);
+      return 1;
     }
+  }
+
+  try {
+    const path = require('path');
+    const {
+      collectAgentPromptFilesFromRoots,
+      readAgentPromptFile
+    } = require('../utils/agentPrompts');
+    const projectRoot = path.join(__dirname, '..');
+    const agentPromptFiles = collectAgentPromptFilesFromRoots([
+      path.join(projectRoot, 'prompts'),
+      path.join(projectRoot, 'skills'),
+      path.join(projectRoot, 'artifacts'),
+      ...collectExtraAgentPromptRoots()
+    ]);
+    for (const filePath of agentPromptFiles) {
+      const parsed = readAgentPromptFile(filePath, { rootDir: projectRoot });
+      if (!parsed.ok) {
+        throw new Error(`${parsed.relativePath}: ${(parsed.problems || []).join('; ')}`);
+      }
+    }
+    ok(`agent prompt assets parsed: ${agentPromptFiles.length}`);
+  } catch (e) {
+    fail(`agent prompt assets invalid: ${e.message}`);
+    return 1;
   }
 
   let TOOL_SCHEMAS, TOOL_EXECUTORS;
@@ -42,7 +75,7 @@ async function main() {
     ok('TOOL_SCHEMAS 与 TOOL_EXECUTORS 映射正常');
   } catch (e) {
     fail(`toolRegistry 加载失败: ${e.message}`);
-    process.exit(1);
+    return 1;
   }
 
   let askAIByGraph;
@@ -52,7 +85,7 @@ async function main() {
     ok('agentGraph 加载成功，askAIByGraph 可用');
   } catch (e) {
     fail(`agentGraph 加载失败: ${e.message}`);
-    process.exit(1);
+    return 1;
   }
 
   ok(`API_BASE_URL: ${config.API_BASE_URL}`);
@@ -64,7 +97,7 @@ async function main() {
   if (!shouldRun) {
     warn('已跳过实际调用（CHECK_RUN=0）');
     console.log('================ 自检完成（静态） ================');
-    process.exit(0);
+    return 0;
   }
 
   console.log('\n---- 开始实际调用测试（可能会消耗一次模型请求） ----');
@@ -76,12 +109,12 @@ async function main() {
     );
     if (looksLikeInvocationFailure(reply)) {
       fail(`askAIByGraph 返回失败文本: ${String(reply).slice(0, 300)}`);
-      process.exit(1);
+      return 1;
     }
     ok('askAIByGraph 调用成功');
     console.log(`模型返回: ${String(reply).slice(0, 300)}`);
     console.log('================ 自检完成（通过） ================');
-    process.exit(0);
+    return 0;
   } catch (e) {
     fail(`实际调用失败: ${e.message}`);
     console.error('--- 错误详情 ---');
@@ -90,12 +123,20 @@ async function main() {
       console.error('--- response.data ---');
       console.error(typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data, null, 2));
     }
-    process.exit(1);
+    return 1;
   }
 }
 
-main().catch((e) => {
-  fail(`自检脚本异常: ${e.message}`);
-  console.error(e.stack || e);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().then((code) => {
+    process.exit(code);
+  }).catch((e) => {
+    fail(`自检脚本异常: ${e.message}`);
+    console.error(e.stack || e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  main
+};

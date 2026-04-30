@@ -31,10 +31,15 @@ const {
   resolveToolReplyFormattingPreferences
 } = require('../utils/toolReplyFormatting');
 const {
+  buildSubagentStyleGuardInstruction,
   buildSubagentExecutionGuidanceLine,
   buildSubagentExecutionPlanLines,
   buildSubagentToolReasonLine
 } = require('../utils/subagentPrompting');
+const {
+  prepareSubagentFallbackReply,
+  prepareSubagentOutputForReview
+} = require('../utils/subagentStyleGuard');
 const { isAtBot, detectIntentHybrid } = require('./router');
 const routeExecution = require('./routeExecution');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
@@ -312,10 +317,12 @@ function buildBridgeGuidancePrompt(route, backend = 'command', routeExecutionPla
   const toolLine = buildSubagentToolReasonLine(route, backend);
   const executionLine = buildSubagentExecutionGuidanceLine(route, backend, routeExecutionPlan);
   const executionPlanLines = buildSubagentExecutionPlanLines(routeExecutionPlan, backend);
+  const styleGuardLine = buildSubagentStyleGuardInstruction();
   return buildRuntimePrompt('bridge-guidance', {
     routeKey,
     routeDescription,
     planId: 'none',
+    styleGuardLine,
     toolLine,
     executionLine,
     executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',
@@ -1166,10 +1173,12 @@ function createMessageHandler({
       const toolLine = buildSubagentToolReasonLine(route, backend);
       const executionLine = buildSubagentExecutionGuidanceLine(route, backend, routeExecutionPlan);
       const executionPlanLines = buildSubagentExecutionPlanLines(routeExecutionPlan, backend);
+      const styleGuardLine = buildSubagentStyleGuardInstruction();
       return buildCachedRuntimePrompt('bridge-guidance', {
         routeKey,
         routeDescription,
         planId: 'none',
+        styleGuardLine,
         toolLine,
         executionLine,
         executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',
@@ -1485,7 +1494,10 @@ function createMessageHandler({
           });
           workerCancels.push((reason) => bridgeCall.cancel(reason));
           const output = await bridgeCall.promise;
-          const cleanOutput = cleanToolReplyText(output, formattingPreferences);
+          const cleanOutput = prepareSubagentOutputForReview(
+            cleanToolReplyText(output, formattingPreferences),
+            { requestText: question }
+          );
           console.log('[full-subagent] worker completed', {
             executor: 'full_subagent',
             multiAgent: true,
@@ -1571,7 +1583,10 @@ function createMessageHandler({
         });
         if (!shouldContinue()) return '';
         if (String(reviewed || '').trim()) {
-          const cleanReviewed = cleanToolReplyText(reviewed, formattingPreferences);
+          const cleanReviewed = prepareSubagentFallbackReply(
+            cleanToolReplyText(reviewed, formattingPreferences),
+            { requestText: question }
+          );
           if (cleanReviewed && !looksLikeModelFailureText(cleanReviewed)) {
             console.log('[full-subagent] review completed', {
               executor: 'full_subagent',
@@ -1712,13 +1727,13 @@ function createMessageHandler({
     }
 
     if (!(config.SUBAGENT_REVIEW_ENABLED || config.NANOBOT_REVIEW_ENABLED)) {
-      return cleanToolReplyText(subagentOutput, formattingPreferences);
+      return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
     }
 
     try {
       const reviewed = await reviewSubagentOutput({
         question,
-        subagentOutput,
+        subagentOutput: prepareSubagentOutputForReview(subagentOutput, { requestText: question }),
         userInfo,
         userId,
         imageUrl,
@@ -1727,14 +1742,20 @@ function createMessageHandler({
       });
 
       if (String(reviewed || '').trim()) {
-        if (looksLikeModelFailureText(reviewed) && String(subagentOutput || '').trim()) return cleanToolReplyText(subagentOutput, formattingPreferences);
-        return cleanToolReplyText(reviewed, formattingPreferences);
+        if (looksLikeModelFailureText(reviewed) && String(subagentOutput || '').trim()) {
+          return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
+        }
+        return prepareSubagentFallbackReply(cleanToolReplyText(reviewed, formattingPreferences), { requestText: question });
       }
-      if (String(subagentOutput || '').trim()) return cleanToolReplyText(subagentOutput, formattingPreferences);
+      if (String(subagentOutput || '').trim()) {
+        return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
+      }
       return '? agent ???????? Mizuki ????????????????????????';
     } catch (reviewErr) {
       console.error('[subagent-review] failed, fallback to raw subagent output:', reviewErr?.message || reviewErr);
-      if (String(subagentOutput || '').trim()) return cleanToolReplyText(subagentOutput, formattingPreferences);
+      if (String(subagentOutput || '').trim()) {
+        return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
+      }
       return '??? agent ????????????????????????';
     }
   }
@@ -1788,7 +1809,7 @@ function createMessageHandler({
         }
 
         if (!(config.SUBAGENT_REVIEW_ENABLED || config.NANOBOT_REVIEW_ENABLED)) {
-          return cleanToolReplyText(subagentOutput, formattingPreferences);
+          return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
         }
 
         const shouldContinue = typeof mutableOptions?.shouldContinue === 'function'
@@ -1799,7 +1820,7 @@ function createMessageHandler({
           if (!shouldContinue()) return '';
           const reviewed = await reviewSubagentOutput({
             question,
-            subagentOutput,
+            subagentOutput: prepareSubagentOutputForReview(subagentOutput, { requestText: question }),
             userInfo,
             userId,
             imageUrl,
@@ -1810,15 +1831,19 @@ function createMessageHandler({
 
           if (String(reviewed || '').trim()) {
             if (looksLikeModelFailureText(reviewed) && String(subagentOutput || '').trim()) {
-              return cleanToolReplyText(subagentOutput, formattingPreferences);
+              return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
             }
-            return cleanToolReplyText(reviewed, formattingPreferences);
+            return prepareSubagentFallbackReply(cleanToolReplyText(reviewed, formattingPreferences), { requestText: question });
           }
-          if (String(subagentOutput || '').trim()) return cleanToolReplyText(subagentOutput, formattingPreferences);
+          if (String(subagentOutput || '').trim()) {
+            return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
+          }
           return '? agent ???????? Mizuki ????????????????????????';
         } catch (reviewErr) {
           console.error('[subagent-review] failed, fallback to raw subagent output:', reviewErr?.message || reviewErr);
-          if (String(subagentOutput || '').trim()) return cleanToolReplyText(subagentOutput, formattingPreferences);
+          if (String(subagentOutput || '').trim()) {
+            return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
+          }
           return '??? agent ????????????????????????';
         }
       }).catch((bridgeErr) => {

@@ -11,6 +11,7 @@ const routeExecution = require('./routeExecution');
 const { humanizeReply } = require('../utils/humanizer');
 const { classifyReplyFailure, isReplyFailure } = require('../utils/replyFailure');
 const { sanitizeUserFacingText } = require('../utils/userFacingText');
+const { prepareSubagentFallbackReply } = require('../utils/subagentStyleGuard');
 const { buildCuteRefusalReply } = require('./refusalReply');
 const {
   cleanToolReplyText,
@@ -87,6 +88,12 @@ function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
     : String(routeContext?.topRouteType || '').trim();
   const routeCapability = String(routeExecution.getPolicyDefinition(routePolicyKey)?.capability || '').trim();
   const toolReplyRoute = isToolReplyRoute(routeContext);
+  const subagentRefill = typeof routeContext === 'string'
+    ? false
+    : (
+        routeContext?.subagentRefill === true
+        || /subagent/i.test(String(routeContext?.source || routeContext?.executor || '').trim())
+      );
   const formattingPreferences = resolveToolReplyFormattingPreferences(
     typeof routeContext === 'string' ? '' : String(routeContext?.requestText || '').trim()
   );
@@ -97,8 +104,21 @@ function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
   }
 
   if (!isReplyFailure(t)) {
-    if (toolReplyRoute) return cleanToolReplyText(t, formattingPreferences);
-    if (shouldBypassLocalHumanize) return t;
+    if (toolReplyRoute) {
+      const cleanedToolReply = cleanToolReplyText(t, formattingPreferences);
+      return subagentRefill
+        ? prepareSubagentFallbackReply(cleanedToolReply, {
+            requestText: typeof routeContext === 'string' ? '' : String(routeContext?.requestText || '').trim()
+          })
+        : cleanedToolReply;
+    }
+    if (shouldBypassLocalHumanize) {
+      return subagentRefill
+        ? prepareSubagentFallbackReply(t, {
+            requestText: typeof routeContext === 'string' ? '' : String(routeContext?.requestText || '').trim()
+          })
+        : t;
+    }
     if (runtimeConfig.HUMANIZER_AGENT_ENABLED || runtimeConfig.LLM_HUMANIZER_ENABLED) return t;
     const cleaned = humanizeReply(t);
     return cleaned || t;

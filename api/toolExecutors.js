@@ -38,6 +38,10 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { isUnsafeHttpUrl } = require('../utils/networkSafety');
+const {
+  formatAgentPromptForRuntime,
+  loadSkillAgentPrompts
+} = require('../utils/agentPrompts');
 const { formatContextStats } = require('../utils/contextInspector');
 const { searchRecipes } = require('../utils/howtocookLocalSearch');
 const {
@@ -470,6 +474,7 @@ async function loadSkillReference(skillName, args = {}) {
   const query = String(args.query ?? args.topic ?? args.keyword ?? '').trim();
   const requestedRef = String(args.reference ?? args.doc ?? '').trim().toLowerCase();
   const refFiles = listSkillReferenceFiles(skillName);
+  const agentPrompts = loadSkillAgentPrompts(skillDir);
 
   let selectedRef = '';
   if (requestedRef) {
@@ -510,6 +515,13 @@ async function loadSkillReference(skillName, args = {}) {
     parts.push('REFERENCE_FILES: ' + refFiles.slice(0, 8).map((abs) => path.relative(skillDir, abs)).join(', '));
   } else {
     parts.push('REFERENCE_FILES: none');
+  }
+
+  if (agentPrompts.length > 0) {
+    parts.push('AGENT_PROMPTS:');
+    parts.push(agentPrompts.map((agentPrompt) => formatAgentPromptForRuntime(agentPrompt)).join('\n\n'));
+  } else {
+    parts.push('AGENT_PROMPTS: none');
   }
 
   return parts.join('\n\n');
@@ -1278,6 +1290,12 @@ const TOOL_EXECUTORS = {
 // 2) Tool Schema锛堢粰妯″瀷鐪嬬殑锛?
 // -------------------------
 
-module.exports = { TOOL_EXECUTORS };
+module.exports = {
+  TOOL_EXECUTORS,
+  _test: {
+    loadSkillReference,
+    resolveSkillsBaseDir
+  }
+};
 
 

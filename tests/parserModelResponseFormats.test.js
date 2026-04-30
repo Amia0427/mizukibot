@@ -1,6 +1,7 @@
 const assert = require('assert');
 
 const { extractMessageContent } = require('../api/parser');
+const { normalizeTextContent } = require('../api/runtimeV2/model/shared');
 
 module.exports = (() => {
   const responsesOutputText = extractMessageContent({
@@ -83,6 +84,32 @@ module.exports = (() => {
     role: 'assistant',
     content: 'nested proxy text'
   });
+
+  const objectContentMessage = extractMessageContent({
+    data: {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: { type: 'text', text: 'object content text' }
+          }
+        }
+      ]
+    }
+  });
+  assert.deepStrictEqual(objectContentMessage, {
+    role: 'assistant',
+    content: 'object content text'
+  });
+  assert.notStrictEqual(String(objectContentMessage.content), '[object Object]');
+  assert.strictEqual(
+    normalizeTextContent({ type: 'text', text: 'shared object content' }),
+    'shared object content'
+  );
+  assert.strictEqual(
+    normalizeTextContent([{ type: 'text', content: { output_text: 'nested shared content' } }]),
+    'nested shared content'
+  );
 
   console.log('parserModelResponseFormats.test.js passed');
 })()

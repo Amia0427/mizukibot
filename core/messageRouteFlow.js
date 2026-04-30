@@ -23,6 +23,10 @@ const {
 const {
   applyGroupDirectStyleGuard
 } = require('../api/runtimeV2/guards/groupDirectReplyStyleGuard');
+const {
+  buildMainReplyDiagnosticReport,
+  parseMainReplyDiagnosticInput
+} = require('../utils/mainReplyDiagnostics');
 
 function parseJsonTail(text = '') {
   const raw = String(text || '').trim();
@@ -661,6 +665,7 @@ function createMessageRouteFlow(deps = {}) {
         routeDebugKey: 'admin/full',
         topRouteType: 'admin',
         allowTools: false,
+        subagentRefill: true,
         requestText: payload
       }),
       atSender: true,
@@ -740,6 +745,7 @@ function createMessageRouteFlow(deps = {}) {
         routeDebugKey: 'admin/claude',
         topRouteType: 'admin',
         allowTools: false,
+        subagentRefill: true,
         requestText: payload
       }),
       atSender: normalizedChatType !== 'private',
@@ -1372,7 +1378,23 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'reload') {
       adminReply = '重载命令已收到。';
     } else if (cmd === 'debug') {
-      adminReply = `debug 参数: ${args.join(' ') || '无'}`;
+      const subcmd = String(args[0] || '').trim().toLowerCase();
+      if (subcmd === 'replydiag' || subcmd === 'main-reply' || subcmd === 'reply') {
+        const payload = args.slice(1).join(' ').trim();
+        const parsed = parseMainReplyDiagnosticInput(payload || rawText || '');
+        const report = await buildMainReplyDiagnosticReport({
+          ...parsed,
+          rawText: parsed.rawText || parsed.text || parsed.requestText || payload || rawText,
+          requestText: parsed.requestText || parsed.cleanText || parsed.text || payload || rawText,
+          userId: parsed.userId || senderId,
+          groupId: parsed.groupId || groupId,
+          chatType: parsed.chatType || normalizedChatType,
+          plannerMode: parsed.plannerMode || 'rule'
+        });
+        adminReply = JSON.stringify(report, null, 2);
+      } else {
+        adminReply = `debug 参数: ${args.join(' ') || '无'}`;
+      }
     } else {
       adminReply = '未知管理员命令。可以发 /help 查看支持项。';
     }

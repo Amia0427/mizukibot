@@ -406,7 +406,28 @@ function shouldUseAdminSharedFallbackScope(userId = '', options = {}) {
 function normalizeTextContent(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.map((part) => (typeof part === 'string' ? part : (part?.text || ''))).join('');
+    return content.map((part) => {
+      if (typeof part === 'string') return part;
+      if (typeof part?.text === 'string') return part.text;
+      if (typeof part?.content === 'string') return part.content;
+      if (typeof part?.output_text === 'string') return part.output_text;
+      if (typeof part?.outputText === 'string') return part.outputText;
+      if (Array.isArray(part?.content)) return normalizeTextContent(part.content);
+      if (part?.content && typeof part.content === 'object') return normalizeTextContent(part.content);
+      return '';
+    }).join('');
+  }
+  if (content && typeof content === 'object') {
+    if (typeof content.text === 'string') return content.text;
+    if (typeof content.content === 'string') return content.content;
+    if (typeof content.output_text === 'string') return content.output_text;
+    if (typeof content.outputText === 'string') return content.outputText;
+    if (Array.isArray(content.content)) return normalizeTextContent(content.content);
+    if (Array.isArray(content.output)) return normalizeTextContent(content.output);
+    if (content.message && typeof content.message === 'object') return normalizeTextContent(content.message);
+    if (content.response && typeof content.response === 'object') return normalizeTextContent(content.response);
+    if (content.result && typeof content.result === 'object') return normalizeTextContent(content.result);
+    return '';
   }
   return String(content || '');
 }

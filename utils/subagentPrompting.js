@@ -22,6 +22,8 @@ const OPENCLAW_ROUTE_EXECUTION_GUIDANCE = {
   quiz: '执行要求: 先确认主题和难度，再生成题目并做一次难度校准，最后给出可直接使用的题目。'
 };
 
+const { buildSubagentStyleGuardInstruction } = require('./subagentStyleGuard');
+
 function normalizeToolHintsForBackend(toolHints = [], backend = 'command') {
   const hints = Array.isArray(toolHints)
     ? toolHints.filter(Boolean).map((item) => String(item).trim()).filter(Boolean)
@@ -94,6 +96,7 @@ function buildSubagentExecutionGuidanceLine(route = {}, backend = 'command', rou
 module.exports = {
   OPENCLAW_ROUTE_EXECUTION_GUIDANCE,
   OPENCLAW_TOOL_HINT_MAP,
+  buildSubagentStyleGuardInstruction,
   buildSubagentExecutionGuidanceLine,
   buildSubagentExecutionPlanLines,
   buildSubagentToolReasonLine,

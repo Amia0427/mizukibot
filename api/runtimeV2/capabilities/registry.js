@@ -1,5 +1,6 @@
 const { callMcpTool } = require('../../mcpRuntime');
 const { askSubagentByBridge } = require('../../subagentExecutor');
+const { prepareSubagentFallbackReply } = require('../../../utils/subagentStyleGuard');
 const { getStaticToolExecutors, getStaticToolSchemas, getDynamicToolDescriptors } = require('../toolRegistryFacade');
 const { GLOBAL_TOOL_REGISTRY } = require('../globalToolRuntimeFacade');
 const { createCapabilityDescriptor, normalizeArray, normalizeObject, normalizeText } = require('../contracts');
@@ -77,14 +78,18 @@ function buildSubagentDescriptors() {
     createCapabilityDescriptor({
       name: 'subagent_bridge',
       kind: 'subagent',
-      executor: async (args = {}) => askSubagentByBridge(
-        String(args.question || args.prompt || args.input || '').trim(),
-        args.userInfo || null,
-        String(args.userId || args.user_id || '').trim() || 'subagent',
-        args.customPrompt || null,
-        args.imageUrl || null,
-        normalizeObject(args.options, {})
-      ),
+      executor: async (args = {}) => {
+        const question = String(args.question || args.prompt || args.input || '').trim();
+        const output = await askSubagentByBridge(
+          question,
+          args.userInfo || null,
+          String(args.userId || args.user_id || '').trim() || 'subagent',
+          args.customPrompt || null,
+          args.imageUrl || null,
+          normalizeObject(args.options, {})
+        );
+        return prepareSubagentFallbackReply(output, { requestText: question });
+      },
       readOnly: false,
       parallelSafe: false,
       resumable: false,

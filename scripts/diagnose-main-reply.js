@@ -4,21 +4,45 @@ const {
   getMainReplyDynamicBlockCatalog
 } = require('../utils/mainReplyPromptBlocks');
 const { getPersonaModuleCatalogSummary } = require('../utils/personaModules');
+const { buildMainReplyDiagnosticReport } = require('../utils/mainReplyDiagnostics');
+
+function parseArgs(argv = []) {
+  const args = argv.slice(2);
+  const flags = new Set(args.filter((item) => String(item || '').startsWith('--')));
+  const text = args.filter((item) => !String(item || '').startsWith('--')).join(' ').trim();
+  return {
+    text,
+    json: flags.has('--json') || true,
+    promptBlocks: flags.has('--prompt-blocks'),
+    plannerMode: flags.has('--live-planner') ? 'live' : 'rule'
+  };
+}
 
 function main() {
-  const question = process.argv.slice(2).join(' ').trim();
-  if (!question) {
-    console.error('usage: node scripts/diagnose-main-reply.js <text>');
+  const args = parseArgs(process.argv);
+  if (!args.text) {
+    console.error('usage: node scripts/diagnose-main-reply.js [--live-planner] [--prompt-blocks] <text-or-json>');
     process.exit(1);
   }
 
-  run(question).catch((error) => {
+  run(args).catch((error) => {
     console.error(error);
     process.exit(1);
   });
 }
 
-async function run(question) {
+async function run(args) {
+  if (args.promptBlocks) {
+    console.log(JSON.stringify(buildPromptBlockDiagnostic(args.text), null, 2));
+    return;
+  }
+  const result = await buildMainReplyDiagnosticReport(args.text, {
+    plannerMode: args.plannerMode
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+function buildPromptBlockDiagnostic(question) {
   const personaModuleCatalog = getPersonaModuleCatalogSummary();
   const dynamicPromptBlockCatalog = getMainReplyDynamicBlockCatalog(personaModuleCatalog);
   const heuristicPlan = buildHeuristicDynamicPromptPlan({
@@ -48,8 +72,15 @@ async function run(question) {
     cacheFriendlyFingerprint: '',
     dynamicPromptGuidePreview: buildMainReplyDynamicPromptGuide(personaModuleCatalog).slice(0, 800)
   };
-
-  console.log(JSON.stringify(result, null, 2));
+  return result;
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  buildPromptBlockDiagnostic,
+  parseArgs,
+  run
+};

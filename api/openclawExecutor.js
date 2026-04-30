@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const config = require('../config');
 const { buildSessionId } = require('./subagentSessionManager');
+const { buildSubagentStyleGuardInstruction } = require('../utils/subagentStyleGuard');
 const { detectSensitiveOutput, sanitizeUntrustedContent } = require('../utils/promptSecurity');
 
 const activeOpenclawChildren = new Set();
@@ -304,6 +305,7 @@ function createOpenclawBridgeCall(question, userInfo, userId, customPrompt = nul
   if (customPrompt) segments.push(String(customPrompt));
   if (options?.subagentRoutePrompt) segments.push(String(options.subagentRoutePrompt));
   if (options?.routePrompt) segments.push(String(options.routePrompt));
+  segments.push(buildSubagentStyleGuardInstruction());
   segments.push(sanitizeUntrustedContent(String(question || '').trim() || 'Please answer this request.', 'subagent'));
   const message = segments.filter(Boolean).join('\n\n');
   let spawnedChild = null;
