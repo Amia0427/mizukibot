@@ -1,7 +1,12 @@
 ﻿const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { postWithRetry } = require('../api/httpClient');
+const {
+  embedQueryText,
+  semanticScoreDoc,
+  embedMemoryItems
+} = require('./memorySemanticIndex');
+const { rerankMemoryCandidates } = require('./memoryRerankClient');
 const {
   normalizeTier,
   maxTier,
@@ -1431,12 +1436,8 @@ function addMemoryItem(userId, text, type = 'fact', meta = {}, weight = 1.0) {
   return ids[0] || null;
 }
 
-function addMemoryItemsBatch(items = []) {
-  const normalizedItems = (Array.isArray(items) ? items : [])
-    .map((item) => normalizeMemoryItem(item))
-    .filter(Boolean);
-
-  if (normalizedItems.length === 0) return [];
+function persistNormalizedMemoryItems(normalizedItems = []) {
+  if (!Array.isArray(normalizedItems) || normalizedItems.length === 0) return [];
 
   ensureShardStateHydrated();
   const ids = [];
@@ -1457,6 +1458,26 @@ function addMemoryItemsBatch(items = []) {
     syncCompatSnapshots();
   }
   return ids;
+}
+
+function addMemoryItemsBatch(items = []) {
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => normalizeMemoryItem(item))
+    .filter(Boolean);
+
+  return persistNormalizedMemoryItems(normalizedItems);
+}
+
+async function addMemoryItemsBatchAsync(items = []) {
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => normalizeMemoryItem(item))
+    .filter(Boolean);
+
+  if (config.MEMORY_EMBEDDING_BACKFILL_ON_WRITE) {
+    await embedMemoryItems(normalizedItems);
+  }
+
+  return persistNormalizedMemoryItems(normalizedItems);
 }
 
 function calcRecencyScore(doc) {
@@ -1565,87 +1586,12 @@ function calcDuplicationPenalty(doc = {}, seenCanonical = new Set()) {
   return seenCanonical.has(canonical) ? 0.24 : 0;
 }
 
-function calcEmbeddingScore(_query, _doc, _options = {}) {
-  // Placeholder for future embedding retrieval.
-  // Keep the interface stable so hybrid recall can be enabled later without refactoring callers.
-  return 0;
-}
-
-function cosineArray(a = [], b = []) {
-  const length = Math.min(Array.isArray(a) ? a.length : 0, Array.isArray(b) ? b.length : 0);
-  if (length === 0) return 0;
-
-  let dotSum = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < length; i += 1) {
-    const va = Number(a[i]) || 0;
-    const vb = Number(b[i]) || 0;
-    dotSum += va * vb;
-    normA += va * va;
-    normB += vb * vb;
-  }
-
-  if (normA <= 0 || normB <= 0) return 0;
-  return dotSum / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-function getEmbeddingApiBaseUrl() {
-  const raw = String(config.MEMORY_EMBEDDING_API_BASE_URL || config.MEMORY_API_BASE_URL || config.API_BASE_URL || '')
-    .replace(/\/+$/, '');
-  if (!raw) return '';
-  if (/\/embeddings$/i.test(raw)) return raw;
-  if (/\/v\d+$/i.test(raw)) return `${raw}/embeddings`;
-  if (/\/chat\/completions$/i.test(raw)) return raw.replace(/\/chat\/completions$/i, '/embeddings');
-  return `${raw}/embeddings`;
-}
-
-function getEmbeddingApiKey() {
-  return String(config.MEMORY_EMBEDDING_API_KEY || config.MEMORY_API_KEY || config.API_KEY || '').trim();
+function calcEmbeddingScore(_query, doc, options = {}) {
+  return semanticScoreDoc(options.queryEmbedding || null, doc);
 }
 
 function shouldUseRemoteEmbedding() {
-  return Boolean(
-    config.MEMORY_HYBRID_RECALL_ENABLED
-    && String(config.MEMORY_EMBEDDING_MODEL || '').trim()
-    && getEmbeddingApiBaseUrl()
-    && getEmbeddingApiKey()
-  );
-}
-
-async function requestEmbedding(text) {
-  if (!shouldUseRemoteEmbedding()) return null;
-
-  if (requestEmbedding.disabledUntil && Date.now() < requestEmbedding.disabledUntil) {
-    return null;
-  }
-
-  try {
-    const resp = await postWithRetry(
-      getEmbeddingApiBaseUrl(),
-      {
-        model: String(config.MEMORY_EMBEDDING_MODEL || '').trim(),
-        input: String(text || '')
-      },
-      0,
-      getEmbeddingApiKey()
-    );
-
-    const list = Array.isArray(resp?.data?.data) ? resp.data.data : [];
-    const first = list[0];
-    requestEmbedding.disabledUntil = 0;
-    return Array.isArray(first?.embedding) ? first.embedding : null;
-  } catch (e) {
-    const status = Number(e?.response?.status || 0) || 0;
-    if (status === 404 || status === 400) {
-      // Disable remote embeddings for a while when the endpoint clearly does not support embeddings.
-      requestEmbedding.disabledUntil = Date.now() + (30 * 60 * 1000);
-      console.warn('[vectorMemory] embedding endpoint unavailable, fallback to lexical recall for 30 minutes');
-      return null;
-    }
-    console.error('[vectorMemory] embedding request failed:', e.message);
-    return null;
-  }
+  return Boolean(config.MEMORY_HYBRID_RECALL_ENABLED && config.MEMORY_EMBEDDING_ENABLED);
 }
 
 function formatReason(doc, lexical, overlap, direct) {
@@ -1891,15 +1837,21 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
     const journalBoost = normalizeType(doc.type) === 'episode'
       ? (journalCue ? 0.16 : -0.02)
       : 0;
-    const embedding = embeddingQueryVec && Array.isArray(doc.meta?.embedding)
-      ? Math.max(0, cosineArray(embeddingQueryVec, doc.meta.embedding))
-      : (config.MEMORY_HYBRID_RECALL_ENABLED ? calcEmbeddingScore(question, doc, options) : 0);
+    const embedding = embeddingQueryVec
+      ? semanticScoreDoc(embeddingQueryVec, doc)
+      : (config.MEMORY_HYBRID_RECALL_ENABLED ? calcEmbeddingScore(question, doc, { ...options, queryEmbedding: options.queryEmbedding }) : 0);
     const semantic = config.MEMORY_HYBRID_RECALL_ENABLED ? embedding : 0;
+    const lexicalWeight = config.MEMORY_HYBRID_RECALL_ENABLED
+      ? clamp(config.MEMORY_HYBRID_LEXICAL_WEIGHT ?? 0.62, 0, 1)
+      : 0.72;
+    const semanticWeight = config.MEMORY_HYBRID_RECALL_ENABLED
+      ? clamp(config.MEMORY_HYBRID_SEMANTIC_WEIGHT ?? 0.38, 0, 1)
+      : 0;
     const lexicalOnly = config.MEMORY_HYBRID_RECALL_ENABLED
-      ? (lexical * 0.55) + (overlap * 0.2)
+      ? (lexical * lexicalWeight) + (overlap * 0.2)
       : (lexical * 0.72) + (overlap * 0.22);
     const directMatch = direct;
-    const baseScore = lexicalOnly + (semantic * 0.35) + directMatch;
+    const baseScore = lexicalOnly + (semantic * semanticWeight) + directMatch;
     const continuityBoost = shouldBiasToContinuity(queryFacet)
       ? (
           (source === 'recent' ? 0.28 : 0)
@@ -1978,7 +1930,13 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
     if (b.score !== a.score) return b.score - a.score;
     return (TIER_RANK[normalizeTier(b.tier) || 'C'] || 0) - (TIER_RANK[normalizeTier(a.tier) || 'C'] || 0);
   });
-  const conflictFiltered = resolveConflictWinners(scored.slice(0, candidateLimit));
+  const candidates = scored.slice(0, candidateLimit);
+  if (options.returnCandidates) return candidates;
+  return finalizeScoredHits(userId, candidates, topK, options);
+}
+
+function finalizeScoredHits(userId, candidates = [], topK = 8, options = {}) {
+  const conflictFiltered = resolveConflictWinners(candidates);
   const selected = selectDiverseHits(conflictFiltered, Math.max(1, Math.min(20, Number(topK) || 8)));
 
   const shouldTrackAccess = options.trackAccess ?? config.MEMORY_RAG_TRACK_ACCESS ?? false;
@@ -1987,6 +1945,11 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
   }
 
   return selected;
+}
+
+async function rerankAndFinalizeScoredHits(userId, question, candidates = [], topK = 8, options = {}) {
+  const reranked = await rerankMemoryCandidates(question, candidates, options);
+  return finalizeScoredHits(userId, reranked, topK, options);
 }
 
 function selectDiverseHits(scored, topK) {
@@ -2121,11 +2084,12 @@ async function retrieveRelevantMemoriesAsync(userId, query, topK = 8, options = 
   const ids = filterDocIdsByOptions(docs, userId, options);
   if (!ids.length) return [];
 
-  const embeddingQueryVec = shouldUseRemoteEmbedding()
-    ? await requestEmbedding(question)
-    : null;
+  const embeddingQueryVec = Array.isArray(options.queryEmbedding)
+    ? options.queryEmbedding
+    : (shouldUseRemoteEmbedding() ? await embedQueryText(question, options) : null);
 
-  return scoreDocs(userId, ids, docs, index, question, topK, options, embeddingQueryVec);
+  const candidates = scoreDocs(userId, ids, docs, index, question, topK, { ...options, returnCandidates: true, queryEmbedding: embeddingQueryVec }, embeddingQueryVec);
+  return rerankAndFinalizeScoredHits(userId, question, candidates, topK, options);
 }
 
 function getMemoryItems(userId = null) {
@@ -2232,11 +2196,12 @@ async function retrieveUnifiedMemoriesAsync(userId, query, topK = 8, options = {
   const ids = filterUnifiedDocIds(docs, userId, unifiedOptions);
   if (!ids.length) return [];
 
-  const embeddingQueryVec = shouldUseRemoteEmbedding()
-    ? await requestEmbedding(question)
-    : null;
+  const embeddingQueryVec = Array.isArray(unifiedOptions.queryEmbedding)
+    ? unifiedOptions.queryEmbedding
+    : (shouldUseRemoteEmbedding() ? await embedQueryText(question, unifiedOptions) : null);
 
-  return scoreDocs(userId, ids, docs, { ...index, docs }, question, topK, unifiedOptions, embeddingQueryVec);
+  const candidates = scoreDocs(userId, ids, docs, { ...index, docs }, question, topK, { ...unifiedOptions, returnCandidates: true, queryEmbedding: embeddingQueryVec }, embeddingQueryVec);
+  return rerankAndFinalizeScoredHits(userId, question, candidates, topK, unifiedOptions);
 }
 
 function getMemoryStats(userId = null) {
@@ -2326,6 +2291,7 @@ function getCoreMemories(userId, limit = 6, options = {}) {
 module.exports = {
   addMemoryItem,
   addMemoryItemsBatch,
+  addMemoryItemsBatchAsync,
   addEpisodeMemory,
   rebuildMemoryIndex,
   retrieveRelevantMemories,
