@@ -121,9 +121,12 @@ function flushAllSync() {
   } catch (_) {}
 }
 
-process.on('exit', flushAllSync);
-process.on('SIGINT', flushAllSync);
-process.on('SIGTERM', flushAllSync);
+if (!globalThis.__mizukiInitiativeStateFlushListenersRegistered) {
+  globalThis.__mizukiInitiativeStateFlushListenersRegistered = true;
+  process.on('exit', flushAllSync);
+  process.on('SIGINT', flushAllSync);
+  process.on('SIGTERM', flushAllSync);
+}
 
 function ensureGroupState(groupId, now = Date.now()) {
   const gid = String(groupId || '').trim();

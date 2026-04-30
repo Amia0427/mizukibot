@@ -20,6 +20,7 @@ const {
   rollbackSnapshot,
   updateMemoryItem
 } = require('../utils/memoryGovernance');
+const { assertSafeModelEndpoint } = require('../utils/networkSafety');
 
 const MODEL_PRESETS = Array.isArray(config.MODEL_OPTIONS) && config.MODEL_OPTIONS.length
   ? config.MODEL_OPTIONS
@@ -40,6 +41,14 @@ function isLocalIp(ip) {
   return ip === '127.0.0.1' || ip === '::1' || ip === 'localhost' || ip === '';
 }
 
+function isLocalBindHost(host) {
+  return isLocalIp(String(host || '').trim().replace(/^::ffff:/, ''));
+}
+
+function isTokenlessLocalWebAllowed(host) {
+  return Boolean(config.WEB_LOCAL_ONLY_WITHOUT_TOKEN) && isLocalBindHost(host || config.WEB_BIND_HOST || '127.0.0.1');
+}
+
 function isTrustedLocalOrigin(req, host, port) {
   const refs = [req.headers.origin, req.headers.referer].filter(Boolean);
   for (const raw of refs) {
@@ -57,11 +66,13 @@ function isTrustedLocalOrigin(req, host, port) {
 function checkWebAuth(req, options = {}) {
   const token = String(config.WEB_TOKEN || '').trim();
   if (!token) {
+    const host = options.host || config.WEB_BIND_HOST || '127.0.0.1';
+    if (!isTokenlessLocalWebAllowed(host)) return false;
     if (!isLocalIp(getClientIp(req))) return false;
     const method = String(req.method || 'GET').toUpperCase();
     // Require same-origin browser context for local unsafe actions.
     if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true;
-    return isTrustedLocalOrigin(req, options.host || '127.0.0.1', options.port || 3005);
+    return isTrustedLocalOrigin(req, host, options.port || 3005);
   }
 
   const xWebToken = String(req.headers['x-web-token'] || '').trim();
@@ -88,6 +99,30 @@ function escapeHtml(value) {
 function resolveSecretInput(submitted, current) {
   const next = String(submitted || '').trim();
   return next || String(current || '').trim();
+}
+
+async function getSettingsEndpointError(next = {}, options = {}) {
+  const endpoints = [
+    ['API_BASE_URL', next.api_base_url],
+    ['AI_FALLBACK_API_BASE_URL', next.ai_fallback_api_base_url],
+    ['AI_ROUTER_BASE_URL', next.ai_router_base_url],
+    ['MEMORY_API_BASE_URL', next.memory_api_base_url],
+    ['IMAGE_API_BASE_URL', next.image_api_base_url]
+  ];
+
+  for (const [name, value] of endpoints) {
+    const raw = String(value || '').trim();
+    if (!raw) continue;
+    try {
+      await assertSafeModelEndpoint(raw, {
+        allowLocalHttp: Boolean(config.MODEL_ENDPOINT_ALLOW_LOCAL_HTTP),
+        lookup: options.lookup
+      });
+    } catch (error) {
+      return `${name} is not an allowed model endpoint: ${error?.message || String(error)}`;
+    }
+  }
+  return '';
 }
 
 function persistSettings(next) {
@@ -226,6 +261,9 @@ function startServer() {
   const app = express();
   const port = config.WEB_PORT || 3005;
   const host = config.WEB_BIND_HOST || '127.0.0.1';
+  if (!String(config.WEB_TOKEN || '').trim() && !isTokenlessLocalWebAllowed(host)) {
+    throw new Error('WEB_TOKEN is required when WEB_BIND_HOST is not loopback');
+  }
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '300kb' }));
@@ -272,7 +310,7 @@ function startServer() {
     return res.json({ ok: true, settings: getCurrentSettings() });
   });
 
-  app.post('/api/settings', (req, res) => {
+  app.post('/api/settings', async (req, res) => {
     try {
       const body = req.body || {};
 
@@ -305,17 +343,14 @@ function startServer() {
       };
 
       if (!next.api_key) return res.status(400).json({ ok: false, error: 'API_KEY cannot be empty' });
-      if (!/^https?:\/\//i.test(next.api_base_url)) return res.status(400).json({ ok: false, error: 'API_BASE_URL must start with http/https' });
+      const endpointError = await getSettingsEndpointError(next);
+      if (endpointError) return res.status(400).json({ ok: false, error: endpointError });
       if (!next.ai_model) return res.status(400).json({ ok: false, error: 'AI_MODEL cannot be empty' });
-      if (next.ai_fallback_api_base_url && !/^https?:\/\//i.test(next.ai_fallback_api_base_url)) return res.status(400).json({ ok: false, error: 'AI_FALLBACK_API_BASE_URL must start with http/https' });
       if (next.ai_fallback_enabled && !next.ai_fallback_model) return res.status(400).json({ ok: false, error: 'AI_FALLBACK_MODEL cannot be empty when fallback is enabled' });
       if (!Number.isFinite(next.ai_fallback_failure_threshold) || next.ai_fallback_failure_threshold < 1 || next.ai_fallback_failure_threshold > 100) return res.status(400).json({ ok: false, error: 'AI_FALLBACK_FAILURE_THRESHOLD must be in 1~100' });
       if (!Number.isFinite(next.ai_fallback_cooldown_ms) || next.ai_fallback_cooldown_ms < 0 || next.ai_fallback_cooldown_ms > 31536000000) return res.status(400).json({ ok: false, error: 'AI_FALLBACK_COOLDOWN_MS must be in 0~31536000000' });
-      if (next.ai_router_base_url && !/^https?:\/\//i.test(next.ai_router_base_url)) return res.status(400).json({ ok: false, error: 'AI_ROUTER_BASE_URL must start with http/https' });
       if (!next.memory_model) return res.status(400).json({ ok: false, error: 'MEMORY_MODEL cannot be empty' });
       if (!next.image_model) return res.status(400).json({ ok: false, error: 'IMAGE_MODEL cannot be empty' });
-      if (next.memory_api_base_url && !/^https?:\/\//i.test(next.memory_api_base_url)) return res.status(400).json({ ok: false, error: 'MEMORY_API_BASE_URL must start with http/https' });
-      if (next.image_api_base_url && !/^https?:\/\//i.test(next.image_api_base_url)) return res.status(400).json({ ok: false, error: 'IMAGE_API_BASE_URL must start with http/https' });
       if (!Number.isFinite(next.ai_temperature) || next.ai_temperature < 0 || next.ai_temperature > 2) return res.status(400).json({ ok: false, error: 'AI_TEMPERATURE must be in 0~2' });
       if (!Number.isFinite(next.ai_top_p) || next.ai_top_p < 0 || next.ai_top_p > 1) return res.status(400).json({ ok: false, error: 'AI_TOP_P must be in 0~1' });
       if (!Number.isFinite(next.ai_max_tokens) || next.ai_max_tokens < 64) return res.status(400).json({ ok: false, error: 'AI_MAX_TOKENS must be >= 64' });
@@ -1095,4 +1130,13 @@ function startServer() {
   });
 }
 
-module.exports = { startServer };
+module.exports = {
+  startServer,
+  __test: {
+    checkWebAuth,
+    getSettingsEndpointError,
+    isLocalBindHost,
+    isLocalIp,
+    isTokenlessLocalWebAllowed
+  }
+};

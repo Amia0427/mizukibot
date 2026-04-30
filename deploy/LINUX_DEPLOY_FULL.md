@@ -114,7 +114,7 @@ WEB_TOKEN=请设置强口令
 
 ```env
 PROXY_URL=
-AMAP_KEY=e9fda05366ed433e82dbdef2f20ccf43
+AMAP_KEY=your_amap_key
 ```
 
 `ADMIN_*` 仅影响管理员主对话主模型；留空时分别回退到默认 `API_BASE_URL` / `AI_MODEL` / `API_KEY`。当前 Web 设置页不会展示或编辑这些字段，需要手工维护 `.env`。

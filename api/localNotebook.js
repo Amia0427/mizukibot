@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
-const { sanitizeUserId, mustStayInside } = require('../utils/toolPolicy');
+const { sanitizeUserId, mustStayInside } = require('../utils/pathSafety');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 
