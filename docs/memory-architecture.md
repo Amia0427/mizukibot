@@ -332,12 +332,13 @@
 
 实现于 [vectorMemory.js](D:/0.01/linux-migration-pack/utils/vectorMemory.js)。
 
-它不是向量数据库，而是项目内自建的词法检索 memory library。
+它仍然不是外部向量数据库，而是项目内自建的 memory library：JSON/shard 存储 + 本地词法索引作为可靠基线，并可选叠加 embedding 与 rerank 增强。
 
 主要文件：
 
 - `memory_items.json`
 - `memory_index.json`
+- `memory-shards/...`
 
 每条 memory item 统一字段包括：
 
@@ -364,12 +365,33 @@
 
 - `retrieveRelevantMemories(...)`
 - `retrieveRelevantMemoriesAsync(...)`
+- `retrieveUnifiedMemories(...)`
+- `retrieveUnifiedMemoriesAsync(...)`
 - `getCoreMemories(...)`
 
-当前检索本质上是：
+同步接口保持本地词法行为，不做网络调用；异步接口在配置开启且服务可用时，会走 hybrid recall 与 rerank。
 
-- 词法 token 化
-- TF-IDF / 词项重叠 / 时间衰减 / 类型权重 / importance/tier 共同参与排序
+当前检索流程是：
+
+1. 先按 user/scope/group/task/session/status/source 等规则过滤候选，避免跨作用域泄漏。
+2. 用 token、TF-IDF、词项重叠、直接 canonical match 生成词法分。
+3. 叠加时间衰减、类型权重、importance/tier、confidence、participant、graph、continuity/preference boost。
+4. 如果 `MEMORY_HYBRID_RECALL_ENABLED` 与 `MEMORY_EMBEDDING_ENABLED` 开启，异步检索会获取 query embedding，并与 item 上持久化的 `meta.embedding` 计算 semantic 分。
+5. 如果 `MEMORY_RERANK_ENABLED` 开启，异步检索只对已过滤、已初排的有限候选池调用 rerank 服务。
+6. rerank 后仍会执行 conflict suppression，确保 stale/candidate 冲突记忆不能被 rerank 复活。
+7. 最后执行多样化选择、每类型数量限制、低 tier 限制，并格式化进 prompt。
+
+Embedding 相关模块：
+
+- `memoryEmbeddingClient.js`：embedding HTTP 调用、响应解析、向量归一化、文本 hash。
+- `memorySemanticIndex.js`：embedding 文本构造、freshness 校验、query embedding cache、item embedding 写入。
+- `scripts/backfill-memory-embeddings.js`：为已有记忆补齐 embedding。
+
+Rerank 相关模块：
+
+- `memoryRerankClient.js`：rerank HTTP 调用、响应解析、分数合并、失败回退。
+
+默认情况下 embedding/rerank 都应可关闭。服务不可用、超时、响应异常或未配置时，检索退回当前词法排序。
 
 类型上有不同衰减规则，例如：
 
@@ -623,20 +645,22 @@ chat 运行时不鼓励也不允许：
 
 ## 11. Known Issues and Boundaries
 
-### 11.1 不是向量数据库
+### 11.1 不是外部向量数据库
 
-当前长期记忆检索是本地词法索引，不是独立 embedding DB。
+当前长期记忆检索仍是本地 JSON/shard + 词法索引，不依赖独立 embedding DB。Embedding 向量持久化在 memory item 的 `meta.embedding` 中，作为本地 hybrid recall 的可选增强。
 
 优点：
 
 - 简单
 - 可控
-- 无额外基础设施
+- 无额外向量数据库基础设施
+- embedding/rerank 服务异常时可退回词法检索
 
-缺点：
+边界：
 
-- 对复杂语义召回能力有限
-- 主要靠词重叠、类型权重和规则
+- 语义召回依赖预先 backfill 或写入时生成的 item embedding
+- sync 检索不做网络调用，因此只保证词法 baseline
+- rerank 只重排有限候选池，不负责扩大召回范围
 
 ### 11.2 Restart recall 不是原样恢复历史
 
@@ -685,6 +709,10 @@ chat 运行时不鼓励也不允许：
 - [shortTermBridgeMemory.js](D:/0.01/linux-migration-pack/utils/shortTermBridgeMemory.js)
 - [memoryContext.js](D:/0.01/linux-migration-pack/utils/memoryContext.js)
 - [vectorMemory.js](D:/0.01/linux-migration-pack/utils/vectorMemory.js)
+- [memoryEmbeddingClient.js](D:/0.01/linux-migration-pack/utils/memoryEmbeddingClient.js)
+- [memorySemanticIndex.js](D:/0.01/linux-migration-pack/utils/memorySemanticIndex.js)
+- [memoryRerankClient.js](D:/0.01/linux-migration-pack/utils/memoryRerankClient.js)
+- [backfill-memory-embeddings.js](D:/0.01/linux-migration-pack/scripts/backfill-memory-embeddings.js)
 - [taskMemory.js](D:/0.01/linux-migration-pack/utils/taskMemory.js)
 - [groupMemory.js](D:/0.01/linux-migration-pack/utils/groupMemory.js)
 - [dailyJournal.js](D:/0.01/linux-migration-pack/utils/dailyJournal.js)
