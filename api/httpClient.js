@@ -22,6 +22,10 @@ const {
   extractHttpStatus,
   nextTracePhase
 } = require('../utils/requestTrace');
+const {
+  buildModelRouteDiagnostics,
+  createModelRouteTracePatch
+} = require('../utils/modelRouteDiagnostics');
 const { extractSSEEvents, flushSSEState, mergeUsageObjects } = require('./parser');
 
 let HttpsProxyAgentCtor = null;
@@ -1439,6 +1443,25 @@ function buildRequestCacheTrace(requestBody = {}, requestHeaders = {}) {
 function emitHttpTrace(trace = {}, phase = '', payload = {}) {
   const requestId = normalizeText(trace?.requestId || trace?.request_id);
   if (!requestId) return;
+  const diagnostics = trace?.modelRouteDiagnostic && typeof trace.modelRouteDiagnostic === 'object'
+    ? trace.modelRouteDiagnostic
+    : buildModelRouteDiagnostics({
+        routeDebugKey: trace?.routeDebugKey,
+        routePolicyKey: trace?.routePolicyKey || trace?.route_policy_key,
+        topRouteType: trace?.topRouteType || trace?.top_route_type,
+        branch: trace?.dispatchBranch || trace?.branch,
+        triggerBranch: trace?.triggerBranch || phase,
+        provider: payload.provider || trace?.provider,
+        apiBaseUrl: trace?.apiBaseUrl || payload.requestUrl,
+        model: payload.model || trace?.model,
+        modelSource: trace?.modelSource,
+        apiBaseUrlSource: trace?.apiBaseUrlSource,
+        apiKeySource: trace?.apiKeySource,
+        fallbackReason: trace?.fallbackReason,
+        fallbackScope: trace?.mainFallbackScope,
+        fallbackActive: trace?.mainFallbackActive === true,
+        fallbackForced: trace?.mainFallbackForced === true
+      });
   appendRequestTraceEvent(nextTracePhase(trace, phase, {
     tracePhase: normalizeText(phase || trace.phase || 'httpClient') || 'httpClient',
     stage: normalizeText(payload.stage || phase || trace.phase || 'http_client'),
@@ -1446,7 +1469,20 @@ function emitHttpTrace(trace = {}, phase = '', payload = {}) {
     purpose: normalizeText(trace.purpose),
     userId: normalizeText(trace.userId || trace.user_id),
     routePolicyKey: normalizeText(trace.routePolicyKey || trace.route_policy_key),
+    routeDebugKey: normalizeText(trace.routeDebugKey || diagnostics.routeDebugKey),
     topRouteType: normalizeText(trace.topRouteType || trace.top_route_type),
+    dispatchBranch: normalizeText(trace.dispatchBranch || diagnostics.branch),
+    triggerBranch: normalizeText(trace.triggerBranch || diagnostics.triggerBranch),
+    apiBaseUrl: normalizeText(trace.apiBaseUrl || diagnostics.apiBaseUrl),
+    apiBaseUrlHost: normalizeText(trace.apiBaseUrlHost || diagnostics.apiBaseUrlHost),
+    modelSource: normalizeText(trace.modelSource || diagnostics.modelSource),
+    apiBaseUrlSource: normalizeText(trace.apiBaseUrlSource || diagnostics.apiBaseUrlSource),
+    apiKeySource: normalizeText(trace.apiKeySource || diagnostics.apiKeySource),
+    fallbackReason: normalizeText(trace.fallbackReason || diagnostics.fallbackReason),
+    mainFallbackScope: normalizeText(trace.mainFallbackScope || diagnostics.fallbackScope),
+    mainFallbackActive: trace.mainFallbackActive === true || diagnostics.fallbackActive === true,
+    mainFallbackForced: trace.mainFallbackForced === true || diagnostics.fallbackForced === true,
+    modelRouteDiagnostic: diagnostics,
     ...payload
   }));
 }
@@ -1987,13 +2023,14 @@ function getAxiosOptions(provider = 'openai_compatible', specificKey = null, tim
   return options;
 }
 
-function getStreamAxiosOptions(provider = 'openai_compatible', specificKey = null, timeoutMs = null, extraHeaders = null) {
+function getStreamAxiosOptions(provider = 'openai_compatible', specificKey = null, timeoutMs = null, extraHeaders = null, abortSignal = null) {
   return {
     ...getAxiosOptions(
       provider,
       specificKey,
       Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : getStreamTimeoutMs(),
-      extraHeaders
+      extraHeaders,
+      abortSignal
     ),
     responseType: 'stream'
   };
@@ -2018,6 +2055,7 @@ function shouldRetry(err) {
 }
 
 function shouldRetryStreamRequest(err, handlers = {}) {
+  if (handlers && handlers.__abort_requested) return false;
   if (!shouldRetry(err)) return false;
   if (handlers && handlers.__stream_started) return false;
   return true;
@@ -2054,6 +2092,13 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       timeoutMs = getRetryTimeoutMs(timeoutBase, i, 15000, timeoutCap);
       prepared = await prepareRequest(url, body);
       await validatePreparedEndpoint(prepared.requestUrl);
+      const routeDiagnostics = buildModelRouteDiagnostics({
+        ...trace,
+        provider: prepared.provider,
+        apiBaseUrl: prepared.requestUrl,
+        model: prepared.requestBody?.model || body?.model || ''
+      });
+      Object.assign(trace, createModelRouteTracePatch(routeDiagnostics));
       emitHttpTrace(trace, 'http_client_start', {
         stage: 'http_client_start',
         attempt: i + 1,
@@ -2075,13 +2120,21 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         userId: trace.userId || '',
         taskId: trace.taskId || '',
         routePolicyKey: trace.routePolicyKey || '',
+        routeDebugKey: trace.routeDebugKey || '',
         topRouteType: trace.topRouteType || '',
+        dispatchBranch: trace.dispatchBranch || '',
+        triggerBranch: trace.triggerBranch || '',
+        apiBaseUrl: trace.apiBaseUrl || prepared.requestUrl,
+        apiBaseUrlHost: trace.apiBaseUrlHost || '',
+        fallbackReason: trace.fallbackReason || '',
         userRole: trace.userRole || '',
         modelSource: trace.modelSource || '',
         apiBaseUrlSource: trace.apiBaseUrlSource || '',
         apiKeySource: trace.apiKeySource || '',
         mainFallbackScope: trace.mainFallbackScope || '',
         mainFallbackActive: trace.mainFallbackActive === true,
+        mainFallbackForced: trace.mainFallbackForced === true,
+        modelRouteDiagnostic: trace.modelRouteDiagnostic,
         adminDedicatedModelConfigured: trace.adminDedicatedModelConfigured,
         url: prepared.requestUrl,
         provider: prepared.provider,
@@ -2505,6 +2558,14 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
   const onResponse = typeof handlers.onResponse === 'function' ? handlers.onResponse : null;
   const onData = typeof handlers.onData === 'function' ? handlers.onData : null;
   const onDone = typeof handlers.onDone === 'function' ? handlers.onDone : null;
+  const abortSignal = body && typeof body === 'object' && body.__abortSignal
+    ? body.__abortSignal
+    : null;
+  if (abortSignal && typeof abortSignal.addEventListener === 'function') {
+    abortSignal.addEventListener('abort', () => {
+      handlers.__abort_requested = true;
+    }, { once: true });
+  }
   const trace = body && typeof body === 'object' && body.__trace && typeof body.__trace === 'object'
     ? body.__trace
     : {};
@@ -2522,6 +2583,13 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
       const timeoutMs = getRetryTimeoutMs(getStreamTimeoutMs(), i, 30000, 300000);
       prepared = await prepareRequest(url, body);
       await validatePreparedEndpoint(prepared.requestUrl);
+      const routeDiagnostics = buildModelRouteDiagnostics({
+        ...trace,
+        provider: prepared.provider,
+        apiBaseUrl: prepared.requestUrl,
+        model: prepared.requestBody?.model || body?.model || ''
+      });
+      Object.assign(trace, createModelRouteTracePatch(routeDiagnostics));
       emitHttpTrace(trace, 'http_client_start', {
         stage: 'http_client_start',
         attempt: i + 1,
@@ -2543,13 +2611,21 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
         userId: trace.userId || '',
         taskId: trace.taskId || '',
         routePolicyKey: trace.routePolicyKey || '',
+        routeDebugKey: trace.routeDebugKey || '',
         topRouteType: trace.topRouteType || '',
+        dispatchBranch: trace.dispatchBranch || '',
+        triggerBranch: trace.triggerBranch || '',
+        apiBaseUrl: trace.apiBaseUrl || prepared.requestUrl,
+        apiBaseUrlHost: trace.apiBaseUrlHost || '',
+        fallbackReason: trace.fallbackReason || '',
         userRole: trace.userRole || '',
         modelSource: trace.modelSource || '',
         apiBaseUrlSource: trace.apiBaseUrlSource || '',
         apiKeySource: trace.apiKeySource || '',
         mainFallbackScope: trace.mainFallbackScope || '',
         mainFallbackActive: trace.mainFallbackActive === true,
+        mainFallbackForced: trace.mainFallbackForced === true,
+        modelRouteDiagnostic: trace.modelRouteDiagnostic,
         adminDedicatedModelConfigured: trace.adminDedicatedModelConfigured,
         url: prepared.requestUrl,
         provider: prepared.provider,
@@ -2563,7 +2639,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
         resp = await axios.post(
           prepared.requestUrl,
           prepared.requestBody,
-          getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+          getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
         );
         } catch (error) {
         if (requestUsesReasoning(prepared?.requestBody) && isReasoningSchemaError(error)) {
@@ -2575,7 +2651,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           resp = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
           prepared = {
             ...prepared,
@@ -2591,7 +2667,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           resp = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
           prepared = {
             ...prepared,
@@ -2612,7 +2688,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             resp = await axios.post(
               prepared.requestUrl,
               strippedRequestBody,
-              getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+              getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
             );
             prepared = {
               ...prepared,
@@ -2632,7 +2708,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
               resp = await axios.post(
                 prepared.requestUrl,
                 strippedCacheRequestBody,
-                getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+                getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
               );
               prepared = {
                 ...prepared,
@@ -2655,7 +2731,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           resp = await axios.post(
             prepared.requestUrl,
             stripOpenAICompatiblePromptCaching(prepared.requestBody),
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders)
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
           );
           prepared = {
             ...prepared,
@@ -2675,7 +2751,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           resp = await axios.post(
             prepared.requestUrl,
             downgraded.requestBody,
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders)
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal)
           );
           prepared = {
             ...prepared,
@@ -2792,6 +2868,9 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
 
       return true;
     } catch (e) {
+      if (abortSignal?.aborted) {
+        handlers.__abort_requested = true;
+      }
       if (!e || typeof e !== 'object' || !streamFailureTraceEmitted.has(e)) {
         emitHttpFailureTrace(trace, prepared, body, e, {
           attempt: i + 1,

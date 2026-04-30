@@ -37,7 +37,7 @@ module.exports = (async () => {
 
   try {
     process.env.API_KEY = 'main-key';
-    process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
+    process.env.API_BASE_URL = 'https://example.com/main/v1/chat/completions';
     process.env.AI_MODEL = 'main-model';
     process.env.AI_TEMPERATURE = '0.7';
     process.env.AI_TOP_P = '0.8';
@@ -49,7 +49,7 @@ module.exports = (async () => {
     process.env.AI_REPETITION_PENALTY = '1.13';
 
     process.env.ADMIN_USER_IDS = 'admin-1';
-    process.env.ADMIN_API_BASE_URL = 'https://admin.example/v1/chat/completions';
+    process.env.ADMIN_API_BASE_URL = 'https://example.com/admin/v1/chat/completions';
     process.env.ADMIN_API_KEY = 'admin-key';
     process.env.ADMIN_AI_MODEL = 'admin-model';
     process.env.ADMIN_AI_TEMPERATURE = '0.91';
@@ -62,7 +62,7 @@ module.exports = (async () => {
     process.env.ADMIN_AI_REPETITION_PENALTY = '1.25';
     process.env.ADMIN_AI_FALLBACK_ENABLED = 'true';
     process.env.ADMIN_AI_FALLBACK_MODEL = 'admin-fallback-model';
-    process.env.ADMIN_AI_FALLBACK_API_BASE_URL = 'https://admin-fallback.example/v1/chat/completions';
+    process.env.ADMIN_AI_FALLBACK_API_BASE_URL = 'https://example.com/admin-fallback/v1/chat/completions';
     process.env.ADMIN_AI_FALLBACK_API_KEY = 'admin-fallback-key';
     process.env.ADMIN_AI_FALLBACK_FAILURE_THRESHOLD = '1';
     process.env.ADMIN_AI_FALLBACK_COOLDOWN_MS = '900000';

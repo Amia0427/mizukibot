@@ -107,6 +107,122 @@ module.exports = (async () => {
   assert.ok(assistantOnlyIndex < lastUserIndex);
   assert.ok(String(replyMessages.messages[assistantOnlyIndex].content || '').startsWith('[Context for assistant only]'));
 
+  const humanizerDeltas = [];
+  const humanizerHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => ({
+      segments: {},
+      compactionPlan: {
+        compactedSegments: [{ name: 'user', messages: input.userTurnMessages || [] }]
+      }
+    }),
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: []
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async (_messages, options) => {
+      if (typeof options.onDelta === 'function') {
+        options.onDelta('raw leaked', 'raw leaked');
+      }
+      return {
+        visibleText: 'raw visible reply',
+        persistedText: 'raw persisted reply'
+      };
+    },
+    finalizeStreamingReplyWithHumanizerImpl: async () => {
+      const error = new Error('humanizer stalled');
+      error.code = 'HUMANIZER_FIRST_TOKEN_TIMEOUT';
+      error.reason = 'humanizer_first_token_timeout';
+      error.humanizerFirstTokenTimeout = true;
+      throw error;
+    },
+    isHumanizerEnabledImpl: () => true,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    config: { AI_MAX_TOKENS: 3500 },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const humanizerStreamed = await humanizerHelpers.streamDirectReply([{ role: 'user', content: 'hi' }], {
+    request: {
+      routePolicyKey: 'direct_chat/default',
+      modelConfig: {},
+      onDelta(text, fullText) {
+        humanizerDeltas.push({ text, fullText });
+      }
+    },
+    memory: {},
+    output: { stream: { hadOutput: false } }
+  });
+  assert.strictEqual(humanizerStreamed.finalReply, 'raw persisted reply');
+  assert.strictEqual(humanizerStreamed.humanizerTimedOut, true);
+  assert.strictEqual(humanizerStreamed.stream.humanizerTimedOut, true);
+  assert.strictEqual(humanizerStreamed.stream.fallbackToNonStream, false);
+  assert.deepStrictEqual(humanizerDeltas, [{ text: 'raw persisted reply', fullText: 'raw persisted reply' }]);
+
+  const longGroupReply = '最先要记的是役和振听。然后你要理解立直的条件。还有一个坑是副露之后很多门清役会消失。推荐路线是先打雀魂低段，再复盘系统提示，最后再补番种表。';
+  const groupTimeoutDeltas = [];
+  const groupTimeoutHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => ({
+      segments: {},
+      compactionPlan: {
+        compactedSegments: [{ name: 'user', messages: input.userTurnMessages || [] }]
+      }
+    }),
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: []
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async () => ({ persistedText: longGroupReply }),
+    finalizeStreamingReplyWithHumanizerImpl: async () => {
+      const error = new Error('humanizer stalled');
+      error.code = 'HUMANIZER_FIRST_TOKEN_TIMEOUT';
+      throw error;
+    },
+    isHumanizerEnabledImpl: () => true,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    config: { AI_MAX_TOKENS: 3500 },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const groupTimeoutStreamed = await groupTimeoutHelpers.streamDirectReply([{ role: 'user', content: 'hi' }], {
+    request: {
+      routePolicyKey: 'direct_chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: { groupId: '1092700300' },
+      modelConfig: {},
+      onDelta(text, fullText) {
+        groupTimeoutDeltas.push({ text, fullText });
+      }
+    },
+    memory: {},
+    output: { stream: { hadOutput: false } }
+  });
+  assert.strictEqual(groupTimeoutStreamed.humanizerTimedOut, true);
+  assert.ok(groupTimeoutStreamed.finalReply.length < longGroupReply.length);
+  assert.strictEqual(groupTimeoutDeltas.length, 1);
+  assert.strictEqual(groupTimeoutDeltas[0].text, groupTimeoutStreamed.finalReply);
+
   console.log('runtimeStreamingCoordinator.test.js passed');
 })().catch((error) => {
   console.error(error);

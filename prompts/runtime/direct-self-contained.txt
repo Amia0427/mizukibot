@@ -1,4 +1,4 @@
-Direct self-contained mode:
+# Direct self-contained mode:
 Reply directly from the current user message.
 Do not ask a follow-up question unless the request is truly impossible without missing required input.
 Do not claim you searched, checked, fetched, executed, or verified anything.

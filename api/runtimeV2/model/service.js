@@ -29,6 +29,10 @@ const {
 } = require('./shared');
 const { shouldUsePlanModeForRequest } = require('../planning/service');
 const { normalizeRequestTrace } = require('../../../utils/requestTrace');
+const {
+  buildModelRouteDiagnostics,
+  createModelRouteTracePatch
+} = require('../../../utils/modelRouteDiagnostics');
 // source-compat anchors for role-aware main model routing:
 // require('../../../utils/mainModelConfigResolver');
 // function buildPrimaryMainModelConfig(overrides = null, userId = '') {
@@ -86,6 +90,9 @@ function buildReplyTextVariants(rawReply, fallbackText, options = {}) {
 function buildModelCallTrace(context = {}, source = 'v2_model') {
   const requestTrace = normalizeRequestTrace(context?.requestTrace)
     || normalizeRequestTrace(context?.routeMeta?.requestTrace);
+  const routeMeta = context?.routeMeta && typeof context.routeMeta === 'object'
+    ? context.routeMeta
+    : {};
   return {
     source: String(context?.source || source).trim() || source,
     phase: String(context?.phase || '').trim(),
@@ -97,7 +104,11 @@ function buildModelCallTrace(context = {}, source = 'v2_model') {
     userId: String(context?.userId || context?.routeMeta?.userId || context?.routeMeta?.user_id || '').trim(),
     taskId: String(context?.taskId || '').trim(),
     routePolicyKey: String(context?.routePolicyKey || context?.routeMeta?.routePolicyKey || '').trim(),
+    routeDebugKey: String(context?.routeDebugKey || routeMeta.routeDebugKey || routeMeta.route_debug_key || '').trim(),
     topRouteType: String(context?.topRouteType || context?.routeMeta?.topRouteType || '').trim(),
+    dispatchBranch: String(context?.dispatchBranch || context?.replyBranch || '').trim(),
+    triggerBranch: String(context?.triggerBranch || '').trim(),
+    fallbackReason: String(context?.fallbackReason || routeMeta.routeFallbackReason || routeMeta.fallbackReason || '').trim(),
     memoryInjected: context?.memoryInjected
   };
 }
@@ -108,6 +119,26 @@ function buildResolvedModelTrace(context = {}, resolvedConfig = null, source = '
   const warnings = Array.isArray(resolvedConfig?.__adminConfigWarnings)
     ? resolvedConfig.__adminConfigWarnings
     : [];
+  const apiBaseUrl = getApiBaseUrl(resolvedConfig);
+  const model = getModelName(resolvedConfig);
+  const diagnostics = buildModelRouteDiagnostics({
+    routeMeta: context?.routeMeta,
+    routeDebugKey: trace.routeDebugKey,
+    routePolicyKey: trace.routePolicyKey,
+    topRouteType: trace.topRouteType,
+    branch: trace.dispatchBranch,
+    triggerBranch: trace.triggerBranch || source,
+    provider: undefined,
+    apiBaseUrl,
+    model,
+    modelSource: resolvedConfig?.__mainModelSource,
+    apiBaseUrlSource: resolvedConfig?.__mainApiBaseUrlSource,
+    apiKeySource: resolvedConfig?.__mainApiKeySource,
+    fallbackReason: resolvedConfig?.__mainFallbackReason || trace.fallbackReason,
+    fallbackScope: resolvedConfig?.__mainFallbackScope,
+    fallbackActive: resolvedConfig?.__mainFallbackActive === true,
+    fallbackForced: resolvedConfig?.__mainFallbackForced === true
+  });
   return {
     ...trace,
     userRole: role,
@@ -116,8 +147,11 @@ function buildResolvedModelTrace(context = {}, resolvedConfig = null, source = '
     apiKeySource: String(resolvedConfig?.__mainApiKeySource || '').trim(),
     mainFallbackScope: String(resolvedConfig?.__mainFallbackScope || '').trim(),
     mainFallbackActive: resolvedConfig?.__mainFallbackActive === true,
+    mainFallbackForced: resolvedConfig?.__mainFallbackForced === true,
+    fallbackReason: String(resolvedConfig?.__mainFallbackReason || trace.fallbackReason || '').trim(),
     adminDedicatedModelConfigured: resolvedConfig?.__adminDedicatedModelConfigured,
-    adminConfigWarnings: warnings
+    adminConfigWarnings: warnings,
+    ...createModelRouteTracePatch(diagnostics)
   };
 }
 
@@ -128,12 +162,18 @@ function logResolvedModelCall(context = {}, resolvedConfig = null, source = 'v2_
     userId: trace.userId,
     userRole: trace.userRole || 'user',
     routePolicyKey: trace.routePolicyKey,
+    routeDebugKey: trace.routeDebugKey,
     topRouteType: trace.topRouteType,
+    dispatchBranch: trace.dispatchBranch,
     model: getModelName(resolvedConfig),
+    provider: trace.provider,
+    apiBaseUrlHost: trace.apiBaseUrlHost,
     modelSource: trace.modelSource,
     apiBaseUrlSource: trace.apiBaseUrlSource,
     fallbackScope: trace.mainFallbackScope,
     fallbackActive: trace.mainFallbackActive,
+    fallbackForced: trace.mainFallbackForced,
+    fallbackReason: trace.fallbackReason,
     adminDedicatedModelConfigured: trace.adminDedicatedModelConfigured,
     adminConfigWarnings: trace.adminConfigWarnings
   };
@@ -173,7 +213,15 @@ async function finalizeReplyText(rawReply, fallbackText, options = {}) {
     model: getModelName(options.modelConfig),
     apiBaseUrl: getApiBaseUrl(options.modelConfig),
     apiKey: getApiKey(options.modelConfig),
-    retries: getRetries(1, options.modelConfig)
+    retries: getRetries(1, options.modelConfig),
+    userId: options.userId,
+    routeMeta: options.routeMeta,
+    routePolicyKey: options.routePolicyKey,
+    routeDebugKey: options.routeDebugKey || options.routeMeta?.routeDebugKey,
+    topRouteType: options.topRouteType,
+    requestTrace: options.requestTrace || options.routeMeta?.requestTrace,
+    dispatchBranch: options.dispatchBranch || 'humanizer',
+    triggerBranch: options.triggerBranch || 'humanizer.finalize_reply'
   });
   const persistedText = String(humanized || '').trim() || base;
   return {
@@ -401,7 +449,15 @@ function finalizeStreamingReplyWithHumanizer(rawReply, fallbackText, options = {
     stream: true,
     onDelta: options.onDelta,
     streamHadOutput: options.streamHadOutput,
-    maxSegments: Number(config.AI_STREAM_MAX_SEGMENTS) || 3
+    maxSegments: Number(config.AI_STREAM_MAX_SEGMENTS) || 3,
+    userId: options.userId,
+    routeMeta: options.routeMeta,
+    routePolicyKey: options.routePolicyKey,
+    routeDebugKey: options.routeDebugKey || options.routeMeta?.routeDebugKey,
+    topRouteType: options.topRouteType,
+    requestTrace: options.requestTrace || options.routeMeta?.requestTrace,
+    dispatchBranch: options.dispatchBranch || 'humanizer',
+    triggerBranch: options.triggerBranch || 'humanizer.streaming'
   });
 }
 

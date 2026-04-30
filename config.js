@@ -306,7 +306,7 @@ function buildSystemPrompt() {
 }
 
 // 鍏煎鏃у彉閲?LLM_HUMANIZER_ENABLED锛屾柊鍙橀噺 HUMANIZER_AGENT_ENABLED 浼樺厛銆?
-const humanizerAgentEnabled = pickBool('HUMANIZER_AGENT_ENABLED', pickBool('LLM_HUMANIZER_ENABLED', false));
+const humanizerAgentEnabled = pickBool('HUMANIZER_AGENT_ENABLED', pickBool('LLM_HUMANIZER_ENABLED', true));
 
 module.exports = {
   // ===== Runtime =====
@@ -635,8 +635,11 @@ module.exports = {
   // Keep de-AI cleanup stable by default: disable stream path when strict humanizer is required.
   HUMANIZER_FORCE_NON_STREAM: pickBool('HUMANIZER_FORCE_NON_STREAM', true),
   HUMANIZER_AGENT_ENABLED: humanizerAgentEnabled,
-  // Optional dedicated model for humanizer sub-agent. Falls back to AI_MODEL when empty.
+  // Dedicated Humanizer endpoint/key/model. Empty values keep legacy fallback to the main model config.
+  HUMANIZER_AGENT_API_BASE_URL: pick('HUMANIZER_AGENT_API_BASE_URL', pick('HUMANIZER_AGENT_API_BASEURI', '')),
+  HUMANIZER_AGENT_API_KEY: pick('HUMANIZER_AGENT_API_KEY', pick('HUMANIZER_AGENT_APIKEY', '')),
   HUMANIZER_AGENT_MODEL: pick('HUMANIZER_AGENT_MODEL', ''),
+  HUMANIZER_AGENT_FIRST_TOKEN_TIMEOUT_MS: Math.max(0, pickNum('HUMANIZER_AGENT_FIRST_TOKEN_TIMEOUT_MS', 10000)),
   HUMANIZER_MODE: pick('HUMANIZER_MODE', 'auto').trim().toLowerCase() || 'auto',
   HUMANIZER_SOFT_BUDGET_MS: pickNum('HUMANIZER_SOFT_BUDGET_MS', 500),
   AGENT_DEV_HOT_RELOAD: pickBool('AGENT_DEV_HOT_RELOAD', false),

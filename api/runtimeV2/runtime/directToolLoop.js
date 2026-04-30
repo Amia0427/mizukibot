@@ -86,6 +86,8 @@ function createDirectToolLoopHelpers(deps = {}) {
       try {
         return normalizeMessageForToolLoop(await requestAssistantMessageImpl(loopMessages, {
           ...directContext,
+          dispatchBranch: directContext.dispatchBranch || 'direct_reply',
+          triggerBranch: 'direct_reply.tool_loop',
           ...normalizeObject(options, {})
         }));
       } catch (error) {
