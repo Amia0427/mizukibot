@@ -2,19 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
+const { sanitizeUserId, mustStayInside } = require('../utils/pathSafety');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 
 function getToolPolicyHelpers() {
-  const policy = require('../utils/toolPolicy');
-  return {
-    sanitizeUserId: typeof policy.sanitizeUserId === 'function'
-      ? policy.sanitizeUserId
-      : ((value, fallback = '') => String(value || fallback || '').trim()),
-    mustStayInside: typeof policy.mustStayInside === 'function'
-      ? policy.mustStayInside
-      : ((_root, target) => path.resolve(target))
-  };
+  return { sanitizeUserId, mustStayInside };
 }
 
 function normalizeUserId(userId) {

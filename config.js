@@ -338,6 +338,7 @@ module.exports = {
   WEB_BIND_HOST: pick('WEB_BIND_HOST', '127.0.0.1'),
   // Minimal auth token. If empty, panel is restricted to localhost only.
   WEB_TOKEN: pick('WEB_TOKEN', ''),
+  WEB_LOCAL_ONLY_WITHOUT_TOKEN: pickBool('WEB_LOCAL_ONLY_WITHOUT_TOKEN', true),
 
   // ===== Network =====
   // Clear-by-default to avoid startup failures when no local proxy is running.
@@ -624,6 +625,7 @@ module.exports = {
   AI_REPETITION_PENALTY: pickNum('AI_REPETITION_PENALTY', NaN),
   AI_MAX_TOKENS: pickNum('AI_MAX_TOKENS', 2500),
   AI_RETRIES: pickNum('AI_RETRIES', 2),
+  MODEL_ENDPOINT_ALLOW_LOCAL_HTTP: pickBool('MODEL_ENDPOINT_ALLOW_LOCAL_HTTP', false),
   AI_STREAM_ENABLED: pickBool('AI_STREAM_ENABLED', false),
   AI_STREAM_CHUNK_MS: pickNum('AI_STREAM_CHUNK_MS', 900),
   AI_STREAM_SEND_GAP_MS: pickNum('AI_STREAM_SEND_GAP_MS', 260),
@@ -697,7 +699,7 @@ module.exports = {
   RESEARCH_SUBAGENT_CACHE_TTL_MS: Math.max(1000, pickNum('RESEARCH_SUBAGENT_CACHE_TTL_MS', 30 * 60 * 1000)),
   // ===== Tools =====
   // Sensitive key must come from environment, never hard-coded.
-  AMAP_KEY: pick('AMAP_KEY', 'e9fda05366ed433e82dbdef2f20ccf43'),
+  AMAP_KEY: pick('AMAP_KEY', ''),
   // Minecraft agent toolchain: disabled by default to avoid accidental server connections.
   MC_ENABLED: pickBool('MC_ENABLED', false),
   MC_HOST: pick('MC_HOST', '127.0.0.1'),
