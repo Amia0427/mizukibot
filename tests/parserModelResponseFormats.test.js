@@ -110,6 +110,14 @@ module.exports = (() => {
     normalizeTextContent([{ type: 'text', content: { output_text: 'nested shared content' } }]),
     'nested shared content'
   );
+  assert.strictEqual(
+    normalizeTextContent({ visibleText: 'visible runtime reply', persistedText: 'persisted runtime reply' }),
+    'persisted runtime reply'
+  );
+  assert.strictEqual(
+    normalizeTextContent({ finalReply: 'final runtime reply' }),
+    'final runtime reply'
+  );
 
   console.log('parserModelResponseFormats.test.js passed');
 })()

@@ -418,6 +418,9 @@ function normalizeTextContent(content) {
     }).join('');
   }
   if (content && typeof content === 'object') {
+    if (typeof content.persistedText === 'string') return content.persistedText;
+    if (typeof content.visibleText === 'string') return content.visibleText;
+    if (typeof content.finalReply === 'string') return content.finalReply;
     if (typeof content.text === 'string') return content.text;
     if (typeof content.content === 'string') return content.content;
     if (typeof content.output_text === 'string') return content.output_text;

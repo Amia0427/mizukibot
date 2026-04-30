@@ -169,6 +169,71 @@ module.exports = (async () => {
   assert.strictEqual(humanizerStreamed.stream.fallbackToNonStream, false);
   assert.deepStrictEqual(humanizerDeltas, [{ text: 'raw persisted reply', fullText: 'raw persisted reply' }]);
 
+  const humanizerErrorDeltas = [];
+  const humanizerErrorEvents = [];
+  let humanizerErrorInput = '';
+  const humanizerErrorHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => ({
+      segments: {},
+      compactionPlan: {
+        compactedSegments: [{ name: 'user', messages: input.userTurnMessages || [] }]
+      }
+    }),
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: []
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async () => ({
+      visibleText: 'raw visible error reply',
+      persistedText: 'raw persisted error reply'
+    }),
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => {
+      humanizerErrorInput = text;
+      const error = new Error('Request failed with status code 400');
+      error.code = 'ERR_BAD_REQUEST';
+      throw error;
+    },
+    isHumanizerEnabledImpl: () => true,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    createEvent: (type, payload) => ({ type, ...payload }),
+    config: { AI_MAX_TOKENS: 3500 },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const humanizerErrorStreamed = await humanizerErrorHelpers.streamDirectReply([{ role: 'user', content: 'hi' }], {
+    request: {
+      routePolicyKey: 'direct_chat/default',
+      modelConfig: {},
+      onDelta(text, fullText) {
+        humanizerErrorDeltas.push({ text, fullText });
+      },
+      onEvent(event) {
+        humanizerErrorEvents.push(event);
+      }
+    },
+    memory: {},
+    output: { stream: { hadOutput: false } }
+  });
+  assert.strictEqual(humanizerErrorInput, 'raw persisted error reply');
+  assert.strictEqual(humanizerErrorStreamed.finalReply, 'raw persisted error reply');
+  assert.strictEqual(humanizerErrorStreamed.humanizerTimedOut, false);
+  assert.strictEqual(humanizerErrorStreamed.humanizerFailed, true);
+  assert.strictEqual(humanizerErrorStreamed.stream.humanizerFailed, true);
+  assert.strictEqual(humanizerErrorStreamed.stream.fallbackToNonStream, false);
+  assert.deepStrictEqual(humanizerErrorDeltas, [{ text: 'raw persisted error reply', fullText: 'raw persisted error reply' }]);
+  assert.ok(humanizerErrorEvents.some((event) => event.type === 'humanizer_failed_fallback'));
+
   const longGroupReply = '最先要记的是役和振听。然后你要理解立直的条件。还有一个坑是副露之后很多门清役会消失。推荐路线是先打雀魂低段，再复盘系统提示，最后再补番种表。';
   const groupTimeoutDeltas = [];
   const groupTimeoutHelpers = createStreamingCoordinatorHelpers({
