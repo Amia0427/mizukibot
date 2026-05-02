@@ -45,7 +45,7 @@ const {
 } = require('./recallHeuristics');
 const { queryMemory } = require('./memory-v3');
 const {
-  schedulePreload,
+  ensureSnapshot,
   searchMemoryCliFast,
   openMemoryCliFast
 } = require('./memory-v3/cliSearchRuntime');
@@ -78,7 +78,9 @@ const JOURNAL_RAW_FALLBACK_MAX_CANDIDATES = 8;
 const JOURNAL_RAW_FALLBACK_WINDOW_RADIUS = 2;
 const JOURNAL_BUNDLE_WEAK_SCORE = 0.48;
 
-schedulePreload();
+function preloadMemoryCli(options = {}) {
+  return ensureSnapshot(options);
+}
 
 function sanitizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -2417,5 +2419,6 @@ module.exports = {
   openUnifiedMemory,
   listUnifiedMemorySources,
   getUnifiedMemoryStats,
+  preloadMemoryCli,
   runMemoryCli
 };

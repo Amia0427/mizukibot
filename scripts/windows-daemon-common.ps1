@@ -75,7 +75,7 @@ function Register-DaemonScheduledTask {
   $daily.StartBoundary = (Get-Date).ToString("yyyy-MM-dd'T'HH:mm:ss")
   $daily.DaysInterval = 1
   $daily.Enabled = $true
-  $daily.Repetition.Interval = 'PT5M'
+  $daily.Repetition.Interval = 'PT2H'
   $daily.Repetition.Duration = 'P1D'
   $daily.Repetition.StopAtDurationEnd = $false
 

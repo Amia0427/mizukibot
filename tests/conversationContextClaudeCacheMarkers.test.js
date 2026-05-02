@@ -52,15 +52,15 @@ module.exports = (() => {
   const currentConversationMessage = systemMessages.find((item) => String(item.content || '').includes('[CurrentConversation]'));
 
   assert.deepStrictEqual(stableSystem.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
-  assert.deepStrictEqual(affinityMessage.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
-  assert.deepStrictEqual(relationshipMessage.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
+  assert.strictEqual(typeof affinityMessage.content, 'string');
+  assert.strictEqual(typeof relationshipMessage.content, 'string');
   assert.strictEqual(typeof continuityMessage.content, 'string');
   assert.strictEqual(typeof currentConversationMessage.content, 'string');
 
   const assistantOnly = helpers.buildAssistantOnlyContextMessages(state);
-  const fewShot = assistantOnly.find((item) => Array.isArray(item.content) && item.content[0]?.text === 'few-shot example');
+  const fewShot = assistantOnly.find((item) => item.content === 'few-shot example');
   const hint = assistantOnly.find((item) => item.content === 'plain hint');
-  assert.deepStrictEqual(fewShot.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
+  assert.strictEqual(typeof fewShot.content, 'string');
   assert.strictEqual(typeof hint.content, 'string');
 
   console.log('conversationContextClaudeCacheMarkers.test.js passed');

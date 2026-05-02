@@ -337,6 +337,10 @@ function isAnthropicDynamicSystemContextText(text = '') {
   return ANTHROPIC_DYNAMIC_SYSTEM_MARKERS.some((marker) => raw.startsWith(marker));
 }
 
+function isAnthropicAssistantOnlyContextText(text = '') {
+  return String(text || '').trim().startsWith(ANTHROPIC_ASSISTANT_CONTEXT_PREFIX);
+}
+
 function isAnthropicStableSystemText(text = '') {
   const raw = String(text || '').trim();
   if (!raw) return false;
@@ -366,6 +370,25 @@ function extractAnthropicMessageText(message = {}) {
     })
     .join('\n')
     .trim();
+}
+
+function extractInputMessageText(message = {}) {
+  const content = message?.content;
+  if (typeof content === 'string') return String(content || '').trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((block) => {
+        if (typeof block === 'string') return block;
+        if (typeof block?.text === 'string') return block.text;
+        return '';
+      })
+      .join('\n')
+      .trim();
+  }
+  if (content && typeof content === 'object' && typeof content.text === 'string') {
+    return String(content.text || '').trim();
+  }
+  return '';
 }
 
 function isAnthropicAssistantOnlyContextMessage(message = {}) {
@@ -470,7 +493,7 @@ function findAnthropicAutoCacheMessageIndex(messages = []) {
     return candidateIndex;
   }
 
-  return lastNonEmptyIndex;
+  return -1;
 }
 
 function applyAutoAnthropicPromptCaching(requestBody = {}) {
@@ -494,19 +517,21 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
   }
 
   const systemBlocks = normalizeAnthropicSystemBlocks(nextBody.system);
+  let hasSystemCacheControl = systemBlocks.some((block) => blockHasAnthropicCacheControl(block));
   if (systemBlocks.length > 0 && !systemBlocks.some((block) => blockHasAnthropicCacheControl(block))) {
     nextBody.system = applyAnthropicCacheControlToBlockIndex(
       systemBlocks,
       findAnthropicAutoCacheSystemBlockIndex(systemBlocks),
       defaultCacheControl
     );
+    hasSystemCacheControl = true;
     mutated = true;
   } else if (anthropicSystemUsesArray(nextBody.system)) {
     nextBody.system = systemBlocks;
   }
 
   const messages = Array.isArray(nextBody.messages) ? nextBody.messages : [];
-  if (!messages.some((message) => messageContentHasAnthropicCacheControl(message))) {
+  if (!hasSystemCacheControl && !messages.some((message) => messageContentHasAnthropicCacheControl(message))) {
     const messageIndex = findAnthropicAutoCacheMessageIndex(messages);
     if (messageIndex >= 0) {
       nextBody.messages = messages.map((message, index) => (
@@ -1646,10 +1671,7 @@ async function mapMessagesToAnthropic(messages) {
         );
         if (stableBlocks.length > 0) systemBlocks.push(...stableBlocks);
 
-        const dynamicBlocks = applyAnthropicCacheControlToLastBlock(
-          await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${splitSystem.dynamicText}`),
-          messageCacheControl
-        );
+        const dynamicBlocks = await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${splitSystem.dynamicText}`);
         if (dynamicBlocks.length > 0) {
           out.push({
             role: 'assistant',
@@ -1660,10 +1682,7 @@ async function mapMessagesToAnthropic(messages) {
       }
 
       if (isAnthropicDynamicSystemContextText(rawSystemText)) {
-        const contextBlocks = applyAnthropicCacheControlToLastBlock(
-          await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${rawSystemText}`),
-          messageCacheControl
-        );
+        const contextBlocks = await toAnthropicContentBlocks(`${ANTHROPIC_ASSISTANT_CONTEXT_PREFIX}\n${rawSystemText}`);
         if (contextBlocks.length > 0) {
           out.push({
             role: 'assistant',
@@ -1701,6 +1720,7 @@ async function mapMessagesToAnthropic(messages) {
 
     if (role === 'assistant') {
       let blocks = await toAnthropicContentBlocks(item?.content);
+      const allowAssistantCacheControl = !isAnthropicAssistantOnlyContextText(extractInputMessageText(item));
       const toolCalls = Array.isArray(item?.tool_calls) ? item.tool_calls : [];
 
       for (const call of toolCalls) {
@@ -1715,7 +1735,9 @@ async function mapMessagesToAnthropic(messages) {
         });
       }
 
-      blocks = applyAnthropicCacheControlToLastBlock(blocks, messageCacheControl);
+      blocks = allowAssistantCacheControl
+        ? applyAnthropicCacheControlToLastBlock(blocks, messageCacheControl)
+        : stripAnthropicCacheControlFromBlocks(blocks);
 
       out.push({
         role: 'assistant',

@@ -140,6 +140,12 @@ function summarizePromptCaching(request = {}, requestHeaders = {}) {
   const toolCacheBreakpoints = tools.reduce((sum, item) => sum + countCacheControlBlocks(item), 0);
 
   return {
+    openai_prompt_cache_key: normalizeText(request.prompt_cache_key),
+    openai_prompt_cache_retention: normalizeText(request.prompt_cache_retention),
+    openai_prompt_cache_enabled: Boolean(
+      normalizeText(request.prompt_cache_key)
+      || normalizeText(request.prompt_cache_retention)
+    ),
     anthropic_beta: anthropicBeta || null,
     prompt_caching_beta_enabled: anthropicBetaFlags.includes('prompt-caching-2024-07-31'),
     system_cache_breakpoints: systemCacheBreakpoints,
@@ -371,6 +377,13 @@ function finalizeRecord(id, patch = {}) {
     provider: cloned.provider,
     host: safeHost(patch?.url || patch?.requestUrl || ''),
     model: cloned.model,
+    stream: cloned.stream,
+    max_tokens: cloned.max_tokens,
+    message_count: cloned.message_count,
+    tool_count: cloned.tool_count,
+    memory_injected: cloned.memory_injected,
+    prompt_caching: cloned.prompt_caching,
+    usage: cloned.usage,
     user_id: cloned.user_id,
     user_role: cloned.user_role,
     route_policy_key: cloned.route_policy_key,

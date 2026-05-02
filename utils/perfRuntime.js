@@ -169,7 +169,13 @@ function getResourcePressureState() {
 }
 
 function getBackgroundPressureDelayMs() {
-  const pressure = getResourcePressureState();
+  const usage = process.memoryUsage();
+  const pressure = computeResourcePressure({
+    rss: Number(usage.rss || 0),
+    heapUsed: Number(usage.heapUsed || 0),
+    eventLoopMeanMs: 0,
+    eventLoopMaxMs: 0
+  });
   if (!pressure || pressure.level === 'normal') return 0;
   const baseDelay = Math.max(1000, Number(config.BACKGROUND_PRESSURE_DEFER_MS || 15000) || 15000);
   return pressure.level === 'severe' ? (baseDelay * 2) : baseDelay;

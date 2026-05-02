@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 
 $taskName = 'OpenClawGatewayStable'
 $gatewayPort = 18789
-$gatewayPattern = 'C:\Users\Administrator\openclaw\node_modules\openclaw\dist\index.js gateway --port 18789'
+$gatewayScriptPattern = 'C:\Users\Administrator\openclaw\node_modules\openclaw\dist\index.js'
+$gatewayArgsPattern = 'gateway --port 18789'
 $launcherPattern = 'run-openclaw-userprofile-gateway.ps1'
 
 function Get-GatewayPids {
@@ -19,23 +20,23 @@ function Get-GatewayProcesses {
   @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
       $pids -contains $_.ProcessId -and (
-        ($_.CommandLine -like "*$gatewayPattern*") -or
+        ($_.CommandLine -like "*$gatewayScriptPattern*" -and $_.CommandLine -like "*$gatewayArgsPattern*") -or
         ($_.CommandLine -like "*$launcherPattern*")
       )
     })
 }
 
 function Test-GatewayHealthy {
-  $procs = Get-GatewayProcesses
+  $procs = @(Get-GatewayProcesses)
   return $procs.Count -gt 0
 }
 
 function Stop-StaleGateway {
   $pids = Get-GatewayPids
   if ($pids -and $pids.Count -gt 0) {
-    foreach ($pid in $pids) {
+    foreach ($gatewayPid in $pids) {
       try {
-        Stop-Process -Id $pid -Force -ErrorAction Stop
+        Stop-Process -Id $gatewayPid -Force -ErrorAction Stop
       } catch {
       }
     }

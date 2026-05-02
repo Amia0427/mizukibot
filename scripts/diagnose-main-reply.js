@@ -4,7 +4,10 @@ const {
   getMainReplyDynamicBlockCatalog
 } = require('../utils/mainReplyPromptBlocks');
 const { getPersonaModuleCatalogSummary } = require('../utils/personaModules');
-const { buildMainReplyDiagnosticReport } = require('../utils/mainReplyDiagnostics');
+const {
+  buildCacheStatsDiagnostic,
+  buildMainReplyDiagnosticReport
+} = require('../utils/mainReplyDiagnostics');
 
 function parseArgs(argv = []) {
   const args = argv.slice(2);
@@ -13,6 +16,7 @@ function parseArgs(argv = []) {
   return {
     text,
     json: flags.has('--json') || true,
+    cacheStats: flags.has('--cache-stats'),
     promptBlocks: flags.has('--prompt-blocks'),
     plannerMode: flags.has('--live-planner') ? 'live' : 'rule'
   };
@@ -20,8 +24,8 @@ function parseArgs(argv = []) {
 
 function main() {
   const args = parseArgs(process.argv);
-  if (!args.text) {
-    console.error('usage: node scripts/diagnose-main-reply.js [--live-planner] [--prompt-blocks] <text-or-json>');
+  if (!args.text && !args.cacheStats) {
+    console.error('usage: node scripts/diagnose-main-reply.js [--live-planner] [--prompt-blocks] [--cache-stats] <text-or-json>');
     process.exit(1);
   }
 
@@ -32,6 +36,10 @@ function main() {
 }
 
 async function run(args) {
+  if (args.cacheStats) {
+    console.log(JSON.stringify(buildCacheStatsDiagnostic(args), null, 2));
+    return;
+  }
   if (args.promptBlocks) {
     console.log(JSON.stringify(buildPromptBlockDiagnostic(args.text), null, 2));
     return;
@@ -80,6 +88,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildCacheStatsDiagnostic,
   buildPromptBlockDiagnostic,
   parseArgs,
   run
