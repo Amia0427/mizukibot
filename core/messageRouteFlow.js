@@ -24,9 +24,11 @@ const {
   applyGroupDirectStyleGuard
 } = require('../api/runtimeV2/guards/groupDirectReplyStyleGuard');
 const {
+  buildCacheStatsDiagnostic,
   buildMainReplyDiagnosticReport,
   parseMainReplyDiagnosticInput
 } = require('../utils/mainReplyDiagnostics');
+const { buildRuntimeStatusDiagnostic } = require('../utils/runtimeStatusDiagnostics');
 
 function parseJsonTail(text = '') {
   const raw = String(text || '').trim();
@@ -1372,14 +1374,18 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /create <prompt>, /full <任务>, /debug on|off, /status, /reload, /hapi status|approve <id>|deny <id>, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /create <prompt>, /full <任务>, /debug runtime|replydiag|replycache, /status, /reload, /hapi status|approve <id>|deny <id>, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
     } else if (cmd === 'status') {
       adminReply = '状态命令已收到。';
     } else if (cmd === 'reload') {
       adminReply = '重载命令已收到。';
     } else if (cmd === 'debug') {
       const subcmd = String(args[0] || '').trim().toLowerCase();
-      if (subcmd === 'replydiag' || subcmd === 'main-reply' || subcmd === 'reply') {
+      if (subcmd === 'replycache' || subcmd === 'main-reply-cache' || subcmd === 'cache-stats') {
+        adminReply = JSON.stringify(buildCacheStatsDiagnostic(), null, 2);
+      } else if (subcmd === 'runtime' || subcmd === 'status' || subcmd === 'daemon') {
+        adminReply = JSON.stringify(buildRuntimeStatusDiagnostic(), null, 2);
+      } else if (subcmd === 'replydiag' || subcmd === 'main-reply' || subcmd === 'reply') {
         const payload = args.slice(1).join(' ').trim();
         const parsed = parseMainReplyDiagnosticInput(payload || rawText || '');
         const report = await buildMainReplyDiagnosticReport({

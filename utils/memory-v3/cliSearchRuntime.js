@@ -13,8 +13,7 @@ const {
   loadProfileProjection,
   loadScopeProjection,
   loadEpisodeProjection,
-  loadMemoryNodes,
-  loadEmbeddingCache
+  loadMemoryNodes
 } = require('./storage');
 const {
   canonicalizeText,
@@ -582,7 +581,6 @@ function buildSnapshot() {
   const scopeProjection = loadScopeProjection();
   const episodeProjection = loadEpisodeProjection();
   const memoryNodes = loadMemoryNodes();
-  const embeddingCache = loadEmbeddingCache();
   const notebookUsers = readNotebookUsers();
   const notebookData = readNotebookIndexes(notebookUsers);
   meta.notebookIndexes = notebookData.fileStats;
@@ -594,7 +592,6 @@ function buildSnapshot() {
     scopeProjection,
     episodeProjection,
     memoryNodes,
-    embeddingCache,
     notebookIndexes: notebookData.indexes
   };
 
@@ -1146,9 +1143,10 @@ async function searchMemoryCliFast(query = '', options = {}, context = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.limit || config.MEMORY_CLI_MAX_RESULTS || 8) || 8));
   const requestedSource = normalizeText(options.source || 'all').toLowerCase() || 'all';
   const plan = chooseSourcePlan(queryText, requestedSource);
+  const queryEmbedding = shouldUseRemoteEmbedding() ? await requestEmbedding(queryText) : null;
   const scoring = {
-    embeddingIndex: loadEmbeddingIndex(),
-    queryEmbedding: shouldUseRemoteEmbedding() ? await requestEmbedding(queryText) : null
+    embeddingIndex: queryEmbedding ? loadEmbeddingIndex() : null,
+    queryEmbedding
   };
   const selectStartedAt = nowMs();
   const selectedPrimarySources = normalizeArray(plan.primary).filter((item) => SOURCE_SET.has(item));

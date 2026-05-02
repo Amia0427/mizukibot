@@ -43,23 +43,21 @@ async function main() {
   try {
     const path = require('path');
     const {
-      collectAgentPromptFilesFromRoots,
-      readAgentPromptFile
+      loadAgentPromptsFromRoots
     } = require('../utils/agentPrompts');
     const projectRoot = path.join(__dirname, '..');
-    const agentPromptFiles = collectAgentPromptFilesFromRoots([
+    const agentPrompts = loadAgentPromptsFromRoots([
       path.join(projectRoot, 'prompts'),
       path.join(projectRoot, 'skills'),
       path.join(projectRoot, 'artifacts'),
       ...collectExtraAgentPromptRoots()
-    ]);
-    for (const filePath of agentPromptFiles) {
-      const parsed = readAgentPromptFile(filePath, { rootDir: projectRoot });
+    ], { rootDir: projectRoot });
+    for (const parsed of agentPrompts) {
       if (!parsed.ok) {
         throw new Error(`${parsed.relativePath}: ${(parsed.problems || []).join('; ')}`);
       }
     }
-    ok(`agent prompt assets parsed: ${agentPromptFiles.length}`);
+    ok(`agent prompt assets parsed: ${agentPrompts.length}`);
   } catch (e) {
     fail(`agent prompt assets invalid: ${e.message}`);
     return 1;

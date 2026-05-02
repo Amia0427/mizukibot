@@ -95,7 +95,12 @@ module.exports = (async () => {
     };
 
     delete require.cache[require.resolve('../utils/postReplyWorkerRuntime')];
-    const { processPostReplyJob, createPostReplyWorkerRuntime } = require('../utils/postReplyWorkerRuntime');
+    const {
+      processPostReplyJob,
+      createPostReplyWorkerRuntime,
+      schedulePostReplyMaterialize,
+      flushPostReplyMaterialize
+    } = require('../utils/postReplyWorkerRuntime');
 
     await processPostReplyJob({
       userId: 'u1',
@@ -122,6 +127,16 @@ module.exports = (async () => {
     assert.ok(selfCall, 'self improvement should run');
     assert.strictEqual(memoryCall.options.postReplyMemoryMode, 'core');
     assert.strictEqual(journalCall.options.segmentNow, false);
+    await flushPostReplyMaterialize({ force: true, source: 'test_cleanup' });
+
+    const materializeFirst = schedulePostReplyMaterialize({ delayMs: 60000 });
+    const materializeSecond = schedulePostReplyMaterialize({ delayMs: 60000 });
+    assert.strictEqual(materializeFirst.scheduled, true);
+    assert.strictEqual(materializeFirst.coalesced, false);
+    assert.strictEqual(materializeSecond.scheduled, true);
+    assert.strictEqual(materializeSecond.coalesced, true);
+    assert.strictEqual(materializeSecond.pendingCount, 2);
+    await flushPostReplyMaterialize({ force: true, source: 'test_flush' });
 
     const queued = [];
     const runtime = createPostReplyWorkerRuntime({

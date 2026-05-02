@@ -5,8 +5,7 @@ const { PROMPTS_DIR, PROMPT_MANIFEST, PROMPT_MANIFEST_PATH } = require('../confi
 const { RUNTIME_PROMPT_DEFAULTS, renderRuntimePromptTemplate } = require('../utils/runtimePrompts');
 const { buildPromptSnapshot } = require('../utils/promptCompiler');
 const {
-  collectAgentPromptFilesFromRoots,
-  readAgentPromptFile
+  loadAgentPromptsFromRoots
 } = require('../utils/agentPrompts');
 const {
   buildPlannerStageSystemPrompt,
@@ -80,6 +79,25 @@ function collectExtraAgentPromptRoots() {
     .filter(Boolean);
 }
 
+function summarizeAgentPromptFormats(agentPrompts = []) {
+  const summary = {
+    total: 0,
+    markdown: 0,
+    yaml: 0,
+    invalid: 0
+  };
+
+  for (const prompt of Array.isArray(agentPrompts) ? agentPrompts : []) {
+    summary.total += 1;
+    const format = String(prompt?.format || '').trim().toLowerCase();
+    if (format === 'markdown') summary.markdown += 1;
+    if (format === 'yaml') summary.yaml += 1;
+    if (!prompt?.ok) summary.invalid += 1;
+  }
+
+  return summary;
+}
+
 function main() {
   let failureCount = 0;
   console.log('================ Prompt Check Start ================');
@@ -101,12 +119,18 @@ function main() {
   const referencedRelPaths = new Set(sections.map((section) => section.path).filter(Boolean));
   const promptFiles = collectPromptFiles(PROMPTS_DIR);
   const runtimePolicy = readRoutePromptPolicy();
-  const agentPromptFiles = collectAgentPromptFilesFromRoots([
-    PROMPTS_DIR,
-    path.join(projectRoot, 'skills'),
-    path.join(projectRoot, 'artifacts'),
-    ...collectExtraAgentPromptRoots()
-  ]);
+  let agentPrompts = [];
+  try {
+    agentPrompts = loadAgentPromptsFromRoots([
+      PROMPTS_DIR,
+      path.join(projectRoot, 'skills'),
+      path.join(projectRoot, 'artifacts'),
+      ...collectExtraAgentPromptRoots()
+    ], { rootDir: projectRoot });
+  } catch (error) {
+    fail(`agent prompt load failed: ${error.message || error}`);
+    failureCount += 1;
+  }
 
   for (const section of sections) {
     const fullPath = path.join(PROMPTS_DIR, ...section.path.split('/'));
@@ -155,13 +179,15 @@ function main() {
     }
   }
 
-  if (agentPromptFiles.length === 0) {
+  if (agentPrompts.length === 0) {
     warn('no agent prompt files found under prompts/, skills/, or artifacts/');
   }
 
-  for (const filePath of agentPromptFiles) {
+  const agentPromptSummary = summarizeAgentPromptFormats(agentPrompts);
+  ok(`agent prompt formats: total=${agentPromptSummary.total}, markdown=${agentPromptSummary.markdown}, yaml=${agentPromptSummary.yaml}, invalid=${agentPromptSummary.invalid}`);
+
+  for (const parsed of agentPrompts) {
     try {
-      const parsed = readAgentPromptFile(filePath, { rootDir: projectRoot });
       if (!parsed.ok) {
         fail(`agent prompt invalid ${parsed.relativePath}: ${(parsed.problems || []).join('; ')}`);
         failureCount += 1;
@@ -169,8 +195,7 @@ function main() {
       }
       ok(`agent prompt parsed ${parsed.relativePath}: ${parsed.displayName}`);
     } catch (error) {
-      const rel = path.relative(projectRoot, filePath).split(path.sep).join('/');
-      fail(`agent prompt parse failed ${rel}: ${error.message || error}`);
+      fail(`agent prompt parse failed: ${error.message || error}`);
       failureCount += 1;
     }
   }
@@ -282,5 +307,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  main
+  main,
+  summarizeAgentPromptFormats
 };

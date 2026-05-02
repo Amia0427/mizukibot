@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { PassThrough } = require('stream');
 
 function clearProjectCache() {
@@ -10,10 +13,12 @@ function clearProjectCache() {
 
 module.exports = (async () => {
   const snapshot = { ...process.env };
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-anthropic-prompt-cache-'));
   let axios = null;
   let originalPost = null;
 
   try {
+    process.env.DATA_DIR = tempDir;
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.ANTHROPIC_BETA = 'tools-2024-04-04';
     clearProjectCache();
@@ -40,6 +45,26 @@ module.exports = (async () => {
           ]
         },
         {
+          role: 'system',
+          content: [
+            {
+              type: 'text',
+              text: '[Relationship]\ntrusted ally',
+              cache_control: true
+            }
+          ]
+        },
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'text',
+              text: '[CurrentConversation]\nlatest turn',
+              cache_control: true
+            }
+          ]
+        },
+        {
           role: 'assistant',
           content: [
             {
@@ -59,12 +84,94 @@ module.exports = (async () => {
 
     assert.strictEqual(prepared.provider, 'anthropic');
     assert.ok(Array.isArray(prepared.requestBody.messages));
-    const assistantContext = prepared.requestBody.messages.find((item) => item.role === 'assistant');
+    const dynamicContext = prepared.requestBody.messages.find((item) => (
+      item.role === 'assistant'
+      && item.content.some((block) => String(block.text || '').includes('[Affinity]'))
+    ));
+    const relationshipContext = prepared.requestBody.messages.find((item) => (
+      item.role === 'assistant'
+      && item.content.some((block) => String(block.text || '').includes('[Relationship]'))
+    ));
+    const currentConversationContext = prepared.requestBody.messages.find((item) => (
+      item.role === 'assistant'
+      && item.content.some((block) => String(block.text || '').includes('[CurrentConversation]'))
+    ));
+    const assistantContext = prepared.requestBody.messages.find((item) => (
+      item.role === 'assistant'
+      && item.content.some((block) => String(block.text || '').includes('[Context for assistant only]'))
+    ));
+    assert.ok(dynamicContext);
+    assert.ok(relationshipContext);
+    assert.ok(currentConversationContext);
     assert.ok(assistantContext);
-    assert.deepStrictEqual(
-      assistantContext.content[assistantContext.content.length - 1].cache_control,
-      { type: 'ephemeral', ttl: '5m' }
-    );
+    assert.ok(!prepared.requestBody.system);
+    assert.ok(dynamicContext.content.every((block) => !('cache_control' in block)));
+    assert.ok(relationshipContext.content.every((block) => !('cache_control' in block)));
+    assert.ok(currentConversationContext.content.every((block) => !('cache_control' in block)));
+    assert.ok(assistantContext.content.every((block) => !('cache_control' in block)));
+    assert.ok(!prepared.requestBody.messages.some((item) => item.content.some((block) => block.cache_control)));
+    assert.strictEqual(prepared.requestHeaders, null);
+
+    const preparedDynamicOnly = await httpClient.prepareRequest('https://example.com/v1/messages', {
+      model: 'claude-3-5-sonnet-latest',
+      messages: [
+        {
+          role: 'system',
+          content: '[Relationship]\ntrusted ally'
+        },
+        {
+          role: 'assistant',
+          content: '[Context for assistant only]\nexample few shot'
+        },
+        {
+          role: 'user',
+          content: 'hello'
+        }
+      ],
+      stream: false
+    });
+    assert.ok(!preparedDynamicOnly.requestBody.system);
+    assert.ok(preparedDynamicOnly.requestBody.messages.every((item) => item.content.every((block) => !('cache_control' in block))));
+    assert.strictEqual(preparedDynamicOnly.requestHeaders, null);
+
+    const preparedStableSystem = await httpClient.prepareRequest('https://example.com/v1/messages', {
+      model: 'claude-3-5-sonnet-latest',
+      messages: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'text',
+              text: 'stable persona',
+              cache_control: { type: 'ephemeral', ttl: '5m' }
+            }
+          ]
+        },
+        {
+          role: 'user',
+          content: 'dynamic latest turn'
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'lookup_memory',
+            description: 'lookup stable schema',
+            parameters: {
+              type: 'object',
+              properties: {
+                query: { type: 'string' }
+              }
+            }
+          }
+        }
+      ],
+      stream: false
+    });
+    assert.strictEqual(preparedStableSystem.requestBody.system[0].cache_control.ttl, '5m');
+    assert.ok(preparedStableSystem.requestBody.messages.every((item) => item.content.every((block) => !('cache_control' in block))));
+    assert.ok(preparedStableSystem.requestBody.tools.some((tool) => tool.cache_control));
 
     let attemptCount = 0;
     let firstAttemptBody = null;
@@ -111,6 +218,16 @@ module.exports = (async () => {
           content: [
             {
               type: 'text',
+              text: 'stable persona',
+              cache_control: { type: 'ephemeral', ttl: '5m' }
+            }
+          ]
+        },
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'text',
               text: '[Relationship]\ntrusted ally',
               cache_control: true
             }
@@ -135,8 +252,10 @@ module.exports = (async () => {
     }, 0, 'test-key');
 
     assert.strictEqual(attemptCount, 2);
-    assert.ok(firstAttemptBody.messages.some((item) => item.content.some((block) => block.cache_control)));
+    assert.ok(firstAttemptBody.system.some((block) => block.cache_control));
+    assert.ok(firstAttemptBody.messages.every((item) => item.content.every((block) => !('cache_control' in block))));
     assert.ok(firstAttemptHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
+    assert.ok(secondAttemptBody.system.every((block) => !('cache_control' in block)));
     assert.ok(secondAttemptBody.messages.every((item) => item.content.every((block) => !('cache_control' in block))));
     assert.ok(!String(secondAttemptHeaders['anthropic-beta'] || '').includes('prompt-caching-2024-07-31'));
     assert.ok(String(secondAttemptHeaders['anthropic-beta'] || '').includes('tools-2024-04-04'));
@@ -147,6 +266,13 @@ module.exports = (async () => {
     assert.strictEqual(calls[0].prompt_caching.prompt_caching_beta_enabled, false);
     assert.strictEqual(calls[0].usage.cache_read_input_tokens, 16);
     assert.strictEqual(calls[0].usage.cache_creation_input_tokens, 2);
+    const loggedCalls = fs.readFileSync(path.join(tempDir, 'model-calls.ndjson'), 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    assert.strictEqual(loggedCalls[0].prompt_caching.total_cache_breakpoints, 0);
+    assert.strictEqual(loggedCalls[0].usage.cache_read_input_tokens, 16);
+    assert.strictEqual(loggedCalls[0].usage.cache_creation_input_tokens, 2);
 
     attemptCount = 0;
     axios.post = async (_url, body, options = {}) => {
@@ -177,6 +303,16 @@ module.exports = (async () => {
     await httpClient.postStreamWithRetry('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
       messages: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'text',
+              text: 'stable persona',
+              cache_control: { type: 'ephemeral', ttl: '5m' }
+            }
+          ]
+        },
         {
           role: 'system',
           content: [

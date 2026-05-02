@@ -8,7 +8,14 @@ const { applyAffinityProposal } = require('./memory');
 const { addTaskMemory } = require('./taskMemory');
 const { addGroupMemory } = require('./groupMemory');
 const { addMemoryItemsBatch } = require('./vectorMemory');
-const { getResourcePressureState, appendPerfEvent } = require('./perfRuntime');
+const { getBackgroundPressureDelayMs, getResourcePressureState, appendPerfEvent } = require('./perfRuntime');
+
+const materializeDebounceState = {
+  timer: null,
+  promise: null,
+  pendingCount: 0,
+  lastScheduledAt: 0
+};
 
 function normalizePhase(value = '') {
   const phase = String(value || '').trim().toLowerCase();
@@ -238,6 +245,83 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function getPostReplyMaterializeDelayMs(options = {}) {
+  if (options.force === true) return 0;
+  const configured = Number(options.delayMs ?? config.POST_REPLY_MATERIALIZE_DEBOUNCE_MS);
+  return Math.max(1000, Number.isFinite(configured) && configured > 0 ? configured : 45 * 1000);
+}
+
+function schedulePostReplyMaterialize(options = {}) {
+  if (options.force === true) {
+    return Promise.resolve(materializeMemoryViews({
+      ...options,
+      force: true,
+      source: options.source || 'post_reply_force'
+    }));
+  }
+
+  materializeDebounceState.pendingCount += 1;
+  if (materializeDebounceState.timer) {
+    return {
+      scheduled: true,
+      coalesced: true,
+      pendingCount: materializeDebounceState.pendingCount,
+      delayMs: getPostReplyMaterializeDelayMs(options)
+    };
+  }
+
+  const delayMs = getPostReplyMaterializeDelayMs(options);
+  materializeDebounceState.lastScheduledAt = Date.now();
+  materializeDebounceState.timer = setTimeout(() => {
+    const pendingCount = materializeDebounceState.pendingCount;
+    materializeDebounceState.timer = null;
+    materializeDebounceState.pendingCount = 0;
+    materializeDebounceState.promise = Promise.resolve()
+      .then(() => materializeMemoryViews({
+        source: 'post_reply_debounced',
+        pendingCount
+      }))
+      .catch((error) => {
+        console.warn('[post_reply_worker] debounced materialize failed:', error?.message || error);
+      })
+      .finally(() => {
+        materializeDebounceState.promise = null;
+      });
+  }, delayMs);
+  if (typeof materializeDebounceState.timer.unref === 'function') {
+    materializeDebounceState.timer.unref();
+  }
+  return {
+    scheduled: true,
+    coalesced: false,
+    pendingCount: materializeDebounceState.pendingCount,
+    delayMs
+  };
+}
+
+async function flushPostReplyMaterialize(options = {}) {
+  if (materializeDebounceState.timer) {
+    clearTimeout(materializeDebounceState.timer);
+    materializeDebounceState.timer = null;
+    const pendingCount = materializeDebounceState.pendingCount;
+    materializeDebounceState.pendingCount = 0;
+    materializeDebounceState.promise = Promise.resolve(materializeMemoryViews({
+      source: options.source || 'post_reply_flush',
+      pendingCount,
+      force: options.force === true
+    })).finally(() => {
+      materializeDebounceState.promise = null;
+    });
+  }
+  if (materializeDebounceState.promise) {
+    await materializeDebounceState.promise;
+  }
+  return {
+    flushed: true,
+    pendingCount: materializeDebounceState.pendingCount
+  };
+}
+
 function buildLearningMeta(job = {}) {
   const routeMeta = normalizeObject(job.routeMeta, {});
   return {
@@ -329,8 +413,27 @@ async function processPostReplyJob(job = {}, deps = {}) {
         type: 'fact'
       }
     });
-    materializeMemoryViews();
-    logStructured('post_reply_step_done', { ...traceBase, step: 'appendMemoryEvent' });
+    const scheduleMaterializeMemoryViews = typeof deps.scheduleMaterializeMemoryViews === 'function'
+      ? deps.scheduleMaterializeMemoryViews
+      : schedulePostReplyMaterialize;
+    const materializeResult = await scheduleMaterializeMemoryViews({
+      reason: 'post_reply_core',
+      userId: normalizeText(job.userId),
+      sessionKey: normalizeText(job.sessionKey),
+      groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id)
+    });
+    logStructured('post_reply_step_done', {
+      ...traceBase,
+      step: 'appendMemoryEvent',
+      materialize: materializeResult && typeof materializeResult === 'object'
+        ? {
+            scheduled: Boolean(materializeResult.scheduled),
+            coalesced: Boolean(materializeResult.coalesced),
+            delayMs: Number(materializeResult.delayMs || 0) || 0,
+            pendingCount: Number(materializeResult.pendingCount || 0) || 0
+          }
+        : {}
+    });
   }
   if (phase === 'enrich') {
     logStructured('post_reply_step_start', { ...traceBase, step: 'runEnrichPhase' });
@@ -533,9 +636,7 @@ function createPostReplyWorkerRuntime(options = {}) {
   }
 
   function getPressureDeferMs() {
-    const pressure = getResourcePressureState();
-    if (!pressure || pressure.level === 'normal') return 0;
-    return Math.max(1000, Number(config.BACKGROUND_PRESSURE_DEFER_MS || 15000) || 15000);
+    return getBackgroundPressureDelayMs();
   }
 
   async function runOneJob(job) {
@@ -668,5 +769,7 @@ function createPostReplyWorkerRuntime(options = {}) {
 
 module.exports = {
   createPostReplyWorkerRuntime,
+  flushPostReplyMaterialize,
+  schedulePostReplyMaterialize,
   processPostReplyJob
 };

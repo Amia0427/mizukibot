@@ -66,7 +66,6 @@ const {
 } = require('./initiativePolicyEngine');
 const { markInitiativeSent, setLastCycleKey } = require('./initiativeState');
 const { isAdmin } = require('./router');
-const { runMemoryCli: defaultRunMemoryCli } = require('../utils/memoryCli');
 const { recordMemoryScope: defaultRecordMemoryScope } = require('../utils/memoryScopeIndex');
 const { requestAssistantMessage } = require('../api/graphModelIO');
 const { classifyReplyFailure, normalizeReplyText } = require('../utils/replyFailure');
@@ -89,6 +88,21 @@ const WINDOW_STATUS_LABELS = Object.freeze({
 const GROUP_MAX_AUTO_SENDS_PER_WINDOW = 1;
 const QZONE_MAX_AUTO_SENDS_PER_WINDOW = 2;
 const QZONE_DAILY_SHARE_TYPES = Object.freeze(['greeting', 'mood', 'recommendation']);
+let cachedDefaultRunMemoryCli;
+
+function getDefaultRunMemoryCli() {
+  if (cachedDefaultRunMemoryCli !== undefined) return cachedDefaultRunMemoryCli;
+  try {
+    const memoryCli = require('../utils/memoryCli');
+    cachedDefaultRunMemoryCli = typeof memoryCli?.runMemoryCli === 'function'
+      ? memoryCli.runMemoryCli
+      : null;
+  } catch (error) {
+    cachedDefaultRunMemoryCli = null;
+    console.warn('[daily-share] memory_cli unavailable:', error?.message || error);
+  }
+  return cachedDefaultRunMemoryCli;
+}
 
 function logDailyShare({ groupId = '', windowKey = '', type = '', reason = '', source = '', event = '' } = {}) {
   const payload = {
@@ -695,7 +709,11 @@ async function prefetchQzoneDailyShareMemory({
     memoryEvidenceSources: []
   };
 
-  if (!memoryOwner || typeof runMemoryCli !== 'function' || typeof recordMemoryScope !== 'function') {
+  const effectiveRunMemoryCli = typeof runMemoryCli === 'function'
+    ? runMemoryCli
+    : getDefaultRunMemoryCli();
+
+  if (!memoryOwner || typeof effectiveRunMemoryCli !== 'function' || typeof recordMemoryScope !== 'function') {
     meta.memoryPrefetchError = !memoryOwner ? 'missing-memory-owner' : 'memory-prefetch-unavailable';
     return { memoryEvidence: { items: [], sources: [] }, meta };
   }
@@ -738,7 +756,7 @@ async function prefetchQzoneDailyShareMemory({
 
   let searchPayload = null;
   try {
-    searchPayload = await runMemoryCli(`mem search --query ${JSON.stringify(meta.memoryQuery)} --source all --limit 6`, memoryContext);
+    searchPayload = await effectiveRunMemoryCli(`mem search --query ${JSON.stringify(meta.memoryQuery)} --source all --limit 6`, memoryContext);
   } catch (error) {
     meta.memoryPrefetchError = String(error?.message || error || 'memory-search-failed');
     logDailyShare({
@@ -771,7 +789,7 @@ async function prefetchQzoneDailyShareMemory({
   const openCandidate = meta.memorySearchCount > 0 ? pickQzoneMemoryOpenCandidate(searchPayload.results) : null;
   if (openCandidate?.ref) {
     try {
-      const openPayload = await runMemoryCli(`mem open --ref ${JSON.stringify(String(openCandidate.ref).trim())}`, memoryContext);
+      const openPayload = await effectiveRunMemoryCli(`mem open --ref ${JSON.stringify(String(openCandidate.ref).trim())}`, memoryContext);
       openedMemory = sanitizeQzoneOpenedMemory(openPayload, openCandidate.source);
       if (openedMemory) {
         meta.memoryOpenUsed = true;
@@ -879,7 +897,7 @@ function createDailyShareEngine({
   knowledgeProvider = dailyShareKnowledgeProvider,
   contentBuilder = null,
   qzonePublisher = publishQzonePost,
-  runMemoryCli = defaultRunMemoryCli,
+  runMemoryCli = null,
   recordMemoryScope = defaultRecordMemoryScope,
   memoryQueryPlanner = null
 } = {}) {

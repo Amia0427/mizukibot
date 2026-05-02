@@ -75,6 +75,62 @@ module.exports = (async () => {
     assert.ok(Object.prototype.hasOwnProperty.call(report, 'guards'));
     assert.ok(Object.prototype.hasOwnProperty.call(report.branch, 'finalBranch'));
 
+    const cacheResult = await routeFlow.dispatchAdminRoute({
+      route: {
+        topRouteType: 'admin',
+        meta: {
+          admin: true,
+          command: {
+            cmd: 'debug',
+            args: ['replycache'],
+            raw: '/debug replycache'
+          }
+        }
+      },
+      groupId: 'g_diag',
+      senderId: 'admin_1',
+      rawText: '/debug replycache',
+      userInfo: null,
+      chatType: 'group'
+    });
+
+    assert.strictEqual(cacheResult.handled, true);
+    assert.strictEqual(sent.length, 2);
+    const cacheReport = JSON.parse(sent[1].replyText);
+    assert.strictEqual(cacheReport.schemaVersion, 'main_reply_cache_stats_v1');
+    assert.ok(Array.isArray(cacheReport.sources));
+    assert.strictEqual(cacheReport.signals.noRecentMainReplyCalls, true);
+
+    const runtimeResult = await routeFlow.dispatchAdminRoute({
+      route: {
+        topRouteType: 'admin',
+        meta: {
+          admin: true,
+          command: {
+            cmd: 'debug',
+            args: ['runtime'],
+            raw: '/debug runtime'
+          }
+        }
+      },
+      groupId: 'g_diag',
+      senderId: 'admin_1',
+      rawText: '/debug runtime',
+      userInfo: null,
+      chatType: 'group'
+    });
+
+    assert.strictEqual(runtimeResult.handled, true);
+    assert.strictEqual(sent.length, 3);
+    const runtimeReport = JSON.parse(sent[2].replyText);
+    assert.strictEqual(runtimeReport.schemaVersion, 'runtime_status_diagnostic_v1');
+    assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport, 'summary'));
+    assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport, 'components'));
+    assert.ok(Array.isArray(runtimeReport.signals));
+    assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport.components, 'postReplyWorker'));
+    assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport.components, 'backgroundTasks'));
+    assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport.components, 'subagents'));
+
     console.log('mainReplyDiagnosticsAdminCommand.test.js passed');
   } finally {
     restoreEnv(snapshot);

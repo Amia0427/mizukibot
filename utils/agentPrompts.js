@@ -207,7 +207,16 @@ function normalizeAgentPrompt(parsed = {}, options = {}) {
     iface.prompt,
     iface.instructions,
     iface.system_prompt,
-    iface.systemPrompt
+    iface.systemPrompt,
+    meta.default_prompt,
+    meta.defaultPrompt,
+    meta.prompt,
+    meta.instructions,
+    meta.system_prompt,
+    meta.systemPrompt,
+    meta.content,
+    meta.body,
+    meta.text
   );
   const defaultPrompt = isMarkdown ? pickString(body, metadataPrompt) : pickString(metadataPrompt, body);
   const relativePath = options.rootDir
@@ -320,7 +329,27 @@ function collectAgentPromptFilesFromRoots(roots = []) {
   return files.sort((a, b) => a.localeCompare(b));
 }
 
+function loadAgentPromptsFromRoots(roots = [], options = {}) {
+  const rootDir = String(options.rootDir || '').trim();
+  return collectAgentPromptFilesFromRoots(roots)
+    .map((filePath) => readAgentPromptFile(filePath, rootDir ? { rootDir } : {}));
+}
+
 function formatAgentPromptForRuntime(agentPrompt = {}) {
+  const defaultPrompt = pickString(
+    agentPrompt.defaultPrompt,
+    agentPrompt.prompt,
+    agentPrompt.content,
+    agentPrompt.interface?.default_prompt,
+    agentPrompt.interface?.defaultPrompt
+  );
+  if (!defaultPrompt) {
+    const source = normalizeText(agentPrompt.relativePath || agentPrompt.sourcePath) || '(unknown)';
+    const problems = Array.isArray(agentPrompt.problems)
+      ? agentPrompt.problems.map((item) => normalizeText(item)).filter(Boolean)
+      : [];
+    throw new Error(`Invalid agent prompt ${source}: ${problems.join('; ') || 'Missing default prompt text'}`);
+  }
   const lines = [
     `- ${normalizeText(agentPrompt.displayName || agentPrompt.id) || 'agent'}`,
     `  source: ${normalizeText(agentPrompt.relativePath || agentPrompt.sourcePath) || '(unknown)'}`,
@@ -328,7 +357,7 @@ function formatAgentPromptForRuntime(agentPrompt = {}) {
   ];
   if (agentPrompt.shortDescription) lines.push(`  description: ${agentPrompt.shortDescription}`);
   lines.push('  default_prompt:');
-  lines.push(String(agentPrompt.defaultPrompt || '').split(/\r?\n/).map((line) => `    ${line}`).join('\n'));
+  lines.push(String(defaultPrompt || '').split(/\r?\n/).map((line) => `    ${line}`).join('\n'));
   return lines.join('\n');
 }
 
@@ -338,6 +367,7 @@ module.exports = {
   formatAgentPromptForRuntime,
   isAgentPromptFile,
   listAgentPromptFiles,
+  loadAgentPromptsFromRoots,
   listSkillAgentPromptFiles,
   loadSkillAgentPrompts,
   parseAgentPromptText,

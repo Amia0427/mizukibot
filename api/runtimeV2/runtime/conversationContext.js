@@ -142,13 +142,6 @@ function createConversationContextHelpers(deps = {}) {
     ].includes(blockId);
   }
 
-  function shouldCacheSessionContextBlock(block = {}) {
-    const blockId = String(block?.id || '').trim();
-    return blockId === 'affinity_level'
-      || blockId === 'affinity_points'
-      || blockId.startsWith('relationship_');
-  }
-
   function mapStableSystemBlocksToMessages(blocks = []) {
     return normalizeArray(blocks)
       .filter((item) => item && typeof item === 'object')
@@ -167,15 +160,10 @@ function createConversationContextHelpers(deps = {}) {
   function mapDynamicContextBlocksToMessages(blocks = []) {
     return normalizeArray(blocks)
       .filter((item) => item && typeof item === 'object')
-      .map((item) => {
-        const base = {
-          role: 'system',
-          content: String(item.content || '').trim()
-        };
-        return shouldCacheSessionContextBlock(item)
-          ? attachCacheControlToMessage(base, OPENAI_COMPATIBLE_CACHE_CONTROL)
-          : base;
-      })
+      .map((item) => ({
+        role: 'system',
+        content: String(item.content || '').trim()
+      }))
       .filter((item) => hasMessageContent(item));
   }
 
@@ -187,9 +175,6 @@ function createConversationContextHelpers(deps = {}) {
           role: 'assistant',
           content: String(item.content || '').trim()
         };
-        if (String(item?.id || '').trim() === 'dynamic_few_shot') {
-          return attachCacheControlToMessage(message, OPENAI_COMPATIBLE_CACHE_CONTROL);
-        }
         return message;
       })
       .filter((item) => hasMessageContent(item));

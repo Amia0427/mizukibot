@@ -180,6 +180,16 @@ function shutdownSubagentExecutor(reason = 'shutdown') {
   };
 }
 
+function getSubagentExecutorSnapshot() {
+  return {
+    activeSubagentRuns,
+    pendingSubagentRuns: pendingSubagentRuns.length,
+    activeBridgeCalls: activeBridgeCalls.size,
+    maxConcurrency: SUBAGENT_MAX_CONCURRENCY,
+    shuttingDown
+  };
+}
+
 function resetSubagentExecutorForTest() {
   shuttingDown = false;
   activeSubagentRuns = 0;
@@ -193,6 +203,7 @@ module.exports = {
   buildSessionId,
   createBridgeCall,
   finalizeSubagentResult,
+  getSubagentExecutorSnapshot,
   parseSubagentReply,
   resetSubagentExecutorForTest,
   shutdownSubagentExecutor,
