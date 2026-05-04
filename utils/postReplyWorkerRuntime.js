@@ -8,7 +8,7 @@ const { applyAffinityProposal } = require('./memory');
 const { addTaskMemory } = require('./taskMemory');
 const { addGroupMemory } = require('./groupMemory');
 const { addMemoryItemsBatch } = require('./vectorMemory');
-const { getBackgroundPressureDelayMs, getResourcePressureState, appendPerfEvent } = require('./perfRuntime');
+const { getBackgroundPressureDelayMs, getResourcePressureState, appendPerfEvent, appendResourceSnapshot } = require('./perfRuntime');
 
 const materializeDebounceState = {
   timer: null,
@@ -716,6 +716,12 @@ function createPostReplyWorkerRuntime(options = {}) {
         delayMs: pressureDeferMs,
         activeCount,
         pressureLevel: getResourcePressureState().level
+      });
+      appendResourceSnapshot({
+        component: 'post_reply_worker',
+        postReplyActiveCount: activeCount,
+        postReplyEffectiveConcurrency: getEffectiveConcurrency(),
+        postReplyQueuedDeferMs: pressureDeferMs
       });
       scheduleTick(pressureDeferMs);
       return;

@@ -24,6 +24,8 @@
 - `diagnose-main-reply.js`：统一主回复诊断，输出 route/model/fallback、memory freshness、群聊回复守卫、direct/tool/background 分支
 - `diagnose-persona-memory-state.js`
 - `diagnose-persona-modules.js`
+- `diagnose-runtime-hotspots.js`：运行时资源热点诊断，汇总 RSS/heap/event loop delay、timer/interval、post-reply worker、子 agent 和高频模块
+- `diagnose-runtime-status.js`：运行时状态诊断，汇总主进程、post-reply worker、后台任务、锁和子 agent
 - `analyze-foreground-concurrency.js`
 
 ## Setup / Install

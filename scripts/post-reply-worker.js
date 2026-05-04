@@ -1,11 +1,18 @@
 const config = require('../config');
 const { createPostReplyWorkerRuntime } = require('../utils/postReplyWorkerRuntime');
+const { startResourceSnapshotLoop } = require('../utils/perfRuntime');
 const fs = require('fs');
 const path = require('path');
 
 config.validateRequiredConfig();
 
 const runtime = createPostReplyWorkerRuntime();
+const resourceSnapshotLoop = startResourceSnapshotLoop(() => ({
+  component: 'post_reply_worker',
+  postReplyActiveUserIds: runtime.getActiveUserIds().length,
+  postReplyConcurrency: runtime.concurrency,
+  postReplyPollMs: runtime.pollMs
+}));
 const PID_FILE = path.join(__dirname, '..', '.mizukibot-postreply-worker.pid');
 
 function writePidFile() {
@@ -30,6 +37,7 @@ function clearPidFile() {
 
 function shutdown(code = 0) {
   runtime.stop();
+  try { resourceSnapshotLoop.stop(); } catch (_) {}
   clearPidFile();
   process.exit(code);
 }

@@ -131,6 +131,33 @@ module.exports = (async () => {
     assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport.components, 'backgroundTasks'));
     assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport.components, 'subagents'));
 
+    const hotspotsResult = await routeFlow.dispatchAdminRoute({
+      route: {
+        topRouteType: 'admin',
+        meta: {
+          admin: true,
+          command: {
+            cmd: 'debug',
+            args: ['hotspots'],
+            raw: '/debug hotspots'
+          }
+        }
+      },
+      groupId: 'g_diag',
+      senderId: 'admin_1',
+      rawText: '/debug hotspots',
+      userInfo: null,
+      chatType: 'group'
+    });
+
+    assert.strictEqual(hotspotsResult.handled, true);
+    assert.strictEqual(sent.length, 4);
+    const hotspotsReport = JSON.parse(sent[3].replyText);
+    assert.strictEqual(hotspotsReport.schemaVersion, 'runtime_hotspots_diagnostic_v1');
+    assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'resources'));
+    assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'runtime'));
+    assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'modules'));
+
     console.log('mainReplyDiagnosticsAdminCommand.test.js passed');
   } finally {
     restoreEnv(snapshot);

@@ -180,7 +180,7 @@ module.exports = (async () => {
     delete process.env.HTTP_USER_AGENT;
     clearProjectCache();
     const defaultConfig = require('../config');
-    assert.strictEqual(defaultConfig.MODEL_HTTP_USER_AGENT, 'codex_cli_rs/0.77.0 (Windows 10.0.26100; x86_64) WindowsTerminal');
+    assert.strictEqual(defaultConfig.MODEL_HTTP_USER_AGENT, 'claude-cli/2.0.76 (external, cli)');
 
     console.log('providerRequestNormalization.test.js passed');
   } finally {
