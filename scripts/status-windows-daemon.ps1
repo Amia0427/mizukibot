@@ -44,3 +44,13 @@ if ($nodeProcs) {
 } else {
   Write-Host "No node process found."
 }
+
+Write-Host ""
+Write-Host "=== Runtime Hotspots ==="
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+$hotspotScript = Join-Path $PSScriptRoot 'diagnose-runtime-hotspots.js'
+if ($nodeCmd -and (Test-Path $hotspotScript)) {
+  & $nodeCmd.Source $hotspotScript --text --window 30m
+} else {
+  Write-Host "Node or diagnose-runtime-hotspots.js not found."
+}

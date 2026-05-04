@@ -18,6 +18,7 @@
     "diag:continuity": "node scripts/diagnose-continuity-state.js",
     "diag:main-reply": "node scripts/diagnose-main-reply.js",
     "diag:runtime": "node scripts/diagnose-runtime-status.js",
+    "diag:runtime-hotspots": "node scripts/diagnose-runtime-hotspots.js",
     "memory:v3:migrate": "node scripts/migrate-memory-v3.js",
     "check:prompts": "node scripts/check-prompts.js",
     "linux:install": "bash scripts/install-linux.sh",
