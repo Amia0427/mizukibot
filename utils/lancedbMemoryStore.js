@@ -438,6 +438,53 @@ function safeSearchFailure(reason = 'unavailable') {
   return { ok: false, skipped: true, reason, results: [], rows: [] };
 }
 
+async function countTableRows(tableName = '', options = {}) {
+  const normalizedTable = normalizeText(tableName);
+  if (!normalizedTable) return { ok: false, skipped: true, reason: 'empty_table', rows: 0 };
+  const openResult = await openLanceDb(options);
+  if (!openResult.ok) return { ...openResult, rows: 0 };
+  try {
+    const table = await openTable(openResult.db, normalizedTable);
+    if (!table) return { ok: false, skipped: true, reason: 'table_missing', rows: 0 };
+    if (typeof table.countRows === 'function') {
+      const rows = await table.countRows();
+      return { ok: true, table: normalizedTable, rows: Number(rows || 0) || 0 };
+    }
+    const rows = await table.query().select(['id']).limit(1000000).toArray();
+    return { ok: true, table: normalizedTable, rows: Array.isArray(rows) ? rows.length : 0 };
+  } catch (error) {
+    return { ok: false, skipped: true, table: normalizedTable, reason: `count_failed:${error.message}`, rows: 0 };
+  }
+}
+
+async function listTableIds(tableName = '', options = {}) {
+  const normalizedTable = normalizeText(tableName);
+  if (!normalizedTable) return { ok: false, skipped: true, reason: 'empty_table', rows: 0, ids: [] };
+  const openResult = await openLanceDb(options);
+  if (!openResult.ok) return { ...openResult, rows: 0, ids: [] };
+  try {
+    const table = await openTable(openResult.db, normalizedTable);
+    if (!table) return { ok: false, skipped: true, reason: 'table_missing', rows: 0, ids: [] };
+    const maxIds = Math.max(1, Math.floor(Number(options.maxIds || 1000000) || 1000000));
+    const idRows = await table.query().select(['id']).limit(maxIds).toArray();
+    const ids = (Array.isArray(idRows) ? idRows : [])
+      .map((row) => normalizeText(row.id))
+      .filter(Boolean);
+    const rowCount = typeof table.countRows === 'function'
+      ? Number(await table.countRows() || 0) || ids.length
+      : ids.length;
+    return {
+      ok: true,
+      table: normalizedTable,
+      rows: rowCount,
+      ids,
+      truncated: ids.length < rowCount
+    };
+  } catch (error) {
+    return { ok: false, skipped: true, table: normalizedTable, reason: `list_ids_failed:${error.message}`, rows: 0, ids: [] };
+  }
+}
+
 async function searchTableVectors(tableName = '', queryEmbedding = [], filterSql = '', options = {}) {
   const vector = normalizeVector(queryEmbedding);
   if (vector.length === 0) return safeSearchFailure('empty_query_embedding');
@@ -529,11 +576,13 @@ module.exports = {
   buildMemoryVectorRow,
   buildWorldbookVectorRow,
   compactLanceDbTables,
+  countTableRows,
   dedupeVectorRows,
   fuseRecallCandidates,
   isLanceDbReadEnabled,
   isLanceDbSyncEnabled,
   lancedbDistanceToScore,
+  listTableIds,
   normalizeVectorStoreMode,
   openLanceDb,
   resolveVectorCandidates,

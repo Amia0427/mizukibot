@@ -1,4 +1,8 @@
 const { getToolSchemaByName } = require('../../toolRegistry');
+const {
+  isToolAllowedByRuntimeList,
+  normalizeToolNames
+} = require('../../../utils/localToolAccess');
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
 }
@@ -560,10 +564,25 @@ function createToolExecutionHelpers(deps = {}) {
     const toolName = String(step.tool || '').trim();
     const policy = getPolicy(toolName);
     const executionState = normalizeObject(state.execution, {});
+    const allowedTools = normalizeToolNames(runtimeOptions.allowedTools ?? (
+      typeof computeEffectiveAllowedTools === 'function'
+        ? computeEffectiveAllowedTools(state.request || {}, executionState.memoryCliTurn)
+        : state.request?.allowedTools
+    ));
     const toolContextOverrides = {
       ...runtimeOptions,
       toolName
     };
+
+    if (!isToolAllowedByRuntimeList(toolName, allowedTools)) {
+      const envelope = buildBlockedToolEnvelope(step, executionState.memoryCliTurn, 'tool_not_allowed');
+      maybeCaptureToolFailure(envelope, step, state);
+      logToolExecution(envelope, step, state, {
+        node: runtimeOptions.node || state.execution?.currentNode || 'unknown',
+        allowedTools
+      });
+      return envelope;
+    }
 
     if (
       String(step?.source || '').trim() === 'direct_chat'

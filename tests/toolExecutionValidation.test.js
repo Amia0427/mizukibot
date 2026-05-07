@@ -43,7 +43,7 @@ module.exports = (async () => {
     shouldRunParallel: () => false,
     capabilityRegistry: { byName: new Map() },
     buildLiveMainConversationSnapshot: () => ({}),
-    computeEffectiveAllowedTools: () => [],
+    computeEffectiveAllowedTools: () => ['lookup'],
     createMemoryCliTurnState: (value) => value || {},
     updateMemoryCliTurnStateAfterError: (state) => state,
     updateMemoryCliTurnStateAfterResult: (state) => state,
@@ -61,7 +61,7 @@ module.exports = (async () => {
 
   const envelope = await helpers.runToolStep(
     { id: 's1', tool: 'lookup', inputs: {} },
-    { request: {}, execution: {} },
+    { request: { allowedTools: ['lookup'] }, execution: {} },
     { getToolSchemaByName: () => schema }
   );
   assert.strictEqual(executed, false);

@@ -24,6 +24,7 @@ _tmp_*.log
 _tmp_*.tar.gz
 artifacts/tmp/
 artifacts/logs/
+artifacts/memory-recall-eval/*.tmp
 
 # Local Windows ops artifacts
 windows-mgmt.conf

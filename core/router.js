@@ -248,6 +248,16 @@ function parseAdminCommand(cleanText = '') {
     };
   }
 
+  if (/^\/memoryops(?:\s|$)/i.test(t)) {
+    const payload = t.replace(/^\/memoryops/i, '').trim();
+    return {
+      cmd: 'memoryops',
+      args: payload ? payload.split(/\s+/).filter(Boolean) : [],
+      raw: t,
+      payload
+    };
+  }
+
   if (/^\/learn(?:\s|$)/i.test(t)) {
     const payload = t.replace(/^\/learn/i, '').trim();
     const parts = payload.split(/\s+/).filter(Boolean);
@@ -317,7 +327,7 @@ function parseAdminCommand(cleanText = '') {
   const parts = t.slice(ADMIN_PREFIX.length).trim().split(/\s+/);
   const cmd = (parts[0] || '').toLowerCase();
   const args = parts.slice(1);
-  const supported = new Set(['debug', 'status', 'reload', 'help', 'hapi']);
+  const supported = new Set(['debug', 'status', 'reload', 'help', 'hapi', 'memoryops']);
 
   if (!supported.has(cmd)) return { cmd: 'unknown', args, raw: t };
   return { cmd, args, raw: t };

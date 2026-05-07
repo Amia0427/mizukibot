@@ -20,7 +20,8 @@ const {
 const { rerankMemoryCandidates } = require('../memoryReranker');
 const {
   loadEmbeddingIndex,
-  calcEmbeddingSimilarity
+  calcEmbeddingSimilarity,
+  getEmbeddingForCandidate
 } = require('./embeddingIndex');
 const {
   buildDailyJournalDocsForUser,
@@ -483,6 +484,31 @@ function buildDigest(items = [], maxChars = Number(config.MEMORY_CLI_DIGEST_MAX_
   return clampText(lines.join('\n'), maxChars);
 }
 
+function buildLanceDbFallbackReason(diagnostics = {}, queryEmbedding = null, vectorStoreMode = 'local_jsonl') {
+  if (diagnostics.enabled !== true) return 'read_disabled';
+  if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) return 'query_embedding_unavailable';
+  if (diagnostics.ok !== true) return diagnostics.reason || 'search_failed';
+  if (Number(diagnostics.rows || 0) <= 0) return 'empty_result';
+  if (Number(diagnostics.vectorCandidates || 0) <= 0) return 'no_visible_candidates';
+  if (vectorStoreMode !== 'lancedb') return `mode_${vectorStoreMode}`;
+  return '';
+}
+
+function buildEmbeddingCoverageDiagnostics(candidates = []) {
+  const total = Array.isArray(candidates) ? candidates.length : 0;
+  const index = loadEmbeddingIndex();
+  const ready = (Array.isArray(candidates) ? candidates : []).filter((candidate) => Boolean(getEmbeddingForCandidate(candidate, index))).length;
+  const readyRatio = total > 0 ? ready / total : 0;
+  const threshold = Math.max(0, Number(config.MEMORY_LANCEDB_LOW_COVERAGE_THRESHOLD || 0.05) || 0.05);
+  return {
+    total,
+    ready,
+    readyRatio,
+    lowCoverage: total > 0 && readyRatio < threshold,
+    threshold
+  };
+}
+
 async function queryMemory(input = {}) {
   const userId = normalizeText(input.userId);
   const query = normalizeText(input.query);
@@ -506,16 +532,26 @@ async function queryMemory(input = {}) {
     queryEmbedding
   });
   const vectorStoreMode = normalizeVectorStoreMode(config.MEMORY_VECTOR_STORE);
+  const embeddingCoverage = buildEmbeddingCoverageDiagnostics(candidates);
   let lancedbDiagnostics = {
     enabled: isLanceDbReadEnabled(config),
     mode: vectorStoreMode,
+    ok: false,
     rows: 0,
     vectorCandidates: 0,
     fused: false,
-    reason: ''
+    reason: '',
+    fallbackReason: '',
+    coverage: embeddingCoverage,
+    lowCoverage: embeddingCoverage.lowCoverage,
+    coverageReason: embeddingCoverage.lowCoverage ? 'low_coverage' : ''
   };
   let rankedForRerank = scored;
-  if (lancedbDiagnostics.enabled && Array.isArray(queryEmbedding) && queryEmbedding.length > 0) {
+  if (!lancedbDiagnostics.enabled) {
+    lancedbDiagnostics.fallbackReason = 'read_disabled';
+  } else if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) {
+    lancedbDiagnostics.fallbackReason = 'query_embedding_unavailable';
+  } else {
     const allowedGroupIds = uniqueBy(
       candidates
         .filter((item) => normalizeText(item.scopeType).toLowerCase() === 'group')
@@ -541,8 +577,15 @@ async function queryMemory(input = {}) {
       rows: Array.isArray(vectorResult.rows) ? vectorResult.rows.length : 0,
       vectorCandidates: vectorCandidates.length,
       fused: vectorStoreMode === 'lancedb' && vectorCandidates.length > 0,
-      reason: vectorResult.reason || ''
+      reason: vectorResult.reason || '',
+      fallbackReason: '',
+      coverage: embeddingCoverage,
+      lowCoverage: embeddingCoverage.lowCoverage,
+      coverageReason: embeddingCoverage.lowCoverage ? 'low_coverage' : ''
     };
+    lancedbDiagnostics.fallbackReason = lancedbDiagnostics.fused
+      ? ''
+      : buildLanceDbFallbackReason(lancedbDiagnostics, queryEmbedding, vectorStoreMode);
     if (vectorStoreMode === 'lancedb' && vectorCandidates.length > 0) {
       rankedForRerank = fuseRecallCandidates(scored, vectorCandidates, {
         rrfK: config.MEMORY_V3_RRF_K
@@ -609,5 +652,7 @@ module.exports = {
   rewriteQuery,
   collectCandidates,
   diversify,
-  applyConflictResolution
+  applyConflictResolution,
+  buildLanceDbFallbackReason,
+  buildEmbeddingCoverageDiagnostics
 };
