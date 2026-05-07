@@ -9,6 +9,7 @@ const {
 } = require('../../../utils/memoryCliTurnPolicy');
 const { buildCapabilityRegistry } = require('./registry');
 const { maybeRunGlobalToolRuntime } = require('../globalToolRuntimeFacade');
+const { isToolAllowedByRuntimeList } = require('../../../utils/localToolAccess');
 const {
   normalizeArray,
   normalizeExecutionEnvelope,
@@ -561,12 +562,19 @@ async function executeStep(step = {}, state = {}, context = {}) {
   const executionState = normalizeObject(state.execution, {});
   const toolName = normalizeText(step.tool);
   const runtimeNode = normalizeText(context.node || state.execution?.currentNode) || 'unknown';
-  const allowedTools = normalizeArray(context.allowedTools ?? state.request?.allowedTools)
+  const computeEffectiveAllowedTools = typeof context.helpers?.computeEffectiveAllowedTools === 'function'
+    ? context.helpers.computeEffectiveAllowedTools
+    : null;
+  const allowedTools = normalizeArray(context.allowedTools ?? (
+    computeEffectiveAllowedTools
+      ? computeEffectiveAllowedTools(state.request || {}, executionState.memoryCliTurn)
+      : state.request?.allowedTools
+  ))
     .map((item) => normalizeText(item))
     .filter(Boolean);
   const executor = normalizeObject(context.executors, {})[toolName] || descriptor?.executor || null;
 
-  if (allowedTools.length > 0 && !allowedTools.includes(toolName)) {
+  if (!isToolAllowedByRuntimeList(toolName, allowedTools)) {
     const blockedEnvelope = buildBlockedToolEnvelope(step, executionState, descriptor, helpers, 'tool_not_allowed');
     maybeCaptureToolFailure(blockedEnvelope, step, state, helpers);
     logToolExecution(blockedEnvelope, step, state, {

@@ -16,6 +16,17 @@ function normalizeText(value = '') {
   return String(value || '').trim();
 }
 
+function splitCommandPayload(payload = '') {
+  return normalizeText(payload).split(/\s+/).filter(Boolean);
+}
+
+function parseMemoryOpsPayload(rawText = '') {
+  const text = normalizeText(rawText);
+  if (!/^\/memoryops(?:\s|$)/i.test(text)) return null;
+  const payload = text.replace(/^\/memoryops/i, '').trim();
+  return payload ? splitCommandPayload(payload) : ['diagnose', '--limit', '20'];
+}
+
 function createDefaultHapiControlClientFactory(runtimeConfig = {}) {
   return function createDefaultHapiControlClient() {
     const axios = require('axios');
@@ -58,7 +69,9 @@ function createMessageAdminCoordinator(deps = {}) {
     scheduleGroupMessage,
     createScheduledCommand,
     hapiControlRuntime = null,
-    createHapiControlClient = null
+    createHapiControlClient = null,
+    runMemoryOpsFromArgv = null,
+    formatMemoryOpsAdminReply = null
   } = deps;
 
   async function handleSessionSummaryCommand({
@@ -259,17 +272,36 @@ function createMessageAdminCoordinator(deps = {}) {
     };
   }
 
+  async function handleMemoryOpsAdminCommand({ rawText = '', userId = '' } = {}) {
+    const argv = parseMemoryOpsPayload(rawText);
+    if (!argv) return null;
+    if (!isAdminUser(userId)) {
+      return { handled: true, replyText: '仅管理员可用。' };
+    }
+    const runner = runMemoryOpsFromArgv || require('../scripts/diagnose-memory-ops').runMemoryOpsFromArgv;
+    const formatter = formatMemoryOpsAdminReply || require('../scripts/diagnose-memory-ops').formatMemoryOpsAdminReply;
+    const report = await runner(argv);
+    return {
+      handled: true,
+      report,
+      replyText: formatter(report)
+    };
+  }
+
   return {
     handleHapiAdminCommand,
     handleInitiativeAdminCommand,
+    handleMemoryOpsAdminCommand,
     handleQqScheduleAdminCommand,
     handleRestartAdminCommand,
     handleSessionSummaryCommand,
+    parseMemoryOpsPayload,
     parseJsonTail
   };
 }
 
 module.exports = {
   createDefaultHapiControlClientFactory,
-  createMessageAdminCoordinator
+  createMessageAdminCoordinator,
+  parseMemoryOpsPayload
 };

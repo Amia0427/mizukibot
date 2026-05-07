@@ -1289,6 +1289,7 @@ function createMessageHandler({
   const handleSessionSummaryCommand = (...args) => getAdminCoordinator().handleSessionSummaryCommand(...args);
   const handleHapiAdminCommand = (...args) => getAdminCoordinator().handleHapiAdminCommand(...args);
   const handleInitiativeAdminCommand = (...args) => getAdminCoordinator().handleInitiativeAdminCommand(...args);
+  const handleMemoryOpsAdminCommand = (...args) => getAdminCoordinator().handleMemoryOpsAdminCommand(...args);
   const handleRestartAdminCommand = (...args) => getAdminCoordinator().handleRestartAdminCommand(...args);
   const handleQqScheduleAdminCommand = (...args) => getAdminCoordinator().handleQqScheduleAdminCommand(...args);
   const reviewSubagentOutput = (...args) => getFullSubagentCoordinator().reviewSubagentOutput(...args);
@@ -1880,6 +1881,7 @@ function createMessageHandler({
     runBackgroundToolTask,
     handleAdminCommand,
     handleHapiAdminCommand,
+    handleMemoryOpsAdminCommand,
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
     generateBotDiaryDraft,

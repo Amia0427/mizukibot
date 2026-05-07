@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const config = require('../../config');
+const { getLastEmbeddingFailure } = require('../memoryEmbeddingClient');
 const {
   ensureDir,
   safeReadJsonLines,
@@ -17,6 +18,9 @@ const backfillState = {
   running: false,
   timer: null
 };
+
+const BACKFILL_SOURCE_SET = new Set(['all', 'memory', 'journal']);
+const FAILURE_REASONS = ['embedding_request_failed', 'empty_embedding', 'rate_limit', 'auth_failed', 'timeout'];
 
 function sha1(value) {
   return crypto.createHash('sha1').update(String(value || '')).digest('hex');
@@ -77,6 +81,37 @@ function isJournalEmbeddingDoc(value = {}) {
     || type === 'daily_journal_segment'
     || nodeId.startsWith('journal-day:')
     || nodeId.startsWith('journal-segment:');
+}
+
+function normalizeBackfillSource(source = 'all') {
+  const normalized = normalizeText(source || 'all').toLowerCase();
+  return BACKFILL_SOURCE_SET.has(normalized) ? normalized : 'all';
+}
+
+function normalizeFailureReason(reason = '') {
+  const normalized = normalizeText(reason || '').toLowerCase();
+  return FAILURE_REASONS.includes(normalized) ? normalized : 'embedding_request_failed';
+}
+
+function buildFailureBreakdown(rows = []) {
+  const breakdown = {};
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (normalizeText(row.status).toLowerCase() !== 'failed') continue;
+    const reason = normalizeFailureReason(row.error);
+    breakdown[reason] = (breakdown[reason] || 0) + 1;
+  }
+  for (const reason of FAILURE_REASONS) {
+    if (!Object.prototype.hasOwnProperty.call(breakdown, reason)) breakdown[reason] = 0;
+  }
+  return breakdown;
+}
+
+function filterEmbeddingBackfillNodes(nodes = [], source = 'all') {
+  const normalized = normalizeBackfillSource(source);
+  const list = Array.isArray(nodes) ? nodes : [];
+  if (normalized === 'journal') return list.filter(isJournalEmbeddingDoc);
+  if (normalized === 'memory') return list.filter((node) => !isJournalEmbeddingDoc(node));
+  return list;
 }
 
 function normalizeCacheRow(row = {}) {
@@ -243,13 +278,101 @@ function collectEmbeddingBackfillNodes() {
   return nodes;
 }
 
-function loadNodeMapByEmbeddingKey() {
+function buildNodeMapByEmbeddingKey(nodes = []) {
   const map = new Map();
-  for (const node of collectEmbeddingBackfillNodes()) {
+  for (const node of Array.isArray(nodes) ? nodes : []) {
     const identity = buildEmbeddingIdentity(node);
-    map.set(identity.key, { node, identity });
+    if (identity.key) map.set(identity.key, { node, identity });
   }
   return map;
+}
+
+function loadNodeMapByEmbeddingKey() {
+  return buildNodeMapByEmbeddingKey(collectEmbeddingBackfillNodes());
+}
+
+function resolveBackfillLimit(options = {}) {
+  const explicitLimit = Math.floor(Number(options.limit || 0) || 0);
+  if (explicitLimit > 0) return explicitLimit;
+  const batchSize = Math.max(1, Math.floor(Number(options.batchSize || config.MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE || 32) || 32));
+  const maxPerRun = Math.max(1, Math.floor(Number(options.maxPerRun || config.MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN || 128) || 128));
+  return Math.min(batchSize, maxPerRun);
+}
+
+function buildEmbeddingBackfillPlan(options = {}) {
+  const source = normalizeBackfillSource(options.source);
+  if (!isEmbeddingIndexEnabled()) {
+    return {
+      ok: false,
+      enabled: false,
+      source,
+      reason: 'embedding_index_disabled',
+      sourceRows: 0,
+      readyBefore: 0,
+      considered: 0,
+      remaining: 0,
+      failed: 0,
+      staleRows: 0
+    };
+  }
+
+  const now = Date.now();
+  const force = options.force === true || options.forceStale === true;
+  const retryFailed = options.retryFailed === true;
+  const nodes = filterEmbeddingBackfillNodes(collectEmbeddingBackfillNodes(), source);
+  const index = loadEmbeddingIndex();
+  const plannedRows = [];
+  let created = 0;
+
+  for (const node of nodes) {
+    const identity = buildEmbeddingIdentity(node);
+    const existing = findReusableRow(index, identity);
+    if (existing) {
+      plannedRows.push({
+        ...existing,
+        version: CACHE_VERSION,
+        key: identity.key,
+        nodeId: identity.nodeId,
+        canonicalKey: identity.canonicalKey,
+        model: identity.model,
+        source: identity.source,
+        textHash: identity.textHash,
+        updatedAt: identity.updatedAt
+      });
+      continue;
+    }
+    created += 1;
+    plannedRows.push(makePendingRow(identity));
+  }
+
+  const pending = plannedRows
+    .filter((row) => {
+      if (row.status === 'ready') return false;
+      if (force) return true;
+      if (retryFailed && row.status === 'failed') return true;
+      return !row.nextRetryAt || row.nextRetryAt <= now;
+    })
+    .sort((a, b) => {
+      const retryDiff = Number(a.nextRetryAt || 0) - Number(b.nextRetryAt || 0);
+      if (retryDiff !== 0) return retryDiff;
+      return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
+    })
+    .slice(0, resolveBackfillLimit(options));
+
+  return {
+    ok: true,
+    enabled: true,
+    source,
+    sourceRows: nodes.length,
+    rows: plannedRows.length,
+    readyBefore: plannedRows.filter((row) => row.status === 'ready' && Array.isArray(row.embedding) && row.embedding.length > 0).length,
+    considered: pending.length,
+    remaining: plannedRows.filter((row) => row.status !== 'ready').length,
+    failed: plannedRows.filter((row) => row.status === 'failed').length,
+    failureBreakdown: buildFailureBreakdown(plannedRows),
+    staleRows: plannedRows.filter((row) => row.status === 'stale').length,
+    created
+  };
 }
 
 function scheduleEmbeddingBackfill(options = {}) {
@@ -289,16 +412,34 @@ async function backfillMissingEmbeddings(options = {}) {
   let continueOptions = null;
   try {
     const now = Date.now();
-    reconcileEmbeddingCache(collectEmbeddingBackfillNodes());
+    const source = normalizeBackfillSource(options.source);
+    const selectedNodes = filterEmbeddingBackfillNodes(collectEmbeddingBackfillNodes(), source);
+    const planBefore = buildEmbeddingBackfillPlan({
+      ...options,
+      source
+    });
+    if (options.dryRun === true) {
+      return {
+        ...planBefore,
+        ok: true,
+        dryRun: true,
+        embedded: 0
+      };
+    }
+    reconcileEmbeddingCache(selectedNodes);
     const rows = loadEmbeddingRows();
-    const nodeMap = loadNodeMapByEmbeddingKey();
-    const batchSize = Math.max(1, Math.floor(Number(options.batchSize || config.MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE || 32) || 32));
-    const maxPerRun = Math.max(1, Math.floor(Number(options.maxPerRun || config.MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN || 128) || 128));
-    const limit = Math.min(batchSize, maxPerRun);
-    const force = options.force === true;
+    const nodeMap = buildNodeMapByEmbeddingKey(selectedNodes);
+    const limit = resolveBackfillLimit(options);
+    const force = options.force === true || options.forceStale === true;
+    const retryFailed = options.retryFailed === true;
     const pending = rows
       .map((row, index) => ({ row, index }))
-      .filter(({ row }) => row.status !== 'ready' && (force || !row.nextRetryAt || row.nextRetryAt <= now))
+      .filter(({ row }) => {
+        if (!nodeMap.has(row.key) || row.status === 'ready') return false;
+        if (force) return true;
+        if (retryFailed && row.status === 'failed') return true;
+        return !row.nextRetryAt || row.nextRetryAt <= now;
+      })
       .sort((a, b) => {
         const journalA = isJournalEmbeddingDoc(a.row) ? 1 : 0;
         const journalB = isJournalEmbeddingDoc(b.row) ? 1 : 0;
@@ -337,19 +478,24 @@ async function backfillMissingEmbeddings(options = {}) {
         continue;
       }
       const failCount = Math.max(0, Number(item.row.failCount || 0) || 0) + 1;
+      const failure = getLastEmbeddingFailure();
+      const errorReason = normalizeFailureReason(failure.reason || 'embedding_request_failed');
       rows[item.index] = {
         ...item.row,
         status: 'failed',
         failCount,
         nextRetryAt: Date.now() + Math.max(60000, Number(config.MEMORY_EMBEDDING_RETRY_COOLDOWN_MS || 1800000) || 1800000),
-        error: 'embedding_request_failed'
+        error: errorReason,
+        lastErrorMessage: failure.message || ''
       };
       failed += 1;
     }
 
     writeJsonLines(config.MEMORY_V3_EMBEDDING_CACHE_FILE, rows);
-    const remaining = rows.filter((row) => row.status !== 'ready').length;
-    const journalRemaining = rows.filter((row) => isJournalEmbeddingDoc(row) && row.status !== 'ready').length;
+    const scopedRows = rows.filter((row) => nodeMap.has(row.key));
+    const remaining = scopedRows.filter((row) => row.status !== 'ready').length;
+    const journalRemaining = scopedRows.filter((row) => isJournalEmbeddingDoc(row) && row.status !== 'ready').length;
+    const failureBreakdown = buildFailureBreakdown(scopedRows);
     if (journalRemaining > 0 && options.continue !== false && embedded > 0) {
       continueOptions = {
         ...options,
@@ -359,9 +505,12 @@ async function backfillMissingEmbeddings(options = {}) {
     }
     return {
       ok: true,
+      source,
+      readyBefore: planBefore.readyBefore || 0,
       considered: pending.length,
       embedded,
       failed,
+      failureBreakdown,
       remaining,
       journalRemaining
     };
@@ -393,11 +542,14 @@ function calcEmbeddingSimilarity(queryEmbedding, candidate = {}, index = loadEmb
 module.exports = {
   buildEmbeddingText,
   buildEmbeddingIdentity,
+  buildEmbeddingBackfillPlan,
+  buildFailureBreakdown,
   loadEmbeddingIndex,
   reconcileEmbeddingCache,
   enqueueMissingEmbeddings,
   backfillMissingEmbeddings,
   collectEmbeddingBackfillNodes,
+  filterEmbeddingBackfillNodes,
   getEmbeddingForCandidate,
   calcEmbeddingSimilarity
 };

@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
+const { getLastEmbeddingFailure } = require('./memoryEmbeddingClient');
 const {
   ensureDir,
   safeReadJsonLines,
@@ -21,11 +22,39 @@ const {
 const CACHE_VERSION = 1;
 const DEFAULT_DOC_MAX_CHARS = 1200;
 const WORLD_BOOK_PREFIX = 'persona_worldbook/';
+const FAILURE_REASONS = ['embedding_request_failed', 'empty_embedding', 'rate_limit', 'auth_failed', 'timeout'];
 
 const backfillState = {
   running: false,
   timer: null
 };
+
+function resolveBackfillLimit(options = {}) {
+  const explicitLimit = Math.floor(Number(options.limit || 0) || 0);
+  if (explicitLimit > 0) return explicitLimit;
+  return Math.max(
+    1,
+    Math.floor(Number(options.maxPerRun || config.PERSONA_WORLDBOOK_EMBEDDING_BACKFILL_MAX_PER_RUN || 24) || 24)
+  );
+}
+
+function normalizeFailureReason(reason = '') {
+  const normalized = normalizeText(reason).toLowerCase();
+  return FAILURE_REASONS.includes(normalized) ? normalized : 'empty_embedding';
+}
+
+function buildFailureBreakdown(rows = []) {
+  const breakdown = {};
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (normalizeText(row.status).toLowerCase() !== 'failed') continue;
+    const reason = normalizeFailureReason(row.error);
+    breakdown[reason] = (breakdown[reason] || 0) + 1;
+  }
+  for (const reason of FAILURE_REASONS) {
+    if (!Object.prototype.hasOwnProperty.call(breakdown, reason)) breakdown[reason] = 0;
+  }
+  return breakdown;
+}
 
 function getVectorMemory() {
   try {
@@ -307,6 +336,85 @@ function reconcilePersonaWorldbookEmbeddingCache(catalog = { modules: [] }) {
   };
 }
 
+function buildPersonaWorldbookBackfillPlan(catalog = { modules: [] }, options = {}) {
+  if (!isEmbeddingEnabled()) {
+    return {
+      ok: false,
+      enabled: false,
+      source: 'worldbook',
+      reason: 'embedding_disabled',
+      sourceRows: 0,
+      readyBefore: 0,
+      considered: 0,
+      remaining: 0,
+      failed: 0,
+      staleRows: 0
+    };
+  }
+  const docs = buildWorldbookDocuments(catalog);
+  const index = loadWorldbookEmbeddingIndex();
+  const plannedRows = [];
+  let created = 0;
+  for (const doc of docs) {
+    const identity = buildEmbeddingIdentity(doc);
+    const existing = index.byKey.get(identity.key) || index.byModuleId.get(identity.moduleId);
+    if (rowMatchesIdentity(existing, identity)) {
+      plannedRows.push({
+        ...existing,
+        version: CACHE_VERSION,
+        key: identity.key,
+        moduleId: identity.moduleId,
+        model: identity.model,
+        textHash: identity.textHash,
+        fileMtimeMs: identity.fileMtimeMs,
+        fileSize: identity.fileSize
+      });
+    } else {
+      created += 1;
+      plannedRows.push({
+        version: CACHE_VERSION,
+        key: identity.key,
+        moduleId: identity.moduleId,
+        model: identity.model,
+        textHash: identity.textHash,
+        fileMtimeMs: identity.fileMtimeMs,
+        fileSize: identity.fileSize,
+        embedding: [],
+        lastEmbeddedAt: 0,
+        status: 'pending',
+        failCount: 0,
+        nextRetryAt: 0,
+        error: ''
+      });
+    }
+  }
+  const now = Date.now();
+  const force = options.force === true || options.forceStale === true;
+  const retryFailed = options.retryFailed === true;
+  const pending = plannedRows
+    .filter((row) => {
+      if (row.status === 'ready') return false;
+      if (force) return true;
+      if (retryFailed && row.status === 'failed') return true;
+      return !row.nextRetryAt || row.nextRetryAt <= now;
+    })
+    .slice(0, resolveBackfillLimit(options));
+  return {
+    ok: true,
+    enabled: true,
+    source: 'worldbook',
+    sourceRows: docs.length,
+    rows: plannedRows.length,
+    readyBefore: plannedRows.filter((row) => row.status === 'ready' && Array.isArray(row.embedding) && row.embedding.length > 0).length,
+    considered: pending.length,
+    remaining: plannedRows.filter((row) => row.status !== 'ready').length,
+    failed: plannedRows.filter((row) => row.status === 'failed').length,
+    failureBreakdown: buildFailureBreakdown(plannedRows),
+    staleRows: plannedRows.filter((row) => row.status === 'stale').length,
+    created
+  };
+}
+
 function schedulePersonaWorldbookEmbeddingBackfill(catalog = { modules: [] }, options = {}) {
   if (!isEmbeddingEnabled() || !shouldUsePersonaWorldbookRemoteEmbedding()) return false;
   if (backfillState.running || backfillState.timer) return false;
@@ -330,18 +438,30 @@ async function backfillPersonaWorldbookEmbeddings(catalog = { modules: [] }, opt
   }
   backfillState.running = true;
   try {
+    const planBefore = buildPersonaWorldbookBackfillPlan(catalog, options);
+    if (options.dryRun === true) {
+      return {
+        ...planBefore,
+        dryRun: true,
+        embedded: 0
+      };
+    }
     reconcilePersonaWorldbookEmbeddingCache(catalog);
     const docsByModuleId = new Map(buildWorldbookDocuments(catalog).map((doc) => [doc.moduleId, doc]));
     const rows = loadEmbeddingRows();
     const now = Date.now();
-    const maxPerRun = Math.max(
-      1,
-      Math.floor(Number(options.maxPerRun || config.PERSONA_WORLDBOOK_EMBEDDING_BACKFILL_MAX_PER_RUN || 24) || 24)
-    );
+    const limit = resolveBackfillLimit(options);
+    const force = options.force === true || options.forceStale === true;
+    const retryFailed = options.retryFailed === true;
     const pending = rows
       .map((row, index) => ({ row, index }))
-      .filter(({ row }) => row.status !== 'ready' && (!row.nextRetryAt || row.nextRetryAt <= now))
-      .slice(0, maxPerRun);
+      .filter(({ row }) => {
+        if (row.status === 'ready') return false;
+        if (force) return true;
+        if (retryFailed && row.status === 'failed') return true;
+        return !row.nextRetryAt || row.nextRetryAt <= now;
+      })
+      .slice(0, limit);
     let embedded = 0;
     let failed = 0;
     for (const { row, index } of pending) {
@@ -368,18 +488,31 @@ async function backfillPersonaWorldbookEmbeddings(catalog = { modules: [] }, opt
         embedded += 1;
       } else {
         const failCount = Math.max(0, Number(row.failCount || 0) || 0) + 1;
+        const failure = getLastEmbeddingFailure();
+        const errorReason = normalizeFailureReason(failure.reason || 'empty_embedding');
         rows[index] = {
           ...row,
           status: 'failed',
           failCount,
           nextRetryAt: Date.now() + Math.min(6 * 60 * 60 * 1000, failCount * 30 * 60 * 1000),
-          error: 'empty_embedding'
+          error: errorReason,
+          lastErrorMessage: failure.message || ''
         };
         failed += 1;
       }
     }
     writeJsonLines(getCacheFile(), rows);
-    return { ok: true, embedded, failed, pending: pending.length };
+    return {
+      ok: true,
+      source: 'worldbook',
+      readyBefore: planBefore.readyBefore || 0,
+      considered: pending.length,
+      embedded,
+      failed,
+      failureBreakdown: buildFailureBreakdown(rows),
+      remaining: rows.filter((row) => row.status !== 'ready').length,
+      pending: pending.length
+    };
   } finally {
     backfillState.running = false;
   }
@@ -747,6 +880,8 @@ function buildPlannerWorldbookCatalog(personaModuleCatalog = [], worldbookResult
 module.exports = {
   WORLD_BOOK_PREFIX,
   backfillPersonaWorldbookEmbeddings,
+  buildFailureBreakdown,
+  buildPersonaWorldbookBackfillPlan,
   buildPlannerWorldbookCatalog,
   buildWorldbookDocuments,
   getWorldbookModules,
