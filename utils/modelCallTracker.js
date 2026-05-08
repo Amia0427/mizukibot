@@ -179,6 +179,8 @@ function normalizeUsage(raw) {
   const cacheReadInputTokens = Number(
     raw.cache_read_input_tokens
     ?? raw.cacheReadInputTokens
+    ?? raw.prompt_cache_hit_tokens
+    ?? raw.promptCacheHitTokens
     ?? raw.prompt_tokens_details?.cached_tokens
     ?? raw.promptTokensDetails?.cachedTokens
     ?? raw.input_tokens_details?.cached_tokens
@@ -187,6 +189,8 @@ function normalizeUsage(raw) {
   const cacheCreationInputTokens = Number(
     raw.cache_creation_input_tokens
     ?? raw.cacheCreationInputTokens
+    ?? raw.prompt_cache_miss_tokens
+    ?? raw.promptCacheMissTokens
     ?? raw.prompt_tokens_details?.cache_write_tokens
     ?? raw.promptTokensDetails?.cacheWriteTokens
     ?? raw.input_tokens_details?.cache_write_tokens

@@ -511,6 +511,8 @@ function normalizeUsageForCacheStats(row = {}) {
     cacheReadTokens: toTokenCount(
       usage.cache_read_input_tokens
       ?? usage.cacheReadInputTokens
+      ?? usage.prompt_cache_hit_tokens
+      ?? usage.promptCacheHitTokens
       ?? usage.prompt_tokens_details?.cached_tokens
       ?? usage.promptTokensDetails?.cachedTokens
       ?? usage.input_tokens_details?.cached_tokens
@@ -519,6 +521,8 @@ function normalizeUsageForCacheStats(row = {}) {
     cacheCreationTokens: toTokenCount(
       usage.cache_creation_input_tokens
       ?? usage.cacheCreationInputTokens
+      ?? usage.prompt_cache_miss_tokens
+      ?? usage.promptCacheMissTokens
       ?? usage.prompt_tokens_details?.cache_write_tokens
       ?? usage.promptTokensDetails?.cacheWriteTokens
       ?? usage.input_tokens_details?.cache_write_tokens
