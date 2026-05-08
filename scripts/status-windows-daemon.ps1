@@ -1,8 +1,12 @@
 param(
+  [AllowEmptyString()]
   [string]$TaskName = 'MizukiBotDaemon'
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($TaskName)) {
+  $TaskName = 'MizukiBotDaemon'
+}
 if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
   $PSNativeCommandUseErrorActionPreference = $false
 }
@@ -26,7 +30,9 @@ if ($task) {
 
 Write-Host ""
 Write-Host "=== Startup Launcher ==="
-$launcher = Get-DaemonStartupLauncherPath -TaskName $TaskName -ScriptRoot $PSScriptRoot
+$safeTaskName = if ([string]::IsNullOrWhiteSpace($TaskName)) { 'MizukiBotDaemon' } else { $TaskName }
+$launcherPaths = Get-DaemonPaths -ScriptRoot $PSScriptRoot -TaskName $safeTaskName
+$launcher = $launcherPaths.StartupLauncher
 if (Test-Path $launcher) {
   [pscustomobject]@{
     Path = $launcher
