@@ -274,15 +274,11 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   const body = {
     model: getModelName(resolvedConfig),
     temperature: getTemperature(resolvedConfig),
-    top_p: getTopP(resolvedConfig),
     messages: Array.isArray(options.messages) ? options.messages : [],
     max_tokens: getMaxTokens(options.defaultMaxTokens || 3500, resolvedConfig),
     reasoning_effort: getReasoningEffort(resolvedConfig),
     stream: Boolean(options.stream)
   };
-
-  const topK = getTopK(resolvedConfig);
-  if (topK !== undefined) body.top_k = topK;
 
   const topA = getTopA(resolvedConfig);
   if (topA !== undefined) body.top_a = topA;

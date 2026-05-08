@@ -105,10 +105,10 @@ module.exports = (async () => {
     });
     assert.strictEqual(sent[0].body.model, 'main-model');
     assert.strictEqual(sent[0].body.temperature, 0.7);
-    assert.strictEqual(sent[0].body.top_p, 0.8);
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'top_p'));
     assert.strictEqual(sent[0].body.max_tokens, 1234);
     assert.strictEqual(sent[0].body.reasoning_effort, 'medium');
-    assert.strictEqual(sent[0].body.top_k, 33);
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'top_k'));
     assert.strictEqual(sent[0].body.top_a, 0.42);
     assert.strictEqual(sent[0].body.repetition_penalty, 1.13);
 
@@ -117,10 +117,10 @@ module.exports = (async () => {
     });
     assert.strictEqual(sent[1].body.model, 'admin-model');
     assert.strictEqual(sent[1].body.temperature, 0.91);
-    assert.strictEqual(sent[1].body.top_p, 0.77);
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_p'));
     assert.strictEqual(sent[1].body.max_tokens, 4321);
     assert.strictEqual(sent[1].body.reasoning_effort, 'low');
-    assert.strictEqual(sent[1].body.top_k, 64);
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_k'));
     assert.strictEqual(sent[1].body.top_a, 0.66);
     assert.strictEqual(sent[1].body.repetition_penalty, 1.25);
     assert.strictEqual(sent[1].options.headers.Authorization, 'Bearer admin-key');
@@ -156,7 +156,8 @@ module.exports = (async () => {
     assert.strictEqual(sent.length, 2);
     assert.strictEqual(sent[1].body.model, 'admin-fallback-model');
     assert.strictEqual(sent[1].body.temperature, 0.91);
-    assert.strictEqual(sent[1].body.top_k, 64);
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_p'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_k'));
     assert.strictEqual(sent[1].body.top_a, 0.66);
     assert.strictEqual(sent[1].body.repetition_penalty, 1.25);
     assert.strictEqual(sent[1].options.headers.Authorization, 'Bearer admin-fallback-key');

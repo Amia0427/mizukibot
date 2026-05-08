@@ -22,5 +22,13 @@ module.exports = (() => {
   assert.strictEqual(merged.cache_read_input_tokens, 8);
   assert.strictEqual(merged.cache_creation_input_tokens, 3);
 
+  const deepSeekStyle = extractSSEEvents(
+    { buffer: '' },
+    'data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":20,"completion_tokens":4,"prompt_cache_hit_tokens":12,"prompt_cache_miss_tokens":8}}\n\n'
+  );
+  assert.strictEqual(deepSeekStyle.events.length, 1);
+  assert.strictEqual(deepSeekStyle.events[0].usage.cache_read_input_tokens, 12);
+  assert.strictEqual(deepSeekStyle.events[0].usage.cache_creation_input_tokens, 8);
+
   console.log('parserOpenAICompatibleCacheUsage.test.js passed');
 })();
