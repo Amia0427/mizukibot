@@ -78,10 +78,21 @@ function cosineArray(a = [], b = []) {
   return dotSum / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+function parseMaybeJsonPayload(value) {
+  if (typeof value !== 'string') return value;
+  const text = value.trim();
+  if (!text) return value;
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return value;
+  }
+}
+
 function parseEmbeddingResponse(response) {
-  const payload = response && typeof response === 'object' && Object.prototype.hasOwnProperty.call(response, 'data')
+  const payload = parseMaybeJsonPayload(response && typeof response === 'object' && Object.prototype.hasOwnProperty.call(response, 'data')
     ? response.data
-    : response;
+    : response);
   const data = Array.isArray(payload?.data) ? payload.data : [];
   return data.map((row) => normalizeEmbeddingVector(row?.embedding)).filter(Boolean);
 }

@@ -26,6 +26,7 @@ assert.strictEqual(normalizeEmbeddingVector([1, 'x']), null);
 assert.ok(cosineArray([1, 0], [1, 0]) > 0.99);
 assert.ok(cosineArray([1, 0], [0, 1]) < 0.01);
 assert.deepStrictEqual(parseEmbeddingResponse({ data: { data: [{ embedding: [0.1, '0.2'] }, { embedding: ['bad'] }] } }), [[0.1, 0.2]]);
+assert.deepStrictEqual(parseEmbeddingResponse({ data: '{"data":[{"embedding":[0.3,"0.4"]}]}' }), [[0.3, 0.4]]);
 assert.strictEqual(classifyEmbeddingFailure({ response: { status: 429 } }), 'rate_limit');
 assert.strictEqual(classifyEmbeddingFailure({ response: { status: 401 } }), 'auth_failed');
 assert.strictEqual(classifyEmbeddingFailure({ code: 'ETIMEDOUT' }), 'timeout');
