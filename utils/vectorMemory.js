@@ -1,7 +1,7 @@
 ﻿const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { commitMemoryWrites } = require('./memoryWritePipeline');
+const { commitMemoryWrites, validateMemoryWrite } = require('./memoryWritePipeline');
 const {
   getEmbeddingApiBaseUrl,
   getEmbeddingApiKey,
@@ -1331,6 +1331,115 @@ function mergeMeta(a, b) {
   };
 }
 
+function sameWriteScope(left = {}, right = {}) {
+  if (String(left.userId || '') !== String(right.userId || '')) return false;
+  if (normalizeScopeType(left.scopeType) !== normalizeScopeType(right.scopeType)) return false;
+  if (String(left.groupId || '') !== String(right.groupId || '')) return false;
+  if (String(left.sessionId || '') && String(right.sessionId || '') && String(left.sessionId || '') !== String(right.sessionId || '')) return false;
+  if (String(left.routePolicyKey || '') && String(right.routePolicyKey || '') && String(left.routePolicyKey || '') !== String(right.routePolicyKey || '')) return false;
+  if (String(left.topRouteType || '') && String(right.topRouteType || '') && String(left.topRouteType || '') !== String(right.topRouteType || '')) return false;
+  return true;
+}
+
+function findWriteRerankNeighbors(candidate = {}, options = {}) {
+  const limit = Math.max(1, Math.min(20, Number(options.writeRerankCandidateLimit || config.MEMORY_RERANK_CANDIDATE_LIMIT || 12) || 12));
+  const candidateTokens = buildDocTokens(candidate);
+  if (!candidateTokens.length) return [];
+  const candidateTokenSet = new Set(candidateTokens);
+  const neighbors = [];
+
+  for (const item of getMemoryItems(candidate.userId)) {
+    if (!item || String(item.id || '') === String(candidate.id || '')) continue;
+    if (normalizeStatus(item.status, STATUS_ACTIVE) === STATUS_ARCHIVED) continue;
+    if (normalizeType(item.type) !== normalizeType(candidate.type)) continue;
+    if (!sameWriteScope(candidate, item)) continue;
+    const itemTokens = buildDocTokens(item);
+    const lexical = jaccardFromTokens(candidateTokens, itemTokens);
+    const direct = String(item.canonicalText || '') && String(candidate.canonicalText || '')
+      && (String(item.canonicalText).includes(String(candidate.canonicalText)) || String(candidate.canonicalText).includes(String(item.canonicalText)))
+      ? 1
+      : 0;
+    const overlap = itemTokens.filter((token) => candidateTokenSet.has(token)).length / Math.max(1, candidateTokenSet.size);
+    const score = Math.max(lexical, overlap * 0.7, direct);
+    const minScore = Number(options.writeRerankMinLexicalScore || 0.28) || 0.28;
+    if (score < minScore && !direct) continue;
+    neighbors.push({
+      ...item,
+      score,
+      reason: 'write-neighbor',
+      preRerankScore: score
+    });
+  }
+
+  return neighbors
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .slice(0, limit);
+}
+
+async function maybeApplyWriteRerank(candidate = {}, options = {}) {
+  if (options.disableWriteRerank === true || config.MEMORY_RERANK_ENABLED !== true) {
+    return { candidate, skipped: true, reason: 'disabled' };
+  }
+
+  const neighbors = findWriteRerankNeighbors(candidate, options);
+  if (!neighbors.length) return { candidate, skipped: true, reason: 'no_neighbors' };
+
+  const probe = {
+    ...candidate,
+    id: candidate.id || `incoming:${candidate.userId}:${candidate.canonicalText}`,
+    score: Math.max(0.01, ...neighbors.map((item) => Number(item.score || 0) || 0)) + 0.01,
+    reason: 'incoming-write'
+  };
+  const list = [probe, ...neighbors];
+  try {
+    const reranked = await rerankMemoryCandidates(candidate.text, list, {
+      ...options,
+      userId: candidate.userId,
+      phase: 'memory_write',
+      maxCandidates: list.length
+    });
+    if (!Array.isArray(reranked) || reranked.length < 2) return { candidate, skipped: true, reason: 'no_scores' };
+
+    const incomingRank = reranked.findIndex((item) => String(item.id || '') === String(probe.id || ''));
+    const bestExisting = reranked.find((item) => String(item.id || '') !== String(probe.id || ''));
+    if (incomingRank > 0 && bestExisting) {
+      const incomingScore = Number(reranked[incomingRank]?.rerankNormalizedScore ?? reranked[incomingRank]?.score ?? 0) || 0;
+      const existingScore = Number(bestExisting.rerankNormalizedScore ?? bestExisting.score ?? 0) || 0;
+      const duplicateMargin = Number(options.writeRerankDuplicateMargin ?? 0.04) || 0.04;
+      if (existingScore >= incomingScore + duplicateMargin) {
+        return {
+          candidate,
+          duplicateId: bestExisting.id,
+          reason: 'rerank_duplicate',
+          rerank: {
+            incomingRank,
+            duplicateId: bestExisting.id,
+            incomingScore,
+            existingScore
+          }
+        };
+      }
+    }
+
+    return {
+      candidate: {
+        ...candidate,
+        meta: {
+          ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
+          writeRerank: {
+            checked: true,
+            neighbors: neighbors.length
+          }
+        }
+      },
+      reason: 'rerank_checked'
+    };
+  } catch (error) {
+    console.warn('[vectorMemory] write rerank failed, fallback to base pipeline:', error.message);
+    return { candidate, skipped: true, reason: 'rerank_failed' };
+  }
+}
+
 function findConflictRecord(library, incoming) {
   if (!incoming || !incoming.conflictKey) return null;
   return library.items.find((item) => {
@@ -1446,23 +1555,8 @@ function addMemoryItem(userId, text, type = 'fact', meta = {}, weight = 1.0) {
   return ids[0] || null;
 }
 
-function persistNormalizedMemoryItems(normalizedItems = []) {
+function persistNormalizedMemoryItemsDirect(normalizedItems = []) {
   if (!Array.isArray(normalizedItems) || normalizedItems.length === 0) return [];
-
-  const pipelineEnabled = config.MEMORY_WRITE_PIPELINE_ENABLED !== false;
-  if (pipelineEnabled && !addMemoryItemsBatch.__pipelineActive) {
-    addMemoryItemsBatch.__pipelineActive = true;
-    try {
-      const result = commitMemoryWrites(
-        normalizedItems,
-        (accepted) => addMemoryItemsBatch(accepted),
-        { minConfidence: config.MEMORY_EXTRACT_MIN_CONFIDENCE }
-      );
-      return result.ids;
-    } finally {
-      addMemoryItemsBatch.__pipelineActive = false;
-    }
-  }
 
   ensureShardStateHydrated();
   const ids = [];
@@ -1485,12 +1579,142 @@ function persistNormalizedMemoryItems(normalizedItems = []) {
   return ids;
 }
 
+function persistNormalizedMemoryItems(normalizedItems = []) {
+  if (!Array.isArray(normalizedItems) || normalizedItems.length === 0) return [];
+
+  const pipelineEnabled = config.MEMORY_WRITE_PIPELINE_ENABLED !== false;
+  if (pipelineEnabled && !addMemoryItemsBatch.__pipelineActive) {
+    addMemoryItemsBatch.__pipelineActive = true;
+    try {
+      const result = commitMemoryWrites(
+        normalizedItems,
+        (accepted) => persistNormalizedMemoryItemsDirect(accepted),
+        { minConfidence: config.MEMORY_EXTRACT_MIN_CONFIDENCE }
+      );
+      return result.ids;
+    } finally {
+      addMemoryItemsBatch.__pipelineActive = false;
+    }
+  }
+
+  return persistNormalizedMemoryItemsDirect(normalizedItems);
+}
+
 function addMemoryItemsBatch(items = []) {
   const normalizedItems = (Array.isArray(items) ? items : [])
     .map((item) => normalizeMemoryItem(item))
     .filter(Boolean);
 
   return persistNormalizedMemoryItems(normalizedItems);
+}
+
+async function prepareEnhancedMemoryWrites(normalizedItems = [], options = {}) {
+  const accepted = [];
+  const rejected = [];
+  const pipelineEnabled = config.MEMORY_WRITE_PIPELINE_ENABLED !== false && options.skipPipeline !== true;
+
+  for (const candidate of Array.isArray(normalizedItems) ? normalizedItems : []) {
+    if (!candidate) continue;
+    if (pipelineEnabled) {
+      const validation = validateMemoryWrite(candidate, {
+        minConfidence: config.MEMORY_EXTRACT_MIN_CONFIDENCE,
+        ...options
+      });
+      if (!validation.ok) {
+        rejected.push({ candidate, ...validation });
+        continue;
+      }
+      const patched = {
+        ...candidate,
+        ...(validation.patch || {}),
+        meta: {
+          ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
+          ...(validation.patch?.meta || {})
+        }
+      };
+      const rerankDecision = await maybeApplyWriteRerank(patched, options);
+      if (rerankDecision.duplicateId) {
+        rejected.push({
+          candidate: patched,
+          ok: false,
+          reason: rerankDecision.reason || 'rerank_duplicate',
+          duplicateId: rerankDecision.duplicateId,
+          rerank: rerankDecision.rerank
+        });
+        continue;
+      }
+      accepted.push(rerankDecision.candidate || patched);
+      continue;
+    }
+
+    const rerankDecision = await maybeApplyWriteRerank(candidate, options);
+    if (rerankDecision.duplicateId) {
+      rejected.push({
+        candidate,
+        ok: false,
+        reason: rerankDecision.reason || 'rerank_duplicate',
+        duplicateId: rerankDecision.duplicateId,
+        rerank: rerankDecision.rerank
+      });
+      continue;
+    }
+    accepted.push(rerankDecision.candidate || candidate);
+  }
+
+  return { accepted, rejected };
+}
+
+function loadNodesForVectorSync() {
+  try {
+    const { loadMemoryNodes } = require('./memory-v3/storage');
+    return typeof loadMemoryNodes === 'function' ? loadMemoryNodes() : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function scheduleMemoryV3VectorBackfill(options = {}) {
+  try {
+    const { materializeMemoryViews } = require('./memory-v3/materializer');
+    const result = materializeMemoryViews({
+      scheduleEmbeddingBackfill: options.scheduleEmbeddingBackfill !== false,
+      embeddingBackfillDelayMs: options.embeddingBackfillDelayMs
+    });
+    return result;
+  } catch (error) {
+    console.warn('[vectorMemory] memory v3 materialize after write failed:', error.message);
+    return { ok: false, reason: error.message };
+  }
+}
+
+async function syncAcceptedMemoryRowsToLanceDb(accepted = [], options = {}) {
+  if (options.syncLanceDb === false) return { skipped: true, reason: 'disabled' };
+  try {
+    const { buildMemoryVectorRow, isLanceDbSyncEnabled, syncMemoryRows } = require('./lancedbMemoryStore');
+    if (!isLanceDbSyncEnabled()) return { skipped: true, reason: 'sync_disabled' };
+    const nodesById = new Map(loadNodesForVectorSync().map((node) => [sanitizeOptionalText(node.id || node.nodeId), node]));
+    const rows = [];
+    for (const item of Array.isArray(accepted) ? accepted : []) {
+      const embedding = item?.meta?.embedding || item?.embedding;
+      if (!Array.isArray(embedding) || embedding.length === 0) continue;
+      const node = nodesById.get(sanitizeOptionalText(item.id)) || item;
+      const row = buildMemoryVectorRow(node, {
+        nodeId: item.id,
+        canonicalKey: item.canonicalText,
+        model: item.meta?.embeddingMeta?.model,
+        textHash: item.meta?.embeddingMeta?.textHash,
+        embedding,
+        updatedAt: item.updatedAt,
+        lastEmbeddedAt: item.meta?.embeddingMeta?.generatedAt
+      });
+      if (row) rows.push(row);
+    }
+    if (!rows.length) return { skipped: true, reason: 'no_embedded_rows', rows: 0 };
+    return syncMemoryRows(rows, { full: false, timeoutMs: options.lanceDbTimeoutMs });
+  } catch (error) {
+    console.warn('[vectorMemory] lancedb sync after memory write failed:', error.message);
+    return { ok: false, reason: error.message };
+  }
 }
 
 async function addMemoryItemsBatchAsync(items = []) {
@@ -1503,6 +1727,44 @@ async function addMemoryItemsBatchAsync(items = []) {
   }
 
   return persistNormalizedMemoryItems(normalizedItems);
+}
+
+async function addMemoryItemsBatchWithVectorBackfill(items = [], options = {}) {
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => normalizeMemoryItem(item))
+    .filter(Boolean);
+
+  if (!normalizedItems.length) {
+    return { ids: [], accepted: [], rejected: [], embedded: 0, embeddingAttempted: 0 };
+  }
+
+  const { accepted, rejected } = await prepareEnhancedMemoryWrites(normalizedItems, options);
+  let embeddingResult = { attempted: 0, embedded: 0, items: accepted };
+  if (accepted.length > 0 && shouldUseRemoteEmbedding()) {
+    try {
+      embeddingResult = await embedMemoryItems(accepted, options);
+    } catch (error) {
+      console.warn('[vectorMemory] embedding memory writes failed, persisting lexical memory only:', error.message);
+    }
+  }
+
+  const ids = persistNormalizedMemoryItemsDirect(accepted);
+  const materialize = ids.length > 0 && options.materialize !== false
+    ? scheduleMemoryV3VectorBackfill(options)
+    : { skipped: true, reason: 'no_ids' };
+  const lancedb = ids.length > 0
+    ? await syncAcceptedMemoryRowsToLanceDb(accepted, options)
+    : { skipped: true, reason: 'no_ids' };
+
+  return {
+    ids,
+    accepted,
+    rejected,
+    embedded: Number(embeddingResult.embedded || 0) || 0,
+    embeddingAttempted: Number(embeddingResult.attempted || 0) || 0,
+    materialize,
+    lancedb
+  };
 }
 
 function getMemoryLayer(doc = {}) {
@@ -2407,6 +2669,7 @@ module.exports = {
   addMemoryItem,
   addMemoryItemsBatch,
   addMemoryItemsBatchAsync,
+  addMemoryItemsBatchWithVectorBackfill,
   addEpisodeMemory,
   rebuildMemoryIndex,
   retrieveRelevantMemories,

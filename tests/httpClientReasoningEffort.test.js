@@ -60,7 +60,7 @@ module.exports = (async () => {
       stream: false
     });
     assert.strictEqual(anthropicPrepared.provider, 'anthropic');
-    assert.strictEqual(anthropicPrepared.requestBody.max_tokens, 1200);
+    assert.strictEqual(anthropicPrepared.requestBody.max_tokens, 1924);
     assert.deepStrictEqual(anthropicPrepared.requestBody.thinking, {
       type: 'enabled',
       budget_tokens: 1024
@@ -128,10 +128,12 @@ module.exports = (async () => {
       stream: false
     }, 0, 'test-key');
     assert.strictEqual(attemptCount, 2);
+    assert.strictEqual(firstAttemptBody.max_tokens, 5600);
     assert.deepStrictEqual(firstAttemptBody.thinking, {
       type: 'enabled',
       budget_tokens: 2100
     });
+    assert.strictEqual(secondAttemptBody.max_tokens, 3500);
     assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, 'thinking'));
   } finally {
     if (axios && originalPost) axios.post = originalPost;

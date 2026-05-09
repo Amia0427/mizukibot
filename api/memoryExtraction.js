@@ -1,15 +1,15 @@
 const config = require('../config');
 const { postWithRetry } = require('./httpClient');
 const { extractMessageContent, extractJsonSafely } = require('./parser');
-const { addMemoryItemsBatch, rememberExplicitMemory } = require('../utils/vectorMemory');
+const { addMemoryItemsBatchWithVectorBackfill } = require('../utils/vectorMemory');
 const { normalizeTier } = require('../utils/memoryTier');
 const {
   addUserFact,
   addProfileItem,
   applyAffinityProposal
 } = require('../utils/memory');
-const { addTaskMemory } = require('../utils/taskMemory');
-const { addGroupMemory } = require('../utils/groupMemory');
+const { addTaskMemoryWithVectorBackfill } = require('../utils/taskMemory');
+const { addGroupMemoryWithVectorBackfill } = require('../utils/groupMemory');
 const { appendMemoryEvent } = require('../utils/memory-v3/events');
 const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('../utils/promptSecurity');
 
@@ -329,6 +329,16 @@ function inferExplicitProfileType(text = '') {
   return 'fact';
 }
 
+async function flushVectorMemoryWrites(vectorItems = [], options = {}) {
+  if (!Array.isArray(vectorItems) || vectorItems.length === 0) {
+    return { ids: [], accepted: [], rejected: [] };
+  }
+  return addMemoryItemsBatchWithVectorBackfill(vectorItems, {
+    ...options,
+    phase: 'memory_extraction_write'
+  });
+}
+
 function persistLearnedMemories(userId, type, values, confidence = 0.8, options = {}) {
   const vectorItems = Array.isArray(options.vectorItems) ? options.vectorItems : [];
   const fieldKey = String(options.fieldKey || type || '').trim().toLowerCase();
@@ -411,7 +421,9 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8, options 
   }
 
   if (!Array.isArray(options.vectorItems) && vectorItems.length > 0) {
-    addMemoryItemsBatch(vectorItems);
+    flushVectorMemoryWrites(vectorItems, options).catch((error) => {
+      console.error('memory vector write backfill failed:', error?.message || error);
+    });
   }
 }
 
@@ -583,7 +595,7 @@ Rules:
     const vectorItems = [];
     if (patterns[0]) vectorItems.push(buildStyleMemoryItem(uid, patterns[0], 'pattern', confidence, options));
     if (!patterns[0] && avoids[0]) vectorItems.push(buildStyleMemoryItem(uid, avoids[0], 'avoid', confidence, options));
-    if (vectorItems.length > 0) addMemoryItemsBatch(vectorItems);
+    if (vectorItems.length > 0) await flushVectorMemoryWrites(vectorItems, options);
   } catch (e) {
     console.error('style memory extraction failed:', e.message);
   }
@@ -647,7 +659,7 @@ Rules:
     const vectorItems = [];
     if (terms[0]) vectorItems.push(buildJargonMemoryItem(groupId, terms[0], 'term', confidence, options));
     if (!terms[0] && patterns[0]) vectorItems.push(buildJargonMemoryItem(groupId, patterns[0], 'pattern', confidence, options));
-    if (vectorItems.length > 0) addMemoryItemsBatch(vectorItems);
+    if (vectorItems.length > 0) await flushVectorMemoryWrites(vectorItems, options);
   } catch (e) {
     console.error('group jargon extraction failed:', e.message);
   }
@@ -714,7 +726,7 @@ Rules:
       return;
     }
 
-    addTaskMemory(userId, {
+    await addTaskMemoryWithVectorBackfill(userId, {
       taskType: obj.task_type,
       trigger: obj.trigger,
       strategy: obj.strategy,
@@ -734,7 +746,7 @@ Rules:
       participants: Array.isArray(options.participants) ? options.participants : [],
       entities: Array.isArray(options.entities) ? options.entities : [],
       relations: Array.isArray(options.relations) ? options.relations : []
-    });
+    }, options);
   } catch (e) {
     console.error('task memory extraction failed:', e.message);
   }
@@ -795,7 +807,7 @@ Rules:
     for (const value of sharedFacts) {
       const text = String(value || '').trim();
       if (shouldBlockMemoryLearning(text, 'group_fact', options).blocked) continue;
-      if (text) addGroupMemory(groupId, text, 'fact', {
+      if (text) await addGroupMemoryWithVectorBackfill(groupId, text, 'fact', {
         confidence,
         routePolicyKey: options.routePolicyKey,
         topRouteType: options.topRouteType,
@@ -807,12 +819,12 @@ Rules:
         participants: Array.isArray(options.participants) ? options.participants : [],
         entities: Array.isArray(options.entities) ? options.entities : [],
         relations: Array.isArray(options.relations) ? options.relations : []
-      }, 1.08);
+      }, 1.08, options);
     }
     for (const value of sharedGoals) {
       const text = String(value || '').trim();
       if (shouldBlockMemoryLearning(text, 'group_goal', options).blocked) continue;
-      if (text) addGroupMemory(groupId, `group goal: ${text}`, 'goal', {
+      if (text) await addGroupMemoryWithVectorBackfill(groupId, `group goal: ${text}`, 'goal', {
         confidence,
         routePolicyKey: options.routePolicyKey,
         topRouteType: options.topRouteType,
@@ -824,13 +836,13 @@ Rules:
         participants: Array.isArray(options.participants) ? options.participants : [],
         entities: Array.isArray(options.entities) ? options.entities : [],
         relations: Array.isArray(options.relations) ? options.relations : []
-      }, 1.15);
+      }, 1.15, options);
     }
     for (const value of sharedTopics) {
       const text = String(value || '').trim();
       if (shouldBlockMemoryLearning(text, 'group_topic', options).blocked) continue;
       if (text && text.length >= 4) {
-        addGroupMemory(groupId, `group topic: ${text}`, 'topic', {
+        await addGroupMemoryWithVectorBackfill(groupId, `group topic: ${text}`, 'topic', {
           confidence,
           routePolicyKey: options.routePolicyKey,
           topRouteType: options.topRouteType,
@@ -842,7 +854,7 @@ Rules:
           participants: Array.isArray(options.participants) ? options.participants : [],
           entities: Array.isArray(options.entities) ? options.entities : [],
           relations: Array.isArray(options.relations) ? options.relations : []
-        }, 0.96);
+        }, 0.96, options);
       }
     }
   } catch (e) {
@@ -933,7 +945,14 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
     const explicitGate = shouldBlockMemoryLearning(explicitRemember, 'fact', options);
     if (!explicitGate.blocked) {
       const explicitType = inferExplicitProfileType(explicitRemember);
-      rememberExplicitMemory(userId, sanitizeUntrustedContent(explicitRemember, 'memory'), {
+      const explicitText = sanitizeUntrustedContent(explicitRemember, 'memory');
+      await flushVectorMemoryWrites([{
+        userId: options.groupId ? `group:${options.groupId}` : userId,
+        text: explicitText,
+        type: 'fact',
+        weight: 1.1,
+        source: 'explicit',
+        confidence: 1,
         scopeType: options.groupId ? 'group' : 'personal',
         groupId: options.groupId || '',
         sessionId: options.sessionId,
@@ -945,9 +964,22 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
         participants,
         entities,
         relations,
-        sourceSessionId: options.sessionId
-      });
-      appendV3LearnedMemoryEvent(userId, explicitType, sanitizeUntrustedContent(explicitRemember, 'memory'), {
+        sourceSessionId: options.sessionId,
+        sourceKind: 'explicit',
+        status: 'active',
+        meta: {
+          source: 'explicit',
+          sourceKind: 'explicit',
+          confidence: 1,
+          status: 'active',
+          fieldKey: explicitType,
+          sourceSessionId: options.sessionId,
+          participants,
+          entities,
+          relations
+        }
+      }], options);
+      appendV3LearnedMemoryEvent(userId, explicitType, explicitText, {
         source: 'explicit',
         sourceKind: 'explicit',
         status: 'active',
@@ -1061,7 +1093,7 @@ Rules:
     persistLearnedMemories(userId, 'summary', summaries.slice(0, 1), Math.max(confidence, 0.84), { vectorItems, ...sharedMeta });
     persistLearnedMemories(userId, 'impression', impressions.slice(0, 1), Math.max(confidence, 0.82), { vectorItems, ...sharedMeta });
     persistLearnedMemories(userId, 'topic', topics, Math.min(confidence, 0.9), { vectorItems, ...sharedMeta });
-    if (vectorItems.length > 0) addMemoryItemsBatch(vectorItems);
+    if (vectorItems.length > 0) await flushVectorMemoryWrites(vectorItems, sharedMeta);
     if (postReplyMemoryMode === 'core') return;
     const affinityProposal = await extractAffinityProposal(userId, userText, botReply, options);
     if (affinityProposal) {

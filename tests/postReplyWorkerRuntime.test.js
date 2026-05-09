@@ -45,8 +45,11 @@ module.exports = (async () => {
     const originalStoreExtractedSelfImprovementItems = selfImprovementRuntime.storeExtractedSelfImprovementItems;
     const originalApplyAffinityProposal = memory.applyAffinityProposal;
     const originalAddTaskMemory = taskMemory.addTaskMemory;
+    const originalAddTaskMemoryWithVectorBackfill = taskMemory.addTaskMemoryWithVectorBackfill;
     const originalAddGroupMemory = groupMemory.addGroupMemory;
+    const originalAddGroupMemoryWithVectorBackfill = groupMemory.addGroupMemoryWithVectorBackfill;
     const originalAddMemoryItemsBatch = vectorMemory.addMemoryItemsBatch;
+    const originalAddMemoryItemsBatchWithVectorBackfill = vectorMemory.addMemoryItemsBatchWithVectorBackfill;
 
     memoryExtraction.learnSomethingNew = async (...args) => {
       calls.push({ type: 'memory', options: args[3] || {} });
@@ -86,12 +89,24 @@ module.exports = (async () => {
     taskMemory.addTaskMemory = (...args) => {
       calls.push({ type: 'task', args });
     };
+    taskMemory.addTaskMemoryWithVectorBackfill = async (...args) => {
+      calls.push({ type: 'task_vector', args });
+      return { ids: [] };
+    };
     groupMemory.addGroupMemory = (...args) => {
       calls.push({ type: 'group', args });
+    };
+    groupMemory.addGroupMemoryWithVectorBackfill = async (...args) => {
+      calls.push({ type: 'group_vector', args });
+      return { ids: [] };
     };
     vectorMemory.addMemoryItemsBatch = (...args) => {
       calls.push({ type: 'vector', args });
       return [];
+    };
+    vectorMemory.addMemoryItemsBatchWithVectorBackfill = async (...args) => {
+      calls.push({ type: 'vector_backfill', args });
+      return { ids: [] };
     };
 
     delete require.cache[require.resolve('../utils/postReplyWorkerRuntime')];
@@ -224,9 +239,9 @@ module.exports = (async () => {
 
     assert.ok(calls.some((item) => item.type === 'enrich'), 'enrich phase should use merged extractor');
     assert.ok(calls.some((item) => item.type === 'affinity'), 'enrich phase should apply affinity');
-    assert.ok(calls.some((item) => item.type === 'task'), 'enrich phase should store task memory');
-    assert.ok(calls.some((item) => item.type === 'group'), 'enrich phase should store group memory');
-    assert.ok(calls.some((item) => item.type === 'vector'), 'enrich phase should store style/jargon vectors');
+    assert.ok(calls.some((item) => item.type === 'task_vector'), 'enrich phase should store task memory with vector backfill');
+    assert.ok(calls.some((item) => item.type === 'group_vector'), 'enrich phase should store group memory with vector backfill');
+    assert.ok(calls.some((item) => item.type === 'vector_backfill'), 'enrich phase should store style/jargon vectors with backfill');
     assert.ok(calls.some((item) => item.type === 'self_store'), 'enrich phase should store self-improvement items');
     assert.ok(calls.some((item) => item.type === 'segment'), 'enrich phase should trigger threshold segmentation');
 
@@ -400,8 +415,11 @@ module.exports = (async () => {
     selfImprovementRuntime.storeExtractedSelfImprovementItems = originalStoreExtractedSelfImprovementItems;
     memory.applyAffinityProposal = originalApplyAffinityProposal;
     taskMemory.addTaskMemory = originalAddTaskMemory;
+    taskMemory.addTaskMemoryWithVectorBackfill = originalAddTaskMemoryWithVectorBackfill;
     groupMemory.addGroupMemory = originalAddGroupMemory;
+    groupMemory.addGroupMemoryWithVectorBackfill = originalAddGroupMemoryWithVectorBackfill;
     vectorMemory.addMemoryItemsBatch = originalAddMemoryItemsBatch;
+    vectorMemory.addMemoryItemsBatchWithVectorBackfill = originalAddMemoryItemsBatchWithVectorBackfill;
 
     console.log('postReplyWorkerRuntime.test.js passed');
   } finally {

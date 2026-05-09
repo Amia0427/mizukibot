@@ -1,5 +1,10 @@
 const config = require('../config');
-const { addMemoryItem, retrieveRelevantMemories, retrieveRelevantMemoriesAsync } = require('./vectorMemory');
+const {
+  addMemoryItem,
+  addMemoryItemsBatchWithVectorBackfill,
+  retrieveRelevantMemories,
+  retrieveRelevantMemoriesAsync
+} = require('./vectorMemory');
 
 function sanitizeText(text) {
   return String(text || '').replace(/\s+/g, ' ').trim();
@@ -23,7 +28,7 @@ function buildTaskMemoryText(item = {}) {
   return lines.join('\n').trim();
 }
 
-function addTaskMemory(userId, task = {}) {
+function buildTaskMemoryCandidate(userId, task = {}) {
   if (!config.TASK_MEMORY_ENABLED) return null;
 
   const taskType = sanitizeText(task.taskType || task.task_type);
@@ -37,37 +42,92 @@ function addTaskMemory(userId, task = {}) {
   if (!text || !taskType) return null;
   if (outcome !== 'success' && !avoid) return null;
 
-  return addMemoryItem(
+  const meta = {
+    source: task.source || 'task_extractor',
+    confidence: Number.isFinite(confidence) ? confidence : 0.8,
+    scopeType: 'task',
+    taskType,
+    routePolicyKey: sanitizeText(task.routePolicyKey || task.route_policy_key),
+    topRouteType: sanitizeText(task.topRouteType || task.top_route_type),
+    agentName: sanitizeText(task.agentName || task.agent_name),
+    toolName: sanitizeText(task.toolName || task.tool_name),
+    sessionId: sanitizeText(task.sessionId || task.session_id),
+    channelId: sanitizeText(task.channelId || task.channel_id),
+    status: sanitizeText(task.status),
+    sourceKind: sanitizeText(task.sourceKind || task.source_kind),
+    sourceSessionId: sanitizeText(task.sourceSessionId || task.source_session_id),
+    participants: Array.isArray(task.participants) ? task.participants : [],
+    entities: Array.isArray(task.entities) ? task.entities : [],
+    relations: Array.isArray(task.relations) ? task.relations : [],
+    outcome,
+    memoryKind: 'task',
+    fieldKey: 'task',
+    semanticSlot: 'task',
+    trigger,
+    strategy,
+    avoid
+  };
+
+  return {
     userId,
     text,
-    'fact',
+    type: 'fact',
+    source: meta.source,
+    confidence: meta.confidence,
+    weight: outcome === 'success' ? 1.12 : 0.98,
+    scopeType: 'task',
+    taskType,
+    routePolicyKey: meta.routePolicyKey,
+    topRouteType: meta.topRouteType,
+    agentName: meta.agentName,
+    toolName: meta.toolName,
+    sessionId: meta.sessionId,
+    channelId: meta.channelId,
+    status: meta.status,
+    sourceKind: meta.sourceKind,
+    sourceSessionId: meta.sourceSessionId,
+    participants: meta.participants,
+    entities: meta.entities,
+    relations: meta.relations,
+    meta
+  };
+}
+
+function addTaskMemory(userId, task = {}) {
+  const candidate = buildTaskMemoryCandidate(userId, task);
+  if (!candidate) return null;
+  return addMemoryItem(
+    candidate.userId,
+    candidate.text,
+    candidate.type,
     {
-      source: task.source || 'task_extractor',
-      confidence: Number.isFinite(confidence) ? confidence : 0.8,
-      scopeType: 'task',
-      taskType,
-      routePolicyKey: sanitizeText(task.routePolicyKey || task.route_policy_key),
-      topRouteType: sanitizeText(task.topRouteType || task.top_route_type),
-      agentName: sanitizeText(task.agentName || task.agent_name),
-      toolName: sanitizeText(task.toolName || task.tool_name),
-      sessionId: sanitizeText(task.sessionId || task.session_id),
-      channelId: sanitizeText(task.channelId || task.channel_id),
-      status: sanitizeText(task.status),
-      sourceKind: sanitizeText(task.sourceKind || task.source_kind),
-      sourceSessionId: sanitizeText(task.sourceSessionId || task.source_session_id),
-      participants: Array.isArray(task.participants) ? task.participants : [],
-      entities: Array.isArray(task.entities) ? task.entities : [],
-      relations: Array.isArray(task.relations) ? task.relations : [],
-      outcome,
-      memoryKind: 'task',
-      fieldKey: 'task',
-      semanticSlot: 'task',
-      trigger,
-      strategy,
-      avoid
+      ...candidate.meta,
+      scopeType: candidate.scopeType,
+      taskType: candidate.taskType,
+      routePolicyKey: candidate.routePolicyKey,
+      topRouteType: candidate.topRouteType,
+      agentName: candidate.agentName,
+      toolName: candidate.toolName,
+      sessionId: candidate.sessionId,
+      channelId: candidate.channelId,
+      status: candidate.status,
+      sourceKind: candidate.sourceKind,
+      sourceSessionId: candidate.sourceSessionId,
+      participants: candidate.participants,
+      entities: candidate.entities,
+      relations: candidate.relations
     },
-    outcome === 'success' ? 1.12 : 0.98
+    candidate.weight
   );
+}
+
+async function addTaskMemoryWithVectorBackfill(userId, task = {}, options = {}) {
+  const candidate = buildTaskMemoryCandidate(userId, task);
+  if (!candidate) return { ids: [], accepted: [], rejected: [] };
+  return addMemoryItemsBatchWithVectorBackfill([candidate], {
+    ...options,
+    phase: 'task_memory_write'
+  });
 }
 
 function retrieveRelevantTaskMemories(userId, query, topK = config.TASK_MEMORY_TOP_K || 3, options = {}) {
@@ -107,6 +167,7 @@ function formatTaskMemoriesCompat(hits = [], options = {}) {
 
 module.exports = {
   addTaskMemory,
+  addTaskMemoryWithVectorBackfill,
   retrieveRelevantTaskMemories,
   retrieveRelevantTaskMemoriesAsync,
   formatTaskMemories: formatTaskMemoriesCompat

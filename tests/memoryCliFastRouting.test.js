@@ -61,7 +61,7 @@ module.exports = (async () => {
     text: '群里把活动叫团建',
     payload: { type: 'jargon', fieldKey: 'group_jargon' }
   });
-  materializeMemoryViews();
+  materializeMemoryViews({ force: true });
 
   const notebookDir = path.join(tempRoot, 'notebook', 'u_route');
   fs.mkdirSync(notebookDir, { recursive: true });

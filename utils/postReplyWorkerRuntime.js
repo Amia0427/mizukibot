@@ -172,9 +172,9 @@ async function runEnrichPhase(job = {}, meta = {}) {
   const { maybeSegmentJournalByThreshold } = getDailyJournalModule();
   const { storeExtractedSelfImprovementItems } = getSelfImprovementModule();
   const { applyAffinityProposal } = getMemoryModule();
-  const { addTaskMemory } = getTaskMemoryModule();
-  const { addGroupMemory } = getGroupMemoryModule();
-  const { addMemoryItemsBatch } = getVectorMemoryModule();
+  const { addTaskMemory, addTaskMemoryWithVectorBackfill } = getTaskMemoryModule();
+  const { addGroupMemory, addGroupMemoryWithVectorBackfill } = getGroupMemoryModule();
+  const { addMemoryItemsBatch, addMemoryItemsBatchWithVectorBackfill } = getVectorMemoryModule();
   const turns = buildTurnsConversation(job.turns);
   const latest = turns[turns.length - 1] || { question: normalizeText(job.question), finalReply: normalizeText(job.finalReply) };
   const enrichment = await extractPostReplyEnrichment(job.userId, turns, {
@@ -198,7 +198,7 @@ async function runEnrichPhase(job = {}, meta = {}) {
     const taskMemory = enrichment.task_memory;
     const confidence = Number(taskMemory.confidence || 0) || 0;
     if (confidence > 0 && normalizeText(taskMemory.task_type)) {
-      addTaskMemory(job.userId, {
+      const taskPayload = {
         taskType: normalizeText(taskMemory.task_type),
         trigger: normalizeText(taskMemory.trigger),
         strategy: normalizeText(taskMemory.strategy),
@@ -218,20 +218,37 @@ async function runEnrichPhase(job = {}, meta = {}) {
         participants: [],
         entities: [],
         relations: []
-      });
+      };
+      if (typeof addTaskMemoryWithVectorBackfill === 'function') {
+        await addTaskMemoryWithVectorBackfill(job.userId, taskPayload, meta);
+      } else {
+        addTaskMemory(job.userId, taskPayload);
+      }
     }
   }
 
   if (meta.groupId && enrichment?.group_memory && typeof enrichment.group_memory === 'object') {
     const confidence = Number(enrichment.group_memory.confidence || 0) || 0;
     for (const value of normalizeArray(enrichment.group_memory.shared_facts).map((item) => normalizeText(item)).filter(Boolean)) {
-      addGroupMemory(meta.groupId, value, 'fact', { confidence, sourceKind: 'extractor', status: 'candidate' }, 1.08);
+      if (typeof addGroupMemoryWithVectorBackfill === 'function') {
+        await addGroupMemoryWithVectorBackfill(meta.groupId, value, 'fact', { confidence, sourceKind: 'extractor', status: 'candidate' }, 1.08, meta);
+      } else {
+        addGroupMemory(meta.groupId, value, 'fact', { confidence, sourceKind: 'extractor', status: 'candidate' }, 1.08);
+      }
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_goals).map((item) => normalizeText(item)).filter(Boolean)) {
-      addGroupMemory(meta.groupId, `group goal: ${value}`, 'goal', { confidence, sourceKind: 'extractor', status: 'active' }, 1.15);
+      if (typeof addGroupMemoryWithVectorBackfill === 'function') {
+        await addGroupMemoryWithVectorBackfill(meta.groupId, `group goal: ${value}`, 'goal', { confidence, sourceKind: 'extractor', status: 'active' }, 1.15, meta);
+      } else {
+        addGroupMemory(meta.groupId, `group goal: ${value}`, 'goal', { confidence, sourceKind: 'extractor', status: 'active' }, 1.15);
+      }
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_topics).map((item) => normalizeText(item)).filter(Boolean)) {
-      addGroupMemory(meta.groupId, `group topic: ${value}`, 'topic', { confidence, sourceKind: 'extractor', status: 'candidate' }, 0.96);
+      if (typeof addGroupMemoryWithVectorBackfill === 'function') {
+        await addGroupMemoryWithVectorBackfill(meta.groupId, `group topic: ${value}`, 'topic', { confidence, sourceKind: 'extractor', status: 'candidate' }, 0.96, meta);
+      } else {
+        addGroupMemory(meta.groupId, `group topic: ${value}`, 'topic', { confidence, sourceKind: 'extractor', status: 'candidate' }, 0.96);
+      }
     }
   }
 
@@ -239,7 +256,16 @@ async function runEnrichPhase(job = {}, meta = {}) {
     ...buildMinimalStyleMemoryItems(job.userId, enrichment?.style_memory, meta),
     ...buildMinimalJargonMemoryItems(meta.groupId, enrichment?.jargon_memory, meta)
   ];
-  if (signalItems.length > 0) addMemoryItemsBatch(signalItems);
+  if (signalItems.length > 0) {
+    if (typeof addMemoryItemsBatchWithVectorBackfill === 'function') {
+      await addMemoryItemsBatchWithVectorBackfill(signalItems, {
+        ...meta,
+        phase: 'post_reply_enrich_write'
+      });
+    } else {
+      addMemoryItemsBatch(signalItems);
+    }
+  }
 
   if (enrichment?.self_improvement && typeof enrichment.self_improvement === 'object') {
     storeExtractedSelfImprovementItems(job.userId, enrichment.self_improvement.items, {

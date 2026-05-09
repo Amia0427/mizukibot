@@ -1378,9 +1378,14 @@ function requestUsesReasoning(requestBody = {}) {
 function stripReasoningFields(requestBody = {}) {
   if (!requestBody || typeof requestBody !== 'object') return requestBody;
   const nextBody = { ...requestBody };
+  const originalMaxTokens = Number(requestBody.__originalMaxTokens);
   delete nextBody.reasoning_effort;
   delete nextBody.reasoning;
   delete nextBody.thinking;
+  delete nextBody.__originalMaxTokens;
+  if (Number.isFinite(originalMaxTokens) && originalMaxTokens > 0) {
+    nextBody.max_tokens = Math.floor(originalMaxTokens);
+  }
   return nextBody;
 }
 
@@ -1419,6 +1424,7 @@ function stripInternalRequestFields(requestBody = {}) {
   delete nextBody.__timeoutMs;
   delete nextBody.__abortSignal;
   delete nextBody.__requestHeaders;
+  delete nextBody.__originalMaxTokens;
   return nextBody;
 }
 
@@ -1768,10 +1774,11 @@ async function buildAnthropicRequestBody(body = {}) {
   const inputBody = stripTopPField(body);
   const mapped = await mapMessagesToAnthropic(inputBody.messages);
   const maxTokens = Number(inputBody.max_tokens);
+  const visibleMaxTokens = Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : 1024;
 
   const requestBody = {
     model: normalizeText(inputBody.model) || normalizeText(config.AI_MODEL) || 'claude-3-5-sonnet-latest',
-    max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : 1024,
+    max_tokens: visibleMaxTokens,
     messages: mapped.messages,
     stream: Boolean(inputBody.stream)
   };
@@ -1803,15 +1810,15 @@ async function buildAnthropicRequestBody(body = {}) {
     }
   }
 
-  if (normalizeReasoningEffort(inputBody.reasoning_effort)) {
-    requestBody.max_tokens = Math.max(Number(requestBody.max_tokens) || 0, 1200);
-  }
-  const thinkingBudget = getAnthropicThinkingBudget(requestBody.max_tokens, inputBody.reasoning_effort);
+  const reasoningEffort = normalizeReasoningEffort(inputBody.reasoning_effort);
+  const thinkingBudget = getAnthropicThinkingBudget(Math.max(visibleMaxTokens, 1200), reasoningEffort);
   if (thinkingBudget > 0) {
+    requestBody.max_tokens = Math.max(visibleMaxTokens + thinkingBudget, 1200);
     requestBody.thinking = {
       type: 'enabled',
       budget_tokens: thinkingBudget
     };
+    requestBody.__originalMaxTokens = visibleMaxTokens;
   }
 
   return applyAutoAnthropicPromptCaching(requestBody);
