@@ -31,8 +31,12 @@ module.exports = (async () => {
     process.env.PLANNER_SUBAGENT_ENABLED = 'false';
     process.env.ENABLE_AI_ROUTER = 'false';
     process.env.COMPANION_TOOL_MODE_ENABLED = 'false';
+    process.env.MEMORY_EMBEDDING_ENABLED = '0';
+    process.env.MEMORY_RERANK_ENABLED = '0';
 
     clearProjectCache();
+    const httpClient = require('../api/httpClient');
+    httpClient.postWithRetry = async () => ({ data: { choices: [{ message: { content: 'ok' } }] } });
 
     const { createMessageRouteFlow } = require('../core/messageRouteFlow');
     const sent = [];
@@ -157,6 +161,79 @@ module.exports = (async () => {
     assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'resources'));
     assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'runtime'));
     assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'modules'));
+
+    const checkResult = await routeFlow.dispatchAdminRoute({
+      route: {
+        topRouteType: 'admin',
+        meta: {
+          admin: true,
+          command: {
+            cmd: 'check',
+            args: [],
+            raw: '/check'
+          }
+        }
+      },
+      groupId: 'g_diag',
+      senderId: 'admin_1',
+      rawText: '/check',
+      userInfo: null,
+      chatType: 'group'
+    });
+
+    assert.strictEqual(checkResult.handled, true);
+    assert.strictEqual(sent.length, 5);
+    assert.ok(sent[4].replyText.includes('模型自检:'));
+    assert.ok(sent[4].replyText.includes('plan |'));
+    assert.ok(sent[4].replyText.includes('main_reply |'));
+    assert.ok(!sent[4].replyText.includes('https://'));
+    assert.ok(!sent[4].replyText.includes('diag-key'));
+
+    const deniedCheckResult = await routeFlow.dispatchAdminRoute({
+      route: {
+        topRouteType: 'admin',
+        meta: {
+          admin: false,
+          command: {
+            cmd: 'check',
+            args: [],
+            raw: '/check'
+          }
+        }
+      },
+      groupId: 'g_diag',
+      senderId: 'user_1',
+      rawText: '/check',
+      userInfo: null,
+      chatType: 'group'
+    });
+
+    assert.strictEqual(deniedCheckResult.handled, true);
+    assert.strictEqual(sent.length, 6);
+    assert.strictEqual(sent[5].replyText, '仅管理员可用。');
+
+    const helpResult = await routeFlow.dispatchAdminRoute({
+      route: {
+        topRouteType: 'admin',
+        meta: {
+          admin: true,
+          command: {
+            cmd: 'help',
+            args: [],
+            raw: '/help'
+          }
+        }
+      },
+      groupId: 'g_diag',
+      senderId: 'admin_1',
+      rawText: '/help',
+      userInfo: null,
+      chatType: 'group'
+    });
+
+    assert.strictEqual(helpResult.handled, true);
+    assert.strictEqual(sent.length, 7);
+    assert.ok(sent[6].replyText.includes('/check'));
 
     console.log('mainReplyDiagnosticsAdminCommand.test.js passed');
   } finally {

@@ -30,6 +30,10 @@ const {
 } = require('../utils/mainReplyDiagnostics');
 const { buildRuntimeStatusDiagnostic } = require('../utils/runtimeStatusDiagnostics');
 const { buildRuntimeHotspotsDiagnostic } = require('../utils/runtimeHotspotsDiagnostics');
+const {
+  formatModelSelfCheckReport,
+  runModelSelfCheck
+} = require('../utils/modelSelfCheck');
 
 function parseJsonTail(text = '') {
   const raw = String(text || '').trim();
@@ -43,6 +47,29 @@ function parseJsonTail(text = '') {
   } catch (error) {
     throw new Error(`JSON 解析失败: ${error.message || error}`);
   }
+}
+
+function scoreFullSubagentComplexity(question = '', options = {}) {
+  const text = String(question || '').trim();
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  let score = 0;
+  if (/并行|多代理|多线程|分工|多个\s*worker|multi[- ]?agent|parallel/i.test(text)) score += 0.35;
+  if (/实现|优化|重构|修复|排查|迁移|部署|测试|方案|计划|完整|全流程/i.test(text)) score += 0.18;
+  if (/文件|代码|接口|schema|数据库|缓存|队列|worker|agent|工具|热路径|性能/i.test(text)) score += 0.18;
+  if (/(^|\n)\s*(?:\d+[\.\、)]|[-*]\s+)/.test(text) || /首先|然后|最后|同时|分别|步骤/i.test(text)) score += 0.18;
+  if (text.length >= 400) score += 0.16;
+  if (text.length >= 900) score += 0.18;
+  const allowedTools = Array.isArray(routeMeta.allowedTools) ? routeMeta.allowedTools : [];
+  if (allowedTools.length >= 2) score += 0.12;
+  if (routeMeta.forceFullMultiAgent === true || routeMeta.fullMultiAgent === true) score = 1;
+  return Math.max(0, Math.min(1, score));
+}
+
+function shouldUseFullMultiAgent(config = {}, question = '', options = {}) {
+  if (config.FULL_SUBAGENT_MULTI_AGENT_ENABLED !== true) return false;
+  if (config.FULL_SUBAGENT_AUTO_UPGRADE_ENABLED === false) return true;
+  const threshold = Math.max(0, Math.min(1, Number(config.FULL_SUBAGENT_COMPLEXITY_THRESHOLD || 0.65) || 0.65));
+  return scoreFullSubagentComplexity(question, options) >= threshold;
 }
 
 function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}, { isAdminUser } = {}) {
@@ -67,8 +94,8 @@ function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}, { isAdm
 
   if (qqActionKey === 'qq_publish_qzone') {
     return adminUser
-      ? 'QQ 空间发布工具暂时不可用。你可以稍后重试，或直接使用 /qzone_post。'
-      : 'QQ 空间发布当前仅管理员可用。';
+      ? 'QQ 空间草稿工具暂时不可用。你可以稍后重试，或直接使用 /qzone_post。'
+      : 'QQ 空间草稿当前仅管理员可用。';
   }
 
   if (qqActionKey === 'qq_schedule_qzone') {
@@ -200,9 +227,6 @@ function createMessageRouteFlow(deps = {}) {
     handleMemoryOpsAdminCommand = async () => ({ handled: true, replyText: 'memoryops 管理命令不可用。' }),
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
-    generateBotDiaryDraft,
-    generateGenericQzoneDraft,
-    normalizeGeneratedQzoneContent,
     publishQzoneForContext,
     backgroundTaskRuntime,
     buildSessionId,
@@ -615,6 +639,10 @@ function createMessageRouteFlow(deps = {}) {
       payload
     ].join('\n\n');
 
+    const useFullMultiAgent = shouldUseFullMultiAgent(config, payload, {
+      routeMeta: route?.meta || {}
+    });
+
     if (config.BACKGROUND_TOOL_TASKS_ENABLED) {
       await runBackgroundToolTask({
         route,
@@ -639,7 +667,7 @@ function createMessageRouteFlow(deps = {}) {
             routePolicyKey: 'admin/full'
           }
         },
-        initialStage: config.FULL_SUBAGENT_MULTI_AGENT_ENABLED ? 'planning' : 'running'
+        initialStage: useFullMultiAgent ? 'planning' : 'running'
       });
       return true;
     }
@@ -1065,57 +1093,38 @@ function createMessageRouteFlow(deps = {}) {
 
         const qzoneDraftMode = detectQzonePostDraftMode(route, cleanText);
         if (qzoneDraftMode === 'bot_diary') {
-          const diaryDraft = await generateBotDiaryDraft({
-            groupId: String(groupId || ''),
+          const draftResult = await publishQzoneForContext({
+            mode: 'bot_diary',
             hint: cleanText
-          });
-          if (!diaryDraft.ok) {
-            reply = `生成 bot 日记草稿失败。\n\n原因：${diaryDraft.reason || '未知错误'}`;
-          } else {
-            const publishResult = await publishQzoneForContext({
-              mode: 'manual',
-              content: diaryDraft.content
-            }, {
+          }, {
+            userId: String(senderId || ''),
+            routeMeta: {
+              ...(route.meta || {}),
               userId: String(senderId || ''),
-              routeMeta: {
-                ...(route.meta || {}),
-                userId: String(senderId || ''),
-                groupId: String(groupId || '')
-              }
-            });
-            reply = publishResult?.ok
-              ? `已发布 bot 日记到 QQ 空间。\n\n内容：\n${diaryDraft.content}`
-              : `bot 日记生成成功，但发布到 QQ 空间失败。\n\n原因：${publishResult?.text || '未知错误'}`;
-          }
+              groupId: String(groupId || '')
+            }
+          });
+          reply = draftResult?.ok
+            ? `已生成 QQ 空间 bot 日记草稿，未发布。\n\n内容：\n${draftResult.content}`
+            : `生成 bot 日记草稿失败。\n\n原因：${draftResult?.reason || draftResult?.text || '未知错误'}`;
         } else if (qzoneDraftMode === 'generic_autodraft' || shouldAutoDraftQzonePostRequest?.(route, cleanText)) {
-          const drafted = await generateGenericQzoneDraft({
-            requestText: cleanText,
-            groupId: String(groupId || '')
-          });
-          const draftedContent = drafted.ok ? normalizeGeneratedQzoneContent(drafted.content) : '';
-
-          if (!draftedContent) {
-            reply = '这次没能生成可发布的 QQ 空间草稿。';
-          } else {
-            const publishResult = await publishQzoneForContext(draftedContent, {
+          const draftResult = await publishQzoneForContext({
+            mode: 'agent',
+            hint: cleanText
+          }, {
+            userId: String(senderId || ''),
+            routeMeta: {
+              ...(route.meta || {}),
               userId: String(senderId || ''),
-              qzoneSource: 'generic_autodraft',
-              qzoneType: 'generic_autodraft',
-              lens: drafted?.meta?.lens,
-              emotion: drafted?.meta?.emotion,
-              anchor: drafted?.meta?.anchor,
-              structure: drafted?.meta?.structure,
-              ending: drafted?.meta?.ending,
-              routeMeta: {
-                ...(route.meta || {}),
-                userId: String(senderId || ''),
-                groupId: String(groupId || '')
-              }
-            });
-            reply = publishResult?.ok
-              ? `已发布到 QQ 空间。\n\n内容：\n${draftedContent}`
-              : `QQ 空间草稿已生成，但发布失败。\n\n原因：${publishResult?.text || '未知错误'}\n\n草稿内容：\n${draftedContent}`;
-          }
+              groupId: String(groupId || '')
+            }
+          }, {
+            qzoneSource: 'generic_autodraft',
+            qzoneType: 'generic_autodraft'
+          });
+          reply = draftResult?.ok
+            ? `已生成 QQ 空间草稿，未发布。\n\n内容：\n${draftResult.content}`
+            : `这次没能生成可发布的 QQ 空间草稿。\n\n原因：${draftResult?.reason || draftResult?.text || '未知错误'}`;
         } else {
           await markThinkingEmojiBeforeLlm?.({
             messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
@@ -1383,7 +1392,12 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /create <prompt>, /full <任务>, /debug runtime|hotspots|replydiag|replycache, /status, /reload, /hapi status|approve <id>|deny <id>, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /check, /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /create <prompt>, /full <任务>, /debug runtime|hotspots|replydiag|replycache, /status, /reload, /hapi status|approve <id>|deny <id>, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+    } else if (cmd === 'check') {
+      adminReply = formatModelSelfCheckReport(await runModelSelfCheck({
+        adminUserId: senderId,
+        normalUserId: '__model_self_check_user__'
+      }));
     } else if (cmd === 'status') {
       adminReply = '状态命令已收到。';
     } else if (cmd === 'reload') {

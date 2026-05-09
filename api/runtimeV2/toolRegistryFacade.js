@@ -1,15 +1,17 @@
 const {
   getDynamicToolDescriptors,
-  getStaticToolExecutors,
+  getToolExecutor,
   getStaticToolSchemas,
   getToolExecutors,
+  getToolSchemaNames,
   getToolSchemas
 } = require('../toolRegistry');
 
 module.exports = {
   getDynamicToolDescriptors,
-  getStaticToolExecutors,
+  getToolExecutor,
   getStaticToolSchemas,
   getToolExecutors,
+  getToolSchemaNames,
   getToolSchemas
 };

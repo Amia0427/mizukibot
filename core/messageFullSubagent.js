@@ -265,6 +265,29 @@ function buildFullSubagentAllWorkersFailedReply(workerResults = []) {
   ].join('\n');
 }
 
+function scoreFullSubagentComplexity(question = '', options = {}) {
+  const text = String(question || '').trim();
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  let score = 0;
+  if (/并行|多代理|多线程|分工|多个\s*worker|multi[- ]?agent|parallel/i.test(text)) score += 0.35;
+  if (/实现|优化|重构|修复|排查|迁移|部署|测试|方案|计划|完整|全流程/i.test(text)) score += 0.18;
+  if (/文件|代码|接口|schema|数据库|缓存|队列|worker|agent|工具|热路径|性能/i.test(text)) score += 0.18;
+  if (/(^|\n)\s*(?:\d+[\.\、)]|[-*]\s+)/.test(text) || /首先|然后|最后|同时|分别|步骤/i.test(text)) score += 0.18;
+  if (text.length >= 400) score += 0.16;
+  if (text.length >= 900) score += 0.18;
+  const allowedTools = Array.isArray(routeMeta.allowedTools) ? routeMeta.allowedTools : [];
+  if (allowedTools.length >= 2) score += 0.12;
+  if (routeMeta.forceFullMultiAgent === true || routeMeta.fullMultiAgent === true) score = 1;
+  return Math.max(0, Math.min(1, score));
+}
+
+function shouldUseFullMultiAgent(config = {}, question = '', options = {}) {
+  if (config.FULL_SUBAGENT_MULTI_AGENT_ENABLED !== true) return false;
+  if (config.FULL_SUBAGENT_AUTO_UPGRADE_ENABLED === false) return true;
+  const threshold = Math.max(0, Math.min(1, Number(config.FULL_SUBAGENT_COMPLEXITY_THRESHOLD || 0.65) || 0.65));
+  return scoreFullSubagentComplexity(question, options) >= threshold;
+}
+
 function createMessageFullSubagentCoordinator(deps = {}) {
   const {
     config,
@@ -678,6 +701,10 @@ function createMessageFullSubagentCoordinator(deps = {}) {
         payload
       ].join('\n\n');
 
+      const useFullMultiAgent = shouldUseFullMultiAgent(config, payload, {
+        routeMeta: route?.meta || {}
+      });
+
       if (config.BACKGROUND_TOOL_TASKS_ENABLED) {
         await runBackgroundToolTask({
           route,
@@ -701,10 +728,10 @@ function createMessageFullSubagentCoordinator(deps = {}) {
               routePolicyKey: 'admin/full'
             }
           },
-          executionHandleFactory: config.FULL_SUBAGENT_MULTI_AGENT_ENABLED
+          executionHandleFactory: useFullMultiAgent
             ? executeFullMultiWorkerTaskWithHandle
             : fullExecutionHandleFactory,
-          initialStage: config.FULL_SUBAGENT_MULTI_AGENT_ENABLED ? 'planning' : 'running'
+          initialStage: useFullMultiAgent ? 'planning' : 'running'
         });
         return true;
       }
@@ -725,7 +752,7 @@ function createMessageFullSubagentCoordinator(deps = {}) {
         }
       };
 
-      const reply = config.FULL_SUBAGENT_MULTI_AGENT_ENABLED
+      const reply = useFullMultiAgent
         ? await (await executeFullMultiWorkerTaskWithHandle(payload, userInfo, senderId, route?.imageUrl || null, fullTaskOptions)).promise
         : await askToolTaskWithSubagentReview(payload, userInfo, senderId, null, route?.imageUrl || null, fullTaskOptions);
 
@@ -765,5 +792,7 @@ module.exports = {
   createMessageFullSubagentCoordinator,
   normalizeFullSubagentPlan,
   normalizeFullSubagentWorker,
+  scoreFullSubagentComplexity,
+  shouldUseFullMultiAgent,
   summarizeFullWorkerError
 };

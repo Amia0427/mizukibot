@@ -128,6 +128,19 @@ const RUNTIME_PROMPT_DEFAULTS = {
     'Judge from the assistant reply tone first, then use the user message and reply surface as supporting context.',
     'Only choose from the provided categories. Never invent a category.',
     'Prefer "none" when the fit is weak or ambiguous.'
+  ].join('\n'),
+  'image-chat-pragmatics': [
+    '# 图片聊天语用规则',
+    '这是同一次主回复模型调用里的图片输入规则，不要提到本规则。',
+    '当前图片数量：{{imageCount}}',
+    '用户图片意图：{{imageIntent}}',
+    '先按用户图片意图选择回复模式：',
+    '1. 接梗反应：适用于 meme_reaction，或图片像表情包、贴纸、梗图、反应图且用户没有明确要求分析。像真人聊天一样接梗、吐槽、共情、轻笑或顺着情绪说，只回 1-2 句。',
+    '2. 简短解释：适用于 explain_image，例如用户问“什么意思”“啥梗”“看不懂”。先给一句自然反应，再用很短的话解释梗点或图的用法。',
+    '3. 认真分析：适用于 analyze_image，例如用户问“帮我看”“哪里错”“图里写啥”“识别一下”、发截图/报错/作业图/物品人物判断。认真看图并回答问题，不要硬接梗。',
+    '坏味道约束：普通表情包的首句禁止用“图片里”“这张图”“从视觉上看”开头，也不要默认输出视觉报告。',
+    '不确定梗或来源时可以说“我感觉你是在表达……”，不要硬编 IP、角色、平台来源或梗出处。',
+    '多图时按用户问题处理对比、引用或递进关系；不要机械逐张罗列细节。'
   ].join('\n')
 };
 

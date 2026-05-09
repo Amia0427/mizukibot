@@ -30,12 +30,27 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
   assert.strictEqual(actionCalls[0].params.message[0].type, 'image');
   assert.ok(String(actionCalls[0].params.message[0].data.file || '').startsWith('base64://'));
 
+  const draftResult = await publishQzoneForContext('我把消息框关掉之后，房间突然安静得有点认真。', {
+    userId: 'u-admin',
+    routeMeta: {
+      groupId: 'g1'
+    }
+  }, {
+    publishQzonePost: async () => {
+      throw new Error('draft_only must not publish');
+    }
+  });
+
+  assert.strictEqual(draftResult.ok, true);
+  assert.strictEqual(draftResult.published, false);
+
   const result = await publishQzoneForContext('我把消息框关掉之后，房间突然安静得有点认真。', {
     userId: 'u-admin',
     routeMeta: {
       groupId: 'g1'
     }
   }, {
+    publishPolicy: 'auto_publish',
     qzoneSource: 'manual_qzone_post',
     qzoneType: 'manual_qzone_post',
     lens: 'scene',
@@ -50,6 +65,7 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
   });
 
   assert.strictEqual(result.ok, true);
+  assert.strictEqual(result.published, true);
   const history = getRecentQzoneHistory();
   assert.ok(history.some((item) => item.source === 'manual_qzone_post'));
   assert.ok(history.some((item) => item.lens === 'scene'));

@@ -71,6 +71,29 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizeCompletedTasks(value) {
+  const source = normalizeObject(value, {});
+  const out = {};
+  for (const [key, taskValue] of Object.entries(source)) {
+    const normalizedKey = normalizeText(key);
+    if (normalizedKey) out[normalizedKey] = taskValue === true;
+  }
+  return out;
+}
+
+function mergeCompletedTasksForQueuedPatch(current = {}, patch = {}, incomingTurns = []) {
+  const completed = normalizeCompletedTasks(current.completedTasks);
+  if (incomingTurns.length === 0) return completed;
+  const patchedTasks = normalizeObject(patch.tasks, {});
+  const keys = ['memoryLearning', 'selfImprovement', 'dailyJournal', 'memoryEvent', 'materialize', 'enrich'];
+  for (const key of keys) {
+    if (patchedTasks[key] === true || completed[key] === true) {
+      completed[key] = false;
+    }
+  }
+  return completed;
+}
+
 function normalizePhase(value = '') {
   const phase = normalizeText(value).toLowerCase();
   return phase === 'enrich' ? 'enrich' : 'core';
@@ -176,6 +199,10 @@ function normalizeJob(job = {}) {
     availableAt: normalizeText(job.availableAt) || createdAt,
     attempt: Math.max(0, Number(job.attempt) || 0),
     lastError: normalizeText(job.lastError),
+    retryDelayMs: Math.max(0, Number(job.retryDelayMs) || 0),
+    lastTransientErrorAt: normalizeText(job.lastTransientErrorAt),
+    nextRetryAt: normalizeText(job.nextRetryAt),
+    completedTasks: normalizeCompletedTasks(job.completedTasks),
     completedAt: normalizeText(job.completedAt),
     failedAt: normalizeText(job.failedAt)
   };
@@ -295,6 +322,7 @@ function createPostReplyJobQueue(options = {}) {
       routeMeta: normalizeObject(patch.routeMeta, current.routeMeta),
       continuitySnapshot: normalizeObject(patch.continuitySnapshot, current.continuitySnapshot),
       contextStats: normalizeObject(patch.contextStats, current.contextStats),
+      completedTasks: mergeCompletedTasksForQueuedPatch(current, patch, incomingTurns),
       updatedAt: lastMergedAt,
       lastMergedAt,
       mergeCount: Math.max(1, Number(current.mergeCount || 1) + Math.max(1, incomingTurns.length || 1)),
@@ -317,7 +345,11 @@ function createPostReplyJobQueue(options = {}) {
         .filter(Boolean)
     );
     const candidates = listJobs(['queued'])
-      .filter((job) => (!job.availableAt || job.availableAt <= currentIso) && !activeUserIds.has(normalizeText(job.userId)));
+      .filter((job) => (
+        (!job.availableAt || job.availableAt <= currentIso)
+        && (!job.nextRetryAt || job.nextRetryAt <= currentIso)
+        && !activeUserIds.has(normalizeText(job.userId))
+      ));
     for (const candidate of candidates) {
       const source = jobPath('queued', candidate.jobId);
       const claimed = normalizeJob({
@@ -349,6 +381,17 @@ function createPostReplyJobQueue(options = {}) {
     removeJobFile('processing', next.jobId);
     atomicWriteJson(jobPath('queued', next.jobId), next);
     return next;
+  }
+
+  function updateProcessingJob(job = {}, patch = {}) {
+    const current = normalizeJob({
+      ...job,
+      ...patch,
+      status: 'processing',
+      updatedAt: nowIso()
+    });
+    atomicWriteJson(jobPath('processing', current.jobId), current);
+    return current;
   }
 
   function markFailed(job = {}, error = '') {
@@ -383,7 +426,9 @@ function createPostReplyJobQueue(options = {}) {
         ...job,
         attempt,
         availableAt,
+        nextRetryAt: availableAt,
         lastError: normalizeText(error),
+        lastTransientErrorAt: job.lastTransientErrorAt,
         retryDelayMs: 0
       }),
       retried: true
@@ -414,6 +459,7 @@ function createPostReplyJobQueue(options = {}) {
     claimNextJob,
     markDone,
     markFailed,
+    updateProcessingJob,
     retryOrFail,
     findJobByDedupeKey,
     findQueuedJobByAggregateKey,

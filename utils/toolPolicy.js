@@ -38,8 +38,10 @@ const TOOL_POLICIES = {
   skill_tavily_extract: { risk: 'medium', capability: 'network' },
   skill_stock_price_query: { risk: 'medium', capability: 'network' },
   skill_ontology_graph: { risk: 'medium', capability: 'fs_write' },
-  publish_qzone: { risk: 'high', capability: 'local_write' },
+  qzone_draft: { risk: 'medium', capability: 'local_write' },
+  publish_qzone: { risk: 'medium', capability: 'local_write' },
   schedule_group_message: { risk: 'medium', capability: 'local_write' },
+  create_qzone_auto_task: { risk: 'high', capability: 'local_write' },
   create_scheduled_command: { risk: 'medium', capability: 'local_write' },
   list_scheduled_tasks: { risk: 'medium', capability: 'local_read' },
   cancel_scheduled_task: { risk: 'medium', capability: 'local_write' },
@@ -243,11 +245,18 @@ function normalizeTaskIdArgs(args = {}, key = 'job_id') {
 }
 
 function normalizeQqActionArgs(toolName, args = {}) {
-  if (toolName === 'publish_qzone') {
+  if (toolName === 'publish_qzone' || toolName === 'qzone_draft') {
     const content = String(args.content || '').trim();
-    if (!content) throw new Error('publish_qzone requires content');
-    if (content.length > 5000) throw new Error('publish_qzone content too large');
-    return { content };
+    const mode = String(args.mode || (content ? 'manual' : 'agent')).trim().toLowerCase();
+    const hint = String(args.hint || '').trim();
+    if (!content && !hint && mode === 'manual') throw new Error(`${toolName} requires content or hint`);
+    if (content.length > 5000) throw new Error(`${toolName} content too large`);
+    if (hint.length > 5000) throw new Error(`${toolName} hint too large`);
+    return {
+      content,
+      mode: new Set(['manual', 'bot_diary', 'agent', 'generic_autodraft']).has(mode) ? mode : 'agent',
+      hint
+    };
   }
 
   if (toolName === 'schedule_group_message') {
@@ -259,18 +268,29 @@ function normalizeQqActionArgs(toolName, args = {}) {
     return { message, when };
   }
 
-  if (toolName === 'create_scheduled_command') {
+  if (toolName === 'create_scheduled_command' || toolName === 'create_qzone_auto_task') {
     const action = String(args.action || '').trim();
     const when = String(args.when || '').trim();
     const content = String(args.content || '').trim();
-    if (!action) throw new Error('create_scheduled_command requires action');
-    if (!when) throw new Error('create_scheduled_command requires when');
-    if (!content) throw new Error('create_scheduled_command requires content');
-    if (!new Set(['group_message', 'qzone_post']).has(action)) {
+    const hint = String(args.hint || '').trim();
+    const mode = String(args.mode || '').trim().toLowerCase();
+    const normalizedAction = toolName === 'create_qzone_auto_task' ? 'qzone_post' : action;
+    if (!normalizedAction) throw new Error(`${toolName} requires action`);
+    if (!when) throw new Error(`${toolName} requires when`);
+    if (normalizedAction === 'group_message' && !content) throw new Error(`${toolName} requires content`);
+    if (normalizedAction === 'qzone_post' && content.length > 5000) throw new Error(`${toolName} content too large`);
+    if (hint.length > 5000) throw new Error(`${toolName} hint too large`);
+    if (!new Set(['group_message', 'qzone_post']).has(normalizedAction)) {
       throw new Error('create_scheduled_command action must be group_message or qzone_post');
     }
-    if (content.length > 5000) throw new Error('create_scheduled_command content too large');
-    return { action, when, content };
+    if (content.length > 5000) throw new Error(`${toolName} content too large`);
+    return {
+      action: normalizedAction,
+      when,
+      content,
+      mode: new Set(['manual', 'bot_diary', 'agent', 'generic_autodraft']).has(mode) ? mode : (normalizedAction === 'qzone_post' ? 'agent' : ''),
+      hint
+    };
   }
 
   if (toolName === 'list_scheduled_tasks') {
@@ -492,7 +512,9 @@ function enforceToolPolicy(toolName, args = {}, context = {}) {
 
   if (
     toolName === 'publish_qzone' ||
+    toolName === 'qzone_draft' ||
     toolName === 'schedule_group_message' ||
+    toolName === 'create_qzone_auto_task' ||
     toolName === 'create_scheduled_command' ||
     toolName === 'list_scheduled_tasks' ||
     toolName === 'cancel_scheduled_task' ||

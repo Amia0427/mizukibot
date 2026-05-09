@@ -46,6 +46,9 @@ const hapiCommand = parseAdminCommand('/hapi status');
 assert.strictEqual(hapiCommand.cmd, 'hapi');
 assert.strictEqual(hapiCommand.payload, 'status');
 
+const checkCommand = parseAdminCommand('/check');
+assert.strictEqual(checkCommand.cmd, 'check');
+
 const claudeCommand = parseAdminCommand('/claude 帮我看下这个仓库');
 assert.strictEqual(claudeCommand.cmd, 'claude');
 assert.strictEqual(claudeCommand.payload, '帮我看下这个仓库');

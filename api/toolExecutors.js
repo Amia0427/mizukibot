@@ -733,6 +733,16 @@ const TOOL_EXECUTORS = {
     }));
   },
 
+  qzone_draft: async (args = {}) => {
+    const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
+    const result = await publishQzoneForContext({
+      content: args.content,
+      mode: args.mode,
+      hint: args.hint
+    }, context);
+    return result.text;
+  },
+
   publish_qzone: async (args = {}) => {
     const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
     const result = await publishQzoneForContext({
@@ -754,6 +764,16 @@ const TOOL_EXECUTORS = {
     const result = createScheduledCommand(args.action, args.when, {
       content: args.content,
       mode: args.mode,
+      hint: args.hint
+    }, context);
+    return result.text;
+  },
+
+  create_qzone_auto_task: async (args = {}) => {
+    const context = args.__context && typeof args.__context === 'object' ? args.__context : {};
+    const result = createScheduledCommand('qzone_post', args.when, {
+      content: args.content,
+      mode: args.mode || 'agent',
       hint: args.hint
     }, context);
     return result.text;

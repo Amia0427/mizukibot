@@ -894,8 +894,11 @@ function deriveToolArgs(toolName = '', route = {}) {
   if (normalizedTool === 'create_scheduled_command') {
     return { action: 'group_message', when: 'tomorrow 09:00', content: requestText || cleanText || 'scheduled message' };
   }
-  if (normalizedTool === 'publish_qzone') {
-    return { content: requestText || cleanText || 'draft content', mode: 'manual' };
+  if (normalizedTool === 'create_qzone_auto_task') {
+    return { when: 'tomorrow 09:00', mode: 'agent', hint: requestText || cleanText || 'scheduled qzone idea' };
+  }
+  if (normalizedTool === 'publish_qzone' || normalizedTool === 'qzone_draft') {
+    return { content: '', mode: 'agent', hint: requestText || cleanText || 'draft content' };
   }
   return { text: requestText || cleanText };
 }

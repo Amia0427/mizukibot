@@ -114,9 +114,9 @@ function resolvePolicyKey(route = {}) {
 
 function resolveQqActionTools(route = {}) {
   const qqActionKey = String(route?.meta?.qqActionKey || '').trim().toLowerCase();
-  if (qqActionKey === 'qq_publish_qzone') return ['publish_qzone'];
+  if (qqActionKey === 'qq_publish_qzone') return ['qzone_draft'];
   if (qqActionKey === 'qq_schedule_message') return ['schedule_group_message', 'create_scheduled_command'];
-  if (qqActionKey === 'qq_schedule_qzone') return ['create_scheduled_command'];
+  if (qqActionKey === 'qq_schedule_qzone') return ['create_qzone_auto_task', 'create_scheduled_command'];
   if (qqActionKey === 'qq_list_scheduled') return ['list_scheduled_tasks'];
   if (qqActionKey === 'qq_cancel_scheduled') return ['list_scheduled_tasks', 'cancel_scheduled_task', 'delete_scheduled_task'];
   return [];
@@ -150,7 +150,9 @@ function isPrivateSafeTool(toolName = '') {
 
   const blockedByName = new Set([
     'publish_qzone',
+    'qzone_draft',
     'schedule_group_message',
+    'create_qzone_auto_task',
     'create_scheduled_command',
     'list_scheduled_tasks',
     'cancel_scheduled_task',

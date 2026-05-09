@@ -43,6 +43,7 @@ let cachedDynamicRegistry = {
   tools: [],
   byName: new Map()
 };
+let warmRegistryPromise = null;
 
 const STATIC_MCP_REPLACEMENTS = [
   {
@@ -1064,22 +1065,34 @@ async function getDynamicMcpToolRegistry(options = {}) {
 }
 
 async function warmMcpRegistry(options = {}) {
-  try {
-    return await getDynamicMcpToolRegistry({
-      ...options,
-      forceRefresh: true
-    });
-  } catch (error) {
-    logMcp('mcp_tool_error', {
-      stage: 'warmup',
-      error: error?.message || String(error || '')
-    });
-    return {
-      generatedAt: 0,
-      tools: [],
-      byName: new Map()
-    };
+  if (config.MCP_WARM_SINGLE_FLIGHT_ENABLED !== false && warmRegistryPromise) {
+    return warmRegistryPromise;
   }
+  const runWarm = async () => {
+    try {
+      return await getDynamicMcpToolRegistry({
+        ...options,
+        forceRefresh: true
+      });
+    } catch (error) {
+      logMcp('mcp_tool_error', {
+        stage: 'warmup',
+        error: error?.message || String(error || '')
+      });
+      return {
+        generatedAt: 0,
+        tools: [],
+        byName: new Map()
+      };
+    }
+  };
+  if (config.MCP_WARM_SINGLE_FLIGHT_ENABLED === false) {
+    return runWarm();
+  }
+  warmRegistryPromise = runWarm().finally(() => {
+    warmRegistryPromise = null;
+  });
+  return warmRegistryPromise;
 }
 
 function getCachedDynamicMcpToolRegistry() {
@@ -1094,6 +1107,7 @@ function clearMcpRuntimeCaches() {
   };
   initializePromisePool.clear();
   discoveryFailureCooldowns.clear();
+  warmRegistryPromise = null;
   for (const entry of sessionPool.values()) {
     try {
       entry.process?.kill();

@@ -101,12 +101,13 @@ function computeNextRunAt(task = {}, nowText = nowDateTimeText()) {
 function normalizePayload(task = {}) {
   const payload = task.payload && typeof task.payload === 'object' ? task.payload : {};
   if (normalizeText(task.commandType) === 'qzone_post') {
-    const mode = normalizeText(payload.mode).toLowerCase() === 'bot_diary' ? 'bot_diary' : 'manual';
+    const rawMode = normalizeText(payload.mode).toLowerCase();
+    const mode = new Set(['manual', 'bot_diary', 'agent', 'generic_autodraft']).has(rawMode) ? rawMode : 'agent';
     return cloneJson({
       mode,
       ...(mode === 'manual'
         ? { content: normalizeText(payload.content) }
-        : { hint: normalizeText(payload.hint) })
+        : { hint: normalizeText(payload.hint || payload.content) })
     }, {});
   }
   return cloneJson(payload, {});
@@ -170,9 +171,12 @@ function validateTaskInput(input = {}) {
     if (!normalizeText(payload.message)) throw new Error('群消息内容不能为空');
   }
   if (commandType === 'qzone_post') {
-    const mode = normalizeText(payload.mode).toLowerCase() === 'bot_diary' ? 'bot_diary' : 'manual';
+    const rawMode = normalizeText(payload.mode).toLowerCase();
+    const mode = new Set(['manual', 'bot_diary', 'agent', 'generic_autodraft']).has(rawMode)
+      ? rawMode
+      : (normalizeText(payload.content) ? 'manual' : 'agent');
     if (mode === 'manual' && !normalizeText(payload.content)) throw new Error('空间内容不能为空');
-    if (mode === 'bot_diary') {
+    if (mode !== 'manual') {
       return {
         ownerUserId,
         groupId,
@@ -183,7 +187,7 @@ function validateTaskInput(input = {}) {
         executeAt: normalizedWhen.executeAt || '',
         payload: cloneJson({
           mode,
-          hint: normalizeText(payload.hint)
+          hint: normalizeText(payload.hint || payload.content)
         }, {}),
         whenSummary: normalizedWhen.summary || ''
       };
@@ -200,9 +204,11 @@ function validateTaskInput(input = {}) {
     executeAt: normalizedWhen.executeAt || '',
     payload: cloneJson(commandType === 'qzone_post'
       ? {
-        mode: normalizeText(payload.mode).toLowerCase() === 'bot_diary' ? 'bot_diary' : 'manual',
-        ...(normalizeText(payload.mode).toLowerCase() === 'bot_diary'
-          ? { hint: normalizeText(payload.hint) }
+        mode: new Set(['manual', 'bot_diary', 'agent', 'generic_autodraft']).has(normalizeText(payload.mode).toLowerCase())
+          ? normalizeText(payload.mode).toLowerCase()
+          : (normalizeText(payload.content) ? 'manual' : 'agent'),
+        ...(new Set(['bot_diary', 'agent', 'generic_autodraft']).has(normalizeText(payload.mode).toLowerCase()) || !normalizeText(payload.content)
+          ? { hint: normalizeText(payload.hint || payload.content) }
           : { content: normalizeText(payload.content) })
       }
       : payload, {}),
