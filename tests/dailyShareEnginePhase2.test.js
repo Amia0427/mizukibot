@@ -17,7 +17,7 @@ const { createDailyShareEngine } = require('../core/dailyShareEngine');
 
 (async () => {
   const engine = createDailyShareEngine({
-    qzonePublisher: async () => ({ success: true, reason: 'ok', source: 'test' }),
+    qzonePublisher: async (payload) => ({ ok: true, content: payload.hint || payload.content || '', reason: 'ok', source: 'test' }),
     runMemoryCli: async () => ({ ok: false }),
     recordMemoryScope: () => {},
     memoryQueryPlanner: async () => ({ query: 'qzone mood' })

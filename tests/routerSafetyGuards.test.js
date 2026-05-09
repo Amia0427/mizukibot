@@ -47,7 +47,7 @@ const sanitizedRoute = sanitizeAiRoute({
     reason: 'explicit-act',
     toolIntent: 'force_tools',
     responseIntent: 'action_guidance',
-    allowedTools: ['publish_qzone']
+    allowedTools: ['qzone_draft']
   }
 }, fallbackRoute, { userId: 'u1', imageUrl: null });
 

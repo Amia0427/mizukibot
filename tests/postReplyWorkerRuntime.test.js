@@ -282,6 +282,116 @@ module.exports = (async () => {
     assert.strictEqual(retried.status, 'queued', '429 should remain retryable for post-reply phase');
     assert.ok(Number(retried.retryDelayMs || 0) >= 1000 || /429/.test(String(retried.lastError || '')));
 
+    calls.length = 0;
+    let firstPartialRun = true;
+    const partialQueue = {
+      updatedJobs: [],
+      recoverStaleProcessingJobs() {
+        return [];
+      },
+      claimNextJob() {
+        return null;
+      },
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      },
+      markDone(job) {
+        return { ...job, status: 'done' };
+      },
+      markFailed(job, error) {
+        return { ...job, status: 'failed', lastError: error };
+      },
+      retryOrFail(job, error) {
+        return { job: { ...job, status: 'queued', lastError: error }, retried: true };
+      },
+      findQueuedJobByAggregateKey() {
+        return null;
+      },
+      enqueue(job) {
+        return { enqueued: true, job };
+      }
+    };
+    const partialRuntime = createPostReplyWorkerRuntime({
+      queue: partialQueue,
+      processJob: async (job, deps) => {
+        const result = await processPostReplyJob(job, deps);
+        if (firstPartialRun) {
+          firstPartialRun = false;
+          throw new Error('Request failed with status code 503');
+        }
+        return result;
+      }
+    });
+    const partialFirst = await partialRuntime.runOneJob({
+      jobId: 'partial_retry_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    assert.strictEqual(partialFirst.status, 'queued');
+    assert.ok(partialFirst.completedTasks.memoryLearning, 'completed memory task should be persisted before retry');
+    assert.ok(partialFirst.completedTasks.selfImprovement, 'completed self task should be persisted before retry');
+    assert.ok(partialFirst.completedTasks.dailyJournal, 'completed journal task should be persisted before retry');
+
+    calls.length = 0;
+    const partialSecond = await partialRuntime.runOneJob(partialFirst);
+    assert.strictEqual(partialSecond.status, 'done');
+    assert.ok(!calls.some((item) => item.type === 'memory'), 'retry should not rerun completed memory learning');
+    assert.ok(!calls.some((item) => item.type === 'self'), 'retry should not rerun completed self improvement');
+    assert.ok(!calls.some((item) => item.type === 'journal'), 'retry should not rerun completed daily journal');
+
+    calls.length = 0;
+    const materializeResumeCalls = [];
+    const materializeResumeQueue = {
+      updatedJobs: [],
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      }
+    };
+    const materializeResume = await processPostReplyJob({
+      jobId: 'materialize_resume_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true
+      }
+    }, {
+      queue: materializeResumeQueue,
+      scheduleMaterializeMemoryViews: async (options = {}) => {
+        materializeResumeCalls.push(options);
+        return { scheduled: true, coalesced: false, delayMs: 1, pendingCount: 1 };
+      }
+    });
+    assert.strictEqual(materializeResumeCalls.length, 1, 'retry should still schedule materialize when only memory event completed');
+    assert.strictEqual(materializeResume.job.completedTasks.memoryEvent, true);
+    assert.strictEqual(materializeResume.job.completedTasks.materialize, true);
+    assert.ok(!calls.some((item) => item.type === 'memory'), 'materialize resume should not rerun heavy memory learning');
+
     memoryExtraction.learnSomethingNew = originalLearnSomethingNew;
     memoryExtraction.extractPostReplyEnrichment = originalExtractPostReplyEnrichment;
     dailyJournal.appendDailyJournalEntry = originalAppendDailyJournalEntry;

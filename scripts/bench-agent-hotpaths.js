@@ -1,5 +1,33 @@
 const path = require('path');
 
+function parseArgs(argv = process.argv.slice(2)) {
+  const out = {
+    caseName: 'all',
+    timeoutMs: 30000
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const item = String(argv[i] || '').trim();
+    if (item === '--case' && argv[i + 1]) {
+      out.caseName = String(argv[i + 1] || '').trim() || 'all';
+      i += 1;
+      continue;
+    }
+    if (item.startsWith('--case=')) {
+      out.caseName = item.slice('--case='.length).trim() || 'all';
+      continue;
+    }
+    if (item === '--timeout-ms' && argv[i + 1]) {
+      out.timeoutMs = Math.max(1000, Number(argv[i + 1]) || out.timeoutMs);
+      i += 1;
+      continue;
+    }
+    if (item.startsWith('--timeout-ms=')) {
+      out.timeoutMs = Math.max(1000, Number(item.slice('--timeout-ms='.length)) || out.timeoutMs);
+    }
+  }
+  return out;
+}
+
 function percentile(values = [], ratio = 0.5) {
   const list = Array.isArray(values) ? values.slice().sort((a, b) => a - b) : [];
   if (!list.length) return 0;
@@ -27,6 +55,23 @@ async function sample(fn, count = 8) {
     values.push(await timeRun(fn));
   }
   return values;
+}
+
+async function withTimeout(label = '', timeoutMs = 30000, fn) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(fn),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label || 'benchmark'} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+        if (typeof timer.unref === 'function') timer.unref();
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function benchDirectReplyNoTool() {
@@ -349,14 +394,50 @@ async function benchSubagentSequentialCalls() {
   }
 }
 
+const BENCH_CASES = {
+  direct_chat_no_tool: benchDirectReplyNoTool,
+  direct_chat_one_readonly_tool: benchReadonlyTool,
+  subagent_sequential_calls: benchSubagentSequentialCalls
+};
+
+async function runBenchCase(name, fn, timeoutMs) {
+  const startedAt = Date.now();
+  try {
+    const result = await withTimeout(name, timeoutMs, fn);
+    return {
+      ok: true,
+      durationMs: Date.now() - startedAt,
+      result
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      durationMs: Date.now() - startedAt,
+      error: String(error?.message || error || 'benchmark failed')
+    };
+  }
+}
+
 async function main() {
+  const args = parseArgs();
+  const selectedNames = args.caseName === 'all'
+    ? Object.keys(BENCH_CASES)
+    : [args.caseName];
+  const unknown = selectedNames.filter((name) => !BENCH_CASES[name]);
+  if (unknown.length > 0) {
+    throw new Error(`Unknown benchmark case: ${unknown.join(', ')}. Available: ${Object.keys(BENCH_CASES).join(', ')}`);
+  }
+
   const results = {
     generatedAt: new Date().toISOString(),
-    direct_chat_no_tool: await benchDirectReplyNoTool(),
-    direct_chat_one_readonly_tool: await benchReadonlyTool(),
-    subagent_sequential_calls: await benchSubagentSequentialCalls()
+    selectedCase: args.caseName,
+    timeoutMs: args.timeoutMs
   };
-  if (results.direct_chat_no_tool.modelCallsPerRun !== 1) {
+  for (const name of selectedNames) {
+    results[name] = await runBenchCase(name, BENCH_CASES[name], args.timeoutMs);
+  }
+  const direct = results.direct_chat_no_tool?.result;
+  if (direct && direct.modelCallsPerRun !== 1) {
     throw new Error('direct_chat_no_tool benchmark is invalid: expected at least 1 model call');
   }
   console.log(JSON.stringify(results, null, 2));

@@ -1,12 +1,11 @@
 const { callMcpTool } = require('../../mcpRuntime');
 const { askSubagentByBridge } = require('../../subagentExecutor');
 const { prepareSubagentFallbackReply } = require('../../../utils/subagentStyleGuard');
-const { getStaticToolExecutors, getStaticToolSchemas, getDynamicToolDescriptors } = require('../toolRegistryFacade');
+const { getStaticToolSchemas, getDynamicToolDescriptors, getToolExecutor, getToolSchemaNames } = require('../toolRegistryFacade');
 const { GLOBAL_TOOL_REGISTRY } = require('../globalToolRuntimeFacade');
 const { createCapabilityDescriptor, normalizeArray, normalizeObject, normalizeText } = require('../contracts');
 
 function buildStaticToolDescriptors() {
-  const executors = normalizeObject(getStaticToolExecutors(), {});
   const schemas = normalizeArray(getStaticToolSchemas());
   const schemaByName = new Map(
     schemas
@@ -16,12 +15,17 @@ function buildStaticToolDescriptors() {
       })
       .filter(Boolean)
   );
+  const names = getToolSchemaNames().filter((name) => schemaByName.has(name));
 
-  return Object.entries(executors).map(([toolName, executor]) => createCapabilityDescriptor({
+  return names.map((toolName) => createCapabilityDescriptor({
     name: toolName,
     kind: 'tool',
     schema: schemaByName.get(toolName) || null,
-    executor,
+    executor: async (args = {}) => {
+      const executor = getToolExecutor(toolName);
+      if (typeof executor !== 'function') return `Unknown tool: ${toolName}`;
+      return executor(args);
+    },
     metadata: {
       source: 'static'
     }

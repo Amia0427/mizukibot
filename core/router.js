@@ -258,6 +258,16 @@ function parseAdminCommand(cleanText = '') {
     };
   }
 
+  if (/^\/check(?:\s|$)/i.test(t)) {
+    const payload = t.replace(/^\/check/i, '').trim();
+    return {
+      cmd: 'check',
+      args: payload ? payload.split(/\s+/).filter(Boolean) : [],
+      raw: t,
+      payload
+    };
+  }
+
   if (/^\/learn(?:\s|$)/i.test(t)) {
     const payload = t.replace(/^\/learn/i, '').trim();
     const parts = payload.split(/\s+/).filter(Boolean);
@@ -327,7 +337,7 @@ function parseAdminCommand(cleanText = '') {
   const parts = t.slice(ADMIN_PREFIX.length).trim().split(/\s+/);
   const cmd = (parts[0] || '').toLowerCase();
   const args = parts.slice(1);
-  const supported = new Set(['debug', 'status', 'reload', 'help', 'hapi', 'memoryops']);
+  const supported = new Set(['debug', 'status', 'reload', 'help', 'hapi', 'memoryops', 'check']);
 
   if (!supported.has(cmd)) return { cmd: 'unknown', args, raw: t };
   return { cmd, args, raw: t };
@@ -417,7 +427,7 @@ function detectQqActionIntent(cleanText = '', imageUrl = null) {
     if (hasQzoneTarget(text)) {
       return {
         key: 'qq_schedule_qzone',
-        allowedTools: ['create_scheduled_command'],
+        allowedTools: ['create_qzone_auto_task', 'create_scheduled_command'],
         reason: 'qq-schedule-qzone',
         toolNeed: ['local-write'],
         executionMode: 'staged',
@@ -440,7 +450,7 @@ function detectQqActionIntent(cleanText = '', imageUrl = null) {
   if (hasQzonePublishSignal(text)) {
     return {
       key: 'qq_publish_qzone',
-      allowedTools: ['publish_qzone'],
+      allowedTools: ['qzone_draft'],
       reason: 'qq-publish-qzone',
       toolNeed: ['local-write'],
       executionMode: 'staged',

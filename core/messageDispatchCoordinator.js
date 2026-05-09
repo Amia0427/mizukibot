@@ -21,9 +21,6 @@ function createMessageDispatchCoordinator(deps = {}) {
     getEffectivePolicyKey,
     runBackgroundToolTask,
     detectQzonePostDraftMode,
-    generateBotDiaryDraft,
-    generateGenericQzoneDraft,
-    normalizeGeneratedQzoneContent,
     publishQzoneForContext,
     markThinkingEmojiBeforeLlm,
     askToolTaskLocally,
@@ -158,57 +155,38 @@ function createMessageDispatchCoordinator(deps = {}) {
 
         const qzoneDraftMode = detectQzonePostDraftMode(route, cleanText);
         if (qzoneDraftMode === 'bot_diary') {
-          const diaryDraft = await generateBotDiaryDraft({
-            groupId: String(groupId || ''),
+          const draftResult = await publishQzoneForContext({
+            mode: 'bot_diary',
             hint: cleanText
-          });
-          if (!diaryDraft.ok) {
-            reply = `?????????? bot ???\n\n?????${diaryDraft.reason || '????'}`;
-          } else {
-            const publishResult = await publishQzoneForContext({
-              mode: 'manual',
-              content: diaryDraft.content
-            }, {
+          }, {
+            userId: String(senderId || ''),
+            routeMeta: {
+              ...(route.meta || {}),
               userId: String(senderId || ''),
-              routeMeta: {
-                ...(route.meta || {}),
-                userId: String(senderId || ''),
-                groupId: String(groupId || '')
-              }
-            });
-            reply = publishResult?.ok
-              ? `??? bot ??? QQ ?????\n\n???\n${diaryDraft.content}`
-              : `?? bot ????????? QQ ??????\n\n?????${publishResult?.text || '????'}`;
-          }
+              groupId: String(groupId || '')
+            }
+          });
+          reply = draftResult?.ok
+            ? `已生成 QQ 空间 bot 日记草稿，未发布。\n\n内容：\n${draftResult.content}`
+            : `生成 bot 日记草稿失败。\n\n原因：${draftResult?.reason || draftResult?.text || '未知错误'}`;
         } else if (qzoneDraftMode === 'generic_autodraft') {
-          const drafted = await generateGenericQzoneDraft({
-            requestText: cleanText,
-            groupId: String(groupId || '')
-          });
-          const draftedContent = drafted.ok ? normalizeGeneratedQzoneContent(drafted.content) : '';
-
-          if (!draftedContent) {
-            reply = '????????????????????????????????????';
-          } else {
-            const publishResult = await publishQzoneForContext(draftedContent, {
+          const draftResult = await publishQzoneForContext({
+            mode: 'agent',
+            hint: cleanText
+          }, {
+            userId: String(senderId || ''),
+            routeMeta: {
+              ...(route.meta || {}),
               userId: String(senderId || ''),
-              qzoneSource: 'generic_autodraft',
-              qzoneType: 'generic_autodraft',
-              lens: drafted?.meta?.lens,
-              emotion: drafted?.meta?.emotion,
-              anchor: drafted?.meta?.anchor,
-              structure: drafted?.meta?.structure,
-              ending: drafted?.meta?.ending,
-              routeMeta: {
-                ...(route.meta || {}),
-                userId: String(senderId || ''),
-                groupId: String(groupId || '')
-              }
-            });
-            reply = publishResult?.ok
-              ? `???????? QQ ???\n\n???\n${draftedContent}`
-              : `????????????? QQ ??????\n\n?????${publishResult?.text || '????'}\n\n???\n${draftedContent}`;
-          }
+              groupId: String(groupId || '')
+            }
+          }, {
+            qzoneSource: 'generic_autodraft',
+            qzoneType: 'generic_autodraft'
+          });
+          reply = draftResult?.ok
+            ? `已生成 QQ 空间草稿，未发布。\n\n内容：\n${draftResult.content}`
+            : `这次没能生成可发布的 QQ 空间草稿。\n\n原因：${draftResult?.reason || draftResult?.text || '未知错误'}`;
         } else {
           await markThinkingEmojiBeforeLlm({
             messageId: sourceMessageId,

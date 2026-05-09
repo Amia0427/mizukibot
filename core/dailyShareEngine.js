@@ -1,5 +1,9 @@
 ﻿const config = require('../config');
-const { publishQzonePost } = require('../api/qzoneClient');
+const { runQzoneAgent } = require('../api/qzoneAgentService');
+const {
+  cleanupLocalImage,
+  tryGenerateBotDiaryQzoneImage
+} = require('../api/qqActionService');
 const { formatDateInTz, getDatePartsInTz } = require('../utils/time');
 const {
   appendRecentContentFingerprint,
@@ -42,7 +46,6 @@ const {
   buildPlanPrompt,
   buildTropeFingerprint,
   buildQzonePlan,
-  finalizeSuccessfulQzoneRecord,
   getRecentFailureLikeEntries,
   normalizeTelemetryPayload,
   pickBestCandidate,
@@ -896,7 +899,7 @@ function shouldRunWindowNow({ entry, windowDef, now, date, targetConfig = {} }) 
 function createDailyShareEngine({
   knowledgeProvider = dailyShareKnowledgeProvider,
   contentBuilder = null,
-  qzonePublisher = publishQzonePost,
+  qzonePublisher = null,
   runMemoryCli = null,
   recordMemoryScope = defaultRecordMemoryScope,
   memoryQueryPlanner = null
@@ -1406,12 +1409,42 @@ function createDailyShareEngine({
       }
     }
 
+    let deliveredText = generated.text;
     try {
       if (normalizedSurface === 'qzone') {
-        const result = await qzonePublisher(generated.text);
-        if (!result?.success) {
+        const publish = typeof qzonePublisher === 'function'
+          ? qzonePublisher
+          : async (payload) => runQzoneAgent(payload, {
+            groupId: QZONE_TARGET_ID,
+            userId: String((config.ADMIN_USER_IDS || [])[0] || 'system')
+          }, {
+            publishPolicy: 'auto_publish',
+            qzoneSource: 'daily_share',
+            qzoneType: type,
+            now,
+            helpers: {
+              tryGenerateBotDiaryQzoneImage,
+              cleanupLocalImage
+            }
+          });
+        const result = await publish({
+          mode: 'agent',
+          hint: generated.text,
+          content: generated.text,
+          source: 'daily_share',
+          type,
+          publishPolicy: 'auto_publish',
+          windowKey,
+          shareType: type,
+          topicKey: payload.topicKey || '',
+          topicGroup: payload.topicGroup || generated.topicGroup || '',
+          imageIntent: generated.plan?.imageIntent || generated.meta?.imageIntent || null,
+          imagePromptHints: generated.plan?.imagePromptHints || generated.meta?.imagePromptHints || []
+        });
+        if (!(result?.ok || result?.success)) {
           throw new Error(String(result?.reason || 'daily-share-send-failed'));
         }
+        deliveredText = String(result?.content || generated.text || '').trim();
       } else {
         const sent = await sendGroupReply({
           sendWithRetry,
@@ -1488,24 +1521,11 @@ function createDailyShareEngine({
       at: now,
       windowKey,
       type,
-      summary: trimReplyText(generated.text, 120),
+      summary: trimReplyText(deliveredText, 120),
       topicKey: payload.topicKey || '',
       contentKey: payload.contentKey || ''
     });
-    appendRecentContentFingerprint(stateEntry, generated.fingerprint, now);
-    if (normalizedSurface === 'qzone') {
-      finalizeSuccessfulQzoneRecord({
-        source: 'daily_share',
-        text: generated.text,
-        type,
-        topicKey: payload.topicKey || '',
-        topicGroup: payload.topicGroup || generated.topicGroup || '',
-        variationProfile: generated.variationProfile || {},
-        plan: generated.plan || null,
-        tropeFingerprint: generated.plan?.tropeFingerprint || '',
-        at: now
-      });
-    }
+    appendRecentContentFingerprint(stateEntry, normalizeDailyShareFingerprint(deliveredText) || generated.fingerprint, now);
 
     if (payload.topicKey) {
       stateEntry.recentTopicKeys = appendRecentKey(stateEntry.recentTopicKeys, payload.topicKey, now, 120);
@@ -1523,7 +1543,7 @@ function createDailyShareEngine({
       source: payload.source || '',
       event: 'send success'
     });
-    return { sent: true, text: generated.text, type, meta: generated.meta || {} };
+    return { sent: true, text: deliveredText, type, meta: generated.meta || {} };
   }
 
   async function runGroupShareCycle({ sendWithRetry, askAIByGraph, today, date, now }) {

@@ -1,7 +1,7 @@
 const config = require('../../../config');
 const { postWithRetry, postStreamWithRetry } = require('../../httpClient');
 const { extractMessageContent, extractSSEEvents, flushSSEState } = require('../../parser');
-const { getToolSchemas } = require('../../toolRegistry');
+const { getToolSchemaByName } = require('../../toolRegistry');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
 const { isToolSchemaValidationError } = require('../../../utils/modelCompat');
@@ -58,11 +58,9 @@ function getFilteredToolSchemas(context = {}) {
   if (cached) {
     return cached.map((schema) => ({ ...schema, function: schema.function ? { ...schema.function } : schema.function }));
   }
-  const allowedSet = new Set(allowedNames);
-  const filtered = getToolSchemas().filter((schema) => {
-    const toolName = String(schema?.function?.name || '').trim();
-    return allowedSet.has(toolName);
-  });
+  const filtered = allowedNames
+    .map((toolName) => getToolSchemaByName(toolName))
+    .filter(Boolean);
   filteredToolSchemaCache.set(cacheKey, filtered.map((schema) => ({
     ...schema,
     function: schema.function ? { ...schema.function } : schema.function

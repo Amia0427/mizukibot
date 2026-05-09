@@ -161,6 +161,8 @@ function createPersistNode(deps = {}) {
     emitPersistTrace('persist_start');
     const finalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
     const latencyDecision = normalizeObject(state.execution?.latencyDecision, {});
+    const persistMode = String(config.FAST_REPLY_PERSIST_MODE || '').trim().toLowerCase();
+    const fastCommitMode = persistMode === 'fast_commit';
     const userContent = String(
       request.persistUserText
       || request.runtimeQuestionText
@@ -317,7 +319,9 @@ function createPersistNode(deps = {}) {
             }
           }
         });
-        materializeMemoryViews();
+        if (!fastCommitMode) {
+          materializeMemoryViews();
+        }
       }
       appendShortTermHistory(request.userId, userContent, finalReply, request.userInfo, {
         chatHistory,
@@ -372,7 +376,9 @@ function createPersistNode(deps = {}) {
               recentMessages: historySlice.slice(-6)
             }
           });
-          materializeMemoryViews();
+          if (!fastCommitMode) {
+            materializeMemoryViews();
+          }
         }
         persistShortTermBridgeSnapshot(request.userId, {
           chatHistory,
@@ -384,7 +390,7 @@ function createPersistNode(deps = {}) {
         });
       }
 
-      if (shouldPersistBridge) {
+      if (shouldPersistBridge && !fastCommitMode) {
         const summaryCooldown = getSessionSummaryCooldownStatus(request.sessionKey, now);
         if (!summaryCooldown.limited) {
           try {
@@ -412,7 +418,7 @@ function createPersistNode(deps = {}) {
         }
       }
 
-      await recordPersonaMemoryOutcome('direct_chat', {
+      if (!fastCommitMode) await recordPersonaMemoryOutcome('direct_chat', {
         state: state.memory?.personaMemoryState,
         request,
         routeMeta: request.routeMeta,

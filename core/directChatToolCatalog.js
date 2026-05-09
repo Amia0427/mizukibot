@@ -162,10 +162,17 @@ const TOOL_PLANNER_METADATA = Object.freeze({
     avoidWhen: ['watchlist-only requests'],
     preferredOver: ['web_search']
   },
-  publish_qzone: {
-    plannerRole: 'qq_qzone_publish',
+  qzone_draft: {
+    plannerRole: 'qq_qzone_draft',
     overlapGroup: 'qq_action',
-    preferWhen: ['qzone publish requests'],
+    preferWhen: ['qzone draft or publish requests'],
+    avoidWhen: ['general planning'],
+    preferredOver: ['assistant_weekly_agenda']
+  },
+  publish_qzone: {
+    plannerRole: 'qq_qzone_draft_alias',
+    overlapGroup: 'qq_action',
+    preferWhen: ['legacy qzone publish requests that should become drafts'],
     avoidWhen: ['general planning'],
     preferredOver: ['assistant_weekly_agenda']
   },
@@ -180,6 +187,13 @@ const TOOL_PLANNER_METADATA = Object.freeze({
     plannerRole: 'qq_group_command_schedule',
     overlapGroup: 'qq_action',
     preferWhen: ['scheduled group command or qzone action requests'],
+    avoidWhen: ['general planning'],
+    preferredOver: ['assistant_weekly_agenda']
+  },
+  create_qzone_auto_task: {
+    plannerRole: 'qq_qzone_auto_schedule',
+    overlapGroup: 'qq_action',
+    preferWhen: ['scheduled qzone action requests'],
     avoidWhen: ['general planning'],
     preferredOver: ['assistant_weekly_agenda']
   },
@@ -246,7 +260,7 @@ function isToolVisibleInContext(toolName = '', context = {}) {
   if (new Set(['self_improvement_recent', 'self_improvement_search', 'self_improvement_patterns', 'self_improvement_rules', 'self_improvement_guides']).has(normalized)) {
     return false;
   }
-  if (normalized === 'publish_qzone') {
+  if (normalized === 'publish_qzone' || normalized === 'qzone_draft' || normalized === 'create_qzone_auto_task') {
     return isAdminUser(context.userId);
   }
   return true;

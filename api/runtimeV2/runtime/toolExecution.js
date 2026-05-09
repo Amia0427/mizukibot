@@ -1,4 +1,4 @@
-const { getToolSchemaByName } = require('../../toolRegistry');
+const { getToolExecutor, getToolSchemaByName } = require('../../toolRegistry');
 const {
   isToolAllowedByRuntimeList,
   normalizeToolNames
@@ -173,8 +173,26 @@ function createToolExecutionHelpers(deps = {}) {
     safeParseMemoryCliResult,
     captureToolFailure,
     isPlannerSingleAuthorityEnabled,
-    toolExecutors
+    toolExecutors,
+    resolveToolExecutor
   } = deps;
+
+  function findToolExecutor(toolName = '', runtimeOptions = {}) {
+    const name = normalizeText(toolName);
+    if (!name) return null;
+    if (typeof runtimeOptions.resolveToolExecutor === 'function') {
+      const resolved = runtimeOptions.resolveToolExecutor(name);
+      if (resolved) return resolved;
+    }
+    if (typeof resolveToolExecutor === 'function') {
+      const resolved = resolveToolExecutor(name);
+      if (resolved) return resolved;
+    }
+    const runtimeExecutors = normalizeObject(runtimeOptions.toolExecutors, {});
+    if (runtimeExecutors[name]) return runtimeExecutors[name];
+    const configuredExecutors = normalizeObject(toolExecutors, {});
+    return configuredExecutors[name] || getToolExecutor(name);
+  }
 
   function getReadOnlyToolCacheTtl(toolName = '', normalizedArgs = {}) {
     const name = normalizeText(toolName);
@@ -693,7 +711,7 @@ function createToolExecutionHelpers(deps = {}) {
           return envelope;
         }
 
-        const executor = toolExecutors[toolName];
+        const executor = findToolExecutor(toolName, runtimeOptions);
         if (!executor) {
           const envelope = {
             ...computeToolEnvelope(step, `Unknown tool: ${toolName}`, policy),
@@ -747,7 +765,7 @@ function createToolExecutionHelpers(deps = {}) {
         return resultEnvelope;
       }
 
-      const executor = toolExecutors[toolName];
+      const executor = findToolExecutor(toolName, runtimeOptions);
       if (!executor) {
         const envelope = computeToolEnvelope(step, `Unknown tool: ${toolName}`, policy);
         maybeCaptureToolFailure(envelope, step, state);

@@ -1,14 +1,41 @@
 const config = require('../config');
-const { learnSomethingNew, extractPostReplyEnrichment } = require('../api/memoryExtraction');
-const { appendDailyJournalEntry, maybeSegmentJournalByThreshold } = require('./dailyJournal');
-const { learnSelfImprovement, storeExtractedSelfImprovementItems } = require('./selfImprovementRuntime');
 const { createPostReplyJobQueue, getPostReplyJobQueue } = require('./postReplyJobQueue');
-const { appendMemoryEvent, materializeMemoryViews } = require('./memory-v3');
-const { applyAffinityProposal } = require('./memory');
-const { addTaskMemory } = require('./taskMemory');
-const { addGroupMemory } = require('./groupMemory');
-const { addMemoryItemsBatch } = require('./vectorMemory');
-const { getBackgroundPressureDelayMs, getResourcePressureState, appendPerfEvent, appendResourceSnapshot } = require('./perfRuntime');
+
+function getMemoryExtractionModule() {
+  return require('../api/memoryExtraction');
+}
+
+function getDailyJournalModule() {
+  return require('./dailyJournal');
+}
+
+function getSelfImprovementModule() {
+  return require('./selfImprovementRuntime');
+}
+
+function getMemoryV3Module() {
+  return require('./memory-v3');
+}
+
+function getMemoryModule() {
+  return require('./memory');
+}
+
+function getTaskMemoryModule() {
+  return require('./taskMemory');
+}
+
+function getGroupMemoryModule() {
+  return require('./groupMemory');
+}
+
+function getVectorMemoryModule() {
+  return require('./vectorMemory');
+}
+
+function getPerfRuntimeModule() {
+  return require('./perfRuntime');
+}
 
 const materializeDebounceState = {
   timer: null,
@@ -29,6 +56,12 @@ function logStructured(event = '', payload = {}) {
 function isRateLimitError(errorText = '') {
   const value = String(errorText || '').toLowerCase();
   return /(429|rate limit|too many requests)/.test(value);
+}
+
+function isTransientPostReplyError(errorText = '') {
+  const value = String(errorText || '').toLowerCase();
+  return isRateLimitError(value)
+    || /(408|425|500|502|503|504|timeout|timed out|temporarily unavailable|econnreset|etimedout|network)/.test(value);
 }
 
 function normalizeTurnItems(turns = []) {
@@ -135,6 +168,13 @@ function buildMinimalJargonMemoryItems(groupId = '', jargonMemory = {}, meta = {
 }
 
 async function runEnrichPhase(job = {}, meta = {}) {
+  const { extractPostReplyEnrichment } = getMemoryExtractionModule();
+  const { maybeSegmentJournalByThreshold } = getDailyJournalModule();
+  const { storeExtractedSelfImprovementItems } = getSelfImprovementModule();
+  const { applyAffinityProposal } = getMemoryModule();
+  const { addTaskMemory } = getTaskMemoryModule();
+  const { addGroupMemory } = getGroupMemoryModule();
+  const { addMemoryItemsBatch } = getVectorMemoryModule();
   const turns = buildTurnsConversation(job.turns);
   const latest = turns[turns.length - 1] || { question: normalizeText(job.question), finalReply: normalizeText(job.finalReply) };
   const enrichment = await extractPostReplyEnrichment(job.userId, turns, {
@@ -245,6 +285,52 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function normalizeCompletedTasks(value = {}) {
+  const source = normalizeObject(value, {});
+  const out = {};
+  for (const [key, completed] of Object.entries(source)) {
+    const normalizedKey = normalizeText(key);
+    if (normalizedKey) out[normalizedKey] = completed === true;
+  }
+  return out;
+}
+
+function isPartialTaskRetryEnabled() {
+  return config.POST_REPLY_PARTIAL_TASK_RETRY_ENABLED !== false;
+}
+
+function isTaskCompleted(job = {}, taskKey = '') {
+  if (!isPartialTaskRetryEnabled()) return false;
+  const key = normalizeText(taskKey);
+  if (!key) return false;
+  return normalizeCompletedTasks(job.completedTasks)[key] === true;
+}
+
+function markTaskCompleted(job = {}, deps = {}, taskKey = '') {
+  if (!isPartialTaskRetryEnabled()) return job;
+  const key = normalizeText(taskKey);
+  if (!key) return job;
+  const nextCompletedTasks = {
+    ...normalizeCompletedTasks(job.completedTasks),
+    [key]: true
+  };
+  const nextJob = {
+    ...job,
+    completedTasks: nextCompletedTasks
+  };
+  const queue = deps.queue;
+  if (queue && typeof queue.updateProcessingJob === 'function') {
+    try {
+      return queue.updateProcessingJob(nextJob, {
+        completedTasks: nextCompletedTasks
+      });
+    } catch (error) {
+      console.warn('[post-reply-worker] failed to persist task progress:', error?.message || error);
+    }
+  }
+  return nextJob;
+}
+
 function getPostReplyMaterializeDelayMs(options = {}) {
   if (options.force === true) return 0;
   const configured = Number(options.delayMs ?? config.POST_REPLY_MATERIALIZE_DEBOUNCE_MS);
@@ -252,6 +338,7 @@ function getPostReplyMaterializeDelayMs(options = {}) {
 }
 
 function schedulePostReplyMaterialize(options = {}) {
+  const { materializeMemoryViews } = getMemoryV3Module();
   if (options.force === true) {
     return Promise.resolve(materializeMemoryViews({
       ...options,
@@ -300,6 +387,7 @@ function schedulePostReplyMaterialize(options = {}) {
 }
 
 async function flushPostReplyMaterialize(options = {}) {
+  const { materializeMemoryViews } = getMemoryV3Module();
   if (materializeDebounceState.timer) {
     clearTimeout(materializeDebounceState.timer);
     materializeDebounceState.timer = null;
@@ -341,6 +429,10 @@ function buildLearningMeta(job = {}) {
 }
 
 async function processPostReplyJob(job = {}, deps = {}) {
+  let currentJob = {
+    ...job,
+    completedTasks: normalizeCompletedTasks(job.completedTasks)
+  };
   const tasks = normalizeObject(job.tasks, {});
   const meta = buildLearningMeta(job);
   const phase = normalizePhase(job.phase);
@@ -357,17 +449,22 @@ async function processPostReplyJob(job = {}, deps = {}) {
     topRouteType: normalizeText(job.topRouteType)
   };
 
-  if (phase === 'core' && tasks.memoryLearning) {
+  if (phase === 'core' && tasks.memoryLearning && !isTaskCompleted(currentJob, 'memoryLearning')) {
+    const { learnSomethingNew } = getMemoryExtractionModule();
     logStructured('post_reply_step_start', { ...traceBase, step: 'learnSomethingNew' });
     await learnSomethingNew(job.userId, job.question, job.finalReply, workerTaskOptions);
     logStructured('post_reply_step_done', { ...traceBase, step: 'learnSomethingNew' });
+    currentJob = markTaskCompleted(currentJob, deps, 'memoryLearning');
   }
-  if (phase === 'core' && tasks.selfImprovement) {
+  if (phase === 'core' && tasks.selfImprovement && !isTaskCompleted(currentJob, 'selfImprovement')) {
+    const { learnSelfImprovement } = getSelfImprovementModule();
     logStructured('post_reply_step_start', { ...traceBase, step: 'learnSelfImprovement' });
     await learnSelfImprovement(job.userId, job.question, job.finalReply, workerTaskOptions);
     logStructured('post_reply_step_done', { ...traceBase, step: 'learnSelfImprovement' });
+    currentJob = markTaskCompleted(currentJob, deps, 'selfImprovement');
   }
-  if (tasks.dailyJournal) {
+  if (tasks.dailyJournal && !isTaskCompleted(currentJob, 'dailyJournal')) {
+    const { appendDailyJournalEntry } = getDailyJournalModule();
     logStructured('post_reply_step_start', { ...traceBase, step: 'appendDailyJournalEntry' });
     await appendDailyJournalEntry(
       job.userId,
@@ -391,57 +488,69 @@ async function processPostReplyJob(job = {}, deps = {}) {
       }
     );
     logStructured('post_reply_step_done', { ...traceBase, step: 'appendDailyJournalEntry' });
+    currentJob = markTaskCompleted(currentJob, deps, 'dailyJournal');
   }
   if (phase === 'core' && config.MEMORY_V3_ENABLED) {
-    logStructured('post_reply_step_start', { ...traceBase, step: 'appendMemoryEvent' });
-    await appendMemoryEvent({
-      type: 'memory_confirmed',
-      userId: job.userId,
-      sessionKey: normalizeText(job.sessionKey),
-      groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
-      channelId: normalizeText(job.routeMeta?.channelId || job.routeMeta?.channel_id),
-      sessionId: normalizeText(job.routeMeta?.sessionId || job.routeMeta?.session_id),
-      routePolicyKey: normalizeText(job.routePolicyKey),
-      topRouteType: normalizeText(job.topRouteType),
-      scopeType: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id) ? 'group' : 'personal',
-      source: 'post_reply_worker',
-      sourceKind: 'runtime',
-      memoryKind: 'turn_summary',
-      semanticSlot: 'turn_summary',
-      text: `Q: ${normalizeText(job.question)}\nA: ${normalizeText(job.finalReply)}`,
-      payload: {
-        type: 'fact'
-      }
-    });
-    const scheduleMaterializeMemoryViews = typeof deps.scheduleMaterializeMemoryViews === 'function'
-      ? deps.scheduleMaterializeMemoryViews
-      : schedulePostReplyMaterialize;
-    const materializeResult = await scheduleMaterializeMemoryViews({
-      reason: 'post_reply_core',
-      userId: normalizeText(job.userId),
-      sessionKey: normalizeText(job.sessionKey),
-      groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id)
-    });
-    logStructured('post_reply_step_done', {
-      ...traceBase,
-      step: 'appendMemoryEvent',
-      materialize: materializeResult && typeof materializeResult === 'object'
-        ? {
-            scheduled: Boolean(materializeResult.scheduled),
-            coalesced: Boolean(materializeResult.coalesced),
-            delayMs: Number(materializeResult.delayMs || 0) || 0,
-            pendingCount: Number(materializeResult.pendingCount || 0) || 0
-          }
-        : {}
-    });
+    if (!isTaskCompleted(currentJob, 'memoryEvent')) {
+      const { appendMemoryEvent } = getMemoryV3Module();
+      logStructured('post_reply_step_start', { ...traceBase, step: 'appendMemoryEvent' });
+      await appendMemoryEvent({
+        type: 'memory_confirmed',
+        userId: job.userId,
+        sessionKey: normalizeText(job.sessionKey),
+        groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
+        channelId: normalizeText(job.routeMeta?.channelId || job.routeMeta?.channel_id),
+        sessionId: normalizeText(job.routeMeta?.sessionId || job.routeMeta?.session_id),
+        routePolicyKey: normalizeText(job.routePolicyKey),
+        topRouteType: normalizeText(job.topRouteType),
+        scopeType: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id) ? 'group' : 'personal',
+        source: 'post_reply_worker',
+        sourceKind: 'runtime',
+        memoryKind: 'turn_summary',
+        semanticSlot: 'turn_summary',
+        text: `Q: ${normalizeText(job.question)}\nA: ${normalizeText(job.finalReply)}`,
+        payload: {
+          type: 'fact'
+        }
+      });
+      logStructured('post_reply_step_done', { ...traceBase, step: 'appendMemoryEvent' });
+      currentJob = markTaskCompleted(currentJob, deps, 'memoryEvent');
+    }
+    if (!isTaskCompleted(currentJob, 'materialize')) {
+      const scheduleMaterializeMemoryViews = typeof deps.scheduleMaterializeMemoryViews === 'function'
+        ? deps.scheduleMaterializeMemoryViews
+        : schedulePostReplyMaterialize;
+      logStructured('post_reply_step_start', { ...traceBase, step: 'scheduleMaterializeMemoryViews' });
+      const materializeResult = await scheduleMaterializeMemoryViews({
+        reason: 'post_reply_core',
+        userId: normalizeText(job.userId),
+        sessionKey: normalizeText(job.sessionKey),
+        groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id)
+      });
+      logStructured('post_reply_step_done', {
+        ...traceBase,
+        step: 'scheduleMaterializeMemoryViews',
+        materialize: materializeResult && typeof materializeResult === 'object'
+          ? {
+              scheduled: Boolean(materializeResult.scheduled),
+              coalesced: Boolean(materializeResult.coalesced),
+              delayMs: Number(materializeResult.delayMs || 0) || 0,
+              pendingCount: Number(materializeResult.pendingCount || 0) || 0
+            }
+          : {}
+      });
+      currentJob = markTaskCompleted(currentJob, deps, 'materialize');
+    }
   }
-  if (phase === 'enrich') {
+  if (phase === 'enrich' && !isTaskCompleted(currentJob, 'enrich')) {
     logStructured('post_reply_step_start', { ...traceBase, step: 'runEnrichPhase' });
     await runEnrichPhase(job, meta);
     logStructured('post_reply_step_done', { ...traceBase, step: 'runEnrichPhase' });
+    currentJob = markTaskCompleted(currentJob, deps, 'enrich');
   }
   return {
-    ok: true
+    ok: true,
+    job: currentJob
   };
 }
 
@@ -636,12 +745,20 @@ function createPostReplyWorkerRuntime(options = {}) {
   }
 
   function getPressureDeferMs() {
-    return getBackgroundPressureDelayMs();
+    return getPerfRuntimeModule().getBackgroundPressureDelayMs();
   }
 
   async function runOneJob(job) {
     if (!job) return null;
     if (!job) return null;
+    let latestJob = job;
+    const progressQueue = Object.create(queue);
+    progressQueue.updateProcessingJob = (...args) => {
+      if (typeof queue.updateProcessingJob !== 'function') return args[0];
+      const updated = queue.updateProcessingJob(...args);
+      if (updated && typeof updated === 'object') latestJob = updated;
+      return updated;
+    };
     const activeUserId = normalizeText(job.userId);
     const phase = normalizePhase(job.phase);
     if (!canRunPhase(job)) {
@@ -658,9 +775,12 @@ function createPostReplyWorkerRuntime(options = {}) {
     if (activeUserId) activeUserIds.add(activeUserId);
 
     try {
-      await processJobImpl(job, options);
+      const processResult = await processJobImpl(job, {
+        ...options,
+        queue: progressQueue
+      });
       recordPhaseSuccess(job);
-      const completed = queue.markDone(job);
+      const completed = queue.markDone(processResult?.job || job);
       logStructured(phase === 'core' ? 'post_reply_core_completed' : 'post_reply_enrich_completed', {
         jobId: completed.jobId,
         dedupeKey: completed.dedupeKey,
@@ -682,12 +802,13 @@ function createPostReplyWorkerRuntime(options = {}) {
         return failed;
       }
       recordPhaseFailure(job, errorText);
-      const retryDelayMs = isRateLimitError(errorText)
+      const retryDelayMs = isTransientPostReplyError(errorText)
         ? applyRateLimitBackoff(job, errorText)
         : 0;
       const result = queue.retryOrFail({
-        ...job,
-        retryDelayMs
+        ...latestJob,
+        retryDelayMs,
+        lastTransientErrorAt: retryDelayMs > 0 ? new Date().toISOString() : latestJob.lastTransientErrorAt
       }, error?.message || error);
       console.error('[post-reply-worker] job failed', {
         jobId: job.jobId,
@@ -710,6 +831,11 @@ function createPostReplyWorkerRuntime(options = {}) {
 
     const pressureDeferMs = getPressureDeferMs();
     if (pressureDeferMs > 0) {
+      const {
+        getResourcePressureState,
+        appendPerfEvent,
+        appendResourceSnapshot
+      } = getPerfRuntimeModule();
       appendPerfEvent({
         category: 'background_pressure',
         type: 'post_reply_deferred',

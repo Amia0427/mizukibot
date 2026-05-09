@@ -1706,16 +1706,49 @@ const TOOL_SCHEMAS = [
   {
     type: 'function',
     function: {
-      name: 'publish_qzone',
-      description: 'Publish a QZone post in the current admin-controlled group context',
+      name: 'qzone_draft',
+      description: 'Generate a creative QZone draft in the current admin-controlled group context without publishing',
       parameters: {
         type: 'object',
         properties: {
-          content: { type: 'string', description: 'QZone post content for manual mode' },
-          mode: { type: 'string', enum: ['manual', 'bot_diary'], description: 'manual or bot_diary' },
-          hint: { type: 'string', description: 'Weak hint used only for bot_diary mode' }
+          content: { type: 'string', description: 'Seed text or exact draft content for manual mode' },
+          mode: { type: 'string', enum: ['manual', 'bot_diary', 'agent', 'generic_autodraft'], description: 'Draft mode' },
+          hint: { type: 'string', description: 'Creative hint for agent or bot_diary mode' }
         },
         required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'publish_qzone',
+      description: 'Compatibility alias: generate a QZone draft only; it does not publish immediately',
+      parameters: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: 'Seed text or exact draft content for manual mode' },
+          mode: { type: 'string', enum: ['manual', 'bot_diary', 'agent', 'generic_autodraft'], description: 'Draft mode' },
+          hint: { type: 'string', description: 'Creative hint for agent or bot_diary mode' }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_qzone_auto_task',
+      description: 'Create a scheduled QZone agent task for the current group; the task may publish automatically when due',
+      parameters: {
+        type: 'object',
+        properties: {
+          when: { type: 'string', description: 'Time expression or 5-field cron' },
+          content: { type: 'string', description: 'Optional seed text for the agent' },
+          mode: { type: 'string', enum: ['agent', 'bot_diary', 'generic_autodraft', 'manual'], description: 'Scheduled QZone mode' },
+          hint: { type: 'string', description: 'Creative hint for the scheduled QZone agent task' }
+        },
+        required: ['when']
       }
     }
   },
@@ -1744,9 +1777,9 @@ const TOOL_SCHEMAS = [
         properties: {
           action: { type: 'string', description: 'group_message or qzone_post' },
           when: { type: 'string', description: 'Time expression or 5-field cron' },
-          content: { type: 'string', description: 'Message content or manual QZone content' },
-          mode: { type: 'string', enum: ['manual', 'bot_diary'], description: 'Only valid when action is qzone_post' },
-          hint: { type: 'string', description: 'Weak hint used only for qzone_post bot_diary mode' }
+          content: { type: 'string', description: 'Message content, manual QZone content, or optional QZone seed' },
+          mode: { type: 'string', enum: ['manual', 'bot_diary', 'agent', 'generic_autodraft'], description: 'Only valid when action is qzone_post' },
+          hint: { type: 'string', description: 'Creative hint used only for qzone_post agent/bot_diary modes' }
         },
         required: ['action', 'when']
       }

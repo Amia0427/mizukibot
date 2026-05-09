@@ -79,17 +79,6 @@ const {
 } = require('./messageAdminCommands');
 const { createMessageBackgroundTaskCoordinator } = require('./messageBackgroundTasks');
 const { createMessageDispatchCoordinator } = require('./messageDispatchCoordinator');
-const {
-  buildFullSubagentAllWorkersFailedReply,
-  buildFullSubagentCoordinatorPayload,
-  buildFullSubagentFallbackReply,
-  buildFullSubagentReviewPayload,
-  buildFullSubagentWorkerPrompt,
-  chooseBestFullSubagentWorkerOutput,
-  createMessageFullSubagentCoordinator,
-  normalizeFullSubagentPlan,
-  summarizeFullWorkerError
-} = require('./messageFullSubagent');
 const { createMessageTaskControlCoordinator } = require('./messageTaskControl');
 const {
   appendInboundTimingLog,
@@ -107,7 +96,6 @@ const {
   resolveVisualInputFromContinuousMeta,
   resolveVisualInputFromContinuousMetaCore
 } = require('./messageVisualContext');
-const { runVisionCaptionWorker } = require('./visionCaptionWorker');
 const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
 const { triggerRemoteRestart } = require('../utils/remoteRestart');
 const {
@@ -123,12 +111,6 @@ const {
   createProactiveGreetingFlow,
   shouldSendScheduledGreeting: proactiveShouldSendScheduledGreeting
 } = require('./proactiveGreetingFlow');
-const {
-  consumePendingUploadFromMessage,
-  handleAdminCommand,
-  maybeSendMemeFollowup
-} = require('./memeManager');
-const { getDailyShareEngine } = require('./dailyShareEngine');
 const { planDirectChat } = require('./directChatPlanner');
 const {
   cancelScheduledTask,
@@ -142,18 +124,98 @@ const {
   sendPrivatePoke,
   setMessageEmojiLike
 } = require('../api/qqActionService');
-const createAgentExecutor = require('../api/createAgentExecutor');
 const {
   armCotOnce,
   consumeCotOnce,
   getCotOnceTtlMs
 } = require('../utils/cotOnceRuntime');
-const {
-  detectQzonePostDraftMode,
-  generateBotDiaryDraft,
-  generateGenericQzoneDraft,
-  normalizeGeneratedQzoneContent
-} = require('../api/qzoneDiaryService');
+function getVisionCaptionWorkerModule() {
+  return require('./visionCaptionWorker');
+}
+
+function getMessageFullSubagentModule() {
+  return require('./messageFullSubagent');
+}
+
+function getMemeManagerModule() {
+  return require('./memeManager');
+}
+
+function getDailyShareEngineModule() {
+  return require('./dailyShareEngine');
+}
+
+function getCreateAgentExecutorModule() {
+  return require('../api/createAgentExecutor');
+}
+
+function getQzoneDiaryServiceModule() {
+  return require('../api/qzoneDiaryService');
+}
+
+function detectQzonePostDraftMode(...args) {
+  return getQzoneDiaryServiceModule().detectQzonePostDraftMode(...args);
+}
+
+function generateBotDiaryDraft(...args) {
+  return getQzoneDiaryServiceModule().generateBotDiaryDraft(...args);
+}
+
+function generateGenericQzoneDraft(...args) {
+  return getQzoneDiaryServiceModule().generateGenericQzoneDraft(...args);
+}
+
+function normalizeGeneratedQzoneContent(...args) {
+  return getQzoneDiaryServiceModule().normalizeGeneratedQzoneContent(...args);
+}
+
+function buildFullSubagentAllWorkersFailedReply(...args) {
+  return getMessageFullSubagentModule().buildFullSubagentAllWorkersFailedReply(...args);
+}
+
+function buildFullSubagentCoordinatorPayload(...args) {
+  return getMessageFullSubagentModule().buildFullSubagentCoordinatorPayload(...args);
+}
+
+function buildFullSubagentFallbackReply(...args) {
+  return getMessageFullSubagentModule().buildFullSubagentFallbackReply(...args);
+}
+
+function buildFullSubagentReviewPayload(...args) {
+  return getMessageFullSubagentModule().buildFullSubagentReviewPayload(...args);
+}
+
+function buildFullSubagentWorkerPrompt(...args) {
+  return getMessageFullSubagentModule().buildFullSubagentWorkerPrompt(...args);
+}
+
+function chooseBestFullSubagentWorkerOutput(...args) {
+  return getMessageFullSubagentModule().chooseBestFullSubagentWorkerOutput(...args);
+}
+
+function createMessageFullSubagentCoordinator(...args) {
+  return getMessageFullSubagentModule().createMessageFullSubagentCoordinator(...args);
+}
+
+function normalizeFullSubagentPlan(...args) {
+  return getMessageFullSubagentModule().normalizeFullSubagentPlan(...args);
+}
+
+function summarizeFullWorkerError(...args) {
+  return getMessageFullSubagentModule().summarizeFullWorkerError(...args);
+}
+
+function consumePendingUploadFromMessage(...args) {
+  return getMemeManagerModule().consumePendingUploadFromMessage(...args);
+}
+
+function handleAdminCommand(...args) {
+  return getMemeManagerModule().handleAdminCommand(...args);
+}
+
+function maybeSendMemeFollowup(...args) {
+  return getMemeManagerModule().maybeSendMemeFollowup(...args);
+}
 const {
   resolveShortTermSessionKey,
   getShortTermPresence,
@@ -954,8 +1016,8 @@ function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}) {
 
   if (qqActionKey === 'qq_publish_qzone') {
     return adminUser
-      ? 'QQ 空间发布工具暂时不可用。你可以稍后重试，或直接使用 /qzone_post。'
-      : 'QQ 空间发布当前仅管理员可用。';
+      ? 'QQ 空间草稿工具暂时不可用。你可以稍后重试，或直接使用 /qzone_post。'
+      : 'QQ 空间草稿当前仅管理员可用。';
   }
 
   if (qqActionKey === 'qq_schedule_qzone') {
@@ -1108,7 +1170,7 @@ function createMessageHandler({
     sentenceWindowMs: config.CONTINUOUS_MESSAGE_SENTENCE_WINDOW_MS,
     sentenceMinChars: config.CONTINUOUS_MESSAGE_SENTENCE_MIN_CHARS
   });
-  const dailyShareEngine = getDailyShareEngine();
+  const getDailyShareEngine = () => getDailyShareEngineModule().getDailyShareEngine();
   const lifeSchedulerEngine = getSafeLifeSchedulerEngine();
   const backgroundTaskRuntime = getBackgroundTaskRuntime();
   const hapiControlRuntime = getHapiControlRuntime();
@@ -1194,7 +1256,7 @@ function createMessageHandler({
   };
   const visionCaptionWorkerRunner = typeof runVisionCaptionWorkerOverride === 'function'
     ? runVisionCaptionWorkerOverride
-    : runVisionCaptionWorker;
+    : (...args) => getVisionCaptionWorkerModule().runVisionCaptionWorker(...args);
   const sessionSummaryGenerator = typeof generateSessionContextSummaryOverride === 'function'
     ? generateSessionContextSummaryOverride
     : generateSessionContextSummary;
@@ -2154,6 +2216,7 @@ function createMessageHandler({
         return;
       }
 
+      const createAgentExecutor = getCreateAgentExecutorModule();
       if (!createAgentExecutor.isCreateAgentUserAllowed(senderId)) {
         try {
           await sendGroupPoke(groupId, senderId, {
@@ -2477,7 +2540,7 @@ function createMessageHandler({
         logMemoryWriteSkip('special_command_private_blocked', { command: 'life' });
         return;
       }
-      const dailyShareResult = await dailyShareEngine.handleAdminCommand({
+      const dailyShareResult = await getDailyShareEngine().handleAdminCommand({
         rawText: slashCommandText,
         groupId,
         userId: senderId,

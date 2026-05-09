@@ -367,8 +367,8 @@ const POLICY_DEFINITIONS = {
   },
   'act/qq-publish-qzone': {
     capability: 'tool',
-    description: '在当前群上下文内发布 QQ 空间说说，仅管理员可用',
-    toolHints: ['publish_qzone'],
+    description: '在当前群上下文内生成 QQ 空间草稿，仅管理员可用，不立即发布',
+    toolHints: ['qzone_draft'],
     executionPlan: []
   },
   'act/qq-schedule-message': {
@@ -380,7 +380,7 @@ const POLICY_DEFINITIONS = {
   'act/qq-schedule-qzone': {
     capability: 'tool',
     description: '在当前群创建定时 QQ 空间任务，仅管理员可用',
-    toolHints: ['create_scheduled_command'],
+    toolHints: ['create_qzone_auto_task', 'create_scheduled_command'],
     executionPlan: []
   },
   'act/qq-list-scheduled': {
