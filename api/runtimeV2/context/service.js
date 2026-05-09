@@ -845,6 +845,14 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       taskType: routeMeta.taskType || routeMeta.task_type || '',
       agentName: routeMeta.agentName || routeMeta.agent_name || '',
       toolName: routeMeta.toolName || routeMeta.tool_name || '',
+      journalToday: options.journalToday,
+      journalNow: options.journalNow,
+      dailyJournalTimestamp: options.dailyJournalTimestamp,
+      dailyJournalYearMonth: options.dailyJournalYearMonth,
+      dailyJournalMaxFourDayFiles: options.dailyJournalMaxFourDayFiles,
+      dailyJournalMaxMonthlyFiles: options.dailyJournalMaxMonthlyFiles,
+      dailyLookbackDays: options.dailyLookbackDays,
+      lookbackDays: options.lookbackDays,
       sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
     });
   const personaMemoryState = options.personaMemoryState && typeof options.personaMemoryState === 'object'
@@ -1125,6 +1133,14 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       taskType: routeMeta.taskType || routeMeta.task_type || '',
       agentName: routeMeta.agentName || routeMeta.agent_name || '',
       toolName: routeMeta.toolName || routeMeta.tool_name || '',
+      journalToday: options.journalToday,
+      journalNow: options.journalNow,
+      dailyJournalTimestamp: options.dailyJournalTimestamp,
+      dailyJournalYearMonth: options.dailyJournalYearMonth,
+      dailyJournalMaxFourDayFiles: options.dailyJournalMaxFourDayFiles,
+      dailyJournalMaxMonthlyFiles: options.dailyJournalMaxMonthlyFiles,
+      dailyLookbackDays: options.dailyLookbackDays,
+      lookbackDays: options.lookbackDays,
       sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
     });
   const forceMemoryContext = shouldForceMemoryContextForQuestion(question, {

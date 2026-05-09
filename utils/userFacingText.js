@@ -12,8 +12,12 @@ function stripTrailingThinkFragment(text = '', options = {}) {
   const thinkMarkers = [
     '<think>',
     '<think ',
+    '<thinking>',
+    '<thinking ',
     '</think>',
-    '</think '
+    '</think ',
+    '</thinking>',
+    '</thinking '
   ];
 
   if (thinkMarkers.some((marker) => marker.startsWith(fragment))) {
@@ -81,11 +85,11 @@ function sanitizeUserFacingText(text = '', options = {}) {
 
   while (next !== previous) {
     previous = next;
-    next = next.replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, '');
+    next = next.replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?\s*>/gi, '');
   }
 
-  next = next.replace(/<think\b[^>]*>[\s\S]*$/i, '');
-  next = next.replace(/<\/think\s*>/gi, '');
+  next = next.replace(/<think(?:ing)?\b[^>]*>[\s\S]*$/i, '');
+  next = next.replace(/<\/think(?:ing)?\s*>/gi, '');
   next = stripTrailingThinkFragment(next, options);
   next = stripNarrativeLeadIn(next);
   return next;

@@ -42,6 +42,13 @@ module.exports = (async () => {
       MEMORY_RERANK_MODEL: 'rerank-model',
       MEMORY_RERANK_API_BASE_URL: 'https://rerank.example/v1',
       MEMORY_RERANK_API_KEY: 'rerank-key',
+      PASSIVE_AWARENESS_DECISION_ENABLED: '1',
+      PASSIVE_AWARENESS_API_BASE_URL: 'https://passive-decision.example/v1',
+      PASSIVE_AWARENESS_API_KEY: 'passive-decision-key',
+      PASSIVE_AWARENESS_MODEL: 'passive-decision-model',
+      PASSIVE_AWARENESS_REPLY_API_BASE_URL: 'https://passive-reply.example/v1',
+      PASSIVE_AWARENESS_REPLY_API_KEY: 'passive-reply-key',
+      PASSIVE_AWARENESS_REPLY_MODEL: 'passive-reply-model',
       MODEL_SELF_CHECK_TIMEOUT_MS: '1200'
     });
 
@@ -69,7 +76,16 @@ module.exports = (async () => {
     } = require('../utils/modelSelfCheck');
 
     const specs = buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
-    assert.deepStrictEqual(specs.map((item) => item.type), ['plan', 'embedding', 'rerank', 'memory', 'main_reply', 'admin_reply']);
+    assert.deepStrictEqual(specs.map((item) => item.type), [
+      'plan',
+      'embedding',
+      'rerank',
+      'memory',
+      'main_reply',
+      'admin_reply',
+      'passive_awareness_decision',
+      'passive_awareness_reply'
+    ]);
     assert.strictEqual(specs[0].url, 'https://plan.example/v1/chat/completions');
     assert.strictEqual(specs[0].body.max_tokens, 8);
     assert.strictEqual(specs[0].body.stream, false);
@@ -78,9 +94,17 @@ module.exports = (async () => {
     assert.strictEqual(specs[2].body.top_n, 1);
     assert.strictEqual(specs[4].model, 'main-model');
     assert.strictEqual(specs[5].model, 'admin-model');
+    assert.strictEqual(specs[6].url, 'https://passive-decision.example/v1/chat/completions');
+    assert.strictEqual(specs[6].model, 'passive-decision-model');
+    assert.strictEqual(specs[6].body.max_tokens, 8);
+    assert.strictEqual(specs[6].body.stream, false);
+    assert.strictEqual(specs[7].url, 'https://passive-reply.example/v1/chat/completions');
+    assert.strictEqual(specs[7].model, 'passive-reply-model');
+    assert.strictEqual(specs[7].body.max_tokens, 8);
+    assert.strictEqual(specs[7].body.stream, false);
 
     const results = await runModelSelfCheck({ adminUserId: 'admin_1', normalUserId: 'user_1' });
-    assert.strictEqual(calls.length, 6);
+    assert.strictEqual(calls.length, 8);
     assert.ok(calls.every((call) => call.retries === 0));
     assert.ok(calls.every((call) => Number(call.body.__timeoutMs) >= 1000));
     assert.strictEqual(results.find((item) => item.type === 'rerank').status, 'timeout');
@@ -91,13 +115,20 @@ module.exports = (async () => {
     const report = formatModelSelfCheckReport(results);
     assert.ok(report.includes('模型自检:'));
     assert.ok(report.includes('rerank | rerank-model |'));
+    assert.ok(report.includes('passive_awareness_decision | passive-decision-model |'));
+    assert.ok(report.includes('passive_awareness_reply | passive-reply-model |'));
     assert.ok(report.includes('timeout=true'));
     assert.ok(!report.includes('provider internal detail'));
     assert.ok(!report.includes('https://'));
     assert.ok(!report.includes('main-key'));
+    assert.ok(!report.includes('passive-decision-key'));
 
     process.env.MEMORY_EMBEDDING_ENABLED = '0';
     process.env.MEMORY_RERANK_ENABLED = '0';
+    process.env.PASSIVE_AWARENESS_DECISION_ENABLED = '0';
+    process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = ' ';
+    process.env.PASSIVE_AWARENESS_REPLY_API_KEY = ' ';
+    process.env.PASSIVE_AWARENESS_REPLY_MODEL = ' ';
     clearProjectCache();
     const disabledHttpClient = require('../api/httpClient');
     disabledHttpClient.postWithRetry = async (url, body, retries, apiKey) => {
@@ -108,6 +139,9 @@ module.exports = (async () => {
     const disabledSpecs = disabledSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
     assert.strictEqual(disabledSpecs.find((item) => item.type === 'embedding').url, '');
     assert.strictEqual(disabledSpecs.find((item) => item.type === 'rerank').url, '');
+    assert.strictEqual(disabledSpecs.find((item) => item.type === 'passive_awareness_decision').url, '');
+    assert.strictEqual(disabledSpecs.find((item) => item.type === 'passive_awareness_reply').url, 'https://passive-decision.example/v1/chat/completions');
+    assert.strictEqual(disabledSpecs.find((item) => item.type === 'passive_awareness_reply').model, 'passive-decision-model');
 
     console.log('modelSelfCheck.test.js passed');
   } finally {

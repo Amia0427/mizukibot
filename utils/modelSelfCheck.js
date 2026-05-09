@@ -27,7 +27,9 @@ const CHECK_TYPES = Object.freeze([
   'rerank',
   'memory',
   'main_reply',
-  'admin_reply'
+  'admin_reply',
+  'passive_awareness_decision',
+  'passive_awareness_reply'
 ]);
 
 function normalizeText(value = '') {
@@ -36,7 +38,7 @@ function normalizeText(value = '') {
 
 function clampTimeoutMs(value = config.MODEL_SELF_CHECK_TIMEOUT_MS) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return 8000;
+  if (!Number.isFinite(n)) return 12000;
   return Math.max(1000, Math.floor(n));
 }
 
@@ -100,6 +102,47 @@ function getMemoryApiKey() {
 
 function getMemoryModel() {
   return normalizeText(config.MEMORY_MODEL || config.AI_MODEL || 'gpt-5.4') || 'gpt-5.4';
+}
+
+function getPassiveAwarenessDecisionModel() {
+  return normalizeText(config.PASSIVE_AWARENESS_MODEL);
+}
+
+function getPassiveAwarenessDecisionApiBaseUrl() {
+  return normalizeText(config.PASSIVE_AWARENESS_API_BASE_URL);
+}
+
+function getPassiveAwarenessDecisionApiKey() {
+  return normalizeText(config.PASSIVE_AWARENESS_API_KEY);
+}
+
+function isPassiveAwarenessDecisionConfigured() {
+  return Boolean(
+    config.PASSIVE_AWARENESS_DECISION_ENABLED !== false
+    && getPassiveAwarenessDecisionModel()
+    && getPassiveAwarenessDecisionApiBaseUrl()
+    && getPassiveAwarenessDecisionApiKey()
+  );
+}
+
+function getPassiveAwarenessReplyModel() {
+  return normalizeText(config.PASSIVE_AWARENESS_REPLY_MODEL || config.PASSIVE_AWARENESS_MODEL);
+}
+
+function getPassiveAwarenessReplyApiBaseUrl() {
+  return normalizeText(config.PASSIVE_AWARENESS_REPLY_API_BASE_URL || config.PASSIVE_AWARENESS_API_BASE_URL);
+}
+
+function getPassiveAwarenessReplyApiKey() {
+  return normalizeText(config.PASSIVE_AWARENESS_REPLY_API_KEY || config.PASSIVE_AWARENESS_API_KEY);
+}
+
+function isPassiveAwarenessReplyConfigured() {
+  return Boolean(
+    getPassiveAwarenessReplyModel()
+    && getPassiveAwarenessReplyApiBaseUrl()
+    && getPassiveAwarenessReplyApiKey()
+  );
 }
 
 function createSkippedResult(type, model = '') {
@@ -228,6 +271,8 @@ function buildSelfCheckSpecs(options = {}) {
   const memoryModel = getMemoryModel();
   const embeddingModel = getEmbeddingModel();
   const rerankModel = getRerankModel();
+  const passiveDecisionModel = getPassiveAwarenessDecisionModel();
+  const passiveReplyModel = getPassiveAwarenessReplyModel();
 
   return [
     {
@@ -293,7 +338,37 @@ function buildSelfCheckSpecs(options = {}) {
       body: buildChatBody(memoryModel, 'memory', timeoutMs)
     },
     buildMainReplySpec(normalUserId, 'main_reply', timeoutMs),
-    buildMainReplySpec(adminUserId, 'admin_reply', timeoutMs)
+    buildMainReplySpec(adminUserId, 'admin_reply', timeoutMs),
+    isPassiveAwarenessDecisionConfigured()
+      ? {
+          type: 'passive_awareness_decision',
+          model: passiveDecisionModel,
+          url: ensureChatCompletionsUrl(getPassiveAwarenessDecisionApiBaseUrl()),
+          apiKey: getPassiveAwarenessDecisionApiKey(),
+          body: buildChatBody(passiveDecisionModel, 'passive_awareness_decision', timeoutMs)
+        }
+      : {
+          type: 'passive_awareness_decision',
+          model: passiveDecisionModel,
+          url: '',
+          apiKey: '',
+          body: null
+        },
+    isPassiveAwarenessReplyConfigured()
+      ? {
+          type: 'passive_awareness_reply',
+          model: passiveReplyModel,
+          url: ensureChatCompletionsUrl(getPassiveAwarenessReplyApiBaseUrl()),
+          apiKey: getPassiveAwarenessReplyApiKey(),
+          body: buildChatBody(passiveReplyModel, 'passive_awareness_reply', timeoutMs)
+        }
+      : {
+          type: 'passive_awareness_reply',
+          model: passiveReplyModel,
+          url: '',
+          apiKey: '',
+          body: null
+        }
   ];
 }
 

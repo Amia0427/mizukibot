@@ -249,6 +249,12 @@ function clearProjectModuleCache() {
   }
 }
 
+function applyDefaultTestEnv() {
+  if (process.env.RESOURCE_PRESSURE_ENABLED === undefined) {
+    process.env.RESOURCE_PRESSURE_ENABLED = 'false';
+  }
+}
+
 async function runAllTests() {
   let failed = 0;
   const discoveredTestFiles = listTestFiles(path.join(__dirname, '..', 'tests'));
@@ -259,6 +265,7 @@ async function runAllTests() {
     const envSnapshot = { ...process.env };
     clearProjectModuleCache();
     try {
+      applyDefaultTestEnv();
       const out = require(file);
       // Allow async test modules to export a Promise for hermetic integration tests.
       if (out && typeof out.then === 'function') await out;

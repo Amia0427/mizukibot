@@ -4,11 +4,23 @@ const { sanitizeUserFacingText } = require('../utils/userFacingText');
 
 module.exports = (() => {
   const raw = '前缀<think>secret reasoning</think>后缀';
+  const rawThinking = '前缀<thinking>secret reasoning</thinking>后缀';
   assert.strictEqual(sanitizeUserFacingText(raw), '前缀后缀');
+  assert.strictEqual(sanitizeUserFacingText(rawThinking), '前缀后缀');
   assert.strictEqual(
     sanitizeUserFacingText(raw, { preserveThink: true }),
     raw,
     'preserveThink should keep think blocks intact'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText(rawThinking, { preserveThink: true }),
+    rawThinking,
+    'preserveThink should keep thinking blocks intact'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('前缀<thinking>secret reasoning'),
+    '前缀',
+    'unterminated thinking blocks should be stripped'
   );
   assert.strictEqual(
     sanitizeUserFacingText('我能不能不回答这个...\n\n笑着转开，话题一跳：诶你怎么突然问这个呀，是在群里看到什么梗吗？'),
