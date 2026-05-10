@@ -1625,7 +1625,7 @@ function createRuntime(options = {}) {
         const timer = setTimeout(() => {
           if (settled) return;
           settled = true;
-          resolve(fallbackValue);
+          resolve(typeof fallbackValue === 'function' ? fallbackValue() : fallbackValue);
         }, budget);
         Promise.resolve()
           .then(() => taskFactory())
@@ -1639,7 +1639,7 @@ function createRuntime(options = {}) {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
-            resolve(fallbackValue);
+            resolve(typeof fallbackValue === 'function' ? fallbackValue() : fallbackValue);
           });
       });
     },

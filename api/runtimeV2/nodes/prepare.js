@@ -1,3 +1,6 @@
+const { buildPromptSnapshot } = require('../../../utils/promptCompiler');
+const { buildMainStableSystemBlocks } = require('../../../utils/stagePromptContracts');
+
 function createPrepareNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
     ? deps.normalizeObject
@@ -105,6 +108,181 @@ function createPrepareNode(deps = {}) {
   const chatHistory = deps.chatHistory;
   const shortTermMemory = deps.shortTermMemory;
   const runtimeOptions = normalizeObject(deps.runtimeOptions, {});
+
+  function clonePromptBlock(block = {}) {
+    if (!block || typeof block !== 'object') return null;
+    return {
+      ...block,
+      content: String(block.content || '').trim(),
+      conflictTags: normalizeArray(block.conflictTags),
+      meta: block.meta && typeof block.meta === 'object' ? { ...block.meta } : {}
+    };
+  }
+
+  function normalizePromptBlocks(blocks = []) {
+    return normalizeArray(blocks)
+      .map(clonePromptBlock)
+      .filter((block) => block && String(block.content || '').trim());
+  }
+
+  function blockId(block = {}) {
+    return String(block?.id || '').trim();
+  }
+
+  function isMainPromptGuardEnabled(request = {}) {
+    return !String(request.customPrompt || '').trim();
+  }
+
+  function buildDefaultStableSystemBlocks() {
+    return normalizePromptBlocks(buildMainStableSystemBlocks({
+      systemPrompt: config.SYSTEM_PROMPT
+    }));
+  }
+
+  function ensureMainStableSystemBlocks(blocks = [], request = {}) {
+    const stableBlocks = normalizePromptBlocks(blocks);
+    if (!isMainPromptGuardEnabled(request)) return stableBlocks;
+
+    const defaults = buildDefaultStableSystemBlocks();
+    const existingIds = new Set(stableBlocks.map(blockId).filter(Boolean));
+    const missingDefaults = defaults.filter((block) => {
+      const id = blockId(block);
+      return id && !existingIds.has(id);
+    });
+    return stableBlocks.concat(missingDefaults);
+  }
+
+  function blocksToMessages(blocks = []) {
+    return normalizePromptBlocks(blocks).map((block) => ({
+      role: 'system',
+      content: String(block.content || '').trim()
+    }));
+  }
+
+  function serializePromptBlocks(blocks = []) {
+    return normalizePromptBlocks(blocks)
+      .map((block) => {
+        const label = String(block.label || block.id || 'Prompt Block').trim();
+        return `# ${label}\n${String(block.content || '').trim()}`;
+      })
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  function buildGuardedPromptArtifacts(rawResult = {}, request = {}, options = {}) {
+    const rawValue = typeof rawResult === 'function' ? rawResult() : rawResult;
+    const raw = normalizeObject(rawValue, {});
+    const rawStableBlocks = normalizePromptBlocks(raw.stableSystemBlocks);
+    const stableSystemBlocks = ensureMainStableSystemBlocks(rawStableBlocks, request);
+    const dynamicContextBlocks = normalizePromptBlocks(raw.dynamicContextBlocks);
+    const assistantOnlyContextBlocks = normalizePromptBlocks(raw.assistantOnlyContextBlocks);
+    const allBlocks = stableSystemBlocks.concat(dynamicContextBlocks, assistantOnlyContextBlocks);
+    const freshness = normalizeObject(raw.freshness, {});
+    const cacheMeta = normalizeObject(raw.cacheMeta, {});
+    const stableGuardApplied = stableSystemBlocks.length > rawStableBlocks.length;
+
+    const existingSnapshot = raw.promptSnapshot && typeof raw.promptSnapshot === 'object'
+      ? raw.promptSnapshot
+      : null;
+    const shouldRebuildSnapshot = stableGuardApplied
+      || !existingSnapshot
+      || normalizeArray(existingSnapshot.assembledBlocks).length === 0;
+    const compiledSnapshot = shouldRebuildSnapshot
+      ? buildPromptSnapshot(allBlocks, {
+        stage: 'main',
+        policyKey: String(request.routePolicyKey || '').trim() || 'direct_chat/main'
+      })
+      : null;
+    const promptSnapshot = {
+      ...(existingSnapshot || {}),
+      ...(compiledSnapshot || {}),
+      stableBlockIds: stableSystemBlocks.map(blockId).filter(Boolean),
+      dynamicBlockIds: dynamicContextBlocks.map(blockId).filter(Boolean),
+      assistantOnlyBlockIds: assistantOnlyContextBlocks.map(blockId).filter(Boolean),
+      cacheLanes: {
+        stable: stableSystemBlocks.map(blockId).filter(Boolean),
+        dynamic: dynamicContextBlocks.map(blockId).filter(Boolean),
+        assistantOnly: assistantOnlyContextBlocks.map(blockId).filter(Boolean)
+      }
+    };
+    if (Object.keys(freshness).length > 0) promptSnapshot.freshness = freshness;
+    if (Object.keys(cacheMeta).length > 0) promptSnapshot.cacheMeta = cacheMeta;
+    if (stableGuardApplied) {
+      promptSnapshot.runtimeAddedBlocks = normalizeArray(promptSnapshot.runtimeAddedBlocks).concat({
+        id: 'stable_system_prompt_guard',
+        blockId: 'stable_system_prompt_guard',
+        reason: 'main reply stable system blocks were missing during prepare'
+      });
+    }
+
+    const existingSegments = raw.promptSegments && typeof raw.promptSegments === 'object'
+      ? raw.promptSegments
+      : {};
+    const promptSegments = {
+      ...existingSegments,
+      systemPrompt: blocksToMessages(stableSystemBlocks.concat(dynamicContextBlocks)),
+      assembledBlocks: normalizeArray(promptSnapshot.assembledBlocks).length > 0
+        ? promptSnapshot.assembledBlocks
+        : allBlocks,
+      renderedSystemMessages: normalizeArray(promptSnapshot.renderedSystemMessages).length > 0
+        ? promptSnapshot.renderedSystemMessages
+        : blocksToMessages(allBlocks),
+      tokenUsageByBlock: normalizeArray(promptSnapshot.tokenUsageByBlock),
+      trimDecisions: normalizeArray(promptSnapshot.trimDecisions),
+      stableSystemBlocks,
+      dynamicContextBlocks,
+      assistantOnlyContextBlocks
+    };
+    if (Object.keys(freshness).length > 0) promptSegments.freshness = freshness;
+    if (Object.keys(cacheMeta).length > 0) promptSegments.cacheMeta = cacheMeta;
+
+    const dynamicPrompt = String(raw.dynamicPrompt || '').trim()
+      || serializePromptBlocks(allBlocks);
+
+    return {
+      ...raw,
+      dynamicPrompt,
+      stableSystemBlocks,
+      dynamicContextBlocks,
+      assistantOnlyContextBlocks,
+      promptSnapshot,
+      promptSegments,
+      stablePromptGuardApplied: Boolean(options.forceGuardApplied || raw.stablePromptGuardApplied || stableGuardApplied)
+    };
+  }
+
+  function buildPromptSoftTimeoutFallback(state = {}, request = {}) {
+    return buildGuardedPromptArtifacts({
+      dynamicPrompt: String(state.memory?.dynamicPrompt || ''),
+      stableSystemBlocks: normalizeArray(state.memory?.stableSystemBlocks),
+      dynamicContextBlocks: normalizeArray(state.memory?.dynamicContextBlocks),
+      assistantOnlyContextBlocks: normalizeArray(state.memory?.assistantOnlyContextBlocks),
+      affinity: state.memory?.affinity || null,
+      memoryContext: state.memory?.context || null,
+      personaMemoryState: state.memory?.personaMemoryState || null,
+      promptSnapshot: state.memory?.promptSnapshot || null,
+      promptSegments: state.memory?.promptSegments || null,
+      freshness: {
+        stableSystem: 'fallback',
+        sessionContext: 'partial',
+        continuity: 'skipped'
+      },
+      cacheMeta: {
+        stableKey: '',
+        sessionKey: '',
+        hit: false
+      },
+      criticalBlocks: [],
+      optionalBlocks: [],
+      latencyMeta: {
+        essentialDurationMs: 0,
+        optionalDurationMs: 0,
+        optionalBuildEnabled: false,
+        optionalBudgetMs: 0,
+        optionalBudgetExceeded: false
+      }
+    }, request, { forceGuardApplied: true });
+  }
 
   return async function prepareNode(state) {
     const startedAt = nowTs();
@@ -255,18 +433,7 @@ function createPrepareNode(deps = {}) {
       topRouteType: request.topRouteType
     });
 
-    const {
-      dynamicPrompt,
-      stableSystemBlocks,
-      dynamicContextBlocks,
-      assistantOnlyContextBlocks,
-      affinity,
-      memoryContext,
-      personaMemoryState,
-      promptSnapshot,
-      promptSegments,
-      latencyMeta
-    } = await withSoftTimeout(
+    const promptBuildResult = await withSoftTimeout(
       () => buildDynamicPromptImpl(
         request.userInfo,
         request.userId,
@@ -290,37 +457,22 @@ function createPrepareNode(deps = {}) {
         }
       ),
       latencyDecision.prepareSoftBudgetMs,
-      {
-        dynamicPrompt: String(state.memory?.dynamicPrompt || ''),
-        stableSystemBlocks: normalizeArray(state.memory?.stableSystemBlocks),
-        dynamicContextBlocks: normalizeArray(state.memory?.dynamicContextBlocks),
-        assistantOnlyContextBlocks: normalizeArray(state.memory?.assistantOnlyContextBlocks),
-        affinity: state.memory?.affinity || null,
-        memoryContext: state.memory?.context || null,
-        personaMemoryState: state.memory?.personaMemoryState || null,
-        promptSnapshot: state.memory?.promptSnapshot || null,
-        promptSegments: state.memory?.promptSegments || null,
-        freshness: {
-          stableSystem: 'cache',
-          sessionContext: 'partial',
-          continuity: 'skipped'
-        },
-        cacheMeta: {
-          stableKey: '',
-          sessionKey: '',
-          hit: false
-        },
-        criticalBlocks: [],
-        optionalBlocks: [],
-        latencyMeta: {
-          essentialDurationMs: 0,
-          optionalDurationMs: 0,
-          optionalBuildEnabled: false,
-          optionalBudgetMs: 0,
-          optionalBudgetExceeded: false
-        }
-      }
+      () => buildPromptSoftTimeoutFallback(state, request)
     );
+    const guardedPromptBuildResult = buildGuardedPromptArtifacts(promptBuildResult, request);
+    const {
+      dynamicPrompt,
+      stableSystemBlocks,
+      dynamicContextBlocks,
+      assistantOnlyContextBlocks,
+      affinity,
+      memoryContext,
+      personaMemoryState,
+      promptSnapshot,
+      promptSegments,
+      latencyMeta,
+      stablePromptGuardApplied
+    } = guardedPromptBuildResult;
     const preparedMainConversationContext = buildPreparedMainConversationContext({
       ...state,
       request: {
@@ -334,8 +486,11 @@ function createPrepareNode(deps = {}) {
         stableSystemBlocks: normalizeArray(stableSystemBlocks),
         dynamicContextBlocks: normalizeArray(dynamicContextBlocks),
         assistantOnlyContextBlocks: normalizeArray(assistantOnlyContextBlocks),
+        promptSnapshot: promptSnapshot || null,
+        promptSegments: promptSegments || null,
         affinity,
         context: memoryContext || null,
+        personaMemoryState: personaMemoryState || null,
         continuityState: {
           payload: continuityBuilt.payload,
           text: continuityBuilt.text,
@@ -488,6 +643,10 @@ function createPrepareNode(deps = {}) {
         node: 'prepare',
         memoryCliTurn: executionMemoryCliTurn
       }),
+      ...(stablePromptGuardApplied ? [createEvent('prompt_stable_guard_applied', {
+        node: 'prepare',
+        stableBlockIds: normalizeArray(stableSystemBlocks).map((block) => String(block?.id || '').trim()).filter(Boolean)
+      })] : []),
       createEvent('checkpoint', { node: 'prepare', resumeUsed, threadId }),
       createEvent('node_complete', { node: 'prepare', threadId })
     ]);

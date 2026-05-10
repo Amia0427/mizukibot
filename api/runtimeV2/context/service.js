@@ -13,7 +13,7 @@ const {
 const { buildPromptSnapshot } = require('../../../utils/promptCompiler');
 const { buildRuntimePrompt } = require('../../../utils/runtimePrompts');
 const {
-  buildMainStageBlocks,
+  buildMainStableSystemBlocks,
   buildPlannerStageSystemPrompt,
   buildReviewStageSystemPrompt
 } = require('../../../utils/stagePromptContracts');
@@ -1267,22 +1267,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   }
   const stablePromptBlocks = normalizeArray(options.cachedStableSystemBlocks).length > 0
     ? normalizeArray(options.cachedStableSystemBlocks).map((block) => ({ ...block }))
-    : buildMainStageBlocks({
+    : buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT
-    }).map((block) => ({
-      ...block,
-      lane: 'stable_system'
-    })).concat(
-      createPromptBlock('core_baseline_patch', 'Core Baseline Patch', loadPersonaModuleText('core_baseline'), {
-        stage: 'main',
-        priority: 145,
-        authority: 'persona_module',
-        kind: 'persona_core_patch',
-        budgetTokens: 120,
-        source: 'persona_modules/core_baseline.txt',
-        lane: 'stable_system'
-      })
-    ).filter(Boolean);
+    }).filter(Boolean);
   promptBlocks.push(...stablePromptBlocks);
   promptBlocks.push(
     ...personaMemoryPrompt.systemMessages
@@ -1576,12 +1563,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   let dynamicPrompt = serializePromptBlocks(snapshotBlocks);
   const promptBudget = Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens);
   if (estimateTokens(dynamicPrompt) > promptBudget) {
-    const compactPromptBlocks = buildMainStageBlocks({
+    const compactPromptBlocks = buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT
-    }).map((block) => ({
-      ...block,
-      lane: 'stable_system'
-    })).concat(
+    }).concat(
       ...personaMemoryPrompt.systemMessages.map((message, index) => createPromptBlock(
         `persona_memory_compact_${index + 1}`,
         `Persona Memory Compact ${index + 1}`,
