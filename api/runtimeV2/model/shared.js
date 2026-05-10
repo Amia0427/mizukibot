@@ -1,6 +1,11 @@
 const config = require('../../../config');
 const crypto = require('crypto');
-const { getApiProvider, isOpenAICompatibleProvider } = require('../../../utils/modelProvider');
+const {
+  ensureAnthropicMessagesUrl,
+  getApiProvider,
+  isClaudeModelName,
+  isOpenAICompatibleProvider
+} = require('../../../utils/modelProvider');
 const {
   ADMIN_SHARED_FALLBACK_SCOPE,
   resolveForcedFallbackMainModelConfig,
@@ -63,8 +68,30 @@ function ensureOpenAIMainUrl(apiBaseUrl = '', options = {}) {
     : ensureChatCompletionsUrl(apiBaseUrl);
 }
 
+function canPromoteMainClaudeUrlToAnthropic(apiBaseUrl = '') {
+  const normalized = String(apiBaseUrl || '').replace(/\/+$/, '');
+  return /\/v\d+$/i.test(normalized)
+    || /\/v\d+\/chat\/completions$/i.test(normalized)
+    || /\/v\d+\/messages$/i.test(normalized);
+}
+
 function resolveMainProvider(apiBaseUrl = '', model = '') {
-  return getApiProvider(apiBaseUrl, model || config.AI_MODEL);
+  const modelName = model || config.AI_MODEL;
+  const provider = getApiProvider(apiBaseUrl, modelName);
+  if (
+    provider === 'openai_compatible'
+    && isClaudeModelName(modelName)
+    && canPromoteMainClaudeUrlToAnthropic(apiBaseUrl)
+  ) {
+    return 'anthropic';
+  }
+  return provider;
+}
+
+function ensureMainModelUrl(apiBaseUrl = '', options = {}) {
+  return options.provider === 'anthropic'
+    ? ensureAnthropicMessagesUrl(apiBaseUrl)
+    : ensureOpenAIMainUrl(apiBaseUrl, options);
 }
 
 function getModelName(overrides = null) {
@@ -313,7 +340,7 @@ function buildMainModelRequest(resolvedConfig = null, options = {}) {
   return {
     provider,
     protocol,
-    url: ensureOpenAIMainUrl(apiBaseUrl, { apiMode: protocol }),
+    url: ensureMainModelUrl(apiBaseUrl, { apiMode: protocol, provider }),
     body: buildGenerationRequestBody(resolvedConfig, {
       ...options,
       provider,
@@ -436,6 +463,7 @@ module.exports = {
   buildGenerationRequestBody,
   buildImageModelConfig,
   ensureChatCompletionsUrl,
+  ensureMainModelUrl,
   ensureOpenAIMainUrl,
   ensureResponsesUrl,
   getApiBaseUrl,

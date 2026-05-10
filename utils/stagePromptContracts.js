@@ -1,6 +1,7 @@
 const config = require('../config');
 const { buildRuntimePrompt } = require('./runtimePrompts');
 const { buildSecuritySystemPrompt } = require('./promptSecurity');
+const { loadPersonaModuleText } = require('./personaModules');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -27,6 +28,31 @@ function buildMainStageBlocks(options = {}) {
       authority: 'persona',
       kind: 'persona',
       content: systemPrompt
+    });
+  }
+  return blocks;
+}
+
+function buildMainStableSystemBlocks(options = {}) {
+  const blocks = buildMainStageBlocks(options).map((block) => ({
+    ...block,
+    lane: 'stable_system'
+  }));
+  const coreBaseline = normalizeText(loadPersonaModuleText('core_baseline'));
+  if (coreBaseline) {
+    blocks.push({
+      id: 'core_baseline_patch',
+      label: 'Core Baseline Patch',
+      stage: 'main',
+      priority: 145,
+      authority: 'persona_module',
+      kind: 'persona_core_patch',
+      content: coreBaseline,
+      budgetTokens: 120,
+      conflictTags: [],
+      source: 'persona_modules/core_baseline.txt',
+      lane: 'stable_system',
+      meta: {}
     });
   }
   return blocks;
@@ -89,6 +115,7 @@ function buildRouterStageSystemPrompt(options = {}) {
 
 module.exports = {
   buildMainStageBlocks,
+  buildMainStableSystemBlocks,
   buildPlannerStageSystemPrompt,
   buildReviewStageRoutePrompt,
   buildReviewStageSystemPrompt,
