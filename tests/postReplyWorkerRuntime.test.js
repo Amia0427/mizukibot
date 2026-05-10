@@ -407,6 +407,18 @@ module.exports = (async () => {
     assert.strictEqual(materializeResume.job.completedTasks.materialize, true);
     assert.ok(!calls.some((item) => item.type === 'memory'), 'materialize resume should not rerun heavy memory learning');
 
+    const recycleCalls = [];
+    const recycleRuntime = createPostReplyWorkerRuntime({
+      queue: circuitQueue,
+      rssRecycleMb: 1,
+      rssRecycleIdleMs: 0,
+      onRecycle: (info) => recycleCalls.push(info),
+      processJob: async () => ({ ok: true })
+    });
+    assert.strictEqual(recycleRuntime.maybeRequestIdleRecycle('test'), true, 'idle high RSS should request recycle');
+    assert.strictEqual(recycleCalls.length, 1);
+    assert.ok(recycleRuntime.getStats().recycleRequested, 'runtime should expose recycle state');
+
     memoryExtraction.learnSomethingNew = originalLearnSomethingNew;
     memoryExtraction.extractPostReplyEnrichment = originalExtractPostReplyEnrichment;
     dailyJournal.appendDailyJournalEntry = originalAppendDailyJournalEntry;

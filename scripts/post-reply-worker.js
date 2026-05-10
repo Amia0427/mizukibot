@@ -6,7 +6,20 @@ const path = require('path');
 
 config.validateRequiredConfig();
 
-const runtime = createPostReplyWorkerRuntime();
+let recycling = false;
+const runtime = createPostReplyWorkerRuntime({
+  onRecycle(info = {}) {
+    if (recycling) return;
+    recycling = true;
+    console.warn('[post-reply-worker] idle RSS recycle requested', {
+      reason: info.reason || 'rss_high',
+      rssMb: Math.round((Number(info.rssBytes || 0) / 1024 / 1024) * 10) / 10,
+      thresholdMb: Math.round((Number(info.thresholdBytes || 0) / 1024 / 1024) * 10) / 10,
+      idleMs: Number(info.idleMs || 0) || 0
+    });
+    setTimeout(() => shutdown(75), 0);
+  }
+});
 const resourceSnapshotLoop = startResourceSnapshotLoop(() => ({
   component: 'post_reply_worker',
   postReplyActiveUserIds: runtime.getActiveUserIds().length,

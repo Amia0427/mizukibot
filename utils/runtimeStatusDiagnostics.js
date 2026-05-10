@@ -207,21 +207,45 @@ function findProcessByPid(processes = [], pid = 0) {
 
 function processMatchesMain(proc = {}) {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  return /(^|[\s/])index\.js(\s|$)/i.test(cmd);
+  if (shouldExcludeOpenclawGatewayProcess(proc)) return false;
+  return /(^|[\s/])index\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
 }
 
 function processMatchesPostReplyWorker(proc = {}) {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  return /(^|[\s/])post-reply-worker\.js(\s|$)/i.test(cmd);
+  return /(^|[\s/])post-reply-worker\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
 }
 
 function processMatchesSubagent(proc = {}) {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
   if (!cmd) return false;
+  if (shouldExcludeOpenclawGatewayProcess(proc)) return false;
+  if (!processMatchesProjectRoot(proc)) return false;
   return cmd.includes('subagent-command-worker.js')
     || cmd.includes('run-claude.ps1')
-    || cmd.includes('openclaw')
     || cmd.includes('subagent');
+}
+
+function getDiagnosticProjectRoot() {
+  return path.resolve(__dirname, '..').replace(/\\/g, '/').toLowerCase();
+}
+
+function processMatchesProjectRoot(proc = {}) {
+  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
+  if (!cmd) return false;
+  const root = getDiagnosticProjectRoot();
+  const rootWithSlash = root.endsWith('/') ? root : `${root}/`;
+  if (cmd.includes(rootWithSlash)) return true;
+  if (/[a-z]:\/|\/home\/|\/users\/|\/opt\/|\/var\//i.test(cmd) && /\/(?:index|post-reply-worker|subagent-command-worker)\.js\b/i.test(cmd)) {
+    return false;
+  }
+  return true;
+}
+
+function shouldExcludeOpenclawGatewayProcess(proc = {}) {
+  if (config.DIAGNOSTICS_EXCLUDE_OPENCLAW_GATEWAY === false) return false;
+  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
+  return cmd.includes('/openclaw/') && /\bgateway\b/.test(cmd);
 }
 
 function compactProcess(proc = null) {

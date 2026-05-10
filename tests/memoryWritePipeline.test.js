@@ -18,6 +18,7 @@ process.env.MEMORY_RERANK_ENABLED = 'true';
 process.env.MEMORY_RERANK_MODEL = 'test-reranker';
 process.env.MEMORY_RERANK_API_BASE_URL = 'https://rerank.example/v1';
 process.env.MEMORY_RERANK_API_KEY = 'test-key';
+process.env.MEMORY_WRITE_RERANK_MIN_SEMANTIC_SCORE = '0.8';
 process.env.MEMORY_LANCEDB_SYNC_ENABLED = 'false';
 fs.mkdirSync(tempRoot, { recursive: true });
 fs.writeFileSync(process.env.MEMORY_FILE, JSON.stringify({}, null, 2));
@@ -29,7 +30,9 @@ httpClient.postWithRetry = async (url, body) => {
     return {
       data: {
         data: (Array.isArray(body.input) ? body.input : [body.input]).map((text) => ({
-          embedding: String(text || '').includes('concise') ? [1, 0, 0] : [0, 1, 0]
+          embedding: String(text || '').includes('concise') || String(text || '').includes('terse')
+            ? [1, 0, 0]
+            : [0, 1, 0]
         }))
       }
     };
@@ -111,6 +114,49 @@ module.exports = (async () => {
   }], { materialize: false });
   assert.strictEqual(rerankDuplicate.ids.length, 0, 'rerank duplicate should not create a new item');
   assert.ok(rerankDuplicate.rejected.some((item) => item.reason === 'duplicate' || item.reason === 'rerank_duplicate'), 'duplicate should be reported');
+
+  const semanticDuplicate = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_vector',
+    type: 'fact',
+    text: 'prefers terse vector responses',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.95,
+    status: 'active'
+  }], { materialize: false, writeRerankMinLexicalScore: 0.9 });
+  assert.strictEqual(semanticDuplicate.ids.length, 0, 'semantic neighbor duplicate should not create a new item');
+  assert.ok(semanticDuplicate.rejected.some((item) => item.reason === 'rerank_duplicate'), 'semantic duplicate should be decided by write rerank');
+  assert.strictEqual(getMemoryItems('u_pipeline_vector').filter((item) => item.status !== 'archived').length, 1, 'semantic duplicate should not add another active item');
+
+  const conflictResult = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_conflict',
+    type: 'like',
+    text: 'likes the nickname Mizu',
+    source: 'test',
+    sourceKind: 'extractor',
+    conflictKey: 'u_pipeline_conflict|preference|nickname',
+    confidence: 0.9,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(conflictResult.ids.length, 1, 'baseline conflict memory should persist');
+
+  const conflictCandidate = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_conflict',
+    type: 'dislike',
+    text: 'dislikes the nickname Mizu',
+    source: 'test',
+    sourceKind: 'extractor',
+    conflictKey: 'u_pipeline_conflict|preference|nickname',
+    confidence: 0.88,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(conflictCandidate.ids.length, 1, 'conflict candidate should still be persisted for governance');
+  const conflictItems = getMemoryItems('u_pipeline_conflict');
+  const markedConflict = conflictItems.find((item) => item.text.includes('dislikes'));
+  const originalConflict = conflictItems.find((item) => item.text.includes('likes'));
+  assert.strictEqual(markedConflict.status, 'candidate', 'conflict candidate should be marked candidate');
+  assert.ok(markedConflict.meta.conflictCandidate, 'conflict candidate metadata should be retained');
+  assert.strictEqual(originalConflict.status, 'active', 'conflict candidate should not overwrite existing memory');
 
   const lowConfidenceEnhanced = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_vector',

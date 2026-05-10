@@ -61,7 +61,8 @@ const {
 const { queryMemory } = require('../utils/memory-v3/query');
 const {
   buildEmbeddingCoverageDiagnostics,
-  buildLanceDbFallbackReason
+  buildLanceDbFallbackReason,
+  diagnoseNoVisibleVectorCandidates
 } = require('../utils/memory-v3/query');
 const { countScopeLeaks } = require('../scripts/diagnose-lancedb-memory');
 
@@ -100,8 +101,18 @@ assert.strictEqual(memoryRows.sourceRows, 0);
 
 assert.strictEqual(buildLanceDbFallbackReason({ enabled: false }, [1], 'lancedb'), 'read_disabled');
 assert.strictEqual(buildLanceDbFallbackReason({ enabled: true, ok: true, rows: 0, vectorCandidates: 0 }, [1], 'lancedb'), 'empty_result');
+assert.strictEqual(buildLanceDbFallbackReason({ enabled: true, ok: true, rows: 1, vectorCandidates: 0, noVisibleReason: 'no_visible_candidates_facet_filtered' }, [1], 'lancedb'), 'no_visible_candidates_facet_filtered');
 assert.strictEqual(countScopeLeaks([{ userId: 'u_other', scopeType: 'personal' }], { userId: 'u_diag' }), 1);
 assert.strictEqual(buildEmbeddingCoverageDiagnostics([{ id: 'node_diag', text: 'green cable' }]).lowCoverage, true);
+assert.strictEqual(diagnoseNoVisibleVectorCandidates([{
+  nodeId: 'node_diag',
+  userId: 'u_diag',
+  scopeType: 'personal',
+  source: 'personal',
+  status: 'active'
+}], [{ id: 'node_diag', source: 'personal', semanticSlot: 'fact', text: 'green cable' }], {
+  filter: lancedbStore.buildMemoryFilter({ userId: 'u_diag' })
+}, 'style'), 'no_visible_candidates_facet_filtered');
 
 module.exports = queryMemory({
   userId: 'u_diag',
@@ -113,6 +124,8 @@ module.exports = queryMemory({
   assert.strictEqual(result.stats.lancedb.fallbackReason, 'empty_result');
   assert.strictEqual(result.stats.lancedb.coverageReason, 'low_coverage');
   assert.strictEqual(result.stats.lancedb.lowCoverage, true);
+  assert.ok(result.stats.timings.totalMs >= 0);
+  assert.ok(Object.prototype.hasOwnProperty.call(result.stats.timings, 'queryEmbeddingMs'));
   assert.ok(result.results.some((item) => item.id === 'node_diag'), 'lexical fallback should still answer');
   console.log('memoryLanceDbEnhancements.test.js passed');
 }).catch((error) => {

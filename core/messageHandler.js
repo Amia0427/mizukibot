@@ -46,7 +46,7 @@ const { buildRouteMetaEnvelope } = require('./executablePlan');
 const { createMessageEventDeduper } = require('./messageDeduper');
 const { createInboundConcurrencyController } = require('./inboundConcurrency');
 const { createForegroundConcurrencyController } = require('./foregroundConcurrency');
-const { isPrivateChatTestUser, isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
+const { isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
 const { handlePassiveGroupAwareness } = require('./passiveGroupAwareness');
 const {
   createContinuousMessagePreprocessor,
@@ -112,6 +112,30 @@ const {
   shouldSendScheduledGreeting: proactiveShouldSendScheduledGreeting
 } = require('./proactiveGreetingFlow');
 const { planDirectChat } = require('./directChatPlanner');
+const {
+  PRIVATE_CHAT_WHITELIST_REPLY,
+  PRIVATE_GROUP_ONLY_REPLY,
+  buildBackgroundAckText,
+  buildNoTaskControlText,
+  buildQqRichMessagePayload,
+  buildQzoneAutodraftPrompt,
+  buildSessionStatusReply,
+  buildSupplementedTaskText,
+  canBypassPrivateGroupOnly,
+  createStreamingDispatcher,
+  getModelSegmentBreakIndex,
+  getNaturalSplitIndex,
+  getReplyChunkChars,
+  getStreamMaxSegments,
+  getStreamSendGapMs,
+  isPrivateChatType,
+  isPrivateChatUserAllowed,
+  parseBackgroundControlCommand,
+  parseQqRichMessage,
+  shouldAutoDraftQzonePostRequest: shouldAutoDraftQzonePostRequestBase,
+  shouldPreferQqRichReply,
+  splitReplyForSend
+} = require('../src/message');
 const {
   cancelScheduledTask,
   createScheduledCommand,
@@ -263,11 +287,6 @@ const { clearGroupMute, getGroupInitiativeState, setGroupMute } = require('./ini
 const {
   sendGroupReply: sendSystemGroupReply
 } = require('./systemGroupReply');
-const {
-  findExplicitSegmentBreakIndex,
-  findNaturalSplitIndex,
-  getStreamingSplitIndex
-} = require('./streamingSegmentation');
 
 const shouldUseSubagentToolRoute = (...args) => routeExecution.shouldUseSubagentToolRoute(...args);
 const shouldUseToolRoute = (...args) => routeExecution.shouldUseToolRoute(...args);
@@ -316,30 +335,6 @@ function buildRouteContextForQqAction(route = {}, senderId = '', groupId = '') {
       allowedTools: qqActionTools
     }
   };
-}
-
-const PRIVATE_GROUP_ONLY_REPLY = '该能力当前仅支持群聊中使用，请在目标群内 @我。';
-const PRIVATE_CHAT_WHITELIST_REPLY = '当前私聊接入仅对白名单用户开放。';
-
-function isPrivateChatType(chatType = '') {
-  return String(chatType || '').trim().toLowerCase() === 'private';
-}
-
-function isPrivateChatUserAllowed(userId = '', runtimeConfig = {}) {
-  return isPrivateChatTestUser({
-    chatType: 'private',
-    userId,
-    config: runtimeConfig
-  });
-}
-
-function canBypassPrivateGroupOnly({ chatType = '', userId = '', runtimeConfig = {} } = {}) {
-  if (!isPrivateChatType(chatType)) return false;
-  return isPrivilegedPrivateChatUser({
-    chatType,
-    userId,
-    config: runtimeConfig
-  });
 }
 
 function getRouteDisplayType(route = {}, routeExecutionPlan = {}) {
@@ -517,24 +512,6 @@ function markDirectSessionHumanInbound({ groupId, senderId, sessionTiming = null
   }));
 }
 
-function getReplyChunkChars(config = {}) {
-  const n = Number(config.AI_REPLY_CHUNK_CHARS);
-  if (!Number.isFinite(n)) return 1200;
-  return Math.max(300, Math.min(3000, Math.floor(n)));
-}
-
-function getStreamSendGapMs(config = {}) {
-  const n = Number(config.AI_STREAM_SEND_GAP_MS);
-  if (!Number.isFinite(n)) return 260;
-  return Math.max(80, Math.floor(n));
-}
-
-function getStreamMaxSegments(config = {}) {
-  const n = Number(config.AI_STREAM_MAX_SEGMENTS);
-  if (!Number.isFinite(n)) return 3;
-  return Math.max(1, Math.min(6, Math.floor(n)));
-}
-
 function getBackgroundTaskAckDelayMs(config) {
   const n = Number(config.BACKGROUND_TASK_ACK_DELAY_MS);
   if (!Number.isFinite(n)) return 1200;
@@ -545,12 +522,6 @@ function getBackgroundTaskSessionTtlMs(config) {
   const n = Number(config.BACKGROUND_TASK_SESSION_TTL_MS);
   if (!Number.isFinite(n)) return 30 * 60 * 1000;
   return Math.max(60 * 1000, Math.floor(n));
-}
-
-function normalizeControlText(text = '') {
-  return String(text || '')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function escapeRegExp(text = '') {
@@ -578,236 +549,8 @@ function stripLeadingCqControlSegments(rawText = '', botQQ = '') {
   return text.trim();
 }
 
-function buildBackgroundAckText() {
-  return '这类任务我先在后台跑。你可以随时发“任务状态”“取消任务”“结束任务”，或用“任务补充 ...”追加要求。';
-}
-
-function buildNoTaskControlText() {
-  return '当前没有可控制的后台任务。';
-}
-
-function buildSessionStatusReply(session = {}, activeTask = null) {
-  if (activeTask) {
-    const summary = String(activeTask.latest_summary || '').trim();
-    const summaryLine = summary ? `最近摘要：${summary}` : '最近摘要：还在处理中。';
-    return [
-      `当前任务状态：${activeTask.status || 'running'} / ${activeTask.stage || 'running'}`,
-      `最近更新时间：${String(activeTask.updated_at || '').trim() || 'unknown'}`,
-      summaryLine
-    ].join('\n');
-  }
-
-  if (session && String(session.status || '').trim() === 'retained') {
-    const summary = String(session.latest_summary || session.latest_result_excerpt || '').trim();
-    return summary
-      ? `当前没有运行中的后台任务。\n最近一次结果：${summary}\n如果要继续，可以发“任务补充 ...”。`
-      : '当前没有运行中的后台任务。如果要继续，可以发“任务补充 ...”。';
-  }
-
-  return buildNoTaskControlText();
-}
-
-function parseBackgroundControlCommand(text = '') {
-  const normalized = normalizeControlText(text);
-  if (!normalized) return null;
-  const plain = normalized.replace(/^\/+/, '').trim();
-  if (!plain) return null;
-  if (plain === '任务状态') return { type: 'status', payload: '' };
-  if (plain === '取消任务') return { type: 'cancel', payload: '' };
-  if (plain === '结束任务') return { type: 'close', payload: '' };
-  if (/^任务(?:补充|继续)\s+/i.test(plain)) {
-    return {
-      type: 'supplement',
-      payload: plain.replace(/^任务(?:补充|继续)\s+/i, '').trim()
-    };
-  }
-  if (plain === '任务补充' || plain === '任务继续') {
-    return { type: 'supplement', payload: '' };
-  }
-  return null;
-}
-
-function buildSupplementedTaskText(session = {}, supplement = '') {
-  const parts = [];
-  const originalText = String(session?.original_text || '').trim();
-  const latestSummary = String(session?.latest_summary || session?.latest_result_excerpt || '').trim();
-  const cleanSupplement = String(supplement || '').trim();
-
-  if (originalText) parts.push(`原始请求：${originalText}`);
-  if (latestSummary) parts.push(`最近结果摘要：${latestSummary}`);
-  if (cleanSupplement) parts.push(`补充要求：${cleanSupplement}`);
-
-  return parts.join('\n');
-}
-
-function getModelSegmentBreakIndex(text) {
-  return findExplicitSegmentBreakIndex(text);
-}
-
 function buildStreamingSegmentationPrompt(maxSegments) {
   return buildRuntimePrompt('streaming-segmentation', { maxSegments });
-}
-
-function getNaturalSplitIndex(text) {
-  return findNaturalSplitIndex(text);
-}
-
-function createStreamingDispatcher({
-  runtimeConfig = null,
-  config = runtimeConfig || {},
-  sendWithRetry,
-  chatType = 'group',
-  groupId,
-  userId,
-  senderId,
-  telemetry = null
-} = {}) {
-  const effectiveConfig = runtimeConfig && typeof runtimeConfig === 'object'
-    ? runtimeConfig
-    : (config || {});
-  const maxSegments = getStreamMaxSegments(effectiveConfig);
-  const state = {
-    fullText: '',
-    sentLength: 0,
-    sentSegments: 0,
-    hasSentAny: false,
-    lastSendAt: 0,
-    sendQueue: Promise.resolve()
-  };
-
-  function emitStreamingTelemetry(type = '', payload = {}) {
-    if (!telemetry || typeof telemetry.onEvent !== 'function') return;
-    try {
-      telemetry.onEvent({
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        ts: Date.now(),
-        type: String(type || 'event').trim() || 'event',
-        ...payload
-      });
-    } catch (_) {}
-  }
-
-  async function sendChunk(chunk) {
-    const text = String(chunk || '').trim();
-    if (!text) return false;
-    const chunkIndex = state.sentSegments + 1;
-
-    const task = async () => {
-      // Keep streamed chunk sending strictly serialized (unit-test anchor).
-      const now = Date.now();
-      const minGap = getStreamSendGapMs(effectiveConfig);
-      const elapsed = now - state.lastSendAt;
-      if (state.lastSendAt > 0 && elapsed < minGap) {
-        await new Promise((r) => setTimeout(r, minGap - elapsed));
-      }
-
-      const isPrivate = String(chatType || '').trim().toLowerCase() === 'private';
-      const payload = isPrivate
-        ? {
-            action: 'send_private_msg',
-            params: { user_id: userId, message: text }
-          }
-        : {
-            action: 'send_group_msg',
-            params: {
-              group_id: groupId,
-              message: `${state.hasSentAny ? '' : `[CQ:at,qq=${senderId}] `}${text}`
-            }
-          };
-      const startedAt = Date.now();
-      emitStreamingTelemetry('reply_stream_chunk_start', {
-        node: 'reply_stream_send',
-        channel: isPrivate ? 'private' : 'group',
-        groupId: String(groupId || '').trim(),
-        userId: String(userId || '').trim(),
-        senderId: String(senderId || '').trim(),
-        chunkIndex,
-        chunkLength: text.length
-      });
-      const sent = await sendWithRetry(payload, 1, 300);
-
-      if (!sent) {
-        emitStreamingTelemetry('reply_stream_chunk_failure', {
-          node: 'reply_stream_send',
-          channel: isPrivate ? 'private' : 'group',
-          groupId: String(groupId || '').trim(),
-          userId: String(userId || '').trim(),
-          senderId: String(senderId || '').trim(),
-          chunkIndex,
-          chunkLength: text.length,
-          durationMs: Math.max(0, Date.now() - startedAt)
-        });
-        console.error(isPrivate ? '[stream] send_private_msg failed' : '[stream] send_group_msg failed', {
-          chatType: isPrivate ? 'private' : 'group',
-          groupId,
-          userId,
-          senderId
-        });
-        return false;
-      }
-
-      emitStreamingTelemetry('reply_stream_chunk_success', {
-        node: 'reply_stream_send',
-        channel: isPrivate ? 'private' : 'group',
-        groupId: String(groupId || '').trim(),
-        userId: String(userId || '').trim(),
-        senderId: String(senderId || '').trim(),
-        chunkIndex,
-        chunkLength: text.length,
-        durationMs: Math.max(0, Date.now() - startedAt)
-      });
-      state.hasSentAny = true;
-      state.lastSendAt = Date.now();
-      return true;
-    };
-
-    state.sendQueue = state.sendQueue.then(task, task);
-    return state.sendQueue;
-  }
-
-  async function flush(force = false) {
-    const pending = state.fullText.slice(state.sentLength);
-    if (!pending) return false;
-
-    let sendUntil = -1;
-    const canSplitMore = state.sentSegments < (maxSegments - 1);
-    if (canSplitMore) {
-      sendUntil = getStreamingSplitIndex(pending);
-    }
-
-    if (sendUntil <= 0 && force) sendUntil = getStreamingSplitIndex(pending, { force: true });
-    if (sendUntil <= 0) return false;
-
-    const rawChunk = pending.slice(0, sendUntil);
-    const chunk = rawChunk.trim();
-    state.sentLength += sendUntil;
-
-    if (!chunk) return true;
-
-    const sent = await sendChunk(chunk);
-    if (!sent) return false;
-
-    state.sentSegments += 1;
-    return true;
-  }
-
-  return {
-    async onDelta(_delta, fullText) {
-      state.fullText = sanitizeUserFacingText(fullText);
-      await flush(false);
-    },
-    async finish(finalReply) {
-      const visibleFinalReply = sanitizeUserFacingText(finalReply).trim();
-      state.fullText = visibleFinalReply || state.fullText || '';
-      while (state.sentSegments < maxSegments && await flush(true)) {}
-
-      if (!state.hasSentAny && state.fullText.trim()) {
-        await sendChunk(state.fullText.trim());
-        state.sentLength = state.fullText.length;
-        state.sentSegments = Math.max(1, state.sentSegments);
-      }
-    }
-  };
 }
 
 function shouldSendScheduledGreeting(data, type, today, config) {
@@ -836,125 +579,6 @@ function isToolReplyRoute(routeContext = {}) {
     || routeCapability === 'tool'
     || isToolStyleRoute(routePolicyKey)
   );
-}
-
-function splitReplyForSend(text, maxChars) {
-  const input = String(text || '').trim();
-  if (!input) return [];
-
-  const limit = Math.max(300, Number(maxChars) || 1200);
-  if (input.length <= limit) return [input];
-
-  const chunks = [];
-  let rest = input;
-  while (rest.length > limit) {
-    let cut = rest.lastIndexOf('\n', limit);
-    if (cut < Math.floor(limit * 0.5)) cut = rest.lastIndexOf('?', limit);
-    if (cut < Math.floor(limit * 0.5)) cut = rest.lastIndexOf('?', limit);
-    if (cut < Math.floor(limit * 0.5)) cut = rest.lastIndexOf(' ', limit);
-    if (cut < Math.floor(limit * 0.3)) cut = limit;
-
-    const part = rest.slice(0, cut).trim();
-    if (part) chunks.push(part);
-    rest = rest.slice(cut).trim();
-  }
-  if (rest) chunks.push(rest);
-
-  return chunks;
-}
-
-function pushTextSegment(segments, text) {
-  const value = String(text || '');
-  if (!value) return;
-
-  const last = segments[segments.length - 1];
-  if (last && last.type === 'text' && last.data && typeof last.data.text === 'string') {
-    last.data.text += value;
-    return;
-  }
-
-  segments.push({ type: 'text', data: { text: value } });
-}
-
-function isSupportedQqImageSource(value) {
-  const input = String(value || '').trim();
-  if (!input) return false;
-
-  return (
-    /^https?:\/\/\S+$/i.test(input) ||
-    /^file:\/\/\S+$/i.test(input) ||
-    /^[a-zA-Z]:[\\/]/.test(input) ||
-    /^base64:\/\/\S+$/i.test(input)
-  );
-}
-
-function parseQqRichMessage(text) {
-  const input = String(text || '');
-  const tokenRe = /\[\[(qq_face|qq_image):([\s\S]*?)\]\]/gi;
-  const segments = [];
-  let hasRichSegment = false;
-  let lastIndex = 0;
-  let match = tokenRe.exec(input);
-
-  while (match) {
-    if (match.index > lastIndex) {
-      pushTextSegment(segments, input.slice(lastIndex, match.index));
-    }
-
-    const kind = String(match[1] || '').toLowerCase();
-    const rawValue = String(match[2] || '').trim();
-    const originalToken = match[0];
-
-    if (kind === 'qq_face' && /^\d+$/.test(rawValue)) {
-      segments.push({ type: 'face', data: { id: rawValue } });
-      hasRichSegment = true;
-    } else if (kind === 'qq_image' && isSupportedQqImageSource(rawValue)) {
-      segments.push({ type: 'image', data: { file: rawValue } });
-      hasRichSegment = true;
-    } else {
-      pushTextSegment(segments, originalToken);
-    }
-
-    lastIndex = match.index + originalToken.length;
-    match = tokenRe.exec(input);
-  }
-
-  if (lastIndex < input.length) {
-    pushTextSegment(segments, input.slice(lastIndex));
-  }
-
-  return {
-    hasRichSegment,
-    segments
-  };
-}
-
-function buildQqRichMessagePayload(text, { atSender = true, senderId } = {}) {
-  const parsed = parseQqRichMessage(text);
-  if (!parsed.hasRichSegment) return null;
-
-  const message = [];
-  if (atSender && senderId) {
-    message.push({ type: 'at', data: { qq: String(senderId) } });
-    message.push({ type: 'text', data: { text: ' ' } });
-  }
-
-  for (const segment of parsed.segments) {
-    if (segment.type === 'text') {
-      pushTextSegment(message, segment.data.text);
-      continue;
-    }
-    message.push(segment);
-  }
-
-  return message.length ? message : null;
-}
-
-function shouldPreferQqRichReply(text = '') {
-  const t = String(text || '').trim();
-  if (!t) return false;
-
-  return /(琛ㄦ儏鍖厊鍙戣〃鎯厊鍙戜釜琛ㄦ儏|emoji|sticker|璐寸焊|鍔ㄥ浘|gif)/i.test(t);
 }
 
 function buildQqRichReplyPrompt() {
@@ -1090,20 +714,7 @@ function maybeCaptureUnavailableFeatureRequest({ routeExecutionPlan, cleanText, 
 }
 
 function shouldAutoDraftQzonePostRequest(route = {}, cleanText = '') {
-  return detectQzonePostDraftMode(route, cleanText) !== 'manual';
-}
-
-function buildQzoneAutodraftPrompt(requestText = '') {
-  return [
-    '你现在只负责代写一条可以直接发布到 QQ 空间的中文正文。',
-    '必须使用第一人称，语气自然，像今天写的日记或状态。',
-    '优先根据用户原话推断主题、心情、长度和风格。',
-    '默认写成 80 到 180 字。',
-    '不要解释，不要提问，不要使用标题、项目符号、引号、标签或前缀。',
-    '不要提到自己是 AI。',
-    '只输出最终可发布正文。',
-    `用户请求: ${String(requestText || '').trim()}`
-  ].join('\n');
+  return shouldAutoDraftQzonePostRequestBase(route, cleanText, detectQzonePostDraftMode);
 }
 
 function getEffectivePolicyKey(routeExecutionPlan = {}) {

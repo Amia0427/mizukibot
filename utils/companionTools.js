@@ -6,11 +6,25 @@ const COMPANION_TOOL_PRESET = Object.freeze([
   'get_context_stats',
   'url_safety_check',
   'getWeather',
+  'skill_weather',
+  'notebook_search',
+  'notebook_list_docs',
   'notebook_append_journal',
   'notebook_read_recent_journal',
   'create_scheduled_command',
   'list_scheduled_tasks',
   'cancel_scheduled_task'
+]);
+
+const COMPANION_PLANNER_SAFE_READ_TOOLS = Object.freeze([
+  'getWeather',
+  'skill_weather',
+  'get_current_time',
+  'get_context_stats',
+  'memory_cli',
+  'notebook_search',
+  'notebook_list_docs',
+  'url_safety_check'
 ]);
 
 function parseToolList(value = '') {
@@ -55,6 +69,7 @@ function filterCompanionToolExecutors(executors = {}, config = {}) {
 }
 
 module.exports = {
+  COMPANION_PLANNER_SAFE_READ_TOOLS,
   COMPANION_TOOL_PRESET,
   filterCompanionAllowedTools,
   filterCompanionToolExecutors,

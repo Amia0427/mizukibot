@@ -27,11 +27,6 @@ const {
   summarizeQzoneDebug,
   summarizeQzoneWindowStats
 } = require('../core/qzoneGenerationPhase2');
-const {
-  composePersonaMemoryState,
-  renderPersonaMemoryPrompt,
-  recordPersonaMemoryOutcome
-} = require('../utils/personaMemoryState');
 
 const INTERNAL_LEAK_TERMS = [
   'ai',
@@ -61,6 +56,18 @@ const BOT_DIARY_MEMORY_OPEN_PRIORITY = [
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function composePersonaMemoryState(...args) {
+  return require('../utils/personaMemoryState').composePersonaMemoryState(...args);
+}
+
+function renderPersonaMemoryPrompt(...args) {
+  return require('../utils/personaMemoryState').renderPersonaMemoryPrompt(...args);
+}
+
+function recordPersonaMemoryOutcome(...args) {
+  return require('../utils/personaMemoryState').recordPersonaMemoryOutcome(...args);
 }
 
 function uniqueBy(list = [], selector = (item) => item) {

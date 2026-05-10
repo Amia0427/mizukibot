@@ -18,17 +18,23 @@ process.env.MEMORY_RERANK_ENABLED = 'false';
 process.env.MEMORY_VECTOR_STORE = 'lancedb';
 process.env.MEMORY_LANCEDB_READ_ENABLED = 'true';
 process.env.MEMORY_LANCEDB_TIMEOUT_MS = '500';
+process.env.MEMORY_STRONG_SEMANTIC_MIN_SCORE = '0.82';
 process.env.MEMORY_SEMANTIC_RECALL_WEIGHT = '0.4';
 process.env.MEMORY_LEXICAL_RECALL_WEIGHT = '0.2';
+process.env.MEMORY_EMBEDDING_CACHE_TTL_MS = '300000';
 
 fs.mkdirSync(process.env.MEMORY_V3_PROJECTIONS_DIR, { recursive: true });
 
 const httpClient = require('../api/httpClient');
-httpClient.postWithRetry = async () => ({
+let embeddingRequests = 0;
+httpClient.postWithRetry = async () => {
+  embeddingRequests += 1;
+  return ({
   data: {
     data: [{ embedding: [1, 0, 0] }]
   }
-});
+  });
+};
 
 const { writeJsonLines } = require('../utils/memory-v3/helpers');
 const lancedbStore = require('../utils/lancedbMemoryStore');
@@ -72,7 +78,11 @@ lancedbStore.searchMemoryVectors = async () => ({
   filter: lancedbStore.buildMemoryFilter({ userId: 'u_lancedb' })
 });
 
-const { queryMemory } = require('../utils/memory-v3/query');
+const {
+  clearQueryEmbeddingCache,
+  queryMemory
+} = require('../utils/memory-v3/query');
+clearQueryEmbeddingCache();
 
 const vectorTarget = {
   id: 'node_vector',
@@ -119,6 +129,20 @@ module.exports = queryMemory({
   assert.ok(result.results.some((item) => item.id === 'node_vector'), 'lancedb vector target should be included');
   assert.ok(!result.results.some((item) => item.id === 'node_other_user'), 'other user vector row must be filtered');
   assert.strictEqual(result.stats.lancedb.fused, true);
+  const vectorHit = result.results.find((item) => item.id === 'node_vector');
+  assert.ok(vectorHit.selectionReason.includes('strong_semantic_protected') || vectorHit.selectionReason.includes('facet_default_selected'), 'vector hit should include selection reason');
+  assert.strictEqual(typeof vectorHit.diagnostics.recall.semantic, 'number', 'vector hit should expose semantic diagnostic');
+  assert.ok(result.diagnostics.recall.selected.some((item) => item.id === 'node_vector'), 'selected diagnostics should include vector hit');
+  assert.strictEqual(result.stats.timings.queryEmbeddingCacheHit, false);
+  return queryMemory({
+    userId: 'u_lancedb',
+    query: 'where is that cable',
+    facet: 'default',
+    topK: 4
+  });
+}).then((cachedResult) => {
+  assert.strictEqual(cachedResult.stats.timings.queryEmbeddingCacheHit, true);
+  assert.strictEqual(embeddingRequests, 1, 'query embedding cache should avoid duplicate remote request');
 
   process.env.MEMORY_VECTOR_STORE = 'shadow';
   const config = require('../config');

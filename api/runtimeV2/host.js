@@ -126,8 +126,6 @@ const {
 } = require('../../utils/shortTermBridgeMemory');
 const { recordMemoryScope } = require('../../utils/memoryScopeIndex');
 const { learnSomethingNew } = require('../memoryExtraction');
-const { appendMemoryEvent, materializeMemoryViews } = require('../../utils/memory-v3');
-const { recordPersonaMemoryOutcome } = require('../../utils/personaMemoryState');
 const { postWithRetry } = require('../httpClient');
 const { extractMessageContent } = require('../parser');
 const { isReplyFailure, classifyReplyFailure } = require('../../utils/replyFailure');
@@ -146,7 +144,6 @@ const {
   updateMemoryCliTurnStateAfterError,
   updateMemoryCliTurnStateAfterResult
 } = require('../../utils/memoryCliTurnPolicy');
-const { warmMcpRegistry } = require('../toolRegistry');
 const {
   classifyRecallFacet,
   shouldBiasToContinuity,
@@ -172,6 +169,22 @@ const {
 const { createStreamingCoordinatorHelpers } = require('./runtime/streamingCoordinator');
 const { createToolExecutionHelpers } = require('./runtime/toolExecution');
 const { buildSecuritySystemPrompt, classifyPromptThreat, protectFinalOutput } = require('../../utils/promptSecurity');
+
+function appendMemoryEvent(...args) {
+  return require('../../utils/memory-v3').appendMemoryEvent(...args);
+}
+
+function materializeMemoryViews(...args) {
+  return require('../../utils/memory-v3').materializeMemoryViews(...args);
+}
+
+function recordPersonaMemoryOutcome(...args) {
+  return require('../../utils/personaMemoryState').recordPersonaMemoryOutcome(...args);
+}
+
+function warmMcpRegistry(...args) {
+  return require('../toolRegistry').warmMcpRegistry(...args);
+}
 
 function nowTs() {
   return Date.now();
@@ -667,6 +680,7 @@ function createRuntime(options = {}) {
 
   function buildMainConversationContextSnapshot(state, segmentedMessages = {}, options = {}) {
     const request = normalizeObject(state.request, {});
+    const routeMeta = normalizeObject(request.routeMeta, {});
     const affinity = normalizeObject(options.affinity, state.memory?.affinity);
     const canonical = buildV2CanonicalSegments(state, {
       systemPromptMessages: normalizeArray(segmentedMessages.systemMessages),
@@ -686,7 +700,7 @@ function createRuntime(options = {}) {
     return {
       modelName: resolveMainConversationModelName(request),
       tokenLimit: resolveMainConversationTokenLimit(request, affinity),
-      routeMeta: normalizeObject(request.routeMeta, {}),
+      routeMeta,
       allowedTools: normalizeArray(options.allowedTools || request.allowedTools),
       snapshotMeta: {
         routePolicyKey: String(request.routePolicyKey || '').trim(),

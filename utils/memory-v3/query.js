@@ -33,12 +33,74 @@ const {
   fuseRecallCandidates,
   isLanceDbReadEnabled,
   normalizeVectorStoreMode,
+  rowPassesMemoryFilter,
   resolveVectorCandidates,
   searchMemoryVectors
 } = require('../lancedbMemoryStore');
 const { diagnoseProjectionFreshness } = require('./diagnostics');
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
+const queryEmbeddingCache = new Map();
+
+function getNowMs() {
+  return Date.now();
+}
+
+function getQueryEmbeddingCacheTtlMs() {
+  return Math.max(0, Number(config.MEMORY_EMBEDDING_CACHE_TTL_MS || 0) || 0);
+}
+
+function getQueryEmbeddingCacheMaxEntries() {
+  return Math.max(1, Math.floor(Number(config.MEMORY_QUERY_EMBEDDING_CACHE_MAX || 512) || 512));
+}
+
+function buildQueryEmbeddingCacheKey(query = '', facet = 'default', options = {}) {
+  return JSON.stringify({
+    query: normalizeText(query),
+    facet: normalizeText(facet).toLowerCase(),
+    userId: normalizeText(options.userId),
+    groupId: normalizeText(options.groupId),
+    sessionKey: normalizeText(options.sessionKey || options.sessionId),
+    source: normalizeText(options.source || 'all').toLowerCase(),
+    rewrites: Array.isArray(options.rewrites) ? options.rewrites.map(normalizeText).filter(Boolean) : []
+  });
+}
+
+function getCachedQueryEmbedding(key = '') {
+  const ttlMs = getQueryEmbeddingCacheTtlMs();
+  if (!ttlMs || !key || !queryEmbeddingCache.has(key)) return null;
+  const entry = queryEmbeddingCache.get(key);
+  if (!entry || !Array.isArray(entry.embedding) || entry.embedding.length === 0) {
+    queryEmbeddingCache.delete(key);
+    return null;
+  }
+  if (getNowMs() - Number(entry.at || 0) > ttlMs) {
+    queryEmbeddingCache.delete(key);
+    return null;
+  }
+  queryEmbeddingCache.delete(key);
+  queryEmbeddingCache.set(key, entry);
+  return entry.embedding;
+}
+
+function setCachedQueryEmbedding(key = '', embedding = []) {
+  const ttlMs = getQueryEmbeddingCacheTtlMs();
+  if (!ttlMs || !key || !Array.isArray(embedding) || embedding.length === 0) return;
+  queryEmbeddingCache.set(key, {
+    embedding,
+    at: getNowMs()
+  });
+  const maxEntries = getQueryEmbeddingCacheMaxEntries();
+  while (queryEmbeddingCache.size > maxEntries) {
+    const firstKey = queryEmbeddingCache.keys().next().value;
+    if (!firstKey) break;
+    queryEmbeddingCache.delete(firstKey);
+  }
+}
+
+function clearQueryEmbeddingCache() {
+  queryEmbeddingCache.clear();
+}
 
 function looksLikePollutedSessionSummary(text = '') {
   const normalized = normalizeText(text);
@@ -284,6 +346,30 @@ function sourceLimit(source) {
   return 3;
 }
 
+function sourceLimitForFacet(source, facet = 'default') {
+  const base = sourceLimit(source);
+  const normalizedFacet = normalizeText(facet).toLowerCase();
+  if (normalizedFacet === 'preference' || normalizedFacet === 'identity' || normalizedFacet === 'relationship') {
+    if (source === 'profile') return Math.max(base, 3);
+    if (source === 'personal') return Math.max(base, 3);
+    if (source === 'recent' || source === 'task' || source === 'journal') return Math.min(base, 1);
+  }
+  if (normalizedFacet === 'continuity') {
+    if (source === 'recent' || source === 'task' || source === 'journal') return Math.max(base, 3);
+    if (source === 'profile') return 1;
+  }
+  if (normalizedFacet === 'task') {
+    if (source === 'task') return Math.max(base, 4);
+    if (source === 'recent' || source === 'journal') return Math.max(base, 3);
+    if (source === 'profile') return 1;
+  }
+  if (normalizedFacet === 'journal') {
+    if (source === 'journal') return Math.max(base, 4);
+    if (source === 'profile') return 1;
+  }
+  return base;
+}
+
 function matchesFacetCandidate(facet, candidate = {}) {
   const fieldKey = normalizeText(candidate.fieldKey || candidate.semanticSlot || candidate.type).toLowerCase();
   const source = normalizeText(candidate.source).toLowerCase();
@@ -322,6 +408,62 @@ function applyJournalTargetDayPriority(items = [], targetDays = []) {
       scoreParts: {
         ...(item.scoreParts || {}),
         targetDatePriorityBoost: hardBoost
+      }
+    };
+  });
+}
+
+function getStrongSemanticThreshold(options = {}) {
+  return Math.max(0.1, Number(options.strongSemanticMinScore || config.MEMORY_STRONG_SEMANTIC_MIN_SCORE || 0.82) || 0.82);
+}
+
+function appendSelectionReason(existing = '', reason = '') {
+  const list = String(existing || '').split(',').map((item) => normalizeText(item)).filter(Boolean);
+  if (reason && !list.includes(reason)) list.push(reason);
+  return list.join(',');
+}
+
+function buildRecallDiagnostics(item = {}, selectionReason = '') {
+  return {
+    preRerankScore: Number(item.preRerankScore || 0) || 0,
+    score: Number(item.score || 0) || 0,
+    semantic: Number(item.embedding || item.semantic || 0) || 0,
+    lexical: Number(item.lexical || 0) || 0,
+    rerankScore: Number(item.rerankScore || 0) || 0,
+    selectionReason: selectionReason || item.selectionReason || '',
+    matchMode: normalizeText(item.matchMode)
+  };
+}
+
+function protectStrongSemanticCandidates(items = [], topK = 8, options = {}) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return list;
+  const threshold = getStrongSemanticThreshold(options);
+  const limit = Math.max(1, Math.min(5, Number(options.strongSemanticProtectLimit || config.MEMORY_STRONG_SEMANTIC_PROTECT_LIMIT || 2) || 2));
+  const protectedIds = new Set(
+    list
+      .filter((item) => Number(item.embedding || item.semantic || item.vectorScore || 0) >= threshold)
+      .sort((a, b) => Number(b.embedding || b.semantic || b.vectorScore || 0) - Number(a.embedding || a.semantic || a.vectorScore || 0))
+      .slice(0, Math.min(limit, Math.max(1, Number(topK) || 1)))
+      .map((item) => normalizeText(item.id))
+      .filter(Boolean)
+  );
+  if (!protectedIds.size) return list;
+  const boost = Math.max(0.04, Number(options.strongSemanticBoost || config.MEMORY_STRONG_SEMANTIC_BOOST || 0.18) || 0.18);
+  return list.map((item) => {
+    if (!protectedIds.has(normalizeText(item.id))) return item;
+    const selectionReason = appendSelectionReason(item.selectionReason, 'strong_semantic_protected');
+    return {
+      ...item,
+      score: Number(item.score || 0) + boost,
+      selectionReason,
+      scoreParts: {
+        ...(item.scoreParts || {}),
+        strongSemanticBoost: boost
+      },
+      diagnostics: {
+        ...(item.diagnostics || {}),
+        recall: buildRecallDiagnostics(item, selectionReason)
       }
     };
   });
@@ -390,17 +532,45 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
       continuityRecallBonus: strength.continuityRecallBonus,
       memoryStrength: strength.memoryStrength,
       forgettingReason: strength.forgettingReason,
-      facet
+      facet,
+      diagnostics: {
+        ...(candidate.diagnostics || {}),
+        recall: buildRecallDiagnostics({
+          ...candidate,
+          score: semanticOnly ? Math.max(score, minScore + (embedding * semanticWeight)) : score,
+          lexical,
+          embedding,
+          matchMode
+        }, semanticOnly ? 'semantic_only_candidate' : 'scored_candidate')
+      }
     });
   }
   return scored;
 }
 
 async function resolveQueryEmbedding(query = '', facet = 'default', options = {}) {
-  if (Array.isArray(options.queryEmbedding) && options.queryEmbedding.length > 0) return options.queryEmbedding;
+  const diagnostics = options.timingDiagnostics && typeof options.timingDiagnostics === 'object'
+    ? options.timingDiagnostics
+    : null;
+  if (Array.isArray(options.queryEmbedding) && options.queryEmbedding.length > 0) {
+    if (diagnostics) diagnostics.queryEmbeddingCacheHit = true;
+    return options.queryEmbedding;
+  }
   if (!shouldUseRemoteEmbedding()) return null;
   const rewrites = Array.isArray(options.rewrites) ? options.rewrites : rewriteQuery(query, facet);
-  return requestEmbedding(rewrites.join('\n'));
+  const cacheKey = buildQueryEmbeddingCacheKey(query, facet, {
+    ...options,
+    rewrites
+  });
+  const cached = getCachedQueryEmbedding(cacheKey);
+  if (cached) {
+    if (diagnostics) diagnostics.queryEmbeddingCacheHit = true;
+    return cached;
+  }
+  if (diagnostics) diagnostics.queryEmbeddingCacheHit = false;
+  const embedding = await requestEmbedding(rewrites.join('\n'));
+  setCachedQueryEmbedding(cacheKey, embedding);
+  return embedding;
 }
 
 function applyConflictResolution(items = []) {
@@ -436,27 +606,45 @@ function applyConflictResolution(items = []) {
   });
 }
 
-function diversify(items = [], topK = 8) {
+function diversify(items = [], topK = 8, options = {}) {
   const selected = [];
   const perSource = new Map();
   const seenCanonical = new Set();
-  for (const item of stableSortByScore(items)) {
+  const facet = normalizeText(options.facet || items.find((item) => item?.facet)?.facet || 'default').toLowerCase();
+  const ranked = protectStrongSemanticCandidates(stableSortByScore(items), topK, options);
+  for (const item of stableSortByScore(ranked)) {
     if (selected.length >= topK) break;
     const canonical = String(item.canonicalKey || canonicalizeText(item.text));
     if (!canonical || seenCanonical.has(canonical)) continue;
     const source = String(item.source || 'personal');
-    if ((perSource.get(source) || 0) >= sourceLimit(source)) continue;
+    if ((perSource.get(source) || 0) >= sourceLimitForFacet(source, facet)) continue;
     seenCanonical.add(canonical);
     perSource.set(source, (perSource.get(source) || 0) + 1);
-    selected.push(item);
+    const selectionReason = appendSelectionReason(item.selectionReason, `facet_${facet || 'default'}_selected`);
+    selected.push({
+      ...item,
+      selectionReason,
+      diagnostics: {
+        ...(item.diagnostics || {}),
+        recall: buildRecallDiagnostics(item, selectionReason)
+      }
+    });
   }
   if (selected.length >= topK) return selected;
-  for (const item of stableSortByScore(items)) {
+  for (const item of stableSortByScore(ranked)) {
     if (selected.length >= topK) break;
     const canonical = String(item.canonicalKey || canonicalizeText(item.text));
     if (seenCanonical.has(canonical)) continue;
     seenCanonical.add(canonical);
-    selected.push(item);
+    const selectionReason = appendSelectionReason(item.selectionReason, 'backfill_selected');
+    selected.push({
+      ...item,
+      selectionReason,
+      diagnostics: {
+        ...(item.diagnostics || {}),
+        recall: buildRecallDiagnostics(item, selectionReason)
+      }
+    });
   }
   return selected;
 }
@@ -489,9 +677,39 @@ function buildLanceDbFallbackReason(diagnostics = {}, queryEmbedding = null, vec
   if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) return 'query_embedding_unavailable';
   if (diagnostics.ok !== true) return diagnostics.reason || 'search_failed';
   if (Number(diagnostics.rows || 0) <= 0) return 'empty_result';
-  if (Number(diagnostics.vectorCandidates || 0) <= 0) return 'no_visible_candidates';
+  if (Number(diagnostics.vectorCandidates || 0) <= 0) return diagnostics.noVisibleReason || 'no_visible_candidates';
   if (vectorStoreMode !== 'lancedb') return `mode_${vectorStoreMode}`;
   return '';
+}
+
+function diagnoseNoVisibleVectorCandidates(rows = [], candidates = [], context = {}, facet = 'default') {
+  const rawRows = Array.isArray(rows) ? rows : [];
+  if (rawRows.length === 0) return '';
+  const localById = new Map((Array.isArray(candidates) ? candidates : [])
+    .map((item) => [normalizeText(item.id || item.nodeId), item])
+    .filter(([key]) => key));
+  const filter = context.filter || {};
+  let missingLocal = 0;
+  let scopeFiltered = 0;
+  let facetFiltered = 0;
+  for (const row of rawRows) {
+    if (!rowPassesMemoryFilter(row, filter)) {
+      scopeFiltered += 1;
+      continue;
+    }
+    const local = localById.get(normalizeText(row.nodeId || row.id));
+    if (!local) {
+      missingLocal += 1;
+      continue;
+    }
+    if (!matchesFacetCandidate(facet, local)) {
+      facetFiltered += 1;
+    }
+  }
+  if (scopeFiltered >= rawRows.length) return 'no_visible_candidates_scope_filtered';
+  if (facetFiltered > 0 && facetFiltered + scopeFiltered + missingLocal >= rawRows.length) return 'no_visible_candidates_facet_filtered';
+  if (missingLocal > 0 && missingLocal + scopeFiltered >= rawRows.length) return 'no_visible_candidates_missing_local';
+  return 'no_visible_candidates';
 }
 
 function buildEmbeddingCoverageDiagnostics(candidates = []) {
@@ -510,6 +728,19 @@ function buildEmbeddingCoverageDiagnostics(candidates = []) {
 }
 
 async function queryMemory(input = {}) {
+  const startedAt = getNowMs();
+  const timing = {
+    queryEmbeddingMs: 0,
+    collectCandidatesMs: 0,
+    localLexicalMs: 0,
+    lancedbSearchMs: 0,
+    fusionMs: 0,
+    conflictResolutionMs: 0,
+    rerankMs: 0,
+    diversifyMs: 0,
+    totalMs: 0,
+    queryEmbeddingCacheHit: false
+  };
   const userId = normalizeText(input.userId);
   const query = normalizeText(input.query);
   const journalTargetDays = resolveJournalTargetDays(query, {
@@ -521,16 +752,24 @@ async function queryMemory(input = {}) {
     ? String(input.facet || '').trim().toLowerCase()
     : classifyFacet(query, input);
   const rewrites = rewriteQuery(query, facet);
+  let stageStartedAt = getNowMs();
   const queryEmbedding = await resolveQueryEmbedding(query, facet, {
     ...input,
-    rewrites
+    rewrites,
+    userId,
+    timingDiagnostics: timing
   });
+  timing.queryEmbeddingMs = getNowMs() - stageStartedAt;
+  stageStartedAt = getNowMs();
   const candidates = filterCandidatesBySource(collectCandidates(userId, input), input.source);
+  timing.collectCandidatesMs = getNowMs() - stageStartedAt;
+  stageStartedAt = getNowMs();
   const scored = await scoreCandidates(candidates, query, facet, {
     ...input,
     rewrites,
     queryEmbedding
   });
+  timing.localLexicalMs = getNowMs() - stageStartedAt;
   const vectorStoreMode = normalizeVectorStoreMode(config.MEMORY_VECTOR_STORE);
   const embeddingCoverage = buildEmbeddingCoverageDiagnostics(candidates);
   let lancedbDiagnostics = {
@@ -544,7 +783,8 @@ async function queryMemory(input = {}) {
     fallbackReason: '',
     coverage: embeddingCoverage,
     lowCoverage: embeddingCoverage.lowCoverage,
-    coverageReason: embeddingCoverage.lowCoverage ? 'low_coverage' : ''
+    coverageReason: embeddingCoverage.lowCoverage ? 'low_coverage' : '',
+    noVisibleReason: ''
   };
   let rankedForRerank = scored;
   if (!lancedbDiagnostics.enabled) {
@@ -559,17 +799,28 @@ async function queryMemory(input = {}) {
         .filter(Boolean),
       (item) => item
     );
+    stageStartedAt = getNowMs();
     const vectorResult = await searchMemoryVectors(queryEmbedding, {
       ...input,
       userId,
       allowedGroupIds
     });
+    timing.lancedbSearchMs = getNowMs() - stageStartedAt;
+    stageStartedAt = getNowMs();
     const vectorCandidates = resolveVectorCandidates(vectorResult.rows || [], candidates, {
       ...input,
       userId,
       allowedGroupIds,
       filter: vectorResult.filter
     }).filter((item) => matchesFacetCandidate(facet, item));
+    const noVisibleReason = vectorCandidates.length > 0
+      ? ''
+      : diagnoseNoVisibleVectorCandidates(vectorResult.rows || [], candidates, {
+        ...input,
+        userId,
+        allowedGroupIds,
+        filter: vectorResult.filter
+      }, facet);
     lancedbDiagnostics = {
       enabled: true,
       mode: vectorStoreMode,
@@ -581,7 +832,8 @@ async function queryMemory(input = {}) {
       fallbackReason: '',
       coverage: embeddingCoverage,
       lowCoverage: embeddingCoverage.lowCoverage,
-      coverageReason: embeddingCoverage.lowCoverage ? 'low_coverage' : ''
+      coverageReason: embeddingCoverage.lowCoverage ? 'low_coverage' : '',
+      noVisibleReason
     };
     lancedbDiagnostics.fallbackReason = lancedbDiagnostics.fused
       ? ''
@@ -591,19 +843,45 @@ async function queryMemory(input = {}) {
         rrfK: config.MEMORY_V3_RRF_K
       });
     }
+    timing.fusionMs = getNowMs() - stageStartedAt;
   }
+  stageStartedAt = getNowMs();
   const conflictResolved = applyConflictResolution(rankedForRerank);
-  const reranked = await rerankMemoryCandidates(query, stableSortByScore(conflictResolved), {
+  timing.conflictResolutionMs = getNowMs() - stageStartedAt;
+  const rerankCandidateLimit = Math.max(
+    2,
+    Math.min(
+      100,
+      Math.floor(Number(input.rerankCandidateLimit || config.MEMORY_RERANK_CANDIDATE_LIMIT || config.MEMORY_RERANK_MAX_CANDIDATES || 32) || 32)
+    )
+  );
+  const sortedForRerank = stableSortByScore(conflictResolved);
+  const rerankPool = sortedForRerank.slice(0, rerankCandidateLimit);
+  const rerankTail = sortedForRerank.slice(rerankCandidateLimit);
+  stageStartedAt = getNowMs();
+  const rerankedHead = await rerankMemoryCandidates(query, rerankPool, {
     ...input,
     userId,
-    phase: 'memory_v3'
+    phase: 'memory_v3',
+    maxCandidates: Math.min(
+      rerankCandidateLimit,
+      Math.max(2, Math.floor(Number(input.maxCandidates || config.MEMORY_RERANK_MAX_CANDIDATES || rerankCandidateLimit) || rerankCandidateLimit))
+    )
   }).then((items) => applyJournalTargetDayPriority(items.map((item) => ({
     ...item,
     matchMode: Number(item.rerankScore || 0) > 0
       ? (item.matchMode === 'semantic' ? 'semantic_rerank' : item.matchMode === 'hybrid' ? 'hybrid_rerank' : 'rerank')
       : item.matchMode
   })), journalTargetDays));
-  const selected = diversify(reranked, topK);
+  timing.rerankMs = getNowMs() - stageStartedAt;
+  const reranked = rerankedHead.concat(rerankTail);
+  stageStartedAt = getNowMs();
+  const selected = diversify(reranked, topK, {
+    ...input,
+    facet
+  });
+  timing.diversifyMs = getNowMs() - stageStartedAt;
+  timing.totalMs = getNowMs() - startedAt;
   const split = splitStrictWeak(
     selected,
     Math.max(1, Number(config.MEMORY_V3_STRICT_RESULTS_MAX || 6)),
@@ -638,10 +916,25 @@ async function queryMemory(input = {}) {
       ranked: rankedForRerank.length,
       reranked: reranked.length,
       selected: selected.length,
-      lancedb: lancedbDiagnostics
+      lancedb: lancedbDiagnostics,
+      timings: timing
     },
     diagnostics: {
-      projectionFreshness
+      projectionFreshness,
+      timings: timing,
+      recall: {
+        strongSemanticThreshold: getStrongSemanticThreshold(input),
+        selected: selected.map((item) => ({
+          id: item.id,
+          source: item.source,
+          matchMode: item.matchMode,
+          selectionReason: item.selectionReason || '',
+          lexical: Number(item.lexical || 0) || 0,
+          semantic: Number(item.embedding || item.semantic || item.vectorScore || 0) || 0,
+          rerankScore: Number(item.rerankScore || 0) || 0,
+          preRerankScore: Number(item.preRerankScore || 0) || 0
+        }))
+      }
     }
   };
 }
@@ -654,5 +947,8 @@ module.exports = {
   diversify,
   applyConflictResolution,
   buildLanceDbFallbackReason,
-  buildEmbeddingCoverageDiagnostics
+  buildEmbeddingCoverageDiagnostics,
+  buildQueryEmbeddingCacheKey,
+  clearQueryEmbeddingCache,
+  diagnoseNoVisibleVectorCandidates
 };
