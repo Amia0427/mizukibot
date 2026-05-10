@@ -343,6 +343,46 @@ module.exports = (async () => {
     assert.ok(roleplayPrompt.promptSnapshot.activatedPersonaModules.includes('roleplay_friend_bit'));
   }
 
+  const worldbookPlannerPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 18 },
+    'u_prompt_worldbook_future_two_tracks',
+    '围绕M7未来双轨：服饰专门学校、open campus、N25、两个都不放弃、撑到撑不住。真冬说想继续N25但也想去服饰学校，绘名怎么接？',
+    null,
+    {
+      routePolicyKey: 'chat/worldbook_future_two_tracks',
+      topRouteType: 'direct_chat',
+      sessionKey: 'worldbook_future_two_tracks_prompt_test',
+      routeMeta: {
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: ['continuity_state'],
+            personaModules: ['wb_mizuki_future_two_tracks'],
+            blockDecisions: [
+              { blockId: 'continuity_state', decision: 'include', confidence: 0.9, priority: 20, reason: 'future two tracks continuity' },
+              { moduleId: 'wb_mizuki_future_two_tracks', decision: 'include', confidence: 0.95, priority: 40, reason: 'strong worldbook future two tracks request' }
+            ],
+            rationaleByBlock: {
+              continuity_state: 'future two tracks continuity',
+              wb_mizuki_future_two_tracks: 'strong worldbook future two tracks request'
+            }
+          }
+        }
+      },
+      continuitySignals: {
+        hasCarryOverTopic: true
+      }
+    }
+  );
+
+  if (!worldbookPlannerPrompt.latencyMeta?.optionalBudgetExceeded) {
+    assert.ok(worldbookPlannerPrompt.promptSnapshot.activatedPersonaModules.includes('wb_mizuki_future_two_tracks'));
+    assert.ok(worldbookPlannerPrompt.promptSnapshot.plannerIncludedBlocks.some((item) => item.id === 'persona_module:wb_mizuki_future_two_tracks'));
+    assert.ok(worldbookPlannerPrompt.promptSnapshot.assembledBlocks.some((item) => item.meta?.moduleId === 'wb_mizuki_future_two_tracks'));
+    assert.ok(worldbookPlannerPrompt.promptSegments.systemPrompt.some((message) => String(message.content || '').includes('服饰专门学校')));
+  }
+  assert.ok(Number(worldbookPlannerPrompt.latencyMeta?.prompt_assembly_ms) >= 0);
+
   console.log('promptGoldenSnapshots.test.js passed');
 })().catch((error) => {
   console.error(error);

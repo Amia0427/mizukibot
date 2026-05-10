@@ -17,13 +17,7 @@ const {
 const { loadBridgeStore } = require('./shortTermBridgeMemory');
 const { getRecentSessionContextSummaries } = require('./sessionContextSummaryStore');
 const { getDailyJournalRetrievalBundle } = require('./dailyJournal');
-const { buildMemoryContextAsync, buildMemoryContext } = require('./memoryContext');
 const { getUserAffinityState, getUserProfile } = require('./memory');
-const {
-  restoreSessionState,
-  appendMemoryEvent,
-  materializeMemoryViews
-} = require('./memory-v3');
 const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('./promptSecurity');
 
 const STATE_VERSION = 2;
@@ -103,6 +97,26 @@ function normalizeText(value, maxChars = 0) {
   if (!text) return '';
   if (!maxChars || text.length <= maxChars) return text;
   return text.slice(0, Math.max(1, Number(maxChars) || 1));
+}
+
+function buildMemoryContext(...args) {
+  return require('./memoryContext').buildMemoryContext(...args);
+}
+
+function buildMemoryContextAsync(...args) {
+  return require('./memoryContext').buildMemoryContextAsync(...args);
+}
+
+function restoreSessionState(...args) {
+  return require('./memory-v3').restoreSessionState(...args);
+}
+
+function appendMemoryEvent(...args) {
+  return require('./memory-v3').appendMemoryEvent(...args);
+}
+
+function materializeMemoryViews(...args) {
+  return require('./memory-v3').materializeMemoryViews(...args);
 }
 
 function normalizeArray(value) {

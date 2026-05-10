@@ -121,6 +121,44 @@ module.exports = (async () => {
   assert.ok(profile.strictProfile.likes.includes('喜欢显式记住项'));
   assert.ok(!profile.strictProfile.likes.includes('今天聊过短期话题'));
 
+  await appendMemoryEvent({
+    type: 'memory_confirmed',
+    ts: now + 2000,
+    userId: 'u_profile_other',
+    scopeType: 'personal',
+    source: 'explicit',
+    sourceKind: 'explicit',
+    status: 'active',
+    memoryKind: 'like',
+    semanticSlot: 'preference_like',
+    text: '另一个用户的旧投影',
+    confidence: 0.99,
+    payload: { fieldKey: 'preference_like', type: 'like' }
+  });
+  materializeMemoryViews({ force: true });
+
+  await appendMemoryEvent({
+    type: 'memory_confirmed',
+    ts: now + 3000,
+    userId: 'u_profile_v3',
+    scopeType: 'personal',
+    source: 'explicit',
+    sourceKind: 'explicit',
+    status: 'active',
+    memoryKind: 'goal',
+    semanticSlot: 'goal',
+    text: '增量刷新后的目标',
+    confidence: 0.99,
+    payload: { fieldKey: 'goal', type: 'goal' }
+  });
+  const incremental = materializeMemoryViews({
+    mode: 'incremental',
+    dirtyScopes: { userId: 'u_profile_v3' }
+  });
+  assert.strictEqual(incremental.stats.materializeMode, 'incremental');
+  assert.ok(incremental.profileProjection.users.u_profile_v3.strictProfile.goals.includes('增量刷新后的目标'));
+  assert.ok(incremental.profileProjection.users.u_profile_other.strictProfile.likes.includes('另一个用户的旧投影'));
+
   console.log('memoryV3MaterializerProfile.test.js passed');
 })().catch((error) => {
   console.error(error);

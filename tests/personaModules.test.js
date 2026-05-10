@@ -230,6 +230,82 @@ const {
   });
   assert.strictEqual(semanticWorldbook.results[0].moduleId, 'wb_mizuki_beta');
   assert.ok(semanticWorldbook.diagnostics.embedding.semanticCandidates >= 1);
+  assert.ok(Number(semanticWorldbook.diagnostics.latency.worldbook_lexical_ms) >= 0);
+  assert.ok(Number(semanticWorldbook.diagnostics.latency.worldbook_semantic_ms) >= 0);
+  assert.ok(Number(semanticWorldbook.diagnostics.latency.worldbook_rerank_ms) >= 0);
+
+  let lancedbSearchCalls = 0;
+  const lancedbMismatchWorldbook = await searchPersonaWorldbook(fakeCatalog, {
+    query: '服饰学业和活动冲突',
+    lexicalLimit: 0,
+    semanticLimit: 2,
+    limit: 2,
+    hotPath: true,
+    shouldUseRemoteEmbedding: () => true,
+    queryEmbedding: [1, 0],
+    embeddingIndex: {
+      rows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      readyRows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      byKey: new Map(),
+      byModuleId: new Map()
+    },
+    lancedbTableName: 'persona_worldbook_vectors_dimension_mismatch_test',
+    config: {
+      MEMORY_VECTOR_STORE: 'lancedb',
+      MEMORY_LANCEDB_READ_ENABLED: true
+    },
+    searchWorldbookVectors: async () => {
+      lancedbSearchCalls += 1;
+      return {
+        ok: false,
+        rows: [],
+        reason: 'search_failed:No vector column found to match query dimension 2'
+      };
+    }
+  });
+  assert.strictEqual(lancedbMismatchWorldbook.results[0].moduleId, 'wb_mizuki_beta');
+  assert.strictEqual(lancedbMismatchWorldbook.diagnostics.embedding.lancedb.lancedbDisabledReason, 'dimension_mismatch');
+  assert.ok(/sync-lancedb-memory-index\.js --full --compact/.test(lancedbMismatchWorldbook.diagnostics.embedding.lancedb.rebuildCommand));
+
+  const lancedbCachedMismatchWorldbook = await searchPersonaWorldbook(fakeCatalog, {
+    query: '服饰学业和活动冲突',
+    lexicalLimit: 0,
+    semanticLimit: 2,
+    limit: 2,
+    hotPath: true,
+    shouldUseRemoteEmbedding: () => true,
+    queryEmbedding: [1, 0],
+    embeddingIndex: {
+      rows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      readyRows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      byKey: new Map(),
+      byModuleId: new Map()
+    },
+    lancedbTableName: 'persona_worldbook_vectors_dimension_mismatch_test',
+    config: {
+      MEMORY_VECTOR_STORE: 'lancedb',
+      MEMORY_LANCEDB_READ_ENABLED: true
+    },
+    searchWorldbookVectors: async () => {
+      lancedbSearchCalls += 1;
+      return { ok: true, rows: [{ id: 'wb_mizuki_alpha', score: 1 }], reason: '' };
+    }
+  });
+  assert.strictEqual(lancedbCachedMismatchWorldbook.diagnostics.embedding.lancedb.reason, 'dimension_mismatch');
+  assert.strictEqual(lancedbCachedMismatchWorldbook.diagnostics.embedding.lancedb.skipped, true);
+  assert.strictEqual(lancedbSearchCalls, 1);
 
   const rerankedWorldbook = await searchPersonaWorldbook(fakeCatalog, {
     query: '冲突',

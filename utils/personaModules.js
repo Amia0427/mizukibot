@@ -385,7 +385,7 @@ function buildPlannerPersonaModuleCatalog(personaModuleCatalog = [], context = {
   const lexicalResults = searchPersonaWorldbookLexical(catalog, normalizeText(context.question || context.routePrompt || ''), {
     limit: options.limit || config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT
   });
-  const limit = Math.max(0, Number(options.limit || config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT || 20) || 20);
+  const limit = Math.max(0, Number(options.limit || config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT || 12) || 12);
   const rankedWorldbookIds = new Set(
     ruleCandidates
       .filter((item) => normalizeText(item.id).startsWith('wb_mizuki_'))

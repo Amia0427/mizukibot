@@ -12,7 +12,8 @@ const {
 const {
   embedQueryText,
   semanticScoreDoc,
-  embedMemoryItems
+  embedMemoryItems,
+  isEmbeddingFresh
 } = require('./memorySemanticIndex');
 const { rerankMemoryCandidates } = require('./memoryReranker');
 const {
@@ -1341,6 +1342,43 @@ function sameWriteScope(left = {}, right = {}) {
   return true;
 }
 
+function areWriteNeighborTypesCompatible(candidate = {}, item = {}) {
+  const candidateType = normalizeType(candidate.type);
+  const itemType = normalizeType(item.type);
+  if (candidateType === itemType) return true;
+
+  const candidateKind = getItemMemoryKind(candidate);
+  const itemKind = getItemMemoryKind(item);
+  if (candidateKind && itemKind && candidateKind === itemKind) return true;
+
+  const preferenceTypes = new Set(['like', 'dislike', 'hobby', 'personality']);
+  if (preferenceTypes.has(candidateType) && preferenceTypes.has(itemType)) return true;
+
+  const stableProfileTypes = new Set(['fact', 'identity', 'summary', 'impression']);
+  if (stableProfileTypes.has(candidateType) && stableProfileTypes.has(itemType)) return true;
+
+  if (candidate.conflictKey && item.conflictKey && String(candidate.conflictKey) === String(item.conflictKey)) return true;
+  return false;
+}
+
+function upsertWriteNeighbor(neighbors, item, score, reason) {
+  if (!item || !String(item.id || '').trim()) return;
+  const existingIndex = neighbors.findIndex((entry) => String(entry.id || '') === String(item.id || ''));
+  const next = {
+    ...item,
+    score,
+    reason,
+    preRerankScore: score
+  };
+  if (existingIndex < 0) {
+    neighbors.push(next);
+    return;
+  }
+  if (score > Number(neighbors[existingIndex].score || 0)) {
+    neighbors[existingIndex] = next;
+  }
+}
+
 function findWriteRerankNeighbors(candidate = {}, options = {}) {
   const limit = Math.max(1, Math.min(20, Number(options.writeRerankCandidateLimit || config.MEMORY_RERANK_CANDIDATE_LIMIT || 12) || 12));
   const candidateTokens = buildDocTokens(candidate);
@@ -1351,8 +1389,8 @@ function findWriteRerankNeighbors(candidate = {}, options = {}) {
   for (const item of getMemoryItems(candidate.userId)) {
     if (!item || String(item.id || '') === String(candidate.id || '')) continue;
     if (normalizeStatus(item.status, STATUS_ACTIVE) === STATUS_ARCHIVED) continue;
-    if (normalizeType(item.type) !== normalizeType(candidate.type)) continue;
     if (!sameWriteScope(candidate, item)) continue;
+    if (!areWriteNeighborTypesCompatible(candidate, item)) continue;
     const itemTokens = buildDocTokens(item);
     const lexical = jaccardFromTokens(candidateTokens, itemTokens);
     const direct = String(item.canonicalText || '') && String(candidate.canonicalText || '')
@@ -1360,15 +1398,50 @@ function findWriteRerankNeighbors(candidate = {}, options = {}) {
       ? 1
       : 0;
     const overlap = itemTokens.filter((token) => candidateTokenSet.has(token)).length / Math.max(1, candidateTokenSet.size);
-    const score = Math.max(lexical, overlap * 0.7, direct);
+    const sameConflict = candidate.conflictKey && item.conflictKey && String(candidate.conflictKey) === String(item.conflictKey);
+    const sameKind = getItemMemoryKind(candidate) && getItemMemoryKind(candidate) === getItemMemoryKind(item);
+    const score = Math.max(lexical, overlap * 0.7, direct, sameConflict ? 0.72 : 0, sameKind ? 0.34 : 0);
     const minScore = Number(options.writeRerankMinLexicalScore || 0.28) || 0.28;
-    if (score < minScore && !direct) continue;
-    neighbors.push({
-      ...item,
-      score,
-      reason: 'write-neighbor',
-      preRerankScore: score
-    });
+    if (score < minScore && !direct && !sameConflict) continue;
+    upsertWriteNeighbor(neighbors, item, score, sameConflict ? 'write-neighbor-conflict-key' : 'write-neighbor');
+  }
+
+  return neighbors
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .slice(0, limit);
+}
+
+async function findWriteRerankNeighborsAsync(candidate = {}, options = {}) {
+  const limit = Math.max(1, Math.min(20, Number(options.writeRerankCandidateLimit || config.MEMORY_RERANK_CANDIDATE_LIMIT || 12) || 12));
+  const neighbors = findWriteRerankNeighbors(candidate, options);
+  if (options.disableWriteSemanticNeighbors === true || !shouldUseRemoteEmbedding()) {
+    return neighbors.slice(0, limit);
+  }
+
+  try {
+    await embedMemoryItems([candidate], options);
+    const queryEmbedding = candidate?.meta?.embedding || candidate?.embedding;
+    if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) return neighbors.slice(0, limit);
+
+    const minSemantic = Math.max(0.01, Number(options.writeRerankMinSemanticScore || config.MEMORY_WRITE_RERANK_MIN_SEMANTIC_SCORE || 0.82) || 0.82);
+    const semanticPoolLimit = Math.max(limit, Math.min(80, Number(options.writeRerankSemanticPoolLimit || 48) || 48));
+    const semanticCandidates = [];
+    for (const item of getMemoryItems(candidate.userId)) {
+      if (!item || String(item.id || '') === String(candidate.id || '')) continue;
+      if (normalizeStatus(item.status, STATUS_ACTIVE) === STATUS_ARCHIVED) continue;
+      if (!sameWriteScope(candidate, item)) continue;
+      if (!areWriteNeighborTypesCompatible(candidate, item)) continue;
+      const semantic = semanticScoreDoc(queryEmbedding, item);
+      if (semantic < minSemantic) continue;
+      semanticCandidates.push({ item, semantic });
+    }
+
+    semanticCandidates
+      .sort((a, b) => Number(b.semantic || 0) - Number(a.semantic || 0))
+      .slice(0, semanticPoolLimit)
+      .forEach(({ item, semantic }) => upsertWriteNeighbor(neighbors, item, semantic, 'write-neighbor-semantic'));
+  } catch (error) {
+    console.warn('[vectorMemory] write semantic neighbor lookup failed, fallback to lexical neighbors:', error.message);
   }
 
   return neighbors
@@ -1381,7 +1454,7 @@ async function maybeApplyWriteRerank(candidate = {}, options = {}) {
     return { candidate, skipped: true, reason: 'disabled' };
   }
 
-  const neighbors = findWriteRerankNeighbors(candidate, options);
+  const neighbors = await findWriteRerankNeighborsAsync(candidate, options);
   if (!neighbors.length) return { candidate, skipped: true, reason: 'no_neighbors' };
 
   const probe = {
@@ -1402,11 +1475,16 @@ async function maybeApplyWriteRerank(candidate = {}, options = {}) {
 
     const incomingRank = reranked.findIndex((item) => String(item.id || '') === String(probe.id || ''));
     const bestExisting = reranked.find((item) => String(item.id || '') !== String(probe.id || ''));
-    if (incomingRank > 0 && bestExisting) {
-      const incomingScore = Number(reranked[incomingRank]?.rerankNormalizedScore ?? reranked[incomingRank]?.score ?? 0) || 0;
+    const incomingItem = incomingRank >= 0 ? reranked[incomingRank] : null;
+    if (incomingItem && bestExisting) {
+      const incomingScore = Number(incomingItem.rerankNormalizedScore ?? incomingItem.score ?? 0) || 0;
       const existingScore = Number(bestExisting.rerankNormalizedScore ?? bestExisting.score ?? 0) || 0;
       const duplicateMargin = Number(options.writeRerankDuplicateMargin ?? 0.04) || 0.04;
-      if (existingScore >= incomingScore + duplicateMargin) {
+      const conflictMargin = Number(options.writeRerankConflictMargin ?? 0.08) || 0.08;
+      const existingHasConflict = bestExisting.conflictKey && candidate.conflictKey && String(bestExisting.conflictKey) === String(candidate.conflictKey);
+      const conflictLike = existingHasConflict
+        || (areWriteNeighborTypesCompatible(candidate, bestExisting) && normalizeType(candidate.type) !== normalizeType(bestExisting.type));
+      if (!conflictLike && incomingRank > 0 && existingScore >= incomingScore + duplicateMargin) {
         return {
           candidate,
           duplicateId: bestExisting.id,
@@ -1414,6 +1492,35 @@ async function maybeApplyWriteRerank(candidate = {}, options = {}) {
           rerank: {
             incomingRank,
             duplicateId: bestExisting.id,
+            incomingScore,
+            existingScore
+          }
+        };
+      }
+      if (conflictLike && existingScore >= incomingScore - conflictMargin) {
+        return {
+          candidate: {
+            ...candidate,
+            status: normalizeStatus(candidate.status, STATUS_ACTIVE) === STATUS_ACTIVE ? STATUS_CANDIDATE : candidate.status,
+            supersedes: Array.from(new Set([...(candidate.supersedes || []), bestExisting.id])),
+            meta: {
+              ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
+              writeRerank: {
+                checked: true,
+                decision: 'conflict_candidate',
+                neighbors: neighbors.length,
+                conflictId: bestExisting.id,
+                incomingScore,
+                existingScore
+              },
+              traceReason: candidate.meta?.traceReason || 'rerank_conflict_candidate'
+            }
+          },
+          conflictId: bestExisting.id,
+          reason: 'rerank_conflict_candidate',
+          rerank: {
+            incomingRank,
+            conflictId: bestExisting.id,
             incomingScore,
             existingScore
           }
@@ -1428,6 +1535,7 @@ async function maybeApplyWriteRerank(candidate = {}, options = {}) {
           ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
           writeRerank: {
             checked: true,
+            decision: 'accept',
             neighbors: neighbors.length
           }
         }
@@ -1447,21 +1555,45 @@ function findConflictRecord(library, incoming) {
     if (String(item.userId || '') !== String(incoming.userId || '')) return false;
     if (String(item.conflictKey || '') !== String(incoming.conflictKey || '')) return false;
     if (normalizeStatus(item.status) === STATUS_ARCHIVED) return false;
-    return String(item.canonicalText || '') !== String(incoming.canonicalText || '');
+    if (normalizeType(item.type) !== normalizeType(incoming.type)) return true;
+    return sanitizeText(item.text || item.canonicalText || '') !== sanitizeText(incoming.text || incoming.canonicalText || '');
   }) || null;
 }
 
 function upsertMemoryItem(library, incoming) {
   const now = nowTs();
   const conflictRecord = findConflictRecord(library, incoming);
-  if (conflictRecord) {
+  const canSupersedeConflict = conflictRecord
+    && normalizeStatus(incoming.status, STATUS_ACTIVE) === STATUS_ACTIVE
+    && Number(incoming.confidence || 0) >= Math.max(0.9, Number(config.MEMORY_CONFLICT_SUPERSEDE_MIN_CONFIDENCE || 0.9) || 0.9);
+  if (canSupersedeConflict) {
     conflictRecord.status = STATUS_ARCHIVED;
     conflictRecord.updatedAt = now;
     conflictRecord.supersedes = Array.from(new Set([...(conflictRecord.supersedes || []), incoming.id]));
     incoming.supersedes = Array.from(new Set([...(incoming.supersedes || []), conflictRecord.id]));
+  } else if (conflictRecord) {
+    if (normalizeStatus(incoming.status, STATUS_ACTIVE) === STATUS_ACTIVE) {
+      incoming.status = STATUS_CANDIDATE;
+    }
+    incoming.supersedes = Array.from(new Set([...(incoming.supersedes || []), conflictRecord.id]));
+    incoming.meta = {
+      ...(incoming.meta && typeof incoming.meta === 'object' ? incoming.meta : {}),
+      conflictCandidate: {
+        existingId: conflictRecord.id,
+        existingText: conflictRecord.text,
+        reason: incoming.meta?.writeRerank?.decision === 'conflict_candidate'
+          ? 'rerank_conflict_candidate'
+          : 'pipeline_conflict_candidate'
+      }
+    };
   }
 
-  const found = library.items.find((item) => isDuplicateMemory(item, incoming));
+  const found = library.items.find((item) => {
+    if (conflictRecord && normalizeStatus(incoming.status, STATUS_ACTIVE) === STATUS_CANDIDATE) {
+      return false;
+    }
+    return isDuplicateMemory(item, incoming);
+  });
   if (!found) {
     if (incoming.status === STATUS_ACTIVE) {
       incoming.lastConfirmedAt = incoming.lastConfirmedAt || now;
@@ -1739,6 +1871,7 @@ async function addMemoryItemsBatchWithVectorBackfill(items = [], options = {}) {
   }
 
   const { accepted, rejected } = await prepareEnhancedMemoryWrites(normalizedItems, options);
+  const preEmbeddedAccepted = accepted.filter((item) => isEmbeddingFresh(item, options)).length;
   let embeddingResult = { attempted: 0, embedded: 0, items: accepted };
   if (accepted.length > 0 && shouldUseRemoteEmbedding()) {
     try {
@@ -1760,7 +1893,7 @@ async function addMemoryItemsBatchWithVectorBackfill(items = [], options = {}) {
     ids,
     accepted,
     rejected,
-    embedded: Number(embeddingResult.embedded || 0) || 0,
+    embedded: Math.min(accepted.length, preEmbeddedAccepted + (Number(embeddingResult.embedded || 0) || 0)),
     embeddingAttempted: Number(embeddingResult.attempted || 0) || 0,
     materialize,
     lancedb
@@ -2299,7 +2432,10 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
 
 function finalizeScoredHits(userId, candidates = [], topK = 8, options = {}) {
   const conflictFiltered = resolveConflictWinners(candidates);
-  const selected = selectDiverseHits(conflictFiltered, Math.max(1, Math.min(20, Number(topK) || 8)));
+  const selected = annotateSelectedHits(
+    selectDiverseHits(protectStrongSemanticCandidates(conflictFiltered, topK, options), Math.max(1, Math.min(20, Number(topK) || 8)), options),
+    options
+  );
 
   const shouldTrackAccess = options.trackAccess ?? config.MEMORY_RAG_TRACK_ACCESS ?? false;
   if (shouldTrackAccess) {
@@ -2307,6 +2443,126 @@ function finalizeScoredHits(userId, candidates = [], topK = 8, options = {}) {
   }
 
   return selected;
+}
+
+function getStrongSemanticThreshold(options = {}) {
+  return Math.max(0.1, Number(options.strongSemanticMinScore || config.MEMORY_STRONG_SEMANTIC_MIN_SCORE || 0.82) || 0.82);
+}
+
+function protectStrongSemanticCandidates(candidates = [], topK = 8, options = {}) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  if (!config.MEMORY_HYBRID_RECALL_ENABLED || list.length <= 1) return list;
+  const limit = Math.max(1, Math.min(5, Math.floor(Number(options.strongSemanticProtectLimit || config.MEMORY_STRONG_SEMANTIC_PROTECT_LIMIT || 2) || 2)));
+  const threshold = getStrongSemanticThreshold(options);
+  const protectedIds = new Set(
+    list
+      .filter((item) => Number(item.semantic ?? item.embedding ?? 0) >= threshold)
+      .sort((a, b) => Number(b.semantic ?? b.embedding ?? 0) - Number(a.semantic ?? a.embedding ?? 0))
+      .slice(0, Math.min(limit, Math.max(1, Number(topK) || 1)))
+      .map((item) => String(item.id || ''))
+      .filter(Boolean)
+  );
+  if (!protectedIds.size) return list;
+  return list.map((item) => {
+    if (!protectedIds.has(String(item.id || ''))) return item;
+    const score = Number(item.score || 0) || 0;
+    const boost = Math.max(0.04, Number(options.strongSemanticBoost || config.MEMORY_STRONG_SEMANTIC_BOOST || 0.18) || 0.18);
+    return {
+      ...item,
+      score: score + boost,
+      selectionReason: appendReason(item.selectionReason, 'strong_semantic_protected'),
+      meta: {
+        ...(item.meta && typeof item.meta === 'object' ? item.meta : {}),
+        recallDiagnostics: buildRecallDiagnostics(item, 'strong_semantic_protected')
+      }
+    };
+  });
+}
+
+function appendReason(existing = '', reason = '') {
+  const list = String(existing || '').split(',').map((item) => item.trim()).filter(Boolean);
+  if (reason && !list.includes(reason)) list.push(reason);
+  return list.join(',');
+}
+
+function buildRecallDiagnostics(item = {}, selectionReason = '') {
+  return {
+    preRerankScore: Number(item.preRerankScore || 0) || 0,
+    score: Number(item.score || 0) || 0,
+    semantic: Number(item.semantic ?? item.embedding ?? 0) || 0,
+    lexical: Number(item.lexical || 0) || 0,
+    rerankScore: Number(item.rerankScore || 0) || 0,
+    selectionReason: selectionReason || item.selectionReason || ''
+  };
+}
+
+function annotateSelectedHits(selected = [], options = {}) {
+  const facet = resolveSelectionFacet(selected, options);
+  return (Array.isArray(selected) ? selected : []).map((item, index) => {
+    const reason = appendReason(
+      appendReason(item.selectionReason, `facet_${facet}_selected`),
+      index === 0 ? 'top_ranked' : 'diverse_selected'
+    );
+    return {
+      ...item,
+      selectionReason: reason,
+      meta: {
+        ...(item.meta && typeof item.meta === 'object' ? item.meta : {}),
+        recallDiagnostics: buildRecallDiagnostics(item, reason)
+      }
+    };
+  });
+}
+
+function resolveSelectionFacet(items = [], options = {}) {
+  const rawFacet = String(
+    options.queryFacet
+    || options.facet
+    || (Array.isArray(items) ? items.find((item) => item?.queryFacet)?.queryFacet : '')
+    || classifyRecallFacet(options.query || options.question || '')
+    || 'default'
+  ).trim() || 'default';
+  if (rawFacet === 'recent_continuity' || rawFacet === 'default_continuity') return 'continuity';
+  if (rawFacet === 'task_or_plan') return 'task';
+  if (rawFacet === 'group_context') return 'group';
+  if (rawFacet === 'broad_recall') return 'default';
+  return rawFacet;
+}
+
+function isFacetPriorityEnabled(facet = '') {
+  return ['preference', 'identity', 'relationship', 'continuity', 'task', 'journal', 'group'].includes(String(facet || '').trim());
+}
+
+function isFacetPreferredHit(hit = {}, facet = '') {
+  const normalizedFacet = String(facet || '').trim();
+  const type = normalizeType(hit.type);
+  const source = classifyDocSource(hit);
+  const kind = getItemMemoryKind(hit);
+  if (normalizedFacet === 'preference' || normalizedFacet === 'relationship') {
+    return ['like', 'dislike', 'personality', 'hobby'].includes(type)
+      || ['style', 'jargon'].includes(kind)
+      || source === 'personal';
+  }
+  if (normalizedFacet === 'identity') {
+    return ['identity', 'summary', 'impression', 'personality', 'hobby', 'fact'].includes(type) || source === 'personal';
+  }
+  if (normalizedFacet === 'continuity') {
+    return source === 'journal' || source === 'task' || ['episode', 'topic', 'goal'].includes(type);
+  }
+  if (normalizedFacet === 'task') {
+    return source === 'task' || ['goal', 'fact'].includes(type);
+  }
+  if (normalizedFacet === 'journal') {
+    return source === 'journal' || type === 'episode';
+  }
+  if (normalizedFacet === 'group') {
+    return source === 'group' || source === 'jargon';
+  }
+  return true;
+}
+
+function isStrongSemanticHit(hit = {}, options = {}) {
+  return Number(hit.semantic ?? hit.embedding ?? 0) >= getStrongSemanticThreshold(options);
 }
 
 async function scoreDocsAsync(userId, ids, docs, index, question, topK, options = {}, embeddingQueryVec = null) {
@@ -2331,10 +2587,18 @@ async function scoreDocsAsync(userId, ids, docs, index, question, topK, options 
   return finalizeScoredHits(userId, reranked, topK, options);
 }
 
-function selectDiverseHits(scored, topK) {
+function selectDiverseHits(scored, topK, options = {}) {
   const maxPerType = Math.max(1, Number(config.MEMORY_RAG_MAX_PER_TYPE) || 2);
   // Avoid flooding the prompt with low-importance (tier C) memories.
   const maxLowTier = Math.max(0, Math.floor(Number(config.MEMORY_RAG_MAX_LOW_TIER ?? 2) || 2));
+  const facet = resolveSelectionFacet(scored, options);
+  const facetPriorityEnabled = isFacetPriorityEnabled(facet);
+  const ranked = (Array.isArray(scored) ? scored : []).slice().sort((a, b) => {
+    if (Number(b.score || 0) !== Number(a.score || 0)) return Number(b.score || 0) - Number(a.score || 0);
+    const tierDelta = (TIER_RANK[normalizeTier(b.tier) || 'C'] || 0) - (TIER_RANK[normalizeTier(a.tier) || 'C'] || 0);
+    if (tierDelta !== 0) return tierDelta;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
   const selected = [];
   const perType = new Map();
   const perKind = new Map();
@@ -2393,24 +2657,36 @@ function selectDiverseHits(scored, topK) {
   }
 
   // Pass 1: try to include one high-tier memory when available.
-  for (const hit of scored) {
-    if (selected.length >= topK) break;
-    if (hit.type !== 'impression') continue;
-    if (!canTake(hit, { enforceLowTierCap: true })) continue;
-    take(hit);
-    break;
+  if (!['continuity', 'task', 'journal'].includes(facet)) {
+    for (const hit of ranked) {
+      if (selected.length >= topK) break;
+      if (hit.type !== 'impression') continue;
+      if (!canTake(hit, { enforceLowTierCap: true })) continue;
+      take({ ...hit, selectionReason: appendReason(hit.selectionReason, 'facet_profile_anchor') });
+      break;
+    }
   }
 
   // Pass 2: try to include one other high-tier memory when available.
-  for (const hit of scored) {
+  for (const hit of ranked) {
     if (selected.length >= topK) break;
     if (!isHighTier(hit.tier)) continue;
+    if (facetPriorityEnabled && !isFacetPreferredHit(hit, facet) && !isStrongSemanticHit(hit, options)) continue;
     if (!canTake(hit, { enforceLowTierCap: true })) continue;
-    take(hit);
+    take({ ...hit, selectionReason: appendReason(hit.selectionReason, 'facet_high_tier') });
     break;
   }
 
-  for (const hit of scored) {
+  if (facetPriorityEnabled) {
+    for (const hit of ranked) {
+      if (selected.length >= topK) break;
+      if (!isFacetPreferredHit(hit, facet) && !isStrongSemanticHit(hit, options)) continue;
+      if (!canTake(hit, { enforceLowTierCap: true })) continue;
+      take({ ...hit, selectionReason: appendReason(hit.selectionReason, 'facet_priority') });
+    }
+  }
+
+  for (const hit of ranked) {
     if (selected.length >= topK) break;
     if (!canTake(hit, { enforceLowTierCap: true })) continue;
     take(hit);
@@ -2418,7 +2694,7 @@ function selectDiverseHits(scored, topK) {
 
   if (selected.length >= topK) return selected;
 
-  for (const hit of scored) {
+  for (const hit of ranked) {
     if (selected.length >= topK) break;
     if (selected.find((row) => row.id === hit.id)) continue;
     // Backfill without low-tier/type caps, but still avoid repeating identical canonical memories.

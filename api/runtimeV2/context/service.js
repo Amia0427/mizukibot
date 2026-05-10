@@ -6,14 +6,6 @@ const { buildPromptSnippet } = require('../../../utils/selfImprovementRuntime');
 const { buildStyleProfileSnippet } = require('../../../utils/styleProfileRuntime');
 const { buildSocialContextSnippet } = require('../../../utils/socialContextRuntime');
 const {
-  buildMemoryContext,
-  buildMemoryContextAsync
-} = require('../../../utils/memoryContext');
-const {
-  composePersonaMemoryState,
-  renderPersonaMemoryPrompt
-} = require('../../../utils/personaMemoryState');
-const {
   estimateTokens,
   getAffinitySettings,
   trimTextByTokenBudget
@@ -61,6 +53,22 @@ function getConfig() {
   } catch (_) {
     return config;
   }
+}
+
+function buildMemoryContext(...args) {
+  return require('../../../utils/memoryContext').buildMemoryContext(...args);
+}
+
+function buildMemoryContextAsync(...args) {
+  return require('../../../utils/memoryContext').buildMemoryContextAsync(...args);
+}
+
+function composePersonaMemoryState(...args) {
+  return require('../../../utils/personaMemoryState').composePersonaMemoryState(...args);
+}
+
+function renderPersonaMemoryPrompt(...args) {
+  return require('../../../utils/personaMemoryState').renderPersonaMemoryPrompt(...args);
 }
 
 function buildRelationshipPromptLines(memoryContext = {}) {
@@ -1873,7 +1881,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
         optionalBudgetMs: 0,
         optionalBudgetExceeded: false,
         promptCollectMs,
-        promptRenderMs
+        promptRenderMs,
+        prompt_assembly_ms: promptRenderMs
       }
     };
   }
@@ -2371,7 +2380,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       optionalBudgetMs,
       optionalBudgetExceeded,
       promptCollectMs,
-      promptRenderMs
+      promptRenderMs,
+      prompt_assembly_ms: promptRenderMs
     },
     dynamicFewShotPrompt: effectiveOptionalLayer?.dynamicFewShotPrompt || sessionCandidateLayer.dynamicFewShotPrompt || promptMaterials.dynamicFewShotPrompt || ''
   };

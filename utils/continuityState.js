@@ -5,7 +5,6 @@ const {
   buildSharedShortTermContextMessages
 } = require('./shortTermMemory');
 const { getDailyJournalRetrievalBundle } = require('./dailyJournal');
-const { buildMemoryContext } = require('./memoryContext');
 const { isRecentRecallQuery } = require('./recallHeuristics');
 
 function normalizeArray(value) {
@@ -21,6 +20,10 @@ function trimLine(value, maxChars = 220) {
   if (!text) return '';
   if (text.length <= maxChars) return text;
   return `${text.slice(0, Math.max(1, maxChars - 3))}...`;
+}
+
+function buildMemoryContext(...args) {
+  return require('./memoryContext').buildMemoryContext(...args);
 }
 
 function isPositiveMemoryRecallText(value) {

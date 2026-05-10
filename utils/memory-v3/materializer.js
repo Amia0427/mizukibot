@@ -16,7 +16,12 @@ const {
   defaultSessionProjection,
   defaultProfileProjection,
   defaultScopeProjection,
-  defaultEpisodeProjection
+  defaultEpisodeProjection,
+  loadSessionProjection,
+  loadProfileProjection,
+  loadScopeProjection,
+  loadEpisodeProjection,
+  loadMemoryNodes
 } = require('./storage');
 const { enqueueMissingEmbeddings } = require('./embeddingIndex');
 const { acquireMaterializeLock, DEFAULT_STALE_MS: DEFAULT_MATERIALIZE_LOCK_STALE_MS } = require('./materializeLock');
@@ -559,6 +564,56 @@ function getLatestEventTs(events = []) {
   return latest;
 }
 
+function normalizeDirtyScopes(value = {}) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const userIds = new Set();
+  const sessionKeys = new Set();
+  const groupIds = new Set();
+  const add = (set, item) => {
+    const text = normalizeText(item);
+    if (text) set.add(text);
+  };
+  for (const item of Array.isArray(source.userIds) ? source.userIds : []) add(userIds, item);
+  for (const item of Array.isArray(source.sessionKeys) ? source.sessionKeys : []) add(sessionKeys, item);
+  for (const item of Array.isArray(source.groupIds) ? source.groupIds : []) add(groupIds, item);
+  add(userIds, source.userId);
+  add(sessionKeys, source.sessionKey);
+  add(groupIds, source.groupId);
+  return { userIds, sessionKeys, groupIds };
+}
+
+function countDirtyScopes(scopes = {}) {
+  return Number(scopes.userIds?.size || 0) + Number(scopes.sessionKeys?.size || 0) + Number(scopes.groupIds?.size || 0);
+}
+
+function eventMatchesDirtyScopes(event = {}, scopes = {}) {
+  const userId = normalizeText(event.userId);
+  const sessionKey = normalizeText(event.sessionKey);
+  const groupId = normalizeText(event.groupId);
+  return Boolean(
+    (userId && scopes.userIds?.has(userId))
+    || (sessionKey && scopes.sessionKeys?.has(sessionKey))
+    || (groupId && scopes.groupIds?.has(groupId))
+  );
+}
+
+function mergeIncrementalProjection(fullProjection = {}, partialProjection = {}, key = 'users', dirtyKeys = new Set()) {
+  const merged = {
+    ...(fullProjection && typeof fullProjection === 'object' ? fullProjection : {}),
+    ...(partialProjection && typeof partialProjection === 'object' ? partialProjection : {})
+  };
+  const existingItems = fullProjection?.[key] && typeof fullProjection[key] === 'object' ? fullProjection[key] : {};
+  const partialItems = partialProjection?.[key] && typeof partialProjection[key] === 'object' ? partialProjection[key] : {};
+  merged[key] = { ...existingItems };
+  for (const dirtyKey of dirtyKeys || []) {
+    delete merged[key][dirtyKey];
+  }
+  for (const [itemKey, value] of Object.entries(partialItems)) {
+    merged[key][itemKey] = value;
+  }
+  return merged;
+}
+
 function materializeMemoryViews(options = {}) {
   const pressureDelayMs = getBackgroundPressureDelayMs();
   if (pressureDelayMs > 0 && options.force !== true) {
@@ -594,9 +649,19 @@ function materializeMemoryViews(options = {}) {
     };
   }
   try {
-  const events = Array.isArray(options.events) ? options.events : loadMemoryEvents();
+  const allEvents = Array.isArray(options.events) ? options.events : loadMemoryEvents();
+  const dirtyScopes = normalizeDirtyScopes(options.dirtyScopes || options);
+  const dirtyScopeCount = countDirtyScopes(dirtyScopes);
+  const incrementalRequested = config.MEMORY_V3_INCREMENTAL_MATERIALIZE_ENABLED !== false
+    && options.force !== true
+    && (options.mode === 'incremental' || dirtyScopeCount > 0);
+  const incrementalLimit = Math.max(1, Number(config.MEMORY_V3_INCREMENTAL_SCOPE_LIMIT || 100) || 100);
+  const incrementalMode = incrementalRequested && dirtyScopeCount > 0 && dirtyScopeCount <= incrementalLimit;
+  const events = incrementalMode
+    ? allEvents.filter((event) => eventMatchesDirtyScopes(event, dirtyScopes))
+    : allEvents;
   const now = Date.now();
-  const eventHighWatermarkTs = getLatestEventTs(events);
+  const eventHighWatermarkTs = getLatestEventTs(allEvents);
   const sessionProjection = defaultSessionProjection();
   const previousProfileProjection = options.previousProfileProjection || defaultProfileProjection();
   const profileProjection = defaultProfileProjection();
@@ -861,11 +926,37 @@ function materializeMemoryViews(options = {}) {
     projection.eventHighWatermarkTs = eventHighWatermarkTs;
   }
 
-  atomicWriteJson(config.MEMORY_V3_SESSION_PROJECTION_FILE, sessionProjection);
-  atomicWriteJson(config.MEMORY_V3_PROFILE_PROJECTION_FILE, profileProjection);
-  atomicWriteJson(config.MEMORY_V3_SCOPE_PROJECTION_FILE, scopeProjection);
-  atomicWriteJson(config.MEMORY_V3_EPISODE_PROJECTION_FILE, episodeProjection);
-  writeJsonLines(config.MEMORY_V3_NODES_FILE, resolvedNodes);
+  const outputSessionProjection = incrementalMode
+    ? mergeIncrementalProjection(loadSessionProjection(), sessionProjection, 'sessions', dirtyScopes.sessionKeys)
+    : sessionProjection;
+  const outputProfileProjection = incrementalMode
+    ? mergeIncrementalProjection(loadProfileProjection(), profileProjection, 'users', dirtyScopes.userIds)
+    : profileProjection;
+  const outputScopeProjection = incrementalMode
+    ? mergeIncrementalProjection(loadScopeProjection(), scopeProjection, 'users', dirtyScopes.userIds)
+    : scopeProjection;
+  const outputEpisodeProjection = incrementalMode
+    ? mergeIncrementalProjection(loadEpisodeProjection(), episodeProjection, 'users', dirtyScopes.userIds)
+    : episodeProjection;
+  for (const projection of [outputSessionProjection, outputProfileProjection, outputScopeProjection, outputEpisodeProjection]) {
+    projection.updatedAt = now;
+    projection.materializedAt = now;
+    projection.eventHighWatermarkTs = eventHighWatermarkTs;
+    projection.materializeMode = incrementalMode ? 'incremental' : 'full';
+  }
+
+  const outputNodes = incrementalMode
+    ? [
+        ...loadMemoryNodes().filter((node) => !eventMatchesDirtyScopes(node, dirtyScopes)),
+        ...resolvedNodes
+      ]
+    : resolvedNodes;
+
+  atomicWriteJson(config.MEMORY_V3_SESSION_PROJECTION_FILE, outputSessionProjection);
+  atomicWriteJson(config.MEMORY_V3_PROFILE_PROJECTION_FILE, outputProfileProjection);
+  atomicWriteJson(config.MEMORY_V3_SCOPE_PROJECTION_FILE, outputScopeProjection);
+  atomicWriteJson(config.MEMORY_V3_EPISODE_PROJECTION_FILE, outputEpisodeProjection);
+  writeJsonLines(config.MEMORY_V3_NODES_FILE, outputNodes);
   const embeddingIndex = enqueueMissingEmbeddings(resolvedNodes, {
     schedule: options.scheduleEmbeddingBackfill !== false,
     delayMs: options.embeddingBackfillDelayMs
@@ -875,18 +966,21 @@ function materializeMemoryViews(options = {}) {
     ok: true,
     stats: {
       events: events.length,
+      totalEvents: allEvents.length,
       latestEventTs: eventHighWatermarkTs,
-      nodes: resolvedNodes.length,
+      nodes: outputNodes.length,
+      materializeMode: incrementalMode ? 'incremental' : 'full',
+      dirtyScopes: dirtyScopeCount,
       embeddings: embeddingIndex,
-      sessions: Object.keys(sessionProjection.sessions).length,
-      profiles: Object.keys(profileProjection.users).length,
-      episodeUsers: Object.keys(episodeProjection.users).length
+      sessions: Object.keys(outputSessionProjection.sessions).length,
+      profiles: Object.keys(outputProfileProjection.users).length,
+      episodeUsers: Object.keys(outputEpisodeProjection.users).length
     },
-    sessionProjection,
-    profileProjection,
-    scopeProjection,
-    episodeProjection,
-    nodes: resolvedNodes
+    sessionProjection: outputSessionProjection,
+    profileProjection: outputProfileProjection,
+    scopeProjection: outputScopeProjection,
+    episodeProjection: outputEpisodeProjection,
+    nodes: outputNodes
   };
   } finally {
     lock.release();

@@ -196,6 +196,81 @@ module.exports = (async () => {
 
   assert.strictEqual(chatDecision.mode, 'chat_only');
   assert.strictEqual(chatDecision.steps.length, 0);
+  assert.strictEqual(chatDecision.plannerMeta.decisionSource, 'rule_preflight');
+  assert.ok(Number(chatDecision.plannerMeta.latencyMeta?.planner_preflight_ms) >= 0);
+  assert.ok(Number(chatDecision.plannerMeta.latencyMeta?.planner_normalize_ms) >= 0);
+
+  const companionWeatherPreflight = await planRequestV2({
+    question: '北京今天天气怎么样',
+    cleanText: '北京今天天气怎么样',
+    topRouteType: 'direct_chat',
+    routeMeta: {
+      chatMode: 'chat',
+      toolIntent: 'maybe_tools',
+      responseIntent: 'answer'
+    },
+    route: {
+      question: '北京今天天气怎么样',
+      cleanText: '北京今天天气怎么样',
+      topRouteType: 'direct_chat',
+      meta: {
+        chatMode: 'chat',
+        toolIntent: 'maybe_tools',
+        responseIntent: 'answer'
+      },
+      intent: {},
+      facets: {
+        domain: 'weather',
+        sourceScope: 'live'
+      }
+    },
+    allowedTools: ['getWeather', 'web_search'],
+    config: {
+      COMPANION_TOOL_MODE_ENABLED: true
+    }
+  });
+
+  assert.strictEqual(companionWeatherPreflight.mode, 'tool_plan');
+  assert.deepStrictEqual(companionWeatherPreflight.allowedToolNames, ['getWeather']);
+  assert.strictEqual(companionWeatherPreflight.steps[0].tool, 'getWeather');
+  assert.strictEqual(companionWeatherPreflight.plannerMeta.decisionSource, 'rule_preflight');
+  assert.strictEqual(companionWeatherPreflight.plannerMeta.toolGateReason, 'allow_safe_weather');
+  assert.ok(Number(companionWeatherPreflight.plannerMeta.latencyMeta?.planner_preflight_ms) >= 0);
+  assert.strictEqual(Number(companionWeatherPreflight.plannerMeta.latencyMeta?.planner_model_ms || 0), 0);
+
+  const companionMemoryPreflight = await planRequestV2({
+    question: '你还记得我们之前聊到哪了吗',
+    cleanText: '你还记得我们之前聊到哪了吗',
+    topRouteType: 'direct_chat',
+    routeMeta: {
+      chatMode: 'chat',
+      toolIntent: 'maybe_tools',
+      responseIntent: 'answer'
+    },
+    route: {
+      question: '你还记得我们之前聊到哪了吗',
+      cleanText: '你还记得我们之前聊到哪了吗',
+      topRouteType: 'direct_chat',
+      meta: {
+        chatMode: 'chat',
+        toolIntent: 'maybe_tools',
+        responseIntent: 'answer'
+      },
+      intent: {
+        needsMemory: true
+      },
+      facets: {}
+    },
+    allowedTools: ['memory_cli', 'web_search'],
+    config: {
+      COMPANION_TOOL_MODE_ENABLED: true
+    }
+  });
+
+  assert.strictEqual(companionMemoryPreflight.mode, 'tool_plan');
+  assert.deepStrictEqual(companionMemoryPreflight.allowedToolNames, ['memory_cli']);
+  assert.strictEqual(companionMemoryPreflight.steps[0].tool, 'memory_cli');
+  assert.strictEqual(companionMemoryPreflight.plannerMeta.toolGateReason, 'allow_safe_memory_recall');
 
   const notebookCorrection = await planRequestV2({
     question: '帮我查一下我笔记里关于 LangGraph 的内容',

@@ -14,6 +14,7 @@ process.env.MEMORY_EMBEDDING_MODEL = 'test-embedding';
 process.env.MEMORY_RAG_MIN_SCORE = '0.01';
 process.env.MEMORY_HYBRID_LEXICAL_WEIGHT = '0.2';
 process.env.MEMORY_HYBRID_SEMANTIC_WEIGHT = '1.4';
+process.env.MEMORY_STRONG_SEMANTIC_MIN_SCORE = '0.82';
 process.env.MEMORY_WRITE_PIPELINE_ENABLED = '0';
 process.env.MEMORY_EMBEDDING_API_BASE_URL = 'https://embedding.example/v1';
 process.env.MEMORY_EMBEDDING_API_KEY = 'test-key';
@@ -87,6 +88,10 @@ module.exports = (async () => {
   assert.ok(hits.length >= 2, 'expected both candidates to pass low threshold');
   assert.ok(hits[0].text.includes('咖啡'), 'expected semantic match to outrank lexical distractor');
   assert.ok(hits[0].semantic > hits[1].semantic, 'expected semantic score metadata');
+  assert.ok(hits[0].selectionReason.includes('strong_semantic_protected'), 'expected strong semantic hit protection reason');
+  assert.strictEqual(typeof hits[0].meta.recallDiagnostics.semantic, 'number', 'expected semantic diagnostic');
+  assert.strictEqual(typeof hits[0].meta.recallDiagnostics.lexical, 'number', 'expected lexical diagnostic');
+  assert.ok(hits[0].meta.recallDiagnostics.selectionReason.includes('facet_'), 'expected facet selection diagnostic');
 
   const liveWrite = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_semantic_live',
@@ -105,6 +110,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(liveHits.length, 1, 'expected live vector write to be retrievable without offline backfill');
   assert.ok(liveHits[0].semantic > 0.9, 'expected live hit to use persisted embedding');
+  assert.ok(liveHits[0].meta.recallDiagnostics, 'expected live hit recall diagnostics');
 
   console.log('memorySemanticRecall.test.js passed');
 })();

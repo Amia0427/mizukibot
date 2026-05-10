@@ -38,6 +38,7 @@ const DEFAULT_MCP_MAX_DEPTH = Math.max(
 const sessionPool = new Map();
 const initializePromisePool = new Map();
 const discoveryFailureCooldowns = new Map();
+let idleCleanupTimer = null;
 let cachedDynamicRegistry = {
   generatedAt: 0,
   tools: [],
@@ -123,6 +124,77 @@ function getStaticReplacementDescriptors(configuredServers = []) {
       inputSchema: item.inputSchema,
       targetTool: item.targetTool
     }));
+}
+
+function getMcpDiscoveryMode() {
+  return String(config.MCP_DISCOVERY_MODE || '').trim().toLowerCase() || 'warm';
+}
+
+function shouldUseStaticMcpReplacementsOnly(options = {}) {
+  const explicit = String(options.discoveryMode || '').trim().toLowerCase();
+  const mode = explicit || getMcpDiscoveryMode();
+  return mode === 'lazy' || mode === 'static' || mode === 'fallback';
+}
+
+function getMcpSessionIdleTtlMs() {
+  return Math.max(0, Number(config.MCP_SESSION_IDLE_TTL_MS || 0) || 0);
+}
+
+function touchSessionEntry(entry = null) {
+  if (entry && typeof entry === 'object') entry.lastUsedAt = Date.now();
+  return entry;
+}
+
+function closeSessionEntry(entry = null, reason = 'closed') {
+  if (!entry) return false;
+  const serverName = entry.serverName;
+  if (serverName) sessionPool.delete(serverName);
+  if (serverName) initializePromisePool.delete(serverName);
+  entry.exited = true;
+  entry.initialized = false;
+  const pendingErrors = Array.from(entry.pending?.values?.() || []);
+  if (entry.pending && typeof entry.pending.clear === 'function') entry.pending.clear();
+  for (const pending of pendingErrors) {
+    pending.reject(normalizeMcpError(new Error(`mcp session ${reason}: ${serverName}`), 'MCP_SESSION_CLOSED'));
+  }
+  try {
+    entry.process?.kill();
+  } catch (_) {}
+  return true;
+}
+
+function cleanupIdleMcpSessions(now = Date.now()) {
+  const ttlMs = getMcpSessionIdleTtlMs();
+  if (!ttlMs) return 0;
+  let closed = 0;
+  for (const entry of Array.from(sessionPool.values())) {
+    const lastUsedAt = Number(entry?.lastUsedAt || 0) || 0;
+    const hasPending = entry?.pending && entry.pending.size > 0;
+    if (!lastUsedAt || hasPending) continue;
+    if ((now - lastUsedAt) < ttlMs) continue;
+    if (closeSessionEntry(entry, 'idle_ttl')) {
+      closed += 1;
+      logMcp('mcp_session_closed', {
+        serverName: entry.serverName,
+        reason: 'idle_ttl',
+        idleMs: now - lastUsedAt
+      });
+    }
+  }
+  return closed;
+}
+
+function scheduleIdleMcpCleanup() {
+  const ttlMs = getMcpSessionIdleTtlMs();
+  if (!ttlMs || idleCleanupTimer) return false;
+  const delayMs = Math.max(1000, Math.min(ttlMs, 60 * 1000));
+  idleCleanupTimer = setTimeout(() => {
+    idleCleanupTimer = null;
+    cleanupIdleMcpSessions();
+    if (sessionPool.size > 0) scheduleIdleMcpCleanup();
+  }, delayMs);
+  if (typeof idleCleanupTimer.unref === 'function') idleCleanupTimer.unref();
+  return true;
 }
 
 function logMcp(event, payload = {}) {
@@ -356,18 +428,7 @@ function invalidateServerCache(serverName = '') {
 function resetSessionEntry(serverName = '') {
   const entry = sessionPool.get(serverName);
   if (!entry) return;
-  sessionPool.delete(serverName);
-  initializePromisePool.delete(serverName);
-  entry.exited = true;
-  entry.initialized = false;
-  const pendingErrors = Array.from(entry.pending.values());
-  entry.pending.clear();
-  for (const pending of pendingErrors) {
-    pending.reject(normalizeMcpError(new Error(`mcp session reset: ${serverName}`), 'MCP_SESSION_RESET'));
-  }
-  try {
-    entry.process?.kill();
-  } catch (_) {}
+  closeSessionEntry(entry, 'reset');
 }
 
 function encodeJsonRpcPayload(message = {}, protocolMode = 'line') {
@@ -531,7 +592,8 @@ function consumeStdoutBuffer(entry) {
 function ensureSessionEntry(serverConfig = {}) {
   const existing = sessionPool.get(serverConfig.serverName);
   if (existing && existing.process && !existing.process.killed && !existing.exited) {
-    return existing;
+    scheduleIdleMcpCleanup();
+    return touchSessionEntry(existing);
   }
 
   const spawnConfig = buildSpawnConfig(serverConfig);
@@ -610,7 +672,8 @@ function ensureSessionEntry(serverConfig = {}) {
   });
 
   sessionPool.set(serverConfig.serverName, entry);
-  return entry;
+  scheduleIdleMcpCleanup();
+  return touchSessionEntry(entry);
 }
 
 function sendJsonRpc(entry, method, params = {}, options = {}) {
@@ -620,6 +683,7 @@ function sendJsonRpc(entry, method, params = {}, options = {}) {
   }
 
   const id = String(entry.nextId++);
+  touchSessionEntry(entry);
   const payload = {
     jsonrpc: '2.0',
     id,
@@ -646,6 +710,7 @@ function sendJsonRpc(entry, method, params = {}, options = {}) {
 
     try {
       entry.process.stdin.write(encodeJsonRpcPayload(payload, entry.protocolMode));
+      touchSessionEntry(entry);
     } catch (error) {
       clearTimeout(timer);
       entry.pending.delete(id);
@@ -790,6 +855,9 @@ async function discoverServerTools(serverConfig = {}, options = {}) {
 
 async function discoverMcpTools(options = {}) {
   const configuredServers = listConfiguredMcpServers(options);
+  if (shouldUseStaticMcpReplacementsOnly(options)) {
+    return getStaticReplacementDescriptors(configuredServers);
+  }
   const all = [];
   const discoveredKeys = new Set();
   for (const serverConfig of configuredServers) {
@@ -908,15 +976,30 @@ function extractTextFromMcpResult(result) {
   return summarizeJson(result);
 }
 
+function getStaticReplacementExecutor(toolName = '') {
+  const name = String(toolName || '').trim();
+  if (!name) return null;
+  try {
+    const mod = require('./toolExecutors');
+    const executors = mod.TOOL_EXECUTORS && typeof mod.TOOL_EXECUTORS === 'object'
+      ? mod.TOOL_EXECUTORS
+      : {};
+    return typeof executors[name] === 'function' ? executors[name] : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 async function callMcpTool(serverName = '', toolName = '', args = {}, context = {}) {
   maybeThrowDiscoveryFailureCooldown(serverName, 'call');
   const configuredServers = listConfiguredMcpServers(context);
   const serverConfig = configuredServers.find((item) => item.serverName === serverName);
   const replacement = STATIC_MCP_REPLACEMENTS.find((item) => item.serverName === serverName && item.toolName === toolName);
+  const staticReplacementOnly = Boolean(replacement && shouldUseStaticMcpReplacementsOnly(context));
 
   let descriptor = null;
   let discoveryError = null;
-  if (serverConfig) {
+  if (serverConfig && !staticReplacementOnly) {
     try {
       const tools = await discoverServerTools(serverConfig, context);
       descriptor = tools.find((item) => item.toolName === toolName) || null;
@@ -931,12 +1014,12 @@ async function callMcpTool(serverName = '', toolName = '', args = {}, context = 
         error: discoveryError.message
       });
     }
+  } else if (staticReplacementOnly) {
+    discoveryError = normalizeMcpError(new Error('mcp discovery skipped by lazy static replacement mode'), 'MCP_DISCOVERY_SKIPPED');
   }
 
   if (!descriptor && replacement) {
-    const { getToolExecutors } = require('./toolRegistry');
-    const executors = getToolExecutors();
-    const executor = executors[replacement.targetTool];
+    const executor = getStaticReplacementExecutor(replacement.targetTool);
     if (typeof executor !== 'function') {
       throw normalizeMcpError(new Error(`replacement tool unavailable: ${replacement.targetTool}`), 'MCP_TOOL_CALL_FAILED');
     }
@@ -1108,6 +1191,10 @@ function clearMcpRuntimeCaches() {
   initializePromisePool.clear();
   discoveryFailureCooldowns.clear();
   warmRegistryPromise = null;
+  if (idleCleanupTimer) {
+    clearTimeout(idleCleanupTimer);
+    idleCleanupTimer = null;
+  }
   for (const entry of sessionPool.values()) {
     try {
       entry.process?.kill();
@@ -1120,6 +1207,7 @@ module.exports = {
   buildDynamicMcpToolName,
   callMcpTool,
   clearMcpRuntimeCaches,
+  cleanupIdleMcpSessions,
   discoverMcpTools,
   getCachedDynamicMcpToolRegistry,
   getDynamicMcpToolRegistry,
@@ -1129,5 +1217,6 @@ module.exports = {
   sanitizeMcpNamePart,
   summarizeJson,
   truncateText,
-  warmMcpRegistry
+  warmMcpRegistry,
+  __getMcpSessionPoolSize: () => sessionPool.size
 };

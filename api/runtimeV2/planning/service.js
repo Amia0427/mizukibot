@@ -3,6 +3,7 @@ const { getApiProvider } = require('../../../utils/modelProvider');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const {
   filterCompanionAllowedTools,
+  COMPANION_PLANNER_SAFE_READ_TOOLS,
   isCompanionToolModeEnabled
 } = require('../../../utils/companionTools');
 const { runStructuredSubagent } = require('../../../core/structuredSubagent');
@@ -57,8 +58,12 @@ function getToolRegistry() {
   return require('../../toolRegistry');
 }
 
-function getToolExecutors() {
-  return getToolRegistry().getToolExecutors();
+function getToolExecutor(toolName = '') {
+  return getToolRegistry().getToolExecutor(toolName);
+}
+
+function getToolNames() {
+  return getToolRegistry().getToolSchemaNames();
 }
 
 function getConfig() {
@@ -76,6 +81,57 @@ const PLANNER_DECISION_VERSION = 'planner_decision_v2';
 const PLANNER_PROTOCOL_VERSION = 'planner_request_v2';
 const DYNAMIC_CONTEXT_PLAN_VERSION = 'dynamic_context_plan_v2';
 const DEFAULT_PLANNER_TEMPERATURE = 0.1;
+const DEFAULT_WORLDBOOK_PLANNER_CANDIDATE_LIMIT = 12;
+const PLANNER_LATENCY_KEYS = Object.freeze([
+  'planner_preflight_ms',
+  'planner_model_ms',
+  'planner_normalize_ms',
+  'worldbook_lexical_ms',
+  'worldbook_semantic_ms',
+  'worldbook_rerank_ms',
+  'prompt_assembly_ms'
+]);
+
+function nowMs() {
+  return Date.now();
+}
+
+function addPlannerLatency(latencyMeta = {}, key = '', startedAt = 0) {
+  const normalizedKey = normalizeText(key);
+  if (!PLANNER_LATENCY_KEYS.includes(normalizedKey)) return latencyMeta;
+  const duration = Math.max(0, nowMs() - Number(startedAt || 0));
+  latencyMeta[normalizedKey] = Math.max(0, Math.round(Number(latencyMeta[normalizedKey] || 0) + duration));
+  return latencyMeta;
+}
+
+function normalizePlannerLatencyMeta(...sources) {
+  const latencyMeta = {};
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+    for (const key of PLANNER_LATENCY_KEYS) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+      const value = Number(source[key]);
+      if (Number.isFinite(value) && value >= 0) latencyMeta[key] = Math.round(value);
+    }
+  }
+  return latencyMeta;
+}
+
+function attachPlannerLatencyMeta(decision = {}, latencyMeta = {}) {
+  if (!decision || typeof decision !== 'object') return decision;
+  const merged = normalizePlannerLatencyMeta(decision?.plannerMeta?.latencyMeta, latencyMeta);
+  decision.plannerMeta = {
+    ...(decision.plannerMeta || {}),
+    latencyMeta: merged
+  };
+  if (decision.validation && typeof decision.validation === 'object') {
+    decision.validation.plannerMeta = {
+      ...(decision.validation.plannerMeta || {}),
+      latencyMeta: merged
+    };
+  }
+  return decision;
+}
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
@@ -280,8 +336,31 @@ function resolveToolBucket(toolName = '', toolCatalogByName = new Map()) {
   return normalizeText(toolCatalogByName.get(normalizeText(toolName))?.bucket) || 'local_tools';
 }
 
+function inferToolBucket(toolName = '') {
+  const normalized = normalizeText(toolName);
+  if (/^mcp_/i.test(normalized)) return 'mcp';
+  if (/^skill_/i.test(normalized)) return 'skills';
+  return 'local_tools';
+}
+
+function buildExplicitAllowedToolCatalog(toolNames = []) {
+  return normalizeToolNames(toolNames).map((toolName) => {
+    const writeCapable = /schedule|publish|create|delete|cancel|append|write|update/i.test(toolName);
+    return {
+      name: toolName,
+      bucket: inferToolBucket(toolName),
+      description: toolName,
+      readOnly: !writeCapable,
+      writeCapable
+    };
+  });
+}
+
 function isWriteCapableTool(toolCatalogByName = new Map(), toolName = '') {
   const item = toolCatalogByName.get(normalizeText(toolName));
+  if (!item) return false;
+  if (item.writeCapable === true) return true;
+  if (item.readOnly === true) return false;
   return Boolean(item?.writeCapable)
     || Boolean(item && item.readOnly === false && /schedule|publish|create|delete|cancel|append|write|update/i.test(normalizeText(item.name)));
 }
@@ -394,17 +473,30 @@ function buildValidationEnvelope({
 }
 
 function collectAvailableToolSummary(route = {}, options = {}) {
-  const currentConfig = getConfig();
-  const rawToolCatalog = normalizeArray(options.toolCatalog).length > 0
-    ? normalizeArray(options.toolCatalog).map((item) => ({ ...item }))
-    : buildDirectChatToolCatalog({
-        userId: options.userId || route?.meta?.userId || '',
-        routeMeta: route?.meta || {}
-      });
+  const optionConfig = normalizeObject(options.config, {});
+  const currentConfig = {
+    ...getConfig(),
+    ...optionConfig
+  };
+  if (
+    optionConfig.COMPANION_TOOL_MODE_ENABLED === true
+    && !Object.prototype.hasOwnProperty.call(optionConfig, 'BOT_TOOL_MODE')
+    && !Object.prototype.hasOwnProperty.call(optionConfig, 'TOOL_MODE')
+  ) {
+    currentConfig.BOT_TOOL_MODE = 'companion';
+  }
   const hasExplicitAllowedTools = Array.isArray(options.allowedTools) || Array.isArray(route?.meta?.allowedTools);
   const routeAllowedTools = normalizeToolNames(
     Array.isArray(options.allowedTools) ? options.allowedTools : route?.meta?.allowedTools
   );
+  const rawToolCatalog = normalizeArray(options.toolCatalog).length > 0
+    ? normalizeArray(options.toolCatalog).map((item) => ({ ...item }))
+    : hasExplicitAllowedTools
+      ? buildExplicitAllowedToolCatalog(routeAllowedTools)
+      : buildDirectChatToolCatalog({
+        userId: options.userId || route?.meta?.userId || '',
+        routeMeta: route?.meta || {}
+      });
   const explicitFilteredCatalog = hasExplicitAllowedTools
     ? rawToolCatalog.filter((item) => routeAllowedTools.includes(normalizeText(item?.name)))
     : rawToolCatalog;
@@ -423,29 +515,84 @@ function collectAvailableToolSummary(route = {}, options = {}) {
 }
 
 function isCompanionPlannerMode(options = {}) {
+  const optionConfig = normalizeObject(options.config, {});
+  if (optionConfig.COMPANION_TOOL_MODE_ENABLED === true) return true;
   return isCompanionToolModeEnabled(getConfig())
-    || isCompanionToolModeEnabled(normalizeObject(options.config, {}));
+    || isCompanionToolModeEnabled(optionConfig);
 }
 
-function isCompanionPlannerToolUseAllowed(route = {}, toolNames = [], options = {}) {
-  if (!isCompanionPlannerMode(options)) return true;
+function isCompanionPlannerSafeReadTool(toolName = '') {
+  return COMPANION_PLANNER_SAFE_READ_TOOLS.includes(normalizeText(toolName));
+}
+
+function resolveCompanionPlannerToolGateReason(route = {}, toolNames = [], options = {}) {
+  if (!isCompanionPlannerMode(options)) return 'not_companion_mode';
   const allowed = normalizeToolNames(toolNames);
-  if (allowed.length === 0) return false;
+  if (allowed.length === 0) return 'no_tools_requested';
+  const unsafe = allowed.filter((toolName) => !isCompanionPlannerSafeReadTool(toolName));
+  if (unsafe.length > 0) return `blocked_unsafe_tools:${unsafe.join(',')}`;
   const cleanText = getPlannerRequestText(route);
   const domain = normalizeText(route?.facets?.domain);
   const sourceScope = normalizeText(route?.facets?.sourceScope);
   const responseIntent = normalizeResponseIntent(route?.meta?.responseIntent);
-  const toolIntent = normalizeToolIntent(route?.meta?.toolIntent);
-  if (domain === 'time' && allowed.includes('get_current_time')) return true;
-  if (isContextStatsRequest(cleanText) && allowed.includes('get_context_stats')) return true;
-  if (isWeatherRequest(cleanText, route) && allowed.includes('getWeather')) return true;
-  if ((shouldPrioritizeMemoryProbe(route) || prefersMemoryRecall(cleanText)) && allowed.includes('memory_cli')) return true;
-  if ((sourceScope === 'notebook' || responseIntent === 'summary') && allowed.some((toolName) => /^notebook_/.test(toolName) || toolName === 'memory_cli')) return true;
-  if ((responseIntent === 'action_guidance' || toolIntent === 'force_tools') && allowed.some((toolName) => /scheduled|schedule|task/i.test(toolName))) return true;
-  if (allowed.includes('url_safety_check') && /https?:\/\//i.test(cleanText)) return true;
-  return false;
+  if (domain === 'time' && allowed.includes('get_current_time')) return 'allow_safe_time';
+  if (isContextStatsRequest(cleanText) && allowed.includes('get_context_stats')) return 'allow_safe_context_stats';
+  if (isWeatherRequest(cleanText, route) && allowed.some((toolName) => toolName === 'getWeather' || toolName === 'skill_weather')) return 'allow_safe_weather';
+  if ((shouldPrioritizeMemoryProbe(route) || prefersMemoryRecall(cleanText)) && allowed.includes('memory_cli')) return 'allow_safe_memory_recall';
+  if ((sourceScope === 'notebook' || responseIntent === 'summary') && allowed.some((toolName) => toolName === 'notebook_search' || toolName === 'notebook_list_docs' || toolName === 'memory_cli')) return 'allow_safe_notebook';
+  if (allowed.includes('url_safety_check') && /https?:\/\//i.test(cleanText)) return 'allow_safe_url_check';
+  return 'blocked_non_companion_intent';
 }
 
+function isCompanionPlannerToolUseAllowed(route = {}, toolNames = [], options = {}) {
+  if (!isCompanionPlannerMode(options)) return true;
+  return resolveCompanionPlannerToolGateReason(route, toolNames, options).startsWith('allow_safe_');
+}
+
+function shouldUseRemotePlannerForWorldbook(route = {}, options = {}) {
+  const personaModuleCatalog = normalizeArray(options.personaModuleCatalog);
+  if (personaModuleCatalog.length === 0) return false;
+  const cleanText = getPlannerRequestText(route);
+  const routeMeta = normalizeObject(route?.meta, {});
+  const requestedModules = normalizeArray(
+    routeMeta?.directChatPlanner?.personaModules
+    || routeMeta?.toolPlanner?.personaModules
+    || options?.personaModuleDecision?.personaModules
+  );
+  if (requestedModules.some((item) => normalizeText(item).startsWith('wb_mizuki_'))) return true;
+  return /(瑞希|mizuki|世界书|worldbook|未来|进路|服饰专门学校|open campus|两个都不放弃|真冬|mafuyu|绘名|ena|n25)/i.test(cleanText);
+}
+
+function shouldUseDeterministicPlannerPreflight(route = {}, options = {}) {
+  const cleanText = getPlannerRequestText(route);
+  if (!cleanText) return false;
+  const chatMode = normalizeChatMode(route?.meta?.chatMode);
+  if (chatMode === 'image_qa' || chatMode === 'image_summary') return false;
+  if (normalizeToolIntent(route?.meta?.toolIntent) === 'force_tools') {
+    const available = collectAvailableToolSummary(route, options);
+    const selected = pickMinimalToolAllowlist(route, available);
+    return selected.length > 0 && selected.every(isCompanionPlannerSafeReadTool);
+  }
+  if (isConversationalNoop(cleanText) || isSubjectiveOpinionQuestion(route)) return true;
+  if (shouldUseRemotePlannerForWorldbook(route, options)) return false;
+  const available = collectAvailableToolSummary(route, options);
+  const selected = pickMinimalToolAllowlist(route, available);
+  if (selected.length === 0) return false;
+  if (!selected.every(isCompanionPlannerSafeReadTool)) return false;
+  if (isCompanionPlannerMode(options)) {
+    return isCompanionPlannerToolUseAllowed(route, selected, options);
+  }
+  return selected.some((toolName) => [
+    'getWeather',
+    'skill_weather',
+    'get_current_time',
+    'get_context_stats',
+    'memory_cli',
+    'notebook_search',
+    'notebook_list_docs',
+    'url_safety_check'
+  ].includes(toolName));
+}
 
 function hasAnyResearchCue(text = '') {
   const lower = normalizeText(text).toLowerCase();
@@ -976,6 +1123,10 @@ function pickMinimalToolAllowlist(route = {}, available = {}) {
     if (actionPreferred.length > 0) return [actionPreferred[0]];
   }
   if (normalizeText(route?.facets?.domain) === 'time' && allowed.includes('get_current_time')) return ['get_current_time'];
+  if (isWeatherRequest(cleanText, route)) {
+    if (allowed.includes('skill_weather')) return ['skill_weather'];
+    if (allowed.includes('getWeather')) return ['getWeather'];
+  }
   if (shouldPrioritizeContextStats(route, allowed)) {
     const selected = ['get_context_stats'];
     if (shouldPrioritizeMemoryProbe(route) && allowed.includes('memory_cli')) selected.push('memory_cli');
@@ -984,6 +1135,7 @@ function pickMinimalToolAllowlist(route = {}, available = {}) {
   if (shouldPrioritizeMemoryProbe(route) && allowed.includes('memory_cli')) return ['memory_cli'];
   if (prefersMemoryRecall(cleanText) && allowed.includes('memory_cli')) return ['memory_cli'];
   const sourceScope = normalizeText(route?.facets?.sourceScope);
+  if (hasExplicitHttpUrl(cleanText) && allowed.includes('url_safety_check') && !allowed.includes('web_fetch')) return ['url_safety_check'];
   if ((sourceScope === 'notebook' || Boolean(route?.intent?.needsMemory)) && allowed.includes('memory_cli')) return ['memory_cli'];
   if ((normalizeText(route?.facets?.freshness) === 'latest' || sourceScope === 'web' || sourceScope === 'live') && allowed.includes('web_search')) {
     return needsWebDetailFetch(route) && allowed.includes('web_fetch')
@@ -1107,6 +1259,10 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
   const ruleTaskShape = chooseTaskShape(route);
   const domain = normalizeText(route?.facets?.domain);
   const goal = normalizeText(options.goal || cleanText || route?.question);
+  const decisionSource = normalizeText(options.decisionSource) || 'rule';
+  const fallbackUsed = Object.prototype.hasOwnProperty.call(options, 'fallbackUsed')
+    ? Boolean(options.fallbackUsed)
+    : true;
   const personaModuleCatalog = normalizeArray(options.personaModuleCatalog).length > 0
     ? normalizeArray(options.personaModuleCatalog)
     : getPersonaModuleCatalogSummary();
@@ -1138,7 +1294,7 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
         taskShape: 'fast_reply',
         steps: [],
         goal,
-        plannerMeta: { fallbackUsed: true, decisionSource: 'rule' }
+        plannerMeta: { fallbackUsed, decisionSource }
       }),
       plannerMeta: {
         protocolVersion: PLANNER_PROTOCOL_VERSION,
@@ -1146,8 +1302,10 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
         plannerVersion: DIRECT_CHAT_PLANNER_VERSION,
         reason: clampReason(`chatMode=${chatMode}; responseIntent=${responseIntent}; toolIntent=${toolIntent}; conversational noop; answer without tools`),
         plannerModel: getPlannerModel(),
-        fallbackUsed: true,
-        decisionSource: 'rule',
+        fallbackUsed,
+        decisionSource,
+        toolGateReason: resolveCompanionPlannerToolGateReason(route, [], options),
+        latencyMeta: normalizePlannerLatencyMeta(options.latencyMeta),
         toolBuckets: [],
         personaModules: dynamicPromptPlan.personaModules,
         dynamicPromptPlan,
@@ -1171,7 +1329,12 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
     }
   }
   if (shouldUseTools && isCompanionPlannerMode(options)) {
-    shouldUseTools = isCompanionPlannerToolUseAllowed(route, available.allowedToolNames, options);
+    const companionGateToolNames = pickMinimalToolAllowlist(route, available);
+    shouldUseTools = isCompanionPlannerToolUseAllowed(
+      route,
+      companionGateToolNames.length > 0 ? companionGateToolNames : available.allowedToolNames,
+      options
+    );
   }
 
   let allowedToolNames = [];
@@ -1219,6 +1382,9 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
   const normalizedAllowedToolNames = normalizeToolNames(allowedToolNames)
     .filter((toolName) => toolCatalogByName.has(toolName))
     .filter((toolName) => !isCompanionPlannerMode(options) || isCompanionPlannerToolUseAllowed(route, [toolName], options));
+  const toolGateReason = isCompanionPlannerMode(options)
+    ? resolveCompanionPlannerToolGateReason(route, normalizedAllowedToolNames.length > 0 ? normalizedAllowedToolNames : allowedToolNames, options)
+    : 'not_companion_mode';
   const writeToolNames = normalizedAllowedToolNames.filter((toolName) => isWriteCapableTool(toolCatalogByName, toolName));
   const taskShape = normalizedAllowedToolNames.length === 0
     ? 'fast_reply'
@@ -1257,7 +1423,7 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
       taskShape,
       steps,
       goal,
-      plannerMeta: { fallbackUsed: true, decisionSource: 'rule' }
+      plannerMeta: { fallbackUsed, decisionSource, toolGateReason }
     }),
     plannerMeta: {
       protocolVersion: PLANNER_PROTOCOL_VERSION,
@@ -1269,8 +1435,10 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
           : reasonParts.join('; ')
       ),
       plannerModel: getPlannerModel(),
-      fallbackUsed: true,
-      decisionSource: 'rule',
+      fallbackUsed,
+      decisionSource,
+      toolGateReason,
+      latencyMeta: normalizePlannerLatencyMeta(options.latencyMeta),
       toolBuckets,
       personaModules: dynamicPromptPlan.personaModules,
       dynamicPromptPlan,
@@ -1508,7 +1676,14 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
     continuitySignals: options?.continuitySignals || routeMeta.continuitySignals,
     personaPhase: routeMeta.personaPhase || ''
   }, {
-    limit: config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT
+    limit: Math.max(
+      0,
+      Math.floor(Number(
+        options.worldbookPlannerCandidateLimit
+        ?? config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT
+        ?? DEFAULT_WORLDBOOK_PLANNER_CANDIDATE_LIMIT
+      ) || DEFAULT_WORLDBOOK_PLANNER_CANDIDATE_LIMIT)
+    )
   });
   const dynamicPromptBlockCatalog = normalizeArray(options?.dynamicPromptBlockCatalog).length > 0
     ? normalizeArray(options.dynamicPromptBlockCatalog)
@@ -1631,11 +1806,21 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   );
   const cleanText = getPlannerRequestText(route);
   const canonicalPreferredTools = choosePreferredToolSubset(route, available.allowedToolNames, toolCatalogByName);
+  const rawRequestedToolNames = normalizeToolNames(
+    Array.isArray(rawDecision?.allowedToolNames) ? rawDecision.allowedToolNames : []
+  ).filter((toolName) => toolCatalogByName.has(toolName));
   const requestedAllowedNames = normalizeToolNames(
     Array.isArray(rawDecision?.allowedToolNames) ? rawDecision.allowedToolNames : fallback.allowedToolNames
   ).filter((toolName) => toolCatalogByName.has(toolName));
   let normalizedAllowedToolNames = requestedAllowedNames.length > 0 ? requestedAllowedNames : fallback.allowedToolNames;
+  let toolGateReason = 'not_companion_mode';
   if (isCompanionPlannerMode(options)) {
+    const candidateToolNames = normalizedAllowedToolNames.length > 0
+      ? normalizedAllowedToolNames
+      : rawRequestedToolNames;
+    toolGateReason = candidateToolNames.length > 0
+      ? resolveCompanionPlannerToolGateReason(route, candidateToolNames, options)
+      : 'model_no_tool';
     normalizedAllowedToolNames = normalizedAllowedToolNames.filter((toolName) => (
       isCompanionPlannerToolUseAllowed(route, [toolName], options)
     ));
@@ -1721,9 +1906,15 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   };
   const canonicalApplied = maybeApplyCanonicalNormalization();
   if (isCompanionPlannerMode(options) && !isCompanionPlannerToolUseAllowed(route, normalizedAllowedToolNames, options)) {
+    toolGateReason = normalizedAllowedToolNames.length > 0
+      ? resolveCompanionPlannerToolGateReason(route, normalizedAllowedToolNames, options)
+      : toolGateReason;
     normalizedAllowedToolNames = [];
     normalizedByRule = true;
     normalizationReason = 'companion tool mode: chat-only for non-companion tool intent';
+  }
+  if (isCompanionPlannerMode(options) && normalizedAllowedToolNames.length > 0) {
+    toolGateReason = resolveCompanionPlannerToolGateReason(route, normalizedAllowedToolNames, options);
   }
   const rebuiltSteps = canonicalApplied
     ? buildPlannerStepGraphSequence(route, normalizedAllowedToolNames, available.toolCatalog, {
@@ -1772,6 +1963,11 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
       plannerModel: normalizeText(rawDecision?.plannerMeta?.plannerModel || getPlannerModel()) || getPlannerModel(),
       fallbackUsed: Boolean(options.fallbackUsed),
       decisionSource: normalizeText(rawDecision?.plannerMeta?.decisionSource) || (options.fallbackUsed ? 'rule' : 'planner'),
+      toolGateReason: normalizeText(rawDecision?.plannerMeta?.toolGateReason) || toolGateReason,
+      latencyMeta: normalizePlannerLatencyMeta(
+        rawDecision?.plannerMeta?.latencyMeta,
+        options.latencyMeta
+      ),
       toolBuckets: Array.from(new Set(
         normalizeToolNames(normalizedSteps.map((step) => step.tool)).map((toolName) => resolveToolBucket(toolName, toolCatalogByName))
       )),
@@ -1840,6 +2036,7 @@ async function callPlannerSubagentV2(route = {}, options = {}) {
 }
 
 async function planRequestV2(input = {}) {
+  const requestLatencyMeta = {};
   const route = {
     question: normalizeText(input.question || input.route?.question || ''),
     cleanText: normalizeText(input.cleanText || input.route?.cleanText || input.question || ''),
@@ -1860,6 +2057,8 @@ async function planRequestV2(input = {}) {
     personaModuleCatalog: normalizeArray(input.personaModuleCatalog),
     dynamicPromptBlockCatalog: normalizeArray(input.dynamicPromptBlockCatalog),
     dynamicPromptGuide: normalizeText(input.dynamicPromptGuide),
+    config: normalizeObject(input.config, {}),
+    worldbookPlannerCandidateLimit: input.worldbookPlannerCandidateLimit,
     requestTrace: input.requestTrace || route?.meta?.requestTrace || null,
     question: route.question,
     goal: normalizeText(input.goal || route.question || route.cleanText),
@@ -1869,32 +2068,74 @@ async function planRequestV2(input = {}) {
 
   if (typeof input.planner === 'function') {
     const plannerOutput = await input.planner(route, options);
-    return normalizePlannerDecisionV2(plannerOutput, route, options);
+    const normalizeStartedAt = nowMs();
+    const normalized = normalizePlannerDecisionV2(plannerOutput, route, options);
+    addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
+    return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
+  }
+
+  const preflightStartedAt = nowMs();
+  const shouldPreflight = shouldUseDeterministicPlannerPreflight(route, options);
+  addPlannerLatency(requestLatencyMeta, 'planner_preflight_ms', preflightStartedAt);
+  if (shouldPreflight) {
+    const preflightDecision = buildRuleBasedPlannerDecision(route, {
+      ...options,
+      fallbackUsed: false,
+      decisionSource: 'rule_preflight',
+      latencyMeta: requestLatencyMeta
+    });
+    const normalizeStartedAt = nowMs();
+    const normalized = normalizePlannerDecisionV2(preflightDecision, route, {
+      ...options,
+      fallbackUsed: false,
+      latencyMeta: requestLatencyMeta
+    });
+    addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
+    return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
   }
 
   if (config.PLANNER_SUBAGENT_ENABLED) {
     try {
+      const modelStartedAt = nowMs();
       const subagentOutput = await callPlannerSubagentV2(route, options);
+      addPlannerLatency(requestLatencyMeta, 'planner_model_ms', modelStartedAt);
       if (subagentOutput && typeof subagentOutput === 'object') {
-        return normalizePlannerDecisionV2(subagentOutput, route, options);
+        const normalizeStartedAt = nowMs();
+        const normalized = normalizePlannerDecisionV2(subagentOutput, route, {
+          ...options,
+          fallbackUsed: false,
+          latencyMeta: requestLatencyMeta
+        });
+        addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
+        return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
       }
     } catch (_) {}
   }
 
   try {
+    const modelStartedAt = nowMs();
     const plannerOutput = await callPlannerModelV2(route, options);
+    addPlannerLatency(requestLatencyMeta, 'planner_model_ms', modelStartedAt);
     if (plannerOutput && typeof plannerOutput === 'object') {
-      return normalizePlannerDecisionV2(plannerOutput, route, {
+      const normalizeStartedAt = nowMs();
+      const normalized = normalizePlannerDecisionV2(plannerOutput, route, {
         ...options,
-        fallbackUsed: false
+        fallbackUsed: false,
+        latencyMeta: requestLatencyMeta
       });
+      addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
+      return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
     }
   } catch (_) {}
 
-  return normalizePlannerDecisionV2(null, route, {
+  const normalizeStartedAt = nowMs();
+  const normalized = normalizePlannerDecisionV2(null, route, {
     ...options,
-    fallbackUsed: true
+    fallbackUsed: true,
+    latencyMeta: requestLatencyMeta
   });
+  addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
+  return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
 }
 
 function convertPlannerDecisionToDirectChatDecision(decision = {}, route = {}, options = {}) {
@@ -1964,7 +2205,6 @@ function sanitizePlan(rawPlan, question = '') {
   }
 
   const maxSteps = Math.max(1, Math.min(8, Number(config.PLAN_MAX_STEPS) || 5));
-  const toolExecutors = getToolExecutors();
   const sanitizedSteps = rawPlan.steps
     .slice(0, maxSteps)
     .map((step, index) => ({
@@ -1976,7 +2216,7 @@ function sanitizePlan(rawPlan, question = '') {
     .filter((step) => {
       if (!step.action) return false;
       if (step.action === 'reply') return true;
-      return Boolean(toolExecutors[step.action]);
+      return Boolean(getToolExecutor(step.action));
     });
 
   const steps = sanitizedSteps.length > 0
@@ -2012,7 +2252,7 @@ function getVisibleToolNames(context = {}) {
       .map((item) => String(item || '').trim())
       .filter(Boolean);
   }
-  return Object.keys(getToolExecutors());
+  return getToolNames();
 }
 
 function getPlannerModelName(overrides = null) {

@@ -106,11 +106,16 @@ function validateMemoryWrite(candidate = {}, options = {}) {
       reason: 'conflict_candidate',
       conflictId: conflict.id,
       patch: {
-        status: candidate.status || 'candidate',
+        status: 'candidate',
         supersedes: [conflict.id],
         meta: {
           ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
-          traceReason: 'conflicts_with_existing_memory'
+          traceReason: 'conflicts_with_existing_memory',
+          conflictCandidate: {
+            existingId: conflict.id,
+            existingText: conflict.text || conflict.canonicalText || '',
+            reason: 'pipeline_conflict_candidate'
+          }
         }
       }
     };

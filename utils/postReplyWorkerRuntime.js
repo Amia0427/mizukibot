@@ -41,7 +41,12 @@ const materializeDebounceState = {
   timer: null,
   promise: null,
   pendingCount: 0,
-  lastScheduledAt: 0
+  lastScheduledAt: 0,
+  dirtyScopes: {
+    userIds: new Set(),
+    sessionKeys: new Set(),
+    groupIds: new Set()
+  }
 };
 
 function normalizePhase(value = '') {
@@ -363,6 +368,28 @@ function getPostReplyMaterializeDelayMs(options = {}) {
   return Math.max(1000, Number.isFinite(configured) && configured > 0 ? configured : 45 * 1000);
 }
 
+function addPostReplyDirtyScope(options = {}) {
+  const add = (set, value) => {
+    const text = normalizeText(value);
+    if (text) set.add(text);
+  };
+  add(materializeDebounceState.dirtyScopes.userIds, options.userId);
+  add(materializeDebounceState.dirtyScopes.sessionKeys, options.sessionKey);
+  add(materializeDebounceState.dirtyScopes.groupIds, options.groupId);
+}
+
+function consumePostReplyDirtyScopes() {
+  const scopes = {
+    userIds: Array.from(materializeDebounceState.dirtyScopes.userIds),
+    sessionKeys: Array.from(materializeDebounceState.dirtyScopes.sessionKeys),
+    groupIds: Array.from(materializeDebounceState.dirtyScopes.groupIds)
+  };
+  materializeDebounceState.dirtyScopes.userIds.clear();
+  materializeDebounceState.dirtyScopes.sessionKeys.clear();
+  materializeDebounceState.dirtyScopes.groupIds.clear();
+  return scopes;
+}
+
 function schedulePostReplyMaterialize(options = {}) {
   const { materializeMemoryViews } = getMemoryV3Module();
   if (options.force === true) {
@@ -373,6 +400,7 @@ function schedulePostReplyMaterialize(options = {}) {
     }));
   }
 
+  addPostReplyDirtyScope(options);
   materializeDebounceState.pendingCount += 1;
   if (materializeDebounceState.timer) {
     return {
@@ -387,12 +415,15 @@ function schedulePostReplyMaterialize(options = {}) {
   materializeDebounceState.lastScheduledAt = Date.now();
   materializeDebounceState.timer = setTimeout(() => {
     const pendingCount = materializeDebounceState.pendingCount;
+    const dirtyScopes = consumePostReplyDirtyScopes();
     materializeDebounceState.timer = null;
     materializeDebounceState.pendingCount = 0;
     materializeDebounceState.promise = Promise.resolve()
       .then(() => materializeMemoryViews({
         source: 'post_reply_debounced',
-        pendingCount
+        pendingCount,
+        mode: 'incremental',
+        dirtyScopes
       }))
       .catch((error) => {
         console.warn('[post_reply_worker] debounced materialize failed:', error?.message || error);
@@ -418,11 +449,14 @@ async function flushPostReplyMaterialize(options = {}) {
     clearTimeout(materializeDebounceState.timer);
     materializeDebounceState.timer = null;
     const pendingCount = materializeDebounceState.pendingCount;
+    const dirtyScopes = consumePostReplyDirtyScopes();
     materializeDebounceState.pendingCount = 0;
     materializeDebounceState.promise = Promise.resolve(materializeMemoryViews({
       source: options.source || 'post_reply_flush',
       pendingCount,
-      force: options.force === true
+      force: options.force === true,
+      mode: options.force === true ? 'full' : 'incremental',
+      dirtyScopes
     })).finally(() => {
       materializeDebounceState.promise = null;
     });
@@ -593,10 +627,15 @@ function createPostReplyWorkerRuntime(options = {}) {
   const retryBaseMs = Math.max(0, Number(config.POST_REPLY_RETRY_BASE_MS) || 1000);
   const retryMaxMs = Math.max(0, Number(config.POST_REPLY_RETRY_MAX_MS) || 30000);
   const retryJitterMs = Math.max(0, Number(config.POST_REPLY_RETRY_JITTER_MS) || 0);
+  const rssRecycleBytes = Math.max(0, Number(options.rssRecycleMb ?? config.POST_REPLY_WORKER_RSS_RECYCLE_MB) || 0) * 1024 * 1024;
+  const rssRecycleIdleMs = Math.max(0, Number(options.rssRecycleIdleMs ?? config.POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS) || 0);
+  const onRecycle = typeof options.onRecycle === 'function' ? options.onRecycle : null;
 
   let timer = null;
   let stopped = true;
   let activeCount = 0;
+  let lastActiveAt = Date.now();
+  let recycleRequested = false;
   const activeUserIds = new Set();
   let scheduledTick = false;
   const phaseCircuitState = new Map();
@@ -604,6 +643,44 @@ function createPostReplyWorkerRuntime(options = {}) {
 
   function getActiveUserIds() {
     return Array.from(activeUserIds);
+  }
+
+  function getStats() {
+    return {
+      activeCount,
+      activeUserIds: getActiveUserIds(),
+      lastActiveAt,
+      rssBytes: process.memoryUsage().rss,
+      recycleRequested
+    };
+  }
+
+  function maybeRequestIdleRecycle(reason = 'rss_high') {
+    if (!rssRecycleBytes || recycleRequested || activeCount > 0) return false;
+    const idleMs = Math.max(0, Date.now() - lastActiveAt);
+    if (idleMs < rssRecycleIdleMs) return false;
+    const rssBytes = process.memoryUsage().rss;
+    if (rssBytes < rssRecycleBytes) return false;
+    recycleRequested = true;
+    logStructured('post_reply_worker_recycle_requested', {
+      reason,
+      rssMb: Math.round((rssBytes / 1024 / 1024) * 10) / 10,
+      thresholdMb: Math.round((rssRecycleBytes / 1024 / 1024) * 10) / 10,
+      idleMs
+    });
+    if (onRecycle) {
+      try {
+        onRecycle({
+          reason,
+          rssBytes,
+          thresholdBytes: rssRecycleBytes,
+          idleMs
+        });
+      } catch (error) {
+        console.error('[post-reply-worker] recycle callback failed:', error?.message || error);
+      }
+    }
+    return true;
   }
 
   function getCircuitKey(job = {}) {
@@ -798,6 +875,7 @@ function createPostReplyWorkerRuntime(options = {}) {
       });
     }
     activeCount += 1;
+    lastActiveAt = Date.now();
     if (activeUserId) activeUserIds.add(activeUserId);
 
     try {
@@ -847,6 +925,7 @@ function createPostReplyWorkerRuntime(options = {}) {
       return result.job;
     } finally {
       activeCount = Math.max(0, activeCount - 1);
+      if (activeCount === 0) lastActiveAt = Date.now();
       if (activeUserId) activeUserIds.delete(activeUserId);
       scheduleTick(0);
     }
@@ -854,6 +933,7 @@ function createPostReplyWorkerRuntime(options = {}) {
 
   async function tick() {
     if (stopped) return;
+    if (maybeRequestIdleRecycle()) return;
 
     const pressureDeferMs = getPressureDeferMs();
     if (pressureDeferMs > 0) {
@@ -921,7 +1001,9 @@ function createPostReplyWorkerRuntime(options = {}) {
     stop,
     tick,
     runOneJob,
-    getActiveUserIds
+    getActiveUserIds,
+    getStats,
+    maybeRequestIdleRecycle
   };
 }
 

@@ -33,6 +33,35 @@ function percentile(values = [], p = 0.5) {
   return sorted[index];
 }
 
+function emptyStageStats() {
+  return {
+    queryEmbeddingMs: [],
+    lancedbSearchMs: [],
+    localLexicalMs: [],
+    fusionMs: [],
+    rerankMs: [],
+    totalMs: []
+  };
+}
+
+function addStageStats(stageStats = emptyStageStats(), timings = {}) {
+  for (const key of Object.keys(stageStats)) {
+    const value = Number(timings?.[key]);
+    if (Number.isFinite(value)) stageStats[key].push(value);
+  }
+}
+
+function summarizeStageStats(stageStats = emptyStageStats()) {
+  const out = {};
+  for (const [key, values] of Object.entries(stageStats)) {
+    out[key] = {
+      p50Ms: percentile(values, 0.5),
+      p95Ms: percentile(values, 0.95)
+    };
+  }
+  return out;
+}
+
 function extractText(row = {}) {
   return normalizeText(
     row.raw_message
@@ -128,6 +157,7 @@ function countScopeLeaks(results = [], testCase = {}) {
 
 async function runProbe(cases = []) {
   const latencies = [];
+  const stageStats = emptyStageStats();
   const fallbackCounts = {};
   const sourceCoverage = {};
   let leakage = 0;
@@ -143,6 +173,7 @@ async function runProbe(cases = []) {
     });
     const latencyMs = Date.now() - startedAt;
     latencies.push(latencyMs);
+    addStageStats(stageStats, result.stats?.timings || result.diagnostics?.timings || {});
     const fallbackReason = normalizeText(result.stats?.lancedb?.fallbackReason || '');
     if (fallbackReason) fallbackCounts[fallbackReason] = (fallbackCounts[fallbackReason] || 0) + 1;
     for (const item of Array.isArray(result.results) ? result.results : []) {
@@ -154,6 +185,7 @@ async function runProbe(cases = []) {
       latencyMs,
       fallbackReason,
       lancedb: result.stats?.lancedb || null,
+      timings: result.stats?.timings || result.diagnostics?.timings || null,
       resultIds: (result.results || []).map((item) => item.id)
     });
   }
@@ -161,6 +193,9 @@ async function runProbe(cases = []) {
     cases: cases.length,
     p50LatencyMs: percentile(latencies, 0.5),
     p95LatencyMs: percentile(latencies, 0.95),
+    latency: {
+      stages: summarizeStageStats(stageStats)
+    },
     fallbackCounts,
     leakage,
     sourceCoverage,
