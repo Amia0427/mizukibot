@@ -18,6 +18,7 @@ const backfillState = {
   running: false,
   timer: null
 };
+let embeddingIndexCache = null;
 
 const BACKFILL_SOURCE_SET = new Set(['all', 'memory', 'journal']);
 const FAILURE_REASONS = ['embedding_request_failed', 'empty_embedding', 'rate_limit', 'auth_failed', 'timeout'];
@@ -139,6 +140,33 @@ function normalizeCacheRow(row = {}) {
   };
 }
 
+function getEmbeddingCacheSignature() {
+  const file = config.MEMORY_V3_EMBEDDING_CACHE_FILE;
+  try {
+    const stat = fs.statSync(file);
+    return {
+      file,
+      mtimeMs: Number(stat.mtimeMs || 0) || 0,
+      size: Number(stat.size || 0) || 0
+    };
+  } catch (_) {
+    return {
+      file,
+      mtimeMs: 0,
+      size: 0
+    };
+  }
+}
+
+function clearEmbeddingIndexCache() {
+  embeddingIndexCache = null;
+}
+
+function writeEmbeddingRows(rows = []) {
+  writeJsonLines(config.MEMORY_V3_EMBEDDING_CACHE_FILE, rows);
+  clearEmbeddingIndexCache();
+}
+
 function loadEmbeddingRows() {
   return safeReadJsonLines(config.MEMORY_V3_EMBEDDING_CACHE_FILE)
     .map(normalizeCacheRow)
@@ -146,6 +174,15 @@ function loadEmbeddingRows() {
 }
 
 function loadEmbeddingIndex() {
+  const signature = getEmbeddingCacheSignature();
+  if (
+    embeddingIndexCache
+    && embeddingIndexCache.file === signature.file
+    && embeddingIndexCache.mtimeMs === signature.mtimeMs
+    && embeddingIndexCache.size === signature.size
+  ) {
+    return embeddingIndexCache.index;
+  }
   const rows = loadEmbeddingRows();
   const byKey = new Map();
   const byNodeId = new Map();
@@ -157,13 +194,18 @@ function loadEmbeddingIndex() {
       byCanonicalKey.set(row.canonicalKey, row);
     }
   }
-  return {
+  const index = {
     rows,
     byKey,
     byNodeId,
     byCanonicalKey,
     readyRows: rows.filter((row) => row.status === 'ready' && row.embedding.length > 0)
   };
+  embeddingIndexCache = {
+    ...signature,
+    index
+  };
+  return index;
 }
 
 function rowMatchesIdentity(row, identity) {
@@ -207,7 +249,7 @@ function reconcileEmbeddingCache(nodes = []) {
   const activeNodes = (Array.isArray(nodes) ? nodes : [])
     .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived');
   if (!isEmbeddingIndexEnabled()) {
-    writeJsonLines(config.MEMORY_V3_EMBEDDING_CACHE_FILE, []);
+    writeEmbeddingRows([]);
     return { enabled: false, rows: 0, ready: 0, pending: 0, reused: 0, created: 0 };
   }
 
@@ -250,7 +292,7 @@ function reconcileEmbeddingCache(nodes = []) {
     rows.push(makePendingRow(identity));
   }
 
-  writeJsonLines(config.MEMORY_V3_EMBEDDING_CACHE_FILE, rows);
+  writeEmbeddingRows(rows);
   return {
     enabled: true,
     rows: rows.length,
@@ -491,7 +533,7 @@ async function backfillMissingEmbeddings(options = {}) {
       failed += 1;
     }
 
-    writeJsonLines(config.MEMORY_V3_EMBEDDING_CACHE_FILE, rows);
+    writeEmbeddingRows(rows);
     const scopedRows = rows.filter((row) => nodeMap.has(row.key));
     const remaining = scopedRows.filter((row) => row.status !== 'ready').length;
     const journalRemaining = scopedRows.filter((row) => isJournalEmbeddingDoc(row) && row.status !== 'ready').length;
@@ -544,6 +586,7 @@ module.exports = {
   buildEmbeddingIdentity,
   buildEmbeddingBackfillPlan,
   buildFailureBreakdown,
+  clearEmbeddingIndexCache,
   loadEmbeddingIndex,
   reconcileEmbeddingCache,
   enqueueMissingEmbeddings,

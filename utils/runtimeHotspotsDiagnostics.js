@@ -141,6 +141,16 @@ function processMatchesPostReplyWorker(proc = {}) {
   return /(^|[\s/])post-reply-worker\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
 }
 
+function processMatchesMemoryBackfill(proc = {}) {
+  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
+  return /(^|[\s/])backfill-memory-v3-embeddings\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
+}
+
+function processMatchesLocalMcpChild(proc = {}) {
+  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
+  return /(^|[\s/])local-mcp-server\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
+}
+
 function processMatchesSubagent(proc = {}) {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
   if (shouldExcludeOpenclawGatewayProcess(proc)) return false;
@@ -154,14 +164,31 @@ function getDiagnosticProjectRoot() {
   return path.resolve(__dirname, '..').replace(/\\/g, '/').toLowerCase();
 }
 
+function extractKnownProjectScriptTokens(cmd = '') {
+  const tokens = [];
+  const pattern = /"([^"]*(?:index|post-reply-worker|subagent-command-worker|backfill-memory-v3-embeddings|local-mcp-server)\.js)"|'([^']*(?:index|post-reply-worker|subagent-command-worker|backfill-memory-v3-embeddings|local-mcp-server)\.js)'|([^\s"]*(?:index|post-reply-worker|subagent-command-worker|backfill-memory-v3-embeddings|local-mcp-server)\.js)/ig;
+  let match = pattern.exec(cmd);
+  while (match) {
+    tokens.push(normalizeText(match[1] || match[2] || match[3]).replace(/\\/g, '/').toLowerCase());
+    match = pattern.exec(cmd);
+  }
+  return tokens.filter(Boolean);
+}
+
+function isAbsoluteLikePath(value = '') {
+  return /^[a-z]:\//i.test(value) || value.startsWith('/');
+}
+
 function processMatchesProjectRoot(proc = {}) {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
   if (!cmd) return false;
   const root = getDiagnosticProjectRoot();
   const rootWithSlash = root.endsWith('/') ? root : `${root}/`;
   if (cmd.includes(rootWithSlash)) return true;
-  if (/[a-z]:\/|\/home\/|\/users\/|\/opt\/|\/var\//i.test(cmd) && /\/(?:index|post-reply-worker|subagent-command-worker)\.js\b/i.test(cmd)) {
-    return false;
+
+  const scriptTokens = extractKnownProjectScriptTokens(cmd);
+  if (scriptTokens.length > 0) {
+    return scriptTokens.some((token) => !isAbsoluteLikePath(token) || token.includes(rootWithSlash));
   }
   return true;
 }
@@ -186,8 +213,11 @@ function summarizeProcessResources(processes = []) {
   const main = processes.filter(processMatchesMain);
   const postReply = processes.filter(processMatchesPostReplyWorker);
   const subagents = processes.filter(processMatchesSubagent);
+  const memoryBackfill = processes.filter(processMatchesMemoryBackfill);
+  const localMcpChildren = processes.filter(processMatchesLocalMcpChild);
   const summarize = (rows = []) => ({
     count: rows.length,
+    processCount: rows.length,
     rssMb: {
       total: formatMb(rows.reduce((sum, row) => sum + normalizeNumber(row.rss, 0), 0)),
       max: formatMb(rows.reduce((max, row) => Math.max(max, normalizeNumber(row.rss, 0)), 0))
@@ -198,6 +228,8 @@ function summarizeProcessResources(processes = []) {
     main: summarize(main),
     postReplyWorker: summarize(postReply),
     subagents: summarize(subagents),
+    memoryBackfill: summarize(memoryBackfill),
+    localMcpChildren: summarize(localMcpChildren),
     allNodeLike: summarize(processes)
   };
 }
@@ -563,6 +595,14 @@ function buildRuntimeHotspotsDiagnostic(options = {}) {
       activeIntervals: Math.round(normalizeNumber(resources.activeIntervals.max, 0)),
       postReplyWorker: runtime.postReplyWorker,
       subagents: runtime.subagents,
+      memoryBackfill: {
+        processCount: processes.memoryBackfill.processCount,
+        rssMb: processes.memoryBackfill.rssMb
+      },
+      localMcpChildren: {
+        processCount: processes.localMcpChildren.processCount,
+        rssMb: processes.localMcpChildren.rssMb
+      },
       processRssMb: {
         mainMax: processes.main.rssMb.max,
         postReplyMax: processes.postReplyWorker.rssMb.max,
@@ -602,6 +642,8 @@ function buildRuntimeHotspotsText(report = {}) {
     `process-rss: mainMax=${summary.processRssMb?.mainMax || 0}MB postReplyMax=${summary.processRssMb?.postReplyMax || 0}MB subagentMax=${summary.processRssMb?.subagentMax || 0}MB`,
     `post-reply: status=${summary.postReplyWorker?.status || 'unknown'} processes=${summary.postReplyWorker?.processCount || 0} activeMax=${summary.postReplyWorker?.active?.max || 0} queue=queued:${queue.queued || 0} processing:${queue.processing || 0} failed:${queue.failed || 0}`,
     `subagents: processes=${summary.subagents?.processCount || 0} persistentWorkers=${summary.subagents?.persistentWorkers || 0} backend=${summary.subagents?.backend || ''}`,
+    `memory-backfill: processes=${summary.memoryBackfill?.processCount || 0} rss=${summary.memoryBackfill?.rssMb?.total || 0}MB max=${summary.memoryBackfill?.rssMb?.max || 0}MB`,
+    `local-mcp: processes=${summary.localMcpChildren?.processCount || 0} rss=${summary.localMcpChildren?.rssMb?.total || 0}MB max=${summary.localMcpChildren?.rssMb?.max || 0}MB`,
     `samples: resource=${report.inputs?.resourceSnapshotFile?.windowSamples || 0} perf=${report.inputs?.perfLogFile?.windowEvents || 0}`
   ];
   const topModules = Array.isArray(summary.topModules) ? summary.topModules : [];

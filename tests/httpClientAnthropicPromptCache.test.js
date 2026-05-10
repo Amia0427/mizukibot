@@ -180,6 +180,13 @@ module.exports = (async () => {
     let secondAttemptHeaders = null;
 
     axios.post = async (_url, body, options = {}) => {
+      if (String(_url || '').includes('/embeddings')) {
+        return {
+          data: {
+            data: (Array.isArray(body?.input) ? body.input : [body?.input]).map(() => ({ embedding: [1, 0, 0] }))
+          }
+        };
+      }
       attemptCount += 1;
       if (attemptCount === 1) {
         firstAttemptBody = body;
@@ -276,6 +283,13 @@ module.exports = (async () => {
 
     attemptCount = 0;
     axios.post = async (_url, body, options = {}) => {
+      if (String(_url || '').includes('/embeddings')) {
+        return {
+          data: {
+            data: (Array.isArray(body?.input) ? body.input : [body?.input]).map(() => ({ embedding: [1, 0, 0] }))
+          }
+        };
+      }
       attemptCount += 1;
       if (attemptCount === 1) {
         const error = new Error('unsupported prompt caching');

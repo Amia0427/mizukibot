@@ -317,6 +317,73 @@ function filterCandidatesBySource(candidates = [], source = 'all') {
   });
 }
 
+function candidateKey(item = {}) {
+  return normalizeText(item.id || item.nodeId)
+    || normalizeText(`${item.scopeType || ''}|${item.userId || ''}|${item.groupId || ''}|${item.canonicalKey || canonicalizeText(item.text)}`);
+}
+
+function mergeCandidateLists(...groups) {
+  const byKey = new Map();
+  for (const group of groups) {
+    for (const item of Array.isArray(group) ? group : []) {
+      const key = candidateKey(item);
+      if (!key) continue;
+      const existing = byKey.get(key);
+      byKey.set(key, existing && Number(existing.score || 0) >= Number(item.score || 0)
+        ? { ...item, ...existing }
+        : { ...existing, ...item });
+    }
+  }
+  return Array.from(byKey.values());
+}
+
+function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default', options = {}) {
+  const rewrites = Array.isArray(options.rewrites) ? options.rewrites : rewriteQuery(query, facet);
+  const queryTokens = uniqueBy(rewrites.flatMap((item) => tokenize(item)), (item) => item);
+  const journalTargetDays = resolveJournalTargetDays(query, {
+    today: options.journalToday,
+    now: options.journalNow
+  });
+  const limit = Math.max(0, Math.min(
+    512,
+    Math.floor(Number(options.localCandidateLimit || config.MEMORY_LOCAL_CANDIDATE_LIMIT || 96) || 96)
+  ));
+  if (limit <= 0) return [];
+  const scoped = [];
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    if (!matchesFacetCandidate(facet, candidate)) continue;
+    const text = normalizeText(candidate.text);
+    if (!text) continue;
+    const docTokens = tokenize(`${text} ${candidate.canonicalKey || canonicalizeText(text)}`);
+    const lexical = cosineFromTokenSets(queryTokens, docTokens);
+    const canonical = canonicalizeText(candidate.canonicalKey || text);
+    const direct = canonical && rewrites.some((rewrite) => canonical.includes(canonicalizeText(rewrite))) ? 0.25 : 0;
+    const dateBoost = journalDateMatchBoost(candidate, journalTargetDays);
+    const recency = candidate.updatedAt ? Math.max(0.2, 1 - ((Date.now() - candidate.updatedAt) / (180 * 24 * 3600 * 1000))) : 0.4;
+    const support = Math.min(0.3, (Number(candidate.evidenceCount || 1) - 1) * 0.05);
+    const confidence = Math.min(0.2, Number(candidate.confidence || 0) * 0.2);
+    const importance = Math.min(0.22, Number(candidate.importance || 0) * 0.1);
+    const sourceBoost = facetSourceWeight(facet, candidate.source);
+    const score = ((lexical * 0.65) + direct + dateBoost + (recency * 0.08) + support + confidence + importance) * sourceBoost;
+    if (score <= 0.02 && lexical <= 0.01 && direct <= 0 && dateBoost <= 0) continue;
+    scoped.push({
+      ...candidate,
+      score: Math.max(Number(candidate.score || 0) || 0, score),
+      lexical: Math.max(Number(candidate.lexical || 0) || 0, lexical),
+      matchMode: Number(candidate.embedding || candidate.vectorScore || 0) > 0 ? 'hybrid' : 'lexical',
+      scoreParts: {
+        ...(candidate.scoreParts || {}),
+        lexical,
+        direct,
+        dateBoost,
+        recency,
+        sourceBoost
+      }
+    });
+  }
+  return stableSortByScore(scoped).slice(0, limit);
+}
+
 function facetSourceWeight(facet, source) {
   const key = `${facet}:${source}`;
   const table = {
@@ -469,6 +536,21 @@ function protectStrongSemanticCandidates(items = [], topK = 8, options = {}) {
   });
 }
 
+function appendRerankTail(rerankedHead = [], rerankTail = []) {
+  const head = Array.isArray(rerankedHead) ? rerankedHead : [];
+  const tail = Array.isArray(rerankTail) ? rerankTail : [];
+  if (!tail.length) return head;
+  const headFloor = head.length > 0
+    ? Math.min(...head.map((item) => Number(item.score || 0)).filter(Number.isFinite)) - 0.0001
+    : null;
+  if (!Number.isFinite(headFloor)) return head.concat(tail);
+  return head.concat(tail.map((item) => ({
+    ...item,
+    preRerankScore: Number(item.score || item.finalScore || 0) || 0,
+    score: Math.min(Number(item.score || 0) || 0, headFloor)
+  })));
+}
+
 async function scoreCandidates(candidates = [], query = '', facet = 'default', options = {}) {
   const rewrites = Array.isArray(options.rewrites) ? options.rewrites : rewriteQuery(query, facet);
   const queryTokens = uniqueBy(rewrites.flatMap((item) => tokenize(item)), (item) => item);
@@ -546,6 +628,37 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
     });
   }
   return scored;
+}
+
+async function scoreLocalCandidatePool(candidates = [], query = '', facet = 'default', options = {}) {
+  const base = Array.isArray(candidates) ? candidates : [];
+  const scored = await scoreCandidates(base, query, facet, options);
+  const scoredIds = new Set(scored.map((item) => candidateKey(item)).filter(Boolean));
+  const semanticWeight = Math.max(0, Number(config.MEMORY_SEMANTIC_RECALL_WEIGHT || 0.3) || 0.3);
+  const minScore = Math.max(0.02, Number(config.MEMORY_RAG_MIN_SCORE || 0.16) * 0.5);
+  const semanticOnly = base
+    .filter((item) => !scoredIds.has(candidateKey(item)))
+    .filter((item) => matchesFacetCandidate(facet, item) && Number(item.vectorScore || item.embedding || 0) > 0)
+    .map((item) => {
+      const embedding = Number(item.vectorScore || item.embedding || 0) || 0;
+      const score = Math.max(Number(item.score || 0) || 0, minScore + (embedding * semanticWeight));
+      return {
+        ...item,
+        score,
+        embedding,
+        matchMode: item.matchMode || 'lancedb',
+        diagnostics: {
+          ...(item.diagnostics || {}),
+          recall: buildRecallDiagnostics({
+            ...item,
+            score,
+            embedding,
+            matchMode: item.matchMode || 'lancedb'
+          }, 'lancedb_semantic_only_candidate')
+        }
+      };
+    });
+  return scored.concat(semanticOnly);
 }
 
 async function resolveQueryEmbedding(query = '', facet = 'default', options = {}) {
@@ -763,13 +876,6 @@ async function queryMemory(input = {}) {
   stageStartedAt = getNowMs();
   const candidates = filterCandidatesBySource(collectCandidates(userId, input), input.source);
   timing.collectCandidatesMs = getNowMs() - stageStartedAt;
-  stageStartedAt = getNowMs();
-  const scored = await scoreCandidates(candidates, query, facet, {
-    ...input,
-    rewrites,
-    queryEmbedding
-  });
-  timing.localLexicalMs = getNowMs() - stageStartedAt;
   const vectorStoreMode = normalizeVectorStoreMode(config.MEMORY_VECTOR_STORE);
   const embeddingCoverage = buildEmbeddingCoverageDiagnostics(candidates);
   let lancedbDiagnostics = {
@@ -786,7 +892,7 @@ async function queryMemory(input = {}) {
     coverageReason: embeddingCoverage.lowCoverage ? 'low_coverage' : '',
     noVisibleReason: ''
   };
-  let rankedForRerank = scored;
+  let vectorCandidates = [];
   if (!lancedbDiagnostics.enabled) {
     lancedbDiagnostics.fallbackReason = 'read_disabled';
   } else if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) {
@@ -807,7 +913,7 @@ async function queryMemory(input = {}) {
     });
     timing.lancedbSearchMs = getNowMs() - stageStartedAt;
     stageStartedAt = getNowMs();
-    const vectorCandidates = resolveVectorCandidates(vectorResult.rows || [], candidates, {
+    vectorCandidates = resolveVectorCandidates(vectorResult.rows || [], candidates, {
       ...input,
       userId,
       allowedGroupIds,
@@ -838,12 +944,31 @@ async function queryMemory(input = {}) {
     lancedbDiagnostics.fallbackReason = lancedbDiagnostics.fused
       ? ''
       : buildLanceDbFallbackReason(lancedbDiagnostics, queryEmbedding, vectorStoreMode);
-    if (vectorStoreMode === 'lancedb' && vectorCandidates.length > 0) {
-      rankedForRerank = fuseRecallCandidates(scored, vectorCandidates, {
-        rrfK: config.MEMORY_V3_RRF_K
-      });
-    }
     timing.fusionMs = getNowMs() - stageStartedAt;
+  }
+  stageStartedAt = getNowMs();
+  const localPool = vectorStoreMode === 'lancedb' && vectorCandidates.length > 0
+    ? mergeCandidateLists(
+      vectorCandidates,
+      buildLexicalCandidatePool(candidates, query, facet, {
+        ...input,
+        rewrites
+      })
+    )
+    : candidates;
+  const scored = await scoreLocalCandidatePool(localPool, query, facet, {
+    ...input,
+    rewrites,
+    queryEmbedding
+  });
+  timing.localLexicalMs = getNowMs() - stageStartedAt;
+  let rankedForRerank = scored;
+  if (vectorStoreMode === 'lancedb' && vectorCandidates.length > 0) {
+    stageStartedAt = getNowMs();
+    rankedForRerank = fuseRecallCandidates(scored, vectorCandidates, {
+      rrfK: config.MEMORY_V3_RRF_K
+    });
+    timing.fusionMs += getNowMs() - stageStartedAt;
   }
   stageStartedAt = getNowMs();
   const conflictResolved = applyConflictResolution(rankedForRerank);
@@ -874,7 +999,7 @@ async function queryMemory(input = {}) {
       : item.matchMode
   })), journalTargetDays));
   timing.rerankMs = getNowMs() - stageStartedAt;
-  const reranked = rerankedHead.concat(rerankTail);
+  const reranked = appendRerankTail(rerankedHead, rerankTail);
   stageStartedAt = getNowMs();
   const selected = diversify(reranked, topK, {
     ...input,
@@ -912,6 +1037,7 @@ async function queryMemory(input = {}) {
     affinityState,
     stats: {
       candidates: candidates.length,
+      localPool: localPool.length,
       scored: scored.length,
       ranked: rankedForRerank.length,
       reranked: reranked.length,

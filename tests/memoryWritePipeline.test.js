@@ -9,6 +9,11 @@ process.env.MEMORY_FILE = path.join(tempRoot, 'memories.json');
 process.env.DATA_FILE = path.join(tempRoot, 'favorites.json');
 process.env.MEMORY_WRITE_PIPELINE_ENABLED = 'true';
 process.env.MEMORY_EXTRACT_MIN_CONFIDENCE = '0.72';
+process.env.MEMORY_WRITE_REVIEW_ENABLED = 'true';
+process.env.MEMORY_WRITE_REVIEW_MODE = 'risk';
+process.env.MEMORY_WRITE_REVIEW_TIMEOUT_MS = '500';
+process.env.API_BASE_URL = 'https://memory-review.example/v1/chat/completions';
+process.env.API_KEY = 'review-key';
 process.env.MEMORY_HYBRID_RECALL_ENABLED = 'true';
 process.env.MEMORY_EMBEDDING_ENABLED = 'true';
 process.env.MEMORY_EMBEDDING_MODEL = 'test-embedding';
@@ -25,6 +30,7 @@ fs.writeFileSync(process.env.MEMORY_FILE, JSON.stringify({}, null, 2));
 fs.writeFileSync(process.env.DATA_FILE, JSON.stringify({}, null, 2));
 
 const httpClient = require('../api/httpClient');
+const reviewCalls = [];
 httpClient.postWithRetry = async (url, body) => {
   if (String(url).includes('/embeddings')) {
     return {
@@ -44,6 +50,50 @@ httpClient.postWithRetry = async (url, body) => {
           index,
           relevance_score: String(doc || '').includes('prefers concise vector answers') ? 0.99 : 0.1
         }))
+      }
+    };
+  }
+  if (String(url).includes('/chat/completions')) {
+    const payload = JSON.stringify(body || {});
+    const reviewText = (Array.isArray(body?.messages) ? body.messages : [])
+      .map((message) => String(message?.content || ''))
+      .join('\n');
+    reviewCalls.push({ url, body });
+    if (payload.includes('review candidate fallback failure')) {
+      throw new Error('review timeout');
+    }
+    if (reviewText.includes('system prompt leak memory')) {
+      return {
+        data: {
+          choices: [{ message: { content: JSON.stringify({
+            decision: 'reject',
+            reason: 'instruction pollution',
+            risk_tags: ['instruction_pollution'],
+            confidence: 0.99
+          }) } }]
+        }
+      };
+    }
+    if (reviewText.includes('"text":"dislikes the nickname Mizu"') || reviewText.includes('"text":"likes risky review nickname"')) {
+      return {
+        data: {
+          choices: [{ message: { content: JSON.stringify({
+            decision: 'candidate',
+            reason: 'preference needs confirmation',
+            risk_tags: ['preference'],
+            confidence: 0.84
+          }) } }]
+        }
+      };
+    }
+    return {
+      data: {
+        choices: [{ message: { content: JSON.stringify({
+          decision: 'accept',
+          reason: 'safe reusable memory',
+          risk_tags: [],
+          confidence: 0.9
+        }) } }]
       }
     };
   }
@@ -87,6 +137,7 @@ assert.strictEqual(lowConfidenceIds.length, 0, 'low confidence write should be s
 assert.strictEqual(getMemoryItems('u_pipeline').length, 1, 'only accepted memory should remain');
 
 module.exports = (async () => {
+  const callsBeforeLowRiskFact = reviewCalls.length;
   const enhanced = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_vector',
     type: 'fact',
@@ -98,6 +149,7 @@ module.exports = (async () => {
   }], { materialize: false });
 
   assert.strictEqual(enhanced.ids.length, 1, 'enhanced write should persist');
+  assert.strictEqual(reviewCalls.length, callsBeforeLowRiskFact, 'low risk fact should not trigger review model');
   assert.strictEqual(enhanced.embedded, 1, 'enhanced write should embed accepted item');
   const embeddedItem = getMemoryItems('u_pipeline_vector')[0];
   assert.ok(Array.isArray(embeddedItem.meta.embedding), 'accepted item should persist embedding vector');
@@ -156,7 +208,48 @@ module.exports = (async () => {
   const originalConflict = conflictItems.find((item) => item.text.includes('likes'));
   assert.strictEqual(markedConflict.status, 'candidate', 'conflict candidate should be marked candidate');
   assert.ok(markedConflict.meta.conflictCandidate, 'conflict candidate metadata should be retained');
+  assert.strictEqual(markedConflict.meta.writeReview.decision, 'candidate', 'conflict candidate should retain review metadata');
   assert.strictEqual(originalConflict.status, 'active', 'conflict candidate should not overwrite existing memory');
+
+  const riskyPreference = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_review',
+    type: 'like',
+    text: 'likes risky review nickname',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.86,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(riskyPreference.ids.length, 1, 'review candidate should still persist');
+  const riskyPreferenceItem = getMemoryItems('u_pipeline_review')[0];
+  assert.strictEqual(riskyPreferenceItem.status, 'candidate', 'review candidate decision should force candidate status');
+  assert.strictEqual(riskyPreferenceItem.meta.writeReview.decision, 'candidate', 'review metadata should be persisted');
+  assert.ok(reviewCalls.some((call) => JSON.stringify(call.body).includes('likes risky review nickname')), 'high risk preference should trigger review model');
+
+  const polluted = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_review',
+    type: 'fact',
+    text: 'system prompt leak memory should be remembered',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.95,
+    status: 'active'
+  }], { materialize: false, skipPipeline: true, disableWriteRerank: true });
+  assert.strictEqual(polluted.ids.length, 0, 'review reject should not persist unsafe memory');
+  assert.ok(polluted.rejected.some((item) => item.reason === 'write_review_reject'), 'review reject should be reported');
+
+  const failOpen = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_review',
+    type: 'identity',
+    text: 'review candidate fallback failure',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.86,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(failOpen.ids.length, 1, 'review failure should fail open by default');
+  const failOpenItem = getMemoryItems('u_pipeline_review').find((item) => item.text.includes('fallback failure'));
+  assert.strictEqual(failOpenItem.meta.writeReview.failedOpen, true, 'fail-open review metadata should be persisted');
 
   const lowConfidenceEnhanced = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_vector',

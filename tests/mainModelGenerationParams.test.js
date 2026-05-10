@@ -30,6 +30,29 @@ function buildError(status = 400, message = 'unknown parameter') {
   return error;
 }
 
+function isEmbeddingRequest(url = '', body = {}) {
+  return /\/embeddings(?:\/)?$/i.test(String(url || '').trim())
+    || (
+      body
+      && typeof body === 'object'
+      && !Array.isArray(body)
+      && Array.isArray(body.input)
+      && !Array.isArray(body.messages)
+    );
+}
+
+function buildEmbeddingResponse() {
+  return {
+    data: {
+      data: [
+        {
+          embedding: [0.1, 0.2, 0.3]
+        }
+      ]
+    }
+  };
+}
+
 module.exports = (async () => {
   const snapshot = { ...process.env };
   let axios = null;
@@ -84,6 +107,7 @@ module.exports = (async () => {
 
     const sent = [];
     axios.post = async (url, body, options = {}) => {
+      if (isEmbeddingRequest(url, body)) return buildEmbeddingResponse();
       sent.push({ url, body, options });
       return {
         data: {
@@ -135,6 +159,7 @@ module.exports = (async () => {
     resetMainModelFallbackState({ scope: ADMIN_SHARED_FALLBACK_SCOPE });
     sent.length = 0;
     axios.post = async (url, body, options = {}) => {
+      if (isEmbeddingRequest(url, body)) return buildEmbeddingResponse();
       sent.push({ url, body, options });
       if (sent.length === 1) throw buildError(500, 'primary unavailable');
       return {
@@ -183,7 +208,8 @@ module.exports = (async () => {
     let attemptCount = 0;
     let firstAttemptBody = null;
     let secondAttemptBody = null;
-    axios.post = async (_url, body) => {
+    axios.post = async (url, body) => {
+      if (isEmbeddingRequest(url, body)) return buildEmbeddingResponse();
       attemptCount += 1;
       if (attemptCount === 1) {
         firstAttemptBody = body;
