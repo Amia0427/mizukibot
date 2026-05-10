@@ -139,6 +139,8 @@ module.exports = (() => {
         { pid: 333, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js', rss: 75 * 1024 * 1024 },
         { pid: 334, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js', rss: 70 * 1024 * 1024 },
         { pid: 335, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js', rss: 65 * 1024 * 1024 },
+        { pid: 336, ppid: 111, name: 'node.exe', commandLine: 'node scripts/backfill-memory-v3-embeddings.js --source all --limit 3000', rss: 240 * 1024 * 1024 },
+        { pid: 337, ppid: 111, name: 'node.exe', commandLine: 'node scripts/local-mcp-server.js fetch', rss: 45 * 1024 * 1024 },
         { pid: 444, ppid: 1, name: 'node.exe', commandLine: 'C:/Program Files/nodejs/node.exe C:/Users/Administrator/openclaw/node_modules/openclaw/dist/index.js gateway --port 18789', rss: 330 * 1024 * 1024 }
       ],
       isProcessAlive: (pid) => [111, 222, 333, 334, 335].includes(Number(pid))
@@ -150,6 +152,10 @@ module.exports = (() => {
     assert.strictEqual(report.summary.subagents.processCount, 3);
     assert.strictEqual(report.summary.processRssMb.mainMax, 170);
     assert.strictEqual(report.processes.subagents.rssMb.total, 210);
+    assert.strictEqual(report.summary.memoryBackfill.processCount, 1);
+    assert.strictEqual(report.summary.memoryBackfill.rssMb.total, 240);
+    assert.strictEqual(report.summary.localMcpChildren.processCount, 1);
+    assert.strictEqual(report.summary.localMcpChildren.rssMb.total, 45);
     assert.ok(!report.processes.main.processes.some((item) => String(item.commandLine || '').includes('openclaw')));
     assert.ok(!report.processes.subagents.processes.some((item) => String(item.commandLine || '').includes('openclaw')));
     assert.ok(report.summary.topModules.some((item) => item.key === 'planner' && item.count === 3));
@@ -168,6 +174,8 @@ module.exports = (() => {
 
     const text = buildRuntimeHotspotsText(report);
     assert.ok(text.includes('runtime-hotspots:'));
+    assert.ok(text.includes('memory-backfill:'));
+    assert.ok(text.includes('local-mcp:'));
     assert.ok(text.includes('hot-modules:'));
     assert.doesNotThrow(() => JSON.parse(JSON.stringify(report)));
 

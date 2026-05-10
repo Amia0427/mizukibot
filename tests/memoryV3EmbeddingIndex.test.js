@@ -28,6 +28,7 @@ httpClient.postWithRetry = async () => ({
 const { writeJsonLines } = require('../utils/memory-v3/helpers');
 const {
   buildEmbeddingIdentity,
+  clearEmbeddingIndexCache,
   reconcileEmbeddingCache,
   loadEmbeddingIndex,
   backfillMissingEmbeddings
@@ -103,6 +104,7 @@ module.exports = backfillMissingEmbeddings({ batchSize: 10, maxPerRun: 10, force
     lastEmbeddedAt: 0,
     status: 'pending'
   })));
+  clearEmbeddingIndexCache();
   return backfillMissingEmbeddings({ batchSize: 2, maxPerRun: 2, force: true });
 }).then((result) => {
   assert.strictEqual(result.ok, true);

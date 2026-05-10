@@ -77,7 +77,7 @@ module.exports = (() => {
 
     const processes = [
       { pid: 111, ppid: 1, name: 'node.exe', commandLine: 'node index.js' },
-      { pid: 222, ppid: 1, name: 'node.exe', commandLine: 'node scripts/post-reply-worker.js' },
+      { pid: 222, ppid: 1, name: 'node.exe', commandLine: '"C:\\Program Files\\nodejs\\node.exe" scripts/post-reply-worker.js' },
       { pid: 333, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js' }
     ];
     const alive = new Set([111, 222, 333]);
@@ -97,6 +97,7 @@ module.exports = (() => {
 
     assert.strictEqual(report.summary.mainProcess.status, 'running');
     assert.strictEqual(report.summary.postReplyWorker.status, 'running');
+    assert.strictEqual(report.summary.postReplyWorker.pidFileMatch, true);
     assert.strictEqual(report.summary.activeBackgroundTasks, 1);
     assert.strictEqual(report.summary.activeSubagentProcesses, 1);
 

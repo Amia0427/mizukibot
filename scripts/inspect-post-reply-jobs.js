@@ -1,4 +1,5 @@
 const { getPostReplyJobQueue } = require('../utils/postReplyJobQueue');
+const { classifyPostReplyJobError } = require('./requeue-post-reply-failed');
 
 function parseArgs(argv = process.argv.slice(2)) {
   const out = {
@@ -21,14 +22,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 }
 
 function classifyJob(job = {}) {
-  const error = String(job.lastError || '').toLowerCase();
-  if (/(429|rate limit|too many requests|408|425|500|502|503|504|timeout|timed out|temporarily unavailable|econnreset|etimedout|network)/.test(error)) {
-    return 'transient';
-  }
-  if (/(401|403|404|forbidden|unauthorized|not found|model not supported|unsupported model)/.test(error)) {
-    return 'terminal';
-  }
-  return error ? 'unknown_error' : 'no_error';
+  return classifyPostReplyJobError(job);
 }
 
 function summarizeJob(job = {}) {
@@ -87,4 +81,13 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  parseArgs,
+  classifyJob,
+  summarizeJob,
+  main
+};

@@ -17,6 +17,7 @@ process.env.MEMORY_EMBEDDING_MODEL = 'test-embedding-model';
 process.env.MEMORY_EMBEDDING_API_BASE_URL = 'https://embedding.example/v1';
 process.env.MEMORY_EMBEDDING_API_KEY = 'test-key';
 process.env.PERSONA_WORLDBOOK_EMBEDDING_ENABLED = 'true';
+process.env.MEMORY_BACKFILL_LOW_RESOURCE_MODE = 'false';
 
 fs.mkdirSync(process.env.MEMORY_V3_PROJECTIONS_DIR, { recursive: true });
 fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona_worldbook'), { recursive: true });
@@ -70,7 +71,7 @@ httpClient.postWithRetry = async () => {
 };
 
 const { runBackfill } = require('../scripts/backfill-memory-v3-embeddings');
-const { loadEmbeddingIndex } = require('../utils/memory-v3/embeddingIndex');
+const { clearEmbeddingIndexCache, loadEmbeddingIndex } = require('../utils/memory-v3/embeddingIndex');
 const { loadWorldbookEmbeddingIndex } = require('../utils/personaWorldbookSearch');
 
 module.exports = runBackfill({ dryRun: true, source: 'all', limit: 3 }).then((dryRun) => {
@@ -93,6 +94,7 @@ module.exports = runBackfill({ dryRun: true, source: 'all', limit: 3 }).then((dr
     error: 'embedding_request_failed'
   };
   writeJsonLines(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, [failedRow]);
+  clearEmbeddingIndexCache();
   return runBackfill({ dryRun: true, source: 'memory', limit: 3 });
 }).then((withoutRetry) => {
   assert.strictEqual(withoutRetry.considered, 0);

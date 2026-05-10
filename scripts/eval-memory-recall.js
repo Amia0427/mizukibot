@@ -77,12 +77,13 @@ function buildGoldQuery(doc = {}) {
   const canonical = normalizeText(doc.canonicalKey || doc.title || doc.moduleId || doc.id);
   const preview = normalizeText(doc.preview || doc.text || doc.purpose);
   const snippet = preview.split(/[。！？.!?\n]/).map(normalizeText).find(Boolean) || preview;
+  const compactSnippet = snippet.length > 160 ? snippet.slice(0, 160) : snippet;
   if (facet === 'journal') {
     const day = normalizeText(doc.episodeDay || doc.title || '').slice(0, 10);
-    return normalizeText(day ? `${day} ${snippet}` : snippet);
+    return normalizeText(day ? `${day} ${compactSnippet}` : compactSnippet);
   }
-  if (facet === 'worldbook') return normalizeText(`${canonical} ${snippet}`);
-  return normalizeText(canonical && canonical !== 'unknown' ? `${canonical} ${snippet}` : snippet);
+  if (facet === 'worldbook') return normalizeText(`${canonical} ${compactSnippet}`);
+  return normalizeText(canonical && canonical !== 'unknown' ? `${canonical} ${compactSnippet}` : compactSnippet);
 }
 
 function caseSortKey(item = {}) {
@@ -129,9 +130,38 @@ function isStableMemoryGoldCase(item = {}) {
   if (source === 'worldbook') return true;
   if (source === 'test' || source === 'unknown') return false;
   if (source === 'post_reply_worker' || source === 'self_improvement') return false;
-  if (source === 'passive_group_reply' && facet !== 'group' && facet !== 'style') return false;
-  if (facet === 'default' || facet === 'identity') return false;
-  return ['journal', 'group', 'preference', 'style', 'relationship', 'task'].includes(facet);
+  if (source === 'legacy_memories' || source === 'daily_journal_summary' || source === 'daily_journal_rollup') return false;
+  if (source === 'direct_chat' || source === 'passive_group_reply' || source === 'bot_diary') return false;
+  if (source === 'explicit') return false;
+  if (facet === 'default' || facet === 'identity' || facet === 'relationship') return false;
+  return ['journal', 'group', 'preference', 'style', 'task'].includes(facet);
+}
+
+function goldCanonicalKey(item = {}) {
+  const facet = normalizeText(item.facet);
+  let canonical = normalizeText(item.canonicalKey || item.query).toLowerCase();
+  if (facet === 'style') {
+    canonical = canonical
+      .replace(/^style\s*/i, '')
+      .replace(/\b(style|语气|偏好|常用|回应|表达|口语化|轻松|自然|亲切|俏皮|温柔|安抚|带一点|一点|的|和|用)\b/gi, ' ')
+      .replace(/[，。、“”"':：；;（）()~…]/g, ' ');
+  }
+  return [
+    normalizeText(item.userId),
+    normalizeText(item.groupId),
+    facet,
+    normalizeText(canonical)
+  ].join('|');
+}
+
+function keepUniqueGoldCases(cases = []) {
+  const counts = new Map();
+  for (const item of Array.isArray(cases) ? cases : []) {
+    const key = goldCanonicalKey(item);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return (Array.isArray(cases) ? cases : []).filter((item) => (counts.get(goldCanonicalKey(item)) || 0) === 1);
 }
 
 function buildMemoryGoldCases(limit = 100) {
@@ -153,6 +183,7 @@ function buildMemoryGoldCases(limit = 100) {
         expectedIds: [normalizeText(node.id)],
         source: normalizeSource(node.scopeType) === 'group' ? 'group' : normalizeSource(node.source || node.memoryKind || 'memory'),
         targetSource: normalizeSource(node.source || node.memoryKind || 'memory'),
+        canonicalKey: normalizeText(node.canonicalKey || node.text).toLowerCase(),
         createdAt: Number(node.updatedAt || node.createdAt || 0) || 0
       };
     })
@@ -172,12 +203,13 @@ function buildMemoryGoldCases(limit = 100) {
         expectedIds: [normalizeText(doc.id)],
         source: 'journal',
         targetSource: 'journal',
+        canonicalKey: normalizeText(doc.id),
         createdAt: Number(doc.updatedAt || 0) || 0
       };
     })
     .filter((item) => item && item.userId && item.query && isStableMemoryGoldCase(item));
 
-  return roundRobinGoldCases(nodes.concat(journals), limit, (item) => `${item.facet}:${item.targetSource || item.source}`);
+  return roundRobinGoldCases(keepUniqueGoldCases(nodes.concat(journals)), limit, (item) => `${item.facet}:${item.targetSource || item.source}`);
 }
 
 function buildWorldbookGoldCases(limit = 100) {
@@ -505,8 +537,15 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     details.push({
       id: testCase.id,
       evalSource: testCase.evalSource || '',
+      userId: testCase.userId || '',
+      groupId: testCase.groupId || '',
       latencyMs,
       resultIds: results.map((item) => item.id || item.nodeId || item.moduleId),
+      query: testCase.query,
+      facet: testCase.facet || '',
+      source: testCase.source || '',
+      targetSource: testCase.targetSource || '',
+      expectedIds,
       sources: results.map((item) => item.source),
       lancedb: result.stats?.lancedb || null,
       worldbook: result.stats?.worldbook || null,

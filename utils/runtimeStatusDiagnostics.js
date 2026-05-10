@@ -230,14 +230,31 @@ function getDiagnosticProjectRoot() {
   return path.resolve(__dirname, '..').replace(/\\/g, '/').toLowerCase();
 }
 
+function extractKnownProjectScriptTokens(cmd = '') {
+  const tokens = [];
+  const pattern = /"([^"]*(?:index|post-reply-worker|subagent-command-worker)\.js)"|'([^']*(?:index|post-reply-worker|subagent-command-worker)\.js)'|([^\s"]*(?:index|post-reply-worker|subagent-command-worker)\.js)/ig;
+  let match = pattern.exec(cmd);
+  while (match) {
+    tokens.push(normalizeText(match[1] || match[2] || match[3]).replace(/\\/g, '/').toLowerCase());
+    match = pattern.exec(cmd);
+  }
+  return tokens.filter(Boolean);
+}
+
+function isAbsoluteLikePath(value = '') {
+  return /^[a-z]:\//i.test(value) || value.startsWith('/');
+}
+
 function processMatchesProjectRoot(proc = {}) {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
   if (!cmd) return false;
   const root = getDiagnosticProjectRoot();
   const rootWithSlash = root.endsWith('/') ? root : `${root}/`;
   if (cmd.includes(rootWithSlash)) return true;
-  if (/[a-z]:\/|\/home\/|\/users\/|\/opt\/|\/var\//i.test(cmd) && /\/(?:index|post-reply-worker|subagent-command-worker)\.js\b/i.test(cmd)) {
-    return false;
+
+  const scriptTokens = extractKnownProjectScriptTokens(cmd);
+  if (scriptTokens.length > 0) {
+    return scriptTokens.some((token) => !isAbsoluteLikePath(token) || token.includes(rootWithSlash));
   }
   return true;
 }
@@ -653,6 +670,7 @@ function buildRuntimeStatusDiagnostic(options = {}) {
       postReplyWorker: {
         status: postReplyStatus,
         pid: postReplyPidFile.pid,
+        pidFileMatch: postReplyPidFile.status !== 'mismatch',
         processCount: workerProcesses.length,
         queue: postReplyQueue.counts
       },
