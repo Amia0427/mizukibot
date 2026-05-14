@@ -1,1 +1,1 @@
-module.exports = require('../../../core/router');
+module.exports = { ...require('../../../core/router') };

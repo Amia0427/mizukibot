@@ -1,4 +1,4 @@
-const planning = require('./index');
+const planning = require('./tool-selection.chunk');
 
 module.exports = {
   buildPlannerStepGraphSequence: planning.buildPlannerStepGraphSequence,

@@ -47,6 +47,7 @@ const { loadQzoneGenerationLog } = require('../core/qzoneGenerationPhase2');
     groupId: 'g1'
   }, {
     assertAdmin: () => {},
+    qzoneAutoPublishEnabled: true,
     publishQzonePost: async (content) => {
       publishCalls += 1;
       assert.ok(String(content).includes('我'));
@@ -60,6 +61,29 @@ const { loadQzoneGenerationLog } = require('../core/qzoneGenerationPhase2');
   assert.ok(getRecentQzoneHistory().some((item) => item.source === 'scheduled_qzone_post'));
   assert.ok(loadQzoneGenerationLog().items.some((item) => item.status === 'sent'));
 
+  const disabledPublish = await runQzoneAgent({
+    mode: 'manual',
+    content: '我把自动发布关掉以后，只留下草稿就够了。',
+    publishPolicy: 'auto_publish',
+    source: 'scheduled_qzone_post',
+    type: 'agent'
+  }, {
+    userId: 'admin',
+    groupId: 'g1'
+  }, {
+    assertAdmin: () => {},
+    qzoneAutoPublishEnabled: false,
+    publishQzonePost: async () => {
+      throw new Error('disabled auto publish should not call QZone publisher');
+    }
+  });
+
+  assert.strictEqual(disabledPublish.ok, true);
+  assert.strictEqual(disabledPublish.published, false);
+  assert.strictEqual(disabledPublish.draftOnly, true);
+  assert.strictEqual(disabledPublish.reason, 'QZone auto publish disabled');
+  assert.strictEqual(publishCalls, 1);
+
   const blockedByUncertainImageUpload = await runQzoneAgent({
     mode: 'manual',
     content: '我把灯关掉以后，桌上的杯影反而像醒着。',
@@ -70,6 +94,7 @@ const { loadQzoneGenerationLog } = require('../core/qzoneGenerationPhase2');
     groupId: 'g1'
   }, {
     assertAdmin: () => {},
+    qzoneAutoPublishEnabled: true,
     helpers: {
       tryGenerateBotDiaryQzoneImage: async () => ({
         attempted: true,

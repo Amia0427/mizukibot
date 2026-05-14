@@ -59,9 +59,13 @@ const {
   loadMemoryNodes,
   loadEpisodeProjection
 } = require('./memory-v3/storage');
+const {
+  openImageMemory,
+  searchImageMemories
+} = require('./imageMemoryIndex');
 
-const VALID_SEARCH_SOURCES = new Set(['all', 'profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook']);
-const VALID_OPEN_SOURCES = new Set(['profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook']);
+const VALID_SEARCH_SOURCES = new Set(['all', 'profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook', 'image']);
+const VALID_OPEN_SOURCES = new Set(['profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook', 'image']);
 const SOURCE_PRIORITY = {
   recent: 0,
   personal: 1,
@@ -70,7 +74,8 @@ const SOURCE_PRIORITY = {
   style: 4,
   jargon: 5,
   profile: 6,
-  journal: 7
+  journal: 7,
+  image: 8
 };
 const QUERY_FACETS = new Set(RECALL_FACETS);
 const JOURNAL_RAW_FALLBACK_DAYS = 10;
@@ -1156,6 +1161,46 @@ function searchJournalCandidates(userId, query) {
   return rawFallback.concat(bundleHit);
 }
 
+function normalizeImageHit(hit = {}) {
+  const cacheKey = sanitizeText(hit.cacheKey);
+  if (!cacheKey) return null;
+  const title = hit.summary ? 'Image memory' : 'Cached image';
+  const fallbackText = [
+    hit.summary,
+    hit.ocrText || hit.visibleText,
+    hit.userText,
+    hit.sourceUrl,
+    hit.messageId
+  ].map(sanitizeText).filter(Boolean).join('\n');
+  const text = sanitizeText(hit.text) || fallbackText;
+  return {
+    ref: `mc_ref:image:${cacheKey}`,
+    source: 'image',
+    type: 'cached_image',
+    id: cacheKey,
+    logicalId: cacheKey,
+    title,
+    preview: sanitizePreviewText(text || hit.imageRef || cacheKey, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
+    text: text || hit.imageRef || cacheKey,
+    score: Number(hit.score || 0) || 0,
+    updatedAt: Number(hit.lastSeenAt || hit.createdAt || 0) || 0,
+    confidence: hit.exists === false ? 0.5 : 0.86,
+    tier: hit.exists === false ? 'C' : 'B',
+    matchMode: 'image_index',
+    status: hit.exists === false ? 'missing_payload' : 'active',
+    sourceKind: 'image_memory',
+    memoryKind: 'image',
+    reason: hit.exists === false ? 'cached image payload missing' : ''
+  };
+}
+
+function searchImageCandidates(userId, query, limit, context = {}) {
+  return searchImageMemories(query, {
+    ...context,
+    userId
+  }, { limit }).map(normalizeImageHit).filter(Boolean);
+}
+
 function buildFallbackCandidates(userId, facet = 'default', context = {}) {
   const fallbackSource = coerceSearchSource(context.source || 'all');
   const profile = getProfileResult(userId);
@@ -1452,12 +1497,13 @@ function searchUnifiedMemory(query, options = {}, context = {}) {
   }
 
   const include = (name) => source === 'all' || source === name;
+  const includeUnified = source !== 'image';
   const internalCandidateTarget = Math.max(
     limit + 4,
     Number(config.MEMORY_CLI_INTERNAL_CANDIDATES_PER_SOURCE || 12),
     shouldBiasToContinuity(queryFacet) ? 20 : 12
   );
-  const unifiedHits = retrieveUnifiedMemories(userId, query, internalCandidateTarget, {
+  const unifiedHits = includeUnified ? retrieveUnifiedMemories(userId, query, internalCandidateTarget, {
     routePolicyKey: searchOptions.routePolicyKey,
     topRouteType: searchOptions.topRouteType,
     taskType: searchOptions.taskType,
@@ -1474,7 +1520,7 @@ function searchUnifiedMemory(query, options = {}, context = {}) {
     includeEpisodes: searchOptions.includeEpisodes,
     sourceFilter: source,
     trackAccess: false
-  }).map((hit) => normalizeUnifiedHit(hit)).filter(Boolean);
+  }).map((hit) => normalizeUnifiedHit(hit)).filter(Boolean) : [];
 
   const candidateBuckets = {
     recent: include('recent') ? searchRecentCandidates(userId, query, context).slice(0, shouldBiasToContinuity(queryFacet) ? 10 : 6) : [],
@@ -1484,7 +1530,8 @@ function searchUnifiedMemory(query, options = {}, context = {}) {
     group: include('group') ? unifiedHits.filter((hit) => hit.source === 'group') : [],
     style: include('style') ? unifiedHits.filter((hit) => hit.source === 'style') : [],
     jargon: include('jargon') ? unifiedHits.filter((hit) => hit.source === 'jargon') : [],
-    journal: include('journal') ? searchJournalCandidates(userId, query).slice(0, shouldBiasToContinuity(queryFacet) ? 12 : 8) : []
+    journal: include('journal') ? searchJournalCandidates(userId, query).slice(0, shouldBiasToContinuity(queryFacet) ? 12 : 8) : [],
+    image: include('image') ? searchImageCandidates(userId, query, internalCandidateTarget, context) : []
   };
 
   let ranked = rerankCandidates(Object.values(candidateBuckets).flat(), queryFacet);
@@ -1521,7 +1568,8 @@ function searchUnifiedMemory(query, options = {}, context = {}) {
       group: candidateBuckets.group.length,
       style: candidateBuckets.style.length,
       jargon: candidateBuckets.jargon.length,
-      journal: candidateBuckets.journal.length
+      journal: candidateBuckets.journal.length,
+      image: candidateBuckets.image.length
     },
     fallbackUsed,
     outputChars: packed.outputChars,
@@ -1844,6 +1892,32 @@ function openUnifiedMemory(target, options = {}, context = {}) {
   const id = sanitizeText(target?.id || options.id);
 
   if (ref) {
+    if (ref.startsWith('mc_ref:image:')) {
+      const openedImage = openImageMemory(ref, { ...context, userId });
+      if (!openedImage) return null;
+      return {
+        source: 'image',
+        id: openedImage.cacheKey,
+        data: {
+          cacheKey: openedImage.cacheKey,
+          imageRef: openedImage.imageRef,
+          mediaType: openedImage.mediaType,
+          sourceUrl: openedImage.sourceUrl,
+          exists: openedImage.exists,
+          userId: openedImage.userId,
+          groupId: openedImage.groupId,
+          sessionKey: openedImage.sessionKey,
+          messageId: openedImage.messageId,
+          createdAt: openedImage.createdAt,
+          lastSeenAt: openedImage.lastSeenAt,
+          summary: openedImage.summary,
+          ocrText: openedImage.ocrText,
+          visibleText: openedImage.visibleText,
+          userText: openedImage.userText,
+          observations: Array.isArray(openedImage.observations) ? openedImage.observations.slice(0, 5) : []
+        }
+      };
+    }
     if (ref.startsWith('mc_ref:profile:')) {
       if (config.MEMORY_V3_ENABLED) {
         const targetProfileId = ref.replace(/^mc_ref:profile:/, '');
@@ -1945,6 +2019,32 @@ function openUnifiedMemory(target, options = {}, context = {}) {
     };
   }
   if (source === 'recent' && id) return openRecentSession(userId, id, context);
+  if (source === 'image' && id) {
+    const openedImage = openImageMemory(id, { ...context, userId });
+    if (!openedImage) return null;
+    return {
+      source: 'image',
+      id: openedImage.cacheKey,
+      data: {
+        cacheKey: openedImage.cacheKey,
+        imageRef: openedImage.imageRef,
+        mediaType: openedImage.mediaType,
+        sourceUrl: openedImage.sourceUrl,
+        exists: openedImage.exists,
+        userId: openedImage.userId,
+        groupId: openedImage.groupId,
+        sessionKey: openedImage.sessionKey,
+        messageId: openedImage.messageId,
+        createdAt: openedImage.createdAt,
+        lastSeenAt: openedImage.lastSeenAt,
+        summary: openedImage.summary,
+        ocrText: openedImage.ocrText,
+        visibleText: openedImage.visibleText,
+        userText: openedImage.userText,
+        observations: Array.isArray(openedImage.observations) ? openedImage.observations.slice(0, 5) : []
+      }
+    };
+  }
   if ((source === 'personal' || source === 'task' || source === 'group' || source === 'style' || source === 'jargon' || source === 'journal') && id) {
     return openMemoryItemById(userId, source, id);
   }
@@ -1970,7 +2070,7 @@ function listUnifiedMemorySources(context = {}) {
   const scope = getMemoryScopeForUser(userId);
   return {
     ok: true,
-    sources: ['recent', 'profile', 'personal', 'task', 'group', 'style', 'jargon', 'journal'],
+    sources: ['recent', 'profile', 'personal', 'task', 'group', 'style', 'jargon', 'journal', 'image'],
     groupCount: Array.isArray(scope.groups) ? scope.groups.length : 0,
     channelCount: Array.isArray(scope.channels) ? scope.channels.length : 0
   };
@@ -2092,7 +2192,7 @@ async function runLegacyMemorySearch(parsed, prepared, context = {}) {
 
   if (payload) return payload;
 
-  const search = config.MEMORY_V3_ENABLED
+  const search = config.MEMORY_V3_ENABLED && parsed.source !== 'image'
     ? await (async () => {
       let facet = classifyRecallFacet(parsed.query);
       if (parsed.source === 'recent') facet = 'continuity';
@@ -2218,7 +2318,7 @@ async function runMemoryCli(commandText = '', context = {}) {
   let payload = null;
 
   if (parsed.commandName === 'search') {
-    if (String(config.MEMORY_CLI_SEARCH_ENGINE || 'fast').trim().toLowerCase() === 'legacy') {
+    if (parsed.source === 'image' || String(config.MEMORY_CLI_SEARCH_ENGINE || 'fast').trim().toLowerCase() === 'legacy') {
       payload = await runLegacyMemorySearch(parsed, prepared, context);
     } else {
       try {

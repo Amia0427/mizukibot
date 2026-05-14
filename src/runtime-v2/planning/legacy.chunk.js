@@ -1,3 +1,77 @@
+const {
+  HUMANIZER_SYSTEM_PROMPT,
+  buildReactiveRetryPayload,
+  config,
+  createContextCompactionHardBlockError,
+  ensureChatCompletionsUrl,
+  extractJsonSafely,
+  extractMessageContent,
+  getApiBaseUrl,
+  getApiKey,
+  getConfig,
+  getMaxTokens,
+  getModelName,
+  getPolicyDefinition,
+  getRetries,
+  getTemperature,
+  getToolExecutor,
+  getToolNames,
+  getTopP,
+  isContextOverflowError,
+  isReplyFailure,
+  normalizeArray,
+  normalizeObject,
+  normalizeText,
+  normalizeTextContent,
+  postWithRetry,
+  runHumanizerAgent,
+  withMainModelFallback
+} = require('./runtime-core.chunk');
+const {
+  buildLegacyExecutionPlanFromSteps,
+  getPlannerDecisionVersion
+} = require('./dynamic-plan.chunk');
+const { planRequestV2 } = require('./caller.chunk');
+const {
+  buildPlannerPrompt,
+  buildPlannerUserPayload,
+  normalizePlannerDecisionV2
+} = require('./prompt-normalizer.chunk');
+const {
+  buildAvailableContextSignals,
+  buildRuleBasedPlannerDecision
+} = require('./rule-decision.chunk');
+const {
+  buildBackgroundResearchMeta,
+  buildPlannerModelRequestBody,
+  collectAvailableToolSummary,
+  getPlannerApiBaseUrlV2,
+  getPlannerApiKeyV2,
+  getPlannerReasoningEffort,
+  shouldRequestBackgroundResearch
+} = require('./tool-gating.chunk');
+const {
+  buildPlannerStepGraphSequence,
+  deriveMemoryOpenArgs,
+  deriveToolArgs,
+  pickMinimalToolAllowlist,
+  requiresToolEvidence
+} = require('./tool-selection.chunk');
+const {
+  callPlannerModelV2,
+  callPlannerSubagentV2,
+  convertPlannerDecisionToDirectChatDecision
+} = require('./caller.chunk');
+const {
+  DIRECT_CHAT_PLANNER_VERSION,
+  DYNAMIC_CONTEXT_PLAN_VERSION,
+  PLANNER_DECISION_VERSION,
+  PLANNER_PROTOCOL_VERSION,
+  TASK_SHAPES,
+  TOOL_BUCKETS
+} = require('./constants');
+const { prefersMemoryRecall } = require('./classifiers');
+
 function shouldUsePlanAndSolve(question = '', customPrompt = null, imageUrl = null) {
   const currentConfig = getConfig();
   if (!currentConfig.ENABLE_PLAN_SOLVE) return false;

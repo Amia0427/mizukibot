@@ -1,3 +1,37 @@
+const {
+  extractExplicitUrl,
+  extractTickerHint,
+  getPlannerRequestText,
+  getPlannerSearchSeed,
+  hasExplicitHttpUrl,
+  isArxivIdRequest,
+  isArxivLatestRequest,
+  isArxivRequest,
+  isContextStatsRequest,
+  isConversationalNoop,
+  isFinanceAnalysisRequest,
+  isFinanceDividendRequest,
+  isFinancePortfolioRequest,
+  isFinanceQuoteRequest,
+  isFinanceRumorRequest,
+  isFinanceWatchlistRequest,
+  isNotebookListingRequest,
+  isSubjectiveOpinionQuestion,
+  isWeatherRequest,
+  normalizeArray,
+  normalizeResponseIntent,
+  normalizeText,
+  normalizeToolNames,
+  prefersMemoryRecall,
+  shouldKeepNotebookAnswerChatOnly,
+  shouldPrioritizeMemoryProbe
+} = require('./runtime-core.chunk');
+const {
+  buildExecutionStepGraph,
+  buildToolCatalogByName,
+  isWriteCapableTool
+} = require('./dynamic-plan.chunk');
+
 function deriveToolArgs(toolName = '', route = {}) {
   const normalizedTool = normalizeText(toolName);
   const cleanText = normalizeText(route?.cleanText);
@@ -299,4 +333,15 @@ function buildPlannerStepGraphSequence(route = {}, allowedToolNames = [], toolCa
     });
   });
 }
+
+module.exports = {
+  buildPlannerStepGraphSequence,
+  deriveMemoryOpenArgs,
+  deriveToolArgs,
+  needsWebDetailFetch,
+  pickMinimalToolAllowlist,
+  requiresToolEvidence,
+  shouldForceWebSearchFetchPlan,
+  shouldPrioritizeContextStats
+};
 

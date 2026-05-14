@@ -1,1 +1,1 @@
-module.exports = require('../../../core/messageAdminCommands');
+module.exports = { ...require('../../../core/messageAdminCommands') };

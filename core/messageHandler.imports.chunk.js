@@ -115,27 +115,35 @@ const { planDirectChat } = require('./directChatPlanner');
 const {
   PRIVATE_CHAT_WHITELIST_REPLY,
   PRIVATE_GROUP_ONLY_REPLY,
+  canBypassPrivateGroupOnly,
+  isPrivateChatType,
+  isPrivateChatUserAllowed
+} = require('../src/message/private-chat');
+const {
   buildBackgroundAckText,
   buildNoTaskControlText,
-  buildQqRichMessagePayload,
-  buildQzoneAutodraftPrompt,
   buildSessionStatusReply,
   buildSupplementedTaskText,
-  canBypassPrivateGroupOnly,
+  parseBackgroundControlCommand
+} = require('../src/message/background-control');
+const {
+  buildQqRichMessagePayload,
+  parseQqRichMessage,
+  shouldPreferQqRichReply
+} = require('../src/message/rich-message');
+const {
+  buildQzoneAutodraftPrompt,
+  shouldAutoDraftQzonePostRequest: shouldAutoDraftQzonePostRequestBase
+} = require('../src/message/qzone');
+const {
   createStreamingDispatcher,
   getModelSegmentBreakIndex,
   getNaturalSplitIndex,
   getReplyChunkChars,
   getStreamMaxSegments,
   getStreamSendGapMs,
-  isPrivateChatType,
-  isPrivateChatUserAllowed,
-  parseBackgroundControlCommand,
-  parseQqRichMessage,
-  shouldAutoDraftQzonePostRequest: shouldAutoDraftQzonePostRequestBase,
-  shouldPreferQqRichReply,
   splitReplyForSend
-} = require('../src/message');
+} = require('../src/message/streaming');
 const {
   cancelScheduledTask,
   createScheduledCommand,

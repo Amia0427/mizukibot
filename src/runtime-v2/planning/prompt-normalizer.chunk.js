@@ -1,3 +1,61 @@
+const {
+  DEFAULT_WORLDBOOK_PLANNER_CANDIDATE_LIMIT,
+  DIRECT_CHAT_PLANNER_VERSION,
+  DYNAMIC_CONTEXT_PLAN_VERSION,
+  PLANNER_DECISION_VERSION,
+  PLANNER_PROTOCOL_VERSION,
+  TASK_SHAPES,
+  TOOL_BUCKETS,
+  buildDirectChatToolCatalogSummary,
+  buildMainReplyDynamicPromptGuide,
+  buildPlannerPersonaModuleCatalog,
+  buildPlannerStageSystemPrompt,
+  config,
+  getMainReplyDynamicBlockCatalog,
+  getPersonaModuleCatalogSummary,
+  getPlannerRequestText,
+  isConversationalNoop,
+  isSubjectiveOpinionQuestion,
+  normalizeArray,
+  normalizeChatMode,
+  normalizeObject,
+  normalizePlannerLatencyMeta,
+  normalizeResponseIntent,
+  normalizeText,
+  normalizeToolIntent,
+  normalizeToolNames
+} = require('./runtime-core.chunk');
+const {
+  buildExecutionStepGraph,
+  buildToolCatalogByName,
+  buildValidationEnvelope,
+  getPlannerDecisionVersion,
+  normalizeDynamicPromptPlan,
+  resolveToolBucket
+} = require('./dynamic-plan.chunk');
+const {
+  buildBackgroundResearchMeta,
+  choosePreferredToolSubset,
+  collectAvailableToolSummary,
+  getPlannerModel,
+  isCompanionPlannerMode,
+  isCompanionPlannerToolUseAllowed,
+  normalizePlannerReasonText,
+  resolveCompanionPlannerToolGateReason
+} = require('./tool-gating.chunk');
+const {
+  buildPlannerStepGraphSequence,
+  deriveToolArgs,
+  shouldForceWebSearchFetchPlan
+} = require('./tool-selection.chunk');
+const {
+  buildAvailableContextSignals,
+  buildRuleBasedPlannerDecision,
+  normalizeDynamicPromptBlockCatalogForPlanner,
+  sanitizePlannerContextSummary,
+  summarizeToolCatalogForPrompt
+} = require('./rule-decision.chunk');
+
 function buildPlannerPrompt(toolCatalog = []) {
   const catalogBlock = summarizeToolCatalogForPrompt(toolCatalog);
   return [
@@ -388,4 +446,11 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     }
   };
 }
+
+module.exports = {
+  buildPlannerPrompt,
+  buildPlannerUserPayload,
+  normalizePlannerDecisionV2,
+  normalizeRuntimeBindingDescriptor
+};
 

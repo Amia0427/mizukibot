@@ -1,1 +1,1 @@
-module.exports = require('../../../core/messageReplyRuntime');
+module.exports = { ...require('../../../core/messageReplyRuntime') };

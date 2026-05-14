@@ -80,6 +80,15 @@ function createPersistNode(deps = {}) {
   const logPostReplyEnqueueError = typeof deps.logPostReplyEnqueueError === 'function'
     ? deps.logPostReplyEnqueueError
     : (() => {});
+  const recordVisualContextImages = typeof deps.recordVisualContextImages === 'function'
+    ? deps.recordVisualContextImages
+    : ((visualContext, context) => {
+        try {
+          return require('../../../utils/imageMemoryIndex').recordVisualContextImages(visualContext, context);
+        } catch (_) {
+          return [];
+        }
+      });
   const postReplyLastEnqueueAtByUser = new Map();
 
   function normalizeText(value) {
@@ -184,6 +193,16 @@ function createPersistNode(deps = {}) {
     const shouldLearnSelfImprovementValue = shouldPersistChatArtifacts
       && shouldLearnSelfImprovement(request, finalReply);
     const normalizedUserId = String(request.userId || '').trim();
+    const visualContext = normalizeObject(request.visualContext || request.routeMeta?.visualContext, null);
+    if (visualContext?.hasVisualInput === true) {
+      recordVisualContextImages(visualContext, {
+        userId: normalizedUserId,
+        groupId: String(request.routeMeta?.groupId || request.routeMeta?.group_id || '').trim(),
+        sessionKey: String(request.sessionKey || '').trim(),
+        messageId: String(request.routeMeta?.messageId || request.routeMeta?.message_id || '').trim(),
+        userText: userContent
+      });
+    }
     const postReplyContentChars = Array.from(`${userContent}\n${finalReply}`.replace(/\s+/g, '')).length;
     const minPostReplyContentChars = Math.max(0, Number(config.POST_REPLY_MIN_CONTENT_CHARS) || 0);
     const hasEnoughPostReplyContent = postReplyContentChars >= minPostReplyContentChars;

@@ -4,6 +4,7 @@ const {
   getForwardMessagesByIdCached
 } = require('../api/napcatMessageReader');
 const { ensureCachedImageRef } = require('../utils/imageInputCache');
+const { upsertImageMemory } = require('../utils/imageMemoryIndex');
 
 const URL_KEY_HINTS = new Set(['jumpurl', 'qqdocurl', 'url', 'musicurl']);
 const KNOWN_CARD_PLATFORM_LABELS = Object.freeze({
@@ -524,6 +525,22 @@ async function buildImageRefMap(urls = [], options = {}) {
     });
     if (cached.ok && cached.ref) {
       out[url] = cached.ref;
+      const cacheKey = String(cached.cacheKey || cached.ref.replace(/^cached-image:\/\//i, '')).trim();
+      upsertImageMemory({
+        cacheKey,
+        imageRef: cached.ref,
+        sourceUrl: cached.sourceUrl || url,
+        mediaType: cached.mediaType,
+        userId: options.userId,
+        groupId: options.groupId,
+        sessionKey: options.sessionKey,
+        messageId: options.messageId,
+        sourceMessageId: options.sourceMessageId,
+        imageSource: options.imageSource,
+        label: options.label,
+        source: 'continuous_message',
+        userText: options.userText
+      });
     }
   }
   return out;
@@ -764,7 +781,13 @@ async function enrichEntryFromReply(entry, options = {}) {
       text: fullText,
       imageUrls: Array.isArray(originalParsed.imageUrls) ? originalParsed.imageUrls.slice() : [],
       imageRefMap: Array.isArray(originalParsed.imageUrls)
-        ? await buildImageRefMap(originalParsed.imageUrls, options)
+        ? await buildImageRefMap(originalParsed.imageUrls, {
+            ...options,
+            imageSource: 'reply',
+            sourceMessageId: replyMessageId,
+            userId: options.userId,
+            userText: fullText
+          })
         : {}
     };
     console.log('[continuous-message] reply expand success', {
@@ -819,7 +842,12 @@ async function enrichEntryFromForward(entry, options = {}) {
     entry.text = [entry.forwardSummaryText, entry.text].filter(Boolean).join('\n').trim();
   }
   entry.forwardImageUrls = uniqueStrings(forwardImageUrls);
-  entry.forwardImageRefMap = await buildImageRefMap(entry.forwardImageUrls, options);
+  entry.forwardImageRefMap = await buildImageRefMap(entry.forwardImageUrls, {
+    ...options,
+    imageSource: 'forward',
+    sourceMessageId: Array.isArray(entry.forwardIds) ? entry.forwardIds.join(',') : '',
+    userText: entry.forwardSummaryText || entry.text
+  });
   return entry;
 }
 
@@ -898,12 +926,27 @@ async function resolveContinuousEntryDetails(entry = {}, options = {}) {
     entry.text = appendCardUrlsToText(entry.text, entry.qqCardUrls || [], { qqCardLinksEnabled });
     entry.expansionState.card = Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length ? 'resolved' : 'skipped';
   }
-  entry.imageRefMap = await buildImageRefMap(entry.imageUrls, options);
+  entry.imageRefMap = await buildImageRefMap(entry.imageUrls, {
+    ...options,
+    imageSource: 'current',
+    sourceMessageId: entry.messageId,
+    userText: entry.text
+  });
   if (entry.replyContext && typeof entry.replyContext === 'object' && (!entry.replyContext.imageRefMap || Object.keys(entry.replyContext.imageRefMap).length === 0)) {
-    entry.replyContext.imageRefMap = await buildImageRefMap(entry.replyContext.imageUrls, options);
+    entry.replyContext.imageRefMap = await buildImageRefMap(entry.replyContext.imageUrls, {
+      ...options,
+      imageSource: 'reply',
+      sourceMessageId: entry.replyContext.messageId || entry.replyMessageId,
+      userText: entry.replyContext.text || entry.text
+    });
   }
   if (Array.isArray(entry.forwardImageUrls) && (!entry.forwardImageRefMap || Object.keys(entry.forwardImageRefMap).length === 0)) {
-    entry.forwardImageRefMap = await buildImageRefMap(entry.forwardImageUrls, options);
+    entry.forwardImageRefMap = await buildImageRefMap(entry.forwardImageUrls, {
+      ...options,
+      imageSource: 'forward',
+      sourceMessageId: Array.isArray(entry.forwardIds) ? entry.forwardIds.join(',') : '',
+      userText: entry.forwardSummaryText || entry.text
+    });
   }
   const selectedImageUrl = normalizeText(
     entry.selectedImageUrl
@@ -1069,9 +1112,16 @@ function createContinuousMessagePreprocessor(options = {}) {
 
     const activityVersion = bumpSessionActivityVersion(sessionKey);
     const effectiveBotQQ = normalizeText(context.effectiveBotQQ);
+    const imageMemoryContext = {
+      userId: normalizeText(msg?.user_id),
+      groupId: normalizeText(msg?.group_id),
+      sessionKey,
+      messageId: normalizeText(msg?.message_id)
+    };
     const entry = cheapParseMessageEntry(msg, {
       ...sharedResolveOptions,
-      effectiveBotQQ
+      effectiveBotQQ,
+      ...imageMemoryContext
     });
     const bypass = isCommandBypass(msg, { effectiveBotQQ });
 
@@ -1234,6 +1284,8 @@ function createContinuousMessagePreprocessor(options = {}) {
             await resolveContinuousEntryDetails(resumedMerged, {
               ...sharedResolveOptions,
               effectiveBotQQ,
+              ...imageMemoryContext,
+              messageId: Array.isArray(resumedMerged.sourceMessageIds) ? resumedMerged.sourceMessageIds[0] : imageMemoryContext.messageId,
               resolveReply: Boolean(resumedMerged.replyMessageId),
               resolveForward: Array.isArray(resumedMerged.forwardIds) && resumedMerged.forwardIds.length > 0,
               resolveCards: Array.isArray(resumedMerged.qqCardUrls) && resumedMerged.qqCardUrls.length > 0
@@ -1256,6 +1308,8 @@ function createContinuousMessagePreprocessor(options = {}) {
     await resolveContinuousEntryDetails(merged, {
       ...sharedResolveOptions,
       effectiveBotQQ,
+      ...imageMemoryContext,
+      messageId: Array.isArray(merged.sourceMessageIds) ? merged.sourceMessageIds[0] : imageMemoryContext.messageId,
       resolveReply: Boolean(merged.replyMessageId),
       resolveForward: Array.isArray(merged.forwardIds) && merged.forwardIds.length > 0,
       resolveCards: Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length > 0

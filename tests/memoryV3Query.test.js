@@ -16,7 +16,12 @@ fs.mkdirSync(tempRoot, { recursive: true });
 
 const { appendMemoryEvent } = require('../utils/memory-v3/events');
 const { materializeMemoryViews } = require('../utils/memory-v3/materializer');
-const { queryMemory } = require('../utils/memory-v3/query');
+const { queryMemory, rewriteQuery } = require('../utils/memory-v3/query');
+const config = require('../config');
+const {
+  clearProjectionReadCache,
+  loadMemoryNodes
+} = require('../utils/memory-v3/storage');
 
 module.exports = (async () => {
   await appendMemoryEvent({
@@ -55,6 +60,29 @@ module.exports = (async () => {
 
   assert.ok(result.results.some((item) => item.text.includes('不喜欢被叫猪猪')), 'expected explicit winner');
   assert.ok(!result.results.some((item) => item.text === '喜欢被叫猪猪'), 'expected loser to be suppressed');
+
+  const preferenceRewrite = rewriteQuery('怎么回答更舒服', 'preference').join(' ');
+  assert.ok(preferenceRewrite.includes('喜欢'), 'expected readable Chinese preference rewrite token');
+  assert.ok(preferenceRewrite.includes('偏好'), 'expected readable Chinese preference synonym');
+  assert.ok(!/[鍠鑳韬]/.test(preferenceRewrite), 'expected no mojibake in query rewrite');
+
+  clearProjectionReadCache();
+  const firstNodes = loadMemoryNodes();
+  assert.ok(firstNodes.some((item) => item.text === '不喜欢被叫猪猪'));
+  fs.appendFileSync(
+    config.MEMORY_V3_NODES_FILE,
+    `\n${JSON.stringify({
+      id: 'node_cache_probe',
+      userId: 'u_v3',
+      scopeType: 'personal',
+      text: '缓存失效探针',
+      status: 'active',
+      updatedAt: Date.now()
+    })}\n`,
+    'utf8'
+  );
+  const secondNodes = loadMemoryNodes();
+  assert.ok(secondNodes.some((item) => item.id === 'node_cache_probe'), 'expected projection read cache to refresh when file changes');
   console.log('memoryV3Query.test.js passed');
 })().catch((error) => {
   console.error(error);

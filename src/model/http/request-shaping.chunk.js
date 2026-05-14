@@ -1,3 +1,44 @@
+const {
+  applyAnthropicCacheControl,
+  applyAnthropicCacheControlToBlockIndex,
+  applyAnthropicCacheControlToLastBlock,
+  applyAutoAnthropicPromptCaching,
+  ANTHROPIC_ASSISTANT_CONTEXT_PREFIX,
+  appendRequestTraceEvent,
+  anthropicRequestUsesPromptCaching,
+  blockHasAnthropicCacheControl,
+  buildModelRouteDiagnostics,
+  clampTemperatureForProvider,
+  coerceTrailingAnthropicAssistantContextToUser,
+  config,
+  extractErrorCode,
+  extractAnthropicCacheControl,
+  extractAnthropicMessageCacheControl,
+  extractHttpStatus,
+  extractInputMessageText,
+  isAnthropicAssistantOnlyContextText,
+  isAnthropicDynamicSystemContextText,
+  mergeAnthropicBetaHeader,
+  nextTracePhase,
+  normalizeJsonObject,
+  normalizeProviderRequestHeaders,
+  normalizeText,
+  providerAllowsCacheControl,
+  providerAllowsOpenAIPromptCache,
+  serializeAnthropicToolResultContent,
+  splitAnthropicStableSystemText,
+  stripAnthropicCacheControlFromBlocks,
+  stripCacheControlFields,
+  stripCacheControlFieldsDeep,
+  stripOpenAIPromptCacheFields,
+  stripOpenAIPromptCacheRetention,
+  stripTopPField
+} = require('./runtime-core.chunk');
+const {
+  sanitizeOpenAICompatibleToolWithoutCache,
+  toAnthropicContentBlocks
+} = require('./images.chunk');
+
 function isAnthropicPromptCacheSchemaError(error) {
   const status = Number(error?.response?.status || 0);
   if (![400, 404, 415, 422].includes(status)) return false;
@@ -487,4 +528,31 @@ async function buildAnthropicRequestBody(body = {}) {
 
   return applyAutoAnthropicPromptCaching(requestBody);
 }
+
+module.exports = {
+  buildAnthropicRequestBody,
+  buildRequestCacheTrace,
+  countCacheControlBlocks,
+  emitHttpDowngradeTrace,
+  emitHttpFailureTrace,
+  emitHttpSuccessTrace,
+  emitHttpTrace,
+  extractInternalRequestHeaders,
+  extractProviderRequestHeaders,
+  getAnthropicThinkingBudget,
+  inferMessageRole,
+  isAnthropicPromptCacheSchemaError,
+  isExtendedSamplingSchemaError,
+  isReasoningSchemaError,
+  mapMessagesToAnthropic,
+  mapToolChoiceToAnthropic,
+  mapToolSchemaToAnthropic,
+  normalizeReasoningEffort,
+  requestUsesExtendedSampling,
+  requestUsesReasoning,
+  stripExtendedSamplingFields,
+  stripInternalRequestFields,
+  stripProviderCacheFields,
+  stripReasoningFields
+};
 

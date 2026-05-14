@@ -339,8 +339,15 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
   const type = normalizeText(options.qzoneType || normalized.type || draft.mode || 'agent').toLowerCase() || 'agent';
   const meta = buildTextPlanMeta(draft.meta || {}, normalized, options);
   const imageMeta = buildImageMetaDefaults();
+  const autoPublishEnabled = options.qzoneAutoPublishEnabled !== undefined
+    ? options.qzoneAutoPublishEnabled
+    : config.QZONE_AUTO_PUBLISH_ENABLED;
+  const shouldPublish = normalized.publishPolicy === AUTO_PUBLISH && autoPublishEnabled;
 
-  if (normalized.publishPolicy !== AUTO_PUBLISH) {
+  if (!shouldPublish) {
+    const reason = normalized.publishPolicy === AUTO_PUBLISH
+      ? 'QZone auto publish disabled'
+      : 'QZone draft generated but not published';
     appendAgentLog({
       status: 'drafted',
       source: source === 'manual' ? 'manual_qzone_post' : source,
@@ -355,10 +362,10 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
       ok: true,
       published: false,
       draftOnly: true,
-      text: `drafted\nreason: QZone draft generated but not published\ngroup: ${groupContext.groupId}\ncontent:\n${content}`,
+      text: `drafted\nreason: ${reason}\ngroup: ${groupContext.groupId}\ncontent:\n${content}`,
       content,
       mode: draft.mode || normalized.mode,
-      reason: 'QZone draft generated but not published',
+      reason,
       source: source === 'manual' ? 'manual_qzone_post' : source,
       meta: {
         ...meta,

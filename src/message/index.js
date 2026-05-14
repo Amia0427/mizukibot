@@ -1,4 +1,5 @@
 module.exports = {
+  ...require('./handler'),
   admin: require('./admin'),
   dispatch: require('./dispatch'),
   ingress: require('./ingress'),

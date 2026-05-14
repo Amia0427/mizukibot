@@ -1,4 +1,8 @@
-const planning = require('./index');
+const planning = {
+  ...require('./prompt-normalizer.chunk'),
+  ...require('./dynamic-plan.chunk'),
+  ...require('./rule-decision.chunk')
+};
 
 module.exports = {
   buildLegacyExecutionPlanFromSteps: planning.buildLegacyExecutionPlanFromSteps,

@@ -1,12 +1,11 @@
-const { runCommonJsChunks } = require('../../shared/chunkedModule');
-
-module.exports = runCommonJsChunks(__dirname, module, [
-  'runtime-core.chunk.js',
-  'dynamic-plan.chunk.js',
-  'tool-gating.chunk.js',
-  'tool-selection.chunk.js',
-  'rule-decision.chunk.js',
-  'prompt-normalizer.chunk.js',
-  'caller.chunk.js',
-  'legacy.chunk.js',
-], { require, filename: __filename });
+module.exports = {
+  ...require('./constants'),
+  ...require('./classifiers'),
+  ...require('./dynamic-plan.chunk'),
+  ...require('./tool-gating.chunk'),
+  ...require('./tool-selection.chunk'),
+  ...require('./rule-decision.chunk'),
+  ...require('./prompt-normalizer.chunk'),
+  ...require('./caller.chunk'),
+  ...require('./legacy.chunk')
+};

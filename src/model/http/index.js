@@ -1,11 +1,22 @@
-const { runCommonJsChunks } = require('../../shared/chunkedModule');
+const runtimeCore = require('./runtime-core.chunk');
+const images = require('./images.chunk');
+const openaiCompatible = require('./openai-compatible.chunk');
+const requestShaping = require('./request-shaping.chunk');
+const transport = require('./prepare.chunk');
+const postRetry = require('./post-retry.chunk');
+const streamRetry = require('./stream-retry.chunk');
 
-module.exports = runCommonJsChunks(__dirname, module, [
-  'runtime-core.chunk.js',
-  'images.chunk.js',
-  'openai-compatible.chunk.js',
-  'request-shaping.chunk.js',
-  'prepare.chunk.js',
-  'post-retry.chunk.js',
-  'stream-retry.chunk.js',
-], { require, filename: __filename });
+module.exports = {
+  buildAnthropicRequestHeaders: runtimeCore.buildAnthropicRequestHeaders,
+  buildOpenAICompatibleImageFallbackText: images.buildOpenAICompatibleImageFallbackText,
+  buildResponsesRequestBody: openaiCompatible.buildResponsesRequestBody,
+  getAxiosOptions: transport.getAxiosOptions,
+  postWithRetry: postRetry.postWithRetry,
+  postStreamWithRetry: streamRetry.postStreamWithRetry,
+  prepareRequest: transport.prepareRequest,
+  mapMessagesToAnthropic: requestShaping.mapMessagesToAnthropic,
+  preprocessOpenAICompatibleMessages: openaiCompatible.preprocessOpenAICompatibleMessages,
+  preprocessOpenAICompatibleMessagesWithoutCache: openaiCompatible.preprocessOpenAICompatibleMessagesWithoutCache,
+  resolveAnthropicImageBlock: images.resolveAnthropicImageBlock,
+  resolveOpenAICompatibleImagePart: images.resolveOpenAICompatibleImagePart
+};

@@ -13,6 +13,10 @@ if (-not (Test-Path $logDir)) {
 }
 
 $logFile = Join-Path $logDir 'bot-daemon.log'
+$mainStdoutLogFile = Join-Path $logDir 'bot-runtime.out.log'
+$mainStderrLogFile = Join-Path $logDir 'bot-runtime.err.log'
+$workerStdoutLogFile = Join-Path $logDir 'post-reply-worker.out.log'
+$workerStderrLogFile = Join-Path $logDir 'post-reply-worker.err.log'
 $workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
 
 function Get-PositiveInt64Env {
@@ -77,6 +81,81 @@ function Write-DaemonLog {
   $line = "[$stamp] $Message`r`n"
   Rotate-DaemonLogIfNeeded -IncomingText $line
   [System.IO.File]::AppendAllText($logFile, $line, [System.Text.Encoding]::UTF8)
+}
+
+function Get-DaemonFallbackLogPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $directory = Split-Path -Parent $Path
+  $leaf = Split-Path -Leaf $Path
+  $extension = [System.IO.Path]::GetExtension($leaf)
+  $baseName = [System.IO.Path]::GetFileNameWithoutExtension($leaf)
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+
+  return Join-Path $directory "$baseName.$stamp$extension"
+}
+
+function Test-CanOpenDaemonLogForWrite {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  try {
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+    $stream.Close()
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Resolve-DaemonWritableLogPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (Test-CanOpenDaemonLogForWrite -Path $Path) {
+    Set-Content -LiteralPath $Path -Value '' -Encoding utf8
+    return $Path
+  }
+
+  $fallbackPath = Get-DaemonFallbackLogPath -Path $Path
+  Set-Content -LiteralPath $fallbackPath -Value '' -Encoding utf8
+  Write-DaemonLog -Message "log file locked, using fallback log. requested=$Path fallback=$fallbackPath"
+  return $fallbackPath
+}
+
+function Start-NodeDaemonProcess {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$NodeExe,
+
+    [Parameter(Mandatory = $true)]
+    [string[]]$ArgumentList,
+
+    [Parameter(Mandatory = $true)]
+    [string]$StdoutLog,
+
+    [Parameter(Mandatory = $true)]
+    [string]$StderrLog
+  )
+
+  $resolvedStdoutLog = Resolve-DaemonWritableLogPath -Path $StdoutLog
+  $resolvedStderrLog = Resolve-DaemonWritableLogPath -Path $StderrLog
+
+  return Start-Process `
+    -FilePath $NodeExe `
+    -ArgumentList $ArgumentList `
+    -WorkingDirectory $repoRoot `
+    -WindowStyle Hidden `
+    -RedirectStandardOutput $resolvedStdoutLog `
+    -RedirectStandardError $resolvedStderrLog `
+    -PassThru
 }
 
 function Import-DotEnv {
@@ -325,8 +404,8 @@ try {
       $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
       Write-DaemonLog -Message "lock present but not owned by active main bot. $lockDiag"
     }
-    $mainProc = Start-Process -FilePath $nodeExe -ArgumentList 'index.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
-    Write-DaemonLog -Message "started main bot pid=$($mainProc.Id)"
+    $mainProc = Start-NodeDaemonProcess -NodeExe $nodeExe -ArgumentList @('index.js') -StdoutLog $mainStdoutLogFile -StderrLog $mainStderrLogFile
+    Write-DaemonLog -Message "started main bot pid=$($mainProc.Id), stdout=$mainStdoutLogFile, stderr=$mainStderrLogFile"
     Start-Sleep -Seconds 2
     if (-not (Test-LockOwnedByRunningNode -LockPath $lockFile)) {
       $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
@@ -337,9 +416,9 @@ try {
   if (Test-WorkerOwnedByRunningNode -PidFile $workerPidFile) {
     Write-DaemonLog -Message 'post-reply worker already running, skip duplicate start.'
   } else {
-    $workerProc = Start-Process -FilePath $nodeExe -ArgumentList 'scripts/post-reply-worker.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+    $workerProc = Start-NodeDaemonProcess -NodeExe $nodeExe -ArgumentList @('scripts/post-reply-worker.js') -StdoutLog $workerStdoutLogFile -StderrLog $workerStderrLogFile
     Set-Content -Path $workerPidFile -Value $workerProc.Id -Encoding utf8
-    Write-DaemonLog -Message "started post-reply worker pid=$($workerProc.Id)"
+    Write-DaemonLog -Message "started post-reply worker pid=$($workerProc.Id), stdout=$workerStdoutLogFile, stderr=$workerStderrLogFile"
   }
 } catch {
   $exitCode = 1

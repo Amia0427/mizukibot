@@ -1,3 +1,30 @@
+const {
+  HttpsProxyAgentCtor,
+  assertSafeModelEndpoint,
+  config,
+  ensureAnthropicMessagesUrl,
+  extractAnthropicCacheControl,
+  getApiProvider,
+  isAnthropicProvider,
+  isGeminiNativeProvider,
+  normalizeProviderRequestHeaders,
+  normalizeText,
+  providerAllowsCacheControl,
+  providerAllowsOpenAIPromptCache,
+  stripTopPField
+} = require('./runtime-core.chunk');
+const { buildResponsesRequestBody, isResponsesUrl, preprocessOpenAICompatibleMessages, preprocessOpenAICompatibleMessagesWithoutCache } = require('./openai-compatible.chunk');
+const {
+  buildAnthropicRequestBody,
+  buildRequestCacheTrace,
+  extractProviderRequestHeaders,
+  normalizeReasoningEffort,
+  stripInternalRequestFields,
+  stripProviderCacheFields
+} = require('./request-shaping.chunk');
+const { buildAnthropicRequestHeaders } = require('./runtime-core.chunk');
+const { sanitizeOpenAICompatibleToolWithoutCache } = require('./images.chunk');
+
 async function prepareRequest(url, body = {}) {
   const provider = getApiProvider(url, body?.model || config.AI_MODEL);
   const internalRequestHeaders = extractProviderRequestHeaders(provider, body);
@@ -263,3 +290,22 @@ function shouldRetryStreamRequest(err, handlers = {}) {
   if (handlers && handlers.__stream_started) return false;
   return true;
 }
+
+module.exports = {
+  buildRequestCacheTrace,
+  containsAny,
+  getAxiosOptions,
+  getFirstTokenTimeoutMs,
+  getHeaders,
+  getRequestTimeoutMs,
+  getRetryDelayMs,
+  getRetryTimeoutMs,
+  getStreamAxiosOptions,
+  getStreamTimeoutMs,
+  isCloudflare403,
+  parseRetryAfterMs,
+  prepareRequest,
+  shouldRetry,
+  shouldRetryStreamRequest,
+  validatePreparedEndpoint
+};
