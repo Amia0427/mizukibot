@@ -1,3 +1,24 @@
+const {
+  extractAnthropicCacheControl,
+  normalizeText,
+  stripCacheControlFields,
+  stripOpenAIPromptCacheFields,
+  stripOpenAIPromptCacheRetention,
+  stripTopPField
+} = require('./runtime-core.chunk');
+const {
+  normalizeOpenAIImageDetail,
+  resolveOpenAICompatibleImagePart,
+  sanitizeOpenAICompatibleContentPart,
+  sanitizeOpenAICompatibleContentPartWithoutCache,
+  sanitizeOpenAICompatibleMessageWithoutCache,
+  sanitizeOpenAICompatibleToolWithoutCache
+} = require('./images.chunk');
+
+function getRequestShaping() {
+  return require('./request-shaping.chunk');
+}
+
 async function preprocessOpenAICompatibleMessages(messages = []) {
   const normalizedMessages = Array.isArray(messages) ? messages : [];
   const out = [];
@@ -284,7 +305,7 @@ function mapToolChoiceToResponses(toolChoice) {
 }
 
 function mapReasoningEffortToResponses(value) {
-  const effort = normalizeReasoningEffort(value);
+  const effort = getRequestShaping().normalizeReasoningEffort(value);
   return effort ? { effort } : null;
 }
 
@@ -327,4 +348,25 @@ function buildResponsesRequestBody(openAICompatibleBody = {}) {
   if (body.previous_response_id) requestBody.previous_response_id = body.previous_response_id;
   return requestBody;
 }
+
+module.exports = {
+  buildResponsesRequestBody,
+  isOpenAICompatiblePromptCacheSchemaError,
+  isOpenAIPromptCacheRetentionSchemaError,
+  isResponsesUrl,
+  mapChatMessageToResponsesInput,
+  mapChatMessagesToResponsesInput,
+  mapChatToolsToResponsesTools,
+  mapContentPartToResponsesInput,
+  mapMessageContentToResponsesInput,
+  mapReasoningEffortToResponses,
+  mapToolChoiceToResponses,
+  normalizeResponsesTextContent,
+  preprocessOpenAICompatibleMessages,
+  preprocessOpenAICompatibleMessagesWithoutCache,
+  requestUsesOpenAICompatiblePromptCaching,
+  requestUsesOpenAIPromptCacheRetention,
+  stripOpenAICompatiblePromptCaching,
+  stripOpenAIPromptCacheRetentionFromRequest
+};
 

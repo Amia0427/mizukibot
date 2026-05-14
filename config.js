@@ -331,6 +331,7 @@ module.exports = {
   QZONE_COOKIE: pick('QZONE_COOKIE', ''),
   QZONE_UIN: pick('QZONE_UIN', ''),
   QZONE_PUBLISH_TIMEOUT_MS: pickNum('QZONE_PUBLISH_TIMEOUT_MS', 30000),
+  QZONE_AUTO_PUBLISH_ENABLED: pickBool('QZONE_AUTO_PUBLISH_ENABLED', true),
   SCHEDULED_TASK_SCAN_INTERVAL_MS: pickNum('SCHEDULED_TASK_SCAN_INTERVAL_MS', 30000),
   SCHEDULER_ADAPTIVE_SCAN_ENABLED: pickBool('SCHEDULER_ADAPTIVE_SCAN_ENABLED', true),
   SCHEDULED_QQ_TASKS_FILE: pick('SCHEDULED_QQ_TASKS_FILE', path.join(DATA_DIR, 'scheduled_qq_tasks.json')),
@@ -1288,6 +1289,9 @@ module.exports = {
   MEMORY_FILE: path.join(DATA_DIR, 'memories.json'),
   SESSION_CONTEXT_SUMMARY_FILE: pick('SESSION_CONTEXT_SUMMARY_FILE', path.join(DATA_DIR, 'session_context_summaries.json')),
   MEMORY_SCOPE_INDEX_FILE: path.join(DATA_DIR, 'memory_scope_index.json'),
+  IMAGE_MEMORY_RECALL_ENABLED: pickBool('IMAGE_MEMORY_RECALL_ENABLED', true),
+  IMAGE_MEMORY_INDEX_FILE: pick('IMAGE_MEMORY_INDEX_FILE', path.join(DATA_DIR, 'image_memory_index.json')),
+  IMAGE_MEMORY_OBSERVATION_LIMIT: Math.max(1, pickNum('IMAGE_MEMORY_OBSERVATION_LIMIT', 20)),
   SHORT_TERM_BRIDGE_FILE: path.join(DATA_DIR, 'short_term_bridge.json'),
   GROUP_AWARENESS_STATE_FILE: path.join(DATA_DIR, 'group_awareness_state.json'),
   GROUP_MAIN_MODEL_STREAM_POLICY_FILE: pick(

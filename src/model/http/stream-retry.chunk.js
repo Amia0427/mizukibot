@@ -1,3 +1,68 @@
+const {
+  axios,
+  createModelRouteTracePatch,
+  extractErrorCode,
+  extractHttpStatus,
+  extractSSEEvents,
+  failModelCall,
+  finishModelCall,
+  flushSSEState,
+  mergeUsageObjects,
+  normalizeText,
+  startModelCall,
+  buildAnthropicRequestHeaders,
+  buildModelRouteDiagnostics
+} = require('./runtime-core.chunk');
+const {
+  buildOpenAICompatibleImageFallbackText,
+  resolveAnthropicImageBlock,
+  resolveOpenAICompatibleImagePart
+} = require('./images.chunk');
+const {
+  buildResponsesRequestBody,
+  preprocessOpenAICompatibleMessages,
+  preprocessOpenAICompatibleMessagesWithoutCache
+} = require('./openai-compatible.chunk');
+const { mapMessagesToAnthropic } = require('./request-shaping.chunk');
+const {
+  getAxiosOptions,
+  getFirstTokenTimeoutMs,
+  getRetryDelayMs,
+  getRetryTimeoutMs,
+  getStreamAxiosOptions,
+  getStreamTimeoutMs,
+  prepareRequest,
+  shouldRetryStreamRequest,
+  validatePreparedEndpoint,
+  buildRequestCacheTrace
+} = require('./prepare.chunk');
+const {
+  anthropicRequestUsesPromptCaching,
+  stripAnthropicPromptCaching
+} = require('./runtime-core.chunk');
+const {
+  emitHttpDowngradeTrace,
+  emitHttpFailureTrace,
+  emitHttpSuccessTrace,
+  emitHttpTrace,
+  isAnthropicPromptCacheSchemaError,
+  isExtendedSamplingSchemaError,
+  isReasoningSchemaError,
+  requestUsesExtendedSampling,
+  requestUsesReasoning,
+  stripExtendedSamplingFields,
+  stripReasoningFields
+} = require('./request-shaping.chunk');
+const {
+  isOpenAICompatiblePromptCacheSchemaError,
+  isOpenAIPromptCacheRetentionSchemaError,
+  requestUsesOpenAICompatiblePromptCaching,
+  requestUsesOpenAIPromptCacheRetention,
+  stripOpenAICompatiblePromptCaching,
+  stripOpenAIPromptCacheRetentionFromRequest
+} = require('./openai-compatible.chunk');
+const { postWithRetry } = require('./post-retry.chunk');
+
 /**
  * Streaming POST request with retry support.
  * The caller receives raw chunks and handles SSE parsing.

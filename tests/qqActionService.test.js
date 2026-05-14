@@ -9,7 +9,7 @@ process.env.QZONE_GENERATION_HISTORY_FILE = path.join(tempRoot, 'qzone_generatio
 process.env.ADMIN_USER_IDS = 'u-admin';
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
-const { publishQzoneForContext, sendGroupImageMessage } = require('../api/qqActionService');
+const { createScheduledCommand, publishQzoneForContext, sendGroupImageMessage } = require('../api/qqActionService');
 const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
 
 (async () => {
@@ -58,6 +58,7 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
     anchor: 'room',
     structure: 'murmur_close',
     ending: 'cold_turn',
+    qzoneAutoPublishEnabled: true,
     publishQzonePost: async (content) => {
       assert.ok(String(content).includes('我'));
       return { success: true, reason: 'ok', source: 'test' };
@@ -69,6 +70,26 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
   const history = getRecentQzoneHistory();
   assert.ok(history.some((item) => item.source === 'manual_qzone_post'));
   assert.ok(history.some((item) => item.lens === 'scene'));
+
+  const createdTasks = [];
+  assert.throws(() => createScheduledCommand('qzone_post', 'tomorrow 09:00', {
+    mode: 'agent',
+    hint: '不应该创建'
+  }, {
+    userId: 'u-admin',
+    routeMeta: {
+      groupId: 'g1'
+    }
+  }, {
+    qzoneAutoPublishEnabled: false,
+    store: {
+      createTask(task) {
+        createdTasks.push(task);
+        return { task: { id: 'unexpected', ...task } };
+      }
+    }
+  }), /QZone auto publish disabled/);
+  assert.strictEqual(createdTasks.length, 0);
 
   console.log('qqActionService.test.js passed');
 })().catch((error) => {

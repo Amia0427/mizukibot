@@ -13,6 +13,7 @@ const {
 } = require('./helpers');
 const { loadMemoryEvents } = require('./events');
 const {
+  clearProjectionReadCache,
   defaultSessionProjection,
   defaultProfileProjection,
   defaultScopeProjection,
@@ -957,6 +958,7 @@ function materializeMemoryViews(options = {}) {
   atomicWriteJson(config.MEMORY_V3_SCOPE_PROJECTION_FILE, outputScopeProjection);
   atomicWriteJson(config.MEMORY_V3_EPISODE_PROJECTION_FILE, outputEpisodeProjection);
   writeJsonLines(config.MEMORY_V3_NODES_FILE, outputNodes);
+  clearProjectionReadCache();
   const embeddingIndex = enqueueMissingEmbeddings(resolvedNodes, {
     schedule: options.scheduleEmbeddingBackfill !== false,
     delayMs: options.embeddingBackfillDelayMs

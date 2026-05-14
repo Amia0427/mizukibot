@@ -1,3 +1,49 @@
+const {
+  DIRECT_CHAT_PLANNER_VERSION,
+  PLANNER_PROTOCOL_VERSION,
+  TOOL_BUCKETS,
+  buildHeuristicDynamicPromptPlan,
+  chooseTaskShape,
+  clampReason,
+  getMainReplyDynamicBlockCatalog,
+  getPlannerRequestText,
+  getPersonaModuleCatalogSummary,
+  isConversationalNoop,
+  isSubjectiveOpinionQuestion,
+  normalizeArray,
+  normalizeChatMode,
+  normalizeObject,
+  normalizePlannerLatencyMeta,
+  normalizeResponseIntent,
+  normalizeText,
+  normalizeToolIntent,
+  normalizeToolNames,
+  prefersMemoryRecall,
+  shouldPrioritizeMemoryProbe
+} = require('./runtime-core.chunk');
+const {
+  buildToolCatalogByName,
+  buildValidationEnvelope,
+  getPlannerDecisionVersion,
+  isWriteCapableTool,
+  normalizeDynamicPromptPlan,
+  resolveToolBucket
+} = require('./dynamic-plan.chunk');
+const {
+  collectAvailableToolSummary,
+  getPlannerModel,
+  isCompanionPlannerMode,
+  isCompanionPlannerToolUseAllowed,
+  resolveCompanionPlannerToolGateReason,
+  buildBackgroundResearchMeta
+} = require('./tool-gating.chunk');
+const {
+  buildPlannerStepGraphSequence,
+  pickMinimalToolAllowlist,
+  requiresToolEvidence,
+  shouldPrioritizeContextStats
+} = require('./tool-selection.chunk');
+
 function buildRuleBasedPlannerDecision(route = {}, options = {}) {
   const chatMode = normalizeChatMode(route?.meta?.chatMode);
   const toolIntent = normalizeToolIntent(route?.meta?.toolIntent);
@@ -343,4 +389,14 @@ function normalizeDynamicPromptBlockCatalogForPlanner(blockCatalog = []) {
     }))
     .filter((item) => item.blockId);
 }
+
+module.exports = {
+  buildAvailableContextSignals,
+  buildRuleBasedPlannerDecision,
+  hasMeaningfulObject,
+  hasMeaningfulText,
+  normalizeDynamicPromptBlockCatalogForPlanner,
+  sanitizePlannerContextSummary,
+  summarizeToolCatalogForPrompt
+};
 

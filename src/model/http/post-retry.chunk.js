@@ -1,3 +1,49 @@
+const {
+  axios,
+  createModelRouteTracePatch,
+  extractErrorCode,
+  extractHttpStatus,
+  failModelCall,
+  finishModelCall,
+  normalizeText,
+  startModelCall,
+  buildModelRouteDiagnostics
+} = require('./runtime-core.chunk');
+const {
+  getAxiosOptions,
+  getRequestTimeoutMs,
+  getRetryDelayMs,
+  getRetryTimeoutMs,
+  prepareRequest,
+  shouldRetry,
+  validatePreparedEndpoint
+} = require('./prepare.chunk');
+const {
+  anthropicRequestUsesPromptCaching,
+  stripAnthropicPromptCaching
+} = require('./runtime-core.chunk');
+const {
+  emitHttpFailureTrace,
+  emitHttpSuccessTrace,
+  emitHttpTrace,
+  isAnthropicPromptCacheSchemaError,
+  isExtendedSamplingSchemaError,
+  isReasoningSchemaError,
+  requestUsesExtendedSampling,
+  requestUsesReasoning,
+  stripExtendedSamplingFields,
+  stripReasoningFields
+} = require('./request-shaping.chunk');
+const {
+  isOpenAICompatiblePromptCacheSchemaError,
+  isOpenAIPromptCacheRetentionSchemaError,
+  requestUsesOpenAICompatiblePromptCaching,
+  requestUsesOpenAIPromptCacheRetention,
+  stripOpenAICompatiblePromptCaching,
+  stripOpenAIPromptCacheRetentionFromRequest
+} = require('./openai-compatible.chunk');
+const { buildRequestCacheTrace } = require('./prepare.chunk');
+
 /**
  * POST request with retry + exponential backoff.
  */
@@ -484,3 +530,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
 
   throw lastErr;
 }
+
+module.exports = {
+  postWithRetry
+};

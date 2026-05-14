@@ -72,6 +72,7 @@ function shouldBypassHumanizerForPolicy(policyKey = '') {
 }
 
 module.exports = {
+  buildBaseDynamicPrompt,
   buildDirectedContextPromptSnippet,
   buildDynamicPrompt,
   buildVisionMessageContent,

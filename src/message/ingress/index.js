@@ -1,1 +1,1 @@
-module.exports = require('../../../core/messageIngress');
+module.exports = { ...require('../../../core/messageIngress') };

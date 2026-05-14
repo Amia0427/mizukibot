@@ -1,3 +1,45 @@
+const {
+  DEFAULT_PLANNER_TEMPERATURE,
+  PLANNER_DECISION_VERSION,
+  PLANNER_PROTOCOL_VERSION,
+  TASK_SHAPES,
+  TOOL_BUCKETS,
+  addPlannerLatency,
+  attachPlannerLatencyMeta,
+  clampReason,
+  config,
+  extractJsonSafely,
+  extractMessageContent,
+  normalizeArray,
+  normalizeObject,
+  normalizeText,
+  normalizeToolNames,
+  nowMs,
+  postWithRetry,
+  runStructuredSubagent
+} = require('./runtime-core.chunk');
+const {
+  buildLegacyExecutionPlanFromSteps,
+  buildToolCatalogByName,
+  getPlannerDecisionVersion,
+  resolveToolBucket
+} = require('./dynamic-plan.chunk');
+const {
+  buildPlannerModelRequestBody,
+  collectAvailableToolSummary,
+  ensureChatCompletionsUrlLocal,
+  getPlannerApiBaseUrlV2,
+  getPlannerApiKeyV2,
+  getPlannerModel,
+  shouldUseDeterministicPlannerPreflight
+} = require('./tool-gating.chunk');
+const { buildRuleBasedPlannerDecision } = require('./rule-decision.chunk');
+const {
+  buildPlannerPrompt,
+  buildPlannerUserPayload,
+  normalizePlannerDecisionV2
+} = require('./prompt-normalizer.chunk');
+
 async function callPlannerModelV2(route = {}, options = {}) {
   const apiBaseUrl = getPlannerApiBaseUrlV2();
   const apiKey = getPlannerApiKeyV2();
@@ -6,7 +48,7 @@ async function callPlannerModelV2(route = {}, options = {}) {
   const response = await postWithRetry(
     ensureChatCompletionsUrlLocal(apiBaseUrl),
     requestBody,
-    1,
+    0,
     apiKey
   );
   const message = extractMessageContent(response);
@@ -189,4 +231,11 @@ function convertPlannerDecisionToDirectChatDecision(decision = {}, route = {}, o
     plannerProtocolVersion: normalizeText(decision?.plannerMeta?.protocolVersion) || PLANNER_PROTOCOL_VERSION
   };
 }
+
+module.exports = {
+  callPlannerModelV2,
+  callPlannerSubagentV2,
+  convertPlannerDecisionToDirectChatDecision,
+  planRequestV2
+};
 

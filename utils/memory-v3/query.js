@@ -162,12 +162,12 @@ function rewriteQuery(query = '', facet = 'default') {
   const base = normalizeText(query);
   const out = [base];
   if (!base) return out;
-  if (facet === 'preference') out.push(`${base} 鍠滄 鍋忓ソ dislike like preference`);
-  if (facet === 'continuity') out.push(`${base} 鍒氭墠 涓婃 缁х画 recent continuity pending`);
-  if (facet === 'identity') out.push(`${base} 韬唤 鑳屾櫙 鑷垜浠嬬粛 identity profile`);
+  if (facet === 'preference') out.push(`${base} 喜欢 偏好 口味 习惯 不喜欢 dislike like preference`);
+  if (facet === 'continuity') out.push(`${base} 刚才 上次 继续 接着 recent continuity pending`);
+  if (facet === 'identity') out.push(`${base} 身份 背景 自我介绍 画像 identity profile`);
   if (facet === 'task') out.push(`${base} strategy trigger avoid outcome task`);
   if (facet === 'style') out.push(`${base} style tone phrasing jargon`);
-  if (facet === 'journal') out.push(`${base} 鏈€杩?鍙戠敓 璁板綍 journal episode`);
+  if (facet === 'journal') out.push(`${base} 最近 发生 记录 日记 回忆 journal episode`);
   if (facet === 'relationship') out.push(`${base} relationship tone attitude distance`);
   return uniqueBy(out.filter(Boolean).slice(0, Math.min(2, Math.max(1, Number(config.MEMORY_V3_QUERY_REWRITE_LIMIT || 2)))), (item) => canonicalizeText(item));
 }
@@ -186,65 +186,107 @@ function resolveAllowedGroupIds(userId = '', options = {}) {
   return explicitNormalized.filter((item) => scopedSet.has(item));
 }
 
+function shouldCollectSourceForQuery(source = '', facet = 'default', requestedSource = 'all') {
+  const normalizedSource = normalizeText(source).toLowerCase();
+  const normalizedFacet = normalizeText(facet || 'default').toLowerCase();
+  const wanted = normalizeText(requestedSource || 'all').toLowerCase();
+  if (wanted && wanted !== 'all') {
+    if (wanted === 'personal') return normalizedSource === 'personal' || normalizedSource === 'profile';
+    return normalizedSource === wanted;
+  }
+  const byFacet = {
+    preference: new Set(['recent', 'personal', 'profile']),
+    identity: new Set(['recent', 'personal', 'profile']),
+    relationship: new Set(['recent', 'personal', 'profile', 'style']),
+    continuity: new Set(['recent', 'task', 'journal']),
+    task: new Set(['task']),
+    group: new Set(['group', 'jargon']),
+    style: new Set(['personal', 'profile', 'style', 'jargon']),
+    journal: new Set(['journal'])
+  };
+  const allowed = byFacet[normalizedFacet];
+  return allowed ? allowed.has(normalizedSource) : true;
+}
+
 function collectCandidates(userId, options = {}) {
-  const sessionProjection = loadSessionProjection();
-  const profileProjection = loadProfileProjection();
-  const episodeProjection = loadEpisodeProjection();
-  const allowedGroupIds = resolveAllowedGroupIds(userId, options);
+  const facet = normalizeText(options.facet || 'default').toLowerCase();
+  const requestedSource = normalizeText(options.source || 'all').toLowerCase();
+  const includeRecent = shouldCollectSourceForQuery('recent', facet, requestedSource);
+  const includePersonal = shouldCollectSourceForQuery('personal', facet, requestedSource);
+  const includeProfile = shouldCollectSourceForQuery('profile', facet, requestedSource);
+  const includeTask = shouldCollectSourceForQuery('task', facet, requestedSource);
+  const includeGroup = shouldCollectSourceForQuery('group', facet, requestedSource);
+  const includeJargon = shouldCollectSourceForQuery('jargon', facet, requestedSource);
+  const includeJournal = shouldCollectSourceForQuery('journal', facet, requestedSource);
+  const includeStyle = shouldCollectSourceForQuery('style', facet, requestedSource);
+  const sessionProjection = includeRecent ? loadSessionProjection() : { sessions: {} };
+  const profileProjection = includeProfile ? loadProfileProjection() : { users: {} };
+  const episodeProjection = includeJournal ? loadEpisodeProjection() : { users: {} };
+  const allowedGroupIds = includeGroup || includeJargon
+    ? resolveAllowedGroupIds(userId, options)
+    : [];
   const currentSessionKey = normalizeText(options.sessionKey);
   const candidates = [];
 
-  for (const session of Object.values(sessionProjection.sessions || {})) {
-    const sessionUserId = normalizeText(session?.userId);
-    if (sessionUserId !== String(userId || '').trim()) continue;
-    candidates.push({
-      id: `session:${session.sessionKey}`,
-      source: 'recent',
-      type: 'session',
-      scopeType: 'session',
-      sessionKey: session.sessionKey,
-      groupId: session.groupId || '',
-      text: [
-        session.carryOverUserTurn ? `pending: ${session.carryOverUserTurn}` : '',
-        session.activeTopic ? `topic: ${session.activeTopic}` : '',
-        session.summary && !looksLikePollutedSessionSummary(session.summary) ? `summary: ${session.summary}` : '',
-        Array.isArray(session.openLoops) && session.openLoops.length ? `open: ${session.openLoops.join(' | ')}` : '',
-        Array.isArray(session.assistantCommitments) && session.assistantCommitments.length ? `commitments: ${session.assistantCommitments.join(' | ')}` : '',
-        Array.isArray(session.userConstraints) && session.userConstraints.length ? `constraints: ${session.userConstraints.join(' | ')}` : '',
-        Array.isArray(session.recentMessages) && session.recentMessages.length
-          ? session.recentMessages.map((item) => `${item.role}: ${item.content}`).join('\n')
-          : ''
-      ].filter(Boolean).join('\n'),
-      updatedAt: Number(session.updatedAt || 0) || 0,
-      confidence: 1,
-      importance: session.sessionKey === currentSessionKey ? 1.6 : 1.2,
-      evidenceCount: 1,
-      evidenceTier: session.sessionKey === currentSessionKey ? 'strict' : 'weak',
-      stabilityScore: session.sessionKey === currentSessionKey ? 0.98 : 0.72,
-      semanticSlot: 'continuity',
-      canonicalKey: canonicalizeText(`${session.activeTopic || ''} ${session.summary || ''} ${session.carryOverUserTurn || ''}`)
-    });
+  if (includeRecent) {
+    for (const session of Object.values(sessionProjection.sessions || {})) {
+      const sessionUserId = normalizeText(session?.userId);
+      if (sessionUserId !== String(userId || '').trim()) continue;
+      candidates.push({
+        id: `session:${session.sessionKey}`,
+        source: 'recent',
+        type: 'session',
+        scopeType: 'session',
+        sessionKey: session.sessionKey,
+        groupId: session.groupId || '',
+        text: [
+          session.carryOverUserTurn ? `pending: ${session.carryOverUserTurn}` : '',
+          session.activeTopic ? `topic: ${session.activeTopic}` : '',
+          session.summary && !looksLikePollutedSessionSummary(session.summary) ? `summary: ${session.summary}` : '',
+          Array.isArray(session.openLoops) && session.openLoops.length ? `open: ${session.openLoops.join(' | ')}` : '',
+          Array.isArray(session.assistantCommitments) && session.assistantCommitments.length ? `commitments: ${session.assistantCommitments.join(' | ')}` : '',
+          Array.isArray(session.userConstraints) && session.userConstraints.length ? `constraints: ${session.userConstraints.join(' | ')}` : '',
+          Array.isArray(session.recentMessages) && session.recentMessages.length
+            ? session.recentMessages.map((item) => `${item.role}: ${item.content}`).join('\n')
+            : ''
+        ].filter(Boolean).join('\n'),
+        updatedAt: Number(session.updatedAt || 0) || 0,
+        confidence: 1,
+        importance: session.sessionKey === currentSessionKey ? 1.6 : 1.2,
+        evidenceCount: 1,
+        evidenceTier: session.sessionKey === currentSessionKey ? 'strict' : 'weak',
+        stabilityScore: session.sessionKey === currentSessionKey ? 0.98 : 0.72,
+        semanticSlot: 'continuity',
+        canonicalKey: canonicalizeText(`${session.activeTopic || ''} ${session.summary || ''} ${session.carryOverUserTurn || ''}`)
+      });
+    }
   }
 
-  for (const node of loadMemoryNodes()) {
-    const nodeUserId = normalizeText(node?.userId);
-    const scopeType = normalizeText(node?.scopeType).toLowerCase();
-    const groupId = normalizeText(node?.groupId);
-    if (scopeType === 'group') {
-      if (!allowedGroupIds.includes(groupId)) continue;
-    } else if (nodeUserId !== String(userId || '').trim()) {
-      continue;
+  if (includePersonal || includeTask || includeGroup || includeJargon || includeStyle) {
+    for (const node of loadMemoryNodes()) {
+      const nodeUserId = normalizeText(node?.userId);
+      const scopeType = normalizeText(node?.scopeType).toLowerCase();
+      const groupId = normalizeText(node?.groupId);
+      const source = scopeType === 'task'
+        ? 'task'
+        : (scopeType === 'group' ? (node.memoryKind === 'jargon' ? 'jargon' : 'group') : (node.memoryKind === 'style' ? 'style' : 'personal'));
+      if (!shouldCollectSourceForQuery(source, facet, requestedSource)) continue;
+      if (scopeType === 'group') {
+        if (!allowedGroupIds.includes(groupId)) continue;
+      } else if (nodeUserId !== String(userId || '').trim()) {
+        continue;
+      }
+      candidates.push({
+        ...node,
+        source,
+        semanticSlot: normalizeText(node.semanticSlot || node.type || node.memoryKind).toLowerCase(),
+        canonicalKey: normalizeText(node.canonicalKey || canonicalizeText(node.text)).toLowerCase()
+      });
     }
-    candidates.push({
-      ...node,
-      source: scopeType === 'task' ? 'task' : (scopeType === 'group' ? (node.memoryKind === 'jargon' ? 'jargon' : 'group') : (node.memoryKind === 'style' ? 'style' : 'personal')),
-      semanticSlot: normalizeText(node.semanticSlot || node.type || node.memoryKind).toLowerCase(),
-      canonicalKey: normalizeText(node.canonicalKey || canonicalizeText(node.text)).toLowerCase()
-    });
   }
 
   const profile = profileProjection.users?.[String(userId || '').trim()];
-  if (profile) {
+  if (includeProfile && profile) {
     const personaCore = profile.personaCore || {};
     const pseudoDocs = [
       personaCore.summary ? { id: `profile:${userId}:summary`, source: 'profile', type: 'persona_summary', text: personaCore.summary, semanticSlot: 'persona_summary', fieldKey: 'persona_summary_support' } : null,
@@ -278,30 +320,32 @@ function collectCandidates(userId, options = {}) {
   }
 
   const episodes = episodeProjection.users?.[String(userId || '').trim()]?.items || [];
-  for (const episode of Array.isArray(episodes) ? episodes : []) {
-    candidates.push({
-      id: `episode:${episode.id}`,
-      source: 'journal',
-      type: 'episode',
-      scopeType: 'personal',
-      text: normalizeText(episode.text),
-      updatedAt: Number(episode.updatedAt || 0) || 0,
-      confidence: 0.92,
-      importance: episode.type === 'monthly' ? 1.2 : 1.0,
-      evidenceCount: 1,
-      semanticSlot: 'episode',
-      canonicalKey: canonicalizeText(episode.text),
-      rollupLevel: episode.type,
-      episodeDay: episode.episodeDay || '',
-      yearMonth: episode.yearMonth || ''
-    });
-  }
+  if (includeJournal) {
+    for (const episode of Array.isArray(episodes) ? episodes : []) {
+      candidates.push({
+        id: `episode:${episode.id}`,
+        source: 'journal',
+        type: 'episode',
+        scopeType: 'personal',
+        text: normalizeText(episode.text),
+        updatedAt: Number(episode.updatedAt || 0) || 0,
+        confidence: 0.92,
+        importance: episode.type === 'monthly' ? 1.2 : 1.0,
+        evidenceCount: 1,
+        semanticSlot: 'episode',
+        canonicalKey: canonicalizeText(episode.text),
+        rollupLevel: episode.type,
+        episodeDay: episode.episodeDay || '',
+        yearMonth: episode.yearMonth || ''
+      });
+    }
 
-  for (const doc of buildDailyJournalDocsForUser(userId, { includeSegments: true })) {
-    candidates.push({
-      ...doc,
-      canonicalKey: canonicalizeText(doc.text)
-    });
+    for (const doc of buildDailyJournalDocsForUser(userId, { includeSegments: true })) {
+      candidates.push({
+        ...doc,
+        canonicalKey: canonicalizeText(doc.text)
+      });
+    }
   }
 
   return candidates.filter((item) => normalizeText(item.text));
@@ -874,7 +918,10 @@ async function queryMemory(input = {}) {
   });
   timing.queryEmbeddingMs = getNowMs() - stageStartedAt;
   stageStartedAt = getNowMs();
-  const candidates = filterCandidatesBySource(collectCandidates(userId, input), input.source);
+  const candidates = filterCandidatesBySource(collectCandidates(userId, {
+    ...input,
+    facet
+  }), input.source);
   timing.collectCandidatesMs = getNowMs() - stageStartedAt;
   const vectorStoreMode = normalizeVectorStoreMode(config.MEMORY_VECTOR_STORE);
   const embeddingCoverage = buildEmbeddingCoverageDiagnostics(candidates);

@@ -40,6 +40,15 @@ function createSchedulerRuntime(options = {}) {
     }
 
     if (commandType === 'qzone_post') {
+      const qzoneAutoPublishEnabled = options.qzoneAutoPublishEnabled !== undefined
+        ? options.qzoneAutoPublishEnabled
+        : config.QZONE_AUTO_PUBLISH_ENABLED;
+      if (!qzoneAutoPublishEnabled) {
+        return {
+          success: false,
+          reason: 'QZone auto publish disabled'
+        };
+      }
       if (!isAdmin(task.ownerUserId)) {
         return {
           success: false,

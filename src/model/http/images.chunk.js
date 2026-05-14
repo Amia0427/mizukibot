@@ -1,4 +1,21 @@
+const {
+  OPENAI_IMAGE_DETAIL_VALUES,
+  applyAnthropicCacheControl,
+  assertSafeHttpUrl,
+  axios,
+  config,
+  extractAnthropicCacheControl,
+  normalizeText,
+  parseCacheRef,
+  readCachedImagePayload,
+  stripCacheControlFields
+} = require('./runtime-core.chunk');
+
 const MAX_REMOTE_IMAGE_BYTES = 10 * 1024 * 1024;
+
+function getHttpTransport() {
+  return require('./prepare.chunk');
+}
 
 function inferImageMediaType(url = '', headers = {}) {
   const contentType = normalizeText(headers?.['content-type'] || headers?.['Content-Type']).toLowerCase();
@@ -29,7 +46,7 @@ function getImageFetchOptions() {
       'Accept-Language': getHttpAcceptLanguage(),
       'User-Agent': getHttpUserAgent()
     },
-    timeout: Math.min(getRequestTimeoutMs(), 20000),
+    timeout: Math.min(getHttpTransport().getRequestTimeoutMs(), 20000),
     proxy: false,
     responseType: 'arraybuffer',
     maxRedirects: 0,
@@ -212,7 +229,11 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
 
   try {
     const resp = await axios.get(imageUrl, {
-      ...getAxiosOptions('openai_compatible', null, Math.min(getRequestTimeoutMs(), 20000)),
+      ...getHttpTransport().getAxiosOptions(
+        'openai_compatible',
+        null,
+        Math.min(getHttpTransport().getRequestTimeoutMs(), 20000)
+      ),
       responseType: 'arraybuffer'
     });
     const mediaType = inferImageMediaType(imageUrl, resp?.headers || {});
@@ -367,4 +388,24 @@ async function toAnthropicContentBlocks(content) {
   const fallback = String(content || '');
   return fallback ? [{ type: 'text', text: fallback }] : [];
 }
+
+module.exports = {
+  buildOpenAICompatibleImageFallbackText,
+  buildUnavailableImageText,
+  fetchRemoteImage,
+  getHttpAcceptLanguage,
+  getHttpUserAgent,
+  getImageFetchOptions,
+  getOpenAICompatibleImageMode,
+  inferImageMediaType,
+  isQqImageUrl,
+  normalizeOpenAIImageDetail,
+  resolveAnthropicImageBlock,
+  resolveOpenAICompatibleImagePart,
+  sanitizeOpenAICompatibleContentPart,
+  sanitizeOpenAICompatibleContentPartWithoutCache,
+  sanitizeOpenAICompatibleMessageWithoutCache,
+  sanitizeOpenAICompatibleToolWithoutCache,
+  toAnthropicContentBlocks
+};
 

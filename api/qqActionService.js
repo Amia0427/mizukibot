@@ -678,6 +678,12 @@ function createScheduledCommand(action = '', when = '', contentOrArgs = '', cont
   const { userId } = requireGroupContext(context);
   if (normalizedAction === 'qzone_post') {
     assertAdmin(userId);
+    const qzoneAutoPublishEnabled = options.qzoneAutoPublishEnabled !== undefined
+      ? options.qzoneAutoPublishEnabled
+      : config.QZONE_AUTO_PUBLISH_ENABLED;
+    if (!qzoneAutoPublishEnabled) {
+      throw new Error('QZone auto publish disabled');
+    }
   }
 
   const qzoneInput = normalizedAction === 'qzone_post'

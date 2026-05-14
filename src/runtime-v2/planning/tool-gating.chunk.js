@@ -1,3 +1,60 @@
+const {
+  COMPANION_PLANNER_SAFE_READ_TOOLS,
+  DEFAULT_PLANNER_TEMPERATURE,
+  DEFAULT_WORLDBOOK_PLANNER_CANDIDATE_LIMIT,
+  TOOL_BUCKETS,
+  buildDirectChatToolCatalog,
+  buildPlannerStageSystemPrompt,
+  clampReason,
+  config,
+  filterCompanionAllowedTools,
+  getApiProvider,
+  getConfig,
+  getMainReplyDynamicBlockCatalog,
+  getPlannerRequestText,
+  getPlannerSearchSeed,
+  extractExplicitUrl,
+  extractTickerHint,
+  isCompanionToolModeEnabled,
+  isArxivIdRequest,
+  isArxivLatestRequest,
+  isArxivRequest,
+  isContextStatsRequest,
+  isConversationalNoop,
+  isExplicitUrlLookup,
+  isFinanceAnalysisRequest,
+  isFinanceDividendRequest,
+  isFinancePortfolioRequest,
+  isFinanceQuoteRequest,
+  isFinanceRumorRequest,
+  isFinanceWatchlistRequest,
+  isNotebookListingRequest,
+  isSubjectiveOpinionQuestion,
+  isWeatherRequest,
+  normalizeArray,
+  normalizeChatMode,
+  normalizeObject,
+  normalizeResponseIntent,
+  normalizeText,
+  normalizeToolIntent,
+  normalizeToolNames,
+  prefersMemoryRecall,
+  shouldKeepNotebookAnswerChatOnly,
+  shouldPrioritizeMemoryProbe
+} = require('./runtime-core.chunk');
+const {
+  buildExplicitAllowedToolCatalog,
+  buildToolCatalogByName
+} = require('./dynamic-plan.chunk');
+const {
+  needsWebDetailFetch,
+  pickMinimalToolAllowlist
+} = require('./tool-selection.chunk');
+
+function getPromptNormalizer() {
+  return require('./prompt-normalizer.chunk');
+}
+
 function collectAvailableToolSummary(route = {}, options = {}) {
   const optionConfig = normalizeObject(options.config, {});
   const currentConfig = {
@@ -338,7 +395,7 @@ function buildPlannerModelRequestBody(route = {}, options = {}) {
     temperature: DEFAULT_PLANNER_TEMPERATURE,
     messages: [
       { role: 'system', content: buildPlannerPrompt(toolCatalog) },
-      { role: 'user', content: JSON.stringify(buildPlannerUserPayload(route, toolCatalog, options)) }
+      { role: 'user', content: JSON.stringify(getPromptNormalizer().buildPlannerUserPayload(route, toolCatalog, options)) }
     ],
     max_tokens: 1000,
     stream: false,
@@ -358,4 +415,32 @@ function buildPlannerModelRequestBody(route = {}, options = {}) {
   }
   return { requestBody, toolCatalog };
 }
+
+function buildPlannerPrompt(toolCatalog = []) {
+  return getPromptNormalizer().buildPlannerPrompt(toolCatalog);
+}
+
+module.exports = {
+  buildBackgroundResearchMeta,
+  buildPlannerModelRequestBody,
+  canonicalizeToolNames,
+  choosePreferredToolSubset,
+  collectAvailableToolSummary,
+  ensureChatCompletionsUrlLocal,
+  getPlannerApiBaseUrlV2,
+  getPlannerApiKeyV2,
+  getPlannerModel,
+  getPlannerReasoningEffort,
+  hasAnyResearchCue,
+  isCompanionPlannerMode,
+  isCompanionPlannerSafeReadTool,
+  isCompanionPlannerToolUseAllowed,
+  normalizePlannerReasonText,
+  normalizePlannerReasoningEffort,
+  resolveCanonicalPreferredTools,
+  resolveCompanionPlannerToolGateReason,
+  shouldRequestBackgroundResearch,
+  shouldUseDeterministicPlannerPreflight,
+  shouldUseRemotePlannerForWorldbook
+};
 

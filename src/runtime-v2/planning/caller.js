@@ -1,4 +1,4 @@
-const planning = require('./index');
+const planning = require('./caller.chunk');
 
 module.exports = {
   callPlannerModelV2: planning.callPlannerModelV2,

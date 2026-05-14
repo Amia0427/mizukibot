@@ -1,3 +1,19 @@
+const {
+  DIRECT_CHAT_PLANNER_VERSION,
+  DYNAMIC_CONTEXT_PLAN_VERSION,
+  PLANNER_DECISION_VERSION,
+  TASK_SHAPES,
+  clampNumber,
+  clampReason,
+  normalizeArray,
+  normalizeChatMode,
+  normalizeObject,
+  normalizeResponseIntent,
+  normalizeText,
+  normalizeToolIntent,
+  normalizeToolNames
+} = require('./runtime-core.chunk');
+
 function normalizeDynamicPromptPlan(plan = {}, options = {}) {
   const personaModuleCatalog = normalizeArray(options.personaModuleCatalog);
   const blockCatalog = normalizeArray(options.dynamicPromptBlockCatalog);
@@ -288,4 +304,18 @@ function buildValidationEnvelope({
     plannerMeta: normalizeObject(plannerMeta, {})
   };
 }
+
+module.exports = {
+  buildExecutionStepGraph,
+  buildExplicitAllowedToolCatalog,
+  buildLegacyExecutionPlanFromSteps,
+  buildToolCatalogByName,
+  buildValidationEnvelope,
+  convertPlannerStepGraphToLegacyStep,
+  getPlannerDecisionVersion,
+  inferToolBucket,
+  isWriteCapableTool,
+  normalizeDynamicPromptPlan,
+  resolveToolBucket
+};
 
