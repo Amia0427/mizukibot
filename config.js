@@ -173,12 +173,26 @@ const SELF_IMPROVEMENT_GUIDES_FILE = pick('SELF_IMPROVEMENT_GUIDES_FILE', path.j
 const PROMPTS_DIR = pick('PROMPTS_DIR', path.join(__dirname, 'prompts'));
 const PERSONA_DIR = path.join(PROMPTS_DIR, 'persona');
 const PROMPT_MANIFEST_PATH = path.join(PROMPTS_DIR, 'prompt-manifest.json');
-const PERSONA_FILES = [
+const REQUIRED_SYSTEM_PERSONA_FILES = [
   '01_identity.txt',
   '02_style.txt',
   '03_boundaries.txt',
-  '04_behavior.txt'
+  '04_behavior.txt',
+  '06_state_modulation.txt',
+  '07_opus_localization.txt'
 ];
+const PERSONA_FILES = REQUIRED_SYSTEM_PERSONA_FILES;
+const REQUIRED_SYSTEM_PERSONA_PATHS = new Set(
+  REQUIRED_SYSTEM_PERSONA_FILES.map((name) => `persona/${name}`)
+);
+
+function normalizePromptRelPath(relPath = '') {
+  return String(relPath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
+function isRequiredSystemPersonaPath(relPath = '') {
+  return REQUIRED_SYSTEM_PERSONA_PATHS.has(normalizePromptRelPath(relPath));
+}
 
 function readPromptManifest() {
   return loadPromptManifest(PROMPT_MANIFEST_PATH);
@@ -215,17 +229,20 @@ function loadPromptSectionsFromManifest(manifest) {
   const sections = Array.isArray(manifest?.system_prompt?.sections) ? manifest.system_prompt.sections : [];
   const missing = [];
   const blocks = [];
+  const loadedRequiredPersonaPaths = new Set();
 
   for (const section of sections) {
-    const relPath = String(section?.path || '').trim();
+    const relPath = normalizePromptRelPath(section?.path);
     if (!relPath) continue;
     const asset = readPromptAsset(PROMPTS_DIR, relPath);
     const text = String(asset.text || '').trim();
     if (!text) {
-      if (section?.required !== false) missing.push(relPath);
+      if (section?.required !== false || isRequiredSystemPersonaPath(relPath)) missing.push(relPath);
       continue;
     }
-    if (section?.includeInSystemPrompt === false || section?.include_in_system_prompt === false) continue;
+    const forceInclude = isRequiredSystemPersonaPath(relPath);
+    if (!forceInclude && (section?.includeInSystemPrompt === false || section?.include_in_system_prompt === false)) continue;
+    if (forceInclude) loadedRequiredPersonaPaths.add(relPath);
     blocks.push({
       id: String(section?.id || relPath).trim() || relPath,
       label: String(section?.id || relPath).trim() || relPath,
@@ -242,8 +259,31 @@ function loadPromptSectionsFromManifest(manifest) {
     });
   }
 
+  REQUIRED_SYSTEM_PERSONA_FILES.forEach((name, index) => {
+    const relPath = `persona/${name}`;
+    if (loadedRequiredPersonaPaths.has(relPath)) return;
+    const text = String(safeReadText(path.join(PERSONA_DIR, name), '') || '').trim();
+    if (!text) {
+      missing.push(relPath);
+      return;
+    }
+    loadedRequiredPersonaPaths.add(relPath);
+    blocks.push({
+      id: `persona_required_${String(index + 1).padStart(2, '0')}`,
+      label: name,
+      stage: 'main',
+      priority: 100 + index,
+      authority: 'persona_required',
+      budgetTokens: 0,
+      conflictTags: [],
+      source: relPath,
+      kind: 'persona_required',
+      content: text
+    });
+  });
+
   if (missing.length > 0) {
-    throw new Error('[config] Missing persona prompt files: ' + missing.join(', '));
+    throw new Error('[config] Missing persona prompt files: ' + [...new Set(missing)].join(', '));
   }
 
   const preamble = Array.isArray(manifest?.system_prompt?.preamble)
@@ -267,6 +307,7 @@ function loadPromptSectionsFromManifest(manifest) {
     policyKey: 'config/system_prompt'
   });
   const fullPrompt = snapshot.renderedSystemMessages.map((message) => String(message.content || '').trim()).filter(Boolean).join('\n');
+  validateRequiredSystemPersonaPrompt(fullPrompt);
   validatePromptText(fullPrompt, manifest);
   return fullPrompt;
 }
@@ -295,8 +336,21 @@ function loadPromptSectionsFromLegacyFiles() {
   ].join('\n');
 
   const fullPrompt = [preamble, persona].filter(Boolean).join('\n');
+  validateRequiredSystemPersonaPrompt(fullPrompt);
   validatePromptText(fullPrompt, null);
   return fullPrompt;
+}
+
+function validateRequiredSystemPersonaPrompt(fullPrompt) {
+  const prompt = String(fullPrompt || '');
+  const missing = [];
+  for (const name of REQUIRED_SYSTEM_PERSONA_FILES) {
+    const text = String(safeReadText(path.join(PERSONA_DIR, name), '') || '').trim();
+    if (!text || !prompt.includes(text)) missing.push(`persona/${name}`);
+  }
+  if (missing.length > 0) {
+    throw new Error('[config] Required persona prompt files were not included in SYSTEM_PROMPT: ' + missing.join(', '));
+  }
 }
 
 function buildSystemPrompt() {
@@ -989,28 +1043,28 @@ module.exports = {
   SCHEDULED_GREETING_MIN_POINTS: pickNum('SCHEDULED_GREETING_MIN_POINTS', 250),
   // Legacy no-op kept for env compatibility after budget ownership moved to ADMIN_USER_IDS only.
   HIGH_AFFINITY_CONTEXT_MIN_POINTS: pickNum('HIGH_AFFINITY_CONTEXT_MIN_POINTS', 20),
-  CONTEXT_WINDOW_MAX_TOKENS: pickNum('CONTEXT_WINDOW_MAX_TOKENS', 32000),
+  CONTEXT_WINDOW_MAX_TOKENS: pickNum('CONTEXT_WINDOW_MAX_TOKENS', 400000),
   // Admin users get a larger context window. Keep legacy HIGH_AFFINITY_* env names as fallback.
   ADMIN_CONTEXT_WINDOW_MAX_TOKENS: pickNum(
     'ADMIN_CONTEXT_WINDOW_MAX_TOKENS',
-    pickNum('HIGH_AFFINITY_CONTEXT_WINDOW_MAX_TOKENS', 258000)
+    pickNum('HIGH_AFFINITY_CONTEXT_WINDOW_MAX_TOKENS', 400000)
   ),
   HIGH_AFFINITY_CONTEXT_WINDOW_MAX_TOKENS: pickNum(
     'HIGH_AFFINITY_CONTEXT_WINDOW_MAX_TOKENS',
-    pickNum('ADMIN_CONTEXT_WINDOW_MAX_TOKENS', 258000)
+    pickNum('ADMIN_CONTEXT_WINDOW_MAX_TOKENS', 400000)
   ),
-  SHORT_TERM_MEMORY_MAX_TOKENS: pickNum('SHORT_TERM_MEMORY_MAX_TOKENS', 12000),
+  SHORT_TERM_MEMORY_MAX_TOKENS: pickNum('SHORT_TERM_MEMORY_MAX_TOKENS', 120000),
   ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS: pickNum(
     'ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS',
-    pickNum('HIGH_AFFINITY_SHORT_TERM_MEMORY_MAX_TOKENS', 400000)
+    pickNum('HIGH_AFFINITY_SHORT_TERM_MEMORY_MAX_TOKENS', 120000)
   ),
   HIGH_AFFINITY_SHORT_TERM_MEMORY_MAX_TOKENS: pickNum(
     'HIGH_AFFINITY_SHORT_TERM_MEMORY_MAX_TOKENS',
-    pickNum('ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS', 400000)
+    pickNum('ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS', 120000)
   ),
   SHORT_TERM_MEMORY_COMPRESSION_TRIGGER_RATIO: pickNum('SHORT_TERM_MEMORY_COMPRESSION_TRIGGER_RATIO', 0.7),
   SHORT_TERM_MEMORY_SUMMARY_MAX_TOKENS: pickNum('SHORT_TERM_MEMORY_SUMMARY_MAX_TOKENS', 640),
-  SHORT_TERM_MEMORY_RECENT_MESSAGES: pickNum('SHORT_TERM_MEMORY_RECENT_MESSAGES', 20),
+  SHORT_TERM_MEMORY_RECENT_MESSAGES: pickNum('SHORT_TERM_MEMORY_RECENT_MESSAGES', 80),
   SHORT_TERM_MEMORY_MAX_COMPRESSION_ROUNDS: pickNum('SHORT_TERM_MEMORY_MAX_COMPRESSION_ROUNDS', 2),
   SESSION_CONTEXT_SUMMARY_MAX_CHARS: pickNum('SESSION_CONTEXT_SUMMARY_MAX_CHARS', 300),
   SESSION_CONTEXT_SUMMARY_LOAD_COUNT: pickNum('SESSION_CONTEXT_SUMMARY_LOAD_COUNT', 3),

@@ -29,16 +29,22 @@ const {
   isAnthropicPromptCacheSchemaError,
   isExtendedSamplingSchemaError,
   isReasoningSchemaError,
+  isTemperatureSchemaError,
   requestUsesExtendedSampling,
   requestUsesReasoning,
+  requestUsesTemperature,
   stripExtendedSamplingFields,
-  stripReasoningFields
+  stripReasoningFields,
+  stripTemperatureField
 } = require('./request-shaping.chunk');
 const {
+  buildChatCompletionsFallbackUrl,
   isOpenAICompatiblePromptCacheSchemaError,
   isOpenAIPromptCacheRetentionSchemaError,
+  markResponsesProtocolFallbackAttempted,
   requestUsesOpenAICompatiblePromptCaching,
   requestUsesOpenAIPromptCacheRetention,
+  shouldFallbackResponsesProtocol,
   stripOpenAICompatiblePromptCaching,
   stripOpenAIPromptCacheRetentionFromRequest
 } = require('./openai-compatible.chunk');
@@ -163,6 +169,49 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         durationMs: Math.max(0, Date.now() - attemptStartedAt),
         fallbackActive: trace.mainFallbackActive === true
       });
+      if (callId && shouldFallbackResponsesProtocol(prepared, body, e)) {
+        const fallbackUrl = buildChatCompletionsFallbackUrl(prepared.requestUrl);
+        const fallbackBody = markResponsesProtocolFallbackAttempted(body);
+        emitHttpTrace(trace, 'http_client_request_downgrade', {
+          stage: 'http_client_request_downgrade',
+          reason: 'fallback_chat_completions_protocol',
+          provider: prepared?.provider,
+          model: prepared?.requestBody?.model || body?.model || '',
+          requestUrl: prepared?.requestUrl,
+          fallbackRequestUrl: fallbackUrl,
+          statusCode: extractHttpStatus(e) || null,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt)
+        });
+        try {
+          const response = await postWithRetry(fallbackUrl, fallbackBody, Math.max(0, maxRetry - i), specificKey);
+          finishModelCall(callId, {
+            response,
+            attempts: i + 1,
+            requestUrl: fallbackUrl,
+            request: fallbackBody,
+            requestHeaders: prepared.requestHeaders
+          });
+          return response;
+        } catch (fallbackError) {
+          emitHttpFailureTrace(trace, { ...prepared, requestUrl: fallbackUrl, requestBody: fallbackBody }, body, fallbackError, {
+            attempt: i + 1,
+            retryable: i < maxRetry && shouldRetry(fallbackError),
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'fallback_chat_completions_protocol'
+          });
+          if (callId) {
+            failModelCall(callId, fallbackError, {
+              attempts: i + 1,
+              requestUrl: fallbackUrl,
+              request: fallbackBody,
+              requestHeaders: prepared.requestHeaders
+            });
+          }
+          lastErr = fallbackError;
+          break;
+        }
+      }
       if (callId && requestUsesReasoning(prepared?.requestBody) && isReasoningSchemaError(e)) {
         emitHttpTrace(trace, 'http_client_request_downgrade', {
           stage: 'http_client_request_downgrade',
@@ -269,6 +318,61 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           lastErr = retryWithoutSamplingError;
           if (i >= maxRetry || !shouldRetry(retryWithoutSamplingError)) break;
           const delayMs = getRetryDelayMs(retryWithoutSamplingError, i);
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+      }
+      if (callId && requestUsesTemperature(prepared?.requestBody) && isTemperatureSchemaError(e)) {
+        emitHttpTrace(trace, 'http_client_request_downgrade', {
+          stage: 'http_client_request_downgrade',
+          reason: 'strip_temperature_field',
+          provider: prepared?.provider,
+          model: prepared?.requestBody?.model || body?.model || '',
+          requestUrl: prepared?.requestUrl,
+          statusCode: extractHttpStatus(e) || null,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt)
+        });
+        try {
+          const strippedRequestBody = stripTemperatureField(prepared.requestBody);
+          const response = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+          );
+          emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
+            attempt: i + 1,
+            statusCode: Number(response?.status || 0) || null,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_temperature_field'
+          });
+          finishModelCall(callId, {
+            response,
+            attempts: i + 1,
+            requestUrl: prepared.requestUrl,
+            request: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          });
+          return response;
+        } catch (retryWithoutTemperatureError) {
+          emitHttpFailureTrace(trace, { ...prepared, requestBody: stripTemperatureField(prepared.requestBody) }, body, retryWithoutTemperatureError, {
+            attempt: i + 1,
+            retryable: i < maxRetry && shouldRetry(retryWithoutTemperatureError),
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_temperature_field'
+          });
+          if (callId) {
+            failModelCall(callId, retryWithoutTemperatureError, {
+              attempts: i + 1,
+              requestUrl: prepared.requestUrl,
+              request: stripTemperatureField(prepared.requestBody),
+              requestHeaders: prepared.requestHeaders
+            });
+          }
+          lastErr = retryWithoutTemperatureError;
+          if (i >= maxRetry || !shouldRetry(retryWithoutTemperatureError)) break;
+          const delayMs = getRetryDelayMs(retryWithoutTemperatureError, i);
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
         }

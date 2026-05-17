@@ -1,4 +1,5 @@
 const assert = require('assert');
+const { Readable } = require('stream');
 
 function clearProjectCache() {
   const projectRoot = 'D:\\waifu\\';
@@ -14,6 +15,7 @@ module.exports = (async () => {
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     clearProjectCache();
     axios = require('axios');
     originalPost = axios.post;
@@ -94,6 +96,67 @@ module.exports = (async () => {
     assert.strictEqual(attemptCount, 2);
     assert.strictEqual(firstAttemptBody.reasoning_effort, 'high');
     assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, 'reasoning_effort'));
+
+    attemptCount = 0;
+    firstAttemptBody = null;
+    secondAttemptBody = null;
+    axios.post = async (_url, body) => {
+      attemptCount += 1;
+      if (attemptCount === 1) {
+        firstAttemptBody = body;
+        const error = new Error('temperature is deprecated');
+        error.response = {
+          status: 400,
+          data: { error: { message: '`temperature` is deprecated for this model' } }
+        };
+        throw error;
+      }
+      secondAttemptBody = body;
+      return { data: { choices: [{ message: { role: 'assistant', content: 'ok' } }] } };
+    };
+
+    await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
+      model: 'gpt-5.4',
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 3500,
+      temperature: 0.7,
+      stream: false
+    }, 0, 'test-key');
+    assert.strictEqual(attemptCount, 2);
+    assert.strictEqual(firstAttemptBody.temperature, 0.7);
+    assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, 'temperature'));
+
+    attemptCount = 0;
+    firstAttemptBody = null;
+    secondAttemptBody = null;
+    axios.post = async (_url, body) => {
+      attemptCount += 1;
+      if (attemptCount === 1) {
+        firstAttemptBody = body;
+        const error = new Error('temperature is deprecated');
+        error.response = {
+          status: 400,
+          data: { error: { message: '`temperature` is deprecated for this model' } }
+        };
+        throw error;
+      }
+      secondAttemptBody = body;
+      return {
+        status: 200,
+        data: Readable.from(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'data: [DONE]\n\n'])
+      };
+    };
+
+    await httpClient.postStreamWithRetry('https://example.com/v1/chat/completions', {
+      model: 'gpt-5.4',
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 3500,
+      temperature: 0.7,
+      stream: true
+    }, {}, 0, 'test-key');
+    assert.strictEqual(attemptCount, 2);
+    assert.strictEqual(firstAttemptBody.temperature, 0.7);
+    assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, 'temperature'));
 
     attemptCount = 0;
     firstAttemptBody = null;

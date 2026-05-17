@@ -13,7 +13,14 @@ const {
   providerAllowsOpenAIPromptCache,
   stripTopPField
 } = require('./runtime-core.chunk');
-const { buildResponsesRequestBody, isResponsesUrl, preprocessOpenAICompatibleMessages, preprocessOpenAICompatibleMessagesWithoutCache } = require('./openai-compatible.chunk');
+const {
+  buildResponsesRequestBody,
+  buildResponsesUrl,
+  isResponsesUrl,
+  preprocessOpenAICompatibleMessages,
+  preprocessOpenAICompatibleMessagesWithoutCache,
+  requestBodyLooksLikeChatCompletion
+} = require('./openai-compatible.chunk');
 const {
   buildAnthropicRequestBody,
   buildRequestCacheTrace,
@@ -24,6 +31,17 @@ const {
 } = require('./request-shaping.chunk');
 const { buildAnthropicRequestHeaders } = require('./runtime-core.chunk');
 const { sanitizeOpenAICompatibleToolWithoutCache } = require('./images.chunk');
+const { isClaudeModelName } = require('../../../utils/modelProvider');
+
+function shouldPreferResponsesProtocol(provider = '', url = '', requestBody = {}, originalBody = {}) {
+  if (provider !== 'openai_compatible') return false;
+  if (isResponsesUrl(url)) return true;
+  const apiMode = String(config.OPENAI_MAIN_API_MODE || 'auto').trim().toLowerCase().replace(/[-\s]+/g, '_');
+  if (apiMode === 'chat' || apiMode === 'chat_completion' || apiMode === 'chat_completions') return false;
+  if (originalBody?.__responsesProtocolFallbackAttempted === true) return false;
+  if (isClaudeModelName(requestBody?.model || originalBody?.model || config.AI_MODEL)) return false;
+  return requestBodyLooksLikeChatCompletion(requestBody);
+}
 
 async function prepareRequest(url, body = {}) {
   const provider = getApiProvider(url, body?.model || config.AI_MODEL);
@@ -70,12 +88,15 @@ async function prepareRequest(url, body = {}) {
       if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
       else delete requestBody.reasoning_effort;
     }
-    const finalRequestBody = isResponsesUrl(url)
+    const requestUrl = shouldPreferResponsesProtocol(provider, url, requestBody, body)
+      ? buildResponsesUrl(url)
+      : url;
+    const finalRequestBody = isResponsesUrl(requestUrl)
       ? buildResponsesRequestBody(requestBody)
       : requestBody;
     return {
       provider,
-      requestUrl: url,
+      requestUrl,
       requestBody: finalRequestBody,
       requestHeaders: internalRequestHeaders
     };

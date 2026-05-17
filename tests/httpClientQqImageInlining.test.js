@@ -14,6 +14,7 @@ module.exports = (async () => {
 
   try {
     process.env.DATA_DIR = tempDataDir;
+    process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     const httpClient = require('../api/httpClient');
     originalAxios.get = async () => ({
       headers: { 'content-type': 'image/png' },

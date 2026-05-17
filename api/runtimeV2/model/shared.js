@@ -30,6 +30,7 @@ const {
 function ensureChatCompletionsUrl(url) {
   const normalized = String(url || '').replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(normalized)) return normalized;
+  if (/\/responses$/i.test(normalized)) return normalized.replace(/\/responses$/i, '/chat/completions');
   if (/\/v\d+$/i.test(normalized)) return `${normalized}/chat/completions`;
   return normalized;
 }
@@ -58,6 +59,8 @@ function resolveOpenAIMainProtocol(apiBaseUrl = '', options = {}) {
 
   const normalized = String(apiBaseUrl || '').replace(/\/+$/, '').toLowerCase();
   if (/\/responses$/i.test(normalized)) return 'responses';
+  if (/\/chat\/completions$/i.test(normalized)) return 'responses';
+  if (/\/v\d+$/i.test(normalized)) return 'responses';
   return 'chat_completions';
 }
 
