@@ -157,6 +157,7 @@ module.exports = (async () => {
       }),
       (error) => String(error?.code || '').trim() === 'PERSISTENT_SUBAGENT_TIMEOUT'
     );
+    assert.strictEqual(backend.getPersistentWorkerSnapshot().length, 0, 'timed-out persistent worker should retire before reuse');
 
     process.env.SUBAGENT_TIMEOUT_MS = '800';
     clearProjectCache();

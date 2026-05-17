@@ -14,14 +14,65 @@ function toMessage(label, text, tokenBudget) {
   return [{ role: 'system', content: `[${label}]\n${value}` }];
 }
 
+function appendSelectionReason(existing = '', reason = '') {
+  const list = String(existing || '').split(',').map((item) => normalizeText(item)).filter(Boolean);
+  if (reason && !list.includes(reason)) list.push(reason);
+  return list.join(',');
+}
+
+function getStrongSemanticThreshold(options = {}) {
+  return Math.max(0.1, Number(options.strongSemanticMinScore || config.MEMORY_STRONG_SEMANTIC_MIN_SCORE || 0.82) || 0.82);
+}
+
+function isStrongPromptCandidate(item = {}, options = {}) {
+  if (!item || typeof item !== 'object') return false;
+  if (String(item.evidenceTier || '').trim().toLowerCase() === 'strict') return true;
+  const semantic = Number(item.embedding ?? item.semantic ?? item.vectorScore ?? 0) || 0;
+  return semantic >= getStrongSemanticThreshold(options);
+}
+
+function protectPromptEvidence(results = [], strictResults = [], options = {}) {
+  const evidenceSourcesToExclude = new Set(['recent', 'task', 'group', 'style', 'jargon']);
+  const byId = new Set((Array.isArray(strictResults) ? strictResults : [])
+    .map((item) => normalizeText(item.id))
+    .filter(Boolean));
+  const protectedResults = (Array.isArray(strictResults) ? strictResults : []).slice();
+  const candidates = (Array.isArray(results) ? results : [])
+    .filter((item) => !evidenceSourcesToExclude.has(normalizeText(item.source).toLowerCase()))
+    .filter((item) => isStrongPromptCandidate(item, options));
+  if (!protectedResults.some((item) => !evidenceSourcesToExclude.has(normalizeText(item.source).toLowerCase()))) {
+    const best = candidates.find((item) => normalizeText(item.text));
+    if (best) {
+      const id = normalizeText(best.id);
+      const protectedHit = {
+        ...best,
+        selectionReason: appendSelectionReason(best.selectionReason, 'semantic_prompt_protected'),
+        diagnostics: {
+          ...(best.diagnostics || {}),
+          prompt: {
+            ...(best.diagnostics?.prompt || {}),
+            protected: true,
+            reason: 'semantic_prompt_protected'
+          }
+        }
+      };
+      if (!id || !byId.has(id)) protectedResults.unshift(protectedHit);
+    }
+  }
+  return protectedResults;
+}
+
 function assembleMemoryPacket(result = {}, options = {}) {
   const userId = normalizeText(result.userId || options.userId);
   const currentSessionKey = normalizeText(options.sessionKey || result.sessionKey);
   const profileProjection = loadProfileProjection();
   const profile = profileProjection.users?.[userId] || {};
   const results = Array.isArray(result.results) ? result.results : [];
-  const strictResults = Array.isArray(result.strictResults) ? result.strictResults : results;
-  const weakResults = Array.isArray(result.weakResults) ? result.weakResults : [];
+  const rawStrictResults = Array.isArray(result.strictResults) ? result.strictResults : results;
+  const strictResults = protectPromptEvidence(results, rawStrictResults, options);
+  const strictIds = new Set(strictResults.map((item) => normalizeText(item.id)).filter(Boolean));
+  const weakResults = (Array.isArray(result.weakResults) ? result.weakResults : [])
+    .filter((item) => !strictIds.has(normalizeText(item.id)));
   const continuity = results.filter((item) => item.source === 'recent');
   const prioritizedContinuity = currentSessionKey
     ? continuity.filter((item) => normalizeText(item.sessionKey) === currentSessionKey)

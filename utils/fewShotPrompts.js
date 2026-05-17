@@ -4,6 +4,7 @@ const config = require('../config');
 
 const FEW_SHOT_INDEX_PATH = path.join(config.PROMPTS_DIR, 'persona', '05_examples.index.json');
 const FEW_SHOT_EXAMPLES_PATH = path.join(config.PROMPTS_DIR, 'persona', '05_examples.txt');
+let fewShotIndexCache = null;
 
 function safeReadText(filePath, fallback = '') {
   try {
@@ -14,8 +15,70 @@ function safeReadText(filePath, fallback = '') {
   }
 }
 
+function safeStatFile(filePath) {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat && stat.isFile() ? stat : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function emptyFewShotIndex() {
+  return { version: 1, max_examples: 0, examples: [] };
+}
+
+function normalizeStringList(value = []) {
+  return Array.isArray(value)
+    ? value.map((item) => normalizeText(item).toLowerCase()).filter(Boolean)
+    : [];
+}
+
+function compileRegexList(value = []) {
+  if (!Array.isArray(value)) return [];
+  const compiled = [];
+  for (const item of value) {
+    const source = String(item || '').trim();
+    if (!source) continue;
+    try {
+      compiled.push(new RegExp(source, 'i'));
+    } catch (_) {}
+  }
+  return compiled;
+}
+
+function normalizeFewShotExample(example = {}) {
+  const source = example && typeof example === 'object' && !Array.isArray(example) ? example : {};
+  const match = source.match && typeof source.match === 'object' && !Array.isArray(source.match)
+    ? source.match
+    : {};
+  const normalized = { ...source };
+  Object.defineProperty(normalized, '__fewShotRuntime', {
+    value: {
+      priority: Number(source.priority || 0) || 0,
+      routeTypes: normalizeStringList(match.route_types),
+      excludeKeywords: normalizeStringList(match.exclude_keywords),
+      keywordsAny: normalizeStringList(match.keywords_any),
+      keywordsAll: normalizeStringList(match.keywords_all),
+      regexAny: compileRegexList(match.regex_any)
+    },
+    enumerable: false,
+    configurable: true
+  });
+  return normalized;
+}
+
+function normalizeFewShotIndex(parsed = {}) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return emptyFewShotIndex();
+  return {
+    version: Number(parsed.version || 1) || 1,
+    max_examples: Math.max(0, Number(parsed.max_examples || 0) || 0),
+    examples: Array.isArray(parsed.examples) ? parsed.examples.map(normalizeFewShotExample) : []
+  };
 }
 
 const HIGH_EMOTION_KEYWORDS = [
@@ -45,23 +108,32 @@ const HIGH_EMOTION_PATTERNS = [
 ];
 
 function loadFewShotIndex() {
-  const raw = safeReadText(FEW_SHOT_INDEX_PATH, '').trim();
+  const stat = safeStatFile(FEW_SHOT_INDEX_PATH);
+  const fileVersion = stat ? `${Number(stat.mtimeMs || 0)}:${Number(stat.size || 0)}` : 'missing';
+  if (
+    fewShotIndexCache
+    && fewShotIndexCache.filePath === FEW_SHOT_INDEX_PATH
+    && fewShotIndexCache.fileVersion === fileVersion
+  ) {
+    return fewShotIndexCache.index;
+  }
+
+  const raw = stat ? safeReadText(FEW_SHOT_INDEX_PATH, '').trim() : '';
   if (!raw) {
-    return { version: 1, max_examples: 0, examples: [] };
+    const index = emptyFewShotIndex();
+    fewShotIndexCache = { filePath: FEW_SHOT_INDEX_PATH, fileVersion, index };
+    return index;
   }
 
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      return { version: 1, max_examples: 0, examples: [] };
-    }
-    return {
-      version: Number(parsed.version || 1) || 1,
-      max_examples: Math.max(0, Number(parsed.max_examples || 0) || 0),
-      examples: Array.isArray(parsed.examples) ? parsed.examples : []
-    };
+    const index = normalizeFewShotIndex(parsed);
+    fewShotIndexCache = { filePath: FEW_SHOT_INDEX_PATH, fileVersion, index };
+    return index;
   } catch (_) {
-    return { version: 1, max_examples: 0, examples: [] };
+    const index = emptyFewShotIndex();
+    fewShotIndexCache = { filePath: FEW_SHOT_INDEX_PATH, fileVersion, index };
+    return index;
   }
 }
 
@@ -124,7 +196,7 @@ function resolveFewShotMaxExamples(context = {}, index = null) {
 function scoreKeywords(text, keywords = [], weight = 14) {
   let score = 0;
   for (const keyword of keywords) {
-    const needle = normalizeText(keyword).toLowerCase();
+    const needle = String(keyword || '').trim();
     if (!needle) continue;
     if (text.includes(needle)) score += weight;
   }
@@ -134,9 +206,13 @@ function scoreKeywords(text, keywords = [], weight = 14) {
 function scoreRegexes(rawText, regexList = [], weight = 18) {
   let score = 0;
   for (const item of regexList) {
-    const source = String(item || '').trim();
-    if (!source) continue;
+    if (item instanceof RegExp) {
+      if (item.test(rawText)) score += weight;
+      continue;
+    }
     try {
+      const source = String(item || '').trim();
+      if (!source) continue;
       const re = new RegExp(source, 'i');
       if (re.test(rawText)) score += weight;
     } catch (_) {}
@@ -150,23 +226,20 @@ function scoreFewShotExample(example = {}, context = {}) {
   const routePrompt = String(context.routePrompt || '').trim();
   const text = normalizeText(`${rawQuestion}\n${routePrompt}`).toLowerCase();
   const match = example && typeof example.match === 'object' ? example.match : {};
+  const runtime = example && typeof example.__fewShotRuntime === 'object' ? example.__fewShotRuntime : {};
 
   if (!text) return 0;
 
-  const routeTypes = Array.isArray(match.route_types)
-    ? match.route_types.map((item) => String(item || '').trim().toLowerCase()).filter(Boolean)
-    : [];
+  const routeTypes = Array.isArray(runtime.routeTypes) ? runtime.routeTypes : normalizeStringList(match.route_types);
   if (routeTypes.length > 0 && routeKey && !routeTypes.includes(routeKey)) return 0;
 
-  const excludeKeywords = Array.isArray(match.exclude_keywords)
-    ? match.exclude_keywords.map((item) => normalizeText(item).toLowerCase()).filter(Boolean)
-    : [];
+  const excludeKeywords = Array.isArray(runtime.excludeKeywords) ? runtime.excludeKeywords : normalizeStringList(match.exclude_keywords);
   if (excludeKeywords.some((needle) => text.includes(needle))) return 0;
 
-  let score = Number(example.priority || 0) || 0;
-  score += scoreKeywords(text, match.keywords_any, 14);
-  score += scoreKeywords(text, match.keywords_all, 10);
-  score += scoreRegexes(rawQuestion, match.regex_any, 18);
+  let score = Number(runtime.priority ?? example.priority ?? 0) || 0;
+  score += scoreKeywords(text, Array.isArray(runtime.keywordsAny) ? runtime.keywordsAny : normalizeStringList(match.keywords_any), 14);
+  score += scoreKeywords(text, Array.isArray(runtime.keywordsAll) ? runtime.keywordsAll : normalizeStringList(match.keywords_all), 10);
+  score += scoreRegexes(rawQuestion, Array.isArray(runtime.regexAny) ? runtime.regexAny : match.regex_any, 18);
   score += scoreContinuitySignals(context);
   score += scoreContextDensity(context);
 
@@ -174,12 +247,11 @@ function scoreFewShotExample(example = {}, context = {}) {
   if (emotion === 'high') score += 12;
   else if (emotion === 'medium') score += 5;
 
-  const keywordsAll = Array.isArray(match.keywords_all)
-    ? match.keywords_all.map((item) => normalizeText(item).toLowerCase()).filter(Boolean)
-    : [];
+  const keywordsAll = Array.isArray(runtime.keywordsAll) ? runtime.keywordsAll : normalizeStringList(match.keywords_all);
   if (keywordsAll.length > 0 && keywordsAll.some((needle) => !text.includes(needle))) return 0;
 
-  if (Array.isArray(match.keywords_any) && match.keywords_any.length > 0 && score <= Number(example.priority || 0)) {
+  const keywordsAny = Array.isArray(runtime.keywordsAny) ? runtime.keywordsAny : normalizeStringList(match.keywords_any);
+  if (keywordsAny.length > 0 && score <= Number(runtime.priority ?? example.priority ?? 0)) {
     return 0;
   }
 
@@ -225,10 +297,15 @@ function buildDynamicFewShotPrompt(context = {}) {
   ].join('\n');
 }
 
+function clearFewShotIndexCache() {
+  fewShotIndexCache = null;
+}
+
 module.exports = {
   FEW_SHOT_INDEX_PATH,
   FEW_SHOT_EXAMPLES_PATH,
   buildDynamicFewShotPrompt,
+  clearFewShotIndexCache,
   loadFewShotIndex,
   resolveFewShotMaxExamples,
   scoreFewShotExample,

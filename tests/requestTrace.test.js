@@ -42,6 +42,7 @@ module.exports = (async () => {
     const {
       buildRequestId,
       createRequestTrace,
+      flushRequestTraceEventsSync,
       nextTracePhase,
       resetRequestTraceStateForTests
     } = require('../utils/requestTrace');
@@ -77,6 +78,7 @@ module.exports = (async () => {
     appendInboundTimingLog(timingLogFile, false, nextTracePhase(trace, 'message_ingress', {
       stage: 'handle_incoming_start'
     }));
+    flushRequestTraceEventsSync();
 
     const traceFile = path.join(tempDir, 'request-trace.ndjson');
     let traceEvents = readJsonLines(traceFile);
@@ -122,6 +124,8 @@ module.exports = (async () => {
       /rate limited/
     );
 
+    flushRequestTraceEventsSync();
+    require('../utils/modelCallTracker').flushModelCallLogsSync();
     traceEvents = readJsonLines(traceFile);
     const httpFailure = traceEvents.find((event) => event.stage === 'http_client_failure' && event.requestId === requestId);
     assert.ok(httpFailure);

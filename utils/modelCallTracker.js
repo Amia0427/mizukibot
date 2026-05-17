@@ -1,8 +1,10 @@
-const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { getApiProvider } = require('./modelProvider');
-const { appendFileWithRotation } = require('./logRotation');
+const {
+  appendFileWithRotationBatched,
+  flushBatchedLogWritesSync
+} = require('./logRotation');
 const {
   pickModelRouteDiagnosticFields,
   safeHost
@@ -35,11 +37,18 @@ function nowIso() {
 
 function appendModelCallLog(record = {}) {
   try {
-    fs.mkdirSync(path.dirname(MODEL_CALL_LOG_FILE), { recursive: true });
-    appendFileWithRotation(MODEL_CALL_LOG_FILE, `${JSON.stringify(record)}\n`, {
+    appendFileWithRotationBatched(MODEL_CALL_LOG_FILE, `${JSON.stringify(record)}\n`, {
       encoding: 'utf8'
     });
   } catch (_) {}
+}
+
+function flushModelCallLogsSync() {
+  try {
+    return flushBatchedLogWritesSync(MODEL_CALL_LOG_FILE);
+  } catch (_) {
+    return false;
+  }
 }
 
 function safeClone(value, fallback = null) {
@@ -459,6 +468,7 @@ module.exports = {
   startModelCall,
   finishModelCall,
   failModelCall,
+  flushModelCallLogsSync,
   listRecentModelCalls,
   resetModelCallTracker
 };

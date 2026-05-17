@@ -202,7 +202,8 @@ module.exports = (async () => {
       }
     }
   );
-  assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(selfContainedPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
   assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'long_term_profile'));
   assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
 

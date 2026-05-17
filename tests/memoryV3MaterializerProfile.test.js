@@ -109,6 +109,34 @@ module.exports = (async () => {
     confidence: 0.99,
     payload: { fieldKey: 'preference_like', type: 'like' }
   });
+  await appendMemoryEvent({
+    type: 'memory_candidate_extracted',
+    ts: now + 1006,
+    userId: 'u_profile_v3',
+    scopeType: 'personal',
+    source: 'extractor',
+    sourceKind: 'extractor',
+    status: 'candidate',
+    memoryKind: 'like',
+    semanticSlot: 'preference_like',
+    text: '喜欢一次性阻断项',
+    confidence: 0.95,
+    payload: { fieldKey: 'preference_like', type: 'like', extractionClass: 'episodic_observation' }
+  });
+  await appendMemoryEvent({
+    type: 'memory_candidate_extracted',
+    ts: now + 1007,
+    userId: 'u_profile_v3',
+    scopeType: 'personal',
+    source: 'extractor',
+    sourceKind: 'extractor',
+    status: 'candidate',
+    memoryKind: 'topic',
+    semanticSlot: 'topic',
+    text: '今天阻断话题',
+    confidence: 0.95,
+    payload: { fieldKey: 'topic', type: 'topic', extractionClass: 'journal_only' }
+  });
 
   const result = materializeMemoryViews({ force: true });
   const profile = result.profileProjection.users.u_profile_v3;
@@ -120,6 +148,9 @@ module.exports = (async () => {
   assert.ok(profile.strictProfile.likes.includes('喜欢重复证据项'));
   assert.ok(profile.strictProfile.likes.includes('喜欢显式记住项'));
   assert.ok(!profile.strictProfile.likes.includes('今天聊过短期话题'));
+  assert.ok(!profile.weakProfile.single_hit_preferences.includes('喜欢一次性阻断项'));
+  assert.ok(!profile.strictProfile.likes.includes('喜欢一次性阻断项'));
+  assert.ok(!profile.weakProfile.recent_topics.includes('今天阻断话题'));
 
   await appendMemoryEvent({
     type: 'memory_confirmed',

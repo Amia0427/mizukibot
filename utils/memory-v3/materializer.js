@@ -346,6 +346,12 @@ function resolveEvidenceTier(node, supportCount = 1) {
   return 'weak';
 }
 
+function isProfileProjectionBlockedByExtractionClass(node = {}) {
+  if (config.MEMORY_V3_PROFILE_SKIP_EPISODIC_EXTRACTIONS === false) return false;
+  const extractionClass = normalizeText(node.extractionClass).toLowerCase();
+  return extractionClass === 'episodic_observation' || extractionClass === 'journal_only';
+}
+
 function buildPersonaSupportHash(supports = []) {
   const payload = (Array.isArray(supports) ? supports : [])
     .map((item) => `${item.fieldKey}|${item.canonicalKey}|${item.text}`)
@@ -869,11 +875,14 @@ function materializeMemoryViews(options = {}) {
         expiresAt: node.expiresAt || 0
       });
     }
-    if (STRICT_PROFILE_FIELD_MAP[node.fieldKey] && node.evidenceTier === 'strict') {
+    const profileProjectionBlocked = isProfileProjectionBlockedByExtractionClass(node);
+    if (!profileProjectionBlocked && STRICT_PROFILE_FIELD_MAP[node.fieldKey] && node.evidenceTier === 'strict') {
       pushProfileItem(profile, 'strictProfile', STRICT_PROFILE_FIELD_MAP[node.fieldKey], node, 20);
-    } else if (WEAK_PROFILE_FIELD_MAP[node.fieldKey]) {
+    } else if (!profileProjectionBlocked && WEAK_PROFILE_FIELD_MAP[node.fieldKey]) {
       pushProfileItem(profile, 'weakProfile', WEAK_PROFILE_FIELD_MAP[node.fieldKey], node, 12);
     } else if (
+      !profileProjectionBlocked
+      &&
       !PERSONA_SUPPORT_FIELDS.has(node.fieldKey)
       && node.fieldKey !== 'episode'
       && node.fieldKey !== 'topic'
@@ -887,7 +896,10 @@ function materializeMemoryViews(options = {}) {
     const affinity = getUserAffinityState(userId);
     profile.relation_stage = normalizeText(affinity?.relationship || profile.relation_stage || '陌生人') || '陌生人';
     const userNodes = resolvedNodes.filter((item) => item.userId === userId && item.scopeType !== 'group');
-    const personaSupports = userNodes.filter((item) => PERSONA_SUPPORT_FIELDS.has(item.fieldKey));
+    const personaSupports = userNodes.filter((item) => (
+      PERSONA_SUPPORT_FIELDS.has(item.fieldKey)
+      && !isProfileProjectionBlockedByExtractionClass(item)
+    ));
     const styleNodes = userNodes.filter((item) => item.fieldKey === 'style_pattern' || item.fieldKey === 'style_avoid');
     const botPersonaNodes = userNodes.filter((item) => BOT_PERSONA_FIELDS.has(item.fieldKey));
     const relationshipNodes = userNodes.filter((item) => RELATIONSHIP_STYLE_FIELDS.has(item.fieldKey));

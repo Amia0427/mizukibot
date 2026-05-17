@@ -136,6 +136,44 @@ function buildContinuityStatePromptSnippet(continuitySignals = {}) {
   return ['[ContinuityState]', ...lines].join('\n');
 }
 
+function formatShortTermMessageLine(message = {}) {
+  const role = String(message?.role || '').trim().toLowerCase() === 'assistant' ? 'Assistant' : 'User';
+  const content = String(message?.content || '').replace(/\s+/g, ' ').trim();
+  if (!content) return '';
+  return `${role}: ${trimTextByTokenBudget(content, 260, 'tail')}`;
+}
+
+function buildShortTermContinuityPrompt(sharedShortTermContext = {}) {
+  const context = sharedShortTermContext && typeof sharedShortTermContext === 'object' ? sharedShortTermContext : {};
+  const maxTokens = Math.max(256, Number(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS || 2200) || 2200);
+  const scope = context.shortTermScope && typeof context.shortTermScope === 'object' ? context.shortTermScope : {};
+  const summary = normalizeText(context.shortTermSummary);
+  const recentHistory = normalizeArray(context.recentHistory).map(formatShortTermMessageLine).filter(Boolean);
+  const sessionSummaries = normalizeArray(context.recentSessionSummaries)
+    .map((item, index) => {
+      const text = normalizeText(item?.summary);
+      return text ? `${index + 1}. ${trimTextByTokenBudget(text, 220, 'tail')}` : '';
+    })
+    .filter(Boolean);
+  const lines = ['[ShortTermContinuity]'];
+
+  if (normalizeText(context.sessionKey)) lines.push(`session=${normalizeText(context.sessionKey)}`);
+  if (normalizeText(scope.mode)) lines.push(`scope=${normalizeText(scope.mode)}`);
+  if (summary) lines.push(`[StateSummary]\n${trimTextByTokenBudget(summary, Math.floor(maxTokens * 0.28), 'tail')}`);
+  if (sessionSummaries.length > 0) {
+    lines.push('[RestartRecoverySummaries]');
+    lines.push(...sessionSummaries.slice(0, Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT || 3) || 3)));
+  }
+  if (recentHistory.length > 0) {
+    lines.push('[RecentRawTurns]');
+    lines.push(...recentHistory.slice(-Math.max(1, Math.floor(Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 64) || 64))));
+  }
+
+  if (lines.length <= 1) return '';
+  lines.push('instruction=Use this as high-priority short-term continuity. Prefer exact recent raw turns over vague long-term memory when they conflict.');
+  return trimTextByTokenBudget(lines.join('\n'), maxTokens, 'tail');
+}
+
 function createPromptBlock(id, label, content, options = {}) {
   const text = String(content || '').trim();
   if (!text) return null;

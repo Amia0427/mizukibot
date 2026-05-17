@@ -28,6 +28,7 @@ module.exports = (async () => {
     const httpClient = require('../api/httpClient');
     const {
       listRecentModelCalls,
+      flushModelCallLogsSync,
       resetModelCallTracker
     } = require('../utils/modelCallTracker');
 
@@ -273,6 +274,7 @@ module.exports = (async () => {
     assert.strictEqual(calls[0].prompt_caching.prompt_caching_beta_enabled, false);
     assert.strictEqual(calls[0].usage.cache_read_input_tokens, 16);
     assert.strictEqual(calls[0].usage.cache_creation_input_tokens, 2);
+    flushModelCallLogsSync();
     const loggedCalls = fs.readFileSync(path.join(tempDir, 'model-calls.ndjson'), 'utf8')
       .split(/\r?\n/)
       .filter(Boolean)

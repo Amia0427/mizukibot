@@ -15,6 +15,17 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       routeMeta,
       sessionKey: options.sessionKey
     });
+  const personaModuleContext = {
+    question,
+    routePrompt: options.routePrompt,
+    routeMeta,
+    directedContext: routeMeta.directedContext,
+    continuitySignals: options?.continuitySignals,
+    personaPhase: routeMeta.personaPhase || '',
+    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
+  };
+  const personaModuleCandidatesPromise = buildPersonaModuleCandidatesAsync(personaModuleContext)
+    .catch((error) => ({ __personaModuleCandidatesError: error }));
   const memoryContext = options.memoryContext && typeof options.memoryContext === 'object'
     ? options.memoryContext
     : await buildMemoryContextAsync(userId, question || '', {
@@ -57,16 +68,10 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
   const personaMemoryPrompt = options.personaMemoryPrompt && typeof options.personaMemoryPrompt === 'object'
     ? options.personaMemoryPrompt
     : renderPersonaMemoryPrompt(personaMemoryState, topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat');
-  const personaModuleContext = {
-    question,
-    routePrompt: options.routePrompt,
-    routeMeta,
-    directedContext: routeMeta.directedContext,
-    continuitySignals: options?.continuitySignals,
-    personaPhase: routeMeta.personaPhase || '',
-    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
-  };
-  const personaModuleCandidates = await buildPersonaModuleCandidatesAsync(personaModuleContext);
+  const personaModuleCandidates = await personaModuleCandidatesPromise;
+  if (personaModuleCandidates?.__personaModuleCandidatesError) {
+    throw personaModuleCandidates.__personaModuleCandidatesError;
+  }
   const personaWorldbookSearch = personaModuleCandidates.personaWorldbookSearch || {};
   const personaModuleDecision = selectPersonaModules(
     {

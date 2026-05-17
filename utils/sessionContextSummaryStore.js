@@ -22,7 +22,7 @@ function normalizeRecentTurns(values = []) {
       content: clampText(item?.content || item?.text, 220)
     }))
     .filter((item) => (item.role === 'user' || item.role === 'assistant') && item.content)
-    .slice(-4);
+    .slice(-Math.max(2, Math.min(80, Math.floor(Number(config.SHORT_TERM_MEMORY_RECENT_TURNS || config.MEMORY_V3_SESSION_RECENT_MESSAGES || 32) || 32))));
 }
 
 function ensureParentDir(filePath = '') {

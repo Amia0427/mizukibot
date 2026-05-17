@@ -72,7 +72,10 @@ const { buildMemoryContext } = require('../utils/memoryContext');
 
 const normal = buildMemoryContext('u_ctx_profile', '普通聊天', { ragEnabled: false });
 assert.ok(normal.promptLongTermProfileText.includes('v3 stable identity'));
+assert.ok(!normal.promptLongTermProfileText.includes('v3 stable like'));
 assert.ok(!normal.promptLongTermProfileText.includes('legacy old like'));
+assert.strictEqual(normal.promptSummaryText, '');
+assert.strictEqual(normal.promptImpressionText, '');
 assert.strictEqual(normal.diagnostics.memoryTrace.profile_source, 'v3');
 assert.strictEqual(normal.diagnostics.memoryTrace.profile_injected, true);
 
@@ -85,6 +88,7 @@ assert.strictEqual(recap.diagnostics.memoryTrace.legacy_fallback_disabled, true)
 
 const profileQuery = buildMemoryContext('u_ctx_profile', '你怎么看我的画像', { ragEnabled: false });
 assert.ok(profileQuery.promptLongTermProfileText.includes('v3 stable identity'));
+assert.ok(profileQuery.promptLongTermProfileText.includes('v3 stable like'));
 assert.ok(profileQuery.promptLongTermProfileText.includes('weak only preference'));
 
 console.log('memoryContextProfileInjection.test.js passed');

@@ -58,6 +58,10 @@ function serializeRecentHistory(history = [], limit = 12, itemMaxChars = 160) {
     .join('\n');
 }
 
+function getSessionSummaryRecentTurnsLimit() {
+  return Math.max(2, Math.min(80, Math.floor(Number(config.SHORT_TERM_MEMORY_RECENT_TURNS || config.MEMORY_V3_SESSION_RECENT_MESSAGES || 32) || 32)));
+}
+
 function buildFallbackSummary(state = {}, history = []) {
   const normalized = normalizeShortTermState(state);
   const segments = [];
@@ -69,7 +73,7 @@ function buildFallbackSummary(state = {}, history = []) {
   if (normalized.recentToolResults.length > 0) segments.push(`结果:${normalized.recentToolResults.join('；')}`);
   if (normalized.summary) segments.push(`摘要:${normalized.summary}`);
 
-  const latestHistory = serializeRecentHistory(history, 4, 90);
+  const latestHistory = serializeRecentHistory(history, getSessionSummaryRecentTurnsLimit(), 90);
   if (latestHistory) segments.push(`近况:${latestHistory.replace(/\n/g, ' | ')}`);
 
   return clampText(segments.join('；'));
@@ -84,7 +88,7 @@ function buildStructuredSummaryPayload(state = {}, history = []) {
     assistantCommitments: normalized.interaction.assistantCommitments.length > 0 ? normalized.interaction.assistantCommitments : normalized.assistantCommitments,
     userConstraints: normalized.interaction.userConstraints.length > 0 ? normalized.interaction.userConstraints : normalized.userConstraints,
     recentTurns: (Array.isArray(history) ? history : [])
-      .slice(-4)
+      .slice(-getSessionSummaryRecentTurnsLimit())
       .map((item) => ({
         role: String(item?.role || '').trim().toLowerCase(),
         content: clampText(item?.content, 140)

@@ -259,7 +259,58 @@ function createDirectToolLoopHelpers(deps = {}) {
       return recorded;
     };
 
-    const executeDirectToolBatch = async (items = []) => {
+    const canRunDirectToolBatchInParallel = (items = [], batch = {}) => {
+      const list = normalizeArray(items);
+      if (String(batch?.mode || '').trim() !== 'parallel') return false;
+      if (list.length < 2) return false;
+      if (executedToolCallCount + list.length > maxToolCallsPerTurn) return false;
+
+      const fingerprints = new Set();
+      for (const item of list) {
+        const toolName = String(item?.toolName || item?.step?.tool || '').trim();
+        if (!toolName || toolName === 'memory_cli') return false;
+        const fingerprint = buildToolCallFingerprint(toolName, item.step?.inputs || item.parsedArgs || {});
+        if (!fingerprint || fingerprints.has(fingerprint)) return false;
+        if (duplicateGuardEnabled && duplicateToolResults.has(fingerprint)) return false;
+        fingerprints.add(fingerprint);
+      }
+      return true;
+    };
+
+    const runParallelDirectTools = async (items = []) => {
+      const allowedToolsSnapshot = normalizeArray(effectiveAllowedTools);
+      const memoryCliTurnSnapshot = createMemoryCliTurnState(nextMemoryCliTurn);
+      executedToolCallCount += items.length;
+      const settled = await Promise.allSettled(items.map((item) => runToolStep(item.step, {
+        ...state,
+        request: {
+          ...request,
+          allowedTools: allowedToolsSnapshot
+        },
+        execution: {
+          ...state.execution,
+          memoryCliTurn: memoryCliTurnSnapshot
+        }
+      }, runtimeOptions)));
+
+      return settled.map((settledItem, index) => {
+        const sourceItem = items[index];
+        if (settledItem.status === 'fulfilled') {
+          const recorded = recordDirectToolEnvelope(settledItem.value, sourceItem.toolCall);
+          if (duplicateGuardEnabled) {
+            const fingerprint = buildToolCallFingerprint(sourceItem.toolName, sourceItem.step?.inputs || sourceItem.parsedArgs || {});
+            if (fingerprint) duplicateToolResults.set(fingerprint, recorded);
+          }
+          return recorded;
+        }
+        return recordDirectToolEnvelope(
+          computeToolEnvelope(sourceItem.step, `Tool error: ${settledItem.reason?.message || 'unknown error'}`, getPolicy(sourceItem.toolName)),
+          sourceItem.toolCall
+        );
+      });
+    };
+
+    const executeDirectToolBatch = async (items = [], batch = {}) => {
       const ordered = [];
       for (const item of normalizeArray(items)) {
         if (!item?.allowed) {
@@ -273,6 +324,16 @@ function createDirectToolLoopHelpers(deps = {}) {
       if (allowedItems.length === 1) {
         const envelope = await runOneDirectTool(allowedItems[0]);
         return ordered.map((item) => (item === allowedItems[0] ? envelope : item));
+      }
+      if (canRunDirectToolBatchInParallel(allowedItems, batch)) {
+        const parallelResults = await runParallelDirectTools(allowedItems);
+        let allowedIndex = 0;
+        return ordered.map((item) => {
+          if (item && item.tool_call_id) return item;
+          const result = parallelResults[allowedIndex];
+          allowedIndex += 1;
+          return result;
+        });
       }
       const settled = [];
       for (const item of allowedItems) {
@@ -302,7 +363,7 @@ function createDirectToolLoopHelpers(deps = {}) {
     const directBatchResults = [];
     for (const batch of directBatches) {
       const batchItems = normalizeArray(batch.items).map((item) => assignBatchMetaToItem(item, batch));
-      const results = await executeDirectToolBatch(batchItems);
+      const results = await executeDirectToolBatch(batchItems, batch);
       directBatchResults.push(...results);
       if (results.some((item) => String(item?.status || '').trim() === 'blocked')) {
         hadBlockedToolCall = true;

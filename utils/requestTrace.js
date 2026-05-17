@@ -1,7 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { appendFileWithRotation } = require('./logRotation');
+const {
+  appendFileWithRotationBatched,
+  flushBatchedLogWritesSync
+} = require('./logRotation');
 
 let sequence = 0;
 const phaseSeqByRequestId = new Map();
@@ -138,7 +141,7 @@ function appendRequestTraceEvent(event = {}) {
   }
   try {
     const logFile = resolveTraceLogFile();
-    appendFileWithRotation(logFile, `${JSON.stringify({
+    appendFileWithRotationBatched(logFile, `${JSON.stringify({
       recordedAt: new Date().toISOString(),
       processId: process.pid,
       ...payload,
@@ -147,6 +150,14 @@ function appendRequestTraceEvent(event = {}) {
       encoding: 'utf8'
     });
   } catch (_) {}
+}
+
+function flushRequestTraceEventsSync() {
+  try {
+    return flushBatchedLogWritesSync(resolveTraceLogFile());
+  } catch (_) {
+    return false;
+  }
 }
 
 function resetRequestTraceStateForTests() {
@@ -194,5 +205,6 @@ module.exports = {
   getTraceFromContainer,
   nextTracePhase,
   normalizeRequestTrace,
-  resetRequestTraceStateForTests
+  resetRequestTraceStateForTests,
+  flushRequestTraceEventsSync
 };

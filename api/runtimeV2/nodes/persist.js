@@ -367,6 +367,7 @@ function createPersistNode(deps = {}) {
           const stateSlice = shortTermMemory?.[request.sessionKey] || {};
           const historySlice = Array.isArray(chatHistory?.[request.sessionKey]) ? chatHistory[request.sessionKey] : [];
           const summarySource = String(stateSlice.summarySource || '').trim().toLowerCase();
+          const sessionRecentMessagesLimit = Math.max(1, Math.floor(Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 64) || 64));
           const persistedSummary = summarySource === 'restart_recall'
             ? ''
             : String(stateSlice.summary || '').trim();
@@ -392,7 +393,7 @@ function createPersistNode(deps = {}) {
               openLoops: normalizeArray(stateSlice.openLoops),
               assistantCommitments: normalizeArray(stateSlice.assistantCommitments),
               userConstraints: normalizeArray(stateSlice.userConstraints),
-              recentMessages: historySlice.slice(-6)
+              recentMessages: historySlice.slice(-sessionRecentMessagesLimit)
             }
           });
           if (!fastCommitMode) {
@@ -452,7 +453,9 @@ function createPersistNode(deps = {}) {
         assistantCommitments: normalizeArray(shortTermMemory?.[request.sessionKey]?.assistantCommitments),
         userConstraints: normalizeArray(shortTermMemory?.[request.sessionKey]?.userConstraints),
         carryOverUserTurn: String(shortTermMemory?.[request.sessionKey]?.carryOverUserTurn || '').trim(),
-        recentMessages: Array.isArray(chatHistory?.[request.sessionKey]) ? chatHistory[request.sessionKey].slice(-6) : []
+        recentMessages: Array.isArray(chatHistory?.[request.sessionKey])
+          ? chatHistory[request.sessionKey].slice(-Math.max(1, Math.floor(Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 64) || 64)))
+          : []
       });
 
       addProfileItem(request.userId, 'recent_topics', String(request.question || '').slice(0, 20), 12);

@@ -3,7 +3,11 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { appendFileWithRotation } = require('../utils/logRotation');
+const {
+  appendFileWithRotation,
+  appendFileWithRotationBatched,
+  flushBatchedLogWritesSync
+} = require('../utils/logRotation');
 const { createJsonLineHotWriter } = require('../utils/jsonHotStore');
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-log-rotation-'));
@@ -52,5 +56,21 @@ const registryArchives = fs.readdirSync(tempDir).filter((name) => name.startsWit
 assert.strictEqual(registryArchives.length, 1);
 assert.ok(fs.readFileSync(path.join(tempDir, registryArchives[0]), 'utf8').includes('first-registry-line'));
 assert.ok(fs.readFileSync(registryFile, 'utf8').includes('second-registry-line'));
+
+const batchedFile = path.join(tempDir, 'batched.ndjson');
+appendFileWithRotationBatched(batchedFile, `${'c'.repeat(20)}\n`, {
+  debounceMs: 1000,
+  maxBytes: 30
+});
+appendFileWithRotationBatched(batchedFile, `${'d'.repeat(20)}\n`, {
+  debounceMs: 1000,
+  maxBytes: 30
+});
+flushBatchedLogWritesSync(batchedFile);
+
+const batchedArchives = fs.readdirSync(tempDir).filter((name) => name.startsWith('batched.ndjson.'));
+assert.strictEqual(batchedArchives.length, 0, 'same batch should rotate at most once before append');
+assert.ok(fs.readFileSync(batchedFile, 'utf8').includes('c'));
+assert.ok(fs.readFileSync(batchedFile, 'utf8').includes('d'));
 
 console.log('logRotation tests passed');

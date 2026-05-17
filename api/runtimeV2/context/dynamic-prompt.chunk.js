@@ -23,7 +23,9 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     routeMeta,
     sessionKey: options.sessionKey
   });
-  const fallbackPersonaModuleCandidates = buildPersonaModuleCandidates({
+  let fallbackPersonaModuleCandidates = null;
+  let fallbackPersonaModuleDecision = null;
+  const fallbackPersonaModuleContext = {
     question,
     routePrompt: options.routePrompt,
     routeMeta,
@@ -31,24 +33,30 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     continuitySignals: options?.continuitySignals,
     personaPhase: routeMeta.personaPhase || '',
     chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
-  });
-  const fallbackPersonaModuleDecision = selectPersonaModules(
-    {
-      ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
-      personaModules: normalizeArray(baseDynamicPromptPlan.personaModules).length > 0
-        ? baseDynamicPromptPlan.personaModules
-        : normalizeArray(options?.personaModuleDecision?.personaModules || routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules)
-    },
-    {
-      question,
-      routePrompt: options.routePrompt,
-      routeMeta,
-      directedContext: routeMeta.directedContext,
-      continuitySignals: options?.continuitySignals,
-      personaPhase: routeMeta.personaPhase || '',
-      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
+  };
+  const getFallbackPersonaModuleCandidates = () => {
+    if (!fallbackPersonaModuleCandidates) {
+      fallbackPersonaModuleCandidates = buildPersonaModuleCandidates(fallbackPersonaModuleContext);
     }
-  );
+    return fallbackPersonaModuleCandidates;
+  };
+  const getFallbackPersonaModuleDecision = () => {
+    if (!fallbackPersonaModuleDecision) {
+      fallbackPersonaModuleDecision = selectPersonaModules(
+        {
+          ...(options?.personaModuleDecision || routeMeta?.directChatPlanner || routeMeta?.toolPlanner || {}),
+          personaModules: normalizeArray(baseDynamicPromptPlan.personaModules).length > 0
+            ? baseDynamicPromptPlan.personaModules
+            : normalizeArray(options?.personaModuleDecision?.personaModules || routeMeta?.directChatPlanner?.personaModules || routeMeta?.toolPlanner?.personaModules)
+        },
+        {
+          ...fallbackPersonaModuleContext,
+          personaModuleCandidates: getFallbackPersonaModuleCandidates()
+        }
+      );
+    }
+    return fallbackPersonaModuleDecision;
+  };
   const now = Date.now();
   const essentialStartedAt = now;
   const collectStartedAt = Date.now();
@@ -77,9 +85,9 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       memoryContext: fallbackMemoryContext,
       personaMemoryState: {},
       personaMemoryPrompt: { systemMessages: [], promptBlocks: [], policy: {} },
-      personaModuleCandidates: fallbackPersonaModuleCandidates,
+      personaModuleCandidates: getFallbackPersonaModuleCandidates(),
       personaWorldbookSearch: {},
-      personaModuleDecision: fallbackPersonaModuleDecision,
+      personaModuleDecision: getFallbackPersonaModuleDecision(),
       dynamicPromptPlan: baseDynamicPromptPlan,
       summaryText: fallbackSummaryText,
       dynamicFewShotPrompt: ''
@@ -412,6 +420,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     directedContext: options?.routeMeta?.directedContext,
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
+    hasShortTermContinuity: combinedDynamicBlocks.some((item) => item?.id === 'short_term_continuity'),
     hasRetrievedMemory: combinedDynamicBlocks.some((item) => item?.id === 'retrieved_memory_lite'),
     hasDailyJournal: combinedDynamicBlocks.some((item) => item?.id === 'daily_journal' || normalizeText(item?.meta?.blockId) === 'daily_journal'),
     hasLongTermProfile: combinedDynamicBlocks.some((item) => item?.id === 'long_term_profile'),
@@ -434,8 +443,17 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
     runtimeAddedIds.push('directed_context');
   }
+  if (combinedDynamicBlocks.some((item) => item?.id === 'short_term_continuity')) {
+    runtimeAddedIds.push('short_term_continuity');
+  }
+  const collectedMemoryContext = promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object'
+    ? promptMaterials.memoryContext
+    : {};
+  if (collectedMemoryContext.promptRetrievedMemoryText || collectedMemoryContext.memoryForPrompt) {
+    runtimeAddedIds.push('retrieved_memory_lite');
+  }
   if (forceMemoryContext) {
-    runtimeAddedIds.push('retrieved_memory_lite', 'daily_journal');
+    runtimeAddedIds.push('short_term_continuity', 'retrieved_memory_lite', 'daily_journal');
   }
   const finalDynamicPromptPlan = {
     ...cloneDynamicPromptPlan(shouldUseHeuristicDynamicPlan ? heuristicDynamicPlan : dynamicPromptPlan),

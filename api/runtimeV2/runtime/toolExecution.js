@@ -453,7 +453,7 @@ function createToolExecutionHelpers(deps = {}) {
 
   function logToolExecution(envelope = {}, step = {}, state = {}, extra = {}) {
     const status = String(envelope.status || '').trim().toLowerCase();
-    if (status === 'completed' && config.GRAPH_TOOL_SUCCESS_LOG_ENABLED === false) {
+    if (status === 'completed' && config.GRAPH_TOOL_SUCCESS_LOG_ENABLED !== true) {
       return;
     }
     const request = normalizeObject(state.request, {});

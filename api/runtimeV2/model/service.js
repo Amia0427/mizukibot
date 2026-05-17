@@ -324,7 +324,24 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
 async function requestStreamingReply(messagesToSend, options = {}, modelConfig = null) {
   const parserState = { buffer: '' };
   let collected = '';
+  let lastVisibleText = '';
   const userId = String(options.userId || options.routeMeta?.userId || options.routeMeta?.user_id || '').trim();
+  const preserveThink = options.preserveThink === true;
+
+  const emitVisibleDelta = (eventDelta = '') => {
+    collected += eventDelta;
+    const visibleCollected = sanitizeUserFacingText(collected, {
+      preserveThink
+    });
+    const visibleDelta = extractUserFacingDelta(lastVisibleText, visibleCollected);
+    if (visibleCollected !== lastVisibleText) {
+      lastVisibleText = visibleCollected;
+      options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
+      if (typeof options.onDelta === 'function') {
+        options.onDelta(visibleDelta, visibleCollected);
+      }
+    }
+  };
 
   try {
     await withMainModelFallback(async (resolvedConfig) => {
@@ -347,20 +364,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
               parserState.buffer = parsed.state.buffer;
               for (const event of parsed.events) {
                 if (!event || event.done || !event.delta) continue;
-                const previousVisible = sanitizeUserFacingText(collected, {
-                  preserveThink: options.preserveThink === true
-                });
-                collected += event.delta;
-                const visibleCollected = sanitizeUserFacingText(collected, {
-                  preserveThink: options.preserveThink === true
-                });
-                const visibleDelta = extractUserFacingDelta(previousVisible, visibleCollected);
-                if (visibleCollected !== previousVisible) {
-                  options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
-                  if (typeof options.onDelta === 'function') {
-                    options.onDelta(visibleDelta, visibleCollected);
-                  }
-                }
+                emitVisibleDelta(event.delta);
               }
             }
           },
@@ -415,20 +419,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
   const tailEvents = flushSSEState(parserState);
   for (const event of tailEvents) {
     if (!event || event.done || !event.delta) continue;
-    const previousVisible = sanitizeUserFacingText(collected, {
-      preserveThink: options.preserveThink === true
-    });
-    collected += event.delta;
-    const visibleCollected = sanitizeUserFacingText(collected, {
-      preserveThink: options.preserveThink === true
-    });
-    const visibleDelta = extractUserFacingDelta(previousVisible, visibleCollected);
-    if (visibleCollected !== previousVisible) {
-      options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
-      if (typeof options.onDelta === 'function') {
-        options.onDelta(visibleDelta, visibleCollected);
-      }
-    }
+    emitVisibleDelta(event.delta);
   }
 
   return buildReplyTextVariants(collected, '', options);
