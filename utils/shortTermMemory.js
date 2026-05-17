@@ -50,7 +50,15 @@ function getStyleAnchorMaxItems() {
 }
 
 function getRecentTurnsMaxItems() {
-  return Math.max(2, Math.min(6, Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 4) || 4));
+  return Math.max(2, Math.min(80, Math.floor(Number(config.SHORT_TERM_MEMORY_RECENT_TURNS || config.MEMORY_V3_SESSION_RECENT_MESSAGES || 32) || 32)));
+}
+
+function getSceneRecentTurnsMaxItems() {
+  return Math.max(2, Math.min(48, Math.floor(Number(config.SHORT_TERM_SCENE_RECENT_TURNS || 16) || 16)));
+}
+
+function getCompressionChunkMaxMessages() {
+  return Math.max(4, Math.min(160, Math.floor(Number(config.SHORT_TERM_MEMORY_COMPRESSION_CHUNK_MESSAGES || 64) || 64)));
 }
 
 const DEFAULT_REPLY_POSTURE = 'light';
@@ -188,7 +196,7 @@ function normalizeSceneState(input = {}) {
     activePair: trimShortText(raw.activePair, 120),
     quoteAnchor: trimShortText(raw.quoteAnchor, 180),
     jargonHints: normalizeStringList(raw.jargonHints, 4, 80),
-    recentTurns: normalizeRecentTurns(raw.recentTurns, 4),
+    recentTurns: normalizeRecentTurns(raw.recentTurns, getSceneRecentTurnsMaxItems()),
     confidence: normalizeConfidence(raw.confidence, 0)
   };
 }
@@ -1059,7 +1067,7 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
       recentTurns: collectSharedRecentTurns(
         sessionEntries,
         (state) => state.scene?.recentTurns || [],
-        4
+        getSceneRecentTurnsMaxItems()
       ),
       confidence: Math.max(
         ...sessionEntries.map((entry) => normalizeConfidence(entry?.state?.scene?.confidence, 0)),
@@ -1197,7 +1205,7 @@ function getCompressionCandidateChunk(history = [], reserveRecentMessages = 2) {
   const chunkEnd = Math.max(0, list.length - reserve);
   if (chunkEnd < 4) return [];
 
-  const maxChunk = Math.max(4, Math.min(16, chunkEnd));
+  const maxChunk = Math.max(4, Math.min(getCompressionChunkMaxMessages(), chunkEnd));
   const chunk = list.slice(0, maxChunk);
   return chunk.length >= 4 ? chunk : [];
 }

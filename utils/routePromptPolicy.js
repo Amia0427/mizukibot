@@ -2,6 +2,7 @@
 const path = require('path');
 
 const ROUTE_PROMPT_POLICY_PATH = path.join(__dirname, '..', 'prompts', 'runtime', 'route-policies.json');
+let routePromptPolicyCache = null;
 
 const DEFAULT_ROUTE_PROMPT_POLICY = {
   version: 1,
@@ -37,8 +38,26 @@ function safeReadJson(filePath, fallback) {
   }
 }
 
+function safeStatFile(filePath) {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat && stat.isFile() ? stat : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function readRoutePromptPolicy() {
-  return safeReadJson(ROUTE_PROMPT_POLICY_PATH, DEFAULT_ROUTE_PROMPT_POLICY);
+  const stat = safeStatFile(ROUTE_PROMPT_POLICY_PATH);
+  const fileVersion = stat ? `${Number(stat.mtimeMs || 0)}:${Number(stat.size || 0)}` : 'missing';
+  if (routePromptPolicyCache && routePromptPolicyCache.fileVersion === fileVersion) {
+    return routePromptPolicyCache.policy;
+  }
+  const policy = stat
+    ? safeReadJson(ROUTE_PROMPT_POLICY_PATH, DEFAULT_ROUTE_PROMPT_POLICY)
+    : DEFAULT_ROUTE_PROMPT_POLICY;
+  routePromptPolicyCache = { fileVersion, policy };
+  return policy;
 }
 
 function mergePolicy(basePolicy, overridePolicy) {
@@ -137,10 +156,15 @@ function buildRoutePromptBundle({
   };
 }
 
+function clearRoutePromptPolicyCache() {
+  routePromptPolicyCache = null;
+}
+
 module.exports = {
   DEFAULT_ROUTE_PROMPT_POLICY,
   ROUTE_PROMPT_POLICY_PATH,
   buildRoutePromptBundle,
+  clearRoutePromptPolicyCache,
   readRoutePromptPolicy,
   resolveRoutePromptPolicy
 };

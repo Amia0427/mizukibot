@@ -721,6 +721,11 @@ function createRuntime(options = {}) {
     const routeMeta = normalizeObject(request.routeMeta, {});
     const memory = normalizeObject(state.memory, {});
     const execution = normalizeObject(state.execution, {});
+    const fingerprintPromptBlocks = (blocks = []) => normalizeArray(blocks).map((item) => ({
+      id: String(item?.id || '').trim(),
+      lane: String(item?.lane || item?.cacheLane || '').trim(),
+      contentHash: stableHash(String(item?.content || '').trim())
+    }));
     return stableHash({
       sessionKey: String(request.sessionKey || state.thread?.sessionKey || '').trim(),
       question: String(request.question || '').trim(),
@@ -735,8 +740,8 @@ function createRuntime(options = {}) {
       source: String(options.source || 'direct_reply').trim() || 'direct_reply',
       memoryCliTurn: execution.memoryCliTurn,
       promptFingerprint: normalizeText(memory.promptSnapshot?.cacheFriendlyFingerprint),
-      dynamicPromptHash: stableHash(normalizeArray(memory.dynamicContextBlocks).map((item) => item?.id)),
-      assistantOnlyHash: stableHash(normalizeArray(memory.assistantOnlyContextBlocks).map((item) => item?.id)),
+      dynamicPromptHash: stableHash(fingerprintPromptBlocks(memory.dynamicContextBlocks)),
+      assistantOnlyHash: stableHash(fingerprintPromptBlocks(memory.assistantOnlyContextBlocks)),
       toolEvidence: String(memory.globalToolEvidence || '').trim()
     });
   }

@@ -43,6 +43,14 @@ function summarize(values = []) {
   };
 }
 
+function clearRequireCache(relativeIds = []) {
+  for (const relativeId of relativeIds) {
+    try {
+      delete require.cache[require.resolve(relativeId)];
+    } catch (_) {}
+  }
+}
+
 async function timeRun(fn) {
   const startedAt = Date.now();
   await fn();
@@ -361,6 +369,10 @@ async function benchSubagentSequentialCalls() {
   process.env.SUBAGENT_WORKER_MAX_REUSE = '100';
   process.env.SUBAGENT_TIMEOUT_MS = '2000';
 
+  clearRequireCache([
+    '../config',
+    '../api/subagentBackends/commandBackend'
+  ]);
   const backend = require('../api/subagentBackends/commandBackend');
   backend.resetPersistentWorkerState();
 
@@ -391,6 +403,8 @@ async function benchSubagentSequentialCalls() {
       skipped: true,
       reason: String(error?.message || error || 'subagent benchmark failed')
     };
+  } finally {
+    backend.resetPersistentWorkerState();
   }
 }
 

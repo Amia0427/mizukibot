@@ -985,8 +985,9 @@ function buildRecentSessionCandidates(userId, context = {}) {
       const state = normalizeShortTermState(entry?.shortTermState || {});
       const summary = buildStructuredSummaryText(state, Math.max(96, Number(config.SHORT_TERM_MEMORY_SUMMARY_MAX_TOKENS || 320)));
       const recentMessages = Array.isArray(entry?.recentMessages) ? entry.recentMessages : [];
+      const recentMessageLimit = Math.max(1, Math.floor(Number(config.SHORT_TERM_BRIDGE_RECENT_MESSAGES || 64) || 64));
       const messagePreview = recentMessages
-        .slice(-4)
+        .slice(-recentMessageLimit)
         .map((msg) => `${String(msg.role || '').trim()}: ${sanitizePreviewText(msg.content, 90)}`)
         .filter(Boolean)
         .join(' | ');
@@ -1017,7 +1018,7 @@ function buildRecentSessionCandidates(userId, context = {}) {
         ].filter(Boolean).join('\n')),
         shortTermSummary: summary,
         shortTermState: state,
-        recentMessages: recentMessages.slice(-4),
+        recentMessages: recentMessages.slice(-recentMessageLimit),
         updatedAt,
         expiresAt: Number(entry?.expiresAt || 0) || 0,
         confidence: 0.86,

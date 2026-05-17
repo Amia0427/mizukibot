@@ -90,6 +90,15 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
     avoidWhen: 'Skip when the turn is self-contained and day-level recall is not useful.'
   },
   {
+    blockId: 'short_term_continuity',
+    label: 'Short Term Continuity',
+    lane: 'dynamic_context',
+    category: 'continuity',
+    defaultPolicy: 'usually_on',
+    useWhen: 'Use whenever recent raw turns, restart summaries, or short-term state are available.',
+    avoidWhen: 'Skip only when there is no short-term context or a custom prompt route explicitly suppresses runtime memory.'
+  },
+  {
     blockId: 'continuity_state',
     label: 'Continuity State',
     lane: 'dynamic_context',
@@ -214,9 +223,13 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
     push('directed_context', 'directed or quoted conversation context is available');
   }
   if (continuitySignals.hasCarryOverTopic || continuitySignals.hasOpenLoop || continuitySignals.quoteAnchored) {
+    push('short_term_continuity', 'short-term continuity should anchor carry-over context');
     push('continuity_state', 'carry-over topic or open loop detected');
     push('summary', 'continuity benefits from a compact carry-over summary');
     push('retrieved_memory_lite', 'continuity may need recalled memory anchors');
+  }
+  if (input.hasShortTermContinuity) {
+    push('short_term_continuity', 'short-term context is available for this turn');
   }
   if (input.hasRetrievedMemory) {
     push('retrieved_memory_lite', 'retrieved memory candidates are available for this turn');
@@ -282,6 +295,7 @@ function buildMainReplyDynamicPromptGuide(personaModuleCatalog = []) {
     'Block guidance:',
     '- `directed_context`: must enable when quoted reply resolution, addressee disambiguation, or group targeting is needed. Do not skip it if the current turn is elliptical or deictic.',
     '- `continuity_state`: must enable when there is a carry-over topic, unresolved thread, prior promise, or open loop that should affect the reply. Skip when the user clearly starts a new topic.',
+    '- `short_term_continuity`: usually enable when available. It carries recent raw turns, restart summaries, and short-term state; it is the main defense against short-term amnesia.',
     '- `style_profile`: enable when local group/style adaptation matters. Skip when the stable persona already provides enough style.',
     '- `social_context`: enable in socially dense group scenes where who-is-who matters. Usually skip in private chat.',
     '- `self_improvement`: enable only when the learned snippet is likely to improve this exact reply pattern. Disable if it looks generic, stale, or likely to overfit.',

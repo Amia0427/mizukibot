@@ -1104,7 +1104,7 @@ function deriveSessionCheckpointPayload(state = {}, payload = {}) {
       activePair: normalizeText(payload.activePair || '', 120),
       quoteAnchor: normalizeText(payload.quoteAnchor || '', 180),
       jargonHints: uniqueStrings(payload.jargonHints || [], 4, 80),
-      recentTurns: recentMessages.slice(-4),
+      recentTurns: recentMessages.slice(-Math.max(2, Math.min(48, Math.floor(Number(config.SHORT_TERM_SCENE_RECENT_TURNS || 16) || 16)))),
       confidence: Math.max(0, Math.min(1, Number(payload.sceneConfidence || continuity.confidence || 0) || 0))
     },
     expressionState: {

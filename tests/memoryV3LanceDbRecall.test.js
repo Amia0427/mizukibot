@@ -156,6 +156,7 @@ module.exports = queryMemory({
 }).then((shadowResult) => {
   assert.strictEqual(shadowResult.results[0].id, 'node_lexical', 'shadow mode should keep local ranking');
   assert.strictEqual(shadowResult.stats.lancedb.fused, false);
+  assert.ok(String(shadowResult.stats.lancedb.fallbackReason || '').includes('mode_shadow'), 'shadow mode should expose local fallback reason');
   console.log('memoryV3LanceDbRecall.test.js passed');
 }).catch((error) => {
   console.error(error);

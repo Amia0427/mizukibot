@@ -16,47 +16,11 @@ async function renderPromptLayers(materials = {}, policy = {}) {
 }
 
 function shouldExposeMemoryCli(options = {}) {
-  const currentConfig = getConfig();
-  if (!currentConfig.MEMORY_CLI_ENABLED || !currentConfig.MEMORY_CLI_CHAT_ENABLED) return false;
-  if (options?.disableTools) return false;
-  if (String(options?.customPrompt || '').trim()) return false;
-  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
-  const reviewMode = String(options?.reviewMode || '').trim().toLowerCase();
-  const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
-  const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
-
-  if (reviewMode) return false;
-  const blockedRoutePrefixes = ['review', 'admin', 'refuse', 'ignore', 'proactive'];
-  if (new Set(blockedRoutePrefixes).has(topRouteType)) return false;
-  if (blockedRoutePrefixes.some((prefix) => routePolicyKey.startsWith(`${prefix}/`))) return false;
-  return topRouteType === 'direct_chat'
-    || routePolicyKey.startsWith('direct_chat/')
-    || (!topRouteType && !routePolicyKey);
+  return require('../../../src/runtime-v2/context/memory-inputs-core').shouldExposeMemoryCli(options);
 }
 
 function mergeAllowedToolsWithMemoryCli(allowedTools, options = {}) {
-  const base = Array.isArray(allowedTools) ? normalizeToolNames(allowedTools) : [];
-  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
-  const reviewMode = String(options?.reviewMode || '').trim().toLowerCase();
-  const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
-  const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
-  const shouldExposeContextStats = !options?.disableTools
-    && !reviewMode
-    && (
-      topRouteType === 'direct_chat'
-      || routePolicyKey.startsWith('direct_chat/')
-      || (!topRouteType && !routePolicyKey)
-    );
-  const withContextStats = (!shouldExposeContextStats || base.includes('get_context_stats'))
-    ? base
-    : [...base, 'get_context_stats'];
-  const withMemoryCli = (!shouldExposeMemoryCli(options) || withContextStats.includes('memory_cli'))
-    ? withContextStats
-    : [...withContextStats, 'memory_cli'];
-  return filterCompanionAllowedTools(
-    filterAllowedToolsForMemoryCliTurn(withMemoryCli, options?.memoryCliTurn),
-    currentConfig
-  );
+  return require('../../../src/runtime-v2/context/memory-inputs-core').mergeAllowedToolsWithMemoryCli(allowedTools, options);
 }
 
 function buildV2MemoryCliInstruction(memoryCliTurn = null) {

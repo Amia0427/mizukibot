@@ -343,17 +343,29 @@ function rejectAllPending(entry = null, error = null) {
   entry.pending.clear();
 }
 
+function rejectWorkerQueue(entry = null, error = null) {
+  if (!entry || !Array.isArray(entry.waitQueue) || entry.waitQueue.length === 0) return;
+  const queue = entry.waitQueue.splice(0);
+  for (const waiter of queue) {
+    try {
+      waiter.reject(error || createPersistentWorkerError('persistent subagent worker closed', 'PERSISTENT_SUBAGENT_WORKER_CLOSED'));
+    } catch (_) {}
+  }
+}
+
 function retirePersistentWorker(entry = null, reason = 'retired') {
   if (!entry || entry.closing) return;
   entry.closing = true;
   clearWorkerIdleTimer(entry);
   persistentWorkerRegistry.delete(entry.key);
   persistentWorkerStats.retired += 1;
-  rejectAllPending(entry, createPersistentWorkerError(
+  const retiredError = createPersistentWorkerError(
     `persistent subagent worker retired (${reason})`,
     'PERSISTENT_SUBAGENT_WORKER_RETIRED',
     { reason }
-  ));
+  );
+  rejectAllPending(entry, retiredError);
+  rejectWorkerQueue(entry, retiredError);
   if (typeof entry?.retire === 'function') {
     try { entry.retire(reason); } catch (_) {}
     return;
@@ -377,10 +389,12 @@ function markWorkerBroken(entry = null, error = null) {
   entry.broken = true;
   clearWorkerIdleTimer(entry);
   persistentWorkerRegistry.delete(entry.key);
-  rejectAllPending(entry, error || createPersistentWorkerError(
+  const brokenError = error || createPersistentWorkerError(
     'persistent subagent worker failed',
     'PERSISTENT_SUBAGENT_WORKER_BROKEN'
-  ));
+  );
+  rejectAllPending(entry, brokenError);
+  rejectWorkerQueue(entry, brokenError);
   if (typeof entry?.breakWorker === 'function') {
     try { entry.breakWorker(error); } catch (_) {}
     return;
@@ -789,17 +803,27 @@ function createPersistentBridgeCall(spec = {}) {
         queueWaitMs,
         healthcheckMs: Number(acquired.healthcheckMs || 0) || 0
       };
+    } catch (error) {
+      if (activeEntry && isUntrustedPersistentWorkerState(error)) {
+        activeEntry.pending.delete(requestId);
+        retirePersistentWorker(activeEntry, normalizeText(error?.code).toLowerCase() || 'persistent_error');
+      }
+      throw error;
     } finally {
       if (activeEntry) {
         activeEntry.busy = false;
         activeEntry.lastUsedAt = Date.now();
-        releaseWorkerQueue(activeEntry);
-        if (!acquired.reused) {
+        if (activeEntry.closing || activeEntry.broken) {
+          activeEntry = null;
+        } else {
+          releaseWorkerQueue(activeEntry);
+        }
+        if (activeEntry && !acquired.reused) {
           activeEntry.reuseCount += 1;
         }
-        if (activeEntry.reuseCount >= Math.max(1, Number(config.SUBAGENT_WORKER_MAX_REUSE) || 100)) {
+        if (activeEntry && activeEntry.reuseCount >= Math.max(1, Number(config.SUBAGENT_WORKER_MAX_REUSE) || 100)) {
           retirePersistentWorker(activeEntry, 'max_reuse');
-        } else {
+        } else if (activeEntry) {
           scheduleWorkerIdleRetire(activeEntry);
         }
       }
@@ -849,6 +873,13 @@ function shouldFallbackToSpawn(error = null) {
   if (code === 'SUBAGENT_CANCELLED' || code === 'SUBAGENT_TIMEOUT') return false;
   if (code === 'PERSISTENT_SUBAGENT_TIMEOUT') return false;
   return code.startsWith('PERSISTENT_SUBAGENT_');
+}
+
+function isUntrustedPersistentWorkerState(error = null) {
+  const code = normalizeText(error?.code).toUpperCase();
+  return code === 'PERSISTENT_SUBAGENT_TIMEOUT'
+    || code === 'SUBAGENT_TIMEOUT'
+    || code === 'SUBAGENT_CANCELLED';
 }
 
 function writeLatencyMeta(options = {}, patch = {}) {

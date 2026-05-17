@@ -538,7 +538,7 @@ function createDirectReplyNode(deps = {}) {
       ]);
       let retriedReply = '';
       try {
-        retriedReply = String(await requestReplyImpl(
+        const retryResult = await requestReplyImpl(
           messagesToSend.concat([{
             role: 'system',
             content: 'Do not emit any <tool_calls> markup or any tool/function call. No tool is available for this turn. Reply with plain natural language only.'
@@ -549,7 +549,14 @@ function createDirectReplyNode(deps = {}) {
             disableTools: true,
             allowedTools: []
           }
-        ) || '').trim();
+        );
+        retriedReply = String(
+          retryResult?.persistedText
+          || retryResult?.finalReply
+          || retryResult?.visibleText
+          || retryResult
+          || ''
+        ).trim();
       } catch (_) {}
 
       if (isStableDirectReplyText(retriedReply)) {

@@ -26,6 +26,13 @@ module.exports = (async () => {
     assert.strictEqual(isLoaded('api/legacy/aiHost.js'), false, 'runtime host should not load legacy aiHost on require');
     assert.strictEqual(isLoaded('utils/memory-v3/materializer.js'), false, 'runtime host should not load memory materializer on require');
 
+    clearProjectCache();
+    require('../src/runtime-v2/context/memory-inputs');
+
+    assert.strictEqual(isLoaded('api/runtimeV2/context/service.js'), false, 'memory input helpers should not load runtime-v2 context service');
+    assert.strictEqual(isLoaded('src/runtime-v2/context/index.js'), false, 'memory input helpers should not load full runtime-v2 context service');
+    assert.strictEqual(isLoaded('utils/memory-v3/materializer.js'), false, 'memory input helpers should not load memory materializer on require');
+
     console.log('hotpathRequireGuard.test.js passed');
   } finally {
     for (const key of Object.keys(process.env)) {

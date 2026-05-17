@@ -470,8 +470,17 @@ function resolveModelCallLogFile(options = {}) {
     || path.join(config.DATA_DIR || path.join(process.cwd(), 'data'), 'model-calls.ndjson');
 }
 
+function flushPendingModelCallLogRows(logFile = '') {
+  try {
+    const { flushBatchedLogWritesSync } = require('./logRotation');
+    flushBatchedLogWritesSync(logFile);
+  } catch (_) {}
+}
+
 function readModelCallLogRows(options = {}) {
-  return readJsonLineFileRows(resolveModelCallLogFile(options), options.readLimit || 5000);
+  const logFile = resolveModelCallLogFile(options);
+  flushPendingModelCallLogRows(logFile);
+  return readJsonLineFileRows(logFile, options.readLimit || 5000);
 }
 
 function normalizePromptCaching(row = {}) {

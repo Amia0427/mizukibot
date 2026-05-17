@@ -7,6 +7,10 @@ const runtimePromptCache = new BoundedCache({
   maxEntries: 256,
   ttlMs: Math.max(0, Number(config.EPHEMERAL_CACHE_TTL_MS || 30 * 60 * 1000) || (30 * 60 * 1000))
 });
+const runtimePromptTemplateCache = new BoundedCache({
+  maxEntries: 64,
+  ttlMs: Math.max(0, Number(config.EPHEMERAL_CACHE_TTL_MS || 30 * 60 * 1000) || (30 * 60 * 1000))
+});
 
 function estimatePromptTokens(value) {
   const text = String(value || '').trim();
@@ -153,6 +157,15 @@ function safeReadText(filePath, fallback = '') {
   }
 }
 
+function safeStatFile(filePath) {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat && stat.isFile() ? stat : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function renderRuntimePromptTemplate(templateText, variables = {}) {
   const source = String(templateText || '');
   const usedKeys = [];
@@ -190,24 +203,52 @@ function loadRuntimePromptTemplate(templateId) {
   if (!id) return fallback;
 
   const fullPath = path.join(RUNTIME_PROMPTS_DIR, `${id}.txt`);
+  const stat = safeStatFile(fullPath);
+  const fileVersion = stat ? `${Number(stat.mtimeMs || 0)}:${Number(stat.size || 0)}` : 'missing';
+  const cacheKey = `${id}::${fileVersion}`;
+  const cached = runtimePromptTemplateCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+  if (!stat) {
+    runtimePromptTemplateCache.set(cacheKey, fallback);
+    return fallback;
+  }
+
   const text = safeReadText(fullPath, '').trim();
-  return text || fallback;
+  const resolved = text || fallback;
+  runtimePromptTemplateCache.set(cacheKey, resolved);
+  return resolved;
 }
 
-function buildRuntimePrompt(templateId, variables = {}) {
+function cloneRenderedPrompt(rendered = {}) {
+  const meta = rendered.meta && typeof rendered.meta === 'object' ? rendered.meta : {};
+  return {
+    text: String(rendered.text || ''),
+    meta: {
+      usedVariables: Array.isArray(meta.usedVariables) ? [...meta.usedVariables] : [],
+      unusedVariables: Array.isArray(meta.unusedVariables) ? [...meta.unusedVariables] : [],
+      estimatedTokens: Math.max(0, Number(meta.estimatedTokens || 0) || 0)
+    }
+  };
+}
+
+function renderRuntimePrompt(templateId, variables = {}) {
   const stableKey = buildStablePromptCacheKey(templateId, variables);
   if (stableKey) {
     const cached = runtimePromptCache.get(stableKey);
-    if (cached) return cached;
-    const rendered = renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables).text;
-    runtimePromptCache.set(stableKey, rendered);
+    if (cached) return cloneRenderedPrompt(cached);
+    const rendered = renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables);
+    runtimePromptCache.set(stableKey, cloneRenderedPrompt(rendered));
     return rendered;
   }
-  return renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables).text;
+  return renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables);
+}
+
+function buildRuntimePrompt(templateId, variables = {}) {
+  return renderRuntimePrompt(templateId, variables).text;
 }
 
 function buildRuntimePromptBlock(templateId, variables = {}, options = {}) {
-  const rendered = renderRuntimePromptTemplate(loadRuntimePromptTemplate(templateId), variables);
+  const rendered = renderRuntimePrompt(templateId, variables);
   return {
     id: String(options.id || `runtime_${templateId}`).trim() || `runtime_${templateId}`,
     label: String(options.label || templateId).trim() || templateId,
@@ -226,11 +267,17 @@ function buildRuntimePromptBlock(templateId, variables = {}, options = {}) {
   };
 }
 
+function clearRuntimePromptCaches() {
+  runtimePromptCache.clear();
+  runtimePromptTemplateCache.clear();
+}
+
 module.exports = {
   RUNTIME_PROMPTS_DIR,
   RUNTIME_PROMPT_DEFAULTS,
   buildRuntimePromptBlock,
   buildRuntimePrompt,
+  clearRuntimePromptCaches,
   loadRuntimePromptTemplate,
   renderRuntimePromptTemplate
 };

@@ -228,7 +228,19 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     || memoryContext.promptSummaryText
     || trimTextByTokenBudget(memoryContext.summary || 'none', affinity.shortTermMemoryTokens, 'tail')
     || 'none';
+  const shortTermContinuityText = buildShortTermContinuityPrompt(sharedShortTermContext);
   if (includeOptionalContextBlocks) {
+    promptBlocks.push(createPromptBlock('short_term_continuity', 'Short Term Continuity', shortTermContinuityText, {
+      stage: 'main',
+      priority: 210,
+      authority: 'memory_fact',
+      kind: 'continuity',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true,
+        evidenceOnly: true
+      }
+    }));
     promptBlocks.push(createPromptBlock('affinity_level', 'Affinity Level', `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`, {
       stage: 'main',
       priority: 320,
@@ -376,6 +388,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     directedContext: options?.routeMeta?.directedContext,
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
+    hasShortTermContinuity: Boolean(shortTermContinuityText),
     hasRetrievedMemory: Boolean(memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt),
     hasDailyJournal: Boolean(dailyJournalPromptText),
     hasLongTermProfile: Boolean(memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText),
@@ -423,8 +436,11 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
     baseRuntimeAddedIds.push('directed_context');
   }
+  if (memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt) {
+    baseRuntimeAddedIds.push('retrieved_memory_lite');
+  }
   if (forceMemoryContext) {
-    baseRuntimeAddedIds.push('retrieved_memory_lite', 'daily_journal');
+    baseRuntimeAddedIds.push('short_term_continuity', 'retrieved_memory_lite', 'daily_journal');
   }
   const selectedPromptBlocks = filterBlocksByPlan(promptBlocks, effectiveBaseDynamicPromptPlan, {
     requiredIds: [],

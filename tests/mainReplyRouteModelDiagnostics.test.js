@@ -49,8 +49,15 @@ module.exports = (async () => {
     originalPost = axios.post;
 
     const { requestAssistantMessage } = require('../api/runtimeV2/model/service');
-    const { createRequestTrace, resetRequestTraceStateForTests } = require('../utils/requestTrace');
-    const { resetModelCallTracker } = require('../utils/modelCallTracker');
+    const {
+      createRequestTrace,
+      flushRequestTraceEventsSync,
+      resetRequestTraceStateForTests
+    } = require('../utils/requestTrace');
+    const {
+      flushModelCallLogsSync,
+      resetModelCallTracker
+    } = require('../utils/modelCallTracker');
 
     resetRequestTraceStateForTests();
     resetModelCallTracker();
@@ -96,6 +103,8 @@ module.exports = (async () => {
       /upstream model quota exceeded/
     );
 
+    flushRequestTraceEventsSync();
+    flushModelCallLogsSync();
     const traceEvents = readJsonLines(path.join(tempDir, 'request-trace.ndjson'));
     const httpFailure = traceEvents.find((event) => event.stage === 'http_client_failure');
     assert.ok(httpFailure, 'http failure trace should be written');

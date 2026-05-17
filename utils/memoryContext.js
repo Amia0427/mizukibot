@@ -474,9 +474,24 @@ function buildMemoryTrace({ hits = [], injected = {}, options = {} } = {}) {
     preview: String(text || '').slice(0, 180)
   })).filter((item) => item.chars > 0);
   const injectedTokens = injectedEntries.reduce((sum, item) => sum + item.approxTokens, 0);
+  const injectedBlockIds = Array.isArray(options.injectedBlockIds)
+    ? options.injectedBlockIds.map((item) => sanitizeText(item)).filter(Boolean)
+    : injectedEntries.map((item) => item.name).filter(Boolean);
+  const droppedReasons = Array.isArray(options.droppedReasons)
+    ? options.droppedReasons.map((item) => sanitizeText(item)).filter(Boolean)
+    : [];
+  const topHitIds = (Array.isArray(hits) ? hits : [])
+    .map((hit) => String(hit.id || ''))
+    .filter(Boolean)
+    .slice(0, 8);
   return {
     enabled: true,
     strictPromptInjection: Boolean(config.MEMORY_STRICT_PROMPT_INJECTION_ENABLED),
+    retrieval_path: sanitizeText(options.retrievalPath || options.retrieval_path || 'none'),
+    retrieved_count: Array.isArray(hits) ? hits.length : 0,
+    injected_block_ids: injectedBlockIds,
+    dropped_reasons: droppedReasons,
+    top_hit_ids: topHitIds,
     groupId: sanitizeText(options.groupId),
     routePolicyKey: sanitizeText(options.routePolicyKey),
     topRouteType: sanitizeText(options.topRouteType),
@@ -511,6 +526,32 @@ function buildMemoryTrace({ hits = [], injected = {}, options = {} } = {}) {
     profile_disabled_reason: String(profileTrace.profile_disabled_reason || profileTrace.reason || '')
   };
 }
+
+function resolveInjectedBlockIds(injected = {}) {
+  const map = {
+    retrievedMemory: 'retrieved_memory_lite',
+    weakEvidence: 'retrieved_memory_lite',
+    styleSignals: 'retrieved_memory_lite',
+    taskMemory: 'retrieved_memory_lite',
+    groupMemory: 'retrieved_memory_lite',
+    dailyJournal: 'daily_journal',
+    longTermProfile: 'long_term_profile'
+  };
+  return Array.from(new Set(Object.entries(injected || {})
+    .filter(([, text]) => String(text || '').trim())
+    .map(([key]) => map[key] || key)
+    .filter(Boolean)));
+}
+
+function resolveDroppedReasons(hits = [], injected = {}, extra = []) {
+  const reasons = Array.isArray(extra) ? extra.map((item) => sanitizeText(item)).filter(Boolean) : [];
+  const hitCount = Array.isArray(hits) ? hits.length : 0;
+  const hasRetrieved = Boolean(String(injected?.retrievedMemory || '').trim());
+  const hasAnyInjected = Object.values(injected || {}).some((text) => String(text || '').trim());
+  if (hitCount > 0 && !hasAnyInjected) reasons.push('retrieved_but_not_injected');
+  if (hitCount > 0 && !hasRetrieved && !String(injected?.weakEvidence || '').trim()) reasons.push('no_retrieved_memory_text');
+  return Array.from(new Set(reasons));
+}
 function buildContextPayload(userId, question = '', options = {}, unifiedHits = []) {
   const recapQuery = isRecentRecallQuery(question);
   const resolvedGroupIds = Array.isArray(options.resolvedGroupIds)
@@ -530,10 +571,12 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     ? stableProfile.persona
     : {};
   const profileDisabled = stableProfile.disabled === true;
-  const effectiveSummary = profileDisabled
+  const injectPersonaBlocks = config.MEMORY_PROFILE_INJECT_PERSONA_BLOCKS === true
+    || options.injectPersonaProfileBlocks === true;
+  const effectiveSummary = profileDisabled || !injectPersonaBlocks
     ? ''
     : sanitizeText(profilePersona.summary || (stableProfile.legacyFallbackUsed ? stableProfile.summary : ''));
-  const effectiveImpression = profileDisabled
+  const effectiveImpression = profileDisabled || !injectPersonaBlocks
     ? ''
     : sanitizeText(profilePersona.impression || (stableProfile.legacyFallbackUsed ? stableProfile.impression : ''));
   const affinityState = getUserAffinityState(userId, options);
@@ -658,6 +701,8 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
   );
   const memorySections = [];
   if (promptRetrievedMemoryText) memorySections.push(`[RetrievedMemory]\n${promptRetrievedMemoryText}`);
+  if (promptTaskMemoryText) memorySections.push(`[TaskMemory]\n${promptTaskMemoryText}`);
+  if (promptGroupMemoryTrimmedText) memorySections.push(`[GroupMemory]\n${promptGroupMemoryTrimmedText}`);
   if (promptStyleSignalsText) memorySections.push(`[StyleSignals]\n${promptStyleSignalsText}`);
   const segments = {
     retrievedMemory: clampPromptMessage('RetrievedMemory', promptRetrievedMemoryText, getPromptTokenLimit('MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', 420), 'tail'),
@@ -667,18 +712,22 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     styleSignals: clampPromptMessage('StyleSignals', promptStyleSignalsText, getPromptTokenLimit('MAIN_PROMPT_STYLE_SIGNALS_MAX_TOKENS', 80), 'tail'),
     longTermProfile: clampPromptMessage('LongTermProfile', promptLongTermProfileText, getPromptTokenLimit('MAIN_PROMPT_LONG_TERM_PROFILE_MAX_TOKENS', 220), 'tail')
   };
+  const injectedForTrace = {
+    retrievedMemory: promptRetrievedMemoryText,
+    styleSignals: promptStyleSignalsText,
+    taskMemory: promptTaskMemoryText,
+    groupMemory: promptGroupMemoryTrimmedText,
+    dailyJournal: promptDailyJournalTrimmedText,
+    longTermProfile: promptLongTermProfileText
+  };
   const memoryTrace = buildMemoryTrace({
     hits,
-    injected: {
-      retrievedMemory: promptRetrievedMemoryText,
-      styleSignals: promptStyleSignalsText,
-      taskMemory: promptTaskMemoryText,
-      groupMemory: promptGroupMemoryTrimmedText,
-      dailyJournal: promptDailyJournalTrimmedText,
-      longTermProfile: promptLongTermProfileText
-    },
+    injected: injectedForTrace,
     options: {
       ...options,
+      retrievalPath: options.retrievalPath || options.retrieval_path || (ragEnabled ? 'legacy_unified' : 'none'),
+      injectedBlockIds: resolveInjectedBlockIds(injectedForTrace),
+      droppedReasons: resolveDroppedReasons(hits, injectedForTrace, options.droppedReasons),
       memoryProfileTrace: {
         profile_source: stableProfile.source,
         profile_injected: Boolean(promptLongTermProfileText),
@@ -816,7 +865,15 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
           question
         }))
       );
-      const fallbackPayload = buildContextPayload(userId, question, normalizedOptions, unifiedHits);
+      const fallbackDroppedReasons = [];
+      const lancedbFallback = queryResult?.stats?.lancedb?.fallbackReason || queryResult?.diagnostics?.lancedb?.fallbackReason || '';
+      if (lancedbFallback) fallbackDroppedReasons.push(`v3_lancedb_${lancedbFallback}`);
+      if (!unifiedHits.length) fallbackDroppedReasons.push('v3_empty_and_unified_empty');
+      const fallbackPayload = buildContextPayload(userId, question, {
+        ...normalizedOptions,
+        retrievalPath: unifiedHits.length ? 'v3_fallback_unified' : 'none',
+        droppedReasons: fallbackDroppedReasons
+      }, unifiedHits);
       fallbackPayload.diagnostics = {
         ...(fallbackPayload.diagnostics || {}),
         projectionFreshness: queryResult?.diagnostics?.projectionFreshness || null
@@ -871,8 +928,10 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
           'tail'
         )
       : '';
+    const injectPersonaBlocks = config.MEMORY_PROFILE_INJECT_PERSONA_BLOCKS === true
+      || baseOptions.injectPersonaProfileBlocks === true;
     const summaryText = String(
-      !profileDisabled && queryResult.persona?.summary
+      !profileDisabled && injectPersonaBlocks && queryResult.persona?.summary
         ? queryResult.persona.summary
         : (continuityFacet
         ? limitPromptText(
@@ -882,13 +941,27 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
           )
         : (queryResult.digest || ''))
     );
-    const impressionText = profileDisabled ? '' : String(queryResult.persona?.impression || '');
+    const impressionText = profileDisabled || !injectPersonaBlocks ? '' : String(queryResult.persona?.impression || '');
     const memoryForPrompt = [
       packet.sessionContinuityText ? `[SessionContinuity]\n${packet.sessionContinuityText}` : '',
       packet.relevantEvidenceText ? `[RelevantEvidence]\n${packet.relevantEvidenceText}` : '',
       (!continuityFacet || !packet.sessionContinuityText) && packet.weakEvidenceText ? `[WeakEvidence]\n${packet.weakEvidenceText}` : '',
+      packet.taskStrategyText ? `[TaskMemory]\n${packet.taskStrategyText}` : '',
+      packet.groupSharedContextText ? `[GroupMemory]\n${packet.groupSharedContextText}` : '',
       packet.styleSignalsText ? `[StyleSignals]\n${packet.styleSignalsText}` : ''
     ].filter(Boolean).join('\n\n');
+    const injectedForTrace = {
+      retrievedMemory: retrievedPromptText,
+      weakEvidence: packet.weakEvidenceText,
+      styleSignals: packet.styleSignalsText,
+      taskMemory: packet.taskStrategyText,
+      groupMemory: packet.groupSharedContextText,
+      dailyJournal: dailyJournalText,
+      longTermProfile: packet.stableProfileText
+    };
+    const v3DroppedReasons = [];
+    const lancedbFallback = queryResult?.stats?.lancedb?.fallbackReason || '';
+    if (lancedbFallback) v3DroppedReasons.push(`lancedb_${lancedbFallback}`);
 
     const notebookText = (localKnowledge.bySource?.notebook_doc || [])
       .map((item) => String(item.preview || item.text || '').trim())
@@ -946,17 +1019,12 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
         projectionFreshness: queryResult?.diagnostics?.projectionFreshness || null,
         memoryTrace: buildMemoryTrace({
           hits: results,
-          injected: {
-            retrievedMemory: retrievedPromptText,
-            weakEvidence: packet.weakEvidenceText,
-            styleSignals: packet.styleSignalsText,
-            taskMemory: packet.taskStrategyText,
-            groupMemory: packet.groupSharedContextText,
-            dailyJournal: dailyJournalText,
-            longTermProfile: packet.stableProfileText
-          },
+          injected: injectedForTrace,
           options: {
             ...options,
+            retrievalPath: 'v3',
+            injectedBlockIds: resolveInjectedBlockIds(injectedForTrace),
+            droppedReasons: resolveDroppedReasons(results, injectedForTrace, v3DroppedReasons),
             memoryProfileTrace: {
               profile_source: packet.stableProfileSource,
               profile_injected: Boolean(packet.stableProfileText),
@@ -1003,7 +1071,11 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       }))
     )
     : [];
-  return buildContextPayload(userId, question, normalizedOptions, unifiedHits);
+  return buildContextPayload(userId, question, {
+    ...normalizedOptions,
+    retrievalPath: unifiedHits.length ? 'legacy_unified' : 'none',
+    droppedReasons: unifiedHits.length ? [] : ['legacy_unified_empty']
+  }, unifiedHits);
 }
 
 module.exports = {

@@ -12,6 +12,7 @@ process.env.MEMORY_EXTRACT_MIN_CONFIDENCE = '0.72';
 process.env.MEMORY_WRITE_REVIEW_ENABLED = 'true';
 process.env.MEMORY_WRITE_REVIEW_MODE = 'risk';
 process.env.MEMORY_WRITE_REVIEW_TIMEOUT_MS = '500';
+process.env.MEMORY_WRITE_REVIEW_FAIL_OPEN = 'true';
 process.env.API_BASE_URL = 'https://memory-review.example/v1/chat/completions';
 process.env.API_KEY = 'review-key';
 process.env.MEMORY_HYBRID_RECALL_ENABLED = 'true';

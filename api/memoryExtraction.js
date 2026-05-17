@@ -169,6 +169,9 @@ function inferRelations(entities = [], participants = []) {
 function getDefaultStatusForType(type = '', memoryKind = '') {
   if (memoryKind === 'style' || memoryKind === 'jargon') return 'active';
   const normalized = String(type || '').trim().toLowerCase();
+  if (config.MEMORY_EXTRACT_PROFILE_WRITES_AS_CANDIDATE === true) {
+    return 'candidate';
+  }
   if (normalized === 'identity' || normalized === 'goal' || normalized === 'summary' || normalized === 'impression') {
     return 'active';
   }
@@ -329,6 +332,41 @@ function inferExplicitProfileType(text = '') {
   return 'fact';
 }
 
+function normalizeLegacyProfileWritePolicy(options = {}) {
+  return String(options.legacyProfileWritePolicy || config.MEMORY_LEGACY_PROFILE_WRITE_POLICY || 'explicit_only')
+    .trim()
+    .toLowerCase();
+}
+
+function shouldWriteLegacyProfileField(type = '', meta = {}, options = {}) {
+  const policy = normalizeLegacyProfileWritePolicy(options);
+  if (options.legacyProfileWriteEnabled === true || policy === 'all') return true;
+  const sourceKind = String(meta.sourceKind || options.sourceKind || '').trim().toLowerCase();
+  if (policy === 'off' || policy === 'none' || policy === 'disabled') return false;
+  if (policy === 'basic') {
+    return ['identity', 'goal'].includes(String(type || '').trim().toLowerCase())
+      && sourceKind === 'explicit';
+  }
+  return sourceKind === 'explicit';
+}
+
+function countStableProfileSignals(groups = [], confidence = 0) {
+  const minConfidence = Math.max(0.78, Number(config.MEMORY_EXTRACT_MIN_CONFIDENCE || 0.72) + 0.06);
+  if (Number(confidence || 0) < minConfidence) return 0;
+  return groups.reduce((sum, values) => {
+    const count = Array.isArray(values)
+      ? values.map((item) => String(item || '').trim()).filter(Boolean).length
+      : 0;
+    return sum + count;
+  }, 0);
+}
+
+function shouldPersistPersonaSupport(stableSignalCount = 0, options = {}) {
+  if (options.forcePersonaSupportWrite === true) return true;
+  if (config.MEMORY_EXTRACT_PERSONA_SUPPORT_REQUIRE_EVIDENCE === false) return true;
+  return stableSignalCount >= Math.max(1, Number(config.MEMORY_EXTRACT_PERSONA_SUPPORT_MIN_SIGNALS || 2) || 2);
+}
+
 async function flushVectorMemoryWrites(vectorItems = [], options = {}) {
   if (!Array.isArray(vectorItems) || vectorItems.length === 0) {
     return { ids: [], accepted: [], rejected: [] };
@@ -342,7 +380,6 @@ async function flushVectorMemoryWrites(vectorItems = [], options = {}) {
 function persistLearnedMemories(userId, type, values, confidence = 0.8, options = {}) {
   const vectorItems = Array.isArray(options.vectorItems) ? options.vectorItems : [];
   const fieldKey = String(options.fieldKey || type || '').trim().toLowerCase();
-  const legacyProfileWriteEnabled = options.legacyProfileWriteEnabled === true;
 
   for (const raw of values) {
     const value = String(raw || '').trim();
@@ -354,50 +391,52 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8, options 
     if (type === 'fact') {
       vectorItems.push({ userId, text: value, type: 'fact', weight: 1.15, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       appendV3LearnedMemoryEvent(userId, type, value, meta, options);
-      addUserFact(userId, value, 30);
+      if (shouldWriteLegacyProfileField(type, meta, options)) addUserFact(userId, value, 30);
       continue;
     }
 
     if (type === 'identity') {
       vectorItems.push({ userId, text: `identity: ${value}`, type: 'identity', weight: 1.25, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       appendV3LearnedMemoryEvent(userId, type, value, meta, options);
-      addProfileItem(userId, 'identities', value, 20);
-      addUserFact(userId, value, 30);
+      if (shouldWriteLegacyProfileField(type, meta, options)) {
+        addProfileItem(userId, 'identities', value, 20);
+        addUserFact(userId, value, 30);
+      }
       continue;
     }
 
     if (type === 'personality') {
       vectorItems.push({ userId, text: `personality: ${value}`, type: 'personality', weight: 1.1, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       appendV3LearnedMemoryEvent(userId, type, value, meta, options);
-      if (legacyProfileWriteEnabled) addProfileItem(userId, 'personality_traits', value, 20);
+      if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'personality_traits', value, 20);
       continue;
     }
 
     if (type === 'hobby') {
       vectorItems.push({ userId, text: `hobby: ${value}`, type: 'hobby', weight: 1.08, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       appendV3LearnedMemoryEvent(userId, type, value, meta, options);
-      if (legacyProfileWriteEnabled) addProfileItem(userId, 'hobbies', value, 20);
+      if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'hobbies', value, 20);
       continue;
     }
 
     if (type === 'like') {
       vectorItems.push({ userId, text: `likes: ${value}`, type: 'like', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       appendV3LearnedMemoryEvent(userId, type, value, meta, options);
-      if (legacyProfileWriteEnabled) addProfileItem(userId, 'likes', value, 20);
+      if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'likes', value, 20);
       continue;
     }
 
     if (type === 'dislike') {
       vectorItems.push({ userId, text: `dislikes: ${value}`, type: 'dislike', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       appendV3LearnedMemoryEvent(userId, type, value, meta, options);
-      if (legacyProfileWriteEnabled) addProfileItem(userId, 'dislikes', value, 20);
+      if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'dislikes', value, 20);
       continue;
     }
 
     if (type === 'goal') {
       vectorItems.push({ userId, text: `goal: ${value}`, type: 'goal', weight: 1.2, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       appendV3LearnedMemoryEvent(userId, type, value, meta, options);
-      addProfileItem(userId, 'goals', value, 20);
+      if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'goals', value, 20);
       continue;
     }
 
@@ -416,7 +455,7 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8, options 
     if (type === 'topic') {
       vectorItems.push({ userId, text: `recent topic: ${value}`, type: 'topic', weight: 0.95, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
       appendV3LearnedMemoryEvent(userId, type, value, meta, options);
-      if (legacyProfileWriteEnabled) addProfileItem(userId, 'recent_topics', value, 12);
+      if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'recent_topics', value, 12);
     }
   }
 
@@ -1018,9 +1057,9 @@ Rules:
 - personality_traits must be enduring interaction or temperament traits, not temporary mood
 - hobbies must be stable hobbies or recurring leisure interests
 - facts must be stable user facts, not transient mood
-- summary must be a concise overall summary of the user's identity, personality, preferences, and ongoing direction
-- impression must be a concise, stable summary of what kind of user this is, their interaction style, and enduring preferences
+- summary and impression should be empty unless this turn contains multiple clear, durable user-profile signals
 - topics should be recurring or ongoing topics, not overly generic words
+- one-off games, songs, memes, moods, plans for today, or current-session events belong in topics/facts only, not identity/personality/hobbies/likes/goals
 - confidence must be between 0 and 1
 `.trim();
 
@@ -1082,6 +1121,15 @@ Rules:
       entities,
       relations
     };
+    const stableProfileSignalCount = countStableProfileSignals([
+      identities,
+      personalityTraits,
+      hobbies,
+      likes,
+      dislikes,
+      goals
+    ], confidence);
+    const allowPersonaSupport = shouldPersistPersonaSupport(stableProfileSignalCount, sharedMeta);
 
     persistLearnedMemories(userId, 'identity', identities, Math.max(confidence, 0.82), { vectorItems, ...sharedMeta });
     persistLearnedMemories(userId, 'personality', personalityTraits, confidence, { vectorItems, ...sharedMeta });
@@ -1090,8 +1138,10 @@ Rules:
     persistLearnedMemories(userId, 'like', likes, confidence, { vectorItems, ...sharedMeta });
     persistLearnedMemories(userId, 'dislike', dislikes, confidence, { vectorItems, ...sharedMeta });
     persistLearnedMemories(userId, 'goal', goals, confidence, { vectorItems, ...sharedMeta });
-    persistLearnedMemories(userId, 'summary', summaries.slice(0, 1), Math.max(confidence, 0.84), { vectorItems, ...sharedMeta });
-    persistLearnedMemories(userId, 'impression', impressions.slice(0, 1), Math.max(confidence, 0.82), { vectorItems, ...sharedMeta });
+    if (allowPersonaSupport) {
+      persistLearnedMemories(userId, 'summary', summaries.slice(0, 1), Math.max(confidence, 0.84), { vectorItems, ...sharedMeta });
+      persistLearnedMemories(userId, 'impression', impressions.slice(0, 1), Math.max(confidence, 0.82), { vectorItems, ...sharedMeta });
+    }
     persistLearnedMemories(userId, 'topic', topics, Math.min(confidence, 0.9), { vectorItems, ...sharedMeta });
     if (vectorItems.length > 0) await flushVectorMemoryWrites(vectorItems, sharedMeta);
     if (postReplyMemoryMode === 'core') return;
