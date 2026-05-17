@@ -61,6 +61,7 @@ module.exports = (async () => {
   try {
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://example.com/main/v1/chat/completions';
+    process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     process.env.AI_MODEL = 'main-model';
     process.env.AI_TEMPERATURE = '0.7';
     process.env.AI_TOP_P = '0.8';

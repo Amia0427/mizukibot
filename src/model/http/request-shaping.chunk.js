@@ -101,6 +101,18 @@ function requestUsesExtendedSampling(requestBody = {}) {
     || Object.prototype.hasOwnProperty.call(requestBody, 'repetition_penalty');
 }
 
+function requestUsesTemperature(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return false;
+  return Object.prototype.hasOwnProperty.call(requestBody, 'temperature');
+}
+
+function stripTemperatureField(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return requestBody;
+  const nextBody = { ...requestBody };
+  delete nextBody.temperature;
+  return nextBody;
+}
+
 function stripExtendedSamplingFields(requestBody = {}) {
   if (!requestBody || typeof requestBody !== 'object') return requestBody;
   const nextBody = { ...requestBody };
@@ -130,6 +142,7 @@ function stripInternalRequestFields(requestBody = {}) {
   delete nextBody.__abortSignal;
   delete nextBody.__requestHeaders;
   delete nextBody.__originalMaxTokens;
+  delete nextBody.__responsesProtocolFallbackAttempted;
   return nextBody;
 }
 
@@ -298,6 +311,17 @@ function isExtendedSamplingSchemaError(error) {
     ? responseData
     : JSON.stringify(responseData || {});
   return /top[_-]?k|top[_-]?a|repetition[_-]?penalty|unsupported.*(?:field|parameter)|unknown field|unknown parameter|extra inputs|additional properties/i.test(bodyText);
+}
+
+function isTemperatureSchemaError(error) {
+  const status = Number(error?.response?.status || 0);
+  if (![400, 404, 415, 422].includes(status)) return false;
+  const responseData = error?.response?.data;
+  const bodyText = typeof responseData === 'string'
+    ? responseData
+    : JSON.stringify(responseData || {});
+  if (!/temperature/i.test(bodyText)) return false;
+  return /deprecated|unsupported|does not support|not supported|unknown (?:field|parameter)|extra inputs|additional properties/i.test(bodyText);
 }
 
 function mapToolSchemaToAnthropic(tool) {
@@ -544,15 +568,18 @@ module.exports = {
   isAnthropicPromptCacheSchemaError,
   isExtendedSamplingSchemaError,
   isReasoningSchemaError,
+  isTemperatureSchemaError,
   mapMessagesToAnthropic,
   mapToolChoiceToAnthropic,
   mapToolSchemaToAnthropic,
   normalizeReasoningEffort,
   requestUsesExtendedSampling,
   requestUsesReasoning,
+  requestUsesTemperature,
   stripExtendedSamplingFields,
   stripInternalRequestFields,
   stripProviderCacheFields,
-  stripReasoningFields
+  stripReasoningFields,
+  stripTemperatureField
 };
 

@@ -98,18 +98,22 @@ function Get-DaemonFallbackLogPath {
   return Join-Path $directory "$baseName.$stamp$extension"
 }
 
-function Test-CanOpenDaemonLogForWrite {
+function New-EmptyDaemonLogFile {
   param(
     [Parameter(Mandatory = $true)]
     [string]$Path
   )
 
+  $stream = $null
   try {
-    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
-    $stream.Close()
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
     return $true
   } catch {
     return $false
+  } finally {
+    if ($null -ne $stream) {
+      $stream.Close()
+    }
   }
 }
 
@@ -119,15 +123,41 @@ function Resolve-DaemonWritableLogPath {
     [string]$Path
   )
 
-  if (Test-CanOpenDaemonLogForWrite -Path $Path) {
-    Set-Content -LiteralPath $Path -Value '' -Encoding utf8
+  if (New-EmptyDaemonLogFile -Path $Path) {
     return $Path
   }
 
   $fallbackPath = Get-DaemonFallbackLogPath -Path $Path
-  Set-Content -LiteralPath $fallbackPath -Value '' -Encoding utf8
+  if (-not (New-EmptyDaemonLogFile -Path $fallbackPath)) {
+    throw "unable to open daemon log for write: requested=$Path fallback=$fallbackPath"
+  }
   Write-DaemonLog -Message "log file locked, using fallback log. requested=$Path fallback=$fallbackPath"
   return $fallbackPath
+}
+
+function Start-NodeDaemonProcessWithResolvedLogs {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$NodeExe,
+
+    [Parameter(Mandatory = $true)]
+    [string[]]$ArgumentList,
+
+    [Parameter(Mandatory = $true)]
+    [string]$StdoutLog,
+
+    [Parameter(Mandatory = $true)]
+    [string]$StderrLog
+  )
+
+  return Start-Process `
+    -FilePath $NodeExe `
+    -ArgumentList $ArgumentList `
+    -WorkingDirectory $repoRoot `
+    -WindowStyle Hidden `
+    -RedirectStandardOutput $StdoutLog `
+    -RedirectStandardError $StderrLog `
+    -PassThru
 }
 
 function Start-NodeDaemonProcess {
@@ -148,14 +178,25 @@ function Start-NodeDaemonProcess {
   $resolvedStdoutLog = Resolve-DaemonWritableLogPath -Path $StdoutLog
   $resolvedStderrLog = Resolve-DaemonWritableLogPath -Path $StderrLog
 
-  return Start-Process `
-    -FilePath $NodeExe `
-    -ArgumentList $ArgumentList `
-    -WorkingDirectory $repoRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $resolvedStdoutLog `
-    -RedirectStandardError $resolvedStderrLog `
-    -PassThru
+  try {
+    return Start-NodeDaemonProcessWithResolvedLogs -NodeExe $NodeExe -ArgumentList $ArgumentList -StdoutLog $resolvedStdoutLog -StderrLog $resolvedStderrLog
+  } catch {
+    if (($resolvedStdoutLog -ne $StdoutLog) -and ($resolvedStderrLog -ne $StderrLog)) {
+      throw
+    }
+
+    $retryStdoutLog = if ($resolvedStdoutLog -eq $StdoutLog) { Get-DaemonFallbackLogPath -Path $StdoutLog } else { $resolvedStdoutLog }
+    $retryStderrLog = if ($resolvedStderrLog -eq $StderrLog) { Get-DaemonFallbackLogPath -Path $StderrLog } else { $resolvedStderrLog }
+
+    foreach ($retryPath in @($retryStdoutLog, $retryStderrLog | Select-Object -Unique)) {
+      if (-not (New-EmptyDaemonLogFile -Path $retryPath)) {
+        throw
+      }
+    }
+
+    Write-DaemonLog -Message "process redirect log became unavailable, retrying with fallback logs. stdout=$retryStdoutLog stderr=$retryStderrLog error=$($_.Exception.Message)"
+    return Start-NodeDaemonProcessWithResolvedLogs -NodeExe $NodeExe -ArgumentList $ArgumentList -StdoutLog $retryStdoutLog -StderrLog $retryStderrLog
+  }
 }
 
 function Import-DotEnv {

@@ -7,6 +7,7 @@ module.exports = (async () => {
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     const httpClient = require('../api/httpClient');
 
     const prepared = await httpClient.prepareRequest('https://example.com/v1/chat/completions', {

@@ -28,6 +28,7 @@ module.exports = (async () => {
     process.env.AI_MODEL = 'gpt-5.4-mini';
     process.env.AI_MAX_TOKENS = '200';
     process.env.AI_RETRIES = '0';
+    process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '';
     clearProjectCache();
@@ -144,9 +145,37 @@ module.exports = (async () => {
     assert.ok(/^mizukibot:main:chat_completions:[a-f0-9]{24}$/.test(customPrefixRequest.body.prompt_cache_key));
     assert.ok(!customPrefixRequest.body.prompt_cache_key.includes('tenant-user-session-secret'));
 
+    delete process.env.OPENAI_MAIN_API_MODE;
+    delete process.env.OPENAI_PROMPT_CACHE_KEY_PREFIX;
+    clearProjectCache();
+    const httpClientAuto = require('../api/httpClient');
+    const { buildMainModelRequest: buildMainModelRequestAuto } = require('../api/runtimeV2/model/shared');
+    const autoResponsesRequest = buildMainModelRequestAuto(null, {
+      messages,
+      tools,
+      stream: false,
+      routeMeta: { topRouteType: 'direct_chat' },
+      defaultMaxTokens: 200
+    });
+    assert.strictEqual(autoResponsesRequest.protocol, 'responses');
+    assert.strictEqual(autoResponsesRequest.url, 'https://example.com/v1/responses');
+    assert.ok(/^mizukibot:main:responses:[a-f0-9]{24}$/.test(autoResponsesRequest.body.prompt_cache_key));
+    const autoPreparedFromChatUrl = await httpClientAuto.prepareRequest('https://example.com/v1/chat/completions', autoResponsesRequest.body);
+    assert.strictEqual(autoPreparedFromChatUrl.requestUrl, 'https://example.com/v1/responses');
+    assert.ok(Array.isArray(autoPreparedFromChatUrl.requestBody.input));
+    assert.ok(!Object.prototype.hasOwnProperty.call(autoPreparedFromChatUrl.requestBody, 'messages'));
+    const autoPreparedClaudeCompatible = await httpClientAuto.prepareRequest('https://example.com/v1/chat/completions', {
+      model: 'claude-opus-4-7',
+      messages: [{ role: 'user', content: 'hello' }],
+      max_tokens: 8,
+      stream: false
+    });
+    assert.strictEqual(autoPreparedClaudeCompatible.requestUrl, 'https://example.com/v1/chat/completions');
+    assert.ok(Array.isArray(autoPreparedClaudeCompatible.requestBody.messages));
+    assert.ok(!Object.prototype.hasOwnProperty.call(autoPreparedClaudeCompatible.requestBody, 'input'));
+
     process.env.OPENAI_MAIN_API_MODE = 'responses';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
-    delete process.env.OPENAI_PROMPT_CACHE_KEY_PREFIX;
     clearProjectCache();
     const httpClientResponses = require('../api/httpClient');
     const { buildMainModelRequest: buildMainModelRequestResponses } = require('../api/runtimeV2/model/shared');
@@ -203,6 +232,67 @@ module.exports = (async () => {
     originalPost = axios.post;
     let attemptCount = 0;
     const bodies = [];
+    const urls = [];
+    axios.post = async (url, body) => {
+      urls.push(url);
+      bodies.push(body);
+      attemptCount += 1;
+      if (attemptCount === 1) {
+        const error = new Error('responses endpoint not found');
+        error.response = { status: 404, data: { error: { message: 'Cannot POST /v1/responses' } } };
+        throw error;
+      }
+      return { data: { choices: [{ message: { role: 'assistant', content: 'fallback ok' } }] } };
+    };
+    await httpClientResponses.postWithRetry(responsesRequest.url, responsesRequest.body, 0, 'test-key');
+    assert.strictEqual(attemptCount, 2);
+    assert.strictEqual(urls[0], 'https://example.com/v1/responses');
+    assert.strictEqual(urls[1], 'https://example.com/v1/chat/completions');
+    assert.ok(Array.isArray(bodies[0].input));
+    assert.ok(Array.isArray(bodies[1].messages));
+    assert.ok(!Object.prototype.hasOwnProperty.call(bodies[1], 'input'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(bodies[1], '__responsesProtocolFallbackAttempted'));
+
+    attemptCount = 0;
+    bodies.length = 0;
+    urls.length = 0;
+    let fallbackStreamed = '';
+    axios.post = async (url, body) => {
+      urls.push(url);
+      bodies.push(body);
+      attemptCount += 1;
+      if (attemptCount === 1) {
+        const error = new Error('responses endpoint not found');
+        error.response = { status: 404, data: { error: { message: 'Cannot POST /v1/responses' } } };
+        throw error;
+      }
+      const stream = new PassThrough();
+      setImmediate(() => {
+        stream.write('data: {"choices":[{"delta":{"content":"fallback stream"}}]}\n\n');
+        stream.write('data: [DONE]\n\n');
+        stream.end();
+      });
+      return { status: 200, data: stream };
+    };
+    await httpClientResponses.postStreamWithRetry(responsesRequest.url, {
+      ...responsesRequest.body,
+      stream: true
+    }, {
+      onData(chunk) {
+        fallbackStreamed += chunk.toString('utf8');
+      }
+    }, 0, 'test-key');
+    assert.strictEqual(attemptCount, 2);
+    assert.strictEqual(urls[0], 'https://example.com/v1/responses');
+    assert.strictEqual(urls[1], 'https://example.com/v1/chat/completions');
+    assert.ok(Array.isArray(bodies[0].input));
+    assert.ok(Array.isArray(bodies[1].messages));
+    assert.ok(!Object.prototype.hasOwnProperty.call(bodies[1], '__responsesProtocolFallbackAttempted'));
+    assert.ok(fallbackStreamed.includes('fallback stream'));
+
+    attemptCount = 0;
+    bodies.length = 0;
+    urls.length = 0;
     axios.post = async (_url, body) => {
       bodies.push(body);
       attemptCount += 1;

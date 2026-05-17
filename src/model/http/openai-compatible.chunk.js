@@ -19,6 +19,8 @@ function getRequestShaping() {
   return require('./request-shaping.chunk');
 }
 
+const RESPONSES_PROTOCOL_FALLBACK_FLAG = '__responsesProtocolFallbackAttempted';
+
 async function preprocessOpenAICompatibleMessages(messages = []) {
   const normalizedMessages = Array.isArray(messages) ? messages : [];
   const out = [];
@@ -180,6 +182,78 @@ function isOpenAICompatiblePromptCacheSchemaError(error) {
 
 function isResponsesUrl(url = '') {
   return /\/responses(?:\/)?$/i.test(String(url || '').trim());
+}
+
+function buildResponsesUrl(url = '') {
+  const normalized = String(url || '').replace(/\/+$/, '');
+  if (!normalized) return normalized;
+  if (/\/responses$/i.test(normalized)) return normalized;
+  if (/\/chat\/completions$/i.test(normalized)) return normalized.replace(/\/chat\/completions$/i, '/responses');
+  if (/\/v\d+$/i.test(normalized)) return `${normalized}/responses`;
+  return normalized;
+}
+
+function buildChatCompletionsFallbackUrl(url = '') {
+  const normalized = String(url || '').replace(/\/+$/, '');
+  if (!normalized) return normalized;
+  if (/\/chat\/completions$/i.test(normalized)) return normalized;
+  if (/\/responses$/i.test(normalized)) return normalized.replace(/\/responses$/i, '/chat/completions');
+  if (/\/v\d+$/i.test(normalized)) return `${normalized}/chat/completions`;
+  return normalized;
+}
+
+function hasResponsesProtocolFallbackAttempted(requestBody = {}) {
+  return Boolean(
+    requestBody
+    && typeof requestBody === 'object'
+    && requestBody[RESPONSES_PROTOCOL_FALLBACK_FLAG] === true
+  );
+}
+
+function markResponsesProtocolFallbackAttempted(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object' || Array.isArray(requestBody)) return requestBody;
+  return {
+    ...requestBody,
+    [RESPONSES_PROTOCOL_FALLBACK_FLAG]: true
+  };
+}
+
+function isResponsesProtocolUnsupportedError(error) {
+  const status = Number(error?.response?.status || 0);
+  if (![400, 404, 405, 415, 422, 501].includes(status)) return false;
+  const responseData = error?.response?.data;
+  const bodyText = typeof responseData === 'string'
+    ? responseData
+    : JSON.stringify(responseData || {});
+  const normalized = bodyText.replace(/\s+/g, ' ').trim();
+
+  if (status === 404 || status === 405 || status === 501) {
+    if (/\bmodel\b/i.test(normalized) && !/responses?|endpoint|route|path|url|cannot\s+(?:post|get)/i.test(normalized)) {
+      return false;
+    }
+    return true;
+  }
+
+  return /\/responses\b|responses?\s+api|responses?\s+protocol|endpoint.*(?:not found|not supported|unsupported)|route.*not found|cannot\s+post|no route|unknown (?:field|parameter).*?(?:input|max_output_tokens|instructions|previous_response_id|truncation)|(?:input|max_output_tokens|instructions|previous_response_id|truncation).*?(?:unknown|unsupported|not supported|extra inputs|additional properties)|missing.*messages|required.*messages/i.test(normalized);
+}
+
+function shouldFallbackResponsesProtocol(prepared = null, originalBody = {}, error = null) {
+  if (!prepared || prepared.provider !== 'openai_compatible') return false;
+  if (!isResponsesUrl(prepared.requestUrl)) return false;
+  if (hasResponsesProtocolFallbackAttempted(originalBody)) return false;
+  if (!requestBodyLooksLikeChatCompletion(originalBody)) return false;
+  if (!isResponsesProtocolUnsupportedError(error)) return false;
+  const fallbackUrl = buildChatCompletionsFallbackUrl(prepared.requestUrl);
+  return fallbackUrl && fallbackUrl !== prepared.requestUrl;
+}
+
+function requestBodyLooksLikeChatCompletion(requestBody = {}) {
+  return Boolean(
+    requestBody
+    && typeof requestBody === 'object'
+    && !Array.isArray(requestBody)
+    && Array.isArray(requestBody.messages)
+  );
 }
 
 function normalizeResponsesTextContent(content) {
@@ -351,9 +425,14 @@ function buildResponsesRequestBody(openAICompatibleBody = {}) {
 
 module.exports = {
   buildResponsesRequestBody,
+  buildResponsesUrl,
+  buildChatCompletionsFallbackUrl,
+  hasResponsesProtocolFallbackAttempted,
   isOpenAICompatiblePromptCacheSchemaError,
   isOpenAIPromptCacheRetentionSchemaError,
+  isResponsesProtocolUnsupportedError,
   isResponsesUrl,
+  markResponsesProtocolFallbackAttempted,
   mapChatMessageToResponsesInput,
   mapChatMessagesToResponsesInput,
   mapChatToolsToResponsesTools,
@@ -366,6 +445,8 @@ module.exports = {
   preprocessOpenAICompatibleMessagesWithoutCache,
   requestUsesOpenAICompatiblePromptCaching,
   requestUsesOpenAIPromptCacheRetention,
+  requestBodyLooksLikeChatCompletion,
+  shouldFallbackResponsesProtocol,
   stripOpenAICompatiblePromptCaching,
   stripOpenAIPromptCacheRetentionFromRequest
 };

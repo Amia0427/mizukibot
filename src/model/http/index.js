@@ -9,8 +9,12 @@ const streamRetry = require('./stream-retry.chunk');
 module.exports = {
   buildAnthropicRequestHeaders: runtimeCore.buildAnthropicRequestHeaders,
   buildOpenAICompatibleImageFallbackText: images.buildOpenAICompatibleImageFallbackText,
+  buildChatCompletionsFallbackUrl: openaiCompatible.buildChatCompletionsFallbackUrl,
   buildResponsesRequestBody: openaiCompatible.buildResponsesRequestBody,
+  buildResponsesUrl: openaiCompatible.buildResponsesUrl,
   getAxiosOptions: transport.getAxiosOptions,
+  isResponsesProtocolUnsupportedError: openaiCompatible.isResponsesProtocolUnsupportedError,
+  isResponsesUrl: openaiCompatible.isResponsesUrl,
   postWithRetry: postRetry.postWithRetry,
   postStreamWithRetry: streamRetry.postStreamWithRetry,
   prepareRequest: transport.prepareRequest,

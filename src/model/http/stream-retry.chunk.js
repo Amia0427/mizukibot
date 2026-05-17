@@ -20,8 +20,11 @@ const {
 } = require('./images.chunk');
 const {
   buildResponsesRequestBody,
+  buildChatCompletionsFallbackUrl,
+  markResponsesProtocolFallbackAttempted,
   preprocessOpenAICompatibleMessages,
-  preprocessOpenAICompatibleMessagesWithoutCache
+  preprocessOpenAICompatibleMessagesWithoutCache,
+  shouldFallbackResponsesProtocol
 } = require('./openai-compatible.chunk');
 const { mapMessagesToAnthropic } = require('./request-shaping.chunk');
 const {
@@ -48,10 +51,13 @@ const {
   isAnthropicPromptCacheSchemaError,
   isExtendedSamplingSchemaError,
   isReasoningSchemaError,
+  isTemperatureSchemaError,
   requestUsesExtendedSampling,
   requestUsesReasoning,
+  requestUsesTemperature,
   stripExtendedSamplingFields,
-  stripReasoningFields
+  stripReasoningFields,
+  stripTemperatureField
 } = require('./request-shaping.chunk');
 const {
   isOpenAICompatiblePromptCacheSchemaError,
@@ -85,6 +91,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
     ? body.__trace
     : {};
   const streamFailureTraceEmitted = new WeakSet();
+  let fallbackProtocolFailed = false;
 
   for (let i = 0; i <= maxRetry; i++) {
     let stream = null;
@@ -173,12 +180,55 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             requestBody: strippedRequestBody,
             requestHeaders: prepared.requestHeaders
           };
+        } else if (shouldFallbackResponsesProtocol(prepared, body, error)) {
+          const fallbackUrl = buildChatCompletionsFallbackUrl(prepared.requestUrl);
+          const fallbackBody = markResponsesProtocolFallbackAttempted(body);
+          emitHttpDowngradeTrace(trace, prepared, body, 'fallback_chat_completions_protocol', error, {
+            attempt: i + 1,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            fallbackRequestUrl: fallbackUrl
+          });
+          try {
+            await postStreamWithRetry(
+              fallbackUrl,
+              fallbackBody,
+              handlers,
+              Math.max(0, maxRetry - i),
+              specificKey
+            );
+            finishModelCall(callId, {
+              attempts: i + 1,
+              requestUrl: fallbackUrl,
+              request: fallbackBody,
+              requestHeaders: prepared.requestHeaders
+            });
+            return true;
+          } catch (fallbackError) {
+            fallbackProtocolFailed = true;
+            throw fallbackError;
+          }
         } else if (requestUsesExtendedSampling(prepared?.requestBody) && isExtendedSamplingSchemaError(error)) {
           emitHttpDowngradeTrace(trace, prepared, body, 'strip_extended_sampling_fields', error, {
             attempt: i + 1,
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           const strippedRequestBody = stripExtendedSamplingFields(prepared.requestBody);
+          resp = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+          );
+          prepared = {
+            ...prepared,
+            requestBody: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          };
+        } else if (requestUsesTemperature(prepared?.requestBody) && isTemperatureSchemaError(error)) {
+          emitHttpDowngradeTrace(trace, prepared, body, 'strip_temperature_field', error, {
+            attempt: i + 1,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt)
+          });
+          const strippedRequestBody = stripTemperatureField(prepared.requestBody);
           resp = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
@@ -405,6 +455,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
       if (stream && typeof stream.destroy === 'function') {
         try { stream.destroy(); } catch (_) {}
       }
+      if (fallbackProtocolFailed) break;
       if (i >= maxRetry || !shouldRetryStreamRequest(e, handlers)) break;
 
       const delayMs = getRetryDelayMs(e, i);
