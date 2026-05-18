@@ -120,6 +120,16 @@ function normalizeWeakItemsForSurface(profile = {}, options = {}) {
   };
 }
 
+function isExplicitStrictProfileItem(profile = {}, field = '', text = '') {
+  const meta = getMetaForText(profile, 'strictProfile', field, text) || {};
+  const sourceKinds = Array.isArray(meta.sourceKinds) ? meta.sourceKinds.map((item) => sanitizeText(item).toLowerCase()) : [];
+  return sourceKinds.includes('explicit');
+}
+
+function filterBasicSurfaceLikes(profile = {}, likes = []) {
+  return uniqueStrings(likes).filter((item) => isExplicitStrictProfileItem(profile, 'likes', item));
+}
+
 function hasStableV3Profile(profile = {}) {
   if (!profile || typeof profile !== 'object') return false;
   const strict = normalizeStrictItems(profile);
@@ -153,6 +163,12 @@ function hasStableProfileNeed(text = '') {
   return /(你怎么看我|你觉得我|我的画像|人物画像|我是什么样的人|我是怎样的人|你对我的印象|我是谁|身份|偏好|爱好|喜欢什么样|喜欢怎样|喜欢哪种|回答方式|回复方式|表达风格|说话风格|who am i|my profile|what am i like|preference|reply style)/i.test(q);
 }
 
+function hasPersonaStyleNeed(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q) return false;
+  return /(回答方式|回复方式|表达风格|说话风格|怎么说话|怎样说话|关系风格|关系语气|关系距离|保持距离|熟人感|熟人聊天|自然接话|突然客套|客套|reply style|relationship style|relationship tone)/i.test(q);
+}
+
 function resolveProfileSurfaceMode(options = {}) {
   const raw = sanitizeText(options.profileSurfaceMode || config.MEMORY_PROFILE_SURFACE_MODE || 'basic').toLowerCase();
   if (raw === 'full' || raw === 'legacy_full' || raw === 'all') return 'full';
@@ -183,20 +199,22 @@ function buildV3ProfileText(profile = {}, options = {}) {
     : {};
   const includeWeak = options.includeWeak === true || config.MEMORY_PROFILE_INJECT_WEAK_ITEMS === true;
   const fullSurface = shouldUseFullProfileSurface(options);
+  const styleSurface = fullSurface || options.forcePersonaStyleSurface === true || hasPersonaStyleNeed(options.question || options.query || '');
+  const basicLikes = fullSurface ? strict.likes : filterBasicSurfaceLikes(profile, strict.likes);
   const lines = [
     sanitizeText(profile.relation_stage) ? `关系阶段：${sanitizeText(profile.relation_stage)}` : '',
     fullSurface && sanitizeText(persona.summary) ? `总结：${sanitizeText(persona.summary)}` : '',
     fullSurface && sanitizeText(persona.impression) ? `印象：${sanitizeText(persona.impression)}` : '',
-    fullSurface && sanitizeText(persona.botBasePersona) ? `基础人格：${sanitizeText(persona.botBasePersona)}` : '',
-    fullSurface && sanitizeText(persona.userAdaptationPersona) ? `用户修正：${sanitizeText(persona.userAdaptationPersona)}` : '',
-    fullSurface && sanitizeText(persona.relationshipStyle) ? `关系风格：${sanitizeText(persona.relationshipStyle)}` : '',
-    fullSurface && sanitizeText(persona.replyStyle) ? `表达风格：${sanitizeText(persona.replyStyle)}` : '',
-    fullSurface && sanitizeText(persona.relationshipTone) ? `关系语气：${sanitizeText(persona.relationshipTone)}` : '',
+    styleSurface && sanitizeText(persona.botBasePersona) ? `基础人格：${sanitizeText(persona.botBasePersona)}` : '',
+    styleSurface && sanitizeText(persona.userAdaptationPersona) ? `用户修正：${sanitizeText(persona.userAdaptationPersona)}` : '',
+    styleSurface && sanitizeText(persona.relationshipStyle) ? `关系风格：${sanitizeText(persona.relationshipStyle)}` : '',
+    styleSurface && sanitizeText(persona.replyStyle) ? `表达风格：${sanitizeText(persona.replyStyle)}` : '',
+    styleSurface && sanitizeText(persona.relationshipTone) ? `关系语气：${sanitizeText(persona.relationshipTone)}` : '',
     strict.identities.length ? `身份信息：${strict.identities.join('、')}` : '',
     fullSurface && strict.personality_traits.length ? `性格特征：${strict.personality_traits.join('、')}` : '',
     fullSurface && strict.hobbies.length ? `爱好：${strict.hobbies.join('、')}` : '',
-    fullSurface && strict.likes.length ? `喜欢：${strict.likes.join('、')}` : '',
-    fullSurface && strict.dislikes.length ? `不喜欢：${strict.dislikes.join('、')}` : '',
+    basicLikes.length ? `喜欢：${basicLikes.join('、')}` : '',
+    strict.dislikes.length ? `不喜欢：${strict.dislikes.join('、')}` : '',
     strict.goals.length ? `目标：${strict.goals.join('、')}` : '',
     strict.boundaries.length ? `边界：${strict.boundaries.join('、')}` : '',
     includeWeak && weak.single_hit_preferences.length ? `低置信偏好：${weak.single_hit_preferences.join('、')}` : '',

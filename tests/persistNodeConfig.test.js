@@ -363,6 +363,95 @@ module.exports = (async () => {
   assert.strictEqual(enqueueCount, 1, 'post-reply enqueue should respect per-user cooldown');
   assert.strictEqual(mergeCount, 0, 'cooldown should prevent merge in the strict cooldown case');
 
+  let directChatQueuedJob = null;
+  const persistNodeWithDirectJournal = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {},
+    persistShortTermBridgeSnapshot() {},
+    async appendMemoryEvent() {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      findQueuedJobByAggregateKey() {
+        return null;
+      },
+      enqueue(job) {
+        directChatQueuedJob = {
+          ...job,
+          jobId: 'direct_journal_job',
+          dedupeKey: 'direct_journal_dedupe'
+        };
+        return { enqueued: true, job: directChatQueuedJob };
+      }
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: false,
+      POST_REPLY_WORKER_GROUP_IDS: ['allowed_group'],
+      POST_REPLY_MIN_CONTENT_CHARS: 10,
+      POST_REPLY_USER_COOLDOWN_MS: 0
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  const directJournalResult = await persistNodeWithDirectJournal({
+    request: {
+      userId: 'u_direct',
+      question: 'direct chat daily journal input',
+      runtimeQuestionText: 'direct chat daily journal input',
+      persistUserText: 'direct chat daily journal input',
+      routeMeta: {},
+      sessionKey: 's_direct',
+      routePolicyKey: 'direct_chat/default',
+      topRouteType: 'direct_chat'
+    },
+    output: {
+      finalReply: 'direct chat daily journal reply'
+    },
+    memory: {},
+    thread: { threadId: 't_direct' },
+    plan: {}
+  });
+  assert.ok(directChatQueuedJob, 'direct_chat should enqueue journal even without group allowlist');
+  assert.strictEqual(directChatQueuedJob.tasks.dailyJournal, true);
+  assert.strictEqual(directChatQueuedJob.tasks.memoryLearning, false);
+  assert.strictEqual(directChatQueuedJob.tasks.selfImprovement, false);
+  const directDecision = (directJournalResult.events || []).find((item) => item.type === 'persist_write_decision');
+  assert.strictEqual(directDecision.shouldQueuePostReplyJournalTask, true);
+  assert.strictEqual(directDecision.shouldQueuePostReplyMemoryTasks, false);
+
   let aggregateEnqueueCount = 0;
   let aggregateMergeCount = 0;
   let aggregateQueuedJob = null;

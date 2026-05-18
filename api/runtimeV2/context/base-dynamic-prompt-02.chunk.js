@@ -14,7 +14,8 @@
     const compactSelectedBlocks = filterBlocksByPlan(compactPromptBlocks, effectiveBaseDynamicPromptPlan, {
       requiredIds: [],
       runtimeAddedIds: baseRuntimeAddedIds,
-      audit: baseDynamicContextAudit
+      audit: baseDynamicContextAudit,
+      budgetTokens: promptBudget
     });
     promptSnapshot = buildPromptSnapshot(compactSelectedBlocks.filter(Boolean), {
       stage: 'main',
@@ -61,7 +62,10 @@
       plannerSkippedBlocks: baseDynamicContextAudit.plannerSkippedBlocks,
       runtimeAddedBlocks: baseDynamicContextAudit.runtimeAddedBlocks,
       runtimeRejectedBlocks: baseDynamicContextAudit.runtimeRejectedBlocks,
+      selectionTrace: normalizeArray(baseDynamicContextAudit.selectionTrace),
+      budgetReport: baseDynamicContextAudit.budgetReport || null,
       personaWorldbookSearch,
+      candidatePruning: personaModuleCandidates.candidatePruning || {},
       cacheFriendlyFingerprint: buildCacheFriendlyFingerprint(compiledLaneSplit.stableSystemBlocks),
       cacheLanes: {
         stable: compiledLaneSplit.stableSystemBlocks.map((item) => item.id),

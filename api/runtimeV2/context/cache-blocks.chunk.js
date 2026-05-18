@@ -151,6 +151,24 @@ function clonePromptLayerValue(value = {}) {
         plannerSkippedBlocks: normalizeArray(normalized.promptSnapshot.plannerSkippedBlocks).map((item) => ({ ...item })),
         runtimeAddedBlocks: normalizeArray(normalized.promptSnapshot.runtimeAddedBlocks).map((item) => ({ ...item })),
         runtimeRejectedBlocks: normalizeArray(normalized.promptSnapshot.runtimeRejectedBlocks).map((item) => ({ ...item })),
+        selectionTrace: normalizeArray(normalized.promptSnapshot.selectionTrace).map((item) => ({ ...item })),
+        budgetReport: normalized.promptSnapshot.budgetReport && typeof normalized.promptSnapshot.budgetReport === 'object'
+          ? {
+              ...normalized.promptSnapshot.budgetReport,
+              usedByLane: normalized.promptSnapshot.budgetReport.usedByLane && typeof normalized.promptSnapshot.budgetReport.usedByLane === 'object'
+                ? { ...normalized.promptSnapshot.budgetReport.usedByLane }
+                : {},
+              blocks: normalizeArray(normalized.promptSnapshot.budgetReport.blocks).map((item) => ({ ...item }))
+            }
+          : null,
+        candidatePruning: normalized.promptSnapshot.candidatePruning && typeof normalized.promptSnapshot.candidatePruning === 'object'
+          ? {
+              ...normalized.promptSnapshot.candidatePruning,
+              keptIds: normalizeArray(normalized.promptSnapshot.candidatePruning.keptIds),
+              droppedIds: normalizeArray(normalized.promptSnapshot.candidatePruning.droppedIds),
+              alwaysKeepIds: normalizeArray(normalized.promptSnapshot.candidatePruning.alwaysKeepIds)
+            }
+          : undefined,
         personaWorldbookSearch: normalized.promptSnapshot.personaWorldbookSearch && typeof normalized.promptSnapshot.personaWorldbookSearch === 'object'
           ? { ...normalized.promptSnapshot.personaWorldbookSearch }
           : undefined,

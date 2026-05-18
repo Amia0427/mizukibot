@@ -126,6 +126,18 @@
           allowedTools: route?.meta?.allowedTools,
           contextSummary: plannerContextSummary,
           directedContext,
+          continuitySignals: route?.meta?.continuitySignals || inboundContext?.continuitySignals || {},
+          memoryContext: inboundContext?.memoryContext || route?.meta?.memoryContext || {},
+          availableContextSignals: route?.meta?.availableContextSignals || inboundContext?.availableContextSignals || {},
+          personaModuleCatalog: route?.meta?.personaModuleCatalog || [],
+          dynamicPromptBlockCatalog: route?.meta?.dynamicPromptBlockCatalog || [],
+          dynamicPromptGuide: route?.meta?.dynamicPromptGuide || '',
+          dynamicFewShotPrompt: inboundContext?.dynamicFewShotPrompt || route?.meta?.dynamicFewShotPrompt || '',
+          memoryCliTurn: inboundContext?.memoryCliTurn || route?.meta?.memoryCliTurn || {},
+          schedulerInjection: inboundContext?.schedulerInjection || route?.meta?.schedulerInjection || route?.meta?.lifeSchedulerInjection || '',
+          sharedShortTermContext: inboundContext?.sharedShortTermContext || route?.meta?.sharedShortTermContext || {},
+          personaMemoryState: inboundContext?.personaMemoryState || route?.meta?.personaMemoryState || {},
+          userInfo: inboundContext?.userInfo || {},
           requestTrace: cloneTraceForMeta(requestTrace)
         });
       } catch (error) {

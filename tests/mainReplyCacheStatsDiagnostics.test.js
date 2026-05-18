@@ -118,10 +118,23 @@ module.exports = (() => {
     const script = require('../scripts/diagnose-main-reply');
     const report = buildCacheStatsDiagnostic({ logFile, limit: 10 });
     const parsedArgs = script.parseArgs(['node', 'scripts/diagnose-main-reply.js', '--cache-stats']);
+    const parsedRealPromptArgs = script.parseArgs([
+      'node',
+      'scripts/diagnose-main-reply.js',
+      '--real-prompt',
+      '--explain-budget',
+      '--max-candidates',
+      '4',
+      '你好'
+    ]);
 
     assert.strictEqual(report.schemaVersion, CACHE_STATS_SCHEMA_VERSION);
     assert.strictEqual(parsedArgs.cacheStats, true);
     assert.strictEqual(parsedArgs.text, '');
+    assert.strictEqual(parsedRealPromptArgs.realPrompt, true);
+    assert.strictEqual(parsedRealPromptArgs.explainBudget, true);
+    assert.strictEqual(parsedRealPromptArgs.maxCandidates, 4);
+    assert.strictEqual(parsedRealPromptArgs.text, '你好');
     assert.strictEqual(report.rowsRead, 4);
     assert.strictEqual(report.mainReplyRows, 3);
     assert.strictEqual(report.latest.id, 'call_3');

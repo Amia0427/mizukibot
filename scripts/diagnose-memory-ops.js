@@ -149,6 +149,20 @@ function summarizeDiagnose(result = {}, args = {}) {
     coverage: result.coverage || {},
     memory: result.memory || {},
     worldbook: result.worldbook || {},
+    journal: {
+      totals: result.journal?.totals || {},
+      userCount: Array.isArray(result.journal?.users) ? result.journal.users.length : 0,
+      users: Array.isArray(result.journal?.users) ? result.journal.users.slice(0, Math.max(1, Number(args.limit || 20) || 20)) : []
+    },
+    projectionFreshness: {
+      projectionStale: result.projectionFreshness?.projectionStale === true,
+      projectionStaleReason: result.projectionFreshness?.projectionStaleReason || '',
+      latestEventTs: Number(result.projectionFreshness?.latestEventTs || 0) || 0,
+      projectionEventHighWatermarkTs: Number(result.projectionFreshness?.projectionEventHighWatermarkTs || 0) || 0,
+      lockHit: result.projectionFreshness?.lockHit === true
+    },
+    repairPlan: result.repairPlan || {},
+    recommendedAction: result.recommendedAction || result.repairPlan?.recommendedAction || '',
     fallback: {
       skipped: probe.skipped === true,
       cases: Number(probe.cases || 0) || 0,
@@ -171,7 +185,12 @@ function summarizeBackfill(result = {}, args = {}) {
     failed: Number(result.failed || 0) || 0,
     failureBreakdown: result.failureBreakdown || {},
     remaining: Number(result.remaining || 0) || 0,
-    resultCount: Array.isArray(result.results) ? result.results.length : 0
+    resultCount: Array.isArray(result.results) ? result.results.length : 0,
+    priority: result.priority || '',
+    reason: result.reason || '',
+    byPriority: result.byPriority || {},
+    estimatedBatches: Number(result.estimatedBatches || 0) || 0,
+    checkpoint: result.checkpoint || null
   };
 }
 
@@ -192,7 +211,12 @@ function summarizeRecall(result = {}, args = {}) {
         p50Ms: Number(result.p50LatencyMs || 0) || 0,
         p95Ms: Number(result.p95LatencyMs || 0) || 0
       }
-    }
+    },
+    fallbackCounts: result.fallbackCounts || {},
+    emptyResultRate: result.emptyResultRate ?? null,
+    noVisibleCandidateRate: result.noVisibleCandidateRate ?? null,
+    bySource: result.bySource || {},
+    byFacet: result.byFacet || {}
   };
 }
 
@@ -284,7 +308,7 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
         ok: result.ok !== false,
         exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
         summary: summarizeDiagnose(result, { ...args, limit }),
-        details: { probe: result.probe || null },
+        details: { probe: result.probe || null, journal: result.journal || null },
         startedAt
       });
     }

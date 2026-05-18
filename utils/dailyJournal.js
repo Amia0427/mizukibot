@@ -5,7 +5,6 @@ const { formatDateInTz, formatTimeInTz, getDatePartsInTz } = require('./time');
 const { favorites, getUserProfile, getUserSummary, getUserImpression } = require('./memory');
 const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent } = require('../api/parser');
-const { addEpisodeMemory } = require('./vectorMemory');
 const { getBackgroundPressureDelayMs, appendPerfEvent } = require('./perfRuntime');
 const {
   createJsonHotStore,
@@ -90,62 +89,43 @@ function getTextStore(filePath, fallback = '') {
   return dailyJournalHotStores.text.get(key);
 }
 
-function syncEpisodeMemory(userId, text, options = {}) {
+async function syncEpisodeMemory(userId, text, options = {}) {
   const uid = String(userId || '').trim();
   const content = strictClampText(text, Math.max(40, Number(options.maxChars) || 4000));
   if (!uid || !content) return null;
-
-  const rollupLevel = String(options.rollupLevel || 'daily').trim().toLowerCase();
-  const episodeDay = String(options.episodeDay || '').trim();
-  const conflictParts = [
-    'journal',
-    uid,
-    rollupLevel,
-    episodeDay || String(options.yearMonth || '').trim(),
-    String(options.part || '').trim(),
-    String(options.startDay || '').trim(),
-    String(options.endDay || '').trim()
-  ].filter(Boolean);
-
-  return addEpisodeMemory(uid, content, {
+  if (config.MEMORY_V3_ENABLED === false) return null;
+  const { appendJournalEpisodeEvent, scheduleJournalV3Refresh } = require('./memory-v3/journalPipeline');
+  const event = await appendJournalEpisodeEvent({
+    ...options,
+    userId: uid,
+    text: content,
     source: options.source || 'daily_journal',
-    scopeType: 'personal',
-    confidence: options.confidence ?? 0.92,
-    rollupLevel,
-    episodeDay,
-    conflictKey: conflictParts.join('|'),
-    conflictKeys: Array.isArray(options.conflictKeys) ? options.conflictKeys : [],
-    meta: {
-      source: options.source || 'daily_journal',
-      memoryKind: 'episode',
-      rollupLevel,
-      episodeDay,
-      yearMonth: String(options.yearMonth || '').trim(),
-      part: Number(options.part || 0) || 0,
-      startDay: String(options.startDay || '').trim(),
-      endDay: String(options.endDay || '').trim(),
-      sourceKind: 'journal',
-      coveredByRollups: Array.isArray(options.coveredByRollups) ? options.coveredByRollups : []
-    }
+    sourceKind: 'journal'
   });
+  if (event && options.scheduleRefresh !== false) {
+    scheduleJournalV3Refresh({
+      userId: uid,
+      days: [options.episodeDay, options.startDay, options.endDay].filter(Boolean),
+      delayMs: options.delayMs,
+      scheduleEmbeddingBackfill: options.scheduleEmbeddingBackfill,
+      reason: options.refreshReason || 'journal_episode_event'
+    });
+  }
+  return event;
 }
 
 function scheduleDailyJournalEmbeddingBackfill(userId, options = {}) {
   const uid = String(userId || '').trim();
   if (!uid || config.MEMORY_JOURNAL_EMBEDDING_BACKFILL_ENABLED === false) return false;
   try {
-    const { buildDailyJournalDocsForUser } = require('./memory-v3/journalDocs');
-    const { enqueueMissingEmbeddings } = require('./memory-v3/embeddingIndex');
-    const docs = buildDailyJournalDocsForUser(uid, {
-      includeSegments: true,
-      days: Array.isArray(options.days) ? options.days : undefined
+    const { scheduleJournalV3Refresh } = require('./memory-v3/journalPipeline');
+    const result = scheduleJournalV3Refresh({
+      userId: uid,
+      days: Array.isArray(options.days) ? options.days : [],
+      delayMs: options.delayMs,
+      reason: options.reason || 'journal_embedding_backfill'
     });
-    if (!docs.length) return false;
-    enqueueMissingEmbeddings(docs, {
-      schedule: true,
-      delayMs: options.delayMs
-    });
-    return true;
+    return result?.ok !== false;
   } catch (error) {
     console.warn('[daily_journal] failed to schedule embedding backfill:', error?.message || error);
     return false;
@@ -778,13 +758,15 @@ async function maintainDailyJournalRollups(userId, options = {}) {
           }
         ]
       }));
-      syncEpisodeMemory(uid, summary, {
+      await syncEpisodeMemory(uid, summary, {
         source: 'daily_journal_rollup',
         rollupLevel: '4day',
         episodeDay: plan.endDay,
         startDay: plan.startDay,
         endDay: plan.endDay,
         yearMonth: getYearMonthFromDay(plan.endDay),
+        sourceFile: filePath,
+        textKind: 'journal_4day_rollup',
         maxChars: config.DAILY_JOURNAL_4DAY_MAX_CHARS,
         conflictKeys: plan.days.map((day) => `journal|${uid}|daily|${day}`),
         coveredByRollups: ['4day']
@@ -847,7 +829,7 @@ async function maintainDailyJournalRollups(userId, options = {}) {
           }
         ]
       }));
-      syncEpisodeMemory(uid, summary, {
+      await syncEpisodeMemory(uid, summary, {
         source: 'daily_journal_rollup',
         rollupLevel: 'monthly',
         episodeDay: plan.endDay,
@@ -855,6 +837,8 @@ async function maintainDailyJournalRollups(userId, options = {}) {
         endDay: plan.endDay,
         yearMonth: plan.yearMonth,
         part: plan.part,
+        sourceFile: filePath,
+        textKind: 'journal_monthly_rollup',
         maxChars: config.DAILY_JOURNAL_MONTHLY_MAX_CHARS,
         conflictKeys: plan.items.flatMap((item) => {
           const keys = [`journal|${uid}|4day|${item.endDay}||${item.startDay}|${item.endDay}`];
@@ -1160,12 +1144,14 @@ function formatJournalEntries(entries = []) {
     .join('\n');
 }
 
-function appendJsonLine(filePath, payload) {
+function appendJsonLine(filePath, payload, options = {}) {
   const { getJsonLineWriter } = require('./storeRegistry');
-  getJsonLineWriter(filePath, {
+  const writer = getJsonLineWriter(filePath, {
     debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
     maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
-  }).append(payload);
+  });
+  writer.append(payload);
+  if (options.flushNow === true) writer.flushSync();
 }
 
 function readJsonLines(filePath) {
@@ -1404,11 +1390,29 @@ async function maybeSegmentJournal(userId, day, state, options = {}) {
   const summary = await summarizeJournalSegment(userId, day, batch, options);
   if (!summary) return false;
 
+  const segmentIndex = Math.max(0, Number(segmentState.segment_count) || 0);
   appendJsonLine(getSegmentsFilePath(userId, day), {
-    index: Math.max(0, Number(segmentState.segment_count) || 0),
+    index: segmentIndex,
     created_at: new Date().toISOString(),
     entry_count: batch.length,
     summary
+  }, {
+    flushNow: true
+  });
+  await syncEpisodeMemory(userId, summary, {
+    source: 'daily_journal_summary',
+    rollupLevel: 'segment',
+    episodeDay: day,
+    startDay: day,
+    endDay: day,
+    yearMonth: getYearMonthFromDay(day),
+    part: segmentIndex,
+    sourceFile: getSegmentsFilePath(userId, day),
+    textKind: 'journal_segment',
+    sourceCompleteness: 'segment',
+    maxChars: config.DAILY_JOURNAL_SEGMENT_MAX_BYTES,
+    scheduleEmbeddingBackfill: false,
+    refreshReason: 'journal_segment_generated'
   });
   scheduleDailyJournalEmbeddingBackfill(userId, { days: [day] });
 
@@ -1763,11 +1767,13 @@ async function runDailyJournalSummaries(options = {}) {
             ...index,
             summaryDays: sortUniqueStrings([...(index.summaryDays || []), targetDay])
           }));
-          syncEpisodeMemory(userId, summary, {
+          await syncEpisodeMemory(userId, summary, {
             source: 'daily_journal_summary',
             rollupLevel: 'daily',
             episodeDay: targetDay,
             yearMonth: getYearMonthFromDay(targetDay),
+            sourceFile: getSummaryFilePath(userId, targetDay),
+            textKind: 'journal_daily_summary',
             maxChars: config.DAILY_JOURNAL_SUMMARY_MAX_TOKENS
           });
           scheduleDailyJournalEmbeddingBackfill(userId, { days: [targetDay] });
@@ -1815,6 +1821,12 @@ module.exports = {
   collectRecentEntrySidecars,
   maybeSegmentJournalByThreshold,
   _test: {
+    syncEpisodeMemory,
+    scheduleDailyJournalEmbeddingBackfill,
+    getSummaryFilePath,
+    getFourDayRollupFilePath,
+    getMonthlyRollupFilePath,
+    updateJournalIndex,
     getUserJournalDir,
     toSafeJournalPathSegment
   }

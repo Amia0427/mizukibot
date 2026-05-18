@@ -30,15 +30,17 @@ const {
 } = require('./embeddingIndex');
 const {
   buildDailyJournalDocsForAllUsers,
-  getDailyJournalFileStats,
+  getDailyJournalFileStats
+} = require('./journalDocs');
+const {
+  JOURNAL_TRIGGER_RE,
   journalDateMatchBoost,
   resolveJournalTargetDays
-} = require('./journalDocs');
+} = require('./journalRecallPolicy');
 const { diagnoseProjectionFreshness } = require('./diagnostics');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 const NOTEBOOK_TRIGGER_RE = /(?:\bnotebook\b|笔记|文档|markdown|\bmd\b)/i;
-const JOURNAL_TRIGGER_RE = /(?:日记|\bjournal\b|前几天|那天|最近发生|昨天|昨日|前天|今天|回忆|记得|聊了什么)/i;
 const SOURCE_SET = new Set(['recent', 'profile', 'personal', 'task', 'group', 'style', 'jargon', 'journal', 'notebook']);
 const FACET_SET = new Set(RECALL_FACETS);
 const SLOW_QUERY_LOG_MS = 120;
@@ -225,6 +227,18 @@ function makeDocBase(input = {}) {
     refId: normalizeText(input.refId || ''),
     notebookRef: input.notebookRef && typeof input.notebookRef === 'object' ? input.notebookRef : null,
     openPayload: input.openPayload && typeof input.openPayload === 'object' ? input.openPayload : null,
+    rollupLevel: normalizeText(input.rollupLevel),
+    episodeDay: normalizeText(input.episodeDay || input.day),
+    day: normalizeText(input.day || input.episodeDay),
+    startDay: normalizeText(input.startDay),
+    endDay: normalizeText(input.endDay),
+    yearMonth: normalizeText(input.yearMonth),
+    part: toSafeNumber(input.part, 0),
+    sessionKeys: normalizeArray(input.sessionKeys).map((item) => normalizeText(item)).filter(Boolean),
+    topics: normalizeArray(input.topics).map((item) => normalizeText(item)).filter(Boolean),
+    textKind: normalizeText(input.textKind),
+    sourceCompleteness: normalizeText(input.sourceCompleteness),
+    sourceFile: normalizeText(input.sourceFile),
     tokens
   };
 }
@@ -466,7 +480,9 @@ function buildEpisodeDocs(snapshot = {}) {
     const normalizedUserId = normalizeText(userId);
     if (!normalizedUserId) continue;
     for (const episode of normalizeArray(entry?.items)) {
-      const title = normalizeText(episode.episodeDay || episode.yearMonth || episode.type || 'episode');
+      const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
+      if (rollupLevel === 'segment') continue;
+      const title = normalizeText(episode.episodeDay || episode.yearMonth || rollupLevel || 'episode');
       const doc = makeDocBase({
         id: `episode:${String(episode.id || '').trim()}`,
         source: 'journal',
@@ -475,19 +491,39 @@ function buildEpisodeDocs(snapshot = {}) {
         userId: normalizedUserId,
         ownerUserId: normalizedUserId,
         memoryKind: 'episode',
+        fieldKey: 'episode',
+        sourceKind: normalizeText(episode.sourceKind || 'journal'),
         text: episode.text || '',
         preview: episode.text || '',
         updatedAt: episode.updatedAt || 0,
-        confidence: 0.92,
-        importance: episode.type === 'monthly' ? 1.25 : 1.0,
-        tier: episode.type === 'monthly' ? 'S' : episode.type === '4day' ? 'A' : 'B',
+        confidence: Number(episode.confidence || 0) || 0.92,
+        importance: Number(episode.importance || 0) || (rollupLevel === 'monthly' ? 1.25 : 1.0),
+        evidenceTier: 'strict',
+        tier: rollupLevel === 'monthly' ? 'S' : rollupLevel === '4day' ? 'A' : 'B',
         title,
+        rollupLevel,
+        episodeDay: episode.episodeDay || episode.endDay || episode.startDay || '',
+        startDay: episode.startDay || '',
+        endDay: episode.endDay || '',
+        yearMonth: episode.yearMonth || '',
+        part: episode.part || 0,
+        sessionKeys: episode.sessionKeys || [],
+        topics: episode.topics || [],
+        textKind: episode.textKind || `journal_${rollupLevel}`,
+        sourceCompleteness: episode.sourceCompleteness || 'summary',
+        sourceFile: episode.sourceFile || '',
         openPayload: {
           id: episode.id,
-          type: episode.type,
+          type: rollupLevel,
           title,
           text: clampText(episode.text || '', Math.max(200, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
-          updatedAt: episode.updatedAt || 0
+          updatedAt: episode.updatedAt || 0,
+          episodeDay: episode.episodeDay || '',
+          startDay: episode.startDay || '',
+          endDay: episode.endDay || '',
+          yearMonth: episode.yearMonth || '',
+          part: episode.part || 0,
+          sourceFile: episode.sourceFile || ''
         }
       });
       if (doc) docs.push(doc);

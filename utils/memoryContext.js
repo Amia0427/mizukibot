@@ -35,6 +35,11 @@ const {
 const {
   resolveJournalTargetDays
 } = require('./memory-v3/journalDocs');
+const {
+  classifyJournalRecallIntent,
+  formatJournalPromptItem,
+  selectJournalPromptEvidence
+} = require('./memory-v3/journalRecallPolicy');
 const { queryLocalKnowledge } = require('./localKnowledge');
 
 function sanitizeText(value) {
@@ -232,10 +237,7 @@ function resolveDailyJournalTimestamp(question = '', options = {}) {
 }
 
 function formatDailyJournalPromptItem(item = {}) {
-  if (!item || !item.text) return '';
-  if (item.kind === 'four_day_rollup') return `[4day ${item.startDay}..${item.endDay}]\n${item.text}`;
-  if (item.kind === 'monthly_rollup') return `[month ${item.yearMonth} ${item.part || ''}]\n${item.text}`.trim();
-  return `[${item.day || item.episodeDay || item.title || 'daily'}]\n${item.text}`;
+  return formatJournalPromptItem(item);
 }
 
 function buildPromptJournalItems(bundle = {}) {
@@ -581,13 +583,14 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     : sanitizeText(profilePersona.impression || (stableProfile.legacyFallbackUsed ? stableProfile.impression : ''));
   const affinityState = getUserAffinityState(userId, options);
   const factText = getUserMemories(userId);
+  const journalIntent = classifyJournalRecallIntent(question, options);
   const dailyJournalTimestamp = resolveDailyJournalTimestamp(question, options);
   const dailyJournalBundle = memoizeValue(
     options,
     buildMemoKey('journal-bundle', userId, question || '', {
       ...options,
       dailyJournalTimestamp,
-      includeActiveRaw: options.includeActiveRaw || recapQuery
+      includeActiveRaw: options.includeActiveRaw || recapQuery || journalIntent.includeActiveRaw
     }),
     () => getDailyJournalRetrievalBundle(userId, {
       lookbackDays: options.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
@@ -598,7 +601,7 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
       sessionKey: options.sessionKey,
       question,
       topic: question,
-      includeActiveRaw: options.includeActiveRaw || recapQuery,
+      includeActiveRaw: options.includeActiveRaw || recapQuery || journalIntent.includeActiveRaw,
       activeRawMaxEntries: options.activeRawMaxEntries || 8
     })
   );
@@ -628,19 +631,19 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     const hitGroupId = sanitizeText(hit?.groupId);
     return promptGroupIds.length > 0 && promptGroupIds.includes(hitGroupId);
   });
-  const promptJournalItems = buildPromptJournalItems(dailyJournalBundle);
-  const promptDailyJournalText = Array.isArray(promptJournalItems)
-    ? promptJournalItems
-      .map(formatDailyJournalPromptItem)
-      .filter(Boolean)
-      .join('\n\n')
-    : '';
   const retrievedMemoryForPrompt = ragEnabled
     ? buildRetrievedMemoryText(hits, core, factText, options)
     : factText;
   const promptRetrievedMemorySourceText = ragEnabled
     ? buildRetrievedMemoryText(promptRetrievedHits, core, factText, options)
     : factText;
+  const selectedJournalEvidence = selectJournalPromptEvidence({
+    bundle: dailyJournalBundle,
+    hits: journalHits,
+    intent: journalIntent,
+    retrievedText: promptRetrievedMemorySourceText
+  });
+  const promptDailyJournalText = selectedJournalEvidence.text || '';
   const taskMemoryText = formatTaskMemories(taskHits, { emptyText: '' });
   const groupMemoryText = formatGroupMemories(groupHits, { emptyText: '' });
   const promptGroupMemoryText = formatGroupMemories(promptGroupHits, { emptyText: '' });
@@ -771,10 +774,13 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     promptStyleSignalText: promptStyleSignalsText,
     longTermProfileText,
     promptLongTermProfileText,
-    dailyJournalText: dailyJournalBundle.text || '',
+    dailyJournalText: selectedJournalEvidence.text || dailyJournalBundle.text || '',
     promptDailyJournalText: promptDailyJournalTrimmedText,
-    dailyJournalItems: dailyJournalBundle.items || [],
-    dailyJournalBundle,
+    dailyJournalItems: selectedJournalEvidence.items || dailyJournalBundle.items || [],
+    dailyJournalBundle: {
+      ...dailyJournalBundle,
+      selectedPromptItems: selectedJournalEvidence.items || []
+    },
     factText,
     stats: getMemoryStats(userId),
     diagnostics: memoryTrace ? { memoryTrace } : {},
@@ -896,7 +902,9 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     const groupHits = results.filter((item) => item.source === 'group');
     const styleHits = results.filter((item) => item.source === 'style');
     const jargonHits = results.filter((item) => item.source === 'jargon');
+    const journalIntent = classifyJournalRecallIntent(question, baseOptions);
     const activeRawBundle = baseOptions.includeActiveRaw
+      || journalIntent.includeActiveRaw
       ? getDailyJournalRetrievalBundle(userId, {
         lookbackDays: baseOptions.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
         timestamp: resolveDailyJournalTimestamp(question, baseOptions),
@@ -910,10 +918,13 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
         activeRawMaxEntries: baseOptions.activeRawMaxEntries || 8
       })
       : null;
-    const dailyJournalText = [
-      activeRawBundle?.text,
-      journalHits.map((item) => String(item.text || '')).filter(Boolean).join('\n')
-    ].filter(Boolean).join('\n\n');
+    const selectedJournalEvidence = selectJournalPromptEvidence({
+      bundle: activeRawBundle || { text: '', items: [], byLayer: { activeRaw: [], daily: [], fourDay: [], monthly: [] } },
+      hits: journalHits,
+      intent: journalIntent,
+      retrievedText: packet.relevantEvidenceText || packet.sessionContinuityText || ''
+    });
+    const dailyJournalText = selectedJournalEvidence.text || journalHits.map((item) => String(item.text || '')).filter(Boolean).join('\n');
     const continuityFacet = String(queryResult.facet || '').trim().toLowerCase() === 'continuity';
     const retrievedPromptText = limitPromptText(
       packet.relevantEvidenceText || packet.sessionContinuityText || '',
@@ -1003,8 +1014,8 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
       promptLongTermProfileText: packet.stableProfileText,
       dailyJournalText,
       promptDailyJournalText: dailyJournalText,
-      dailyJournalItems: activeRawBundle?.items?.length ? activeRawBundle.items : journalHits,
-      dailyJournalBundle: activeRawBundle || { text: dailyJournalText, items: journalHits, byLayer: { daily: journalHits, fourDay: [], monthly: [] } },
+      dailyJournalItems: selectedJournalEvidence.items?.length ? selectedJournalEvidence.items : (activeRawBundle?.items?.length ? activeRawBundle.items : journalHits),
+      dailyJournalBundle: activeRawBundle || { text: dailyJournalText, items: journalHits, byLayer: { daily: journalHits, fourDay: [], monthly: [] }, selectedPromptItems: selectedJournalEvidence.items || [] },
       factText: getUserMemories(userId),
       stats: {
         total: Number(queryResult?.stats?.selected || 0),

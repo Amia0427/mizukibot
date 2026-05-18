@@ -116,6 +116,26 @@ module.exports = (() => {
 
     assert.doesNotThrow(() => JSON.parse(JSON.stringify(report)));
 
+    process.env.POST_REPLY_WORKER_ENABLED = 'false';
+    clearProjectCache();
+    const { buildRuntimeStatusDiagnostic: buildDisabledRuntimeStatusDiagnostic } = require('../utils/runtimeStatusDiagnostics');
+    const disabledReport = buildDisabledRuntimeStatusDiagnostic({
+      projectRoot: tempDir,
+      now: () => now,
+      listProcesses: () => [],
+      isProcessAlive: () => false
+    });
+    assert.strictEqual(disabledReport.summary.postReplyWorker.status, 'disabled');
+    assert.ok(!disabledReport.signals.some((item) => String(item.code || '').startsWith('post_reply_')));
+
+    const explicitWorkerReport = buildDisabledRuntimeStatusDiagnostic({
+      projectRoot: tempDir,
+      now: () => now,
+      listProcesses: () => processes.filter((item) => item.pid === 222),
+      isProcessAlive: (pid) => Number(pid) === 222
+    });
+    assert.strictEqual(explicitWorkerReport.summary.postReplyWorker.status, 'running');
+
     console.log('runtimeStatusDiagnostics.test.js passed');
   } finally {
     restoreEnv(snapshot);

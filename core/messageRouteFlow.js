@@ -899,7 +899,19 @@ function createMessageRouteFlow(deps = {}) {
       const plannerDecision = await planDirectChat(route, {
         userId: senderId,
         allowedTools: route?.meta?.allowedTools,
-        contextSummary: plannerContextSummary
+        contextSummary: plannerContextSummary,
+        directedContext: route?.meta?.directedContext || null,
+        continuitySignals: route?.meta?.continuitySignals || {},
+        memoryContext: route?.meta?.memoryContext || {},
+        availableContextSignals: route?.meta?.availableContextSignals || {},
+        personaModuleCatalog: route?.meta?.personaModuleCatalog || [],
+        dynamicPromptBlockCatalog: route?.meta?.dynamicPromptBlockCatalog || [],
+        dynamicPromptGuide: route?.meta?.dynamicPromptGuide || '',
+        dynamicFewShotPrompt: route?.meta?.dynamicFewShotPrompt || '',
+        memoryCliTurn: route?.meta?.memoryCliTurn || {},
+        schedulerInjection: route?.meta?.schedulerInjection || route?.meta?.lifeSchedulerInjection || '',
+        sharedShortTermContext: route?.meta?.sharedShortTermContext || {},
+        personaMemoryState: route?.meta?.personaMemoryState || {}
       });
       route.meta = {
         ...(route.meta || {}),

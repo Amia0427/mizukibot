@@ -27,6 +27,7 @@ const {
 const {
   buildDirectChatToolCatalog
 } = require('../core/directChatToolCatalog');
+const { planDirectChat } = require('../core/directChatPlanner');
 const config = require('../config');
 const { getPersonaModuleCatalogSummary } = require('../utils/personaModules');
 
@@ -675,6 +676,16 @@ module.exports = (async () => {
   assert.ok(Array.isArray(plannerPayload.dynamicPromptBlockCatalog));
   assert.ok(plannerPayload.dynamicPromptBlockCatalog.some((item) => item.blockId === 'directed_context'));
   assert.ok(plannerPayload.dynamicPromptBlockCatalog.every((item) => item.lane && item.category && item.defaultPolicy));
+  const directedBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'directed_context');
+  const fewShotBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'dynamic_few_shot');
+  const memoryBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'retrieved_memory_lite');
+  assert.strictEqual(directedBlockMeta.selectionPolicy, 'must_use_when_available');
+  assert.strictEqual(directedBlockMeta.signalKey, 'directedContext');
+  assert.strictEqual(directedBlockMeta.available, true);
+  assert.strictEqual(fewShotBlockMeta.selectionPolicy, 'high_value_only');
+  assert.strictEqual(fewShotBlockMeta.available, true);
+  assert.strictEqual(memoryBlockMeta.signalKey, 'retrievedMemory');
+  assert.strictEqual(memoryBlockMeta.available, true);
   assert.strictEqual(plannerPayload.availableContextSignals.directedContext, true);
   assert.strictEqual(plannerPayload.availableContextSignals.continuity, true);
   assert.strictEqual(plannerPayload.availableContextSignals.retrievedMemory, true);
@@ -744,6 +755,9 @@ module.exports = (async () => {
       chatMode: 'chat',
       toolIntent: 'none',
       responseIntent: 'answer',
+      continuitySignals: {
+        hasCarryOverTopic: true
+      },
       directedContext: {
         addressee: { senderName: 'Yuki', userId: 'mafuyu', kind: 'user', confidence: 0.96 }
       }
@@ -756,6 +770,9 @@ module.exports = (async () => {
         chatMode: 'chat',
         toolIntent: 'none',
         responseIntent: 'answer',
+        continuitySignals: {
+          hasCarryOverTopic: true
+        },
         directedContext: {
           addressee: { senderName: 'Yuki', userId: 'mafuyu', kind: 'user', confidence: 0.96 }
         }
@@ -764,6 +781,9 @@ module.exports = (async () => {
       facets: {}
     },
     allowedTools: [],
+    continuitySignals: {
+      hasCarryOverTopic: true
+    },
     personaModuleCatalog: getPersonaModuleCatalogSummary(),
     planner: async () => ({
       mode: 'chat_only',
@@ -813,7 +833,11 @@ module.exports = (async () => {
     routeMeta: {
       chatMode: 'chat',
       toolIntent: 'none',
-      responseIntent: 'answer'
+      responseIntent: 'answer',
+      directedContext: {
+        scene: 'group_reply',
+        addressee: { senderName: 'A', userId: 'u_a', kind: 'user', confidence: 0.9 }
+      }
     },
     route: {
       question: '只测试动态上下文协议',
@@ -822,12 +846,20 @@ module.exports = (async () => {
       meta: {
         chatMode: 'chat',
         toolIntent: 'none',
-        responseIntent: 'answer'
+        responseIntent: 'answer',
+        directedContext: {
+          scene: 'group_reply',
+          addressee: { senderName: 'A', userId: 'u_a', kind: 'user', confidence: 0.9 }
+        }
       },
       intent: {},
       facets: {}
     },
     allowedTools: [],
+    directedContext: {
+      scene: 'group_reply',
+      addressee: { senderName: 'A', userId: 'u_a', kind: 'user', confidence: 0.9 }
+    },
     personaModuleCatalog: getPersonaModuleCatalogSummary(),
     planner: async () => ({
       mode: 'chat_only',
@@ -862,6 +894,254 @@ module.exports = (async () => {
   assert.deepStrictEqual(invalidDynamicPlanDecision.dynamicPromptPlan.enabledBlockIds, ['directed_context']);
   assert.deepStrictEqual(invalidDynamicPlanDecision.dynamicPromptPlan.personaModules, ['care_light']);
   assert.ok(!invalidDynamicPlanDecision.dynamicPromptPlan.blockDecisions.some((item) => item.blockId === 'fake_block' || item.moduleId === 'fake_module'));
+
+  const unavailableSignalDecision = await planRequestV2({
+    question: '全新问题，不需要记忆',
+    cleanText: '全新问题，不需要记忆',
+    topRouteType: 'direct_chat',
+    routeMeta: {
+      chatMode: 'chat',
+      toolIntent: 'none',
+      responseIntent: 'answer'
+    },
+    route: {
+      question: '全新问题，不需要记忆',
+      cleanText: '全新问题，不需要记忆',
+      topRouteType: 'direct_chat',
+      meta: {
+        chatMode: 'chat',
+        toolIntent: 'none',
+        responseIntent: 'answer'
+      },
+      intent: {},
+      facets: {}
+    },
+    allowedTools: [],
+    availableContextSignals: {
+      directedContext: false,
+      retrievedMemory: false,
+      longTermProfile: false,
+      summary: false,
+      dynamicFewShot: false
+    },
+    personaModuleCatalog: getPersonaModuleCatalogSummary(),
+    planner: async () => ({
+      mode: 'chat_only',
+      taskShape: 'fast_reply',
+      allowedToolNames: [],
+      steps: [],
+      dynamicPromptPlan: {
+        schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+        enabledBlockIds: ['retrieved_memory_lite', 'long_term_profile', 'summary', 'dynamic_few_shot'],
+        personaModules: [],
+        blockDecisions: [
+          { blockId: 'retrieved_memory_lite', decision: 'include', confidence: 0.9, priority: 10, reason: 'bad include' },
+          { blockId: 'long_term_profile', decision: 'include', confidence: 0.9, priority: 20, reason: 'bad include' },
+          { blockId: 'summary', decision: 'include', confidence: 0.9, priority: 30, reason: 'bad include' },
+          { blockId: 'dynamic_few_shot', decision: 'include', confidence: 0.9, priority: 40, reason: 'bad include' }
+        ]
+      },
+      plannerMeta: {
+        decisionVersion: 'planner_decision_v2',
+        plannerVersion: 'direct_chat_single_authority_v2',
+        reason: 'bad unavailable block include',
+        plannerModel: 'mock-planner',
+        decisionSource: 'planner'
+      }
+    })
+  });
+
+  assert.deepStrictEqual(unavailableSignalDecision.dynamicPromptPlan.enabledBlockIds, []);
+  assert.ok(!unavailableSignalDecision.dynamicPromptPlan.blockDecisions.some((item) => item.decision === 'include' && item.blockId));
+
+  let requestRouteMetaOptions = null;
+  const requestRouteMetaDecision = await planRequestV2({
+    question: 'route meta only',
+    cleanText: 'route meta only',
+    topRouteType: 'direct_chat',
+    routeMeta: {
+      chatMode: 'chat',
+      toolIntent: 'none',
+      responseIntent: 'answer',
+      allowedTools: [],
+      memoryContext: {
+        memoryForPrompt: 'planRequest route meta memory'
+      },
+      availableContextSignals: {
+        retrievedMemory: true,
+        dynamicFewShot: true
+      },
+      dynamicFewShotPrompt: 'planRequest route meta few shot',
+      memoryCliTurn: { routeMeta: true },
+      schedulerInjection: 'planRequest scheduler'
+    },
+    route: {
+      question: 'route meta only',
+      cleanText: 'route meta only',
+      topRouteType: 'direct_chat',
+      meta: {
+        chatMode: 'chat',
+        toolIntent: 'none',
+        responseIntent: 'answer'
+      },
+      intent: {},
+      facets: {}
+    },
+    allowedTools: [],
+    planner: async (_route, options) => {
+      requestRouteMetaOptions = options;
+      return {
+        mode: 'chat_only',
+        taskShape: 'fast_reply',
+        allowedToolNames: [],
+        steps: [],
+        dynamicPromptPlan: {
+          schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+          enabledBlockIds: ['retrieved_memory_lite', 'dynamic_few_shot', 'memory_cli_instruction', 'life_scheduler'],
+          personaModules: []
+        },
+        plannerMeta: {
+          decisionVersion: 'planner_decision_v2',
+          plannerVersion: 'direct_chat_single_authority_v2',
+          reason: 'planRequest route meta fallback',
+          plannerModel: 'mock-planner',
+          decisionSource: 'planner'
+        }
+      };
+    }
+  });
+
+  assert.ok(requestRouteMetaOptions);
+  assert.strictEqual(requestRouteMetaOptions.memoryContext.memoryForPrompt, 'planRequest route meta memory');
+  assert.strictEqual(requestRouteMetaOptions.availableContextSignals.retrievedMemory, true);
+  assert.strictEqual(requestRouteMetaOptions.dynamicFewShotPrompt, 'planRequest route meta few shot');
+  assert.deepStrictEqual(requestRouteMetaOptions.memoryCliTurn, { routeMeta: true });
+  assert.strictEqual(requestRouteMetaOptions.schedulerInjection, 'planRequest scheduler');
+  assert.ok(requestRouteMetaDecision.dynamicPromptPlan.enabledBlockIds.includes('retrieved_memory_lite'));
+
+  let directChatPlannerOptions = null;
+  const directChatDecision = await planDirectChat({
+    question: '继续刚才的计划',
+    cleanText: '继续刚才的计划',
+    topRouteType: 'direct_chat',
+    meta: {
+      chatMode: 'chat',
+      toolIntent: 'none',
+      responseIntent: 'answer',
+      allowedTools: []
+    },
+    intent: {},
+    facets: {}
+  }, {
+    userId: 'u_rich',
+    allowedTools: [],
+    memoryContext: {
+      memoryForPrompt: '之前说先修 planner 动态上下文。'
+    },
+    availableContextSignals: {
+      retrievedMemory: true
+    },
+    dynamicFewShotPrompt: 'few shot example',
+    memoryCliTurn: { exposed: true },
+    schedulerInjection: 'fresh scheduler note',
+    planner: async (_route, options) => {
+      directChatPlannerOptions = options;
+      return {
+        mode: 'chat_only',
+        taskShape: 'fast_reply',
+        allowedToolNames: [],
+        steps: [],
+        dynamicPromptPlan: {
+          schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+          enabledBlockIds: ['retrieved_memory_lite', 'dynamic_few_shot', 'memory_cli_instruction', 'life_scheduler'],
+          personaModules: []
+        },
+        plannerMeta: {
+          decisionVersion: 'planner_decision_v2',
+          plannerVersion: 'direct_chat_single_authority_v2',
+          reason: 'rich inputs',
+          plannerModel: 'mock-planner',
+          decisionSource: 'planner'
+        }
+      };
+    }
+  });
+
+  assert.ok(directChatPlannerOptions);
+  assert.strictEqual(directChatPlannerOptions.memoryContext.memoryForPrompt, '之前说先修 planner 动态上下文。');
+  assert.strictEqual(directChatPlannerOptions.availableContextSignals.retrievedMemory, true);
+  assert.strictEqual(directChatPlannerOptions.dynamicFewShotPrompt, 'few shot example');
+  assert.deepStrictEqual(directChatPlannerOptions.memoryCliTurn, { exposed: true });
+  assert.strictEqual(directChatPlannerOptions.schedulerInjection, 'fresh scheduler note');
+  assert.ok(directChatDecision.dynamicPromptPlan.enabledBlockIds.includes('retrieved_memory_lite'));
+
+  let routeMetaPlannerOptions = null;
+  const routeMetaDecision = await planDirectChat({
+    question: '引用回复',
+    cleanText: '引用回复',
+    topRouteType: 'direct_chat',
+    meta: {
+      chatMode: 'chat',
+      toolIntent: 'none',
+      responseIntent: 'answer',
+      allowedTools: [],
+      memoryContext: {
+        memoryForPrompt: 'route meta memory'
+      },
+      availableContextSignals: {
+        directedContext: true,
+        retrievedMemory: true
+      },
+      dynamicFewShotPrompt: 'route meta few shot',
+      memoryCliTurn: { routeMeta: true },
+      schedulerInjection: 'route meta scheduler',
+      sharedShortTermContext: {
+        shortTermSummary: 'route short term'
+      },
+      personaMemoryState: {
+        phase: 'route persona'
+      },
+      userInfo: {
+        level: 'friend'
+      }
+    },
+    intent: {},
+    facets: {}
+  }, {
+    userId: 'u_route_meta',
+    planner: async (_route, options) => {
+      routeMetaPlannerOptions = options;
+      return {
+        mode: 'chat_only',
+        taskShape: 'fast_reply',
+        allowedToolNames: [],
+        steps: [],
+        dynamicPromptPlan: {
+          schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+          enabledBlockIds: ['retrieved_memory_lite', 'dynamic_few_shot', 'memory_cli_instruction', 'short_term_continuity', 'life_scheduler'],
+          personaModules: []
+        },
+        plannerMeta: {
+          decisionVersion: 'planner_decision_v2',
+          plannerVersion: 'direct_chat_single_authority_v2',
+          reason: 'route meta rich inputs',
+          plannerModel: 'mock-planner',
+          decisionSource: 'planner'
+        }
+      };
+    }
+  });
+
+  assert.ok(routeMetaPlannerOptions);
+  assert.strictEqual(routeMetaPlannerOptions.memoryContext.memoryForPrompt, 'route meta memory');
+  assert.strictEqual(routeMetaPlannerOptions.availableContextSignals.retrievedMemory, true);
+  assert.strictEqual(routeMetaPlannerOptions.dynamicFewShotPrompt, 'route meta few shot');
+  assert.deepStrictEqual(routeMetaPlannerOptions.memoryCliTurn, { routeMeta: true });
+  assert.strictEqual(routeMetaPlannerOptions.schedulerInjection, 'route meta scheduler');
+  assert.strictEqual(routeMetaPlannerOptions.sharedShortTermContext.shortTermSummary, 'route short term');
+  assert.strictEqual(routeMetaPlannerOptions.personaMemoryState.phase, 'route persona');
+  assert.strictEqual(routeMetaPlannerOptions.userInfo.level, 'friend');
+  assert.ok(routeMetaDecision.dynamicPromptPlan.enabledBlockIds.includes('short_term_continuity'));
 
   console.log('plannerV2Protocol.test.js passed');
   if (oldBotToolMode === undefined) delete process.env.BOT_TOOL_MODE;

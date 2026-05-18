@@ -35,7 +35,9 @@ const {
 } = require('../../../utils/personaModules');
 const {
   buildHeuristicDynamicPromptPlan,
-  getMainReplyDynamicBlockCatalog
+  getMainReplyDynamicBlockCatalog,
+  isCriticalDynamicContextBlock,
+  selectDynamicContextBlocks
 } = require('../../../utils/mainReplyPromptBlocks');
 const {
   GROUP_DIRECT_REPLY_CHAR_LIMIT,
@@ -200,6 +202,32 @@ function normalizeArray(value) {
 function normalizeText(value, fallback = '') {
   const text = String(value || '').trim();
   return text || fallback;
+}
+
+function canonicalMemoryEvidenceText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\[(?:retrievedmemorylite|retrievedmemory|relevantevidence|dailyjournal|journal\|[^\]]+)\]/gi, ' ')
+    .replace(/date:\s*(\d{4}-\d{2}-\d{2})/gi, '$1 ')
+    .replace(/[^\u4e00-\u9fa5a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function removeDuplicateJournalPromptText(journalText = '', retrievedText = '') {
+  const journal = String(journalText || '').trim();
+  if (!journal) return '';
+  const retrievedCanonical = canonicalMemoryEvidenceText(retrievedText);
+  if (!retrievedCanonical) return journal;
+  const chunks = journal
+    .split(/\n{2,}/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
+  const kept = chunks.filter((chunk) => {
+    const canonical = canonicalMemoryEvidenceText(chunk);
+    return !canonical || canonical.length < 24 || !retrievedCanonical.includes(canonical);
+  });
+  return kept.join('\n\n').trim();
 }
 
 function getRouteMetaGroupId(routeMeta = {}) {

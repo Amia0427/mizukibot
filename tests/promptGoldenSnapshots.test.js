@@ -60,6 +60,11 @@ module.exports = (async () => {
   assert.ok(Array.isArray(main.promptSnapshot.plannerSkippedBlocks));
   assert.ok(Array.isArray(main.promptSnapshot.runtimeAddedBlocks));
   assert.ok(Array.isArray(main.promptSnapshot.runtimeRejectedBlocks));
+  assert.ok(Array.isArray(main.promptSnapshot.selectionTrace));
+  assert.ok(main.promptSnapshot.selectionTrace.some((item) => item.id === 'directed_context' && item.selected === true));
+  assert.ok(main.promptSnapshot.budgetReport && main.promptSnapshot.budgetReport.schemaVersion === 'context_budget_report_v1');
+  assert.ok(Object.prototype.hasOwnProperty.call(main.promptSnapshot.budgetReport, 'usedByLane'));
+  assert.ok(main.promptSnapshot.candidatePruning && typeof main.promptSnapshot.candidatePruning === 'object');
   assert.ok(main.promptSnapshot.personaWorldbookSearch && typeof main.promptSnapshot.personaWorldbookSearch === 'object');
   assert.ok(main.promptSnapshot.plannerDynamicContextPlan);
   assert.ok(main.promptSnapshot.cacheLanes && Array.isArray(main.promptSnapshot.cacheLanes.stable));
@@ -95,6 +100,12 @@ module.exports = (async () => {
   );
   assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'directed_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.selectionTrace.some((item) => (
+    item.id === 'directed_context'
+    && item.selected === true
+    && item.skippedByPlanner === true
+    && item.reason === 'runtime_must_use_overrode_planner_skip'
+  )));
 
   const plannerIncludedMemoryPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 9 },
@@ -170,6 +181,7 @@ module.exports = (async () => {
   assert.ok(!emptyContentPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'impression'));
   assert.ok(!emptyContentPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
   assert.ok(emptyContentPrompt.promptSnapshot.runtimeRejectedBlocks.some((item) => item.id === 'retrieved_memory_lite' && /empty|content/i.test(item.reason)));
+  assert.ok(emptyContentPrompt.promptSnapshot.selectionTrace.some((item) => item.id === 'summary' && item.decision === 'reject'));
 
   const selfContainedPrompt = await buildDynamicPrompt(
     { level: '', points: 0 },
@@ -206,6 +218,7 @@ module.exports = (async () => {
   assert.ok(selfContainedPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
   assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'long_term_profile'));
   assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
+  assert.ok(!selfContainedPrompt.promptSnapshot.selectionTrace.some((item) => item.id === 'long_term_profile' && item.selected === true));
 
   const personaRejectedPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 14 },

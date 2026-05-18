@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const fs = require('fs');
 const config = require('../../config');
 const { getLastEmbeddingFailure } = require('../memoryEmbeddingClient');
 const {
@@ -78,8 +79,11 @@ function isJournalEmbeddingDoc(value = {}) {
   const type = normalizeText(value.type || value.memoryKind).toLowerCase();
   const nodeId = normalizeText(value.nodeId || value.id);
   return source === 'journal'
+    || source === 'episode'
+    || type === 'episode'
     || type === 'daily_journal'
     || type === 'daily_journal_segment'
+    || nodeId.startsWith('episode:')
     || nodeId.startsWith('journal-day:')
     || nodeId.startsWith('journal-segment:');
 }
@@ -244,27 +248,89 @@ function makePendingRow(identity) {
   };
 }
 
-function reconcileEmbeddingCache(nodes = []) {
+function classifyEmbeddingPriority(node = {}) {
+  const source = normalizeText(node.source).toLowerCase();
+  const scopeType = normalizeText(node.scopeType).toLowerCase();
+  const fieldKey = normalizeText(node.fieldKey || node.semanticSlot || node.type || node.memoryKind).toLowerCase();
+  const type = normalizeText(node.type || node.memoryKind).toLowerCase();
+  if (isJournalEmbeddingDoc(node)) return { priority: 'journal', rank: 10, reason: 'journal_doc' };
+  if (
+    source === 'profile'
+    || fieldKey.includes('identity')
+    || fieldKey.includes('persona')
+    || fieldKey.includes('preference')
+    || fieldKey === 'like'
+    || fieldKey === 'dislike'
+    || ['identity', 'summary', 'impression', 'like', 'dislike', 'hobby', 'personality'].includes(type)
+  ) {
+    return { priority: 'profile', rank: 20, reason: 'profile_or_preference' };
+  }
+  if (scopeType === 'task' || source === 'task' || fieldKey.includes('task')) {
+    return { priority: 'task', rank: 30, reason: 'task_scope' };
+  }
+  if (scopeType === 'group' || source === 'group' || source === 'jargon') {
+    return { priority: 'group', rank: 40, reason: 'group_scope' };
+  }
+  return { priority: 'other', rank: 90, reason: 'default' };
+}
+
+function reconcileEmbeddingCache(nodes = [], options = {}) {
   ensureDir(config.MEMORY_V3_PROJECTIONS_DIR);
   const activeNodes = (Array.isArray(nodes) ? nodes : [])
     .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived');
   if (!isEmbeddingIndexEnabled()) {
+    if (options.dryRun === true) {
+      return { enabled: false, rows: 0, ready: 0, pending: 0, reused: 0, created: 0, dropped: 0 };
+    }
     writeEmbeddingRows([]);
-    return { enabled: false, rows: 0, ready: 0, pending: 0, reused: 0, created: 0 };
+    return { enabled: false, rows: 0, ready: 0, pending: 0, reused: 0, created: 0, dropped: 0 };
+  }
+
+  const plan = buildEmbeddingCacheReconcilePlan(activeNodes, options);
+  if (options.dryRun === true) return plan;
+  writeEmbeddingRows(plan.rowsData || []);
+  return {
+    enabled: plan.enabled,
+    fullReconcile: plan.fullReconcile,
+    rows: plan.rows,
+    ready: plan.ready,
+    pending: plan.pending,
+    reused: plan.reused,
+    created: plan.created,
+    dropped: plan.dropped,
+    dryRun: false
+  };
+}
+
+function buildEmbeddingCacheReconcilePlan(nodes = [], options = {}) {
+  const activeNodes = (Array.isArray(nodes) ? nodes : [])
+    .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived');
+  if (!isEmbeddingIndexEnabled()) {
+    return {
+      enabled: false,
+      fullReconcile: options.fullReconcile === true || options.full === true,
+      rows: 0,
+      ready: 0,
+      pending: 0,
+      reused: 0,
+      created: 0,
+      dropped: 0,
+      rowsData: []
+    };
   }
 
   const index = loadEmbeddingIndex();
   const rows = [];
   let reused = 0;
   let created = 0;
-  const includesJournalDocs = activeNodes.some(isJournalEmbeddingDoc);
-  const includesMemoryDocs = activeNodes.some((node) => !isJournalEmbeddingDoc(node));
-  const shouldPreserveExisting = (row) => {
-    if (activeNodes.length === 0) return isJournalEmbeddingDoc(row);
-    if (includesJournalDocs && !includesMemoryDocs) return !isJournalEmbeddingDoc(row);
-    if (includesMemoryDocs && !includesJournalDocs) return isJournalEmbeddingDoc(row);
-    return false;
-  };
+  const fullReconcile = options.fullReconcile === true || options.full === true;
+  const activeKeys = new Set(activeNodes.map((node) => buildEmbeddingIdentity(node).key).filter(Boolean));
+  const activeNodeIds = new Set(activeNodes.map((node) => normalizeText(node.id || node.nodeId)).filter(Boolean));
+  const shouldPreserveExisting = (row) => (
+    !fullReconcile
+    && !activeKeys.has(normalizeText(row.key))
+    && !activeNodeIds.has(normalizeText(row.nodeId))
+  );
 
   for (const row of index.rows) {
     if (shouldPreserveExisting(row)) rows.push(row);
@@ -292,23 +358,64 @@ function reconcileEmbeddingCache(nodes = []) {
     rows.push(makePendingRow(identity));
   }
 
-  writeEmbeddingRows(rows);
   return {
     enabled: true,
+    fullReconcile,
     rows: rows.length,
     ready: rows.filter((row) => row.status === 'ready' && row.embedding.length > 0).length,
     pending: rows.filter((row) => row.status !== 'ready').length,
     reused,
-    created
+    created,
+    dropped: Math.max(0, index.rows.length + created - rows.length),
+    rowsData: rows
   };
 }
 
 function collectEmbeddingBackfillNodes() {
-  const { loadMemoryNodes } = require('./storage');
+  const { loadMemoryNodes, loadEpisodeProjection } = require('./storage');
   const nodes = [];
   for (const node of loadMemoryNodes()) {
     if (!node || normalizeText(node.status).toLowerCase() === 'archived') continue;
     nodes.push(node);
+  }
+  const episodeProjection = loadEpisodeProjection();
+  for (const [userId, entry] of Object.entries(episodeProjection.users || {})) {
+    for (const episode of Array.isArray(entry?.items) ? entry.items : []) {
+      const text = normalizeText(episode.text);
+      const eventId = normalizeText(episode.id);
+      if (!text || !eventId) continue;
+      const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
+      if (rollupLevel === 'segment') continue;
+      nodes.push({
+        id: `episode:${eventId}`,
+        source: 'journal',
+        sourceKind: normalizeText(episode.sourceKind || 'journal'),
+        type: 'episode',
+        memoryKind: 'episode',
+        scopeType: 'personal',
+        userId: normalizeText(userId),
+        ownerUserId: normalizeText(userId),
+        fieldKey: 'episode',
+        semanticSlot: 'episode',
+        status: 'active',
+        canonicalKey: normalizeText(episode.canonicalKey || episode.dedupeKey || canonicalizeText(text)).toLowerCase(),
+        text,
+        updatedAt: Number(episode.updatedAt || 0) || 0,
+        confidence: Number(episode.confidence || 0) || 0.92,
+        importance: Number(episode.importance || 0) || (rollupLevel === 'monthly' ? 1.2 : 1.0),
+        evidenceCount: Math.max(1, Number(episode.evidenceCount || 1) || 1),
+        evidenceTier: 'strict',
+        rollupLevel,
+        episodeDay: normalizeText(episode.episodeDay || episode.endDay || episode.startDay),
+        startDay: normalizeText(episode.startDay),
+        endDay: normalizeText(episode.endDay),
+        yearMonth: normalizeText(episode.yearMonth),
+        part: Math.max(0, Number(episode.part || 0) || 0),
+        textKind: normalizeText(episode.textKind) || `journal_${rollupLevel}`,
+        sourceCompleteness: normalizeText(episode.sourceCompleteness || 'summary'),
+        sourceFile: normalizeText(episode.sourceFile)
+      });
+    }
   }
   if (config.MEMORY_JOURNAL_EMBEDDING_BACKFILL_ENABLED !== false) {
     const { buildDailyJournalDocsForAllUsers } = require('./journalDocs');
@@ -364,10 +471,12 @@ function buildEmbeddingBackfillPlan(options = {}) {
   const nodes = filterEmbeddingBackfillNodes(collectEmbeddingBackfillNodes(), source);
   const index = loadEmbeddingIndex();
   const plannedRows = [];
+  const nodePriorityByKey = new Map();
   let created = 0;
 
   for (const node of nodes) {
     const identity = buildEmbeddingIdentity(node);
+    nodePriorityByKey.set(identity.key, classifyEmbeddingPriority(node));
     const existing = findReusableRow(index, identity);
     if (existing) {
       plannedRows.push({
@@ -395,11 +504,42 @@ function buildEmbeddingBackfillPlan(options = {}) {
       return !row.nextRetryAt || row.nextRetryAt <= now;
     })
     .sort((a, b) => {
+      const priorityA = nodePriorityByKey.get(a.key) || classifyEmbeddingPriority(a);
+      const priorityB = nodePriorityByKey.get(b.key) || classifyEmbeddingPriority(b);
+      if (priorityA.rank !== priorityB.rank) return priorityA.rank - priorityB.rank;
       const retryDiff = Number(a.nextRetryAt || 0) - Number(b.nextRetryAt || 0);
       if (retryDiff !== 0) return retryDiff;
       return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
     })
     .slice(0, resolveBackfillLimit(options));
+  const batchSize = Math.max(1, Math.floor(Number(options.batchSize || config.MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE || 32) || 32));
+  const remaining = plannedRows.filter((row) => row.status !== 'ready').length;
+  const byPriority = {};
+  for (const row of plannedRows.filter((item) => item.status !== 'ready')) {
+    const priority = nodePriorityByKey.get(row.key) || classifyEmbeddingPriority(row);
+    if (!byPriority[priority.priority]) {
+      byPriority[priority.priority] = {
+        pending: 0,
+        considered: 0,
+        reason: priority.reason
+      };
+    }
+    byPriority[priority.priority].pending += 1;
+  }
+  for (const row of pending) {
+    const priority = nodePriorityByKey.get(row.key) || classifyEmbeddingPriority(row);
+    if (!byPriority[priority.priority]) {
+      byPriority[priority.priority] = {
+        pending: 0,
+        considered: 0,
+        reason: priority.reason
+      };
+    }
+    byPriority[priority.priority].considered += 1;
+  }
+  const nextPriority = pending.length > 0
+    ? (nodePriorityByKey.get(pending[0].key) || classifyEmbeddingPriority(pending[0]))
+    : null;
 
   return {
     ok: true,
@@ -409,11 +549,21 @@ function buildEmbeddingBackfillPlan(options = {}) {
     rows: plannedRows.length,
     readyBefore: plannedRows.filter((row) => row.status === 'ready' && Array.isArray(row.embedding) && row.embedding.length > 0).length,
     considered: pending.length,
-    remaining: plannedRows.filter((row) => row.status !== 'ready').length,
+    remaining,
     failed: plannedRows.filter((row) => row.status === 'failed').length,
     failureBreakdown: buildFailureBreakdown(plannedRows),
     staleRows: plannedRows.filter((row) => row.status === 'stale').length,
-    created
+    created,
+    priority: nextPriority?.priority || '',
+    reason: nextPriority?.reason || '',
+    byPriority,
+    estimatedBatches: Math.ceil(remaining / batchSize),
+    checkpoint: {
+      source,
+      remaining,
+      nextNodeId: pending[0]?.nodeId || '',
+      nextPriority: nextPriority?.priority || ''
+    }
   };
 }
 
@@ -432,7 +582,7 @@ function scheduleEmbeddingBackfill(options = {}) {
 }
 
 function enqueueMissingEmbeddings(nodes = [], options = {}) {
-  const stats = Array.isArray(nodes) ? reconcileEmbeddingCache(nodes) : {
+  const stats = Array.isArray(nodes) ? reconcileEmbeddingCache(nodes, options) : {
     enabled: isEmbeddingIndexEnabled(),
     rows: loadEmbeddingRows().length
   };
@@ -468,7 +618,9 @@ async function backfillMissingEmbeddings(options = {}) {
         embedded: 0
       };
     }
-    reconcileEmbeddingCache(selectedNodes);
+    reconcileEmbeddingCache(selectedNodes, {
+      fullReconcile: options.fullReconcile === true || options.full === true
+    });
     const rows = loadEmbeddingRows();
     const nodeMap = buildNodeMapByEmbeddingKey(selectedNodes);
     const limit = resolveBackfillLimit(options);
@@ -483,9 +635,9 @@ async function backfillMissingEmbeddings(options = {}) {
         return !row.nextRetryAt || row.nextRetryAt <= now;
       })
       .sort((a, b) => {
-        const journalA = isJournalEmbeddingDoc(a.row) ? 1 : 0;
-        const journalB = isJournalEmbeddingDoc(b.row) ? 1 : 0;
-        if (journalA !== journalB) return journalB - journalA;
+        const priorityA = classifyEmbeddingPriority(nodeMap.get(a.row.key)?.node || a.row);
+        const priorityB = classifyEmbeddingPriority(nodeMap.get(b.row.key)?.node || b.row);
+        if (priorityA.rank !== priorityB.rank) return priorityA.rank - priorityB.rank;
         if (Number(a.row.nextRetryAt || 0) !== Number(b.row.nextRetryAt || 0)) {
           return Number(a.row.nextRetryAt || 0) - Number(b.row.nextRetryAt || 0);
         }
@@ -584,8 +736,10 @@ function calcEmbeddingSimilarity(queryEmbedding, candidate = {}, index = loadEmb
 module.exports = {
   buildEmbeddingText,
   buildEmbeddingIdentity,
+  buildEmbeddingCacheReconcilePlan,
   buildEmbeddingBackfillPlan,
   buildFailureBreakdown,
+  classifyEmbeddingPriority,
   clearEmbeddingIndexCache,
   loadEmbeddingIndex,
   reconcileEmbeddingCache,

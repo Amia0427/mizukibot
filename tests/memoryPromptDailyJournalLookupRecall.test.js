@@ -53,6 +53,8 @@ module.exports = (async () => {
   assert.ok(promptText.includes('[DailyJournal]'), 'daily journal block should be rendered');
   assert.ok(promptText.includes('2026-04-26'), 'daily journal content should preserve the recalled date');
   assert.ok(promptText.includes('直球告白'), 'daily journal content should preserve recalled details');
+  const dailyJournalMatches = promptText.match(/直球告白/g) || [];
+  assert.strictEqual(dailyJournalMatches.length, 1, 'journal evidence already in RetrievedMemory should not be duplicated in DailyJournal');
   assert.ok(
     result.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite')
       && result.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'daily_journal'),

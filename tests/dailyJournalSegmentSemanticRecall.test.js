@@ -84,6 +84,9 @@ module.exports = queryMemory({
   assert.strictEqual(result.results[0].id, 'journal-segment:u_journal_semantic:2026-04-26:1');
   assert.ok(result.results[0].text.includes('口腔溃疡'));
   assert.ok(['semantic', 'hybrid'].includes(result.results[0].matchMode));
+  const sameDaySummaryIndex = result.results.findIndex((item) => item.id === 'journal-day:u_journal_semantic:2026-04-26');
+  assert.ok(sameDaySummaryIndex >= 0, 'same-day day summary should stay in the journal result set');
+  assert.ok(sameDaySummaryIndex < 3, 'same-day segment should not drown out the day summary');
   console.log('dailyJournalSegmentSemanticRecall.test.js passed');
 }).catch((error) => {
   console.error(error);

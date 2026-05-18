@@ -51,6 +51,7 @@ const {
 const {
   buildAvailableContextSignals,
   buildRuleBasedPlannerDecision,
+  isDynamicPromptBlockAvailable,
   normalizeDynamicPromptBlockCatalogForPlanner,
   sanitizePlannerContextSummary,
   summarizeToolCatalogForPrompt
@@ -78,8 +79,9 @@ function buildPlannerPrompt(toolCatalog = []) {
     'You may output personaModules as a top-level array and/or plannerMeta.personaModules; respect catalog/runtime limits and prefer a small useful set.',
     'You must output dynamicPromptPlan as a top-level object and may mirror it under plannerMeta.dynamicPromptPlan for compatibility.',
     `dynamicPromptPlan.schemaVersion must be exactly "${DYNAMIC_CONTEXT_PLAN_VERSION}".`,
-    'Coverage-first rule: include every block with real information gain for the current turn, but never include empty, unavailable, conflicting, or purely noisy blocks.',
-    'Prefer include for directed/quoted context, continuity, real memory/profile/summary, group social context, private emotional context, strong style scenes, and useful persona scene modules.',
+    'Dynamic context policy is availability-gated: only include a block when dynamicPromptBlockCatalog.available is true, except persona modules which use personaModules.',
+    'Selection policy: must_use_when_available blocks are required when available; include_if_relevant blocks need clear turn-level value; high_value_only blocks need specific information gain; tool_policy_only blocks require the corresponding tool exposure.',
+    'Never include empty, unavailable, conflicting, or purely noisy dynamic blocks.',
     'For ordinary self-contained questions, skip memory/profile blocks unless availableContextSignals shows real content and the block helps the answer.',
     'Use enabledBlockIds only for non-persona dynamic blocks. Use personaModules only for persona modules.',
     'For every important include or skip, add a blockDecisions item with decision, confidence, priority, and a short reason.',
@@ -149,6 +151,7 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
   const dynamicPromptBlockCatalog = normalizeArray(options?.dynamicPromptBlockCatalog).length > 0
     ? normalizeArray(options.dynamicPromptBlockCatalog)
     : getMainReplyDynamicBlockCatalog(plannerPersonaModuleCatalog);
+  const availableContextSignals = buildAvailableContextSignals(route, options);
   return {
     question: normalizeText(options.question || route?.question || route?.cleanText),
     cleanText: normalizeText(route?.cleanText),
@@ -171,12 +174,12 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
     ),
     directedContext: normalizeObject(options?.directedContext || routeMeta.directedContext, null),
     continuitySignals: normalizeObject(options?.continuitySignals || routeMeta.continuitySignals, {}),
-    availableContextSignals: buildAvailableContextSignals(route, options),
+    availableContextSignals,
     constraints: normalizeObject(options?.constraints, {}),
     explicitAllowlist: allowlist,
     tools: buildDirectChatToolCatalogSummary(toolCatalog),
     personaModuleCatalog: plannerPersonaModuleCatalog,
-    dynamicPromptBlockCatalog: normalizeDynamicPromptBlockCatalogForPlanner(dynamicPromptBlockCatalog),
+    dynamicPromptBlockCatalog: normalizeDynamicPromptBlockCatalogForPlanner(dynamicPromptBlockCatalog, availableContextSignals),
     dynamicPromptGuide: normalizeText(options?.dynamicPromptGuide)
       || buildMainReplyDynamicPromptGuide(
         plannerPersonaModuleCatalog
@@ -235,6 +238,38 @@ function normalizeRuntimeBindingDescriptor(step = {}, route = {}) {
   return rawBinding ? { ...rawBinding } : null;
 }
 
+function pruneUnavailableDynamicPromptPlan(plan = {}, route = {}, options = {}) {
+  const availableContextSignals = buildAvailableContextSignals(route, options);
+  const enabledBlockIds = normalizeArray(plan.enabledBlockIds)
+    .map((item) => normalizeText(item))
+    .filter((blockId) => blockId && isDynamicPromptBlockAvailable(blockId, availableContextSignals));
+  const enabledSet = new Set(enabledBlockIds);
+  const blockDecisions = normalizeArray(plan.blockDecisions).filter((decision) => {
+    const blockId = normalizeText(decision?.blockId);
+    if (!blockId) return true;
+    if (normalizeText(decision?.decision).toLowerCase() === 'skip') return true;
+    return enabledSet.has(blockId) || isDynamicPromptBlockAvailable(blockId, availableContextSignals);
+  });
+  const rationaleByBlock = {};
+  const sourceRationale = normalizeObject(plan.rationaleByBlock, {});
+  for (const [key, value] of Object.entries(sourceRationale)) {
+    const blockId = normalizeText(key);
+    if (!blockId || !blockId.includes('_')) {
+      rationaleByBlock[key] = value;
+      continue;
+    }
+    if (enabledSet.has(blockId) || isDynamicPromptBlockAvailable(blockId, availableContextSignals)) {
+      rationaleByBlock[key] = value;
+    }
+  }
+  return {
+    ...plan,
+    enabledBlockIds,
+    blockDecisions,
+    rationaleByBlock
+  };
+}
+
 function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) {
   const fallback = buildRuleBasedPlannerDecision(route, options);
   const available = collectAvailableToolSummary(route, options);
@@ -252,7 +287,7 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   );
   const rawDynamicPromptPlan = rawDecision?.dynamicPromptPlan || rawDecision?.plannerMeta?.dynamicPromptPlan;
   const hasRawDynamicPromptPlan = rawDynamicPromptPlan && typeof rawDynamicPromptPlan === 'object' && !Array.isArray(rawDynamicPromptPlan);
-  const normalizedDynamicPromptPlan = normalizeDynamicPromptPlan(
+  const normalizedDynamicPromptPlan = pruneUnavailableDynamicPromptPlan(normalizeDynamicPromptPlan(
     hasRawDynamicPromptPlan
       ? rawDynamicPromptPlan
       : (fallback?.dynamicPromptPlan || fallback?.plannerMeta?.dynamicPromptPlan || {}),
@@ -264,7 +299,7 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
       source: hasRawDynamicPromptPlan ? 'planner' : 'rule',
       plannerProvided: hasRawDynamicPromptPlan
     }
-  );
+  ), route, options);
   const cleanText = getPlannerRequestText(route);
   const rawRequestedToolNames = normalizeToolNames(
     Array.isArray(rawDecision?.allowedToolNames) ? rawDecision.allowedToolNames : []

@@ -351,6 +351,78 @@ function sortCandidatesWithWorldbookScores(candidates = [], worldbookResults = [
     });
 }
 
+function scorePersonaCandidate(item = {}, context = {}) {
+  const question = lower(context.question || '');
+  const routePrompt = lower(context.routePrompt || '');
+  const combined = `${question}\n${routePrompt}`.replace(/\s+/g, '');
+  const priority = Math.max(0, Number(item.priority || 100) || 100);
+  let score = Math.max(0, 120 - priority);
+  if (Number(item.worldbookScore || 0) > 0) score += 120 + (Number(item.worldbookScore || 0) * 100);
+  if (normalizeText(item.worldbookMatchMode)) score += 20;
+  for (const hint of normalizeArray(item.triggerHints)) {
+    if (triggerHintMatches(hint, combined)) score += 18;
+  }
+  const purpose = lower(item.purpose || '').replace(/\s+/g, '');
+  if (purpose && purpose.length >= 3 && combined.includes(purpose.slice(0, Math.min(8, purpose.length)))) score += 8;
+  if (context.chatType === 'group' && item.id === 'scene_group_insert') score += 80;
+  if (context.chatType === 'private' && item.id === 'scene_private_chat') score += 80;
+  if (normalizeText(context.directedContext?.addressee?.senderName) && /branch$/.test(item.id)) score += 20;
+  return score;
+}
+
+function prunePersonaModuleCandidates(candidates = [], context = {}, options = {}) {
+  const normalized = normalizeArray(candidates).filter((item) => item && typeof item === 'object');
+  const limit = Math.max(1, Math.floor(Number(options.maxCandidates || context.maxPersonaModuleCandidates || config.PERSONA_MODULE_CANDIDATE_MAX || 16) || 16));
+  const alwaysKeep = new Set(
+    normalizeArray(options.alwaysKeepIds || context.alwaysKeepPersonaModuleIds)
+      .map((item) => normalizeText(item))
+      .filter(Boolean)
+  );
+  for (const item of normalized) {
+    if (Number(item.worldbookScore || 0) > 0) alwaysKeep.add(item.id);
+    if (item.id === 'scene_group_insert' && context.chatType === 'group') alwaysKeep.add(item.id);
+    if (item.id === 'scene_private_chat' && context.chatType === 'private') alwaysKeep.add(item.id);
+  }
+  const scored = normalized
+    .map((item, index) => ({
+      item,
+      index,
+      score: scorePersonaCandidate(item, context),
+      keep: alwaysKeep.has(item.id)
+    }))
+    .sort((a, b) => {
+      if (b.keep !== a.keep) return Number(b.keep) - Number(a.keep);
+      if (b.score !== a.score) return b.score - a.score;
+      return a.item.priority - b.item.priority || a.item.id.localeCompare(b.item.id);
+    });
+  const selectedIds = new Set();
+  const selected = [];
+  for (const row of scored) {
+    if (selected.length >= limit && !row.keep) continue;
+    if (selectedIds.has(row.item.id)) continue;
+    selectedIds.add(row.item.id);
+    selected.push({
+      ...row.item,
+      candidateScore: row.score
+    });
+  }
+  const selectedSorted = selected.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+  selectedSorted.candidatePruning = {
+    schemaVersion: 'persona_candidate_pruning_v1',
+    originalCount: normalized.length,
+    keptCount: selectedSorted.length,
+    limit,
+    droppedCount: Math.max(0, normalized.length - selectedSorted.length),
+    keptIds: selectedSorted.map((item) => item.id),
+    droppedIds: normalized.map((item) => item.id).filter((id) => !selectedIds.has(id)).slice(0, 40),
+    alwaysKeepIds: Array.from(alwaysKeep)
+  };
+  if (candidates && typeof candidates === 'object' && candidates.personaWorldbookSearch) {
+    selectedSorted.personaWorldbookSearch = candidates.personaWorldbookSearch;
+  }
+  return selectedSorted;
+}
+
 async function buildPersonaModuleCandidatesAsync(context = {}) {
   const catalog = loadPersonaModuleCatalog();
   const phase = inferPhase(context);
@@ -376,7 +448,11 @@ async function buildPersonaModuleCandidatesAsync(context = {}) {
     .filter((item) => item.phase === 'all' || item.phase === phase);
   const sorted = sortCandidatesWithWorldbookScores(candidates, worldbookSearch.results);
   sorted.personaWorldbookSearch = worldbookSearch.diagnostics;
-  return sorted;
+  const pruned = prunePersonaModuleCandidates(sorted, context, {
+    maxCandidates: context.maxPersonaModuleCandidates
+  });
+  pruned.personaWorldbookSearch = worldbookSearch.diagnostics;
+  return pruned;
 }
 
 function buildPlannerPersonaModuleCatalog(personaModuleCatalog = [], context = {}, options = {}) {
@@ -492,5 +568,6 @@ module.exports = {
   getPersonaModuleCatalogSummary,
   loadPersonaModuleCatalog,
   loadPersonaModuleText,
+  prunePersonaModuleCandidates,
   selectPersonaModules
 };

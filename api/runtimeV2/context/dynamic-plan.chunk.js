@@ -197,89 +197,24 @@ function blockHasUsableContent(block = {}) {
 }
 
 function filterBlocksByPlan(blocks = [], dynamicPromptPlan = {}, options = {}) {
+  const selection = selectDynamicContextBlocks({
+    blocks,
+    dynamicPromptPlan,
+    requiredIds: options.requiredIds,
+    runtimeAddedIds: options.runtimeAddedIds,
+    budgetTokens: options.budgetTokens
+  });
   const audit = options.audit && typeof options.audit === 'object' ? options.audit : null;
-  const requiredIds = new Set(normalizeArray(options.requiredIds).map((item) => normalizeText(item)).filter(Boolean));
-  const runtimeAddedIds = new Set(normalizeArray(options.runtimeAddedIds).map((item) => normalizeText(item)).filter(Boolean));
-  const enabledIds = new Set(normalizeArray(dynamicPromptPlan.enabledBlockIds).map((item) => normalizeText(item)).filter(Boolean));
-  const enabledPersonaModules = new Set(normalizeArray(dynamicPromptPlan.personaModules).map((item) => normalizeText(item)).filter(Boolean));
-  const skippedIds = new Set();
-  const skippedPersonaModules = new Set();
-  for (const decision of normalizeArray(dynamicPromptPlan.blockDecisions)) {
-    if (normalizeText(decision.decision).toLowerCase() !== 'skip') continue;
-    if (normalizeText(decision.blockId)) skippedIds.add(normalizeText(decision.blockId));
-    if (normalizeText(decision.moduleId)) skippedPersonaModules.add(normalizeText(decision.moduleId));
-  }
-
-  const selected = [];
-  const availablePlanIds = new Set();
-  const selectedPlanIds = new Set();
-  const rejectedPlanIds = new Set();
-  for (const block of normalizeArray(blocks)) {
-    const { blockId, aliasId, moduleId, ids } = getPromptBlockPlanIds(block);
-    if (!blockId) continue;
-    ids.forEach((id) => availablePlanIds.add(id));
-    if (moduleId) availablePlanIds.add(`persona_module:${moduleId}`);
-    const optional = block?.meta?.optional === true;
-    const required = ids.some((id) => requiredIds.has(id)) || (moduleId && requiredIds.has(`persona_module:${moduleId}`));
-    const runtimeAdded = ids.some((id) => runtimeAddedIds.has(id)) || (moduleId && runtimeAddedIds.has(`persona_module:${moduleId}`));
-    const includedByPlanner = ids.some((id) => enabledIds.has(id)) || (moduleId && enabledPersonaModules.has(moduleId));
-    const skippedByPlanner = ids.some((id) => skippedIds.has(id)) || (moduleId && skippedPersonaModules.has(moduleId));
-    const includeBlock = !optional
-      || required
-      || runtimeAdded
-      || (includedByPlanner && !skippedByPlanner);
-
-    if (!includeBlock) continue;
-    const usable = blockHasUsableContent(block);
-    if (!usable && optional) {
-      const rejectedId = aliasId || (moduleId ? `persona_module:${moduleId}` : blockId);
-      rejectedPlanIds.add(rejectedId);
-      if (audit && includedByPlanner) {
-        pushUniqueAuditEntry(audit.runtimeRejectedBlocks, {
-          id: rejectedId,
-          ...(moduleId ? { moduleId } : { blockId: aliasId || blockId }),
-          reason: 'no_real_content'
-        });
-      }
-      continue;
-    }
-    selected.push(block);
-    ids.forEach((id) => selectedPlanIds.add(id));
-    if (moduleId) selectedPlanIds.add(`persona_module:${moduleId}`);
-    if (audit && runtimeAdded && !includedByPlanner) {
-      const addedId = aliasId || blockId;
-      pushUniqueAuditEntry(audit.runtimeAddedBlocks, {
-        id: addedId,
-        blockId: addedId,
-        reason: addedId === 'directed_context'
-          ? 'directed context exists and is required to resolve current turn'
-          : 'runtime must-use block'
-      });
-    }
-  }
-
   if (audit) {
-    for (const blockId of enabledIds) {
-      if (selectedPlanIds.has(blockId) || rejectedPlanIds.has(blockId)) continue;
-      if (availablePlanIds.has(blockId)) continue;
-      pushUniqueAuditEntry(audit.runtimeRejectedBlocks, {
-        id: blockId,
-        blockId,
-        reason: 'unavailable_or_empty'
-      });
+    for (const entry of normalizeArray(selection.runtimeAddedBlocks)) {
+      pushUniqueAuditEntry(audit.runtimeAddedBlocks, entry);
     }
-    for (const moduleId of enabledPersonaModules) {
-      const id = `persona_module:${moduleId}`;
-      if (selectedPlanIds.has(id) || rejectedPlanIds.has(id)) continue;
-      if (availablePlanIds.has(id)) continue;
-      pushUniqueAuditEntry(audit.runtimeRejectedBlocks, {
-        id,
-        moduleId,
-        reason: 'unavailable_or_rejected'
-      });
+    for (const entry of normalizeArray(selection.runtimeRejectedBlocks)) {
+      pushUniqueAuditEntry(audit.runtimeRejectedBlocks, entry);
     }
+    audit.selectionTrace = normalizeArray(audit.selectionTrace).concat(selection.selectionTrace);
+    audit.budgetReport = selection.budgetReport;
   }
-
-  return selected;
+  return selection.selectedBlocks;
 }
 

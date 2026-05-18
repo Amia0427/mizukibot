@@ -12,7 +12,6 @@ const { initializeMemeManager } = require('./core/memeManager');
 const { askAIByGraph } = require('./api/agentGraph');
 const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
 const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
-const { warmMcpRegistry } = require('./api/toolRegistry');
 const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
 const { shutdownSubagentExecutor } = require('./api/subagentExecutor');
 const { getNapCatActionClient } = require('./api/napcatActionClient');
@@ -109,7 +108,6 @@ try {
 }
 const webServer = startServer();
 initializeMemeManager();
-void warmMcpRegistry();
 enqueueMissingEmbeddings(null, {
   schedule: true,
   delayMs: 15000,
@@ -213,12 +211,12 @@ function connectNapCat() {
     reconnectAttempts = 0;
     console.log('✅ 瑞希上线啦！已连接到 NapCat');
 
-    if (!tickStarted) {
+    if (config.TICK_ENGINE_ENABLED && !tickStarted) {
       tickRuntime = startTickEngine(ws, askAIByGraph);
       tickStarted = true;
     }
 
-    if (!schedulerStarted) {
+    if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
       schedulerRuntime.start();
       schedulerStarted = true;
     }

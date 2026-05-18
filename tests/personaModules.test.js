@@ -5,6 +5,7 @@ const {
   buildPersonaModuleCandidates,
   diagnosePersonaModules,
   getPersonaModuleCatalogSummary,
+  prunePersonaModuleCandidates,
   selectPersonaModules
 } = require('../utils/personaModules');
 const {
@@ -175,11 +176,29 @@ const {
   const fallbackAsyncCandidates = await buildPersonaModuleCandidatesAsync({
     question: '我不想说，但有点难受，你不用追问我',
     worldbookEmbeddingHotPath: false,
-    worldbookSemanticLimit: 0
+    worldbookSemanticLimit: 0,
+    maxPersonaModuleCandidates: 3
   });
   assert.ok(fallbackAsyncCandidates.some((item) => item.id === 'wb_mizuki_care_chains'));
   assert.ok(fallbackAsyncCandidates.personaWorldbookSearch);
+  assert.ok(fallbackAsyncCandidates.candidatePruning);
+  assert.ok(fallbackAsyncCandidates.candidatePruning.keptCount <= 3 || fallbackAsyncCandidates.candidatePruning.alwaysKeepIds.length > 0);
   assert.strictEqual(fallbackAsyncCandidates.personaWorldbookSearch.embedding.hotPathUsed, false);
+
+  const prunedStrongHit = prunePersonaModuleCandidates([
+    { id: 'daily_energy', priority: 30, triggerHints: [], conflictsWith: [], phase: 'all', slot: 'energy' },
+    { id: 'scene_group_insert', priority: 50, triggerHints: [], conflictsWith: [], phase: 'all', slot: 'scene' },
+    { id: 'wb_mizuki_future_two_tracks', priority: 999, triggerHints: [], conflictsWith: [], phase: 'all', slot: 'general', worldbookScore: 0.99 },
+    { id: 'care_light', priority: 20, triggerHints: [], conflictsWith: [], phase: 'all', slot: 'emotion' }
+  ], {
+    question: '服饰专门学校和N25两个都不放弃',
+    chatType: 'group'
+  }, {
+    maxCandidates: 2
+  });
+  assert.ok(prunedStrongHit.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
+  assert.ok(prunedStrongHit.some((item) => item.id === 'scene_group_insert'));
+  assert.ok(prunedStrongHit.candidatePruning.droppedCount >= 1);
 
   const fakeCatalog = {
     modules: [

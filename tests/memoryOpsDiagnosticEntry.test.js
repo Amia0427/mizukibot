@@ -23,6 +23,21 @@ const runners = {
       coverage: { memory: { readyRatio: 0.5 }, worldbook: { readyRatio: 1 } },
       memory: { sourceRows: 2, ready: 1 },
       worldbook: { sourceRows: 1, ready: 1 },
+      journal: {
+        totals: {
+          users: 1,
+          days: 2,
+          summaryDays: 1,
+          segmentDays: 1,
+          segments: 3,
+          v3EpisodeEvents: 1,
+          v3EpisodeItems: 1,
+          embeddingReady: 1,
+          embeddingPending: 1,
+          embeddingFailed: 0
+        },
+        users: [{ userId: 'u1', days: 2, summaryDays: 1 }]
+      },
       probe: {
         cases: 2,
         fallbackCounts: { empty_result: 1 },
@@ -87,6 +102,9 @@ module.exports = (async () => {
   assert.strictEqual(diagnose.ok, true);
   assert.strictEqual(diagnose.exitCode, EXIT_CODES.ok);
   assert.ok(Object.prototype.hasOwnProperty.call(diagnose.summary, 'coverage'));
+  assert.strictEqual(diagnose.summary.journal.totals.days, 2);
+  assert.strictEqual(diagnose.summary.journal.totals.v3EpisodeEvents, 1);
+  assert.strictEqual(diagnose.details.journal.totals.embeddingPending, 1);
   assert.strictEqual(diagnose.summary.fallback.fallbackCounts.empty_result, 1);
 
   const backfill = await runMemoryOps(parseMemoryOpsArgs(['backfill', '--source', 'journal', '--limit', '4']), { runners });

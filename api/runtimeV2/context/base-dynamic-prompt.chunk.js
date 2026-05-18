@@ -82,7 +82,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       directedContext: routeMeta.directedContext,
       continuitySignals: options?.continuitySignals,
       personaPhase: routeMeta.personaPhase || '',
-      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
+      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
+      maxPersonaModuleCandidates: options.maxPersonaModuleCandidates
     }))
     : [];
   const personaWorldbookSearch = promptMaterials?.personaWorldbookSearch && typeof promptMaterials.personaWorldbookSearch === 'object'
@@ -104,6 +105,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         continuitySignals: options?.continuitySignals,
         personaPhase: routeMeta.personaPhase || '',
         chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
+        maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
         personaModuleCandidates
       }
     ))
@@ -196,7 +198,13 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       optional: true
     }
   }));
-  const dailyJournalPromptText = memoryContext.promptDailyJournalText || memoryContext.dailyJournalText || '';
+  const rawDailyJournalPromptText = memoryContext.promptDailyJournalText || memoryContext.dailyJournalText || '';
+  const dedupedDailyJournalPromptText = removeDuplicateJournalPromptText(
+    rawDailyJournalPromptText,
+    memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt || ''
+  );
+  const dailyJournalPromptText = dedupedDailyJournalPromptText
+    || (String(rawDailyJournalPromptText || '').trim() ? 'journal evidence already included in RetrievedMemory' : '');
   promptBlocks.push(createPromptBlock('daily_journal', 'Daily Journal', `[DailyJournal]\n${dailyJournalPromptText || 'none'}`, {
     stage: 'main',
     priority: 261,
@@ -445,7 +453,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   const selectedPromptBlocks = filterBlocksByPlan(promptBlocks, effectiveBaseDynamicPromptPlan, {
     requiredIds: [],
     runtimeAddedIds: baseRuntimeAddedIds,
-    audit: baseDynamicContextAudit
+    audit: baseDynamicContextAudit,
+    budgetTokens: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens)
   });
   const dedupedPromptBlocks = selectedPromptBlocks.filter((block) => {
     const blockId = normalizeText(block?.id);

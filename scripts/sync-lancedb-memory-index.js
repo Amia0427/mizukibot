@@ -6,6 +6,7 @@ const {
   buildMemoryVectorRow,
   buildWorldbookVectorRow,
   compactLanceDbTables,
+  dedupeVectorRows,
   isLanceDbSyncEnabled,
   listTableIds,
   syncMemoryRows,
@@ -21,13 +22,20 @@ function parseArgs(argv = process.argv.slice(2)) {
   const args = {
     dryRun: false,
     full: false,
+    fullReconcile: false,
+    deleteStaleRows: false,
     compact: false,
     since: 0
   };
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
     if (item === '--dry-run') args.dryRun = true;
-    else if (item === '--full') args.full = true;
+    else if (item === '--full') {
+      args.full = true;
+      args.fullReconcile = true;
+    }
+    else if (item === '--full-reconcile') args.fullReconcile = true;
+    else if (item === '--delete-stale-rows') args.deleteStaleRows = true;
     else if (item === '--compact') args.compact = true;
     else if (item === '--since') {
       args.since = Number(argv[index + 1] || 0) || Date.parse(argv[index + 1] || '') || 0;
@@ -140,16 +148,38 @@ function buildCoverage(source = {}, table = {}) {
 async function buildSyncSummary(args = {}) {
   const memory = buildMemoryRows(args);
   const worldbook = buildWorldbookRows(args);
+  const reconcileAllRows = args.full === true || args.fullReconcile === true || args.deleteStaleRows === true;
+  const memoryRowsToSync = dedupeVectorRows(reconcileAllRows ? memory.readyRows : memory.rows);
+  const worldbookRowsToSync = dedupeVectorRows(reconcileAllRows ? worldbook.readyRows : worldbook.rows);
   const memoryTable = normalizeText(config.MEMORY_LANCEDB_MEMORY_TABLE || 'memory_v3_vectors');
   const worldbookTable = normalizeText(config.MEMORY_LANCEDB_WORLDBOOK_TABLE || 'persona_worldbook_vectors');
   const [memoryTableStats, worldbookTableStats] = await Promise.all([
     listTableIds(memoryTable),
     listTableIds(worldbookTable)
   ]);
+  const memoryCoverage = buildCoverage(memory, memoryTableStats);
+  const worldbookCoverage = buildCoverage(worldbook, worldbookTableStats);
+  const memoryRepair = {
+    syncRows: memoryRowsToSync.length,
+    readyButNotSynced: Number(memoryCoverage.readyButNotSynced || 0) || 0,
+    staleTableRows: Number(memoryCoverage.staleTableRows || 0) || 0,
+    pendingEmbeddingRows: Number(memoryCoverage.pendingRows || 0) || 0
+  };
+  const worldbookRepair = {
+    syncRows: worldbookRowsToSync.length,
+    readyButNotSynced: Number(worldbookCoverage.readyButNotSynced || 0) || 0,
+    staleTableRows: Number(worldbookCoverage.staleTableRows || 0) || 0,
+    pendingEmbeddingRows: Number(worldbookCoverage.pendingRows || 0) || 0
+  };
+  const recommendedAction = memoryRepair.readyButNotSynced > 0 || worldbookRepair.readyButNotSynced > 0 || memoryRepair.staleTableRows > 0 || worldbookRepair.staleTableRows > 0
+    ? 'run_full_lancedb_reconcile'
+    : (memoryRepair.pendingEmbeddingRows > 0 ? 'run_embedding_backfill' : 'none');
   return {
     ok: true,
     dryRun: Boolean(args.dryRun),
     full: Boolean(args.full),
+    fullReconcile: Boolean(args.fullReconcile || args.full),
+    deleteStaleRows: Boolean(args.deleteStaleRows || args.fullReconcile || args.full),
     since: args.since || null,
     lancedbDir: path.resolve(config.MEMORY_LANCEDB_DIR),
     syncEnabled: isLanceDbSyncEnabled(config),
@@ -172,13 +202,20 @@ async function buildSyncSummary(args = {}) {
       staleRows: worldbook.staleRows
     },
     coverage: {
-      memory: buildCoverage(memory, memoryTableStats),
-      worldbook: buildCoverage(worldbook, worldbookTableStats)
+      memory: memoryCoverage,
+      worldbook: worldbookCoverage
     },
     writes: [],
+    repairPlan: {
+      memory: memoryRepair,
+      worldbook: worldbookRepair,
+      recommendedAction,
+      dryRunCommand: 'node scripts/sync-lancedb-memory-index.js --dry-run --full',
+      applyCommand: 'node scripts/sync-lancedb-memory-index.js --full --compact'
+    },
     _rows: {
-      memory: memory.rows,
-      worldbook: worldbook.rows
+      memory: memoryRowsToSync,
+      worldbook: worldbookRowsToSync
     }
   };
 }
@@ -196,8 +233,18 @@ async function main() {
   }
 
   if (!args.dryRun) {
-    summary.writes.push(await syncMemoryRows(summary._rows.memory, { full: args.full, createIndex: args.full }));
-    summary.writes.push(await syncWorldbookRows(summary._rows.worldbook, { full: args.full, createIndex: args.full }));
+    summary.writes.push(await syncMemoryRows(summary._rows.memory, {
+      full: args.full,
+      fullReconcile: args.fullReconcile,
+      deleteStaleRows: args.deleteStaleRows,
+      createIndex: args.full
+    }));
+    summary.writes.push(await syncWorldbookRows(summary._rows.worldbook, {
+      full: args.full,
+      fullReconcile: args.fullReconcile,
+      deleteStaleRows: args.deleteStaleRows,
+      createIndex: args.full
+    }));
     if (args.compact) {
       summary.compact = await compactLanceDbTables();
     }

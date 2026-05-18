@@ -324,14 +324,32 @@ function rowMatchesIdentity(row = {}, identity = {}) {
     && Number(row.fileSize || 0) === Number(identity.fileSize || 0);
 }
 
-function reconcilePersonaWorldbookEmbeddingCache(catalog = { modules: [] }) {
+function reconcilePersonaWorldbookEmbeddingCache(catalog = { modules: [] }, options = {}) {
   ensureDir(path.dirname(getCacheFile()));
-  const docs = buildWorldbookDocuments(catalog);
   if (!isEmbeddingEnabled()) {
+    if (options.dryRun === true) {
+      return { enabled: false, rows: 0, ready: 0, pending: 0, reused: 0, created: 0, dropped: 0 };
+    }
     writeJsonLines(getCacheFile(), []);
-    return { enabled: false, rows: 0, ready: 0, pending: 0, reused: 0, created: 0 };
+    return { enabled: false, rows: 0, ready: 0, pending: 0, reused: 0, created: 0, dropped: 0 };
   }
 
+  const plan = buildPersonaWorldbookEmbeddingCacheReconcilePlan(catalog);
+  if (options.dryRun === true) return plan;
+  writeJsonLines(getCacheFile(), plan.rowsData || []);
+  return {
+    enabled: plan.enabled,
+    rows: plan.rows,
+    ready: plan.ready,
+    pending: plan.pending,
+    reused: plan.reused,
+    created: plan.created,
+    dropped: plan.dropped
+  };
+}
+
+function buildPersonaWorldbookEmbeddingCacheReconcilePlan(catalog = { modules: [] }) {
+  const docs = buildWorldbookDocuments(catalog);
   const index = loadWorldbookEmbeddingIndex();
   const rows = [];
   let reused = 0;
@@ -370,14 +388,15 @@ function reconcilePersonaWorldbookEmbeddingCache(catalog = { modules: [] }) {
       });
     }
   }
-  writeJsonLines(getCacheFile(), rows);
   return {
     enabled: true,
     rows: rows.length,
     ready: rows.filter((row) => row.status === 'ready' && row.embedding.length > 0).length,
     pending: rows.filter((row) => row.status !== 'ready').length,
     reused,
-    created
+    created,
+    dropped: Math.max(0, index.rows.length + created - rows.length),
+    rowsData: rows
   };
 }
 
@@ -979,6 +998,7 @@ module.exports = {
   backfillPersonaWorldbookEmbeddings,
   buildFailureBreakdown,
   buildPersonaWorldbookBackfillPlan,
+  buildPersonaWorldbookEmbeddingCacheReconcilePlan,
   buildPlannerWorldbookCatalog,
   buildWorldbookDocuments,
   getWorldbookModules,
