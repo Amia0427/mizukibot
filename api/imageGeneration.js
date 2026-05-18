@@ -1,6 +1,5 @@
 const axios = require('axios');
 const config = require('../config');
-const { drawPicture } = require('./legacy/aiHost');
 const { getApiProvider, normalizeProviderRequestHeaders } = require('../utils/modelProvider');
 
 function normalizeText(value) {
@@ -199,6 +198,10 @@ function describeBotDiaryQzoneImageFailure(payload) {
   if (errorMessage) return errorMessage;
 
   return 'image generation returned no image';
+}
+
+async function drawPicture(prompt) {
+  return require('./legacy/aiHost').drawPicture(prompt);
 }
 
 async function drawBotDiaryQzonePicture(prompt = '', options = {}) {

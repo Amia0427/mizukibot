@@ -22,7 +22,8 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     directedContext: routeMeta.directedContext,
     continuitySignals: options?.continuitySignals,
     personaPhase: routeMeta.personaPhase || '',
-    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
+    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
+    maxPersonaModuleCandidates: options.maxPersonaModuleCandidates
   };
   const personaModuleCandidatesPromise = buildPersonaModuleCandidatesAsync(personaModuleContext)
     .catch((error) => ({ __personaModuleCandidatesError: error }));
@@ -122,7 +123,8 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     personaModuleDecision,
     dynamicPromptPlan,
     summaryText,
-    dynamicFewShotPrompt
+    dynamicFewShotPrompt,
+    candidatePruning: personaModuleCandidates.candidatePruning || {}
   };
 }
 

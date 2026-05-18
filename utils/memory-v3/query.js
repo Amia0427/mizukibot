@@ -25,10 +25,13 @@ const {
 } = require('./embeddingIndex');
 const {
   buildDailyJournalDocsForUser,
-  getJournalDocDay,
+  getJournalDocDay
+} = require('./journalDocs');
+const {
+  classifyJournalRecallIntent,
   journalDateMatchBoost,
   resolveJournalTargetDays
-} = require('./journalDocs');
+} = require('./journalRecallPolicy');
 const {
   fuseRecallCandidates,
   isLanceDbReadEnabled,
@@ -322,21 +325,40 @@ function collectCandidates(userId, options = {}) {
   const episodes = episodeProjection.users?.[String(userId || '').trim()]?.items || [];
   if (includeJournal) {
     for (const episode of Array.isArray(episodes) ? episodes : []) {
+      const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
+      if (rollupLevel === 'segment') continue;
+      const episodeDay = normalizeText(episode.episodeDay || episode.endDay || episode.startDay);
       candidates.push({
         id: `episode:${episode.id}`,
         source: 'journal',
         type: 'episode',
         scopeType: 'personal',
+        userId,
+        ownerUserId: userId,
         text: normalizeText(episode.text),
         updatedAt: Number(episode.updatedAt || 0) || 0,
-        confidence: 0.92,
-        importance: episode.type === 'monthly' ? 1.2 : 1.0,
-        evidenceCount: 1,
+        confidence: Number(episode.confidence || 0) || 0.92,
+        importance: Number(episode.importance || 0) || (rollupLevel === 'monthly' ? 1.2 : 1.0),
+        evidenceCount: Math.max(1, Number(episode.evidenceCount || 1) || 1),
+        evidenceTier: 'strict',
+        stabilityScore: rollupLevel === 'monthly' ? 0.88 : 0.82,
+        memoryKind: 'episode',
+        sourceKind: normalizeText(episode.sourceKind || 'journal'),
+        fieldKey: 'episode',
         semanticSlot: 'episode',
-        canonicalKey: canonicalizeText(episode.text),
-        rollupLevel: episode.type,
-        episodeDay: episode.episodeDay || '',
-        yearMonth: episode.yearMonth || ''
+        canonicalKey: normalizeText(episode.canonicalKey || canonicalizeText(episode.text)).toLowerCase(),
+        rollupLevel,
+        episodeDay,
+        day: episodeDay,
+        startDay: normalizeText(episode.startDay),
+        endDay: normalizeText(episode.endDay),
+        yearMonth: normalizeText(episode.yearMonth),
+        part: Math.max(0, Number(episode.part || 0) || 0),
+        sessionKeys: Array.isArray(episode.sessionKeys) ? episode.sessionKeys : [],
+        topics: Array.isArray(episode.topics) ? episode.topics : [],
+        textKind: normalizeText(episode.textKind) || `journal_${rollupLevel}`,
+        sourceCompleteness: normalizeText(episode.sourceCompleteness || 'summary'),
+        sourceFile: normalizeText(episode.sourceFile)
       });
     }
 
@@ -524,6 +546,32 @@ function applyJournalTargetDayPriority(items = [], targetDays = []) {
   });
 }
 
+function ensureTargetJournalCandidates(items = [], allCandidates = [], targetDays = []) {
+  if (!Array.isArray(targetDays) || targetDays.length === 0) return Array.isArray(items) ? items : [];
+  const existing = new Set((Array.isArray(items) ? items : []).map((item) => candidateKey(item)).filter(Boolean));
+  const additions = [];
+  for (const candidate of Array.isArray(allCandidates) ? allCandidates : []) {
+    if (!isJournalTargetDayCandidate(candidate, targetDays)) continue;
+    const key = candidateKey(candidate);
+    if (!key || existing.has(key)) continue;
+    existing.add(key);
+    additions.push({
+      ...candidate,
+      score: Math.max(Number(candidate.score || 0) || 0, Number(config.MEMORY_RAG_MIN_SCORE || 0.16) + 8),
+      lexical: Number(candidate.lexical || 0) || 0,
+      embedding: Number(candidate.embedding || candidate.vectorScore || 0) || 0,
+      matchMode: candidate.matchMode || 'date_fallback',
+      journalTargetDayPriority: true,
+      selectionReason: appendSelectionReason(candidate.selectionReason, 'target_day_fallback'),
+      scoreParts: {
+        ...(candidate.scoreParts || {}),
+        targetDatePriorityBoost: Math.max(4, Number(config.MEMORY_JOURNAL_TARGET_DATE_HARD_BOOST || 8) || 8)
+      }
+    });
+  }
+  return stableSortByScore((Array.isArray(items) ? items : []).concat(additions));
+}
+
 function getStrongSemanticThreshold(options = {}) {
   return Math.max(0.1, Number(options.strongSemanticMinScore || config.MEMORY_STRONG_SEMANTIC_MIN_SCORE || 0.82) || 0.82);
 }
@@ -575,6 +623,36 @@ function protectStrongSemanticCandidates(items = [], topK = 8, options = {}) {
       diagnostics: {
         ...(item.diagnostics || {}),
         recall: buildRecallDiagnostics(item, selectionReason)
+      }
+    };
+  });
+}
+
+function boostJournalDaySummaryCompanions(items = [], options = {}) {
+  const list = Array.isArray(items) ? items : [];
+  if (!list.length) return list;
+  const threshold = getStrongSemanticThreshold(options);
+  const strongSegmentDays = new Set(list
+    .filter((item) => String(item.source || '').toLowerCase() === 'journal')
+    .filter((item) => String(item.type || '').includes('segment') || String(item.rollupLevel || '') === 'segment')
+    .filter((item) => Number(item.embedding || item.semantic || item.vectorScore || 0) >= threshold)
+    .map((item) => getJournalDocDay(item))
+    .filter(Boolean));
+  if (!strongSegmentDays.size) return list;
+  const boost = Math.max(0.04, Number(options.journalDaySummaryCompanionBoost || config.MEMORY_JOURNAL_DAY_SUMMARY_COMPANION_BOOST || 0.28) || 0.28);
+  return list.map((item) => {
+    if (String(item.source || '').toLowerCase() !== 'journal') return item;
+    const day = getJournalDocDay(item);
+    const isSegment = String(item.type || '').includes('segment') || String(item.rollupLevel || '') === 'segment';
+    if (!day || isSegment || !strongSegmentDays.has(day)) return item;
+    const selectionReason = appendSelectionReason(item.selectionReason, 'same_day_summary_companion');
+    return {
+      ...item,
+      score: Number(item.score || 0) + boost,
+      selectionReason,
+      scoreParts: {
+        ...(item.scoreParts || {}),
+        daySummaryCompanionBoost: boost
       }
     };
   });
@@ -767,14 +845,32 @@ function diversify(items = [], topK = 8, options = {}) {
   const selected = [];
   const perSource = new Map();
   const seenCanonical = new Set();
+  const selectedJournalDays = new Set();
   const facet = normalizeText(options.facet || items.find((item) => item?.facet)?.facet || 'default').toLowerCase();
-  const ranked = protectStrongSemanticCandidates(stableSortByScore(items), topK, options);
+  const ranked = boostJournalDaySummaryCompanions(
+    protectStrongSemanticCandidates(stableSortByScore(items), topK, options),
+    options
+  );
   for (const item of stableSortByScore(ranked)) {
     if (selected.length >= topK) break;
     const canonical = String(item.canonicalKey || canonicalizeText(item.text));
     if (!canonical || seenCanonical.has(canonical)) continue;
     const source = String(item.source || 'personal');
     if ((perSource.get(source) || 0) >= sourceLimitForFacet(source, facet)) continue;
+    if (source === 'journal') {
+      const day = getJournalDocDay(item);
+      const isSegment = String(item.type || '').includes('segment') || String(item.rollupLevel || '') === 'segment';
+      const isStrongSemanticSegment = isSegment
+        && Number(item.embedding || item.semantic || item.vectorScore || 0) >= getStrongSemanticThreshold(options);
+      const hasDaySummary = day && ranked.some((candidate) => (
+        getJournalDocDay(candidate) === day
+        && String(candidate.source || '') === 'journal'
+        && !String(candidate.type || '').includes('segment')
+        && String(candidate.rollupLevel || '') !== 'segment'
+      ));
+      if (isSegment && hasDaySummary && !selectedJournalDays.has(day) && !isStrongSemanticSegment) continue;
+      if (day && (!isSegment || isStrongSemanticSegment)) selectedJournalDays.add(day);
+    }
     seenCanonical.add(canonical);
     perSource.set(source, (perSource.get(source) || 0) + 1);
     const selectionReason = appendSelectionReason(item.selectionReason, `facet_${facet || 'default'}_selected`);
@@ -904,6 +1000,7 @@ async function queryMemory(input = {}) {
     today: input.journalToday,
     now: input.journalNow
   });
+  const journalIntent = classifyJournalRecallIntent(query, input);
   const topK = Math.max(1, Math.min(20, Number(input.topK || config.MEMORY_V3_TOP_K || config.MEMORY_RAG_TOP_K || 8) || 8));
   const facet = FACETS.includes(String(input.facet || '').trim().toLowerCase())
     ? String(input.facet || '').trim().toLowerCase()
@@ -1018,7 +1115,11 @@ async function queryMemory(input = {}) {
     timing.fusionMs += getNowMs() - stageStartedAt;
   }
   stageStartedAt = getNowMs();
-  const conflictResolved = applyConflictResolution(rankedForRerank);
+  const conflictResolved = ensureTargetJournalCandidates(
+    applyConflictResolution(rankedForRerank),
+    candidates,
+    journalTargetDays
+  );
   timing.conflictResolutionMs = getNowMs() - stageStartedAt;
   const rerankCandidateLimit = Math.max(
     2,
@@ -1048,7 +1149,7 @@ async function queryMemory(input = {}) {
   timing.rerankMs = getNowMs() - stageStartedAt;
   const reranked = appendRerankTail(rerankedHead, rerankTail);
   stageStartedAt = getNowMs();
-  const selected = diversify(reranked, topK, {
+  const selected = diversify(ensureTargetJournalCandidates(reranked, candidates, journalTargetDays), topK, {
     ...input,
     facet
   });
@@ -1066,6 +1167,19 @@ async function queryMemory(input = {}) {
     ...input,
     userId
   });
+  const coverageAtQuery = {
+    embedding: embeddingCoverage,
+    lancedb: {
+      enabled: lancedbDiagnostics.enabled === true,
+      mode: lancedbDiagnostics.mode,
+      fused: lancedbDiagnostics.fused === true,
+      fallbackReason: lancedbDiagnostics.fallbackReason || '',
+      rows: Number(lancedbDiagnostics.rows || 0) || 0,
+      vectorCandidates: Number(lancedbDiagnostics.vectorCandidates || 0) || 0
+    },
+    projectionStale: projectionFreshness.projectionStale === true,
+    projectionStaleReason: projectionFreshness.projectionStaleReason || ''
+  };
   return {
     ok: true,
     userId,
@@ -1090,10 +1204,20 @@ async function queryMemory(input = {}) {
       reranked: reranked.length,
       selected: selected.length,
       lancedb: lancedbDiagnostics,
+      projectionFreshness: {
+        projectionStale: projectionFreshness.projectionStale === true,
+        projectionStaleReason: projectionFreshness.projectionStaleReason || '',
+        latestEventTs: Number(projectionFreshness.latestEventTs || 0) || 0,
+        projectionEventHighWatermarkTs: Number(projectionFreshness.projectionEventHighWatermarkTs || 0) || 0
+      },
+      coverageAtQuery,
+      journalIntent,
       timings: timing
     },
     diagnostics: {
       projectionFreshness,
+      coverageAtQuery,
+      journalIntent,
       timings: timing,
       recall: {
         strongSemanticThreshold: getStrongSemanticThreshold(input),

@@ -114,6 +114,7 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'dailyJournalSegments.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyJournalRollups.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyJournalRetrieval.test.js'),
+  path.join(__dirname, '..', 'tests', 'backfillJournalV3Events.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyShareStore.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyShareContent.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyShareEngine.test.js'),

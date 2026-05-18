@@ -62,6 +62,7 @@ function summarizeResults(results = [], startedAt = Date.now(), options = {}) {
   const failed = results.reduce((sum, item) => sum + Number(item.failed || 0), 0);
   const remaining = results.reduce((sum, item) => sum + Number(item.remaining || 0), 0);
   const failureBreakdown = {};
+  const byPriority = {};
   for (const result of results) {
     const breakdown = result?.failureBreakdown && typeof result.failureBreakdown === 'object'
       ? result.failureBreakdown
@@ -69,7 +70,15 @@ function summarizeResults(results = [], startedAt = Date.now(), options = {}) {
     for (const [reason, count] of Object.entries(breakdown)) {
       failureBreakdown[reason] = (failureBreakdown[reason] || 0) + Number(count || 0);
     }
+    const priorities = result?.byPriority && typeof result.byPriority === 'object' ? result.byPriority : {};
+    for (const [priority, value] of Object.entries(priorities)) {
+      if (!byPriority[priority]) byPriority[priority] = { pending: 0, considered: 0, reason: value?.reason || '' };
+      byPriority[priority].pending += Number(value?.pending || 0) || 0;
+      byPriority[priority].considered += Number(value?.considered || 0) || 0;
+      if (!byPriority[priority].reason && value?.reason) byPriority[priority].reason = value.reason;
+    }
   }
+  const firstActionable = results.find((item) => item && (item.priority || item.reason || item.checkpoint));
   return {
     ok: results.every((item) => item && item.ok !== false),
     dryRun: Boolean(options.dryRun),
@@ -80,6 +89,11 @@ function summarizeResults(results = [], startedAt = Date.now(), options = {}) {
     failed,
     failureBreakdown,
     remaining,
+    priority: firstActionable?.priority || '',
+    reason: firstActionable?.reason || '',
+    byPriority,
+    estimatedBatches: results.reduce((sum, item) => sum + (Number(item.estimatedBatches || 0) || 0), 0),
+    checkpoint: firstActionable?.checkpoint || null,
     durationMs: Date.now() - startedAt,
     results
   };
@@ -105,6 +119,7 @@ function resolveBackfillRuntimeOptions(args = {}) {
     effectiveLimit,
     lowResourceMaxPerRun,
     rssRecycleMb: Math.max(0, Number(config.MEMORY_BACKFILL_RSS_RECYCLE_MB || 0) || 0),
+    rssGrowthMb: Math.max(0, Number(config.MEMORY_BACKFILL_RSS_GROWTH_MB || 0) || 0),
     batchSleepMs: lowResourceMode ? Math.max(0, Number(config.MEMORY_BACKFILL_BATCH_SLEEP_MS || 0) || 0) : 0,
     checkpointFile: path.resolve(String(args.checkpointFile || config.MEMORY_BACKFILL_CHECKPOINT_FILE || path.join(config.MEMORY_V3_DIR, 'backfill-checkpoint.json')))
   };
@@ -120,10 +135,16 @@ function getRssMb(getMemoryUsage = process.memoryUsage) {
   }
 }
 
-function shouldStopForRss(options = {}, rssMb = 0) {
-  return options.lowResourceMode === true
-    && Number(options.rssRecycleMb || 0) > 0
-    && Number(rssMb || 0) >= Number(options.rssRecycleMb || 0);
+function shouldStopForRss(options = {}, rssMb = 0, baselineRssMb = 0) {
+  if (options.lowResourceMode !== true) return false;
+  const current = Number(rssMb || 0) || 0;
+  const absoluteLimit = Number(options.rssRecycleMb || 0) || 0;
+  const growthLimit = Number(options.rssGrowthMb || 0) || 0;
+  const baseline = Number(baselineRssMb || 0) || 0;
+  const effectiveLimit = absoluteLimit > 0 && baseline > 0
+    ? Math.max(absoluteLimit, baseline + growthLimit)
+    : absoluteLimit;
+  return effectiveLimit > 0 && current >= effectiveLimit;
 }
 
 function sleep(ms = 0, deps = {}) {
@@ -202,22 +223,37 @@ function shouldRepeatStepFromResult(result = {}) {
   return Number(result?.remaining || 0) > 0;
 }
 
-async function syncAfterBackfill(startedAt = Date.now(), source = 'all') {
-  const summary = await buildSyncSummary({
+async function syncAfterBackfill(startedAt = Date.now(), source = 'all', deps = {}) {
+  const syncSummaryBuilder = deps.buildSyncSummary || buildSyncSummary;
+  const memorySync = deps.syncMemoryRows || syncMemoryRows;
+  const worldbookSync = deps.syncWorldbookRows || syncWorldbookRows;
+  const summary = await syncSummaryBuilder({
     dryRun: false,
     since: startedAt
   });
+  const beforeFullSummary = await syncSummaryBuilder({
+    dryRun: true,
+    fullReconcile: true
+  });
   const writes = [];
   if (source === 'all' || source === 'memory' || source === 'journal') {
-    writes.push(await syncMemoryRows(summary._rows.memory, { full: false }));
+    writes.push(await memorySync(summary._rows.memory, { full: false }));
   }
   if (source === 'all' || source === 'worldbook') {
-    writes.push(await syncWorldbookRows(summary._rows.worldbook, { full: false }));
+    writes.push(await worldbookSync(summary._rows.worldbook, { full: false }));
   }
+  const afterFullSummary = await syncSummaryBuilder({
+    dryRun: true,
+    fullReconcile: true
+  });
   delete summary._rows;
+  delete beforeFullSummary._rows;
+  delete afterFullSummary._rows;
   return {
     since: startedAt,
-    coverage: summary.coverage,
+    coverage: afterFullSummary.coverage,
+    beforeCoverage: beforeFullSummary.coverage,
+    incrementalCoverage: summary.coverage,
     writes
   };
 }
@@ -244,20 +280,31 @@ async function runBackfill(args = {}, deps = {}) {
   let stoppedBy = '';
   let checkpointStatus = null;
   let latestRssMb = getRssMb(getMemoryUsage);
+  const baselineRssMb = latestRssMb;
 
   for (let index = 0; index < steps.length; index += 1) {
     const step = steps[index];
     latestRssMb = getRssMb(getMemoryUsage);
-    if (shouldStopForRss(runtimeOptions, latestRssMb)) {
+    if (args.dryRun !== true && shouldStopForRss(runtimeOptions, latestRssMb, baselineRssMb)) {
       stoppedBy = 'rss_limit';
-      checkpointStatus = writeBackfillCheckpoint(runtimeOptions.checkpointFile, {
-        reason: stoppedBy,
-        rssMb: latestRssMb,
-        args: compactBackfillArgs(args),
-        runtimeOptions,
-        completedSteps,
-        pendingSteps: steps.slice(index)
-      });
+      checkpointStatus = args.dryRun === true
+        ? {
+            written: false,
+            dryRun: true,
+            reason: stoppedBy,
+            rssMb: latestRssMb,
+            baselineRssMb,
+            pendingSteps: steps.slice(index)
+          }
+        : writeBackfillCheckpoint(runtimeOptions.checkpointFile, {
+            reason: stoppedBy,
+            rssMb: latestRssMb,
+            baselineRssMb,
+            args: compactBackfillArgs(args),
+            runtimeOptions,
+            completedSteps,
+            pendingSteps: steps.slice(index)
+          });
       break;
     }
 
@@ -278,12 +325,35 @@ async function runBackfill(args = {}, deps = {}) {
     const pendingSteps = shouldRepeatStepFromResult(latestResult)
       ? [step, ...steps.slice(index + 1)]
       : steps.slice(index + 1);
-    if (shouldStopForRss(runtimeOptions, latestRssMb)) {
+    if (args.dryRun !== true && shouldStopForRss(runtimeOptions, latestRssMb, baselineRssMb)) {
       stoppedBy = 'rss_limit';
+      checkpointStatus = args.dryRun === true
+        ? {
+            written: false,
+            dryRun: true,
+            reason: stoppedBy,
+            rssMb: latestRssMb,
+            baselineRssMb,
+            pendingSteps
+          }
+        : writeBackfillCheckpoint(runtimeOptions.checkpointFile, {
+            reason: stoppedBy,
+            rssMb: latestRssMb,
+            baselineRssMb,
+            args: compactBackfillArgs(args),
+            runtimeOptions,
+            completedSteps,
+            pendingSteps
+          });
+      break;
+    }
+    if (!args.dryRun && pendingSteps.length > 0 && runtimeOptions.lowResourceMode === true && Number(latestResult?.embedded || 0) > 0) {
+      stoppedBy = 'partial_run';
       checkpointStatus = writeBackfillCheckpoint(runtimeOptions.checkpointFile, {
         reason: stoppedBy,
         rssMb: latestRssMb,
-        args: compactBackfillArgs(args),
+        baselineRssMb,
+        args: compactBackfillArgs({ ...args, resume: true }),
         runtimeOptions,
         completedSteps,
         pendingSteps
@@ -303,8 +373,9 @@ async function runBackfill(args = {}, deps = {}) {
   summary.requestedLimit = runtimeOptions.requestedLimit;
   summary.effectiveLimit = runtimeOptions.effectiveLimit;
   summary.rssMb = latestRssMb;
+  summary.baselineRssMb = baselineRssMb;
   summary.stoppedBy = stoppedBy;
-  summary.checkpoint = checkpointStatus;
+  summary.checkpoint = checkpointStatus || summary.checkpoint;
   summary.completedSteps = completedSteps;
   summary.pendingSteps = checkpointStatus?.pendingSteps || [];
   if (checkpoint && checkpointSteps.length > 0) {

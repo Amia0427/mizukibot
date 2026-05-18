@@ -8,6 +8,33 @@ const {
   buildExecutablePlanFromPolicy
 } = require('./executablePlan');
 
+function hasOwnValue(source = {}, key = '') {
+  return Boolean(source && Object.prototype.hasOwnProperty.call(source, key));
+}
+
+function hasMeaningfulObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0;
+}
+
+function pickObjectOption(options = {}, routeMeta = {}, key = '', fallback = {}) {
+  if (hasOwnValue(options, key) && hasMeaningfulObject(options[key])) return options[key];
+  if (hasOwnValue(routeMeta, key) && hasMeaningfulObject(routeMeta[key])) return routeMeta[key];
+  if (hasOwnValue(options, key) && options[key] && typeof options[key] === 'object' && !Array.isArray(options[key])) return options[key];
+  if (hasOwnValue(routeMeta, key) && routeMeta[key] && typeof routeMeta[key] === 'object' && !Array.isArray(routeMeta[key])) return routeMeta[key];
+  return fallback;
+}
+
+function pickArrayOption(options = {}, routeMeta = {}, key = '') {
+  if (Array.isArray(options[key]) && options[key].length > 0) return options[key];
+  if (Array.isArray(routeMeta[key]) && routeMeta[key].length > 0) return routeMeta[key];
+  if (Array.isArray(options[key])) return options[key];
+  if (Array.isArray(routeMeta[key])) return routeMeta[key];
+  return [];
+}
+
+function pickTextOption(options = {}, routeMeta = {}, key = '') {
+  return options[key] || routeMeta[key] || '';
+}
 
 function maybeEnqueueBackgroundResearch(route = {}, decision = {}, options = {}) {
   const meta = decision?.plannerMeta && typeof decision.plannerMeta === 'object' ? decision.plannerMeta : {};
@@ -25,15 +52,16 @@ function maybeEnqueueBackgroundResearch(route = {}, decision = {}, options = {})
 async function planDirectChat(route = {}, options = {}) {
   const available = planning.collectAvailableToolSummary(route, options);
   const policyKey = resolvePolicyKey(route);
+  const routeMeta = route?.meta || {};
   const explicitAllowedTools = Array.isArray(options?.allowedTools)
     ? options.allowedTools
-    : (Array.isArray(route?.meta?.allowedTools) ? route.meta.allowedTools : undefined);
+    : (Array.isArray(routeMeta.allowedTools) ? routeMeta.allowedTools : undefined);
   const decision = await planning.planRequestV2({
     question: route?.question || route?.cleanText || '',
     cleanText: route?.cleanText || route?.question || '',
     imageUrl: route?.imageUrl || null,
     topRouteType: route?.topRouteType || 'direct_chat',
-    routeMeta: route?.meta || {},
+    routeMeta,
     route: {
       ...route,
       question: route?.question || route?.cleanText || '',
@@ -45,10 +73,21 @@ async function planDirectChat(route = {}, options = {}) {
     ...(explicitAllowedTools ? { allowedTools: explicitAllowedTools } : {}),
     toolCatalog: available.toolCatalog,
     contextSummary: options?.contextSummary || route?.meta?.contextSummary || route?.meta?.conversationSummary || '',
-    directedContext: options?.directedContext || route?.meta?.directedContext || null,
-    continuitySignals: options?.continuitySignals || {},
+    directedContext: options?.directedContext || routeMeta.directedContext || null,
+    continuitySignals: pickObjectOption(options, routeMeta, 'continuitySignals'),
+    memoryContext: pickObjectOption(options, routeMeta, 'memoryContext'),
+    availableContextSignals: pickObjectOption(options, routeMeta, 'availableContextSignals'),
+    personaModuleCatalog: pickArrayOption(options, routeMeta, 'personaModuleCatalog'),
+    dynamicPromptBlockCatalog: pickArrayOption(options, routeMeta, 'dynamicPromptBlockCatalog'),
+    dynamicPromptGuide: pickTextOption(options, routeMeta, 'dynamicPromptGuide'),
+    dynamicFewShotPrompt: pickTextOption(options, routeMeta, 'dynamicFewShotPrompt'),
+    memoryCliTurn: pickObjectOption(options, routeMeta, 'memoryCliTurn'),
+    schedulerInjection: options?.schedulerInjection || routeMeta.schedulerInjection || routeMeta.lifeSchedulerInjection,
+    sharedShortTermContext: pickObjectOption(options, routeMeta, 'sharedShortTermContext'),
+    personaMemoryState: pickObjectOption(options, routeMeta, 'personaMemoryState'),
+    userInfo: pickObjectOption(options, routeMeta, 'userInfo'),
     constraints: options?.constraints || {},
-    requestTrace: options?.requestTrace || route?.meta?.requestTrace || null,
+    requestTrace: options?.requestTrace || routeMeta.requestTrace || null,
     planner: options?.planner
   });
   const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, {

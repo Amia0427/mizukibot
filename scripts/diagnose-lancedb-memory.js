@@ -5,6 +5,8 @@ const config = require('../config');
 const { buildSyncSummary } = require('./sync-lancedb-memory-index');
 const { queryMemory } = require('../utils/memory-v3/query');
 const { loadScopeProjection } = require('../utils/memory-v3/storage');
+const { diagnoseProjectionFreshness } = require('../utils/memory-v3/diagnostics');
+const { buildJournalHealthSummary } = require('../utils/memory-v3/journalDiagnostics');
 const {
   safeReadJsonLines,
   normalizeText
@@ -203,11 +205,14 @@ async function runProbe(cases = []) {
   };
 }
 
-async function runDiagnostics(args = {}) {
-  const sync = await buildSyncSummary({ dryRun: true });
+async function runDiagnostics(args = {}, deps = {}) {
+  const sync = await (deps.buildSyncSummary || buildSyncSummary)({ dryRun: true });
+  const repairPlan = sync.repairPlan || {};
   delete sync._rows;
   const cases = args.skipProbe ? [] : loadProbeCases(args.limit);
   const probe = args.skipProbe ? { skipped: true, reason: 'skip_probe' } : await runProbe(cases);
+  const projectionFreshness = (deps.diagnoseProjectionFreshness || diagnoseProjectionFreshness)();
+  const journal = buildSafeJournalHealthSummary({ limit: args.limit || 20 }, deps);
   return {
     ok: true,
     lancedbDir: sync.lancedbDir,
@@ -215,8 +220,26 @@ async function runDiagnostics(args = {}) {
     coverage: sync.coverage,
     memory: sync.memory,
     worldbook: sync.worldbook,
+    repairPlan,
+    recommendedAction: repairPlan.recommendedAction || '',
+    projectionFreshness,
+    journal,
     probe
   };
+}
+
+function buildSafeJournalHealthSummary(options = {}, deps = {}) {
+  try {
+    return (deps.buildJournalHealthSummary || buildJournalHealthSummary)(options);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'journal_health_failed',
+      message: error?.message || String(error || ''),
+      totals: {},
+      users: []
+    };
+  }
 }
 
 async function main() {
@@ -234,6 +257,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildSafeJournalHealthSummary,
   countScopeLeaks,
   loadProbeCases,
   parseArgs,

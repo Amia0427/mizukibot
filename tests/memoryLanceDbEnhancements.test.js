@@ -56,8 +56,12 @@ writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [{
 
 const {
   buildCoverage,
-  buildMemoryRows
+  buildMemoryRows,
+  parseArgs
 } = require('../scripts/sync-lancedb-memory-index');
+const { buildSafeJournalHealthSummary, runDiagnostics } = require('../scripts/diagnose-lancedb-memory');
+const { runRepair } = require('../scripts/repair-memory-vector-index');
+const journalDocs = require('../utils/memory-v3/journalDocs');
 const { queryMemory } = require('../utils/memory-v3/query');
 const {
   buildEmbeddingCoverageDiagnostics,
@@ -65,6 +69,15 @@ const {
   diagnoseNoVisibleVectorCandidates
 } = require('../utils/memory-v3/query');
 const { countScopeLeaks } = require('../scripts/diagnose-lancedb-memory');
+
+assert.strictEqual(typeof journalDocs.readDailyJournalUsers, 'function');
+const failedJournal = buildSafeJournalHealthSummary({}, {
+  buildJournalHealthSummary: () => {
+    throw new Error('journal scan failed');
+  }
+});
+assert.strictEqual(failedJournal.ok, false);
+assert.strictEqual(failedJournal.reason, 'journal_health_failed');
 
 const coverage = buildCoverage({
   sourceRows: 4,
@@ -95,6 +108,22 @@ const staleCoverage = buildCoverage({
 assert.strictEqual(staleCoverage.readyButNotSynced, 1);
 assert.strictEqual(staleCoverage.staleTableRows, 1);
 assert.strictEqual(staleCoverage.staleRows, 1);
+assert.deepStrictEqual(parseArgs(['--full-reconcile', '--delete-stale-rows', '--since', '1000']), {
+  dryRun: false,
+  full: false,
+  fullReconcile: true,
+  deleteStaleRows: true,
+  compact: false,
+  since: 1000
+});
+assert.deepStrictEqual(parseArgs(['--full']), {
+  dryRun: false,
+  full: true,
+  fullReconcile: true,
+  deleteStaleRows: false,
+  compact: false,
+  since: 0
+});
 
 const memoryRows = buildMemoryRows();
 assert.strictEqual(memoryRows.sourceRows, 0);
@@ -114,12 +143,111 @@ assert.strictEqual(diagnoseNoVisibleVectorCandidates([{
   filter: lancedbStore.buildMemoryFilter({ userId: 'u_diag' })
 }, 'style'), 'no_visible_candidates_facet_filtered');
 
-module.exports = queryMemory({
+module.exports = runDiagnostics({
+  skipProbe: true,
+  limit: 1
+}, {
+  buildSyncSummary: async () => ({
+    ok: true,
+    lancedbDir: tempRoot,
+    syncEnabled: true,
+    coverage: {},
+    memory: {},
+    worldbook: {},
+    repairPlan: {}
+  }),
+  diagnoseProjectionFreshness: () => ({ projectionStale: false }),
+  buildJournalHealthSummary: () => {
+    throw new Error('journal health degraded');
+  }
+}).then((diagnose) => {
+  assert.strictEqual(diagnose.ok, true);
+  assert.strictEqual(diagnose.journal.ok, false);
+  const cacheBefore = fs.existsSync(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE)
+    ? fs.readFileSync(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, 'utf8')
+    : '';
+  return runRepair({
+    dryRun: true,
+    source: 'memory'
+  }, {
+    collectEmbeddingBackfillNodes: () => [{
+      id: 'repair_node',
+      userId: 'u_diag',
+      scopeType: 'personal',
+      source: 'profile',
+      status: 'active',
+      text: 'repair dry run should not write cache',
+      canonicalKey: 'repair',
+      updatedAt: 200
+    }],
+    buildSyncSummary: async () => ({
+      coverage: {
+        memory: { staleTableRows: 2 },
+        worldbook: { staleTableRows: 3 }
+      },
+      repairPlan: {
+        memory: { syncRows: 4 },
+        worldbook: { syncRows: 5 }
+      },
+      _rows: {
+        memory: [{ id: 'memory:repair_node', vector: [1] }],
+        worldbook: []
+      }
+    })
+  }).then((repairDryRun) => {
+    assert.strictEqual(repairDryRun.dryRun, true);
+    assert.strictEqual(repairDryRun.cacheRepair.memory.created, 1);
+    assert.strictEqual(repairDryRun.syncedRows, 4);
+    assert.strictEqual(repairDryRun.cleanedStaleRows, 2);
+    assert.strictEqual(fs.existsSync(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE)
+      ? fs.readFileSync(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, 'utf8')
+      : '', cacheBefore);
+    const syncCalls = [];
+    return runRepair({
+      apply: true,
+      source: 'memory'
+    }, {
+      collectEmbeddingBackfillNodes: () => [{
+        id: 'repair_node_apply',
+        userId: 'u_diag',
+        scopeType: 'personal',
+        source: 'profile',
+        status: 'active',
+        text: 'repair apply writes cache and syncs rows',
+        canonicalKey: 'repair apply',
+        updatedAt: 300
+      }],
+      buildSyncSummary: async () => ({
+        coverage: {
+          memory: { staleTableRows: 1 },
+          worldbook: { staleTableRows: 0 }
+        },
+        repairPlan: {
+          memory: { syncRows: 1 },
+          worldbook: { syncRows: 0 }
+        },
+        _rows: {
+          memory: [{ id: 'memory:repair_node_apply', vector: [1] }],
+          worldbook: []
+        }
+      }),
+      syncMemoryRows: async (rows, options) => {
+        syncCalls.push({ rows, options });
+        return { ok: true, rows: rows.length };
+      }
+    }).then((repairApply) => {
+      assert.strictEqual(repairApply.dryRun, false);
+      assert.strictEqual(syncCalls.length, 1);
+      assert.strictEqual(syncCalls[0].options.fullReconcile, true);
+      assert.strictEqual(syncCalls[0].options.deleteStaleRows, true);
+    });
+  });
+}).then(() => queryMemory({
   userId: 'u_diag',
   query: 'where is the green cable',
   facet: 'default',
   topK: 4
-}).then((result) => {
+})).then((result) => {
   assert.strictEqual(result.stats.lancedb.fused, false);
   assert.strictEqual(result.stats.lancedb.fallbackReason, 'empty_result');
   assert.strictEqual(result.stats.lancedb.coverageReason, 'low_coverage');

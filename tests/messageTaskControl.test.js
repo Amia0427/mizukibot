@@ -5,6 +5,7 @@ const { createMessageTaskControlCoordinator } = require('../core/messageTaskCont
 const sent = [];
 let backgroundTriggered = false;
 let resolvedRouteMeta = null;
+let plannerOptionsSeen = null;
 
 const runtime = {
   getSessionState() {
@@ -33,8 +34,29 @@ module.exports = (async () => {
     buildSessionStatusReply: () => 'status-ok',
     buildSupplementedTaskText: () => 'supplemented task',
     buildSubagentContextSummary: () => 'context',
-    routeResolver: async () => ({ topRouteType: 'direct_chat', meta: {} }),
-    planDirectChat: async () => ({ executionPlan: {} }),
+    routeResolver: async () => ({
+      topRouteType: 'direct_chat',
+      meta: {
+        directedContext: {
+          scene: 'task_supplement',
+          addressee: { senderName: 'A', userId: 'u1' }
+        },
+        memoryContext: {
+          memoryForPrompt: 'task memory'
+        },
+        availableContextSignals: {
+          directedContext: true,
+          retrievedMemory: true
+        },
+        dynamicFewShotPrompt: 'task few shot',
+        memoryCliTurn: { exposed: true },
+        schedulerInjection: 'task scheduler'
+      }
+    }),
+    planDirectChat: async (_route, options) => {
+      plannerOptionsSeen = options;
+      return { executionPlan: {} };
+    },
     routeExecution: {
       resolveRouteExecution: (route) => {
         resolvedRouteMeta = route?.meta || null;
@@ -82,6 +104,13 @@ module.exports = (async () => {
   assert.ok(resolvedRouteMeta);
   assert.ok(resolvedRouteMeta.toolPlanner);
   assert.ok(resolvedRouteMeta.directChatPlanner);
+  assert.ok(plannerOptionsSeen);
+  assert.strictEqual(plannerOptionsSeen.directedContext.scene, 'task_supplement');
+  assert.strictEqual(plannerOptionsSeen.memoryContext.memoryForPrompt, 'task memory');
+  assert.strictEqual(plannerOptionsSeen.availableContextSignals.retrievedMemory, true);
+  assert.strictEqual(plannerOptionsSeen.dynamicFewShotPrompt, 'task few shot');
+  assert.deepStrictEqual(plannerOptionsSeen.memoryCliTurn, { exposed: true });
+  assert.strictEqual(plannerOptionsSeen.schedulerInjection, 'task scheduler');
 
   console.log('messageTaskControl.test.js passed');
 })().catch((error) => {

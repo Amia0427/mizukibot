@@ -32,7 +32,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     directedContext: routeMeta.directedContext,
     continuitySignals: options?.continuitySignals,
     personaPhase: routeMeta.personaPhase || '',
-    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim()
+    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
+    maxPersonaModuleCandidates: options.maxPersonaModuleCandidates
   };
   const getFallbackPersonaModuleCandidates = () => {
     if (!fallbackPersonaModuleCandidates) {
@@ -496,27 +497,11 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const selectedBlocks = filterBlocksByPlan(combinedBlocks, finalDynamicPromptPlan, {
     requiredIds,
     runtimeAddedIds,
-    audit: dynamicContextAudit
+    audit: dynamicContextAudit,
+    budgetTokens: Math.max(1200, fallbackAffinity.contextWindowTokens - fallbackAffinity.shortTermMemoryTokens)
   });
-  const criticalBlockIdPrefixes = new Set([
-    'retrieved_memory',
-    'daily_journal',
-    'directed_context',
-    'long_term_profile',
-    'impression',
-    'summary',
-    'relationship',
-    'persona_memory'
-  ]);
   for (const block of selectedBlocks) {
-    const blockId = normalizeText(block?.id);
-    const isCritical = block?.lane === 'stable_system'
-      || blockId === 'context_stats_instruction'
-      || blockId === 'group_direct_chat_style_guard'
-      || normalizeText(block?.meta?.moduleId) === 'scene_group_insert'
-      || blockId === 'memory_cli_followup'
-      || blockId === 'memory_cli_instruction'
-      || [...criticalBlockIdPrefixes].some((prefix) => blockId.startsWith(prefix));
+    const isCritical = isCriticalDynamicContextBlock(block);
     if (isCritical) criticalBlocks.push(block);
     else optionalBlocks.push(block);
   }

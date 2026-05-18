@@ -3,7 +3,7 @@ const express = require('express');
 
 const config = require('../config');
 const { favorites, memories } = require('../utils/memory');
-const { getLatestReasoning } = require('../api/ai');
+const { getLatestReasoning } = require('../api/parser');
 const { listTasks, loadTask } = require('../utils/agentRuntime');
 const { listRecentModelCalls } = require('../utils/modelCallTracker');
 const { setEnvPairs, maskSecret } = require('../utils/envFile');

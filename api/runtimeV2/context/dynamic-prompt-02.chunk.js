@@ -36,10 +36,18 @@
     plannerSkippedBlocks: dynamicContextAudit.plannerSkippedBlocks,
     runtimeAddedBlocks: dynamicContextAudit.runtimeAddedBlocks,
     runtimeRejectedBlocks: dynamicContextAudit.runtimeRejectedBlocks,
+    selectionTrace: normalizeArray(dynamicContextAudit.selectionTrace),
+    budgetReport: dynamicContextAudit.budgetReport || null,
     personaWorldbookSearch: (
       effectiveOptionalLayer?.promptSnapshot?.personaWorldbookSearch
       || sessionCandidateLayer?.promptSnapshot?.personaWorldbookSearch
       || promptMaterials?.personaWorldbookSearch
+      || {}
+    ),
+    candidatePruning: (
+      effectiveOptionalLayer?.promptSnapshot?.candidatePruning
+      || sessionCandidateLayer?.promptSnapshot?.candidatePruning
+      || promptMaterials?.candidatePruning
       || {}
     ),
     cacheFriendlyFingerprint: buildCacheFriendlyFingerprint(laneSplit.stableSystemBlocks),

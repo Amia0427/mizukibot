@@ -588,6 +588,17 @@ function buildRuntimeStatusDiagnostic(options = {}) {
     staleProcessingMs: Math.max(1000, normalizeNumber(config.POST_REPLY_WORKER_STALE_PROCESSING_MS, 5 * 60 * 1000))
   });
   const subagents = buildSubagentSummary(processes);
+  const journalHealth = (() => {
+    try {
+      const { buildJournalHealthSummary } = require('./memory-v3/journalDiagnostics');
+      return buildJournalHealthSummary({ limit: Math.max(1, normalizeNumber(options.journalLimit, 5)) });
+    } catch (error) {
+      return {
+        ok: false,
+        error: normalizeText(error?.message || error)
+      };
+    }
+  })();
 
   if (singleInstanceLock.status === 'stale') {
     addSignal(signals, 'warning', 'mainProcess', 'main_lock_stale', 'main lock pid is not alive', { pid: singleInstanceLock.pid });
@@ -602,22 +613,23 @@ function buildRuntimeStatusDiagnostic(options = {}) {
   }
 
   const postReplyExpected = config.POST_REPLY_WORKER_ENABLED === true && config.POST_REPLY_WORKER_INLINE !== true;
+  const postReplyDiagnosticsEnabled = postReplyExpected || config.POST_REPLY_WORKER_INLINE === true;
   if (postReplyExpected && postReplyPidFile.status === 'missing' && workerProcesses.length === 0) {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_pid_missing', 'post-reply worker pid file is missing and no worker process was found');
   }
-  if (postReplyPidFile.status === 'stale') {
+  if (postReplyDiagnosticsEnabled && postReplyPidFile.status === 'stale') {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_pid_stale', 'post-reply worker pid is not alive', { pid: postReplyPidFile.pid });
   }
-  if (postReplyPidFile.status === 'mismatch') {
+  if (postReplyDiagnosticsEnabled && postReplyPidFile.status === 'mismatch') {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_pid_mismatch', 'post-reply worker pid is alive but command line does not look like post-reply-worker.js', { pid: postReplyPidFile.pid });
   }
-  if (workerProcesses.length > 1) {
+  if (postReplyDiagnosticsEnabled && workerProcesses.length > 1) {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_worker_duplicate', 'multiple post-reply worker processes were found', { count: workerProcesses.length });
   }
-  if (postReplyQueue.staleProcessingCount > 0) {
+  if (postReplyDiagnosticsEnabled && postReplyQueue.staleProcessingCount > 0) {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_processing_stale', 'post-reply processing jobs exceeded stale threshold', { count: postReplyQueue.staleProcessingCount });
   }
-  if (postReplyQueue.counts.failed > 0) {
+  if (postReplyDiagnosticsEnabled && postReplyQueue.counts.failed > 0) {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_failed_jobs', 'post-reply queue has failed jobs', { count: postReplyQueue.counts.failed });
   }
 
@@ -645,8 +657,8 @@ function buildRuntimeStatusDiagnostic(options = {}) {
   })();
   const postReplyStatus = (() => {
     if (config.POST_REPLY_WORKER_INLINE === true) return 'inline';
-    if (config.POST_REPLY_WORKER_ENABLED !== true) return 'disabled';
     if (postReplyPidFile.status === 'running' || workerProcesses.length > 0) return 'running';
+    if (config.POST_REPLY_WORKER_ENABLED !== true) return 'disabled';
     if (postReplyPidFile.status === 'stale') return 'stale_pid';
     if (postReplyPidFile.status === 'invalid') return 'invalid_pid';
     return 'missing';
@@ -677,7 +689,8 @@ function buildRuntimeStatusDiagnostic(options = {}) {
       activeBackgroundTasks: backgroundTasks.activeCount,
       staleBackgroundTasks: backgroundTasks.staleActiveCount,
       activeSubagentProcesses: subagents.processCount,
-      persistentSubagentWorkers: subagents.persistentWorkers.length
+      persistentSubagentWorkers: subagents.persistentWorkers.length,
+      journalHealth: journalHealth.totals || {}
     },
     components: {
       projectRoot,
@@ -701,7 +714,8 @@ function buildRuntimeStatusDiagnostic(options = {}) {
         createAgentRuntime
       ],
       backgroundTasks,
-      subagents
+      subagents,
+      journalHealth
     },
     signals
   };
@@ -717,6 +731,10 @@ function buildRuntimeStatusText(report = {}) {
     `background-tasks: active=${summary.activeBackgroundTasks || 0} stale=${summary.staleBackgroundTasks || 0}`,
     `subagents: osProcesses=${summary.activeSubagentProcesses || 0} persistentWorkers=${summary.persistentSubagentWorkers || 0}`
   ];
+  const journal = summary.journalHealth || {};
+  if (Object.keys(journal).length > 0) {
+    lines.push(`journal: users=${journal.users || 0} days=${journal.days || 0} summaries=${journal.summaryDays || 0} segments=${journal.segments || 0} v3Events=${journal.v3EpisodeEvents || 0} embeddingReady=${journal.embeddingReady || 0} pending=${journal.embeddingPending || 0} failed=${journal.embeddingFailed || 0}`);
+  }
   if (Array.isArray(report.signals) && report.signals.length > 0) {
     lines.push('signals:');
     for (const signal of report.signals) {

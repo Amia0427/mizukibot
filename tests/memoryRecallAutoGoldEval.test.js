@@ -24,7 +24,14 @@ fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona'), { recursive: true })
 fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona_modules'), { recursive: true });
 fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona_worldbook'), { recursive: true });
 
-for (const fileName of ['01_identity.txt', '02_style.txt', '03_boundaries.txt', '04_behavior.txt']) {
+for (const fileName of [
+  '01_identity.txt',
+  '02_style.txt',
+  '03_boundaries.txt',
+  '04_behavior.txt',
+  '06_state_modulation.txt',
+  '07_opus_localization.txt'
+]) {
   fs.writeFileSync(path.join(process.env.PROMPTS_DIR, 'persona', fileName), 'test persona prompt', 'utf8');
 }
 

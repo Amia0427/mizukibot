@@ -13,24 +13,6 @@ const tools2 = require('./tools_batch2');
 const tools3 = require('./tools_batch3');
 const tools4 = require('./tools_batch4');
 const toolsExtra = require('./tools_extra');
-const assistantSkills = require('./skills_assistant');
-const minecraftAgent = require('./minecraftAgent');
-const nativeArxiv = require('./skills_native/arxiv');
-const nativeWeather = require('./skills_native/weather');
-const nativeSkillValidation = require('./skills_native/skillValidation');
-const nativeClawddocs = require('./skills_native/clawddocs');
-const nativeSummarize = require('./skills_native/summarize');
-const nativeStockQuote = require('./skills_native/stocks/quote');
-const nativeStockDividend = require('./skills_native/stocks/dividend');
-const nativeStockPortfolio = require('./skills_native/stocks/portfolio');
-const nativeStockHot = require('./skills_native/stocks/hot');
-const nativeStockRumor = require('./skills_native/stocks/rumor');
-const nativeStockAnalyze = require('./skills_native/stocks/analyze');
-const nativeStockWatchlist = require('./skills_native/stocks/watchlist');
-const nativeOntology = require('./skills_native/ontology');
-const nativeYoutube = require('./skills_native/youtube');
-const nativePpt = require('./skills_native/ppt');
-const nativeImageGenerate = require('./skills_native/imageGenerate');
 const config = require('../config');
 const axios = require('axios');
 const cheerio = require('cheerio');
@@ -63,6 +45,52 @@ const {
   publishQzoneForContext,
   scheduleGroupMessage
 } = require('./qqActionService');
+
+const lazyModules = new Map();
+
+function loadLazyModule(key, loader) {
+  if (!lazyModules.has(key)) lazyModules.set(key, loader());
+  return lazyModules.get(key);
+}
+
+function createLazyModuleProxy(key, loader) {
+  return new Proxy({}, {
+    get(_target, prop) {
+      const mod = loadLazyModule(key, loader);
+      const value = mod[prop];
+      return typeof value === 'function' ? value.bind(mod) : value;
+    },
+    has(_target, prop) {
+      return prop in loadLazyModule(key, loader);
+    },
+    ownKeys() {
+      return Reflect.ownKeys(loadLazyModule(key, loader));
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      const descriptor = Object.getOwnPropertyDescriptor(loadLazyModule(key, loader), prop);
+      return descriptor ? { ...descriptor, configurable: true } : undefined;
+    }
+  });
+}
+
+const assistantSkills = createLazyModuleProxy('assistantSkills', () => require('./skills_assistant'));
+const minecraftAgent = createLazyModuleProxy('minecraftAgent', () => require('./minecraftAgent'));
+const nativeArxiv = createLazyModuleProxy('nativeArxiv', () => require('./skills_native/arxiv'));
+const nativeWeather = createLazyModuleProxy('nativeWeather', () => require('./skills_native/weather'));
+const nativeSkillValidation = createLazyModuleProxy('nativeSkillValidation', () => require('./skills_native/skillValidation'));
+const nativeClawddocs = createLazyModuleProxy('nativeClawddocs', () => require('./skills_native/clawddocs'));
+const nativeSummarize = createLazyModuleProxy('nativeSummarize', () => require('./skills_native/summarize'));
+const nativeStockQuote = createLazyModuleProxy('nativeStockQuote', () => require('./skills_native/stocks/quote'));
+const nativeStockDividend = createLazyModuleProxy('nativeStockDividend', () => require('./skills_native/stocks/dividend'));
+const nativeStockPortfolio = createLazyModuleProxy('nativeStockPortfolio', () => require('./skills_native/stocks/portfolio'));
+const nativeStockHot = createLazyModuleProxy('nativeStockHot', () => require('./skills_native/stocks/hot'));
+const nativeStockRumor = createLazyModuleProxy('nativeStockRumor', () => require('./skills_native/stocks/rumor'));
+const nativeStockAnalyze = createLazyModuleProxy('nativeStockAnalyze', () => require('./skills_native/stocks/analyze'));
+const nativeStockWatchlist = createLazyModuleProxy('nativeStockWatchlist', () => require('./skills_native/stocks/watchlist'));
+const nativeOntology = createLazyModuleProxy('nativeOntology', () => require('./skills_native/ontology'));
+const nativeYoutube = createLazyModuleProxy('nativeYoutube', () => require('./skills_native/youtube'));
+const nativePpt = createLazyModuleProxy('nativePpt', () => require('./skills_native/ppt'));
+const nativeImageGenerate = createLazyModuleProxy('nativeImageGenerate', () => require('./skills_native/imageGenerate'));
 
 // Keep skill paths configurable while defaulting to the project-level skills folder.
 function resolveSkillsBaseDir() {

@@ -8,6 +8,7 @@ config.validateRequiredConfig();
 
 let recycling = false;
 const runtime = createPostReplyWorkerRuntime({
+  forceStart: true,
   onRecycle(info = {}) {
     if (recycling) return;
     recycling = true;

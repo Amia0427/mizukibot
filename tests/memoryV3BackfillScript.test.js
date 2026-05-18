@@ -23,7 +23,7 @@ fs.mkdirSync(process.env.MEMORY_V3_PROJECTIONS_DIR, { recursive: true });
 fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona_worldbook'), { recursive: true });
 fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona_modules'), { recursive: true });
 fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona'), { recursive: true });
-for (const name of ['01_identity.txt', '02_style.txt', '03_boundaries.txt', '04_behavior.txt']) {
+for (const name of ['01_identity.txt', '02_style.txt', '03_boundaries.txt', '04_behavior.txt', '06_state_modulation.txt', '07_opus_localization.txt']) {
   fs.writeFileSync(path.join(process.env.PROMPTS_DIR, 'persona', name), 'test persona text', 'utf8');
 }
 fs.writeFileSync(
@@ -70,13 +70,14 @@ httpClient.postWithRetry = async () => {
   };
 };
 
-const { runBackfill } = require('../scripts/backfill-memory-v3-embeddings');
+const { runBackfill, syncAfterBackfill } = require('../scripts/backfill-memory-v3-embeddings');
 const { clearEmbeddingIndexCache, loadEmbeddingIndex } = require('../utils/memory-v3/embeddingIndex');
 const { loadWorldbookEmbeddingIndex } = require('../utils/personaWorldbookSearch');
 
 module.exports = runBackfill({ dryRun: true, source: 'all', limit: 3 }).then((dryRun) => {
   assert.strictEqual(dryRun.ok, true);
   assert.strictEqual(dryRun.dryRun, true);
+  assert.ok(!dryRun.checkpoint?.written, 'dry-run backfill must not write checkpoint state');
   assert.ok(dryRun.considered >= 2);
   assert.ok(dryRun.failureBreakdown);
   assert.strictEqual(loadEmbeddingIndex().rows.length, 0);
@@ -114,6 +115,37 @@ module.exports = runBackfill({ dryRun: true, source: 'all', limit: 3 }).then((dr
   assert.strictEqual(retryResult.failed, 1);
   assert.strictEqual(retryResult.failureBreakdown.rate_limit, 1);
   assert.strictEqual(safeReadJsonLines(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE)[0].error, 'rate_limit');
+  const syncRows = [];
+  let summaryCalls = 0;
+  return syncAfterBackfill(1000, 'memory', {
+    buildSyncSummary: async (options) => {
+      summaryCalls += 1;
+      if (options.since) {
+        return {
+          coverage: { memory: { readyButNotSynced: 1 }, worldbook: {} },
+          _rows: { memory: [{ id: 'memory:node_memory', vector: [1] }], worldbook: [] }
+        };
+      }
+      return summaryCalls === 2
+        ? {
+            coverage: { memory: { readyButNotSynced: 1 }, worldbook: {} },
+            _rows: { memory: [], worldbook: [] }
+          }
+        : {
+            coverage: { memory: { readyButNotSynced: 0 }, worldbook: {} },
+            _rows: { memory: [], worldbook: [] }
+          };
+    },
+    syncMemoryRows: async (rows) => {
+      syncRows.push(...rows);
+      return { ok: true, rows: rows.length };
+    },
+    syncWorldbookRows: async () => ({ ok: true, rows: 0 })
+  });
+}).then((syncSummary) => {
+  assert.strictEqual(syncSummary.coverage.memory.readyButNotSynced, 0);
+  assert.strictEqual(syncSummary.beforeCoverage.memory.readyButNotSynced, 1);
+  assert.strictEqual(syncSummary.incrementalCoverage.memory.readyButNotSynced, 1);
 }).then(() => {
   console.log('memoryV3BackfillScript.test.js passed');
 }).catch((error) => {

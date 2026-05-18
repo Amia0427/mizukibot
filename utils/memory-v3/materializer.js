@@ -24,7 +24,7 @@ const {
   loadEpisodeProjection,
   loadMemoryNodes
 } = require('./storage');
-const { enqueueMissingEmbeddings } = require('./embeddingIndex');
+const { collectEmbeddingBackfillNodes, enqueueMissingEmbeddings } = require('./embeddingIndex');
 const { acquireMaterializeLock, DEFAULT_STALE_MS: DEFAULT_MATERIALIZE_LOCK_STALE_MS } = require('./materializeLock');
 
 const PERSONA_SUPPORT_FIELDS = new Set([
@@ -780,14 +780,31 @@ function materializeMemoryViews(options = {}) {
       }
       const target = episodeProjection.users[userId];
       target.updatedAt = Math.max(Number(target.updatedAt || 0), Number(event.ts || 0));
+      const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+      const rollupLevel = normalizeText(payload.rollupLevel || event.memoryKind || 'daily') || 'daily';
+      const sourceFile = normalizeText(payload.sourceFile);
       const item = {
         id: String(event.id || '').trim(),
-        type: normalizeText(event.payload?.rollupLevel || event.memoryKind || 'daily'),
+        type: rollupLevel,
+        rollupLevel,
         text: clampText(event.text, 4000),
-        episodeDay: normalizeText(event.payload?.episodeDay),
-        yearMonth: normalizeText(event.payload?.yearMonth),
-        startDay: normalizeText(event.payload?.startDay),
-        endDay: normalizeText(event.payload?.endDay),
+        episodeDay: normalizeText(payload.episodeDay),
+        yearMonth: normalizeText(payload.yearMonth),
+        startDay: normalizeText(payload.startDay),
+        endDay: normalizeText(payload.endDay),
+        part: Math.max(0, Number(payload.part || 0) || 0),
+        source: normalizeText(event.source),
+        sourceKind: normalizeText(event.sourceKind || payload.sourceKind || 'journal'),
+        sourceFile,
+        sourceCompleteness: normalizeText(payload.sourceCompleteness || 'summary'),
+        textKind: normalizeText(payload.textKind) || `journal_${rollupLevel}`,
+        sessionKeys: Array.isArray(payload.sessionKeys) ? payload.sessionKeys.map(normalizeText).filter(Boolean).slice(0, 16) : [],
+        topics: Array.isArray(payload.topics) ? payload.topics.map(normalizeText).filter(Boolean).slice(0, 16) : [],
+        canonicalKey: normalizeText(event.canonicalKey || event.dedupeKey).toLowerCase(),
+        dedupeKey: normalizeText(event.dedupeKey),
+        confidence: Number(event.confidence || 0) || 0.92,
+        importance: Number(event.importance || 0) || (rollupLevel === 'monthly' ? 1.2 : 1.0),
+        evidenceCount: Math.max(1, Number(event.evidenceCount || payload.evidenceCount || 1) || 1),
         updatedAt: Number(event.ts || 0) || 0
       };
       if (item.text) target.items.push(item);
@@ -971,9 +988,15 @@ function materializeMemoryViews(options = {}) {
   atomicWriteJson(config.MEMORY_V3_EPISODE_PROJECTION_FILE, outputEpisodeProjection);
   writeJsonLines(config.MEMORY_V3_NODES_FILE, outputNodes);
   clearProjectionReadCache();
-  const embeddingIndex = enqueueMissingEmbeddings(resolvedNodes, {
+  const embeddingNodes = incrementalMode ? resolvedNodes : collectEmbeddingBackfillNodes();
+  const embeddingIndex = enqueueMissingEmbeddings(embeddingNodes, {
+    fullReconcile: !incrementalMode,
     schedule: options.scheduleEmbeddingBackfill !== false,
     delayMs: options.embeddingBackfillDelayMs
+  });
+  const lancedbSyncPlan = buildLanceDbSyncPlan(incrementalMode ? outputNodes : embeddingNodes, {
+    fullReconcile: !incrementalMode,
+    dryRun: true
   });
 
   return {
@@ -986,6 +1009,7 @@ function materializeMemoryViews(options = {}) {
       materializeMode: incrementalMode ? 'incremental' : 'full',
       dirtyScopes: dirtyScopeCount,
       embeddings: embeddingIndex,
+      lancedbSyncPlan,
       sessions: Object.keys(outputSessionProjection.sessions).length,
       profiles: Object.keys(outputProfileProjection.users).length,
       episodeUsers: Object.keys(outputEpisodeProjection.users).length
@@ -1001,7 +1025,31 @@ function materializeMemoryViews(options = {}) {
   }
 }
 
+function buildLanceDbSyncPlan(nodes = [], options = {}) {
+  const activeNodes = (Array.isArray(nodes) ? nodes : [])
+    .filter((node) => node && normalizeText(node.status).toLowerCase() !== 'archived');
+  const readyNodeIds = new Set();
+  try {
+    const { loadEmbeddingIndex } = require('./embeddingIndex');
+    for (const row of loadEmbeddingIndex().readyRows || []) {
+      if (normalizeText(row.nodeId)) readyNodeIds.add(normalizeText(row.nodeId));
+    }
+  } catch (_) {}
+  const embeddableNodes = activeNodes.filter((node) => readyNodeIds.has(normalizeText(node.id || node.nodeId)));
+  return {
+    dryRun: options.dryRun !== false,
+    fullReconcile: options.fullReconcile === true,
+    sourceNodes: activeNodes.length,
+    readyRows: embeddableNodes.length,
+    pendingRows: Math.max(0, activeNodes.length - embeddableNodes.length),
+    recommendedCommand: options.fullReconcile === true
+      ? 'node scripts/sync-lancedb-memory-index.js --full --compact'
+      : 'node scripts/sync-lancedb-memory-index.js'
+  };
+}
+
 module.exports = {
   materializeMemoryViews,
-  createNodeFromEvent
+  createNodeFromEvent,
+  buildLanceDbSyncPlan
 };

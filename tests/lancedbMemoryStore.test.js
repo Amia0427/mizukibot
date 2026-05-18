@@ -9,9 +9,11 @@ const {
   buildMemoryFilter,
   buildMemoryVectorRow,
   dedupeVectorRows,
+  diffStaleTableIds,
   fuseRecallCandidates,
   isLanceDbReadEnabled,
   normalizeVectorStoreMode,
+  syncMemoryRows,
   rowPassesMemoryFilter
 } = require('../utils/lancedbMemoryStore');
 
@@ -84,5 +86,15 @@ const deduped = dedupeVectorRows([
 ]);
 assert.strictEqual(deduped.length, 2);
 assert.deepStrictEqual(deduped.find((item) => item.id === 'memory:a').vector, [2]);
+assert.deepStrictEqual(diffStaleTableIds(['memory:a', 'memory:c'], deduped), ['memory:c']);
 
-console.log('lancedbMemoryStore.test.js passed');
+module.exports = (async () => {
+  const fullDryRun = await syncMemoryRows(deduped, { full: true, dryRun: true, tableName: 'memory_v3_vectors' });
+  assert.strictEqual(fullDryRun.mode, 'overwrite');
+  const reconcileDryRun = await syncMemoryRows(deduped, { fullReconcile: true, dryRun: true, tableName: 'memory_v3_vectors' });
+  assert.strictEqual(reconcileDryRun.mode, 'merge_reconcile');
+  console.log('lancedbMemoryStore.test.js passed');
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

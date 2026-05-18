@@ -44,6 +44,71 @@ const {
   shouldPrioritizeContextStats
 } = require('./tool-selection.chunk');
 
+const DYNAMIC_PROMPT_BLOCK_SIGNAL_KEYS = Object.freeze({
+  affinity_level: 'affinityState',
+  affinity_points: 'affinityState',
+  persona_memory: 'personaMemory',
+  long_term_profile: 'longTermProfile',
+  impression: 'impression',
+  relationship_state: 'relationship',
+  summary: 'summary',
+  retrieved_memory_lite: 'retrievedMemory',
+  daily_journal: 'dailyJournal',
+  short_term_continuity: 'shortTermContinuity',
+  continuity_state: 'continuity',
+  directed_context: 'directedContext',
+  style_profile: 'styleProfile',
+  social_context: 'socialContext',
+  self_improvement: 'selfImprovement',
+  dynamic_few_shot: 'dynamicFewShot',
+  memory_cli_instruction: 'memoryCliInstruction',
+  context_stats_instruction: 'contextStatsInstruction',
+  life_scheduler: 'schedulerInjection'
+});
+
+const DYNAMIC_PROMPT_BLOCK_SELECTION_POLICIES = Object.freeze({
+  affinity_level: 'include_if_relevant',
+  affinity_points: 'include_if_relevant',
+  persona_memory: 'include_if_relevant',
+  long_term_profile: 'include_if_relevant',
+  impression: 'include_if_relevant',
+  relationship_state: 'include_if_relevant',
+  summary: 'include_if_relevant',
+  retrieved_memory_lite: 'high_value_only',
+  daily_journal: 'high_value_only',
+  short_term_continuity: 'must_use_when_available',
+  continuity_state: 'include_if_relevant',
+  directed_context: 'must_use_when_available',
+  style_profile: 'include_if_relevant',
+  social_context: 'include_if_relevant',
+  self_improvement: 'include_if_relevant',
+  dynamic_few_shot: 'high_value_only',
+  memory_cli_instruction: 'tool_policy_only',
+  context_stats_instruction: 'tool_policy_only',
+  life_scheduler: 'include_if_relevant'
+});
+
+function getDynamicPromptBlockSignalKey(blockId = '') {
+  const normalized = normalizeText(blockId);
+  if (!normalized || normalized.startsWith('persona_module:')) return '';
+  return DYNAMIC_PROMPT_BLOCK_SIGNAL_KEYS[normalized] || '';
+}
+
+function getDynamicPromptBlockSelectionPolicy(blockId = '') {
+  const normalized = normalizeText(blockId);
+  if (!normalized) return 'situational';
+  if (normalized.startsWith('persona_module:')) return 'planner_selected';
+  return DYNAMIC_PROMPT_BLOCK_SELECTION_POLICIES[normalized] || 'situational';
+}
+
+function isDynamicPromptBlockAvailable(blockId = '', availableContextSignals = {}) {
+  const signalKey = getDynamicPromptBlockSignalKey(blockId);
+  if (!signalKey) return true;
+  const signals = normalizeObject(availableContextSignals, {});
+  if (!Object.prototype.hasOwnProperty.call(signals, signalKey)) return false;
+  return signals[signalKey] === true;
+}
+
 function buildRuleBasedPlannerDecision(route = {}, options = {}) {
   const chatMode = normalizeChatMode(route?.meta?.chatMode);
   const toolIntent = normalizeToolIntent(route?.meta?.toolIntent);
@@ -64,10 +129,24 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
   const dynamicPromptBlockCatalog = normalizeArray(options.dynamicPromptBlockCatalog).length > 0
     ? normalizeArray(options.dynamicPromptBlockCatalog)
     : getMainReplyDynamicBlockCatalog(personaModuleCatalog);
+  const availableContextSignals = buildAvailableContextSignals(route, options);
   const heuristicDynamicPromptPlan = buildHeuristicDynamicPromptPlan({
     continuitySignals: options.continuitySignals,
     directedContext: options.directedContext,
-    hasContextStatsInstruction: true
+    hasAffinityState: availableContextSignals.affinityState,
+    hasShortTermContinuity: availableContextSignals.shortTermContinuity,
+    hasRetrievedMemory: availableContextSignals.retrievedMemory,
+    hasDailyJournal: availableContextSignals.dailyJournal,
+    hasLongTermProfile: availableContextSignals.longTermProfile,
+    hasImpression: availableContextSignals.impression,
+    hasRelationshipState: availableContextSignals.relationship,
+    hasStyleProfile: availableContextSignals.styleProfile,
+    hasSocialContext: availableContextSignals.socialContext,
+    hasSelfImprovement: availableContextSignals.selfImprovement,
+    hasDynamicFewShot: availableContextSignals.dynamicFewShot,
+    hasMemoryCliInstruction: availableContextSignals.memoryCliInstruction,
+    hasContextStatsInstruction: availableContextSignals.contextStatsInstruction,
+    hasLifeScheduler: availableContextSignals.schedulerInjection
   });
 
   if (isConversationalNoop(cleanText)) {
@@ -310,6 +389,7 @@ function buildAvailableContextSignals(route = {}, options = {}) {
   const memoryContext = normalizeObject(options.memoryContext, {});
   const directedContext = normalizeObject(options.directedContext || routeMeta.directedContext, null);
   const continuitySignals = normalizeObject(options.continuitySignals || routeMeta.continuitySignals, {});
+  const sharedShortTermContext = normalizeObject(options.sharedShortTermContext || routeMeta.sharedShortTermContext, {});
   const explicitSignals = normalizeObject(options.availableContextSignals, {});
   const signal = (key, fallback) => (
     Object.prototype.hasOwnProperty.call(explicitSignals, key)
@@ -317,6 +397,20 @@ function buildAvailableContextSignals(route = {}, options = {}) {
       : Boolean(fallback)
   );
   return {
+    affinityState: signal('affinityState', (
+      hasMeaningfulObject(memoryContext.affinityState)
+      || hasMeaningfulText(options?.userInfo?.level)
+      || Number.isFinite(Number(options?.userInfo?.points))
+    )),
+    personaMemory: signal('personaMemory', (
+      hasMeaningfulObject(options.personaMemoryState)
+      || hasMeaningfulObject(memoryContext.persona)
+    )),
+    shortTermContinuity: signal('shortTermContinuity', (
+      hasMeaningfulText(sharedShortTermContext.shortTermSummary)
+      || normalizeArray(sharedShortTermContext.recentHistory).length > 0
+      || normalizeArray(sharedShortTermContext.recentSessionSummaries).length > 0
+    )),
     directedContext: signal('directedContext', directedContext && (
       hasMeaningfulText(directedContext.scene)
       || hasMeaningfulObject(directedContext.addressee)
@@ -328,6 +422,10 @@ function buildAvailableContextSignals(route = {}, options = {}) {
       hasMeaningfulText(memoryContext.promptRetrievedMemoryText)
       || hasMeaningfulText(memoryContext.memoryForPrompt)
       || hasMeaningfulText(options.retrievedMemoryText)
+    )),
+    dailyJournal: signal('dailyJournal', (
+      hasMeaningfulText(memoryContext.promptDailyJournalText)
+      || hasMeaningfulText(memoryContext.dailyJournalText)
     )),
     longTermProfile: signal('longTermProfile', (
       hasMeaningfulText(memoryContext.promptLongTermProfileText)
@@ -367,6 +465,9 @@ function buildAvailableContextSignals(route = {}, options = {}) {
       hasMeaningfulObject(options.memoryCliTurn)
       || normalizeArray(options.allowedTools || routeMeta.allowedTools).includes('memory_cli')
     )),
+    contextStatsInstruction: signal('contextStatsInstruction', (
+      normalizeArray(options.allowedTools || routeMeta.allowedTools).includes('get_context_stats')
+    )),
     schedulerInjection: signal('schedulerInjection', (
       hasMeaningfulText(options.schedulerInjection)
       || hasMeaningfulObject(routeMeta.schedulerInjection)
@@ -375,26 +476,37 @@ function buildAvailableContextSignals(route = {}, options = {}) {
   };
 }
 
-function normalizeDynamicPromptBlockCatalogForPlanner(blockCatalog = []) {
+function normalizeDynamicPromptBlockCatalogForPlanner(blockCatalog = [], availableContextSignals = {}) {
   return normalizeArray(blockCatalog)
     .filter((item) => item && typeof item === 'object')
-    .map((item) => ({
-      ...item,
-      blockId: normalizeText(item.blockId),
-      lane: normalizeText(item.lane || item.cacheLane || 'dynamic_context'),
-      category: normalizeText(item.category || 'general'),
-      defaultPolicy: normalizeText(item.defaultPolicy || 'situational'),
-      useWhen: normalizeText(item.useWhen || item.purpose || ''),
-      avoidWhen: normalizeText(item.avoidWhen || '')
-    }))
+    .map((item) => {
+      const blockId = normalizeText(item.blockId);
+      const signalKey = getDynamicPromptBlockSignalKey(blockId);
+      const selectionPolicy = getDynamicPromptBlockSelectionPolicy(blockId);
+      return {
+        ...item,
+        blockId,
+        lane: normalizeText(item.lane || item.cacheLane || 'dynamic_context'),
+        category: normalizeText(item.category || 'general'),
+        defaultPolicy: normalizeText(item.defaultPolicy || 'situational'),
+        selectionPolicy,
+        signalKey,
+        available: isDynamicPromptBlockAvailable(blockId, availableContextSignals),
+        useWhen: normalizeText(item.useWhen || item.purpose || ''),
+        avoidWhen: normalizeText(item.avoidWhen || '')
+      };
+    })
     .filter((item) => item.blockId);
 }
 
 module.exports = {
   buildAvailableContextSignals,
   buildRuleBasedPlannerDecision,
+  getDynamicPromptBlockSelectionPolicy,
+  getDynamicPromptBlockSignalKey,
   hasMeaningfulObject,
   hasMeaningfulText,
+  isDynamicPromptBlockAvailable,
   normalizeDynamicPromptBlockCatalogForPlanner,
   sanitizePlannerContextSummary,
   summarizeToolCatalogForPrompt

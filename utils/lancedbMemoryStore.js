@@ -370,6 +370,20 @@ async function createVectorIndex(table, rowCount = 0) {
 
 async function replaceTableRows(tableName = '', rows = [], options = {}) {
   const cleanRows = dedupeVectorRows(rows);
+  if (options.dryRun === true) {
+    const tableStats = await listTableIds(tableName, options);
+    const staleIds = diffStaleTableIds(tableStats.ids || [], cleanRows);
+    return {
+      ok: true,
+      dryRun: true,
+      table: tableName,
+      rows: cleanRows.length,
+      mode: 'overwrite',
+      staleRows: staleIds.length,
+      staleIdsSample: staleIds.slice(0, 20),
+      tableRowsBefore: Number(tableStats.rows || 0) || 0
+    };
+  }
   if (cleanRows.length === 0) {
     return { ok: false, skipped: true, reason: 'no_rows', rows: 0 };
   }
@@ -388,6 +402,22 @@ async function replaceTableRows(tableName = '', rows = [], options = {}) {
 
 async function upsertTableRows(tableName = '', rows = [], options = {}) {
   const cleanRows = dedupeVectorRows(rows);
+  if (options.dryRun === true) {
+    const tableStats = await listTableIds(tableName, options);
+    const staleIds = options.fullReconcile || options.deleteStaleRows
+      ? diffStaleTableIds(tableStats.ids || [], cleanRows)
+      : [];
+    return {
+      ok: true,
+      dryRun: true,
+      table: tableName,
+      rows: cleanRows.length,
+      mode: options.fullReconcile ? 'merge_reconcile' : 'upsert',
+      staleRows: staleIds.length,
+      staleIdsSample: staleIds.slice(0, 20),
+      tableRowsBefore: Number(tableStats.rows || 0) || 0
+    };
+  }
   if (cleanRows.length === 0) {
     return { ok: false, skipped: true, reason: 'no_rows', rows: 0 };
   }
@@ -399,19 +429,67 @@ async function upsertTableRows(tableName = '', rows = [], options = {}) {
       table = await openResult.db.createTable(tableName, cleanRows, { mode: 'create', existOk: true });
       return { ok: true, table: tableName, rows: cleanRows.length, mode: 'create' };
     }
+    let mode = 'append';
     if (typeof table.mergeInsert === 'function') {
       await table
         .mergeInsert('id')
         .whenMatchedUpdateAll()
         .whenNotMatchedInsertAll()
         .execute(cleanRows, { timeoutMs: Math.max(1000, Number(options.timeoutMs || config.MEMORY_LANCEDB_TIMEOUT_MS || 800) || 800) });
-      return { ok: true, table: tableName, rows: cleanRows.length, mode: 'merge_insert' };
+      mode = options.fullReconcile || options.deleteStaleRows ? 'merge_reconcile' : 'merge_insert';
+    } else {
+      await table.add(cleanRows);
+      mode = options.fullReconcile || options.deleteStaleRows ? 'append_reconcile' : 'append';
     }
-    await table.add(cleanRows);
-    return { ok: true, table: tableName, rows: cleanRows.length, mode: 'append' };
+    let staleDelete = { deleted: 0, skipped: true, reason: 'not_requested' };
+    if (options.fullReconcile || options.deleteStaleRows) {
+      staleDelete = await deleteStaleTableRows(table, tableName, cleanRows, options);
+    }
+    return { ok: true, table: tableName, rows: cleanRows.length, mode, staleDelete };
   } catch (error) {
     return { ok: false, skipped: true, reason: `upsert_failed:${error.message}`, rows: cleanRows.length };
   }
+}
+
+function diffStaleTableIds(tableIds = [], desiredRows = []) {
+  const desired = new Set((Array.isArray(desiredRows) ? desiredRows : [])
+    .map((row) => normalizeText(row?.id))
+    .filter(Boolean));
+  return (Array.isArray(tableIds) ? tableIds : [])
+    .map(normalizeText)
+    .filter(Boolean)
+    .filter((id) => !desired.has(id));
+}
+
+function chunkList(values = [], size = 100) {
+  const chunkSize = Math.max(1, Math.floor(Number(size) || 100));
+  const out = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    out.push(values.slice(index, index + chunkSize));
+  }
+  return out;
+}
+
+async function deleteStaleTableRows(table, tableName = '', desiredRows = [], options = {}) {
+  if (!table || typeof table.delete !== 'function') {
+    return { deleted: 0, skipped: true, reason: 'delete_unavailable' };
+  }
+  const tableStats = await listTableIds(tableName, options);
+  const staleIds = diffStaleTableIds(tableStats.ids || [], desiredRows);
+  if (staleIds.length === 0) return { deleted: 0, skipped: false, reason: '' };
+  const chunkSize = Math.max(1, Math.min(200, Number(options.deleteChunkSize || 100) || 100));
+  let deleted = 0;
+  for (const chunk of chunkList(staleIds, chunkSize)) {
+    const predicate = `id IN (${chunk.map(quoteSql).join(', ')})`;
+    await table.delete(predicate);
+    deleted += chunk.length;
+  }
+  return {
+    deleted,
+    skipped: false,
+    reason: '',
+    staleIdsSample: staleIds.slice(0, 20)
+  };
 }
 
 async function syncMemoryRows(rows = [], options = {}) {
@@ -578,6 +656,8 @@ module.exports = {
   compactLanceDbTables,
   countTableRows,
   dedupeVectorRows,
+  deleteStaleTableRows,
+  diffStaleTableIds,
   fuseRecallCandidates,
   isLanceDbReadEnabled,
   isLanceDbSyncEnabled,
