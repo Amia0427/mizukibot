@@ -5,13 +5,10 @@ const { sanitizeUntrustedContent } = require('./promptSecurity');
 const { getBackgroundPressureDelayMs, appendPerfEvent } = require('./perfRuntime');
 const {
   appendJsonLine,
-  atomicWriteJson,
   ensureStore,
-  getStorePaths,
-  safeReadJson,
-  safeReadText,
-  safeWriteText
+  getStorePaths
 } = require('./selfImprovement/storeFiles');
+const { createSelfImprovementAccessors } = require('./selfImprovement/accessors');
 const { createPatternEngine } = require('./selfImprovement/patternEngine');
 const {
   clampNumber,
@@ -44,6 +41,7 @@ const {
   shouldBlockSelfImprovementText
 } = require('./selfImprovement/recordTransforms');
 const { createSelfImprovementExtraction } = require('./selfImprovement/extraction');
+const { createSelfImprovementFormatters } = require('./selfImprovement/formatters');
 
 const PROMOTED_STATUS = 'promoted';
 const GUIDE_ACTIVE_STATUS = 'active';
@@ -63,74 +61,33 @@ const {
   normalizeStoredEvent
 });
 
-function readEvents() {
-  const paths = ensureStore();
-  const raw = safeReadText(paths.eventsFile, '');
-  return raw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch (_) {
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .map((item) => normalizeStoredEvent(item));
-}
+const {
+  readEvents,
+  readPatterns,
+  readPromotedRules,
+  readSkillGuides,
+  writeEvents,
+  writePatterns,
+  writePromotedRules,
+  writeSkillGuides
+} = createSelfImprovementAccessors({
+  normalizeArray,
+  normalizeGuideRecord,
+  normalizePatternRecord,
+  normalizeRuleRecord,
+  normalizeStoredEvent
+});
 
-function readPatterns() {
-  const paths = ensureStore();
-  const payload = safeReadJson(paths.patternsFile, { items: [] });
-  return {
-    items: normalizeArray(payload?.items).map((item) => normalizePatternRecord(item))
-  };
-}
-
-function readPromotedRules() {
-  const paths = ensureStore();
-  const payload = safeReadJson(paths.rulesFile, { items: [] });
-  return {
-    items: normalizeArray(payload?.items).map((item) => normalizeRuleRecord(item))
-  };
-}
-
-function readSkillGuides() {
-  const paths = ensureStore();
-  const payload = safeReadJson(paths.guidesFile, { items: [] });
-  return {
-    items: normalizeArray(payload?.items).map((item) => normalizeGuideRecord(item))
-  };
-}
-
-function writeEvents(events = []) {
-  const paths = ensureStore();
-  const body = normalizeArray(events).map((item) => JSON.stringify(normalizeStoredEvent(item))).join('\n');
-  safeWriteText(paths.eventsFile, body ? `${body}\n` : '');
-}
-
-function writePatterns(payload = { items: [] }) {
-  const paths = ensureStore();
-  atomicWriteJson(paths.patternsFile, {
-    items: normalizeArray(payload?.items).map((item) => normalizePatternRecord(item))
-  });
-}
-
-function writePromotedRules(payload = { items: [] }) {
-  const paths = ensureStore();
-  atomicWriteJson(paths.rulesFile, {
-    items: normalizeArray(payload?.items).map((item) => normalizeRuleRecord(item))
-  });
-}
-
-function writeSkillGuides(payload = { items: [] }) {
-  const paths = ensureStore();
-  atomicWriteJson(paths.guidesFile, {
-    items: normalizeArray(payload?.items).map((item) => normalizeGuideRecord(item))
-  });
-}
+const {
+  collectPromptRuleLines,
+  formatEventsAsText,
+  formatGuidesAsText,
+  formatPatternsAsText,
+  formatRulesAsText
+} = createSelfImprovementFormatters({
+  buildRuntimeRule,
+  normalizeArray
+});
 
 function ensureEnabled() {
   return Boolean(config.SELF_IMPROVEMENT_ENABLED);
@@ -417,68 +374,12 @@ function buildPromptSnippet(input = {}) {
     .slice(0, topK);
   if (candidates.length === 0) return '';
 
-  const prefer = [];
-  const avoid = [];
-  for (const item of candidates) {
-    const text = trimText(item.ruleText || item.runtimeRule || item.injectionText || buildRuntimeRule(item).ruleText, 220);
-    if (!text) continue;
-    if (/^Prefer:/i.test(text)) prefer.push(text.replace(/^Prefer:\s*/i, ''));
-    else avoid.push(text.replace(/^Avoid:\s*/i, ''));
-  }
+  const { prefer, avoid } = collectPromptRuleLines(candidates, { trimText });
   if (prefer.length === 0 && avoid.length === 0) return '';
   const lines = ['[SelfImprovement]'];
   if (prefer.length > 0) lines.push(`Prefer: ${prefer.join(' | ')}`);
   if (avoid.length > 0) lines.push(`Avoid: ${avoid.join(' | ')}`);
   return trimText(lines.join('\n'), maxChars);
-}
-
-function formatEventsAsText(items = []) {
-  const list = normalizeArray(items);
-  if (list.length === 0) return 'No self-improvement events found.';
-  return list.map((item, index) => {
-    const status = item.status === PROMOTED_STATUS ? 'promoted' : item.status;
-    const meta = [item.kind, status, item.patternKey].filter(Boolean).join(' | ');
-    const detail = [item.summary, item.suggestedAction ? `action: ${item.suggestedAction}` : ''].filter(Boolean).join(' | ');
-    return `${index + 1}. [${meta}] ${detail}`;
-  }).join('\n');
-}
-
-function formatPatternsAsText(items = []) {
-  const list = normalizeArray(items);
-  if (list.length === 0) return 'No self-improvement patterns found.';
-  return list.map((item, index) => {
-    const prefix = `${index + 1}. [${item.kind} | ${item.status} | count:${item.occurrenceCount}]`;
-    const body = [item.patternKey, item.summary, item.runtimeRule || item.injectionText].filter(Boolean).join(' | ');
-    return `${prefix} ${body}`.trim();
-  }).join('\n');
-}
-
-function formatRulesAsText(items = []) {
-  const list = normalizeArray(items);
-  if (list.length === 0) return 'No self-improvement rules found.';
-  return list.map((item, index) => {
-    const meta = [item.kind, item.ruleType, `count:${item.occurrenceCount}`, item.patternKey].filter(Boolean).join(' | ');
-    return `${index + 1}. [${meta}] ${item.ruleText}`;
-  }).join('\n');
-}
-
-function formatGuidesAsText(items = []) {
-  const list = normalizeArray(items);
-  if (list.length === 0) return 'No self-improvement guides found.';
-  return list.map((item, index) => {
-    const hints = normalizeArray(item.triggerHints).join(', ');
-    const dos = normalizeArray(item.doList).join(' | ');
-    const donts = normalizeArray(item.dontList).join(' | ');
-    return [
-      `${index + 1}. [${item.kind} | ${item.patternKey}] ${item.title}`,
-      item.summary ? `summary: ${item.summary}` : '',
-      item.ruleText ? `rule: ${item.ruleText}` : '',
-      hints ? `triggers: ${hints}` : '',
-      dos ? `do: ${dos}` : '',
-      donts ? `avoid: ${donts}` : '',
-      item.example ? `example: ${item.example}` : ''
-    ].filter(Boolean).join('\n');
-  }).join('\n\n');
 }
 
 module.exports = {

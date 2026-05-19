@@ -48,6 +48,9 @@ const {
   resolveDailyJournalTimestamp,
   resolveReadableGroupIds
 } = require('./memoryContext/recallOptions');
+const { createMemoryContextHitHelpers } = require('./memoryContext/hits');
+const { createMemoryContextProfilePayloadHelpers } = require('./memoryContext/profilePayload');
+const { createMemoryContextPromptSegmentHelpers } = require('./memoryContext/promptSegments');
 const { createSignalMemoryHelpers } = require('./memoryContext/signals');
 const { buildMemoryContextV3Payload } = require('./memoryContext/v3Payload');
 
@@ -65,91 +68,47 @@ const {
   sanitizeText
 });
 
-function splitUnifiedHits(allHits = [], options = {}) {
-  const hits = Array.isArray(allHits) ? allHits : [];
-  const factHits = hits.filter((hit) => hit.memoryKind !== 'style' && hit.memoryKind !== 'jargon');
-  const styleHits = hits.filter((hit) => hit.memoryKind === 'style');
-  const jargonHits = hits.filter((hit) => hit.memoryKind === 'jargon');
-  const journalHits = factHits.filter((hit) => hit.type === 'episode' || hit.memoryKind === 'episode');
-  const taskHits = factHits.filter((hit) => String(hit.scopeType || '') === 'task');
-  const groupHits = factHits.filter((hit) => String(hit.scopeType || '') === 'group');
-  const coreCandidates = memoizeValue(
-    options,
-    buildMemoKey('core', options.userId, options.question || '', options),
-    () => getCoreMemories(options.userId, options.coreK || 6, {
-      minTier: options.coreMinTier || 'A'
-    })
-  );
-  const core = coreCandidates.filter((item) => !factHits.some((hit) => String(hit.id) === String(item.id)));
-
-  return {
-    hits: factHits,
-    journalHits,
-    taskHits,
-    groupHits,
-    styleHits,
-    jargonHits,
-    core
-  };
-}
-
-function buildRetrievedMemoryText(hits = [], core = [], factText = '', options = {}) {
-  const relevantHits = Array.isArray(hits) ? hits : [];
-  const coreHits = options.disableLegacyFactFallback ? [] : (Array.isArray(core) ? core : []);
-  if (relevantHits.length > 0 || coreHits.length > 0) {
-    const mainText = relevantHits.length > 0
-      ? formatRetrievedMemories(relevantHits, {
-        showScore: options.showMemoryScores === true,
-        showReason: options.showMemoryReasons === true,
-        showImportance: true,
-        showStatus: false
-      })
-      : '';
-    const coreText = coreHits.length > 0
-      ? formatRetrievedMemories(coreHits, {
-        showScore: false,
-        showReason: false,
-        showImportance: true,
-        showStatus: false
-      })
-      : '';
-    return [mainText, coreText].filter(Boolean).join('\n');
-  }
-  if (options.disableLegacyFactFallback) return '暂无与当前问题强相关的长期记忆';
-  const compactFacts = compactFactText(factText, Math.max(1, Number(options.fallbackFactLines || 8)));
-  return compactFacts && compactFacts !== '目前没有特别记忆。'
-    ? `[NoStrongMatch]\n${compactFacts}`
-    : '暂无与当前问题强相关的长期记忆';
-}
+const {
+  buildRetrievedMemoryText,
+  splitUnifiedHits
+} = createMemoryContextHitHelpers({
+  buildMemoKey,
+  compactFactText,
+  formatRetrievedMemories,
+  getCoreMemories,
+  memoizeValue
+});
+const {
+  buildPromptSegments,
+  buildPromptTexts
+} = createMemoryContextPromptSegmentHelpers({
+  clampPromptMessage,
+  getPromptTokenLimit,
+  limitPromptText
+});
+const { buildProfilePayload } = createMemoryContextProfilePayloadHelpers({
+  buildStableProfileText,
+  config,
+  getUserAffinityState,
+  getUserImpression,
+  getUserProfile,
+  getUserSummary,
+  sanitizeText
+});
 
 function buildContextPayload(userId, question = '', options = {}, unifiedHits = []) {
   const recapQuery = isRecentRecallQuery(question);
   const resolvedGroupIds = Array.isArray(options.resolvedGroupIds)
     ? options.resolvedGroupIds.map((item) => sanitizeText(item)).filter(Boolean)
     : resolveReadableGroupIds(userId, options);
-  const profile = getUserProfile(userId);
-  const summary = getUserSummary(userId);
-  const impression = getUserImpression(userId);
-  const stableProfile = buildStableProfileText(userId, {
-    question,
-    includeWeakForProfileQuery: true,
-    disableStableProfile: options.disableStableProfile,
-    forceStableProfile: options.forceStableProfile,
-    legacyFallbackEnabled: options.legacyProfileFallbackEnabled
-  });
-  const profilePersona = stableProfile.persona && typeof stableProfile.persona === 'object'
-    ? stableProfile.persona
-    : {};
-  const profileDisabled = stableProfile.disabled === true;
-  const injectPersonaBlocks = config.MEMORY_PROFILE_INJECT_PERSONA_BLOCKS === true
-    || options.injectPersonaProfileBlocks === true;
-  const effectiveSummary = profileDisabled || !injectPersonaBlocks
-    ? ''
-    : sanitizeText(profilePersona.summary || (stableProfile.legacyFallbackUsed ? stableProfile.summary : ''));
-  const effectiveImpression = profileDisabled || !injectPersonaBlocks
-    ? ''
-    : sanitizeText(profilePersona.impression || (stableProfile.legacyFallbackUsed ? stableProfile.impression : ''));
-  const affinityState = getUserAffinityState(userId, options);
+  const {
+    affinityState,
+    effectiveImpression,
+    effectiveSummary,
+    profile,
+    profilePersona,
+    stableProfile
+  } = buildProfilePayload(userId, question, options);
   const factText = getUserMemories(userId);
   const journalIntent = classifyJournalRecallIntent(question, options);
   const dailyJournalTimestamp = resolveDailyJournalTimestamp(question, options);
@@ -223,43 +182,23 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
   const styleSignalText = styleSignal.text;
   const longTermProfileText = stableProfile.text || '';
   const promptLongTermProfileSourceText = stableProfile.text || '';
-  const promptRetrievedMemoryText = limitPromptText(
-    promptRetrievedMemorySourceText,
-    getPromptTokenLimit('MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', 420),
-    'tail'
-  );
-  const promptStyleSignalsText = limitPromptText(
-    styleSignalText,
-    getPromptTokenLimit('MAIN_PROMPT_STYLE_SIGNALS_MAX_TOKENS', 80),
-    'tail'
-  );
-  const promptTaskMemoryText = limitPromptText(
-    taskMemoryText,
-    getPromptTokenLimit('MAIN_PROMPT_TASK_MEMORY_MAX_TOKENS', 160),
-    'tail'
-  );
-  const promptGroupMemoryTrimmedText = limitPromptText(
-    promptGroupMemoryText,
-    getPromptTokenLimit('MAIN_PROMPT_GROUP_MEMORY_MAX_TOKENS', 160),
-    'tail'
-  );
-  const dailyJournalTokenLimit = dailyJournalTimestamp
-    ? Math.max(
-      getPromptTokenLimit('MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS', 160),
-      getPromptTokenLimit('MAIN_PROMPT_TARGET_DAILY_JOURNAL_MAX_TOKENS', 420)
-    )
-    : getPromptTokenLimit('MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS', 160);
-  const dailyJournalTrimStrategy = dailyJournalTimestamp ? 'head' : 'tail';
-  const promptDailyJournalTrimmedText = limitPromptText(
+  const promptTexts = buildPromptTexts({
+    dailyJournalTimestamp,
     promptDailyJournalText,
-    dailyJournalTokenLimit,
-    dailyJournalTrimStrategy
-  );
-  const promptLongTermProfileText = limitPromptText(
+    promptGroupMemoryText,
     promptLongTermProfileSourceText,
-    getPromptTokenLimit('MAIN_PROMPT_LONG_TERM_PROFILE_MAX_TOKENS', 220),
-    'tail'
-  );
+    promptRetrievedMemorySourceText,
+    styleSignalText,
+    taskMemoryText
+  });
+  const {
+    promptDailyJournalTrimmedText,
+    promptGroupMemoryTrimmedText,
+    promptLongTermProfileText,
+    promptRetrievedMemoryText,
+    promptStyleSignalsText,
+    promptTaskMemoryText
+  } = promptTexts;
   const promptSummaryText = limitPromptText(
     effectiveSummary,
     getPromptTokenLimit('MAIN_PROMPT_SUMMARY_MAX_TOKENS', 180),
@@ -275,14 +214,7 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
   if (promptTaskMemoryText) memorySections.push(`[TaskMemory]\n${promptTaskMemoryText}`);
   if (promptGroupMemoryTrimmedText) memorySections.push(`[GroupMemory]\n${promptGroupMemoryTrimmedText}`);
   if (promptStyleSignalsText) memorySections.push(`[StyleSignals]\n${promptStyleSignalsText}`);
-  const segments = {
-    retrievedMemory: clampPromptMessage('RetrievedMemory', promptRetrievedMemoryText, getPromptTokenLimit('MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', 420), 'tail'),
-    dailyJournal: clampPromptMessage('DailyJournal', promptDailyJournalTrimmedText, dailyJournalTokenLimit, dailyJournalTrimStrategy),
-    taskMemory: clampPromptMessage('TaskMemory', promptTaskMemoryText, getPromptTokenLimit('MAIN_PROMPT_TASK_MEMORY_MAX_TOKENS', 160), 'tail'),
-    groupMemory: clampPromptMessage('GroupMemory', promptGroupMemoryTrimmedText, getPromptTokenLimit('MAIN_PROMPT_GROUP_MEMORY_MAX_TOKENS', 160), 'tail'),
-    styleSignals: clampPromptMessage('StyleSignals', promptStyleSignalsText, getPromptTokenLimit('MAIN_PROMPT_STYLE_SIGNALS_MAX_TOKENS', 80), 'tail'),
-    longTermProfile: clampPromptMessage('LongTermProfile', promptLongTermProfileText, getPromptTokenLimit('MAIN_PROMPT_LONG_TERM_PROFILE_MAX_TOKENS', 220), 'tail')
-  };
+  const segments = buildPromptSegments(promptTexts);
   const injectedForTrace = {
     retrievedMemory: promptRetrievedMemoryText,
     styleSignals: promptStyleSignalsText,

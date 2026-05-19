@@ -3,21 +3,11 @@ const router = require('../core/router');
 const routeExecution = require('../core/routeExecution');
 const {
   attachExecutablePlanToPlannerDecision,
-  buildExecutablePlanFromPlannerDecision,
-  buildRouteMetaEnvelope
+  buildExecutablePlanFromPlannerDecision
 } = require('../core/executablePlan');
 const planning = require('../api/runtimeV2/planning/service');
 const { planDirectChat } = require('../core/directChatPlanner');
-const {
-  GROUP_DIRECT_REPLY_CHAR_LIMIT,
-  GROUP_DIRECT_REPLY_MAX_QUESTION_SENTENCES,
-  GROUP_DIRECT_REPLY_MAX_SENTENCES,
-  applyGroupDirectStyleGuard,
-  buildGroupDirectStyleGuardReasons,
-  isGroupDirectChatRequest
-} = require('../api/runtimeV2/guards/groupDirectReplyStyleGuard');
 const { diagnoseProjectionFreshness } = require('./memory-v3/diagnostics');
-const { resolveShortTermSessionKey } = require('./shortTermMemory');
 const { getApiProvider } = require('./modelProvider');
 const {
   ADMIN_SHARED_FALLBACK_SCOPE,
@@ -34,89 +24,25 @@ const {
   buildCacheStatsDiagnostic,
   readModelCallLogRows
 } = require('./mainReplyDiagnostics/cacheStats');
+const {
+  normalizeArray,
+  normalizeDiagnosticContext,
+  normalizeObject,
+  normalizeText,
+  parseMainReplyDiagnosticInput
+} = require('./mainReplyDiagnostics/input');
+const {
+  buildBranchSummary,
+  resolveDispatchBranch,
+  resolveFinalBranch
+} = require('./mainReplyDiagnostics/branch');
+const {
+  buildGuardSummary,
+  buildPlannerSummary,
+  compactProjectionFreshness
+} = require('./mainReplyDiagnostics/reportSections');
 
 const SCHEMA_VERSION = 'main_reply_diagnostic_v1';
-
-function normalizeText(value = '') {
-  return String(value || '').trim();
-}
-
-function normalizeObject(value, fallback = {}) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
-}
-
-function normalizeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function parseMaybeJsonObject(text = '') {
-  const raw = normalizeText(text);
-  if (!raw || !raw.startsWith('{')) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function parseMainReplyDiagnosticInput(input = '') {
-  if (input && typeof input === 'object' && !Array.isArray(input)) {
-    return { ...input };
-  }
-  const raw = normalizeText(input);
-  const parsed = parseMaybeJsonObject(raw);
-  if (parsed) return parsed;
-  return {
-    rawText: raw,
-    cleanText: raw,
-    requestText: raw
-  };
-}
-
-function resolveRequestText(input = {}) {
-  return normalizeText(
-    input.requestText
-    || input.cleanText
-    || input.text
-    || input.rawText
-    || input.question
-    || input.message
-  );
-}
-
-function normalizeDiagnosticContext(input = {}) {
-  const source = normalizeObject(input);
-  const rawText = normalizeText(source.rawText || source.message || source.text || source.requestText);
-  const cleanText = normalizeText(source.cleanText || source.requestText || source.question || rawText);
-  const userId = normalizeText(source.userId || source.senderId || source.user_id);
-  const groupId = normalizeText(source.groupId || source.group_id);
-  const chatType = normalizeText(source.chatType || source.messageType || source.message_type || (groupId ? 'group' : 'private')).toLowerCase() === 'private'
-    ? 'private'
-    : 'group';
-  const sessionKey = normalizeText(source.sessionKey || source.session_key)
-    || resolveShortTermSessionKey(userId, { groupId, chatType });
-  const botQQ = normalizeText(source.botQQ || source.botQq || source.selfId || config.BOT_QQ);
-  const imageUrls = normalizeArray(source.imageUrls)
-    .concat(source.imageUrl ? [source.imageUrl] : [])
-    .map((url) => normalizeText(url))
-    .filter(Boolean);
-  return {
-    rawText: rawText || cleanText,
-    cleanText,
-    requestText: resolveRequestText(source) || cleanText || rawText,
-    userId,
-    groupId,
-    chatType,
-    sessionKey,
-    botQQ,
-    imageUrl: imageUrls[0] || null,
-    imageUrls,
-    contextSummary: normalizeText(source.contextSummary || source.conversationSummary),
-    directedContext: normalizeObject(source.directedContext, null),
-    candidateReply: normalizeText(source.candidateReply || source.replyText || source.finalReply || source.outputText)
-  };
-}
 
 function pickRoute(input = {}) {
   const route = input.route && typeof input.route === 'object' && !Array.isArray(input.route)
@@ -260,47 +186,6 @@ function resolveExecutionPlan(route = {}, input = {}) {
   };
 }
 
-function resolveFinalBranch(executionPlan = {}) {
-  const executor = normalizeText(executionPlan.executor);
-  const unavailableReason = normalizeText(executionPlan.unavailableReason);
-  if (unavailableReason) return 'unavailable';
-  if (executor === 'background_direct' || executionPlan.needsBackground === true) return 'background';
-  if (executionPlan.allowTools === true) return 'tool';
-  if (executor === 'direct') return 'direct';
-  if (executor === 'admin') return 'admin';
-  if (executor === 'full_subagent') return 'background';
-  if (executor === 'ignore') return 'ignore';
-  if (executor === 'refuse') return 'refuse';
-  return executor || 'unknown';
-}
-
-function resolveDispatchBranch(executionPlan = {}) {
-  const finalBranch = resolveFinalBranch(executionPlan);
-  if (finalBranch === 'unavailable') return 'unavailable';
-  if (executionPlan.executor === 'background_direct') return 'background_direct';
-  if (executionPlan.allowTools === true) return 'tool_plan';
-  if (executionPlan.executor === 'direct') return 'direct_reply';
-  return normalizeText(executionPlan.executor) || finalBranch;
-}
-
-function buildBranchSummary(executionPlan = {}) {
-  return {
-    finalBranch: resolveFinalBranch(executionPlan),
-    dispatchBranch: resolveDispatchBranch(executionPlan),
-    executor: normalizeText(executionPlan.executor),
-    allowTools: executionPlan.allowTools === true,
-    needsBackground: executionPlan.needsBackground === true,
-    allowStream: executionPlan.allowStream === true,
-    unavailableReason: normalizeText(executionPlan.unavailableReason),
-    allowedTools: normalizeArray(executionPlan.allowedTools).map((item) => normalizeText(item)).filter(Boolean),
-    blockedPlanSteps: normalizeArray(executionPlan.blockedPlanSteps).map((step) => ({
-      id: normalizeText(step?.id),
-      action: normalizeText(step?.action),
-      blockedReason: normalizeText(step?.blockedReason)
-    })).filter((step) => step.id || step.action || step.blockedReason)
-  };
-}
-
 function resolveRouteFallbackReason(route = {}, executionPlan = {}) {
   const routeMeta = normalizeObject(route?.meta);
   return normalizeText(
@@ -339,90 +224,6 @@ function buildModelSummary(userId = '', routeMeta = {}) {
       fallbackUntil: Number(fallbackStatus.fallbackUntil || 0) || 0,
       fallbackModel: normalizeText(fallbackStatus.fallbackModel)
     }
-  };
-}
-
-function compactProjectionFreshness(freshness = {}, sessionKey = '') {
-  const lock = normalizeObject(freshness.materializeLock);
-  const sessionSnapshot = normalizeObject(freshness.sessionSnapshot);
-  return {
-    sessionKey: normalizeText(sessionKey || sessionSnapshot.sessionKey),
-    projectionStale: freshness.projectionStale === true,
-    projectionStaleReason: normalizeText(freshness.projectionStaleReason),
-    usedOldSnapshot: freshness.usedOldSnapshot === true,
-    usedOldSnapshotReason: normalizeText(freshness.usedOldSnapshotReason),
-    latestEventTs: Number(freshness.latestEventTs || 0) || 0,
-    latestRelevantEventTs: Number(freshness.latestRelevantEventTs || 0) || 0,
-    projectionEventHighWatermarkTs: Number(freshness.projectionEventHighWatermarkTs || 0) || 0,
-    materializerUpdatedAt: Number(freshness.materializerUpdatedAt || 0) || 0,
-    lockHit: lock.hit === true,
-    lockStale: lock.stale === true,
-    lockAgeMs: Number(lock.ageMs || 0) || 0,
-    sessionSnapshotHit: sessionSnapshot.hit === true,
-    sessionUpdatedAt: Number(sessionSnapshot.sessionUpdatedAt || 0) || 0
-  };
-}
-
-function buildGuardSummary(context = {}, route = {}, executionPlan = {}) {
-  const routeMeta = buildRouteMetaEnvelope(route, executionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
-    groupId: context.groupId,
-    chatType: context.chatType
-  });
-  const guardRequest = {
-    topRouteType: executionPlan.topRouteType || routeMeta.topRouteType,
-    routeMeta
-  };
-  const eligible = isGroupDirectChatRequest(guardRequest);
-  const candidateReply = normalizeText(context.candidateReply);
-  const guard = candidateReply ? applyGroupDirectStyleGuard(candidateReply, guardRequest) : null;
-  const reasons = candidateReply
-    ? normalizeArray(guard?.reasons)
-    : buildGroupDirectStyleGuardReasons(candidateReply);
-  return {
-    groupDirectStyle: {
-      eligible,
-      checkedReply: Boolean(candidateReply),
-      hit: Boolean(guard?.applied),
-      reasons,
-      originalChars: candidateReply ? Number(guard?.originalChars || candidateReply.length) || 0 : 0,
-      finalChars: candidateReply ? Number(guard?.finalChars || 0) || 0 : 0,
-      needsReplyText: !candidateReply,
-      limits: {
-        charLimit: GROUP_DIRECT_REPLY_CHAR_LIMIT,
-        maxSentences: GROUP_DIRECT_REPLY_MAX_SENTENCES,
-        maxQuestionSentences: GROUP_DIRECT_REPLY_MAX_QUESTION_SENTENCES
-      }
-    }
-  };
-}
-
-function buildPlannerSummary(plannerDecision = null, source = '') {
-  const decision = normalizeObject(plannerDecision, null);
-  if (!decision) {
-    return {
-      source,
-      mode: '',
-      taskShape: '',
-      decisionSource: '',
-      fallbackUsed: false,
-      reason: '',
-      allowedToolNames: [],
-      needsBackground: false,
-      backgroundResearchRequested: false
-    };
-  }
-  const decisionV2 = normalizeObject(decision.plannerDecisionV2);
-  const meta = normalizeObject(decisionV2.plannerMeta);
-  return {
-    source,
-    mode: normalizeText(decisionV2.mode || (decision.shouldUseTools ? 'tool_plan' : 'chat_only')),
-    taskShape: normalizeText(decision.taskShape || decisionV2.taskShape),
-    decisionSource: normalizeText(decision.decisionSource || meta.decisionSource),
-    fallbackUsed: decision.plannerFallbackUsed === true || meta.fallbackUsed === true,
-    reason: normalizeText(decision.reason || meta.reason),
-    allowedToolNames: normalizeArray(decision.allowedToolNames || decisionV2.allowedToolNames).map((item) => normalizeText(item)).filter(Boolean),
-    needsBackground: decision.needsBackground === true,
-    backgroundResearchRequested: decision.backgroundResearchRequested === true || meta.backgroundResearchRequested === true
   };
 }
 

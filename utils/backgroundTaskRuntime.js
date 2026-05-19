@@ -1,127 +1,30 @@
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const config = require('../config');
-
-const ACTIVE_STATUSES = new Set(['queued', 'running', 'reviewing']);
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled', 'superseded', 'interrupted', 'expired']);
-const SESSION_STATUSES = new Set(['active', 'retained', 'done']);
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function clampPositiveInt(value, fallback) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.floor(n);
-}
-
-function normalizeText(value) {
-  return String(value || '').trim();
-}
-
-function cloneJson(value, fallback = null) {
-  if (value === undefined) return fallback;
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
-
-function safeReadJson(filePath, fallback = null) {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    const raw = fs.readFileSync(filePath, 'utf8');
-    if (!String(raw || '').trim()) return fallback;
-    return JSON.parse(raw);
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function makeTaskId() {
-  return `bg_${Date.now()}_${crypto.randomBytes(6).toString('hex')}`;
-}
-
-function summarizeReply(text = '', maxChars = 160) {
-  const compact = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!compact) return '';
-  if (compact.length <= maxChars) return compact;
-  return `${compact.slice(0, maxChars - 1)}…`;
-}
-
-function normalizeTask(task = {}, options = {}) {
-  const now = nowIso();
-  const ttlMs = clampPositiveInt(options.sessionTtlMs, 30 * 60 * 1000);
-  const updatedAt = normalizeText(task.updated_at) || now;
-  return {
-    id: normalizeText(task.id) || makeTaskId(),
-    session_key: normalizeText(task.session_key),
-    revision: Math.max(1, Number(task.revision) || 1),
-    executor_type: normalizeText(task.executor_type || 'local_tools') || 'local_tools',
-    status: normalizeText(task.status || 'queued') || 'queued',
-    stage: normalizeText(task.stage || task.status || 'queued') || 'queued',
-    group_id: normalizeText(task.group_id),
-    user_id: normalizeText(task.user_id),
-    original_text: normalizeText(task.original_text),
-    effective_text: normalizeText(task.effective_text),
-    route_policy_key: normalizeText(task.route_policy_key),
-    top_route_type: normalizeText(task.top_route_type),
-    created_at: normalizeText(task.created_at) || now,
-    updated_at: updatedAt,
-    started_at: task.started_at || null,
-    completed_at: task.completed_at || null,
-    expires_at: normalizeText(task.expires_at) || new Date(Date.parse(updatedAt) + ttlMs).toISOString(),
-    ack_sent: Boolean(task.ack_sent),
-    followup_sent: Boolean(task.followup_sent),
-    suppress_followup: Boolean(task.suppress_followup),
-    cancel_requested_at: task.cancel_requested_at || null,
-    superseded_by: normalizeText(task.superseded_by),
-    latest_summary: normalizeText(task.latest_summary),
-    result_excerpt: normalizeText(task.result_excerpt),
-    error: normalizeText(task.error),
-    session_status: SESSION_STATUSES.has(String(task.session_status || '').trim())
-      ? String(task.session_status).trim()
-      : ''
-  };
-}
-
-function normalizeSession(session = {}, options = {}) {
-  const ttlMs = clampPositiveInt(options.sessionTtlMs, 30 * 60 * 1000);
-  const updatedAt = normalizeText(session.updated_at) || nowIso();
-  const expiresAt = normalizeText(session.expires_at) || new Date(Date.parse(updatedAt) + ttlMs).toISOString();
-  const status = SESSION_STATUSES.has(String(session.status || '').trim())
-    ? String(session.status).trim()
-    : 'retained';
-  return {
-    session_key: normalizeText(session.session_key),
-    status,
-    active_task_id: normalizeText(session.active_task_id),
-    latest_task_id: normalizeText(session.latest_task_id),
-    latest_summary: normalizeText(session.latest_summary),
-    latest_result_excerpt: normalizeText(session.latest_result_excerpt),
-    original_text: normalizeText(session.original_text),
-    revision: Math.max(0, Number(session.revision) || 0),
-    updated_at: updatedAt,
-    expires_at: expiresAt,
-    closed_at: session.closed_at || null
-  };
-}
+const { createControllerRegistry } = require('./backgroundTask/controllers');
+const { restoreBackgroundTasksFromDisk } = require('./backgroundTask/restore');
+const {
+  ACTIVE_STATUSES,
+  TERMINAL_STATUSES,
+  clampPositiveInt,
+  cloneJson,
+  makeTaskId,
+  normalizeSession,
+  normalizeTask,
+  normalizeText,
+  nowIso,
+  summarizeReply
+} = require('./backgroundTask/state');
+const {
+  ensureDir
+} = require('./backgroundTask/store');
 
 function createBackgroundTaskRuntime(options = {}) {
   const storeDir = normalizeText(options.storeDir || config.BACKGROUND_TASK_STORE_DIR || path.join(config.DATA_DIR, 'background_tasks'));
   const sessionTtlMs = clampPositiveInt(options.sessionTtlMs || config.BACKGROUND_TASK_SESSION_TTL_MS, 30 * 60 * 1000);
   const tasksById = new Map();
   const sessionsByKey = new Map();
-  const controllersByTaskId = new Map();
+  const controllerRegistry = createControllerRegistry();
 
   function taskPath(taskId) {
     return path.join(storeDir, `${String(taskId || '').trim()}.json`);
@@ -217,27 +120,15 @@ function createBackgroundTaskRuntime(options = {}) {
   }
 
   function clearController(taskId = '') {
-    controllersByTaskId.delete(normalizeText(taskId));
+    controllerRegistry.clear(taskId);
   }
 
   function attachController(taskId = '', controller = null) {
-    const key = normalizeText(taskId);
-    if (!key || !controller || typeof controller.cancel !== 'function') return false;
-    controllersByTaskId.set(key, controller);
-    return true;
+    return controllerRegistry.attach(taskId, controller);
   }
 
   function cancelAttachedController(taskId = '', reason = 'cancelled') {
-    const key = normalizeText(taskId);
-    if (!key) return false;
-    const controller = controllersByTaskId.get(key);
-    if (!controller || typeof controller.cancel !== 'function') return false;
-    try {
-      controller.cancel(reason);
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return controllerRegistry.cancel(taskId, reason);
   }
 
   function shouldContinue(taskId = '') {
@@ -565,62 +456,17 @@ function createBackgroundTaskRuntime(options = {}) {
   }
 
   function restoreFromDisk() {
-    ensureDir(storeDir);
-    tasksById.clear();
-    sessionsByKey.clear();
-    controllersByTaskId.clear();
-
-    const files = fs.readdirSync(storeDir)
-      .filter((name) => name.endsWith('.json'))
-      .map((name) => path.join(storeDir, name));
-
-    for (const filePath of files) {
-      const parsed = safeReadJson(filePath, null);
-      if (!parsed || typeof parsed !== 'object') continue;
-      let task = normalizeTask(parsed, { sessionTtlMs });
-      if (ACTIVE_STATUSES.has(task.status)) {
-        task = {
-          ...task,
-          status: 'interrupted',
-          stage: 'interrupted',
-          suppress_followup: true,
-          completed_at: task.completed_at || nowIso(),
-          error: task.error || 'interrupted on restore'
-        };
-      }
-      writeTask(task);
-    }
-
-    const grouped = new Map();
-    for (const task of tasksById.values()) {
-      const sessionKey = normalizeText(task.session_key);
-      if (!sessionKey) continue;
-      const list = grouped.get(sessionKey) || [];
-      list.push(task);
-      grouped.set(sessionKey, list);
-    }
-
-    for (const [sessionKey, list] of grouped.entries()) {
-      const sorted = list.slice().sort((a, b) => {
-        const byRevision = Number(b.revision || 0) - Number(a.revision || 0);
-        if (byRevision !== 0) return byRevision;
-        return String(b.updated_at || '').localeCompare(String(a.updated_at || ''));
-      });
-      const latest = sorted[0];
-      const explicitDone = sorted.find((item) => item.session_status === 'done');
-      saveSession(buildSessionSkeleton(sessionKey, {
-        status: explicitDone ? 'done' : 'retained',
-        active_task_id: '',
-        latest_task_id: latest?.id || '',
-        latest_summary: latest?.latest_summary || '',
-        latest_result_excerpt: latest?.result_excerpt || '',
-        original_text: latest?.original_text || '',
-        revision: Number(latest?.revision || 0),
-        updated_at: latest?.updated_at || nowIso(),
-        expires_at: latest?.expires_at || new Date(Date.now() + sessionTtlMs).toISOString(),
-        closed_at: explicitDone?.completed_at || null
-      }));
-    }
+    restoreBackgroundTasksFromDisk({
+      storeDir,
+      sessionTtlMs,
+      tasksById,
+      sessionsByKey,
+      controllerRegistry,
+      writeTask,
+      saveSession,
+      buildSessionSkeleton,
+      now: nowIso
+    });
   }
 
   restoreFromDisk();
