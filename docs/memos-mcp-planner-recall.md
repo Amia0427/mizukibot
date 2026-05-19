@@ -1,6 +1,6 @@
 # MemOS MCP Planner Recall
 
-更新时间：2026-05-19 21:55 CST
+更新时间：2026-05-19 22:37 +08:00
 
 ## 目标
 
@@ -36,9 +36,14 @@ MEMOS_WRITE_ASYNC=true
 ## 约束
 
 - planner 可增加一次 MCP recall/discovery 判断，主回复模型调用次数不增加。
+- MemOS 工具发现固定对 `memos-api-mcp` 做真实 discovery；即使全局 `MCP_DISCOVERY_MODE=lazy`，也会校验实际工具列表。
 - `memos_recall` 优先级低于 `short_term_continuity`，高于 `background_research`。
 - MemOS 召回只作为证据，不覆盖 Memory V3、短期连续性、persona memory。
 - 默认不写远端记忆，避免和现有 Memory V3 重复污染。
+
+## 真实连通性记录
+
+2026-05-19 22:37 +08:00：Windows 本地真实调用通过，`memos-api-mcp` 以 `protocolMode=line` 初始化成功，`search_memory` 返回 `code=0`。当前 `MEMOS_USER_ID` 下远端列表为空，因此不生成 `[MemOSRecall]` 动态块。
 
 ## 验证
 

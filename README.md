@@ -57,7 +57,7 @@ DATA_DIR=./data
 
 ### MemOS MCP planner 召回
 
-更新时间：2026-05-19 21:55 CST
+更新时间：2026-05-19 22:37 +08:00
 
 启用方式：
 
@@ -71,6 +71,7 @@ MEMOS_CHANNEL=MODELSCOPE
 说明：
 
 - `.mcp.json` 已配置 `memos-api-mcp`，运行时通过 `npx -y @memtensor/memos-api-mcp@latest` 启动。
+- Windows 本地真实测试已通过：MCP 使用 `protocolMode=line` 初始化，`search_memory` 返回 `code=0`；当前 user id 下无远端记忆时不会注入 `[MemOSRecall]`。
 - MemOS 只接在 planner 侧：`search_memory` 的结果先给 planner 判断，主回复模型只接收 planner 认可的 `[MemOSRecall]` 动态提示词块。
 - 主回复工具 allowlist 不暴露 `mcp_memos_api_mcp_*`，避免主模型自行调用 MemOS MCP。
 - 写入远端默认关闭：`MEMOS_WRITE_ENABLED=false`。稳定后再打开 shadow/异步写入。
@@ -623,6 +624,8 @@ npm run check:prompts
 - `utils/memoryCli.js`
 - `api/localNotebook.js`
 - `npm run diag:memory -- audit --limit 5`
+
+更新 2026-05-19 22:33 +08:00：用户画像记忆治理剩余目标已补齐。Memory V3 现在支持显式纠错归档、替代事实重写、忘记命令防召回、近重复画像合并、后台画像维护诊断、召回 lifecycle 加权，以及 `mem profile review/stale/why-injected` 三个画像诊断命令；清理逻辑默认保留审计历史，不做硬删除。
 
 ---
 

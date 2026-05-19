@@ -20,11 +20,21 @@ module.exports = (async () => {
         { serverName: 'memos-api-mcp', toolName: 'search_memory' },
         { serverName: 'memos-api-mcp', toolName: 'add_message' }
       ],
+      discoverMcpServerTools: async (serverName) => {
+        assert.strictEqual(serverName, 'memos-api-mcp');
+        return [
+          { serverName: 'memos-api-mcp', toolName: 'search_memory' },
+          { serverName: 'memos-api-mcp', toolName: 'add_message' }
+        ];
+      },
       callMcpTool: async (serverName, toolName, args) => {
         assert.strictEqual(serverName, 'memos-api-mcp');
         assert.strictEqual(toolName, 'search_memory');
-        assert.strictEqual(args.user_id, 'user-123');
-        assert.strictEqual(args.channel, 'MODELSCOPE');
+        assert.strictEqual(args.query, '继续刚才的实现');
+        assert.strictEqual(args.conversation_first_message, '继续刚才的实现');
+        assert.strictEqual(args.memory_limit_number, 2);
+        assert.strictEqual(args.preference_limit_number, 2);
+        assert.ok(!Object.prototype.hasOwnProperty.call(args, 'user_id'));
         return {
           result: {
             memories: [
@@ -63,6 +73,20 @@ module.exports = (async () => {
   });
   assert.strictEqual(empty.used, false);
   assert.strictEqual(empty.rejectedReason, 'disabled');
+
+  assert.deepStrictEqual(memos.normalizeRecallItems({
+    text: JSON.stringify({
+      code: 0,
+      data: {
+        memory_detail_list: [],
+        preference_detail_list: [],
+        tool_memory_detail_list: [],
+        skill_detail_list: [],
+        preference_note: ''
+      },
+      message: 'ok'
+    })
+  }), []);
 
   console.log('memosPlannerRecall.test.js passed');
   clearProjectCache();
