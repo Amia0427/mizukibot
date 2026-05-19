@@ -199,6 +199,10 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function normalizeObject(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
 function normalizeText(value, fallback = '') {
   const text = String(value || '').trim();
   return text || fallback;
@@ -206,6 +210,10 @@ function normalizeText(value, fallback = '') {
 
 function getMemosPlannerRecallRuntime() {
   return require('../../../utils/memosPlannerRecall');
+}
+
+function getMemoryRecallDeduperRuntime() {
+  return require('../../../utils/memoryRecallDeduper');
 }
 
 function resolveMemosRecallObject(options = {}, routeMeta = {}, promptMaterials = null) {
@@ -220,6 +228,16 @@ function resolveMemosRecallObject(options = {}, routeMeta = {}, promptMaterials 
 }
 
 function resolveMemosRecallText(options = {}, routeMeta = {}, promptMaterials = null) {
+  const explicitRecall = promptMaterials?.memosRecall || options?.memosRecall || null;
+  if (
+    explicitRecall
+    && typeof explicitRecall === 'object'
+    && !Array.isArray(explicitRecall)
+    && explicitRecall.used === false
+    && normalizeText(explicitRecall.rejectedReason) === 'deduped_by_local_memory'
+  ) {
+    return '';
+  }
   const directText = normalizeText(
     promptMaterials?.memosRecallText
     || options?.memosRecallText
@@ -241,6 +259,54 @@ function normalizeMemosRecallBlockText(value = '') {
   const text = normalizeText(value);
   if (!text) return '';
   return /^\[MemOSRecall\]/i.test(text) ? text : `[MemOSRecall]\n${text}`;
+}
+
+function dedupeMemosRecallForPrompt(memosRecall = {}, memoryContext = {}, options = {}) {
+  try {
+    return getMemoryRecallDeduperRuntime().dedupeMemosRecallAgainstMemoryContext(memosRecall, memoryContext, {
+      maxChars: getConfig().MEMOS_RECALL_MAX_CHARS,
+      ...normalizeObject(options, {})
+    });
+  } catch (_) {
+    const recall = memosRecall && typeof memosRecall === 'object' && !Array.isArray(memosRecall) ? memosRecall : {};
+    const localText = normalizeText([
+      memoryContext?.promptRetrievedMemoryText,
+      memoryContext?.retrievedMemoryForPrompt,
+      memoryContext?.memoryForPrompt
+    ].filter(Boolean).join('\n'));
+    const recallText = normalizeText(
+      recall.promptText
+      || normalizeArray(recall.items).map((item) => item?.text || item?.content || '').filter(Boolean).join('\n')
+    );
+    const canonical = (value = '') => normalizeText(value)
+      .toLowerCase()
+      .replace(/\[(?:memosrecall|retrievedmemorylite|retrievedmemory|relevantevidence|weakevidence|sessioncontinuity|taskmemory|groupmemory|stylesignals)\]/gi, ' ')
+      .replace(/^\s*\d+[.)、]\s*/gm, ' ')
+      .replace(/(?:然后|并且|而且|以及|另外|同时|先|再|会|了|的)/g, ' ')
+      .replace(/[^\u4e00-\u9fa5a-z0-9]+/g, '')
+      .trim();
+    const localCanonical = canonical(localText);
+    const recallCanonical = canonical(recallText);
+    if (localCanonical && recallCanonical && (localCanonical.includes(recallCanonical) || recallCanonical.includes(localCanonical))) {
+      return {
+        ...recall,
+        items: [],
+        used: false,
+        rejectedReason: 'deduped_by_local_memory',
+        promptText: '',
+        diagnostics: {
+          ...(recall.diagnostics && typeof recall.diagnostics === 'object' ? recall.diagnostics : {}),
+          dedupe: {
+            enabled: true,
+            fallback: true,
+            removed: normalizeArray(recall.items).length || 1,
+            kept: 0
+          }
+        }
+      };
+    }
+    return recall;
+  }
 }
 
 function canonicalMemoryEvidenceText(value = '') {
