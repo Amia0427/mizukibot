@@ -24,6 +24,7 @@ const {
 } = require('./model/service');
 const {
   normalizeArray: normalizeContractArray,
+  buildToolEvidenceBundle,
   normalizeExecutionEnvelope,
   normalizeObject: normalizeContractObject,
   normalizePlanStep,
@@ -1523,6 +1524,8 @@ function createRuntime(options = {}) {
     compileDirectChatToolCallsToPlan,
     computeEffectiveAllowedTools,
     resolveToolLoopReply,
+    buildToolEvidenceBundle,
+    normalizeExecutionEnvelope,
     synthesizeImpl,
     saveAndEmit
   });
@@ -1732,6 +1735,7 @@ function createRuntime(options = {}) {
         }
       });
     },
+    normalizeExecutionEnvelope,
     rebuildFinalPlanFromSteps,
     buildExecLogsFromSteps,
     mergeAllowedToolsWithMemoryCli,

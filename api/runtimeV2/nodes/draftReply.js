@@ -1,3 +1,5 @@
+const { buildToolEvidenceBundle } = require('../contracts');
+
 function createDraftReplyNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
     ? deps.normalizeObject
@@ -50,10 +52,47 @@ function createDraftReplyNode(deps = {}) {
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
+  const buildToolEvidenceBundleImpl = typeof deps.buildToolEvidenceBundle === 'function'
+    ? deps.buildToolEvidenceBundle
+    : buildToolEvidenceBundle;
+  const isPureToolCallMarkup = typeof deps.isPureToolCallMarkup === 'function'
+    ? deps.isPureToolCallMarkup
+    : ((text = '') => /^<tool_calls>[\s\S]*<\/tool_calls>$/i.test(String(text || '').trim()));
+
+  function extractAssistantContentText(content) {
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content.map((part) => {
+        if (typeof part === 'string') return part;
+        if (typeof part?.text === 'string') return part.text;
+        return '';
+      }).join('');
+    }
+    if (content && typeof content === 'object') {
+      if (typeof content.text === 'string') return content.text;
+      if (typeof content.content === 'string') return content.content;
+    }
+    return '';
+  }
+
+  function isStableToolFollowupReply(message = {}) {
+    const text = extractAssistantContentText(message?.content).trim();
+    if (!text) return { ok: false, text: '', reason: 'empty_reply' };
+    if (normalizeArray(message?.tool_calls).length > 0) {
+      return { ok: false, text, reason: 'unexpected_tool_calls' };
+    }
+    if (isPureToolCallMarkup(text)) {
+      return { ok: false, text, reason: 'pure_tool_markup' };
+    }
+    return { ok: true, text, reason: '' };
+  }
 
   return async function draftReplyNode(state) {
+    const draftStartedAt = Date.now();
     const request = normalizeObject(state.request, {});
     const events = [createEvent('node_start', { node: 'draft_reply' })];
+    let followupModelCalls = 0;
+    let synthesisModelCalls = 0;
     let nextMemory = {
       ...state.memory
     };
@@ -93,7 +132,10 @@ function createDraftReplyNode(deps = {}) {
       }));
     }
     const finalPlan = state.plan?.finalPlan || rebuildFinalPlanFromSteps(state);
-    const finalExecLogs = normalizeArray(state.plan?.finalExecLogs);
+    const toolEvidenceBundle = buildToolEvidenceBundleImpl(state);
+    const finalExecLogs = normalizeArray(toolEvidenceBundle.execLogs).length > 0
+      ? normalizeArray(toolEvidenceBundle.execLogs)
+      : normalizeArray(state.plan?.finalExecLogs);
     const synthesisDynamicPrompt = [
       String(nextMemory.dynamicPrompt || '').trim(),
       String(nextMemory.globalToolEvidence || state.memory?.globalToolEvidence || '').trim()
@@ -188,15 +230,87 @@ function createDraftReplyNode(deps = {}) {
         reason: 'compiled_tool_plan_followup'
       }));
     } else {
-      draftReply = await synthesizeImpl(
-        request.question || '',
-        synthesisDynamicPrompt,
-        finalPlan,
-        finalExecLogs,
-        state.plan?.verification || null,
-        request.modelConfig,
-        continuityStateMessage ? { systemMessages: [continuityStateMessage] } : null
-      );
+      const hasToolMessages = normalizeArray(toolEvidenceBundle.toolMessages).length > 0
+        && toolEvidenceBundle.assistantToolCallMessage;
+      let fallbackReason = '';
+      if (hasToolMessages) {
+        const followupMessages = normalizeArray([
+          ...getMainConversationSystemMessages({
+            ...state,
+            memory: nextMemory
+          }, {
+            isReviewRoute: isReviewMode(request.reviewMode),
+            disableMemoryCliInstruction: true
+          }),
+          ...(continuityStateMessage ? [continuityStateMessage] : []),
+          ...buildDirectReplyMessages({
+            ...state,
+            memory: nextMemory
+          }, request.imageUrl
+            ? buildVisionMessageContent(request.question || '', request.imageUrl, request.imageUrls)
+            : (request.question || ''), []).messages.filter((item) => String(item?.role || '').trim() !== 'system'),
+          toolEvidenceBundle.assistantToolCallMessage,
+          ...toolEvidenceBundle.toolMessages
+        ]).filter(Boolean);
+        try {
+          followupModelCalls += 1;
+          const assistantFollowup = normalizeMessageForToolLoop(await requestAssistantMessageImpl(followupMessages, {
+            question: request.question,
+            userId: request.userId,
+            dynamicPrompt: synthesisDynamicPrompt,
+            modelConfig: request.modelConfig,
+            routePolicyKey: request.routePolicyKey,
+            routeDebugKey: request.routeDebugKey || request.routeMeta?.routeDebugKey,
+            reviewMode: request.reviewMode,
+            routeMeta: request.routeMeta,
+            requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
+            topRouteType: request.topRouteType,
+            customPrompt: request.customPrompt,
+            source: 'draft_reply',
+            dispatchBranch: 'tool_plan',
+            triggerBranch: 'draft_reply.followup_after_tools',
+            disableTools: true,
+            allowedTools: []
+          }));
+          const stable = isStableToolFollowupReply(assistantFollowup);
+          if (stable.ok) {
+            draftReply = stable.text;
+            events.push(createEvent('tool_result_injected', {
+              node: 'draft_reply',
+              track: 'tool_messages',
+              toolResultCount: toolEvidenceBundle.toolResultCount,
+              globalEvidenceCount: toolEvidenceBundle.globalEvidenceCount
+            }));
+          } else {
+            fallbackReason = stable.reason || 'unstable_tool_followup';
+          }
+        } catch (error) {
+          fallbackReason = `tool_message_followup_error:${String(error?.message || error || 'unknown').slice(0, 160)}`;
+        }
+      } else if (normalizeArray(finalExecLogs).length > 0) {
+        fallbackReason = 'missing_tool_messages';
+      }
+
+      if (!draftReply) {
+        if (fallbackReason) {
+          events.push(createEvent('tool_result_injection_fallback', {
+            node: 'draft_reply',
+            reason: fallbackReason,
+            toolResultCount: toolEvidenceBundle.toolResultCount,
+            globalEvidenceCount: toolEvidenceBundle.globalEvidenceCount
+          }));
+        }
+        synthesisModelCalls += 1;
+        draftReply = await synthesizeImpl(
+          request.question || '',
+          synthesisDynamicPrompt,
+          finalPlan,
+          finalExecLogs,
+          state.plan?.verification || null,
+          request.modelConfig,
+          continuityStateMessage ? { systemMessages: [continuityStateMessage] } : null
+        );
+      }
     }
     const nextEvents = events.concat([
       createEvent('draft_reply', {
@@ -213,7 +327,19 @@ function createDraftReplyNode(deps = {}) {
       memory: nextMemory,
       execution: {
         ...state.execution,
-        currentNode: 'draft_reply'
+        currentNode: 'draft_reply',
+        latencyBreakdown: {
+          ...normalizeObject(state.execution?.latencyBreakdown, {}),
+          model: {
+            ...normalizeObject(state.execution?.latencyBreakdown?.model, {}),
+            draft_reply_followup_calls: followupModelCalls,
+            draft_reply_synthesis_calls: synthesisModelCalls,
+            total_model_calls: Number(state.execution?.latencyBreakdown?.model?.total_model_calls || 0)
+              + followupModelCalls
+              + synthesisModelCalls,
+            draft_reply_ms: Math.max(0, Date.now() - draftStartedAt)
+          }
+        }
       },
       events: nextEvents
     }, 'draft_reply', 'running', nextEvents);

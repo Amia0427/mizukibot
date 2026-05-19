@@ -1,3 +1,5 @@
+const { normalizeExecutionEnvelope } = require('../contracts');
+
 function createDispatchNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
     ? deps.normalizeObject
@@ -74,6 +76,9 @@ function createDispatchNode(deps = {}) {
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
+  const normalizeExecutionEnvelopeImpl = typeof deps.normalizeExecutionEnvelope === 'function'
+    ? deps.normalizeExecutionEnvelope
+    : normalizeExecutionEnvelope;
   const config = deps.config || {};
 
   return async function dispatchNode(state) {
@@ -189,6 +194,7 @@ function createDispatchNode(deps = {}) {
       })
     );
     const preflightStartedAt = Date.now();
+    const preflightCalls = mustRunPreflight ? 1 : 0;
     const preflight = mustRunPreflight
       ? await runCapabilityPreflight(request.question || '', {
         question: String(request.question || '').trim(),
@@ -293,6 +299,8 @@ function createDispatchNode(deps = {}) {
       side_effect: false,
       retryable: true,
       attempt: Number(step.attempts || 0) + 1,
+      duration_ms: 0,
+      source: 'dispatch',
       unsatisfiedRequirement: step.blockingReason,
       runtimeBinding: step.runtimeBinding
     });
@@ -333,18 +341,29 @@ function createDispatchNode(deps = {}) {
       persistDispatchCheckpoint(false);
     };
 
+    const normalizeDispatchEnvelope = (envelope = {}) => {
+      const fallbackStep = nextSteps.find((step) => String(step?.id || '').trim() === String(envelope?.step_id || envelope?.stepId || '').trim())
+        || selectedSteps.find((step) => String(step?.id || '').trim() === String(envelope?.step_id || envelope?.stepId || '').trim())
+        || {};
+      return normalizeExecutionEnvelopeImpl(envelope, fallbackStep, {
+        stableHash,
+        source: envelope?.source || 'dispatch'
+      });
+    };
+
     const applyEnvelope = (envelope) => {
-      toolResults.push(envelope);
-      const updatedSteps = updatePlanStepsWithEnvelope(nextSteps, envelope);
+      const normalizedEnvelope = normalizeDispatchEnvelope(envelope);
+      toolResults.push(normalizedEnvelope);
+      const updatedSteps = updatePlanStepsWithEnvelope(nextSteps, normalizedEnvelope);
       nextSteps.splice(0, nextSteps.length, ...updatedSteps);
-      if (envelope.memoryCliTurn) {
-        nextMemoryCliTurn = createMemoryCliTurnState(envelope.memoryCliTurn);
+      if (normalizedEnvelope.memoryCliTurn) {
+        nextMemoryCliTurn = createMemoryCliTurnState(normalizedEnvelope.memoryCliTurn);
       }
-      if (envelope.invalidateMemoryPrompt) {
+      if (normalizedEnvelope.invalidateMemoryPrompt) {
         memoryDirty = true;
       }
-      if (envelope.side_effect) {
-        checkpointAfterSideEffect(envelope);
+      if (normalizedEnvelope.side_effect) {
+        checkpointAfterSideEffect(normalizedEnvelope);
       }
     };
 
@@ -353,7 +372,7 @@ function createDispatchNode(deps = {}) {
       const argsHash = stableHash(step.inputs || {});
       const reusableEnvelope = findEvidenceEnvelope(step, argsHash);
       if (String(step.status || '').trim() === 'completed' && reusableEnvelope && reusableEnvelope.side_effect) {
-        toolResults.push({
+        toolResults.push(normalizeDispatchEnvelope({
           ...reusableEnvelope,
           ...(String(reusableEnvelope?.batch_id || step.batchId || '').trim()
             ? { batch_id: String(reusableEnvelope?.batch_id || step.batchId).trim() }
@@ -364,7 +383,7 @@ function createDispatchNode(deps = {}) {
               : (Number.isFinite(Number(step.batchIndex)) ? { batch_index: Number(step.batchIndex) } : {})
           ),
           reused: true
-        });
+        }));
         continue;
       }
 
@@ -509,9 +528,16 @@ function createDispatchNode(deps = {}) {
           dispatch: {
             tool_exec_ms: Math.max(0, Date.now() - dispatchStartedAt - preflightDurationMs),
             capability_preflight_ms: preflightDurationMs,
+            capability_preflight_calls: preflightCalls,
             tool_result_count: toolResults.length,
             scheduled_batch_count: scheduledBatches.length,
             parallel_batch_count: scheduledBatches.filter((batch) => batch.mode === 'parallel').length
+          },
+          model: {
+            ...normalizeObject(state.execution?.latencyBreakdown?.model, {}),
+            global_preflight_calls: Number(state.execution?.latencyBreakdown?.model?.global_preflight_calls || 0)
+              + preflightCalls,
+            total_model_calls: Number(state.execution?.latencyBreakdown?.model?.total_model_calls || 0)
           }
         }
       },

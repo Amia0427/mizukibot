@@ -26,6 +26,7 @@ module.exports = (async () => {
     process.env.POST_REPLY_ENRICH_DELAY_MS = '300000';
     process.env.POST_REPLY_ENRICH_MIN_TURNS = '2';
     process.env.POST_REPLY_ENRICH_MIN_CONTENT_CHARS = '120';
+    process.env.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = 'false';
     clearProjectCache();
 
     const memoryExtraction = require('../api/memoryExtraction');
@@ -114,7 +115,8 @@ module.exports = (async () => {
       processPostReplyJob,
       createPostReplyWorkerRuntime,
       schedulePostReplyMaterialize,
-      flushPostReplyMaterialize
+      flushPostReplyMaterialize,
+      runPostReplyVectorMaintenance
     } = require('../utils/postReplyWorkerRuntime');
 
     await processPostReplyJob({
@@ -449,6 +451,166 @@ module.exports = (async () => {
     assert.strictEqual(materializeResume.job.completedTasks.memoryEvent, true);
     assert.strictEqual(materializeResume.job.completedTasks.materialize, true);
     assert.ok(!calls.some((item) => item.type === 'memory'), 'materialize resume should not rerun heavy memory learning');
+
+    const config = require('../config');
+    config.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = true;
+    config.MEMORY_V3_ENABLED = true;
+    config.MEMORY_EMBEDDING_INDEX_ENABLED = true;
+    config.MEMORY_LANCEDB_SYNC_ENABLED = true;
+    const vectorMaintenanceCalls = [];
+    const vectorQueue = {
+      updatedJobs: [],
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      }
+    };
+    const vectorMaintenanceResult = await processPostReplyJob({
+      jobId: 'vector_maintenance_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true
+      }
+    }, {
+      queue: vectorQueue,
+      runVectorMaintenance: async (options = {}) => {
+        vectorMaintenanceCalls.push(options);
+        return { ok: true, skipped: false, embedded: 1, failed: 0, remaining: 0, durationMs: 1 };
+      }
+    });
+    assert.strictEqual(vectorMaintenanceCalls.length, 1, 'core job should run vector maintenance when enabled');
+    assert.strictEqual(vectorMaintenanceCalls[0].jobId, 'vector_maintenance_job');
+    assert.strictEqual(vectorMaintenanceResult.job.completedTasks.vectorMaintenance, true);
+
+    vectorMaintenanceCalls.length = 0;
+    await processPostReplyJob({
+      jobId: 'vector_maintenance_resume_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true,
+        vectorMaintenance: true
+      }
+    }, {
+      runVectorMaintenance: async (options = {}) => {
+        vectorMaintenanceCalls.push(options);
+        return { ok: true };
+      }
+    });
+    assert.strictEqual(vectorMaintenanceCalls.length, 0, 'retry should not rerun completed vector maintenance');
+    config.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = false;
+
+    const reconcileCalls = [];
+    config.POST_REPLY_VECTOR_MAINTENANCE_RECONCILE_ENABLED = true;
+    const directMaintenance = await runPostReplyVectorMaintenance({
+      enabled: true,
+      force: true,
+      source: 'all',
+      limit: 1,
+      intervalMs: 0
+    }, {
+      flushPostReplyMaterialize: async () => ({ flushed: true }),
+      runMemoryVectorBackfill: async () => ({
+        ok: true,
+        source: 'all',
+        considered: 0,
+        embedded: 0,
+        failed: 0,
+        remaining: 0,
+        syncRuns: []
+      }),
+      reconcileDeps: {
+        buildSyncSummary: async () => ({
+          ok: true,
+          coverage: {
+            memory: { readyButNotSynced: 1, staleTableRows: 0 },
+            worldbook: { readyButNotSynced: 0, staleTableRows: 0 }
+          },
+          _rows: {
+            memory: [{ id: 'm1', vector: [0.1], updatedAt: 1 }],
+            worldbook: []
+          }
+        }),
+        lanceDbStore: {
+          syncMemoryRows: async (rows, options) => {
+            reconcileCalls.push({ type: 'memory', rows, options });
+            return { ok: true, rows: rows.length };
+          },
+          syncWorldbookRows: async (rows, options) => {
+            reconcileCalls.push({ type: 'worldbook', rows, options });
+            return { ok: true, rows: rows.length };
+          }
+        }
+      }
+    });
+    assert.strictEqual(directMaintenance.reconciled, true, 'maintenance should reconcile LanceDB drift even without new embeddings');
+    assert.ok(reconcileCalls.some((item) => item.type === 'memory'), 'memory reconcile should run when coverage drifts');
+
+    reconcileCalls.length = 0;
+    const healthGateMaintenance = await runPostReplyVectorMaintenance({
+      enabled: true,
+      force: true,
+      source: 'all',
+      limit: 1,
+      intervalMs: 0
+    }, {
+      flushPostReplyMaterialize: async () => ({ flushed: true }),
+      runMemoryVectorBackfill: async () => ({
+        ok: false,
+        source: 'all',
+        considered: 1,
+        embedded: 1,
+        failed: 0,
+        remaining: 0,
+        syncRuns: [{ step: { kind: 'memory' } }],
+        stoppedBy: 'post_sync_health_gate'
+      }),
+      reconcileDeps: {
+        buildSyncSummary: async () => ({
+          ok: true,
+          coverage: {
+            memory: { readyButNotSynced: 1, staleTableRows: 1 },
+            worldbook: { readyButNotSynced: 0, staleTableRows: 0 }
+          },
+          _rows: {
+            memory: [{ id: 'm2', vector: [0.2], updatedAt: 2 }],
+            worldbook: []
+          }
+        }),
+        lanceDbStore: {
+          syncMemoryRows: async (rows, options) => {
+            reconcileCalls.push({ type: 'memory', rows, options });
+            return { ok: true, rows: rows.length };
+          },
+          syncWorldbookRows: async (rows, options) => {
+            reconcileCalls.push({ type: 'worldbook', rows, options });
+            return { ok: true, rows: rows.length };
+          }
+        }
+      }
+    });
+    assert.strictEqual(healthGateMaintenance.ok, true, 'health gate stop should recover when reconcile succeeds');
+    assert.strictEqual(healthGateMaintenance.reconciled, true, 'health gate stop should trigger reconcile');
+    config.POST_REPLY_VECTOR_MAINTENANCE_RECONCILE_ENABLED = false;
 
     const recycleCalls = [];
     const recycleRuntime = createPostReplyWorkerRuntime({
