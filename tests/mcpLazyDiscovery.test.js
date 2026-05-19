@@ -30,11 +30,22 @@ module.exports = (() => {
         fetch: {
           command: 'node',
           args: ['missing-local-mcp-server.js', 'fetch']
+        },
+        'memos-api-mcp': {
+          command: 'npx',
+          args: ['-y', '@memtensor/memos-api-mcp@latest'],
+          env: {
+            MEMOS_API_KEY: '${MEMOS_API_KEY}',
+            MEMOS_USER_ID: '${MEMOS_USER_ID}',
+            MEMOS_CHANNEL: 'MODELSCOPE'
+          }
         }
       }
     }), 'utf8');
 
     process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.MEMOS_API_KEY = 'memos-test-key';
+    process.env.MEMOS_USER_ID = 'memos-user-1';
     process.env.DATA_DIR = path.join(tempDir, 'data');
     process.env.MIZUKI_MCP_CONFIG = configPath;
     process.env.MCP_DISCOVERY_MODE = 'lazy';
@@ -43,7 +54,15 @@ module.exports = (() => {
     clearProjectCache();
 
     const runtime = require('../api/mcpRuntime');
+    const { expandEnvValue, listConfiguredMcpServers } = require('../api/mcp/config');
     runtime.clearMcpRuntimeCaches();
+    assert.strictEqual(expandEnvValue('${MEMOS_API_KEY}', { MEMOS_API_KEY: 'expanded-key' }), 'expanded-key');
+    const configured = listConfiguredMcpServers({ configPath });
+    const memosServer = configured.find((item) => item.serverName === 'memos-api-mcp');
+    assert.ok(memosServer);
+    assert.strictEqual(memosServer.env.MEMOS_API_KEY, 'memos-test-key');
+    assert.strictEqual(memosServer.env.MEMOS_USER_ID, 'memos-user-1');
+    assert.strictEqual(memosServer.env.MEMOS_CHANNEL, 'MODELSCOPE');
 
     return runtime.discoverMcpTools().then((tools) => {
       assert.ok(tools.some((item) => item.functionName === 'mcp_fetch_fetch_url'));

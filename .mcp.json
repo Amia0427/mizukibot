@@ -27,6 +27,18 @@
         "scripts/local-mcp-server.js",
         "howtocook-mcp"
       ]
+    },
+    "memos-api-mcp": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@memtensor/memos-api-mcp@latest"
+      ],
+      "env": {
+        "MEMOS_API_KEY": "${MEMOS_API_KEY}",
+        "MEMOS_USER_ID": "${MEMOS_USER_ID}",
+        "MEMOS_CHANNEL": "MODELSCOPE"
+      }
     }
   }
 }

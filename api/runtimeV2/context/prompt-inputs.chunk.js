@@ -4,6 +4,8 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
   const surface = buildPromptSurface(topRouteType, routeMeta);
+  const memosRecall = resolveMemosRecallObject(options, routeMeta, null);
+  const memosRecallText = resolveMemosRecallText(options, routeMeta, { memosRecall });
   const affinity = options.affinity && typeof options.affinity === 'object'
     ? options.affinity
     : getAffinitySettings(userInfo, { userId });
@@ -122,6 +124,8 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     personaModuleCandidates,
     personaWorldbookSearch,
     personaModuleDecision,
+    memosRecall,
+    memosRecallText,
     dynamicPromptPlan,
     summaryText,
     dynamicFewShotPrompt,

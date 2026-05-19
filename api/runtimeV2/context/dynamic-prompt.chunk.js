@@ -89,6 +89,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       personaModuleCandidates: getFallbackPersonaModuleCandidates(),
       personaWorldbookSearch: {},
       personaModuleDecision: getFallbackPersonaModuleDecision(),
+      memosRecall: resolveMemosRecallObject(options, routeMeta, null),
+      memosRecallText: resolveMemosRecallText(options, routeMeta, null),
       dynamicPromptPlan: baseDynamicPromptPlan,
       summaryText: fallbackSummaryText,
       dynamicFewShotPrompt: ''
@@ -423,6 +425,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     hasAffinityState: true,
     hasShortTermContinuity: combinedDynamicBlocks.some((item) => item?.id === 'short_term_continuity'),
     hasRetrievedMemory: combinedDynamicBlocks.some((item) => item?.id === 'retrieved_memory_lite'),
+    hasMemosRecall: combinedDynamicBlocks.some((item) => item?.id === 'memos_recall' || normalizeText(item?.meta?.blockId) === 'memos_recall')
+      || Boolean(resolveMemosRecallText(options, routeMeta, promptMaterials)),
     hasDailyJournal: combinedDynamicBlocks.some((item) => item?.id === 'daily_journal' || normalizeText(item?.meta?.blockId) === 'daily_journal'),
     hasLongTermProfile: combinedDynamicBlocks.some((item) => item?.id === 'long_term_profile'),
     hasImpression: combinedDynamicBlocks.some((item) => item?.id === 'impression'),

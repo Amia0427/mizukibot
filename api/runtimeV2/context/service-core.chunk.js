@@ -204,6 +204,45 @@ function normalizeText(value, fallback = '') {
   return text || fallback;
 }
 
+function getMemosPlannerRecallRuntime() {
+  return require('../../../utils/memosPlannerRecall');
+}
+
+function resolveMemosRecallObject(options = {}, routeMeta = {}, promptMaterials = null) {
+  const candidates = [
+    promptMaterials?.memosRecall,
+    options?.memosRecall,
+    routeMeta?.directChatPlanner?.memosRecall,
+    routeMeta?.toolPlanner?.memosRecall,
+    routeMeta?.memosRecall
+  ];
+  return candidates.find((item) => item && typeof item === 'object' && !Array.isArray(item)) || {};
+}
+
+function resolveMemosRecallText(options = {}, routeMeta = {}, promptMaterials = null) {
+  const directText = normalizeText(
+    promptMaterials?.memosRecallText
+    || options?.memosRecallText
+    || routeMeta?.directChatPlanner?.memosRecallText
+    || routeMeta?.toolPlanner?.memosRecallText
+    || routeMeta?.memosRecallText
+  );
+  if (directText) return directText;
+  try {
+    return normalizeText(getMemosPlannerRecallRuntime().getMemosRecallPromptText(
+      resolveMemosRecallObject(options, routeMeta, promptMaterials)
+    ));
+  } catch (_) {
+    return '';
+  }
+}
+
+function normalizeMemosRecallBlockText(value = '') {
+  const text = normalizeText(value);
+  if (!text) return '';
+  return /^\[MemOSRecall\]/i.test(text) ? text : `[MemOSRecall]\n${text}`;
+}
+
 function canonicalMemoryEvidenceText(value = '') {
   return String(value || '')
     .toLowerCase()

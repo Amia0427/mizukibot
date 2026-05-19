@@ -55,6 +55,26 @@ DATA_DIR=./data
 - `DATA_DIR` 默认是项目根目录下的 `data/`。
 - `.env` 不要提交到仓库。
 
+### MemOS MCP planner 召回
+
+更新时间：2026-05-19 21:55 CST
+
+启用方式：
+
+```env
+MEMOS_MCP_ENABLED=true
+MEMOS_API_KEY=...
+MEMOS_USER_ID=...
+MEMOS_CHANNEL=MODELSCOPE
+```
+
+说明：
+
+- `.mcp.json` 已配置 `memos-api-mcp`，运行时通过 `npx -y @memtensor/memos-api-mcp@latest` 启动。
+- MemOS 只接在 planner 侧：`search_memory` 的结果先给 planner 判断，主回复模型只接收 planner 认可的 `[MemOSRecall]` 动态提示词块。
+- 主回复工具 allowlist 不暴露 `mcp_memos_api_mcp_*`，避免主模型自行调用 MemOS MCP。
+- 写入远端默认关闭：`MEMOS_WRITE_ENABLED=false`。稳定后再打开 shadow/异步写入。
+
 ### 启动
 
 ```bash

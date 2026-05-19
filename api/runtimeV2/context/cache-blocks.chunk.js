@@ -30,7 +30,8 @@ function buildSessionCacheFingerprint(userInfo = {}, promptMaterials = {}) {
     : getAffinitySettings(userInfo, { userId: promptMaterials?.userId });
   return hashText([
     normalizeText(userInfo?.level || ''),
-    String(Number(userInfo?.points || affinity?.points || 0) || 0)
+    String(Number(userInfo?.points || affinity?.points || 0) || 0),
+    normalizeText(promptMaterials?.memosRecallText)
   ].join('|'));
 }
 

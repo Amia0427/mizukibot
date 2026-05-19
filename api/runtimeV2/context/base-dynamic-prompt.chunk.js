@@ -14,6 +14,11 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   const includeOptionalContextBlocks = options.includeOptionalContextBlocks !== false;
   const includePersonaModuleBlocks = options.includePersonaModuleBlocks !== false;
   const includeDynamicFewShotBlock = options.includeDynamicFewShotBlock !== false;
+  const memosRecall = resolveMemosRecallObject(options, routeMeta, promptMaterials);
+  const memosRecallText = normalizeMemosRecallBlockText(resolveMemosRecallText(options, routeMeta, {
+    ...(promptMaterials || {}),
+    memosRecall
+  }));
   const sharedShortTermContext = promptMaterials?.sharedShortTermContext && typeof promptMaterials.sharedShortTermContext === 'object'
     ? promptMaterials.sharedShortTermContext
     : (options.sharedShortTermContext && typeof options.sharedShortTermContext === 'object'
@@ -199,6 +204,19 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       optional: true
     }
   }));
+  if (memosRecallText) {
+    promptBlocks.push(createPromptBlock('memos_recall', 'MemOS Recall', memosRecallText, {
+      stage: 'main',
+      priority: 262,
+      authority: 'memory_fact',
+      kind: 'memory',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true,
+        evidenceOnly: true
+      }
+    }));
+  }
   const rawDailyJournalPromptText = memoryContext.promptDailyJournalText || memoryContext.dailyJournalText || '';
   const dedupedDailyJournalPromptText = removeDuplicateJournalPromptText(
     rawDailyJournalPromptText,
@@ -399,6 +417,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     hasAffinityState: true,
     hasShortTermContinuity: Boolean(shortTermContinuityText),
     hasRetrievedMemory: Boolean(memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt),
+    hasMemosRecall: Boolean(memosRecallText),
     hasDailyJournal: Boolean(dailyJournalPromptText),
     hasLongTermProfile: Boolean(memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText),
     hasImpression: Boolean(memoryContext.promptImpressionText || memoryContext.impressionText),
@@ -522,6 +541,18 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
           meta: {
             optional: true,
             blockId: 'daily_journal',
+            evidenceOnly: true
+          }
+        }),
+        createPromptBlock('memos_recall_compact', 'MemOS Recall Compact', trimTextByTokenBudget(memosRecallText, Math.floor(promptBudget * 0.12), 'tail'), {
+          stage: 'main',
+          priority: 262,
+          authority: 'memory_fact',
+          kind: 'memory',
+          lane: 'dynamic_context',
+          meta: {
+            optional: true,
+            blockId: 'memos_recall',
             evidenceOnly: true
           }
         }),

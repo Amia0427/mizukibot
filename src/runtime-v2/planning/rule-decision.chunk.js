@@ -53,6 +53,7 @@ const DYNAMIC_PROMPT_BLOCK_SIGNAL_KEYS = Object.freeze({
   relationship_state: 'relationship',
   summary: 'summary',
   retrieved_memory_lite: 'retrievedMemory',
+  memos_recall: 'memosRecall',
   daily_journal: 'dailyJournal',
   short_term_continuity: 'shortTermContinuity',
   continuity_state: 'continuity',
@@ -75,6 +76,7 @@ const DYNAMIC_PROMPT_BLOCK_SELECTION_POLICIES = Object.freeze({
   relationship_state: 'include_if_relevant',
   summary: 'include_if_relevant',
   retrieved_memory_lite: 'high_value_only',
+  memos_recall: 'high_value_only',
   daily_journal: 'high_value_only',
   short_term_continuity: 'must_use_when_available',
   continuity_state: 'include_if_relevant',
@@ -136,6 +138,7 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
     hasAffinityState: availableContextSignals.affinityState,
     hasShortTermContinuity: availableContextSignals.shortTermContinuity,
     hasRetrievedMemory: availableContextSignals.retrievedMemory,
+    hasMemosRecall: availableContextSignals.memosRecall,
     hasDailyJournal: availableContextSignals.dailyJournal,
     hasLongTermProfile: availableContextSignals.longTermProfile,
     hasImpression: availableContextSignals.impression,
@@ -422,6 +425,11 @@ function buildAvailableContextSignals(route = {}, options = {}) {
       hasMeaningfulText(memoryContext.promptRetrievedMemoryText)
       || hasMeaningfulText(memoryContext.memoryForPrompt)
       || hasMeaningfulText(options.retrievedMemoryText)
+    )),
+    memosRecall: signal('memosRecall', (
+      hasMeaningfulText(options.memosRecallText)
+      || hasMeaningfulText(options.memosRecall?.promptText)
+      || normalizeArray(options.memosRecall?.items).some((item) => hasMeaningfulText(item?.text || item?.content))
     )),
     dailyJournal: signal('dailyJournal', (
       hasMeaningfulText(memoryContext.promptDailyJournalText)
