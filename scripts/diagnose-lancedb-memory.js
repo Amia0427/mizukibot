@@ -13,7 +13,7 @@ const { queryMemory } = require('../utils/memory-v3/query');
 const { loadScopeProjection } = require('../utils/memory-v3/storage');
 const { diagnoseProjectionFreshness } = require('../utils/memory-v3/diagnostics');
 const { buildJournalHealthSummary } = require('../utils/memory-v3/journalDiagnostics');
-const { buildMemoryQualityReport } = require('../utils/memoryQuality');
+const { buildLongTermMemoryQualityReport } = require('../utils/memoryQualitySources');
 const {
   safeReadJsonLines,
   normalizeText
@@ -265,7 +265,10 @@ function buildSafeJournalHealthSummary(options = {}, deps = {}) {
 function buildSafeMemoryQualityReport(options = {}, deps = {}) {
   try {
     const loader = deps.loadMemoryNodes || loadMemoryNodes;
-    return (deps.buildMemoryQualityReport || buildMemoryQualityReport)(loader(), options);
+    return (deps.buildLongTermMemoryQualityReport || buildLongTermMemoryQualityReport)(options, {
+      ...deps,
+      loadMemoryNodes: loader
+    });
   } catch (error) {
     return {
       ok: false,

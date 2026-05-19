@@ -105,6 +105,11 @@ module.exports = (async () => {
   assert.strictEqual(parsed.source, 'memory');
   assert.strictEqual(parsed.limit, 7);
   assert.strictEqual(parsed.retryFailed, true);
+  const parsedGate = parseMemoryOpsArgs(['recall', '--gate', '--min-recall-at8', '0.7', '--max-empty-result-rate', '0.4', '--max-no-visible-candidate-rate', '0.5']);
+  assert.strictEqual(parsedGate.gate, true);
+  assert.strictEqual(parsedGate.minRecallAt8, 0.7);
+  assert.strictEqual(parsedGate.maxEmptyResultRate, 0.4);
+  assert.strictEqual(parsedGate.maxNoVisibleCandidateRate, 0.5);
 
   const diagnose = await runMemoryOps(parseMemoryOpsArgs(['diagnose', '--limit', '2']), { runners });
   assert.strictEqual(diagnose.schemaVersion, SCHEMA_VERSION);
@@ -129,7 +134,39 @@ module.exports = (async () => {
   assert.strictEqual(recall.mode, 'recall');
   assert.strictEqual(recall.summary.evalMode, 'shadow');
   assert.strictEqual(recall.summary.cases, 1);
+  assert.ok(recall.summary.gate);
   assert.ok(recall.summary.casesFile.endsWith('artifacts\\memory-recall-eval\\cases.jsonl') || recall.summary.casesFile.endsWith('artifacts/memory-recall-eval/cases.jsonl'));
+
+  const gateRunners = {
+    ...runners,
+    runMode: async (mode, cases, options) => {
+      calls.push(['gateRecall', { mode, cases: cases.length, options }]);
+      return {
+        mode,
+        cases: cases.length,
+        judgedCases: 12,
+        recallAt8: mode === 'local_jsonl' ? 0.8 : 0.81,
+        mrrAt8: mode === 'local_jsonl' ? 0.5 : 0.52,
+        leakage: 0,
+        emptyResultRate: 0.02,
+        noVisibleCandidateRate: 0.02,
+        details: []
+      };
+    },
+    runDiagnostics: async () => ({
+      ok: true,
+      coverage: {
+        memory: { readyRatio: 1, staleTableRows: 0, readyButNotSynced: 0 },
+        worldbook: { readyRatio: 1, staleTableRows: 0, readyButNotSynced: 0 }
+      },
+      healthGate: { mustMaterializeFirst: false, mustReconcileFirst: false },
+      projectionFreshness: { projectionStale: false }
+    })
+  };
+  const lancedbGate = await runMemoryOps(parseMemoryOpsArgs(['lancedb-gate', '--limit', '1', '--min-judged-cases', '1', '--min-recall-at8', '0.7']), { runners: gateRunners });
+  assert.strictEqual(lancedbGate.mode, 'lancedb-gate');
+  assert.strictEqual(lancedbGate.ok, true);
+  assert.strictEqual(lancedbGate.summary.canPromoteRead, true);
 
   const invalid = await runMemoryOpsFromArgv(['unknown-mode'], { runners });
   assert.strictEqual(invalid.ok, false);

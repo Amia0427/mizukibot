@@ -235,6 +235,10 @@ function candidateKey(item = {}) {
 
 function fuseRecallCandidates(localCandidates = [], vectorCandidates = [], options = {}) {
   const rrfK = Math.max(1, Number(options.rrfK || config.MEMORY_V3_RRF_K || 50) || 50);
+  const localWeight = Math.max(0, Number(options.localWeight || config.MEMORY_LANCEDB_RRF_LOCAL_WEIGHT || 1) || 1);
+  const vectorWeight = Math.max(0, Number(options.vectorWeight || config.MEMORY_LANCEDB_RRF_VECTOR_WEIGHT || 1.18) || 1.18);
+  const strongVectorThreshold = Math.max(0, Math.min(1, Number(options.strongVectorThreshold || config.MEMORY_LANCEDB_STRONG_VECTOR_THRESHOLD || 0.72) || 0.72));
+  const strongVectorBoost = Math.max(0, Number(options.strongVectorBoost || config.MEMORY_LANCEDB_STRONG_VECTOR_BOOST || 0.08) || 0.08);
   const local = stableSortByScore(localCandidates);
   const vector = stableSortByScore(vectorCandidates);
   const slots = new Map();
@@ -250,7 +254,7 @@ function fuseRecallCandidates(localCandidates = [], vectorCandidates = [], optio
         vectorRank: null,
         sources: new Set()
       };
-      const contribution = 1 / (rrfK + index + 1);
+      const contribution = (groupName === 'lancedb' ? vectorWeight : localWeight) / (rrfK + index + 1);
       current.rrfScore += contribution;
       current.sources.add(groupName);
       current.item = Number(item.score || 0) > Number(current.item.score || 0)
@@ -268,7 +272,9 @@ function fuseRecallCandidates(localCandidates = [], vectorCandidates = [], optio
   return Array.from(slots.values())
     .map((entry) => ({
       ...entry.item,
-      score: Number(entry.item.score || 0) + entry.rrfScore,
+      score: Number(entry.item.score || 0)
+        + entry.rrfScore
+        + (Number(entry.item.vectorScore || entry.item.embedding || 0) >= strongVectorThreshold ? strongVectorBoost : 0),
       rrfScore: entry.rrfScore,
       rrfSources: Array.from(entry.sources),
       localRank: entry.localRank,

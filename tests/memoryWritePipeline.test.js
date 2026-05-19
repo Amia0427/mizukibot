@@ -322,6 +322,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(notRecallableProbe.accepted[0].meta.recallVerification.status, 'not_recallable');
   assert.strictEqual(notRecallableProbe.accepted[0].meta.recallVerification.repairHint, 'memory_text_has_no_lexical_overlap_with_source_evidence');
+  assert.strictEqual(getMemoryItems('u_pipeline_recall_probe')[0].notRecallable, true, 'not recallable write should persist recall hidden flag');
 
   const sameBatchDuplicate = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_batch',

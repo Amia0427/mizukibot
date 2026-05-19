@@ -57,6 +57,18 @@ function lexicalRecallScore(query = '', item = {}) {
   return overlap / Math.max(1, queryTokens.length);
 }
 
+function attachRecallNotRecallableFlag(item = {}, verification = {}) {
+  if (!item || typeof item !== 'object') return item;
+  if (verification.status !== 'not_recallable') return item;
+  item.notRecallable = true;
+  item.meta = {
+    ...(item.meta && typeof item.meta === 'object' ? item.meta : {}),
+    notRecallable: true,
+    recallHiddenReason: verification.repairHint || 'write_recall_verification_failed'
+  };
+  return item;
+}
+
 function attachRecallVerification(accepted = [], options = {}) {
   const list = Array.isArray(accepted) ? accepted : [];
   if (!list.length || options.recallVerification === false || config.MEMORY_WRITE_RECALL_VERIFY_ENABLED === false) return list;
@@ -71,20 +83,22 @@ function attachRecallVerification(accepted = [], options = {}) {
       const { normalizeRecallTargetIds } = require('../../../utils/memory-v3/recallVerifier');
       expectedIds = normalizeRecallTargetIds(options.expectedIds || options.expectedId || item.id);
     } catch (_) {}
+    const verification = {
+      checked: true,
+      status,
+      method: 'pre_persist_lexical_probe',
+      query: query.slice(0, 240),
+      expectedId: item.id,
+      expectedIds,
+      topK,
+      lexicalScore: score,
+      checkedAt: now,
+      repairHint: status === 'not_recallable' ? 'memory_text_has_no_lexical_overlap_with_source_evidence' : ''
+    };
+    attachRecallNotRecallableFlag(item, verification);
     item.meta = {
       ...(item.meta && typeof item.meta === 'object' ? item.meta : {}),
-      recallVerification: {
-        checked: true,
-        status,
-        method: 'pre_persist_lexical_probe',
-        query: query.slice(0, 240),
-        expectedId: item.id,
-        expectedIds,
-        topK,
-        lexicalScore: score,
-        checkedAt: now,
-        repairHint: status === 'not_recallable' ? 'memory_text_has_no_lexical_overlap_with_source_evidence' : ''
-      }
+      recallVerification: verification
     };
   }
   return list;
