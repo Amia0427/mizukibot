@@ -1,5 +1,8 @@
 const { buildPromptSnapshot } = require('../../../utils/promptCompiler');
 const { buildMainStableSystemBlocks } = require('../../../utils/stagePromptContracts');
+const {
+  recordMainPromptBlockObservation
+} = require('../../../utils/memoryRecallObservability');
 
 function createPrepareNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
@@ -127,6 +130,44 @@ function createPrepareNode(deps = {}) {
 
   function blockId(block = {}) {
     return String(block?.id || '').trim();
+  }
+
+  function pickFirstObject(candidates = []) {
+    return normalizeArray(candidates).find((item) => item && typeof item === 'object' && !Array.isArray(item)) || {};
+  }
+
+  function resolvePlannerRuntimeMeta(request = {}, promptBuildResult = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    return pickFirstObject([
+      promptBuildResult.directChatPlanner,
+      promptBuildResult.toolPlanner,
+      routeMeta.directChatPlanner,
+      routeMeta.toolPlanner
+    ]);
+  }
+
+  function resolveMemosRecallForObservation(request = {}, promptBuildResult = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const plannerMeta = resolvePlannerRuntimeMeta(request, promptBuildResult);
+    return pickFirstObject([
+      promptBuildResult.memosRecall,
+      request.memosRecall,
+      plannerMeta.memosRecall,
+      routeMeta.memosRecall
+    ]);
+  }
+
+  function resolveDynamicPromptPlanForObservation(request = {}, promptBuildResult = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const plannerMeta = resolvePlannerRuntimeMeta(request, promptBuildResult);
+    return pickFirstObject([
+      promptBuildResult.dynamicPromptPlan,
+      request.dynamicPromptPlan,
+      plannerMeta.dynamicPromptPlan,
+      plannerMeta.plannerDecisionV2?.dynamicPromptPlan,
+      plannerMeta.plannerDecisionV2?.plannerMeta?.dynamicPromptPlan,
+      routeMeta.dynamicPromptPlan
+    ]);
   }
 
   function isMainPromptGuardEnabled(request = {}) {
@@ -449,6 +490,18 @@ function createPrepareNode(deps = {}) {
       latencyMeta,
       stablePromptGuardApplied
     } = guardedPromptBuildResult;
+    recordMainPromptBlockObservation({
+      requestTrace: request.requestTrace || request.routeMeta?.requestTrace || null,
+      routeMeta: request.routeMeta,
+      routePolicyKey: request.routePolicyKey,
+      topRouteType: request.topRouteType,
+      userId: request.userId,
+      promptSnapshot,
+      memoryContext,
+      memosRecall: resolveMemosRecallForObservation(request, guardedPromptBuildResult),
+      dynamicPromptPlan: resolveDynamicPromptPlanForObservation(request, guardedPromptBuildResult),
+      stage: 'prepare_main_prompt_blocks'
+    });
     const continuityProbe = await withSoftTimeout(
       () => maybeRunAutoContinuityProbe({
         ...state,
