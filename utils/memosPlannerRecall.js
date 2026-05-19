@@ -162,6 +162,27 @@ function parsePossibleJsonText(text = '') {
   }
 }
 
+function extractStructuredMcpPayload(rawResult) {
+  const resultObject = normalizeObject(rawResult, null);
+  if (!resultObject) return rawResult;
+  if (resultObject.result && typeof resultObject.result === 'object') {
+    const structured = resultObject.result.structuredContent;
+    if (structured && typeof structured === 'object') return structured;
+    const contentItems = normalizeArray(resultObject.result.content);
+    for (const item of contentItems) {
+      const parsed = typeof item?.text === 'string' ? parsePossibleJsonText(item.text) : null;
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  }
+  if (resultObject.structuredContent && typeof resultObject.structuredContent === 'object') {
+    return resultObject.structuredContent;
+  }
+  const parsedText = typeof resultObject.text === 'string' ? parsePossibleJsonText(resultObject.text) : null;
+  if (parsedText && typeof parsedText === 'object') return parsedText;
+  if (resultObject.result) return resultObject.result;
+  return rawResult;
+}
+
 function flattenMemoryCandidates(value, output = []) {
   if (value === null || value === undefined) return output;
   if (typeof value === 'string') {
@@ -180,44 +201,47 @@ function flattenMemoryCandidates(value, output = []) {
     return output;
   }
 
+  const directTextCandidates = [
+    value.text,
+    value.content,
+    value.memory,
+    value.memory_text,
+    value.memoryText,
+    value.memory_value,
+    value.memoryValue,
+    value.preference,
+    value.preference_text,
+    value.preferenceText,
+    value.preference_note,
+    value.preferenceNote,
+    value.skill,
+    value.skill_text,
+    value.skillText,
+    value.tool_memory,
+    value.toolMemory,
+    value.message,
+    value.summary,
+    value.description,
+    value.file_text,
+    value.fileText,
+    value.file_content,
+    value.fileContent,
+    value.document,
+    value.document_text,
+    value.documentText,
+    value.document_content,
+    value.documentContent,
+    value.page_content,
+    value.pageContent,
+    value.chunk,
+    value.chunk_text,
+    value.chunkText,
+    value.kb_content,
+    value.kbContent,
+    value.markdown
+  ].filter((item) => typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean');
   const directText = normalizeText(
-    value.text
-    || value.content
-    || value.memory
-    || value.memory_text
-    || value.memoryText
-    || value.memory_value
-    || value.memoryValue
-    || value.preference
-    || value.preference_text
-    || value.preferenceText
-    || value.preference_note
-    || value.preferenceNote
-    || value.skill
-    || value.skill_text
-    || value.skillText
-    || value.tool_memory
-    || value.toolMemory
-    || value.message
-    || value.summary
-    || value.description
-    || value.file_text
-    || value.fileText
-    || value.file_content
-    || value.fileContent
-    || value.document
-    || value.document_text
-    || value.documentText
-    || value.document_content
-    || value.documentContent
-    || value.page_content
-    || value.pageContent
-    || value.chunk
-    || value.chunk_text
-    || value.chunkText
-    || value.kb_content
-    || value.kbContent
-    || value.markdown
+    directTextCandidates.find((item) => normalizeText(item))
   );
   if (directText) {
     output.push({
@@ -264,10 +288,7 @@ function flattenMemoryCandidates(value, output = []) {
 function normalizeRecallItems(rawResult, options = {}) {
   const maxItems = clampNumber(options.topK, 1, 20, 5);
   const maxChars = clampNumber(options.maxChars, 120, 8000, 900);
-  const parsed = typeof rawResult?.text === 'string'
-    ? parsePossibleJsonText(rawResult.text)
-    : null;
-  const source = parsed || rawResult?.result || rawResult?.text || rawResult;
+  const source = extractStructuredMcpPayload(rawResult);
   const seen = new Set();
   return flattenMemoryCandidates(source)
     .map((item) => ({
@@ -315,7 +336,12 @@ function buildSearchArgs(query = '', options = {}) {
     ...normalizeObject(options.config, {})
   };
   const topK = clampNumber(options.topK ?? currentConfig.MEMOS_RECALL_TOP_K, 1, 20, 5);
-  return {
+  const knowledgebaseIds = normalizeStringList(
+    options.knowledgebaseIds
+    || options.kbIds
+    || currentConfig.MEMOS_KB_IDS
+  );
+  const args = {
     query: normalizeText(query),
     conversation_first_message: normalizeText(
       options.conversationFirstMessage
@@ -328,6 +354,8 @@ function buildSearchArgs(query = '', options = {}) {
     memory_limit_number: topK,
     relativity: 0
   };
+  if (knowledgebaseIds.length > 0) args.knowledgebase_ids = knowledgebaseIds;
+  return args;
 }
 
 function buildKnowledgeBaseArgs(options = {}) {
@@ -344,6 +372,18 @@ function buildKnowledgeBaseArgs(options = {}) {
   return {
     file_ids: fileIds.slice(0, topK)
   };
+}
+
+function getConfiguredKnowledgebaseIds(options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  return normalizeStringList(
+    options.knowledgebaseIds
+    || options.kbIds
+    || currentConfig.MEMOS_KB_IDS
+  );
 }
 
 async function discoverMemosTools(options = {}) {
@@ -503,6 +543,7 @@ async function callSearchMemoryRecall(normalizedQuery = '', options = {}) {
       sourceToolName: searchToolName,
       kbToolName: discovery.kbToolName,
       searchToolName,
+      knowledgebaseIdsCount: getConfiguredKnowledgebaseIds({ ...options, config: currentConfig }).length,
       availableTools: discovery.availableTools,
       durationMs: Math.max(0, Date.now() - startedAt),
       fallback: result?.fallback === true,
@@ -565,11 +606,26 @@ async function recallForPlanner(query = '', options = {}) {
     }
     if (recallSource === 'auto') {
       const kbArgs = buildKnowledgeBaseArgs({ ...options, config: currentConfig, topK });
+      if (getConfiguredKnowledgebaseIds({ ...options, config: currentConfig }).length > 0) {
+        return await callSearchMemoryRecall(normalizedQuery, recallOptions);
+      }
       if (discovery.kbToolName && kbArgs.file_ids.length > 0) {
         const kbRecall = await callKnowledgeBaseRecall(normalizedQuery, recallOptions);
         if (kbRecall.used || currentConfig.MEMOS_KB_FALLBACK_SEARCH_ENABLED !== true) return kbRecall;
       }
       return await callSearchMemoryRecall(normalizedQuery, recallOptions);
+    }
+    if (getConfiguredKnowledgebaseIds({ ...options, config: currentConfig }).length > 0) {
+      const kbSearchRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
+      return {
+        ...kbSearchRecall,
+        diagnostics: {
+          ...kbSearchRecall.diagnostics,
+          recallSource: 'knowledge_base_search',
+          sourceToolName: kbSearchRecall.diagnostics.searchToolName,
+          kbMode: 'knowledgebase_ids'
+        }
+      };
     }
     const kbRecall = await callKnowledgeBaseRecall(normalizedQuery, recallOptions);
     if (
@@ -641,6 +697,7 @@ module.exports = {
   getMemosRecallPromptText,
   getMemosRecallSource,
   getMemosServerName,
+  getConfiguredKnowledgebaseIds,
   isMemosPlannerRecallEnabled,
   normalizeRecallItems,
   recallForPlanner,
