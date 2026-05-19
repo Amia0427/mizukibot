@@ -185,10 +185,9 @@ function buildSpawnConfig(serverConfig = {}) {
   }
 
   const cmdExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
-  const commandLine = [resolvedCommand, ...resolvedArgs].map((item) => quoteWindowsArg(item)).join(' ');
   return {
     command: cmdExe,
-    args: ['/d', '/s', '/c', commandLine],
+    args: ['/d', '/s', '/c', 'call', resolvedCommand, ...resolvedArgs],
     options: {
       shell: false
     }
@@ -625,6 +624,17 @@ async function discoverMcpTools(options = {}) {
   return [...all, ...fallbacks];
 }
 
+async function discoverMcpServerTools(serverName = '', options = {}) {
+  const normalizedServerName = String(serverName || '').trim();
+  if (!normalizedServerName) return [];
+  const configuredServers = listConfiguredMcpServers(options);
+  const serverConfig = configuredServers.find((item) => item.serverName === normalizedServerName);
+  if (!serverConfig) {
+    throw normalizeMcpError(new Error(`mcp server not found: ${normalizedServerName}`), 'MCP_SERVER_NOT_FOUND');
+  }
+  return discoverServerTools(serverConfig, options);
+}
+
 function sanitizeMcpArgumentValue(value, depth = 0) {
   if (depth > DEFAULT_MCP_MAX_DEPTH) {
     throw new Error('mcp args nested too deep');
@@ -952,6 +962,7 @@ module.exports = {
   callMcpTool,
   clearMcpRuntimeCaches,
   cleanupIdleMcpSessions,
+  discoverMcpServerTools,
   discoverMcpTools,
   getCachedDynamicMcpToolRegistry,
   getDynamicMcpToolRegistry,
@@ -962,5 +973,6 @@ module.exports = {
   summarizeJson,
   truncateText,
   warmMcpRegistry,
+  __buildSpawnConfigForTest: buildSpawnConfig,
   __getMcpSessionPoolSize: () => sessionPool.size
 };

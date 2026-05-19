@@ -96,7 +96,8 @@ function listConfiguredMcpServers(options = {}) {
       configPath,
       command,
       args: Array.isArray(definition?.args) ? definition.args.map((item) => String(item)) : [],
-      env: serverEnv
+      env: serverEnv,
+      protocolMode: String(definition?.protocolMode || definition?.protocol || '').trim()
     };
   }).filter((item) => item.serverName && item.command);
 }

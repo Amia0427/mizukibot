@@ -30,6 +30,7 @@
     },
     "memos-api-mcp": {
       "command": "npx",
+      "protocolMode": "line",
       "args": [
         "-y",
         "@memtensor/memos-api-mcp@latest"

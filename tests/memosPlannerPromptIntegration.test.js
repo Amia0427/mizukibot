@@ -178,6 +178,9 @@ module.exports = (async () => {
     route,
     routeMeta: route.meta,
     allowedTools: [],
+    config: {
+      MEMOS_MCP_ENABLED: false
+    },
     availableContextSignals: {
       memosRecall: false
     },

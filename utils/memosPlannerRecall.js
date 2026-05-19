@@ -124,10 +124,29 @@ function flattenMemoryCandidates(value, output = []) {
   }
   if (typeof value !== 'object') return output;
 
+  if (Object.prototype.hasOwnProperty.call(value, 'code') && value.data && typeof value.data === 'object') {
+    flattenMemoryCandidates(value.data, output);
+    return output;
+  }
+
   const directText = normalizeText(
     value.text
     || value.content
     || value.memory
+    || value.memory_text
+    || value.memoryText
+    || value.memory_value
+    || value.memoryValue
+    || value.preference
+    || value.preference_text
+    || value.preferenceText
+    || value.preference_note
+    || value.preferenceNote
+    || value.skill
+    || value.skill_text
+    || value.skillText
+    || value.tool_memory
+    || value.toolMemory
     || value.message
     || value.summary
     || value.description
@@ -144,7 +163,18 @@ function flattenMemoryCandidates(value, output = []) {
     });
   }
 
-  for (const key of ['items', 'results', 'memories', 'messages', 'data', 'content']) {
+  for (const key of [
+    'items',
+    'results',
+    'memories',
+    'messages',
+    'data',
+    'content',
+    'memory_detail_list',
+    'preference_detail_list',
+    'tool_memory_detail_list',
+    'skill_detail_list'
+  ]) {
     if (Object.prototype.hasOwnProperty.call(value, key)) {
       flattenMemoryCandidates(value[key], output);
     }
@@ -200,15 +230,18 @@ function buildSearchArgs(query = '', options = {}) {
     ...normalizeObject(options.config, {})
   };
   const topK = clampNumber(options.topK ?? currentConfig.MEMOS_RECALL_TOP_K, 1, 20, 5);
-  const userId = normalizeText(options.userId || options.routeMeta?.userId || options.routeMeta?.user_id || currentConfig.MEMOS_USER_ID || process.env.MEMOS_USER_ID);
-  const channel = normalizeText(options.channel || currentConfig.MEMOS_CHANNEL || process.env.MEMOS_CHANNEL || 'MODELSCOPE');
   return {
     query: normalizeText(query),
-    top_k: topK,
-    topK,
-    limit: topK,
-    ...(userId ? { user_id: userId, userId } : {}),
-    ...(channel ? { channel } : {})
+    conversation_first_message: normalizeText(
+      options.conversationFirstMessage
+      || options.routeMeta?.conversationFirstMessage
+      || options.routeMeta?.conversation_first_message
+      || query
+    ),
+    include_preference: true,
+    preference_limit_number: topK,
+    memory_limit_number: topK,
+    relativity: 0
   };
 }
 
@@ -222,10 +255,17 @@ async function discoverMemosTools(options = {}) {
     error: ''
   };
   try {
-    const tools = await getMcpRuntime().discoverMcpTools({
-      ...(options.mcpContext && typeof options.mcpContext === 'object' ? options.mcpContext : {}),
-      timeoutMs: options.timeoutMs
-    });
+    const runtime = getMcpRuntime();
+    const discover = typeof runtime.discoverMcpServerTools === 'function'
+      ? () => runtime.discoverMcpServerTools(serverName, {
+        ...(options.mcpContext && typeof options.mcpContext === 'object' ? options.mcpContext : {}),
+        timeoutMs: options.timeoutMs
+      })
+      : () => runtime.discoverMcpTools({
+        ...(options.mcpContext && typeof options.mcpContext === 'object' ? options.mcpContext : {}),
+        timeoutMs: options.timeoutMs
+      });
+    const tools = await discover();
     const serverTools = normalizeArray(tools).filter((item) => normalizeText(item.serverName) === serverName);
     diagnostics.availableTools = serverTools.map((item) => normalizeText(item.toolName)).filter(Boolean);
     diagnostics.searchToolName = DEFAULT_SEARCH_TOOL_CANDIDATES.find((tool) => diagnostics.availableTools.includes(tool))

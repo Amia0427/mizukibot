@@ -33,6 +33,7 @@ module.exports = (() => {
         },
         'memos-api-mcp': {
           command: 'npx',
+          protocolMode: 'line',
           args: ['-y', '@memtensor/memos-api-mcp@latest'],
           env: {
             MEMOS_API_KEY: '${MEMOS_API_KEY}',
@@ -63,10 +64,19 @@ module.exports = (() => {
     assert.strictEqual(memosServer.env.MEMOS_API_KEY, 'memos-test-key');
     assert.strictEqual(memosServer.env.MEMOS_USER_ID, 'memos-user-1');
     assert.strictEqual(memosServer.env.MEMOS_CHANNEL, 'MODELSCOPE');
+    assert.strictEqual(memosServer.protocolMode, 'line');
 
     return runtime.discoverMcpTools().then((tools) => {
       assert.ok(tools.some((item) => item.functionName === 'mcp_fetch_fetch_url'));
       assert.strictEqual(runtime.__getMcpSessionPoolSize(), 0);
+      if (process.platform === 'win32') {
+        const spawnConfig = runtime.__buildSpawnConfigForTest({
+          command: 'C:\\Program Files\\nodejs\\npx.cmd',
+          args: ['-y', '@memtensor/memos-api-mcp@latest']
+        });
+        assert.deepStrictEqual(spawnConfig.args.slice(0, 4), ['/d', '/s', '/c', 'call']);
+        assert.strictEqual(spawnConfig.args[4], 'C:\\Program Files\\nodejs\\npx.cmd');
+      }
       return runtime.callMcpTool('fetch', 'fetch_url', { url: 'https://example.com' });
     }).then((result) => {
       assert.strictEqual(result.ok, true);
