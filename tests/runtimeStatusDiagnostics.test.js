@@ -30,6 +30,8 @@ module.exports = (() => {
   const dataDir = path.join(tempDir, 'data');
   const backgroundDir = path.join(dataDir, 'background_tasks');
   const postReplyDir = path.join(dataDir, 'post_reply_jobs');
+  const langGraphCheckpointDir = path.join(dataDir, 'langgraph_v2_checkpoints');
+  const langGraphEventDir = path.join(dataDir, 'langgraph_v2_events');
   const memoryLockFile = path.join(dataDir, 'memory-v3', 'projections', 'materialize.lock');
   const now = Date.parse('2026-05-03T00:00:00.000Z');
 
@@ -37,6 +39,8 @@ module.exports = (() => {
     process.env.DATA_DIR = dataDir;
     process.env.BACKGROUND_TASK_STORE_DIR = backgroundDir;
     process.env.POST_REPLY_QUEUE_DIR = postReplyDir;
+    process.env.LANGGRAPH_V2_CHECKPOINT_DIR = langGraphCheckpointDir;
+    process.env.LANGGRAPH_V2_EVENT_DIR = langGraphEventDir;
     process.env.POST_REPLY_WORKER_ENABLED = 'true';
     process.env.POST_REPLY_WORKER_INLINE = 'false';
     process.env.POST_REPLY_WORKER_STALE_PROCESSING_MS = '300000';
@@ -74,6 +78,28 @@ module.exports = (() => {
       pid: 555,
       acquiredAt: now - (20 * 60 * 1000)
     });
+    writeJson(path.join(langGraphCheckpointDir, 'thread_stale.json'), {
+      threadId: 'thread_stale',
+      status: 'running',
+      node: 'dispatch',
+      updatedAt: now - (45 * 60 * 1000),
+      state: {
+        thread: { threadId: 'thread_stale' }
+      }
+    });
+    writeJson(path.join(langGraphCheckpointDir, 'thread_done.json'), {
+      threadId: 'thread_done',
+      status: 'completed',
+      node: 'persist',
+      updatedAt: now - (2 * 60 * 1000),
+      state: {
+        thread: { threadId: 'thread_done' }
+      }
+    });
+    writeJson(path.join(langGraphEventDir, 'thread_stale.json'), [
+      { type: 'node_start', node: 'prepare', ts: now - (46 * 60 * 1000) },
+      { type: 'checkpoint', node: 'dispatch', ts: now - (45 * 60 * 1000) }
+    ]);
 
     const processes = [
       { pid: 111, ppid: 1, name: 'node.exe', commandLine: 'node index.js' },
@@ -86,7 +112,8 @@ module.exports = (() => {
       projectRoot: tempDir,
       now: () => now,
       listProcesses: () => processes,
-      isProcessAlive: (pid) => alive.has(Number(pid))
+      isProcessAlive: (pid) => alive.has(Number(pid)),
+      langGraphV2CheckpointStaleMs: 30 * 60 * 1000
     });
 
     assert.strictEqual(report.schemaVersion, 'runtime_status_diagnostic_v1');
@@ -100,11 +127,21 @@ module.exports = (() => {
     assert.strictEqual(report.summary.postReplyWorker.pidFileMatch, true);
     assert.strictEqual(report.summary.activeBackgroundTasks, 1);
     assert.strictEqual(report.summary.activeSubagentProcesses, 1);
+    assert.strictEqual(report.summary.langGraphV2.checkpoints, 2);
+    assert.strictEqual(report.summary.langGraphV2.events, 1);
+    assert.strictEqual(report.summary.langGraphV2.activeCheckpoints, 1);
+    assert.strictEqual(report.summary.langGraphV2.staleRunningCheckpoints, 1);
+    assert.ok(report.summary.langGraphV2.checkpointBytes > 0);
+    assert.ok(report.summary.langGraphV2.eventBytes > 0);
 
     assert.strictEqual(report.components.mainProcess.lockFile.pid, 111);
     assert.strictEqual(report.components.postReplyWorker.pidFile.pid, 222);
     assert.strictEqual(report.components.postReplyWorker.queue.counts.processing, 1);
     assert.strictEqual(report.components.backgroundTasks.countsByStatus.running, 1);
+    assert.strictEqual(report.components.langGraphV2Store.countsByCheckpointStatus.running, 1);
+    assert.strictEqual(report.components.langGraphV2Store.countsByCheckpointStatus.completed, 1);
+    assert.strictEqual(report.components.langGraphV2Store.staleRunningCheckpoints[0].threadId, 'thread_stale');
+    assert.strictEqual(report.components.langGraphV2Store.latestEventFiles[0].eventCount, 2);
     assert.strictEqual(report.components.subagents.processes[0].pid, 333);
     assert.ok(Array.isArray(report.components.lockFiles));
     assert.ok(report.components.lockFiles.some((item) => item.name === 'memoryMaterializeLock'));
@@ -113,6 +150,7 @@ module.exports = (() => {
     assert.ok(signalCodes.includes('background_task_stale'));
     assert.ok(signalCodes.includes('post_reply_processing_stale'));
     assert.ok(signalCodes.includes('memory_materialize_lock_stale'));
+    assert.ok(signalCodes.includes('langgraph_v2_checkpoint_stale'));
 
     assert.doesNotThrow(() => JSON.parse(JSON.stringify(report)));
 

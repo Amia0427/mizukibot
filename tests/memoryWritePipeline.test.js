@@ -13,6 +13,8 @@ process.env.MEMORY_WRITE_REVIEW_ENABLED = 'true';
 process.env.MEMORY_WRITE_REVIEW_MODE = 'risk';
 process.env.MEMORY_WRITE_REVIEW_TIMEOUT_MS = '500';
 process.env.MEMORY_WRITE_REVIEW_FAIL_OPEN = 'true';
+process.env.MEMORY_WRITE_REVIEW_FAILURE_POLICY = '';
+process.env.MEMORY_WRITE_RECALL_VERIFY_ENABLED = 'true';
 process.env.API_BASE_URL = 'https://memory-review.example/v1/chat/completions';
 process.env.API_KEY = 'review-key';
 process.env.MEMORY_HYBRID_RECALL_ENABLED = 'true';
@@ -210,7 +212,8 @@ module.exports = (async () => {
   assert.strictEqual(markedConflict.status, 'candidate', 'conflict candidate should be marked candidate');
   assert.ok(markedConflict.meta.conflictCandidate, 'conflict candidate metadata should be retained');
   assert.strictEqual(markedConflict.meta.writeReview.decision, 'candidate', 'conflict candidate should retain review metadata');
-  assert.strictEqual(originalConflict.status, 'active', 'conflict candidate should not overwrite existing memory');
+  assert.strictEqual(originalConflict.status, 'candidate', 'implicit high-risk profile baseline should be candidate-only');
+  assert.strictEqual(originalConflict.meta.learningDecision.candidateOnly, true, 'baseline preference should carry candidate-only decision');
 
   const riskyPreference = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_review',
@@ -239,6 +242,18 @@ module.exports = (async () => {
   assert.strictEqual(polluted.ids.length, 0, 'review reject should not persist unsafe memory');
   assert.ok(polluted.rejected.some((item) => item.reason === 'write_review_reject'), 'review reject should be reported');
 
+  const skipPipelineRisk = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_skip_guard',
+    type: 'identity',
+    text: 'identity: skip pipeline inferred user',
+    source: 'extractor',
+    sourceKind: 'extractor',
+    confidence: 0.95,
+    status: 'active'
+  }], { materialize: false, skipPipeline: true, disableWriteRerank: true });
+  assert.strictEqual(skipPipelineRisk.ids.length, 1, 'skipPipeline high-risk profile should still persist for governance');
+  assert.strictEqual(getMemoryItems('u_pipeline_skip_guard')[0].status, 'candidate', 'skipPipeline should not bypass candidate-only guard');
+
   const failOpen = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_review',
     type: 'identity',
@@ -248,9 +263,85 @@ module.exports = (async () => {
     confidence: 0.86,
     status: 'active'
   }], { materialize: false, disableWriteRerank: true });
-  assert.strictEqual(failOpen.ids.length, 1, 'review failure should fail open by default');
+  assert.strictEqual(failOpen.ids.length, 1, 'review failure should persist high-risk profile as candidate');
   const failOpenItem = getMemoryItems('u_pipeline_review').find((item) => item.text.includes('fallback failure'));
-  assert.strictEqual(failOpenItem.meta.writeReview.failedOpen, true, 'fail-open review metadata should be persisted');
+  assert.strictEqual(failOpenItem.status, 'candidate', 'high-risk review failure should not fail open to active');
+  assert.strictEqual(failOpenItem.meta.writeReview.failedCandidate, true, 'fail-candidate review metadata should be persisted');
+
+  const explicitActive = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_explicit',
+    type: 'identity',
+    text: 'identity: explicit remembered engineer',
+    source: 'explicit',
+    sourceKind: 'explicit',
+    confidence: 1,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(explicitActive.ids.length, 1, 'explicit profile write should persist');
+  assert.strictEqual(getMemoryItems('u_pipeline_explicit')[0].status, 'active', 'explicit profile write should remain active');
+
+  const implicitProfile = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_guard',
+    type: 'identity',
+    text: 'identity: inferred profile guard user',
+    source: 'extractor',
+    sourceKind: 'extractor',
+    confidence: 0.95,
+    status: 'active',
+    meta: {
+      fieldKey: 'identity',
+      learningDecision: {
+        jobId: 'job-guard',
+        turnId: 'turn-guard',
+        turnIds: ['turn-guard']
+      },
+      evidence: [{ turnId: 'turn-guard', userText: 'inferred profile guard user' }]
+    }
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(implicitProfile.ids.length, 1, 'implicit high-risk profile should persist for governance');
+  const implicitProfileItem = getMemoryItems('u_pipeline_guard')[0];
+  assert.strictEqual(implicitProfileItem.status, 'candidate', 'implicit high-risk profile should be candidate-only');
+  assert.strictEqual(implicitProfileItem.meta.learningDecision.candidateOnly, true);
+  assert.strictEqual(implicitProfileItem.meta.learningDecision.jobId, 'job-guard');
+  assert.strictEqual(implicitProfileItem.meta.learningDecision.turnId, 'turn-guard');
+  assert.strictEqual(implicitProfileItem.meta.recallVerification.checked, true, 'accepted item should carry recall verification metadata');
+  assert.deepStrictEqual(implicitProfileItem.meta.recallVerification.expectedIds, [implicitProfileItem.id], 'recall verification should carry normalized expected ids');
+
+  const notRecallableProbe = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_recall_probe',
+    type: 'fact',
+    text: 'recall probe stores the blue lantern preference',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.95,
+    status: 'active'
+  }], {
+    materialize: false,
+    disableWriteRerank: true,
+    recallVerificationQuery: 'orange cactus schedule'
+  });
+  assert.strictEqual(notRecallableProbe.accepted[0].meta.recallVerification.status, 'not_recallable');
+  assert.strictEqual(notRecallableProbe.accepted[0].meta.recallVerification.repairHint, 'memory_text_has_no_lexical_overlap_with_source_evidence');
+
+  const sameBatchDuplicate = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_batch',
+    type: 'fact',
+    text: 'batch duplicate memory',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.95,
+    status: 'active'
+  }, {
+    userId: 'u_pipeline_batch',
+    type: 'fact',
+    text: 'batch duplicate memory',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.96,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(sameBatchDuplicate.ids.length, 1, 'same batch duplicate should persist once');
+  assert.ok(sameBatchDuplicate.rejected.some((item) => item.reason === 'same_turn_duplicate'), 'same batch duplicate should be reported');
 
   const lowConfidenceEnhanced = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_vector',

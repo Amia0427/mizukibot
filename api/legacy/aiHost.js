@@ -21,6 +21,10 @@
  */
 const config = require('../../config');
 const MODEL_RESPONSE_MALFORMED_REPLY = '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。';
+
+function getMainReplyDefaultMaxTokens() {
+  return Math.max(64, Number(config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192) || 8192);
+}
 const { normalizeTier } = require('../../utils/memoryTier');
 const { buildMemoryContext, buildMemoryContextAsync } = require('../../utils/memoryContext');
 const { normalizeToolNames } = require('../../utils/localToolAccess');
@@ -364,7 +368,7 @@ function getPlannerApiKey(overrides = null) {
   ).trim();
 }
 
-function getMaxTokens(defaultValue = 3500, overrides = null) {
+function getMaxTokens(defaultValue = getMainReplyDefaultMaxTokens(), overrides = null) {
   const raw = overrides && typeof overrides === 'object' && overrides.maxTokens !== undefined
     ? overrides.maxTokens
     : config.AI_MAX_TOKENS;
@@ -803,7 +807,7 @@ function buildConversationMessagesWithCompression(
   const compactionPlan = buildContextCompactionPlan({
     segments,
     modelWindowTokens: Math.max(2048, Number(affinity?.contextWindowTokens || config.CONTEXT_WINDOW_MAX_TOKENS || 32000)),
-    maxOutputTokens: getMaxTokens(3500, options.modelConfig),
+    maxOutputTokens: getMaxTokens(getMainReplyDefaultMaxTokens(), options.modelConfig),
     routeMeta,
     source: String(options.source || 'legacy_chat').trim() || 'legacy_chat'
   });
@@ -833,7 +837,7 @@ function buildReactiveRetryMessages(messagesToSend, context = {}, resolvedConfig
         || 32000
       ) || 2048
     ),
-    maxOutputTokens: getMaxTokens(3500, resolvedConfig || context?.modelConfig || null),
+    maxOutputTokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig || context?.modelConfig || null),
     preferRawTrim: !context?.canonicalSegments
   });
 }
@@ -1483,7 +1487,7 @@ async function synthesizeFromPlan(question, dynamicPrompt, plan, execLogs, verif
         temperature: getTemperature(resolvedConfig),
         top_p: getTopP(resolvedConfig),
         messages,
-        max_tokens: getMaxTokens(3500, resolvedConfig),
+        max_tokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
         stream: false
       },
       getRetries(1, resolvedConfig),
@@ -1551,7 +1555,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
         const request = buildMainModelRequest(resolvedConfig, {
           messages,
           stream: true,
-          defaultMaxTokens: 3500,
+          defaultMaxTokens: getMainReplyDefaultMaxTokens(),
           routeMeta: options?.routeMeta,
           topRouteType: options?.topRouteType
         });
@@ -1619,7 +1623,7 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
       const request = buildMainModelRequest(resolvedConfig, {
         messages,
         stream: false,
-        defaultMaxTokens: 3500,
+        defaultMaxTokens: getMainReplyDefaultMaxTokens(),
         routeMeta: context?.routeMeta,
         topRouteType: context?.topRouteType,
         tools: includeTools ? toolSchemas : []
@@ -1698,7 +1702,7 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
         const request = buildMainModelRequest(resolvedConfig, {
           messages,
           stream: false,
-          defaultMaxTokens: 3500,
+          defaultMaxTokens: getMainReplyDefaultMaxTokens(),
           routeMeta: context?.routeMeta,
           topRouteType: context?.topRouteType
         });

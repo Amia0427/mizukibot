@@ -14,6 +14,8 @@ const {
   syncMemoryRows,
   syncWorldbookRows
 } = require('../utils/lancedbMemoryStore');
+const { diagnoseProjectionFreshness } = require('../utils/memory-v3/diagnostics');
+const { buildMemoryIndexHealthGate } = require('./memory-index-health-gate');
 
 const VALID_SOURCES = new Set(['all', 'memory', 'journal', 'worldbook']);
 
@@ -31,7 +33,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     resume: false,
     checkpointFile: '',
     source: 'all',
-    limit: 0
+    limit: 0,
+    maxBatches: 1
   };
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
@@ -49,6 +52,9 @@ function parseArgs(argv = process.argv.slice(2)) {
       index += 1;
     } else if (item === '--limit') {
       args.limit = Math.max(0, Math.floor(Number(argv[index + 1] || 0) || 0));
+      index += 1;
+    } else if (item === '--max-batches') {
+      args.maxBatches = normalizePositiveInt(argv[index + 1], 1);
       index += 1;
     }
   }
@@ -117,6 +123,7 @@ function resolveBackfillRuntimeOptions(args = {}) {
     lowResourceMode,
     requestedLimit,
     effectiveLimit,
+    maxBatches: normalizePositiveInt(args.maxBatches, 1),
     lowResourceMaxPerRun,
     rssRecycleMb: Math.max(0, Number(config.MEMORY_BACKFILL_RSS_RECYCLE_MB || 0) || 0),
     rssGrowthMb: Math.max(0, Number(config.MEMORY_BACKFILL_RSS_GROWTH_MB || 0) || 0),
@@ -208,6 +215,16 @@ function normalizeCheckpointSteps(value = []) {
     .filter(Boolean);
 }
 
+function checkpointMatchesSource(checkpoint = null, requestedSource = 'all', steps = []) {
+  if (!checkpoint || !Array.isArray(steps) || steps.length === 0) return false;
+  const requested = normalizeSource(requestedSource);
+  if (requested === 'all') return true;
+  return steps.every((step) => {
+    if (requested === 'worldbook') return step.kind === 'worldbook';
+    return step.kind === 'memory' && normalizeSource(step.source) === requested;
+  });
+}
+
 function compactBackfillArgs(args = {}) {
   return {
     dryRun: args.dryRun === true,
@@ -215,7 +232,8 @@ function compactBackfillArgs(args = {}) {
     retryFailed: args.retryFailed === true,
     syncAfter: args.syncAfter === true,
     source: normalizeSource(args.source),
-    limit: Math.max(0, Math.floor(Number(args.limit || 0) || 0))
+    limit: Math.max(0, Math.floor(Number(args.limit || 0) || 0)),
+    maxBatches: normalizePositiveInt(args.maxBatches, 1)
   };
 }
 
@@ -227,6 +245,7 @@ async function syncAfterBackfill(startedAt = Date.now(), source = 'all', deps = 
   const syncSummaryBuilder = deps.buildSyncSummary || buildSyncSummary;
   const memorySync = deps.syncMemoryRows || syncMemoryRows;
   const worldbookSync = deps.syncWorldbookRows || syncWorldbookRows;
+  const projectionFreshness = (deps.diagnoseProjectionFreshness || diagnoseProjectionFreshness)();
   const summary = await syncSummaryBuilder({
     dryRun: false,
     since: startedAt
@@ -254,6 +273,11 @@ async function syncAfterBackfill(startedAt = Date.now(), source = 'all', deps = 
     coverage: afterFullSummary.coverage,
     beforeCoverage: beforeFullSummary.coverage,
     incrementalCoverage: summary.coverage,
+    projectionFreshness,
+    healthGate: buildMemoryIndexHealthGate({
+      coverage: afterFullSummary.coverage,
+      projectionFreshness
+    }),
     writes
   };
 }
@@ -267,6 +291,7 @@ async function runBackfill(args = {}, deps = {}) {
     forceStale: args.forceStale === true,
     force: args.forceStale === true,
     retryFailed: args.retryFailed === true,
+    continue: false,
     limit: runtimeOptions.effectiveLimit
   };
   const results = [];
@@ -275,10 +300,13 @@ async function runBackfill(args = {}, deps = {}) {
     ? readBackfillCheckpoint(runtimeOptions.checkpointFile)
     : null;
   const checkpointSteps = normalizeCheckpointSteps(checkpoint?.pendingSteps);
-  const steps = checkpointSteps.length > 0 ? checkpointSteps : buildBackfillSteps(source);
+  const useCheckpointSteps = checkpointMatchesSource(checkpoint, source, checkpointSteps);
+  const steps = useCheckpointSteps ? checkpointSteps : buildBackfillSteps(source);
   const getMemoryUsage = deps.getMemoryUsage || process.memoryUsage;
   let stoppedBy = '';
   let checkpointStatus = null;
+  let batchesRun = 0;
+  const syncRuns = [];
   let latestRssMb = getRssMb(getMemoryUsage);
   const baselineRssMb = latestRssMb;
 
@@ -304,10 +332,11 @@ async function runBackfill(args = {}, deps = {}) {
             runtimeOptions,
             completedSteps,
             pendingSteps: steps.slice(index)
-          });
+      });
       break;
     }
 
+    const batchStartedAt = Date.now();
     if (step.kind === 'memory') {
       results.push(args.dryRun
         ? (deps.buildEmbeddingBackfillPlan || buildEmbeddingBackfillPlan)({ ...common, source: step.source })
@@ -319,12 +348,49 @@ async function runBackfill(args = {}, deps = {}) {
         : await (deps.backfillPersonaWorldbookEmbeddings || backfillPersonaWorldbookEmbeddings)(catalog, common));
     }
     completedSteps.push(step);
+    if (!args.dryRun) batchesRun += 1;
 
     latestRssMb = getRssMb(getMemoryUsage);
     const latestResult = results[results.length - 1] || null;
     const pendingSteps = shouldRepeatStepFromResult(latestResult)
       ? [step, ...steps.slice(index + 1)]
       : steps.slice(index + 1);
+
+    if (!args.dryRun && args.syncAfter && Number(latestResult?.embedded || 0) > 0) {
+      const syncSource = step.kind === 'worldbook'
+        ? 'worldbook'
+        : (step.source === 'journal' ? 'journal' : 'memory');
+      const syncSummary = await (deps.syncAfterBackfill || syncAfterBackfill)(batchStartedAt, syncSource, deps);
+      syncRuns.push({
+        step,
+        ...syncSummary
+      });
+      if (syncSummary.healthGate && syncSummary.healthGate.canBackfill !== true) {
+        stoppedBy = 'post_sync_health_gate';
+        checkpointStatus = args.dryRun === true
+          ? {
+              written: false,
+              dryRun: true,
+              reason: stoppedBy,
+              rssMb: latestRssMb,
+              baselineRssMb,
+              pendingSteps,
+              healthGate: syncSummary.healthGate
+            }
+          : writeBackfillCheckpoint(runtimeOptions.checkpointFile, {
+              reason: stoppedBy,
+              rssMb: latestRssMb,
+              baselineRssMb,
+              args: compactBackfillArgs({ ...args, resume: true }),
+              runtimeOptions,
+              completedSteps,
+              pendingSteps,
+              healthGate: syncSummary.healthGate
+            });
+        break;
+      }
+    }
+
     if (args.dryRun !== true && shouldStopForRss(runtimeOptions, latestRssMb, baselineRssMb)) {
       stoppedBy = 'rss_limit';
       checkpointStatus = args.dryRun === true
@@ -347,7 +413,19 @@ async function runBackfill(args = {}, deps = {}) {
           });
       break;
     }
-    if (!args.dryRun && pendingSteps.length > 0 && runtimeOptions.lowResourceMode === true && Number(latestResult?.embedded || 0) > 0) {
+
+    if (!args.dryRun) {
+      checkpointStatus = writeBackfillCheckpoint(runtimeOptions.checkpointFile, {
+        reason: pendingSteps.length > 0 ? 'batch_checkpoint' : 'completed',
+        rssMb: latestRssMb,
+        baselineRssMb,
+        args: compactBackfillArgs({ ...args, resume: true }),
+        runtimeOptions,
+        completedSteps,
+        pendingSteps
+      });
+    }
+    if (!args.dryRun && pendingSteps.length > 0 && runtimeOptions.lowResourceMode === true && Number(latestResult?.embedded || 0) > 0 && batchesRun >= runtimeOptions.maxBatches) {
       stoppedBy = 'partial_run';
       checkpointStatus = writeBackfillCheckpoint(runtimeOptions.checkpointFile, {
         reason: stoppedBy,
@@ -359,6 +437,22 @@ async function runBackfill(args = {}, deps = {}) {
         pendingSteps
       });
       break;
+    }
+    if (!args.dryRun && pendingSteps.length > 0 && batchesRun >= runtimeOptions.maxBatches) {
+      stoppedBy = 'max_batches';
+      checkpointStatus = writeBackfillCheckpoint(runtimeOptions.checkpointFile, {
+        reason: stoppedBy,
+        rssMb: latestRssMb,
+        baselineRssMb,
+        args: compactBackfillArgs({ ...args, resume: true }),
+        runtimeOptions,
+        completedSteps,
+        pendingSteps
+      });
+      break;
+    }
+    if (!args.dryRun && shouldRepeatStepFromResult(latestResult)) {
+      steps.splice(index + 1, 0, step);
     }
     if (pendingSteps.length > 0 && runtimeOptions.batchSleepMs > 0 && !args.dryRun) {
       await sleep(runtimeOptions.batchSleepMs, deps);
@@ -372,17 +466,33 @@ async function runBackfill(args = {}, deps = {}) {
   summary.lowResourceMode = runtimeOptions.lowResourceMode;
   summary.requestedLimit = runtimeOptions.requestedLimit;
   summary.effectiveLimit = runtimeOptions.effectiveLimit;
+  summary.maxBatches = runtimeOptions.maxBatches;
+  summary.batchesRun = batchesRun;
   summary.rssMb = latestRssMb;
   summary.baselineRssMb = baselineRssMb;
   summary.stoppedBy = stoppedBy;
   summary.checkpoint = checkpointStatus || summary.checkpoint;
   summary.completedSteps = completedSteps;
   summary.pendingSteps = checkpointStatus?.pendingSteps || [];
-  if (checkpoint && checkpointSteps.length > 0) {
-    summary.resumedFromCheckpoint = runtimeOptions.checkpointFile;
+  summary.syncRuns = syncRuns;
+  if (syncRuns.length > 0) {
+    summary.sync = syncRuns[syncRuns.length - 1];
+    summary.healthGate = summary.sync.healthGate || null;
   }
-  if (!args.dryRun && args.syncAfter && summary.embedded > 0) {
-    summary.sync = await (deps.syncAfterBackfill || syncAfterBackfill)(startedAt, source);
+  if (checkpoint && checkpointSteps.length > 0) {
+    if (useCheckpointSteps) {
+      summary.resumedFromCheckpoint = runtimeOptions.checkpointFile;
+    } else {
+      summary.ignoredCheckpoint = {
+        path: runtimeOptions.checkpointFile,
+        reason: 'source_mismatch',
+        checkpointSource: normalizeSource(checkpoint.args?.source || checkpoint.source || ''),
+        requestedSource: source
+      };
+    }
+  }
+  if (stoppedBy === 'post_sync_health_gate') {
+    summary.ok = false;
   }
   return summary;
 }
@@ -402,6 +512,7 @@ if (require.main === module) {
 module.exports = {
   parseArgs,
   runBackfill,
+  checkpointMatchesSource,
   resolveBackfillRuntimeOptions,
   shouldStopForRss,
   syncAfterBackfill,

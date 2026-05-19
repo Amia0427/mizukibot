@@ -32,6 +32,7 @@ const {
   buildDailyJournalDocsForAllUsers,
   getDailyJournalFileStats
 } = require('./journalDocs');
+const { isMemoryNotRecallable } = require('./recallFilter');
 const {
   JOURNAL_TRIGGER_RE,
   journalDateMatchBoost,
@@ -402,6 +403,7 @@ function buildProfileDocs(snapshot = {}) {
 function buildNodeDocs(snapshot = {}) {
   const docs = [];
   for (const node of normalizeArray(snapshot?.memoryNodes)) {
+    if (isMemoryNotRecallable(node)) continue;
     const scopeType = normalizeText(node.scopeType).toLowerCase() || 'personal';
     const source = scopeType === 'task'
       ? 'task'
@@ -480,6 +482,7 @@ function buildEpisodeDocs(snapshot = {}) {
     const normalizedUserId = normalizeText(userId);
     if (!normalizedUserId) continue;
     for (const episode of normalizeArray(entry?.items)) {
+      if (isMemoryNotRecallable(episode)) continue;
       const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
       if (rollupLevel === 'segment') continue;
       const title = normalizeText(episode.episodeDay || episode.yearMonth || rollupLevel || 'episode');

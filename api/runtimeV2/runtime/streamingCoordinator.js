@@ -361,7 +361,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       toolEvidenceMessages: globalToolEvidenceMessages,
       modelName: resolveMainConversationModelName(request),
       modelWindowTokens: Math.max(2048, Number(affinity?.contextWindowTokens || 0) || 2048),
-      maxOutputTokens: Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || 3500),
+      maxOutputTokens: Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192),
       source: 'direct_reply'
     });
     const trimmedRecentHistory = normalizeArray(

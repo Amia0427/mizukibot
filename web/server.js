@@ -247,7 +247,7 @@ function getCurrentSettings() {
     image_api_base_url: String(config.IMAGE_API_BASE_URL || ''),
     ai_temperature: Number(config.AI_TEMPERATURE ?? 0.6),
     ai_top_p: Number(config.AI_TOP_P ?? 0.92),
-    ai_max_tokens: Number(config.AI_MAX_TOKENS ?? 3500),
+    ai_max_tokens: Number(config.AI_MAX_TOKENS ?? config.MAIN_REPLY_DEFAULT_MAX_TOKENS ?? 8192),
     ai_retries: Number(config.AI_RETRIES ?? 1),
     ai_stream_enabled: Boolean(config.AI_STREAM_ENABLED),
     ai_stream_chunk_ms: Number(config.AI_STREAM_CHUNK_MS ?? 900),
@@ -738,7 +738,7 @@ function startServer() {
         document.getElementById('image_api_base_url').value = s.image_api_base_url || '';
         document.getElementById('ai_temperature').value = String(s.ai_temperature ?? 0.6);
         document.getElementById('ai_top_p').value = String(s.ai_top_p ?? 0.92);
-        document.getElementById('ai_max_tokens').value = String(s.ai_max_tokens ?? 3500);
+        document.getElementById('ai_max_tokens').value = String(s.ai_max_tokens ?? 8192);
         document.getElementById('ai_retries').value = String(s.ai_retries ?? 1);
         document.getElementById('ai_stream_enabled').checked = Boolean(s.ai_stream_enabled);
         document.getElementById('ai_stream_chunk_ms').value = String(s.ai_stream_chunk_ms ?? 900);

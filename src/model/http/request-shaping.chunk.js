@@ -106,10 +106,22 @@ function requestUsesTemperature(requestBody = {}) {
   return Object.prototype.hasOwnProperty.call(requestBody, 'temperature');
 }
 
+function requestUsesTopP(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return false;
+  return Object.prototype.hasOwnProperty.call(requestBody, 'top_p');
+}
+
 function stripTemperatureField(requestBody = {}) {
   if (!requestBody || typeof requestBody !== 'object') return requestBody;
   const nextBody = { ...requestBody };
   delete nextBody.temperature;
+  return nextBody;
+}
+
+function stripTopPRequestField(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return requestBody;
+  const nextBody = { ...requestBody };
+  delete nextBody.top_p;
   return nextBody;
 }
 
@@ -141,6 +153,7 @@ function stripInternalRequestFields(requestBody = {}) {
   delete nextBody.__timeoutMs;
   delete nextBody.__abortSignal;
   delete nextBody.__requestHeaders;
+  delete nextBody.__preferredProtocol;
   delete nextBody.__originalMaxTokens;
   delete nextBody.__responsesProtocolFallbackAttempted;
   return nextBody;
@@ -300,7 +313,7 @@ function isReasoningSchemaError(error) {
   const bodyText = typeof responseData === 'string'
     ? responseData
     : JSON.stringify(responseData || {});
-  return /reasoning|reasoning[_-]?effort|thinking|budget[_-]?tokens|unsupported.*(?:field|parameter)|unknown field|extra inputs|additional properties/i.test(bodyText);
+  return /reasoning|reasoning[_-]?effort|thinking|budget[_-]?tokens/i.test(bodyText);
 }
 
 function isExtendedSamplingSchemaError(error) {
@@ -310,7 +323,7 @@ function isExtendedSamplingSchemaError(error) {
   const bodyText = typeof responseData === 'string'
     ? responseData
     : JSON.stringify(responseData || {});
-  return /top[_-]?k|top[_-]?a|repetition[_-]?penalty|unsupported.*(?:field|parameter)|unknown field|unknown parameter|extra inputs|additional properties/i.test(bodyText);
+  return /top[_-]?k|top[_-]?a|repetition[_-]?penalty/i.test(bodyText);
 }
 
 function isTemperatureSchemaError(error) {
@@ -322,6 +335,17 @@ function isTemperatureSchemaError(error) {
     : JSON.stringify(responseData || {});
   if (!/temperature/i.test(bodyText)) return false;
   return /deprecated|unsupported|does not support|not supported|unknown (?:field|parameter)|extra inputs|additional properties/i.test(bodyText);
+}
+
+function isTemperatureTopPConflictError(error) {
+  const status = Number(error?.response?.status || 0);
+  if (![400, 404, 415, 422].includes(status)) return false;
+  const responseData = error?.response?.data;
+  const bodyText = typeof responseData === 'string'
+    ? responseData
+    : JSON.stringify(responseData || {});
+  if (!/temperature/i.test(bodyText) || !/top[_-]?p/i.test(bodyText)) return false;
+  return /cannot both be specified|use only one|only one/i.test(bodyText);
 }
 
 function mapToolSchemaToAnthropic(tool) {
@@ -569,6 +593,7 @@ module.exports = {
   isExtendedSamplingSchemaError,
   isReasoningSchemaError,
   isTemperatureSchemaError,
+  isTemperatureTopPConflictError,
   mapMessagesToAnthropic,
   mapToolChoiceToAnthropic,
   mapToolSchemaToAnthropic,
@@ -576,10 +601,12 @@ module.exports = {
   requestUsesExtendedSampling,
   requestUsesReasoning,
   requestUsesTemperature,
+  requestUsesTopP,
   stripExtendedSamplingFields,
   stripInternalRequestFields,
   stripProviderCacheFields,
   stripReasoningFields,
-  stripTemperatureField
+  stripTemperatureField,
+  stripTopPRequestField
 };
 

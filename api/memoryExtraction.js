@@ -166,6 +166,71 @@ function inferRelations(entities = [], participants = []) {
   return relations.slice(0, 8);
 }
 
+function normalizeText(value = '') {
+  return String(value || '').trim();
+}
+
+function normalizeStringArray(value = [], limit = 16) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(value) ? value : []) {
+    const text = normalizeText(raw);
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= Math.max(1, Number(limit) || 1)) break;
+  }
+  return out;
+}
+
+function normalizeEvidenceItems(value = []) {
+  const list = Array.isArray(value) ? value : (value && typeof value === 'object' ? [value] : []);
+  return list
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const userText = normalizeText(item.userText || item.question).slice(0, 500);
+      const assistantText = normalizeText(item.assistantText || item.finalReply).slice(0, 500);
+      if (!userText && !assistantText) return null;
+      return {
+        turnId: normalizeText(item.turnId || item.turn_id),
+        createdAt: normalizeText(item.createdAt),
+        userText,
+        assistantText,
+        sourceSessionId: normalizeText(item.sourceSessionId || item.source_session_id),
+        index: Math.max(0, Number(item.index || 0) || 0)
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function buildLearningDecisionMeta(type = '', confidence = 0, options = {}) {
+  const turnIds = normalizeStringArray(options.turnIds || options.turn_ids, 16);
+  const turnId = normalizeText(options.turnId || options.turn_id || turnIds[turnIds.length - 1]);
+  const evidence = normalizeEvidenceItems(options.evidence);
+  const status = normalizeText(options.status).toLowerCase();
+  const sourceKind = normalizeText(options.sourceKind || 'extractor').toLowerCase() || 'extractor';
+  const fieldKey = normalizeText(options.fieldKey || type).toLowerCase();
+  const postReplyJobId = normalizeText(options.postReplyJobId || options.jobId);
+  return {
+    status: status || 'candidate',
+    reason: sourceKind === 'explicit' ? 'explicit_user_request' : 'extractor_profile_guard',
+    fieldKey,
+    extractionClass: normalizeText(options.extractionClass),
+    sourceKind,
+    confidence: Number(confidence || 0) || 0,
+    postReplyJobId,
+    jobId: postReplyJobId,
+    turnId,
+    turnIds,
+    sourceSessionId: normalizeText(options.sourceSessionId || options.sessionId || options.sessionKey),
+    evidenceCount: evidence.length,
+    phase: normalizeText(options.phase || 'post_reply_learning')
+  };
+}
+
 function getDefaultStatusForType(type = '', memoryKind = '') {
   if (memoryKind === 'style' || memoryKind === 'jargon') return 'active';
   const normalized = String(type || '').trim().toLowerCase();
@@ -189,16 +254,35 @@ function buildMemoryBaseMeta(type, confidence, options = {}) {
   const defaultStatus = extractionClass === 'episodic_observation' || extractionClass === 'journal_only'
     ? 'candidate'
     : getDefaultStatusForType(type, options.memoryKind);
+  const status = options.status || defaultStatus;
+  const turnIds = normalizeStringArray(options.turnIds || options.turn_ids, 16);
+  const turnId = normalizeText(options.turnId || options.turn_id || turnIds[turnIds.length - 1]);
+  const evidence = normalizeEvidenceItems(options.evidence);
+  const sourceSessionId = normalizeText(options.sourceSessionId || options.sessionId || options.sessionKey);
+  const learningDecision = buildLearningDecisionMeta(type, confidence, {
+    ...options,
+    fieldKey,
+    extractionClass,
+    status,
+    turnId,
+    turnIds,
+    evidence,
+    sourceSessionId
+  });
   return {
     source: 'extractor',
     confidence,
     importanceTier,
     sourceKind: options.sourceKind || 'extractor',
-    status: options.status || defaultStatus,
+    status,
     fieldKey,
     extractionClass,
     conflictKey,
-    sourceSessionId: options.sessionId || '',
+    sourceSessionId,
+    turnId,
+    turnIds,
+    evidence,
+    learningDecision,
     participants: Array.isArray(options.participants) ? options.participants : [],
     entities: Array.isArray(options.entities) ? options.entities : [],
     relations: Array.isArray(options.relations) ? options.relations : []
@@ -315,7 +399,7 @@ function appendV3LearnedMemoryEvent(userId, type, value, meta = {}, options = {}
 function parseExplicitRemember(text = '') {
   const source = String(text || '').trim();
   if (!source) return '';
-  const match = source.match(/^(?:记住|记一下|帮我记住|remember)\s*(?:[:：,-]\s*|\s+)?(.+)$/i);
+  const match = source.match(/(?:^|\n)(?:Turn\s+\d+\s+User:\s*)?(?:记住|记一下|帮我记住|remember)\s*(?:[:：,-]\s*|\s+)?(.+?)(?:\n|$)/i);
   if (!match) return '';
   return String(match[1] || '').trim();
 }
@@ -367,14 +451,107 @@ function shouldPersistPersonaSupport(stableSignalCount = 0, options = {}) {
   return stableSignalCount >= Math.max(1, Number(config.MEMORY_EXTRACT_PERSONA_SUPPORT_MIN_SIGNALS || 2) || 2);
 }
 
+function buildPendingMemoryV3Event(userId, type, value, meta = {}, options = {}) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const fieldKey = resolveV3ProfileFieldKey(type, meta.fieldKey);
+  const status = String(meta.status || '').trim().toLowerCase() || getDefaultStatusForType(type, options.memoryKind);
+  const sourceKind = String(meta.sourceKind || 'extractor').trim().toLowerCase() || 'extractor';
+  const extractionClass = meta.extractionClass || classifyProfileExtraction(type, text, { ...options, fieldKey, status, sourceKind });
+  const conflictKey = meta.conflictKey || buildProfileConflictKeyForExtraction(userId, type, text, { ...options, fieldKey });
+  const eventType = status === 'active' || sourceKind === 'explicit'
+    ? 'memory_confirmed'
+    : 'memory_candidate_extracted';
+  return {
+    type: eventType,
+    userId,
+    sessionKey: options.sessionKey,
+    groupId: options.groupId,
+    channelId: options.channelId,
+    sessionId: options.sessionId,
+    routePolicyKey: options.routePolicyKey,
+    topRouteType: options.topRouteType,
+    scopeType: 'personal',
+    source: meta.source || 'extractor',
+    sourceKind,
+    status,
+    confidence: meta.confidence,
+    importance: meta.importance,
+    memoryKind: type === 'summary' || type === 'impression' ? fieldKey : type,
+    semanticSlot: fieldKey,
+    conflictKey,
+    text,
+    payload: {
+      type: type === 'summary' || type === 'impression' ? 'fact' : type,
+      fieldKey,
+      memoryKind: type,
+      extractionClass,
+      conflictKey,
+      turnId: meta.turnId || options.turnId || '',
+      turnIds: Array.isArray(meta.turnIds) ? meta.turnIds : normalizeStringArray(options.turnIds || []),
+      evidence: Array.isArray(meta.evidence) ? meta.evidence : normalizeEvidenceItems(options.evidence),
+      sourceSessionId: meta.sourceSessionId || options.sourceSessionId || options.sessionId || '',
+      learningDecision: meta.learningDecision || null
+    },
+    participants: meta.participants,
+    entities: meta.entities,
+    relations: meta.relations
+  };
+}
+
+function attachPendingMemoryV3Event(item = {}, userId, type, value, meta = {}, options = {}) {
+  const event = buildPendingMemoryV3Event(userId, type, value, meta, options);
+  if (!event) return item;
+  return {
+    ...item,
+    meta: {
+      ...(item.meta && typeof item.meta === 'object' ? item.meta : {}),
+      pendingMemoryV3Event: event
+    }
+  };
+}
+
+async function flushPendingMemoryV3Events(accepted = []) {
+  if (config.MEMORY_V3_ENABLED === false) return;
+  for (const item of Array.isArray(accepted) ? accepted : []) {
+    const event = item?.meta?.pendingMemoryV3Event;
+    if (!event || typeof event !== 'object') continue;
+    try {
+      const nextStatus = String(item.status || event.status || '').trim().toLowerCase();
+      const nextSourceKind = String(item.sourceKind || event.sourceKind || '').trim().toLowerCase();
+      await appendMemoryEvent({
+        ...event,
+        type: nextStatus === 'active' || nextSourceKind === 'explicit'
+          ? 'memory_confirmed'
+          : 'memory_candidate_extracted',
+        status: nextStatus || event.status,
+        confidence: item.confidence ?? event.confidence,
+        payload: {
+          ...(event.payload && typeof event.payload === 'object' ? event.payload : {}),
+          acceptedMemoryId: item.id,
+          writeReview: item.meta?.writeReview || null,
+          writeRerank: item.meta?.writeRerank || null,
+          recallVerification: item.meta?.recallVerification || null,
+          learningDecision: item.meta?.learningDecision || event.payload?.learningDecision || null
+        }
+      });
+      delete item.meta.pendingMemoryV3Event;
+    } catch (error) {
+      console.error('memory v3 event append failed:', error?.message || error);
+    }
+  }
+}
+
 async function flushVectorMemoryWrites(vectorItems = [], options = {}) {
   if (!Array.isArray(vectorItems) || vectorItems.length === 0) {
     return { ids: [], accepted: [], rejected: [] };
   }
-  return addMemoryItemsBatchWithVectorBackfill(vectorItems, {
+  const result = await addMemoryItemsBatchWithVectorBackfill(vectorItems, {
     ...options,
     phase: 'memory_extraction_write'
   });
+  await flushPendingMemoryV3Events(result.accepted);
+  return result;
 }
 
 function persistLearnedMemories(userId, type, values, confidence = 0.8, options = {}) {
@@ -389,15 +566,13 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8, options 
     const meta = buildMemoryBaseMeta(type, confidence, { ...options, fieldKey, value, userId });
 
     if (type === 'fact') {
-      vectorItems.push({ userId, text: value, type: 'fact', weight: 1.15, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: value, type: 'fact', weight: 1.15, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta }, userId, type, value, meta, options));
       if (shouldWriteLegacyProfileField(type, meta, options)) addUserFact(userId, value, 30);
       continue;
     }
 
     if (type === 'identity') {
-      vectorItems.push({ userId, text: `identity: ${value}`, type: 'identity', weight: 1.25, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: `identity: ${value}`, type: 'identity', weight: 1.25, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta }, userId, type, value, meta, options));
       if (shouldWriteLegacyProfileField(type, meta, options)) {
         addProfileItem(userId, 'identities', value, 20);
         addUserFact(userId, value, 30);
@@ -406,55 +581,49 @@ function persistLearnedMemories(userId, type, values, confidence = 0.8, options 
     }
 
     if (type === 'personality') {
-      vectorItems.push({ userId, text: `personality: ${value}`, type: 'personality', weight: 1.1, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: `personality: ${value}`, type: 'personality', weight: 1.1, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta }, userId, type, value, meta, options));
       if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'personality_traits', value, 20);
       continue;
     }
 
     if (type === 'hobby') {
-      vectorItems.push({ userId, text: `hobby: ${value}`, type: 'hobby', weight: 1.08, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: `hobby: ${value}`, type: 'hobby', weight: 1.08, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta }, userId, type, value, meta, options));
       if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'hobbies', value, 20);
       continue;
     }
 
     if (type === 'like') {
-      vectorItems.push({ userId, text: `likes: ${value}`, type: 'like', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: `likes: ${value}`, type: 'like', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta }, userId, type, value, meta, options));
       if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'likes', value, 20);
       continue;
     }
 
     if (type === 'dislike') {
-      vectorItems.push({ userId, text: `dislikes: ${value}`, type: 'dislike', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: `dislikes: ${value}`, type: 'dislike', weight: 1.05, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta }, userId, type, value, meta, options));
       if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'dislikes', value, 20);
       continue;
     }
 
     if (type === 'goal') {
-      vectorItems.push({ userId, text: `goal: ${value}`, type: 'goal', weight: 1.2, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: `goal: ${value}`, type: 'goal', weight: 1.2, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta }, userId, type, value, meta, options));
       if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'goals', value, 20);
       continue;
     }
 
     if (type === 'impression') {
-      vectorItems.push({ userId, text: `impression support: ${value}`, type: 'fact', weight: 1.18, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey || 'persona_impression_support', meta: { ...meta, fieldKey: fieldKey || 'persona_impression_support' } });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      const itemMeta = { ...meta, fieldKey: fieldKey || 'persona_impression_support' };
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: `impression support: ${value}`, type: 'fact', weight: 1.18, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey || 'persona_impression_support', meta: itemMeta }, userId, type, value, itemMeta, options));
       continue;
     }
 
     if (type === 'summary') {
-      vectorItems.push({ userId, text: `summary support: ${value}`, type: 'fact', weight: 1.16, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey || 'persona_summary_support', meta: { ...meta, fieldKey: fieldKey || 'persona_summary_support' } });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      const itemMeta = { ...meta, fieldKey: fieldKey || 'persona_summary_support' };
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: `summary support: ${value}`, type: 'fact', weight: 1.16, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey || 'persona_summary_support', meta: itemMeta }, userId, type, value, itemMeta, options));
       continue;
     }
 
     if (type === 'topic') {
-      vectorItems.push({ userId, text: `recent topic: ${value}`, type: 'topic', weight: 0.95, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta });
-      appendV3LearnedMemoryEvent(userId, type, value, meta, options);
+      vectorItems.push(attachPendingMemoryV3Event({ userId, text: `recent topic: ${value}`, type: 'topic', weight: 0.95, source: meta.source, confidence: meta.confidence, semanticSlot: fieldKey, meta }, userId, type, value, meta, options));
       if (shouldWriteLegacyProfileField(type, meta, options)) addProfileItem(userId, 'recent_topics', value, 12);
     }
   }
@@ -985,7 +1154,35 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
     if (!explicitGate.blocked) {
       const explicitType = inferExplicitProfileType(explicitRemember);
       const explicitText = sanitizeUntrustedContent(explicitRemember, 'memory');
-      await flushVectorMemoryWrites([{
+      const explicitTurnIds = normalizeStringArray(options.turnIds || [], 16);
+      const explicitTurnId = normalizeText(options.turnId || explicitTurnIds[explicitTurnIds.length - 1]);
+      const explicitEvidence = normalizeEvidenceItems(options.evidence);
+      const explicitSourceSessionId = normalizeText(options.sourceSessionId || options.sessionId || options.sessionKey);
+      const explicitMeta = {
+        source: 'explicit',
+        sourceKind: 'explicit',
+        confidence: 1,
+        status: 'active',
+        fieldKey: explicitType,
+        sourceSessionId: explicitSourceSessionId,
+        turnId: explicitTurnId,
+        turnIds: explicitTurnIds,
+        evidence: explicitEvidence,
+        learningDecision: buildLearningDecisionMeta(explicitType, 1, {
+          ...options,
+          status: 'active',
+          sourceKind: 'explicit',
+          fieldKey: explicitType,
+          turnId: explicitTurnId,
+          turnIds: explicitTurnIds,
+          evidence: explicitEvidence,
+          sourceSessionId: explicitSourceSessionId
+        }),
+        participants,
+        entities,
+        relations
+      };
+      await flushVectorMemoryWrites([attachPendingMemoryV3Event({
         userId: options.groupId ? `group:${options.groupId}` : userId,
         text: explicitText,
         type: 'fact',
@@ -1003,37 +1200,14 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
         participants,
         entities,
         relations,
-        sourceSessionId: options.sessionId,
+        sourceSessionId: explicitSourceSessionId,
+        turnId: explicitTurnId,
+        turnIds: explicitTurnIds,
+        evidence: explicitEvidence,
         sourceKind: 'explicit',
         status: 'active',
-        meta: {
-          source: 'explicit',
-          sourceKind: 'explicit',
-          confidence: 1,
-          status: 'active',
-          fieldKey: explicitType,
-          sourceSessionId: options.sessionId,
-          participants,
-          entities,
-          relations
-        }
-      }], options);
-      appendV3LearnedMemoryEvent(userId, explicitType, explicitText, {
-        source: 'explicit',
-        sourceKind: 'explicit',
-        status: 'active',
-        confidence: 1,
-        importance: 2,
-        fieldKey: explicitType,
-        participants,
-        entities,
-        relations
-      }, {
-        ...options,
-        userId,
-        sessionKey: options.sessionKey,
-        sessionId: options.sessionId
-      });
+        meta: explicitMeta
+      }, userId, explicitType, explicitText, explicitMeta, options)], options);
     }
   }
 

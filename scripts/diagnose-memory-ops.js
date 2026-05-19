@@ -163,6 +163,8 @@ function summarizeDiagnose(result = {}, args = {}) {
     },
     repairPlan: result.repairPlan || {},
     recommendedAction: result.recommendedAction || result.repairPlan?.recommendedAction || '',
+    recommendedActions: Array.isArray(result.recommendedActions) ? result.recommendedActions : [],
+    healthGate: result.healthGate || null,
     fallback: {
       skipped: probe.skipped === true,
       cases: Number(probe.cases || 0) || 0,

@@ -43,7 +43,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       dailyJournalMaxMonthlyFiles: options.dailyJournalMaxMonthlyFiles,
       dailyLookbackDays: options.dailyLookbackDays,
       lookbackDays: options.lookbackDays,
-      sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
+      sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
+      __memoryContextMemo: options.__memoryContextMemo
     });
   const forceMemoryContext = shouldForceMemoryContextForQuestion(question, {
     ...options,

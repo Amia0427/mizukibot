@@ -264,12 +264,77 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
 }
 
 function snapshotState(state) {
+  const memory = normalizeObject(state.memory, {});
+  const execution = normalizeObject(state.execution, {});
+  const promptSnapshot = normalizeObject(memory.promptSnapshot, null);
+  const promptSegments = normalizeObject(memory.promptSegments, null);
+  const contextStats = normalizeObject(memory.contextStats, null);
+  const mainConversationSnapshot = normalizeObject(memory.mainConversationSnapshot, null);
+  const compactContextStats = contextStats || (mainConversationSnapshot
+    ? {
+        usageRatio: Number(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.usageRatio || 0) || 0,
+        compactionLevel: String(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
+      }
+    : null);
+
   return {
     request: state.request,
     thread: state.thread,
-    memory: state.memory,
+    memory: {
+      dynamicPrompt: String(memory.dynamicPrompt || ''),
+      stableSystemBlocks: normalizeArray(memory.stableSystemBlocks),
+      dynamicContextBlocks: normalizeArray(memory.dynamicContextBlocks),
+      assistantOnlyContextBlocks: normalizeArray(memory.assistantOnlyContextBlocks),
+      promptSnapshot: promptSnapshot
+        ? {
+            stableBlockIds: normalizeArray(promptSnapshot.stableBlockIds),
+            dynamicBlockIds: normalizeArray(promptSnapshot.dynamicBlockIds),
+            assistantOnlyBlockIds: normalizeArray(promptSnapshot.assistantOnlyBlockIds),
+            cacheFriendlyFingerprint: String(promptSnapshot.cacheFriendlyFingerprint || '').trim(),
+            cacheMeta: normalizeObject(promptSnapshot.cacheMeta, {}),
+            freshness: normalizeObject(promptSnapshot.freshness, {}),
+            dynamicPromptPlan: normalizeObject(promptSnapshot.dynamicPromptPlan, null)
+          }
+        : null,
+      promptSegments: promptSegments
+        ? {
+            cacheMeta: normalizeObject(promptSegments.cacheMeta, {}),
+            freshness: normalizeObject(promptSegments.freshness, {}),
+            securityLabels: normalizeArray(promptSegments.securityLabels),
+            activatedPersonaModules: normalizeArray(promptSegments.activatedPersonaModules),
+            personaModuleCandidates: normalizeArray(promptSegments.personaModuleCandidates)
+          }
+        : null,
+      securityLabels: normalizeArray(memory.securityLabels),
+      blockedLearningEvents: normalizeArray(memory.blockedLearningEvents),
+      redactionEvents: normalizeArray(memory.redactionEvents),
+      affinity: memory.affinity || null,
+      context: memory.context || null,
+      personaMemoryState: memory.personaMemoryState || null,
+      dirty: Boolean(memory.dirty),
+      restoredBridge: Boolean(memory.restoredBridge),
+      memoryScopeRecorded: Boolean(memory.memoryScopeRecorded),
+      persisted: Boolean(memory.persisted),
+      learningQueued: Boolean(memory.learningQueued),
+      globalToolEvidence: String(memory.globalToolEvidence || ''),
+      globalToolResults: normalizeArray(memory.globalToolResults),
+      globalToolMemoryCliTurn: memory.globalToolMemoryCliTurn || null,
+      continuityState: memory.continuityState || null,
+      contextStats: compactContextStats,
+      pendingReplySnapshot: memory.pendingReplySnapshot || null,
+      checkpointCompacted: true
+    },
     plan: state.plan,
-    execution: state.execution,
+    execution: {
+      ...execution,
+      directChatToolCompile: execution.directChatToolCompile
+        ? {
+            enabled: Boolean(execution.directChatToolCompile.enabled),
+            assistantMessage: execution.directChatToolCompile.assistantMessage || null,
+            directContext: execution.directChatToolCompile.directContext || null
+          }
+        : undefined
+    },
     output: state.output,
     messages: state.messages
   };

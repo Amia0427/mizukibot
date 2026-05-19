@@ -1,9 +1,7 @@
 const config = require('../../../config');
 const crypto = require('crypto');
 const {
-  ensureAnthropicMessagesUrl,
   getApiProvider,
-  isClaudeModelName,
   isOpenAICompatibleProvider
 } = require('../../../utils/modelProvider');
 const {
@@ -27,10 +25,15 @@ const {
   buildImageModelConfig
 } = require('../../../utils/imageModelConfigResolver');
 
+function getMainReplyDefaultMaxTokens() {
+  return Math.max(64, Number(config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192) || 8192);
+}
+
 function ensureChatCompletionsUrl(url) {
   const normalized = String(url || '').replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(normalized)) return normalized;
   if (/\/responses$/i.test(normalized)) return normalized.replace(/\/responses$/i, '/chat/completions');
+  if (/\/messages$/i.test(normalized)) return normalized.replace(/\/messages$/i, '/chat/completions');
   if (/\/v\d+$/i.test(normalized)) return `${normalized}/chat/completions`;
   return normalized;
 }
@@ -39,6 +42,7 @@ function ensureResponsesUrl(url) {
   const normalized = String(url || '').replace(/\/+$/, '');
   if (/\/responses$/i.test(normalized)) return normalized;
   if (/\/chat\/completions$/i.test(normalized)) return normalized.replace(/\/chat\/completions$/i, '/responses');
+  if (/\/messages$/i.test(normalized)) return normalized.replace(/\/messages$/i, '/responses');
   if (/\/v\d+$/i.test(normalized)) return `${normalized}/responses`;
   return normalized;
 }
@@ -59,8 +63,9 @@ function resolveOpenAIMainProtocol(apiBaseUrl = '', options = {}) {
 
   const normalized = String(apiBaseUrl || '').replace(/\/+$/, '').toLowerCase();
   if (/\/responses$/i.test(normalized)) return 'responses';
-  if (/\/chat\/completions$/i.test(normalized)) return 'responses';
-  if (/\/v\d+$/i.test(normalized)) return 'responses';
+  if (/\/chat\/completions$/i.test(normalized)) return 'chat_completions';
+  if (/\/messages$/i.test(normalized)) return 'chat_completions';
+  if (/\/v\d+$/i.test(normalized)) return 'chat_completions';
   return 'chat_completions';
 }
 
@@ -71,30 +76,13 @@ function ensureOpenAIMainUrl(apiBaseUrl = '', options = {}) {
     : ensureChatCompletionsUrl(apiBaseUrl);
 }
 
-function canPromoteMainClaudeUrlToAnthropic(apiBaseUrl = '') {
-  const normalized = String(apiBaseUrl || '').replace(/\/+$/, '');
-  return /\/v\d+$/i.test(normalized)
-    || /\/v\d+\/chat\/completions$/i.test(normalized)
-    || /\/v\d+\/messages$/i.test(normalized);
-}
-
 function resolveMainProvider(apiBaseUrl = '', model = '') {
   const modelName = model || config.AI_MODEL;
-  const provider = getApiProvider(apiBaseUrl, modelName);
-  if (
-    provider === 'openai_compatible'
-    && isClaudeModelName(modelName)
-    && canPromoteMainClaudeUrlToAnthropic(apiBaseUrl)
-  ) {
-    return 'anthropic';
-  }
-  return provider;
+  return getApiProvider(apiBaseUrl, modelName, { preferUnifiedResponses: true });
 }
 
 function ensureMainModelUrl(apiBaseUrl = '', options = {}) {
-  return options.provider === 'anthropic'
-    ? ensureAnthropicMessagesUrl(apiBaseUrl)
-    : ensureOpenAIMainUrl(apiBaseUrl, options);
+  return ensureOpenAIMainUrl(apiBaseUrl, options);
 }
 
 function getModelName(overrides = null) {
@@ -159,7 +147,7 @@ function getRepetitionPenalty(overrides = null) {
   return getOptionalPositiveNumber(raw);
 }
 
-function getMaxTokens(defaultValue = 3500, overrides = null) {
+function getMaxTokens(defaultValue = getMainReplyDefaultMaxTokens(), overrides = null) {
   const raw = overrides && typeof overrides === 'object' && overrides.maxTokens !== undefined
     ? overrides.maxTokens
     : config.AI_MAX_TOKENS;
@@ -305,7 +293,7 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
     model: getModelName(resolvedConfig),
     temperature: getTemperature(resolvedConfig),
     messages: Array.isArray(options.messages) ? options.messages : [],
-    max_tokens: getMaxTokens(options.defaultMaxTokens || 3500, resolvedConfig),
+    max_tokens: getMaxTokens(options.defaultMaxTokens || getMainReplyDefaultMaxTokens(), resolvedConfig),
     reasoning_effort: getReasoningEffort(resolvedConfig),
     stream: Boolean(options.stream)
   };
@@ -324,6 +312,8 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   if (options.trace && typeof options.trace === 'object') {
     body.__trace = options.trace;
   }
+
+  body.__preferredProtocol = protocol;
 
   const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || '').trim();
   const apiKey = getApiKey(resolvedConfig);
@@ -471,6 +461,7 @@ module.exports = {
   ensureResponsesUrl,
   getApiBaseUrl,
   getApiKey,
+  getMainReplyDefaultMaxTokens,
   getMaxTokens,
   getModelName,
   getRepetitionPenalty,

@@ -5,6 +5,13 @@ function shouldUseLocalDecisionFallback({ decision, addressee, score }) {
   return Number(score || 0) >= Math.max(60, Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60));
 }
 
+function shouldForceStrongCueReply({ decision, addressee, score }) {
+  if (config.PASSIVE_AWARENESS_STRONG_CUE_FORCE_REPLY !== true) return false;
+  if (!['bot_presence_check', 'bot_direct'].includes(String(addressee || ''))) return false;
+  if (decision?.shouldReply) return false;
+  return Number(score || 0) >= Math.max(1, Number(config.PASSIVE_AWARENESS_CHEAP_GATE_MIN_SCORE || 1));
+}
+
 function buildLocalReplyFallback({ addressee, replyType }) {
   return '';
 }
@@ -65,6 +72,39 @@ function cheapRuleGate({ gate, gateWithSocialContext, score, addressee, text, re
   };
 }
 
+function readPassiveSamplingNumber(value, fallback, { unit = false } = {}) {
+  const n = Number(value);
+  const fallbackNumber = fallback === null || fallback === undefined ? NaN : Number(fallback);
+  const resolved = Number.isFinite(n) ? n : fallbackNumber;
+  if (!Number.isFinite(resolved)) return null;
+  if (unit) return Math.max(0, Math.min(1, resolved));
+  return resolved;
+}
+
+function readPassiveTopP(envKey, configuredValue, fallback) {
+  if (Object.prototype.hasOwnProperty.call(process.env, envKey)) {
+    const raw = String(process.env[envKey] || '').trim();
+    if (!raw) return null;
+    return readPassiveSamplingNumber(raw, null, { unit: true });
+  }
+  return readPassiveSamplingNumber(configuredValue, fallback, { unit: true });
+}
+
+function buildPassiveSamplingFields({
+  temperature,
+  temperatureFallback,
+  topPEnvKey,
+  topP,
+  topPFallback
+}) {
+  const out = {};
+  const resolvedTemperature = readPassiveSamplingNumber(temperature, temperatureFallback);
+  if (resolvedTemperature !== null) out.temperature = resolvedTemperature;
+  const resolvedTopP = readPassiveTopP(topPEnvKey, topP, topPFallback);
+  if (resolvedTopP !== null) out.top_p = resolvedTopP;
+  return out;
+}
+
 async function invokeDecisionModel({
   groupId,
   senderId,
@@ -121,14 +161,20 @@ async function invokeDecisionModel({
     baseUrl,
     {
       model,
-      temperature: Number(config.PASSIVE_AWARENESS_TEMPERATURE || 0.4),
-      top_p: Number(config.PASSIVE_AWARENESS_TOP_P || 0.9),
+      ...buildPassiveSamplingFields({
+        temperature: config.PASSIVE_AWARENESS_TEMPERATURE,
+        temperatureFallback: 0.4,
+        topPEnvKey: 'PASSIVE_AWARENESS_TOP_P',
+        topP: config.PASSIVE_AWARENESS_TOP_P,
+        topPFallback: 0.9
+      }),
       messages: [
         { role: 'system', content: 'You are a QQ passive reply decision model. Return JSON only with should_reply, confidence, reason.' },
         { role: 'user', content: buildPassiveModelUserContent(prompt, visualInputs) }
       ],
       max_tokens: Math.max(120, Number(config.PASSIVE_AWARENESS_MAX_TOKENS || 300)),
       stream: false,
+      __preferredProtocol: 'chat_completions',
       __timeoutMs: Math.max(1000, Number(config.PASSIVE_AWARENESS_TIMEOUT_MS || 15000)),
       __trace: {
         source: 'passive_awareness',
@@ -219,14 +265,20 @@ async function invokeReplyModel({
     baseUrl,
     {
       model,
-      temperature: Number(config.PASSIVE_AWARENESS_REPLY_TEMPERATURE || 0.9),
-      top_p: Number(config.PASSIVE_AWARENESS_REPLY_TOP_P || 0.92),
+      ...buildPassiveSamplingFields({
+        temperature: config.PASSIVE_AWARENESS_REPLY_TEMPERATURE,
+        temperatureFallback: 0.9,
+        topPEnvKey: 'PASSIVE_AWARENESS_REPLY_TOP_P',
+        topP: config.PASSIVE_AWARENESS_REPLY_TOP_P,
+        topPFallback: 0.92
+      }),
       messages: [
         { role: 'system', content: 'You generate a final passive QQ group reply. Output only the reply text.' },
         { role: 'user', content: buildPassiveModelUserContent(prompt, visualInputs) }
       ],
       max_tokens: Math.max(160, Number(config.PASSIVE_AWARENESS_REPLY_MAX_TOKENS || 320)),
       stream: true,
+      __preferredProtocol: 'chat_completions',
       __timeoutMs: Math.max(1000, Number(config.PASSIVE_AWARENESS_REPLY_TIMEOUT_MS || 20000)),
       __trace: {
         source: 'passive_awareness',

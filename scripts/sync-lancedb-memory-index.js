@@ -17,6 +17,10 @@ const { collectEmbeddingBackfillNodes } = require('../utils/memory-v3/embeddingI
 const { buildWorldbookDocuments, loadWorldbookEmbeddingIndex } = require('../utils/personaWorldbookSearch');
 const { loadPersonaModuleCatalog } = require('../utils/personaModules');
 const { normalizeText } = require('../utils/memory-v3/helpers');
+const {
+  buildMemoryIndexHealthGate,
+  buildRecommendedActions
+} = require('./memory-index-health-gate');
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = {
@@ -174,6 +178,8 @@ async function buildSyncSummary(args = {}) {
   const recommendedAction = memoryRepair.readyButNotSynced > 0 || worldbookRepair.readyButNotSynced > 0 || memoryRepair.staleTableRows > 0 || worldbookRepair.staleTableRows > 0
     ? 'run_full_lancedb_reconcile'
     : (memoryRepair.pendingEmbeddingRows > 0 ? 'run_embedding_backfill' : 'none');
+  const healthGate = buildMemoryIndexHealthGate({ coverage: { memory: memoryCoverage, worldbook: worldbookCoverage } });
+  const recommendedActions = buildRecommendedActions(healthGate, { memory: memoryCoverage, worldbook: worldbookCoverage });
   return {
     ok: true,
     dryRun: Boolean(args.dryRun),
@@ -210,9 +216,12 @@ async function buildSyncSummary(args = {}) {
       memory: memoryRepair,
       worldbook: worldbookRepair,
       recommendedAction,
+      recommendedActions,
       dryRunCommand: 'node scripts/sync-lancedb-memory-index.js --dry-run --full',
       applyCommand: 'node scripts/sync-lancedb-memory-index.js --full --compact'
     },
+    healthGate,
+    recommendedActions,
     _rows: {
       memory: memoryRowsToSync,
       worldbook: worldbookRowsToSync
@@ -233,6 +242,7 @@ async function main() {
   }
 
   if (!args.dryRun) {
+    summary.beforeCoverage = summary.coverage;
     summary.writes.push(await syncMemoryRows(summary._rows.memory, {
       full: args.full,
       fullReconcile: args.fullReconcile,
@@ -248,6 +258,19 @@ async function main() {
     if (args.compact) {
       summary.compact = await compactLanceDbTables();
     }
+    const after = await buildSyncSummary({
+      dryRun: true,
+      full: args.full,
+      fullReconcile: args.fullReconcile,
+      deleteStaleRows: args.deleteStaleRows,
+      since: args.since
+    });
+    summary.afterCoverage = after.coverage;
+    summary.coverage = after.coverage;
+    summary.healthGate = after.healthGate;
+    summary.recommendedActions = after.recommendedActions;
+    summary.repairPlan = after.repairPlan;
+    if (after._rows) delete after._rows;
   } else if (args.compact) {
     summary.compact = { skipped: true, reason: 'dry_run' };
   }

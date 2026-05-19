@@ -10,6 +10,7 @@ const {
   buildModelRouteDiagnostics
 } = require('./runtime-core.chunk');
 const {
+  buildPinnedLookup,
   getAxiosOptions,
   getRequestTimeoutMs,
   getRetryDelayMs,
@@ -30,12 +31,15 @@ const {
   isExtendedSamplingSchemaError,
   isReasoningSchemaError,
   isTemperatureSchemaError,
+  isTemperatureTopPConflictError,
   requestUsesExtendedSampling,
   requestUsesReasoning,
   requestUsesTemperature,
+  requestUsesTopP,
   stripExtendedSamplingFields,
   stripReasoningFields,
-  stripTemperatureField
+  stripTemperatureField,
+  stripTopPRequestField
 } = require('./request-shaping.chunk');
 const {
   buildChatCompletionsFallbackUrl,
@@ -69,6 +73,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
   for (let i = 0; i <= maxRetry; i++) {
     let callId = '';
     let prepared = null;
+    let pinnedLookup = null;
     let timeoutMs = getRequestTimeoutMs();
     const attemptStartedAt = Date.now();
     try {
@@ -80,7 +85,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         : 180000;
       timeoutMs = getRetryTimeoutMs(timeoutBase, i, 15000, timeoutCap);
       prepared = await prepareRequest(url, body);
-      await validatePreparedEndpoint(prepared.requestUrl);
+      pinnedLookup = buildPinnedLookup(await validatePreparedEndpoint(prepared.requestUrl));
       const routeDiagnostics = buildModelRouteDiagnostics({
         ...trace,
         provider: prepared.provider,
@@ -135,7 +140,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       const response = await axios.post(
         prepared.requestUrl,
         prepared.requestBody,
-        getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+        getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
       );
       emitHttpTrace(trace, 'http_client_success', {
         stage: 'http_client_success',
@@ -227,7 +232,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
           );
           emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
             attempt: i + 1,
@@ -282,7 +287,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
           );
           emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
             attempt: i + 1,
@@ -337,7 +342,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
           );
           emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
             attempt: i + 1,
@@ -379,6 +384,66 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
       }
       if (
         callId
+        && requestUsesTemperature(prepared?.requestBody)
+        && requestUsesTopP(prepared?.requestBody)
+        && isTemperatureTopPConflictError(e)
+      ) {
+        emitHttpTrace(trace, 'http_client_request_downgrade', {
+          stage: 'http_client_request_downgrade',
+          reason: 'strip_top_p_field',
+          provider: prepared?.provider,
+          model: prepared?.requestBody?.model || body?.model || '',
+          requestUrl: prepared?.requestUrl,
+          statusCode: extractHttpStatus(e) || null,
+          durationMs: Math.max(0, Date.now() - attemptStartedAt)
+        });
+        try {
+          const strippedRequestBody = stripTopPRequestField(prepared.requestBody);
+          const response = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
+          );
+          emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
+            attempt: i + 1,
+            statusCode: Number(response?.status || 0) || null,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_top_p_field'
+          });
+          finishModelCall(callId, {
+            response,
+            attempts: i + 1,
+            requestUrl: prepared.requestUrl,
+            request: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          });
+          return response;
+        } catch (retryWithoutTopPError) {
+          emitHttpFailureTrace(trace, { ...prepared, requestBody: stripTopPRequestField(prepared.requestBody) }, body, retryWithoutTopPError, {
+            attempt: i + 1,
+            retryable: i < maxRetry && shouldRetry(retryWithoutTopPError),
+            durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            downgraded: true,
+            downgradeReason: 'strip_top_p_field'
+          });
+          if (callId) {
+            failModelCall(callId, retryWithoutTopPError, {
+              attempts: i + 1,
+              requestUrl: prepared.requestUrl,
+              request: stripTopPRequestField(prepared.requestBody),
+              requestHeaders: prepared.requestHeaders
+            });
+          }
+          lastErr = retryWithoutTopPError;
+          if (i >= maxRetry || !shouldRetry(retryWithoutTopPError)) break;
+          const delayMs = getRetryDelayMs(retryWithoutTopPError, i);
+          await new Promise((r) => setTimeout(r, delayMs));
+          continue;
+        }
+      }
+      if (
+        callId
         && prepared?.provider === 'openai_compatible'
         && requestUsesOpenAIPromptCacheRetention(prepared.requestBody)
         && isOpenAIPromptCacheRetentionSchemaError(e)
@@ -397,7 +462,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
           );
           emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
             attempt: i + 1,
@@ -433,7 +498,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
               const response = await axios.post(
                 prepared.requestUrl,
                 strippedCacheRequestBody,
-                getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+                getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
               );
               emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedCacheRequestBody }, body, {
                 attempt: i + 1,
@@ -515,7 +580,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
           );
           emitHttpSuccessTrace(trace, { ...prepared, requestBody: strippedRequestBody }, body, {
             attempt: i + 1,
@@ -575,7 +640,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const response = await axios.post(
             prepared.requestUrl,
             downgraded.requestBody,
-            getAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal)
+            getAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal, pinnedLookup)
           );
           emitHttpSuccessTrace(trace, { ...prepared, requestBody: downgraded.requestBody, requestHeaders: downgraded.requestHeaders }, body, {
             attempt: i + 1,

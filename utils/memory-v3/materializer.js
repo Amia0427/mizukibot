@@ -26,6 +26,7 @@ const {
 } = require('./storage');
 const { collectEmbeddingBackfillNodes, enqueueMissingEmbeddings } = require('./embeddingIndex');
 const { acquireMaterializeLock, DEFAULT_STALE_MS: DEFAULT_MATERIALIZE_LOCK_STALE_MS } = require('./materializeLock');
+const { isMemoryNotRecallable } = require('./recallFilter');
 
 const PERSONA_SUPPORT_FIELDS = new Set([
   'persona_summary_support',
@@ -114,14 +115,15 @@ function createEmptyProfileProjection() {
 function createNodeFromEvent(event) {
   const text = normalizeText(event.text);
   if (!text) return null;
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
   const fieldKey = normalizeText(
-    event.payload?.fieldKey
+    payload.fieldKey
     || event.fieldKey
-    || event.payload?.type
+    || payload.type
     || event.memoryKind
-    || event.payload?.memoryKind
+    || payload.memoryKind
     || event.semanticSlot
-    || event.payload?.semanticSlot
+    || payload.semanticSlot
     || 'fact'
   ).toLowerCase();
   const normalizedFieldKey = fieldKey === 'like'
@@ -142,26 +144,30 @@ function createNodeFromEvent(event) {
     source: normalizeText(event.source),
     sourceKind: normalizeText(event.sourceKind || event.source),
     status: normalizeText(event.status || (event.type === 'memory_candidate_extracted' ? 'candidate' : 'active')).toLowerCase(),
-    type: normalizeText(event.payload?.type || event.memoryKind || 'fact').toLowerCase() || 'fact',
-    memoryKind: normalizeText(event.memoryKind || event.payload?.memoryKind).toLowerCase(),
+    type: normalizeText(payload.type || event.memoryKind || 'fact').toLowerCase() || 'fact',
+    memoryKind: normalizeText(event.memoryKind || payload.memoryKind).toLowerCase(),
     fieldKey: normalizedFieldKey,
-    semanticSlot: normalizeText(event.semanticSlot || event.payload?.semanticSlot || normalizedFieldKey).toLowerCase(),
-    conflictKey: normalizeText(event.conflictKey || event.payload?.conflictKey),
+    semanticSlot: normalizeText(event.semanticSlot || payload.semanticSlot || normalizedFieldKey).toLowerCase(),
+    conflictKey: normalizeText(event.conflictKey || payload.conflictKey),
     canonicalKey: normalizeText(event.canonicalKey || canonicalizeText(text)).toLowerCase(),
     text,
-    confidence: Number(event.confidence || event.payload?.confidence || 0) || 0,
-    importance: Number(event.importance || event.payload?.importance || 0) || 0,
-    evidenceCount: Math.max(1, Number(event.evidenceCount || event.payload?.evidenceCount || 1) || 1),
+    confidence: Number(event.confidence || payload.confidence || 0) || 0,
+    importance: Number(event.importance || payload.importance || 0) || 0,
+    evidenceCount: Math.max(1, Number(event.evidenceCount || payload.evidenceCount || 1) || 1),
     evidenceTier: 'weak',
     stabilityScore: 0,
     suppressedBy: '',
+    notRecallable: isMemoryNotRecallable(event),
+    recallVerification: payload.recallVerification && typeof payload.recallVerification === 'object'
+      ? payload.recallVerification
+      : null,
     participants: Array.isArray(event.participants) ? event.participants : [],
     entities: Array.isArray(event.entities) ? event.entities : [],
     relations: Array.isArray(event.relations) ? event.relations : [],
-    taskType: normalizeText(event.taskType || event.payload?.taskType),
-    extractionClass: normalizeText(event.payload?.extractionClass || event.payload?.classification || event.extractionClass).toLowerCase(),
-    toolName: normalizeText(event.toolName || event.payload?.toolName),
-    agentName: normalizeText(event.agentName || event.payload?.agentName),
+    taskType: normalizeText(event.taskType || payload.taskType),
+    extractionClass: normalizeText(payload.extractionClass || payload.classification || event.extractionClass).toLowerCase(),
+    toolName: normalizeText(event.toolName || payload.toolName),
+    agentName: normalizeText(event.agentName || payload.agentName),
     updatedAt: Number(event.ts || 0) || 0,
     createdAt: Number(event.ts || 0) || 0
   };
@@ -805,7 +811,11 @@ function materializeMemoryViews(options = {}) {
         confidence: Number(event.confidence || 0) || 0.92,
         importance: Number(event.importance || 0) || (rollupLevel === 'monthly' ? 1.2 : 1.0),
         evidenceCount: Math.max(1, Number(event.evidenceCount || payload.evidenceCount || 1) || 1),
-        updatedAt: Number(event.ts || 0) || 0
+        updatedAt: Number(event.ts || 0) || 0,
+        notRecallable: isMemoryNotRecallable(event),
+        recallVerification: payload.recallVerification && typeof payload.recallVerification === 'object'
+          ? payload.recallVerification
+          : null
       };
       if (item.text) target.items.push(item);
     }
@@ -831,7 +841,13 @@ function materializeMemoryViews(options = {}) {
         : 0;
     }
   }
-  const activeNodes = nodes.filter((item) => item.status !== 'archived');
+  const activeNodes = nodes.filter((item) => item.status !== 'archived' && !isMemoryNotRecallable(item));
+  const hiddenRecallNodes = nodes
+    .filter((item) => item.status !== 'archived' && isMemoryNotRecallable(item))
+    .map((item) => ({
+      ...item,
+      suppressedBy: item.suppressedBy || 'not_recallable'
+    }));
   const winners = new Map();
   const suppressed = [];
   for (const node of activeNodes.slice().sort((a, b) => {
@@ -857,6 +873,7 @@ function materializeMemoryViews(options = {}) {
   }
 
   const resolvedNodes = Array.from(winners.values());
+  const outputResolvedNodes = resolvedNodes.concat(hiddenRecallNodes);
   const profileConflictResolution = resolveProfileNodeConflicts(resolvedNodes);
   const profileNodes = profileConflictResolution.selected;
   const profileConflicts = profileConflictResolution.conflicts;
@@ -978,9 +995,9 @@ function materializeMemoryViews(options = {}) {
   const outputNodes = incrementalMode
     ? [
         ...loadMemoryNodes().filter((node) => !eventMatchesDirtyScopes(node, dirtyScopes)),
-        ...resolvedNodes
+        ...outputResolvedNodes
       ]
-    : resolvedNodes;
+    : outputResolvedNodes;
 
   atomicWriteJson(config.MEMORY_V3_SESSION_PROJECTION_FILE, outputSessionProjection);
   atomicWriteJson(config.MEMORY_V3_PROFILE_PROJECTION_FILE, outputProfileProjection);
@@ -1027,7 +1044,7 @@ function materializeMemoryViews(options = {}) {
 
 function buildLanceDbSyncPlan(nodes = [], options = {}) {
   const activeNodes = (Array.isArray(nodes) ? nodes : [])
-    .filter((node) => node && normalizeText(node.status).toLowerCase() !== 'archived');
+    .filter((node) => node && normalizeText(node.status).toLowerCase() !== 'archived' && !isMemoryNotRecallable(node));
   const readyNodeIds = new Set();
   try {
     const { loadEmbeddingIndex } = require('./embeddingIndex');

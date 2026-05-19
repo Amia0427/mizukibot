@@ -21,6 +21,10 @@ function getToolSchemas() {
 const { postWithRetry } = require('../httpClient');
 const { extractMessageContent } = require('../parser');
 
+function getMainReplyDefaultMaxTokens() {
+  return Math.max(64, Number(config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192) || 8192);
+}
+
 const { chatHistory, shortTermMemory, addProfileItem, buildReplyStylePolicy } = require('../../utils/memory');
 const { buildMemoryContext, buildMemoryContextAsync } = require('../../utils/memoryContext');
 const { HUMANIZER_SYSTEM_PROMPT } = require('../../utils/humanizer');
@@ -118,7 +122,7 @@ function createGraphModelClient({ apiBaseUrl, apiKey, model, temperature, topP, 
             messages,
             tools: Array.isArray(options.tools) ? options.tools : [],
             tool_choice: options.tool_choice,
-            max_tokens: Math.max(64, Number(config.AI_MAX_TOKENS) || 2500),
+            max_tokens: Math.max(64, Number(config.AI_MAX_TOKENS) || getMainReplyDefaultMaxTokens()),
             stream: false
           },
           retries,

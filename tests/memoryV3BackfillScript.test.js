@@ -70,18 +70,26 @@ httpClient.postWithRetry = async () => {
   };
 };
 
-const { runBackfill, syncAfterBackfill } = require('../scripts/backfill-memory-v3-embeddings');
+const { checkpointMatchesSource, runBackfill, syncAfterBackfill } = require('../scripts/backfill-memory-v3-embeddings');
 const { clearEmbeddingIndexCache, loadEmbeddingIndex } = require('../utils/memory-v3/embeddingIndex');
 const { loadWorldbookEmbeddingIndex } = require('../utils/personaWorldbookSearch');
 
 module.exports = runBackfill({ dryRun: true, source: 'all', limit: 3 }).then((dryRun) => {
+  assert.strictEqual(checkpointMatchesSource({
+    args: { source: 'journal' },
+    pendingSteps: [{ kind: 'memory', source: 'all' }]
+  }, 'journal', [{ kind: 'memory', source: 'all' }]), false);
+  assert.strictEqual(checkpointMatchesSource({
+    args: { source: 'journal' },
+    pendingSteps: [{ kind: 'memory', source: 'journal' }]
+  }, 'journal', [{ kind: 'memory', source: 'journal' }]), true);
   assert.strictEqual(dryRun.ok, true);
   assert.strictEqual(dryRun.dryRun, true);
   assert.ok(!dryRun.checkpoint?.written, 'dry-run backfill must not write checkpoint state');
   assert.ok(dryRun.considered >= 2);
   assert.ok(dryRun.failureBreakdown);
   assert.strictEqual(loadEmbeddingIndex().rows.length, 0);
-  return runBackfill({ dryRun: false, source: 'all', limit: 3, forceStale: true });
+  return runBackfill({ dryRun: false, source: 'all', limit: 3, forceStale: true, maxBatches: 2 });
 }).then((result) => {
   assert.strictEqual(result.ok, true);
   assert.ok(result.embedded >= 2);
@@ -146,6 +154,97 @@ module.exports = runBackfill({ dryRun: true, source: 'all', limit: 3 }).then((dr
   assert.strictEqual(syncSummary.coverage.memory.readyButNotSynced, 0);
   assert.strictEqual(syncSummary.beforeCoverage.memory.readyButNotSynced, 1);
   assert.strictEqual(syncSummary.incrementalCoverage.memory.readyButNotSynced, 1);
+  assert.strictEqual(syncSummary.healthGate.canBackfill, true);
+  const gateCheckpoint = path.join(tempRoot, 'gate-checkpoint.json');
+  let syncCalls = 0;
+  return runBackfill({
+    dryRun: false,
+    source: 'memory',
+    limit: 1,
+    syncAfter: true,
+    checkpointFile: gateCheckpoint
+  }, {
+    getMemoryUsage: () => ({ rss: 120 * 1024 * 1024 }),
+    backfillMissingEmbeddings: async () => ({
+      ok: true,
+      source: 'memory',
+      considered: 1,
+      readyBefore: 0,
+      embedded: 1,
+      failed: 0,
+      failureBreakdown: {},
+      remaining: 5
+    }),
+    syncAfterBackfill: async () => {
+      syncCalls += 1;
+      return {
+        coverage: { memory: { readyButNotSynced: 1, staleTableRows: 0 }, worldbook: { readyButNotSynced: 0, staleTableRows: 0 } },
+        healthGate: {
+          canBackfill: false,
+          mustReconcileFirst: true,
+          readyButNotSynced: 1,
+          staleTableRows: 0,
+          nextSafeCommand: 'node scripts/repair-memory-vector-index.js --apply --compact'
+        },
+        writes: []
+      };
+    }
+  }).then((gateResult) => {
+    assert.strictEqual(gateResult.ok, false);
+    assert.strictEqual(gateResult.stoppedBy, 'post_sync_health_gate');
+    assert.strictEqual(syncCalls, 1);
+    assert.strictEqual(gateResult.checkpoint?.written, true);
+    assert.strictEqual(JSON.parse(fs.readFileSync(gateCheckpoint, 'utf8')).reason, 'post_sync_health_gate');
+  });
+}).then(() => {
+  const maxCheckpoint = path.join(tempRoot, 'max-batches-checkpoint.json');
+  let backfillCalls = 0;
+  let syncCalls = 0;
+  return runBackfill({
+    dryRun: false,
+    source: 'memory',
+    limit: 1,
+    syncAfter: true,
+    maxBatches: 2,
+    checkpointFile: maxCheckpoint
+  }, {
+    getMemoryUsage: () => ({ rss: 120 * 1024 * 1024 }),
+    backfillMissingEmbeddings: async () => {
+      backfillCalls += 1;
+      return {
+        ok: true,
+        source: 'memory',
+        considered: 1,
+        readyBefore: backfillCalls - 1,
+        embedded: 1,
+        failed: 0,
+        failureBreakdown: {},
+        remaining: 5 - backfillCalls
+      };
+    },
+    syncAfterBackfill: async () => {
+      syncCalls += 1;
+      return {
+        coverage: { memory: { readyButNotSynced: 0, staleTableRows: 0 }, worldbook: { readyButNotSynced: 0, staleTableRows: 0 } },
+        healthGate: {
+          canBackfill: true,
+          mustReconcileFirst: false,
+          readyButNotSynced: 0,
+          staleTableRows: 0,
+          nextSafeCommand: 'node scripts/backfill-memory-v3-embeddings.js --resume --source journal --limit 100 --sync-after'
+        },
+        writes: []
+      };
+    }
+  }).then((maxResult) => {
+    assert.strictEqual(maxResult.ok, true);
+    assert.strictEqual(maxResult.stoppedBy, 'max_batches');
+    assert.strictEqual(maxResult.batchesRun, 2);
+    assert.strictEqual(backfillCalls, 2);
+    assert.strictEqual(syncCalls, 2);
+    assert.strictEqual(maxResult.syncRuns.length, 2);
+    assert.strictEqual(JSON.parse(fs.readFileSync(maxCheckpoint, 'utf8')).reason, 'max_batches');
+  });
 }).then(() => {
   console.log('memoryV3BackfillScript.test.js passed');
 }).catch((error) => {

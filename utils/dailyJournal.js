@@ -1186,12 +1186,54 @@ function normalizeContinuitySnapshot(snapshot = {}) {
   };
 }
 
+function normalizeText(value = '') {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeStringArray(values = [], limit = 16) {
+  const list = Array.isArray(values) ? values : [values];
+  const out = [];
+  const seen = new Set();
+  for (const raw of list) {
+    const value = normalizeText(raw);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+    if (out.length >= Math.max(1, Number(limit) || 1)) break;
+  }
+  return out;
+}
+
+function normalizeEvidenceSidecarItems(values = []) {
+  return (Array.isArray(values) ? values : [])
+    .map((item) => {
+      const value = item && typeof item === 'object' ? item : {};
+      return {
+        turnId: normalizeText(value.turnId || value.turn_id),
+        userText: strictClampText(value.userText || value.user_text || value.question || '', 500),
+        assistantText: strictClampText(value.assistantText || value.assistant_text || value.reply || value.finalReply || '', 500),
+        sourceSessionId: normalizeText(value.sourceSessionId || value.source_session_id || value.sessionId || value.session_id)
+      };
+    })
+    .filter((item) => item.turnId || item.userText || item.assistantText)
+    .slice(0, 16);
+}
+
 function buildEntrySidecarRecord(record = {}, options = {}, day = '') {
   const routeMeta = options.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const turnIds = normalizeStringArray(options.turnIds || options.turn_ids, 32);
+  const turnId = normalizeText(options.turnId || options.turn_id || turnIds[turnIds.length - 1]);
+  const evidence = normalizeEvidenceSidecarItems(options.evidence);
   return {
     ts: String(record.ts || new Date().toISOString()),
     day: String(day || '').trim(),
     sessionKey: String(options.sessionKey || '').trim(),
+    sourceSessionId: normalizeText(options.sourceSessionId || options.source_session_id || options.sessionId || routeMeta.sessionId || routeMeta.session_id),
+    jobId: normalizeText(options.jobId || options.postReplyJobId || options.post_reply_job_id),
+    postReplyJobId: normalizeText(options.postReplyJobId || options.post_reply_job_id || options.jobId),
+    turnId,
+    turnIds,
+    evidence,
     groupId: String(options.groupId || routeMeta.groupId || routeMeta.group_id || '').trim(),
     channelId: String(options.channelId || routeMeta.channelId || routeMeta.channel_id || '').trim(),
     routePolicyKey: String(options.routePolicyKey || '').trim(),
@@ -1470,7 +1512,7 @@ async function appendDailyJournalEntry(userId, question, reply, userInfo = {}, o
   const currentEntries = parseJournalEntries(safeReadText(filePath, ''));
   currentEntries.push(record);
   atomicWriteText(filePath, `${formatJournalEntries(currentEntries)}\n`);
-  appendJsonLine(getEntrySidecarFilePath(uid, day), buildEntrySidecarRecord(record, options, day));
+  appendJsonLine(getEntrySidecarFilePath(uid, day), buildEntrySidecarRecord(record, options, day), { flushNow: true });
   updateJournalIndex(uid, (index) => ({
     ...index,
     summaryDays: index.summaryDays.filter((item) => item !== day)

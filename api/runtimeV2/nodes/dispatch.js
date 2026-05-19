@@ -80,6 +80,17 @@ function createDispatchNode(deps = {}) {
     const request = normalizeObject(state.request, {});
     const dispatchStartedAt = Date.now();
     const allSteps = normalizeArray(state.plan?.steps).map((step) => ({ ...step }));
+    const normalizeStepDependencies = (step = {}) => {
+      const deps = normalizeArray(step.dependsOn || step.depends_on || step.dependencies)
+        .map((item) => String(typeof item === 'string' ? item : item?.id || item?.step_id || '').trim())
+        .filter(Boolean);
+      const runtimeSourceStepId = String(step.runtimeBinding?.sourceStepId || '').trim();
+      return Array.from(new Set(runtimeSourceStepId ? deps.concat([runtimeSourceStepId]) : deps));
+    };
+    const withImplicitDependencies = (step = {}) => ({
+      ...step,
+      dependsOn: normalizeStepDependencies(step)
+    });
     const resolveRuntimeBoundStep = (step, currentSteps = allSteps) => {
       const binding = normalizeObject(step?.runtimeBinding, null);
       if (!binding) return { ...step };
@@ -152,11 +163,9 @@ function createDispatchNode(deps = {}) {
     const selectedSteps = [];
     const selectedIds = new Set();
     for (const step of selectedBase) {
-      const deps = normalizeArray(step.dependsOn || step.depends_on || step.dependencies)
-        .map((item) => String(typeof item === 'string' ? item : item?.id || item?.step_id || '').trim())
-        .filter(Boolean);
+      const deps = normalizeStepDependencies(step);
       if (!deps.every((dep) => dependencyCompletedIds.has(dep) || selectedIds.has(dep))) continue;
-      selectedSteps.push(step);
+      selectedSteps.push(withImplicitDependencies(step));
       const stepId = String(step.id || '').trim();
       if (stepId) selectedIds.add(stepId);
       if (selectedSteps.length >= Math.max(1, Number(config.PLAN_MAX_STEPS) || 5)) break;
@@ -204,7 +213,7 @@ function createDispatchNode(deps = {}) {
         memoryCliTurn: state.execution?.memoryCliTurn || null
       };
     const preflightDurationMs = Math.max(0, Date.now() - preflightStartedAt);
-    const hasExplicitDependencies = selectedSteps.some((step) => normalizeArray(step.dependsOn).length > 0);
+    const hasExplicitDependencies = selectedSteps.some((step) => normalizeStepDependencies(step).length > 0);
     const directChatBatchExecution = isDirectChatRequest(request) && !hasExplicitDependencies;
     const directChatBatches = directChatBatchExecution
       ? buildDirectChatExecutionBatches(selectedSteps, (step) => step)
@@ -269,6 +278,23 @@ function createDispatchNode(deps = {}) {
         toolResults,
         memoryCliTurn: nextMemoryCliTurn
       }
+    });
+    const isRuntimeBindingUnresolved = (step = {}) => (
+      String(step.blockingReason || '').trim().startsWith('runtime_binding_unresolved:')
+    );
+    const buildRuntimeBindingFailureEnvelope = (step = {}) => ({
+      tool_call_id: `${step.id}_binding_${Date.now()}`,
+      step_id: String(step.id || '').trim(),
+      tool_name: String(step.tool || '').trim(),
+      args_hash: stableHash(step.inputs || {}),
+      args: step.inputs || {},
+      status: 'failed',
+      result: `Tool error: ${step.blockingReason}`,
+      side_effect: false,
+      retryable: true,
+      attempt: Number(step.attempts || 0) + 1,
+      unsatisfiedRequirement: step.blockingReason,
+      runtimeBinding: step.runtimeBinding
     });
 
     const persistDispatchCheckpoint = (pendingInterrupt) => {
@@ -346,21 +372,8 @@ function createDispatchNode(deps = {}) {
       if (parallelExecution) continue;
 
       const preparedStep = resolveRuntimeBoundStep(step, nextSteps);
-      if (String(preparedStep.blockingReason || '').trim().startsWith('runtime_binding_unresolved:')) {
-        applyEnvelope({
-          tool_call_id: `${preparedStep.id}_binding_${Date.now()}`,
-          step_id: String(preparedStep.id || '').trim(),
-          tool_name: String(preparedStep.tool || '').trim(),
-          args_hash: stableHash(preparedStep.inputs || {}),
-          args: preparedStep.inputs || {},
-          status: 'failed',
-          result: `Tool error: ${preparedStep.blockingReason}`,
-          side_effect: false,
-          retryable: true,
-          attempt: Number(preparedStep.attempts || 0) + 1,
-          unsatisfiedRequirement: preparedStep.blockingReason,
-          runtimeBinding: preparedStep.runtimeBinding
-        });
+      if (isRuntimeBindingUnresolved(preparedStep)) {
+        applyEnvelope(buildRuntimeBindingFailureEnvelope(preparedStep));
         continue;
       }
 
@@ -386,21 +399,8 @@ function createDispatchNode(deps = {}) {
               ...(String(batch.batchId || '').trim() ? { batchId: String(batch.batchId).trim() } : {}),
               ...(Number.isFinite(Number(batch.batchIndex)) ? { batchIndex: Number(batch.batchIndex) } : {})
             }, nextSteps);
-            if (String(runnableStep.blockingReason || '').trim().startsWith('runtime_binding_unresolved:')) {
-              applyEnvelope({
-                tool_call_id: `${runnableStep.id}_binding_${Date.now()}`,
-                step_id: String(runnableStep.id || '').trim(),
-                tool_name: String(runnableStep.tool || '').trim(),
-                args_hash: stableHash(runnableStep.inputs || {}),
-                args: runnableStep.inputs || {},
-                status: 'failed',
-                result: `Tool error: ${runnableStep.blockingReason}`,
-                side_effect: false,
-                retryable: true,
-                attempt: Number(runnableStep.attempts || 0) + 1,
-                unsatisfiedRequirement: runnableStep.blockingReason,
-                runtimeBinding: runnableStep.runtimeBinding
-              });
+            if (isRuntimeBindingUnresolved(runnableStep)) {
+              applyEnvelope(buildRuntimeBindingFailureEnvelope(runnableStep));
               continue;
             }
             if (isSideEffectPolicy(getPolicy(step.tool))) {
@@ -418,11 +418,15 @@ function createDispatchNode(deps = {}) {
           }
           continue;
         }
-        const runnableBatchItems = batchItems.map((step) => resolveRuntimeBoundStep({
+        const resolvedBatchItems = batchItems.map((step) => resolveRuntimeBoundStep({
           ...step,
           ...(String(batch.batchId || '').trim() ? { batchId: String(batch.batchId).trim() } : {}),
           ...(Number.isFinite(Number(batch.batchIndex)) ? { batchIndex: Number(batch.batchIndex) } : {})
-        }, nextSteps)).filter((step) => !String(step.blockingReason || '').trim().startsWith('runtime_binding_unresolved:'));
+        }, nextSteps));
+        for (const step of resolvedBatchItems.filter(isRuntimeBindingUnresolved)) {
+          applyEnvelope(buildRuntimeBindingFailureEnvelope(step));
+        }
+        const runnableBatchItems = resolvedBatchItems.filter((step) => !isRuntimeBindingUnresolved(step));
         const sideEffectSteps = runnableBatchItems.filter((step) => isSideEffectPolicy(getPolicy(step.tool)));
         if (sideEffectSteps.length > 0) {
           const preEvents = sideEffectSteps.map((step) => createEvent('checkpoint', {
@@ -448,9 +452,12 @@ function createDispatchNode(deps = {}) {
       }
     } else if (parallelExecution && selectedSteps.length > 0) {
       for (const batch of scheduledBatches) {
-        const runnableBatchItems = normalizeArray(batch.items)
-          .map((step) => resolveRuntimeBoundStep(step, nextSteps))
-          .filter((step) => !String(step.blockingReason || '').trim().startsWith('runtime_binding_unresolved:'));
+        const resolvedBatchItems = normalizeArray(batch.items)
+          .map((step) => resolveRuntimeBoundStep(step, nextSteps));
+        for (const step of resolvedBatchItems.filter(isRuntimeBindingUnresolved)) {
+          applyEnvelope(buildRuntimeBindingFailureEnvelope(step));
+        }
+        const runnableBatchItems = resolvedBatchItems.filter((step) => !isRuntimeBindingUnresolved(step));
         if (runnableBatchItems.length === 0) continue;
         for (const step of runnableBatchItems.filter((item) => isSideEffectPolicy(getPolicy(item.tool)))) {
           checkpointBeforeSideEffect(step);

@@ -45,12 +45,17 @@ function normalizeMemoryItem(raw) {
     type,
     canonicalText: raw.canonicalText || raw.canonical_text || canonicalizeText(text)
   });
-  const status = shouldStartAsCandidate(type, memoryKind, sourceKind, raw.status, confidence)
+  const rawStatus = normalizeStatus(raw.status, '');
+  const status = rawStatus === STATUS_ARCHIVED
+    ? STATUS_ARCHIVED
+    : shouldStartAsCandidate(type, memoryKind, sourceKind, raw.status, confidence)
     ? STATUS_CANDIDATE
     : normalizeStatus(raw.status, STATUS_ACTIVE);
   const evidenceCount = Math.max(1, Math.floor(Number(raw.evidenceCount ?? raw.evidence_count ?? raw.meta?.evidenceCount ?? 1) || 1));
   const lastConfirmedAt = Number(raw.lastConfirmedAt ?? raw.last_confirmed_at ?? raw.meta?.lastConfirmedAt ?? updatedAt) || updatedAt;
   const sourceSessionId = sanitizeOptionalText(raw.sourceSessionId ?? raw.source_session_id ?? raw.meta?.sourceSessionId ?? raw.meta?.source_session_id ?? scope.sessionId);
+  const turnId = sanitizeOptionalText(raw.turnId ?? raw.turn_id ?? raw.meta?.turnId ?? raw.meta?.turn_id ?? raw.meta?.learningDecision?.turnId);
+  const turnIds = normalizeStringArray(raw.turnIds ?? raw.turn_ids ?? raw.meta?.turnIds ?? raw.meta?.turn_ids ?? raw.meta?.learningDecision?.turnIds);
   const rollupLevel = normalizeEpisodeRollupLevel(raw.rollupLevel ?? raw.rollup_level ?? raw.meta?.rollupLevel ?? raw.meta?.rollup_level);
   const episodeDay = normalizeEpisodeDay(raw.episodeDay ?? raw.episode_day ?? raw.meta?.episodeDay ?? raw.meta?.episode_day);
   const rawMeta = raw.meta && typeof raw.meta === 'object' ? raw.meta : {};
@@ -64,6 +69,8 @@ function normalizeMemoryItem(raw) {
     ...(entities.length > 0 ? { entities } : {}),
     ...(relations.length > 0 ? { relations } : {}),
     ...(sourceSessionId ? { sourceSessionId } : {}),
+    ...(turnId ? { turnId } : {}),
+    ...(turnIds.length > 0 ? { turnIds } : {}),
     ...(rollupLevel ? { rollupLevel } : {}),
     ...(episodeDay ? { episodeDay } : {})
   };
@@ -104,6 +111,8 @@ function normalizeMemoryItem(raw) {
     toolName: scope.toolName,
     channelId: scope.channelId,
     sourceSessionId,
+    turnId,
+    turnIds,
     participants,
     entities,
     relations,

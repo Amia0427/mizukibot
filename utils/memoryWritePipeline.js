@@ -19,6 +19,21 @@ function normalizeType(value = '') {
   return String(value || 'fact').trim().toLowerCase() || 'fact';
 }
 
+function normalizeList(values = [], limit = 16) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of Array.isArray(values) ? values : []) {
+    const value = normalizeText(raw);
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(value);
+    if (out.length >= Math.max(1, Number(limit) || 1)) break;
+  }
+  return out;
+}
+
 function clamp01(value, fallback = 0) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -79,6 +94,85 @@ function candidateText(candidate = {}) {
 
 function getMemoryKind(candidate = {}) {
   return normalizeText(candidate.memoryKind || candidate.meta?.memoryKind).toLowerCase();
+}
+
+function getSourceKind(candidate = {}) {
+  return normalizeText(candidate.sourceKind || candidate.meta?.sourceKind || candidate.source).toLowerCase();
+}
+
+function getFieldKey(candidate = {}) {
+  return normalizeText(candidate.semanticSlot || candidate.fieldKey || candidate.meta?.fieldKey).toLowerCase();
+}
+
+function isHighRiskProfileField(candidate = {}) {
+  const type = normalizeType(candidate.type || candidate.memoryKind);
+  const fieldKey = getFieldKey(candidate);
+  if (getSourceKind(candidate) === 'explicit') return false;
+  if (['identity', 'like', 'dislike', 'personality', 'hobby', 'goal', 'summary', 'impression'].includes(type)) return true;
+  if (['identity', 'personality', 'hobby', 'goal', 'persona_summary_support', 'persona_impression_support', 'preference_like', 'preference_dislike'].includes(fieldKey)) return true;
+  return /^relationship_/.test(fieldKey);
+}
+
+function shouldForceCandidateOnly(candidate = {}) {
+  return isHighRiskProfileField(candidate);
+}
+
+function getLearningRef(candidate = {}) {
+  const meta = candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {};
+  const existing = meta.learningDecision && typeof meta.learningDecision === 'object' ? meta.learningDecision : {};
+  const turnIds = normalizeList(existing.turnIds || meta.turnIds || candidate.turnIds || [], 16);
+  return {
+    jobId: normalizeText(existing.jobId || existing.postReplyJobId || meta.jobId || meta.postReplyJobId || candidate.jobId),
+    postReplyJobId: normalizeText(existing.postReplyJobId || existing.jobId || meta.postReplyJobId || meta.jobId || candidate.postReplyJobId),
+    turnId: normalizeText(existing.turnId || meta.turnId || candidate.turnId || turnIds[turnIds.length - 1]),
+    turnIds,
+    sourceSessionId: normalizeText(existing.sourceSessionId || meta.sourceSessionId || candidate.sourceSessionId),
+    fieldKey: normalizeText(existing.fieldKey || meta.fieldKey || getFieldKey(candidate)),
+    extractionClass: normalizeText(existing.extractionClass || meta.extractionClass),
+    phase: normalizeText(existing.phase || meta.phase)
+  };
+}
+
+function buildLearningDecision(candidate = {}, patch = {}) {
+  const meta = candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {};
+  const existing = meta.learningDecision && typeof meta.learningDecision === 'object' ? meta.learningDecision : {};
+  const refs = getLearningRef(candidate);
+  const status = normalizeText(patch.status || candidate.status || existing.status || 'active').toLowerCase() || 'active';
+  const riskReasons = normalizeList(patch.riskReasons || existing.riskReasons || [], 16);
+  return {
+    ...existing,
+    ...refs,
+    status,
+    reason: normalizeText(patch.reason || existing.reason || 'accepted_by_memory_write_pipeline'),
+    validationReason: normalizeText(patch.validationReason || existing.validationReason || ''),
+    candidateOnly: Boolean(patch.candidateOnly ?? existing.candidateOnly ?? status === 'candidate'),
+    riskReasons,
+    riskLevel: normalizeText(patch.riskLevel || existing.riskLevel || ''),
+    reviewDecision: normalizeText(patch.reviewDecision || existing.reviewDecision || ''),
+    rerankDecision: normalizeText(patch.rerankDecision || existing.rerankDecision || meta.writeRerank?.decision || ''),
+    duplicateId: normalizeText(patch.duplicateId || existing.duplicateId || ''),
+    conflictId: normalizeText(patch.conflictId || existing.conflictId || ''),
+    sourceKind: normalizeText(existing.sourceKind || getSourceKind(candidate) || 'extractor'),
+    type: normalizeType(candidate.type || candidate.memoryKind)
+  };
+}
+
+function mergeLearningDecisionMeta(candidate = {}, patch = {}) {
+  return {
+    ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
+    learningDecision: buildLearningDecision(candidate, patch)
+  };
+}
+
+function scopeKeyForBatch(candidate = {}) {
+  const scope = normalizeScope(candidate);
+  return [
+    scope.userId || 'nouser',
+    scope.groupId || 'nogroup',
+    scope.scopeType || 'personal',
+    scope.routePolicyKey || '',
+    scope.topRouteType || ''
+  ].join('|');
 }
 
 function hasInstructionPollution(text = '') {
@@ -195,6 +289,7 @@ function validateMemoryWrite(candidate = {}, options = {}) {
   if (learningGate.blocked) return { ok: false, reason: learningGate.reason || 'blocked_by_security' };
   const duplicate = findExistingMemory(candidate);
   if (duplicate) return { ok: false, reason: 'duplicate', duplicateId: duplicate.id };
+  const forceCandidateOnly = shouldForceCandidateOnly(candidate);
   const conflict = findConflict(candidate);
   if (conflict) {
     return {
@@ -205,7 +300,13 @@ function validateMemoryWrite(candidate = {}, options = {}) {
         status: 'candidate',
         supersedes: [conflict.id],
         meta: {
-          ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
+          ...mergeLearningDecisionMeta(candidate, {
+            status: 'candidate',
+            reason: 'conflicts_with_existing_memory',
+            validationReason: 'conflict_candidate',
+            candidateOnly: true,
+            conflictId: conflict.id
+          }),
           traceReason: 'conflicts_with_existing_memory',
           conflictCandidate: {
             existingId: conflict.id,
@@ -216,17 +317,105 @@ function validateMemoryWrite(candidate = {}, options = {}) {
       }
     };
   }
+  if (forceCandidateOnly) {
+    return {
+      ok: true,
+      reason: 'candidate_only_profile_guard',
+      patch: {
+        status: 'candidate',
+        meta: {
+          ...mergeLearningDecisionMeta(candidate, {
+            status: 'candidate',
+            reason: 'high_risk_profile_candidate_only',
+            validationReason: 'candidate_only_profile_guard',
+            candidateOnly: true
+          }),
+          traceReason: candidate.meta?.traceReason || 'candidate_only_profile_guard'
+        }
+      }
+    };
+  }
   return {
     ok: true,
     reason: 'accepted',
     patch: {
       status: candidate.status || undefined,
       meta: {
-        ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
+        ...mergeLearningDecisionMeta(candidate, {
+          status: candidate.status || 'active',
+          reason: 'accepted_by_memory_write_pipeline',
+          validationReason: 'accepted',
+          candidateOnly: normalizeText(candidate.status).toLowerCase() === 'candidate'
+        }),
         traceReason: candidate.meta?.traceReason || 'accepted_by_memory_write_pipeline'
       }
     }
   };
+}
+
+function applyBatchWriteGuards(candidates = []) {
+  const accepted = [];
+  const rejected = [];
+  const seenByFingerprint = new Map();
+  const conflictGroups = new Map();
+
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    const fp = fingerprintText(candidateText(candidate));
+    const duplicateKey = `${scopeKeyForBatch(candidate)}|${normalizeType(candidate.type || candidate.memoryKind)}|${fp}`;
+    if (fp && seenByFingerprint.has(duplicateKey)) {
+      rejected.push({
+        candidate: {
+          ...candidate,
+          meta: mergeLearningDecisionMeta(candidate, {
+            status: 'rejected',
+            reason: 'same_turn_duplicate',
+            validationReason: 'same_turn_duplicate',
+            duplicateId: seenByFingerprint.get(duplicateKey)
+          })
+        },
+        ok: false,
+        reason: 'same_turn_duplicate',
+        duplicateId: seenByFingerprint.get(duplicateKey)
+      });
+      continue;
+    }
+    if (fp) seenByFingerprint.set(duplicateKey, candidate.id || fp);
+    const conflictKey = normalizeText(candidate.conflictKey || candidate.meta?.conflictKey || '');
+    if (conflictKey) {
+      const key = `${scopeKeyForBatch(candidate)}|${conflictKey}`;
+      if (!conflictGroups.has(key)) conflictGroups.set(key, []);
+      conflictGroups.get(key).push(candidate);
+    }
+    accepted.push(candidate);
+  }
+
+  const candidateOnlyIds = new Set();
+  for (const group of conflictGroups.values()) {
+    const fingerprints = new Set(group.map((item) => `${normalizeType(item.type || item.memoryKind)}|${fingerprintText(candidateText(item))}`).filter(Boolean));
+    if (fingerprints.size <= 1) continue;
+    for (const item of group) {
+      if (item.id) candidateOnlyIds.add(String(item.id));
+    }
+  }
+
+  const guarded = accepted.map((candidate) => {
+    if (!candidateOnlyIds.has(String(candidate.id || ''))) return candidate;
+    return {
+      ...candidate,
+      status: 'candidate',
+      meta: {
+        ...mergeLearningDecisionMeta(candidate, {
+          status: 'candidate',
+          reason: 'same_batch_conflict_candidate',
+          validationReason: 'same_batch_conflict',
+          candidateOnly: true
+        }),
+        traceReason: candidate.meta?.traceReason || 'same_batch_conflict_candidate'
+      }
+    };
+  });
+
+  return { accepted: guarded, rejected };
 }
 
 function buildReviewPrompt(candidate = {}, risk = {}, context = {}) {
@@ -339,14 +528,26 @@ function buildWriteReviewMeta(review = {}, risk = {}, extra = {}) {
     riskLevel: risk.riskLevel || 'none',
     model: normalizeText(review.model || getMemoryModelName()),
     failedOpen: Boolean(extra.failedOpen),
+    failedClosed: Boolean(extra.failedClosed),
+    failedCandidate: Boolean(extra.failedCandidate),
+    failurePolicy: normalizeText(extra.failurePolicy || ''),
     error: normalizeText(extra.error || '')
   };
 }
 
 function applyWriteReviewDecision(candidate = {}, review = {}, risk = {}) {
   const decision = normalizeText(review.decision).toLowerCase();
+  const forceCandidateOnly = decision === 'accept' && shouldForceCandidateOnly(candidate);
+  const nextStatus = decision === 'candidate' || forceCandidateOnly ? 'candidate' : candidate.status || 'active';
   const meta = {
-    ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
+    ...mergeLearningDecisionMeta(candidate, {
+      status: nextStatus,
+      reason: forceCandidateOnly ? 'high_risk_profile_candidate_only' : (review.reason || `write_review_${decision || 'accept'}`),
+      reviewDecision: decision,
+      riskReasons: risk.riskReasons,
+      riskLevel: risk.riskLevel,
+      candidateOnly: forceCandidateOnly || decision === 'candidate' || normalizeText(candidate.status).toLowerCase() === 'candidate'
+    }),
     writeReview: buildWriteReviewMeta(review, risk)
   };
   if (decision === 'reject') {
@@ -372,27 +573,44 @@ function applyWriteReviewDecision(candidate = {}, review = {}, risk = {}) {
     accepted: true,
     candidate: {
       ...candidate,
+      ...(forceCandidateOnly ? { status: 'candidate' } : {}),
       meta
     }
   };
 }
 
 function applyWriteReviewFailure(candidate = {}, error = null, risk = {}, options = {}) {
-  const failOpen = options.reviewFailOpen ?? config.MEMORY_WRITE_REVIEW_FAIL_OPEN;
+  const highRisk = risk.severe || isHighRiskProfileField(candidate);
+  const configuredPolicy = normalizeText(options.reviewFailurePolicy || config.MEMORY_WRITE_REVIEW_FAILURE_POLICY).toLowerCase();
+  const legacyFailOpen = options.reviewFailOpen ?? config.MEMORY_WRITE_REVIEW_FAIL_OPEN;
+  const failurePolicy = configuredPolicy || (legacyFailOpen && !highRisk ? 'fail_open' : 'fail_candidate');
+  const failOpen = failurePolicy === 'fail_open';
+  const failClosed = failurePolicy === 'fail_closed';
+  const failCandidate = !failClosed && !failOpen;
   const review = {
-    decision: failOpen ? 'accept' : (risk.severe ? 'reject' : 'candidate'),
+    decision: failOpen ? 'accept' : (risk.severe || failClosed ? 'reject' : 'candidate'),
     reason: 'write_review_failed',
     riskTags: [],
     model: getMemoryModelName()
   };
   const meta = {
-    ...(candidate.meta && typeof candidate.meta === 'object' ? candidate.meta : {}),
+    ...mergeLearningDecisionMeta(candidate, {
+      status: review.decision === 'candidate' ? 'candidate' : candidate.status || 'active',
+      reason: 'write_review_failed',
+      reviewDecision: review.decision,
+      riskReasons: risk.riskReasons,
+      riskLevel: risk.riskLevel,
+      candidateOnly: review.decision === 'candidate' || normalizeText(candidate.status).toLowerCase() === 'candidate'
+    }),
     writeReview: buildWriteReviewMeta(review, risk, {
       failedOpen: Boolean(failOpen),
+      failedClosed: Boolean(failClosed || risk.severe),
+      failedCandidate: Boolean(failCandidate && !risk.severe),
+      failurePolicy,
       error: error?.message || String(error || '')
     })
   };
-  if (risk.severe) {
+  if (risk.severe || failClosed) {
     return {
       accepted: false,
       candidate,
@@ -423,9 +641,20 @@ function applyWriteReviewFailure(candidate = {}, error = null, risk = {}, option
 async function reviewMemoryWriteCandidate(candidate = {}, context = {}) {
   const risk = classifyWriteRisk(candidate, context);
   if (!risk.shouldReview) {
+    const forceCandidateOnly = shouldForceCandidateOnly(candidate);
     return {
       accepted: true,
-      candidate,
+      candidate: {
+        ...candidate,
+        ...(forceCandidateOnly ? { status: 'candidate' } : {}),
+        meta: mergeLearningDecisionMeta(candidate, {
+          status: forceCandidateOnly ? 'candidate' : candidate.status || 'active',
+          reason: forceCandidateOnly ? 'high_risk_profile_candidate_only' : 'write_review_skipped_low_risk',
+          riskReasons: risk.riskReasons,
+          riskLevel: risk.riskLevel,
+          candidateOnly: forceCandidateOnly || normalizeText(candidate.status).toLowerCase() === 'candidate'
+        })
+      },
       skipped: true,
       risk
     };
@@ -440,11 +669,23 @@ async function reviewMemoryWriteCandidate(candidate = {}, context = {}) {
 
 function commitMemoryWrites(candidates = [], writer, options = {}) {
   const accepted = [];
-  const rejected = [];
-  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+  const batchGuard = applyBatchWriteGuards(candidates);
+  const rejected = [...batchGuard.rejected];
+  for (const candidate of batchGuard.accepted) {
     const validation = validateMemoryWrite(candidate, options);
     if (!validation.ok) {
-      rejected.push({ candidate, ...validation });
+      rejected.push({
+        candidate: {
+          ...candidate,
+          meta: mergeLearningDecisionMeta(candidate, {
+            status: 'rejected',
+            reason: validation.reason,
+            validationReason: validation.reason,
+            duplicateId: validation.duplicateId
+          })
+        },
+        ...validation
+      });
       continue;
     }
     accepted.push({
@@ -462,8 +703,11 @@ function commitMemoryWrites(candidates = [], writer, options = {}) {
 
 module.exports = {
   applyWriteReviewDecision,
+  applyBatchWriteGuards,
   classifyWriteRisk,
   fingerprintText,
+  isHighRiskProfileField,
+  mergeLearningDecisionMeta,
   proposeMemoryWrites,
   reviewMemoryWriteCandidate,
   validateMemoryWrite,

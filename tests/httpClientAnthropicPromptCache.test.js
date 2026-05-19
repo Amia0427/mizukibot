@@ -11,6 +11,10 @@ function clearProjectCache() {
   }
 }
 
+function contentParts(item = {}) {
+  return Array.isArray(item?.content) ? item.content : [];
+}
+
 module.exports = (async () => {
   const snapshot = { ...process.env };
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-anthropic-prompt-cache-'));
@@ -83,34 +87,32 @@ module.exports = (async () => {
       stream: false
     });
 
-    assert.strictEqual(prepared.provider, 'anthropic');
-    assert.ok(Array.isArray(prepared.requestBody.messages));
-    const dynamicContext = prepared.requestBody.messages.find((item) => (
-      item.role === 'assistant'
-      && item.content.some((block) => String(block.text || '').includes('[Affinity]'))
+    assert.strictEqual(prepared.provider, 'openai_compatible');
+    assert.strictEqual(prepared.requestUrl, 'https://example.com/v1/responses');
+    assert.ok(Array.isArray(prepared.requestBody.input));
+    const dynamicContext = prepared.requestBody.input.find((item) => (
+      item.role === 'system'
+      && contentParts(item).some((block) => String(block.text || '').includes('[Affinity]'))
     ));
-    const relationshipContext = prepared.requestBody.messages.find((item) => (
-      item.role === 'assistant'
-      && item.content.some((block) => String(block.text || '').includes('[Relationship]'))
+    const relationshipContext = prepared.requestBody.input.find((item) => (
+      item.role === 'system'
+      && contentParts(item).some((block) => String(block.text || '').includes('[Relationship]'))
     ));
-    const currentConversationContext = prepared.requestBody.messages.find((item) => (
-      item.role === 'assistant'
-      && item.content.some((block) => String(block.text || '').includes('[CurrentConversation]'))
+    const currentConversationContext = prepared.requestBody.input.find((item) => (
+      item.role === 'system'
+      && contentParts(item).some((block) => String(block.text || '').includes('[CurrentConversation]'))
     ));
-    const assistantContext = prepared.requestBody.messages.find((item) => (
+    const assistantContext = prepared.requestBody.input.find((item) => (
       item.role === 'assistant'
-      && item.content.some((block) => String(block.text || '').includes('[Context for assistant only]'))
+      && contentParts(item).some((block) => String(block.text || '').includes('[Context for assistant only]'))
     ));
     assert.ok(dynamicContext);
     assert.ok(relationshipContext);
     assert.ok(currentConversationContext);
     assert.ok(assistantContext);
     assert.ok(!prepared.requestBody.system);
-    assert.ok(dynamicContext.content.every((block) => !('cache_control' in block)));
-    assert.ok(relationshipContext.content.every((block) => !('cache_control' in block)));
-    assert.ok(currentConversationContext.content.every((block) => !('cache_control' in block)));
-    assert.ok(assistantContext.content.every((block) => !('cache_control' in block)));
-    assert.ok(!prepared.requestBody.messages.some((item) => item.content.some((block) => block.cache_control)));
+    assert.ok(!prepared.requestBody.messages);
+    assert.ok(prepared.requestBody.input.every((item) => contentParts(item).every((block) => !('cache_control' in block))));
     assert.strictEqual(prepared.requestHeaders, null);
 
     const preparedDynamicOnly = await httpClient.prepareRequest('https://example.com/v1/messages', {
@@ -132,7 +134,10 @@ module.exports = (async () => {
       stream: false
     });
     assert.ok(!preparedDynamicOnly.requestBody.system);
-    assert.ok(preparedDynamicOnly.requestBody.messages.every((item) => item.content.every((block) => !('cache_control' in block))));
+    assert.ok(preparedDynamicOnly.requestBody.input.every((item) => (
+      contentParts(item).length === 0
+      || contentParts(item).every((block) => !('cache_control' in block))
+    )));
     assert.strictEqual(preparedDynamicOnly.requestHeaders, null);
 
     const preparedStableSystem = await httpClient.prepareRequest('https://example.com/v1/messages', {
@@ -170,9 +175,8 @@ module.exports = (async () => {
       ],
       stream: false
     });
-    assert.strictEqual(preparedStableSystem.requestBody.system[0].cache_control.ttl, '5m');
-    assert.ok(preparedStableSystem.requestBody.messages.every((item) => item.content.every((block) => !('cache_control' in block))));
-    assert.ok(preparedStableSystem.requestBody.tools.some((tool) => tool.cache_control));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody.input[0].content[0], 'cache_control'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody.tools[0], 'cache_control'));
 
     let attemptCount = 0;
     let firstAttemptBody = null;
@@ -192,15 +196,10 @@ module.exports = (async () => {
       if (attemptCount === 1) {
         firstAttemptBody = body;
         firstAttemptHeaders = options.headers;
-        const error = new Error('unsupported prompt caching');
-        error.response = {
-          status: 400,
-          data: { error: { message: 'unsupported beta anthropic-beta prompt-caching-2024-07-31' } }
-        };
-        throw error;
+      } else {
+        secondAttemptBody = body;
+        secondAttemptHeaders = options.headers;
       }
-      secondAttemptBody = body;
-      secondAttemptHeaders = options.headers;
       return {
         data: {
           type: 'message',
@@ -259,19 +258,15 @@ module.exports = (async () => {
       stream: false
     }, 0, 'test-key');
 
-    assert.strictEqual(attemptCount, 2);
-    assert.ok(firstAttemptBody.system.some((block) => block.cache_control));
-    assert.ok(firstAttemptBody.messages.every((item) => item.content.every((block) => !('cache_control' in block))));
-    assert.ok(firstAttemptHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
-    assert.ok(secondAttemptBody.system.every((block) => !('cache_control' in block)));
-    assert.ok(secondAttemptBody.messages.every((item) => item.content.every((block) => !('cache_control' in block))));
-    assert.ok(!String(secondAttemptHeaders['anthropic-beta'] || '').includes('prompt-caching-2024-07-31'));
-    assert.ok(String(secondAttemptHeaders['anthropic-beta'] || '').includes('tools-2024-04-04'));
+    assert.strictEqual(attemptCount, 1);
+    assert.ok(firstAttemptBody.input.every((item) => contentParts(item).every((block) => !('cache_control' in block))));
+    assert.ok(firstAttemptHeaders.Authorization);
+    assert.strictEqual(secondAttemptBody, null);
+    assert.strictEqual(secondAttemptHeaders, null);
 
     const calls = listRecentModelCalls(1);
     assert.strictEqual(calls.length, 1);
-    assert.strictEqual(calls[0].prompt_caching.total_cache_breakpoints, 0);
-    assert.strictEqual(calls[0].prompt_caching.prompt_caching_beta_enabled, false);
+    assert.strictEqual(calls[0].prompt_caching.openai_prompt_cache_key, '');
     assert.strictEqual(calls[0].usage.cache_read_input_tokens, 16);
     assert.strictEqual(calls[0].usage.cache_creation_input_tokens, 2);
     flushModelCallLogsSync();
@@ -279,7 +274,7 @@ module.exports = (async () => {
       .split(/\r?\n/)
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    assert.strictEqual(loggedCalls[0].prompt_caching.total_cache_breakpoints, 0);
+    assert.strictEqual(loggedCalls[0].prompt_caching.openai_prompt_cache_key, '');
     assert.strictEqual(loggedCalls[0].usage.cache_read_input_tokens, 16);
     assert.strictEqual(loggedCalls[0].usage.cache_creation_input_tokens, 2);
 
@@ -293,21 +288,16 @@ module.exports = (async () => {
         };
       }
       attemptCount += 1;
-      if (attemptCount === 1) {
-        const error = new Error('unsupported prompt caching');
-        error.response = {
-          status: 422,
-          data: { error: { message: 'unknown field cache_control' } }
-        };
-        throw error;
-      }
-      assert.ok(body.messages.every((item) => item.content.every((block) => !('cache_control' in block))));
-      assert.ok(!String(options?.headers?.['anthropic-beta'] || '').includes('prompt-caching-2024-07-31'));
+      assert.ok(body.input.every((item) => (
+        contentParts(item).length === 0
+        || contentParts(item).every((block) => !('cache_control' in block))
+      )));
+      assert.ok(options?.headers?.Authorization);
       const stream = new PassThrough();
       setImmediate(() => {
-        stream.write('data: {"type":"message_start","message":{"usage":{"input_tokens":18,"cache_read_input_tokens":12}}}\n\n');
-        stream.write('data: {"type":"content_block_start","content_block":{"type":"text","text":"he"}}\n\n');
-        stream.write('data: {"type":"message_delta","usage":{"output_tokens":3,"cache_creation_input_tokens":1}}\n\n');
+        stream.write('data: {"type":"response.created","response":{"usage":{"input_tokens":18,"input_tokens_details":{"cached_tokens":12}}}}\n\n');
+        stream.write('data: {"type":"response.output_text.delta","delta":"he"}\n\n');
+        stream.write('data: {"type":"response.completed","response":{"usage":{"output_tokens":3,"input_tokens_details":{"cached_tokens":12}}}}\n\n');
         stream.write('data: [DONE]\n\n');
         stream.end();
       });
@@ -351,15 +341,13 @@ module.exports = (async () => {
       }
     }, 0, 'test-key');
 
-    assert.strictEqual(attemptCount, 2);
-    assert.ok(streamed.includes('"message_delta"'));
+    assert.strictEqual(attemptCount, 1);
+    assert.ok(streamed.includes('"response.output_text.delta"'));
     const streamedCalls = listRecentModelCalls(1);
     assert.strictEqual(streamedCalls.length, 1);
-    assert.strictEqual(streamedCalls[0].prompt_caching.total_cache_breakpoints, 0);
     assert.strictEqual(streamedCalls[0].usage.prompt_tokens, 18);
     assert.strictEqual(streamedCalls[0].usage.completion_tokens, 3);
     assert.strictEqual(streamedCalls[0].usage.cache_read_input_tokens, 12);
-    assert.strictEqual(streamedCalls[0].usage.cache_creation_input_tokens, 1);
 
     console.log('httpClientAnthropicPromptCache.test.js passed');
   } finally {

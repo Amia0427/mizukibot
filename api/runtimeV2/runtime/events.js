@@ -41,6 +41,7 @@ function pickRouteMetaForPostReplyJob(routeMeta = {}) {
     agentName: String(source.agentName || source.agent_name || '').trim(),
     toolName: String(source.toolName || source.tool_name || '').trim(),
     channelId: String(source.channelId || source.channel_id || '').trim(),
+    messageId: String(source.messageId || source.message_id || '').trim(),
     topRouteType: String(source.topRouteType || '').trim()
   };
 }

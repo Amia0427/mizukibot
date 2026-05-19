@@ -28,6 +28,7 @@ const {
 } = require('./openai-compatible.chunk');
 const { mapMessagesToAnthropic } = require('./request-shaping.chunk');
 const {
+  buildPinnedLookup,
   getAxiosOptions,
   getFirstTokenTimeoutMs,
   getRetryDelayMs,
@@ -52,12 +53,15 @@ const {
   isExtendedSamplingSchemaError,
   isReasoningSchemaError,
   isTemperatureSchemaError,
+  isTemperatureTopPConflictError,
   requestUsesExtendedSampling,
   requestUsesReasoning,
   requestUsesTemperature,
+  requestUsesTopP,
   stripExtendedSamplingFields,
   stripReasoningFields,
-  stripTemperatureField
+  stripTemperatureField,
+  stripTopPRequestField
 } = require('./request-shaping.chunk');
 const {
   isOpenAICompatiblePromptCacheSchemaError,
@@ -97,6 +101,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
     let stream = null;
     let callId = '';
     let prepared = null;
+    let pinnedLookup = null;
     const usageParserState = { buffer: '' };
     let streamUsage = null;
     const attemptStartedAt = Date.now();
@@ -104,7 +109,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
     try {
       const timeoutMs = getRetryTimeoutMs(getStreamTimeoutMs(), i, 30000, 300000);
       prepared = await prepareRequest(url, body);
-      await validatePreparedEndpoint(prepared.requestUrl);
+      pinnedLookup = buildPinnedLookup(await validatePreparedEndpoint(prepared.requestUrl));
       const routeDiagnostics = buildModelRouteDiagnostics({
         ...trace,
         provider: prepared.provider,
@@ -161,7 +166,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
         resp = await axios.post(
           prepared.requestUrl,
           prepared.requestBody,
-          getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+          getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
         );
         } catch (error) {
         if (requestUsesReasoning(prepared?.requestBody) && isReasoningSchemaError(error)) {
@@ -173,7 +178,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           resp = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
           );
           prepared = {
             ...prepared,
@@ -216,7 +221,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           resp = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
           );
           prepared = {
             ...prepared,
@@ -232,7 +237,27 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           resp = await axios.post(
             prepared.requestUrl,
             strippedRequestBody,
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
+          );
+          prepared = {
+            ...prepared,
+            requestBody: strippedRequestBody,
+            requestHeaders: prepared.requestHeaders
+          };
+        } else if (
+          requestUsesTemperature(prepared?.requestBody)
+          && requestUsesTopP(prepared?.requestBody)
+          && isTemperatureTopPConflictError(error)
+        ) {
+          emitHttpDowngradeTrace(trace, prepared, body, 'strip_top_p_field', error, {
+            attempt: i + 1,
+            durationMs: Math.max(0, Date.now() - attemptStartedAt)
+          });
+          const strippedRequestBody = stripTopPRequestField(prepared.requestBody);
+          resp = await axios.post(
+            prepared.requestUrl,
+            strippedRequestBody,
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
           );
           prepared = {
             ...prepared,
@@ -253,7 +278,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             resp = await axios.post(
               prepared.requestUrl,
               strippedRequestBody,
-              getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+              getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
             );
             prepared = {
               ...prepared,
@@ -273,7 +298,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
               resp = await axios.post(
                 prepared.requestUrl,
                 strippedCacheRequestBody,
-                getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+                getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
               );
               prepared = {
                 ...prepared,
@@ -296,7 +321,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           resp = await axios.post(
             prepared.requestUrl,
             stripOpenAICompatiblePromptCaching(prepared.requestBody),
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal)
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
           );
           prepared = {
             ...prepared,
@@ -316,7 +341,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           resp = await axios.post(
             prepared.requestUrl,
             downgraded.requestBody,
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal)
+            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal, pinnedLookup)
           );
           prepared = {
             ...prepared,

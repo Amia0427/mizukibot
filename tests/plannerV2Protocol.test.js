@@ -41,10 +41,31 @@ module.exports = (async () => {
   assert.strictEqual(buildPlannerModelRequestBody({ question: 'test', cleanText: 'test' }).requestBody.reasoning_effort, 'high');
   assert.strictEqual(buildPlannerModelRequestBody({ question: 'test', cleanText: 'test' }, { plannerReasoningEffort: 'low' }).requestBody.reasoning_effort, 'low');
   assert.ok(!Object.prototype.hasOwnProperty.call(buildPlannerModelRequestBody({ question: 'test', cleanText: 'test' }, { plannerReasoningEffort: 'off' }).requestBody, 'reasoning_effort'));
+  const plannerCacheRequest = buildPlannerModelRequestBody(
+    { question: 'first turn', cleanText: 'first turn', topRouteType: 'direct_chat' },
+    { allowedTools: ['memory_cli'] }
+  ).requestBody;
+  const plannerCacheRequestWithDifferentPayload = buildPlannerModelRequestBody(
+    { question: 'second turn with different dynamic payload', cleanText: 'second turn with different dynamic payload', topRouteType: 'direct_chat' },
+    {
+      allowedTools: ['memory_cli'],
+      memoryContext: { memoryForPrompt: 'turn-local memory changed' },
+      availableContextSignals: { retrievedMemory: true }
+    }
+  ).requestBody;
+  const plannerCacheRequestWithDifferentCatalog = buildPlannerModelRequestBody(
+    { question: 'first turn', cleanText: 'first turn', topRouteType: 'direct_chat' },
+    { allowedTools: ['memory_cli', 'get_context_stats'] }
+  ).requestBody;
+  assert.ok(/^mizukibot:planner:chat_completions:[a-f0-9]{24}$/.test(plannerCacheRequest.prompt_cache_key));
+  assert.strictEqual(plannerCacheRequestWithDifferentPayload.prompt_cache_key, plannerCacheRequest.prompt_cache_key);
+  assert.notStrictEqual(plannerCacheRequestWithDifferentCatalog.prompt_cache_key, plannerCacheRequest.prompt_cache_key);
 
   const originalConfigPlanApiBaseUrl = config.PLAN_API_BASE_URL;
   config.PLAN_API_BASE_URL = 'https://api.anthropic.com/v1/messages';
-  assert.ok(!Object.prototype.hasOwnProperty.call(buildPlannerModelRequestBody({ question: 'test', cleanText: 'test' }).requestBody, 'reasoning_effort'));
+  const anthropicPlannerRequest = buildPlannerModelRequestBody({ question: 'test', cleanText: 'test' }).requestBody;
+  assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPlannerRequest, 'reasoning_effort'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPlannerRequest, 'prompt_cache_key'));
   config.PLAN_API_BASE_URL = originalConfigPlanApiBaseUrl;
 
   const memoryDecision = await planRequestV2({

@@ -213,6 +213,7 @@ function buildChatBody(model, purpose, timeoutMs) {
     ],
     max_tokens: 8,
     stream: false,
+    __preferredProtocol: 'chat_completions',
     __timeoutMs: timeoutMs,
     __trace: {
       source: 'model_self_check',
@@ -223,9 +224,18 @@ function buildChatBody(model, purpose, timeoutMs) {
 
 function buildMainReplySpec(userId = '', type = 'main_reply', timeoutMs = clampTimeoutMs()) {
   const resolvedConfig = resolveUserScopedMainModelConfig(userId, null, {});
-  const model = getModelName(resolvedConfig);
-  const apiBaseUrl = getApiBaseUrl(resolvedConfig);
-  const apiKey = getApiKey(resolvedConfig);
+  const selfCheckConfig = {
+    ...resolvedConfig,
+    temperature: 0,
+    maxTokens: 8,
+    reasoningEffort: 'off',
+    topA: NaN,
+    topK: NaN,
+    repetitionPenalty: NaN
+  };
+  const model = getModelName(selfCheckConfig);
+  const apiBaseUrl = getApiBaseUrl(selfCheckConfig);
+  const apiKey = getApiKey(selfCheckConfig);
   if (!apiBaseUrl || !apiKey || !model) {
     return {
       type,
@@ -235,7 +245,7 @@ function buildMainReplySpec(userId = '', type = 'main_reply', timeoutMs = clampT
       body: null
     };
   }
-  const request = buildMainModelRequest(resolvedConfig, {
+  const request = buildMainModelRequest(selfCheckConfig, {
     messages: [
       { role: 'system', content: 'Return ok.' },
       { role: 'user', content: 'ok' }
@@ -254,12 +264,17 @@ function buildMainReplySpec(userId = '', type = 'main_reply', timeoutMs = clampT
     model,
     url: request.url,
     apiKey,
-    body: {
-      ...request.body,
-      max_tokens: Math.min(8, Number(request.body?.max_tokens || 8) || 8),
-      stream: false,
-      __timeoutMs: timeoutMs
-    }
+    body: (() => {
+      const body = {
+        ...request.body,
+        max_tokens: Math.min(8, Number(request.body?.max_tokens || 8) || 8),
+        stream: false,
+        __timeoutMs: timeoutMs
+      };
+      delete body.prompt_cache_key;
+      delete body.prompt_cache_retention;
+      return body;
+    })()
   };
 }
 

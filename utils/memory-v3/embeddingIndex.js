@@ -10,6 +10,7 @@ const {
   clampText,
   canonicalizeText
 } = require('./helpers');
+const { isMemoryNotRecallable } = require('./recallFilter');
 const { shouldUseRemoteEmbedding, requestEmbedding, cosineArray } = require('../vectorMemory');
 
 const CACHE_VERSION = 1;
@@ -277,7 +278,7 @@ function classifyEmbeddingPriority(node = {}) {
 function reconcileEmbeddingCache(nodes = [], options = {}) {
   ensureDir(config.MEMORY_V3_PROJECTIONS_DIR);
   const activeNodes = (Array.isArray(nodes) ? nodes : [])
-    .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived');
+    .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived' && !isMemoryNotRecallable(node));
   if (!isEmbeddingIndexEnabled()) {
     if (options.dryRun === true) {
       return { enabled: false, rows: 0, ready: 0, pending: 0, reused: 0, created: 0, dropped: 0 };
@@ -304,7 +305,7 @@ function reconcileEmbeddingCache(nodes = [], options = {}) {
 
 function buildEmbeddingCacheReconcilePlan(nodes = [], options = {}) {
   const activeNodes = (Array.isArray(nodes) ? nodes : [])
-    .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived');
+    .filter((node) => normalizeText(node?.text) && normalizeText(node?.status).toLowerCase() !== 'archived' && !isMemoryNotRecallable(node));
   if (!isEmbeddingIndexEnabled()) {
     return {
       enabled: false,
@@ -375,12 +376,13 @@ function collectEmbeddingBackfillNodes() {
   const { loadMemoryNodes, loadEpisodeProjection } = require('./storage');
   const nodes = [];
   for (const node of loadMemoryNodes()) {
-    if (!node || normalizeText(node.status).toLowerCase() === 'archived') continue;
+    if (!node || normalizeText(node.status).toLowerCase() === 'archived' || isMemoryNotRecallable(node)) continue;
     nodes.push(node);
   }
   const episodeProjection = loadEpisodeProjection();
   for (const [userId, entry] of Object.entries(episodeProjection.users || {})) {
     for (const episode of Array.isArray(entry?.items) ? entry.items : []) {
+      if (isMemoryNotRecallable(episode)) continue;
       const text = normalizeText(episode.text);
       const eventId = normalizeText(episode.id);
       if (!text || !eventId) continue;
@@ -420,7 +422,7 @@ function collectEmbeddingBackfillNodes() {
   if (config.MEMORY_JOURNAL_EMBEDDING_BACKFILL_ENABLED !== false) {
     const { buildDailyJournalDocsForAllUsers } = require('./journalDocs');
     for (const doc of buildDailyJournalDocsForAllUsers({ includeSegments: true })) {
-      if (!doc || normalizeText(doc.status).toLowerCase() === 'archived') continue;
+      if (!doc || normalizeText(doc.status).toLowerCase() === 'archived' || isMemoryNotRecallable(doc)) continue;
       nodes.push(doc);
     }
   }

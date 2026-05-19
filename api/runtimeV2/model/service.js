@@ -21,6 +21,7 @@ const {
   buildMainModelRequest,
   getApiBaseUrl,
   getApiKey,
+  getMainReplyDefaultMaxTokens,
   getMaxTokens,
   getModelName,
   getRetries,
@@ -238,7 +239,7 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
     const request = buildMainModelRequest(resolvedConfig, {
       messages,
       stream: false,
-      defaultMaxTokens: 3500,
+      defaultMaxTokens: getMainReplyDefaultMaxTokens(),
       trace: callTrace,
       routeMeta: context?.routeMeta,
       topRouteType: context?.topRouteType,
@@ -277,7 +278,7 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
           || config.CONTEXT_WINDOW_MAX_TOKENS
           || 32000
         ) || 32000,
-        maxOutputTokens: getMaxTokens(3500, resolvedConfig),
+        maxOutputTokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
         preferRawTrim: !context?.canonicalSegments
       });
       try {
@@ -350,7 +351,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
         const request = buildMainModelRequest(resolvedConfig, {
           messages,
           stream: true,
-          defaultMaxTokens: 3500,
+          defaultMaxTokens: getMainReplyDefaultMaxTokens(),
           trace: callTrace,
           routeMeta: options?.routeMeta,
           topRouteType: options?.topRouteType
@@ -389,7 +390,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
             || config.CONTEXT_WINDOW_MAX_TOKENS
             || 32000
           ) || 32000,
-          maxOutputTokens: getMaxTokens(3500, resolvedConfig),
+          maxOutputTokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
           preferRawTrim: !options?.canonicalSegments
         });
         try {

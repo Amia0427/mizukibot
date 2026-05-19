@@ -27,6 +27,10 @@ const {
   runHumanizerAgent,
   withMainModelFallback
 } = require('./runtime-core.chunk');
+
+function getMainReplyDefaultMaxTokens() {
+  return Math.max(64, Number(config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192) || 8192);
+}
 const {
   buildLegacyExecutionPlanFromSteps,
   getPlannerDecisionVersion
@@ -344,7 +348,7 @@ async function synthesizeFromPlan(question, dynamicPrompt, plan, execLogs, verif
         temperature: getTemperature(resolvedConfig),
         top_p: getTopP(resolvedConfig),
         messages,
-        max_tokens: getMaxTokens(3500, resolvedConfig),
+        max_tokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
         stream: false
       },
       getRetries(1, resolvedConfig),
@@ -367,7 +371,7 @@ async function synthesizeFromPlan(question, dynamicPrompt, plan, execLogs, verif
           || config.CONTEXT_WINDOW_MAX_TOKENS
           || 32000
         ) || 32000,
-        maxOutputTokens: getMaxTokens(3500, resolvedConfig),
+        maxOutputTokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
         preferRawTrim: !normalizedOptions?.canonicalSegments
       });
       try {
