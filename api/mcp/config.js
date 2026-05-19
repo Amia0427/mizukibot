@@ -19,6 +19,20 @@ function safeReadJson(absPath) {
   }
 }
 
+function expandEnvValue(value = '', env = process.env) {
+  return String(value || '').replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name) => {
+    return String(env?.[name] || '');
+  });
+}
+
+function expandEnvObject(source = {}, env = process.env) {
+  const output = {};
+  for (const [key, value] of Object.entries(source && typeof source === 'object' ? source : {})) {
+    output[key] = expandEnvValue(value, env);
+  }
+  return output;
+}
+
 function readMcpConfig(options = {}) {
   const configPath = resolveMcpConfigPath(options.configPath);
   return {
@@ -72,7 +86,9 @@ function listConfiguredMcpServers(options = {}) {
     : {};
 
   return Object.entries(servers).map(([serverName, definition]) => {
-    const serverEnv = definition?.env && typeof definition.env === 'object' ? { ...definition.env } : {};
+    const serverEnv = definition?.env && typeof definition.env === 'object'
+      ? expandEnvObject(definition.env)
+      : {};
     const mergedEnv = { ...process.env, ...serverEnv };
     const command = resolveCommandForSpawn(String(definition?.command || '').trim(), mergedEnv);
     return {
@@ -86,6 +102,8 @@ function listConfiguredMcpServers(options = {}) {
 }
 
 module.exports = {
+  expandEnvObject,
+  expandEnvValue,
   listConfiguredMcpServers,
   readMcpConfig,
   resolveCommandForSpawn,

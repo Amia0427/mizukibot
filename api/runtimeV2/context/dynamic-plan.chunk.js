@@ -186,6 +186,7 @@ function blockHasUsableContent(block = {}) {
   const key = aliasId || blockId;
   const emptyPatternByBlock = {
     retrieved_memory_lite: /\[RetrievedMemoryLite\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
+    memos_recall: /\[MemOSRecall\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     daily_journal: /\[DailyJournal\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     long_term_profile: /\[LongTermProfile\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     impression: /\[Impression\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,

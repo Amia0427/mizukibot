@@ -81,6 +81,15 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
     avoidWhen: 'Skip for generic small talk or when it would add noisy turn-local detail.'
   },
   {
+    blockId: 'memos_recall',
+    label: 'MemOS Recall',
+    lane: 'dynamic_context',
+    category: 'memory_summary',
+    defaultPolicy: 'high_value_only',
+    useWhen: 'Use when planner-side MemOS recall contains specific external memory evidence that helps this turn.',
+    avoidWhen: 'Skip when MemOS recall is empty, generic, stale, or weaker than short-term continuity.'
+  },
+  {
     blockId: 'daily_journal',
     label: 'Daily Journal',
     lane: 'dynamic_context',
@@ -221,6 +230,11 @@ const DYNAMIC_CONTEXT_BLOCK_SPEC_OVERRIDES = Object.freeze({
     criticality: 'critical',
     emptyPolicy: 'reject_optional_empty',
     budget: { configKey: 'MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', hardCapTokens: 420 }
+  },
+  memos_recall: {
+    criticality: 'critical',
+    emptyPolicy: 'reject_optional_empty',
+    budget: { configKey: 'MEMOS_RECALL_MAX_CHARS', hardCapTokens: 260 }
   },
   daily_journal: {
     criticality: 'critical',

@@ -11,6 +11,7 @@ function isExcludedDirectChatTool(toolName = '') {
   const normalized = String(toolName || '').trim().toLowerCase();
   if (!normalized) return true;
   if (EXCLUDED_DIRECT_CHAT_TOOL_NAMES.has(normalized)) return true;
+  if (/^mcp_memos_api_mcp_/i.test(normalized)) return true;
   return /subagent|openclaw|nanobot/i.test(normalized);
 }
 

@@ -47,6 +47,8 @@ function blockHasUsableDynamicContextContent(block = {}) {
   const emptyPatternByBlock = {
     retrieved_memory_lite: /\[RetrievedMemoryLite\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     retrieved_memory_compact: /\[RetrievedMemoryLite\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
+    memos_recall: /\[MemOSRecall\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
+    memos_recall_compact: /\[MemOSRecall\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     daily_journal: /\[DailyJournal\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     daily_journal_compact: /\[DailyJournal\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     long_term_profile: /\[LongTermProfile\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
@@ -323,6 +325,9 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   }
   if (input.hasRetrievedMemory) {
     push('retrieved_memory_lite', 'retrieved memory candidates are available for this turn');
+  }
+  if (input.hasMemosRecall) {
+    push('memos_recall', 'MemOS planner-side recall is available for this turn');
   }
   if (input.hasDailyJournal) {
     push('daily_journal', 'daily journal recall is available for this turn');

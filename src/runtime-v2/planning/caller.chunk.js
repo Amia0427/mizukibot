@@ -40,6 +40,10 @@ const {
   normalizePlannerDecisionV2
 } = require('./prompt-normalizer.chunk');
 
+function getMemosPlannerRecall() {
+  return require('../../../utils/memosPlannerRecall');
+}
+
 async function callPlannerModelV2(route = {}, options = {}) {
   const apiBaseUrl = getPlannerApiBaseUrlV2();
   const apiKey = getPlannerApiKeyV2();
@@ -102,6 +106,21 @@ async function planRequestV2(input = {}) {
     intent: normalizeObject(input.intent || input.route?.intent, {}),
     facets: normalizeObject(input.facets || input.route?.facets, {})
   };
+  const inputMemosRecall = normalizeObject(input.memosRecall, normalizeObject(route?.meta?.memosRecall, null));
+  let memosRecall = inputMemosRecall && Object.keys(inputMemosRecall).length > 0 ? inputMemosRecall : null;
+  if (!memosRecall && getMemosPlannerRecall().isMemosPlannerRecallEnabled(input)) {
+    memosRecall = await getMemosPlannerRecall().recallForPlanner(route.question || route.cleanText, {
+      ...input,
+      routeMeta: route.meta,
+      userId: normalizeText(input.userId || route?.meta?.userId),
+      config: normalizeObject(input.config, {})
+    });
+  }
+  const memosRecallText = getMemosPlannerRecall().getMemosRecallPromptText(memosRecall || {});
+  const inputAvailableContextSignals = normalizeObject(input.availableContextSignals, normalizeObject(route?.meta?.availableContextSignals, {}));
+  const availableContextSignals = memosRecallText
+    ? { ...inputAvailableContextSignals, memosRecall: true }
+    : inputAvailableContextSignals;
   const options = {
     userId: normalizeText(input.userId || route?.meta?.userId),
     allowedTools: normalizeArray(input.allowedTools),
@@ -109,7 +128,9 @@ async function planRequestV2(input = {}) {
     contextSummary: normalizeText(input.contextSummary),
     continuitySignals: normalizeObject(input.continuitySignals, normalizeObject(route?.meta?.continuitySignals, {})),
     memoryContext: normalizeObject(input.memoryContext, normalizeObject(route?.meta?.memoryContext, {})),
-    availableContextSignals: normalizeObject(input.availableContextSignals, normalizeObject(route?.meta?.availableContextSignals, {})),
+    memosRecall: normalizeObject(memosRecall, {}),
+    memosRecallText,
+    availableContextSignals,
     constraints: normalizeObject(input.constraints, {}),
     directedContext: normalizeObject(input.directedContext, normalizeObject(route?.meta?.directedContext, null)),
     personaModuleCatalog: normalizeArray(input.personaModuleCatalog).length > 0
@@ -239,6 +260,7 @@ function convertPlannerDecisionToDirectChatDecision(decision = {}, route = {}, o
     backgroundResearchReason: normalizeText(decision?.plannerMeta?.backgroundResearchReason),
     personaModules,
     dynamicPromptPlan,
+    memosRecall: normalizeObject(decision?.memosRecall || decision?.plannerMeta?.memosRecall || options.memosRecall, {}),
     plannerDecisionV2: decision,
     plannerProtocolVersion: normalizeText(decision?.plannerMeta?.protocolVersion) || PLANNER_PROTOCOL_VERSION
   };
