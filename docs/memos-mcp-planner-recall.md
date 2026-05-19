@@ -1,10 +1,10 @@
 # MemOS MCP Planner Recall
 
-更新时间：2026-05-19 23:12 +08:00
+更新时间：2026-05-19 23:41 +08:00
 
 ## 目标
 
-把 MemOS MCP 接成 planner 内部召回器。主回复模型不直接拿 MemOS MCP 工具，只接收 planner 认可后的短记忆摘要。
+把 MemOS MCP 接成 planner 内部只读召回器，主要读取 MemOS 远端知识库文档。主回复模型不直接拿 MemOS MCP 工具，只接收 planner 认可后的短记忆摘要。
 
 ## 流程
 
@@ -27,6 +27,9 @@ MEMOS_MCP_SERVER_NAME=memos-api-mcp
 MEMOS_API_KEY=
 MEMOS_USER_ID=
 MEMOS_CHANNEL=MODELSCOPE
+MEMOS_RECALL_SOURCE=knowledge_base
+MEMOS_KB_FILE_IDS=
+MEMOS_KB_FALLBACK_SEARCH_ENABLED=false
 MEMOS_RECALL_TOP_K=5
 MEMOS_RECALL_MAX_CHARS=900
 MEMOS_RECALL_TIMEOUT_MS=1200
@@ -41,7 +44,19 @@ MEMOS_WRITE_ASYNC=true
 - `memos_recall` 优先级低于 `short_term_continuity`，高于 `background_research`。
 - MemOS 召回只作为证据，不覆盖 Memory V3、短期连续性、persona memory。
 - MemOS 召回会先与本地 `memoryContext` 去重；重复项保留本地 Memory V3/向量记忆，MemOS 只进入 diagnostics，不重复进入 `[MemOSRecall]`。
-- 默认不写远端记忆，避免和现有 Memory V3 重复污染。
+- 默认召回源是 `knowledge_base`，只调用只读 `get_kb_documents`；需要在 `MEMOS_KB_FILE_IDS` 填入远端知识库文档 ID，逗号分隔。
+- 本地 agent 运行时不写远端记忆：即使误配 `MEMOS_WRITE_ENABLED=true`，`addMessageToMemos()` 也会返回 `remote_write_disabled`，不会调用 `add_message`。
+- 不自动调用 `add_message`、`add_kb_document`、`create_knowledge_base`、`delete_kb_documents`、`remove_knowledge_base`。
+- 如需临时兼容旧记忆搜索，可显式设置 `MEMOS_RECALL_SOURCE=search_memory`；如需 KB 为空再退回搜索，显式设置 `MEMOS_KB_FALLBACK_SEARCH_ENABLED=true`。
+
+## 远端知识库只读模式
+
+2026-05-19 23:41 +08:00：默认召回源改为 MemOS 远端知识库只读文档，关闭本地 agent 对远端 MemOS 的写入能力。
+
+- `get_kb_documents` 的真实入参是 `file_ids: string[]`，因此必须先在 MemOS 侧准备知识库文档，并把文档 ID 配到 `MEMOS_KB_FILE_IDS`。
+- planner 仍负责过滤噪声；主回复 prompt 只收到 `[MemOSRecall]` 摘要，不收到原始 MCP 工具。
+- 没有配置 `MEMOS_KB_FILE_IDS` 时，召回结果为 `used=false`、`rejectedReason=kb_file_ids_missing`，主流程继续降级。
+- 写入类工具只保留 discovery 诊断，不参与运行时调用。
 
 ## 去重策略
 
