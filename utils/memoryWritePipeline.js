@@ -1,6 +1,7 @@
 const config = require('../config');
 const { shouldBlockMemoryLearning } = require('./promptSecurity');
 const { createWriteReviewHelpers } = require('./memoryWritePipeline/review');
+const { buildMemoryQualityMeta, evaluateMemoryQuality } = require('./memoryQuality');
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -219,6 +220,20 @@ function validateMemoryWrite(candidate = {}, options = {}) {
   if (confidence < minConfidence) return { ok: false, reason: 'low_confidence' };
   const learningGate = shouldBlockMemoryLearning(text, type, options);
   if (learningGate.blocked) return { ok: false, reason: learningGate.reason || 'blocked_by_security' };
+  const quality = evaluateMemoryQuality(candidate, {
+    ...options,
+    minConfidence
+  });
+  const qualityMeta = buildMemoryQualityMeta(quality);
+  if (quality.shouldReject) {
+    return {
+      ok: false,
+      reason: quality.reasons.includes('prompt_pollution') || quality.reasons.includes('assistant_self_instruction')
+        ? 'quality_reject_polluted'
+        : 'quality_reject_low_signal',
+      quality: qualityMeta
+    };
+  }
   const duplicate = findExistingMemory(candidate);
   if (duplicate) return { ok: false, reason: 'duplicate', duplicateId: duplicate.id };
   const forceCandidateOnly = shouldForceCandidateOnly(candidate);
@@ -239,6 +254,7 @@ function validateMemoryWrite(candidate = {}, options = {}) {
             candidateOnly: true,
             conflictId: conflict.id
           }),
+          quality: qualityMeta,
           traceReason: 'conflicts_with_existing_memory',
           conflictCandidate: {
             existingId: conflict.id,
@@ -262,7 +278,29 @@ function validateMemoryWrite(candidate = {}, options = {}) {
             validationReason: 'candidate_only_profile_guard',
             candidateOnly: true
           }),
+          quality: qualityMeta,
           traceReason: candidate.meta?.traceReason || 'candidate_only_profile_guard'
+        }
+      }
+    };
+  }
+  if (quality.shouldCandidate) {
+    return {
+      ok: true,
+      reason: quality.stale?.expired ? 'quality_candidate_stale' : 'quality_candidate_low_signal',
+      patch: {
+        status: 'candidate',
+        meta: {
+          ...mergeLearningDecisionMeta(candidate, {
+            status: 'candidate',
+            reason: quality.stale?.expired ? 'quality_stale_candidate' : 'quality_low_signal_candidate',
+            validationReason: quality.stale?.expired ? 'quality_candidate_stale' : 'quality_candidate_low_signal',
+            riskReasons: quality.reasons,
+            riskLevel: quality.grade,
+            candidateOnly: true
+          }),
+          quality: qualityMeta,
+          traceReason: candidate.meta?.traceReason || (quality.stale?.expired ? 'quality_candidate_stale' : 'quality_candidate_low_signal')
         }
       }
     };
@@ -279,6 +317,7 @@ function validateMemoryWrite(candidate = {}, options = {}) {
           validationReason: 'accepted',
           candidateOnly: normalizeText(candidate.status).toLowerCase() === 'candidate'
         }),
+        quality: qualityMeta,
         traceReason: candidate.meta?.traceReason || 'accepted_by_memory_write_pipeline'
       }
     }

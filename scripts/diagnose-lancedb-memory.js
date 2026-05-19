@@ -13,10 +13,12 @@ const { queryMemory } = require('../utils/memory-v3/query');
 const { loadScopeProjection } = require('../utils/memory-v3/storage');
 const { diagnoseProjectionFreshness } = require('../utils/memory-v3/diagnostics');
 const { buildJournalHealthSummary } = require('../utils/memory-v3/journalDiagnostics');
+const { buildMemoryQualityReport } = require('../utils/memoryQuality');
 const {
   safeReadJsonLines,
   normalizeText
 } = require('../utils/memory-v3/helpers');
+const { loadMemoryNodes } = require('../utils/memory-v3/storage');
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = {
@@ -219,6 +221,7 @@ async function runDiagnostics(args = {}, deps = {}) {
   const probe = args.skipProbe ? { skipped: true, reason: 'skip_probe' } : await runProbe(cases);
   const projectionFreshness = (deps.diagnoseProjectionFreshness || diagnoseProjectionFreshness)();
   const journal = buildSafeJournalHealthSummary({ limit: args.limit || 20 }, deps);
+  const quality = buildSafeMemoryQualityReport({ limit: args.limit || 20 }, deps);
   const journalPending = Number(journal?.totals?.embeddingPending || 0) || 0;
   const nextBackfillCommand = journalPending > 0 ? JOURNAL_BACKFILL_COMMAND : MEMORY_BACKFILL_COMMAND;
   const healthGate = buildMemoryIndexHealthGate({
@@ -240,6 +243,7 @@ async function runDiagnostics(args = {}, deps = {}) {
     healthGate,
     projectionFreshness,
     journal,
+    quality,
     probe
   };
 }
@@ -254,6 +258,19 @@ function buildSafeJournalHealthSummary(options = {}, deps = {}) {
       message: error?.message || String(error || ''),
       totals: {},
       users: []
+    };
+  }
+}
+
+function buildSafeMemoryQualityReport(options = {}, deps = {}) {
+  try {
+    const loader = deps.loadMemoryNodes || loadMemoryNodes;
+    return (deps.buildMemoryQualityReport || buildMemoryQualityReport)(loader(), options);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'memory_quality_failed',
+      message: error?.message || String(error || '')
     };
   }
 }
@@ -273,6 +290,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildSafeMemoryQualityReport,
   buildSafeJournalHealthSummary,
   buildMemoryIndexHealthGate,
   buildRecommendedActions,
