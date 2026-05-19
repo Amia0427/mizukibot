@@ -10,7 +10,7 @@
 
 ---
 
-Updated: 2026-05-19 21:25 +08:00
+Updated: 2026-05-19 22:33 +08:00
 
 ## Chunk 1: Lifecycle And Quality Policy
 
@@ -111,3 +111,60 @@ node tests/memoryExtractionProfileClassification.test.js
 - [x] **Step 3: Commit**
 
 Stage only files changed for this implementation and commit on the current branch.
+
+## Chunk 4: Remaining Productization Goals
+
+### Task 6: Complete cleanup, correction, duplicate merge, scoring, and diagnostics
+
+**Files:**
+- Modify: `utils/memory-v3/profileLifecycle.js`
+- Modify: `utils/memory-v3/events.js`
+- Modify: `utils/memory-v3/materializer.js`
+- Modify: `utils/memory-v3/queryRanking.js`
+- Create: `utils/memory-v3/profileMaintenance.js`
+- Modify: `utils/memory-v3/index.js`
+- Modify: `utils/memoryCli/commandParser.js`
+- Modify: `utils/memoryCli.js`
+- Create: `utils/memoryCli/profileDiagnostics.js`
+- Modify: `utils/postReplyWorker/processJob.js`
+- Modify: `config.js`
+- Test: `tests/memoryV3ProfileLifecycleRemainders.test.js`
+- Test: `tests/memoryCliProfileDiagnostics.test.js`
+
+- [x] **Step 1: Add explicit correction handling**
+
+Explicit "不是/改成/别记" profile updates now archive matching old profile facts, rewrite replacement text to the corrected fact, and suppress forget-only commands from recall.
+
+- [x] **Step 2: Add near-duplicate profile merge**
+
+Materialization now supersedes highly similar profile nodes under the same user/scope/field so duplicate goals and preferences do not compete in recall or prompt injection.
+
+- [x] **Step 3: Add profile cleanup maintenance**
+
+`runProfileMemoryMaintenance` materializes profile lifecycle state and reports stale/suspect/superseded cleanup candidates without deleting audit history.
+
+- [x] **Step 4: Strengthen recall scoring**
+
+Profile candidates receive freshness/stability/evidence lifecycle score parts before diversification, while hidden lifecycle states remain excluded.
+
+- [x] **Step 5: Add CLI diagnostics**
+
+`mem profile review`, `mem profile stale`, and `mem profile why-injected` expose profile state, cleanup candidates, and injected prompt trace.
+
+- [x] **Step 6: Verify**
+
+Run:
+
+```bash
+node tests/memoryV3ProfileLifecycleRemainders.test.js
+node tests/memoryCliProfileDiagnostics.test.js
+node tests/memoryV3ProfileLifecycle.test.js
+node tests/memoryV3MaterializerProfile.test.js
+node tests/memoryV3Query.test.js
+node tests/memoryContextProfileInjection.test.js
+node tests/memoryProfileSurface.test.js
+node tests/memoryExtractionProfileClassification.test.js
+node tests/memoryCliV3.test.js
+node tests/memoryCliFastRuntime.test.js
+node tests/postReplyWorkerRuntime.test.js
+```

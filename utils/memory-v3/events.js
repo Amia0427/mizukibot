@@ -9,6 +9,10 @@ const {
   normalizeArray
 } = require('./helpers');
 const { getJsonLineWriter } = require('../storeRegistry');
+const {
+  buildProfileCorrectionEvents,
+  detectProfileCorrection
+} = require('./profileLifecycle');
 
 const EVENT_TYPES = new Set([
   'turn_received',
@@ -99,9 +103,60 @@ function normalizeMemoryEvent(input = {}) {
 }
 
 async function appendMemoryEvent(event = {}) {
-  const normalized = normalizeMemoryEvent(event);
+  const correction = detectProfileCorrection(event?.text || '');
+  const shouldRewriteCorrection = correction.isCorrection
+    && correction.correctedTo
+    && ['explicit', 'manual'].includes(normalizeText(event?.sourceKind || event?.source).toLowerCase());
+  const shouldSuppressCorrectionCommand = correction.isCorrection
+    && !correction.correctedTo
+    && ['explicit', 'manual'].includes(normalizeText(event?.sourceKind || event?.source).toLowerCase());
+  const normalized = normalizeMemoryEvent(shouldRewriteCorrection
+    ? {
+      ...event,
+      text: correction.correctedTo,
+      payload: {
+        ...(event.payload && typeof event.payload === 'object' ? event.payload : {}),
+        originalCorrectionText: normalizeText(event.text),
+        correction
+      }
+    }
+    : shouldSuppressCorrectionCommand
+      ? {
+        ...event,
+        payload: {
+          ...(event.payload && typeof event.payload === 'object' ? event.payload : {}),
+          correction,
+          lifecycleStatus: 'suspect',
+          profileQuality: {
+            ok: false,
+            reasons: ['correction_command'],
+            confidence: Number(event.confidence || 0) || 1,
+            sourceKind: normalizeText(event.sourceKind || event.source)
+          }
+        }
+      }
+      : event);
   const filePath = eventFileForTs(normalized.ts);
   const writer = getJsonLineWriter(filePath);
+  const correctionEvents = correction.isCorrection
+    ? buildProfileCorrectionEvents(loadMemoryEvents(), normalized, {
+      now: normalized.ts,
+      correction
+    })
+    : [];
+  for (const correctionEvent of correctionEvents) {
+    const normalizedCorrection = normalizeMemoryEvent({
+      ...correctionEvent,
+      ts: Math.max(0, Number(correctionEvent.ts || normalized.ts - 1) || normalized.ts - 1),
+      id: normalizeText(correctionEvent.id) || buildEventId({
+        ...correctionEvent,
+        ts: Math.max(0, Number(correctionEvent.ts || normalized.ts - 1) || normalized.ts - 1)
+      })
+    });
+    const correctionWriter = getJsonLineWriter(eventFileForTs(normalizedCorrection.ts));
+    correctionWriter.append(normalizedCorrection);
+    correctionWriter.flushSync();
+  }
   writer.append(normalized);
   writer.flushSync();
   return normalized;

@@ -5,6 +5,7 @@ const { assembleMemoryPacket } = require('./packet');
 const { restoreSessionState } = require('./session');
 const { migrateLegacyMemoryToV3 } = require('./migration');
 const { diagnoseProjectionFreshness } = require('./diagnostics');
+const { runProfileMemoryMaintenance } = require('./profileMaintenance');
 
 module.exports = {
   appendMemoryEvent,
@@ -15,5 +16,6 @@ module.exports = {
   assembleMemoryPacket,
   restoreSessionState,
   migrateLegacyMemoryToV3,
-  diagnoseProjectionFreshness
+  diagnoseProjectionFreshness,
+  runProfileMemoryMaintenance
 };

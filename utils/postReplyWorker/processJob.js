@@ -42,6 +42,10 @@ function getMemoryQualityAuditModule() {
   return require('../memoryQualityAudit');
 }
 
+function getProfileMaintenanceModule() {
+  return require('../memory-v3/profileMaintenance');
+}
+
 function buildLearningMeta(job = {}) {
   const routeMeta = normalizeObject(job.routeMeta, {});
   const evidenceMeta = buildCoreLearningEvidence(job);
@@ -262,6 +266,43 @@ async function processPostReplyJob(job = {}, deps = {}) {
         });
       }
       currentJob = markTaskCompleted(currentJob, deps, 'memoryQualityAudit');
+    }
+    if (!isTaskCompleted(currentJob, 'profileMaintenance') && config.MEMORY_PROFILE_MAINTENANCE_ENABLED === true) {
+      const runProfileMaintenance = typeof deps.runProfileMaintenance === 'function'
+        ? deps.runProfileMaintenance
+        : getProfileMaintenanceModule().runProfileMemoryMaintenance;
+      logStructured('post_reply_step_start', { ...traceBase, step: 'runProfileMaintenance' });
+      try {
+        const maintenanceResult = await runProfileMaintenance({
+          jobId: normalizeText(job.jobId),
+          userId: normalizeText(job.userId),
+          sessionKey: normalizeText(job.sessionKey),
+          groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
+          intervalMs: config.MEMORY_PROFILE_MAINTENANCE_INTERVAL_MS,
+          limit: config.MEMORY_PROFILE_MAINTENANCE_SAMPLE_SIZE
+        });
+        logStructured('post_reply_step_done', {
+          ...traceBase,
+          step: 'runProfileMaintenance',
+          maintenance: maintenanceResult && typeof maintenanceResult === 'object'
+            ? {
+                ok: maintenanceResult.ok !== false,
+                skipped: Boolean(maintenanceResult.skipped),
+                reason: normalizeText(maintenanceResult.reason),
+                cleanupCandidates: Number(maintenanceResult.cleanupCandidates || 0) || 0,
+                hardDeleteCandidates: Number(maintenanceResult.hardDeleteCandidates || 0) || 0,
+                durationMs: Number(maintenanceResult.durationMs || 0) || 0
+              }
+            : {}
+        });
+      } catch (error) {
+        logStructured('post_reply_step_failed', {
+          ...traceBase,
+          step: 'runProfileMaintenance',
+          error: error?.message || error
+        });
+      }
+      currentJob = markTaskCompleted(currentJob, deps, 'profileMaintenance');
     }
   }
   if (phase === 'enrich' && !isTaskCompleted(currentJob, 'enrich')) {

@@ -627,6 +627,8 @@ npm run check:prompts
 
 更新 2026-05-19 22:33 +08:00：用户画像记忆治理剩余目标已补齐。Memory V3 现在支持显式纠错归档、替代事实重写、忘记命令防召回、近重复画像合并、后台画像维护诊断、召回 lifecycle 加权，以及 `mem profile review/stale/why-injected` 三个画像诊断命令；清理逻辑默认保留审计历史，不做硬删除。
 
+更新 2026-05-19 22:48 +08:00：画像治理剩余实现已提交化：新增 `runProfileMemoryMaintenance` 维护入口、`mem profile review/stale/why-injected` 诊断入口，并补充纠错、近重复和 lifecycle 召回测试，避免过时画像继续进入召回或主回复注入。
+
 ---
 
 ## 测试建议
