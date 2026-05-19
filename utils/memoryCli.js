@@ -88,6 +88,13 @@ const {
   reviewMemories
 } = require('./memoryCli/openSupport');
 
+const {
+  explainProfileInjection,
+  listStaleProfileMemories,
+  reviewProfileMemories
+} = require('./memoryCli/profileDiagnostics');
+
+
 function preloadMemoryCli(options = {}) {
   return ensureSnapshot(options);
 }
@@ -482,6 +489,24 @@ async function runMemoryCli(commandText = '', context = {}) {
     };
   }
 
+  if (!payload && parsed.commandName === 'profile') {
+    if (parsed.action === 'review') {
+      payload = reviewProfileMemories(context, parsed);
+    } else if (parsed.action === 'stale') {
+      payload = listStaleProfileMemories(context, parsed);
+    } else if (parsed.action === 'why-injected') {
+      payload = explainProfileInjection(context, parsed);
+    }
+    if (payload) {
+      payload = {
+        ...payload,
+        rawCommandText: prepared.rawCommandText,
+        normalizedCommandText: prepared.normalizedCommandText,
+        repairApplied: prepared.repairApplied,
+        repairStrategy: prepared.repairStrategy
+      };
+    }
+  }
   if (!payload && parsed.commandName === 'open') {
     let opened = null;
     if (String(config.MEMORY_CLI_SEARCH_ENGINE || 'fast').trim().toLowerCase() !== 'legacy') {

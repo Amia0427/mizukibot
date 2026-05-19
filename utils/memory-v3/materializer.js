@@ -27,6 +27,7 @@ const { collectEmbeddingBackfillNodes, enqueueMissingEmbeddings } = require('./e
 const { acquireMaterializeLock, DEFAULT_STALE_MS: DEFAULT_MATERIALIZE_LOCK_STALE_MS } = require('./materializeLock');
 const { isMemoryNotRecallable } = require('./recallFilter');
 const {
+  applyNearDuplicateMerges,
   applyProfileLifecycle,
   applySupersession,
   isProfileField,
@@ -278,7 +279,7 @@ function materializeMemoryViews(options = {}) {
         : 0;
     }
   }
-  const lifecycleNodes = applySupersession(nodes.map((item) => applyProfileLifecycle(item, { now })));
+  const lifecycleNodes = applyNearDuplicateMerges(applySupersession(nodes.map((item) => applyProfileLifecycle(item, { now }))), { now });
   const activeNodes = lifecycleNodes.filter((item) => item.status !== 'archived' && !isMemoryNotRecallable(item));
   const hiddenRecallNodes = lifecycleNodes
     .filter((item) => item.status !== 'archived' && isMemoryNotRecallable(item))

@@ -304,6 +304,53 @@ function parseReviewArgs(tokens = [], raw = '') {
   };
 }
 
+function parseProfileArgs(tokens = [], raw = '') {
+  const action = sanitizeText(tokens[0] || '').toLowerCase();
+  if (!action) throw new Error(`Unexpected token: missing profile action in ${raw}`);
+  let limit = 20;
+  let query = '';
+
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = String(tokens[i] || '').trim();
+    if (!token) continue;
+
+    if (token === '--limit') {
+      limit = Math.max(1, Math.min(100, Number(tokens[i + 1] || limit) || limit));
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--limit=')) {
+      limit = Math.max(1, Math.min(100, Number(token.slice('--limit='.length)) || limit));
+      continue;
+    }
+    if (token === '--query') {
+      query = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--query=')) {
+      query = sanitizeText(token.slice('--query='.length));
+      continue;
+    }
+
+    throw new Error(`Unexpected token: ${token}`);
+  }
+
+  if (action !== 'review' && action !== 'stale' && action !== 'why-injected') {
+    throw new Error(`Unsupported profile action: ${action}`);
+  }
+  if (action === 'why-injected' && !query) {
+    throw new Error(`Unexpected token: missing profile injection query in ${raw}`);
+  }
+  return {
+    commandName: 'profile',
+    action,
+    limit,
+    query,
+    raw
+  };
+}
+
 function parseMemoryCliCommand(commandText = '') {
   const raw = sanitizeText(commandText);
   if (!raw) throw new Error('memory_cli command must start with "mem"');
@@ -319,6 +366,7 @@ function parseMemoryCliCommand(commandText = '') {
   if (subcommand === 'open') return parseOpenArgs(args, raw);
   if (subcommand === 'remember') return parseRememberArgs(args, raw);
   if (subcommand === 'review') return parseReviewArgs(args, raw);
+  if (subcommand === 'profile') return parseProfileArgs(args, raw);
   if (subcommand === 'ls' || subcommand === 'stats') {
     return { commandName: subcommand, raw };
   }
@@ -357,6 +405,9 @@ function tryRepairPrefix(text = '', repairStrategy = []) {
     } else if (/^review\b/i.test(normalized)) {
       normalized = normalized.replace(/^review\b/i, 'mem review');
       repairStrategy.push('prefix_mem_review');
+    } else if (/^profile\b/i.test(normalized)) {
+      normalized = normalized.replace(/^profile\b/i, 'mem profile');
+      repairStrategy.push('prefix_mem_profile');
     } else if (/^ls\b/i.test(normalized)) {
       normalized = normalized.replace(/^ls\b/i, 'mem ls');
       repairStrategy.push('prefix_mem_ls');
@@ -481,6 +532,7 @@ module.exports = {
   coerceSearchSource,
   parseSearchArgs,
   parseOpenArgs,
+  parseProfileArgs,
   parseRememberArgs,
   parseReviewArgs,
   parseMemoryCliCommand,

@@ -7,6 +7,7 @@ const {
 const { getJournalDocDay } = require('./journalDocs');
 const { rowPassesMemoryFilter } = require('../lancedbMemoryStore');
 const { lifecycleStatusOf } = require('./recallFilter');
+const { applyLifecycleScore } = require('./profileLifecycle');
 const {
   appendSelectionReason,
   buildRecallDiagnostics,
@@ -170,7 +171,7 @@ function diversify(items = [], topK = 8, options = {}) {
   const selectedJournalDays = new Set();
   const facet = normalizeText(options.facet || items.find((item) => item?.facet)?.facet || 'default').toLowerCase();
   const ranked = boostJournalDaySummaryCompanions(
-    protectStrongSemanticCandidates(stableSortByScore(items), topK, options),
+    protectStrongSemanticCandidates(stableSortByScore(items.map((item) => applyLifecycleScore(item, options))), topK, options),
     options
   );
   for (const item of stableSortByScore(ranked)) {
