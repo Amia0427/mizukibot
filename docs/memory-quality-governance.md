@@ -35,6 +35,10 @@
 - `archive`：类型 TTL 已硬过期的 active 记忆，例如旧 topic、任务和短期语境。
 - `keep`：稳定且可复用的事实、偏好、身份、画像和日记 rollup。
 
+## 运维记录
+
+- 2026-05-19 22:24 +08:00：执行 `repair-memory-vector-index --apply --compact`、强制 materialize、`backfill-memory-v3-embeddings --source memory --sync-after`，最终 `pendingRows=0`、`readyButNotSynced=0`、`staleTableRows=0`，`diag:memory audit --limit 5` 硬指标通过。
+
 ## 验收命令
 
 ```bash
