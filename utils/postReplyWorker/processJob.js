@@ -38,6 +38,10 @@ function getMemoryV3Module() {
   return require('../memory-v3');
 }
 
+function getMemoryQualityAuditModule() {
+  return require('../memoryQualityAudit');
+}
+
 function buildLearningMeta(job = {}) {
   const routeMeta = normalizeObject(job.routeMeta, {});
   const evidenceMeta = buildCoreLearningEvidence(job);
@@ -218,6 +222,46 @@ async function processPostReplyJob(job = {}, deps = {}) {
         });
       }
       currentJob = markTaskCompleted(currentJob, deps, 'vectorMaintenance');
+    }
+    if (!isTaskCompleted(currentJob, 'memoryQualityAudit') && config.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED === true) {
+      const runMemoryQualityAudit = typeof deps.runMemoryQualityAudit === 'function'
+        ? deps.runMemoryQualityAudit
+        : getMemoryQualityAuditModule().runMemoryQualityAudit;
+      logStructured('post_reply_step_start', { ...traceBase, step: 'runMemoryQualityAudit' });
+      try {
+        const auditResult = await runMemoryQualityAudit({
+          jobId: normalizeText(job.jobId),
+          userId: normalizeText(job.userId),
+          sessionKey: normalizeText(job.sessionKey),
+          groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
+          sampleSize: config.POST_REPLY_MEMORY_QUALITY_AUDIT_SAMPLE_SIZE,
+          timeoutMs: config.POST_REPLY_MEMORY_QUALITY_AUDIT_TIMEOUT_MS,
+          intervalMs: config.POST_REPLY_MEMORY_QUALITY_AUDIT_INTERVAL_MS
+        }, deps);
+        logStructured('post_reply_step_done', {
+          ...traceBase,
+          step: 'runMemoryQualityAudit',
+          audit: auditResult && typeof auditResult === 'object'
+            ? {
+                ok: auditResult.ok !== false,
+                skipped: Boolean(auditResult.skipped),
+                reason: normalizeText(auditResult.reason),
+                score: Number(auditResult.score ?? 0) || 0,
+                warnings: normalizeArray(auditResult.warnings).length,
+                writeFindings: normalizeArray(auditResult.writeFindings).length,
+                recallFindings: normalizeArray(auditResult.recallFindings).length,
+                durationMs: Number(auditResult.durationMs || 0) || 0
+              }
+            : {}
+        });
+      } catch (error) {
+        logStructured('post_reply_step_failed', {
+          ...traceBase,
+          step: 'runMemoryQualityAudit',
+          error: error?.message || error
+        });
+      }
+      currentJob = markTaskCompleted(currentJob, deps, 'memoryQualityAudit');
     }
   }
   if (phase === 'enrich' && !isTaskCompleted(currentJob, 'enrich')) {
