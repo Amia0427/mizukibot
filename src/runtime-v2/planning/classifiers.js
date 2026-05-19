@@ -39,7 +39,8 @@ function chooseTaskShape(route = {}) {
 function prefersMemoryRecall(cleanText = '') {
   const text = normalizeText(cleanText);
   if (!text) return false;
-  return /(记得|记不记得|前几天|之前|刚才|聊过|说过|我们.*(事情|聊)|回忆|日志)/i.test(text);
+  return /(记得|记不记得|前几天|之前|刚才|聊过|说过|我们.*(事情|聊)|回忆|日志)/i.test(text)
+    || /(?:(?:今天|今日|昨天|昨日|前天|刚刚|刚才).{0,24}(?:我|我们|咱|你)?.{0,24}(?:发|发过|发了|传|贴|给你|给妳|聊|说|讲|提|打|玩|听|看).{0,24}(?:什么|啥|哪些|哪几|图|图片|照片|截图|歌|内容|战绩)|(?:我|我们|咱).{0,24}(?:今天|今日|昨天|昨日|前天|刚刚|刚才).{0,24}(?:发|发过|发了|传|贴|给你|给妳|聊|说|讲|提|打|玩|听|看))/i.test(text);
 }
 
 function isNotebookListingRequest(cleanText = '') {
@@ -48,15 +49,22 @@ function isNotebookListingRequest(cleanText = '') {
   return /(列出|列表|有哪些|都有什么|目录|文档列表|笔记列表|所有笔记|notebook list|list docs?|document list)/i.test(text);
 }
 
+function isNotebookDocumentLookup(cleanText = '') {
+  const text = normalizeText(cleanText);
+  if (!text) return false;
+  return /(知识库|笔记|notebook|notes?|我的文档|我的资料|my notebook|my notes|notes about|document)/i.test(text);
+}
+
 function shouldKeepNotebookAnswerChatOnly(route = {}, options = {}) {
   if (options.allowPlannerCorrection === true) return false;
   const sourceScope = normalizeText(route?.facets?.sourceScope);
   if (sourceScope !== 'notebook') return false;
+  const cleanText = getPlannerRequestText(route);
+  if (prefersMemoryRecall(cleanText) || (route?.intent?.needsMemory === true && !isNotebookDocumentLookup(cleanText))) return false;
   const toolIntent = normalizeText(route?.meta?.toolIntent);
   if (toolIntent === 'force_tools') return false;
   const responseIntent = normalizeText(route?.meta?.responseIntent) || 'answer';
   if (responseIntent !== 'answer') return false;
-  const cleanText = getPlannerRequestText(route);
   if (isNotebookListingRequest(cleanText)) return false;
   if (/(总结|摘要|概括|提炼|梳理|改写|润色|summary|summari[sz]e|recap|outline|rewrite|rephrase)/i.test(cleanText)) return false;
   return true;
@@ -180,6 +188,7 @@ module.exports = {
   isFinanceQuoteRequest,
   isFinanceRumorRequest,
   isFinanceWatchlistRequest,
+  isNotebookDocumentLookup,
   isNotebookListingRequest,
   isSubjectiveOpinionQuestion,
   isWeatherRequest,

@@ -72,7 +72,7 @@ assert.strictEqual(notebookLookupRoute.meta.responseIntent, 'answer');
 assert.strictEqual(notebookLookupRoute.facets.sourceScope, 'notebook');
 assert.strictEqual(notebookLookupRoute.meta.localRuleId, 'direct-chat');
 assert.strictEqual(notebookLookupRoute.meta.toolIntent, 'maybe_tools');
-assert.deepStrictEqual(notebookLookupRoute.meta.allowedTools, ['notebook_search', 'notebook_list_docs']);
+assert.deepStrictEqual(notebookLookupRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
 
 const recapRoute = detectIntent({
   rawText: '宝说一下我今天和你说的',
@@ -85,7 +85,7 @@ assert.strictEqual(recapRoute.topRouteType, 'direct_chat');
 assert.strictEqual(recapRoute.facets.sourceScope, 'notebook');
 assert.strictEqual(recapRoute.facets.freshness, 'unknown');
 assert.strictEqual(recapRoute.intent.needsMemory, true);
-assert.deepStrictEqual(recapRoute.meta.allowedTools, ['notebook_search', 'notebook_list_docs']);
+assert.deepStrictEqual(recapRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
 assert.strictEqual(recapRoute.meta.toolIntent, 'maybe_tools');
 
 const todaySongRoute = detectIntent({
@@ -99,7 +99,7 @@ assert.strictEqual(todaySongRoute.topRouteType, 'direct_chat');
 assert.strictEqual(todaySongRoute.facets.sourceScope, 'notebook');
 assert.strictEqual(todaySongRoute.facets.freshness, 'unknown');
 assert.strictEqual(todaySongRoute.intent.needsMemory, true);
-assert.deepStrictEqual(todaySongRoute.meta.allowedTools, ['notebook_search', 'notebook_list_docs']);
+assert.deepStrictEqual(todaySongRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
 assert.strictEqual(todaySongRoute.meta.toolIntent, 'maybe_tools');
 
 const textOnlyPlanRoute = detectIntent({

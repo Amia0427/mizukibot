@@ -8,6 +8,13 @@ process.env.DATA_DIR = tempRoot;
 process.env.IMAGE_MEMORY_INDEX_FILE = path.join(tempRoot, 'image_memory_index.json');
 process.env.IMAGE_MEMORY_RECALL_ENABLED = 'true';
 process.env.MEMORY_SCOPE_INDEX_FILE = path.join(tempRoot, 'memory_scope_index.json');
+process.env.MEMORY_V3_DIR = path.join(tempRoot, 'memory-v3');
+process.env.MEMORY_V3_EVENTS_DIR = path.join(process.env.MEMORY_V3_DIR, 'events');
+process.env.MEMORY_V3_PROJECTIONS_DIR = path.join(process.env.MEMORY_V3_DIR, 'projections');
+process.env.MEMORY_CLI_SEARCH_ENGINE = 'fast';
+process.env.MEMORY_CLI_PRELOAD = 'false';
+process.env.MEMORY_HYBRID_RECALL_ENABLED = 'false';
+process.env.MEMORY_EMBEDDING_MODEL = '';
 
 fs.mkdirSync(path.join(tempRoot, 'inbound_image_cache'), { recursive: true });
 fs.writeFileSync(path.join(tempRoot, 'inbound_image_cache', 'cat_img.bin'), Buffer.from('fake-cat'));
@@ -44,6 +51,19 @@ upsertImageMemory({
   summary: '群里的服务器部署截图',
   messageId: 'm_group'
 });
+const scoreImageTime = Date.parse('2026-05-19T16:57:02+08:00');
+upsertImageMemory({
+  cacheKey: 'score_blank_img',
+  imageRef: 'cached-image://score_blank_img',
+  mediaType: 'image/png',
+  userId: 'u_img',
+  groupId: 'g_img',
+  userText: '[图片] 宝',
+  messageId: 'm_score',
+  observedAt: scoreImageTime,
+  createdAt: scoreImageTime,
+  lastSeenAt: scoreImageTime
+});
 
 module.exports = (async () => {
   const search = await runMemoryCli('mem search --source image --query "橘猫"', {
@@ -77,6 +97,15 @@ module.exports = (async () => {
   });
   assert.strictEqual(blockedGroupSearch.ok, true);
   assert.strictEqual(blockedGroupSearch.results.length, 0);
+
+  const implicitImageSearch = await runMemoryCli('mem search --query "今天发给你什么战绩图了" --limit 5', {
+    userId: 'u_img',
+    groupId: 'g_img',
+    now: '2026-05-20T00:16:00+08:00'
+  });
+  assert.strictEqual(implicitImageSearch.ok, true);
+  assert.ok(implicitImageSearch.results.some((item) => item.source === 'image' && item.id === 'score_blank_img'));
+  assert.ok(implicitImageSearch.sourceCoverage.image >= 1);
 
   console.log('memoryCliImageRecall.test.js passed');
 })().catch((error) => {

@@ -15,6 +15,7 @@ const {
   isFinanceQuoteRequest,
   isFinanceRumorRequest,
   isFinanceWatchlistRequest,
+  isNotebookDocumentLookup,
   isNotebookListingRequest,
   isSubjectiveOpinionQuestion,
   isWeatherRequest,
@@ -177,7 +178,7 @@ function requiresToolEvidence(route = {}) {
   if (isConversationalNoop(cleanText)) return false;
   if (isSubjectiveOpinionQuestion(route)) return false;
   if (shouldKeepNotebookAnswerChatOnly(route)) return false;
-  if (shouldPrioritizeMemoryProbe(route)) return true;
+  if (shouldPrioritizeMemoryProbe(route) && !isNotebookDocumentLookup(cleanText)) return true;
   if (prefersMemoryRecall(cleanText)) return true;
   if (normalizeText(route?.facets?.domain) === 'time') return true;
   const freshness = normalizeText(route?.facets?.freshness);
@@ -213,15 +214,15 @@ function pickMinimalToolAllowlist(route = {}, available = {}) {
   }
   if (shouldPrioritizeContextStats(route, allowed)) {
     const selected = ['get_context_stats'];
-    if (shouldPrioritizeMemoryProbe(route) && allowed.includes('memory_cli')) selected.push('memory_cli');
+    if (shouldPrioritizeMemoryProbe(route) && !isNotebookDocumentLookup(cleanText) && allowed.includes('memory_cli')) selected.push('memory_cli');
     return selected;
   }
   if (shouldKeepNotebookAnswerChatOnly(route, available)) return [];
-  if (shouldPrioritizeMemoryProbe(route) && allowed.includes('memory_cli')) return ['memory_cli'];
+  if (shouldPrioritizeMemoryProbe(route) && !isNotebookDocumentLookup(cleanText) && allowed.includes('memory_cli')) return ['memory_cli'];
   if (prefersMemoryRecall(cleanText) && allowed.includes('memory_cli')) return ['memory_cli'];
   const sourceScope = normalizeText(route?.facets?.sourceScope);
   if (hasExplicitHttpUrl(cleanText) && allowed.includes('url_safety_check') && !allowed.includes('web_fetch')) return ['url_safety_check'];
-  if ((sourceScope === 'notebook' || Boolean(route?.intent?.needsMemory)) && allowed.includes('memory_cli')) return ['memory_cli'];
+  if ((sourceScope === 'notebook' || Boolean(route?.intent?.needsMemory)) && !isNotebookDocumentLookup(cleanText) && allowed.includes('memory_cli')) return ['memory_cli'];
   if ((normalizeText(route?.facets?.freshness) === 'latest' || sourceScope === 'web' || sourceScope === 'live') && allowed.includes('web_search')) {
     return needsWebDetailFetch(route) && allowed.includes('web_fetch')
       ? ['web_search', 'web_fetch']

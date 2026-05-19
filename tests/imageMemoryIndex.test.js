@@ -103,4 +103,47 @@ assert.strictEqual(searchImageMemories('私聊暗号', { userId: 'u_allowed' }).
 assert.strictEqual(searchImageMemories('公开说明', { userId: 'u_allowed' }).length, 1);
 assert.strictEqual(searchImageMemories('私聊暗号', { userId: 'u_owner' }).length, 1);
 
+const scoreImageTime = Date.parse('2026-05-19T16:57:02+08:00');
+upsertImageMemory({
+  cacheKey: 'img_score_blank',
+  imageRef: 'cached-image://img_score_blank',
+  userId: 'u_owner',
+  groupId: 'g_allowed',
+  userText: '[图片] 宝',
+  messageId: 'score1',
+  observedAt: scoreImageTime,
+  createdAt: scoreImageTime,
+  lastSeenAt: scoreImageTime
+});
+upsertImageMemory({
+  cacheKey: 'img_score_old',
+  imageRef: 'cached-image://img_score_old',
+  userId: 'u_owner',
+  groupId: 'g_allowed',
+  userText: '[图片] 宝',
+  messageId: 'score_old',
+  observedAt: Date.parse('2026-05-18T16:57:02+08:00'),
+  createdAt: Date.parse('2026-05-18T16:57:02+08:00'),
+  lastSeenAt: Date.parse('2026-05-18T16:57:02+08:00')
+});
+upsertImageMemory({
+  cacheKey: 'img_score_future',
+  imageRef: 'cached-image://img_score_future',
+  userId: 'u_owner',
+  groupId: 'g_allowed',
+  userText: '[图片] 事后讨论',
+  messageId: 'score_future',
+  observedAt: Date.parse('2026-05-20T00:30:00+08:00'),
+  createdAt: Date.parse('2026-05-20T00:30:00+08:00'),
+  lastSeenAt: Date.parse('2026-05-20T00:30:00+08:00')
+});
+const scoreHits = searchImageMemories('今天发给你什么战绩图了', {
+  userId: 'u_owner',
+  groupId: 'g_allowed',
+  now: '2026-05-20T00:16:00+08:00'
+});
+assert.strictEqual(scoreHits[0].cacheKey, 'img_score_blank');
+assert.ok(scoreHits.every((item) => item.cacheKey !== 'img_score_old'));
+assert.ok(scoreHits.every((item) => item.cacheKey !== 'img_score_future'));
+
 console.log('imageMemoryIndex.test.js passed');
