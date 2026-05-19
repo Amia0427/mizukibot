@@ -1,28 +1,18 @@
-const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const axios = require('axios');
 const config = require('../config');
 const { extractSSEEvents, flushSSEState } = require('./parser');
 const { sendGroupImageMessage } = require('./qqActionService');
 const {
-  appendRequestTraceEvent,
   extractErrorCode,
-  extractHttpStatus,
-  nextTracePhase,
-  normalizeRequestTrace
+  extractHttpStatus
 } = require('../utils/requestTrace');
 const {
-  appendTextFileSafe,
   ensureDirSync,
   readJsonFileSafe,
   writeJsonFileSafe
 } = require('./createAgent/fileState');
-const {
-  detectImageExtension,
-  normalizeBase64ImageData,
-  validateImageBuffer
-} = require('./createAgent/imageValidation');
+const { detectImageExtension } = require('./createAgent/imageValidation');
 const {
   extractUrlFromText,
   looksLikeHtmlDocument,
@@ -61,85 +51,25 @@ const {
   releaseRuntimeSlot,
   tryAcquireRuntimeSlot
 } = require('./createAgent/quotaRuntime');
-
-const DEFAULT_IMAGE_EXTENSION = '.png';
-const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
-const CREATE_AGENT_STREAM_PARTIAL_IMAGES = 1;
-
-function normalizePromptText(prompt = '') {
-  return String(prompt || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function buildResolutionQualityClause(imageSize = '') {
-  const normalizedSize = normalizeRequestedImageSize(imageSize);
-  const sizeMatch = normalizedSize.match(/^(\d{2,5})x(\d{2,5})$/i);
-  if (!sizeMatch) {
-    return 'Target native high-resolution clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
-  }
-
-  const width = Number(sizeMatch[1] || 0);
-  const height = Number(sizeMatch[2] || 0);
-  const longestEdge = Math.max(width, height);
-  if (longestEdge >= 3840) {
-    return 'Target true 4K-class clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
-  }
-  if (longestEdge >= 2048) {
-    return 'Target true 2K-class clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
-  }
-  if (longestEdge >= 1536) {
-    return 'Target high-resolution clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
-  }
-  return 'Target clean high-resolution clarity with strong micro-detail preservation, clean edges, precise textures, and high subject-background separation.';
-}
-
-function buildCreateAgentPrompt(rawPrompt = '', options = {}) {
-  const prompt = normalizePromptText(rawPrompt);
-  if (!prompt) return '';
-
-  const effectiveSize = normalizeRequestedImageSize(options.imageSize || '');
-  const hasSizeHint = /(1024|1536|2048|4096|1k|2k|4k|1080p|high[- ]?res|high resolution|ultra)/i.test(prompt);
-  const hasPhotoHint = /(照片|摄影|真实|写实|photoreal|photo[- ]?real|iphone photo|realistic)/i.test(prompt);
-  const hasNoTextHint = /(不要文字|无文字|no text|without text|不要水印|no watermark)/i.test(prompt);
-  const hasCompositionHint = /(竖图|横图|方图|portrait|landscape|square|9:16|16:9|手机截图|海报|poster|screenshot)/i.test(prompt);
-  const hasSharpnessHint = /(清晰|锐利|锐度|sharp|crisp|high detail|fine detail|ultra detailed|detailed skin|clean lineart|clean linework)/i.test(prompt);
-  const hasAntiBlurHint = /(不要模糊|避免模糊|no blur|avoid blur|sharp focus|in focus|clear edges|anti[- ]blur)/i.test(prompt);
-
-  const clauses = [prompt];
-  if (!hasPhotoHint) {
-    clauses.push('Use clean composition and natural lighting with coherent details.');
-  }
-  if (!hasSharpnessHint) {
-    clauses.push('Prioritize crisp focus, sharp edges, clean linework, high local contrast, and dense fine details.');
-  }
-  if (!hasAntiBlurHint) {
-    clauses.push('Avoid blur, softness, haze, washed-out textures, smeared details, and low-detail backgrounds.');
-  }
-  clauses.push(buildResolutionQualityClause(effectiveSize));
-  clauses.push('Preserve facial features, eyes, hands, hair strands, clothing textures, object edges, and small foreground details without mushiness.');
-  if (!hasNoTextHint) {
-    clauses.push('No text, watermark, UI, screenshot, or logo.');
-  }
-  if (!hasCompositionHint) {
-    clauses.push('Render it as a polished single-image composition.');
-  }
-  if (!hasSizeHint) {
-    clauses.push(`Prefer a polished single-image composition suitable for a ${effectiveSize === 'auto' ? 'native high-quality image output' : effectiveSize + ' output'}.`);
-  }
-  return clauses.join(' ');
-}
-
-function buildOutputBasename(prompt = '') {
-  const datePart = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
-  const normalized = normalizePromptText(prompt)
-    .toLowerCase()
-    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
-  const suffix = crypto.randomBytes(3).toString('hex');
-  return `${datePart}-${normalized || 'create'}-${suffix}`;
-}
+const {
+  normalizePromptText,
+  buildCreateAgentPrompt
+} = require('./createAgent/promptBuilder');
+const {
+  buildChatCompletionsImageRequestBody,
+  buildImageGenerationRequestBodyVariants
+} = require('./createAgent/requestBodies');
+const {
+  getCreateAgentRequestTrace,
+  emitCreateAgentTrace,
+  buildCreateAgentTracePayload,
+  logCreateAgentError
+} = require('./createAgent/tracing');
+const {
+  MAX_IMAGE_BYTES,
+  downloadImageFromUrl,
+  materializeGeneratedImage
+} = require('./createAgent/materializeImage');
 
 function validateCreateAgentPrerequisites(runtimeConfig = {}) {
   if (!runtimeConfig.apiBaseUrl) {
@@ -158,183 +88,6 @@ function getCreateAgentStreamTimeoutMs(runtimeConfig = {}) {
   const requestStreamTimeoutMs = Math.max(1000, Number(config.REQUEST_STREAM_TIMEOUT_MS || 0) || 0);
   const firstTokenTimeoutMs = Math.max(1000, Number(config.AI_STREAM_FIRST_TOKEN_TIMEOUT_MS || 0) || 0);
   return Math.max(configuredTimeoutMs, requestStreamTimeoutMs, firstTokenTimeoutMs, 420000);
-}
-
-function getCreateAgentRequestTrace(deps = {}, context = {}) {
-  return normalizeRequestTrace(deps.requestTrace)
-    || normalizeRequestTrace(context.requestTrace)
-    || normalizeRequestTrace(context.routeMeta?.requestTrace);
-}
-
-function emitCreateAgentTrace(trace = null, stage = '', payload = {}) {
-  const requestTrace = normalizeRequestTrace(trace);
-  if (!requestTrace) return;
-  appendRequestTraceEvent(nextTracePhase(requestTrace, stage || 'create_agent', {
-    tracePhase: stage || 'create_agent',
-    stage: stage || 'create_agent',
-    source: 'createAgentExecutor',
-    ...payload
-  }));
-}
-
-function buildCreateAgentTracePayload(runtimeConfig = {}, requestUrl = '', extra = {}) {
-  return {
-    provider: 'openai_compatible',
-    model: String(runtimeConfig.model || '').trim(),
-    requestUrl: String(requestUrl || '').trim(),
-    protocol: String(runtimeConfig.protocol || 'images').trim(),
-    cache: null,
-    fallbackActive: false,
-    ...extra
-  };
-}
-
-function logCreateAgentError(runtimeConfig = {}, context = {}, error = null) {
-  const fallbackRequestUrl = runtimeConfig.protocol === 'chat_completions'
-    ? buildCreateAgentChatCompletionsUrl(runtimeConfig.apiBaseUrl)
-    : buildCreateAgentGenerationUrl(runtimeConfig.apiBaseUrl);
-  const napcatRetcode = Number.isFinite(Number(error?.retcode)) ? Number(error.retcode) : null;
-  const line = JSON.stringify({
-    ts: new Date().toISOString(),
-    prompt: normalizePromptText(context.prompt || context.payload || '').slice(0, 500),
-    groupId: String(context.groupId || '').trim(),
-    senderId: String(context.senderId || '').trim(),
-    model: String(runtimeConfig.model || '').trim(),
-    apiBaseUrl: String(runtimeConfig.apiBaseUrl || '').trim(),
-    protocol: String(runtimeConfig.protocol || 'images').trim(),
-    requestedImageSize: String(runtimeConfig.requestedImageSize || '').trim(),
-    effectiveImageSize: String(runtimeConfig.imageSize || '').trim(),
-    requestUrl: String(context.requestUrl || fallbackRequestUrl).trim(),
-    backend: runtimeConfig.protocol === 'chat_completions' ? 'openai_chat_completions' : 'openai_images',
-    responsePreview: String(context.responsePreview || '').trim(),
-    error: String(error?.message || error || '').trim(),
-    errorName: String(error?.name || '').trim(),
-    errorCode: String(error?.code || '').trim(),
-    napcatAction: String(error?.action || '').trim(),
-    napcatStatus: String(error?.status || '').trim(),
-    napcatRetcode,
-    napcatData: error?.data === undefined ? '' : summarizePayloadShape(error.data)
-  });
-  appendTextFileSafe(runtimeConfig.errorLogFile, `${line}\n`);
-}
-
-function buildImageOutputPath(runtimeConfig = {}, prompt = '', buffer = Buffer.alloc(0), mimeType = '') {
-  const extension = detectImageExtension(buffer, DEFAULT_IMAGE_EXTENSION, mimeType);
-  return path.join(runtimeConfig.outputDir, `${buildOutputBasename(prompt)}${extension}`);
-}
-
-function buildImageGenerationRequestBody(prompt = '', runtimeConfig = {}, options = {}) {
-  const body = {
-    model: runtimeConfig.model,
-    prompt,
-    size: runtimeConfig.imageSize,
-    quality: runtimeConfig.imageQuality,
-    style: runtimeConfig.imageStyle,
-    background: runtimeConfig.imageBackground,
-    output_format: runtimeConfig.outputFormat,
-    output_compression: runtimeConfig.imageOutputCompression,
-    response_format: runtimeConfig.responseFormat
-  };
-
-  if (options.stream) {
-    body.stream = true;
-    body.partial_images = Math.max(
-      0,
-      Math.min(3, Number(options.partialImages ?? CREATE_AGENT_STREAM_PARTIAL_IMAGES) || 0)
-    );
-  }
-  return body;
-}
-
-function buildChatCompletionsImagePrompt(prompt = '', runtimeConfig = {}) {
-  const responseFormat = String(runtimeConfig.responseFormat || 'b64_json').trim().toLowerCase();
-  const lines = [
-    'Generate exactly one high-quality image that follows the prompt below.',
-    `Prompt: ${String(prompt || '').trim()}`,
-    `Image size: ${String(runtimeConfig.imageSize || '1024x1024').trim()}`,
-    `Quality: ${String(runtimeConfig.imageQuality || 'high').trim()}`,
-    `Style: ${String(runtimeConfig.imageStyle || 'vivid').trim()}`,
-    `Background: ${String(runtimeConfig.imageBackground || 'auto').trim()}`,
-    `Output format: ${String(runtimeConfig.outputFormat || 'png').trim()}`,
-    `Response format preference: ${responseFormat}`,
-    responseFormat === 'url'
-      ? 'Return only a direct image URL or a data:image/... URL when possible. Do not return prose.'
-      : 'If returning JSON, return one complete final image payload such as {"b64_json":"..."} without truncation or splitting across content blocks.',
-    'Return image output only.'
-  ];
-  return lines.join('\n');
-}
-
-function buildChatCompletionsImageRequestBody(prompt = '', runtimeConfig = {}, options = {}) {
-  return {
-    model: runtimeConfig.model,
-    messages: [
-      {
-        role: 'user',
-        content: buildChatCompletionsImagePrompt(prompt, runtimeConfig)
-      }
-    ],
-    stream: Boolean(options.stream)
-  };
-}
-
-function omitObjectKeys(source = {}, keys = []) {
-  const next = { ...(source && typeof source === 'object' ? source : {}) };
-  for (const key of (Array.isArray(keys) ? keys : [])) {
-    delete next[String(key || '').trim()];
-  }
-  return next;
-}
-
-function pickObjectKeys(source = {}, keys = []) {
-  const next = {};
-  const rawSource = source && typeof source === 'object' ? source : {};
-  for (const key of (Array.isArray(keys) ? keys : [])) {
-    const normalizedKey = String(key || '').trim();
-    if (!normalizedKey) continue;
-    if (!Object.prototype.hasOwnProperty.call(rawSource, normalizedKey)) continue;
-    next[normalizedKey] = rawSource[normalizedKey];
-  }
-  return next;
-}
-
-function buildImageGenerationRequestBodyVariants(prompt = '', runtimeConfig = {}, options = {}) {
-  const fullBody = buildImageGenerationRequestBody(prompt, runtimeConfig, options);
-  const variants = [
-    fullBody,
-    omitObjectKeys(fullBody, ['style']),
-    omitObjectKeys(fullBody, ['style', 'background']),
-    omitObjectKeys(fullBody, ['style', 'background', 'output_format', 'output_compression']),
-    omitObjectKeys(fullBody, ['style', 'background', 'output_format', 'output_compression', 'quality']),
-    omitObjectKeys(fullBody, ['style', 'background', 'output_format', 'output_compression', 'quality', 'response_format'])
-  ];
-
-  if (options.stream) {
-    variants.push(
-      omitObjectKeys(fullBody, [
-        'style',
-        'background',
-        'output_format',
-        'output_compression',
-        'quality',
-        'response_format',
-        'partial_images'
-      ])
-    );
-    variants.push(pickObjectKeys(fullBody, ['model', 'prompt', 'size', 'stream']));
-    variants.push(pickObjectKeys(fullBody, ['model', 'prompt', 'stream']));
-  } else {
-    variants.push(pickObjectKeys(fullBody, ['model', 'prompt', 'size']));
-    variants.push(pickObjectKeys(fullBody, ['model', 'prompt']));
-  }
-
-  const seen = new Set();
-  return variants.filter((variant) => {
-    const key = JSON.stringify(variant);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 function isImageGenerationParameterCompatibilityError(error = null) {
@@ -445,66 +198,6 @@ function buildImageGenerationRequestOptions(runtimeConfig = {}, options = {}) {
       ).trim() || 'Mozilla/5.0'
     }
   };
-}
-
-function writeImageBuffer(runtimeConfig = {}, prompt = '', buffer = Buffer.alloc(0), mimeType = '') {
-  validateImageBuffer(buffer, mimeType);
-  const outputPath = buildImageOutputPath(runtimeConfig, prompt, buffer, mimeType);
-  fs.writeFileSync(outputPath, buffer);
-  return outputPath;
-}
-
-async function downloadImageFromUrl(imageUrl = '', prompt = '', runtimeConfig = {}, deps = {}) {
-  const rawUrl = String(imageUrl || '').trim();
-  if (!rawUrl) {
-    throw new Error('generation response missing image data');
-  }
-
-  const dataUrlMatch = rawUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i);
-  if (dataUrlMatch) {
-    const buffer = Buffer.from(normalizeBase64ImageData(dataUrlMatch[2] || ''), 'base64');
-    const filePath = writeImageBuffer(runtimeConfig, prompt, buffer, dataUrlMatch[1]);
-    return { filePath, buffer };
-  }
-
-  const httpClient = deps.httpClient || axios;
-  try {
-    const response = await httpClient.get(rawUrl, {
-      responseType: 'arraybuffer',
-      timeout: runtimeConfig.timeoutMs,
-      maxContentLength: MAX_IMAGE_BYTES,
-      maxBodyLength: MAX_IMAGE_BYTES,
-      proxy: false
-    });
-    const buffer = Buffer.from(response?.data || []);
-    const filePath = writeImageBuffer(
-      runtimeConfig,
-      prompt,
-      buffer,
-      String(response?.headers?.['content-type'] || '').trim()
-    );
-    return { filePath, buffer };
-  } catch (error) {
-    throw new Error(normalizeRequestError(error));
-  }
-}
-
-async function materializeGeneratedImage(imageResult = null, prompt = '', runtimeConfig = {}, deps = {}) {
-  if (!imageResult || typeof imageResult !== 'object') {
-    throw new Error('generation response missing image data');
-  }
-
-  if (imageResult.kind === 'b64_json') {
-    const buffer = Buffer.from(normalizeBase64ImageData(imageResult.value || ''), 'base64');
-    const filePath = writeImageBuffer(runtimeConfig, prompt, buffer);
-    return { filePath, buffer };
-  }
-
-  if (imageResult.kind === 'url') {
-    return downloadImageFromUrl(imageResult.value, prompt, runtimeConfig, deps);
-  }
-
-  throw new Error('generation response missing image data');
 }
 
 async function requestImageGeneration(prompt = '', runtimeConfig = {}, deps = {}) {
