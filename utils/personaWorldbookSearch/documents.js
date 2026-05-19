@@ -1,0 +1,107 @@
+const fs = require('fs');
+const path = require('path');
+const config = require('../../config');
+const {
+  normalizeText,
+  clampText
+} = require('../memory-v3/helpers');
+
+const DEFAULT_DOC_MAX_CHARS = 1200;
+const WORLD_BOOK_PREFIX = 'persona_worldbook/';
+
+function normalizeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeModuleCatalogItem(item = {}) {
+  return {
+    id: normalizeText(item.id || item.moduleId),
+    path: normalizeText(item.path),
+    purpose: normalizeText(item.purpose),
+    triggerHints: normalizeArray(item.triggerHints).map((entry) => normalizeText(entry)).filter(Boolean),
+    tokenCost: Math.max(0, Number(item.tokenCost || 0) || 0),
+    priority: Number.isFinite(Number(item.priority)) ? Number(item.priority) : 100,
+    conflictsWith: normalizeArray(item.conflictsWith).map((entry) => normalizeText(entry)).filter(Boolean),
+    phase: normalizeText(item.phase, 'all'),
+    slot: normalizeText(item.slot, 'general')
+  };
+}
+
+function isWorldbookModule(item = {}) {
+  const moduleId = normalizeText(item.id || item.moduleId);
+  const relPath = normalizeText(item.path).replace(/\\/g, '/');
+  return Boolean(moduleId) && relPath.startsWith(WORLD_BOOK_PREFIX);
+}
+
+function getWorldbookModules(catalog = { modules: [] }) {
+  return normalizeArray(catalog.modules)
+    .map(normalizeModuleCatalogItem)
+    .filter(isWorldbookModule);
+}
+
+function safeReadText(filePath = '') {
+  try {
+    if (!fs.existsSync(filePath)) return '';
+    return fs.readFileSync(filePath, 'utf8');
+  } catch (_) {
+    return '';
+  }
+}
+
+function getModuleFilePath(item = {}) {
+  const relPath = normalizeText(item.path).replace(/\\/g, '/');
+  if (!relPath) return '';
+  return path.join(config.PROMPTS_DIR, ...relPath.split('/'));
+}
+
+function getFileMeta(filePath = '') {
+  try {
+    const stat = fs.statSync(filePath);
+    return {
+      fileMtimeMs: Number(stat.mtimeMs || 0) || 0,
+      fileSize: Number(stat.size || 0) || 0
+    };
+  } catch (_) {
+    return {
+      fileMtimeMs: 0,
+      fileSize: 0
+    };
+  }
+}
+
+function buildWorldbookSearchText(item = {}) {
+  const filePath = getModuleFilePath(item);
+  const fileText = safeReadText(filePath);
+  return clampText([
+    item.id,
+    item.purpose,
+    normalizeArray(item.triggerHints).join(' '),
+    path.basename(normalizeText(item.path)),
+    fileText
+  ].filter(Boolean).join('\n'), DEFAULT_DOC_MAX_CHARS);
+}
+
+function buildWorldbookDocuments(catalog = { modules: [] }) {
+  return getWorldbookModules(catalog)
+    .map((item) => {
+      const filePath = getModuleFilePath(item);
+      const text = buildWorldbookSearchText(item);
+      if (!text) return null;
+      return {
+        ...item,
+        moduleId: item.id,
+        filePath,
+        text,
+        ...getFileMeta(filePath)
+      };
+    })
+    .filter(Boolean);
+}
+
+module.exports = {
+  DEFAULT_DOC_MAX_CHARS,
+  WORLD_BOOK_PREFIX,
+  buildWorldbookDocuments,
+  getWorldbookModules,
+  isWorldbookModule
+};
