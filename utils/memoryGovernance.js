@@ -3,198 +3,52 @@ const path = require('path');
 const config = require('../config');
 const { rebuildMemoryIndex } = require('./vectorMemory');
 const { loadProjection, runMemoryMigration, saveProjection } = require('./memoryProjection');
+const {
+  DEFAULTS,
+  normalizeStringArray,
+  normalizeText,
+  nowTs
+} = require('./memoryGovernance/common');
+const { createMemoryGovernanceConflictHandlers } = require('./memoryGovernance/conflicts');
 const { createMemoryGovernancePlanHelpers } = require('./memoryGovernance/plan');
+const { createPostReplyLearningRollback } = require('./memoryGovernance/postReplyRollback');
+const { createMemoryGovernanceStore } = require('./memoryGovernance/store');
 
 const ITEMS_FILE = path.join(config.DATA_DIR, 'memory_items.json');
 const SNAPSHOT_DIR = path.join(config.DATA_DIR, 'memory_snapshots');
 
-const DEFAULTS = {
-  mode: 'balanced',
-  action: 'archive',
-  minConfidence: 0.72,
-  topicTtlDays: 21,
-  dedupeThreshold: 0.9
-};
-
-function nowTs() {
-  return Date.now();
-}
-
-function safeReadJson(filePath, fallback) {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    if (!raw || !raw.trim()) return fallback;
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('[memoryGovernance] read json failed:', filePath, e.message);
-    return fallback;
-  }
-}
-
-function atomicWriteJson(filePath, obj) {
-  const tmp = `${filePath}.${process.pid}.tmp`;
-  const text = JSON.stringify(obj, null, 2);
-  try {
-    fs.writeFileSync(tmp, text, 'utf-8');
-    fs.renameSync(tmp, filePath);
-  } catch (e) {
-    try {
-      fs.writeFileSync(filePath, text, 'utf-8');
-    } finally {
-      try {
-        if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
-      } catch (_) {}
-    }
-    if (e.code !== 'EPERM' && e.code !== 'EXDEV') throw e;
-  }
-}
-
-function ensureSnapshotDir() {
-  if (!fs.existsSync(SNAPSHOT_DIR)) {
-    fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
-  }
-}
-
-function resolveSnapshotPath(snapshotFile) {
-  const name = String(snapshotFile || '').trim();
-  if (!name) throw new Error('snapshot file is required');
-  // Keep snapshot names strict to avoid ../ traversal and arbitrary file reads.
-  if (path.basename(name) !== name) throw new Error('invalid snapshot file name');
-  if (!/^memory_items_.*\.json$/i.test(name)) throw new Error('invalid snapshot file name');
-
-  const root = path.resolve(SNAPSHOT_DIR);
-  const fullPath = path.resolve(path.join(SNAPSHOT_DIR, name));
-  const rel = path.relative(root, fullPath);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
-    throw new Error('snapshot file must stay inside snapshot dir');
-  }
-  return { name, fullPath };
-}
-
-function loadLibrary() {
-  const fallback = { version: 2, items: [] };
-  const data = safeReadJson(ITEMS_FILE, fallback);
-  if (!data || typeof data !== 'object') return fallback;
-  if (!Array.isArray(data.items)) data.items = [];
-  return { version: 2, items: data.items };
-}
-
-function saveLibrary(library) {
-  atomicWriteJson(ITEMS_FILE, {
-    version: 2,
-    items: Array.isArray(library?.items) ? library.items : []
-  });
-}
-
-function normalizeText(text) {
-  return String(text || '').replace(/\s+/g, ' ').trim();
-}
-
-function normalizeStringArray(values = []) {
-  const list = Array.isArray(values) ? values : [values];
-  return Array.from(new Set(list.map((item) => normalizeText(item)).filter(Boolean)));
-}
-
 const {
+  canonicalizeText,
+  clamp,
   buildGovernancePlan,
   mergeIntoKeeper
 } = createMemoryGovernancePlanHelpers({
   defaults: DEFAULTS,
   nowTs
 });
-
-function listConflictGroups(filters = {}) {
-  const userId = normalizeText(filters.userId || filters.user_id);
-  const items = loadLibrary().items
-    .filter((item) => !userId || String(item.userId || '') === userId)
-    .filter((item) => String(item.conflictKey || '').trim());
-
-  const groups = new Map();
-  for (const item of items) {
-    const key = String(item.conflictKey || '').trim();
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
-  }
-
-  return Array.from(groups.entries())
-    .map(([conflictKey, list]) => {
-      const sorted = list
-        .slice()
-        .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0));
-      return {
-        conflictKey,
-        userId: String(sorted[0]?.userId || ''),
-        size: sorted.length,
-        items: sorted.map((item) => ({
-          id: item.id,
-          text: item.text,
-          type: item.type,
-          status: item.status,
-          sourceKind: item.sourceKind,
-          confidence: item.confidence,
-          importance: item.importance,
-          tier: item.tier,
-          updatedAt: item.updatedAt || item.createdAt || 0
-        }))
-      };
-    })
-    .filter((row) => row.items.length > 1)
-    .sort((a, b) => b.size - a.size || String(a.conflictKey).localeCompare(String(b.conflictKey)));
-}
-
-function resolveConflictGroup(conflictKey = '', winnerId = '') {
-  const key = normalizeText(conflictKey);
-  const chosenWinnerId = normalizeText(winnerId);
-  if (!key) throw new Error('conflictKey is required');
-  if (!chosenWinnerId) throw new Error('winnerId is required');
-
-  const library = loadLibrary();
-  let foundWinner = false;
-  let changed = 0;
-
-  for (const item of library.items) {
-    if (String(item.conflictKey || '').trim() !== key) continue;
-    if (String(item.id || '').trim() === chosenWinnerId) {
-      item.status = 'active';
-      item.updatedAt = nowTs();
-      item.meta = {
-        ...(item.meta || {}),
-        resolvedByGovernance: true,
-        resolvedConflictKey: key
-      };
-      foundWinner = true;
-      changed += 1;
-      continue;
-    }
-
-    if (String(item.status || '').trim().toLowerCase() !== 'archived') {
-      item.status = 'archived';
-      item.updatedAt = nowTs();
-      item.meta = {
-        ...(item.meta || {}),
-        archivedReason: 'governance_conflict_resolution',
-        resolvedConflictKey: key,
-        winnerId: chosenWinnerId
-      };
-      changed += 1;
-    }
-  }
-
-  if (!foundWinner) throw new Error('winnerId not found in conflict group');
-  if (changed > 0) {
-    saveLibrary(library);
-    rebuildMemoryIndex(library);
-    saveProjection();
-  }
-
-  return {
-    ok: true,
-    conflictKey: key,
-    winnerId: chosenWinnerId,
-    changed
-  };
-}
+const {
+  createSnapshot,
+  ensureSnapshotDir,
+  listSnapshots,
+  loadLibrary,
+  resolveSnapshotPath,
+  safeReadJson,
+  saveLibrary
+} = createMemoryGovernanceStore({
+  itemsFile: ITEMS_FILE,
+  snapshotDir: SNAPSHOT_DIR
+});
+const {
+  listConflictGroups,
+  resolveConflictGroup
+} = createMemoryGovernanceConflictHandlers({
+  loadLibrary,
+  normalizeText,
+  nowTs,
+  rebuildMemoryIndex,
+  saveLibrary,
+  saveProjection
+});
 
 function rebuildMemoryArtifacts() {
   const library = loadLibrary();
@@ -205,35 +59,6 @@ function rebuildMemoryArtifacts() {
     totalItems: Array.isArray(library.items) ? library.items.length : 0,
     projectionUsers: Object.keys(projection.users || {}).length
   };
-}
-
-function createSnapshot(label = 'manual') {
-  ensureSnapshotDir();
-  const safeLabel = String(label || 'manual').replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 24) || 'manual';
-  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14);
-  const file = `memory_items_${stamp}_${safeLabel}.json`;
-  const fullPath = path.join(SNAPSHOT_DIR, file);
-  const library = loadLibrary();
-  atomicWriteJson(fullPath, library);
-  return file;
-}
-
-function listSnapshots(limit = 30) {
-  ensureSnapshotDir();
-  const files = fs.readdirSync(SNAPSHOT_DIR)
-    .filter((name) => /^memory_items_.*\.json$/i.test(name))
-    .map((name) => {
-      const full = path.join(SNAPSHOT_DIR, name);
-      const stat = fs.statSync(full);
-      return {
-        file: name,
-        size: stat.size,
-        createdAt: stat.mtimeMs
-      };
-    })
-    .sort((a, b) => b.createdAt - a.createdAt);
-
-  return files.slice(0, Math.max(1, Math.min(200, Number(limit) || 30)));
 }
 
 function previewGovernance(options = {}) {
@@ -328,153 +153,16 @@ function applyGovernance(options = {}) {
   };
 }
 
-function hasAnyPostReplyLearningRef(item = {}) {
-  const meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
-  const decision = meta.learningDecision && typeof meta.learningDecision === 'object' ? meta.learningDecision : {};
-  const phase = normalizeText(decision.phase).toLowerCase();
-  return Boolean(
-    decision.jobId
-    || decision.postReplyJobId
-    || meta.jobId
-    || meta.postReplyJobId
-    || item.jobId
-    || item.postReplyJobId
-    || phase === 'post_reply_learning'
-    || phase === 'post_reply_enrich_write'
-  );
-}
-
-function collectItemLearningJobIds(item = {}) {
-  const meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
-  const decision = meta.learningDecision && typeof meta.learningDecision === 'object' ? meta.learningDecision : {};
-  return normalizeStringArray([
-    item.jobId,
-    item.postReplyJobId,
-    meta.jobId,
-    meta.postReplyJobId,
-    decision.jobId,
-    decision.postReplyJobId
-  ]);
-}
-
-function collectItemLearningTurnIds(item = {}) {
-  const meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
-  const decision = meta.learningDecision && typeof meta.learningDecision === 'object' ? meta.learningDecision : {};
-  return normalizeStringArray([
-    item.turnId,
-    ...(Array.isArray(item.turnIds) ? item.turnIds : []),
-    meta.turnId,
-    ...(Array.isArray(meta.turnIds) ? meta.turnIds : []),
-    decision.turnId,
-    ...(Array.isArray(decision.turnIds) ? decision.turnIds : [])
-  ]);
-}
-
-function itemMatchesPostReplyLearningRef(item = {}, criteria = {}) {
-  if (!item || typeof item !== 'object') return false;
-  const userId = normalizeText(criteria.userId);
-  if (userId && normalizeText(item.userId) !== userId) return false;
-  if (!hasAnyPostReplyLearningRef(item)) return false;
-
-  const jobIds = normalizeStringArray([criteria.jobId, criteria.postReplyJobId]);
-  const turnIds = normalizeStringArray([
-    criteria.turnId,
-    ...(Array.isArray(criteria.turnIds) ? criteria.turnIds : [])
-  ]);
-  const itemJobIds = collectItemLearningJobIds(item);
-  const itemTurnIds = collectItemLearningTurnIds(item);
-  const jobMatched = jobIds.length === 0 || jobIds.some((id) => itemJobIds.includes(id));
-  const turnMatched = turnIds.length === 0 || turnIds.some((id) => itemTurnIds.includes(id));
-  return jobMatched && turnMatched;
-}
-
-function rollbackPostReplyLearning(options = {}) {
-  const jobIds = normalizeStringArray([options.jobId, options.postReplyJobId]);
-  const turnIds = normalizeStringArray([
-    options.turnId,
-    ...(Array.isArray(options.turnIds) ? options.turnIds : [])
-  ]);
-  if (jobIds.length === 0 && turnIds.length === 0) {
-    throw new Error('jobId, postReplyJobId, turnId, or turnIds is required');
-  }
-
-  const library = loadLibrary();
-  const matches = library.items
-    .filter((item) => itemMatchesPostReplyLearningRef(item, {
-      ...options,
-      jobId: jobIds[0] || '',
-      postReplyJobId: jobIds[1] || options.postReplyJobId || '',
-      turnIds
-    }))
-    .map((item) => ({
-      id: String(item.id || '').trim(),
-      userId: String(item.userId || '').trim(),
-      status: String(item.status || 'active').trim() || 'active',
-      text: normalizeText(item.text || item.canonicalText || '')
-    }))
-    .filter((item) => item.id);
-
-  if (options.dryRun === true) {
-    return {
-      ok: true,
-      dryRun: true,
-      matched: matches.length,
-      changed: 0,
-      ids: matches.map((item) => item.id),
-      items: matches
-    };
-  }
-
-  const activeIds = new Set(
-    matches
-      .filter((item) => normalizeText(item.status).toLowerCase() !== 'archived')
-      .map((item) => item.id)
-  );
-  if (activeIds.size === 0) {
-    return {
-      ok: true,
-      dryRun: false,
-      matched: matches.length,
-      changed: 0,
-      snapshot: '',
-      ids: matches.map((item) => item.id),
-      items: matches
-    };
-  }
-
-  const snapshot = createSnapshot('post_reply_rollback');
-  const now = nowTs();
-  const reason = normalizeText(options.reason) || 'post_reply_learning_rollback';
-  for (const item of library.items) {
-    if (!activeIds.has(String(item.id || '').trim())) continue;
-    item.status = 'archived';
-    item.updatedAt = now;
-    item.meta = {
-      ...(item.meta && typeof item.meta === 'object' ? item.meta : {}),
-      archivedByGovernance: true,
-      rollback: {
-        reason,
-        jobIds,
-        turnIds,
-        rolledBackAt: now
-      }
-    };
-  }
-
-  saveLibrary({ version: 2, items: library.items });
-  rebuildMemoryIndex({ version: 2, items: library.items });
-  saveProjection();
-
-  return {
-    ok: true,
-    dryRun: false,
-    matched: matches.length,
-    changed: activeIds.size,
-    snapshot,
-    ids: matches.map((item) => item.id),
-    items: matches
-  };
-}
+const { rollbackPostReplyLearning } = createPostReplyLearningRollback({
+  createSnapshot,
+  loadLibrary,
+  normalizeStringArray,
+  normalizeText,
+  nowTs,
+  rebuildMemoryIndex,
+  saveLibrary,
+  saveProjection
+});
 
 const rollbackMemoryWritesByLearningRef = rollbackPostReplyLearning;
 

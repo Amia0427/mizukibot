@@ -11,15 +11,10 @@ const {
 const {
   getDailyJournalStats
 } = require('../dailyJournal');
-const {
-  loadSessionProjection,
-  loadProfileProjection,
-  loadMemoryNodes,
-  loadEpisodeProjection
-} = require('../memory-v3/storage');
-const { openImageMemory } = require('../imageMemoryIndex');
 const { sanitizeText } = require('./commandParser');
 const { sanitizePreviewText } = require('./text');
+const { openImageMemoryResult } = require('./openImage');
+const { openV3MemoryItemById } = require('./openV3Item');
 const {
   getJournalSummaryFiles,
   openJournalByRef,
@@ -62,132 +57,9 @@ function openRecentSession(userId, sessionKey, context = {}) {
 }
 
 function openMemoryItemById(userId, source, id) {
-  if (config.MEMORY_V3_ENABLED && String(id || '').startsWith('session:')) {
-    return openRecentSession(userId, String(id || '').replace(/^session:/, ''), { userId });
-  }
-  if (config.MEMORY_V3_ENABLED && String(id || '').startsWith('profile:')) {
-    return {
-      source: 'profile',
-      id,
-      data: truncateProfileForOpen(getProfileResult(userId))
-    };
-  }
-  if (config.MEMORY_V3_ENABLED) {
-    const targetId = String(id || '').trim();
-    const sessionProjection = loadSessionProjection();
-    const profileProjection = loadProfileProjection();
-    const memoryNodes = loadMemoryNodes();
-    const episodeProjection = loadEpisodeProjection();
-    if (targetId.startsWith('profile:')) {
-      const profileUserId = targetId.split(':')[1] || '';
-      if (String(profileUserId || '').trim() !== String(userId || '').trim()) return null;
-      const profile = profileProjection.users?.[String(userId || '').trim()] || null;
-      if (profile) {
-        return {
-          source: 'profile',
-          id: targetId,
-          data: truncateProfileForOpen({
-            profile: {
-              identities: profile.identities || [],
-              personality_traits: profile.personality_traits || [],
-              hobbies: profile.hobbies || [],
-              likes: profile.likes || [],
-              dislikes: profile.dislikes || [],
-              goals: profile.goals || [],
-              recent_topics: profile.recent_topics || [],
-              relation_stage: profile.relation_stage || '陌生人'
-            },
-            summary: Array.isArray(profile.summaries) ? profile.summaries[0] || '' : '',
-            impression: Array.isArray(profile.impressions) ? profile.impressions[0] || '' : '',
-            facts: profile.facts || []
-          })
-        };
-      }
-    }
-    if (targetId.startsWith('session:')) {
-      const sessionKey = targetId.replace(/^session:/, '');
-      const session = sessionProjection.sessions?.[sessionKey];
-      if (session && String(session.userId || '') === String(userId || '')) {
-        return {
-          source: 'recent',
-          id: targetId,
-          data: {
-            sessionKey,
-            snapshotType: session.snapshotType || '',
-            updatedAt: session.updatedAt || 0,
-            shortTermSummary: session.summary || '',
-            shortTermState: {
-              summary: session.summary || '',
-              activeTopic: session.activeTopic || '',
-              openLoops: Array.isArray(session.openLoops) ? session.openLoops : [],
-              assistantCommitments: Array.isArray(session.assistantCommitments) ? session.assistantCommitments : [],
-              userConstraints: Array.isArray(session.userConstraints) ? session.userConstraints : [],
-              recentToolResults: [],
-              carryOverUserTurn: session.carryOverUserTurn || ''
-            },
-            recentMessages: Array.isArray(session.recentMessages) ? session.recentMessages : []
-          }
-        };
-      }
-    }
-    const node = memoryNodes.find((item) => String(item.id || '') === targetId);
-    if (node) {
-      const nodeScopeType = sanitizeText(node.scopeType).toLowerCase();
-      if (nodeScopeType === 'group') {
-        const allowedGroups = new Set(getAccessibleGroupIdsForUser(userId));
-        if (!allowedGroups.has(sanitizeText(node.groupId))) return null;
-      } else if (String(node.userId || '').trim() !== String(userId || '').trim()) {
-        return null;
-      }
-      return {
-        source: source || node.source || 'personal',
-        id: targetId,
-        data: {
-          id: node.id,
-          type: node.type,
-          text: sanitizePreviewText(node.text, Math.min(1600, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
-          confidence: node.confidence,
-          importance: node.importance,
-          tier: node.tier || '',
-          status: sanitizeText(node.status).toLowerCase() || 'active',
-          sourceKind: sanitizeText(node.sourceKind).toLowerCase() || 'runtime',
-          evidenceTier: sanitizeText(node.evidenceTier).toLowerCase() || 'weak',
-          stabilityScore: Number(node.stabilityScore || 0) || 0,
-          fieldKey: sanitizeText(node.fieldKey).toLowerCase(),
-          suppressedBy: sanitizeText(node.suppressedBy),
-          updatedAt: node.updatedAt || 0,
-          scopeType: node.scopeType || 'personal',
-          groupId: node.groupId || '',
-          taskType: node.taskType || '',
-          routePolicyKey: node.routePolicyKey || '',
-          topRouteType: node.topRouteType || '',
-          source: node.source || '',
-          participants: Array.isArray(node.participants) ? node.participants : [],
-          entities: Array.isArray(node.entities) ? node.entities : [],
-          relations: Array.isArray(node.relations) ? node.relations : [],
-          memoryKind: sanitizeText(node.memoryKind).toLowerCase(),
-          styleRole: '',
-          jargonRole: ''
-        }
-      };
-    }
-    for (const item of Array.isArray(episodeProjection.users?.[String(userId || '').trim()]?.items)
-      ? episodeProjection.users[String(userId || '').trim()].items
-      : []) {
-      if (`episode:${item.id}` !== targetId) continue;
-      return {
-        source: 'journal',
-        id: targetId,
-        data: {
-          id: item.id,
-          type: item.type,
-          title: item.episodeDay || item.yearMonth || item.type,
-          text: String(item.text || '').slice(0, Math.max(200, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
-          updatedAt: item.updatedAt || 0
-        }
-      };
-    }
-  }
+  const openedV3 = openV3MemoryItemById(userId, source, id, { openRecentSession });
+  if (openedV3) return openedV3;
+
   const targetId = String(id || '').trim();
   let items = [];
 
@@ -293,30 +165,7 @@ function openUnifiedMemory(target, options = {}, context = {}) {
 
   if (ref) {
     if (ref.startsWith('mc_ref:image:')) {
-      const openedImage = openImageMemory(ref, { ...context, userId });
-      if (!openedImage) return null;
-      return {
-        source: 'image',
-        id: openedImage.cacheKey,
-        data: {
-          cacheKey: openedImage.cacheKey,
-          imageRef: openedImage.imageRef,
-          mediaType: openedImage.mediaType,
-          sourceUrl: openedImage.sourceUrl,
-          exists: openedImage.exists,
-          userId: openedImage.userId,
-          groupId: openedImage.groupId,
-          sessionKey: openedImage.sessionKey,
-          messageId: openedImage.messageId,
-          createdAt: openedImage.createdAt,
-          lastSeenAt: openedImage.lastSeenAt,
-          summary: openedImage.summary,
-          ocrText: openedImage.ocrText,
-          visibleText: openedImage.visibleText,
-          userText: openedImage.userText,
-          observations: Array.isArray(openedImage.observations) ? openedImage.observations.slice(0, 5) : []
-        }
-      };
+      return openImageMemoryResult(ref, { ...context, userId });
     }
     if (ref.startsWith('mc_ref:profile:')) {
       if (config.MEMORY_V3_ENABLED) {
@@ -420,30 +269,7 @@ function openUnifiedMemory(target, options = {}, context = {}) {
   }
   if (source === 'recent' && id) return openRecentSession(userId, id, context);
   if (source === 'image' && id) {
-    const openedImage = openImageMemory(id, { ...context, userId });
-    if (!openedImage) return null;
-    return {
-      source: 'image',
-      id: openedImage.cacheKey,
-      data: {
-        cacheKey: openedImage.cacheKey,
-        imageRef: openedImage.imageRef,
-        mediaType: openedImage.mediaType,
-        sourceUrl: openedImage.sourceUrl,
-        exists: openedImage.exists,
-        userId: openedImage.userId,
-        groupId: openedImage.groupId,
-        sessionKey: openedImage.sessionKey,
-        messageId: openedImage.messageId,
-        createdAt: openedImage.createdAt,
-        lastSeenAt: openedImage.lastSeenAt,
-        summary: openedImage.summary,
-        ocrText: openedImage.ocrText,
-        visibleText: openedImage.visibleText,
-        userText: openedImage.userText,
-        observations: Array.isArray(openedImage.observations) ? openedImage.observations.slice(0, 5) : []
-      }
-    };
+    return openImageMemoryResult(id, { ...context, userId });
   }
   if ((source === 'personal' || source === 'task' || source === 'group' || source === 'style' || source === 'jargon' || source === 'journal') && id) {
     return openMemoryItemById(userId, source, id);

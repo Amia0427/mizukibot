@@ -9,247 +9,27 @@ const {
   pickModelRouteDiagnosticFields,
   safeHost
 } = require('./modelRouteDiagnostics');
+const {
+  normalizeErrorCode,
+  normalizeText,
+  nowIso,
+  safeClone
+} = require('./modelCallTracker/common');
+const { createModelCallLogWriter } = require('./modelCallTracker/logFile');
+const { summarizePromptCaching } = require('./modelCallTracker/promptCaching');
+const { summarizeRequest } = require('./modelCallTracker/requestSummary');
+const { extractResponseModel, extractUsage } = require('./modelCallTracker/usage');
 
 const MAX_RECENT_MODEL_CALLS = 200;
 const MODEL_CALL_LOG_FILE = path.join(config.DATA_DIR || path.join(process.cwd(), 'data'), 'model-calls.ndjson');
 
 let recentModelCalls = [];
 let sequence = 0;
-
-function normalizeText(value) {
-  return String(value || '').trim();
-}
-
-function normalizeErrorCode(error = null) {
-  const status = Number(error?.response?.status || error?.status || error?.statusCode || 0);
-  if (Number.isFinite(status) && status > 0) return `http_${Math.floor(status)}`;
-  const code = normalizeText(error?.code || error?.errorCode || error?.error_code);
-  if (code) return code;
-  const message = normalizeText(error?.message || error).toLowerCase();
-  if (message.includes('timeout') || message.includes('timed out')) return 'timeout';
-  if (message.includes('network')) return 'network_error';
-  return message ? 'error' : '';
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function appendModelCallLog(record = {}) {
-  try {
-    appendFileWithRotationBatched(MODEL_CALL_LOG_FILE, `${JSON.stringify(record)}\n`, {
-      encoding: 'utf8'
-    });
-  } catch (_) {}
-}
-
-function flushModelCallLogsSync() {
-  try {
-    return flushBatchedLogWritesSync(MODEL_CALL_LOG_FILE);
-  } catch (_) {
-    return false;
-  }
-}
-
-function safeClone(value, fallback = null) {
-  try {
-    return JSON.parse(JSON.stringify(value));
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function flattenContentText(content) {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content.map((part) => flattenContentText(part)).join('\n');
-  }
-  if (!content || typeof content !== 'object') return '';
-  if (typeof content.text === 'string') return content.text;
-  if (typeof content.content === 'string') return content.content;
-  if (Array.isArray(content.content)) return flattenContentText(content.content);
-  if (content.type === 'image_url') {
-    return String(content?.image_url?.url || content?.url || '');
-  }
-  return '';
-}
-
-function hasCacheControl(value) {
-  return Boolean(
-    value
-    && typeof value === 'object'
-    && value.cache_control
-    && typeof value.cache_control === 'object'
-    && String(value.cache_control.type || '').trim()
-  );
-}
-
-function countCacheControlBlocks(value) {
-  if (Array.isArray(value)) {
-    return value.reduce((sum, item) => sum + countCacheControlBlocks(item), 0);
-  }
-  if (!value || typeof value !== 'object') return 0;
-
-  let total = hasCacheControl(value) ? 1 : 0;
-  if (Array.isArray(value.content)) {
-    total += value.content.reduce((sum, item) => sum + countCacheControlBlocks(item), 0);
-  }
-  if (value.function && typeof value.function === 'object') {
-    total += countCacheControlBlocks(value.function);
-  }
-  return total;
-}
-
-function containsMemoryMarker(text) {
-  const input = String(text || '');
-  if (!input) return false;
-  return /\[Memory\]|\[Profile\]|\[Summary\]|长期记忆|记忆注入/i.test(input);
-}
-
-function summarizeRequest(request = {}) {
-  const messages = Array.isArray(request.messages) ? request.messages : [];
-  const systemText = flattenContentText(request.system);
-  const combinedText = [
-    systemText,
-    ...messages.map((msg) => flattenContentText(msg?.content))
-  ].join('\n');
-  const explicitMessageCount = Number(request.message_count);
-  const explicitToolCount = Number(request.tool_count);
-
-  return {
-    model: normalizeText(request.model),
-    stream: Boolean(request.stream),
-    max_tokens: Number.isFinite(Number(request.max_tokens))
-      ? Math.floor(Number(request.max_tokens))
-      : null,
-    message_count: Number.isFinite(explicitMessageCount)
-      ? Math.max(0, Math.floor(explicitMessageCount))
-      : messages.length + (systemText ? 1 : 0),
-    tool_count: Number.isFinite(explicitToolCount)
-      ? Math.max(0, Math.floor(explicitToolCount))
-      : (Array.isArray(request.tools) ? request.tools.length : 0),
-    memory_injected: request.memory_injected !== undefined
-      ? Boolean(request.memory_injected)
-      : containsMemoryMarker(combinedText)
-  };
-}
-
-function summarizePromptCaching(request = {}, requestHeaders = {}) {
-  const headers = requestHeaders && typeof requestHeaders === 'object' ? requestHeaders : {};
-  const anthropicBeta = String(headers['anthropic-beta'] || headers['Anthropic-Beta'] || '').trim();
-  const systemBlocks = Array.isArray(request.system) ? request.system : [];
-  const messages = Array.isArray(request.messages) ? request.messages : [];
-  const tools = Array.isArray(request.tools) ? request.tools : [];
-  const anthropicBetaFlags = anthropicBeta
-    ? anthropicBeta.toLowerCase().split(',').map((part) => part.trim()).filter(Boolean)
-    : [];
-
-  const systemCacheBreakpoints = systemBlocks.reduce((sum, item) => sum + countCacheControlBlocks(item), 0);
-  const messageCacheBreakpoints = messages.reduce((sum, item) => sum + countCacheControlBlocks(item), 0);
-  const toolCacheBreakpoints = tools.reduce((sum, item) => sum + countCacheControlBlocks(item), 0);
-
-  return {
-    openai_prompt_cache_key: normalizeText(request.prompt_cache_key),
-    openai_prompt_cache_retention: normalizeText(request.prompt_cache_retention),
-    openai_prompt_cache_enabled: Boolean(
-      normalizeText(request.prompt_cache_key)
-      || normalizeText(request.prompt_cache_retention)
-    ),
-    anthropic_beta: anthropicBeta || null,
-    prompt_caching_beta_enabled: anthropicBetaFlags.includes('prompt-caching-2024-07-31'),
-    system_cache_breakpoints: systemCacheBreakpoints,
-    message_cache_breakpoints: messageCacheBreakpoints,
-    tool_cache_breakpoints: toolCacheBreakpoints,
-    total_cache_breakpoints: systemCacheBreakpoints + messageCacheBreakpoints + toolCacheBreakpoints
-  };
-}
-
-function normalizeUsage(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-
-  const promptTokens = Number(
-    raw.prompt_tokens
-    ?? raw.input_tokens
-    ?? raw.promptTokens
-    ?? raw.inputTokens
-    ?? raw.input_token_count
-  );
-  const completionTokens = Number(
-    raw.completion_tokens
-    ?? raw.output_tokens
-    ?? raw.completionTokens
-    ?? raw.outputTokens
-    ?? raw.output_token_count
-  );
-  const totalTokens = Number(
-    raw.total_tokens
-    ?? raw.totalTokens
-  );
-  const cacheReadInputTokens = Number(
-    raw.cache_read_input_tokens
-    ?? raw.cacheReadInputTokens
-    ?? raw.prompt_cache_hit_tokens
-    ?? raw.promptCacheHitTokens
-    ?? raw.prompt_tokens_details?.cached_tokens
-    ?? raw.promptTokensDetails?.cachedTokens
-    ?? raw.input_tokens_details?.cached_tokens
-    ?? raw.inputTokensDetails?.cachedTokens
-  );
-  const cacheCreationInputTokens = Number(
-    raw.cache_creation_input_tokens
-    ?? raw.cacheCreationInputTokens
-    ?? raw.prompt_cache_miss_tokens
-    ?? raw.promptCacheMissTokens
-    ?? raw.prompt_tokens_details?.cache_write_tokens
-    ?? raw.promptTokensDetails?.cacheWriteTokens
-    ?? raw.input_tokens_details?.cache_write_tokens
-    ?? raw.inputTokensDetails?.cacheWriteTokens
-  );
-  const cacheCreation = raw.cache_creation && typeof raw.cache_creation === 'object'
-    ? safeClone(raw.cache_creation, {})
-    : null;
-
-  const hasPrompt = Number.isFinite(promptTokens);
-  const hasCompletion = Number.isFinite(completionTokens);
-  const hasTotal = Number.isFinite(totalTokens);
-  const hasCacheRead = Number.isFinite(cacheReadInputTokens);
-  const hasCacheCreation = Number.isFinite(cacheCreationInputTokens) || Boolean(cacheCreation);
-  if (!hasPrompt && !hasCompletion && !hasTotal && !hasCacheRead && !hasCacheCreation) return null;
-
-  return {
-    prompt_tokens: hasPrompt ? Math.floor(promptTokens) : null,
-    completion_tokens: hasCompletion ? Math.floor(completionTokens) : null,
-    cache_read_input_tokens: hasCacheRead ? Math.floor(cacheReadInputTokens) : null,
-    cache_creation_input_tokens: Number.isFinite(cacheCreationInputTokens) ? Math.floor(cacheCreationInputTokens) : null,
-    cache_creation: cacheCreation,
-    total_tokens: hasTotal
-      ? Math.floor(totalTokens)
-      : ((hasPrompt || hasCompletion)
-        ? Math.floor((hasPrompt ? promptTokens : 0) + (hasCompletion ? completionTokens : 0))
-        : null)
-  };
-}
-
-function extractUsage(response) {
-  const data = response?.data ?? response;
-  return (
-    normalizeUsage(data?.usage)
-    || normalizeUsage(data?.response_metadata?.usage)
-    || normalizeUsage(data?.response_metadata?.tokenUsage)
-    || normalizeUsage(data?.usage_metadata)
-    || null
-  );
-}
-
-function extractResponseModel(response) {
-  const data = response?.data ?? response;
-  return normalizeText(
-    data?.model
-    || data?.model_name
-    || data?.response_metadata?.model_name
-    || data?.response_metadata?.model
-  );
-}
+const { appendModelCallLog, flushModelCallLogsSync } = createModelCallLogWriter({
+  appendFileWithRotationBatched,
+  flushBatchedLogWritesSync,
+  modelCallLogFile: MODEL_CALL_LOG_FILE
+});
 
 function capRecentCalls() {
   if (recentModelCalls.length <= MAX_RECENT_MODEL_CALLS) return;

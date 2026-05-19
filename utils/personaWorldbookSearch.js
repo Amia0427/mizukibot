@@ -1,10 +1,5 @@
 const config = require('../config');
-const {
-  normalizeText,
-  tokenize,
-  cosineFromTokenSets,
-  uniqueBy
-} = require('./memory-v3/helpers');
+const { normalizeText } = require('./memory-v3/helpers');
 const {
   isLanceDbReadEnabled,
   normalizeVectorStoreMode,
@@ -28,10 +23,22 @@ const {
   schedulePersonaWorldbookEmbeddingBackfill,
   shouldUsePersonaWorldbookRemoteEmbedding
 } = require('./personaWorldbookSearch/embeddingCache');
-
-const lancedbDisableState = {
-  worldbook: new Map()
-};
+const {
+  cosineArray,
+  lexicalScore,
+  mergeCandidates,
+  normalizeArray,
+  normalizeCandidate
+} = require('./personaWorldbookSearch/candidates');
+const {
+  getWorldbookLanceDbDisableState,
+  isLanceDbDimensionMismatch,
+  markWorldbookLanceDbDisabled
+} = require('./personaWorldbookSearch/lancedbState');
+const {
+  rerankPersonaWorldbookCandidates,
+  withSoftTimeout
+} = require('./personaWorldbookSearch/rerank');
 
 function nowMs() {
   return Date.now();
@@ -39,103 +46,6 @@ function nowMs() {
 
 function elapsedMs(startedAt = 0) {
   return Math.max(0, Date.now() - Number(startedAt || 0));
-}
-
-function isLanceDbDimensionMismatch(reason = '') {
-  const normalized = normalizeText(reason).toLowerCase();
-  if (!normalized) return false;
-  return /dimension/.test(normalized)
-    || /no vector column found/.test(normalized)
-    || /vector column.*not found/.test(normalized);
-}
-
-function buildWorldbookLanceDbDisableKey(queryEmbedding = [], options = {}) {
-  return [
-    normalizeText(options.lancedbTableName || options.tableName || config.MEMORY_LANCEDB_WORLDBOOK_TABLE || 'persona_worldbook_vectors'),
-    Array.isArray(queryEmbedding) ? queryEmbedding.length : 0
-  ].join(':');
-}
-
-function getWorldbookLanceDbDisableState(queryEmbedding = [], options = {}) {
-  return lancedbDisableState.worldbook.get(buildWorldbookLanceDbDisableKey(queryEmbedding, options)) || null;
-}
-
-function markWorldbookLanceDbDisabled(queryEmbedding = [], options = {}, reason = 'dimension_mismatch') {
-  const key = buildWorldbookLanceDbDisableKey(queryEmbedding, options);
-  const state = {
-    key,
-    tableName: normalizeText(options.lancedbTableName || options.tableName || config.MEMORY_LANCEDB_WORLDBOOK_TABLE || 'persona_worldbook_vectors'),
-    queryDimension: Array.isArray(queryEmbedding) ? queryEmbedding.length : 0,
-    lancedbDisabledReason: reason,
-    rebuildCommand: 'node scripts/sync-lancedb-memory-index.js --full --compact',
-    disabledAt: nowMs()
-  };
-  lancedbDisableState.worldbook.set(key, state);
-  return state;
-}
-
-function getMemoryReranker() {
-  try {
-    return require('./memoryReranker');
-  } catch (_) {
-    return {};
-  }
-}
-
-function cosineArray(a = [], b = []) {
-  const length = Math.min(Array.isArray(a) ? a.length : 0, Array.isArray(b) ? b.length : 0);
-  if (length === 0) return 0;
-  let dotSum = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < length; i += 1) {
-    const va = Number(a[i]) || 0;
-    const vb = Number(b[i]) || 0;
-    dotSum += va * vb;
-    normA += va * va;
-    normB += vb * vb;
-  }
-  if (normA <= 0 || normB <= 0) return 0;
-  return dotSum / (Math.sqrt(normA) * Math.sqrt(normB));
-}
-
-function normalizeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function lexicalScore(query = '', doc = {}) {
-  const queryTokens = tokenize(query);
-  if (queryTokens.length === 0) return 0;
-  const docTokens = tokenize(doc.text);
-  const lexical = cosineFromTokenSets(queryTokens, docTokens);
-  const compactQuery = normalizeText(query).toLowerCase().replace(/\s+/g, '');
-  const compactText = normalizeText(doc.text).toLowerCase().replace(/\s+/g, '');
-  const direct = compactQuery && compactText.includes(compactQuery) ? 0.35 : 0;
-  const hintHit = normalizeArray(doc.triggerHints)
-    .some((hint) => {
-      const normalized = normalizeText(hint).toLowerCase().replace(/\s+/g, '');
-      return normalized && (compactQuery.includes(normalized) || compactText.includes(compactQuery));
-    }) ? 0.2 : 0;
-  return lexical + direct + hintHit;
-}
-
-function normalizeCandidate(doc = {}, score = 0, matchMode = 'lexical', reason = '') {
-  return {
-    id: doc.moduleId,
-    moduleId: doc.moduleId,
-    score,
-    matchMode,
-    reason,
-    phase: doc.phase,
-    slot: doc.slot,
-    conflictsWith: normalizeArray(doc.conflictsWith),
-    tokenCost: doc.tokenCost,
-    priority: doc.priority,
-    purpose: doc.purpose,
-    triggerHints: normalizeArray(doc.triggerHints),
-    path: doc.path,
-    text: doc.text
-  };
 }
 
 function searchPersonaWorldbookLexical(catalog = { modules: [] }, query = '', options = {}) {
@@ -287,113 +197,6 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
     .slice(0, limit);
   diagnostics.semanticCandidates = results.length;
   return { results, diagnostics };
-}
-
-function shouldRerankCandidates(candidates = []) {
-  if (config.PERSONA_WORLDBOOK_RERANK_ENABLED === false) return false;
-  if (!Array.isArray(candidates) || candidates.length < 4) return false;
-  const head = candidates.slice(0, Math.min(4, candidates.length));
-  const top = Number(head[0]?.score || 0);
-  const fourth = Number(head[head.length - 1]?.score || 0);
-  return top <= 0 || fourth <= 0 || (top - fourth) < 0.35;
-}
-
-async function rerankPersonaWorldbookCandidates(query = '', candidates = [], options = {}) {
-  const diagnostics = {
-    applied: false,
-    candidates: 0,
-    reason: ''
-  };
-  if (!shouldRerankCandidates(candidates)) {
-    diagnostics.reason = config.PERSONA_WORLDBOOK_RERANK_ENABLED === false ? 'disabled' : 'not_needed';
-    return { results: candidates, diagnostics };
-  }
-  const maxCandidates = Math.max(
-    2,
-    Math.floor(Number(options.maxCandidates || config.PERSONA_WORLDBOOK_RERANK_MAX_CANDIDATES || 24) || 24)
-  );
-  const rerankTimeoutMs = Math.max(
-    0,
-    Math.floor(Number(options.rerankTimeoutMs || config.PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS || config.MEMORY_RERANK_TIMEOUT_MS || 2000) || 0)
-  );
-  const head = candidates.slice(0, maxCandidates);
-  diagnostics.candidates = head.length;
-  try {
-    const rerank = typeof options.rerankCandidates === 'function'
-      ? options.rerankCandidates
-      : getMemoryReranker().rerankMemoryCandidates;
-    if (typeof rerank !== 'function') {
-      diagnostics.reason = 'rerank_unavailable';
-      return { results: candidates, diagnostics };
-    }
-    const reranked = await rerank(query, head, {
-      ...options,
-      phase: 'persona_worldbook',
-      maxCandidates,
-      timeoutMs: rerankTimeoutMs,
-      disableRerank: config.PERSONA_WORLDBOOK_RERANK_ENABLED === false
-    });
-    if (Array.isArray(reranked) && reranked.length > 0 && reranked !== head) {
-      diagnostics.applied = reranked.some((item) => Number(item.rerankScore || 0) > 0);
-      diagnostics.reason = diagnostics.applied ? 'rerank' : 'no_scores';
-      return {
-        results: uniqueBy(reranked.concat(candidates.slice(maxCandidates)), (item) => item.moduleId || item.id),
-        diagnostics
-      };
-    }
-    diagnostics.reason = 'no_scores';
-    return { results: candidates, diagnostics };
-  } catch (error) {
-    diagnostics.reason = `failed:${error.message}`;
-    return { results: candidates, diagnostics };
-  }
-}
-
-async function withSoftTimeout(promiseFactory, timeoutMs, fallbackValue) {
-  const budget = Math.max(0, Number(timeoutMs) || 0);
-  if (!budget) return promiseFactory();
-  return new Promise((resolve) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      resolve(typeof fallbackValue === 'function' ? fallbackValue() : fallbackValue);
-    }, budget);
-    Promise.resolve()
-      .then(promiseFactory)
-      .then((value) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(value);
-      })
-      .catch((error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(typeof fallbackValue === 'function' ? fallbackValue(error) : fallbackValue);
-      });
-  });
-}
-
-function mergeCandidates(...groups) {
-  const byId = new Map();
-  for (const item of groups.flat().filter(Boolean)) {
-    const moduleId = normalizeText(item.moduleId || item.id);
-    if (!moduleId) continue;
-    const existing = byId.get(moduleId);
-    if (!existing || Number(item.score || 0) > Number(existing.score || 0)) {
-      byId.set(moduleId, {
-        ...existing,
-        ...item,
-        moduleId,
-        id: moduleId,
-        matchMode: existing && existing.matchMode !== item.matchMode ? 'hybrid' : item.matchMode
-      });
-    }
-  }
-  return Array.from(byId.values())
-    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || Number(a.priority || 0) - Number(b.priority || 0));
 }
 
 async function searchPersonaWorldbook(catalog = { modules: [] }, input = {}) {

@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const config = require('../config');
 const {
   ALLOWED_ANALYSIS_MOODS,
@@ -12,12 +11,16 @@ const {
   MEME_CONTEXT_VOCAB,
   createMemeStoreNormalizers
 } = require('./memeStore/normalizers');
-
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
+const { createMemeStoreFileHelpers } = require('./memeStore/files');
+const {
+  listAllStoreAssets,
+  listAssetsNeedingAnalysisFromEntries,
+  listCategoryAssets,
+  listCategorySummaries,
+  listEnabledCategoryNames,
+  listSelectorCategories,
+  pickRandomAssetFromCategory
+} = require('./memeStore/selectors');
 
 function nowTs() {
   return Date.now();
@@ -25,39 +28,6 @@ function nowTs() {
 
 function analysisVersion() {
   return Math.max(1, Number(config.MEME_MANAGER_ASSET_ANALYSIS_VERSION) || 1);
-}
-
-function atomicWriteJson(targetFile, data) {
-  const tempFile = `${targetFile}.${process.pid}.tmp`;
-  const text = JSON.stringify(data, null, 2);
-  try {
-    fs.writeFileSync(tempFile, text, 'utf8');
-    fs.renameSync(tempFile, targetFile);
-  } catch (error) {
-    try {
-      fs.writeFileSync(targetFile, text, 'utf8');
-    } finally {
-      try {
-        if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
-      } catch (_) {}
-    }
-    if (error?.code !== 'EPERM') throw error;
-  }
-}
-
-function safeReadJson(filePath, fallback) {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    const raw = fs.readFileSync(filePath, 'utf8').trim();
-    if (!raw) return fallback;
-    return JSON.parse(raw);
-  } catch (error) {
-    console.error('[meme-manager] failed to read store json:', {
-      filePath,
-      error: error?.message || String(error)
-    });
-    return fallback;
-  }
 }
 
 function defaultStore() {
@@ -90,31 +60,19 @@ const {
   analysisVersion,
   nowTs
 });
-
-function getCategoryDir(categoryName) {
-  return path.join(config.MEME_MANAGER_ASSET_DIR, categoryName);
-}
-
-function getCategoryAssetPath(categoryName, fileName) {
-  return path.join(getCategoryDir(categoryName), String(fileName || '').trim());
-}
-
-function inferMimeFromExt(fileName = '') {
-  const ext = path.extname(String(fileName || '').trim()).toLowerCase();
-  if (ext === '.png') return 'image/png';
-  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
-  if (ext === '.gif') return 'image/gif';
-  if (ext === '.webp') return 'image/webp';
-  return 'application/octet-stream';
-}
-
-function buildAssetId() {
-  return `m_${nowTs()}_${crypto.randomBytes(3).toString('hex')}`;
-}
-
-function buildFileName(assetId, ext) {
-  return `${assetId}${ext.toLowerCase()}`;
-}
+const {
+  atomicWriteJson,
+  buildAssetId,
+  buildFileName,
+  ensureDir,
+  getCategoryAssetPath,
+  getCategoryDir,
+  inferMimeFromExt,
+  safeReadJson
+} = createMemeStoreFileHelpers({
+  config,
+  nowTs
+});
 
 let store = defaultStore();
 
@@ -161,22 +119,11 @@ function getStore() {
 }
 
 function getEnabledCategoryNames() {
-  return Object.values(store.categories)
-    .filter((category) => category.enabled !== false && Array.isArray(category.assets) && category.assets.length > 0)
-    .map((category) => category.name);
+  return listEnabledCategoryNames(store);
 }
 
 function getSelectorCategories() {
-  return Object.values(store.categories)
-    .filter((category) => category.enabled !== false)
-    .map((category) => ({
-      name: category.name,
-      description: category.description,
-      moods: Array.isArray(category.moods) ? [...category.moods] : [],
-      intensities: Array.isArray(category.intensities) ? [...category.intensities] : [],
-      keywords: Array.isArray(category.keywords) ? [...category.keywords] : [],
-      assetCount: Array.isArray(category.assets) ? category.assets.length : 0
-    }));
+  return listSelectorCategories(store);
 }
 
 function setEnabled(enabled) {
@@ -251,26 +198,13 @@ function getAsset(categoryName, assetId) {
 }
 
 function listCategories() {
-  return Object.values(store.categories)
-    .map((category) => ({
-      name: category.name,
-      description: category.description,
-      enabled: category.enabled !== false,
-      moods: Array.isArray(category.moods) ? [...category.moods] : [],
-      intensities: Array.isArray(category.intensities) ? [...category.intensities] : [],
-      keywords: Array.isArray(category.keywords) ? [...category.keywords] : [],
-      assetCount: Array.isArray(category.assets) ? category.assets.length : 0
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hans-CN-u-co-pinyin'));
+  return listCategorySummaries(store);
 }
 
 function listCategoryFiles(name) {
   const category = getCategory(name);
   if (!category) throw new Error('Category not found.');
-  return category.assets
-    .slice()
-    .sort((left, right) => right.createdAt - left.createdAt)
-    .map((asset) => ({ ...asset }));
+  return listCategoryAssets(category);
 }
 
 function importAsset(categoryName, fileBuffer, options = {}) {
@@ -481,25 +415,14 @@ function applyAssetFeedback(categoryName, assetId, action = '') {
 }
 
 function listAllAssets(options = {}) {
-  const filterCategory = String(options.categoryName || '').trim();
-  const entries = [];
-  for (const category of Object.values(store.categories)) {
-    if (filterCategory && category.name !== filterCategory) continue;
-    for (const asset of Array.isArray(category.assets) ? category.assets : []) {
-      entries.push({
-        categoryName: category.name,
-        asset: JSON.parse(JSON.stringify(asset))
-      });
-    }
-  }
-  return entries;
+  return listAllStoreAssets(store, options);
 }
 
 function listAssetsNeedingAnalysis(options = {}) {
-  const targetVersion = Math.max(1, Number(options.version) || analysisVersion());
-  return listAllAssets(options).filter(({ asset }) => {
-    const analysis = normalizeAssetAnalysisRecord(asset.analysis);
-    return analysis.status !== 'ready' || analysis.version !== targetVersion;
+  return listAssetsNeedingAnalysisFromEntries(listAllAssets(options), {
+    ...options,
+    defaultVersion: analysisVersion(),
+    normalizeAssetAnalysisRecord
   });
 }
 
@@ -515,34 +438,16 @@ function getAssetAbsolutePath(categoryName, assetId) {
 
 function pickRandomAsset(categoryName) {
   const category = store.categories[String(categoryName || '').trim()];
-  if (!category || !Array.isArray(category.assets) || category.assets.length === 0) return null;
-  const index = Math.floor(Math.random() * category.assets.length);
-  const asset = category.assets[index];
-  return {
-    ...asset,
-    category: category.name,
-    absolutePath: getCategoryAssetPath(category.name, asset.fileName)
-  };
+  return pickRandomAssetFromCategory(category, { getCategoryAssetPath });
 }
 
 function pickRandomAssetFromSelectedCategory(categoryName, options = {}) {
   if (!categoryName || categoryName === 'none') return null;
   const category = store.categories[String(categoryName || '').trim()];
-  if (!category || !Array.isArray(category.assets) || category.assets.length === 0) return null;
-  const excludeAssetIds = new Set(
-    (Array.isArray(options?.excludeAssetIds) ? options.excludeAssetIds : [])
-      .map((item) => String(item || '').trim())
-      .filter(Boolean)
-  );
-  const filteredAssets = category.assets.filter((asset) => !excludeAssetIds.has(String(asset.id || '').trim()));
-  const pool = filteredAssets.length > 0 ? filteredAssets : category.assets;
-  const index = Math.floor(Math.random() * pool.length);
-  const asset = pool[index];
-  return {
-    ...asset,
-    category: category.name,
-    absolutePath: getCategoryAssetPath(category.name, asset.fileName)
-  };
+  return pickRandomAssetFromCategory(category, {
+    ...options,
+    getCategoryAssetPath
+  });
 }
 
 module.exports = {

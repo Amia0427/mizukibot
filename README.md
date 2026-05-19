@@ -196,6 +196,13 @@ artifacts/  临时产物、备份和评估输出
 
 多个历史大文件已拆为“稳定旧入口 + 同名子目录模块”。旧入口继续作为 facade，外部 require 路径优先保持不变；新增逻辑尽量放进子目录，减少并行开发冲突。
 
+阶段性记录（2026-05-19）：
+
+- 本阶段完成 `scheduledTaskStore`、`styleProfileRuntime`、`continuityState`、`scheduledTaskTime`、`memory-v3/profileProjection` 等 clean target 的拆分。
+- 每个旧入口继续保留原 require 路径；调用方无需迁移到子目录。
+- 子目录模块按职责拆开，便于多人并行维护：store/persistence、shape/normalization、analysis/evidence、format/render、cron/parser 等逻辑分别落位。
+- 验证以 `node -c`、聚焦单测和 smoke 为主；优先验证旧入口兼容和关键链路行为。
+
 重点边界：
 
 - `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。
@@ -211,11 +218,42 @@ artifacts/  临时产物、备份和评估输出
 - `core/tickEngine.js` -> `core/tickEngine/state.js`、`core/tickEngine/schedule.js`：tick 状态和调度时间。
 - `config.js` -> `config/envRuntime.js`、`config/promptRuntime.js`：环境变量解析和 prompt runtime 配置。
 - `utils/dailyJournal.js` -> `utils/dailyJournal/`：journal 片段、检索、rollup、sidecar 逻辑。
+- `utils/scheduledTaskStore.js` -> `utils/scheduledTaskStore/common.js`、`utils/scheduledTaskStore/taskShape.js`：调度任务常量/工具、任务归一化和输入校验。
+- `utils/scheduledTaskTime.js` -> `utils/scheduledTaskTime/`：时间公共工具、文本解析、Cron 解析和自然语言时间表达式。
+- `utils/styleProfileRuntime.js` -> `utils/styleProfileRuntime/`：风格样本归一化、profile 分析、热存储读写和旧入口流程。
+- `utils/continuityState.js` -> `utils/continuityState/`：连续性证据摘要、证据源选择、文本格式化和公共清洗 helper。
+- `utils/memory-v3/profileProjection.js` -> `utils/memory-v3/profileProjection/`：profile 字段定义、投影 shape、冲突消解、证据等级/TTL、persona core 生成。
 - `utils/memory-v3/query.js` -> `utils/memory-v3/queryCache.js`、`utils/memory-v3/queryPolicy.js`：查询缓存和 facet/策略。
 - `utils/memoryCli.js` -> `utils/memoryCli/commandParser.js`：`mem search/open/remember/review` 命令解析。
 - `utils/shortTermMemory.js` -> `utils/shortTermMemory/state.js`：短期记忆状态和 key 规范化。
 - `utils/personaMemoryState.js` -> `utils/personaMemoryState/helpers.js`、`utils/personaMemoryState/promptRenderer.js`：persona 状态纯 helper 和 prompt 渲染。
 - `web/server.js` -> `web/auth.js`、`web/settingsRuntime.js`：Web 鉴权和设置运行时。
+
+本阶段聚焦验证：
+
+```bash
+node tests/messageTaskControl.test.js
+node tests/memoryPromptDailyJournalLookupRecall.test.js
+node tests/conversationContextClaudeCacheMarkers.test.js
+node tests/langgraphCheckpointSnapshot.test.js
+node tests/memoryRecallPrepareBudget.test.js
+node tests/memoryV3PersonaCore.test.js
+node tests/memoryV3PersonaDecay.test.js
+node tests/memoryProfileConflict.test.js
+node tests/memoryV3MaterializerProfile.test.js
+node tests/memoryProfileTtl.test.js
+node tests/memoryExtractionProfileClassification.test.js
+```
+
+下一批低冲突候选优先级：
+
+- `utils/memoryQualityAudit.js`
+- `utils/backgroundTaskRuntime.js`
+- `utils/memeStore.js`
+- `utils/memory.js`
+- `utils/memoryWritePipeline.js`
+
+继续拆分前先看 `git status --short` 和目标文件 diff；若文件已脏，必须把现有改动当作并行改动保留。
 
 常见文档：
 

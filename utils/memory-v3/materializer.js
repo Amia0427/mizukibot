@@ -36,9 +36,9 @@ const {
 const {
   buildLanceDbSyncPlan,
   createNodeFromEvent,
-  normalizeSessionScopeFromEvent,
   upsertNode
 } = require('./materializerNodes');
+const { applySessionEvent } = require('./materializerSessions');
 const {
   countDirtyScopes,
   eventMatchesDirtyScopes,
@@ -122,83 +122,8 @@ function materializeMemoryViews(options = {}) {
 
   for (const event of events) {
     const userId = normalizeText(event.userId);
-    const sessionKey = normalizeText(event.sessionKey);
 
-    if (event.type === 'turn_received' || event.type === 'turn_replied' || event.type === 'session_checkpoint') {
-      if (sessionKey) {
-        const existing = sessionProjection.sessions[sessionKey] || {
-          sessionKey,
-          userId,
-          groupId: '',
-          channelId: '',
-          sessionId: '',
-          updatedAt: 0,
-          snapshotType: '',
-          activeTopic: '',
-          openLoops: [],
-          assistantCommitments: [],
-          userConstraints: [],
-          recentMessages: [],
-          carryOverUserTurn: '',
-          summary: '',
-          phaseHint: '',
-          interactionState: {},
-          sceneState: {},
-          expressionState: {},
-          moduleState: {}
-        };
-        const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
-        const clearsRestartRecallTopic = event.type === 'session_checkpoint'
-          && Object.prototype.hasOwnProperty.call(payload, 'activeTopic')
-          && (normalizeText(event.sourceKind).toLowerCase() === 'restart_recall_clear'
-            || normalizeText(payload.summarySource || payload.source || '').toLowerCase() === 'restart_recall_clear');
-        sessionProjection.sessions[sessionKey] = {
-          ...existing,
-          ...normalizeSessionScopeFromEvent(event),
-          updatedAt: Math.max(Number(existing.updatedAt || 0), Number(event.ts || 0)),
-          snapshotType: normalizeText(payload.snapshotType || existing.snapshotType),
-          activeTopic: Object.prototype.hasOwnProperty.call(payload, 'activeTopic')
-            ? normalizeText(payload.activeTopic)
-            : normalizeText(existing.activeTopic),
-          carryOverUserTurn: Object.prototype.hasOwnProperty.call(payload, 'carryOverUserTurn')
-            ? normalizeText(payload.carryOverUserTurn)
-            : normalizeText(existing.carryOverUserTurn),
-          summary: Object.prototype.hasOwnProperty.call(payload, 'summary')
-            ? clampText(payload.summary, 2400)
-            : clampText(existing.summary, 2400),
-          phaseHint: normalizeText(payload.phaseHint || existing.phaseHint),
-          openLoops: Array.isArray(payload.openLoops) ? payload.openLoops.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.openLoops,
-          assistantCommitments: Array.isArray(payload.assistantCommitments) ? payload.assistantCommitments.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.assistantCommitments,
-          userConstraints: Array.isArray(payload.userConstraints) ? payload.userConstraints.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.userConstraints,
-          interactionState: clearsRestartRecallTopic
-            ? {
-                ...(existing.interactionState && typeof existing.interactionState === 'object' ? existing.interactionState : {}),
-                activeTopic: normalizeText(payload.activeTopic)
-              }
-            : payload.interactionState && typeof payload.interactionState === 'object'
-              ? payload.interactionState
-            : existing.interactionState,
-          sceneState: payload.sceneState && typeof payload.sceneState === 'object'
-            ? payload.sceneState
-            : existing.sceneState,
-          expressionState: payload.expressionState && typeof payload.expressionState === 'object'
-            ? payload.expressionState
-            : existing.expressionState,
-          moduleState: payload.moduleState && typeof payload.moduleState === 'object'
-            ? payload.moduleState
-            : existing.moduleState,
-          recentMessages: Array.isArray(payload.recentMessages)
-            ? payload.recentMessages
-              .map((item) => ({
-                role: normalizeText(item?.role).toLowerCase(),
-                content: clampText(item?.content, 320)
-              }))
-              .filter((item) => item.role && item.content)
-              .slice(-Math.max(1, Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 6)))
-            : existing.recentMessages
-        };
-      }
-    }
+    applySessionEvent(sessionProjection, event);
 
     if (event.type === 'turn_received' || event.type === 'turn_replied' || event.type === 'migration_bootstrap') {
       if (userId) {
@@ -299,6 +224,19 @@ function materializeMemoryViews(options = {}) {
       suppressedBy: item.suppressedBy || item.supersededBy || '',
       text: item.text,
       reason: item.recallHiddenReason || lifecycleHiddenReason(item, { now }) || 'profile_lifecycle_hidden',
+      expiresAt: item.expiresAt || 0
+    }));
+  const hiddenExpiredRecentTopicSuppressed = hiddenRecallNodes
+    .filter((item) => isProfileField(item) && isExpiredRecentTopic(item, now))
+    .map((item) => ({
+      userId: item.userId,
+      fieldKey: item.fieldKey,
+      canonicalKey: item.canonicalKey,
+      conflictKey: item.conflictKey || '',
+      id: item.id,
+      suppressedBy: item.suppressedBy || item.supersededBy || '',
+      text: item.text,
+      reason: 'recent_topic_expired',
       expiresAt: item.expiresAt || 0
     }));
   const hiddenProfileConflicts = hiddenProfileSuppressed
@@ -431,6 +369,7 @@ function materializeMemoryViews(options = {}) {
     profile.suppressed = [
       ...suppressed.filter((item) => item.userId === userId),
       ...hiddenProfileSuppressed.filter((item) => item.userId === userId),
+      ...hiddenExpiredRecentTopicSuppressed.filter((item) => item.userId === userId),
       ...expiredProfileNodes.filter((item) => item.userId === userId),
       ...profileConflicts.filter((item) => item.userId === userId)
     ];

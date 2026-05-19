@@ -1,12 +1,25 @@
 const path = require('path');
 const config = require('../config');
 const { sanitizeUserId, normalizeInsideRoot, mustStayInside } = require('./pathSafety');
+const {
+  normalizeArxivGetArgs,
+  normalizeArxivLatestArgs,
+  normalizeArxivSearchArgs,
+  normalizeWeatherArgs
+} = require('./toolPolicy/skillArgs');
+const { createDynamicMcpArgNormalizer } = require('./toolPolicy/dynamicMcp');
 
 const NOTEBOOK_ROOT = path.join(config.DATA_DIR, 'notebook');
 
 function getToolRegistry() {
   return require('../api/toolRegistry');
 }
+
+const {
+  normalizeDynamicMcpArgs
+} = createDynamicMcpArgNormalizer({
+  getToolRegistry
+});
 
 const TOOL_POLICIES = {
   notebook_reindex_folder: { risk: 'high', capability: 'fs_read' },
@@ -310,152 +323,6 @@ function normalizeQqActionArgs(toolName, args = {}) {
   }
 
   return { ...args };
-}
-
-function normalizeWeatherArgs(args = {}) {
-  const next = {};
-  const location = String(args.location ?? args.city ?? args.text ?? '').trim();
-  if (!location) throw new Error('skill_weather requires location');
-  if (location.length > 120) throw new Error('skill_weather location too long');
-  if (/[\r\n<>`]/.test(location)) throw new Error('skill_weather location contains unsafe characters');
-  next.location = location;
-  return next;
-}
-
-function normalizeArxivList(raw) {
-  const values = Array.isArray(raw) ? raw : [];
-  return values
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)
-    .map((item) => {
-      if (/[\r\n\u0000-\u001f]/.test(item)) {
-        throw new Error('arxiv list contains unsafe characters');
-      }
-      return item.slice(0, 50);
-    })
-    .slice(0, 10);
-}
-
-function normalizeArxivSearchArgs(args = {}) {
-  const next = {};
-  const query = String(args.query ?? '').trim();
-  if (!query) throw new Error('skill_arxiv_search requires query');
-  if (query.length > 300) throw new Error('skill_arxiv_search query too long');
-  if (/[\r\n\u0000-\u001f]/.test(query)) throw new Error('skill_arxiv_search query contains unsafe characters');
-  next.query = query;
-  next.max_results = Math.max(1, Math.min(10, Number(args.max_results) || 5));
-  next.categories = normalizeArxivList(args.categories ?? []);
-  next.tags = normalizeArxivList(args.tags ?? []);
-  return next;
-}
-
-function normalizeArxivGetArgs(args = {}) {
-  const next = {};
-  const arxivId = String(args.arxiv_id ?? args.id ?? '').trim();
-  if (!arxivId) throw new Error('skill_arxiv_get requires arxiv_id');
-  if (arxivId.length > 80) throw new Error('skill_arxiv_get arxiv_id too long');
-  if (/[\r\n\u0000-\u001f]/.test(arxivId)) throw new Error('skill_arxiv_get arxiv_id contains unsafe characters');
-  next.arxiv_id = arxivId;
-  next.include_abstract = Boolean(args.include_abstract ?? true);
-  return next;
-}
-
-function normalizeArxivLatestArgs(args = {}) {
-  return {
-    categories: normalizeArxivList(args.categories ?? []),
-    tags: normalizeArxivList(args.tags ?? []),
-    max_results: Math.max(1, Math.min(10, Number(args.max_results) || 5))
-  };
-}
-
-function normalizeDynamicMcpArgs(toolName, args = {}) {
-  const descriptor = getToolRegistry().getDynamicToolDescriptors().find((item) => item.functionName === String(toolName || '').trim());
-  if (!descriptor) return {};
-
-  const schema = descriptor.inputSchema && typeof descriptor.inputSchema === 'object'
-    ? descriptor.inputSchema
-    : {};
-  const properties = schema.properties && typeof schema.properties === 'object'
-    ? schema.properties
-    : {};
-  const source = args && typeof args === 'object' && !Array.isArray(args) ? args : {};
-  const next = {};
-
-  for (const key of Object.keys(properties)) {
-    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
-    const value = source[key];
-
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(trimmed)) {
-        throw new Error('mcp args contain unsafe characters');
-      }
-      next[key] = trimmed.slice(0, 500);
-      continue;
-    }
-
-    if (typeof value === 'number') {
-      if (!Number.isFinite(value)) throw new Error('mcp args contain invalid number');
-      next[key] = value;
-      continue;
-    }
-
-    if (typeof value === 'boolean' || value === null) {
-      next[key] = value;
-      continue;
-    }
-
-    if (Array.isArray(value)) {
-      if (value.length > 20) throw new Error('mcp args array too large');
-      next[key] = value.slice(0, 20).map((item) => {
-        if (typeof item === 'string') {
-          const trimmed = item.trim();
-          if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(trimmed)) {
-            throw new Error('mcp args contain unsafe characters');
-          }
-          return trimmed.slice(0, 500);
-        }
-        if (typeof item === 'number') {
-          if (!Number.isFinite(item)) throw new Error('mcp args contain invalid number');
-          return item;
-        }
-        if (typeof item === 'boolean' || item === null) return item;
-        throw new Error('mcp args array item type not allowed');
-      });
-      continue;
-    }
-
-    if (value && typeof value === 'object') {
-      const entries = Object.entries(value);
-      if (entries.length > 50) throw new Error('mcp args object too large');
-      const nested = {};
-      for (const [nestedKey, nestedValue] of entries) {
-        const safeKey = String(nestedKey || '').trim();
-        if (!safeKey) continue;
-        if (typeof nestedValue === 'string') {
-          const trimmed = nestedValue.trim();
-          if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(trimmed)) {
-            throw new Error('mcp args contain unsafe characters');
-          }
-          nested[safeKey] = trimmed.slice(0, 500);
-          continue;
-        }
-        if (typeof nestedValue === 'number') {
-          if (!Number.isFinite(nestedValue)) throw new Error('mcp args contain invalid number');
-          nested[safeKey] = nestedValue;
-          continue;
-        }
-        if (typeof nestedValue === 'boolean' || nestedValue === null) {
-          nested[safeKey] = nestedValue;
-          continue;
-        }
-        throw new Error('mcp args nested type not allowed');
-      }
-      next[key] = nested;
-    }
-  }
-
-  return next;
 }
 
 function enforceToolPolicy(toolName, args = {}, context = {}) {
