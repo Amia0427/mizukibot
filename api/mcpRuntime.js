@@ -1,39 +1,30 @@
-const fs = require('fs');
 const path = require('path');
 const childProcess = require('child_process');
 const config = require('../config');
-const DEFAULT_MCP_DISCOVERY_TTL_MS = Math.max(
-  10_000,
-  Number(process.env.MCP_DISCOVERY_TTL_MS || 5 * 60 * 1000) || 5 * 60 * 1000
-);
-const DEFAULT_MCP_INIT_TIMEOUT_MS = Math.max(
-  2_000,
-  Number(process.env.MCP_INIT_TIMEOUT_MS || config.TOOL_TIMEOUT_MS || 15_000) || 15_000
-);
-const DEFAULT_MCP_CALL_TIMEOUT_MS = Math.max(
-  2_000,
-  Number(process.env.MCP_CALL_TIMEOUT_MS || config.TOOL_TIMEOUT_MS || 20_000) || 20_000
-);
-const DEFAULT_MCP_RESULT_CHAR_BUDGET = Math.max(
-  400,
-  Number(process.env.MCP_RESULT_CHAR_BUDGET || 2_000) || 2_000
-);
-const DEFAULT_MCP_ARG_STRING_LIMIT = Math.max(
-  32,
-  Number(process.env.MCP_ARG_STRING_LIMIT || 500) || 500
-);
-const DEFAULT_MCP_MAX_OBJECT_KEYS = Math.max(
-  4,
-  Number(process.env.MCP_ARG_MAX_OBJECT_KEYS || 50) || 50
-);
-const DEFAULT_MCP_MAX_ARRAY_ITEMS = Math.max(
-  4,
-  Number(process.env.MCP_ARG_MAX_ARRAY_ITEMS || 20) || 20
-);
-const DEFAULT_MCP_MAX_DEPTH = Math.max(
-  2,
-  Number(process.env.MCP_ARG_MAX_DEPTH || 4) || 4
-);
+const {
+  DEFAULT_MCP_ARG_STRING_LIMIT,
+  DEFAULT_MCP_CALL_TIMEOUT_MS,
+  DEFAULT_MCP_DISCOVERY_TTL_MS,
+  DEFAULT_MCP_INIT_TIMEOUT_MS,
+  DEFAULT_MCP_MAX_ARRAY_ITEMS,
+  DEFAULT_MCP_MAX_DEPTH,
+  DEFAULT_MCP_MAX_OBJECT_KEYS,
+  DEFAULT_MCP_RESULT_CHAR_BUDGET
+} = require('./mcp/constants');
+const {
+  listConfiguredMcpServers,
+  readMcpConfig
+} = require('./mcp/config');
+const {
+  encodeJsonRpcPayload,
+  trimLeadingMessageWhitespace,
+  tryParseFramedMessage,
+  tryParseLineDelimitedMessage
+} = require('./mcp/protocol');
+const {
+  STATIC_MCP_REPLACEMENTS,
+  getStaticReplacementDescriptors
+} = require('./mcp/staticReplacements');
 
 const sessionPool = new Map();
 const initializePromisePool = new Map();
@@ -45,86 +36,6 @@ let cachedDynamicRegistry = {
   byName: new Map()
 };
 let warmRegistryPromise = null;
-
-const STATIC_MCP_REPLACEMENTS = [
-  {
-    serverName: 'fetch',
-    toolName: 'fetch_url',
-    functionName: 'mcp_fetch_fetch_url',
-    description: 'Fetch and extract readable webpage content',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' }
-      },
-      required: ['url']
-    },
-    targetTool: 'web_fetch'
-  },
-  {
-    serverName: 'bing-search',
-    toolName: 'search_web',
-    functionName: 'mcp_bing_search_search_web',
-    description: 'Search the web',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string' }
-      },
-      required: ['query']
-    },
-    targetTool: 'web_search'
-  },
-  {
-    serverName: 'amap-maps',
-    toolName: 'search_places',
-    functionName: 'mcp_amap_maps_search_places',
-    description: 'Search nearby places',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        keywords: { type: 'string' },
-        city: { type: 'string' }
-      },
-      required: ['keywords']
-    },
-    targetTool: 'search_nearby_places'
-  },
-  {
-    serverName: 'howtocook-mcp',
-    toolName: 'recipe_search',
-    functionName: 'mcp_howtocook_mcp_recipe_search',
-    description: 'Search local recipe records from the cached howtocook dataset',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string' },
-        limit: { type: 'number' }
-      },
-      required: ['query']
-    },
-    targetTool: 'local_howtocook_recipe_search'
-  }
-];
-
-function getStaticReplacementDescriptors(configuredServers = []) {
-  const configuredNames = new Set(
-    (Array.isArray(configuredServers) ? configuredServers : [])
-      .map((item) => String(item?.serverName || '').trim())
-      .filter(Boolean)
-  );
-
-  return STATIC_MCP_REPLACEMENTS
-    .filter((item) => configuredNames.size === 0 || configuredNames.has(item.serverName))
-    .map((item) => ({
-      serverName: item.serverName,
-      toolName: item.toolName,
-      functionName: item.functionName,
-      description: item.description,
-      inputSchema: item.inputSchema,
-      targetTool: item.targetTool
-    }));
-}
 
 function getMcpDiscoveryMode() {
   return String(config.MCP_DISCOVERY_MODE || '').trim().toLowerCase() || 'warm';
@@ -247,70 +158,6 @@ function maybeThrowDiscoveryFailureCooldown(serverName = '', stage = 'discover')
   });
 }
 
-function resolveMcpConfigPath(explicitPath = '') {
-  const candidate = String(explicitPath || process.env.MIZUKI_MCP_CONFIG || '').trim();
-  if (candidate) return path.resolve(candidate);
-  return path.resolve(__dirname, '..', '.mcp.json');
-}
-
-function safeReadJson(absPath) {
-  try {
-    if (!fs.existsSync(absPath)) return null;
-    const raw = fs.readFileSync(absPath, 'utf8').trim();
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch (_) {
-    return null;
-  }
-}
-
-function readMcpConfig(options = {}) {
-  const configPath = resolveMcpConfigPath(options.configPath);
-  return {
-    configPath,
-    config: safeReadJson(configPath)
-  };
-}
-
-function splitPathEntries(rawPath = '') {
-  return String(rawPath || '')
-    .split(path.delimiter)
-    .map((item) => String(item || '').trim())
-    .filter(Boolean);
-}
-
-function resolveCommandForSpawn(command = '', env = process.env) {
-  const normalized = String(command || '').trim();
-  if (!normalized) return '';
-  if (path.isAbsolute(normalized) && fs.existsSync(normalized)) return normalized;
-
-  const ext = path.extname(normalized).toLowerCase();
-  const candidates = [];
-  if (process.platform === 'win32') {
-    if (ext) {
-      candidates.push(normalized);
-    } else {
-      candidates.push(`${normalized}.cmd`, `${normalized}.exe`, `${normalized}.bat`, normalized);
-    }
-  } else {
-    candidates.push(normalized);
-  }
-
-  const pathEntries = splitPathEntries(env?.PATH || process.env.PATH || '');
-  for (const candidate of candidates) {
-    if (path.isAbsolute(candidate) && fs.existsSync(candidate)) return candidate;
-    for (const dir of pathEntries) {
-      const abs = path.join(dir, candidate);
-      try {
-        if (fs.existsSync(abs)) return abs;
-      } catch (_) {}
-    }
-  }
-
-  return normalized;
-}
-
 function shouldUseShellSpawn(command = '') {
   if (process.platform !== 'win32') return false;
   const ext = path.extname(String(command || '').trim()).toLowerCase();
@@ -358,26 +205,6 @@ function normalizeSpawnFailure(error, serverName = '') {
   return normalizeMcpError(error, 'MCP_PROCESS_ERROR', {
     fallbackMessage: `failed to start mcp server ${serverName}`
   });
-}
-
-function listConfiguredMcpServers(options = {}) {
-  const { config: parsed, configPath } = readMcpConfig(options);
-  const servers = parsed && parsed.mcpServers && typeof parsed.mcpServers === 'object'
-    ? parsed.mcpServers
-    : {};
-
-  return Object.entries(servers).map(([serverName, definition]) => {
-    const serverEnv = definition?.env && typeof definition.env === 'object' ? { ...definition.env } : {};
-    const mergedEnv = { ...process.env, ...serverEnv };
-    const command = resolveCommandForSpawn(String(definition?.command || '').trim(), mergedEnv);
-    return {
-      serverName,
-      configPath,
-      command,
-      args: Array.isArray(definition?.args) ? definition.args.map((item) => String(item)) : [],
-      env: serverEnv
-    };
-  }).filter((item) => item.serverName && item.command);
 }
 
 function sanitizeMcpNamePart(value = '', fallback = 'tool') {
@@ -431,90 +258,6 @@ function resetSessionEntry(serverName = '') {
   closeSessionEntry(entry, 'reset');
 }
 
-function encodeJsonRpcPayload(message = {}, protocolMode = 'line') {
-  const body = JSON.stringify(message);
-  if (protocolMode === 'frame') {
-    const bodyBuffer = Buffer.from(body, 'utf8');
-    const header = Buffer.from(`Content-Length: ${bodyBuffer.length}\r\n\r\n`, 'utf8');
-    return Buffer.concat([header, bodyBuffer]);
-  }
-  return Buffer.from(`${body}\n`, 'utf8');
-}
-
-function trimLeadingMessageWhitespace(buffer = Buffer.alloc(0)) {
-  let offset = 0;
-  while (offset < buffer.length && [0x0a, 0x0d, 0x20, 0x09].includes(buffer[offset])) {
-    offset += 1;
-  }
-  return offset > 0 ? buffer.slice(offset) : buffer;
-}
-
-function tryParseLineDelimitedMessage(buffer = Buffer.alloc(0)) {
-  const normalized = trimLeadingMessageWhitespace(buffer);
-  if (!normalized.length) return { rest: normalized, skip: true };
-
-  const newlineIndex = normalized.indexOf(0x0a);
-  if (newlineIndex < 0) return null;
-
-  let lineBuffer = normalized.slice(0, newlineIndex);
-  if (lineBuffer.length && lineBuffer[lineBuffer.length - 1] === 0x0d) {
-    lineBuffer = lineBuffer.slice(0, -1);
-  }
-  const raw = lineBuffer.toString('utf8').trim();
-  return {
-    raw,
-    rest: normalized.slice(newlineIndex + 1),
-    skip: !raw
-  };
-}
-
-function tryParseFramedMessage(buffer = Buffer.alloc(0)) {
-  const normalized = trimLeadingMessageWhitespace(buffer);
-  if (!normalized.length) return { rest: normalized, skip: true };
-
-  const headerEndCrLf = normalized.indexOf(Buffer.from('\r\n\r\n'));
-  const headerEndLf = normalized.indexOf(Buffer.from('\n\n'));
-  let headerEnd = -1;
-  let separatorLength = 0;
-
-  if (headerEndCrLf >= 0 && (headerEndLf < 0 || headerEndCrLf <= headerEndLf)) {
-    headerEnd = headerEndCrLf;
-    separatorLength = 4;
-  } else if (headerEndLf >= 0) {
-    headerEnd = headerEndLf;
-    separatorLength = 2;
-  } else {
-    return null;
-  }
-
-  const headerText = normalized.slice(0, headerEnd).toString('utf8');
-  const contentLengthMatch = headerText.match(/content-length\s*:\s*(\d+)/i);
-  if (!contentLengthMatch) {
-    return {
-      error: normalizeMcpError(new Error('missing content-length header'), 'MCP_INVALID_FRAME'),
-      rest: Buffer.alloc(0)
-    };
-  }
-
-  const contentLength = Number(contentLengthMatch[1]);
-  if (!Number.isFinite(contentLength) || contentLength < 0) {
-    return {
-      error: normalizeMcpError(new Error('invalid content-length header'), 'MCP_INVALID_FRAME'),
-      rest: Buffer.alloc(0)
-    };
-  }
-
-  const bodyStart = headerEnd + separatorLength;
-  const bodyEnd = bodyStart + contentLength;
-  if (normalized.length < bodyEnd) return null;
-
-  return {
-    raw: normalized.slice(bodyStart, bodyEnd).toString('utf8').trim(),
-    rest: normalized.slice(bodyEnd),
-    skip: false
-  };
-}
-
 function consumeStdoutBuffer(entry) {
   let safety = 0;
   while (safety < 1000) {
@@ -536,6 +279,7 @@ function consumeStdoutBuffer(entry) {
     entry.buffer = parsed.rest;
 
     if (parsed.error) {
+      parsed.error = normalizeMcpError(parsed.error, 'MCP_INVALID_FRAME');
       const pendingErrors = Array.from(entry.pending.values());
       entry.pending.clear();
       for (const pending of pendingErrors) {

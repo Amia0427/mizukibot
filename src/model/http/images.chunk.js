@@ -309,16 +309,12 @@ async function resolveAnthropicImageBlock(part = {}) {
   }
 
   try {
-    const resp = await fetchRemoteImage(imageUrl);
-    const mediaType = inferImageMediaType(imageUrl, resp.headers);
-    const data = resp.buffer.toString('base64');
-    if (!data) return null;
+    await assertSafeHttpUrl(imageUrl);
     return {
       type: 'image',
       source: {
-        type: 'base64',
-        media_type: mediaType,
-        data
+        type: 'url',
+        url: imageUrl
       }
     };
   } catch (error) {

@@ -3,7 +3,6 @@ const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 const config = require('../config');
-const { todayStrInTz } = require('../utils/time');
 const { extractSSEEvents, flushSSEState } = require('./parser');
 const { sendGroupImageMessage } = require('./qqActionService');
 const {
@@ -13,91 +12,64 @@ const {
   nextTracePhase,
   normalizeRequestTrace
 } = require('../utils/requestTrace');
+const {
+  appendTextFileSafe,
+  ensureDirSync,
+  readJsonFileSafe,
+  writeJsonFileSafe
+} = require('./createAgent/fileState');
+const {
+  detectImageExtension,
+  normalizeBase64ImageData,
+  validateImageBuffer
+} = require('./createAgent/imageValidation');
+const {
+  extractUrlFromText,
+  looksLikeHtmlDocument,
+  normalizeRequestError,
+  parseJsonTextSafe,
+  summarizePayloadShape
+} = require('./createAgent/requestUtils');
+const {
+  collectChatCompletionsTextFragments,
+  extractImageFromChatCompletionsResponse,
+  extractImageFromGenerationResponse,
+  extractImageFromStreamEventPayload,
+  extractImageResultFromTextBlob,
+  extractStreamFailureMessage
+} = require('./createAgent/responseExtractors');
+const {
+  buildCreateAgentAllowedUserIds,
+  buildCreateAgentChatCompletionsUrl,
+  buildCreateAgentChatCompletionsUrlCandidates,
+  buildCreateAgentGenerationUrl,
+  buildCreateAgentGenerationUrlCandidates,
+  isCreateAgentUserAllowed,
+  normalizeCreateAgentBaseUrl,
+  normalizeCreateAgentProtocol,
+  normalizeIdList,
+  normalizeRequestedImageSize,
+  resolveConfig
+} = require('./createAgent/config');
+const {
+  clearRuntimeSlotsForCurrentProcess,
+  consumeQuota,
+  getQuotaStatus,
+  isRuntimeStateStale,
+  loadQuotaState,
+  loadRuntimeState,
+  releaseRuntimeSlot,
+  tryAcquireRuntimeSlot
+} = require('./createAgent/quotaRuntime');
 
-const CREATE_AGENT_DIR = path.join(config.DATA_DIR, 'create-agent');
-const CREATE_AGENT_QUOTA_FILE = path.join(CREATE_AGENT_DIR, 'quota.json');
-const CREATE_AGENT_RUNTIME_FILE = path.join(CREATE_AGENT_DIR, 'runtime.json');
-const CREATE_AGENT_ERROR_LOG_FILE = path.join(CREATE_AGENT_DIR, 'errors.log');
 const DEFAULT_IMAGE_EXTENSION = '.png';
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const CREATE_AGENT_STREAM_PARTIAL_IMAGES = 1;
-const CREATE_AGENT_ADMIN_USER_IDS = new Set((config.ADMIN_USER_IDS || []).map((item) => String(item || '').trim()).filter(Boolean));
-
-function ensureDirSync(dirPath = '') {
-  const fullPath = path.resolve(String(dirPath || '').trim());
-  if (!fullPath) return '';
-  fs.mkdirSync(fullPath, { recursive: true });
-  return fullPath;
-}
-
-function readJsonFileSafe(filePath = '', fallback = {}) {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fallback;
-    return parsed;
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function writeJsonFileSafe(filePath = '', value = {}) {
-  const target = path.resolve(String(filePath || '').trim());
-  if (!target) return;
-  ensureDirSync(path.dirname(target));
-  fs.writeFileSync(target, JSON.stringify(value, null, 2));
-}
-
-function appendTextFileSafe(filePath = '', text = '') {
-  const target = path.resolve(String(filePath || '').trim());
-  const content = String(text || '');
-  if (!target || !content) return;
-  ensureDirSync(path.dirname(target));
-  fs.appendFileSync(target, content, 'utf8');
-}
 
 function normalizePromptText(prompt = '') {
   return String(prompt || '')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function normalizeIdList(list = []) {
-  return Array.from(new Set(
-    (Array.isArray(list) ? list : [list])
-      .map((item) => String(item || '').trim())
-      .filter(Boolean)
-  ));
-}
-
-function buildCreateAgentAllowedUserIds(overrides = {}) {
-  const configAllowUserIds = normalizeIdList(overrides.allowUserIds ?? config.CREATE_AGENT_ALLOW_USER_IDS ?? []);
-  return new Set([
-    ...CREATE_AGENT_ADMIN_USER_IDS,
-    ...configAllowUserIds
-  ]);
-}
-
-function isCreateAgentUserAllowed(userId = '', overrides = {}) {
-  const normalizedUserId = String(userId || '').trim();
-  if (!normalizedUserId) return false;
-  return buildCreateAgentAllowedUserIds(overrides).has(normalizedUserId);
-}
-
-function normalizeRequestedImageSize(value = '') {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw || raw === 'auto') return 'auto';
-
-  const sizeMatch = raw.match(/^(\d{2,5})x(\d{2,5})$/i);
-  if (!sizeMatch) return '1024x1024';
-
-  const width = Number(sizeMatch[1] || 0);
-  const height = Number(sizeMatch[2] || 0);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return '1024x1024';
-  }
-  return `${width}x${height}`;
 }
 
 function buildResolutionQualityClause(imageSize = '') {
@@ -158,30 +130,6 @@ function buildCreateAgentPrompt(rawPrompt = '', options = {}) {
   return clauses.join(' ');
 }
 
-function detectImageExtension(buffer = Buffer.alloc(0), fallback = DEFAULT_IMAGE_EXTENSION, mimeType = '') {
-  const mime = String(mimeType || '').trim().toLowerCase();
-  if (mime.includes('png')) return '.png';
-  if (mime.includes('webp')) return '.webp';
-  if (mime.includes('gif')) return '.gif';
-  if (mime.includes('jpeg') || mime.includes('jpg')) return '.jpg';
-
-  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return fallback;
-  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return '.png';
-  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return '.jpg';
-  if (
-    buffer[0] === 0x52
-    && buffer[1] === 0x49
-    && buffer[2] === 0x46
-    && buffer[3] === 0x46
-    && buffer[8] === 0x57
-    && buffer[9] === 0x45
-    && buffer[10] === 0x42
-    && buffer[11] === 0x50
-  ) return '.webp';
-  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return '.gif';
-  return fallback;
-}
-
 function buildOutputBasename(prompt = '') {
   const datePart = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
   const normalized = normalizePromptText(prompt)
@@ -191,264 +139,6 @@ function buildOutputBasename(prompt = '') {
     .slice(0, 40);
   const suffix = crypto.randomBytes(3).toString('hex');
   return `${datePart}-${normalized || 'create'}-${suffix}`;
-}
-
-function normalizeCreateAgentBaseUrl(value = '') {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-
-  const stripKnownSuffix = (pathname = '') => String(pathname || '')
-    .replace(/\/+$/g, '')
-    .replace(/\/chat\/completions$/i, '')
-    .replace(/\/completions$/i, '')
-    .replace(/\/responses$/i, '')
-    .replace(/\/images\/generations$/i, '')
-    .replace(/\/images\/edits$/i, '')
-    .replace(/\/+$/g, '');
-
-  try {
-    const url = new URL(raw);
-    url.pathname = stripKnownSuffix(url.pathname) || '/';
-    url.search = '';
-    url.hash = '';
-    return url.toString().replace(/\/$/, '');
-  } catch (_) {
-    return stripKnownSuffix(raw);
-  }
-}
-
-function buildCreateAgentGenerationUrl(baseUrl = '') {
-  const normalizedBaseUrl = normalizeCreateAgentBaseUrl(baseUrl);
-  if (!normalizedBaseUrl) return '';
-  return `${normalizedBaseUrl}/images/generations`;
-}
-
-function normalizeCreateAgentProtocol(value = '') {
-  const normalized = String(value || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
-  if (
-    normalized === 'chat'
-    || normalized === 'chat_completion'
-    || normalized === 'chat_completions'
-    || normalized === 'completions'
-  ) {
-    return 'chat_completions';
-  }
-  return 'images';
-}
-
-function buildCreateAgentChatCompletionsUrl(baseUrl = '') {
-  const normalizedBaseUrl = normalizeCreateAgentBaseUrl(baseUrl);
-  if (!normalizedBaseUrl) return '';
-  const baseWithoutSlash = normalizedBaseUrl.replace(/\/+$/g, '');
-  if (/\/chat\/completions$/i.test(baseWithoutSlash)) return baseWithoutSlash;
-  if (/\/v\d+$/i.test(baseWithoutSlash)) return `${baseWithoutSlash}/chat/completions`;
-  return `${baseWithoutSlash}/v1/chat/completions`;
-}
-
-function buildCreateAgentGenerationUrlCandidates(baseUrl = '') {
-  const normalizedBaseUrl = normalizeCreateAgentBaseUrl(baseUrl);
-  if (!normalizedBaseUrl) return [];
-  const baseWithoutSlash = normalizedBaseUrl.replace(/\/+$/g, '');
-  const candidates = [`${baseWithoutSlash}/images/generations`];
-  if (!/\/v1$/i.test(baseWithoutSlash)) {
-    candidates.push(`${baseWithoutSlash}/v1/images/generations`);
-  }
-  return Array.from(new Set(candidates.filter(Boolean)));
-}
-
-function buildCreateAgentChatCompletionsUrlCandidates(baseUrl = '') {
-  const normalizedBaseUrl = normalizeCreateAgentBaseUrl(baseUrl);
-  if (!normalizedBaseUrl) return [];
-  const baseWithoutSlash = normalizedBaseUrl.replace(/\/+$/g, '');
-
-  if (/\/chat\/completions$/i.test(baseWithoutSlash)) {
-    return [baseWithoutSlash];
-  }
-
-  if (/\/v\d+$/i.test(baseWithoutSlash)) {
-    return [`${baseWithoutSlash}/chat/completions`];
-  }
-
-  return [`${baseWithoutSlash}/v1/chat/completions`];
-}
-
-function resolveConfig(overrides = {}) {
-  const requestedImageSize = String((overrides.imageSize ?? config.CREATE_AGENT_IMAGE_SIZE) || '1024x1024').trim() || '1024x1024';
-  return {
-    enabled: overrides.enabled ?? config.CREATE_AGENT_ENABLED,
-    apiBaseUrl: normalizeCreateAgentBaseUrl(overrides.apiBaseUrl ?? config.CREATE_AGENT_API_BASE_URL),
-    apiKey: String((overrides.apiKey ?? config.CREATE_AGENT_API_KEY) || '').trim(),
-    model: String((overrides.model ?? config.CREATE_AGENT_MODEL) || '').trim(),
-    protocol: normalizeCreateAgentProtocol(overrides.protocol ?? config.CREATE_AGENT_PROTOCOL),
-    allowUserIds: normalizeIdList(overrides.allowUserIds ?? config.CREATE_AGENT_ALLOW_USER_IDS ?? []),
-    dailyLimit: Math.max(0, Number(overrides.dailyLimit ?? config.CREATE_AGENT_DAILY_LIMIT ?? 20) || 0),
-    timeoutMs: Math.max(1000, Number(overrides.timeoutMs ?? config.CREATE_AGENT_TIMEOUT_MS ?? 120000) || 120000),
-    groupOnly: overrides.groupOnly ?? config.CREATE_AGENT_GROUP_ONLY,
-    maxConcurrency: Math.max(1, Number(overrides.maxConcurrency ?? config.CREATE_AGENT_MAX_CONCURRENCY ?? 1) || 1),
-    requestedImageSize,
-    imageSize: normalizeRequestedImageSize(requestedImageSize),
-    imageQuality: String((overrides.imageQuality ?? config.CREATE_AGENT_IMAGE_QUALITY) || 'high').trim() || 'high',
-    imageBackground: String((overrides.imageBackground ?? config.CREATE_AGENT_IMAGE_BACKGROUND) || 'auto').trim() || 'auto',
-    imageStyle: String((overrides.imageStyle ?? config.CREATE_AGENT_IMAGE_STYLE) || 'vivid').trim() || 'vivid',
-    imageOutputCompression: Math.max(0, Math.min(100, Number(
-      overrides.imageOutputCompression ?? config.CREATE_AGENT_IMAGE_OUTPUT_COMPRESSION ?? 0
-    ) || 0)),
-    responseFormat: String((overrides.responseFormat ?? config.CREATE_AGENT_RESPONSE_FORMAT) || 'b64_json').trim() || 'b64_json',
-    outputFormat: String((overrides.outputFormat ?? config.CREATE_AGENT_OUTPUT_FORMAT) || 'png').trim() || 'png',
-    outputDir: path.resolve(String((overrides.outputDir ?? config.CREATE_AGENT_OUTPUT_DIR) || path.join(config.DATA_DIR, 'create-agent', 'output')).trim()),
-    timezone: String((overrides.timezone ?? config.TIMEZONE) || 'Asia/Shanghai').trim() || 'Asia/Shanghai',
-    quotaFile: path.resolve(String(overrides.quotaFile || CREATE_AGENT_QUOTA_FILE)),
-    runtimeFile: path.resolve(String(overrides.runtimeFile || CREATE_AGENT_RUNTIME_FILE)),
-    errorLogFile: path.resolve(String(overrides.errorLogFile || CREATE_AGENT_ERROR_LOG_FILE))
-  };
-}
-
-function loadQuotaState(quotaFile = '') {
-  const fallback = { day: '', used: 0 };
-  const parsed = readJsonFileSafe(quotaFile, fallback);
-  return {
-    day: String(parsed.day || '').trim(),
-    used: Math.max(0, Number(parsed.used || 0) || 0)
-  };
-}
-
-function getQuotaStatus(runtimeConfig = {}) {
-  const quotaState = loadQuotaState(runtimeConfig.quotaFile);
-  const today = todayStrInTz(runtimeConfig.timezone);
-  if (quotaState.day !== today) {
-    return {
-      day: today,
-      used: 0,
-      remaining: Math.max(0, runtimeConfig.dailyLimit)
-    };
-  }
-  return {
-    day: today,
-    used: quotaState.used,
-    remaining: Math.max(0, runtimeConfig.dailyLimit - quotaState.used)
-  };
-}
-
-function loadRuntimeState(runtimeFile = '') {
-  const fallback = { running: 0, updatedAt: 0, ownerPid: 0 };
-  const parsed = readJsonFileSafe(runtimeFile, fallback);
-  return {
-    running: Math.max(0, Number(parsed.running || 0) || 0),
-    updatedAt: Math.max(0, Number(parsed.updatedAt || 0) || 0),
-    ownerPid: Math.max(0, Number(parsed.ownerPid || 0) || 0)
-  };
-}
-
-function saveRuntimeState(runtimeFile = '', state = {}) {
-  const running = Math.max(0, Number(state.running || 0) || 0);
-  writeJsonFileSafe(runtimeFile, {
-    running,
-    updatedAt: Number(state.updatedAt || Date.now()) || Date.now(),
-    ownerPid: running > 0
-      ? Math.max(0, Number(state.ownerPid || process.pid) || process.pid)
-      : 0
-  });
-}
-
-function isProcessAlive(pid = 0) {
-  const targetPid = Math.max(0, Number(pid || 0) || 0);
-  if (!targetPid) return false;
-  try {
-    process.kill(targetPid, 0);
-    return true;
-  } catch (error) {
-    return String(error?.code || '').trim().toUpperCase() === 'EPERM';
-  }
-}
-
-function isRuntimeStateStale(runtimeConfig = {}, state = {}) {
-  const running = Math.max(0, Number(state.running || 0) || 0);
-  if (running <= 0) return false;
-
-  const ownerPid = Math.max(0, Number(state.ownerPid || 0) || 0);
-  if (ownerPid > 0 && !isProcessAlive(ownerPid)) {
-    return true;
-  }
-
-  if (ownerPid > 0) return false;
-
-  const updatedAt = Math.max(0, Number(state.updatedAt || 0) || 0);
-  const ageMs = updatedAt > 0 ? Math.max(0, Date.now() - updatedAt) : Number.MAX_SAFE_INTEGER;
-  const staleAfterMs = Math.max(180000, Number(runtimeConfig.timeoutMs || 120000) + 60000);
-  return ageMs >= staleAfterMs;
-}
-
-function consumeQuota(runtimeConfig = {}) {
-  const today = todayStrInTz(runtimeConfig.timezone);
-  const quotaState = loadQuotaState(runtimeConfig.quotaFile);
-  const currentUsed = quotaState.day === today ? quotaState.used : 0;
-  const nextState = {
-    day: today,
-    used: currentUsed + 1
-  };
-  writeJsonFileSafe(runtimeConfig.quotaFile, nextState);
-  return nextState;
-}
-
-function tryAcquireRuntimeSlot(runtimeConfig = {}) {
-  let current = loadRuntimeState(runtimeConfig.runtimeFile);
-  if (isRuntimeStateStale(runtimeConfig, current)) {
-    current = {
-      running: 0,
-      updatedAt: Date.now(),
-      ownerPid: 0
-    };
-    saveRuntimeState(runtimeConfig.runtimeFile, current);
-  }
-
-  if (current.running >= runtimeConfig.maxConcurrency) {
-    return {
-      ok: false,
-      state: current
-    };
-  }
-  const nextState = {
-    running: current.running + 1,
-    updatedAt: Date.now(),
-    ownerPid: process.pid
-  };
-  saveRuntimeState(runtimeConfig.runtimeFile, nextState);
-  return {
-    ok: true,
-    state: nextState
-  };
-}
-
-function releaseRuntimeSlot(runtimeConfig = {}) {
-  const current = loadRuntimeState(runtimeConfig.runtimeFile);
-  saveRuntimeState(runtimeConfig.runtimeFile, {
-    running: Math.max(0, current.running - 1),
-    updatedAt: Date.now(),
-    ownerPid: Math.max(0, current.running - 1) > 0 ? process.pid : 0
-  });
-}
-
-function clearRuntimeSlotsForCurrentProcess(runtimeConfig = resolveConfig()) {
-  const current = loadRuntimeState(runtimeConfig.runtimeFile);
-  if (Number(current.ownerPid || 0) !== process.pid) {
-    return {
-      cleared: false,
-      state: current
-    };
-  }
-  saveRuntimeState(runtimeConfig.runtimeFile, {
-    running: 0,
-    updatedAt: Date.now(),
-    ownerPid: 0
-  });
-  console.log('[create-agent] cleared runtime slots for shutdown', {
-    pid: process.pid,
-    previousRunning: Math.max(0, Number(current.running || 0) || 0)
-  });
-  return {
-    cleared: true,
-    state: current
-  };
 }
 
 function validateCreateAgentPrerequisites(runtimeConfig = {}) {
@@ -463,80 +153,11 @@ function validateCreateAgentPrerequisites(runtimeConfig = {}) {
   }
 }
 
-function stringifyBody(body = null) {
-  if (typeof body === 'string') return body.trim();
-  if (body === null || body === undefined) return '';
-  try {
-    return JSON.stringify(body);
-  } catch (_) {
-    return String(body || '').trim();
-  }
-}
-
-function parseJsonTextSafe(text = '') {
-  const raw = String(text || '').trim();
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch (_) {
-    return null;
-  }
-}
-
-function extractUrlFromText(value = '') {
-  const match = String(value || '').match(/(?:data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+|https?:\/\/[^\s"'`<>]+)/i);
-  return String(match ? match[0] : '').trim();
-}
-
-function looksLikeHtmlDocument(value = '') {
-  const text = String(value || '').trim().toLowerCase();
-  if (!text) return false;
-  return text.startsWith('<!doctype html') || text.startsWith('<html') || text.includes('<head>') && text.includes('<body>');
-}
-
 function getCreateAgentStreamTimeoutMs(runtimeConfig = {}) {
   const configuredTimeoutMs = Math.max(1000, Number(runtimeConfig.timeoutMs || 0) || 0);
   const requestStreamTimeoutMs = Math.max(1000, Number(config.REQUEST_STREAM_TIMEOUT_MS || 0) || 0);
   const firstTokenTimeoutMs = Math.max(1000, Number(config.AI_STREAM_FIRST_TOKEN_TIMEOUT_MS || 0) || 0);
   return Math.max(configuredTimeoutMs, requestStreamTimeoutMs, firstTokenTimeoutMs, 420000);
-}
-
-function summarizePayloadShape(payload = null) {
-  if (payload === null || payload === undefined) return '';
-  if (typeof payload === 'string') {
-    return payload.replace(/\s+/g, ' ').trim().slice(0, 400);
-  }
-  try {
-    const text = JSON.stringify(payload);
-    return text.slice(0, 400);
-  } catch (_) {
-    return String(payload || '').trim().slice(0, 400);
-  }
-}
-
-function normalizeRequestError(error = null) {
-  const status = Number(error?.response?.status || 0) || 0;
-  const body = stringifyBody(error?.response?.data);
-  if (status > 0) {
-    return `http_error status=${status} body=${body}`;
-  }
-
-  const code = String(error?.code || '').trim().toUpperCase();
-  const message = String(error?.message || error || '').trim();
-  const lower = message.toLowerCase();
-  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT' || lower.includes('timeout') || lower.includes('timed out')) {
-    return message || 'timeout';
-  }
-  if (
-    code === 'ENOTFOUND'
-    || code === 'ECONNRESET'
-    || code === 'ECONNREFUSED'
-    || code === 'EHOSTUNREACH'
-    || code === 'EAI_AGAIN'
-  ) {
-    return `network_error ${message}`.trim();
-  }
-  return message || 'unknown error';
 }
 
 function getCreateAgentRequestTrace(deps = {}, context = {}) {
@@ -826,119 +447,6 @@ function buildImageGenerationRequestOptions(runtimeConfig = {}, options = {}) {
   };
 }
 
-function normalizeBase64ImageData(value = '') {
-  return String(value || '').replace(/\s+/g, '').trim();
-}
-
-function detectImageKind(buffer = Buffer.alloc(0), mimeType = '') {
-  const mime = String(mimeType || '').trim().toLowerCase();
-  if (Buffer.isBuffer(buffer) && buffer.length >= 12) {
-    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'png';
-    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpeg';
-    if (
-      buffer[0] === 0x52
-      && buffer[1] === 0x49
-      && buffer[2] === 0x46
-      && buffer[3] === 0x46
-      && buffer[8] === 0x57
-      && buffer[9] === 0x45
-      && buffer[10] === 0x42
-      && buffer[11] === 0x50
-    ) return 'webp';
-    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'gif';
-  } else if (Buffer.isBuffer(buffer) && buffer.length >= 3) {
-    if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'jpeg';
-    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return 'gif';
-  }
-
-  if (mime.includes('png')) return 'png';
-  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpeg';
-  if (mime.includes('webp')) return 'webp';
-  if (mime.includes('gif')) return 'gif';
-  return 'unknown';
-}
-
-function validatePngBuffer(buffer = Buffer.alloc(0)) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 33) return 'png shorter than minimal valid structure';
-  if (buffer.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') return 'png signature mismatch';
-
-  let offset = 8;
-  let sawIHDR = false;
-  let sawIEND = false;
-  while (offset < buffer.length) {
-    if (offset + 8 > buffer.length) return 'png chunk header truncated';
-    const chunkLength = buffer.readUInt32BE(offset);
-    const chunkType = buffer.subarray(offset + 4, offset + 8).toString('ascii');
-    const chunkEnd = offset + 12 + chunkLength;
-    if (!/^[A-Za-z]{4}$/.test(chunkType)) return 'png chunk type invalid';
-    if (chunkEnd > buffer.length) return `png chunk ${chunkType} truncated`;
-
-    if (chunkType === 'IHDR') {
-      sawIHDR = true;
-      if (chunkLength !== 13) return 'png IHDR length invalid';
-    }
-    if (chunkType === 'IEND') {
-      sawIEND = true;
-      if (chunkLength !== 0) return 'png IEND length invalid';
-      if (chunkEnd !== buffer.length) return 'png has trailing bytes after IEND';
-      break;
-    }
-
-    offset = chunkEnd;
-  }
-
-  if (!sawIHDR) return 'png missing IHDR';
-  if (!sawIEND) return 'png missing IEND';
-  return '';
-}
-
-function validateJpegBuffer(buffer = Buffer.alloc(0)) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 4) return 'jpeg shorter than minimal valid structure';
-  if (!(buffer[0] === 0xff && buffer[1] === 0xd8)) return 'jpeg start marker missing';
-  if (!(buffer[buffer.length - 2] === 0xff && buffer[buffer.length - 1] === 0xd9)) return 'jpeg end marker missing';
-  return '';
-}
-
-function validateGifBuffer(buffer = Buffer.alloc(0)) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 14) return 'gif shorter than minimal valid structure';
-  const header = buffer.subarray(0, 6).toString('ascii');
-  if (!(header === 'GIF87a' || header === 'GIF89a')) return 'gif signature mismatch';
-  if (buffer[buffer.length - 1] !== 0x3b) return 'gif trailer missing';
-  return '';
-}
-
-function validateWebpBuffer(buffer = Buffer.alloc(0)) {
-  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return 'webp shorter than minimal valid structure';
-  if (buffer.subarray(0, 4).toString('ascii') !== 'RIFF') return 'webp RIFF signature missing';
-  if (buffer.subarray(8, 12).toString('ascii') !== 'WEBP') return 'webp signature mismatch';
-
-  const declaredSize = buffer.readUInt32LE(4) + 8;
-  if (declaredSize > buffer.length) return 'webp container truncated';
-  return '';
-}
-
-function validateImageBuffer(buffer = Buffer.alloc(0), mimeType = '') {
-  if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
-    throw new Error('image buffer empty');
-  }
-
-  const kind = detectImageKind(buffer, mimeType);
-  let reason = '';
-  if (kind === 'png') reason = validatePngBuffer(buffer);
-  else if (kind === 'jpeg') reason = validateJpegBuffer(buffer);
-  else if (kind === 'gif') reason = validateGifBuffer(buffer);
-  else if (kind === 'webp') reason = validateWebpBuffer(buffer);
-  else reason = 'unrecognized image signature';
-
-  if (reason) {
-    const error = new Error(`image buffer invalid or truncated format=${kind} reason=${reason}`);
-    error.imageFormat = kind;
-    throw error;
-  }
-
-  return { kind };
-}
-
 function writeImageBuffer(runtimeConfig = {}, prompt = '', buffer = Buffer.alloc(0), mimeType = '') {
   validateImageBuffer(buffer, mimeType);
   const outputPath = buildImageOutputPath(runtimeConfig, prompt, buffer, mimeType);
@@ -979,261 +487,6 @@ async function downloadImageFromUrl(imageUrl = '', prompt = '', runtimeConfig = 
   } catch (error) {
     throw new Error(normalizeRequestError(error));
   }
-}
-
-function extractImageFromGenerationResponse(payload = {}) {
-  const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-  if (!first || typeof first !== 'object') {
-    throw new Error('generation response missing image data');
-  }
-
-  const b64Json = String(first.b64_json || '').trim();
-  if (b64Json) {
-    return {
-      kind: 'b64_json',
-      value: b64Json
-    };
-  }
-
-  const url = String(first.url || '').trim();
-  if (url) {
-    return {
-      kind: 'url',
-      value: url
-    };
-  }
-
-  throw new Error('generation response missing image data');
-}
-
-function extractImageResultFromChatContentPart(part = {}) {
-  if (!part || typeof part !== 'object') return null;
-
-  const b64Json = String(
-    part.b64_json
-    || part.base64
-    || part.image_base64
-    || part.output_b64
-    || part.result_b64
-    || ''
-  ).trim();
-  if (b64Json) {
-    return {
-      kind: 'b64_json',
-      value: b64Json
-    };
-  }
-
-  const imageUrl = String(
-    part?.image_url?.url
-    || part?.image_url
-    || part?.url
-    || part?.file_url
-    || extractUrlFromText(part?.text || part?.content || '')
-    || ''
-  ).trim();
-  if (imageUrl) {
-    if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(imageUrl)) {
-      return {
-        kind: 'url',
-        value: imageUrl
-      };
-    }
-    return {
-      kind: 'url',
-      value: imageUrl
-    };
-  }
-
-  return null;
-}
-
-function extractImageResultFromTextBlob(value = '') {
-  const text = String(value || '').trim();
-  if (!text) return null;
-
-  const directDataUrl = extractUrlFromText(text);
-  if (/^data:image\/[a-z0-9.+-]+;base64,/i.test(directDataUrl)) {
-    return {
-      kind: 'url',
-      value: directDataUrl
-    };
-  }
-
-  const parsedJson = parseJsonTextSafe(text);
-  if (parsedJson && typeof parsedJson === 'object') {
-    const parsedDirect = extractImageResultFromChatContentPart(parsedJson);
-    if (parsedDirect) return parsedDirect;
-    try {
-      return extractImageFromGenerationResponse(parsedJson);
-    } catch (_) {}
-  }
-
-  const urlMatch = extractUrlFromText(text);
-  if (urlMatch) {
-    return {
-      kind: 'url',
-      value: urlMatch
-    };
-  }
-
-  return null;
-}
-
-function collectChatCompletionsTextFragments(payload = {}) {
-  const fragments = [];
-  if (!payload || typeof payload !== 'object') return fragments;
-
-  const collectFromValue = (value) => {
-    if (typeof value === 'string') {
-      fragments.push(value);
-      return;
-    }
-    if (!Array.isArray(value)) return;
-    for (const part of value) {
-      if (typeof part === 'string') {
-        fragments.push(part);
-        continue;
-      }
-      if (!part || typeof part !== 'object') continue;
-      if (typeof part.text === 'string') fragments.push(part.text);
-      else if (typeof part.content === 'string') fragments.push(part.content);
-    }
-  };
-
-  const choices = Array.isArray(payload?.choices) ? payload.choices : [];
-  for (const choice of choices) {
-    collectFromValue(choice?.message?.content);
-    collectFromValue(choice?.delta?.content);
-  }
-
-  collectFromValue(payload?.message?.content);
-  collectFromValue(payload?.delta?.content);
-  return fragments;
-}
-
-function extractImageFromChatCompletionsResponse(payload = {}) {
-  const directCandidates = [
-    Array.isArray(payload?.data) ? payload.data : [],
-    Array.isArray(payload?.images) ? payload.images : [],
-    Array.isArray(payload?.output) ? payload.output : []
-  ];
-  for (const candidateList of directCandidates) {
-    for (const item of candidateList) {
-      const directImage = extractImageResultFromChatContentPart(item);
-      if (directImage) return directImage;
-
-      const nestedParts = Array.isArray(item?.content) ? item.content : [];
-      for (const part of nestedParts) {
-        const partImage = extractImageResultFromChatContentPart(part);
-        if (partImage) return partImage;
-      }
-    }
-  }
-
-  const choices = Array.isArray(payload?.choices) ? payload.choices : [];
-  for (const choice of choices) {
-    const directImage = extractImageResultFromChatContentPart(choice);
-    if (directImage) return directImage;
-
-    const message = choice?.message && typeof choice.message === 'object' ? choice.message : {};
-    const messageImage = extractImageResultFromChatContentPart(message);
-    if (messageImage) return messageImage;
-    const messageTextImage = extractImageResultFromTextBlob(message?.content);
-    if (messageTextImage) return messageTextImage;
-
-    const delta = choice?.delta && typeof choice.delta === 'object' ? choice.delta : {};
-    const deltaImage = extractImageResultFromChatContentPart(delta);
-    if (deltaImage) return deltaImage;
-    const deltaTextImage = extractImageResultFromTextBlob(delta?.content);
-    if (deltaTextImage) return deltaTextImage;
-
-    const content = message?.content;
-    if (Array.isArray(content)) {
-      for (const part of content) {
-        const partImage = extractImageResultFromChatContentPart(part);
-        if (partImage) return partImage;
-        const partTextImage = extractImageResultFromTextBlob(part?.text || part?.content || '');
-        if (partTextImage) return partTextImage;
-      }
-    }
-
-    const deltaContent = delta?.content;
-    if (Array.isArray(deltaContent)) {
-      for (const part of deltaContent) {
-        const partImage = extractImageResultFromChatContentPart(part);
-        if (partImage) return partImage;
-        const partTextImage = extractImageResultFromTextBlob(part?.text || part?.content || '');
-        if (partTextImage) return partTextImage;
-      }
-    }
-  }
-
-  const aggregatedText = collectChatCompletionsTextFragments(payload).join('').trim();
-  if (aggregatedText) {
-    const aggregatedImage = extractImageResultFromTextBlob(aggregatedText);
-    if (aggregatedImage) return aggregatedImage;
-  }
-
-  throw new Error('chat completions response missing image data');
-}
-
-function extractImageFromStreamEventPayload(payload = {}) {
-  if (!payload || typeof payload !== 'object') return null;
-
-  const b64Json = String(payload.b64_json || payload.partial_image_b64 || '').trim();
-  if (b64Json) {
-    return {
-      kind: 'b64_json',
-      value: b64Json,
-      eventType: String(payload.type || '').trim()
-    };
-  }
-
-  const url = String(payload.url || '').trim();
-  if (url) {
-    return {
-      kind: 'url',
-      value: url,
-      eventType: String(payload.type || '').trim()
-    };
-  }
-
-  try {
-    const nestedImage = extractImageFromGenerationResponse(payload);
-    return {
-      ...nestedImage,
-      eventType: String(payload.type || '').trim()
-    };
-  } catch (_) {
-    try {
-      const nestedChatImage = extractImageFromChatCompletionsResponse(payload);
-      return {
-        ...nestedChatImage,
-        eventType: String(payload.type || '').trim()
-      };
-    } catch (_) {
-      return null;
-    }
-  }
-}
-
-function extractStreamFailureMessage(payload = {}) {
-  if (!payload || typeof payload !== 'object') return '';
-
-  const type = String(payload.type || '').trim().toLowerCase();
-  const errorMessage = String(
-    payload?.error?.message
-    || payload?.error?.detail
-    || payload?.message
-    || ''
-  ).trim();
-
-  if (type === 'error' || type.endsWith('.failed')) {
-    return errorMessage || summarizePayloadShape(payload);
-  }
-
-  return '';
 }
 
 async function materializeGeneratedImage(imageResult = null, prompt = '', runtimeConfig = {}, deps = {}) {

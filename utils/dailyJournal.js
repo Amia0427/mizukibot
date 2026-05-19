@@ -7,87 +7,43 @@ const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent } = require('../api/parser');
 const { getBackgroundPressureDelayMs, appendPerfEvent } = require('./perfRuntime');
 const {
-  createJsonHotStore,
-  createTextHotStore
-} = require('./jsonHotStore');
-
-const JOURNAL_ROOT = config.DAILY_JOURNAL_DIR;
-const SUMMARY_STATE_FILE = path.join(JOURNAL_ROOT, 'summary_state.json');
-const READ_LOG_FILE = path.join(JOURNAL_ROOT, 'read_log.jsonl');
-const JOURNAL_INDEX_FILE = 'journal_index.json';
-const ROLLUP_INDEX_FILE = 'rollup_index.json';
-const dailyJournalHotStores = {
-  json: new Map(),
-  text: new Map()
-};
-
-ensureDir(JOURNAL_ROOT);
-
-function toSafeJournalPathSegment(value = '') {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  return text
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
-    .replace(/\s+/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^\.+/, '')
-    .replace(/[. ]+$/g, '')
-    .slice(0, 180);
-}
-
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
-
-function safeReadJson(filePath, fallback) {
-  try {
-    return getJsonStore(filePath, fallback).read();
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function safeReadText(filePath, fallback = '') {
-  try {
-    return getTextStore(filePath, fallback).read();
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function atomicWriteText(filePath, text) {
-  const store = getTextStore(filePath, '');
-  store.replace(String(text || ''));
-  store.flushSync();
-}
-
-function atomicWriteJson(filePath, data) {
-  const store = getJsonStore(filePath, () => ({}));
-  store.replace(data);
-  store.flushSync();
-}
-
-function getJsonStore(filePath, fallback) {
-  const key = String(filePath || '');
-  if (!dailyJournalHotStores.json.has(key)) {
-    dailyJournalHotStores.json.set(key, createJsonHotStore(key, {
-      fallback
-    }));
-  }
-  return dailyJournalHotStores.json.get(key);
-}
-
-function getTextStore(filePath, fallback = '') {
-  const key = String(filePath || '');
-  if (!dailyJournalHotStores.text.has(key)) {
-    dailyJournalHotStores.text.set(key, createTextHotStore(key, {
-      fallback
-    }));
-  }
-  return dailyJournalHotStores.text.get(key);
-}
+  atomicWriteJson,
+  atomicWriteText,
+  ensureDir,
+  ensureUserJournalDir,
+  getEntrySidecarFilePath,
+  getFourDayRollupDir,
+  getFourDayRollupFilePath,
+  getJournalFilePath,
+  getJournalIndex: getStoredJournalIndex,
+  getMonthlyRollupDir,
+  getMonthlyRollupFilePath,
+  getRollupIndex,
+  getSegmentsFilePath,
+  getSummaryFilePath,
+  getUserJournalDir,
+  normalizeJournalIndex,
+  READ_LOG_FILE,
+  safeReadJson,
+  safeReadText,
+  sortUniqueStrings,
+  SUMMARY_STATE_FILE,
+  toSafeJournalPathSegment,
+  updateJournalIndex,
+  updateRollupIndex
+} = require('./dailyJournal/storage');
+const {
+  compareFourDayRollups,
+  compareMonthlyRollups,
+  formatDailyJournalBundleText,
+  formatMonthlyPart,
+  getYearMonthFromDay,
+  isValidDayString,
+  isValidYearMonth,
+  parseFourDayRollupFileName,
+  parseMonthlyRollupFileName,
+  selectMostRecentItems
+} = require('./dailyJournal/rollupUtils');
 
 async function syncEpisodeMemory(userId, text, options = {}) {
   const uid = String(userId || '').trim();
@@ -150,86 +106,6 @@ function getMemoryApiKey() {
   return String(config.API_KEY || '').trim();
 }
 
-function getUserJournalDir(userId) {
-  return path.join(JOURNAL_ROOT, toSafeJournalPathSegment(userId));
-}
-
-function getJournalIndexFilePath(userId) {
-  return path.join(getUserJournalDir(userId), JOURNAL_INDEX_FILE);
-}
-
-function getJournalFilePath(userId, day) {
-  return path.join(getUserJournalDir(userId), `${day}.journal.md`);
-}
-
-function getSegmentsFilePath(userId, day) {
-  return path.join(getUserJournalDir(userId), `${day}.segments.jsonl`);
-}
-
-function getEntrySidecarFilePath(userId, day) {
-  return path.join(getUserJournalDir(userId), `${day}.entries.jsonl`);
-}
-
-function getSummaryFilePath(userId, day) {
-  return path.join(getUserJournalDir(userId), `${day}.summary.md`);
-}
-
-function getRollupIndexFilePath(userId) {
-  return path.join(getUserJournalDir(userId), ROLLUP_INDEX_FILE);
-}
-
-function ensureUserJournalDir(userId) {
-  const dir = getUserJournalDir(userId);
-  ensureDir(dir);
-  return dir;
-}
-
-function defaultJournalIndex() {
-  return {
-    version: 1,
-    updatedAt: 0,
-    summaryDays: [],
-    fourDayRollups: [],
-    monthlyRollups: []
-  };
-}
-
-function defaultRollupIndex() {
-  return {
-    version: 1,
-    updatedAt: 0,
-    daily: {},
-    fourDay: [],
-    monthly: []
-  };
-}
-
-function sortUniqueStrings(values = []) {
-  return Array.from(new Set((Array.isArray(values) ? values : []).filter(Boolean))).sort();
-}
-
-function normalizeJournalIndex(raw = {}) {
-  const next = raw && typeof raw === 'object' ? raw : {};
-  return {
-    version: 1,
-    updatedAt: Number(next.updatedAt || 0) || 0,
-    summaryDays: sortUniqueStrings(next.summaryDays),
-    fourDayRollups: Array.isArray(next.fourDayRollups) ? next.fourDayRollups.filter(Boolean) : [],
-    monthlyRollups: Array.isArray(next.monthlyRollups) ? next.monthlyRollups.filter(Boolean) : []
-  };
-}
-
-function normalizeRollupIndex(raw = {}) {
-  const next = raw && typeof raw === 'object' ? raw : {};
-  return {
-    version: 1,
-    updatedAt: Number(next.updatedAt || 0) || 0,
-    daily: next.daily && typeof next.daily === 'object' ? next.daily : {},
-    fourDay: Array.isArray(next.fourDay) ? next.fourDay.filter(Boolean) : [],
-    monthly: Array.isArray(next.monthly) ? next.monthly.filter(Boolean) : []
-  };
-}
-
 function scanJournalIndex(userId) {
   const uid = String(userId || '').trim();
   const summaryDays = listUserSummaryDaysFromDisk(uid);
@@ -253,102 +129,7 @@ function scanJournalIndex(userId) {
 }
 
 function getJournalIndex(userId) {
-  const uid = String(userId || '').trim();
-  if (!uid) return defaultJournalIndex();
-  ensureUserJournalDir(uid);
-  const store = getJsonStore(getJournalIndexFilePath(uid), defaultJournalIndex);
-  const current = normalizeJournalIndex(store.read());
-  const hasPayload = current.summaryDays.length || current.fourDayRollups.length || current.monthlyRollups.length;
-  if (hasPayload) return current;
-  const scanned = scanJournalIndex(uid);
-  store.replace(scanned);
-  return scanned;
-}
-
-function getRollupIndex(userId) {
-  const uid = String(userId || '').trim();
-  if (!uid) return defaultRollupIndex();
-  ensureUserJournalDir(uid);
-  const store = getJsonStore(getRollupIndexFilePath(uid), defaultRollupIndex);
-  return normalizeRollupIndex(store.read());
-}
-
-function updateRollupIndex(userId, updater) {
-  const uid = String(userId || '').trim();
-  if (!uid) return defaultRollupIndex();
-  ensureUserJournalDir(uid);
-  const store = getJsonStore(getRollupIndexFilePath(uid), defaultRollupIndex);
-  const current = normalizeRollupIndex(store.read());
-  const next = normalizeRollupIndex(typeof updater === 'function' ? updater(current) : current);
-  next.updatedAt = Date.now();
-  store.replace(next);
-  store.flushSync();
-  return next;
-}
-
-function updateJournalIndex(userId, mutator) {
-  const uid = String(userId || '').trim();
-  if (!uid) return defaultJournalIndex();
-  ensureUserJournalDir(uid);
-  const store = getJsonStore(getJournalIndexFilePath(uid), defaultJournalIndex);
-  const next = normalizeJournalIndex(typeof mutator === 'function' ? mutator(normalizeJournalIndex(store.read())) : store.read());
-  next.updatedAt = Date.now();
-  store.replace(next);
-  return next;
-}
-
-function getRollupRootDir(userId) {
-  return path.join(getUserJournalDir(userId), 'rollups');
-}
-
-function getFourDayRollupDir(userId) {
-  return path.join(getRollupRootDir(userId), '4day');
-}
-
-function getMonthlyRollupDir(userId) {
-  return path.join(getRollupRootDir(userId), 'monthly');
-}
-
-function getFourDayRollupFilePath(userId, startDay, endDay) {
-  return path.join(getFourDayRollupDir(userId), `${startDay}__${endDay}.rollup.md`);
-}
-
-function getMonthlyRollupFilePath(userId, yearMonth, part) {
-  return path.join(getMonthlyRollupDir(userId), `${yearMonth}__${formatMonthlyPart(part)}.rollup.md`);
-}
-
-function isValidDayString(day) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(day || '').trim());
-}
-
-function isValidYearMonth(yearMonth) {
-  return /^\d{4}-\d{2}$/.test(String(yearMonth || '').trim());
-}
-
-function getYearMonthFromDay(day) {
-  return isValidDayString(day) ? String(day).slice(0, 7) : '';
-}
-
-function formatMonthlyPart(part) {
-  return `p${String(Math.max(1, Number(part) || 1)).padStart(2, '0')}`;
-}
-
-function parseFourDayRollupFileName(fileName) {
-  const match = String(fileName || '').match(/^(\d{4}-\d{2}-\d{2})__(\d{4}-\d{2}-\d{2})\.rollup\.md$/i);
-  if (!match) return null;
-  return {
-    startDay: match[1],
-    endDay: match[2]
-  };
-}
-
-function parseMonthlyRollupFileName(fileName) {
-  const match = String(fileName || '').match(/^(\d{4}-\d{2})__p(\d+)\.rollup\.md$/i);
-  if (!match) return null;
-  return {
-    yearMonth: match[1],
-    part: Math.max(1, Number(match[2]) || 1)
-  };
+  return getStoredJournalIndex(userId, scanJournalIndex);
 }
 
 function strictClampText(text, maxChars) {
@@ -384,43 +165,6 @@ function normalizeTimestampToDay(timestamp) {
 function normalizeYearMonth(yearMonth) {
   const value = String(yearMonth || '').trim();
   return isValidYearMonth(value) ? value : '';
-}
-
-function compareFourDayRollups(a, b) {
-  return String(a?.startDay || '').localeCompare(String(b?.startDay || ''))
-    || String(a?.endDay || '').localeCompare(String(b?.endDay || ''));
-}
-
-function compareMonthlyRollups(a, b) {
-  return String(a?.yearMonth || '').localeCompare(String(b?.yearMonth || ''))
-    || (Number(a?.part || 0) - Number(b?.part || 0));
-}
-
-function selectMostRecentItems(items = [], limit = 0, comparator = null) {
-  const list = Array.isArray(items) ? items.slice() : [];
-  if (typeof comparator === 'function') list.sort(comparator);
-  const maxItems = Math.max(0, Number(limit) || 0);
-  if (maxItems === 0 || list.length <= maxItems) return list;
-  return list.slice(-maxItems);
-}
-
-function formatDailyJournalBundleText(items = []) {
-  return (Array.isArray(items) ? items : [])
-    .map((item) => {
-      if (!item || !item.text) return '';
-      if (item.kind === 'active_raw') {
-        return `[active_raw ${item.day}]\n${item.text}`;
-      }
-      if (item.kind === 'four_day_rollup') {
-        return `[4day ${item.startDay}..${item.endDay}]\n${item.text}`;
-      }
-      if (item.kind === 'monthly_rollup') {
-        return `[month ${item.yearMonth} ${formatMonthlyPart(item.part)}]\n${item.text}`;
-      }
-      return `[${item.day}]\n${item.text}`;
-    })
-    .filter(Boolean)
-    .join('\n\n');
 }
 
 function listUserSummaryDaysFromDisk(userId) {
