@@ -1,5 +1,10 @@
 const { Annotation } = require('@langchain/langgraph');
-const { normalizePlanStep, normalizeArray, normalizeObject } = require('./contracts');
+const {
+  normalizePlanStep,
+  normalizeArray,
+  normalizeObject,
+  validatePlannerExecutionPlan
+} = require('./contracts');
 const { cloneTraceForMeta, normalizeRequestTrace } = require('../../utils/requestTrace');
 
 function appendReducer(left, right) {
@@ -49,8 +54,44 @@ function buildInitialPlanSlice(request = {}, options = {}) {
     : ((step, index) => normalizePlanStep(step, 'route', index));
 
   const plannerExecutionPlan = getToolPlannerExecutionPlan(request.routeMeta);
-  const directPlannerSteps = Array.isArray(plannerExecutionPlan?.steps) ? plannerExecutionPlan.steps : [];
+  const plannerValidation = plannerExecutionPlan
+    ? validatePlannerExecutionPlan(plannerExecutionPlan, {
+      allowedTools: request.allowedTools || request.routeMeta?.allowedTools || []
+    })
+    : {
+      ok: true,
+      status: 'not_applicable',
+      reasons: [],
+      steps: [],
+      stepCount: 0,
+      allowedToolNames: normalizeArray(request.allowedTools || request.routeMeta?.allowedTools)
+    };
+  const directPlannerSteps = plannerValidation.ok && Array.isArray(plannerExecutionPlan?.steps)
+    ? plannerValidation.steps
+    : [];
   const legacySteps = Array.isArray(request.routeMeta?.planSteps) ? request.routeMeta.planSteps : [];
+  if (plannerExecutionPlan && !plannerValidation.ok) {
+    return {
+      status: 'idle',
+      currentStepId: '',
+      steps: [],
+      planner: {
+        legacyRoutePlanDetected: legacySteps.length > 0,
+        directChatPlannerSingleAuthority: false,
+        toolPlannerSingleAuthority: false,
+        validation: plannerValidation
+      },
+      verification: null,
+      rounds: [],
+      finalPlan: {
+        goal: String(request.question || '').trim(),
+        need_tools: false,
+        steps: []
+      },
+      finalExecLogs: [],
+      lastRepairPlan: null
+    };
+  }
   const steps = directPlannerSteps.length > 0
     ? directPlannerSteps.map((step, index) => normalizeDirectChatPlannerPlanStep(step, index))
     : legacySteps.map((step, index) => normalizeRoutePlanStep(step, index));
@@ -61,7 +102,8 @@ function buildInitialPlanSlice(request = {}, options = {}) {
     planner: {
       legacyRoutePlanDetected: legacySteps.length > 0,
       directChatPlannerSingleAuthority: directPlannerSteps.length > 0,
-      toolPlannerSingleAuthority: directPlannerSteps.length > 0
+      toolPlannerSingleAuthority: directPlannerSteps.length > 0,
+      validation: plannerValidation
     },
     verification: null,
     rounds: [],

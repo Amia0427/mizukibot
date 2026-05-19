@@ -1,6 +1,7 @@
 const { normalizeToolNames } = require('../utils/localToolAccess');
 const { getPolicyExecutionPlan } = require('./routeProfiles');
 const { getPolicy } = require('../utils/toolPolicy');
+const { validatePlannerExecutionPlan } = require('../api/runtimeV2/contracts');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -165,6 +166,19 @@ function buildRouteMetaEnvelope(route = {}, routeExecutionPlan = {}, plannerDeci
     : (Array.isArray(executablePlan?.steps) ? executablePlan.steps : []);
   const routePolicyKey = normalizeText(routeExecutionPlan.policyKey || routeExecutionPlan.routePolicyKey || routeMeta.routePolicyKey);
   const routeDebugKey = normalizeText(routeExecutionPlan.routeDebugKey || routeMeta.routeDebugKey || routePolicyKey);
+  const allowedTools = normalizeToolNames(routeExecutionPlan.allowedTools || routeMeta.allowedTools || []);
+  const executionPlan = planner?.executionPlan && typeof planner.executionPlan === 'object'
+    ? planner.executionPlan
+    : null;
+  const plannerValidation = executionPlan
+    ? validatePlannerExecutionPlan(executionPlan, { allowedTools })
+    : null;
+  const plannerWithValidation = planner
+    ? {
+      ...planner,
+      ...(plannerValidation ? { validation: plannerValidation } : {})
+    }
+    : null;
   return {
     ...routeMeta,
     ...extraMeta,
@@ -177,9 +191,10 @@ function buildRouteMetaEnvelope(route = {}, routeExecutionPlan = {}, plannerDeci
     executablePlan: executablePlan ? createExecutablePlan(executablePlan, { policyKey: routePolicyKey }) : null,
     planId: normalizeText(planner?.planId || routeMeta.planId || (routePolicyKey ? `${routePolicyKey}:route` : '')),
     planSteps,
-    toolPlanner: planner || routeMeta.toolPlanner || null,
-    directChatPlanner: routeMeta.directChatPlanner || planner || null,
-    allowedTools: normalizeToolNames(routeExecutionPlan.allowedTools || routeMeta.allowedTools || [])
+    toolPlanner: plannerWithValidation || routeMeta.toolPlanner || null,
+    directChatPlanner: routeMeta.directChatPlanner || plannerWithValidation || null,
+    allowedTools,
+    ...(plannerValidation ? { plannerValidation } : {})
   };
 }
 

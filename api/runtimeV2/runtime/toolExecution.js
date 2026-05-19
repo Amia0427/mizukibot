@@ -332,6 +332,8 @@ function createToolExecutionHelpers(deps = {}) {
       side_effect: isSideEffectPolicy(policy),
       retryable: status !== 'completed',
       attempt: Number(step.attempts || 0) + 1,
+      duration_ms: 0,
+      source: 'dispatch',
       ...(batchId ? { batch_id: batchId } : {}),
       ...(batchIndex !== null ? { batch_index: batchIndex } : {})
     };

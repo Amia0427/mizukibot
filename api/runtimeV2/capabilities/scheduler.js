@@ -305,6 +305,8 @@ function computeToolEnvelope(step = {}, rawResult = '', descriptor = null, helpe
     side_effect: isSideEffectCapability(descriptor),
     retryable: status !== 'completed',
     attempt: Number(step.attempts || 0) + 1,
+    duration_ms: 0,
+    source: normalizeText(helpers.source || 'dispatch') || 'dispatch',
     batch_id: step.batchId || step.batch_id || '',
     batch_index: step.batchIndex ?? step.batch_index
   }, step);
@@ -784,7 +786,10 @@ async function executeBatch(steps = [], state = {}, context = {}) {
           item,
           `Tool error: timeout after ${timeoutMs}ms`,
           descriptor,
-          normalizeObject(context.helpers, {})
+          {
+            ...normalizeObject(context.helpers, {}),
+            source: 'dispatch'
+          }
         )), timeoutMs))
       ])
       : await run;
@@ -815,7 +820,10 @@ async function executeBatch(steps = [], state = {}, context = {}) {
             item,
             `Tool error: ${error?.message || 'unknown error'}`,
             descriptor,
-            normalizeObject(context.helpers, {})
+            {
+              ...normalizeObject(context.helpers, {}),
+              source: 'dispatch'
+            }
           );
         }
       }

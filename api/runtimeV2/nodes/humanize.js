@@ -108,7 +108,15 @@ function createHumanizeNode(deps = {}) {
         execution: {
           ...state.execution,
           currentNode: 'humanize',
-          humanizerInvoked: false
+          humanizerInvoked: false,
+          latencyBreakdown: {
+            ...normalizeObject(state.execution?.latencyBreakdown, {}),
+            model: {
+              ...normalizeObject(state.execution?.latencyBreakdown?.model, {}),
+              humanizer_model_calls: Number(state.execution?.latencyBreakdown?.model?.humanizer_model_calls || 0),
+              total_model_calls: Number(state.execution?.latencyBreakdown?.model?.total_model_calls || 0)
+            }
+          }
         },
         events: skippedEvents
       }, 'humanize', 'running', skippedEvents);
@@ -171,7 +179,15 @@ function createHumanizeNode(deps = {}) {
         ...state.execution,
         currentNode: 'humanize',
         humanizerInvoked: !humanizerTimedOut,
-        humanizerFirstTokenTimeout: humanizerTimedOut
+        humanizerFirstTokenTimeout: humanizerTimedOut,
+        latencyBreakdown: {
+          ...normalizeObject(state.execution?.latencyBreakdown, {}),
+          model: {
+            ...normalizeObject(state.execution?.latencyBreakdown?.model, {}),
+            humanizer_model_calls: Number(state.execution?.latencyBreakdown?.model?.humanizer_model_calls || 0) + 1,
+            total_model_calls: Number(state.execution?.latencyBreakdown?.model?.total_model_calls || 0) + 1
+          }
+        }
       },
       events: nextEvents
     }, 'humanize', 'running', nextEvents);
