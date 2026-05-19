@@ -27,6 +27,7 @@ module.exports = (async () => {
     process.env.POST_REPLY_ENRICH_MIN_TURNS = '2';
     process.env.POST_REPLY_ENRICH_MIN_CONTENT_CHARS = '120';
     process.env.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = 'false';
+    process.env.POST_REPLY_VECTOR_WATCHDOG_ENABLED = 'false';
     process.env.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED = 'false';
     clearProjectCache();
 

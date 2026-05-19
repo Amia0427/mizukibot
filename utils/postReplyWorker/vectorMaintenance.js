@@ -153,7 +153,10 @@ async function runPostReplyVectorMaintenance(options = {}, deps = {}) {
     const source = normalizeVectorMaintenanceSource(result?.source || options.source || config.POST_REPLY_VECTOR_MAINTENANCE_SOURCE);
     const syncRuns = Array.isArray(result?.syncRuns) ? result.syncRuns.length : 0;
     const stoppedBy = normalizeText(result?.stoppedBy);
-    const shouldReconcile = config.POST_REPLY_VECTOR_MAINTENANCE_RECONCILE_ENABLED === true
+    const reconcileEnabled = Object.prototype.hasOwnProperty.call(options, 'reconcileEnabled')
+      ? options.reconcileEnabled === true
+      : config.POST_REPLY_VECTOR_MAINTENANCE_RECONCILE_ENABLED === true;
+    const shouldReconcile = reconcileEnabled
       && (syncRuns === 0 || stoppedBy === 'post_sync_health_gate');
     const reconcile = shouldReconcile
       ? await reconcilePostReplyVectorStore(source, deps.reconcileDeps || {})
@@ -184,5 +187,6 @@ async function runPostReplyVectorMaintenance(options = {}, deps = {}) {
 
 module.exports = {
   isPostReplyVectorMaintenanceEnabled,
+  reconcilePostReplyVectorStore,
   runPostReplyVectorMaintenance
 };
