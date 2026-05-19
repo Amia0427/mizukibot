@@ -86,6 +86,7 @@ const { buildStableProfileText } = require('../utils/memoryProfileSurface');
 
 const v3 = buildStableProfileText('u_profile', { question: '普通聊天' });
 assert.strictEqual(v3.source, 'v3');
+assert.ok(v3.text.includes('稳定画像'));
 assert.ok(v3.text.includes('v3 身份'));
 assert.ok(!v3.text.includes('v3 喜欢新证据'));
 assert.ok(!v3.text.includes('legacy 喜欢旧梗'));
@@ -94,6 +95,7 @@ assert.ok(!v3.text.includes('weak 一次性偏好'));
 const profileQuery = buildStableProfileText('u_profile', { question: '你怎么看我的画像' });
 assert.ok(profileQuery.text.includes('v3 喜欢新证据'));
 assert.ok(profileQuery.text.includes('weak 一次性偏好'));
+assert.ok(profileQuery.text.includes('谨慎参考'));
 
 const legacy = buildStableProfileText('u_legacy', { question: '普通聊天' });
 assert.strictEqual(legacy.source, 'legacy_fallback');

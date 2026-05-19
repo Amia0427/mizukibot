@@ -1,5 +1,8 @@
 const config = require('../../config');
 const { canonicalizeText } = require('../memory-v3/helpers');
+const {
+  formatPromptProfileSurface
+} = require('../memory-v3/profileLifecycle');
 const { isRecentRecallQuery, classifyRecallFacet } = require('../recallHeuristics');
 
 function sanitizeText(value = '') {
@@ -218,7 +221,7 @@ function buildV3ProfileText(profile = {}, options = {}) {
     includeWeak && weak.single_hit_traits.length ? `低置信特征：${weak.single_hit_traits.join('、')}` : '',
     includeWeak && weak.recent_topics.length ? `近期弱话题：${weak.recent_topics.join('、')}` : ''
   ].filter(Boolean);
-  return lines.join('\n');
+  return formatPromptProfileSurface(lines.join('\n'));
 }
 
 function collectTraceItems(profile = {}, options = {}) {

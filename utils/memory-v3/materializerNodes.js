@@ -3,6 +3,9 @@ const {
   normalizeText
 } = require('./helpers');
 const { isMemoryNotRecallable } = require('./recallFilter');
+const {
+  applyProfileLifecycle
+} = require('./profileLifecycle');
 
 function createNodeFromEvent(event) {
   const text = normalizeText(event.text);
@@ -23,7 +26,7 @@ function createNodeFromEvent(event) {
     : fieldKey === 'dislike'
       ? 'preference_dislike'
       : fieldKey;
-  return {
+  return applyProfileLifecycle({
     id: String(event.id || '').trim(),
     userId: normalizeText(event.userId),
     groupId: normalizeText(event.groupId),
@@ -35,7 +38,8 @@ function createNodeFromEvent(event) {
     scopeType: normalizeText(event.scopeType || 'personal').toLowerCase() || 'personal',
     source: normalizeText(event.source),
     sourceKind: normalizeText(event.sourceKind || event.source),
-    status: normalizeText(event.status || (event.type === 'memory_candidate_extracted' ? 'candidate' : 'active')).toLowerCase(),
+    status: normalizeText(event.status || payload.status || (event.type === 'memory_candidate_extracted' ? 'candidate' : 'active')).toLowerCase(),
+    lifecycleStatus: normalizeText(event.lifecycleStatus || payload.lifecycleStatus).toLowerCase(),
     type: normalizeText(payload.type || event.memoryKind || 'fact').toLowerCase() || 'fact',
     memoryKind: normalizeText(event.memoryKind || payload.memoryKind).toLowerCase(),
     fieldKey: normalizedFieldKey,
@@ -53,6 +57,12 @@ function createNodeFromEvent(event) {
     recallVerification: payload.recallVerification && typeof payload.recallVerification === 'object'
       ? payload.recallVerification
       : null,
+    profileQuality: payload.profileQuality && typeof payload.profileQuality === 'object'
+      ? payload.profileQuality
+      : null,
+    expiresAt: Number(event.expiresAt || payload.expiresAt || 0) || 0,
+    lastConfirmedAt: Number(event.lastConfirmedAt || payload.lastConfirmedAt || 0) || 0,
+    supersededBy: normalizeText(event.supersededBy || payload.supersededBy),
     participants: Array.isArray(event.participants) ? event.participants : [],
     entities: Array.isArray(event.entities) ? event.entities : [],
     relations: Array.isArray(event.relations) ? event.relations : [],
@@ -62,7 +72,7 @@ function createNodeFromEvent(event) {
     agentName: normalizeText(event.agentName || payload.agentName),
     updatedAt: Number(event.ts || 0) || 0,
     createdAt: Number(event.ts || 0) || 0
-  };
+  });
 }
 
 function upsertNode(nodeMap, node) {

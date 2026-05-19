@@ -6,6 +6,7 @@ const {
   canonicalizeText,
   stableSortByScore
 } = require('../memory-v3/helpers');
+const { lifecycleStatusOf } = require('../memory-v3/recallFilter');
 
 const VECTOR_STORE_MODES = new Set(['local_jsonl', 'lancedb', 'shadow']);
 const LANCEDB_ROW_COLUMNS = [
@@ -179,6 +180,8 @@ function buildMemoryFilter(input = {}) {
 function rowPassesMemoryFilter(row = {}, filter = {}) {
   const status = normalizeText(row.status || 'active').toLowerCase();
   if (status === 'archived') return false;
+  const lifecycleStatus = lifecycleStatusOf(row);
+  if (lifecycleStatus === 'stale' || lifecycleStatus === 'suspect' || lifecycleStatus === 'superseded') return false;
   const source = normalizeSourceFilter(filter.source);
   const rowSource = normalizeText(row.source).toLowerCase();
   if (source !== 'all') {

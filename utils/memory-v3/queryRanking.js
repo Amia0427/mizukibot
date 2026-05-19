@@ -6,6 +6,7 @@ const {
 } = require('./helpers');
 const { getJournalDocDay } = require('./journalDocs');
 const { rowPassesMemoryFilter } = require('../lancedbMemoryStore');
+const { lifecycleStatusOf } = require('./recallFilter');
 const {
   appendSelectionReason,
   buildRecallDiagnostics,
@@ -48,7 +49,7 @@ function matchesFacetCandidate(facet, candidate = {}) {
   const fieldKey = normalizeText(candidate.fieldKey || candidate.semanticSlot || candidate.type).toLowerCase();
   const source = normalizeText(candidate.source).toLowerCase();
   if (facet === 'preference') return ['preference_like', 'preference_dislike', 'like', 'dislike', 'hobby', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
-  if (facet === 'identity') return ['identity', 'fact', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
+  if (facet === 'identity') return ['identity', 'goal', 'boundary', 'hobby', 'personality', 'fact', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
   if (facet === 'relationship') return ['relationship', 'relationship_tone', 'relationship_distance', 'relationship_salutation', 'relationship_reply_style', 'relationship_engagement', 'relationship_boundaries', 'style_pattern', 'persona_impression_support'].includes(fieldKey) || source === 'profile';
   if (facet === 'continuity') return source === 'recent' || source === 'journal' || source === 'task';
   if (facet === 'style') return ['style_pattern', 'style_avoid', 'group_jargon', 'bot_persona_tone', 'bot_persona_initiative', 'bot_persona_boundaries', 'bot_persona_playfulness', 'bot_persona_guardedness', 'bot_persona_verbosity', 'relationship_reply_style'].includes(fieldKey) || source === 'style' || source === 'jargon' || fieldKey === 'relationship';
@@ -128,7 +129,10 @@ function boostJournalDaySummaryCompanions(items = [], options = {}) {
 
 function applyConflictResolution(items = []) {
   const winners = new Map();
-  for (const item of stableSortByScore(items)) {
+  for (const item of stableSortByScore(items).filter((candidate) => {
+    const lifecycleStatus = lifecycleStatusOf(candidate);
+    return lifecycleStatus !== 'stale' && lifecycleStatus !== 'suspect' && lifecycleStatus !== 'superseded';
+  })) {
     const slot = `${item.userId || ''}|${item.scopeType || ''}|${semanticSlotForCandidate(item)}|${item.canonicalKey || canonicalizeText(item.text)}`;
     const existing = winners.get(slot);
     if (!existing) {
