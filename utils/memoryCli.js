@@ -1,12 +1,6 @@
-const fs = require('fs');
-const path = require('path');
 const config = require('../config');
 const {
-  getUserProfile,
-  getUserSummary,
-  getUserImpression,
   getUserMemories,
-  memories
 } = require('./memory');
 const {
   retrieveRelevantMemories,
@@ -24,18 +18,8 @@ const {
 } = require('./memoryScopeIndex');
 const {
   getDailyJournalStats,
-  listFourDayRollups,
-  listMonthlyRollups,
-  getDailyJournalRetrievalBundle,
-  listUserJournalDays,
-  parseJournalEntries
+  getDailyJournalRetrievalBundle
 } = require('./dailyJournal');
-const { loadBridgeStore } = require('./shortTermBridgeMemory');
-const {
-  buildStructuredSummaryText,
-  normalizeShortTermState,
-  resolveShortTermSessionKey
-} = require('./shortTermMemory');
 const {
   RECALL_FACETS,
   classifyRecallFacet,
@@ -69,6 +53,25 @@ const {
   parseMemoryCliCommand,
   prepareMemoryCliCommand
 } = require('./memoryCli/commandParser');
+const {
+  sanitizePreviewText,
+  scoreTextMatch
+} = require('./memoryCli/text');
+const {
+  buildJournalRawFallbackCandidates,
+  getJournalSummaryFiles,
+  openJournalByRef,
+  parseJournalRawRef
+} = require('./memoryCli/journalCandidates');
+const {
+  buildProfileSearchCandidates,
+  getProfileResult,
+  truncateProfileForOpen
+} = require('./memoryCli/profileCandidates');
+const {
+  buildRecentSessionCandidates,
+  searchRecentCandidates
+} = require('./memoryCli/recentCandidates');
 
 const SOURCE_PRIORITY = {
   recent: 0,
@@ -82,276 +85,10 @@ const SOURCE_PRIORITY = {
   image: 8
 };
 const QUERY_FACETS = new Set(RECALL_FACETS);
-const JOURNAL_RAW_FALLBACK_DAYS = 10;
-const JOURNAL_RAW_FALLBACK_MAX_CANDIDATES = 8;
-const JOURNAL_RAW_FALLBACK_WINDOW_RADIUS = 2;
 const JOURNAL_BUNDLE_WEAK_SCORE = 0.48;
 
 function preloadMemoryCli(options = {}) {
   return ensureSnapshot(options);
-}
-
-function sanitizePreviewText(value, limit = 180) {
-  const text = sanitizeText(value);
-  if (!text) return '';
-  const maxChars = Math.max(24, Number(limit) || 180);
-  return text.length > maxChars ? `${text.slice(0, maxChars - 3).trim()}...` : text;
-}
-
-function getProfileResult(userId) {
-  return {
-    profile: getUserProfile(userId) || {},
-    summary: getUserSummary(userId) || '',
-    impression: getUserImpression(userId) || '',
-    facts: Array.isArray(memories[userId]?.facts) ? memories[userId].facts : []
-  };
-}
-
-function getJournalSummaryFiles(userId) {
-  const dir = path.join(config.DAILY_JOURNAL_DIR, String(userId || '').trim());
-  if (!fs.existsSync(dir)) return [];
-
-  const summaries = fs.readdirSync(dir)
-    .filter((name) => /^\d{4}-\d{2}-\d{2}\.summary\.md$/i.test(name))
-    .map((name) => {
-      const filePath = path.join(dir, name);
-      const text = sanitizeText(fs.readFileSync(filePath, 'utf8'));
-      const stat = fs.statSync(filePath);
-      return {
-        id: name.slice(0, 10),
-        ref: `mc_ref:journal:${name.slice(0, 10)}`,
-        source: 'journal',
-        type: 'daily_summary',
-        title: `Daily summary ${name.slice(0, 10)}`,
-        preview: sanitizePreviewText(text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
-        text,
-        updatedAt: Number(stat.mtimeMs || 0) || 0,
-        confidence: 0.68,
-        tier: 'B',
-        matchMode: 'lexical',
-        filePath
-      };
-    })
-    .filter((item) => item.text);
-
-  const fourDay = listFourDayRollups(userId).map((item) => ({
-    id: `${item.startDay}__${item.endDay}`,
-    ref: `mc_ref:journal:4day:${item.startDay}__${item.endDay}`,
-    source: 'journal',
-    type: 'four_day_rollup',
-    title: `4-day rollup ${item.startDay}..${item.endDay}`,
-    preview: sanitizePreviewText(item.text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
-    text: String(item.text || ''),
-    updatedAt: 0,
-    confidence: 0.7,
-    tier: 'A',
-    matchMode: 'lexical',
-    filePath: item.filePath
-  }));
-
-  const monthly = listMonthlyRollups(userId).map((item) => ({
-    id: `${item.yearMonth}__p${String(item.part || 1).padStart(2, '0')}`,
-    ref: `mc_ref:journal:monthly:${item.yearMonth}__p${String(item.part || 1).padStart(2, '0')}`,
-    source: 'journal',
-    type: 'monthly_rollup',
-    title: `Monthly rollup ${item.yearMonth} p${String(item.part || 1).padStart(2, '0')}`,
-    preview: sanitizePreviewText(item.text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
-    text: String(item.text || ''),
-    updatedAt: 0,
-    confidence: 0.72,
-    tier: 'S',
-    matchMode: 'lexical',
-    filePath: item.filePath
-  }));
-
-  return [...summaries, ...fourDay, ...monthly];
-}
-
-function buildJournalRawRef(day = '', windowIndex = 0) {
-  return `mc_ref:journal:raw:${day}:${Math.max(0, Number(windowIndex) || 0)}`;
-}
-
-function parseJournalRawRef(ref = '') {
-  const match = String(ref || '').trim().match(/^mc_ref:journal:raw:(\d{4}-\d{2}-\d{2}):(\d+)$/i);
-  if (!match) return null;
-  return {
-    day: match[1],
-    windowIndex: Math.max(0, Number(match[2]) || 0)
-  };
-}
-
-function buildJournalRawWindowCandidate(day = '', entries = [], query = '', windowIndex = 0, updatedAt = 0) {
-  const safeEntries = Array.isArray(entries) ? entries : [];
-  const texts = safeEntries
-    .map((entry) => {
-      const user = sanitizeText(entry?.user || '');
-      const assistant = sanitizeText(entry?.assistant || '');
-      return [
-        user ? `user: ${user}` : '',
-        assistant ? `assistant: ${assistant}` : ''
-      ].filter(Boolean).join('\n');
-    })
-    .filter(Boolean);
-  const text = sanitizeText(texts.join('\n\n'));
-  if (!text) return null;
-
-  const preview = sanitizePreviewText(text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS);
-  const hasQuery = Boolean(sanitizeText(query));
-  const score = hasQuery ? scoreTextMatch(query, text) : 0;
-  if (hasQuery && score <= 0) return null;
-
-  return {
-    ref: buildJournalRawRef(day, windowIndex),
-    source: 'journal',
-    type: 'journal_raw',
-    id: `${day}:${windowIndex}`,
-    logicalId: `${day}:${windowIndex}`,
-    title: `Journal raw ${day} #${windowIndex + 1}`,
-    preview,
-    text,
-    score: score + 0.16,
-    updatedAt,
-    confidence: 0.54,
-    tier: 'C',
-    matchMode: 'fallback',
-    day,
-    windowIndex
-  };
-}
-
-function buildJournalRawFallbackCandidates(userId, query) {
-  const days = listUserJournalDays(userId).slice(-JOURNAL_RAW_FALLBACK_DAYS);
-  const maxCandidates = Math.max(1, JOURNAL_RAW_FALLBACK_MAX_CANDIDATES);
-  const candidates = [];
-
-  for (const day of days.slice().reverse()) {
-    const filePath = path.join(config.DAILY_JOURNAL_DIR, String(userId || '').trim(), `${day}.journal.md`);
-    if (!fs.existsSync(filePath)) continue;
-    const rawText = String(fs.readFileSync(filePath, 'utf8') || '');
-    if (!rawText.trim()) continue;
-
-    const entries = parseJournalEntries(rawText);
-    if (!entries.length) continue;
-
-    const scored = entries
-      .map((entry, index) => {
-        const entryText = sanitizeText([
-          sanitizeText(entry?.user || ''),
-          sanitizeText(entry?.assistant || '')
-        ].filter(Boolean).join('\n'));
-        return {
-          index,
-          score: scoreTextMatch(query, entryText)
-        };
-      })
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score || a.index - b.index)
-      .slice(0, 2);
-
-    const updatedAt = Number(fs.statSync(filePath).mtimeMs || 0) || 0;
-    const seenWindows = new Set();
-    for (const match of scored) {
-      const start = Math.max(0, match.index - JOURNAL_RAW_FALLBACK_WINDOW_RADIUS);
-      const end = Math.min(entries.length, match.index + JOURNAL_RAW_FALLBACK_WINDOW_RADIUS + 1);
-      const windowEntries = entries.slice(start, end);
-      const windowKey = `${start}:${end}`;
-      if (seenWindows.has(windowKey)) continue;
-      seenWindows.add(windowKey);
-      const candidate = buildJournalRawWindowCandidate(
-        day,
-        windowEntries,
-        query,
-        start,
-        updatedAt
-      );
-      if (candidate) candidates.push(candidate);
-      if (candidates.length >= maxCandidates) return candidates;
-    }
-  }
-
-  return candidates;
-}
-
-function profileArrayHits(field, values = [], score = 0.6, title = '') {
-  return (Array.isArray(values) ? values : [])
-    .map((value, index) => {
-      const text = sanitizeText(value);
-      if (!text) return null;
-      return {
-        ref: `mc_ref:profile:${field}:${index}`,
-        source: 'profile',
-        type: field,
-        id: `${field}:${index}`,
-        logicalId: `${field}:${index}`,
-        title: title || `Profile ${field}`,
-        preview: sanitizePreviewText(text, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
-        text,
-        score,
-        updatedAt: 0,
-        confidence: 0.82,
-        tier: 'A',
-        matchMode: 'fallback'
-      };
-    })
-    .filter(Boolean);
-}
-
-function buildProfileSearchCandidates(userId) {
-  const result = getProfileResult(userId);
-  const profile = result.profile || {};
-  return [
-    {
-      ref: 'mc_ref:profile:summary',
-      source: 'profile',
-      type: 'summary',
-      id: 'summary',
-      logicalId: 'summary',
-      title: 'Profile summary',
-      preview: sanitizePreviewText(result.summary, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
-      text: String(result.summary || ''),
-      score: 0.6,
-      updatedAt: 0,
-      confidence: 0.9,
-      tier: 'A',
-      matchMode: 'lexical'
-    },
-    {
-      ref: 'mc_ref:profile:impression',
-      source: 'profile',
-      type: 'impression',
-      id: 'impression',
-      logicalId: 'impression',
-      title: 'User impression',
-      preview: sanitizePreviewText(result.impression, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
-      text: String(result.impression || ''),
-      score: 0.64,
-      updatedAt: 0,
-      confidence: 0.9,
-      tier: 'S',
-      matchMode: 'lexical'
-    },
-    {
-      ref: 'mc_ref:profile:facts',
-      source: 'profile',
-      type: 'facts',
-      id: 'facts',
-      logicalId: 'facts',
-      title: 'Known facts',
-      preview: sanitizePreviewText(getUserMemories(userId), config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
-      text: String(getUserMemories(userId) || ''),
-      score: 0.58,
-      updatedAt: 0,
-      confidence: 0.8,
-      tier: 'B',
-      matchMode: 'lexical'
-    },
-    ...profileArrayHits('identities', profile.identities, 0.66, 'Identities'),
-    ...profileArrayHits('likes', profile.likes, 0.7, 'Likes'),
-    ...profileArrayHits('dislikes', profile.dislikes, 0.68, 'Dislikes'),
-    ...profileArrayHits('goals', profile.goals, 0.69, 'Goals'),
-    ...profileArrayHits('recent_topics', profile.recent_topics, 0.62, 'Recent topics'),
-    ...profileArrayHits('hobbies', profile.hobbies, 0.66, 'Hobbies')
-  ].filter((item) => sanitizeText(item.text));
 }
 
 function normalizeVectorHit(hit, source) {
@@ -483,108 +220,6 @@ function getFacetSourceWeightsLegacy(facet = 'default') {
     default:
       return base;
   }
-}
-
-function buildQueryTokens(query = '') {
-  return sanitizeText(query).toLowerCase().split(/\s+/).filter(Boolean);
-}
-
-function scoreTextMatch(query = '', text = '') {
-  const haystack = sanitizeText(text).toLowerCase();
-  if (!haystack) return 0;
-  const q = sanitizeText(query).toLowerCase();
-  if (!q) return 0;
-  if (haystack.includes(q)) return 1;
-  const tokens = buildQueryTokens(q);
-  if (!tokens.length) return 0;
-  let hits = 0;
-  for (const token of tokens) {
-    if (haystack.includes(token)) hits += 1;
-  }
-  return hits / tokens.length;
-}
-
-function buildRecentSessionCandidates(userId, context = {}) {
-  if (!config.MEMORY_CLI_RECENT_ENABLED) return [];
-
-  const store = loadBridgeStore();
-  const sessions = store && store.sessions && typeof store.sessions === 'object' ? store.sessions : {};
-  const now = Date.now();
-  const ttlMs = Math.max(1, Number(config.MEMORY_CLI_RECENT_TTL_HOURS || 72)) * 60 * 60 * 1000;
-  const recentSessionMax = Math.max(1, Number(config.MEMORY_CLI_RECENT_SESSION_MAX || 3));
-  const currentSessionKey = sanitizeText(resolveShortTermSessionKey(userId, context.routeMeta || {}));
-
-  return Object.entries(sessions)
-    .map(([sessionKey, entry]) => {
-      const scope = entry?.scope && typeof entry.scope === 'object' ? entry.scope : {};
-      if (String(scope.userId || entry?.userId || '').trim() !== String(userId || '').trim()) return null;
-
-      const updatedAt = Number(entry?.updatedAt || 0) || 0;
-      if (!updatedAt || (now - updatedAt) > ttlMs) return null;
-
-      const state = normalizeShortTermState(entry?.shortTermState || {});
-      const summary = buildStructuredSummaryText(state, Math.max(96, Number(config.SHORT_TERM_MEMORY_SUMMARY_MAX_TOKENS || 320)));
-      const recentMessages = Array.isArray(entry?.recentMessages) ? entry.recentMessages : [];
-      const recentMessageLimit = Math.max(1, Math.floor(Number(config.SHORT_TERM_BRIDGE_RECENT_MESSAGES || 64) || 64));
-      const messagePreview = recentMessages
-        .slice(-recentMessageLimit)
-        .map((msg) => `${String(msg.role || '').trim()}: ${sanitizePreviewText(msg.content, 90)}`)
-        .filter(Boolean)
-        .join(' | ');
-      const preview = [
-        state.carryOverUserTurn ? `carry: ${state.carryOverUserTurn}` : '',
-        state.activeTopic ? `topic: ${state.activeTopic}` : '',
-        summary,
-        messagePreview
-      ].filter(Boolean).join(' | ');
-
-      return {
-        ref: `mc_ref:recent:${sessionKey}`,
-        source: 'recent',
-        type: 'recent_session',
-        id: sessionKey,
-        logicalId: sessionKey,
-        title: sessionKey === currentSessionKey ? 'Current recent session' : `Recent session ${sessionKey}`,
-        preview: sanitizePreviewText(preview, config.MEMORY_CLI_RESULT_PREVIEW_CHARS),
-        text: sanitizeText([
-          summary,
-          state.carryOverUserTurn,
-          state.activeTopic,
-          state.openLoops.join(' | '),
-          state.assistantCommitments.join(' | '),
-          state.userConstraints.join(' | '),
-          state.recentToolResults.join(' | '),
-          messagePreview
-        ].filter(Boolean).join('\n')),
-        shortTermSummary: summary,
-        shortTermState: state,
-        recentMessages: recentMessages.slice(-recentMessageLimit),
-        updatedAt,
-        expiresAt: Number(entry?.expiresAt || 0) || 0,
-        confidence: 0.86,
-        tier: 'A',
-        matchMode: 'lexical',
-        snapshotType: String(entry?.snapshotType || 'post_reply').trim() || 'post_reply',
-        scope
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => {
-      if (a.id === currentSessionKey && b.id !== currentSessionKey) return -1;
-      if (b.id === currentSessionKey && a.id !== currentSessionKey) return 1;
-      return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
-    })
-    .slice(0, recentSessionMax);
-}
-
-function searchRecentCandidates(userId, query, context = {}) {
-  const queryFacet = classifyRecallFacet(query);
-  const continuityBias = shouldBiasToContinuity(queryFacet);
-  return buildRecentSessionCandidates(userId, context)
-    .map((item) => ({
-      ...item,
-      score: scoreTextMatch(query, item.text) + (continuityBias ? 0.62 : 0.42)
-    }));
 }
 
 function searchProfileCandidates(userId, query) {
@@ -1119,27 +754,6 @@ function searchUnifiedMemory(query, options = {}, context = {}) {
   };
 }
 
-function truncateProfileForOpen(profileResult = {}) {
-  const profile = profileResult.profile || {};
-  const maxItems = Math.max(1, Number(config.MEMORY_CLI_PROFILE_FIELD_MAX_ITEMS || 4));
-  const limitList = (values) => (Array.isArray(values) ? values : []).slice(0, maxItems).map((item) => sanitizePreviewText(item, 160)).filter(Boolean);
-  return {
-    profile: {
-      identities: limitList(profile.identities),
-      personality_traits: limitList(profile.personality_traits),
-      hobbies: limitList(profile.hobbies),
-      likes: limitList(profile.likes),
-      dislikes: limitList(profile.dislikes),
-      goals: limitList(profile.goals),
-      recent_topics: limitList(profile.recent_topics),
-      relation_stage: sanitizePreviewText(profile.relation_stage, 80)
-    },
-    summary: sanitizePreviewText(profileResult.summary, 1000),
-    impression: sanitizePreviewText(profileResult.impression, 1000),
-    facts: (Array.isArray(profileResult.facts) ? profileResult.facts : []).slice(0, maxItems).map((item) => sanitizePreviewText(item, 180))
-  };
-}
-
 function openRecentSession(userId, sessionKey, context = {}) {
   const recent = buildRecentSessionCandidates(userId, context).find((item) => item.id === sessionKey);
   if (!recent) return null;
@@ -1388,40 +1002,6 @@ function reviewMemories(context = {}, options = {}) {
     count: items.length,
     items
   };
-}
-
-function openJournalByRef(userId, ref = '') {
-  const rawRef = parseJournalRawRef(ref);
-  if (rawRef) {
-    const filePath = path.join(config.DAILY_JOURNAL_DIR, String(userId || '').trim(), `${rawRef.day}.journal.md`);
-    if (!fs.existsSync(filePath)) return null;
-    const rawText = String(fs.readFileSync(filePath, 'utf8') || '');
-    if (!rawText.trim()) return null;
-    const entries = parseJournalEntries(rawText);
-    if (!entries.length) return null;
-    const start = Math.max(0, rawRef.windowIndex);
-    const end = Math.min(entries.length, start + (JOURNAL_RAW_FALLBACK_WINDOW_RADIUS * 2) + 1);
-    const opened = buildJournalRawWindowCandidate(
-      rawRef.day,
-      entries.slice(start, end),
-      '',
-      start,
-      Number(fs.statSync(filePath).mtimeMs || 0) || 0
-    );
-    if (!opened) return null;
-    return {
-      ...opened,
-      data: {
-        id: opened.id,
-        type: opened.type,
-        title: opened.title,
-        text: String(opened.text || '').slice(0, Math.max(200, Number(config.MEMORY_CLI_MAX_OPEN_CHARS || 12000))),
-        updatedAt: opened.updatedAt,
-        day: opened.day
-      }
-    };
-  }
-  return getJournalSummaryFiles(userId).find((item) => item.ref === ref) || null;
 }
 
 function openUnifiedMemory(target, options = {}, context = {}) {

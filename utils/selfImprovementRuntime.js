@@ -1,25 +1,47 @@
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
 const config = require('../config');
 const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent } = require('../api/parser');
 const { classifyPromptThreat, sanitizeUntrustedContent } = require('./promptSecurity');
-const { getJsonLineWriter } = require('./storeRegistry');
 const { getBackgroundPressureDelayMs, appendPerfEvent } = require('./perfRuntime');
+const {
+  appendJsonLine,
+  atomicWriteJson,
+  ensureStore,
+  getStorePaths,
+  safeReadJson,
+  safeReadText,
+  safeWriteText
+} = require('./selfImprovement/storeFiles');
+const { createPatternEngine } = require('./selfImprovement/patternEngine');
+const {
+  clampNumber,
+  derivePriority,
+  hashId,
+  hashShort,
+  isStableOtherIssue,
+  normalizeArray,
+  normalizeEvidenceList,
+  normalizeKeyPart,
+  normalizeKind,
+  normalizeLowerText,
+  normalizeObject,
+  normalizePatternKey,
+  normalizeRouteContext,
+  normalizeRuleType,
+  normalizeShortList,
+  normalizeStatus,
+  normalizeSummary,
+  normalizeSummaryKey,
+  nowIso,
+  parseTime,
+  redactSensitiveText,
+  splitKnownIssueSuffix,
+  stableOtherIssue,
+  trimText
+} = require('./selfImprovement/normalizers');
 
-const EVENT_KINDS = new Set(['error', 'correction', 'feature_request', 'strategy', 'knowledge_gap']);
-const EVENT_STATUSES = new Set(['open', 'promoted', 'ignored']);
-const RULE_TYPES = new Set(['prefer', 'avoid']);
 const PROMOTED_STATUS = 'promoted';
 const GUIDE_ACTIVE_STATUS = 'active';
-const SOURCE_PRIORITY = Object.freeze({
-  deterministic_tool_error: 1,
-  deterministic_correction: 1,
-  deterministic_feature_request: 1,
-  llm_extraction: 2,
-  unknown: 9
-});
 
 const KNOWN_TOOL_ISSUES = new Set(['timeout', 'rate_limit', 'auth', 'command_format', 'param_format', 'result_parse', 'empty_result', 'not_allowed', 'unsupported', 'network']);
 const KNOWN_ROUTE_ISSUES = new Set(['no_allowed_tools', 'policy_block', 'misroute', 'admin_only', 'refuse_false_positive']);
@@ -28,296 +50,6 @@ const KNOWN_RESPONSE_ISSUES = new Set(['fact_incorrect', 'missing_constraint', '
 const KNOWN_CAPABILITY_ISSUES = new Set(['tool_missing', 'route_missing_capability', 'write_action_unavailable']);
 const TAXONOMY_DOMAINS = new Set(['tool', 'route', 'deploy', 'memory', 'response', 'capability', 'general']);
 let cachedTaskMemoryBridge = undefined;
-
-function nowMs() {
-  return Date.now();
-}
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-function normalizeObject(value, fallback = {}) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
-}
-
-function normalizeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function trimText(value, maxChars = 240) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  return text.length > maxChars ? text.slice(0, maxChars) : text;
-}
-
-function normalizeLowerText(value, maxChars = 240) {
-  return trimText(value, maxChars).toLowerCase();
-}
-
-function clampNumber(value, min, max, fallback = 0) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return fallback;
-  return Math.max(min, Math.min(max, num));
-}
-
-function normalizeShortList(values = [], limit = 3, itemMaxChars = 180) {
-  const output = [];
-  const seen = new Set();
-  for (const raw of normalizeArray(values)) {
-    const text = trimText(raw, itemMaxChars);
-    if (!text) continue;
-    const key = text.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    output.push(text);
-    if (output.length >= limit) break;
-  }
-  return output;
-}
-
-function redactSensitiveText(value, maxChars = 240) {
-  let text = String(value || '').replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  text = text
-    .replace(/\b(sk-[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{8,}|xox[baprs]-[A-Za-z0-9-]{8,}|AKIA[0-9A-Z]{12,}|AIza[0-9A-Za-z\-_]{20,})\b/g, '[redacted-token]')
-    .replace(/\b(?:api[_-]?key|token|secret|password|passwd|private[_-]?key)\b\s*[:=]\s*['"]?[^'"\s,;]+['"]?/ig, '$1=[redacted]')
-    .replace(/\bBearer\s+[A-Za-z0-9._~-]+\b/ig, 'Bearer [redacted]')
-    .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, '[redacted-key-block]');
-  return trimText(text, maxChars);
-}
-
-function normalizeEvidenceItem(entry = {}) {
-  if (typeof entry === 'string') {
-    const excerpt = redactSensitiveText(entry, 180);
-    return excerpt ? { excerpt } : null;
-  }
-  const item = normalizeObject(entry, {});
-  const excerpt = redactSensitiveText(item.excerpt || item.text || item.summary || '', 180);
-  const label = trimText(item.label || item.type || item.source || '', 60);
-  const out = {};
-  if (label) out.label = label;
-  if (excerpt) out.excerpt = excerpt;
-  return Object.keys(out).length > 0 ? out : null;
-}
-
-function normalizeEvidenceList(entries = []) {
-  const output = [];
-  const seen = new Set();
-  for (const entry of normalizeArray(entries)) {
-    const normalized = normalizeEvidenceItem(entry);
-    if (!normalized) continue;
-    const key = JSON.stringify(normalized);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    output.push(normalized);
-    if (output.length >= 3) break;
-  }
-  return output;
-}
-
-function hashId(input = {}) {
-  return crypto.createHash('sha1').update(JSON.stringify(input)).digest('hex').slice(0, 16);
-}
-
-function hashShort(text = '') {
-  return crypto.createHash('sha1').update(String(text || '')).digest('hex').slice(0, 6);
-}
-
-function parseTime(value) {
-  const ts = Date.parse(String(value || ''));
-  return Number.isFinite(ts) ? ts : 0;
-}
-
-function safeMkdir(dirPath) {
-  fs.mkdirSync(dirPath, { recursive: true });
-}
-
-function safeReadText(filePath, fallback = '') {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    return fs.readFileSync(filePath, 'utf8');
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function safeReadJson(filePath, fallback) {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    const raw = fs.readFileSync(filePath, 'utf8');
-    if (!raw.trim()) return fallback;
-    return JSON.parse(raw);
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function atomicWriteJson(filePath, value) {
-  const tempPath = `${filePath}.${process.pid}.tmp`;
-  const body = JSON.stringify(value, null, 2);
-  try {
-    fs.writeFileSync(tempPath, body, 'utf8');
-    fs.renameSync(tempPath, filePath);
-  } catch (error) {
-    try {
-      fs.writeFileSync(filePath, body, 'utf8');
-    } finally {
-      try {
-        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-      } catch (_) {}
-    }
-    if (error && error.code !== 'EPERM') throw error;
-  }
-}
-
-function appendJsonLine(filePath, value) {
-  getJsonLineWriter(filePath, {
-    debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
-    maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
-  }).append(value);
-}
-
-function getStorePaths() {
-  const storeDir = String(config.SELF_IMPROVEMENT_STORE_DIR || path.join(config.DATA_DIR, 'self_improvement')).trim();
-  return {
-    storeDir,
-    eventsFile: path.join(storeDir, 'events.jsonl'),
-    patternsFile: path.join(storeDir, 'patterns.json'),
-    rulesFile: String(config.SELF_IMPROVEMENT_RULES_FILE || path.join(storeDir, 'promoted_rules.json')).trim(),
-    guidesFile: String(config.SELF_IMPROVEMENT_GUIDES_FILE || path.join(storeDir, 'skill_guides.json')).trim()
-  };
-}
-
-function ensureStore() {
-  const paths = getStorePaths();
-  safeMkdir(paths.storeDir);
-  safeMkdir(path.dirname(paths.rulesFile));
-  safeMkdir(path.dirname(paths.guidesFile));
-  if (!fs.existsSync(paths.eventsFile)) fs.writeFileSync(paths.eventsFile, '', 'utf8');
-  if (!fs.existsSync(paths.patternsFile)) atomicWriteJson(paths.patternsFile, { items: [] });
-  if (!fs.existsSync(paths.rulesFile)) atomicWriteJson(paths.rulesFile, { items: [] });
-  if (!fs.existsSync(paths.guidesFile)) atomicWriteJson(paths.guidesFile, { items: [] });
-  return paths;
-}
-
-function normalizeKind(kind = '') {
-  const value = String(kind || '').trim().toLowerCase();
-  return EVENT_KINDS.has(value) ? value : 'knowledge_gap';
-}
-
-function normalizeStatus(status = '') {
-  const value = String(status || '').trim().toLowerCase();
-  return EVENT_STATUSES.has(value) ? value : 'open';
-}
-
-function normalizeRuleType(value = '', fallback = '') {
-  const normalized = String(value || '').trim().toLowerCase();
-  if (RULE_TYPES.has(normalized)) return normalized;
-  return fallback || '';
-}
-
-function derivePriority(kind = '') {
-  if (kind === 'error' || kind === 'correction') return 0.88;
-  if (kind === 'feature_request') return 0.74;
-  if (kind === 'strategy') return 0.72;
-  return 0.68;
-}
-
-function normalizeKeyPart(value, fallback = 'general') {
-  const text = String(value || fallback || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[\/_]+/g, ' ')
-    .replace(/[^a-z0-9.\- ]+/g, ' ');
-  const compact = text.trim().replace(/\s+/g, '_').replace(/_+/g, '_');
-  return compact || fallback;
-}
-
-function normalizePatternKey(value, fallback = 'general.unknown.other') {
-  const raw = String(value || fallback || '').trim().toLowerCase();
-  if (!raw) return fallback;
-  const parts = raw
-    .replace(/[\/]+/g, '.')
-    .split('.')
-    .map((part) => normalizeKeyPart(part, 'unknown'))
-    .filter(Boolean);
-  return trimText((parts.length > 0 ? parts : [fallback]).join('.'), 120) || fallback;
-}
-
-function splitKnownIssueSuffix(value = '', knownIssues = new Set()) {
-  const normalized = normalizeKeyPart(value, '');
-  if (!normalized) return null;
-  const issues = Array.from(knownIssues).sort((a, b) => b.length - a.length);
-  for (const issue of issues) {
-    if (normalized === issue) {
-      return {
-        subject: 'unknown',
-        issue
-      };
-    }
-    const suffix = `_${issue}`;
-    if (!normalized.endsWith(suffix)) continue;
-    const subject = normalizeKeyPart(normalized.slice(0, -suffix.length), 'unknown');
-    if (!subject) continue;
-    return {
-      subject,
-      issue
-    };
-  }
-  return null;
-}
-
-function stableOtherIssue(existingKey = '', summaryKey = '') {
-  return `other_${hashShort(existingKey || summaryKey || 'pattern')}`;
-}
-
-function isStableOtherIssue(issue = '') {
-  return /^other_[a-f0-9]{6}$/i.test(String(issue || '').trim());
-}
-
-function normalizeSummary(value) {
-  return redactSensitiveText(value, 220);
-}
-
-function normalizeSummaryKey(value) {
-  return normalizeLowerText(redactSensitiveText(value, 220), 220);
-}
-
-function normalizeRouteContext(context = {}) {
-  const routeMeta = normalizeObject(context.routeMeta, {});
-  return {
-    routePolicyKey: trimText(context.routePolicyKey || routeMeta.routePolicyKey || '', 120),
-    topRouteType: trimText(context.topRouteType || routeMeta.topRouteType || '', 80),
-    toolName: trimText(context.toolName || routeMeta.toolName || routeMeta.tool_name || '', 80),
-    taskType: trimText(context.taskType || routeMeta.taskType || routeMeta.task_type || '', 120),
-    sessionId: trimText(context.sessionId || routeMeta.sessionId || routeMeta.session_id || '', 120),
-    channelId: trimText(context.channelId || routeMeta.channelId || routeMeta.channel_id || '', 120),
-    groupId: trimText(context.groupId || routeMeta.groupId || routeMeta.group_id || '', 120),
-    userId: trimText(context.userId || routeMeta.userId || routeMeta.user_id || '', 120)
-  };
-}
-
-function getDedupWindowMs() {
-  return 24 * 60 * 60 * 1000;
-}
-
-function getPromotionWindowMs() {
-  const days = Math.max(1, Number(config.SELF_IMPROVEMENT_PROMOTION_WINDOW_DAYS || 30));
-  return days * 24 * 60 * 60 * 1000;
-}
-
-function getPromotionThreshold() {
-  return Math.max(1, Number(config.SELF_IMPROVEMENT_PROMOTION_THRESHOLD || 3));
-}
-
-function getGuideMinOccurrences() {
-  return Math.max(1, Number(config.SELF_IMPROVEMENT_GUIDE_MIN_OCCURRENCES || 5));
-}
-
-function getGuideMinConfidence() {
-  return clampNumber(config.SELF_IMPROVEMENT_GUIDE_MIN_CONFIDENCE, 0, 1, 0.85);
-}
 
 function normalizePromptSource(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
@@ -557,6 +289,20 @@ function normalizeGuideRecord(input = {}) {
   };
 }
 
+const {
+  buildRuntimeRule,
+  findDedupMatch,
+  mergeEvent,
+  recomputePatterns,
+  rebuildLocalSkillGuides,
+  rebuildPromotedRules
+} = createPatternEngine({
+  normalizeGuideRecord,
+  normalizePatternRecord,
+  normalizeRuleRecord,
+  normalizeStoredEvent
+});
+
 function readEvents() {
   const paths = ensureStore();
   const raw = safeReadText(paths.eventsFile, '');
@@ -602,7 +348,7 @@ function readSkillGuides() {
 function writeEvents(events = []) {
   const paths = ensureStore();
   const body = normalizeArray(events).map((item) => JSON.stringify(normalizeStoredEvent(item))).join('\n');
-  fs.writeFileSync(paths.eventsFile, body ? `${body}\n` : '', 'utf8');
+  safeWriteText(paths.eventsFile, body ? `${body}\n` : '');
 }
 
 function writePatterns(payload = { items: [] }) {
@@ -624,248 +370,6 @@ function writeSkillGuides(payload = { items: [] }) {
   atomicWriteJson(paths.guidesFile, {
     items: normalizeArray(payload?.items).map((item) => normalizeGuideRecord(item))
   });
-}
-
-function selectBetterSource(candidate = {}, current = {}) {
-  const candidateRank = SOURCE_PRIORITY[String(candidate.source || '').trim().toLowerCase()] ?? SOURCE_PRIORITY.unknown;
-  const currentRank = SOURCE_PRIORITY[String(current.source || '').trim().toLowerCase()] ?? SOURCE_PRIORITY.unknown;
-  return candidateRank <= currentRank;
-}
-
-function getPromotionContextKey(event = {}) {
-  const fields = [
-    trimText(event.toolName || '', 80),
-    trimText(event.routePolicyKey || '', 120),
-    trimText(event.taskType || '', 120)
-  ].filter(Boolean);
-  return fields.join('|');
-}
-
-function getDedupKey(event = {}) {
-  return [
-    normalizePatternKey(event.patternKey, 'general.unknown.other'),
-    normalizeKind(event.kind),
-    trimText(event.toolName || '', 80).toLowerCase(),
-    trimText(event.routePolicyKey || '', 120).toLowerCase(),
-    normalizeSummaryKey(event.summary)
-  ].join('|');
-}
-
-function mergeEvent(existing = {}, incoming = {}) {
-  const mergedEvidence = normalizeEvidenceList([
-    ...normalizeArray(existing.evidence),
-    ...normalizeArray(incoming.evidence)
-  ]);
-  const betterSource = selectBetterSource(incoming, existing);
-  return normalizeStoredEvent({
-    ...existing,
-    source: betterSource ? incoming.source : existing.source,
-    status: existing.status === PROMOTED_STATUS ? PROMOTED_STATUS : normalizeStatus(incoming.status || existing.status),
-    priority: Math.max(Number(existing.priority || 0), Number(incoming.priority || 0)),
-    summary: incoming.summary || existing.summary,
-    details: incoming.details || existing.details,
-    suggestedAction: incoming.suggestedAction || existing.suggestedAction,
-    confidence: Math.max(Number(existing.confidence || 0), Number(incoming.confidence || 0)),
-    evidence: mergedEvidence,
-    updatedAt: nowIso(),
-    occurrenceCount: Math.max(1, Number(existing.occurrenceCount || 1) || 1) + 1
-  });
-}
-
-function findDedupMatch(events = [], incoming = {}) {
-  const dedupKey = getDedupKey(incoming);
-  const cutoff = nowMs() - getDedupWindowMs();
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const item = normalizeStoredEvent(events[i]);
-    if (getDedupKey(item) !== dedupKey) continue;
-    if (parseTime(item.updatedAt || item.createdAt) < cutoff) continue;
-    return i;
-  }
-  return -1;
-}
-
-function buildRuntimeRule(entry = {}) {
-  const summary = normalizeSummary(entry.summary);
-  const action = redactSensitiveText(entry.suggestedAction, 180);
-  const kind = normalizeKind(entry.kind);
-  const ruleType = kind === 'strategy' ? 'prefer' : 'avoid';
-
-  if (ruleType === 'prefer') {
-    return {
-      ruleType,
-      ruleText: trimText(`Prefer: ${action || summary}`, 280)
-    };
-  }
-
-  let fallback = summary;
-  if (!fallback) {
-    if (String(entry.patternKey || '').startsWith('route.')) fallback = 'Check route policy before refusing or claiming no tools are available.';
-    else if (String(entry.patternKey || '').startsWith('tool.')) fallback = 'Do not repeat the same tool failure pattern without adjusting inputs or fallback strategy.';
-    else if (String(entry.patternKey || '').startsWith('capability.')) fallback = 'Do not claim the capability exists when current route or tool access cannot execute it.';
-    else if (String(entry.patternKey || '').startsWith('deploy.')) fallback = 'Do not skip the required safe deployment step for this class of change.';
-    else fallback = 'Do not repeat the same failure pattern.';
-  }
-  return {
-    ruleType,
-    ruleText: trimText(`Avoid: ${action || fallback}`, 280)
-  };
-}
-
-function buildPatternRecord(windowEvents = []) {
-  const list = normalizeArray(windowEvents).map((item) => normalizeStoredEvent(item));
-  if (list.length === 0) return null;
-  const latest = list[list.length - 1];
-  const contexts = new Set();
-  for (const event of list) {
-    const ctx = getPromotionContextKey(event);
-    if (ctx) contexts.add(ctx);
-  }
-  const distinctContextList = Array.from(contexts).slice(0, 8);
-  const totalCount = list.reduce((total, event) => total + Math.max(1, Number(event.occurrenceCount || 1) || 1), 0);
-  const promoted = totalCount >= getPromotionThreshold() && distinctContextList.length >= 2;
-  const runtimeRule = promoted ? buildRuntimeRule(latest) : { ruleType: latest.kind === 'strategy' ? 'prefer' : 'avoid', ruleText: '' };
-  const priority = promoted
-    ? Math.max(0.9, ...list.map((event) => Number(event.priority || 0)))
-    : Math.max(...list.map((event) => Number(event.priority || 0)));
-  return normalizePatternRecord({
-    patternKey: latest.patternKey,
-    kind: latest.kind,
-    status: promoted ? PROMOTED_STATUS : latest.status,
-    occurrenceCount: totalCount,
-    distinctContexts: distinctContextList,
-    summary: latest.summary,
-    suggestedAction: latest.suggestedAction,
-    injectionText: promoted ? runtimeRule.ruleText : '',
-    confidence: list.reduce((max, event) => Math.max(max, Number(event.confidence || 0)), 0),
-    topRouteType: latest.topRouteType,
-    routePolicyKey: latest.routePolicyKey,
-    toolName: latest.toolName,
-    taskType: latest.taskType,
-    firstSeenAt: list[0].createdAt,
-    lastSeenAt: latest.updatedAt,
-    taxonomyVersion: config.SELF_IMPROVEMENT_PATTERN_TAXONOMY_VERSION || 3,
-    ruleType: runtimeRule.ruleType,
-    runtimeRule: runtimeRule.ruleText,
-    priority
-  });
-}
-
-function rebuildPromotedRules(patterns = []) {
-  const now = nowIso();
-  return normalizeArray(patterns)
-    .map((item) => normalizePatternRecord(item))
-    .filter((item) => item.status === PROMOTED_STATUS)
-    .filter((item) => item.learning_allowed !== false)
-    .map((item) => {
-      const runtimeRule = buildRuntimeRule(item);
-      return normalizeRuleRecord({
-        ruleId: `sir_${hashId({ patternKey: item.patternKey, ruleText: runtimeRule.ruleText })}`,
-        patternKey: item.patternKey,
-        kind: item.kind,
-        priority: Math.max(Number(item.priority || 0), 0.9),
-        ruleType: runtimeRule.ruleType,
-        ruleText: runtimeRule.ruleText,
-        toolName: item.toolName,
-        routePolicyKey: item.routePolicyKey,
-        topRouteType: item.topRouteType,
-        taskType: item.taskType,
-        occurrenceCount: item.occurrenceCount,
-        confidence: item.confidence,
-        sourcePatternUpdatedAt: item.lastSeenAt,
-        updatedAt: now
-      });
-    })
-    .sort((a, b) => parseTime(b.sourcePatternUpdatedAt) - parseTime(a.sourcePatternUpdatedAt));
-}
-
-function buildGuideExample(pattern = {}) {
-  const routeHint = trimText(pattern.routePolicyKey || pattern.topRouteType || pattern.taskType || '', 80);
-  const toolHint = trimText(pattern.toolName || '', 80);
-  const parts = [routeHint, toolHint, trimText(pattern.summary, 80)].filter(Boolean);
-  return trimText(parts.join(' | '), 220);
-}
-
-function rebuildLocalSkillGuides(patterns = [], rules = []) {
-  const now = nowIso();
-  const rulesByPattern = new Map(normalizeArray(rules).map((item) => {
-    const normalized = normalizeRuleRecord(item);
-    return [normalized.patternKey, normalized];
-  }));
-  return normalizeArray(patterns)
-    .map((item) => normalizePatternRecord(item))
-    .filter((item) => item.status === PROMOTED_STATUS)
-    .filter((item) => item.learning_allowed !== false)
-    .filter((item) => item.kind !== 'knowledge_gap')
-    .filter((item) => Number(item.occurrenceCount || 0) >= getGuideMinOccurrences())
-    .filter((item) => Number(item.confidence || 0) >= getGuideMinConfidence())
-    .map((item) => {
-      const rule = rulesByPattern.get(item.patternKey);
-      if (!rule || !rule.ruleText) return null;
-      const doList = rule.ruleType === 'prefer'
-        ? [redactSensitiveText(item.suggestedAction || rule.ruleText.replace(/^Prefer:\s*/i, ''), 140)]
-        : [redactSensitiveText(item.suggestedAction || 'Use a safer fallback before repeating this pattern.', 140)];
-      const dontList = rule.ruleType === 'avoid'
-        ? [redactSensitiveText(item.summary || rule.ruleText.replace(/^Avoid:\s*/i, ''), 140)]
-        : [];
-      return normalizeGuideRecord({
-        guideId: `sig_${hashId({ patternKey: item.patternKey, updatedAt: item.lastSeenAt })}`,
-        patternKey: item.patternKey,
-        kind: item.kind,
-        title: `Guide: ${item.patternKey}`,
-        summary: item.summary,
-        ruleText: rule.ruleText,
-        triggerHints: normalizeShortList([item.patternKey, item.routePolicyKey, item.toolName, item.taskType], 4, 120),
-        doList,
-        dontList,
-        example: buildGuideExample(item),
-        occurrenceCount: item.occurrenceCount,
-        confidence: item.confidence,
-        status: GUIDE_ACTIVE_STATUS,
-        updatedAt: now
-      });
-    })
-    .filter(Boolean)
-    .sort((a, b) => parseTime(b.updatedAt) - parseTime(a.updatedAt));
-}
-
-function recomputePatterns(events = []) {
-  const cutoff = nowMs() - getPromotionWindowMs();
-  const bucket = new Map();
-  for (const raw of normalizeArray(events)) {
-    const event = normalizeStoredEvent(raw);
-    const ts = parseTime(event.updatedAt || event.createdAt);
-    if (ts < cutoff) continue;
-    const key = `${event.patternKey}|${event.kind}`;
-    if (!bucket.has(key)) bucket.set(key, []);
-    bucket.get(key).push(event);
-  }
-
-  const patterns = [];
-  const promotedKeys = new Set();
-  for (const [key, list] of bucket.entries()) {
-    list.sort((a, b) => parseTime(a.updatedAt) - parseTime(b.updatedAt));
-    const pattern = buildPatternRecord(list);
-    if (!pattern) continue;
-    patterns.push(pattern);
-    if (pattern.status === PROMOTED_STATUS) promotedKeys.add(key);
-  }
-
-  const normalizedEvents = normalizeArray(events).map((item) => normalizeStoredEvent(item)).map((event) => {
-    const key = `${event.patternKey}|${event.kind}`;
-    if (promotedKeys.has(key)) return normalizeStoredEvent({ ...event, status: PROMOTED_STATUS });
-    if (event.status === PROMOTED_STATUS) return normalizeStoredEvent({ ...event, status: 'open' });
-    return event;
-  });
-
-  const sortedPatterns = patterns.sort((a, b) => parseTime(b.lastSeenAt) - parseTime(a.lastSeenAt));
-  const promotedRules = rebuildPromotedRules(sortedPatterns);
-  const skillGuides = rebuildLocalSkillGuides(sortedPatterns, promotedRules);
-  return {
-    events: normalizedEvents,
-    patterns: sortedPatterns,
-    promotedRules,
-    skillGuides
-  };
 }
 
 function ensureEnabled() {

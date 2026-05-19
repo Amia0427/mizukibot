@@ -23,26 +23,19 @@ const {
   requestAssistantMessage
 } = require('./model/service');
 const {
-  normalizeArray: normalizeContractArray,
   buildToolEvidenceBundle,
   normalizeExecutionEnvelope,
-  normalizeObject: normalizeContractObject,
-  normalizePlanStep,
-  normalizeStepId: contractNormalizeStepId,
   normalizeText
 } = require('./contracts');
 const {
   GraphStateV2,
-  buildInitialPlanSlice: buildInitialPlanSliceBase,
   buildExecLogsFromSteps,
   buildReplyOnlyPlan,
-  createInitialState: createInitialStateBase,
   findEvidenceEnvelope,
   isCompletedSideEffectStep,
   normalizePlanForResume,
   rebuildFinalPlanFromSteps,
-  snapshotState,
-  translatePlan: translatePlanBase
+  snapshotState
 } = require('./state');
 const {
   buildDirectChatExecutionBatches,
@@ -99,7 +92,6 @@ const {
 } = require('./capabilities/scheduler');
 const { normalizeToolNames } = require('../../utils/localToolAccess');
 const { getPolicy, enforceToolPolicy } = require('../../utils/toolPolicy');
-const { shouldUseMinecraftLLM, getMinecraftModelOverrides } = require('../../utils/minecraftRouting');
 const { appendDailyJournalEntry } = require('../../utils/dailyJournal');
 const { runHumanizerAgent, isHumanizerAgentEnabled } = require('../humanizerAgent');
 const {
@@ -136,7 +128,7 @@ const {
   captureToolFailure,
   learnSelfImprovement
 } = require('../../utils/selfImprovementRuntime');
-const { createCheckpointStore, resolveThreadId } = require('../../utils/langgraphV2Store');
+const { createCheckpointStore } = require('../../utils/langgraphV2Store');
 const { getPostReplyJobQueue } = require('../../utils/postReplyJobQueue');
 const {
   createMemoryCliTurnState,
@@ -179,284 +171,34 @@ const {
   buildContinuitySnapshotPayload,
   buildV2CanonicalSegments: buildV2CanonicalSegmentsWithDeps
 } = require('./host/runtimeHelpers');
-
-function appendMemoryEvent(...args) {
-  return require('../../utils/memory-v3').appendMemoryEvent(...args);
-}
-
-function materializeMemoryViews(...args) {
-  return require('../../utils/memory-v3').materializeMemoryViews(...args);
-}
-
-function recordPersonaMemoryOutcome(...args) {
-  return require('../../utils/personaMemoryState').recordPersonaMemoryOutcome(...args);
-}
-
-function warmMcpRegistry(...args) {
-  return require('../toolRegistry').warmMcpRegistry(...args);
-}
-
-function resolveMemoryCompletionsUrl() {
-  const memoryUrl = String(config.MEMORY_API_BASE_URL || config.API_BASE_URL || '').replace(/\/+$/, '');
-  if (/\/chat\/completions$/i.test(memoryUrl)) return memoryUrl;
-  if (/\/v\d+$/i.test(memoryUrl)) return `${memoryUrl}/chat/completions`;
-  return memoryUrl;
-}
-
-function resolveMemoryModelName() {
-  return String(config.MEMORY_MODEL || config.AI_MODEL || 'gpt-5.4').trim() || 'gpt-5.4';
-}
-
-function resolveMemoryApiKey() {
-  return String(config.MEMORY_API_KEY || config.API_KEY || '').trim();
-}
-
-async function summarizeShortTermChunk(payload = {}) {
-  const summaryTokens = Math.max(96, Math.min(400, Number(payload.summaryTokens || 0) || 400));
-  const response = await postWithRetry(
-    resolveMemoryCompletionsUrl(),
-    {
-      model: resolveMemoryModelName(),
-      temperature: 0.2,
-      top_p: 0.9,
-      messages: [
-        {
-          role: 'system',
-          content: [
-            buildStructuredCompressionPrompt(
-              payload.existingState || { summary: payload.existingSummary },
-              summaryTokens
-            ),
-            '如果无法稳定输出 JSON，退回输出纯文本短期摘要。'
-          ].join('\n')
-        },
-        {
-          role: 'user',
-          content: String(payload.chunkText || '').trim()
-        }
-      ],
-      max_tokens: summaryTokens,
-      stream: false
-    },
-    Math.max(0, Number(config.AI_RETRIES) || 0),
-    resolveMemoryApiKey()
-  );
-  const message = extractMessageContent(response);
-  return String(message?.content || message?.text || '').trim();
-}
+const {
+  appendMemoryEvent,
+  materializeMemoryViews,
+  recordPersonaMemoryOutcome,
+  warmMcpRegistry,
+  summarizeShortTermChunk
+} = require('./host/memoryHooks');
+const {
+  isReviewMode,
+  isChatLikeRoute,
+  isDirectChatRequest,
+  shouldQueueMemoryLearningForV2,
+  shouldAppendDailyJournalForV2
+} = require('./host/routePredicates');
+const {
+  isSideEffectPolicy,
+  getRouteToolPlanner,
+  getToolPlannerExecutionPlan,
+  isPlannerSingleAuthorityEnabled,
+  createInitialState,
+  normalizeMode,
+  translatePlan
+} = require('./host/requestState');
 
 function buildV2CanonicalSegments(state, input = {}) {
   return buildV2CanonicalSegmentsWithDeps(state, input, {
     resolveModelTokenLimit,
     buildContextCompactionPlan
-  });
-}
-
-function lastNonEmpty(items = []) {
-  for (let i = items.length - 1; i >= 0; i -= 1) {
-    const value = String(items[i] || '').trim();
-    if (value) return value;
-  }
-  return '';
-}
-
-function isReviewMode(reviewMode = '') {
-  return Boolean(String(reviewMode || '').trim());
-}
-
-function isChatLikeRoute(request = {}) {
-  const routeMeta = normalizeObject(request.routeMeta, {});
-  const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
-  const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
-  if (request.systemInitiated) return false;
-  if (isReviewMode(request.reviewMode)) return false;
-  if (!topRouteType && !routePolicyKey) return true;
-  return (
-    topRouteType === 'direct_chat'
-    || routePolicyKey.startsWith('direct_chat/')
-  );
-}
-
-function isDirectChatRequest(request = {}) {
-  const routeMeta = normalizeObject(request.routeMeta, {});
-  const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
-  const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
-  return topRouteType === 'direct_chat' || routePolicyKey.startsWith('direct_chat/');
-}
-
-function shouldQueueMemoryLearningForV2(request = {}, finalReply = '') {
-  if (!config.MEMORY_LEARNING_ENABLED) return false;
-  if (request.disableMemoryLearning) return false;
-  if (request.systemInitiated) return false;
-  if (String(request.customPrompt || '').trim()) return false;
-  if (isReviewMode(request.reviewMode)) return false;
-
-  const uid = String(request.userId || '').trim();
-  const q = String(request.persistUserText || request.runtimeQuestionText || request.question || '').trim();
-  const a = String(finalReply || '').trim();
-  if (!uid || !q || !a) return false;
-  if (isReplyFailure(a, { emptyIsFailure: true })) return false;
-
-  const routeMeta = normalizeObject(request.routeMeta, {});
-  const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
-  const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
-  if (!topRouteType && !routePolicyKey) return true;
-  if (new Set(['admin', 'ignore', 'refuse']).has(topRouteType || '')) return false;
-
-  const hasGroupId = Boolean(String(routeMeta.groupId || routeMeta.group_id || '').trim());
-  const hasTaskContext = Boolean(
-    String(routeMeta.taskType || routeMeta.task_type || '').trim()
-    || String(routeMeta.toolName || routeMeta.tool_name || '').trim()
-    || String(routeMeta.agentName || routeMeta.agent_name || '').trim()
-  );
-
-  if (topRouteType === 'direct_chat') return true;
-  if (hasGroupId) return true;
-  if (hasTaskContext) return true;
-  return routePolicyKey.startsWith('direct_chat/');
-}
-
-function shouldAppendDailyJournalForV2(request = {}, finalReply = '') {
-  if (!config.DAILY_JOURNAL_ENABLED) return false;
-  if (request.disableDailyJournal) return false;
-  if (request.systemInitiated) return false;
-  if (String(request.customPrompt || '').trim()) return false;
-
-  const uid = String(request.userId || '').trim();
-  const q = String(request.persistUserText || request.runtimeQuestionText || request.question || '').trim();
-  const a = String(finalReply || '').trim();
-  if (!uid || !q || !a) return false;
-  if (isReplyFailure(a, { emptyIsFailure: true })) return false;
-
-  const routeMeta = normalizeObject(request.routeMeta, {});
-  const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
-  const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
-  if (!topRouteType && !routePolicyKey) return true;
-  if (topRouteType) return topRouteType === 'direct_chat';
-  return routePolicyKey.startsWith('direct_chat/');
-}
-
-function isWriteLikeCapability(capability = '') {
-  return /write/i.test(String(capability || ''));
-}
-
-function isSideEffectPolicy(policy = {}) {
-  return isWriteLikeCapability(policy.capability) || String(policy.risk || '').trim().toLowerCase() === 'high';
-}
-
-function inferStepKindFromTool(toolName = '') {
-  const normalized = String(toolName || '').trim();
-  if (!normalized) return 'reply';
-  if (normalized === 'memory_cli') return 'memory_cli';
-  if (normalized === 'humanizer') return 'humanizer';
-  return normalized === 'reply' ? 'reply' : 'tool';
-}
-
-function normalizeStepId(step = {}, fallbackPrefix = 'step', index = 0) {
-  return contractNormalizeStepId(step, fallbackPrefix, index);
-}
-
-function normalizeRoutePlanStep(step = {}, index = 0) {
-  return normalizePlanStep(step, 'route', index);
-}
-
-function normalizePlannedStep(step = {}, index = 0) {
-  return normalizePlanStep(step, 'planner', index);
-}
-
-function normalizeDirectChatPlannerPlanStep(step = {}, index = 0) {
-  return normalizePlanStep(step, 'direct_chat', index);
-}
-
-function buildInitialPlanSlice(request = {}, options = {}) {
-  return buildInitialPlanSliceBase(request, {
-    ...normalizeObject(options, {}),
-    getToolPlannerExecutionPlan,
-    normalizeDirectChatPlannerPlanStep,
-    normalizeRoutePlanStep
-  });
-}
-
-function getRouteToolPlanner(routeMeta = {}) {
-  const meta = normalizeObject(routeMeta, {});
-  if (meta.toolPlanner && typeof meta.toolPlanner === 'object') return meta.toolPlanner;
-  if (meta.directChatPlanner && typeof meta.directChatPlanner === 'object') return meta.directChatPlanner;
-  return null;
-}
-
-function getToolPlannerExecutionPlan(routeMeta = {}) {
-  const planner = getRouteToolPlanner(routeMeta);
-  const executionPlan = planner?.executionPlan && typeof planner.executionPlan === 'object'
-    ? planner.executionPlan
-    : null;
-  return executionPlan;
-}
-
-function isPlannerSingleAuthorityEnabled() {
-  return config.PLANNER_SINGLE_AUTHORITY_ENABLED === true;
-}
-
-function createInitialState(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
-  const normalizedOptions = normalizeObject(options, {});
-  const latencyDecision = buildLatencyDecision({
-    question,
-    runtimeQuestionText: question,
-    routeMeta: normalizedOptions.routeMeta,
-    topRouteType: normalizedOptions.topRouteType,
-    routePolicyKey: normalizedOptions.routePolicyKey,
-    allowedTools: normalizedOptions.allowedTools,
-    allowTools: normalizedOptions.disableTools ? false : true,
-    systemInitiated: normalizedOptions.systemInitiated,
-    deferPersist: normalizedOptions.deferPersist
-  }, normalizedOptions);
-  return createInitialStateBase(question, userInfo, userId, customPrompt, imageUrl, {
-    ...normalizedOptions,
-    resolveThreadId,
-    resolveShortTermSessionKey,
-    resolveShortTermScope,
-    normalizeToolNames,
-    shouldUseMinecraftLLM,
-    getMinecraftModelOverrides,
-    createMemoryCliTurnState,
-    buildInitialPlanSlice,
-    nowTs,
-    latencyDecision
-  });
-}
-
-function shouldPlanRequest(request = {}) {
-  if (request.forcePlanMode) return true;
-  const plannerSteps = normalizeArray(getToolPlannerExecutionPlan(request.routeMeta)?.steps);
-  if (isPlannerSingleAuthorityEnabled()) {
-    return plannerSteps.length > 0;
-  }
-  if (normalizeArray(request.routeMeta?.planSteps).length > 0) return true;
-  if (plannerSteps.length > 0) return true;
-  if (String(request.reviewMode || '').trim()) return false;
-  const topRouteType = String(request.topRouteType || '').trim().toLowerCase();
-  const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
-  if (
-    topRouteType === 'direct_chat'
-    || routePolicyKey.startsWith('direct_chat/')
-  ) {
-    return plannerSteps.length > 0;
-  }
-  return normalizeArray(request.allowedTools).length > 0;
-}
-
-function normalizeMode(request = {}) {
-  const topRouteType = String(request.topRouteType || request.routeMeta?.topRouteType || '').trim().toLowerCase();
-  const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
-  if (request.systemInitiated || topRouteType === 'proactive' || routePolicyKey === 'proactive/default') return 'proactive';
-  if (String(request.reviewMode || '').trim()) return 'review';
-  if (request.imageUrl) return 'image';
-  if (request.useMinecraftModel) return 'minecraft';
-  return shouldPlanRequest(request) ? 'tool_plan' : 'chat';
-}
-
-function translatePlan(rawPlan = {}) {
-  return translatePlanBase(rawPlan, {
-    normalizePlannedStep
   });
 }
 
