@@ -3,7 +3,6 @@ const { getUserAffinityState } = require('../memory');
 const { shouldUseRemoteEmbedding, requestEmbedding } = require('../vectorMemory');
 const {
   normalizeText,
-  clampText,
   canonicalizeText,
   tokenize,
   cosineFromTokenSets,
@@ -11,23 +10,16 @@ const {
   uniqueBy
 } = require('./helpers');
 const {
-  loadSessionProjection,
-  loadProfileProjection,
-  loadScopeProjection,
-  loadEpisodeProjection,
-  loadMemoryNodes
+  loadProfileProjection
 } = require('./storage');
 const { rerankMemoryCandidates } = require('../memoryReranker');
 const {
   loadEmbeddingIndex,
-  calcEmbeddingSimilarity,
-  getEmbeddingForCandidate
+  calcEmbeddingSimilarity
 } = require('./embeddingIndex');
 const {
-  buildDailyJournalDocsForUser,
   getJournalDocDay
 } = require('./journalDocs');
-const { isMemoryNotRecallable } = require('./recallFilter');
 const {
   classifyJournalRecallIntent,
   journalDateMatchBoost,
@@ -37,7 +29,6 @@ const {
   fuseRecallCandidates,
   isLanceDbReadEnabled,
   normalizeVectorStoreMode,
-  rowPassesMemoryFilter,
   resolveVectorCandidates,
   searchMemoryVectors
 } = require('../lancedbMemoryStore');
@@ -60,220 +51,23 @@ const {
 const {
   calcMemoryStrength,
   classifyFacet,
-  looksLikePollutedSessionSummary,
-  rewriteQuery,
-  shouldCollectSourceForQuery
+  rewriteQuery
 } = require('./queryPolicy');
+const {
+  applyConflictResolution,
+  diagnoseNoVisibleVectorCandidates,
+  diversify,
+  matchesFacetCandidate,
+  splitStrictWeak
+} = require('./queryRanking');
+const {
+  candidateKey,
+  collectCandidates,
+  filterCandidatesBySource,
+  mergeCandidateLists
+} = require('./queryCandidates');
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
-
-function resolveAllowedGroupIds(userId = '', options = {}) {
-  const explicit = Array.isArray(options.groupIds) ? options.groupIds : [];
-  const scope = loadScopeProjection();
-  const groups = Array.isArray(scope.users?.[String(userId || '').trim()]?.groups)
-    ? scope.users[String(userId || '').trim()].groups.map((item) => normalizeText(item)).filter(Boolean)
-    : [];
-  const current = normalizeText(options.groupId);
-  const scoped = uniqueBy([...groups, current].filter(Boolean), (item) => item);
-  if (explicit.length === 0) return scoped;
-  const explicitNormalized = explicit.map((item) => normalizeText(item)).filter(Boolean);
-  const scopedSet = new Set(scoped);
-  return explicitNormalized.filter((item) => scopedSet.has(item));
-}
-
-function collectCandidates(userId, options = {}) {
-  const facet = normalizeText(options.facet || 'default').toLowerCase();
-  const requestedSource = normalizeText(options.source || 'all').toLowerCase();
-  const includeRecent = shouldCollectSourceForQuery('recent', facet, requestedSource);
-  const includePersonal = shouldCollectSourceForQuery('personal', facet, requestedSource);
-  const includeProfile = shouldCollectSourceForQuery('profile', facet, requestedSource);
-  const includeTask = shouldCollectSourceForQuery('task', facet, requestedSource);
-  const includeGroup = shouldCollectSourceForQuery('group', facet, requestedSource);
-  const includeJargon = shouldCollectSourceForQuery('jargon', facet, requestedSource);
-  const includeJournal = shouldCollectSourceForQuery('journal', facet, requestedSource);
-  const includeStyle = shouldCollectSourceForQuery('style', facet, requestedSource);
-  const sessionProjection = includeRecent ? loadSessionProjection() : { sessions: {} };
-  const profileProjection = includeProfile ? loadProfileProjection() : { users: {} };
-  const episodeProjection = includeJournal ? loadEpisodeProjection() : { users: {} };
-  const allowedGroupIds = includeGroup || includeJargon
-    ? resolveAllowedGroupIds(userId, options)
-    : [];
-  const currentSessionKey = normalizeText(options.sessionKey);
-  const candidates = [];
-
-  if (includeRecent) {
-    for (const session of Object.values(sessionProjection.sessions || {})) {
-      const sessionUserId = normalizeText(session?.userId);
-      if (sessionUserId !== String(userId || '').trim()) continue;
-      candidates.push({
-        id: `session:${session.sessionKey}`,
-        source: 'recent',
-        type: 'session',
-        scopeType: 'session',
-        sessionKey: session.sessionKey,
-        groupId: session.groupId || '',
-        text: [
-          session.carryOverUserTurn ? `pending: ${session.carryOverUserTurn}` : '',
-          session.activeTopic ? `topic: ${session.activeTopic}` : '',
-          session.summary && !looksLikePollutedSessionSummary(session.summary) ? `summary: ${session.summary}` : '',
-          Array.isArray(session.openLoops) && session.openLoops.length ? `open: ${session.openLoops.join(' | ')}` : '',
-          Array.isArray(session.assistantCommitments) && session.assistantCommitments.length ? `commitments: ${session.assistantCommitments.join(' | ')}` : '',
-          Array.isArray(session.userConstraints) && session.userConstraints.length ? `constraints: ${session.userConstraints.join(' | ')}` : '',
-          Array.isArray(session.recentMessages) && session.recentMessages.length
-            ? session.recentMessages.map((item) => `${item.role}: ${item.content}`).join('\n')
-            : ''
-        ].filter(Boolean).join('\n'),
-        updatedAt: Number(session.updatedAt || 0) || 0,
-        confidence: 1,
-        importance: session.sessionKey === currentSessionKey ? 1.6 : 1.2,
-        evidenceCount: 1,
-        evidenceTier: session.sessionKey === currentSessionKey ? 'strict' : 'weak',
-        stabilityScore: session.sessionKey === currentSessionKey ? 0.98 : 0.72,
-        semanticSlot: 'continuity',
-        canonicalKey: canonicalizeText(`${session.activeTopic || ''} ${session.summary || ''} ${session.carryOverUserTurn || ''}`)
-      });
-    }
-  }
-
-  if (includePersonal || includeTask || includeGroup || includeJargon || includeStyle) {
-    for (const node of loadMemoryNodes()) {
-      if (isMemoryNotRecallable(node)) continue;
-      const nodeUserId = normalizeText(node?.userId);
-      const scopeType = normalizeText(node?.scopeType).toLowerCase();
-      const groupId = normalizeText(node?.groupId);
-      const source = scopeType === 'task'
-        ? 'task'
-        : (scopeType === 'group' ? (node.memoryKind === 'jargon' ? 'jargon' : 'group') : (node.memoryKind === 'style' ? 'style' : 'personal'));
-      if (!shouldCollectSourceForQuery(source, facet, requestedSource)) continue;
-      if (scopeType === 'group') {
-        if (!allowedGroupIds.includes(groupId)) continue;
-      } else if (nodeUserId !== String(userId || '').trim()) {
-        continue;
-      }
-      candidates.push({
-        ...node,
-        source,
-        semanticSlot: normalizeText(node.semanticSlot || node.type || node.memoryKind).toLowerCase(),
-        canonicalKey: normalizeText(node.canonicalKey || canonicalizeText(node.text)).toLowerCase()
-      });
-    }
-  }
-
-  const profile = profileProjection.users?.[String(userId || '').trim()];
-  if (includeProfile && profile) {
-    const personaCore = profile.personaCore || {};
-    const pseudoDocs = [
-      personaCore.summary ? { id: `profile:${userId}:summary`, source: 'profile', type: 'persona_summary', text: personaCore.summary, semanticSlot: 'persona_summary', fieldKey: 'persona_summary_support' } : null,
-      personaCore.impression ? { id: `profile:${userId}:impression`, source: 'profile', type: 'persona_impression', text: personaCore.impression, semanticSlot: 'persona_impression', fieldKey: 'persona_impression_support' } : null,
-      personaCore.botBasePersona ? { id: `profile:${userId}:botBasePersona`, source: 'profile', type: 'bot_persona', text: personaCore.botBasePersona, semanticSlot: 'bot_persona', fieldKey: 'bot_persona_tone' } : null,
-      personaCore.userAdaptationPersona ? { id: `profile:${userId}:userAdaptationPersona`, source: 'profile', type: 'user_adaptation_persona', text: personaCore.userAdaptationPersona, semanticSlot: 'relationship', fieldKey: 'relationship_reply_style' } : null,
-      personaCore.relationshipStyle ? { id: `profile:${userId}:relationshipStyle`, source: 'profile', type: 'relationship_style', text: personaCore.relationshipStyle, semanticSlot: 'relationship', fieldKey: 'relationship_tone' } : null,
-      personaCore.replyStyle ? { id: `profile:${userId}:replyStyle`, source: 'profile', type: 'reply_style', text: personaCore.replyStyle, semanticSlot: 'style_pattern', fieldKey: 'style_pattern' } : null,
-      personaCore.relationshipTone ? { id: `profile:${userId}:relationshipTone`, source: 'profile', type: 'relationship_tone', text: personaCore.relationshipTone, semanticSlot: 'relationship', fieldKey: 'relationship' } : null,
-      ...(Array.isArray(profile.strictProfile?.identities) ? profile.strictProfile.identities.map((item, index) => ({ id: `profile:${userId}:identity:${index}`, source: 'profile', type: 'identity', text: item, semanticSlot: 'identity', fieldKey: 'identity' })) : []),
-      ...(Array.isArray(profile.strictProfile?.personality_traits) ? profile.strictProfile.personality_traits.map((item, index) => ({ id: `profile:${userId}:personality:${index}`, source: 'profile', type: 'personality', text: item, semanticSlot: 'personality', fieldKey: 'personality' })) : []),
-      ...(Array.isArray(profile.strictProfile?.hobbies) ? profile.strictProfile.hobbies.map((item, index) => ({ id: `profile:${userId}:hobby:${index}`, source: 'profile', type: 'hobby', text: item, semanticSlot: 'hobby', fieldKey: 'hobby' })) : []),
-      ...(Array.isArray(profile.strictProfile?.likes) ? profile.strictProfile.likes.map((item, index) => ({ id: `profile:${userId}:like:${index}`, source: 'profile', type: 'like', text: item, semanticSlot: 'preference_like', fieldKey: 'preference_like' })) : []),
-      ...(Array.isArray(profile.strictProfile?.dislikes) ? profile.strictProfile.dislikes.map((item, index) => ({ id: `profile:${userId}:dislike:${index}`, source: 'profile', type: 'dislike', text: item, semanticSlot: 'preference_dislike', fieldKey: 'preference_dislike' })) : []),
-      ...(Array.isArray(profile.strictProfile?.goals) ? profile.strictProfile.goals.map((item, index) => ({ id: `profile:${userId}:goal:${index}`, source: 'profile', type: 'goal', text: item, semanticSlot: 'goal', fieldKey: 'goal' })) : []),
-      ...(Array.isArray(profile.strictProfile?.boundaries) ? profile.strictProfile.boundaries.map((item, index) => ({ id: `profile:${userId}:boundary:${index}`, source: 'profile', type: 'boundary', text: item, semanticSlot: 'boundary', fieldKey: 'boundary' })) : [])
-    ].filter(Boolean);
-    for (const doc of pseudoDocs) {
-      candidates.push({
-        ...doc,
-        scopeType: 'personal',
-        updatedAt: Number(profile.personaCore?.updatedAt || profileProjection.updatedAt || 0) || 0,
-        confidence: 1,
-        importance: 1.2,
-        evidenceCount: 1,
-        canonicalKey: canonicalizeText(doc.text),
-        evidenceTier: 'strict',
-        stabilityScore: 0.92
-      });
-    }
-  }
-
-  const episodes = episodeProjection.users?.[String(userId || '').trim()]?.items || [];
-  if (includeJournal) {
-    for (const episode of Array.isArray(episodes) ? episodes : []) {
-      if (isMemoryNotRecallable(episode)) continue;
-      const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
-      if (rollupLevel === 'segment') continue;
-      const episodeDay = normalizeText(episode.episodeDay || episode.endDay || episode.startDay);
-      candidates.push({
-        id: `episode:${episode.id}`,
-        source: 'journal',
-        type: 'episode',
-        scopeType: 'personal',
-        userId,
-        ownerUserId: userId,
-        text: normalizeText(episode.text),
-        updatedAt: Number(episode.updatedAt || 0) || 0,
-        confidence: Number(episode.confidence || 0) || 0.92,
-        importance: Number(episode.importance || 0) || (rollupLevel === 'monthly' ? 1.2 : 1.0),
-        evidenceCount: Math.max(1, Number(episode.evidenceCount || 1) || 1),
-        evidenceTier: 'strict',
-        stabilityScore: rollupLevel === 'monthly' ? 0.88 : 0.82,
-        memoryKind: 'episode',
-        sourceKind: normalizeText(episode.sourceKind || 'journal'),
-        fieldKey: 'episode',
-        semanticSlot: 'episode',
-        canonicalKey: normalizeText(episode.canonicalKey || canonicalizeText(episode.text)).toLowerCase(),
-        rollupLevel,
-        episodeDay,
-        day: episodeDay,
-        startDay: normalizeText(episode.startDay),
-        endDay: normalizeText(episode.endDay),
-        yearMonth: normalizeText(episode.yearMonth),
-        part: Math.max(0, Number(episode.part || 0) || 0),
-        sessionKeys: Array.isArray(episode.sessionKeys) ? episode.sessionKeys : [],
-        topics: Array.isArray(episode.topics) ? episode.topics : [],
-        textKind: normalizeText(episode.textKind) || `journal_${rollupLevel}`,
-        sourceCompleteness: normalizeText(episode.sourceCompleteness || 'summary'),
-        sourceFile: normalizeText(episode.sourceFile)
-      });
-    }
-
-    for (const doc of buildDailyJournalDocsForUser(userId, { includeSegments: true })) {
-      candidates.push({
-        ...doc,
-        canonicalKey: canonicalizeText(doc.text)
-      });
-    }
-  }
-
-  return candidates.filter((item) => normalizeText(item.text));
-}
-
-function filterCandidatesBySource(candidates = [], source = 'all') {
-  const wanted = normalizeText(source).toLowerCase();
-  if (!wanted || wanted === 'all') return Array.isArray(candidates) ? candidates : [];
-  return (Array.isArray(candidates) ? candidates : []).filter((item) => {
-    const itemSource = normalizeText(item.source).toLowerCase();
-    if (wanted === 'personal') return itemSource === 'personal' || itemSource === 'profile';
-    return itemSource === wanted;
-  });
-}
-
-function candidateKey(item = {}) {
-  return normalizeText(item.id || item.nodeId)
-    || normalizeText(`${item.scopeType || ''}|${item.userId || ''}|${item.groupId || ''}|${item.canonicalKey || canonicalizeText(item.text)}`);
-}
-
-function mergeCandidateLists(...groups) {
-  const byKey = new Map();
-  for (const group of groups) {
-    for (const item of Array.isArray(group) ? group : []) {
-      const key = candidateKey(item);
-      if (!key) continue;
-      const existing = byKey.get(key);
-      byKey.set(key, existing && Number(existing.score || 0) >= Number(item.score || 0)
-        ? { ...item, ...existing }
-        : { ...existing, ...item });
-    }
-  }
-  return Array.from(byKey.values());
-}
 
 function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default', options = {}) {
   const rewrites = Array.isArray(options.rewrites) ? options.rewrites : rewriteQuery(query, facet);
@@ -343,56 +137,6 @@ function facetSourceWeight(facet, source) {
   return Number(table[key] || 1);
 }
 
-function sourceLimit(source) {
-  if (source === 'recent') return 2;
-  if (source === 'profile') return 2;
-  if (source === 'style' || source === 'jargon') return 1;
-  if (source === 'journal') return 2;
-  return 3;
-}
-
-function sourceLimitForFacet(source, facet = 'default') {
-  const base = sourceLimit(source);
-  const normalizedFacet = normalizeText(facet).toLowerCase();
-  if (normalizedFacet === 'preference' || normalizedFacet === 'identity' || normalizedFacet === 'relationship') {
-    if (source === 'profile') return Math.max(base, 3);
-    if (source === 'personal') return Math.max(base, 3);
-    if (source === 'recent' || source === 'task' || source === 'journal') return Math.min(base, 1);
-  }
-  if (normalizedFacet === 'continuity') {
-    if (source === 'recent' || source === 'task' || source === 'journal') return Math.max(base, 3);
-    if (source === 'profile') return 1;
-  }
-  if (normalizedFacet === 'task') {
-    if (source === 'task') return Math.max(base, 4);
-    if (source === 'recent' || source === 'journal') return Math.max(base, 3);
-    if (source === 'profile') return 1;
-  }
-  if (normalizedFacet === 'journal') {
-    if (source === 'journal') return Math.max(base, 4);
-    if (source === 'profile') return 1;
-  }
-  return base;
-}
-
-function matchesFacetCandidate(facet, candidate = {}) {
-  const fieldKey = normalizeText(candidate.fieldKey || candidate.semanticSlot || candidate.type).toLowerCase();
-  const source = normalizeText(candidate.source).toLowerCase();
-  if (facet === 'preference') return ['preference_like', 'preference_dislike', 'like', 'dislike', 'hobby', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
-  if (facet === 'identity') return ['identity', 'fact', 'persona_summary_support', 'persona_impression_support'].includes(fieldKey);
-  if (facet === 'relationship') return ['relationship', 'relationship_tone', 'relationship_distance', 'relationship_salutation', 'relationship_reply_style', 'relationship_engagement', 'relationship_boundaries', 'style_pattern', 'persona_impression_support'].includes(fieldKey) || source === 'profile';
-  if (facet === 'continuity') return source === 'recent' || source === 'journal' || source === 'task';
-  if (facet === 'style') return ['style_pattern', 'style_avoid', 'group_jargon', 'bot_persona_tone', 'bot_persona_initiative', 'bot_persona_boundaries', 'bot_persona_playfulness', 'bot_persona_guardedness', 'bot_persona_verbosity', 'relationship_reply_style'].includes(fieldKey) || source === 'style' || source === 'jargon' || fieldKey === 'relationship';
-  if (facet === 'task') return source === 'task';
-  if (facet === 'group') return source === 'group';
-  if (facet === 'journal') return source === 'journal';
-  return true;
-}
-
-function semanticSlotForCandidate(candidate) {
-  return normalizeText(candidate.semanticSlot || candidate.type || '').toLowerCase() || 'fact';
-}
-
 function isJournalTargetDayCandidate(candidate = {}, targetDays = []) {
   if (!Array.isArray(targetDays) || targetDays.length === 0) return false;
   if (String(candidate.source || '').toLowerCase() !== 'journal') return false;
@@ -442,70 +186,6 @@ function ensureTargetJournalCandidates(items = [], allCandidates = [], targetDay
     });
   }
   return stableSortByScore((Array.isArray(items) ? items : []).concat(additions));
-}
-
-function protectStrongSemanticCandidates(items = [], topK = 8, options = {}) {
-  const list = Array.isArray(items) ? items : [];
-  if (!list.length) return list;
-  const threshold = getStrongSemanticThreshold(options);
-  const limit = Math.max(1, Math.min(5, Number(options.strongSemanticProtectLimit || config.MEMORY_STRONG_SEMANTIC_PROTECT_LIMIT || 2) || 2));
-  const protectedIds = new Set(
-    list
-      .filter((item) => Number(item.embedding || item.semantic || item.vectorScore || 0) >= threshold)
-      .sort((a, b) => Number(b.embedding || b.semantic || b.vectorScore || 0) - Number(a.embedding || a.semantic || a.vectorScore || 0))
-      .slice(0, Math.min(limit, Math.max(1, Number(topK) || 1)))
-      .map((item) => normalizeText(item.id))
-      .filter(Boolean)
-  );
-  if (!protectedIds.size) return list;
-  const boost = Math.max(0.04, Number(options.strongSemanticBoost || config.MEMORY_STRONG_SEMANTIC_BOOST || 0.18) || 0.18);
-  return list.map((item) => {
-    if (!protectedIds.has(normalizeText(item.id))) return item;
-    const selectionReason = appendSelectionReason(item.selectionReason, 'strong_semantic_protected');
-    return {
-      ...item,
-      score: Number(item.score || 0) + boost,
-      selectionReason,
-      scoreParts: {
-        ...(item.scoreParts || {}),
-        strongSemanticBoost: boost
-      },
-      diagnostics: {
-        ...(item.diagnostics || {}),
-        recall: buildRecallDiagnostics(item, selectionReason)
-      }
-    };
-  });
-}
-
-function boostJournalDaySummaryCompanions(items = [], options = {}) {
-  const list = Array.isArray(items) ? items : [];
-  if (!list.length) return list;
-  const threshold = getStrongSemanticThreshold(options);
-  const strongSegmentDays = new Set(list
-    .filter((item) => String(item.source || '').toLowerCase() === 'journal')
-    .filter((item) => String(item.type || '').includes('segment') || String(item.rollupLevel || '') === 'segment')
-    .filter((item) => Number(item.embedding || item.semantic || item.vectorScore || 0) >= threshold)
-    .map((item) => getJournalDocDay(item))
-    .filter(Boolean));
-  if (!strongSegmentDays.size) return list;
-  const boost = Math.max(0.04, Number(options.journalDaySummaryCompanionBoost || config.MEMORY_JOURNAL_DAY_SUMMARY_COMPANION_BOOST || 0.28) || 0.28);
-  return list.map((item) => {
-    if (String(item.source || '').toLowerCase() !== 'journal') return item;
-    const day = getJournalDocDay(item);
-    const isSegment = String(item.type || '').includes('segment') || String(item.rollupLevel || '') === 'segment';
-    if (!day || isSegment || !strongSegmentDays.has(day)) return item;
-    const selectionReason = appendSelectionReason(item.selectionReason, 'same_day_summary_companion');
-    return {
-      ...item,
-      score: Number(item.score || 0) + boost,
-      selectionReason,
-      scoreParts: {
-        ...(item.scoreParts || {}),
-        daySummaryCompanionBoost: boost
-      }
-    };
-  });
 }
 
 function appendRerankTail(rerankedHead = [], rerankTail = []) {
@@ -656,145 +336,6 @@ async function resolveQueryEmbedding(query = '', facet = 'default', options = {}
   const embedding = await requestEmbedding(rewrites.join('\n'));
   setCachedQueryEmbedding(cacheKey, embedding);
   return embedding;
-}
-
-function applyConflictResolution(items = []) {
-  const winners = new Map();
-  for (const item of stableSortByScore(items)) {
-    const slot = `${item.userId || ''}|${item.scopeType || ''}|${semanticSlotForCandidate(item)}|${item.canonicalKey || canonicalizeText(item.text)}`;
-    const existing = winners.get(slot);
-    if (!existing) {
-      winners.set(slot, item);
-      continue;
-    }
-    const existingRank = (existing.status === 'active' ? 2 : 1) + (existing.sourceKind === 'explicit' ? 2 : 0);
-    const currentRank = (item.status === 'active' ? 2 : 1) + (item.sourceKind === 'explicit' ? 2 : 0);
-    if (currentRank > existingRank || (currentRank === existingRank && Number(item.score || 0) > Number(existing.score || 0))) {
-      winners.set(slot, item);
-    }
-  }
-  return Array.from(winners.values()).filter((item, index, list) => {
-    const slot = semanticSlotForCandidate(item);
-    if (slot !== 'nickname_preference' && slot !== 'like' && slot !== 'dislike' && slot !== 'preference') {
-      return true;
-    }
-    const canonical = String(item.canonicalKey || canonicalizeText(item.text));
-    const sameKey = list.filter((candidate) => String(candidate.canonicalKey || canonicalizeText(candidate.text)) === canonical);
-    if (sameKey.length <= 1) return true;
-    const sorted = stableSortByScore(sameKey).sort((a, b) => {
-      const aRank = (a.status === 'active' ? 2 : 1) + (a.sourceKind === 'explicit' ? 2 : 0) + (String(a.type || '').toLowerCase() === 'dislike' ? 1 : 0);
-      const bRank = (b.status === 'active' ? 2 : 1) + (b.sourceKind === 'explicit' ? 2 : 0) + (String(b.type || '').toLowerCase() === 'dislike' ? 1 : 0);
-      if (bRank !== aRank) return bRank - aRank;
-      return Number(b.score || 0) - Number(a.score || 0);
-    });
-    return String(sorted[0]?.id || '') === String(item.id || '');
-  });
-}
-
-function diversify(items = [], topK = 8, options = {}) {
-  const selected = [];
-  const perSource = new Map();
-  const seenCanonical = new Set();
-  const selectedJournalDays = new Set();
-  const facet = normalizeText(options.facet || items.find((item) => item?.facet)?.facet || 'default').toLowerCase();
-  const ranked = boostJournalDaySummaryCompanions(
-    protectStrongSemanticCandidates(stableSortByScore(items), topK, options),
-    options
-  );
-  for (const item of stableSortByScore(ranked)) {
-    if (selected.length >= topK) break;
-    const canonical = String(item.canonicalKey || canonicalizeText(item.text));
-    if (!canonical || seenCanonical.has(canonical)) continue;
-    const source = String(item.source || 'personal');
-    if ((perSource.get(source) || 0) >= sourceLimitForFacet(source, facet)) continue;
-    if (source === 'journal') {
-      const day = getJournalDocDay(item);
-      const isSegment = String(item.type || '').includes('segment') || String(item.rollupLevel || '') === 'segment';
-      const isStrongSemanticSegment = isSegment
-        && Number(item.embedding || item.semantic || item.vectorScore || 0) >= getStrongSemanticThreshold(options);
-      const hasDaySummary = day && ranked.some((candidate) => (
-        getJournalDocDay(candidate) === day
-        && String(candidate.source || '') === 'journal'
-        && !String(candidate.type || '').includes('segment')
-        && String(candidate.rollupLevel || '') !== 'segment'
-      ));
-      if (isSegment && hasDaySummary && !selectedJournalDays.has(day) && !isStrongSemanticSegment) continue;
-      if (day && (!isSegment || isStrongSemanticSegment)) selectedJournalDays.add(day);
-    }
-    seenCanonical.add(canonical);
-    perSource.set(source, (perSource.get(source) || 0) + 1);
-    const selectionReason = appendSelectionReason(item.selectionReason, `facet_${facet || 'default'}_selected`);
-    selected.push({
-      ...item,
-      selectionReason,
-      diagnostics: {
-        ...(item.diagnostics || {}),
-        recall: buildRecallDiagnostics(item, selectionReason)
-      }
-    });
-  }
-  if (selected.length >= topK) return selected;
-  for (const item of stableSortByScore(ranked)) {
-    if (selected.length >= topK) break;
-    const canonical = String(item.canonicalKey || canonicalizeText(item.text));
-    if (seenCanonical.has(canonical)) continue;
-    seenCanonical.add(canonical);
-    const selectionReason = appendSelectionReason(item.selectionReason, 'backfill_selected');
-    selected.push({
-      ...item,
-      selectionReason,
-      diagnostics: {
-        ...(item.diagnostics || {}),
-        recall: buildRecallDiagnostics(item, selectionReason)
-      }
-    });
-  }
-  return selected;
-}
-
-function splitStrictWeak(items = [], strictCap = 6, weakCap = 3) {
-  const strictResults = [];
-  const weakResults = [];
-  for (const item of stableSortByScore(items)) {
-    if (item.evidenceTier === 'strict' && strictResults.length < strictCap) {
-      strictResults.push(item);
-      continue;
-    }
-    if (item.evidenceTier !== 'strict' && weakResults.length < weakCap) {
-      weakResults.push(item);
-    }
-  }
-  return { strictResults, weakResults };
-}
-
-function diagnoseNoVisibleVectorCandidates(rows = [], candidates = [], context = {}, facet = 'default') {
-  const rawRows = Array.isArray(rows) ? rows : [];
-  if (rawRows.length === 0) return '';
-  const localById = new Map((Array.isArray(candidates) ? candidates : [])
-    .map((item) => [normalizeText(item.id || item.nodeId), item])
-    .filter(([key]) => key));
-  const filter = context.filter || {};
-  let missingLocal = 0;
-  let scopeFiltered = 0;
-  let facetFiltered = 0;
-  for (const row of rawRows) {
-    if (!rowPassesMemoryFilter(row, filter)) {
-      scopeFiltered += 1;
-      continue;
-    }
-    const local = localById.get(normalizeText(row.nodeId || row.id));
-    if (!local) {
-      missingLocal += 1;
-      continue;
-    }
-    if (!matchesFacetCandidate(facet, local)) {
-      facetFiltered += 1;
-    }
-  }
-  if (scopeFiltered >= rawRows.length) return 'no_visible_candidates_scope_filtered';
-  if (facetFiltered > 0 && facetFiltered + scopeFiltered + missingLocal >= rawRows.length) return 'no_visible_candidates_facet_filtered';
-  if (missingLocal > 0 && missingLocal + scopeFiltered >= rawRows.length) return 'no_visible_candidates_missing_local';
-  return 'no_visible_candidates';
 }
 
 async function queryMemory(input = {}) {

@@ -1,14 +1,26 @@
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
 const config = require('../config');
+const {
+  compactProcess,
+  findProcessByPid,
+  isProcessAliveDefault,
+  listProcesses,
+  listProcessesDefault,
+  normalizePid,
+  processMatchesMain,
+  processMatchesPostReplyWorker,
+  processMatchesSubagent
+} = require('./runtimeStatusDiagnostics/processes');
+const {
+  buildBackgroundTaskSummary,
+  buildLangGraphV2StoreSummary,
+  buildPostReplyQueueSummary
+} = require('./runtimeStatusDiagnostics/stores');
 
 const SCHEMA_VERSION = 'runtime_status_diagnostic_v1';
-const ACTIVE_BACKGROUND_STATUSES = new Set(['queued', 'running', 'reviewing']);
-const POST_REPLY_STATUSES = ['queued', 'processing', 'failed', 'done'];
 const DEFAULT_BACKGROUND_TASK_STALE_MS = 30 * 60 * 1000;
 const DEFAULT_LANGGRAPH_V2_CHECKPOINT_STALE_MS = 30 * 60 * 1000;
-const LANGGRAPH_V2_ACTIVE_CHECKPOINT_STATUSES = new Set(['running', 'queued', 'reviewing']);
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -17,11 +29,6 @@ function normalizeText(value = '') {
 function normalizeNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
-}
-
-function normalizePid(value) {
-  const pid = Math.floor(normalizeNumber(value, 0));
-  return pid > 0 ? pid : 0;
 }
 
 function normalizePath(value = '') {
@@ -85,196 +92,6 @@ function safeReadDir(dirPath = '') {
   } catch (_) {
     return [];
   }
-}
-
-function isProcessAliveDefault(pid = 0) {
-  const targetPid = normalizePid(pid);
-  if (!targetPid) return false;
-  try {
-    process.kill(targetPid, 0);
-    return true;
-  } catch (error) {
-    return normalizeText(error?.code).toUpperCase() === 'EPERM';
-  }
-}
-
-function parseWindowsProcessList(raw = '') {
-  const text = normalizeText(raw);
-  if (!text) return [];
-  let parsed = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch (_) {
-    return [];
-  }
-  const rows = Array.isArray(parsed) ? parsed : [parsed];
-  return rows.map((row) => ({
-    pid: normalizePid(row.ProcessId),
-    ppid: normalizePid(row.ParentProcessId),
-    name: normalizeText(row.Name),
-    commandLine: normalizeText(row.CommandLine)
-  })).filter((row) => row.pid);
-}
-
-function parseWindowsGetProcessList(raw = '') {
-  const text = normalizeText(raw);
-  if (!text) return [];
-  let parsed = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch (_) {
-    return [];
-  }
-  const rows = Array.isArray(parsed) ? parsed : [parsed];
-  return rows.map((row) => ({
-    pid: normalizePid(row.Id),
-    ppid: 0,
-    name: normalizeText(row.ProcessName || row.Name),
-    commandLine: normalizeText(row.Path)
-  })).filter((row) => row.pid);
-}
-
-function parsePosixProcessList(raw = '') {
-  return String(raw || '').split(/\r?\n/).map((line) => {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/);
-    if (!match) return null;
-    return {
-      pid: normalizePid(match[1]),
-      ppid: normalizePid(match[2]),
-      name: normalizeText(match[3]),
-      commandLine: normalizeText(match[4])
-    };
-  }).filter(Boolean);
-}
-
-function listProcessesDefault() {
-  try {
-    if (process.platform === 'win32') {
-      const command = "Get-CimInstance Win32_Process -Filter \"Name = 'node.exe' OR Name = 'powershell.exe' OR Name = 'pwsh.exe' OR Name = 'cmd.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress";
-      const raw = execFileSync('powershell.exe', [
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        command
-      ], {
-        encoding: 'utf8',
-        timeout: 5000,
-        windowsHide: true
-      });
-      const cimRows = parseWindowsProcessList(raw);
-      if (cimRows.length > 0) return cimRows;
-
-      const fallbackRaw = execFileSync('powershell.exe', [
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        "Get-Process node,powershell,pwsh,cmd -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path | ConvertTo-Json -Compress"
-      ], {
-        encoding: 'utf8',
-        timeout: 5000,
-        windowsHide: true
-      });
-      return parseWindowsGetProcessList(fallbackRaw);
-    }
-
-    const raw = execFileSync('ps', ['-eo', 'pid=,ppid=,comm=,args='], {
-      encoding: 'utf8',
-      timeout: 5000
-    });
-    return parsePosixProcessList(raw);
-  } catch (_) {
-    return [];
-  }
-}
-
-function listProcesses(options = {}) {
-  if (typeof options.listProcesses === 'function') {
-    return options.listProcesses().map((row) => ({
-      pid: normalizePid(row.pid ?? row.ProcessId),
-      ppid: normalizePid(row.ppid ?? row.ParentProcessId),
-      name: normalizeText(row.name ?? row.Name),
-      commandLine: normalizeText(row.commandLine ?? row.CommandLine)
-    })).filter((row) => row.pid);
-  }
-  return listProcessesDefault();
-}
-
-function findProcessByPid(processes = [], pid = 0) {
-  const targetPid = normalizePid(pid);
-  if (!targetPid) return null;
-  return processes.find((proc) => normalizePid(proc.pid) === targetPid) || null;
-}
-
-function processMatchesMain(proc = {}) {
-  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  if (shouldExcludeOpenclawGatewayProcess(proc)) return false;
-  return /(^|[\s/])index\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
-}
-
-function processMatchesPostReplyWorker(proc = {}) {
-  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  return /(^|[\s/])post-reply-worker\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
-}
-
-function processMatchesSubagent(proc = {}) {
-  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
-  if (!cmd) return false;
-  if (shouldExcludeOpenclawGatewayProcess(proc)) return false;
-  if (!processMatchesProjectRoot(proc)) return false;
-  return cmd.includes('subagent-command-worker.js')
-    || cmd.includes('run-claude.ps1')
-    || cmd.includes('subagent');
-}
-
-function getDiagnosticProjectRoot() {
-  return path.resolve(__dirname, '..').replace(/\\/g, '/').toLowerCase();
-}
-
-function extractKnownProjectScriptTokens(cmd = '') {
-  const tokens = [];
-  const pattern = /"([^"]*(?:index|post-reply-worker|subagent-command-worker)\.js)"|'([^']*(?:index|post-reply-worker|subagent-command-worker)\.js)'|([^\s"]*(?:index|post-reply-worker|subagent-command-worker)\.js)/ig;
-  let match = pattern.exec(cmd);
-  while (match) {
-    tokens.push(normalizeText(match[1] || match[2] || match[3]).replace(/\\/g, '/').toLowerCase());
-    match = pattern.exec(cmd);
-  }
-  return tokens.filter(Boolean);
-}
-
-function isAbsoluteLikePath(value = '') {
-  return /^[a-z]:\//i.test(value) || value.startsWith('/');
-}
-
-function processMatchesProjectRoot(proc = {}) {
-  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
-  if (!cmd) return false;
-  const root = getDiagnosticProjectRoot();
-  const rootWithSlash = root.endsWith('/') ? root : `${root}/`;
-  if (cmd.includes(rootWithSlash)) return true;
-
-  const scriptTokens = extractKnownProjectScriptTokens(cmd);
-  if (scriptTokens.length > 0) {
-    return scriptTokens.some((token) => !isAbsoluteLikePath(token) || token.includes(rootWithSlash));
-  }
-  return true;
-}
-
-function shouldExcludeOpenclawGatewayProcess(proc = {}) {
-  if (config.DIAGNOSTICS_EXCLUDE_OPENCLAW_GATEWAY === false) return false;
-  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
-  return cmd.includes('/openclaw/') && /\bgateway\b/.test(cmd);
-}
-
-function compactProcess(proc = null) {
-  if (!proc) return null;
-  return {
-    pid: normalizePid(proc.pid),
-    ppid: normalizePid(proc.ppid),
-    name: normalizeText(proc.name),
-    commandLine: normalizeText(proc.commandLine).slice(0, 500)
-  };
 }
 
 function buildPidFileStatus({
@@ -370,217 +187,6 @@ function buildCreateAgentRuntimeState({ filePath, isProcessAlive, now }) {
     ageMs,
     mtimeMs: stat.mtimeMs,
     size: stat.size
-  };
-}
-
-function readJsonFilesFromDir(dirPath = '') {
-  return safeReadDir(dirPath)
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-    .map((entry) => {
-      const filePath = path.join(dirPath, entry.name);
-      const parsed = safeReadJson(filePath, null);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? { filePath, data: parsed }
-        : null;
-    })
-    .filter(Boolean);
-}
-
-function readJsonStoreFiles(dirPath = '') {
-  const target = normalizePath(dirPath);
-  return safeReadDir(target)
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-    .map((entry) => {
-      const filePath = path.join(target, entry.name);
-      const stat = safeStat(filePath);
-      const data = safeReadJson(filePath, null);
-      return {
-        filePath,
-        file: entry.name,
-        mtimeMs: stat.mtimeMs,
-        size: stat.size,
-        valid: Boolean(data && typeof data === 'object'),
-        data
-      };
-    });
-}
-
-function countByValue(items = [], getValue = () => '') {
-  const counts = {};
-  for (const item of items) {
-    const key = normalizeText(getValue(item) || 'unknown') || 'unknown';
-    counts[key] = (counts[key] || 0) + 1;
-  }
-  return counts;
-}
-
-function sumStoreBytes(files = []) {
-  return files.reduce((total, file) => total + Math.max(0, normalizeNumber(file.size, 0)), 0);
-}
-
-function buildLangGraphV2StoreSummary({
-  checkpointDir,
-  eventDir,
-  now,
-  staleCheckpointMs
-}) {
-  const normalizedCheckpointDir = normalizePath(checkpointDir);
-  const normalizedEventDir = normalizePath(eventDir);
-  const checkpointFiles = readJsonStoreFiles(normalizedCheckpointDir);
-  const eventFiles = readJsonStoreFiles(normalizedEventDir);
-  const checkpoints = checkpointFiles.map((file) => {
-    const data = file.valid && !Array.isArray(file.data) ? file.data : {};
-    const updatedAtMs = normalizeNumber(data.updatedAt, file.mtimeMs);
-    const status = normalizeText(data.status || 'unknown') || 'unknown';
-    const ageMs = updatedAtMs > 0 ? Math.max(0, now - updatedAtMs) : 0;
-    const active = LANGGRAPH_V2_ACTIVE_CHECKPOINT_STATUSES.has(status);
-    return {
-      threadId: normalizeText(data.threadId || path.basename(file.file, '.json')),
-      file: file.file,
-      status,
-      node: normalizeText(data.node),
-      updatedAt: updatedAtMs > 0 ? isoFromMs(updatedAtMs) : '',
-      ageMs,
-      size: file.size,
-      valid: file.valid && !Array.isArray(file.data),
-      active,
-      stale: active && ageMs > staleCheckpointMs
-    };
-  });
-  const eventSummaries = eventFiles.map((file) => {
-    const events = Array.isArray(file.data) ? file.data : [];
-    const latestTs = events.reduce((maxTs, event) => {
-      const ts = normalizeNumber(event?.ts, 0);
-      return ts > maxTs ? ts : maxTs;
-    }, 0);
-    const updatedAtMs = latestTs || file.mtimeMs;
-    return {
-      threadId: path.basename(file.file, '.json'),
-      file: file.file,
-      eventCount: events.length,
-      valid: Array.isArray(file.data),
-      latestEventAt: updatedAtMs > 0 ? isoFromMs(updatedAtMs) : '',
-      ageMs: updatedAtMs > 0 ? Math.max(0, now - updatedAtMs) : 0,
-      size: file.size,
-      countsByType: countByValue(events, (event) => event?.type)
-    };
-  });
-  const staleRunningCheckpoints = checkpoints
-    .filter((item) => item.stale)
-    .sort((a, b) => b.ageMs - a.ageMs)
-    .slice(0, 20);
-  return {
-    checkpointDir: normalizedCheckpointDir,
-    eventDir: normalizedEventDir,
-    checkpointDirExists: safeStat(normalizedCheckpointDir).exists,
-    eventDirExists: safeStat(normalizedEventDir).exists,
-    checkpointCount: checkpoints.length,
-    eventFileCount: eventSummaries.length,
-    totalCheckpointBytes: sumStoreBytes(checkpointFiles),
-    totalEventBytes: sumStoreBytes(eventFiles),
-    countsByCheckpointStatus: countByValue(checkpoints, (item) => item.status),
-    activeCheckpointCount: checkpoints.filter((item) => item.active).length,
-    staleRunningCheckpointCount: staleRunningCheckpoints.length,
-    staleCheckpointMs,
-    staleRunningCheckpoints,
-    latestCheckpoints: checkpoints
-      .slice()
-      .sort((a, b) => a.ageMs - b.ageMs)
-      .slice(0, 10),
-    latestEventFiles: eventSummaries
-      .slice()
-      .sort((a, b) => a.ageMs - b.ageMs)
-      .slice(0, 10),
-    invalidCheckpointCount: checkpointFiles.filter((file) => !(file.valid && !Array.isArray(file.data))).length,
-    invalidEventFileCount: eventFiles.filter((file) => !Array.isArray(file.data)).length
-  };
-}
-
-function buildBackgroundTaskSummary({ storeDir, now, staleMs }) {
-  const target = normalizePath(storeDir);
-  const tasks = readJsonFilesFromDir(target).map(({ filePath, data }) => {
-    const status = normalizeText(data.status || 'unknown') || 'unknown';
-    const updatedAtText = normalizeText(data.updated_at || data.updatedAt || data.started_at || data.created_at);
-    const updatedAtMs = Date.parse(updatedAtText);
-    const ageMs = Number.isFinite(updatedAtMs) ? Math.max(0, now - updatedAtMs) : 0;
-    const active = ACTIVE_BACKGROUND_STATUSES.has(status);
-    return {
-      id: normalizeText(data.id),
-      file: path.basename(filePath),
-      status,
-      stage: normalizeText(data.stage),
-      executorType: normalizeText(data.executor_type || data.executorType),
-      sessionKey: normalizeText(data.session_key || data.sessionKey),
-      groupId: normalizeText(data.group_id || data.groupId),
-      userId: normalizeText(data.user_id || data.userId),
-      updatedAt: updatedAtText,
-      ageMs,
-      active,
-      stale: active && ageMs > staleMs,
-      error: normalizeText(data.error).slice(0, 240)
-    };
-  });
-  const countsByStatus = {};
-  for (const task of tasks) {
-    countsByStatus[task.status] = (countsByStatus[task.status] || 0) + 1;
-  }
-  const activeTasks = tasks
-    .filter((task) => task.active)
-    .sort((a, b) => b.ageMs - a.ageMs)
-    .slice(0, 20);
-  const staleActiveTasks = activeTasks.filter((task) => task.stale);
-  return {
-    storeDir: target,
-    exists: safeStat(target).exists,
-    total: tasks.length,
-    countsByStatus,
-    activeCount: activeTasks.length,
-    staleActiveCount: staleActiveTasks.length,
-    staleMs,
-    activeTasks,
-    latestTasks: tasks
-      .slice()
-      .sort((a, b) => a.ageMs - b.ageMs)
-      .slice(0, 10)
-  };
-}
-
-function buildPostReplyQueueSummary({ queueDir, now, staleProcessingMs }) {
-  const target = normalizePath(queueDir);
-  const counts = {};
-  const samples = {};
-  const staleProcessingJobs = [];
-  for (const status of POST_REPLY_STATUSES) {
-    const dir = path.join(target, status);
-    const jobs = readJsonFilesFromDir(dir).map(({ filePath, data }) => {
-      const updatedAtText = normalizeText(data.updatedAt || data.updated_at || data.createdAt || data.created_at);
-      const updatedAtMs = Date.parse(updatedAtText);
-      const ageMs = Number.isFinite(updatedAtMs) ? Math.max(0, now - updatedAtMs) : 0;
-      return {
-        jobId: normalizeText(data.jobId || data.id),
-        file: path.basename(filePath),
-        status,
-        phase: normalizeText(data.phase),
-        userId: normalizeText(data.userId || data.user_id),
-        attempt: Math.max(0, normalizeNumber(data.attempt, 0)),
-        updatedAt: updatedAtText,
-        ageMs,
-        stale: status === 'processing' && ageMs > staleProcessingMs,
-        lastError: normalizeText(data.lastError || data.error).slice(0, 240)
-      };
-    }).sort((a, b) => a.ageMs - b.ageMs);
-    counts[status] = jobs.length;
-    samples[status] = jobs.slice(0, status === 'done' ? 3 : 5);
-    staleProcessingJobs.push(...jobs.filter((job) => job.stale));
-  }
-  return {
-    queueDir: target,
-    exists: safeStat(target).exists,
-    counts,
-    staleProcessingMs,
-    staleProcessingCount: staleProcessingJobs.length,
-    staleProcessingJobs,
-    samples
   };
 }
 
@@ -699,18 +305,27 @@ function buildRuntimeStatusDiagnostic(options = {}) {
   const backgroundTasks = buildBackgroundTaskSummary({
     storeDir: config.BACKGROUND_TASK_STORE_DIR,
     now,
-    staleMs: backgroundTaskStaleMs
+    staleMs: backgroundTaskStaleMs,
+    safeReadDir,
+    safeReadJson,
+    safeStat
   });
   const langGraphV2Store = buildLangGraphV2StoreSummary({
     checkpointDir: config.LANGGRAPH_V2_CHECKPOINT_DIR,
     eventDir: config.LANGGRAPH_V2_EVENT_DIR,
     now,
-    staleCheckpointMs: langGraphV2CheckpointStaleMs
+    staleCheckpointMs: langGraphV2CheckpointStaleMs,
+    safeReadDir,
+    safeReadJson,
+    safeStat
   });
   const postReplyQueue = buildPostReplyQueueSummary({
     queueDir: config.POST_REPLY_QUEUE_DIR,
     now,
-    staleProcessingMs: Math.max(1000, normalizeNumber(config.POST_REPLY_WORKER_STALE_PROCESSING_MS, 5 * 60 * 1000))
+    staleProcessingMs: Math.max(1000, normalizeNumber(config.POST_REPLY_WORKER_STALE_PROCESSING_MS, 5 * 60 * 1000)),
+    safeReadDir,
+    safeReadJson,
+    safeStat
   });
   const subagents = buildSubagentSummary(processes);
   const journalHealth = (() => {

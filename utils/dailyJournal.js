@@ -65,6 +65,8 @@ const {
   appendJsonLine,
   readJsonLines
 } = require('./dailyJournal/jsonLines');
+const { createDailyJournalRetrieval } = require('./dailyJournal/retrieval');
+const { createDailyJournalRollupMaintenance } = require('./dailyJournal/rollupMaintenance');
 
 async function syncEpisodeMemory(userId, text, options = {}) {
   const uid = String(userId || '').trim();
@@ -240,441 +242,73 @@ function collectDailySummaryItems(userId, days = []) {
     .sort((a, b) => a.day.localeCompare(b.day));
 }
 
-async function summarizeDerivedRollup(userId, payload = {}, options = {}) {
-  const uid = String(userId || '').trim();
-  const kind = String(payload.kind || '').trim();
-  const sourceText = String(payload.sourceText || '').trim();
-  const maxChars = Math.max(40, Number(payload.maxChars) || 40);
-  if (!uid || !kind || !sourceText) return '';
+const {
+  maintainDailyJournalRollups,
+  summarizeDerivedRollup
+} = createDailyJournalRollupMaintenance({
+  atomicWriteText,
+  buildFourDayRollupPlans,
+  buildMonthlyRollupPlans,
+  buildUserSnapshot,
+  config,
+  extractMessageContent,
+  fs,
+  getFourDayRollupFilePath,
+  getMemoryApiKey,
+  getMemoryChatCompletionsUrl,
+  getMemoryModelName,
+  getMonthlyRollupFilePath,
+  getSummaryFilePath,
+  getYearMonthFromDay,
+  listFourDayRollups,
+  listUserSummaryDays,
+  postWithRetry,
+  safeReadText,
+  shiftDate,
+  strictClampText,
+  syncEpisodeMemory,
+  updateJournalIndex,
+  updateRollupIndex
+});
 
-  const customSummarizer = kind === 'monthly_rollup'
-    ? options.monthlySummarizer
-    : options.fourDaySummarizer;
-  if (typeof customSummarizer === 'function') {
-    return strictClampText(await customSummarizer(payload), maxChars);
-  }
-
-  const prompt = kind === 'monthly_rollup'
-    ? [
-      'You compress seven higher-level 4-day memory rollups into one monthly memory note.',
-      'Keep only durable priorities, recurring themes, important progress, blockers, emotional patterns, and commitments worth recalling later.',
-      'Drop filler and repetition.',
-      'Return plain text only.',
-      `Keep the output within ${maxChars} characters.`
-    ].join('\n')
-    : [
-      'You compress four daily summaries into one durable higher-level memory note.',
-      'Keep only durable preferences, decisions, progress, blockers, emotional shifts, and follow-up topics worth carrying forward.',
-      'Drop filler and repetition.',
-      'Return plain text only.',
-      `Keep the output within ${maxChars} characters.`
-    ].join('\n');
-
-  const resp = await postWithRetry(
-    getMemoryChatCompletionsUrl(),
-    {
-      model: getMemoryModelName(),
-      temperature: 0.2,
-      top_p: 0.9,
-      messages: [
-        { role: 'system', content: prompt },
-        {
-          role: 'system',
-          content: `User snapshot:\n${buildUserSnapshot(uid)}`
-        },
-        {
-          role: 'user',
-          content: sourceText
-        }
-      ],
-      max_tokens: Math.max(120, Math.min(800, maxChars * 2)),
-      stream: false
-    },
-    Math.max(0, Number(config.AI_RETRIES) || 0),
-    getMemoryApiKey()
-  );
-
-  const msg = extractMessageContent(resp);
-  return strictClampText(String(msg?.content || msg?.text || '').trim(), maxChars);
-}
-
-async function maintainDailyJournalRollups(userId, options = {}) {
-  const uid = String(userId || '').trim();
-  if (!uid || !config.DAILY_JOURNAL_ENABLED) {
-    return {
-      userId: uid,
-      fourDayCreated: 0,
-      monthlyCreated: 0
-    };
-  }
-
-  let fourDayCreated = 0;
-  let monthlyCreated = 0;
-
-  if (config.DAILY_JOURNAL_4DAY_ENABLED) {
-    const fourDayPlans = buildFourDayRollupPlans(listUserSummaryDays(uid));
-    for (const plan of fourDayPlans) {
-      const filePath = getFourDayRollupFilePath(uid, plan.startDay, plan.endDay);
-      if (fs.existsSync(filePath)) continue;
-
-      const sourceItems = plan.days
-        .map((day) => ({ day, text: safeReadText(getSummaryFilePath(uid, day), '').trim() }))
-        .filter((item) => item.text);
-      if (sourceItems.length !== 4) continue;
-
-      const sourceText = sourceItems
-        .map((item) => `[${item.day}]\n${item.text}`)
-        .join('\n\n');
-      const summary = await summarizeDerivedRollup(uid, {
-        kind: 'four_day_rollup',
-        startDay: plan.startDay,
-        endDay: plan.endDay,
-        days: plan.days,
-        sourceItems,
-        sourceText,
-        maxChars: config.DAILY_JOURNAL_4DAY_MAX_CHARS
-      }, options);
-      if (!summary) continue;
-
-      atomicWriteText(filePath, `${summary}\n`);
-      updateJournalIndex(uid, (index) => ({
-        ...index,
-        fourDayRollups: [
-          ...index.fourDayRollups.filter((item) => !(item.startDay === plan.startDay && item.endDay === plan.endDay)),
-          {
-            startDay: plan.startDay,
-            endDay: plan.endDay,
-            yearMonth: getYearMonthFromDay(plan.endDay),
-            filePath
-          }
-        ]
-      }));
-      updateRollupIndex(uid, (index) => ({
-        ...index,
-        fourDay: [
-          ...(index.fourDay || []).filter((item) => !(item.startDay === plan.startDay && item.endDay === plan.endDay)),
-          {
-            startDay: plan.startDay,
-            endDay: plan.endDay,
-            yearMonth: getYearMonthFromDay(plan.endDay),
-            sessionKeys: plan.days.flatMap((day) => (
-              Array.isArray(index.daily?.[day]?.sessionKeys) ? index.daily[day].sessionKeys : []
-            )).filter(Boolean),
-            topics: plan.days.flatMap((day) => (
-              Array.isArray(index.daily?.[day]?.topics) ? index.daily[day].topics : []
-            )).filter(Boolean)
-          }
-        ]
-      }));
-      await syncEpisodeMemory(uid, summary, {
-        source: 'daily_journal_rollup',
-        rollupLevel: '4day',
-        episodeDay: plan.endDay,
-        startDay: plan.startDay,
-        endDay: plan.endDay,
-        yearMonth: getYearMonthFromDay(plan.endDay),
-        sourceFile: filePath,
-        textKind: 'journal_4day_rollup',
-        maxChars: config.DAILY_JOURNAL_4DAY_MAX_CHARS,
-        conflictKeys: plan.days.map((day) => `journal|${uid}|daily|${day}`),
-        coveredByRollups: ['4day']
-      });
-      fourDayCreated += 1;
-    }
-  }
-
-  if (config.DAILY_JOURNAL_MONTHLY_ENABLED) {
-    const monthlyPlans = buildMonthlyRollupPlans(listFourDayRollups(uid));
-    for (const plan of monthlyPlans) {
-      if (!plan.yearMonth) continue;
-      const filePath = getMonthlyRollupFilePath(uid, plan.yearMonth, plan.part);
-      if (fs.existsSync(filePath)) continue;
-
-      const sourceText = plan.items
-        .map((item) => `[${item.startDay}..${item.endDay}]\n${item.text}`)
-        .join('\n\n');
-      const summary = await summarizeDerivedRollup(uid, {
-        kind: 'monthly_rollup',
-        yearMonth: plan.yearMonth,
-        part: plan.part,
-        startDay: plan.startDay,
-        endDay: plan.endDay,
-        items: plan.items,
-        sourceText,
-        maxChars: config.DAILY_JOURNAL_MONTHLY_MAX_CHARS
-      }, options);
-      if (!summary) continue;
-
-      atomicWriteText(filePath, `${summary}\n`);
-      updateJournalIndex(uid, (index) => ({
-        ...index,
-        monthlyRollups: [
-          ...index.monthlyRollups.filter((item) => !(item.yearMonth === plan.yearMonth && Number(item.part || 0) === Number(plan.part || 0))),
-          {
-            yearMonth: plan.yearMonth,
-            part: plan.part,
-            filePath
-          }
-        ]
-      }));
-      updateRollupIndex(uid, (index) => ({
-        ...index,
-        monthly: [
-          ...(index.monthly || []).filter((item) => !(item.yearMonth === plan.yearMonth && Number(item.part || 0) === Number(plan.part || 0))),
-          {
-            yearMonth: plan.yearMonth,
-            part: plan.part,
-            startDay: plan.startDay,
-            endDay: plan.endDay,
-            sessionKeys: plan.items.flatMap((item) => {
-              const matched = (index.fourDay || []).find((row) => row.startDay === item.startDay && row.endDay === item.endDay);
-              return Array.isArray(matched?.sessionKeys) ? matched.sessionKeys : [];
-            }).filter(Boolean),
-            topics: plan.items.flatMap((item) => {
-              const matched = (index.fourDay || []).find((row) => row.startDay === item.startDay && row.endDay === item.endDay);
-              return Array.isArray(matched?.topics) ? matched.topics : [];
-            }).filter(Boolean)
-          }
-        ]
-      }));
-      await syncEpisodeMemory(uid, summary, {
-        source: 'daily_journal_rollup',
-        rollupLevel: 'monthly',
-        episodeDay: plan.endDay,
-        startDay: plan.startDay,
-        endDay: plan.endDay,
-        yearMonth: plan.yearMonth,
-        part: plan.part,
-        sourceFile: filePath,
-        textKind: 'journal_monthly_rollup',
-        maxChars: config.DAILY_JOURNAL_MONTHLY_MAX_CHARS,
-        conflictKeys: plan.items.flatMap((item) => {
-          const keys = [`journal|${uid}|4day|${item.endDay}||${item.startDay}|${item.endDay}`];
-          const range = [];
-          let current = String(item.startDay || '').trim();
-          while (current && current <= item.endDay) {
-            range.push(`journal|${uid}|daily|${current}`);
-            if (current === item.endDay) break;
-            current = shiftDate(current, 1);
-          }
-          return keys.concat(range);
-        }),
-        coveredByRollups: ['monthly']
-      });
-      monthlyCreated += 1;
-    }
-  }
-
-  return {
-    userId: uid,
-    fourDayCreated,
-    monthlyCreated
-  };
-}
-
-function buildEmptyRetrievalBundle(options = {}) {
-  const byLayer = {
-    daily: [],
-    fourDay: [],
-    monthly: []
-  };
-  if (options.includeActiveRaw) byLayer.activeRaw = [];
-  const stats = {
-    dailyCount: 0,
-    fourDayCount: 0,
-    monthlyCount: 0,
-    totalChars: 0
-  };
-  if (options.includeActiveRaw) stats.activeRawCount = 0;
-  return {
-    text: '',
-    items: [],
-    byLayer,
-    continuity: {
-      sameSession: [],
-      sameTopic: []
-    },
-    query: {
-      lookbackDays: Math.max(1, Number(options.lookbackDays) || Number(config.DAILY_JOURNAL_LOOKBACK_DAYS) || 2),
-      maxFourDayFiles: Math.max(0, Number(options.maxFourDayFiles) || Number(config.DAILY_JOURNAL_4DAY_PROMPT_MAX_FILES) || 0),
-      maxMonthlyFiles: Math.max(0, Number(options.maxMonthlyFiles) || Number(config.DAILY_JOURNAL_MONTHLY_PROMPT_MAX_FILES) || 0),
-      timestamp: options.timestamp ?? null,
-      day: options.day || '',
-      yearMonth: options.yearMonth || ''
-    },
-    stats
-  };
-}
-
-function buildActiveRawJournalItem(userId, day, options = {}) {
-  const uid = String(userId || '').trim();
-  if (!uid || !isValidDayString(day)) return null;
-  const rawEntries = parseJournalEntries(safeReadText(getJournalFilePath(uid, day), ''));
-  if (rawEntries.length === 0) return null;
-
-  const maxEntries = Math.max(1, Number(options.activeRawMaxEntries) || Number(config.DAILY_JOURNAL_ACTIVE_RAW_MAX_ENTRIES) || 8);
-  const sessionKey = String(options.sessionKey || '').trim();
-  const sidecars = readEntrySidecar(uid, day);
-  const alignedSidecars = sidecars.length >= rawEntries.length
-    ? sidecars.slice(-rawEntries.length)
-    : Array.from({ length: rawEntries.length - sidecars.length }, () => null).concat(sidecars);
-  const merged = rawEntries.map((entry, index) => {
-    const sidecar = alignedSidecars[index] && typeof alignedSidecars[index] === 'object'
-      ? alignedSidecars[index]
-      : {};
-    return {
-      time: entry.time,
-      user: entry.user,
-      assistant: entry.assistant,
-      ts: String(sidecar.ts || '').trim(),
-      sessionKey: String(sidecar.sessionKey || '').trim(),
-      source: 'journal_active_raw'
-    };
-  });
-
-  const sessionEntries = sessionKey
-    ? merged.filter((entry) => entry.sessionKey === sessionKey).slice(-maxEntries)
-    : [];
-  const selectedKeys = new Set(sessionEntries.map((entry) => `${entry.ts}|${entry.time}|${entry.user}|${entry.assistant}`));
-  const backfillEntries = merged
-    .filter((entry) => !selectedKeys.has(`${entry.ts}|${entry.time}|${entry.user}|${entry.assistant}`))
-    .slice(-Math.max(0, maxEntries - sessionEntries.length));
-  const selected = sessionEntries.concat(backfillEntries).slice(0, maxEntries);
-  const text = strictClampText(
-    formatJournalEntries(selected),
-    Math.max(600, Number(config.MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS || 160) * 12)
-  );
-  if (!text) return null;
-  return {
-    kind: 'active_raw',
-    day,
-    text,
-    entries: selected,
-    source: 'journal_active_raw'
-  };
-}
-
-function getDailyJournalRetrievalBundle(userId, options = {}) {
-  const startedAt = nowMs();
-  const uid = String(userId || '').trim();
-  if (!uid || !config.DAILY_JOURNAL_ENABLED) {
-    return buildEmptyRetrievalBundle(options);
-  }
-
-  const lookbackDays = Math.max(1, Number(options.lookbackDays || options.dailyLookbackDays) || Number(config.DAILY_JOURNAL_LOOKBACK_DAYS) || 2);
-  const maxFourDayFiles = Math.max(0, Number(options.maxFourDayFiles) || Number(config.DAILY_JOURNAL_4DAY_PROMPT_MAX_FILES) || 0);
-  const maxMonthlyFiles = Math.max(0, Number(options.maxMonthlyFiles) || Number(config.DAILY_JOURNAL_MONTHLY_PROMPT_MAX_FILES) || 0);
-  const targetDay = normalizeTimestampToDay(options.timestamp);
-  const targetYearMonth = normalizeYearMonth(options.yearMonth);
-  const includeActiveRaw = Boolean(options.includeActiveRaw);
-  const activeRawDay = targetDay || formatDateInTz(new Date(), config.TIMEZONE);
-
-  let activeRawItems = [];
-  let dailyItems = [];
-  let fourDayItems = [];
-  let monthlyItems = [];
-
-  if (targetYearMonth) {
-    monthlyItems = listMonthlyRollups(uid).filter((item) => item.yearMonth === targetYearMonth);
-  } else if (targetDay) {
-    const dailyItem = getDailySummaryItem(uid, targetDay);
-    if (dailyItem) dailyItems.push(dailyItem);
-
-    if (config.DAILY_JOURNAL_4DAY_ENABLED) {
-      const hit = listFourDayRollups(uid).find((item) => item.startDay <= targetDay && item.endDay >= targetDay);
-      if (hit) fourDayItems.push(hit);
-    }
-
-    if (config.DAILY_JOURNAL_MONTHLY_ENABLED && maxMonthlyFiles > 0) {
-      monthlyItems = selectMostRecentItems(
-        listMonthlyRollups(uid).filter((item) => item.yearMonth === getYearMonthFromDay(targetDay)),
-        maxMonthlyFiles,
-        compareMonthlyRollups
-      );
-    }
-  } else {
-    const today = formatDateInTz(new Date(), config.TIMEZONE);
-    const days = [];
-    for (let i = 0; i < lookbackDays; i += 1) {
-      days.push(shiftDate(today, -i));
-    }
-
-    dailyItems = collectDailySummaryItems(uid, days);
-    if (config.DAILY_JOURNAL_4DAY_ENABLED && maxFourDayFiles > 0) {
-      fourDayItems = selectMostRecentItems(listFourDayRollups(uid), maxFourDayFiles, compareFourDayRollups);
-    }
-    if (config.DAILY_JOURNAL_MONTHLY_ENABLED && maxMonthlyFiles > 0) {
-      monthlyItems = selectMostRecentItems(listMonthlyRollups(uid), maxMonthlyFiles, compareMonthlyRollups);
-    }
-  }
-
-  dailyItems = dailyItems.slice().sort((a, b) => a.day.localeCompare(b.day));
-  fourDayItems = fourDayItems.slice().sort(compareFourDayRollups);
-  monthlyItems = monthlyItems.slice().sort(compareMonthlyRollups);
-  if (includeActiveRaw) {
-    const activeRawItem = buildActiveRawJournalItem(uid, activeRawDay, options);
-    activeRawItems = activeRawItem ? [activeRawItem] : [];
-  }
-
-  const items = [...activeRawItems, ...dailyItems, ...fourDayItems, ...monthlyItems];
-  const continuityEntries = items.flatMap((item) => Array.isArray(item.sidecarEntries) ? item.sidecarEntries : []);
-  const continuity = matchSidecarEntries(continuityEntries, {
-    sessionKey: options.sessionKey,
-    topic: options.topic || options.question || ''
-  });
-  const byLayer = {
-    daily: dailyItems,
-    fourDay: fourDayItems,
-    monthly: monthlyItems
-  };
-  if (includeActiveRaw) byLayer.activeRaw = activeRawItems;
-  const resultStats = {
-    dailyCount: dailyItems.length,
-    fourDayCount: fourDayItems.length,
-    monthlyCount: monthlyItems.length,
-    totalChars: items.reduce((sum, item) => sum + String(item.text || '').length, 0)
-  };
-  if (includeActiveRaw) resultStats.activeRawCount = activeRawItems.length;
-  const result = {
-    text: formatDailyJournalBundleText(items),
-    items,
-    byLayer,
-    continuity,
-    query: {
-      lookbackDays,
-      maxFourDayFiles,
-      maxMonthlyFiles,
-      timestamp: options.timestamp ?? null,
-      day: targetDay,
-      yearMonth: targetYearMonth || getYearMonthFromDay(targetDay)
-    },
-    stats: resultStats
-  };
-
-  const stats = getDailyJournalStats(uid, lookbackDays);
-  logDailyJournalRead({
-    userId: uid,
-    lookbackDays,
-    durationMs: nowMs() - startedAt,
-    queryHash: hashText(result.text),
-    queryMode: targetYearMonth ? 'yearMonth' : (targetDay ? 'timestamp' : 'default'),
-    day: targetDay,
-    yearMonth: result.query.yearMonth,
-    selectedDays: dailyItems.length,
-    selectedKinds: items.map((item) => item.kind || 'unknown'),
-    totalSegments: stats.totalSegments,
-    totalSegmentEntries: stats.totalSegmentEntries,
-    rawTailEntries: stats.rawTailEntries,
-    summaryChars: stats.summaryChars,
-    segmentChars: stats.segmentChars,
-    rawTailChars: stats.rawTailChars,
-    activeRawCount: activeRawItems.length,
-    fourDayCount: fourDayItems.length,
-    monthlyCount: monthlyItems.length
-  });
-
-  return result;
-}
+const {
+  buildActiveRawJournalItem,
+  buildEmptyRetrievalBundle,
+  getDailyJournalRetrievalBundle,
+  hashText,
+  logDailyJournalRead,
+  matchSidecarEntries,
+  nowMs,
+  shouldLogDailyJournalReads
+} = createDailyJournalRetrieval({
+  READ_LOG_FILE,
+  appendJsonLine,
+  collectDailySummaryItems,
+  compareFourDayRollups,
+  compareMonthlyRollups,
+  config,
+  formatDailyJournalBundleText,
+  formatDateInTz,
+  formatJournalEntries,
+  getDailyJournalStats: (...args) => getDailyJournalStats(...args),
+  getDailySummaryItem,
+  getEntrySidecarFilePath,
+  getJournalFilePath,
+  getYearMonthFromDay,
+  isValidDayString,
+  listFourDayRollups,
+  listMonthlyRollups,
+  normalizeContinuitySnapshot,
+  normalizeTimestampToDay,
+  normalizeYearMonth,
+  parseJournalEntries,
+  readEntrySidecar: (...args) => readEntrySidecar(...args),
+  readJsonLines,
+  safeReadText,
+  selectMostRecentItems,
+  shiftDate,
+  strictClampText
+});
 
 function buildJournalEntryRecord(question, reply, userInfo = {}, date = new Date()) {
   const userText = normalizeJournalText(question, config.DAILY_JOURNAL_MAX_USER_CHARS);
@@ -789,56 +423,6 @@ function collectRecentEntrySidecars(userId, options = {}) {
     days.push(shiftDate(targetDay, -i));
   }
   return days.flatMap((day) => readEntrySidecar(uid, day));
-}
-
-function matchSidecarEntries(entries = [], options = {}) {
-  const sessionKey = String(options.sessionKey || '').trim();
-  const topicNeedle = String(options.topic || '').trim().toLowerCase();
-  const matchedSession = [];
-  const matchedTopic = [];
-
-  for (const entry of Array.isArray(entries) ? entries : []) {
-    const snapshot = entry && typeof entry === 'object' ? normalizeContinuitySnapshot(entry.continuitySnapshot) : normalizeContinuitySnapshot();
-    const activeTopic = String(snapshot.activeTopic || '').trim().toLowerCase();
-    const carry = String(snapshot.carryOverUserTurn || '').trim().toLowerCase();
-    if (sessionKey && String(entry.sessionKey || '').trim() === sessionKey) {
-      matchedSession.push({ ...entry, continuitySnapshot: snapshot });
-    }
-    if (topicNeedle && (activeTopic.includes(topicNeedle) || carry.includes(topicNeedle))) {
-      matchedTopic.push({ ...entry, continuitySnapshot: snapshot });
-    }
-  }
-
-  return {
-    sameSession: matchedSession,
-    sameTopic: matchedTopic
-  };
-}
-
-function nowMs() {
-  return Date.now();
-}
-
-function shouldLogDailyJournalReads() {
-  return Boolean(config.DAILY_JOURNAL_READ_LOG_ENABLED);
-}
-
-function hashText(text) {
-  let hash = 2166136261;
-  const input = String(text || '');
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `fnv1a_${(hash >>> 0).toString(16)}`;
-}
-
-function logDailyJournalRead(event = {}) {
-  if (!shouldLogDailyJournalReads()) return;
-  appendJsonLine(READ_LOG_FILE, {
-    ts: new Date().toISOString(),
-    ...event
-  });
 }
 
 function getSegmentState(state, userId, day) {

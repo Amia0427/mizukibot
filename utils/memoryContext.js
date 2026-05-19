@@ -12,244 +12,47 @@ const {
   getCoreMemories,
   getMemoryStats
 } = require('./vectorMemory');
-const {
-  getAccessibleGroupIdsForUser
-} = require('./memoryScopeIndex');
 const { getDailyJournalRetrievalBundle } = require('./dailyJournal');
 const { formatGroupMemories } = require('./groupMemory');
 const { formatTaskMemories } = require('./taskMemory');
 const {
-  classifyRecallFacet,
   isRecentRecallQuery
 } = require('./recallHeuristics');
 const {
   buildStableProfileText
 } = require('./memoryProfileSurface');
 const {
-  trimTextByTokenBudget
-} = require('./contextBudget');
-const {
   queryMemory,
   assembleMemoryPacket
 } = require('./memory-v3');
 const {
-  resolveJournalTargetDays
-} = require('./memory-v3/journalDocs');
-const {
   classifyJournalRecallIntent,
-  formatJournalPromptItem,
   selectJournalPromptEvidence
 } = require('./memory-v3/journalRecallPolicy');
 const { queryLocalKnowledge } = require('./localKnowledge');
-
-function sanitizeText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
-}
-
-function joinOrFallback(list, fallback = '暂无') {
-  const values = Array.isArray(list) ? list.map((item) => sanitizeText(item)).filter(Boolean) : [];
-  return values.length > 0 ? values.join('、') : fallback;
-}
-
-function formatProfile(profile) {
-  if (!profile) return '暂无画像';
-
-  return [
-    `关系阶段：${profile.relation_stage || '陌生人'}`,
-    `身份信息：${joinOrFallback(profile.identities)}`,
-    `性格特征：${joinOrFallback(profile.personality_traits)}`,
-    `爱好：${joinOrFallback(profile.hobbies)}`,
-    `喜欢：${joinOrFallback(profile.likes)}`,
-    `不喜欢：${joinOrFallback(profile.dislikes)}`,
-    `目标：${joinOrFallback(profile.goals)}`,
-    `最近话题：${joinOrFallback(profile.recent_topics)}`
-  ].join('\n');
-}
-
-function formatImpression(impression) {
-  const text = sanitizeText(impression);
-  return text || '暂无明确用户印象';
-}
-
-function formatRetrievedMemories(hits, options = {}) {
-  const list = Array.isArray(hits) ? hits : [];
-  if (list.length === 0) {
-    return String(options.emptyText || '暂无与当前问题强相关的长期记忆');
-  }
-
-  const showScore = options.showScore === true;
-  const showReason = options.showReason === true;
-  const showImportance = options.showImportance === true;
-  const showStatus = options.showStatus !== false;
-  const showSourceKind = options.showSourceKind === true;
-
-  return list.map((hit, index) => {
-    const parts = [String(hit.type || 'fact')];
-    if (hit.tier) parts.push(`tier:${String(hit.tier).toUpperCase()}`);
-    if (showStatus && hit.status) parts.push(`status:${hit.status}`);
-    if (showSourceKind && hit.sourceKind) parts.push(`src:${hit.sourceKind}`);
-    if (showImportance && hit.importance !== undefined) parts.push(`imp:${Number(hit.importance || 0).toFixed(2)}`);
-    if (showScore && hit.score !== undefined) parts.push(`score:${Number(hit.score || 0).toFixed(3)}`);
-    if (showReason && hit.reason) parts.push(String(hit.reason));
-    return `${index + 1}. [${parts.join('|')}] ${hit.text}`;
-  }).join('\n');
-}
-
-function getPromptTokenLimit(name, fallback) {
-  return Math.max(0, Number(config[name] || fallback) || fallback || 0);
-}
-
-function limitPromptText(text, tokenBudget, strategy = 'tail') {
-  const value = String(text || '').trim();
-  if (!value) return '';
-  const budget = Math.max(0, Number(tokenBudget) || 0);
-  if (budget <= 0) return '';
-  return trimTextByTokenBudget(value, budget, strategy);
-}
-
-function clampPromptMessage(label, text, tokenBudget, strategy = 'tail') {
-  const body = limitPromptText(text, tokenBudget, strategy);
-  if (!body) return [];
-  return [{
-    role: 'system',
-    content: `[${label}]\n${body}`
-  }];
-}
-
-function compactFactText(factText, maxLines = 8) {
-  const lines = String(factText || '')
-    .split(/\r?\n/)
-    .map((line) => sanitizeText(line))
-    .filter(Boolean);
-
-  if (lines.length === 0) return '目前没有特别记忆。';
-  if (lines.length <= maxLines) return lines.join('\n');
-  return lines.slice(-Math.max(1, maxLines)).join('\n');
-}
-
-function buildRouteMemoryFilter(options = {}) {
-  return {
-    routePolicyKey: options.routePolicyKey,
-    topRouteType: options.topRouteType
-  };
-}
-
-function resolveReadableGroupIds(userId = '', options = {}) {
-  const explicitGroupIds = Array.isArray(options.groupIds)
-    ? options.groupIds
-    : [];
-  const readableGroupIds = explicitGroupIds.length > 0
-    ? explicitGroupIds
-    : getAccessibleGroupIdsForUser(userId);
-  const currentGroupId = sanitizeText(options.groupId);
-  const deduped = [];
-  const seen = new Set();
-
-  for (const raw of [...readableGroupIds, currentGroupId]) {
-    const groupId = sanitizeText(raw);
-    if (!groupId || seen.has(groupId)) continue;
-    seen.add(groupId);
-    deduped.push(groupId);
-  }
-
-  deduped.sort();
-  return deduped;
-}
-
-function buildUnifiedRecallOptions(options = {}) {
-  const resolvedGroupIds = Array.isArray(options.resolvedGroupIds)
-    ? options.resolvedGroupIds.map((item) => sanitizeText(item)).filter(Boolean)
-    : resolveReadableGroupIds(options.userId, options);
-  return {
-    ...buildRouteMemoryFilter(options),
-    queryFacet: options.queryFacet || classifyRecallFacet(options.question || ''),
-    taskType: options.taskType,
-    agentName: options.agentName,
-    toolName: options.toolName,
-    sessionId: options.sessionId,
-    channelId: options.channelId,
-    participants: Array.isArray(options.participants) ? options.participants : [],
-    groupId: options.groupId,
-    groupIds: resolvedGroupIds,
-    includeTask: true,
-    includeGroup: resolvedGroupIds.length > 0,
-    includeSignals: true,
-    includeEpisodes: true
-  };
-}
-
-function getRequestMemo(options = {}) {
-  if (!options || typeof options !== 'object') return new Map();
-  if (!(options.__memoryContextMemo instanceof Map)) {
-    options.__memoryContextMemo = new Map();
-  }
-  return options.__memoryContextMemo;
-}
-
-function buildMemoKey(prefix, userId, question = '', options = {}) {
-  const resolvedGroupIds = Array.isArray(options.resolvedGroupIds)
-    ? options.resolvedGroupIds.map((item) => sanitizeText(item)).filter(Boolean)
-    : resolveReadableGroupIds(userId, options);
-  const kindMask = [
-    options.includeTask !== false ? 'task' : '',
-    options.includeGroup !== false && options.groupId ? `group:${options.groupId}` : '',
-    options.includeGroup !== false && resolvedGroupIds.length > 0 ? `groups:${resolvedGroupIds.join(',')}` : '',
-    options.includeSignals !== false ? 'signals' : '',
-    options.includeEpisodes !== false ? 'episodes' : '',
-    options.memoryKind || '',
-    Array.isArray(options.memoryKinds) ? options.memoryKinds.join(',') : '',
-    sanitizeText(options.sessionId) ? `session:${sanitizeText(options.sessionId)}` : '',
-    sanitizeText(options.channelId) ? `channel:${sanitizeText(options.channelId)}` : '',
-    sanitizeText(options.sharedShortTermSignature) ? `shared:${sanitizeText(options.sharedShortTermSignature)}` : ''
-  ].filter(Boolean).join('|') || 'default';
-  const lookback = String(options.dailyLookbackDays || options.lookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS || '');
-  const journalTarget = sanitizeText(options.dailyJournalTimestamp || options.dailyJournalYearMonth || '');
-  const rawMode = options.includeActiveRaw ? 'active_raw' : '';
-  return [
-    prefix,
-    sanitizeText(userId),
-    sanitizeText(options.groupId),
-    sanitizeText(options.taskType),
-    sanitizeText(question),
-    kindMask,
-    lookback,
-    journalTarget,
-    rawMode
-  ].join('|');
-}
-
-function memoizeValue(options, key, factory) {
-  const memo = getRequestMemo(options);
-  if (memo.has(key)) return memo.get(key);
-  const value = factory();
-  memo.set(key, value);
-  return value;
-}
-
-function resolveDailyJournalTimestamp(question = '', options = {}) {
-  const explicit = sanitizeText(options.dailyJournalTimestamp);
-  if (explicit) return explicit;
-  const targetDays = resolveJournalTargetDays(question, {
-    today: options.journalToday,
-    now: options.journalNow
-  });
-  return targetDays[0] || '';
-}
-
-function formatDailyJournalPromptItem(item = {}) {
-  return formatJournalPromptItem(item);
-}
-
-function buildPromptJournalItems(bundle = {}) {
-  const activeRaw = Array.isArray(bundle?.byLayer?.activeRaw) ? bundle.byLayer.activeRaw : [];
-  const daily = Array.isArray(bundle?.byLayer?.daily) ? bundle.byLayer.daily : [];
-  const fourDay = Array.isArray(bundle?.byLayer?.fourDay) ? bundle.byLayer.fourDay : [];
-  const monthly = Array.isArray(bundle?.byLayer?.monthly) ? bundle.byLayer.monthly : [];
-  if (activeRaw.length > 0) return activeRaw.concat(daily.slice(-1), fourDay.slice(-1), monthly.slice(-1));
-  if (daily.length > 0) return daily.concat(fourDay.slice(-1), monthly.slice(-1));
-  if (fourDay.length > 0) return fourDay.concat(monthly.slice(-1));
-  return monthly;
-}
+const {
+  buildMemoryTrace,
+  clampPromptMessage,
+  classifyRecallHitForPrompt,
+  compactFactText,
+  formatImpression,
+  formatJargonSignal,
+  formatProfile,
+  formatRetrievedMemories,
+  formatStyleSignal,
+  getPromptTokenLimit,
+  limitPromptText,
+  resolveDroppedReasons,
+  resolveInjectedBlockIds,
+  sanitizeText
+} = require('./memoryContext/formatters');
+const {
+  buildMemoKey,
+  buildUnifiedRecallOptions,
+  memoizeValue,
+  resolveDailyJournalTimestamp,
+  resolveReadableGroupIds
+} = require('./memoryContext/recallOptions');
 
 function isStyleQuery(question = '', options = {}) {
   if (options.forceSignalRecall) return true;
@@ -296,16 +99,6 @@ function markSignalsInjected(hits = [], options = {}) {
     if (!key) continue;
     cache[key] = ts;
   }
-}
-
-function formatStyleSignal(hit) {
-  const text = String(hit?.text || '').replace(/^style:\s*/i, '').trim();
-  return text ? `- User style: ${text}` : '';
-}
-
-function formatJargonSignal(hit) {
-  const text = String(hit?.text || '').replace(/^group jargon:\s*/i, '').trim();
-  return text ? `- Group jargon: ${text}` : '';
 }
 
 function splitUnifiedHits(allHits = [], options = {}) {
@@ -449,111 +242,6 @@ function pickStyleSignals(styleHits = [], jargonHits = [], question = '', option
   };
 }
 
-function estimateTraceTokens(text = '') {
-  const raw = String(text || '');
-  if (!raw) return 0;
-  return Math.ceil(raw.length / 4);
-}
-
-function classifyRecallHitForPrompt(hit = {}) {
-  const score = Number(hit.score || 0);
-  const strongMin = Number(config.MEMORY_STRONG_RECALL_MIN_SCORE ?? 0.2);
-  const weakMin = Number(config.MEMORY_WEAK_RECALL_MIN_SCORE ?? 0.08);
-  if (score >= strongMin) return 'strong';
-  if (score >= weakMin) return 'weak';
-  return 'background';
-}
-
-function buildMemoryTrace({ hits = [], injected = {}, options = {} } = {}) {
-  if (!config.MEMORY_TRACE_ENABLED) return null;
-  const profileTrace = options.memoryProfileTrace && typeof options.memoryProfileTrace === 'object'
-    ? options.memoryProfileTrace
-    : {};
-  const injectedEntries = Object.entries(injected || {}).map(([name, text]) => ({
-    name,
-    chars: String(text || '').length,
-    approxTokens: estimateTraceTokens(text),
-    preview: String(text || '').slice(0, 180)
-  })).filter((item) => item.chars > 0);
-  const injectedTokens = injectedEntries.reduce((sum, item) => sum + item.approxTokens, 0);
-  const injectedBlockIds = Array.isArray(options.injectedBlockIds)
-    ? options.injectedBlockIds.map((item) => sanitizeText(item)).filter(Boolean)
-    : injectedEntries.map((item) => item.name).filter(Boolean);
-  const droppedReasons = Array.isArray(options.droppedReasons)
-    ? options.droppedReasons.map((item) => sanitizeText(item)).filter(Boolean)
-    : [];
-  const topHitIds = (Array.isArray(hits) ? hits : [])
-    .map((hit) => String(hit.id || ''))
-    .filter(Boolean)
-    .slice(0, 8);
-  return {
-    enabled: true,
-    strictPromptInjection: Boolean(config.MEMORY_STRICT_PROMPT_INJECTION_ENABLED),
-    retrieval_path: sanitizeText(options.retrievalPath || options.retrieval_path || 'none'),
-    retrieved_count: Array.isArray(hits) ? hits.length : 0,
-    injected_block_ids: injectedBlockIds,
-    dropped_reasons: droppedReasons,
-    top_hit_ids: topHitIds,
-    groupId: sanitizeText(options.groupId),
-    routePolicyKey: sanitizeText(options.routePolicyKey),
-    topRouteType: sanitizeText(options.topRouteType),
-    hits: (Array.isArray(hits) ? hits : []).map((hit) => ({
-      id: String(hit.id || ''),
-      type: String(hit.type || hit.memoryKind || ''),
-      source: String(hit.source || hit.sourceKind || hit.meta?.sourceKind || ''),
-      status: String(hit.status || ''),
-      scopeType: String(hit.scopeType || ''),
-      groupId: String(hit.groupId || ''),
-      score: Number(hit.score || 0),
-      tier: classifyRecallHitForPrompt(hit),
-      finalTier: classifyRecallHitForPrompt(hit),
-      decayScore: Number(hit.decayScore || 0),
-      rehearsalBoost: Number(hit.rehearsalBoost || 0),
-      memoryStrength: Number(hit.memoryStrength || 0),
-      forgettingReason: String(hit.forgettingReason || ''),
-      traceReason: String(hit.traceReason || hit.reason || hit.meta?.traceReason || ''),
-      injected: classifyRecallHitForPrompt(hit) === 'strong' || !config.MEMORY_STRICT_PROMPT_INJECTION_ENABLED,
-      preview: String(hit.text || '').slice(0, 180)
-    })),
-    injected: injectedEntries,
-    injectedApproxTokens: injectedTokens,
-    profile_source: String(profileTrace.profile_source || profileTrace.source || ''),
-    profile_injected: Boolean(profileTrace.profile_injected),
-    profile_trace_items: Array.isArray(profileTrace.traceItems) ? profileTrace.traceItems.slice(0, 12) : [],
-    profile_conflicts: Array.isArray(profileTrace.conflicts) ? profileTrace.conflicts.slice(0, 12) : [],
-    profile_suppressed: Array.isArray(profileTrace.suppressed) ? profileTrace.suppressed.slice(0, 12) : [],
-    profile_expires_soon: Array.isArray(profileTrace.expiresSoon) ? profileTrace.expiresSoon.slice(0, 12) : [],
-    legacy_fallback_used: Boolean(profileTrace.legacyFallbackUsed || profileTrace.legacy_fallback_used),
-    legacy_fallback_disabled: Boolean(profileTrace.legacy_fallback_disabled),
-    profile_disabled_reason: String(profileTrace.profile_disabled_reason || profileTrace.reason || '')
-  };
-}
-
-function resolveInjectedBlockIds(injected = {}) {
-  const map = {
-    retrievedMemory: 'retrieved_memory_lite',
-    weakEvidence: 'retrieved_memory_lite',
-    styleSignals: 'retrieved_memory_lite',
-    taskMemory: 'retrieved_memory_lite',
-    groupMemory: 'retrieved_memory_lite',
-    dailyJournal: 'daily_journal',
-    longTermProfile: 'long_term_profile'
-  };
-  return Array.from(new Set(Object.entries(injected || {})
-    .filter(([, text]) => String(text || '').trim())
-    .map(([key]) => map[key] || key)
-    .filter(Boolean)));
-}
-
-function resolveDroppedReasons(hits = [], injected = {}, extra = []) {
-  const reasons = Array.isArray(extra) ? extra.map((item) => sanitizeText(item)).filter(Boolean) : [];
-  const hitCount = Array.isArray(hits) ? hits.length : 0;
-  const hasRetrieved = Boolean(String(injected?.retrievedMemory || '').trim());
-  const hasAnyInjected = Object.values(injected || {}).some((text) => String(text || '').trim());
-  if (hitCount > 0 && !hasAnyInjected) reasons.push('retrieved_but_not_injected');
-  if (hitCount > 0 && !hasRetrieved && !String(injected?.weakEvidence || '').trim()) reasons.push('no_retrieved_memory_text');
-  return Array.from(new Set(reasons));
-}
 function buildContextPayload(userId, question = '', options = {}, unifiedHits = []) {
   const recapQuery = isRecentRecallQuery(question);
   const resolvedGroupIds = Array.isArray(options.resolvedGroupIds)
