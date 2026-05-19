@@ -104,12 +104,38 @@ function clearProjectCache() {
       ]
     }
   });
+  recordMainPromptBlockObservation({
+    requestTrace: trace,
+    routeMeta: { groupId: 'g1', routePolicyKey: 'direct_chat/main' },
+    userId: 'u1',
+    promptSnapshot: {
+      stableBlockIds: ['stable_identity'],
+      dynamicBlockIds: ['short_term_continuity'],
+      assistantOnlyBlockIds: [],
+      assembledBlocks: [
+        { id: 'stable_identity' },
+        { id: 'short_term_continuity' }
+      ],
+      tokenUsageByBlock: [],
+      trimDecisions: []
+    },
+    memoryContext: {},
+    memosRecall: {},
+    dynamicPromptPlan: {
+      source: 'planner',
+      enabledBlockIds: ['memos_recall'],
+      blockDecisions: [
+        { blockId: 'memos_recall', decision: 'include', confidence: 0.8, reason: 'available remotely' }
+      ]
+    }
+  });
   flushMemoryRecallObservabilitySync();
 
   const lines = fs.readFileSync(resolveObservabilityLogFile(), 'utf8').trim().split(/\r?\n/);
-  assert.strictEqual(lines.length, 2);
+  assert.strictEqual(lines.length, 3);
   const planner = JSON.parse(lines[0]);
   const prompt = JSON.parse(lines[1]);
+  const dropped = JSON.parse(lines[2]);
   assert.strictEqual(planner.requestId, 'req_observe');
   assert.strictEqual(planner.memos.usedBeforeDedupe, true);
   assert.strictEqual(planner.memos.usedAfterDedupe, false);
@@ -119,6 +145,10 @@ function clearProjectCache() {
   assert.strictEqual(prompt.prompt.hasMemosRecall, false);
   assert.strictEqual(prompt.prompt.hasRetrievedMemoryLite, true);
   assert.strictEqual(prompt.planner.memosRecallDecision.decision, 'skip');
+  assert.strictEqual(prompt.drop.dropped, false);
+  assert.strictEqual(dropped.stage, 'memos_recall_dropped_before_prompt');
+  assert.strictEqual(dropped.planner.includedMemosRecall, true);
+  assert.deepStrictEqual(dropped.drop.reasons, ['planner_included_but_memos_recall_unused']);
 
   clearProjectCache();
   if (oldDataDir === undefined) delete process.env.DATA_DIR;

@@ -245,20 +245,43 @@ function findPlannerDecisionForBlock(plan = {}, blockId = '') {
     .find((item) => normalizeText(item?.blockId) === target) || null;
 }
 
+function isPlannerIncludingBlock(plan = {}, blockId = '') {
+  const target = normalizeText(blockId);
+  if (!target) return false;
+  const normalizedPlan = normalizeObject(plan, {});
+  const decision = findPlannerDecisionForBlock(normalizedPlan, target);
+  if (decision) return normalizeText(decision.decision).toLowerCase() !== 'skip';
+  return normalizeArray(normalizedPlan.enabledBlockIds)
+    .map((item) => normalizeText(item))
+    .includes(target);
+}
+
 function recordMainPromptBlockObservation(input = {}) {
   const promptSnapshot = normalizeObject(input.promptSnapshot, {});
   const dynamicPromptPlan = normalizeObject(input.dynamicPromptPlan, {});
   const allBlockIds = collectBlockIds(promptSnapshot);
   const memosDecision = findPlannerDecisionForBlock(dynamicPromptPlan, 'memos_recall');
+  const memosSummary = summarizeMemosRecall(input.memosRecall);
+  const promptHasMemosRecall = allBlockIds.includes('memos_recall') || allBlockIds.includes('memos_recall_compact');
+  const plannerIncludedMemosRecall = isPlannerIncludingBlock(dynamicPromptPlan, 'memos_recall');
+  const droppedReasons = [];
+  if (plannerIncludedMemosRecall && !memosSummary.used) {
+    droppedReasons.push('planner_included_but_memos_recall_unused');
+  }
+  if (plannerIncludedMemosRecall && memosSummary.used && !promptHasMemosRecall) {
+    droppedReasons.push('planner_included_but_prompt_missing_block');
+  }
   appendObservation({
     ...baseLogFields(input),
-    stage: normalizeText(input.stage, 'prepare_main_prompt_blocks'),
+    stage: droppedReasons.length > 0
+      ? normalizeText(input.dropStage, 'memos_recall_dropped_before_prompt')
+      : normalizeText(input.stage, 'prepare_main_prompt_blocks'),
     prompt: {
       stableBlockIds: normalizeArray(promptSnapshot.stableBlockIds).map((item) => normalizeText(item)).filter(Boolean),
       dynamicBlockIds: normalizeArray(promptSnapshot.dynamicBlockIds).map((item) => normalizeText(item)).filter(Boolean),
       assistantOnlyBlockIds: normalizeArray(promptSnapshot.assistantOnlyBlockIds).map((item) => normalizeText(item)).filter(Boolean),
       assembledBlockCount: normalizeArray(promptSnapshot.assembledBlocks).length,
-      hasMemosRecall: allBlockIds.includes('memos_recall') || allBlockIds.includes('memos_recall_compact'),
+      hasMemosRecall: promptHasMemosRecall,
       hasRetrievedMemoryLite: allBlockIds.includes('retrieved_memory_lite') || allBlockIds.includes('retrieved_memory_compact'),
       hasShortTermContinuity: allBlockIds.includes('short_term_continuity'),
       hasContinuityState: allBlockIds.includes('continuity_state') || allBlockIds.includes('session_continuity'),
@@ -268,6 +291,7 @@ function recordMainPromptBlockObservation(input = {}) {
     planner: {
       dynamicPromptPlanSource: normalizeText(dynamicPromptPlan.source || dynamicPromptPlan._source),
       enabledBlockIds: normalizeArray(dynamicPromptPlan.enabledBlockIds).map((item) => normalizeText(item)).filter(Boolean),
+      includedMemosRecall: plannerIncludedMemosRecall,
       memosRecallDecision: memosDecision
         ? {
             decision: normalizeText(memosDecision.decision),
@@ -281,7 +305,11 @@ function recordMainPromptBlockObservation(input = {}) {
       evidenceCount: countLocalMemoryEvidence(input.memoryContext),
       cacheHit: Boolean(input.memoryContext?.cacheMeta?.hit)
     },
-    memos: summarizeMemosRecall(input.memosRecall)
+    memos: memosSummary,
+    drop: {
+      dropped: droppedReasons.length > 0,
+      reasons: droppedReasons
+    }
   });
 }
 

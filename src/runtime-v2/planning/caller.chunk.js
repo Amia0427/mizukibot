@@ -52,6 +52,33 @@ function getMemoryRecallObservability() {
   return require('../../../utils/memoryRecallObservability');
 }
 
+function attachMemosRecallToPlannerDecision(decision = {}, options = {}) {
+  const normalizedDecision = normalizeObject(decision, {});
+  const memosRecall = normalizeObject(
+    normalizedDecision.memosRecall
+    || normalizedDecision.plannerMeta?.memosRecall
+    || options.memosRecall,
+    {}
+  );
+  const memosRecallText = normalizeText(
+    normalizedDecision.memosRecallText
+    || normalizedDecision.plannerMeta?.memosRecallText
+    || options.memosRecallText
+  );
+  const patch = {};
+  if (Object.keys(memosRecall).length > 0) patch.memosRecall = memosRecall;
+  if (memosRecallText) patch.memosRecallText = memosRecallText;
+  if (Object.keys(patch).length === 0) return normalizedDecision;
+  return {
+    ...normalizedDecision,
+    ...patch,
+    plannerMeta: {
+      ...normalizeObject(normalizedDecision.plannerMeta, {}),
+      ...patch
+    }
+  };
+}
+
 async function callPlannerModelV2(route = {}, options = {}) {
   const apiBaseUrl = getPlannerApiBaseUrlV2();
   const apiKey = getPlannerApiKeyV2();
@@ -194,7 +221,10 @@ async function planRequestV2(input = {}) {
       allowPlannerCorrection: true
     });
     addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-    return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
+    return attachMemosRecallToPlannerDecision(
+      attachPlannerLatencyMeta(normalized, requestLatencyMeta),
+      options
+    );
   }
 
   const preflightStartedAt = nowMs();
@@ -214,7 +244,10 @@ async function planRequestV2(input = {}) {
       latencyMeta: requestLatencyMeta
     });
     addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-    return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
+    return attachMemosRecallToPlannerDecision(
+      attachPlannerLatencyMeta(normalized, requestLatencyMeta),
+      options
+    );
   }
 
   if (config.PLANNER_SUBAGENT_ENABLED) {
@@ -230,7 +263,10 @@ async function planRequestV2(input = {}) {
           latencyMeta: requestLatencyMeta
         });
         addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-        return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
+        return attachMemosRecallToPlannerDecision(
+          attachPlannerLatencyMeta(normalized, requestLatencyMeta),
+          options
+        );
       }
     } catch (_) {}
   }
@@ -247,7 +283,10 @@ async function planRequestV2(input = {}) {
         latencyMeta: requestLatencyMeta
       });
       addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-      return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
+      return attachMemosRecallToPlannerDecision(
+        attachPlannerLatencyMeta(normalized, requestLatencyMeta),
+        options
+      );
     }
   } catch (_) {}
 
@@ -258,7 +297,10 @@ async function planRequestV2(input = {}) {
     latencyMeta: requestLatencyMeta
   });
   addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-  return attachPlannerLatencyMeta(normalized, requestLatencyMeta);
+  return attachMemosRecallToPlannerDecision(
+    attachPlannerLatencyMeta(normalized, requestLatencyMeta),
+    options
+  );
 }
 
 function convertPlannerDecisionToDirectChatDecision(decision = {}, route = {}, options = {}) {
@@ -292,6 +334,7 @@ function convertPlannerDecisionToDirectChatDecision(decision = {}, route = {}, o
     personaModules,
     dynamicPromptPlan,
     memosRecall: normalizeObject(decision?.memosRecall || decision?.plannerMeta?.memosRecall || options.memosRecall, {}),
+    memosRecallText: normalizeText(decision?.memosRecallText || decision?.plannerMeta?.memosRecallText || options.memosRecallText),
     plannerDecisionV2: decision,
     plannerProtocolVersion: normalizeText(decision?.plannerMeta?.protocolVersion) || PLANNER_PROTOCOL_VERSION
   };
