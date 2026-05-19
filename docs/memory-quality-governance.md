@@ -1,6 +1,6 @@
 # Memory Quality Governance
 
-更新时间：2026-05-20 00:55 +08:00
+更新时间：2026-05-20 01:23 +08:00
 
 ## 目标
 
@@ -18,10 +18,12 @@
 - `utils/memoryGovernance/recallEvalGate.js` 和 `lancedbMigrationGate.js` 将 recall eval/LanceDB shadow 迁移变成可失败门禁。
 - `npm run diag:memory` 在 `summary.quality` 中显示 Memory V3、worldbook、social context、image asset、notebook 的跨来源质量统计和样本。
 - `utils/postReplyWorker/vectorWatchdog.js` 在 post-reply worker 内独立低频巡检，自动处理 projection materialize、LanceDB reconcile、pending embedding 小批量 backfill+sync。
+- `utils/imageVisualSummaryMemory.js` 在图片缓存入库后调用 `MEMORY_MODEL` 生成带简短时间戳的视觉摘要，同时写入图片索引和 Memory V3。
 
 更新 2026-05-19 22:20 +08:00：补齐冲突报告、纠错归档、召回门禁、LanceDB 读迁移门禁、混合召回排序权重和写后不可召回隐藏。
 更新 2026-05-20 00:42 +08:00：新增 `POST_REPLY_VECTOR_WATCHDOG_*` 自动巡检维护，避免健康漂移只能依赖新消息触发。
 更新 2026-05-20 00:55 +08:00：修复图片/战绩图召回链路。图片意图的 `mem search --source all` 会合并图片索引；凌晨 4 点前的“今天”同时覆盖前一自然日；sender-scoped 查询只回查当前用户发出的图；路由/planner 对“今天/昨天发给你什么图”改走 `memory_cli`，避免 notebook-answer chat-only 直接凭空否认。
+更新 2026-05-20 01:23 +08:00：新增图片视觉摘要长期写入。图片入库后异步使用 `MEMORY_MODEL` 生成摘要，摘要带 `[YYYY-MM-DD HH:mm]` 前缀，落到 `image_memory_index.summary` 并追加 `memory_confirmed/image_visual_summary` 事件，供后续长期记忆检索。
 
 ## 运维顺序
 
@@ -53,5 +55,6 @@ node tests/memoryRecallAndLanceDbGates.test.js
 node tests/memoryGovernanceConflictReport.test.js
 node tests/memoryCorrectionSupersede.test.js
 node tests/postReplyVectorWatchdog.test.js
+node tests/imageVisualSummaryMemory.test.js
 node scripts/diagnose-memory-ops.js diagnose --skip-probe --limit 5
 ```
