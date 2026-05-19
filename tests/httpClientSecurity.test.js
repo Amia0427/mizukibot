@@ -28,18 +28,8 @@ async function withAxiosPostStub(stub, fn) {
 }
 
 (async () => {
-  await withAxiosGetStub(async (_url, options = {}) => {
-    const headers = options.headers || {};
-    assert.strictEqual(headers.Authorization, undefined);
-    assert.strictEqual(headers.authorization, undefined);
-    assert.strictEqual(headers['x-api-key'], undefined);
-    assert.strictEqual(headers['X-API-Key'], undefined);
-    assert.notStrictEqual(headers['Content-Type'], 'application/json');
-    assert.strictEqual(options.responseType, 'arraybuffer');
-    return {
-      data: Buffer.from('fake-png'),
-      headers: { 'content-type': 'image/png' }
-    };
+  await withAxiosGetStub(async () => {
+    throw new Error('axios.get should not be called when anthropic can consume image URLs directly');
   }, async () => {
     const mapped = await mapMessagesToAnthropic([
       {
@@ -51,8 +41,9 @@ async function withAxiosPostStub(stub, fn) {
     ]);
     const image = mapped.messages[0].content[0];
     assert.strictEqual(image.type, 'image');
-    assert.strictEqual(image.source.media_type, 'image/png');
-    assert.strictEqual(image.source.data, Buffer.from('fake-png').toString('base64'));
+    assert.strictEqual(image.source.type, 'url');
+    assert.strictEqual(image.source.url, 'https://example.com/image.png');
+    assert.ok(!Object.prototype.hasOwnProperty.call(image.source, 'data'));
   });
 
   await withAxiosGetStub(async () => {

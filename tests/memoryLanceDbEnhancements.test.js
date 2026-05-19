@@ -69,6 +69,7 @@ const {
   diagnoseNoVisibleVectorCandidates
 } = require('../utils/memory-v3/query');
 const { countScopeLeaks } = require('../scripts/diagnose-lancedb-memory');
+const { buildMemoryIndexHealthGate } = require('../scripts/memory-index-health-gate');
 
 assert.strictEqual(typeof journalDocs.readDailyJournalUsers, 'function');
 const failedJournal = buildSafeJournalHealthSummary({}, {
@@ -142,6 +143,16 @@ assert.strictEqual(diagnoseNoVisibleVectorCandidates([{
 }], [{ id: 'node_diag', source: 'personal', semanticSlot: 'fact', text: 'green cable' }], {
   filter: lancedbStore.buildMemoryFilter({ userId: 'u_diag' })
 }, 'style'), 'no_visible_candidates_facet_filtered');
+const driftGate = buildMemoryIndexHealthGate({
+  coverage: {
+    memory: { staleTableRows: 1, readyButNotSynced: 2 },
+    worldbook: { staleTableRows: 0, readyButNotSynced: 0 }
+  },
+  projectionFreshness: { projectionStale: false }
+});
+assert.strictEqual(driftGate.canBackfill, false);
+assert.strictEqual(driftGate.mustReconcileFirst, true);
+assert.ok(driftGate.nextSafeCommand.includes('repair-memory-vector-index.js'));
 
 module.exports = runDiagnostics({
   skipProbe: true,
@@ -151,10 +162,13 @@ module.exports = runDiagnostics({
     ok: true,
     lancedbDir: tempRoot,
     syncEnabled: true,
-    coverage: {},
+    coverage: {
+      memory: { staleTableRows: 2, readyButNotSynced: 3 },
+      worldbook: { staleTableRows: 0, readyButNotSynced: 0 }
+    },
     memory: {},
     worldbook: {},
-    repairPlan: {}
+    repairPlan: { recommendedAction: 'run_full_lancedb_reconcile' }
   }),
   diagnoseProjectionFreshness: () => ({ projectionStale: false }),
   buildJournalHealthSummary: () => {
@@ -163,6 +177,36 @@ module.exports = runDiagnostics({
 }).then((diagnose) => {
   assert.strictEqual(diagnose.ok, true);
   assert.strictEqual(diagnose.journal.ok, false);
+  assert.strictEqual(diagnose.healthGate.canBackfill, false);
+  assert.strictEqual(diagnose.healthGate.mustReconcileFirst, true);
+  assert.ok(Array.isArray(diagnose.recommendedActions));
+  assert.strictEqual(diagnose.recommendedActions[0].action, 'reconcile');
+  return runDiagnostics({
+    skipProbe: true,
+    limit: 1
+  }, {
+    buildSyncSummary: async () => ({
+      ok: true,
+      lancedbDir: tempRoot,
+      syncEnabled: true,
+      coverage: {
+        memory: { staleTableRows: 0, readyButNotSynced: 0, pendingRows: 5 },
+        worldbook: { staleTableRows: 0, readyButNotSynced: 0, pendingRows: 0 }
+      },
+      memory: {},
+      worldbook: {},
+      repairPlan: { recommendedAction: 'run_embedding_backfill' }
+    }),
+    diagnoseProjectionFreshness: () => ({ projectionStale: false }),
+    buildJournalHealthSummary: () => ({
+      ok: true,
+      totals: { embeddingPending: 0 },
+      users: []
+    })
+  });
+}).then((memoryBackfillDiagnose) => {
+  assert.strictEqual(memoryBackfillDiagnose.healthGate.canBackfill, true);
+  assert.ok(memoryBackfillDiagnose.healthGate.nextSafeCommand.includes('--source memory'));
   const cacheBefore = fs.existsSync(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE)
     ? fs.readFileSync(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, 'utf8')
     : '';
@@ -203,6 +247,7 @@ module.exports = runDiagnostics({
       ? fs.readFileSync(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, 'utf8')
       : '', cacheBefore);
     const syncCalls = [];
+    let applySummaryCalls = 0;
     return runRepair({
       apply: true,
       source: 'memory'
@@ -217,20 +262,26 @@ module.exports = runDiagnostics({
         canonicalKey: 'repair apply',
         updatedAt: 300
       }],
-      buildSyncSummary: async () => ({
-        coverage: {
-          memory: { staleTableRows: 1 },
-          worldbook: { staleTableRows: 0 }
-        },
-        repairPlan: {
-          memory: { syncRows: 1 },
-          worldbook: { syncRows: 0 }
-        },
-        _rows: {
-          memory: [{ id: 'memory:repair_node_apply', vector: [1] }],
-          worldbook: []
-        }
-      }),
+      buildSyncSummary: async () => {
+        applySummaryCalls += 1;
+        return {
+          coverage: {
+            memory: {
+              staleTableRows: applySummaryCalls === 1 ? 1 : 0,
+              readyButNotSynced: applySummaryCalls === 1 ? 1 : 0
+            },
+            worldbook: { staleTableRows: 0, readyButNotSynced: 0 }
+          },
+          repairPlan: {
+            memory: { syncRows: 1 },
+            worldbook: { syncRows: 0 }
+          },
+          _rows: {
+            memory: [{ id: 'memory:repair_node_apply', vector: [1] }],
+            worldbook: []
+          }
+        };
+      },
       syncMemoryRows: async (rows, options) => {
         syncCalls.push({ rows, options });
         return { ok: true, rows: rows.length };
@@ -240,6 +291,10 @@ module.exports = runDiagnostics({
       assert.strictEqual(syncCalls.length, 1);
       assert.strictEqual(syncCalls[0].options.fullReconcile, true);
       assert.strictEqual(syncCalls[0].options.deleteStaleRows, true);
+      assert.ok(repairApply.afterCoverage);
+      assert.strictEqual(repairApply.afterCoverage.memory.staleTableRows, 0);
+      assert.strictEqual(repairApply.afterCoverage.memory.readyButNotSynced, 0);
+      assert.strictEqual(repairApply.healthGate.canBackfill, true);
     });
   });
 }).then(() => queryMemory({

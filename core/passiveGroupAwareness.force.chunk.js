@@ -208,6 +208,8 @@ module.exports = {
   forcePassiveGroupInterjection,
   handlePassiveGroupAwareness,
   isEnabledForGroup,
+  getPresenceConfig,
+  decidePresenceAction,
   scoreMessageTrigger,
   parseDecision,
   buildDecisionPrompt,

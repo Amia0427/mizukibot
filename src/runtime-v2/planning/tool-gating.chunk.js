@@ -1,6 +1,9 @@
 const {
   COMPANION_PLANNER_SAFE_READ_TOOLS,
   DEFAULT_PLANNER_TEMPERATURE,
+  DIRECT_CHAT_PLANNER_VERSION,
+  DYNAMIC_CONTEXT_PLAN_VERSION,
+  PLANNER_DECISION_VERSION,
   DEFAULT_WORLDBOOK_PLANNER_CANDIDATE_LIMIT,
   TOOL_BUCKETS,
   buildDirectChatToolCatalog,
@@ -42,6 +45,7 @@ const {
   shouldKeepNotebookAnswerChatOnly,
   shouldPrioritizeMemoryProbe
 } = require('./runtime-core.chunk');
+const crypto = require('crypto');
 const {
   buildExplicitAllowedToolCatalog,
   buildToolCatalogByName
@@ -386,11 +390,75 @@ function getPlannerReasoningEffort(overrides = null) {
   );
 }
 
+function normalizeOpenAIPromptCacheRetention(value = '') {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized === 'in_memory' || normalized === '24h' ? normalized : '';
+}
+
+function buildPlannerStablePromptFingerprint(toolCatalog = []) {
+  const tools = normalizeArray(toolCatalog)
+    .map((item) => ({
+      name: normalizeText(item?.name),
+      bucket: normalizeText(item?.bucket),
+      description: normalizeText(item?.description),
+      plannerRole: normalizeText(item?.plannerRole),
+      overlapGroup: normalizeText(item?.overlapGroup),
+      preferredOver: normalizeArray(item?.preferredOver).map((entry) => normalizeText(entry)).filter(Boolean),
+      preferWhen: normalizeArray(item?.preferWhen).map((entry) => normalizeText(entry)).filter(Boolean),
+      avoidWhen: normalizeArray(item?.avoidWhen).map((entry) => normalizeText(entry)).filter(Boolean),
+      readOnly: item?.readOnly === true,
+      writeCapable: item?.writeCapable === true
+    }))
+    .filter((item) => item.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return JSON.stringify({
+    plannerVersion: DIRECT_CHAT_PLANNER_VERSION,
+    decisionVersion: PLANNER_DECISION_VERSION,
+    dynamicContextPlanVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+    stagePrompt: buildPlannerStageSystemPrompt(toolCatalog),
+    prompt: buildPlannerPrompt(toolCatalog),
+    tools
+  });
+}
+
+function buildPlannerOpenAIPromptCacheKey(model = '', route = {}, toolCatalog = []) {
+  const prefix = normalizeText(config.OPENAI_PROMPT_CACHE_KEY_PREFIX) || 'mizukibot:main';
+  const namespaceHash = crypto
+    .createHash('sha256')
+    .update(`${prefix}:planner`)
+    .digest('hex')
+    .slice(0, 8);
+  const payload = JSON.stringify({
+    namespaceHash,
+    model: normalizeText(model),
+    routeType: normalizeText(route?.topRouteType || route?.meta?.topRouteType || 'direct_chat') || 'direct_chat',
+    stablePrompt: buildPlannerStablePromptFingerprint(toolCatalog)
+  });
+  const hash = crypto
+    .createHash('sha256')
+    .update(payload)
+    .digest('hex')
+    .slice(0, 24);
+  return `mizukibot:planner:chat_completions:${hash}`;
+}
+
+function applyPlannerOpenAIPromptCacheOptions(requestBody = {}, route = {}, toolCatalog = []) {
+  if (!requestBody || typeof requestBody !== 'object') return requestBody;
+  if (config.OPENAI_PROMPT_CACHE_ENABLED === false) return requestBody;
+  const nextBody = {
+    ...requestBody,
+    prompt_cache_key: buildPlannerOpenAIPromptCacheKey(requestBody.model, route, toolCatalog)
+  };
+  const retention = normalizeOpenAIPromptCacheRetention(config.OPENAI_PROMPT_CACHE_RETENTION);
+  if (retention) nextBody.prompt_cache_retention = retention;
+  return nextBody;
+}
+
 function buildPlannerModelRequestBody(route = {}, options = {}) {
   const apiBaseUrl = getPlannerApiBaseUrlV2();
   const model = getPlannerModel();
   const toolCatalog = collectAvailableToolSummary(route, options).toolCatalog;
-  const requestBody = {
+  let requestBody = {
     model,
     temperature: DEFAULT_PLANNER_TEMPERATURE,
     messages: [
@@ -412,6 +480,7 @@ function buildPlannerModelRequestBody(route = {}, options = {}) {
   if (getApiProvider(ensureChatCompletionsUrlLocal(apiBaseUrl), model) === 'openai_compatible') {
     const effort = getPlannerReasoningEffort(options);
     if (effort) requestBody.reasoning_effort = effort;
+    requestBody = applyPlannerOpenAIPromptCacheOptions(requestBody, route, toolCatalog);
   }
   return { requestBody, toolCatalog };
 }
@@ -422,7 +491,9 @@ function buildPlannerPrompt(toolCatalog = []) {
 
 module.exports = {
   buildBackgroundResearchMeta,
+  buildPlannerOpenAIPromptCacheKey,
   buildPlannerModelRequestBody,
+  buildPlannerStablePromptFingerprint,
   canonicalizeToolNames,
   choosePreferredToolSubset,
   collectAvailableToolSummary,

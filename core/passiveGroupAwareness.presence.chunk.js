@@ -17,7 +17,7 @@ function getSessionKeyForPresence(groupId, senderId) {
 function containsExitCue(text = '') {
   const t = normalizeText(text).toLowerCase();
   if (!t) return false;
-  return /(懂了|知道了|行|好|ok|okay|收到|谢谢|谢了|没事了|解决了|先这样|晚安|睡了)/i.test(t);
+  return /^(?:懂了|知道了|行|好|ok|okay|收到|谢谢|谢了|没事了|解决了|先这样|晚安|睡了)[。.!！~～\s]*$/i.test(t);
 }
 
 function hasStrongBotCue(addressee) {
@@ -147,6 +147,11 @@ function decidePresenceAction({
   const scoreMin = Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60);
   const strongCue = hasStrongBotCue(addressee);
   const topicCue = hasBotTopicCue(addressee);
+  const ambientEnabled = config.PASSIVE_AWARENESS_AMBIENT_TRIGGER_ENABLED === true;
+  const ambientMinScore = Number(config.PASSIVE_AWARENESS_AMBIENT_MIN_SCORE || 12);
+  const ambientMinLength = Math.max(1, Number(config.PASSIVE_AWARENESS_AMBIENT_MIN_LENGTH || 8));
+  const ambientAllowUnclear = config.PASSIVE_AWARENESS_AMBIENT_ALLOW_UNCLEAR === true;
+  const ambientAllowHumanChat = config.PASSIVE_AWARENESS_AMBIENT_ALLOW_HUMAN_CHAT === true;
   const waitingSince = Number(groupPresence?.waiting_since || 0) || 0;
   const waitingElapsed = waitingSince > 0 ? now - waitingSince : 0;
   const humanTurnsSinceWaiting = waitingSince > 0
@@ -192,12 +197,27 @@ function decidePresenceAction({
   }
 
   const minLength = Math.max(1, Number(config.PASSIVE_AWARENESS_MIN_MESSAGE_LENGTH || 6));
-  if (String(text || '').length < minLength || isNoiseText(text) || (!strongCue && score < scoreMin)) {
+  const normalizedText = String(text || '');
+  const normalizedAddressee = String(addressee || '');
+  const ambientCandidate = Boolean(
+    ambientEnabled
+    && normalizedText.length >= ambientMinLength
+    && !isNoiseText(normalizedText)
+    && (normalizedAddressee !== 'unclear' || ambientAllowUnclear)
+    && (normalizedAddressee !== 'human_to_human' || ambientAllowHumanChat)
+    && Number(score || 0) >= ambientMinScore
+  );
+
+  if (normalizedText.length < minLength || isNoiseText(normalizedText) || (!strongCue && !ambientCandidate && score < scoreMin)) {
     return { action: 'no_reply', state: groupState, reason: score < scoreMin ? 'score-too-low' : 'noise-or-too-short' };
   }
 
   if (strongCue) {
     return { action: 'reply', state: 'interjecting', reason: `direct-cue:${addressee}` };
+  }
+
+  if (ambientCandidate) {
+    return { action: 'reply', state: 'interjecting', reason: `ambient-candidate:${addressee}` };
   }
 
   if (['group_bot_topic', 'group_open_question'].includes(addressee)) {

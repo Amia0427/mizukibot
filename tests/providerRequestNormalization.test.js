@@ -39,20 +39,20 @@ module.exports = (async () => {
       stream: false,
       defaultMaxTokens: 200
     });
-    assert.strictEqual(anthropicMain.provider, 'anthropic');
-    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicMain.body, 'prompt_cache_key'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicMain.body, 'prompt_cache_retention'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicMain.body, '__requestHeaders'));
+    assert.strictEqual(anthropicMain.provider, 'openai_compatible');
+    assert.strictEqual(anthropicMain.url, 'https://api.anthropic.com/v1/chat/completions');
+    assert.ok(Object.prototype.hasOwnProperty.call(anthropicMain.body, 'prompt_cache_key'));
+    assert.strictEqual(anthropicMain.body.prompt_cache_retention, '24h');
+    assert.ok(Object.prototype.hasOwnProperty.call(anthropicMain.body, '__requestHeaders'));
 
     const preparedAnthropic = await httpClient.prepareRequest(anthropicMain.url, anthropicMain.body);
-    assert.strictEqual(preparedAnthropic.provider, 'anthropic');
-    assert.ok(preparedAnthropic.requestBody.messages.some((message) => (
-      message.content.some((block) => Object.prototype.hasOwnProperty.call(block, 'cache_control'))
-    )));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestBody, 'prompt_cache_key'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestBody, 'prompt_cache_retention'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestHeaders || {}, 'Authorization'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestHeaders || {}, 'User-Agent'));
+    assert.strictEqual(preparedAnthropic.provider, 'openai_compatible');
+    assert.strictEqual(preparedAnthropic.requestUrl, 'https://api.anthropic.com/v1/chat/completions');
+    assert.ok(Array.isArray(preparedAnthropic.requestBody.messages));
+    assert.strictEqual(preparedAnthropic.requestBody.prompt_cache_key, anthropicMain.body.prompt_cache_key);
+    assert.strictEqual(preparedAnthropic.requestBody.prompt_cache_retention, '24h');
+    assert.ok(Object.prototype.hasOwnProperty.call(preparedAnthropic.requestHeaders || {}, 'Authorization'));
+    assert.strictEqual(preparedAnthropic.requestHeaders['User-Agent'], 'test-agent');
 
     axios = require('axios');
     originalPost = axios.post;
@@ -62,9 +62,9 @@ module.exports = (async () => {
       return { data: { content: [{ type: 'text', text: 'ok' }] }, status: 200 };
     };
     await httpClient.postWithRetry(anthropicMain.url, anthropicMain.body, 0, 'main-key');
-    assert.strictEqual(sentAnthropicOptions.headers['x-api-key'], 'main-key');
-    assert.ok(!Object.prototype.hasOwnProperty.call(sentAnthropicOptions.headers, 'Authorization'));
-    assert.strictEqual(sentAnthropicOptions.headers['User-Agent'], false);
+    assert.strictEqual(sentAnthropicOptions.headers.Authorization, 'Bearer main-key');
+    assert.ok(!Object.prototype.hasOwnProperty.call(sentAnthropicOptions.headers, 'x-api-key'));
+    assert.strictEqual(sentAnthropicOptions.headers['User-Agent'], 'test-agent');
     axios.post = originalPost;
 
     const preparedGeminiNative = await httpClient.prepareRequest(

@@ -111,6 +111,28 @@ function createPersistNode(deps = {}) {
     return new Date(Math.min(...candidates)).toISOString();
   }
 
+  function buildPostReplyTurnId({ routeMeta = {}, sessionKey = '', createdAt = '', userContent = '', finalReply = '' } = {}) {
+    const explicit = normalizeText(routeMeta.messageId || routeMeta.message_id);
+    if (explicit) return explicit;
+    return stableHash({
+      sessionKey: normalizeText(sessionKey),
+      createdAt: normalizeText(createdAt),
+      userContent: String(userContent || '').slice(0, 1000),
+      finalReply: String(finalReply || '').slice(0, 1000)
+    });
+  }
+
+  function buildPostReplyTurnEvidence({ routeMeta = {}, userContent = '', finalReply = '', createdAt = '', routePolicyKey = '', topRouteType = '' } = {}) {
+    return {
+      userText: String(userContent || '').slice(0, 500),
+      assistantText: String(finalReply || '').slice(0, 500),
+      createdAt: normalizeText(createdAt),
+      routePolicyKey: normalizeText(routePolicyKey),
+      topRouteType: normalizeText(topRouteType || routeMeta.topRouteType),
+      messageId: normalizeText(routeMeta.messageId || routeMeta.message_id)
+    };
+  }
+
   function buildPersistGateReasons({
     request,
     state,
@@ -472,9 +494,25 @@ function createPersistNode(deps = {}) {
           groupId: routeGroupId
         });
         const coreTurn = {
+          turnId: buildPostReplyTurnId({
+            routeMeta,
+            sessionKey: request.sessionKey,
+            createdAt: new Date(now).toISOString(),
+            userContent,
+            finalReply
+          }),
           question: userContent,
           finalReply,
           createdAt: new Date(now).toISOString(),
+          evidence: buildPostReplyTurnEvidence({
+            routeMeta,
+            userContent,
+            finalReply,
+            createdAt: new Date(now).toISOString(),
+            routePolicyKey: request.routePolicyKey,
+            topRouteType: request.topRouteType
+          }),
+          sourceSessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id || request.sessionKey),
           routeMeta,
           continuitySnapshot: {
             activeTopic: String(state.memory?.continuityState?.payload?.active_topic || '').trim(),

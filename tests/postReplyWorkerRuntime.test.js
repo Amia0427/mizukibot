@@ -52,7 +52,7 @@ module.exports = (async () => {
     const originalAddMemoryItemsBatchWithVectorBackfill = vectorMemory.addMemoryItemsBatchWithVectorBackfill;
 
     memoryExtraction.learnSomethingNew = async (...args) => {
-      calls.push({ type: 'memory', options: args[3] || {} });
+      calls.push({ type: 'memory', userText: args[1], botReply: args[2], options: args[3] || {} });
       return null;
     };
     memoryExtraction.extractPostReplyEnrichment = async (...args) => {
@@ -125,8 +125,13 @@ module.exports = (async () => {
       routePolicyKey: 'chat/default',
       topRouteType: 'direct_chat',
       routeMeta: {
-        groupId: '1083095371'
+        groupId: '1083095371',
+        sessionId: 'session-1'
       },
+      jobId: 'core_job_meta_1',
+      turns: [
+        { turnId: 'turn-1', question: 'hello world', finalReply: 'reply text', createdAt: '2026-04-18T10:00:00.000Z', sourceSessionId: 'session-1', evidence: { userText: 'hello world', assistantText: 'reply text' }, routeMeta: { groupId: '1083095371', sessionId: 'session-1' } }
+      ],
       tasks: {
         memoryLearning: true,
         selfImprovement: true,
@@ -141,8 +146,46 @@ module.exports = (async () => {
     assert.ok(journalCall, 'daily journal should run');
     assert.ok(selfCall, 'self improvement should run');
     assert.strictEqual(memoryCall.options.postReplyMemoryMode, 'core');
+    assert.strictEqual(memoryCall.options.jobId, 'core_job_meta_1');
+    assert.strictEqual(memoryCall.options.turnId, 'turn-1');
+    assert.deepStrictEqual(memoryCall.options.turnIds, ['turn-1']);
+    assert.strictEqual(memoryCall.options.sourceSessionId, 'session-1');
+    assert.strictEqual(memoryCall.options.evidence[0].turnId, 'turn-1');
     assert.strictEqual(journalCall.options.segmentNow, false);
+    assert.strictEqual(journalCall.options.jobId, 'core_job_meta_1');
+    assert.strictEqual(journalCall.options.postReplyJobId, 'core_job_meta_1');
+    assert.strictEqual(journalCall.options.turnId, 'turn-1');
+    assert.deepStrictEqual(journalCall.options.turnIds, ['turn-1']);
+    assert.strictEqual(journalCall.options.sourceSessionId, 'session-1');
+    assert.strictEqual(journalCall.options.evidence[0].turnId, 'turn-1');
     await flushPostReplyMaterialize({ force: true, source: 'test_cleanup' });
+
+    calls.length = 0;
+    await processPostReplyJob({
+      userId: 'u1',
+      question: 'latest q',
+      finalReply: 'latest r',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371',
+        sessionId: 'session-1'
+      },
+      jobId: 'core_job_merged_turns',
+      turns: [
+        { turnId: 'turn-a', question: 'q1', finalReply: 'r1', createdAt: '2026-04-18T10:00:00.000Z', sourceSessionId: 'session-1', routeMeta: { groupId: '1083095371', sessionId: 'session-1' } },
+        { turnId: 'turn-b', question: 'q2', finalReply: 'r2', createdAt: '2026-04-18T10:02:00.000Z', sourceSessionId: 'session-1', routeMeta: { groupId: '1083095371', sessionId: 'session-1' } }
+      ],
+      tasks: {
+        memoryLearning: true
+      }
+    });
+    const mergedMemoryCall = calls.find((item) => item.type === 'memory');
+    assert.ok(mergedMemoryCall.userText.includes('Turn 1 User: q1'), 'core learning should receive merged user turns');
+    assert.ok(mergedMemoryCall.botReply.includes('Turn 2 Assistant: r2'), 'core learning should receive merged assistant turns');
+    assert.deepStrictEqual(mergedMemoryCall.options.turnIds, ['turn-a', 'turn-b']);
+    await flushPostReplyMaterialize({ force: true, source: 'test_merged_cleanup' });
 
     const materializeFirst = schedulePostReplyMaterialize({ delayMs: 60000 });
     const materializeSecond = schedulePostReplyMaterialize({ delayMs: 60000 });

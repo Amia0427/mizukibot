@@ -46,7 +46,8 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       dailyJournalMaxMonthlyFiles: options.dailyJournalMaxMonthlyFiles,
       dailyLookbackDays: options.dailyLookbackDays,
       lookbackDays: options.lookbackDays,
-      sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature
+      sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
+      __memoryContextMemo: options.__memoryContextMemo
     });
   const personaMemoryState = options.personaMemoryState && typeof options.personaMemoryState === 'object'
     ? options.personaMemoryState

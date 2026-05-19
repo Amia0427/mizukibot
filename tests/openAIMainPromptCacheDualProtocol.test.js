@@ -128,10 +128,14 @@ module.exports = (async () => {
 
     const preparedChat = await httpClient.prepareRequest(chatRequest.url, chatRequest.body);
     assert.strictEqual(preparedChat.provider, 'openai_compatible');
+    assert.strictEqual(preparedChat.requestUrl, 'https://example.com/v1/chat/completions');
     assert.strictEqual(preparedChat.requestBody.prompt_cache_key, chatRequest.body.prompt_cache_key);
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedChat.requestBody, 'prompt_cache_retention'));
+    assert.ok(Array.isArray(preparedChat.requestBody.messages));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedChat.requestBody, 'input'));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedChat.requestBody.messages[0].content[0], 'cache_control'));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedChat.requestBody.tools[0].function, 'cache_control'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedChat.requestBody, '__preferredProtocol'));
 
     process.env.OPENAI_PROMPT_CACHE_KEY_PREFIX = 'tenant-user-session-secret';
     clearProjectCache();
@@ -157,22 +161,23 @@ module.exports = (async () => {
       routeMeta: { topRouteType: 'direct_chat' },
       defaultMaxTokens: 200
     });
-    assert.strictEqual(autoResponsesRequest.protocol, 'responses');
-    assert.strictEqual(autoResponsesRequest.url, 'https://example.com/v1/responses');
-    assert.ok(/^mizukibot:main:responses:[a-f0-9]{24}$/.test(autoResponsesRequest.body.prompt_cache_key));
+    assert.strictEqual(autoResponsesRequest.protocol, 'chat_completions');
+    assert.strictEqual(autoResponsesRequest.url, 'https://example.com/v1/chat/completions');
+    assert.ok(/^mizukibot:main:chat_completions:[a-f0-9]{24}$/.test(autoResponsesRequest.body.prompt_cache_key));
     const autoPreparedFromChatUrl = await httpClientAuto.prepareRequest('https://example.com/v1/chat/completions', autoResponsesRequest.body);
-    assert.strictEqual(autoPreparedFromChatUrl.requestUrl, 'https://example.com/v1/responses');
-    assert.ok(Array.isArray(autoPreparedFromChatUrl.requestBody.input));
-    assert.ok(!Object.prototype.hasOwnProperty.call(autoPreparedFromChatUrl.requestBody, 'messages'));
+    assert.strictEqual(autoPreparedFromChatUrl.requestUrl, 'https://example.com/v1/chat/completions');
+    assert.ok(Array.isArray(autoPreparedFromChatUrl.requestBody.messages));
+    assert.ok(!Object.prototype.hasOwnProperty.call(autoPreparedFromChatUrl.requestBody, 'input'));
     const autoPreparedClaudeCompatible = await httpClientAuto.prepareRequest('https://example.com/v1/chat/completions', {
       model: 'claude-opus-4-7',
       messages: [{ role: 'user', content: 'hello' }],
       max_tokens: 8,
       stream: false
     });
-    assert.strictEqual(autoPreparedClaudeCompatible.requestUrl, 'https://example.com/v1/chat/completions');
-    assert.ok(Array.isArray(autoPreparedClaudeCompatible.requestBody.messages));
-    assert.ok(!Object.prototype.hasOwnProperty.call(autoPreparedClaudeCompatible.requestBody, 'input'));
+    assert.strictEqual(autoPreparedClaudeCompatible.provider, 'openai_compatible');
+    assert.strictEqual(autoPreparedClaudeCompatible.requestUrl, 'https://example.com/v1/responses');
+    assert.ok(Array.isArray(autoPreparedClaudeCompatible.requestBody.input));
+    assert.ok(!Object.prototype.hasOwnProperty.call(autoPreparedClaudeCompatible.requestBody, 'messages'));
 
     process.env.OPENAI_MAIN_API_MODE = 'responses';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
@@ -252,6 +257,30 @@ module.exports = (async () => {
     assert.ok(Array.isArray(bodies[1].messages));
     assert.ok(!Object.prototype.hasOwnProperty.call(bodies[1], 'input'));
     assert.ok(!Object.prototype.hasOwnProperty.call(bodies[1], '__responsesProtocolFallbackAttempted'));
+
+    attemptCount = 0;
+    bodies.length = 0;
+    urls.length = 0;
+    axios.post = async (url, body) => {
+      urls.push(url);
+      bodies.push(body);
+      attemptCount += 1;
+      if (attemptCount === 1) {
+        const error = new Error('not implemented');
+        error.response = {
+          status: 500,
+          data: { error: { message: 'not implemented', code: 'convert_request_failed' } }
+        };
+        throw error;
+      }
+      return { data: { choices: [{ message: { role: 'assistant', content: 'fallback ok' } }] } };
+    };
+    await httpClientResponses.postWithRetry(responsesRequest.url, responsesRequest.body, 0, 'test-key');
+    assert.strictEqual(attemptCount, 2);
+    assert.strictEqual(urls[0], 'https://example.com/v1/responses');
+    assert.strictEqual(urls[1], 'https://example.com/v1/chat/completions');
+    assert.ok(Array.isArray(bodies[0].input));
+    assert.ok(Array.isArray(bodies[1].messages));
 
     attemptCount = 0;
     bodies.length = 0;

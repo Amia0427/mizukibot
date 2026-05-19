@@ -43,7 +43,17 @@ const runners = {
         fallbackCounts: { empty_result: 1 },
         leakage: 0,
         sourceCoverage: { lexical: 2 }
-      }
+      },
+      healthGate: {
+        canBackfill: false,
+        mustReconcileFirst: true,
+        nextSafeCommand: 'node scripts/repair-memory-vector-index.js --apply --compact'
+      },
+      recommendedActions: [{
+        action: 'reconcile',
+        command: 'node scripts/repair-memory-vector-index.js --apply --compact',
+        required: true
+      }]
     };
   },
   runBackfill: async (args) => {
@@ -106,6 +116,8 @@ module.exports = (async () => {
   assert.strictEqual(diagnose.summary.journal.totals.v3EpisodeEvents, 1);
   assert.strictEqual(diagnose.details.journal.totals.embeddingPending, 1);
   assert.strictEqual(diagnose.summary.fallback.fallbackCounts.empty_result, 1);
+  assert.strictEqual(diagnose.summary.healthGate.mustReconcileFirst, true);
+  assert.strictEqual(diagnose.summary.recommendedActions[0].action, 'reconcile');
 
   const backfill = await runMemoryOps(parseMemoryOpsArgs(['backfill', '--source', 'journal', '--limit', '4']), { runners });
   assert.strictEqual(backfill.mode, 'backfill');

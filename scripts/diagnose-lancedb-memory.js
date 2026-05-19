@@ -3,6 +3,12 @@
 const path = require('path');
 const config = require('../config');
 const { buildSyncSummary } = require('./sync-lancedb-memory-index');
+const {
+  buildMemoryIndexHealthGate,
+  buildRecommendedActions,
+  JOURNAL_BACKFILL_COMMAND,
+  MEMORY_BACKFILL_COMMAND
+} = require('./memory-index-health-gate');
 const { queryMemory } = require('../utils/memory-v3/query');
 const { loadScopeProjection } = require('../utils/memory-v3/storage');
 const { diagnoseProjectionFreshness } = require('../utils/memory-v3/diagnostics');
@@ -213,6 +219,14 @@ async function runDiagnostics(args = {}, deps = {}) {
   const probe = args.skipProbe ? { skipped: true, reason: 'skip_probe' } : await runProbe(cases);
   const projectionFreshness = (deps.diagnoseProjectionFreshness || diagnoseProjectionFreshness)();
   const journal = buildSafeJournalHealthSummary({ limit: args.limit || 20 }, deps);
+  const journalPending = Number(journal?.totals?.embeddingPending || 0) || 0;
+  const nextBackfillCommand = journalPending > 0 ? JOURNAL_BACKFILL_COMMAND : MEMORY_BACKFILL_COMMAND;
+  const healthGate = buildMemoryIndexHealthGate({
+    coverage: sync.coverage,
+    projectionFreshness,
+    nextBackfillCommand
+  });
+  const recommendedActions = buildRecommendedActions(healthGate, sync.coverage, { nextBackfillCommand });
   return {
     ok: true,
     lancedbDir: sync.lancedbDir,
@@ -222,6 +236,8 @@ async function runDiagnostics(args = {}, deps = {}) {
     worldbook: sync.worldbook,
     repairPlan,
     recommendedAction: repairPlan.recommendedAction || '',
+    recommendedActions,
+    healthGate,
     projectionFreshness,
     journal,
     probe
@@ -258,6 +274,8 @@ if (require.main === module) {
 
 module.exports = {
   buildSafeJournalHealthSummary,
+  buildMemoryIndexHealthGate,
+  buildRecommendedActions,
   countScopeLeaks,
   loadProbeCases,
   parseArgs,

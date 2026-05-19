@@ -82,6 +82,113 @@ function buildTurnsConversation(turns = []) {
     .filter((item) => item.question || item.finalReply);
 }
 
+function buildCoreLearningTurns(job = {}) {
+  const turns = normalizeTurnItems(job.turns)
+    .map((item, index) => {
+      const routeMeta = normalizeObject(item.routeMeta, {});
+      const question = normalizeText(item.question);
+      const finalReply = normalizeText(item.finalReply);
+      if (!question && !finalReply) return null;
+      const createdAt = normalizeText(item.createdAt);
+      return {
+        turnId: normalizeText(item.turnId || item.turn_id) || `${normalizeText(job.jobId) || 'post_reply'}:${index + 1}`,
+        question,
+        finalReply,
+        createdAt,
+        evidence: normalizeObject(item.evidence, {}),
+        sourceSessionId: normalizeText(item.sourceSessionId || item.source_session_id || routeMeta.sessionId || routeMeta.session_id || job.sessionKey),
+        routeMeta
+      };
+    })
+    .filter(Boolean);
+
+  if (turns.length > 0) return turns;
+  const fallbackQuestion = normalizeText(job.question);
+  const fallbackReply = normalizeText(job.finalReply);
+  if (!fallbackQuestion && !fallbackReply) return [];
+  const routeMeta = normalizeObject(job.routeMeta, {});
+  return [{
+    turnId: `${normalizeText(job.jobId) || 'post_reply'}:1`,
+    question: fallbackQuestion,
+    finalReply: fallbackReply,
+    createdAt: normalizeText(job.createdAt || new Date().toISOString()),
+    evidence: {},
+    sourceSessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id || job.sessionKey),
+    routeMeta
+  }];
+}
+
+function buildCoreLearningConversation(job = {}) {
+  const turns = buildCoreLearningTurns(job);
+  if (turns.length <= 1) {
+    const only = turns[0] || {};
+    return {
+      turns,
+      userText: only.question || normalizeText(job.question),
+      botReply: only.finalReply || normalizeText(job.finalReply)
+    };
+  }
+  return {
+    turns,
+    userText: turns.map((item, index) => `Turn ${index + 1} User: ${item.question}`).join('\n'),
+    botReply: turns.map((item, index) => `Turn ${index + 1} Assistant: ${item.finalReply}`).join('\n')
+  };
+}
+
+function buildCoreLearningEvidence(job = {}) {
+  const { turns } = buildCoreLearningConversation(job);
+  const turnIds = turns.map((item) => normalizeText(item.turnId)).filter(Boolean);
+  const latestTurn = turns[turns.length - 1] || {};
+  const evidenceItems = turns.map((item, index) => ({
+    turnId: normalizeText(item.turnId),
+    createdAt: normalizeText(item.createdAt),
+    userText: normalizeText(item.evidence?.userText || item.question).slice(0, 500),
+    assistantText: normalizeText(item.evidence?.assistantText || item.finalReply).slice(0, 500),
+    sourceSessionId: normalizeText(item.sourceSessionId),
+    index: index + 1
+  }));
+  return {
+    turns,
+    turnId: normalizeText(latestTurn.turnId),
+    turnIds,
+    evidence: evidenceItems,
+    sourceSessionId: normalizeText(latestTurn.sourceSessionId || job.sessionKey)
+  };
+}
+
+function buildLearningDecisionMeta(type = '', meta = {}, status = 'candidate') {
+  return {
+    status,
+    reason: 'post_reply_enrich_extractor',
+    fieldKey: normalizeText(type),
+    sourceKind: 'extractor',
+    postReplyJobId: normalizeText(meta.jobId),
+    jobId: normalizeText(meta.jobId),
+    turnId: normalizeText(meta.turnId),
+    turnIds: normalizeArray(meta.turnIds).map((item) => normalizeText(item)).filter(Boolean),
+    sourceSessionId: normalizeText(meta.sourceSessionId || meta.sessionId),
+    evidenceCount: normalizeArray(meta.evidence).length,
+    phase: 'post_reply_enrich_write'
+  };
+}
+
+function buildPostReplyEnrichMeta(base = {}, fieldKey = '', status = 'candidate') {
+  const turnIds = normalizeArray(base.turnIds).map((item) => normalizeText(item)).filter(Boolean);
+  const turnId = normalizeText(base.turnId || turnIds[turnIds.length - 1]);
+  return {
+    routePolicyKey: normalizeText(base.routePolicyKey),
+    topRouteType: normalizeText(base.topRouteType),
+    sessionId: normalizeText(base.sessionId),
+    groupId: normalizeText(base.groupId),
+    channelId: normalizeText(base.channelId),
+    sourceSessionId: normalizeText(base.sourceSessionId || base.sessionId),
+    turnId,
+    turnIds,
+    evidence: normalizeArray(base.evidence),
+    learningDecision: buildLearningDecisionMeta(fieldKey, { ...base, turnId, turnIds }, status)
+  };
+}
+
 function buildMinimalStyleMemoryItems(userId = '', styleMemory = {}, meta = {}) {
   const uid = normalizeText(userId);
   if (!uid) return [];
@@ -90,6 +197,7 @@ function buildMinimalStyleMemoryItems(userId = '', styleMemory = {}, meta = {}) 
   const avoids = normalizeArray(styleMemory?.style_avoid).map((item) => normalizeText(item)).filter(Boolean).slice(0, 1);
   const out = [];
   if (patterns[0]) {
+    const enrichMeta = buildPostReplyEnrichMeta(meta, 'style_pattern', 'active');
     out.push({
       userId: uid,
       text: `style: ${patterns[0]}`,
@@ -98,6 +206,13 @@ function buildMinimalStyleMemoryItems(userId = '', styleMemory = {}, meta = {}) 
       source: 'post_reply_enrich',
       confidence,
       semanticSlot: 'style_pattern',
+      routePolicyKey: enrichMeta.routePolicyKey,
+      topRouteType: enrichMeta.topRouteType,
+      sessionId: enrichMeta.sessionId,
+      sourceSessionId: enrichMeta.sourceSessionId,
+      turnId: enrichMeta.turnId,
+      turnIds: enrichMeta.turnIds,
+      evidence: enrichMeta.evidence,
       meta: {
         source: 'post_reply_enrich',
         confidence,
@@ -108,12 +223,18 @@ function buildMinimalStyleMemoryItems(userId = '', styleMemory = {}, meta = {}) 
         participants: [],
         entities: [],
         relations: [],
-        routePolicyKey: normalizeText(meta.routePolicyKey),
-        topRouteType: normalizeText(meta.topRouteType)
+        routePolicyKey: enrichMeta.routePolicyKey,
+        topRouteType: enrichMeta.topRouteType,
+        sourceSessionId: enrichMeta.sourceSessionId,
+        turnId: enrichMeta.turnId,
+        turnIds: enrichMeta.turnIds,
+        evidence: enrichMeta.evidence,
+        learningDecision: enrichMeta.learningDecision
       }
     });
   }
   if (!patterns[0] && avoids[0]) {
+    const enrichMeta = buildPostReplyEnrichMeta(meta, 'style_avoid', 'active');
     out.push({
       userId: uid,
       text: `style: ${avoids[0]}`,
@@ -122,6 +243,13 @@ function buildMinimalStyleMemoryItems(userId = '', styleMemory = {}, meta = {}) 
       source: 'post_reply_enrich',
       confidence,
       semanticSlot: 'style_avoid',
+      routePolicyKey: enrichMeta.routePolicyKey,
+      topRouteType: enrichMeta.topRouteType,
+      sessionId: enrichMeta.sessionId,
+      sourceSessionId: enrichMeta.sourceSessionId,
+      turnId: enrichMeta.turnId,
+      turnIds: enrichMeta.turnIds,
+      evidence: enrichMeta.evidence,
       meta: {
         source: 'post_reply_enrich',
         confidence,
@@ -132,8 +260,13 @@ function buildMinimalStyleMemoryItems(userId = '', styleMemory = {}, meta = {}) 
         participants: [],
         entities: [],
         relations: [],
-        routePolicyKey: normalizeText(meta.routePolicyKey),
-        topRouteType: normalizeText(meta.topRouteType)
+        routePolicyKey: enrichMeta.routePolicyKey,
+        topRouteType: enrichMeta.topRouteType,
+        sourceSessionId: enrichMeta.sourceSessionId,
+        turnId: enrichMeta.turnId,
+        turnIds: enrichMeta.turnIds,
+        evidence: enrichMeta.evidence,
+        learningDecision: enrichMeta.learningDecision
       }
     });
   }
@@ -148,6 +281,7 @@ function buildMinimalJargonMemoryItems(groupId = '', jargonMemory = {}, meta = {
   const patterns = normalizeArray(jargonMemory?.jargon_patterns).map((item) => normalizeText(item)).filter(Boolean).slice(0, 1);
   const selected = terms[0] || patterns[0];
   if (!selected) return [];
+  const enrichMeta = buildPostReplyEnrichMeta(meta, 'group_jargon', 'active');
   return [{
     userId: `group:${gid}`,
     text: `group jargon: ${selected}`,
@@ -156,6 +290,13 @@ function buildMinimalJargonMemoryItems(groupId = '', jargonMemory = {}, meta = {
     source: 'post_reply_enrich',
     confidence,
     semanticSlot: 'group_jargon',
+    routePolicyKey: enrichMeta.routePolicyKey,
+    topRouteType: enrichMeta.topRouteType,
+    sessionId: enrichMeta.sessionId,
+    sourceSessionId: enrichMeta.sourceSessionId,
+    turnId: enrichMeta.turnId,
+    turnIds: enrichMeta.turnIds,
+    evidence: enrichMeta.evidence,
     meta: {
       source: 'post_reply_enrich',
       confidence,
@@ -166,8 +307,13 @@ function buildMinimalJargonMemoryItems(groupId = '', jargonMemory = {}, meta = {
       participants: [],
       entities: [],
       relations: [],
-      routePolicyKey: normalizeText(meta.routePolicyKey),
-      topRouteType: normalizeText(meta.topRouteType)
+      routePolicyKey: enrichMeta.routePolicyKey,
+      topRouteType: enrichMeta.topRouteType,
+      sourceSessionId: enrichMeta.sourceSessionId,
+      turnId: enrichMeta.turnId,
+      turnIds: enrichMeta.turnIds,
+      evidence: enrichMeta.evidence,
+      learningDecision: enrichMeta.learningDecision
     }
   }];
 }
@@ -219,7 +365,11 @@ async function runEnrichPhase(job = {}, meta = {}) {
         channelId: meta.channelId,
         sourceKind: 'extractor',
         status: 'candidate',
-        sourceSessionId: meta.sessionId,
+        sourceSessionId: meta.sourceSessionId || meta.sessionId,
+        turnId: meta.turnId,
+        turnIds: meta.turnIds,
+        evidence: meta.evidence,
+        learningDecision: buildLearningDecisionMeta('task', meta, 'candidate'),
         participants: [],
         entities: [],
         relations: []
@@ -235,24 +385,27 @@ async function runEnrichPhase(job = {}, meta = {}) {
   if (meta.groupId && enrichment?.group_memory && typeof enrichment.group_memory === 'object') {
     const confidence = Number(enrichment.group_memory.confidence || 0) || 0;
     for (const value of normalizeArray(enrichment.group_memory.shared_facts).map((item) => normalizeText(item)).filter(Boolean)) {
+      const groupMeta = { confidence, sourceKind: 'extractor', status: 'candidate', ...buildPostReplyEnrichMeta(meta, 'group_fact', 'candidate') };
       if (typeof addGroupMemoryWithVectorBackfill === 'function') {
-        await addGroupMemoryWithVectorBackfill(meta.groupId, value, 'fact', { confidence, sourceKind: 'extractor', status: 'candidate' }, 1.08, meta);
+        await addGroupMemoryWithVectorBackfill(meta.groupId, value, 'fact', groupMeta, 1.08, meta);
       } else {
-        addGroupMemory(meta.groupId, value, 'fact', { confidence, sourceKind: 'extractor', status: 'candidate' }, 1.08);
+        addGroupMemory(meta.groupId, value, 'fact', groupMeta, 1.08);
       }
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_goals).map((item) => normalizeText(item)).filter(Boolean)) {
+      const groupMeta = { confidence, sourceKind: 'extractor', status: 'active', ...buildPostReplyEnrichMeta(meta, 'group_goal', 'active') };
       if (typeof addGroupMemoryWithVectorBackfill === 'function') {
-        await addGroupMemoryWithVectorBackfill(meta.groupId, `group goal: ${value}`, 'goal', { confidence, sourceKind: 'extractor', status: 'active' }, 1.15, meta);
+        await addGroupMemoryWithVectorBackfill(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15, meta);
       } else {
-        addGroupMemory(meta.groupId, `group goal: ${value}`, 'goal', { confidence, sourceKind: 'extractor', status: 'active' }, 1.15);
+        addGroupMemory(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15);
       }
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_topics).map((item) => normalizeText(item)).filter(Boolean)) {
+      const groupMeta = { confidence, sourceKind: 'extractor', status: 'candidate', ...buildPostReplyEnrichMeta(meta, 'group_topic', 'candidate') };
       if (typeof addGroupMemoryWithVectorBackfill === 'function') {
-        await addGroupMemoryWithVectorBackfill(meta.groupId, `group topic: ${value}`, 'topic', { confidence, sourceKind: 'extractor', status: 'candidate' }, 0.96, meta);
+        await addGroupMemoryWithVectorBackfill(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96, meta);
       } else {
-        addGroupMemory(meta.groupId, `group topic: ${value}`, 'topic', { confidence, sourceKind: 'extractor', status: 'candidate' }, 0.96);
+        addGroupMemory(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96);
       }
     }
   }
@@ -472,12 +625,19 @@ async function flushPostReplyMaterialize(options = {}) {
 
 function buildLearningMeta(job = {}) {
   const routeMeta = normalizeObject(job.routeMeta, {});
+  const evidenceMeta = buildCoreLearningEvidence(job);
   return {
+    jobId: normalizeText(job.jobId),
     routePolicyKey: normalizeText(job.routePolicyKey),
     topRouteType: normalizeText(job.topRouteType || routeMeta.topRouteType),
     sessionKey: normalizeText(job.sessionKey),
     groupId: normalizeText(routeMeta.groupId || routeMeta.group_id),
-    sessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id),
+    sessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id || evidenceMeta.sourceSessionId),
+    turnId: evidenceMeta.turnId,
+    turnIds: evidenceMeta.turnIds,
+    turns: evidenceMeta.turns,
+    evidence: evidenceMeta.evidence,
+    sourceSessionId: evidenceMeta.sourceSessionId,
     taskType: normalizeText(routeMeta.taskType || routeMeta.task_type),
     agentName: normalizeText(routeMeta.agentName || routeMeta.agent_name),
     toolName: normalizeText(routeMeta.toolName || routeMeta.tool_name),
@@ -501,6 +661,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
     postReplyMemoryMode: String(config.POST_REPLY_MEMORY_MODE || 'core').trim().toLowerCase() || 'core',
     throwOnError: true
   };
+  const learningConversation = buildCoreLearningConversation(job);
   const traceBase = {
     jobId: normalizeText(job.jobId),
     phase,
@@ -512,7 +673,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
   if (phase === 'core' && tasks.memoryLearning && !isTaskCompleted(currentJob, 'memoryLearning')) {
     const { learnSomethingNew } = getMemoryExtractionModule();
     logStructured('post_reply_step_start', { ...traceBase, step: 'learnSomethingNew' });
-    await learnSomethingNew(job.userId, job.question, job.finalReply, workerTaskOptions);
+    await learnSomethingNew(job.userId, learningConversation.userText, learningConversation.botReply, workerTaskOptions);
     logStructured('post_reply_step_done', { ...traceBase, step: 'learnSomethingNew' });
     currentJob = markTaskCompleted(currentJob, deps, 'memoryLearning');
   }
@@ -537,6 +698,12 @@ async function processPostReplyJob(job = {}, deps = {}) {
           : false,
         throwOnError: true,
         sessionKey: normalizeText(job.sessionKey),
+        sourceSessionId: normalizeText(meta.sourceSessionId || job.sourceSessionId || job.routeMeta?.sessionId || job.routeMeta?.session_id),
+        jobId: normalizeText(job.jobId),
+        postReplyJobId: normalizeText(job.jobId),
+        turnId: normalizeText(meta.turnId),
+        turnIds: normalizeArray(meta.turnIds).map((item) => normalizeText(item)).filter(Boolean),
+        evidence: normalizeArray(meta.evidence),
         routePolicyKey: normalizeText(job.routePolicyKey),
         topRouteType: normalizeText(job.topRouteType),
         routeMeta: normalizeObject(job.routeMeta, {}),
@@ -1011,5 +1178,7 @@ module.exports = {
   createPostReplyWorkerRuntime,
   flushPostReplyMaterialize,
   schedulePostReplyMaterialize,
+  buildCoreLearningConversation,
+  buildCoreLearningEvidence,
   processPostReplyJob
 };

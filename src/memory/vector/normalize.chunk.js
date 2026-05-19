@@ -1,7 +1,12 @@
 ﻿const fs = require('fs');
 const path = require('path');
 const config = require('../../../config');
-const { commitMemoryWrites, reviewMemoryWriteCandidate, validateMemoryWrite } = require('../../../utils/memoryWritePipeline');
+const {
+  applyBatchWriteGuards,
+  commitMemoryWrites,
+  reviewMemoryWriteCandidate,
+  validateMemoryWrite
+} = require('../../../utils/memoryWritePipeline');
 const {
   getEmbeddingApiBaseUrl,
   getEmbeddingApiKey,

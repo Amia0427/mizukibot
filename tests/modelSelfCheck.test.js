@@ -94,14 +94,24 @@ module.exports = (async () => {
     assert.strictEqual(specs[2].body.top_n, 1);
     assert.strictEqual(specs[4].model, 'main-model');
     assert.strictEqual(specs[5].model, 'admin-model');
+    assert.ok(!specs[4].body.reasoning_effort);
+    assert.ok(!Object.prototype.hasOwnProperty.call(specs[4].body, 'top_a'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(specs[4].body, 'repetition_penalty'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(specs[4].body, 'prompt_cache_key'));
+    assert.ok(!specs[5].body.reasoning_effort);
+    assert.ok(!Object.prototype.hasOwnProperty.call(specs[5].body, 'top_a'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(specs[5].body, 'repetition_penalty'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(specs[5].body, 'prompt_cache_key'));
     assert.strictEqual(specs[6].url, 'https://passive-decision.example/v1/chat/completions');
     assert.strictEqual(specs[6].model, 'passive-decision-model');
     assert.strictEqual(specs[6].body.max_tokens, 8);
     assert.strictEqual(specs[6].body.stream, false);
+    assert.strictEqual(specs[6].body.__preferredProtocol, 'chat_completions');
     assert.strictEqual(specs[7].url, 'https://passive-reply.example/v1/chat/completions');
     assert.strictEqual(specs[7].model, 'passive-reply-model');
     assert.strictEqual(specs[7].body.max_tokens, 8);
     assert.strictEqual(specs[7].body.stream, false);
+    assert.strictEqual(specs[7].body.__preferredProtocol, 'chat_completions');
 
     const results = await runModelSelfCheck({ adminUserId: 'admin_1', normalUserId: 'user_1' });
     assert.strictEqual(calls.length, 8);

@@ -10,7 +10,11 @@ const {
 } = require('../../../utils/modelProvider');
 const { parseCacheRef, readCachedImagePayload } = require('../../../utils/imageInputCache');
 const { HUMANIZER_SYSTEM_PROMPT } = require('../../../utils/humanizer');
-const { assertSafeHttpUrl, assertSafeModelEndpoint } = require('../../../utils/networkSafety');
+const {
+  assertSafeHttpUrl,
+  assertSafeModelEndpoint,
+  resolveSafeModelEndpoint
+} = require('../../../utils/networkSafety');
 const {
   startModelCall,
   finishModelCall,
@@ -456,6 +460,7 @@ module.exports = {
   anthropicSystemUsesArray,
   assertSafeHttpUrl,
   assertSafeModelEndpoint,
+  resolveSafeModelEndpoint,
   axios,
   blockHasAnthropicCacheControl,
   buildAnthropicRequestHeaders,

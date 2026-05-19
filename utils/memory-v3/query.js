@@ -27,6 +27,7 @@ const {
   buildDailyJournalDocsForUser,
   getJournalDocDay
 } = require('./journalDocs');
+const { isMemoryNotRecallable } = require('./recallFilter');
 const {
   classifyJournalRecallIntent,
   journalDateMatchBoost,
@@ -267,6 +268,7 @@ function collectCandidates(userId, options = {}) {
 
   if (includePersonal || includeTask || includeGroup || includeJargon || includeStyle) {
     for (const node of loadMemoryNodes()) {
+      if (isMemoryNotRecallable(node)) continue;
       const nodeUserId = normalizeText(node?.userId);
       const scopeType = normalizeText(node?.scopeType).toLowerCase();
       const groupId = normalizeText(node?.groupId);
@@ -325,6 +327,7 @@ function collectCandidates(userId, options = {}) {
   const episodes = episodeProjection.users?.[String(userId || '').trim()]?.items || [];
   if (includeJournal) {
     for (const episode of Array.isArray(episodes) ? episodes : []) {
+      if (isMemoryNotRecallable(episode)) continue;
       const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
       if (rollupLevel === 'segment') continue;
       const episodeDay = normalizeText(episode.episodeDay || episode.endDay || episode.startDay);

@@ -32,12 +32,13 @@ function buildError(status = 400, message = 'unknown parameter') {
 
 function isEmbeddingRequest(url = '', body = {}) {
   return /\/embeddings(?:\/)?$/i.test(String(url || '').trim())
-    || (
+    || Boolean(
       body
       && typeof body === 'object'
       && !Array.isArray(body)
       && Array.isArray(body.input)
       && !Array.isArray(body.messages)
+      && !body.model
     );
 }
 
@@ -47,6 +48,21 @@ function buildEmbeddingResponse() {
       data: [
         {
           embedding: [0.1, 0.2, 0.3]
+        }
+      ]
+    }
+  };
+}
+
+function buildChatOk(text = 'ok') {
+  return {
+    data: {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: text
+          }
         }
       ]
     }
@@ -95,7 +111,7 @@ module.exports = (async () => {
     axios = require('axios');
     originalPost = axios.post;
 
-    const httpClient = require('../api/httpClient');
+    let httpClient = require('../api/httpClient');
     const { requestAssistantMessage } = require('../api/runtimeV2/model/service');
     const {
       ADMIN_SHARED_FALLBACK_SCOPE,
@@ -110,18 +126,7 @@ module.exports = (async () => {
     axios.post = async (url, body, options = {}) => {
       if (isEmbeddingRequest(url, body)) return buildEmbeddingResponse();
       sent.push({ url, body, options });
-      return {
-        data: {
-          choices: [
-            {
-              message: {
-                role: 'assistant',
-                content: 'ok'
-              }
-            }
-          ]
-        }
-      };
+      return buildChatOk();
     };
 
     resetModelCallTracker();
@@ -129,6 +134,7 @@ module.exports = (async () => {
       userId: 'user-1'
     });
     assert.strictEqual(sent[0].body.model, 'main-model');
+    assert.strictEqual(sent[0].url, 'https://example.com/main/v1/chat/completions');
     assert.strictEqual(sent[0].body.temperature, 0.7);
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'top_p'));
     assert.strictEqual(sent[0].body.max_tokens, 1234);
@@ -137,10 +143,85 @@ module.exports = (async () => {
     assert.strictEqual(sent[0].body.top_a, 0.42);
     assert.strictEqual(sent[0].body.repetition_penalty, 1.13);
 
-    await requestAssistantMessage([{ role: 'user', content: 'hi' }], {
+    restoreEnv(snapshot);
+    clearProjectCache();
+    process.env.API_KEY = 'main-key';
+    process.env.API_BASE_URL = 'https://example.com/main/v1/chat/completions';
+    process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
+    process.env.AI_MODEL = 'main-model';
+    process.env.AI_RETRIES = '0';
+    process.env.AI_MAX_TOKENS = 'not-a-number';
+    axios = require('axios');
+    axios.post = async (url, body, options = {}) => {
+      if (isEmbeddingRequest(url, body)) return buildEmbeddingResponse();
+      sent.push({ url, body, options });
+      return buildChatOk();
+    };
+    sent.length = 0;
+    const { requestAssistantMessage: requestAssistantMessageWithDefaults } = require('../api/runtimeV2/model/service');
+    const defaultConfig = require('../config');
+    await requestAssistantMessageWithDefaults([{ role: 'user', content: 'hi' }], {
+      userId: 'user-1'
+    });
+    assert.strictEqual(defaultConfig.MAIN_REPLY_DEFAULT_MAX_TOKENS, 8192);
+    assert.strictEqual(defaultConfig.AI_MAX_TOKENS, 8192);
+    assert.strictEqual(sent[0].body.max_tokens, 8192);
+
+    restoreEnv(snapshot);
+    process.env.API_KEY = 'main-key';
+    process.env.API_BASE_URL = 'https://example.com/main/v1/chat/completions';
+    process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
+    process.env.AI_MODEL = 'main-model';
+    process.env.AI_TEMPERATURE = '0.7';
+    process.env.AI_TOP_P = '0.8';
+    process.env.AI_MAX_TOKENS = '1234';
+    process.env.AI_REASONING_EFFORT = 'medium';
+    process.env.AI_RETRIES = '0';
+    process.env.AI_TOP_K = '33.9';
+    process.env.AI_TOP_A = '0.42';
+    process.env.AI_REPETITION_PENALTY = '1.13';
+
+    process.env.ADMIN_USER_IDS = 'admin-1';
+    process.env.ADMIN_API_BASE_URL = 'https://example.com/admin/v1/chat/completions';
+    process.env.ADMIN_API_KEY = 'admin-key';
+    process.env.ADMIN_AI_MODEL = 'admin-model';
+    process.env.ADMIN_AI_TEMPERATURE = '0.91';
+    process.env.ADMIN_AI_TOP_P = '0.77';
+    process.env.ADMIN_AI_MAX_TOKENS = '4321';
+    process.env.ADMIN_AI_RETRIES = '0';
+    process.env.ADMIN_AI_REASONING_EFFORT = 'low';
+    process.env.ADMIN_AI_TOP_K = '64.8';
+    process.env.ADMIN_AI_TOP_A = '0.66';
+    process.env.ADMIN_AI_REPETITION_PENALTY = '1.25';
+    process.env.ADMIN_AI_FALLBACK_ENABLED = 'true';
+    process.env.ADMIN_AI_FALLBACK_MODEL = 'admin-fallback-model';
+    process.env.ADMIN_AI_FALLBACK_API_BASE_URL = 'https://example.com/admin-fallback/v1/chat/completions';
+    process.env.ADMIN_AI_FALLBACK_API_KEY = 'admin-fallback-key';
+    process.env.ADMIN_AI_FALLBACK_FAILURE_THRESHOLD = '1';
+    process.env.ADMIN_AI_FALLBACK_COOLDOWN_MS = '900000';
+    clearProjectCache();
+    axios = require('axios');
+    httpClient = require('../api/httpClient');
+    axios.post = async (url, body, options = {}) => {
+      if (isEmbeddingRequest(url, body)) return buildEmbeddingResponse();
+      sent.push({ url, body, options });
+      return buildChatOk();
+    };
+    sent.length = 1;
+    const { requestAssistantMessage: requestAssistantMessageWithAdminConfig } = require('../api/runtimeV2/model/service');
+    const {
+      ADMIN_SHARED_FALLBACK_SCOPE: freshAdminFallbackScope,
+      resetMainModelFallbackState: freshResetMainModelFallbackState
+    } = require('../utils/mainModelFallback');
+    const {
+      listRecentModelCalls: freshListRecentModelCalls
+    } = require('../utils/modelCallTracker');
+
+    await requestAssistantMessageWithAdminConfig([{ role: 'user', content: 'hi' }], {
       userId: 'admin-1'
     });
     assert.strictEqual(sent[1].body.model, 'admin-model');
+    assert.strictEqual(sent[1].url, 'https://example.com/admin/v1/chat/completions');
     assert.strictEqual(sent[1].body.temperature, 0.91);
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_p'));
     assert.strictEqual(sent[1].body.max_tokens, 4321);
@@ -149,45 +230,35 @@ module.exports = (async () => {
     assert.strictEqual(sent[1].body.top_a, 0.66);
     assert.strictEqual(sent[1].body.repetition_penalty, 1.25);
     assert.strictEqual(sent[1].options.headers.Authorization, 'Bearer admin-key');
-    const adminCall = listRecentModelCalls(1)[0];
+    const adminCall = freshListRecentModelCalls(1)[0];
     assert.strictEqual(adminCall.user_role, 'admin');
     assert.strictEqual(adminCall.model_source, 'ADMIN_AI_MODEL');
     assert.strictEqual(adminCall.api_base_url_source, 'ADMIN_API_BASE_URL');
-    assert.strictEqual(adminCall.main_fallback_scope, ADMIN_SHARED_FALLBACK_SCOPE);
+    assert.strictEqual(adminCall.main_fallback_scope, freshAdminFallbackScope);
     assert.strictEqual(adminCall.main_fallback_active, false);
     assert.strictEqual(adminCall.admin_dedicated_model_configured, true);
 
-    resetMainModelFallbackState({ scope: ADMIN_SHARED_FALLBACK_SCOPE });
+    freshResetMainModelFallbackState({ scope: freshAdminFallbackScope });
     sent.length = 0;
     axios.post = async (url, body, options = {}) => {
       if (isEmbeddingRequest(url, body)) return buildEmbeddingResponse();
       sent.push({ url, body, options });
       if (sent.length === 1) throw buildError(500, 'primary unavailable');
-      return {
-        data: {
-          choices: [
-            {
-              message: {
-                role: 'assistant',
-                content: 'ok'
-              }
-            }
-          ]
-        }
-      };
+      return buildChatOk();
     };
-    await requestAssistantMessage([{ role: 'user', content: 'hi' }], {
+    await requestAssistantMessageWithAdminConfig([{ role: 'user', content: 'hi' }], {
       userId: 'admin-1'
     });
     assert.strictEqual(sent.length, 2);
     assert.strictEqual(sent[1].body.model, 'admin-fallback-model');
+    assert.strictEqual(sent[1].url, 'https://example.com/admin-fallback/v1/chat/completions');
     assert.strictEqual(sent[1].body.temperature, 0.91);
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_p'));
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_k'));
     assert.strictEqual(sent[1].body.top_a, 0.66);
     assert.strictEqual(sent[1].body.repetition_penalty, 1.25);
     assert.strictEqual(sent[1].options.headers.Authorization, 'Bearer admin-fallback-key');
-    const fallbackCall = listRecentModelCalls(1)[0];
+    const fallbackCall = freshListRecentModelCalls(1)[0];
     assert.strictEqual(fallbackCall.user_role, 'admin');
     assert.strictEqual(fallbackCall.model_source, 'admin_shared.fallbackModel');
     assert.strictEqual(fallbackCall.main_fallback_active, true);
@@ -201,10 +272,11 @@ module.exports = (async () => {
       repetition_penalty: 1.2,
       stream: false
     });
-    assert.strictEqual(anthropicPrepared.provider, 'anthropic');
+    assert.strictEqual(anthropicPrepared.provider, 'openai_compatible');
+    assert.strictEqual(anthropicPrepared.requestUrl, 'https://api.anthropic.com/v1/responses');
     assert.strictEqual(anthropicPrepared.requestBody.top_k, 40);
-    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPrepared.requestBody, 'top_a'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPrepared.requestBody, 'repetition_penalty'));
+    assert.strictEqual(anthropicPrepared.requestBody.top_a, 0.5);
+    assert.strictEqual(anthropicPrepared.requestBody.repetition_penalty, 1.2);
 
     let attemptCount = 0;
     let firstAttemptBody = null;
@@ -217,18 +289,7 @@ module.exports = (async () => {
         throw buildError(400, 'Unknown parameter top_k');
       }
       secondAttemptBody = body;
-      return {
-        data: {
-          choices: [
-            {
-              message: {
-                role: 'assistant',
-                content: 'ok'
-              }
-            }
-          ]
-        }
-      };
+      return buildChatOk();
     };
 
     await httpClient.postWithRetry('https://example.com/v1/chat/completions', {

@@ -189,6 +189,7 @@ function buildResponsesUrl(url = '') {
   if (!normalized) return normalized;
   if (/\/responses$/i.test(normalized)) return normalized;
   if (/\/chat\/completions$/i.test(normalized)) return normalized.replace(/\/chat\/completions$/i, '/responses');
+  if (/\/messages$/i.test(normalized)) return normalized.replace(/\/messages$/i, '/responses');
   if (/\/v\d+$/i.test(normalized)) return `${normalized}/responses`;
   return normalized;
 }
@@ -198,6 +199,7 @@ function buildChatCompletionsFallbackUrl(url = '') {
   if (!normalized) return normalized;
   if (/\/chat\/completions$/i.test(normalized)) return normalized;
   if (/\/responses$/i.test(normalized)) return normalized.replace(/\/responses$/i, '/chat/completions');
+  if (/\/messages$/i.test(normalized)) return normalized.replace(/\/messages$/i, '/chat/completions');
   if (/\/v\d+$/i.test(normalized)) return `${normalized}/chat/completions`;
   return normalized;
 }
@@ -220,12 +222,17 @@ function markResponsesProtocolFallbackAttempted(requestBody = {}) {
 
 function isResponsesProtocolUnsupportedError(error) {
   const status = Number(error?.response?.status || 0);
-  if (![400, 404, 405, 415, 422, 501].includes(status)) return false;
+  if (![400, 404, 405, 415, 422, 500, 501].includes(status)) return false;
   const responseData = error?.response?.data;
   const bodyText = typeof responseData === 'string'
     ? responseData
     : JSON.stringify(responseData || {});
   const normalized = bodyText.replace(/\s+/g, ' ').trim();
+
+  if (status === 500) {
+    return /\bnot implemented\b/i.test(normalized)
+      || /responses?\s+(?:api|protocol).*?(?:not implemented|not supported|unsupported)/i.test(normalized);
+  }
 
   if (status === 404 || status === 405 || status === 501) {
     if (/\bmodel\b/i.test(normalized) && !/responses?|endpoint|route|path|url|cannot\s+(?:post|get)/i.test(normalized)) {
@@ -252,8 +259,110 @@ function requestBodyLooksLikeChatCompletion(requestBody = {}) {
     requestBody
     && typeof requestBody === 'object'
     && !Array.isArray(requestBody)
-    && Array.isArray(requestBody.messages)
+    && (Array.isArray(requestBody.messages) || Array.isArray(requestBody.input) || typeof requestBody.input === 'string')
   );
+}
+
+function mapResponsesContentPartToChat(part) {
+  if (typeof part === 'string') return { type: 'text', text: part };
+  if (!part || typeof part !== 'object' || Array.isArray(part)) return null;
+  const type = String(part.type || '').trim().toLowerCase();
+  if (type === 'input_text' || type === 'output_text' || type === 'text') {
+    return { type: 'text', text: String(part.text || part.content || '') };
+  }
+  if (type === 'input_image') {
+    const url = String(part.image_url || part.url || '').trim();
+    if (!url) return null;
+    const mapped = { type: 'image_url', image_url: { url } };
+    const detail = normalizeOpenAIImageDetail(part.detail);
+    if (detail) mapped.image_url.detail = detail;
+    return mapped;
+  }
+  const text = normalizeResponsesTextContent(part);
+  return text ? { type: 'text', text } : null;
+}
+
+function mapResponsesInputItemToChatMessages(item) {
+  if (typeof item === 'string') return [{ role: 'user', content: item }];
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+  const type = String(item.type || '').trim().toLowerCase();
+  if (type === 'message') {
+    const role = ['system', 'developer', 'assistant', 'user'].includes(String(item.role || '').trim().toLowerCase())
+      ? String(item.role || '').trim().toLowerCase()
+      : 'user';
+    const content = Array.isArray(item.content)
+      ? item.content.map(mapResponsesContentPartToChat).filter(Boolean)
+      : normalizeResponsesTextContent(item.content);
+    return [{ role, content }];
+  }
+  if (type === 'function_call') {
+    return [{
+      role: 'assistant',
+      content: '',
+      tool_calls: [{
+        id: String(item.call_id || item.id || '').trim(),
+        type: 'function',
+        function: {
+          name: String(item.name || '').trim(),
+          arguments: String(item.arguments || '{}')
+        }
+      }].filter((call) => call.id && call.function.name)
+    }];
+  }
+  if (type === 'function_call_output') {
+    const callId = String(item.call_id || '').trim();
+    if (!callId) return [];
+    return [{
+      role: 'tool',
+      tool_call_id: callId,
+      content: String(item.output || '')
+    }];
+  }
+  const contentPart = mapResponsesContentPartToChat(item);
+  return contentPart ? [{ role: 'user', content: [contentPart] }] : [];
+}
+
+function mapResponsesInputToChatMessages(input) {
+  if (typeof input === 'string') return [{ role: 'user', content: input }];
+  const out = [];
+  for (const item of Array.isArray(input) ? input : []) {
+    out.push(...mapResponsesInputItemToChatMessages(item));
+  }
+  return out;
+}
+
+function buildChatCompletionsRequestBody(requestBody = {}) {
+  const body = requestBody && typeof requestBody === 'object' ? { ...requestBody } : {};
+  if (Array.isArray(body.messages)) return body;
+  const out = {
+    model: body.model,
+    messages: mapResponsesInputToChatMessages(body.input),
+    stream: Boolean(body.stream)
+  };
+  if (Number.isFinite(Number(body.temperature))) out.temperature = Number(body.temperature);
+  if (Number.isFinite(Number(body.top_p))) out.top_p = Number(body.top_p);
+  if (Number.isFinite(Number(body.max_tokens))) out.max_tokens = Math.floor(Number(body.max_tokens));
+  else if (Number.isFinite(Number(body.max_output_tokens))) out.max_tokens = Math.floor(Number(body.max_output_tokens));
+  if (body.reasoning_effort) out.reasoning_effort = body.reasoning_effort;
+  if (body.reasoning?.effort) out.reasoning_effort = body.reasoning.effort;
+  if (Array.isArray(body.tools)) {
+    out.tools = body.tools.map((tool) => {
+      if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool;
+      if (tool.type !== 'function' || !tool.name) return tool;
+      return {
+        type: 'function',
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters || { type: 'object', properties: {} },
+          ...(typeof tool.strict === 'boolean' ? { strict: tool.strict } : {})
+        }
+      };
+    }).filter(Boolean);
+  }
+  if (body.tool_choice) out.tool_choice = body.tool_choice;
+  if (body.user) out.user = body.user;
+  return out;
 }
 
 function normalizeResponsesTextContent(content) {
@@ -397,6 +506,9 @@ function buildResponsesRequestBody(openAICompatibleBody = {}) {
 
   if (Number.isFinite(Number(body.temperature))) requestBody.temperature = Number(body.temperature);
   if (Number.isFinite(Number(body.top_p))) requestBody.top_p = Number(body.top_p);
+  if (Number.isFinite(Number(body.top_k))) requestBody.top_k = Math.floor(Number(body.top_k));
+  if (Number.isFinite(Number(body.top_a))) requestBody.top_a = Number(body.top_a);
+  if (Number.isFinite(Number(body.repetition_penalty))) requestBody.repetition_penalty = Number(body.repetition_penalty);
   if (Number.isFinite(Number(body.max_output_tokens))) {
     requestBody.max_output_tokens = Math.floor(Number(body.max_output_tokens));
   } else if (Number.isFinite(Number(body.max_tokens))) {
@@ -425,6 +537,7 @@ function buildResponsesRequestBody(openAICompatibleBody = {}) {
 
 module.exports = {
   buildResponsesRequestBody,
+  buildChatCompletionsRequestBody,
   buildResponsesUrl,
   buildChatCompletionsFallbackUrl,
   hasResponsesProtocolFallbackAttempted,

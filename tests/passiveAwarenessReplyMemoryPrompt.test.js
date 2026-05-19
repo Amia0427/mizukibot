@@ -40,6 +40,8 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://example.com/reply-endpoint';
     process.env.PASSIVE_AWARENESS_REPLY_API_KEY = 'test-reply-key';
     process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'test-reply-model';
+    process.env.PASSIVE_AWARENESS_REPLY_TEMPERATURE = '1';
+    process.env.PASSIVE_AWARENESS_REPLY_TOP_P = '';
     process.env.BOT_QQ = 'bot-test';
 
     clearProjectCache();
@@ -124,6 +126,9 @@ module.exports = (async () => {
     assert.strictEqual(result.handled, true);
     assert.strictEqual(result.replyText, '我来接一句');
     assert.strictEqual(streamedBodies.length, 1);
+    assert.strictEqual(streamedBodies[0].temperature, 1);
+    assert.ok(!Object.prototype.hasOwnProperty.call(streamedBodies[0], 'top_p'));
+    assert.strictEqual(streamedBodies[0].__preferredProtocol, 'chat_completions');
 
     const userPrompt = String(streamedBodies[0]?.messages?.[1]?.content || '');
     assert.ok(userPrompt.includes('[RetrievedMemory]'));

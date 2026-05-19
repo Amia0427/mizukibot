@@ -24,7 +24,11 @@ function isGeminiNativeApiBase(url) {
     || /:generatecontent(?:[?#].*)?$/i.test(normalized);
 }
 
-function getApiProvider(url, model = '') {
+function getApiProvider(url, model = '', options = {}) {
+  if (options && typeof options === 'object' && options.preferUnifiedResponses === true) {
+    if (isGeminiNativeApiBase(url)) return 'gemini_native';
+    return 'openai_compatible';
+  }
   if (isAnthropicApiBase(url)) return 'anthropic';
   if (isGeminiNativeApiBase(url)) return 'gemini_native';
 

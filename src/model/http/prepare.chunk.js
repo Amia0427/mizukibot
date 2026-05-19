@@ -1,6 +1,5 @@
 const {
   HttpsProxyAgentCtor,
-  assertSafeModelEndpoint,
   config,
   ensureAnthropicMessagesUrl,
   extractAnthropicCacheControl,
@@ -11,9 +10,11 @@ const {
   normalizeText,
   providerAllowsCacheControl,
   providerAllowsOpenAIPromptCache,
+  resolveSafeModelEndpoint,
   stripTopPField
 } = require('./runtime-core.chunk');
 const {
+  buildChatCompletionsRequestBody,
   buildResponsesRequestBody,
   buildResponsesUrl,
   isResponsesUrl,
@@ -31,20 +32,19 @@ const {
 } = require('./request-shaping.chunk');
 const { buildAnthropicRequestHeaders } = require('./runtime-core.chunk');
 const { sanitizeOpenAICompatibleToolWithoutCache } = require('./images.chunk');
-const { isClaudeModelName } = require('../../../utils/modelProvider');
 
 function shouldPreferResponsesProtocol(provider = '', url = '', requestBody = {}, originalBody = {}) {
   if (provider !== 'openai_compatible') return false;
   if (isResponsesUrl(url)) return true;
-  const apiMode = String(config.OPENAI_MAIN_API_MODE || 'auto').trim().toLowerCase().replace(/[-\s]+/g, '_');
-  if (apiMode === 'chat' || apiMode === 'chat_completion' || apiMode === 'chat_completions') return false;
   if (originalBody?.__responsesProtocolFallbackAttempted === true) return false;
-  if (isClaudeModelName(requestBody?.model || originalBody?.model || config.AI_MODEL)) return false;
-  return requestBodyLooksLikeChatCompletion(requestBody);
+  const preferredProtocol = normalizeText(originalBody?.__preferredProtocol).toLowerCase().replace(/[-\s]+/g, '_');
+  if (preferredProtocol === 'chat' || preferredProtocol === 'chat_completion' || preferredProtocol === 'chat_completions') return false;
+  const responsesUrl = buildResponsesUrl(url);
+  return isResponsesUrl(responsesUrl) && requestBodyLooksLikeChatCompletion(requestBody);
 }
 
 async function prepareRequest(url, body = {}) {
-  const provider = getApiProvider(url, body?.model || config.AI_MODEL);
+  const provider = getApiProvider(url, body?.model || config.AI_MODEL, { preferUnifiedResponses: true });
   const internalRequestHeaders = extractProviderRequestHeaders(provider, body);
   if (!isAnthropicProvider(provider)) {
     const requestBody = body && typeof body === 'object'
@@ -93,7 +93,11 @@ async function prepareRequest(url, body = {}) {
       : url;
     const finalRequestBody = isResponsesUrl(requestUrl)
       ? buildResponsesRequestBody(requestBody)
-      : requestBody;
+      : (
+          /\/chat\/completions(?:\/)?$/i.test(String(requestUrl || '').trim()) && requestBodyLooksLikeChatCompletion(requestBody)
+            ? buildChatCompletionsRequestBody(requestBody)
+            : requestBody
+        );
     return {
       provider,
       requestUrl,
@@ -259,7 +263,7 @@ function getHeaders(provider, specificKey = null, extraHeaders = null) {
   return normalizeProviderRequestHeaders(provider, headers) || {};
 }
 
-function getAxiosOptions(provider = 'openai_compatible', specificKey = null, timeoutMs = null, extraHeaders = null, abortSignal = null) {
+function getAxiosOptions(provider = 'openai_compatible', specificKey = null, timeoutMs = null, extraHeaders = null, abortSignal = null, lookup = null) {
   const options = {
     headers: getHeaders(provider, specificKey, extraHeaders),
     timeout: Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : getRequestTimeoutMs(),
@@ -267,6 +271,7 @@ function getAxiosOptions(provider = 'openai_compatible', specificKey = null, tim
     responseType: 'text'
   };
   if (abortSignal) options.signal = abortSignal;
+  if (typeof lookup === 'function') options.lookup = lookup;
 
   if (config.PROXY_URL && HttpsProxyAgentCtor) {
     options.httpsAgent = new HttpsProxyAgentCtor(config.PROXY_URL);
@@ -274,23 +279,56 @@ function getAxiosOptions(provider = 'openai_compatible', specificKey = null, tim
   return options;
 }
 
-function getStreamAxiosOptions(provider = 'openai_compatible', specificKey = null, timeoutMs = null, extraHeaders = null, abortSignal = null) {
+function getStreamAxiosOptions(provider = 'openai_compatible', specificKey = null, timeoutMs = null, extraHeaders = null, abortSignal = null, lookup = null) {
   return {
     ...getAxiosOptions(
       provider,
       specificKey,
       Number.isFinite(Number(timeoutMs)) ? Number(timeoutMs) : getStreamTimeoutMs(),
       extraHeaders,
-      abortSignal
+      abortSignal,
+      lookup
     ),
     responseType: 'stream'
   };
 }
 
 async function validatePreparedEndpoint(requestUrl) {
-  await assertSafeModelEndpoint(requestUrl, {
+  return resolveSafeModelEndpoint(requestUrl, {
     allowLocalHttp: Boolean(config.MODEL_ENDPOINT_ALLOW_LOCAL_HTTP)
   });
+}
+
+function buildPinnedLookup(safeEndpoint = null) {
+  const hostname = String(safeEndpoint?.hostname || '').trim().toLowerCase();
+  const addresses = Array.isArray(safeEndpoint?.safeAddresses)
+    ? safeEndpoint.safeAddresses.filter((entry) => entry?.address)
+    : [];
+  if (!hostname || addresses.length === 0) return null;
+
+  return (lookupHost, options, callback) => {
+    let opts = options;
+    let cb = callback;
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
+    const requestedHost = String(lookupHost || '').trim().toLowerCase().replace(/\.+$/g, '');
+    if (requestedHost !== hostname) {
+      return require('dns').lookup(lookupHost, opts, cb);
+    }
+
+    const family = Number(opts?.family || 0);
+    const matches = family === 4 || family === 6
+      ? addresses.filter((entry) => Number(entry.family) === family)
+      : addresses;
+    const selected = matches[0] || addresses[0];
+    if (opts && opts.all) {
+      cb(null, matches.length ? matches : [selected]);
+      return;
+    }
+    cb(null, selected.address, Number(selected.family) || 4);
+  };
 }
 
 function shouldRetry(err) {
@@ -323,6 +361,7 @@ module.exports = {
   getRetryTimeoutMs,
   getStreamAxiosOptions,
   getStreamTimeoutMs,
+  buildPinnedLookup,
   isCloudflare403,
   parseRetryAfterMs,
   prepareRequest,

@@ -292,6 +292,7 @@ function createPrepareNode(deps = {}) {
     const persistUserText = String(request.persistUserText || request.runtimeQuestionText || request.question || '').trim();
     const threadId = String(state.thread?.threadId || '').trim();
     const latencyDecision = buildLatencyDecision(request, state.execution?.latencyDecision || {});
+    const memoryContextMemo = new Map();
     const events = [createEvent('node_start', { node: 'prepare', threadId })];
 
     let resumeUsed = false;
@@ -389,32 +390,6 @@ function createPrepareNode(deps = {}) {
       }));
     }
 
-    const continuityProbe = await withSoftTimeout(
-      () => maybeRunAutoContinuityProbe({
-        ...state,
-        execution: {
-          ...state.execution,
-          latencyDecision
-        }
-      }),
-      latencyDecision.continuityBudgetMs,
-      {
-        skipped: true,
-        reason: 'soft_timeout',
-        events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'soft_timeout' })],
-        probeResult: null,
-        probeMeta: null
-      }
-    );
-    const continuityBuilt = buildContinuityState({
-      request,
-      thread: state.thread,
-      shortTermMemory,
-      chatHistory,
-      continuityProbeResult: continuityProbe.probeResult,
-      maxChars: config.CONTINUITY_STATE_PROMPT_MAX_CHARS
-    });
-
     const restoredExecution = normalizeObject(restoredState.execution, state.execution);
     const nextMemoryCliTurn = createMemoryCliTurnState(restoredExecution.memoryCliTurn);
     const effectiveAllowedTools = computeEffectiveAllowedTools(request, nextMemoryCliTurn);
@@ -453,7 +428,8 @@ function createPrepareNode(deps = {}) {
           chatHistory,
           shortTermMemory,
           sessionKey: request.sessionKey,
-          latencyDecision
+          latencyDecision,
+          __memoryContextMemo: memoryContextMemo
         }
       ),
       latencyDecision.prepareSoftBudgetMs,
@@ -473,6 +449,37 @@ function createPrepareNode(deps = {}) {
       latencyMeta,
       stablePromptGuardApplied
     } = guardedPromptBuildResult;
+    const continuityProbe = await withSoftTimeout(
+      () => maybeRunAutoContinuityProbe({
+        ...state,
+        memory: {
+          ...state.memory,
+          context: memoryContext || null
+        },
+        execution: {
+          ...state.execution,
+          memoryCliTurn: executionMemoryCliTurn,
+          latencyDecision
+        }
+      }),
+      latencyDecision.continuityBudgetMs,
+      {
+        skipped: true,
+        reason: 'soft_timeout',
+        events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'soft_timeout' })],
+        probeResult: null,
+        probeMeta: null
+      }
+    );
+    const continuityBuilt = buildContinuityState({
+      request,
+      thread: state.thread,
+      shortTermMemory,
+      chatHistory,
+      memoryContext: memoryContext || null,
+      continuityProbeResult: continuityProbe.probeResult,
+      maxChars: config.CONTINUITY_STATE_PROMPT_MAX_CHARS
+    });
     const preparedMainConversationContext = buildPreparedMainConversationContext({
       ...state,
       request: {

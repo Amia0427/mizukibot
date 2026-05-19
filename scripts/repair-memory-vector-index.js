@@ -16,6 +16,10 @@ const {
   syncMemoryRows,
   syncWorldbookRows
 } = require('../utils/lancedbMemoryStore');
+const {
+  buildMemoryIndexHealthGate,
+  buildRecommendedActions
+} = require('./memory-index-health-gate');
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = {
@@ -71,7 +75,9 @@ async function runRepair(args = {}, deps = {}) {
     source: options.source,
     cacheRepair: {},
     before: {},
+    beforeCoverage: {},
     after: null,
+    afterCoverage: null,
     writes: [],
     compact: null,
     restoredCacheRows: 0,
@@ -109,6 +115,7 @@ async function runRepair(args = {}, deps = {}) {
     coverage: syncSummary.coverage || {},
     repairPlan: syncSummary.repairPlan || {}
   };
+  result.beforeCoverage = syncSummary.coverage || {};
   result.syncedRows = (
     (includeMemory ? Number(syncSummary.repairPlan?.memory?.syncRows || 0) : 0)
     + (includeWorldbook ? Number(syncSummary.repairPlan?.worldbook?.syncRows || 0) : 0)
@@ -139,11 +146,19 @@ async function runRepair(args = {}, deps = {}) {
       fullReconcile: true,
       deleteStaleRows: true
     });
+    const afterCoverage = after.coverage || {};
     result.after = {
-      coverage: after.coverage || {},
+      coverage: afterCoverage,
       repairPlan: after.repairPlan || {}
     };
+    result.afterCoverage = afterCoverage;
+    result.healthGate = after.healthGate || buildMemoryIndexHealthGate({ coverage: afterCoverage });
+    result.recommendedActions = after.recommendedActions || buildRecommendedActions(result.healthGate, afterCoverage);
     if (after._rows) delete after._rows;
+  } else {
+    const healthGate = syncSummary.healthGate || buildMemoryIndexHealthGate({ coverage: result.beforeCoverage });
+    result.healthGate = healthGate;
+    result.recommendedActions = syncSummary.recommendedActions || buildRecommendedActions(healthGate, result.beforeCoverage);
   }
 
   if (syncSummary._rows) delete syncSummary._rows;

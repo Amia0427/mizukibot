@@ -7,6 +7,8 @@ const SCHEMA_VERSION = 'runtime_status_diagnostic_v1';
 const ACTIVE_BACKGROUND_STATUSES = new Set(['queued', 'running', 'reviewing']);
 const POST_REPLY_STATUSES = ['queued', 'processing', 'failed', 'done'];
 const DEFAULT_BACKGROUND_TASK_STALE_MS = 30 * 60 * 1000;
+const DEFAULT_LANGGRAPH_V2_CHECKPOINT_STALE_MS = 30 * 60 * 1000;
+const LANGGRAPH_V2_ACTIVE_CHECKPOINT_STATUSES = new Set(['running', 'queued', 'reviewing']);
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -384,6 +386,116 @@ function readJsonFilesFromDir(dirPath = '') {
     .filter(Boolean);
 }
 
+function readJsonStoreFiles(dirPath = '') {
+  const target = normalizePath(dirPath);
+  return safeReadDir(target)
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+    .map((entry) => {
+      const filePath = path.join(target, entry.name);
+      const stat = safeStat(filePath);
+      const data = safeReadJson(filePath, null);
+      return {
+        filePath,
+        file: entry.name,
+        mtimeMs: stat.mtimeMs,
+        size: stat.size,
+        valid: Boolean(data && typeof data === 'object'),
+        data
+      };
+    });
+}
+
+function countByValue(items = [], getValue = () => '') {
+  const counts = {};
+  for (const item of items) {
+    const key = normalizeText(getValue(item) || 'unknown') || 'unknown';
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
+}
+
+function sumStoreBytes(files = []) {
+  return files.reduce((total, file) => total + Math.max(0, normalizeNumber(file.size, 0)), 0);
+}
+
+function buildLangGraphV2StoreSummary({
+  checkpointDir,
+  eventDir,
+  now,
+  staleCheckpointMs
+}) {
+  const normalizedCheckpointDir = normalizePath(checkpointDir);
+  const normalizedEventDir = normalizePath(eventDir);
+  const checkpointFiles = readJsonStoreFiles(normalizedCheckpointDir);
+  const eventFiles = readJsonStoreFiles(normalizedEventDir);
+  const checkpoints = checkpointFiles.map((file) => {
+    const data = file.valid && !Array.isArray(file.data) ? file.data : {};
+    const updatedAtMs = normalizeNumber(data.updatedAt, file.mtimeMs);
+    const status = normalizeText(data.status || 'unknown') || 'unknown';
+    const ageMs = updatedAtMs > 0 ? Math.max(0, now - updatedAtMs) : 0;
+    const active = LANGGRAPH_V2_ACTIVE_CHECKPOINT_STATUSES.has(status);
+    return {
+      threadId: normalizeText(data.threadId || path.basename(file.file, '.json')),
+      file: file.file,
+      status,
+      node: normalizeText(data.node),
+      updatedAt: updatedAtMs > 0 ? isoFromMs(updatedAtMs) : '',
+      ageMs,
+      size: file.size,
+      valid: file.valid && !Array.isArray(file.data),
+      active,
+      stale: active && ageMs > staleCheckpointMs
+    };
+  });
+  const eventSummaries = eventFiles.map((file) => {
+    const events = Array.isArray(file.data) ? file.data : [];
+    const latestTs = events.reduce((maxTs, event) => {
+      const ts = normalizeNumber(event?.ts, 0);
+      return ts > maxTs ? ts : maxTs;
+    }, 0);
+    const updatedAtMs = latestTs || file.mtimeMs;
+    return {
+      threadId: path.basename(file.file, '.json'),
+      file: file.file,
+      eventCount: events.length,
+      valid: Array.isArray(file.data),
+      latestEventAt: updatedAtMs > 0 ? isoFromMs(updatedAtMs) : '',
+      ageMs: updatedAtMs > 0 ? Math.max(0, now - updatedAtMs) : 0,
+      size: file.size,
+      countsByType: countByValue(events, (event) => event?.type)
+    };
+  });
+  const staleRunningCheckpoints = checkpoints
+    .filter((item) => item.stale)
+    .sort((a, b) => b.ageMs - a.ageMs)
+    .slice(0, 20);
+  return {
+    checkpointDir: normalizedCheckpointDir,
+    eventDir: normalizedEventDir,
+    checkpointDirExists: safeStat(normalizedCheckpointDir).exists,
+    eventDirExists: safeStat(normalizedEventDir).exists,
+    checkpointCount: checkpoints.length,
+    eventFileCount: eventSummaries.length,
+    totalCheckpointBytes: sumStoreBytes(checkpointFiles),
+    totalEventBytes: sumStoreBytes(eventFiles),
+    countsByCheckpointStatus: countByValue(checkpoints, (item) => item.status),
+    activeCheckpointCount: checkpoints.filter((item) => item.active).length,
+    staleRunningCheckpointCount: staleRunningCheckpoints.length,
+    staleCheckpointMs,
+    staleRunningCheckpoints,
+    latestCheckpoints: checkpoints
+      .slice()
+      .sort((a, b) => a.ageMs - b.ageMs)
+      .slice(0, 10),
+    latestEventFiles: eventSummaries
+      .slice()
+      .sort((a, b) => a.ageMs - b.ageMs)
+      .slice(0, 10),
+    invalidCheckpointCount: checkpointFiles.filter((file) => !(file.valid && !Array.isArray(file.data))).length,
+    invalidEventFileCount: eventFiles.filter((file) => !Array.isArray(file.data)).length
+  };
+}
+
 function buildBackgroundTaskSummary({ storeDir, now, staleMs }) {
   const target = normalizePath(storeDir);
   const tasks = readJsonFilesFromDir(target).map(({ filePath, data }) => {
@@ -577,10 +689,23 @@ function buildRuntimeStatusDiagnostic(options = {}) {
     1000,
     normalizeNumber(options.backgroundTaskStaleMs || process.env.BACKGROUND_TASK_STALE_MS, DEFAULT_BACKGROUND_TASK_STALE_MS)
   );
+  const langGraphV2CheckpointStaleMs = Math.max(
+    1000,
+    normalizeNumber(
+      options.langGraphV2CheckpointStaleMs || process.env.LANGGRAPH_V2_CHECKPOINT_STALE_MS,
+      DEFAULT_LANGGRAPH_V2_CHECKPOINT_STALE_MS
+    )
+  );
   const backgroundTasks = buildBackgroundTaskSummary({
     storeDir: config.BACKGROUND_TASK_STORE_DIR,
     now,
     staleMs: backgroundTaskStaleMs
+  });
+  const langGraphV2Store = buildLangGraphV2StoreSummary({
+    checkpointDir: config.LANGGRAPH_V2_CHECKPOINT_DIR,
+    eventDir: config.LANGGRAPH_V2_EVENT_DIR,
+    now,
+    staleCheckpointMs: langGraphV2CheckpointStaleMs
   });
   const postReplyQueue = buildPostReplyQueueSummary({
     queueDir: config.POST_REPLY_QUEUE_DIR,
@@ -636,6 +761,15 @@ function buildRuntimeStatusDiagnostic(options = {}) {
   if (backgroundTasks.staleActiveCount > 0) {
     addSignal(signals, 'warning', 'backgroundTasks', 'background_task_stale', 'active background tasks exceeded stale threshold', { count: backgroundTasks.staleActiveCount });
   }
+  if (langGraphV2Store.staleRunningCheckpointCount > 0) {
+    addSignal(signals, 'warning', 'langGraphV2', 'langgraph_v2_checkpoint_stale', 'active LangGraph V2 checkpoints exceeded stale threshold', { count: langGraphV2Store.staleRunningCheckpointCount });
+  }
+  if (langGraphV2Store.invalidCheckpointCount > 0) {
+    addSignal(signals, 'warning', 'langGraphV2', 'langgraph_v2_checkpoint_invalid', 'LangGraph V2 checkpoint files could not be parsed', { count: langGraphV2Store.invalidCheckpointCount });
+  }
+  if (langGraphV2Store.invalidEventFileCount > 0) {
+    addSignal(signals, 'warning', 'langGraphV2', 'langgraph_v2_event_file_invalid', 'LangGraph V2 event files could not be parsed as event arrays', { count: langGraphV2Store.invalidEventFileCount });
+  }
   if (memoryMaterializeLock.status === 'stale') {
     addSignal(signals, 'warning', 'locks', 'memory_materialize_lock_stale', 'memory materialize lock is stale', { pid: memoryMaterializeLock.pid });
   }
@@ -688,6 +822,14 @@ function buildRuntimeStatusDiagnostic(options = {}) {
       },
       activeBackgroundTasks: backgroundTasks.activeCount,
       staleBackgroundTasks: backgroundTasks.staleActiveCount,
+      langGraphV2: {
+        checkpoints: langGraphV2Store.checkpointCount,
+        events: langGraphV2Store.eventFileCount,
+        activeCheckpoints: langGraphV2Store.activeCheckpointCount,
+        staleRunningCheckpoints: langGraphV2Store.staleRunningCheckpointCount,
+        checkpointBytes: langGraphV2Store.totalCheckpointBytes,
+        eventBytes: langGraphV2Store.totalEventBytes
+      },
       activeSubagentProcesses: subagents.processCount,
       persistentSubagentWorkers: subagents.persistentWorkers.length,
       journalHealth: journalHealth.totals || {}
@@ -714,6 +856,7 @@ function buildRuntimeStatusDiagnostic(options = {}) {
         createAgentRuntime
       ],
       backgroundTasks,
+      langGraphV2Store,
       subagents,
       journalHealth
     },
@@ -724,11 +867,13 @@ function buildRuntimeStatusDiagnostic(options = {}) {
 function buildRuntimeStatusText(report = {}) {
   const summary = report.summary || {};
   const postQueue = summary.postReplyWorker?.queue || {};
+  const langGraphV2 = summary.langGraphV2 || {};
   const lines = [
     `runtime: ${summary.overallStatus || 'unknown'} (${summary.signalCount || 0} signals)`,
     `main: ${summary.mainProcess?.status || 'unknown'} pid=${summary.mainProcess?.lockPid || 0} processes=${summary.mainProcess?.processCount || 0}`,
     `post-reply: ${summary.postReplyWorker?.status || 'unknown'} pid=${summary.postReplyWorker?.pid || 0} processes=${summary.postReplyWorker?.processCount || 0} queue=queued:${postQueue.queued || 0} processing:${postQueue.processing || 0} failed:${postQueue.failed || 0}`,
     `background-tasks: active=${summary.activeBackgroundTasks || 0} stale=${summary.staleBackgroundTasks || 0}`,
+    `langgraph-v2: checkpoints=${langGraphV2.checkpoints || 0} active=${langGraphV2.activeCheckpoints || 0} stale=${langGraphV2.staleRunningCheckpoints || 0} events=${langGraphV2.events || 0}`,
     `subagents: osProcesses=${summary.activeSubagentProcesses || 0} persistentWorkers=${summary.persistentSubagentWorkers || 0}`
   ];
   const journal = summary.journalHealth || {};

@@ -102,9 +102,12 @@ function normalizePhase(value = '') {
 function normalizeTurn(turn = {}) {
   const normalized = normalizeObject(turn, {});
   return {
+    turnId: normalizeText(normalized.turnId || normalized.turn_id),
     question: String(normalized.question || '').trim(),
     finalReply: String(normalized.finalReply || '').trim(),
     createdAt: normalizeText(normalized.createdAt) || nowIso(),
+    evidence: normalizeObject(normalized.evidence, {}),
+    sourceSessionId: normalizeText(normalized.sourceSessionId || normalized.source_session_id),
     routeMeta: normalizeObject(normalized.routeMeta, {}),
     continuitySnapshot: normalizeObject(normalized.continuitySnapshot, {}),
     contextStats: normalizeObject(normalized.contextStats, {})

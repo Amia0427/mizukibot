@@ -34,6 +34,72 @@ function addMemoryItem(userId, text, type = 'fact', meta = {}, weight = 1.0) {
   return ids[0] || null;
 }
 
+function buildRecallVerificationQuery(item = {}, options = {}) {
+  const evidence = Array.isArray(item.meta?.evidence) ? item.meta.evidence : [];
+  const latestEvidence = evidence[evidence.length - 1] || {};
+  return sanitizeOptionalText(
+    options.recallVerificationQuery
+    || latestEvidence.userText
+    || latestEvidence.assistantText
+    || item.text
+  );
+}
+
+function lexicalRecallScore(query = '', item = {}) {
+  const q = canonicalizeText(query);
+  const text = canonicalizeText(`${item.text || ''} ${item.canonicalText || ''}`);
+  if (!q || !text) return 0;
+  if (text.includes(q) || q.includes(text)) return 1;
+  const queryTokens = tokenize(q);
+  const textTokens = new Set(tokenize(text));
+  if (!queryTokens.length || !textTokens.size) return 0;
+  const overlap = queryTokens.filter((token) => textTokens.has(token)).length;
+  return overlap / Math.max(1, queryTokens.length);
+}
+
+function attachRecallVerification(accepted = [], options = {}) {
+  const list = Array.isArray(accepted) ? accepted : [];
+  if (!list.length || options.recallVerification === false || config.MEMORY_WRITE_RECALL_VERIFY_ENABLED === false) return list;
+  const now = Date.now();
+  const topK = Math.max(1, Number(options.recallVerificationTopK || config.MEMORY_WRITE_RECALL_VERIFY_TOP_K || 8) || 8);
+  for (const item of list) {
+    const query = buildRecallVerificationQuery(item, options);
+    const score = lexicalRecallScore(query, item);
+    const status = score > 0 ? 'recallable' : 'not_recallable';
+    let expectedIds = [item.id].filter(Boolean);
+    try {
+      const { normalizeRecallTargetIds } = require('../../../utils/memory-v3/recallVerifier');
+      expectedIds = normalizeRecallTargetIds(options.expectedIds || options.expectedId || item.id);
+    } catch (_) {}
+    item.meta = {
+      ...(item.meta && typeof item.meta === 'object' ? item.meta : {}),
+      recallVerification: {
+        checked: true,
+        status,
+        method: 'pre_persist_lexical_probe',
+        query: query.slice(0, 240),
+        expectedId: item.id,
+        expectedIds,
+        topK,
+        lexicalScore: score,
+        checkedAt: now,
+        repairHint: status === 'not_recallable' ? 'memory_text_has_no_lexical_overlap_with_source_evidence' : ''
+      }
+    };
+  }
+  return list;
+}
+
+function stripTransientMemoryWriteMeta(item = {}) {
+  if (!item || typeof item !== 'object') return item;
+  const meta = item.meta && typeof item.meta === 'object' ? { ...item.meta } : {};
+  delete meta.pendingMemoryV3Event;
+  return {
+    ...item,
+    meta
+  };
+}
+
 function persistNormalizedMemoryItemsDirect(normalizedItems = []) {
   if (!Array.isArray(normalizedItems) || normalizedItems.length === 0) return [];
 
@@ -65,6 +131,7 @@ function persistNormalizedMemoryItems(normalizedItems = []) {
   if (pipelineEnabled && !addMemoryItemsBatch.__pipelineActive) {
     addMemoryItemsBatch.__pipelineActive = true;
     try {
+      attachRecallVerification(normalizedItems, {});
       const result = commitMemoryWrites(
         normalizedItems,
         (accepted) => persistNormalizedMemoryItemsDirect(accepted),
@@ -89,10 +156,11 @@ function addMemoryItemsBatch(items = []) {
 
 async function prepareEnhancedMemoryWrites(normalizedItems = [], options = {}) {
   const accepted = [];
-  const rejected = [];
+  const batchGuard = applyBatchWriteGuards(normalizedItems);
+  const rejected = [...batchGuard.rejected];
   const pipelineEnabled = config.MEMORY_WRITE_PIPELINE_ENABLED !== false && options.skipPipeline !== true;
 
-  for (const candidate of Array.isArray(normalizedItems) ? normalizedItems : []) {
+  for (const candidate of batchGuard.accepted) {
     if (!candidate) continue;
     if (pipelineEnabled) {
       const validation = validateMemoryWrite(candidate, {
@@ -142,6 +210,7 @@ async function prepareEnhancedMemoryWrites(normalizedItems = [], options = {}) {
     if (reviewed) accepted.push(reviewed);
   }
 
+  attachRecallVerification(accepted, options);
   return { accepted, rejected };
 }
 
@@ -230,12 +299,13 @@ async function addMemoryItemsBatchWithVectorBackfill(items = [], options = {}) {
     }
   }
 
-  const ids = persistNormalizedMemoryItemsDirect(accepted);
+  const persistableAccepted = accepted.map((item) => stripTransientMemoryWriteMeta(item));
+  const ids = persistNormalizedMemoryItemsDirect(persistableAccepted);
   const materialize = ids.length > 0 && options.materialize !== false
     ? scheduleMemoryV3VectorBackfill(options)
     : { skipped: true, reason: 'no_ids' };
   const lancedb = ids.length > 0
-    ? await syncAcceptedMemoryRowsToLanceDb(accepted, options)
+    ? await syncAcceptedMemoryRowsToLanceDb(persistableAccepted, options)
     : { skipped: true, reason: 'no_ids' };
 
   return {

@@ -2,6 +2,7 @@
 // behavior belongs here or in the neutral helper modules it composes.
 const { StateGraph, END } = require('@langchain/langgraph');
 const config = require('../../config');
+const { applyLangGraphV2Topology } = require('./topology');
 const {
   buildDynamicPrompt,
   buildVisionMessageContent,
@@ -354,7 +355,11 @@ function buildV2CanonicalSegments(state, input = {}) {
     2048,
     Number(input.modelWindowTokens || state.memory?.affinity?.contextWindowTokens || resolveModelTokenLimit(modelName, Number(config.CONTEXT_WINDOW_MAX_TOKENS || 32000))) || 2048
   );
-  const maxOutputTokens = Math.max(64, Number(input.maxOutputTokens || request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || 3500) || 3500);
+  const mainReplyDefaultMaxTokens = Math.max(64, Number(config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192) || 8192);
+  const maxOutputTokens = Math.max(
+    64,
+    Number(input.maxOutputTokens || request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || mainReplyDefaultMaxTokens) || mainReplyDefaultMaxTokens
+  );
 
   const segments = {
     system_prompt: systemPromptMessages,
@@ -694,7 +699,7 @@ function createRuntime(options = {}) {
       plannerArtifactMessages: normalizeArray(options.plannerArtifactMessages),
       modelName: resolveMainConversationModelName(request),
       modelWindowTokens: resolveMainConversationTokenLimit(request, affinity),
-      maxOutputTokens: Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || 3500),
+      maxOutputTokens: Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192),
       source: String(options.source || 'direct_reply').trim() || 'direct_reply'
     });
     return {
@@ -1763,54 +1768,30 @@ function createRuntime(options = {}) {
     });
   }
 
-  // Fixed V2 topology:
-  // prepare -> route -> direct_reply | planner -> dispatch -> validate
-  // -> repair_or_continue -> draft_reply -> humanize -> final_validate -> persist
   const graph = new StateGraph(GraphStateV2);
-  graph.addNode('prepare', prepareNodeImpl);
-  graph.addNode('route', routeNode);
-  graph.addNode('direct_reply', directReplyNodeImpl);
-  graph.addNode('planner', plannerNode);
-  graph.addNode('dispatch', dispatchNodeImpl);
-  graph.addNode('validate', validateNode);
-  graph.addNode('repair_or_continue', repairNode);
-  graph.addNode('draft_reply', draftReplyNode);
-  graph.addNode('humanize', humanizeNode);
-  graph.addNode('final_validate', finalValidateNode);
-  graph.addNode('persist', persistNode);
-
-  graph.setEntryPoint('prepare');
-  graph.addEdge('prepare', 'route');
-  graph.addConditionalEdges('route', routeAfterRoute, {
-    chat: 'direct_reply',
-    proactive: 'direct_reply',
-    review: 'direct_reply',
-    image: 'direct_reply',
-    minecraft: 'direct_reply',
-    tool_plan: 'planner'
+  applyLangGraphV2Topology(graph, {
+    end: END,
+    nodes: {
+      prepare: prepareNodeImpl,
+      route: routeNode,
+      direct_reply: directReplyNodeImpl,
+      planner: plannerNode,
+      dispatch: dispatchNodeImpl,
+      validate: validateNode,
+      repair_or_continue: repairNode,
+      draft_reply: draftReplyNode,
+      humanize: humanizeNode,
+      final_validate: finalValidateNode,
+      persist: persistNode
+    },
+    routers: {
+      routeAfterRoute,
+      routeAfterDirectReply: routeAfterDirectReplyImpl,
+      routeAfterValidate,
+      routeAfterRepair,
+      routeAfterDraftReply
+    }
   });
-  graph.addConditionalEdges('direct_reply', routeAfterDirectReplyImpl, {
-    planner: 'planner',
-    persist: 'persist',
-    __end__: END
-  });
-  graph.addEdge('planner', 'dispatch');
-  graph.addEdge('dispatch', 'validate');
-  graph.addConditionalEdges('validate', routeAfterValidate, {
-    answer: 'draft_reply',
-    repair: 'repair_or_continue'
-  });
-  graph.addConditionalEdges('repair_or_continue', routeAfterRepair, {
-    dispatch: 'dispatch',
-    answer: 'draft_reply'
-  });
-  graph.addConditionalEdges('draft_reply', routeAfterDraftReply, {
-    dispatch: 'dispatch',
-    humanize: 'humanize'
-  });
-  graph.addEdge('humanize', 'final_validate');
-  graph.addEdge('final_validate', 'persist');
-  graph.addEdge('persist', END);
 
   const app = graph.compile();
 
