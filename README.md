@@ -57,7 +57,7 @@ DATA_DIR=./data
 
 ### MemOS MCP 远端知识库召回
 
-更新时间：2026-05-19 23:41 +08:00
+更新时间：2026-05-19 23:48 +08:00
 
 启用方式：
 
@@ -67,18 +67,18 @@ MEMOS_API_KEY=...
 MEMOS_USER_ID=...
 MEMOS_CHANNEL=MODELSCOPE
 MEMOS_RECALL_SOURCE=knowledge_base
-MEMOS_KB_FILE_IDS=kb_file_id_1,kb_file_id_2
+MEMOS_KB_IDS=knowledgebase_id_1
 ```
 
 说明：
 
 - `.mcp.json` 已配置 `memos-api-mcp`，运行时通过 `npx -y @memtensor/memos-api-mcp@latest` 启动。
-- 默认主要使用 MemOS 远端知识库只读能力：通过 `get_kb_documents` 读取 `MEMOS_KB_FILE_IDS` 指定的文档。
+- 默认主要使用 MemOS 远端知识库只读能力：通过 `search_memory` 携带 `knowledgebase_ids` 搜索 `MEMOS_KB_IDS` 指定的知识库。
 - MemOS 只接在 planner 侧：远端知识库结果先给 planner 判断，主回复模型只接收 planner 认可的 `[MemOSRecall]` 动态提示词块。
 - MemOS 召回会先与本地 Memory V3/向量记忆去重；重复项保留本地记忆，全部重复时不生成 `[MemOSRecall]`。
 - 主回复工具 allowlist 不暴露 `mcp_memos_api_mcp_*`，避免主模型自行调用 MemOS MCP。
 - 本地 agent 不写远端 MemOS：运行时不调用 `add_message` / `add_kb_document` / 删除类工具，即使误配 `MEMOS_WRITE_ENABLED=true` 也会跳过。
-- 未配置 `MEMOS_KB_FILE_IDS` 时不会退回远端记忆搜索；如需旧 `search_memory` 兼容，显式设置 `MEMOS_RECALL_SOURCE=search_memory`。
+- 如果只有知识库 ID，配置 `MEMOS_KB_IDS`；如果已有具体文档 file ID，才配置 `MEMOS_KB_FILE_IDS` 做精确文档读取。
 
 ### 启动
 
