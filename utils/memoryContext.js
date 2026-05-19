@@ -22,14 +22,9 @@ const {
   buildStableProfileText
 } = require('./memoryProfileSurface');
 const {
-  queryMemory,
-  assembleMemoryPacket
-} = require('./memory-v3');
-const {
   classifyJournalRecallIntent,
   selectJournalPromptEvidence
 } = require('./memory-v3/journalRecallPolicy');
-const { queryLocalKnowledge } = require('./localKnowledge');
 const {
   buildMemoryTrace,
   clampPromptMessage,
@@ -53,53 +48,22 @@ const {
   resolveDailyJournalTimestamp,
   resolveReadableGroupIds
 } = require('./memoryContext/recallOptions');
+const { createSignalMemoryHelpers } = require('./memoryContext/signals');
+const { buildMemoryContextV3Payload } = require('./memoryContext/v3Payload');
 
-function isStyleQuery(question = '', options = {}) {
-  if (options.forceSignalRecall) return true;
-  const text = sanitizeText(question).toLowerCase();
-  if (!text) return false;
-  return /(\bstyle\b|\btone\b|\bvoice\b|\bjargon\b|\bslang\b|\bphrase\b|\blike the user\b|\blike the group\b|语气|风格|说话方式|表达方式|口头禅|黑话|群话|群友|像本人|像群里)/i.test(text);
-}
-
-function normalizeSignalKey(hit = {}) {
-  return sanitizeText(hit.canonicalText || hit.text || '').toLowerCase();
-}
-
-function getSignalInjectionState(options = {}) {
-  if (!options || typeof options !== 'object') return {};
-  if (!options.signalInjectionState || typeof options.signalInjectionState !== 'object') {
-    options.signalInjectionState = {};
-  }
-  return options.signalInjectionState;
-}
-
-function getSessionSignalCache(options = {}) {
-  const state = getSignalInjectionState(options);
-  const scopeKey = sanitizeText(options.sessionId || options.channelId || options.groupId || options.userId || 'default') || 'default';
-  if (!state[scopeKey] || typeof state[scopeKey] !== 'object') {
-    state[scopeKey] = {};
-  }
-  return state[scopeKey];
-}
-
-function wasSignalRecentlyInjected(hit, options = {}) {
-  const key = normalizeSignalKey(hit);
-  if (!key) return false;
-  const cache = getSessionSignalCache(options);
-  const lastTs = Number(cache[key] || 0) || 0;
-  if (!lastTs) return false;
-  return (Date.now() - lastTs) < (48 * 3600 * 1000);
-}
-
-function markSignalsInjected(hits = [], options = {}) {
-  const cache = getSessionSignalCache(options);
-  const ts = Date.now();
-  for (const hit of Array.isArray(hits) ? hits : []) {
-    const key = normalizeSignalKey(hit);
-    if (!key) continue;
-    cache[key] = ts;
-  }
-}
+const {
+  isStyleQuery,
+  pickStyleSignals
+} = createSignalMemoryHelpers({
+  buildMemoKey,
+  buildUnifiedRecallOptions,
+  formatJargonSignal,
+  formatStyleSignal,
+  memoizeValue,
+  resolveReadableGroupIds,
+  retrieveUnifiedMemories,
+  sanitizeText
+});
 
 function splitUnifiedHits(allHits = [], options = {}) {
   const hits = Array.isArray(allHits) ? allHits : [];
@@ -156,90 +120,6 @@ function buildRetrievedMemoryText(hits = [], core = [], factText = '', options =
   return compactFacts && compactFacts !== '目前没有特别记忆。'
     ? `[NoStrongMatch]\n${compactFacts}`
     : '暂无与当前问题强相关的长期记忆';
-}
-
-function pickStyleSignals(styleHits = [], jargonHits = [], question = '', options = {}) {
-  const queryIsStyleRelated = isStyleQuery(question, options);
-  // Group jargon is not a generic fallback. Only explicit style/group-voice requests may inject it.
-  const currentGroupId = sanitizeText(options.groupId);
-  const allowJargonSignal = queryIsStyleRelated && Boolean(currentGroupId);
-  const resolvedGroupIds = Array.isArray(options.resolvedGroupIds)
-    ? options.resolvedGroupIds.map((item) => sanitizeText(item)).filter(Boolean)
-    : resolveReadableGroupIds(options.userId, options);
-  const freshStyleHits = (Array.isArray(styleHits) ? styleHits : []).filter((hit) => !wasSignalRecentlyInjected(hit, options));
-  const freshJargonHits = (Array.isArray(jargonHits) ? jargonHits : [])
-    .filter((hit) => sanitizeText(hit?.groupId) === currentGroupId)
-    .filter((hit) => !wasSignalRecentlyInjected(hit, options));
-
-  const fallbackStyleHit = (!freshStyleHits.length && options.userId)
-    ? memoizeValue(
-      options,
-      buildMemoKey('style-fallback', options.userId, 'style tone phrasing concise direct', {
-        ...options,
-        includeTask: false,
-        includeGroup: false,
-        includeEpisodes: false,
-        memoryKind: 'style'
-      }),
-      () => retrieveUnifiedMemories(options.userId, 'style tone phrasing concise direct', 3, {
-        ...buildUnifiedRecallOptions(options),
-        includeTask: false,
-        includeGroup: false,
-        includeEpisodes: false,
-        source: 'style',
-        memoryKind: 'style',
-        forceSignalRecall: true
-      }).find((hit) => !wasSignalRecentlyInjected(hit, options))
-    )
-    : null;
-
-  const fallbackJargonHit = (allowJargonSignal && !freshJargonHits.length && options.userId && resolvedGroupIds.length > 0)
-    ? memoizeValue(
-      options,
-      buildMemoKey('jargon-fallback', options.userId, 'group jargon shorthand nickname term', {
-        ...options,
-        resolvedGroupIds,
-        includeTask: false,
-        includeGroup: true,
-        includeEpisodes: false,
-        memoryKind: 'jargon'
-      }),
-      () => retrieveUnifiedMemories(options.userId, 'group jargon shorthand nickname term', 3, {
-        ...buildUnifiedRecallOptions(options),
-        includeTask: false,
-        includeGroup: true,
-        includeEpisodes: false,
-        source: 'jargon',
-        memoryKind: 'jargon',
-        forceSignalRecall: true
-      }).find((hit) => sanitizeText(hit?.groupId) === currentGroupId && !wasSignalRecentlyInjected(hit, options))
-    )
-    : null;
-
-  const preferredStyleHits = freshStyleHits.length ? freshStyleHits : (fallbackStyleHit ? [fallbackStyleHit] : []);
-  const preferredJargonHits = allowJargonSignal
-    ? (freshJargonHits.length ? freshJargonHits : (fallbackJargonHit ? [fallbackJargonHit] : []))
-    : [];
-  const selected = [];
-
-  if (preferredStyleHits[0]) selected.push({ kind: 'style', hit: preferredStyleHits[0] });
-  if (allowJargonSignal && !selected.length && preferredJargonHits[0]) {
-    selected.push({ kind: 'jargon', hit: preferredJargonHits[0] });
-  } else if (allowJargonSignal && selected.length === 1 && selected[0].kind === 'style' && preferredJargonHits[0]) {
-    selected.push({ kind: 'jargon', hit: preferredJargonHits[0] });
-  }
-
-  const chosenHits = selected.map((item) => item.hit);
-  markSignalsInjected(chosenHits, options);
-
-  return {
-    selectedHits: chosenHits,
-    text: selected
-      .map((item) => (item.kind === 'style' ? formatStyleSignal(item.hit) : formatJargonSignal(item.hit)))
-      .filter(Boolean)
-      .slice(0, 2)
-      .join('\n')
-  };
 }
 
 function buildContextPayload(userId, question = '', options = {}, unifiedHits = []) {
@@ -510,247 +390,14 @@ async function buildMemoryContextAsync(userId, question = '', options = {}) {
     activeRawMaxEntries: options.activeRawMaxEntries || 8,
     disableLegacyFactFallback: options.disableLegacyFactFallback || recapQuery
   };
-  const localKnowledge = await queryLocalKnowledge({
-    userId,
-    query: question || '',
-    topK: baseOptions.topK || config.MEMORY_RAG_TOP_K || 8,
-    groupId: baseOptions.groupId,
-    groupIds: resolveReadableGroupIds(userId, baseOptions),
-    sessionId: baseOptions.sessionId,
-    sessionKey: baseOptions.sessionKey,
-    routePolicyKey: baseOptions.routePolicyKey,
-    topRouteType: baseOptions.topRouteType,
-    taskType: baseOptions.taskType,
-    agentName: baseOptions.agentName,
-    toolName: baseOptions.toolName,
-    lookbackDays: baseOptions.dailyLookbackDays || baseOptions.lookbackDays,
-    skipMemoryV3: true
-  });
   if (config.MEMORY_V3_ENABLED) {
-    const resolvedGroupIds = resolveReadableGroupIds(userId, baseOptions);
-    const queryResult = await queryMemory({
+    return buildMemoryContextV3Payload({
       userId,
-      query: question || '',
-      topK: baseOptions.topK || config.MEMORY_RAG_TOP_K || 8,
-      groupId: baseOptions.groupId,
-      groupIds: resolvedGroupIds,
-      sessionId: baseOptions.sessionId,
-      sessionKey: baseOptions.sessionKey,
-      routePolicyKey: baseOptions.routePolicyKey,
-      topRouteType: baseOptions.topRouteType,
-      taskType: baseOptions.taskType,
-      agentName: baseOptions.agentName,
-      toolName: baseOptions.toolName,
-      sharedShortTermSignature: baseOptions.sharedShortTermSignature
-    });
-    if (!Array.isArray(queryResult.results) || queryResult.results.length === 0) {
-      const resolvedGroupIds = resolveReadableGroupIds(userId, baseOptions);
-      const normalizedOptions = {
-        ...baseOptions,
-        userId,
-        resolvedGroupIds
-      };
-      const unifiedHits = await memoizeValue(
-        normalizedOptions,
-        buildMemoKey('unified-async-v3-fallback', userId, question || '', normalizedOptions),
-        () => retrieveUnifiedMemoriesAsync(userId, question || '', baseOptions.topK || config.MEMORY_RAG_TOP_K || 8, buildUnifiedRecallOptions({
-          ...normalizedOptions,
-          disableLegacyFactFallback: true,
-          question
-        }))
-      );
-      const fallbackDroppedReasons = [];
-      const lancedbFallback = queryResult?.stats?.lancedb?.fallbackReason || queryResult?.diagnostics?.lancedb?.fallbackReason || '';
-      if (lancedbFallback) fallbackDroppedReasons.push(`v3_lancedb_${lancedbFallback}`);
-      if (!unifiedHits.length) fallbackDroppedReasons.push('v3_empty_and_unified_empty');
-      const fallbackPayload = buildContextPayload(userId, question, {
-        ...normalizedOptions,
-        retrievalPath: unifiedHits.length ? 'v3_fallback_unified' : 'none',
-        droppedReasons: fallbackDroppedReasons
-      }, unifiedHits);
-      fallbackPayload.diagnostics = {
-        ...(fallbackPayload.diagnostics || {}),
-        projectionFreshness: queryResult?.diagnostics?.projectionFreshness || null
-      };
-      return fallbackPayload;
-    }
-    const packet = assembleMemoryPacket(queryResult, {
-      userId,
-      sessionKey: baseOptions.sessionKey,
       question,
-      disableStableProfile: baseOptions.disableStableProfile,
-      forceStableProfile: baseOptions.forceStableProfile,
-      legacyProfileFallbackEnabled: baseOptions.legacyProfileFallbackEnabled
+      baseOptions,
+      buildContextPayload,
+      retrieveUnifiedMemoriesAsync
     });
-    const results = Array.isArray(queryResult.results) ? queryResult.results : [];
-    const strictResults = Array.isArray(queryResult.strictResults) ? queryResult.strictResults : results;
-    const weakResults = Array.isArray(queryResult.weakResults) ? queryResult.weakResults : [];
-    const journalHits = results.filter((item) => item.source === 'journal');
-    const taskHits = results.filter((item) => item.source === 'task');
-    const groupHits = results.filter((item) => item.source === 'group');
-    const styleHits = results.filter((item) => item.source === 'style');
-    const jargonHits = results.filter((item) => item.source === 'jargon');
-    const journalIntent = classifyJournalRecallIntent(question, baseOptions);
-    const activeRawBundle = baseOptions.includeActiveRaw
-      || journalIntent.includeActiveRaw
-      ? getDailyJournalRetrievalBundle(userId, {
-        lookbackDays: baseOptions.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
-        timestamp: resolveDailyJournalTimestamp(question, baseOptions),
-        yearMonth: baseOptions.dailyJournalYearMonth,
-        maxFourDayFiles: baseOptions.dailyJournalMaxFourDayFiles,
-        maxMonthlyFiles: baseOptions.dailyJournalMaxMonthlyFiles,
-        sessionKey: baseOptions.sessionKey,
-        question,
-        topic: question,
-        includeActiveRaw: true,
-        activeRawMaxEntries: baseOptions.activeRawMaxEntries || 8
-      })
-      : null;
-    const selectedJournalEvidence = selectJournalPromptEvidence({
-      bundle: activeRawBundle || { text: '', items: [], byLayer: { activeRaw: [], daily: [], fourDay: [], monthly: [] } },
-      hits: journalHits,
-      intent: journalIntent,
-      retrievedText: packet.relevantEvidenceText || packet.sessionContinuityText || ''
-    });
-    const dailyJournalText = selectedJournalEvidence.text || journalHits.map((item) => String(item.text || '')).filter(Boolean).join('\n');
-    const continuityFacet = String(queryResult.facet || '').trim().toLowerCase() === 'continuity';
-    const retrievedPromptText = limitPromptText(
-      packet.relevantEvidenceText || packet.sessionContinuityText || '',
-      getPromptTokenLimit('MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', 420),
-      'tail'
-    );
-    const profileDisabled = packet.stableProfile?.disabled === true;
-    const continuitySummaryText = continuityFacet
-      ? limitPromptText(
-          packet.sessionContinuityText || queryResult.digest || '',
-          getPromptTokenLimit('MAIN_PROMPT_SUMMARY_MAX_TOKENS', 180),
-          'tail'
-        )
-      : '';
-    const injectPersonaBlocks = config.MEMORY_PROFILE_INJECT_PERSONA_BLOCKS === true
-      || baseOptions.injectPersonaProfileBlocks === true;
-    const summaryText = String(
-      !profileDisabled && injectPersonaBlocks && queryResult.persona?.summary
-        ? queryResult.persona.summary
-        : (continuityFacet
-        ? limitPromptText(
-            continuitySummaryText || packet.sessionContinuityText || queryResult.digest || '',
-            getPromptTokenLimit('MAIN_PROMPT_SUMMARY_MAX_TOKENS', 180),
-            'tail'
-          )
-        : (queryResult.digest || ''))
-    );
-    const impressionText = profileDisabled || !injectPersonaBlocks ? '' : String(queryResult.persona?.impression || '');
-    const memoryForPrompt = [
-      packet.sessionContinuityText ? `[SessionContinuity]\n${packet.sessionContinuityText}` : '',
-      packet.relevantEvidenceText ? `[RelevantEvidence]\n${packet.relevantEvidenceText}` : '',
-      (!continuityFacet || !packet.sessionContinuityText) && packet.weakEvidenceText ? `[WeakEvidence]\n${packet.weakEvidenceText}` : '',
-      packet.taskStrategyText ? `[TaskMemory]\n${packet.taskStrategyText}` : '',
-      packet.groupSharedContextText ? `[GroupMemory]\n${packet.groupSharedContextText}` : '',
-      packet.styleSignalsText ? `[StyleSignals]\n${packet.styleSignalsText}` : ''
-    ].filter(Boolean).join('\n\n');
-    const injectedForTrace = {
-      retrievedMemory: retrievedPromptText,
-      weakEvidence: packet.weakEvidenceText,
-      styleSignals: packet.styleSignalsText,
-      taskMemory: packet.taskStrategyText,
-      groupMemory: packet.groupSharedContextText,
-      dailyJournal: dailyJournalText,
-      longTermProfile: packet.stableProfileText
-    };
-    const v3DroppedReasons = [];
-    const lancedbFallback = queryResult?.stats?.lancedb?.fallbackReason || '';
-    if (lancedbFallback) v3DroppedReasons.push(`lancedb_${lancedbFallback}`);
-
-    const notebookText = (localKnowledge.bySource?.notebook_doc || [])
-      .map((item) => String(item.preview || item.text || '').trim())
-      .filter(Boolean)
-      .slice(0, 2)
-      .join('\n');
-    return {
-      memoryForPrompt,
-      retrievedMemoryForPrompt: retrievedPromptText,
-      promptRetrievedMemoryText: retrievedPromptText,
-      hits: results,
-      strictResults,
-      weakResults,
-      journalHits,
-      taskHits,
-      groupHits,
-      promptGroupHits: groupHits,
-      styleHits,
-      jargonHits,
-      core: [],
-      profile: getUserProfile(userId),
-      stableProfile: packet.stableProfile,
-      persona: profileDisabled
-        ? {}
-        : (queryResult.persona && typeof queryResult.persona === 'object' ? queryResult.persona : {}),
-      affinityState: queryResult.affinityState || getUserAffinityState(userId),
-      profileText: packet.stableProfileText,
-      impression: impressionText,
-      impressionText,
-      summary: summaryText,
-      promptSummaryText: summaryText,
-      promptImpressionText: impressionText,
-      taskMemoryText: packet.taskStrategyText,
-      groupMemoryText: [packet.groupSharedContextText, notebookText].filter(Boolean).join('\n'),
-      promptGroupMemoryText: packet.groupSharedContextText,
-      styleSignalText: packet.styleSignalsText,
-      promptStyleSignalText: packet.styleSignalsText,
-      longTermProfileText: packet.stableProfileText,
-      promptLongTermProfileText: packet.stableProfileText,
-      dailyJournalText,
-      promptDailyJournalText: dailyJournalText,
-      dailyJournalItems: selectedJournalEvidence.items?.length ? selectedJournalEvidence.items : (activeRawBundle?.items?.length ? activeRawBundle.items : journalHits),
-      dailyJournalBundle: activeRawBundle || { text: dailyJournalText, items: journalHits, byLayer: { daily: journalHits, fourDay: [], monthly: [] }, selectedPromptItems: selectedJournalEvidence.items || [] },
-      factText: getUserMemories(userId),
-      stats: {
-        total: Number(queryResult?.stats?.selected || 0),
-        byType: {},
-        byTier: {},
-        byMemoryKind: {},
-        byStatus: {},
-        bySourceKind: {},
-        localKnowledge: localKnowledge.diagnostics
-      },
-      diagnostics: {
-        projectionFreshness: queryResult?.diagnostics?.projectionFreshness || null,
-        memoryTrace: buildMemoryTrace({
-          hits: results,
-          injected: injectedForTrace,
-          options: {
-            ...options,
-            retrievalPath: 'v3',
-            injectedBlockIds: resolveInjectedBlockIds(injectedForTrace),
-            droppedReasons: resolveDroppedReasons(results, injectedForTrace, v3DroppedReasons),
-            memoryProfileTrace: {
-              profile_source: packet.stableProfileSource,
-              profile_injected: Boolean(packet.stableProfileText),
-              traceItems: packet.stableProfile?.traceItems || [],
-              conflicts: packet.stableProfile?.conflicts || [],
-              suppressed: packet.stableProfile?.suppressed || [],
-              expiresSoon: packet.stableProfile?.expiresSoon || [],
-              legacyFallbackUsed: Boolean(packet.stableProfile?.legacyFallbackUsed),
-              legacy_fallback_disabled: Boolean(baseOptions.disableLegacyFactFallback || recapQuery),
-              profile_disabled_reason: packet.stableProfile?.reason || ''
-            }
-          }
-        })
-      },
-      segments: {
-        retrievedMemory: packet.messages.relevantEvidence?.length > 0
-          ? packet.messages.relevantEvidence
-          : (packet.messages.sessionContinuity || []),
-        weakEvidence: packet.messages.weakEvidence || [],
-        dailyJournal: [],
-        taskMemory: packet.messages.taskStrategy || [],
-        groupMemory: packet.messages.groupSharedContext || [],
-        styleSignals: packet.messages.styleSignals || [],
-        longTermProfile: packet.messages.stableProfile || [],
-        sessionContinuity: packet.messages.sessionContinuity || []
-      }
-    };
   }
   const resolvedGroupIds = resolveReadableGroupIds(userId, baseOptions);
   const normalizedOptions = {
