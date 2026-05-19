@@ -85,7 +85,7 @@ function mergeCompletedTasksForQueuedPatch(current = {}, patch = {}, incomingTur
   const completed = normalizeCompletedTasks(current.completedTasks);
   if (incomingTurns.length === 0) return completed;
   const patchedTasks = normalizeObject(patch.tasks, {});
-  const keys = ['memoryLearning', 'selfImprovement', 'dailyJournal', 'memoryEvent', 'materialize', 'vectorMaintenance', 'enrich'];
+  const keys = ['memoryLearning', 'selfImprovement', 'dailyJournal', 'memoryEvent', 'materialize', 'vectorMaintenance', 'memoryQualityAudit', 'enrich'];
   for (const key of keys) {
     if (patchedTasks[key] === true || completed[key] === true) {
       completed[key] = false;

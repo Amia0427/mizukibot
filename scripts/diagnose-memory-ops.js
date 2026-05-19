@@ -2,9 +2,11 @@
 
 const path = require('path');
 
+const config = require('../config');
 const { runDiagnostics } = require('./diagnose-lancedb-memory');
 const { runBackfill } = require('./backfill-memory-v3-embeddings');
 const { loadCases, runMode } = require('./eval-memory-recall');
+const { runMemoryQualityAudit } = require('../utils/memoryQualityAudit');
 
 const SCHEMA_VERSION = 'memory_ops_diagnostic_v1';
 const CASES_FILE = path.join(__dirname, '..', 'artifacts', 'memory-recall-eval', 'cases.jsonl');
@@ -25,7 +27,11 @@ const MODE_ALIASES = {
   dryrun: 'backfill',
   recall: 'recall',
   eval: 'recall',
-  'recall-eval': 'recall'
+  'recall-eval': 'recall',
+  audit: 'audit',
+  quality: 'audit',
+  'quality-audit': 'audit',
+  'memory-audit': 'audit'
 };
 
 function normalizeText(value = '') {
@@ -107,11 +113,12 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
 
 function buildUsageSummary() {
   return {
-    usage: 'npm run diag:memory -- <diagnose|backfill|recall> [--limit N]',
+    usage: 'npm run diag:memory -- <diagnose|backfill|recall|audit> [--limit N]',
     modes: {
       diagnose: 'coverage and LanceDB fallback probe summary',
       backfill: 'dry-run embedding backfill plan',
-      recall: 'recall eval summary from artifacts/memory-recall-eval/cases.jsonl'
+      recall: 'recall eval summary from artifacts/memory-recall-eval/cases.jsonl',
+      audit: 'sampled memory semantic quality audit plus hard metric warnings'
     }
   };
 }
@@ -223,12 +230,36 @@ function summarizeRecall(result = {}, args = {}) {
   };
 }
 
+function summarizeAudit(result = {}, args = {}) {
+  return {
+    limit: args.limit ?? 5,
+    ok: result.ok !== false,
+    skipped: result.skipped === true,
+    reason: result.reason || '',
+    score: result.score ?? null,
+    warnings: Array.isArray(result.warnings) ? result.warnings.length : 0,
+    writeFindings: Array.isArray(result.writeFindings) ? result.writeFindings.length : 0,
+    recallFindings: Array.isArray(result.recallFindings) ? result.recallFindings.length : 0,
+    hardMetrics: result.hardMetrics
+      ? {
+          syncEnabled: result.hardMetrics.syncSummary?.syncEnabled === true,
+          memoryCoverage: result.hardMetrics.syncSummary?.coverage?.memory || null,
+          worldbookCoverage: result.hardMetrics.syncSummary?.coverage?.worldbook || null,
+          projectionStale: result.hardMetrics.projectionFreshness?.projectionStale === true,
+          projectionStaleReason: result.hardMetrics.projectionFreshness?.projectionStaleReason || ''
+        }
+      : null,
+    samples: result.samples || {}
+  };
+}
+
 function getDefaultRunners() {
   return {
     runDiagnostics,
     runBackfill,
     loadCases,
-    runMode
+    runMode,
+    runMemoryQualityAudit
   };
 }
 
@@ -284,7 +315,7 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
     });
   }
 
-  if (!['diagnose', 'backfill', 'recall'].includes(args.mode)) {
+  if (!['diagnose', 'backfill', 'recall', 'audit'].includes(args.mode)) {
     return createEnvelope({
       mode: args.mode,
       ok: false,
@@ -332,6 +363,29 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
         exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
         summary: summarizeBackfill(result, { ...args, limit }),
         details: { results: result.results || [] },
+        startedAt
+      });
+    }
+
+    if (args.mode === 'audit') {
+      const limit = args.limit ?? 5;
+      const result = await runners.runMemoryQualityAudit({
+        enabled: true,
+        force: true,
+        sampleSize: limit,
+        timeoutMs: Number(config.POST_REPLY_MEMORY_QUALITY_AUDIT_TIMEOUT_MS) || 3000
+      });
+      return createEnvelope({
+        mode: 'audit',
+        ok: result.ok !== false,
+        exitCode: EXIT_CODES.ok,
+        summary: summarizeAudit(result, { ...args, limit }),
+        details: {
+          hardMetrics: result.hardMetrics || null,
+          warnings: result.warnings || [],
+          writeFindings: result.writeFindings || [],
+          recallFindings: result.recallFindings || []
+        },
         startedAt
       });
     }
@@ -434,5 +488,6 @@ module.exports = {
   runMemoryOpsFromArgv,
   summarizeBackfill,
   summarizeDiagnose,
-  summarizeRecall
+  summarizeRecall,
+  summarizeAudit
 };

@@ -27,6 +27,7 @@ module.exports = (async () => {
     process.env.POST_REPLY_ENRICH_MIN_TURNS = '2';
     process.env.POST_REPLY_ENRICH_MIN_CONTENT_CHARS = '120';
     process.env.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = 'false';
+    process.env.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED = 'false';
     clearProjectCache();
 
     const memoryExtraction = require('../api/memoryExtraction');
@@ -518,6 +519,95 @@ module.exports = (async () => {
     });
     assert.strictEqual(vectorMaintenanceCalls.length, 0, 'retry should not rerun completed vector maintenance');
     config.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = false;
+
+    config.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED = true;
+    config.MEMORY_V3_ENABLED = true;
+    const memoryQualityAuditCalls = [];
+    const auditQueue = {
+      updatedJobs: [],
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      }
+    };
+    const auditResult = await processPostReplyJob({
+      jobId: 'memory_quality_audit_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true,
+        vectorMaintenance: true
+      }
+    }, {
+      queue: auditQueue,
+      runMemoryQualityAudit: async (options = {}) => {
+        memoryQualityAuditCalls.push(options);
+        return { ok: true, score: 1, warnings: [], writeFindings: [], recallFindings: [], durationMs: 1 };
+      }
+    });
+    assert.strictEqual(memoryQualityAuditCalls.length, 1, 'core job should run memory quality audit when enabled');
+    assert.strictEqual(memoryQualityAuditCalls[0].jobId, 'memory_quality_audit_job');
+    assert.strictEqual(auditResult.job.completedTasks.memoryQualityAudit, true);
+
+    memoryQualityAuditCalls.length = 0;
+    await processPostReplyJob({
+      jobId: 'memory_quality_audit_resume_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true,
+        vectorMaintenance: true,
+        memoryQualityAudit: true
+      }
+    }, {
+      runMemoryQualityAudit: async (options = {}) => {
+        memoryQualityAuditCalls.push(options);
+        return { ok: true };
+      }
+    });
+    assert.strictEqual(memoryQualityAuditCalls.length, 0, 'retry should not rerun completed memory quality audit');
+
+    const auditFailure = await processPostReplyJob({
+      jobId: 'memory_quality_audit_failure_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true,
+        vectorMaintenance: true
+      }
+    }, {
+      runMemoryQualityAudit: async () => {
+        throw new Error('audit failed');
+      }
+    });
+    assert.strictEqual(auditFailure.ok, true, 'audit failure should not fail core post-reply job');
+    assert.strictEqual(auditFailure.job.completedTasks.memoryQualityAudit, true);
+    config.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED = false;
 
     const reconcileCalls = [];
     config.POST_REPLY_VECTOR_MAINTENANCE_RECONCILE_ENABLED = true;

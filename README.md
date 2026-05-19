@@ -94,6 +94,7 @@ npm run check:agent:static
 npm run diag:security
 npm run diag:fallback
 npm run diag:memory
+npm run diag:memory -- audit --limit 5
 npm run diag:continuity
 npm run diag:main-reply
 npm run diag:runtime
@@ -386,6 +387,8 @@ prepare
 
 当前上下文可能融合长期画像、短期记忆、bridge snapshot、session summary、daily journal、Memory V3、notebook 文档和其他本地知识源。
 
+更新 2026-05-19 21:45 +08:00：post-reply worker 支持低频抽样 `memoryQualityAudit`，默认由 `POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED=false` 关闭。开启后会在向量维护之后读取 LanceDB 同步覆盖率、projection freshness、最近/高风险 Memory V3 节点和 recall eval case，再用 `MEMORY_MODEL` 做语义质检；结果只进入日志和 `npm run diag:memory -- audit --limit 5` 诊断报告，不会自动删除或改写记忆。
+
 更新 2026-05-19 21:25 +08:00：用户画像记忆增加 lifecycle 派生治理。Memory V3 materialize 会为画像节点计算 `lifecycleStatus`、`expiresAt`、`freshnessScore` 和 `profileQuality`；过时、可疑、被新事实覆盖的画像会保留在节点文件用于审计，但不会进入召回、向量检索或主回复模型注入。主回复模型收到的长期画像现在会整理成稳定画像、回复偏好、避免触碰和谨慎参考四类，并明确低置信内容只能作参考。
 
 ### 工具系统
@@ -594,6 +597,7 @@ npm run check:prompts
 - `utils/localKnowledge.js`
 - `utils/memoryCli.js`
 - `api/localNotebook.js`
+- `npm run diag:memory -- audit --limit 5`
 
 ---
 
