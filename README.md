@@ -137,7 +137,7 @@ npm run memory:v3:migrate
 
 ### 记忆质量与召回治理
 
-更新时间：2026-05-20 00:42 +08:00
+更新时间：2026-05-20 01:23 +08:00
 
 ```bash
 npm run diag:memory -- diagnose --skip-probe --limit 20
@@ -153,6 +153,7 @@ node scripts/repair-memory-vector-index.js --apply --compact
 - 新写入记忆会记录 `meta.quality`，严重 prompt/助手自指污染会拒绝，临时或低信号内容会降为 `candidate`。
 - 写后召回验证失败的记忆会带 `notRecallable`，保留审计但不进入 legacy/vector 检索；显式用户纠错会归档被 supersede 的旧记忆。
 - 图片召回问题会走 `memory_cli`：`今天/昨天发给你什么图/战绩图` 这类请求会在 all-search 中合并图片索引，凌晨 4 点前的“今天”会同时查前一自然日，并过滤请求时间之后的图片记录。
+- 更新 2026-05-20 01:23 +08:00：入库图片会异步调用 `MEMORY_MODEL` 生成带简短时间戳的视觉摘要，写回 `image_memory_index`，并同步追加 `memory_confirmed/image_visual_summary` 到 Memory V3。
 - `recall --gate` 可作为 CI/人工门禁；`lancedb-gate` 会比较 local_jsonl baseline 与 LanceDB candidate，未过 recall/覆盖率/漂移门禁前保持 shadow read。
 - 当前向量健康门禁若提示 `mustMaterializeFirst`，先运行 `npm run memory:v3:migrate`；若提示 stale/ready-but-not-synced，再运行修复脚本。
 - `POST_REPLY_VECTOR_WATCHDOG_ENABLED=true` 时，post-reply worker 会独立低频巡检：projection stale 自动 materialize、LanceDB 漂移自动 reconcile、pending embedding 小批量 backfill+sync。

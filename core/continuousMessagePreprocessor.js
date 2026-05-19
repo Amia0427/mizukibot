@@ -83,6 +83,20 @@ function clampDebounceMs(value, fallback = 2000) {
   return Math.max(300, Math.min(60000, Math.floor(n)));
 }
 
+function enqueueImageVisualSummarySafe(imageRef = '', context = {}, deps = {}) {
+  if (config.IMAGE_MEMORY_VISUAL_SUMMARY_ENABLED === false && context.force !== true) {
+    return { queued: false, reason: 'disabled' };
+  }
+  try {
+    return require('../utils/imageVisualSummaryMemory').enqueueImageVisualSummary(imageRef, context, deps);
+  } catch (error) {
+    if (config.ENABLE_DEBUG_LOG) {
+      console.warn('[continuous-message] image visual summary enqueue failed:', error?.message || error);
+    }
+    return { queued: false, reason: error?.message || 'enqueue_failed' };
+  }
+}
+
 function cloneReplyContext(replyContext = null) {
   if (!replyContext || typeof replyContext !== 'object') return null;
   return {
@@ -122,6 +136,24 @@ async function buildImageRefMap(urls = [], options = {}) {
         source: 'continuous_message',
         userText: options.userText
       });
+      const summaryTask = enqueueImageVisualSummarySafe(cached.ref, {
+        sourceUrl: cached.sourceUrl || url,
+        mediaType: cached.mediaType,
+        userId: options.userId,
+        groupId: options.groupId,
+        sessionKey: options.sessionKey,
+        messageId: options.messageId,
+        sourceMessageId: options.sourceMessageId,
+        imageSource: options.imageSource,
+        label: options.label,
+        userText: options.userText,
+        awaitSummary: options.awaitImageVisualSummary === true
+      }, {
+        postWithRetry: options.imageVisualSummaryPostWithRetry
+      });
+      if (options.awaitImageVisualSummary === true && summaryTask?.promise) {
+        await summaryTask.promise;
+      }
     }
   }
   return out;
