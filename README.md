@@ -137,7 +137,7 @@ npm run memory:v3:migrate
 
 ### 记忆质量与召回治理
 
-更新时间：2026-05-19 22:20 +08:00
+更新时间：2026-05-20 00:42 +08:00
 
 ```bash
 npm run diag:memory -- diagnose --skip-probe --limit 20
@@ -154,6 +154,7 @@ node scripts/repair-memory-vector-index.js --apply --compact
 - 写后召回验证失败的记忆会带 `notRecallable`，保留审计但不进入 legacy/vector 检索；显式用户纠错会归档被 supersede 的旧记忆。
 - `recall --gate` 可作为 CI/人工门禁；`lancedb-gate` 会比较 local_jsonl baseline 与 LanceDB candidate，未过 recall/覆盖率/漂移门禁前保持 shadow read。
 - 当前向量健康门禁若提示 `mustMaterializeFirst`，先运行 `npm run memory:v3:migrate`；若提示 stale/ready-but-not-synced，再运行修复脚本。
+- `POST_REPLY_VECTOR_WATCHDOG_ENABLED=true` 时，post-reply worker 会独立低频巡检：projection stale 自动 materialize、LanceDB 漂移自动 reconcile、pending embedding 小批量 backfill+sync。
 - 维护记录 2026-05-19 22:24 +08:00：已完成 LanceDB reconcile、memory-v3 projection 刷新和 embedding backfill；`pendingRows=0`、`readyButNotSynced=0`、`staleTableRows=0`，语义审查硬指标通过。
 
 ### Windows 运维

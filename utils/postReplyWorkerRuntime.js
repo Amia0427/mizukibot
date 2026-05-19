@@ -8,6 +8,10 @@ const {
   runPostReplyVectorMaintenance
 } = require('./postReplyWorker/vectorMaintenance');
 const {
+  createPostReplyVectorWatchdogLoop,
+  runPostReplyVectorWatchdog
+} = require('./postReplyWorker/vectorWatchdog');
+const {
   buildCoreLearningConversation,
   buildCoreLearningEvidence
 } = require('./postReplyWorker/enrichPhase');
@@ -41,6 +45,14 @@ function createPostReplyWorkerRuntime(options = {}) {
   const rssRecycleBytes = Math.max(0, Number(options.rssRecycleMb ?? config.POST_REPLY_WORKER_RSS_RECYCLE_MB) || 0) * 1024 * 1024;
   const rssRecycleIdleMs = Math.max(0, Number(options.rssRecycleIdleMs ?? config.POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS) || 0);
   const onRecycle = typeof options.onRecycle === 'function' ? options.onRecycle : null;
+  const vectorWatchdogLoop = options.vectorWatchdogLoop === false
+    ? null
+    : (options.vectorWatchdogLoop || createPostReplyVectorWatchdogLoop({
+        isBusy: () => activeCount > 0,
+        source: config.POST_REPLY_VECTOR_WATCHDOG_SOURCE,
+        limit: config.POST_REPLY_VECTOR_WATCHDOG_LIMIT,
+        maxBatches: config.POST_REPLY_VECTOR_WATCHDOG_MAX_BATCHES
+      }));
 
   let timer = null;
   let stopped = true;
@@ -391,6 +403,9 @@ function createPostReplyWorkerRuntime(options = {}) {
     if (!stopped) return true;
     stopped = false;
     scheduleTick(0);
+    if (vectorWatchdogLoop && config.POST_REPLY_VECTOR_WATCHDOG_ENABLED === true) {
+      vectorWatchdogLoop.start();
+    }
     return true;
   }
 
@@ -400,6 +415,9 @@ function createPostReplyWorkerRuntime(options = {}) {
     if (timer) {
       clearTimeout(timer);
       timer = null;
+    }
+    if (vectorWatchdogLoop && typeof vectorWatchdogLoop.stop === 'function') {
+      vectorWatchdogLoop.stop();
     }
   }
 
@@ -414,7 +432,8 @@ function createPostReplyWorkerRuntime(options = {}) {
     runOneJob,
     getActiveUserIds,
     getStats,
-    maybeRequestIdleRecycle
+    maybeRequestIdleRecycle,
+    vectorWatchdogLoop
   };
 }
 
@@ -422,6 +441,7 @@ module.exports = {
   createPostReplyWorkerRuntime,
   flushPostReplyMaterialize,
   runPostReplyVectorMaintenance,
+  runPostReplyVectorWatchdog,
   schedulePostReplyMaterialize,
   buildCoreLearningConversation,
   buildCoreLearningEvidence,

@@ -1,6 +1,6 @@
 # Memory Quality Governance
 
-更新时间：2026-05-19 21:42 +08:00
+更新时间：2026-05-20 00:42 +08:00
 
 ## 目标
 
@@ -17,8 +17,10 @@
 - `utils/memoryGovernance/correctionSupersede.js` 识别显式用户纠错，把被纠正的旧记忆归档为 `user_correction_superseded`。
 - `utils/memoryGovernance/recallEvalGate.js` 和 `lancedbMigrationGate.js` 将 recall eval/LanceDB shadow 迁移变成可失败门禁。
 - `npm run diag:memory` 在 `summary.quality` 中显示 Memory V3、worldbook、social context、image asset、notebook 的跨来源质量统计和样本。
+- `utils/postReplyWorker/vectorWatchdog.js` 在 post-reply worker 内独立低频巡检，自动处理 projection materialize、LanceDB reconcile、pending embedding 小批量 backfill+sync。
 
 更新 2026-05-19 22:20 +08:00：补齐冲突报告、纠错归档、召回门禁、LanceDB 读迁移门禁、混合召回排序权重和写后不可召回隐藏。
+更新 2026-05-20 00:42 +08:00：新增 `POST_REPLY_VECTOR_WATCHDOG_*` 自动巡检维护，避免健康漂移只能依赖新消息触发。
 
 ## 运维顺序
 
@@ -38,6 +40,7 @@
 ## 运维记录
 
 - 2026-05-19 22:24 +08:00：执行 `repair-memory-vector-index --apply --compact`、强制 materialize、`backfill-memory-v3-embeddings --source memory --sync-after`，最终 `pendingRows=0`、`readyButNotSynced=0`、`staleTableRows=0`，`diag:memory audit --limit 5` 硬指标通过。
+- 2026-05-20 00:42 +08:00：post-reply worker 接入自动向量 watchdog，默认 30 分钟巡检一次；健康时跳过，发现 projection stale / LanceDB drift / pending embedding 时自动小批量维护。
 
 ## 验收命令
 
@@ -48,5 +51,6 @@ node tests/memoryGovernanceRollbackLearningRef.test.js
 node tests/memoryRecallAndLanceDbGates.test.js
 node tests/memoryGovernanceConflictReport.test.js
 node tests/memoryCorrectionSupersede.test.js
+node tests/postReplyVectorWatchdog.test.js
 node scripts/diagnose-memory-ops.js diagnose --skip-probe --limit 5
 ```
