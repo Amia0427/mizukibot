@@ -27,6 +27,19 @@ const { collectEmbeddingBackfillNodes, enqueueMissingEmbeddings } = require('./e
 const { acquireMaterializeLock, DEFAULT_STALE_MS: DEFAULT_MATERIALIZE_LOCK_STALE_MS } = require('./materializeLock');
 const { isMemoryNotRecallable } = require('./recallFilter');
 const {
+  buildLanceDbSyncPlan,
+  createNodeFromEvent,
+  normalizeSessionScopeFromEvent,
+  upsertNode
+} = require('./materializerNodes');
+const {
+  countDirtyScopes,
+  eventMatchesDirtyScopes,
+  getLatestEventTs,
+  mergeIncrementalProjection,
+  normalizeDirtyScopes
+} = require('./materializerIncremental');
+const {
   BOT_PERSONA_FIELDS,
   PERSONA_SUPPORT_FIELDS,
   RELATIONSHIP_STYLE_FIELDS,
@@ -44,167 +57,6 @@ const {
   resolveEvidenceTier,
   resolveProfileNodeConflicts
 } = require('./profileProjection');
-
-function createNodeFromEvent(event) {
-  const text = normalizeText(event.text);
-  if (!text) return null;
-  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
-  const fieldKey = normalizeText(
-    payload.fieldKey
-    || event.fieldKey
-    || payload.type
-    || event.memoryKind
-    || payload.memoryKind
-    || event.semanticSlot
-    || payload.semanticSlot
-    || 'fact'
-  ).toLowerCase();
-  const normalizedFieldKey = fieldKey === 'like'
-    ? 'preference_like'
-    : fieldKey === 'dislike'
-      ? 'preference_dislike'
-      : fieldKey;
-  return {
-    id: String(event.id || '').trim(),
-    userId: normalizeText(event.userId),
-    groupId: normalizeText(event.groupId),
-    channelId: normalizeText(event.channelId),
-    sessionId: normalizeText(event.sessionId),
-    sessionKey: normalizeText(event.sessionKey),
-    routePolicyKey: normalizeText(event.routePolicyKey),
-    topRouteType: normalizeText(event.topRouteType),
-    scopeType: normalizeText(event.scopeType || 'personal').toLowerCase() || 'personal',
-    source: normalizeText(event.source),
-    sourceKind: normalizeText(event.sourceKind || event.source),
-    status: normalizeText(event.status || (event.type === 'memory_candidate_extracted' ? 'candidate' : 'active')).toLowerCase(),
-    type: normalizeText(payload.type || event.memoryKind || 'fact').toLowerCase() || 'fact',
-    memoryKind: normalizeText(event.memoryKind || payload.memoryKind).toLowerCase(),
-    fieldKey: normalizedFieldKey,
-    semanticSlot: normalizeText(event.semanticSlot || payload.semanticSlot || normalizedFieldKey).toLowerCase(),
-    conflictKey: normalizeText(event.conflictKey || payload.conflictKey),
-    canonicalKey: normalizeText(event.canonicalKey || canonicalizeText(text)).toLowerCase(),
-    text,
-    confidence: Number(event.confidence || payload.confidence || 0) || 0,
-    importance: Number(event.importance || payload.importance || 0) || 0,
-    evidenceCount: Math.max(1, Number(event.evidenceCount || payload.evidenceCount || 1) || 1),
-    evidenceTier: 'weak',
-    stabilityScore: 0,
-    suppressedBy: '',
-    notRecallable: isMemoryNotRecallable(event),
-    recallVerification: payload.recallVerification && typeof payload.recallVerification === 'object'
-      ? payload.recallVerification
-      : null,
-    participants: Array.isArray(event.participants) ? event.participants : [],
-    entities: Array.isArray(event.entities) ? event.entities : [],
-    relations: Array.isArray(event.relations) ? event.relations : [],
-    taskType: normalizeText(event.taskType || payload.taskType),
-    extractionClass: normalizeText(payload.extractionClass || payload.classification || event.extractionClass).toLowerCase(),
-    toolName: normalizeText(event.toolName || payload.toolName),
-    agentName: normalizeText(event.agentName || payload.agentName),
-    updatedAt: Number(event.ts || 0) || 0,
-    createdAt: Number(event.ts || 0) || 0
-  };
-}
-
-function upsertNode(nodeMap, node) {
-  if (!node || !node.id) return;
-  const existing = nodeMap.get(node.id);
-  if (!existing) {
-    nodeMap.set(node.id, node);
-    return;
-  }
-  nodeMap.set(node.id, {
-    ...existing,
-    ...node,
-    evidenceCount: Math.max(Number(existing.evidenceCount || 1), Number(node.evidenceCount || 1)),
-    confidence: Math.max(Number(existing.confidence || 0), Number(node.confidence || 0)),
-    importance: Math.max(Number(existing.importance || 0), Number(node.importance || 0)),
-    updatedAt: Math.max(Number(existing.updatedAt || 0), Number(node.updatedAt || 0))
-  });
-}
-
-function normalizeSessionScopeFromEvent(event = {}) {
-  return {
-    sessionKey: normalizeText(event.sessionKey),
-    userId: normalizeText(event.userId),
-    groupId: normalizeText(event.groupId),
-    channelId: normalizeText(event.channelId),
-    sessionId: normalizeText(event.sessionId)
-  };
-}
-
-function resolveNodeConflicts(nodes = []) {
-  const winners = new Map();
-  for (const node of (Array.isArray(nodes) ? nodes : []).slice().sort((a, b) => {
-    const aRank = (a.status === 'active' ? 2 : 1) + (a.sourceKind === 'explicit' ? 2 : 0) + (String(a.type || '').toLowerCase() === 'dislike' ? 1 : 0);
-    const bRank = (b.status === 'active' ? 2 : 1) + (b.sourceKind === 'explicit' ? 2 : 0) + (String(b.type || '').toLowerCase() === 'dislike' ? 1 : 0);
-    if (bRank !== aRank) return bRank - aRank;
-    if (Number(b.confidence || 0) !== Number(a.confidence || 0)) return Number(b.confidence || 0) - Number(a.confidence || 0);
-    return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
-  })) {
-    const slot = `${node.userId}|${node.scopeType}|${node.semanticSlot || node.type}|${node.canonicalKey}`;
-    if (!winners.has(slot)) winners.set(slot, node);
-  }
-  return Array.from(winners.values());
-}
-
-function getLatestEventTs(events = []) {
-  let latest = 0;
-  for (const event of Array.isArray(events) ? events : []) {
-    latest = Math.max(latest, Number(event?.ts || 0) || 0);
-  }
-  return latest;
-}
-
-function normalizeDirtyScopes(value = {}) {
-  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const userIds = new Set();
-  const sessionKeys = new Set();
-  const groupIds = new Set();
-  const add = (set, item) => {
-    const text = normalizeText(item);
-    if (text) set.add(text);
-  };
-  for (const item of Array.isArray(source.userIds) ? source.userIds : []) add(userIds, item);
-  for (const item of Array.isArray(source.sessionKeys) ? source.sessionKeys : []) add(sessionKeys, item);
-  for (const item of Array.isArray(source.groupIds) ? source.groupIds : []) add(groupIds, item);
-  add(userIds, source.userId);
-  add(sessionKeys, source.sessionKey);
-  add(groupIds, source.groupId);
-  return { userIds, sessionKeys, groupIds };
-}
-
-function countDirtyScopes(scopes = {}) {
-  return Number(scopes.userIds?.size || 0) + Number(scopes.sessionKeys?.size || 0) + Number(scopes.groupIds?.size || 0);
-}
-
-function eventMatchesDirtyScopes(event = {}, scopes = {}) {
-  const userId = normalizeText(event.userId);
-  const sessionKey = normalizeText(event.sessionKey);
-  const groupId = normalizeText(event.groupId);
-  return Boolean(
-    (userId && scopes.userIds?.has(userId))
-    || (sessionKey && scopes.sessionKeys?.has(sessionKey))
-    || (groupId && scopes.groupIds?.has(groupId))
-  );
-}
-
-function mergeIncrementalProjection(fullProjection = {}, partialProjection = {}, key = 'users', dirtyKeys = new Set()) {
-  const merged = {
-    ...(fullProjection && typeof fullProjection === 'object' ? fullProjection : {}),
-    ...(partialProjection && typeof partialProjection === 'object' ? partialProjection : {})
-  };
-  const existingItems = fullProjection?.[key] && typeof fullProjection[key] === 'object' ? fullProjection[key] : {};
-  const partialItems = partialProjection?.[key] && typeof partialProjection[key] === 'object' ? partialProjection[key] : {};
-  merged[key] = { ...existingItems };
-  for (const dirtyKey of dirtyKeys || []) {
-    delete merged[key][dirtyKey];
-  }
-  for (const [itemKey, value] of Object.entries(partialItems)) {
-    merged[key][itemKey] = value;
-  }
-  return merged;
-}
 
 function materializeMemoryViews(options = {}) {
   const pressureDelayMs = getBackgroundPressureDelayMs();
@@ -619,29 +471,6 @@ function materializeMemoryViews(options = {}) {
   } finally {
     lock.release();
   }
-}
-
-function buildLanceDbSyncPlan(nodes = [], options = {}) {
-  const activeNodes = (Array.isArray(nodes) ? nodes : [])
-    .filter((node) => node && normalizeText(node.status).toLowerCase() !== 'archived' && !isMemoryNotRecallable(node));
-  const readyNodeIds = new Set();
-  try {
-    const { loadEmbeddingIndex } = require('./embeddingIndex');
-    for (const row of loadEmbeddingIndex().readyRows || []) {
-      if (normalizeText(row.nodeId)) readyNodeIds.add(normalizeText(row.nodeId));
-    }
-  } catch (_) {}
-  const embeddableNodes = activeNodes.filter((node) => readyNodeIds.has(normalizeText(node.id || node.nodeId)));
-  return {
-    dryRun: options.dryRun !== false,
-    fullReconcile: options.fullReconcile === true,
-    sourceNodes: activeNodes.length,
-    readyRows: embeddableNodes.length,
-    pendingRows: Math.max(0, activeNodes.length - embeddableNodes.length),
-    recommendedCommand: options.fullReconcile === true
-      ? 'node scripts/sync-lancedb-memory-index.js --full --compact'
-      : 'node scripts/sync-lancedb-memory-index.js'
-  };
 }
 
 module.exports = {
