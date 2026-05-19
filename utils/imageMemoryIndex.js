@@ -3,12 +3,20 @@ const path = require('path');
 const config = require('../config');
 const { getJsonStore } = require('./storeRegistry');
 const { getAccessibleGroupIdsForUser } = require('./memoryScopeIndex');
+const {
+  formatDateInTz,
+  getDatePartsInTz
+} = require('./time');
 
 const DEFAULT_INDEX = Object.freeze({
   version: 1,
   images: {}
 });
 const CACHE_REF_PREFIX = 'cached-image://';
+const IMAGE_RECALL_CUE_RE = /(?:图片|截图|照片|图像|战绩图|成绩图|分数图|结算图|谱面图|哪张图|几张图|什么图|发.{0,12}图|传.{0,12}图|给你.{0,12}图|\bimage\b|\bphoto\b|\bscreenshot\b|\bscore\b|\bresult\b)/i;
+const SELF_SENT_IMAGE_RE = /(?:(?:我|俺|咱|我们).{0,18}(?:发|传|贴|给你|给妳|发过|发了)|(?:发给你|发给妳|传给你|传给妳))/i;
+const SCORE_IMAGE_RE = /(?:战绩|成绩|分数|结算|谱面|音游|打歌|\bscore\b|\bresult\b)/i;
+const EARLY_MORNING_PREV_DAY_HOUR = 4;
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -32,6 +40,69 @@ function parseCacheRef(value = '') {
 function normalizeTimestamp(value = 0) {
   const num = Number(value || 0);
   return Number.isFinite(num) && num > 0 ? num : Date.now();
+}
+
+function normalizeDate(value = null) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value;
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return new Date(value);
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = new Date(value);
+    if (Number.isFinite(parsed.getTime())) return parsed;
+  }
+  return new Date();
+}
+
+function normalizeDay(value = '') {
+  const day = String(value || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : '';
+}
+
+function shiftDay(day = '', offsetDays = 0) {
+  const normalized = normalizeDay(day);
+  if (!normalized) return '';
+  const [year, month, date] = normalized.split('-').map((part) => Number(part));
+  const utc = new Date(Date.UTC(year, month - 1, date));
+  utc.setUTCDate(utc.getUTCDate() + Number(offsetDays || 0));
+  return utc.toISOString().slice(0, 10);
+}
+
+function uniqueStrings(values = []) {
+  return Array.from(new Set((Array.isArray(values) ? values : [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)));
+}
+
+function isImageRecallQuery(query = '') {
+  return IMAGE_RECALL_CUE_RE.test(normalizeText(query));
+}
+
+function isSelfSentImageRecallQuery(query = '') {
+  const text = normalizeText(query);
+  return isImageRecallQuery(text) && SELF_SENT_IMAGE_RE.test(text);
+}
+
+function resolveImageTargetDays(query = '', context = {}, options = {}) {
+  const text = normalizeText(query);
+  const explicitDays = text.match(/\b\d{4}-\d{2}-\d{2}\b/g) || [];
+  const now = normalizeImageSearchNow(context, options);
+  const today = normalizeDay(options.today || context.today || context.journalToday)
+    || formatDateInTz(now, config.TIMEZONE);
+  const days = explicitDays.slice();
+  if (/(?:大前天)/.test(text)) days.push(shiftDay(today, -3));
+  if (/(?:前天|day before yesterday)/i.test(text)) days.push(shiftDay(today, -2));
+  if (/(?:昨天|昨日|yesterday)/i.test(text)) days.push(shiftDay(today, -1));
+  if (/(?:今天|今日|today)/i.test(text)) {
+    days.push(today);
+    const hour = Number(getDatePartsInTz(now, config.TIMEZONE).hour || 0);
+    if (hour >= 0 && hour < EARLY_MORNING_PREV_DAY_HOUR) {
+      days.push(shiftDay(today, -1));
+    }
+  }
+  return uniqueStrings(days.map(normalizeDay));
+}
+
+function normalizeImageSearchNow(context = {}, options = {}) {
+  return normalizeDate(options.now || context.now || context.journalNow || context.timestamp || context.ts);
 }
 
 function getIndexFile() {
@@ -244,6 +315,57 @@ function buildSearchText(record = {}, context = {}) {
   ].map(normalizeText).filter(Boolean).join(' ');
 }
 
+function getVisibleImageTimestamps(record = {}, context = {}) {
+  const visibleRecord = filterImageRecordForContext(record, context);
+  const values = [
+    visibleRecord.createdAt,
+    visibleRecord.lastSeenAt,
+    ...getVisibleImageObservations(record, context).map((item) => item.observedAt)
+  ].map((value) => Number(value || 0)).filter((value) => Number.isFinite(value) && value > 0);
+  return values.length ? values : [Number(record.lastSeenAt || record.createdAt || 0)].filter(Boolean);
+}
+
+function getVisibleImageTimestampsBefore(record = {}, context = {}, maxTs = 0) {
+  const upper = Number(maxTs || 0);
+  return getVisibleImageTimestamps(record, context).filter((ts) => !upper || Number(ts || 0) <= upper);
+}
+
+function imageRecordMatchesTargetDays(record = {}, context = {}, targetDays = [], maxTs = 0) {
+  const timestamps = getVisibleImageTimestampsBefore(record, context, maxTs);
+  if (!timestamps.length) return false;
+  if (!Array.isArray(targetDays) || targetDays.length === 0) return true;
+  const daySet = new Set(targetDays.map(normalizeDay).filter(Boolean));
+  if (daySet.size === 0) return true;
+  return timestamps.some((ts) => {
+    const day = formatDateInTz(new Date(Number(ts)), config.TIMEZONE);
+    return daySet.has(day);
+  });
+}
+
+function isSenderScopedImageRecord(record = {}, context = {}) {
+  const userId = normalizeId(context.userId);
+  if (!userId) return true;
+  const visibleRecord = filterImageRecordForContext(record, context);
+  if (normalizeId(visibleRecord.userId) === userId) return true;
+  return getVisibleImageObservations(record, context).some((item) => normalizeId(item.userId) === userId);
+}
+
+function hasVisibleImageMarker(record = {}, context = {}, text = '') {
+  const visibleRecord = filterImageRecordForContext(record, context);
+  if (/\[图片\]|\[image\]|\[CQ:image/i.test(text)) return true;
+  if (visibleRecord.imageRef || visibleRecord.sourceUrl) return true;
+  return getVisibleImageObservations(record, context).some((item) => item.imageSource || item.label || /\[图片\]|\[image\]|\[CQ:image/i.test(item.userText || ''));
+}
+
+function imageMarkerStrength(record = {}, context = {}, text = '') {
+  if (/\[图片\]|\[image\]|\[CQ:image/i.test(text)) return 1;
+  if (getVisibleImageObservations(record, context).some((item) => item.imageSource || item.label || /\[图片\]|\[image\]|\[CQ:image/i.test(item.userText || ''))) {
+    return 1;
+  }
+  const visibleRecord = filterImageRecordForContext(record, context);
+  return visibleRecord.imageRef || visibleRecord.sourceUrl ? 0.55 : 0;
+}
+
 function scoreTextMatch(query = '', text = '') {
   const haystack = normalizeText(text).toLowerCase();
   const q = normalizeText(query).toLowerCase();
@@ -281,19 +403,32 @@ function imageExists(cacheKey = '') {
 function searchImageMemories(query = '', context = {}, options = {}) {
   if (config.IMAGE_MEMORY_RECALL_ENABLED === false) return [];
   const limit = Math.max(1, Math.min(20, Number(options.limit || 8) || 8));
+  const imageIntent = isImageRecallQuery(query);
+  const selfSentIntent = isSelfSentImageRecallQuery(query);
+  const targetDays = resolveImageTargetDays(query, context, options);
+  const searchNowTs = normalizeImageSearchNow(context, options).getTime();
   const index = loadImageMemoryIndex();
   return Object.values(index.images || {})
     .filter((record) => canAccessImageRecord(record, context))
+    .filter((record) => imageRecordMatchesTargetDays(record, context, targetDays, searchNowTs))
+    .filter((record) => !selfSentIntent || isSenderScopedImageRecord(record, context))
     .map((record) => {
       const visibleRecord = filterImageRecordForContext(record, context);
       const text = buildSearchText(record, context);
       const textScore = scoreTextMatch(query, text);
+      const markerStrength = imageIntent ? imageMarkerStrength(record, context, text) : 0;
+      const markerMatch = markerStrength > 0 || (imageIntent && hasVisibleImageMarker(record, context, text));
+      const dayBoost = targetDays.length > 0 ? 0.18 : 0;
+      const senderBoost = selfSentIntent && isSenderScopedImageRecord(record, context) ? 0.16 : 0;
+      const scoreCueBoost = SCORE_IMAGE_RE.test(query) && markerMatch ? 0.08 : 0;
+      const explicitMarkerBoost = markerStrength >= 1 ? 0.14 : 0;
+      const fallbackScore = markerMatch ? (0.34 + dayBoost + senderBoost + scoreCueBoost + explicitMarkerBoost) : 0;
       return {
         ...visibleRecord,
         text,
         score: textScore > 0
-          ? textScore + (record.summary ? 0.18 : 0) + (record.ocrText || record.visibleText ? 0.12 : 0)
-          : 0,
+          ? textScore + (record.summary ? 0.18 : 0) + (record.ocrText || record.visibleText ? 0.12 : 0) + dayBoost + senderBoost
+          : fallbackScore,
         exists: imageExists(record.cacheKey)
       };
     })
@@ -356,9 +491,11 @@ function recordVisualContextImages(visualContext = {}, context = {}) {
 module.exports = {
   buildSearchText,
   canAccessImageRecord,
+  isImageRecallQuery,
   loadImageMemoryIndex,
   openImageMemory,
   recordVisualContextImages,
+  resolveImageTargetDays,
   saveImageMemoryIndex,
   searchImageMemories,
   upsertImageMemory

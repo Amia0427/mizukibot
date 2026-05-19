@@ -5,11 +5,13 @@ const oldPlanApiBaseUrl = process.env.PLAN_API_BASE_URL;
 const oldPlanApiKey = process.env.PLAN_API_KEY;
 const oldPlanModel = process.env.PLAN_MODEL;
 const oldPlanReasoningEffort = process.env.PLAN_REASONING_EFFORT;
+const oldMemosMcpEnabled = process.env.MEMOS_MCP_ENABLED;
 process.env.BOT_TOOL_MODE = 'full';
 process.env.PLAN_API_BASE_URL = 'https://planner.example.test/v1';
 process.env.PLAN_API_KEY = 'planner-test-key';
 process.env.PLAN_MODEL = 'planner-test-model';
 process.env.PLAN_REASONING_EFFORT = 'high';
+process.env.MEMOS_MCP_ENABLED = 'false';
 
 const {
   planRequestV2,
@@ -30,6 +32,8 @@ const {
 const { planDirectChat } = require('../core/directChatPlanner');
 const config = require('../config');
 const { getPersonaModuleCatalogSummary } = require('../utils/personaModules');
+const oldConfigMemosMcpEnabled = config.MEMOS_MCP_ENABLED;
+config.MEMOS_MCP_ENABLED = false;
 
 module.exports = (async () => {
   assert.strictEqual(getPlannerApiBaseUrl(), 'https://planner.example.test/v1');
@@ -1175,6 +1179,9 @@ module.exports = (async () => {
   else process.env.PLAN_MODEL = oldPlanModel;
   if (oldPlanReasoningEffort === undefined) delete process.env.PLAN_REASONING_EFFORT;
   else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
+  if (oldMemosMcpEnabled === undefined) delete process.env.MEMOS_MCP_ENABLED;
+  else process.env.MEMOS_MCP_ENABLED = oldMemosMcpEnabled;
+  config.MEMOS_MCP_ENABLED = oldConfigMemosMcpEnabled;
 })().catch((error) => {
   if (oldBotToolMode === undefined) delete process.env.BOT_TOOL_MODE;
   else process.env.BOT_TOOL_MODE = oldBotToolMode;
@@ -1186,6 +1193,9 @@ module.exports = (async () => {
   else process.env.PLAN_MODEL = oldPlanModel;
   if (oldPlanReasoningEffort === undefined) delete process.env.PLAN_REASONING_EFFORT;
   else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
+  if (oldMemosMcpEnabled === undefined) delete process.env.MEMOS_MCP_ENABLED;
+  else process.env.MEMOS_MCP_ENABLED = oldMemosMcpEnabled;
+  config.MEMOS_MCP_ENABLED = oldConfigMemosMcpEnabled;
   console.error(error);
   process.exit(1);
 });

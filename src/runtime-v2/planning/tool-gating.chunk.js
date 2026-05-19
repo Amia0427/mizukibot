@@ -31,6 +31,7 @@ const {
   isFinanceQuoteRequest,
   isFinanceRumorRequest,
   isFinanceWatchlistRequest,
+  isNotebookDocumentLookup,
   isNotebookListingRequest,
   isSubjectiveOpinionQuestion,
   isWeatherRequest,
@@ -248,15 +249,15 @@ function resolveCanonicalPreferredTools(route = {}, available = {}) {
     return pickFirstAllowed('skill_weather', 'getWeather');
   }
 
+  if ((shouldPrioritizeMemoryProbe(route) && !isNotebookDocumentLookup(cleanText)) || prefersMemoryRecall(cleanText)) {
+    return pickFirstAllowed('memory_cli');
+  }
+
   if ((sourceScope === 'notebook' || /知识库|笔记|notebook|我的文档|我的资料/i.test(cleanText))
     && !shouldKeepNotebookAnswerChatOnly(route, available)) {
     return isNotebookListingRequest(cleanText)
       ? pickFirstAllowed('notebook_list_docs')
       : pickFirstAllowed('notebook_search');
-  }
-
-  if (shouldPrioritizeMemoryProbe(route) || prefersMemoryRecall(cleanText)) {
-    return pickFirstAllowed('memory_cli');
   }
 
   if (isArxivRequest(cleanText, route)) {

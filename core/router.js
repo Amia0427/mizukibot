@@ -548,7 +548,7 @@ function matchLegacyFineDirectLocalRoute({ rawText = '', cleanText = '', imageUr
       toolNeed: prefersMemory && prefersWeb ? ['mixed'] : (prefersMemory ? ['local-read'] : ['web']),
       needsMemory: prefersMemory,
       freshness: prefersWeb ? 'latest' : 'unknown',
-      allowedTools: prefersMemory ? ['notebook_search', 'notebook_list_docs'] : undefined
+      allowedTools: prefersMemory ? ['memory_cli', 'notebook_search', 'notebook_list_docs'] : undefined
     });
   }
 
@@ -765,7 +765,7 @@ function matchLegacyFineDirectLocalRoute({ rawText = '', cleanText = '', imageUr
         : 'web';
     const toolNeed = domain === 'personal' ? ['local-read'] : (imageUrl ? ['image'] : ['web']);
     const allowedTools = domain === 'personal'
-      ? ['notebook_search', 'notebook_list_docs']
+      ? ['memory_cli', 'notebook_search', 'notebook_list_docs']
       : undefined;
 
     return makeRoute({
@@ -886,7 +886,7 @@ function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = 
         ? 'summary'
         : 'answer';
   const allowedTools = sourceScope === 'notebook'
-    ? ['notebook_search', 'notebook_list_docs']
+    ? (s.needsMemory ? ['memory_cli', 'notebook_search', 'notebook_list_docs'] : ['notebook_search', 'notebook_list_docs'])
     : undefined;
 
   return makeRoute({
