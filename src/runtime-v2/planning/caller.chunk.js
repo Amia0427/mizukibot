@@ -48,6 +48,10 @@ function getMemoryRecallDeduper() {
   return require('../../../utils/memoryRecallDeduper');
 }
 
+function getMemoryRecallObservability() {
+  return require('../../../utils/memoryRecallObservability');
+}
+
 async function callPlannerModelV2(route = {}, options = {}) {
   const apiBaseUrl = getPlannerApiBaseUrlV2();
   const apiKey = getPlannerApiKeyV2();
@@ -121,10 +125,29 @@ async function planRequestV2(input = {}) {
     });
   }
   const memoryContext = normalizeObject(input.memoryContext, normalizeObject(route?.meta?.memoryContext, {}));
+  const rawMemosRecall = memosRecall && typeof memosRecall === 'object'
+    ? {
+        ...memosRecall,
+        items: normalizeArray(memosRecall.items).map((item) => (item && typeof item === 'object' ? { ...item } : item)),
+        diagnostics: normalizeObject(memosRecall.diagnostics, {})
+      }
+    : {};
   memosRecall = getMemoryRecallDeduper().dedupeMemosRecallAgainstMemoryContext(memosRecall || {}, memoryContext, {
     maxChars: normalizeObject(input.config, {}).MEMOS_RECALL_MAX_CHARS || config.MEMOS_RECALL_MAX_CHARS
   });
   const memosRecallText = getMemosPlannerRecall().getMemosRecallPromptText(memosRecall || {});
+  getMemoryRecallObservability().recordMemosPlannerRecallObservation({
+    requestTrace: input.requestTrace || route?.meta?.requestTrace || null,
+    routeMeta: route.meta,
+    userId: normalizeText(input.userId || route?.meta?.userId),
+    topRouteType: route.topRouteType,
+    query: route.question || route.cleanText,
+    rawRecall: rawMemosRecall,
+    dedupedRecall: memosRecall || {},
+    memosRecallText,
+    memoryContext,
+    stage: 'planner_memos_recall'
+  });
   const inputAvailableContextSignals = normalizeObject(input.availableContextSignals, normalizeObject(route?.meta?.availableContextSignals, {}));
   const availableContextSignals = memosRecallText
     ? { ...inputAvailableContextSignals, memosRecall: true }
