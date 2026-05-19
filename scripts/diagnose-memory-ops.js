@@ -7,6 +7,8 @@ const { runDiagnostics } = require('./diagnose-lancedb-memory');
 const { runBackfill } = require('./backfill-memory-v3-embeddings');
 const { loadCases, runMode } = require('./eval-memory-recall');
 const { runMemoryQualityAudit } = require('../utils/memoryQualityAudit');
+const { buildRecallEvalGate } = require('../utils/memoryGovernance/recallEvalGate');
+const { buildLanceDbReadMigrationGate } = require('../utils/memoryGovernance/lancedbMigrationGate');
 
 const SCHEMA_VERSION = 'memory_ops_diagnostic_v1';
 const CASES_FILE = path.join(__dirname, '..', 'artifacts', 'memory-recall-eval', 'cases.jsonl');
@@ -28,6 +30,10 @@ const MODE_ALIASES = {
   recall: 'recall',
   eval: 'recall',
   'recall-eval': 'recall',
+  gate: 'lancedb-gate',
+  'lancedb-gate': 'lancedb-gate',
+  'migration-gate': 'lancedb-gate',
+  'read-gate': 'lancedb-gate',
   audit: 'audit',
   quality: 'audit',
   'quality-audit': 'audit',
@@ -60,6 +66,14 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
     retryFailed: false,
     evalMode: 'lancedb',
     memoryCli: false,
+    gate: false,
+    minRecallAt8: null,
+    minMrrAt8: null,
+    minJudgedCases: null,
+    maxLeakage: null,
+    maxEmptyResultRate: null,
+    maxNoVisibleCandidateRate: null,
+    regressionTolerance: null,
     help: false,
     unknown: []
   };
@@ -95,6 +109,29 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
       index += 1;
     } else if (item === '--memory-cli') {
       args.memoryCli = true;
+    } else if (item === '--gate') {
+      args.gate = true;
+    } else if (item === '--min-recall-at8') {
+      args.minRecallAt8 = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--min-mrr-at8') {
+      args.minMrrAt8 = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--min-judged-cases') {
+      args.minJudgedCases = parseNumberOption(argv[index + 1], 0, 0);
+      index += 1;
+    } else if (item === '--max-leakage') {
+      args.maxLeakage = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--max-empty-result-rate') {
+      args.maxEmptyResultRate = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--max-no-visible-candidate-rate') {
+      args.maxNoVisibleCandidateRate = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--regression-tolerance') {
+      args.regressionTolerance = Number(argv[index + 1]);
+      index += 1;
     } else if (item === '--json') {
       // JSON is the only output format for this entry.
     } else if (item.startsWith('--')) {
@@ -113,11 +150,12 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
 
 function buildUsageSummary() {
   return {
-    usage: 'npm run diag:memory -- <diagnose|backfill|recall|audit> [--limit N]',
+    usage: 'npm run diag:memory -- <diagnose|backfill|recall|lancedb-gate|audit> [--limit N]',
     modes: {
       diagnose: 'coverage and LanceDB fallback probe summary',
       backfill: 'dry-run embedding backfill plan',
       recall: 'recall eval summary from artifacts/memory-recall-eval/cases.jsonl',
+      'lancedb-gate': 'compare local_jsonl baseline with LanceDB candidate and decide whether read promotion is safe',
       audit: 'sampled memory semantic quality audit plus hard metric warnings'
     }
   };
@@ -226,7 +264,8 @@ function summarizeRecall(result = {}, args = {}) {
     emptyResultRate: result.emptyResultRate ?? null,
     noVisibleCandidateRate: result.noVisibleCandidateRate ?? null,
     bySource: result.bySource || {},
-    byFacet: result.byFacet || {}
+    byFacet: result.byFacet || {},
+    gate: result.gate || null
   };
 }
 
@@ -250,6 +289,39 @@ function summarizeAudit(result = {}, args = {}) {
         }
       : null,
     samples: result.samples || {}
+  };
+}
+
+function summarizeLanceDbGate(result = {}, args = {}) {
+  const gate = result.gate || {};
+  return {
+    limit: args.limit ?? 50,
+    candidateMode: result.candidate?.mode || args.evalMode || 'lancedb',
+    canPromoteRead: gate.canPromoteRead === true,
+    recommendation: gate.recommendation || '',
+    failures: Array.isArray(gate.failures) ? gate.failures : [],
+    metrics: gate.metrics || {},
+    recallGate: gate.recallGate || null,
+    regressionGate: gate.regressionGate || null,
+    baseline: result.baseline
+      ? {
+          mode: result.baseline.mode,
+          judgedCases: result.baseline.judgedCases,
+          recallAt8: result.baseline.recallAt8,
+          mrrAt8: result.baseline.mrrAt8,
+          emptyResultRate: result.baseline.emptyResultRate
+        }
+      : null,
+    candidate: result.candidate
+      ? {
+          mode: result.candidate.mode,
+          judgedCases: result.candidate.judgedCases,
+          recallAt8: result.candidate.recallAt8,
+          mrrAt8: result.candidate.mrrAt8,
+          emptyResultRate: result.candidate.emptyResultRate,
+          noVisibleCandidateRate: result.candidate.noVisibleCandidateRate
+        }
+      : null
   };
 }
 
@@ -279,6 +351,59 @@ async function runRecallEval(args = {}, runners = getDefaultRunners()) {
     config.MEMORY_VECTOR_STORE = previous.MEMORY_VECTOR_STORE;
     config.MEMORY_LANCEDB_READ_ENABLED = previous.MEMORY_LANCEDB_READ_ENABLED;
   }
+}
+
+function buildRecallGateOptions(args = {}) {
+  const options = {};
+  if (args.minRecallAt8 !== null && Number.isFinite(Number(args.minRecallAt8))) {
+    options.minRecallAt8 = Number(args.minRecallAt8);
+  }
+  if (args.minMrrAt8 !== null && Number.isFinite(Number(args.minMrrAt8))) {
+    options.minMrrAt8 = Number(args.minMrrAt8);
+  }
+  if (args.minJudgedCases !== null && Number.isFinite(Number(args.minJudgedCases))) {
+    options.minJudgedCases = Number(args.minJudgedCases);
+  }
+  if (args.maxLeakage !== null && Number.isFinite(Number(args.maxLeakage))) {
+    options.maxLeakage = Number(args.maxLeakage);
+  }
+  if (args.maxEmptyResultRate !== null && Number.isFinite(Number(args.maxEmptyResultRate))) {
+    options.maxEmptyResultRate = Number(args.maxEmptyResultRate);
+  }
+  if (args.maxNoVisibleCandidateRate !== null && Number.isFinite(Number(args.maxNoVisibleCandidateRate))) {
+    options.maxNoVisibleCandidateRate = Number(args.maxNoVisibleCandidateRate);
+  }
+  if (args.regressionTolerance !== null && Number.isFinite(Number(args.regressionTolerance))) {
+    options.regressionTolerance = Number(args.regressionTolerance);
+  }
+  return options;
+}
+
+async function runLanceDbMigrationGate(args = {}, runners = getDefaultRunners()) {
+  const limit = args.limit ?? 50;
+  const diagnostics = await runners.runDiagnostics({
+    limit,
+    skipProbe: true
+  });
+  const cases = runners.loadCases(limit);
+  const baseline = await runners.runMode('local_jsonl', cases, {
+    memoryCli: false
+  });
+  const candidateMode = args.evalMode || 'lancedb';
+  const candidate = await runners.runMode(candidateMode, cases, {
+    memoryCli: args.memoryCli === true
+  });
+  const gate = buildLanceDbReadMigrationGate({
+    diagnostics,
+    baseline,
+    candidate
+  }, buildRecallGateOptions(args));
+  return {
+    diagnostics,
+    baseline,
+    candidate,
+    gate
+  };
 }
 
 async function runMemoryOps(parsedArgs = {}, options = {}) {
@@ -315,7 +440,7 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
     });
   }
 
-  if (!['diagnose', 'backfill', 'recall', 'audit'].includes(args.mode)) {
+  if (!['diagnose', 'backfill', 'recall', 'lancedb-gate', 'audit'].includes(args.mode)) {
     return createEnvelope({
       mode: args.mode,
       ok: false,
@@ -390,13 +515,33 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
       });
     }
 
+    if (args.mode === 'lancedb-gate') {
+      const limit = args.limit ?? 50;
+      const result = await runLanceDbMigrationGate({ ...args, limit }, runners);
+      const ok = result.gate?.canPromoteRead === true;
+      return createEnvelope({
+        mode: 'lancedb-gate',
+        ok,
+        exitCode: ok ? EXIT_CODES.ok : EXIT_CODES.failed,
+        summary: summarizeLanceDbGate(result, { ...args, limit }),
+        details: {
+          diagnostics: result.diagnostics,
+          baselineDetails: result.baseline?.details || [],
+          candidateDetails: result.candidate?.details || []
+        },
+        startedAt
+      });
+    }
+
     const limit = args.limit ?? 100;
     const result = await runRecallEval({ ...args, limit }, runners);
+    const gate = buildRecallEvalGate(result, buildRecallGateOptions(args));
+    const ok = result.ok !== false && (args.gate !== true || gate.ok);
     return createEnvelope({
       mode: 'recall',
-      ok: result.ok !== false,
-      exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
-      summary: summarizeRecall(result, { ...args, limit }),
+      ok,
+      exitCode: ok ? EXIT_CODES.ok : EXIT_CODES.failed,
+      summary: summarizeRecall({ ...result, gate }, { ...args, limit }),
       details: { details: result.details || [] },
       startedAt
     });
@@ -488,6 +633,10 @@ module.exports = {
   runMemoryOpsFromArgv,
   summarizeBackfill,
   summarizeDiagnose,
+  summarizeLanceDbGate,
   summarizeRecall,
-  summarizeAudit
+  summarizeAudit,
+  buildLanceDbReadMigrationGate,
+  buildRecallEvalGate,
+  runLanceDbMigrationGate
 };

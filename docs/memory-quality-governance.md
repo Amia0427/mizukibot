@@ -13,7 +13,12 @@
 - `utils/memoryQuality.js` 统一评估记忆质量，输出 `score`、`grade`、`reasons`、`cleanupAction` 和 staleness。
 - `utils/memoryWritePipeline.js` 在写入前调用质量评估：污染直接拒绝，低信号/过时/临时性内容转为 `candidate`，并写入 `meta.quality`。
 - `utils/memoryGovernance/plan.js` 在治理预览中识别 `quality_reject` 和 `quality_hard_stale`。
-- `npm run diag:memory` 在 `summary.quality` 中显示质量统计和样本。
+- `utils/memoryGovernance/conflictReport.js` 输出冲突聚类、推荐 winner 和 loser 清理建议。
+- `utils/memoryGovernance/correctionSupersede.js` 识别显式用户纠错，把被纠正的旧记忆归档为 `user_correction_superseded`。
+- `utils/memoryGovernance/recallEvalGate.js` 和 `lancedbMigrationGate.js` 将 recall eval/LanceDB shadow 迁移变成可失败门禁。
+- `npm run diag:memory` 在 `summary.quality` 中显示 Memory V3、worldbook、social context、image asset、notebook 的跨来源质量统计和样本。
+
+更新 2026-05-19 22:20 +08:00：补齐冲突报告、纠错归档、召回门禁、LanceDB 读迁移门禁、混合召回排序权重和写后不可召回隐藏。
 
 ## 运维顺序
 
@@ -21,6 +26,7 @@
 2. 若 `projectionFreshness.projectionStale=true`，运行 `npm run memory:v3:migrate`。
 3. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。
 4. 修复后运行 `npm run diag:memory -- recall --limit 50`，观察 `recallAt8`、`mrrAt8`、`leakage`、`emptyResultRate`。
+5. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --min-judged-cases 10`。
 
 ## 清洗策略
 
@@ -35,5 +41,8 @@
 node tests/memoryQualityGovernance.test.js
 node tests/memoryWritePipeline.test.js
 node tests/memoryGovernanceRollbackLearningRef.test.js
+node tests/memoryRecallAndLanceDbGates.test.js
+node tests/memoryGovernanceConflictReport.test.js
+node tests/memoryCorrectionSupersede.test.js
 node scripts/diagnose-memory-ops.js diagnose --skip-probe --limit 5
 ```

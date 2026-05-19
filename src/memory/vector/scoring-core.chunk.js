@@ -230,6 +230,7 @@ function filterDocIdsByOptions(docs, userId, options = {}) {
     const doc = docs[id];
     if (String(doc.userId) !== String(userId)) return false;
     if (isAssistantPersonaPollution(doc)) return false;
+    if (doc.notRecallable === true || doc.meta?.notRecallable === true || String(doc.meta?.recallVerification?.status || '').toLowerCase() === 'not_recallable') return false;
     if (options.scopeType && normalizeScopeType(doc.scopeType) !== normalizeScopeType(options.scopeType)) return false;
     if (options.groupId && String(doc.groupId || '') !== String(options.groupId || '')) return false;
     if (options.taskType && String(doc.taskType || '') !== String(options.taskType || '')) return false;
@@ -307,6 +308,7 @@ function filterUnifiedDocIds(docs, userId, options = {}) {
     const doc = docs[id];
     const source = classifyDocSource(doc);
     if (isAssistantPersonaPollution(doc)) return false;
+    if (doc.notRecallable === true || doc.meta?.notRecallable === true || String(doc.meta?.recallVerification?.status || '').toLowerCase() === 'not_recallable') return false;
     if (!allowedSources.has(source)) return false;
 
     const ownerId = String(doc.userId || '');

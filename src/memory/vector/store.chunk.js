@@ -28,6 +28,11 @@ function normalizeMemoryItem(raw) {
   const supersedes = Array.isArray(raw.supersedes ?? raw.meta?.supersedes)
     ? (raw.supersedes ?? raw.meta?.supersedes).map((id) => String(id || '').trim()).filter(Boolean)
     : [];
+  const notRecallable = raw.notRecallable === true
+    || raw.not_recallable === true
+    || raw.meta?.notRecallable === true
+    || raw.meta?.not_recallable === true
+    || String(raw.meta?.recallVerification?.status || '').toLowerCase() === 'not_recallable';
   const conflictKeys = Array.isArray(raw.conflictKeys ?? raw.conflict_keys ?? raw.meta?.conflictKeys)
     ? (raw.conflictKeys ?? raw.conflict_keys ?? raw.meta?.conflictKeys)
       .map((key) => sanitizeOptionalText(key))
@@ -118,6 +123,7 @@ function normalizeMemoryItem(raw) {
     relations,
     conflictKey,
     supersedes,
+    notRecallable,
     conflictKeys,
     memoryKind,
     rollupLevel,
@@ -350,6 +356,7 @@ function materializeShardIndex(items = [], meta = {}) {
   };
   for (const item of Array.isArray(items) ? items : []) {
     if (normalizeStatus(item.status) === STATUS_ARCHIVED || isExpired(item)) continue;
+    if (item.notRecallable === true || item.meta?.notRecallable === true || String(item.meta?.recallVerification?.status || '').toLowerCase() === 'not_recallable') continue;
     const tokens = buildDocTokens(item);
     if (!tokens.length) continue;
     const tf = {};
@@ -398,6 +405,7 @@ function materializeShardIndex(items = [], meta = {}) {
       relations: Array.isArray(item.relations) ? item.relations : [],
       conflictKey: item.conflictKey || '',
       supersedes: Array.isArray(item.supersedes) ? item.supersedes : [],
+      notRecallable: item.notRecallable === true,
       memoryKind: getItemMemoryKind(item),
       rollupLevel: item.rollupLevel || '',
       episodeDay: item.episodeDay || '',

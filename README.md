@@ -130,18 +130,22 @@ npm run memory:v3:migrate
 
 ### 记忆质量与召回治理
 
-更新时间：2026-05-19 21:42 +08:00
+更新时间：2026-05-19 22:20 +08:00
 
 ```bash
 npm run diag:memory -- diagnose --skip-probe --limit 20
 npm run diag:memory -- recall --limit 50
+npm run diag:memory -- recall --limit 50 --gate
+npm run diag:memory -- lancedb-gate --limit 50 --min-judged-cases 10
 node scripts/repair-memory-vector-index.js --apply --compact
 ```
 
 说明：
 
-- `diag:memory` 的 `summary.quality` 会输出长期记忆质量报告，覆盖低质量、过时、污染、候选化和建议清理样本。
+- `diag:memory` 的 `summary.quality` 会输出跨来源长期记忆质量报告，覆盖 Memory V3、worldbook、social context、image asset、notebook 的低质量、过时、污染、候选化和建议清理样本。
 - 新写入记忆会记录 `meta.quality`，严重 prompt/助手自指污染会拒绝，临时或低信号内容会降为 `candidate`。
+- 写后召回验证失败的记忆会带 `notRecallable`，保留审计但不进入 legacy/vector 检索；显式用户纠错会归档被 supersede 的旧记忆。
+- `recall --gate` 可作为 CI/人工门禁；`lancedb-gate` 会比较 local_jsonl baseline 与 LanceDB candidate，未过 recall/覆盖率/漂移门禁前保持 shadow read。
 - 当前向量健康门禁若提示 `mustMaterializeFirst`，先运行 `npm run memory:v3:migrate`；若提示 stale/ready-but-not-synced，再运行修复脚本。
 
 ### Windows 运维

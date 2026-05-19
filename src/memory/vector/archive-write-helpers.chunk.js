@@ -444,6 +444,10 @@ function findConflictRecord(library, incoming) {
 
 function upsertMemoryItem(library, incoming) {
   const now = nowTs();
+  try {
+    const { applyCorrectionSupersedeToLibrary } = require('../../../utils/memoryGovernance/correctionSupersede');
+    applyCorrectionSupersedeToLibrary(library, incoming, { now });
+  } catch (_) {}
   const conflictRecord = findConflictRecord(library, incoming);
   const canSupersedeConflict = conflictRecord
     && normalizeStatus(incoming.status, STATUS_ACTIVE) === STATUS_ACTIVE
