@@ -81,6 +81,7 @@ npm run console
 
 ```bash
 npm test
+NODE_OPTIONS=--max-old-space-size=8192 npm test
 npm run lint
 npm run check:prompts
 npm run check:agent
@@ -146,6 +147,31 @@ docs/       文档模板和辅助说明
 data/       本地运行数据，默认持久化目录
 artifacts/  临时产物、备份和评估输出
 ```
+
+### 拆分后的模块边界
+
+多个历史大文件已拆为“稳定旧入口 + 同名子目录模块”。旧入口继续作为 facade，外部 require 路径优先保持不变；新增逻辑尽量放进子目录，减少并行开发冲突。
+
+重点边界：
+
+- `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。
+- `api/toolExecutors.js` -> `api/toolExecutors/lazyModules.js`、`api/toolExecutors/skillRuntime.js`：懒加载代理和 skill 运行时。
+- `api/createAgentExecutor.js` -> `api/createAgent/`：create-agent 请求、模型、图片和执行辅助。
+- `api/mcpRuntime.js` -> `api/mcp/`：MCP 配置、发现、静态替代和调用辅助。
+- `api/runtimeV2/host.js` -> `api/runtimeV2/host/runtimeHelpers.js`：runtime host 的预算、snapshot、canonical segment 辅助。
+- `api/memoryExtraction.js` -> `api/memoryExtraction/`：模型运行配置和画像分类策略。
+- `api/qzoneDiaryService.js` -> `api/qzoneDiaryService/diarySignals.js`：空间日记信号、证据摘要和安全过滤。
+- `core/router.js` -> `core/router/safety.js`：安全/恶意/坏信念请求检测。
+- `core/messageRouteFlow.js` -> `core/messageRouteFlow/helpers.js`：路由流纯 helper。
+- `core/continuousMessagePreprocessor.js` -> `core/continuousMessage/contentExtraction.js`：连续消息内容提取。
+- `core/tickEngine.js` -> `core/tickEngine/state.js`、`core/tickEngine/schedule.js`：tick 状态和调度时间。
+- `config.js` -> `config/envRuntime.js`、`config/promptRuntime.js`：环境变量解析和 prompt runtime 配置。
+- `utils/dailyJournal.js` -> `utils/dailyJournal/`：journal 片段、检索、rollup、sidecar 逻辑。
+- `utils/memory-v3/query.js` -> `utils/memory-v3/queryCache.js`、`utils/memory-v3/queryPolicy.js`：查询缓存和 facet/策略。
+- `utils/memoryCli.js` -> `utils/memoryCli/commandParser.js`：`mem search/open/remember/review` 命令解析。
+- `utils/shortTermMemory.js` -> `utils/shortTermMemory/state.js`：短期记忆状态和 key 规范化。
+- `utils/personaMemoryState.js` -> `utils/personaMemoryState/helpers.js`、`utils/personaMemoryState/promptRenderer.js`：persona 状态纯 helper 和 prompt 渲染。
+- `web/server.js` -> `web/auth.js`、`web/settingsRuntime.js`：Web 鉴权和设置运行时。
 
 常见文档：
 
@@ -250,6 +276,7 @@ artifacts/  临时产物、备份和评估输出
 当前运行时主体是：
 
 - `api/runtimeV2/host.js`
+- `api/runtimeV2/host/runtimeHelpers.js`
 
 兼容入口：
 
@@ -327,12 +354,19 @@ prepare
 
 - `utils/memory.js`
 - `utils/shortTermMemory.js`
+- `utils/shortTermMemory/state.js`
 - `utils/shortTermBridgeMemory.js`
 - `utils/memoryContext.js`
 - `utils/memoryCli.js`
+- `utils/memoryCli/commandParser.js`
+- `utils/memory-v3/`
+- `utils/personaMemoryState.js`
+- `utils/personaMemoryState/helpers.js`
+- `utils/personaMemoryState/promptRenderer.js`
 - `utils/localKnowledge.js`
 - `api/localNotebook.js`
 - `utils/dailyJournal.js`
+- `utils/dailyJournal/`
 
 当前上下文可能融合长期画像、短期记忆、bridge snapshot、session summary、daily journal、Memory V3、notebook 文档和其他本地知识源。
 
@@ -342,6 +376,10 @@ prepare
 
 - `api/toolRegistry.js`
 - `api/toolExecutors.js`
+- `api/toolExecutors/lazyModules.js`
+- `api/toolExecutors/skillRuntime.js`
+- `api/toolSchemas.js`
+- `api/toolSchemas/`
 - `api/globalToolRuntime.js`
 - `utils/toolPolicy.js`
 - `utils/localToolAccess.js`
@@ -356,6 +394,8 @@ prepare
 - `core/messagePassiveFlow.js`
 - `utils/groupAwarenessState.js`
 - `core/tickEngine.js`
+- `core/tickEngine/state.js`
+- `core/tickEngine/schedule.js`
 - `core/proactiveGreetingFlow.js`
 - `core/schedulerRuntime.js`
 - `utils/postReplyWorkerRuntime.js`
@@ -369,6 +409,7 @@ prepare
 - `api/subagentExecutor.js`
 - `api/openclawExecutor.js`
 - `api/createAgentExecutor.js`
+- `api/createAgent/`
 
 ---
 
@@ -388,6 +429,7 @@ prepare
 先看：
 
 - `core/router.js`
+- `core/router/safety.js`
 - `core/routeSchema.js`
 - `core/intentAI.js`
 - `core/routeProfiles.js`
@@ -401,6 +443,8 @@ prepare
 - `utils/localToolAccess.js`
 - `api/toolRegistry.js`
 - `api/toolExecutors.js`
+- `api/toolExecutors/`
+- `api/toolSchemas/`
 
 ### 改 planner、dispatch、tool evidence 或 repair
 
@@ -435,8 +479,11 @@ npm run check:prompts
 - `utils/memoryContext.js`
 - `utils/localKnowledge.js`
 - `utils/memoryCli.js`
+- `utils/memoryCli/commandParser.js`
 - `api/localNotebook.js`
 - `utils/memory-v3/`
+- `utils/memory-v3/queryPolicy.js`
+- `utils/memory-v3/queryCache.js`
 
 ### 改主动任务、定时任务或后台任务
 
@@ -538,6 +585,12 @@ npm run check:prompts
 
 ```bash
 npm test
+```
+
+本地全量测试如果触及大量 memory / runtime 用例，建议使用更大的 Node heap：
+
+```bash
+NODE_OPTIONS=--max-old-space-size=8192 npm test
 ```
 
 涉及 prompt：
