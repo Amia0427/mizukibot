@@ -107,6 +107,22 @@ npm run diag:low-resource
 npm run memory:v3:migrate
 ```
 
+### 记忆质量与召回治理
+
+更新时间：2026-05-19 21:42 +08:00
+
+```bash
+npm run diag:memory -- diagnose --skip-probe --limit 20
+npm run diag:memory -- recall --limit 50
+node scripts/repair-memory-vector-index.js --apply --compact
+```
+
+说明：
+
+- `diag:memory` 的 `summary.quality` 会输出长期记忆质量报告，覆盖低质量、过时、污染、候选化和建议清理样本。
+- 新写入记忆会记录 `meta.quality`，严重 prompt/助手自指污染会拒绝，临时或低信号内容会降为 `candidate`。
+- 当前向量健康门禁若提示 `mustMaterializeFirst`，先运行 `npm run memory:v3:migrate`；若提示 stale/ready-but-not-synced，再运行修复脚本。
+
 ### Windows 运维
 
 ```bash

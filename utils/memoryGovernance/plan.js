@@ -8,6 +8,15 @@ function createMemoryGovernancePlanHelpers(deps = {}) {
     return String(text || '').replace(/\s+/g, ' ').trim();
   }
 
+  function getMemoryQuality(item = {}, options = {}) {
+    try {
+      const { evaluateMemoryQuality } = require('../memoryQuality');
+      return evaluateMemoryQuality(item, options);
+    } catch (_) {
+      return null;
+    }
+  }
+
   function canonicalizeText(text) {
     return normalizeText(text)
       .toLowerCase()
@@ -237,6 +246,12 @@ function createMemoryGovernancePlanHelpers(deps = {}) {
       if (isExpiredTopic(item, topicTtlDays)) reasons.push('stale_topic');
       if (isLikelyInjectionText(text)) reasons.push('prompt_injection_like');
       if (isLikelyAssistantPersonaFact(text)) reasons.push('assistant_persona_fact');
+      const quality = getMemoryQuality(item, {
+        ...cfg,
+        minConfidence
+      });
+      if (quality?.cleanupAction === 'reject') reasons.push('quality_reject');
+      if (quality?.cleanupAction === 'archive') reasons.push('quality_hard_stale');
 
       if (mode === 'strict') {
         if (text.length > 180) reasons.push('too_verbose');
@@ -247,7 +262,7 @@ function createMemoryGovernancePlanHelpers(deps = {}) {
         plans.push({
           id: item.id,
           op: action,
-          reason: reasons.join('+'),
+          reason: Array.from(new Set(reasons)).join('+'),
           mergeTo: ''
         });
       }
@@ -292,6 +307,8 @@ function createMemoryGovernancePlanHelpers(deps = {}) {
       stale_topic: plans.filter((p) => p.reason.includes('stale_topic')).length,
       prompt_injection_like: plans.filter((p) => p.reason.includes('prompt_injection_like')).length,
       assistant_persona_fact: plans.filter((p) => p.reason.includes('assistant_persona_fact')).length,
+      quality_reject: plans.filter((p) => p.reason.includes('quality_reject')).length,
+      quality_hard_stale: plans.filter((p) => p.reason.includes('quality_hard_stale')).length,
       duplicate: plans.filter((p) => p.reason === 'duplicate').length,
       merge_keepers: keepers.size
     };
@@ -312,6 +329,8 @@ function createMemoryGovernancePlanHelpers(deps = {}) {
   }
 
   return {
+    canonicalizeText,
+    clamp,
     buildGovernancePlan,
     mergeIntoKeeper,
     normalizeText
