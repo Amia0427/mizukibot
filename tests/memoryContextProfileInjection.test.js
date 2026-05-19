@@ -71,6 +71,7 @@ fs.writeFileSync(path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'profile_proje
 const { buildMemoryContext } = require('../utils/memoryContext');
 
 const normal = buildMemoryContext('u_ctx_profile', '普通聊天', { ragEnabled: false });
+assert.ok(normal.promptLongTermProfileText.includes('稳定画像'));
 assert.ok(normal.promptLongTermProfileText.includes('v3 stable identity'));
 assert.ok(!normal.promptLongTermProfileText.includes('v3 stable like'));
 assert.ok(!normal.promptLongTermProfileText.includes('legacy old like'));
@@ -90,5 +91,6 @@ const profileQuery = buildMemoryContext('u_ctx_profile', '你怎么看我的画�
 assert.ok(profileQuery.promptLongTermProfileText.includes('v3 stable identity'));
 assert.ok(profileQuery.promptLongTermProfileText.includes('v3 stable like'));
 assert.ok(profileQuery.promptLongTermProfileText.includes('weak only preference'));
+assert.ok(profileQuery.promptLongTermProfileText.includes('谨慎参考'));
 
 console.log('memoryContextProfileInjection.test.js passed');

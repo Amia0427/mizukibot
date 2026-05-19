@@ -1,9 +1,17 @@
 const config = require('../../config');
 const { normalizeTier } = require('../../utils/memoryTier');
+const {
+  assessProfileWriteQuality,
+  buildQualityPayload
+} = require('../../utils/memory-v3/profileLifecycle');
 
 function shouldPersistMemoryCandidate(type, value, confidence) {
   const text = String(value || '').trim();
   if (!text) return false;
+
+  const quality = assessProfileWriteQuality(type, text, confidence);
+  const hardRejectReasons = new Set(['empty_text', 'too_short', 'topic_too_short', 'generic_text', 'label_only', 'too_long', 'low_confidence']);
+  if (quality.reasons.some((reason) => hardRejectReasons.has(reason))) return false;
 
   const minConfidence = Number(config.MEMORY_EXTRACT_MIN_CONFIDENCE) || 0.72;
   if (Number(confidence || 0) < minConfidence) return false;
@@ -232,6 +240,7 @@ function buildMemoryBaseMeta(type, confidence, options = {}) {
   const importanceTier = normalizeTier(inferExtractorTier(type, confidence)) || 'B';
   const fieldKey = String(options.fieldKey || type || '').trim().toLowerCase();
   const extractionClass = classifyProfileExtraction(type, options.value || options.text || '', options);
+  const profileQuality = buildQualityPayload(type, options.value || options.text || '', confidence, options);
   const conflictKey = buildProfileConflictKeyForExtraction(options.userId, type, options.value || options.text || '', {
     ...options,
     fieldKey
@@ -263,6 +272,7 @@ function buildMemoryBaseMeta(type, confidence, options = {}) {
     fieldKey,
     extractionClass,
     conflictKey,
+    profileQuality,
     sourceSessionId,
     turnId,
     turnIds,
@@ -365,6 +375,10 @@ function buildPendingMemoryV3Event(userId, type, value, meta = {}, options = {})
       memoryKind: type,
       extractionClass,
       conflictKey,
+      profileQuality: meta.profileQuality || buildQualityPayload(type, text, meta.confidence, {
+        ...options,
+        sourceKind
+      }),
       turnId: meta.turnId || options.turnId || '',
       turnIds: Array.isArray(meta.turnIds) ? meta.turnIds : normalizeStringArray(options.turnIds || []),
       evidence: Array.isArray(meta.evidence) ? meta.evidence : normalizeEvidenceItems(options.evidence),

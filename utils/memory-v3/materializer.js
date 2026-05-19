@@ -27,6 +27,12 @@ const { collectEmbeddingBackfillNodes, enqueueMissingEmbeddings } = require('./e
 const { acquireMaterializeLock, DEFAULT_STALE_MS: DEFAULT_MATERIALIZE_LOCK_STALE_MS } = require('./materializeLock');
 const { isMemoryNotRecallable } = require('./recallFilter');
 const {
+  applyProfileLifecycle,
+  applySupersession,
+  isProfileField,
+  lifecycleHiddenReason
+} = require('./profileLifecycle');
+const {
   buildLanceDbSyncPlan,
   createNodeFromEvent,
   normalizeSessionScopeFromEvent,
@@ -272,12 +278,41 @@ function materializeMemoryViews(options = {}) {
         : 0;
     }
   }
-  const activeNodes = nodes.filter((item) => item.status !== 'archived' && !isMemoryNotRecallable(item));
-  const hiddenRecallNodes = nodes
+  const lifecycleNodes = applySupersession(nodes.map((item) => applyProfileLifecycle(item, { now })));
+  const activeNodes = lifecycleNodes.filter((item) => item.status !== 'archived' && !isMemoryNotRecallable(item));
+  const hiddenRecallNodes = lifecycleNodes
     .filter((item) => item.status !== 'archived' && isMemoryNotRecallable(item))
     .map((item) => ({
       ...item,
-      suppressedBy: item.suppressedBy || 'not_recallable'
+      suppressedBy: item.suppressedBy || item.supersededBy || 'not_recallable',
+      recallHiddenReason: item.recallHiddenReason || lifecycleHiddenReason(item, { now }) || 'not_recallable'
+    }));
+  const hiddenProfileSuppressed = hiddenRecallNodes
+    .filter((item) => isProfileField(item))
+    .map((item) => ({
+      userId: item.userId,
+      fieldKey: item.fieldKey,
+      canonicalKey: item.canonicalKey,
+      conflictKey: item.conflictKey || '',
+      id: item.id,
+      suppressedBy: item.suppressedBy || item.supersededBy || '',
+      text: item.text,
+      reason: item.recallHiddenReason || lifecycleHiddenReason(item, { now }) || 'profile_lifecycle_hidden',
+      expiresAt: item.expiresAt || 0
+    }));
+  const hiddenProfileConflicts = hiddenProfileSuppressed
+    .filter((item) => item.reason === 'profile_lifecycle_superseded')
+    .map((item) => ({
+      userId: item.userId,
+      conflictKey: item.conflictKey,
+      fieldKey: item.fieldKey,
+      canonicalKey: item.canonicalKey,
+      id: item.id,
+      text: item.text,
+      suppressedBy: item.suppressedBy,
+      winnerId: item.suppressedBy,
+      winnerText: '',
+      reason: 'profile_superseded'
     }));
   const winners = new Map();
   const suppressed = [];
@@ -326,6 +361,21 @@ function materializeMemoryViews(options = {}) {
         id: node.id,
         text: node.text,
         reason: 'recent_topic_expired',
+        expiresAt: node.expiresAt || 0
+      });
+      continue;
+    }
+    const hiddenReason = lifecycleHiddenReason(node, { now });
+    if (hiddenReason) {
+      expiredProfileNodes.push({
+        userId,
+        fieldKey: node.fieldKey,
+        canonicalKey: node.canonicalKey,
+        conflictKey: node.conflictKey || '',
+        id: node.id,
+        text: node.text,
+        reason: hiddenReason,
+        suppressedBy: node.suppressedBy || node.supersededBy || '',
         expiresAt: node.expiresAt || 0
       });
       continue;
@@ -379,10 +429,14 @@ function materializeMemoryViews(options = {}) {
     );
     profile.suppressed = [
       ...suppressed.filter((item) => item.userId === userId),
+      ...hiddenProfileSuppressed.filter((item) => item.userId === userId),
       ...expiredProfileNodes.filter((item) => item.userId === userId),
       ...profileConflicts.filter((item) => item.userId === userId)
     ];
-    profile.conflicts = profileConflicts.filter((item) => item.userId === userId);
+    profile.conflicts = [
+      ...profileConflicts.filter((item) => item.userId === userId),
+      ...hiddenProfileConflicts.filter((item) => item.userId === userId)
+    ];
     profile.expiresSoon = expiringProfileNodes.filter((item) => item.userId === userId);
   }
 
