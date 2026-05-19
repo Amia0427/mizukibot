@@ -198,8 +198,15 @@ function blockHasUsableContent(block = {}) {
 }
 
 function filterBlocksByPlan(blocks = [], dynamicPromptPlan = {}, options = {}) {
+  const blockedIds = new Set(normalizeArray(options.blockedIds).map((item) => normalizeText(item)).filter(Boolean));
+  const candidateBlocks = blockedIds.size > 0
+    ? normalizeArray(blocks).filter((block) => {
+      const ids = getPromptBlockPlanIds(block).ids;
+      return !ids.some((id) => blockedIds.has(id));
+    })
+    : blocks;
   const selection = selectDynamicContextBlocks({
-    blocks,
+    blocks: candidateBlocks,
     dynamicPromptPlan,
     requiredIds: options.requiredIds,
     runtimeAddedIds: options.runtimeAddedIds,

@@ -14,6 +14,7 @@
     const compactSelectedBlocks = filterBlocksByPlan(compactPromptBlocks, effectiveBaseDynamicPromptPlan, {
       requiredIds: [],
       runtimeAddedIds: baseRuntimeAddedIds,
+      blockedIds: baseBlockedIds,
       audit: baseDynamicContextAudit,
       budgetTokens: promptBudget
     });

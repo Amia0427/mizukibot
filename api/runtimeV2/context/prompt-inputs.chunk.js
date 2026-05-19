@@ -4,8 +4,7 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
   const surface = buildPromptSurface(topRouteType, routeMeta);
-  const memosRecall = resolveMemosRecallObject(options, routeMeta, null);
-  const memosRecallText = resolveMemosRecallText(options, routeMeta, { memosRecall });
+  const rawMemosRecall = resolveMemosRecallObject(options, routeMeta, null);
   const affinity = options.affinity && typeof options.affinity === 'object'
     ? options.affinity
     : getAffinitySettings(userInfo, { userId });
@@ -51,6 +50,12 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
       __memoryContextMemo: options.__memoryContextMemo
     });
+  const memosRecall = dedupeMemosRecallForPrompt(rawMemosRecall, memoryContext);
+  const dedupedMemosRecallText = normalizeText(memosRecall.promptText);
+  const memosRecallText = resolveMemosRecallText({
+    memosRecall,
+    memosRecallText: dedupedMemosRecallText
+  }, {}, { memosRecall, memosRecallText: dedupedMemosRecallText });
   const personaMemoryState = options.personaMemoryState && typeof options.personaMemoryState === 'object'
     ? options.personaMemoryState
     : await composePersonaMemoryState({

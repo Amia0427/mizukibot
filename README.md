@@ -57,7 +57,7 @@ DATA_DIR=./data
 
 ### MemOS MCP planner 召回
 
-更新时间：2026-05-19 22:37 +08:00
+更新时间：2026-05-19 23:12 +08:00
 
 启用方式：
 
@@ -73,6 +73,7 @@ MEMOS_CHANNEL=MODELSCOPE
 - `.mcp.json` 已配置 `memos-api-mcp`，运行时通过 `npx -y @memtensor/memos-api-mcp@latest` 启动。
 - Windows 本地真实测试已通过：MCP 使用 `protocolMode=line` 初始化，`search_memory` 返回 `code=0`；当前 user id 下无远端记忆时不会注入 `[MemOSRecall]`。
 - MemOS 只接在 planner 侧：`search_memory` 的结果先给 planner 判断，主回复模型只接收 planner 认可的 `[MemOSRecall]` 动态提示词块。
+- MemOS 召回会先与本地 Memory V3/向量记忆去重；重复项保留本地记忆，全部重复时不生成 `[MemOSRecall]`。
 - 主回复工具 allowlist 不暴露 `mcp_memos_api_mcp_*`，避免主模型自行调用 MemOS MCP。
 - 写入远端默认关闭：`MEMOS_WRITE_ENABLED=false`。稳定后再打开 shadow/异步写入。
 

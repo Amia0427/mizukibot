@@ -14,11 +14,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   const includeOptionalContextBlocks = options.includeOptionalContextBlocks !== false;
   const includePersonaModuleBlocks = options.includePersonaModuleBlocks !== false;
   const includeDynamicFewShotBlock = options.includeDynamicFewShotBlock !== false;
-  const memosRecall = resolveMemosRecallObject(options, routeMeta, promptMaterials);
-  const memosRecallText = normalizeMemosRecallBlockText(resolveMemosRecallText(options, routeMeta, {
-    ...(promptMaterials || {}),
-    memosRecall
-  }));
+  const rawMemosRecall = resolveMemosRecallObject(options, routeMeta, promptMaterials);
   const sharedShortTermContext = promptMaterials?.sharedShortTermContext && typeof promptMaterials.sharedShortTermContext === 'object'
     ? promptMaterials.sharedShortTermContext
     : (options.sharedShortTermContext && typeof options.sharedShortTermContext === 'object'
@@ -29,9 +25,13 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         routeMeta,
         sessionKey: options.sessionKey
       }));
-  const memoryContext = promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object'
-    ? promptMaterials.memoryContext
-    : await buildMemoryContextAsync(userId, question || '', {
+  let memoryContext = null;
+  if (promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object') {
+    memoryContext = promptMaterials.memoryContext;
+  } else if (options.memoryContext && typeof options.memoryContext === 'object') {
+    memoryContext = options.memoryContext;
+  } else {
+    memoryContext = await buildMemoryContextAsync(userId, question || '', {
       routePolicyKey,
       topRouteType,
       groupId: routeMeta.groupId || routeMeta.group_id || '',
@@ -51,6 +51,18 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
       __memoryContextMemo: options.__memoryContextMemo
     });
+  }
+  const memosRecall = dedupeMemosRecallForPrompt(rawMemosRecall, memoryContext);
+  const dedupedMemosRecallText = normalizeText(memosRecall.promptText);
+  const memosRecallText = normalizeMemosRecallBlockText(resolveMemosRecallText({
+    memosRecall,
+    memosRecallText: dedupedMemosRecallText
+  }, {}, {
+    memosRecall,
+    memosRecallText: dedupedMemosRecallText
+  }));
+  const memosRecallAvailable = Boolean(memosRecallText)
+    && !(memosRecall.used === false && normalizeText(memosRecall.rejectedReason) === 'deduped_by_local_memory');
   const forceMemoryContext = shouldForceMemoryContextForQuestion(question, {
     ...options,
     routeMeta
@@ -204,7 +216,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       optional: true
     }
   }));
-  if (memosRecallText) {
+  if (memosRecallAvailable) {
     promptBlocks.push(createPromptBlock('memos_recall', 'MemOS Recall', memosRecallText, {
       stage: 'main',
       priority: 262,
@@ -417,7 +429,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     hasAffinityState: true,
     hasShortTermContinuity: Boolean(shortTermContinuityText),
     hasRetrievedMemory: Boolean(memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt),
-    hasMemosRecall: Boolean(memosRecallText),
+    hasMemosRecall: memosRecallAvailable,
     hasDailyJournal: Boolean(dailyJournalPromptText),
     hasLongTermProfile: Boolean(memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText),
     hasImpression: Boolean(memoryContext.promptImpressionText || memoryContext.impressionText),
@@ -470,9 +482,13 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   if (forceMemoryContext) {
     baseRuntimeAddedIds.push('short_term_continuity', 'retrieved_memory_lite', 'daily_journal');
   }
+  const baseBlockedIds = memosRecall.used === false && normalizeText(memosRecall.rejectedReason) === 'deduped_by_local_memory'
+    ? ['memos_recall']
+    : [];
   const selectedPromptBlocks = filterBlocksByPlan(promptBlocks, effectiveBaseDynamicPromptPlan, {
     requiredIds: [],
     runtimeAddedIds: baseRuntimeAddedIds,
+    blockedIds: baseBlockedIds,
     audit: baseDynamicContextAudit,
     budgetTokens: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens)
   });
@@ -544,7 +560,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
             evidenceOnly: true
           }
         }),
-        createPromptBlock('memos_recall_compact', 'MemOS Recall Compact', trimTextByTokenBudget(memosRecallText, Math.floor(promptBudget * 0.12), 'tail'), {
+        createPromptBlock('memos_recall_compact', 'MemOS Recall Compact', memosRecallAvailable ? trimTextByTokenBudget(memosRecallText, Math.floor(promptBudget * 0.12), 'tail') : '', {
           stage: 'main',
           priority: 262,
           authority: 'memory_fact',

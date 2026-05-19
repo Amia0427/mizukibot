@@ -44,6 +44,10 @@ function getMemosPlannerRecall() {
   return require('../../../utils/memosPlannerRecall');
 }
 
+function getMemoryRecallDeduper() {
+  return require('../../../utils/memoryRecallDeduper');
+}
+
 async function callPlannerModelV2(route = {}, options = {}) {
   const apiBaseUrl = getPlannerApiBaseUrlV2();
   const apiKey = getPlannerApiKeyV2();
@@ -116,6 +120,10 @@ async function planRequestV2(input = {}) {
       config: normalizeObject(input.config, {})
     });
   }
+  const memoryContext = normalizeObject(input.memoryContext, normalizeObject(route?.meta?.memoryContext, {}));
+  memosRecall = getMemoryRecallDeduper().dedupeMemosRecallAgainstMemoryContext(memosRecall || {}, memoryContext, {
+    maxChars: normalizeObject(input.config, {}).MEMOS_RECALL_MAX_CHARS || config.MEMOS_RECALL_MAX_CHARS
+  });
   const memosRecallText = getMemosPlannerRecall().getMemosRecallPromptText(memosRecall || {});
   const inputAvailableContextSignals = normalizeObject(input.availableContextSignals, normalizeObject(route?.meta?.availableContextSignals, {}));
   const availableContextSignals = memosRecallText
@@ -127,7 +135,7 @@ async function planRequestV2(input = {}) {
     toolCatalog: normalizeArray(input.toolCatalog),
     contextSummary: normalizeText(input.contextSummary),
     continuitySignals: normalizeObject(input.continuitySignals, normalizeObject(route?.meta?.continuitySignals, {})),
-    memoryContext: normalizeObject(input.memoryContext, normalizeObject(route?.meta?.memoryContext, {})),
+    memoryContext,
     memosRecall: normalizeObject(memosRecall, {}),
     memosRecallText,
     availableContextSignals,

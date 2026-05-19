@@ -57,7 +57,7 @@ const {
   convertPlannerDecisionToDirectChatDecision,
   DYNAMIC_CONTEXT_PLAN_VERSION
 } = require('../api/runtimeV2/planning/service');
-const { buildDynamicPrompt } = require('../api/runtimeV2/context/service');
+const { buildBaseDynamicPrompt, buildDynamicPrompt } = require('../api/runtimeV2/context/service');
 const { buildDirectChatToolCatalog } = require('../core/directChatToolCatalog');
 
 module.exports = (async () => {
@@ -172,6 +172,164 @@ module.exports = (async () => {
   assert.ok(memosBlock);
   assert.ok(memosBlock.content.startsWith('[MemOSRecall]'));
   assert.ok(prompt.promptSegments.systemPrompt.some((message) => String(message.content || '').includes('[MemOSRecall]')));
+
+  const duplicateMemoryContext = {
+    memoryForPrompt: '[RelevantEvidence]\n用户偏好直接给结论。',
+    promptRetrievedMemoryText: '用户偏好直接给结论。'
+  };
+  let dedupedPlannerMemosRecall = null;
+  const dedupedDecision = await planRequestV2({
+    ...route,
+    route,
+    routeMeta: route.meta,
+    allowedTools: [],
+    memoryContext: duplicateMemoryContext,
+    memosRecall,
+    memosRecallText: memosRecall.promptText,
+    planner: async (_route, options) => {
+      assert.strictEqual(options.availableContextSignals.memosRecall, true);
+      assert.ok(!String(options.memosRecallText || '').includes('用户偏好直接给结论。'));
+      assert.ok(String(options.memosRecallText || '').includes('不能覆盖他人改动'));
+      dedupedPlannerMemosRecall = options.memosRecall;
+      return {
+        mode: 'chat_only',
+        taskShape: 'fast_reply',
+        allowedToolNames: [],
+        steps: [],
+        dynamicPromptPlan: {
+          schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+          enabledBlockIds: ['memos_recall'],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'memos_recall', decision: 'include', confidence: 0.9, priority: 20, reason: 'deduped MemOS evidence remains useful' }
+          ]
+        },
+        plannerMeta: {
+          decisionVersion: 'planner_decision_v2',
+          plannerVersion: 'direct_chat_single_authority_v2',
+          reason: 'deduped memos recall',
+          plannerModel: 'mock-planner',
+          decisionSource: 'planner'
+        }
+      };
+    }
+  });
+  assert.ok(dedupedDecision.dynamicPromptPlan.enabledBlockIds.includes('memos_recall'));
+  assert.strictEqual(dedupedPlannerMemosRecall.items.length, 1);
+  assert.ok(!dedupedPlannerMemosRecall.promptText.includes('直接给结论'));
+  assert.ok(dedupedPlannerMemosRecall.promptText.includes('不能覆盖他人改动'));
+
+  const duplicateOnlyRecall = {
+    query: '继续计划',
+    used: true,
+    promptText: '[MemOSRecall]\n1. 用户偏好直接给结论。',
+    items: [
+      { id: 'dup-only', text: '用户偏好直接给结论。' }
+    ]
+  };
+  let duplicateOnlyPlannerMemosRecall = null;
+  const duplicateOnlyDecision = await planRequestV2({
+    ...route,
+    route,
+    routeMeta: route.meta,
+    allowedTools: [],
+    memoryContext: duplicateMemoryContext,
+    memosRecall: duplicateOnlyRecall,
+    memosRecallText: duplicateOnlyRecall.promptText,
+    planner: async (_route, options) => {
+      assert.strictEqual(options.availableContextSignals.memosRecall, undefined);
+      assert.strictEqual(options.memosRecallText, '');
+      duplicateOnlyPlannerMemosRecall = options.memosRecall;
+      return {
+        mode: 'chat_only',
+        taskShape: 'fast_reply',
+        allowedToolNames: [],
+        steps: [],
+        dynamicPromptPlan: {
+          schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+          enabledBlockIds: ['memos_recall'],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'memos_recall', decision: 'include', confidence: 0.9, priority: 20, reason: 'duplicate should be rejected' }
+          ]
+        },
+        plannerMeta: {
+          decisionVersion: 'planner_decision_v2',
+          plannerVersion: 'direct_chat_single_authority_v2',
+          reason: 'duplicate-only memos recall',
+          plannerModel: 'mock-planner',
+          decisionSource: 'planner'
+        }
+      };
+    }
+  });
+  assert.ok(!duplicateOnlyDecision.dynamicPromptPlan.enabledBlockIds.includes('memos_recall'));
+  assert.strictEqual(duplicateOnlyPlannerMemosRecall.used, false);
+  assert.strictEqual(duplicateOnlyPlannerMemosRecall.rejectedReason, 'deduped_by_local_memory');
+
+  const dedupedPrompt = await buildBaseDynamicPrompt(
+    { level: 'friend', points: 7 },
+    'u_memos_prompt_dedupe',
+    '继续刚才的实现计划',
+    null,
+    {
+      topRouteType: 'direct_chat',
+      routePolicyKey: 'chat/default',
+      promptMaterials: {
+        userInfo: { level: 'friend', points: 7 },
+        userId: 'u_memos_prompt_dedupe',
+        question: '继续刚才的实现计划',
+        customPrompt: null,
+        routeMeta: {
+          directChatPlanner: {
+            memosRecall: duplicateOnlyRecall,
+            dynamicPromptPlan: {
+              schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+              enabledBlockIds: ['memos_recall'],
+              personaModules: [],
+              blockDecisions: [
+                { blockId: 'memos_recall', decision: 'include', confidence: 0.9, priority: 20, reason: 'duplicate should be rejected' }
+              ]
+            }
+          }
+        },
+        routePolicyKey: 'chat/default',
+        topRouteType: 'direct_chat',
+        memoryContext: duplicateMemoryContext,
+        personaMemoryState: {},
+        personaMemoryPrompt: { systemMessages: [], promptBlocks: [], policy: {} },
+        personaModuleCandidates: [],
+        personaWorldbookSearch: {},
+        personaModuleDecision: { selected: [], rejected: [] },
+        memosRecall: duplicateOnlyRecall,
+        dynamicPromptPlan: {
+          schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+          enabledBlockIds: ['memos_recall'],
+          personaModules: [],
+          blockDecisions: [
+            { blockId: 'memos_recall', decision: 'include', confidence: 0.9, priority: 20, reason: 'duplicate should be rejected' }
+          ]
+        },
+        summaryText: 'none',
+        dynamicFewShotPrompt: ''
+      },
+      routeMeta: {
+        directChatPlanner: {
+          memosRecall: duplicateOnlyRecall,
+          dynamicPromptPlan: {
+            schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,
+            enabledBlockIds: ['memos_recall'],
+            personaModules: [],
+            blockDecisions: [
+              { blockId: 'memos_recall', decision: 'include', confidence: 0.9, priority: 20, reason: 'duplicate should be rejected' }
+            ]
+          }
+        }
+      }
+    }
+  );
+  assert.ok(!dedupedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'memos_recall'));
+  assert.ok(!dedupedPrompt.promptSegments.systemPrompt.some((message) => String(message.content || '').includes('[MemOSRecall]')));
 
   const unavailableDecision = await planRequestV2({
     ...route,

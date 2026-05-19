@@ -66,13 +66,13 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     || trimTextByTokenBudget(fallbackMemoryContext.summary || 'none', fallbackAffinity.shortTermMemoryTokens, 'tail')
     || 'none';
   const memoryPromptBudgetMs = resolveMemoryPromptBudgetMs(options, question);
-  const promptMaterials = await withSoftTimeout(
-    () => collectPromptInputs(userInfo, userId, question, customPrompt, {
-      ...options,
-      sharedShortTermContext
-    }),
-    memoryPromptBudgetMs,
-    () => ({
+  const buildFallbackPromptMaterials = () => {
+    const fallbackMemosRecall = dedupeMemosRecallForPrompt(
+      resolveMemosRecallObject(options, routeMeta, null),
+      fallbackMemoryContext
+    );
+    const fallbackMemosRecallText = normalizeText(fallbackMemosRecall.promptText);
+    return {
       userInfo,
       userId,
       question,
@@ -89,12 +89,23 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       personaModuleCandidates: getFallbackPersonaModuleCandidates(),
       personaWorldbookSearch: {},
       personaModuleDecision: getFallbackPersonaModuleDecision(),
-      memosRecall: resolveMemosRecallObject(options, routeMeta, null),
-      memosRecallText: resolveMemosRecallText(options, routeMeta, null),
+      memosRecall: fallbackMemosRecall,
+      memosRecallText: resolveMemosRecallText({
+        memosRecall: fallbackMemosRecall,
+        memosRecallText: fallbackMemosRecallText
+      }, {}, { memosRecall: fallbackMemosRecall, memosRecallText: fallbackMemosRecallText }),
       dynamicPromptPlan: baseDynamicPromptPlan,
       summaryText: fallbackSummaryText,
       dynamicFewShotPrompt: ''
-    })
+    };
+  };
+  const promptMaterials = await withSoftTimeout(
+    () => collectPromptInputs(userInfo, userId, question, customPrompt, {
+      ...options,
+      sharedShortTermContext
+    }),
+    memoryPromptBudgetMs,
+    buildFallbackPromptMaterials
   );
   const promptCollectMs = Math.max(0, Date.now() - collectStartedAt);
   const sessionCacheFingerprint = buildSessionCacheFingerprint(userInfo, {
@@ -490,17 +501,64 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       }
     })
     : null;
-  const combinedBlocks = [
+  const rawCombinedBlocks = [
     ...combinedStableBlocks,
     ...combinedDynamicBlocks,
     ...combinedAssistantOnlyBlocks,
     ...extraBlocks,
     ...(memoryCliBlock ? [memoryCliBlock] : [])
   ];
+  const promptMaterialsMemoryContext = promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object'
+    ? promptMaterials.memoryContext
+    : {};
+  const optionsMemoryContext = options.memoryContext && typeof options.memoryContext === 'object'
+    ? options.memoryContext
+    : {};
+  const visibleMemoryContextForDedupe = {
+    ...collectedMemoryContext,
+    ...promptMaterialsMemoryContext,
+    ...optionsMemoryContext,
+    segments: {
+      ...(collectedMemoryContext.segments || {}),
+      ...(promptMaterialsMemoryContext.segments || {}),
+      ...(optionsMemoryContext.segments || {})
+    }
+  };
+  const combinedBlocks = rawCombinedBlocks.filter((block) => {
+    const ids = getPromptBlockPlanIds(block).ids;
+    if (!ids.includes('memos_recall')) return true;
+    const deduped = dedupeMemosRecallForPrompt({
+      used: true,
+      promptText: normalizeText(block?.content),
+      items: []
+    }, visibleMemoryContextForDedupe);
+    return !(deduped?.used === false && normalizeText(deduped?.rejectedReason) === 'deduped_by_local_memory');
+  });
   const requiredIds = normalizeArray(stableLayer.promptSnapshot?.stableBlockIds);
+  const finalMemosRecall = dedupeMemosRecallForPrompt(
+    resolveMemosRecallObject(options, routeMeta, promptMaterials),
+    visibleMemoryContextForDedupe
+  );
+  const finalBlockedIds = finalMemosRecall?.used === false
+    && normalizeText(finalMemosRecall?.rejectedReason) === 'deduped_by_local_memory'
+    ? ['memos_recall']
+    : [];
+  const hasLocalMemosDuplicate = finalBlockedIds.includes('memos_recall')
+    || (
+      options.memoryContext
+      && typeof options.memoryContext === 'object'
+      && dedupeMemosRecallForPrompt(
+        resolveMemosRecallObject(options, routeMeta, promptMaterials),
+        options.memoryContext
+      )?.rejectedReason === 'deduped_by_local_memory'
+    );
+  if (hasLocalMemosDuplicate && !finalBlockedIds.includes('memos_recall')) {
+    finalBlockedIds.push('memos_recall');
+  }
   const selectedBlocks = filterBlocksByPlan(combinedBlocks, finalDynamicPromptPlan, {
     requiredIds,
     runtimeAddedIds,
+    blockedIds: finalBlockedIds,
     audit: dynamicContextAudit,
     budgetTokens: Math.max(1200, fallbackAffinity.contextWindowTokens - fallbackAffinity.shortTermMemoryTokens)
   });
