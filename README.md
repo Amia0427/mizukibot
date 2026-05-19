@@ -57,7 +57,7 @@ DATA_DIR=./data
 
 ### MemOS MCP 远端知识库召回
 
-更新时间：2026-05-20 00:19 +08:00
+更新时间：2026-05-20 00:42 +08:00
 
 启用方式：
 
@@ -79,7 +79,7 @@ MEMOS_KB_IDS=knowledgebase_id_1
 - 主回复工具 allowlist 不暴露 `mcp_memos_api_mcp_*`，避免主模型自行调用 MemOS MCP。
 - 本地 agent 不写远端 MemOS：运行时不调用 `add_message` / `add_kb_document` / 删除类工具，即使误配 `MEMOS_WRITE_ENABLED=true` 也会跳过。
 - 如果只有知识库 ID，配置 `MEMOS_KB_IDS`；如果已有具体文档 file ID，才配置 `MEMOS_KB_FILE_IDS` 做精确文档读取。
-- 召回观测写入 `data/memory-recall-observability.ndjson`：可按 `requestId` 查看 MemOS 召回耗时、去重前后候选数、planner 是否跳过、主 prompt 是否最终包含 `memos_recall`。
+- 召回观测写入 `data/memory-recall-observability.ndjson`：可按 `requestId` 查看 MemOS 召回耗时、去重前后候选数、planner 是否跳过、主 prompt 是否最终包含 `memos_recall`；若 planner include 但 prompt 前丢失，会记录 `memos_recall_dropped_before_prompt`。
 - 远端 KB 优化优先做分库/分段标题、短 query 改写、路由加权和二阶段过滤；远端结果只作证据，不覆盖本地 Memory V3/短期连续性。
 
 ### 启动

@@ -134,13 +134,18 @@ module.exports = (async () => {
   });
   assert.deepStrictEqual(decision.allowedToolNames, []);
   assert.ok(decision.dynamicPromptPlan.enabledBlockIds.includes('memos_recall'));
+  assert.strictEqual(decision.memosRecall.used, true);
+  assert.ok(decision.memosRecall.promptText.includes('用户偏好直接给结论。'));
+  assert.ok(decision.memosRecall.promptText.includes('用户强调不能覆盖他人改动。'));
+  assert.strictEqual(decision.plannerMeta.memosRecall, decision.memosRecall);
+  assert.strictEqual(decision.memosRecallText, memosRecall.promptText);
 
   const directChatDecision = convertPlannerDecisionToDirectChatDecision(decision, route, {
-    memosRecall,
     toolCatalog: [{ name: 'mcp_memos_api_mcp_search_memory', bucket: 'mcp' }]
   });
   assert.deepStrictEqual(directChatDecision.allowedToolNames, []);
-  assert.deepStrictEqual(directChatDecision.memosRecall, memosRecall);
+  assert.deepStrictEqual(directChatDecision.memosRecall, decision.memosRecall);
+  assert.strictEqual(directChatDecision.memosRecallText, memosRecall.promptText);
 
   const catalog = buildDirectChatToolCatalog({ userId: 'u_memos' });
   assert.ok(!catalog.some((item) => /^mcp_memos_api_mcp_/i.test(item.name)));
@@ -215,9 +220,33 @@ module.exports = (async () => {
     }
   });
   assert.ok(dedupedDecision.dynamicPromptPlan.enabledBlockIds.includes('memos_recall'));
+  assert.deepStrictEqual(dedupedDecision.memosRecall, dedupedPlannerMemosRecall);
   assert.strictEqual(dedupedPlannerMemosRecall.items.length, 1);
   assert.ok(!dedupedPlannerMemosRecall.promptText.includes('直接给结论'));
   assert.ok(dedupedPlannerMemosRecall.promptText.includes('不能覆盖他人改动'));
+
+  const dedupedDirectChatDecision = convertPlannerDecisionToDirectChatDecision(dedupedDecision, route, {
+    toolCatalog: []
+  });
+  const promptFromDirectChatPlanner = await buildDynamicPrompt(
+    { level: 'friend', points: 7 },
+    'u_memos_prompt_direct_planner',
+    '继续刚才的实现计划',
+    null,
+    {
+      topRouteType: 'direct_chat',
+      routePolicyKey: 'chat/default',
+      routeMeta: {
+        directChatPlanner: dedupedDirectChatDecision
+      },
+      memoryContext: duplicateMemoryContext
+    }
+  );
+  const promptMemosBlock = promptFromDirectChatPlanner.promptSnapshot.assembledBlocks.find((item) => item.id === 'memos_recall');
+  assert.ok(promptMemosBlock);
+  assert.ok(promptFromDirectChatPlanner.promptSegments.systemPrompt.some((message) => String(message.content || '').includes('[MemOSRecall]')));
+  assert.ok(!String(promptMemosBlock.content || '').includes('用户偏好直接给结论。'));
+  assert.ok(promptFromDirectChatPlanner.promptSegments.systemPrompt.some((message) => String(message.content || '').includes('不能覆盖他人改动')));
 
   const duplicateOnlyRecall = {
     query: '继续计划',

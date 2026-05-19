@@ -1,6 +1,6 @@
 # MemOS MCP Planner Recall
 
-更新时间：2026-05-20 00:19 +08:00
+更新时间：2026-05-20 00:42 +08:00
 
 ## 目标
 
@@ -65,10 +65,13 @@ MEMOS_WRITE_ASYNC=true
 
 ## 召回观测日志
 
+2026-05-20 00:42 +08:00：修复 planner decision 出口的 `memosRecall/memosRecallText` 传递；当 planner include `memos_recall` 但 prepare 前召回对象为空或最终 prompt 缺块时，记录 `stage=memos_recall_dropped_before_prompt`。
+
 2026-05-20 00:19 +08:00：新增 `data/memory-recall-observability.ndjson`，用于评估 MemOS 远端知识库召回和本地 Memory V3/向量记忆召回的速度、命中和最终注入情况。
 
 - `stage=planner_memos_recall`：记录 MemOS 召回耗时、召回源、工具名、知识库数量、去重前后候选数、`usedBeforeDedupe`、`usedAfterDedupe`、`rejectedReason`、去重原因。
 - `stage=prepare_main_prompt_blocks`：记录主回复 prompt 的 `stableBlockIds`、`dynamicBlockIds`、`assistantOnlyBlockIds`，以及 `hasMemosRecall`、`hasRetrievedMemoryLite`、`hasShortTermContinuity`。
+- `stage=memos_recall_dropped_before_prompt`：表示 planner 已选择 `memos_recall`，但召回对象未传到 prompt 构建或最终 block 未进入主 prompt。
 - 日志只写候选的短 `textPreview` 和 `textHash`，不写完整远端知识库正文，不写 API key。
 - 结合 `data/model-calls.ndjson` 可按 `requestId` 对齐主回复耗时和调用次数；主回复模型调用次数仍只看 main reply 记录。
 
