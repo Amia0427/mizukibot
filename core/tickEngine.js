@@ -1,8 +1,5 @@
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 const config = require('../config');
-const { createJsonHotStore } = require('../utils/jsonHotStore');
 const { postWithRetry } = require('../api/httpClient');
 const { extractMessageContent, extractJsonSafely } = require('../api/parser');
 const { formatDateInTz, getDatePartsInTz } = require('../utils/time');
@@ -37,74 +34,28 @@ const {
 const { markInitiativeSent, setLastCycleKey } = require('./initiativeState');
 const { getDailyShareEngine } = require('./dailyShareEngine');
 const { getLifeSchedulerEngine } = require('./lifeSchedulerEngine');
-
-const TICK_STATE_FILE = path.join(config.DATA_DIR, 'tick_state.json');
-const tickStateStore = createJsonHotStore(TICK_STATE_FILE, {
-  fallback: () => ({}),
-  debounceMs: Math.max(0, Number(config.HOT_STORE_DEBOUNCE_MS || 250) || 250),
-  maxDelayMs: Math.max(0, Number(config.HOT_STORE_MAX_DELAY_MS || 2000) || 2000)
-});
-const RANDOM_WINDOW_DEFS = Object.freeze([
-  { key: 'morning', configKey: 'PROACTIVE_TOUCH_WINDOWS_MORNING' },
-  { key: 'afternoon', configKey: 'PROACTIVE_TOUCH_WINDOWS_AFTERNOON' },
-  { key: 'night', configKey: 'PROACTIVE_TOUCH_WINDOWS_NIGHT' }
-]);
-
-function safeReadJson(filePath, fallback = {}) {
-  try {
-    if (!fs.existsSync(filePath)) return fallback;
-    const text = fs.readFileSync(filePath, 'utf-8');
-    if (!String(text || '').trim()) return fallback;
-    return JSON.parse(text);
-  } catch (_) {
-    return fallback;
-  }
-}
-
-function saveTickState(state) {
-  try {
-    tickStateStore.replace(state);
-  } catch (error) {
-    console.error('[tick] failed to save state:', error?.message || error);
-  }
-}
-
-function normalizeUserTickState(raw = {}, today = '') {
-  const sameDay = String(raw?.day || '').trim() === String(today || '').trim();
-  return {
-    ...raw,
-    day: String(today || raw?.day || '').trim(),
-    proactive_count: sameDay ? Math.max(0, Number(raw?.proactive_count || 0) || 0) : 0,
-    touched_windows: sameDay && raw?.touched_windows && typeof raw.touched_windows === 'object'
-      ? { ...raw.touched_windows }
-      : {},
-    last_reason_at: raw?.last_reason_at && typeof raw.last_reason_at === 'object'
-      ? { ...raw.last_reason_at }
-      : {},
-    last_touch_signature: String(raw?.last_touch_signature || '').trim(),
-    last_touch_signature_at: Math.max(0, Number(raw?.last_touch_signature_at || 0) || 0),
-    last_light_care_at: Math.max(0, Number(raw?.last_light_care_at || 0) || 0),
-    last_morning_fallback_day: String(raw?.last_morning_fallback_day || '').trim(),
-    last_night_fallback_day: String(raw?.last_night_fallback_day || '').trim(),
-    last_proactive_at: Math.max(0, Number(raw?.last_proactive_at || 0) || 0),
-    last_proactive_reason: String(raw?.last_proactive_reason || '').trim()
-  };
-}
-
-function loadTickState() {
-  const raw = tickStateStore.read({ forceReload: true });
-  const next = {};
-  for (const [userId, value] of Object.entries(raw || {})) {
-    next[String(userId)] = normalizeUserTickState(value, String(value?.day || '').trim());
-  }
-  return next;
-}
-
-function clampNumber(value, min, max, fallback = min) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-}
+const {
+  getDailyState,
+  loadTickState,
+  saveTickState
+} = require('./tickEngine/state');
+const {
+  computeWindowTriggerMinutes,
+  formatWindowBucket,
+  getDailyMax,
+  getDailyShareScanIntervalMs,
+  getIdleMs,
+  getLifeSchedulerScanIntervalMs,
+  getProactiveScanIntervalMs,
+  getProactiveStartDelayMs,
+  getRandomWindows,
+  getReasonRepeatMs,
+  getSignatureRepeatMs,
+  getTouchMinGapMs,
+  getWindowByCurrentTime,
+  isWindowReadyForUser,
+  shouldTriggerFallbackGreeting
+} = require('./tickEngine/schedule');
 
 function trimText(value, maxChars = 180) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -237,99 +188,6 @@ async function invokeInitiativeDecisionModel(input = {}) {
   return parseInitiativeDecision(String(msg?.content || ''), fallbackStyle, fallbackAtSender);
 }
 
-function hashInt(seed = '') {
-  const hex = crypto.createHash('sha1').update(String(seed || '')).digest('hex').slice(0, 12);
-  return Number.parseInt(hex, 16);
-}
-
-function parseTimeToMinutes(text = '', fallback = 0) {
-  const match = String(text || '').trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) return fallback;
-  const hour = clampNumber(match[1], 0, 23, 0);
-  const minute = clampNumber(match[2], 0, 59, 0);
-  return (hour * 60) + minute;
-}
-
-function formatWindowBucket(day = '', key = '') {
-  return `${String(day || '').trim()}::${String(key || '').trim()}`;
-}
-
-function parseWindowRange(text = '', fallbackStart, fallbackEnd) {
-  const match = String(text || '').trim().match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})$/);
-  if (!match) {
-    return { startMinutes: fallbackStart, endMinutes: fallbackEnd };
-  }
-  const startMinutes = parseTimeToMinutes(match[1], fallbackStart);
-  const endMinutes = parseTimeToMinutes(match[2], fallbackEnd);
-  if (endMinutes <= startMinutes) {
-    return { startMinutes: fallbackStart, endMinutes: fallbackEnd };
-  }
-  return { startMinutes, endMinutes };
-}
-
-function getRandomWindows() {
-  const fallbacks = {
-    morning: { start: 10 * 60, end: (11 * 60) + 30 },
-    afternoon: { start: 15 * 60, end: (17 * 60) + 30 },
-    night: { start: 20 * 60, end: 22 * 60 }
-  };
-
-  return RANDOM_WINDOW_DEFS.map((definition) => {
-    const fallback = fallbacks[definition.key];
-    const parsed = parseWindowRange(config[definition.configKey], fallback.start, fallback.end);
-    return {
-      key: definition.key,
-      startMinutes: parsed.startMinutes,
-      endMinutes: parsed.endMinutes
-    };
-  });
-}
-
-function getCurrentMinutes(date = new Date(), timezone = config.TIMEZONE) {
-  const parts = getDatePartsInTz(date, timezone);
-  return (parts.hour * 60) + parts.minute;
-}
-
-function getIdleMs() {
-  const minutes = Math.max(5, Number(config.PROACTIVE_REPLY_IDLE_MINUTES || 45));
-  return minutes * 60 * 1000;
-}
-
-function getDailyMax() {
-  return Math.max(
-    1,
-    Number(config.PROACTIVE_TOUCH_MAX_PER_DAY || 3)
-  );
-}
-
-function getProactiveStartDelayMs() {
-  const minutes = Math.max(0, Number(config.PROACTIVE_REPLY_START_DELAY_MINUTES || 30));
-  return minutes * 60 * 1000;
-}
-
-function getProactiveScanIntervalMs() {
-  const minutes = Math.max(
-    5,
-    Number(config.PROACTIVE_TOUCH_SCAN_INTERVAL_MINUTES || config.PROACTIVE_REPLY_SCAN_INTERVAL_MINUTES || 15)
-  );
-  return minutes * 60 * 1000;
-}
-
-function getDailyShareScanIntervalMs() {
-  return 5 * 60 * 1000;
-}
-
-function getLifeSchedulerScanIntervalMs() {
-  const value = Number(config.LIFE_SCHEDULER_SCAN_INTERVAL_MS || 60000);
-  if (!Number.isFinite(value)) return 60000;
-  return Math.max(1000, Math.floor(value));
-}
-
-function getTouchMinGapMs() {
-  const minutes = Math.max(30, Number(config.PROACTIVE_TOUCH_MIN_GAP_MINUTES || 240));
-  return minutes * 60 * 1000;
-}
-
 async function sendTickPayloadWithRetry(ws, payload, retries = 1, waitMs = 500) {
   const maxRetry = Math.max(0, Number(retries) || 0);
   for (let i = 0; i <= maxRetry; i += 1) {
@@ -344,22 +202,6 @@ async function sendTickPayloadWithRetry(ws, payload, retries = 1, waitMs = 500) 
     }
   }
   return false;
-}
-
-function getReasonRepeatMs(reason = '') {
-  if (String(reason || '').trim() === 'light_care_ping') {
-    return 24 * 60 * 60 * 1000;
-  }
-  return 12 * 60 * 60 * 1000;
-}
-
-function getSignatureRepeatMs() {
-  return 48 * 60 * 60 * 1000;
-}
-
-function getDailyState(state, userId, today) {
-  const current = state[userId] || {};
-  return normalizeUserTickState(current, today);
 }
 
 function canTriggerProactiveReply(userId, data, state, today, now = Date.now()) {
@@ -508,44 +350,6 @@ async function buildProactivePrompt(userId, data, payload = {}) {
     data,
     ...payload
   });
-}
-
-function computeWindowTriggerMinutes(userId, day, windowKey, startMinutes, endMinutes) {
-  const range = Math.max(1, endMinutes - startMinutes);
-  const value = hashInt(`${userId}|${day}|${windowKey}`);
-  return startMinutes + (value % range);
-}
-
-function getWindowByCurrentTime(date = new Date(), timezone = config.TIMEZONE) {
-  const currentMinutes = getCurrentMinutes(date, timezone);
-  return getRandomWindows().find((windowDef) => {
-    return currentMinutes >= windowDef.startMinutes && currentMinutes < windowDef.endMinutes;
-  }) || null;
-}
-
-function isWindowReadyForUser(userId, today, windowDef, date = new Date()) {
-  const currentMinutes = getCurrentMinutes(date, config.TIMEZONE);
-  const triggerMinutes = computeWindowTriggerMinutes(
-    userId,
-    today,
-    windowDef.key,
-    windowDef.startMinutes,
-    windowDef.endMinutes
-  );
-  return currentMinutes >= triggerMinutes;
-}
-
-function shouldTriggerFallbackGreeting(type, date = new Date(), timezone = config.TIMEZONE) {
-  if (!config.PROACTIVE_GREETING_FALLBACK_ENABLED) return false;
-  const fallbackText = type === 'morning'
-    ? config.PROACTIVE_GREETING_MORNING_FALLBACK_AT
-    : config.PROACTIVE_GREETING_NIGHT_FALLBACK_AT;
-  const parts = getDatePartsInTz(date, timezone);
-  const targetMinutes = parseTimeToMinutes(
-    fallbackText,
-    type === 'morning' ? ((11 * 60) + 40) : ((22 * 60) + 30)
-  );
-  return ((parts.hour * 60) + parts.minute) >= targetMinutes;
 }
 
 function shouldSendScheduledGreeting(data, type, today, runtimeConfig = config, userState = null) {

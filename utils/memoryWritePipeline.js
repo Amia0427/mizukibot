@@ -390,11 +390,31 @@ function applyBatchWriteGuards(candidates = []) {
   }
 
   const candidateOnlyIds = new Set();
+  const rankConflictCandidate = (item = {}) => {
+    const status = normalizeText(item.status).toLowerCase();
+    const sourceKind = normalizeText(item.sourceKind || item.source_kind || item.meta?.sourceKind || item.meta?.source_kind).toLowerCase();
+    const type = normalizeType(item.type || item.memoryKind);
+    const explicitBoost = sourceKind === 'explicit' ? 4 : 0;
+    const statusBoost = status === 'active' ? 3 : (status === 'candidate' ? 1 : 0);
+    const preferenceBoost = type === 'dislike' ? 0.5 : 0;
+    const confidence = clamp01(item.confidence ?? item.meta?.confidence, 0);
+    const importance = Math.max(0, Math.min(3, Number(item.importance ?? item.meta?.importance ?? 0) || 0));
+    return explicitBoost + statusBoost + preferenceBoost + confidence + (importance / 10);
+  };
   for (const group of conflictGroups.values()) {
     const fingerprints = new Set(group.map((item) => `${normalizeType(item.type || item.memoryKind)}|${fingerprintText(candidateText(item))}`).filter(Boolean));
     if (fingerprints.size <= 1) continue;
+    const winner = group.slice().sort((a, b) => {
+      const rankDelta = rankConflictCandidate(b) - rankConflictCandidate(a);
+      if (rankDelta !== 0) return rankDelta;
+      const updatedDelta = Number(b.updatedAt || b.updated_at || b.ts || 0) - Number(a.updatedAt || a.updated_at || a.ts || 0);
+      if (updatedDelta !== 0) return updatedDelta;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    })[0] || null;
+    const winnerId = String(winner?.id || '');
     for (const item of group) {
-      if (item.id) candidateOnlyIds.add(String(item.id));
+      const itemId = String(item.id || '');
+      if (itemId && itemId !== winnerId) candidateOnlyIds.add(itemId);
     }
   }
 

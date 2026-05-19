@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { estimateTokens, trimTextByTokenBudget } = require('./contextBudget');
 const { getStyleProfile } = require('./styleProfileRuntime');
 const { getGroupSocialContext } = require('./socialContextRuntime');
 const {
@@ -19,85 +18,37 @@ const { getRecentSessionContextSummaries } = require('./sessionContextSummarySto
 const { getDailyJournalRetrievalBundle } = require('./dailyJournal');
 const { getUserAffinityState, getUserProfile } = require('./memory');
 const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('./promptSecurity');
+const {
+  CONTINUITY_PRIORITY,
+  DEFAULT_SURFACE,
+  buildCandidate,
+  buildExpressionValue,
+  chooseBestScalar,
+  computeTopicFingerprint,
+  createRecentReplyFrameFromMessages,
+  getSurfacePolicy,
+  inferGuardedness,
+  inferInitiative,
+  inferJargon,
+  inferPlayfulness,
+  inferReplyPostureFromSignals,
+  inferTease,
+  inferVerbosity,
+  inferWarmth,
+  looksLikePollutedContinuitySummary,
+  mergeListCandidates,
+  normalizeArray,
+  normalizeEvidenceItem,
+  normalizeObject,
+  normalizeReplyPosture,
+  normalizeText,
+  parsePersonaPreference,
+  uniqueBy,
+  uniqueStrings
+} = require('./personaMemoryState/helpers');
+const { renderPersonaMemoryPrompt } = require('./personaMemoryState/promptRenderer');
 
 const STATE_VERSION = 2;
-const DEFAULT_SURFACE = 'direct_chat';
-
-const CONTINUITY_PRIORITY = Object.freeze({
-  session_projection: 500,
-  short_term_bridge: 400,
-  short_term_state: 360,
-  same_session_summary: 300,
-  same_session_journal: 260,
-  task_memory: 180,
-  group_memory: 160,
-  generic_recall: 120,
-  fallback: 0
-});
-
-function looksLikePollutedContinuitySummary(text = '') {
-  const normalized = normalizeText(text, 2400);
-  if (!normalized) return false;
-  return /\[(KnownSummary|KnownImpression|Identity|Likes|Dislikes|Goals|KnownFacts|RelevantRecall|RecentTopics)\]/i.test(normalized);
-}
-
-const SURFACE_POLICIES = Object.freeze({
-  direct_chat: {
-    includeContinuity: true,
-    includeRelationship: true,
-    includeRecentReplyFrame: true,
-    includeDeepHistory: true,
-    allowJargon: 'group_only',
-    maxMemoryDigestItems: 5
-  },
-  passive_group_reply: {
-    includeContinuity: true,
-    includeRelationship: true,
-    includeRecentReplyFrame: true,
-    includeDeepHistory: false,
-    allowJargon: 'group_only',
-    maxMemoryDigestItems: 3
-  },
-  proactive_touch: {
-    includeContinuity: true,
-    includeRelationship: true,
-    includeRecentReplyFrame: true,
-    includeDeepHistory: false,
-    allowJargon: 'off',
-    maxMemoryDigestItems: 3
-  },
-  qzone_diary: {
-    includeContinuity: true,
-    includeRelationship: false,
-    includeRecentReplyFrame: false,
-    includeDeepHistory: false,
-    allowJargon: 'off',
-    maxMemoryDigestItems: 3
-  },
-  bot_diary: {
-    includeContinuity: true,
-    includeRelationship: false,
-    includeRecentReplyFrame: false,
-    includeDeepHistory: false,
-    allowJargon: 'off',
-    maxMemoryDigestItems: 3
-  },
-  daily_share: {
-    includeContinuity: true,
-    includeRelationship: false,
-    includeRecentReplyFrame: false,
-    includeDeepHistory: false,
-    allowJargon: 'off',
-    maxMemoryDigestItems: 2
-  }
-});
-
-function normalizeText(value, maxChars = 0) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  if (!text) return '';
-  if (!maxChars || text.length <= maxChars) return text;
-  return text.slice(0, Math.max(1, Number(maxChars) || 1));
-}
 
 function buildMemoryContext(...args) {
   return require('./memoryContext').buildMemoryContext(...args);
@@ -117,51 +68,6 @@ function appendMemoryEvent(...args) {
 
 function materializeMemoryViews(...args) {
   return require('./memory-v3').materializeMemoryViews(...args);
-}
-
-function normalizeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function normalizeObject(value, fallback = {}) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
-}
-
-function uniqueStrings(values = [], limit = 6, maxChars = 180) {
-  const out = [];
-  const seen = new Set();
-  for (const raw of normalizeArray(values)) {
-    const text = normalizeText(raw, maxChars);
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    out.push(text);
-    if (out.length >= Math.max(1, Number(limit) || 1)) break;
-  }
-  return out;
-}
-
-function uniqueBy(items = [], selector = (item) => item) {
-  const out = [];
-  const seen = new Set();
-  for (const item of normalizeArray(items)) {
-    const key = normalizeText(selector(item));
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(item);
-  }
-  return out;
-}
-
-function clampMessageText(text = '', tokenBudget = 0, fallbackChars = 220) {
-  const value = normalizeText(text);
-  if (!value) return '';
-  if (tokenBudget > 0) return trimTextByTokenBudget(value, tokenBudget, 'tail');
-  return normalizeText(value, fallbackChars);
-}
-
-function getSurfacePolicy(surface = '') {
-  const key = normalizeText(surface).toLowerCase() || DEFAULT_SURFACE;
-  return SURFACE_POLICIES[key] || SURFACE_POLICIES[DEFAULT_SURFACE];
 }
 
 function readPromptManifest() {
@@ -199,171 +105,6 @@ function loadPersonaCoreText() {
     .map((text) => String(text || '').trim())
     .filter(Boolean);
   return parts.join('\n\n').trim() || String(config.SYSTEM_PROMPT || '').trim();
-}
-
-function normalizeEvidenceItem(item = {}, fallbackSource = 'fallback') {
-  const source = normalizeText(item.source || fallbackSource).toLowerCase() || fallbackSource;
-  const text = normalizeText(item.text || item.summary || item.content, 260);
-  if (!text) return null;
-  return {
-    source,
-    label: normalizeText(item.label || item.type || item.fieldKey || source, 48),
-    text,
-    confidence: Math.max(0, Math.min(1, Number(item.confidence || 0) || 0)),
-    priority: Number.isFinite(Number(item.priority)) ? Number(item.priority) : (CONTINUITY_PRIORITY[source] || 0),
-    scope: normalizeText(item.scope || item.scopeType || '', 32),
-    metadata: normalizeObject(item.metadata)
-  };
-}
-
-function chooseBestScalar(entries = []) {
-  const ordered = normalizeArray(entries)
-    .filter(Boolean)
-    .slice()
-    .sort((a, b) => {
-      const p = Number(b.priority || 0) - Number(a.priority || 0);
-      if (p !== 0) return p;
-      const c = Number(b.confidence || 0) - Number(a.confidence || 0);
-      if (c !== 0) return c;
-      return normalizeText(b.text).length - normalizeText(a.text).length;
-    });
-  return ordered[0] || null;
-}
-
-function mergeListCandidates(entries = [], limit = 4) {
-  const ordered = normalizeArray(entries)
-    .filter(Boolean)
-    .slice()
-    .sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0));
-  return uniqueStrings(ordered.map((item) => item.text), limit, 180);
-}
-
-function buildCandidate(source, text, extras = {}) {
-  return normalizeEvidenceItem({
-    source,
-    text,
-    ...extras
-  }, source);
-}
-
-function createRecentReplyFrameFromMessages(messages = []) {
-  const turns = normalizeArray(messages)
-    .map((item) => ({
-      role: normalizeText(item?.role || '', 16).toLowerCase(),
-      content: normalizeText(item?.content || item?.text || '', 240)
-    }))
-    .filter((item) => (item.role === 'user' || item.role === 'assistant') && item.content)
-    .slice(-4);
-  if (!turns.length) return null;
-  return {
-    summary: turns.map((item) => `${item.role === 'assistant' ? 'A' : 'U'}:${item.content}`).join(' | '),
-    turns
-  };
-}
-
-function normalizeReplyPosture(value = '') {
-  const posture = normalizeText(value, 24);
-  return ['light', 'playful', 'gentle', 'reserved', 'focused', 'comforting'].includes(posture)
-    ? posture
-    : '';
-}
-
-function inferReplyPostureFromSignals({ surface = '', expressionState = {}, continuityState = {}, question = '' } = {}) {
-  const explicit = normalizeReplyPosture(expressionState?.replyPosture?.value || expressionState?.replyPosture || continuityState?.replyPosture);
-  if (explicit) return explicit;
-  const text = normalizeText(question, 240);
-  if (/难受|低落|撑不住|安慰|抱抱|陪我/i.test(text)) return 'comforting';
-  if (/认真|排查|修|部署|配置|步骤|先给结论/i.test(text)) return 'focused';
-  if (/玩笑|搞怪|扮演|可爱|发夹|逛街/i.test(text)) return 'playful';
-  if (String(surface || '').trim().toLowerCase() === 'passive_group_reply') return 'light';
-  return 'gentle';
-}
-
-function computeTopicFingerprint(parts = []) {
-  const joined = normalizeArray(parts).map((item) => normalizeText(item, 80)).filter(Boolean).join('|');
-  if (!joined) return '';
-  let hash = 0;
-  for (const ch of joined) {
-    hash = ((hash << 5) - hash) + ch.charCodeAt(0);
-    hash |= 0;
-  }
-  return String(hash >>> 0);
-}
-
-function inferWarmth(relationship = '', attitude = '', surface = '') {
-  const relationshipText = normalizeText(relationship).toLowerCase();
-  const attitudeText = normalizeText(attitude).toLowerCase();
-  if (['bot_diary', 'qzone_diary', 'daily_share'].includes(normalizeText(surface).toLowerCase())) return 'mid';
-  if (/亲密|伙伴|信任|普通朋友/i.test(relationshipText) || /亲近|友好|积极|信任/i.test(attitudeText)) return 'high';
-  if (/警惕|疏离|中立/i.test(relationshipText) || /距离|克制|边界/i.test(attitudeText)) return 'low';
-  return 'mid';
-}
-
-function inferGuardedness(surface = '', relationship = '') {
-  const normalizedSurface = normalizeText(surface).toLowerCase();
-  if (['qzone_diary', 'bot_diary', 'daily_share'].includes(normalizedSurface)) return 'guarded';
-  if (/亲密|伙伴/i.test(normalizeText(relationship))) return 'soft_open';
-  return 'guarded';
-}
-
-function inferPlayfulness(styleProfile = {}, socialContext = {}, surface = '') {
-  const profile = normalizeObject(styleProfile.globalBotBase, {});
-  const tags = normalizeArray(profile.toneTags).map((item) => normalizeText(item).toLowerCase());
-  if (['qzone_diary', 'bot_diary'].includes(normalizeText(surface).toLowerCase())) return tags.includes('playful') ? 'high' : 'mid';
-  if (tags.includes('playful') || tags.includes('cute')) return 'mid';
-  if (normalizeText(socialContext.atmosphere).includes('活跃')) return 'mid';
-  return 'low';
-}
-
-function inferVerbosity(surface = '', styleProfile = {}) {
-  const normalizedSurface = normalizeText(surface).toLowerCase();
-  if (normalizedSurface === 'passive_group_reply' || normalizedSurface === 'proactive_touch') return 'terse';
-  if (normalizedSurface === 'qzone_diary' || normalizedSurface === 'bot_diary') return 'rich';
-  const sentenceLength = normalizeText(styleProfile?.globalBotBase?.sentenceLength || '', 16).toLowerCase();
-  if (sentenceLength === 'short') return 'terse';
-  if (sentenceLength === 'long') return 'rich';
-  return 'normal';
-}
-
-function inferTease(styleProfile = {}, socialContext = {}, surface = '') {
-  if (['qzone_diary', 'bot_diary'].includes(normalizeText(surface).toLowerCase())) return 'light';
-  const profile = normalizeObject(styleProfile.globalBotBase, {});
-  if (Number(profile.teaseCueRatio || 0) >= 0.18) return 'light';
-  if (normalizeArray(socialContext.topTeasePairs).length > 0) return 'light';
-  return 'off';
-}
-
-function inferJargon(surface = '', groupId = '', styleSignals = '') {
-  const normalizedSurface = normalizeText(surface).toLowerCase();
-  if (!groupId) return 'off';
-  if (normalizedSurface === 'passive_group_reply' || normalizedSurface === 'direct_chat') {
-    return 'group_only';
-  }
-  return 'off';
-}
-
-function inferInitiative(surface = '') {
-  const normalizedSurface = normalizeText(surface).toLowerCase();
-  if (normalizedSurface === 'passive_group_reply') return 'reply';
-  if (normalizedSurface === 'proactive_touch') return 'proactive';
-  return 'reply';
-}
-
-function parsePersonaPreference(text = '', key = '') {
-  const source = normalizeText(text, 320);
-  const normalizedKey = normalizeText(key).toLowerCase();
-  if (!source || !normalizedKey) return '';
-  const lines = source.split(/\r?\n/).map((line) => normalizeText(line)).filter(Boolean);
-  const line = lines.find((item) => item.toLowerCase().startsWith(`${normalizedKey}:`));
-  if (!line) return '';
-  return normalizeText(line.slice(normalizedKey.length + 1), 120);
-}
-
-function buildExpressionValue(value = '', source = 'runtime_inference') {
-  return {
-    value: normalizeText(value, 48),
-    source: normalizeText(source, 32) || 'runtime_inference'
-  };
 }
 
 function buildExpressionState({ surface, relationshipState, styleProfile, socialContext, memoryContext }) {
@@ -473,105 +214,6 @@ function buildMemoryDigest(memoryContext = {}, options = {}) {
       return acc;
     }, {})
   };
-}
-
-function buildPromptBlock(label, text, tokenBudget) {
-  const value = clampMessageText(text, tokenBudget, 480);
-  if (!value) return null;
-  return {
-    label,
-    text: value,
-    message: { role: 'system', content: `[${label}]\n${value}` }
-  };
-}
-
-function sanitizePromptBlocks(blocks = [], totalBudget = 2400) {
-  const selected = normalizeArray(blocks).filter(Boolean);
-  const messages = [];
-  let used = 0;
-  for (const block of selected) {
-    const msg = block?.message;
-    if (!msg) continue;
-    const cost = estimateTokens(String(msg.content || ''));
-    if (used > 0 && used + cost > totalBudget && block.label !== 'PersonaCore' && block.label !== 'SurfacePolicy') {
-      continue;
-    }
-    messages.push(msg);
-    used += cost;
-  }
-  return messages;
-}
-
-function formatRelationshipStateText(state = {}) {
-  const lines = [];
-  if (state.relationship) lines.push(`relationship=${state.relationship}`);
-  if (state.distanceMode) lines.push(`distance=${state.distanceMode}`);
-  if (state.attitude) lines.push(`tone=${normalizeText(state.attitude, 72)}`);
-  if (state.replyStylePolicy) lines.push(`reply=${normalizeText(state.replyStylePolicy, 72)}`);
-  if (state.salutationStyle || state.salutationPolicy) lines.push(`salutation=${normalizeText(state.salutationStyle || state.salutationPolicy, 48)}`);
-  return lines.join('\n');
-}
-
-function formatContinuityStateText(state = {}, options = {}) {
-  const lines = [];
-  if (state.activeTopic) lines.push(`active_topic=${state.activeTopic}`);
-  if (state.carryOverUserTurn) lines.push(`carry_over_user_turn=${state.carryOverUserTurn}`);
-  if (normalizeArray(state.openLoops).length) lines.push(`open_loops=${state.openLoops.join(' | ')}`);
-  if (normalizeArray(state.assistantCommitments).length) lines.push(`assistant_commitments=${state.assistantCommitments.join(' | ')}`);
-  if (normalizeArray(state.userConstraints).length) lines.push(`user_constraints=${state.userConstraints.join(' | ')}`);
-  if (state.phaseHint) lines.push(`phase_hint=${state.phaseHint}`);
-  if (state.replyPosture) lines.push(`reply_posture=${state.replyPosture}`);
-  if (normalizeArray(state.activePersonaModules).length) lines.push(`active_persona_modules=${state.activePersonaModules.join(' | ')}`);
-  if (normalizeArray(state.styleAnchors).length) lines.push(`style_anchors=${state.styleAnchors.join(' | ')}`);
-  if (state.sceneTopic) lines.push(`scene_topic=${state.sceneTopic}`);
-  if (state.sceneAtmosphere) lines.push(`scene_atmosphere=${state.sceneAtmosphere}`);
-  if (state.recentReplyFrame && options.includeRecentReplyFrame !== false) lines.push(`recent_reply_frame=${state.recentReplyFrame}`);
-  if (state.summary) lines.push(`summary=${state.summary}`);
-  if (normalizeObject(state.sources) && Object.keys(state.sources).length > 0) {
-    const sourceLines = [];
-    if (state.sources.activeTopic) sourceLines.push(`active_topic:${state.sources.activeTopic}`);
-    if (state.sources.carryOverUserTurn) sourceLines.push(`carry_over:${state.sources.carryOverUserTurn}`);
-    if (state.sources.summary) sourceLines.push(`summary:${state.sources.summary}`);
-    if (sourceLines.length) lines.push(`sources=${sourceLines.join(', ')}`);
-  }
-  return lines.join('\n');
-}
-
-function formatExpressionStateText(state = {}) {
-  const compact = (entry, fallback = '') => {
-    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
-      return normalizeText(entry.value || fallback, 24);
-    }
-    return normalizeText(entry || fallback, 24);
-  };
-  return [
-    `reply_posture=${compact(state.replyPosture, 'light')}`,
-    `warmth=${compact(state.warmth, 'mid')}`,
-    `play=${compact(state.playfulness, 'low')}`,
-    `tease=${compact(state.tease, 'off')}`,
-    `initiative=${compact(state.initiative, 'reply')}`,
-    `jargon=${compact(state.jargon, 'off')}`,
-    `verbosity=${compact(state.verbosity, 'normal')}`,
-    `guarded=${compact(state.guardedness, 'guarded')}`
-  ].join('\n');
-}
-
-function formatMemoryDigestText(digest = {}) {
-  return normalizeArray(digest.items)
-    .map((item) => `[${item.source}${item.label ? `|${item.label}` : ''}] ${item.text}`)
-    .join('\n');
-}
-
-function formatSurfacePolicyText(surface = '', policy = {}) {
-  return [
-    `surface=${surface || DEFAULT_SURFACE}`,
-    `include_continuity=${policy.includeContinuity !== false}`,
-    `include_relationship=${policy.includeRelationship !== false}`,
-    `include_recent_reply_frame=${policy.includeRecentReplyFrame !== false}`,
-    `include_deep_history=${policy.includeDeepHistory !== false}`,
-    `allow_jargon=${policy.allowJargon || 'off'}`,
-    `max_memory_digest_items=${Number(policy.maxMemoryDigestItems || 0) || 0}`
-  ].join('\n');
 }
 
 function resolveContinuitySlots(candidates = {}, policy = {}) {
@@ -1029,33 +671,6 @@ async function composePersonaMemoryState(request = {}, options = {}) {
     moduleState: nextModuleState,
     memoryDigest,
     evidence
-  };
-}
-
-function renderPersonaMemoryPrompt(state = {}, surface = '') {
-  const normalizedState = normalizeObject(state);
-  const surfaceName = normalizeText(surface || normalizedState.surface || DEFAULT_SURFACE).toLowerCase() || DEFAULT_SURFACE;
-  const surfacePolicy = getSurfacePolicy(surfaceName);
-  const promptBudget = Math.max(1000, Number(config.MAIN_PROMPT_PERSONA_MEMORY_MAX_TOKENS || 2200) || 2200);
-  const promptBlocks = [
-    buildPromptBlock('PersonaCore', normalizedState.personaCore?.text, Math.min(promptBudget * 0.3, 900)),
-    surfacePolicy.includeRelationship !== false
-      ? buildPromptBlock('RelationshipState', formatRelationshipStateText(normalizedState.relationshipState), 220)
-      : null,
-    surfacePolicy.includeContinuity !== false
-      ? buildPromptBlock('ContinuityState', formatContinuityStateText(normalizedState.continuityState, {
-          includeRecentReplyFrame: surfacePolicy.includeRecentReplyFrame !== false
-        }), 360)
-      : null,
-    buildPromptBlock('ExpressionPolicy', formatExpressionStateText(normalizedState.expressionState), 140),
-    buildPromptBlock('RelevantMemoryDigest', formatMemoryDigestText(normalizedState.memoryDigest), 360),
-    buildPromptBlock('SurfacePolicy', formatSurfacePolicyText(surfaceName, surfacePolicy), 140)
-  ].filter(Boolean);
-
-  return {
-    systemMessages: sanitizePromptBlocks(promptBlocks, promptBudget),
-    promptBlocks,
-    policy: surfacePolicy
   };
 }
 
