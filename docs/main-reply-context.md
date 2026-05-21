@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-21 21:38 +08:00
+更新时间：2026-05-21 22:02 +08:00
 
 ## 已调整
 
@@ -14,15 +14,20 @@
 - `MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS` 默认从 2200 提高到 3600。
 - `MEMORY_V3_SESSION_RECENT_MESSAGES` 默认从 64 提高到 96。
 - 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 会同步补 `retrieved_memory_lite`、`daily_journal`、`short_term_continuity`、planner 已选择的 `memos_recall` 和摘要块；主模型调用日志新增 `prompt_integrity` 摘要。
+- 2026-05-21 22:02 +08:00：八个目标已落地：`short_term_continuity` 观测新增 token/raw/summary/trim；普通聊天、长任务、记忆追问、管理员私聊使用不同 context profile；raw turns 会按引用、承诺、未闭环、纠错和信息量保留；session summary 关键字段有独立数量/字符配置；`diag:continuity -- prompt --user <id>` 可输出实际短期块；bridge 过 48h 只恢复结构化摘要；新增主回复失忆 eval；Web 面板新增只读上下文预览。
 
 ## 诊断
 
 ```bash
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:main-reply-prompt -- --limit 20 --json
+npm run diag:continuity -- prompt --user <id>
+npm run diag:continuity -- prompt --user <id> --json
 ```
 
 查看最近主回复模型请求是否真的包含系统提示词、记忆标记、短期连续性和 MemOS 召回。日志只记录计数和布尔字段，不记录完整 prompt。
+
+`diag:continuity -- prompt` 会输出当前用户主回复实际可见的 `[ShortTermContinuity]`、summary、recent raw turns 和裁剪报告。
 
 ## 可实施改进目标
 

@@ -14,7 +14,10 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       chatHistory: options.chatHistory,
       shortTermMemory: options.shortTermMemory,
       routeMeta,
-      sessionKey: options.sessionKey
+      sessionKey: options.sessionKey,
+      routePolicyKey,
+      topRouteType,
+      question
     });
   const personaModuleContext = {
     question,

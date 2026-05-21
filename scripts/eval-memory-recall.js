@@ -332,6 +332,19 @@ function normalizeExpectedIds(testCase = {}) {
   return explicit.concat(aliases).map(normalizeText).filter(Boolean);
 }
 
+function normalizeCaseTimestampMs(value = 0) {
+  const ts = Number(value || 0) || 0;
+  if (ts <= 0) return 0;
+  return ts < 100000000000 ? ts * 1000 : ts;
+}
+
+function buildCaseQueryOptions(testCase = {}) {
+  const createdAtMs = normalizeCaseTimestampMs(testCase.createdAt || testCase.created_at || testCase.timestamp || testCase.time);
+  return createdAtMs > 0
+    ? { journalNow: new Date(createdAtMs) }
+    : {};
+}
+
 function configureMode(mode = '') {
   if (mode === 'lancedb') {
     config.MEMORY_VECTOR_STORE = 'lancedb';
@@ -452,6 +465,8 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
   let promptChars = 0;
   let emptyResults = 0;
   let noVisibleCandidates = 0;
+  let coverageReady = 0;
+  let coverageTotal = 0;
   const details = [];
 
   for (const testCase of cases) {
@@ -477,7 +492,8 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
         groupId: testCase.groupId,
         query: testCase.query,
         facet: testCase.facet,
-        topK: 8
+        topK: 8,
+        ...buildCaseQueryOptions(testCase)
       });
       addStageStats(stageStats, result.stats?.timings || result.diagnostics?.timings || {});
     }
@@ -498,6 +514,9 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
       memoryCliLatencies.push(memoryCli.latencyMs);
     }
     const results = Array.isArray(result.results) ? result.results : [];
+    const embeddingCoverage = result.stats?.lancedb?.coverage || result.diagnostics?.coverageAtQuery?.embedding || null;
+    coverageReady += Number(embeddingCoverage?.ready || 0) || 0;
+    coverageTotal += Number(embeddingCoverage?.total || 0) || 0;
     for (const item of results) {
       sourceCoverage[item.source || 'unknown'] = (sourceCoverage[item.source || 'unknown'] || 0) + 1;
     }
@@ -565,6 +584,9 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     leakage,
     emptyResultRate: cases.length ? emptyResults / cases.length : 0,
     noVisibleCandidateRate: cases.length ? noVisibleCandidates / cases.length : 0,
+    coverageReady,
+    coverageTotal,
+    coverageReadyRatio: coverageTotal > 0 ? coverageReady / coverageTotal : 1,
     bySource: finalizeGroupedMetrics(bySourceRaw),
     byFacet: finalizeGroupedMetrics(byFacetRaw),
     avgPromptChars: cases.length ? promptChars / cases.length : 0,
@@ -620,6 +642,7 @@ if (require.main === module) {
 module.exports = {
   buildCases,
   buildAutoGoldCases,
+  buildCaseQueryOptions,
   buildMemoryGoldCases,
   buildWorldbookGoldCases,
   countScopeLeaks,

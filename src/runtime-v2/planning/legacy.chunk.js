@@ -52,6 +52,7 @@ const {
   getPlannerApiBaseUrlV2,
   getPlannerApiKeyV2,
   getPlannerReasoningEffort,
+  isPlannerMainModelFallbackAllowed,
   shouldRequestBackgroundResearch
 } = require('./tool-gating.chunk');
 const {
@@ -187,6 +188,10 @@ function getPlannerApiBaseUrl(overrides = null) {
   const plannerApiBaseUrl = overrides && typeof overrides === 'object'
     ? (overrides.plannerApiBaseUrl || overrides.apiBaseUrl)
     : '';
+  const allowMainModelFallback = overrides && typeof overrides === 'object'
+    && Object.prototype.hasOwnProperty.call(overrides, 'plannerAllowMainModelFallback')
+    ? overrides.plannerAllowMainModelFallback === true
+    : isPlannerMainModelFallbackAllowed(currentConfig);
   return String(
     plannerApiBaseUrl
     || currentConfig.PLAN_API_BASE_URL
@@ -195,7 +200,7 @@ function getPlannerApiBaseUrl(overrides = null) {
     || process.env.PLANNER_API_BASEURI
     || currentConfig.PASSIVE_AWARENESS_REPLY_API_BASE_URL
     || currentConfig.PASSIVE_AWARENESS_API_BASE_URL
-    || currentConfig.API_BASE_URL
+    || (allowMainModelFallback ? currentConfig.API_BASE_URL : '')
     || ''
   ).trim();
 }
@@ -205,6 +210,10 @@ function getPlannerApiKey(overrides = null) {
   const plannerApiKey = overrides && typeof overrides === 'object'
     ? (overrides.plannerApiKey || overrides.apiKey)
     : '';
+  const allowMainModelFallback = overrides && typeof overrides === 'object'
+    && Object.prototype.hasOwnProperty.call(overrides, 'plannerAllowMainModelFallback')
+    ? overrides.plannerAllowMainModelFallback === true
+    : isPlannerMainModelFallbackAllowed(currentConfig);
   return String(
     plannerApiKey
     || currentConfig.PLAN_API_KEY
@@ -213,7 +222,7 @@ function getPlannerApiKey(overrides = null) {
     || process.env.PLANNER_APIKEY
     || currentConfig.PASSIVE_AWARENESS_REPLY_API_KEY
     || currentConfig.PASSIVE_AWARENESS_API_KEY
-    || currentConfig.API_KEY
+    || (allowMainModelFallback ? currentConfig.API_KEY : '')
     || ''
   ).trim();
 }

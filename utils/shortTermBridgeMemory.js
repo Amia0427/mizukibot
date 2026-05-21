@@ -50,6 +50,19 @@ function getBridgeTtlMs() {
   return ttlHours * 60 * 60 * 1000;
 }
 
+function getBridgeRawTtlMs() {
+  const ttlHours = Math.max(1, Number(config.SHORT_TERM_BRIDGE_RAW_TTL_HOURS || 48));
+  return ttlHours * 60 * 60 * 1000;
+}
+
+function resolveBridgeFreshnessTier(entry = {}, now = Date.now()) {
+  const updatedAt = Number(entry?.updatedAt || 0) || 0;
+  if (!updatedAt) return 'unknown';
+  const ageMs = Math.max(0, now - updatedAt);
+  if (ageMs <= getBridgeRawTtlMs()) return 'raw_recent';
+  return 'summary_only';
+}
+
 function getBridgeRecentMessagesLimit() {
   return Math.max(1, Math.floor(Number(config.SHORT_TERM_BRIDGE_RECENT_MESSAGES || 4)));
 }
@@ -334,8 +347,10 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
   state.lastCompressedAt = Date.now();
 
   const recentMessages = normalizeRecentMessages(entry.recentMessages);
+  const freshnessTier = resolveBridgeFreshnessTier(entry);
+  const allowRawRestore = freshnessTier === 'raw_recent';
   let restoredMessages = 0;
-  if (entry.snapshotType === 'post_reply') {
+  if (entry.snapshotType === 'post_reply' && allowRawRestore) {
     if (recentMessages.length > 0) {
       historyStore[sessionKey] = recentMessages.map((item) => ({ ...item }));
       restoredMessages = historyStore[sessionKey].length;
@@ -352,6 +367,7 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
   console.log('[memory] short-term bridge restored', {
     sessionKey,
     snapshotType: entry.snapshotType,
+    freshnessTier,
     restoredMessages,
     summaryLength: String(state.summary || '').length
   });
@@ -361,6 +377,8 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
     restoredMessages,
     summaryLength: String(state.summary || '').length,
     snapshotType: entry.snapshotType,
+    freshnessTier,
+    rawMessagesRestored: restoredMessages > 0,
     carryOverRestored: Boolean(String(state.carryOverUserTurn || '').trim())
   };
 }
@@ -418,7 +436,9 @@ function persistShortTermBridgeSnapshot(userId, deps = {}) {
 module.exports = {
   BRIDGE_FILE_VERSION,
   defaultBridgeStore,
+  getBridgeRawTtlMs,
   loadBridgeStore,
+  resolveBridgeFreshnessTier,
   saveBridgeStore,
   sanitizeBridgeStore,
   restoreShortTermBridgeAfterRestartIfNeeded,

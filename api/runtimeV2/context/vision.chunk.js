@@ -75,6 +75,7 @@ module.exports = {
   buildBaseDynamicPrompt,
   buildDirectedContextPromptSnippet,
   buildDynamicPrompt,
+  buildShortTermContinuityPrompt,
   buildVisionMessageContent,
   formatResearchBriefsForPrompt,
   mergeAllowedToolsWithMemoryCli,

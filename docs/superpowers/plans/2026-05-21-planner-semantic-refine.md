@@ -8,6 +8,8 @@
 
 **Tech Stack:** Node.js CommonJS, existing planner v2 modules, `node:assert` tests.
 
+**Update 2026-05-21 22:00 +08:00:** 默认禁止 planner endpoint/key 兜底到主回复模型配置；只有显式 `PLANNER_ALLOW_MAIN_MODEL_FALLBACK=true` 才允许共用主 `API_BASE_URL/API_KEY`。
+
 ---
 
 ## Chunk 1: Planner Multi-Call
@@ -62,3 +64,25 @@
 - [x] **Step 3: 更新 README**
 
 写入带简短时间戳的 planner semantic refinement 配置说明。
+
+### Task 4: 主回复模型兜底隔离
+
+**Files:**
+- Modify: `config.js`
+- Modify: `src/runtime-v2/planning/tool-gating.chunk.js`
+- Modify: `src/runtime-v2/planning/legacy.chunk.js`
+- Modify: `tests/plannerV2Protocol.test.js`
+- Modify: `tests/plannerNoRetry.test.js`
+- Modify: `README.md`
+
+- [x] **Step 1: 增加显式开关**
+
+新增 `PLANNER_ALLOW_MAIN_MODEL_FALLBACK=false`，默认禁止 planner 使用主回复 `API_BASE_URL/API_KEY`。
+
+- [x] **Step 2: 隔离 planner endpoint/key 解析**
+
+v2 和 legacy planner 解析只在显式开启时才落到主回复配置；`PLAN_*`、router、passive 配置继续可用。
+
+- [x] **Step 3: 补回归测试和文档**
+
+覆盖无独立 planner 配置时不会调用主 API，并更新 README 时间戳说明。

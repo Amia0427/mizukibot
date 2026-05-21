@@ -260,6 +260,26 @@ function createPrepareNode(deps = {}) {
     };
   }
 
+  function summarizeFallbackShortTermContinuity(context = {}) {
+    const observation = context?.contextObservability && typeof context.contextObservability === 'object'
+      ? context.contextObservability
+      : {};
+    const profile = context?.contextProfile && typeof context.contextProfile === 'object'
+      ? context.contextProfile
+      : {};
+    return {
+      profileName: String(profile.name || '').trim(),
+      profileReason: String(profile.reason || '').trim(),
+      rawTurnCount: Math.max(0, Number(observation.rawTurnCount || (Array.isArray(context?.recentHistory) ? context.recentHistory.length : 0) || 0) || 0),
+      selectedRawTurnCount: Math.max(0, Number(observation.selectedRawTurnCount || (Array.isArray(context?.recentHistory) ? context.recentHistory.length : 0) || 0) || 0),
+      selectedNewestRawTurnCount: Math.max(0, Number(observation.selectedNewestRawTurnCount || 0) || 0),
+      selectedImportantRawTurnCount: Math.max(0, Number(observation.selectedImportantRawTurnCount || 0) || 0),
+      sessionSummaryCount: Math.max(0, Number(observation.sessionSummaryCount || (Array.isArray(context?.recentSessionSummaries) ? context.recentSessionSummaries.length : 0) || 0) || 0),
+      shortTermSummaryChars: Math.max(0, Number(observation.shortTermSummaryChars || String(context?.shortTermSummary || '').length || 0) || 0),
+      trimReasons: Array.isArray(observation.trimReasons) ? observation.trimReasons.map((item) => String(item || '').trim()).filter(Boolean) : []
+    };
+  }
+
   function appendUniquePromptBlock(blocks = [], block = null) {
     if (!block || !String(block.content || '').trim()) return blocks;
     const id = blockId(block);
@@ -339,7 +359,10 @@ function createPrepareNode(deps = {}) {
       chatHistory,
       shortTermMemory,
       routeMeta,
-      sessionKey: request.sessionKey || state.thread?.sessionKey
+      sessionKey: request.sessionKey || state.thread?.sessionKey,
+      routePolicyKey: request.routePolicyKey,
+      topRouteType: request.topRouteType,
+      question: request.runtimeQuestionText || request.question
     });
     const lines = ['[ShortTermContinuity]'];
     let hasContinuityEvidence = false;
@@ -377,7 +400,10 @@ function createPrepareNode(deps = {}) {
     }
     if (!hasContinuityEvidence) return '';
     lines.push('instruction=Use this as high-priority short-term continuity. Prefer exact recent raw turns over vague long-term memory when they conflict.');
-    return lines.join('\n');
+    return {
+      text: lines.join('\n'),
+      meta: summarizeFallbackShortTermContinuity(context)
+    };
   }
 
   function buildSoftTimeoutDynamicBlocks(state = {}, request = {}, memoryContext = null) {
@@ -409,8 +435,8 @@ function createPrepareNode(deps = {}) {
     appendUniquePromptBlock(blocks, createFallbackPromptBlock(
       'short_term_continuity',
       'Short Term Continuity',
-      shortTermContinuity,
-      { priority: 210, kind: 'continuity', meta: { evidenceOnly: true } }
+      shortTermContinuity.text || shortTermContinuity,
+      { priority: 210, kind: 'continuity', meta: { evidenceOnly: true, continuity: shortTermContinuity.meta || {} } }
     ));
 
     const memosRecall = resolvePlannerMemosRecall(request);

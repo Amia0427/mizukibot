@@ -65,6 +65,142 @@ const {
   resolveProfileNodeConflicts
 } = require('./profileProjection');
 
+const NODE_EVENT_TYPES = new Set([
+  'memory_candidate_extracted',
+  'memory_confirmed',
+  'memory_archived',
+  'migration_bootstrap'
+]);
+
+function normalizeDedupeValue(value = '') {
+  return normalizeText(value).toLowerCase();
+}
+
+function getEventPayload(event = {}) {
+  return event && event.payload && typeof event.payload === 'object' ? event.payload : {};
+}
+
+function buildNodeEventSemanticKey(event = {}) {
+  const payload = getEventPayload(event);
+  const fieldKey = normalizeDedupeValue(
+    payload.fieldKey
+    || event.fieldKey
+    || payload.type
+    || event.memoryKind
+    || payload.memoryKind
+    || event.semanticSlot
+    || payload.semanticSlot
+    || 'fact'
+  );
+  return [
+    event.type,
+    event.userId,
+    event.groupId,
+    event.channelId,
+    event.sessionId,
+    event.routePolicyKey,
+    event.topRouteType,
+    event.scopeType,
+    event.source,
+    event.sourceKind,
+    event.status,
+    fieldKey,
+    event.memoryKind,
+    event.semanticSlot,
+    event.conflictKey,
+    event.canonicalKey || event.dedupeKey || canonicalizeText(event.text),
+    event.text,
+    payload.lifecycleStatus,
+    payload.extractionClass || payload.classification
+  ].map(normalizeDedupeValue).join('|');
+}
+
+function buildEpisodeEventSemanticKey(event = {}) {
+  const payload = getEventPayload(event);
+  return [
+    event.type,
+    event.userId,
+    event.groupId,
+    event.channelId,
+    event.sessionKey,
+    event.scopeType,
+    event.source,
+    event.sourceKind,
+    event.memoryKind,
+    event.semanticSlot,
+    event.canonicalKey || event.dedupeKey || canonicalizeText(event.text),
+    payload.rollupLevel,
+    payload.episodeDay,
+    payload.startDay,
+    payload.endDay,
+    payload.yearMonth,
+    payload.part,
+    payload.sourceFile,
+    event.text
+  ].map(normalizeDedupeValue).join('|');
+}
+
+function shouldDedupeMaterializeEvent(event = {}) {
+  if (!event || typeof event !== 'object') return false;
+  return NODE_EVENT_TYPES.has(normalizeDedupeValue(event.type))
+    || normalizeDedupeValue(event.type) === 'episode_rollup_generated';
+}
+
+function buildMaterializeEventSemanticKey(event = {}) {
+  const type = normalizeDedupeValue(event.type);
+  if (type === 'episode_rollup_generated') return buildEpisodeEventSemanticKey(event);
+  if (NODE_EVENT_TYPES.has(type)) return buildNodeEventSemanticKey(event);
+  return '';
+}
+
+function preferMaterializeEvent(left = {}, right = {}) {
+  const leftTs = Number(left.ts || 0) || 0;
+  const rightTs = Number(right.ts || 0) || 0;
+  if (leftTs !== rightTs) return leftTs < rightTs ? left : right;
+  return String(left.id || '').localeCompare(String(right.id || '')) <= 0 ? left : right;
+}
+
+function dedupeMaterializeEvents(events = []) {
+  const list = Array.isArray(events) ? events : [];
+  const byKey = new Map();
+  let suppressed = 0;
+  for (const event of list) {
+    if (!shouldDedupeMaterializeEvent(event)) continue;
+    const key = buildMaterializeEventSemanticKey(event);
+    if (!key) continue;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, event);
+      continue;
+    }
+    byKey.set(key, preferMaterializeEvent(existing, event));
+    suppressed += 1;
+  }
+  if (!suppressed) {
+    return {
+      events: list,
+      stats: {
+        enabled: true,
+        inputEvents: list.length,
+        outputEvents: list.length,
+        suppressedEvents: 0
+      }
+    };
+  }
+
+  const kept = new Set(byKey.values());
+  const output = list.filter((event) => !shouldDedupeMaterializeEvent(event) || kept.has(event));
+  return {
+    events: output,
+    stats: {
+      enabled: true,
+      inputEvents: list.length,
+      outputEvents: output.length,
+      suppressedEvents: suppressed
+    }
+  };
+}
+
 function materializeMemoryViews(options = {}) {
   const pressureDelayMs = getBackgroundPressureDelayMs();
   if (pressureDelayMs > 0 && options.force !== true) {
@@ -101,6 +237,17 @@ function materializeMemoryViews(options = {}) {
   }
   try {
   const allEvents = Array.isArray(options.events) ? options.events : loadMemoryEvents();
+  const deduped = options.dedupeEvents === false
+    ? {
+        events: allEvents,
+        stats: {
+          enabled: false,
+          inputEvents: allEvents.length,
+          outputEvents: allEvents.length,
+          suppressedEvents: 0
+        }
+      }
+    : dedupeMaterializeEvents(allEvents);
   const dirtyScopes = normalizeDirtyScopes(options.dirtyScopes || options);
   const dirtyScopeCount = countDirtyScopes(dirtyScopes);
   const incrementalRequested = config.MEMORY_V3_INCREMENTAL_MATERIALIZE_ENABLED !== false
@@ -109,8 +256,8 @@ function materializeMemoryViews(options = {}) {
   const incrementalLimit = Math.max(1, Number(config.MEMORY_V3_INCREMENTAL_SCOPE_LIMIT || 100) || 100);
   const incrementalMode = incrementalRequested && dirtyScopeCount > 0 && dirtyScopeCount <= incrementalLimit;
   const events = incrementalMode
-    ? allEvents.filter((event) => eventMatchesDirtyScopes(event, dirtyScopes))
-    : allEvents;
+    ? deduped.events.filter((event) => eventMatchesDirtyScopes(event, dirtyScopes))
+    : deduped.events;
   const now = Date.now();
   const eventHighWatermarkTs = getLatestEventTs(allEvents);
   const sessionProjection = defaultSessionProjection();
@@ -452,6 +599,7 @@ function materializeMemoryViews(options = {}) {
       dirtyScopes: dirtyScopeCount,
       embeddings: embeddingIndex,
       lancedbSyncPlan,
+      dedupe: deduped.stats,
       sessions: Object.keys(outputSessionProjection.sessions).length,
       profiles: Object.keys(outputProfileProjection.users).length,
       episodeUsers: Object.keys(outputEpisodeProjection.users).length
@@ -470,5 +618,6 @@ function materializeMemoryViews(options = {}) {
 module.exports = {
   materializeMemoryViews,
   createNodeFromEvent,
-  buildLanceDbSyncPlan
+  buildLanceDbSyncPlan,
+  dedupeMaterializeEvents
 };

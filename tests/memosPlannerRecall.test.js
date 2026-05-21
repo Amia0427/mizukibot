@@ -62,6 +62,7 @@ module.exports = (async () => {
   };
 
   const memos = require('../utils/memosPlannerRecall');
+  memos.resetMemosRecallRuntimeState();
   assert.strictEqual(
     memos.buildMemosRecallQuery('继续刚才的实现', {
       config: { MEMOS_RECALL_QUERY_MODE: 'compact' }
@@ -100,6 +101,7 @@ module.exports = (async () => {
   assert.strictEqual(recall.used, true);
   assert.strictEqual(recall.items.length, 2);
   assert.ok(recall.promptText.startsWith('[MemOSRecall]'));
+  assert.ok(recall.promptText.includes('source='));
   assert.ok(recall.promptText.includes('先给结论'));
   assert.strictEqual(recall.diagnostics.recallSource, 'knowledge_base_search');
   assert.strictEqual(recall.diagnostics.searchToolName, 'search_memory');
@@ -108,6 +110,8 @@ module.exports = (async () => {
   assert.strictEqual(recall.diagnostics.readOnly, true);
   assert.strictEqual(recall.diagnostics.queryMode, 'compact');
   assert.strictEqual(recall.diagnostics.routeGate.allowed, true);
+  assert.strictEqual(recall.diagnostics.rerank.enabled, true);
+  assert.strictEqual(recall.diagnostics.cache.hit, false);
 
   const localOnly = await memos.recallForPlanner('我是谁，刚才聊到哪了', {
     config: {
@@ -175,6 +179,7 @@ module.exports = (async () => {
   assert.strictEqual(fileRecall.diagnostics.kbToolName, 'get_kb_documents');
   assert.strictEqual(fileRecall.diagnostics.sourceToolName, 'get_kb_documents');
   assert.strictEqual(fileRecall.diagnostics.readOnly, true);
+  assert.strictEqual(fileRecall.diagnostics.rerank.enabled, true);
 
   expectedToolName = 'search_memory';
   const missingKbIds = await memos.recallForPlanner('没有配置 kb 文件', {
@@ -272,7 +277,8 @@ module.exports = (async () => {
       title: '远端知识库.md',
       source: 'memos_kb',
       score: null,
-      createdAt: ''
+      createdAt: '',
+      knowledgebaseId: ''
     }
   ]);
 
@@ -312,6 +318,27 @@ module.exports = (async () => {
   assert.strictEqual(nestedObjectItems[0].text, '只保留字符串内容。');
   assert.ok(!nestedObjectItems.some((item) => item.text.includes('[object Object]')));
 
+  const ranked = memos.rerankRecallItems([
+    { id: 'generic', text: '普通远端资料。', title: '通用', source: 'memos_kb', score: 0.8 },
+    { id: 'worldbook', text: 'Mizuki 世界观规则包含海边城市与记忆潮汐。', title: '世界观规则', source: 'memos_kb', score: 0.62 }
+  ], {
+    query: 'Mizuki 的世界观规则是什么',
+    routeMeta: { routePolicyKey: 'lore/worldbook' },
+    config: {
+      MEMOS_RECALL_TOP_K: 2
+    }
+  });
+  assert.deepStrictEqual(ranked.items.map((item) => item.id), ['worldbook', 'generic']);
+  assert.ok(ranked.items[0].rerankReasons.length > 0);
+
+  const runtimeBefore = memos.getMemosRecallRuntimeDiagnostics({
+    config: {
+      MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+      MEMOS_RECALL_SOURCE: 'knowledge_base'
+    }
+  });
+  assert.strictEqual(runtimeBefore.cache.hits >= 0, true);
+
   const writeAttempt = await memos.addMessageToMemos({ text: '不应写入远端' }, {
     config: {
       MEMOS_MCP_ENABLED: true,
@@ -321,6 +348,86 @@ module.exports = (async () => {
   assert.strictEqual(writeAttempt.ok, false);
   assert.strictEqual(writeAttempt.skipped, true);
   assert.strictEqual(writeAttempt.reason, 'remote_write_disabled');
+
+  clearProjectCache();
+  let aliasCallCount = 0;
+  require.cache[runtimePath] = {
+    id: runtimePath,
+    filename: runtimePath,
+    loaded: true,
+    exports: {
+      discoverMcpTools: async () => [{ serverName: 'memos-api-mcp', toolName: 'search_memory' }],
+      discoverMcpServerTools: async () => [{ serverName: 'memos-api-mcp', toolName: 'search_memory' }],
+      callMcpTool: async (_serverName, toolName, args) => {
+        aliasCallCount += 1;
+        assert.strictEqual(toolName, 'search_memory');
+        assert.deepStrictEqual(args.knowledgebase_ids, ['kb-lore']);
+        return {
+          result: {
+            memories: [
+              { id: 'alias-1', text: 'Mizuki 世界观规则优先来自 lore 分区。', title: '世界观规则', score: 0.7, knowledgebase_id: 'kb-lore' }
+            ]
+          }
+        };
+      }
+    }
+  };
+  const memosAlias = require('../utils/memosPlannerRecall');
+  memosAlias.resetMemosRecallRuntimeState();
+  const aliasConfig = {
+    MEMOS_MCP_ENABLED: true,
+    MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+    MEMOS_RECALL_SOURCE: 'knowledge_base',
+    MEMOS_KB_IDS: ['kb-default'],
+    MEMOS_KB_ALIAS_MAP: 'lore=kb-lore;docs=kb-docs',
+    MEMOS_RECALL_TOP_K: 1,
+    MEMOS_RECALL_CACHE_TTL_MS: 60000
+  };
+  const aliasRecall = await memosAlias.recallForPlanner('Mizuki 的 lore 世界观规则', {
+    routeMeta: { routePolicyKey: 'lore/worldbook' },
+    config: aliasConfig
+  });
+  const aliasCached = await memosAlias.recallForPlanner('Mizuki 的 lore 世界观规则', {
+    routeMeta: { routePolicyKey: 'lore/worldbook' },
+    config: aliasConfig
+  });
+  assert.strictEqual(aliasRecall.used, true);
+  assert.strictEqual(aliasRecall.diagnostics.kbPartition.usedAliasPartition, true);
+  assert.deepStrictEqual(aliasRecall.diagnostics.kbPartition.matchedAliases, ['lore']);
+  assert.strictEqual(aliasCached.diagnostics.cache.hit, true);
+  assert.strictEqual(aliasCallCount, 1);
+
+  clearProjectCache();
+  let failingCallCount = 0;
+  require.cache[runtimePath] = {
+    id: runtimePath,
+    filename: runtimePath,
+    loaded: true,
+    exports: {
+      discoverMcpTools: async () => [{ serverName: 'memos-api-mcp', toolName: 'search_memory' }],
+      discoverMcpServerTools: async () => [{ serverName: 'memos-api-mcp', toolName: 'search_memory' }],
+      callMcpTool: async () => {
+        failingCallCount += 1;
+        throw new Error('remote timeout');
+      }
+    }
+  };
+  const memosCircuit = require('../utils/memosPlannerRecall');
+  memosCircuit.resetMemosRecallRuntimeState();
+  const circuitConfig = {
+    MEMOS_MCP_ENABLED: true,
+    MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+    MEMOS_RECALL_SOURCE: 'search_memory',
+    MEMOS_KB_IDS: ['kb-default'],
+    MEMOS_RECALL_CIRCUIT_FAILURE_THRESHOLD: 1,
+    MEMOS_RECALL_CIRCUIT_COOLDOWN_MS: 60000
+  };
+  const failed = await memosCircuit.recallForPlanner('远端超时测试', { config: circuitConfig });
+  const shorted = await memosCircuit.recallForPlanner('远端超时测试第二次', { config: circuitConfig });
+  assert.strictEqual(failed.rejectedReason, 'mcp_error');
+  assert.strictEqual(shorted.rejectedReason, 'circuit_open');
+  assert.strictEqual(shorted.diagnostics.circuit.open, true);
+  assert.strictEqual(failingCallCount, 1);
 
   console.log('memosPlannerRecall.test.js passed');
   clearProjectCache();

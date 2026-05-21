@@ -88,14 +88,17 @@ MEMOS_KB_IDS=knowledgebase_id_1
 
 ### Planner 语义 refinement
 
-更新时间：2026-05-21 00:00 +08:00
+更新时间：2026-05-21 22:00 +08:00
 
 planner v2 会输出 `semanticAssessment` 和 `semanticConfidence`；当第一轮语义置信度低、计划不完整或显式要求 refinement 时，可在同一轮请求内再次调用 planner 模型纠偏。默认 `PLANNER_MAX_MODEL_CALLS=2`，硬上限 3；单次模型请求仍使用 `postWithRetry(..., 0, ...)`，失败后走规则 fallback。
+
+更新 2026-05-21 22:00 +08:00：默认 `PLANNER_ALLOW_MAIN_MODEL_FALLBACK=false`，planner 缺少独立 `PLAN_*`/router/passive 配置时不会兜底使用主回复 `API_BASE_URL/API_KEY`；确需共用主模型时显式开启。
 
 ```env
 PLANNER_MAX_MODEL_CALLS=2
 PLANNER_SEMANTIC_REFINE_ENABLED=true
 PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD=0.72
+PLANNER_ALLOW_MAIN_MODEL_FALLBACK=false
 ```
 
 ### 启动
@@ -139,6 +142,7 @@ npm run diag:fallback
 npm run diag:memory
 npm run diag:memory -- audit --limit 5
 npm run diag:continuity
+npm run diag:continuity -- prompt --user <id>
 npm run diag:main-reply
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:runtime
@@ -146,21 +150,26 @@ npm run diag:runtime-hotspots
 npm run diag:low-resource
 ```
 
-### 记忆迁移
+### 记忆物化 / 迁移
 
 ```bash
 npm run memory:v3:migrate
 ```
 
+说明：
+
+- 更新 2026-05-21 21:30 +08:00：默认只强制物化 Memory V3 projection，不重复导入 legacy 事件。
+- 只有首次或明确需要重导旧数据时才运行：`node scripts/migrate-memory-v3.js --import-legacy`；需要强制重复导入时使用 `--force-import-legacy`。
+
 ### 记忆质量与召回治理
 
-更新时间：2026-05-20 01:23 +08:00
+更新时间：2026-05-21 22:06 +08:00
 
 ```bash
 npm run diag:memory -- diagnose --skip-probe --limit 20
-npm run diag:memory -- recall --limit 50
+npm run diag:memory -- recall --limit 50 --auto-gold
 npm run diag:memory -- recall --limit 50 --gate
-npm run diag:memory -- lancedb-gate --limit 50 --min-judged-cases 10
+npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10
 node scripts/repair-memory-vector-index.js --apply --compact
 ```
 
@@ -172,13 +181,15 @@ node scripts/repair-memory-vector-index.js --apply --compact
 - 图片召回问题会走 `memory_cli`：`今天/昨天发给你什么图/战绩图` 这类请求会在 all-search 中合并图片索引，凌晨 4 点前的“今天”会同时查前一自然日，并过滤请求时间之后的图片记录。
 - 更新 2026-05-20 01:23 +08:00：入库图片会异步调用 `MEMORY_MODEL` 生成带简短时间戳的视觉摘要，写回 `image_memory_index`，并同步追加 `memory_confirmed/image_visual_summary` 到 Memory V3。
 - `recall --gate` 可作为 CI/人工门禁；`lancedb-gate` 会比较 local_jsonl baseline 与 LanceDB candidate，未过 recall/覆盖率/漂移门禁前保持 shadow read。
-- 当前向量健康门禁若提示 `mustMaterializeFirst`，先运行 `npm run memory:v3:migrate`；若提示 stale/ready-but-not-synced，再运行修复脚本。
+- 当前向量健康门禁若提示 `mustMaterializeFirst`，先运行 `npm run memory:v3:migrate` 进行安全物化；若提示 stale/ready-but-not-synced，再运行修复脚本。
+- 更新 2026-05-21 21:30 +08:00：不要把 legacy 导入当日常维护命令；重复导入会制造 migration 事件膨胀，日常只用默认物化模式。
+- 更新 2026-05-21 22:06 +08:00：Memory V3 物化层会对重复 migration/node/episode 事件做非删除式投影去重；`--auto-gold` 会从当前 active projection 生成评估集，避免旧手工 cases 中相对日期污染影响门禁。LanceDB 读门禁的 query 覆盖率低水位默认 `0.2`，召回质量仍由 recall gate 判定。
 - `POST_REPLY_VECTOR_WATCHDOG_ENABLED=true` 时，post-reply worker 会独立低频巡检：projection stale 自动 materialize、LanceDB 漂移自动 reconcile、pending embedding 小批量 backfill+sync。
 - 维护记录 2026-05-19 22:24 +08:00：已完成 LanceDB reconcile、memory-v3 projection 刷新和 embedding backfill；`pendingRows=0`、`readyButNotSynced=0`、`staleTableRows=0`，语义审查硬指标通过。
 
 ### 主回复短期上下文
 
-更新时间：2026-05-21 21:09 +08:00
+更新时间：2026-05-21 22:02 +08:00
 
 默认已提高主回复模型可见的短期连续性：
 
@@ -189,6 +200,11 @@ SHORT_TERM_SCENE_RECENT_TURNS=24
 SESSION_CONTEXT_SUMMARY_MAX_CHARS=520
 SESSION_CONTEXT_SUMMARY_LOAD_COUNT=5
 SESSION_CONTEXT_SUMMARY_MAX_ITEMS_PER_SESSION=32
+SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_ITEMS=6
+SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_ITEMS=6
+SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_ITEMS=6
+SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS=16
+SHORT_TERM_BRIDGE_RAW_TTL_HOURS=48
 SHORT_TERM_BRIDGE_RECENT_MESSAGES=96
 MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3600
 MEMORY_V3_SESSION_RECENT_MESSAGES=96
@@ -199,6 +215,7 @@ MEMORY_V3_SESSION_RECENT_MESSAGES=96
 - 主回复 `short_term_continuity` 动态块会携带更长的 `[RecentRawTurns]`、重启恢复摘要和结构化短期状态。
 - `.env` 里的同名配置仍会覆盖默认值；如果本地已有旧值，需要同步调高。
 - 更新 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 会补最小记忆块；`npm run diag:main-reply-prompt` 可查看最近主模型请求是否实际含系统提示词和 `[RetrievedMemoryLite]` / `[DailyJournal]` / `[ShortTermContinuity]` / `[MemOSRecall]`。
+- 更新 2026-05-21 22:02 +08:00：主回复短期块新增 profile 档位、raw turn 重要性选择、summary 子字段独立限额、bridge raw 48h 新鲜度分层、`diag:continuity -- prompt --user <id>` 和 Web 只读上下文预览。
 - 详细目标见 `docs/main-reply-context.md`。
 
 ### Windows 运维

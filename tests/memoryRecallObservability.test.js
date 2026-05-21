@@ -67,6 +67,32 @@ function clearProjectCache() {
         removedItems: [
           { id: 'low', reason: 'below_min_score', score: 0.2, text: '低分内容不应进入 prompt。' }
         ]
+      },
+      rerank: {
+        enabled: true,
+        candidateCount: 2,
+        kept: 1,
+        queryTermCount: 4,
+        topReasons: [
+          { id: 'remote-1', score: 0.91, rerankScore: 1.02, reasons: ['title:1', 'structured'] }
+        ]
+      },
+      cache: {
+        hit: false,
+        key: 'cache-key-1',
+        ttlMs: 300000,
+        ageMs: 0
+      },
+      circuit: {
+        open: false,
+        failures: 0,
+        failureThreshold: 3,
+        cooldownMs: 60000
+      },
+      kbPartition: {
+        usedAliasPartition: true,
+        matchedAliases: ['lore'],
+        fallbackIdsCount: 2
       }
     }
   };
@@ -109,10 +135,25 @@ function clearProjectCache() {
       assistantOnlyBlockIds: [],
       assembledBlocks: [
         { id: 'stable_identity' },
-        { id: 'short_term_continuity' },
+        {
+          id: 'short_term_continuity',
+          meta: {
+            continuity: {
+              profileName: 'memory_recall',
+              rawTurnCount: 12,
+              selectedRawTurnCount: 8,
+              selectedNewestRawTurnCount: 3,
+              selectedImportantRawTurnCount: 2,
+              sessionSummaryCount: 1,
+              shortTermSummaryChars: 80,
+              trimReasons: ['message_limit_importance_selection']
+            }
+          }
+        },
         { id: 'retrieved_memory_lite' }
       ],
       tokenUsageByBlock: [
+        { id: 'short_term_continuity', tokens: 88 },
         { id: 'retrieved_memory_lite', tokens: 12 }
       ],
       trimDecisions: []
@@ -167,10 +208,19 @@ function clearProjectCache() {
   assert.strictEqual(planner.memos.queryChanged, true);
   assert.strictEqual(planner.memos.routeGate.reason, 'allowlist_match');
   assert.strictEqual(planner.memos.quality.removed, 1);
+  assert.strictEqual(planner.memos.rerank.enabled, true);
+  assert.strictEqual(planner.memos.rerank.kept, 1);
+  assert.strictEqual(planner.memos.cache.hit, false);
+  assert.strictEqual(planner.memos.circuit.open, false);
+  assert.strictEqual(planner.memos.kbPartition.usedAliasPartition, true);
   assert.ok(planner.memos.rawItems[0].textHash);
   assert.ok(planner.memos.rawItems[0].textPreview.includes('完整内容'));
   assert.strictEqual(prompt.prompt.hasMemosRecall, false);
   assert.strictEqual(prompt.prompt.hasRetrievedMemoryLite, true);
+  assert.strictEqual(prompt.prompt.shortTermContinuity.injectedTokens, 88);
+  assert.strictEqual(prompt.prompt.shortTermContinuity.contextProfile, 'memory_recall');
+  assert.strictEqual(prompt.prompt.shortTermContinuity.selectedImportantRawTurnCount, 2);
+  assert.ok(prompt.prompt.shortTermContinuity.trimReasons.includes('message_limit_importance_selection'));
   assert.strictEqual(prompt.planner.memosRecallDecision.decision, 'skip');
   assert.strictEqual(prompt.drop.dropped, false);
   assert.strictEqual(dropped.stage, 'memos_recall_dropped_before_prompt');

@@ -176,6 +176,27 @@ function buildShortTermContinuityPrompt(sharedShortTermContext = {}) {
   return trimTextByTokenBudget(lines.join('\n'), maxTokens, 'tail');
 }
 
+function summarizeShortTermContinuityForPrompt(sharedShortTermContext = {}) {
+  const context = sharedShortTermContext && typeof sharedShortTermContext === 'object' ? sharedShortTermContext : {};
+  const observation = context.contextObservability && typeof context.contextObservability === 'object'
+    ? context.contextObservability
+    : {};
+  const profile = context.contextProfile && typeof context.contextProfile === 'object'
+    ? context.contextProfile
+    : {};
+  return {
+    profileName: normalizeText(profile.name),
+    profileReason: normalizeText(profile.reason),
+    rawTurnCount: Math.max(0, Number(observation.rawTurnCount || normalizeArray(context.recentHistory).length || 0) || 0),
+    selectedRawTurnCount: Math.max(0, Number(observation.selectedRawTurnCount || normalizeArray(context.recentHistory).length || 0) || 0),
+    selectedNewestRawTurnCount: Math.max(0, Number(observation.selectedNewestRawTurnCount || 0) || 0),
+    selectedImportantRawTurnCount: Math.max(0, Number(observation.selectedImportantRawTurnCount || 0) || 0),
+    sessionSummaryCount: Math.max(0, Number(observation.sessionSummaryCount || normalizeArray(context.recentSessionSummaries).length || 0) || 0),
+    shortTermSummaryChars: Math.max(0, Number(observation.shortTermSummaryChars || normalizeText(context.shortTermSummary).length || 0) || 0),
+    trimReasons: normalizeArray(observation.trimReasons).map((item) => normalizeText(item)).filter(Boolean)
+  };
+}
+
 function createPromptBlock(id, label, content, options = {}) {
   const text = String(content || '').trim();
   if (!text) return null;

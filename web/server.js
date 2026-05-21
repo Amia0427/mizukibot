@@ -1,11 +1,11 @@
 ﻿
 const express = require('express');
-
 const config = require('../config');
 const { favorites, memories } = require('../utils/memory');
 const { getLatestReasoning } = require('../api/parser');
 const { listTasks, loadTask } = require('../utils/agentRuntime');
 const { listRecentModelCalls } = require('../utils/modelCallTracker');
+const { buildMainReplyContextPreview } = require('../utils/mainReplyContextPreview');
 const { collectSecurityDiagnostics, logStartupSecurityWarnings } = require('../utils/securityDiagnostics');
 const {
   listMemoryItems,
@@ -87,6 +87,11 @@ function startServer() {
   app.get('/api/model-calls', (req, res) => {
     const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 30));
     return res.json({ ok: true, calls: listRecentModelCalls(limit) });
+  });
+
+  app.get('/api/main-reply-context-preview', (req, res) => {
+    const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 12));
+    return res.json({ ok: true, preview: buildMainReplyContextPreview({ limit }) });
   });
 
   app.get('/api/settings', (req, res) => {
@@ -395,6 +400,13 @@ function startServer() {
     <div class="hint">可直接看到主对话调用、是否注入长期记忆，以及异步长期记忆提取调用。</div>
     <div class="actions"><button type="button" id="btn-model-calls-load">刷新模型调用</button></div>
     <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>时间</th><th>来源</th><th>阶段/目的</th><th>模型</th><th>状态</th><th>记忆注入</th><th>详情</th></tr></thead><tbody id="model-calls-body"></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h3>主回复上下文预览</h3>
+    <div class="hint">只读摘要：短期连续性、Memory V3/本地记忆、日记和 MemOS 召回是否进入主回复。</div>
+    <div class="actions"><button type="button" id="btn-context-preview-load">刷新上下文预览</button><span id="context-preview-updated" class="muted"></span></div>
+    <div class="table-wrap" style="margin-top:10px"><table><thead><tr><th>时间</th><th>User</th><th>Profile</th><th>Raw</th><th>Summary</th><th>Memory V3</th><th>Journal</th><th>MemOS</th><th>Trim</th></tr></thead><tbody id="context-preview-body"></tbody></table></div>
   </div>
 
   <div class="card">
@@ -878,8 +890,44 @@ function startServer() {
       } catch (_) {}
     }
 
+    function renderContextPreview(preview) {
+      const body = document.getElementById('context-preview-body');
+      const rows = Array.isArray(preview && preview.observations) ? preview.observations : [];
+      document.getElementById('context-preview-updated').textContent = preview && preview.updatedAt ? ('updated: ' + preview.updatedAt) : '';
+      if (rows.length === 0) {
+        body.innerHTML = '<tr><td colspan="9" class="muted">暂无上下文观测</td></tr>';
+        return;
+      }
+      body.innerHTML = rows.slice().reverse().map(function (row) {
+        const st = row.shortTermContinuity || {};
+        const raw = String(Number(st.selectedRawTurnCount || 0)) + '/' + String(Number(st.rawTurnCount || 0));
+        const trim = Array.isArray(st.trimReasons) ? st.trimReasons.join(', ') : '';
+        return '<tr>'
+          + '<td>' + escapeCell(row.ts || '') + '</td>'
+          + '<td class="mono">' + escapeCell(row.userId || '-') + '</td>'
+          + '<td>' + escapeCell(st.contextProfile || '-') + '</td>'
+          + '<td>' + escapeCell(raw) + '</td>'
+          + '<td>' + Number(st.sessionSummaryCount || 0) + '</td>'
+          + '<td>' + (row.hasRetrievedMemoryLite || row.localMemoryEvidenceCount > 0 ? 'yes' : 'no') + '</td>'
+          + '<td>' + (row.hasDailyJournal ? 'yes' : 'no') + '</td>'
+          + '<td>' + (row.hasMemosRecall || row.memosUsed ? 'yes' : 'no') + '</td>'
+          + '<td title="' + escapeCell(trim) + '">' + escapeCell(trim || '-') + '</td>'
+          + '</tr>';
+      }).join('');
+    }
+
+    async function loadContextPreview() {
+      try {
+        const res = await authedFetch('/api/main-reply-context-preview?limit=12');
+        const data = await res.json();
+        if (!res.ok || !data.ok) return;
+        renderContextPreview(data.preview || {});
+      } catch (_) {}
+    }
+
     document.getElementById('settings-form').addEventListener('submit', saveSettings);
     document.getElementById('btn-model-calls-load').addEventListener('click', loadModelCalls);
+    document.getElementById('btn-context-preview-load').addEventListener('click', loadContextPreview);
     document.getElementById('btn-mg-preview').addEventListener('click', previewGovernanceAction);
     document.getElementById('btn-mg-apply').addEventListener('click', applyGovernanceAction);
     document.getElementById('btn-ml-load').addEventListener('click', loadMemoryItems);
@@ -935,8 +983,10 @@ function startServer() {
     previewGovernanceAction();
     refreshThinking();
     loadModelCalls();
+    loadContextPreview();
     setInterval(refreshThinking, 1500);
     setInterval(loadModelCalls, 2500);
+    setInterval(loadContextPreview, 5000);
   </script>
 </body>
 </html>

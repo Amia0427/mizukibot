@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const config = require('../config');
 
 const DEFAULT_SEARCH_TOOL_CANDIDATES = Object.freeze([
@@ -18,6 +19,19 @@ const DEFAULT_ADD_TOOL_CANDIDATES = Object.freeze([
   'create_memory'
 ]);
 
+const memosRecallRuntimeState = {
+  cache: new Map(),
+  circuit: new Map(),
+  stats: {
+    cacheHits: 0,
+    cacheMisses: 0,
+    cacheStores: 0,
+    circuitShortCircuits: 0,
+    circuitFailures: 0,
+    circuitSuccesses: 0
+  }
+};
+
 function normalizeText(value, fallback = '') {
   const text = String(value || '').trim();
   return text || fallback;
@@ -37,6 +51,24 @@ function normalizeStringList(value) {
     .split(',')
     .map((item) => normalizeText(item))
     .filter(Boolean);
+}
+
+function uniqueStringList(values = []) {
+  return Array.from(new Set(
+    normalizeArray(values)
+      .map((item) => normalizeText(item))
+      .filter(Boolean)
+  ));
+}
+
+function stableHash(value = '') {
+  const text = normalizeText(value);
+  if (!text) return '';
+  return crypto
+    .createHash('sha1')
+    .update(text)
+    .digest('hex')
+    .slice(0, 16);
 }
 
 function normalizeObject(value, fallback = {}) {
@@ -131,6 +163,79 @@ function getRouteSignalValues(options = {}) {
     .filter(Boolean);
 }
 
+function parseAliasMap(value) {
+  const entries = Array.isArray(value) ? value : normalizeText(value).split(/[;\n]+/);
+  const output = {};
+  for (const entry of entries) {
+    const raw = normalizeText(entry);
+    if (!raw) continue;
+    const match = raw.match(/^([^:=]+)[:=](.+)$/);
+    if (!match) continue;
+    const alias = normalizeText(match[1]).toLowerCase();
+    const ids = normalizeText(match[2])
+      .split(/[|,\s]+/)
+      .map((item) => normalizeText(item))
+      .filter(Boolean);
+    if (alias && ids.length > 0) output[alias] = uniqueStringList([...(output[alias] || []), ...ids]);
+  }
+  return output;
+}
+
+function getMemosKbAliasMap(options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  return parseAliasMap(
+    options.kbAliasMap
+    || options.knowledgebaseAliasMap
+    || currentConfig.MEMOS_KB_ALIAS_MAP
+    || currentConfig.MEMOS_RECALL_KB_ALIAS_MAP
+    || process.env.MEMOS_KB_ALIAS_MAP
+    || process.env.MEMOS_RECALL_KB_ALIAS_MAP
+  );
+}
+
+function getMemosKbAliasBoostMap(options = {}) {
+  const rawMap = getMemosKbAliasMap(options);
+  const boostMap = {};
+  for (const [alias, ids] of Object.entries(rawMap)) {
+    for (const id of ids) boostMap[id] = Math.max(boostMap[id] || 0, 0.25);
+  }
+  return boostMap;
+}
+
+function resolveKnowledgebaseIds(options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  const fallbackIds = normalizeStringList(
+    options.knowledgebaseIds
+    || options.kbIds
+    || currentConfig.MEMOS_KB_IDS
+  );
+  const aliasMap = getMemosKbAliasMap({ ...options, config: currentConfig });
+  const routeSignals = getRouteSignalValues(options);
+  const queryClass = classifyRecallQuery(options.query || options.normalizedQuery || '');
+  const haystack = [
+    ...routeSignals,
+    normalizeText(options.query || options.normalizedQuery).toLowerCase(),
+    queryClass
+  ].join(' ');
+  const matchedAliases = Object.keys(aliasMap)
+    .filter((alias) => alias && haystack.includes(alias));
+  const aliasIds = uniqueStringList(matchedAliases.flatMap((alias) => aliasMap[alias] || []));
+  const ids = aliasIds.length > 0 ? aliasIds : fallbackIds;
+  return {
+    ids,
+    fallbackIds,
+    aliasMap,
+    matchedAliases,
+    usedAliasPartition: aliasIds.length > 0
+  };
+}
+
 function classifyRecallQuery(query = '') {
   const text = normalizeText(query).toLowerCase();
   if (!text) return 'empty';
@@ -141,6 +246,24 @@ function classifyRecallQuery(query = '') {
     return 'local_memory';
   }
   return 'neutral';
+}
+
+function tokenizeRecallTerms(value = '') {
+  const text = normalizeText(value).toLowerCase();
+  const asciiTerms = (text.match(/[a-z0-9_/-]{2,}/g) || [])
+    .map((item) => item.replace(/^[-_/]+|[-_/]+$/g, ''))
+    .filter((item) => item.length >= 2);
+  const cjkTerms = (text.match(/[\u4e00-\u9fa5]{2,}/g) || [])
+    .flatMap((segment) => {
+      const terms = [segment];
+      for (let index = 0; index <= segment.length - 2; index += 1) {
+        terms.push(segment.slice(index, index + 2));
+      }
+      return terms;
+    });
+  return Array.from(new Set([...asciiTerms, ...cjkTerms]))
+    .filter((term) => !/^(the|and|for|with|this|that|是什么|怎么|请帮|继续|刚才|上次|之前)$/i.test(term))
+    .slice(0, 80);
 }
 
 function evaluateMemosRouteGate(query = '', options = {}) {
@@ -222,6 +345,23 @@ function truncateText(value = '', maxChars = 900) {
   if (!text || !limit) return '';
   if (text.length <= limit) return text;
   return `${text.slice(0, Math.max(0, limit - 12)).trim()} [truncated]`;
+}
+
+function extractRecallItemKbId(item = {}) {
+  const normalized = normalizeObject(item, {});
+  const raw = normalizeObject(normalized.raw, {});
+  return normalizeText(
+    normalized.knowledgebaseId
+    || normalized.knowledgebase_id
+    || normalized.kbId
+    || normalized.kb_id
+    || raw.knowledgebase_id
+    || raw.knowledgebaseId
+    || raw.kb_id
+    || raw.kbId
+    || raw.knowledge_base_id
+    || raw.knowledgeBaseId
+  );
 }
 
 function stripQueryNoise(value = '') {
@@ -443,6 +583,14 @@ function flattenMemoryCandidates(value, output = []) {
         ? Number(value.score || value.similarity || value.relevance)
         : null,
       createdAt: normalizeText(value.created_at || value.createdAt || value.time || value.timestamp),
+      knowledgebaseId: normalizeText(
+        value.knowledgebase_id
+        || value.knowledgebaseId
+        || value.kb_id
+        || value.kbId
+        || value.knowledge_base_id
+        || value.knowledgeBaseId
+      ),
       raw: value
     });
   }
@@ -489,7 +637,8 @@ function normalizeRecallItems(rawResult, options = {}) {
       score: item.score === null || item.score === undefined || item.score === ''
         ? null
         : (Number.isFinite(Number(item.score)) ? Number(item.score) : null),
-      createdAt: normalizeText(item.createdAt)
+      createdAt: normalizeText(item.createdAt),
+      knowledgebaseId: extractRecallItemKbId(item)
     }))
     .filter((item) => {
       if (!item.text) return false;
@@ -573,15 +722,102 @@ function filterRecallItemsByQuality(items = [], options = {}) {
   };
 }
 
+function scoreRecallItemForRerank(item = {}, context = {}) {
+  const text = normalizeText(item.text).toLowerCase();
+  const title = normalizeText(item.title).toLowerCase();
+  const source = normalizeText(item.source).toLowerCase();
+  const kbId = extractRecallItemKbId(item);
+  const baseScore = Number.isFinite(Number(item.score)) ? Number(item.score) : 0.35;
+  const terms = normalizeArray(context.terms);
+  const titleHits = terms.filter((term) => title.includes(term)).length;
+  const textHits = terms.filter((term) => text.includes(term)).length;
+  const sourceHits = terms.filter((term) => source.includes(term)).length;
+  const kbBoost = Number(context.kbBoostMap?.[kbId] || 0) || 0;
+  const titleBoost = Math.min(0.3, titleHits * 0.08);
+  const textBoost = Math.min(0.35, textHits * 0.035);
+  const sourceBoost = Math.min(0.12, sourceHits * 0.04);
+  const structuredBoost = (title ? 0.04 : 0) + (source ? 0.02 : 0);
+  const finalScore = baseScore + titleBoost + textBoost + sourceBoost + kbBoost + structuredBoost;
+  const reasons = [];
+  if (titleHits > 0) reasons.push(`title:${titleHits}`);
+  if (textHits > 0) reasons.push(`text:${textHits}`);
+  if (sourceHits > 0) reasons.push(`source:${sourceHits}`);
+  if (kbBoost > 0) reasons.push(`kb:${kbId}`);
+  if (structuredBoost > 0) reasons.push('structured');
+  return {
+    ...item,
+    rerankScore: Number(finalScore.toFixed(6)),
+    rerankReasons: reasons
+  };
+}
+
+function rerankRecallItems(items = [], options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  const enabled = (
+    options.rerankEnabled
+    ?? currentConfig.MEMOS_RECALL_RERANK_ENABLED
+    ?? process.env.MEMOS_RECALL_RERANK_ENABLED
+  ) !== false && String(
+    options.rerankEnabled
+    ?? currentConfig.MEMOS_RECALL_RERANK_ENABLED
+    ?? process.env.MEMOS_RECALL_RERANK_ENABLED
+    ?? 'true'
+  ).toLowerCase() !== 'false';
+  const inputItems = normalizeArray(items);
+  const topK = clampNumber(options.topK ?? currentConfig.MEMOS_RECALL_TOP_K, 1, 20, 5);
+  const routeTerms = [
+    options.query,
+    options.rawQuery,
+    ...getRouteSignalValues(options)
+  ].flatMap((item) => tokenizeRecallTerms(item));
+  const terms = Array.from(new Set(routeTerms)).slice(0, 80);
+  const kbBoostMap = {
+    ...getMemosKbAliasBoostMap({ ...options, config: currentConfig }),
+    ...normalizeObject(options.kbBoostMap, {})
+  };
+  const scored = inputItems.map((item) => scoreRecallItemForRerank(item, { terms, kbBoostMap }));
+  const ranked = enabled
+    ? scored
+      .map((item, index) => ({ item, index }))
+      .sort((left, right) => {
+        const delta = Number(right.item.rerankScore || 0) - Number(left.item.rerankScore || 0);
+        if (Math.abs(delta) > 0.000001) return delta;
+        return left.index - right.index;
+      })
+      .map((entry) => entry.item)
+    : inputItems;
+  return {
+    items: ranked.slice(0, topK),
+    diagnostics: {
+      enabled,
+      candidateCount: inputItems.length,
+      kept: Math.min(topK, ranked.length),
+      queryTermCount: terms.length,
+      topReasons: ranked.slice(0, Math.min(topK, 5)).map((item) => ({
+        id: normalizeText(item.id),
+        score: Number.isFinite(Number(item.score)) ? Number(item.score) : null,
+        rerankScore: Number.isFinite(Number(item.rerankScore)) ? Number(item.rerankScore) : null,
+        reasons: normalizeArray(item.rerankReasons).slice(0, 6)
+      }))
+    }
+  };
+}
+
 function formatMemosRecallPrompt(items = [], options = {}) {
   const maxChars = clampNumber(options.maxChars, 120, 8000, 900);
   const lines = normalizeArray(items)
     .map((item, index) => {
       const score = Number.isFinite(Number(item.score)) ? ` score=${Number(item.score).toFixed(3)}` : '';
       const createdAt = normalizeText(item.createdAt) ? ` time=${normalizeText(item.createdAt)}` : '';
-      const source = normalizeText(item.source) ? ` source=${normalizeText(item.source)}` : '';
-      const title = normalizeText(item.title) ? `${normalizeText(item.title)}: ` : '';
-      return `${index + 1}. ${title}${normalizeText(item.text)}${source}${score}${createdAt}`;
+      const source = normalizeText(item.source) ? ` source=${normalizeText(item.source)}` : ' source=memos';
+      const title = normalizeText(item.title) ? ` title=${normalizeText(item.title)}` : '';
+      const why = normalizeArray(item.rerankReasons).length > 0
+        ? ` why=${normalizeArray(item.rerankReasons).slice(0, 3).join('|')}`
+        : '';
+      return `${index + 1}. ${normalizeText(item.text)}${source}${title}${score}${createdAt}${why}`;
     })
     .filter(Boolean);
   if (lines.length === 0) return '';
@@ -598,11 +834,8 @@ function buildSearchArgs(query = '', options = {}) {
     ...normalizeObject(options.config, {})
   };
   const topK = clampNumber(options.topK ?? currentConfig.MEMOS_RECALL_TOP_K, 1, 20, 5);
-  const knowledgebaseIds = normalizeStringList(
-    options.knowledgebaseIds
-    || options.kbIds
-    || currentConfig.MEMOS_KB_IDS
-  );
+  const kbPartition = resolveKnowledgebaseIds({ ...options, config: currentConfig, query });
+  const knowledgebaseIds = kbPartition.ids;
   const args = {
     query: normalizeText(query),
     conversation_first_message: normalizeText(
@@ -637,15 +870,177 @@ function buildKnowledgeBaseArgs(options = {}) {
 }
 
 function getConfiguredKnowledgebaseIds(options = {}) {
+  return resolveKnowledgebaseIds(options).ids;
+}
+
+function getMemosRecallCacheTtlMs(options = {}) {
   const currentConfig = {
     ...getConfig(),
     ...normalizeObject(options.config, {})
   };
-  return normalizeStringList(
-    options.knowledgebaseIds
-    || options.kbIds
-    || currentConfig.MEMOS_KB_IDS
+  return clampNumber(
+    options.cacheTtlMs ?? currentConfig.MEMOS_RECALL_CACHE_TTL_MS ?? process.env.MEMOS_RECALL_CACHE_TTL_MS,
+    0,
+    60 * 60 * 1000,
+    5 * 60 * 1000
   );
+}
+
+function getMemosCircuitOptions(options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  return {
+    failureThreshold: clampNumber(
+      options.circuitFailureThreshold
+        ?? currentConfig.MEMOS_RECALL_CIRCUIT_FAILURE_THRESHOLD
+        ?? process.env.MEMOS_RECALL_CIRCUIT_FAILURE_THRESHOLD,
+      1,
+      20,
+      3
+    ),
+    cooldownMs: clampNumber(
+      options.circuitCooldownMs
+        ?? currentConfig.MEMOS_RECALL_CIRCUIT_COOLDOWN_MS
+        ?? process.env.MEMOS_RECALL_CIRCUIT_COOLDOWN_MS,
+      0,
+      60 * 60 * 1000,
+      60 * 1000
+    )
+  };
+}
+
+function buildMemosRecallCacheKey(input = {}) {
+  const keyObject = {
+    serverName: normalizeText(input.serverName),
+    recallSource: normalizeText(input.recallSource),
+    query: normalizeText(input.normalizedQuery || input.query).toLowerCase(),
+    kbIds: normalizeArray(input.kbIds).map((item) => normalizeText(item)).filter(Boolean).sort(),
+    fileIds: normalizeArray(input.fileIds).map((item) => normalizeText(item)).filter(Boolean).sort(),
+    routeSignals: normalizeArray(input.routeSignals).map((item) => normalizeText(item)).filter(Boolean).sort(),
+    topK: Number(input.topK || 0) || 0,
+    maxChars: Number(input.maxChars || 0) || 0
+  };
+  return stableHash(JSON.stringify(keyObject));
+}
+
+function getCachedMemosRecall(cacheKey = '', ttlMs = 0) {
+  if (!cacheKey || ttlMs <= 0) return null;
+  const cached = memosRecallRuntimeState.cache.get(cacheKey);
+  if (!cached) {
+    memosRecallRuntimeState.stats.cacheMisses += 1;
+    return null;
+  }
+  if (Date.now() - Number(cached.storedAt || 0) > ttlMs) {
+    memosRecallRuntimeState.cache.delete(cacheKey);
+    memosRecallRuntimeState.stats.cacheMisses += 1;
+    return null;
+  }
+  memosRecallRuntimeState.stats.cacheHits += 1;
+  return {
+    ...cached.value,
+    diagnostics: {
+      ...normalizeObject(cached.value?.diagnostics, {}),
+      cache: {
+        hit: true,
+        key: cacheKey,
+        ttlMs,
+        ageMs: Math.max(0, Date.now() - Number(cached.storedAt || 0))
+      }
+    }
+  };
+}
+
+function storeCachedMemosRecall(cacheKey = '', value = {}, ttlMs = 0) {
+  if (!cacheKey || ttlMs <= 0) return;
+  memosRecallRuntimeState.cache.set(cacheKey, {
+    storedAt: Date.now(),
+    value
+  });
+  memosRecallRuntimeState.stats.cacheStores += 1;
+}
+
+function getCircuitKey(serverName = '', recallSource = '') {
+  return `${normalizeText(serverName)}:${normalizeText(recallSource)}`;
+}
+
+function getMemosCircuitState(serverName = '', recallSource = '') {
+  const key = getCircuitKey(serverName, recallSource);
+  return memosRecallRuntimeState.circuit.get(key) || {
+    key,
+    failures: 0,
+    openedAt: 0,
+    openUntil: 0,
+    lastError: ''
+  };
+}
+
+function shouldShortCircuitMemosRecall(serverName = '', recallSource = '') {
+  const state = getMemosCircuitState(serverName, recallSource);
+  return Number(state.openUntil || 0) > Date.now();
+}
+
+function recordMemosCircuitSuccess(serverName = '', recallSource = '') {
+  const key = getCircuitKey(serverName, recallSource);
+  memosRecallRuntimeState.circuit.delete(key);
+  memosRecallRuntimeState.stats.circuitSuccesses += 1;
+}
+
+function recordMemosCircuitFailure(serverName = '', recallSource = '', error = '', options = {}) {
+  const { failureThreshold, cooldownMs } = getMemosCircuitOptions(options);
+  const key = getCircuitKey(serverName, recallSource);
+  const previous = getMemosCircuitState(serverName, recallSource);
+  const failures = Number(previous.failures || 0) + 1;
+  const opened = failures >= failureThreshold;
+  const now = Date.now();
+  const next = {
+    key,
+    failures,
+    openedAt: opened ? now : Number(previous.openedAt || 0),
+    openUntil: opened ? now + cooldownMs : Number(previous.openUntil || 0),
+    lastError: truncateText(error, 160)
+  };
+  memosRecallRuntimeState.circuit.set(key, next);
+  memosRecallRuntimeState.stats.circuitFailures += 1;
+  return next;
+}
+
+function getMemosRecallRuntimeDiagnostics(options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  const serverName = getMemosServerName({ ...options, config: currentConfig });
+  const recallSource = getMemosRecallSource({ ...options, config: currentConfig });
+  const circuitState = getMemosCircuitState(serverName, recallSource);
+  return {
+    cache: {
+      size: memosRecallRuntimeState.cache.size,
+      ttlMs: getMemosRecallCacheTtlMs({ ...options, config: currentConfig }),
+      hits: memosRecallRuntimeState.stats.cacheHits,
+      misses: memosRecallRuntimeState.stats.cacheMisses,
+      stores: memosRecallRuntimeState.stats.cacheStores
+    },
+    circuit: {
+      ...circuitState,
+      open: Number(circuitState.openUntil || 0) > Date.now(),
+      failureThreshold: getMemosCircuitOptions({ ...options, config: currentConfig }).failureThreshold,
+      cooldownMs: getMemosCircuitOptions({ ...options, config: currentConfig }).cooldownMs,
+      shortCircuits: memosRecallRuntimeState.stats.circuitShortCircuits
+    }
+  };
+}
+
+function resetMemosRecallRuntimeState() {
+  memosRecallRuntimeState.cache.clear();
+  memosRecallRuntimeState.circuit.clear();
+  memosRecallRuntimeState.stats.cacheHits = 0;
+  memosRecallRuntimeState.stats.cacheMisses = 0;
+  memosRecallRuntimeState.stats.cacheStores = 0;
+  memosRecallRuntimeState.stats.circuitShortCircuits = 0;
+  memosRecallRuntimeState.stats.circuitFailures = 0;
+  memosRecallRuntimeState.stats.circuitSuccesses = 0;
 }
 
 async function discoverMemosTools(options = {}) {
@@ -747,7 +1142,13 @@ async function callKnowledgeBaseRecall(normalizedQuery = '', options = {}) {
   );
   const rawItems = normalizeRecallItems(result, { topK: Math.min(20, topK * 2), maxChars, source: 'memos_kb' });
   const quality = filterRecallItemsByQuality(rawItems, { ...options, config: currentConfig });
-  const items = quality.items.slice(0, topK);
+  const rerank = rerankRecallItems(quality.items, {
+    ...options,
+    config: currentConfig,
+    query: normalizedQuery,
+    topK
+  });
+  const items = rerank.items;
   const promptText = formatMemosRecallPrompt(items, { maxChars });
   return {
     query: normalizedQuery,
@@ -769,7 +1170,8 @@ async function callKnowledgeBaseRecall(normalizedQuery = '', options = {}) {
       error: normalizeText(discovery.error),
       readOnly: true,
       rawCandidateCount: rawItems.length,
-      quality: quality.diagnostics
+      quality: quality.diagnostics,
+      rerank: rerank.diagnostics
     }
   };
 }
@@ -796,7 +1198,19 @@ async function callSearchMemoryRecall(normalizedQuery = '', options = {}) {
   );
   const rawItems = normalizeRecallItems(result, { topK: Math.min(20, topK * 2), maxChars, source: 'memos_memory' });
   const quality = filterRecallItemsByQuality(rawItems, { ...options, config: currentConfig });
-  const items = quality.items.slice(0, topK);
+  const kbPartition = resolveKnowledgebaseIds({
+    ...options,
+    config: currentConfig,
+    query: normalizedQuery,
+    normalizedQuery
+  });
+  const rerank = rerankRecallItems(quality.items, {
+    ...options,
+    config: currentConfig,
+    query: normalizedQuery,
+    topK
+  });
+  const items = rerank.items;
   const promptText = formatMemosRecallPrompt(items, { maxChars });
   return {
     query: normalizedQuery,
@@ -811,14 +1225,20 @@ async function callSearchMemoryRecall(normalizedQuery = '', options = {}) {
       sourceToolName: searchToolName,
       kbToolName: discovery.kbToolName,
       searchToolName,
-      knowledgebaseIdsCount: getConfiguredKnowledgebaseIds({ ...options, config: currentConfig }).length,
+      knowledgebaseIdsCount: kbPartition.ids.length,
+      kbPartition: {
+        matchedAliases: kbPartition.matchedAliases,
+        usedAliasPartition: kbPartition.usedAliasPartition,
+        fallbackIdsCount: kbPartition.fallbackIds.length
+      },
       availableTools: discovery.availableTools,
       durationMs: Math.max(0, Date.now() - startedAt),
       fallback: result?.fallback === true,
       error: normalizeText(discovery.error),
       readOnly: true,
       rawCandidateCount: rawItems.length,
-      quality: quality.diagnostics
+      quality: quality.diagnostics,
+      rerank: rerank.diagnostics
     }
   };
 }
@@ -838,6 +1258,29 @@ async function recallForPlanner(query = '', options = {}) {
   const routeGate = evaluateMemosRouteGate(rawQuery, { ...options, config: currentConfig });
   const queryPlan = buildMemosRecallQuery(rawQuery, { ...options, config: currentConfig });
   const normalizedQuery = queryPlan.query;
+  const kbPartition = resolveKnowledgebaseIds({
+    ...options,
+    config: currentConfig,
+    query: normalizedQuery,
+    normalizedQuery
+  });
+  const kbFileIds = normalizeStringList(
+    options.fileIds
+    || options.kbFileIds
+    || currentConfig.MEMOS_KB_FILE_IDS
+  );
+  const cacheTtlMs = getMemosRecallCacheTtlMs({ ...options, config: currentConfig });
+  const circuitOptions = getMemosCircuitOptions({ ...options, config: currentConfig });
+  const cacheKey = buildMemosRecallCacheKey({
+    serverName,
+    recallSource,
+    normalizedQuery,
+    kbIds: kbPartition.ids,
+    fileIds: kbFileIds,
+    routeSignals: routeGate.routeSignals,
+    topK,
+    maxChars
+  });
   const attachBoundaryDiagnostics = (recall = {}) => ({
     ...recall,
     rawQuery,
@@ -848,7 +1291,26 @@ async function recallForPlanner(query = '', options = {}) {
       queryMode: queryPlan.mode,
       queryChanged: queryPlan.changed,
       rawQueryPreview: truncateText(rawQuery, 160),
-      timeoutMs
+      timeoutMs,
+      cache: {
+        hit: false,
+        key: cacheKey,
+        ttlMs: cacheTtlMs,
+        ...normalizeObject(recall.diagnostics?.cache, {})
+      },
+      circuit: {
+        ...getMemosCircuitState(serverName, recallSource),
+        open: shouldShortCircuitMemosRecall(serverName, recallSource),
+        failureThreshold: circuitOptions.failureThreshold,
+        cooldownMs: circuitOptions.cooldownMs,
+        ...normalizeObject(recall.diagnostics?.circuit, {})
+      },
+      kbPartition: {
+        matchedAliases: kbPartition.matchedAliases,
+        usedAliasPartition: kbPartition.usedAliasPartition,
+        fallbackIdsCount: kbPartition.fallbackIds.length,
+        ...normalizeObject(recall.diagnostics?.kbPartition, {})
+      }
     }
   });
 
@@ -887,6 +1349,36 @@ async function recallForPlanner(query = '', options = {}) {
     }));
   }
 
+  if (shouldShortCircuitMemosRecall(serverName, recallSource)) {
+    memosRecallRuntimeState.stats.circuitShortCircuits += 1;
+    return attachBoundaryDiagnostics(buildEmptyRecall(normalizedQuery, {
+      rejectedReason: 'circuit_open',
+      diagnostics: {
+        enabled: true,
+        serverName,
+        recallSource,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        error: getMemosCircuitState(serverName, recallSource).lastError,
+        readOnly: true,
+        circuit: {
+          ...getMemosCircuitState(serverName, recallSource),
+          open: true
+        }
+      }
+    }));
+  }
+
+  const cachedRecall = getCachedMemosRecall(cacheKey, cacheTtlMs);
+  if (cachedRecall) {
+    return attachBoundaryDiagnostics({
+      ...cachedRecall,
+      diagnostics: {
+        ...normalizeObject(cachedRecall.diagnostics, {}),
+        durationMs: Math.max(0, Date.now() - startedAt)
+      }
+    });
+  }
+
   const discovery = await discoverMemosTools({ ...options, config: currentConfig, timeoutMs });
   try {
     const recallOptions = {
@@ -899,23 +1391,37 @@ async function recallForPlanner(query = '', options = {}) {
       timeoutMs,
       topK
     };
+    let resultRecall;
     if (recallSource === 'search_memory') {
-      return attachBoundaryDiagnostics(await callSearchMemoryRecall(normalizedQuery, recallOptions));
+      resultRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
+      recordMemosCircuitSuccess(serverName, recallSource);
+      if (resultRecall.used || resultRecall.rejectedReason) storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+      return attachBoundaryDiagnostics(resultRecall);
     }
     if (recallSource === 'auto') {
       const kbArgs = buildKnowledgeBaseArgs({ ...options, config: currentConfig, topK });
-      if (getConfiguredKnowledgebaseIds({ ...options, config: currentConfig }).length > 0) {
-        return attachBoundaryDiagnostics(await callSearchMemoryRecall(normalizedQuery, recallOptions));
+      if (kbPartition.ids.length > 0) {
+        resultRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
+        recordMemosCircuitSuccess(serverName, recallSource);
+        storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+        return attachBoundaryDiagnostics(resultRecall);
       }
       if (discovery.kbToolName && kbArgs.file_ids.length > 0) {
         const kbRecall = await callKnowledgeBaseRecall(normalizedQuery, recallOptions);
-        if (kbRecall.used || currentConfig.MEMOS_KB_FALLBACK_SEARCH_ENABLED !== true) return attachBoundaryDiagnostics(kbRecall);
+        if (kbRecall.used || currentConfig.MEMOS_KB_FALLBACK_SEARCH_ENABLED !== true) {
+          recordMemosCircuitSuccess(serverName, recallSource);
+          storeCachedMemosRecall(cacheKey, kbRecall, cacheTtlMs);
+          return attachBoundaryDiagnostics(kbRecall);
+        }
       }
-      return attachBoundaryDiagnostics(await callSearchMemoryRecall(normalizedQuery, recallOptions));
+      resultRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
+      recordMemosCircuitSuccess(serverName, recallSource);
+      storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+      return attachBoundaryDiagnostics(resultRecall);
     }
-    if (getConfiguredKnowledgebaseIds({ ...options, config: currentConfig }).length > 0) {
+    if (kbPartition.ids.length > 0) {
       const kbSearchRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
-      return attachBoundaryDiagnostics({
+      resultRecall = {
         ...kbSearchRecall,
         diagnostics: {
           ...kbSearchRecall.diagnostics,
@@ -923,7 +1429,10 @@ async function recallForPlanner(query = '', options = {}) {
           sourceToolName: kbSearchRecall.diagnostics.searchToolName,
           kbMode: 'knowledgebase_ids'
         }
-      });
+      };
+      recordMemosCircuitSuccess(serverName, recallSource);
+      storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+      return attachBoundaryDiagnostics(resultRecall);
     }
     const kbRecall = await callKnowledgeBaseRecall(normalizedQuery, recallOptions);
     if (
@@ -931,18 +1440,29 @@ async function recallForPlanner(query = '', options = {}) {
       || currentConfig.MEMOS_KB_FALLBACK_SEARCH_ENABLED !== true
       || !discovery.searchToolName
     ) {
+      recordMemosCircuitSuccess(serverName, recallSource);
+      storeCachedMemosRecall(cacheKey, kbRecall, cacheTtlMs);
       return attachBoundaryDiagnostics(kbRecall);
     }
     const searchRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
-    return attachBoundaryDiagnostics({
+    resultRecall = {
       ...searchRecall,
       diagnostics: {
         ...searchRecall.diagnostics,
         recallSource: 'knowledge_base_fallback_search',
         fallbackReason: kbRecall.rejectedReason || 'kb_empty'
       }
-    });
+    };
+    recordMemosCircuitSuccess(serverName, recallSource);
+    storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+    return attachBoundaryDiagnostics(resultRecall);
   } catch (error) {
+    const circuit = recordMemosCircuitFailure(
+      serverName,
+      recallSource,
+      normalizeText(error?.message || error || discovery.error),
+      { ...options, config: currentConfig }
+    );
     return attachBoundaryDiagnostics(buildEmptyRecall(normalizedQuery, {
       rejectedReason: 'mcp_error',
       diagnostics: {
@@ -955,7 +1475,8 @@ async function recallForPlanner(query = '', options = {}) {
         availableTools: discovery.availableTools,
         durationMs: Math.max(0, Date.now() - startedAt),
         error: normalizeText(error?.message || error || discovery.error),
-        readOnly: true
+        readOnly: true,
+        circuit
       }
     }));
   }
@@ -986,11 +1507,68 @@ async function addMessageToMemos(message = {}, options = {}) {
   };
 }
 
+async function diagnoseMemosPlannerRecall(options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  const serverName = getMemosServerName({ ...options, config: currentConfig });
+  const recallSource = getMemosRecallSource({ ...options, config: currentConfig });
+  const timeoutMs = clampNumber(options.timeoutMs ?? currentConfig.MEMOS_RECALL_TIMEOUT_MS, 100, 30000, 1200);
+  const kbPartition = resolveKnowledgebaseIds({
+    ...options,
+    config: currentConfig,
+    query: options.query || ''
+  });
+  const fileIds = normalizeStringList(
+    options.fileIds
+    || options.kbFileIds
+    || currentConfig.MEMOS_KB_FILE_IDS
+  );
+  const routeGate = evaluateMemosRouteGate(options.query || '', { ...options, config: currentConfig });
+  const queryPlan = buildMemosRecallQuery(options.query || '', { ...options, config: currentConfig });
+  const discovery = await discoverMemosTools({ ...options, config: currentConfig, timeoutMs });
+  return {
+    ok: discovery.error ? false : true,
+    enabled: currentConfig.MEMOS_MCP_ENABLED === true,
+    serverName,
+    recallSource,
+    readOnly: true,
+    configured: {
+      knowledgebaseIdsCount: kbPartition.ids.length,
+      fallbackKnowledgebaseIdsCount: kbPartition.fallbackIds.length,
+      kbFileIdsCount: fileIds.length,
+      kbAliasCount: Object.keys(kbPartition.aliasMap).length,
+      matchedAliases: kbPartition.matchedAliases,
+      usedAliasPartition: kbPartition.usedAliasPartition,
+      routeAllowlistCount: normalizeConfigList(currentConfig.MEMOS_RECALL_ROUTE_ALLOWLIST).length,
+      localQueryGuardEnabled: currentConfig.MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED !== false,
+      queryMode: queryPlan.mode,
+      queryChanged: queryPlan.changed,
+      topK: clampNumber(options.topK ?? currentConfig.MEMOS_RECALL_TOP_K, 1, 20, 5),
+      maxChars: clampNumber(options.maxChars ?? currentConfig.MEMOS_RECALL_MAX_CHARS, 120, 8000, 900),
+      timeoutMs
+    },
+    routeGate,
+    discovery: {
+      availableTools: discovery.availableTools,
+      kbToolName: discovery.kbToolName,
+      searchToolName: discovery.searchToolName,
+      addToolName: discovery.addToolName,
+      mutatingToolNames: discovery.mutatingToolNames,
+      mutatingToolsDetected: discovery.mutatingToolNames.length > 0,
+      error: discovery.error
+    },
+    runtime: getMemosRecallRuntimeDiagnostics({ ...options, config: currentConfig })
+  };
+}
+
 module.exports = {
   addMessageToMemos,
   buildKnowledgeBaseArgs,
   buildMemosRecallQuery,
   buildSearchArgs,
+  diagnoseMemosPlannerRecall,
   discoverMemosTools,
   evaluateMemosRouteGate,
   filterRecallItemsByQuality,
@@ -999,8 +1577,11 @@ module.exports = {
   getMemosRecallSource,
   getMemosServerName,
   getConfiguredKnowledgebaseIds,
+  getMemosRecallRuntimeDiagnostics,
   isMemosPlannerRecallEnabled,
   normalizeRecallItems,
+  rerankRecallItems,
   recallForPlanner,
+  resetMemosRecallRuntimeState,
   truncateText
 };

@@ -10,6 +10,33 @@ function createShortTermSummaryHelpers(deps = {}) {
     trimTextByTokenBudget
   } = deps;
 
+  function positiveInt(value, fallback, min = 1) {
+    return Math.max(min, Math.floor(Number(value || fallback) || fallback));
+  }
+
+  function limitedList(values = [], limit, maxChars) {
+    return (Array.isArray(values) ? values : [])
+      .map((item) => String(item || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, positiveInt(limit, 1))
+      .map((item) => item.length > maxChars ? item.slice(0, maxChars) : item);
+  }
+
+  function limitedRecentTurns(values = [], limit, maxChars) {
+    return (Array.isArray(values) ? values : [])
+      .map((item) => {
+        const role = String(item?.role || '').trim().toLowerCase();
+        const content = String(item?.content || item?.text || '').replace(/\s+/g, ' ').trim();
+        if ((role !== 'user' && role !== 'assistant') || !content) return null;
+        return {
+          role,
+          content: content.length > maxChars ? content.slice(0, maxChars) : content
+        };
+      })
+      .filter(Boolean)
+      .slice(-positiveInt(limit, 2, 2));
+  }
+
   function buildStructuredSummaryText(shortTermState, summaryTokens) {
     const state = normalizeShortTermState(shortTermState);
     const interaction = normalizeInteractionState(state.interaction);
@@ -24,14 +51,37 @@ function createShortTermSummaryHelpers(deps = {}) {
     if (interaction.activeTopic || state.activeTopic) {
       sections.push(`[ActiveTopic] ${interaction.activeTopic || state.activeTopic}`);
     }
-    if (interaction.openLoops.length > 0 || state.openLoops.length > 0) {
-      sections.push(`[OpenLoops] ${(interaction.openLoops.length > 0 ? interaction.openLoops : state.openLoops).join(' | ')}`);
+    const openLoops = limitedList(
+      interaction.openLoops.length > 0 ? interaction.openLoops : state.openLoops,
+      config.SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_ITEMS || 4,
+      Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_CHARS || 120) || 120)
+    );
+    if (openLoops.length > 0) {
+      sections.push(`[OpenLoops] ${openLoops.join(' | ')}`);
     }
-    if (interaction.assistantCommitments.length > 0 || state.assistantCommitments.length > 0) {
-      sections.push(`[AssistantCommitments] ${(interaction.assistantCommitments.length > 0 ? interaction.assistantCommitments : state.assistantCommitments).join(' | ')}`);
+    const assistantCommitments = limitedList(
+      interaction.assistantCommitments.length > 0 ? interaction.assistantCommitments : state.assistantCommitments,
+      config.SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_ITEMS || 4,
+      Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_CHARS || 120) || 120)
+    );
+    if (assistantCommitments.length > 0) {
+      sections.push(`[AssistantCommitments] ${assistantCommitments.join(' | ')}`);
     }
-    if (interaction.userConstraints.length > 0 || state.userConstraints.length > 0) {
-      sections.push(`[UserConstraints] ${(interaction.userConstraints.length > 0 ? interaction.userConstraints : state.userConstraints).join(' | ')}`);
+    const userConstraints = limitedList(
+      interaction.userConstraints.length > 0 ? interaction.userConstraints : state.userConstraints,
+      config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_ITEMS || 4,
+      Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_CHARS || 120) || 120)
+    );
+    if (userConstraints.length > 0) {
+      sections.push(`[UserConstraints] ${userConstraints.join(' | ')}`);
+    }
+    const recentTurns = limitedRecentTurns(
+      interaction.recentTurns,
+      config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS || 8,
+      Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_CHARS || 160) || 160)
+    );
+    if (recentTurns.length > 0) {
+      sections.push(`[RecentTurns] ${recentTurns.map((item) => `${item.role}: ${item.content}`).join(' | ')}`);
     }
     if (state.recentToolResults.length > 0) {
       sections.push(`[RecentToolResults] ${state.recentToolResults.join(' | ')}`);

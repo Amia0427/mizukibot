@@ -11,6 +11,7 @@ process.env.SHORT_TERM_MEMORY_RECENT_TURNS = '14';
 process.env.SHORT_TERM_SCENE_RECENT_TURNS = '8';
 process.env.SHORT_TERM_MEMORY_COMPRESSION_CHUNK_MESSAGES = '24';
 process.env.SHORT_TERM_BRIDGE_RECENT_MESSAGES = '12';
+process.env.SHORT_TERM_BRIDGE_RAW_TTL_HOURS = '1';
 process.env.MEMORY_V3_SESSION_RECENT_MESSAGES = '14';
 process.env.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS = '1800';
 process.env.SHORT_TERM_BRIDGE_FILE = path.join(tempRoot, 'short_term_bridge.json');
@@ -84,6 +85,27 @@ module.exports = (async () => {
   });
   assert.strictEqual(restored.restored, true);
   assert.strictEqual(restoredHistory[sessionKey].length, 12);
+  assert.strictEqual(restored.freshnessTier, 'raw_recent');
+  assert.strictEqual(restored.rawMessagesRestored, true);
+  assert.strictEqual(restored.freshnessTier, 'raw_recent');
+  assert.strictEqual(restored.rawMessagesRestored, true);
+
+  const staleStore = loadBridgeStore();
+  staleStore.sessions[sessionKey].updatedAt = Date.now() - (2 * 60 * 60 * 1000);
+  const { saveBridgeStore } = require('../utils/shortTermBridgeMemory');
+  saveBridgeStore(staleStore);
+  const staleRestoredHistory = {};
+  const staleRestoredShortTermMemory = {};
+  const staleRestored = restoreShortTermBridgeAfterRestartIfNeeded(userId, {
+    chatHistory: staleRestoredHistory,
+    shortTermMemory: staleRestoredShortTermMemory,
+    sessionKey,
+    routeMeta: {}
+  });
+  assert.strictEqual(staleRestored.restored, true);
+  assert.strictEqual(staleRestored.freshnessTier, 'summary_only');
+  assert.strictEqual(staleRestored.rawMessagesRestored, false);
+  assert.strictEqual(Array.isArray(staleRestoredHistory[sessionKey]), false);
 
   const sharedContext = buildShortTermContextMessages(userId, {}, {
     chatHistory,
