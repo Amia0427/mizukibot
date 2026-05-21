@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-21 21:09 +08:00
+更新时间：2026-05-21 21:38 +08:00
 
 ## 已调整
 
@@ -13,6 +13,16 @@
 - `SHORT_TERM_BRIDGE_RECENT_MESSAGES` 默认从 64 提高到 96。
 - `MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS` 默认从 2200 提高到 3600。
 - `MEMORY_V3_SESSION_RECENT_MESSAGES` 默认从 64 提高到 96。
+- 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 会同步补 `retrieved_memory_lite`、`daily_journal`、`short_term_continuity`、planner 已选择的 `memos_recall` 和摘要块；主模型调用日志新增 `prompt_integrity` 摘要。
+
+## 诊断
+
+```bash
+npm run diag:main-reply-prompt -- --limit 20
+npm run diag:main-reply-prompt -- --limit 20 --json
+```
+
+查看最近主回复模型请求是否真的包含系统提示词、记忆标记、短期连续性和 MemOS 召回。日志只记录计数和布尔字段，不记录完整 prompt。
 
 ## 可实施改进目标
 

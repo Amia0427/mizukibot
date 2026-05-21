@@ -74,6 +74,33 @@ function createPrepareNode(deps = {}) {
   const buildDynamicPromptImpl = typeof deps.buildDynamicPromptImpl === 'function'
     ? deps.buildDynamicPromptImpl
     : (async () => ({ dynamicPrompt: '', affinity: null, memoryContext: null }));
+  const buildFallbackMemoryContextImpl = typeof deps.buildFallbackMemoryContextImpl === 'function'
+    ? deps.buildFallbackMemoryContextImpl
+    : ((userId, question, options = {}) => {
+        try {
+          return require('../../../utils/memoryContext').buildMemoryContext(userId, question, options);
+        } catch (_) {
+          return {};
+        }
+      });
+  const buildSharedShortTermContextMessagesImpl = typeof deps.buildSharedShortTermContextMessages === 'function'
+    ? deps.buildSharedShortTermContextMessages
+    : ((userId, userInfo, options = {}) => {
+        try {
+          return require('../../../utils/shortTermMemory').buildSharedShortTermContextMessages(userId, userInfo, options);
+        } catch (_) {
+          return {};
+        }
+      });
+  const getMemosRecallPromptTextImpl = typeof deps.getMemosRecallPromptText === 'function'
+    ? deps.getMemosRecallPromptText
+    : ((memosRecall = {}) => {
+        try {
+          return require('../../../utils/memosPlannerRecall').getMemosRecallPromptText(memosRecall);
+        } catch (_) {
+          return '';
+        }
+      });
   const buildPreparedMainConversationContext = typeof deps.buildPreparedMainConversationContext === 'function'
     ? deps.buildPreparedMainConversationContext
     : (() => null);
@@ -210,6 +237,208 @@ function createPrepareNode(deps = {}) {
       .join('\n\n');
   }
 
+  function createFallbackPromptBlock(id, label, content, options = {}) {
+    const text = String(content || '').trim();
+    if (!text) return null;
+    return {
+      id: String(id || label || 'fallback_block').trim() || 'fallback_block',
+      label: String(label || id || 'Fallback Block').trim() || 'Fallback Block',
+      content: text,
+      stage: 'main',
+      priority: Number.isFinite(Number(options.priority)) ? Number(options.priority) : 260,
+      authority: String(options.authority || 'memory_fact').trim() || 'memory_fact',
+      budgetTokens: Math.max(0, Number(options.budgetTokens || 0) || 0),
+      conflictTags: normalizeArray(options.conflictTags),
+      kind: String(options.kind || 'memory').trim() || 'memory',
+      source: String(options.source || 'prepare_soft_timeout_fallback').trim() || 'prepare_soft_timeout_fallback',
+      lane: 'dynamic_context',
+      meta: {
+        optional: false,
+        softTimeoutFallback: true,
+        ...(options.meta && typeof options.meta === 'object' ? options.meta : {})
+      }
+    };
+  }
+
+  function appendUniquePromptBlock(blocks = [], block = null) {
+    if (!block || !String(block.content || '').trim()) return blocks;
+    const id = blockId(block);
+    if (id && blocks.some((item) => blockId(item) === id)) return blocks;
+    blocks.push(block);
+    return blocks;
+  }
+
+  function resolvePlannerMemosRecall(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const candidates = [
+      request.memosRecall,
+      routeMeta.directChatPlanner?.memosRecall,
+      routeMeta.toolPlanner?.memosRecall,
+      routeMeta.memosRecall
+    ];
+    return pickFirstObject(candidates);
+  }
+
+  function resolvePromptDynamicPlan(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    return pickFirstObject([
+      request.dynamicPromptPlan,
+      routeMeta.directChatPlanner?.dynamicPromptPlan,
+      routeMeta.directChatPlanner?.plannerDecisionV2?.dynamicPromptPlan,
+      routeMeta.toolPlanner?.dynamicPromptPlan,
+      routeMeta.toolPlanner?.plannerDecisionV2?.dynamicPromptPlan,
+      routeMeta.dynamicPromptPlan
+    ]);
+  }
+
+  function planIncludesBlock(plan = {}, targetBlockId = '') {
+    const target = String(targetBlockId || '').trim();
+    if (!target) return false;
+    const enabled = normalizeArray(plan.enabledBlockIds)
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+    if (enabled.includes(target)) return true;
+    const decision = normalizeArray(plan.blockDecisions)
+      .find((item) => String(item?.blockId || '').trim() === target);
+    if (!decision) return false;
+    return String(decision.decision || '').trim().toLowerCase() !== 'skip';
+  }
+
+  function buildFallbackMemoryContext(state = {}, request = {}) {
+    const existing = state.memory?.context && typeof state.memory.context === 'object'
+      ? state.memory.context
+      : null;
+    if (existing) return existing;
+    if (String(request.customPrompt || '').trim()) return null;
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const userId = String(request.userId || '').trim();
+    const question = String(request.runtimeQuestionText || request.question || '').trim();
+    if (!userId || !question) return null;
+    return buildFallbackMemoryContextImpl(userId, question, {
+      routePolicyKey: request.routePolicyKey,
+      topRouteType: request.topRouteType || routeMeta.topRouteType || '',
+      groupId: routeMeta.groupId || routeMeta.group_id || '',
+      sessionKey: request.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+      sessionId: routeMeta.sessionId || routeMeta.session_id || '',
+      taskType: routeMeta.taskType || routeMeta.task_type || '',
+      agentName: routeMeta.agentName || routeMeta.agent_name || '',
+      toolName: routeMeta.toolName || routeMeta.tool_name || '',
+      journalToday: request.journalToday,
+      journalNow: request.journalNow,
+      dailyJournalTimestamp: request.dailyJournalTimestamp,
+      dailyJournalYearMonth: request.dailyJournalYearMonth,
+      dailyJournalMaxFourDayFiles: 1,
+      dailyJournalMaxMonthlyFiles: 0,
+      ragEnabled: false
+    }) || null;
+  }
+
+  function formatFallbackShortTermContinuity(state = {}, request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const context = buildSharedShortTermContextMessagesImpl(request.userId, request.userInfo, {
+      chatHistory,
+      shortTermMemory,
+      routeMeta,
+      sessionKey: request.sessionKey || state.thread?.sessionKey
+    });
+    const lines = ['[ShortTermContinuity]'];
+    let hasContinuityEvidence = false;
+    const sessionKey = String(context?.sessionKey || request.sessionKey || '').trim();
+    if (sessionKey) lines.push(`session=${sessionKey}`);
+    const summary = String(context?.shortTermSummary || '').trim();
+    if (summary) {
+      hasContinuityEvidence = true;
+      lines.push(`[StateSummary]\n${summary}`);
+    }
+    const sessionSummaries = normalizeArray(context?.recentSessionSummaries)
+      .map((item, index) => {
+        const text = String(item?.summary || item?.content || '').replace(/\s+/g, ' ').trim();
+        return text ? `${index + 1}. ${text}` : '';
+      })
+      .filter(Boolean)
+      .slice(0, 5);
+    if (sessionSummaries.length > 0) {
+      hasContinuityEvidence = true;
+      lines.push('[RestartRecoverySummaries]');
+      lines.push(...sessionSummaries);
+    }
+    const recentHistory = normalizeArray(context?.recentHistory)
+      .map((message) => {
+        const role = String(message?.role || '').trim().toLowerCase() === 'assistant' ? 'Assistant' : 'User';
+        const content = String(message?.content || '').replace(/\s+/g, ' ').trim();
+        return content ? `${role}: ${content}` : '';
+      })
+      .filter(Boolean)
+      .slice(-12);
+    if (recentHistory.length > 0) {
+      hasContinuityEvidence = true;
+      lines.push('[RecentRawTurns]');
+      lines.push(...recentHistory);
+    }
+    if (!hasContinuityEvidence) return '';
+    lines.push('instruction=Use this as high-priority short-term continuity. Prefer exact recent raw turns over vague long-term memory when they conflict.');
+    return lines.join('\n');
+  }
+
+  function buildSoftTimeoutDynamicBlocks(state = {}, request = {}, memoryContext = null) {
+    if (String(request.customPrompt || '').trim()) return [];
+    const blocks = normalizePromptBlocks(state.memory?.dynamicContextBlocks);
+    const context = memoryContext && typeof memoryContext === 'object' ? memoryContext : {};
+    const retrievedText = String(
+      context.promptRetrievedMemoryText
+      || context.memoryForPrompt
+      || context.retrievedMemoryForPrompt
+      || ''
+    ).trim();
+    appendUniquePromptBlock(blocks, createFallbackPromptBlock(
+      'retrieved_memory_lite',
+      'Retrieved Memory Lite',
+      retrievedText ? `[RetrievedMemoryLite]\n${retrievedText}` : '',
+      { priority: 260, meta: { evidenceOnly: true } }
+    ));
+
+    const dailyJournalText = String(context.promptDailyJournalText || context.dailyJournalText || '').trim();
+    appendUniquePromptBlock(blocks, createFallbackPromptBlock(
+      'daily_journal',
+      'Daily Journal',
+      dailyJournalText ? `[DailyJournal]\n${dailyJournalText}` : '',
+      { priority: 261, meta: { evidenceOnly: true } }
+    ));
+
+    const shortTermContinuity = formatFallbackShortTermContinuity(state, request);
+    appendUniquePromptBlock(blocks, createFallbackPromptBlock(
+      'short_term_continuity',
+      'Short Term Continuity',
+      shortTermContinuity,
+      { priority: 210, kind: 'continuity', meta: { evidenceOnly: true } }
+    ));
+
+    const memosRecall = resolvePlannerMemosRecall(request);
+    const dynamicPlan = resolvePromptDynamicPlan(request);
+    const shouldInjectMemos = memosRecall.used === true && planIncludesBlock(dynamicPlan, 'memos_recall');
+    const memosText = shouldInjectMemos ? String(getMemosRecallPromptTextImpl(memosRecall) || '').trim() : '';
+    appendUniquePromptBlock(blocks, createFallbackPromptBlock(
+      'memos_recall',
+      'MemOS Recall',
+      memosText,
+      {
+        priority: 262,
+        source: 'memos_recall',
+        meta: { evidenceOnly: true }
+      }
+    ));
+
+    const summaryText = String(context.promptSummaryText || context.summary || '').trim();
+    appendUniquePromptBlock(blocks, createFallbackPromptBlock(
+      'summary',
+      'Summary',
+      summaryText ? `[Summary] ${summaryText}` : '',
+      { priority: 280, kind: 'summary', meta: { evidenceOnly: true } }
+    ));
+
+    return normalizePromptBlocks(blocks);
+  }
+
   function buildGuardedPromptArtifacts(rawResult = {}, request = {}, options = {}) {
     const rawValue = typeof rawResult === 'function' ? rawResult() : rawResult;
     const raw = normalizeObject(rawValue, {});
@@ -226,6 +455,7 @@ function createPrepareNode(deps = {}) {
       ? raw.promptSnapshot
       : null;
     const shouldRebuildSnapshot = stableGuardApplied
+      || options.forceGuardApplied
       || !existingSnapshot
       || normalizeArray(existingSnapshot.assembledBlocks).length === 0;
     const compiledSnapshot = shouldRebuildSnapshot
@@ -293,13 +523,15 @@ function createPrepareNode(deps = {}) {
   }
 
   function buildPromptSoftTimeoutFallback(state = {}, request = {}) {
+    const memoryContext = buildFallbackMemoryContext(state, request);
+    const dynamicContextBlocks = buildSoftTimeoutDynamicBlocks(state, request, memoryContext);
     return buildGuardedPromptArtifacts({
       dynamicPrompt: String(state.memory?.dynamicPrompt || ''),
       stableSystemBlocks: normalizeArray(state.memory?.stableSystemBlocks),
-      dynamicContextBlocks: normalizeArray(state.memory?.dynamicContextBlocks),
+      dynamicContextBlocks,
       assistantOnlyContextBlocks: normalizeArray(state.memory?.assistantOnlyContextBlocks),
       affinity: state.memory?.affinity || null,
-      memoryContext: state.memory?.context || null,
+      memoryContext: memoryContext || null,
       personaMemoryState: state.memory?.personaMemoryState || null,
       promptSnapshot: state.memory?.promptSnapshot || null,
       promptSegments: state.memory?.promptSegments || null,

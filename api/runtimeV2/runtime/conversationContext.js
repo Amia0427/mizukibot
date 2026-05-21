@@ -21,6 +21,10 @@ function hasMessageContent(message = {}) {
   return false;
 }
 
+function dynamicPromptHasContextMarker(text = '') {
+  return /\[(?:RetrievedMemoryLite|RetrievedMemory|DailyJournal|TaskMemory|GroupMemory|StyleSignals|ShortTermContinuity|MemOSRecall|LongTermProfile|Impression|Summary|ContinuityState)\]/i.test(String(text || ''));
+}
+
 function createConversationContextHelpers(deps = {}) {
   const OPENAI_COMPATIBLE_CACHE_CONTROL = Object.freeze({
     type: 'ephemeral',
@@ -200,7 +204,10 @@ function createConversationContextHelpers(deps = {}) {
     const stableBlockMessages = mapStableSystemBlocksToMessages(stableSystemBlocks);
     const dynamicBlockMessages = mapDynamicContextBlocksToMessages(dynamicContextBlocks)
       .filter((message) => hasMessageContent(message));
-    const fallbackDynamicMessages = (!stableBlockMessages.length && dynamicPrompt)
+    const fallbackDynamicMessages = (
+      dynamicPrompt
+      && (!stableBlockMessages.length || (dynamicBlockMessages.length === 0 && dynamicPromptHasContextMarker(dynamicPrompt)))
+    )
       ? [{ role: 'system', content: dynamicPrompt }]
       : [];
     return [

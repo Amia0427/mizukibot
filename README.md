@@ -140,6 +140,7 @@ npm run diag:memory
 npm run diag:memory -- audit --limit 5
 npm run diag:continuity
 npm run diag:main-reply
+npm run diag:main-reply-prompt -- --limit 20
 npm run diag:runtime
 npm run diag:runtime-hotspots
 npm run diag:low-resource
@@ -197,6 +198,7 @@ MEMORY_V3_SESSION_RECENT_MESSAGES=96
 
 - 主回复 `short_term_continuity` 动态块会携带更长的 `[RecentRawTurns]`、重启恢复摘要和结构化短期状态。
 - `.env` 里的同名配置仍会覆盖默认值；如果本地已有旧值，需要同步调高。
+- 更新 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 会补最小记忆块；`npm run diag:main-reply-prompt` 可查看最近主模型请求是否实际含系统提示词和 `[RetrievedMemoryLite]` / `[DailyJournal]` / `[ShortTermContinuity]` / `[MemOSRecall]`。
 - 详细目标见 `docs/main-reply-context.md`。
 
 ### Windows 运维
