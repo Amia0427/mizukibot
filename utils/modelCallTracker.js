@@ -84,6 +84,7 @@ function startModelCall(meta = {}) {
         ? meta.memoryInjected
         : requestSummary.memory_injected
     ),
+    prompt_integrity: requestSummary.prompt_integrity || null,
     prompt_caching: promptCaching,
     user_id: normalizeText(meta.userId),
     task_id: normalizeText(meta.taskId),
@@ -175,6 +176,7 @@ function finalizeRecord(id, patch = {}) {
     message_count: cloned.message_count,
     tool_count: cloned.tool_count,
     memory_injected: cloned.memory_injected,
+    prompt_integrity: cloned.prompt_integrity,
     prompt_caching: cloned.prompt_caching,
     usage: cloned.usage,
     user_id: cloned.user_id,

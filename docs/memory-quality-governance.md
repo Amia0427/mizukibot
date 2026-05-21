@@ -1,6 +1,6 @@
 # Memory Quality Governance
 
-更新时间：2026-05-21 21:09 +08:00
+更新时间：2026-05-21 21:38 +08:00
 
 ## 目标
 
@@ -25,6 +25,7 @@
 更新 2026-05-20 00:55 +08:00：修复图片/战绩图召回链路。图片意图的 `mem search --source all` 会合并图片索引；凌晨 4 点前的“今天”同时覆盖前一自然日；sender-scoped 查询只回查当前用户发出的图；路由/planner 对“今天/昨天发给你什么图”改走 `memory_cli`，避免 notebook-answer chat-only 直接凭空否认。
 更新 2026-05-20 01:23 +08:00：新增图片视觉摘要长期写入。图片入库后异步使用 `MEMORY_MODEL` 生成摘要，摘要带 `[YYYY-MM-DD HH:mm]` 前缀，落到 `image_memory_index.summary` 并追加 `memory_confirmed/image_visual_summary` 事件，供后续长期记忆检索。
 更新 2026-05-21 21:09 +08:00：主回复短期上下文默认加宽。`short_term_continuity` prompt 预算提高到 3600 tokens，近期 raw turns、session summary、bridge 和 Memory V3 session tail 默认窗口同步加大，减少主回复模型短期断片。
+更新 2026-05-21 21:38 +08:00：主回复 prompt 完整性新增保底和观测。`prepare` 软超时 fallback 会补最小记忆动态块；`data/model-calls.ndjson` 新增 `prompt_integrity`，可用 `npm run diag:main-reply-prompt` 检查最终主模型请求里的系统提示词和记忆标记。
 
 ## 运维顺序
 
