@@ -571,6 +571,8 @@ prepare
 
 更新 2026-05-21 22:38 +08:00：`/create` 生图错误映射已区分上游临时资源失效；`file not found, The resource is valid for 2 hours` 不再误报为“当前生图接口不存在”。
 
+更新 2026-05-21 22:53 +08:00：Right Code Draw 应按文档使用 `/draw` 基础地址和 `images` 协议；下载临时图片 URL 失败时会把真实图片 URL 记录到 `requestUrl`，避免把资源 404 误判成 `/v1/chat/completions` 接口 404。
+
 ---
 
 ## 修改入口指南
