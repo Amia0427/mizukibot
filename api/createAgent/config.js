@@ -102,6 +102,12 @@ function buildCreateAgentGenerationUrlCandidates(baseUrl = '') {
   const normalizedBaseUrl = normalizeCreateAgentBaseUrl(baseUrl);
   if (!normalizedBaseUrl) return [];
   const baseWithoutSlash = normalizedBaseUrl.replace(/\/+$/g, '');
+  if (/\/draw$/i.test(baseWithoutSlash)) {
+    return [
+      `${baseWithoutSlash}/v1/images/generations`,
+      `${baseWithoutSlash}/images/generations`
+    ];
+  }
   const candidates = [`${baseWithoutSlash}/images/generations`];
   if (!/\/v1$/i.test(baseWithoutSlash)) {
     candidates.push(`${baseWithoutSlash}/v1/images/generations`);
