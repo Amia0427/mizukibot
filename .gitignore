@@ -22,6 +22,9 @@ _migration_backup_*/
 _tmp_*.txt
 _tmp_*.log
 _tmp_*.tar.gz
+*.bak_codex_*
+*.bak-*
+*.before.json
 artifacts/tmp/
 artifacts/logs/
 artifacts/memory-recall-eval/*.tmp
