@@ -44,7 +44,30 @@ function clearProjectCache() {
       recallSource: 'knowledge_base',
       sourceToolName: 'search_memory',
       durationMs: 321,
-      knowledgebaseIdsCount: 1
+      knowledgebaseIdsCount: 1,
+      rawCandidateCount: 2,
+      queryMode: 'compact',
+      queryChanged: true,
+      rawQueryPreview: '继续刚才的关系称呼',
+      routeGate: {
+        enabled: true,
+        allowed: true,
+        reason: 'allowlist_match',
+        matched: 'lore',
+        queryClass: 'external_kb',
+        allowlist: ['lore'],
+        routeSignals: ['lore/worldbook']
+      },
+      quality: {
+        enabled: true,
+        minScore: 0.5,
+        minChars: 6,
+        kept: 1,
+        removed: 1,
+        removedItems: [
+          { id: 'low', reason: 'below_min_score', score: 0.2, text: '低分内容不应进入 prompt。' }
+        ]
+      }
     }
   };
   const dedupedRecall = {
@@ -140,6 +163,10 @@ function clearProjectCache() {
   assert.strictEqual(planner.memos.usedBeforeDedupe, true);
   assert.strictEqual(planner.memos.usedAfterDedupe, false);
   assert.strictEqual(planner.memos.dedupe.removed, 1);
+  assert.strictEqual(planner.memos.queryMode, 'compact');
+  assert.strictEqual(planner.memos.queryChanged, true);
+  assert.strictEqual(planner.memos.routeGate.reason, 'allowlist_match');
+  assert.strictEqual(planner.memos.quality.removed, 1);
   assert.ok(planner.memos.rawItems[0].textHash);
   assert.ok(planner.memos.rawItems[0].textPreview.includes('完整内容'));
   assert.strictEqual(prompt.prompt.hasMemosRecall, false);

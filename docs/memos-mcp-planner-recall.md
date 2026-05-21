@@ -1,6 +1,6 @@
 # MemOS MCP Planner Recall
 
-更新时间：2026-05-20 00:42 +08:00
+更新时间：2026-05-21 21:38 +08:00
 
 ## 目标
 
@@ -34,6 +34,13 @@ MEMOS_KB_FALLBACK_SEARCH_ENABLED=false
 MEMOS_RECALL_TOP_K=5
 MEMOS_RECALL_MAX_CHARS=900
 MEMOS_RECALL_TIMEOUT_MS=1200
+MEMOS_RECALL_ROUTE_ALLOWLIST=
+MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED=true
+MEMOS_RECALL_QUERY_MODE=compact
+MEMOS_RECALL_QUERY_MAX_CHARS=160
+MEMOS_RECALL_MIN_SCORE=0
+MEMOS_RECALL_MIN_CHARS=6
+MEMOS_RECALL_REQUIRE_TITLE=false
 MEMOS_WRITE_ENABLED=false
 MEMOS_WRITE_ASYNC=true
 ```
@@ -49,6 +56,17 @@ MEMOS_WRITE_ASYNC=true
 - 本地 agent 运行时不写远端记忆：即使误配 `MEMOS_WRITE_ENABLED=true`，`addMessageToMemos()` 也会返回 `remote_write_disabled`，不会调用 `add_message`。
 - 不自动调用 `add_message`、`add_kb_document`、`create_knowledge_base`、`delete_kb_documents`、`remove_knowledge_base`。
 - 如需临时兼容旧记忆搜索，可显式设置 `MEMOS_RECALL_SOURCE=search_memory`；如需 KB 为空再退回搜索，显式设置 `MEMOS_KB_FALLBACK_SEARCH_ENABLED=true`。
+
+## 本地主权边界
+
+2026-05-21 21:20 +08:00：新增 MemOS 首批召回治理目标，保持本地记忆为主。
+
+- 默认 `MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED=true`：最近聊天、关系称呼、用户画像、短期连续性类 query 直接跳过远端 MemOS。
+- `MEMOS_RECALL_ROUTE_ALLOWLIST` 可限制远端只服务于 `lore/worldbook/docs/project` 等路由；空值表示开放但仍执行本地 query guard。
+- `MEMOS_RECALL_QUERY_MODE=compact` 会清理“刚才/上次/继续”等本地连续性噪声，并拼接 route signal / directed context 形成短 query；`raw` 保留原 query，`off` 关闭改写。
+- `MEMOS_RECALL_MIN_SCORE`、`MEMOS_RECALL_MIN_CHARS`、`MEMOS_RECALL_REQUIRE_TITLE` 在进入 planner 前过滤远端候选；被过滤项只写 diagnostics。
+- 去重层现在识别简单否定冲突，远端候选与本地事实冲突时标记 `remote_conflict_with_local` 并移出 `[MemOSRecall]`。
+- 观测日志新增 `queryMode`、`queryChanged`、`routeGate`、`quality`、`rawCandidateCount` 字段，用于判断远端是被路由挡住、质量过滤还是被本地裁决。
 
 ## 远端知识库只读模式
 
@@ -70,8 +88,10 @@ MEMOS_WRITE_ASYNC=true
 2026-05-20 00:19 +08:00：新增 `data/memory-recall-observability.ndjson`，用于评估 MemOS 远端知识库召回和本地 Memory V3/向量记忆召回的速度、命中和最终注入情况。
 
 - `stage=planner_memos_recall`：记录 MemOS 召回耗时、召回源、工具名、知识库数量、去重前后候选数、`usedBeforeDedupe`、`usedAfterDedupe`、`rejectedReason`、去重原因。
+- `stage=planner_memos_recall` 也记录 query 改写、路由门、质量过滤和本地冲突裁决摘要；仍只保存预览与 hash。
 - `stage=prepare_main_prompt_blocks`：记录主回复 prompt 的 `stableBlockIds`、`dynamicBlockIds`、`assistantOnlyBlockIds`，以及 `hasMemosRecall`、`hasRetrievedMemoryLite`、`hasShortTermContinuity`。
 - `stage=memos_recall_dropped_before_prompt`：表示 planner 已选择 `memos_recall`，但召回对象未传到 prompt 构建或最终 block 未进入主 prompt。
+- 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 若检测到 planner 已 include 且 MemOS recall 可用，会补 `memos_recall` 动态块；`data/model-calls.ndjson` 的 `prompt_integrity.has_memos_recall` 可验证最终主模型请求是否实际带入。
 - 日志只写候选的短 `textPreview` 和 `textHash`，不写完整远端知识库正文，不写 API key。
 - 结合 `data/model-calls.ndjson` 可按 `requestId` 对齐主回复耗时和调用次数；主回复模型调用次数仍只看 main reply 记录。
 

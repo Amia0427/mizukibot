@@ -3,6 +3,7 @@ const assert = require('assert');
 const {
   collectLocalMemoryTexts,
   dedupeMemosRecallAgainstMemoryContext,
+  findConflictReason,
   findDuplicateReason,
   normalizeMemosItems
 } = require('../utils/memoryRecallDeduper');
@@ -22,6 +23,12 @@ const {
   assert.ok(localTexts.some((text) => text.includes('直接给结论')));
   assert.strictEqual(findDuplicateReason('用户偏好直接给结论，再补关键细节。', localTexts), 'normalized_hash');
   assert.ok(findDuplicateReason('用户偏好先直接给结论，然后再补关键细节。', localTexts));
+
+  const conflictContext = {
+    memoryForPrompt: '[RelevantEvidence]\n用户喜欢喝咖啡。'
+  };
+  const conflictTexts = collectLocalMemoryTexts(conflictContext);
+  assert.strictEqual(findConflictReason('用户不喜欢喝咖啡。', conflictTexts), 'remote_conflict_with_local');
 
   const recall = {
     query: '继续项目',
@@ -54,6 +61,17 @@ const {
   assert.strictEqual(allDuplicate.used, false);
   assert.strictEqual(allDuplicate.rejectedReason, 'deduped_by_local_memory');
   assert.strictEqual(allDuplicate.promptText, '');
+
+  const conflict = dedupeMemosRecallAgainstMemoryContext({
+    query: '偏好',
+    used: true,
+    items: [
+      { id: 'conflict', text: '用户不喜欢喝咖啡。' }
+    ]
+  }, conflictContext);
+  assert.strictEqual(conflict.used, false);
+  assert.strictEqual(conflict.rejectedReason, 'deduped_by_local_memory');
+  assert.strictEqual(conflict.diagnostics.dedupe.removedItems[0].reason, 'remote_conflict_with_local');
 
   const promptOnly = normalizeMemosItems({
     promptText: '[MemOSRecall]\n1. 用户偏好直接给结论。\n2. 用户喜欢简短回答。'
