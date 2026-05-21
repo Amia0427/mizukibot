@@ -25,7 +25,10 @@ module.exports = (async () => {
       PLAN_API_BASE_URL: 'https://planner.example.test/v1',
       PLAN_API_KEY: 'planner-key',
       PLAN_MODEL: 'planner-model',
-      PLANNER_SUBAGENT_ENABLED: '0'
+      PLANNER_MAX_MODEL_CALLS: '2',
+      PLANNER_SEMANTIC_REFINE_ENABLED: 'true',
+      PLANNER_SUBAGENT_ENABLED: '0',
+      MEMOS_MCP_ENABLED: 'false'
     });
 
     clearProjectCache();
@@ -59,7 +62,12 @@ module.exports = (async () => {
         intent: {},
         facets: {}
       },
-      allowedTools: []
+      allowedTools: [],
+      config: {
+        MEMOS_MCP_ENABLED: false,
+        PLANNER_MAX_MODEL_CALLS: 2,
+        PLANNER_SEMANTIC_REFINE_ENABLED: true
+      }
     });
 
     assert.strictEqual(calls.length, 1);

@@ -384,6 +384,9 @@ module.exports = {
   PLAN_API_KEY: pick('PLAN_API_KEY', pick('PLANNER_API_KEY', pick('PLAN_APIKEY', pick('PLANNER_APIKEY', '')))),
   PLAN_MODEL: pick('PLAN_MODEL', pick('PLANNER_MODEL', 'gemini-3-pro-preview')),
   PLAN_REASONING_EFFORT: pick('PLAN_REASONING_EFFORT', pick('PLANNER_REASONING_EFFORT', 'high')),
+  PLANNER_MAX_MODEL_CALLS: Math.max(1, Math.min(3, pickNum('PLANNER_MAX_MODEL_CALLS', 2))),
+  PLANNER_SEMANTIC_REFINE_ENABLED: pickBool('PLANNER_SEMANTIC_REFINE_ENABLED', true),
+  PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD: Math.max(0, Math.min(1, pickNum('PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD', 0.72))),
   MODEL_SELF_CHECK_TIMEOUT_MS: Math.max(1000, pickNum('MODEL_SELF_CHECK_TIMEOUT_MS', 12000)),
   // AI router can use a dedicated endpoint/key/model. Empty values fall back to the main AI config.
   AI_ROUTER_BASE_URL: pick('AI_ROUTER_BASE_URL', pick('AI_ROUTER_BASEURI', '')),

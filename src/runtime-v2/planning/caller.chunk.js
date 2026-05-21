@@ -79,7 +79,184 @@ function attachMemosRecallToPlannerDecision(decision = {}, options = {}) {
   };
 }
 
-async function callPlannerModelV2(route = {}, options = {}) {
+function normalizePlannerPositiveInt(value, fallback = 1, min = 1, max = 3) {
+  const number = Math.floor(Number(value));
+  if (!Number.isFinite(number)) return Math.max(min, Math.min(max, fallback));
+  return Math.max(min, Math.min(max, number));
+}
+
+function getPlannerMaxModelCalls(options = {}) {
+  const optionConfig = normalizeObject(options.config, {});
+  return normalizePlannerPositiveInt(
+    options.plannerMaxModelCalls
+      ?? optionConfig.PLANNER_MAX_MODEL_CALLS
+      ?? config.PLANNER_MAX_MODEL_CALLS
+      ?? 2,
+    2,
+    1,
+    3
+  );
+}
+
+function isPlannerSemanticRefineEnabled(options = {}) {
+  const optionConfig = normalizeObject(options.config, {});
+  if (options.plannerSemanticRefineEnabled === false || options.semanticRefineEnabled === false) return false;
+  if (optionConfig.PLANNER_SEMANTIC_REFINE_ENABLED === false) return false;
+  return config.PLANNER_SEMANTIC_REFINE_ENABLED !== false;
+}
+
+function getPlannerSemanticConfidenceThreshold(options = {}) {
+  const optionConfig = normalizeObject(options.config, {});
+  const value = Number(
+    options.plannerSemanticConfidenceThreshold
+      ?? optionConfig.PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD
+      ?? config.PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD
+      ?? 0.72
+  );
+  if (!Number.isFinite(value)) return 0.72;
+  return Math.max(0, Math.min(1, value));
+}
+
+function readPlannerSemanticConfidence(output = {}) {
+  const meta = normalizeObject(output?.plannerMeta, {});
+  const assessment = normalizeObject(meta.semanticAssessment || output?.semanticAssessment, {});
+  const value = Number(
+    meta.semanticConfidence
+      ?? assessment.confidence
+      ?? output?.semanticConfidence
+  );
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : null;
+}
+
+function plannerOutputHasDecisionShape(output = {}) {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return false;
+  if (Object.keys(output).length === 0) return false;
+  if (normalizeText(output.mode)) return true;
+  if (Array.isArray(output.steps)) return true;
+  if (Array.isArray(output.allowedToolNames)) return true;
+  if (output.dynamicPromptPlan && typeof output.dynamicPromptPlan === 'object') return true;
+  if (output.plannerMeta && typeof output.plannerMeta === 'object') return true;
+  return false;
+}
+
+function getPlannerSemanticRefineReasons(output = null, options = {}) {
+  const reasons = [];
+  if (!plannerOutputHasDecisionShape(output)) {
+    reasons.push(output && typeof output === 'object' ? 'empty_planner_output' : 'invalid_planner_json');
+    return reasons;
+  }
+  const meta = normalizeObject(output.plannerMeta, {});
+  const assessment = normalizeObject(meta.semanticAssessment || output.semanticAssessment, {});
+  const confidence = readPlannerSemanticConfidence(output);
+  if (
+    meta.needsSemanticRefinement === true
+    || meta.semanticRefinementRequested === true
+    || assessment.needsRefinement === true
+    || normalizeText(assessment.action).toLowerCase() === 'semantic_refine'
+  ) {
+    reasons.push('requested_semantic_refinement');
+  }
+  if (confidence !== null && confidence < getPlannerSemanticConfidenceThreshold(options)) {
+    reasons.push('low_semantic_confidence');
+  }
+  const mode = normalizeText(output.mode);
+  const allowed = normalizeToolNames(output.allowedToolNames);
+  if (mode === 'tool_plan' && (allowed.length === 0 || normalizeArray(output.steps).length === 0)) {
+    reasons.push('incomplete_tool_plan');
+  }
+  return Array.from(new Set(reasons));
+}
+
+function summarizePlannerDecisionForRefine(output = {}) {
+  const meta = normalizeObject(output?.plannerMeta, {});
+  const dynamicPromptPlan = normalizeObject(output?.dynamicPromptPlan || meta.dynamicPromptPlan, {});
+  return {
+    mode: normalizeText(output?.mode),
+    taskShape: normalizeText(output?.taskShape),
+    allowedToolNames: normalizeToolNames(output?.allowedToolNames),
+    stepTools: normalizeArray(output?.steps).map((step) => normalizeText(step?.tool)).filter(Boolean),
+    personaModules: normalizeArray(output?.personaModules || meta.personaModules).map((item) => normalizeText(item)).filter(Boolean),
+    enabledBlockIds: normalizeArray(dynamicPromptPlan.enabledBlockIds).map((item) => normalizeText(item)).filter(Boolean),
+    semanticConfidence: readPlannerSemanticConfidence(output),
+    semanticAssessment: normalizeObject(meta.semanticAssessment || output?.semanticAssessment, {}),
+    reason: clampReason(normalizeText(meta.reason), 180)
+  };
+}
+
+function buildPlannerSemanticRefinementPayload({ route = {}, output = null, reasons = [], attempt = 1, maxCalls = 1 } = {}) {
+  return {
+    schemaVersion: 'planner_semantic_refinement_v1',
+    attempt,
+    maxCalls,
+    reasons: normalizeArray(reasons).map((item) => normalizeText(item)).filter(Boolean),
+    currentQuestion: normalizeText(route?.question || route?.cleanText),
+    instruction: [
+      'Re-evaluate the user intent, source scope, temporal need, context dependencies, and tool/context selection.',
+      'Correct any overly broad chat-only choice, generic tool substitution, missing dynamic context block, or incomplete execution graph.',
+      'Return the final planner JSON only; include plannerMeta.semanticAssessment and a calibrated semanticConfidence.'
+    ].join(' '),
+    previousDecision: output && typeof output === 'object'
+      ? summarizePlannerDecisionForRefine(output)
+      : null
+  };
+}
+
+function buildPlannerModelAttemptMeta(attempts = [], maxCalls = 1) {
+  const normalizedAttempts = normalizeArray(attempts).map((attempt) => ({
+    attempt: normalizePlannerPositiveInt(attempt.attempt, 1, 1, 10),
+    ok: attempt.ok === true,
+    reasons: normalizeArray(attempt.reasons).map((item) => normalizeText(item)).filter(Boolean),
+    semanticConfidence: attempt.semanticConfidence === null || attempt.semanticConfidence === undefined
+      ? null
+      : Math.max(0, Math.min(1, Number(attempt.semanticConfidence))),
+    refinedNext: attempt.refinedNext === true
+  }));
+  return {
+    totalModelCalls: normalizedAttempts.length,
+    maxModelCalls: maxCalls,
+    refined: normalizedAttempts.some((attempt) => attempt.refinedNext),
+    triggerReasons: Array.from(new Set(normalizedAttempts.flatMap((attempt) => attempt.reasons))),
+    attempts: normalizedAttempts
+  };
+}
+
+function attachPlannerModelAttemptMeta(decision = {}, attemptMeta = {}) {
+  const meta = normalizeObject(attemptMeta, {});
+  if (!decision || typeof decision !== 'object' || Object.keys(meta).length === 0) return decision;
+  const existingMeta = normalizeObject(decision.plannerMeta?.semanticRefinement, {});
+  const mergedMeta = {
+    ...existingMeta,
+    ...meta,
+    triggerReasons: Array.from(new Set(
+      normalizeArray(existingMeta.triggerReasons)
+        .concat(normalizeArray(meta.triggerReasons))
+        .map((item) => normalizeText(item))
+        .filter(Boolean)
+    )),
+    attempts: normalizeArray(meta.attempts).length > 0
+      ? normalizeArray(meta.attempts)
+      : normalizeArray(existingMeta.attempts)
+  };
+  const next = {
+    ...decision,
+    plannerMeta: {
+      ...normalizeObject(decision.plannerMeta, {}),
+      semanticRefinement: mergedMeta
+    }
+  };
+  if (next.validation && typeof next.validation === 'object') {
+    next.validation = {
+      ...next.validation,
+      plannerMeta: {
+        ...normalizeObject(next.validation.plannerMeta, {}),
+        semanticRefinement: mergedMeta
+      }
+    };
+  }
+  return next;
+}
+
+async function callPlannerModelAttemptV2(route = {}, options = {}) {
   const apiBaseUrl = getPlannerApiBaseUrlV2();
   const apiKey = getPlannerApiKeyV2();
   if (!apiBaseUrl || !apiKey) return null;
@@ -94,7 +271,61 @@ async function callPlannerModelV2(route = {}, options = {}) {
   const rawText = typeof message?.content === 'string'
     ? message.content
     : normalizeArray(message?.content).map((part) => (typeof part === 'string' ? part : String(part?.text || ''))).join('');
-  return extractJsonSafely(rawText);
+  return {
+    output: extractJsonSafely(rawText),
+    rawText
+  };
+}
+
+async function callPlannerModelV2(route = {}, options = {}) {
+  const attempt = await callPlannerModelAttemptV2(route, options);
+  return attempt?.output || null;
+}
+
+async function callPlannerModelWithSemanticRefinement(route = {}, options = {}, latencyMeta = {}) {
+  const maxCalls = getPlannerMaxModelCalls(options);
+  const attempts = [];
+  const refineEnabled = isPlannerSemanticRefineEnabled(options) && maxCalls > 1;
+  let refinement = normalizeObject(options.semanticRefinement, null);
+  let lastOutput = null;
+
+  for (let index = 0; index < maxCalls; index += 1) {
+    const attemptOptions = refinement
+      ? { ...options, semanticRefinement: refinement }
+      : options;
+    const modelStartedAt = nowMs();
+    const attemptResult = await callPlannerModelAttemptV2(route, attemptOptions);
+    addPlannerLatency(latencyMeta, 'planner_model_ms', modelStartedAt);
+    const output = attemptResult?.output || null;
+    const reasons = getPlannerSemanticRefineReasons(output, attemptOptions);
+    const canRefineNext = refineEnabled && reasons.length > 0 && index + 1 < maxCalls;
+    attempts.push({
+      attempt: index + 1,
+      ok: plannerOutputHasDecisionShape(output),
+      reasons,
+      semanticConfidence: readPlannerSemanticConfidence(output),
+      refinedNext: canRefineNext
+    });
+    lastOutput = output;
+    if (!canRefineNext) {
+      return {
+        output,
+        attemptMeta: buildPlannerModelAttemptMeta(attempts, maxCalls)
+      };
+    }
+    refinement = buildPlannerSemanticRefinementPayload({
+      route,
+      output,
+      reasons,
+      attempt: index + 1,
+      maxCalls
+    });
+  }
+
+  return {
+    output: lastOutput,
+    attemptMeta: buildPlannerModelAttemptMeta(attempts, maxCalls)
+  };
 }
 
 async function callPlannerSubagentV2(route = {}, options = {}) {
@@ -272,19 +503,22 @@ async function planRequestV2(input = {}) {
   }
 
   try {
-    const modelStartedAt = nowMs();
-    const plannerOutput = await callPlannerModelV2(route, options);
-    addPlannerLatency(requestLatencyMeta, 'planner_model_ms', modelStartedAt);
+    const plannerModelResult = await callPlannerModelWithSemanticRefinement(route, options, requestLatencyMeta);
+    const plannerOutput = plannerModelResult?.output || null;
     if (plannerOutput && typeof plannerOutput === 'object') {
       const normalizeStartedAt = nowMs();
       const normalized = normalizePlannerDecisionV2(plannerOutput, route, {
         ...options,
         fallbackUsed: false,
-        latencyMeta: requestLatencyMeta
+        latencyMeta: requestLatencyMeta,
+        plannerModelAttemptMeta: plannerModelResult?.attemptMeta
       });
       addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
       return attachMemosRecallToPlannerDecision(
-        attachPlannerLatencyMeta(normalized, requestLatencyMeta),
+        attachPlannerLatencyMeta(
+          attachPlannerModelAttemptMeta(normalized, plannerModelResult?.attemptMeta),
+          requestLatencyMeta
+        ),
         options
       );
     }
