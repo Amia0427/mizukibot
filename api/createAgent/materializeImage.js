@@ -55,7 +55,9 @@ async function downloadImageFromUrl(imageUrl = '', prompt = '', runtimeConfig = 
     );
     return { filePath, buffer };
   } catch (error) {
-    throw new Error(normalizeRequestError(error));
+    const normalized = new Error(normalizeRequestError(error));
+    normalized.requestUrl = rawUrl;
+    throw normalized;
   }
 }
 

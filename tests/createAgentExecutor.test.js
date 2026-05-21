@@ -137,6 +137,10 @@ module.exports = (async () => {
       buildCreateAgentGenerationUrlCandidates('https://www.packyapi.com'),
       ['https://www.packyapi.com/images/generations', 'https://www.packyapi.com/v1/images/generations']
     );
+    assert.deepStrictEqual(
+      buildCreateAgentGenerationUrlCandidates('https://www.right.codes/draw'),
+      ['https://www.right.codes/draw/v1/images/generations', 'https://www.right.codes/draw/images/generations']
+    );
 
     assert.deepStrictEqual(
       extractImageFromGenerationResponse({ data: [{ b64_json: 'Zm9v' }] }),
@@ -687,6 +691,26 @@ module.exports = (async () => {
       {}
     );
     assert.ok(fs.existsSync(downloadedFromDataUrl.filePath));
+
+    await assert.rejects(
+      () => downloadImageFromUrl('https://example.com/expired.png', 'expired url sample', runtimeConfig, {
+        httpClient: {
+          async get() {
+            const error = new Error('not found');
+            error.response = {
+              status: 404,
+              data: Buffer.from('file not found, The resource is valid for 2 hours', 'utf8')
+            };
+            throw error;
+          }
+        }
+      }),
+      (error) => {
+        assert.strictEqual(error.requestUrl, 'https://example.com/expired.png');
+        assert.strictEqual(error.message, 'http_error status=404 body=file not found, The resource is valid for 2 hours');
+        return true;
+      }
+    );
 
     const overQuotaConfig = {
       ...runtimeConfig,
