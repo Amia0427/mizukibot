@@ -829,6 +829,9 @@ function buildUserFacingFailureReply(error = null, runtimeConfig = {}) {
     return `当前生图供应商不支持 ${providerModel || '该模型'}`;
   }
   if (lower.includes('chat completions endpoint returned html')) return '当前生图接口路径不兼容，供应商返回了网页页面';
+  if (lower.includes('file not found') && lower.includes('resource is valid for 2 hours')) {
+    return '生图临时资源已失效，请重试或更换提示词';
+  }
   if (lower.includes('http_error') && lower.includes('400')) return '生图请求参数无效';
   if (lower.includes('http_error') && lower.includes('404')) return '当前生图接口不存在';
   if (lower.includes('http_error') && (lower.includes('401') || lower.includes('403'))) return '生图鉴权失败';

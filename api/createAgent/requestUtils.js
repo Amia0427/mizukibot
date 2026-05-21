@@ -1,6 +1,12 @@
 function stringifyBody(body = null) {
   if (typeof body === 'string') return body.trim();
   if (body === null || body === undefined) return '';
+  if (Buffer.isBuffer(body)) return body.toString('utf8').trim();
+  if (body && typeof body === 'object' && body.type === 'Buffer' && Array.isArray(body.data)) {
+    try {
+      return Buffer.from(body.data).toString('utf8').trim();
+    } catch (_) {}
+  }
   try {
     return JSON.stringify(body);
   } catch (_) {
