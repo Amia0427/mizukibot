@@ -165,7 +165,7 @@ npm run memory:v3:migrate
 
 ### 记忆质量与召回治理
 
-更新时间：2026-05-21 22:06 +08:00
+更新时间：2026-05-21 22:23 +08:00
 
 ```bash
 npm run diag:memory -- diagnose --skip-probe --limit 20
@@ -186,6 +186,7 @@ node scripts/repair-memory-vector-index.js --apply --compact
 - 当前向量健康门禁若提示 `mustMaterializeFirst`，先运行 `npm run memory:v3:migrate` 进行安全物化；若提示 stale/ready-but-not-synced，再运行修复脚本。
 - 更新 2026-05-21 21:30 +08:00：不要把 legacy 导入当日常维护命令；重复导入会制造 migration 事件膨胀，日常只用默认物化模式。
 - 更新 2026-05-21 22:06 +08:00：Memory V3 物化层会对重复 migration/node/episode 事件做非删除式投影去重；`--auto-gold` 会从当前 active projection 生成评估集，避免旧手工 cases 中相对日期污染影响门禁。LanceDB 读门禁的 query 覆盖率低水位默认 `0.2`，召回质量仍由 recall gate 判定。
+- 维护记录 2026-05-21 22:23 +08:00：安全物化和 LanceDB reconcile 后，`projectionStale=false`、`staleTableRows=0`、`readyButNotSynced=0`；`lancedb-gate --auto-gold --limit 50` 通过，LanceDB recall@8=0.96、MRR@8=0.914、emptyResultRate=0。
 - `POST_REPLY_VECTOR_WATCHDOG_ENABLED=true` 时，post-reply worker 会独立低频巡检：projection stale 自动 materialize、LanceDB 漂移自动 reconcile、pending embedding 小批量 backfill+sync。
 - 维护记录 2026-05-19 22:24 +08:00：已完成 LanceDB reconcile、memory-v3 projection 刷新和 embedding backfill；`pendingRows=0`、`readyButNotSynced=0`、`staleTableRows=0`，语义审查硬指标通过。
 

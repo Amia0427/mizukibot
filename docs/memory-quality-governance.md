@@ -1,6 +1,6 @@
 # Memory Quality Governance
 
-更新时间：2026-05-21 22:06 +08:00
+更新时间：2026-05-21 22:23 +08:00
 
 ## 目标
 
@@ -58,6 +58,7 @@
 - 2026-05-20 00:42 +08:00：post-reply worker 接入自动向量 watchdog，默认 30 分钟巡检一次；健康时跳过，发现 projection stale / LanceDB drift / pending embedding 时自动小批量维护。
 - 2026-05-21 21:30 +08:00：发现旧维护入口会重复导入 legacy migration events，已将默认命令收敛为只物化；重导旧数据必须显式加 `--import-legacy`。
 - 2026-05-21 22:06 +08:00：本轮安全物化后 raw events 143461，投影去重输入 41956，抑制重复 101505；修复索引后 `staleTableRows=0`、`readyButNotSynced=0`，auto-gold LanceDB recall@8=0.96、MRR@8=0.914、emptyResultRate=0。
+- 2026-05-21 22:23 +08:00：最终复核安全物化后 raw events 143465，投影去重输入 41960，抑制重复 101505；LanceDB reconcile 后 `projectionStale=false`、`staleTableRows=0`、`readyButNotSynced=0`，`lancedb-gate --limit 50 --auto-gold` 通过并建议 `enable_lancedb_read`。
 
 ## 验收命令
 
