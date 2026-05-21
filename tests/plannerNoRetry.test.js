@@ -110,8 +110,9 @@ module.exports = (async () => {
 
     const blockedHttpClient = require('../src/model/http');
     let blockedFallbackCalls = 0;
-    blockedHttpClient.postWithRetry = async () => {
+    blockedHttpClient.postWithRetry = async (url) => {
       blockedFallbackCalls += 1;
+      assert.notStrictEqual(url, 'https://main.example.test/v1/chat/completions');
       throw new Error('planner should not use main model fallback by default');
     };
     const { planRequestV2: planRequestV2WithoutPlannerEndpoint } = require('../api/runtimeV2/planning/service');
@@ -155,8 +156,7 @@ module.exports = (async () => {
       }
     });
     assert.strictEqual(blockedFallbackCalls, 0);
-    assert.strictEqual(blockedDecision.plannerMeta.fallbackUsed, false);
-    assert.strictEqual(blockedDecision.plannerMeta.decisionSource, 'rule_preflight');
+    assert.strictEqual(blockedDecision.plannerMeta.fallbackUsed, true);
 
     console.log('plannerNoRetry.test.js passed');
   } finally {

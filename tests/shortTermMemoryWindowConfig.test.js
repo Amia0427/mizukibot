@@ -87,8 +87,6 @@ module.exports = (async () => {
   assert.strictEqual(restoredHistory[sessionKey].length, 12);
   assert.strictEqual(restored.freshnessTier, 'raw_recent');
   assert.strictEqual(restored.rawMessagesRestored, true);
-  assert.strictEqual(restored.freshnessTier, 'raw_recent');
-  assert.strictEqual(restored.rawMessagesRestored, true);
 
   const staleStore = loadBridgeStore();
   staleStore.sessions[sessionKey].updatedAt = Date.now() - (2 * 60 * 60 * 1000);
