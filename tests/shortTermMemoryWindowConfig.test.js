@@ -7,12 +7,12 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-short-term-window
 process.env.DATA_DIR = tempRoot;
 process.env.SHORT_TERM_MEMORY_MAX_TOKENS = '1000';
 process.env.SHORT_TERM_MEMORY_RECENT_MESSAGES = '40';
-process.env.SHORT_TERM_MEMORY_RECENT_TURNS = '10';
-process.env.SHORT_TERM_SCENE_RECENT_TURNS = '6';
+process.env.SHORT_TERM_MEMORY_RECENT_TURNS = '14';
+process.env.SHORT_TERM_SCENE_RECENT_TURNS = '8';
 process.env.SHORT_TERM_MEMORY_COMPRESSION_CHUNK_MESSAGES = '24';
 process.env.SHORT_TERM_BRIDGE_RECENT_MESSAGES = '12';
-process.env.MEMORY_V3_SESSION_RECENT_MESSAGES = '12';
-process.env.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS = '1200';
+process.env.MEMORY_V3_SESSION_RECENT_MESSAGES = '14';
+process.env.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS = '1800';
 process.env.SHORT_TERM_BRIDGE_FILE = path.join(tempRoot, 'short_term_bridge.json');
 
 fs.mkdirSync(tempRoot, { recursive: true });
@@ -59,10 +59,10 @@ module.exports = (async () => {
   }
 
   const state = ensureShortTermMemoryState(sessionKey, shortTermMemory);
-  assert.strictEqual(state.interaction.recentTurns.length, 10);
-  assert.strictEqual(state.interaction.recentTurns[0].content, 'user turn 2');
-  assert.strictEqual(state.scene.recentTurns.length, 6);
-  assert.strictEqual(state.scene.recentTurns[0].content, 'scene turn 2');
+  assert.strictEqual(state.interaction.recentTurns.length, 14);
+  assert.strictEqual(state.interaction.recentTurns[0].content, 'user turn 0');
+  assert.strictEqual(state.scene.recentTurns.length, 8);
+  assert.strictEqual(state.scene.recentTurns[0].content, 'scene turn 0');
 
   persistShortTermBridgeSnapshot(userId, {
     chatHistory,
@@ -91,8 +91,8 @@ module.exports = (async () => {
     sessionKey,
     routeMeta: {}
   });
-  assert.strictEqual(sharedContext.shortTermState.interaction.recentTurns.length, 10);
-  assert.strictEqual(sharedContext.shortTermState.scene.recentTurns.length, 6);
+  assert.strictEqual(sharedContext.shortTermState.interaction.recentTurns.length, 14);
+  assert.strictEqual(sharedContext.shortTermState.scene.recentTurns.length, 8);
 
   const compressionHistory = Array.from({ length: 70 }, (_, index) => ({
     role: index % 2 === 0 ? 'user' : 'assistant',
@@ -133,6 +133,7 @@ module.exports = (async () => {
     .find((item) => item.id === 'short_term_continuity');
   assert.ok(shortTermBlock, 'short-term continuity should be a first-class dynamic prompt block');
   assert.ok(String(shortTermBlock.content || '').includes('[RecentRawTurns]'));
+  assert.ok(String(shortTermBlock.content || '').includes('user turn 0'));
   assert.ok(String(shortTermBlock.content || '').includes('assistant turn 6'));
 
   console.log('shortTermMemoryWindowConfig.test.js passed');

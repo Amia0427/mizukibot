@@ -147,7 +147,7 @@ function formatShortTermMessageLine(message = {}) {
 
 function buildShortTermContinuityPrompt(sharedShortTermContext = {}) {
   const context = sharedShortTermContext && typeof sharedShortTermContext === 'object' ? sharedShortTermContext : {};
-  const maxTokens = Math.max(256, Number(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS || 2200) || 2200);
+  const maxTokens = Math.max(256, Number(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS || 3600) || 3600);
   const scope = context.shortTermScope && typeof context.shortTermScope === 'object' ? context.shortTermScope : {};
   const summary = normalizeText(context.shortTermSummary);
   const recentHistory = normalizeArray(context.recentHistory).map(formatShortTermMessageLine).filter(Boolean);
