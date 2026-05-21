@@ -159,6 +159,30 @@ node scripts/repair-memory-vector-index.js --apply --compact
 - `POST_REPLY_VECTOR_WATCHDOG_ENABLED=true` 时，post-reply worker 会独立低频巡检：projection stale 自动 materialize、LanceDB 漂移自动 reconcile、pending embedding 小批量 backfill+sync。
 - 维护记录 2026-05-19 22:24 +08:00：已完成 LanceDB reconcile、memory-v3 projection 刷新和 embedding backfill；`pendingRows=0`、`readyButNotSynced=0`、`staleTableRows=0`，语义审查硬指标通过。
 
+### 主回复短期上下文
+
+更新时间：2026-05-21 21:09 +08:00
+
+默认已提高主回复模型可见的短期连续性：
+
+```env
+SHORT_TERM_MEMORY_RECENT_MESSAGES=240
+SHORT_TERM_MEMORY_RECENT_TURNS=48
+SHORT_TERM_SCENE_RECENT_TURNS=24
+SESSION_CONTEXT_SUMMARY_MAX_CHARS=520
+SESSION_CONTEXT_SUMMARY_LOAD_COUNT=5
+SESSION_CONTEXT_SUMMARY_MAX_ITEMS_PER_SESSION=32
+SHORT_TERM_BRIDGE_RECENT_MESSAGES=96
+MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3600
+MEMORY_V3_SESSION_RECENT_MESSAGES=96
+```
+
+说明：
+
+- 主回复 `short_term_continuity` 动态块会携带更长的 `[RecentRawTurns]`、重启恢复摘要和结构化短期状态。
+- `.env` 里的同名配置仍会覆盖默认值；如果本地已有旧值，需要同步调高。
+- 详细目标见 `docs/main-reply-context.md`。
+
 ### Windows 运维
 
 ```bash

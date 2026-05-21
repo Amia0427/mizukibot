@@ -9,12 +9,22 @@ function clearProjectCache() {
   }
 }
 
+function useConfigDefault(key) {
+  process.env[key] = '__USE_CONFIG_DEFAULT__';
+}
+
 (() => {
   const snapshot = { ...process.env };
   try {
-    delete process.env.CONTEXT_WINDOW_MAX_TOKENS;
-    delete process.env.SHORT_TERM_MEMORY_MAX_TOKENS;
-    delete process.env.SHORT_TERM_MEMORY_RECENT_MESSAGES;
+    useConfigDefault('CONTEXT_WINDOW_MAX_TOKENS');
+    useConfigDefault('SHORT_TERM_MEMORY_MAX_TOKENS');
+    useConfigDefault('SHORT_TERM_MEMORY_RECENT_MESSAGES');
+    useConfigDefault('SHORT_TERM_MEMORY_RECENT_TURNS');
+    useConfigDefault('SHORT_TERM_SCENE_RECENT_TURNS');
+    useConfigDefault('SESSION_CONTEXT_SUMMARY_MAX_CHARS');
+    useConfigDefault('SESSION_CONTEXT_SUMMARY_LOAD_COUNT');
+    useConfigDefault('MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS');
+    useConfigDefault('MEMORY_V3_SESSION_RECENT_MESSAGES');
 
     clearProjectCache();
     const config = require('../config');
@@ -36,7 +46,13 @@ function clearProjectCache() {
 
     assert.strictEqual(config.CONTEXT_WINDOW_MAX_TOKENS, 400000);
     assert.strictEqual(config.SHORT_TERM_MEMORY_MAX_TOKENS, 120000);
-    assert.strictEqual(config.SHORT_TERM_MEMORY_RECENT_MESSAGES, 80);
+    assert.strictEqual(config.SHORT_TERM_MEMORY_RECENT_MESSAGES, 240);
+    assert.strictEqual(config.SHORT_TERM_MEMORY_RECENT_TURNS, 48);
+    assert.strictEqual(config.SHORT_TERM_SCENE_RECENT_TURNS, 24);
+    assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_MAX_CHARS, 520);
+    assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT, 5);
+    assert.strictEqual(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS, 3600);
+    assert.strictEqual(config.MEMORY_V3_SESSION_RECENT_MESSAGES, 96);
 
     console.log('configPersonaPrompt.test.js passed');
   } finally {
