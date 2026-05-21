@@ -82,6 +82,18 @@ MEMOS_KB_IDS=knowledgebase_id_1
 - 召回观测写入 `data/memory-recall-observability.ndjson`：可按 `requestId` 查看 MemOS 召回耗时、去重前后候选数、planner 是否跳过、主 prompt 是否最终包含 `memos_recall`；若 planner include 但 prompt 前丢失，会记录 `memos_recall_dropped_before_prompt`。
 - 远端 KB 优化优先做分库/分段标题、短 query 改写、路由加权和二阶段过滤；远端结果只作证据，不覆盖本地 Memory V3/短期连续性。
 
+### Planner 语义 refinement
+
+更新时间：2026-05-21 00:00 +08:00
+
+planner v2 会输出 `semanticAssessment` 和 `semanticConfidence`；当第一轮语义置信度低、计划不完整或显式要求 refinement 时，可在同一轮请求内再次调用 planner 模型纠偏。默认 `PLANNER_MAX_MODEL_CALLS=2`，硬上限 3；单次模型请求仍使用 `postWithRetry(..., 0, ...)`，失败后走规则 fallback。
+
+```env
+PLANNER_MAX_MODEL_CALLS=2
+PLANNER_SEMANTIC_REFINE_ENABLED=true
+PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD=0.72
+```
+
 ### 启动
 
 ```bash

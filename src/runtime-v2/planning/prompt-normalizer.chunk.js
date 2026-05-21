@@ -10,6 +10,7 @@ const {
   buildMainReplyDynamicPromptGuide,
   buildPlannerPersonaModuleCatalog,
   buildPlannerStageSystemPrompt,
+  clampNumber,
   config,
   getMainReplyDynamicBlockCatalog,
   getPersonaModuleCatalogSummary,
@@ -62,6 +63,7 @@ function buildPlannerPrompt(toolCatalog = []) {
   return [
     buildPlannerStageSystemPrompt(toolCatalog),
     'Decide the complete tool decision and execution graph in one pass.',
+    'First build a compact semantic understanding of the request: user intent, source scope, temporal/freshness need, context dependencies, constraints, ambiguity, and whether tool evidence is necessary.',
     `"plannerMeta.decisionVersion" must be exactly "${PLANNER_DECISION_VERSION}".`,
     `"plannerMeta.plannerVersion" must be exactly "${DIRECT_CHAT_PLANNER_VERSION}".`,
     'mode must be exactly chat_only or tool_plan.',
@@ -86,6 +88,10 @@ function buildPlannerPrompt(toolCatalog = []) {
     'MemOS recall is internal planner-side evidence. You may enable memos_recall when it contains specific useful memory, but never expose or request MemOS MCP tools in allowedToolNames.',
     'Use enabledBlockIds only for non-persona dynamic blocks. Use personaModules only for persona modules.',
     'For every important include or skip, add a blockDecisions item with decision, confidence, priority, and a short reason.',
+    'Set plannerMeta.semanticConfidence from 0 to 1. Use >=0.86 only when intent, tools, and context selection are clear; use <0.72 when there is meaningful ambiguity, weak source-scope understanding, or an incomplete graph.',
+    'Set plannerMeta.needsSemanticRefinement=true only when another planner pass is likely to correct ambiguity or an incomplete decision; otherwise false.',
+    'Always include plannerMeta.semanticAssessment with intentSummary, sourceScope, contextDependencies, ambiguity, confidence, and needsRefinement.',
+    'If semanticRefinement is present in the user payload, directly address its reasons and previousDecision defects before returning the final JSON.',
     'steps items must include: id, tool, args, kind, dependsOn, parallelGroup, sideEffect, successCriteria, evidenceRequirement, repairPolicy, runtimeBinding, purpose.',
     'Available tools right now:',
     catalogBlock,
@@ -107,6 +113,9 @@ function buildPlannerPrompt(toolCatalog = []) {
     `    "decisionVersion": "${PLANNER_DECISION_VERSION}",`,
     `    "plannerVersion": "${DIRECT_CHAT_PLANNER_VERSION}",`,
     '    "reason": "short reason",',
+    '    "semanticConfidence": 0.88,',
+    '    "needsSemanticRefinement": false,',
+    '    "semanticAssessment": {"intentSummary":"short intent","sourceScope":"current_context|memory|notebook|web|live|action|none","contextDependencies":["directed_context"],"ambiguity":[],"confidence":0.88,"needsRefinement":false},',
     '    "dynamicPromptPlan": {',
     `      "schemaVersion": "${DYNAMIC_CONTEXT_PLAN_VERSION}",`,
     '      "enabledBlockIds": ["directed_context"],',
@@ -153,6 +162,7 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
     ? normalizeArray(options.dynamicPromptBlockCatalog)
     : getMainReplyDynamicBlockCatalog(plannerPersonaModuleCatalog);
   const availableContextSignals = buildAvailableContextSignals(route, options);
+  const semanticRefinement = normalizeObject(options?.semanticRefinement || routeMeta.semanticRefinement, null);
   return {
     question: normalizeText(options.question || route?.question || route?.cleanText),
     cleanText: normalizeText(route?.cleanText),
@@ -177,6 +187,36 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
     continuitySignals: normalizeObject(options?.continuitySignals || routeMeta.continuitySignals, {}),
     memosRecall: normalizeObject(options?.memosRecall || routeMeta.memosRecall || routeMeta.directChatPlanner?.memosRecall || routeMeta.toolPlanner?.memosRecall, {}),
     availableContextSignals,
+    semanticContext: {
+      intentText: getPlannerRequestText(route),
+      contextSummary: sanitizePlannerContextSummary(
+        options?.contextSummary
+        || routeMeta.sessionContextSummary
+        || routeMeta.contextSummary
+        || routeMeta.conversationSummary
+        || '',
+        360
+      ),
+      directedContext: normalizeObject(options?.directedContext || routeMeta.directedContext, null),
+      continuitySignals: normalizeObject(options?.continuitySignals || routeMeta.continuitySignals, {}),
+      availableContextSignals,
+      memorySignals: {
+        hasRetrievedMemory: availableContextSignals.retrievedMemory === true,
+        hasMemosRecall: availableContextSignals.memosRecall === true,
+        hasDailyJournal: availableContextSignals.dailyJournal === true,
+        hasShortTermContinuity: availableContextSignals.shortTermContinuity === true,
+        hasLongTermProfile: availableContextSignals.longTermProfile === true
+      },
+      toolDecisionHints: {
+        explicitAllowlist: allowlist,
+        toolIntent: normalizeToolIntent(route?.meta?.toolIntent),
+        responseIntent: normalizeResponseIntent(route?.meta?.responseIntent),
+        freshness: normalizeText(route?.facets?.freshness),
+        domain: normalizeText(route?.facets?.domain),
+        sourceScope: normalizeText(route?.facets?.sourceScope)
+      }
+    },
+    ...(semanticRefinement ? { semanticRefinement } : {}),
     constraints: normalizeObject(options?.constraints, {}),
     explicitAllowlist: allowlist,
     tools: buildDirectChatToolCatalogSummary(toolCatalog),
@@ -479,6 +519,23 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
       ),
       normalizedByRule,
       normalizationReason: normalizeText(normalizationReason),
+      semanticConfidence: clampNumber(
+        rawDecision?.plannerMeta?.semanticConfidence
+          ?? rawDecision?.plannerMeta?.semanticAssessment?.confidence
+          ?? rawDecision?.semanticConfidence,
+        0,
+        1,
+        null
+      ),
+      needsSemanticRefinement: rawDecision?.plannerMeta?.needsSemanticRefinement === true
+        || rawDecision?.plannerMeta?.semanticAssessment?.needsRefinement === true
+        || rawDecision?.needsSemanticRefinement === true,
+      semanticAssessment: normalizeObject(
+        rawDecision?.plannerMeta?.semanticAssessment
+          || rawDecision?.semanticAssessment,
+        {}
+      ),
+      semanticRefinement: normalizeObject(options.plannerModelAttemptMeta, {}),
       ...buildBackgroundResearchMeta(route, options)
     }
   };
