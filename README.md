@@ -567,6 +567,8 @@ prepare
 - `api/createAgentExecutor.js`
 - `api/createAgent/`
 
+更新 2026-05-21 22:38 +08:00：`/create` 生图错误映射已区分上游临时资源失效；`file not found, The resource is valid for 2 hours` 不再误报为“当前生图接口不存在”。
+
 ---
 
 ## 修改入口指南

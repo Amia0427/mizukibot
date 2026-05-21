@@ -932,9 +932,37 @@ module.exports = (async () => {
     assert.strictEqual(upstreamTimeoutFailure.ok, false);
     assert.strictEqual(upstreamTimeoutFailure.replyText, '生图上游超时，请稍后重试或更换供应商');
 
+    const expiredResourceFailure = await executeCreateCommand({
+      prompt: 'expired resource failure',
+      chatType: 'group',
+      groupId: 'g12',
+      senderId: 'u12'
+    }, {
+      config: {
+        ...runtimeConfig,
+        quotaFile: path.join(tempRoot, 'quota-expired-resource.json'),
+        runtimeFile: path.join(tempRoot, 'runtime-expired-resource.json'),
+        errorLogFile: path.join(tempRoot, 'errors-expired-resource.log')
+      },
+      generateImage: async () => {
+        throw new Error('http_error status=404 body=file not found, The resource is valid for 2 hours');
+      }
+    });
+    assert.strictEqual(expiredResourceFailure.ok, false);
+    assert.strictEqual(expiredResourceFailure.replyText, '生图临时资源已失效，请重试或更换提示词');
+
     assert.strictEqual(
       normalizeRequestError({ response: { status: 429, data: { error: 'rate_limited' } } }),
       'http_error status=429 body={"error":"rate_limited"}'
+    );
+    assert.strictEqual(
+      normalizeRequestError({
+        response: {
+          status: 404,
+          data: Buffer.from('file not found, The resource is valid for 2 hours', 'utf8')
+        }
+      }),
+      'http_error status=404 body=file not found, The resource is valid for 2 hours'
     );
 
     console.log('createAgentExecutor.test.js passed');
