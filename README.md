@@ -277,6 +277,14 @@ artifacts/  临时产物、备份和评估输出
 - 子目录模块按职责拆开，便于多人并行维护：store/persistence、shape/normalization、analysis/evidence、format/render、cron/parser 等逻辑分别落位。
 - 验证以 `node -c`、聚焦单测和 smoke 为主；优先验证旧入口兼容和关键链路行为。
 
+状态校正（2026-05-21 23:28 +08:00）：
+
+- “已拆分”不等于旧入口已经冻结；2026-05-19 之后有新功能继续落回部分旧大文件，下一轮拆分前必须先做回流同步。
+- 仍可视为 clean target 的已拆项：`utils/scheduledTaskStore.js`、`utils/styleProfileRuntime.js`、`utils/continuityState.js`、`utils/scheduledTaskTime.js`、`utils/memory-v3/profileProjection.js`。
+- 需回流同步的旧入口：`config.js`、`web/server.js`、`core/continuousMessagePreprocessor.js`、`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`。
+- 已识别的新功能增量：planner semantic refine 配置、MemOS recall 治理/缓存/熔断配置、post-reply vector watchdog 配置、主回复上下文预览 Web API/UI、图片 visual summary 入队、图片记忆召回合并、create-agent 临时资源过期提示。
+- 回流规则：先把旧入口新增功能迁入对应子目录或新增小模块，再把旧入口恢复为薄 facade；不要把旧文档里的“重点边界”当作当前完成状态。
+
 重点边界：
 
 - `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。
