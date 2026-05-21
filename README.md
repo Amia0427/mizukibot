@@ -57,7 +57,7 @@ DATA_DIR=./data
 
 ### MemOS MCP 远端知识库召回
 
-更新时间：2026-05-20 00:55 +08:00
+更新时间：2026-05-21 22:01 +08:00
 
 启用方式：
 
@@ -73,12 +73,14 @@ MEMOS_KB_IDS=knowledgebase_id_1
 说明：
 
 - 更新 2026-05-21 21:20 +08:00：MemOS 召回边界增加路由白名单、短 query 改写、质量过滤和本地优先冲突裁决；默认仍以本地 Memory V3/短期连续性为主，远端只作外部证据。
+- 更新 2026-05-21 22:01 +08:00：新增二阶段 rerank、结构化 `[MemOSRecall]`、KB alias 分区、短期缓存、失败熔断和 `npm run diag:memory -- memos --query "世界观规则"` 健康诊断；远端仍只作证据，本地 Memory V3/短期连续性优先。
 - `.mcp.json` 已配置 `memos-api-mcp`，运行时通过 `npx -y @memtensor/memos-api-mcp@latest` 启动。
 - 默认主要使用 MemOS 远端知识库只读能力：通过 `search_memory` 携带 `knowledgebase_ids` 搜索 `MEMOS_KB_IDS` 指定的知识库。
 - MemOS 只接在 planner 侧：远端知识库结果先给 planner 判断，主回复模型只接收 planner 认可的 `[MemOSRecall]` 动态提示词块。
 - MemOS 召回会先与本地 Memory V3/向量记忆去重；重复项保留本地记忆，全部重复时不生成 `[MemOSRecall]`。
 - `MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED=true` 时，最近聊天、关系称呼、用户画像类 query 会跳过远端；可用 `MEMOS_RECALL_ROUTE_ALLOWLIST` 只允许设定/世界观/项目文档等路由接入远端。
 - `MEMOS_RECALL_QUERY_MODE=compact` 会把当前问题、路由信号和 directed context 压缩成短 query；`MEMOS_RECALL_MIN_SCORE`、`MEMOS_RECALL_MIN_CHARS`、`MEMOS_RECALL_REQUIRE_TITLE` 用于过滤低质量远端候选。
+- `MEMOS_KB_ALIAS_MAP` 可按 `lore=kb1;docs=kb2` 做路由分区；`MEMOS_RECALL_CACHE_TTL_MS` 和 `MEMOS_RECALL_CIRCUIT_*` 控制本进程缓存与远端失败熔断。
 - 如果远端候选与本地记忆冲突，诊断标记 `remote_conflict_with_local`，不进入主 prompt。
 - 主回复工具 allowlist 不暴露 `mcp_memos_api_mcp_*`，避免主模型自行调用 MemOS MCP。
 - 本地 agent 不写远端 MemOS：运行时不调用 `add_message` / `add_kb_document` / 删除类工具，即使误配 `MEMOS_WRITE_ENABLED=true` 也会跳过。

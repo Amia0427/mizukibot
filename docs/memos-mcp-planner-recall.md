@@ -1,6 +1,6 @@
 # MemOS MCP Planner Recall
 
-更新时间：2026-05-21 21:38 +08:00
+更新时间：2026-05-21 22:01 +08:00
 
 ## 目标
 
@@ -41,6 +41,11 @@ MEMOS_RECALL_QUERY_MAX_CHARS=160
 MEMOS_RECALL_MIN_SCORE=0
 MEMOS_RECALL_MIN_CHARS=6
 MEMOS_RECALL_REQUIRE_TITLE=false
+MEMOS_RECALL_RERANK_ENABLED=true
+MEMOS_KB_ALIAS_MAP=
+MEMOS_RECALL_CACHE_TTL_MS=300000
+MEMOS_RECALL_CIRCUIT_FAILURE_THRESHOLD=3
+MEMOS_RECALL_CIRCUIT_COOLDOWN_MS=60000
 MEMOS_WRITE_ENABLED=false
 MEMOS_WRITE_ASYNC=true
 ```
@@ -67,6 +72,10 @@ MEMOS_WRITE_ASYNC=true
 - `MEMOS_RECALL_MIN_SCORE`、`MEMOS_RECALL_MIN_CHARS`、`MEMOS_RECALL_REQUIRE_TITLE` 在进入 planner 前过滤远端候选；被过滤项只写 diagnostics。
 - 去重层现在识别简单否定冲突，远端候选与本地事实冲突时标记 `remote_conflict_with_local` 并移出 `[MemOSRecall]`。
 - 观测日志新增 `queryMode`、`queryChanged`、`routeGate`、`quality`、`rawCandidateCount` 字段，用于判断远端是被路由挡住、质量过滤还是被本地裁决。
+- 2026-05-21 22:01 +08:00：补齐二阶段 rerank、结构化 `[MemOSRecall]` 条目、KB alias 分区、短期内存缓存、失败熔断和 `diag:memory memos` 健康诊断；本地 Memory V3/短期连续性仍是冲突裁决主源。
+- `MEMOS_KB_ALIAS_MAP` 支持 `lore=kb-id-1;docs=kb-id-2`，route/query 命中 alias 时优先只搜对应 KB；未命中时回退 `MEMOS_KB_IDS`。
+- `MEMOS_RECALL_CACHE_TTL_MS` 只缓存本进程只读召回结果；`MEMOS_RECALL_CIRCUIT_*` 在连续 MCP 失败后短暂跳过远端，不影响本地记忆召回。
+- `[MemOSRecall]` 条目现在包含 `source=`、可选 `title=`、`score=`、`why=`，方便 planner 判断来源与命中原因。
 
 ## 远端知识库只读模式
 
@@ -92,6 +101,7 @@ MEMOS_WRITE_ASYNC=true
 - `stage=prepare_main_prompt_blocks`：记录主回复 prompt 的 `stableBlockIds`、`dynamicBlockIds`、`assistantOnlyBlockIds`，以及 `hasMemosRecall`、`hasRetrievedMemoryLite`、`hasShortTermContinuity`。
 - `stage=memos_recall_dropped_before_prompt`：表示 planner 已选择 `memos_recall`，但召回对象未传到 prompt 构建或最终 block 未进入主 prompt。
 - 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 若检测到 planner 已 include 且 MemOS recall 可用，会补 `memos_recall` 动态块；`data/model-calls.ndjson` 的 `prompt_integrity.has_memos_recall` 可验证最终主模型请求是否实际带入。
+- 2026-05-21 22:01 +08:00：观测摘要新增 `rerank`、`cache`、`circuit`、`kbPartition`，用于区分 rerank 命中、缓存命中、熔断跳过和 alias 分区召回。
 - 日志只写候选的短 `textPreview` 和 `textHash`，不写完整远端知识库正文，不写 API key。
 - 结合 `data/model-calls.ndjson` 可按 `requestId` 对齐主回复耗时和调用次数；主回复模型调用次数仍只看 main reply 记录。
 
@@ -121,6 +131,18 @@ MEMOS_WRITE_ASYNC=true
 - 负样本沉淀：把 planner 的 skip 原因、`deduped_by_local_memory`、低相关命中写入观测日志即可，不向 MemOS 远端写回。
 - 后续可加配置：`MEMOS_RECALL_MIN_SCORE`、`MEMOS_RECALL_QUERY_MODE=compact|raw`、`MEMOS_RECALL_ROUTE_ALLOWLIST`，用于更细粒度地控召回范围。
 
+## 健康诊断与评测样例
+
+2026-05-21 22:01 +08:00：新增 MemOS 专用健康检查和样例集。
+
+```bash
+npm run diag:memory -- memos --query "世界观规则"
+```
+
+- `summary.readOnly` 必须为 `true`；发现写入类工具只进入 `summary.discovery.mutatingToolNames`，运行时仍不调用。
+- `summary.cache` 显示本进程缓存大小、命中和 TTL；`summary.circuit` 显示失败计数和熔断窗口。
+- `artifacts/memory-recall-eval/memos-cases.jsonl` 记录远端命中、本地跳过、质量过滤、本地冲突、缓存命中 5 类样例，供后续自动化评测接入。
+
 ## 验证
 
 ```bash
@@ -128,5 +150,6 @@ node tests/memosPlannerRecall.test.js
 node tests/memoryRecallDeduper.test.js
 node tests/memoryRecallObservability.test.js
 node tests/memosPlannerPromptIntegration.test.js
+node tests/memoryOpsDiagnosticEntry.test.js
 node tests/mcpLazyDiscovery.test.js
 ```
