@@ -174,7 +174,7 @@ function collectLocalMemoryTexts(memoryContext = {}) {
     .map((text) => normalizeText(text))
     .filter((text) => {
       const canonical = canonicalRecallText(text);
-      if (!canonical || canonical.length < 8) return false;
+      if (!canonical || canonical.length < 6) return false;
       if (seen.has(canonical)) return false;
       seen.add(canonical);
       return true;
@@ -207,6 +207,41 @@ function findDuplicateReason(itemText = '', localTexts = [], options = {}) {
     }
     if (Math.min(localCompact.length, compact.length) >= 10 && diceCoefficient(localCanonical, canonical) >= diceThreshold) {
       return 'ngram_dice';
+    }
+  }
+  return '';
+}
+
+function extractNegationSignature(text = '') {
+  const canonical = canonicalRecallText(text).replace(/\s+/g, '');
+  if (!canonical) return null;
+  const negated = /(不|不是|没有|没|讨厌|禁止|不要|不能|别|拒绝|avoid|never|not|no)/i.test(canonical);
+  const positive = canonical
+    .replace(/不(?=(?:喜欢|爱|想要|需要|接受|同意|可以|能|会|是))/g, '')
+    .replace(/不(?!(?:喜欢|爱|想要|需要|接受|同意|可以|能|会|是))/g, '')
+    .replace(/不是/g, '')
+    .replace(/(?:没有|没|讨厌|禁止|不要|不能|别|拒绝|avoid|never|not|no)/gi, '')
+    .replace(/\s+/g, '');
+  if (positive.length < 6) return null;
+  return { positive, negated };
+}
+
+function findConflictReason(itemText = '', localTexts = [], options = {}) {
+  const itemSignature = extractNegationSignature(itemText);
+  if (!itemSignature) return '';
+  const threshold = Number.isFinite(Number(options.conflictDiceThreshold))
+    ? Number(options.conflictDiceThreshold)
+    : 0.68;
+  for (const localText of localTexts) {
+    const localSignature = extractNegationSignature(localText);
+    if (!localSignature) continue;
+    if (localSignature.negated === itemSignature.negated) continue;
+    if (
+      localSignature.positive.includes(itemSignature.positive)
+      || itemSignature.positive.includes(localSignature.positive)
+      || diceCoefficient(localSignature.positive, itemSignature.positive) >= threshold
+    ) {
+      return 'remote_conflict_with_local';
     }
   }
   return '';
@@ -259,6 +294,15 @@ function dedupeMemosRecallAgainstMemoryContext(memosRecall = {}, memoryContext =
       });
       continue;
     }
+    const conflictReason = findConflictReason(item.text, localTexts, options);
+    if (conflictReason) {
+      removedItems.push({
+        id: item.id,
+        reason: conflictReason,
+        text: item.text
+      });
+      continue;
+    }
     kept.push(item);
   }
 
@@ -296,6 +340,7 @@ module.exports = {
   collectLocalMemoryTexts,
   dedupeMemosRecallAgainstMemoryContext,
   diceCoefficient,
+  findConflictReason,
   findDuplicateReason,
   normalizeMemosItems
 };

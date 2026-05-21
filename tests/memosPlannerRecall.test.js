@@ -35,7 +35,7 @@ module.exports = (async () => {
         assert.strictEqual(toolName, expectedToolName);
         assert.notStrictEqual(toolName, 'add_message');
         if (toolName === 'search_memory') {
-          assert.strictEqual(args.query, '继续刚才的实现');
+          assert.ok(['实现', '设定资料里 Mizuki 的世界观规则是什么 lore/worldbook'].includes(args.query));
           assert.deepStrictEqual(args.knowledgebase_ids, ['basea6e3658a-4f31-4c54-ba83-821fa21f9a44']);
           assert.strictEqual(args.memory_limit_number, 2);
           assert.strictEqual(args.preference_limit_number, 2);
@@ -62,10 +62,30 @@ module.exports = (async () => {
   };
 
   const memos = require('../utils/memosPlannerRecall');
+  assert.strictEqual(
+    memos.buildMemosRecallQuery('继续刚才的实现', {
+      config: { MEMOS_RECALL_QUERY_MODE: 'compact' }
+    }).query,
+    '实现'
+  );
+  assert.strictEqual(
+    memos.evaluateMemosRouteGate('我是谁，刚才聊到哪了', {
+      config: { MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: true }
+    }).allowed,
+    false
+  );
+  assert.strictEqual(
+    memos.evaluateMemosRouteGate('设定资料里 Mizuki 的世界观规则是什么', {
+      config: { MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: true }
+    }).allowed,
+    true
+  );
+
   const recall = await memos.recallForPlanner('继续刚才的实现', {
     config: {
       MEMOS_MCP_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+      MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_TOP_K: 2,
       MEMOS_RECALL_MAX_CHARS: 500,
       MEMOS_RECALL_TIMEOUT_MS: 500,
@@ -86,12 +106,56 @@ module.exports = (async () => {
   assert.strictEqual(recall.diagnostics.sourceToolName, 'search_memory');
   assert.strictEqual(recall.diagnostics.knowledgebaseIdsCount, 1);
   assert.strictEqual(recall.diagnostics.readOnly, true);
+  assert.strictEqual(recall.diagnostics.queryMode, 'compact');
+  assert.strictEqual(recall.diagnostics.routeGate.allowed, true);
+
+  const localOnly = await memos.recallForPlanner('我是谁，刚才聊到哪了', {
+    config: {
+      MEMOS_MCP_ENABLED: true,
+      MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+      MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: true,
+      MEMOS_RECALL_SOURCE: 'knowledge_base',
+      MEMOS_KB_IDS: ['basea6e3658a-4f31-4c54-ba83-821fa21f9a44']
+    }
+  });
+  assert.strictEqual(localOnly.used, false);
+  assert.strictEqual(localOnly.rejectedReason, 'local_memory_query');
+  assert.strictEqual(localOnly.diagnostics.routeGate.allowed, false);
+
+  const allowlisted = await memos.recallForPlanner('设定资料里 Mizuki 的世界观规则是什么', {
+    routeMeta: { routePolicyKey: 'lore/worldbook' },
+    config: {
+      MEMOS_MCP_ENABLED: true,
+      MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+      MEMOS_RECALL_ROUTE_ALLOWLIST: 'lore,worldbook',
+      MEMOS_RECALL_TOP_K: 2,
+      MEMOS_RECALL_SOURCE: 'knowledge_base',
+      MEMOS_KB_IDS: ['basea6e3658a-4f31-4c54-ba83-821fa21f9a44']
+    }
+  });
+  assert.strictEqual(allowlisted.used, true);
+  assert.strictEqual(allowlisted.diagnostics.routeGate.reason, 'allowlist_match');
+  assert.strictEqual(allowlisted.diagnostics.routeGate.matched, 'lore');
+
+  const quality = memos.filterRecallItemsByQuality([
+    { id: 'low', text: '低分但非空内容', score: 0.2 },
+    { id: 'short', text: '短', score: 0.99 },
+    { id: 'good', text: '远端知识库提供足够具体的设定证据。', score: 0.9, title: '设定' }
+  ], {
+    config: {
+      MEMOS_RECALL_MIN_SCORE: 0.5,
+      MEMOS_RECALL_MIN_CHARS: 6
+    }
+  });
+  assert.deepStrictEqual(quality.items.map((item) => item.id), ['good']);
+  assert.strictEqual(quality.diagnostics.removed, 2);
 
   expectedToolName = 'get_kb_documents';
   const fileRecall = await memos.recallForPlanner('继续刚才的实现', {
     config: {
       MEMOS_MCP_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+      MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_TOP_K: 2,
       MEMOS_RECALL_MAX_CHARS: 500,
       MEMOS_RECALL_TIMEOUT_MS: 500,
@@ -117,6 +181,7 @@ module.exports = (async () => {
     config: {
       MEMOS_MCP_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+      MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_SOURCE: 'knowledge_base',
       MEMOS_KB_IDS: [],
       MEMOS_KB_FILE_IDS: []
@@ -145,6 +210,7 @@ module.exports = (async () => {
     config: {
       MEMOS_MCP_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+      MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_SOURCE: 'knowledge_base',
       MEMOS_KB_IDS: ['basea6e3658a-4f31-4c54-ba83-821fa21f9a44'],
       MEMOS_KB_FILE_IDS: ['kb-file-1']
@@ -158,6 +224,7 @@ module.exports = (async () => {
     config: {
       MEMOS_MCP_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
+      MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_SOURCE: 'knowledge_base',
       MEMOS_KB_IDS: [],
       MEMOS_KB_FILE_IDS: ['kb-file-1'],

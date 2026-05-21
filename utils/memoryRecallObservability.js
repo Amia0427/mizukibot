@@ -110,6 +110,44 @@ function summarizeDedupedRemovedItems(dedupe = {}) {
     .filter((item) => item.id || item.reason || item.textHash);
 }
 
+function summarizeQualityDiagnostics(quality = {}) {
+  const normalized = normalizeObject(quality, {});
+  return {
+    enabled: normalized.enabled === true,
+    minScore: Number.isFinite(Number(normalized.minScore)) ? Number(normalized.minScore) : 0,
+    minChars: Math.max(0, Number(normalized.minChars || 0) || 0),
+    requireTitle: normalized.requireTitle === true,
+    kept: Math.max(0, Number(normalized.kept || 0) || 0),
+    removed: Math.max(0, Number(normalized.removed || 0) || 0),
+    removedItems: normalizeArray(normalized.removedItems)
+      .map((item) => {
+        const itemObject = normalizeObject(item, {});
+        const text = normalizeText(itemObject.text);
+        return {
+          id: normalizeText(itemObject.id),
+          reason: normalizeText(itemObject.reason),
+          score: Number.isFinite(Number(itemObject.score)) ? Number(itemObject.score) : null,
+          textPreview: truncatePreview(text, DEFAULT_PREVIEW_CHARS),
+          textHash: stableHash(text)
+        };
+      })
+      .filter((item) => item.id || item.reason || item.textHash)
+  };
+}
+
+function summarizeRouteGate(routeGate = {}) {
+  const normalized = normalizeObject(routeGate, {});
+  return {
+    enabled: normalized.enabled === true,
+    allowed: normalized.allowed !== false,
+    reason: normalizeText(normalized.reason),
+    matched: normalizeText(normalized.matched),
+    queryClass: normalizeText(normalized.queryClass),
+    allowlist: normalizeArray(normalized.allowlist).map((item) => normalizeText(item)).filter(Boolean).slice(0, 20),
+    routeSignals: normalizeArray(normalized.routeSignals).map((item) => normalizeText(item)).filter(Boolean).slice(0, 20)
+  };
+}
+
 function countLocalMemoryEvidence(memoryContext = {}) {
   const context = normalizeObject(memoryContext, {});
   const values = [
@@ -148,10 +186,17 @@ function summarizeMemosRecall(recall = {}, options = {}) {
     durationMs: Math.max(0, Number(diagnostics.durationMs || 0) || 0),
     timeoutMs: Math.max(0, Number(diagnostics.timeoutMs || 0) || 0),
     knowledgebaseIdsCount: Math.max(0, Number(diagnostics.knowledgebaseIdsCount || 0) || 0),
+    rawCandidateCount: Math.max(0, Number(diagnostics.rawCandidateCount || 0) || 0),
     candidateCount: items.length,
     promptChars: normalizeText(normalized.promptText).length,
     queryHash: stableHash(normalized.query),
     queryPreview: truncatePreview(normalized.query, 120),
+    rawQueryHash: stableHash(normalized.rawQuery || diagnostics.rawQueryPreview),
+    rawQueryPreview: truncatePreview(normalized.rawQuery || diagnostics.rawQueryPreview, 120),
+    queryMode: normalizeText(diagnostics.queryMode),
+    queryChanged: diagnostics.queryChanged === true,
+    routeGate: summarizeRouteGate(diagnostics.routeGate),
+    quality: summarizeQualityDiagnostics(diagnostics.quality),
     diagnosticsError: normalizeText(diagnostics.error),
     dedupe: {
       enabled: dedupe.enabled === true,

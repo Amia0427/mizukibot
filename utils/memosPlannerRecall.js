@@ -96,6 +96,120 @@ function getMemosRecallSource(options = {}) {
   );
 }
 
+function normalizeConfigList(value) {
+  return normalizeStringList(value)
+    .map((item) => item.toLowerCase())
+    .filter(Boolean);
+}
+
+function getRouteSignalValues(options = {}) {
+  const routeMeta = normalizeObject(options.routeMeta || options.route?.meta, {});
+  const intent = normalizeObject(options.intent || options.route?.intent || routeMeta.intent, {});
+  const facets = normalizeObject(options.facets || options.route?.facets || routeMeta.facets, {});
+  const directedContext = normalizeObject(options.directedContext || routeMeta.directedContext, {});
+  return [
+    options.topRouteType,
+    options.route?.topRouteType,
+    routeMeta.topRouteType,
+    routeMeta.routePolicyKey,
+    routeMeta.policyKey,
+    routeMeta.routeDebugKey,
+    routeMeta.chatMode,
+    routeMeta.toolIntent,
+    routeMeta.responseIntent,
+    intent.type,
+    intent.name,
+    intent.intent,
+    intent.category,
+    facets.topic,
+    facets.domain,
+    facets.memoryDomain,
+    directedContext.topic,
+    directedContext.domain
+  ]
+    .map((item) => normalizeText(item).toLowerCase())
+    .filter(Boolean);
+}
+
+function classifyRecallQuery(query = '') {
+  const text = normalizeText(query).toLowerCase();
+  if (!text) return 'empty';
+  if (/(知识库|文档|资料|设定|世界观|角色设定|角色资料|规则|规范|项目知识|项目文档|外部文档|lore|worldbook|docs?|knowledge)/i.test(text)) {
+    return 'external_kb';
+  }
+  if (/(刚才|刚刚|上次|之前|前面|昨天|今天|前天|还记得|记得|我是谁|你是谁|我们.*关系|关系称呼|叫我|称呼|我的|我喜欢|我不喜欢|用户画像|短期记忆|本地记忆|继续)/i.test(text)) {
+    return 'local_memory';
+  }
+  return 'neutral';
+}
+
+function evaluateMemosRouteGate(query = '', options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  const queryClass = classifyRecallQuery(query);
+  const allowlist = normalizeConfigList(
+    options.routeAllowlist
+    || currentConfig.MEMOS_RECALL_ROUTE_ALLOWLIST
+    || process.env.MEMOS_RECALL_ROUTE_ALLOWLIST
+  );
+  const routeSignals = getRouteSignalValues(options);
+  const localQueryGuardEnabled = currentConfig.MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED !== false;
+  if (allowlist.includes('*') || allowlist.includes('all')) {
+    return {
+      enabled: true,
+      allowed: true,
+      reason: 'allowlist_all',
+      queryClass,
+      allowlist,
+      routeSignals
+    };
+  }
+  if (allowlist.length > 0) {
+    const haystack = [...routeSignals, queryClass, normalizeText(query).toLowerCase()].join(' ');
+    const matched = allowlist.find((entry) => entry && haystack.includes(entry));
+    if (localQueryGuardEnabled && queryClass === 'local_memory') {
+      return {
+        enabled: true,
+        allowed: false,
+        reason: 'local_memory_query',
+        matched: matched || '',
+        queryClass,
+        allowlist,
+        routeSignals
+      };
+    }
+    return {
+      enabled: true,
+      allowed: Boolean(matched),
+      reason: matched ? 'allowlist_match' : 'route_not_allowlisted',
+      matched: matched || '',
+      queryClass,
+      allowlist,
+      routeSignals
+    };
+  }
+  if (localQueryGuardEnabled && queryClass === 'local_memory') {
+    return {
+      enabled: true,
+      allowed: false,
+      reason: 'local_memory_query',
+      queryClass,
+      allowlist,
+      routeSignals
+    };
+  }
+  return {
+    enabled: localQueryGuardEnabled,
+    allowed: true,
+    reason: queryClass === 'external_kb' ? 'external_kb_query' : 'open',
+    queryClass,
+    allowlist,
+    routeSignals
+  };
+}
+
 function clampNumber(value, min, max, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
@@ -108,6 +222,74 @@ function truncateText(value = '', maxChars = 900) {
   if (!text || !limit) return '';
   if (text.length <= limit) return text;
   return `${text.slice(0, Math.max(0, limit - 12)).trim()} [truncated]`;
+}
+
+function stripQueryNoise(value = '') {
+  return normalizeText(value)
+    .replace(/\[CQ:[^\]]+\]/gi, ' ')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/(?:继续刚才|接着刚才|上面说的|前面提到的|继续前面|接着前面)/gi, ' ')
+    .replace(/(?:刚才|刚刚|上次|之前|前面|昨天|今天|前天|还记得|记得)/g, ' ')
+    .replace(/^\s*(?:的|了|继续|接着|然后|请|帮我|帮忙)+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildMemosRecallQuery(query = '', options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  const rawQuery = normalizeText(query);
+  const mode = normalizeText(
+    options.queryMode
+    || currentConfig.MEMOS_RECALL_QUERY_MODE
+    || process.env.MEMOS_RECALL_QUERY_MODE,
+    'compact'
+  ).toLowerCase();
+  const maxChars = clampNumber(
+    options.queryMaxChars
+    ?? currentConfig.MEMOS_RECALL_QUERY_MAX_CHARS
+    ?? process.env.MEMOS_RECALL_QUERY_MAX_CHARS,
+    40,
+    500,
+    160
+  );
+  if (mode === 'raw' || mode === 'off') {
+    return {
+      query: truncateText(rawQuery, maxChars),
+      mode: mode === 'off' ? 'off' : 'raw',
+      rawQuery,
+      changed: rawQuery.length > maxChars
+    };
+  }
+  const routeSignals = getRouteSignalValues(options)
+    .filter((item) => !/^(direct_chat|chat|none|answer|default|main|private|group)$/i.test(item))
+    .slice(0, 4);
+  const directedContext = normalizeObject(options.directedContext || options.routeMeta?.directedContext, {});
+  const directedTerms = [
+    directedContext.topic,
+    directedContext.domain,
+    directedContext.goal,
+    directedContext.query
+  ]
+    .map((item) => stripQueryNoise(item))
+    .filter(Boolean)
+    .slice(0, 3);
+  const compact = truncateText(
+    [stripQueryNoise(rawQuery), ...directedTerms, ...routeSignals]
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim() || rawQuery,
+    maxChars
+  );
+  return {
+    query: compact,
+    mode: 'compact',
+    rawQuery,
+    changed: compact !== rawQuery
+  };
 }
 
 function buildEmptyRecall(query = '', patch = {}) {
@@ -127,7 +309,11 @@ function buildEmptyRecall(query = '', patch = {}) {
       availableTools: [],
       durationMs: 0,
       error: '',
-      readOnly: true
+      readOnly: true,
+      queryMode: '',
+      queryChanged: false,
+      routeGate: null,
+      quality: null
     },
     ...patch,
     diagnostics: {
@@ -141,6 +327,10 @@ function buildEmptyRecall(query = '', patch = {}) {
       durationMs: 0,
       error: '',
       readOnly: true,
+      queryMode: '',
+      queryChanged: false,
+      routeGate: null,
+      quality: null,
       ...normalizeObject(patch.diagnostics, {})
     }
   };
@@ -309,6 +499,78 @@ function normalizeRecallItems(rawResult, options = {}) {
       return true;
     })
     .slice(0, maxItems);
+}
+
+function isGenericRemoteText(text = '') {
+  const normalized = normalizeText(text);
+  if (!normalized) return true;
+  if (/^(ok|none|null|undefined|无|暂无|没有|empty)$/i.test(normalized)) return true;
+  if (/^(用户|user|assistant|system)[:：]?\s*$/i.test(normalized)) return true;
+  return false;
+}
+
+function filterRecallItemsByQuality(items = [], options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  const minScoreRaw = options.minScore ?? currentConfig.MEMOS_RECALL_MIN_SCORE ?? process.env.MEMOS_RECALL_MIN_SCORE;
+  const minScore = Number.isFinite(Number(minScoreRaw)) ? Number(minScoreRaw) : 0;
+  const minChars = clampNumber(
+    options.minChars ?? currentConfig.MEMOS_RECALL_MIN_CHARS ?? process.env.MEMOS_RECALL_MIN_CHARS,
+    0,
+    500,
+    6
+  );
+  const requireTitle = (
+    options.requireTitle
+    ?? currentConfig.MEMOS_RECALL_REQUIRE_TITLE
+    ?? process.env.MEMOS_RECALL_REQUIRE_TITLE
+  ) === true || String(
+    options.requireTitle
+    ?? currentConfig.MEMOS_RECALL_REQUIRE_TITLE
+    ?? process.env.MEMOS_RECALL_REQUIRE_TITLE
+    ?? ''
+  ).toLowerCase() === 'true';
+  const filteredItems = [];
+  const removedItems = [];
+  for (const item of normalizeArray(items)) {
+    const normalized = normalizeObject(item, {});
+    const text = normalizeText(normalized.text);
+    const score = Number.isFinite(Number(normalized.score)) ? Number(normalized.score) : null;
+    let reason = '';
+    if (!text || isGenericRemoteText(text)) reason = 'generic_or_empty';
+    else if (text.length < minChars) reason = 'below_min_chars';
+    else if (minScore > 0 && score !== null && score < minScore) reason = 'below_min_score';
+    else if (requireTitle && !normalizeText(normalized.title)) reason = 'missing_title';
+    if (reason) {
+      removedItems.push({
+        id: normalizeText(normalized.id),
+        reason,
+        score,
+        text
+      });
+    } else {
+      filteredItems.push(normalized);
+    }
+  }
+  return {
+    items: filteredItems,
+    diagnostics: {
+      enabled: minScore > 0 || minChars > 0 || requireTitle,
+      minScore,
+      minChars,
+      requireTitle,
+      kept: filteredItems.length,
+      removed: removedItems.length,
+      removedItems: removedItems.map((item) => ({
+        id: item.id,
+        reason: item.reason,
+        score: item.score,
+        text: truncateText(item.text, 160)
+      }))
+    }
+  };
 }
 
 function formatMemosRecallPrompt(items = [], options = {}) {
@@ -483,13 +745,15 @@ async function callKnowledgeBaseRecall(normalizedQuery = '', options = {}) {
       timeoutMs
     }
   );
-  const items = normalizeRecallItems(result, { topK, maxChars, source: 'memos_kb' });
+  const rawItems = normalizeRecallItems(result, { topK: Math.min(20, topK * 2), maxChars, source: 'memos_kb' });
+  const quality = filterRecallItemsByQuality(rawItems, { ...options, config: currentConfig });
+  const items = quality.items.slice(0, topK);
   const promptText = formatMemosRecallPrompt(items, { maxChars });
   return {
     query: normalizedQuery,
     items,
     used: items.length > 0,
-    rejectedReason: items.length > 0 ? '' : 'empty_result',
+    rejectedReason: items.length > 0 ? '' : (rawItems.length > 0 ? 'quality_filtered' : 'empty_result'),
     promptText,
     diagnostics: {
       enabled: true,
@@ -503,7 +767,9 @@ async function callKnowledgeBaseRecall(normalizedQuery = '', options = {}) {
       durationMs: Math.max(0, Date.now() - startedAt),
       fallback: result?.fallback === true,
       error: normalizeText(discovery.error),
-      readOnly: true
+      readOnly: true,
+      rawCandidateCount: rawItems.length,
+      quality: quality.diagnostics
     }
   };
 }
@@ -528,13 +794,15 @@ async function callSearchMemoryRecall(normalizedQuery = '', options = {}) {
       timeoutMs
     }
   );
-  const items = normalizeRecallItems(result, { topK, maxChars, source: 'memos_memory' });
+  const rawItems = normalizeRecallItems(result, { topK: Math.min(20, topK * 2), maxChars, source: 'memos_memory' });
+  const quality = filterRecallItemsByQuality(rawItems, { ...options, config: currentConfig });
+  const items = quality.items.slice(0, topK);
   const promptText = formatMemosRecallPrompt(items, { maxChars });
   return {
     query: normalizedQuery,
     items,
     used: items.length > 0,
-    rejectedReason: items.length > 0 ? '' : 'empty_result',
+    rejectedReason: items.length > 0 ? '' : (rawItems.length > 0 ? 'quality_filtered' : 'empty_result'),
     promptText,
     diagnostics: {
       enabled: true,
@@ -548,14 +816,16 @@ async function callSearchMemoryRecall(normalizedQuery = '', options = {}) {
       durationMs: Math.max(0, Date.now() - startedAt),
       fallback: result?.fallback === true,
       error: normalizeText(discovery.error),
-      readOnly: true
+      readOnly: true,
+      rawCandidateCount: rawItems.length,
+      quality: quality.diagnostics
     }
   };
 }
 
 async function recallForPlanner(query = '', options = {}) {
   const startedAt = Date.now();
-  const normalizedQuery = normalizeText(query);
+  const rawQuery = normalizeText(query);
   const currentConfig = {
     ...getConfig(),
     ...normalizeObject(options.config, {})
@@ -565,9 +835,25 @@ async function recallForPlanner(query = '', options = {}) {
   const maxChars = clampNumber(options.maxChars ?? currentConfig.MEMOS_RECALL_MAX_CHARS, 120, 8000, 900);
   const topK = clampNumber(options.topK ?? currentConfig.MEMOS_RECALL_TOP_K, 1, 20, 5);
   const timeoutMs = clampNumber(options.timeoutMs ?? currentConfig.MEMOS_RECALL_TIMEOUT_MS, 100, 30000, 1200);
+  const routeGate = evaluateMemosRouteGate(rawQuery, { ...options, config: currentConfig });
+  const queryPlan = buildMemosRecallQuery(rawQuery, { ...options, config: currentConfig });
+  const normalizedQuery = queryPlan.query;
+  const attachBoundaryDiagnostics = (recall = {}) => ({
+    ...recall,
+    rawQuery,
+    query: normalizeText(recall.query || normalizedQuery),
+    diagnostics: {
+      ...normalizeObject(recall.diagnostics, {}),
+      routeGate,
+      queryMode: queryPlan.mode,
+      queryChanged: queryPlan.changed,
+      rawQueryPreview: truncateText(rawQuery, 160),
+      timeoutMs
+    }
+  });
 
   if (!currentConfig.MEMOS_MCP_ENABLED) {
-    return buildEmptyRecall(normalizedQuery, {
+    return attachBoundaryDiagnostics(buildEmptyRecall(normalizedQuery, {
       rejectedReason: 'disabled',
       diagnostics: {
         enabled: false,
@@ -575,10 +861,22 @@ async function recallForPlanner(query = '', options = {}) {
         recallSource,
         durationMs: Math.max(0, Date.now() - startedAt)
       }
-    });
+    }));
+  }
+  if (!routeGate.allowed) {
+    return attachBoundaryDiagnostics(buildEmptyRecall(normalizedQuery, {
+      rejectedReason: routeGate.reason || 'route_not_allowed',
+      diagnostics: {
+        enabled: true,
+        serverName,
+        recallSource,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        readOnly: true
+      }
+    }));
   }
   if (!normalizedQuery) {
-    return buildEmptyRecall(normalizedQuery, {
+    return attachBoundaryDiagnostics(buildEmptyRecall(normalizedQuery, {
       rejectedReason: 'empty_query',
       diagnostics: {
         enabled: true,
@@ -586,7 +884,7 @@ async function recallForPlanner(query = '', options = {}) {
         recallSource,
         durationMs: Math.max(0, Date.now() - startedAt)
       }
-    });
+    }));
   }
 
   const discovery = await discoverMemosTools({ ...options, config: currentConfig, timeoutMs });
@@ -602,22 +900,22 @@ async function recallForPlanner(query = '', options = {}) {
       topK
     };
     if (recallSource === 'search_memory') {
-      return await callSearchMemoryRecall(normalizedQuery, recallOptions);
+      return attachBoundaryDiagnostics(await callSearchMemoryRecall(normalizedQuery, recallOptions));
     }
     if (recallSource === 'auto') {
       const kbArgs = buildKnowledgeBaseArgs({ ...options, config: currentConfig, topK });
       if (getConfiguredKnowledgebaseIds({ ...options, config: currentConfig }).length > 0) {
-        return await callSearchMemoryRecall(normalizedQuery, recallOptions);
+        return attachBoundaryDiagnostics(await callSearchMemoryRecall(normalizedQuery, recallOptions));
       }
       if (discovery.kbToolName && kbArgs.file_ids.length > 0) {
         const kbRecall = await callKnowledgeBaseRecall(normalizedQuery, recallOptions);
-        if (kbRecall.used || currentConfig.MEMOS_KB_FALLBACK_SEARCH_ENABLED !== true) return kbRecall;
+        if (kbRecall.used || currentConfig.MEMOS_KB_FALLBACK_SEARCH_ENABLED !== true) return attachBoundaryDiagnostics(kbRecall);
       }
-      return await callSearchMemoryRecall(normalizedQuery, recallOptions);
+      return attachBoundaryDiagnostics(await callSearchMemoryRecall(normalizedQuery, recallOptions));
     }
     if (getConfiguredKnowledgebaseIds({ ...options, config: currentConfig }).length > 0) {
       const kbSearchRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
-      return {
+      return attachBoundaryDiagnostics({
         ...kbSearchRecall,
         diagnostics: {
           ...kbSearchRecall.diagnostics,
@@ -625,7 +923,7 @@ async function recallForPlanner(query = '', options = {}) {
           sourceToolName: kbSearchRecall.diagnostics.searchToolName,
           kbMode: 'knowledgebase_ids'
         }
-      };
+      });
     }
     const kbRecall = await callKnowledgeBaseRecall(normalizedQuery, recallOptions);
     if (
@@ -633,19 +931,19 @@ async function recallForPlanner(query = '', options = {}) {
       || currentConfig.MEMOS_KB_FALLBACK_SEARCH_ENABLED !== true
       || !discovery.searchToolName
     ) {
-      return kbRecall;
+      return attachBoundaryDiagnostics(kbRecall);
     }
     const searchRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
-    return {
+    return attachBoundaryDiagnostics({
       ...searchRecall,
       diagnostics: {
         ...searchRecall.diagnostics,
         recallSource: 'knowledge_base_fallback_search',
         fallbackReason: kbRecall.rejectedReason || 'kb_empty'
       }
-    };
+    });
   } catch (error) {
-    return buildEmptyRecall(normalizedQuery, {
+    return attachBoundaryDiagnostics(buildEmptyRecall(normalizedQuery, {
       rejectedReason: 'mcp_error',
       diagnostics: {
         enabled: true,
@@ -659,7 +957,7 @@ async function recallForPlanner(query = '', options = {}) {
         error: normalizeText(error?.message || error || discovery.error),
         readOnly: true
       }
-    });
+    }));
   }
 }
 
@@ -691,8 +989,11 @@ async function addMessageToMemos(message = {}, options = {}) {
 module.exports = {
   addMessageToMemos,
   buildKnowledgeBaseArgs,
+  buildMemosRecallQuery,
   buildSearchArgs,
   discoverMemosTools,
+  evaluateMemosRouteGate,
+  filterRecallItemsByQuality,
   formatMemosRecallPrompt,
   getMemosRecallPromptText,
   getMemosRecallSource,
