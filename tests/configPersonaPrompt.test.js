@@ -23,6 +23,11 @@ function useConfigDefault(key) {
     useConfigDefault('SHORT_TERM_SCENE_RECENT_TURNS');
     useConfigDefault('SESSION_CONTEXT_SUMMARY_MAX_CHARS');
     useConfigDefault('SESSION_CONTEXT_SUMMARY_LOAD_COUNT');
+    useConfigDefault('SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_ITEMS');
+    useConfigDefault('SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_ITEMS');
+    useConfigDefault('SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_ITEMS');
+    useConfigDefault('SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS');
+    useConfigDefault('SHORT_TERM_BRIDGE_RAW_TTL_HOURS');
     useConfigDefault('MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS');
     useConfigDefault('MEMORY_V3_SESSION_RECENT_MESSAGES');
 
@@ -51,6 +56,11 @@ function useConfigDefault(key) {
     assert.strictEqual(config.SHORT_TERM_SCENE_RECENT_TURNS, 24);
     assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_MAX_CHARS, 520);
     assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT, 5);
+    assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_ITEMS, 6);
+    assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_ITEMS, 6);
+    assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_ITEMS, 6);
+    assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS, 16);
+    assert.strictEqual(config.SHORT_TERM_BRIDGE_RAW_TTL_HOURS, 48);
     assert.strictEqual(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS, 3600);
     assert.strictEqual(config.MEMORY_V3_SESSION_RECENT_MESSAGES, 96);
 

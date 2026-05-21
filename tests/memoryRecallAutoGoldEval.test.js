@@ -76,6 +76,7 @@ atomicWriteText(
 
 const {
   buildAutoGoldCases,
+  buildCaseQueryOptions,
   runMode
 } = require('../scripts/eval-memory-recall');
 
@@ -84,6 +85,10 @@ assert.ok(cases.some((item) => item.expectedIds.includes('node_like_tea')), 'aut
 assert.ok(cases.some((item) => item.expectedIds.includes('wb_test_jasmine')), 'auto gold should include worldbook expected id');
 assert.ok(cases.every((item) => item.expectedIds.length > 0), 'all auto gold cases should be judged');
 assert.ok(new Set(cases.map((item) => item.facet)).size >= 2, 'auto gold should not collapse to one facet');
+assert.strictEqual(
+  buildCaseQueryOptions({ createdAt: 1777268735 }).journalNow.toISOString(),
+  '2026-04-27T05:45:35.000Z'
+);
 
 module.exports = runMode('local_jsonl', cases, { memoryCli: false }).then((result) => {
   assert.ok(result.judgedCases > 0);

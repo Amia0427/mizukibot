@@ -135,6 +135,60 @@ function summarizeQualityDiagnostics(quality = {}) {
   };
 }
 
+function summarizeRerankDiagnostics(rerank = {}) {
+  const normalized = normalizeObject(rerank, {});
+  return {
+    enabled: normalized.enabled === true,
+    candidateCount: Math.max(0, Number(normalized.candidateCount || 0) || 0),
+    kept: Math.max(0, Number(normalized.kept || 0) || 0),
+    queryTermCount: Math.max(0, Number(normalized.queryTermCount || 0) || 0),
+    topReasons: normalizeArray(normalized.topReasons)
+      .map((item) => {
+        const reason = normalizeObject(item, {});
+        return {
+          id: normalizeText(reason.id),
+          score: Number.isFinite(Number(reason.score)) ? Number(reason.score) : null,
+          rerankScore: Number.isFinite(Number(reason.rerankScore)) ? Number(reason.rerankScore) : null,
+          reasons: normalizeArray(reason.reasons).map((entry) => normalizeText(entry)).filter(Boolean).slice(0, 6)
+        };
+      })
+      .filter((item) => item.id || item.reasons.length > 0)
+      .slice(0, 5)
+  };
+}
+
+function summarizeCacheDiagnostics(cache = {}) {
+  const normalized = normalizeObject(cache, {});
+  return {
+    hit: normalized.hit === true,
+    key: normalizeText(normalized.key),
+    ttlMs: Math.max(0, Number(normalized.ttlMs || 0) || 0),
+    ageMs: Math.max(0, Number(normalized.ageMs || 0) || 0)
+  };
+}
+
+function summarizeCircuitDiagnostics(circuit = {}) {
+  const normalized = normalizeObject(circuit, {});
+  return {
+    open: normalized.open === true,
+    failures: Math.max(0, Number(normalized.failures || 0) || 0),
+    openUntil: Math.max(0, Number(normalized.openUntil || 0) || 0),
+    failureThreshold: Math.max(0, Number(normalized.failureThreshold || 0) || 0),
+    cooldownMs: Math.max(0, Number(normalized.cooldownMs || 0) || 0),
+    shortCircuits: Math.max(0, Number(normalized.shortCircuits || 0) || 0),
+    lastError: truncatePreview(normalized.lastError, DEFAULT_PREVIEW_CHARS)
+  };
+}
+
+function summarizeKbPartitionDiagnostics(partition = {}) {
+  const normalized = normalizeObject(partition, {});
+  return {
+    usedAliasPartition: normalized.usedAliasPartition === true,
+    matchedAliases: normalizeArray(normalized.matchedAliases).map((item) => normalizeText(item)).filter(Boolean).slice(0, 10),
+    fallbackIdsCount: Math.max(0, Number(normalized.fallbackIdsCount || 0) || 0)
+  };
+}
+
 function summarizeRouteGate(routeGate = {}) {
   const normalized = normalizeObject(routeGate, {});
   return {
@@ -197,6 +251,10 @@ function summarizeMemosRecall(recall = {}, options = {}) {
     queryChanged: diagnostics.queryChanged === true,
     routeGate: summarizeRouteGate(diagnostics.routeGate),
     quality: summarizeQualityDiagnostics(diagnostics.quality),
+    rerank: summarizeRerankDiagnostics(diagnostics.rerank),
+    cache: summarizeCacheDiagnostics(diagnostics.cache),
+    circuit: summarizeCircuitDiagnostics(diagnostics.circuit),
+    kbPartition: summarizeKbPartitionDiagnostics(diagnostics.kbPartition),
     diagnosticsError: normalizeText(diagnostics.error),
     dedupe: {
       enabled: dedupe.enabled === true,
@@ -283,6 +341,44 @@ function summarizeTrimDecisions(promptSnapshot = {}) {
     .filter((item) => item.type || item.blockId);
 }
 
+function findBlockById(promptSnapshot = {}, blockId = '') {
+  const target = normalizeText(blockId);
+  if (!target) return null;
+  return normalizeArray(normalizeObject(promptSnapshot, {}).assembledBlocks)
+    .find((block) => normalizeText(block?.id) === target || normalizeText(block?.meta?.blockId) === target) || null;
+}
+
+function tokenUsageForBlock(promptSnapshot = {}, blockId = '') {
+  const target = normalizeText(blockId);
+  if (!target) return 0;
+  const usage = summarizeTokenUsage(promptSnapshot)
+    .filter((item) => item.id === target || item.id.startsWith(`${target}_`) || item.id.endsWith(`_${target}`) || item.id.includes(target));
+  return usage.reduce((sum, item) => sum + Math.max(0, Number(item.tokens || 0) || 0), 0);
+}
+
+function summarizeShortTermContinuityPrompt(promptSnapshot = {}) {
+  const block = findBlockById(promptSnapshot, 'short_term_continuity');
+  const meta = normalizeObject(block?.meta?.continuity, {});
+  const trimDecisions = summarizeTrimDecisions(promptSnapshot)
+    .filter((item) => item.blockId === 'short_term_continuity' || item.blockId === 'short_term_continuity_compact');
+  return {
+    injectedTokens: tokenUsageForBlock(promptSnapshot, 'short_term_continuity'),
+    rawTurnCount: Math.max(0, Number(meta.rawTurnCount || 0) || 0),
+    selectedRawTurnCount: Math.max(0, Number(meta.selectedRawTurnCount || 0) || 0),
+    selectedNewestRawTurnCount: Math.max(0, Number(meta.selectedNewestRawTurnCount || 0) || 0),
+    selectedImportantRawTurnCount: Math.max(0, Number(meta.selectedImportantRawTurnCount || 0) || 0),
+    sessionSummaryCount: Math.max(0, Number(meta.sessionSummaryCount || 0) || 0),
+    shortTermSummaryChars: Math.max(0, Number(meta.shortTermSummaryChars || 0) || 0),
+    contextProfile: normalizeText(meta.profileName),
+    contextProfileReason: normalizeText(meta.profileReason),
+    trimReasons: Array.from(new Set(
+      normalizeArray(meta.trimReasons).map((item) => normalizeText(item)).filter(Boolean)
+        .concat(trimDecisions.map((item) => normalizeText(item.type)).filter(Boolean))
+    )),
+    trimDecisions
+  };
+}
+
 function findPlannerDecisionForBlock(plan = {}, blockId = '') {
   const target = normalizeText(blockId);
   if (!target) return null;
@@ -331,7 +427,8 @@ function recordMainPromptBlockObservation(input = {}) {
       hasShortTermContinuity: allBlockIds.includes('short_term_continuity'),
       hasContinuityState: allBlockIds.includes('continuity_state') || allBlockIds.includes('session_continuity'),
       tokenUsageByBlock: summarizeTokenUsage(promptSnapshot),
-      trimDecisions: summarizeTrimDecisions(promptSnapshot)
+      trimDecisions: summarizeTrimDecisions(promptSnapshot),
+      shortTermContinuity: summarizeShortTermContinuityPrompt(promptSnapshot)
     },
     planner: {
       dynamicPromptPlanSource: normalizeText(dynamicPromptPlan.source || dynamicPromptPlan._source),

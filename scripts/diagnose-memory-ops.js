@@ -9,6 +9,7 @@ const { loadCases, runMode } = require('./eval-memory-recall');
 const { runMemoryQualityAudit } = require('../utils/memoryQualityAudit');
 const { buildRecallEvalGate } = require('../utils/memoryGovernance/recallEvalGate');
 const { buildLanceDbReadMigrationGate } = require('../utils/memoryGovernance/lancedbMigrationGate');
+const { diagnoseMemosPlannerRecall } = require('../utils/memosPlannerRecall');
 
 const SCHEMA_VERSION = 'memory_ops_diagnostic_v1';
 const CASES_FILE = path.join(__dirname, '..', 'artifacts', 'memory-recall-eval', 'cases.jsonl');
@@ -37,7 +38,10 @@ const MODE_ALIASES = {
   audit: 'audit',
   quality: 'audit',
   'quality-audit': 'audit',
-  'memory-audit': 'audit'
+  'memory-audit': 'audit',
+  memos: 'memos',
+  'memos-health': 'memos',
+  'memos-diagnose': 'memos'
 };
 
 function normalizeText(value = '') {
@@ -61,9 +65,11 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
     rawMode: 'diagnose',
     limit: null,
     source: 'all',
+    query: '',
     skipProbe: false,
     forceStale: false,
     retryFailed: false,
+    autoGold: false,
     evalMode: 'lancedb',
     memoryCli: false,
     gate: false,
@@ -98,12 +104,17 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
     } else if (item === '--source') {
       args.source = normalizeText(argv[index + 1] || 'all').toLowerCase() || 'all';
       index += 1;
+    } else if (item === '--query') {
+      args.query = normalizeText(argv[index + 1] || '');
+      index += 1;
     } else if (item === '--skip-probe' || item === '--no-probe') {
       args.skipProbe = true;
     } else if (item === '--force-stale') {
       args.forceStale = true;
     } else if (item === '--retry-failed') {
       args.retryFailed = true;
+    } else if (item === '--auto-gold') {
+      args.autoGold = true;
     } else if (item === '--candidate' || item === '--baseline' || item === '--eval-mode') {
       args.evalMode = normalizeText(argv[index + 1] || 'lancedb').toLowerCase() || 'lancedb';
       index += 1;
@@ -156,7 +167,8 @@ function buildUsageSummary() {
       backfill: 'dry-run embedding backfill plan',
       recall: 'recall eval summary from artifacts/memory-recall-eval/cases.jsonl',
       'lancedb-gate': 'compare local_jsonl baseline with LanceDB candidate and decide whether read promotion is safe',
-      audit: 'sampled memory semantic quality audit plus hard metric warnings'
+      audit: 'sampled memory semantic quality audit plus hard metric warnings',
+      memos: 'MemOS remote recall health, read-only tool discovery, cache, circuit and KB partition summary'
     }
   };
 }
@@ -261,6 +273,9 @@ function summarizeRecall(result = {}, args = {}) {
       }
     },
     fallbackCounts: result.fallbackCounts || {},
+    coverageReady: Number(result.coverageReady || 0) || 0,
+    coverageTotal: Number(result.coverageTotal || 0) || 0,
+    coverageReadyRatio: result.coverageReadyRatio ?? null,
     emptyResultRate: result.emptyResultRate ?? null,
     noVisibleCandidateRate: result.noVisibleCandidateRate ?? null,
     bySource: result.bySource || {},
@@ -292,6 +307,30 @@ function summarizeAudit(result = {}, args = {}) {
   };
 }
 
+function summarizeMemos(result = {}, args = {}) {
+  return {
+    enabled: result.enabled === true,
+    serverName: result.serverName || '',
+    recallSource: result.recallSource || '',
+    readOnly: result.readOnly !== false,
+    query: args.query || '',
+    configured: result.configured || {},
+    routeGate: result.routeGate || null,
+    discovery: result.discovery
+      ? {
+        availableToolsCount: Array.isArray(result.discovery.availableTools) ? result.discovery.availableTools.length : 0,
+        kbToolName: result.discovery.kbToolName || '',
+        searchToolName: result.discovery.searchToolName || '',
+        mutatingToolsDetected: result.discovery.mutatingToolsDetected === true,
+        mutatingToolNames: Array.isArray(result.discovery.mutatingToolNames) ? result.discovery.mutatingToolNames : [],
+        error: result.discovery.error || ''
+      }
+      : {},
+    cache: result.runtime?.cache || {},
+    circuit: result.runtime?.circuit || {}
+  };
+}
+
 function summarizeLanceDbGate(result = {}, args = {}) {
   const gate = result.gate || {};
   return {
@@ -309,7 +348,8 @@ function summarizeLanceDbGate(result = {}, args = {}) {
           judgedCases: result.baseline.judgedCases,
           recallAt8: result.baseline.recallAt8,
           mrrAt8: result.baseline.mrrAt8,
-          emptyResultRate: result.baseline.emptyResultRate
+          emptyResultRate: result.baseline.emptyResultRate,
+          coverageReadyRatio: result.baseline.coverageReadyRatio
         }
       : null,
     candidate: result.candidate
@@ -319,7 +359,8 @@ function summarizeLanceDbGate(result = {}, args = {}) {
           recallAt8: result.candidate.recallAt8,
           mrrAt8: result.candidate.mrrAt8,
           emptyResultRate: result.candidate.emptyResultRate,
-          noVisibleCandidateRate: result.candidate.noVisibleCandidateRate
+          noVisibleCandidateRate: result.candidate.noVisibleCandidateRate,
+          coverageReadyRatio: result.candidate.coverageReadyRatio
         }
       : null
   };
@@ -331,7 +372,8 @@ function getDefaultRunners() {
     runBackfill,
     loadCases,
     runMode,
-    runMemoryQualityAudit
+    runMemoryQualityAudit,
+    diagnoseMemosPlannerRecall
   };
 }
 
@@ -343,7 +385,7 @@ async function runRecallEval(args = {}, runners = getDefaultRunners()) {
   };
   try {
     const limit = args.limit ?? 100;
-    const cases = runners.loadCases(limit);
+    const cases = runners.loadCases(limit, { autoGold: args.autoGold === true });
     return await runners.runMode(args.evalMode || 'lancedb', cases, {
       memoryCli: args.memoryCli === true
     });
@@ -385,7 +427,7 @@ async function runLanceDbMigrationGate(args = {}, runners = getDefaultRunners())
     limit,
     skipProbe: true
   });
-  const cases = runners.loadCases(limit);
+  const cases = runners.loadCases(limit, { autoGold: args.autoGold === true });
   const baseline = await runners.runMode('local_jsonl', cases, {
     memoryCli: false
   });
@@ -440,7 +482,7 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
     });
   }
 
-  if (!['diagnose', 'backfill', 'recall', 'lancedb-gate', 'audit'].includes(args.mode)) {
+  if (!['diagnose', 'backfill', 'recall', 'lancedb-gate', 'audit', 'memos'].includes(args.mode)) {
     return createEnvelope({
       mode: args.mode,
       ok: false,
@@ -511,6 +553,20 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
           writeFindings: result.writeFindings || [],
           recallFindings: result.recallFindings || []
         },
+        startedAt
+      });
+    }
+
+    if (args.mode === 'memos') {
+      const result = await runners.diagnoseMemosPlannerRecall({
+        query: args.query || '设定资料 世界观 规则'
+      });
+      return createEnvelope({
+        mode: 'memos',
+        ok: result.ok !== false,
+        exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
+        summary: summarizeMemos(result, args),
+        details: result,
         startedAt
       });
     }
@@ -634,6 +690,7 @@ module.exports = {
   summarizeBackfill,
   summarizeDiagnose,
   summarizeLanceDbGate,
+  summarizeMemos,
   summarizeRecall,
   summarizeAudit,
   buildLanceDbReadMigrationGate,

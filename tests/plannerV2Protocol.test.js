@@ -6,12 +6,18 @@ const oldPlanApiKey = process.env.PLAN_API_KEY;
 const oldPlanModel = process.env.PLAN_MODEL;
 const oldPlanReasoningEffort = process.env.PLAN_REASONING_EFFORT;
 const oldMemosMcpEnabled = process.env.MEMOS_MCP_ENABLED;
+const oldPlannerAllowMainModelFallback = process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK;
+const oldApiBaseUrl = process.env.API_BASE_URL;
+const oldApiKey = process.env.API_KEY;
 process.env.BOT_TOOL_MODE = 'full';
 process.env.PLAN_API_BASE_URL = 'https://planner.example.test/v1';
 process.env.PLAN_API_KEY = 'planner-test-key';
 process.env.PLAN_MODEL = 'planner-test-model';
 process.env.PLAN_REASONING_EFFORT = 'high';
 process.env.MEMOS_MCP_ENABLED = 'false';
+process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = 'false';
+process.env.API_BASE_URL = 'https://main.example.test/v1';
+process.env.API_KEY = 'main-test-key';
 
 const {
   planRequestV2,
@@ -71,6 +77,42 @@ module.exports = (async () => {
   assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPlannerRequest, 'reasoning_effort'));
   assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPlannerRequest, 'prompt_cache_key'));
   config.PLAN_API_BASE_URL = originalConfigPlanApiBaseUrl;
+
+  const originalConfigPlanApiKey = config.PLAN_API_KEY;
+  const originalConfigPassiveReplyApiBaseUrl = config.PASSIVE_AWARENESS_REPLY_API_BASE_URL;
+  const originalConfigPassiveApiBaseUrl = config.PASSIVE_AWARENESS_API_BASE_URL;
+  const originalConfigPassiveReplyApiKey = config.PASSIVE_AWARENESS_REPLY_API_KEY;
+  const originalConfigPassiveApiKey = config.PASSIVE_AWARENESS_API_KEY;
+  const originalConfigRouterBaseUrl = config.AI_ROUTER_BASE_URL;
+  const originalConfigRouterApiKey = config.AI_ROUTER_API_KEY;
+  const originalConfigPlannerAllowMainModelFallback = config.PLANNER_ALLOW_MAIN_MODEL_FALLBACK;
+  config.PLAN_API_BASE_URL = '';
+  config.PLAN_API_KEY = '';
+  config.PASSIVE_AWARENESS_REPLY_API_BASE_URL = '';
+  config.PASSIVE_AWARENESS_API_BASE_URL = '';
+  config.PASSIVE_AWARENESS_REPLY_API_KEY = '';
+  config.PASSIVE_AWARENESS_API_KEY = '';
+  config.AI_ROUTER_BASE_URL = '';
+  config.AI_ROUTER_API_KEY = '';
+  config.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = false;
+  assert.strictEqual(getPlannerApiBaseUrl(), '');
+  assert.strictEqual(getPlannerApiKey(), '');
+  assert.strictEqual(getPlannerApiBaseUrlV2(), '');
+  assert.strictEqual(getPlannerApiKeyV2(), '');
+  config.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = true;
+  assert.strictEqual(getPlannerApiBaseUrl(), 'https://main.example.test/v1');
+  assert.strictEqual(getPlannerApiKey(), 'main-test-key');
+  assert.strictEqual(getPlannerApiBaseUrlV2(), 'https://main.example.test/v1');
+  assert.strictEqual(getPlannerApiKeyV2(), 'main-test-key');
+  config.PLAN_API_BASE_URL = originalConfigPlanApiBaseUrl;
+  config.PLAN_API_KEY = originalConfigPlanApiKey;
+  config.PASSIVE_AWARENESS_REPLY_API_BASE_URL = originalConfigPassiveReplyApiBaseUrl;
+  config.PASSIVE_AWARENESS_API_BASE_URL = originalConfigPassiveApiBaseUrl;
+  config.PASSIVE_AWARENESS_REPLY_API_KEY = originalConfigPassiveReplyApiKey;
+  config.PASSIVE_AWARENESS_API_KEY = originalConfigPassiveApiKey;
+  config.AI_ROUTER_BASE_URL = originalConfigRouterBaseUrl;
+  config.AI_ROUTER_API_KEY = originalConfigRouterApiKey;
+  config.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = originalConfigPlannerAllowMainModelFallback;
 
   const memoryDecision = await planRequestV2({
     question: '你还记得我们之前聊到哪了吗',
@@ -1181,6 +1223,12 @@ module.exports = (async () => {
   else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
   if (oldMemosMcpEnabled === undefined) delete process.env.MEMOS_MCP_ENABLED;
   else process.env.MEMOS_MCP_ENABLED = oldMemosMcpEnabled;
+  if (oldPlannerAllowMainModelFallback === undefined) delete process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK;
+  else process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = oldPlannerAllowMainModelFallback;
+  if (oldApiBaseUrl === undefined) delete process.env.API_BASE_URL;
+  else process.env.API_BASE_URL = oldApiBaseUrl;
+  if (oldApiKey === undefined) delete process.env.API_KEY;
+  else process.env.API_KEY = oldApiKey;
   config.MEMOS_MCP_ENABLED = oldConfigMemosMcpEnabled;
 })().catch((error) => {
   if (oldBotToolMode === undefined) delete process.env.BOT_TOOL_MODE;
@@ -1195,6 +1243,12 @@ module.exports = (async () => {
   else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
   if (oldMemosMcpEnabled === undefined) delete process.env.MEMOS_MCP_ENABLED;
   else process.env.MEMOS_MCP_ENABLED = oldMemosMcpEnabled;
+  if (oldPlannerAllowMainModelFallback === undefined) delete process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK;
+  else process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = oldPlannerAllowMainModelFallback;
+  if (oldApiBaseUrl === undefined) delete process.env.API_BASE_URL;
+  else process.env.API_BASE_URL = oldApiBaseUrl;
+  if (oldApiKey === undefined) delete process.env.API_KEY;
+  else process.env.API_KEY = oldApiKey;
   config.MEMOS_MCP_ENABLED = oldConfigMemosMcpEnabled;
   console.error(error);
   process.exit(1);

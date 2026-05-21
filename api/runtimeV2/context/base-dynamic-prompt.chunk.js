@@ -23,7 +23,10 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         chatHistory: options.chatHistory,
         shortTermMemory: options.shortTermMemory,
         routeMeta,
-        sessionKey: options.sessionKey
+        sessionKey: options.sessionKey,
+        routePolicyKey,
+        topRouteType,
+        question
       }));
   let memoryContext = null;
   if (promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object') {
@@ -268,6 +271,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     || trimTextByTokenBudget(memoryContext.summary || 'none', affinity.shortTermMemoryTokens, 'tail')
     || 'none';
   const shortTermContinuityText = buildShortTermContinuityPrompt(sharedShortTermContext);
+  const shortTermContinuityMeta = summarizeShortTermContinuityForPrompt(sharedShortTermContext);
   if (includeOptionalContextBlocks) {
     promptBlocks.push(createPromptBlock('short_term_continuity', 'Short Term Continuity', shortTermContinuityText, {
       stage: 'main',
@@ -277,7 +281,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       lane: 'dynamic_context',
       meta: {
         optional: true,
-        evidenceOnly: true
+        evidenceOnly: true,
+        continuity: shortTermContinuityMeta
       }
     }));
     promptBlocks.push(createPromptBlock('affinity_level', 'Affinity Level', `[Affinity] ${String(userInfo?.level || '').trim() || 'stranger'}`, {
@@ -570,6 +575,19 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
             optional: true,
             blockId: 'memos_recall',
             evidenceOnly: true
+          }
+        }),
+        createPromptBlock('short_term_continuity_compact', 'Short Term Continuity Compact', trimTextByTokenBudget(shortTermContinuityText, Math.floor(promptBudget * 0.2), 'tail'), {
+          stage: 'main',
+          priority: 210,
+          authority: 'memory_fact',
+          kind: 'continuity',
+          lane: 'dynamic_context',
+          meta: {
+            optional: true,
+            blockId: 'short_term_continuity',
+            evidenceOnly: true,
+            continuity: shortTermContinuityMeta
           }
         }),
         createPromptBlock('long_term_profile_compact', 'Long Term Profile Compact', `[LongTermProfile] ${trimTextByTokenBudget(memoryContext.promptLongTermProfileText || memoryContext.longTermProfileText || memoryContext.profileText, Math.floor(promptBudget * 0.18), 'tail') || '暂无'}`, {

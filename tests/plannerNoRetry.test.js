@@ -78,6 +78,86 @@ module.exports = (async () => {
     assert.strictEqual(decision.plannerMeta.fallbackUsed, true);
     assert.strictEqual(decision.plannerMeta.plannerModel, 'planner-model');
 
+    restoreEnv(snapshot);
+    Object.assign(process.env, {
+      BOT_TOOL_MODE: 'full',
+      API_BASE_URL: 'https://main.example.test/v1',
+      API_KEY: 'main-key',
+      AI_MODEL: 'main-model',
+      PLANNER_MAX_MODEL_CALLS: '2',
+      PLANNER_SEMANTIC_REFINE_ENABLED: 'true',
+      PLANNER_ALLOW_MAIN_MODEL_FALLBACK: 'false',
+      PLANNER_SUBAGENT_ENABLED: '0',
+      MEMOS_MCP_ENABLED: 'false',
+      PLAN_API_BASE_URL: '',
+      PLAN_API_KEY: '',
+      PLANNER_API_BASE_URL: '',
+      PLANNER_API_KEY: '',
+      PLAN_API_BASEURI: '',
+      PLAN_APIKEY: '',
+      PLANNER_API_BASEURI: '',
+      PLANNER_APIKEY: '',
+      PASSIVE_AWARENESS_API_BASE_URL: '',
+      PASSIVE_AWARENESS_API_KEY: '',
+      PASSIVE_AWARENESS_REPLY_API_BASE_URL: '',
+      PASSIVE_AWARENESS_REPLY_API_KEY: '',
+      AI_ROUTER_BASE_URL: '',
+      AI_ROUTER_API_KEY: '',
+      AI_ROUTER_BASEURI: '',
+      AI_ROUTER_APIKEY: ''
+    });
+    clearProjectCache();
+
+    const blockedHttpClient = require('../src/model/http');
+    let blockedFallbackCalls = 0;
+    blockedHttpClient.postWithRetry = async () => {
+      blockedFallbackCalls += 1;
+      throw new Error('planner should not use main model fallback by default');
+    };
+    const { planRequestV2: planRequestV2WithoutPlannerEndpoint } = require('../api/runtimeV2/planning/service');
+    const blockedConfig = require('../config');
+    blockedConfig.PLAN_API_BASE_URL = '';
+    blockedConfig.PLAN_API_KEY = '';
+    blockedConfig.PASSIVE_AWARENESS_REPLY_API_BASE_URL = '';
+    blockedConfig.PASSIVE_AWARENESS_REPLY_API_KEY = '';
+    blockedConfig.PASSIVE_AWARENESS_API_BASE_URL = '';
+    blockedConfig.PASSIVE_AWARENESS_API_KEY = '';
+    blockedConfig.AI_ROUTER_BASE_URL = '';
+    blockedConfig.AI_ROUTER_API_KEY = '';
+    blockedConfig.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = false;
+    const blockedDecision = await planRequestV2WithoutPlannerEndpoint({
+      question: '帮我规划一个跨模块重构方案',
+      cleanText: '帮我规划一个跨模块重构方案',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        chatMode: 'chat',
+        toolIntent: 'none',
+        responseIntent: 'answer'
+      },
+      route: {
+        question: '帮我规划一个跨模块重构方案',
+        cleanText: '帮我规划一个跨模块重构方案',
+        topRouteType: 'direct_chat',
+        meta: {
+          chatMode: 'chat',
+          toolIntent: 'none',
+          responseIntent: 'answer'
+        },
+        intent: {},
+        facets: {}
+      },
+      allowedTools: [],
+      config: {
+        MEMOS_MCP_ENABLED: false,
+        PLANNER_MAX_MODEL_CALLS: 2,
+        PLANNER_SEMANTIC_REFINE_ENABLED: true,
+        PLANNER_ALLOW_MAIN_MODEL_FALLBACK: false
+      }
+    });
+    assert.strictEqual(blockedFallbackCalls, 0);
+    assert.strictEqual(blockedDecision.plannerMeta.fallbackUsed, false);
+    assert.strictEqual(blockedDecision.plannerMeta.decisionSource, 'rule_preflight');
+
     console.log('plannerNoRetry.test.js passed');
   } finally {
     restoreEnv(snapshot);

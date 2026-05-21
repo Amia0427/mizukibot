@@ -3,6 +3,7 @@ const JOURNAL_BACKFILL_COMMAND = 'node scripts/backfill-memory-v3-embeddings.js 
 const MEMORY_BACKFILL_COMMAND = 'node scripts/backfill-memory-v3-embeddings.js --resume --source memory --limit 100 --sync-after';
 const RECALL_EVAL_COMMAND = 'npm run diag:memory -- recall --limit 50';
 const MATERIALIZE_COMMAND = 'npm run memory:v3:migrate';
+const LEGACY_IMPORT_COMMAND = 'node scripts/migrate-memory-v3.js --import-legacy';
 
 function countDrift(coverage = {}) {
   const memory = coverage.memory || {};
@@ -81,6 +82,7 @@ function buildRecommendedActions(healthGate = {}, coverage = {}, options = {}) {
 
 module.exports = {
   JOURNAL_BACKFILL_COMMAND,
+  LEGACY_IMPORT_COMMAND,
   MATERIALIZE_COMMAND,
   MEMORY_BACKFILL_COMMAND,
   RECALL_EVAL_COMMAND,

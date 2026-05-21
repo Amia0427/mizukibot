@@ -22,6 +22,10 @@ const {
   resolveShortTermSessionKey,
   ensureShortTermMemoryState
 } = require('./state');
+const {
+  applyContextProfileToTokenBudget,
+  resolveShortTermContextProfile
+} = require('./contextProfile');
 
 const shortTermScopeLogCache = new Map();
 
@@ -218,12 +222,103 @@ function pickSharedField(entries = [], selector, maxChars = 220) {
   return '';
 }
 
-function buildSharedRecentHistory(entries = [], tokenBudget = 0) {
+function getMessageImportanceScore(message = {}, index = 0, total = 0) {
+  const role = String(message?.role || '').trim().toLowerCase();
+  const content = normalizeMessageContent(message?.content);
+  let score = Math.max(0, Number(index || 0) || 0) / Math.max(1, Number(total || 1) || 1);
+  const textLength = String(content || '').trim().length;
+  if (message?.isCurrent) score += 0.8;
+  if (role === 'user') score += 0.15;
+  if (/(引用|回复|quote|quoted|>|\[quote\]|转发|上面这句|这句话)/i.test(content)) score += 1.2;
+  if (/(我会|我将|承诺|保证|稍后|等下|待会|下一步|TODO|todo|commit|提交|部署|修复|实现|测试|补上|继续做)/i.test(content)) score += 0.95;
+  if (/(还没|未完成|没做完|待办|坑|open loop|pending|继续|接着|上次|刚才)/i.test(content)) score += 0.9;
+  if (/(不对|不是|错了|纠正|更正|改成|应该是|你刚|你说过|别忘|不要忘)/i.test(content)) score += 1.05;
+  if (textLength >= 80) score += 0.3;
+  if (textLength >= 180) score += 0.35;
+  if (/[`*_#{}[\]()/\\]|https?:\/\//i.test(content)) score += 0.2;
+  return score;
+}
+
+function trimMessagesByImportanceAndTokenBudget(messages = [], tokenBudget = 0, options = {}) {
+  const list = Array.isArray(messages) ? messages : [];
+  const budget = Math.max(0, Number(tokenBudget) || 0);
+  const rawCount = list.length;
+  const newestMin = Math.max(0, Math.floor(Number(options.newestMin || 0) || 0));
+  const maxMessages = Math.max(0, Math.floor(Number(options.maxMessages || 0) || 0));
+  const stats = {
+    rawCount,
+    selectedCount: 0,
+    tokenBudget: budget,
+    maxMessages,
+    newestMin,
+    selectedImportantCount: 0,
+    selectedNewestCount: 0,
+    trimReasons: []
+  };
+
+  if (!list.length || budget <= 0) {
+    stats.trimReasons.push('empty_or_zero_budget');
+    return { messages: [], stats };
+  }
+
+  const newestStart = Math.max(0, list.length - newestMin);
+  const selectedIndexes = new Set();
+  for (let index = newestStart; index < list.length; index += 1) {
+    selectedIndexes.add(index);
+  }
+
+  const remaining = list
+    .map((message, index) => ({
+      index,
+      message,
+      score: getMessageImportanceScore(message, index, list.length)
+    }))
+    .filter((item) => !selectedIndexes.has(item.index))
+    .sort((a, b) => b.score - a.score || b.index - a.index);
+
+  const selectLimit = maxMessages > 0 ? maxMessages : list.length;
+  for (const item of remaining) {
+    if (selectedIndexes.size >= selectLimit) break;
+    selectedIndexes.add(item.index);
+  }
+
+  if (selectedIndexes.size < list.length) {
+    stats.trimReasons.push('message_limit_importance_selection');
+  }
+
+  const candidates = Array.from(selectedIndexes)
+    .sort((a, b) => a - b)
+    .map((index) => list[index]);
+  const trimmed = trimMessagesByTokenBudget(candidates, budget);
+  if (trimmed.length < candidates.length) {
+    stats.trimReasons.push('token_budget_tail_trim');
+  }
+
+  const keptKeys = new Set(trimmed.map((message) => `${String(message.role || '').trim().toLowerCase()}:${normalizeMessageContent(message.content)}`));
+  const selectedImportantCount = remaining.filter((item) => keptKeys.has(`${String(item.message.role || '').trim().toLowerCase()}:${normalizeMessageContent(item.message.content)}`)).length;
+  const selectedNewestCount = trimmed.filter((message) => message.isNewest === true).length;
+  stats.selectedCount = trimmed.length;
+  stats.selectedImportantCount = selectedImportantCount;
+  stats.selectedNewestCount = selectedNewestCount;
+  if (stats.selectedCount < rawCount && stats.trimReasons.length === 0) {
+    stats.trimReasons.push('trimmed');
+  }
+
+  return {
+    messages: trimmed.map((message) => {
+      const { isCurrent, isNewest, ...clean } = message;
+      return clean;
+    }),
+    stats
+  };
+}
+
+function buildSharedRecentHistory(entries = [], tokenBudget = 0, options = {}) {
   const current = entries.find((entry) => entry?.isCurrent);
   const combined = [];
   const seen = new Set();
 
-  const pushHistory = (messages = []) => {
+  const pushHistory = (messages = [], entry = null) => {
     for (const item of messages) {
       const role = String(item?.role || '').trim().toLowerCase();
       const content = normalizeMessageContent(item?.content);
@@ -231,17 +326,21 @@ function buildSharedRecentHistory(entries = [], tokenBudget = 0) {
       const key = `${role}:${content}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      combined.push({ role, content });
+      combined.push({ role, content, isCurrent: Boolean(entry?.isCurrent) });
     }
   };
 
   for (const entry of entries) {
     if (!entry || entry.isCurrent) continue;
-    pushHistory(entry.history || []);
+    pushHistory(entry.history || [], entry);
   }
-  pushHistory(current?.history || []);
+  pushHistory(current?.history || [], current);
+  const newestStart = Math.max(0, combined.length - Math.max(0, Number(options.newestMin || 0) || 0));
+  for (let index = newestStart; index < combined.length; index += 1) {
+    combined[index].isNewest = true;
+  }
 
-  return trimMessagesByTokenBudget(combined, tokenBudget);
+  return trimMessagesByImportanceAndTokenBudget(combined, tokenBudget, options);
 }
 
 function collectSharedRecentTurns(entries = [], selector, limit = getRecentTurnsMaxItems()) {
@@ -262,6 +361,10 @@ function collectSharedRecentTurns(entries = [], selector, limit = getRecentTurns
 function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
   const key = String(deps.sessionKey || resolveShortTermSessionKey(userId, deps.routeMeta) || '').trim();
   const settings = getShortTermCompressionSettings(userInfo, { userId: String(userId || '').trim() });
+  const contextProfile = resolveShortTermContextProfile(userInfo, {
+    ...deps,
+    userId: String(userId || '').trim()
+  });
   const sessionEntries = collectSharedShortTermSessionEntries(userId, {
     ...deps,
     sessionKey: key
@@ -362,13 +465,26 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
   const summaryMessage = deps.buildHistorySummaryMessage(summaryText, settings.summaryMaxTokens);
   const historyStore = deps.chatHistory || {};
   const currentHistory = Array.isArray(historyStore[key]) ? historyStore[key] : [];
+  const summaryLoadCount = Math.max(1, Math.floor(Number(deps.sessionSummaryLoadCount || contextProfile.summaryLoadCount || config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT) || 1));
   const sessionSummaryBundle = deps.buildSessionSummaryMessages(
     key,
     currentHistory,
-    config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT,
+    summaryLoadCount,
     { dedupeAgainstText: summaryText }
   );
-  const recentHistory = buildSharedRecentHistory(sessionEntries, settings.affinity.shortTermMemoryTokens);
+  const recentHistoryResult = buildSharedRecentHistory(
+    sessionEntries,
+    applyContextProfileToTokenBudget(settings.affinity.shortTermMemoryTokens, contextProfile),
+    {
+      maxMessages: contextProfile.recentRawMessageLimit,
+      newestMin: contextProfile.recentRawNewestMin
+    }
+  );
+  const recentHistory = recentHistoryResult.messages;
+  const rawStats = recentHistoryResult.stats || {};
+  const sessionSummaryCount = Array.isArray(sessionSummaryBundle.recentSessionSummaries)
+    ? sessionSummaryBundle.recentSessionSummaries.length
+    : 0;
 
   return {
     summaryMessage,
@@ -381,14 +497,33 @@ function buildSharedShortTermContextMessages(userId, userInfo = {}, deps = {}) {
     sessionKey: key,
     sharedSessionKeys: sessionEntries.map((entry) => entry.sessionKey),
     sharedShortTermSignature: buildSharedShortTermSignature(sessionEntries),
-    shortTermScope: scopeMeta
+    shortTermScope: scopeMeta,
+    contextProfile: {
+      name: contextProfile.name,
+      reason: contextProfile.reason,
+      recentRawMessageLimit: contextProfile.recentRawMessageLimit,
+      recentRawNewestMin: contextProfile.recentRawNewestMin,
+      rawTokenMultiplier: contextProfile.rawTokenMultiplier,
+      summaryLoadCount
+    },
+    contextObservability: {
+      rawTurnCount: Math.max(0, Number(rawStats.rawCount || 0) || 0),
+      selectedRawTurnCount: recentHistory.length,
+      selectedNewestRawTurnCount: Math.max(0, Number(rawStats.selectedNewestCount || 0) || 0),
+      selectedImportantRawTurnCount: Math.max(0, Number(rawStats.selectedImportantCount || 0) || 0),
+      sessionSummaryCount,
+      shortTermSummaryChars: String(summaryText || '').length,
+      trimReasons: Array.isArray(rawStats.trimReasons) ? rawStats.trimReasons : []
+    }
   };
 }
 
 module.exports = {
   buildSharedShortTermContextMessages,
   buildSharedShortTermSignature,
+  buildSharedRecentHistory,
   collectSharedShortTermSessionEntries,
   listUserSessionKeys,
-  normalizeHistoryMessages
+  normalizeHistoryMessages,
+  trimMessagesByImportanceAndTokenBudget
 };

@@ -19,10 +19,10 @@ function normalizeRecentTurns(values = []) {
   return (Array.isArray(values) ? values : [])
     .map((item) => ({
       role: String(item?.role || '').trim().toLowerCase(),
-      content: clampText(item?.content || item?.text, 220)
+      content: clampText(item?.content || item?.text, config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_CHARS || 220)
     }))
     .filter((item) => (item.role === 'user' || item.role === 'assistant') && item.content)
-    .slice(-Math.max(2, Math.min(80, Math.floor(Number(config.SHORT_TERM_MEMORY_RECENT_TURNS || config.MEMORY_V3_SESSION_RECENT_MESSAGES || 32) || 32))));
+    .slice(-Math.max(2, Math.min(80, Math.floor(Number(config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS || config.SHORT_TERM_MEMORY_RECENT_TURNS || config.MEMORY_V3_SESSION_RECENT_MESSAGES || 32) || 32))));
 }
 
 function ensureParentDir(filePath = '') {
@@ -71,16 +71,16 @@ function normalizeSummaryItem(item = {}) {
     structured: {
       activeTopic: clampText(structured.activeTopic, 180),
       carryOverUserTurn: clampText(structured.carryOverUserTurn, 220),
-      openLoops: clampList(structured.openLoops, 4, 120),
-      assistantCommitments: clampList(structured.assistantCommitments, 4, 120),
-      userConstraints: clampList(structured.userConstraints, 4, 120),
+      openLoops: clampList(structured.openLoops, config.SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_ITEMS || 4, config.SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_CHARS || 120),
+      assistantCommitments: clampList(structured.assistantCommitments, config.SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_ITEMS || 4, config.SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_CHARS || 120),
+      userConstraints: clampList(structured.userConstraints, config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_ITEMS || 4, config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_CHARS || 120),
       recentTurns: normalizeRecentTurns(structured.recentTurns),
       interaction: {
         activeTopic: clampText(structured.interaction?.activeTopic, 180),
         carryOverUserTurn: clampText(structured.interaction?.carryOverUserTurn, 220),
-        openLoops: clampList(structured.interaction?.openLoops, 4, 120),
-        assistantCommitments: clampList(structured.interaction?.assistantCommitments, 4, 120),
-        userConstraints: clampList(structured.interaction?.userConstraints, 4, 120),
+        openLoops: clampList(structured.interaction?.openLoops, config.SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_ITEMS || 4, config.SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_CHARS || 120),
+        assistantCommitments: clampList(structured.interaction?.assistantCommitments, config.SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_ITEMS || 4, config.SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_CHARS || 120),
+        userConstraints: clampList(structured.interaction?.userConstraints, config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_ITEMS || 4, config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_CHARS || 120),
         recentTurns: normalizeRecentTurns(structured.interaction?.recentTurns),
         phaseHint: clampText(structured.interaction?.phaseHint, 48),
         sourceFlags: clampList(structured.interaction?.sourceFlags, 8, 80),

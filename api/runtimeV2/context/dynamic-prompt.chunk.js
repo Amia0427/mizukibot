@@ -21,7 +21,10 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     chatHistory: options.chatHistory,
     shortTermMemory: options.shortTermMemory,
     routeMeta,
-    sessionKey: options.sessionKey
+    sessionKey: options.sessionKey,
+    routePolicyKey,
+    topRouteType,
+    question
   });
   let fallbackPersonaModuleCandidates = null;
   let fallbackPersonaModuleDecision = null;

@@ -71,8 +71,8 @@ const runners = {
       results: [{ ok: true, considered: 3 }]
     };
   },
-  loadCases: (limit) => {
-    calls.push(['loadCases', { limit }]);
+  loadCases: (limit, options = {}) => {
+    calls.push(['loadCases', { limit, options }]);
     return [{
       id: 'case_1',
       userId: 'u1',
@@ -96,6 +96,35 @@ const runners = {
       latency: { main: { p50Ms: 3, p95Ms: 5 } },
       details: [{ id: 'case_1', resultIds: ['node_1'] }]
     };
+  },
+  diagnoseMemosPlannerRecall: async (args) => {
+    calls.push(['memos', args]);
+    return {
+      ok: true,
+      enabled: true,
+      serverName: 'memos-api-mcp',
+      recallSource: 'knowledge_base',
+      readOnly: true,
+      configured: {
+        knowledgebaseIdsCount: 1,
+        kbFileIdsCount: 0,
+        kbAliasCount: 1,
+        queryMode: 'compact'
+      },
+      routeGate: { allowed: true, reason: 'external_kb_query' },
+      discovery: {
+        availableTools: ['search_memory', 'add_message'],
+        kbToolName: '',
+        searchToolName: 'search_memory',
+        mutatingToolsDetected: true,
+        mutatingToolNames: ['add_message'],
+        error: ''
+      },
+      runtime: {
+        cache: { size: 1, hits: 2, misses: 1 },
+        circuit: { open: false, failures: 0, shortCircuits: 0 }
+      }
+    };
   }
 };
 
@@ -110,6 +139,11 @@ module.exports = (async () => {
   assert.strictEqual(parsedGate.minRecallAt8, 0.7);
   assert.strictEqual(parsedGate.maxEmptyResultRate, 0.4);
   assert.strictEqual(parsedGate.maxNoVisibleCandidateRate, 0.5);
+  const parsedAutoGold = parseMemoryOpsArgs(['lancedb-gate', '--auto-gold']);
+  assert.strictEqual(parsedAutoGold.autoGold, true);
+  const parsedMemos = parseMemoryOpsArgs(['memos', '--query', '世界观规则']);
+  assert.strictEqual(parsedMemos.mode, 'memos');
+  assert.strictEqual(parsedMemos.query, '世界观规则');
 
   const diagnose = await runMemoryOps(parseMemoryOpsArgs(['diagnose', '--limit', '2']), { runners });
   assert.strictEqual(diagnose.schemaVersion, SCHEMA_VERSION);
@@ -130,12 +164,26 @@ module.exports = (async () => {
   assert.strictEqual(calls.find((entry) => entry[0] === 'backfill')[1].dryRun, true);
   assert.strictEqual(backfill.summary.embedded, 0);
 
+  const memosHealth = await runMemoryOps(parseMemoryOpsArgs(['memos', '--query', '世界观规则']), { runners });
+  assert.strictEqual(memosHealth.mode, 'memos');
+  assert.strictEqual(memosHealth.ok, true);
+  assert.strictEqual(memosHealth.summary.readOnly, true);
+  assert.strictEqual(memosHealth.summary.discovery.searchToolName, 'search_memory');
+  assert.strictEqual(memosHealth.summary.cache.hits, 2);
+  assert.strictEqual(calls.find((entry) => entry[0] === 'memos')[1].query, '世界观规则');
+
   const recall = await runMemoryOps(parseMemoryOpsArgs(['recall', '--candidate', 'shadow', '--limit', '1']), { runners });
   assert.strictEqual(recall.mode, 'recall');
   assert.strictEqual(recall.summary.evalMode, 'shadow');
   assert.strictEqual(recall.summary.cases, 1);
   assert.ok(recall.summary.gate);
   assert.ok(recall.summary.casesFile.endsWith('artifacts\\memory-recall-eval\\cases.jsonl') || recall.summary.casesFile.endsWith('artifacts/memory-recall-eval/cases.jsonl'));
+  const recallLoad = calls.find((entry) => entry[0] === 'loadCases' && entry[1].limit === 1);
+  assert.strictEqual(recallLoad[1].options.autoGold, false);
+
+  await runMemoryOps(parseMemoryOpsArgs(['recall', '--auto-gold', '--limit', '3']), { runners });
+  const autoGoldLoad = calls.find((entry) => entry[0] === 'loadCases' && entry[1].limit === 3);
+  assert.strictEqual(autoGoldLoad[1].options.autoGold, true);
 
   const gateRunners = {
     ...runners,

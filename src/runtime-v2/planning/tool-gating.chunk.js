@@ -340,6 +340,10 @@ function getPlannerModel() {
   return normalizeText(currentConfig.PLAN_MODEL || currentConfig.AI_ROUTER_MODEL || currentConfig.AI_MODEL || 'gpt-5.4-mini') || 'gpt-5.4-mini';
 }
 
+function isPlannerMainModelFallbackAllowed(currentConfig = getConfig()) {
+  return currentConfig.PLANNER_ALLOW_MAIN_MODEL_FALLBACK === true;
+}
+
 function getPlannerApiBaseUrlV2() {
   const currentConfig = getConfig();
   return normalizeText(
@@ -350,7 +354,7 @@ function getPlannerApiBaseUrlV2() {
     || currentConfig.AI_ROUTER_BASE_URL
     || currentConfig.PASSIVE_AWARENESS_REPLY_API_BASE_URL
     || currentConfig.PASSIVE_AWARENESS_API_BASE_URL
-    || currentConfig.API_BASE_URL
+    || (isPlannerMainModelFallbackAllowed(currentConfig) ? currentConfig.API_BASE_URL : '')
   );
 }
 
@@ -364,7 +368,7 @@ function getPlannerApiKeyV2() {
     || currentConfig.AI_ROUTER_API_KEY
     || currentConfig.PASSIVE_AWARENESS_REPLY_API_KEY
     || currentConfig.PASSIVE_AWARENESS_API_KEY
-    || currentConfig.API_KEY
+    || (isPlannerMainModelFallbackAllowed(currentConfig) ? currentConfig.API_KEY : '')
   );
 }
 
@@ -503,6 +507,7 @@ module.exports = {
   getPlannerApiKeyV2,
   getPlannerModel,
   getPlannerReasoningEffort,
+  isPlannerMainModelFallbackAllowed,
   hasAnyResearchCue,
   isCompanionPlannerMode,
   isCompanionPlannerSafeReadTool,

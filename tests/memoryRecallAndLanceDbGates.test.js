@@ -39,20 +39,43 @@ assert.ok(regression.failures.includes('recall_at_8_regressed'));
 const promote = buildLanceDbReadMigrationGate({
   diagnostics: {
     coverage: {
-      memory: { readyRatio: 0.99, staleTableRows: 0, readyButNotSynced: 0 },
+      memory: { readyRatio: 0.5, staleTableRows: 0, readyButNotSynced: 0 },
       worldbook: { readyRatio: 1, staleTableRows: 0, readyButNotSynced: 0 }
     },
     healthGate: { mustMaterializeFirst: false, mustReconcileFirst: false },
     projectionFreshness: { projectionStale: false }
   },
   baseline: { judgedCases: 20, recallAt8: 0.82, mrrAt8: 0.5, leakage: 0, emptyResultRate: 0.05 },
-  candidate: { judgedCases: 20, recallAt8: 0.84, mrrAt8: 0.51, leakage: 0, emptyResultRate: 0.04 }
+  candidate: { judgedCases: 20, recallAt8: 0.84, mrrAt8: 0.51, leakage: 0, emptyResultRate: 0.04, coverageReadyRatio: 0.99 }
 }, {
   minJudgedCases: 10,
   minRecallAt8: 0.8,
   minMrrAt8: 0.45
 });
 assert.strictEqual(promote.canPromoteRead, true);
+assert.strictEqual(promote.thresholds.minQueryReadyRatio, 0.2);
+assert.strictEqual(promote.metrics.minCoverageReadyRatio, 0.2);
+assert.strictEqual(promote.metrics.globalMinReadyRatio, 0.5);
+assert.strictEqual(promote.metrics.candidateCoverageReadyRatio, 0.99);
+
+const shadowReady = buildLanceDbReadMigrationGate({
+  diagnostics: {
+    coverage: {
+      memory: { readyRatio: 0.5, staleTableRows: 0, readyButNotSynced: 0 },
+      worldbook: { readyRatio: 1, staleTableRows: 0, readyButNotSynced: 0 }
+    },
+    healthGate: { mustMaterializeFirst: false, mustReconcileFirst: false },
+    projectionFreshness: { projectionStale: false }
+  },
+  baseline: { judgedCases: 20, recallAt8: 0.82, mrrAt8: 0.5, leakage: 0, emptyResultRate: 0.05 },
+  candidate: { judgedCases: 20, recallAt8: 0.84, mrrAt8: 0.51, leakage: 0, emptyResultRate: 0.04, coverageReadyRatio: 0.25 }
+}, {
+  minJudgedCases: 10,
+  minRecallAt8: 0.8,
+  minMrrAt8: 0.45
+});
+assert.strictEqual(shadowReady.canPromoteRead, true);
+assert.ok(!shadowReady.failures.includes('embedding_coverage_below_threshold'));
 
 const blocked = buildLanceDbReadMigrationGate({
   diagnostics: {
