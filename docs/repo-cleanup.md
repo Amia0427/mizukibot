@@ -1,5 +1,7 @@
 # Repo Cleanup Notes
 
+更新 2026-05-22 21:18 +08:00：根 README 已从历史流水账重构为入口文档，保留快速启动、常用命令、关键配置、修改入口和排障顺序；详细维护记录继续收敛在 `docs/`。
+
 更新 2026-05-21 22:52 +08:00：本次只清理低风险历史垃圾，包括 `bak_codex` 备份、`artifacts/memory-recall-eval/*.tmp` 和旧排障日志。
 
 更新 2026-05-21 23:13 +08:00：继续移除无运行入口的历史快照、旧 recall eval 输出、`core/routeContract.js` 和 `api/nanobotExecutor.js` 兼容 shim；保留 `cases.jsonl` 与 `memos-cases.jsonl` 作为评估入口。
