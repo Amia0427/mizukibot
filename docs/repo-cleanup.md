@@ -20,6 +20,8 @@
 
 更新 2026-05-22 16:29 +08:00：`core/router.js` 与 `utils/memoryCli.js` 回流同步已推进，notebook allowlist 拆入 `core/router/memoryTools.js`，图片记忆搜索 normalize/merge 拆入 `utils/memoryCli/imageRecall.js`。剩余必须迁移：`api/createAgentExecutor.js`；`api/mcpRuntime.js` 仍需处理审计结论。
 
+更新 2026-05-22 16:33 +08:00：`api/createAgentExecutor.js` 回流同步已推进，失败回复映射拆入 `api/createAgent/failureReply.js`；`api/mcpRuntime.js` 审计结论已处理，spawn config 拆入 `api/mcp/config.js`，单服务器 discovery 拆入 `api/mcp/discovery.js`。下一步执行最终关键词复核、审计项复核和烟测。
+
 未处理项：`api/skills.js`、`core/tgBot.js`、`api/legacy/agentGraphV1Runtime.js` 和 `src/features/*` 需要按功能开关、外部调用兼容和测试覆盖单独确认。
 
 禁止直接手删项：`data/lancedb/**`、`data/memory-v3/**`、`api/legacy/aiHost.js`、`core/*.chunk.js` 和 `api/runtimeV2/context/*.chunk.js`。

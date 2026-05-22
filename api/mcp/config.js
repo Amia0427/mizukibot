@@ -102,7 +102,37 @@ function listConfiguredMcpServers(options = {}) {
   }).filter((item) => item.serverName && item.command);
 }
 
+function shouldUseShellSpawn(command = '') {
+  if (process.platform !== 'win32') return false;
+  const ext = path.extname(String(command || '').trim()).toLowerCase();
+  return ext === '.cmd' || ext === '.bat';
+}
+
+function buildSpawnConfig(serverConfig = {}) {
+  const resolvedCommand = String(serverConfig.command || '').trim();
+  const resolvedArgs = Array.isArray(serverConfig.args) ? [...serverConfig.args] : [];
+  if (!shouldUseShellSpawn(resolvedCommand)) {
+    return {
+      command: resolvedCommand,
+      args: resolvedArgs,
+      options: {
+        shell: false
+      }
+    };
+  }
+
+  const cmdExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+  return {
+    command: cmdExe,
+    args: ['/d', '/s', '/c', 'call', resolvedCommand, ...resolvedArgs],
+    options: {
+      shell: false
+    }
+  };
+}
+
 module.exports = {
+  buildSpawnConfig,
   expandEnvObject,
   expandEnvValue,
   listConfiguredMcpServers,
@@ -110,5 +140,6 @@ module.exports = {
   resolveCommandForSpawn,
   resolveMcpConfigPath,
   safeReadJson,
+  shouldUseShellSpawn,
   splitPathEntries
 };

@@ -12,9 +12,12 @@ const {
   DEFAULT_MCP_RESULT_CHAR_BUDGET
 } = require('./mcp/constants');
 const {
+  buildSpawnConfig,
   listConfiguredMcpServers,
-  readMcpConfig
+  readMcpConfig,
+  resolveMcpConfigPath
 } = require('./mcp/config');
+const { createMcpServerToolDiscovery } = require('./mcp/discovery');
 const {
   encodeJsonRpcPayload,
   trimLeadingMessageWhitespace,
@@ -156,42 +159,6 @@ function maybeThrowDiscoveryFailureCooldown(serverName = '', stage = 'discover')
   throw normalizeMcpError(new Error(entry.message || `mcp ${stage} cooldown active for ${serverName}`), entry.code || 'MCP_DISCOVERY_COOLDOWN', {
     fallbackMessage: `mcp ${stage} cooldown active for ${serverName}`
   });
-}
-
-function shouldUseShellSpawn(command = '') {
-  if (process.platform !== 'win32') return false;
-  const ext = path.extname(String(command || '').trim()).toLowerCase();
-  return ext === '.cmd' || ext === '.bat';
-}
-
-function quoteWindowsArg(value = '') {
-  const text = String(value || '');
-  if (!text) return '""';
-  if (!/[\s"]/g.test(text)) return text;
-  return `"${text.replace(/"/g, '\\"')}"`;
-}
-
-function buildSpawnConfig(serverConfig = {}) {
-  const resolvedCommand = String(serverConfig.command || '').trim();
-  const resolvedArgs = Array.isArray(serverConfig.args) ? [...serverConfig.args] : [];
-  if (!shouldUseShellSpawn(resolvedCommand)) {
-    return {
-      command: resolvedCommand,
-      args: resolvedArgs,
-      options: {
-        shell: false
-      }
-    };
-  }
-
-  const cmdExe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
-  return {
-    command: cmdExe,
-    args: ['/d', '/s', '/c', 'call', resolvedCommand, ...resolvedArgs],
-    options: {
-      shell: false
-    }
-  };
 }
 
 function normalizeSpawnFailure(error, serverName = '') {
@@ -624,16 +591,11 @@ async function discoverMcpTools(options = {}) {
   return [...all, ...fallbacks];
 }
 
-async function discoverMcpServerTools(serverName = '', options = {}) {
-  const normalizedServerName = String(serverName || '').trim();
-  if (!normalizedServerName) return [];
-  const configuredServers = listConfiguredMcpServers(options);
-  const serverConfig = configuredServers.find((item) => item.serverName === normalizedServerName);
-  if (!serverConfig) {
-    throw normalizeMcpError(new Error(`mcp server not found: ${normalizedServerName}`), 'MCP_SERVER_NOT_FOUND');
-  }
-  return discoverServerTools(serverConfig, options);
-}
+const discoverMcpServerTools = createMcpServerToolDiscovery({
+  discoverServerTools,
+  listConfiguredMcpServers,
+  normalizeMcpError
+});
 
 function sanitizeMcpArgumentValue(value, depth = 0) {
   if (depth > DEFAULT_MCP_MAX_DEPTH) {
