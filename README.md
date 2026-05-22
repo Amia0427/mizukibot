@@ -282,10 +282,13 @@ artifacts/  临时产物、备份和评估输出
 - “已拆分”不等于旧入口已经冻结；2026-05-19 之后有新功能继续落回部分旧大文件，下一轮拆分前必须先做回流同步。
 - 仍可视为 clean target 的已拆项：`utils/scheduledTaskStore.js`、`utils/styleProfileRuntime.js`、`utils/continuityState.js`、`utils/scheduledTaskTime.js`、`utils/memory-v3/profileProjection.js`。
 - 需回流同步的旧入口：`config.js`、`web/server.js`、`core/continuousMessagePreprocessor.js`、`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`。
+- 需审计确认的同日后续拆分入口：`api/mcpRuntime.js`、`utils/dailyJournal.js`、`utils/memory-v3/query.js`、`utils/personaMemoryState.js`、`utils/shortTermMemory.js`；这些文件可能已在同一提交中回流到子模块，但执行回流计划前必须确认。
 - 已识别的新功能增量：planner semantic refine 配置、MemOS recall 治理/缓存/熔断配置、post-reply vector watchdog 配置、主回复上下文预览 Web API/UI、图片 visual summary 入队、图片记忆召回合并、create-agent 临时资源过期提示。
 - 回流规则：先把旧入口新增功能迁入对应子目录或新增小模块，再把旧入口恢复为薄 facade；不要把旧文档里的“重点边界”当作当前完成状态。
 
 回流同步计划（2026-05-22 08:38 +08:00）：`docs/superpowers/plans/2026-05-22-large-file-backflow-sync.md`。继续拆分前必须先执行该计划的审计步骤，把旧大文件新增功能同步到拆分模块和本节状态记录。
+
+复核更新（2026-05-22 08:58 +08:00）：确认“六个”只是必须迁移清单；全量计划还包含五个必须审计入口，避免漏掉 2026-05-19 当天拆分后继续变更的旧文件。
 
 重点边界：
 

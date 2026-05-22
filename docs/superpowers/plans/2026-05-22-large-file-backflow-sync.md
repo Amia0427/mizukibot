@@ -12,7 +12,12 @@
 
 ## Scope
 
-This plan covers the old large files that were already marked as split but received feature updates after 2026-05-19:
+This plan covers old large files that were already marked as split but received feature updates after the split began. There are two levels:
+
+1. **Must migrate:** old files with confirmed post-2026-05-19 feature backflow still visible in the old facade.
+2. **Must audit:** old files touched later on 2026-05-19 where the same commit may already have moved code into split modules. These are not automatically migration work, but they must be checked before the plan is considered complete.
+
+Confirmed must-migrate files:
 
 - `config.js`
 - `web/server.js`
@@ -20,6 +25,14 @@ This plan covers the old large files that were already marked as split but recei
 - `core/router.js`
 - `utils/memoryCli.js`
 - `api/createAgentExecutor.js`
+
+Additional must-audit files:
+
+- `api/mcpRuntime.js`
+- `utils/dailyJournal.js`
+- `utils/memory-v3/query.js`
+- `utils/personaMemoryState.js`
+- `utils/shortTermMemory.js`
 
 Do not touch unrelated large files in the same pass. If another old facade appears in `git log` or `git status`, add it to the audit table first and stop before editing code.
 
@@ -33,6 +46,18 @@ Do not touch unrelated large files in the same pass. If another old facade appea
 | `core/router.js` | memory/image recall routing allows `memory_cli` in notebook/local-read routes | `core/router/safety.js`, `core/router/intentScoring.js`, or a new route helper if ownership is not safety/scoring |
 | `utils/memoryCli.js` | image memory search normalization and merge into `source=all` search payload; MemOS/profile governance-related command additions from 2026-05-19 commits | existing `utils/memoryCli/*` helpers, or new `utils/memoryCli/imageRecall.js` and governance-specific helpers |
 | `api/createAgentExecutor.js` | user-facing error for expired temporary image resource | existing `api/createAgent/*` response/error helper; create one if no response helper owns it |
+
+## Current Audit-Only Inventory
+
+These files are not yet confirmed migration work. They were touched by post-split same-day commits and must be reviewed so the plan does not miss late backflow.
+
+| Old file | Commit evidence | Audit decision to make |
+| --- | --- | --- |
+| `api/mcpRuntime.js` | `d351d3f fix: stabilize MemOS MCP runtime integration` changed spawn args, added `discoverMcpServerTools`, and exported `__buildSpawnConfigForTest`; same commit also touched `api/mcp/config.js` | Decide whether these helpers should move to `api/mcp/protocol.js`, `api/mcp/config.js`, or a new split helper, or document why they remain facade-owned |
+| `utils/dailyJournal.js` | `ffb5a5c Restrict MemOS to remote recall only` touched the old file while adding `utils/dailyJournal/memorySync.js`, `summaryRunner.js`, and `views.js` | Confirm the commit was completing the split, not adding new facade-owned behavior; migrate any remaining helper blocks if found |
+| `utils/memory-v3/query.js` | `ffb5a5c` touched query behavior after earlier split files existed | Confirm query additions live in `queryPolicy.js`, `queryCandidates.js`, `queryRanking.js`, or another split module; migrate if old file still owns feature logic |
+| `utils/personaMemoryState.js` | `ffb5a5c` touched old file while adding `utils/personaMemoryState/continuityCandidates.js` | Confirm continuity candidate behavior is fully in the split module |
+| `utils/shortTermMemory.js` | `ffb5a5c` touched old file while adding `continuityDelta.js`, `restartRecall.js`, and `summaries.js` | Confirm old file only wires helpers and does not retain migrated behavior |
 
 ## Guardrails
 
@@ -54,6 +79,11 @@ Do not touch unrelated large files in the same pass. If another old facade appea
 - Read: `core/router.js`
 - Read: `utils/memoryCli.js`
 - Read: `api/createAgentExecutor.js`
+- Read: `api/mcpRuntime.js`
+- Read: `utils/dailyJournal.js`
+- Read: `utils/memory-v3/query.js`
+- Read: `utils/personaMemoryState.js`
+- Read: `utils/shortTermMemory.js`
 - Modify: this plan only if inventory changes
 
 - [ ] **Step 1: Check working tree**
@@ -64,24 +94,35 @@ Run:
 git status --short --branch
 ```
 
-Expected: Either clean or only known user changes. If dirty files overlap the six old files, inspect them before editing.
+Expected: Either clean or only known user changes. If dirty files overlap the must-migrate or must-audit files, inspect them before editing.
 
 - [ ] **Step 2: List post-split commits touching old files**
 
 Run:
 
 ```powershell
-git log --since='2026-05-19' --name-only --pretty=format:'COMMIT %h %ad %s' --date=short -- config.js web\server.js core\continuousMessagePreprocessor.js core\router.js utils\memoryCli.js api\createAgentExecutor.js
+git log --since='2026-05-19' --name-only --pretty=format:'COMMIT %h %ad %s' --date=short -- config.js web\server.js core\continuousMessagePreprocessor.js core\router.js utils\memoryCli.js api\createAgentExecutor.js api\mcpRuntime.js utils\dailyJournal.js utils\memory-v3\query.js utils\personaMemoryState.js utils\shortTermMemory.js
 ```
 
 Expected: Includes the known commits from this plan. Add any new commits to the inventory table before implementation.
+
+- [ ] **Step 2b: Separate migration work from audit-only work**
+
+Run:
+
+```powershell
+git show --stat --name-status --oneline d351d3f -- api\mcpRuntime.js api\mcp
+git show --stat --name-status --oneline ffb5a5c -- utils\dailyJournal.js utils\dailyJournal utils\memory-v3\query.js utils\memory-v3\queryCache.js utils\memory-v3\queryPolicy.js utils\memory-v3\queryCandidates.js utils\memory-v3\queryRanking.js utils\personaMemoryState.js utils\personaMemoryState utils\shortTermMemory.js utils\shortTermMemory
+```
+
+Expected: If the matching split modules were created or modified in the same commit and old files only wire exports/imports, keep the file in audit-only status. If real feature logic remains in the old file, move it into must-migrate status before code edits.
 
 - [ ] **Step 3: Inspect current file sizes**
 
 Run:
 
 ```powershell
-$files = @('config.js','web/server.js','core/continuousMessagePreprocessor.js','core/router.js','utils/memoryCli.js','api/createAgentExecutor.js')
+$files = @('config.js','web/server.js','core/continuousMessagePreprocessor.js','core/router.js','utils/memoryCli.js','api/createAgentExecutor.js','api/mcpRuntime.js','utils/dailyJournal.js','utils/memory-v3/query.js','utils/personaMemoryState.js','utils/shortTermMemory.js')
 foreach ($f in $files) { $lines = (Get-Content -LiteralPath $f | Measure-Object -Line).Lines; "$lines`t$f" }
 ```
 
@@ -371,7 +412,7 @@ git commit -m "refactor: sync create agent failure backflow"
 Run:
 
 ```powershell
-$files = @('config.js','web/server.js','core/continuousMessagePreprocessor.js','core/router.js','utils/memoryCli.js','api/createAgentExecutor.js')
+$files = @('config.js','web/server.js','core/continuousMessagePreprocessor.js','core/router.js','utils/memoryCli.js','api/createAgentExecutor.js','api/mcpRuntime.js','utils/dailyJournal.js','utils/memory-v3/query.js','utils/personaMemoryState.js','utils/shortTermMemory.js')
 foreach ($f in $files) { $lines = (Get-Content -LiteralPath $f | Measure-Object -Line).Lines; "$lines`t$f" }
 ```
 
@@ -386,6 +427,16 @@ rg -n "PLANNER_SEMANTIC|MEMOS_RECALL_CACHE|POST_REPLY_VECTOR_WATCHDOG|main-reply
 ```
 
 Expected: Either no matches in old files, or matches only in thin facade imports/exports.
+
+- [ ] **Step 2b: Check audit-only files for unresolved feature ownership**
+
+Run:
+
+```powershell
+rg -n "discoverMcpServerTools|__buildSpawnConfigForTest|memorySync|summaryRunner|continuityCandidates|continuityDelta|restartRecall|createShortTermSummaryHelpers" api/mcpRuntime.js utils/dailyJournal.js utils/memory-v3/query.js utils/personaMemoryState.js utils/shortTermMemory.js
+```
+
+Expected: Matches are imports/exports/wiring only, or are documented as intentionally facade-owned. If the old file still owns implementation logic, create a new migration task before final status refresh.
 
 - [ ] **Step 3: Update split status**
 
@@ -418,6 +469,7 @@ git commit -m "docs: refresh large file backflow status"
 ## Completion Criteria
 
 - Every known post-split feature in the six old files is either migrated to a split module or explicitly documented as intentionally remaining in the facade.
+- Every must-audit file has a recorded decision: already synced, migrated in this plan, or intentionally facade-owned.
 - README has a timestamped backflow status.
 - `docs/repo-cleanup.md` lists only remaining unsynced old files.
 - Focused tests for touched behavior pass.
