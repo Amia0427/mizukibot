@@ -350,7 +350,8 @@ node tests/memoryExtractionProfileClassification.test.js
 - `utils/backgroundTaskRuntime.js`
 - `utils/memeStore.js`
 - `utils/memory.js`
-- `utils/memoryWritePipeline.js`
+
+回流同步更新（2026-05-22 17:08 +08:00）：`utils/memoryWritePipeline.js` 的 memory quality gate 已拆入 `utils/memoryWritePipeline/qualityGate.js`，旧入口保留写入流程编排和兼容导出。
 
 继续拆分前先看 `git status --short` 和目标文件 diff；若文件已脏，必须把现有改动当作并行改动保留。
 

@@ -1,7 +1,7 @@
 const config = require('../config');
 const { shouldBlockMemoryLearning } = require('./promptSecurity');
 const { createWriteReviewHelpers } = require('./memoryWritePipeline/review');
-const { buildMemoryQualityMeta, evaluateMemoryQuality } = require('./memoryQuality');
+const { createMemoryWriteQualityGate } = require('./memoryWritePipeline/qualityGate');
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -151,6 +151,10 @@ const {
   shouldForceCandidateOnly,
   mergeLearningDecisionMeta
 });
+const qualityGate = createMemoryWriteQualityGate({
+  normalizeText,
+  mergeLearningDecisionMeta
+});
 
 function scopeKeyForBatch(candidate = {}) {
   const scope = normalizeScope(candidate);
@@ -220,108 +224,19 @@ function validateMemoryWrite(candidate = {}, options = {}) {
   if (confidence < minConfidence) return { ok: false, reason: 'low_confidence' };
   const learningGate = shouldBlockMemoryLearning(text, type, options);
   if (learningGate.blocked) return { ok: false, reason: learningGate.reason || 'blocked_by_security' };
-  const quality = evaluateMemoryQuality(candidate, {
+  const qualityDecision = qualityGate.evaluate(candidate, {
     ...options,
     minConfidence
   });
-  const qualityMeta = buildMemoryQualityMeta(quality);
-  if (quality.shouldReject) {
-    return {
-      ok: false,
-      reason: quality.reasons.includes('prompt_pollution') || quality.reasons.includes('assistant_self_instruction')
-        ? 'quality_reject_polluted'
-        : 'quality_reject_low_signal',
-      quality: qualityMeta
-    };
-  }
+  if (qualityDecision.rejected) return qualityDecision.rejected;
   const duplicate = findExistingMemory(candidate);
   if (duplicate) return { ok: false, reason: 'duplicate', duplicateId: duplicate.id };
   const forceCandidateOnly = shouldForceCandidateOnly(candidate);
   const conflict = findConflict(candidate);
-  if (conflict) {
-    return {
-      ok: true,
-      reason: 'conflict_candidate',
-      conflictId: conflict.id,
-      patch: {
-        status: 'candidate',
-        supersedes: [conflict.id],
-        meta: {
-          ...mergeLearningDecisionMeta(candidate, {
-            status: 'candidate',
-            reason: 'conflicts_with_existing_memory',
-            validationReason: 'conflict_candidate',
-            candidateOnly: true,
-            conflictId: conflict.id
-          }),
-          quality: qualityMeta,
-          traceReason: 'conflicts_with_existing_memory',
-          conflictCandidate: {
-            existingId: conflict.id,
-            existingText: conflict.text || conflict.canonicalText || '',
-            reason: 'pipeline_conflict_candidate'
-          }
-        }
-      }
-    };
-  }
-  if (forceCandidateOnly) {
-    return {
-      ok: true,
-      reason: 'candidate_only_profile_guard',
-      patch: {
-        status: 'candidate',
-        meta: {
-          ...mergeLearningDecisionMeta(candidate, {
-            status: 'candidate',
-            reason: 'high_risk_profile_candidate_only',
-            validationReason: 'candidate_only_profile_guard',
-            candidateOnly: true
-          }),
-          quality: qualityMeta,
-          traceReason: candidate.meta?.traceReason || 'candidate_only_profile_guard'
-        }
-      }
-    };
-  }
-  if (quality.shouldCandidate) {
-    return {
-      ok: true,
-      reason: quality.stale?.expired ? 'quality_candidate_stale' : 'quality_candidate_low_signal',
-      patch: {
-        status: 'candidate',
-        meta: {
-          ...mergeLearningDecisionMeta(candidate, {
-            status: 'candidate',
-            reason: quality.stale?.expired ? 'quality_stale_candidate' : 'quality_low_signal_candidate',
-            validationReason: quality.stale?.expired ? 'quality_candidate_stale' : 'quality_candidate_low_signal',
-            riskReasons: quality.reasons,
-            riskLevel: quality.grade,
-            candidateOnly: true
-          }),
-          quality: qualityMeta,
-          traceReason: candidate.meta?.traceReason || (quality.stale?.expired ? 'quality_candidate_stale' : 'quality_candidate_low_signal')
-        }
-      }
-    };
-  }
-  return {
-    ok: true,
-    reason: 'accepted',
-    patch: {
-      status: candidate.status || undefined,
-      meta: {
-        ...mergeLearningDecisionMeta(candidate, {
-          status: candidate.status || 'active',
-          reason: 'accepted_by_memory_write_pipeline',
-          validationReason: 'accepted',
-          candidateOnly: normalizeText(candidate.status).toLowerCase() === 'candidate'
-        }),
-        quality: qualityMeta,
-        traceReason: candidate.meta?.traceReason || 'accepted_by_memory_write_pipeline'
-      }
-    }
-  };
+  if (conflict) return qualityGate.buildConflictCandidate(candidate, conflict, qualityDecision);
+  if (forceCandidateOnly) return qualityGate.buildProfileCandidateOnly(candidate, qualityDecision);
+  return qualityGate.buildQualityCandidate(candidate, qualityDecision)
+    || qualityGate.buildAccepted(candidate, qualityDecision);
 }
 
 function applyBatchWriteGuards(candidates = []) {
