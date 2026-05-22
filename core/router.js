@@ -40,6 +40,7 @@ const {
   shouldPreferToolAssistance,
   shouldUseToolBackedSummary
 } = require('./router/intentScoring');
+const { getNotebookAllowedTools } = require('./router/memoryTools');
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -548,7 +549,7 @@ function matchLegacyFineDirectLocalRoute({ rawText = '', cleanText = '', imageUr
       toolNeed: prefersMemory && prefersWeb ? ['mixed'] : (prefersMemory ? ['local-read'] : ['web']),
       needsMemory: prefersMemory,
       freshness: prefersWeb ? 'latest' : 'unknown',
-      allowedTools: prefersMemory ? ['memory_cli', 'notebook_search', 'notebook_list_docs'] : undefined
+      allowedTools: prefersMemory ? getNotebookAllowedTools({ needsMemory: true }) : undefined
     });
   }
 
@@ -765,7 +766,7 @@ function matchLegacyFineDirectLocalRoute({ rawText = '', cleanText = '', imageUr
         : 'web';
     const toolNeed = domain === 'personal' ? ['local-read'] : (imageUrl ? ['image'] : ['web']);
     const allowedTools = domain === 'personal'
-      ? ['memory_cli', 'notebook_search', 'notebook_list_docs']
+      ? getNotebookAllowedTools({ needsMemory: true })
       : undefined;
 
     return makeRoute({
@@ -886,7 +887,7 @@ function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = 
         ? 'summary'
         : 'answer';
   const allowedTools = sourceScope === 'notebook'
-    ? (s.needsMemory ? ['memory_cli', 'notebook_search', 'notebook_list_docs'] : ['notebook_search', 'notebook_list_docs'])
+    ? getNotebookAllowedTools({ needsMemory: s.needsMemory })
     : undefined;
 
   return makeRoute({

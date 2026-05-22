@@ -296,6 +296,8 @@ artifacts/  临时产物、备份和评估输出
 
 回流同步进展（2026-05-22 16:26 +08:00）：`core/continuousMessagePreprocessor.js` 的图片视觉摘要安全入队 helper 已迁到 `core/continuousMessage/imageVisualSummary.js`，旧入口仅保留调用点；剩余待迁移旧入口为 `core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`，另需处理 `api/mcpRuntime.js`。
 
+回流同步进展（2026-05-22 16:29 +08:00）：`core/router.js` 的 notebook 工具 allowlist 已迁到 `core/router/memoryTools.js`，`utils/memoryCli.js` 的图片召回 normalize/merge helper 已迁到 `utils/memoryCli/imageRecall.js`；剩余待迁移旧入口为 `api/createAgentExecutor.js`，另需处理 `api/mcpRuntime.js`。
+
 重点边界：
 
 - `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。
