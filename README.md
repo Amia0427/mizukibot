@@ -292,6 +292,8 @@ artifacts/  临时产物、备份和评估输出
 
 回流同步进展（2026-05-22 16:19 +08:00）：`config.js` 的 planner、MemOS recall、post-reply vector watchdog、主回复上下文和图片视觉摘要配置已回流到 `config/*Runtime.js` 模块；剩余待迁移旧入口为 `web/server.js`、`core/continuousMessagePreprocessor.js`、`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`，另需处理 `api/mcpRuntime.js` 审计结论。
 
+回流同步进展（2026-05-22 16:24 +08:00）：`web/server.js` 的主回复上下文预览 API 已迁到 `web/mainReplyContextPreviewRoute.js`，Admin 面板片段和刷新脚本已迁到 `web/mainReplyContextPreviewAdmin.js`；剩余待迁移旧入口为 `core/continuousMessagePreprocessor.js`、`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`，另需处理 `api/mcpRuntime.js`。
+
 重点边界：
 
 - `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。
