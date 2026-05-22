@@ -298,6 +298,8 @@ artifacts/  临时产物、备份和评估输出
 
 回流同步进展（2026-05-22 16:29 +08:00）：`core/router.js` 的 notebook 工具 allowlist 已迁到 `core/router/memoryTools.js`，`utils/memoryCli.js` 的图片召回 normalize/merge helper 已迁到 `utils/memoryCli/imageRecall.js`；剩余待迁移旧入口为 `api/createAgentExecutor.js`，另需处理 `api/mcpRuntime.js`。
 
+回流同步进展（2026-05-22 16:33 +08:00）：`api/createAgentExecutor.js` 的生图失败用户提示已迁到 `api/createAgent/failureReply.js`；`api/mcpRuntime.js` 的 spawn config 和单服务器 discovery 已迁到 `api/mcp/config.js`、`api/mcp/discovery.js`。必须迁移清单已进入最终复核阶段。
+
 重点边界：
 
 - `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。
