@@ -300,6 +300,8 @@ artifacts/  临时产物、备份和评估输出
 
 回流同步进展（2026-05-22 16:33 +08:00）：`api/createAgentExecutor.js` 的生图失败用户提示已迁到 `api/createAgent/failureReply.js`；`api/mcpRuntime.js` 的 spawn config 和单服务器 discovery 已迁到 `api/mcp/config.js`、`api/mcp/discovery.js`。必须迁移清单已进入最终复核阶段。
 
+回流同步完成（2026-05-22 16:35 +08:00）：本计划覆盖的六个必须迁移旧入口已完成回流，`api/mcpRuntime.js` 审计项已完成迁移；`utils/dailyJournal.js`、`utils/memory-v3/query.js`、`utils/personaMemoryState.js`、`utils/shortTermMemory.js` 复核为已拆分 wiring/组合层，无新增未同步回流项。继续瘦身 facade 时以 `docs/repo-cleanup.md` 的当前剩余清单为准。
+
 重点边界：
 
 - `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。

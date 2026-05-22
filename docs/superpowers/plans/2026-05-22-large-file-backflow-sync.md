@@ -474,3 +474,7 @@ git commit -m "docs: refresh large file backflow status"
 - `docs/repo-cleanup.md` lists only remaining unsynced old files.
 - Focused tests for touched behavior pass.
 - Old entrypoints still work through existing require paths.
+
+## Final Execution Record
+
+更新 2026-05-22 16:35 +08:00：18 个推进目标已执行完成。六个 must-migrate 旧入口均已把已知回流逻辑迁入拆分模块：`config/*Runtime.js`、`web/mainReplyContextPreview*`、`core/continuousMessage/imageVisualSummary.js`、`core/router/memoryTools.js`、`utils/memoryCli/imageRecall.js`、`api/createAgent/failureReply.js`。`api/mcpRuntime.js` 审计项已迁移到 `api/mcp/config.js` 和 `api/mcp/discovery.js`；其余 audit-only 入口复核为拆分模块 wiring/组合层。最终关键词复核仅剩薄 facade import/export 或测试断言匹配，语法 smoke 通过。

@@ -22,6 +22,8 @@
 
 更新 2026-05-22 16:33 +08:00：`api/createAgentExecutor.js` 回流同步已推进，失败回复映射拆入 `api/createAgent/failureReply.js`；`api/mcpRuntime.js` 审计结论已处理，spawn config 拆入 `api/mcp/config.js`，单服务器 discovery 拆入 `api/mcp/discovery.js`。下一步执行最终关键词复核、审计项复核和烟测。
 
+更新 2026-05-22 16:35 +08:00：大文件回流同步计划已完成最终复核；本计划剩余未同步旧入口：无。审计项结论：`api/mcpRuntime.js` 已迁移；`utils/dailyJournal.js`、`utils/memory-v3/query.js`、`utils/personaMemoryState.js`、`utils/shortTermMemory.js` 当前仅保留拆分模块 wiring/组合逻辑，暂无需新增回流任务。
+
 未处理项：`api/skills.js`、`core/tgBot.js`、`api/legacy/agentGraphV1Runtime.js` 和 `src/features/*` 需要按功能开关、外部调用兼容和测试覆盖单独确认。
 
 禁止直接手删项：`data/lancedb/**`、`data/memory-v3/**`、`api/legacy/aiHost.js`、`core/*.chunk.js` 和 `api/runtimeV2/context/*.chunk.js`。
