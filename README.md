@@ -290,6 +290,8 @@ artifacts/  临时产物、备份和评估输出
 
 复核更新（2026-05-22 08:58 +08:00）：确认“六个”只是必须迁移清单；全量计划还包含五个必须审计入口，避免漏掉 2026-05-19 当天拆分后继续变更的旧文件。
 
+回流同步进展（2026-05-22 16:19 +08:00）：`config.js` 的 planner、MemOS recall、post-reply vector watchdog、主回复上下文和图片视觉摘要配置已回流到 `config/*Runtime.js` 模块；剩余待迁移旧入口为 `web/server.js`、`core/continuousMessagePreprocessor.js`、`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`，另需处理 `api/mcpRuntime.js` 审计结论。
+
 重点边界：
 
 - `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。
