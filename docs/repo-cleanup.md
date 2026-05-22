@@ -24,6 +24,8 @@
 
 更新 2026-05-22 16:35 +08:00：大文件回流同步计划已完成最终复核；本计划剩余未同步旧入口：无。审计项结论：`api/mcpRuntime.js` 已迁移；`utils/dailyJournal.js`、`utils/memory-v3/query.js`、`utils/personaMemoryState.js`、`utils/shortTermMemory.js` 当前仅保留拆分模块 wiring/组合逻辑，暂无需新增回流任务。
 
+更新 2026-05-22 17:08 +08:00：扩展复查发现的 `utils/memoryWritePipeline.js` 回流项已处理，memory quality gate 拆入 `utils/memoryWritePipeline/qualityGate.js`；旧入口仅保留写入流程编排、批处理 guard 和兼容导出。
+
 未处理项：`api/skills.js`、`core/tgBot.js`、`api/legacy/agentGraphV1Runtime.js` 和 `src/features/*` 需要按功能开关、外部调用兼容和测试覆盖单独确认。
 
 禁止直接手删项：`data/lancedb/**`、`data/memory-v3/**`、`api/legacy/aiHost.js`、`core/*.chunk.js` 和 `api/runtimeV2/context/*.chunk.js`。
