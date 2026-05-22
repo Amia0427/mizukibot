@@ -12,6 +12,8 @@
 
 更新 2026-05-22 08:58 +08:00：复核后确认回流计划不是只有六个文件；六个是必须迁移清单，另需审计 `api/mcpRuntime.js`、`utils/dailyJournal.js`、`utils/memory-v3/query.js`、`utils/personaMemoryState.js`、`utils/shortTermMemory.js` 是否已在同日拆分提交中同步完成。
 
+更新 2026-05-22 16:19 +08:00：`config.js` 回流同步已完成，相关配置拆入 `config/plannerRuntime.js`、`config/memosRuntime.js`、`config/postReplyRuntime.js`、`config/mainReplyContextRuntime.js` 和 `config/imageMemoryRuntime.js`。剩余必须迁移：`web/server.js`、`core/continuousMessagePreprocessor.js`、`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`；`api/mcpRuntime.js` 需从审计项升级为迁移或明确保留说明。
+
 未处理项：`api/skills.js`、`core/tgBot.js`、`api/legacy/agentGraphV1Runtime.js` 和 `src/features/*` 需要按功能开关、外部调用兼容和测试覆盖单独确认。
 
 禁止直接手删项：`data/lancedb/**`、`data/memory-v3/**`、`api/legacy/aiHost.js`、`core/*.chunk.js` 和 `api/runtimeV2/context/*.chunk.js`。
