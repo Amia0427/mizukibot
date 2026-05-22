@@ -8,6 +8,8 @@
 
 拆分回流待处理项：`config.js`、`web/server.js`、`core/continuousMessagePreprocessor.js`、`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`。回流前先查这些文件自 2026-05-19 以来的提交，确认新增功能迁移到子模块后再继续瘦身 facade。
 
+更新 2026-05-22 08:38 +08:00：回流同步执行计划已落到 `docs/superpowers/plans/2026-05-22-large-file-backflow-sync.md`；后续拆分必须先按该计划审计旧入口新增提交，再迁移、验证、更新时间戳状态。
+
 未处理项：`api/skills.js`、`core/tgBot.js`、`api/legacy/agentGraphV1Runtime.js` 和 `src/features/*` 需要按功能开关、外部调用兼容和测试覆盖单独确认。
 
 禁止直接手删项：`data/lancedb/**`、`data/memory-v3/**`、`api/legacy/aiHost.js`、`core/*.chunk.js` 和 `api/runtimeV2/context/*.chunk.js`。

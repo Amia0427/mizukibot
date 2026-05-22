@@ -285,6 +285,8 @@ artifacts/  临时产物、备份和评估输出
 - 已识别的新功能增量：planner semantic refine 配置、MemOS recall 治理/缓存/熔断配置、post-reply vector watchdog 配置、主回复上下文预览 Web API/UI、图片 visual summary 入队、图片记忆召回合并、create-agent 临时资源过期提示。
 - 回流规则：先把旧入口新增功能迁入对应子目录或新增小模块，再把旧入口恢复为薄 facade；不要把旧文档里的“重点边界”当作当前完成状态。
 
+回流同步计划（2026-05-22 08:38 +08:00）：`docs/superpowers/plans/2026-05-22-large-file-backflow-sync.md`。继续拆分前必须先执行该计划的审计步骤，把旧大文件新增功能同步到拆分模块和本节状态记录。
+
 重点边界：
 
 - `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。
