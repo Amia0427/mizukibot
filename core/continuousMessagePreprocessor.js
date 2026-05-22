@@ -5,6 +5,7 @@ const {
 } = require('../api/napcatMessageReader');
 const { ensureCachedImageRef } = require('../utils/imageInputCache');
 const { upsertImageMemory } = require('../utils/imageMemoryIndex');
+const { enqueueImageVisualSummarySafe } = require('./continuousMessage/imageVisualSummary');
 const {
   appendCardUrlsToText,
   appendPromptLine,
@@ -81,20 +82,6 @@ function clampDebounceMs(value, fallback = 2000) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(300, Math.min(60000, Math.floor(n)));
-}
-
-function enqueueImageVisualSummarySafe(imageRef = '', context = {}, deps = {}) {
-  if (config.IMAGE_MEMORY_VISUAL_SUMMARY_ENABLED === false && context.force !== true) {
-    return { queued: false, reason: 'disabled' };
-  }
-  try {
-    return require('../utils/imageVisualSummaryMemory').enqueueImageVisualSummary(imageRef, context, deps);
-  } catch (error) {
-    if (config.ENABLE_DEBUG_LOG) {
-      console.warn('[continuous-message] image visual summary enqueue failed:', error?.message || error);
-    }
-    return { queued: false, reason: error?.message || 'enqueue_failed' };
-  }
 }
 
 function cloneReplyContext(replyContext = null) {

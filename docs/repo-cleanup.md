@@ -16,6 +16,8 @@
 
 更新 2026-05-22 16:24 +08:00：`web/server.js` 回流同步已推进，`/api/main-reply-context-preview` 和对应 Admin UI/刷新脚本已拆入 `web/mainReplyContextPreviewRoute.js`、`web/mainReplyContextPreviewAdmin.js`。剩余必须迁移：`core/continuousMessagePreprocessor.js`、`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`；`api/mcpRuntime.js` 仍需处理审计结论。
 
+更新 2026-05-22 16:26 +08:00：`core/continuousMessagePreprocessor.js` 回流同步已推进，图片视觉摘要入队 helper 已拆入 `core/continuousMessage/imageVisualSummary.js`。剩余必须迁移：`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`；`api/mcpRuntime.js` 仍需处理审计结论。
+
 未处理项：`api/skills.js`、`core/tgBot.js`、`api/legacy/agentGraphV1Runtime.js` 和 `src/features/*` 需要按功能开关、外部调用兼容和测试覆盖单独确认。
 
 禁止直接手删项：`data/lancedb/**`、`data/memory-v3/**`、`api/legacy/aiHost.js`、`core/*.chunk.js` 和 `api/runtimeV2/context/*.chunk.js`。

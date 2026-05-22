@@ -294,6 +294,8 @@ artifacts/  临时产物、备份和评估输出
 
 回流同步进展（2026-05-22 16:24 +08:00）：`web/server.js` 的主回复上下文预览 API 已迁到 `web/mainReplyContextPreviewRoute.js`，Admin 面板片段和刷新脚本已迁到 `web/mainReplyContextPreviewAdmin.js`；剩余待迁移旧入口为 `core/continuousMessagePreprocessor.js`、`core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`，另需处理 `api/mcpRuntime.js`。
 
+回流同步进展（2026-05-22 16:26 +08:00）：`core/continuousMessagePreprocessor.js` 的图片视觉摘要安全入队 helper 已迁到 `core/continuousMessage/imageVisualSummary.js`，旧入口仅保留调用点；剩余待迁移旧入口为 `core/router.js`、`utils/memoryCli.js`、`api/createAgentExecutor.js`，另需处理 `api/mcpRuntime.js`。
+
 重点边界：
 
 - `api/toolSchemas.js` -> `api/toolSchemas/`：工具 schema 分组，旧入口只聚合导出。
