@@ -212,6 +212,7 @@ function summarizeDiagnose(result = {}, args = {}) {
       users: Array.isArray(result.journal?.users) ? result.journal.users.slice(0, Math.max(1, Number(args.limit || 20) || 20)) : []
     },
     quality: result.quality || {},
+    categoryManifest: result.categoryManifest || {},
     projectionFreshness: {
       projectionStale: result.projectionFreshness?.projectionStale === true,
       projectionStaleReason: result.projectionFreshness?.projectionStaleReason || '',

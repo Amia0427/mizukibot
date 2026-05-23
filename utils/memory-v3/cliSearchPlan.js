@@ -44,6 +44,19 @@ const FACET_SOURCE_PLAN = Object.freeze({
   }
 });
 
+const CATEGORY_TO_SOURCE_PLAN = Object.freeze({
+  preference: { queryFacet: 'preference', primary: ['profile', 'personal'], secondary: ['recent'] },
+  identity: { queryFacet: 'identity', primary: ['profile', 'personal'], secondary: ['recent'] },
+  relationship: { queryFacet: 'relationship', primary: ['profile', 'personal'], secondary: ['recent'] },
+  continuity: { queryFacet: 'recent_continuity', primary: ['recent', 'task', 'journal'], secondary: ['personal', 'profile'] },
+  journal: { queryFacet: 'recent_continuity', primary: ['journal', 'recent'], secondary: ['personal'] },
+  task: { queryFacet: 'task_or_plan', primary: ['task', 'recent', 'journal'], secondary: ['personal', 'profile'] },
+  group_context: { queryFacet: 'group_context', primary: ['group', 'jargon', 'recent'], secondary: ['journal'] },
+  style: { queryFacet: 'preference', primary: ['style', 'jargon', 'profile'], secondary: ['personal'] },
+  notebook: { queryFacet: 'notebook', primary: ['notebook'], secondary: [] },
+  profile: { queryFacet: 'identity', primary: ['profile', 'personal'], secondary: ['recent'] }
+});
+
 function normalizeArray(values) {
   return Array.isArray(values) ? values : [];
 }
@@ -62,8 +75,18 @@ function queryFacetForSearch(query = '', source = 'all') {
   return FACET_SET.has(facet) ? facet : 'default_continuity';
 }
 
-function chooseSourcePlan(query = '', requestedSource = 'all') {
+function chooseSourcePlan(query = '', requestedSource = 'all', options = {}) {
   const source = normalizeText(requestedSource).toLowerCase() || 'all';
+  const category = normalizeText(options.category || options.memoryCategory).toLowerCase();
+  if (source === 'all' && CATEGORY_TO_SOURCE_PLAN[category]) {
+    const categoryPlan = CATEGORY_TO_SOURCE_PLAN[category];
+    return {
+      queryFacet: categoryPlan.queryFacet,
+      primary: Array.from(new Set(categoryPlan.primary)),
+      secondary: Array.from(new Set(categoryPlan.secondary)),
+      category
+    };
+  }
   const queryFacet = queryFacetForSearch(query, source);
   if (source === 'notebook') {
     return { queryFacet: 'notebook', primary: ['notebook'], secondary: [] };
@@ -83,7 +106,8 @@ function chooseSourcePlan(query = '', requestedSource = 'all') {
   return {
     queryFacet,
     primary: Array.from(new Set(primary)),
-    secondary: Array.from(new Set(secondary))
+    secondary: Array.from(new Set(secondary)),
+    category
   };
 }
 

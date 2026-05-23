@@ -64,8 +64,31 @@ function normalizeMemoryItem(raw) {
   const rollupLevel = normalizeEpisodeRollupLevel(raw.rollupLevel ?? raw.rollup_level ?? raw.meta?.rollupLevel ?? raw.meta?.rollup_level);
   const episodeDay = normalizeEpisodeDay(raw.episodeDay ?? raw.episode_day ?? raw.meta?.episodeDay ?? raw.meta?.episode_day);
   const rawMeta = raw.meta && typeof raw.meta === 'object' ? raw.meta : {};
+  const memoryCategoryMetadata = (() => {
+    try {
+      return require('../../../utils/memory-v3/categoryMetadata').deriveMemoryMetadata({
+        ...raw,
+        type,
+        memoryKind,
+        fieldKey: raw.fieldKey ?? raw.field_key ?? raw.semanticSlot ?? raw.semantic_slot ?? rawMeta.fieldKey,
+        sourceKind,
+        scopeType: scope.scopeType,
+        source: raw.source || rawMeta.source || 'unknown',
+        tags: raw.tags ?? rawMeta.tags,
+        intent: raw.intent ?? rawMeta.intent,
+        privacyLevel: raw.privacyLevel ?? raw.privacy_level ?? rawMeta.privacyLevel ?? rawMeta.privacy_level,
+        meta: rawMeta
+      });
+    } catch (_) {
+      return { category: '', tags: [], intent: '', privacyLevel: 'private' };
+    }
+  })();
   const meta = {
     ...rawMeta,
+    ...(memoryCategoryMetadata.category ? { category: memoryCategoryMetadata.category } : {}),
+    ...(memoryCategoryMetadata.tags.length > 0 ? { tags: memoryCategoryMetadata.tags } : {}),
+    ...(memoryCategoryMetadata.intent ? { intent: memoryCategoryMetadata.intent } : {}),
+    ...(memoryCategoryMetadata.privacyLevel ? { privacyLevel: memoryCategoryMetadata.privacyLevel } : {}),
     ...(memoryKind ? { memoryKind } : {}),
     ...(styleRole ? { styleRole } : {}),
     ...(jargonRole ? { jargonRole } : {}),
@@ -409,6 +432,10 @@ function materializeShardIndex(items = [], meta = {}) {
       memoryKind: getItemMemoryKind(item),
       rollupLevel: item.rollupLevel || '',
       episodeDay: item.episodeDay || '',
+      category: item.meta?.category || '',
+      tags: Array.isArray(item.meta?.tags) ? item.meta.tags : [],
+      intent: item.meta?.intent || '',
+      privacyLevel: item.meta?.privacyLevel || 'private',
       styleRole: normalizeStyleRole(item.meta?.styleRole),
       jargonRole: normalizeJargonRole(item.meta?.jargonRole),
       meta: item.meta || {}

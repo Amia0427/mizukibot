@@ -29,6 +29,7 @@ const {
 } = require('./queryPolicy');
 const { matchesFacetCandidate } = require('./queryRanking');
 const { candidateKey } = require('./queryCandidates');
+const { categoryFacetBoost } = require('./categoryMetadata');
 
 function facetSourceWeight(facet, source) {
   const key = `${facet}:${source}`;
@@ -78,7 +79,8 @@ function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default
     const confidence = Math.min(0.2, Number(candidate.confidence || 0) * 0.2);
     const importance = Math.min(0.22, Number(candidate.importance || 0) * 0.1);
     const sourceBoost = facetSourceWeight(facet, candidate.source);
-    const score = ((lexical * 0.65) + direct + dateBoost + (recency * 0.08) + support + confidence + importance) * sourceBoost;
+    const categoryBoost = categoryFacetBoost(candidate, facet);
+    const score = ((lexical * 0.65) + direct + dateBoost + (recency * 0.08) + support + confidence + importance + categoryBoost) * sourceBoost;
     if (score <= 0.02 && lexical <= 0.01 && direct <= 0 && dateBoost <= 0) continue;
     scoped.push({
       ...candidate,
@@ -91,7 +93,8 @@ function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default
         direct,
         dateBoost,
         recency,
-        sourceBoost
+        sourceBoost,
+        categoryBoost
       }
     });
   }
@@ -200,7 +203,8 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
     const embedding = queryEmbedding
       ? calcEmbeddingSimilarity(queryEmbedding, candidate, embeddingIndex)
       : 0;
-    const score = ((lexical * lexicalWeight) + (embedding * semanticWeight) + direct + dateBoost + (recency * 0.08) + (strength.memoryStrength * 0.1) + support + confidence + importance + stabilityBoost) * sourceBoost;
+    const categoryBoost = categoryFacetBoost(candidate, facet);
+    const score = ((lexical * lexicalWeight) + (embedding * semanticWeight) + direct + dateBoost + (recency * 0.08) + (strength.memoryStrength * 0.1) + support + confidence + importance + stabilityBoost + categoryBoost) * sourceBoost;
     const semanticOnly = embedding >= semanticMinScore && lexical < 0.04 && direct <= 0;
     if (score < minScore && !semanticOnly) continue;
     const matchMode = embedding > 0 && lexical > 0.04
@@ -220,7 +224,8 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
         direct,
         dateBoost,
         recency,
-        sourceBoost
+        sourceBoost,
+        categoryBoost
       },
       decayScore: strength.decayScore,
       rehearsalBoost: strength.rehearsalBoost,

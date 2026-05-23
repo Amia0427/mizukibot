@@ -13,6 +13,10 @@ const {
 const {
   buildDailyJournalDocsForUser
 } = require('./journalDocs');
+const {
+  deriveMemoryMetadata,
+  matchesMemoryMetadataFilters
+} = require('./categoryMetadata');
 const { isMemoryNotRecallable } = require('./recallFilter');
 const {
   looksLikePollutedSessionSummary,
@@ -57,7 +61,7 @@ function collectCandidates(userId, options = {}) {
     for (const session of Object.values(sessionProjection.sessions || {})) {
       const sessionUserId = normalizeText(session?.userId);
       if (sessionUserId !== String(userId || '').trim()) continue;
-      candidates.push({
+      const candidate = {
         id: `session:${session.sessionKey}`,
         source: 'recent',
         type: 'session',
@@ -82,7 +86,15 @@ function collectCandidates(userId, options = {}) {
         evidenceTier: session.sessionKey === currentSessionKey ? 'strict' : 'weak',
         stabilityScore: session.sessionKey === currentSessionKey ? 0.98 : 0.72,
         semanticSlot: 'continuity',
-        canonicalKey: canonicalizeText(`${session.activeTopic || ''} ${session.summary || ''} ${session.carryOverUserTurn || ''}`)
+        canonicalKey: canonicalizeText(`${session.activeTopic || ''} ${session.summary || ''} ${session.carryOverUserTurn || ''}`),
+        category: 'continuity',
+        tags: ['recent', 'session'].concat([session.snapshotType, session.activeTopic].map(normalizeText).filter(Boolean)),
+        intent: 'recent_context',
+        privacyLevel: 'private'
+      };
+      candidates.push({
+        ...candidate,
+        ...deriveMemoryMetadata(candidate)
       });
     }
   }
@@ -102,11 +114,15 @@ function collectCandidates(userId, options = {}) {
       } else if (nodeUserId !== String(userId || '').trim()) {
         continue;
       }
-      candidates.push({
+      const candidate = {
         ...node,
         source,
         semanticSlot: normalizeText(node.semanticSlot || node.type || node.memoryKind).toLowerCase(),
         canonicalKey: normalizeText(node.canonicalKey || canonicalizeText(node.text)).toLowerCase()
+      };
+      candidates.push({
+        ...candidate,
+        ...deriveMemoryMetadata(candidate)
       });
     }
   }
@@ -131,7 +147,7 @@ function collectCandidates(userId, options = {}) {
       ...(Array.isArray(profile.strictProfile?.boundaries) ? profile.strictProfile.boundaries.map((item, index) => ({ id: `profile:${userId}:boundary:${index}`, source: 'profile', type: 'boundary', text: item, semanticSlot: 'boundary', fieldKey: 'boundary' })) : [])
     ].filter(Boolean);
     for (const doc of pseudoDocs) {
-      candidates.push({
+      const candidate = {
         ...doc,
         scopeType: 'personal',
         updatedAt: Number(profile.personaCore?.updatedAt || profileProjection.updatedAt || 0) || 0,
@@ -141,6 +157,10 @@ function collectCandidates(userId, options = {}) {
         canonicalKey: canonicalizeText(doc.text),
         evidenceTier: 'strict',
         stabilityScore: 0.92
+      };
+      candidates.push({
+        ...candidate,
+        ...deriveMemoryMetadata(candidate)
       });
     }
   }
@@ -152,7 +172,7 @@ function collectCandidates(userId, options = {}) {
       const rollupLevel = normalizeText(episode.rollupLevel || episode.type || 'daily') || 'daily';
       if (rollupLevel === 'segment') continue;
       const episodeDay = normalizeText(episode.episodeDay || episode.endDay || episode.startDay);
-      candidates.push({
+      const candidate = {
         id: `episode:${episode.id}`,
         source: 'journal',
         type: 'episode',
@@ -182,19 +202,33 @@ function collectCandidates(userId, options = {}) {
         topics: Array.isArray(episode.topics) ? episode.topics : [],
         textKind: normalizeText(episode.textKind) || `journal_${rollupLevel}`,
         sourceCompleteness: normalizeText(episode.sourceCompleteness || 'summary'),
-        sourceFile: normalizeText(episode.sourceFile)
+        sourceFile: normalizeText(episode.sourceFile),
+        category: 'journal',
+        tags: ['journal', rollupLevel, episodeDay].concat(Array.isArray(episode.topics) ? episode.topics : []).map(normalizeText).filter(Boolean),
+        intent: 'episode_recall',
+        privacyLevel: 'private'
+      };
+      candidates.push({
+        ...candidate,
+        ...deriveMemoryMetadata(candidate)
       });
     }
 
     for (const doc of buildDailyJournalDocsForUser(userId, { includeSegments: true })) {
-      candidates.push({
+      const candidate = {
         ...doc,
         canonicalKey: canonicalizeText(doc.text)
+      };
+      candidates.push({
+        ...candidate,
+        ...deriveMemoryMetadata(candidate)
       });
     }
   }
 
-  return candidates.filter((item) => normalizeText(item.text));
+  return candidates
+    .filter((item) => normalizeText(item.text))
+    .filter((item) => matchesMemoryMetadataFilters(item, options));
 }
 
 function filterCandidatesBySource(candidates = [], source = 'all') {

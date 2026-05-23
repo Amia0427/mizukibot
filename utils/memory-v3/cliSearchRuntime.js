@@ -11,6 +11,10 @@ const {
   shouldReloadSnapshot
 } = require('./cliSearchSnapshot');
 const {
+  buildMemoryCategoryManifest,
+  compactMemoryCategoryManifest
+} = require('./categoryManifest');
+const {
   SOURCE_SET,
   chooseSourcePlan
 } = require('./cliSearchPlan');
@@ -110,7 +114,14 @@ async function searchMemoryCliFast(query = '', options = {}, context = {}) {
   const queryText = normalizeText(query);
   const limit = Math.max(1, Math.min(20, Number(options.limit || config.MEMORY_CLI_MAX_RESULTS || 8) || 8));
   const requestedSource = normalizeText(options.source || 'all').toLowerCase() || 'all';
-  const plan = chooseSourcePlan(queryText, requestedSource);
+  const searchContext = {
+    ...context,
+    ...options
+  };
+  const plan = chooseSourcePlan(queryText, requestedSource, {
+    ...searchContext
+  });
+  const categoryManifest = compactMemoryCategoryManifest(buildMemoryCategoryManifest({ snapshot }), options.categoryManifestLimit || 12);
   const queryEmbedding = shouldUseRemoteEmbedding() ? await requestEmbedding(queryText) : null;
   const scoring = {
     embeddingIndex: queryEmbedding ? loadEmbeddingIndex() : null,
@@ -122,12 +133,12 @@ async function searchMemoryCliFast(query = '', options = {}, context = {}) {
   const selectMs = nowMs() - selectStartedAt;
 
   const gatherStartedAt = nowMs();
-  const primary = gatherRowsForSources(snapshot, selectedPrimarySources, queryText, limit, context, plan.queryFacet, scoring);
+  const primary = gatherRowsForSources(snapshot, selectedPrimarySources, queryText, limit, searchContext, plan.queryFacet, scoring);
   let candidateCounts = primary.candidateCounts;
   let ranked = primary.rows;
   let fallbackUsed = false;
   if (requestedSource === 'all' && shouldExpandSelection(ranked, limit) && selectedSecondarySources.length > 0) {
-    const secondary = gatherRowsForSources(snapshot, selectedSecondarySources, queryText, limit, context, plan.queryFacet, scoring);
+    const secondary = gatherRowsForSources(snapshot, selectedSecondarySources, queryText, limit, searchContext, plan.queryFacet, scoring);
     ranked = sortRows(ranked.concat(secondary.rows));
     candidateCounts = mergeCandidateCounts(candidateCounts, secondary.candidateCounts);
     fallbackUsed = true;
@@ -135,19 +146,30 @@ async function searchMemoryCliFast(query = '', options = {}, context = {}) {
   const gatherMs = nowMs() - gatherStartedAt;
 
   const scoreStartedAt = nowMs();
-  ranked = sortRows(applyJournalTargetDayPriorityToRows(await rerankRows(queryText, ranked, context), queryText));
+  ranked = sortRows(applyJournalTargetDayPriorityToRows(await rerankRows(queryText, ranked, searchContext), queryText));
   const selectedRows = selectDiverseRows(ranked, limit, plan.queryFacet);
   const scoreMs = nowMs() - scoreStartedAt;
 
   const packStartedAt = nowMs();
   const payload = buildSearchResponse(selectedRows, candidateCounts, plan.queryFacet, fallbackUsed, limit);
+  payload.sourcePlan = {
+    requestedSource,
+    queryFacet: plan.queryFacet,
+    primary: selectedPrimarySources,
+    secondary: selectedSecondarySources,
+    category: plan.category || normalizeText(options.category || options.memoryCategory),
+    fallbackUsed
+  };
+  payload.categoryManifest = categoryManifest;
   payload.diagnostics = {
     projectionFreshness: diagnoseProjectionFreshness({
       ...context,
       userId: normalizeText(context.userId),
       groupId: normalizeText(context.groupId),
       sessionKey: normalizeText(context.sessionKey)
-    })
+    }),
+    sourcePlan: payload.sourcePlan,
+    categoryManifest
   };
   const packMs = nowMs() - packStartedAt;
 

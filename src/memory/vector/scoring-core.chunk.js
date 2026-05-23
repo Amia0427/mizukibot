@@ -10,6 +10,30 @@ function getMemoryLayer(doc = {}) {
   return 'personal_fact';
 }
 
+function deriveDocCategoryMetadata(doc = {}) {
+  try {
+    return require('../../../utils/memory-v3/categoryMetadata').deriveMemoryMetadata(doc);
+  } catch (_) {
+    return { category: '', tags: [], intent: '', privacyLevel: 'private' };
+  }
+}
+
+function docMatchesCategoryFilters(doc = {}, options = {}) {
+  try {
+    return require('../../../utils/memory-v3/categoryMetadata').matchesMemoryMetadataFilters(doc, options);
+  } catch (_) {
+    return true;
+  }
+}
+
+function calcCategoryBoost(doc = {}, options = {}) {
+  try {
+    return require('../../../utils/memory-v3/categoryMetadata').categoryFacetBoost(doc, options.queryFacet || options.facet || '');
+  } catch (_) {
+    return 0;
+  }
+}
+
 function getLayerHalfLifeDays(doc = {}) {
   const layer = getMemoryLayer(doc);
   const rule = getTypeRule(doc.type);
@@ -240,6 +264,7 @@ function filterDocIdsByOptions(docs, userId, options = {}) {
     if (options.toolName && String(doc.toolName || '') !== String(options.toolName || '')) return false;
     if (options.sessionId && String(doc.sessionId || '') !== String(options.sessionId || '')) return false;
     if (options.status && normalizeStatus(doc.status, STATUS_ACTIVE) !== normalizeStatus(options.status, STATUS_ACTIVE)) return false;
+    if (!docMatchesCategoryFilters(doc, options)) return false;
     if (options.sourceKind && String(doc.sourceKind || '').toLowerCase() !== String(options.sourceKind || '').toLowerCase()) return false;
     if (options.memoryKind && getItemMemoryKind(doc) !== normalizeMemoryKind(options.memoryKind)) return false;
     if (options.memoryKind === 'episode' && options.rollupLevel && String(doc.rollupLevel || '') !== String(options.rollupLevel || '')) return false;
@@ -310,6 +335,7 @@ function filterUnifiedDocIds(docs, userId, options = {}) {
     if (isAssistantPersonaPollution(doc)) return false;
     if (doc.notRecallable === true || doc.meta?.notRecallable === true || String(doc.meta?.recallVerification?.status || '').toLowerCase() === 'not_recallable') return false;
     if (!allowedSources.has(source)) return false;
+    if (!docMatchesCategoryFilters(doc, options)) return false;
 
     const ownerId = String(doc.userId || '');
     if (source === 'group' || source === 'jargon') {

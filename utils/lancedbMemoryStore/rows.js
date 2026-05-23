@@ -6,6 +6,7 @@ const {
   canonicalizeText,
   stableSortByScore
 } = require('../memory-v3/helpers');
+const { deriveMemoryMetadata } = require('../memory-v3/categoryMetadata');
 const { lifecycleStatusOf } = require('../memory-v3/recallFilter');
 
 const VECTOR_STORE_MODES = new Set(['local_jsonl', 'lancedb', 'shadow']);
@@ -24,6 +25,10 @@ const LANCEDB_ROW_COLUMNS = [
   'updatedAt',
   'canonicalKey',
   'textHash',
+  'category',
+  'tagsText',
+  'intent',
+  'privacyLevel',
   'model',
   'vector',
   'preview'
@@ -82,6 +87,7 @@ function buildMemoryVectorRow(node = {}, embeddingRow = {}, options = {}) {
   const canonicalKey = normalizeText(node.canonicalKey || embeddingRow.canonicalKey || canonicalizeText(text)).toLowerCase();
   const model = normalizeText(embeddingRow.model || options.model || config.MEMORY_EMBEDDING_MODEL);
   const textHash = normalizeText(embeddingRow.textHash) || buildTextHash(text, canonicalKey);
+  const metadata = deriveMemoryMetadata(node);
   return {
     id: buildRowId('memory', nodeId),
     nodeId,
@@ -97,6 +103,10 @@ function buildMemoryVectorRow(node = {}, embeddingRow = {}, options = {}) {
     updatedAt: Number(node.updatedAt || node.createdAt || embeddingRow.updatedAt || 0) || 0,
     canonicalKey,
     textHash,
+    category: metadata.category,
+    tagsText: metadata.tagsText,
+    intent: metadata.intent,
+    privacyLevel: metadata.privacyLevel,
     model,
     vector,
     preview: clampText(text, Number(options.previewChars || 160) || 160)
@@ -110,6 +120,15 @@ function buildWorldbookVectorRow(doc = {}, embeddingRow = {}, options = {}) {
   const text = normalizeText(doc.text || doc.purpose);
   const model = normalizeText(embeddingRow.model || options.model || config.MEMORY_EMBEDDING_MODEL);
   const textHash = normalizeText(embeddingRow.textHash) || buildTextHash(text, moduleId);
+  const metadata = deriveMemoryMetadata({
+    ...doc,
+    source: 'persona_worldbook',
+    type: 'worldbook',
+    category: doc.category || 'persona_worldbook',
+    tags: [doc.slot, doc.phase, doc.moduleId].filter(Boolean),
+    intent: 'persona_worldbook_recall',
+    privacyLevel: 'private'
+  });
   return {
     id: buildRowId('worldbook', moduleId),
     nodeId: moduleId,
@@ -125,6 +144,10 @@ function buildWorldbookVectorRow(doc = {}, embeddingRow = {}, options = {}) {
     updatedAt: Number(doc.fileMtimeMs || embeddingRow.updatedAt || embeddingRow.lastEmbeddedAt || 0) || 0,
     canonicalKey: normalizeText(doc.moduleId || doc.id || moduleId).toLowerCase(),
     textHash,
+    category: metadata.category,
+    tagsText: metadata.tagsText,
+    intent: metadata.intent,
+    privacyLevel: metadata.privacyLevel,
     model,
     vector,
     preview: clampText([doc.purpose, text].filter(Boolean).join('\n'), Number(options.previewChars || 160) || 160)
@@ -158,6 +181,12 @@ function buildMemoryFilter(input = {}) {
       clauses.push(`source = ${quoteSql(source)}`);
     }
   }
+  const category = normalizeText(input.category || input.memoryCategory).toLowerCase();
+  if (category) clauses.push(`category = ${quoteSql(category)}`);
+  const intent = normalizeText(input.intentFilter || input.memoryIntent).toLowerCase();
+  if (intent) clauses.push(`intent = ${quoteSql(intent)}`);
+  const privacyLevel = normalizeText(input.privacyLevel || input.memoryPrivacyLevel).toLowerCase();
+  if (privacyLevel) clauses.push(`privacyLevel = ${quoteSql(privacyLevel)}`);
   const visibility = [];
   if (userId) visibility.push(`(scopeType != 'group' AND userId = ${quoteSql(userId)})`);
   if (allowedGroups.length > 0) {
@@ -172,6 +201,9 @@ function buildMemoryFilter(input = {}) {
     sql: clauses.join(' AND '),
     userId,
     source,
+    category,
+    intentFilter: intent,
+    privacyLevel,
     allowedGroupIds: allowedGroups,
     sessionKey
   };
@@ -191,6 +223,12 @@ function rowPassesMemoryFilter(row = {}, filter = {}) {
       return false;
     }
   }
+  const category = normalizeText(filter.category || filter.memoryCategory).toLowerCase();
+  if (category && normalizeText(row.category).toLowerCase() !== category) return false;
+  const intent = normalizeText(filter.intentFilter || filter.memoryIntent).toLowerCase();
+  if (intent && normalizeText(row.intent).toLowerCase() !== intent) return false;
+  const privacyLevel = normalizeText(filter.privacyLevel || filter.memoryPrivacyLevel).toLowerCase();
+  if (privacyLevel && normalizeText(row.privacyLevel).toLowerCase() !== privacyLevel) return false;
   const scopeType = normalizeText(row.scopeType || 'personal').toLowerCase();
   if (scopeType === 'group') {
     const allowed = Array.isArray(filter.allowedGroupIds) ? filter.allowedGroupIds.map(normalizeText) : [];

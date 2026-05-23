@@ -36,6 +36,11 @@ const {
   getStrongSemanticThreshold
 } = require('./queryDiagnostics');
 const {
+  buildMemoryCategoryManifestFromDocs,
+  compactMemoryCategoryManifest
+} = require('./categoryManifest');
+const { chooseSourcePlan } = require('./cliSearchPlan');
+const {
   classifyFacet,
   rewriteQuery
 } = require('./queryPolicy');
@@ -112,6 +117,13 @@ async function queryMemory(input = {}) {
     ? String(input.facet || '').trim().toLowerCase()
     : classifyFacet(query, input);
   const rewrites = rewriteQuery(query, facet);
+  const resolvedSourcePlan = chooseSourcePlan(query, input.source || 'all', input);
+  const sourcePlan = {
+    ...resolvedSourcePlan,
+    category: normalizeText(input.category || input.memoryCategory)
+      || resolvedSourcePlan.category
+      || ''
+  };
   let stageStartedAt = getNowMs();
   const queryEmbedding = await resolveQueryEmbedding(query, facet, {
     ...input,
@@ -125,6 +137,7 @@ async function queryMemory(input = {}) {
     ...input,
     facet
   }), input.source);
+  const categoryManifest = compactMemoryCategoryManifest(buildMemoryCategoryManifestFromDocs(candidates), input.categoryManifestLimit || 12);
   timing.collectCandidatesMs = getNowMs() - stageStartedAt;
   const vectorStoreMode = normalizeVectorStoreMode(config.MEMORY_VECTOR_STORE);
   const embeddingCoverage = buildEmbeddingCoverageDiagnostics(candidates);
@@ -318,12 +331,16 @@ async function queryMemory(input = {}) {
       },
       coverageAtQuery,
       journalIntent,
+      sourcePlan,
+      categoryManifest,
       timings: timing
     },
     diagnostics: {
       projectionFreshness,
       coverageAtQuery,
       journalIntent,
+      sourcePlan,
+      categoryManifest,
       timings: timing,
       recall: {
         strongSemanticThreshold: getStrongSemanticThreshold(input),

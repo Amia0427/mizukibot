@@ -231,6 +231,25 @@ function safeSearchFailure(reason = 'unavailable') {
   return { ok: false, skipped: true, reason, results: [], rows: [] };
 }
 
+function looksLikeMissingColumnError(error = null) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('column')
+    && (message.includes('not found') || message.includes('does not exist') || message.includes('no field') || message.includes('missing'));
+}
+
+function legacySelectColumns() {
+  return LANCEDB_SELECT_COLUMNS.filter((column) => !['category', 'tagsText', 'intent', 'privacyLevel'].includes(column));
+}
+
+function stripMetadataFilterClauses(filterSql = '') {
+  return String(filterSql || '')
+    .split(/\s+AND\s+/i)
+    .map((clause) => clause.trim())
+    .filter(Boolean)
+    .filter((clause) => !/^(category|intent|privacyLevel)\s*=/.test(clause))
+    .join(' AND ');
+}
+
 async function countTableRows(tableName = '', options = {}) {
   const normalizedTable = normalizeText(tableName);
   if (!normalizedTable) return { ok: false, skipped: true, reason: 'empty_table', rows: 0 };
@@ -287,13 +306,22 @@ async function searchTableVectors(tableName = '', queryEmbedding = [], filterSql
     const table = await openTable(openResult.db, tableName);
     if (!table) return safeSearchFailure('table_missing');
     const limit = Math.max(1, Math.floor(Number(options.limit || config.MEMORY_LANCEDB_CANDIDATE_LIMIT || 32) || 32));
-    let query = table
-      .vectorSearch(vector)
-      .distanceType('cosine')
-      .select(LANCEDB_SELECT_COLUMNS)
-      .limit(limit);
-    if (filterSql) query = query.where(filterSql);
-    const rows = await query.toArray();
+    const runQuery = async (selectColumns, sql) => {
+      let query = table
+        .vectorSearch(vector)
+        .distanceType('cosine')
+        .select(selectColumns)
+        .limit(limit);
+      if (sql) query = query.where(sql);
+      return query.toArray();
+    };
+    let rows;
+    try {
+      rows = await runQuery(LANCEDB_SELECT_COLUMNS, filterSql);
+    } catch (error) {
+      if (!looksLikeMissingColumnError(error)) throw error;
+      rows = await runQuery(legacySelectColumns(), stripMetadataFilterClauses(filterSql));
+    }
     return { ok: true, rows: Array.isArray(rows) ? rows : [], results: Array.isArray(rows) ? rows : [], reason: '' };
   } catch (error) {
     return safeSearchFailure(`search_failed:${error.message}`);

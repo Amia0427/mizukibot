@@ -2,6 +2,10 @@ const {
   canonicalizeText,
   normalizeText
 } = require('./helpers');
+const {
+  deriveMemoryMetadata,
+  normalizeTags
+} = require('./categoryMetadata');
 const { isMemoryNotRecallable } = require('./recallFilter');
 const {
   applyProfileLifecycle
@@ -26,6 +30,17 @@ function createNodeFromEvent(event) {
     : fieldKey === 'dislike'
       ? 'preference_dislike'
       : fieldKey;
+  const metadata = deriveMemoryMetadata({
+    ...event,
+    payload,
+    type: payload.type || event.memoryKind || 'fact',
+    fieldKey: normalizedFieldKey,
+    semanticSlot: event.semanticSlot || payload.semanticSlot || normalizedFieldKey,
+    tags: normalizeTags([
+      ...(Array.isArray(event.tags) ? event.tags : []),
+      ...(Array.isArray(payload.tags) ? payload.tags : [])
+    ])
+  });
   return applyProfileLifecycle({
     id: String(event.id || '').trim(),
     userId: normalizeText(event.userId),
@@ -66,6 +81,10 @@ function createNodeFromEvent(event) {
     participants: Array.isArray(event.participants) ? event.participants : [],
     entities: Array.isArray(event.entities) ? event.entities : [],
     relations: Array.isArray(event.relations) ? event.relations : [],
+    category: metadata.category,
+    tags: metadata.tags,
+    intent: metadata.intent,
+    privacyLevel: metadata.privacyLevel,
     taskType: normalizeText(event.taskType || payload.taskType),
     extractionClass: normalizeText(payload.extractionClass || payload.classification || event.extractionClass).toLowerCase(),
     toolName: normalizeText(event.toolName || payload.toolName),
