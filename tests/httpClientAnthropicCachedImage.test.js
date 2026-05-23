@@ -34,11 +34,13 @@ module.exports = (async () => {
       stream: false
     });
 
-    assert.strictEqual(prepared.provider, 'openai_compatible');
-    assert.strictEqual(prepared.requestUrl, 'https://example.com/v1/responses');
-    const content = prepared.requestBody.input[0].content;
-    assert.strictEqual(content[1].type, 'input_image');
-    assert.ok(/^data:image\/png;base64,/i.test(String(content[1].image_url || '')));
+    assert.strictEqual(prepared.provider, 'anthropic');
+    assert.strictEqual(prepared.requestUrl, 'https://example.com/v1/messages');
+    const content = prepared.requestBody.messages[0].content;
+    assert.strictEqual(content[1].type, 'image');
+    assert.strictEqual(content[1].source.media_type, 'image/png');
+    assert.strictEqual(content[1].source.type, 'base64');
+    assert.ok(String(content[1].source.data || '').length > 0);
 
     console.log('httpClientAnthropicCachedImage.test.js passed');
   } finally {

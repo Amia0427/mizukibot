@@ -58,7 +58,11 @@ module.exports = (async () => {
     assert.strictEqual(isLoaded('api/minecraftAgent.js'), false, 'toolExecutors should lazy-load minecraft tools');
 
     const config = loadConfigWithEnv({
-      API_KEY: process.env.API_KEY || 'test-key'
+      API_KEY: process.env.API_KEY || 'test-key',
+      POST_REPLY_WORKER_ENABLED: 'false',
+      TICK_ENGINE_ENABLED: 'false',
+      SCHEDULER_RUNTIME_ENABLED: 'false',
+      QZONE_AUTO_PUBLISH_ENABLED: 'false'
     });
     assert.strictEqual(config.MCP_DISCOVERY_MODE, 'lazy');
     assert.strictEqual(config.MCP_WARM_ON_RUNTIME_INIT, false);

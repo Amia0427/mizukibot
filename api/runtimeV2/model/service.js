@@ -25,6 +25,7 @@ const {
   getMaxTokens,
   getModelName,
   getRetries,
+  resolveMainProvider,
   normalizeTextContent,
   withMainModelFallback
 } = require('./shared');
@@ -127,7 +128,7 @@ function buildResolvedModelTrace(context = {}, resolvedConfig = null, source = '
     topRouteType: trace.topRouteType,
     branch: trace.dispatchBranch,
     triggerBranch: trace.triggerBranch || source,
-    provider: undefined,
+    provider: resolveMainProvider(apiBaseUrl, model),
     apiBaseUrl,
     model,
     modelSource: resolvedConfig?.__mainModelSource,

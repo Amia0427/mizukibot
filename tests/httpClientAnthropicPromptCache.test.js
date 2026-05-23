@@ -87,22 +87,19 @@ module.exports = (async () => {
       stream: false
     });
 
-    assert.strictEqual(prepared.provider, 'openai_compatible');
-    assert.strictEqual(prepared.requestUrl, 'https://example.com/v1/responses');
-    assert.ok(Array.isArray(prepared.requestBody.input));
-    const dynamicContext = prepared.requestBody.input.find((item) => (
-      item.role === 'system'
-      && contentParts(item).some((block) => String(block.text || '').includes('[Affinity]'))
+    assert.strictEqual(prepared.provider, 'anthropic');
+    assert.strictEqual(prepared.requestUrl, 'https://example.com/v1/messages');
+    assert.ok(Array.isArray(prepared.requestBody.messages));
+    const dynamicContext = prepared.requestBody.messages.find((item) => (
+      contentParts(item).some((block) => String(block.text || '').includes('[Affinity]'))
     ));
-    const relationshipContext = prepared.requestBody.input.find((item) => (
-      item.role === 'system'
-      && contentParts(item).some((block) => String(block.text || '').includes('[Relationship]'))
+    const relationshipContext = prepared.requestBody.messages.find((item) => (
+      contentParts(item).some((block) => String(block.text || '').includes('[Relationship]'))
     ));
-    const currentConversationContext = prepared.requestBody.input.find((item) => (
-      item.role === 'system'
-      && contentParts(item).some((block) => String(block.text || '').includes('[CurrentConversation]'))
+    const currentConversationContext = prepared.requestBody.messages.find((item) => (
+      contentParts(item).some((block) => String(block.text || '').includes('[CurrentConversation]'))
     ));
-    const assistantContext = prepared.requestBody.input.find((item) => (
+    const assistantContext = prepared.requestBody.messages.find((item) => (
       item.role === 'assistant'
       && contentParts(item).some((block) => String(block.text || '').includes('[Context for assistant only]'))
     ));
@@ -111,8 +108,8 @@ module.exports = (async () => {
     assert.ok(currentConversationContext);
     assert.ok(assistantContext);
     assert.ok(!prepared.requestBody.system);
-    assert.ok(!prepared.requestBody.messages);
-    assert.ok(prepared.requestBody.input.every((item) => contentParts(item).every((block) => !('cache_control' in block))));
+    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'input'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'prompt_cache_key'));
     assert.strictEqual(prepared.requestHeaders, null);
 
     const preparedDynamicOnly = await httpClient.prepareRequest('https://example.com/v1/messages', {
@@ -133,12 +130,12 @@ module.exports = (async () => {
       ],
       stream: false
     });
-    assert.ok(!preparedDynamicOnly.requestBody.system);
-    assert.ok(preparedDynamicOnly.requestBody.input.every((item) => (
+    assert.ok(!preparedDynamicOnly.requestBody.system || Array.isArray(preparedDynamicOnly.requestBody.system));
+    assert.ok(preparedDynamicOnly.requestBody.messages.every((item) => (
       contentParts(item).length === 0
-      || contentParts(item).every((block) => !('cache_control' in block))
+      || contentParts(item).every((block) => block.cache_control?.type === 'ephemeral' || !('cache_control' in block))
     )));
-    assert.strictEqual(preparedDynamicOnly.requestHeaders, null);
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedDynamicOnly.requestBody, 'prompt_cache_key'));
 
     const preparedStableSystem = await httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
@@ -175,8 +172,9 @@ module.exports = (async () => {
       ],
       stream: false
     });
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody.input[0].content[0], 'cache_control'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody.tools[0], 'cache_control'));
+    assert.ok(preparedStableSystem.requestBody.system.some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(preparedStableSystem.requestBody.tools.some((tool) => tool.cache_control?.type === 'ephemeral'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody, 'prompt_cache_key'));
 
     let attemptCount = 0;
     let firstAttemptBody = null;
@@ -259,8 +257,9 @@ module.exports = (async () => {
     }, 0, 'test-key');
 
     assert.strictEqual(attemptCount, 1);
-    assert.ok(firstAttemptBody.input.every((item) => contentParts(item).every((block) => !('cache_control' in block))));
-    assert.ok(firstAttemptHeaders.Authorization);
+    assert.ok(firstAttemptBody.system.some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(firstAttemptHeaders['x-api-key']);
+    assert.ok(firstAttemptHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
     assert.strictEqual(secondAttemptBody, null);
     assert.strictEqual(secondAttemptHeaders, null);
 
@@ -288,11 +287,11 @@ module.exports = (async () => {
         };
       }
       attemptCount += 1;
-      assert.ok(body.input.every((item) => (
+      assert.ok(body.messages.every((item) => (
         contentParts(item).length === 0
-        || contentParts(item).every((block) => !('cache_control' in block))
+        || contentParts(item).every((block) => block.cache_control?.type === 'ephemeral' || !('cache_control' in block))
       )));
-      assert.ok(options?.headers?.Authorization);
+      assert.ok(options?.headers?.['x-api-key']);
       const stream = new PassThrough();
       setImmediate(() => {
         stream.write('data: {"type":"response.created","response":{"usage":{"input_tokens":18,"input_tokens_details":{"cached_tokens":12}}}}\n\n');
