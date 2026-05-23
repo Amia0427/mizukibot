@@ -26,6 +26,7 @@ module.exports = (() => {
   assert.deepStrictEqual(normalizedLegacy.sourceMessageIds, []);
   assert.strictEqual(normalizedLegacy.cancelRequested, false);
   assert.strictEqual(normalizedLegacy.priority, 0);
+  assert.strictEqual(normalizedLegacy.learningIntent, '');
 
   const enqueued = queue.enqueue({
     jobId: 'schema_v2_job',
@@ -81,6 +82,34 @@ module.exports = (() => {
   assert.strictEqual(canceled.requeueSafe, false);
   assert.strictEqual(cancelQueue.listJobs(['queued']).length, 0);
   assert.strictEqual(cancelQueue.listJobs(['failed']).length, 1);
+
+  const mergeQueueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-post-reply-merge-dedupe-'));
+  const mergeQueue = createPostReplyJobQueue({ queueDir: mergeQueueDir });
+  const first = mergeQueue.enqueue({
+    jobId: 'merge_dedupe',
+    userId: 'u3',
+    aggregateKey: 'core|u3|s3|g3',
+    learningIntent: 'journal_only',
+    sourceMessageIds: ['m1'],
+    tags: ['core'],
+    turns: [
+      { turnId: 'turn-1', question: 'q1', finalReply: 'r1' }
+    ]
+  });
+  const merged = mergeQueue.mergeQueuedJob(first.job, {
+    learningIntent: 'explicit',
+    sourceMessageIds: ['m1', 'm2'],
+    tags: ['core', 'runtime_v2_persist'],
+    turns: [
+      { turnId: 'turn-1', question: 'q1 changed', finalReply: 'r1 changed' },
+      { turnId: 'turn-2', question: 'q2', finalReply: 'r2' }
+    ]
+  });
+  assert.strictEqual(merged.turns.length, 2, 'merge should dedupe turns by turnId');
+  assert.strictEqual(merged.turns[0].question, 'q1');
+  assert.strictEqual(merged.learningIntent, 'explicit');
+  assert.deepStrictEqual(merged.sourceMessageIds, ['m1', 'm2']);
+  assert.deepStrictEqual(merged.tags, ['core', 'runtime_v2_persist']);
 
   console.log('postReplyJobQueue.test.js passed');
 })();

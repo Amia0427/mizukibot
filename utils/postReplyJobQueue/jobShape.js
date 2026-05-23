@@ -8,6 +8,10 @@ const {
   nowIso,
   stableHash
 } = require('./common');
+const {
+  mergeLearningIntent,
+  normalizeLearningIntent
+} = require('../postReplyWorker/learningIntent');
 
 const POST_REPLY_JOB_SCHEMA_VERSION = 2;
 
@@ -58,6 +62,32 @@ function normalizeTurn(turn = {}) {
     continuitySnapshot: normalizeObject(normalized.continuitySnapshot, {}),
     contextStats: normalizeObject(normalized.contextStats, {})
   };
+}
+
+function getTurnDedupeKey(turn = {}, index = 0) {
+  const normalized = normalizeTurn(turn);
+  const explicit = normalizeText(normalized.turnId);
+  if (explicit) return `turn:${explicit}`;
+  return `hash:${stableHash({
+    question: normalized.question,
+    finalReply: normalized.finalReply,
+    createdAt: normalized.createdAt,
+    sourceSessionId: normalized.sourceSessionId
+  })}`;
+}
+
+function mergeTurnsUnique(currentTurns = [], incomingTurns = []) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of [...normalizeArray(currentTurns), ...normalizeArray(incomingTurns)]) {
+    const turn = normalizeTurn(raw);
+    if (!turn.question && !turn.finalReply) continue;
+    const key = getTurnDedupeKey(turn, out.length);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(turn);
+  }
+  return out;
 }
 
 function computeAggregateKey(job = {}) {
@@ -118,6 +148,8 @@ function normalizeJob(job = {}) {
     createdAt
   });
   const sourceMessageIds = normalizeStringArray(job.sourceMessageIds || job.source_message_ids);
+  const learningIntent = normalizeLearningIntent(job.learningIntent || job.learning_intent);
+  const rawEnrichBudget = normalizeObject(job.enrichBudget || job.enrich_budget, {});
   return {
     schemaVersion: POST_REPLY_JOB_SCHEMA_VERSION,
     jobId,
@@ -155,6 +187,13 @@ function normalizeJob(job = {}) {
     threadId: normalizeText(job.threadId),
     traceId,
     sourceMessageIds,
+    learningIntent,
+    enrichBudget: {
+      maxTurns: Math.max(0, Number(rawEnrichBudget.maxTurns || rawEnrichBudget.max_turns) || 0),
+      maxChars: Math.max(0, Number(rawEnrichBudget.maxChars || rawEnrichBudget.max_chars) || 0),
+      maxWrites: Math.max(0, Number(rawEnrichBudget.maxWrites || rawEnrichBudget.max_writes) || 0),
+      maxCostHint: Math.max(0, Number(rawEnrichBudget.maxCostHint || rawEnrichBudget.max_cost_hint) || 0)
+    },
     leaseOwner: normalizeText(job.leaseOwner || job.lease_owner),
     leaseUntil: normalizeText(job.leaseUntil || job.lease_until),
     cancelRequested: job.cancelRequested === true || job.cancel_requested === true,
@@ -183,10 +222,14 @@ module.exports = {
   buildAggregateAvailableAt,
   computeAggregateKey,
   getPhaseMaxAttempts,
+  mergeLearningIntent,
   mergeCompletedTasksForQueuedPatch,
+  mergeTurnsUnique,
   normalizeCompletedTasks,
   normalizeJob,
   normalizePhase,
+  normalizeLearningIntent,
   normalizeStringArray,
-  normalizeTurn
+  normalizeTurn,
+  getTurnDedupeKey
 };

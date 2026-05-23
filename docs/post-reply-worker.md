@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-23 22:43 +08:00
+更新时间：2026-05-23 23:16 +08:00
 
 ## 启动
 
@@ -36,6 +36,8 @@ POST_REPLY_WORKER_INLINE=true
 - `cancelRequested`
 - `priority`
 - `tags`
+- `learningIntent`
+- `enrichBudget`
 - `errorClass`
 - `requeueSafe`
 
@@ -89,6 +91,39 @@ node scripts/requeue-post-reply-failed.js --apply --force --transient-only --lim
 - `canceled`：人工取消，不应重放。
 - `unknown_error`：需要人工看 trace。
 
+## 学习降噪
+
+`learningIntent` 分为：
+
+- `explicit`：用户显式说“记住/记一下/remember”，允许 explicit capture 写入强记忆。
+- `implicit`：普通回复后学习，只保留 core 摘要、journal、materialize 等低污染链路，不再触发 profile LLM 强提取。
+- `journal_only`：只做日志记录，跳过长期画像提取。
+
+显式记忆默认仍受群白名单控制；需要允许白名单外显式记忆时开启：
+
+```env
+POST_REPLY_EXPLICIT_MEMORY_BYPASS_GROUP_ALLOWLIST=true
+```
+
+## Enrich 门禁
+
+默认预算：
+
+```env
+POST_REPLY_ENRICH_MAX_TURNS=12
+POST_REPLY_ENRICH_MAX_CHARS=6000
+POST_REPLY_ENRICH_MAX_WRITES=12
+```
+
+enrich 写入亲密度、任务记忆、群记忆、风格、黑话、自改进前会统一检查置信度、证据、scope、重复文本和敏感字段。drop/allow 结果写入 job trace，事件名为 `enrich_write_allowed` 或 `enrich_write_dropped`。
+
+轻量评测：
+
+```bash
+node scripts/eval-post-reply-learning.js
+node scripts/eval-post-reply-learning.js --case explicit-remember-like
+```
+
 ## 租约和恢复
 
 worker claim job 时写 `leaseOwner` 和 `leaseUntil`。`processing` job 只有在租约过期后才会被 stale recovery 重入队；没有租约的旧 job 仍按 `updatedAt` 和 `POST_REPLY_WORKER_STALE_PROCESSING_MS` 回退判断。
@@ -107,4 +142,3 @@ processing 长时间不动：
 1. 看 `oldestProcessingLeaseAgeMs`。
 2. 如果 worker 进程已不在且租约已过期，下一轮 worker tick 会自动 recovery。
 3. 如果 PID 文件 stale，重启 worker。
-

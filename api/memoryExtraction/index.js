@@ -23,6 +23,7 @@ const {
   getTopP,
   getMaxTokens,
   getRetries,
+  resolveLearningIntent,
   resolvePostReplyMemoryMode
 } = require('./runtimeConfig');
 const {
@@ -724,6 +725,7 @@ Rules:
 
 async function learnSomethingNew(userId, userText, botReply, options = {}) {
   const postReplyMemoryMode = resolvePostReplyMemoryMode(options);
+  const learningIntent = resolveLearningIntent(options);
   if (postReplyMemoryMode === 'off') return;
   const participants = extractParticipantsFromText(userText, botReply, { ...options, userId });
   const entities = extractEntitiesFromConversation(userText, botReply);
@@ -792,6 +794,7 @@ async function learnSomethingNew(userId, userText, botReply, options = {}) {
       }, userId, explicitType, explicitText, explicitMeta, options)], options);
     }
   }
+  if (learningIntent === 'journal_only' || learningIntent === 'implicit') return;
 
   const extractPrompt = `
 You are a long-term memory extractor. Return JSON only:

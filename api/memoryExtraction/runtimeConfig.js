@@ -62,6 +62,14 @@ function resolvePostReplyMemoryMode(options = {}) {
   return 'full';
 }
 
+function resolveLearningIntent(options = {}) {
+  const raw = String(options.learningIntent || options.learning_intent || '').trim().toLowerCase();
+  if (raw === 'explicit') return 'explicit';
+  if (raw === 'implicit') return 'implicit';
+  if (raw === 'journal_only' || raw === 'journal-only' || raw === 'journal') return 'journal_only';
+  return '';
+}
+
 module.exports = {
   ensureChatCompletionsUrl,
   normalizeTextContent,
@@ -72,5 +80,6 @@ module.exports = {
   getTopP,
   getMaxTokens,
   getRetries,
+  resolveLearningIntent,
   resolvePostReplyMemoryMode
 };
