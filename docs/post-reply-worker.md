@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-24 01:01 +08:00
+更新时间：2026-05-24 01:10 +08:00
 
 ## 最短操作路径
 
@@ -266,6 +266,8 @@ node scripts/rollback-post-reply-job.js --post-reply-job-id <jobId> --turn-ids t
 ```
 
 输出会分 `memory` 和 `selfImprovement` 展示 matched/changed/ids；apply 前会给 `memory_items.json` 建 snapshot，自改进事件会标记 `status=archived` 并重算 promoted rules / local skill guides。
+
+回滚报告的 `memory.summary.byCategory` 会区分 `task/group/style/jargon` 等 enrich 写入类型；`selfImprovement.summary` 会单独统计自改进事件。enrich 写入成功时也会在 trace 写 `enrich_write_ids`，便于从 job 追溯实际写入 id。
 
 ## 常用处理
 

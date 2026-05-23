@@ -98,14 +98,14 @@ module.exports = (async () => {
     };
     taskMemory.addTaskMemoryWithVectorBackfill = async (...args) => {
       calls.push({ type: 'task_vector', args });
-      return { ids: [] };
+      return { ids: ['task-write-id'], accepted: [{}], rejected: [] };
     };
     groupMemory.addGroupMemory = (...args) => {
       calls.push({ type: 'group', args });
     };
     groupMemory.addGroupMemoryWithVectorBackfill = async (...args) => {
       calls.push({ type: 'group_vector', args });
-      return { ids: [] };
+      return { ids: [`group-write-${calls.filter((item) => item.type === 'group_vector').length}`], accepted: [{}], rejected: [] };
     };
     vectorMemory.addMemoryItemsBatch = (...args) => {
       calls.push({ type: 'vector', args });
@@ -113,7 +113,7 @@ module.exports = (async () => {
     };
     vectorMemory.addMemoryItemsBatchWithVectorBackfill = async (...args) => {
       calls.push({ type: 'vector_backfill', args });
-      return { ids: [] };
+      return { ids: ['style-write-id', 'jargon-write-id'], accepted: [{}, {}], rejected: [] };
     };
 
     delete require.cache[require.resolve('../utils/postReplyWorkerRuntime')];
@@ -267,6 +267,7 @@ module.exports = (async () => {
 
     calls.length = 0;
     await processPostReplyJob({
+      jobId: 'enrich_trace_ids_job',
       userId: 'u1',
       question: 'hello world',
       finalReply: 'reply text',
@@ -295,6 +296,13 @@ module.exports = (async () => {
     assert.ok(calls.some((item) => item.type === 'vector_backfill'), 'enrich phase should store style/jargon vectors with backfill');
     assert.ok(calls.some((item) => item.type === 'self_store'), 'enrich phase should store self-improvement items');
     assert.ok(calls.some((item) => item.type === 'segment'), 'enrich phase should trigger threshold segmentation');
+    const { readPostReplyJobTrace } = require('../utils/postReplyWorker/jobTrace');
+    const enrichTraceWriteIds = readPostReplyJobTrace('enrich_trace_ids_job')
+      .filter((item) => item.event === 'enrich_write_ids')
+      .flatMap((item) => item.payload?.ids || []);
+    assert.ok(enrichTraceWriteIds.includes('task-write-id'), 'task write id should be traceable for rollback audit');
+    assert.ok(enrichTraceWriteIds.includes('style-write-id'), 'style write id should be traceable for rollback audit');
+    assert.ok(enrichTraceWriteIds.includes('jargon-write-id'), 'jargon write id should be traceable for rollback audit');
 
     calls.length = 0;
     const budgetResult = await processPostReplyJob({
@@ -330,6 +338,10 @@ module.exports = (async () => {
     assert.strictEqual(budgetResult.job.taskStates.enrich.result.writes.maxWrites, 2);
     assert.strictEqual(budgetResult.job.taskStates.enrich.result.writes.accepted, 2);
     assert.ok(budgetResult.job.taskStates.enrich.result.writes.dropped > 0, 'maxWrites should make later enrich writes visible as drops');
+    const budgetTraceWriteIds = readPostReplyJobTrace('enrich_budget_job')
+      .filter((item) => item.event === 'enrich_write_ids')
+      .flatMap((item) => item.payload?.ids || []);
+    assert.ok(budgetTraceWriteIds.includes('task-write-id'), 'task write id should be traceable for rollback audit');
 
     const circuitQueue = {
       recoverStaleProcessingJobs() {
