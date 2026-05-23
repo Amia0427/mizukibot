@@ -14,6 +14,8 @@
 
 运行状态更新 2026-05-24 00:31 +08:00：目标 11 首阶段落地，队列对 aggregate/dedupe/job/index 写入加短时目录锁；同 aggregate 并发 enqueue 会合并 turn，不再只返回旧 job；claim 与 merge 通过 job 锁避免旧 queued 快照回写覆盖 processing。
 
+运行状态更新 2026-05-24 00:38 +08:00：目标 14 首阶段落地，`artifacts/post-reply-eval/cases.jsonl` 扩到 20 个 case，覆盖显式/隐式/journal intent、enrich drop reason、maxWrites 和预算裁剪；新增 `tests/postReplyLearningEval.test.js` 纳入自动测试。
+
 ## 现状结论
 
 回复后学习链路已经从主回复热路径拆出：`api/runtimeV2/nodes/persist.js` 负责在回复完成后判定是否入队；`utils/postReplyJobQueue/` 用文件队列承载 `queued/processing/failed/done` 四状态；`utils/postReplyWorkerRuntime.js` 拉取 job，执行 `utils/postReplyWorker/processJob.js` 的 core/enrich 两阶段任务；`scripts/post-reply-worker.js` 作为独立子进程运行，并带 PID 文件、资源采样和 RSS 空闲回收。
@@ -193,6 +195,8 @@
 ### 14. 专项回归评测集
 
 目标：建立 post-reply 学习评测集，覆盖显式记忆、隐式聊天、群黑话、风格偏好、任务经验、错误撤销、重启恢复。
+
+进展 2026-05-24 00:38 +08:00：已建立 20 个轻量 case，并让 `scripts/eval-post-reply-learning.js` 支持 job intent、enrich gate 序列和 budget trimming 三类断言；`tests/postReplyLearningEval.test.js` 会要求 case 数量不少于 20 且全部通过。
 
 实施：
 - 新增 `artifacts/post-reply-eval/cases.jsonl`。

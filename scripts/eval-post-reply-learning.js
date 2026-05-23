@@ -6,6 +6,9 @@ const {
 const {
   createEnrichQualityGate
 } = require('../utils/postReplyWorker/enrichQualityGate');
+const {
+  trimTurnsForEnrichBudget
+} = require('../utils/postReplyWorker/enrichPhase');
 
 function parseArgs(argv = []) {
   const out = { caseId: 'all' };
@@ -34,18 +37,39 @@ function runCase(item) {
       expected: { learningIntent: item.job.learningIntent }
     };
   }
+  if (item.budget) {
+    const result = trimTurnsForEnrichBudget(item.budget.turns, item.budget.options || {});
+    const expected = item.expected || {};
+    const ok = Object.entries(expected).every(([key, value]) => {
+      if (key === 'turnIds') return JSON.stringify(result.turns.map((turn) => turn.turnId)) === JSON.stringify(value);
+      return result[key] === value;
+    });
+    return {
+      id: item.id,
+      ok,
+      actual: {
+        truncated: result.truncated,
+        selectedTurns: result.selectedTurns,
+        turnIds: result.turns.map((turn) => turn.turnId),
+        chars: result.chars
+      },
+      expected
+    };
+  }
   if (item.enrich) {
     const gate = createEnrichQualityGate({
-      userId: 'u_eval',
-      groupId: 'g_eval',
-      evidence: [{ turnId: 't_eval', userText: 'q', assistantText: 'r' }],
-      maxWrites: 4
+      userId: item.context?.userId ?? 'u_eval',
+      groupId: item.context?.groupId ?? 'g_eval',
+      evidence: item.context?.evidence ?? [{ turnId: 't_eval', userText: 'q', assistantText: 'r' }],
+      maxWrites: item.context?.maxWrites ?? 4
     });
-    const result = gate.assess(item.enrich);
+    const candidates = Array.isArray(item.enrich) ? item.enrich : [item.enrich];
+    const results = candidates.map((candidate) => gate.assess(candidate));
+    const result = results[results.length - 1] || { allow: false, reason: 'empty_case' };
     return {
       id: item.id,
       ok: result.allow === item.expected.allow && result.reason === item.expected.reason,
-      actual: { allow: result.allow, reason: result.reason },
+      actual: { allow: result.allow, reason: result.reason, results: results.map(({ allow, reason }) => ({ allow, reason })) },
       expected: item.expected
     };
   }

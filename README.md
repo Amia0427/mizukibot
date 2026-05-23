@@ -46,6 +46,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-24 00:31 +08:00：回复后学习队列新增 aggregate/dedupe/job/index 短时锁；并发 enqueue 同一 aggregate 会合并 turns，claim 后 stale merge 不会把旧 queued 快照写回。
 
+更新 2026-05-24 00:38 +08:00：回复后学习评测集扩到 20 个 case，覆盖 intent、enrich gate 和预算裁剪；`tests/postReplyLearningEval.test.js` 已纳入自动测试。
+
 更新 2026-05-23 23:45 +08:00：主回复模型默认固定走 Claude Messages 缓存协议，`buildMainModelRequest` 统一生成 `/v1/messages` 请求，不再为主回复注入 OpenAI `prompt_cache_key`；Claude 缓存断点由 `cache_control` 和 `anthropic-beta: prompt-caching-2024-07-31` 承担。
 
 更新 2026-05-23 23:55 +08:00：主回复 Claude Messages 链路默认注入 Anthropic 原生 `web_search_20250305` server tool；可用 `MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED=false` 关闭，诊断脚本会对照测试开启/关闭原生搜索的真实请求结果。
