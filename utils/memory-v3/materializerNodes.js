@@ -78,6 +78,26 @@ function createNodeFromEvent(event) {
     expiresAt: Number(event.expiresAt || payload.expiresAt || 0) || 0,
     lastConfirmedAt: Number(event.lastConfirmedAt || payload.lastConfirmedAt || 0) || 0,
     supersededBy: normalizeText(event.supersededBy || payload.supersededBy),
+    supersedes: Array.isArray(payload.supersedes)
+      ? payload.supersedes.map((item) => normalizeText(item)).filter(Boolean).slice(0, 16)
+      : [],
+    previousVersions: Array.isArray(payload.previousVersions)
+      ? payload.previousVersions
+          .map((item) => (item && typeof item === 'object'
+            ? {
+                id: normalizeText(item.id || item.nodeId),
+                text: normalizeText(item.text),
+                canonicalKey: normalizeText(item.canonicalKey),
+                source: normalizeText(item.source),
+                sourceKind: normalizeText(item.sourceKind),
+                updatedAt: Number(item.updatedAt || item.createdAt || 0) || 0
+              }
+            : null))
+          .filter((item) => item && (item.id || item.text))
+          .slice(0, 12)
+      : [],
+    versionRootId: normalizeText(payload.versionRootId || event.versionRootId),
+    archivedReason: normalizeText(payload.archivedReason || event.archivedReason),
     participants: Array.isArray(event.participants) ? event.participants : [],
     entities: Array.isArray(event.entities) ? event.entities : [],
     relations: Array.isArray(event.relations) ? event.relations : [],

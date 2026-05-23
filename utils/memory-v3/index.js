@@ -6,6 +6,17 @@ const { restoreSessionState } = require('./session');
 const { migrateLegacyMemoryToV3 } = require('./migration');
 const { diagnoseProjectionFreshness } = require('./diagnostics');
 const { runProfileMemoryMaintenance } = require('./profileMaintenance');
+const {
+  appendVersionedMemoryUpdate,
+  findSimilarMemoryForUpdate
+} = require('./versionedUpdate');
+const {
+  importMemoryFile,
+  splitMemoryImportChunks
+} = require('./fileImport');
+const {
+  getMemoryRecallPolicyResource
+} = require('./recallPolicyResource');
 
 module.exports = {
   appendMemoryEvent,
@@ -17,5 +28,10 @@ module.exports = {
   restoreSessionState,
   migrateLegacyMemoryToV3,
   diagnoseProjectionFreshness,
-  runProfileMemoryMaintenance
+  runProfileMemoryMaintenance,
+  appendVersionedMemoryUpdate,
+  findSimilarMemoryForUpdate,
+  importMemoryFile,
+  splitMemoryImportChunks,
+  getMemoryRecallPolicyResource
 };

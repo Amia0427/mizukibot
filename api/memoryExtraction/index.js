@@ -9,7 +9,9 @@ const {
 } = require('../../utils/memory');
 const { addTaskMemoryWithVectorBackfill } = require('../../utils/taskMemory');
 const { addGroupMemoryWithVectorBackfill } = require('../../utils/groupMemory');
-const { appendMemoryEvent } = require('../../utils/memory-v3/events');
+const {
+  appendVersionedMemoryUpdate
+} = require('../../utils/memory-v3');
 const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('../../utils/promptSecurity');
 const {
   ensureChatCompletionsUrl,
@@ -57,7 +59,7 @@ function appendV3LearnedMemoryEvent(userId, type, value, meta = {}, options = {}
   const eventType = status === 'active' || sourceKind === 'explicit'
     ? 'memory_confirmed'
     : 'memory_candidate_extracted';
-  void appendMemoryEvent({
+  void appendVersionedMemoryUpdate({
     type: eventType,
     userId,
     sessionKey: options.sessionKey,
@@ -99,7 +101,7 @@ async function flushPendingMemoryV3Events(accepted = []) {
     try {
       const nextStatus = String(item.status || event.status || '').trim().toLowerCase();
       const nextSourceKind = String(item.sourceKind || event.sourceKind || '').trim().toLowerCase();
-      await appendMemoryEvent({
+      await appendVersionedMemoryUpdate({
         ...event,
         type: nextStatus === 'active' || nextSourceKind === 'explicit'
           ? 'memory_confirmed'

@@ -33,11 +33,42 @@ function hasDailyJournalBlock(prompt = {}) {
   return ids.some((id) => String(id || '').includes('daily_journal'));
 }
 
+function summarizeMemoryTrace(trace = {}) {
+  const value = trace && typeof trace === 'object' ? trace : {};
+  return {
+    retrievalPath: value.retrieval_path || '',
+    retrievedCount: Math.max(0, Number(value.retrieved_count || 0) || 0),
+    droppedReasons: Array.isArray(value.dropped_reasons) ? value.dropped_reasons.slice(0, 12) : [],
+    injectedBlockIds: Array.isArray(value.injected_block_ids) ? value.injected_block_ids.slice(0, 12) : [],
+    hits: Array.isArray(value.hits)
+      ? value.hits.slice(0, 12).map((item) => ({
+          id: item.id || '',
+          source: item.source || '',
+          sourceKind: item.sourceKind || '',
+          category: item.category || '',
+          tags: Array.isArray(item.tags) ? item.tags.slice(0, 8) : [],
+          intent: item.intent || '',
+          status: item.status || '',
+          lifecycleStatus: item.lifecycleStatus || '',
+          scopeType: item.scopeType || '',
+          score: Number(item.score || 0) || 0,
+          matchMode: item.matchMode || '',
+          selectionReason: item.selectionReason || item.traceReason || '',
+          injected: item.injected === true,
+          preview: item.preview || ''
+        }))
+      : []
+  };
+}
+
 function summarizeObservation(row = {}) {
   const prompt = row.prompt && typeof row.prompt === 'object' ? row.prompt : {};
   const continuity = prompt.shortTermContinuity && typeof prompt.shortTermContinuity === 'object'
     ? prompt.shortTermContinuity
     : {};
+  const memoryTrace = row.memoryTrace && typeof row.memoryTrace === 'object'
+    ? row.memoryTrace
+    : (row.localMemory?.trace && typeof row.localMemory.trace === 'object' ? row.localMemory.trace : null);
   return {
     ts: row.recordedAt || '',
     userId: row.userId || '',
@@ -49,6 +80,7 @@ function summarizeObservation(row = {}) {
     hasDailyJournal: hasDailyJournalBlock(prompt),
     hasMemosRecall: prompt.hasMemosRecall === true,
     localMemoryEvidenceCount: Math.max(0, Number(row.localMemory?.evidenceCount || 0) || 0),
+    memoryTrace: summarizeMemoryTrace(memoryTrace || {}),
     memosUsed: row.memos?.used === true,
     drop: row.drop || {}
   };
@@ -88,5 +120,6 @@ function buildMainReplyContextPreview(options = {}) {
 module.exports = {
   buildMainReplyContextPreview,
   readRecentJsonLines,
+  summarizeMemoryTrace,
   summarizeObservation
 };
