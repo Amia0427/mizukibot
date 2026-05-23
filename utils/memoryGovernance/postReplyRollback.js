@@ -7,7 +7,13 @@ function createPostReplyLearningRollback(deps = {}) {
     nowTs,
     rebuildMemoryIndex,
     saveLibrary,
-    saveProjection
+    saveProjection,
+    readSelfImprovementEvents,
+    recomputeSelfImprovementPatterns,
+    writeSelfImprovementEvents,
+    writeSelfImprovementPatterns,
+    writeSelfImprovementPromotedRules,
+    writeSelfImprovementSkillGuides
   } = deps;
 
   function hasAnyPostReplyLearningRef(item = {}) {
@@ -52,6 +58,20 @@ function createPostReplyLearningRollback(deps = {}) {
     ]);
   }
 
+  function collectEventLearningJobIds(event = {}) {
+    return normalizeStringArray([
+      event.jobId,
+      event.postReplyJobId
+    ]);
+  }
+
+  function collectEventLearningTurnIds(event = {}) {
+    return normalizeStringArray([
+      event.turnId,
+      ...(Array.isArray(event.turnIds) ? event.turnIds : [])
+    ]);
+  }
+
   function itemMatchesPostReplyLearningRef(item = {}, criteria = {}) {
     if (!item || typeof item !== 'object') return false;
     const userId = normalizeText(criteria.userId);
@@ -70,6 +90,124 @@ function createPostReplyLearningRollback(deps = {}) {
     return jobMatched && turnMatched;
   }
 
+  function eventMatchesPostReplyLearningRef(event = {}, criteria = {}) {
+    if (!event || typeof event !== 'object') return false;
+    const userId = normalizeText(criteria.userId);
+    if (userId && normalizeText(event.userId) !== userId) return false;
+    const eventJobIds = collectEventLearningJobIds(event);
+    const eventTurnIds = collectEventLearningTurnIds(event);
+    if (eventJobIds.length === 0 && eventTurnIds.length === 0) return false;
+    const jobIds = normalizeStringArray([criteria.jobId, criteria.postReplyJobId]);
+    const turnIds = normalizeStringArray([
+      criteria.turnId,
+      ...(Array.isArray(criteria.turnIds) ? criteria.turnIds : [])
+    ]);
+    const jobMatched = jobIds.length === 0 || jobIds.some((id) => eventJobIds.includes(id));
+    const turnMatched = turnIds.length === 0 || turnIds.some((id) => eventTurnIds.includes(id));
+    return jobMatched && turnMatched;
+  }
+
+  function listSelfImprovementMatches(criteria = {}) {
+    if (typeof readSelfImprovementEvents !== 'function') return [];
+    return readSelfImprovementEvents()
+      .filter((event) => eventMatchesPostReplyLearningRef(event, criteria))
+      .map((event) => ({
+        id: String(event.id || '').trim(),
+        userId: String(event.userId || '').trim(),
+        status: String(event.status || 'open').trim() || 'open',
+        kind: String(event.kind || '').trim(),
+        summary: normalizeText(event.summary || '')
+      }))
+      .filter((event) => event.id);
+  }
+
+  function archiveSelfImprovementMatches(criteria = {}, options = {}) {
+    if (typeof readSelfImprovementEvents !== 'function' || typeof writeSelfImprovementEvents !== 'function') {
+      return {
+        matched: 0,
+        changed: 0,
+        ids: [],
+        items: []
+      };
+    }
+    const events = readSelfImprovementEvents();
+    const providedMatches = Array.isArray(options.matches) ? options.matches : [];
+    const matches = (providedMatches.length > 0
+      ? providedMatches
+      : events
+        .filter((event) => eventMatchesPostReplyLearningRef(event, criteria))
+        .map((event) => ({
+          id: String(event.id || '').trim(),
+          userId: String(event.userId || '').trim(),
+          status: String(event.status || 'open').trim() || 'open',
+          kind: String(event.kind || '').trim(),
+          summary: normalizeText(event.summary || '')
+        }))
+    ).filter((event) => event.id);
+    const activeIds = new Set(
+      matches
+        .filter((event) => normalizeText(event.status).toLowerCase() !== 'archived')
+        .map((event) => event.id)
+    );
+    if (activeIds.size === 0) {
+      return {
+        matched: matches.length,
+        changed: 0,
+        ids: matches.map((event) => event.id),
+        items: matches
+      };
+    }
+    const now = new Date().toISOString();
+    const reason = normalizeText(options.reason) || 'post_reply_learning_rollback';
+    const activeMatchIds = new Set(activeIds);
+    const nextEvents = events.map((event) => {
+      const eventId = String(event.id || '').trim();
+      if (activeMatchIds.has(eventId)) {
+        return {
+          ...event,
+          status: 'archived',
+          updatedAt: now,
+          rollback: {
+            reason,
+            jobIds: criteria.jobIds || [],
+            turnIds: criteria.turnIds || [],
+            rolledBackAt: now
+          }
+        };
+      }
+      if (providedMatches.length > 0 || !eventMatchesPostReplyLearningRef(event, criteria)) return event;
+      const matched = matches.find((item) => item.id === eventId);
+      if (!matched || normalizeText(matched.status).toLowerCase() === 'archived') return event;
+      activeMatchIds.add(eventId);
+      return {
+        ...event,
+        status: 'archived',
+        updatedAt: now,
+        rollback: {
+          reason,
+          jobIds: criteria.jobIds || [],
+          turnIds: criteria.turnIds || [],
+          rolledBackAt: now
+        }
+      };
+    });
+    if (typeof recomputeSelfImprovementPatterns === 'function') {
+      const recomputed = recomputeSelfImprovementPatterns(nextEvents);
+      writeSelfImprovementEvents(recomputed.events);
+      if (typeof writeSelfImprovementPatterns === 'function') writeSelfImprovementPatterns({ items: recomputed.patterns });
+      if (typeof writeSelfImprovementPromotedRules === 'function') writeSelfImprovementPromotedRules({ items: recomputed.promotedRules });
+      if (typeof writeSelfImprovementSkillGuides === 'function') writeSelfImprovementSkillGuides({ items: recomputed.skillGuides });
+    } else {
+      writeSelfImprovementEvents(nextEvents);
+    }
+    return {
+      matched: matches.length,
+      changed: activeIds.size,
+      ids: matches.map((event) => event.id),
+      items: matches
+    };
+  }
+
   function rollbackPostReplyLearning(options = {}) {
     const jobIds = normalizeStringArray([options.jobId, options.postReplyJobId]);
     const turnIds = normalizeStringArray([
@@ -80,13 +218,18 @@ function createPostReplyLearningRollback(deps = {}) {
       throw new Error('jobId, postReplyJobId, turnId, or turnIds is required');
     }
 
+    const criteria = {
+      ...options,
+      jobId: jobIds[0] || '',
+      postReplyJobId: jobIds[1] || options.postReplyJobId || '',
+      jobIds,
+      turnIds
+    };
+
     const library = loadLibrary();
-    const matches = library.items
+    const memoryMatches = library.items
       .filter((item) => itemMatchesPostReplyLearningRef(item, {
-        ...options,
-        jobId: jobIds[0] || '',
-        postReplyJobId: jobIds[1] || options.postReplyJobId || '',
-        turnIds
+        ...criteria
       }))
       .map((item) => ({
         id: String(item.id || '').trim(),
@@ -95,15 +238,29 @@ function createPostReplyLearningRollback(deps = {}) {
         text: normalizeText(item.text || item.canonicalText || '')
       }))
       .filter((item) => item.id);
+    const selfImprovementMatches = listSelfImprovementMatches(criteria);
+    const matches = memoryMatches;
 
     if (options.dryRun === true) {
       return {
         ok: true,
         dryRun: true,
-        matched: matches.length,
+        matched: memoryMatches.length + selfImprovementMatches.length,
         changed: 0,
-        ids: matches.map((item) => item.id),
-        items: matches
+        ids: memoryMatches.map((item) => item.id),
+        items: memoryMatches,
+        memory: {
+          matched: memoryMatches.length,
+          changed: 0,
+          ids: memoryMatches.map((item) => item.id),
+          items: memoryMatches
+        },
+        selfImprovement: {
+          matched: selfImprovementMatches.length,
+          changed: 0,
+          ids: selfImprovementMatches.map((item) => item.id),
+          items: selfImprovementMatches
+        }
       };
     }
 
@@ -112,15 +269,27 @@ function createPostReplyLearningRollback(deps = {}) {
         .filter((item) => normalizeText(item.status).toLowerCase() !== 'archived')
         .map((item) => item.id)
     );
+    const selfImprovementResult = archiveSelfImprovementMatches(criteria, {
+      reason: normalizeText(options.reason) || 'post_reply_learning_rollback',
+      matches: selfImprovementMatches
+    });
+
     if (activeIds.size === 0) {
       return {
         ok: true,
         dryRun: false,
-        matched: matches.length,
-        changed: 0,
+        matched: memoryMatches.length + selfImprovementResult.matched,
+        changed: selfImprovementResult.changed,
         snapshot: '',
-        ids: matches.map((item) => item.id),
-        items: matches
+        ids: memoryMatches.map((item) => item.id),
+        items: memoryMatches,
+        memory: {
+          matched: memoryMatches.length,
+          changed: 0,
+          ids: memoryMatches.map((item) => item.id),
+          items: memoryMatches
+        },
+        selfImprovement: selfImprovementResult
       };
     }
 
@@ -150,17 +319,27 @@ function createPostReplyLearningRollback(deps = {}) {
     return {
       ok: true,
       dryRun: false,
-      matched: matches.length,
-      changed: activeIds.size,
+      matched: memoryMatches.length + selfImprovementResult.matched,
+      changed: activeIds.size + selfImprovementResult.changed,
       snapshot,
       ids: matches.map((item) => item.id),
-      items: matches
+      items: matches,
+      memory: {
+        matched: memoryMatches.length,
+        changed: activeIds.size,
+        ids: memoryMatches.map((item) => item.id),
+        items: memoryMatches
+      },
+      selfImprovement: selfImprovementResult
     };
   }
 
   return {
+    collectEventLearningJobIds,
+    collectEventLearningTurnIds,
     collectItemLearningJobIds,
     collectItemLearningTurnIds,
+    eventMatchesPostReplyLearningRef,
     hasAnyPostReplyLearningRef,
     itemMatchesPostReplyLearningRef,
     rollbackPostReplyLearning

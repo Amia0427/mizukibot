@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-24 00:08 +08:00
+更新时间：2026-05-24 00:15 +08:00
 
 ## 启动
 
@@ -184,6 +184,18 @@ worker claim job 时写 `leaseOwner` 和 `leaseUntil`。每个关键 step 前后
 node scripts/cancel-post-reply-job.js --job-id <jobId> --reason manual_cancel --dry-run
 node scripts/cancel-post-reply-job.js --job-id <jobId> --reason manual_cancel --apply
 ```
+
+## 学习回滚
+
+按 job 或 turn 维度回滚误学内容，默认 dry-run，只归档相关 memory/self-improvement 事件，不删除原始文件：
+
+```bash
+node scripts/rollback-post-reply-job.js --job-id <jobId> --dry-run
+node scripts/rollback-post-reply-job.js --job-id <jobId> --turn-id <turnId> --apply --reason wrong_learning
+node scripts/rollback-post-reply-job.js --post-reply-job-id <jobId> --turn-ids turn-a,turn-b --dry-run
+```
+
+输出会分 `memory` 和 `selfImprovement` 展示 matched/changed/ids；apply 前会给 `memory_items.json` 建 snapshot，自改进事件会标记 `status=archived` 并重算 promoted rules / local skill guides。
 
 ## 常用处理
 

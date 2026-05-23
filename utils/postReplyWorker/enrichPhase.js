@@ -524,6 +524,11 @@ async function runEnrichPhase(job = {}, meta = {}) {
       return gateResult.allow;
     });
     storeExtractedSelfImprovementItems(job.userId, selfItems, {
+      jobId: meta.jobId,
+      postReplyJobId: meta.jobId,
+      turnId: meta.turnId,
+      turnIds: meta.turnIds,
+      sourceSessionId: meta.sourceSessionId || meta.sessionId,
       routePolicyKey: meta.routePolicyKey,
       topRouteType: meta.topRouteType,
       toolName: meta.toolName,

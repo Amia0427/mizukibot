@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
 const EVENT_KINDS = new Set(['error', 'correction', 'feature_request', 'strategy', 'knowledge_gap']);
-const EVENT_STATUSES = new Set(['open', 'promoted', 'ignored']);
+const EVENT_STATUSES = new Set(['open', 'promoted', 'ignored', 'archived']);
 const RULE_TYPES = new Set(['prefer', 'avoid']);
 
 function nowMs() {

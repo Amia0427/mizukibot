@@ -261,6 +261,7 @@ function createPatternEngine(deps = {}) {
     const bucket = new Map();
     for (const raw of normalizeArray(events)) {
       const event = normalizeStoredEvent(raw);
+      if (event.status === 'archived') continue;
       const ts = parseTime(event.updatedAt || event.createdAt);
       if (ts < cutoff) continue;
       const key = `${event.patternKey}|${event.kind}`;
@@ -279,6 +280,7 @@ function createPatternEngine(deps = {}) {
     }
 
     const normalizedEvents = normalizeArray(events).map((item) => normalizeStoredEvent(item)).map((event) => {
+      if (event.status === 'archived') return event;
       const key = `${event.patternKey}|${event.kind}`;
       if (promotedKeys.has(key)) return normalizeStoredEvent({ ...event, status: PROMOTED_STATUS });
       if (event.status === PROMOTED_STATUS) return normalizeStoredEvent({ ...event, status: 'open' });
