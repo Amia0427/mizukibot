@@ -91,10 +91,10 @@ function getPlannerMaxModelCalls(options = {}) {
     options.plannerMaxModelCalls
       ?? optionConfig.PLANNER_MAX_MODEL_CALLS
       ?? config.PLANNER_MAX_MODEL_CALLS
-      ?? 2,
-    2,
+      ?? 1,
     1,
-    3
+    1,
+    1
   );
 }
 

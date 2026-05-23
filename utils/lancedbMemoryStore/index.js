@@ -165,14 +165,28 @@ async function upsertTableRows(tableName = '', rows = [], options = {}) {
     }
     let mode = 'append';
     if (typeof table.mergeInsert === 'function') {
-      await table
-        .mergeInsert('id')
-        .whenMatchedUpdateAll()
-        .whenNotMatchedInsertAll()
-        .execute(cleanRows, { timeoutMs: Math.max(1000, Number(options.timeoutMs || config.MEMORY_LANCEDB_TIMEOUT_MS || 800) || 800) });
+      try {
+        await table
+          .mergeInsert('id')
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute(cleanRows, { timeoutMs: Math.max(1000, Number(options.timeoutMs || config.MEMORY_LANCEDB_TIMEOUT_MS || 800) || 800) });
+      } catch (error) {
+        if (!looksLikeMissingColumnError(error)) throw error;
+        await table
+          .mergeInsert('id')
+          .whenMatchedUpdateAll()
+          .whenNotMatchedInsertAll()
+          .execute(stripMetadataColumnsFromRows(cleanRows), { timeoutMs: Math.max(1000, Number(options.timeoutMs || config.MEMORY_LANCEDB_TIMEOUT_MS || 800) || 800) });
+      }
       mode = options.fullReconcile || options.deleteStaleRows ? 'merge_reconcile' : 'merge_insert';
     } else {
-      await table.add(cleanRows);
+      try {
+        await table.add(cleanRows);
+      } catch (error) {
+        if (!looksLikeMissingColumnError(error)) throw error;
+        await table.add(stripMetadataColumnsFromRows(cleanRows));
+      }
       mode = options.fullReconcile || options.deleteStaleRows ? 'append_reconcile' : 'append';
     }
     let staleDelete = { deleted: 0, skipped: true, reason: 'not_requested' };
@@ -233,12 +247,24 @@ function safeSearchFailure(reason = 'unavailable') {
 
 function looksLikeMissingColumnError(error = null) {
   const message = String(error?.message || error || '').toLowerCase();
-  return message.includes('column')
-    && (message.includes('not found') || message.includes('does not exist') || message.includes('no field') || message.includes('missing'));
+  return (message.includes('column') || message.includes('field'))
+    && (message.includes('not found') || message.includes('does not exist') || message.includes('no field') || message.includes('missing') || message.includes('not in schema'));
 }
 
 function legacySelectColumns() {
   return LANCEDB_SELECT_COLUMNS.filter((column) => !['category', 'tagsText', 'intent', 'privacyLevel'].includes(column));
+}
+
+function stripMetadataColumnsFromRows(rows = []) {
+  const metadataColumns = new Set(['category', 'tagsText', 'intent', 'privacyLevel']);
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    if (!row || typeof row !== 'object') return row;
+    const next = {};
+    for (const [key, value] of Object.entries(row)) {
+      if (!metadataColumns.has(key)) next[key] = value;
+    }
+    return next;
+  });
 }
 
 function stripMetadataFilterClauses(filterSql = '') {

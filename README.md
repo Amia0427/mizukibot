@@ -14,6 +14,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 19:10 +08:00：修复主模型/子代理流式 UTF-8 分片解码问题，避免中文字符跨 Buffer 边界时被替换成 `�` 并出现在 QQ 回复中。
 
+更新 2026-05-23 22:10 +08:00：默认关闭 MemOS 远端记忆召回；planner 模型调用限制为单轮，语义 refine 只保留诊断不再触发第二轮。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始
@@ -119,7 +121,8 @@ npm run linux:logs
 MemOS MCP 远端知识库召回：
 
 ```env
-MEMOS_MCP_ENABLED=true
+MEMOS_MCP_ENABLED=false
+MEMOS_REMOTE_RECALL_ENABLED=false
 MEMOS_API_KEY=...
 MEMOS_USER_ID=...
 MEMOS_CHANNEL=MODELSCOPE
@@ -130,8 +133,8 @@ MEMOS_KB_IDS=knowledgebase_id_1
 Planner refinement：
 
 ```env
-PLANNER_MAX_MODEL_CALLS=2
-PLANNER_SEMANTIC_REFINE_ENABLED=true
+PLANNER_MAX_MODEL_CALLS=1
+PLANNER_SEMANTIC_REFINE_ENABLED=false
 PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD=0.72
 PLANNER_ALLOW_MAIN_MODEL_FALLBACK=false
 ```

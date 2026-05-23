@@ -23,7 +23,9 @@
 
 - [x] **Step 1: 增加保守配置**
 
-新增 `PLANNER_MAX_MODEL_CALLS`、`PLANNER_SEMANTIC_REFINE_ENABLED`、`PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD`，默认最多 2 次调用，硬上限 3 次。
+更新 2026-05-23 22:10 +08:00：当前运行策略已关闭多轮 planner；`PLANNER_MAX_MODEL_CALLS` 固定为 1，`PLANNER_SEMANTIC_REFINE_ENABLED` 默认 false。语义 refine 字段仅用于诊断，不再触发第二轮 planner 请求。
+
+原计划新增 `PLANNER_MAX_MODEL_CALLS`、`PLANNER_SEMANTIC_REFINE_ENABLED`、`PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD`，当时默认最多 2 次调用、硬上限 3 次；该策略已被上面的单轮约束替代。
 
 - [x] **Step 2: 模型请求支持 refinement 上下文**
 

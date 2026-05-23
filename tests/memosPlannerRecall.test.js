@@ -64,6 +64,15 @@ module.exports = (async () => {
   const memos = require('../utils/memosPlannerRecall');
   memos.resetMemosRecallRuntimeState();
   assert.strictEqual(
+    memos.isMemosPlannerRecallEnabled({
+      config: {
+        MEMOS_MCP_ENABLED: true,
+        MEMOS_REMOTE_RECALL_ENABLED: false
+      }
+    }),
+    false
+  );
+  assert.strictEqual(
     memos.buildMemosRecallQuery('继续刚才的实现', {
       config: { MEMOS_RECALL_QUERY_MODE: 'compact' }
     }).query,
@@ -85,6 +94,7 @@ module.exports = (async () => {
   const recall = await memos.recallForPlanner('继续刚才的实现', {
     config: {
       MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
       MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_TOP_K: 2,
@@ -116,6 +126,7 @@ module.exports = (async () => {
   const localOnly = await memos.recallForPlanner('我是谁，刚才聊到哪了', {
     config: {
       MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
       MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: true,
       MEMOS_RECALL_SOURCE: 'knowledge_base',
@@ -130,6 +141,7 @@ module.exports = (async () => {
     routeMeta: { routePolicyKey: 'lore/worldbook' },
     config: {
       MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
       MEMOS_RECALL_ROUTE_ALLOWLIST: 'lore,worldbook',
       MEMOS_RECALL_TOP_K: 2,
@@ -158,6 +170,7 @@ module.exports = (async () => {
   const fileRecall = await memos.recallForPlanner('继续刚才的实现', {
     config: {
       MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
       MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_TOP_K: 2,
@@ -185,6 +198,7 @@ module.exports = (async () => {
   const missingKbIds = await memos.recallForPlanner('没有配置 kb 文件', {
     config: {
       MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
       MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_SOURCE: 'knowledge_base',
@@ -214,6 +228,7 @@ module.exports = (async () => {
   const kbIdWithNoKbDocumentsTool = await memosWithoutKbTool.recallForPlanner('工具缺失', {
     config: {
       MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
       MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_SOURCE: 'knowledge_base',
@@ -228,6 +243,7 @@ module.exports = (async () => {
   const missingKbTool = await memosWithoutKbTool.recallForPlanner('工具缺失', {
     config: {
       MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: true,
       MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
       MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED: false,
       MEMOS_RECALL_SOURCE: 'knowledge_base',
@@ -246,6 +262,15 @@ module.exports = (async () => {
   });
   assert.strictEqual(empty.used, false);
   assert.strictEqual(empty.rejectedReason, 'disabled');
+  const remoteDisabled = await memos.recallForPlanner('不会远端召回', {
+    config: {
+      MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: false
+    }
+  });
+  assert.strictEqual(remoteDisabled.used, false);
+  assert.strictEqual(remoteDisabled.rejectedReason, 'remote_recall_disabled');
+  assert.strictEqual(remoteDisabled.diagnostics.remoteRecallEnabled, false);
 
   assert.deepStrictEqual(memos.normalizeRecallItems({
     text: JSON.stringify({
@@ -342,6 +367,7 @@ module.exports = (async () => {
   const writeAttempt = await memos.addMessageToMemos({ text: '不应写入远端' }, {
     config: {
       MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: true,
       MEMOS_WRITE_ENABLED: true
     }
   });
@@ -376,6 +402,7 @@ module.exports = (async () => {
   memosAlias.resetMemosRecallRuntimeState();
   const aliasConfig = {
     MEMOS_MCP_ENABLED: true,
+    MEMOS_REMOTE_RECALL_ENABLED: true,
     MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
     MEMOS_RECALL_SOURCE: 'knowledge_base',
     MEMOS_KB_IDS: ['kb-default'],
@@ -416,6 +443,7 @@ module.exports = (async () => {
   memosCircuit.resetMemosRecallRuntimeState();
   const circuitConfig = {
     MEMOS_MCP_ENABLED: true,
+    MEMOS_REMOTE_RECALL_ENABLED: true,
     MEMOS_MCP_SERVER_NAME: 'memos-api-mcp',
     MEMOS_RECALL_SOURCE: 'search_memory',
     MEMOS_KB_IDS: ['kb-default'],

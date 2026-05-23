@@ -1,6 +1,7 @@
 function buildMemosRuntimeConfig({ pick, pickNum, pickBool, pickList }) {
   return {
     MEMOS_MCP_ENABLED: pickBool('MEMOS_MCP_ENABLED', false),
+    MEMOS_REMOTE_RECALL_ENABLED: pickBool('MEMOS_REMOTE_RECALL_ENABLED', false),
     MEMOS_MCP_SERVER_NAME: pick('MEMOS_MCP_SERVER_NAME', 'memos-api-mcp'),
     MEMOS_USER_ID: pick('MEMOS_USER_ID', ''),
     MEMOS_CHANNEL: pick('MEMOS_CHANNEL', 'MODELSCOPE'),
