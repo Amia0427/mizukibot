@@ -1,8 +1,10 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-23 22:37 +08:00
+更新时间：2026-05-23 22:58 +08:00
 
 运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
+
+运行状态更新 2026-05-23 22:58 +08:00：`POST_REPLY_WORKER_RSS_RECYCLE_MB` 默认改为 `0`，本地 `.env` 同步设置为 `0`，关闭独立 worker 的 RSS 空闲自回收，避免无人守护时进程因超过默认 1024MB 阈值退出。
 
 ## 现状结论
 

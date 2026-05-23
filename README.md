@@ -26,6 +26,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 22:48 +08:00：主回复延迟排查发现 planner HTTP 调用继承全局长超时并占用 inbound lock，新增 `PLANNER_REQUEST_TIMEOUT_MS=60000` 独立限制；超时后走规则 fallback，排查记录见 `docs/runtime-latency-diagnosis.md`。
 
+更新 2026-05-23 22:58 +08:00：关闭 post-reply worker 默认 RSS 空闲自回收，`POST_REPLY_WORKER_RSS_RECYCLE_MB` 默认改为 `0`，本地 `.env` 同步设置为 `0`，避免后台学习进程处理完任务后因内存阈值主动退出。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始
