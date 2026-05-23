@@ -266,12 +266,18 @@ function createPostReplyJobQueue(options = {}) {
         .map((item) => normalizeText(item))
         .filter(Boolean)
     );
+    const deferredPhases = new Set(
+      normalizeArray(options.deferredPhases || options.skipPhases)
+        .map((item) => normalizePhase(item))
+        .filter(Boolean)
+    );
     const indexedCandidates = indexStore.listEntries(['queued']);
     const candidateEntries = indexedCandidates
       ? indexedCandidates.filter((entry) => (
           (!entry.availableAt || entry.availableAt <= currentIso)
           && (!entry.nextRetryAt || entry.nextRetryAt <= currentIso)
           && !activeUserIds.has(normalizeText(entry.userId))
+          && !deferredPhases.has(normalizePhase(entry.phase))
         ))
       : [];
     const candidates = indexedCandidates
@@ -281,6 +287,7 @@ function createPostReplyJobQueue(options = {}) {
         (!job.availableAt || job.availableAt <= currentIso)
         && (!job.nextRetryAt || job.nextRetryAt <= currentIso)
         && !activeUserIds.has(normalizeText(job.userId))
+        && !deferredPhases.has(normalizePhase(job.phase))
       ));
     if (indexedCandidates && candidates.length < candidateEntries.length) {
       rebuildIndex({ dryRun: false });
