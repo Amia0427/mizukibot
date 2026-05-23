@@ -60,6 +60,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-24 01:27 +08:00：回复后学习 worker 支持开启 transient failed job 自动安全重放，`POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED` 默认关闭并按 tick 限流。
 
+更新 2026-05-24 02:16 +08:00：默认 `npm test` 改为逐测试文件子进程隔离，避免全量测试的模块缓存、全局 stub 和后台异步清理互相污染，同时不再依赖 8GB 单进程堆。
+
 更新 2026-05-23 23:45 +08:00：主回复模型默认固定走 Claude Messages 缓存协议，`buildMainModelRequest` 统一生成 `/v1/messages` 请求，不再为主回复注入 OpenAI `prompt_cache_key`；Claude 缓存断点由 `cache_control` 和 `anthropic-beta: prompt-caching-2024-07-31` 承担。
 
 更新 2026-05-23 23:55 +08:00：主回复 Claude Messages 链路默认注入 Anthropic 原生 `web_search_20250305` server tool；可用 `MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED=false` 关闭，诊断脚本会对照测试开启/关闭原生搜索的真实请求结果。
@@ -119,7 +121,6 @@ node scripts/eval-post-reply-learning.js
 
 ```bash
 npm test
-NODE_OPTIONS=--max-old-space-size=8192 npm test
 npm run lint
 npm run check:prompts
 npm run check:agent

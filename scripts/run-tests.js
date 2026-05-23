@@ -1,5 +1,6 @@
 ﻿const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 
 function listTestFiles(rootDir) {
   const discovered = [];
@@ -233,27 +234,29 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'messageHandlerInboundConcurrency.test.js')
 ];
 
-function restoreEnv(snapshot = {}) {
-  for (const key of Object.keys(process.env)) {
-    if (!(key in snapshot)) delete process.env[key];
+function applyDefaultTestEnv(env = process.env) {
+  if (env.RESOURCE_PRESSURE_ENABLED === undefined) {
+    env.RESOURCE_PRESSURE_ENABLED = 'false';
   }
-  for (const [key, value] of Object.entries(snapshot)) {
-    process.env[key] = value;
-  }
+  return env;
 }
 
-function clearProjectModuleCache() {
-  const projectRoot = path.resolve(__dirname, '..');
-  for (const cacheKey of Object.keys(require.cache)) {
-    if (!cacheKey.startsWith(projectRoot)) continue;
-    delete require.cache[cacheKey];
-  }
-}
+function runTestFile(file) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--unhandled-rejections=strict', file], {
+      cwd: path.resolve(__dirname, '..'),
+      env: applyDefaultTestEnv({ ...process.env }),
+      stdio: 'inherit',
+      windowsHide: true
+    });
 
-function applyDefaultTestEnv() {
-  if (process.env.RESOURCE_PRESSURE_ENABLED === undefined) {
-    process.env.RESOURCE_PRESSURE_ENABLED = 'false';
-  }
+    child.on('error', (error) => {
+      resolve({ ok: false, error });
+    });
+    child.on('exit', (code, signal) => {
+      resolve({ ok: code === 0, code, signal });
+    });
+  });
 }
 
 async function runAllTests() {
@@ -263,21 +266,17 @@ async function runAllTests() {
     ? discoveredTestFiles
     : testFiles.filter((candidate) => fs.existsSync(candidate));
   for (const file of runnableFiles) {
-    const envSnapshot = { ...process.env };
-    clearProjectModuleCache();
-    try {
-      applyDefaultTestEnv();
-      const out = require(file);
-      // Allow async test modules to export a Promise for hermetic integration tests.
-      if (out && typeof out.then === 'function') await out;
+    const result = await runTestFile(file);
+    if (result.ok) {
       console.log(`[test] pass ${path.basename(file)}`);
-    } catch (e) {
-      failed += 1;
-      console.error(`[test] fail ${path.basename(file)}`);
-      console.error('       ' + (e && e.stack ? e.stack : String(e)));
-    } finally {
-      clearProjectModuleCache();
-      restoreEnv(envSnapshot);
+      continue;
+    }
+    failed += 1;
+    console.error(`[test] fail ${path.basename(file)}`);
+    if (result.error) {
+      console.error('       ' + (result.error.stack || String(result.error)));
+    } else {
+      console.error(`       exited with code ${result.code}${result.signal ? ` signal ${result.signal}` : ''}`);
     }
   }
 

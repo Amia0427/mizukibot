@@ -273,9 +273,11 @@ module.exports = (async () => {
       .split(/\r?\n/)
       .filter(Boolean)
       .map((line) => JSON.parse(line));
-    assert.strictEqual(loggedCalls[0].prompt_caching.openai_prompt_cache_key, '');
-    assert.strictEqual(loggedCalls[0].usage.cache_read_input_tokens, 16);
-    assert.strictEqual(loggedCalls[0].usage.cache_creation_input_tokens, 2);
+    const loggedCall = loggedCalls.find((item) => item.id === calls[0].id);
+    assert.ok(loggedCall, 'model call log should include the completed Anthropic prompt cache request');
+    assert.strictEqual(loggedCall.prompt_caching.openai_prompt_cache_key, '');
+    assert.strictEqual(loggedCall.usage.cache_read_input_tokens, 16);
+    assert.strictEqual(loggedCall.usage.cache_creation_input_tokens, 2);
 
     attemptCount = 0;
     axios.post = async (_url, body, options = {}) => {

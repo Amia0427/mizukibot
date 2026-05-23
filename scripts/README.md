@@ -2,7 +2,7 @@
 
 ## Daily Use
 
-- `run-tests.js`：测试入口
+- `run-tests.js`：测试入口；更新 2026-05-24 02:16 +08:00，逐测试文件子进程隔离执行，避免全局 stub/env/模块缓存和后台异步任务跨测试污染
 - `check-agent.js`：LangGraph / agent 自检
 - `check-prompts.js`：prompt 资源检查
 - `console.js`：本地控制台入口
