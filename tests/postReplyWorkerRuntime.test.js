@@ -29,6 +29,7 @@ module.exports = (async () => {
     process.env.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = 'false';
     process.env.POST_REPLY_VECTOR_WATCHDOG_ENABLED = 'false';
     process.env.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED = 'false';
+    process.env.POST_REPLY_TRACE_DIR = require('path').join(require('os').tmpdir(), `mizuki-post-reply-runtime-trace-${process.pid}`);
     clearProjectCache();
 
     const memoryExtraction = require('../api/memoryExtraction');

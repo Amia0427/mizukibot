@@ -14,12 +14,16 @@ assert.strictEqual(classifyPostReplyJobError({ lastError: '503 temporarily unava
 assert.strictEqual(classifyPostReplyJobError({ lastError: '401 unauthorized' }), 'terminal');
 assert.strictEqual(classifyPostReplyJobError({ lastError: '403 forbidden' }), 'terminal');
 assert.strictEqual(classifyPostReplyJobError({ lastError: '404 not found' }), 'terminal');
+assert.strictEqual(classifyPostReplyJobError({ lastError: 'invalid job schema_version' }), 'schema');
+assert.strictEqual(classifyPostReplyJobError({ lastError: 'quality_gate low confidence' }), 'quality_gate');
+assert.strictEqual(classifyPostReplyJobError({ lastError: 'manual canceled' }), 'canceled');
 assert.strictEqual(isTransient({ lastError: 'timeout' }), true);
 assert.strictEqual(isTerminal({ lastError: 'unsupported model' }), true);
 
 const jobs = [
   { jobId: 'transient_1', phase: 'core', lastError: '429 too many requests' },
   { jobId: 'terminal_1', phase: 'core', lastError: '403 forbidden' },
+  { jobId: 'schema_1', phase: 'core', lastError: 'invalid job schema' },
   { jobId: 'unknown_1', phase: 'core', lastError: 'weird failure' }
 ];
 
@@ -28,8 +32,9 @@ assert.deepStrictEqual(transientPlan.map((item) => item.jobId), ['transient_1'])
 assert.strictEqual(transientPlan[0].requeueSafe, true);
 
 const allPlan = planRequeueJobs(jobs, { transientOnly: false, limit: 10 });
-assert.deepStrictEqual(allPlan.map((item) => item.errorClass), ['transient', 'terminal', 'unknown_error']);
+assert.deepStrictEqual(allPlan.map((item) => item.errorClass), ['transient', 'terminal', 'schema', 'unknown_error']);
 assert.strictEqual(allPlan.find((item) => item.jobId === 'terminal_1').requeueSafe, false);
+assert.strictEqual(allPlan.find((item) => item.jobId === 'schema_1').requeueSafe, false);
 
 assert.deepStrictEqual(parseArgs(['--apply', '--force', '--all', '--limit', '2']), {
   dryRun: false,

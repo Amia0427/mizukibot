@@ -276,7 +276,11 @@ function buildRuntimeStatusDiagnostic(options = {}) {
         pid: postReplyPidFile.pid,
         pidFileMatch: postReplyPidFile.status !== 'mismatch',
         processCount: workerProcesses.length,
-        queue: postReplyQueue.counts
+        queue: postReplyQueue.counts,
+        queueByPhase: postReplyQueue.countsByPhase,
+        failedByErrorClass: postReplyQueue.failedByErrorClass,
+        oldestQueuedAgeMs: postReplyQueue.oldestQueued?.availableAgeMs || 0,
+        oldestProcessingLeaseAgeMs: postReplyQueue.oldestProcessingLease?.leaseAgeMs || 0
       },
       activeBackgroundTasks: backgroundTasks.activeCount,
       staleBackgroundTasks: backgroundTasks.staleActiveCount,
@@ -325,11 +329,12 @@ function buildRuntimeStatusDiagnostic(options = {}) {
 function buildRuntimeStatusText(report = {}) {
   const summary = report.summary || {};
   const postQueue = summary.postReplyWorker?.queue || {};
+  const failedByErrorClass = summary.postReplyWorker?.failedByErrorClass || {};
   const langGraphV2 = summary.langGraphV2 || {};
   const lines = [
     `runtime: ${summary.overallStatus || 'unknown'} (${summary.signalCount || 0} signals)`,
     `main: ${summary.mainProcess?.status || 'unknown'} pid=${summary.mainProcess?.lockPid || 0} processes=${summary.mainProcess?.processCount || 0}`,
-    `post-reply: ${summary.postReplyWorker?.status || 'unknown'} pid=${summary.postReplyWorker?.pid || 0} processes=${summary.postReplyWorker?.processCount || 0} queue=queued:${postQueue.queued || 0} processing:${postQueue.processing || 0} failed:${postQueue.failed || 0}`,
+    `post-reply: ${summary.postReplyWorker?.status || 'unknown'} pid=${summary.postReplyWorker?.pid || 0} processes=${summary.postReplyWorker?.processCount || 0} queue=queued:${postQueue.queued || 0} processing:${postQueue.processing || 0} failed:${postQueue.failed || 0} oldestQueuedMs=${summary.postReplyWorker?.oldestQueuedAgeMs || 0}`,
     `background-tasks: active=${summary.activeBackgroundTasks || 0} stale=${summary.staleBackgroundTasks || 0}`,
     `langgraph-v2: checkpoints=${langGraphV2.checkpoints || 0} active=${langGraphV2.activeCheckpoints || 0} stale=${langGraphV2.staleRunningCheckpoints || 0} events=${langGraphV2.events || 0}`,
     `subagents: osProcesses=${summary.activeSubagentProcesses || 0} persistentWorkers=${summary.persistentSubagentWorkers || 0}`
@@ -337,6 +342,9 @@ function buildRuntimeStatusText(report = {}) {
   const journal = summary.journalHealth || {};
   if (Object.keys(journal).length > 0) {
     lines.push(`journal: users=${journal.users || 0} days=${journal.days || 0} summaries=${journal.summaryDays || 0} segments=${journal.segments || 0} v3Events=${journal.v3EpisodeEvents || 0} embeddingReady=${journal.embeddingReady || 0} pending=${journal.embeddingPending || 0} failed=${journal.embeddingFailed || 0}`);
+  }
+  if (Object.keys(failedByErrorClass).length > 0) {
+    lines.push(`post-reply-failed: ${Object.entries(failedByErrorClass).map(([key, value]) => `${key}:${value}`).join(' ')}`);
   }
   if (Array.isArray(report.signals) && report.signals.length > 0) {
     lines.push('signals:');

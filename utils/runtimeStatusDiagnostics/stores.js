@@ -1,4 +1,8 @@
 const path = require('path');
+const {
+  classifyPostReplyJobError
+} = require('../postReplyWorker/errorClassifier');
+
 function normalizeText(value = '') {
   return String(value || '').trim();
 }
@@ -206,34 +210,71 @@ function buildPostReplyQueueSummary({ queueDir, now, staleProcessingMs, safeRead
   const target = normalizePath(queueDir);
   const counts = {};
   const samples = {};
+  const countsByPhase = {};
+  const failedByErrorClass = {};
   const staleProcessingJobs = [];
+  const allJobs = [];
   for (const status of ['queued', 'processing', 'failed', 'done']) {
     const dir = path.join(target, status);
     const jobs = readJsonFilesFromDir(dir, { safeReadDir, safeReadJson }).map(({ filePath, data }) => {
       const updatedAtText = normalizeText(data.updatedAt || data.updated_at || data.createdAt || data.created_at);
       const updatedAtMs = Date.parse(updatedAtText);
+      const availableAtText = normalizeText(data.availableAt || data.available_at);
+      const availableAtMs = Date.parse(availableAtText);
+      const leaseUntilText = normalizeText(data.leaseUntil || data.lease_until);
+      const leaseUntilMs = Date.parse(leaseUntilText);
       const ageMs = Number.isFinite(updatedAtMs) ? Math.max(0, now - updatedAtMs) : 0;
+      const errorClass = normalizeText(data.errorClass || data.error_class) || classifyPostReplyJobError(data);
       return {
         jobId: normalizeText(data.jobId || data.id),
         file: path.basename(filePath),
         status,
         phase: normalizeText(data.phase),
+        schemaVersion: Math.max(0, normalizeNumber(data.schemaVersion || data.schema_version, 0)),
         userId: normalizeText(data.userId || data.user_id),
+        aggregateKey: normalizeText(data.aggregateKey || data.aggregate_key),
+        traceId: normalizeText(data.traceId || data.trace_id),
         attempt: Math.max(0, normalizeNumber(data.attempt, 0)),
         updatedAt: updatedAtText,
+        availableAt: availableAtText,
+        leaseOwner: normalizeText(data.leaseOwner || data.lease_owner),
+        leaseUntil: leaseUntilText,
+        leaseExpired: status === 'processing' && Number.isFinite(leaseUntilMs) && leaseUntilMs <= now,
+        availableAgeMs: Number.isFinite(availableAtMs) ? Math.max(0, now - availableAtMs) : 0,
+        leaseAgeMs: Number.isFinite(leaseUntilMs) ? Math.max(0, now - leaseUntilMs) : 0,
         ageMs,
         stale: status === 'processing' && ageMs > staleProcessingMs,
+        errorClass,
+        requeueSafe: data.requeueSafe === true || data.requeue_safe === true,
         lastError: normalizeText(data.lastError || data.error).slice(0, 240)
       };
     }).sort((a, b) => a.ageMs - b.ageMs);
     counts[status] = jobs.length;
     samples[status] = jobs.slice(0, status === 'done' ? 3 : 5);
+    for (const job of jobs) {
+      allJobs.push(job);
+      const phaseKey = job.phase || 'unknown';
+      countsByPhase[phaseKey] = (countsByPhase[phaseKey] || 0) + 1;
+      if (status === 'failed') {
+        failedByErrorClass[job.errorClass || 'unknown_error'] = (failedByErrorClass[job.errorClass || 'unknown_error'] || 0) + 1;
+      }
+    }
     staleProcessingJobs.push(...jobs.filter((job) => job.stale));
   }
+  const oldestQueued = allJobs
+    .filter((job) => job.status === 'queued')
+    .sort((a, b) => b.availableAgeMs - a.availableAgeMs)[0] || null;
+  const oldestProcessingLease = allJobs
+    .filter((job) => job.status === 'processing' && job.leaseUntil)
+    .sort((a, b) => b.leaseAgeMs - a.leaseAgeMs)[0] || null;
   return {
     queueDir: target,
     exists: readStat(target).exists,
     counts,
+    countsByPhase,
+    failedByErrorClass,
+    oldestQueued,
+    oldestProcessingLease,
     staleProcessingMs,
     staleProcessingCount: staleProcessingJobs.length,
     staleProcessingJobs,

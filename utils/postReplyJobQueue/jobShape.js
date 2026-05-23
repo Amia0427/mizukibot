@@ -5,8 +5,17 @@ const {
   normalizeArray,
   normalizeObject,
   normalizeText,
-  nowIso
+  nowIso,
+  stableHash
 } = require('./common');
+
+const POST_REPLY_JOB_SCHEMA_VERSION = 2;
+
+function normalizeStringArray(value) {
+  return normalizeArray(value)
+    .map((item) => normalizeText(item))
+    .filter(Boolean);
+}
 
 function normalizeCompletedTasks(value) {
   const source = normalizeObject(value, {});
@@ -85,6 +94,7 @@ function normalizeJob(job = {}) {
   const updatedAt = normalizeText(job.updatedAt) || createdAt;
   const routeMeta = normalizeObject(job.routeMeta, {});
   const phase = normalizePhase(job.phase);
+  const jobId = normalizeText(job.jobId) || makeJobId();
   const turns = normalizeArray(job.turns).map((item) => normalizeTurn(item)).filter((item) => item.question || item.finalReply);
   const fallbackTurn = normalizeTurn({
     question: job.question,
@@ -100,8 +110,17 @@ function normalizeJob(job = {}) {
   const firstQueuedAt = normalizeText(job.firstQueuedAt) || createdAt;
   const lastMergedAt = normalizeText(job.lastMergedAt) || updatedAt;
   const aggregateKey = normalizeText(job.aggregateKey);
+  const traceId = normalizeText(job.traceId || job.trace_id) || stableHash({
+    jobId,
+    aggregateKey,
+    userId: job.userId,
+    sessionKey: job.sessionKey,
+    createdAt
+  });
+  const sourceMessageIds = normalizeStringArray(job.sourceMessageIds || job.source_message_ids);
   return {
-    jobId: normalizeText(job.jobId) || makeJobId(),
+    schemaVersion: POST_REPLY_JOB_SCHEMA_VERSION,
+    jobId,
     type: normalizeText(job.type || 'post_reply') || 'post_reply',
     phase,
     aggregateKey,
@@ -134,6 +153,15 @@ function normalizeJob(job = {}) {
           dailyJournal: false
         },
     threadId: normalizeText(job.threadId),
+    traceId,
+    sourceMessageIds,
+    leaseOwner: normalizeText(job.leaseOwner || job.lease_owner),
+    leaseUntil: normalizeText(job.leaseUntil || job.lease_until),
+    cancelRequested: job.cancelRequested === true || job.cancel_requested === true,
+    canceledAt: normalizeText(job.canceledAt || job.canceled_at),
+    cancelReason: normalizeText(job.cancelReason || job.cancel_reason),
+    priority: Math.max(0, Number(job.priority) || 0),
+    tags: normalizeStringArray(job.tags),
     createdAt,
     updatedAt,
     availableAt: normalizeText(job.availableAt) || createdAt,
@@ -142,6 +170,8 @@ function normalizeJob(job = {}) {
     retryDelayMs: Math.max(0, Number(job.retryDelayMs) || 0),
     lastTransientErrorAt: normalizeText(job.lastTransientErrorAt),
     nextRetryAt: normalizeText(job.nextRetryAt),
+    errorClass: normalizeText(job.errorClass || job.error_class),
+    requeueSafe: job.requeueSafe === true || job.requeue_safe === true,
     completedTasks: normalizeCompletedTasks(job.completedTasks),
     completedAt: normalizeText(job.completedAt),
     failedAt: normalizeText(job.failedAt)
@@ -149,6 +179,7 @@ function normalizeJob(job = {}) {
 }
 
 module.exports = {
+  POST_REPLY_JOB_SCHEMA_VERSION,
   buildAggregateAvailableAt,
   computeAggregateKey,
   getPhaseMaxAttempts,
@@ -156,5 +187,6 @@ module.exports = {
   normalizeCompletedTasks,
   normalizeJob,
   normalizePhase,
+  normalizeStringArray,
   normalizeTurn
 };

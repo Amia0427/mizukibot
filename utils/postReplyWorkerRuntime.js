@@ -17,6 +17,12 @@ const {
 } = require('./postReplyWorker/enrichPhase');
 const { processPostReplyJob } = require('./postReplyWorker/processJob');
 const {
+  isTerminalPostReplyError
+} = require('./postReplyWorker/errorClassifier');
+const {
+  appendPostReplyJobTrace
+} = require('./postReplyWorker/jobTrace');
+const {
   isTransientPostReplyError,
   logStructured,
   normalizeArray,
@@ -148,11 +154,6 @@ function createPostReplyWorkerRuntime(options = {}) {
       : Math.max(0, Number(config.POST_REPLY_CORE_CIRCUIT_COOLDOWN_MS) || 0);
   }
 
-  function isTerminalPostReplyError(errorText = '') {
-    const value = String(errorText || '').toLowerCase();
-    return /(401|403|404|forbidden|unauthorized|not found|model not supported|unsupported model)/.test(value);
-  }
-
   function canRunPhase(job = {}) {
     const key = getCircuitKey(job);
     const state = normalizeObject(phaseCircuitState.get(key), {});
@@ -264,9 +265,16 @@ function createPostReplyWorkerRuntime(options = {}) {
 
   function tryClaimJob() {
     const staleBefore = Date.now() - staleProcessingMs;
-    queue.recoverStaleProcessingJobs({ staleBefore });
+    const recovered = queue.recoverStaleProcessingJobs({ staleBefore });
+    for (const recoveredJob of normalizeArray(recovered)) {
+      appendPostReplyJobTrace(recoveredJob, 'job_recovered_stale', {
+        staleBefore: new Date(staleBefore).toISOString()
+      });
+    }
     return queue.claimNextJob(new Date(), {
-      activeUserIds: getActiveUserIds()
+      activeUserIds: getActiveUserIds(),
+      leaseOwner: `post-reply-worker:${process.pid}`,
+      leaseMs: staleProcessingMs
     });
   }
 
@@ -293,21 +301,38 @@ function createPostReplyWorkerRuntime(options = {}) {
         reason: 'circuit_open',
         jobId: job.jobId
       });
-      return queue.markDone(job, {
+      appendPostReplyJobTrace(job, 'job_skipped', {
+        reason: 'circuit_open'
+      });
+      const skipped = queue.markDone(job, {
         lastError: 'skipped:circuit_open'
       });
+      appendPostReplyJobTrace(skipped, 'job_done', {
+        skipped: true,
+        reason: 'circuit_open'
+      });
+      return skipped;
     }
     activeCount += 1;
     lastActiveAt = Date.now();
     if (activeUserId) activeUserIds.add(activeUserId);
 
     try {
+      appendPostReplyJobTrace(job, 'job_started', {
+        activeCount,
+        phase,
+        attempt: Number(job.attempt || 0) || 0
+      });
       const processResult = await processJobImpl(job, {
         ...options,
         queue: progressQueue
       });
       recordPhaseSuccess(job);
       const completed = queue.markDone(processResult?.job || job);
+      appendPostReplyJobTrace(completed, 'job_done', {
+        turns: normalizeArray(completed.turns).length,
+        attempt: completed.attempt
+      });
       logStructured(phase === 'core' ? 'post_reply_core_completed' : 'post_reply_enrich_completed', {
         jobId: completed.jobId,
         dedupeKey: completed.dedupeKey,
@@ -315,12 +340,25 @@ function createPostReplyWorkerRuntime(options = {}) {
         turns: normalizeArray(completed.turns).length,
         post_reply_worker_active: Math.max(1, activeCount)
       });
-      if (phase === 'core') enqueueEnrichJob(completed);
+      if (phase === 'core') {
+        const enrichJob = enqueueEnrichJob(completed);
+        if (enrichJob) {
+          appendPostReplyJobTrace(enrichJob, 'job_enqueued', {
+            sourceJobId: completed.jobId,
+            phase: 'enrich'
+          });
+        }
+      }
       return completed;
     } catch (error) {
       const errorText = error?.message || error;
       if (isTerminalPostReplyError(errorText)) {
         const failed = queue.markFailed(job, errorText);
+        appendPostReplyJobTrace(failed, 'job_failed', {
+          terminal: true,
+          errorClass: failed.errorClass,
+          error: errorText
+        });
         logStructured('post_reply_terminal_error', {
           phase,
           jobId: failed.jobId,
@@ -337,6 +375,12 @@ function createPostReplyWorkerRuntime(options = {}) {
         retryDelayMs,
         lastTransientErrorAt: retryDelayMs > 0 ? new Date().toISOString() : latestJob.lastTransientErrorAt
       }, error?.message || error);
+      appendPostReplyJobTrace(result.job, result.retried ? 'job_retry_scheduled' : 'job_failed', {
+        retried: result.retried,
+        retryDelayMs,
+        errorClass: result.job?.errorClass,
+        error: errorText
+      });
       console.error('[post-reply-worker] job failed', {
         jobId: job.jobId,
         dedupeKey: job.dedupeKey,

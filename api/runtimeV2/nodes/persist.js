@@ -488,6 +488,9 @@ function createPersistNode(deps = {}) {
       addProfileItem(request.userId, 'recent_topics', String(request.question || '').slice(0, 20), 12);
       if (shouldEnqueuePostReplyJob) {
         const routeMeta = pickRouteMetaForPostReplyJob(request.routeMeta);
+        const createdAtIso = new Date(now).toISOString();
+        const routeMessageId = normalizeText(routeMeta.messageId || routeMeta.message_id);
+        const sourceMessageIds = [routeMessageId].filter(Boolean);
         const aggregateKey = buildCoreAggregateKey({
           userId: normalizedUserId,
           sessionKey: String(request.sessionKey || '').trim(),
@@ -497,18 +500,18 @@ function createPersistNode(deps = {}) {
           turnId: buildPostReplyTurnId({
             routeMeta,
             sessionKey: request.sessionKey,
-            createdAt: new Date(now).toISOString(),
+            createdAt: createdAtIso,
             userContent,
             finalReply
           }),
           question: userContent,
           finalReply,
-          createdAt: new Date(now).toISOString(),
+          createdAt: createdAtIso,
           evidence: buildPostReplyTurnEvidence({
             routeMeta,
             userContent,
             finalReply,
-            createdAt: new Date(now).toISOString(),
+            createdAt: createdAtIso,
             routePolicyKey: request.routePolicyKey,
             topRouteType: request.topRouteType
           }),
@@ -526,6 +529,12 @@ function createPersistNode(deps = {}) {
             compactionLevel: String(state.memory?.contextStats?.compactionLevel || state.memory?.mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
           }
         };
+        const traceId = stableHash({
+          aggregateKey,
+          turnId: coreTurn.turnId,
+          threadId: String(state.thread?.threadId || '').trim(),
+          createdAt: createdAtIso
+        });
         try {
           const existingQueuedCoreJob = typeof postReplyJobQueue.findQueuedJobByAggregateKey === 'function'
             ? postReplyJobQueue.findQueuedJobByAggregateKey(aggregateKey, 'core')
@@ -540,6 +549,9 @@ function createPersistNode(deps = {}) {
                       contextStats: coreTurn.contextStats,
                       lastMergedAt: coreTurn.createdAt,
                       turns: [coreTurn],
+                      traceId: existingQueuedCoreJob.traceId || traceId,
+                      sourceMessageIds: Array.from(new Set(normalizeArray(existingQueuedCoreJob.sourceMessageIds).concat(sourceMessageIds))),
+                      tags: Array.from(new Set(normalizeArray(existingQueuedCoreJob.tags).concat(['runtime_v2_persist', 'core']))),
                       tasks: {
                         memoryLearning: Boolean(existingQueuedCoreJob.tasks?.memoryLearning) || (shouldRunGroupScopedPostReplyTasks && shouldLearn),
                         selfImprovement: Boolean(existingQueuedCoreJob.tasks?.selfImprovement) || (shouldRunGroupScopedPostReplyTasks && shouldLearnSelfImprovementValue),
@@ -567,6 +579,10 @@ function createPersistNode(deps = {}) {
                 routePolicyKey: String(request.routePolicyKey || '').trim(),
                 topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),
                 routeMeta,
+                traceId,
+                sourceMessageIds,
+                priority: shouldLearn ? 10 : 0,
+                tags: ['runtime_v2_persist', 'core'],
                 sessionKey: String(request.sessionKey || '').trim(),
                 continuitySnapshot: coreTurn.continuitySnapshot,
                 contextStats: coreTurn.contextStats,

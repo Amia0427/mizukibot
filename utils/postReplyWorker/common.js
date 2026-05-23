@@ -1,4 +1,7 @@
 const config = require('../../config');
+const {
+  isTransientPostReplyError
+} = require('./errorClassifier');
 
 function normalizePhase(value = '') {
   const phase = String(value || '').trim().toLowerCase();
@@ -12,12 +15,6 @@ function logStructured(event = '', payload = {}) {
 function isRateLimitError(errorText = '') {
   const value = String(errorText || '').toLowerCase();
   return /(429|rate limit|too many requests)/.test(value);
-}
-
-function isTransientPostReplyError(errorText = '') {
-  const value = String(errorText || '').toLowerCase();
-  return isRateLimitError(value)
-    || /(408|425|500|502|503|504|timeout|timed out|temporarily unavailable|econnreset|etimedout|network)/.test(value);
 }
 
 function normalizeObject(value, fallback = {}) {
