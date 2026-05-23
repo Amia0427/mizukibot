@@ -12,6 +12,12 @@ const {
   mergeLearningIntent,
   normalizeLearningIntent
 } = require('../postReplyWorker/learningIntent');
+const {
+  TASK_KEYS,
+  normalizeCompletedTasksCompat,
+  normalizeTaskStates,
+  resetTaskState
+} = require('../postReplyWorker/taskState');
 
 const POST_REPLY_JOB_SCHEMA_VERSION = 2;
 
@@ -22,26 +28,32 @@ function normalizeStringArray(value) {
 }
 
 function normalizeCompletedTasks(value) {
-  const source = normalizeObject(value, {});
-  const out = {};
-  for (const [key, taskValue] of Object.entries(source)) {
-    const normalizedKey = normalizeText(key);
-    if (normalizedKey) out[normalizedKey] = taskValue === true;
-  }
-  return out;
+  return normalizeCompletedTasksCompat(value);
 }
 
 function mergeCompletedTasksForQueuedPatch(current = {}, patch = {}, incomingTurns = []) {
-  const completed = normalizeCompletedTasks(current.completedTasks);
+  const completed = normalizeCompletedTasksCompat(current.completedTasks, current.taskStates);
   if (incomingTurns.length === 0) return completed;
   const patchedTasks = normalizeObject(patch.tasks, {});
-  const keys = ['memoryLearning', 'selfImprovement', 'dailyJournal', 'memoryEvent', 'materialize', 'vectorMaintenance', 'memoryQualityAudit', 'enrich'];
-  for (const key of keys) {
+  for (const key of TASK_KEYS) {
     if (patchedTasks[key] === true || completed[key] === true) {
       completed[key] = false;
     }
   }
   return completed;
+}
+
+function mergeTaskStatesForQueuedPatch(current = {}, patch = {}, incomingTurns = []) {
+  const taskStates = normalizeTaskStates(current.taskStates, current.completedTasks);
+  if (incomingTurns.length === 0) return taskStates;
+  const completed = normalizeCompletedTasksCompat(current.completedTasks, current.taskStates);
+  const patchedTasks = normalizeObject(patch.tasks, {});
+  for (const key of TASK_KEYS) {
+    if (patchedTasks[key] === true || completed[key] === true) {
+      taskStates[key] = resetTaskState(taskStates[key]);
+    }
+  }
+  return taskStates;
 }
 
 function normalizePhase(value = '') {
@@ -150,6 +162,8 @@ function normalizeJob(job = {}) {
   const sourceMessageIds = normalizeStringArray(job.sourceMessageIds || job.source_message_ids);
   const learningIntent = normalizeLearningIntent(job.learningIntent || job.learning_intent);
   const rawEnrichBudget = normalizeObject(job.enrichBudget || job.enrich_budget, {});
+  const taskStates = normalizeTaskStates(job.taskStates || job.task_states, job.completedTasks);
+  const completedTasks = normalizeCompletedTasksCompat(job.completedTasks, taskStates);
   return {
     schemaVersion: POST_REPLY_JOB_SCHEMA_VERSION,
     jobId,
@@ -212,7 +226,8 @@ function normalizeJob(job = {}) {
     nextRetryAt: normalizeText(job.nextRetryAt),
     errorClass: normalizeText(job.errorClass || job.error_class),
     requeueSafe: job.requeueSafe === true || job.requeue_safe === true,
-    completedTasks: normalizeCompletedTasks(job.completedTasks),
+    completedTasks,
+    taskStates,
     completedAt: normalizeText(job.completedAt),
     failedAt: normalizeText(job.failedAt)
   };
@@ -225,6 +240,7 @@ module.exports = {
   getPhaseMaxAttempts,
   mergeLearningIntent,
   mergeCompletedTasksForQueuedPatch,
+  mergeTaskStatesForQueuedPatch,
   mergeTurnsUnique,
   normalizeCompletedTasks,
   normalizeJob,

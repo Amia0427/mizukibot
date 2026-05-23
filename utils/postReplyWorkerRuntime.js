@@ -379,7 +379,7 @@ function createPostReplyWorkerRuntime(options = {}) {
     } catch (error) {
       const errorText = error?.message || error;
       if (isTerminalPostReplyError(errorText)) {
-        const failed = queue.markFailed(job, errorText);
+        const failed = queue.markFailed(latestJob, errorText);
         appendPostReplyJobTrace(failed, 'job_failed', {
           terminal: true,
           errorClass: failed.errorClass,

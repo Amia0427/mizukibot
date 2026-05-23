@@ -22,10 +22,14 @@ const {
   isTaskCompleted,
   logStructured,
   markTaskCompleted,
+  markTaskFailed,
+  markTaskFailedNonFatal,
+  markTaskStarted,
   normalizeArray,
   normalizeCompletedTasks,
   normalizeObject,
   normalizePhase,
+  normalizeTaskStates,
   normalizeText
 } = require('./common');
 
@@ -82,8 +86,9 @@ function buildLearningMeta(job = {}) {
 async function processPostReplyJob(job = {}, deps = {}) {
   let currentJob = {
     ...job,
-    completedTasks: normalizeCompletedTasks(job.completedTasks)
+    taskStates: normalizeTaskStates(job.taskStates, job.completedTasks)
   };
+  currentJob.completedTasks = normalizeCompletedTasks(job.completedTasks, currentJob.taskStates);
   const tasks = normalizeObject(job.tasks, {});
   const meta = buildLearningMeta(job);
   const phase = normalizePhase(job.phase);
@@ -102,6 +107,43 @@ async function processPostReplyJob(job = {}, deps = {}) {
     topRouteType: normalizeText(job.topRouteType)
   };
   const trace = (event, payload = {}) => appendPostReplyJobTrace(currentJob, event, payload);
+  const startTask = (taskKey = '', step = '') => {
+    const startedAt = new Date().toISOString();
+    currentJob = markTaskStarted(currentJob, deps, taskKey, {
+      startedAt,
+      step
+    });
+    return {
+      taskKey,
+      step,
+      startedAt,
+      startedMs: Date.now()
+    };
+  };
+  const completeTask = (taskRun = {}, options = {}) => {
+    currentJob = markTaskCompleted(currentJob, deps, taskRun.taskKey, {
+      ...options,
+      status: options.status || 'done',
+      startedAt: taskRun.startedAt,
+      completedAt: new Date().toISOString(),
+      durationMs: Math.max(0, Date.now() - Number(taskRun.startedMs || Date.now())),
+      step: taskRun.step
+    });
+    return currentJob;
+  };
+  const failTask = (taskRun = {}, error = '', options = {}) => {
+    const errorText = error?.message || error;
+    const patch = {
+      startedAt: taskRun.startedAt,
+      completedAt: new Date().toISOString(),
+      durationMs: Math.max(0, Date.now() - Number(taskRun.startedMs || Date.now())),
+      step: taskRun.step
+    };
+    currentJob = options.nonFatal
+      ? markTaskFailedNonFatal(currentJob, deps, taskRun.taskKey, errorText, patch)
+      : markTaskFailed(currentJob, deps, taskRun.taskKey, errorText, patch);
+    return currentJob;
+  };
   const heartbeatAndCheckCancel = (step = '') => {
     const queue = deps.queue;
     const latest = queue && typeof queue.readProcessingJob === 'function'
@@ -146,9 +188,16 @@ async function processPostReplyJob(job = {}, deps = {}) {
     heartbeatAndCheckCancel('learnSomethingNew');
     trace('step_start', { step: 'learnSomethingNew', learningIntent: meta.learningIntent });
     logStructured('post_reply_step_start', { ...traceBase, step: 'learnSomethingNew', learningIntent: meta.learningIntent });
-    await learnSomethingNew(job.userId, learningConversation.userText, learningConversation.botReply, workerTaskOptions);
+    const taskRun = startTask('memoryLearning', 'learnSomethingNew');
+    try {
+      await learnSomethingNew(job.userId, learningConversation.userText, learningConversation.botReply, workerTaskOptions);
+    } catch (error) {
+      failTask(taskRun, error);
+      trace('step_failed', { step: 'learnSomethingNew', error: error?.message || error });
+      throw error;
+    }
     logStructured('post_reply_step_done', { ...traceBase, step: 'learnSomethingNew' });
-    currentJob = markTaskCompleted(currentJob, deps, 'memoryLearning');
+    currentJob = completeTask(taskRun);
     trace('step_done', { step: 'learnSomethingNew' });
     heartbeatAndCheckCancel('learnSomethingNew');
   }
@@ -157,9 +206,16 @@ async function processPostReplyJob(job = {}, deps = {}) {
     heartbeatAndCheckCancel('learnSelfImprovement');
     trace('step_start', { step: 'learnSelfImprovement' });
     logStructured('post_reply_step_start', { ...traceBase, step: 'learnSelfImprovement' });
-    await learnSelfImprovement(job.userId, job.question, job.finalReply, workerTaskOptions);
+    const taskRun = startTask('selfImprovement', 'learnSelfImprovement');
+    try {
+      await learnSelfImprovement(job.userId, job.question, job.finalReply, workerTaskOptions);
+    } catch (error) {
+      failTask(taskRun, error);
+      trace('step_failed', { step: 'learnSelfImprovement', error: error?.message || error });
+      throw error;
+    }
     logStructured('post_reply_step_done', { ...traceBase, step: 'learnSelfImprovement' });
-    currentJob = markTaskCompleted(currentJob, deps, 'selfImprovement');
+    currentJob = completeTask(taskRun);
     trace('step_done', { step: 'learnSelfImprovement' });
     heartbeatAndCheckCancel('learnSelfImprovement');
   }
@@ -168,35 +224,42 @@ async function processPostReplyJob(job = {}, deps = {}) {
     heartbeatAndCheckCancel('appendDailyJournalEntry');
     trace('step_start', { step: 'appendDailyJournalEntry' });
     logStructured('post_reply_step_start', { ...traceBase, step: 'appendDailyJournalEntry' });
-    await appendDailyJournalEntry(
-      job.userId,
-      job.question,
-      job.finalReply,
-      normalizeObject(job.userInfo, {}),
-      {
-        segmentNow: phase === 'enrich'
-          ? config.POST_REPLY_DAILY_JOURNAL_SEGMENT_NOW === true
-          : false,
-        throwOnError: true,
-        sessionKey: normalizeText(job.sessionKey),
-        sourceSessionId: normalizeText(meta.sourceSessionId || job.sourceSessionId || job.routeMeta?.sessionId || job.routeMeta?.session_id),
-        jobId: normalizeText(job.jobId),
-        postReplyJobId: normalizeText(job.jobId),
-        turnId: normalizeText(meta.turnId),
-        turnIds: normalizeArray(meta.turnIds).map((item) => normalizeText(item)).filter(Boolean),
-        evidence: normalizeArray(meta.evidence),
-        routePolicyKey: normalizeText(job.routePolicyKey),
-        topRouteType: normalizeText(job.topRouteType),
-        routeMeta: normalizeObject(job.routeMeta, {}),
-        continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
-        contextStats: normalizeObject(job.contextStats, {}),
-        groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
-        channelId: normalizeText(job.routeMeta?.channelId || job.routeMeta?.channel_id),
-        taskType: normalizeText(job.routeMeta?.taskType || job.routeMeta?.task_type)
-      }
-    );
+    const taskRun = startTask('dailyJournal', 'appendDailyJournalEntry');
+    try {
+      await appendDailyJournalEntry(
+        job.userId,
+        job.question,
+        job.finalReply,
+        normalizeObject(job.userInfo, {}),
+        {
+          segmentNow: phase === 'enrich'
+            ? config.POST_REPLY_DAILY_JOURNAL_SEGMENT_NOW === true
+            : false,
+          throwOnError: true,
+          sessionKey: normalizeText(job.sessionKey),
+          sourceSessionId: normalizeText(meta.sourceSessionId || job.sourceSessionId || job.routeMeta?.sessionId || job.routeMeta?.session_id),
+          jobId: normalizeText(job.jobId),
+          postReplyJobId: normalizeText(job.jobId),
+          turnId: normalizeText(meta.turnId),
+          turnIds: normalizeArray(meta.turnIds).map((item) => normalizeText(item)).filter(Boolean),
+          evidence: normalizeArray(meta.evidence),
+          routePolicyKey: normalizeText(job.routePolicyKey),
+          topRouteType: normalizeText(job.topRouteType),
+          routeMeta: normalizeObject(job.routeMeta, {}),
+          continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
+          contextStats: normalizeObject(job.contextStats, {}),
+          groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
+          channelId: normalizeText(job.routeMeta?.channelId || job.routeMeta?.channel_id),
+          taskType: normalizeText(job.routeMeta?.taskType || job.routeMeta?.task_type)
+        }
+      );
+    } catch (error) {
+      failTask(taskRun, error);
+      trace('step_failed', { step: 'appendDailyJournalEntry', error: error?.message || error });
+      throw error;
+    }
     logStructured('post_reply_step_done', { ...traceBase, step: 'appendDailyJournalEntry' });
-    currentJob = markTaskCompleted(currentJob, deps, 'dailyJournal');
+    currentJob = completeTask(taskRun);
     trace('step_done', { step: 'appendDailyJournalEntry' });
     heartbeatAndCheckCancel('appendDailyJournalEntry');
   }
@@ -206,29 +269,36 @@ async function processPostReplyJob(job = {}, deps = {}) {
       heartbeatAndCheckCancel('appendVersionedMemoryUpdate');
       trace('step_start', { step: 'appendVersionedMemoryUpdate' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'appendVersionedMemoryUpdate' });
-      await appendVersionedMemoryUpdate({
-        type: 'memory_confirmed',
-        userId: job.userId,
-        sessionKey: normalizeText(job.sessionKey),
-        groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
-        channelId: normalizeText(job.routeMeta?.channelId || job.routeMeta?.channel_id),
-        sessionId: normalizeText(job.routeMeta?.sessionId || job.routeMeta?.session_id),
-        routePolicyKey: normalizeText(job.routePolicyKey),
-        topRouteType: normalizeText(job.topRouteType),
-        scopeType: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id) ? 'group' : 'personal',
-        source: 'post_reply_worker',
-        sourceKind: 'runtime',
-        memoryKind: 'turn_summary',
-        semanticSlot: 'turn_summary',
-        text: `Q: ${normalizeText(job.question)}\nA: ${normalizeText(job.finalReply)}`,
-        payload: {
-          type: 'fact'
-        }
-      }, {
-        updateRuntimeSummaries: true
-      });
+      const taskRun = startTask('memoryEvent', 'appendVersionedMemoryUpdate');
+      try {
+        await appendVersionedMemoryUpdate({
+          type: 'memory_confirmed',
+          userId: job.userId,
+          sessionKey: normalizeText(job.sessionKey),
+          groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
+          channelId: normalizeText(job.routeMeta?.channelId || job.routeMeta?.channel_id),
+          sessionId: normalizeText(job.routeMeta?.sessionId || job.routeMeta?.session_id),
+          routePolicyKey: normalizeText(job.routePolicyKey),
+          topRouteType: normalizeText(job.topRouteType),
+          scopeType: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id) ? 'group' : 'personal',
+          source: 'post_reply_worker',
+          sourceKind: 'runtime',
+          memoryKind: 'turn_summary',
+          semanticSlot: 'turn_summary',
+          text: `Q: ${normalizeText(job.question)}\nA: ${normalizeText(job.finalReply)}`,
+          payload: {
+            type: 'fact'
+          }
+        }, {
+          updateRuntimeSummaries: true
+        });
+      } catch (error) {
+        failTask(taskRun, error);
+        trace('step_failed', { step: 'appendVersionedMemoryUpdate', error: error?.message || error });
+        throw error;
+      }
       logStructured('post_reply_step_done', { ...traceBase, step: 'appendVersionedMemoryUpdate' });
-      currentJob = markTaskCompleted(currentJob, deps, 'memoryEvent');
+      currentJob = completeTask(taskRun);
       trace('step_done', { step: 'appendVersionedMemoryUpdate' });
       heartbeatAndCheckCancel('appendVersionedMemoryUpdate');
     }
@@ -239,12 +309,20 @@ async function processPostReplyJob(job = {}, deps = {}) {
       heartbeatAndCheckCancel('scheduleMaterializeMemoryViews');
       trace('step_start', { step: 'scheduleMaterializeMemoryViews' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'scheduleMaterializeMemoryViews' });
-      const materializeResult = await scheduleMaterializeMemoryViews({
-        reason: 'post_reply_core',
-        userId: normalizeText(job.userId),
-        sessionKey: normalizeText(job.sessionKey),
-        groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id)
-      });
+      const taskRun = startTask('materialize', 'scheduleMaterializeMemoryViews');
+      let materializeResult = null;
+      try {
+        materializeResult = await scheduleMaterializeMemoryViews({
+          reason: 'post_reply_core',
+          userId: normalizeText(job.userId),
+          sessionKey: normalizeText(job.sessionKey),
+          groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id)
+        });
+      } catch (error) {
+        failTask(taskRun, error);
+        trace('step_failed', { step: 'scheduleMaterializeMemoryViews', error: error?.message || error });
+        throw error;
+      }
       logStructured('post_reply_step_done', {
         ...traceBase,
         step: 'scheduleMaterializeMemoryViews',
@@ -257,7 +335,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
             }
           : {}
       });
-      currentJob = markTaskCompleted(currentJob, deps, 'materialize');
+      currentJob = completeTask(taskRun);
       trace('step_done', { step: 'scheduleMaterializeMemoryViews' });
       heartbeatAndCheckCancel('scheduleMaterializeMemoryViews');
     }
@@ -268,6 +346,8 @@ async function processPostReplyJob(job = {}, deps = {}) {
       heartbeatAndCheckCancel('runVectorMaintenance');
       trace('step_start', { step: 'runVectorMaintenance' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'runVectorMaintenance' });
+      const taskRun = startTask('vectorMaintenance', 'runVectorMaintenance');
+      let vectorMaintenanceError = null;
       try {
         const maintenanceResult = await runVectorMaintenance({
           jobId: normalizeText(job.jobId),
@@ -291,6 +371,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
             : {}
         });
       } catch (error) {
+        vectorMaintenanceError = error;
         logStructured('post_reply_step_failed', {
           ...traceBase,
           step: 'runVectorMaintenance',
@@ -298,7 +379,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
         });
         trace('step_failed', { step: 'runVectorMaintenance', error: error?.message || error });
       }
-      currentJob = markTaskCompleted(currentJob, deps, 'vectorMaintenance');
+      currentJob = vectorMaintenanceError
+        ? failTask(taskRun, vectorMaintenanceError, { nonFatal: true })
+        : completeTask(taskRun);
       trace('step_done', { step: 'runVectorMaintenance' });
       heartbeatAndCheckCancel('runVectorMaintenance');
     }
@@ -309,6 +392,8 @@ async function processPostReplyJob(job = {}, deps = {}) {
       heartbeatAndCheckCancel('runMemoryQualityAudit');
       trace('step_start', { step: 'runMemoryQualityAudit' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'runMemoryQualityAudit' });
+      const taskRun = startTask('memoryQualityAudit', 'runMemoryQualityAudit');
+      let memoryQualityAuditError = null;
       try {
         const auditResult = await runMemoryQualityAudit({
           jobId: normalizeText(job.jobId),
@@ -336,6 +421,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
             : {}
         });
       } catch (error) {
+        memoryQualityAuditError = error;
         logStructured('post_reply_step_failed', {
           ...traceBase,
           step: 'runMemoryQualityAudit',
@@ -343,7 +429,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
         });
         trace('step_failed', { step: 'runMemoryQualityAudit', error: error?.message || error });
       }
-      currentJob = markTaskCompleted(currentJob, deps, 'memoryQualityAudit');
+      currentJob = memoryQualityAuditError
+        ? failTask(taskRun, memoryQualityAuditError, { nonFatal: true })
+        : completeTask(taskRun);
       trace('step_done', { step: 'runMemoryQualityAudit' });
       heartbeatAndCheckCancel('runMemoryQualityAudit');
     }
@@ -354,6 +442,8 @@ async function processPostReplyJob(job = {}, deps = {}) {
       heartbeatAndCheckCancel('runProfileMaintenance');
       trace('step_start', { step: 'runProfileMaintenance' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'runProfileMaintenance' });
+      const taskRun = startTask('profileMaintenance', 'runProfileMaintenance');
+      let profileMaintenanceError = null;
       try {
         const maintenanceResult = await runProfileMaintenance({
           jobId: normalizeText(job.jobId),
@@ -378,6 +468,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
             : {}
         });
       } catch (error) {
+        profileMaintenanceError = error;
         logStructured('post_reply_step_failed', {
           ...traceBase,
           step: 'runProfileMaintenance',
@@ -385,7 +476,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
         });
         trace('step_failed', { step: 'runProfileMaintenance', error: error?.message || error });
       }
-      currentJob = markTaskCompleted(currentJob, deps, 'profileMaintenance');
+      currentJob = profileMaintenanceError
+        ? failTask(taskRun, profileMaintenanceError, { nonFatal: true })
+        : completeTask(taskRun);
       trace('step_done', { step: 'runProfileMaintenance' });
       heartbeatAndCheckCancel('runProfileMaintenance');
     }
@@ -394,9 +487,16 @@ async function processPostReplyJob(job = {}, deps = {}) {
     heartbeatAndCheckCancel('runEnrichPhase');
     trace('step_start', { step: 'runEnrichPhase' });
     logStructured('post_reply_step_start', { ...traceBase, step: 'runEnrichPhase' });
-    await runEnrichPhase(job, meta);
+    const taskRun = startTask('enrich', 'runEnrichPhase');
+    try {
+      await runEnrichPhase(job, meta);
+    } catch (error) {
+      failTask(taskRun, error);
+      trace('step_failed', { step: 'runEnrichPhase', error: error?.message || error });
+      throw error;
+    }
     logStructured('post_reply_step_done', { ...traceBase, step: 'runEnrichPhase' });
-    currentJob = markTaskCompleted(currentJob, deps, 'enrich');
+    currentJob = completeTask(taskRun);
     trace('step_done', { step: 'runEnrichPhase' });
     heartbeatAndCheckCancel('runEnrichPhase');
   }

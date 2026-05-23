@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-23 23:26 +08:00
+更新时间：2026-05-23 23:58 +08:00
 
 ## 启动
 
@@ -42,8 +42,23 @@ POST_REPLY_WORKER_INLINE=true
 - `enrichBudget`
 - `errorClass`
 - `requeueSafe`
+- `taskStates`
 
 旧 job 读取时会自动归一化成 V2 形状，不需要手工迁移。
+
+## 任务状态
+
+`completedTasks` 仍保留布尔兼容字段；新增 `taskStates` 记录每个 step 的结构化状态：
+
+- `status`：`pending/running/done/failed/failed_nonfatal/skipped`
+- `attempt`
+- `startedAt`
+- `completedAt`
+- `durationMs`
+- `lastError`
+- `step`
+
+`failed_nonfatal` 会视为已完成，用于 `vectorMaintenance/memoryQualityAudit/profileMaintenance` 这类低优先级维护任务；核心学习、self-improvement、journal、memory event、materialize 和 enrich 失败仍会让 job 进入重试/失败流程。
 
 ## 诊断
 
@@ -69,6 +84,15 @@ node scripts/inspect-post-reply-job.js <jobId>
 ```
 
 输出会包含队列记录、trace 文件路径、trace event 计数和最近事件。
+
+批量检查最近 job：
+
+```bash
+node scripts/inspect-post-reply-jobs.js --limit 20
+node scripts/inspect-post-reply-jobs.js --failed --json
+```
+
+列表输出会附带 `tasks=<task>:<status>` 摘要，便于定位卡住或非致命失败的 step。
 
 ## 队列索引
 
