@@ -10,6 +10,8 @@
 
 运行状态更新 2026-05-24 00:08 +08:00：目标 10 首阶段落地，资源压力下默认暂停 enrich claim，core job 进入 minimal 模式，保留 memory/journal/turn_summary/materialize，self/vector/audit/profile 标记为 `skipped` 并等待后续 job 消化 backlog。
 
+运行状态更新 2026-05-24 00:15 +08:00：目标 12 首阶段落地，post-reply 写入会携带 job/turn 引用；新增 `scripts/rollback-post-reply-job.js` 支持 dry-run/apply 归档 memory 与 self-improvement 事件，并在回滚后重算自改进 patterns/rules/guides。
+
 ## 现状结论
 
 回复后学习链路已经从主回复热路径拆出：`api/runtimeV2/nodes/persist.js` 负责在回复完成后判定是否入队；`utils/postReplyJobQueue/` 用文件队列承载 `queued/processing/failed/done` 四状态；`utils/postReplyWorkerRuntime.js` 拉取 job，执行 `utils/postReplyWorker/processJob.js` 的 core/enrich 两阶段任务；`scripts/post-reply-worker.js` 作为独立子进程运行，并带 PID 文件、资源采样和 RSS 空闲回收。
@@ -163,6 +165,8 @@
 ### 12. 学习结果回滚和可解释删除
 
 目标：从 job/turn 维度回滚本次学习写入，支持“这条学错了”后精准撤销。
+
+进展 2026-05-24 00:15 +08:00：已覆盖 `memory_items.json` 和 self-improvement `events.jsonl`；enrich 自改进写入会保存 `jobId/postReplyJobId/turnId/turnIds/sourceSessionId`，回滚 apply 只标记 archived，不删除原始记录，并重算 promoted rules / local skill guides。
 
 实施：
 - 复用 `utils/memoryGovernance/postReplyRollback.js`，扩大到 enrich 写入的 group/task/style/jargon/self-improvement。

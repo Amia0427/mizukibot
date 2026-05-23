@@ -3,6 +3,7 @@ const path = require('path');
 const config = require('../../config');
 const { rebuildMemoryIndex } = require('../vectorMemory');
 const { loadProjection, runMemoryMigration, saveProjection } = require('../memoryProjection');
+const selfImprovementRuntime = require('../selfImprovementRuntime');
 const {
   DEFAULTS,
   normalizeStringArray,
@@ -161,7 +162,13 @@ const { rollbackPostReplyLearning } = createPostReplyLearningRollback({
   nowTs,
   rebuildMemoryIndex,
   saveLibrary,
-  saveProjection
+  saveProjection,
+  readSelfImprovementEvents: selfImprovementRuntime.readEvents,
+  recomputeSelfImprovementPatterns: selfImprovementRuntime.recomputePatterns,
+  writeSelfImprovementEvents: selfImprovementRuntime.writeEvents,
+  writeSelfImprovementPatterns: selfImprovementRuntime.writePatterns,
+  writeSelfImprovementPromotedRules: selfImprovementRuntime.writePromotedRules,
+  writeSelfImprovementSkillGuides: selfImprovementRuntime.writeSkillGuides
 });
 
 const rollbackMemoryWritesByLearningRef = rollbackPostReplyLearning;

@@ -188,7 +188,13 @@ function normalizeStoredEvent(input = {}) {
     channelId: context.channelId,
     groupId: context.groupId,
     userId: context.userId,
+    jobId: trimText(input.jobId || input.postReplyJobId || '', 120),
+    postReplyJobId: trimText(input.postReplyJobId || input.jobId || '', 120),
+    turnId: trimText(input.turnId || '', 120),
+    turnIds: normalizeShortList(input.turnIds || [], 16, 120),
+    sourceSessionId: trimText(input.sourceSessionId || '', 120),
     evidence: normalizeEvidenceList(input.evidence),
+    rollback: input.rollback && typeof input.rollback === 'object' ? input.rollback : null,
     createdAt: trimText(input.createdAt || now, 40) || now,
     updatedAt: trimText(input.updatedAt || input.createdAt || now, 40) || now,
     occurrenceCount: Math.max(1, Number(input.occurrenceCount || 1) || 1)

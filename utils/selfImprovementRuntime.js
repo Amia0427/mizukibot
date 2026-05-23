@@ -408,5 +408,9 @@ module.exports = {
   recomputePatterns,
   rebuildLocalSkillGuides,
   rebuildPromotedRules,
-  searchEvents
+  searchEvents,
+  writeEvents,
+  writePatterns,
+  writePromotedRules,
+  writeSkillGuides
 };

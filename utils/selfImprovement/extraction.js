@@ -138,6 +138,11 @@ function createSelfImprovementExtraction(deps = {}) {
         channelId: options.channelId,
         groupId: options.groupId,
         userId: uid,
+        jobId: options.jobId || options.postReplyJobId,
+        postReplyJobId: options.postReplyJobId || options.jobId,
+        turnId: options.turnId,
+        turnIds: options.turnIds,
+        sourceSessionId: options.sourceSessionId,
         evidence: normalizeArray(item.evidence).map((entry) => ({ excerpt: sanitizeUntrustedContent(entry, 'self_improvement') }))
       });
       if (event) stored.push(event);
