@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-23 23:16 +08:00
+更新时间：2026-05-23 23:17 +08:00
 
 ## 启动
 
@@ -21,6 +21,7 @@ POST_REPLY_WORKER_INLINE=true
 ## 关键目录
 
 - `POST_REPLY_QUEUE_DIR`：默认 `data/post_reply_jobs`。
+- `POST_REPLY_QUEUE_DIR/index.json`：队列轻量索引，可自动重建。
 - `POST_REPLY_TRACE_DIR`：默认 `data/post_reply_traces`。
 - `.mizukibot-postreply-worker.pid`：独立 worker PID 文件。
 
@@ -67,6 +68,17 @@ node scripts/inspect-post-reply-job.js <jobId>
 ```
 
 输出会包含队列记录、trace 文件路径、trace event 计数和最近事件。
+
+## 队列索引
+
+worker 会维护 `POST_REPLY_QUEUE_DIR/index.json`，记录 job 的 `status/phase/userId/aggregateKey/dedupeKey/availableAt/nextRetryAt/leaseUntil/errorClass`。`claimNextJob`、`findQueuedJobByAggregateKey` 和 `findJobByDedupeKey` 会先用索引筛候选，再读取候选 job 文件。
+
+索引缺失、损坏或指向不存在的 job 文件时，队列会自动全扫描并重建。手工修复：
+
+```bash
+node scripts/repair-post-reply-queue.js --rebuild-index --dry-run
+node scripts/repair-post-reply-queue.js --rebuild-index --apply
+```
 
 ## 失败重放
 
