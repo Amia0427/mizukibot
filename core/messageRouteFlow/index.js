@@ -560,9 +560,6 @@ function createMessageRouteFlow(deps = {}) {
         })) {
           replyOptions.disableStream = true;
         }
-        if (chatType === 'group') {
-          replyOptions.disableStream = true;
-        }
         if (cotDisplayOnce) {
           replyOptions.disableStream = true;
         }

@@ -4,6 +4,7 @@ const { createDispatchNode } = require('../api/runtimeV2/nodes/dispatch');
 
 module.exports = (async () => {
   let preflightCalls = 0;
+  const runtimeEvents = [];
   const dispatchNode = createDispatchNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;
@@ -42,7 +43,9 @@ module.exports = (async () => {
       return value;
     },
     persistCheckpoint() {},
-    appendRuntimeEvents() {},
+    appendRuntimeEvents(_state, events = []) {
+      runtimeEvents.push(...events);
+    },
     updatePlanStepsWithEnvelope(steps, envelope) {
       return steps.map((step) => (step.id === envelope.step_id ? { ...step, status: envelope.status } : step));
     },
@@ -130,6 +133,44 @@ module.exports = (async () => {
   });
 
   assert.strictEqual(preflightCalls, 0, 'chat_fast should skip synchronous preflight by default');
+
+  await dispatchNode({
+    request: {
+      question: '需要查资料',
+      allowedTools: ['web_search'],
+      allowTools: true,
+      routeMeta: {}
+    },
+    plan: {
+      steps: [
+        {
+          id: 'planner_step_2',
+          kind: 'tool',
+          tool: 'web_search',
+          inputs: { query: 'hello' },
+          status: 'pending',
+          evidence: []
+        }
+      ]
+    },
+    execution: {
+      retryQueue: [],
+      memoryCliTurn: {},
+      toolResults: [],
+      latencyDecision: {
+        profile: 'balanced'
+      }
+    },
+    memory: {
+      dirty: false
+    },
+    output: {}
+  });
+
+  assert.strictEqual(preflightCalls, 1, 'non chat_fast dispatch should still run preflight');
+  assert.strictEqual(runtimeEvents[0].type, 'node_start', 'dispatch node_start should be emitted before preflight waits');
+  assert.strictEqual(runtimeEvents[1].type, 'dispatch_preflight_start');
+  assert.strictEqual(runtimeEvents[2].type, 'dispatch_preflight_complete');
 
   console.log('dispatchChatFastPreflight.test.js passed');
 })().catch((error) => {

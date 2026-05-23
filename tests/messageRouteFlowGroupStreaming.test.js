@@ -1,6 +1,18 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-group-stream-'));
+process.env.DATA_DIR = tempDir;
+process.env.GROUP_MAIN_MODEL_STREAM_POLICY_FILE = path.join(tempDir, 'group_main_model_stream_policy.json');
+process.env.AI_STREAM_ENABLED = 'true';
 
 const { createMessageRouteFlow } = require('../core/messageRouteFlow');
+const {
+  setGroupMainModelStreamEnabled,
+  setGroupPublic
+} = require('../utils/groupMainModelStreamPolicy');
 
 function createBaseDeps(overrides = {}) {
   const replyOptionsSeen = [];
@@ -140,7 +152,15 @@ module.exports = (async () => {
   const groupEnvelope = await groupCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('group'));
   assert.strictEqual(groupEnvelope.replyText, 'ai reply');
   assert.strictEqual(groupCase.replyOptionsSeen.length, 1);
-  assert.strictEqual(groupCase.replyOptionsSeen[0].disableStream, true, 'group direct replies should force non-streaming');
+  assert.strictEqual(groupCase.replyOptionsSeen[0].disableStream, true, 'group direct replies should stay non-streaming by default');
+
+  setGroupPublic('group_1', true, 'test', Date.parse('2026-05-23T23:20:00+08:00'));
+  setGroupMainModelStreamEnabled('group_1', true, 'test', Date.parse('2026-05-23T23:20:01+08:00'));
+  const publicStreamCase = createBaseDeps();
+  const publicStreamEnvelope = await publicStreamCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('group'));
+  assert.strictEqual(publicStreamEnvelope.replyText, 'ai reply');
+  assert.strictEqual(publicStreamCase.replyOptionsSeen.length, 1);
+  assert.strictEqual(publicStreamCase.replyOptionsSeen[0].disableStream, false, 'public group with /main_stream on should allow streaming');
 
   const privateCase = createBaseDeps();
   const privateEnvelope = await privateCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('private'));
