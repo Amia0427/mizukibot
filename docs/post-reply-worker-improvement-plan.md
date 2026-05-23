@@ -1,6 +1,6 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-24 00:54 +08:00
+更新时间：2026-05-24 01:01 +08:00
 
 运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
 
@@ -20,11 +20,13 @@
 
 运行状态更新 2026-05-24 00:54 +08:00：目标 13 补强落地，enrich 阶段会返回预算执行摘要并写入 `taskStates.enrich.result` 与 trace，包含 `truncated/sourceTurns/selectedTurns/chars/maxWrites/accepted/dropped`，便于 inspect 单 job 判断是否因预算裁剪或写入上限 drop。
 
+运行状态更新 2026-05-24 01:01 +08:00：目标 15 手册收束，运行手册补齐最短操作路径、配置速查和常见处置入口；本计划页补充 15 项落地状态，后续开发按“剩余强化”而不是从零实现推进。
+
 ## 现状结论
 
 回复后学习链路已经从主回复热路径拆出：`api/runtimeV2/nodes/persist.js` 负责在回复完成后判定是否入队；`utils/postReplyJobQueue/` 用文件队列承载 `queued/processing/failed/done` 四状态；`utils/postReplyWorkerRuntime.js` 拉取 job，执行 `utils/postReplyWorker/processJob.js` 的 core/enrich 两阶段任务；`scripts/post-reply-worker.js` 作为独立子进程运行，并带 PID 文件、资源采样和 RSS 空闲回收。
 
-当前基础能力完整，但还缺少面向长期运行的强治理：队列索引和 job schema 仍偏文件扫描；失败重放需要人工脚本；core/enrich 学习策略与质量门禁耦合在单个 processJob；运行时可观测性有诊断摘要但缺少单 job trace；并行 worker 的租约、心跳和取消语义不够明确。
+当前 15 项改造已形成可运行闭环：job schema、索引、租约、取消、trace、错误分类、诊断、任务 runner、质量门禁、背压、并发锁、回滚、预算摘要、评测集和运行手册均有代码或文档入口。后续主要是扩大覆盖面：回滚范围继续覆盖 group/task/style 写入、评测集升级为更真实的端到端 case、队列索引做大规模压力测试。
 
 ## 文件地图
 
@@ -41,11 +43,33 @@
 - `utils/runtimeStatusDiagnostics/`、`utils/runtimeHotspots*`：进程、队列、资源诊断。
 - `tests/postReply*.test.js`、`tests/persistNodeConfig.test.js`、`tests/memoryContinuityStressRegression.test.js`：现有回归覆盖。
 
+## 落地状态总览
+
+| 目标 | 状态 | 当前入口 |
+| --- | --- | --- |
+| 1. Job Schema V2 | 已落地 | `utils/postReplyJobQueue/jobShape.js`、`tests/postReplyJobQueue.test.js` |
+| 2. 队列索引 | 已落地 | `POST_REPLY_QUEUE_DIR/index.json`、`scripts/repair-post-reply-queue.js` |
+| 3. 租约/心跳/取消 | 已落地 | `claimNextJob`、`heartbeatProcessingJob`、`scripts/cancel-post-reply-job.js` |
+| 4. 任务 DAG / per-task retry | 已落地 | `utils/postReplyWorker/taskRegistry.js`、`taskRunner.js`、`taskStates` |
+| 5. Enrich 质量门禁 | 已落地 | `utils/postReplyWorker/enrichQualityGate.js` |
+| 6. Core 学习降噪 | 已落地 | `learningIntent`、`POST_REPLY_EXPLICIT_MEMORY_BYPASS_GROUP_ALLOWLIST` |
+| 7. 单 Job Trace | 已落地 | `data/post_reply_traces/*.jsonl`、`scripts/inspect-post-reply-job.js` |
+| 8. 失败分类/安全重放 | 已落地 | `errorClassifier.js`、`scripts/requeue-post-reply-failed.js` |
+| 9. Worker 诊断 | 已落地 | `npm run diag:runtime`、`scripts/inspect-post-reply-jobs.js` |
+| 10. 背压保护 | 已落地 | `POST_REPLY_ENRICH_PRESSURE_PAUSE_ENABLED`、`POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE` |
+| 11. 并行安全 | 已落地 | `POST_REPLY_QUEUE_LOCK_TIMEOUT_MS`、`.locks` |
+| 12. 学习回滚 | 首阶段落地 | `scripts/rollback-post-reply-job.js`，后续扩到更多 enrich 写入类型 |
+| 13. Enrich 成本控制 | 已落地 | `enrichBudget`、`taskStates.enrich.result`、`enrich_budget_result` |
+| 14. 回归评测集 | 已落地 | `artifacts/post-reply-eval/cases.jsonl`、`tests/postReplyLearningEval.test.js` |
+| 15. 运行手册 | 已落地 | `docs/post-reply-worker.md` |
+
 ## 改进目标
 
 ### 1. Job Schema V2 与迁移兼容
 
 目标：把 job 明确升级为 `schemaVersion: 2`，补齐 `leaseOwner/leaseUntil/cancelRequested/priority/tags/traceId/sourceMessageIds`，旧 job 读取时自动升级，不破坏已有队列文件。
+
+进展 2026-05-23 22:43 +08:00：已落地 Job Schema V2 兼容归一化，新 job 带 trace/source/cancel/priority/tag 等字段，旧 job 读取时自动补默认值。
 
 实施：
 - 修改 `utils/postReplyJobQueue/jobShape.js`，新增 `normalizeJobV2` 字段归一化。
@@ -58,6 +82,8 @@
 
 目标：减少每次 claim/list 时全目录扫描，新增轻量索引文件 `index.json` 或分片索引，记录 status、availableAt、userId、phase、aggregateKey。
 
+进展 2026-05-23 23:17 +08:00：已落地 `index.json` 轻量索引和 repair 脚本，claim/find 优先按索引筛候选，索引缺失或损坏时可重建。
+
 实施：
 - 在 `utils/postReplyJobQueue/` 新增 `indexStore.js`，负责索引重建、增量更新、损坏回退。
 - `enqueue/merge/claim/markDone/markFailed/retryOrFail` 同步维护索引。
@@ -69,6 +95,8 @@
 ### 3. 显式租约、心跳和可取消 job
 
 目标：processing job 不再只靠 `updatedAt` 判断 stale，worker claim 时写租约，长任务定期 heartbeat，支持取消未开始或正在运行的 job。
+
+进展 2026-05-23 23:26 +08:00：已落地 claim 租约、step 边界 heartbeat、queued/processing cancel 语义和 `scripts/cancel-post-reply-job.js`。
 
 实施：
 - `claimNextJob` 写入 `leaseOwner/process.pid/leaseUntil`。
@@ -95,6 +123,8 @@
 
 目标：enrich 提取结果进入 memory/task/group/self-improvement 前做统一质量门禁，降低幻觉、重复和低置信污染。
 
+进展 2026-05-23 23:16 +08:00：已落地统一 enrich quality gate，allow/drop 写入 trace，覆盖低置信、缺证据、scope、重复、敏感文本和 maxWrites。
+
 实施：
 - 新增 `utils/postReplyWorker/enrichQualityGate.js`，检查 confidence、证据 turn、重复文本、group/user scope、敏感字段。
 - `enrichPhase.js` 所有写入前调用 gate，输出 allow/drop/reason。
@@ -105,6 +135,8 @@
 ### 6. Core 学习降噪与显式记忆优先
 
 目标：core 阶段区分显式“记住”与普通聊天，普通聊天只写 turn_summary 和 journal，显式记忆才触发强画像/偏好更新。
+
+进展 2026-05-23 23:16 +08:00：已落地 `learningIntent`，core 学习根据 explicit/implicit/journal_only 调整写入强度，并保留显式记忆绕过白名单配置。
 
 实施：
 - 在 `persist.js` 或 `processJob.js` 记录 `learningIntent: explicit|implicit|journal_only`。
@@ -117,6 +149,8 @@
 
 目标：每个 post-reply job 生成可读 trace，包含入队判定、每步开始/结束/耗时、LLM 调用、写入对象、drop reason、重试原因。
 
+进展 2026-05-23 22:43 +08:00：已落地 `jobTrace.js` 和单 job inspect 脚本，step、heartbeat、质量门禁、预算结果和失败分类均可追踪。
+
 实施：
 - 新增 `utils/postReplyWorker/jobTrace.js`，写 `data/post_reply_traces/<jobId>.jsonl`。
 - `persist.js`、`postReplyWorkerRuntime.js`、`processJob.js`、`enrichPhase.js` 注入 trace writer。
@@ -128,6 +162,8 @@
 
 目标：把 `requeue-post-reply-failed.js` 从人工脚本升级为 worker 内置的安全重放策略，可区分 transient、terminal、schema、quality_gate、canceled。
 
+进展 2026-05-23 22:43 +08:00：已落地统一错误分类，failed job 写入 `errorClass/requeueSafe`，重放脚本支持 transient-only dry-run/apply。
+
 实施：
 - 抽出 `utils/postReplyWorker/errorClassifier.js`，统一 runtime 与 requeue 脚本的错误分类。
 - 新增配置 `POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED`、`POST_REPLY_AUTO_REQUEUE_MAX_PER_TICK`。
@@ -138,6 +174,8 @@
 ### 9. Worker 管理面与健康门禁
 
 目标：诊断能回答“worker 是否应该运行、是否在运行、是否卡住、积压多少、失败原因是什么、是否安全重启”。
+
+进展 2026-05-23 22:43 +08:00：已落地 runtime 诊断摘要，包含队列、phase backlog、失败分类、最老 queued/processing 租约年龄和 worker 状态。
 
 实施：
 - 扩展 `utils/runtimeStatusDiagnostics/queue.js`，增加 oldest queued age、oldest processing lease age、failed by errorClass、phase backlog。
@@ -214,6 +252,8 @@
 ### 15. 文档化运行手册
 
 目标：把启停、配置、诊断、失败重放、回滚、低资源参数整理成单页手册。
+
+进展 2026-05-24 01:01 +08:00：已收束 `docs/post-reply-worker.md`，包含启动、诊断、索引修复、失败重放、学习降噪、enrich 门禁/预算、背压、租约、取消、回滚和常见处置。
 
 实施：
 - 新增或扩展 `docs/post-reply-worker.md`。
