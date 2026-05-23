@@ -194,6 +194,17 @@ function buildPostReplyEnrichMeta(base = {}, fieldKey = '', status = 'candidate'
   };
 }
 
+function summarizeWriteResult(kind = '', result = {}) {
+  const ids = normalizeArray(result?.ids).map((item) => normalizeText(item)).filter(Boolean);
+  const accepted = normalizeArray(result?.accepted);
+  return {
+    kind: normalizeText(kind),
+    ids,
+    accepted: accepted.length || ids.length,
+    rejected: normalizeArray(result?.rejected).length
+  };
+}
+
 function buildMinimalStyleMemoryItems(userId = '', styleMemory = {}, meta = {}) {
   const uid = normalizeText(userId);
   if (!uid) return [];
@@ -397,36 +408,43 @@ async function runEnrichPhase(job = {}, meta = {}) {
       if (!gateResult.allow) {
         // dropped by quality gate
       } else {
-      const taskPayload = {
-        taskType: normalizeText(taskMemory.task_type),
-        trigger: normalizeText(taskMemory.trigger),
-        strategy: normalizeText(taskMemory.strategy),
-        avoid: normalizeText(taskMemory.avoid),
-        outcome: normalizeText(taskMemory.outcome) || 'success',
-        confidence,
-        source: 'post_reply_enrich',
-        routePolicyKey: meta.routePolicyKey,
-        topRouteType: meta.topRouteType,
-        agentName: meta.agentName,
-        toolName: meta.toolName,
-        sessionId: meta.sessionId,
-        channelId: meta.channelId,
-        sourceKind: 'extractor',
-        status: 'candidate',
-        sourceSessionId: meta.sourceSessionId || meta.sessionId,
-        turnId: meta.turnId,
-        turnIds: meta.turnIds,
-        evidence: meta.evidence,
-        learningDecision: buildLearningDecisionMeta('task', meta, 'candidate'),
-        participants: [],
-        entities: [],
-        relations: []
-      };
-      if (typeof addTaskMemoryWithVectorBackfill === 'function') {
-        await addTaskMemoryWithVectorBackfill(job.userId, taskPayload, meta);
-      } else {
-        addTaskMemory(job.userId, taskPayload);
-      }
+        const taskPayload = {
+          taskType: normalizeText(taskMemory.task_type),
+          trigger: normalizeText(taskMemory.trigger),
+          strategy: normalizeText(taskMemory.strategy),
+          avoid: normalizeText(taskMemory.avoid),
+          outcome: normalizeText(taskMemory.outcome) || 'success',
+          confidence,
+          source: 'post_reply_enrich',
+          routePolicyKey: meta.routePolicyKey,
+          topRouteType: meta.topRouteType,
+          agentName: meta.agentName,
+          toolName: meta.toolName,
+          sessionId: meta.sessionId,
+          channelId: meta.channelId,
+          sourceKind: 'extractor',
+          status: 'candidate',
+          sourceSessionId: meta.sourceSessionId || meta.sessionId,
+          turnId: meta.turnId,
+          turnIds: meta.turnIds,
+          evidence: meta.evidence,
+          learningDecision: buildLearningDecisionMeta('task', meta, 'candidate'),
+          participants: [],
+          entities: [],
+          relations: []
+        };
+        if (typeof addTaskMemoryWithVectorBackfill === 'function') {
+          const writeResult = await addTaskMemoryWithVectorBackfill(job.userId, taskPayload, meta);
+          appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('task', writeResult));
+        } else {
+          const id = addTaskMemory(job.userId, taskPayload);
+          appendPostReplyJobTrace(job, 'enrich_write_ids', {
+            kind: 'task',
+            ids: [id].filter(Boolean),
+            accepted: id ? 1 : 0,
+            rejected: 0
+          });
+        }
       }
     }
   }
@@ -445,9 +463,16 @@ async function runEnrichPhase(job = {}, meta = {}) {
       if (!gateResult.allow) continue;
       const groupMeta = { confidence, sourceKind: 'extractor', status: 'candidate', ...buildPostReplyEnrichMeta(meta, 'group_fact', 'candidate') };
       if (typeof addGroupMemoryWithVectorBackfill === 'function') {
-        await addGroupMemoryWithVectorBackfill(meta.groupId, value, 'fact', groupMeta, 1.08, meta);
+        const writeResult = await addGroupMemoryWithVectorBackfill(meta.groupId, value, 'fact', groupMeta, 1.08, meta);
+        appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('group_fact', writeResult));
       } else {
-        addGroupMemory(meta.groupId, value, 'fact', groupMeta, 1.08);
+        const id = addGroupMemory(meta.groupId, value, 'fact', groupMeta, 1.08);
+        appendPostReplyJobTrace(job, 'enrich_write_ids', {
+          kind: 'group_fact',
+          ids: [id].filter(Boolean),
+          accepted: id ? 1 : 0,
+          rejected: 0
+        });
       }
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_goals).map((item) => normalizeText(item)).filter(Boolean)) {
@@ -462,9 +487,16 @@ async function runEnrichPhase(job = {}, meta = {}) {
       if (!gateResult.allow) continue;
       const groupMeta = { confidence, sourceKind: 'extractor', status: 'active', ...buildPostReplyEnrichMeta(meta, 'group_goal', 'active') };
       if (typeof addGroupMemoryWithVectorBackfill === 'function') {
-        await addGroupMemoryWithVectorBackfill(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15, meta);
+        const writeResult = await addGroupMemoryWithVectorBackfill(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15, meta);
+        appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('group_goal', writeResult));
       } else {
-        addGroupMemory(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15);
+        const id = addGroupMemory(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15);
+        appendPostReplyJobTrace(job, 'enrich_write_ids', {
+          kind: 'group_goal',
+          ids: [id].filter(Boolean),
+          accepted: id ? 1 : 0,
+          rejected: 0
+        });
       }
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_topics).map((item) => normalizeText(item)).filter(Boolean)) {
@@ -480,9 +512,16 @@ async function runEnrichPhase(job = {}, meta = {}) {
       if (!gateResult.allow) continue;
       const groupMeta = { confidence, sourceKind: 'extractor', status: 'candidate', ...buildPostReplyEnrichMeta(meta, 'group_topic', 'candidate') };
       if (typeof addGroupMemoryWithVectorBackfill === 'function') {
-        await addGroupMemoryWithVectorBackfill(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96, meta);
+        const writeResult = await addGroupMemoryWithVectorBackfill(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96, meta);
+        appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('group_topic', writeResult));
       } else {
-        addGroupMemory(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96);
+        const id = addGroupMemory(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96);
+        appendPostReplyJobTrace(job, 'enrich_write_ids', {
+          kind: 'group_topic',
+          ids: [id].filter(Boolean),
+          accepted: id ? 1 : 0,
+          rejected: 0
+        });
       }
     }
   }
@@ -505,12 +544,19 @@ async function runEnrichPhase(job = {}, meta = {}) {
   });
   if (signalItems.length > 0) {
     if (typeof addMemoryItemsBatchWithVectorBackfill === 'function') {
-      await addMemoryItemsBatchWithVectorBackfill(signalItems, {
+      const writeResult = await addMemoryItemsBatchWithVectorBackfill(signalItems, {
         ...meta,
         phase: 'post_reply_enrich_write'
       });
+      appendPostReplyJobTrace(job, 'enrich_write_ids', summarizeWriteResult('style_jargon', writeResult));
     } else {
-      addMemoryItemsBatch(signalItems);
+      const ids = addMemoryItemsBatch(signalItems);
+      appendPostReplyJobTrace(job, 'enrich_write_ids', {
+        kind: 'style_jargon',
+        ids: normalizeArray(ids).map((item) => normalizeText(item)).filter(Boolean),
+        accepted: normalizeArray(ids).length,
+        rejected: 0
+      });
     }
   }
 

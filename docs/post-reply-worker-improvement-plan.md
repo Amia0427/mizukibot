@@ -1,6 +1,6 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-24 01:01 +08:00
+更新时间：2026-05-24 01:10 +08:00
 
 运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
 
@@ -21,6 +21,8 @@
 运行状态更新 2026-05-24 00:54 +08:00：目标 13 补强落地，enrich 阶段会返回预算执行摘要并写入 `taskStates.enrich.result` 与 trace，包含 `truncated/sourceTurns/selectedTurns/chars/maxWrites/accepted/dropped`，便于 inspect 单 job 判断是否因预算裁剪或写入上限 drop。
 
 运行状态更新 2026-05-24 01:01 +08:00：目标 15 手册收束，运行手册补齐最短操作路径、配置速查和常见处置入口；本计划页补充 15 项落地状态，后续开发按“剩余强化”而不是从零实现推进。
+
+运行状态更新 2026-05-24 01:10 +08:00：目标 12 补强落地，enrich task/group/style/jargon 写入会记录 `enrich_write_ids` trace；回滚 dry-run/apply 报告新增 `summary.byCategory/byStatus/byUser`，可解释哪些 task/group/style/jargon/self-improvement 写入会被归档。
 
 ## 现状结论
 
@@ -58,7 +60,7 @@
 | 9. Worker 诊断 | 已落地 | `npm run diag:runtime`、`scripts/inspect-post-reply-jobs.js` |
 | 10. 背压保护 | 已落地 | `POST_REPLY_ENRICH_PRESSURE_PAUSE_ENABLED`、`POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE` |
 | 11. 并行安全 | 已落地 | `POST_REPLY_QUEUE_LOCK_TIMEOUT_MS`、`.locks` |
-| 12. 学习回滚 | 首阶段落地 | `scripts/rollback-post-reply-job.js`，后续扩到更多 enrich 写入类型 |
+| 12. 学习回滚 | 已落地 | `scripts/rollback-post-reply-job.js`、`enrich_write_ids` trace、回滚分类摘要 |
 | 13. Enrich 成本控制 | 已落地 | `enrichBudget`、`taskStates.enrich.result`、`enrich_budget_result` |
 | 14. 回归评测集 | 已落地 | `artifacts/post-reply-eval/cases.jsonl`、`tests/postReplyLearningEval.test.js` |
 | 15. 运行手册 | 已落地 | `docs/post-reply-worker.md` |
@@ -214,7 +216,7 @@
 
 目标：从 job/turn 维度回滚本次学习写入，支持“这条学错了”后精准撤销。
 
-进展 2026-05-24 00:15 +08:00：已覆盖 `memory_items.json` 和 self-improvement `events.jsonl`；enrich 自改进写入会保存 `jobId/postReplyJobId/turnId/turnIds/sourceSessionId`，回滚 apply 只标记 archived，不删除原始记录，并重算 promoted rules / local skill guides。
+进展 2026-05-24 01:10 +08:00：已覆盖 `memory_items.json`、self-improvement `events.jsonl`，并补强 task/group/style/jargon 分类摘要；enrich 写入会保存 job/turn 引用和 write ids trace，回滚 apply 只标记 archived，不删除原始记录，并重算 promoted rules / local skill guides。
 
 实施：
 - 复用 `utils/memoryGovernance/postReplyRollback.js`，扩大到 enrich 写入的 group/task/style/jargon/self-improvement。

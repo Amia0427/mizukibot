@@ -69,6 +69,82 @@ fs.writeFileSync(path.join(tempRoot, 'memory_items.json'), JSON.stringify({
       }
     },
     {
+      id: 'enrich_task_match',
+      userId: 'u_rollback',
+      text: 'task type: chat\nstrategy: merge',
+      type: 'fact',
+      status: 'active',
+      scopeType: 'task',
+      memoryKind: 'task',
+      meta: {
+        memoryKind: 'task',
+        fieldKey: 'task',
+        learningDecision: {
+          jobId: 'job-enrich',
+          postReplyJobId: 'job-enrich',
+          turnIds: ['turn-enrich'],
+          fieldKey: 'task',
+          phase: 'post_reply_enrich_write'
+        }
+      }
+    },
+    {
+      id: 'enrich_group_match',
+      userId: 'group:g_rollback',
+      text: 'group fact',
+      type: 'fact',
+      status: 'active',
+      scopeType: 'group',
+      meta: {
+        scopeType: 'group',
+        fieldKey: 'group_fact',
+        learningDecision: {
+          jobId: 'job-enrich',
+          turnIds: ['turn-enrich'],
+          fieldKey: 'group_fact',
+          phase: 'post_reply_enrich_write'
+        }
+      }
+    },
+    {
+      id: 'enrich_style_match',
+      userId: 'u_rollback',
+      text: 'style: short',
+      type: 'fact',
+      status: 'active',
+      memoryKind: 'style',
+      semanticSlot: 'style_pattern',
+      meta: {
+        memoryKind: 'style',
+        fieldKey: 'style_pattern',
+        learningDecision: {
+          jobId: 'job-enrich',
+          turnIds: ['turn-enrich'],
+          fieldKey: 'style_pattern',
+          phase: 'post_reply_enrich_write'
+        }
+      }
+    },
+    {
+      id: 'enrich_jargon_match',
+      userId: 'group:g_rollback',
+      text: 'group jargon: foo=bar',
+      type: 'fact',
+      status: 'active',
+      memoryKind: 'jargon',
+      semanticSlot: 'group_jargon',
+      meta: {
+        memoryKind: 'jargon',
+        fieldKey: 'group_jargon',
+        learningDecision: {
+          jobId: 'job-enrich',
+          turnIds: ['turn-enrich'],
+          fieldKey: 'group_jargon',
+          phase: 'post_reply_enrich_write'
+        }
+      }
+    },
+    {
       id: 'non_post_reply',
       userId: 'u_rollback',
       text: 'manual memory',
@@ -148,6 +224,20 @@ const byPostReplyJob = rollbackPostReplyLearning({ postReplyJobId: 'job-b' });
 assert.strictEqual(byPostReplyJob.changed, 1);
 const finalItems = JSON.parse(fs.readFileSync(path.join(tempRoot, 'memory_items.json'), 'utf8')).items;
 assert.strictEqual(finalItems.find((item) => item.id === 'post_reply_job_id_match').status, 'archived');
+
+const enrichDry = rollbackPostReplyLearning({ jobId: 'job-enrich', dryRun: true });
+assert.strictEqual(enrichDry.memory.matched, 4);
+assert.strictEqual(enrichDry.memory.summary.byCategory.task, 1);
+assert.strictEqual(enrichDry.memory.summary.byCategory.group, 1);
+assert.strictEqual(enrichDry.memory.summary.byCategory.style, 1);
+assert.strictEqual(enrichDry.memory.summary.byCategory.jargon, 1);
+const enrichRolled = rollbackPostReplyLearning({ jobId: 'job-enrich', reason: 'enrich_rollback' });
+assert.strictEqual(enrichRolled.memory.changed, 4);
+const enrichAfter = JSON.parse(fs.readFileSync(path.join(tempRoot, 'memory_items.json'), 'utf8')).items;
+for (const id of ['enrich_task_match', 'enrich_group_match', 'enrich_style_match', 'enrich_jargon_match']) {
+  assert.strictEqual(enrichAfter.find((item) => item.id === id).status, 'archived');
+  assert.strictEqual(enrichAfter.find((item) => item.id === id).meta.rollback.reason, 'enrich_rollback');
+}
 
 assert.throws(() => rollbackPostReplyLearning({}), /jobId, postReplyJobId, turnId, or turnIds is required/);
 

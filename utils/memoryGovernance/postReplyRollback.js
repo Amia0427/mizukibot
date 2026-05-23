@@ -72,6 +72,38 @@ function createPostReplyLearningRollback(deps = {}) {
     ]);
   }
 
+  function getItemCategory(item = {}) {
+    const meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
+    const decision = meta.learningDecision && typeof meta.learningDecision === 'object' ? meta.learningDecision : {};
+    const memoryKind = normalizeText(item.memoryKind || meta.memoryKind || item.semanticSlot || meta.semanticSlot).toLowerCase();
+    const fieldKey = normalizeText(item.fieldKey || meta.fieldKey || decision.fieldKey).toLowerCase();
+    const scopeType = normalizeText(item.scopeType || meta.scopeType).toLowerCase();
+    if (memoryKind === 'task' || scopeType === 'task' || fieldKey === 'task') return 'task';
+    if (memoryKind === 'jargon' || fieldKey === 'group_jargon' || item.semanticSlot === 'group_jargon') return 'jargon';
+    if (memoryKind === 'style' || fieldKey.startsWith('style_') || String(item.semanticSlot || '').startsWith('style_')) return 'style';
+    if (scopeType === 'group' || memoryKind === 'group' || fieldKey.startsWith('group_')) return 'group';
+    return normalizeText(memoryKind || fieldKey || item.source || meta.source || 'memory') || 'memory';
+  }
+
+  function summarizeMatches(items = [], categoryFn = getItemCategory) {
+    const byCategory = {};
+    const byStatus = {};
+    const byUser = {};
+    for (const item of Array.isArray(items) ? items : []) {
+      const category = normalizeText(categoryFn(item)) || 'unknown';
+      const status = normalizeText(item.status || 'active') || 'active';
+      const userId = normalizeText(item.userId || 'unknown') || 'unknown';
+      byCategory[category] = (byCategory[category] || 0) + 1;
+      byStatus[status] = (byStatus[status] || 0) + 1;
+      byUser[userId] = (byUser[userId] || 0) + 1;
+    }
+    return {
+      byCategory,
+      byStatus,
+      byUser
+    };
+  }
+
   function itemMatchesPostReplyLearningRef(item = {}, criteria = {}) {
     if (!item || typeof item !== 'object') return false;
     const userId = normalizeText(criteria.userId);
@@ -235,7 +267,11 @@ function createPostReplyLearningRollback(deps = {}) {
         id: String(item.id || '').trim(),
         userId: String(item.userId || '').trim(),
         status: String(item.status || 'active').trim() || 'active',
-        text: normalizeText(item.text || item.canonicalText || '')
+        text: normalizeText(item.text || item.canonicalText || ''),
+        category: getItemCategory(item),
+        memoryKind: normalizeText(item.memoryKind || item.meta?.memoryKind || ''),
+        fieldKey: normalizeText(item.fieldKey || item.meta?.fieldKey || item.meta?.learningDecision?.fieldKey || ''),
+        source: normalizeText(item.source || item.meta?.source || '')
       }))
       .filter((item) => item.id);
     const selfImprovementMatches = listSelfImprovementMatches(criteria);
@@ -253,13 +289,15 @@ function createPostReplyLearningRollback(deps = {}) {
           matched: memoryMatches.length,
           changed: 0,
           ids: memoryMatches.map((item) => item.id),
-          items: memoryMatches
+          items: memoryMatches,
+          summary: summarizeMatches(memoryMatches)
         },
         selfImprovement: {
           matched: selfImprovementMatches.length,
           changed: 0,
           ids: selfImprovementMatches.map((item) => item.id),
-          items: selfImprovementMatches
+          items: selfImprovementMatches,
+          summary: summarizeMatches(selfImprovementMatches, () => 'self_improvement')
         }
       };
     }
@@ -287,9 +325,13 @@ function createPostReplyLearningRollback(deps = {}) {
           matched: memoryMatches.length,
           changed: 0,
           ids: memoryMatches.map((item) => item.id),
-          items: memoryMatches
+          items: memoryMatches,
+          summary: summarizeMatches(memoryMatches)
         },
-        selfImprovement: selfImprovementResult
+        selfImprovement: {
+          ...selfImprovementResult,
+          summary: summarizeMatches(selfImprovementResult.items, () => 'self_improvement')
+        }
       };
     }
 
@@ -328,9 +370,13 @@ function createPostReplyLearningRollback(deps = {}) {
         matched: memoryMatches.length,
         changed: activeIds.size,
         ids: memoryMatches.map((item) => item.id),
-        items: memoryMatches
+        items: memoryMatches,
+        summary: summarizeMatches(memoryMatches)
       },
-      selfImprovement: selfImprovementResult
+      selfImprovement: {
+        ...selfImprovementResult,
+        summary: summarizeMatches(selfImprovementResult.items, () => 'self_improvement')
+      }
     };
   }
 
