@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-24 00:15 +08:00
+更新时间：2026-05-24 00:31 +08:00
 
 ## 启动
 
@@ -97,6 +97,15 @@ node scripts/inspect-post-reply-jobs.js --failed --json
 ## 队列索引
 
 worker 会维护 `POST_REPLY_QUEUE_DIR/index.json`，记录 job 的 `status/phase/userId/aggregateKey/dedupeKey/availableAt/nextRetryAt/leaseUntil/errorClass`。`claimNextJob`、`findQueuedJobByAggregateKey` 和 `findJobByDedupeKey` 会先用索引筛候选，再读取候选 job 文件。
+
+队列写入会用 `POST_REPLY_QUEUE_DIR/.locks` 下的短时目录锁保护同一 aggregate/dedupe/job/index。默认：
+
+```env
+POST_REPLY_QUEUE_LOCK_TIMEOUT_MS=5000
+POST_REPLY_QUEUE_STALE_LOCK_MS=30000
+```
+
+并发 enqueue 同一 aggregate 时会合并 turns/sourceMessageIds；claim 后的旧 queued 快照不会被 merge 重新写回 queued。
 
 索引缺失、损坏或指向不存在的 job 文件时，队列会自动全扫描并重建。手工修复：
 
