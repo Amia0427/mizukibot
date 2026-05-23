@@ -31,7 +31,7 @@ copy_item web
 copy_item package.json
 copy_item package-lock.json
 copy_item index.js
-copy_item config.js
+copy_item config
 copy_item .env.example
 copy_item README.md
 copy_item README_PORTABLE.md

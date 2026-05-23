@@ -32,8 +32,8 @@ function createDailyJournalRollupMaintenance(deps = {}) {
     if (!uid || !kind || !sourceText) return '';
 
     const customSummarizer = kind === 'monthly_rollup'
-      ? options.monthlySummarizer
-      : options.fourDaySummarizer;
+      ? (options.monthlySummarizer || options.rollupSummarizer)
+      : (options.fourDaySummarizer || options.rollupSummarizer);
     if (typeof customSummarizer === 'function') {
       return strictClampText(await customSummarizer(payload), maxChars);
     }

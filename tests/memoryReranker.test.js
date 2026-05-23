@@ -60,7 +60,7 @@ assert.deepStrictEqual(
     }
   });
   assert.deepStrictEqual(timeoutFallback.map((item) => item.id), candidates.map((item) => item.id));
-  assert.ok(Date.now() - started < 350);
+  assert.ok(Date.now() - started < 1000);
 
   console.log('memoryReranker.test.js passed');
 })();

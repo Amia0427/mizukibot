@@ -12,7 +12,7 @@ assert.ok(
   'messageHandler.runtime-05 should pass existing rich context into planDirectChat'
 );
 
-const routeFlow = readProjectFile('core/messageRouteFlow.js');
+const routeFlow = readProjectFile('core/messageRouteFlow/index.js');
 assert.ok(
   /planDirectChat\(route,\s*\{[\s\S]*directedContext:\s*route\?\.meta\?\.directedContext[\s\S]*memoryContext:\s*route\?\.meta\?\.memoryContext[\s\S]*dynamicPromptBlockCatalog/.test(routeFlow),
   'messageRouteFlow supplement path should preserve route meta planner context'
