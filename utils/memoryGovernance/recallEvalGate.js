@@ -15,6 +15,9 @@ function buildRecallEvalGate(result = {}, options = {}) {
   const recallAt8 = metricOf(result, 'recallAt8');
   const mrrAt8 = metricOf(result, 'mrrAt8');
   const leakage = normalizeNumber(metricOf(result, 'leakage'), 0);
+  const lifecycleLeakage = normalizeNumber(metricOf(result, 'lifecycleLeakage'), 0);
+  const categoryMismatches = normalizeNumber(metricOf(result, 'categoryMismatches'), 0);
+  const recentRecallMisses = normalizeNumber(metricOf(result, 'recentRecallMisses'), 0);
   const emptyResultRate = metricOf(result, 'emptyResultRate');
   const noVisibleCandidateRate = metricOf(result, 'noVisibleCandidateRate');
   const thresholds = {
@@ -22,6 +25,9 @@ function buildRecallEvalGate(result = {}, options = {}) {
     minRecallAt8: Math.max(0, Math.min(1, Number(options.minRecallAt8 ?? 0.72) || 0)),
     minMrrAt8: Math.max(0, Math.min(1, Number(options.minMrrAt8 ?? 0.45) || 0)),
     maxLeakage: Math.max(0, Number(options.maxLeakage ?? 0) || 0),
+    maxLifecycleLeakage: Math.max(0, Number(options.maxLifecycleLeakage ?? 0) || 0),
+    maxCategoryMismatches: Math.max(0, Number(options.maxCategoryMismatches ?? 0) || 0),
+    maxRecentRecallMisses: Math.max(0, Number(options.maxRecentRecallMisses ?? 0) || 0),
     maxEmptyResultRate: Math.max(0, Math.min(1, Number(options.maxEmptyResultRate ?? 0.12) || 0)),
     maxNoVisibleCandidateRate: Math.max(0, Math.min(1, Number(options.maxNoVisibleCandidateRate ?? 0.2) || 0))
   };
@@ -30,6 +36,9 @@ function buildRecallEvalGate(result = {}, options = {}) {
   if (recallAt8 === null || recallAt8 === undefined || normalizeNumber(recallAt8, -1) < thresholds.minRecallAt8) failures.push('recall_at_8_below_threshold');
   if (mrrAt8 === null || mrrAt8 === undefined || normalizeNumber(mrrAt8, -1) < thresholds.minMrrAt8) failures.push('mrr_at_8_below_threshold');
   if (leakage > thresholds.maxLeakage) failures.push('scope_leakage_detected');
+  if (lifecycleLeakage > thresholds.maxLifecycleLeakage) failures.push('lifecycle_leakage_detected');
+  if (categoryMismatches > thresholds.maxCategoryMismatches) failures.push('category_mismatch_detected');
+  if (recentRecallMisses > thresholds.maxRecentRecallMisses) failures.push('recent_recall_miss_detected');
   if (emptyResultRate !== null && emptyResultRate !== undefined && normalizeNumber(emptyResultRate, 1) > thresholds.maxEmptyResultRate) failures.push('empty_result_rate_high');
   if (noVisibleCandidateRate !== null && noVisibleCandidateRate !== undefined && normalizeNumber(noVisibleCandidateRate, 1) > thresholds.maxNoVisibleCandidateRate) failures.push('no_visible_candidate_rate_high');
   return {
@@ -41,6 +50,9 @@ function buildRecallEvalGate(result = {}, options = {}) {
       recallAt8: recallAt8 ?? null,
       mrrAt8: mrrAt8 ?? null,
       leakage,
+      lifecycleLeakage,
+      categoryMismatches,
+      recentRecallMisses,
       emptyResultRate: emptyResultRate ?? null,
       noVisibleCandidateRate: noVisibleCandidateRate ?? null
     }

@@ -91,6 +91,9 @@ const runners = {
       recallAt8: null,
       mrrAt8: null,
       leakage: 0,
+      lifecycleLeakage: 0,
+      categoryMismatches: 0,
+      recentRecallMisses: 0,
       sourceCoverage: { personal: 1 },
       avgPromptTokenEstimate: 12,
       latency: { main: { p50Ms: 3, p95Ms: 5 } },
@@ -134,11 +137,14 @@ module.exports = (async () => {
   assert.strictEqual(parsed.source, 'memory');
   assert.strictEqual(parsed.limit, 7);
   assert.strictEqual(parsed.retryFailed, true);
-  const parsedGate = parseMemoryOpsArgs(['recall', '--gate', '--min-recall-at8', '0.7', '--max-empty-result-rate', '0.4', '--max-no-visible-candidate-rate', '0.5']);
+  const parsedGate = parseMemoryOpsArgs(['recall', '--gate', '--min-recall-at8', '0.7', '--max-empty-result-rate', '0.4', '--max-no-visible-candidate-rate', '0.5', '--max-lifecycle-leakage', '0', '--max-category-mismatches', '0', '--max-recent-recall-misses', '0']);
   assert.strictEqual(parsedGate.gate, true);
   assert.strictEqual(parsedGate.minRecallAt8, 0.7);
   assert.strictEqual(parsedGate.maxEmptyResultRate, 0.4);
   assert.strictEqual(parsedGate.maxNoVisibleCandidateRate, 0.5);
+  assert.strictEqual(parsedGate.maxLifecycleLeakage, 0);
+  assert.strictEqual(parsedGate.maxCategoryMismatches, 0);
+  assert.strictEqual(parsedGate.maxRecentRecallMisses, 0);
   const parsedAutoGold = parseMemoryOpsArgs(['lancedb-gate', '--auto-gold']);
   assert.strictEqual(parsedAutoGold.autoGold, true);
   const parsedMemos = parseMemoryOpsArgs(['memos', '--query', '世界观规则']);
@@ -176,6 +182,9 @@ module.exports = (async () => {
   assert.strictEqual(recall.mode, 'recall');
   assert.strictEqual(recall.summary.evalMode, 'shadow');
   assert.strictEqual(recall.summary.cases, 1);
+  assert.strictEqual(recall.summary.lifecycleLeakage, 0);
+  assert.strictEqual(recall.summary.categoryMismatches, 0);
+  assert.strictEqual(recall.summary.recentRecallMisses, 0);
   assert.ok(recall.summary.gate);
   assert.ok(recall.summary.casesFile.endsWith('artifacts\\memory-recall-eval\\cases.jsonl') || recall.summary.casesFile.endsWith('artifacts/memory-recall-eval/cases.jsonl'));
   const recallLoad = calls.find((entry) => entry[0] === 'loadCases' && entry[1].limit === 1);
@@ -196,6 +205,9 @@ module.exports = (async () => {
         recallAt8: mode === 'local_jsonl' ? 0.8 : 0.81,
         mrrAt8: mode === 'local_jsonl' ? 0.5 : 0.52,
         leakage: 0,
+        lifecycleLeakage: 0,
+        categoryMismatches: 0,
+        recentRecallMisses: 0,
         emptyResultRate: 0.02,
         noVisibleCandidateRate: 0.02,
         details: []

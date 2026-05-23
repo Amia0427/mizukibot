@@ -74,6 +74,8 @@ assert.strictEqual(preview.observations[0].hasDailyJournal, true);
 assert.strictEqual(preview.observations[0].shortTermContinuity.contextProfile, 'memory_recall');
 assert.strictEqual(preview.observations[0].memoryTrace.retrievalPath, 'v3');
 assert.strictEqual(preview.observations[0].memoryTrace.hits[0].category, 'preference');
+assert.strictEqual(preview.observations[0].memoryTrace.lifecycleCounts.active, 1);
+assert.strictEqual(preview.observations[0].memoryTrace.conflictHiddenCount, 0);
 assert.deepStrictEqual(preview.observations[0].memoryTrace.droppedReasons, ['lancedb_read_disabled']);
 assert.strictEqual(preview.modelCalls[0].promptIntegrity.has_system_prompt, true);
 

@@ -79,6 +79,7 @@ const {
   buildCaseQueryOptions,
   countCategoryMismatches,
   countLifecycleLeaks,
+  countRecentRecallMisses,
   runMode
 } = require('../scripts/eval-memory-recall');
 
@@ -93,6 +94,8 @@ assert.strictEqual(
 );
 assert.strictEqual(countLifecycleLeaks([{ lifecycleStatus: 'superseded' }, { lifecycleStatus: 'active' }]), 1);
 assert.strictEqual(countCategoryMismatches([{ category: 'task' }, { category: 'preference' }], { category: 'preference' }), 1);
+assert.strictEqual(countRecentRecallMisses([{ source: 'profile' }], { query: '刚才说到哪了', facet: 'continuity' }), 1);
+assert.strictEqual(countRecentRecallMisses([{ source: 'recent' }], { query: '刚才说到哪了', facet: 'continuity' }), 0);
 
 module.exports = runMode('local_jsonl', cases, { memoryCli: false }).then((result) => {
   assert.ok(result.judgedCases > 0);
@@ -101,6 +104,7 @@ module.exports = runMode('local_jsonl', cases, { memoryCli: false }).then((resul
   assert.ok(result.bySource.preference || result.bySource.memory || result.byFacet.preference);
   assert.strictEqual(typeof result.lifecycleLeakage, 'number');
   assert.strictEqual(typeof result.categoryMismatches, 'number');
+  assert.strictEqual(typeof result.recentRecallMisses, 'number');
   assert.ok(result.latency.stages.totalMs.p50Ms >= 0);
   console.log('memoryRecallAutoGoldEval.test.js passed');
 }).catch((error) => {

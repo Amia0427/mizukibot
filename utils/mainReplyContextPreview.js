@@ -35,13 +35,22 @@ function hasDailyJournalBlock(prompt = {}) {
 
 function summarizeMemoryTrace(trace = {}) {
   const value = trace && typeof trace === 'object' ? trace : {};
+  const hits = Array.isArray(value.hits) ? value.hits : [];
+  const lifecycleCounts = hits.reduce((acc, item) => {
+    const status = String(item.lifecycleStatus || item.status || 'unknown').trim() || 'unknown';
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {});
   return {
     retrievalPath: value.retrieval_path || '',
     retrievedCount: Math.max(0, Number(value.retrieved_count || 0) || 0),
     droppedReasons: Array.isArray(value.dropped_reasons) ? value.dropped_reasons.slice(0, 12) : [],
     injectedBlockIds: Array.isArray(value.injected_block_ids) ? value.injected_block_ids.slice(0, 12) : [],
-    hits: Array.isArray(value.hits)
-      ? value.hits.slice(0, 12).map((item) => ({
+    lifecycleCounts,
+    conflictHiddenCount: hits.filter((item) => String(item.selectionReason || item.traceReason || item.recallHiddenReason || '').includes('memory_conflict_resolved')).length,
+    hasMemoryRecallPolicy: Array.isArray(value.injected_block_ids) && value.injected_block_ids.includes('memory_recall_policy'),
+    hits: hits.length > 0
+      ? hits.slice(0, 12).map((item) => ({
           id: item.id || '',
           source: item.source || '',
           sourceKind: item.sourceKind || '',

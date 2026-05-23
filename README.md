@@ -10,6 +10,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 11:20 +08:00：Memory V3 新增通用冲突仲裁和近期召回快路径；非 profile 事实可按 `conflictKey` 选 winner 并隐藏 loser，主回复会注入 `memory_recall_policy` 约束 stale/superseded/弱证据使用，“刚才/今天/昨天”查询优先 recent/journal/task。
 
+更新 2026-05-23 11:25 +08:00：召回评估门禁继续补强，`diag:memory recall --gate` 可检查 lifecycle leakage、category mismatch 和 recent recall miss；主回复 context preview 会汇总 memory trace lifecycle/conflict/policy 信号。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始

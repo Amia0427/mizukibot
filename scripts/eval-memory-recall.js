@@ -431,6 +431,19 @@ function countCategoryMismatches(results = [], testCase = {}) {
     .length;
 }
 
+function countRecentRecallMisses(results = [], testCase = {}) {
+  const query = normalizeText(testCase.query);
+  const facet = normalizeText(testCase.facet).toLowerCase();
+  if (!/(刚才|刚刚|最近|今天|今日|昨天|昨日|继续|接着|聊到哪|说到哪|\brecent\b|\btoday\b|\byesterday\b|\bcontinue\b)/i.test(query)) {
+    return 0;
+  }
+  const expectedSources = facet === 'journal'
+    ? new Set(['journal', 'recent'])
+    : new Set(['recent', 'journal', 'task']);
+  const top = (Array.isArray(results) ? results : []).slice(0, 3);
+  return top.some((item) => expectedSources.has(normalizeSource(item.source))) ? 0 : 1;
+}
+
 function finalizeGroupedMetrics(metrics = {}) {
   const out = {};
   for (const [key, value] of Object.entries(metrics)) {
@@ -478,6 +491,7 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
   let leakage = 0;
   let lifecycleLeakage = 0;
   let categoryMismatches = 0;
+  let recentRecallMisses = 0;
   let recallHits = 0;
   let reciprocalSum = 0;
   let judgedCases = 0;
@@ -542,6 +556,7 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     if (!isWorldbookCase) leakage += countScopeLeaks(results, testCase);
     lifecycleLeakage += countLifecycleLeaks(results);
     categoryMismatches += countCategoryMismatches(results, testCase);
+    recentRecallMisses += countRecentRecallMisses(results, testCase);
     promptChars += normalizeText(result.digest).length;
     const expectedIds = normalizeExpectedIds(testCase);
     const sourceMetric = ensureSourceMetrics(bySourceRaw, testCase.targetSource || testCase.source || testCase.evalSource || 'unknown');
@@ -590,6 +605,7 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
       categories: results.map((item) => item.category || ''),
       lifecycleStatuses: results.map((item) => item.lifecycleStatus || ''),
       sourcePlan: result.stats?.sourcePlan || result.diagnostics?.sourcePlan || null,
+      recentRecallIntent: result.stats?.recentRecallIntent || result.diagnostics?.recentRecallIntent || null,
       lancedb: result.stats?.lancedb || null,
       worldbook: result.stats?.worldbook || null,
       timings: result.stats?.timings || result.diagnostics?.timings || null,
@@ -608,6 +624,7 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     leakage,
     lifecycleLeakage,
     categoryMismatches,
+    recentRecallMisses,
     emptyResultRate: cases.length ? emptyResults / cases.length : 0,
     noVisibleCandidateRate: cases.length ? noVisibleCandidates / cases.length : 0,
     coverageReady,
@@ -673,6 +690,7 @@ module.exports = {
   buildWorldbookGoldCases,
   countCategoryMismatches,
   countLifecycleLeaks,
+  countRecentRecallMisses,
   countScopeLeaks,
   isStableMemoryGoldCase,
   loadCases,

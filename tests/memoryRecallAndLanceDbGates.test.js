@@ -8,6 +8,9 @@ const pass = buildRecallEvalGate({
   recallAt8: 0.86,
   mrrAt8: 0.55,
   leakage: 0,
+  lifecycleLeakage: 0,
+  categoryMismatches: 0,
+  recentRecallMisses: 0,
   emptyResultRate: 0.05,
   noVisibleCandidateRate: 0.08
 }, {
@@ -22,11 +25,17 @@ const fail = buildRecallEvalGate({
   recallAt8: 0.3,
   mrrAt8: 0.1,
   leakage: 1,
+  lifecycleLeakage: 1,
+  categoryMismatches: 1,
+  recentRecallMisses: 1,
   emptyResultRate: 0.5
 });
 assert.strictEqual(fail.ok, false);
 assert.ok(fail.failures.includes('insufficient_judged_cases'));
 assert.ok(fail.failures.includes('scope_leakage_detected'));
+assert.ok(fail.failures.includes('lifecycle_leakage_detected'));
+assert.ok(fail.failures.includes('category_mismatch_detected'));
+assert.ok(fail.failures.includes('recent_recall_miss_detected'));
 
 const regression = compareRecallEvalResults(
   { recallAt8: 0.9, mrrAt8: 0.7, emptyResultRate: 0.02 },

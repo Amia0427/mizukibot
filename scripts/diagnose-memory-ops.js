@@ -77,6 +77,9 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
     minMrrAt8: null,
     minJudgedCases: null,
     maxLeakage: null,
+    maxLifecycleLeakage: null,
+    maxCategoryMismatches: null,
+    maxRecentRecallMisses: null,
     maxEmptyResultRate: null,
     maxNoVisibleCandidateRate: null,
     regressionTolerance: null,
@@ -133,6 +136,15 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
       index += 1;
     } else if (item === '--max-leakage') {
       args.maxLeakage = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--max-lifecycle-leakage') {
+      args.maxLifecycleLeakage = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--max-category-mismatches') {
+      args.maxCategoryMismatches = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--max-recent-recall-misses') {
+      args.maxRecentRecallMisses = Number(argv[index + 1]);
       index += 1;
     } else if (item === '--max-empty-result-rate') {
       args.maxEmptyResultRate = Number(argv[index + 1]);
@@ -265,6 +277,9 @@ function summarizeRecall(result = {}, args = {}) {
     recallAt8: result.recallAt8 ?? null,
     mrrAt8: result.mrrAt8 ?? null,
     leakage: Number(result.leakage || 0) || 0,
+    lifecycleLeakage: Number(result.lifecycleLeakage || 0) || 0,
+    categoryMismatches: Number(result.categoryMismatches || 0) || 0,
+    recentRecallMisses: Number(result.recentRecallMisses || 0) || 0,
     sourceCoverage: result.sourceCoverage || {},
     avgPromptTokenEstimate: Number(result.avgPromptTokenEstimate || 0) || 0,
     latency: result.latency || {
@@ -349,6 +364,9 @@ function summarizeLanceDbGate(result = {}, args = {}) {
           judgedCases: result.baseline.judgedCases,
           recallAt8: result.baseline.recallAt8,
           mrrAt8: result.baseline.mrrAt8,
+          lifecycleLeakage: result.baseline.lifecycleLeakage,
+          categoryMismatches: result.baseline.categoryMismatches,
+          recentRecallMisses: result.baseline.recentRecallMisses,
           emptyResultRate: result.baseline.emptyResultRate,
           coverageReadyRatio: result.baseline.coverageReadyRatio
         }
@@ -359,6 +377,9 @@ function summarizeLanceDbGate(result = {}, args = {}) {
           judgedCases: result.candidate.judgedCases,
           recallAt8: result.candidate.recallAt8,
           mrrAt8: result.candidate.mrrAt8,
+          lifecycleLeakage: result.candidate.lifecycleLeakage,
+          categoryMismatches: result.candidate.categoryMismatches,
+          recentRecallMisses: result.candidate.recentRecallMisses,
           emptyResultRate: result.candidate.emptyResultRate,
           noVisibleCandidateRate: result.candidate.noVisibleCandidateRate,
           coverageReadyRatio: result.candidate.coverageReadyRatio
@@ -409,6 +430,15 @@ function buildRecallGateOptions(args = {}) {
   }
   if (args.maxLeakage !== null && Number.isFinite(Number(args.maxLeakage))) {
     options.maxLeakage = Number(args.maxLeakage);
+  }
+  if (args.maxLifecycleLeakage !== null && Number.isFinite(Number(args.maxLifecycleLeakage))) {
+    options.maxLifecycleLeakage = Number(args.maxLifecycleLeakage);
+  }
+  if (args.maxCategoryMismatches !== null && Number.isFinite(Number(args.maxCategoryMismatches))) {
+    options.maxCategoryMismatches = Number(args.maxCategoryMismatches);
+  }
+  if (args.maxRecentRecallMisses !== null && Number.isFinite(Number(args.maxRecentRecallMisses))) {
+    options.maxRecentRecallMisses = Number(args.maxRecentRecallMisses);
   }
   if (args.maxEmptyResultRate !== null && Number.isFinite(Number(args.maxEmptyResultRate))) {
     options.maxEmptyResultRate = Number(args.maxEmptyResultRate);
