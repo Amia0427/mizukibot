@@ -12,6 +12,11 @@ const {
   resolveJournalTargetDays
 } = require('./journalRecallPolicy');
 const { resolveSourceCandidates } = require('./cliSearchScope');
+const {
+  categoryFacetBoost,
+  deriveMemoryMetadata,
+  matchesMemoryMetadataFilters
+} = require('./categoryMetadata');
 
 const SEARCH_EXPAND_SCORE_DEFAULT = 0.42;
 const SEARCH_EXPAND_MIN_RATIO_DEFAULT = 0.5;
@@ -109,6 +114,7 @@ function scoreDoc(query = '', queryTokens = [], doc = {}, context = {}, queryFac
   const lexical = overlapRatio(queryTokens, normalizeArray(doc.tokens));
   const direct = directMatchBoost(query, doc);
   const dateBoost = journalDateMatchBoost(doc, resolveJournalTargetDays(query));
+  const categoryBoost = categoryFacetBoost(doc, queryFacet);
   const embedding = scoring.queryEmbedding
     ? calcEmbeddingSimilarity(scoring.queryEmbedding, doc, scoring.embeddingIndex)
     : 0;
@@ -121,7 +127,8 @@ function scoreDoc(query = '', queryTokens = [], doc = {}, context = {}, queryFac
     + recencyBoost(doc.updatedAt)
     + confidenceBoost(doc)
     + tierBoost(doc)
-    + scopeBoost(doc, context, queryFacet);
+    + scopeBoost(doc, context, queryFacet)
+    + categoryBoost;
   return {
     doc,
     score,
@@ -140,7 +147,8 @@ function scoreDoc(query = '', queryTokens = [], doc = {}, context = {}, queryFac
       embedding,
       semanticWeight,
       direct,
-      dateBoost
+      dateBoost,
+      categoryBoost
     }
   };
 }
@@ -196,7 +204,11 @@ function trimPackedResults(rows = [], limit = 8) {
       status: doc.status || 'active',
       sourceKind: doc.sourceKind || '',
       evidenceTier: doc.evidenceTier || '',
-      fieldKey: doc.fieldKey || ''
+      fieldKey: doc.fieldKey || '',
+      category: doc.category || deriveMemoryMetadata(doc).category,
+      tags: Array.isArray(doc.tags) ? doc.tags : deriveMemoryMetadata(doc).tags,
+      intent: doc.intent || deriveMemoryMetadata(doc).intent,
+      privacyLevel: doc.privacyLevel || deriveMemoryMetadata(doc).privacyLevel
     });
     outputChars += estimated;
   }
@@ -264,6 +276,7 @@ function gatherRowsForSources(snapshot, sources = [], query = '', limit = 8, con
     for (const id of ids) {
       const doc = snapshot.docsById.get(id);
       if (!doc || !doc.text) continue;
+      if (!matchesMemoryMetadataFilters(doc, context)) continue;
       rows.push(scoreDoc(query, queryTokens, doc, context, queryFacet, scoring));
     }
   }

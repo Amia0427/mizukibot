@@ -5,6 +5,10 @@ const {
   normalizeText,
   tokenize
 } = require('../helpers');
+const {
+  deriveMemoryMetadata,
+  normalizeTags
+} = require('../categoryMetadata');
 const { buildDailyJournalDocsForAllUsers } = require('../journalDocs');
 const { isMemoryNotRecallable } = require('../recallFilter');
 
@@ -36,6 +40,7 @@ function makeDocBase(input = {}) {
   if (!text) return null;
   const canonicalText = normalizeText(input.canonicalText || canonicalizeText(text));
   const tokens = tokenize(`${text} ${canonicalText}`);
+  const metadata = deriveMemoryMetadata(input);
   return {
     id: String(input.id || '').trim(),
     source: normalizeText(input.source).toLowerCase(),
@@ -84,6 +89,11 @@ function makeDocBase(input = {}) {
     textKind: normalizeText(input.textKind),
     sourceCompleteness: normalizeText(input.sourceCompleteness),
     sourceFile: normalizeText(input.sourceFile),
+    category: metadata.category,
+    tags: metadata.tags,
+    tagsText: metadata.tagsText,
+    intent: metadata.intent,
+    privacyLevel: metadata.privacyLevel,
     tokens
   };
 }
@@ -116,6 +126,10 @@ function buildSessionDocs(snapshot = {}) {
       sessionKey,
       sessionId: session.sessionId || '',
       text,
+      category: 'continuity',
+      tags: normalizeTags(['recent', 'session', session.snapshotType, session.activeTopic]),
+      intent: 'recent_context',
+      privacyLevel: 'private',
       preview: [
         session.carryOverUserTurn,
         session.activeTopic,
@@ -165,6 +179,10 @@ function buildProfileDocs(snapshot = {}) {
       userId: normalizedUserId,
       ownerUserId: normalizedUserId,
       fieldKey: 'persona_summary_support',
+      category: 'profile',
+      tags: normalizeTags(['profile', 'summary', 'persona']),
+      intent: 'profile_support',
+      privacyLevel: 'private',
       text: personaCore.summary || '',
       updatedAt: personaCore.updatedAt || snapshot?.profileProjection?.updatedAt || 0,
       confidence: 1,
@@ -197,6 +215,10 @@ function buildProfileDocs(snapshot = {}) {
       userId: normalizedUserId,
       ownerUserId: normalizedUserId,
       fieldKey: 'persona_impression_support',
+      category: 'profile',
+      tags: normalizeTags(['profile', 'impression', 'persona']),
+      intent: 'profile_support',
+      privacyLevel: 'private',
       text: personaCore.impression || '',
       updatedAt: personaCore.updatedAt || snapshot?.profileProjection?.updatedAt || 0,
       confidence: 1,
@@ -225,6 +247,12 @@ function buildProfileDocs(snapshot = {}) {
           userId: normalizedUserId,
           ownerUserId: normalizedUserId,
           fieldKey,
+          category: fieldKey.startsWith('preference_')
+            ? 'preference'
+            : (fieldKey === 'identity' || fieldKey === 'personality' ? 'identity' : 'profile'),
+          tags: normalizeTags(['profile', fieldKey, normalizeText(title)]),
+          intent: 'profile_support',
+          privacyLevel: 'private',
           memoryKind: fieldKey === 'preference_like'
             ? 'like'
             : fieldKey === 'preference_dislike'
@@ -268,6 +296,14 @@ function buildNodeDocs(snapshot = {}) {
       fieldKey: node.fieldKey || '',
       memoryKind: node.memoryKind || '',
       sourceKind: node.sourceKind || '',
+      category: node.category || node.payload?.category || node.meta?.category || '',
+      tags: normalizeTags([
+        ...(Array.isArray(node.tags) ? node.tags : []),
+        ...(Array.isArray(node.payload?.tags) ? node.payload.tags : []),
+        ...(Array.isArray(node.meta?.tags) ? node.meta.tags : [])
+      ]),
+      intent: node.intent || node.payload?.intent || node.meta?.intent || '',
+      privacyLevel: node.privacyLevel || node.privacy_level || node.payload?.privacyLevel || node.payload?.privacy_level || node.meta?.privacyLevel || node.meta?.privacy_level || '',
       status: node.status || 'active',
       text: node.text || '',
       updatedAt: node.updatedAt || 0,
@@ -306,6 +342,14 @@ function buildNodeDocs(snapshot = {}) {
         routePolicyKey: node.routePolicyKey || '',
         topRouteType: node.topRouteType || '',
         source: node.source || '',
+        category: node.category || node.payload?.category || node.meta?.category || '',
+        tags: normalizeTags([
+          ...(Array.isArray(node.tags) ? node.tags : []),
+          ...(Array.isArray(node.payload?.tags) ? node.payload.tags : []),
+          ...(Array.isArray(node.meta?.tags) ? node.meta.tags : [])
+        ]),
+        intent: node.intent || node.payload?.intent || node.meta?.intent || '',
+        privacyLevel: node.privacyLevel || node.privacy_level || node.payload?.privacyLevel || node.payload?.privacy_level || node.meta?.privacyLevel || node.meta?.privacy_level || '',
         participants: normalizeArray(node.participants),
         entities: normalizeArray(node.entities),
         relations: normalizeArray(node.relations),
@@ -341,6 +385,10 @@ function buildEpisodeDocs(snapshot = {}) {
         fieldKey: 'episode',
         sourceKind: normalizeText(episode.sourceKind || 'journal'),
         text: episode.text || '',
+        category: 'journal',
+        tags: normalizeTags(['journal', rollupLevel, episode.episodeDay || episode.yearMonth, ...(episode.topics || [])]),
+        intent: 'episode_recall',
+        privacyLevel: 'private',
         preview: episode.text || '',
         updatedAt: episode.updatedAt || 0,
         confidence: Number(episode.confidence || 0) || 0.92,
@@ -404,6 +452,10 @@ function buildNotebookDocs(snapshot = {}) {
           userId: notebookUserId,
           ownerUserId,
           groupId: meta.groupId || '',
+          category: meta.category || 'notebook',
+          tags: normalizeTags(['notebook', title, ...(Array.isArray(meta.tags) ? meta.tags : [])]),
+          intent: meta.intent || 'document_recall',
+          privacyLevel: meta.privacyLevel || meta.privacy_level || 'private',
           text,
           updatedAt: meta.updatedAt || toSafeNumber(new Date(doc.updated_at || 0).getTime(), 0),
           confidence: 0.84,

@@ -19,6 +19,10 @@ const {
   normalizeText
 } = require('../utils/memory-v3/helpers');
 const { loadMemoryNodes } = require('../utils/memory-v3/storage');
+const {
+  buildMemoryCategoryManifest,
+  compactMemoryCategoryManifest
+} = require('../utils/memory-v3/categoryManifest');
 
 function parseArgs(argv = process.argv.slice(2)) {
   const args = {
@@ -222,6 +226,7 @@ async function runDiagnostics(args = {}, deps = {}) {
   const projectionFreshness = (deps.diagnoseProjectionFreshness || diagnoseProjectionFreshness)();
   const journal = buildSafeJournalHealthSummary({ limit: args.limit || 20 }, deps);
   const quality = buildSafeMemoryQualityReport({ limit: args.limit || 20 }, deps);
+  const categoryManifest = buildSafeCategoryManifest({ limit: args.limit || 20 }, deps);
   const journalPending = Number(journal?.totals?.embeddingPending || 0) || 0;
   const nextBackfillCommand = journalPending > 0 ? JOURNAL_BACKFILL_COMMAND : MEMORY_BACKFILL_COMMAND;
   const healthGate = buildMemoryIndexHealthGate({
@@ -244,8 +249,23 @@ async function runDiagnostics(args = {}, deps = {}) {
     projectionFreshness,
     journal,
     quality,
+    categoryManifest,
     probe
   };
+}
+
+function buildSafeCategoryManifest(options = {}, deps = {}) {
+  try {
+    const builder = deps.buildMemoryCategoryManifest || buildMemoryCategoryManifest;
+    return compactMemoryCategoryManifest(builder(), options.limit || 20);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'category_manifest_failed',
+      message: error?.message || String(error || ''),
+      categories: []
+    };
+  }
 }
 
 function buildSafeJournalHealthSummary(options = {}, deps = {}) {
@@ -294,6 +314,7 @@ if (require.main === module) {
 
 module.exports = {
   buildSafeMemoryQualityReport,
+  buildSafeCategoryManifest,
   buildSafeJournalHealthSummary,
   buildMemoryIndexHealthGate,
   buildRecommendedActions,

@@ -72,6 +72,7 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
     const scopeBoost = calcScopeBoost(doc, options);
     const participant = calcParticipantBoost(doc, options);
     const graphBoost = calcGraphBoost(question, doc, options);
+    const categoryBoost = calcCategoryBoost(doc, { ...options, queryFacet });
     const staleCandidatePenalty = getStaleCandidatePenalty(doc);
     const candidatePenalty = normalizeStatus(doc.status, STATUS_ACTIVE) === STATUS_CANDIDATE ? 0.08 : 0;
     const source = classifyDocSource(doc);
@@ -114,6 +115,7 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
       + scopeBoost
       + participant.score
       + graphBoost
+      + categoryBoost
       + journalBoost
       + continuityBoost
       + preferenceBoost
@@ -156,6 +158,7 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
       relations: Array.isArray(doc.relations) ? doc.relations : [],
       conflictKey: String(doc.conflictKey || ''),
       graphBoost,
+      categoryBoost,
       recencyScore,
       memoryLayer: strength.layer,
       memoryStrength: strength.memoryStrength,
@@ -171,6 +174,10 @@ function scoreDocs(userId, ids, docs, index, question, topK, options = {}, embed
       evidenceCount: Number(doc.evidenceCount || 1) || 1,
       styleRole: normalizeStyleRole(doc.styleRole ?? doc.meta?.styleRole),
       jargonRole: normalizeJargonRole(doc.jargonRole ?? doc.meta?.jargonRole),
+      category: doc.category || deriveDocCategoryMetadata(doc).category,
+      tags: Array.isArray(doc.tags) ? doc.tags : deriveDocCategoryMetadata(doc).tags,
+      intent: doc.intent || deriveDocCategoryMetadata(doc).intent,
+      privacyLevel: doc.privacyLevel || deriveDocCategoryMetadata(doc).privacyLevel,
       meta: doc.meta || {}
     });
   }
