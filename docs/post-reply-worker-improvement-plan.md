@@ -1,6 +1,8 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-23 22:23 +08:00
+更新时间：2026-05-23 22:37 +08:00
+
+运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
 
 ## 现状结论
 
@@ -206,4 +208,3 @@
 - 新增写入能力默认保守关闭或 dry-run，先用 trace 验证。
 - 修改 `processJob.js` 前先加 characterization tests，保证现有 core/enrich 行为不回退。
 - 每个目标单独提交，避免大改一次性落地导致难回滚。
-
