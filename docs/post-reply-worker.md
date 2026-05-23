@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-23 23:17 +08:00
+更新时间：2026-05-23 23:26 +08:00
 
 ## 启动
 
@@ -34,6 +34,7 @@ POST_REPLY_WORKER_INLINE=true
 - `sourceMessageIds`
 - `leaseOwner`
 - `leaseUntil`
+- `lastHeartbeatAt`
 - `cancelRequested`
 - `priority`
 - `tags`
@@ -138,7 +139,16 @@ node scripts/eval-post-reply-learning.js --case explicit-remember-like
 
 ## 租约和恢复
 
-worker claim job 时写 `leaseOwner` 和 `leaseUntil`。`processing` job 只有在租约过期后才会被 stale recovery 重入队；没有租约的旧 job 仍按 `updatedAt` 和 `POST_REPLY_WORKER_STALE_PROCESSING_MS` 回退判断。
+worker claim job 时写 `leaseOwner` 和 `leaseUntil`。每个关键 step 前后会 heartbeat，推进 `leaseUntil` 并写 `lastHeartbeatAt`。`processing` job 只有在租约过期后才会被 stale recovery 重入队；没有租约的旧 job 仍按 `updatedAt` 和 `POST_REPLY_WORKER_STALE_PROCESSING_MS` 回退判断。
+
+## 取消 Job
+
+取消 queued job 会直接进入 failed/canceled；取消 processing job 只写 `cancelRequested/cancelReason`，worker 在下一个 step 边界检测后终止并标记 failed/canceled。
+
+```bash
+node scripts/cancel-post-reply-job.js --job-id <jobId> --reason manual_cancel --dry-run
+node scripts/cancel-post-reply-job.js --job-id <jobId> --reason manual_cancel --apply
+```
 
 ## 常用处理
 

@@ -18,6 +18,7 @@ const {
   detectPostReplyLearningIntent
 } = require('./learningIntent');
 const {
+  buildPostReplyCanceledError,
   isTaskCompleted,
   logStructured,
   markTaskCompleted,
@@ -101,27 +102,70 @@ async function processPostReplyJob(job = {}, deps = {}) {
     topRouteType: normalizeText(job.topRouteType)
   };
   const trace = (event, payload = {}) => appendPostReplyJobTrace(currentJob, event, payload);
+  const heartbeatAndCheckCancel = (step = '') => {
+    const queue = deps.queue;
+    const latest = queue && typeof queue.readProcessingJob === 'function'
+      ? queue.readProcessingJob(currentJob.jobId)
+      : null;
+    if (latest && latest.cancelRequested === true) {
+      currentJob = {
+        ...currentJob,
+        ...latest
+      };
+      trace('job_cancel_detected', {
+        step,
+        cancelReason: latest.cancelReason
+      });
+      throw buildPostReplyCanceledError(latest);
+    }
+    if (queue && typeof queue.heartbeatProcessingJob === 'function') {
+      try {
+        currentJob = queue.heartbeatProcessingJob(currentJob, {
+          leaseOwner: currentJob.leaseOwner
+        });
+        trace('job_heartbeat', {
+          step,
+          leaseUntil: currentJob.leaseUntil
+        });
+      } catch (error) {
+        console.warn('[post-reply-worker] heartbeat failed:', error?.message || error);
+      }
+    }
+    if (currentJob.cancelRequested === true) {
+      trace('job_cancel_detected', {
+        step,
+        cancelReason: currentJob.cancelReason
+      });
+      throw buildPostReplyCanceledError(currentJob);
+    }
+    return currentJob;
+  };
 
   if (phase === 'core' && tasks.memoryLearning && !isTaskCompleted(currentJob, 'memoryLearning')) {
     const { learnSomethingNew } = getMemoryExtractionModule();
+    heartbeatAndCheckCancel('learnSomethingNew');
     trace('step_start', { step: 'learnSomethingNew', learningIntent: meta.learningIntent });
     logStructured('post_reply_step_start', { ...traceBase, step: 'learnSomethingNew', learningIntent: meta.learningIntent });
     await learnSomethingNew(job.userId, learningConversation.userText, learningConversation.botReply, workerTaskOptions);
     logStructured('post_reply_step_done', { ...traceBase, step: 'learnSomethingNew' });
     currentJob = markTaskCompleted(currentJob, deps, 'memoryLearning');
     trace('step_done', { step: 'learnSomethingNew' });
+    heartbeatAndCheckCancel('learnSomethingNew');
   }
   if (phase === 'core' && tasks.selfImprovement && !isTaskCompleted(currentJob, 'selfImprovement')) {
     const { learnSelfImprovement } = getSelfImprovementModule();
+    heartbeatAndCheckCancel('learnSelfImprovement');
     trace('step_start', { step: 'learnSelfImprovement' });
     logStructured('post_reply_step_start', { ...traceBase, step: 'learnSelfImprovement' });
     await learnSelfImprovement(job.userId, job.question, job.finalReply, workerTaskOptions);
     logStructured('post_reply_step_done', { ...traceBase, step: 'learnSelfImprovement' });
     currentJob = markTaskCompleted(currentJob, deps, 'selfImprovement');
     trace('step_done', { step: 'learnSelfImprovement' });
+    heartbeatAndCheckCancel('learnSelfImprovement');
   }
   if (tasks.dailyJournal && !isTaskCompleted(currentJob, 'dailyJournal')) {
     const { appendDailyJournalEntry } = getDailyJournalModule();
+    heartbeatAndCheckCancel('appendDailyJournalEntry');
     trace('step_start', { step: 'appendDailyJournalEntry' });
     logStructured('post_reply_step_start', { ...traceBase, step: 'appendDailyJournalEntry' });
     await appendDailyJournalEntry(
@@ -154,10 +198,12 @@ async function processPostReplyJob(job = {}, deps = {}) {
     logStructured('post_reply_step_done', { ...traceBase, step: 'appendDailyJournalEntry' });
     currentJob = markTaskCompleted(currentJob, deps, 'dailyJournal');
     trace('step_done', { step: 'appendDailyJournalEntry' });
+    heartbeatAndCheckCancel('appendDailyJournalEntry');
   }
   if (phase === 'core' && config.MEMORY_V3_ENABLED) {
     if (!isTaskCompleted(currentJob, 'memoryEvent')) {
       const { appendVersionedMemoryUpdate } = getMemoryV3Module();
+      heartbeatAndCheckCancel('appendVersionedMemoryUpdate');
       trace('step_start', { step: 'appendVersionedMemoryUpdate' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'appendVersionedMemoryUpdate' });
       await appendVersionedMemoryUpdate({
@@ -184,11 +230,13 @@ async function processPostReplyJob(job = {}, deps = {}) {
       logStructured('post_reply_step_done', { ...traceBase, step: 'appendVersionedMemoryUpdate' });
       currentJob = markTaskCompleted(currentJob, deps, 'memoryEvent');
       trace('step_done', { step: 'appendVersionedMemoryUpdate' });
+      heartbeatAndCheckCancel('appendVersionedMemoryUpdate');
     }
     if (!isTaskCompleted(currentJob, 'materialize')) {
       const scheduleMaterializeMemoryViews = typeof deps.scheduleMaterializeMemoryViews === 'function'
         ? deps.scheduleMaterializeMemoryViews
         : schedulePostReplyMaterialize;
+      heartbeatAndCheckCancel('scheduleMaterializeMemoryViews');
       trace('step_start', { step: 'scheduleMaterializeMemoryViews' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'scheduleMaterializeMemoryViews' });
       const materializeResult = await scheduleMaterializeMemoryViews({
@@ -211,11 +259,13 @@ async function processPostReplyJob(job = {}, deps = {}) {
       });
       currentJob = markTaskCompleted(currentJob, deps, 'materialize');
       trace('step_done', { step: 'scheduleMaterializeMemoryViews' });
+      heartbeatAndCheckCancel('scheduleMaterializeMemoryViews');
     }
     if (!isTaskCompleted(currentJob, 'vectorMaintenance') && isPostReplyVectorMaintenanceEnabled()) {
       const runVectorMaintenance = typeof deps.runVectorMaintenance === 'function'
         ? deps.runVectorMaintenance
         : runPostReplyVectorMaintenance;
+      heartbeatAndCheckCancel('runVectorMaintenance');
       trace('step_start', { step: 'runVectorMaintenance' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'runVectorMaintenance' });
       try {
@@ -250,11 +300,13 @@ async function processPostReplyJob(job = {}, deps = {}) {
       }
       currentJob = markTaskCompleted(currentJob, deps, 'vectorMaintenance');
       trace('step_done', { step: 'runVectorMaintenance' });
+      heartbeatAndCheckCancel('runVectorMaintenance');
     }
     if (!isTaskCompleted(currentJob, 'memoryQualityAudit') && config.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED === true) {
       const runMemoryQualityAudit = typeof deps.runMemoryQualityAudit === 'function'
         ? deps.runMemoryQualityAudit
         : getMemoryQualityAuditModule().runMemoryQualityAudit;
+      heartbeatAndCheckCancel('runMemoryQualityAudit');
       trace('step_start', { step: 'runMemoryQualityAudit' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'runMemoryQualityAudit' });
       try {
@@ -293,11 +345,13 @@ async function processPostReplyJob(job = {}, deps = {}) {
       }
       currentJob = markTaskCompleted(currentJob, deps, 'memoryQualityAudit');
       trace('step_done', { step: 'runMemoryQualityAudit' });
+      heartbeatAndCheckCancel('runMemoryQualityAudit');
     }
     if (!isTaskCompleted(currentJob, 'profileMaintenance') && config.MEMORY_PROFILE_MAINTENANCE_ENABLED === true) {
       const runProfileMaintenance = typeof deps.runProfileMaintenance === 'function'
         ? deps.runProfileMaintenance
         : getProfileMaintenanceModule().runProfileMemoryMaintenance;
+      heartbeatAndCheckCancel('runProfileMaintenance');
       trace('step_start', { step: 'runProfileMaintenance' });
       logStructured('post_reply_step_start', { ...traceBase, step: 'runProfileMaintenance' });
       try {
@@ -333,15 +387,18 @@ async function processPostReplyJob(job = {}, deps = {}) {
       }
       currentJob = markTaskCompleted(currentJob, deps, 'profileMaintenance');
       trace('step_done', { step: 'runProfileMaintenance' });
+      heartbeatAndCheckCancel('runProfileMaintenance');
     }
   }
   if (phase === 'enrich' && !isTaskCompleted(currentJob, 'enrich')) {
+    heartbeatAndCheckCancel('runEnrichPhase');
     trace('step_start', { step: 'runEnrichPhase' });
     logStructured('post_reply_step_start', { ...traceBase, step: 'runEnrichPhase' });
     await runEnrichPhase(job, meta);
     logStructured('post_reply_step_done', { ...traceBase, step: 'runEnrichPhase' });
     currentJob = markTaskCompleted(currentJob, deps, 'enrich');
     trace('step_done', { step: 'runEnrichPhase' });
+    heartbeatAndCheckCancel('runEnrichPhase');
   }
   return {
     ok: true,

@@ -335,6 +335,25 @@ function createPostReplyJobQueue(options = {}) {
     return current;
   }
 
+  function heartbeatProcessingJob(job = {}, options = {}) {
+    const leaseMs = Math.max(1000, Number(options.leaseMs || config.POST_REPLY_WORKER_STALE_PROCESSING_MS) || 5 * 60 * 1000);
+    const now = normalizeText(options.now) || nowIso();
+    const leaseOwner = normalizeText(options.leaseOwner || job.leaseOwner);
+    return updateProcessingJob(job, {
+      leaseOwner,
+      leaseUntil: new Date(Date.parse(now) + leaseMs).toISOString(),
+      lastHeartbeatAt: now
+    });
+  }
+
+  function readProcessingJob(jobId = '') {
+    const normalizedJobId = normalizeText(jobId);
+    if (!normalizedJobId) return null;
+    const currentPath = jobPath('processing', normalizedJobId);
+    const parsed = safeReadJson(currentPath, null);
+    return parsed ? normalizeJob({ ...parsed, status: 'processing' }) : null;
+  }
+
   function markFailed(job = {}, error = '') {
     const errorClass = classifyPostReplyJobError(error || job);
     const current = normalizeJob({
@@ -364,6 +383,22 @@ function createPostReplyJobQueue(options = {}) {
       if (!fs.existsSync(currentPath)) continue;
       const parsed = safeReadJson(currentPath, null);
       if (!parsed) return null;
+      if (status === 'processing') {
+        const marked = normalizeJob({
+          ...parsed,
+          status: 'processing',
+          cancelRequested: true,
+          canceledAt: now,
+          cancelReason: reason,
+          updatedAt: now,
+          lastError: reason,
+          errorClass: 'canceled',
+          requeueSafe: false
+        });
+        atomicWriteJson(currentPath, marked);
+        indexStore.upsert(marked);
+        return marked;
+      }
       const canceled = normalizeJob({
         ...parsed,
         status: 'failed',
@@ -446,6 +481,8 @@ function createPostReplyJobQueue(options = {}) {
     cancelJob,
     markDone,
     markFailed,
+    heartbeatProcessingJob,
+    readProcessingJob,
     updateProcessingJob,
     retryOrFail,
     findJobByDedupeKey,

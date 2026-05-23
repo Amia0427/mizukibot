@@ -86,6 +86,33 @@ module.exports = (() => {
   assert.strictEqual(cancelQueue.listJobs(['queued']).length, 0);
   assert.strictEqual(cancelQueue.listJobs(['failed']).length, 1);
 
+  const processingCancelQueueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-post-reply-processing-cancel-'));
+  const processingCancelQueue = createPostReplyJobQueue({ queueDir: processingCancelQueueDir });
+  processingCancelQueue.enqueue({
+    jobId: 'cancel_processing',
+    userId: 'u2',
+    question: 'q',
+    finalReply: 'r',
+    availableAt: '2026-05-23T12:00:00.000Z'
+  });
+  const processingJob = processingCancelQueue.claimNextJob(new Date('2026-05-23T12:00:00.000Z'), {
+    leaseOwner: 'worker-cancel',
+    leaseMs: 60000
+  });
+  const processingCancel = processingCancelQueue.cancelJob('cancel_processing', 'manual_processing_cancel');
+  assert.strictEqual(processingCancel.status, 'processing');
+  assert.strictEqual(processingCancel.cancelRequested, true);
+  assert.strictEqual(processingCancel.errorClass, 'canceled');
+  assert.strictEqual(processingCancelQueue.listJobs(['processing']).length, 1, 'processing cancel should keep file in processing until worker exits');
+  assert.strictEqual(processingCancelQueue.listJobs(['failed']).length, 0);
+  const heartbeat = processingCancelQueue.heartbeatProcessingJob(processingJob, {
+    now: '2026-05-23T12:00:30.000Z',
+    leaseMs: 120000,
+    leaseOwner: 'worker-cancel'
+  });
+  assert.strictEqual(heartbeat.leaseUntil, '2026-05-23T12:02:30.000Z');
+  assert.strictEqual(heartbeat.lastHeartbeatAt, '2026-05-23T12:00:30.000Z');
+
   const mergeQueueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-post-reply-merge-dedupe-'));
   const mergeQueue = createPostReplyJobQueue({ queueDir: mergeQueueDir });
   const first = mergeQueue.enqueue({
