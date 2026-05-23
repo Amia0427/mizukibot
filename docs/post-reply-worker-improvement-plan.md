@@ -1,6 +1,6 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-24 01:27 +08:00
+更新时间：2026-05-24 02:16 +08:00
 
 运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
 
@@ -27,6 +27,8 @@
 运行状态更新 2026-05-24 01:21 +08:00：目标 2/14 补强落地，新增 1k job 队列索引规模回归；评测脚本开始校验 `expected.writes/drops`，并新增学习回滚与重启租约恢复 case。
 
 运行状态更新 2026-05-24 01:27 +08:00：目标 8 补强落地，worker tick 内置 transient failed job 自动安全重放；新增 `POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED` 和 `POST_REPLY_AUTO_REQUEUE_MAX_PER_TICK`，手工脚本与 runtime 复用队列 API。
+
+运行状态更新 2026-05-24 02:16 +08:00：全量验证入口补强，`scripts/run-tests.js` 改为逐测试文件子进程隔离，避免模块缓存、`axios.post` stub、环境变量和后台异步任务跨测试污染，也避免长进程堆累积导致 OOM。
 
 ## 现状结论
 
