@@ -258,6 +258,7 @@ async function invokeReplyModel({
   });
   const prompt = String(promptBundle?.prompt || '').trim();
   let sseState = { buffer: '' };
+  const rawStreamDecoder = new StringDecoder('utf8');
   let streamedText = '';
   let rawStreamText = '';
 
@@ -291,9 +292,8 @@ async function invokeReplyModel({
     },
     {
       onData(chunk) {
-        const chunkText = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
-        rawStreamText += chunkText;
-        const parsed = extractSSEEvents(sseState, chunkText);
+        rawStreamText += appendUtf8Chunk(rawStreamDecoder, chunk);
+        const parsed = extractSSEEvents(sseState, chunk);
         sseState = parsed.state;
         for (const event of parsed.events) {
           if (event?.delta) streamedText += event.delta;
@@ -303,6 +303,8 @@ async function invokeReplyModel({
     Math.max(0, Number(config.PASSIVE_AWARENESS_REPLY_RETRIES || 1)),
     apiKey
   );
+
+  rawStreamText += rawStreamDecoder.end();
 
   for (const event of flushSSEState(sseState)) {
     if (event?.delta) streamedText += event.delta;
