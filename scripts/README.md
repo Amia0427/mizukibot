@@ -23,6 +23,7 @@
 - `diagnose-main-model-fallback.js`
 - `diagnose-main-reply.js`：统一主回复诊断，输出 route/model/fallback、memory freshness、群聊回复守卫、direct/tool/background 分支
 - `diagnose-memory-ops.js`：记忆诊断入口，支持 `diagnose/backfill/recall/audit`；更新 2026-05-19 21:45 +08:00：`audit` 会运行抽样记忆质量审查，只报告不改库
+- 更新 2026-05-23 11:25 +08:00：`diagnose-memory-ops.js recall --gate` 会把 lifecycle leakage、category mismatch、recent recall miss 纳入门禁指标。
 - `diagnose-persona-memory-state.js`
 - `diagnose-persona-modules.js`
 - `diagnose-runtime-hotspots.js`：运行时资源热点诊断，汇总 RSS/heap/event loop delay、timer/interval、post-reply worker、子 agent 和高频模块
