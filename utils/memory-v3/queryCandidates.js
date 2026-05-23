@@ -18,6 +18,7 @@ const {
   matchesMemoryMetadataFilters
 } = require('./categoryMetadata');
 const { isMemoryNotRecallable } = require('./recallFilter');
+const { filterResolvedMemoryConflicts } = require('./memoryConflictResolver');
 const {
   looksLikePollutedSessionSummary,
   shouldCollectSourceForQuery
@@ -100,7 +101,7 @@ function collectCandidates(userId, options = {}) {
   }
 
   if (includePersonal || includeTask || includeGroup || includeJargon || includeStyle) {
-    for (const node of loadMemoryNodes()) {
+    for (const node of filterResolvedMemoryConflicts(loadMemoryNodes())) {
       if (isMemoryNotRecallable(node)) continue;
       const nodeUserId = normalizeText(node?.userId);
       const scopeType = normalizeText(node?.scopeType).toLowerCase();

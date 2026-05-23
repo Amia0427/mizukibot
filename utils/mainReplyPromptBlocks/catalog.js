@@ -72,6 +72,15 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
     avoidWhen: 'Skip when the turn is fresh and self-contained.'
   },
   {
+    blockId: 'memory_recall_policy',
+    label: 'Memory Recall Policy',
+    lane: 'dynamic_context',
+    category: 'memory_policy',
+    defaultPolicy: 'must_use_when_available',
+    useWhen: 'Use when recalled memory evidence is present so memory is interpreted with category, source, lifecycle, and certainty rules.',
+    avoidWhen: 'Skip only when no memory evidence or memory tool policy is available.'
+  },
+  {
     blockId: 'retrieved_memory_lite',
     label: 'Retrieved Memory Lite',
     lane: 'dynamic_context',
@@ -230,6 +239,12 @@ const DYNAMIC_CONTEXT_BLOCK_SPEC_OVERRIDES = Object.freeze({
     criticality: 'critical',
     emptyPolicy: 'reject_optional_empty',
     budget: { configKey: 'MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS', hardCapTokens: 420 }
+  },
+  memory_recall_policy: {
+    criticality: 'critical',
+    emptyPolicy: 'reject_optional_empty',
+    mustUseWhen: 'retrieved memory, daily journal, or memory_cli evidence is present',
+    budget: { configKey: '', hardCapTokens: 120 }
   },
   memos_recall: {
     criticality: 'critical',

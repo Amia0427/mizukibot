@@ -8,6 +8,7 @@ const { getJournalDocDay } = require('./journalDocs');
 const { rowPassesMemoryFilter } = require('../lancedbMemoryStore');
 const { lifecycleStatusOf } = require('./recallFilter');
 const { applyLifecycleScore } = require('./profileLifecycle');
+const { filterResolvedMemoryConflicts } = require('./memoryConflictResolver');
 const {
   appendSelectionReason,
   buildRecallDiagnostics,
@@ -130,7 +131,7 @@ function boostJournalDaySummaryCompanions(items = [], options = {}) {
 
 function applyConflictResolution(items = []) {
   const winners = new Map();
-  for (const item of stableSortByScore(items).filter((candidate) => {
+  for (const item of stableSortByScore(filterResolvedMemoryConflicts(items)).filter((candidate) => {
     const lifecycleStatus = lifecycleStatusOf(candidate);
     return lifecycleStatus !== 'stale' && lifecycleStatus !== 'suspect' && lifecycleStatus !== 'superseded';
   })) {

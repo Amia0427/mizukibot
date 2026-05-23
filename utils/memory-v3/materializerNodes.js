@@ -78,6 +78,7 @@ function createNodeFromEvent(event) {
     expiresAt: Number(event.expiresAt || payload.expiresAt || 0) || 0,
     lastConfirmedAt: Number(event.lastConfirmedAt || payload.lastConfirmedAt || 0) || 0,
     supersededBy: normalizeText(event.supersededBy || payload.supersededBy),
+    conflictWinnerId: normalizeText(event.conflictWinnerId || payload.conflictWinnerId),
     supersedes: Array.isArray(payload.supersedes)
       ? payload.supersedes.map((item) => normalizeText(item)).filter(Boolean).slice(0, 16)
       : [],
@@ -98,6 +99,7 @@ function createNodeFromEvent(event) {
       : [],
     versionRootId: normalizeText(payload.versionRootId || event.versionRootId),
     archivedReason: normalizeText(payload.archivedReason || event.archivedReason),
+    recallHiddenReason: normalizeText(event.recallHiddenReason || payload.recallHiddenReason),
     participants: Array.isArray(event.participants) ? event.participants : [],
     entities: Array.isArray(event.entities) ? event.entities : [],
     relations: Array.isArray(event.relations) ? event.relations : [],

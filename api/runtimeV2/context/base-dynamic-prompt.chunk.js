@@ -219,6 +219,21 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       optional: true
     }
   }));
+  const memoryRecallPolicyText = buildMemoryRecallPolicyPromptSnippet(memoryContext);
+  if (memoryRecallPolicyText) {
+    promptBlocks.push(createPromptBlock('memory_recall_policy', 'Memory Recall Policy', memoryRecallPolicyText, {
+      stage: 'main',
+      priority: 255,
+      authority: 'memory_policy',
+      kind: 'memory_policy',
+      source: 'memory_v3_recall_policy',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true,
+        evidenceOnly: true
+      }
+    }));
+  }
   if (memosRecallAvailable) {
     promptBlocks.push(createPromptBlock('memos_recall', 'MemOS Recall', memosRecallText, {
       stage: 'main',
@@ -433,6 +448,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
     hasShortTermContinuity: Boolean(shortTermContinuityText),
+    hasMemoryRecallPolicy: Boolean(memoryRecallPolicyText),
     hasRetrievedMemory: Boolean(memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt),
     hasMemosRecall: memosRecallAvailable,
     hasDailyJournal: Boolean(dailyJournalPromptText),
@@ -482,10 +498,10 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     baseRuntimeAddedIds.push('directed_context');
   }
   if (memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt) {
-    baseRuntimeAddedIds.push('retrieved_memory_lite');
+    baseRuntimeAddedIds.push('memory_recall_policy', 'retrieved_memory_lite');
   }
   if (forceMemoryContext) {
-    baseRuntimeAddedIds.push('short_term_continuity', 'retrieved_memory_lite', 'daily_journal');
+    baseRuntimeAddedIds.push('short_term_continuity', 'memory_recall_policy', 'retrieved_memory_lite', 'daily_journal');
   }
   const baseBlockedIds = memosRecall.used === false && normalizeText(memosRecall.rejectedReason) === 'deduped_by_local_memory'
     ? ['memos_recall']
@@ -562,6 +578,19 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
           meta: {
             optional: true,
             blockId: 'daily_journal',
+            evidenceOnly: true
+          }
+        }),
+        createPromptBlock('memory_recall_policy_compact', 'Memory Recall Policy Compact', trimTextByTokenBudget(memoryRecallPolicyText, 120, 'tail'), {
+          stage: 'main',
+          priority: 255,
+          authority: 'memory_policy',
+          kind: 'memory_policy',
+          source: 'memory_v3_recall_policy',
+          lane: 'dynamic_context',
+          meta: {
+            optional: true,
+            blockId: 'memory_recall_policy',
             evidenceOnly: true
           }
         }),

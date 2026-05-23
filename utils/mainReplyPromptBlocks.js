@@ -323,6 +323,9 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   if (input.hasShortTermContinuity) {
     push('short_term_continuity', 'short-term context is available for this turn');
   }
+  if (input.hasMemoryRecallPolicy) {
+    push('memory_recall_policy', 'memory recall policy should govern recalled evidence use');
+  }
   if (input.hasRetrievedMemory) {
     push('retrieved_memory_lite', 'retrieved memory candidates are available for this turn');
   }
@@ -389,6 +392,7 @@ function buildMainReplyDynamicPromptGuide(personaModuleCatalog = []) {
     '5. When a block would only add vague flavor, stale memory, or noisy steering, leave it out.',
     'Block guidance:',
     '- `directed_context`: must enable when quoted reply resolution, addressee disambiguation, or group targeting is needed. Do not skip it if the current turn is elliptical or deictic.',
+    '- `memory_recall_policy`: enable when any recalled memory evidence is included. It tells the main reply how to treat source/category/lifecycle/certainty.',
     '- `continuity_state`: must enable when there is a carry-over topic, unresolved thread, prior promise, or open loop that should affect the reply. Skip when the user clearly starts a new topic.',
     '- `short_term_continuity`: usually enable when available. It carries recent raw turns, restart summaries, and short-term state; it is the main defense against short-term amnesia.',
     '- `style_profile`: enable when local group/style adaptation matters. Skip when the stable persona already provides enough style.',

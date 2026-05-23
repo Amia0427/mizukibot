@@ -63,6 +63,7 @@ const {
   ensureTargetJournalCandidates,
   scoreLocalCandidatePool
 } = require('./queryScoring');
+const { detectRecentRecallIntent } = require('./recentRecallPolicy');
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
 
@@ -112,6 +113,7 @@ async function queryMemory(input = {}) {
     now: input.journalNow
   });
   const journalIntent = classifyJournalRecallIntent(query, input);
+  const recentRecallIntent = detectRecentRecallIntent(query, input);
   const topK = Math.max(1, Math.min(20, Number(input.topK || config.MEMORY_V3_TOP_K || config.MEMORY_RAG_TOP_K || 8) || 8));
   const facet = FACETS.includes(String(input.facet || '').trim().toLowerCase())
     ? String(input.facet || '').trim().toLowerCase()
@@ -332,6 +334,7 @@ async function queryMemory(input = {}) {
       coverageAtQuery,
       journalIntent,
       sourcePlan,
+      recentRecallIntent,
       categoryManifest,
       timings: timing
     },
@@ -340,6 +343,7 @@ async function queryMemory(input = {}) {
       coverageAtQuery,
       journalIntent,
       sourcePlan,
+      recentRecallIntent,
       categoryManifest,
       timings: timing,
       recall: {

@@ -17,6 +17,9 @@ const {
 const {
   getMemoryRecallPolicyResource
 } = require('./recallPolicyResource');
+const {
+  resolveMemoryConflicts
+} = require('./memoryConflictResolver');
 
 module.exports = {
   appendMemoryEvent,
@@ -33,5 +36,6 @@ module.exports = {
   findSimilarMemoryForUpdate,
   importMemoryFile,
   splitMemoryImportChunks,
-  getMemoryRecallPolicyResource
+  getMemoryRecallPolicyResource,
+  resolveMemoryConflicts
 };

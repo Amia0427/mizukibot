@@ -30,6 +30,12 @@ const {
 const { matchesFacetCandidate } = require('./queryRanking');
 const { candidateKey } = require('./queryCandidates');
 const { categoryFacetBoost } = require('./categoryMetadata');
+const {
+  buildRecentFallbackCandidates,
+  detectRecentRecallIntent,
+  recentCandidateBonus,
+  recentSourceBoost
+} = require('./recentRecallPolicy');
 
 function facetSourceWeight(facet, source) {
   const key = `${facet}:${source}`;
@@ -59,6 +65,7 @@ function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default
     today: options.journalToday,
     now: options.journalNow
   });
+  const recentIntent = detectRecentRecallIntent(query, options);
   const limit = Math.max(0, Math.min(
     512,
     Math.floor(Number(options.localCandidateLimit || config.MEMORY_LOCAL_CANDIDATE_LIMIT || 96) || 96)
@@ -78,10 +85,11 @@ function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default
     const support = Math.min(0.3, (Number(candidate.evidenceCount || 1) - 1) * 0.05);
     const confidence = Math.min(0.2, Number(candidate.confidence || 0) * 0.2);
     const importance = Math.min(0.22, Number(candidate.importance || 0) * 0.1);
-    const sourceBoost = facetSourceWeight(facet, candidate.source);
+    const sourceBoost = facetSourceWeight(facet, candidate.source) * recentSourceBoost(candidate, recentIntent);
     const categoryBoost = categoryFacetBoost(candidate, facet);
-    const score = ((lexical * 0.65) + direct + dateBoost + (recency * 0.08) + support + confidence + importance + categoryBoost) * sourceBoost;
-    if (score <= 0.02 && lexical <= 0.01 && direct <= 0 && dateBoost <= 0) continue;
+    const recentBonus = recentCandidateBonus(candidate, recentIntent, options);
+    const score = ((lexical * 0.65) + direct + dateBoost + (recency * 0.08) + support + confidence + importance + categoryBoost + recentBonus) * sourceBoost;
+    if (score <= 0.02 && lexical <= 0.01 && direct <= 0 && dateBoost <= 0 && recentBonus <= 0) continue;
     scoped.push({
       ...candidate,
       score: Math.max(Number(candidate.score || 0) || 0, score),
@@ -94,11 +102,15 @@ function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default
         dateBoost,
         recency,
         sourceBoost,
-        categoryBoost
+        categoryBoost,
+        recentBonus
       }
     });
   }
-  return stableSortByScore(scoped).slice(0, limit);
+  const existing = new Set(scoped.map((item) => candidateKey(item)).filter(Boolean));
+  const fallbacks = buildRecentFallbackCandidates(candidates, recentIntent, options)
+    .filter((item) => !existing.has(candidateKey(item)));
+  return stableSortByScore(scoped.concat(fallbacks)).slice(0, limit);
 }
 
 function isJournalTargetDayCandidate(candidate = {}, targetDays = []) {
@@ -174,6 +186,7 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
     today: options.journalToday,
     now: options.journalNow
   });
+  const recentIntent = detectRecentRecallIntent(query, options);
   const embeddingIndex = loadEmbeddingIndex();
   const useEmbedding = shouldUseRemoteEmbedding();
   let queryEmbedding = Array.isArray(options.queryEmbedding) ? options.queryEmbedding : null;
@@ -197,16 +210,17 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
     const confidence = Math.min(0.2, Number(candidate.confidence || 0) * 0.2);
     const importance = Math.min(0.22, Number(candidate.importance || 0) * 0.1);
     const dateBoost = journalDateMatchBoost(candidate, journalTargetDays);
-    const sourceBoost = facetSourceWeight(facet, candidate.source);
+    const sourceBoost = facetSourceWeight(facet, candidate.source) * recentSourceBoost(candidate, recentIntent);
     const stabilityBoost = Math.min(0.24, Number(candidate.stabilityScore || 0) * 0.24);
     const strength = calcMemoryStrength(candidate, facet);
     const embedding = queryEmbedding
       ? calcEmbeddingSimilarity(queryEmbedding, candidate, embeddingIndex)
       : 0;
     const categoryBoost = categoryFacetBoost(candidate, facet);
-    const score = ((lexical * lexicalWeight) + (embedding * semanticWeight) + direct + dateBoost + (recency * 0.08) + (strength.memoryStrength * 0.1) + support + confidence + importance + stabilityBoost + categoryBoost) * sourceBoost;
+    const recentBonus = recentCandidateBonus(candidate, recentIntent, options);
+    const score = ((lexical * lexicalWeight) + (embedding * semanticWeight) + direct + dateBoost + (recency * 0.08) + (strength.memoryStrength * 0.1) + support + confidence + importance + stabilityBoost + categoryBoost + recentBonus) * sourceBoost;
     const semanticOnly = embedding >= semanticMinScore && lexical < 0.04 && direct <= 0;
-    if (score < minScore && !semanticOnly) continue;
+    if (score < minScore && !semanticOnly && recentBonus <= 0) continue;
     const matchMode = embedding > 0 && lexical > 0.04
       ? 'hybrid'
       : embedding > 0
@@ -225,7 +239,8 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
         dateBoost,
         recency,
         sourceBoost,
-        categoryBoost
+        categoryBoost,
+        recentBonus
       },
       decayScore: strength.decayScore,
       rehearsalBoost: strength.rehearsalBoost,
