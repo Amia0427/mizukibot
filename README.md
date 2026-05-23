@@ -294,6 +294,7 @@ Prompt 改了但没生效：
 ## 开发注意
 
 - 共享文件改动前先看 `git status --short` 和目标文件 diff，保留并行开发者已有改动。
+- 历史维护记录统一写入 `docs/repo-cleanup.md`；README 只保留当前入口信息和必要的简短更新时间戳。
 - 不要把 `api/agentGraphV2.js` 当成 runtime 主体；真实主体在 `api/runtimeV2/host.js`。
 - 不要把旧的 `lookup / transform / plan / act` 当成当前顶层 route。
 - 不要只改 prompt 文本就默认生效，要确认 manifest、stage、priority 和预算裁剪。
@@ -302,7 +303,7 @@ Prompt 改了但没生效：
 
 ## 更多文档
 
-- `docs/repo-cleanup.md`：拆分、回流和清理记录。
+- `docs/repo-cleanup.md`：历史维护记录、拆分、回流和清理记录。
 - `docs/main-reply-context.md`：主回复上下文目标。
 - `docs/memos-mcp-planner-recall.md`：MemOS MCP 召回设计。
 - `scripts/README.md`：脚本说明。
