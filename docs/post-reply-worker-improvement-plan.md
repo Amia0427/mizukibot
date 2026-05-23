@@ -6,6 +6,8 @@
 
 运行状态更新 2026-05-23 22:58 +08:00：`POST_REPLY_WORKER_RSS_RECYCLE_MB` 默认改为 `0`，本地 `.env` 同步设置为 `0`，关闭独立 worker 的 RSS 空闲自回收，避免无人守护时进程因超过默认 1024MB 阈值退出。
 
+运行状态更新 2026-05-23 23:58 +08:00：目标 4 首阶段落地，新增结构化 `taskStates`，记录每个 post-reply step 的 `status/attempt/lastError/durationMs`；`completedTasks` 保持布尔兼容，vector/audit/profile 失败标记为 `failed_nonfatal` 且不阻断 core job。
+
 ## 现状结论
 
 回复后学习链路已经从主回复热路径拆出：`api/runtimeV2/nodes/persist.js` 负责在回复完成后判定是否入队；`utils/postReplyJobQueue/` 用文件队列承载 `queued/processing/failed/done` 四状态；`utils/postReplyWorkerRuntime.js` 拉取 job，执行 `utils/postReplyWorker/processJob.js` 的 core/enrich 两阶段任务；`scripts/post-reply-worker.js` 作为独立子进程运行，并带 PID 文件、资源采样和 RSS 空闲回收。
@@ -67,6 +69,8 @@
 ### 4. 任务 DAG 化与 per-task retry
 
 目标：把 `processJob.js` 中顺序 if 编排拆成任务 DAG，按任务粒度记录 retry/skip/result，避免一个低优先级任务影响核心记忆。
+
+进展 2026-05-23 23:58 +08:00：已先完成兼容式任务状态层，`taskStates` 与旧 `completedTasks` 双写；queued merge 新 turn 会重置相关任务状态；核心任务失败仍触发 job retry，低优先级维护任务失败记录为 `failed_nonfatal`。后续再抽 `taskRegistry/taskRunner` 做完整 DAG 编排。
 
 实施：
 - 新增 `utils/postReplyWorker/taskRegistry.js`，注册 `memoryLearning/selfImprovement/dailyJournal/memoryEvent/materialize/vectorMaintenance/memoryQualityAudit/profileMaintenance/enrich`。

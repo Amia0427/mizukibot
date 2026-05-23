@@ -25,6 +25,21 @@ function classifyJob(job = {}) {
   return classifyPostReplyJobError(job);
 }
 
+function summarizeTaskStates(job = {}) {
+  const taskStates = job.taskStates && typeof job.taskStates === 'object' ? job.taskStates : {};
+  const out = {};
+  for (const [key, value] of Object.entries(taskStates)) {
+    if (!value || typeof value !== 'object') continue;
+    out[key] = {
+      status: String(value.status || '').trim(),
+      attempt: Number(value.attempt || 0) || 0,
+      durationMs: Number(value.durationMs || 0) || 0,
+      lastError: String(value.lastError || '').trim()
+    };
+  }
+  return out;
+}
+
 function summarizeJob(job = {}) {
   return {
     jobId: String(job.jobId || '').trim(),
@@ -38,7 +53,8 @@ function summarizeJob(job = {}) {
     updatedAt: String(job.updatedAt || '').trim(),
     lastError: String(job.lastError || '').trim(),
     errorClass: classifyJob(job),
-    completedTasks: job.completedTasks && typeof job.completedTasks === 'object' ? job.completedTasks : {}
+    completedTasks: job.completedTasks && typeof job.completedTasks === 'object' ? job.completedTasks : {},
+    taskStates: summarizeTaskStates(job)
   };
 }
 
@@ -70,12 +86,16 @@ function main() {
   console.log(`post-reply jobs: ${payload.count} queue=${payload.queueDir}`);
   console.log(`counts: ${Object.entries(counts).map(([key, value]) => `${key}=${value}`).join(' ') || 'none'}`);
   for (const job of jobs) {
+    const taskSummary = Object.entries(job.taskStates)
+      .map(([key, value]) => `${key}:${value.status}`)
+      .join(',');
     console.log([
       job.status,
       job.errorClass,
       job.phase,
       job.jobId,
       `attempt=${job.attempt}`,
+      taskSummary ? `tasks=${taskSummary}` : '',
       job.lastError ? `error=${job.lastError.slice(0, 160)}` : ''
     ].filter(Boolean).join(' | '));
   }
@@ -88,6 +108,7 @@ if (require.main === module) {
 module.exports = {
   parseArgs,
   classifyJob,
+  summarizeTaskStates,
   summarizeJob,
   main
 };

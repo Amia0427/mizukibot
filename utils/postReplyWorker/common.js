@@ -2,6 +2,12 @@ const config = require('../../config');
 const {
   isTransientPostReplyError
 } = require('./errorClassifier');
+const {
+  buildTaskStatusPatch,
+  isTaskStateCompleted,
+  normalizeCompletedTasksCompat,
+  normalizeTaskStates
+} = require('./taskState');
 
 function normalizePhase(value = '') {
   const phase = String(value || '').trim().toLowerCase();
@@ -29,14 +35,8 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
-function normalizeCompletedTasks(value = {}) {
-  const source = normalizeObject(value, {});
-  const out = {};
-  for (const [key, completed] of Object.entries(source)) {
-    const normalizedKey = normalizeText(key);
-    if (normalizedKey) out[normalizedKey] = completed === true;
-  }
-  return out;
+function normalizeCompletedTasks(value = {}, taskStates = {}) {
+  return normalizeCompletedTasksCompat(value, taskStates);
 }
 
 function isPartialTaskRetryEnabled() {
@@ -47,32 +47,62 @@ function isTaskCompleted(job = {}, taskKey = '') {
   if (!isPartialTaskRetryEnabled()) return false;
   const key = normalizeText(taskKey);
   if (!key) return false;
-  return normalizeCompletedTasks(job.completedTasks)[key] === true;
+  return isTaskStateCompleted(job, key);
 }
 
-function markTaskCompleted(job = {}, deps = {}, taskKey = '') {
-  if (!isPartialTaskRetryEnabled()) return job;
-  const key = normalizeText(taskKey);
-  if (!key) return job;
-  const nextCompletedTasks = {
-    ...normalizeCompletedTasks(job.completedTasks),
-    [key]: true
-  };
+function persistTaskPatch(job = {}, deps = {}, patch = {}) {
   const nextJob = {
     ...job,
-    completedTasks: nextCompletedTasks
+    ...patch
   };
   const queue = deps.queue;
   if (queue && typeof queue.updateProcessingJob === 'function') {
     try {
-      return queue.updateProcessingJob(nextJob, {
-        completedTasks: nextCompletedTasks
-      });
+      return queue.updateProcessingJob(nextJob, patch);
     } catch (error) {
       console.warn('[post-reply-worker] failed to persist task progress:', error?.message || error);
     }
   }
   return nextJob;
+}
+
+function markTaskStarted(job = {}, deps = {}, taskKey = '', options = {}) {
+  if (!isPartialTaskRetryEnabled()) return job;
+  const key = normalizeText(taskKey);
+  if (!key) return job;
+  const taskStates = normalizeTaskStates(job.taskStates, job.completedTasks);
+  const currentAttempt = Math.max(0, Number(taskStates[key]?.attempt || 0) || 0);
+  return persistTaskPatch(job, deps, buildTaskStatusPatch(job, key, 'running', {
+    ...options,
+    attempt: currentAttempt + 1
+  }));
+}
+
+function markTaskCompleted(job = {}, deps = {}, taskKey = '', options = {}) {
+  if (!isPartialTaskRetryEnabled()) return job;
+  const key = normalizeText(taskKey);
+  if (!key) return job;
+  return persistTaskPatch(job, deps, buildTaskStatusPatch(job, key, options.status || 'done', options));
+}
+
+function markTaskFailed(job = {}, deps = {}, taskKey = '', error = '', options = {}) {
+  if (!isPartialTaskRetryEnabled()) return job;
+  const key = normalizeText(taskKey);
+  if (!key) return job;
+  return persistTaskPatch(job, deps, buildTaskStatusPatch(job, key, 'failed', {
+    ...options,
+    lastError: error?.message || error
+  }));
+}
+
+function markTaskFailedNonFatal(job = {}, deps = {}, taskKey = '', error = '', options = {}) {
+  if (!isPartialTaskRetryEnabled()) return job;
+  const key = normalizeText(taskKey);
+  if (!key) return job;
+  return persistTaskPatch(job, deps, buildTaskStatusPatch(job, key, 'failed_nonfatal', {
+    ...options,
+    lastError: error?.message || error
+  }));
 }
 
 function buildPostReplyCanceledError(job = {}) {
@@ -91,9 +121,13 @@ module.exports = {
   isTransientPostReplyError,
   logStructured,
   markTaskCompleted,
+  markTaskFailed,
+  markTaskFailedNonFatal,
+  markTaskStarted,
   normalizeArray,
   normalizeCompletedTasks,
   normalizeObject,
   normalizePhase,
+  normalizeTaskStates,
   normalizeText
 };
