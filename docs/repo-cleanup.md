@@ -1,5 +1,7 @@
 # Repo Cleanup Notes
 
+更新 2026-05-23 10:30 +08:00：小模块版本切换已落地到目录入口。备份包：`artifacts/backups/large-facades-small-module-cutover-2026-05-23-0917+0800.zip`；sha256：`33dd4e90a280f763aae3aae89f9c9826e0664b206d96a8826626dd7e2f907380`。归档内 33 个旧大文件齐全，`.sha256` 校验通过；manifest 内 33 个旧 `.js` 入口已删除；33 个新 `index.js` 语法检查和 require smoke 通过；运行代码、脚本、测试、README、CLAUDE 中未发现旧 `.js` facade 直连路径。聚焦验证已通过：`npm run check:agent:static`、`npm run check:prompts`、`node tests/memoryWritePipeline.test.js`、`node tests/memoryWritePipelineQualityGate.test.js`、`node tests/routerMemoryTools.test.js`、`node tests/mainReplyContextPreviewRoute.test.js`、`node tests/createAgentExecutor.test.js`、`node tests/runtimeHostCotSource.test.js`、`node tests/httpClientReasoningEffort.test.js`。全量验证 `NODE_OPTIONS=--max-old-space-size=8192 npm test` 已通过；`npm start` 在现有活跃实例 PID 11240 下被单实例锁正常拦截，启动日志未出现旧大文件路径。
+
 更新 2026-05-23 09:02 +08:00：README 已明确历史维护记录统一写入 `docs/repo-cleanup.md`，README 只保留入口级更新时间戳。
 
 更新 2026-05-22 21:18 +08:00：根 README 已从历史流水账重构为入口文档，保留快速启动、常用命令、关键配置、修改入口和排障顺序；详细维护记录继续收敛在 `docs/`。
@@ -30,6 +32,8 @@
 
 更新 2026-05-22 17:08 +08:00：扩展复查发现的 `utils/memoryWritePipeline.js` 回流项已处理，memory quality gate 拆入 `utils/memoryWritePipeline/qualityGate.js`；旧入口仅保留写入流程编排、批处理 guard 和兼容导出。
 
-未处理项：`api/skills.js`、`core/tgBot.js`、`api/legacy/agentGraphV1Runtime.js` 和 `src/features/*` 需要按功能开关、外部调用兼容和测试覆盖单独确认。
+当前小模块切换清单内未处理项：无。
+
+清单外待后续单独确认项：`api/skills.js`、`core/tgBot.js`、`api/legacy/agentGraphV1Runtime.js` 和 `src/features/*` 需要按功能开关、外部调用兼容和测试覆盖单独确认。
 
 禁止直接手删项：`data/lancedb/**`、`data/memory-v3/**`、`api/legacy/aiHost.js`、`core/*.chunk.js` 和 `api/runtimeV2/context/*.chunk.js`。
