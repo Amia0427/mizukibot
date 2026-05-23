@@ -31,6 +31,8 @@ const {
 } = require('../utils/personaMemoryState');
 const { buildDirectedContextPromptSnippet } = require('../api/graphPrompting');
 const { buildLlmPerception } = require('./llmPerception');
+const { appendUtf8Chunk } = require('../utils/utf8Stream');
+const { StringDecoder } = require('string_decoder');
 
 function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();

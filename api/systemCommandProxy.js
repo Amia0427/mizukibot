@@ -1,5 +1,6 @@
 const axios = require('axios');
 const config = require('../config');
+const { readUtf8StreamToString } = require('../utils/utf8Stream');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -79,23 +80,7 @@ async function ensureSystemSession(client, machineId, sessionId, cwd = '', metad
 }
 
 async function readStreamToString(stream) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let buffer = '';
-    const done = (error = null) => {
-      if (settled) return;
-      settled = true;
-      if (error) return reject(error);
-      resolve(buffer);
-    };
-
-    stream.on('data', (chunk) => {
-      buffer += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
-    });
-    stream.once('end', () => done());
-    stream.once('close', () => done());
-    stream.once('error', (error) => done(error));
-  });
+  return readUtf8StreamToString(stream);
 }
 
 function parseSseEvents(raw = '') {

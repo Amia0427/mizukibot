@@ -3,6 +3,7 @@ const config = require('../../config');
 const { buildForwardPrompt } = require('./commandBackend');
 const { getHapiControlRuntime } = require('../../utils/hapiControlRuntime');
 const { detectSensitiveOutput } = require('../../utils/promptSecurity');
+const { readUtf8StreamToString } = require('../../utils/utf8Stream');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -159,23 +160,7 @@ async function postSessionMessage(client, sessionId, body = {}, requestOptions =
 }
 
 async function readStreamToString(stream) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let buffer = '';
-    const done = (error = null) => {
-      if (settled) return;
-      settled = true;
-      if (error) return reject(error);
-      resolve(buffer);
-    };
-
-    stream.on('data', (chunk) => {
-      buffer += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
-    });
-    stream.once('end', () => done());
-    stream.once('close', () => done());
-    stream.once('error', (error) => done(error));
-  });
+  return readUtf8StreamToString(stream);
 }
 
 async function approveOrDeny(client, sessionId, approval = {}, resolution = 'approve') {

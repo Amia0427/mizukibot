@@ -3,6 +3,7 @@ const config = require('../../config');
 const { buildForwardPrompt } = require('./commandBackend');
 const { parseGatewayJsonResponse, parseGatewaySSEStream } = require('./gatewayResponseParser');
 const { detectSensitiveOutput } = require('../../utils/promptSecurity');
+const { readUtf8StreamToString } = require('../../utils/utf8Stream');
 
 function ensureResponsesUrl(url = '') {
   const normalized = String(url || '').replace(/\/+$/, '');
@@ -115,23 +116,7 @@ function createGatewayBridgeCall({ question, sessionId, customPrompt = null, ima
         throw new Error('gateway streaming response is not readable');
       }
 
-      const raw = await new Promise((resolve, reject) => {
-        let settled = false;
-        let buffer = '';
-        const done = (err = null) => {
-          if (settled) return;
-          settled = true;
-          if (err) return reject(err);
-          resolve(buffer);
-        };
-
-        stream.on('data', (chunk) => {
-          buffer += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
-        });
-        stream.once('end', () => done());
-        stream.once('close', () => done());
-        stream.once('error', (error) => done(error));
-      });
+      const raw = await readUtf8StreamToString(stream);
 
       if (cancelled) {
         const err = new Error('gateway cancelled');

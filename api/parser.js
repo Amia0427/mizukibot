@@ -1,5 +1,34 @@
 ﻿let latestReasoning = ''; // Keep latest model reasoning for the web panel.
 
+const { StringDecoder } = require('string_decoder');
+
+const SSE_UTF8_DECODER = Symbol('sseUtf8Decoder');
+
+function normalizeSSEState(state) {
+  const nextState = state && typeof state === 'object' ? state : {};
+  nextState.buffer = String(nextState.buffer || '');
+  return nextState;
+}
+
+function decodeSSEChunk(state, chunk) {
+  if (!Buffer.isBuffer(chunk)) return String(chunk || '');
+  if (!state[SSE_UTF8_DECODER]) {
+    Object.defineProperty(state, SSE_UTF8_DECODER, {
+      value: new StringDecoder('utf8'),
+      enumerable: false,
+      configurable: true
+    });
+  }
+  return state[SSE_UTF8_DECODER].write(chunk);
+}
+
+function flushSSEDecoder(state) {
+  if (!state || typeof state !== 'object' || !state[SSE_UTF8_DECODER]) return '';
+  const tail = state[SSE_UTF8_DECODER].end();
+  delete state[SSE_UTF8_DECODER];
+  return tail;
+}
+
 function textFromContentArray(content) {
   if (!Array.isArray(content)) return '';
   return content
@@ -254,11 +283,9 @@ function extractUsageFromSSEObject(obj) {
 }
 
 function extractSSEEvents(state, chunk) {
-  const nextState = state && typeof state === 'object'
-    ? { buffer: String(state.buffer || '') }
-    : { buffer: '' };
+  const nextState = normalizeSSEState(state);
 
-  nextState.buffer += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
+  nextState.buffer += decodeSSEChunk(nextState, chunk);
   const events = [];
 
   while (true) {
@@ -304,7 +331,9 @@ function extractSSEEvents(state, chunk) {
 }
 
 function flushSSEState(state) {
-  const tail = String(state?.buffer || '').trim();
+  const nextState = normalizeSSEState(state);
+  nextState.buffer += flushSSEDecoder(nextState);
+  const tail = String(nextState.buffer || '').trim();
   if (!tail) return [];
 
   const lines = tail.split(/\r?\n/);

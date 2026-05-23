@@ -1,8 +1,10 @@
 const path = require('path');
 const { spawn } = require('child_process');
+const { StringDecoder } = require('string_decoder');
 const config = require('../../config');
 const { cleanToolReplyText, resolveToolReplyFormattingPreferences } = require('../../utils/toolReplyFormatting');
 const { buildSubagentStyleGuardInstruction } = require('../../utils/subagentStyleGuard');
+const { appendUtf8Chunk } = require('../../utils/utf8Stream');
 const {
   classifyPromptThreat,
   detectSensitiveOutput,
@@ -194,6 +196,8 @@ function runSubagentOnce({ command, args, workDir, timeoutMs, onSpawn = null }) 
     let stdout = '';
     let stderr = '';
     let settled = false;
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
 
     const timer = setTimeout(() => {
       if (settled) return;
@@ -202,8 +206,8 @@ function runSubagentOnce({ command, args, workDir, timeoutMs, onSpawn = null }) 
       reject(createSubagentError(`subagent timeout after ${timeoutMs}ms`, 'SUBAGENT_TIMEOUT'));
     }, timeoutMs);
 
-    child.stdout.on('data', (buf) => { stdout += String(buf); });
-    child.stderr.on('data', (buf) => { stderr += String(buf); });
+    child.stdout.on('data', (buf) => { stdout += appendUtf8Chunk(stdoutDecoder, buf); });
+    child.stderr.on('data', (buf) => { stderr += appendUtf8Chunk(stderrDecoder, buf); });
 
     child.on('error', (err) => {
       if (settled) return;
@@ -218,6 +222,8 @@ function runSubagentOnce({ command, args, workDir, timeoutMs, onSpawn = null }) 
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      stdout += stdoutDecoder.end();
+      stderr += stderrDecoder.end();
       resolve({ code, stdout, stderr });
     });
   });
@@ -501,9 +507,11 @@ function handleWorkerMessage(entry = null, rawLine = '') {
 function attachWorkerListeners(entry = null) {
   if (!entry?.child) return;
   let stdoutBuffer = '';
+  const stdoutDecoder = new StringDecoder('utf8');
+  const stderrDecoder = new StringDecoder('utf8');
 
   entry.child.stdout.on('data', (chunk) => {
-    stdoutBuffer += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
+    stdoutBuffer += appendUtf8Chunk(stdoutDecoder, chunk);
     while (true) {
       const newlineIndex = stdoutBuffer.indexOf('\n');
       if (newlineIndex < 0) break;
@@ -515,7 +523,7 @@ function attachWorkerListeners(entry = null) {
   });
 
   entry.child.stderr.on('data', (chunk) => {
-    entry.stderr = `${String(entry.stderr || '')}${Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')}`;
+    entry.stderr = `${String(entry.stderr || '')}${appendUtf8Chunk(stderrDecoder, chunk)}`;
   });
 
   entry.child.on('error', (error) => {
@@ -526,6 +534,19 @@ function attachWorkerListeners(entry = null) {
   });
 
   entry.child.on('close', (code, signal) => {
+    stdoutBuffer += stdoutDecoder.end();
+    entry.stderr = `${String(entry.stderr || '')}${stderrDecoder.end()}`;
+    while (true) {
+      const newlineIndex = stdoutBuffer.indexOf('\n');
+      if (newlineIndex < 0) break;
+      const line = stdoutBuffer.slice(0, newlineIndex).trim();
+      stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+      if (!line) continue;
+      handleWorkerMessage(entry, line);
+    }
+    const tailLine = stdoutBuffer.trim();
+    stdoutBuffer = '';
+    if (tailLine) handleWorkerMessage(entry, tailLine);
     if (entry.ready === false && typeof entry.rejectReady === 'function') {
       entry.rejectReady(createPersistentWorkerError(
         `persistent subagent worker exited before ready (code=${code}, signal=${signal || 'none'})`,
@@ -1044,5 +1065,8 @@ module.exports = {
   setCommandBackendTestHooks,
   shutdownCommandBackend,
   summarizeProcessFailure,
+  __testInternals: {
+    attachWorkerListeners
+  },
   __persistentWorkerStats: persistentWorkerStats
 };
