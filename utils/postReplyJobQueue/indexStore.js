@@ -32,6 +32,7 @@ function normalizeIndexEntry(value = {}) {
     createdAt: normalizeText(source.createdAt || source.created_at),
     updatedAt: normalizeText(source.updatedAt || source.updated_at),
     leaseUntil: normalizeText(source.leaseUntil || source.lease_until),
+    lastHeartbeatAt: normalizeText(source.lastHeartbeatAt || source.last_heartbeat_at),
     errorClass: normalizeText(source.errorClass || source.error_class),
     priority: Math.max(0, Number(source.priority) || 0)
   };
@@ -50,6 +51,7 @@ function buildIndexEntry(job = {}) {
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     leaseUntil: job.leaseUntil,
+    lastHeartbeatAt: job.lastHeartbeatAt,
     errorClass: job.errorClass,
     priority: job.priority
   });

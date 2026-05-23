@@ -5,9 +5,11 @@ function normalizeErrorText(jobOrError = {}) {
 }
 
 function classifyPostReplyJobError(jobOrError = {}) {
+  const directClass = String(jobOrError?.errorClass || jobOrError?.code || '').trim();
+  if (directClass === 'canceled' || directClass === 'POST_REPLY_JOB_CANCELED') return 'canceled';
   const error = normalizeErrorText(jobOrError).toLowerCase();
   if (!error) return 'no_error';
-  if (/(canceled|cancelled|cancel requested|skipped:circuit_open)/.test(error)) return 'canceled';
+  if (/(canceled|cancelled|cancel requested|cancel_requested|POST_REPLY_JOB_CANCELED|skipped:circuit_open)/i.test(error)) return 'canceled';
   if (/(schema|invalid job|parse job|job shape|schema_version)/.test(error)) return 'schema';
   if (/(quality_gate|quality gate|low confidence|drop reason)/.test(error)) return 'quality_gate';
   if (/(401|403|404|forbidden|unauthorized|not found|model not supported|unsupported model)/.test(error)) {
@@ -28,7 +30,11 @@ function isTransientPostReplyError(jobOrError = {}) {
 }
 
 function isTerminalPostReplyError(jobOrError = {}) {
-  return isPostReplyErrorClass(classifyPostReplyJobError(jobOrError), 'terminal');
+  const errorClass = classifyPostReplyJobError(jobOrError);
+  return errorClass === 'terminal'
+    || errorClass === 'canceled'
+    || errorClass === 'schema'
+    || errorClass === 'quality_gate';
 }
 
 function isRequeueSafePostReplyError(jobOrError = {}) {

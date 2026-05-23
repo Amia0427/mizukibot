@@ -75,7 +75,17 @@ function markTaskCompleted(job = {}, deps = {}, taskKey = '') {
   return nextJob;
 }
 
+function buildPostReplyCanceledError(job = {}) {
+  const reason = normalizeText(job.cancelReason || job.lastError || 'cancel_requested') || 'cancel_requested';
+  const error = new Error(`post-reply job canceled: ${reason}`);
+  error.code = 'POST_REPLY_JOB_CANCELED';
+  error.errorClass = 'canceled';
+  error.cancelReason = reason;
+  return error;
+}
+
 module.exports = {
+  buildPostReplyCanceledError,
   isRateLimitError,
   isTaskCompleted,
   isTransientPostReplyError,

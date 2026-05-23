@@ -196,6 +196,7 @@ function normalizeJob(job = {}) {
     },
     leaseOwner: normalizeText(job.leaseOwner || job.lease_owner),
     leaseUntil: normalizeText(job.leaseUntil || job.lease_until),
+    lastHeartbeatAt: normalizeText(job.lastHeartbeatAt || job.last_heartbeat_at),
     cancelRequested: job.cancelRequested === true || job.cancel_requested === true,
     canceledAt: normalizeText(job.canceledAt || job.canceled_at),
     cancelReason: normalizeText(job.cancelReason || job.cancel_reason),

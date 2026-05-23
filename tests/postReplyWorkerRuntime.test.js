@@ -418,6 +418,86 @@ module.exports = (async () => {
     assert.ok(!calls.some((item) => item.type === 'journal'), 'retry should not rerun completed daily journal');
 
     calls.length = 0;
+    const cancelQueue = {
+      updatedJobs: [],
+      readCount: 0,
+      recoverStaleProcessingJobs() {
+        return [];
+      },
+      claimNextJob() {
+        return null;
+      },
+      heartbeatProcessingJob(job, patch = {}) {
+        const next = {
+          ...job,
+          ...patch,
+          leaseUntil: '2026-05-23T12:05:00.000Z',
+          lastHeartbeatAt: '2026-05-23T12:00:00.000Z'
+        };
+        this.updatedJobs.push(next);
+        return next;
+      },
+      readProcessingJob(jobId) {
+        this.readCount += 1;
+        if (this.readCount >= 2) {
+          return {
+            jobId,
+            status: 'processing',
+            cancelRequested: true,
+            cancelReason: 'test_cancel'
+          };
+        }
+        return null;
+      },
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      },
+      markDone(job) {
+        return { ...job, status: 'done' };
+      },
+      markFailed(job, error) {
+        return { ...job, status: 'failed', lastError: error, errorClass: 'canceled' };
+      },
+      retryOrFail(job, error) {
+        return { job: { ...job, status: 'queued', lastError: error }, retried: true };
+      },
+      findQueuedJobByAggregateKey() {
+        return null;
+      },
+      enqueue(job) {
+        return { enqueued: true, job };
+      }
+    };
+    const cancelRuntime = createPostReplyWorkerRuntime({
+      queue: cancelQueue,
+      processJob: async (job, deps) => processPostReplyJob(job, deps)
+    });
+    const canceledJob = await cancelRuntime.runOneJob({
+      jobId: 'cancel_runtime_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true
+      }
+    });
+    assert.strictEqual(canceledJob.status, 'failed', 'canceled processing job should fail terminally');
+    assert.strictEqual(canceledJob.errorClass, 'canceled');
+    assert.ok(calls.some((item) => item.type === 'memory'), 'first step should have run before cancel boundary');
+    assert.ok(!calls.some((item) => item.type === 'self'), 'cancel boundary should stop next step');
+    assert.ok(cancelQueue.updatedJobs.some((item) => item.leaseUntil), 'heartbeat should extend lease around steps');
+
+    calls.length = 0;
     const materializeResumeCalls = [];
     const materializeResumeQueue = {
       updatedJobs: [],

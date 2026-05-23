@@ -309,6 +309,16 @@ function createPostReplyWorkerRuntime(options = {}) {
       if (updated && typeof updated === 'object') latestJob = updated;
       return updated;
     };
+    progressQueue.heartbeatProcessingJob = (...args) => {
+      if (typeof queue.heartbeatProcessingJob !== 'function') return args[0];
+      const updated = queue.heartbeatProcessingJob(...args);
+      if (updated && typeof updated === 'object') latestJob = updated;
+      return updated;
+    };
+    progressQueue.readProcessingJob = (...args) => {
+      if (typeof queue.readProcessingJob !== 'function') return null;
+      return queue.readProcessingJob(...args);
+    };
     const activeUserId = normalizeText(job.userId);
     const phase = normalizePhase(job.phase);
     if (!canRunPhase(job)) {
