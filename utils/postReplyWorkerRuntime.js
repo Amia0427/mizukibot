@@ -17,6 +17,7 @@ const {
 } = require('./postReplyWorker/enrichPhase');
 const { processPostReplyJob } = require('./postReplyWorker/processJob');
 const {
+  isRequeueSafePostReplyError,
   isTerminalPostReplyError
 } = require('./postReplyWorker/errorClassifier');
 const {
@@ -53,6 +54,10 @@ function createPostReplyWorkerRuntime(options = {}) {
   const retryBaseMs = Math.max(0, Number(config.POST_REPLY_RETRY_BASE_MS) || 1000);
   const retryMaxMs = Math.max(0, Number(config.POST_REPLY_RETRY_MAX_MS) || 30000);
   const retryJitterMs = Math.max(0, Number(config.POST_REPLY_RETRY_JITTER_MS) || 0);
+  const autoRequeueTransientEnabled = options.autoRequeueTransientEnabled !== undefined
+    ? options.autoRequeueTransientEnabled === true
+    : config.POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED === true;
+  const autoRequeueMaxPerTick = Math.max(1, Number(options.autoRequeueMaxPerTick || config.POST_REPLY_AUTO_REQUEUE_MAX_PER_TICK) || 3);
   const rssRecycleBytes = Math.max(0, Number(options.rssRecycleMb ?? config.POST_REPLY_WORKER_RSS_RECYCLE_MB) || 0) * 1024 * 1024;
   const rssRecycleIdleMs = Math.max(0, Number(options.rssRecycleIdleMs ?? config.POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS) || 0);
   const onRecycle = typeof options.onRecycle === 'function' ? options.onRecycle : null;
@@ -309,6 +314,58 @@ function createPostReplyWorkerRuntime(options = {}) {
     });
   }
 
+  function requeueTransientFailedJobs() {
+    if (!autoRequeueTransientEnabled) {
+      return {
+        enabled: false,
+        scanned: 0,
+        requeued: 0
+      };
+    }
+    if (typeof queue.listJobs !== 'function' || typeof queue.requeueFailedJob !== 'function') {
+      return {
+        enabled: true,
+        skipped: true,
+        reason: 'queue_api_missing',
+        scanned: 0,
+        requeued: 0
+      };
+    }
+    const failedJobs = normalizeArray(queue.listJobs(['failed']));
+    let scanned = 0;
+    let requeued = 0;
+    for (const job of failedJobs) {
+      if (requeued >= autoRequeueMaxPerTick) break;
+      scanned += 1;
+      if (!isRequeueSafePostReplyError(job)) continue;
+      const requeuedJob = queue.requeueFailedJob(job, {
+        availableAt: new Date().toISOString(),
+        nextRetryAt: '',
+        retryDelayMs: 0,
+        lastError: normalizeText(job.lastError),
+        errorClass: normalizeText(job.errorClass),
+        requeueReason: 'auto_transient_failed_requeue'
+      });
+      requeued += 1;
+      appendPostReplyJobTrace(requeuedJob, 'job_auto_requeued', {
+        errorClass: normalizeText(job.errorClass),
+        lastError: normalizeText(job.lastError).slice(0, 240)
+      });
+    }
+    if (requeued > 0) {
+      logStructured('post_reply_auto_requeue_transient', {
+        scanned,
+        requeued,
+        maxPerTick: autoRequeueMaxPerTick
+      });
+    }
+    return {
+      enabled: true,
+      scanned,
+      requeued
+    };
+  }
+
   function getPressureDeferMs() {
     return getPerfRuntimeModule().getBackgroundPressureDelayMs();
   }
@@ -478,6 +535,7 @@ function createPostReplyWorkerRuntime(options = {}) {
   async function tick() {
     if (stopped) return;
     if (maybeRequestIdleRecycle()) return;
+    requeueTransientFailedJobs();
 
     const pressureDeferMs = getPressureDeferMs();
     updatePressureBackoff(pressureDeferMs);
@@ -554,6 +612,7 @@ function createPostReplyWorkerRuntime(options = {}) {
     stop,
     tick,
     runOneJob,
+    requeueTransientFailedJobs,
     getActiveUserIds,
     getStats,
     maybeRequestIdleRecycle,

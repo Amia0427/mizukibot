@@ -70,7 +70,9 @@ function planRequeueJobs(jobs = [], args = {}) {
 
 function shouldApplyRequeue(args = {}) {
   return args.dryRun !== true
-    && (args.force === true || config.POST_REPLY_FAILED_TRANSIENT_REQUEUE_ENABLED === true);
+    && (args.force === true
+      || config.POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED === true
+      || config.POST_REPLY_FAILED_TRANSIENT_REQUEUE_ENABLED === true);
 }
 
 function buildQueuedJob(job = {}, now = new Date()) {
@@ -93,13 +95,17 @@ function requeuePlannedJobs(queue, planned = [], args = {}) {
     if (!item.requeueSafe) continue;
     const job = item.job;
     const next = buildQueuedJob(job);
-    const failedPath = path.join(queue.queueDir, 'failed', `${job.jobId}.json`);
-    const queuedPath = path.join(queue.queueDir, 'queued', `${job.jobId}.json`);
-    writeJson(queuedPath, next);
-    try {
-      if (fs.existsSync(failedPath)) fs.unlinkSync(failedPath);
-    } catch (error) {
-      console.warn('[post-reply-requeue] failed to remove old failed job file:', error?.message || error);
+    if (typeof queue.requeueFailedJob === 'function') {
+      queue.requeueFailedJob(next);
+    } else {
+      const failedPath = path.join(queue.queueDir, 'failed', `${job.jobId}.json`);
+      const queuedPath = path.join(queue.queueDir, 'queued', `${job.jobId}.json`);
+      writeJson(queuedPath, next);
+      try {
+        if (fs.existsSync(failedPath)) fs.unlinkSync(failedPath);
+      } catch (error) {
+        console.warn('[post-reply-requeue] failed to remove old failed job file:', error?.message || error);
+      }
     }
     requeued += 1;
   }

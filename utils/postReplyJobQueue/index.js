@@ -580,6 +580,25 @@ function createPostReplyJobQueue(options = {}) {
     };
   }
 
+  function requeueFailedJob(job = {}, patch = {}) {
+    const normalized = normalizeJob({
+      ...job,
+      ...patch,
+      status: 'queued',
+      updatedAt: nowIso(),
+      failedAt: '',
+      leaseOwner: '',
+      leaseUntil: '',
+      nextRetryAt: normalizeText(patch.nextRetryAt),
+      retryDelayMs: Math.max(0, Number(patch.retryDelayMs) || 0),
+      requeueSafe: false
+    });
+    removeJobFile('failed', normalized.jobId);
+    atomicWriteJson(jobPath('queued', normalized.jobId), normalized);
+    withQueueLock('index', () => indexStore.upsert(normalized));
+    return normalized;
+  }
+
   function recoverStaleProcessingJobs(options = {}) {
     const staleBefore = typeof options.staleBefore === 'string'
       ? options.staleBefore
@@ -616,6 +635,7 @@ function createPostReplyJobQueue(options = {}) {
     readProcessingJob,
     updateProcessingJob,
     retryOrFail,
+    requeueFailedJob,
     findJobByDedupeKey,
     findQueuedJobByAggregateKey,
     listJobs,

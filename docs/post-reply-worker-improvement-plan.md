@@ -1,6 +1,6 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-24 01:21 +08:00
+更新时间：2026-05-24 01:27 +08:00
 
 运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
 
@@ -25,6 +25,8 @@
 运行状态更新 2026-05-24 01:10 +08:00：目标 12 补强落地，enrich task/group/style/jargon 写入会记录 `enrich_write_ids` trace；回滚 dry-run/apply 报告新增 `summary.byCategory/byStatus/byUser`，可解释哪些 task/group/style/jargon/self-improvement 写入会被归档。
 
 运行状态更新 2026-05-24 01:21 +08:00：目标 2/14 补强落地，新增 1k job 队列索引规模回归；评测脚本开始校验 `expected.writes/drops`，并新增学习回滚与重启租约恢复 case。
+
+运行状态更新 2026-05-24 01:27 +08:00：目标 8 补强落地，worker tick 内置 transient failed job 自动安全重放；新增 `POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED` 和 `POST_REPLY_AUTO_REQUEUE_MAX_PER_TICK`，手工脚本与 runtime 复用队列 API。
 
 ## 现状结论
 
@@ -58,7 +60,7 @@
 | 5. Enrich 质量门禁 | 已落地 | `utils/postReplyWorker/enrichQualityGate.js` |
 | 6. Core 学习降噪 | 已落地 | `learningIntent`、`POST_REPLY_EXPLICIT_MEMORY_BYPASS_GROUP_ALLOWLIST` |
 | 7. 单 Job Trace | 已落地 | `data/post_reply_traces/*.jsonl`、`scripts/inspect-post-reply-job.js` |
-| 8. 失败分类/安全重放 | 已落地 | `errorClassifier.js`、`scripts/requeue-post-reply-failed.js` |
+| 8. 失败分类/安全重放 | 已落地 | `errorClassifier.js`、`scripts/requeue-post-reply-failed.js`、worker 自动 transient requeue |
 | 9. Worker 诊断 | 已落地 | `npm run diag:runtime`、`scripts/inspect-post-reply-jobs.js` |
 | 10. 背压保护 | 已落地 | `POST_REPLY_ENRICH_PRESSURE_PAUSE_ENABLED`、`POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE` |
 | 11. 并行安全 | 已落地 | `POST_REPLY_QUEUE_LOCK_TIMEOUT_MS`、`.locks` |
@@ -166,7 +168,7 @@
 
 目标：把 `requeue-post-reply-failed.js` 从人工脚本升级为 worker 内置的安全重放策略，可区分 transient、terminal、schema、quality_gate、canceled。
 
-进展 2026-05-23 22:43 +08:00：已落地统一错误分类，failed job 写入 `errorClass/requeueSafe`，重放脚本支持 transient-only dry-run/apply。
+进展 2026-05-24 01:27 +08:00：已落地统一错误分类，failed job 写入 `errorClass/requeueSafe`，重放脚本支持 transient-only dry-run/apply；worker 可通过配置在 tick 内自动安全重排 transient failed job，并按每 tick 上限限流。
 
 实施：
 - 抽出 `utils/postReplyWorker/errorClassifier.js`，统一 runtime 与 requeue 脚本的错误分类。
