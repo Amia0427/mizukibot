@@ -11,7 +11,7 @@ const { addTaskMemoryWithVectorBackfill } = require('../../utils/taskMemory');
 const { addGroupMemoryWithVectorBackfill } = require('../../utils/groupMemory');
 const {
   appendVersionedMemoryUpdate
-} = require('../../utils/memory-v3');
+} = require('../../utils/memory-v3/versionedUpdate');
 const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('../../utils/promptSecurity');
 const {
   ensureChatCompletionsUrl,

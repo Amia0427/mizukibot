@@ -151,28 +151,24 @@ module.exports = (async () => {
       }
     });
 
-    assert.strictEqual(calls.length, 2);
+    assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].retries, 0);
-    assert.strictEqual(calls[1].retries, 0);
     const firstPayload = JSON.parse(calls[0].body.messages[1].content);
-    const secondPayload = JSON.parse(calls[1].body.messages[1].content);
     assert.ok(firstPayload.semanticContext);
     assert.strictEqual(firstPayload.semanticContext.toolDecisionHints.sourceScope, 'web');
     assert.ok(!Object.prototype.hasOwnProperty.call(firstPayload, 'semanticRefinement'));
-    assert.strictEqual(secondPayload.semanticRefinement.schemaVersion, 'planner_semantic_refinement_v1');
-    assert.ok(secondPayload.semanticRefinement.reasons.includes('requested_semantic_refinement'));
-    assert.ok(secondPayload.semanticRefinement.reasons.includes('low_semantic_confidence'));
-    assert.strictEqual(secondPayload.semanticRefinement.previousDecision.mode, 'chat_only');
 
-    assert.strictEqual(decision.mode, 'tool_plan');
-    assert.deepStrictEqual(decision.allowedToolNames, ['web_search', 'web_fetch']);
-    assert.strictEqual(decision.steps[0].tool, 'web_search');
-    assert.strictEqual(decision.steps[1].tool, 'web_fetch');
-    assert.strictEqual(decision.plannerMeta.semanticConfidence, 0.91);
-    assert.strictEqual(decision.plannerMeta.needsSemanticRefinement, false);
-    assert.strictEqual(decision.plannerMeta.semanticRefinement.totalModelCalls, 2);
-    assert.strictEqual(decision.plannerMeta.semanticRefinement.refined, true);
-    assert.deepStrictEqual(decision.plannerMeta.semanticRefinement.attempts.map((item) => item.attempt), [1, 2]);
+    assert.strictEqual(decision.mode, 'chat_only');
+    assert.deepStrictEqual(decision.allowedToolNames, []);
+    assert.strictEqual(decision.steps.length, 0);
+    assert.strictEqual(decision.plannerMeta.semanticConfidence, 0.41);
+    assert.strictEqual(decision.plannerMeta.needsSemanticRefinement, true);
+    assert.strictEqual(decision.plannerMeta.semanticRefinement.totalModelCalls, 1);
+    assert.strictEqual(decision.plannerMeta.semanticRefinement.maxModelCalls, 1);
+    assert.strictEqual(decision.plannerMeta.semanticRefinement.refined, false);
+    assert.deepStrictEqual(decision.plannerMeta.semanticRefinement.attempts.map((item) => item.attempt), [1]);
+    assert.ok(decision.plannerMeta.semanticRefinement.triggerReasons.includes('requested_semantic_refinement'));
+    assert.ok(decision.plannerMeta.semanticRefinement.triggerReasons.includes('low_semantic_confidence'));
 
     console.log('plannerSemanticRefine.test.js passed');
   } finally {

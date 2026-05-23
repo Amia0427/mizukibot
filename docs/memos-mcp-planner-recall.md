@@ -1,6 +1,6 @@
 # MemOS MCP Planner Recall
 
-更新时间：2026-05-21 22:01 +08:00
+更新时间：2026-05-23 22:10 +08:00
 
 ## 目标
 
@@ -23,6 +23,7 @@ prepare/planner
 
 ```env
 MEMOS_MCP_ENABLED=false
+MEMOS_REMOTE_RECALL_ENABLED=false
 MEMOS_MCP_SERVER_NAME=memos-api-mcp
 MEMOS_API_KEY=
 MEMOS_USER_ID=
@@ -52,6 +53,8 @@ MEMOS_WRITE_ASYNC=true
 
 ## 约束
 
+- 2026-05-23 22:10 +08:00：远端召回新增总闸 `MEMOS_REMOTE_RECALL_ENABLED=false`。即使旧环境变量 `MEMOS_MCP_ENABLED=true`，planner 也不会触发 MemOS 远端召回；如需恢复，必须同时显式开启两个变量。
+- 2026-05-23 22:10 +08:00：planner 模型调用固定单轮，`PLANNER_MAX_MODEL_CALLS=1`，语义 refine 只记录诊断，不再追加第二轮 planner 请求。
 - planner 可增加一次 MCP recall/discovery 判断，主回复模型调用次数不增加。
 - MemOS 工具发现固定对 `memos-api-mcp` 做真实 discovery；即使全局 `MCP_DISCOVERY_MODE=lazy`，也会校验实际工具列表。
 - `memos_recall` 优先级低于 `short_term_continuity`，高于 `background_research`。

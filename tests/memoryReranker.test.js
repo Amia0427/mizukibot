@@ -28,7 +28,7 @@ assert.deepStrictEqual(
   ]
 );
 
-(async () => {
+module.exports = (async () => {
   const candidates = [
     { id: 'old_top', text: 'user likes coffee', score: 0.9, source: 'profile', type: 'like' },
     { id: 'rerank_top', text: 'user wants memory reranker help', score: 0.3, source: 'task', type: 'fact' }

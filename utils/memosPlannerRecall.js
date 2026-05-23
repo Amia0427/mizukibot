@@ -92,7 +92,8 @@ function isMemosPlannerRecallEnabled(options = {}) {
     ...getConfig(),
     ...normalizeObject(options.config, {})
   };
-  return currentConfig.MEMOS_MCP_ENABLED === true;
+  return currentConfig.MEMOS_MCP_ENABLED === true
+    && currentConfig.MEMOS_REMOTE_RECALL_ENABLED === true;
 }
 
 function getMemosServerName(options = {}) {
@@ -1325,6 +1326,18 @@ async function recallForPlanner(query = '', options = {}) {
       }
     }));
   }
+  if (currentConfig.MEMOS_REMOTE_RECALL_ENABLED !== true) {
+    return attachBoundaryDiagnostics(buildEmptyRecall(normalizedQuery, {
+      rejectedReason: 'remote_recall_disabled',
+      diagnostics: {
+        enabled: false,
+        remoteRecallEnabled: false,
+        serverName,
+        recallSource,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      }
+    }));
+  }
   if (!routeGate.allowed) {
     return attachBoundaryDiagnostics(buildEmptyRecall(normalizedQuery, {
       rejectedReason: routeGate.reason || 'route_not_allowed',
@@ -1500,7 +1513,9 @@ async function addMessageToMemos(message = {}, options = {}) {
     skipped: true,
     reason: 'remote_write_disabled',
     diagnostics: {
-      enabled: currentConfig.MEMOS_MCP_ENABLED === true,
+      enabled: isMemosPlannerRecallEnabled({ ...options, config: currentConfig }),
+      mcpEnabled: currentConfig.MEMOS_MCP_ENABLED === true,
+      remoteRecallEnabled: currentConfig.MEMOS_REMOTE_RECALL_ENABLED === true,
       serverName,
       readOnly: true
     }
@@ -1530,7 +1545,9 @@ async function diagnoseMemosPlannerRecall(options = {}) {
   const discovery = await discoverMemosTools({ ...options, config: currentConfig, timeoutMs });
   return {
     ok: discovery.error ? false : true,
-    enabled: currentConfig.MEMOS_MCP_ENABLED === true,
+    enabled: isMemosPlannerRecallEnabled({ ...options, config: currentConfig }),
+    mcpEnabled: currentConfig.MEMOS_MCP_ENABLED === true,
+    remoteRecallEnabled: currentConfig.MEMOS_REMOTE_RECALL_ENABLED === true,
     serverName,
     recallSource,
     readOnly: true,
