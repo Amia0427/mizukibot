@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-24 01:10 +08:00
+更新时间：2026-05-24 01:21 +08:00
 
 ## 最短操作路径
 
@@ -229,7 +229,7 @@ node scripts/eval-post-reply-learning.js
 node scripts/eval-post-reply-learning.js --case explicit-remember-like
 ```
 
-评测集位于 `artifacts/post-reply-eval/cases.jsonl`，当前覆盖 20 个 intent、enrich gate 和预算裁剪 case；`tests/postReplyLearningEval.test.js` 会在自动测试中校验它们。
+评测集位于 `artifacts/post-reply-eval/cases.jsonl`，当前覆盖 intent、expected writes/drops、enrich gate、预算裁剪、学习回滚和重启租约恢复 case；`tests/postReplyLearningEval.test.js` 会在自动测试中校验它们。
 
 ## 背压降级
 
