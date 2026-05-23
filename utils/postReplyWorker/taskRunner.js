@@ -22,6 +22,15 @@ function createPostReplyTaskRunner(options = {}) {
     ? options.heartbeatAndCheckCancel
     : () => currentJob;
 
+  function sanitizeTaskResult(result = {}) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return {};
+    try {
+      return JSON.parse(JSON.stringify(result));
+    } catch (_) {
+      return {};
+    }
+  }
+
   function setJob(nextJob = {}) {
     currentJob = nextJob;
     return currentJob;
@@ -105,8 +114,11 @@ function createPostReplyTaskRunner(options = {}) {
     try {
       const result = await handler();
       logStepDone(step, result);
-      currentJob = completeTask(taskRun, taskOptions.complete || {});
-      trace('step_done', { step });
+      currentJob = completeTask(taskRun, {
+        ...taskOptions.complete,
+        result: sanitizeTaskResult(result)
+      });
+      trace('step_done', { step, result: sanitizeTaskResult(result) });
       heartbeatAndCheckCancel(step);
       return currentJob;
     } catch (error) {

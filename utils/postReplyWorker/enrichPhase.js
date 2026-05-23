@@ -354,8 +354,10 @@ async function runEnrichPhase(job = {}, meta = {}) {
     evidence: meta.evidence,
     maxWrites: Number(job.enrichBudget?.maxWrites || config.POST_REPLY_ENRICH_MAX_WRITES) || 0
   });
+  let droppedWrites = 0;
   const assessWrite = (candidate = {}) => {
     const result = gate.assess(candidate);
+    if (!result.allow) droppedWrites += 1;
     appendPostReplyJobTrace(job, result.allow ? 'enrich_write_allowed' : 'enrich_write_dropped', result);
     return result;
   };
@@ -557,6 +559,25 @@ async function runEnrichPhase(job = {}, meta = {}) {
       taskType: meta.taskType
     });
   }
+  const gateStats = gate.getStats();
+  const result = {
+    budget: {
+      truncated: budget.truncated,
+      sourceTurns: budget.sourceTurns,
+      selectedTurns: budget.selectedTurns,
+      chars: budget.chars,
+      maxTurns: budget.maxTurns,
+      maxChars: budget.maxChars,
+      maxWrites: gateStats.maxWrites
+    },
+    writes: {
+      accepted: gateStats.acceptedWrites,
+      dropped: droppedWrites,
+      maxWrites: gateStats.maxWrites
+    }
+  };
+  appendPostReplyJobTrace(job, 'enrich_budget_result', result);
+  return result;
 }
 
 module.exports = {

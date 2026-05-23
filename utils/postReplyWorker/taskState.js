@@ -33,6 +33,15 @@ function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
 }
 
+function normalizeTaskResult(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (_) {
+    return {};
+  }
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -54,7 +63,8 @@ function normalizeTaskState(value = {}, fallback = {}) {
       startedAt: '',
       completedAt: '',
       durationMs: 0,
-      lastError: ''
+      lastError: '',
+      result: {}
     };
   }
   if (value === false || value == null) {
@@ -64,7 +74,8 @@ function normalizeTaskState(value = {}, fallback = {}) {
       startedAt: '',
       completedAt: '',
       durationMs: 0,
-      lastError: ''
+      lastError: '',
+      result: {}
     };
   }
   const source = normalizeObject(value, {});
@@ -77,7 +88,8 @@ function normalizeTaskState(value = {}, fallback = {}) {
     completedAt: normalizeText(source.completedAt || source.completed_at || fallbackState.completedAt),
     durationMs: Math.max(0, Number(source.durationMs ?? source.duration_ms ?? fallbackState.durationMs) || 0),
     lastError: normalizeText(source.lastError || source.last_error || fallbackState.lastError),
-    step: normalizeText(source.step || fallbackState.step)
+    step: normalizeText(source.step || fallbackState.step),
+    result: normalizeTaskResult(source.result || fallbackState.result)
   };
 }
 
@@ -139,7 +151,8 @@ function buildTaskState(currentState = {}, status = 'pending', options = {}) {
     completedAt,
     durationMs,
     lastError: normalizeText(options.lastError),
-    step: normalizeText(options.step || normalizedCurrent.step)
+    step: normalizeText(options.step || normalizedCurrent.step),
+    result: normalizeTaskResult(options.result || normalizedCurrent.result)
   });
 }
 
@@ -164,7 +177,8 @@ function resetTaskState(currentState = {}) {
     startedAt: '',
     completedAt: '',
     durationMs: 0,
-    lastError: ''
+    lastError: '',
+    result: {}
   });
 }
 

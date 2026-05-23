@@ -26,6 +26,9 @@ module.exports = (async () => {
     process.env.POST_REPLY_ENRICH_DELAY_MS = '300000';
     process.env.POST_REPLY_ENRICH_MIN_TURNS = '2';
     process.env.POST_REPLY_ENRICH_MIN_CONTENT_CHARS = '120';
+    process.env.POST_REPLY_ENRICH_MAX_TURNS = '2';
+    process.env.POST_REPLY_ENRICH_MAX_CHARS = '6000';
+    process.env.POST_REPLY_ENRICH_MAX_WRITES = '12';
     process.env.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = 'false';
     process.env.POST_REPLY_VECTOR_WATCHDOG_ENABLED = 'false';
     process.env.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED = 'false';
@@ -292,6 +295,41 @@ module.exports = (async () => {
     assert.ok(calls.some((item) => item.type === 'vector_backfill'), 'enrich phase should store style/jargon vectors with backfill');
     assert.ok(calls.some((item) => item.type === 'self_store'), 'enrich phase should store self-improvement items');
     assert.ok(calls.some((item) => item.type === 'segment'), 'enrich phase should trigger threshold segmentation');
+
+    calls.length = 0;
+    const budgetResult = await processPostReplyJob({
+      jobId: 'enrich_budget_job',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      phase: 'enrich',
+      turns: [
+        { turnId: 'old', question: 'old question', finalReply: 'old reply', createdAt: '2026-04-18T09:58:00.000Z', routeMeta: { groupId: '1083095371' } },
+        { turnId: 'keep-1', question: 'q1', finalReply: 'r1', createdAt: '2026-04-18T10:00:00.000Z', routeMeta: { groupId: '1083095371' } },
+        { turnId: 'keep-2', question: 'q2', finalReply: 'r2', createdAt: '2026-04-18T10:02:00.000Z', routeMeta: { groupId: '1083095371' } }
+      ],
+      enrichBudget: {
+        maxTurns: 2,
+        maxChars: 120,
+        maxWrites: 2
+      },
+      tasks: {
+        dailyJournal: false
+      }
+    });
+    const budgetEnrichCall = calls.find((item) => item.type === 'enrich');
+    assert.deepStrictEqual(budgetEnrichCall.turns.map((item) => item.question), ['q1', 'q2']);
+    assert.strictEqual(budgetResult.job.taskStates.enrich.result.budget.truncated, true);
+    assert.strictEqual(budgetResult.job.taskStates.enrich.result.budget.selectedTurns, 2);
+    assert.strictEqual(budgetResult.job.taskStates.enrich.result.writes.maxWrites, 2);
+    assert.strictEqual(budgetResult.job.taskStates.enrich.result.writes.accepted, 2);
+    assert.ok(budgetResult.job.taskStates.enrich.result.writes.dropped > 0, 'maxWrites should make later enrich writes visible as drops');
 
     const circuitQueue = {
       recoverStaleProcessingJobs() {

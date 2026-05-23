@@ -107,7 +107,8 @@ module.exports = (() => {
       memoryLearning: {
         status: 'done',
         attempt: 1,
-        durationMs: 5
+        durationMs: 5,
+        result: { learned: 1 }
       },
       memoryQualityAudit: {
         status: 'failed_nonfatal',
@@ -127,6 +128,7 @@ module.exports = (() => {
   assert.strictEqual(merged.completedTasks.memoryLearning, false);
   assert.strictEqual(merged.taskStates.memoryLearning.status, 'pending');
   assert.strictEqual(merged.taskStates.memoryLearning.lastError, '');
+  assert.deepStrictEqual(merged.taskStates.memoryLearning.result, {});
   assert.strictEqual(merged.completedTasks.memoryQualityAudit, false);
   assert.strictEqual(merged.taskStates.memoryQualityAudit.status, 'pending');
 

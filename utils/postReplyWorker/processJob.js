@@ -371,7 +371,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
   }
   if (phase === 'enrich' && !isTaskCompleted(currentJob, 'enrich')) {
     currentJob = await runTask('enrich', async () => {
-      await runEnrichPhase(job, meta);
+      return runEnrichPhase(job, meta);
     });
   }
   return {
