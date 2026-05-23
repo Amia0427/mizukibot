@@ -21,10 +21,6 @@ const {
   buildPostReplyCanceledError,
   isTaskCompleted,
   logStructured,
-  markTaskCompleted,
-  markTaskFailed,
-  markTaskFailedNonFatal,
-  markTaskStarted,
   normalizeArray,
   normalizeCompletedTasks,
   normalizeObject,
@@ -32,6 +28,9 @@ const {
   normalizeTaskStates,
   normalizeText
 } = require('./common');
+const {
+  createPostReplyTaskRunner
+} = require('./taskRunner');
 
 function getMemoryExtractionModule() {
   return require('../../api/memoryExtraction');
@@ -109,54 +108,6 @@ async function processPostReplyJob(job = {}, deps = {}) {
     topRouteType: normalizeText(job.topRouteType)
   };
   const trace = (event, payload = {}) => appendPostReplyJobTrace(currentJob, event, payload);
-  const startTask = (taskKey = '', step = '') => {
-    const startedAt = new Date().toISOString();
-    currentJob = markTaskStarted(currentJob, deps, taskKey, {
-      startedAt,
-      step
-    });
-    return {
-      taskKey,
-      step,
-      startedAt,
-      startedMs: Date.now()
-    };
-  };
-  const completeTask = (taskRun = {}, options = {}) => {
-    currentJob = markTaskCompleted(currentJob, deps, taskRun.taskKey, {
-      ...options,
-      status: options.status || 'done',
-      startedAt: taskRun.startedAt,
-      completedAt: new Date().toISOString(),
-      durationMs: Math.max(0, Date.now() - Number(taskRun.startedMs || Date.now())),
-      step: taskRun.step
-    });
-    return currentJob;
-  };
-  const failTask = (taskRun = {}, error = '', options = {}) => {
-    const errorText = error?.message || error;
-    const patch = {
-      startedAt: taskRun.startedAt,
-      completedAt: new Date().toISOString(),
-      durationMs: Math.max(0, Date.now() - Number(taskRun.startedMs || Date.now())),
-      step: taskRun.step
-    };
-    currentJob = options.nonFatal
-      ? markTaskFailedNonFatal(currentJob, deps, taskRun.taskKey, errorText, patch)
-      : markTaskFailed(currentJob, deps, taskRun.taskKey, errorText, patch);
-    return currentJob;
-  };
-  const skipTask = (taskKey = '', step = '', reason = 'skipped') => {
-    currentJob = markTaskCompleted(currentJob, deps, taskKey, {
-      status: 'skipped',
-      completedAt: new Date().toISOString(),
-      durationMs: 0,
-      lastError: reason,
-      step
-    });
-    trace('step_skipped', { step, taskKey, reason });
-    return currentJob;
-  };
   const heartbeatAndCheckCancel = (step = '') => {
     const queue = deps.queue;
     const latest = queue && typeof queue.readProcessingJob === 'function'
@@ -195,53 +146,57 @@ async function processPostReplyJob(job = {}, deps = {}) {
     }
     return currentJob;
   };
+  const taskRunner = createPostReplyTaskRunner({
+    job: currentJob,
+    deps,
+    trace,
+    heartbeatAndCheckCancel,
+    logStepStart(step, payload = {}) {
+      logStructured('post_reply_step_start', { ...traceBase, ...payload, step });
+    },
+    logStepDone(step, payload = {}) {
+      logStructured('post_reply_step_done', { ...traceBase, step, ...normalizeObject(payload, {}) });
+    },
+    logStepFailed(step, error = '') {
+      logStructured('post_reply_step_failed', {
+        ...traceBase,
+        step,
+        error: error?.message || error
+      });
+    }
+  });
+  const runTask = async (...args) => {
+    taskRunner.setJob(currentJob);
+    currentJob = await taskRunner.runTask(...args);
+    return currentJob;
+  };
+  const skipTask = (...args) => {
+    taskRunner.setJob(currentJob);
+    currentJob = taskRunner.skipTask(...args);
+    return currentJob;
+  };
 
   if (phase === 'core' && tasks.memoryLearning && !isTaskCompleted(currentJob, 'memoryLearning')) {
     const { learnSomethingNew } = getMemoryExtractionModule();
-    heartbeatAndCheckCancel('learnSomethingNew');
-    trace('step_start', { step: 'learnSomethingNew', learningIntent: meta.learningIntent });
-    logStructured('post_reply_step_start', { ...traceBase, step: 'learnSomethingNew', learningIntent: meta.learningIntent });
-    const taskRun = startTask('memoryLearning', 'learnSomethingNew');
-    try {
+    currentJob = await runTask('memoryLearning', async () => {
       await learnSomethingNew(job.userId, learningConversation.userText, learningConversation.botReply, workerTaskOptions);
-    } catch (error) {
-      failTask(taskRun, error);
-      trace('step_failed', { step: 'learnSomethingNew', error: error?.message || error });
-      throw error;
-    }
-    logStructured('post_reply_step_done', { ...traceBase, step: 'learnSomethingNew' });
-    currentJob = completeTask(taskRun);
-    trace('step_done', { step: 'learnSomethingNew' });
-    heartbeatAndCheckCancel('learnSomethingNew');
+    }, {
+      traceStart: { step: 'learnSomethingNew', learningIntent: meta.learningIntent },
+      logStart: { learningIntent: meta.learningIntent }
+    });
   }
   if (phase === 'core' && tasks.selfImprovement && !isTaskCompleted(currentJob, 'selfImprovement') && coreMinimalUnderPressure) {
     currentJob = skipTask('selfImprovement', 'learnSelfImprovement', 'pressure_minimal_core');
   }
   if (phase === 'core' && tasks.selfImprovement && !isTaskCompleted(currentJob, 'selfImprovement')) {
     const { learnSelfImprovement } = getSelfImprovementModule();
-    heartbeatAndCheckCancel('learnSelfImprovement');
-    trace('step_start', { step: 'learnSelfImprovement' });
-    logStructured('post_reply_step_start', { ...traceBase, step: 'learnSelfImprovement' });
-    const taskRun = startTask('selfImprovement', 'learnSelfImprovement');
-    try {
+    currentJob = await runTask('selfImprovement', async () => {
       await learnSelfImprovement(job.userId, job.question, job.finalReply, workerTaskOptions);
-    } catch (error) {
-      failTask(taskRun, error);
-      trace('step_failed', { step: 'learnSelfImprovement', error: error?.message || error });
-      throw error;
-    }
-    logStructured('post_reply_step_done', { ...traceBase, step: 'learnSelfImprovement' });
-    currentJob = completeTask(taskRun);
-    trace('step_done', { step: 'learnSelfImprovement' });
-    heartbeatAndCheckCancel('learnSelfImprovement');
+    });
   }
   if (tasks.dailyJournal && !isTaskCompleted(currentJob, 'dailyJournal')) {
     const { appendDailyJournalEntry } = getDailyJournalModule();
-    heartbeatAndCheckCancel('appendDailyJournalEntry');
-    trace('step_start', { step: 'appendDailyJournalEntry' });
-    logStructured('post_reply_step_start', { ...traceBase, step: 'appendDailyJournalEntry' });
-    const taskRun = startTask('dailyJournal', 'appendDailyJournalEntry');
-    try {
+    currentJob = await runTask('dailyJournal', async () => {
       await appendDailyJournalEntry(
         job.userId,
         job.question,
@@ -269,24 +224,12 @@ async function processPostReplyJob(job = {}, deps = {}) {
           taskType: normalizeText(job.routeMeta?.taskType || job.routeMeta?.task_type)
         }
       );
-    } catch (error) {
-      failTask(taskRun, error);
-      trace('step_failed', { step: 'appendDailyJournalEntry', error: error?.message || error });
-      throw error;
-    }
-    logStructured('post_reply_step_done', { ...traceBase, step: 'appendDailyJournalEntry' });
-    currentJob = completeTask(taskRun);
-    trace('step_done', { step: 'appendDailyJournalEntry' });
-    heartbeatAndCheckCancel('appendDailyJournalEntry');
+    });
   }
   if (phase === 'core' && config.MEMORY_V3_ENABLED) {
     if (!isTaskCompleted(currentJob, 'memoryEvent')) {
       const { appendVersionedMemoryUpdate } = getMemoryV3Module();
-      heartbeatAndCheckCancel('appendVersionedMemoryUpdate');
-      trace('step_start', { step: 'appendVersionedMemoryUpdate' });
-      logStructured('post_reply_step_start', { ...traceBase, step: 'appendVersionedMemoryUpdate' });
-      const taskRun = startTask('memoryEvent', 'appendVersionedMemoryUpdate');
-      try {
+      currentJob = await runTask('memoryEvent', async () => {
         await appendVersionedMemoryUpdate({
           type: 'memory_confirmed',
           userId: job.userId,
@@ -308,41 +251,21 @@ async function processPostReplyJob(job = {}, deps = {}) {
         }, {
           updateRuntimeSummaries: true
         });
-      } catch (error) {
-        failTask(taskRun, error);
-        trace('step_failed', { step: 'appendVersionedMemoryUpdate', error: error?.message || error });
-        throw error;
-      }
-      logStructured('post_reply_step_done', { ...traceBase, step: 'appendVersionedMemoryUpdate' });
-      currentJob = completeTask(taskRun);
-      trace('step_done', { step: 'appendVersionedMemoryUpdate' });
-      heartbeatAndCheckCancel('appendVersionedMemoryUpdate');
+      });
     }
     if (!isTaskCompleted(currentJob, 'materialize')) {
       const scheduleMaterializeMemoryViews = typeof deps.scheduleMaterializeMemoryViews === 'function'
         ? deps.scheduleMaterializeMemoryViews
         : schedulePostReplyMaterialize;
-      heartbeatAndCheckCancel('scheduleMaterializeMemoryViews');
-      trace('step_start', { step: 'scheduleMaterializeMemoryViews' });
-      logStructured('post_reply_step_start', { ...traceBase, step: 'scheduleMaterializeMemoryViews' });
-      const taskRun = startTask('materialize', 'scheduleMaterializeMemoryViews');
-      let materializeResult = null;
-      try {
-        materializeResult = await scheduleMaterializeMemoryViews({
+      currentJob = await runTask('materialize', async () => {
+        const materializeResult = await scheduleMaterializeMemoryViews({
           reason: 'post_reply_core',
           userId: normalizeText(job.userId),
           sessionKey: normalizeText(job.sessionKey),
           groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id)
         });
-      } catch (error) {
-        failTask(taskRun, error);
-        trace('step_failed', { step: 'scheduleMaterializeMemoryViews', error: error?.message || error });
-        throw error;
-      }
-      logStructured('post_reply_step_done', {
-        ...traceBase,
-        step: 'scheduleMaterializeMemoryViews',
-        materialize: materializeResult && typeof materializeResult === 'object'
+        return {
+          materialize: materializeResult && typeof materializeResult === 'object'
           ? {
               scheduled: Boolean(materializeResult.scheduled),
               coalesced: Boolean(materializeResult.coalesced),
@@ -350,10 +273,8 @@ async function processPostReplyJob(job = {}, deps = {}) {
               pendingCount: Number(materializeResult.pendingCount || 0) || 0
             }
           : {}
+        };
       });
-      currentJob = completeTask(taskRun);
-      trace('step_done', { step: 'scheduleMaterializeMemoryViews' });
-      heartbeatAndCheckCancel('scheduleMaterializeMemoryViews');
     }
     if (!isTaskCompleted(currentJob, 'vectorMaintenance') && isPostReplyVectorMaintenanceEnabled() && coreMinimalUnderPressure) {
       currentJob = skipTask('vectorMaintenance', 'runVectorMaintenance', 'pressure_minimal_core');
@@ -362,21 +283,14 @@ async function processPostReplyJob(job = {}, deps = {}) {
       const runVectorMaintenance = typeof deps.runVectorMaintenance === 'function'
         ? deps.runVectorMaintenance
         : runPostReplyVectorMaintenance;
-      heartbeatAndCheckCancel('runVectorMaintenance');
-      trace('step_start', { step: 'runVectorMaintenance' });
-      logStructured('post_reply_step_start', { ...traceBase, step: 'runVectorMaintenance' });
-      const taskRun = startTask('vectorMaintenance', 'runVectorMaintenance');
-      let vectorMaintenanceError = null;
-      try {
+      currentJob = await runTask('vectorMaintenance', async () => {
         const maintenanceResult = await runVectorMaintenance({
           jobId: normalizeText(job.jobId),
           userId: normalizeText(job.userId),
           sessionKey: normalizeText(job.sessionKey),
           groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id)
         }, deps);
-        logStructured('post_reply_step_done', {
-          ...traceBase,
-          step: 'runVectorMaintenance',
+        return {
           maintenance: maintenanceResult && typeof maintenanceResult === 'object'
             ? {
                 ok: maintenanceResult.ok !== false,
@@ -388,21 +302,8 @@ async function processPostReplyJob(job = {}, deps = {}) {
                 durationMs: Number(maintenanceResult.durationMs || 0) || 0
               }
             : {}
-        });
-      } catch (error) {
-        vectorMaintenanceError = error;
-        logStructured('post_reply_step_failed', {
-          ...traceBase,
-          step: 'runVectorMaintenance',
-          error: error?.message || error
-        });
-        trace('step_failed', { step: 'runVectorMaintenance', error: error?.message || error });
-      }
-      currentJob = vectorMaintenanceError
-        ? failTask(taskRun, vectorMaintenanceError, { nonFatal: true })
-        : completeTask(taskRun);
-      trace('step_done', { step: 'runVectorMaintenance' });
-      heartbeatAndCheckCancel('runVectorMaintenance');
+        };
+      });
     }
     if (!isTaskCompleted(currentJob, 'memoryQualityAudit') && config.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED === true && coreMinimalUnderPressure) {
       currentJob = skipTask('memoryQualityAudit', 'runMemoryQualityAudit', 'pressure_minimal_core');
@@ -411,12 +312,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
       const runMemoryQualityAudit = typeof deps.runMemoryQualityAudit === 'function'
         ? deps.runMemoryQualityAudit
         : getMemoryQualityAuditModule().runMemoryQualityAudit;
-      heartbeatAndCheckCancel('runMemoryQualityAudit');
-      trace('step_start', { step: 'runMemoryQualityAudit' });
-      logStructured('post_reply_step_start', { ...traceBase, step: 'runMemoryQualityAudit' });
-      const taskRun = startTask('memoryQualityAudit', 'runMemoryQualityAudit');
-      let memoryQualityAuditError = null;
-      try {
+      currentJob = await runTask('memoryQualityAudit', async () => {
         const auditResult = await runMemoryQualityAudit({
           jobId: normalizeText(job.jobId),
           userId: normalizeText(job.userId),
@@ -426,9 +322,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
           timeoutMs: config.POST_REPLY_MEMORY_QUALITY_AUDIT_TIMEOUT_MS,
           intervalMs: config.POST_REPLY_MEMORY_QUALITY_AUDIT_INTERVAL_MS
         }, deps);
-        logStructured('post_reply_step_done', {
-          ...traceBase,
-          step: 'runMemoryQualityAudit',
+        return {
           audit: auditResult && typeof auditResult === 'object'
             ? {
                 ok: auditResult.ok !== false,
@@ -441,21 +335,8 @@ async function processPostReplyJob(job = {}, deps = {}) {
                 durationMs: Number(auditResult.durationMs || 0) || 0
               }
             : {}
-        });
-      } catch (error) {
-        memoryQualityAuditError = error;
-        logStructured('post_reply_step_failed', {
-          ...traceBase,
-          step: 'runMemoryQualityAudit',
-          error: error?.message || error
-        });
-        trace('step_failed', { step: 'runMemoryQualityAudit', error: error?.message || error });
-      }
-      currentJob = memoryQualityAuditError
-        ? failTask(taskRun, memoryQualityAuditError, { nonFatal: true })
-        : completeTask(taskRun);
-      trace('step_done', { step: 'runMemoryQualityAudit' });
-      heartbeatAndCheckCancel('runMemoryQualityAudit');
+        };
+      });
     }
     if (!isTaskCompleted(currentJob, 'profileMaintenance') && config.MEMORY_PROFILE_MAINTENANCE_ENABLED === true && coreMinimalUnderPressure) {
       currentJob = skipTask('profileMaintenance', 'runProfileMaintenance', 'pressure_minimal_core');
@@ -464,12 +345,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
       const runProfileMaintenance = typeof deps.runProfileMaintenance === 'function'
         ? deps.runProfileMaintenance
         : getProfileMaintenanceModule().runProfileMemoryMaintenance;
-      heartbeatAndCheckCancel('runProfileMaintenance');
-      trace('step_start', { step: 'runProfileMaintenance' });
-      logStructured('post_reply_step_start', { ...traceBase, step: 'runProfileMaintenance' });
-      const taskRun = startTask('profileMaintenance', 'runProfileMaintenance');
-      let profileMaintenanceError = null;
-      try {
+      currentJob = await runTask('profileMaintenance', async () => {
         const maintenanceResult = await runProfileMaintenance({
           jobId: normalizeText(job.jobId),
           userId: normalizeText(job.userId),
@@ -478,9 +354,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
           intervalMs: config.MEMORY_PROFILE_MAINTENANCE_INTERVAL_MS,
           limit: config.MEMORY_PROFILE_MAINTENANCE_SAMPLE_SIZE
         });
-        logStructured('post_reply_step_done', {
-          ...traceBase,
-          step: 'runProfileMaintenance',
+        return {
           maintenance: maintenanceResult && typeof maintenanceResult === 'object'
             ? {
                 ok: maintenanceResult.ok !== false,
@@ -491,39 +365,14 @@ async function processPostReplyJob(job = {}, deps = {}) {
                 durationMs: Number(maintenanceResult.durationMs || 0) || 0
               }
             : {}
-        });
-      } catch (error) {
-        profileMaintenanceError = error;
-        logStructured('post_reply_step_failed', {
-          ...traceBase,
-          step: 'runProfileMaintenance',
-          error: error?.message || error
-        });
-        trace('step_failed', { step: 'runProfileMaintenance', error: error?.message || error });
-      }
-      currentJob = profileMaintenanceError
-        ? failTask(taskRun, profileMaintenanceError, { nonFatal: true })
-        : completeTask(taskRun);
-      trace('step_done', { step: 'runProfileMaintenance' });
-      heartbeatAndCheckCancel('runProfileMaintenance');
+        };
+      });
     }
   }
   if (phase === 'enrich' && !isTaskCompleted(currentJob, 'enrich')) {
-    heartbeatAndCheckCancel('runEnrichPhase');
-    trace('step_start', { step: 'runEnrichPhase' });
-    logStructured('post_reply_step_start', { ...traceBase, step: 'runEnrichPhase' });
-    const taskRun = startTask('enrich', 'runEnrichPhase');
-    try {
+    currentJob = await runTask('enrich', async () => {
       await runEnrichPhase(job, meta);
-    } catch (error) {
-      failTask(taskRun, error);
-      trace('step_failed', { step: 'runEnrichPhase', error: error?.message || error });
-      throw error;
-    }
-    logStructured('post_reply_step_done', { ...traceBase, step: 'runEnrichPhase' });
-    currentJob = completeTask(taskRun);
-    trace('step_done', { step: 'runEnrichPhase' });
-    heartbeatAndCheckCancel('runEnrichPhase');
+    });
   }
   return {
     ok: true,

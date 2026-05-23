@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-24 00:38 +08:00
+更新时间：2026-05-24 00:50 +08:00
 
 ## 启动
 
@@ -59,6 +59,8 @@ POST_REPLY_WORKER_INLINE=true
 - `step`
 
 `failed_nonfatal` 会视为已完成，用于 `vectorMaintenance/memoryQualityAudit/profileMaintenance` 这类低优先级维护任务；核心学习、self-improvement、journal、memory event、materialize 和 enrich 失败仍会让 job 进入重试/失败流程。
+
+任务定义集中在 `utils/postReplyWorker/taskRegistry.js`，执行由 `utils/postReplyWorker/taskRunner.js` 统一处理。`materialize` 依赖 `memoryEvent`，`vectorMaintenance/memoryQualityAudit/profileMaintenance` 依赖 `materialize`；依赖未完成时任务会标记 `skipped`，`lastError=dependency_incomplete:<task>`。
 
 ## 诊断
 

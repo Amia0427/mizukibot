@@ -1,6 +1,6 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-23 22:58 +08:00
+更新时间：2026-05-24 00:50 +08:00
 
 运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
 
@@ -15,6 +15,8 @@
 运行状态更新 2026-05-24 00:31 +08:00：目标 11 首阶段落地，队列对 aggregate/dedupe/job/index 写入加短时目录锁；同 aggregate 并发 enqueue 会合并 turn，不再只返回旧 job；claim 与 merge 通过 job 锁避免旧 queued 快照回写覆盖 processing。
 
 运行状态更新 2026-05-24 00:38 +08:00：目标 14 首阶段落地，`artifacts/post-reply-eval/cases.jsonl` 扩到 20 个 case，覆盖显式/隐式/journal intent、enrich drop reason、maxWrites 和预算裁剪；新增 `tests/postReplyLearningEval.test.js` 纳入自动测试。
+
+运行状态更新 2026-05-24 00:50 +08:00：目标 4 第二阶段落地，新增 `taskRegistry/taskRunner`，`processJob.js` 的 memory/journal/materialize/maintenance/enrich 均通过统一 runner 执行，依赖检查、heartbeat、trace、状态持久化和非致命失败策略集中处理。
 
 ## 现状结论
 
@@ -78,7 +80,7 @@
 
 目标：把 `processJob.js` 中顺序 if 编排拆成任务 DAG，按任务粒度记录 retry/skip/result，避免一个低优先级任务影响核心记忆。
 
-进展 2026-05-23 23:58 +08:00：已先完成兼容式任务状态层，`taskStates` 与旧 `completedTasks` 双写；queued merge 新 turn 会重置相关任务状态；核心任务失败仍触发 job retry，低优先级维护任务失败记录为 `failed_nonfatal`。后续再抽 `taskRegistry/taskRunner` 做完整 DAG 编排。
+进展 2026-05-24 00:50 +08:00：已完成兼容式任务状态层和 runner 化编排；`taskStates` 与旧 `completedTasks` 双写，queued merge 新 turn 会重置相关任务状态，`materialize/vector/audit/profile` 依赖 `memoryEvent/materialize` 检查，核心任务失败仍触发 job retry，低优先级维护任务失败记录为 `failed_nonfatal`。
 
 实施：
 - 新增 `utils/postReplyWorker/taskRegistry.js`，注册 `memoryLearning/selfImprovement/dailyJournal/memoryEvent/materialize/vectorMaintenance/memoryQualityAudit/profileMaintenance/enrich`。
