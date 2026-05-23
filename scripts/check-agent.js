@@ -24,9 +24,9 @@ async function main() {
   let config;
   try {
     config = require('../config');
-    ok('config.js 加载成功');
+    ok('config/index.js 加载成功');
   } catch (e) {
-    fail(`config.js 加载失败: ${e.message}`);
+    fail(`config/index.js 加载失败: ${e.message}`);
     return 1;
   }
 

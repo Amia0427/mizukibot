@@ -82,6 +82,13 @@ function getEventPayload(event = {}) {
 
 function buildNodeEventSemanticKey(event = {}) {
   const payload = getEventPayload(event);
+  const explicitId = normalizeDedupeValue(event.id);
+  if (explicitId && normalizeDedupeValue(event.type) !== 'migration_bootstrap') {
+    return [
+      event.type,
+      explicitId
+    ].map(normalizeDedupeValue).join('|');
+  }
   const fieldKey = normalizeDedupeValue(
     payload.fieldKey
     || event.fieldKey

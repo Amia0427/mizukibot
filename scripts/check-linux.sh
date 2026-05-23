@@ -72,11 +72,11 @@ fi
 
 cd "$ROOT_DIR"
 
-node -c config.js
+node -c config/index.js
 node -c index.js
-node -c web/server.js
+node -c web/server/index.js
 node -c api/ai.js
-node -c core/tickEngine.js
+node -c core/tickEngine/index.js
 
 echo "[linux-check] syntax check passed"
 

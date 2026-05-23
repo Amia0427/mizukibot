@@ -38,7 +38,7 @@ module.exports = (async () => {
 
     require('../api/runtimeV2/host');
 
-    assert.strictEqual(isLoaded('api/toolExecutors.js'), false, 'runtime host should not load full static tool executors on require');
+    assert.strictEqual(isLoaded('api/toolExecutors/index.js'), false, 'runtime host should not load full static tool executors on require');
     assert.strictEqual(isLoaded('api/legacy/aiHost.js'), false, 'runtime host should not load legacy aiHost on require');
     assert.strictEqual(isLoaded('utils/memory-v3/materializer.js'), false, 'runtime host should not load memory materializer on require');
 
