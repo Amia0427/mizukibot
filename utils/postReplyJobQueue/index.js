@@ -34,6 +34,8 @@ const {
 } = require('../postReplyWorker/errorClassifier');
 
 const STATUS_DIRS = ['queued', 'processing', 'failed', 'done'];
+const DEFAULT_LOCK_TIMEOUT_MS = 5000;
+const DEFAULT_STALE_LOCK_MS = 30000;
 
 function createPostReplyJobQueue(options = {}) {
   const queueDir = normalizeText(options.queueDir || config.POST_REPLY_QUEUE_DIR || path.join(config.DATA_DIR, 'post_reply_jobs'));
@@ -53,11 +55,85 @@ function createPostReplyJobQueue(options = {}) {
     return path.join(statusDir(status), `${normalizeText(jobId)}.json`);
   }
 
+  function lockDir() {
+    return path.join(queueDir, '.locks');
+  }
+
+  function lockPath(lockKey = '') {
+    const key = stableHash({ lockKey: normalizeText(lockKey) || 'unknown' });
+    return path.join(lockDir(), `${key}.lock`);
+  }
+
   function ensureLayout() {
     ensureDir(queueDir);
     for (const status of STATUS_DIRS) {
       ensureDir(statusDir(status));
     }
+    ensureDir(lockDir());
+  }
+
+  function sleepSync(ms) {
+    const delay = Math.max(1, Number(ms) || 1);
+    const buffer = new SharedArrayBuffer(4);
+    const view = new Int32Array(buffer);
+    Atomics.wait(view, 0, 0, delay);
+  }
+
+  function acquireQueueLock(lockKey = '', options = {}) {
+    ensureLayout();
+    const target = lockPath(lockKey);
+    const timeoutMs = Math.max(1, Number(options.lockTimeoutMs || config.POST_REPLY_QUEUE_LOCK_TIMEOUT_MS) || DEFAULT_LOCK_TIMEOUT_MS);
+    const staleMs = Math.max(1000, Number(options.staleLockMs || config.POST_REPLY_QUEUE_STALE_LOCK_MS) || DEFAULT_STALE_LOCK_MS);
+    const startedAt = Date.now();
+    while (true) {
+      try {
+        fs.mkdirSync(target);
+        fs.writeFileSync(path.join(target, 'owner.json'), JSON.stringify({
+          pid: process.pid,
+          lockKey: normalizeText(lockKey),
+          createdAt: nowIso()
+        }, null, 2), 'utf8');
+        return {
+          release() {
+            try {
+              fs.rmSync(target, { recursive: true, force: true });
+            } catch (_) {}
+          }
+        };
+      } catch (error) {
+        if (!error || error.code !== 'EEXIST') throw error;
+        try {
+          const stat = fs.statSync(target);
+          if ((Date.now() - stat.mtimeMs) > staleMs) {
+            fs.rmSync(target, { recursive: true, force: true });
+            continue;
+          }
+        } catch (_) {
+          continue;
+        }
+        if ((Date.now() - startedAt) >= timeoutMs) {
+          throw new Error(`post-reply queue lock timeout: ${normalizeText(lockKey)}`);
+        }
+        sleepSync(10);
+      }
+    }
+  }
+
+  function withQueueLock(lockKey = '', fn, options = {}) {
+    const lock = acquireQueueLock(lockKey, options);
+    try {
+      return fn();
+    } finally {
+      lock.release();
+    }
+  }
+
+  function buildAggregateLockKey(aggregateKey = '', phase = '') {
+    return `aggregate:${normalizePhase(phase)}:${normalizeText(aggregateKey)}`;
+  }
+
+  function buildJobLockKey(jobId = '') {
+    return `job:${normalizeText(jobId)}`;
   }
 
   function listJobs(statuses = STATUS_DIRS) {
@@ -122,7 +198,7 @@ function createPostReplyJobQueue(options = {}) {
 
   function rebuildIndex(options = {}) {
     const jobs = scanJobs(STATUS_DIRS);
-    const result = indexStore.rebuild(jobs, options);
+    const result = withQueueLock('index', () => indexStore.rebuild(jobs, options), options);
     return {
       ...result,
       jobs
@@ -167,7 +243,7 @@ function createPostReplyJobQueue(options = {}) {
   function writeJob(job = {}) {
     const normalized = normalizeJob(job);
     atomicWriteJson(jobPath(normalized.status, normalized.jobId), normalized);
-    indexStore.upsert(normalized);
+    withQueueLock('index', () => indexStore.upsert(normalized));
     return normalized;
   }
 
@@ -176,84 +252,121 @@ function createPostReplyJobQueue(options = {}) {
     if (fs.existsSync(target)) {
       fs.unlinkSync(target);
     }
-    indexStore.remove(jobId);
+    withQueueLock('index', () => indexStore.remove(jobId));
   }
 
-  function enqueue(job = {}) {
+  function enqueue(job = {}, options = {}) {
     ensureLayout();
     const normalized = normalizeJob({
       ...job,
       status: 'queued',
       availableAt: normalizeText(job.availableAt) || nowIso()
     });
-    if (normalized.aggregateKey) {
-      const existingAggregateJob = findQueuedJobByAggregateKey(normalized.aggregateKey, normalized.phase);
-      if (existingAggregateJob) {
+    const writeNewJob = () => {
+      const existing = normalized.dedupeKey ? findJobByDedupeKey(normalized.dedupeKey) : null;
+      if (existing) {
         return {
-          job: existingAggregateJob,
+          job: existing,
           enqueued: false
         };
       }
-    }
-    const existing = normalized.dedupeKey ? findJobByDedupeKey(normalized.dedupeKey) : null;
-    if (existing) {
+      const created = writeJob(normalized);
       return {
-        job: existing,
-        enqueued: false
+        job: created,
+        enqueued: true
       };
-    }
-    const created = writeJob(normalized);
-    return {
-      job: created,
-      enqueued: true
     };
+    if (normalized.aggregateKey) {
+      const enqueueAggregate = () => withQueueLock(buildAggregateLockKey(normalized.aggregateKey, normalized.phase), () => {
+        const existingAggregateJob = findQueuedJobByAggregateKey(normalized.aggregateKey, normalized.phase);
+        if (existingAggregateJob) {
+          const merged = mergeQueuedJob(existingAggregateJob, {
+            routeMeta: normalized.routeMeta,
+            continuitySnapshot: normalized.continuitySnapshot,
+            contextStats: normalized.contextStats,
+            execLogs: normalized.execLogs,
+            lastMergedAt: normalized.lastMergedAt || normalized.updatedAt,
+            turns: normalized.turns,
+            traceId: existingAggregateJob.traceId || normalized.traceId,
+            learningIntent: normalized.learningIntent,
+            sourceMessageIds: normalized.sourceMessageIds,
+            tags: normalized.tags,
+            tasks: {
+              memoryLearning: Boolean(existingAggregateJob.tasks?.memoryLearning) || Boolean(normalized.tasks?.memoryLearning),
+              selfImprovement: Boolean(existingAggregateJob.tasks?.selfImprovement) || Boolean(normalized.tasks?.selfImprovement),
+              dailyJournal: Boolean(existingAggregateJob.tasks?.dailyJournal) || Boolean(normalized.tasks?.dailyJournal)
+            },
+            userInfo: normalized.userInfo,
+            enrichBudget: normalized.enrichBudget
+          }, options);
+          return {
+            job: merged,
+            enqueued: false
+          };
+        }
+        return writeNewJob();
+      }, options);
+      return normalized.dedupeKey
+        ? withQueueLock(`dedupe:${normalized.dedupeKey}`, enqueueAggregate, options)
+        : enqueueAggregate();
+    }
+    if (normalized.dedupeKey) {
+      return withQueueLock(`dedupe:${normalized.dedupeKey}`, writeNewJob, options);
+    }
+    return writeNewJob();
   }
 
   function mergeQueuedJob(existingJob = {}, patch = {}, options = {}) {
     ensureLayout();
     const existingJobId = normalizeText(existingJob.jobId || patch.jobId);
-    const currentPath = existingJobId ? jobPath('queued', existingJobId) : '';
-    const current = normalizeJob(
-      currentPath && fs.existsSync(currentPath)
-        ? safeReadJson(currentPath, existingJob)
-        : existingJob
-    );
-    if (normalizeText(current.status) !== 'queued') return current;
-    const incomingTurns = normalizeArray(patch.turns).map((item) => normalizeTurn(item)).filter((item) => item.question || item.finalReply);
-    const previousTurnCount = normalizeArray(current.turns).length;
-    const nextTurns = mergeTurnsUnique(current.turns, incomingTurns);
-    const acceptedIncomingTurns = Math.max(0, nextTurns.length - previousTurnCount);
-    const latestAcceptedTurn = acceptedIncomingTurns > 0
-      ? nextTurns[nextTurns.length - 1]
-      : null;
-    const lastMergedAt = normalizeText(patch.lastMergedAt) || nowIso();
-    const merged = normalizeJob({
-      ...current,
-      ...patch,
-      status: 'queued',
-      turns: nextTurns,
-      question: latestAcceptedTurn?.question || current.question,
-      finalReply: latestAcceptedTurn?.finalReply || current.finalReply,
-      routeMeta: normalizeObject(patch.routeMeta, current.routeMeta),
-      continuitySnapshot: normalizeObject(patch.continuitySnapshot, current.continuitySnapshot),
-      contextStats: normalizeObject(patch.contextStats, current.contextStats),
-      completedTasks: mergeCompletedTasksForQueuedPatch(current, patch, acceptedIncomingTurns > 0 ? incomingTurns : []),
-      taskStates: mergeTaskStatesForQueuedPatch(current, patch, acceptedIncomingTurns > 0 ? incomingTurns : []),
-      learningIntent: mergeLearningIntent(current.learningIntent, patch.learningIntent),
-      sourceMessageIds: Array.from(new Set(normalizeArray(current.sourceMessageIds).concat(normalizeArray(patch.sourceMessageIds)).map((item) => normalizeText(item)).filter(Boolean))),
-      tags: Array.from(new Set(normalizeArray(current.tags).concat(normalizeArray(patch.tags)).map((item) => normalizeText(item)).filter(Boolean))),
-      updatedAt: lastMergedAt,
-      lastMergedAt,
-      mergeCount: Math.max(1, Number(current.mergeCount || 1) + Math.max(0, acceptedIncomingTurns || 0)),
-      availableAt: buildAggregateAvailableAt(
-        normalizeText(current.firstQueuedAt) || normalizeText(current.createdAt) || nowIso(),
+    const fallbackLockKey = existingJobId ? buildJobLockKey(existingJobId) : buildAggregateLockKey(existingJob.aggregateKey || patch.aggregateKey, existingJob.phase || patch.phase);
+    return withQueueLock(fallbackLockKey, () => {
+      const currentPath = existingJobId ? jobPath('queued', existingJobId) : '';
+      const current = normalizeJob(
+        currentPath && fs.existsSync(currentPath)
+          ? safeReadJson(currentPath, existingJob)
+          : existingJob
+      );
+      if (existingJobId && (!currentPath || !fs.existsSync(currentPath))) {
+        return current;
+      }
+      if (normalizeText(current.status) !== 'queued') return current;
+      const incomingTurns = normalizeArray(patch.turns).map((item) => normalizeTurn(item)).filter((item) => item.question || item.finalReply);
+      const previousTurnCount = normalizeArray(current.turns).length;
+      const nextTurns = mergeTurnsUnique(current.turns, incomingTurns);
+      const acceptedIncomingTurns = Math.max(0, nextTurns.length - previousTurnCount);
+      const latestAcceptedTurn = acceptedIncomingTurns > 0
+        ? nextTurns[nextTurns.length - 1]
+        : null;
+      const lastMergedAt = normalizeText(patch.lastMergedAt) || nowIso();
+      const merged = normalizeJob({
+        ...current,
+        ...patch,
+        status: 'queued',
+        turns: nextTurns,
+        question: latestAcceptedTurn?.question || current.question,
+        finalReply: latestAcceptedTurn?.finalReply || current.finalReply,
+        routeMeta: normalizeObject(patch.routeMeta, current.routeMeta),
+        continuitySnapshot: normalizeObject(patch.continuitySnapshot, current.continuitySnapshot),
+        contextStats: normalizeObject(patch.contextStats, current.contextStats),
+        completedTasks: mergeCompletedTasksForQueuedPatch(current, patch, acceptedIncomingTurns > 0 ? incomingTurns : []),
+        taskStates: mergeTaskStatesForQueuedPatch(current, patch, acceptedIncomingTurns > 0 ? incomingTurns : []),
+        learningIntent: mergeLearningIntent(current.learningIntent, patch.learningIntent),
+        sourceMessageIds: Array.from(new Set(normalizeArray(current.sourceMessageIds).concat(normalizeArray(patch.sourceMessageIds)).map((item) => normalizeText(item)).filter(Boolean))),
+        tags: Array.from(new Set(normalizeArray(current.tags).concat(normalizeArray(patch.tags)).map((item) => normalizeText(item)).filter(Boolean))),
+        updatedAt: lastMergedAt,
         lastMergedAt,
-        options
-      )
-    });
-    atomicWriteJson(jobPath('queued', merged.jobId), merged);
-    indexStore.upsert(merged);
-    return merged;
+        mergeCount: Math.max(1, Number(current.mergeCount || 1) + Math.max(0, acceptedIncomingTurns || 0)),
+        availableAt: buildAggregateAvailableAt(
+          normalizeText(current.firstQueuedAt) || normalizeText(current.createdAt) || nowIso(),
+          lastMergedAt,
+          options
+        )
+      });
+      atomicWriteJson(jobPath('queued', merged.jobId), merged);
+      withQueueLock('index', () => indexStore.upsert(merged), options);
+      return merged;
+    }, options);
   }
 
   function claimNextJob(now = new Date(), options = {}) {
@@ -293,20 +406,29 @@ function createPostReplyJobQueue(options = {}) {
       rebuildIndex({ dryRun: false });
     }
     for (const candidate of candidates) {
-      const source = jobPath('queued', candidate.jobId);
-      const claimed = normalizeJob({
-        ...candidate,
-        status: 'processing',
-        updatedAt: nowIso(),
-        leaseOwner,
-        leaseUntil: new Date(Date.parse(currentIso) + leaseMs).toISOString()
-      });
-      const target = jobPath('processing', candidate.jobId);
       try {
-        fs.renameSync(source, target);
-        atomicWriteJson(target, claimed);
-        indexStore.upsert(claimed);
-        return claimed;
+        const claimed = withQueueLock(buildJobLockKey(candidate.jobId), () => {
+          const source = jobPath('queued', candidate.jobId);
+          if (!fs.existsSync(source)) return null;
+          const current = normalizeJob({
+            ...safeReadJson(source, candidate),
+            status: 'queued'
+          });
+          if (normalizeText(current.status) !== 'queued') return null;
+          const next = normalizeJob({
+            ...current,
+            status: 'processing',
+            updatedAt: nowIso(),
+            leaseOwner,
+            leaseUntil: new Date(Date.parse(currentIso) + leaseMs).toISOString()
+          });
+          const target = jobPath('processing', current.jobId);
+          fs.renameSync(source, target);
+          atomicWriteJson(target, next);
+          withQueueLock('index', () => indexStore.upsert(next), options);
+          return next;
+        }, options);
+        if (claimed) return claimed;
       } catch (_) {
         rebuildIndex({ dryRun: false });
         continue;
@@ -319,7 +441,7 @@ function createPostReplyJobQueue(options = {}) {
     const current = normalizeJob({ ...job, ...patch, status: 'done', completedAt: nowIso(), updatedAt: nowIso(), leaseOwner: '', leaseUntil: '' });
     removeJobFile('processing', current.jobId);
     atomicWriteJson(jobPath('done', current.jobId), current);
-    indexStore.upsert(current);
+    withQueueLock('index', () => indexStore.upsert(current));
     return current;
   }
 
@@ -328,7 +450,7 @@ function createPostReplyJobQueue(options = {}) {
     removeJobFile('processing', next.jobId);
     removeJobFile('failed', next.jobId);
     atomicWriteJson(jobPath('queued', next.jobId), next);
-    indexStore.upsert(next);
+    withQueueLock('index', () => indexStore.upsert(next));
     return next;
   }
 
@@ -340,7 +462,7 @@ function createPostReplyJobQueue(options = {}) {
       updatedAt: nowIso()
     });
     atomicWriteJson(jobPath('processing', current.jobId), current);
-    indexStore.upsert(current);
+    withQueueLock('index', () => indexStore.upsert(current));
     return current;
   }
 
@@ -378,7 +500,7 @@ function createPostReplyJobQueue(options = {}) {
     });
     removeJobFile('processing', current.jobId);
     atomicWriteJson(jobPath('failed', current.jobId), current);
-    indexStore.upsert(current);
+    withQueueLock('index', () => indexStore.upsert(current));
     return current;
   }
 
@@ -405,7 +527,7 @@ function createPostReplyJobQueue(options = {}) {
           requeueSafe: false
         });
         atomicWriteJson(currentPath, marked);
-        indexStore.upsert(marked);
+        withQueueLock('index', () => indexStore.upsert(marked));
         return marked;
       }
       const canceled = normalizeJob({
@@ -424,7 +546,7 @@ function createPostReplyJobQueue(options = {}) {
       });
       removeJobFile(status, normalizedJobId);
       atomicWriteJson(jobPath('failed', normalizedJobId), canceled);
-      indexStore.upsert(canceled);
+      withQueueLock('index', () => indexStore.upsert(canceled));
       return canceled;
     }
     return null;
