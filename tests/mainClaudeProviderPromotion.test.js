@@ -42,12 +42,16 @@ module.exports = (async () => {
     assert.strictEqual(request.url, 'https://superapi.buzz/v1/messages');
     assert.ok(!Object.prototype.hasOwnProperty.call(request.body, '__requestHeaders'));
     assert.ok(!Object.prototype.hasOwnProperty.call(request.body, 'prompt_cache_key'));
+    assert.ok(request.body.tools.some((tool) => tool.type === 'web_search_20250305'));
 
     const prepared = await httpClient.prepareRequest(request.url, request.body);
     assert.strictEqual(prepared.provider, 'anthropic');
     assert.strictEqual(prepared.requestUrl, 'https://superapi.buzz/v1/messages');
     assert.ok(Array.isArray(prepared.requestBody.messages));
     assert.ok(prepared.requestBody.system.some((item) => String(item.text || '').includes('stable persona')));
+    assert.ok(prepared.requestBody.tools.some((tool) => tool.type === 'web_search_20250305' && tool.name === 'web_search'));
+    assert.ok(prepared.requestBody.tools.some((tool) => tool.type === 'web_search_20250305' && !Object.prototype.hasOwnProperty.call(tool, 'cache_control')));
+    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'tool_choice'));
     assert.strictEqual(prepared.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestHeaders || {}, 'Authorization'));
 

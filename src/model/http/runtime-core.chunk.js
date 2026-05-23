@@ -319,9 +319,21 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
   };
 
   const tools = Array.isArray(nextBody.tools) ? nextBody.tools : null;
-  if (tools && tools.length > 0 && !tools.some((tool) => toolHasAnthropicCacheControl(tool))) {
+  const cacheableToolIndexes = tools
+    ? tools
+        .map((tool, index) => (
+          String(tool?.type || '').trim() === 'web_search_20250305' ? -1 : index
+        ))
+        .filter((index) => index >= 0)
+    : [];
+  if (
+    tools
+    && cacheableToolIndexes.length > 0
+    && !cacheableToolIndexes.some((index) => toolHasAnthropicCacheControl(tools[index]))
+  ) {
+    const cacheToolIndex = cacheableToolIndexes[cacheableToolIndexes.length - 1];
     nextBody.tools = tools.map((tool, index) => (
-      index === tools.length - 1
+      index === cacheToolIndex
         ? applyAnthropicCacheControl(tool, defaultCacheControl)
         : tool
     ));

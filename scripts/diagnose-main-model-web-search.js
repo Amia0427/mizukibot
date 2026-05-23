@@ -87,8 +87,8 @@ function inferNoToolWebCapability(text = '') {
   const claimsSearched = /已(?:联网|搜索|检索)|我(?:联网|搜索|检索)了|according to (?:the )?(?:search|web)|i searched|web search/i.test(text);
   const hasUrl = /https?:\/\/[^\s)）"'<>]+/i.test(text);
   return {
-    canary: refusal ? 'explicit_no_browsing' : (claimsSearched || hasUrl ? 'claims_or_cites_web' : 'no_evidence'),
-    likelyBuiltInWebSearch: Boolean(!refusal && (claimsSearched || hasUrl)),
+    canary: refusal && !hasUrl ? 'explicit_no_browsing' : (claimsSearched || hasUrl ? 'claims_or_cites_web' : 'no_evidence'),
+    likelyBuiltInWebSearch: Boolean(hasUrl || (!refusal && claimsSearched)),
     refusal,
     claimsSearched,
     hasUrl,
@@ -98,19 +98,63 @@ function inferNoToolWebCapability(text = '') {
 
 function inspectProviderSearchEvidence(resp, text = '') {
   const raw = typeof resp?.data === 'string' ? resp.data : JSON.stringify(resp?.data || {});
+  const parsed = parseResponseData(resp?.data);
   const combined = `${raw}\n${text}`;
   const hasOpenAISearchCall = /web_search_call|web_search_preview|url_citation|citation/i.test(combined);
-  const hasAnthropicSearchCall = /server_tool_use|web_search_tool_result|web_search_20250305/i.test(combined);
+  const hasAnthropicContentSearch = Boolean(
+    Array.isArray(parsed?.content)
+    && parsed.content.some((block) => {
+      const type = String(block?.type || '').trim();
+      return type === 'server_tool_use'
+        || type === 'web_search_tool_result'
+        || String(block?.name || '').trim() === 'web_search';
+    })
+  );
+  const hasAnthropicUsageSearch = Boolean(
+    parsed?.usage?.server_tool_use
+    && Object.values(parsed.usage.server_tool_use).some((value) => Number(value) > 0)
+  );
+  const hasAnthropicSearchCall = Boolean(
+    hasAnthropicContentSearch
+    || hasAnthropicUsageSearch
+    || /server_tool_use|web_search_tool_result/i.test(combined)
+  );
   const hasUrl = /https?:\/\/[^\s)）"'<>]+/i.test(combined);
   return {
-    providerSearchEvidence: Boolean(hasOpenAISearchCall || hasAnthropicSearchCall || hasUrl),
+    providerSearchEvidence: Boolean(hasOpenAISearchCall || hasAnthropicSearchCall),
     hasOpenAISearchCall,
     hasAnthropicSearchCall,
+    hasAnthropicContentSearch,
+    hasAnthropicUsageSearch,
     hasUrl
   };
 }
 
-async function runNoToolProbe(label, modelConfig, timeoutMs) {
+function parseResponseData(data) {
+  if (data && typeof data === 'object') return data;
+  if (typeof data === 'string') {
+    try {
+      return JSON.parse(data);
+    } catch (_) {}
+  }
+  return null;
+}
+
+async function runRuntimeMainProbe(label, modelConfig, timeoutMs, options = {}) {
+  const enableNativeSearch = options.enableNativeSearch !== false;
+  const userPrompt = enableNativeSearch
+    ? [
+        '请测试本次主回复 API 调用是否已经注入 Anthropic 原生 web_search 工具。',
+        '如果可用，请务必调用该原生 web_search 工具搜索 Reuters 当前 World News 首页的最新标题。',
+        '请回复 JSON：',
+        '{"can_web_search":true|false,"searched":true|false,"evidence_urls":[],"answer":"...","note":"..."}'
+      ].join('\n')
+    : [
+        '请测试你在本次 API 调用中是否拥有“模型/供应商内置”的联网搜索能力。',
+        '不要使用外部工具，因为调用方不会提供工具。',
+        '请尝试联网搜索 Reuters 当前 World News 首页的最新标题，并回复 JSON：',
+        '{"can_web_search":true|false,"searched":true|false,"evidence_urls":[],"answer":"...","note":"..."}'
+      ].join('\n');
   const request = buildMainModelRequest(modelConfig, {
     messages: [
       {
@@ -119,46 +163,65 @@ async function runNoToolProbe(label, modelConfig, timeoutMs) {
       },
       {
         role: 'user',
-        content: [
-          '请测试你在本次 API 调用中是否拥有“模型/供应商内置”的联网搜索能力。',
-          '不要使用外部工具，因为调用方不会提供工具。',
-          '请尝试联网搜索 Reuters 当前 World News 首页的最新标题，并回复 JSON：',
-          '{"can_web_search":true|false,"searched":true|false,"evidence_urls":[],"answer":"...","note":"..."}'
-        ].join('\n')
+        content: userPrompt
       }
     ],
     stream: false,
     defaultMaxTokens: 420,
+    anthropicWebSearch: enableNativeSearch,
     trace: {
       source: 'diagnose_script',
       phase: 'web_search_capability_probe',
-      purpose: `${label}_no_tool_probe`,
+      purpose: `${label}_${enableNativeSearch ? 'runtime_native_search_probe' : 'runtime_no_native_search_probe'}`,
       routeType: 'diagnose'
     }
   });
 
   request.body.__timeoutMs = timeoutMs;
   const startedAt = Date.now();
+  let preparedProbe = null;
+  try {
+    preparedProbe = await httpClient.prepareRequest(request.url, request.body);
+  } catch (_) {}
   try {
     const resp = await httpClient.postWithRetry(request.url, request.body, 0, modelConfig.apiKey);
     const text = extractReplyText(resp);
     return {
       ok: true,
       elapsedMs: Date.now() - startedAt,
-      requestUrl: ensureChatCompletionsUrl(modelConfig.apiBaseUrl),
+      requestUrl: request.url,
       protocol: request.protocol,
       status: Number(resp?.status || 200),
+      injectedAnthropicWebSearch: Boolean(
+        Array.isArray(request.body?.tools)
+        && request.body.tools.some((tool) => String(tool?.type || '') === 'web_search_20250305')
+      ),
+      preparedAnthropicWebSearch: Boolean(
+        Array.isArray(preparedProbe?.requestBody?.tools)
+        && preparedProbe.requestBody.tools.some((tool) => String(tool?.type || '') === 'web_search_20250305')
+      ),
       text,
-      inference: inferNoToolWebCapability(text)
+      inference: {
+        ...inferNoToolWebCapability(text),
+        ...inspectProviderSearchEvidence(resp, text)
+      }
     };
   } catch (error) {
     return {
       elapsedMs: Date.now() - startedAt,
       requestUrl: request.url,
       protocol: request.protocol,
+      injectedAnthropicWebSearch: Boolean(
+        Array.isArray(request.body?.tools)
+        && request.body.tools.some((tool) => String(tool?.type || '') === 'web_search_20250305')
+      ),
       ...extractError(error)
     };
   }
+}
+
+async function runNoToolProbe(label, modelConfig, timeoutMs) {
+  return runRuntimeMainProbe(label, modelConfig, timeoutMs, { enableNativeSearch: false });
 }
 
 async function postPrepared(url, body, apiKey, timeoutMs) {
@@ -275,6 +338,7 @@ async function runAnthropicNativeSearchProbe(label, modelConfig, timeoutMs) {
     try {
       const response = await postAnthropicMessages(url, body, modelConfig.apiKey, timeoutMs, authMode);
       const text = extractReplyText(response);
+      const parsedData = parseResponseData(response?.data);
       return {
         ok: true,
         elapsedMs: Date.now() - startedAt,
@@ -282,6 +346,10 @@ async function runAnthropicNativeSearchProbe(label, modelConfig, timeoutMs) {
         authMode,
         status: Number(response?.status || 200),
         text,
+        rawContentTypes: Array.isArray(parsedData?.content)
+          ? parsedData.content.map((block) => String(block?.type || '').trim()).filter(Boolean)
+          : [],
+        usageServerToolUse: parsedData?.usage?.server_tool_use || null,
         inference: inspectProviderSearchEvidence(response, text),
         attempts
       };
@@ -347,7 +415,9 @@ async function runDiagnose(options = {}) {
       config: summarizeConfig(target.label, target.modelConfig),
       probes: {}
     };
-    entry.probes.no_tool = await runNoToolProbe(target.label, target.modelConfig, timeoutMs);
+    entry.probes.runtime_without_native_search = await runRuntimeMainProbe(target.label, target.modelConfig, timeoutMs, { enableNativeSearch: false });
+    entry.probes.runtime_with_native_search = await runRuntimeMainProbe(target.label, target.modelConfig, timeoutMs, { enableNativeSearch: true });
+    entry.probes.no_tool = entry.probes.runtime_without_native_search;
     entry.probes.openai_responses_web_search_preview = await runOpenAIResponsesSearchProbe(target.label, target.modelConfig, timeoutMs);
     entry.probes.anthropic_messages_web_search = await runAnthropicNativeSearchProbe(target.label, target.modelConfig, timeoutMs);
     result.targets.push(entry);

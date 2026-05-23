@@ -78,7 +78,10 @@ module.exports = (async () => {
     assert.strictEqual(preparedMain.requestUrl, 'https://example.com/v1/messages');
     assert.ok(Array.isArray(preparedMain.requestBody.system));
     assert.ok(preparedMain.requestBody.system.some((block) => block.cache_control?.type === 'ephemeral'));
-    assert.ok(preparedMain.requestBody.tools.some((tool) => tool.cache_control?.type === 'ephemeral'));
+    assert.ok(preparedMain.requestBody.tools.some((tool) => tool.type === 'web_search_20250305' && tool.name === 'web_search'));
+    assert.ok(preparedMain.requestBody.tools.some((tool) => tool.name === 'lookup_memory' && tool.cache_control?.type === 'ephemeral'));
+    assert.ok(preparedMain.requestBody.tools.some((tool) => tool.type === 'web_search_20250305' && !Object.prototype.hasOwnProperty.call(tool, 'cache_control')));
+    assert.deepStrictEqual(preparedMain.requestBody.tool_choice, { type: 'auto' });
     assert.strictEqual(preparedMain.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestBody, 'prompt_cache_key'));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestBody, 'input'));
@@ -96,6 +99,36 @@ module.exports = (async () => {
     assert.strictEqual(responsesUrlMainRequest.protocol, 'anthropic_messages');
     assert.strictEqual(responsesUrlMainRequest.url, 'https://example.com/v1/messages');
     assert.ok(!Object.prototype.hasOwnProperty.call(responsesUrlMainRequest.body, 'prompt_cache_key'));
+
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED = 'false';
+    clearProjectCache();
+    const { buildMainModelRequest: buildMainModelRequestWithoutSearch } = require('../api/runtimeV2/model/shared');
+    const noSearchRequest = buildMainModelRequestWithoutSearch(null, {
+      messages: [{ role: 'user', content: 'hello without web search' }],
+      stream: false,
+      defaultMaxTokens: 200
+    });
+    assert.ok(!Array.isArray(noSearchRequest.body.tools));
+
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED = 'true';
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_MAX_USES = '3';
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ALLOWED_DOMAINS = 'https://reuters.com/world, apnews.com';
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_CITY = 'Shanghai';
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_COUNTRY = 'CN';
+    clearProjectCache();
+    const { buildMainModelRequest: buildMainModelRequestWithSearchConfig } = require('../api/runtimeV2/model/shared');
+    const configuredSearchRequest = buildMainModelRequestWithSearchConfig(null, {
+      messages: [{ role: 'user', content: 'latest news' }],
+      stream: false,
+      defaultMaxTokens: 200
+    });
+    const configuredPrepared = await httpClient.prepareRequest(configuredSearchRequest.url, configuredSearchRequest.body);
+    const searchTool = configuredPrepared.requestBody.tools.find((tool) => tool.type === 'web_search_20250305');
+    assert.strictEqual(searchTool.max_uses, 3);
+    assert.deepStrictEqual(searchTool.allowed_domains, ['reuters.com/world', 'apnews.com']);
+    assert.deepStrictEqual(searchTool.user_location, { type: 'approximate', city: 'Shanghai', country: 'CN' });
+    assert.ok(!Object.prototype.hasOwnProperty.call(configuredPrepared.requestBody, 'tool_choice'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(searchTool, 'cache_control'));
 
     console.log('openAIMainPromptCacheDualProtocol.test.js passed');
   } finally {

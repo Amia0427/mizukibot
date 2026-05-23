@@ -22,6 +22,7 @@ try {
   process.env.ADMIN_AI_FALLBACK_MODEL = 'admin-fallback-model';
   process.env.ADMIN_AI_FALLBACK_API_BASE_URL = 'https://example.com/admin-fallback/v1/messages';
   process.env.ADMIN_AI_FALLBACK_API_KEY = 'admin-fallback-key';
+  process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED = 'false';
   clearProjectCache();
 
   const {
@@ -46,6 +47,28 @@ try {
   assert.strictEqual(evidence.providerSearchEvidence, true);
   assert.strictEqual(evidence.hasOpenAISearchCall, true);
 
+  const urlOnlyEvidence = inspectProviderSearchEvidence(
+    { data: { content: [{ type: 'text', text: 'source https://www.reuters.com/world/' }] } },
+    ''
+  );
+  assert.strictEqual(urlOnlyEvidence.providerSearchEvidence, false);
+  assert.strictEqual(urlOnlyEvidence.hasUrl, true);
+
+  const anthropicEvidence = inspectProviderSearchEvidence(
+    {
+      data: {
+        content: [
+          { type: 'server_tool_use', name: 'web_search' },
+          { type: 'web_search_tool_result' }
+        ],
+        usage: { server_tool_use: { web_search_requests: 1 } }
+      }
+    },
+    ''
+  );
+  assert.strictEqual(anthropicEvidence.providerSearchEvidence, true);
+  assert.strictEqual(anthropicEvidence.hasAnthropicSearchCall, true);
+
   const parsedArgs = parseArgs(['node', 'script', '--json', '--timeout-ms=12000']);
   assert.strictEqual(parsedArgs.json, true);
   assert.strictEqual(parsedArgs.timeoutMs, 12000);
@@ -59,7 +82,17 @@ try {
       throw err;
     }
     if (Array.isArray(body?.tools) && body.tools.some((tool) => tool?.type === 'web_search_20250305')) {
-      return { status: 200, data: { content: [{ type: 'text', text: 'searched https://example.com' }] } };
+      return {
+        status: 200,
+        data: {
+          content: [
+            { type: 'server_tool_use', name: 'web_search' },
+            { type: 'web_search_tool_result' },
+            { type: 'text', text: 'searched https://example.com' }
+          ],
+          usage: { server_tool_use: { web_search_requests: 1 } }
+        }
+      };
     }
     return {
       status: 200,
