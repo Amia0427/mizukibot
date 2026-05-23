@@ -1,6 +1,6 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-24 01:10 +08:00
+更新时间：2026-05-24 01:21 +08:00
 
 运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
 
@@ -24,11 +24,13 @@
 
 运行状态更新 2026-05-24 01:10 +08:00：目标 12 补强落地，enrich task/group/style/jargon 写入会记录 `enrich_write_ids` trace；回滚 dry-run/apply 报告新增 `summary.byCategory/byStatus/byUser`，可解释哪些 task/group/style/jargon/self-improvement 写入会被归档。
 
+运行状态更新 2026-05-24 01:21 +08:00：目标 2/14 补强落地，新增 1k job 队列索引规模回归；评测脚本开始校验 `expected.writes/drops`，并新增学习回滚与重启租约恢复 case。
+
 ## 现状结论
 
 回复后学习链路已经从主回复热路径拆出：`api/runtimeV2/nodes/persist.js` 负责在回复完成后判定是否入队；`utils/postReplyJobQueue/` 用文件队列承载 `queued/processing/failed/done` 四状态；`utils/postReplyWorkerRuntime.js` 拉取 job，执行 `utils/postReplyWorker/processJob.js` 的 core/enrich 两阶段任务；`scripts/post-reply-worker.js` 作为独立子进程运行，并带 PID 文件、资源采样和 RSS 空闲回收。
 
-当前 15 项改造已形成可运行闭环：job schema、索引、租约、取消、trace、错误分类、诊断、任务 runner、质量门禁、背压、并发锁、回滚、预算摘要、评测集和运行手册均有代码或文档入口。后续主要是扩大覆盖面：回滚范围继续覆盖 group/task/style 写入、评测集升级为更真实的端到端 case、队列索引做大规模压力测试。
+当前 15 项改造已形成可运行闭环：job schema、索引、租约、取消、trace、错误分类、诊断、任务 runner、质量门禁、背压、并发锁、回滚、预算摘要、评测集和运行手册均有代码、测试或文档入口。后续主要是继续扩大真实端到端场景和生产观测样本。
 
 ## 文件地图
 
@@ -50,7 +52,7 @@
 | 目标 | 状态 | 当前入口 |
 | --- | --- | --- |
 | 1. Job Schema V2 | 已落地 | `utils/postReplyJobQueue/jobShape.js`、`tests/postReplyJobQueue.test.js` |
-| 2. 队列索引 | 已落地 | `POST_REPLY_QUEUE_DIR/index.json`、`scripts/repair-post-reply-queue.js` |
+| 2. 队列索引 | 已落地 | `POST_REPLY_QUEUE_DIR/index.json`、`scripts/repair-post-reply-queue.js`、`tests/postReplyQueueIndexScale.test.js` |
 | 3. 租约/心跳/取消 | 已落地 | `claimNextJob`、`heartbeatProcessingJob`、`scripts/cancel-post-reply-job.js` |
 | 4. 任务 DAG / per-task retry | 已落地 | `utils/postReplyWorker/taskRegistry.js`、`taskRunner.js`、`taskStates` |
 | 5. Enrich 质量门禁 | 已落地 | `utils/postReplyWorker/enrichQualityGate.js` |
@@ -62,7 +64,7 @@
 | 11. 并行安全 | 已落地 | `POST_REPLY_QUEUE_LOCK_TIMEOUT_MS`、`.locks` |
 | 12. 学习回滚 | 已落地 | `scripts/rollback-post-reply-job.js`、`enrich_write_ids` trace、回滚分类摘要 |
 | 13. Enrich 成本控制 | 已落地 | `enrichBudget`、`taskStates.enrich.result`、`enrich_budget_result` |
-| 14. 回归评测集 | 已落地 | `artifacts/post-reply-eval/cases.jsonl`、`tests/postReplyLearningEval.test.js` |
+| 14. 回归评测集 | 已落地 | `artifacts/post-reply-eval/cases.jsonl`、`tests/postReplyLearningEval.test.js`、回滚/恢复 case |
 | 15. 运行手册 | 已落地 | `docs/post-reply-worker.md` |
 
 ## 改进目标
@@ -84,7 +86,7 @@
 
 目标：减少每次 claim/list 时全目录扫描，新增轻量索引文件 `index.json` 或分片索引，记录 status、availableAt、userId、phase、aggregateKey。
 
-进展 2026-05-23 23:17 +08:00：已落地 `index.json` 轻量索引和 repair 脚本，claim/find 优先按索引筛候选，索引缺失或损坏时可重建。
+进展 2026-05-24 01:21 +08:00：已落地 `index.json` 轻量索引和 repair 脚本，claim/find 优先按索引筛候选，索引缺失或损坏时可重建；新增 1k job 规模回归覆盖 claim 过滤、状态迁移和损坏索引 fallback。
 
 实施：
 - 在 `utils/postReplyJobQueue/` 新增 `indexStore.js`，负责索引重建、增量更新、损坏回退。
@@ -242,7 +244,7 @@
 
 目标：建立 post-reply 学习评测集，覆盖显式记忆、隐式聊天、群黑话、风格偏好、任务经验、错误撤销、重启恢复。
 
-进展 2026-05-24 00:38 +08:00：已建立 20 个轻量 case，并让 `scripts/eval-post-reply-learning.js` 支持 job intent、enrich gate 序列和 budget trimming 三类断言；`tests/postReplyLearningEval.test.js` 会要求 case 数量不少于 20 且全部通过。
+进展 2026-05-24 01:21 +08:00：已建立 22 个 case，并让 `scripts/eval-post-reply-learning.js` 支持 job intent + writes/drops、enrich gate 序列、budget trimming、学习回滚、重启租约恢复五类断言；`tests/postReplyLearningEval.test.js` 会要求 case 数量不少于 20 且全部通过。
 
 实施：
 - 新增 `artifacts/post-reply-eval/cases.jsonl`。
