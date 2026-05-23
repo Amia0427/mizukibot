@@ -25,6 +25,7 @@ module.exports = (async () => {
       PLAN_API_BASE_URL: 'https://planner.example.test/v1',
       PLAN_API_KEY: 'planner-key',
       PLAN_MODEL: 'planner-model',
+      PLANNER_REQUEST_TIMEOUT_MS: '60000',
       PLANNER_MAX_MODEL_CALLS: '2',
       PLANNER_SEMANTIC_REFINE_ENABLED: 'true',
       PLANNER_SUBAGENT_ENABLED: '0',
@@ -73,6 +74,7 @@ module.exports = (async () => {
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0].url, 'https://planner.example.test/v1/chat/completions');
     assert.strictEqual(calls[0].body.model, 'planner-model');
+    assert.strictEqual(calls[0].body.__timeoutMs, 60000);
     assert.strictEqual(calls[0].retries, 0);
     assert.strictEqual(calls[0].apiKey, 'planner-key');
     assert.strictEqual(decision.plannerMeta.fallbackUsed, true);
