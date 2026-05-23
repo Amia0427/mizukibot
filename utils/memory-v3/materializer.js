@@ -64,6 +64,7 @@ const {
   resolveEvidenceTier,
   resolveProfileNodeConflicts
 } = require('./profileProjection');
+const { resolveMemoryConflicts } = require('./memoryConflictResolver');
 
 const NODE_EVENT_TYPES = new Set([
   'memory_candidate_extracted',
@@ -358,7 +359,10 @@ function materializeMemoryViews(options = {}) {
         : 0;
     }
   }
-  const lifecycleNodes = applyNearDuplicateMerges(applySupersession(nodes.map((item) => applyProfileLifecycle(item, { now }))), { now });
+  const conflictResolution = resolveMemoryConflicts(
+    applyNearDuplicateMerges(applySupersession(nodes.map((item) => applyProfileLifecycle(item, { now }))), { now })
+  );
+  const lifecycleNodes = conflictResolution.nodes;
   const activeNodes = lifecycleNodes.filter((item) => item.status !== 'archived' && !isMemoryNotRecallable(item));
   const hiddenRecallNodes = lifecycleNodes
     .filter((item) => item.status !== 'archived' && isMemoryNotRecallable(item))
@@ -525,11 +529,13 @@ function materializeMemoryViews(options = {}) {
       ...hiddenProfileSuppressed.filter((item) => item.userId === userId),
       ...hiddenExpiredRecentTopicSuppressed.filter((item) => item.userId === userId),
       ...expiredProfileNodes.filter((item) => item.userId === userId),
-      ...profileConflicts.filter((item) => item.userId === userId)
+      ...profileConflicts.filter((item) => item.userId === userId),
+      ...conflictResolution.suppressed.filter((item) => item.userId === userId)
     ];
     profile.conflicts = [
       ...profileConflicts.filter((item) => item.userId === userId),
-      ...hiddenProfileConflicts.filter((item) => item.userId === userId)
+      ...hiddenProfileConflicts.filter((item) => item.userId === userId),
+      ...conflictResolution.conflicts.filter((item) => item.userId === userId)
     ];
     profile.expiresSoon = expiringProfileNodes.filter((item) => item.userId === userId);
   }
@@ -606,6 +612,7 @@ function materializeMemoryViews(options = {}) {
       dirtyScopes: dirtyScopeCount,
       embeddings: embeddingIndex,
       lancedbSyncPlan,
+      conflictsResolved: conflictResolution.conflicts.length,
       dedupe: deduped.stats,
       sessions: Object.keys(outputSessionProjection.sessions).length,
       profiles: Object.keys(outputProfileProjection.users).length,

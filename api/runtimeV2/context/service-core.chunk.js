@@ -39,6 +39,7 @@ const {
   isCriticalDynamicContextBlock,
   selectDynamicContextBlocks
 } = require('../../../utils/mainReplyPromptBlocks');
+const { getMemoryRecallPolicyResource } = require('../../../utils/memory-v3/recallPolicyResource');
 const {
   GROUP_DIRECT_REPLY_CHAR_LIMIT,
   GROUP_DIRECT_REPLY_TARGET_MAX_CHARS,
@@ -136,6 +137,47 @@ function buildContinuityStatePromptSnippet(continuitySignals = {}) {
   push('last_assistant_commitment', signals.lastAssistantCommitment);
   if (lines.length === 0) return '';
   return ['[ContinuityState]', ...lines].join('\n');
+}
+
+function buildMemoryRecallPolicyPromptSnippet(memoryContext = {}) {
+  const context = memoryContext && typeof memoryContext === 'object' ? memoryContext : {};
+  const trace = context?.diagnostics?.memoryTrace && typeof context.diagnostics.memoryTrace === 'object'
+    ? context.diagnostics.memoryTrace
+    : {};
+  const hits = Array.isArray(trace.hits) ? trace.hits : [];
+  const evidenceText = [
+    context.promptRetrievedMemoryText,
+    context.memoryForPrompt,
+    context.promptDailyJournalText,
+    context.taskMemoryText,
+    context.groupMemoryText,
+    context.promptLongTermProfileText
+  ].map((item) => normalizeText(item)).filter(Boolean).join('\n');
+  const hasEvidenceText = Boolean(evidenceText)
+    && !/^\[?(?:RetrievedMemory|RelevantEvidence|DailyJournal)?\]?\s*(?:none|null|undefined|暂无|无|暂无与当前问题强相关的长期记忆)?\s*$/i.test(evidenceText);
+  if (hits.length === 0 && Number(trace.retrieved_count || 0) <= 0 && !hasEvidenceText) return '';
+  const firstHit = hits.find((item) => item && typeof item === 'object') || {};
+  const sourcePlan = context?.diagnostics?.sourcePlan || context?.stats?.sourcePlan || {};
+  const resource = getMemoryRecallPolicyResource({
+    category: firstHit.category || context.category,
+    sourcePlan
+  });
+  if (!resource || !normalizeText(resource.text)) return '';
+  const lines = [
+    '[MemoryRecallPolicy]',
+    resource.text
+  ];
+  const category = normalizeText(resource.category || firstHit.category);
+  const source = normalizeText(resource.sourcePlan?.source);
+  const reason = normalizeText(resource.sourcePlan?.reason);
+  if (category || source || reason) {
+    lines.push(`active_plan=${[
+      category ? `category:${category}` : '',
+      source ? `source:${source}` : '',
+      reason ? `reason:${reason}` : ''
+    ].filter(Boolean).join('|')}`);
+  }
+  return lines.join('\n');
 }
 
 function formatShortTermMessageLine(message = {}) {

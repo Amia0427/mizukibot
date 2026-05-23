@@ -331,6 +331,25 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }));
   }
 
+  const collectedMemoryContextForPolicy = promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object'
+    ? promptMaterials.memoryContext
+    : {};
+  const memoryRecallPolicyText = buildMemoryRecallPolicyPromptSnippet(collectedMemoryContextForPolicy);
+  if (memoryRecallPolicyText) {
+    extraBlocks.push(createPromptBlock('memory_recall_policy', 'Memory Recall Policy', memoryRecallPolicyText, {
+      stage: 'main',
+      priority: 255,
+      authority: 'memory_policy',
+      kind: 'memory_policy',
+      source: 'memory_v3_recall_policy',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true,
+        evidenceOnly: true
+      }
+    }));
+  }
+
   const continuityStateText = buildContinuityStatePromptSnippet(options?.continuitySignals);
   if (continuityStateText) {
     extraBlocks.push(createPromptBlock('continuity_state', 'Continuity State', continuityStateText, {
@@ -438,6 +457,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
     hasShortTermContinuity: combinedDynamicBlocks.some((item) => item?.id === 'short_term_continuity'),
+    hasMemoryRecallPolicy: combinedDynamicBlocks.some((item) => item?.id === 'memory_recall_policy' || normalizeText(item?.meta?.blockId) === 'memory_recall_policy')
+      || extraBlocks.some((item) => item?.id === 'memory_recall_policy'),
     hasRetrievedMemory: combinedDynamicBlocks.some((item) => item?.id === 'retrieved_memory_lite'),
     hasMemosRecall: combinedDynamicBlocks.some((item) => item?.id === 'memos_recall' || normalizeText(item?.meta?.blockId) === 'memos_recall')
       || Boolean(resolveMemosRecallText(options, routeMeta, promptMaterials)),
@@ -469,10 +490,10 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     ? promptMaterials.memoryContext
     : {};
   if (collectedMemoryContext.promptRetrievedMemoryText || collectedMemoryContext.memoryForPrompt) {
-    runtimeAddedIds.push('retrieved_memory_lite');
+    runtimeAddedIds.push('memory_recall_policy', 'retrieved_memory_lite');
   }
   if (forceMemoryContext) {
-    runtimeAddedIds.push('short_term_continuity', 'retrieved_memory_lite', 'daily_journal');
+    runtimeAddedIds.push('short_term_continuity', 'memory_recall_policy', 'retrieved_memory_lite', 'daily_journal');
   }
   const finalDynamicPromptPlan = {
     ...cloneDynamicPromptPlan(shouldUseHeuristicDynamicPlan ? heuristicDynamicPlan : dynamicPromptPlan),

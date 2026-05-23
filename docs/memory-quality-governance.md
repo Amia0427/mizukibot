@@ -1,6 +1,6 @@
 # Memory Quality Governance
 
-更新时间：2026-05-23 11:04 +08:00
+更新时间：2026-05-23 11:20 +08:00
 
 ## 目标
 
@@ -24,6 +24,9 @@
 - `utils/memory-v3/categoryMetadata.js` 和 `categoryManifest.js` 提供 Memory-Plus 风格的类别清单：召回文档统一派生 `category/tags/intent/privacyLevel`，`memory_cli_fast`、Memory V3 查询和 LanceDB 行都带 category-aware 过滤/boost。
 - `utils/memory-v3/versionedUpdate.js` 提供写入前相似检测和版本化 update：命中相似 active 记忆时追加新 `memory_confirmed`，再把旧 id 追加 `memory_archived`，新节点保留 `previousVersions/supersedes/versionRootId`。
 - `utils/memory-v3/fileImport.js` 和 `scripts/import-memory-file.js` 提供 `.md/.txt` 文件导入管线，导入 chunk 默认带 `source=file_import`、`intent=bulk_import`、文件名和 chunk index，并复用版本化 update 防止重复导入扩散。
+- `utils/memory-v3/memoryConflictResolver.js` 在 projection 阶段处理非 profile 通用冲突：同 `conflictKey` 下按 active/explicit/confidence/recency 选 winner，loser 标记 `lifecycleStatus=superseded`、`conflictWinnerId` 和 `recallHiddenReason=memory_conflict_resolved`，默认不进入召回。
+- `utils/memory-v3/recentRecallPolicy.js` 强化“刚才/最近/今天/昨天”召回：本地评分优先 `recent/journal/task`，并在词面弱匹配时补 recent fallback candidates。
+- `utils/memory-v3/recallPolicyResource.js` 已接入主回复动态上下文，运行时在有记忆证据时注入 `memory_recall_policy`，约束 category/source/lifecycle/弱证据使用。
 - `utils/mainReplyContextPreview.js`、`utils/memoryContext/formatters.js` 和 `scripts/eval-memory-recall.js` 已扩展 source/category/tags/lifecycle/drop reason 观测，便于定位错召、旧版本误召和类别漏召。
 
 更新 2026-05-19 22:20 +08:00：补齐冲突报告、纠错归档、召回门禁、LanceDB 读迁移门禁、混合召回排序权重和写后不可召回隐藏。
@@ -36,6 +39,7 @@
 更新 2026-05-21 22:06 +08:00：LanceDB gate 优先使用 candidate query 覆盖率，默认低水位 `minQueryReadyRatio=0.2` 仅防止向量完全断供；召回质量、空结果和不可见候选仍由 recall gate 卡住。
 更新 2026-05-23 10:55 +08:00：第一批 Memory-Plus 改造落地：类别 manifest、query 前 source plan 诊断、category/tag/intent/privacy metadata、类别感知本地/CLI 召回 boost、LanceDB metadata 行和 filter、旧 LanceDB 表缺列降级查询。
 更新 2026-05-23 11:04 +08:00：第二批 Memory-Plus 改造落地：写入前相似检测、通用版本化 update、文件导入管线、context preview 召回观测和 recall eval category/lifecycle 指标。
+更新 2026-05-23 11:20 +08:00：第三批 Memory-Plus 改造落地：通用冲突 winner/loser projection、主回复 `memory_recall_policy` 资源注入、近期/日期召回快路径和相关测试。
 
 ## 运维顺序
 
@@ -52,6 +56,7 @@
 - `reject`：prompt/schema 泄露、助手永久行为指令、空文本等严重污染。
 - `candidate`：临时、假设、低信号或接近置信阈值内容，等待更多证据或人工治理。
 - `archive`：类型 TTL 已硬过期的 active 记忆，例如旧 topic、任务和短期语境。
+- `superseded`：版本更新或冲突仲裁输掉的旧事实，保留在 projection 供审计，但 `notRecallable=true`，查询和 prompt 默认过滤。
 - `keep`：稳定且可复用的事实、偏好、身份、画像和日记 rollup。
 
 ## 召回评估注意
@@ -69,6 +74,7 @@
 - 2026-05-21 22:23 +08:00：最终复核安全物化后 raw events 143465，投影去重输入 41960，抑制重复 101505；LanceDB reconcile 后 `projectionStale=false`、`staleTableRows=0`、`readyButNotSynced=0`，`lancedb-gate --limit 50 --auto-gold` 通过并建议 `enable_lancedb_read`。
 - 2026-05-23 10:55 +08:00：Memory-Plus 类别 manifest 第一批改造完成；新增 `tests/memoryCategoryManifestRecall.test.js` 和 `tests/lancedbMetadataCompatibility.test.js` 覆盖 manifest、category filter、source plan 诊断和 LanceDB metadata 兼容。后续仍需补版本化 update 和文件导入管线。
 - 2026-05-23 11:04 +08:00：Memory-Plus 写入/导入第二批改造完成；新增 `tests/memoryV3VersionedUpdate.test.js` 和 `tests/memoryV3FileImport.test.js` 覆盖相似检测、版本链、旧版本不可召回、Markdown 导入、重复导入稳定 active chunk 数。
+- 2026-05-23 11:20 +08:00：Memory-Plus 召回治理第三批完成；新增 `tests/memoryV3GenericConflictResolution.test.js`、`tests/memoryRecallPolicyPromptBlock.test.js`、`tests/memoryV3RecentRecallFastPath.test.js`，覆盖通用冲突 loser 隐藏、主 prompt recall policy 注入、刚才/近期 fast path。
 
 ## 验收命令
 
@@ -81,6 +87,9 @@ node tests/memoryCategoryManifestRecall.test.js
 node tests/lancedbMetadataCompatibility.test.js
 node tests/memoryV3VersionedUpdate.test.js
 node tests/memoryV3FileImport.test.js
+node tests/memoryV3GenericConflictResolution.test.js
+node tests/memoryRecallPolicyPromptBlock.test.js
+node tests/memoryV3RecentRecallFastPath.test.js
 node tests/memoryRecallAutoGoldEval.test.js
 node tests/mainReplyContextPreview.test.js
 node tests/memoryGovernanceConflictReport.test.js
