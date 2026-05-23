@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-23 10:30 +08:00：启动链和已拆 facade 已切到目录小模块入口；旧大文件已归档到 `artifacts/backups/large-facades-small-module-cutover-2026-05-23-0917+0800.zip`，33 个旧入口已删除，`npm test` 全量通过，运行时不再使用旧 `.js` facade。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始
@@ -127,7 +129,7 @@ MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3600
 MEMORY_V3_SESSION_RECENT_MESSAGES=96
 ```
 
-配置入口优先看 `config.js` 和 `config/*Runtime.js`。MemOS 细节见 `docs/memos-mcp-planner-recall.md`，主回复上下文见 `docs/main-reply-context.md`。
+配置入口优先看 `config/index.js` 和 `config/*Runtime.js`。MemOS 细节见 `docs/memos-mcp-planner-recall.md`，主回复上下文见 `docs/main-reply-context.md`。
 
 ## 项目结构
 
@@ -151,10 +153,10 @@ artifacts/  临时产物、备份和评估输出
 NapCat / OneBot WebSocket
   -> core/messageHandler.js
   -> core/messageIngress.js
-  -> core/router.js
+  -> core/router/index.js
   -> core/routeExecution.js
-  -> core/messageRouteFlow.js
-  -> api/runtimeV2/host.js
+  -> core/messageRouteFlow/index.js
+  -> api/runtimeV2/host/index.js
   -> api/runtimeV2/nodes/*
   -> 工具 / 记忆 / 子代理 / 本地知识
   -> 回复润色
@@ -203,7 +205,7 @@ prepare
 
 路由判断：
 
-- `core/router.js`
+- `core/router/index.js`
 - `core/router/safety.js`
 - `core/routeSchema.js`
 - `core/intentAI.js`
@@ -212,15 +214,15 @@ prepare
 执行策略和工具开放范围：
 
 - `core/routeExecution.js`
-- `utils/toolPolicy.js`
+- `utils/toolPolicy/index.js`
 - `utils/localToolAccess.js`
 - `api/toolRegistry.js`
-- `api/toolExecutors.js`
+- `api/toolExecutors/index.js`
 - `api/toolSchemas/`
 
 Runtime、planner、dispatch、repair：
 
-- `api/runtimeV2/host.js`
+- `api/runtimeV2/host/index.js`
 - `api/runtimeV2/planning/service.js`
 - `api/runtimeV2/nodes/prepare.js`
 - `api/runtimeV2/nodes/dispatch.js`
@@ -238,28 +240,28 @@ Prompt 和人格：
 
 记忆、RAG、本地知识、notebook：
 
-- `utils/memoryContext.js`
-- `utils/localKnowledge.js`
-- `utils/memoryCli.js`
+- `utils/memoryContext/index.js`
+- `utils/localKnowledge/index.js`
+- `utils/memoryCli/index.js`
 - `api/localNotebook.js`
 - `utils/memory-v3/`
-- `utils/personaMemoryState.js`
+- `utils/personaMemoryState/index.js`
 - `utils/dailyJournal/`
 
 主动任务和后台任务：
 
 - `core/schedulerRuntime.js`
-- `core/tickEngine.js`
+- `core/tickEngine/index.js`
 - `core/proactiveGreetingFlow.js`
 - `utils/postReplyWorkerRuntime.js`
-- `utils/postReplyJobQueue.js`
+- `utils/postReplyJobQueue/index.js`
 
 子代理和生图：
 
 - `core/messageFullSubagent.js`
 - `api/subagentExecutor.js`
 - `api/openclawExecutor.js`
-- `api/createAgentExecutor.js`
+- `api/createAgentExecutor/index.js`
 - `api/createAgent/`
 
 ## 排障顺序
@@ -273,12 +275,12 @@ Prompt 和人格：
 
 消息进来了但没有回复：
 
-- 先查 `core/messageIngress.js`、`core/router.js`、`core/routeExecution.js`、`core/messageRouteFlow.js`、`core/messageDispatchCoordinator.js`。
+- 先查 `core/messageIngress.js`、`core/router/index.js`、`core/routeExecution.js`、`core/messageRouteFlow/index.js`、`core/messageDispatchCoordinator.js`。
 - 重点确认是否被判成 `ignore`、`refuse`、`unavailable` 或 `background_direct`。
 
 工具没有跑：
 
-- 先查 `core/routeExecution.js`、`utils/toolPolicy.js`、`api/runtimeV2/nodes/prepare.js`、`api/runtimeV2/planning/service.js`。
+- 先查 `core/routeExecution.js`、`utils/toolPolicy/index.js`、`api/runtimeV2/nodes/prepare.js`、`api/runtimeV2/planning/service.js`。
 - 常见原因是 `policyKey` 不匹配、`allowTools` 未打开、`allowedTools` 被收窄、planner 未进入工具分支。
 
 Prompt 改了但没生效：
@@ -288,14 +290,14 @@ Prompt 改了但没生效：
 
 记忆或 notebook 检索不对：
 
-- 先查 `utils/memoryContext.js`、`utils/localKnowledge.js`、`utils/memoryCli.js`、`api/localNotebook.js`。
+- 先查 `utils/memoryContext/index.js`、`utils/localKnowledge/index.js`、`utils/memoryCli/index.js`、`api/localNotebook.js`。
 - 再跑 `npm run diag:memory -- audit --limit 5`。
 
 ## 开发注意
 
 - 共享文件改动前先看 `git status --short` 和目标文件 diff，保留并行开发者已有改动。
 - 历史维护记录统一写入 `docs/repo-cleanup.md`；README 只保留当前入口信息和必要的简短更新时间戳。
-- 不要把 `api/agentGraphV2.js` 当成 runtime 主体；真实主体在 `api/runtimeV2/host.js`。
+- 不要把 `api/agentGraphV2.js` 当成 runtime 主体；真实主体在 `api/runtimeV2/host/index.js`。
 - 不要把旧的 `lookup / transform / plan / act` 当成当前顶层 route。
 - 不要只改 prompt 文本就默认生效，要确认 manifest、stage、priority 和预算裁剪。
 - `npm run memory:v3:migrate` 日常只做安全物化；只有明确需要重导旧数据时才加 `--import-legacy`。
