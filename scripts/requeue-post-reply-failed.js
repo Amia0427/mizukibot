@@ -2,6 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { getPostReplyJobQueue } = require('../utils/postReplyJobQueue');
+const {
+  classifyPostReplyJobError,
+  isRequeueSafePostReplyError,
+  isTerminalPostReplyError,
+  isTransientPostReplyError
+} = require('../utils/postReplyWorker/errorClassifier');
 
 function parseArgs(argv = process.argv.slice(2)) {
   const out = {
@@ -27,26 +33,12 @@ function parseArgs(argv = process.argv.slice(2)) {
   return out;
 }
 
-function classifyPostReplyJobError(jobOrError = {}) {
-  const raw = typeof jobOrError === 'string'
-    ? jobOrError
-    : (jobOrError.lastError || jobOrError.error || '');
-  const error = String(raw || '').toLowerCase();
-  if (/(401|403|404|forbidden|unauthorized|not found|model not supported|unsupported model)/.test(error)) {
-    return 'terminal';
-  }
-  if (/(429|rate limit|too many requests|408|425|500|502|503|504|timeout|timed out|temporarily unavailable|econnreset|etimedout|network)/.test(error)) {
-    return 'transient';
-  }
-  return error ? 'unknown_error' : 'no_error';
-}
-
 function isTransient(job = {}) {
-  return classifyPostReplyJobError(job) === 'transient';
+  return isTransientPostReplyError(job);
 }
 
 function isTerminal(job = {}) {
-  return classifyPostReplyJobError(job) === 'terminal';
+  return isTerminalPostReplyError(job);
 }
 
 function writeJson(filePath, data) {
@@ -70,7 +62,7 @@ function planRequeueJobs(jobs = [], args = {}) {
     errorClass,
     transient: errorClass === 'transient',
     terminal: errorClass === 'terminal',
-    requeueSafe: errorClass === 'transient',
+    requeueSafe: isRequeueSafePostReplyError(job),
     lastError: String(job.lastError || '').slice(0, 240),
     job
   }));

@@ -69,10 +69,35 @@ module.exports = (() => {
     });
     writeJson(path.join(postReplyDir, 'processing', 'post_reply_1.json'), {
       jobId: 'post_reply_1',
+      schemaVersion: 2,
       status: 'processing',
       phase: 'core',
       userId: 'u1',
+      aggregateKey: 'core|u1|s1|g1',
+      traceId: 'trace-1',
+      leaseOwner: 'worker-test',
+      leaseUntil: '2026-05-02T23:45:00.000Z',
       updatedAt: '2026-05-02T23:50:00.000Z'
+    });
+    writeJson(path.join(postReplyDir, 'queued', 'post_reply_2.json'), {
+      jobId: 'post_reply_2',
+      schemaVersion: 2,
+      status: 'queued',
+      phase: 'enrich',
+      userId: 'u2',
+      availableAt: '2026-05-02T23:30:00.000Z',
+      updatedAt: '2026-05-02T23:30:00.000Z'
+    });
+    writeJson(path.join(postReplyDir, 'failed', 'post_reply_3.json'), {
+      jobId: 'post_reply_3',
+      schemaVersion: 2,
+      status: 'failed',
+      phase: 'core',
+      userId: 'u3',
+      lastError: '429 rate limit',
+      errorClass: 'transient',
+      requeueSafe: true,
+      updatedAt: '2026-05-02T23:40:00.000Z'
     });
     writeJson(memoryLockFile, {
       pid: 555,
@@ -137,6 +162,13 @@ module.exports = (() => {
     assert.strictEqual(report.components.mainProcess.lockFile.pid, 111);
     assert.strictEqual(report.components.postReplyWorker.pidFile.pid, 222);
     assert.strictEqual(report.components.postReplyWorker.queue.counts.processing, 1);
+    assert.strictEqual(report.components.postReplyWorker.queue.counts.queued, 1);
+    assert.strictEqual(report.components.postReplyWorker.queue.failedByErrorClass.transient, 1);
+    assert.strictEqual(report.components.postReplyWorker.queue.countsByPhase.core, 2);
+    assert.strictEqual(report.summary.postReplyWorker.queueByPhase.enrich, 1);
+    assert.strictEqual(report.summary.postReplyWorker.failedByErrorClass.transient, 1);
+    assert.ok(report.summary.postReplyWorker.oldestQueuedAgeMs > 0);
+    assert.ok(report.summary.postReplyWorker.oldestProcessingLeaseAgeMs > 0);
     assert.strictEqual(report.components.backgroundTasks.countsByStatus.running, 1);
     assert.strictEqual(report.components.langGraphV2Store.countsByCheckpointStatus.running, 1);
     assert.strictEqual(report.components.langGraphV2Store.countsByCheckpointStatus.completed, 1);

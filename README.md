@@ -22,6 +22,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 22:37 +08:00：本地启用 post-reply worker，`.env` 增加 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 继续使用 `npm run start:post-reply-worker` 启动，运行状态用 `npm run diag:runtime` 查看。
 
+更新 2026-05-23 22:43 +08:00：开始执行回复后学习子进程改进：新增 Job Schema V2 基础字段、processing 租约、取消标记、错误分类、job trace、单 job inspect 脚本和 runtime 诊断摘要；运行手册见 `docs/post-reply-worker.md`。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始
@@ -60,6 +62,8 @@ npm start
 npm run console
 npm run start:post-reply-worker
 ```
+
+回复后学习 worker 运行手册：`docs/post-reply-worker.md`
 
 ## 常用命令
 

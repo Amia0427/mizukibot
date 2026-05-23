@@ -22,6 +22,10 @@ const {
   normalizePhase,
   normalizeTurn
 } = require('./jobShape');
+const {
+  classifyPostReplyJobError,
+  isRequeueSafePostReplyError
+} = require('../postReplyWorker/errorClassifier');
 
 const STATUS_DIRS = ['queued', 'processing', 'failed', 'done'];
 
@@ -156,6 +160,8 @@ function createPostReplyJobQueue(options = {}) {
   function claimNextJob(now = new Date(), options = {}) {
     ensureLayout();
     const currentIso = typeof now === 'string' ? now : new Date(now || Date.now()).toISOString();
+    const leaseMs = Math.max(1000, Number(options.leaseMs || config.POST_REPLY_WORKER_STALE_PROCESSING_MS) || 5 * 60 * 1000);
+    const leaseOwner = normalizeText(options.leaseOwner || `pid:${process.pid}`);
     const activeUserIds = new Set(
       (Array.isArray(options.activeUserIds) ? options.activeUserIds : [])
         .map((item) => normalizeText(item))
@@ -172,7 +178,9 @@ function createPostReplyJobQueue(options = {}) {
       const claimed = normalizeJob({
         ...candidate,
         status: 'processing',
-        updatedAt: nowIso()
+        updatedAt: nowIso(),
+        leaseOwner,
+        leaseUntil: new Date(Date.parse(currentIso) + leaseMs).toISOString()
       });
       const target = jobPath('processing', candidate.jobId);
       try {
@@ -187,15 +195,16 @@ function createPostReplyJobQueue(options = {}) {
   }
 
   function markDone(job = {}, patch = {}) {
-    const current = normalizeJob({ ...job, ...patch, status: 'done', completedAt: nowIso(), updatedAt: nowIso() });
+    const current = normalizeJob({ ...job, ...patch, status: 'done', completedAt: nowIso(), updatedAt: nowIso(), leaseOwner: '', leaseUntil: '' });
     removeJobFile('processing', current.jobId);
     atomicWriteJson(jobPath('done', current.jobId), current);
     return current;
   }
 
   function moveToQueued(job = {}, patch = {}) {
-    const next = normalizeJob({ ...job, ...patch, status: 'queued', updatedAt: nowIso() });
+    const next = normalizeJob({ ...job, ...patch, status: 'queued', updatedAt: nowIso(), leaseOwner: '', leaseUntil: '' });
     removeJobFile('processing', next.jobId);
+    removeJobFile('failed', next.jobId);
     atomicWriteJson(jobPath('queued', next.jobId), next);
     return next;
   }
@@ -212,16 +221,52 @@ function createPostReplyJobQueue(options = {}) {
   }
 
   function markFailed(job = {}, error = '') {
+    const errorClass = classifyPostReplyJobError(error || job);
     const current = normalizeJob({
       ...job,
       status: 'failed',
       failedAt: nowIso(),
       updatedAt: nowIso(),
-      lastError: normalizeText(error)
+      leaseOwner: '',
+      leaseUntil: '',
+      lastError: normalizeText(error),
+      errorClass,
+      requeueSafe: isRequeueSafePostReplyError(error || job)
     });
     removeJobFile('processing', current.jobId);
     atomicWriteJson(jobPath('failed', current.jobId), current);
     return current;
+  }
+
+  function cancelJob(jobId = '', reason = 'cancel_requested') {
+    ensureLayout();
+    const normalizedJobId = normalizeText(jobId);
+    if (!normalizedJobId) return null;
+    const now = nowIso();
+    for (const status of ['queued', 'processing']) {
+      const currentPath = jobPath(status, normalizedJobId);
+      if (!fs.existsSync(currentPath)) continue;
+      const parsed = safeReadJson(currentPath, null);
+      if (!parsed) return null;
+      const canceled = normalizeJob({
+        ...parsed,
+        status: 'failed',
+        cancelRequested: true,
+        canceledAt: now,
+        cancelReason: reason,
+        failedAt: now,
+        updatedAt: now,
+        leaseOwner: '',
+        leaseUntil: '',
+        lastError: reason,
+        errorClass: 'canceled',
+        requeueSafe: false
+      });
+      removeJobFile(status, normalizedJobId);
+      atomicWriteJson(jobPath('failed', normalizedJobId), canceled);
+      return canceled;
+    }
+    return null;
   }
 
   function retryOrFail(job = {}, error = '') {
@@ -256,10 +301,16 @@ function createPostReplyJobQueue(options = {}) {
     const staleBefore = typeof options.staleBefore === 'string'
       ? options.staleBefore
       : new Date(options.staleBefore || Date.now()).toISOString();
+    const nowText = normalizeText(options.now) || nowIso();
     const recovered = [];
     for (const job of listJobs(['processing'])) {
-      const updatedAt = normalizeText(job.updatedAt || job.createdAt);
-      if (updatedAt && updatedAt > staleBefore) continue;
+      const leaseUntil = normalizeText(job.leaseUntil);
+      if (leaseUntil) {
+        if (leaseUntil > nowText) continue;
+      } else {
+        const updatedAt = normalizeText(job.updatedAt || job.createdAt);
+        if (updatedAt && updatedAt > staleBefore) continue;
+      }
       const result = retryOrFail(job, job.lastError || 'worker-recovered-stale-processing-job');
       recovered.push(result.job);
     }
@@ -274,6 +325,7 @@ function createPostReplyJobQueue(options = {}) {
     enqueue,
     mergeQueuedJob,
     claimNextJob,
+    cancelJob,
     markDone,
     markFailed,
     updateProcessingJob,
