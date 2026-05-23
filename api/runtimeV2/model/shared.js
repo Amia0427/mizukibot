@@ -189,6 +189,66 @@ function getApiKey(overrides = null) {
   return String(raw || config.API_KEY || '').trim();
 }
 
+function normalizeDomainList(values = []) {
+  return (Array.isArray(values) ? values : [])
+    .map((item) => String(item || '').trim().toLowerCase())
+    .map((item) => item
+      .replace(/^https?:\/\//i, '')
+      .replace(/[?#].*$/g, '')
+      .replace(/^\/+|\/+$/g, '')
+      .replace(/^\.+|\.+$/g, ''))
+    .filter(Boolean)
+    .filter((item, index, arr) => arr.indexOf(item) === index);
+}
+
+function buildAnthropicWebSearchUserLocation(currentConfig = config) {
+  const userLocation = { type: 'approximate' };
+  const city = String(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_CITY || '').trim();
+  const region = String(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_REGION || '').trim();
+  const country = String(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_COUNTRY || '').trim();
+  const timezone = String(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_TIMEZONE || '').trim();
+  if (city) userLocation.city = city;
+  if (region) userLocation.region = region;
+  if (country) userLocation.country = country;
+  if (timezone) userLocation.timezone = timezone;
+  return Object.keys(userLocation).length > 1 ? userLocation : null;
+}
+
+function buildAnthropicWebSearchTool(currentConfig = config) {
+  const maxUses = Math.max(1, Math.floor(Number(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_MAX_USES) || 2));
+  const tool = {
+    type: 'web_search_20250305',
+    name: 'web_search',
+    max_uses: maxUses
+  };
+  const allowedDomains = normalizeDomainList(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ALLOWED_DOMAINS);
+  const blockedDomains = normalizeDomainList(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_BLOCKED_DOMAINS);
+  if (allowedDomains.length > 0) tool.allowed_domains = allowedDomains;
+  else if (blockedDomains.length > 0) tool.blocked_domains = blockedDomains;
+  const userLocation = buildAnthropicWebSearchUserLocation(currentConfig);
+  if (userLocation) tool.user_location = userLocation;
+  return tool;
+}
+
+function isAnthropicWebSearchServerTool(tool) {
+  return String(tool?.type || '').trim() === 'web_search_20250305';
+}
+
+function shouldInjectAnthropicWebSearchTool(protocol = '', options = {}, currentConfig = config) {
+  if (String(protocol || '').trim() !== 'anthropic_messages') return false;
+  if (currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED === false) return false;
+  if (options.disableAnthropicWebSearch === true || options.anthropicWebSearch === false) return false;
+  return true;
+}
+
+function withAnthropicWebSearchTool(tools = [], protocol = '', options = {}, currentConfig = config) {
+  const items = Array.isArray(tools) ? [...tools] : [];
+  if (!shouldInjectAnthropicWebSearchTool(protocol, options, currentConfig)) return items;
+  if (items.some((tool) => String(tool?.type || '').trim() === 'web_search_20250305')) return items;
+  items.push(buildAnthropicWebSearchTool(currentConfig));
+  return items;
+}
+
 function normalizeOpenAIPromptCacheRetention(value = '') {
   const normalized = String(value || '').trim().toLowerCase();
   return normalized === 'in_memory' || normalized === '24h' ? normalized : '';
@@ -308,9 +368,13 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   const repetitionPenalty = getRepetitionPenalty(resolvedConfig);
   if (repetitionPenalty !== undefined) body.repetition_penalty = repetitionPenalty;
 
-  if (Array.isArray(options.tools) && options.tools.length > 0) {
-    body.tools = options.tools;
-    body.tool_choice = options.toolChoice || options.tool_choice || 'auto';
+  const tools = withAnthropicWebSearchTool(options.tools, protocol, options);
+  if (tools.length > 0) {
+    body.tools = tools;
+    const explicitToolChoice = options.toolChoice || options.tool_choice || null;
+    const hasClientTool = tools.some((tool) => !isAnthropicWebSearchServerTool(tool));
+    if (explicitToolChoice) body.tool_choice = explicitToolChoice;
+    else if (hasClientTool) body.tool_choice = 'auto';
   }
 
   if (options.trace && typeof options.trace === 'object') {
@@ -460,6 +524,7 @@ function normalizeTextContent(content) {
 
 module.exports = {
   buildMainModelRequest,
+  buildAnthropicWebSearchTool,
   buildGenerationRequestBody,
   buildImageModelConfig,
   ensureChatCompletionsUrl,

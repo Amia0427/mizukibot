@@ -46,6 +46,10 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 23:45 +08:00：主回复模型默认固定走 Claude Messages 缓存协议，`buildMainModelRequest` 统一生成 `/v1/messages` 请求，不再为主回复注入 OpenAI `prompt_cache_key`；Claude 缓存断点由 `cache_control` 和 `anthropic-beta: prompt-caching-2024-07-31` 承担。
 
+更新 2026-05-23 23:55 +08:00：主回复 Claude Messages 链路默认注入 Anthropic 原生 `web_search_20250305` server tool；可用 `MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED=false` 关闭，诊断脚本会对照测试开启/关闭原生搜索的真实请求结果。
+
+更新 2026-05-24 00:18 +08:00：Anthropic 原生搜索注入改为官方 server tool 形态：`web_search_20250305` 不再被加 `cache_control`，纯 server tool 请求不默认加 `tool_choice`，`user_location` 自动带 `type=approximate`。本次真实请求显示主/管理员链路参数已注入并送达，但当前网关响应没有 `server_tool_use`/`web_search_tool_result`/`usage.server_tool_use`，不能判定为 Anthropic 原生搜索真实执行。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始
@@ -177,6 +181,19 @@ PLANNER_REQUEST_TIMEOUT_MS=60000
 PLANNER_SEMANTIC_REFINE_ENABLED=false
 PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD=0.72
 PLANNER_ALLOW_MAIN_MODEL_FALLBACK=false
+```
+
+Anthropic 主回复原生搜索：
+
+```env
+MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED=true
+MAIN_MODEL_ANTHROPIC_WEB_SEARCH_MAX_USES=2
+MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ALLOWED_DOMAINS=
+MAIN_MODEL_ANTHROPIC_WEB_SEARCH_BLOCKED_DOMAINS=
+MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_CITY=
+MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_REGION=
+MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_COUNTRY=
+MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_TIMEZONE=
 ```
 
 主回复短期上下文常用调节项：

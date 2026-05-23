@@ -350,6 +350,34 @@ function isTemperatureTopPConflictError(error) {
 
 function mapToolSchemaToAnthropic(tool) {
   if (!tool || typeof tool !== 'object') return null;
+  if (tool.type === 'web_search_20250305') {
+    const mapped = {
+      type: 'web_search_20250305',
+      name: normalizeText(tool.name || 'web_search') || 'web_search'
+    };
+    const maxUses = Number(tool.max_uses ?? tool.maxUses);
+    if (Number.isFinite(maxUses) && maxUses > 0) mapped.max_uses = Math.floor(maxUses);
+    if (Array.isArray(tool.allowed_domains)) {
+      const allowedDomains = tool.allowed_domains.map((item) => normalizeText(item)).filter(Boolean);
+      if (allowedDomains.length > 0) mapped.allowed_domains = allowedDomains;
+    }
+    if (Array.isArray(tool.blocked_domains)) {
+      const blockedDomains = tool.blocked_domains.map((item) => normalizeText(item)).filter(Boolean);
+      if (blockedDomains.length > 0) mapped.blocked_domains = blockedDomains;
+    }
+    if (tool.user_location && typeof tool.user_location === 'object') {
+      const userLocation = {};
+      for (const key of ['type', 'city', 'region', 'country', 'timezone']) {
+        const value = normalizeText(tool.user_location[key]);
+        if (value) userLocation[key] = value;
+      }
+      if (Object.keys(userLocation).length > 0 && !userLocation.type) {
+        userLocation.type = 'approximate';
+      }
+      if (Object.keys(userLocation).length > 0) mapped.user_location = userLocation;
+    }
+    return mapped;
+  }
   if (tool.type !== 'function') return null;
 
   const fn = tool.function || {};
@@ -387,6 +415,16 @@ function mapToolChoiceToAnthropic(toolChoice) {
   }
 
   return null;
+}
+
+function isAnthropicServerTool(tool) {
+  return String(tool?.type || '').trim() === 'web_search_20250305';
+}
+
+function shouldMapAnthropicToolChoice(inputBody = {}, tools = []) {
+  if (!Object.prototype.hasOwnProperty.call(inputBody, 'tool_choice')) return false;
+  if (!tools.length) return false;
+  return tools.some((tool) => !isAnthropicServerTool(tool));
 }
 
 function inferMessageRole(item) {
@@ -558,7 +596,9 @@ async function buildAnthropicRequestBody(body = {}) {
       .filter(Boolean);
     if (tools.length) {
       requestBody.tools = tools;
-      const choice = mapToolChoiceToAnthropic(inputBody.tool_choice);
+      const choice = shouldMapAnthropicToolChoice(inputBody, tools)
+        ? mapToolChoiceToAnthropic(inputBody.tool_choice)
+        : null;
       if (choice) requestBody.tool_choice = choice;
     }
   }
