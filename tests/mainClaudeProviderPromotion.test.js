@@ -38,17 +38,18 @@ module.exports = (async () => {
       defaultMaxTokens: 200
     });
 
-    assert.strictEqual(request.provider, 'openai_compatible');
-    assert.strictEqual(request.url, 'https://superapi.buzz/v1/chat/completions');
-    assert.ok(Object.prototype.hasOwnProperty.call(request.body, '__requestHeaders'));
-    assert.ok(Object.prototype.hasOwnProperty.call(request.body, 'prompt_cache_key'));
+    assert.strictEqual(request.provider, 'anthropic');
+    assert.strictEqual(request.url, 'https://superapi.buzz/v1/messages');
+    assert.ok(!Object.prototype.hasOwnProperty.call(request.body, '__requestHeaders'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(request.body, 'prompt_cache_key'));
 
     const prepared = await httpClient.prepareRequest(request.url, request.body);
-    assert.strictEqual(prepared.provider, 'openai_compatible');
-    assert.strictEqual(prepared.requestUrl, 'https://superapi.buzz/v1/chat/completions');
+    assert.strictEqual(prepared.provider, 'anthropic');
+    assert.strictEqual(prepared.requestUrl, 'https://superapi.buzz/v1/messages');
     assert.ok(Array.isArray(prepared.requestBody.messages));
-    assert.ok(prepared.requestBody.messages.some((item) => item.role === 'system' && String(item.content || item.content?.[0]?.text || '').includes('stable persona')));
-    assert.ok(Object.prototype.hasOwnProperty.call(prepared.requestHeaders || {}, 'Authorization'));
+    assert.ok(prepared.requestBody.system.some((item) => String(item.text || '').includes('stable persona')));
+    assert.strictEqual(prepared.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
+    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestHeaders || {}, 'Authorization'));
 
     console.log('mainClaudeProviderPromotion.test.js passed');
   } finally {

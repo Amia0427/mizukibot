@@ -40,6 +40,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 23:58 +08:00：回复后学习 job 新增结构化 `taskStates`，每个 step 记录 `status/attempt/lastError/durationMs`；低优先级 vector/audit/profile 失败标记为 `failed_nonfatal`，核心学习失败仍按 job 重试。
 
+更新 2026-05-23 23:45 +08:00：主回复模型默认固定走 Claude Messages 缓存协议，`buildMainModelRequest` 统一生成 `/v1/messages` 请求，不再为主回复注入 OpenAI `prompt_cache_key`；Claude 缓存断点由 `cache_control` 和 `anthropic-beta: prompt-caching-2024-07-31` 承担。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始
@@ -182,6 +184,8 @@ SHORT_TERM_SCENE_RECENT_TURNS=24
 MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3600
 MEMORY_V3_SESSION_RECENT_MESSAGES=96
 ```
+
+主回复默认协议：`API_BASE_URL` 即使配置为 `/v1/chat/completions` 或 `/v1/responses`，主回复调用也会规范化为 Claude `/v1/messages`；OpenAI prompt cache 字段只保留给显式 OpenAI-compatible HTTP 路径，主回复缓存以 Claude `cache_control` 为准。
 
 配置入口优先看 `config/index.js` 和 `config/*Runtime.js`。MemOS 细节见 `docs/memos-mcp-planner-recall.md`，主回复上下文见 `docs/main-reply-context.md`。
 

@@ -134,14 +134,14 @@ module.exports = (async () => {
       userId: 'user-1'
     });
     assert.strictEqual(sent[0].body.model, 'main-model');
-    assert.strictEqual(sent[0].url, 'https://example.com/main/v1/chat/completions');
+    assert.strictEqual(sent[0].url, 'https://example.com/main/v1/messages');
     assert.strictEqual(sent[0].body.temperature, 0.7);
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'top_p'));
-    assert.strictEqual(sent[0].body.max_tokens, 1234);
-    assert.strictEqual(sent[0].body.reasoning_effort, 'medium');
+    assert.strictEqual(sent[0].body.max_tokens, 2258);
+    assert.deepStrictEqual(sent[0].body.thinking, { type: 'enabled', budget_tokens: 1024 });
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'top_k'));
-    assert.strictEqual(sent[0].body.top_a, 0.42);
-    assert.strictEqual(sent[0].body.repetition_penalty, 1.13);
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'top_a'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'repetition_penalty'));
 
     restoreEnv(snapshot);
     clearProjectCache();
@@ -165,7 +165,7 @@ module.exports = (async () => {
     });
     assert.strictEqual(defaultConfig.MAIN_REPLY_DEFAULT_MAX_TOKENS, 8192);
     assert.strictEqual(defaultConfig.AI_MAX_TOKENS, 8192);
-    assert.strictEqual(sent[0].body.max_tokens, 8192);
+    assert.strictEqual(sent[0].body.max_tokens, 12288);
 
     restoreEnv(snapshot);
     process.env.API_KEY = 'main-key';
@@ -221,15 +221,15 @@ module.exports = (async () => {
       userId: 'admin-1'
     });
     assert.strictEqual(sent[1].body.model, 'admin-model');
-    assert.strictEqual(sent[1].url, 'https://example.com/admin/v1/chat/completions');
+    assert.strictEqual(sent[1].url, 'https://example.com/admin/v1/messages');
     assert.strictEqual(sent[1].body.temperature, 0.91);
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_p'));
-    assert.strictEqual(sent[1].body.max_tokens, 4321);
-    assert.strictEqual(sent[1].body.reasoning_effort, 'low');
+    assert.strictEqual(sent[1].body.max_tokens, 5345);
+    assert.deepStrictEqual(sent[1].body.thinking, { type: 'enabled', budget_tokens: 1024 });
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_k'));
-    assert.strictEqual(sent[1].body.top_a, 0.66);
-    assert.strictEqual(sent[1].body.repetition_penalty, 1.25);
-    assert.strictEqual(sent[1].options.headers.Authorization, 'Bearer admin-key');
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_a'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'repetition_penalty'));
+    assert.strictEqual(sent[1].options.headers['x-api-key'], 'admin-key');
     const adminCall = freshListRecentModelCalls(1)[0];
     assert.strictEqual(adminCall.user_role, 'admin');
     assert.strictEqual(adminCall.model_source, 'ADMIN_AI_MODEL');
@@ -251,13 +251,13 @@ module.exports = (async () => {
     });
     assert.strictEqual(sent.length, 2);
     assert.strictEqual(sent[1].body.model, 'admin-fallback-model');
-    assert.strictEqual(sent[1].url, 'https://example.com/admin-fallback/v1/chat/completions');
+    assert.strictEqual(sent[1].url, 'https://example.com/admin-fallback/v1/messages');
     assert.strictEqual(sent[1].body.temperature, 0.91);
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_p'));
     assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_k'));
-    assert.strictEqual(sent[1].body.top_a, 0.66);
-    assert.strictEqual(sent[1].body.repetition_penalty, 1.25);
-    assert.strictEqual(sent[1].options.headers.Authorization, 'Bearer admin-fallback-key');
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'top_a'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[1].body, 'repetition_penalty'));
+    assert.strictEqual(sent[1].options.headers['x-api-key'], 'admin-fallback-key');
     const fallbackCall = freshListRecentModelCalls(1)[0];
     assert.strictEqual(fallbackCall.user_role, 'admin');
     assert.strictEqual(fallbackCall.model_source, 'admin_shared.fallbackModel');
@@ -272,11 +272,11 @@ module.exports = (async () => {
       repetition_penalty: 1.2,
       stream: false
     });
-    assert.strictEqual(anthropicPrepared.provider, 'openai_compatible');
-    assert.strictEqual(anthropicPrepared.requestUrl, 'https://api.anthropic.com/v1/responses');
+    assert.strictEqual(anthropicPrepared.provider, 'anthropic');
+    assert.strictEqual(anthropicPrepared.requestUrl, 'https://api.anthropic.com/v1/messages');
     assert.strictEqual(anthropicPrepared.requestBody.top_k, 40);
-    assert.strictEqual(anthropicPrepared.requestBody.top_a, 0.5);
-    assert.strictEqual(anthropicPrepared.requestBody.repetition_penalty, 1.2);
+    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPrepared.requestBody, 'top_a'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPrepared.requestBody, 'repetition_penalty'));
 
     let attemptCount = 0;
     let firstAttemptBody = null;

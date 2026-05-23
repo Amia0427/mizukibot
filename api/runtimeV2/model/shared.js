@@ -1,8 +1,9 @@
 const config = require('../../../config');
 const crypto = require('crypto');
 const {
-  getApiProvider,
-  isOpenAICompatibleProvider
+  isAnthropicProvider,
+  isOpenAICompatibleProvider,
+  ensureAnthropicMessagesUrl
 } = require('../../../utils/modelProvider');
 const {
   ADMIN_SHARED_FALLBACK_SCOPE,
@@ -57,6 +58,7 @@ function normalizeOpenAIMainApiMode(value = '') {
 }
 
 function resolveOpenAIMainProtocol(apiBaseUrl = '', options = {}) {
+  if (isAnthropicProvider(options.provider)) return 'anthropic_messages';
   const mode = normalizeOpenAIMainApiMode(options.apiMode || config.OPENAI_MAIN_API_MODE);
   if (mode === 'responses') return 'responses';
   if (mode === 'chat_completions') return 'chat_completions';
@@ -71,17 +73,18 @@ function resolveOpenAIMainProtocol(apiBaseUrl = '', options = {}) {
 
 function ensureOpenAIMainUrl(apiBaseUrl = '', options = {}) {
   const protocol = resolveOpenAIMainProtocol(apiBaseUrl, options);
+  if (protocol === 'anthropic_messages') return ensureAnthropicMessagesUrl(apiBaseUrl);
   return protocol === 'responses'
     ? ensureResponsesUrl(apiBaseUrl)
     : ensureChatCompletionsUrl(apiBaseUrl);
 }
 
 function resolveMainProvider(apiBaseUrl = '', model = '') {
-  const modelName = model || config.AI_MODEL;
-  return getApiProvider(apiBaseUrl, modelName, { preferUnifiedResponses: true });
+  return 'anthropic';
 }
 
 function ensureMainModelUrl(apiBaseUrl = '', options = {}) {
+  if (isAnthropicProvider(options.provider)) return ensureAnthropicMessagesUrl(apiBaseUrl);
   return ensureOpenAIMainUrl(apiBaseUrl, options);
 }
 
@@ -277,6 +280,7 @@ function applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig = null, op
   if (!body || typeof body !== 'object') return body;
   if (config.OPENAI_PROMPT_CACHE_ENABLED === false) return body;
   if (!isOpenAICompatibleProvider(options.provider)) return body;
+  if (protocol === 'anthropic_messages') return body;
 
   const nextBody = {
     ...body,
@@ -329,7 +333,10 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
 function buildMainModelRequest(resolvedConfig = null, options = {}) {
   const apiBaseUrl = getApiBaseUrl(resolvedConfig);
   const provider = resolveMainProvider(apiBaseUrl, getModelName(resolvedConfig));
-  const protocol = resolveOpenAIMainProtocol(apiBaseUrl, options);
+  const protocol = resolveOpenAIMainProtocol(apiBaseUrl, {
+    ...options,
+    provider
+  });
   return {
     provider,
     protocol,

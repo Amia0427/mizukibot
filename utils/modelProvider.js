@@ -26,6 +26,11 @@ function isGeminiNativeApiBase(url) {
 
 function getApiProvider(url, model = '', options = {}) {
   if (options && typeof options === 'object' && options.preferUnifiedResponses === true) {
+    if (isAnthropicApiBase(url)) return 'anthropic';
+    const normalized = normalizeApiBaseUrl(url).toLowerCase();
+    if (/\/v1\/messages(?:\/)?$/i.test(normalized) && isClaudeModelName(model)) {
+      return 'anthropic';
+    }
     if (isGeminiNativeApiBase(url)) return 'gemini_native';
     return 'openai_compatible';
   }
@@ -115,6 +120,9 @@ function ensureAnthropicMessagesUrl(url) {
   if (/\/v1\/messages$/i.test(normalized)) return normalized;
   if (/\/chat\/completions$/i.test(normalized)) {
     return normalized.replace(/\/chat\/completions$/i, '/messages');
+  }
+  if (/\/responses$/i.test(normalized)) {
+    return normalized.replace(/\/responses$/i, '/messages');
   }
   if (/\/v1$/i.test(normalized)) return `${normalized}/messages`;
   return normalized;

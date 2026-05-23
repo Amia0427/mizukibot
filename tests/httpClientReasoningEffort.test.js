@@ -64,10 +64,13 @@ module.exports = (async () => {
       reasoning_effort: 'high',
       stream: false
     });
-    assert.strictEqual(anthropicPrepared.provider, 'openai_compatible');
-    assert.strictEqual(anthropicPrepared.requestUrl, 'https://api.anthropic.com/v1/responses');
-    assert.strictEqual(anthropicPrepared.requestBody.max_output_tokens, 900);
-    assert.deepStrictEqual(anthropicPrepared.requestBody.reasoning, { effort: 'high' });
+    assert.strictEqual(anthropicPrepared.provider, 'anthropic');
+    assert.strictEqual(anthropicPrepared.requestUrl, 'https://api.anthropic.com/v1/messages');
+    assert.strictEqual(anthropicPrepared.requestBody.max_tokens, 1924);
+    assert.deepStrictEqual(anthropicPrepared.requestBody.thinking, {
+      type: 'enabled',
+      budget_tokens: 1024
+    });
 
     let attemptCount = 0;
     let firstAttemptBody = null;
@@ -259,10 +262,13 @@ module.exports = (async () => {
       stream: false
     }, 0, 'test-key');
     assert.strictEqual(attemptCount, 2);
-    assert.strictEqual(firstAttemptBody.max_output_tokens, 3500);
-    assert.deepStrictEqual(firstAttemptBody.reasoning, { effort: 'high' });
-    assert.strictEqual(secondAttemptBody.max_output_tokens, 3500);
-    assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, 'reasoning'));
+    assert.strictEqual(firstAttemptBody.max_tokens, 5600);
+    assert.deepStrictEqual(firstAttemptBody.thinking, {
+      type: 'enabled',
+      budget_tokens: 2100
+    });
+    assert.strictEqual(secondAttemptBody.max_tokens, 3500);
+    assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, 'thinking'));
   } finally {
     if (axios && originalPost) axios.post = originalPost;
     process.env = snapshot;
