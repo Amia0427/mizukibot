@@ -103,6 +103,9 @@ function requeuePlannedJobs(queue, planned = [], args = {}) {
     }
     requeued += 1;
   }
+  if (requeued > 0 && typeof queue.rebuildIndex === 'function') {
+    queue.rebuildIndex({ dryRun: false });
+  }
   return { applied: true, requeued };
 }
 

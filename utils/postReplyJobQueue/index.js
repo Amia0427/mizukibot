@@ -15,6 +15,9 @@ const {
   safeReadJson
 } = require('./files');
 const {
+  createPostReplyQueueIndexStore
+} = require('./indexStore');
+const {
   buildAggregateAvailableAt,
   getPhaseMaxAttempts,
   mergeLearningIntent,
@@ -36,6 +39,10 @@ function createPostReplyJobQueue(options = {}) {
   const maxAttempts = clampPositiveInt(options.maxAttempts || config.POST_REPLY_JOB_MAX_ATTEMPTS, 5);
   const retryBaseMs = clampPositiveInt(options.retryBaseMs || config.POST_REPLY_JOB_RETRY_BASE_MS, 30000);
   const retryMaxMs = clampPositiveInt(options.retryMaxMs || config.POST_REPLY_JOB_RETRY_MAX_MS, 15 * 60 * 1000);
+  const indexStore = createPostReplyQueueIndexStore({
+    queueDir,
+    indexPath: options.indexPath
+  });
 
   function statusDir(status) {
     return path.join(queueDir, normalizeText(status || 'queued') || 'queued');
@@ -55,6 +62,46 @@ function createPostReplyJobQueue(options = {}) {
   function listJobs(statuses = STATUS_DIRS) {
     ensureLayout();
     const normalizedStatuses = Array.isArray(statuses) ? statuses : [statuses];
+    const indexedEntries = indexStore.listEntries(normalizedStatuses);
+    if (indexedEntries) {
+      const jobs = [];
+      let staleIndex = false;
+      for (const entry of indexedEntries) {
+        const filePath = jobPath(entry.status, entry.jobId);
+        const parsed = safeReadJson(filePath, null);
+        if (!parsed) {
+          staleIndex = true;
+          break;
+        }
+        jobs.push(normalizeJob({
+          ...parsed,
+          status: normalizeText(parsed.status || entry.status) || entry.status
+        }));
+      }
+      if (!staleIndex) {
+        return jobs.sort((a, b) => String(a.availableAt || '').localeCompare(String(b.availableAt || '')) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      }
+    }
+    return rebuildIndex({ dryRun: false }).jobs
+      .filter((job) => normalizedStatuses.includes(job.status))
+      .sort((a, b) => String(a.availableAt || '').localeCompare(String(b.availableAt || '')) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  }
+
+  function readIndexedJob(entry = {}) {
+    const status = normalizeText(entry.status);
+    const jobId = normalizeText(entry.jobId);
+    if (!status || !jobId) return null;
+    const parsed = safeReadJson(jobPath(status, jobId), null);
+    if (!parsed) return null;
+    return normalizeJob({
+      ...parsed,
+      status: normalizeText(parsed.status || status) || status
+    });
+  }
+
+  function scanJobs(statuses = STATUS_DIRS) {
+    ensureLayout();
+    const normalizedStatuses = Array.isArray(statuses) ? statuses : [statuses];
     const jobs = [];
     for (const status of normalizedStatuses) {
       const dir = statusDir(status);
@@ -72,9 +119,29 @@ function createPostReplyJobQueue(options = {}) {
     return jobs.sort((a, b) => String(a.availableAt || '').localeCompare(String(b.availableAt || '')) || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
   }
 
+  function rebuildIndex(options = {}) {
+    const jobs = scanJobs(STATUS_DIRS);
+    const result = indexStore.rebuild(jobs, options);
+    return {
+      ...result,
+      jobs
+    };
+  }
+
   function findJobByDedupeKey(dedupeKey = '') {
     const key = normalizeText(dedupeKey);
     if (!key) return null;
+    const entries = indexStore.listEntries(STATUS_DIRS);
+    if (entries) {
+      for (const entry of entries) {
+        if (entry.dedupeKey !== key) continue;
+        const job = readIndexedJob(entry);
+        if (job) return job;
+        rebuildIndex({ dryRun: false });
+        break;
+      }
+      return null;
+    }
     return listJobs().find((job) => job.dedupeKey === key) || null;
   }
 
@@ -82,12 +149,24 @@ function createPostReplyJobQueue(options = {}) {
     const key = normalizeText(aggregateKey);
     const normalizedPhase = normalizePhase(phase);
     if (!key) return null;
+    const entries = indexStore.listEntries(['queued']);
+    if (entries) {
+      for (const entry of entries) {
+        if (entry.aggregateKey !== key || normalizePhase(entry.phase) !== normalizedPhase) continue;
+        const job = readIndexedJob(entry);
+        if (job) return job;
+        rebuildIndex({ dryRun: false });
+        break;
+      }
+      return null;
+    }
     return listJobs(['queued']).find((job) => job.aggregateKey === key && normalizePhase(job.phase) === normalizedPhase) || null;
   }
 
   function writeJob(job = {}) {
     const normalized = normalizeJob(job);
     atomicWriteJson(jobPath(normalized.status, normalized.jobId), normalized);
+    indexStore.upsert(normalized);
     return normalized;
   }
 
@@ -96,6 +175,7 @@ function createPostReplyJobQueue(options = {}) {
     if (fs.existsSync(target)) {
       fs.unlinkSync(target);
     }
+    indexStore.remove(jobId);
   }
 
   function enqueue(job = {}) {
@@ -170,6 +250,7 @@ function createPostReplyJobQueue(options = {}) {
       )
     });
     atomicWriteJson(jobPath('queued', merged.jobId), merged);
+    indexStore.upsert(merged);
     return merged;
   }
 
@@ -183,12 +264,25 @@ function createPostReplyJobQueue(options = {}) {
         .map((item) => normalizeText(item))
         .filter(Boolean)
     );
-    const candidates = listJobs(['queued'])
+    const indexedCandidates = indexStore.listEntries(['queued']);
+    const candidateEntries = indexedCandidates
+      ? indexedCandidates.filter((entry) => (
+          (!entry.availableAt || entry.availableAt <= currentIso)
+          && (!entry.nextRetryAt || entry.nextRetryAt <= currentIso)
+          && !activeUserIds.has(normalizeText(entry.userId))
+        ))
+      : [];
+    const candidates = indexedCandidates
+      ? candidateEntries.map((entry) => readIndexedJob(entry)).filter(Boolean)
+      : listJobs(['queued'])
       .filter((job) => (
         (!job.availableAt || job.availableAt <= currentIso)
         && (!job.nextRetryAt || job.nextRetryAt <= currentIso)
         && !activeUserIds.has(normalizeText(job.userId))
       ));
+    if (indexedCandidates && candidates.length < candidateEntries.length) {
+      rebuildIndex({ dryRun: false });
+    }
     for (const candidate of candidates) {
       const source = jobPath('queued', candidate.jobId);
       const claimed = normalizeJob({
@@ -202,8 +296,10 @@ function createPostReplyJobQueue(options = {}) {
       try {
         fs.renameSync(source, target);
         atomicWriteJson(target, claimed);
+        indexStore.upsert(claimed);
         return claimed;
       } catch (_) {
+        rebuildIndex({ dryRun: false });
         continue;
       }
     }
@@ -214,6 +310,7 @@ function createPostReplyJobQueue(options = {}) {
     const current = normalizeJob({ ...job, ...patch, status: 'done', completedAt: nowIso(), updatedAt: nowIso(), leaseOwner: '', leaseUntil: '' });
     removeJobFile('processing', current.jobId);
     atomicWriteJson(jobPath('done', current.jobId), current);
+    indexStore.upsert(current);
     return current;
   }
 
@@ -222,6 +319,7 @@ function createPostReplyJobQueue(options = {}) {
     removeJobFile('processing', next.jobId);
     removeJobFile('failed', next.jobId);
     atomicWriteJson(jobPath('queued', next.jobId), next);
+    indexStore.upsert(next);
     return next;
   }
 
@@ -233,6 +331,7 @@ function createPostReplyJobQueue(options = {}) {
       updatedAt: nowIso()
     });
     atomicWriteJson(jobPath('processing', current.jobId), current);
+    indexStore.upsert(current);
     return current;
   }
 
@@ -251,6 +350,7 @@ function createPostReplyJobQueue(options = {}) {
     });
     removeJobFile('processing', current.jobId);
     atomicWriteJson(jobPath('failed', current.jobId), current);
+    indexStore.upsert(current);
     return current;
   }
 
@@ -280,6 +380,7 @@ function createPostReplyJobQueue(options = {}) {
       });
       removeJobFile(status, normalizedJobId);
       atomicWriteJson(jobPath('failed', normalizedJobId), canceled);
+      indexStore.upsert(canceled);
       return canceled;
     }
     return null;
@@ -338,6 +439,7 @@ function createPostReplyJobQueue(options = {}) {
     maxAttempts,
     retryBaseMs,
     retryMaxMs,
+    indexPath: indexStore.indexPath,
     enqueue,
     mergeQueuedJob,
     claimNextJob,
@@ -349,6 +451,7 @@ function createPostReplyJobQueue(options = {}) {
     findJobByDedupeKey,
     findQueuedJobByAggregateKey,
     listJobs,
+    rebuildIndex,
     recoverStaleProcessingJobs,
     stableHash
   };

@@ -30,6 +30,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 23:16 +08:00：回复后学习第二批改进落地：新增 `learningIntent` 降噪、enrich 统一质量门禁、enrich 预算字段、队列 merge turnId 去重和 `scripts/eval-post-reply-learning.js` 轻量评测；运行细节见 `docs/post-reply-worker.md`。
 
+更新 2026-05-23 23:17 +08:00：回复后学习队列新增 `index.json` 轻量索引，claim/find 热路径先按索引筛候选 job；新增 `scripts/repair-post-reply-queue.js --rebuild-index` 支持 dry-run/apply 重建索引。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始

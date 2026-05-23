@@ -44,6 +44,7 @@ module.exports = (() => {
   assert.strictEqual(enqueued.job.traceId, 'trace-1');
   assert.deepStrictEqual(enqueued.job.sourceMessageIds, ['message-1']);
   assert.strictEqual(enqueued.job.priority, 10);
+  assert.ok(fs.existsSync(queue.indexPath), 'enqueue should create queue index');
 
   const claimed = queue.claimNextJob(new Date('2026-05-23T12:00:00.000Z'), {
     leaseOwner: 'worker-test',
@@ -52,6 +53,7 @@ module.exports = (() => {
   assert.strictEqual(claimed.jobId, 'schema_v2_job');
   assert.strictEqual(claimed.leaseOwner, 'worker-test');
   assert.strictEqual(claimed.leaseUntil, '2026-05-23T12:01:00.000Z');
+  assert.strictEqual(queue.listJobs(['processing']).length, 1, 'claim should update queue index to processing');
 
   const notRecovered = queue.recoverStaleProcessingJobs({
     now: '2026-05-23T12:00:30.000Z',
@@ -66,6 +68,7 @@ module.exports = (() => {
   assert.strictEqual(recovered.length, 1, 'expired lease should allow stale recovery');
   assert.strictEqual(recovered[0].status, 'queued');
   assert.strictEqual(recovered[0].leaseOwner, '');
+  assert.strictEqual(queue.listJobs(['queued']).length, 1, 'stale recovery should update index back to queued');
 
   const cancelQueueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-post-reply-cancel-'));
   const cancelQueue = createPostReplyJobQueue({ queueDir: cancelQueueDir });
@@ -110,6 +113,16 @@ module.exports = (() => {
   assert.strictEqual(merged.learningIntent, 'explicit');
   assert.deepStrictEqual(merged.sourceMessageIds, ['m1', 'm2']);
   assert.deepStrictEqual(merged.tags, ['core', 'runtime_v2_persist']);
+
+  fs.writeFileSync(path.join(mergeQueueDir, 'index.json'), '{broken', 'utf8');
+  const rebuiltFromCorruptIndex = mergeQueue.listJobs(['queued']);
+  assert.strictEqual(rebuiltFromCorruptIndex.length, 1, 'corrupt index should fallback to scan and rebuild');
+  const rebuiltIndex = JSON.parse(fs.readFileSync(path.join(mergeQueueDir, 'index.json'), 'utf8'));
+  assert.ok(rebuiltIndex.jobs.merge_dedupe, 'fallback scan should write rebuilt index');
+
+  fs.unlinkSync(path.join(mergeQueueDir, 'queued', 'merge_dedupe.json'));
+  const staleIndexJobs = mergeQueue.listJobs(['queued']);
+  assert.strictEqual(staleIndexJobs.length, 0, 'stale index entry should rebuild when job file is missing');
 
   console.log('postReplyJobQueue.test.js passed');
 })();
