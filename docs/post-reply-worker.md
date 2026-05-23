@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-24 00:50 +08:00
+更新时间：2026-05-24 00:54 +08:00
 
 ## 启动
 
@@ -61,6 +61,8 @@ POST_REPLY_WORKER_INLINE=true
 `failed_nonfatal` 会视为已完成，用于 `vectorMaintenance/memoryQualityAudit/profileMaintenance` 这类低优先级维护任务；核心学习、self-improvement、journal、memory event、materialize 和 enrich 失败仍会让 job 进入重试/失败流程。
 
 任务定义集中在 `utils/postReplyWorker/taskRegistry.js`，执行由 `utils/postReplyWorker/taskRunner.js` 统一处理。`materialize` 依赖 `memoryEvent`，`vectorMaintenance/memoryQualityAudit/profileMaintenance` 依赖 `materialize`；依赖未完成时任务会标记 `skipped`，`lastError=dependency_incomplete:<task>`。
+
+完成任务可携带 `result` 摘要，当前 enrich 会写入预算执行结果，便于 inspect 时查看是否发生裁剪或写入上限 drop。
 
 ## 诊断
 
@@ -164,6 +166,8 @@ POST_REPLY_ENRICH_MAX_WRITES=12
 ```
 
 enrich 写入亲密度、任务记忆、群记忆、风格、黑话、自改进前会统一检查置信度、证据、scope、重复文本和敏感字段。drop/allow 结果写入 job trace，事件名为 `enrich_write_allowed` 或 `enrich_write_dropped`。
+
+enrich 完成后会在 `taskStates.enrich.result` 和 trace 的 `enrich_budget_result` 中记录 `budget.truncated/sourceTurns/selectedTurns/chars/maxWrites` 与 `writes.accepted/dropped`。
 
 轻量评测：
 

@@ -49,6 +49,7 @@ module.exports = (async () => {
   assert.strictEqual(job.completedTasks.materialize, true);
   assert.strictEqual(job.taskStates.materialize.status, 'done');
   assert.ok(job.taskStates.memoryEvent.durationMs >= 0);
+  assert.deepStrictEqual(job.taskStates.materialize.result, { ok: true });
 
   await runner.runTask('vectorMaintenance', async () => {
     throw new Error('vector failed');

@@ -1,6 +1,6 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-24 00:50 +08:00
+更新时间：2026-05-24 00:54 +08:00
 
 运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
 
@@ -17,6 +17,8 @@
 运行状态更新 2026-05-24 00:38 +08:00：目标 14 首阶段落地，`artifacts/post-reply-eval/cases.jsonl` 扩到 20 个 case，覆盖显式/隐式/journal intent、enrich drop reason、maxWrites 和预算裁剪；新增 `tests/postReplyLearningEval.test.js` 纳入自动测试。
 
 运行状态更新 2026-05-24 00:50 +08:00：目标 4 第二阶段落地，新增 `taskRegistry/taskRunner`，`processJob.js` 的 memory/journal/materialize/maintenance/enrich 均通过统一 runner 执行，依赖检查、heartbeat、trace、状态持久化和非致命失败策略集中处理。
+
+运行状态更新 2026-05-24 00:54 +08:00：目标 13 补强落地，enrich 阶段会返回预算执行摘要并写入 `taskStates.enrich.result` 与 trace，包含 `truncated/sourceTurns/selectedTurns/chars/maxWrites/accepted/dropped`，便于 inspect 单 job 判断是否因预算裁剪或写入上限 drop。
 
 ## 现状结论
 
@@ -186,6 +188,8 @@
 ### 13. Enrich 批处理与成本控制
 
 目标：把 enrich 从“聚合后一次 LLM 提取”升级为可预算的批处理，按 group/user/session 合并，控制最大 token 和最大写入数。
+
+进展 2026-05-24 00:54 +08:00：已具备 `enrichBudget` 入队、turn/char 裁剪、`maxWrites` 门禁；本次补充 task result 与 trace 摘要，单 job 可直接查看预算裁剪和写入 drop 统计。
 
 实施：
 - `enqueueEnrichJob` 增加 budget 字段：`maxTurns/maxChars/maxWrites/maxCostHint`。
