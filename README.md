@@ -40,6 +40,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 23:58 +08:00：回复后学习 job 新增结构化 `taskStates`，每个 step 记录 `status/attempt/lastError/durationMs`；低优先级 vector/audit/profile 失败标记为 `failed_nonfatal`，核心学习失败仍按 job 重试。
 
+更新 2026-05-24 00:08 +08:00：回复后学习 worker 新增背压降级策略：资源压力下默认暂停 enrich claim，core 进入 minimal 模式并跳过 self/vector/audit/profile，跳过项写入 `taskStates.status=skipped`。
+
 更新 2026-05-23 23:45 +08:00：主回复模型默认固定走 Claude Messages 缓存协议，`buildMainModelRequest` 统一生成 `/v1/messages` 请求，不再为主回复注入 OpenAI `prompt_cache_key`；Claude 缓存断点由 `cache_control` 和 `anthropic-beta: prompt-caching-2024-07-31` 承担。
 
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。

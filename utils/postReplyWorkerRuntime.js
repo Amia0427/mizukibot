@@ -74,6 +74,12 @@ function createPostReplyWorkerRuntime(options = {}) {
   let scheduledTick = false;
   const phaseCircuitState = new Map();
   const phaseRateLimitState = new Map();
+  let pressureBackoffState = {
+    active: false,
+    delayMs: 0,
+    pressureLevel: 'normal',
+    pressureReasons: []
+  };
 
   function getActiveUserIds() {
     return Array.from(activeUserIds);
@@ -85,7 +91,13 @@ function createPostReplyWorkerRuntime(options = {}) {
       activeUserIds: getActiveUserIds(),
       lastActiveAt,
       rssBytes: process.memoryUsage().rss,
-      recycleRequested
+      recycleRequested,
+      pressureBackoff: {
+        ...pressureBackoffState,
+        pressureReasons: Array.isArray(pressureBackoffState.pressureReasons)
+          ? pressureBackoffState.pressureReasons.slice()
+          : []
+      }
     };
   }
 
@@ -289,6 +301,9 @@ function createPostReplyWorkerRuntime(options = {}) {
     }
     return queue.claimNextJob(new Date(), {
       activeUserIds: getActiveUserIds(),
+      deferredPhases: pressureBackoffState.active && config.POST_REPLY_ENRICH_PRESSURE_PAUSE_ENABLED === true
+        ? ['enrich']
+        : [],
       leaseOwner: `post-reply-worker:${process.pid}`,
       leaseMs: staleProcessingMs
     });
@@ -296,6 +311,37 @@ function createPostReplyWorkerRuntime(options = {}) {
 
   function getPressureDeferMs() {
     return getPerfRuntimeModule().getBackgroundPressureDelayMs();
+  }
+
+  function updatePressureBackoff(delayMs = 0) {
+    const {
+      getResourcePressureState
+    } = getPerfRuntimeModule();
+    const pressure = getResourcePressureState();
+    pressureBackoffState = {
+      active: Math.max(0, Number(delayMs) || 0) > 0,
+      delayMs: Math.max(0, Number(delayMs) || 0),
+      pressureLevel: normalizeText(pressure.level || 'normal') || 'normal',
+      pressureReasons: normalizeArray(pressure.reasons)
+        .map((item) => normalizeText(item))
+        .filter(Boolean)
+    };
+    return pressureBackoffState;
+  }
+
+  function buildJobForCurrentPressure(job = {}) {
+    if (!pressureBackoffState.active) return job;
+    const phase = normalizePhase(job.phase);
+    if (phase !== 'core' || config.POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE !== true) return job;
+    return {
+      ...job,
+      postReplyPressureMode: 'minimal',
+      postReplyPressure: {
+        level: pressureBackoffState.pressureLevel,
+        reasons: pressureBackoffState.pressureReasons.slice(),
+        delayMs: pressureBackoffState.delayMs
+      }
+    };
   }
 
   async function runOneJob(job) {
@@ -347,9 +393,14 @@ function createPostReplyWorkerRuntime(options = {}) {
       appendPostReplyJobTrace(job, 'job_started', {
         activeCount,
         phase,
-        attempt: Number(job.attempt || 0) || 0
+        attempt: Number(job.attempt || 0) || 0,
+        pressureMode: pressureBackoffState.active
+          ? (normalizePhase(job.phase) === 'core' && config.POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE === true ? 'minimal' : 'normal')
+          : 'normal',
+        pressureLevel: pressureBackoffState.pressureLevel
       });
-      const processResult = await processJobImpl(job, {
+      const runnableJob = buildJobForCurrentPressure(job);
+      const processResult = await processJobImpl(runnableJob, {
         ...options,
         queue: progressQueue
       });
@@ -429,7 +480,10 @@ function createPostReplyWorkerRuntime(options = {}) {
     if (maybeRequestIdleRecycle()) return;
 
     const pressureDeferMs = getPressureDeferMs();
-    if (pressureDeferMs > 0) {
+    updatePressureBackoff(pressureDeferMs);
+    const selectivePressureMode = pressureDeferMs > 0
+      && (config.POST_REPLY_ENRICH_PRESSURE_PAUSE_ENABLED === true || config.POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE === true);
+    if (pressureDeferMs > 0 && !selectivePressureMode) {
       const {
         getResourcePressureState,
         appendPerfEvent,
@@ -463,7 +517,7 @@ function createPostReplyWorkerRuntime(options = {}) {
       }
     }
 
-    if (startedJobs === 0) scheduleTick(pollMs);
+    if (startedJobs === 0) scheduleTick(selectivePressureMode ? Math.max(pollMs, pressureDeferMs) : pollMs);
   }
 
   function start() {

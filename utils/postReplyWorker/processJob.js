@@ -92,6 +92,8 @@ async function processPostReplyJob(job = {}, deps = {}) {
   const tasks = normalizeObject(job.tasks, {});
   const meta = buildLearningMeta(job);
   const phase = normalizePhase(job.phase);
+  const pressureMode = normalizeText(job.postReplyPressureMode).toLowerCase();
+  const coreMinimalUnderPressure = phase === 'core' && pressureMode === 'minimal';
   const workerTaskOptions = {
     ...meta,
     postReplyMemoryMode: String(config.POST_REPLY_MEMORY_MODE || 'core').trim().toLowerCase() || 'core',
@@ -142,6 +144,17 @@ async function processPostReplyJob(job = {}, deps = {}) {
     currentJob = options.nonFatal
       ? markTaskFailedNonFatal(currentJob, deps, taskRun.taskKey, errorText, patch)
       : markTaskFailed(currentJob, deps, taskRun.taskKey, errorText, patch);
+    return currentJob;
+  };
+  const skipTask = (taskKey = '', step = '', reason = 'skipped') => {
+    currentJob = markTaskCompleted(currentJob, deps, taskKey, {
+      status: 'skipped',
+      completedAt: new Date().toISOString(),
+      durationMs: 0,
+      lastError: reason,
+      step
+    });
+    trace('step_skipped', { step, taskKey, reason });
     return currentJob;
   };
   const heartbeatAndCheckCancel = (step = '') => {
@@ -200,6 +213,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
     currentJob = completeTask(taskRun);
     trace('step_done', { step: 'learnSomethingNew' });
     heartbeatAndCheckCancel('learnSomethingNew');
+  }
+  if (phase === 'core' && tasks.selfImprovement && !isTaskCompleted(currentJob, 'selfImprovement') && coreMinimalUnderPressure) {
+    currentJob = skipTask('selfImprovement', 'learnSelfImprovement', 'pressure_minimal_core');
   }
   if (phase === 'core' && tasks.selfImprovement && !isTaskCompleted(currentJob, 'selfImprovement')) {
     const { learnSelfImprovement } = getSelfImprovementModule();
@@ -339,6 +355,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
       trace('step_done', { step: 'scheduleMaterializeMemoryViews' });
       heartbeatAndCheckCancel('scheduleMaterializeMemoryViews');
     }
+    if (!isTaskCompleted(currentJob, 'vectorMaintenance') && isPostReplyVectorMaintenanceEnabled() && coreMinimalUnderPressure) {
+      currentJob = skipTask('vectorMaintenance', 'runVectorMaintenance', 'pressure_minimal_core');
+    }
     if (!isTaskCompleted(currentJob, 'vectorMaintenance') && isPostReplyVectorMaintenanceEnabled()) {
       const runVectorMaintenance = typeof deps.runVectorMaintenance === 'function'
         ? deps.runVectorMaintenance
@@ -384,6 +403,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
         : completeTask(taskRun);
       trace('step_done', { step: 'runVectorMaintenance' });
       heartbeatAndCheckCancel('runVectorMaintenance');
+    }
+    if (!isTaskCompleted(currentJob, 'memoryQualityAudit') && config.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED === true && coreMinimalUnderPressure) {
+      currentJob = skipTask('memoryQualityAudit', 'runMemoryQualityAudit', 'pressure_minimal_core');
     }
     if (!isTaskCompleted(currentJob, 'memoryQualityAudit') && config.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED === true) {
       const runMemoryQualityAudit = typeof deps.runMemoryQualityAudit === 'function'
@@ -434,6 +456,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
         : completeTask(taskRun);
       trace('step_done', { step: 'runMemoryQualityAudit' });
       heartbeatAndCheckCancel('runMemoryQualityAudit');
+    }
+    if (!isTaskCompleted(currentJob, 'profileMaintenance') && config.MEMORY_PROFILE_MAINTENANCE_ENABLED === true && coreMinimalUnderPressure) {
+      currentJob = skipTask('profileMaintenance', 'runProfileMaintenance', 'pressure_minimal_core');
     }
     if (!isTaskCompleted(currentJob, 'profileMaintenance') && config.MEMORY_PROFILE_MAINTENANCE_ENABLED === true) {
       const runProfileMaintenance = typeof deps.runProfileMaintenance === 'function'
