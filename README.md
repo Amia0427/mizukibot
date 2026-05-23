@@ -28,6 +28,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 22:58 +08:00：关闭 post-reply worker 默认 RSS 空闲自回收，`POST_REPLY_WORKER_RSS_RECYCLE_MB` 默认改为 `0`，本地 `.env` 同步设置为 `0`，避免后台学习进程处理完任务后因内存阈值主动退出。
 
+更新 2026-05-23 23:16 +08:00：回复后学习第二批改进落地：新增 `learningIntent` 降噪、enrich 统一质量门禁、enrich 预算字段、队列 merge turnId 去重和 `scripts/eval-post-reply-learning.js` 轻量评测；运行细节见 `docs/post-reply-worker.md`。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始
@@ -68,6 +70,12 @@ npm run start:post-reply-worker
 ```
 
 回复后学习 worker 运行手册：`docs/post-reply-worker.md`
+
+回复后学习轻量评测：
+
+```bash
+node scripts/eval-post-reply-learning.js
+```
 
 ## 常用命令
 

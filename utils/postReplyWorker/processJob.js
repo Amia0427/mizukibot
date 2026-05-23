@@ -15,6 +15,9 @@ const {
   appendPostReplyJobTrace
 } = require('./jobTrace');
 const {
+  detectPostReplyLearningIntent
+} = require('./learningIntent');
+const {
   isTaskCompleted,
   logStructured,
   markTaskCompleted,
@@ -63,6 +66,7 @@ function buildLearningMeta(job = {}) {
     turnIds: evidenceMeta.turnIds,
     turns: evidenceMeta.turns,
     evidence: evidenceMeta.evidence,
+    learningIntent: detectPostReplyLearningIntent(job, evidenceMeta.turns),
     sourceSessionId: evidenceMeta.sourceSessionId,
     taskType: normalizeText(routeMeta.taskType || routeMeta.task_type),
     agentName: normalizeText(routeMeta.agentName || routeMeta.agent_name),
@@ -85,6 +89,7 @@ async function processPostReplyJob(job = {}, deps = {}) {
   const workerTaskOptions = {
     ...meta,
     postReplyMemoryMode: String(config.POST_REPLY_MEMORY_MODE || 'core').trim().toLowerCase() || 'core',
+    learningIntent: meta.learningIntent,
     throwOnError: true
   };
   const learningConversation = buildCoreLearningConversation(job);
@@ -99,8 +104,8 @@ async function processPostReplyJob(job = {}, deps = {}) {
 
   if (phase === 'core' && tasks.memoryLearning && !isTaskCompleted(currentJob, 'memoryLearning')) {
     const { learnSomethingNew } = getMemoryExtractionModule();
-    trace('step_start', { step: 'learnSomethingNew' });
-    logStructured('post_reply_step_start', { ...traceBase, step: 'learnSomethingNew' });
+    trace('step_start', { step: 'learnSomethingNew', learningIntent: meta.learningIntent });
+    logStructured('post_reply_step_start', { ...traceBase, step: 'learnSomethingNew', learningIntent: meta.learningIntent });
     await learnSomethingNew(job.userId, learningConversation.userText, learningConversation.botReply, workerTaskOptions);
     logStructured('post_reply_step_done', { ...traceBase, step: 'learnSomethingNew' });
     currentJob = markTaskCompleted(currentJob, deps, 'memoryLearning');

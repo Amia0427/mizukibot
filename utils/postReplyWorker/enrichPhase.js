@@ -1,3 +1,11 @@
+const config = require('../../config');
+const {
+  createEnrichQualityGate
+} = require('./enrichQualityGate');
+const {
+  appendPostReplyJobTrace
+} = require('./jobTrace');
+
 function getMemoryExtractionModule() {
   return require('../../api/memoryExtraction');
 }
@@ -49,6 +57,34 @@ function buildTurnsConversation(turns = []) {
       finalReply: normalizeText(item.finalReply)
     }))
     .filter((item) => item.question || item.finalReply);
+}
+
+function trimTurnsForEnrichBudget(turns = [], options = {}) {
+  const maxTurns = Math.max(1, Number(options.maxTurns ?? config.POST_REPLY_ENRICH_MAX_TURNS) || 12);
+  const maxChars = Math.max(200, Number(options.maxChars ?? config.POST_REPLY_ENRICH_MAX_CHARS) || 6000);
+  const source = normalizeTurnItems(turns);
+  const selected = [];
+  let totalChars = 0;
+
+  for (const item of source.slice(-maxTurns).reverse()) {
+    const question = normalizeText(item.question);
+    const finalReply = normalizeText(item.finalReply);
+    const itemChars = Array.from(`${question}\n${finalReply}`).length;
+    if (selected.length > 0 && totalChars + itemChars > maxChars) continue;
+    selected.push(item);
+    totalChars += itemChars;
+    if (totalChars >= maxChars) break;
+  }
+
+  return {
+    turns: selected.reverse(),
+    truncated: selected.length < source.length || totalChars > maxChars,
+    sourceTurns: source.length,
+    selectedTurns: selected.length,
+    chars: totalChars,
+    maxTurns,
+    maxChars
+  };
 }
 
 function buildCoreLearningTurns(job = {}) {
@@ -295,16 +331,46 @@ async function runEnrichPhase(job = {}, meta = {}) {
   const { addTaskMemory, addTaskMemoryWithVectorBackfill } = getTaskMemoryModule();
   const { addGroupMemory, addGroupMemoryWithVectorBackfill } = getGroupMemoryModule();
   const { addMemoryItemsBatch, addMemoryItemsBatchWithVectorBackfill } = getVectorMemoryModule();
-  const turns = buildTurnsConversation(job.turns);
+  const budget = trimTurnsForEnrichBudget(job.turns, normalizeObject(job.enrichBudget, {}));
+  appendPostReplyJobTrace(job, 'enrich_budget', {
+    truncated: budget.truncated,
+    sourceTurns: budget.sourceTurns,
+    selectedTurns: budget.selectedTurns,
+    chars: budget.chars,
+    maxTurns: budget.maxTurns,
+    maxChars: budget.maxChars,
+    maxWrites: Number(job.enrichBudget?.maxWrites || config.POST_REPLY_ENRICH_MAX_WRITES) || 0
+  });
+  const turns = buildTurnsConversation(budget.turns);
   const latest = turns[turns.length - 1] || { question: normalizeText(job.question), finalReply: normalizeText(job.finalReply) };
   const enrichment = await extractPostReplyEnrichment(job.userId, turns, {
     routePolicyKey: meta.routePolicyKey,
     topRouteType: meta.topRouteType,
     groupId: meta.groupId
   });
+  const gate = createEnrichQualityGate({
+    userId: job.userId,
+    groupId: meta.groupId,
+    evidence: meta.evidence,
+    maxWrites: Number(job.enrichBudget?.maxWrites || config.POST_REPLY_ENRICH_MAX_WRITES) || 0
+  });
+  const assessWrite = (candidate = {}) => {
+    const result = gate.assess(candidate);
+    appendPostReplyJobTrace(job, result.allow ? 'enrich_write_allowed' : 'enrich_write_dropped', result);
+    return result;
+  };
 
   if (enrichment?.affinity && typeof enrichment.affinity === 'object') {
-    applyAffinityProposal(job.userId, enrichment.affinity, {
+    const affinity = enrichment.affinity;
+    const affinityText = [affinity.relationship, affinity.attitude, affinity.reason].map((item) => normalizeText(item)).filter(Boolean).join(' ');
+    const gateResult = assessWrite({
+      fieldKey: 'affinity',
+      text: affinityText,
+      confidence: Number(affinity.confidence || 0) || 0,
+      evidence: meta.evidence,
+      requiresUser: true
+    });
+    if (gateResult.allow) applyAffinityProposal(job.userId, affinity, {
       userText: latest.question,
       assistantText: latest.finalReply,
       routePolicyKey: meta.routePolicyKey,
@@ -318,6 +384,17 @@ async function runEnrichPhase(job = {}, meta = {}) {
     const taskMemory = enrichment.task_memory;
     const confidence = Number(taskMemory.confidence || 0) || 0;
     if (confidence > 0 && normalizeText(taskMemory.task_type)) {
+      const taskText = [taskMemory.task_type, taskMemory.trigger, taskMemory.strategy, taskMemory.avoid, taskMemory.outcome].map((item) => normalizeText(item)).filter(Boolean).join(' ');
+      const gateResult = assessWrite({
+        fieldKey: 'task',
+        text: taskText,
+        confidence,
+        evidence: meta.evidence,
+        requiresUser: true
+      });
+      if (!gateResult.allow) {
+        // dropped by quality gate
+      } else {
       const taskPayload = {
         taskType: normalizeText(taskMemory.task_type),
         trigger: normalizeText(taskMemory.trigger),
@@ -348,12 +425,22 @@ async function runEnrichPhase(job = {}, meta = {}) {
       } else {
         addTaskMemory(job.userId, taskPayload);
       }
+      }
     }
   }
 
   if (meta.groupId && enrichment?.group_memory && typeof enrichment.group_memory === 'object') {
     const confidence = Number(enrichment.group_memory.confidence || 0) || 0;
     for (const value of normalizeArray(enrichment.group_memory.shared_facts).map((item) => normalizeText(item)).filter(Boolean)) {
+      const gateResult = assessWrite({
+        fieldKey: 'group_fact',
+        text: value,
+        confidence,
+        evidence: meta.evidence,
+        groupId: meta.groupId,
+        requiresGroup: true
+      });
+      if (!gateResult.allow) continue;
       const groupMeta = { confidence, sourceKind: 'extractor', status: 'candidate', ...buildPostReplyEnrichMeta(meta, 'group_fact', 'candidate') };
       if (typeof addGroupMemoryWithVectorBackfill === 'function') {
         await addGroupMemoryWithVectorBackfill(meta.groupId, value, 'fact', groupMeta, 1.08, meta);
@@ -362,6 +449,15 @@ async function runEnrichPhase(job = {}, meta = {}) {
       }
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_goals).map((item) => normalizeText(item)).filter(Boolean)) {
+      const gateResult = assessWrite({
+        fieldKey: 'group_goal',
+        text: value,
+        confidence,
+        evidence: meta.evidence,
+        groupId: meta.groupId,
+        requiresGroup: true
+      });
+      if (!gateResult.allow) continue;
       const groupMeta = { confidence, sourceKind: 'extractor', status: 'active', ...buildPostReplyEnrichMeta(meta, 'group_goal', 'active') };
       if (typeof addGroupMemoryWithVectorBackfill === 'function') {
         await addGroupMemoryWithVectorBackfill(meta.groupId, `group goal: ${value}`, 'goal', groupMeta, 1.15, meta);
@@ -370,6 +466,16 @@ async function runEnrichPhase(job = {}, meta = {}) {
       }
     }
     for (const value of normalizeArray(enrichment.group_memory.shared_topics).map((item) => normalizeText(item)).filter(Boolean)) {
+      const gateResult = assessWrite({
+        fieldKey: 'group_topic',
+        text: value,
+        confidence,
+        evidence: meta.evidence,
+        groupId: meta.groupId,
+        requiresGroup: true,
+        minTextLength: 4
+      });
+      if (!gateResult.allow) continue;
       const groupMeta = { confidence, sourceKind: 'extractor', status: 'candidate', ...buildPostReplyEnrichMeta(meta, 'group_topic', 'candidate') };
       if (typeof addGroupMemoryWithVectorBackfill === 'function') {
         await addGroupMemoryWithVectorBackfill(meta.groupId, `group topic: ${value}`, 'topic', groupMeta, 0.96, meta);
@@ -382,7 +488,19 @@ async function runEnrichPhase(job = {}, meta = {}) {
   const signalItems = [
     ...buildMinimalStyleMemoryItems(job.userId, enrichment?.style_memory, meta),
     ...buildMinimalJargonMemoryItems(meta.groupId, enrichment?.jargon_memory, meta)
-  ];
+  ].filter((item) => {
+    const gateResult = assessWrite({
+      fieldKey: item.semanticSlot || item.meta?.fieldKey,
+      text: item.text,
+      confidence: item.confidence,
+      evidence: item.evidence || item.meta?.evidence || meta.evidence,
+      groupId: item.groupId || meta.groupId,
+      userId: item.userId,
+      requiresGroup: item.semanticSlot === 'group_jargon',
+      requiresUser: item.semanticSlot !== 'group_jargon'
+    });
+    return gateResult.allow;
+  });
   if (signalItems.length > 0) {
     if (typeof addMemoryItemsBatchWithVectorBackfill === 'function') {
       await addMemoryItemsBatchWithVectorBackfill(signalItems, {
@@ -395,7 +513,17 @@ async function runEnrichPhase(job = {}, meta = {}) {
   }
 
   if (enrichment?.self_improvement && typeof enrichment.self_improvement === 'object') {
-    storeExtractedSelfImprovementItems(job.userId, enrichment.self_improvement.items, {
+    const selfItems = normalizeArray(enrichment.self_improvement.items).filter((item) => {
+      const gateResult = assessWrite({
+        fieldKey: 'self_improvement',
+        text: [item?.summary, item?.details, item?.suggested_action].map((value) => normalizeText(value)).filter(Boolean).join(' '),
+        confidence: Number(item?.confidence || 0) || 0,
+        evidence: meta.evidence,
+        requiresUser: true
+      });
+      return gateResult.allow;
+    });
+    storeExtractedSelfImprovementItems(job.userId, selfItems, {
       routePolicyKey: meta.routePolicyKey,
       topRouteType: meta.topRouteType,
       toolName: meta.toolName,
@@ -429,5 +557,6 @@ async function runEnrichPhase(job = {}, meta = {}) {
 module.exports = {
   buildCoreLearningConversation,
   buildCoreLearningEvidence,
+  trimTurnsForEnrichBudget,
   runEnrichPhase
 };

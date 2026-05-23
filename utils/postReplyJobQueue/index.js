@@ -17,7 +17,9 @@ const {
 const {
   buildAggregateAvailableAt,
   getPhaseMaxAttempts,
+  mergeLearningIntent,
   mergeCompletedTasksForQueuedPatch,
+  mergeTurnsUnique,
   normalizeJob,
   normalizePhase,
   normalizeTurn
@@ -128,25 +130,39 @@ function createPostReplyJobQueue(options = {}) {
 
   function mergeQueuedJob(existingJob = {}, patch = {}, options = {}) {
     ensureLayout();
-    const current = normalizeJob(existingJob);
+    const existingJobId = normalizeText(existingJob.jobId || patch.jobId);
+    const currentPath = existingJobId ? jobPath('queued', existingJobId) : '';
+    const current = normalizeJob(
+      currentPath && fs.existsSync(currentPath)
+        ? safeReadJson(currentPath, existingJob)
+        : existingJob
+    );
     if (normalizeText(current.status) !== 'queued') return current;
     const incomingTurns = normalizeArray(patch.turns).map((item) => normalizeTurn(item)).filter((item) => item.question || item.finalReply);
-    const nextTurns = [...normalizeArray(current.turns), ...incomingTurns];
+    const previousTurnCount = normalizeArray(current.turns).length;
+    const nextTurns = mergeTurnsUnique(current.turns, incomingTurns);
+    const acceptedIncomingTurns = Math.max(0, nextTurns.length - previousTurnCount);
+    const latestAcceptedTurn = acceptedIncomingTurns > 0
+      ? nextTurns[nextTurns.length - 1]
+      : null;
     const lastMergedAt = normalizeText(patch.lastMergedAt) || nowIso();
     const merged = normalizeJob({
       ...current,
       ...patch,
       status: 'queued',
       turns: nextTurns,
-      question: incomingTurns[incomingTurns.length - 1]?.question || current.question,
-      finalReply: incomingTurns[incomingTurns.length - 1]?.finalReply || current.finalReply,
+      question: latestAcceptedTurn?.question || current.question,
+      finalReply: latestAcceptedTurn?.finalReply || current.finalReply,
       routeMeta: normalizeObject(patch.routeMeta, current.routeMeta),
       continuitySnapshot: normalizeObject(patch.continuitySnapshot, current.continuitySnapshot),
       contextStats: normalizeObject(patch.contextStats, current.contextStats),
-      completedTasks: mergeCompletedTasksForQueuedPatch(current, patch, incomingTurns),
+      completedTasks: mergeCompletedTasksForQueuedPatch(current, patch, acceptedIncomingTurns > 0 ? incomingTurns : []),
+      learningIntent: mergeLearningIntent(current.learningIntent, patch.learningIntent),
+      sourceMessageIds: Array.from(new Set(normalizeArray(current.sourceMessageIds).concat(normalizeArray(patch.sourceMessageIds)).map((item) => normalizeText(item)).filter(Boolean))),
+      tags: Array.from(new Set(normalizeArray(current.tags).concat(normalizeArray(patch.tags)).map((item) => normalizeText(item)).filter(Boolean))),
       updatedAt: lastMergedAt,
       lastMergedAt,
-      mergeCount: Math.max(1, Number(current.mergeCount || 1) + Math.max(1, incomingTurns.length || 1)),
+      mergeCount: Math.max(1, Number(current.mergeCount || 1) + Math.max(0, acceptedIncomingTurns || 0)),
       availableAt: buildAggregateAvailableAt(
         normalizeText(current.firstQueuedAt) || normalizeText(current.createdAt) || nowIso(),
         lastMergedAt,

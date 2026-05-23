@@ -23,6 +23,11 @@ const {
   appendPostReplyJobTrace
 } = require('./postReplyWorker/jobTrace');
 const {
+  detectPostReplyLearningIntent,
+  isExplicitRememberText,
+  mergeLearningIntent
+} = require('./postReplyWorker/learningIntent');
+const {
   isTransientPostReplyError,
   logStructured,
   normalizeArray,
@@ -199,7 +204,7 @@ function createPostReplyWorkerRuntime(options = {}) {
     if (!config.POST_REPLY_ENRICH_ENABLED) return null;
     const turns = normalizeArray(job.turns).filter((item) => item && typeof item === 'object');
     const joinedChars = Array.from(turns.map((item) => `${item.question || ''}\n${item.finalReply || ''}`).join('\n').replace(/\s+/g, '')).length;
-    const hasExplicitRemember = turns.some((item) => /^(?:记住|记一下|帮我记住|remember)\b/i.test(String(item?.question || '').trim()));
+    const hasExplicitRemember = turns.some((item) => isExplicitRememberText(item?.question));
     const routeMeta = normalizeObject(job.routeMeta, {});
     const groupId = normalizeText(routeMeta.groupId || routeMeta.group_id);
     const shouldEnrich = turns.length >= Math.max(1, Number(config.POST_REPLY_ENRICH_MIN_TURNS) || 2)
@@ -210,6 +215,13 @@ function createPostReplyWorkerRuntime(options = {}) {
 
     const aggregateKey = buildEnrichAggregateKey(job);
     const nowIso = new Date().toISOString();
+    const enrichBudget = {
+      maxTurns: Math.max(1, Number(config.POST_REPLY_ENRICH_MAX_TURNS) || 12),
+      maxChars: Math.max(200, Number(config.POST_REPLY_ENRICH_MAX_CHARS) || 6000),
+      maxWrites: Math.max(1, Number(config.POST_REPLY_ENRICH_MAX_WRITES) || 12),
+      maxCostHint: 0
+    };
+    const learningIntent = detectPostReplyLearningIntent(job, turns);
     const existing = typeof queue.findQueuedJobByAggregateKey === 'function'
       ? queue.findQueuedJobByAggregateKey(aggregateKey, 'enrich')
       : null;
@@ -220,7 +232,9 @@ function createPostReplyWorkerRuntime(options = {}) {
         continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
         contextStats: normalizeObject(job.contextStats, {}),
         lastMergedAt: nowIso,
-        tasks: normalizeObject(job.tasks, {})
+        tasks: normalizeObject(job.tasks, {}),
+        learningIntent: mergeLearningIntent(existing.learningIntent, learningIntent),
+        enrichBudget
       }, {
         aggregateWindowMs: Number(config.POST_REPLY_ENRICH_DELAY_MS) || 0,
         idleFlushMs: Number(config.POST_REPLY_ENRICH_DELAY_MS) || 0
@@ -240,6 +254,8 @@ function createPostReplyWorkerRuntime(options = {}) {
       dedupeKey: '',
       firstQueuedAt: nowIso,
       lastMergedAt: nowIso,
+      learningIntent,
+      enrichBudget,
       availableAt: new Date(Date.now() + Math.max(0, Number(config.POST_REPLY_ENRICH_DELAY_MS) || 0)).toISOString()
     });
     if (result?.job) {

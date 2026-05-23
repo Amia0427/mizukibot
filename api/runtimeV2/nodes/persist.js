@@ -1,3 +1,8 @@
+const {
+  detectPostReplyLearningIntent,
+  isExplicitRememberText
+} = require('../../../utils/postReplyWorker/learningIntent');
+
 function createPersistNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
     ? deps.normalizeObject
@@ -142,7 +147,8 @@ function createPersistNode(deps = {}) {
     allowedPostReplyGroupIds,
     hasEnoughPostReplyContent,
     postReplyCooldownReady,
-    shouldAllowPostReplyForGroup
+    shouldAllowPostReplyForGroup,
+    explicitPostReplyMemoryBypassGroup
   }) {
     const reasons = [];
     if (request.systemInitiated) reasons.push('system_initiated');
@@ -153,9 +159,9 @@ function createPersistNode(deps = {}) {
     if (String(request.customPrompt || '').trim()) reasons.push('custom_prompt');
     if (!hasEnoughPostReplyContent) reasons.push('post_reply_min_chars');
     if (!postReplyCooldownReady) reasons.push('post_reply_cooldown');
-    if (!routeGroupId) reasons.push('post_reply_no_group');
-    if (allowedPostReplyGroupIds.length === 0) reasons.push('post_reply_no_group_allowlist');
-    if (routeGroupId && allowedPostReplyGroupIds.length > 0 && !shouldAllowPostReplyForGroup) {
+    if (!routeGroupId && !explicitPostReplyMemoryBypassGroup) reasons.push('post_reply_no_group');
+    if (allowedPostReplyGroupIds.length === 0 && !explicitPostReplyMemoryBypassGroup) reasons.push('post_reply_no_group_allowlist');
+    if (routeGroupId && allowedPostReplyGroupIds.length > 0 && !shouldAllowPostReplyForGroup && !explicitPostReplyMemoryBypassGroup) {
       reasons.push('post_reply_group_not_allowed');
     }
     return reasons;
@@ -242,7 +248,15 @@ function createPersistNode(deps = {}) {
     const shouldAllowPostReplyForGroup = routeGroupId
       && allowedPostReplyGroupIds.length > 0
       && allowedPostReplyGroupIds.includes(routeGroupId);
-    const shouldRunGroupScopedPostReplyTasks = Boolean(shouldAllowPostReplyForGroup);
+    const explicitPostReplyMemoryRequest = isExplicitRememberText(userContent);
+    const explicitPostReplyMemoryBypassGroup = Boolean(
+      config.POST_REPLY_EXPLICIT_MEMORY_BYPASS_GROUP_ALLOWLIST === true
+      && explicitPostReplyMemoryRequest
+    );
+    const shouldRunGroupScopedPostReplyTasks = Boolean(
+      shouldAllowPostReplyForGroup
+      || explicitPostReplyMemoryBypassGroup
+    );
     const shouldQueuePostReplyMemoryTasks = shouldRunGroupScopedPostReplyTasks
       && (shouldLearn || shouldLearnSelfImprovementValue);
     const shouldQueuePostReplyJournalTask = Boolean(shouldPersistJournal);
@@ -278,7 +292,8 @@ function createPersistNode(deps = {}) {
         allowedPostReplyGroupIds,
         hasEnoughPostReplyContent,
         postReplyCooldownReady,
-        shouldAllowPostReplyForGroup
+        shouldAllowPostReplyForGroup,
+        explicitPostReplyMemoryBypassGroup
       })
     };
     let enqueuedPostReplyJob = null;
@@ -535,6 +550,16 @@ function createPersistNode(deps = {}) {
           threadId: String(state.thread?.threadId || '').trim(),
           createdAt: createdAtIso
         });
+        const learningIntent = detectPostReplyLearningIntent({
+          question: userContent,
+          finalReply,
+          turns: [coreTurn],
+          tasks: {
+            memoryLearning: shouldRunGroupScopedPostReplyTasks && shouldLearn,
+            selfImprovement: shouldRunGroupScopedPostReplyTasks && shouldLearnSelfImprovementValue,
+            dailyJournal: shouldQueuePostReplyJournalTask
+          }
+        });
         try {
           const existingQueuedCoreJob = typeof postReplyJobQueue.findQueuedJobByAggregateKey === 'function'
             ? postReplyJobQueue.findQueuedJobByAggregateKey(aggregateKey, 'core')
@@ -550,6 +575,7 @@ function createPersistNode(deps = {}) {
                       lastMergedAt: coreTurn.createdAt,
                       turns: [coreTurn],
                       traceId: existingQueuedCoreJob.traceId || traceId,
+                      learningIntent,
                       sourceMessageIds: Array.from(new Set(normalizeArray(existingQueuedCoreJob.sourceMessageIds).concat(sourceMessageIds))),
                       tags: Array.from(new Set(normalizeArray(existingQueuedCoreJob.tags).concat(['runtime_v2_persist', 'core']))),
                       tasks: {
@@ -581,6 +607,7 @@ function createPersistNode(deps = {}) {
                 routeMeta,
                 traceId,
                 sourceMessageIds,
+                learningIntent,
                 priority: shouldLearn ? 10 : 0,
                 tags: ['runtime_v2_persist', 'core'],
                 sessionKey: String(request.sessionKey || '').trim(),
