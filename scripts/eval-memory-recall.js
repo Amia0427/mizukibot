@@ -414,6 +414,23 @@ function ensureSourceMetrics(metrics = {}, source = 'unknown') {
   return metrics[key];
 }
 
+function countLifecycleLeaks(results = []) {
+  let leaks = 0;
+  for (const item of Array.isArray(results) ? results : []) {
+    const status = normalizeText(item.lifecycleStatus || item.meta?.lifecycleStatus || item.payload?.lifecycleStatus).toLowerCase();
+    if (status === 'stale' || status === 'suspect' || status === 'superseded') leaks += 1;
+  }
+  return leaks;
+}
+
+function countCategoryMismatches(results = [], testCase = {}) {
+  const expected = normalizeText(testCase.category || testCase.memoryCategory).toLowerCase();
+  if (!expected) return 0;
+  return (Array.isArray(results) ? results : [])
+    .filter((item) => normalizeText(item.category || item.meta?.category || item.payload?.category).toLowerCase() !== expected)
+    .length;
+}
+
 function finalizeGroupedMetrics(metrics = {}) {
   const out = {};
   for (const [key, value] of Object.entries(metrics)) {
@@ -459,6 +476,8 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
   const bySourceRaw = {};
   const byFacetRaw = {};
   let leakage = 0;
+  let lifecycleLeakage = 0;
+  let categoryMismatches = 0;
   let recallHits = 0;
   let reciprocalSum = 0;
   let judgedCases = 0;
@@ -521,6 +540,8 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
       sourceCoverage[item.source || 'unknown'] = (sourceCoverage[item.source || 'unknown'] || 0) + 1;
     }
     if (!isWorldbookCase) leakage += countScopeLeaks(results, testCase);
+    lifecycleLeakage += countLifecycleLeaks(results);
+    categoryMismatches += countCategoryMismatches(results, testCase);
     promptChars += normalizeText(result.digest).length;
     const expectedIds = normalizeExpectedIds(testCase);
     const sourceMetric = ensureSourceMetrics(bySourceRaw, testCase.targetSource || testCase.source || testCase.evalSource || 'unknown');
@@ -566,6 +587,9 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
       targetSource: testCase.targetSource || '',
       expectedIds,
       sources: results.map((item) => item.source),
+      categories: results.map((item) => item.category || ''),
+      lifecycleStatuses: results.map((item) => item.lifecycleStatus || ''),
+      sourcePlan: result.stats?.sourcePlan || result.diagnostics?.sourcePlan || null,
       lancedb: result.stats?.lancedb || null,
       worldbook: result.stats?.worldbook || null,
       timings: result.stats?.timings || result.diagnostics?.timings || null,
@@ -582,6 +606,8 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     sourceCoverage,
     fallbackCounts,
     leakage,
+    lifecycleLeakage,
+    categoryMismatches,
     emptyResultRate: cases.length ? emptyResults / cases.length : 0,
     noVisibleCandidateRate: cases.length ? noVisibleCandidates / cases.length : 0,
     coverageReady,
@@ -645,6 +671,8 @@ module.exports = {
   buildCaseQueryOptions,
   buildMemoryGoldCases,
   buildWorldbookGoldCases,
+  countCategoryMismatches,
+  countLifecycleLeaks,
   countScopeLeaks,
   isStableMemoryGoldCase,
   loadCases,

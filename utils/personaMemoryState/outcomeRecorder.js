@@ -14,6 +14,10 @@ function appendMemoryEvent(...args) {
   return require('../memory-v3').appendMemoryEvent(...args);
 }
 
+function appendVersionedMemoryUpdate(...args) {
+  return require('../memory-v3').appendVersionedMemoryUpdate(...args);
+}
+
 function materializeMemoryViews(...args) {
   return require('../memory-v3').materializeMemoryViews(...args);
 }
@@ -228,7 +232,7 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
   const writePersonaSlot = async (memoryKind, fieldKey, value, options = {}) => {
     const sanitizedValue = sanitizeUntrustedContent(value, 'memory');
     if (!sanitizedValue) return false;
-    await appendMemoryEvent({
+    await appendVersionedMemoryUpdate({
       type: 'memory_confirmed',
       userId,
       sessionKey,
@@ -256,7 +260,7 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
   };
 
   if (expressionFingerprint && !expressionGate.blocked) {
-    await appendMemoryEvent({
+    await appendVersionedMemoryUpdate({
       type: 'memory_confirmed',
       userId,
       sessionKey,

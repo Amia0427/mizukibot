@@ -44,6 +44,7 @@
 ## Migration / Maintenance
 
 - `migrate-memory-v3.js`
+- `import-memory-file.js`：导入 `.md/.txt` 到 Memory V3；更新 2026-05-23 11:04 +08:00：Markdown 按标题切块，写入前走版本化 update，重复导入不扩大 active chunk 数
 - `check-native-migration.js`
 - `backup-prompt-persona-modules.js`
 - `pack-linux-migration.sh`

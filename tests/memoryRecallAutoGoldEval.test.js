@@ -77,6 +77,8 @@ atomicWriteText(
 const {
   buildAutoGoldCases,
   buildCaseQueryOptions,
+  countCategoryMismatches,
+  countLifecycleLeaks,
   runMode
 } = require('../scripts/eval-memory-recall');
 
@@ -89,12 +91,16 @@ assert.strictEqual(
   buildCaseQueryOptions({ createdAt: 1777268735 }).journalNow.toISOString(),
   '2026-04-27T05:45:35.000Z'
 );
+assert.strictEqual(countLifecycleLeaks([{ lifecycleStatus: 'superseded' }, { lifecycleStatus: 'active' }]), 1);
+assert.strictEqual(countCategoryMismatches([{ category: 'task' }, { category: 'preference' }], { category: 'preference' }), 1);
 
 module.exports = runMode('local_jsonl', cases, { memoryCli: false }).then((result) => {
   assert.ok(result.judgedCases > 0);
   assert.notStrictEqual(result.recallAt8, null);
   assert.notStrictEqual(result.mrrAt8, null);
   assert.ok(result.bySource.preference || result.bySource.memory || result.byFacet.preference);
+  assert.strictEqual(typeof result.lifecycleLeakage, 'number');
+  assert.strictEqual(typeof result.categoryMismatches, 'number');
   assert.ok(result.latency.stages.totalMs.p50Ms >= 0);
   console.log('memoryRecallAutoGoldEval.test.js passed');
 }).catch((error) => {

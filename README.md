@@ -6,6 +6,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 10:55 +08:00：Memory V3 吸收 Memory-Plus 的类别 manifest 思路，召回链路新增 `category/tags/intent/privacyLevel` 元数据、category-aware source plan、LanceDB metadata filter 和 `diag:memory` category manifest 摘要。
 
+更新 2026-05-23 11:04 +08:00：Memory V3 继续接入 Memory-Plus 风格写入策略：`appendVersionedMemoryUpdate` 写入前先查相似 active 记忆，相似则归档旧版本并保留 `previousVersions/supersedes`；新增 `npm run memory:v3:import-file` 支持 `.md/.txt` 文件分块导入和重复导入版本化更新；context preview/recall eval 增加 source/category/lifecycle/drop 观测。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始
@@ -82,10 +84,13 @@ npm run diag:memory -- diagnose --skip-probe --limit 20
 npm run diag:memory -- recall --limit 50 --auto-gold
 npm run diag:memory -- recall --limit 50 --gate
 npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10
+npm run memory:v3:import-file -- --user <id> --file <path.md> --category preference --tags doc,import
 node scripts/repair-memory-vector-index.js --apply --compact
 ```
 
 `diag:memory -- diagnose` 的 `summary.categoryManifest` 会列出当前可召回类别、来源覆盖、热门 tags 和 intent，可用于判断查询应优先查 profile/personal/recent/task/journal/group/style 中哪一层。
+
+`memory:v3:import-file` 支持 `.md/.markdown/.txt`；Markdown 按标题切块，普通文本按段落切块。默认写入 `source=file_import`、`intent=bulk_import`，并复用版本化 update，重复导入不会扩大 active chunk 数。
 
 运维：
 

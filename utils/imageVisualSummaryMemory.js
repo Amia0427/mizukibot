@@ -7,9 +7,6 @@ const {
   upsertImageMemory
 } = require('./imageMemoryIndex');
 const {
-  appendMemoryEvent
-} = require('./memory-v3/events');
-const {
   materializeMemoryViews
 } = require('./memory-v3/materializer');
 const { formatDateInTz, getDatePartsInTz } = require('./time');
@@ -226,6 +223,10 @@ function buildImageMemoryEvent(summaryResult = {}, context = {}) {
   };
 }
 
+function appendVersionedMemoryUpdate(...args) {
+  return require('./memory-v3').appendVersionedMemoryUpdate(...args);
+}
+
 async function summarizeImageIntoLongTermMemory(imageRef = '', context = {}, deps = {}) {
   try {
     const generated = await generateImageVisualSummary(imageRef, context, deps);
@@ -251,13 +252,14 @@ async function summarizeImageIntoLongTermMemory(imageRef = '', context = {}, dep
 
     let event = null;
     if (config.MEMORY_V3_ENABLED !== false) {
-      event = await appendMemoryEvent(buildImageMemoryEvent(generated, {
+      const versioned = await appendVersionedMemoryUpdate(buildImageMemoryEvent(generated, {
         ...context,
         cacheKey,
         imageRef,
         sourceUrl: generated.sourceUrl,
         mediaType: generated.mediaType
       }));
+      event = versioned.event || null;
       materializeMemoryViews({
         mode: 'incremental',
         userId: context.userId,

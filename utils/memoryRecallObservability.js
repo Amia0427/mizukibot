@@ -445,8 +445,10 @@ function recordMainPromptBlockObservation(input = {}) {
     },
     localMemory: {
       evidenceCount: countLocalMemoryEvidence(input.memoryContext),
-      cacheHit: Boolean(input.memoryContext?.cacheMeta?.hit)
+      cacheHit: Boolean(input.memoryContext?.cacheMeta?.hit),
+      trace: normalizeObject(input.memoryContext?.diagnostics, {}).memoryTrace || null
     },
+    memoryTrace: normalizeObject(input.memoryContext?.diagnostics, {}).memoryTrace || null,
     memos: memosSummary,
     drop: {
       dropped: droppedReasons.length > 0,

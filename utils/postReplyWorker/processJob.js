@@ -142,9 +142,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
   }
   if (phase === 'core' && config.MEMORY_V3_ENABLED) {
     if (!isTaskCompleted(currentJob, 'memoryEvent')) {
-      const { appendMemoryEvent } = getMemoryV3Module();
-      logStructured('post_reply_step_start', { ...traceBase, step: 'appendMemoryEvent' });
-      await appendMemoryEvent({
+      const { appendVersionedMemoryUpdate } = getMemoryV3Module();
+      logStructured('post_reply_step_start', { ...traceBase, step: 'appendVersionedMemoryUpdate' });
+      await appendVersionedMemoryUpdate({
         type: 'memory_confirmed',
         userId: job.userId,
         sessionKey: normalizeText(job.sessionKey),
@@ -162,8 +162,10 @@ async function processPostReplyJob(job = {}, deps = {}) {
         payload: {
           type: 'fact'
         }
+      }, {
+        updateRuntimeSummaries: true
       });
-      logStructured('post_reply_step_done', { ...traceBase, step: 'appendMemoryEvent' });
+      logStructured('post_reply_step_done', { ...traceBase, step: 'appendVersionedMemoryUpdate' });
       currentJob = markTaskCompleted(currentJob, deps, 'memoryEvent');
     }
     if (!isTaskCompleted(currentJob, 'materialize')) {
