@@ -16,6 +16,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 22:10 +08:00：默认关闭 MemOS 远端记忆召回；planner 模型调用限制为单轮，语义 refine 只保留诊断不再触发第二轮。
 
+更新 2026-05-23 22:20 +08:00：planner 推理程度默认关闭，`PLAN_REASONING_EFFORT=off` 时 planner 请求不再携带 `reasoning_effort`；当前本地主回复模型 `AI_REASONING_EFFORT=on` 会按运行时归一化为 `high`。
+
 更新 2026-05-22 21:18 +08:00：README 已重构为入口文档，历史维护记录和细节说明下沉到 `docs/`、`deploy/`、`scripts/`。
 
 ## 快速开始
