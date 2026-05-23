@@ -78,6 +78,79 @@ function sanitizeForJson(value, seen = new WeakSet()) {
   return output;
 }
 
+function compactListForCheckpoint(value, limit = 20) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, Math.max(0, Number(limit) || 0)).map((item) => sanitizeForJson(item));
+}
+
+function compactStableProfileForCheckpoint(stableProfile = {}) {
+  if (!stableProfile || typeof stableProfile !== 'object' || Array.isArray(stableProfile)) {
+    return stableProfile;
+  }
+  const strictItems = Array.isArray(stableProfile.strictItems)
+    ? stableProfile.strictItems
+    : [];
+  const weakItems = Array.isArray(stableProfile.weakItems)
+    ? stableProfile.weakItems
+    : [];
+  const conflicts = Array.isArray(stableProfile.conflicts)
+    ? stableProfile.conflicts
+    : [];
+  const suppressed = Array.isArray(stableProfile.suppressed)
+    ? stableProfile.suppressed
+    : [];
+  const traceItems = Array.isArray(stableProfile.traceItems)
+    ? stableProfile.traceItems
+    : [];
+  return {
+    text: String(stableProfile.text || ''),
+    source: String(stableProfile.source || ''),
+    disabled: stableProfile.disabled === true,
+    reason: String(stableProfile.reason || ''),
+    legacyFallbackUsed: stableProfile.legacyFallbackUsed === true,
+    persona: sanitizeForJson(stableProfile.persona || {}),
+    strictItems: compactListForCheckpoint(strictItems, 12),
+    weakItems: compactListForCheckpoint(weakItems, 8),
+    traceItems: compactListForCheckpoint(traceItems, 20),
+    conflicts: compactListForCheckpoint(conflicts, 20),
+    suppressed: compactListForCheckpoint(suppressed, 20),
+    expiresSoon: compactListForCheckpoint(stableProfile.expiresSoon, 20),
+    checkpointCompacted: true,
+    checkpointOriginalCounts: {
+      strictItems: strictItems.length,
+      weakItems: weakItems.length,
+      traceItems: traceItems.length,
+      conflicts: conflicts.length,
+      suppressed: suppressed.length,
+      expiresSoon: Array.isArray(stableProfile.expiresSoon) ? stableProfile.expiresSoon.length : 0
+    }
+  };
+}
+
+function compactMemoryContextForCheckpoint(context = {}) {
+  if (!context || typeof context !== 'object' || Array.isArray(context)) return context;
+  return {
+    ...context,
+    stableProfile: compactStableProfileForCheckpoint(context.stableProfile)
+  };
+}
+
+function compactStateForCheckpoint(state = {}) {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) return state;
+  const memory = state.memory && typeof state.memory === 'object' && !Array.isArray(state.memory)
+    ? state.memory
+    : null;
+  if (!memory) return state;
+  return {
+    ...state,
+    memory: {
+      ...memory,
+      context: compactMemoryContextForCheckpoint(memory.context),
+      checkpointCompacted: true
+    }
+  };
+}
+
 // V2 persistence intentionally stays on local JSON files under `data` so the
 // runtime can gain resume/event semantics without introducing a database.
 function createCheckpointStore(options = {}) {
@@ -105,7 +178,7 @@ function createCheckpointStore(options = {}) {
       status: String(payload.status || 'running').trim() || 'running',
       node: String(payload.node || '').trim(),
       updatedAt: Number.isFinite(Number(payload.updatedAt)) ? Number(payload.updatedAt) : Date.now(),
-      state: sanitizeForJson(payload.state || {})
+      state: sanitizeForJson(compactStateForCheckpoint(payload.state || {}))
     };
     atomicWriteJson(checkpointFile(threadId), normalized);
     return normalized;
@@ -178,6 +251,8 @@ function resolveThreadId({
 
 module.exports = {
   atomicWriteJson,
+  compactStateForCheckpoint,
+  compactStableProfileForCheckpoint,
   createCheckpointStore,
   resolveThreadId,
   safeReadJson,

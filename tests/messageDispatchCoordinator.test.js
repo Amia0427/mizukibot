@@ -1,6 +1,18 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-dispatch-stream-'));
+process.env.DATA_DIR = tempDir;
+process.env.GROUP_MAIN_MODEL_STREAM_POLICY_FILE = path.join(tempDir, 'group_main_model_stream_policy.json');
+process.env.AI_STREAM_ENABLED = 'true';
 
 const { createMessageDispatchCoordinator } = require('../core/messageDispatchCoordinator');
+const {
+  setGroupMainModelStreamEnabled,
+  setGroupPublic
+} = require('../utils/groupMainModelStreamPolicy');
 
 module.exports = (async () => {
   let backgroundCalled = false;
@@ -91,8 +103,22 @@ module.exports = (async () => {
   assert.strictEqual(aiCalled, true);
   assert.ok(chat.replyOptions.modelConfig);
   assert.strictEqual(typeof chat.replyOptions.modelConfig.model, 'string');
-  assert.strictEqual(chat.replyOptions.disableStream, true, 'group chat should force non-streaming replies');
+  assert.strictEqual(chat.replyOptions.disableStream, true, 'group chat should stay non-streaming by default');
   assert.strictEqual(chat.replyOptions.deferPersist, true, 'direct chat replies should defer persist until send succeeds');
+
+  setGroupPublic('g1', true, 'test', Date.parse('2026-05-23T23:20:00+08:00'));
+  setGroupMainModelStreamEnabled('g1', true, 'test', Date.parse('2026-05-23T23:20:01+08:00'));
+  const publicGroupChat = await coordinator.dispatchByRoutePlan({
+    route: { meta: {} },
+    routeExecutionPlan: { executor: 'direct', allowTools: false, topRouteType: 'direct_chat', allowedTools: [] },
+    cleanText: 'task',
+    imageUrl: null,
+    userInfo: {},
+    senderId: 'u1',
+    groupId: 'g1'
+  });
+  assert.strictEqual(publicGroupChat.reply, 'ai reply');
+  assert.strictEqual(publicGroupChat.replyOptions.disableStream, false, 'public group with /main_stream on should allow streaming');
 
   const privateChat = await coordinator.dispatchByRoutePlan({
     route: {

@@ -2,6 +2,9 @@ const { buildRouteMetaEnvelope } = require('./executablePlan');
 const {
   applyGroupDirectStyleGuard
 } = require('../api/runtimeV2/guards/groupDirectReplyStyleGuard');
+const {
+  shouldForceDisableGroupMainModelStream
+} = require('../utils/groupMainModelStreamPolicy');
 
 function createMessageDispatchCoordinator(deps = {}) {
   const {
@@ -248,7 +251,12 @@ function createMessageDispatchCoordinator(deps = {}) {
           streamOptions.modelConfig = fallbackModelConfig;
         }
         const replyOptions = streamOptions;
-        if (String(route?.meta?.chatType || 'group').trim().toLowerCase() === 'group') {
+        if (shouldForceDisableGroupMainModelStream({
+          groupId,
+          routeMeta: replyOptions.routeMeta,
+          isQqGroup: String(route?.meta?.chatType || 'group').trim().toLowerCase() === 'group',
+          isDirectMainModelReply: true
+        })) {
           replyOptions.disableStream = true;
         }
         finalReplyOptions = replyOptions;

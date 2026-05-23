@@ -212,11 +212,10 @@ function formatGroupMainModelStreamStatus(groupId = '') {
 function shouldForceDisableGroupMainModelStream(options = {}) {
   const routeMeta = options.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
   const groupId = normalizeText(options.groupId || routeMeta.groupId || routeMeta.group_id);
-  if (!groupId) return false;
   if (options.isQqGroup !== true) return false;
   if (options.isDirectMainModelReply !== true) return false;
+  if (!groupId) return true;
   if (!config.AI_STREAM_ENABLED) return true;
-  if (!hasExplicitGroupMainModelStreamPolicy(groupId)) return false;
 
   const policy = getGroupMainModelStreamPolicy(groupId);
   return !(policy.isPublic && policy.mainModelStreamEnabled);

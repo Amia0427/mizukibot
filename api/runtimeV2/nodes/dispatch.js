@@ -193,8 +193,22 @@ function createDispatchNode(deps = {}) {
         meta: normalizeObject(request.routeMeta, {})
       })
     );
+    const selectedStepCount = selectedSteps.length;
+    const preflightEvents = [createEvent('node_start', {
+      node: 'dispatch',
+      stepCount: selectedStepCount,
+      preflightRequired: mustRunPreflight
+    })];
     const preflightStartedAt = Date.now();
     const preflightCalls = mustRunPreflight ? 1 : 0;
+    if (mustRunPreflight) {
+      preflightEvents.push(createEvent('dispatch_preflight_start', {
+        node: 'dispatch',
+        allowedTools: selectedStepToolNames,
+        stepCount: selectedStepCount
+      }));
+      appendRuntimeEvents(state, preflightEvents);
+    }
     const preflight = mustRunPreflight
       ? await runCapabilityPreflight(request.question || '', {
         question: String(request.question || '').trim(),
@@ -219,6 +233,15 @@ function createDispatchNode(deps = {}) {
         memoryCliTurn: state.execution?.memoryCliTurn || null
       };
     const preflightDurationMs = Math.max(0, Date.now() - preflightStartedAt);
+    if (mustRunPreflight) {
+      appendRuntimeEvents(state, [createEvent('dispatch_preflight_complete', {
+        node: 'dispatch',
+        durationMs: preflightDurationMs,
+        skipped: Boolean(preflight?.skipped),
+        reason: String(preflight?.reason || '').trim(),
+        resultCount: normalizeArray(preflight?.results).length
+      })]);
+    }
     const hasExplicitDependencies = selectedSteps.some((step) => normalizeStepDependencies(step).length > 0);
     const directChatBatchExecution = isDirectChatRequest(request) && !hasExplicitDependencies;
     const directChatBatches = directChatBatchExecution
@@ -239,7 +262,14 @@ function createDispatchNode(deps = {}) {
     const parallelExecution = directChatBatchExecution
       ? directChatBatches.some((batch) => batch.mode === 'parallel' && normalizeArray(batch.items).length > 1)
       : scheduledBatches.some((batch) => batch.mode === 'parallel' && normalizeArray(batch.items).length > 1);
-    const events = [createEvent('node_start', { node: 'dispatch', stepCount: selectedSteps.length, parallelExecution })];
+    const events = mustRunPreflight ? [] : preflightEvents;
+    events.push(createEvent('dispatch_schedule_ready', {
+      node: 'dispatch',
+      stepCount: selectedSteps.length,
+      parallelExecution,
+      preflightRequired: mustRunPreflight,
+      preflightDurationMs
+    }));
     if (String(preflight?.evidenceMessage || '').trim()) {
       events.push(createEvent('dispatch_preflight', {
         node: 'dispatch',
