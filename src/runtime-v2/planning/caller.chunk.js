@@ -261,6 +261,7 @@ async function callPlannerModelAttemptV2(route = {}, options = {}) {
   const apiKey = getPlannerApiKeyV2();
   if (!apiBaseUrl || !apiKey) return null;
   const { requestBody } = buildPlannerModelRequestBody(route, options);
+  requestBody.__timeoutMs = Number(config.PLANNER_REQUEST_TIMEOUT_MS || 60000);
   const response = await postWithRetry(
     ensureChatCompletionsUrlLocal(apiBaseUrl),
     requestBody,
