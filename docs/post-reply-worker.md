@@ -1,6 +1,6 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-24 01:21 +08:00
+更新时间：2026-05-24 01:27 +08:00
 
 ## 最短操作路径
 
@@ -77,6 +77,8 @@ POST_REPLY_WORKER_INLINE=true
 | `POST_REPLY_ENRICH_MAX_WRITES` | `12` | enrich 最多允许写入数 |
 | `POST_REPLY_ENRICH_PRESSURE_PAUSE_ENABLED` | `true` | 压力态暂停 claim enrich |
 | `POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE` | `true` | 压力态 core 只保留关键任务 |
+| `POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED` | `false` | worker tick 自动重排 transient failed job |
+| `POST_REPLY_AUTO_REQUEUE_MAX_PER_TICK` | `3` | 每轮自动重排 failed job 上限 |
 
 ## Job Schema V2
 
@@ -193,6 +195,15 @@ node scripts/requeue-post-reply-failed.js --apply --force --transient-only --lim
 - `quality_gate`：质量门禁拒绝，不应重放。
 - `canceled`：人工取消，不应重放。
 - `unknown_error`：需要人工看 trace。
+
+自动安全重放默认关闭；确认 transient 失败可自动处理后开启：
+
+```env
+POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED=true
+POST_REPLY_AUTO_REQUEUE_MAX_PER_TICK=3
+```
+
+开启后 worker 每轮 tick 只会重排 `requeueSafe=true` 的 transient failed job；terminal、schema、quality_gate、canceled 仍保持 failed，等待人工处理。
 
 ## 学习降噪
 
