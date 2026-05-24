@@ -10,6 +10,29 @@ async function runMemeTest({
   replyMeta = null,
   passiveContext = {}
 }) {
+  if (!config.MEME_MANAGER_FOLLOWUP_ENABLED) {
+    return {
+      send: false,
+      mood: 'none',
+      intensity: 'low',
+      confidence: 0,
+      selectedCategory: '',
+      decisionSource: 'disabled',
+      reason: 'followup-disabled',
+      availableCategoryNames: [],
+      keywordHits: [],
+      selectedAssetId: '',
+      assetScore: 0,
+      contextUsed: {},
+      gatePreview: {
+        allowed: false,
+        reason: 'followup-disabled',
+        probability: 0,
+        cooldownRemainingMs: 0
+      }
+    };
+  }
+
   const normalizedReplyMeta = replyMeta && typeof replyMeta === 'object'
     ? { ...buildReplyMeta({ replyText, routeMeta: { responseIntent: replyMeta.responseIntent } }), ...replyMeta }
     : buildReplyMeta({ replyText, routeMeta: {} });
@@ -105,6 +128,7 @@ async function handleAdminCommand({ rawText, groupId, userId }) {
         handled: true,
         replyText: [
           `meme manager: ${store.enabled && config.MEME_MANAGER_ENABLED ? 'on' : 'off'}`,
+          `followup sender: ${config.MEME_MANAGER_FOLLOWUP_ENABLED ? 'on' : 'off'}`,
           `surfaces: ${surfaceFlags}`,
           `categories: ${categories.length}`,
           session ? `uploading: ${session.categoryName} (${Math.max(0, session.expiresAt - Date.now())}ms left)` : 'uploading: none',

@@ -14,6 +14,11 @@ async function maybeSendMemeFollowup({
   passiveDecisionMeta = null
 }) {
   try {
+    if (!config.MEME_MANAGER_FOLLOWUP_ENABLED) {
+      console.log('[meme-manager] selector skipped', { surface, reason: 'followup-disabled' });
+      return { sent: false, reason: 'followup-disabled' };
+    }
+
     if (!isSurfaceEnabled(surface)) {
       console.log('[meme-manager] selector skipped', { surface, reason: 'surface-disabled' });
       return { sent: false, reason: 'surface-disabled' };
