@@ -4,8 +4,6 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-24 17:13 +08:00：主回复系统提示词顶部新增角色活人感与记忆连续性总纲，通过 `prompts/persona/00_roleplay_liveness_prelude.txt` 和 manifest 负优先级注入，强化瑞希口吻、关系温度和记忆承接。
 
-更新 2026-05-24 17:20 +08:00：扩充角色活人感顶部总纲，补强模式判断、私聊/群聊差异、主动性边界和任务场景下的瑞希口吻保持。
-
 更新 2026-05-24 17:23 +08:00：Anthropic 图片输入新增内联 base64 预算闸门，`ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS` 默认 `120000`；超过阈值的 cached 图片优先改走安全原始 URL，否则降级为文本占位，避免单次图片主回复出现 10 万级输入 token。
 
 更新 2026-05-23 10:30 +08:00：启动链和已拆 facade 已切到目录小模块入口；旧大文件已归档到 `artifacts/backups/large-facades-small-module-cutover-2026-05-23-0917+0800.zip`，33 个旧入口已删除，`npm test` 全量通过，运行时不再使用旧 `.js` facade。
@@ -69,6 +67,10 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 更新 2026-05-24 02:16 +08:00：默认 `npm test` 改为逐测试文件子进程隔离，避免全量测试的模块缓存、全局 stub 和后台异步清理互相污染，同时不再依赖 8GB 单进程堆。
 
 更新 2026-05-24 08:35 +08:00：主回复 Claude 缓存适配补齐 Anthropic automatic prompt caching：出站请求会在不超过 4 个断点时追加顶层 `cache_control`，显式断点按 `tools -> system -> messages` 裁剪到 4 个以内；网关不支持顶层 automatic 时先保留显式 system/tool 缓存重试，再兜底去缓存。
+
+更新 2026-05-24 09:06 +08:00：LanceDB 记忆索引支持 `user_bucket` 影子迁移；`memory_v3_vectors` 可按用户/群分桶重建到 `data/lancedb_user_bucket`，热表只保留可召回 row，旧 `data/lancedb` 保留回滚，详见 `docs/lancedb-partitioning.md`。
+
+更新 2026-05-24 17:13 +08:00：本地 `data/lancedb_user_bucket` shadow 库验证通过，体积约 83.2 MiB，相比旧 `data/lancedb` 约 9.89 GiB 明显下降；覆盖漂移为 0，`lancedb-gate` 建议启用 LanceDB read。
 
 更新 2026-05-24 17:03 +08:00：修复“我打过哪些歌/我发过哪些图”这类泛化个人活动回忆未触发 `memory_cli` 的问题；主回复路由会暴露记忆检索工具，`mem search --source all` 对音游/打歌记录问题会合并图片索引，避免只靠过期画像或日记摘要回答。
 
@@ -164,6 +166,7 @@ npm run diag:memory -- recall --limit 50 --gate
 npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10
 npm run memory:v3:import-file -- --user <id> --file <path.md> --category preference --tags doc,import
 node scripts/repair-memory-vector-index.js --apply --compact
+node scripts/sync-lancedb-memory-index.js --full --compact --dir data/lancedb_user_bucket --partition-mode user_bucket --bucket-count 32
 ```
 
 `diag:memory -- diagnose` 的 `summary.categoryManifest` 会列出当前可召回类别、来源覆盖、热门 tags 和 intent，可用于判断查询应优先查 profile/personal/recent/task/journal/group/style 中哪一层。
@@ -171,6 +174,8 @@ node scripts/repair-memory-vector-index.js --apply --compact
 Memory V3 projection 会保留冲突 loser 供审计，但默认标记不可召回；主回复 prompt 会随记忆证据加入短 `memory_recall_policy`，避免把 stale/superseded/弱证据当确定事实。
 
 `memory:v3:import-file` 支持 `.md/.markdown/.txt`；Markdown 按标题切块，普通文本按段落切块。默认写入 `source=file_import`、`intent=bulk_import`，并复用版本化 update，重复导入不会扩大 active chunk 数。
+
+LanceDB 用户分桶影子迁移默认不删除旧库；验证通过后配置 `MEMORY_LANCEDB_DIR=./data/lancedb_user_bucket`、`MEMORY_LANCEDB_PARTITION_MODE=user_bucket`、`MEMORY_LANCEDB_BUCKET_COUNT=32`，回滚时改回 `./data/lancedb` 和 `legacy`。
 
 运维：
 

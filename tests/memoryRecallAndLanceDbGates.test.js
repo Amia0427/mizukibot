@@ -86,6 +86,73 @@ const shadowReady = buildLanceDbReadMigrationGate({
 assert.strictEqual(shadowReady.canPromoteRead, true);
 assert.ok(!shadowReady.failures.includes('embedding_coverage_below_threshold'));
 
+const baselineLimited = buildLanceDbReadMigrationGate({
+  diagnostics: {
+    coverage: {
+      memory: { readyRatio: 0.5, staleTableRows: 0, readyButNotSynced: 0 },
+      worldbook: { readyRatio: 1, staleTableRows: 0, readyButNotSynced: 0 }
+    },
+    healthGate: { mustMaterializeFirst: false, mustReconcileFirst: false },
+    projectionFreshness: { projectionStale: false }
+  },
+  baseline: {
+    judgedCases: 50,
+    recallAt8: 0.7,
+    mrrAt8: 0.64,
+    leakage: 0,
+    lifecycleLeakage: 0,
+    categoryMismatches: 0,
+    recentRecallMisses: 2,
+    emptyResultRate: 0
+  },
+  candidate: {
+    judgedCases: 50,
+    recallAt8: 0.68,
+    mrrAt8: 0.65,
+    leakage: 0,
+    lifecycleLeakage: 0,
+    categoryMismatches: 0,
+    recentRecallMisses: 2,
+    emptyResultRate: 0,
+    noVisibleCandidateRate: 0,
+    coverageReadyRatio: 0.41
+  }
+}, {
+  minJudgedCases: 10,
+  minRecallAt8: 0.72,
+  minMrrAt8: 0.45,
+  maxRecentRecallMisses: 0,
+  regressionTolerance: 0.03
+});
+assert.strictEqual(baselineLimited.canPromoteRead, true);
+assert.deepStrictEqual(baselineLimited.acceptedRecallFailures.sort(), [
+  'recall_at_8_below_threshold',
+  'recent_recall_miss_detected'
+].sort());
+assert.ok(!baselineLimited.failures.includes('candidate_recall_at_8_below_threshold'));
+
+const baselineRegressionBlocked = buildLanceDbReadMigrationGate({
+  diagnostics: {
+    coverage: {
+      memory: { readyRatio: 0.5, staleTableRows: 0, readyButNotSynced: 0 },
+      worldbook: { readyRatio: 1, staleTableRows: 0, readyButNotSynced: 0 }
+    },
+    healthGate: { mustMaterializeFirst: false, mustReconcileFirst: false },
+    projectionFreshness: { projectionStale: false }
+  },
+  baseline: { judgedCases: 50, recallAt8: 0.7, mrrAt8: 0.64, leakage: 0, recentRecallMisses: 1, emptyResultRate: 0 },
+  candidate: { judgedCases: 50, recallAt8: 0.6, mrrAt8: 0.65, leakage: 0, recentRecallMisses: 1, emptyResultRate: 0, coverageReadyRatio: 0.41 }
+}, {
+  minJudgedCases: 10,
+  minRecallAt8: 0.72,
+  minMrrAt8: 0.45,
+  maxRecentRecallMisses: 0,
+  regressionTolerance: 0.03
+});
+assert.strictEqual(baselineRegressionBlocked.canPromoteRead, false);
+assert.ok(baselineRegressionBlocked.failures.includes('recall_at_8_regressed'));
+assert.ok(baselineRegressionBlocked.failures.includes('candidate_recall_at_8_below_threshold'));
+
 const blocked = buildLanceDbReadMigrationGate({
   diagnostics: {
     coverage: {

@@ -9,9 +9,12 @@ const {
   dedupeVectorRows,
   isLanceDbSyncEnabled,
   listTableIds,
+  normalizeLanceDbPartitionMode,
+  resolveLanceDbBucketCount,
   syncMemoryRows,
   syncWorldbookRows
 } = require('../utils/lancedbMemoryStore');
+const { isMemoryNotRecallable, lifecycleStatusOf } = require('../utils/memory-v3/recallFilter');
 const { loadEmbeddingIndex } = require('../utils/memory-v3/embeddingIndex');
 const { collectEmbeddingBackfillNodes } = require('../utils/memory-v3/embeddingIndex');
 const { buildWorldbookDocuments, loadWorldbookEmbeddingIndex } = require('../utils/personaWorldbookSearch');
@@ -29,7 +32,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     fullReconcile: false,
     deleteStaleRows: false,
     compact: false,
-    since: 0
+    since: 0,
+    dir: '',
+    partitionMode: '',
+    bucketCount: 0
   };
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
@@ -41,6 +47,21 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (item === '--full-reconcile') args.fullReconcile = true;
     else if (item === '--delete-stale-rows') args.deleteStaleRows = true;
     else if (item === '--compact') args.compact = true;
+    else if (item === '--dir') {
+      args.dir = String(argv[index + 1] || '').trim();
+      index += 1;
+    }
+    else if (item.startsWith('--dir=')) args.dir = item.slice('--dir='.length).trim();
+    else if (item === '--partition-mode') {
+      args.partitionMode = String(argv[index + 1] || '').trim();
+      index += 1;
+    }
+    else if (item.startsWith('--partition-mode=')) args.partitionMode = item.slice('--partition-mode='.length).trim();
+    else if (item === '--bucket-count') {
+      args.bucketCount = Math.max(1, Number(argv[index + 1] || 0) || 0);
+      index += 1;
+    }
+    else if (item.startsWith('--bucket-count=')) args.bucketCount = Math.max(1, Number(item.slice('--bucket-count='.length)) || 0);
     else if (item === '--since') {
       args.since = Number(argv[index + 1] || 0) || Date.parse(argv[index + 1] || '') || 0;
       index += 1;
@@ -49,9 +70,27 @@ function parseArgs(argv = process.argv.slice(2)) {
   return args;
 }
 
+function buildLanceDbOptions(args = {}) {
+  return {
+    dir: normalizeText(args.dir),
+    partitionMode: normalizeLanceDbPartitionMode(args.partitionMode || undefined),
+    bucketCount: args.bucketCount ? resolveLanceDbBucketCount(args.bucketCount) : undefined
+  };
+}
+
+function isHotRecallableMemoryNode(node = {}) {
+  const status = normalizeText(node.status || 'active').toLowerCase();
+  if (status === 'archived') return false;
+  if (isMemoryNotRecallable(node)) return false;
+  const lifecycleStatus = lifecycleStatusOf(node);
+  return !['stale', 'suspect', 'superseded'].includes(lifecycleStatus);
+}
+
 function buildMemoryRows({ since = 0 } = {}) {
   const index = loadEmbeddingIndex();
-  const nodesById = new Map(collectEmbeddingBackfillNodes().map((node) => [normalizeText(node.id || node.nodeId), node]));
+  const nodesById = new Map(collectEmbeddingBackfillNodes()
+    .filter(isHotRecallableMemoryNode)
+    .map((node) => [normalizeText(node.id || node.nodeId), node]));
   const allReadyRows = index.readyRows
     .map((row) => {
       const node = nodesById.get(row.nodeId);
@@ -150,6 +189,7 @@ function buildCoverage(source = {}, table = {}) {
 }
 
 async function buildSyncSummary(args = {}) {
+  const lanceDbOptions = buildLanceDbOptions(args);
   const memory = buildMemoryRows(args);
   const worldbook = buildWorldbookRows(args);
   const reconcileAllRows = args.full === true || args.fullReconcile === true || args.deleteStaleRows === true;
@@ -158,8 +198,8 @@ async function buildSyncSummary(args = {}) {
   const memoryTable = normalizeText(config.MEMORY_LANCEDB_MEMORY_TABLE || 'memory_v3_vectors');
   const worldbookTable = normalizeText(config.MEMORY_LANCEDB_WORLDBOOK_TABLE || 'persona_worldbook_vectors');
   const [memoryTableStats, worldbookTableStats] = await Promise.all([
-    listTableIds(memoryTable),
-    listTableIds(worldbookTable)
+    listTableIds(memoryTable, lanceDbOptions),
+    listTableIds(worldbookTable, lanceDbOptions)
   ]);
   const memoryCoverage = buildCoverage(memory, memoryTableStats);
   const worldbookCoverage = buildCoverage(worldbook, worldbookTableStats);
@@ -187,7 +227,9 @@ async function buildSyncSummary(args = {}) {
     fullReconcile: Boolean(args.fullReconcile || args.full),
     deleteStaleRows: Boolean(args.deleteStaleRows || args.fullReconcile || args.full),
     since: args.since || null,
-    lancedbDir: path.resolve(config.MEMORY_LANCEDB_DIR),
+    lancedbDir: path.resolve(lanceDbOptions.dir || config.MEMORY_LANCEDB_DIR),
+    partitionMode: lanceDbOptions.partitionMode,
+    bucketCount: lanceDbOptions.bucketCount || resolveLanceDbBucketCount(),
     syncEnabled: isLanceDbSyncEnabled(config),
     memory: {
       sourceRows: memory.sourceRows,
@@ -247,23 +289,35 @@ async function main() {
       full: args.full,
       fullReconcile: args.fullReconcile,
       deleteStaleRows: args.deleteStaleRows,
-      createIndex: args.full
+      createIndex: args.full,
+      ...buildLanceDbOptions(args)
     }));
     summary.writes.push(await syncWorldbookRows(summary._rows.worldbook, {
       full: args.full,
       fullReconcile: args.fullReconcile,
       deleteStaleRows: args.deleteStaleRows,
-      createIndex: args.full
+      createIndex: args.full,
+      ...buildLanceDbOptions(args)
     }));
     if (args.compact) {
-      summary.compact = await compactLanceDbTables();
+      const lanceDbOptions = buildLanceDbOptions(args);
+      const activeDir = path.resolve(config.MEMORY_LANCEDB_DIR);
+      const targetDir = path.resolve(lanceDbOptions.dir || config.MEMORY_LANCEDB_DIR);
+      const shadowCompact = Boolean(lanceDbOptions.dir) && targetDir !== activeDir;
+      summary.compact = await compactLanceDbTables({
+        ...lanceDbOptions,
+        ...(shadowCompact ? { cleanupOlderThan: new Date(), deleteUnverified: true } : {})
+      });
     }
     const after = await buildSyncSummary({
       dryRun: true,
       full: args.full,
       fullReconcile: args.fullReconcile,
       deleteStaleRows: args.deleteStaleRows,
-      since: args.since
+      since: args.since,
+      dir: args.dir,
+      partitionMode: args.partitionMode,
+      bucketCount: args.bucketCount
     });
     summary.afterCoverage = after.coverage;
     summary.coverage = after.coverage;
@@ -291,5 +345,7 @@ module.exports = {
   buildMemoryRows,
   buildSyncSummary,
   buildWorldbookRows,
+  buildLanceDbOptions,
+  isHotRecallableMemoryNode,
   parseArgs
 };
