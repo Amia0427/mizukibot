@@ -42,6 +42,7 @@ const {
 } = require('./prepare.chunk');
 const {
   anthropicRequestUsesPromptCaching,
+  stripAnthropicAutomaticPromptCaching,
   stripAnthropicPromptCaching
 } = require('./runtime-core.chunk');
 const {
@@ -337,17 +338,34 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             attempt: i + 1,
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
-          const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
-          resp = await axios.post(
-            prepared.requestUrl,
-            downgraded.requestBody,
-            getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal, pinnedLookup)
-          );
-          prepared = {
-            ...prepared,
-            requestBody: downgraded.requestBody,
-            requestHeaders: downgraded.requestHeaders
-          };
+          const automaticDowngrade = stripAnthropicAutomaticPromptCaching(prepared.requestBody, prepared.requestHeaders);
+          try {
+            resp = await axios.post(
+              prepared.requestUrl,
+              automaticDowngrade.requestBody,
+              getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, automaticDowngrade.requestHeaders, abortSignal, pinnedLookup)
+            );
+            prepared = {
+              ...prepared,
+              requestBody: automaticDowngrade.requestBody,
+              requestHeaders: automaticDowngrade.requestHeaders
+            };
+          } catch (automaticDowngradeError) {
+            if (!anthropicRequestUsesPromptCaching(automaticDowngrade.requestBody) || !isAnthropicPromptCacheSchemaError(automaticDowngradeError)) {
+              throw automaticDowngradeError;
+            }
+            const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
+            resp = await axios.post(
+              prepared.requestUrl,
+              downgraded.requestBody,
+              getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal, pinnedLookup)
+            );
+            prepared = {
+              ...prepared,
+              requestBody: downgraded.requestBody,
+              requestHeaders: downgraded.requestHeaders
+            };
+          }
         } else {
           throw error;
         }

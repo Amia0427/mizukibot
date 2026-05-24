@@ -62,6 +62,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-24 02:16 +08:00：默认 `npm test` 改为逐测试文件子进程隔离，避免全量测试的模块缓存、全局 stub 和后台异步清理互相污染，同时不再依赖 8GB 单进程堆。
 
+更新 2026-05-24 08:35 +08:00：主回复 Claude 缓存适配补齐 Anthropic automatic prompt caching：出站请求会在不超过 4 个断点时追加顶层 `cache_control`，显式断点按 `tools -> system -> messages` 裁剪到 4 个以内；网关不支持顶层 automatic 时先保留显式 system/tool 缓存重试，再兜底去缓存。
+
 更新 2026-05-23 23:45 +08:00：主回复模型默认固定走 Claude Messages 缓存协议，`buildMainModelRequest` 统一生成 `/v1/messages` 请求，不再为主回复注入 OpenAI `prompt_cache_key`；Claude 缓存断点由 `cache_control` 和 `anthropic-beta: prompt-caching-2024-07-31` 承担。
 
 更新 2026-05-23 23:55 +08:00：主回复 Claude Messages 链路默认注入 Anthropic 原生 `web_search_20250305` server tool；可用 `MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED=false` 关闭，诊断脚本会对照测试开启/关闭原生搜索的真实请求结果。

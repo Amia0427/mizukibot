@@ -164,7 +164,10 @@ function countCacheControlBlocks(value) {
     return value.reduce((total, item) => total + countCacheControlBlocks(item), 0);
   }
   if (!value || typeof value !== 'object') return 0;
-  let total = extractAnthropicCacheControl(value) ? 1 : 0;
+  let total = (
+    normalizeText(value.type).toLowerCase() === 'ephemeral'
+    || extractAnthropicCacheControl(value)
+  ) ? 1 : 0;
   total += countCacheControlBlocks(value.content);
   total += countCacheControlBlocks(value.function);
   return total;
@@ -180,6 +183,7 @@ function buildRequestCacheTrace(requestBody = {}, requestHeaders = {}) {
     anthropicBeta: normalizeText((requestHeaders || {})['anthropic-beta'] || (requestHeaders || {})['Anthropic-Beta'])
   };
 
+  promptCaching.anthropicCacheBreakpoints += countCacheControlBlocks(body.cache_control);
   promptCaching.anthropicCacheBreakpoints += countCacheControlBlocks(body.system);
   promptCaching.anthropicCacheBreakpoints += countCacheControlBlocks(body.messages);
   promptCaching.anthropicCacheBreakpoints += countCacheControlBlocks(body.tools);
@@ -193,12 +197,15 @@ function buildRequestCacheTrace(requestBody = {}, requestHeaders = {}) {
       return '';
     }
     if (!value || typeof value !== 'object') return '';
+    if (normalizeText(value.type).toLowerCase() === 'ephemeral') {
+      return normalizeText(value.ttl);
+    }
     if (value.cache_control && typeof value.cache_control === 'object') {
       return normalizeText(value.cache_control.ttl);
     }
     return findTtl(value.content) || findTtl(value.function);
   };
-  promptCaching.anthropicPromptCacheTtl = findTtl(body.system) || findTtl(body.messages) || findTtl(body.tools);
+  promptCaching.anthropicPromptCacheTtl = findTtl(body.cache_control) || findTtl(body.system) || findTtl(body.messages) || findTtl(body.tools);
   return promptCaching;
 }
 

@@ -4,9 +4,14 @@ function hasCacheControl(value) {
   return Boolean(
     value
     && typeof value === 'object'
-    && value.cache_control
-    && typeof value.cache_control === 'object'
-    && String(value.cache_control.type || '').trim()
+    && (
+      String(value.type || '').trim().toLowerCase() === 'ephemeral'
+      || (
+        value.cache_control
+        && typeof value.cache_control === 'object'
+        && String(value.cache_control.type || '').trim()
+      )
+    )
   );
 }
 
@@ -36,6 +41,7 @@ function summarizePromptCaching(request = {}, requestHeaders = {}) {
     ? anthropicBeta.toLowerCase().split(',').map((part) => part.trim()).filter(Boolean)
     : [];
 
+  const requestCacheBreakpoints = countCacheControlBlocks(request.cache_control);
   const systemCacheBreakpoints = systemBlocks.reduce((sum, item) => sum + countCacheControlBlocks(item), 0);
   const messageCacheBreakpoints = messages.reduce((sum, item) => sum + countCacheControlBlocks(item), 0);
   const toolCacheBreakpoints = tools.reduce((sum, item) => sum + countCacheControlBlocks(item), 0);
@@ -49,10 +55,11 @@ function summarizePromptCaching(request = {}, requestHeaders = {}) {
     ),
     anthropic_beta: anthropicBeta || null,
     prompt_caching_beta_enabled: anthropicBetaFlags.includes('prompt-caching-2024-07-31'),
+    request_cache_breakpoints: requestCacheBreakpoints,
     system_cache_breakpoints: systemCacheBreakpoints,
     message_cache_breakpoints: messageCacheBreakpoints,
     tool_cache_breakpoints: toolCacheBreakpoints,
-    total_cache_breakpoints: systemCacheBreakpoints + messageCacheBreakpoints + toolCacheBreakpoints
+    total_cache_breakpoints: requestCacheBreakpoints + systemCacheBreakpoints + messageCacheBreakpoints + toolCacheBreakpoints
   };
 }
 

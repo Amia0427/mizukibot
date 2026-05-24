@@ -21,6 +21,7 @@ const {
 } = require('./prepare.chunk');
 const {
   anthropicRequestUsesPromptCaching,
+  stripAnthropicAutomaticPromptCaching,
   stripAnthropicPromptCaching
 } = require('./runtime-core.chunk');
 const {
@@ -636,6 +637,34 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           durationMs: Math.max(0, Date.now() - attemptStartedAt)
         });
         try {
+          const automaticDowngrade = stripAnthropicAutomaticPromptCaching(prepared.requestBody, prepared.requestHeaders);
+          try {
+            const response = await axios.post(
+              prepared.requestUrl,
+              automaticDowngrade.requestBody,
+              getAxiosOptions(prepared.provider, specificKey, timeoutMs, automaticDowngrade.requestHeaders, abortSignal, pinnedLookup)
+            );
+            emitHttpSuccessTrace(trace, { ...prepared, requestBody: automaticDowngrade.requestBody, requestHeaders: automaticDowngrade.requestHeaders }, body, {
+              attempt: i + 1,
+              statusCode: Number(response?.status || 0) || null,
+              durationMs: Math.max(0, Date.now() - attemptStartedAt),
+              downgraded: true,
+              downgradeReason: 'strip_anthropic_automatic_prompt_cache'
+            });
+            finishModelCall(callId, {
+              response,
+              attempts: i + 1,
+              requestUrl: prepared.requestUrl,
+              request: automaticDowngrade.requestBody,
+              requestHeaders: automaticDowngrade.requestHeaders
+            });
+            return response;
+          } catch (automaticDowngradeError) {
+            if (!anthropicRequestUsesPromptCaching(automaticDowngrade.requestBody) || !isAnthropicPromptCacheSchemaError(automaticDowngradeError)) {
+              throw automaticDowngradeError;
+            }
+          }
+
           const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
           const response = await axios.post(
             prepared.requestUrl,
