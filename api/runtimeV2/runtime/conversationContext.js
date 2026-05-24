@@ -196,10 +196,13 @@ function createConversationContextHelpers(deps = {}) {
     const continuityProbePolicyMessage = buildSilentContinuityProbeSystemMessage(state);
     const dynamicPlan = normalizeObject(state.memory?.promptSnapshot?.dynamicPromptPlan, {});
     const enabledDynamicIds = new Set(normalizeArray(dynamicPlan.enabledBlockIds).map((item) => String(item || '').trim()).filter(Boolean));
+    const continuityPayload = normalizeObject(state.memory?.continuityState?.payload, {});
     const forceIncludeContinuity = Boolean(
-      state.memory?.continuityState?.payload?.active_topic
-      || normalizeArray(state.memory?.continuityState?.payload?.open_loops).length > 0
-      || normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments).length > 0
+      String(continuityPayload.carry_over_user_turn || '').trim()
+      || normalizeArray(continuityPayload.open_loops).length > 0
+      || normalizeArray(continuityPayload.assistant_commitments).length > 0
+      || normalizeArray(continuityPayload.user_constraints).length > 0
+      || normalizeArray(continuityPayload.continuity_probe_digest).length > 0
     );
     const stableBlockMessages = mapStableSystemBlocksToMessages(stableSystemBlocks);
     const dynamicBlockMessages = mapDynamicContextBlocksToMessages(dynamicContextBlocks)
