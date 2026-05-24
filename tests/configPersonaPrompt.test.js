@@ -43,6 +43,14 @@ function useConfigDefault(key) {
     ];
 
     assert.deepStrictEqual(config.PERSONA_FILES, requiredFiles);
+    const roleplayLivenessPrelude = fs.readFileSync(path.join(config.PERSONA_DIR, '00_roleplay_liveness_prelude.txt'), 'utf8').trim();
+    assert.ok(roleplayLivenessPrelude, '00_roleplay_liveness_prelude.txt must not be empty');
+    assert.ok(config.SYSTEM_PROMPT.includes(roleplayLivenessPrelude), 'roleplay liveness prelude must be included in SYSTEM_PROMPT');
+    assert.ok(
+      config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) >= 0
+        && config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) < config.SYSTEM_PROMPT.indexOf('你是晓山瑞希风格的聊天伙伴。'),
+      'roleplay liveness prelude must be injected before manifest preamble'
+    );
     for (const name of requiredFiles) {
       const text = fs.readFileSync(path.join(config.PERSONA_DIR, name), 'utf8').trim();
       assert.ok(text, `${name} must not be empty`);

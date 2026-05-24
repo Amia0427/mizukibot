@@ -8,6 +8,14 @@
     ],
     "sections": [
       {
+        "id": "persona_roleplay_liveness_prelude",
+        "path": "persona/00_roleplay_liveness_prelude.txt",
+        "required": true,
+        "kind": "persona_policy",
+        "authority": "persona_core",
+        "priority": -20
+      },
+      {
         "id": "persona_identity",
         "path": "persona/01_identity.txt",
         "required": true,
