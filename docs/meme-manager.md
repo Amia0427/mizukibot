@@ -1,5 +1,7 @@
 # Meme Manager
 
+更新 2026-05-24 22:05 +08:00：表情包自动 follow-up 已关闭。`MEME_MANAGER_FOLLOWUP_ENABLED=false` 时 `maybeSendMemeFollowup` 会在 selector LLM 前直接返回 `followup-disabled`，不会选择素材，也不会向 NapCat 发送图片；图库、标注和 `/meme` 管理命令保留。
+
 更新 2026-05-24 19:40 +08:00：对 `C:\Users\Administrator\Downloads\yichuantiku` 的 11 张表情包完成视觉理解标注，并写入当前本地运行时图库。
 
 ## Runtime Assets
