@@ -1,6 +1,6 @@
 # Memory Quality Governance
 
-更新时间：2026-05-24 17:13 +08:00
+更新时间：2026-05-24 17:20 +08:00
 
 ## 目标
 
@@ -31,6 +31,7 @@
 - `utils/mainReplyContextPreview.js`、`utils/memoryContext/formatters.js` 和 `scripts/eval-memory-recall.js` 已扩展 source/category/tags/lifecycle/drop reason 观测，便于定位错召、旧版本误召和类别漏召。
 
 更新 2026-05-24 17:13 +08:00：主回复系统提示词顶部新增 `prompts/persona/00_roleplay_liveness_prelude.txt`，由 `prompts/prompt-manifest.json` 以负优先级注入，用于强化角色活人感、关系温度和记忆连续性；验证入口为 `npm run check:prompts` 与 `node tests/configPersonaPrompt.test.js`。
+更新 2026-05-24 17:20 +08:00：扩充 `00_roleplay_liveness_prelude.txt`，新增模式判断、私聊/群聊差异、主动性边界和任务场景口吻保持要求，仍由同一 manifest 入口注入并受 `configPersonaPrompt.test.js` 覆盖。
 更新 2026-05-19 22:20 +08:00：补齐冲突报告、纠错归档、召回门禁、LanceDB 读迁移门禁、混合召回排序权重和写后不可召回隐藏。
 更新 2026-05-20 00:42 +08:00：新增 `POST_REPLY_VECTOR_WATCHDOG_*` 自动巡检维护，避免健康漂移只能依赖新消息触发。
 更新 2026-05-20 00:55 +08:00：修复图片/战绩图召回链路。图片意图的 `mem search --source all` 会合并图片索引；凌晨 4 点前的“今天”同时覆盖前一自然日；sender-scoped 查询只回查当前用户发出的图；路由/planner 对“今天/昨天发给你什么图”改走 `memory_cli`，避免 notebook-answer chat-only 直接凭空否认。
