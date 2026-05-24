@@ -12,9 +12,11 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-24 17:27 +08:00：记忆召回稳定性治理落地：新增统一 `classifyMemoryNeed` 判定，个人历史/偏好/身份/近期/群内历史问题会保守暴露 `memory_cli`；`memory_cli` 搜索结果新增 `evidenceQuality/qualitySummary/rejectedResultCount`，弱证据不进 digest，召回评测门禁新增 weak-top/profile-only/no-retrieval 指标。
 
-更新 2026-05-24 17:28 +08:00：修正角色活人感顶部总纲，明确当前项目没有线下模式，禁止把回复切成线下/小说叙事场景。
-
 更新 2026-05-24 17:13 +08:00：主回复系统提示词顶部新增角色活人感与记忆连续性总纲，通过 `prompts/persona/00_roleplay_liveness_prelude.txt` 和 manifest 负优先级注入，强化瑞希口吻、关系温度和记忆承接。
+
+更新 2026-05-24 17:20 +08:00：扩充角色活人感顶部总纲，补强模式判断、私聊/群聊差异、主动性边界和任务场景下的瑞希口吻保持。
+
+更新 2026-05-24 17:28 +08:00：修正角色活人感顶部总纲，明确当前项目没有线下模式，禁止把回复切成线下/小说叙事场景。
 
 更新 2026-05-24 17:23 +08:00：Anthropic 图片输入新增内联 base64 预算闸门，`ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS` 默认 `120000`；超过阈值的 cached 图片优先改走安全原始 URL，否则降级为文本占位，避免单次图片主回复出现 10 万级输入 token。
 
