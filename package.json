@@ -55,6 +55,7 @@
     "mineflayer": "^4.35.0",
     "mineflayer-pathfinder": "^2.4.5",
     "node-telegram-bot-api": "^0.67.0",
+    "sharp": "^0.33.5",
     "vec3": "^0.1.10",
     "ws": "^8.19.0",
     "zod": "^3.24.1"

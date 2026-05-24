@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-24 21:36 +08:00
+更新时间：2026-05-24 22:22 +08:00
 
 ## 已调整
 
@@ -18,6 +18,7 @@
 - 2026-05-23 23:45 +08:00：主回复请求默认使用 Claude `/v1/messages` 协议，稳定 system/tool 前缀使用 Anthropic `cache_control` 断点；主回复不再使用 OpenAI `prompt_cache_key/prompt_cache_retention`。
 - 2026-05-24 08:35 +08:00：Anthropic 缓存断点适配官方 automatic prompt caching：可用时追加顶层 `cache_control`，显式断点总量按 `tools -> system -> messages` 保持在 4 个以内；如果兼容网关拒绝顶层 automatic，会先去掉顶层字段并保留稳定 system/tool 断点重试。
 - 2026-05-24 17:23 +08:00：Anthropic 图片输入新增 `ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS`，默认 `120000`；cached 图片超过内联预算时不再转 base64，优先发送安全原始 URL，否则注入文本占位，避免图片路由把 base64 字符串计成 10 万级输入 token。
+- 2026-05-24 22:22 +08:00：Anthropic 超大 cached 图片优先用 `sharp` 压缩为小 JPEG 内联，最大边长由 `ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE` 控制，转后仍必须低于 `ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS`；QQ 临时图不再回退裸 URL，避免网关取不到图导致“看不清”。
 - 2026-05-24 17:28 +08:00：角色活人感顶部总纲明确当前项目没有线下模式；主回复只按线上私聊、群聊和任务聊天组织口吻，禁止切成线下/小说叙事场景。
 - 2026-05-24 17:35 +08:00：瑞希稳定系统提示词继续作为默认人格；主回复新增 `roleplay_runtime_context` critical 动态块，注入当前时间、场景、聊天模式、关系/近期摘要、用户最新消息、可见用户状态和本轮限制，并明确不读心、不替用户行动、普通聊天短消息、纯文本输出。
 - 2026-05-24 19:56 +08:00：planner 决策模型切到 `PLAN_MODEL=gpt-5.4-nano`，用于路由后工具/计划决策；`PLANNER_MAX_MODEL_CALLS=1` 和 `PLANNER_REQUEST_TIMEOUT_MS=60000` 保持不变。
