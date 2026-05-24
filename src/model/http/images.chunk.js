@@ -13,6 +13,10 @@ const {
 
 const MAX_REMOTE_IMAGE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS = 120000;
+const DEFAULT_ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE = 768;
+const ANTHROPIC_DOWNSAMPLE_JPEG_QUALITIES = [82, 74, 66, 58, 50, 42];
+let sharpLoaderState = 'unloaded';
+let sharpModule = null;
 
 function getHttpTransport() {
   return require('./prepare.chunk');
@@ -170,6 +174,124 @@ function shouldInlineAnthropicBase64Image(base64Data = '') {
   return maxChars > 0 && data.length <= maxChars;
 }
 
+function getAnthropicDownsampledImageMaxEdge() {
+  const raw = normalizeText(
+    process.env.ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE
+    || config.ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE
+    || ''
+  );
+  if (!raw) return DEFAULT_ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE;
+  const parsed = Math.floor(Number(raw));
+  if (!Number.isFinite(parsed)) return DEFAULT_ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE;
+  return Math.max(96, parsed);
+}
+
+function loadSharpForAnthropicDownsample() {
+  if (sharpLoaderState !== 'unloaded') return sharpModule;
+  sharpLoaderState = 'loaded';
+  try {
+    sharpModule = require('sharp');
+  } catch (error) {
+    sharpModule = null;
+    if (config.ENABLE_DEBUG_LOG) {
+      console.warn('[vision] sharp is unavailable for oversized anthropic image downsample: ' + (error?.message || error));
+    }
+  }
+  return sharpModule;
+}
+
+function buildAnthropicImageBlockFromBase64(mediaType = 'image/jpeg', data = '') {
+  return {
+    type: 'image',
+    source: {
+      type: 'base64',
+      media_type: mediaType || 'image/jpeg',
+      data
+    }
+  };
+}
+
+function buildAnthropicDownsampleEdges() {
+  const configured = getAnthropicDownsampledImageMaxEdge();
+  const candidates = [configured, 768, 640, 512, 448, 384, 320, 256, 192]
+    .map((value) => Math.floor(Number(value)))
+    .filter((value) => Number.isFinite(value) && value >= 96 && value <= configured);
+  return [...new Set(candidates)].sort((a, b) => b - a);
+}
+
+function hasKnownImageSignature(buffer, mediaType = '') {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return false;
+  const normalizedMediaType = normalizeText(mediaType).toLowerCase();
+  const startsWithHex = (hex) => buffer.subarray(0, hex.length / 2).equals(Buffer.from(hex, 'hex'));
+  if (normalizedMediaType === 'image/png') return startsWithHex('89504e470d0a1a0a');
+  if (normalizedMediaType === 'image/jpeg' || normalizedMediaType === 'image/jpg') return startsWithHex('ffd8ff');
+  if (normalizedMediaType === 'image/webp') return buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+    && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+  if (normalizedMediaType === 'image/gif') {
+    const signature = buffer.subarray(0, 6).toString('ascii');
+    return signature === 'GIF87a' || signature === 'GIF89a';
+  }
+  return startsWithHex('89504e470d0a1a0a')
+    || startsWithHex('ffd8ff')
+    || (
+      buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+      && buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+    )
+    || ['GIF87a', 'GIF89a'].includes(buffer.subarray(0, 6).toString('ascii'));
+}
+
+async function buildDownsampledAnthropicImageBlock(imagePayload = {}) {
+  const maxChars = getAnthropicInlineImageMaxBase64Chars();
+  if (maxChars <= 0) return null;
+
+  const sharp = loadSharpForAnthropicDownsample();
+  if (!sharp) return null;
+
+  const data = String(imagePayload?.data || '').trim();
+  if (!data) return null;
+
+  let inputBuffer = null;
+  try {
+    inputBuffer = Buffer.from(data, 'base64');
+  } catch (_) {
+    return null;
+  }
+  if (!inputBuffer || !inputBuffer.length) return null;
+  if (!hasKnownImageSignature(inputBuffer, imagePayload?.mediaType)) return null;
+
+  for (const edge of buildAnthropicDownsampleEdges()) {
+    for (const quality of ANTHROPIC_DOWNSAMPLE_JPEG_QUALITIES) {
+      try {
+        const outputBuffer = await sharp(inputBuffer, {
+          animated: false,
+          limitInputPixels: 25000000
+        })
+          .rotate()
+          .resize({
+            width: edge,
+            height: edge,
+            fit: 'inside',
+            withoutEnlargement: true
+          })
+          .flatten({ background: { r: 255, g: 255, b: 255 } })
+          .jpeg({ quality, mozjpeg: true })
+          .toBuffer();
+        const outputBase64 = outputBuffer.toString('base64');
+        if (shouldInlineAnthropicBase64Image(outputBase64)) {
+          return buildAnthropicImageBlockFromBase64('image/jpeg', outputBase64);
+        }
+      } catch (error) {
+        if (config.ENABLE_DEBUG_LOG) {
+          console.warn('[vision] failed oversized anthropic image downsample: ' + (error?.message || error));
+        }
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
 function buildOversizeAnthropicImageText(imageUrl = '') {
   if (parseCacheRef(imageUrl)) {
     return '[Image attached but skipped because the cached image payload is too large to inline safely.]';
@@ -179,7 +301,7 @@ function buildOversizeAnthropicImageText(imageUrl = '') {
 
 async function buildOversizeAnthropicImageFallbackBlock(imageUrl = '') {
   const url = String(imageUrl || '').trim();
-  if (/^https?:\/\//i.test(url)) {
+  if (/^https?:\/\//i.test(url) && !isQqImageUrl(url)) {
     try {
       await assertSafeHttpUrl(url);
       return {
@@ -329,16 +451,14 @@ async function resolveAnthropicImageBlock(part = {}) {
   const sourceType = normalizeText(part?.source?.type || '');
   if (inlineData && (sourceType === 'base64' || part?.type === 'input_image' || part?.type === 'image')) {
     if (!shouldInlineAnthropicBase64Image(inlineData)) {
+      const downsampledBlock = await buildDownsampledAnthropicImageBlock({
+        mediaType: inlineMediaType || 'image/jpeg',
+        data: inlineData
+      });
+      if (downsampledBlock) return downsampledBlock;
       return buildOversizeAnthropicImageFallbackBlock(String(part?.image_url?.url || part?.url || '').trim());
     }
-    return {
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type: inlineMediaType || 'image/jpeg',
-        data: inlineData
-      }
-    };
+    return buildAnthropicImageBlockFromBase64(inlineMediaType || 'image/jpeg', inlineData);
   }
 
   const imageUrl = String(part?.image_url?.url || part?.url || '').trim();
@@ -347,16 +467,11 @@ async function resolveAnthropicImageBlock(part = {}) {
   const cachedImage = cacheRef ? readCachedImagePayload(imageUrl) : null;
   if (cachedImage?.data) {
     if (!shouldInlineAnthropicBase64Image(cachedImage.data)) {
+      const downsampledBlock = await buildDownsampledAnthropicImageBlock(cachedImage);
+      if (downsampledBlock) return downsampledBlock;
       return buildOversizeAnthropicImageFallbackBlock(cachedImage.sourceUrl || imageUrl);
     }
-    return {
-      type: 'image',
-      source: {
-        type: 'base64',
-        media_type: cachedImage.mediaType || 'image/jpeg',
-        data: cachedImage.data
-      }
-    };
+    return buildAnthropicImageBlockFromBase64(cachedImage.mediaType || 'image/jpeg', cachedImage.data);
   }
   if (cacheRef) {
     return {
@@ -449,6 +564,7 @@ module.exports = {
   getHttpAcceptLanguage,
   getHttpUserAgent,
   getImageFetchOptions,
+  getAnthropicDownsampledImageMaxEdge,
   getAnthropicInlineImageMaxBase64Chars,
   getOpenAICompatibleImageMode,
   inferImageMediaType,
