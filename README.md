@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-24 20:08 +08:00：planner 决策模型改为 `PLAN_MODEL=gpt-5.4-mini`，同步当前可用的 router 模型配置。
+
 更新 2026-05-24 19:56 +08:00：planner 决策模型切到 `PLAN_MODEL=gpt-5.4-nano`，与表情包二次决策模型保持一致；planner 仍保持单轮调用和 `PLANNER_REQUEST_TIMEOUT_MS=60000`。
 
 更新 2026-05-24 19:40 +08:00：完成 `yichuantiku` 表情包库视觉标注，写入本地 meme manager 运行时图库：5 个分类、11 张素材，素材 `analysis.auto` 字段已按当前发送机制的 mood/intensity/context 结构补齐。
@@ -224,7 +226,7 @@ MEMOS_KB_IDS=knowledgebase_id_1
 Planner refinement：
 
 ```env
-PLAN_MODEL=gpt-5.4-nano
+PLAN_MODEL=gpt-5.4-mini
 PLANNER_MAX_MODEL_CALLS=1
 PLANNER_REQUEST_TIMEOUT_MS=60000
 PLANNER_SEMANTIC_REFINE_ENABLED=false
