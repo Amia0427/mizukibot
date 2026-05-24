@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-24 19:40 +08:00：完成 `yichuantiku` 表情包库视觉标注，写入本地 meme manager 运行时图库：5 个分类、11 张素材，素材 `analysis.auto` 字段已按当前发送机制的 mood/intensity/context 结构补齐。
+
 更新 2026-05-24 18:03 +08:00：排查普通主回复不出声发现运行中旧进程在 planner 归一化阶段抛 `shouldPrioritizeMemoryProbe is not defined`；磁盘代码已包含修复，已重启主 bot 和 post-reply worker，`node tests\plannerV2Protocol.test.js` 通过。
 
 更新 2026-05-24 17:57 +08:00：主回复系统提示词完成去重收敛，顶部总纲保留瑞希活人感、记忆连续性和线上聊天锚点，风格、边界、状态与上下文细节回到对应 persona 文件。
