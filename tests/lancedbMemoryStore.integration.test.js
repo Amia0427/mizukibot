@@ -23,6 +23,8 @@ process.env.MEMORY_EMBEDDING_API_BASE_URL = 'https://embedding.example/v1';
 process.env.MEMORY_EMBEDDING_API_KEY = 'test-key';
 
 const {
+  countTableRows,
+  listTableIds,
   resolveVectorCandidates,
   searchMemoryVectors,
   syncMemoryRows
@@ -111,6 +113,91 @@ module.exports = (async () => {
   const liveSearch = await searchMemoryVectors([0, 1, 0], { userId: 'u_live_lancedb' }, { limit: 5 });
   assert.strictEqual(liveSearch.ok, true);
   assert.ok(liveSearch.rows.some((row) => row.nodeId === liveWrite.ids[0]), 'expected enhanced write row in lancedb');
+
+  const bucketWrite = await syncMemoryRows([{
+    id: 'memory:bucket_personal',
+    nodeId: 'bucket_personal',
+    userId: 'u_bucket_live',
+    source: 'personal',
+    scopeType: 'personal',
+    groupId: '',
+    sessionKey: '',
+    fieldKey: 'fact',
+    type: 'fact',
+    status: 'active',
+    evidenceTier: 'strict',
+    updatedAt: 200,
+    canonicalKey: 'bucket personal',
+    textHash: 'bucket-personal',
+    model: 'm',
+    vector: [0, 1, 0],
+    preview: 'bucket personal'
+  }, {
+    id: 'memory:bucket_group',
+    nodeId: 'bucket_group',
+    userId: 'u_other_bucket',
+    source: 'group',
+    scopeType: 'group',
+    groupId: 'g_bucket_live',
+    sessionKey: '',
+    fieldKey: 'fact',
+    type: 'fact',
+    status: 'active',
+    evidenceTier: 'strict',
+    updatedAt: 200,
+    canonicalKey: 'bucket group',
+    textHash: 'bucket-group',
+    model: 'm',
+    vector: [0, 1, 0],
+    preview: 'bucket group'
+  }], {
+    full: true,
+    tableName: 'memory_v3_vectors',
+    partitionMode: 'user_bucket',
+    bucketCount: 4
+  });
+  assert.strictEqual(bucketWrite.ok, true);
+  assert.strictEqual(bucketWrite.partitionMode, 'user_bucket');
+  assert.strictEqual(bucketWrite.rows, 2);
+  assert.strictEqual(bucketWrite.tableCount, 2);
+
+  const bucketPersonalSearch = await searchMemoryVectors([0, 1, 0], {
+    userId: 'u_bucket_live'
+  }, {
+    limit: 5,
+    partitionMode: 'user_bucket',
+    bucketCount: 4,
+    legacyFallbackEnabled: false
+  });
+  assert.strictEqual(bucketPersonalSearch.ok, true);
+  assert.ok(bucketPersonalSearch.rows.some((row) => row.nodeId === 'bucket_personal'));
+  assert.ok(!bucketPersonalSearch.rows.some((row) => row.nodeId === 'bucket_group'));
+
+  const bucketGroupSearch = await searchMemoryVectors([0, 1, 0], {
+    userId: 'u_bucket_live',
+    groupId: 'g_bucket_live'
+  }, {
+    limit: 5,
+    partitionMode: 'user_bucket',
+    bucketCount: 4,
+    legacyFallbackEnabled: false
+  });
+  assert.ok(bucketGroupSearch.rows.some((row) => row.nodeId === 'bucket_group'));
+  assert.ok(bucketGroupSearch.targetTables.length <= 2);
+
+  const bucketCount = await countTableRows('memory_v3_vectors', {
+    partitionMode: 'user_bucket',
+    bucketCount: 4
+  });
+  assert.strictEqual(bucketCount.ok, true);
+  assert.strictEqual(bucketCount.rows, 2);
+  assert.strictEqual(bucketCount.tableCount, 2);
+  const bucketIds = await listTableIds('memory_v3_vectors', {
+    partitionMode: 'user_bucket',
+    bucketCount: 4
+  });
+  assert.strictEqual(bucketIds.ok, true);
+  assert.strictEqual(bucketIds.ids.length, 2);
   console.log('lancedbMemoryStore.integration.test.js passed');
 })().catch((error) => {
   console.error(error);

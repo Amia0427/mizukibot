@@ -57,6 +57,7 @@ writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [{
 const {
   buildCoverage,
   buildMemoryRows,
+  buildSyncSummary,
   parseArgs
 } = require('../scripts/sync-lancedb-memory-index');
 const { buildSafeJournalHealthSummary, runDiagnostics } = require('../scripts/diagnose-lancedb-memory');
@@ -115,7 +116,10 @@ assert.deepStrictEqual(parseArgs(['--full-reconcile', '--delete-stale-rows', '--
   fullReconcile: true,
   deleteStaleRows: true,
   compact: false,
-  since: 1000
+  since: 1000,
+  dir: '',
+  partitionMode: '',
+  bucketCount: 0
 });
 assert.deepStrictEqual(parseArgs(['--full']), {
   dryRun: false,
@@ -123,7 +127,21 @@ assert.deepStrictEqual(parseArgs(['--full']), {
   fullReconcile: true,
   deleteStaleRows: false,
   compact: false,
-  since: 0
+  since: 0,
+  dir: '',
+  partitionMode: '',
+  bucketCount: 0
+});
+assert.deepStrictEqual(parseArgs(['--dir', 'data/lancedb_user_bucket', '--partition-mode', 'user_bucket', '--bucket-count', '32']), {
+  dryRun: false,
+  full: false,
+  fullReconcile: false,
+  deleteStaleRows: false,
+  compact: false,
+  since: 0,
+  dir: 'data/lancedb_user_bucket',
+  partitionMode: 'user_bucket',
+  bucketCount: 32
 });
 
 const memoryRows = buildMemoryRows();
@@ -154,26 +172,38 @@ assert.strictEqual(driftGate.canBackfill, false);
 assert.strictEqual(driftGate.mustReconcileFirst, true);
 assert.ok(driftGate.nextSafeCommand.includes('repair-memory-vector-index.js'));
 
-module.exports = runDiagnostics({
+module.exports = buildSyncSummary({
+  dryRun: true,
+  full: true,
+  dir: path.join(tempRoot, 'lancedb_bucket_shadow'),
+  partitionMode: 'user_bucket',
+  bucketCount: 8
+}).then((bucketSummary) => {
+  assert.strictEqual(bucketSummary.partitionMode, 'user_bucket');
+  assert.strictEqual(bucketSummary.bucketCount, 8);
+  assert.strictEqual(bucketSummary.coverage.memory.tableRows, 0);
+  assert.ok(bucketSummary.lancedbDir.endsWith('lancedb_bucket_shadow'));
+  return runDiagnostics({
   skipProbe: true,
   limit: 1
-}, {
-  buildSyncSummary: async () => ({
-    ok: true,
-    lancedbDir: tempRoot,
-    syncEnabled: true,
-    coverage: {
-      memory: { staleTableRows: 2, readyButNotSynced: 3 },
-      worldbook: { staleTableRows: 0, readyButNotSynced: 0 }
-    },
-    memory: {},
-    worldbook: {},
-    repairPlan: { recommendedAction: 'run_full_lancedb_reconcile' }
-  }),
-  diagnoseProjectionFreshness: () => ({ projectionStale: false }),
-  buildJournalHealthSummary: () => {
-    throw new Error('journal health degraded');
-  }
+  }, {
+    buildSyncSummary: async () => ({
+      ok: true,
+      lancedbDir: tempRoot,
+      syncEnabled: true,
+      coverage: {
+        memory: { staleTableRows: 2, readyButNotSynced: 3 },
+        worldbook: { staleTableRows: 0, readyButNotSynced: 0 }
+      },
+      memory: {},
+      worldbook: {},
+      repairPlan: { recommendedAction: 'run_full_lancedb_reconcile' }
+    }),
+    diagnoseProjectionFreshness: () => ({ projectionStale: false }),
+    buildJournalHealthSummary: () => {
+      throw new Error('journal health degraded');
+    }
+  });
 }).then((diagnose) => {
   assert.strictEqual(diagnose.ok, true);
   assert.strictEqual(diagnose.journal.ok, false);
@@ -250,7 +280,10 @@ module.exports = runDiagnostics({
     let applySummaryCalls = 0;
     return runRepair({
       apply: true,
-      source: 'memory'
+      source: 'memory',
+      dir: path.join(tempRoot, 'repair_bucket_shadow'),
+      partitionMode: 'user_bucket',
+      bucketCount: 8
     }, {
       collectEmbeddingBackfillNodes: () => [{
         id: 'repair_node_apply',
@@ -291,6 +324,9 @@ module.exports = runDiagnostics({
       assert.strictEqual(syncCalls.length, 1);
       assert.strictEqual(syncCalls[0].options.fullReconcile, true);
       assert.strictEqual(syncCalls[0].options.deleteStaleRows, true);
+      assert.strictEqual(syncCalls[0].options.partitionMode, 'user_bucket');
+      assert.strictEqual(syncCalls[0].options.bucketCount, 8);
+      assert.ok(syncCalls[0].options.dir.endsWith('repair_bucket_shadow'));
       assert.ok(repairApply.afterCoverage);
       assert.strictEqual(repairApply.afterCoverage.memory.staleTableRows, 0);
       assert.strictEqual(repairApply.afterCoverage.memory.readyButNotSynced, 0);

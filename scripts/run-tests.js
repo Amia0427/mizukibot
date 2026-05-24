@@ -261,10 +261,20 @@ function runTestFile(file) {
 
 async function runAllTests() {
   let failed = 0;
+  const requestedFiles = process.argv.slice(2)
+    .filter((item) => String(item || '').trim() && !String(item || '').startsWith('--'))
+    .map((item) => path.resolve(process.cwd(), item));
   const discoveredTestFiles = listTestFiles(path.join(__dirname, '..', 'tests'));
-  const runnableFiles = discoveredTestFiles.length > 0
+  const runnableFiles = requestedFiles.length > 0
+    ? requestedFiles.filter((candidate) => fs.existsSync(candidate))
+    : discoveredTestFiles.length > 0
     ? discoveredTestFiles
     : testFiles.filter((candidate) => fs.existsSync(candidate));
+  if (requestedFiles.length > 0 && runnableFiles.length !== requestedFiles.length) {
+    const missing = requestedFiles.filter((candidate) => !fs.existsSync(candidate));
+    console.error('[test] missing requested files: ' + missing.join(', '));
+    process.exit(1);
+  }
   for (const file of runnableFiles) {
     const result = await runTestFile(file);
     if (result.ok) {

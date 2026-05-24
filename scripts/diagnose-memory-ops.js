@@ -358,6 +358,8 @@ function summarizeLanceDbGate(result = {}, args = {}) {
     metrics: gate.metrics || {},
     recallGate: gate.recallGate || null,
     regressionGate: gate.regressionGate || null,
+    acceptedRecallFailures: Array.isArray(gate.acceptedRecallFailures) ? gate.acceptedRecallFailures : [],
+    blockingRecallFailures: Array.isArray(gate.blockingRecallFailures) ? gate.blockingRecallFailures : [],
     baseline: result.baseline
       ? {
           mode: result.baseline.mode,

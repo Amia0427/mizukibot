@@ -42,6 +42,37 @@ function candidateReadyRatio(candidate = null) {
   return null;
 }
 
+function recallMetric(result = null, key = '') {
+  if (!result || typeof result !== 'object') return null;
+  if (Object.prototype.hasOwnProperty.call(result, key)) return result[key];
+  if (result.summary && Object.prototype.hasOwnProperty.call(result.summary, key)) return result.summary[key];
+  return null;
+}
+
+function isBaselineAcceptedRecallFailure(failure = '', baseline = null, candidate = null, recallGate = null, regressionGate = null, options = {}) {
+  if (!baseline || !candidate || !recallGate) return false;
+  const thresholds = recallGate.thresholds || {};
+  if (failure === 'recall_at_8_below_threshold') {
+    const baselineRecall = normalizeNumber(recallMetric(baseline, 'recallAt8'), 0);
+    return baselineRecall < normalizeNumber(thresholds.minRecallAt8, 0)
+      && regressionGate
+      && !((regressionGate.failures || []).includes('recall_at_8_regressed'));
+  }
+  if (failure === 'mrr_at_8_below_threshold') {
+    const baselineMrr = normalizeNumber(recallMetric(baseline, 'mrrAt8'), 0);
+    return baselineMrr < normalizeNumber(thresholds.minMrrAt8, 0)
+      && regressionGate
+      && !((regressionGate.failures || []).includes('mrr_at_8_regressed'));
+  }
+  if (failure === 'recent_recall_miss_detected') {
+    const maxMisses = normalizeNumber(options.maxRecentRecallMisses ?? thresholds.maxRecentRecallMisses ?? 0, 0);
+    const baselineMisses = normalizeNumber(recallMetric(baseline, 'recentRecallMisses'), 0);
+    const candidateMisses = normalizeNumber(recallMetric(candidate, 'recentRecallMisses'), 0);
+    return baselineMisses > maxMisses && candidateMisses <= baselineMisses;
+  }
+  return false;
+}
+
 function buildLanceDbReadMigrationGate(input = {}, options = {}) {
   const diagnostics = input.diagnostics || input.diagnose || {};
   const healthGate = diagnostics.healthGate || diagnostics.summary?.healthGate || {};
@@ -65,6 +96,8 @@ function buildLanceDbReadMigrationGate(input = {}, options = {}) {
 
   let recallGate = null;
   let regressionGate = null;
+  const acceptedRecallFailures = [];
+  const blockingRecallFailures = [];
   if (candidate) {
     recallGate = buildRecallEvalGate(candidate, {
       minJudgedCases: options.minJudgedCases ?? 10,
@@ -74,7 +107,6 @@ function buildLanceDbReadMigrationGate(input = {}, options = {}) {
       maxEmptyResultRate: options.maxEmptyResultRate ?? 0.12,
       maxNoVisibleCandidateRate: options.maxNoVisibleCandidateRate ?? 0.2
     });
-    if (!recallGate.ok) failures.push(...recallGate.failures.map((item) => `candidate_${item}`));
   } else {
     failures.push('missing_candidate_recall_eval');
   }
@@ -84,6 +116,17 @@ function buildLanceDbReadMigrationGate(input = {}, options = {}) {
       regressionTolerance: options.regressionTolerance ?? 0.03
     });
     if (!regressionGate.ok) failures.push(...regressionGate.failures);
+  }
+
+  if (recallGate && !recallGate.ok) {
+    for (const failure of recallGate.failures) {
+      if (isBaselineAcceptedRecallFailure(failure, baseline, candidate, recallGate, regressionGate, options)) {
+        acceptedRecallFailures.push(failure);
+      } else {
+        blockingRecallFailures.push(failure);
+      }
+    }
+    failures.push(...blockingRecallFailures.map((item) => `candidate_${item}`));
   }
 
   const uniqueFailures = Array.from(new Set(failures));
@@ -108,7 +151,9 @@ function buildLanceDbReadMigrationGate(input = {}, options = {}) {
       mustReconcileFirst: healthGate.mustReconcileFirst === true
     },
     recallGate,
-    regressionGate
+    regressionGate,
+    acceptedRecallFailures,
+    blockingRecallFailures
   };
 }
 
