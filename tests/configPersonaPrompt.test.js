@@ -13,6 +13,17 @@ function useConfigDefault(key) {
   process.env[key] = '__USE_CONFIG_DEFAULT__';
 }
 
+function estimatePromptTokens(value) {
+  const text = String(value || '').trim();
+  let cjkChars = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    if (code >= 0x3400 && code <= 0x9fff) cjkChars += 1;
+  }
+  const latinChars = text.length - cjkChars;
+  return cjkChars + Math.ceil(Math.max(0, latinChars) / 4);
+}
+
 (() => {
   const snapshot = { ...process.env };
   try {
@@ -45,6 +56,7 @@ function useConfigDefault(key) {
     assert.deepStrictEqual(config.PERSONA_FILES, requiredFiles);
     const roleplayLivenessPrelude = fs.readFileSync(path.join(config.PERSONA_DIR, '00_roleplay_liveness_prelude.txt'), 'utf8').trim();
     assert.ok(roleplayLivenessPrelude, '00_roleplay_liveness_prelude.txt must not be empty');
+    assert.ok(estimatePromptTokens(roleplayLivenessPrelude) <= 1500, 'roleplay liveness prelude must stay within 1500 estimated tokens');
     assert.ok(config.SYSTEM_PROMPT.includes(roleplayLivenessPrelude), 'roleplay liveness prelude must be included in SYSTEM_PROMPT');
     assert.ok(
       config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) >= 0

@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-24 17:13 +08:00：主回复系统提示词顶部新增角色活人感与记忆连续性总纲，通过 `prompts/persona/00_roleplay_liveness_prelude.txt` 和 manifest 负优先级注入，强化瑞希口吻、关系温度和记忆承接。
 
+更新 2026-05-24 17:20 +08:00：扩充角色活人感顶部总纲，补强模式判断、私聊/群聊差异、主动性边界和任务场景下的瑞希口吻保持。
+
 更新 2026-05-24 17:23 +08:00：Anthropic 图片输入新增内联 base64 预算闸门，`ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS` 默认 `120000`；超过阈值的 cached 图片优先改走安全原始 URL，否则降级为文本占位，避免单次图片主回复出现 10 万级输入 token。
 
 更新 2026-05-23 10:30 +08:00：启动链和已拆 facade 已切到目录小模块入口；旧大文件已归档到 `artifacts/backups/large-facades-small-module-cutover-2026-05-23-0917+0800.zip`，33 个旧入口已删除，`npm test` 全量通过，运行时不再使用旧 `.js` facade。
