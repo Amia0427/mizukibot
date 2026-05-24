@@ -2,7 +2,7 @@ function buildPlannerRuntimeConfig({ pick, pickNum, pickBool }) {
   return {
     PLAN_API_BASE_URL: pick('PLAN_API_BASE_URL', pick('PLANNER_API_BASE_URL', pick('PLAN_API_BASEURI', pick('PLANNER_API_BASEURI', '')))),
     PLAN_API_KEY: pick('PLAN_API_KEY', pick('PLANNER_API_KEY', pick('PLAN_APIKEY', pick('PLANNER_APIKEY', '')))),
-    PLAN_MODEL: pick('PLAN_MODEL', pick('PLANNER_MODEL', 'gpt-5.4-nano')),
+    PLAN_MODEL: pick('PLAN_MODEL', pick('PLANNER_MODEL', 'gpt-5.4-mini')),
     PLAN_REASONING_EFFORT: pick('PLAN_REASONING_EFFORT', pick('PLANNER_REASONING_EFFORT', 'off')),
     PLANNER_REQUEST_TIMEOUT_MS: Math.max(1000, pickNum('PLANNER_REQUEST_TIMEOUT_MS', 60000)),
     PLANNER_MAX_MODEL_CALLS: 1,
