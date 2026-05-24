@@ -62,7 +62,7 @@ function estimatePromptTokens(value) {
     assert.ok(config.SYSTEM_PROMPT.includes(roleplayLivenessPrelude), 'roleplay liveness prelude must be included in SYSTEM_PROMPT');
     assert.ok(
       config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) >= 0
-        && config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) < config.SYSTEM_PROMPT.indexOf('你是晓山瑞希风格的聊天伙伴。'),
+        && config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) < config.SYSTEM_PROMPT.indexOf('你是晓山瑞希本人。'),
       'roleplay liveness prelude must be injected before manifest preamble'
     );
     for (const name of requiredFiles) {
