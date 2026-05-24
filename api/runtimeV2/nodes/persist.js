@@ -2,6 +2,7 @@ const {
   detectPostReplyLearningIntent,
   isExplicitRememberText
 } = require('../../../utils/postReplyWorker/learningIntent');
+const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
 
 function createPersistNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
@@ -153,6 +154,7 @@ function createPersistNode(deps = {}) {
     const reasons = [];
     if (request.systemInitiated) reasons.push('system_initiated');
     if (state.output?.failure) reasons.push('output_failure');
+    if (isUnsafeUserFacingReply(finalReply)) reasons.push('unsafe_user_facing_reply');
     if (!userContent) reasons.push('empty_user_content');
     if (!finalReply) reasons.push('empty_final_reply');
     if (isReviewMode(request.reviewMode)) reasons.push('review_mode');
@@ -210,6 +212,7 @@ function createPersistNode(deps = {}) {
       && !state.output?.failure
       && userContent
       && finalReply
+      && !isUnsafeUserFacingReply(finalReply)
       && !isReviewMode(request.reviewMode)
     );
     const shouldPersistBridge = shouldPersistChatArtifacts

@@ -238,7 +238,11 @@ function shouldInjectAnthropicWebSearchTool(protocol = '', options = {}, current
   if (String(protocol || '').trim() !== 'anthropic_messages') return false;
   if (currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED === false) return false;
   if (options.disableAnthropicWebSearch === true || options.anthropicWebSearch === false) return false;
-  return true;
+  if (options.anthropicWebSearch === true) return true;
+  const allowedTools = Array.isArray(options.allowedTools) ? options.allowedTools : [];
+  return allowedTools
+    .map((item) => String(item || '').trim())
+    .some((toolName) => toolName === 'web_search' || toolName === 'skill_web_search');
 }
 
 function withAnthropicWebSearchTool(tools = [], protocol = '', options = {}, currentConfig = config) {
@@ -326,6 +330,7 @@ function buildOpenAIPromptCacheKey(protocol, resolvedConfig = null, options = {}
     namespaceHash,
     model,
     routeType,
+    allowedTools: Array.isArray(options?.allowedTools) ? options.allowedTools : [],
     stablePrompt: buildStablePromptFingerprint(options.messages, options.tools)
   });
   const hash = crypto

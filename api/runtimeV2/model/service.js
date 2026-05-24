@@ -244,6 +244,7 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
       trace: callTrace,
       routeMeta: context?.routeMeta,
       topRouteType: context?.topRouteType,
+      allowedTools: context?.allowedTools,
       tools: includeTools ? toolSchemas : []
     });
     const body = request.body;
@@ -355,7 +356,8 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
           defaultMaxTokens: getMainReplyDefaultMaxTokens(),
           trace: callTrace,
           routeMeta: options?.routeMeta,
-          topRouteType: options?.topRouteType
+          topRouteType: options?.topRouteType,
+          allowedTools: options?.allowedTools
         });
         await postStreamWithRetry(
           request.url,
