@@ -105,6 +105,7 @@ module.exports = {
   MODEL_HTTP_USER_AGENT: pick('MODEL_HTTP_USER_AGENT', pick('MAIN_REPLY_USER_AGENT', 'claude-cli/2.0.76 (external, cli)')),
   HTTP_ACCEPT_LANGUAGE: pick('HTTP_ACCEPT_LANGUAGE', 'zh-CN,zh;q=0.9,en;q=0.8'),
   MODEL_TOP_P_ENABLED: pickBool('MODEL_TOP_P_ENABLED', false),
+  ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS: pickNum('ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS', 120000),
 
   // ===== Subagent Bridge (multi-agent) =====
   // 寮€鍏充负 true 鏃讹紝mizuki 浼氭妸宸ュ叿鍨嬩换鍔¤浆鍙戠粰鍙浛鎹㈢殑澶栭儴瀛?agent銆?

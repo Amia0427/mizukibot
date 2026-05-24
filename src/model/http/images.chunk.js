@@ -12,6 +12,7 @@ const {
 } = require('./runtime-core.chunk');
 
 const MAX_REMOTE_IMAGE_BYTES = 10 * 1024 * 1024;
+const DEFAULT_ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS = 120000;
 
 function getHttpTransport() {
   return require('./prepare.chunk');
@@ -150,6 +151,56 @@ function buildUnavailableImageText(imageUrl = '') {
     : `[Image URL] ${imageUrl}`;
 }
 
+function getAnthropicInlineImageMaxBase64Chars() {
+  const raw = normalizeText(
+    process.env.ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS
+    || config.ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS
+    || ''
+  );
+  if (!raw) return DEFAULT_ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS;
+  const parsed = Math.floor(Number(raw));
+  if (!Number.isFinite(parsed)) return DEFAULT_ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS;
+  return Math.max(0, parsed);
+}
+
+function shouldInlineAnthropicBase64Image(base64Data = '') {
+  const data = String(base64Data || '').trim();
+  if (!data) return false;
+  const maxChars = getAnthropicInlineImageMaxBase64Chars();
+  return maxChars > 0 && data.length <= maxChars;
+}
+
+function buildOversizeAnthropicImageText(imageUrl = '') {
+  if (parseCacheRef(imageUrl)) {
+    return '[Image attached but skipped because the cached image payload is too large to inline safely.]';
+  }
+  return '[Image attached but skipped because the inline image payload is too large.]';
+}
+
+async function buildOversizeAnthropicImageFallbackBlock(imageUrl = '') {
+  const url = String(imageUrl || '').trim();
+  if (/^https?:\/\//i.test(url)) {
+    try {
+      await assertSafeHttpUrl(url);
+      return {
+        type: 'image',
+        source: {
+          type: 'url',
+          url
+        }
+      };
+    } catch (error) {
+      const details = error?.message || 'unknown-error';
+      console.warn('[vision] skipped oversized inline image and source url was not safe: ' + details);
+    }
+  }
+
+  return {
+    type: 'text',
+    text: buildOversizeAnthropicImageText(imageUrl)
+  };
+}
+
 function getOpenAICompatibleImageMode() {
   const raw = normalizeText(process.env.OPENAI_COMPAT_IMAGE_INPUT_MODE || '').toLowerCase();
   if (!raw) return 'data_url';
@@ -277,6 +328,9 @@ async function resolveAnthropicImageBlock(part = {}) {
   ).toLowerCase();
   const sourceType = normalizeText(part?.source?.type || '');
   if (inlineData && (sourceType === 'base64' || part?.type === 'input_image' || part?.type === 'image')) {
+    if (!shouldInlineAnthropicBase64Image(inlineData)) {
+      return buildOversizeAnthropicImageFallbackBlock(String(part?.image_url?.url || part?.url || '').trim());
+    }
     return {
       type: 'image',
       source: {
@@ -292,6 +346,9 @@ async function resolveAnthropicImageBlock(part = {}) {
   const cacheRef = parseCacheRef(imageUrl);
   const cachedImage = cacheRef ? readCachedImagePayload(imageUrl) : null;
   if (cachedImage?.data) {
+    if (!shouldInlineAnthropicBase64Image(cachedImage.data)) {
+      return buildOversizeAnthropicImageFallbackBlock(cachedImage.sourceUrl || imageUrl);
+    }
     return {
       type: 'image',
       source: {
@@ -392,6 +449,7 @@ module.exports = {
   getHttpAcceptLanguage,
   getHttpUserAgent,
   getImageFetchOptions,
+  getAnthropicInlineImageMaxBase64Chars,
   getOpenAICompatibleImageMode,
   inferImageMediaType,
   isQqImageUrl,
