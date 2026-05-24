@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-24 17:23 +08:00：Anthropic 图片输入新增内联 base64 预算闸门，`ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS` 默认 `120000`；超过阈值的 cached 图片优先改走安全原始 URL，否则降级为文本占位，避免单次图片主回复出现 10 万级输入 token。
+
 更新 2026-05-23 10:30 +08:00：启动链和已拆 facade 已切到目录小模块入口；旧大文件已归档到 `artifacts/backups/large-facades-small-module-cutover-2026-05-23-0917+0800.zip`，33 个旧入口已删除，`npm test` 全量通过，运行时不再使用旧 `.js` facade。
 
 更新 2026-05-23 10:55 +08:00：Memory V3 吸收 Memory-Plus 的类别 manifest 思路，召回链路新增 `category/tags/intent/privacyLevel` 元数据、category-aware source plan、LanceDB metadata filter 和 `diag:memory` category manifest 摘要。
@@ -215,6 +217,12 @@ MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_CITY=
 MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_REGION=
 MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_COUNTRY=
 MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_TIMEZONE=
+```
+
+Anthropic 图片输入预算：
+
+```env
+ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS=120000
 ```
 
 主回复短期上下文常用调节项：
