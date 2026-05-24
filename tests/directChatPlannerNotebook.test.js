@@ -89,6 +89,37 @@ module.exports = (async () => {
   assert.strictEqual(playedSongsExecution.allowTools, true);
   assert.ok(playedSongsExecution.allowedTools.includes('memory_cli'));
 
+  const preferenceRecallRoute = detectIntent({
+    rawText: '你记得我喜欢什么吗',
+    botQQ: '123456',
+    userId: 'u1',
+    chatType: 'group'
+  });
+  const preferenceDecision = await planDirectChat(preferenceRecallRoute, { userId: 'u1' });
+  assert.strictEqual(preferenceDecision.shouldUseTools, true);
+  assert.deepStrictEqual(preferenceDecision.allowedToolNames, ['memory_cli']);
+  assert.strictEqual(preferenceDecision.executionPlan.mode, 'tool_plan');
+
+  const identityRecallRoute = detectIntent({
+    rawText: '我之前说我是谁',
+    botQQ: '123456',
+    userId: 'u1',
+    chatType: 'group'
+  });
+  const identityDecision = await planDirectChat(identityRecallRoute, { userId: 'u1' });
+  assert.strictEqual(identityDecision.shouldUseTools, true);
+  assert.deepStrictEqual(identityDecision.allowedToolNames, ['memory_cli']);
+
+  const groupRecallRoute = detectIntent({
+    rawText: '群里之前怎么说这个活动',
+    botQQ: '123456',
+    userId: 'u1',
+    chatType: 'group'
+  });
+  const groupDecision = await planDirectChat(groupRecallRoute, { userId: 'u1' });
+  assert.strictEqual(groupDecision.shouldUseTools, true);
+  assert.deepStrictEqual(groupDecision.allowedToolNames, ['memory_cli']);
+
   console.log('directChatPlannerNotebook.test.js passed');
 })();
 

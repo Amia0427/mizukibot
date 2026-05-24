@@ -108,7 +108,9 @@ async function runMemoryCli(commandText = '', context = {}) {
           fallbackUsed: fastSearch.fallbackUsed,
           outputChars: fastSearch.outputChars,
           recentUsed: fastSearch.recentUsed,
-          droppedResultCount: fastSearch.droppedResultCount
+          droppedResultCount: fastSearch.droppedResultCount,
+          rejectedResultCount: fastSearch.rejectedResultCount,
+          qualitySummary: fastSearch.qualitySummary
         };
         if (parsed.source === 'all') {
           payload = mergeImageSearchIntoPayload(payload, parsed.query, {

@@ -26,6 +26,8 @@ function normalizeImageSearchHit(hit = {}) {
     tier: hit.exists === false ? 'C' : 'B',
     matchMode: 'image_index',
     status: hit.exists === false ? 'missing_payload' : 'active',
+    evidenceQuality: hit.exists === false ? 'weak' : 'strong',
+    qualityReasons: hit.exists === false ? ['image_payload_missing'] : ['trusted_source:image', 'image_index_match'],
     sourceKind: 'image_memory',
     memoryKind: 'image'
   };
@@ -54,6 +56,12 @@ function mergeImageSearchIntoPayload(payload = {}, query = '', context = {}, lim
   for (const item of results) {
     sourceCoverage[item.source] = (sourceCoverage[item.source] || 0) + 1;
   }
+  const qualityCounts = {};
+  for (const item of results) {
+    const quality = item.evidenceQuality || 'usable';
+    qualityCounts[quality] = (qualityCounts[quality] || 0) + 1;
+  }
+  const rejectedResultCount = Number(payload.rejectedResultCount || 0) || 0;
   return {
     ...payload,
     count: results.length,
@@ -63,6 +71,17 @@ function mergeImageSearchIntoPayload(payload = {}, query = '', context = {}, lim
       ...mergedImages.map((item) => `[image] ${item.preview}`).slice(0, 3)
     ])).slice(0, 5),
     sourceCoverage,
+    rejectedResultCount,
+    qualitySummary: {
+      ...(payload.qualitySummary || {}),
+      hasUsableEvidence: results.some((item) => item.evidenceQuality === 'strong' || item.evidenceQuality === 'usable'),
+      topResultQuality: results[0]?.evidenceQuality || payload.qualitySummary?.topResultQuality || '',
+      counts: {
+        ...(payload.qualitySummary?.counts || {}),
+        ...qualityCounts
+      },
+      rejectedResultCount
+    },
     candidateCounts: {
       ...(payload.candidateCounts || {}),
       image: (Number(payload.candidateCounts?.image || 0) || 0) + imageResults.length

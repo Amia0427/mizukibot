@@ -54,7 +54,8 @@ function isRecentPersonalActivityRecallQuery(text = '') {
     new RegExp(`${recent}.{0,8}${actor}.{0,8}${objectQuestion}${objectNoun}.{0,8}${activity}`, 'i'),
     new RegExp(`${actor}.{0,8}${recent}.{0,8}${objectQuestion}${objectNoun}.{0,8}${activity}`, 'i'),
     /(?:我|我们|俺|咱).{0,8}(?:打过|打了|玩过|玩了|听过|听了|看过|看了|刷过|刷了|做过|做了|去过|发过|发了|提到过|说过|聊过|买过|买了|吃过|吃了|喝过|喝了|练过|练了|测过|测了|试过|试了).{0,10}(?:哪些|哪几|哪几个|哪几张|哪几首|哪首|什么|啥)(?:歌|曲|谱|图|图片|照片|东西|内容|题|游戏|本|活动|记录)?/i,
-    /(?:我|我们|俺|咱).{0,8}(?:哪些|哪几|哪几个|哪几张|哪几首|哪首|什么|啥)(?:歌|曲|谱|图|图片|照片|东西|内容|题|游戏|本|活动|记录)?.{0,10}(?:打过|打了|玩过|玩了|听过|听了|看过|看了|刷过|刷了|做过|做了|去过|发过|发了|提到过|说过|聊过|买过|买了|吃过|吃了|喝过|喝了|练过|练了|测过|测了|试过|试了)/i
+    /(?:我|我们|俺|咱).{0,8}(?:哪些|哪几|哪几个|哪几张|哪几首|哪首|什么|啥)(?:歌|曲|谱|图|图片|照片|东西|内容|题|游戏|本|活动|记录)?.{0,10}(?:打过|打了|玩过|玩了|听过|听了|看过|看了|刷过|刷了|做过|做了|去过|发过|发了|提到过|说过|聊过|买过|买了|吃过|吃了|喝过|喝了|练过|练了|测过|测了|试过|试了)/i,
+    /(?:哪些|哪几|哪几个|哪几张|哪几首|哪首|什么|啥)(?:歌|曲|谱|图|图片|照片|东西|内容|题|游戏|本|活动|记录)?.{0,10}(?:我|我们|俺|咱).{0,8}(?:打过|打了|玩过|玩了|听过|听了|看过|看了|刷过|刷了|做过|做了|去过|发过|发了|提到过|说过|聊过|买过|买了|吃过|吃了|喝过|喝了|练过|练了|测过|测了|试过|试了)/i
   ];
   return patterns.some((pattern) => pattern.test(q));
 }
@@ -63,17 +64,37 @@ function isRecentRecallQuery(text = '') {
   return isConversationRecapQuery(text) || isRecentPersonalActivityRecallQuery(text);
 }
 
+function isExternalFreshnessQuery(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q) return false;
+  return /(?:今天天气|今天.{0,8}(天气|气温|下雨|温度|股价|股票|行情|新闻|日期|星期|几点)|现在几点|当前时间|北京时间|当地时间|today.{0,12}(weather|temperature|stock|news|date|time)|(?:search|look up|find|google|latest|news|official|docs?|documentation|官网|查一下|搜索|最新|新闻|实时|当前))/i.test(q);
+}
+
+function isSubjectiveOpinionOnlyQuery(text = '') {
+  const q = sanitizeText(text);
+  if (!q) return false;
+  return /^(?:你觉得|你认为|你喜不喜欢|你喜歡|你怎么看|觉得.*好听吗|觉得.*怎么样|what do you think|how do you feel)/i.test(q);
+}
+
+function isSelfContainedPlanLikeQuery(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q) return false;
+  if (/(继续|接着|接上|上次|之前|以前|刚才|刚刚|resume|continue|previous|earlier|last time)/i.test(q)) return false;
+  return /^(?:plan|make a plan|create a plan|draft a|write a|帮我)?\s*(?:a\s+)?(?:study|learning|work|project|roadmap|plan|todo|schedule|方案|计划|规划|路线图|待办)/i.test(q)
+    || /(?:plan a|roadmap|study plan|学习计划|学习路线|规划一下|制定.*计划)/i.test(q);
+}
+
 function classifyRecallFacet(question = '') {
   const q = sanitizeText(question).toLowerCase();
   if (!q) return 'default_continuity';
   if (isRecentRecallQuery(q)) return 'recent_continuity';
   if (/(where did we leave off|what were we(?: just)? talking about|what were we doing|what was the thing from before|from before|earlier|previously|last time|continuity|recent|上次|刚才|刚刚|聊到哪|做到哪|接上)/i.test(q)) return 'recent_continuity';
   if (/(continue|continue with|resume|pick back up|next step|next steps|what should we do next|plan|task|todo|roadmap|继续|接着|接上|计划|任务|待办|推进)/i.test(q)) return 'task_or_plan';
-  if (/(喜欢|不喜欢|偏好|爱好|口味|习惯|风格|like|likes|prefer|preference|favorite|favourite|dislike|hobby)/i.test(q)) return 'preference';
+  if (/(喜欢|不喜欢|讨厌|偏好|爱好|口味|习惯|风格|like|likes|prefer|preference|favorite|favourite|dislike|hobby)/i.test(q)) return 'preference';
   if (/(我是谁|身份|设定|画像|人设|总结|印象|identity|who am i|profile|summary|impression)/i.test(q)) return 'identity';
   if (/(关系|相处|熟悉|朋友|friend|relationship|stage)/i.test(q)) return 'relationship';
   if (/(群|群里|频道|channel|group|大家|上下文|群友|群内)/i.test(q)) return 'group_context';
-  if (/(回想|想起来|记得什么|都记得什么|全部记忆|anything|all memory|broad recall)/i.test(q)) return 'broad_recall';
+  if (/(回想|想起来|记得什么|都记得什么|都记得我什么|记得我什么|全部记忆|anything|all memory|broad recall)/i.test(q)) return 'broad_recall';
   return 'default_continuity';
 }
 
@@ -147,26 +168,77 @@ function isMemoryContinuationQuestion(text = '') {
   }
   if (isRecentRecallQuery(normalized)) return true;
   const facet = classifyRecallFacet(normalized);
-  return facet !== 'group_context' || /(继续|上次|最近群里|刚刚|刚才|context|上下文)/i.test(normalized);
+  if (facet === 'task_or_plan') return true;
+  if (facet === 'recent_continuity') return true;
+  if (facet === 'group_context') return /(继续|上次|最近群里|刚刚|刚才|context|上下文|之前|以前)/i.test(normalized);
+  return /(继续|接着|接上|上次|刚刚|刚才|之前|以前|聊到哪|做到哪|where did we leave off|last time|earlier|previously|resume|pick back up)/i.test(normalized);
+}
+
+function classifyMemoryNeed(text = '', routeContext = {}) {
+  const cleanText = sanitizeText(text || routeContext?.cleanText || routeContext?.rawText || '');
+  if (!cleanText) {
+    return { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'empty' };
+  }
+  if (isConversationalNoop(cleanText)) {
+    return { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'conversational_noop' };
+  }
+  if (String(routeContext?.facets?.domain || '').trim() === 'time') {
+    return { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'time_domain' };
+  }
+  const sourceScope = String(routeContext?.facets?.sourceScope || '').trim().toLowerCase();
+  const freshness = String(routeContext?.facets?.freshness || '').trim().toLowerCase();
+  const chatMode = String(routeContext?.meta?.chatMode || '').trim().toLowerCase();
+  if (chatMode === 'image_qa' || chatMode === 'image_summary') {
+    return { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'image_chat' };
+  }
+  if (freshness === 'latest' || sourceScope === 'web' || sourceScope === 'live' || isExternalFreshnessQuery(cleanText)) {
+    return { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'fresh_external_query' };
+  }
+  if (isSubjectiveOpinionOnlyQuery(cleanText)) {
+    return { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'subjective_opinion_only' };
+  }
+  if (isSelfContainedPlanLikeQuery(cleanText)) {
+    return { needsMemory: false, facet: 'task_or_plan', confidence: 0, reason: 'self_contained_plan' };
+  }
+  if (/\b(?:notebook|notes?|docs?|documents?)\b/i.test(cleanText) && !/(记得|记不记得|还记得|之前|以前|上次|刚才|刚刚|remember|recall|previous|earlier|before|last time|history)/i.test(cleanText)) {
+    return { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'notebook_document_lookup' };
+  }
+  if (Boolean(routeContext?.intent?.needsMemory)) {
+    const facet = classifyRecallFacet(cleanText);
+    return { needsMemory: true, facet, confidence: 0.95, reason: `route_needs_memory:${facet}` };
+  }
+
+  const q = cleanText.toLowerCase();
+  const explicitRecall = /(?:记得|记不记得|还记得|想得起来|回忆|回想|之前|以前|上次|刚才|刚刚|最近|前几天|昨天|履历|历史|记录|日志|remember|recall|previous|earlier|before|last time|history)/i.test(q);
+  const personalSubject = /(?:我|我们|俺|咱|我的|我们的|me|my|we|our)/i.test(q);
+  const personalFactQuestion = personalSubject && /(?:喜欢|爱好|讨厌|偏好|是谁|身份|画像|人设|性格|目标|关系|熟悉|是不是|有没有|会不会|要不要|说过|提过|聊过|发过|打过|玩过|看过|听过|做过|去过|买过|吃过|喝过|练过|测过|试过|哪些|什么|啥|哪几)/i.test(q);
+  const groupHistory = /(?:群里|群内|大家|群友|这个群).{0,16}(?:之前|以前|上次|刚才|最近|说过|聊过|怎么说|记录|日志|历史|叫|称呼)/i.test(q);
+  const continuity = isMemoryContinuationQuestion(cleanText);
+  if (!explicitRecall && !personalFactQuestion && !groupHistory && !continuity) {
+    return { needsMemory: false, facet: classifyRecallFacet(cleanText), confidence: 0.12, reason: 'no_memory_dependency_signal' };
+  }
+
+  const facet = groupHistory ? 'group_context' : classifyRecallFacet(cleanText);
+  const reason = groupHistory
+    ? 'group_history_recall'
+    : explicitRecall
+      ? `explicit_recall:${facet}`
+      : personalFactQuestion
+        ? `personal_history_question:${facet}`
+        : `continuity_question:${facet}`;
+  const confidence = explicitRecall || groupHistory ? 0.9 : (personalFactQuestion ? 0.82 : 0.72);
+  return { needsMemory: true, facet, confidence, reason };
 }
 
 function shouldPrioritizeMemoryProbe(route = {}) {
   const cleanText = sanitizeText(route?.cleanText || route?.rawText || '');
   if (!cleanText) return false;
-  if (isConversationalNoop(cleanText)) return false;
-  if (String(route?.facets?.domain || '').trim() === 'time') return false;
-  const sourceScope = String(route?.facets?.sourceScope || '').trim().toLowerCase();
-  const freshness = String(route?.facets?.freshness || '').trim().toLowerCase();
-  const chatMode = String(route?.meta?.chatMode || '').trim().toLowerCase();
-  if (chatMode === 'image_qa' || chatMode === 'image_summary') return false;
-  if (freshness === 'latest' || sourceScope === 'web' || sourceScope === 'live') return false;
-  if (/^(search|look up|find|google|latest|news|official|docs?|documentation|官网|查一下|搜索)/i.test(cleanText)) return false;
-  if (Boolean(route?.intent?.needsMemory)) return true;
-  return isMemoryContinuationQuestion(cleanText);
+  return classifyMemoryNeed(cleanText, route).needsMemory;
 }
 
 module.exports = {
   RECALL_FACETS,
+  classifyMemoryNeed,
   classifyRecallFacet,
   getFacetPerSourceLimit,
   getFacetSourceWeights,

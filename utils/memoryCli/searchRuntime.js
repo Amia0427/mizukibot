@@ -33,13 +33,38 @@ const {
   trimSearchResultsForBudget
 } = require('./searchSupport');
 
+function attachDefaultQuality(payload = {}) {
+  const results = Array.isArray(payload.results) ? payload.results : [];
+  const nextResults = results.map((item) => ({
+    ...item,
+    evidenceQuality: item.evidenceQuality || 'usable',
+    qualityReasons: Array.isArray(item.qualityReasons) ? item.qualityReasons : [`legacy_source:${item.source || 'unknown'}`]
+  }));
+  const counts = {};
+  for (const item of nextResults) {
+    const quality = item.evidenceQuality || 'usable';
+    counts[quality] = (counts[quality] || 0) + 1;
+  }
+  return {
+    ...payload,
+    results: nextResults,
+    rejectedResultCount: Number(payload.rejectedResultCount || 0) || 0,
+    qualitySummary: payload.qualitySummary || {
+      hasUsableEvidence: nextResults.some((item) => item.evidenceQuality === 'strong' || item.evidenceQuality === 'usable'),
+      topResultQuality: nextResults[0]?.evidenceQuality || '',
+      counts,
+      rejectedResultCount: Number(payload.rejectedResultCount || 0) || 0
+    }
+  };
+}
+
 function searchUnifiedMemory(query, options = {}, context = {}) {
   const userId = sanitizeText(context.userId);
   const searchOptions = buildUnifiedSearchOptions(userId, query, options, context);
   const { source, queryFacet, limit } = searchOptions;
 
   if (!userId) {
-    return {
+    return attachDefaultQuality({
       results: [],
       digest: [],
       sourceCoverage: {},
@@ -49,7 +74,7 @@ function searchUnifiedMemory(query, options = {}, context = {}) {
       outputChars: 0,
       recentUsed: false,
       droppedResultCount: 0
-    };
+    });
   }
 
   const include = (name) => source === 'all' || source === name;
@@ -111,7 +136,7 @@ function searchUnifiedMemory(query, options = {}, context = {}) {
     sourceCoverage[item.source] = (sourceCoverage[item.source] || 0) + 1;
   }
 
-  return {
+  return attachDefaultQuality({
     results: packed.results,
     digest: buildRecallHints(selected),
     sourceCoverage,
@@ -131,7 +156,7 @@ function searchUnifiedMemory(query, options = {}, context = {}) {
     outputChars: packed.outputChars,
     recentUsed: Boolean(sourceCoverage.recent),
     droppedResultCount: packed.droppedResultCount
-  };
+  });
 }
 
 async function runLegacyMemorySearch(parsed, prepared, context = {}) {
@@ -154,7 +179,7 @@ async function runLegacyMemorySearch(parsed, prepared, context = {}) {
     ? (localKnowledge.bySource?.notebook_doc || [])
     : [];
   if (parsed.source === 'notebook') {
-    payload = {
+    payload = attachDefaultQuality({
       ok: true,
       command: 'search',
       rawCommandText: prepared.rawCommandText,
@@ -181,12 +206,12 @@ async function runLegacyMemorySearch(parsed, prepared, context = {}) {
       outputChars: notebookOnlyResults.reduce((sum, item) => sum + String(item.preview || '').length, 0),
       recentUsed: false,
       droppedResultCount: 0
-    };
+    });
   } else if (parsed.source === 'journal') {
     const journalOnly = (localKnowledge.bySource?.journal_entry || [])
       .concat(localKnowledge.bySource?.journal_continuity || [])
       .slice(0, parsed.limit);
-    payload = {
+    payload = attachDefaultQuality({
       ok: true,
       command: 'search',
       rawCommandText: prepared.rawCommandText,
@@ -213,7 +238,7 @@ async function runLegacyMemorySearch(parsed, prepared, context = {}) {
       outputChars: journalOnly.reduce((sum, item) => sum + String(item.preview || '').length, 0),
       recentUsed: false,
       droppedResultCount: 0
-    };
+    });
   }
 
   if (payload) return payload;
@@ -258,7 +283,7 @@ async function runLegacyMemorySearch(parsed, prepared, context = {}) {
         scoreParts: item.scoreParts && typeof item.scoreParts === 'object' ? item.scoreParts : {},
         updatedAt: item.updatedAt || 0
       }));
-      return {
+      return attachDefaultQuality({
         results,
         digest: [
           ...(result.persona?.summary
@@ -282,13 +307,13 @@ async function runLegacyMemorySearch(parsed, prepared, context = {}) {
         outputChars: results.reduce((sum, item) => sum + String(item.preview || '').length, 0),
         recentUsed: Boolean((result.sourceCoverage || {}).recent),
         droppedResultCount: 0
-      };
+      });
     })()
     : searchUnifiedMemory(parsed.query, {
       source: parsed.source,
       limit: parsed.limit
     }, context);
-  return {
+  return attachDefaultQuality({
     ok: true,
     command: 'search',
     rawCommandText: prepared.rawCommandText,
@@ -305,8 +330,10 @@ async function runLegacyMemorySearch(parsed, prepared, context = {}) {
     fallbackUsed: search.fallbackUsed,
     outputChars: search.outputChars,
     recentUsed: search.recentUsed,
-    droppedResultCount: search.droppedResultCount
-  };
+    droppedResultCount: search.droppedResultCount,
+    rejectedResultCount: search.rejectedResultCount,
+    qualitySummary: search.qualitySummary
+  });
 }
 
 module.exports = {

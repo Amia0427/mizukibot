@@ -82,6 +82,9 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
     maxRecentRecallMisses: null,
     maxEmptyResultRate: null,
     maxNoVisibleCandidateRate: null,
+    maxWeakTopHitRate: null,
+    maxProfileOnlyHitRate: null,
+    maxNoRetrievalRate: null,
     regressionTolerance: null,
     help: false,
     unknown: []
@@ -151,6 +154,15 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
       index += 1;
     } else if (item === '--max-no-visible-candidate-rate') {
       args.maxNoVisibleCandidateRate = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--max-weak-top-hit-rate') {
+      args.maxWeakTopHitRate = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--max-profile-only-hit-rate') {
+      args.maxProfileOnlyHitRate = Number(argv[index + 1]);
+      index += 1;
+    } else if (item === '--max-no-retrieval-rate') {
+      args.maxNoRetrievalRate = Number(argv[index + 1]);
       index += 1;
     } else if (item === '--regression-tolerance') {
       args.regressionTolerance = Number(argv[index + 1]);
@@ -294,6 +306,9 @@ function summarizeRecall(result = {}, args = {}) {
     coverageReadyRatio: result.coverageReadyRatio ?? null,
     emptyResultRate: result.emptyResultRate ?? null,
     noVisibleCandidateRate: result.noVisibleCandidateRate ?? null,
+    weakTopHitRate: result.weakTopHitRate ?? null,
+    profileOnlyHitRate: result.profileOnlyHitRate ?? null,
+    noRetrievalRate: result.noRetrievalRate ?? null,
     bySource: result.bySource || {},
     byFacet: result.byFacet || {},
     gate: result.gate || null
@@ -447,6 +462,15 @@ function buildRecallGateOptions(args = {}) {
   }
   if (args.maxNoVisibleCandidateRate !== null && Number.isFinite(Number(args.maxNoVisibleCandidateRate))) {
     options.maxNoVisibleCandidateRate = Number(args.maxNoVisibleCandidateRate);
+  }
+  if (args.maxWeakTopHitRate !== null && Number.isFinite(Number(args.maxWeakTopHitRate))) {
+    options.maxWeakTopHitRate = Number(args.maxWeakTopHitRate);
+  }
+  if (args.maxProfileOnlyHitRate !== null && Number.isFinite(Number(args.maxProfileOnlyHitRate))) {
+    options.maxProfileOnlyHitRate = Number(args.maxProfileOnlyHitRate);
+  }
+  if (args.maxNoRetrievalRate !== null && Number.isFinite(Number(args.maxNoRetrievalRate))) {
+    options.maxNoRetrievalRate = Number(args.maxNoRetrievalRate);
   }
   if (args.regressionTolerance !== null && Number.isFinite(Number(args.regressionTolerance))) {
     options.regressionTolerance = Number(args.regressionTolerance);

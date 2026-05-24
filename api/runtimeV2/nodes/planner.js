@@ -85,6 +85,9 @@ function createPlannerNode(deps = {}) {
         stepCount: normalizeArray(translated.steps).length,
         mode: state.execution.mode,
         plannerSource,
+        plannerAllowedTools: normalizeArray(translated.allowedToolNames || request.routeMeta?.toolPlanner?.allowedToolNames || request.routeMeta?.directChatPlanner?.allowedToolNames),
+        routeAllowedTools: normalizeArray(request.routeMeta?.allowedTools),
+        memoryNeedReason: request.routeMeta?.meta?.needsMemoryReason || request.routeMeta?.needsMemoryReason || '',
         graphPlannerModelCalls
       }),
       createEvent('node_complete', { node: 'planner' })

@@ -24,7 +24,8 @@ const {
   normalizeResponseIntent,
   normalizeText,
   normalizeToolIntent,
-  normalizeToolNames
+  normalizeToolNames,
+  shouldPrioritizeMemoryProbe
 } = require('./runtime-core.chunk');
 const {
   buildExecutionStepGraph,
@@ -368,7 +369,7 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
       normalizedAllowedToolNames = [];
     }
   }
-  const taskShape = TASK_SHAPES.includes(normalizeText(rawDecision?.taskShape))
+  let taskShape = TASK_SHAPES.includes(normalizeText(rawDecision?.taskShape))
     ? normalizeText(rawDecision.taskShape)
     : fallback.taskShape;
   const rawSteps = normalizeArray(rawDecision?.steps);
@@ -445,6 +446,15 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     return false;
   };
   const canonicalApplied = maybeApplyCanonicalNormalization();
+  if (
+    normalizedAllowedToolNames.includes('memory_cli')
+    && shouldPrioritizeMemoryProbe(route)
+    && taskShape === 'fast_reply'
+  ) {
+    taskShape = 'tool_augmented_reply';
+    normalizedByRule = true;
+    normalizationReason = 'force memory recall tool plan';
+  }
   if (isCompanionPlannerMode(options) && !isCompanionPlannerToolUseAllowed(route, normalizedAllowedToolNames, options)) {
     toolGateReason = normalizedAllowedToolNames.length > 0
       ? resolveCompanionPlannerToolGateReason(route, normalizedAllowedToolNames, options)
