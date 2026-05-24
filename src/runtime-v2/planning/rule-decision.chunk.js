@@ -45,6 +45,7 @@ const {
 } = require('./tool-selection.chunk');
 
 const DYNAMIC_PROMPT_BLOCK_SIGNAL_KEYS = Object.freeze({
+  roleplay_runtime_context: 'roleplayRuntimeContext',
   affinity_level: 'affinityState',
   affinity_points: 'affinityState',
   persona_memory: 'personaMemory',
@@ -68,6 +69,7 @@ const DYNAMIC_PROMPT_BLOCK_SIGNAL_KEYS = Object.freeze({
 });
 
 const DYNAMIC_PROMPT_BLOCK_SELECTION_POLICIES = Object.freeze({
+  roleplay_runtime_context: 'must_use_when_available',
   affinity_level: 'include_if_relevant',
   affinity_points: 'include_if_relevant',
   persona_memory: 'include_if_relevant',
@@ -135,6 +137,7 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
   const heuristicDynamicPromptPlan = buildHeuristicDynamicPromptPlan({
     continuitySignals: options.continuitySignals,
     directedContext: options.directedContext,
+    hasRoleplayRuntimeContext: availableContextSignals.roleplayRuntimeContext,
     hasAffinityState: availableContextSignals.affinityState,
     hasShortTermContinuity: availableContextSignals.shortTermContinuity,
     hasRetrievedMemory: availableContextSignals.retrievedMemory,
@@ -400,6 +403,7 @@ function buildAvailableContextSignals(route = {}, options = {}) {
       : Boolean(fallback)
   );
   return {
+    roleplayRuntimeContext: signal('roleplayRuntimeContext', true),
     affinityState: signal('affinityState', (
       hasMeaningfulObject(memoryContext.affinityState)
       || hasMeaningfulText(options?.userInfo?.level)

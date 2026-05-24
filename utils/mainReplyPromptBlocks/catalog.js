@@ -9,6 +9,15 @@ function normalizeArray(value) {
 
 const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
   {
+    blockId: 'roleplay_runtime_context',
+    label: 'Roleplay Runtime Context',
+    lane: 'dynamic_context',
+    category: 'roleplay_context',
+    defaultPolicy: 'must_use_when_available',
+    useWhen: 'Always use for main roleplay replies so Mizuki can anchor the current time, scene, chat mode, visible user state, and output rhythm.',
+    avoidWhen: 'Skip only outside main roleplay replies or when no current-turn runtime context exists.'
+  },
+  {
     blockId: 'affinity_level',
     label: 'Affinity Level',
     lane: 'dynamic_context',
@@ -200,6 +209,12 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
 ]);
 
 const DYNAMIC_CONTEXT_BLOCK_SPEC_OVERRIDES = Object.freeze({
+  roleplay_runtime_context: {
+    criticality: 'critical',
+    emptyPolicy: 'reject_optional_empty',
+    mustUseWhen: 'main roleplay reply has current-turn runtime context',
+    budget: { configKey: '', hardCapTokens: 420 }
+  },
   affinity_level: {
     criticality: 'optional',
     emptyPolicy: 'reject_optional_empty',

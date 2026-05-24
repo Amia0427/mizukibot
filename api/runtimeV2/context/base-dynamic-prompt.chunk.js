@@ -188,6 +188,30 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       systemPrompt: config.SYSTEM_PROMPT
     }).filter(Boolean);
   promptBlocks.push(...stablePromptBlocks);
+  const roleplayRuntimeContextText = buildRoleplayRuntimeContextPromptSnippet({
+    userInfo,
+    userId,
+    question,
+    routeMeta,
+    routePolicyKey,
+    topRouteType,
+    surface: promptMaterials?.surface,
+    memoryContext,
+    sharedShortTermContext,
+    continuitySignals: options?.continuitySignals,
+    options
+  });
+  promptBlocks.push(createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {
+    stage: 'main',
+    priority: 205,
+    authority: 'runtime_context',
+    kind: 'roleplay_runtime_context',
+    source: 'runtime',
+    lane: 'dynamic_context',
+    meta: {
+      optional: true
+    }
+  }));
   promptBlocks.push(
     ...personaMemoryPrompt.systemMessages
       .map((message, index) => createPromptBlock(
@@ -447,6 +471,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     directedContext: options?.routeMeta?.directedContext,
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
+    hasRoleplayRuntimeContext: Boolean(roleplayRuntimeContextText),
     hasShortTermContinuity: Boolean(shortTermContinuityText),
     hasMemoryRecallPolicy: Boolean(memoryRecallPolicyText),
     hasRetrievedMemory: Boolean(memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt),
@@ -490,7 +515,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     phase: item.phase,
     slot: item.slot
   })));
-  const baseRuntimeAddedIds = [];
+  const baseRuntimeAddedIds = ['roleplay_runtime_context'];
   if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
     baseRuntimeAddedIds.push('persona_module:scene_group_insert');
   }
@@ -542,6 +567,19 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     const compactPromptBlocks = buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT
     }).concat(
+      [
+        createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {
+          stage: 'main',
+          priority: 205,
+          authority: 'runtime_context',
+          kind: 'roleplay_runtime_context',
+          source: 'runtime',
+          lane: 'dynamic_context',
+          meta: {
+            optional: true
+          }
+        })
+      ],
       ...personaMemoryPrompt.systemMessages.map((message, index) => createPromptBlock(
         `persona_memory_compact_${index + 1}`,
         `Persona Memory Compact ${index + 1}`,

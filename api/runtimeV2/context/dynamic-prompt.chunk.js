@@ -222,6 +222,33 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const optionalBlocks = [];
   const extraBlocks = [];
   const contextStatsInstruction = 'If the user asks about current context usage, remaining context, token usage, or whether the chat is close to the context limit, you may call get_context_stats.';
+  const roleplayRuntimeContextText = buildRoleplayRuntimeContextPromptSnippet({
+    userInfo,
+    userId,
+    question,
+    routeMeta,
+    routePolicyKey,
+    topRouteType,
+    surface: promptMaterials?.surface,
+    memoryContext: promptMaterials?.memoryContext || fallbackMemoryContext,
+    sharedShortTermContext,
+    continuitySignals: options?.continuitySignals,
+    options
+  });
+
+  if (roleplayRuntimeContextText) {
+    extraBlocks.push(createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {
+      stage: 'main',
+      priority: 205,
+      authority: 'runtime_context',
+      kind: 'roleplay_runtime_context',
+      source: 'runtime',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true
+      }
+    }));
+  }
 
   if (shouldInjectContextStatsInstruction) {
     extraBlocks.push(createPromptBlock('context_stats_instruction', 'Context Stats Instruction', contextStatsInstruction, {
@@ -455,6 +482,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     continuitySignals: options?.continuitySignals,
     directedContext: options?.routeMeta?.directedContext,
     personaModules: dynamicPromptPlan.personaModules,
+    hasRoleplayRuntimeContext: Boolean(roleplayRuntimeContextText),
     hasAffinityState: true,
     hasShortTermContinuity: combinedDynamicBlocks.some((item) => item?.id === 'short_term_continuity'),
     hasMemoryRecallPolicy: combinedDynamicBlocks.some((item) => item?.id === 'memory_recall_policy' || normalizeText(item?.meta?.blockId) === 'memory_recall_policy')
@@ -476,7 +504,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   });
   const plannerProvidedDynamicPlan = dynamicPromptPlan.plannerProvided === true;
   const shouldUseHeuristicDynamicPlan = !plannerProvidedDynamicPlan;
-  const runtimeAddedIds = [];
+  const runtimeAddedIds = ['roleplay_runtime_context'];
   if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
     runtimeAddedIds.push('group_direct_chat_style_guard', 'persona_module:scene_group_insert');
   }
