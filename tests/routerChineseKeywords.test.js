@@ -102,6 +102,20 @@ assert.strictEqual(todaySongRoute.intent.needsMemory, true);
 assert.deepStrictEqual(todaySongRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
 assert.strictEqual(todaySongRoute.meta.toolIntent, 'maybe_tools');
 
+const playedSongsRoute = detectIntent({
+  rawText: '宝我打过哪些歌',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+
+assert.strictEqual(playedSongsRoute.topRouteType, 'direct_chat');
+assert.strictEqual(playedSongsRoute.facets.sourceScope, 'notebook');
+assert.strictEqual(playedSongsRoute.facets.freshness, 'unknown');
+assert.strictEqual(playedSongsRoute.intent.needsMemory, true);
+assert.deepStrictEqual(playedSongsRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
+assert.strictEqual(playedSongsRoute.meta.toolIntent, 'maybe_tools');
+
 const textOnlyPlanRoute = detectIntent({
   rawText: 'plan a study roadmap',
   botQQ: '123456',

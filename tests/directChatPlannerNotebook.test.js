@@ -63,6 +63,32 @@ module.exports = (async () => {
   assert.strictEqual(recallExecution.allowTools, true);
   assert.ok(recallExecution.allowedTools.includes('memory_cli'));
 
+  const playedSongsRoute = detectIntent({
+    rawText: '宝我打过哪些歌',
+    botQQ: '123456',
+    userId: 'u1',
+    chatType: 'group'
+  });
+
+  assert.strictEqual(playedSongsRoute.facets.sourceScope, 'notebook');
+  assert.strictEqual(playedSongsRoute.intent.needsMemory, true);
+  assert.ok(playedSongsRoute.meta.allowedTools.includes('memory_cli'));
+
+  const playedSongsDecision = await planDirectChat(playedSongsRoute, { userId: 'u1' });
+  assert.strictEqual(playedSongsDecision.shouldUseTools, true);
+  assert.deepStrictEqual(playedSongsDecision.allowedToolNames, ['memory_cli']);
+  assert.strictEqual(playedSongsDecision.executionPlan.mode, 'tool_plan');
+  assert.ok(playedSongsDecision.executionPlan.steps.some((step) => step.action === 'memory_cli'));
+  const playedSongsExecution = resolveRouteExecution({
+    ...playedSongsRoute,
+    meta: {
+      ...playedSongsRoute.meta,
+      toolPlanner: playedSongsDecision
+    }
+  });
+  assert.strictEqual(playedSongsExecution.allowTools, true);
+  assert.ok(playedSongsExecution.allowedTools.includes('memory_cli'));
+
   console.log('directChatPlannerNotebook.test.js passed');
 })();
 

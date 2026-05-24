@@ -107,6 +107,15 @@ module.exports = (async () => {
   assert.ok(implicitImageSearch.results.some((item) => item.source === 'image' && item.id === 'score_blank_img'));
   assert.ok(implicitImageSearch.sourceCoverage.image >= 1);
 
+  const playedSongsImageSearch = await runMemoryCli('mem search --query "宝我打过哪些歌" --limit 5', {
+    userId: 'u_img',
+    groupId: 'g_img',
+    now: '2026-05-20T00:16:00+08:00'
+  });
+  assert.strictEqual(playedSongsImageSearch.ok, true);
+  assert.ok(playedSongsImageSearch.results.some((item) => item.source === 'image' && item.id === 'score_blank_img'));
+  assert.ok(playedSongsImageSearch.sourceCoverage.image >= 1);
+
   console.log('memoryCliImageRecall.test.js passed');
 })().catch((error) => {
   console.error(error);

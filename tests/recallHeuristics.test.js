@@ -32,6 +32,14 @@ module.exports = (() => {
   assert.strictEqual(isRecentPersonalActivityRecallQuery('我今天听了什么歌'), true);
   assert.strictEqual(isRecentPersonalActivityRecallQuery('今天我玩了啥'), true);
   assert.strictEqual(isRecentPersonalActivityRecallQuery('刚刚我发了哪几张图'), true);
+  assert.strictEqual(isRecentPersonalActivityRecallQuery('宝我打过哪些歌'), true);
+  assert.strictEqual(isRecentRecallQuery('宝我打过哪些歌'), true);
+  assert.strictEqual(shouldPrioritizeMemoryProbe({
+    cleanText: '宝我打过哪些歌',
+    facets: {},
+    intent: {},
+    meta: { chatMode: 'chat' }
+  }), true);
   assert.strictEqual(isRecentRecallQuery('宝我今天打了哪些歌'), true);
   assert.strictEqual(isRecentRecallQuery('今天天气怎么样'), false);
   assert.strictEqual(isRecentPersonalActivityRecallQuery('今天股票怎么样'), false);
