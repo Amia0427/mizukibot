@@ -81,6 +81,7 @@
 - 2026-05-23 11:20 +08:00：Memory-Plus 召回治理第三批完成；新增 `tests/memoryV3GenericConflictResolution.test.js`、`tests/memoryRecallPolicyPromptBlock.test.js`、`tests/memoryV3RecentRecallFastPath.test.js`，覆盖通用冲突 loser 隐藏、主 prompt recall policy 注入、刚才/近期 fast path。
 - 2026-05-23 11:25 +08:00：Memory-Plus 召回门禁第四批完成；新增 gate 指标和 context preview trace 摘要，相关覆盖在 `tests/memoryRecallAndLanceDbGates.test.js`、`tests/memoryRecallAutoGoldEval.test.js`、`tests/memoryOpsDiagnosticEntry.test.js`、`tests/mainReplyContextPreview.test.js`。
 - 2026-05-24 17:03 +08:00：排查“宝我打过哪些歌”回复命中过期画像的问题，根因是泛化个人活动回忆未被 `isRecentPersonalActivityRecallQuery` 识别，路由 `allowedTools=[]`，主模型无法调用 `memory_cli`；已扩展“我打过/发过/玩过哪些...”识别，并让音游/打歌记录问题合并图片索引。
+- 2026-05-24 17:27 +08:00：记忆召回稳定性治理完成；`classifyMemoryNeed` 统一判定个人历史依赖，router/planner/continuity probe 共享同一记忆需求信号，`memory_cli` 搜索结果增加 `evidenceQuality/qualitySummary/rejectedResultCount`，召回门禁新增 weak-top/profile-only/no-retrieval 质量指标。
 
 ## 验收命令
 

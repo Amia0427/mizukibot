@@ -115,6 +115,53 @@ assert.strictEqual(playedSongsRoute.facets.freshness, 'unknown');
 assert.strictEqual(playedSongsRoute.intent.needsMemory, true);
 assert.deepStrictEqual(playedSongsRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
 assert.strictEqual(playedSongsRoute.meta.toolIntent, 'maybe_tools');
+assert.ok(playedSongsRoute.meta.needsMemoryReason);
+assert.strictEqual(playedSongsRoute.meta.recallFacet, 'recent_continuity');
+
+const preferenceRecallRoute = detectIntent({
+  rawText: '你记得我喜欢什么吗',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+assert.strictEqual(preferenceRecallRoute.facets.sourceScope, 'notebook');
+assert.strictEqual(preferenceRecallRoute.intent.needsMemory, true);
+assert.strictEqual(preferenceRecallRoute.meta.recallFacet, 'preference');
+assert.deepStrictEqual(preferenceRecallRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
+
+const identityRecallRoute = detectIntent({
+  rawText: '我之前说我是谁',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+assert.strictEqual(identityRecallRoute.intent.needsMemory, true);
+assert.strictEqual(identityRecallRoute.meta.recallFacet, 'identity');
+
+const groupRecallRoute = detectIntent({
+  rawText: '群里之前怎么说这个活动',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+assert.strictEqual(groupRecallRoute.intent.needsMemory, true);
+assert.strictEqual(groupRecallRoute.meta.recallFacet, 'group_context');
+
+const weatherRoute = detectIntent({
+  rawText: '今天天气怎么样',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+assert.notStrictEqual(weatherRoute.intent.needsMemory, true);
+
+const subjectiveRoute = detectIntent({
+  rawText: '你觉得这首歌怎么样',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+assert.notStrictEqual(subjectiveRoute.intent.needsMemory, true);
 
 const textOnlyPlanRoute = detectIntent({
   rawText: 'plan a study roadmap',

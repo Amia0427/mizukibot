@@ -1,5 +1,6 @@
 const assert = require('assert');
 const {
+  classifyMemoryNeed,
   classifyRecallFacet,
   isConversationRecapQuery,
   isRecentPersonalActivityRecallQuery,
@@ -10,6 +11,10 @@ const {
 
 module.exports = (() => {
   assert.strictEqual(isMemoryContinuationQuestion('你觉得这个名字好听吗'), false);
+  assert.strictEqual(classifyMemoryNeed('你觉得这首歌怎么样').needsMemory, false);
+  assert.strictEqual(classifyMemoryNeed('今天天气怎么样').needsMemory, false);
+  assert.strictEqual(classifyMemoryNeed('现在几点').needsMemory, false);
+  assert.strictEqual(classifyMemoryNeed('哈哈收到').needsMemory, false);
   assert.strictEqual(shouldPrioritizeMemoryProbe({
     cleanText: '你觉得这个名字好听吗',
     facets: {},
@@ -18,6 +23,10 @@ module.exports = (() => {
   }), false);
 
   assert.strictEqual(isMemoryContinuationQuestion('我们刚才聊到哪了'), true);
+  assert.strictEqual(classifyMemoryNeed('你记得我喜欢什么吗').facet, 'preference');
+  assert.strictEqual(classifyMemoryNeed('我之前说我是谁').facet, 'identity');
+  assert.strictEqual(classifyMemoryNeed('我上次在干嘛').facet, 'recent_continuity');
+  assert.strictEqual(classifyMemoryNeed('群里之前怎么说这个活动').facet, 'group_context');
   assert.strictEqual(shouldPrioritizeMemoryProbe({
     cleanText: '我们刚才聊到哪了',
     facets: {},

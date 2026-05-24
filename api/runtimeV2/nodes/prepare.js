@@ -950,7 +950,12 @@ function createPrepareNode(deps = {}) {
       }),
       createEvent('effectiveAllowedTools', {
         node: 'prepare',
-        allowedTools: executionAllowedTools
+        allowedTools: executionAllowedTools,
+        routeAllowedTools: normalizeArray(request.routeMeta?.allowedTools),
+        memoryNeedReason: request.routeMeta?.meta?.needsMemoryReason || request.routeMeta?.needsMemoryReason || '',
+        memoryToolGateReason: normalizeArray(executionAllowedTools).includes('memory_cli')
+          ? 'memory_cli_allowed'
+          : 'memory_cli_not_allowed'
       }),
       createEvent('latency_profile', {
         node: 'prepare',

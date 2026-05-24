@@ -20,6 +20,9 @@ function buildRecallEvalGate(result = {}, options = {}) {
   const recentRecallMisses = normalizeNumber(metricOf(result, 'recentRecallMisses'), 0);
   const emptyResultRate = metricOf(result, 'emptyResultRate');
   const noVisibleCandidateRate = metricOf(result, 'noVisibleCandidateRate');
+  const weakTopHitRate = metricOf(result, 'weakTopHitRate');
+  const profileOnlyHitRate = metricOf(result, 'profileOnlyHitRate');
+  const noRetrievalRate = metricOf(result, 'noRetrievalRate');
   const thresholds = {
     minJudgedCases: Math.max(0, Number(options.minJudgedCases ?? 10) || 0),
     minRecallAt8: Math.max(0, Math.min(1, Number(options.minRecallAt8 ?? 0.72) || 0)),
@@ -29,7 +32,10 @@ function buildRecallEvalGate(result = {}, options = {}) {
     maxCategoryMismatches: Math.max(0, Number(options.maxCategoryMismatches ?? 0) || 0),
     maxRecentRecallMisses: Math.max(0, Number(options.maxRecentRecallMisses ?? 0) || 0),
     maxEmptyResultRate: Math.max(0, Math.min(1, Number(options.maxEmptyResultRate ?? 0.12) || 0)),
-    maxNoVisibleCandidateRate: Math.max(0, Math.min(1, Number(options.maxNoVisibleCandidateRate ?? 0.2) || 0))
+    maxNoVisibleCandidateRate: Math.max(0, Math.min(1, Number(options.maxNoVisibleCandidateRate ?? 0.2) || 0)),
+    maxWeakTopHitRate: Math.max(0, Math.min(1, Number(options.maxWeakTopHitRate ?? 0.08) || 0)),
+    maxProfileOnlyHitRate: Math.max(0, Math.min(1, Number(options.maxProfileOnlyHitRate ?? 0.12) || 0)),
+    maxNoRetrievalRate: Math.max(0, Math.min(1, Number(options.maxNoRetrievalRate ?? 0.12) || 0))
   };
   const failures = [];
   if (judgedCases < thresholds.minJudgedCases) failures.push('insufficient_judged_cases');
@@ -41,6 +47,9 @@ function buildRecallEvalGate(result = {}, options = {}) {
   if (recentRecallMisses > thresholds.maxRecentRecallMisses) failures.push('recent_recall_miss_detected');
   if (emptyResultRate !== null && emptyResultRate !== undefined && normalizeNumber(emptyResultRate, 1) > thresholds.maxEmptyResultRate) failures.push('empty_result_rate_high');
   if (noVisibleCandidateRate !== null && noVisibleCandidateRate !== undefined && normalizeNumber(noVisibleCandidateRate, 1) > thresholds.maxNoVisibleCandidateRate) failures.push('no_visible_candidate_rate_high');
+  if (weakTopHitRate !== null && weakTopHitRate !== undefined && normalizeNumber(weakTopHitRate, 1) > thresholds.maxWeakTopHitRate) failures.push('weak_top_hit_rate_high');
+  if (profileOnlyHitRate !== null && profileOnlyHitRate !== undefined && normalizeNumber(profileOnlyHitRate, 1) > thresholds.maxProfileOnlyHitRate) failures.push('profile_only_hit_rate_high');
+  if (noRetrievalRate !== null && noRetrievalRate !== undefined && normalizeNumber(noRetrievalRate, 1) > thresholds.maxNoRetrievalRate) failures.push('no_retrieval_rate_high');
   return {
     ok: failures.length === 0,
     failures,
@@ -54,7 +63,10 @@ function buildRecallEvalGate(result = {}, options = {}) {
       categoryMismatches,
       recentRecallMisses,
       emptyResultRate: emptyResultRate ?? null,
-      noVisibleCandidateRate: noVisibleCandidateRate ?? null
+      noVisibleCandidateRate: noVisibleCandidateRate ?? null,
+      weakTopHitRate: weakTopHitRate ?? null,
+      profileOnlyHitRate: profileOnlyHitRate ?? null,
+      noRetrievalRate: noRetrievalRate ?? null
     }
   };
 }

@@ -444,6 +444,18 @@ function countRecentRecallMisses(results = [], testCase = {}) {
   return top.some((item) => expectedSources.has(normalizeSource(item.source))) ? 0 : 1;
 }
 
+function isWeakTopHit(results = []) {
+  const top = (Array.isArray(results) ? results : [])[0] || null;
+  if (!top) return false;
+  const quality = normalizeText(top.evidenceQuality || top.qualitySummary?.topResultQuality).toLowerCase();
+  return quality === 'weak' || quality === 'reject';
+}
+
+function isProfileOnlyHit(results = []) {
+  const list = Array.isArray(results) ? results : [];
+  return list.length > 0 && list.every((item) => normalizeSource(item.source) === 'profile');
+}
+
 function finalizeGroupedMetrics(metrics = {}) {
   const out = {};
   for (const [key, value] of Object.entries(metrics)) {
@@ -498,6 +510,9 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
   let promptChars = 0;
   let emptyResults = 0;
   let noVisibleCandidates = 0;
+  let noRetrieval = 0;
+  let weakTopHits = 0;
+  let profileOnlyHits = 0;
   let coverageReady = 0;
   let coverageTotal = 0;
   const details = [];
@@ -565,9 +580,12 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     facetMetric.cases += 1;
     if (results.length === 0) {
       emptyResults += 1;
+      noRetrieval += 1;
       sourceMetric.emptyResults += 1;
       facetMetric.emptyResults += 1;
     }
+    if (isWeakTopHit(results)) weakTopHits += 1;
+    if (isProfileOnlyHit(results)) profileOnlyHits += 1;
     const fallbackReason = normalizeText(result.stats?.lancedb?.fallbackReason || result.stats?.worldbook?.embedding?.fallbackReason || '');
     if (fallbackReason) incrementMetric(fallbackCounts, fallbackReason);
     if (/no_visible_candidates/.test(fallbackReason)) {
@@ -625,6 +643,9 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     lifecycleLeakage,
     categoryMismatches,
     recentRecallMisses,
+    weakTopHitRate: cases.length ? weakTopHits / cases.length : 0,
+    profileOnlyHitRate: cases.length ? profileOnlyHits / cases.length : 0,
+    noRetrievalRate: cases.length ? noRetrieval / cases.length : 0,
     emptyResultRate: cases.length ? emptyResults / cases.length : 0,
     noVisibleCandidateRate: cases.length ? noVisibleCandidates / cases.length : 0,
     coverageReady,

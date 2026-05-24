@@ -12,7 +12,10 @@ const {
 } = require('../routeSchema');
 const { isPrivilegedPrivateChatUser } = require('../../utils/privilegedPrivateChat');
 const { buildRouterStageSystemPrompt } = require('../../utils/stagePromptContracts');
-const { isRecentRecallQuery } = require('../../utils/recallHeuristics');
+const {
+  classifyMemoryNeed,
+  isRecentRecallQuery
+} = require('../../utils/recallHeuristics');
 const {
   detectExplicitBadFaithRequest,
   detectExplicitHarmfulRequest,
@@ -811,7 +814,16 @@ function extractDirectRouteSignals(cleanText = '', imageUrl = null) {
   const hasSafetyBoundary = detectSafetyBoundaryCaution(text);
   const isStrictTime = isStrictTimeDirectQuestion(text);
   const recapQuery = !hasImage && isRecentRecallQuery(text);
-  const needsMemory = !hasImage && (recapQuery || /(remember|recall|earlier|previous|before|history|timeline|log|logs|my notes|my notebook|notes about|我的资料|我的笔记|之前记录|之前记过|知识库|笔记|记得|记不记得|之前|昨天|前几天|回忆|记录|发过|图|图片)/i.test(text));
+  const memoryNeed = hasImage
+    ? { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'image_chat' }
+    : classifyMemoryNeed(text, {
+        cleanText: text,
+        facets: { sourceScope: 'none', freshness: 'unknown' },
+        intent: { needsMemory: false },
+        meta: { chatMode: 'text_chat' }
+      });
+  const notebookMemoryCue = !hasImage && /(?:my notes|my notebook|notes about|我的资料|我的笔记|之前记录|之前记过|知识库|笔记)/i.test(text);
+  const needsMemory = !hasImage && (memoryNeed.needsMemory || notebookMemoryCue);
   const needsFreshInfo = !isStrictTime && !hasImage && !recapQuery && (
     shouldUseToolBackedSummary(text)
     || /(search|look up|find|google|latest|news|official|docs?|documentation|source|link|links|web|website|weather|stock|stocks|ticker|shares|portfolio|fund|crypto|etf|搜索|查一下|查查|帮我查|网页|官网|链接|资料|文档|最新|新闻|来源|实时|当前|今天|天气|气温|下雨|温度|股票|股价|行情|财报|基金|币圈)/i.test(text)
@@ -834,7 +846,14 @@ function extractDirectRouteSignals(cleanText = '', imageUrl = null) {
     isPlanLike,
     isExplicitAction,
     hasSafetyBoundary,
-    recapQuery
+    recapQuery,
+    memoryNeed: {
+      ...memoryNeed,
+      needsMemory,
+      reason: needsMemory && notebookMemoryCue && !memoryNeed.needsMemory
+        ? 'notebook_memory_lookup'
+        : memoryNeed.reason
+    }
   };
 }
 
@@ -915,6 +934,11 @@ function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = 
       localRuleId: s.isExplicitAction ? 'explicit-action' : 'direct-chat',
       ...(allowedTools ? { allowedTools } : {}),
       ...(s.hasSafetyBoundary ? { safetyBoundary: true } : {}),
+      ...(s.memoryNeed?.needsMemory ? {
+        needsMemoryReason: s.memoryNeed.reason || 'memory_dependency',
+        recallFacet: s.memoryNeed.facet || 'default_continuity',
+        memoryNeedConfidence: s.memoryNeed.confidence ?? 0
+      } : {}),
       chatMode,
       toolIntent,
       responseIntent

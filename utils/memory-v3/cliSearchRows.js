@@ -174,6 +174,73 @@ function resultTypeForDoc(doc = {}) {
   return doc.type || 'fact';
 }
 
+function lifecycleStatusOfDoc(doc = {}) {
+  return normalizeText(
+    doc.lifecycleStatus
+    || doc.status
+    || doc.meta?.lifecycleStatus
+    || doc.payload?.lifecycleStatus
+    || ''
+  ).toLowerCase();
+}
+
+function isRecallBlockedDoc(doc = {}) {
+  if (doc.notRecallable === true || doc.not_recallable === true) return true;
+  const lifecycle = lifecycleStatusOfDoc(doc);
+  return lifecycle === 'stale' || lifecycle === 'suspect' || lifecycle === 'superseded' || lifecycle === 'not_recallable';
+}
+
+function classifyEvidenceQuality(row = {}, queryFacet = 'default_continuity') {
+  const doc = row.doc || {};
+  const reasons = [];
+  if (isRecallBlockedDoc(doc)) {
+    reasons.push(`blocked_lifecycle:${lifecycleStatusOfDoc(doc) || 'unknown'}`);
+    return { evidenceQuality: 'reject', qualityReasons: reasons };
+  }
+  const source = normalizeText(doc.source).toLowerCase();
+  const score = Number(row.score || 0) || 0;
+  const lexical = Number(row.lexical || 0) || 0;
+  const direct = Number(row.direct || row.scoreParts?.direct || 0) || 0;
+  const rerankScore = Number(row.rerankScore || 0) || 0;
+  const embedding = Number(row.embedding || 0) || 0;
+  const trustedSource = new Set(['recent', 'journal', 'task', 'personal', 'group', 'jargon', 'notebook']).has(source);
+  const profileAllowed = source === 'profile' && new Set(['identity', 'preference', 'relationship']).has(queryFacet);
+  const strongMatch = direct >= 0.18 || lexical >= 0.32 || rerankScore >= 0.72 || score >= 0.86;
+  const usableMatch = direct >= 0.1 || lexical >= 0.16 || rerankScore >= 0.48 || embedding >= 0.48 || score >= 0.58;
+
+  if (source === 'profile' && !profileAllowed) reasons.push('profile_not_primary_for_facet');
+  if (trustedSource) reasons.push(`trusted_source:${source}`);
+  if (profileAllowed) reasons.push(`profile_allowed:${queryFacet}`);
+  if (strongMatch) reasons.push('strong_match');
+  else if (usableMatch) reasons.push('usable_match');
+  else reasons.push('weak_match');
+
+  if ((trustedSource || profileAllowed) && strongMatch) {
+    return { evidenceQuality: 'strong', qualityReasons: reasons };
+  }
+  if ((trustedSource || profileAllowed) && usableMatch) {
+    return { evidenceQuality: 'usable', qualityReasons: reasons };
+  }
+  if (source === 'profile' && !profileAllowed) {
+    return { evidenceQuality: 'weak', qualityReasons: reasons };
+  }
+  return { evidenceQuality: usableMatch ? 'weak' : 'reject', qualityReasons: reasons };
+}
+
+function annotateRowsWithEvidenceQuality(rows = [], queryFacet = 'default_continuity') {
+  return normalizeArray(rows).map((row) => {
+    const quality = classifyEvidenceQuality(row, queryFacet);
+    return {
+      ...row,
+      ...quality
+    };
+  });
+}
+
+function isUsableEvidenceRow(row = {}) {
+  return row.evidenceQuality === 'strong' || row.evidenceQuality === 'usable';
+}
+
 function trimPackedResults(rows = [], limit = 8) {
   const results = [];
   let outputChars = 0;
@@ -202,6 +269,8 @@ function trimPackedResults(rows = [], limit = 8) {
       tier: doc.tier || '',
       matchMode: row.matchMode || 'lexical',
       status: doc.status || 'active',
+      evidenceQuality: row.evidenceQuality || 'usable',
+      qualityReasons: Array.isArray(row.qualityReasons) ? row.qualityReasons : [],
       sourceKind: doc.sourceKind || '',
       evidenceTier: doc.evidenceTier || '',
       fieldKey: doc.fieldKey || '',
@@ -219,7 +288,7 @@ function digestForResults(rows = []) {
   const maxChars = Math.max(120, Number(config.MEMORY_CLI_DIGEST_MAX_CHARS || 480));
   let total = 0;
   const output = [];
-  for (const row of normalizeArray(rows).slice(0, 5)) {
+  for (const row of normalizeArray(rows).filter(isUsableEvidenceRow).slice(0, 5)) {
     const doc = row.doc || {};
     const line = `[${doc.source}|${resultTypeForDoc(doc)}] ${sanitizePreviewText(doc.preview || doc.text, 120)}`;
     if (total + line.length + 1 > maxChars) break;
@@ -346,27 +415,44 @@ function mergeCandidateCounts(base = {}, extra = {}) {
 }
 
 function buildSearchResponse(selectedRows = [], candidateCounts = {}, queryFacet = 'default_continuity', fallbackUsed = false, limit = 8) {
-  const packed = trimPackedResults(selectedRows, limit);
+  const annotatedRows = annotateRowsWithEvidenceQuality(selectedRows, queryFacet);
+  const usableRows = annotatedRows.filter(isUsableEvidenceRow);
+  const rejectedResultCount = annotatedRows.length - usableRows.length;
+  const packed = trimPackedResults(usableRows, limit);
   const sourceCoverage = {};
   for (const item of packed.results) {
     sourceCoverage[item.source] = (sourceCoverage[item.source] || 0) + 1;
   }
+  const qualityCounts = {};
+  for (const row of annotatedRows) {
+    const quality = row.evidenceQuality || 'unknown';
+    qualityCounts[quality] = (qualityCounts[quality] || 0) + 1;
+  }
   return {
     results: packed.results,
-    digest: digestForResults(selectedRows),
+    digest: digestForResults(annotatedRows),
     sourceCoverage,
     queryFacet,
     candidateCounts,
     fallbackUsed,
     outputChars: packed.outputChars,
     recentUsed: Boolean(sourceCoverage.recent),
-    droppedResultCount: packed.droppedResultCount
+    droppedResultCount: packed.droppedResultCount,
+    rejectedResultCount,
+    qualitySummary: {
+      hasUsableEvidence: usableRows.length > 0,
+      topResultQuality: annotatedRows[0]?.evidenceQuality || '',
+      counts: qualityCounts,
+      rejectedResultCount
+    }
   };
 }
 
 module.exports = {
+  annotateRowsWithEvidenceQuality,
   applyJournalTargetDayPriorityToRows,
   buildSearchResponse,
+  classifyEvidenceQuality,
   gatherRowsForSources,
   mergeCandidateCounts,
   rerankRows,

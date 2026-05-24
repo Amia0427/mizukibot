@@ -1,4 +1,5 @@
 const { normalizeExecutionEnvelope } = require('../contracts');
+const { buildMemoryToolTelemetry } = require('../runtime/memoryToolTelemetry');
 
 function createDispatchNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
@@ -526,7 +527,10 @@ function createDispatchNode(deps = {}) {
     }
 
     const nextEvents = events
-      .concat(toolResults.map((item) => createEvent('tool_result', item)))
+      .concat(toolResults.map((item) => createEvent('tool_result', {
+        ...item,
+        ...buildMemoryToolTelemetry(item)
+      })))
       .concat([createEvent('node_complete', { node: 'dispatch' })]);
 
     return saveAndEmit({

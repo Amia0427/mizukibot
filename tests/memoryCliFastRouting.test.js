@@ -80,6 +80,9 @@ module.exports = (async () => {
   assert.strictEqual(continuity.ok, true);
   assert.ok(['recent_continuity', 'task_or_plan'].includes(continuity.queryFacet));
   assert.strictEqual(continuity.results[0].source, 'recent');
+  assert.ok(['strong', 'usable'].includes(continuity.results[0].evidenceQuality));
+  assert.strictEqual(continuity.qualitySummary.hasUsableEvidence, true);
+  assert.strictEqual(typeof continuity.rejectedResultCount, 'number');
 
   const preference = await runMemoryCli('mem search --query "你喜欢喝什么"', {
     userId: 'u_route',
@@ -87,6 +90,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(preference.ok, true);
   assert.ok(['profile', 'personal'].includes(preference.results[0].source));
+  assert.ok(['strong', 'usable'].includes(preference.results[0].evidenceQuality));
 
   const group = await runMemoryCli('mem search --query "群里怎么说这个活动"', {
     userId: 'u_route',
@@ -103,6 +107,15 @@ module.exports = (async () => {
   assert.strictEqual(notebook.ok, true);
   assert.ok(notebook.results.every((item) => item.source === 'notebook'));
   assert.strictEqual(Object.keys(notebook.sourceCoverage).join(','), 'notebook');
+
+  const weakOnly = await runMemoryCli('mem search --query "完全不相关的宇宙飞船问题" --source profile --limit 3', {
+    userId: 'u_route',
+    sessionKey: 'direct:u_route'
+  });
+  assert.strictEqual(weakOnly.ok, true);
+  assert.strictEqual(weakOnly.qualitySummary.hasUsableEvidence, false);
+  assert.strictEqual(weakOnly.results.length, 0);
+  assert.ok(weakOnly.rejectedResultCount >= 0);
 
   console.log('memoryCliFastRouting.test.js passed');
 })().catch((error) => {

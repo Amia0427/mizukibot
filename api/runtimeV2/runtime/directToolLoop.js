@@ -26,6 +26,7 @@ function createDirectToolLoopHelpers(deps = {}) {
     logToolExecution,
     resolveToolLoopReply
   } = deps;
+  const { buildMemoryToolTelemetry } = require('./memoryToolTelemetry');
 
   function cloneDirectToolLoopState(statePatch = {}) {
     return {
@@ -176,6 +177,7 @@ function createDirectToolLoopHelpers(deps = {}) {
       effectiveAllowedTools = computeEffectiveAllowedTools(request, nextMemoryCliTurn);
       loopEvents.push(createEvent('tool_result', {
         ...normalizedEnvelope,
+        ...buildMemoryToolTelemetry(normalizedEnvelope),
         node: 'direct_reply',
         tool_call_id: toolCallId
       }));
