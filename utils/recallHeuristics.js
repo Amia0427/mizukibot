@@ -52,7 +52,9 @@ function isRecentPersonalActivityRecallQuery(text = '') {
     new RegExp(`${recent}.{0,8}${actor}.{0,8}${activity}.{0,10}${objectQuestion}${objectNoun}`, 'i'),
     new RegExp(`${actor}.{0,8}${recent}.{0,8}${activity}.{0,10}${objectQuestion}${objectNoun}`, 'i'),
     new RegExp(`${recent}.{0,8}${actor}.{0,8}${objectQuestion}${objectNoun}.{0,8}${activity}`, 'i'),
-    new RegExp(`${actor}.{0,8}${recent}.{0,8}${objectQuestion}${objectNoun}.{0,8}${activity}`, 'i')
+    new RegExp(`${actor}.{0,8}${recent}.{0,8}${objectQuestion}${objectNoun}.{0,8}${activity}`, 'i'),
+    /(?:我|我们|俺|咱).{0,8}(?:打过|打了|玩过|玩了|听过|听了|看过|看了|刷过|刷了|做过|做了|去过|发过|发了|提到过|说过|聊过|买过|买了|吃过|吃了|喝过|喝了|练过|练了|测过|测了|试过|试了).{0,10}(?:哪些|哪几|哪几个|哪几张|哪几首|哪首|什么|啥)(?:歌|曲|谱|图|图片|照片|东西|内容|题|游戏|本|活动|记录)?/i,
+    /(?:我|我们|俺|咱).{0,8}(?:哪些|哪几|哪几个|哪几张|哪几首|哪首|什么|啥)(?:歌|曲|谱|图|图片|照片|东西|内容|题|游戏|本|活动|记录)?.{0,10}(?:打过|打了|玩过|玩了|听过|听了|看过|看了|刷过|刷了|做过|做了|去过|发过|发了|提到过|说过|聊过|买过|买了|吃过|吃了|喝过|喝了|练过|练了|测过|测了|试过|试了)/i
   ];
   return patterns.some((pattern) => pattern.test(q));
 }

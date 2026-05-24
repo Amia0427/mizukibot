@@ -13,7 +13,7 @@ const DEFAULT_INDEX = Object.freeze({
   images: {}
 });
 const CACHE_REF_PREFIX = 'cached-image://';
-const IMAGE_RECALL_CUE_RE = /(?:图片|截图|照片|图像|战绩图|成绩图|分数图|结算图|谱面图|哪张图|几张图|什么图|发.{0,12}图|传.{0,12}图|给你.{0,12}图|\bimage\b|\bphoto\b|\bscreenshot\b|\bscore\b|\bresult\b)/i;
+const IMAGE_RECALL_CUE_RE = /(?:图片|截图|照片|图像|战绩图|成绩图|分数图|结算图|谱面图|哪张图|几张图|什么图|发.{0,12}图|传.{0,12}图|给你.{0,12}图|打过.{0,8}(?:哪些|哪几|哪几首|什么|啥)?(?:歌|曲|谱)|(?:哪些|哪几|哪几首|什么|啥)(?:歌|曲|谱).{0,8}打过|打歌记录|音游记录|\bimage\b|\bphoto\b|\bscreenshot\b|\bscore\b|\bresult\b)/i;
 const SELF_SENT_IMAGE_RE = /(?:(?:我|俺|咱|我们).{0,18}(?:发|传|贴|给你|给妳|发过|发了)|(?:发给你|发给妳|传给你|传给妳))/i;
 const SCORE_IMAGE_RE = /(?:战绩|成绩|分数|结算|谱面|音游|打歌|\bscore\b|\bresult\b)/i;
 const EARLY_MORNING_PREV_DAY_HOUR = 4;
