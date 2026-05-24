@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-24 23:06 +08:00：修复弱指代群聊被旧连续性话题带偏的误召回路径；主回复不再仅因旧 `active_topic` 强制注入 `[ContinuityState]`，只有未完成用户轮次、open loop、承诺、用户约束或 continuity probe digest 才会绕过 planner 强制进入 prompt。
+
 更新 2026-05-24 22:22 +08:00：Anthropic 超大 cached 图片不再回退 QQ 临时 URL；会先压缩成 `ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE=768` 内的小 JPEG，并继续受 `ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS=120000` 约束，避免 10 万级输入 token 同时保留视觉识别。
 
 更新 2026-05-24 22:05 +08:00：关闭表情包二次选择与自动发送链路，新增 `MEME_MANAGER_FOLLOWUP_ENABLED=false` 作为发送层硬开关；素材库和 `/meme` 管理能力保留。

@@ -57,6 +57,40 @@ module.exports = (() => {
   assert.strictEqual(typeof continuityMessage.content, 'string');
   assert.strictEqual(typeof currentConversationMessage.content, 'string');
 
+  const activeTopicOnlyState = {
+    request: {},
+    memory: {
+      stableSystemBlocks: [
+        { id: 'main_persona_system', content: 'persona stable' }
+      ],
+      dynamicContextBlocks: [],
+      assistantOnlyContextBlocks: [],
+      promptSnapshot: {
+        dynamicPromptPlan: {
+          enabledBlockIds: []
+        }
+      },
+      continuityState: {
+        text: '[ContinuityState]\n[ActiveTopic] old joke topic',
+        payload: {
+          active_topic: 'old joke topic'
+        }
+      }
+    }
+  };
+  const activeTopicOnlyMessages = helpers.getMainConversationSystemMessages(activeTopicOnlyState);
+  assert.ok(
+    !activeTopicOnlyMessages.some((item) => String(item.content || '').includes('[ContinuityState]')),
+    'active_topic alone should not force ContinuityState into the main prompt'
+  );
+
+  activeTopicOnlyState.memory.promptSnapshot.dynamicPromptPlan.enabledBlockIds = ['continuity_state'];
+  const plannerEnabledMessages = helpers.getMainConversationSystemMessages(activeTopicOnlyState);
+  assert.ok(
+    plannerEnabledMessages.some((item) => String(item.content || '').includes('[ContinuityState]')),
+    'planner-selected continuity_state should still be included'
+  );
+
   const assistantOnly = helpers.buildAssistantOnlyContextMessages(state);
   const fewShot = assistantOnly.find((item) => item.content === 'few-shot example');
   const hint = assistantOnly.find((item) => item.content === 'plain hint');
