@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-23 23:45 +08:00
+更新时间：2026-05-24 08:35 +08:00
 
 ## 已调整
 
@@ -16,6 +16,7 @@
 - 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 会同步补 `retrieved_memory_lite`、`daily_journal`、`short_term_continuity`、planner 已选择的 `memos_recall` 和摘要块；主模型调用日志新增 `prompt_integrity` 摘要。
 - 2026-05-21 22:02 +08:00：八个目标已落地：`short_term_continuity` 观测新增 token/raw/summary/trim；普通聊天、长任务、记忆追问、管理员私聊使用不同 context profile；raw turns 会按引用、承诺、未闭环、纠错和信息量保留；session summary 关键字段有独立数量/字符配置；`diag:continuity -- prompt --user <id>` 可输出实际短期块；bridge 过 48h 只恢复结构化摘要；新增主回复失忆 eval；Web 面板新增只读上下文预览。
 - 2026-05-23 23:45 +08:00：主回复请求默认使用 Claude `/v1/messages` 协议，稳定 system/tool 前缀使用 Anthropic `cache_control` 断点；主回复不再使用 OpenAI `prompt_cache_key/prompt_cache_retention`。
+- 2026-05-24 08:35 +08:00：Anthropic 缓存断点适配官方 automatic prompt caching：可用时追加顶层 `cache_control`，显式断点总量按 `tools -> system -> messages` 保持在 4 个以内；如果兼容网关拒绝顶层 automatic，会先去掉顶层字段并保留稳定 system/tool 断点重试。
 
 ## 诊断
 
@@ -28,7 +29,7 @@ npm run diag:continuity -- prompt --user <id> --json
 
 查看最近主回复模型请求是否真的包含系统提示词、记忆标记、短期连续性和 MemOS 召回。日志只记录计数和布尔字段，不记录完整 prompt。
 
-主回复缓存诊断看 `prompt_caching.system_cache_breakpoints/tool_cache_breakpoints` 和 usage 中的 `cache_read_input_tokens/cache_creation_input_tokens`；`openai_prompt_cache_key` 对主回复应为空。
+主回复缓存诊断看 `prompt_caching.request_cache_breakpoints/system_cache_breakpoints/tool_cache_breakpoints` 和 usage 中的 `cache_read_input_tokens/cache_creation_input_tokens`；`openai_prompt_cache_key` 对主回复应为空。
 
 `diag:continuity -- prompt` 会输出当前用户主回复实际可见的 `[ShortTermContinuity]`、summary、recent raw turns 和裁剪报告。
 

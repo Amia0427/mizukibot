@@ -272,6 +272,8 @@ function extractAnthropicMessageCacheControl(message = {}) {
 }
 
 function anthropicRequestUsesPromptCaching(requestBody = {}) {
+  if (extractAnthropicCacheControl(requestBody)) return true;
+
   if ((Array.isArray(requestBody.tools) ? requestBody.tools : []).some((tool) => toolHasAnthropicCacheControl(tool))) {
     return true;
   }
@@ -306,6 +308,101 @@ function findAnthropicAutoCacheMessageIndex(messages = []) {
   }
 
   return -1;
+}
+
+const ANTHROPIC_MAX_CACHE_BREAKPOINTS = 4;
+
+function normalizeCachedTarget(target, keepCacheControl) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
+  const cacheControl = extractAnthropicCacheControl(target);
+  const stripped = stripCacheControlFields(target);
+  return cacheControl && keepCacheControl
+    ? applyAnthropicCacheControl(stripped, cacheControl)
+    : stripped;
+}
+
+function normalizeAnthropicCacheBreakpointSlots(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object' || Array.isArray(requestBody)) return requestBody;
+
+  let slotsUsed = 0;
+  const keepNextExplicit = () => {
+    if (slotsUsed >= ANTHROPIC_MAX_CACHE_BREAKPOINTS) return false;
+    slotsUsed += 1;
+    return true;
+  };
+
+  const nextBody = { ...requestBody };
+
+  if (Array.isArray(nextBody.tools)) {
+    nextBody.tools = nextBody.tools.map((tool) => (
+      extractAnthropicCacheControl(tool)
+        ? normalizeCachedTarget(tool, keepNextExplicit())
+        : tool
+    ));
+  }
+
+  const systemBlocks = normalizeAnthropicSystemBlocks(nextBody.system);
+  if (systemBlocks.length > 0) {
+    nextBody.system = systemBlocks.map((block) => (
+      extractAnthropicCacheControl(block)
+        ? normalizeCachedTarget(block, keepNextExplicit())
+        : block
+    ));
+  }
+
+  if (Array.isArray(nextBody.messages)) {
+    nextBody.messages = nextBody.messages.map((message) => {
+      if (!message || typeof message !== 'object' || Array.isArray(message)) return message;
+      if (!Array.isArray(message.content)) {
+        return extractAnthropicCacheControl(message)
+          ? normalizeCachedTarget(message, keepNextExplicit())
+          : message;
+      }
+      return {
+        ...stripCacheControlFields(message),
+        content: message.content.map((block) => (
+          extractAnthropicCacheControl(block)
+            ? normalizeCachedTarget(block, keepNextExplicit())
+            : block
+        ))
+      };
+    });
+  }
+
+  const topLevelCacheControl = extractAnthropicCacheControl(requestBody);
+  const strippedBody = stripCacheControlFields(nextBody);
+  if (!topLevelCacheControl || slotsUsed >= ANTHROPIC_MAX_CACHE_BREAKPOINTS) return strippedBody;
+  return applyAnthropicCacheControl(strippedBody, topLevelCacheControl);
+}
+
+function getLastCacheableBlockCacheControl(requestBody = {}) {
+  const messages = Array.isArray(requestBody.messages) ? requestBody.messages : [];
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const content = Array.isArray(messages[messageIndex]?.content) ? messages[messageIndex].content : [];
+    for (let blockIndex = content.length - 1; blockIndex >= 0; blockIndex -= 1) {
+      const block = content[blockIndex];
+      if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
+      if (block.type === 'text' && !normalizeText(block.text)) continue;
+      return extractAnthropicCacheControl(block);
+    }
+  }
+
+  const systemBlocks = normalizeAnthropicSystemBlocks(requestBody.system);
+  for (let index = systemBlocks.length - 1; index >= 0; index -= 1) {
+    const block = systemBlocks[index];
+    if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
+    if (block.type === 'text' && !normalizeText(block.text)) continue;
+    return extractAnthropicCacheControl(block);
+  }
+
+  const tools = Array.isArray(requestBody.tools) ? requestBody.tools : [];
+  for (let index = tools.length - 1; index >= 0; index -= 1) {
+    if (tools[index] && typeof tools[index] === 'object' && !Array.isArray(tools[index])) {
+      return extractAnthropicCacheControl(tools[index]);
+    }
+  }
+
+  return null;
 }
 
 function applyAutoAnthropicPromptCaching(requestBody = {}) {
@@ -370,7 +467,29 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
     }
   }
 
-  return mutated ? nextBody : requestBody;
+  const existingTopLevelCacheControl = extractAnthropicCacheControl(nextBody);
+  if (!existingTopLevelCacheControl) {
+    const explicitBreakpointCount = (
+      (Array.isArray(nextBody.tools) ? nextBody.tools : []).filter((tool) => extractAnthropicCacheControl(tool)).length
+      + normalizeAnthropicSystemBlocks(nextBody.system).filter((block) => extractAnthropicCacheControl(block)).length
+      + (Array.isArray(nextBody.messages) ? nextBody.messages : []).reduce((sum, message) => {
+        const content = Array.isArray(message?.content) ? message.content : [];
+        return sum + content.filter((block) => extractAnthropicCacheControl(block)).length;
+      }, 0)
+    );
+    const lastBlockCacheControl = getLastCacheableBlockCacheControl(nextBody);
+    const lastBlockUsesDifferentTtl = Boolean(
+      lastBlockCacheControl
+      && normalizeText(lastBlockCacheControl.ttl || defaultCacheControl.ttl) !== normalizeText(defaultCacheControl.ttl)
+    );
+    if (explicitBreakpointCount < ANTHROPIC_MAX_CACHE_BREAKPOINTS && !lastBlockUsesDifferentTtl) {
+      nextBody.cache_control = defaultCacheControl;
+      mutated = true;
+    }
+  }
+
+  const normalized = normalizeAnthropicCacheBreakpointSlots(nextBody);
+  return mutated || normalized !== nextBody ? normalized : requestBody;
 }
 
 function buildAnthropicRequestHeaders(requestBody = {}) {
@@ -390,6 +509,38 @@ function stripPromptCachingBetaHeaderValue(headerValue = '') {
     .map((part) => normalizeText(part))
     .filter((part) => part && part.toLowerCase() !== 'prompt-caching-2024-07-31')
     .join(',');
+}
+
+function stripPromptCachingBetaHeader(requestHeaders = null) {
+  const nextHeaders = requestHeaders && typeof requestHeaders === 'object'
+    ? { ...requestHeaders }
+    : {};
+  const headerKey = Object.prototype.hasOwnProperty.call(nextHeaders, 'anthropic-beta')
+    ? 'anthropic-beta'
+    : (Object.prototype.hasOwnProperty.call(nextHeaders, 'Anthropic-Beta') ? 'Anthropic-Beta' : '');
+  if (headerKey) {
+    const strippedHeader = stripPromptCachingBetaHeaderValue(nextHeaders[headerKey]);
+    if (strippedHeader) nextHeaders[headerKey] = strippedHeader;
+    else delete nextHeaders[headerKey];
+  }
+  return Object.keys(nextHeaders).length > 0 ? nextHeaders : null;
+}
+
+function stripAnthropicAutomaticPromptCaching(requestBody = {}, requestHeaders = null) {
+  if (!requestBody || typeof requestBody !== 'object') {
+    return {
+      requestBody,
+      requestHeaders: requestHeaders && typeof requestHeaders === 'object' ? { ...requestHeaders } : requestHeaders
+    };
+  }
+
+  const nextBody = stripCacheControlFields({ ...requestBody });
+  return {
+    requestBody: nextBody,
+    requestHeaders: anthropicRequestUsesPromptCaching(nextBody)
+      ? (requestHeaders && typeof requestHeaders === 'object' ? { ...requestHeaders } : requestHeaders)
+      : stripPromptCachingBetaHeader(requestHeaders)
+  };
 }
 
 function stripAnthropicPromptCaching(requestBody = {}, requestHeaders = null) {
@@ -433,21 +584,9 @@ function stripAnthropicPromptCaching(requestBody = {}, requestHeaders = null) {
     });
   }
 
-  const nextHeaders = requestHeaders && typeof requestHeaders === 'object'
-    ? { ...requestHeaders }
-    : {};
-  const headerKey = Object.prototype.hasOwnProperty.call(nextHeaders, 'anthropic-beta')
-    ? 'anthropic-beta'
-    : (Object.prototype.hasOwnProperty.call(nextHeaders, 'Anthropic-Beta') ? 'Anthropic-Beta' : '');
-  if (headerKey) {
-    const strippedHeader = stripPromptCachingBetaHeaderValue(nextHeaders[headerKey]);
-    if (strippedHeader) nextHeaders[headerKey] = strippedHeader;
-    else delete nextHeaders[headerKey];
-  }
-
   return {
     requestBody: nextBody,
-    requestHeaders: Object.keys(nextHeaders).length > 0 ? nextHeaders : null
+    requestHeaders: stripPromptCachingBetaHeader(requestHeaders)
   };
 }
 
@@ -461,6 +600,7 @@ function clampTemperatureForProvider(provider, value) {
 module.exports = {
   ANTHROPIC_ASSISTANT_CONTEXT_PREFIX,
   ANTHROPIC_DYNAMIC_SYSTEM_MARKERS,
+  ANTHROPIC_MAX_CACHE_BREAKPOINTS,
   ANTHROPIC_STABLE_SYSTEM_TEXTS,
   OPENAI_IMAGE_DETAIL_VALUES,
   appendRequestTraceEvent,
@@ -524,11 +664,13 @@ module.exports = {
   splitAnthropicStableSystemText,
   startModelCall,
   stripAnthropicCacheControlFromBlocks,
+  stripAnthropicAutomaticPromptCaching,
   stripAnthropicPromptCaching,
   stripCacheControlFields,
   stripCacheControlFieldsDeep,
   stripOpenAIPromptCacheFields,
   stripOpenAIPromptCacheRetention,
+  stripPromptCachingBetaHeader,
   stripPromptCachingBetaHeaderValue,
   stripTopPField,
   toolHasAnthropicCacheControl

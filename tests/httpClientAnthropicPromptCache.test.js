@@ -15,6 +15,22 @@ function contentParts(item = {}) {
   return Array.isArray(item?.content) ? item.content : [];
 }
 
+function countCacheControl(value) {
+  if (Array.isArray(value)) return value.reduce((sum, item) => sum + countCacheControl(item), 0);
+  if (!value || typeof value !== 'object') return 0;
+  let total = value.cache_control?.type ? 1 : 0;
+  total += countCacheControl(value.content);
+  total += countCacheControl(value.function);
+  return total;
+}
+
+function countRequestCacheControl(body = {}) {
+  return countCacheControl(body.cache_control)
+    + countCacheControl(body.tools)
+    + countCacheControl(body.system)
+    + countCacheControl(body.messages);
+}
+
 module.exports = (async () => {
   const snapshot = { ...process.env };
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-anthropic-prompt-cache-'));
@@ -110,7 +126,8 @@ module.exports = (async () => {
     assert.ok(!prepared.requestBody.system);
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'input'));
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'prompt_cache_key'));
-    assert.strictEqual(prepared.requestHeaders, null);
+    assert.ok(countRequestCacheControl(prepared.requestBody) <= 4);
+    assert.strictEqual(prepared.requestHeaders['anthropic-beta'], 'tools-2024-04-04,prompt-caching-2024-07-31');
 
     const preparedDynamicOnly = await httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
@@ -135,6 +152,8 @@ module.exports = (async () => {
       contentParts(item).length === 0
       || contentParts(item).every((block) => block.cache_control?.type === 'ephemeral' || !('cache_control' in block))
     )));
+    assert.strictEqual(preparedDynamicOnly.requestBody.cache_control?.type, 'ephemeral');
+    assert.strictEqual(preparedDynamicOnly.requestHeaders['anthropic-beta'], 'tools-2024-04-04,prompt-caching-2024-07-31');
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedDynamicOnly.requestBody, 'prompt_cache_key'));
 
     const preparedStableSystem = await httpClient.prepareRequest('https://example.com/v1/messages', {
@@ -174,7 +193,50 @@ module.exports = (async () => {
     });
     assert.ok(preparedStableSystem.requestBody.system.some((block) => block.cache_control?.type === 'ephemeral'));
     assert.ok(preparedStableSystem.requestBody.tools.some((tool) => tool.cache_control?.type === 'ephemeral'));
+    assert.strictEqual(preparedStableSystem.requestBody.cache_control?.type, 'ephemeral');
+    assert.ok(countRequestCacheControl(preparedStableSystem.requestBody) <= 4);
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody, 'prompt_cache_key'));
+
+    const preparedTooManyBreakpoints = await httpClient.prepareRequest('https://example.com/v1/messages', {
+      model: 'claude-3-5-sonnet-latest',
+      messages: [
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'stable persona A', cache_control: true }]
+        },
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'stable persona B', cache_control: true }]
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'historical assistant context', cache_control: true }]
+        },
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'historical user context', cache_control: true }]
+        },
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'current user context', cache_control: true }]
+        }
+      ],
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'lookup_memory',
+            description: 'lookup stable schema',
+            parameters: { type: 'object', properties: {} }
+          },
+          cache_control: true
+        }
+      ],
+      stream: false
+    });
+    assert.ok(countRequestCacheControl(preparedTooManyBreakpoints.requestBody) <= 4);
+    assert.ok(preparedTooManyBreakpoints.requestBody.tools.some((tool) => tool.name === 'lookup_memory' && tool.cache_control?.type === 'ephemeral'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedTooManyBreakpoints.requestBody, 'cache_control'));
 
     let attemptCount = 0;
     let firstAttemptBody = null;
@@ -278,6 +340,44 @@ module.exports = (async () => {
     assert.strictEqual(loggedCall.prompt_caching.openai_prompt_cache_key, '');
     assert.strictEqual(loggedCall.usage.cache_read_input_tokens, 16);
     assert.strictEqual(loggedCall.usage.cache_creation_input_tokens, 2);
+
+    attemptCount = 0;
+    const automaticDowngradeBodies = [];
+    axios.post = async (_url, body, options = {}) => {
+      automaticDowngradeBodies.push({ body, headers: options.headers });
+      attemptCount += 1;
+      if (attemptCount === 1) {
+        const error = new Error('top-level cache_control unsupported');
+        error.response = { status: 400, data: { error: { message: 'Unknown field cache_control' } } };
+        throw error;
+      }
+      return {
+        data: {
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-3-5-sonnet-latest',
+          content: [{ type: 'text', text: 'ok' }],
+          usage: { input_tokens: 20, output_tokens: 4 }
+        }
+      };
+    };
+
+    await httpClient.postWithRetry('https://example.com/v1/messages', {
+      model: 'claude-3-5-sonnet-latest',
+      messages: [
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'stable persona', cache_control: true }]
+        },
+        { role: 'user', content: 'hello' }
+      ],
+      stream: false
+    }, 0, 'test-key');
+    assert.strictEqual(attemptCount, 2);
+    assert.strictEqual(automaticDowngradeBodies[0].body.cache_control?.type, 'ephemeral');
+    assert.ok(!Object.prototype.hasOwnProperty.call(automaticDowngradeBodies[1].body, 'cache_control'));
+    assert.ok(automaticDowngradeBodies[1].body.system.some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(automaticDowngradeBodies[1].headers['anthropic-beta'].includes('prompt-caching-2024-07-31'));
 
     attemptCount = 0;
     axios.post = async (_url, body, options = {}) => {
