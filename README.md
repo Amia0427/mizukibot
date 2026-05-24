@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-24 17:35 +08:00：瑞希现有系统提示词仍是默认稳定人格；主回复动态构建新增 `roleplay_runtime_context`，用于注入本轮场景、时间、可见用户状态和不读心/不替用户行动/纯文本短消息约束。
+
 更新 2026-05-24 17:27 +08:00：记忆召回稳定性治理落地：新增统一 `classifyMemoryNeed` 判定，个人历史/偏好/身份/近期/群内历史问题会保守暴露 `memory_cli`；`memory_cli` 搜索结果新增 `evidenceQuality/qualitySummary/rejectedResultCount`，弱证据不进 digest，召回评测门禁新增 weak-top/profile-only/no-retrieval 指标。
 
 更新 2026-05-24 17:28 +08:00：修正角色活人感顶部总纲，明确当前项目没有线下模式，禁止把回复切成线下/小说叙事场景。

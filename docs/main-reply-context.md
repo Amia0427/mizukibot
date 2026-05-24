@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-24 17:28 +08:00
+更新时间：2026-05-24 17:35 +08:00
 
 ## 已调整
 
@@ -19,6 +19,19 @@
 - 2026-05-24 08:35 +08:00：Anthropic 缓存断点适配官方 automatic prompt caching：可用时追加顶层 `cache_control`，显式断点总量按 `tools -> system -> messages` 保持在 4 个以内；如果兼容网关拒绝顶层 automatic，会先去掉顶层字段并保留稳定 system/tool 断点重试。
 - 2026-05-24 17:23 +08:00：Anthropic 图片输入新增 `ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS`，默认 `120000`；cached 图片超过内联预算时不再转 base64，优先发送安全原始 URL，否则注入文本占位，避免图片路由把 base64 字符串计成 10 万级输入 token。
 - 2026-05-24 17:28 +08:00：角色活人感顶部总纲明确当前项目没有线下模式；主回复只按线上私聊、群聊和任务聊天组织口吻，禁止切成线下/小说叙事场景。
+- 2026-05-24 17:35 +08:00：瑞希稳定系统提示词继续作为默认人格；主回复新增 `roleplay_runtime_context` critical 动态块，注入当前时间、场景、聊天模式、关系/近期摘要、用户最新消息、可见用户状态和本轮限制，并明确不读心、不替用户行动、普通聊天短消息、纯文本输出。
+
+## Roleplay Runtime Context
+
+`roleplay_runtime_context` 由主回复 runtime 构建，不替代 `config.SYSTEM_PROMPT`。字段来源：
+
+- 时间：`options.currentTime/current_time/journalNow` 或当前时间，按 `TIMEZONE` 格式化。
+- 场景/模式：`routeMeta.directedContext`、`groupId`、`chatType`、`topRouteType` 和 prompt surface。
+- 关系/近期：`memoryContext.profile.relation_stage`、`userInfo.level`、`memoryContext.promptSummaryText/summary`、短期连续性摘要。
+- 用户状态：只使用 `routeMeta.userVisibleState/userState` 或可见文本提示，不读取括号内心理。
+- 本轮限制：默认 `pure_text_reply_only; no_structured_actions`。
+
+该块在 planner catalog 中标记为 `must_use_when_available`，runtime 也会通过 `runtimeAddedIds` 强制保留。诊断可看 `promptSnapshot.dynamicBlockIds`、`selectionTrace` 和 `runtimeAddedBlocks`。
 
 ## 诊断
 

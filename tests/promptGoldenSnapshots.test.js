@@ -39,9 +39,17 @@ module.exports = (async () => {
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'main_persona_system'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'core_baseline_patch'));
+  assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_runtime_context'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'main_persona_system'));
+  assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  const roleplayRuntimeContext = main.dynamicContextBlocks.find((item) => item.id === 'roleplay_runtime_context');
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('[RoleplayRuntimeContext]'));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('mind_reading_rule='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('boundary_rule='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('pure_text_reply_only') || String(roleplayRuntimeContext?.content || '').includes('纯文本'));
+  assert.ok(!String(roleplayRuntimeContext?.content || '').includes('current_time=1970-'));
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'directed_context'));
   if (main.latencyMeta?.optionalBudgetExceeded || !String(main.dynamicFewShotPrompt || '').trim()) {
     assert.ok(!main.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
@@ -99,6 +107,8 @@ module.exports = (async () => {
     }
   );
   assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'roleplay_runtime_context'));
   assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(directedMustUsePrompt.promptSnapshot.selectionTrace.some((item) => (
     item.id === 'directed_context'
@@ -182,6 +192,26 @@ module.exports = (async () => {
   assert.ok(!emptyContentPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
   assert.ok(emptyContentPrompt.promptSnapshot.runtimeRejectedBlocks.some((item) => item.id === 'retrieved_memory_lite' && /empty|content/i.test(item.reason)));
   assert.ok(emptyContentPrompt.promptSnapshot.selectionTrace.some((item) => item.id === 'summary' && item.decision === 'reject'));
+
+  const mindReadingGuardPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 11 },
+    'u_prompt_mind_reading_guard',
+    '没事。（其实我很难过）你替我跟绘名说我先走了',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        userVisibleState: '用户只发出“没事”和一段括号背景，没有可见动作。'
+      }
+    }
+  );
+  const mindReadingBlock = mindReadingGuardPrompt.promptSnapshot.assembledBlocks.find((item) => item.id === 'roleplay_runtime_context');
+  const mindReadingText = String(mindReadingBlock?.content || '');
+  assert.ok(mindReadingText.includes('用户括号里的内心、旁白或不可见心理只能当背景'));
+  assert.ok(mindReadingText.includes('不要替用户说话、行动、做决定'));
+  assert.ok(mindReadingText.includes('pure_text_reply_only'));
+  assert.ok(!mindReadingText.includes('Return JSON only'));
 
   const selfContainedPrompt = await buildDynamicPrompt(
     { level: '', points: 0 },

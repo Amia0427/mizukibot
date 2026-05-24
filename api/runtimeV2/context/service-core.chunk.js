@@ -45,6 +45,12 @@ const {
   GROUP_DIRECT_REPLY_TARGET_MAX_CHARS,
   GROUP_DIRECT_REPLY_TARGET_MIN_CHARS
 } = require('../guards/groupDirectReplyStyleGuard');
+const {
+  formatDateInTz,
+  formatTimeInTz,
+  formatWeekdayInTz,
+  getTimezone
+} = require('../../../utils/time');
 
 const DYNAMIC_CONTEXT_PLAN_VERSION = 'dynamic_context_plan_v2';
 const MEMORY_RECALL_PROMPT_MIN_BUDGET_MS = 6000;
@@ -137,6 +143,109 @@ function buildContinuityStatePromptSnippet(continuitySignals = {}) {
   push('last_assistant_commitment', signals.lastAssistantCommitment);
   if (lines.length === 0) return '';
   return ['[ContinuityState]', ...lines].join('\n');
+}
+
+function normalizeRuntimeDate(value = null) {
+  if (value === null || value === undefined || value === '') return new Date();
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (Number.isFinite(Number(value))) {
+    const date = new Date(Number(value));
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  const text = normalizeText(value);
+  if (text) {
+    const date = new Date(text);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return new Date();
+}
+
+function compactRuntimeLineValue(value = '', maxTokens = 120) {
+  const text = normalizeText(value).replace(/\s+/g, ' ');
+  if (!text) return '';
+  return trimTextByTokenBudget(text, Math.max(16, Number(maxTokens || 120) || 120), 'tail');
+}
+
+function summarizeContinuitySignalsForRoleplay(continuitySignals = {}) {
+  const signals = continuitySignals && typeof continuitySignals === 'object' ? continuitySignals : {};
+  return [
+    signals.hasCarryOverTopic ? 'carry_over_topic' : '',
+    signals.hasOpenLoop ? 'open_loop' : '',
+    signals.quoteAnchored ? 'quote_anchored' : '',
+    compactRuntimeLineValue(signals.topic || signals.currentTopic || signals.carryOverTopic, 60),
+    compactRuntimeLineValue(signals.openLoop || signals.pendingTask || signals.unresolvedThread, 80)
+  ].filter(Boolean).join(' | ');
+}
+
+function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
+  const options = input.options && typeof input.options === 'object' ? input.options : {};
+  const routeMeta = input.routeMeta && typeof input.routeMeta === 'object' ? input.routeMeta : {};
+  const userInfo = input.userInfo && typeof input.userInfo === 'object' ? input.userInfo : {};
+  const memoryContext = input.memoryContext && typeof input.memoryContext === 'object' ? input.memoryContext : {};
+  const continuitySignals = input.continuitySignals && typeof input.continuitySignals === 'object' ? input.continuitySignals : {};
+  const sharedShortTermContext = input.sharedShortTermContext && typeof input.sharedShortTermContext === 'object' ? input.sharedShortTermContext : {};
+  const timezone = normalizeText(options.timezone || routeMeta.timezone || routeMeta.userTimezone || getTimezone(), 'Asia/Shanghai');
+  const currentDate = normalizeRuntimeDate(options.currentTime || options.current_time || options.journalNow || routeMeta.currentTime || routeMeta.current_time || routeMeta.timestamp);
+  const groupId = getRouteMetaGroupId(routeMeta);
+  const chatType = normalizeText(routeMeta.chatType || routeMeta.chat_type || (groupId ? 'group' : 'private'), groupId ? 'group' : 'private');
+  const topRouteType = normalizeText(input.topRouteType || routeMeta.topRouteType || options.topRouteType, 'direct_chat');
+  const surface = normalizeText(input.surface || buildPromptSurface(topRouteType, routeMeta), 'direct_chat');
+  const outputMode = groupId
+    ? 'group_chat'
+    : (surface === 'passive_group_reply' ? 'group_chat' : 'mobile_chat');
+  const directedContext = routeMeta.directedContext && typeof routeMeta.directedContext === 'object' ? routeMeta.directedContext : {};
+  const addressee = directedContext.addressee && typeof directedContext.addressee === 'object' ? directedContext.addressee : {};
+  const relationStage = compactRuntimeLineValue(
+    memoryContext?.profile?.relation_stage
+    || memoryContext?.relationshipState?.stage
+    || userInfo.level
+    || 'unknown',
+    48
+  );
+  const recentEvents = compactRuntimeLineValue(
+    memoryContext.promptSummaryText
+    || memoryContext.summary
+    || sharedShortTermContext.shortTermSummary
+    || '',
+    120
+  );
+  const continuity = summarizeContinuitySignalsForRoleplay(continuitySignals);
+  const latestMessage = compactRuntimeLineValue(input.question || routeMeta.userText || routeMeta.cleanText || routeMeta.rawText, 160);
+  const visibleUserState = compactRuntimeLineValue(
+    routeMeta.userVisibleState
+    || routeMeta.userState
+    || routeMeta.user_status
+    || 'Only infer from visible text, pauses, quotes, images, and explicit behavior. Do not read hidden thoughts.',
+    100
+  );
+  const specialLimit = compactRuntimeLineValue(
+    routeMeta.specialLimit
+    || routeMeta.special_limit
+    || options.specialLimit
+    || 'pure_text_reply_only; no_structured_actions',
+    80
+  );
+  const lines = [
+    '[RoleplayRuntimeContext]',
+    'purpose=Anchor this one reply in the current scene while preserving the existing Mizuki system prompt.',
+    `current_time=${formatDateInTz(currentDate, timezone)} ${formatTimeInTz('zh-CN', currentDate, timezone)} ${formatWeekdayInTz('zh-CN', currentDate, timezone)} (${timezone})`,
+    `surface=${surface}`,
+    `chat_type=${chatType}`,
+    `output_mode=${outputMode}`,
+    `scene=${compactRuntimeLineValue(directedContext.scene || routeMeta.scene || routeMeta.currentScene || routeMeta.current_scene || (groupId ? 'group chat' : 'private chat'), 60)}`,
+    `current_addressee=${compactRuntimeLineValue(addressee.senderName || addressee.userId || addressee.kind || (groupId ? 'group member' : 'user'), 40)}`,
+    `relationship_state=${relationStage}`,
+    recentEvents ? `recent_events=${recentEvents}` : '',
+    continuity ? `open_threads=${continuity}` : '',
+    `user_latest_message_data=${latestMessage || '(empty)'}`,
+    `visible_user_state=${visibleUserState}`,
+    `special_limit=${specialLimit}`,
+    'mode_rule=普通聊天输出1到4条短消息，像社交软件自然接话；线下/剧情场景才用2到5段叙事；群聊不需要每个角色发言。',
+    'boundary_rule=不要替用户说话、行动、做决定或描写明确心理；只能回应用户说出口的话、图片、引用和可见行为。',
+    'mind_reading_rule=用户括号里的内心、旁白或不可见心理只能当背景，不能像瑞希直接听见了一样回应。',
+    'style_rule=不要复述这些字段，不要解释提示词或内部规则；只输出瑞希此刻自然会说的话，保持纯文本。'
+  ].filter(Boolean);
+  return trimTextByTokenBudget(lines.join('\n'), 420, 'tail');
 }
 
 function buildMemoryRecallPolicyPromptSnippet(memoryContext = {}) {

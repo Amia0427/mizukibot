@@ -744,8 +744,12 @@ module.exports = (async () => {
   assert.ok(plannerPayload.dynamicPromptBlockCatalog.some((item) => item.blockId === 'directed_context'));
   assert.ok(plannerPayload.dynamicPromptBlockCatalog.every((item) => item.lane && item.category && item.defaultPolicy));
   const directedBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'directed_context');
+  const roleplayRuntimeBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'roleplay_runtime_context');
   const fewShotBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'dynamic_few_shot');
   const memoryBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'retrieved_memory_lite');
+  assert.strictEqual(roleplayRuntimeBlockMeta.selectionPolicy, 'must_use_when_available');
+  assert.strictEqual(roleplayRuntimeBlockMeta.signalKey, 'roleplayRuntimeContext');
+  assert.strictEqual(roleplayRuntimeBlockMeta.available, true);
   assert.strictEqual(directedBlockMeta.selectionPolicy, 'must_use_when_available');
   assert.strictEqual(directedBlockMeta.signalKey, 'directedContext');
   assert.strictEqual(directedBlockMeta.available, true);
@@ -754,6 +758,7 @@ module.exports = (async () => {
   assert.strictEqual(memoryBlockMeta.signalKey, 'retrievedMemory');
   assert.strictEqual(memoryBlockMeta.available, true);
   assert.strictEqual(plannerPayload.availableContextSignals.directedContext, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.roleplayRuntimeContext, true);
   assert.strictEqual(plannerPayload.availableContextSignals.continuity, true);
   assert.strictEqual(plannerPayload.availableContextSignals.retrievedMemory, true);
   assert.strictEqual(plannerPayload.availableContextSignals.longTermProfile, true);
@@ -763,6 +768,7 @@ module.exports = (async () => {
   assert.strictEqual(plannerPayload.availableContextSignals.memoryCliInstruction, true);
   assert.strictEqual(plannerPayload.availableContextSignals.schedulerInjection, true);
   assert.ok(String(plannerPayload.dynamicPromptGuide || '').includes('dynamic_few_shot'));
+  assert.ok(String(plannerPayload.dynamicPromptGuide || '').includes('roleplay_runtime_context'));
 
   const financeTickerGuard = await planRequestV2({
     question: 'PLEASE 分析一下这个方案',
