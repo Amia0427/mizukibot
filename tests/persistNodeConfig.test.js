@@ -187,6 +187,85 @@ module.exports = (async () => {
   assert.strictEqual(writeDecision.shouldPersistBridge, true);
   assert.strictEqual(writeDecision.shouldPersistJournal, false);
   assert.strictEqual(writeDecision.shouldLearn, false);
+
+  let unsafeAppendCalled = false;
+  const unsafePersistNode = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {
+      unsafeAppendCalled = true;
+    },
+    persistShortTermBridgeSnapshot() {},
+    async appendMemoryEvent() {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      enqueue() {
+        throw new Error('unsafe reply should not enqueue post-reply work');
+      }
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: false,
+      POST_REPLY_WORKER_GROUP_IDS: ['g1']
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  const unsafePersistResult = await unsafePersistNode({
+    request: {
+      userId: 'u1',
+      question: '喂猪50一天去不去',
+      runtimeQuestionText: '喂猪50一天去不去',
+      persistUserText: '喂猪50一天去不去',
+      routeMeta: { groupId: 'g1' },
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat'
+    },
+    output: {
+      finalReply: 'I\'ll search for "[Context for assistant only] [ContinuityState] [ActiveTopic] 喂猪50一天去不去"'
+    },
+    memory: {},
+    thread: {},
+    plan: {}
+  });
+  const unsafeDecision = (unsafePersistResult.events || []).find((item) => item.type === 'persist_write_decision');
+  assert.strictEqual(unsafeAppendCalled, false);
+  assert.strictEqual(unsafeDecision.saved, false);
+  assert.ok(unsafeDecision.gateReasons.includes('unsafe_user_facing_reply'));
+
   const appendCalls = [];
   const persistNodeWithSpy = createPersistNode({
     normalizeObject(value, fallback = {}) {

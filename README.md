@@ -4,6 +4,10 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-24 20:08 +08:00：planner 决策模型改为 `PLAN_MODEL=gpt-5.4-mini`，同步当前可用的 router 模型配置。
 
+更新 2026-05-24 21:10 +08:00：修复主回复把 Anthropic 原生搜索占位语 `I'll search for "[Context for assistant only] ..."` 发到群里的问题；普通聊天/记忆检索不再默认注入 `web_search_20250305`，仅显式联网工具或诊断探针启用，同时拦截内部上下文泄露回复进入发送和记忆写入。
+
+更新 2026-05-24 21:36 +08:00：补齐 planner 归一化回归防护：companion 模式下天气请求会从被过滤的 `web_search` 纠正到安全的 `getWeather`，已有 MemOS 召回证据时不再强制追加 `memory_cli`；`npm test` 通过。
+
 更新 2026-05-24 19:56 +08:00：planner 决策模型切到 `PLAN_MODEL=gpt-5.4-nano`，与表情包二次决策模型保持一致；planner 仍保持单轮调用和 `PLANNER_REQUEST_TIMEOUT_MS=60000`。
 
 更新 2026-05-24 19:40 +08:00：完成 `yichuantiku` 表情包库视觉标注，写入本地 meme manager 运行时图库：5 个分类、11 张素材，素材 `analysis.auto` 字段已按当前发送机制的 mood/intensity/context 结构补齐。
@@ -94,7 +98,7 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-23 23:45 +08:00：主回复模型默认固定走 Claude Messages 缓存协议，`buildMainModelRequest` 统一生成 `/v1/messages` 请求，不再为主回复注入 OpenAI `prompt_cache_key`；Claude 缓存断点由 `cache_control` 和 `anthropic-beta: prompt-caching-2024-07-31` 承担。
 
-更新 2026-05-23 23:55 +08:00：主回复 Claude Messages 链路默认注入 Anthropic 原生 `web_search_20250305` server tool；可用 `MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED=false` 关闭，诊断脚本会对照测试开启/关闭原生搜索的真实请求结果。
+更新 2026-05-23 23:55 +08:00：主回复 Claude Messages 链路曾默认注入 Anthropic 原生 `web_search_20250305` server tool；2026-05-24 21:10 +08:00 起已改为按需注入，只有 `allowedTools` 包含 `web_search/skill_web_search` 或调用方显式 `anthropicWebSearch: true` 时启用。
 
 更新 2026-05-24 00:18 +08:00：Anthropic 原生搜索注入改为官方 server tool 形态：`web_search_20250305` 不再被加 `cache_control`，纯 server tool 请求不默认加 `tool_choice`，`user_location` 自动带 `type=approximate`。本次真实请求显示主/管理员链路参数已注入并送达，但当前网关响应没有 `server_tool_use`/`web_search_tool_result`/`usage.server_tool_use`，不能判定为 Anthropic 原生搜索真实执行。
 
@@ -235,6 +239,8 @@ PLANNER_ALLOW_MAIN_MODEL_FALLBACK=false
 ```
 
 Anthropic 主回复原生搜索：
+
+`MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED` 是总开关；实际请求只在路由暴露 `web_search/skill_web_search` 或诊断显式启用时注入 server tool。
 
 ```env
 MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED=true

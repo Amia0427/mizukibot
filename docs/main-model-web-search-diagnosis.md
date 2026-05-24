@@ -6,6 +6,10 @@
 
 更新 2026-05-24 00:18 +08:00：`web_search_20250305` 注入调整为官方 server tool 形态：不对 server tool 写入 `cache_control`，仅存在 server tool 时不写 `tool_choice`，`user_location` 自动补 `type=approximate`，并避免同时发送 `allowed_domains` 和 `blocked_domains`。诊断脚本把“参数已注入”和“供应商实际执行原生搜索”拆开判断，后者只认 `server_tool_use`、`web_search_tool_result` 或 `usage.server_tool_use`。
 
+更新 2026-05-24 21:10 +08:00：线上日志发现普通群聊被默认 server tool 诱导输出 `I'll search for "[Context for assistant only] [ContinuityState] ..."`，并污染 daily journal/style profile。主回复构建已改为按需注入原生搜索：`allowedTools` 包含 `web_search/skill_web_search` 或诊断脚本显式 `anthropicWebSearch: true` 时才启用；普通聊天、记忆检索和 `memory_cli` 路径不再默认带 `web_search_20250305`。
+
+更新 2026-05-24 21:36 +08:00：修复按需联网后暴露出的 planner normalization 回归：companion 安全工具纠正不会被提前过滤成空计划，MemOS 已召回时不再重复升级为 `memory_cli` 工具计划；全量 `npm test` 通过。
+
 ## 诊断命令
 
 ```bash
@@ -16,7 +20,7 @@ node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
 脚本会跑五类探针：
 
 - `runtime_without_native_search`：按主回复实际 Claude Messages 链路请求，但显式关闭原生搜索注入。
-- `runtime_with_native_search`：按主回复实际 Claude Messages 链路请求，并启用原生 `web_search_20250305` 注入。
+- `runtime_with_native_search`：按主回复实际 Claude Messages 链路请求，并通过 `anthropicWebSearch: true` 显式启用原生 `web_search_20250305` 注入。
 - `no_tool`：兼容旧字段，等同于 `runtime_without_native_search`。
 - `openai_responses_web_search_preview`：尝试 OpenAI Responses `web_search_preview` 原生工具参数。
 - `anthropic_messages_web_search`：尝试 Anthropic Messages `web_search_20250305` 原生工具参数。
@@ -46,4 +50,4 @@ node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
 
 ## 使用判断
 
-当前主回复链路已注入 Anthropic 原生搜索参数；如果临时关闭 `MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED`，普通和管理员主回复仍会退回无内置联网能力。需要确定线上渠道是否真的完成搜索时，看 `runtime_with_native_search.inference.providerSearchEvidence`，不要只看文本里是否出现 URL。
+当前主回复链路只在显式联网场景注入 Anthropic 原生搜索参数；如果临时关闭 `MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED`，即使显式联网探针也不会注入。需要确定线上渠道是否真的完成搜索时，看 `runtime_with_native_search.inference.providerSearchEvidence`，不要只看文本里是否出现 URL。

@@ -2,6 +2,7 @@ const {
   applyGroupDirectStyleGuard,
   createGroupDirectStyleGuardEvent
 } = require('../guards/groupDirectReplyStyleGuard');
+const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
 
 function createRouteAfterDirectReply() {
   return function routeAfterDirectReply(state) {
@@ -92,6 +93,7 @@ function createDirectReplyNode(deps = {}) {
         const trimmed = String(text || '').trim();
         if (!trimmed) return false;
         if (isPureToolCallMarkup(trimmed)) return false;
+        if (isUnsafeUserFacingReply(trimmed)) return false;
         return classifyReplyFailure(trimmed).type === 'none';
       });
   const classifyDirectReplyError = typeof deps.classifyDirectReplyError === 'function'
@@ -120,6 +122,13 @@ function createDirectReplyNode(deps = {}) {
         const limit = Math.max(80, Number(maxChars) || 240);
         return compact.length > limit ? `${compact.slice(0, limit - 3).trim()}...` : compact;
       });
+  const buildUnsafeReplyRetryInstruction = typeof deps.buildUnsafeReplyRetryInstruction === 'function'
+    ? deps.buildUnsafeReplyRetryInstruction
+    : (() => [
+        'The previous candidate narrated hidden tool/search work or exposed internal context markers.',
+        'Do not mention tools, searches, commands, or bracketed internal context.',
+        'Reply with plain natural language only, using the context silently.'
+      ].join(' '));
   const buildReplyTextVariants = typeof deps.buildReplyTextVariants === 'function'
     ? deps.buildReplyTextVariants
     : ((text = '') => ({
@@ -339,6 +348,26 @@ function createDirectReplyNode(deps = {}) {
               mode: 'direct'
             };
           }
+        } else if (isUnsafeUserFacingReply(assistantText)) {
+          directLoopEvents.push(createEvent('unsafe_reply_blocked', {
+            node: 'direct_reply',
+            stage: 'tool_probe',
+            preview: summarizeToolMarkupText(assistantText, 320)
+          }));
+          const replyResult = await requestReplyImpl(
+            messagesToSend.concat([{
+              role: 'system',
+              content: buildUnsafeReplyRetryInstruction()
+            }]),
+            {
+              ...directContext,
+              triggerBranch: 'direct_reply.unsafe_tool_probe_retry',
+              disableTools: true,
+              allowedTools: []
+            }
+          );
+          reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
+          displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
         } else if (request.streaming) {
           const streamed = await streamDirectReply(messagesToSend, {
             ...state,
@@ -526,6 +555,46 @@ function createDirectReplyNode(deps = {}) {
 
     if (!displayReply) {
       displayReply = reply;
+    }
+
+    if (isUnsafeUserFacingReply(reply)) {
+      directLoopEvents = directLoopEvents.concat([
+        createEvent('unsafe_reply_blocked', {
+          node: 'direct_reply',
+          stage: 'final_reply',
+          preview: summarizeToolMarkupText(reply, 320)
+        })
+      ]);
+      let retriedReply = '';
+      try {
+        const retryResult = await requestReplyImpl(
+          messagesToSend.concat([{
+            role: 'system',
+            content: buildUnsafeReplyRetryInstruction()
+          }]),
+          {
+            ...directContext,
+            triggerBranch: 'direct_reply.unsafe_final_retry',
+            disableTools: true,
+            allowedTools: []
+          }
+        );
+        retriedReply = String(
+          retryResult?.persistedText
+          || retryResult?.finalReply
+          || retryResult?.visibleText
+          || retryResult
+          || ''
+        ).trim();
+      } catch (_) {}
+
+      if (isStableDirectReplyText(retriedReply)) {
+        reply = retriedReply;
+        displayReply = retriedReply;
+      } else {
+        reply = getControlledFailureReply('generic_model_failure');
+        displayReply = reply;
+      }
     }
 
     if (isPureToolCallMarkup(reply) && executedToolEnvelopes.length === 0) {

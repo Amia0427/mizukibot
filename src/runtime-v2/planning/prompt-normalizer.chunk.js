@@ -17,6 +17,7 @@ const {
   getPlannerRequestText,
   isConversationalNoop,
   isSubjectiveOpinionQuestion,
+  isWeatherRequest,
   normalizeArray,
   normalizeChatMode,
   normalizeObject,
@@ -318,6 +319,9 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   const fallback = buildRuleBasedPlannerDecision(route, options);
   const available = collectAvailableToolSummary(route, options);
   const toolCatalogByName = buildToolCatalogByName(available.toolCatalog);
+  const hasMemosRecallEvidence = options.availableContextSignals?.memosRecall === true
+    || Boolean(normalizeText(options.memosRecallText))
+    || normalizeObject(options.memosRecall, {}).used === true;
   const personaModuleCatalog = normalizeArray(options.personaModuleCatalog).length > 0
     ? normalizeArray(options.personaModuleCatalog)
     : getPersonaModuleCatalogSummary();
@@ -421,7 +425,11 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
       && currentSet.has('search_academic_paper');
     const financeMismatch = canonicalPreferredTools.some((toolName) => /^skill_stock_/i.test(toolName))
       && currentSet.has('web_search');
-    const weatherMismatch = canonicalSet.has('skill_weather') && (currentSet.has('web_search') || currentSet.has('getWeather'));
+    const weatherMismatch = (canonicalSet.has('skill_weather') || canonicalSet.has('getWeather'))
+      && (currentSet.has('web_search') || currentSet.has('getWeather'));
+    const emptyWeatherToolAfterCompanionFilter = currentSet.size === 0
+      && (canonicalSet.has('skill_weather') || canonicalSet.has('getWeather'))
+      && isWeatherRequest(cleanText, route);
     const contextMismatch = canonicalPrimary === 'get_context_stats' && currentPrimary !== canonicalPrimary;
     const timeMismatch = canonicalPrimary === 'get_current_time' && currentPrimary !== canonicalPrimary;
     const notebookMismatch = (canonicalPrimary === 'notebook_search' || canonicalPrimary === 'notebook_list_docs') && currentPrimary !== canonicalPrimary;
@@ -429,6 +437,7 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     const explicitUrlMismatch = canonicalPrimary === 'web_fetch' && currentPrimary !== canonicalPrimary;
     if (
       selectedGenericWebForSpecialized
+      || emptyWeatherToolAfterCompanionFilter
       || notebookVsMemoryMismatch
       || arxivMismatch
       || financeMismatch
@@ -451,6 +460,7 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     normalizedAllowedToolNames.includes('memory_cli')
     && shouldPrioritizeMemoryProbe(route)
     && taskShape === 'fast_reply'
+    && !hasMemosRecallEvidence
   ) {
     taskShape = 'tool_augmented_reply';
     normalizedByRule = true;

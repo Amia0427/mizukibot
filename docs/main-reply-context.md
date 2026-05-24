@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-24 20:08 +08:00
+更新时间：2026-05-24 21:36 +08:00
 
 ## 已调整
 
@@ -22,6 +22,8 @@
 - 2026-05-24 17:35 +08:00：瑞希稳定系统提示词继续作为默认人格；主回复新增 `roleplay_runtime_context` critical 动态块，注入当前时间、场景、聊天模式、关系/近期摘要、用户最新消息、可见用户状态和本轮限制，并明确不读心、不替用户行动、普通聊天短消息、纯文本输出。
 - 2026-05-24 19:56 +08:00：planner 决策模型切到 `PLAN_MODEL=gpt-5.4-nano`，用于路由后工具/计划决策；`PLANNER_MAX_MODEL_CALLS=1` 和 `PLANNER_REQUEST_TIMEOUT_MS=60000` 保持不变。
 - 2026-05-24 20:08 +08:00：planner 决策模型改为 `PLAN_MODEL=gpt-5.4-mini`，同步当前可用的 router 模型配置。
+- 2026-05-24 21:10 +08:00：主回复新增用户可见回复防漏闸门，拦截 `I'll search for ...`、`[Context for assistant only]`、`[ContinuityState]` 等内部上下文/工具叙事进入首条复用、工具 followup 和 persist；`web_search_20250305` 改为只在显式联网工具或诊断探针启用。
+- 2026-05-24 21:36 +08:00：planner normalization 收尾：companion 模式会把天气类泛用 web 选择纠正为 `getWeather/skill_weather`，MemOS recall 已作为 prompt evidence 注入时不会再额外强制 `memory_cli`。
 
 ## Roleplay Runtime Context
 
@@ -49,6 +51,8 @@ npm run diag:continuity -- prompt --user <id> --json
 主回复缓存诊断看 `prompt_caching.request_cache_breakpoints/system_cache_breakpoints/tool_cache_breakpoints` 和 usage 中的 `cache_read_input_tokens/cache_creation_input_tokens`；`openai_prompt_cache_key` 对主回复应为空。
 
 `diag:continuity -- prompt` 会输出当前用户主回复实际可见的 `[ShortTermContinuity]`、summary、recent raw turns 和裁剪报告。
+
+内部上下文泄露排查可先搜 `data/bot-runtime.out.log` 的 `I'll search for "[Context for assistant only]`，正常情况下该文本不会再成为 `replyPreview` 或进入 daily journal/post-reply 学习。
 
 ## 可实施改进目标
 

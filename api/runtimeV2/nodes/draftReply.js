@@ -1,4 +1,5 @@
 const { buildToolEvidenceBundle } = require('../contracts');
+const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
 
 function createDraftReplyNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
@@ -83,6 +84,9 @@ function createDraftReplyNode(deps = {}) {
     }
     if (isPureToolCallMarkup(text)) {
       return { ok: false, text, reason: 'pure_tool_markup' };
+    }
+    if (isUnsafeUserFacingReply(text)) {
+      return { ok: false, text, reason: 'unsafe_user_facing_reply' };
     }
     return { ok: true, text, reason: '' };
   }

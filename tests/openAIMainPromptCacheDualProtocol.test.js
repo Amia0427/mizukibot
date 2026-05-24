@@ -78,9 +78,8 @@ module.exports = (async () => {
     assert.strictEqual(preparedMain.requestUrl, 'https://example.com/v1/messages');
     assert.ok(Array.isArray(preparedMain.requestBody.system));
     assert.ok(preparedMain.requestBody.system.some((block) => block.cache_control?.type === 'ephemeral'));
-    assert.ok(preparedMain.requestBody.tools.some((tool) => tool.type === 'web_search_20250305' && tool.name === 'web_search'));
     assert.ok(preparedMain.requestBody.tools.some((tool) => tool.name === 'lookup_memory' && tool.cache_control?.type === 'ephemeral'));
-    assert.ok(preparedMain.requestBody.tools.some((tool) => tool.type === 'web_search_20250305' && !Object.prototype.hasOwnProperty.call(tool, 'cache_control')));
+    assert.ok(!preparedMain.requestBody.tools.some((tool) => tool.type === 'web_search_20250305'));
     assert.deepStrictEqual(preparedMain.requestBody.tool_choice, { type: 'auto' });
     assert.strictEqual(preparedMain.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestBody, 'prompt_cache_key'));
@@ -117,9 +116,17 @@ module.exports = (async () => {
     process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_COUNTRY = 'CN';
     clearProjectCache();
     const { buildMainModelRequest: buildMainModelRequestWithSearchConfig } = require('../api/runtimeV2/model/shared');
+    const plainChatRequest = buildMainModelRequestWithSearchConfig(null, {
+      messages: [{ role: 'user', content: 'plain chat should not search' }],
+      stream: false,
+      defaultMaxTokens: 200
+    });
+    assert.ok(!Array.isArray(plainChatRequest.body.tools));
+
     const configuredSearchRequest = buildMainModelRequestWithSearchConfig(null, {
       messages: [{ role: 'user', content: 'latest news' }],
       stream: false,
+      allowedTools: ['web_search'],
       defaultMaxTokens: 200
     });
     const configuredPrepared = await httpClient.prepareRequest(configuredSearchRequest.url, configuredSearchRequest.body);
