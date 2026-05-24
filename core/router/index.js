@@ -73,7 +73,8 @@ function hasGroupMessageTarget(text = '') {
 function hasScheduleSignal(text = '') {
   const input = String(text || '').trim();
   if (!input) return false;
-  if (/\u5b9a\u65f6|\u7a0d\u540e|\u5230\u70b9|cron/i.test(input)) return true;
+  if (/\u5b9a\u65f6|\u7a0d\u540e|cron/i.test(input)) return true;
+  if (/\u5230\u70b9/i.test(input) && /(\u53d1|\u53d1\u9001|\u63d0\u9192|\u901a\u77e5|\u53eb\u6211|\u8ddf(?:\u6211|\u5927\u5bb6)?\u8bf4)/i.test(input)) return true;
   if (/(?:\u4eca\u5929|\u660e\u5929)\s*\d{1,2}:\d{2}/i.test(input)) return true;
   if (/\d+\s*(?:\u5206\u949f|\u5c0f\u65f6)\u540e/i.test(input)) return true;
   if (/\u6bcf\u5929\s*\d{1,2}:\d{2}/i.test(input)) return true;
@@ -471,8 +472,9 @@ function matchTerminalLocalRoute({ rawText = '', cleanText = '', imageUrl = null
   return null;
 }
 
-function matchActionLocalRoute({ rawText = '', cleanText = '', imageUrl = null, userId = '' }) {
-  const qqActionIntent = detectQqActionIntent(cleanText, imageUrl);
+function matchActionLocalRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null, userId = '' }) {
+  const actionIntentText = String(currentTurnText || cleanText || '').trim();
+  const qqActionIntent = detectQqActionIntent(actionIntentText, imageUrl);
   if (qqActionIntent) {
     const adjustedAllowedTools = (() => {
       const requested = Array.isArray(qqActionIntent.allowedTools) ? qqActionIntent.allowedTools.slice() : [];
@@ -961,8 +963,8 @@ const LOCAL_ROUTE_RULE_GROUPS = Object.freeze([
   matchDirectLocalRoute
 ]);
 
-function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', imageUrl = null, userId = '', chatType = '' }) {
-  const input = { rawText, cleanText, imageUrl, userId, chatType };
+function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null, userId = '', chatType = '' }) {
+  const input = { rawText, cleanText, currentTurnText, imageUrl, userId, chatType };
   for (const matchRuleGroup of LOCAL_ROUTE_RULE_GROUPS) {
     const route = matchRuleGroup(input);
     if (route) return route;
@@ -1264,7 +1266,7 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
     intentText,
     quotePriority
   } = resolveIntentInputs({ rawText, botQQ, directedContext, effectiveIntentText });
-  let route = buildCanonicalFallbackRoute({ rawText, cleanText: intentText, imageUrl, userId, chatType });
+  let route = buildCanonicalFallbackRoute({ rawText, cleanText: intentText, currentTurnText: cleanText, imageUrl, userId, chatType });
   route.cleanText = cleanText;
   route.rawText = rawText;
   route.meta = {

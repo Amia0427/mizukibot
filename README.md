@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-25 00:43 +08:00：修复引用消息中的“到点/消息”误触发 `qq_schedule_message`；QQ action 路由现在只用本轮清洗文本判定写操作，直接聊天和记忆检索仍可使用增强上下文。详见 `docs/qq-action-routing.md`。
+
 更新 2026-05-24 23:06 +08:00：修复弱指代群聊被旧连续性话题带偏的误召回路径；主回复不再仅因旧 `active_topic` 强制注入 `[ContinuityState]`，只有未完成用户轮次、open loop、承诺、用户约束或 continuity probe digest 才会绕过 planner 强制进入 prompt。
 
 更新 2026-05-24 22:22 +08:00：Anthropic 超大 cached 图片不再回退 QQ 临时 URL；会先压缩成 `ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE=768` 内的小 JPEG，并继续受 `ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS=120000` 约束，避免 10 万级输入 token 同时保留视觉识别。
@@ -455,6 +457,7 @@ Prompt 改了但没生效：
 
 - `docs/repo-cleanup.md`：历史维护记录、拆分、回流和清理记录。
 - `docs/main-reply-context.md`：主回复上下文目标。
+- `docs/qq-action-routing.md`：QQ action 路由误判排障记录。
 - `docs/memos-mcp-planner-recall.md`：MemOS MCP 召回设计。
 - `scripts/README.md`：脚本说明。
 - `deploy/README.md`：部署说明。

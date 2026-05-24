@@ -42,6 +42,30 @@ assert.strictEqual(actionRoute.topRouteType, 'direct_chat');
 assert.strictEqual(actionRoute.meta.localRuleId, 'explicit-action');
 assert.strictEqual(actionRoute.meta.responseIntent, 'action_guidance');
 
+const quotedApologyRoute = detectIntent({
+  rawText: '[CQ:reply,id=1511211870][CQ:at,qq=123456] 宝我错了，我只能变成深海少女自沉东京湾谢罪了',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group',
+  effectiveIntentText: '基于引用内容“你这个"错了"根本就没错到点上吧。 这种话题我不想接,换个别的聊吧。”，[引用消息] ai瑞希 / reply_quote 你这个"错了"根本就没错到点上吧。 这种话题我不想接,换个别的聊吧。 宝我错了，我只能变成深海少女自沉东京湾谢罪了'
+});
+
+assert.strictEqual(quotedApologyRoute.topRouteType, 'direct_chat');
+assert.notStrictEqual(quotedApologyRoute.meta.qqActionKey, 'qq_schedule_message');
+assert.notStrictEqual(quotedApologyRoute.meta.localRuleId, 'qq-schedule-message');
+assert.strictEqual(quotedApologyRoute.meta.responseIntent, 'answer');
+
+const explicitDeadlineRoute = detectIntent({
+  rawText: '[CQ:at,qq=123456] 到点提醒本群该睡觉了',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'group'
+});
+
+assert.strictEqual(explicitDeadlineRoute.meta.qqActionKey, 'qq_schedule_message');
+assert.deepStrictEqual(explicitDeadlineRoute.meta.allowedTools, ['schedule_group_message', 'create_scheduled_command']);
+assert.strictEqual(explicitDeadlineRoute.meta.responseIntent, 'action_guidance');
+
 const hapiCommand = parseAdminCommand('/hapi status');
 assert.strictEqual(hapiCommand.cmd, 'hapi');
 assert.strictEqual(hapiCommand.payload, 'status');
