@@ -9,6 +9,26 @@ function normalizeText(value) {
 
 function buildMainStageBlocks(options = {}) {
   const blocks = [];
+  const optionSystemPrompt = normalizeText(options.systemPrompt);
+  const configSystemPrompt = normalizeText(config.SYSTEM_PROMPT);
+  const hasSystemPromptOverride = Boolean(optionSystemPrompt && optionSystemPrompt !== configSystemPrompt);
+  const configuredSystemBlocks = Array.isArray(options.systemPromptBlocks)
+    ? options.systemPromptBlocks
+    : (!hasSystemPromptOverride && Array.isArray(config.SYSTEM_PROMPT_BLOCKS) ? config.SYSTEM_PROMPT_BLOCKS : []);
+  const normalizedSystemBlocks = configuredSystemBlocks.map((block, index) => ({
+    ...block,
+    id: normalizeText(block.id, `system_prompt_block_${index + 1}`),
+    label: normalizeText(block.label, normalizeText(block.id, `System Prompt Block ${index + 1}`)),
+    stage: normalizeText(block.stage, 'main'),
+    priority: Number.isFinite(Number(block.priority)) ? Number(block.priority) : 500 + index,
+    authority: normalizeText(block.authority, 'persona'),
+    kind: normalizeText(block.kind, 'persona'),
+    content: normalizeText(block.content)
+  })).filter((block) => block.content);
+  const rootSystemBlocks = normalizedSystemBlocks.filter((block) => block.authority === 'system_root' || block.kind === 'system_root');
+  const nonRootSystemBlocks = normalizedSystemBlocks.filter((block) => !(block.authority === 'system_root' || block.kind === 'system_root'));
+  const hasConfiguredSystemBlocks = normalizedSystemBlocks.length > 0;
+  blocks.push(...rootSystemBlocks);
   blocks.push({
     id: 'security_contract',
     label: 'Security Contract',
@@ -18,17 +38,21 @@ function buildMainStageBlocks(options = {}) {
     kind: 'security',
     content: buildSecuritySystemPrompt()
   });
-  const systemPrompt = normalizeText(options.systemPrompt || config.SYSTEM_PROMPT);
-  if (systemPrompt) {
-    blocks.push({
-      id: 'main_persona_system',
-      label: 'Main Persona',
-      stage: 'main',
-      priority: 500,
-      authority: 'persona',
-      kind: 'persona',
-      content: systemPrompt
-    });
+  if (hasConfiguredSystemBlocks) {
+    blocks.push(...nonRootSystemBlocks);
+  } else {
+    const systemPrompt = optionSystemPrompt || configSystemPrompt;
+    if (systemPrompt) {
+      blocks.push({
+        id: 'main_persona_system',
+        label: 'Main Persona',
+        stage: 'main',
+        priority: 500,
+        authority: 'persona',
+        kind: 'persona',
+        content: systemPrompt
+      });
+    }
   }
   return blocks;
 }

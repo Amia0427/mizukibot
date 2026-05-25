@@ -2,6 +2,8 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
+const { createTempPromptsDir } = require('./promptTestHelpers');
+
 function clearProjectCache() {
   const projectRoot = 'D:\\waifu\\';
   for (const key of Object.keys(require.cache)) {
@@ -26,7 +28,11 @@ function estimatePromptTokens(value) {
 
 (() => {
   const snapshot = { ...process.env };
+  const tempPrompts = createTempPromptsDir();
   try {
+    const rootSystemPromptPath = path.join(tempPrompts.promptsDir, 'SYSTEM.txt');
+    fs.writeFileSync(rootSystemPromptPath, '主回复根系统提示词测试块：最高优先级。', 'utf8');
+    process.env.PROMPTS_DIR = tempPrompts.promptsDir;
     useConfigDefault('CONTEXT_WINDOW_MAX_TOKENS');
     useConfigDefault('SHORT_TERM_MEMORY_MAX_TOKENS');
     useConfigDefault('SHORT_TERM_MEMORY_RECENT_MESSAGES');
@@ -54,6 +60,12 @@ function estimatePromptTokens(value) {
     ];
 
     assert.deepStrictEqual(config.PERSONA_FILES, requiredFiles);
+    assert.ok(config.SYSTEM_PROMPT.startsWith('主回复根系统提示词测试块：最高优先级。'), 'SYSTEM.txt must be the first compiled SYSTEM_PROMPT text');
+    assert.ok(Array.isArray(config.SYSTEM_PROMPT_BLOCKS), 'SYSTEM_PROMPT_BLOCKS must be exported');
+    assert.strictEqual(config.SYSTEM_PROMPT_BLOCKS[0]?.id, 'root_system_prompt');
+    assert.strictEqual(config.SYSTEM_PROMPT_BLOCKS[0]?.authority, 'system_root');
+    assert.ok(config.SYSTEM_PROMPT_BLOCKS[0]?.content.includes('主回复根系统提示词测试块：最高优先级。'));
+    assert.strictEqual(config.SYSTEM_PROMPT_BLOCKS[1]?.id, 'main_persona_system');
     const roleplayLivenessPrelude = fs.readFileSync(path.join(config.PERSONA_DIR, '00_roleplay_liveness_prelude.txt'), 'utf8').trim();
     assert.ok(roleplayLivenessPrelude, '00_roleplay_liveness_prelude.txt must not be empty');
     assert.ok(estimatePromptTokens(roleplayLivenessPrelude) <= 1500, 'roleplay liveness prelude must stay within 1500 estimated tokens');
@@ -88,6 +100,7 @@ function estimatePromptTokens(value) {
 
     console.log('configPersonaPrompt.test.js passed');
   } finally {
+    tempPrompts.cleanup();
     for (const key of Object.keys(process.env)) {
       if (!(key in snapshot)) delete process.env[key];
     }

@@ -140,6 +140,7 @@ function createConversationContextHelpers(deps = {}) {
     const blockId = String(block?.id || '').trim();
     if (!blockId) return false;
     return [
+      'root_system_prompt',
       'main_persona_system',
       'security_contract',
       'core_baseline_patch'

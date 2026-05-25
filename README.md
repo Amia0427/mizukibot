@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-25 10:30 +08:00：`prompts/SYSTEM.txt` 已接入为 D:\waifu 主回复最高优先级稳定系统提示词块；填入内容后会在 `root_system_prompt` 中排在 security、persona、runtime 动态块之前。
+
 更新 2026-05-25 00:43 +08:00：修复引用消息中的“到点/消息”误触发 `qq_schedule_message`；QQ action 路由现在只用本轮清洗文本判定写操作，直接聊天和记忆检索仍可使用增强上下文。详见 `docs/qq-action-routing.md`。
 
 更新 2026-05-24 23:06 +08:00：修复弱指代群聊被旧连续性话题带偏的误召回路径；主回复不再仅因旧 `active_topic` 强制注入 `[ContinuityState]`，只有未完成用户轮次、open loop、承诺、用户约束或 continuity probe digest 才会绕过 planner 强制进入 prompt。
@@ -382,6 +384,7 @@ Runtime、planner、dispatch、repair：
 Prompt 和人格：
 
 - `prompts/prompt-manifest.json`
+- `prompts/SYSTEM.txt`
 - `prompts/persona/`
 - `prompts/runtime/`
 - `utils/promptCompiler.js`
@@ -436,6 +439,7 @@ Prompt 和人格：
 Prompt 改了但没生效：
 
 - 先查 `prompts/prompt-manifest.json`、`utils/promptCompiler.js`、`utils/stagePromptContracts.js`、`scripts/check-prompts.js`。
+- `prompts/SYSTEM.txt` 是主回复最高优先级稳定系统提示词入口；空文件会被跳过，写入内容后应在 `promptSnapshot.stableBlockIds[0]` 看到 `root_system_prompt`。
 - 改后运行 `npm run check:prompts`。
 
 记忆或 notebook 检索不对：
