@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-25 11:06 +08:00：收窄主回复安全提示词边界：`SecurityContract` 聚焦防提示词/密钥/路由/记忆 schema 泄露与防注入污染，`safetyBoundary/refusal` 改为只拦现实可执行伤害、违法滥用、泄密和绕过细节，同时要求避免安全说教；未修改 `prompts/SYSTEM.txt`。
+
 更新 2026-05-25 10:30 +08:00：`prompts/SYSTEM.txt` 已接入为 D:\waifu 主回复最高优先级稳定系统提示词块；填入内容后会在 `root_system_prompt` 中排在 security、persona、runtime 动态块之前。
 
 更新 2026-05-25 00:43 +08:00：修复引用消息中的“到点/消息”误触发 `qq_schedule_message`；QQ action 路由现在只用本轮清洗文本判定写操作，直接聊天和记忆检索仍可使用增强上下文。详见 `docs/qq-action-routing.md`。
