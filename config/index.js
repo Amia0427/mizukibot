@@ -46,6 +46,7 @@ const PROMPTS_DIR = pick('PROMPTS_DIR', path.join(PROJECT_ROOT, 'prompts'));
 const PERSONA_DIR = path.join(PROMPTS_DIR, 'persona');
 const PROMPT_MANIFEST_PATH = path.join(PROMPTS_DIR, 'prompt-manifest.json');
 const {
+  buildSystemPromptBlocks,
   buildSystemPrompt,
   readPromptManifest
 } = createPromptRuntime({
@@ -54,6 +55,8 @@ const {
   promptManifestPath: PROMPT_MANIFEST_PATH,
   safeReadText
 });
+const SYSTEM_PROMPT = buildSystemPrompt();
+const SYSTEM_PROMPT_BLOCKS = buildSystemPromptBlocks();
 
 // 鍏煎鏃у彉閲?LLM_HUMANIZER_ENABLED锛屾柊鍙橀噺 HUMANIZER_AGENT_ENABLED 浼樺厛銆?
 const humanizerAgentEnabled = pickBool('HUMANIZER_AGENT_ENABLED', pickBool('LLM_HUMANIZER_ENABLED', true));
@@ -1149,7 +1152,8 @@ module.exports = {
   PERSONA_DIR,
   PERSONA_FILES,
   PROMPT_MANIFEST: readPromptManifest(),
-  SYSTEM_PROMPT: buildSystemPrompt(),
+  SYSTEM_PROMPT,
+  SYSTEM_PROMPT_BLOCKS,
 
   REQUIRED_ENV_KEYS,
   validateRequiredConfig

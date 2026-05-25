@@ -1,4 +1,8 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const { createTempPromptsDir } = require('./promptTestHelpers');
 
 function clearProjectCache() {
   const projectRoot = 'D:\\waifu\\';
@@ -9,7 +13,11 @@ function clearProjectCache() {
 
 module.exports = (async () => {
   const snapshot = { ...process.env };
+  const tempPrompts = createTempPromptsDir();
   try {
+    const rootSystemPromptPath = path.join(tempPrompts.promptsDir, 'SYSTEM.txt');
+    fs.writeFileSync(rootSystemPromptPath, '主回复根系统提示词测试块：stable blocks 第一位。', 'utf8');
+    process.env.PROMPTS_DIR = tempPrompts.promptsDir;
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.PROMPT_OPTIONAL_BUILD_ENABLED = 'true';
     process.env.PROMPT_OPTIONAL_BUILD_BUDGET_MS = '1';
@@ -35,6 +43,10 @@ module.exports = (async () => {
     assert.strictEqual(first.latencyMeta.optionalBudgetExceeded, true);
     assert.ok(Number(first.latencyMeta.promptCollectMs || 0) >= 0);
     assert.ok(Number(first.latencyMeta.promptRenderMs || 0) >= 0);
+    assert.strictEqual(first.stableSystemBlocks[0]?.id, 'root_system_prompt');
+    assert.ok(first.stableSystemBlocks[0]?.content.includes('主回复根系统提示词测试块：stable blocks 第一位。'));
+    assert.strictEqual(first.promptSnapshot.stableBlockIds[0], 'root_system_prompt');
+    assert.strictEqual(first.promptSnapshot.assembledBlocks[0]?.id, 'root_system_prompt');
     assert.ok(first.promptSnapshot.assembledBlocks.some((item) => item.id === 'main_persona_system'));
     assert.ok(!first.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
 
@@ -64,6 +76,7 @@ module.exports = (async () => {
 
     console.log('runtimeV2PromptOptimization.test.js passed');
   } finally {
+    tempPrompts.cleanup();
     for (const key of Object.keys(process.env)) {
       if (!(key in snapshot)) delete process.env[key];
     }

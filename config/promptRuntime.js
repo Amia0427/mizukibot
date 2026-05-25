@@ -24,6 +24,24 @@ function isRequiredSystemPersonaPath(relPath = '') {
   return REQUIRED_SYSTEM_PERSONA_PATHS.has(normalizePromptRelPath(relPath));
 }
 
+function normalizeManifestSectionBlock(section = {}, relPath = '', text = '') {
+  const normalizedRelPath = normalizePromptRelPath(relPath || section?.path);
+  return {
+    id: String(section?.id || normalizedRelPath).trim() || normalizedRelPath,
+    label: String(section?.id || normalizedRelPath).trim() || normalizedRelPath,
+    stage: String(section?.stage || 'main').trim() || 'main',
+    priority: Number.isFinite(Number(section?.priority)) ? Number(section.priority) : 100,
+    authority: String(section?.authority || section?.kind || 'prompt_asset').trim() || 'prompt_asset',
+    budgetTokens: Math.max(0, Number(section?.budgetTokens || section?.budget_tokens || 0) || 0),
+    conflictTags: Array.isArray(section?.conflictTags || section?.conflict_tags)
+      ? (section.conflictTags || section.conflict_tags).map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    source: normalizedRelPath,
+    kind: String(section?.kind || 'prompt_asset').trim() || 'prompt_asset',
+    content: String(text || '').trim()
+  };
+}
+
 function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeReadText }) {
   function readPromptManifest() {
     return loadPromptManifest(promptManifestPath);
@@ -74,20 +92,7 @@ function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeR
       const forceInclude = isRequiredSystemPersonaPath(relPath);
       if (!forceInclude && (section?.includeInSystemPrompt === false || section?.include_in_system_prompt === false)) continue;
       if (forceInclude) loadedRequiredPersonaPaths.add(relPath);
-      blocks.push({
-        id: String(section?.id || relPath).trim() || relPath,
-        label: String(section?.id || relPath).trim() || relPath,
-        stage: String(section?.stage || 'main').trim() || 'main',
-        priority: Number.isFinite(Number(section?.priority)) ? Number(section.priority) : 100,
-        authority: String(section?.authority || section?.kind || 'prompt_asset').trim() || 'prompt_asset',
-        budgetTokens: Math.max(0, Number(section?.budgetTokens || section?.budget_tokens || 0) || 0),
-        conflictTags: Array.isArray(section?.conflictTags || section?.conflict_tags)
-          ? (section.conflictTags || section.conflict_tags).map((item) => String(item || '').trim()).filter(Boolean)
-          : [],
-        source: relPath,
-        kind: String(section?.kind || 'prompt_asset').trim() || 'prompt_asset',
-        content: text
-      });
+      blocks.push(normalizeManifestSectionBlock(section, relPath, text));
     }
 
     REQUIRED_SYSTEM_PERSONA_FILES.forEach((name, index) => {
@@ -121,7 +126,7 @@ function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeR
       ? manifest.system_prompt.preamble.map((item) => String(item || '').trim()).filter(Boolean).join('\n')
       : '';
 
-    const snapshot = buildPromptSnapshot([
+    const promptBlocks = [
       ...(preamble ? [{
         id: 'manifest_preamble',
         label: 'Manifest Preamble',
@@ -133,7 +138,8 @@ function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeR
         content: preamble
       }] : []),
       ...blocks
-    ], {
+    ];
+    const snapshot = buildPromptSnapshot(promptBlocks, {
       stage: 'main',
       policyKey: 'config/system_prompt'
     });
@@ -141,6 +147,74 @@ function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeR
     validateRequiredSystemPersonaPrompt(fullPrompt);
     validatePromptText(fullPrompt, manifest);
     return fullPrompt;
+  }
+
+  function buildSystemPromptBlocks() {
+    const manifest = readPromptManifest();
+    if (!manifest) {
+      return [{
+        id: 'main_persona_system',
+        label: 'Main Persona',
+        stage: 'main',
+        priority: 500,
+        authority: 'persona',
+        kind: 'persona',
+        source: 'legacy_system_prompt',
+        content: loadPromptSectionsFromLegacyFiles()
+      }];
+    }
+
+    const fullPrompt = loadPromptSectionsFromManifest(manifest);
+    const sections = Array.isArray(manifest?.system_prompt?.sections) ? manifest.system_prompt.sections : [];
+    const rootBlocks = [];
+    const personaBlocks = [];
+
+    for (const section of sections) {
+      const relPath = normalizePromptRelPath(section?.path);
+      if (!relPath) continue;
+      const asset = readPromptAsset(promptsDir, relPath);
+      const text = String(asset.text || '').trim();
+      if (!text) continue;
+      const block = normalizeManifestSectionBlock(section, relPath, text);
+      if (String(block.kind || '').trim() === 'system_root' || String(block.authority || '').trim() === 'system_root') {
+        rootBlocks.push(block);
+      } else if (block.source !== 'prompt-manifest.json') {
+        personaBlocks.push(block);
+      }
+    }
+
+    const rootSnapshot = buildPromptSnapshot(rootBlocks, {
+      stage: 'main',
+      policyKey: 'config/system_prompt/root'
+    });
+    const rootIds = new Set(rootSnapshot.assembledBlocks.map((block) => block.id));
+    const rootPrompt = rootSnapshot.renderedSystemMessages
+      .map((message) => String(message.content || '').trim())
+      .filter(Boolean)
+      .join('\n');
+    const personaPrompt = fullPrompt.slice(rootPrompt.length).trim() || fullPrompt;
+
+    return [
+      ...rootSnapshot.assembledBlocks.map((block) => ({
+        ...block,
+        lane: 'stable_system'
+      })),
+      {
+        id: 'main_persona_system',
+        label: 'Main Persona',
+        stage: 'main',
+        priority: 500,
+        authority: 'persona',
+        kind: 'persona',
+        source: 'config/system_prompt',
+        content: personaPrompt,
+        meta: {
+          compiledFromManifest: true,
+          rootSystemPromptIds: [...rootIds],
+          manifestPersonaBlockIds: personaBlocks.map((block) => block.id).filter(Boolean)
+        }
+      }
+    ].filter((block) => String(block.content || '').trim());
   }
 
   function loadPromptSectionsFromLegacyFiles() {
@@ -179,6 +253,7 @@ function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeR
   }
 
   return {
+    buildSystemPromptBlocks,
     buildSystemPrompt,
     isRequiredSystemPersonaPath,
     loadPromptSectionsFromLegacyFiles,
@@ -193,6 +268,7 @@ function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeR
 module.exports = {
   createPromptRuntime,
   isRequiredSystemPersonaPath,
+  normalizeManifestSectionBlock,
   normalizePromptRelPath,
   PERSONA_FILES,
   REQUIRED_SYSTEM_PERSONA_FILES,
