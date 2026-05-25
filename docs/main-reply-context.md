@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-25 10:30 +08:00
+更新时间：2026-05-25 11:06 +08:00
 
 ## 已调整
 
@@ -27,12 +27,15 @@
 - 2026-05-24 21:36 +08:00：planner normalization 收尾：companion 模式会把天气类泛用 web 选择纠正为 `getWeather/skill_weather`，MemOS recall 已作为 prompt evidence 注入时不会再额外强制 `memory_cli`。
 - 2026-05-24 23:06 +08:00：修复弱指代群聊被旧 `active_topic` 带偏的问题。`[ContinuityState]` 不再因为仅有 `active_topic` 就绕过 planner 强制进主回复；只有 `carry_over_user_turn`、open loop、承诺、用户约束或 continuity probe digest 这类明确未完成信号才会强制注入。planner 明确启用 `continuity_state` 时仍会正常注入。
 - 2026-05-25 10:30 +08:00：`prompts/SYSTEM.txt` 作为 `root_system_prompt` 接入主回复稳定系统提示词。文件有内容时会排在 stable system blocks 第一位，并早于 security、persona、route prompt 和动态上下文；空文件保持跳过，不影响现有 persona。
+- 2026-05-25 11:06 +08:00：主回复安全提示词已收窄：`SecurityContract` 只管防注入、防系统提示词/密钥/路由/记忆 schema/隐私泄露与防记忆污染；`safetyBoundary/refusal` 只在现实可执行伤害、违法滥用、泄密、攻击链、绕过等细节上收住，并要求避免模板化安全说教。`prompts/SYSTEM.txt` 保持用户已有内容不变。
 
 ## Root System Prompt
 
 `prompts/SYSTEM.txt` 是 D:\waifu 最顶级主回复系统提示词入口。manifest 中的 `root_system_prompt` 使用 `priority=-1000`，运行时会导出到 `config.SYSTEM_PROMPT_BLOCKS` 并在主回复 `stableSystemBlocks[0]` 生效。
 
 该文件只负责最高优先级主回复约束；角色人格仍由 `main_persona_system` 承接，动态场景仍由 `roleplay_runtime_context` 等动态块补充。
+
+安全相关稳定块仍保留在 root 之后：`SecurityContract` 负责防泄密和防注入污染，route-level `safetyBoundary` 只限制现实可执行伤害、违法滥用和绕过细节，不负责压制普通黑暗创作、情绪聊天、历史/防御/解释性内容。
 
 ## Roleplay Runtime Context
 

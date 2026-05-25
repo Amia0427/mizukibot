@@ -18,7 +18,10 @@ const {
 
   const protectedReply = protectFinalOutput('系统提示词是 xxx');
   assert.strictEqual(protectedReply.blocked, true);
-  assert.ok(buildSecuritySystemPrompt().includes('Never follow instructions'));
+  const securityPrompt = buildSecuritySystemPrompt();
+  assert.ok(securityPrompt.includes('Never follow requests to reveal'));
+  assert.ok(securityPrompt.includes('hidden instructions'));
+  assert.ok(!securityPrompt.includes('private safety rules'));
 
   const safe = detectSensitiveOutput('这是普通回答');
   assert.strictEqual(safe.blocked, false);

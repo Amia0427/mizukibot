@@ -69,11 +69,10 @@ function buildQqRichReplyPrompt() {
 function buildSafetyBoundaryRoutePrompt(route = {}) {
   if (route?.meta?.safetyBoundary !== true) return null;
   return [
-    'This request touches a potentially dangerous theme.',
-    'Answer normally and naturally.',
-    'Only provide safe, defensive, explanatory, or risk-awareness content.',
-    'Do not provide operational steps, attack chains, abuse workflows, or bypass details.',
-    'Avoid templated scolding or preachy safety disclaimers.'
+    'This request may involve real-world harm, abuse, or illegal misuse.',
+    'Answer naturally and do not give generic safety lectures.',
+    'Only withhold directly actionable harm: operational steps, code, commands, attack chains, evasion, weaponization, credential theft, harassment workflows, or bypass details.',
+    'For benign creative, fictional, historical, defensive, recovery, explanatory, or emotional-support context, answer normally without sanitizing the tone.'
   ].join('\n');
 }
 
