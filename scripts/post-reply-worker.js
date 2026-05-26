@@ -1,3 +1,5 @@
+process.env.MIZUKIBOT_RUNTIME_ROLE = process.env.MIZUKIBOT_RUNTIME_ROLE || 'post_reply_worker';
+
 const config = require('../config');
 const { createPostReplyWorkerRuntime } = require('../utils/postReplyWorkerRuntime');
 const { startResourceSnapshotLoop } = require('../utils/perfRuntime');

@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-27 01:45 +08:00：低内存档位改为“轻量化但不关闭能力”：`LOW_RESOURCE_MODE=true` 且运行角色为 main 时默认不启动 embedding backfill，LanceDB 读走一次性 helper，并降低 memory/worldbook rerank、worldbook semantic、图片记忆召回的候选数和超时预算；post-reply worker 保留完整学习链路，默认 `768MB/30s` 空闲 RSS 回收。
+
 更新 2026-05-27 01:05 +08:00：群聊 direct chat 主模型默认跟随全局流式开关输出；旧公开群配置不会再因未显式 `/main_stream on` 阻断流式，仍可用 `/main_stream off` 对公开群单独关闭。
 
 更新 2026-05-27 01:04 +08:00：复盘“前天脚臭排行”误召回，定位为主回复运行时在 planner 明确跳过记忆时仍因 `memoryContext` 非空强制注入 `retrieved_memory_lite`；已收窄强制注入条件，清理 `prompts/SYSTEM.txt` 中与瑞希人格冲突的 root prompt 注入语，并新增回归样例防止无关记忆进入普通新话题。

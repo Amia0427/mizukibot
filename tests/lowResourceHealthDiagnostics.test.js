@@ -34,6 +34,8 @@ const report = buildLowResourceHealthReport({
 assert.strictEqual(report.schemaVersion, 'low_resource_health_v1');
 assert.strictEqual(report.ok, true);
 assert.strictEqual(report.summary.postReplyWorker.pidFileMatch, true);
+assert.ok(report.summary.config && typeof report.summary.config === 'object');
+assert.ok(buildLowResourceHealthText(report).includes('config: lowResource='));
 
 const warning = buildLowResourceHealthReport({
   status: {
@@ -58,5 +60,28 @@ assert.ok(warning.failedChecks.includes('localMcpIdle'));
 assert.ok(warning.failedChecks.includes('memoryBackfillWithinLimit'));
 assert.ok(warning.failedChecks.includes('postReplyPidHealthy'));
 assert.ok(buildLowResourceHealthText(warning).includes('low-resource-health: warning'));
+
+const recycled = buildLowResourceHealthReport({
+  status: {
+    summary: {
+      postReplyWorker: {
+        status: 'missing',
+        processCount: 0,
+        pidFileMatch: true,
+        queue: {}
+      }
+    }
+  },
+  hotspots: {
+    summary: {
+      localMcpChildren: { processCount: 0, rssMb: { total: 0, max: 0 } },
+      memoryBackfill: { processCount: 0, rssMb: { total: 0, max: 0 } }
+    }
+  }
+});
+
+assert.strictEqual(recycled.ok, true);
+assert.strictEqual(recycled.summary.config.postReplyIdleRecycled, true);
+assert.ok(buildLowResourceHealthText(recycled).includes('idleRecycled=true'));
 
 console.log('lowResourceHealthDiagnostics.test.js passed');
