@@ -1,5 +1,8 @@
 const { normalizeText } = require('./common');
 
+const PROMPT_TOKEN_WARNING_THRESHOLD = 50000;
+const PROMPT_TOKEN_HARD_LIMIT = 100000;
+
 function flattenContentText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -13,6 +16,60 @@ function flattenContentText(content) {
     return String(content?.image_url?.url || content?.url || '');
   }
   return '';
+}
+
+function estimatePromptTokens(value) {
+  const text = String(value || '').trim();
+  if (!text) return 0;
+  let cjkChars = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    if (code >= 0x3400 && code <= 0x9fff) cjkChars += 1;
+  }
+  const latinChars = text.length - cjkChars;
+  return cjkChars + Math.ceil(Math.max(0, latinChars) / 4);
+}
+
+function estimateContentTokens(content) {
+  return estimatePromptTokens(flattenContentText(content));
+}
+
+function summarizePromptTokenBudget(request = {}, combinedText = '') {
+  const messages = Array.isArray(request.messages) ? request.messages : [];
+  const systemTokens = estimateContentTokens(request.system);
+  const messageRows = messages.map((msg, index) => {
+    const role = normalizeText(msg?.role).toLowerCase() || 'unknown';
+    const tokens = estimateContentTokens(msg?.content);
+    return {
+      index,
+      role,
+      tokens
+    };
+  });
+  const messageTokens = messageRows.reduce((sum, row) => sum + row.tokens, 0);
+  const toolTokens = Array.isArray(request.tools)
+    ? estimatePromptTokens(JSON.stringify(request.tools))
+    : 0;
+  const totalEstimatedTokens = systemTokens + messageTokens + toolTokens;
+  const largestMessages = messageRows
+    .filter((row) => row.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens || a.index - b.index)
+    .slice(0, 5);
+  const warningThreshold = Math.max(0, Number(request.__promptTokenWarningThreshold || PROMPT_TOKEN_WARNING_THRESHOLD) || PROMPT_TOKEN_WARNING_THRESHOLD);
+  const hardLimit = Math.max(0, Number(request.__promptTokenHardLimit || PROMPT_TOKEN_HARD_LIMIT) || PROMPT_TOKEN_HARD_LIMIT);
+
+  return {
+    estimated_input_tokens: totalEstimatedTokens,
+    estimated_text_tokens: estimatePromptTokens(combinedText),
+    estimated_system_tokens: systemTokens,
+    estimated_message_tokens: messageTokens,
+    estimated_tool_tokens: toolTokens,
+    warning_threshold_tokens: warningThreshold,
+    hard_limit_tokens: hardLimit,
+    over_warning_threshold: warningThreshold > 0 && totalEstimatedTokens >= warningThreshold,
+    over_hard_limit: hardLimit > 0 && totalEstimatedTokens >= hardLimit,
+    largest_messages: largestMessages
+  };
 }
 
 function containsMemoryMarker(text) {
@@ -64,7 +121,8 @@ function summarizeRequest(request = {}) {
       has_daily_journal: markerCounts.daily_journal > 0,
       has_short_term_continuity: markerCounts.short_term_continuity > 0,
       has_memos_recall: markerCounts.memos_recall > 0,
-      has_continuity_state: markerCounts.continuity_state > 0
+      has_continuity_state: markerCounts.continuity_state > 0,
+      token_budget: summarizePromptTokenBudget(request, combinedText)
     }
   };
 }
@@ -92,7 +150,9 @@ function summarizePromptMarkerCounts(text = '') {
 
 module.exports = {
   containsMemoryMarker,
+  estimatePromptTokens,
   flattenContentText,
+  summarizePromptTokenBudget,
   summarizePromptMarkerCounts,
   summarizeRequest
 };

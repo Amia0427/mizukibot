@@ -29,6 +29,17 @@ module.exports = (() => {
   assert.strictEqual(summary.prompt_integrity.has_daily_journal, true);
   assert.strictEqual(summary.prompt_integrity.has_short_term_continuity, true);
   assert.strictEqual(summary.prompt_integrity.has_memos_recall, true);
+  assert.ok(summary.prompt_integrity.token_budget.estimated_input_tokens > 0);
+  assert.strictEqual(summary.prompt_integrity.token_budget.over_hard_limit, false);
+
+  const largeSummary = summarizeRequest({
+    messages: [{ role: 'user', content: 'x'.repeat(404000) }],
+    __promptTokenWarningThreshold: 50000,
+    __promptTokenHardLimit: 100000
+  });
+  assert.strictEqual(largeSummary.prompt_integrity.token_budget.over_warning_threshold, true);
+  assert.strictEqual(largeSummary.prompt_integrity.token_budget.over_hard_limit, true);
+  assert.strictEqual(largeSummary.prompt_integrity.token_budget.largest_messages[0].role, 'user');
 
   const markers = summarizePromptMarkerCounts(request.messages.map((item) => item.content).join('\n'));
   assert.strictEqual(markers.retrieved_memory, 1);

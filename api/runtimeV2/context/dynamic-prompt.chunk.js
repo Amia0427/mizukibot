@@ -576,7 +576,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       ...(optionsMemoryContext.segments || {})
     }
   };
-  const combinedBlocks = rawCombinedBlocks.filter((block) => {
+  const combinedBlocks = dedupePromptBlocks(rawCombinedBlocks).filter((block) => {
     const ids = getPromptBlockPlanIds(block).ids;
     if (!ids.includes('memos_recall')) return true;
     const deduped = dedupeMemosRecallForPrompt({
