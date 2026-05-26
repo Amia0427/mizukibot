@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-27 01:05 +08:00：群聊 direct chat 主模型默认跟随全局流式开关输出；旧公开群配置不会再因未显式 `/main_stream on` 阻断流式，仍可用 `/main_stream off` 对公开群单独关闭。
 
+更新 2026-05-27 01:18 +08:00：主回复 prompt token 体检：当前端到端样例约 6,597 估算输入 token，块合计 6,571；`persona/01_identity.txt` 占 36.74%、`00_roleplay_liveness_prelude.txt` 占 10.39%、`SYSTEM.txt` 占 3.35%；修复 `roleplay_runtime_context` 双重注入，并新增 `MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD=50000`、`MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT=100000` 出站预算日志/硬拦截。
+
 更新 2026-05-27 00:56 +08:00：复查当前 agent 回复变慢，24h 主回复完成 p50 约 117.5s、p95 约 206.2s；QQ 发送仅 20ms 级。主要原因是 planner `gpt-5.4-mini` 前台调用 p90 约 60s、主模型上游 `superapi.buzz` p50 约 45s，叠加群聊默认非流式和 post-reply worker 2GB 级内存压力；详见 `docs/runtime-latency-diagnosis.md`。
 
 更新 2026-05-26 08:11 +08:00：`tests/configPersonaPrompt.test.js` 的角色活人感断言改为语义校验，兼容 `00_roleplay_liveness_prelude.txt` 去掉“当前项目没有线下模式”的新措辞。
@@ -285,6 +287,8 @@ ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS=120000
 主回复短期上下文常用调节项：
 
 ```env
+MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD=50000
+MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT=100000
 SHORT_TERM_MEMORY_RECENT_MESSAGES=240
 SHORT_TERM_MEMORY_RECENT_TURNS=48
 SHORT_TERM_SCENE_RECENT_TURNS=24

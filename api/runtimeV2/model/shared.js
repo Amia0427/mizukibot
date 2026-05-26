@@ -12,6 +12,9 @@ const {
   recordMainModelSuccess
 } = require('../../../utils/mainModelFallback');
 const {
+  summarizePromptTokenBudget
+} = require('../../../utils/modelCallTracker/requestSummary');
+const {
   appendRequestTraceEvent,
   extractErrorCode,
   nextTracePhase
@@ -358,6 +361,13 @@ function applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig = null, op
 
 function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   const protocol = String(options.protocol || 'chat_completions').trim() || 'chat_completions';
+  const baseTools = withAnthropicWebSearchTool(options.tools, protocol, options);
+  const promptBudget = summarizePromptTokenBudget({
+    messages: Array.isArray(options.messages) ? options.messages : [],
+    tools: baseTools,
+    __promptTokenWarningThreshold: config.MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD,
+    __promptTokenHardLimit: config.MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT
+  });
   const body = {
     model: getModelName(resolvedConfig),
     temperature: getTemperature(resolvedConfig),
@@ -373,7 +383,7 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   const repetitionPenalty = getRepetitionPenalty(resolvedConfig);
   if (repetitionPenalty !== undefined) body.repetition_penalty = repetitionPenalty;
 
-  const tools = withAnthropicWebSearchTool(options.tools, protocol, options);
+  const tools = baseTools;
   if (tools.length > 0) {
     body.tools = tools;
     const explicitToolChoice = options.toolChoice || options.tool_choice || null;
@@ -386,7 +396,22 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
     body.__trace = options.trace;
   }
 
+  body.__promptTokenWarningThreshold = promptBudget.warning_threshold_tokens;
+  body.__promptTokenHardLimit = promptBudget.hard_limit_tokens;
   body.__preferredProtocol = protocol;
+
+  const finalPromptBudget = summarizePromptTokenBudget(body);
+  if (finalPromptBudget.over_hard_limit) {
+    const error = new Error(
+      `[main-reply-token-budget] estimated input ${finalPromptBudget.estimated_input_tokens} tokens exceeds hard limit ${finalPromptBudget.hard_limit_tokens}`
+    );
+    error.code = 'MAIN_REPLY_INPUT_TOKEN_BUDGET_EXCEEDED';
+    error.promptTokenBudget = finalPromptBudget;
+    throw error;
+  }
+  if (finalPromptBudget.over_warning_threshold) {
+    console.warn('[main-reply-token-budget] high estimated input tokens', finalPromptBudget);
+  }
 
   const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || '').trim();
   const apiKey = getApiKey(resolvedConfig);

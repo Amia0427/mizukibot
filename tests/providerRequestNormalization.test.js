@@ -45,6 +45,14 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(anthropicMain.body, 'prompt_cache_retention'));
     assert.ok(!Object.prototype.hasOwnProperty.call(anthropicMain.body, '__requestHeaders'));
 
+    assert.throws(
+      () => buildMainModelRequest(null, {
+        messages: [{ role: 'user', content: 'x'.repeat(404000) }],
+        stream: false
+      }),
+      (error) => error && error.code === 'MAIN_REPLY_INPUT_TOKEN_BUDGET_EXCEEDED'
+    );
+
     const preparedAnthropic = await httpClient.prepareRequest(anthropicMain.url, anthropicMain.body);
     assert.strictEqual(preparedAnthropic.provider, 'anthropic');
     assert.strictEqual(preparedAnthropic.requestUrl, 'https://api.anthropic.com/v1/messages');

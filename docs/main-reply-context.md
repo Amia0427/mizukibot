@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-26 08:11 +08:00
+更新时间：2026-05-27 01:18 +08:00
 
 ## 已调整
 
@@ -13,6 +13,7 @@
 - `SHORT_TERM_BRIDGE_RECENT_MESSAGES` 默认从 64 提高到 96。
 - `MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS` 默认从 2200 提高到 3600。
 - `MEMORY_V3_SESSION_RECENT_MESSAGES` 默认从 64 提高到 96。
+- 2026-05-27 01:18 +08:00：主回复 token 体检显示当前端到端样例约 6,597 估算输入 token，块合计 6,571；stable system 5,058（76.97%）、dynamic context 1,348（20.51%）、assistant-only 165（2.51%）。最大块是 `main_persona_system` 4,594（69.91%），其中 `persona/01_identity.txt` 2,414（36.74%）、`00_roleplay_liveness_prelude.txt` 683（10.39%）、`SYSTEM.txt` 220（3.35%）。修复 session/runtime 合并后 `roleplay_runtime_context` 重复注入，并在模型出站层新增 50k warning、100k hard block。
 - 2026-05-26 08:11 +08:00：`tests/configPersonaPrompt.test.js` 不再要求 `00_roleplay_liveness_prelude.txt` 固定包含“当前项目没有线下模式”，改为校验线上聊天锚点和避免线下/小说叙事语义。
 - 2026-05-26 08:00 +08:00：`prompts/persona/01_identity.txt` 与好友资料版瑞希提示词合并去重；人格核补强外在轻快/内里谨慎、秘密触发反应、人际关系、外貌审美和自然语料，未调整 manifest 优先级。
 - 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 会同步补 `retrieved_memory_lite`、`daily_journal`、`short_term_continuity`、planner 已选择的 `memos_recall` 和摘要块；主模型调用日志新增 `prompt_integrity` 摘要。
@@ -61,6 +62,8 @@ npm run diag:continuity -- prompt --user <id> --json
 ```
 
 查看最近主回复模型请求是否真的包含系统提示词、记忆标记、短期连续性和 MemOS 召回。日志只记录计数和布尔字段，不记录完整 prompt。
+
+`prompt_integrity.token_budget` 会记录估算输入 token、文本/系统/消息/工具分项、最大消息索引和阈值状态；默认 `MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD=50000` 打 warning，`MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT=100000` 在出站构造主回复请求时硬拦截。
 
 误召回排查可对照 `memory-recall-observability.ndjson` 的 `prepare_main_prompt_blocks` 和 `model-calls.ndjson` 的 `prompt_integrity`：如果 planner 未启用 `continuity_state`，但主模型调用仍出现 `[ContinuityState]`，优先查 runtime 注入层。2026-05-24 23:06 +08:00 起，单独旧 `active_topic` 不再触发这条强制路径。
 

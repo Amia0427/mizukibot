@@ -50,6 +50,11 @@ module.exports = (async () => {
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('boundary_rule='));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('pure_text_reply_only') || String(roleplayRuntimeContext?.content || '').includes('纯文本'));
   assert.ok(!String(roleplayRuntimeContext?.content || '').includes('current_time=1970-'));
+  assert.strictEqual(
+    main.dynamicContextBlocks.filter((item) => item.id === 'roleplay_runtime_context').length,
+    1,
+    'roleplay runtime context should not be duplicated after session/runtime merge'
+  );
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'directed_context'));
   if (main.latencyMeta?.optionalBudgetExceeded || !String(main.dynamicFewShotPrompt || '').trim()) {
     assert.ok(!main.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));

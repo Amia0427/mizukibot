@@ -154,6 +154,9 @@ function stripInternalRequestFields(requestBody = {}) {
   delete nextBody.__abortSignal;
   delete nextBody.__requestHeaders;
   delete nextBody.__preferredProtocol;
+  // Keep prompt-budget metadata out of provider payloads; it is for local logs/guards only.
+  delete nextBody.__promptTokenWarningThreshold;
+  delete nextBody.__promptTokenHardLimit;
   delete nextBody.__originalMaxTokens;
   delete nextBody.__responsesProtocolFallbackAttempted;
   return nextBody;

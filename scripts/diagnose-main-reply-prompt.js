@@ -60,6 +60,9 @@ function summarizeRow(row = {}) {
   const integrity = row.prompt_integrity && typeof row.prompt_integrity === 'object'
     ? row.prompt_integrity
     : {};
+  const tokenBudget = integrity.token_budget && typeof integrity.token_budget === 'object'
+    ? integrity.token_budget
+    : {};
   return {
     ts: row.ts || row.completed_at || '',
     status: row.status || '',
@@ -78,6 +81,12 @@ function summarizeRow(row = {}) {
     hasDailyJournal: integrity.has_daily_journal === true,
     hasShortTermContinuity: integrity.has_short_term_continuity === true,
     hasMemosRecall: integrity.has_memos_recall === true,
+    estimatedInputTokens: tokenBudget.estimated_input_tokens || null,
+    inputTokenWarn: tokenBudget.over_warning_threshold === true,
+    inputTokenHardBlock: tokenBudget.over_hard_limit === true,
+    largestPromptMessages: Array.isArray(tokenBudget.largest_messages)
+      ? tokenBudget.largest_messages.slice(0, 3)
+      : [],
     durationMs: row.duration_ms
   };
 }
