@@ -10,7 +10,8 @@ function normalizeText(value = '') {
 function defaultEntry() {
   return {
     isPublic: false,
-    mainModelStreamEnabled: false,
+    mainModelStreamEnabled: true,
+    mainModelStreamConfigured: false,
     updatedAt: 0,
     updatedBy: ''
   };
@@ -25,9 +26,14 @@ function defaultState() {
 
 function normalizeEntry(input = {}) {
   const raw = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const isPublic = raw.isPublic === true;
+  const mainModelStreamConfigured = isPublic && raw.mainModelStreamConfigured === true;
   return {
-    isPublic: raw.isPublic === true,
-    mainModelStreamEnabled: raw.isPublic === true && raw.mainModelStreamEnabled === true,
+    isPublic,
+    mainModelStreamEnabled: mainModelStreamConfigured
+      ? raw.mainModelStreamEnabled === true
+      : true,
+    mainModelStreamConfigured,
     updatedAt: Math.max(0, Number(raw.updatedAt || 0) || 0),
     updatedBy: normalizeText(raw.updatedBy)
   };
@@ -95,7 +101,8 @@ function hasExplicitGroupMainModelStreamPolicy(groupId = '') {
   const normalizedGroupId = normalizeText(groupId);
   if (!normalizedGroupId) return false;
   const state = readState();
-  return Boolean(state.groups && Object.prototype.hasOwnProperty.call(state.groups, normalizedGroupId));
+  const entry = state.groups && state.groups[normalizedGroupId];
+  return normalizeEntry(entry).mainModelStreamConfigured === true;
 }
 
 function setGroupPublic(groupId = '', isPublic = false, updatedBy = '', now = Date.now()) {
@@ -117,7 +124,10 @@ function setGroupPublic(groupId = '', isPublic = false, updatedBy = '', now = Da
       const existing = normalizeEntry(nextGroups[normalizedGroupId] || {});
       nextGroups[normalizedGroupId] = {
         isPublic: true,
-        mainModelStreamEnabled: existing.mainModelStreamEnabled === true,
+        mainModelStreamEnabled: existing.mainModelStreamConfigured
+          ? existing.mainModelStreamEnabled === true
+          : true,
+        mainModelStreamConfigured: existing.mainModelStreamConfigured === true,
         updatedAt,
         updatedBy: normalizedUpdatedBy
       };
@@ -163,6 +173,7 @@ function setGroupMainModelStreamEnabled(groupId = '', enabled = false, updatedBy
     nextGroups[normalizedGroupId] = {
       isPublic: true,
       mainModelStreamEnabled: enabled === true,
+      mainModelStreamConfigured: true,
       updatedAt,
       updatedBy: normalizedUpdatedBy
     };
@@ -183,14 +194,18 @@ function getGroupMainModelStreamStatus(groupId = '') {
   const normalizedGroupId = normalizeText(groupId);
   const policy = getGroupMainModelStreamPolicy(normalizedGroupId);
   const globalAiStreamEnabled = config.AI_STREAM_ENABLED === true;
-  const effectivePolicy = globalAiStreamEnabled && policy.isPublic && policy.mainModelStreamEnabled
-    ? 'main_model_stream_on'
-    : 'main_model_stream_off';
+  let effectivePolicy = 'main_model_stream_off';
+  if (globalAiStreamEnabled) {
+    effectivePolicy = policy.mainModelStreamConfigured
+      ? (policy.mainModelStreamEnabled ? 'main_model_stream_on' : 'main_model_stream_off')
+      : 'main_model_stream_on_by_default';
+  }
 
   return {
     groupId: normalizedGroupId,
     isPublic: policy.isPublic,
     mainModelStreamEnabled: policy.mainModelStreamEnabled,
+    mainModelStreamConfigured: policy.mainModelStreamConfigured,
     globalAiStreamEnabled,
     effectivePolicy,
     updatedAt: policy.updatedAt,
@@ -203,7 +218,7 @@ function formatGroupMainModelStreamStatus(groupId = '') {
   return [
     `groupId: ${status.groupId || '(empty)'}`,
     `public: ${status.isPublic ? 'on' : 'off'}`,
-    `main_model_stream: ${status.mainModelStreamEnabled ? 'on' : 'off'}`,
+    `main_model_stream: ${status.mainModelStreamConfigured ? (status.mainModelStreamEnabled ? 'on' : 'off') : 'default_on'}`,
     `global_ai_stream: ${status.globalAiStreamEnabled ? 'on' : 'off'}`,
     `effective_policy: ${status.effectivePolicy}`
   ].join('\n');
@@ -218,7 +233,7 @@ function shouldForceDisableGroupMainModelStream(options = {}) {
   if (!config.AI_STREAM_ENABLED) return true;
 
   const policy = getGroupMainModelStreamPolicy(groupId);
-  return !(policy.isPublic && policy.mainModelStreamEnabled);
+  return policy.mainModelStreamConfigured === true && policy.mainModelStreamEnabled !== true;
 }
 
 function reloadGroupMainModelStreamPolicyStore() {

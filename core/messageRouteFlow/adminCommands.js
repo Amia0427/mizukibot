@@ -11,7 +11,7 @@ function handleGroupPublicAdminCommand(command = {}, groupId = '', senderId = ''
   if (subcommand === 'status') return formatGroupMainModelStreamStatus(groupId);
   if (subcommand === 'on') {
     setGroupPublic(groupId, true, senderId, Date.now());
-    return '已开启当前群公开群标记。\n主模型流式默认仍为关闭。\n如需开启，请发送 /main_stream on';
+    return '已开启当前群公开群标记。\n主模型流式默认已开启。\n如需关闭，请发送 /main_stream off';
   }
   if (subcommand === 'off') {
     setGroupPublic(groupId, false, senderId, Date.now());

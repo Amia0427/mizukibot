@@ -10,6 +10,7 @@ process.env.AI_STREAM_ENABLED = 'true';
 
 const { createMessageRouteFlow } = require('../core/messageRouteFlow');
 const {
+  reloadGroupMainModelStreamPolicyStore,
   setGroupMainModelStreamEnabled,
   setGroupPublic
 } = require('../utils/groupMainModelStreamPolicy');
@@ -152,7 +153,28 @@ module.exports = (async () => {
   const groupEnvelope = await groupCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('group'));
   assert.strictEqual(groupEnvelope.replyText, 'ai reply');
   assert.strictEqual(groupCase.replyOptionsSeen.length, 1);
-  assert.strictEqual(groupCase.replyOptionsSeen[0].disableStream, true, 'group direct replies should stay non-streaming by default');
+  assert.strictEqual(groupCase.replyOptionsSeen[0].disableStream, false, 'group direct replies should stream by default');
+
+  fs.writeFileSync(process.env.GROUP_MAIN_MODEL_STREAM_POLICY_FILE, JSON.stringify({
+    version: 1,
+    groups: {
+      group_legacy: {
+        isPublic: true,
+        mainModelStreamEnabled: false,
+        updatedAt: Date.parse('2026-05-23T23:20:00+08:00'),
+        updatedBy: 'legacy'
+      }
+    }
+  }, null, 2));
+  reloadGroupMainModelStreamPolicyStore();
+  const legacyPolicyCase = createBaseDeps();
+  const legacyPolicyEnvelope = await legacyPolicyCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('group'),
+    groupId: 'group_legacy'
+  });
+  assert.strictEqual(legacyPolicyEnvelope.replyText, 'ai reply');
+  assert.strictEqual(legacyPolicyCase.replyOptionsSeen.length, 1);
+  assert.strictEqual(legacyPolicyCase.replyOptionsSeen[0].disableStream, false, 'legacy public group policy without explicit toggle should stream by default');
 
   setGroupPublic('group_1', true, 'test', Date.parse('2026-05-23T23:20:00+08:00'));
   setGroupMainModelStreamEnabled('group_1', true, 'test', Date.parse('2026-05-23T23:20:01+08:00'));
@@ -161,6 +183,13 @@ module.exports = (async () => {
   assert.strictEqual(publicStreamEnvelope.replyText, 'ai reply');
   assert.strictEqual(publicStreamCase.replyOptionsSeen.length, 1);
   assert.strictEqual(publicStreamCase.replyOptionsSeen[0].disableStream, false, 'public group with /main_stream on should allow streaming');
+
+  setGroupMainModelStreamEnabled('group_1', false, 'test', Date.parse('2026-05-23T23:20:02+08:00'));
+  const explicitOffCase = createBaseDeps();
+  const explicitOffEnvelope = await explicitOffCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('group'));
+  assert.strictEqual(explicitOffEnvelope.replyText, 'ai reply');
+  assert.strictEqual(explicitOffCase.replyOptionsSeen.length, 1);
+  assert.strictEqual(explicitOffCase.replyOptionsSeen[0].disableStream, true, 'public group with /main_stream off should disable streaming');
 
   const privateCase = createBaseDeps();
   const privateEnvelope = await privateCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('private'));

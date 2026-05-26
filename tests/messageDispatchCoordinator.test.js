@@ -103,7 +103,7 @@ module.exports = (async () => {
   assert.strictEqual(aiCalled, true);
   assert.ok(chat.replyOptions.modelConfig);
   assert.strictEqual(typeof chat.replyOptions.modelConfig.model, 'string');
-  assert.strictEqual(chat.replyOptions.disableStream, true, 'group chat should stay non-streaming by default');
+  assert.strictEqual(chat.replyOptions.disableStream, false, 'group chat should stream by default');
   assert.strictEqual(chat.replyOptions.deferPersist, true, 'direct chat replies should defer persist until send succeeds');
 
   setGroupPublic('g1', true, 'test', Date.parse('2026-05-23T23:20:00+08:00'));
@@ -119,6 +119,19 @@ module.exports = (async () => {
   });
   assert.strictEqual(publicGroupChat.reply, 'ai reply');
   assert.strictEqual(publicGroupChat.replyOptions.disableStream, false, 'public group with /main_stream on should allow streaming');
+
+  setGroupMainModelStreamEnabled('g1', false, 'test', Date.parse('2026-05-23T23:20:02+08:00'));
+  const explicitOffGroupChat = await coordinator.dispatchByRoutePlan({
+    route: { meta: {} },
+    routeExecutionPlan: { executor: 'direct', allowTools: false, topRouteType: 'direct_chat', allowedTools: [] },
+    cleanText: 'task',
+    imageUrl: null,
+    userInfo: {},
+    senderId: 'u1',
+    groupId: 'g1'
+  });
+  assert.strictEqual(explicitOffGroupChat.reply, 'ai reply');
+  assert.strictEqual(explicitOffGroupChat.replyOptions.disableStream, true, 'public group with /main_stream off should disable streaming');
 
   const privateChat = await coordinator.dispatchByRoutePlan({
     route: {
