@@ -70,7 +70,13 @@ function estimatePromptTokens(value) {
     assert.ok(roleplayLivenessPrelude, '00_roleplay_liveness_prelude.txt must not be empty');
     assert.ok(estimatePromptTokens(roleplayLivenessPrelude) <= 1500, 'roleplay liveness prelude must stay within 1500 estimated tokens');
     assert.ok(!roleplayLivenessPrelude.includes('线下或叙事场景'), 'roleplay liveness prelude must not define offline/narrative mode');
-    assert.ok(roleplayLivenessPrelude.includes('当前项目没有线下模式'), 'roleplay liveness prelude must explicitly avoid offline mode');
+    assert.ok(roleplayLivenessPrelude.includes('保持线上聊天里的瑞希'), 'roleplay liveness prelude must anchor online chat mode');
+    assert.ok(
+      roleplayLivenessPrelude.includes('当前项目没有线下模式')
+        || (roleplayLivenessPrelude.includes('不要切成小说叙事或线下演出')
+          && roleplayLivenessPrelude.includes('不要写长段动作、神态、环境描写')),
+      'roleplay liveness prelude must explicitly avoid offline/narrative mode'
+    );
     assert.ok(config.SYSTEM_PROMPT.includes(roleplayLivenessPrelude), 'roleplay liveness prelude must be included in SYSTEM_PROMPT');
     assert.ok(
       config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) >= 0
