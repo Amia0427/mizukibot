@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-25 11:06 +08:00
+更新时间：2026-05-26 08:00 +08:00
 
 ## 已调整
 
@@ -13,6 +13,7 @@
 - `SHORT_TERM_BRIDGE_RECENT_MESSAGES` 默认从 64 提高到 96。
 - `MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS` 默认从 2200 提高到 3600。
 - `MEMORY_V3_SESSION_RECENT_MESSAGES` 默认从 64 提高到 96。
+- 2026-05-26 08:00 +08:00：`prompts/persona/01_identity.txt` 与好友资料版瑞希提示词合并去重；人格核补强外在轻快/内里谨慎、秘密触发反应、人际关系、外貌审美和自然语料，未调整 manifest 优先级。
 - 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 会同步补 `retrieved_memory_lite`、`daily_journal`、`short_term_continuity`、planner 已选择的 `memos_recall` 和摘要块；主模型调用日志新增 `prompt_integrity` 摘要。
 - 2026-05-21 22:02 +08:00：八个目标已落地：`short_term_continuity` 观测新增 token/raw/summary/trim；普通聊天、长任务、记忆追问、管理员私聊使用不同 context profile；raw turns 会按引用、承诺、未闭环、纠错和信息量保留；session summary 关键字段有独立数量/字符配置；`diag:continuity -- prompt --user <id>` 可输出实际短期块；bridge 过 48h 只恢复结构化摘要；新增主回复失忆 eval；Web 面板新增只读上下文预览。
 - 2026-05-23 23:45 +08:00：主回复请求默认使用 Claude `/v1/messages` 协议，稳定 system/tool 前缀使用 Anthropic `cache_control` 断点；主回复不再使用 OpenAI `prompt_cache_key/prompt_cache_retention`。
