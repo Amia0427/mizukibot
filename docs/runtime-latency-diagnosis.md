@@ -1,5 +1,7 @@
 # Runtime Latency Diagnosis
 
+更新 2026-05-27 01:45 +08:00：已落地低内存主进程轻量档位：主进程默认不再启动 embedding backfill，并在 `LOW_RESOURCE_MODE=true` 下保留 LanceDB 读、memory/worldbook rerank、worldbook semantic 和 image memory recall；LanceDB 读改由一次性 helper 执行，同时降低候选数、单次 backfill 数和超时预算；post-reply worker 保留完整学习维护，并设置 `POST_REPLY_WORKER_RSS_RECYCLE_MB=768`、`POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS=30000` 以便空闲自回收。
+
 更新 2026-05-27 01:05 +08:00：群聊 direct chat 主模型已改为默认流式输出，只要 `AI_STREAM_ENABLED=true` 就不再等待完整主模型响应后才发送；公开群仍可用 `/main_stream off` 显式关闭，旧的“公开群但未配置 main_stream”记录按默认开启处理。
 
 更新 2026-05-27 00:56 +08:00：复查当前运行态，慢回复已不是 QQ 发送链路问题，也不是单个请求偶发。过去 24h `request_complete` 43 个样本：p50 约 117537ms，p90 约 179823ms，p95 约 206188ms，max 约 261946ms；慢样本最终 `final_reply_send_done` 仍只有 20ms 级。主要耗时叠加在 planner 和主模型 HTTP：`planner|gpt-5.4-mini|token.memoh.net` p50 约 14.7s、p90 约 60.0s、p95 约 65.1s、max 68.0s；`direct_reply|claude-sonnet/opus|superapi.buzz` p50 约 45.2s、p90 约 56.2s、p95 约 57.7s、max 91.6s。当前资源压力也异常：主进程 private memory 约 2.57GB，post-reply worker private memory 约 2.14GB，`diag:low-resource` 报 `severe`。本次不改代码，结论是“外部模型耗时变长 + planner 前台串行等待 + 群聊默认非流式 + 后台 worker 内存压力”共同拖慢可见回复。

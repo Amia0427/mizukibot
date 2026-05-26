@@ -71,6 +71,16 @@ module.exports = (async () => {
     assert.strictEqual(config.SCHEDULER_RUNTIME_ENABLED, false);
     assert.strictEqual(config.QZONE_AUTO_PUBLISH_ENABLED, false);
 
+    const indexSource = require('fs').readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+    assert.ok(!indexSource.includes("const { askAIByGraph } = require('./api/agentGraph')"), 'main entrypoint should lazy-load agentGraph until first model call');
+    assert.ok(!/^const\s+\{\s*enqueueMissingEmbeddings\s*\}\s*=\s*require\('\.\/utils\/memory-v3\/embeddingIndex'\)/m.test(indexSource), 'main entrypoint should not top-level load embedding backfill');
+    assert.ok(indexSource.includes('config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START'), 'main entrypoint should gate startup embedding backfill behind config');
+    const memoryQuerySource = require('fs').readFileSync(path.join(__dirname, '..', 'utils', 'memory-v3', 'query.js'), 'utf8');
+    assert.ok(!/^const\s+\{[\s\S]*?\}\s*=\s*require\('\.\.\/lancedbMemoryStore'\)/m.test(memoryQuerySource), 'memory query should lazy-load LanceDB only when vector recall runs');
+    assert.ok(memoryQuerySource.includes("require('../lancedbMemoryStore/helperClient')"), 'memory query should route low-resource main LanceDB reads through the helper');
+    const memoryQueryScoringSource = require('fs').readFileSync(path.join(__dirname, '..', 'utils', 'memory-v3', 'queryScoring.js'), 'utf8');
+    assert.ok(!/^const\s+\{[\s\S]*?\}\s*=\s*require\('\.\/embeddingIndex'\)/m.test(memoryQueryScoringSource), 'memory scoring should lazy-load embeddingIndex only for semantic scoring');
+
     clearProjectCache();
     require('../src/runtime-v2/context/memory-inputs');
 

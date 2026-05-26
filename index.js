@@ -1,6 +1,9 @@
 ﻿const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
+
+process.env.MIZUKIBOT_RUNTIME_ROLE = process.env.MIZUKIBOT_RUNTIME_ROLE || 'main';
+
 const config = require('./config');
 
 config.validateRequiredConfig();
@@ -9,7 +12,6 @@ const { startServer } = require('./web/server');
 const { startTickEngine } = require('./core/tickEngine');
 const { createMessageHandler } = require('./core/messageHandler');
 const { initializeMemeManager } = require('./core/memeManager');
-const { askAIByGraph } = require('./api/agentGraph');
 const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
 const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
 const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
@@ -20,7 +22,6 @@ const { sendGroupMessage } = require('./api/qqActionService');
 const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime');
 const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/napcatLogFollower');
 const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
-const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
 const { cleanupStaleDataTmpFiles, DEFAULT_MAX_AGE_MS } = require('./utils/dataTmpCleanup');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
@@ -108,11 +109,14 @@ try {
 }
 const webServer = startServer();
 initializeMemeManager();
-enqueueMissingEmbeddings(null, {
-  schedule: true,
-  delayMs: 15000,
-  continueDelayMs: 60000
-});
+if (config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START) {
+  const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
+  enqueueMissingEmbeddings(null, {
+    schedule: true,
+    delayMs: 15000,
+    continueDelayMs: 60000
+  });
+}
 
 let ws = null;
 let shuttingDown = false;
@@ -124,6 +128,10 @@ let reconnectAttempts = 0;
 let schedulerStarted = false;
 const napcatActionClient = getNapCatActionClient();
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
+
+function askAIByGraph(...args) {
+  return require('./api/agentGraph').askAIByGraph(...args);
+}
 
 function scheduleReconnect() {
   if (shuttingDown) return;

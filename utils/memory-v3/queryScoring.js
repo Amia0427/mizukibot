@@ -9,10 +9,6 @@ const {
   uniqueBy
 } = require('./helpers');
 const {
-  loadEmbeddingIndex,
-  calcEmbeddingSimilarity
-} = require('./embeddingIndex');
-const {
   getJournalDocDay
 } = require('./journalDocs');
 const {
@@ -36,6 +32,10 @@ const {
   recentCandidateBonus,
   recentSourceBoost
 } = require('./recentRecallPolicy');
+
+function getEmbeddingIndex() {
+  return require('./embeddingIndex');
+}
 
 function facetSourceWeight(facet, source) {
   const key = `${facet}:${source}`;
@@ -187,12 +187,14 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
     now: options.journalNow
   });
   const recentIntent = detectRecentRecallIntent(query, options);
-  const embeddingIndex = loadEmbeddingIndex();
   const useEmbedding = shouldUseRemoteEmbedding();
   let queryEmbedding = Array.isArray(options.queryEmbedding) ? options.queryEmbedding : null;
   if (!queryEmbedding && useEmbedding) {
     queryEmbedding = await requestEmbedding(rewrites.join('\n'));
   }
+  const useLocalEmbeddingIndex = queryEmbedding && config.LOW_RESOURCE_SKIP_LOCAL_EMBEDDING_INDEX_SCORING !== true;
+  const embeddingHelpers = useLocalEmbeddingIndex ? getEmbeddingIndex() : null;
+  const embeddingIndex = embeddingHelpers ? embeddingHelpers.loadEmbeddingIndex() : null;
   const semanticWeight = Math.max(0, Number(config.MEMORY_SEMANTIC_RECALL_WEIGHT || 0.3) || 0.3);
   const lexicalWeight = Math.max(0, Number(config.MEMORY_LEXICAL_RECALL_WEIGHT || 0.45) || 0.45);
   const minScore = Math.max(0.02, Number(config.MEMORY_RAG_MIN_SCORE || 0.16) * 0.5);
@@ -213,8 +215,8 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
     const sourceBoost = facetSourceWeight(facet, candidate.source) * recentSourceBoost(candidate, recentIntent);
     const stabilityBoost = Math.min(0.24, Number(candidate.stabilityScore || 0) * 0.24);
     const strength = calcMemoryStrength(candidate, facet);
-    const embedding = queryEmbedding
-      ? calcEmbeddingSimilarity(queryEmbedding, candidate, embeddingIndex)
+    const embedding = embeddingHelpers
+      ? embeddingHelpers.calcEmbeddingSimilarity(queryEmbedding, candidate, embeddingIndex)
       : 0;
     const categoryBoost = categoryFacetBoost(candidate, facet);
     const recentBonus = recentCandidateBonus(candidate, recentIntent, options);

@@ -1,28 +1,11 @@
 const config = require('../../config');
 const { normalizeText } = require('../memory-v3/helpers');
 const {
-  isLanceDbReadEnabled,
-  normalizeVectorStoreMode,
-  searchWorldbookVectors
-} = require('../lancedbMemoryStore');
-const {
   WORLD_BOOK_PREFIX,
   buildWorldbookDocuments,
   getWorldbookModules,
   isWorldbookModule
 } = require('./documents');
-const {
-  backfillPersonaWorldbookEmbeddings,
-  buildFailureBreakdown,
-  buildPersonaWorldbookBackfillPlan,
-  buildPersonaWorldbookEmbeddingCacheReconcilePlan,
-  isEmbeddingEnabled,
-  loadWorldbookEmbeddingIndex,
-  reconcilePersonaWorldbookEmbeddingCache,
-  requestPersonaWorldbookEmbedding,
-  schedulePersonaWorldbookEmbeddingBackfill,
-  shouldUsePersonaWorldbookRemoteEmbedding
-} = require('./embeddingCache');
 const {
   cosineArray,
   lexicalScore,
@@ -39,6 +22,58 @@ const {
   rerankPersonaWorldbookCandidates,
   withSoftTimeout
 } = require('./rerank');
+const {
+  searchLanceDbWithHelper,
+  shouldUseLanceDbHelper
+} = require('../lancedbMemoryStore/helperClient');
+
+const VECTOR_STORE_MODES = new Set(['local_jsonl', 'lancedb', 'shadow']);
+
+function normalizeVectorStoreModeLight(value) {
+  const mode = normalizeText(value || config.MEMORY_VECTOR_STORE || 'local_jsonl').toLowerCase();
+  return VECTOR_STORE_MODES.has(mode) ? mode : 'local_jsonl';
+}
+
+function isLanceDbReadEnabledLight(configLike = config) {
+  const mode = normalizeVectorStoreModeLight(configLike.MEMORY_VECTOR_STORE);
+  return (mode === 'lancedb' || mode === 'shadow') && configLike.MEMORY_LANCEDB_READ_ENABLED === true;
+}
+
+function getLanceDbMemoryStore() {
+  return require('../lancedbMemoryStore');
+}
+
+function getEmbeddingCache() {
+  return require('./embeddingCache');
+}
+
+function backfillPersonaWorldbookEmbeddings(...args) {
+  return getEmbeddingCache().backfillPersonaWorldbookEmbeddings(...args);
+}
+
+function buildFailureBreakdown(...args) {
+  return getEmbeddingCache().buildFailureBreakdown(...args);
+}
+
+function buildPersonaWorldbookBackfillPlan(...args) {
+  return getEmbeddingCache().buildPersonaWorldbookBackfillPlan(...args);
+}
+
+function buildPersonaWorldbookEmbeddingCacheReconcilePlan(...args) {
+  return getEmbeddingCache().buildPersonaWorldbookEmbeddingCacheReconcilePlan(...args);
+}
+
+function loadWorldbookEmbeddingIndex(...args) {
+  return getEmbeddingCache().loadWorldbookEmbeddingIndex(...args);
+}
+
+function reconcilePersonaWorldbookEmbeddingCache(...args) {
+  return getEmbeddingCache().reconcilePersonaWorldbookEmbeddingCache(...args);
+}
+
+function schedulePersonaWorldbookEmbeddingBackfill(...args) {
+  return getEmbeddingCache().schedulePersonaWorldbookEmbeddingBackfill(...args);
+}
 
 function nowMs() {
   return Date.now();
@@ -67,15 +102,21 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
     ...config,
     ...(options.config && typeof options.config === 'object' ? options.config : {})
   };
+  const lancedbEnabled = isLanceDbReadEnabledLight(lancedbConfig);
+  const embeddingEnabled = Boolean(
+    config.PERSONA_WORLDBOOK_SEARCH_ENABLED !== false
+    && config.PERSONA_WORLDBOOK_EMBEDDING_ENABLED !== false
+    && normalizeText(config.MEMORY_EMBEDDING_MODEL)
+  );
   const diagnostics = {
-    enabled: isEmbeddingEnabled(),
+    enabled: embeddingEnabled,
     ready: 0,
     pending: 0,
     semanticCandidates: 0,
     hotPathUsed: false,
     lancedb: {
-      enabled: isLanceDbReadEnabled(lancedbConfig),
-      mode: normalizeVectorStoreMode(lancedbConfig.MEMORY_VECTOR_STORE),
+      enabled: lancedbEnabled,
+      mode: normalizeVectorStoreModeLight(lancedbConfig.MEMORY_VECTOR_STORE),
       ok: false,
       rows: 0,
       semanticCandidates: 0,
@@ -87,12 +128,6 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
     diagnostics.fallbackReason = 'embedding_disabled';
     return { results: [], diagnostics };
   }
-  if (!options.embeddingIndex) {
-    schedulePersonaWorldbookEmbeddingBackfill(catalog, options);
-  }
-  const index = options.embeddingIndex || loadWorldbookEmbeddingIndex();
-  diagnostics.ready = index.readyRows.length;
-  diagnostics.pending = index.rows.filter((row) => row.status !== 'ready').length;
   const rawLimit = Object.prototype.hasOwnProperty.call(options, 'limit')
     ? Number(options.limit)
     : Number(config.PERSONA_WORLDBOOK_SEMANTIC_LIMIT || 24);
@@ -101,13 +136,9 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
     diagnostics.fallbackReason = 'semantic_limit_zero';
     return { results: [], diagnostics };
   }
-  if (index.readyRows.length === 0) {
-    diagnostics.fallbackReason = 'no_ready_embeddings';
-    return { results: [], diagnostics };
-  }
   const canUseRemoteEmbedding = typeof options.shouldUseRemoteEmbedding === 'function'
     ? options.shouldUseRemoteEmbedding()
-    : shouldUsePersonaWorldbookRemoteEmbedding();
+    : getEmbeddingCache().shouldUsePersonaWorldbookRemoteEmbedding();
   if (!canUseRemoteEmbedding && !Array.isArray(options.queryEmbedding)) {
     diagnostics.fallbackReason = 'remote_embedding_unavailable';
     return { results: [], diagnostics };
@@ -122,7 +153,7 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
   diagnostics.hotPathUsed = true;
   const queryEmbedding = Array.isArray(options.queryEmbedding)
     ? options.queryEmbedding
-    : await (typeof options.requestEmbedding === 'function' ? options.requestEmbedding(query) : requestPersonaWorldbookEmbedding(query));
+    : await (typeof options.requestEmbedding === 'function' ? options.requestEmbedding(query) : getEmbeddingCache().requestPersonaWorldbookEmbedding(query));
   if (!Array.isArray(queryEmbedding) || queryEmbedding.length === 0) {
     diagnostics.fallbackReason = 'query_embedding_failed';
     return { results: [], diagnostics };
@@ -141,14 +172,19 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
         rebuildCommand: cachedDisable.rebuildCommand
       };
     } else {
-      const vectorSearch = typeof options.searchWorldbookVectors === 'function'
-        ? options.searchWorldbookVectors
-        : searchWorldbookVectors;
-      const vectorResult = await vectorSearch(queryEmbedding, {}, {
+      const vectorOptions = {
         limit,
         timeoutMs: options.lancedbTimeoutMs || config.MEMORY_LANCEDB_TIMEOUT_MS,
         tableName: options.lancedbTableName || options.tableName
-      });
+      };
+      const vectorSearch = typeof options.searchWorldbookVectors === 'function'
+        ? options.searchWorldbookVectors
+        : null;
+      const vectorResult = vectorSearch
+        ? await vectorSearch(queryEmbedding, {}, vectorOptions)
+        : shouldUseLanceDbHelper()
+          ? await searchLanceDbWithHelper('worldbook', queryEmbedding, {}, vectorOptions)
+          : await getLanceDbMemoryStore().searchWorldbookVectors(queryEmbedding, {}, vectorOptions);
       const vectorResults = (Array.isArray(vectorResult.rows) ? vectorResult.rows : [])
         .map((row) => {
           const moduleId = normalizeText(row.nodeId || row.id);
@@ -184,6 +220,20 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
         return { results: vectorResults, diagnostics };
       }
     }
+  }
+  if (!options.embeddingIndex && config.LOW_RESOURCE_SKIP_LOCAL_EMBEDDING_INDEX_SCORING === true) {
+    diagnostics.fallbackReason = diagnostics.lancedb.enabled ? 'lancedb_no_rows' : 'local_embedding_index_skipped';
+    return { results: [], diagnostics };
+  }
+  if (!options.embeddingIndex) {
+    schedulePersonaWorldbookEmbeddingBackfill(catalog, options);
+  }
+  const index = options.embeddingIndex || loadWorldbookEmbeddingIndex();
+  diagnostics.ready = index.readyRows.length;
+  diagnostics.pending = index.rows.filter((row) => row.status !== 'ready').length;
+  if (index.readyRows.length === 0) {
+    diagnostics.fallbackReason = 'no_ready_embeddings';
+    return { results: [], diagnostics };
   }
   const results = index.readyRows
     .map((row) => {
@@ -246,7 +296,7 @@ async function searchPersonaWorldbook(catalog = { modules: [] }, input = {}) {
     () => ({
       results: [],
       diagnostics: {
-        enabled: isEmbeddingEnabled(),
+        enabled: getEmbeddingCache().isEmbeddingEnabled(),
         ready: 0,
         pending: 0,
         semanticCandidates: 0,

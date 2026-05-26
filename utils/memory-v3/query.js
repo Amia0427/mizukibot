@@ -9,18 +9,10 @@ const {
 const {
   loadProfileProjection
 } = require('./storage');
-const { rerankMemoryCandidates } = require('../memoryReranker');
 const {
   classifyJournalRecallIntent,
   resolveJournalTargetDays
 } = require('./journalRecallPolicy');
-const {
-  fuseRecallCandidates,
-  isLanceDbReadEnabled,
-  normalizeVectorStoreMode,
-  resolveVectorCandidates,
-  searchMemoryVectors
-} = require('../lancedbMemoryStore');
 const { diagnoseProjectionFreshness } = require('./diagnostics');
 const {
   buildQueryEmbeddingCacheKey,
@@ -64,8 +56,37 @@ const {
   scoreLocalCandidatePool
 } = require('./queryScoring');
 const { detectRecentRecallIntent } = require('./recentRecallPolicy');
+const {
+  searchLanceDbWithHelper,
+  shouldUseLanceDbHelper
+} = require('../lancedbMemoryStore/helperClient');
+const {
+  fuseRecallCandidates,
+  resolveVectorCandidates
+} = require('../lancedbMemoryStore/rows');
 
 const FACETS = ['continuity', 'preference', 'identity', 'task', 'group', 'style', 'journal', 'default', 'relationship'];
+const VECTOR_STORE_MODES = new Set(['local_jsonl', 'lancedb', 'shadow']);
+
+function normalizeVectorStoreModeLight(value) {
+  const mode = normalizeText(value || config.MEMORY_VECTOR_STORE || 'local_jsonl').toLowerCase();
+  return VECTOR_STORE_MODES.has(mode) ? mode : 'local_jsonl';
+}
+
+function isLanceDbReadEnabledLight(configLike = config) {
+  const mode = normalizeVectorStoreModeLight(configLike.MEMORY_VECTOR_STORE);
+  return (mode === 'lancedb' || mode === 'shadow') && configLike.MEMORY_LANCEDB_READ_ENABLED === true;
+}
+
+function getLanceDbMemoryStore() {
+  return require('../lancedbMemoryStore');
+}
+
+async function rerankMemoryCandidates(query, candidates = [], options = {}) {
+  const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+  if (config.MEMORY_RERANK_ENABLED === false || options.disableRerank === true) return list;
+  return require('../memoryReranker').rerankMemoryCandidates(query, list, options);
+}
 
 async function resolveQueryEmbedding(query = '', facet = 'default', options = {}) {
   const diagnostics = options.timingDiagnostics && typeof options.timingDiagnostics === 'object'
@@ -141,10 +162,10 @@ async function queryMemory(input = {}) {
   }), input.source);
   const categoryManifest = compactMemoryCategoryManifest(buildMemoryCategoryManifestFromDocs(candidates), input.categoryManifestLimit || 12);
   timing.collectCandidatesMs = getNowMs() - stageStartedAt;
-  const vectorStoreMode = normalizeVectorStoreMode(config.MEMORY_VECTOR_STORE);
+  const vectorStoreMode = normalizeVectorStoreModeLight(config.MEMORY_VECTOR_STORE);
   const embeddingCoverage = buildEmbeddingCoverageDiagnostics(candidates);
   let lancedbDiagnostics = {
-    enabled: isLanceDbReadEnabled(config),
+    enabled: isLanceDbReadEnabledLight(config),
     mode: vectorStoreMode,
     ok: false,
     rows: 0,
@@ -171,11 +192,19 @@ async function queryMemory(input = {}) {
       (item) => item
     );
     stageStartedAt = getNowMs();
-    const vectorResult = await searchMemoryVectors(queryEmbedding, {
+    const vectorSearchOptions = {
       ...input,
       userId,
       allowedGroupIds
-    });
+    };
+    const vectorOptions = {
+      ...input,
+      limit: input.lancedbLimit || input.limit || config.MEMORY_LANCEDB_CANDIDATE_LIMIT,
+      timeoutMs: input.lancedbTimeoutMs || input.timeoutMs || config.MEMORY_LANCEDB_TIMEOUT_MS
+    };
+    const vectorResult = shouldUseLanceDbHelper()
+      ? await searchLanceDbWithHelper('memory', queryEmbedding, vectorSearchOptions, vectorOptions)
+      : await getLanceDbMemoryStore().searchMemoryVectors(queryEmbedding, vectorSearchOptions, vectorOptions);
     timing.lancedbSearchMs = getNowMs() - stageStartedAt;
     stageStartedAt = getNowMs();
     vectorCandidates = resolveVectorCandidates(vectorResult.rows || [], candidates, {

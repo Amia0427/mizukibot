@@ -12,7 +12,6 @@ const {
   clearGroupBindingForUser
 } = require('../utils/memory');
 const { recordMemoryScope } = require('../utils/memoryScopeIndex');
-const { askAIByGraph, runPersistInBackgroundFromCheckpoint } = require('../api/agentGraph');
 const { extractJsonSafely } = require('../api/parser');
 const {
   startSubagentBridgeCall
@@ -163,6 +162,14 @@ const {
 } = require('../utils/cotOnceRuntime');
 function getVisionCaptionWorkerModule() {
   return require('./visionCaptionWorker');
+}
+
+function askAIByGraph(...args) {
+  return require('../api/agentGraph').askAIByGraph(...args);
+}
+
+function runPersistInBackgroundFromCheckpoint(...args) {
+  return require('../api/agentGraph').runPersistInBackgroundFromCheckpoint(...args);
 }
 
 function getMessageFullSubagentModule() {
