@@ -22,6 +22,7 @@
 - `diagnose-local-knowledge.js`
 - `diagnose-main-model-fallback.js`
 - `diagnose-main-model-web-search.js`：更新 2026-05-23 23:20 +08:00，探测主回复/管理员主回复实际链路及 provider-native 参数是否具备内置联网搜索能力
+- `diagnose-provider-request.js`：更新 2026-05-26 18:35 +08:00，输出指定 provider 在 `http_client_direct/main_reply/admin_reply/vision_reply/qzone_image_generation` 下最终 headers、cache、鉴权来源、剔除字段和异常信号；可用 `npm run diag:provider-request -- --provider gemini_native`
 - `diagnose-main-reply.js`：统一主回复诊断，输出 route/model/fallback、memory freshness、群聊回复守卫、direct/tool/background 分支
 - `diagnose-memory-ops.js`：记忆诊断入口，支持 `diagnose/backfill/recall/audit`；更新 2026-05-19 21:45 +08:00：`audit` 会运行抽样记忆质量审查，只报告不改库
 - 更新 2026-05-23 11:25 +08:00：`diagnose-memory-ops.js recall --gate` 会把 lifecycle leakage、category mismatch、recent recall miss 纳入门禁指标。
