@@ -517,7 +517,10 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const collectedMemoryContext = promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object'
     ? promptMaterials.memoryContext
     : {};
-  if (collectedMemoryContext.promptRetrievedMemoryText || collectedMemoryContext.memoryForPrompt) {
+  if (shouldRuntimeAddRetrievedMemoryBlock(question, {
+    ...options,
+    routeMeta
+  }, dynamicPromptPlan, collectedMemoryContext)) {
     runtimeAddedIds.push('memory_recall_policy', 'retrieved_memory_lite');
   }
   if (forceMemoryContext) {

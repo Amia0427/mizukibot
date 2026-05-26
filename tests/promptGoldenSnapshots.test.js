@@ -249,11 +249,54 @@ module.exports = (async () => {
       }
     }
   );
-  assert.ok(selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
-  assert.ok(selfContainedPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!selfContainedPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
   assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'long_term_profile'));
   assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
   assert.ok(!selfContainedPrompt.promptSnapshot.selectionTrace.some((item) => item.id === 'long_term_profile' && item.selected === true));
+
+  const unrelatedMemoryLeakPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 10 },
+    'u_prompt_unrelated_memory_leak',
+    '今晚吃什么比较省事',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      memoryContext: {
+        memoryForPrompt: '1. [episode|tier:B] 用户前天追问脚臭排名，助手拒绝回答。',
+        promptRetrievedMemoryText: '1. [episode|tier:B] 用户前天追问脚臭排名，助手拒绝回答。',
+        promptDailyJournalText: '',
+        promptLongTermProfileText: '',
+        promptImpressionText: '',
+        summary: '',
+        promptSummaryText: ''
+      },
+      routeMeta: {
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: [],
+            personaModules: [],
+            blockDecisions: [
+              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.98, priority: 20, reason: 'unrelated noisy memory' },
+              { blockId: 'memory_recall_policy', decision: 'skip', confidence: 0.98, priority: 21, reason: 'no usable evidence' },
+              { blockId: 'daily_journal', decision: 'skip', confidence: 0.98, priority: 22, reason: 'not a recall turn' }
+            ],
+            rationaleByBlock: {},
+            source: 'planner',
+            _source: 'planner'
+          }
+        }
+      }
+    }
+  );
+  const unrelatedMemoryPromptText = unrelatedMemoryLeakPrompt.promptSnapshot.assembledBlocks
+    .map((item) => String(item.content || ''))
+    .join('\n');
+  assert.ok(!unrelatedMemoryLeakPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!unrelatedMemoryLeakPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!unrelatedMemoryPromptText.includes('脚臭排名'));
 
   const personaRejectedPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 14 },

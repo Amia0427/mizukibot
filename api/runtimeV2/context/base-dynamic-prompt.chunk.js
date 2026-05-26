@@ -522,7 +522,10 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   if (options?.routeMeta?.directedContext && typeof options.routeMeta.directedContext === 'object') {
     baseRuntimeAddedIds.push('directed_context');
   }
-  if (memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt) {
+  if (shouldRuntimeAddRetrievedMemoryBlock(question, {
+    ...options,
+    routeMeta
+  }, effectiveBaseDynamicPromptPlan, memoryContext)) {
     baseRuntimeAddedIds.push('memory_recall_policy', 'retrieved_memory_lite');
   }
   if (forceMemoryContext) {

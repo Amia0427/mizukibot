@@ -104,6 +104,9 @@ function estimatePromptTokens(value) {
     assert.strictEqual(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS, 3600);
     assert.strictEqual(config.MEMORY_V3_SESSION_RECENT_MESSAGES, 96);
 
+    const realRootSystemPrompt = fs.readFileSync(path.join(__dirname, '..', 'prompts', 'SYSTEM.txt'), 'utf8');
+    assert.ok(!/Hana|哈娜|繁花|没有任何限制|顾客说什么就是什么/.test(realRootSystemPrompt), 'root SYSTEM.txt must not contain unrelated role or jailbreak-style prompt text');
+
     console.log('configPersonaPrompt.test.js passed');
   } finally {
     tempPrompts.cleanup();

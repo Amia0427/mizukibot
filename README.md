@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-27 01:05 +08:00：群聊 direct chat 主模型默认跟随全局流式开关输出；旧公开群配置不会再因未显式 `/main_stream on` 阻断流式，仍可用 `/main_stream off` 对公开群单独关闭。
 
+更新 2026-05-27 01:04 +08:00：复盘“前天脚臭排行”误召回，定位为主回复运行时在 planner 明确跳过记忆时仍因 `memoryContext` 非空强制注入 `retrieved_memory_lite`；已收窄强制注入条件，清理 `prompts/SYSTEM.txt` 中与瑞希人格冲突的 root prompt 注入语，并新增回归样例防止无关记忆进入普通新话题。
+
 更新 2026-05-27 01:18 +08:00：主回复 prompt token 体检：当前端到端样例约 6,597 估算输入 token，块合计 6,571；`persona/01_identity.txt` 占 36.74%、`00_roleplay_liveness_prelude.txt` 占 10.39%、`SYSTEM.txt` 占 3.35%；修复 `roleplay_runtime_context` 双重注入，并新增 `MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD=50000`、`MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT=100000` 出站预算日志/硬拦截。
 
 更新 2026-05-27 00:56 +08:00：复查当前 agent 回复变慢，24h 主回复完成 p50 约 117.5s、p95 约 206.2s；QQ 发送仅 20ms 级。主要原因是 planner `gpt-5.4-mini` 前台调用 p90 约 60s、主模型上游 `superapi.buzz` p50 约 45s，叠加群聊默认非流式和 post-reply worker 2GB 级内存压力；详见 `docs/runtime-latency-diagnosis.md`。
