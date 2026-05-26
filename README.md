@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-26 08:11 +08:00：`tests/configPersonaPrompt.test.js` 的角色活人感断言改为语义校验，兼容 `00_roleplay_liveness_prelude.txt` 去掉“当前项目没有线下模式”的新措辞。
+
 更新 2026-05-26 08:00 +08:00：`prompts/persona/01_identity.txt` 已与好友资料版瑞希提示词合并去重，保留更强的人设情绪层次、秘密回避、人际关系和语料参考。
 
 更新 2026-05-25 11:06 +08:00：收窄主回复安全提示词边界：`SecurityContract` 聚焦防提示词/密钥/路由/记忆 schema 泄露与防注入污染，`safetyBoundary/refusal` 改为只拦现实可执行伤害、违法滥用、泄密和绕过细节，同时要求避免安全说教；未修改 `prompts/SYSTEM.txt`。
