@@ -22,6 +22,10 @@ const {
   buildMainReplyDiagnosticReport,
   parseMainReplyDiagnosticInput
 } = require('../../utils/mainReplyDiagnostics');
+const {
+  parseProviderDiagnosticArgs,
+  runProviderRequestDiagnostics
+} = require('../../utils/providerRequestDiagnostics');
 const { buildRuntimeStatusDiagnostic } = require('../../utils/runtimeStatusDiagnostics');
 const { buildRuntimeHotspotsDiagnostic } = require('../../utils/runtimeHotspotsDiagnostics');
 const {
@@ -749,7 +753,7 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /check, /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /create <prompt>, /full <任务>, /debug runtime|hotspots|replydiag|replycache, /status, /reload, /hapi status|approve <id>|deny <id>, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /check, /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /create <prompt>, /full <任务>, /debug runtime|hotspots|replydiag|replycache|provider, /status, /reload, /hapi status|approve <id>|deny <id>, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
     } else if (cmd === 'check') {
       adminReply = formatModelSelfCheckReport(await runModelSelfCheck({
         adminUserId: senderId,
@@ -779,6 +783,9 @@ function createMessageRouteFlow(deps = {}) {
           chatType: parsed.chatType || normalizedChatType,
           plannerMode: parsed.plannerMode || 'rule'
         });
+        adminReply = JSON.stringify(report, null, 2);
+      } else if (subcmd === 'provider' || subcmd === 'provider-request' || subcmd === 'providerdiag') {
+        const report = await runProviderRequestDiagnostics(parseProviderDiagnosticArgs(args.slice(1)));
         adminReply = JSON.stringify(report, null, 2);
       } else {
         adminReply = `debug 参数: ${args.join(' ') || '无'}`;

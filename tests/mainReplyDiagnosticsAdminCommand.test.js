@@ -162,6 +162,32 @@ module.exports = (async () => {
     assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'runtime'));
     assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'modules'));
 
+    const providerResult = await routeFlow.dispatchAdminRoute({
+      route: {
+        topRouteType: 'admin',
+        meta: {
+          admin: true,
+          command: {
+            cmd: 'debug',
+            args: ['provider', 'gemini_native', '--scenario', 'http_client_direct'],
+            raw: '/debug provider gemini_native --scenario http_client_direct'
+          }
+        }
+      },
+      groupId: 'g_diag',
+      senderId: 'admin_1',
+      rawText: '/debug provider gemini_native --scenario http_client_direct',
+      userInfo: null,
+      chatType: 'group'
+    });
+
+    assert.strictEqual(providerResult.handled, true);
+    assert.strictEqual(sent.length, 5);
+    const providerReport = JSON.parse(sent[4].replyText);
+    assert.strictEqual(providerReport.schemaVersion, 'provider_request_diagnostic_v1');
+    assert.strictEqual(providerReport.scenarios[0].finalProvider, 'gemini_native');
+    assert.strictEqual(providerReport.scenarios[0].auth.header, 'x-goog-api-key');
+
     const checkResult = await routeFlow.dispatchAdminRoute({
       route: {
         topRouteType: 'admin',
@@ -182,12 +208,12 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(checkResult.handled, true);
-    assert.strictEqual(sent.length, 5);
-    assert.ok(sent[4].replyText.includes('模型自检:'));
-    assert.ok(sent[4].replyText.includes('plan |'));
-    assert.ok(sent[4].replyText.includes('main_reply |'));
-    assert.ok(!sent[4].replyText.includes('https://'));
-    assert.ok(!sent[4].replyText.includes('diag-key'));
+    assert.strictEqual(sent.length, 6);
+    assert.ok(sent[5].replyText.includes('模型自检:'));
+    assert.ok(sent[5].replyText.includes('plan |'));
+    assert.ok(sent[5].replyText.includes('main_reply |'));
+    assert.ok(!sent[5].replyText.includes('https://'));
+    assert.ok(!sent[5].replyText.includes('diag-key'));
 
     const deniedCheckResult = await routeFlow.dispatchAdminRoute({
       route: {
@@ -209,8 +235,8 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(deniedCheckResult.handled, true);
-    assert.strictEqual(sent.length, 6);
-    assert.strictEqual(sent[5].replyText, '仅管理员可用。');
+    assert.strictEqual(sent.length, 7);
+    assert.strictEqual(sent[6].replyText, '仅管理员可用。');
 
     const helpResult = await routeFlow.dispatchAdminRoute({
       route: {
@@ -232,8 +258,8 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(helpResult.handled, true);
-    assert.strictEqual(sent.length, 7);
-    assert.ok(sent[6].replyText.includes('/check'));
+    assert.strictEqual(sent.length, 8);
+    assert.ok(sent[7].replyText.includes('/check'));
 
     console.log('mainReplyDiagnosticsAdminCommand.test.js passed');
   } finally {

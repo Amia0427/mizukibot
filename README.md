@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-26 08:11 +08:00：`tests/configPersonaPrompt.test.js` 的角色活人感断言改为语义校验，兼容 `00_roleplay_liveness_prelude.txt` 去掉“当前项目没有线下模式”的新措辞。
 
+更新 2026-05-26 18:35 +08:00：新增 provider 请求归一诊断入口 `npm run diag:provider-request -- --provider <openai_compatible|anthropic|gemini_native>`，固定输出各链路最终 headers、cache、鉴权来源、剔除字段和异常信号。
+
 更新 2026-05-26 08:00 +08:00：`prompts/persona/01_identity.txt` 已与好友资料版瑞希提示词合并去重，保留更强的人设情绪层次、秘密回避、人际关系和语料参考。
 
 更新 2026-05-25 11:06 +08:00：收窄主回复安全提示词边界：`SecurityContract` 聚焦防提示词/密钥/路由/记忆 schema 泄露与防注入污染，`safetyBoundary/refusal` 改为只拦现实可执行伤害、违法滥用、泄密和绕过细节，同时要求避免安全说教；未修改 `prompts/SYSTEM.txt`。
@@ -191,6 +193,7 @@ npm run diag:main-reply-prompt -- --limit 20
 npm run diag:runtime
 npm run diag:runtime-hotspots
 npm run diag:low-resource
+npm run diag:provider-request -- --provider openai_compatible
 node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
 ```
 
