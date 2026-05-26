@@ -13,6 +13,7 @@
 - `SHORT_TERM_BRIDGE_RECENT_MESSAGES` 默认从 64 提高到 96。
 - `MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS` 默认从 2200 提高到 3600。
 - `MEMORY_V3_SESSION_RECENT_MESSAGES` 默认从 64 提高到 96。
+- 2026-05-27 01:04 +08:00：完成“前天脚臭排行”最小回放：非回忆新话题里，即使 `memoryContext` 残留该 episode，planner 明确 skip `retrieved_memory_lite` 后主 prompt 不再强制注入；显式“昨天/刚才/where did we put”类回忆仍保留运行时兜底。`prompts/SYSTEM.txt` 同步收窄为记忆使用边界，移除与瑞希人格冲突的外部角色设定。
 - 2026-05-27 01:18 +08:00：主回复 token 体检显示当前端到端样例约 6,597 估算输入 token，块合计 6,571；stable system 5,058（76.97%）、dynamic context 1,348（20.51%）、assistant-only 165（2.51%）。最大块是 `main_persona_system` 4,594（69.91%），其中 `persona/01_identity.txt` 2,414（36.74%）、`00_roleplay_liveness_prelude.txt` 683（10.39%）、`SYSTEM.txt` 220（3.35%）。修复 session/runtime 合并后 `roleplay_runtime_context` 重复注入，并在模型出站层新增 50k warning、100k hard block。
 - 2026-05-26 08:11 +08:00：`tests/configPersonaPrompt.test.js` 不再要求 `00_roleplay_liveness_prelude.txt` 固定包含“当前项目没有线下模式”，改为校验线上聊天锚点和避免线下/小说叙事语义。
 - 2026-05-26 08:00 +08:00：`prompts/persona/01_identity.txt` 与好友资料版瑞希提示词合并去重；人格核补强外在轻快/内里谨慎、秘密触发反应、人际关系、外貌审美和自然语料，未调整 manifest 优先级。
@@ -36,7 +37,7 @@
 
 `prompts/SYSTEM.txt` 是 D:\waifu 最顶级主回复系统提示词入口。manifest 中的 `root_system_prompt` 使用 `priority=-1000`，运行时会导出到 `config.SYSTEM_PROMPT_BLOCKS` 并在主回复 `stableSystemBlocks[0]` 生效。
 
-该文件只负责最高优先级主回复约束；角色人格仍由 `main_persona_system` 承接，动态场景仍由 `roleplay_runtime_context` 等动态块补充。
+该文件只负责最高优先级主回复约束；角色人格仍由 `main_persona_system` 承接，动态场景仍由 `roleplay_runtime_context` 等动态块补充。不要在这里放外部角色、世界观或“无条件满足/不受限制”类文案，否则会比 persona 和安全块更早进入主回复。
 
 安全相关稳定块仍保留在 root 之后：`SecurityContract` 负责防泄密和防注入污染，route-level `safetyBoundary` 只限制现实可执行伤害、违法滥用和绕过细节，不负责压制普通黑暗创作、情绪聊天、历史/防御/解释性内容。
 
@@ -65,7 +66,7 @@ npm run diag:continuity -- prompt --user <id> --json
 
 `prompt_integrity.token_budget` 会记录估算输入 token、文本/系统/消息/工具分项、最大消息索引和阈值状态；默认 `MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD=50000` 打 warning，`MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT=100000` 在出站构造主回复请求时硬拦截。
 
-误召回排查可对照 `memory-recall-observability.ndjson` 的 `prepare_main_prompt_blocks` 和 `model-calls.ndjson` 的 `prompt_integrity`：如果 planner 未启用 `continuity_state`，但主模型调用仍出现 `[ContinuityState]`，优先查 runtime 注入层。2026-05-24 23:06 +08:00 起，单独旧 `active_topic` 不再触发这条强制路径。
+误召回排查可对照 `memory-recall-observability.ndjson` 的 `prepare_main_prompt_blocks` 和 `model-calls.ndjson` 的 `prompt_integrity`：如果 planner 未启用 `continuity_state` 或 `retrieved_memory_lite`，但主模型调用仍出现对应块，优先查 runtime 注入层。2026-05-24 23:06 +08:00 起，单独旧 `active_topic` 不再触发 `continuity_state` 强制路径；2026-05-27 01:04 +08:00 起，普通新话题不再仅因 `memoryContext` 非空绕过 planner skip 强制注入 `retrieved_memory_lite`。
 
 主回复缓存诊断看 `prompt_caching.request_cache_breakpoints/system_cache_breakpoints/tool_cache_breakpoints` 和 usage 中的 `cache_read_input_tokens/cache_creation_input_tokens`；`openai_prompt_cache_key` 对主回复应为空。
 

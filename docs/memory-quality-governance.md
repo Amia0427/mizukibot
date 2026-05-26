@@ -1,6 +1,6 @@
 # Memory Quality Governance
 
-更新时间：2026-05-24 17:57 +08:00
+更新时间：2026-05-27 01:04 +08:00
 
 ## 目标
 
@@ -31,6 +31,7 @@
 - `utils/mainReplyContextPreview.js`、`utils/memoryContext/formatters.js` 和 `scripts/eval-memory-recall.js` 已扩展 source/category/tags/lifecycle/drop reason 观测，便于定位错召、旧版本误召和类别漏召。
 
 更新 2026-05-24 17:13 +08:00：主回复系统提示词顶部新增 `prompts/persona/00_roleplay_liveness_prelude.txt`，由 `prompts/prompt-manifest.json` 以负优先级注入，用于强化角色活人感、关系温度和记忆连续性；验证入口为 `npm run check:prompts` 与 `node tests/configPersonaPrompt.test.js`。
+更新 2026-05-27 01:04 +08:00：回放“脚臭排行”误召回确认责任层是主回复 runtime 强制注入，而不是记忆筛选本身；planner skip 的 `retrieved_memory_lite` 不再被普通新话题的非空 `memoryContext` 反向加回，persona/root prompt 仅作为已注入噪声的放大因素处理。
 更新 2026-05-24 17:20 +08:00：扩充 `00_roleplay_liveness_prelude.txt`，新增模式判断、私聊/群聊差异、主动性边界和任务场景口吻保持要求，仍由同一 manifest 入口注入并受 `configPersonaPrompt.test.js` 覆盖。
 更新 2026-05-24 17:57 +08:00：主回复 persona 稳定提示词完成去重收敛；`00_roleplay_liveness_prelude.txt` 只保留顶部活人感、记忆连续性和线上聊天总纲，具体风格、硬边界、状态调制和上下文事实锚点分别收回 `02_style.txt`、`03_boundaries.txt`、`06_state_modulation.txt`、`07_opus_localization.txt`；验证命令仍为 `npm run check:prompts` 与 `node tests/configPersonaPrompt.test.js`。
 更新 2026-05-19 22:20 +08:00：补齐冲突报告、纠错归档、召回门禁、LanceDB 读迁移门禁、混合召回排序权重和写后不可召回隐藏。

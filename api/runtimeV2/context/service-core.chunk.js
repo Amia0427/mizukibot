@@ -54,7 +54,7 @@ const {
 
 const DYNAMIC_CONTEXT_PLAN_VERSION = 'dynamic_context_plan_v2';
 const MEMORY_RECALL_PROMPT_MIN_BUDGET_MS = 6000;
-const MEMORY_RECALL_QUERY_RE = /(昨天|昨日|前天|大前天|今天|今日|刚才|刚刚|上次|之前|前面|前几天|那天|聊了什么|聊过什么|聊到哪|说了什么|讲了什么|还记得|记得|记不记得|回忆|想起来|接着|继续|断片|失忆|\byesterday\b|\bremember\b|\blast time\b|\bearlier\b|what did we talk|where did we leave)/i;
+const MEMORY_RECALL_QUERY_RE = /(昨天|昨日|前天|大前天|今天|今日|刚才|刚刚|上次|之前|前面|前几天|那天|聊了什么|聊过什么|聊到哪|说了什么|讲了什么|还记得|记得|记不记得|回忆|想起来|接着|继续|断片|失忆|\byesterday\b|\bremember\b|\blast time\b|\bearlier\b|what did we talk|where did we leave|where did (?:i|we) put)/i;
 
 function getConfig() {
   try {
@@ -570,6 +570,34 @@ function shouldForceMemoryContextForQuestion(question = '', options = {}) {
   if (!text) return false;
   if (/^(查一下|搜索|搜一下|最新|新闻|官网|search|look up|google)\b/i.test(text)) return false;
   return MEMORY_RECALL_QUERY_RE.test(text);
+}
+
+function planHasBlockDecision(dynamicPromptPlan = {}, blockId = '', decision = '') {
+  const targetBlockId = normalizeText(blockId);
+  const targetDecision = normalizeText(decision).toLowerCase();
+  if (!targetBlockId || !targetDecision) return false;
+  return normalizeArray(dynamicPromptPlan?.blockDecisions).some((item) => {
+    const currentBlockId = normalizeText(item?.blockId);
+    const currentDecision = normalizeText(item?.decision).toLowerCase();
+    return currentBlockId === targetBlockId && currentDecision === targetDecision;
+  });
+}
+
+function planIncludesBlock(dynamicPromptPlan = {}, blockId = '') {
+  const targetBlockId = normalizeText(blockId);
+  if (!targetBlockId) return false;
+  return normalizeArray(dynamicPromptPlan?.enabledBlockIds).map((item) => normalizeText(item)).includes(targetBlockId)
+    || planHasBlockDecision(dynamicPromptPlan, targetBlockId, 'include');
+}
+
+function shouldRuntimeAddRetrievedMemoryBlock(question = '', options = {}, dynamicPromptPlan = {}, memoryContext = {}) {
+  const hasMemoryEvidence = Boolean(normalizeText(memoryContext?.promptRetrievedMemoryText || memoryContext?.memoryForPrompt));
+  if (!hasMemoryEvidence) return false;
+  if (shouldForceMemoryContextForQuestion(question, options)) return true;
+  if (dynamicPromptPlan?.plannerProvided === true) {
+    return planIncludesBlock(dynamicPromptPlan, 'retrieved_memory_lite');
+  }
+  return true;
 }
 
 function resolveMemoryPromptBudgetMs(options = {}, question = '') {
