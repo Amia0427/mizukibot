@@ -42,6 +42,9 @@ function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}, { isAdm
     if (command === 'full') {
       return '私聊不支持 /full，请在目标群内 @我后使用。';
     }
+    if (command === 'group_summary') {
+      return '仅群聊可用。';
+    }
     return '该能力当前仅支持群聊中使用，请在目标群内 @我。';
   }
   if (unavailableReason === 'private-write-disabled') {

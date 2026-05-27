@@ -45,6 +45,7 @@ function parseAdminCommand(cleanText = '') {
   if (/^\/hapi(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/hapi/i, 'hapi', true);
   if (/^\/memoryops(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/memoryops/i, 'memoryops', true);
   if (/^\/check(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/check/i, 'check', true);
+  if (/^\/群总结(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/群总结/i, 'group_summary', true);
 
   if (/^\/learn(?:\s|$)/i.test(t)) {
     const payload = t.replace(/^\/learn/i, '').trim();

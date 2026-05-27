@@ -71,6 +71,23 @@ module.exports = (async () => {
 
   assert.strictEqual(unavailableReply, '私聊不支持 /full，请在目标群内 @我后使用。');
 
+  const groupSummaryPrivateReply = buildUnavailableRouteReply(
+    {
+      meta: {
+        command: { cmd: 'group_summary' },
+        chatType: 'private'
+      }
+    },
+    {
+      unavailableReason: 'private-group-only'
+    },
+    {
+      isAdminUser: (userId) => userId === 'admin_1'
+    }
+  );
+
+  assert.strictEqual(groupSummaryPrivateReply, '仅群聊可用。');
+
   console.log('privateChatAdminRouting.test.js passed');
 })().catch((error) => {
   console.error(error);
