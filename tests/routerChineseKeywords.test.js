@@ -73,6 +73,11 @@ assert.strictEqual(hapiCommand.payload, 'status');
 const checkCommand = parseAdminCommand('/check');
 assert.strictEqual(checkCommand.cmd, 'check');
 
+const groupSummaryCommand = parseAdminCommand('/群总结 50');
+assert.strictEqual(groupSummaryCommand.cmd, 'group_summary');
+assert.strictEqual(groupSummaryCommand.payload, '50');
+assert.deepStrictEqual(groupSummaryCommand.args, ['50']);
+
 const claudeCommand = parseAdminCommand('/claude 帮我看下这个仓库');
 assert.strictEqual(claudeCommand.cmd, 'claude');
 assert.strictEqual(claudeCommand.payload, '帮我看下这个仓库');

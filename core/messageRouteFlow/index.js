@@ -47,6 +47,9 @@ const {
   handleMainStreamAdminCommand
 } = require('./adminCommands');
 const {
+  generateGroupSummary: generateGroupSummaryDefault
+} = require('../../api/groupSummaryService');
+const {
   applyGroupDirectGuardToReplyEnvelopeInput
 } = require('./groupDirectGuard');
 const {
@@ -116,7 +119,8 @@ function createMessageRouteFlow(deps = {}) {
     getStreamMaxSegments,
     sendWithRetry,
     markThinkingEmojiBeforeLlm,
-    buildSubagentContextSummary
+    buildSubagentContextSummary,
+    generateGroupSummary = generateGroupSummaryDefault
   } = deps;
   const claudeSessionRuntime = getClaudeSessionRuntime();
   const handleClaudeSessionAdminCommand = createClaudeSessionAdminHandler({
@@ -702,6 +706,18 @@ function createMessageRouteFlow(deps = {}) {
         userId: senderId
       });
       adminReply = String(memoryOpsResult?.replyText || '').trim() || 'memoryops 管理命令已处理。';
+    } else if (cmd === 'group_summary') {
+      if (normalizedChatType === 'private' || !String(groupId || '').trim()) {
+        adminReply = '仅群聊可用。';
+      } else {
+        const summaryResult = await generateGroupSummary({
+          groupId,
+          userId: senderId,
+          botQQ: config.BOT_QQ,
+          command: route?.meta?.command || {}
+        });
+        adminReply = String(summaryResult?.text || '').trim() || '群总结生成失败，请稍后再试。';
+      }
     } else if (cmd === 'qzone_post') {
       const payload = parseJsonTail(route?.meta?.command?.payload);
       adminReply = (await publishQzoneForContext({
@@ -753,7 +769,7 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /check, /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /create <prompt>, /full <任务>, /debug runtime|hotspots|replydiag|replycache|provider, /status, /reload, /hapi status|approve <id>|deny <id>, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /check, /群总结 [条数], /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /create <prompt>, /full <任务>, /debug runtime|hotspots|replydiag|replycache|provider, /status, /reload, /hapi status|approve <id>|deny <id>, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
     } else if (cmd === 'check') {
       adminReply = formatModelSelfCheckReport(await runModelSelfCheck({
         adminUserId: senderId,

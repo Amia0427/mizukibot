@@ -1,11 +1,14 @@
 const { getNapCatActionClient } = require('./napcatActionClient');
 const MESSAGE_CACHE_TTL_MS = 120 * 1000;
 const FORWARD_CACHE_TTL_MS = 300 * 1000;
+const GROUP_HISTORY_CACHE_TTL_MS = 30 * 1000;
 const NEGATIVE_CACHE_TTL_MS = 15 * 1000;
 const MESSAGE_CACHE_LIMIT = 1000;
 const FORWARD_CACHE_LIMIT = 200;
+const GROUP_HISTORY_CACHE_LIMIT = 100;
 const messageCache = new Map();
 const forwardCache = new Map();
+const groupHistoryCache = new Map();
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -21,6 +24,18 @@ function normalizeForwardId(value) {
   const text = normalizeText(value);
   if (!text) throw new Error('forward id is required');
   return text;
+}
+
+function normalizeGroupId(value) {
+  const text = normalizeText(value);
+  if (!text) throw new Error('group_id is required');
+  return text;
+}
+
+function normalizeHistoryCount(value, fallback = 200) {
+  const count = Number(value);
+  if (!Number.isFinite(count) || count <= 0) return Math.max(1, Math.floor(Number(fallback) || 200));
+  return Math.max(1, Math.floor(count));
 }
 
 function pruneCache(cache, maxSize) {
@@ -83,6 +98,27 @@ async function getForwardMessagesById(forwardId = '', options = {}) {
   return [];
 }
 
+async function getGroupMessageHistory(groupId = '', options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const id = normalizeGroupId(groupId);
+  const count = normalizeHistoryCount(options.count, 200);
+  const params = {
+    group_id: /^\d+$/.test(id) ? Number(id) : id,
+    count
+  };
+  const messageSeq = normalizeText(options.messageSeq || options.message_seq);
+  if (messageSeq) {
+    params.message_seq = /^\d+$/.test(messageSeq) ? Number(messageSeq) : messageSeq;
+  }
+
+  const data = await actionClient.callAction('get_group_msg_history', params, options);
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.messages)) return data.messages;
+  if (Array.isArray(data?.message)) return data.message;
+  if (Array.isArray(data?.data)) return data.data;
+  return [];
+}
+
 async function getMessageByIdCached(messageId = '', options = {}) {
   const id = normalizeMessageId(messageId);
   return runCached(messageCache, id, () => getMessageById(id, options), {
@@ -99,9 +135,22 @@ async function getForwardMessagesByIdCached(forwardId = '', options = {}) {
   });
 }
 
+async function getGroupMessageHistoryCached(groupId = '', options = {}) {
+  const id = normalizeGroupId(groupId);
+  const count = normalizeHistoryCount(options.count, 200);
+  const messageSeq = normalizeText(options.messageSeq || options.message_seq);
+  const cacheKey = `${id}:${count}:${messageSeq}`;
+  return runCached(groupHistoryCache, cacheKey, () => getGroupMessageHistory(id, options), {
+    ttlMs: GROUP_HISTORY_CACHE_TTL_MS,
+    maxSize: GROUP_HISTORY_CACHE_LIMIT
+  });
+}
+
 module.exports = {
   getMessageById,
   getForwardMessagesById,
+  getGroupMessageHistory,
   getMessageByIdCached,
-  getForwardMessagesByIdCached
+  getForwardMessagesByIdCached,
+  getGroupMessageHistoryCached
 };
