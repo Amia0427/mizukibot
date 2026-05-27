@@ -10,6 +10,7 @@ const { runMemoryQualityAudit } = require('../utils/memoryQualityAudit');
 const { buildRecallEvalGate } = require('../utils/memoryGovernance/recallEvalGate');
 const { buildLanceDbReadMigrationGate } = require('../utils/memoryGovernance/lancedbMigrationGate');
 const { diagnoseMemosPlannerRecall } = require('../utils/memosPlannerRecall');
+const { diagnoseOpenVikingMemory } = require('../utils/openVikingMemory/diagnostics');
 
 const SCHEMA_VERSION = 'memory_ops_diagnostic_v1';
 const CASES_FILE = path.join(__dirname, '..', 'artifacts', 'memory-recall-eval', 'cases.jsonl');
@@ -41,7 +42,10 @@ const MODE_ALIASES = {
   'memory-audit': 'audit',
   memos: 'memos',
   'memos-health': 'memos',
-  'memos-diagnose': 'memos'
+  'memos-diagnose': 'memos',
+  openviking: 'openviking',
+  'openviking-health': 'openviking',
+  'openviking-diagnose': 'openviking'
 };
 
 function normalizeText(value = '') {
@@ -185,14 +189,15 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
 
 function buildUsageSummary() {
   return {
-    usage: 'npm run diag:memory -- <diagnose|backfill|recall|lancedb-gate|audit> [--limit N]',
+    usage: 'npm run diag:memory -- <diagnose|backfill|recall|lancedb-gate|audit|memos|openviking> [--limit N]',
     modes: {
       diagnose: 'coverage and LanceDB fallback probe summary',
       backfill: 'dry-run embedding backfill plan',
       recall: 'recall eval summary from artifacts/memory-recall-eval/cases.jsonl',
       'lancedb-gate': 'compare local_jsonl baseline with LanceDB candidate and decide whether read promotion is safe',
       audit: 'sampled memory semantic quality audit plus hard metric warnings',
-      memos: 'MemOS remote recall health, read-only tool discovery, cache, circuit and KB partition summary'
+      memos: 'MemOS remote recall health, read-only tool discovery, cache, circuit and KB partition summary',
+      openviking: 'OpenViking recall/ingest health, cache, circuit and prompt injection readiness'
     }
   };
 }
@@ -362,6 +367,33 @@ function summarizeMemos(result = {}, args = {}) {
   };
 }
 
+function summarizeOpenViking(result = {}, args = {}) {
+  return {
+    enabled: result.enabled === true,
+    ingestEnabled: result.ingestEnabled === true,
+    recallEnabled: result.recallEnabled === true,
+    baseUrl: result.baseUrl || '',
+    health: result.health === true,
+    query: args.query || result.query || '',
+    recall: result.recall
+      ? {
+          used: result.recall.used === true,
+          rejectedReason: result.recall.rejectedReason || '',
+          itemCount: Number(result.recall.itemCount || 0) || 0,
+          rawCandidateCount: Number(result.recall.diagnostics?.rawCandidateCount || 0) || 0,
+          dedupe: result.recall.diagnostics?.dedupe || null
+        }
+      : null,
+    cache: result.runtime?.cache || {},
+    circuit: result.runtime?.circuit || {},
+    ingest: {
+      enabled: result.ingest?.enabled === true,
+      pendingMessages: Number(result.ingest?.scheduler?.pendingMessages || 0) || 0,
+      pendingTokens: Number(result.ingest?.scheduler?.pendingTokens || 0) || 0
+    }
+  };
+}
+
 function summarizeLanceDbGate(result = {}, args = {}) {
   const gate = result.gate || {};
   return {
@@ -412,7 +444,8 @@ function getDefaultRunners() {
     loadCases,
     runMode,
     runMemoryQualityAudit,
-    diagnoseMemosPlannerRecall
+    diagnoseMemosPlannerRecall,
+    diagnoseOpenVikingMemory
   };
 }
 
@@ -539,7 +572,7 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
     });
   }
 
-  if (!['diagnose', 'backfill', 'recall', 'lancedb-gate', 'audit', 'memos'].includes(args.mode)) {
+  if (!['diagnose', 'backfill', 'recall', 'lancedb-gate', 'audit', 'memos', 'openviking'].includes(args.mode)) {
     return createEnvelope({
       mode: args.mode,
       ok: false,
@@ -623,6 +656,20 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
         ok: result.ok !== false,
         exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
         summary: summarizeMemos(result, args),
+        details: result,
+        startedAt
+      });
+    }
+
+    if (args.mode === 'openviking') {
+      const result = await runners.diagnoseOpenVikingMemory({
+        query: args.query || '长期记忆 偏好'
+      });
+      return createEnvelope({
+        mode: 'openviking',
+        ok: result.ok !== false,
+        exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
+        summary: summarizeOpenViking(result, args),
         details: result,
         startedAt
       });
@@ -748,6 +795,7 @@ module.exports = {
   summarizeDiagnose,
   summarizeLanceDbGate,
   summarizeMemos,
+  summarizeOpenViking,
   summarizeRecall,
   summarizeAudit,
   buildLanceDbReadMigrationGate,

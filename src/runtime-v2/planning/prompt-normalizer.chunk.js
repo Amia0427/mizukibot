@@ -89,6 +89,7 @@ function buildPlannerPrompt(toolCatalog = []) {
     'Never include empty, unavailable, conflicting, or purely noisy dynamic blocks.',
     'For ordinary self-contained questions, skip memory/profile blocks unless availableContextSignals shows real content and the block helps the answer.',
     'MemOS recall is internal planner-side evidence. You may enable memos_recall when it contains specific useful memory, but never expose or request MemOS MCP tools in allowedToolNames.',
+    'OpenViking recall is external long-term conversation memory. You may enable openviking_recall only when it adds specific evidence not already covered by local Memory V3 or short-term continuity.',
     'Use enabledBlockIds only for non-persona dynamic blocks. Use personaModules only for persona modules.',
     'For every important include or skip, add a blockDecisions item with decision, confidence, priority, and a short reason.',
     'Set plannerMeta.semanticConfidence from 0 to 1. Use >=0.86 only when intent, tools, and context selection are clear; use <0.72 when there is meaningful ambiguity, weak source-scope understanding, or an incomplete graph.',
@@ -189,6 +190,7 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
     directedContext: normalizeObject(options?.directedContext || routeMeta.directedContext, null),
     continuitySignals: normalizeObject(options?.continuitySignals || routeMeta.continuitySignals, {}),
     memosRecall: normalizeObject(options?.memosRecall || routeMeta.memosRecall || routeMeta.directChatPlanner?.memosRecall || routeMeta.toolPlanner?.memosRecall, {}),
+    openVikingRecall: normalizeObject(options?.openVikingRecall || options?.openvikingRecall || routeMeta.openVikingRecall || routeMeta.openvikingRecall || routeMeta.directChatPlanner?.openVikingRecall || routeMeta.toolPlanner?.openVikingRecall, {}),
     availableContextSignals,
     semanticContext: {
       intentText: getPlannerRequestText(route),
@@ -206,6 +208,7 @@ function buildPlannerUserPayload(route = {}, toolCatalog = [], options = {}) {
       memorySignals: {
         hasRetrievedMemory: availableContextSignals.retrievedMemory === true,
         hasMemosRecall: availableContextSignals.memosRecall === true,
+        hasOpenVikingRecall: availableContextSignals.openVikingRecall === true,
         hasDailyJournal: availableContextSignals.dailyJournal === true,
         hasShortTermContinuity: availableContextSignals.shortTermContinuity === true,
         hasLongTermProfile: availableContextSignals.longTermProfile === true
@@ -322,6 +325,9 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   const hasMemosRecallEvidence = options.availableContextSignals?.memosRecall === true
     || Boolean(normalizeText(options.memosRecallText))
     || normalizeObject(options.memosRecall, {}).used === true;
+  const hasOpenVikingRecallEvidence = options.availableContextSignals?.openVikingRecall === true
+    || Boolean(normalizeText(options.openVikingRecallText || options.openvikingRecallText))
+    || normalizeObject(options.openVikingRecall || options.openvikingRecall, {}).used === true;
   const personaModuleCatalog = normalizeArray(options.personaModuleCatalog).length > 0
     ? normalizeArray(options.personaModuleCatalog)
     : getPersonaModuleCatalogSummary();
@@ -461,6 +467,7 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     && shouldPrioritizeMemoryProbe(route)
     && taskShape === 'fast_reply'
     && !hasMemosRecallEvidence
+    && !hasOpenVikingRecallEvidence
   ) {
     taskShape = 'tool_augmented_reply';
     normalizedByRule = true;

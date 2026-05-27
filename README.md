@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-27 10:44 +08:00：新增 OpenViking 外部长期对话记忆层，默认全关；启用后先本地 Memory V3 召回，再用 OpenViking 补强跨会话语义覆盖，并经本地去重/冲突过滤和 planner 选择后才注入 `[OpenVikingRecall]`。详见 `docs/openviking-memory-recall.md`。
+
 更新 2026-05-27 10:02 +08:00：新增管理员手动群总结命令 `/群总结 [条数]`，通过 NapCat `get_group_msg_history` 拉取最近群消息并输出文本报告；失败时回退基础统计，详见 `docs/qq-group-summary.md`。
 
 更新 2026-05-27 01:45 +08:00：低内存档位改为“轻量化但不关闭能力”：`LOW_RESOURCE_MODE=true` 且运行角色为 main 时默认不启动 embedding backfill，LanceDB 读走一次性 helper，并降低 memory/worldbook rerank、worldbook semantic、图片记忆召回的候选数和超时预算；post-reply worker 保留完整学习链路，默认 `768MB/30s` 空闲 RSS 回收。
@@ -198,6 +200,7 @@ npm run diag:security
 npm run diag:fallback
 npm run diag:memory
 npm run diag:memory -- audit --limit 5
+npm run diag:memory -- openviking --query "长期记忆 偏好"
 npm run diag:continuity
 npm run diag:continuity -- prompt --user <id>
 npm run diag:main-reply
@@ -227,6 +230,8 @@ node scripts/sync-lancedb-memory-index.js --full --compact --dir data/lancedb_us
 Memory V3 projection 会保留冲突 loser 供审计，但默认标记不可召回；主回复 prompt 会随记忆证据加入短 `memory_recall_policy`，避免把 stale/superseded/弱证据当确定事实。
 
 `memory:v3:import-file` 支持 `.md/.markdown/.txt`；Markdown 按标题切块，普通文本按段落切块。默认写入 `source=file_import`、`intent=bulk_import`，并复用版本化 update，重复导入不会扩大 active chunk 数。
+
+OpenViking 远端记忆默认 `OPENVIKING_ENABLED=false`、`OPENVIKING_INGEST_ENABLED=false`、`OPENVIKING_RECALL_ENABLED=false`。只在显式开启后连接外部 OpenViking 服务；本地 Memory V3、短期连续性和 profile memory 始终优先，远端重复或冲突会被丢弃。CLI 只读入口：`mem search --source openviking --query "..."` 和 `mem open ov_ref:...`。
 
 LanceDB 用户分桶影子迁移默认不删除旧库；验证通过后配置 `MEMORY_LANCEDB_DIR=./data/lancedb_user_bucket`、`MEMORY_LANCEDB_PARTITION_MODE=user_bucket`、`MEMORY_LANCEDB_BUCKET_COUNT=32`，回滚时改回 `./data/lancedb` 和 `legacy`。
 

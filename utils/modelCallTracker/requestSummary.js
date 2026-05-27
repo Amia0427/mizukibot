@@ -75,7 +75,7 @@ function summarizePromptTokenBudget(request = {}, combinedText = '') {
 function containsMemoryMarker(text) {
   const input = String(text || '');
   if (!input) return false;
-  return /\[(?:Memory|Profile|Summary|RetrievedMemoryLite|RetrievedMemory|DailyJournal|TaskMemory|GroupMemory|StyleSignals|ShortTermContinuity|MemOSRecall|LongTermProfile|Impression|ContinuityState)\]|长期记忆|记忆注入/i.test(input);
+  return /\[(?:Memory|Profile|Summary|RetrievedMemoryLite|RetrievedMemory|DailyJournal|TaskMemory|GroupMemory|StyleSignals|ShortTermContinuity|MemOSRecall|OpenVikingRecall|LongTermProfile|Impression|ContinuityState)\]|长期记忆|记忆注入/i.test(input);
 }
 
 function summarizeRequest(request = {}) {
@@ -121,6 +121,7 @@ function summarizeRequest(request = {}) {
       has_daily_journal: markerCounts.daily_journal > 0,
       has_short_term_continuity: markerCounts.short_term_continuity > 0,
       has_memos_recall: markerCounts.memos_recall > 0,
+      has_openviking_recall: markerCounts.openviking_recall > 0,
       has_continuity_state: markerCounts.continuity_state > 0,
       token_budget: summarizePromptTokenBudget(request, combinedText)
     }
@@ -142,6 +143,7 @@ function summarizePromptMarkerCounts(text = '') {
     style_signals: countPattern(input, /\[StyleSignals\]/gi),
     short_term_continuity: countPattern(input, /\[ShortTermContinuity\]/gi),
     memos_recall: countPattern(input, /\[MemOSRecall\]/gi),
+    openviking_recall: countPattern(input, /\[OpenVikingRecall\]/gi),
     long_term_profile: countPattern(input, /\[LongTermProfile\]/gi),
     summary: countPattern(input, /\[Summary\]/gi),
     continuity_state: countPattern(input, /\[ContinuityState\]/gi)

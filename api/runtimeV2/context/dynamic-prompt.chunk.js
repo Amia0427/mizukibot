@@ -75,6 +75,11 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       fallbackMemoryContext
     );
     const fallbackMemosRecallText = normalizeText(fallbackMemosRecall.promptText);
+    const fallbackOpenVikingRecall = dedupeOpenVikingRecallForPrompt(
+      resolveOpenVikingRecallObject(options, routeMeta, null),
+      fallbackMemoryContext
+    );
+    const fallbackOpenVikingRecallText = normalizeText(fallbackOpenVikingRecall.promptText);
     return {
       userInfo,
       userId,
@@ -97,6 +102,11 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
         memosRecall: fallbackMemosRecall,
         memosRecallText: fallbackMemosRecallText
       }, {}, { memosRecall: fallbackMemosRecall, memosRecallText: fallbackMemosRecallText }),
+      openVikingRecall: fallbackOpenVikingRecall,
+      openVikingRecallText: normalizeOpenVikingRecallBlockText(resolveOpenVikingRecallText({
+        openVikingRecall: fallbackOpenVikingRecall,
+        openVikingRecallText: fallbackOpenVikingRecallText
+      }, {}, { openVikingRecall: fallbackOpenVikingRecall, openVikingRecallText: fallbackOpenVikingRecallText })),
       dynamicPromptPlan: baseDynamicPromptPlan,
       summaryText: fallbackSummaryText,
       dynamicFewShotPrompt: ''
@@ -490,6 +500,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     hasRetrievedMemory: combinedDynamicBlocks.some((item) => item?.id === 'retrieved_memory_lite'),
     hasMemosRecall: combinedDynamicBlocks.some((item) => item?.id === 'memos_recall' || normalizeText(item?.meta?.blockId) === 'memos_recall')
       || Boolean(resolveMemosRecallText(options, routeMeta, promptMaterials)),
+    hasOpenVikingRecall: combinedDynamicBlocks.some((item) => item?.id === 'openviking_recall' || normalizeText(item?.meta?.blockId) === 'openviking_recall')
+      || Boolean(resolveOpenVikingRecallText(options, routeMeta, promptMaterials)),
     hasDailyJournal: combinedDynamicBlocks.some((item) => item?.id === 'daily_journal' || normalizeText(item?.meta?.blockId) === 'daily_journal'),
     hasLongTermProfile: combinedDynamicBlocks.some((item) => item?.id === 'long_term_profile'),
     hasImpression: combinedDynamicBlocks.some((item) => item?.id === 'impression'),
@@ -581,13 +593,23 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   };
   const combinedBlocks = dedupePromptBlocks(rawCombinedBlocks).filter((block) => {
     const ids = getPromptBlockPlanIds(block).ids;
-    if (!ids.includes('memos_recall')) return true;
-    const deduped = dedupeMemosRecallForPrompt({
-      used: true,
-      promptText: normalizeText(block?.content),
-      items: []
-    }, visibleMemoryContextForDedupe);
-    return !(deduped?.used === false && normalizeText(deduped?.rejectedReason) === 'deduped_by_local_memory');
+    if (ids.includes('memos_recall')) {
+      const deduped = dedupeMemosRecallForPrompt({
+        used: true,
+        promptText: normalizeText(block?.content),
+        items: []
+      }, visibleMemoryContextForDedupe);
+      return !(deduped?.used === false && normalizeText(deduped?.rejectedReason) === 'deduped_by_local_memory');
+    }
+    if (ids.includes('openviking_recall')) {
+      const deduped = dedupeOpenVikingRecallForPrompt({
+        used: true,
+        promptText: normalizeText(block?.content),
+        items: [{ id: 'prompt_block', text: normalizeText(block?.content) }]
+      }, visibleMemoryContextForDedupe);
+      return !(deduped?.used === false && normalizeText(deduped?.rejectedReason) === 'deduped_by_local_memory');
+    }
+    return true;
   });
   const requiredIds = normalizeArray(stableLayer.promptSnapshot?.stableBlockIds);
   const finalMemosRecall = dedupeMemosRecallForPrompt(
@@ -609,6 +631,24 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     );
   if (hasLocalMemosDuplicate && !finalBlockedIds.includes('memos_recall')) {
     finalBlockedIds.push('memos_recall');
+  }
+  const finalOpenVikingRecall = dedupeOpenVikingRecallForPrompt(
+    resolveOpenVikingRecallObject(options, routeMeta, promptMaterials),
+    visibleMemoryContextForDedupe
+  );
+  const hasLocalOpenVikingDuplicate = (
+    finalOpenVikingRecall?.used === false
+    && normalizeText(finalOpenVikingRecall?.rejectedReason) === 'deduped_by_local_memory'
+  ) || (
+    options.memoryContext
+    && typeof options.memoryContext === 'object'
+    && dedupeOpenVikingRecallForPrompt(
+      resolveOpenVikingRecallObject(options, routeMeta, promptMaterials),
+      options.memoryContext
+    )?.rejectedReason === 'deduped_by_local_memory'
+  );
+  if (hasLocalOpenVikingDuplicate && !finalBlockedIds.includes('openviking_recall')) {
+    finalBlockedIds.push('openviking_recall');
   }
   const selectedBlocks = filterBlocksByPlan(combinedBlocks, finalDynamicPromptPlan, {
     requiredIds,

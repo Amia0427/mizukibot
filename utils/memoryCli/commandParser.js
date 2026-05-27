@@ -1,7 +1,7 @@
 const config = require('../../config');
 
-const VALID_SEARCH_SOURCES = new Set(['all', 'profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook', 'image']);
-const VALID_OPEN_SOURCES = new Set(['profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook', 'image']);
+const VALID_SEARCH_SOURCES = new Set(['all', 'profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook', 'image', 'openviking']);
+const VALID_OPEN_SOURCES = new Set(['profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook', 'image', 'openviking']);
 
 function sanitizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -451,7 +451,7 @@ function tryRepairImplicitSearch(text = '', repairStrategy = []) {
 }
 
 function tryRepairImplicitOpen(text = '', repairStrategy = []) {
-  const match = text.match(/^mem open\s+(mc_ref:[^\s]+)$/i);
+  const match = text.match(/^mem open\s+((?:mc_ref|ov_ref):[^\s]+)$/i);
   if (!match) return text;
   repairStrategy.push('implicit_open_ref');
   return `mem open --ref ${buildQuotedCommandValue(match[1])}`;

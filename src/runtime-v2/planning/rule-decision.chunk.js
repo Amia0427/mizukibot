@@ -55,6 +55,7 @@ const DYNAMIC_PROMPT_BLOCK_SIGNAL_KEYS = Object.freeze({
   summary: 'summary',
   retrieved_memory_lite: 'retrievedMemory',
   memos_recall: 'memosRecall',
+  openviking_recall: 'openVikingRecall',
   daily_journal: 'dailyJournal',
   short_term_continuity: 'shortTermContinuity',
   continuity_state: 'continuity',
@@ -79,6 +80,7 @@ const DYNAMIC_PROMPT_BLOCK_SELECTION_POLICIES = Object.freeze({
   summary: 'include_if_relevant',
   retrieved_memory_lite: 'high_value_only',
   memos_recall: 'high_value_only',
+  openviking_recall: 'high_value_only',
   daily_journal: 'high_value_only',
   short_term_continuity: 'must_use_when_available',
   continuity_state: 'include_if_relevant',
@@ -142,6 +144,7 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
     hasShortTermContinuity: availableContextSignals.shortTermContinuity,
     hasRetrievedMemory: availableContextSignals.retrievedMemory,
     hasMemosRecall: availableContextSignals.memosRecall,
+    hasOpenVikingRecall: availableContextSignals.openVikingRecall,
     hasDailyJournal: availableContextSignals.dailyJournal,
     hasLongTermProfile: availableContextSignals.longTermProfile,
     hasImpression: availableContextSignals.impression,
@@ -434,6 +437,13 @@ function buildAvailableContextSignals(route = {}, options = {}) {
       hasMeaningfulText(options.memosRecallText)
       || hasMeaningfulText(options.memosRecall?.promptText)
       || normalizeArray(options.memosRecall?.items).some((item) => hasMeaningfulText(item?.text || item?.content))
+    )),
+    openVikingRecall: signal('openVikingRecall', (
+      hasMeaningfulText(options.openVikingRecallText)
+      || hasMeaningfulText(options.openvikingRecallText)
+      || hasMeaningfulText(options.openVikingRecall?.promptText)
+      || hasMeaningfulText(options.openvikingRecall?.promptText)
+      || normalizeArray(options.openVikingRecall?.items || options.openvikingRecall?.items).some((item) => hasMeaningfulText(item?.text || item?.content || item?.abstract))
     )),
     dailyJournal: signal('dailyJournal', (
       hasMeaningfulText(memoryContext.promptDailyJournalText)

@@ -267,6 +267,37 @@ function summarizeMemosRecall(recall = {}, options = {}) {
   };
 }
 
+function summarizeOpenVikingRecall(recall = {}, options = {}) {
+  const normalized = normalizeObject(recall, {});
+  const diagnostics = normalizeObject(normalized.diagnostics, {});
+  const dedupe = normalizeObject(diagnostics.dedupe, {});
+  const items = normalizeArray(normalized.items);
+  return {
+    enabled: diagnostics.enabled === true,
+    used: normalized.used === true,
+    rejectedReason: normalizeText(normalized.rejectedReason),
+    durationMs: Math.max(0, Number(diagnostics.durationMs || 0) || 0),
+    rawCandidateCount: Math.max(0, Number(diagnostics.rawCandidateCount || 0) || 0),
+    filteredCount: Math.max(0, Number(diagnostics.filteredCount || 0) || 0),
+    candidateCount: items.length,
+    promptChars: normalizeText(normalized.promptText).length,
+    queryHash: stableHash(normalized.query || diagnostics.query),
+    queryPreview: truncatePreview(normalized.query || diagnostics.query, 120),
+    targetUri: truncatePreview(diagnostics.targetUri, 160),
+    cache: summarizeCacheDiagnostics(diagnostics.cache),
+    circuit: summarizeCircuitDiagnostics(diagnostics.circuit),
+    diagnosticsError: normalizeText(diagnostics.error),
+    dedupe: {
+      enabled: dedupe.enabled === true,
+      localEvidenceCount: Math.max(0, Number(dedupe.localEvidenceCount || 0) || 0),
+      kept: Math.max(0, Number(dedupe.kept || 0) || 0),
+      removed: Math.max(0, Number(dedupe.removed || 0) || 0),
+      removedItems: summarizeDedupedRemovedItems(dedupe)
+    },
+    items: summarizeRecallItems(items, options)
+  };
+}
+
 function appendObservation(payload = {}) {
   try {
     appendFileWithRotationBatched(
@@ -405,6 +436,10 @@ function recordMainPromptBlockObservation(input = {}) {
   const memosSummary = summarizeMemosRecall(input.memosRecall);
   const promptHasMemosRecall = allBlockIds.includes('memos_recall') || allBlockIds.includes('memos_recall_compact');
   const plannerIncludedMemosRecall = isPlannerIncludingBlock(dynamicPromptPlan, 'memos_recall');
+  const openVikingDecision = findPlannerDecisionForBlock(dynamicPromptPlan, 'openviking_recall');
+  const openVikingSummary = summarizeOpenVikingRecall(input.openVikingRecall);
+  const promptHasOpenVikingRecall = allBlockIds.includes('openviking_recall') || allBlockIds.includes('openviking_recall_compact');
+  const plannerIncludedOpenVikingRecall = isPlannerIncludingBlock(dynamicPromptPlan, 'openviking_recall');
   const droppedReasons = [];
   if (plannerIncludedMemosRecall && !memosSummary.used) {
     droppedReasons.push('planner_included_but_memos_recall_unused');
@@ -412,10 +447,16 @@ function recordMainPromptBlockObservation(input = {}) {
   if (plannerIncludedMemosRecall && memosSummary.used && !promptHasMemosRecall) {
     droppedReasons.push('planner_included_but_prompt_missing_block');
   }
+  if (plannerIncludedOpenVikingRecall && !openVikingSummary.used) {
+    droppedReasons.push('planner_included_but_openviking_recall_unused');
+  }
+  if (plannerIncludedOpenVikingRecall && openVikingSummary.used && !promptHasOpenVikingRecall) {
+    droppedReasons.push('planner_included_but_openviking_prompt_missing_block');
+  }
   appendObservation({
     ...baseLogFields(input),
     stage: droppedReasons.length > 0
-      ? normalizeText(input.dropStage, 'memos_recall_dropped_before_prompt')
+      ? normalizeText(input.dropStage, plannerIncludedOpenVikingRecall ? 'openviking_recall_dropped_before_prompt' : 'memos_recall_dropped_before_prompt')
       : normalizeText(input.stage, 'prepare_main_prompt_blocks'),
     prompt: {
       stableBlockIds: normalizeArray(promptSnapshot.stableBlockIds).map((item) => normalizeText(item)).filter(Boolean),
@@ -423,6 +464,7 @@ function recordMainPromptBlockObservation(input = {}) {
       assistantOnlyBlockIds: normalizeArray(promptSnapshot.assistantOnlyBlockIds).map((item) => normalizeText(item)).filter(Boolean),
       assembledBlockCount: normalizeArray(promptSnapshot.assembledBlocks).length,
       hasMemosRecall: promptHasMemosRecall,
+      hasOpenVikingRecall: promptHasOpenVikingRecall,
       hasRetrievedMemoryLite: allBlockIds.includes('retrieved_memory_lite') || allBlockIds.includes('retrieved_memory_compact'),
       hasShortTermContinuity: allBlockIds.includes('short_term_continuity'),
       hasContinuityState: allBlockIds.includes('continuity_state') || allBlockIds.includes('session_continuity'),
@@ -434,12 +476,21 @@ function recordMainPromptBlockObservation(input = {}) {
       dynamicPromptPlanSource: normalizeText(dynamicPromptPlan.source || dynamicPromptPlan._source),
       enabledBlockIds: normalizeArray(dynamicPromptPlan.enabledBlockIds).map((item) => normalizeText(item)).filter(Boolean),
       includedMemosRecall: plannerIncludedMemosRecall,
+      includedOpenVikingRecall: plannerIncludedOpenVikingRecall,
       memosRecallDecision: memosDecision
         ? {
             decision: normalizeText(memosDecision.decision),
             confidence: Number.isFinite(Number(memosDecision.confidence)) ? Number(memosDecision.confidence) : null,
             priority: Number.isFinite(Number(memosDecision.priority)) ? Number(memosDecision.priority) : null,
             reasonPreview: truncatePreview(memosDecision.reason, 120)
+          }
+        : null,
+      openVikingRecallDecision: openVikingDecision
+        ? {
+            decision: normalizeText(openVikingDecision.decision),
+            confidence: Number.isFinite(Number(openVikingDecision.confidence)) ? Number(openVikingDecision.confidence) : null,
+            priority: Number.isFinite(Number(openVikingDecision.priority)) ? Number(openVikingDecision.priority) : null,
+            reasonPreview: truncatePreview(openVikingDecision.reason, 120)
           }
         : null
     },
@@ -450,6 +501,7 @@ function recordMainPromptBlockObservation(input = {}) {
     },
     memoryTrace: normalizeObject(input.memoryContext?.diagnostics, {}).memoryTrace || null,
     memos: memosSummary,
+    openviking: openVikingSummary,
     drop: {
       dropped: droppedReasons.length > 0,
       reasons: droppedReasons
@@ -473,6 +525,7 @@ module.exports = {
   resolveObservabilityLogFile,
   stableHash,
   summarizeMemosRecall,
+  summarizeOpenVikingRecall,
   summarizeRecallItems,
   truncatePreview
 };

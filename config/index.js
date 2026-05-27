@@ -24,6 +24,7 @@ const {
 } = require('./promptRuntime');
 const { buildPlannerRuntimeConfig } = require('./plannerRuntime');
 const { buildMemosRuntimeConfig } = require('./memosRuntime');
+const { buildOpenVikingRuntimeConfig } = require('./openVikingRuntime');
 const { buildPostReplyWatchdogRuntimeConfig } = require('./postReplyRuntime');
 const {
   buildMainReplyContextRuntimeConfig,
@@ -450,6 +451,10 @@ module.exports = {
   GROUP_SUMMARY_DEFAULT_LIMIT: Math.max(1, pickNum('GROUP_SUMMARY_DEFAULT_LIMIT', 200)),
   GROUP_SUMMARY_MAX_LIMIT: Math.max(1, pickNum('GROUP_SUMMARY_MAX_LIMIT', 500)),
   GROUP_SUMMARY_MODEL_MAX_CHARS: Math.max(1000, pickNum('GROUP_SUMMARY_MODEL_MAX_CHARS', 12000)),
+  GROUP_SUMMARY_MODEL: pick('GROUP_SUMMARY_MODEL', ''),
+  GROUP_SUMMARY_API_BASE_URL: pick('GROUP_SUMMARY_API_BASE_URL', pick('GROUP_SUMMARY_API_BASEURI', '')),
+  GROUP_SUMMARY_API_KEY: pick('GROUP_SUMMARY_API_KEY', pick('GROUP_SUMMARY_APIKEY', '')),
+  GROUP_SUMMARY_MODEL_TYPE: pick('GROUP_SUMMARY_MODEL_TYPE', ''),
   MODEL_ENDPOINT_ALLOW_LOCAL_HTTP: pickBool('MODEL_ENDPOINT_ALLOW_LOCAL_HTTP', false),
   AI_STREAM_ENABLED: pickBool('AI_STREAM_ENABLED', false),
   AI_STREAM_CHUNK_MS: pickNum('AI_STREAM_CHUNK_MS', 900),
@@ -753,6 +758,7 @@ module.exports = {
   MCP_DISCOVERY_FAILURE_TTL_MS: pickNum('MCP_DISCOVERY_FAILURE_TTL_MS', 30000),
   MCP_SESSION_IDLE_TTL_MS: Math.max(0, pickNum('MCP_SESSION_IDLE_TTL_MS', lowResourceMode ? 120000 : 0)),
   ...buildMemosRuntimeConfig({ pick, pickNum, pickBool, pickList }),
+  ...buildOpenVikingRuntimeConfig({ pick, pickNum, pickBool, pickList }),
   DIAGNOSTICS_EXCLUDE_OPENCLAW_GATEWAY: pickBool('DIAGNOSTICS_EXCLUDE_OPENCLAW_GATEWAY', true),
   GRAPH_TOOL_SUCCESS_LOG_ENABLED: pickBool('GRAPH_TOOL_SUCCESS_LOG_ENABLED', false),
   ENABLE_DEBUG_LOG: pickBool('ENABLE_DEBUG_LOG', true),

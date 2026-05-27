@@ -728,6 +728,11 @@ module.exports = (async () => {
     },
     dynamicFewShotPrompt: 'example',
     memoryCliTurn: { exposed: true },
+    openVikingRecall: {
+      used: true,
+      items: [{ id: 'ov1', text: 'OpenViking recalls a workflow preference.' }]
+    },
+    openVikingRecallText: '[OpenVikingRecall]\n1. source=openviking score=0.91 OpenViking recalls a workflow preference.',
     schedulerInjection: 'fresh injection'
   });
 
@@ -747,6 +752,7 @@ module.exports = (async () => {
   const roleplayRuntimeBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'roleplay_runtime_context');
   const fewShotBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'dynamic_few_shot');
   const memoryBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'retrieved_memory_lite');
+  const openVikingBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'openviking_recall');
   assert.strictEqual(roleplayRuntimeBlockMeta.selectionPolicy, 'must_use_when_available');
   assert.strictEqual(roleplayRuntimeBlockMeta.signalKey, 'roleplayRuntimeContext');
   assert.strictEqual(roleplayRuntimeBlockMeta.available, true);
@@ -757,6 +763,9 @@ module.exports = (async () => {
   assert.strictEqual(fewShotBlockMeta.available, true);
   assert.strictEqual(memoryBlockMeta.signalKey, 'retrievedMemory');
   assert.strictEqual(memoryBlockMeta.available, true);
+  assert.strictEqual(openVikingBlockMeta.selectionPolicy, 'high_value_only');
+  assert.strictEqual(openVikingBlockMeta.signalKey, 'openVikingRecall');
+  assert.strictEqual(openVikingBlockMeta.available, true);
   assert.strictEqual(plannerPayload.availableContextSignals.directedContext, true);
   assert.strictEqual(plannerPayload.availableContextSignals.roleplayRuntimeContext, true);
   assert.strictEqual(plannerPayload.availableContextSignals.continuity, true);
@@ -766,6 +775,7 @@ module.exports = (async () => {
   assert.strictEqual(plannerPayload.availableContextSignals.summary, true);
   assert.strictEqual(plannerPayload.availableContextSignals.dynamicFewShot, true);
   assert.strictEqual(plannerPayload.availableContextSignals.memoryCliInstruction, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.openVikingRecall, true);
   assert.strictEqual(plannerPayload.availableContextSignals.schedulerInjection, true);
   assert.ok(String(plannerPayload.dynamicPromptGuide || '').includes('dynamic_few_shot'));
   assert.ok(String(plannerPayload.dynamicPromptGuide || '').includes('roleplay_runtime_context'));

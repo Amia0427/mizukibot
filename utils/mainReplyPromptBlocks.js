@@ -49,6 +49,8 @@ function blockHasUsableDynamicContextContent(block = {}) {
     retrieved_memory_compact: /\[RetrievedMemoryLite\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     memos_recall: /\[MemOSRecall\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     memos_recall_compact: /\[MemOSRecall\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
+    openviking_recall: /\[OpenVikingRecall\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
+    openviking_recall_compact: /\[OpenVikingRecall\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     daily_journal: /\[DailyJournal\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     daily_journal_compact: /\[DailyJournal\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
     long_term_profile: /\[LongTermProfile\]\s*(?:none|null|undefined|暂无|无)?\s*$/i,
@@ -335,6 +337,9 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   if (input.hasMemosRecall) {
     push('memos_recall', 'MemOS planner-side recall is available for this turn');
   }
+  if (input.hasOpenVikingRecall) {
+    push('openviking_recall', 'OpenViking external long-term recall is available for this turn');
+  }
   if (input.hasDailyJournal) {
     push('daily_journal', 'daily journal recall is available for this turn');
   }
@@ -404,6 +409,7 @@ function buildMainReplyDynamicPromptGuide(personaModuleCatalog = []) {
     '- `self_improvement`: enable only when the learned snippet is likely to improve this exact reply pattern. Disable if it looks generic, stale, or likely to overfit.',
     '- `dynamic_few_shot`: enable only for hard style matching, nuanced scene control, or when examples clearly outperform rules. Disable for normal chat or when examples would mostly waste context.',
     '- `retrieved_memory_lite`: enable when specific recalled facts help answer the current turn. Disable when the turn is self-contained or the retrieved facts are weak/noisy.',
+    '- `openviking_recall`: enable only when OpenViking external long-term recall adds specific evidence not already present in local Memory V3. Disable if duplicated, conflicting, generic, or weaker than short-term continuity.',
     '- `daily_journal`: enable when the user asks about yesterday, a specific date, recent days, or what happened in prior conversation.',
     '- `long_term_profile`, `impression`, `relationship_state`, `summary`: enable the ones that materially help continuity or tone. Do not include all of them mechanically if the scene does not need them.',
     '- `memory_cli_instruction` and `context_stats_instruction`: enable only if those tools are actually exposed this turn.',
