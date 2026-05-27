@@ -7,10 +7,12 @@ process.env.GROUP_SUMMARY_MODEL_MAX_CHARS = '12000';
 
 const {
   buildGroupSummaryModelConfig,
+  buildSummaryPrompt,
   buildStats,
   cleanMessageText,
   generateGroupSummary,
   normalizeHistoryMessage,
+  normalizeSummaryStyle,
   parseGroupSummaryLimit
 } = require('../api/groupSummaryService');
 
@@ -40,6 +42,23 @@ module.exports = (async () => {
     provider: 'openai_compatible'
   });
   assert.strictEqual(buildGroupSummaryModelConfig({}), null);
+  assert.strictEqual(normalizeSummaryStyle('brief'), 'brief');
+  assert.strictEqual(normalizeSummaryStyle('ops'), 'ops');
+  assert.strictEqual(normalizeSummaryStyle('unknown'), 'daily');
+
+  const prompt = buildSummaryPrompt({
+    groupId: 'g1',
+    limit: 50,
+    stats: { totalMessages: 1, participantCount: 1, topUsers: [], topHours: [] },
+    messagesText: '[10:00] [u1] 小明: 今天先上线灰度',
+    style: 'ops'
+  });
+  const promptText = prompt.map((item) => item.content).join('\n');
+  assert.ok(promptText.includes('关键结论/待办'));
+  assert.ok(promptText.includes('高能发言/金句'));
+  assert.ok(promptText.includes('禁止使用没有事实支撑的空话'));
+  assert.ok(promptText.includes('不得合成多人发言或编造引语'));
+  assert.ok(promptText.includes('总结风格：ops'));
 
   assert.strictEqual(
     cleanMessageText('[CQ:reply,id=1][CQ:at,qq=2] 你好 [CQ:image,url=x] [CQ:face,id=1]'),
@@ -86,7 +105,8 @@ module.exports = (async () => {
       GROUP_SUMMARY_MODEL: 'summary-model',
       GROUP_SUMMARY_API_BASE_URL: 'https://summary.example/v1/chat/completions',
       GROUP_SUMMARY_API_KEY: 'summary-key',
-      GROUP_SUMMARY_MODEL_TYPE: 'openai_compatible'
+      GROUP_SUMMARY_MODEL_TYPE: 'openai_compatible',
+      GROUP_SUMMARY_STYLE: 'brief'
     },
     getGroupMessageHistoryCached: async (groupId, options) => {
       calls.push({ groupId, options });
@@ -99,6 +119,7 @@ module.exports = (async () => {
     requestNonStreamingReply: async (messages, context) => {
       assert.ok(Array.isArray(messages));
       assert.ok(String(messages[1].content).includes('今天先上线灰度'));
+      assert.ok(String(messages[1].content).includes('总结风格：brief'));
       assert.strictEqual(context.routePolicyKey, 'admin/group_summary');
       assert.deepStrictEqual(context.modelConfig, {
         model: 'summary-model',
