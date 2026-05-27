@@ -39,6 +39,11 @@ const {
   listStaleProfileMemories,
   reviewProfileMemories
 } = require('./profileDiagnostics');
+const {
+  openOpenVikingMemory,
+  parseOpenVikingRef,
+  searchOpenVikingForMemoryCli
+} = require('../openVikingMemory/cli');
 
 function preloadMemoryCli(options = {}) {
   return ensureSnapshot(options);
@@ -79,7 +84,9 @@ async function runMemoryCli(commandText = '', context = {}) {
   let payload = null;
 
   if (parsed.commandName === 'search') {
-    if (parsed.source === 'image' || String(config.MEMORY_CLI_SEARCH_ENGINE || 'fast').trim().toLowerCase() === 'legacy') {
+    if (parsed.source === 'openviking') {
+      payload = await searchOpenVikingForMemoryCli(parsed, context);
+    } else if (parsed.source === 'image' || String(config.MEMORY_CLI_SEARCH_ENGINE || 'fast').trim().toLowerCase() === 'legacy') {
       payload = await runLegacyMemorySearch(parsed, prepared, context);
     } else {
       try {
@@ -196,6 +203,9 @@ async function runMemoryCli(commandText = '', context = {}) {
           console.warn('[memory_cli_fast] open fallback to legacy:', error?.message || error);
         }
       }
+    }
+    if (!opened && (parsed.source === 'openviking' || parseOpenVikingRef(parsed.ref))) {
+      opened = await openOpenVikingMemory(parsed, context);
     }
     if (!opened && (parsed.source === 'notebook' || String(parsed.ref || '').startsWith('mc_ref:notebook:'))) {
       const refParts = String(parsed.ref || '').replace(/^mc_ref:notebook:/, '').split(':');

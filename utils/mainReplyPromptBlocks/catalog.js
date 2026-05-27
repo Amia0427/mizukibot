@@ -108,6 +108,15 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
     avoidWhen: 'Skip when MemOS recall is empty, generic, stale, or weaker than short-term continuity.'
   },
   {
+    blockId: 'openviking_recall',
+    label: 'OpenViking Recall',
+    lane: 'dynamic_context',
+    category: 'memory_summary',
+    defaultPolicy: 'high_value_only',
+    useWhen: 'Use when OpenViking external long-term recall adds specific evidence not already covered by local Memory V3.',
+    avoidWhen: 'Skip when it is empty, duplicated by local memory, conflicts with local memory, or is weaker than short-term continuity.'
+  },
+  {
     blockId: 'daily_journal',
     label: 'Daily Journal',
     lane: 'dynamic_context',
@@ -265,6 +274,11 @@ const DYNAMIC_CONTEXT_BLOCK_SPEC_OVERRIDES = Object.freeze({
     criticality: 'critical',
     emptyPolicy: 'reject_optional_empty',
     budget: { configKey: 'MEMOS_RECALL_MAX_CHARS', hardCapTokens: 260 }
+  },
+  openviking_recall: {
+    criticality: 'critical',
+    emptyPolicy: 'reject_optional_empty',
+    budget: { configKey: 'OPENVIKING_RECALL_MAX_CHARS', hardCapTokens: 260 }
   },
   daily_journal: {
     criticality: 'critical',

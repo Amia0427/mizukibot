@@ -95,6 +95,15 @@ function createPersistNode(deps = {}) {
           return [];
         }
       });
+  const ingestOpenVikingTurnAsync = typeof deps.ingestOpenVikingTurnAsync === 'function'
+    ? deps.ingestOpenVikingTurnAsync
+    : ((input = {}) => {
+        try {
+          return require('../../../utils/openVikingMemory/ingest').ingestTurnAsync(input);
+        } catch (_) {
+          return undefined;
+        }
+      });
   const postReplyLastEnqueueAtByUser = new Map();
 
   function normalizeText(value) {
@@ -359,6 +368,22 @@ function createPersistNode(deps = {}) {
     console.log('[memory-write] persist decision', persistDecisionPayload);
 
     if (shouldPersistChatArtifacts) {
+      try {
+        ingestOpenVikingTurnAsync({
+          userId: request.userId,
+          senderId: request.routeMeta?.senderId || request.routeMeta?.sender_id || request.userId,
+          groupId: routeGroupId,
+          channelId: request.routeMeta?.channelId || request.routeMeta?.channel_id || '',
+          sessionKey: request.sessionKey,
+          sessionId: request.routeMeta?.sessionId || request.routeMeta?.session_id || '',
+          platform: request.routeMeta?.platform || request.routeMeta?.channel || 'qq',
+          routePolicyKey: request.routePolicyKey,
+          topRouteType: request.topRouteType,
+          senderName: request.userInfo?.name || request.userInfo?.nickname || request.routeMeta?.senderName || request.routeMeta?.sender_name || '',
+          userText: userContent,
+          assistantText: finalReply
+        });
+      } catch (_) {}
       if (config.MEMORY_V3_ENABLED) {
         await appendMemoryEvent({
           type: 'turn_replied',

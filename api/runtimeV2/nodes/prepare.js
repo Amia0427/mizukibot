@@ -101,6 +101,15 @@ function createPrepareNode(deps = {}) {
           return '';
         }
       });
+  const getOpenVikingRecallPromptTextImpl = typeof deps.getOpenVikingRecallPromptText === 'function'
+    ? deps.getOpenVikingRecallPromptText
+    : ((openVikingRecall = {}) => {
+        try {
+          return require('../../../utils/openVikingMemory/recall').getOpenVikingRecallPromptText(openVikingRecall);
+        } catch (_) {
+          return '';
+        }
+      });
   const buildPreparedMainConversationContext = typeof deps.buildPreparedMainConversationContext === 'function'
     ? deps.buildPreparedMainConversationContext
     : (() => null);
@@ -181,6 +190,21 @@ function createPrepareNode(deps = {}) {
       request.memosRecall,
       plannerMeta.memosRecall,
       routeMeta.memosRecall
+    ]);
+  }
+
+  function resolveOpenVikingRecallForObservation(request = {}, promptBuildResult = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const plannerMeta = resolvePlannerRuntimeMeta(request, promptBuildResult);
+    return pickFirstObject([
+      promptBuildResult.openVikingRecall,
+      promptBuildResult.openvikingRecall,
+      request.openVikingRecall,
+      request.openvikingRecall,
+      plannerMeta.openVikingRecall,
+      plannerMeta.openvikingRecall,
+      routeMeta.openVikingRecall,
+      routeMeta.openvikingRecall
     ]);
   }
 
@@ -295,6 +319,21 @@ function createPrepareNode(deps = {}) {
       routeMeta.directChatPlanner?.memosRecall,
       routeMeta.toolPlanner?.memosRecall,
       routeMeta.memosRecall
+    ];
+    return pickFirstObject(candidates);
+  }
+
+  function resolvePlannerOpenVikingRecall(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const candidates = [
+      request.openVikingRecall,
+      request.openvikingRecall,
+      routeMeta.directChatPlanner?.openVikingRecall,
+      routeMeta.directChatPlanner?.openvikingRecall,
+      routeMeta.toolPlanner?.openVikingRecall,
+      routeMeta.toolPlanner?.openvikingRecall,
+      routeMeta.openVikingRecall,
+      routeMeta.openvikingRecall
     ];
     return pickFirstObject(candidates);
   }
@@ -450,6 +489,20 @@ function createPrepareNode(deps = {}) {
       {
         priority: 262,
         source: 'memos_recall',
+        meta: { evidenceOnly: true }
+      }
+    ));
+
+    const openVikingRecall = resolvePlannerOpenVikingRecall(request);
+    const shouldInjectOpenViking = openVikingRecall.used === true && planIncludesBlock(dynamicPlan, 'openviking_recall');
+    const openVikingText = shouldInjectOpenViking ? String(getOpenVikingRecallPromptTextImpl(openVikingRecall) || '').trim() : '';
+    appendUniquePromptBlock(blocks, createFallbackPromptBlock(
+      'openviking_recall',
+      'OpenViking Recall',
+      openVikingText,
+      {
+        priority: 263,
+        source: 'openviking_recall',
         meta: { evidenceOnly: true }
       }
     ));
@@ -757,6 +810,7 @@ function createPrepareNode(deps = {}) {
       promptSnapshot,
       memoryContext,
       memosRecall: resolveMemosRecallForObservation(request, guardedPromptBuildResult),
+      openVikingRecall: resolveOpenVikingRecallForObservation(request, guardedPromptBuildResult),
       dynamicPromptPlan: resolveDynamicPromptPlanForObservation(request, guardedPromptBuildResult),
       stage: 'prepare_main_prompt_blocks'
     });

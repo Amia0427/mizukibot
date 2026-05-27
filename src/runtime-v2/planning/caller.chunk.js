@@ -52,7 +52,15 @@ function getMemoryRecallObservability() {
   return require('../../../utils/memoryRecallObservability');
 }
 
-function attachMemosRecallToPlannerDecision(decision = {}, options = {}) {
+function getOpenVikingRecallRuntime() {
+  return require('../../../utils/openVikingMemory/recall');
+}
+
+function getOpenVikingDeduper() {
+  return require('../../../utils/openVikingMemory/deduper');
+}
+
+function attachExternalRecallToPlannerDecision(decision = {}, options = {}) {
   const normalizedDecision = normalizeObject(decision, {});
   const memosRecall = normalizeObject(
     normalizedDecision.memosRecall
@@ -65,9 +73,26 @@ function attachMemosRecallToPlannerDecision(decision = {}, options = {}) {
     || normalizedDecision.plannerMeta?.memosRecallText
     || options.memosRecallText
   );
+  const openVikingRecall = normalizeObject(
+    normalizedDecision.openVikingRecall
+    || normalizedDecision.openvikingRecall
+    || normalizedDecision.plannerMeta?.openVikingRecall
+    || normalizedDecision.plannerMeta?.openvikingRecall
+    || options.openVikingRecall,
+    {}
+  );
+  const openVikingRecallText = normalizeText(
+    normalizedDecision.openVikingRecallText
+    || normalizedDecision.openvikingRecallText
+    || normalizedDecision.plannerMeta?.openVikingRecallText
+    || normalizedDecision.plannerMeta?.openvikingRecallText
+    || options.openVikingRecallText
+  );
   const patch = {};
   if (Object.keys(memosRecall).length > 0) patch.memosRecall = memosRecall;
   if (memosRecallText) patch.memosRecallText = memosRecallText;
+  if (Object.keys(openVikingRecall).length > 0) patch.openVikingRecall = openVikingRecall;
+  if (openVikingRecallText) patch.openVikingRecallText = openVikingRecallText;
   if (Object.keys(patch).length === 0) return normalizedDecision;
   return {
     ...normalizedDecision,
@@ -395,6 +420,31 @@ async function planRequestV2(input = {}) {
     maxChars: normalizeObject(input.config, {}).MEMOS_RECALL_MAX_CHARS || config.MEMOS_RECALL_MAX_CHARS
   });
   const memosRecallText = getMemosPlannerRecall().getMemosRecallPromptText(memosRecall || {});
+  const inputOpenVikingRecall = normalizeObject(
+    input.openVikingRecall
+    || input.openvikingRecall,
+    normalizeObject(route?.meta?.openVikingRecall || route?.meta?.openvikingRecall, null)
+  );
+  let openVikingRecall = inputOpenVikingRecall && Object.keys(inputOpenVikingRecall).length > 0 ? inputOpenVikingRecall : null;
+  if (!openVikingRecall) {
+    const inputConfig = normalizeObject(input.config, {});
+    openVikingRecall = await getOpenVikingRecallRuntime().recallOpenVikingForPrompt(route.question || route.cleanText, {
+      ...input,
+      routeMeta: route.meta,
+      userId: normalizeText(input.userId || route?.meta?.userId),
+      senderId: normalizeText(input.senderId || route?.meta?.senderId || route?.meta?.sender_id || input.userId || route?.meta?.userId),
+      groupId: normalizeText(input.groupId || route?.meta?.groupId || route?.meta?.group_id),
+      sessionKey: normalizeText(input.sessionKey || route?.meta?.sessionKey || route?.meta?.session_key),
+      topRouteType: route.topRouteType,
+      platform: route?.meta?.platform || route?.meta?.channel || 'qq',
+      memoryContext,
+      ...(Object.keys(inputConfig).length > 0 ? { config: inputConfig } : {})
+    });
+  }
+  openVikingRecall = getOpenVikingDeduper().dedupeOpenVikingRecallAgainstMemoryContext(openVikingRecall || {}, memoryContext, {
+    maxChars: normalizeObject(input.config, {}).OPENVIKING_RECALL_MAX_CHARS || config.OPENVIKING_RECALL_MAX_CHARS
+  });
+  const openVikingRecallText = getOpenVikingRecallRuntime().getOpenVikingRecallPromptText(openVikingRecall || {});
   getMemoryRecallObservability().recordMemosPlannerRecallObservation({
     requestTrace: input.requestTrace || route?.meta?.requestTrace || null,
     routeMeta: route.meta,
@@ -410,7 +460,8 @@ async function planRequestV2(input = {}) {
   const inputAvailableContextSignals = normalizeObject(input.availableContextSignals, normalizeObject(route?.meta?.availableContextSignals, {}));
   const availableContextSignals = memosRecallText
     ? { ...inputAvailableContextSignals, memosRecall: true }
-    : inputAvailableContextSignals;
+    : { ...inputAvailableContextSignals };
+  if (openVikingRecallText) availableContextSignals.openVikingRecall = true;
   const options = {
     userId: normalizeText(input.userId || route?.meta?.userId),
     allowedTools: normalizeArray(input.allowedTools),
@@ -420,6 +471,8 @@ async function planRequestV2(input = {}) {
     memoryContext,
     memosRecall: normalizeObject(memosRecall, {}),
     memosRecallText,
+    openVikingRecall: normalizeObject(openVikingRecall, {}),
+    openVikingRecallText,
     availableContextSignals,
     constraints: normalizeObject(input.constraints, {}),
     directedContext: normalizeObject(input.directedContext, normalizeObject(route?.meta?.directedContext, null)),
@@ -453,7 +506,7 @@ async function planRequestV2(input = {}) {
       allowPlannerCorrection: true
     });
     addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-    return attachMemosRecallToPlannerDecision(
+    return attachExternalRecallToPlannerDecision(
       attachPlannerLatencyMeta(normalized, requestLatencyMeta),
       options
     );
@@ -476,7 +529,7 @@ async function planRequestV2(input = {}) {
       latencyMeta: requestLatencyMeta
     });
     addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-    return attachMemosRecallToPlannerDecision(
+    return attachExternalRecallToPlannerDecision(
       attachPlannerLatencyMeta(normalized, requestLatencyMeta),
       options
     );
@@ -495,7 +548,7 @@ async function planRequestV2(input = {}) {
           latencyMeta: requestLatencyMeta
         });
         addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-        return attachMemosRecallToPlannerDecision(
+        return attachExternalRecallToPlannerDecision(
           attachPlannerLatencyMeta(normalized, requestLatencyMeta),
           options
         );
@@ -515,7 +568,7 @@ async function planRequestV2(input = {}) {
         plannerModelAttemptMeta: plannerModelResult?.attemptMeta
       });
       addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-      return attachMemosRecallToPlannerDecision(
+      return attachExternalRecallToPlannerDecision(
         attachPlannerLatencyMeta(
           attachPlannerModelAttemptMeta(normalized, plannerModelResult?.attemptMeta),
           requestLatencyMeta
@@ -532,7 +585,7 @@ async function planRequestV2(input = {}) {
     latencyMeta: requestLatencyMeta
   });
   addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
-  return attachMemosRecallToPlannerDecision(
+  return attachExternalRecallToPlannerDecision(
     attachPlannerLatencyMeta(normalized, requestLatencyMeta),
     options
   );
@@ -570,6 +623,8 @@ function convertPlannerDecisionToDirectChatDecision(decision = {}, route = {}, o
     dynamicPromptPlan,
     memosRecall: normalizeObject(decision?.memosRecall || decision?.plannerMeta?.memosRecall || options.memosRecall, {}),
     memosRecallText: normalizeText(decision?.memosRecallText || decision?.plannerMeta?.memosRecallText || options.memosRecallText),
+    openVikingRecall: normalizeObject(decision?.openVikingRecall || decision?.openvikingRecall || decision?.plannerMeta?.openVikingRecall || decision?.plannerMeta?.openvikingRecall || options.openVikingRecall, {}),
+    openVikingRecallText: normalizeText(decision?.openVikingRecallText || decision?.openvikingRecallText || decision?.plannerMeta?.openVikingRecallText || decision?.plannerMeta?.openvikingRecallText || options.openVikingRecallText),
     plannerDecisionV2: decision,
     plannerProtocolVersion: normalizeText(decision?.plannerMeta?.protocolVersion) || PLANNER_PROTOCOL_VERSION
   };

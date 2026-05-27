@@ -59,6 +59,30 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     memosRecall,
     memosRecallText: dedupedMemosRecallText
   }, {}, { memosRecall, memosRecallText: dedupedMemosRecallText });
+  let rawOpenVikingRecall = resolveOpenVikingRecallObject(options, routeMeta, null);
+  if (Object.keys(rawOpenVikingRecall).length === 0) {
+    try {
+      rawOpenVikingRecall = await getOpenVikingRecallRuntime().recallOpenVikingForPrompt(question || '', {
+        userId,
+        senderId: routeMeta.senderId || routeMeta.sender_id || userId,
+        groupId: routeMeta.groupId || routeMeta.group_id || '',
+        sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+        routePolicyKey,
+        topRouteType,
+        platform: routeMeta.platform || routeMeta.channel || 'qq',
+        channel: routeMeta.channel || '',
+        memoryContext
+      });
+    } catch (_) {
+      rawOpenVikingRecall = {};
+    }
+  }
+  const openVikingRecall = dedupeOpenVikingRecallForPrompt(rawOpenVikingRecall, memoryContext);
+  const dedupedOpenVikingRecallText = normalizeText(openVikingRecall.promptText);
+  const openVikingRecallText = normalizeOpenVikingRecallBlockText(resolveOpenVikingRecallText({
+    openVikingRecall,
+    openVikingRecallText: dedupedOpenVikingRecallText
+  }, {}, { openVikingRecall, openVikingRecallText: dedupedOpenVikingRecallText }));
   const personaMemoryState = options.personaMemoryState && typeof options.personaMemoryState === 'object'
     ? options.personaMemoryState
     : await composePersonaMemoryState({
@@ -134,6 +158,8 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     personaModuleDecision,
     memosRecall,
     memosRecallText,
+    openVikingRecall,
+    openVikingRecallText,
     dynamicPromptPlan,
     summaryText,
     dynamicFewShotPrompt,

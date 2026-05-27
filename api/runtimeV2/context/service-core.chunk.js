@@ -388,6 +388,14 @@ function getMemoryRecallDeduperRuntime() {
   return require('../../../utils/memoryRecallDeduper');
 }
 
+function getOpenVikingRecallRuntime() {
+  return require('../../../utils/openVikingMemory/recall');
+}
+
+function getOpenVikingDeduperRuntime() {
+  return require('../../../utils/openVikingMemory/deduper');
+}
+
 function resolveMemosRecallObject(options = {}, routeMeta = {}, promptMaterials = null) {
   const candidates = [
     promptMaterials?.memosRecall,
@@ -431,6 +439,12 @@ function normalizeMemosRecallBlockText(value = '') {
   const text = normalizeText(value);
   if (!text) return '';
   return /^\[MemOSRecall\]/i.test(text) ? text : `[MemOSRecall]\n${text}`;
+}
+
+function normalizeOpenVikingRecallBlockText(value = '') {
+  const text = normalizeText(value);
+  if (!text) return '';
+  return /^\[OpenVikingRecall\]/i.test(text) ? text : `[OpenVikingRecall]\n${text}`;
 }
 
 function dedupeMemosRecallForPrompt(memosRecall = {}, memoryContext = {}, options = {}) {
@@ -478,6 +492,52 @@ function dedupeMemosRecallForPrompt(memosRecall = {}, memoryContext = {}, option
       };
     }
     return recall;
+  }
+}
+
+function resolveOpenVikingRecallObject(options = {}, routeMeta = {}, promptMaterials = null) {
+  const candidates = [
+    promptMaterials?.openVikingRecall,
+    promptMaterials?.openvikingRecall,
+    options?.openVikingRecall,
+    options?.openvikingRecall,
+    routeMeta?.directChatPlanner?.openVikingRecall,
+    routeMeta?.toolPlanner?.openVikingRecall,
+    routeMeta?.openVikingRecall
+  ];
+  return candidates.find((item) => item && typeof item === 'object' && !Array.isArray(item)) || {};
+}
+
+function resolveOpenVikingRecallText(options = {}, routeMeta = {}, promptMaterials = null) {
+  const directText = normalizeText(
+    promptMaterials?.openVikingRecallText
+    || promptMaterials?.openvikingRecallText
+    || options?.openVikingRecallText
+    || options?.openvikingRecallText
+    || routeMeta?.directChatPlanner?.openVikingRecallText
+    || routeMeta?.toolPlanner?.openVikingRecallText
+    || routeMeta?.openVikingRecallText
+  );
+  if (directText) return directText;
+  try {
+    return normalizeText(getOpenVikingRecallRuntime().getOpenVikingRecallPromptText(
+      resolveOpenVikingRecallObject(options, routeMeta, promptMaterials)
+    ));
+  } catch (_) {
+    return '';
+  }
+}
+
+function dedupeOpenVikingRecallForPrompt(openVikingRecall = {}, memoryContext = {}, options = {}) {
+  try {
+    return getOpenVikingDeduperRuntime().dedupeOpenVikingRecallAgainstMemoryContext(openVikingRecall, memoryContext, {
+      maxChars: getConfig().OPENVIKING_RECALL_MAX_CHARS,
+      ...normalizeObject(options, {})
+    });
+  } catch (_) {
+    return openVikingRecall && typeof openVikingRecall === 'object' && !Array.isArray(openVikingRecall)
+      ? openVikingRecall
+      : {};
   }
 }
 
