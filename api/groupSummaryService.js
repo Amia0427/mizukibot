@@ -27,6 +27,21 @@ function parseGroupSummaryLimit(command = {}, runtimeConfig = config) {
   return clampNumber(match ? match[0] : defaultLimit, defaultLimit, 1, maxLimit);
 }
 
+function buildGroupSummaryModelConfig(runtimeConfig = config) {
+  const model = normalizeText(runtimeConfig.GROUP_SUMMARY_MODEL);
+  const apiBaseUrl = normalizeText(runtimeConfig.GROUP_SUMMARY_API_BASE_URL);
+  const apiKey = normalizeText(runtimeConfig.GROUP_SUMMARY_API_KEY);
+  const provider = normalizeText(runtimeConfig.GROUP_SUMMARY_MODEL_TYPE);
+  if (!model && !apiBaseUrl && !apiKey && !provider) return null;
+
+  const modelConfig = {};
+  if (model) modelConfig.model = model;
+  if (apiBaseUrl) modelConfig.apiBaseUrl = apiBaseUrl;
+  if (apiKey) modelConfig.apiKey = apiKey;
+  if (provider) modelConfig.provider = provider;
+  return modelConfig;
+}
+
 function messageToRawText(message = {}) {
   const raw = message.raw_message ?? message.message ?? message.content ?? '';
   if (Array.isArray(raw)) {
@@ -256,6 +271,9 @@ async function generateGroupSummary(input = {}, deps = {}) {
   const messagesText = buildMessagesText(messages, runtimeConfig.GROUP_SUMMARY_MODEL_MAX_CHARS);
   const fallbackText = buildFallbackReport(stats, { limit });
   const modelRequester = deps.requestNonStreamingReply || requestNonStreamingReply;
+  const modelConfig = deps.modelConfig === undefined
+    ? buildGroupSummaryModelConfig(runtimeConfig)
+    : deps.modelConfig;
 
   try {
     const reply = await modelRequester(buildSummaryPrompt({
@@ -271,6 +289,7 @@ async function generateGroupSummary(input = {}, deps = {}) {
       dispatchBranch: 'admin_group_summary',
       triggerBranch: 'admin_group_summary.final_send',
       disableHumanizer: true,
+      modelConfig,
       routeMeta: {
         topRouteType: 'admin',
         routePolicyKey: 'admin/group_summary',
@@ -303,6 +322,7 @@ async function generateGroupSummary(input = {}, deps = {}) {
 
 module.exports = {
   buildFallbackReport,
+  buildGroupSummaryModelConfig,
   buildMessagesText,
   buildStats,
   buildSummaryPrompt,

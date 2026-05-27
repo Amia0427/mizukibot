@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-27 10:46 +08:00：`/群总结` 支持独立模型配置，可通过 `GROUP_SUMMARY_MODEL`、`GROUP_SUMMARY_API_BASE_URL`、`GROUP_SUMMARY_API_KEY`、`GROUP_SUMMARY_MODEL_TYPE` 单独设置总结模型、端点、密钥和模型类型。
+
 更新 2026-05-27 10:44 +08:00：新增 OpenViking 外部长期对话记忆层，默认全关；启用后先本地 Memory V3 召回，再用 OpenViking 补强跨会话语义覆盖，并经本地去重/冲突过滤和 planner 选择后才注入 `[OpenVikingRecall]`。详见 `docs/openviking-memory-recall.md`。
 
 更新 2026-05-27 10:02 +08:00：新增管理员手动群总结命令 `/群总结 [条数]`，通过 NapCat `get_group_msg_history` 拉取最近群消息并输出文本报告；失败时回退基础统计，详见 `docs/qq-group-summary.md`。
