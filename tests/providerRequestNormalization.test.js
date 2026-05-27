@@ -183,6 +183,20 @@ module.exports = (async () => {
     assert.strictEqual(openAIImageHeaders['User-Agent'], 'test-agent');
     assert.ok(!Object.prototype.hasOwnProperty.call(openAIImageHeaders, 'x-goog-api-key'));
 
+    const explicitSummaryOpenAI = buildMainModelRequest({
+      model: 'summary-model',
+      apiBaseUrl: 'https://summary.example/v1/chat/completions',
+      apiKey: 'summary-key',
+      provider: 'openai_compatible'
+    }, {
+      messages: [{ role: 'user', content: 'summary' }],
+      stream: false,
+      defaultMaxTokens: 200
+    });
+    assert.strictEqual(explicitSummaryOpenAI.provider, 'openai_compatible');
+    assert.strictEqual(explicitSummaryOpenAI.url, 'https://summary.example/v1/chat/completions');
+    assert.strictEqual(explicitSummaryOpenAI.body.__requestHeaders.Authorization, 'Bearer summary-key');
+
     delete process.env.MODEL_HTTP_USER_AGENT;
     delete process.env.MAIN_REPLY_USER_AGENT;
     delete process.env.HTTP_USER_AGENT;

@@ -6,6 +6,7 @@ process.env.GROUP_SUMMARY_MAX_LIMIT = '500';
 process.env.GROUP_SUMMARY_MODEL_MAX_CHARS = '12000';
 
 const {
+  buildGroupSummaryModelConfig,
   buildStats,
   cleanMessageText,
   generateGroupSummary,
@@ -26,6 +27,19 @@ module.exports = (async () => {
     GROUP_SUMMARY_DEFAULT_LIMIT: 200,
     GROUP_SUMMARY_MAX_LIMIT: 500
   }), 500);
+
+  assert.deepStrictEqual(buildGroupSummaryModelConfig({
+    GROUP_SUMMARY_MODEL: 'summary-model',
+    GROUP_SUMMARY_API_BASE_URL: 'https://summary.example/v1/chat/completions',
+    GROUP_SUMMARY_API_KEY: 'summary-key',
+    GROUP_SUMMARY_MODEL_TYPE: 'openai_compatible'
+  }), {
+    model: 'summary-model',
+    apiBaseUrl: 'https://summary.example/v1/chat/completions',
+    apiKey: 'summary-key',
+    provider: 'openai_compatible'
+  });
+  assert.strictEqual(buildGroupSummaryModelConfig({}), null);
 
   assert.strictEqual(
     cleanMessageText('[CQ:reply,id=1][CQ:at,qq=2] 你好 [CQ:image,url=x] [CQ:face,id=1]'),
@@ -68,7 +82,11 @@ module.exports = (async () => {
       BOT_QQ: 'bot',
       GROUP_SUMMARY_DEFAULT_LIMIT: 200,
       GROUP_SUMMARY_MAX_LIMIT: 500,
-      GROUP_SUMMARY_MODEL_MAX_CHARS: 12000
+      GROUP_SUMMARY_MODEL_MAX_CHARS: 12000,
+      GROUP_SUMMARY_MODEL: 'summary-model',
+      GROUP_SUMMARY_API_BASE_URL: 'https://summary.example/v1/chat/completions',
+      GROUP_SUMMARY_API_KEY: 'summary-key',
+      GROUP_SUMMARY_MODEL_TYPE: 'openai_compatible'
     },
     getGroupMessageHistoryCached: async (groupId, options) => {
       calls.push({ groupId, options });
@@ -82,6 +100,12 @@ module.exports = (async () => {
       assert.ok(Array.isArray(messages));
       assert.ok(String(messages[1].content).includes('今天先上线灰度'));
       assert.strictEqual(context.routePolicyKey, 'admin/group_summary');
+      assert.deepStrictEqual(context.modelConfig, {
+        model: 'summary-model',
+        apiBaseUrl: 'https://summary.example/v1/chat/completions',
+        apiKey: 'summary-key',
+        provider: 'openai_compatible'
+      });
       return { visibleText: '群总结正文' };
     }
   });

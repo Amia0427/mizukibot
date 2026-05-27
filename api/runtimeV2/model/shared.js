@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const {
   isAnthropicProvider,
   isOpenAICompatibleProvider,
+  normalizeApiProvider,
   ensureAnthropicMessagesUrl
 } = require('../../../utils/modelProvider');
 const {
@@ -82,7 +83,10 @@ function ensureOpenAIMainUrl(apiBaseUrl = '', options = {}) {
     : ensureChatCompletionsUrl(apiBaseUrl);
 }
 
-function resolveMainProvider(apiBaseUrl = '', model = '') {
+function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
+  if (options && typeof options === 'object' && String(options.provider || '').trim()) {
+    return normalizeApiProvider(options.provider);
+  }
   return 'anthropic';
 }
 
@@ -426,7 +430,7 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
 
 function buildMainModelRequest(resolvedConfig = null, options = {}) {
   const apiBaseUrl = getApiBaseUrl(resolvedConfig);
-  const provider = resolveMainProvider(apiBaseUrl, getModelName(resolvedConfig));
+  const provider = resolveMainProvider(apiBaseUrl, getModelName(resolvedConfig), resolvedConfig);
   const protocol = resolveOpenAIMainProtocol(apiBaseUrl, {
     ...options,
     provider
