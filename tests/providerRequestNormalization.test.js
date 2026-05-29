@@ -26,7 +26,7 @@ module.exports = (async () => {
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://api.anthropic.com/v1/messages';
     process.env.AI_MODEL = 'claude-3-5-sonnet-latest';
-    process.env.MODEL_HTTP_USER_AGENT = 'test-agent';
+    process.env.MODEL_HTTP_USER_AGENT = 'codex-test-agent';
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
     clearProjectCache();
@@ -84,7 +84,7 @@ module.exports = (async () => {
         cache_control: { type: 'ephemeral', ttl: '5m' },
         __requestHeaders: {
           Authorization: 'Bearer bad',
-          'User-Agent': 'bad-agent',
+          'User-Agent': 'codex-bad-agent',
           'x-goog-api-key': 'gemini-key'
         },
         contents: [
@@ -180,7 +180,7 @@ module.exports = (async () => {
       'https://example.com/v1/images/generations'
     );
     assert.strictEqual(openAIImageHeaders.Authorization, 'Bearer openai-image-key');
-    assert.strictEqual(openAIImageHeaders['User-Agent'], 'test-agent');
+    assert.strictEqual(openAIImageHeaders['User-Agent'], 'codex-test-agent');
     assert.ok(!Object.prototype.hasOwnProperty.call(openAIImageHeaders, 'x-goog-api-key'));
 
     const explicitSummaryOpenAI = buildMainModelRequest({
@@ -202,7 +202,7 @@ module.exports = (async () => {
     delete process.env.HTTP_USER_AGENT;
     clearProjectCache();
     const defaultConfig = require('../config');
-    assert.strictEqual(defaultConfig.MODEL_HTTP_USER_AGENT, 'claude-cli/2.0.76 (external, cli)');
+    assert.strictEqual(defaultConfig.MODEL_HTTP_USER_AGENT, 'codex-cli/0.121.0 (external, cli)');
 
     console.log('providerRequestNormalization.test.js passed');
   } finally {

@@ -23,7 +23,7 @@ module.exports = (async () => {
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://superapi.buzz/v1/chat/completions';
     process.env.AI_MODEL = 'claude-opus-4-6';
-    process.env.MODEL_HTTP_USER_AGENT = 'test-agent';
+    process.env.MODEL_HTTP_USER_AGENT = 'codex-test-agent';
     clearProjectCache();
 
     const httpClient = require('../api/httpClient');

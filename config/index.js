@@ -31,6 +31,7 @@ const {
   buildSessionContextRuntimeConfig
 } = require('./mainReplyContextRuntime');
 const { buildImageVisualSummaryRuntimeConfig } = require('./imageMemoryRuntime');
+const { CODEX_USER_AGENT, normalizeUserAgent } = require('./userAgentRuntime');
 
 loadEnvironment(PROJECT_ROOT);
 
@@ -123,10 +124,11 @@ module.exports = {
   // ===== Network =====
   // Clear-by-default to avoid startup failures when no local proxy is running.
   PROXY_URL: pick('PROXY_URL', ''),
-  // Some reverse proxies/CDN rules block requests without browser-like headers.
-  HTTP_USER_AGENT: pick('HTTP_USER_AGENT', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'),
-  MAIN_REPLY_USER_AGENT: pick('MAIN_REPLY_USER_AGENT', 'claude-cli/2.0.76 (external, cli)'),
-  MODEL_HTTP_USER_AGENT: pick('MODEL_HTTP_USER_AGENT', pick('MAIN_REPLY_USER_AGENT', 'claude-cli/2.0.76 (external, cli)')),
+  // Default all outbound User-Agent headers to the Codex client identity.
+  CODEX_USER_AGENT,
+  HTTP_USER_AGENT: normalizeUserAgent(pick('HTTP_USER_AGENT', CODEX_USER_AGENT)),
+  MAIN_REPLY_USER_AGENT: normalizeUserAgent(pick('MAIN_REPLY_USER_AGENT', CODEX_USER_AGENT)),
+  MODEL_HTTP_USER_AGENT: normalizeUserAgent(pick('MODEL_HTTP_USER_AGENT', pick('MAIN_REPLY_USER_AGENT', CODEX_USER_AGENT))),
   HTTP_ACCEPT_LANGUAGE: pick('HTTP_ACCEPT_LANGUAGE', 'zh-CN,zh;q=0.9,en;q=0.8'),
   MODEL_TOP_P_ENABLED: pickBool('MODEL_TOP_P_ENABLED', false),
   ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS: pickNum('ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS', 120000),

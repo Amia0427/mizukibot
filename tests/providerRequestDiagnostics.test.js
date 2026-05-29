@@ -37,7 +37,7 @@ module.exports = (async () => {
     process.env.AI_MODEL = 'main-model';
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
-    process.env.MODEL_HTTP_USER_AGENT = 'diagnostic-agent';
+    process.env.MODEL_HTTP_USER_AGENT = 'codex-diagnostic-agent';
     clearProjectCache();
 
     const { runProviderRequestDiagnostics } = require('../utils/providerRequestDiagnostics');

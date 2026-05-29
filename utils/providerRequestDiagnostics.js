@@ -284,7 +284,7 @@ function buildHttpDiagnosticBody(scenarioConfig = {}, options = {}) {
     },
     __requestHeaders: {
       Authorization: apiKey ? `Bearer ${apiKey}` : '',
-      'User-Agent': 'provider-diagnostic-agent',
+      'User-Agent': config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || config.HTTP_USER_AGENT,
       'x-api-key': apiKey,
       'x-goog-api-key': apiKey,
       'X-Not-Allowed': 'drop-me'

@@ -1,5 +1,6 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const config = require('../../../config');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -10,7 +11,7 @@ async function fetchCoinGeckoTrending() {
     timeout: 15000,
     proxy: false,
     headers: {
-      'User-Agent': 'MizukiBot/1.0 (stocks hot native client)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
   return Array.isArray(response?.data?.coins) ? response.data.coins : [];
@@ -21,7 +22,7 @@ async function fetchCompaniesMarketCap() {
     timeout: 15000,
     proxy: false,
     headers: {
-      'User-Agent': 'MizukiBot/1.0 (stocks hot native client)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
   const html = String(response.data || '');
