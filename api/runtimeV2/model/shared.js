@@ -417,7 +417,7 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
     console.warn('[main-reply-token-budget] high estimated input tokens', finalPromptBudget);
   }
 
-  const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || '').trim();
+  const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || config.CODEX_USER_AGENT || '').trim();
   const apiKey = getApiKey(resolvedConfig);
   if (isOpenAICompatibleProvider(options.provider) && (userAgent || apiKey)) {
     body.__requestHeaders = {};

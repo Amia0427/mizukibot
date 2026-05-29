@@ -71,8 +71,9 @@ function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '') {
       config.MODEL_HTTP_USER_AGENT
       || config.MAIN_REPLY_USER_AGENT
       || config.HTTP_USER_AGENT
+      || config.CODEX_USER_AGENT
       || ''
-    ).trim() || 'Mozilla/5.0';
+    ).trim() || config.CODEX_USER_AGENT;
   }
   const normalizedHeaders = normalizeProviderRequestHeaders(provider, headers) || headers;
   if (provider !== 'openai_compatible') normalizedHeaders['User-Agent'] = false;

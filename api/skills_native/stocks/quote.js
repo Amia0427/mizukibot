@@ -1,4 +1,5 @@
 const axios = require('axios');
+const config = require('../../../config');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -16,7 +17,7 @@ async function fetchYahooQuote(symbol = '') {
     timeout: 15000,
     proxy: false,
     headers: {
-      'User-Agent': 'MizukiBot/1.0 (stocks native client)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
   return normalizeArray(response?.data?.quoteResponse?.result)[0] || null;
@@ -40,7 +41,7 @@ async function fetchStooqQuote(symbol = '') {
     timeout: 15000,
     proxy: false,
     headers: {
-      'User-Agent': 'MizukiBot/1.0 (stocks native client)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
   const line = String(response.data || '').trim().split(/\r?\n/).filter(Boolean)[0] || '';
@@ -72,7 +73,7 @@ async function fetchAlphaVantageQuote(symbol = '') {
     timeout: 15000,
     proxy: false,
     headers: {
-      'User-Agent': 'MizukiBot/1.0 (stocks native client)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
   const quote = response?.data?.['Global Quote'];

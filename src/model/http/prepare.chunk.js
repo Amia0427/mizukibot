@@ -1,5 +1,6 @@
 const {
   HttpsProxyAgentCtor,
+  CODEX_USER_AGENT,
   config,
   ensureAnthropicMessagesUrl,
   extractAnthropicCacheControl,
@@ -213,7 +214,7 @@ function getHeaders(provider, specificKey = null, extraHeaders = null) {
     config.MODEL_HTTP_USER_AGENT
       || config.MAIN_REPLY_USER_AGENT
       || config.HTTP_USER_AGENT
-      || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+      || CODEX_USER_AGENT
   ).trim();
   const acceptLanguage = String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim();
   if (isAnthropicProvider(provider)) {

@@ -1,5 +1,6 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const config = require('../../config');
 
 const ARXIV_API_URL = 'https://export.arxiv.org/api/query';
 const ARXIV_HTML_SEARCH_URL = 'https://arxiv.org/search/';
@@ -47,7 +48,7 @@ async function queryArxiv(params = {}) {
     timeout: 20000,
     proxy: false,
     headers: {
-      'User-Agent': 'MizukiBot/1.0 (arxiv native client)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
   const xml = String(response.data || '');
@@ -136,7 +137,7 @@ async function searchArxivHtml({ query = '', max_results = 5 } = {}) {
     timeout: 15000,
     proxy: false,
     headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; MizukiBot/1.0; arxiv html fallback)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
 

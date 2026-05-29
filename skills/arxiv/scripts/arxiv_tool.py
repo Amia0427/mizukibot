@@ -12,6 +12,7 @@ ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 MAX_RESULTS_DEFAULT = 5
 MAX_RESULTS_LIMIT = 10
 ABSTRACT_EXCERPT_LIMIT = 320
+CODEX_USER_AGENT = "codex-cli/0.121.0 (external, cli)"
 
 
 def clamp_max_results(value):
@@ -92,7 +93,7 @@ def request_arxiv(params, timeout=30):
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "MizukiBot/1.0 (arxiv skill)"
+            "User-Agent": CODEX_USER_AGENT
         }
     )
     with urllib.request.urlopen(req, timeout=timeout) as response:

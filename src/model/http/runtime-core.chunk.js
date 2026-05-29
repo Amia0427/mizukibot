@@ -1,5 +1,6 @@
 const axios = require('axios');
 const config = require('../../../config');
+const { CODEX_USER_AGENT } = require('../../../config/userAgentRuntime');
 const {
   getApiProvider,
   ensureAnthropicMessagesUrl,
@@ -617,6 +618,7 @@ module.exports = {
   blockHasAnthropicCacheControl,
   buildAnthropicRequestHeaders,
   buildModelRouteDiagnostics,
+  CODEX_USER_AGENT,
   clampTemperatureForProvider,
   coerceTrailingAnthropicAssistantContextToUser,
   config,

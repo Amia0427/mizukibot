@@ -20,7 +20,7 @@ function createHttpClient() {
     timeout: 10000,
     proxy: false,
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MizukiBot/1.0'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   };
 
@@ -64,7 +64,7 @@ async function getLyrics(question) {
   }
 
   try {
-    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' };
+    const headers = { 'User-Agent': config.HTTP_USER_AGENT };
 
     const searchResp = await withRetry(
       () => http.get(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(songName)}&type=1&limit=1`, {
@@ -425,7 +425,7 @@ async function probeOfficialSearchCandidates(query = '', options = {}) {
       maxRedirects: 4,
       validateStatus: (status) => status >= 200 && status < 400,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MizukiBot/1.0'
+        'User-Agent': config.HTTP_USER_AGENT
       }
     });
     const finalUrl = String(response?.request?.res?.responseUrl || url || '').trim();
@@ -529,7 +529,7 @@ async function web_search(query) {
         timeout: remainingTimeout(5000, 1500),
         headers: {
           Referer: 'https://www.baidu.com/',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) MizukiBot/1.0'
+          'User-Agent': config.HTTP_USER_AGENT
         }
       }),
       0,
@@ -827,7 +827,7 @@ async function get_bilibili_hot() {
     const response = await withRetry(
       () => http.get('https://api.bilibili.com/x/web-interface/search/square?limit=10', {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': config.HTTP_USER_AGENT,
           Referer: 'https://www.bilibili.com'
         },
         timeout: 8000

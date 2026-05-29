@@ -335,7 +335,7 @@ async function downloadImageToLocal(imageUrl = '', options = {}) {
       maxBodyLength: maxBytes,
       proxy: false,
       headers: {
-        'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
+        'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT || '').trim() || config.CODEX_USER_AGENT
       }
     });
     const buffer = Buffer.from(response?.data || []);

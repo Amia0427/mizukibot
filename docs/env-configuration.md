@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-05-27 11:15 +08:00
+更新时间：2026-05-29 17:43 +08:00
 
 ## 维护约定
 
@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前 `.env` 有 305 个变量，303 个唯一变量；重复项仅保留 `MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE` 和 `MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN` 两组历史调优项。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；重复项已在本地 `.env` 注释中标明实际生效顺序。
+- 2026-05-29 17:43 +08:00：`HTTP_USER_AGENT`、`MAIN_REPLY_USER_AGENT`、`MODEL_HTTP_USER_AGENT` 默认统一为 `codex-cli/0.121.0 (external, cli)`；配置值不包含 `codex` 时会回落到该默认值。
 
 ## 当前分区
 

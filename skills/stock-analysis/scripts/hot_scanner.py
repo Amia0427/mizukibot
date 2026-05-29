@@ -32,6 +32,7 @@ if ENV_FILE.exists():
 # Cache directory
 CACHE_DIR = Path(__file__).parent.parent / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
+CODEX_USER_AGENT = "codex-cli/0.121.0 (external, cli)"
 
 # SSL context
 SSL_CONTEXT = ssl.create_default_context()
@@ -49,7 +50,7 @@ class HotScanner:
         }
         self.mentions = defaultdict(lambda: {"count": 0, "sources": [], "sentiment_hints": []})
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": CODEX_USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Accept-Encoding": "gzip, deflate",

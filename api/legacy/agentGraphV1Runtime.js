@@ -92,7 +92,7 @@ function getBaseURLForOpenAI() {
 
 function getDefaultClientHeaders() {
   return {
-    'User-Agent': String(config.HTTP_USER_AGENT || 'MizukiBot/1.0 (Windows; Node.js)').trim(),
+    'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT).trim(),
     'Accept-Language': String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim()
   };
 }

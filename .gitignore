@@ -4,6 +4,7 @@
 
 # Dependencies
 node_modules/
+__pycache__/
 
 # Runtime data / generated assets
 data/
