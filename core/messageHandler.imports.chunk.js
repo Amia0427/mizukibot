@@ -256,10 +256,13 @@ function maybeSendMemeFollowup(...args) {
   return getMemeManagerModule().maybeSendMemeFollowup(...args);
 }
 const {
+  appendShortTermHistory,
   resolveShortTermSessionKey,
   getShortTermPresence,
   updateShortTermPresence
 } = require('../utils/shortTermMemory');
+const { buildNormalFastReplyDecision } = require('../utils/normalFastReplyGate');
+const { runNormalFastReply } = require('./normalFastReplyRuntime');
 const { createCheckpointStore, resolveThreadId } = require('../utils/langgraphV2Store');
 const {
   saveSessionContextSummary,
