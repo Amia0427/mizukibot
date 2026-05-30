@@ -95,6 +95,7 @@
         sent: true,
         stream: true,
         streamCompleted: replyOptions?.streamCompleted === true,
+        durationMs: Math.max(0, Date.now() - formalDispatchStartedAt),
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       maybeRunDeferredPersist(replyEnvelope);

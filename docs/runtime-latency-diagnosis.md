@@ -1,5 +1,7 @@
 # Runtime Latency Diagnosis
 
+更新 2026-05-30 18:47 +08:00：新增 `npm run diag:main-reply-lag` 作为面向主回复卡顿的单入口。它会合并 `diag:runtime`、`diag:runtime-hotspots`、provider 请求诊断和低资源诊断，优先从 `perf-events.jsonl` 与 `request-trace.ndjson` 提取 planner/发送耗时，从 `model-calls.ndjson` 提取主模型耗时，并输出 post-reply worker RSS 压力和 `mostLikelyBottleneck`；流式主回复的最终发送事件已补 `durationMs` 作为最小埋点。
+
 更新 2026-05-27 01:45 +08:00：已落地低内存主进程轻量档位：主进程默认不再启动 embedding backfill，并在 `LOW_RESOURCE_MODE=true` 下保留 LanceDB 读、memory/worldbook rerank、worldbook semantic 和 image memory recall；LanceDB 读改由一次性 helper 执行，同时降低候选数、单次 backfill 数和超时预算；post-reply worker 保留完整学习维护，并设置 `POST_REPLY_WORKER_RSS_RECYCLE_MB=768`、`POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS=30000` 以便空闲自回收。
 
 更新 2026-05-27 01:05 +08:00：群聊 direct chat 主模型已改为默认流式输出，只要 `AI_STREAM_ENABLED=true` 就不再等待完整主模型响应后才发送；公开群仍可用 `/main_stream off` 显式关闭，旧的“公开群但未配置 main_stream”记录按默认开启处理。
