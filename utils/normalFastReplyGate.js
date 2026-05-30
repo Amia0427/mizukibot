@@ -86,7 +86,7 @@ function resolveAdminChecker(runtimeConfig = {}, options = {}) {
 }
 
 function buildNormalFastReplyDecision(input = {}, runtimeConfig = {}, options = {}) {
-  if (runtimeConfig.NORMAL_FAST_REPLY_ENABLED === false) {
+  if (runtimeConfig.NORMAL_FAST_REPLY_ENABLED !== true) {
     return { eligible: false, reason: 'disabled' };
   }
   const userId = normalizeText(input.userId || input.senderId || input.route?.meta?.userId || input.route?.meta?.user_id);

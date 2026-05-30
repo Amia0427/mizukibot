@@ -33,6 +33,12 @@ const config = {
 };
 
 assert.strictEqual(isNormalFastReplyEligible(baseInput(), config), true, '普通纯文本应命中 fast path');
+assert.strictEqual(isNormalFastReplyEligible(baseInput(), { ADMIN_USER_IDS: [] }), false, '未显式开启时应禁用 fast path');
+assert.strictEqual(
+  isNormalFastReplyEligible(baseInput(), { NORMAL_FAST_REPLY_ENABLED: false, ADMIN_USER_IDS: [] }),
+  false,
+  '显式关闭时应禁用 fast path'
+);
 
 assert.strictEqual(isNormalFastReplyEligible(baseInput({ userId: 'admin_1' }), config), false, '管理员不应命中');
 
