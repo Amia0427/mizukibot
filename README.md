@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-30 18:56 +08:00：OpenViking recall 注入前新增本地 Memory V3 同义证据和结构化 `conflictKey` 优先级兜底；本地已有同义记忆或更高优先级冲突 winner 时，`openviking_recall` 不进入主 prompt，prepare 软超时 fallback 也复用同一去重路径。
 
+更新 2026-05-30 18:47 +08:00：新增主回复卡顿单入口 `npm run diag:main-reply-lag`，串联 runtime、hotspots、provider 请求和低资源诊断，直接汇总 planner p95、主模型 p95、发送 p95、post-reply worker RSS 压力与最可能瓶颈；`--json` 输出完整报告，`--no-provider-diagnostic` 可跳过 provider 请求形状检查。
+
 更新 2026-05-29 17:43 +08:00：全局出站 User-Agent 默认统一为 `codex-cli/0.121.0 (external, cli)`，覆盖模型请求、工具抓取、原生技能、图片下载和相关技能脚本；非 Codex UA 环境值会回落到 Codex 默认值。
 
 更新 2026-05-27 11:15 +08:00：本地 `.env` 已按功能域重排并为每个变量补充中文注释；注释统一放在变量上一行，避免 fallback env 解析器把行尾注释并入值。配置分区和维护约定见 `docs/env-configuration.md`。
@@ -214,6 +216,7 @@ npm run diag:memory -- openviking --query "长期记忆 偏好"
 npm run diag:continuity
 npm run diag:continuity -- prompt --user <id>
 npm run diag:main-reply
+npm run diag:main-reply-lag
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:runtime
 npm run diag:runtime-hotspots
