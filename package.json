@@ -20,6 +20,7 @@
     "diag:main-reply": "node scripts/diagnose-main-reply.js",
     "diag:main-reply-prompt": "node scripts/diagnose-main-reply-prompt.js",
     "diag:provider-request": "node scripts/diagnose-provider-request.js",
+    "diag:main-reply-lag": "node scripts/diagnose-main-reply-lag.js",
     "diag:runtime": "node scripts/diagnose-runtime-status.js",
     "diag:runtime-hotspots": "node scripts/diagnose-runtime-hotspots.js",
     "diag:low-resource": "node scripts/diagnose-low-resource.js",
