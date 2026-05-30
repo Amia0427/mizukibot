@@ -48,6 +48,7 @@ function clampText(value = '', maxChars = 1000) {
 function canonicalRecallText(value = '') {
   return normalizeText(value)
     .toLowerCase()
+    .replace(/\b(?:prefers?|preference|favorite|favourite|likes?|loves?|enjoys?)\b/g, 'like')
     .replace(/\[(?:openvikingrecall|openviking-context|retrievedmemorylite|retrievedmemory|relevantevidence|weakevidence|sessioncontinuity|taskmemory|groupmemory|stylesignals|dailyjournal|longtermprofile|memosrecall)\]/gi, ' ')
     .replace(/<\/?openviking-context>/gi, ' ')
     .replace(/\b(?:score|source|uri|ref|from|venue|time|date)\s*=\s*[\w:./+-]+/gi, ' ')

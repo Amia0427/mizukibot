@@ -2,11 +2,13 @@
 
 更新 2026-05-27 10:44 +08:00：OpenViking 已作为外部长期对话记忆层接入 Memory V3 运行时，默认全关。
 
+更新 2026-05-30 18:56 +08:00：OpenViking recall 注入前会同时做文本同义去重和 Memory V3 结构化冲突优先级判断；本地同义证据或同一 `conflictKey` 下更高优先级 winner 存在时，`openviking_recall` 会被拦截，prepare 软超时 fallback 同样生效。
+
 ## 定位
 
 OpenViking 只补强跨会话、历史回灌和语义召回覆盖率，不替换本地 Memory V3。主权优先级固定为：短期连续性 > 本地 Memory V3/profile/daily journal > OpenViking > 普通外部知识。
 
-远端结果进入主 prompt 前会经过本地去重、冲突过滤和动态 prompt planner 选择。重复项、与本地记忆冲突项、低分项不会生成 `[OpenVikingRecall]`。
+远端结果进入主 prompt 前会经过本地去重、冲突过滤和动态 prompt planner 选择。重复项、同义重复项、与本地记忆冲突项、低分项不会生成 `[OpenVikingRecall]`。
 
 ## 配置
 
@@ -53,6 +55,12 @@ OPENVIKING_COMMIT_IDLE_MS=1800000
 
 主回复构建先取本地 Memory V3，再调用 OpenViking recall。远端候选会按 score 阈值、URI/文本去重、偏好/时间查询 boost 排序，必要时读取 `read_content` 补全文。
 
+进入主 prompt 前还会与本地 `memoryContext` 二次比对：
+
+- 文本层：归一化同义词和 n-gram 相似度，拦截本地已覆盖的同义证据。
+- 结构层：读取 Memory V3 `hits`、profile trace、conflict/suppressed 诊断里的 `conflictKey`、tier、sourceKind、status 等字段；同一 `conflictKey` 下本地证据优先级不低于 OpenViking 时，远端项被标记为 `local_conflict_key_priority` 并丢弃。
+- fallback 层：`prepare` 软超时 fallback 不直接信任 planner 携带的 OpenViking 对象，会先复用同一去重器。
+
 Prompt 块为：
 
 ```text
@@ -98,8 +106,8 @@ npm run diag:memory -- openviking --query "长期记忆 偏好"
 
 ```bash
 npm run test -- tests/openVikingClient.test.js tests/openVikingIdentityScheduler.test.js tests/openVikingRecall.test.js tests/openVikingMemoryCli.test.js tests/openVikingPersistIntegration.test.js tests/openVikingPromptIntegration.test.js
+npm run test -- tests/runtimeV2PromptTimeoutMemoryFallback.test.js
 node tests/plannerV2Protocol.test.js
 node tests/persistNodeConfig.test.js
-node tests/runtimeV2PromptTimeoutMemoryFallback.test.js
 node tests/promptGoldenSnapshots.test.js
 ```

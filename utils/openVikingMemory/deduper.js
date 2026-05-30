@@ -7,6 +7,13 @@ const {
   normalizeText
 } = require('./text');
 
+const TIER_RANK = Object.freeze({
+  S: 4,
+  A: 3,
+  B: 2,
+  C: 1
+});
+
 function extractTextValues(value, output = [], depth = 0) {
   if (depth > 5 || value === null || value === undefined) return output;
   if (typeof value === 'string') {
@@ -85,6 +92,172 @@ function collectLocalMemoryTexts(memoryContext = {}) {
     });
 }
 
+function normalizeConflictKey(value = '') {
+  return normalizeText(value).toLowerCase();
+}
+
+function getConflictKey(item = {}) {
+  const value = normalizeObject(item, {});
+  return normalizeConflictKey(
+    value.conflictKey
+    || value.conflict_key
+    || value.raw?.conflictKey
+    || value.raw?.conflict_key
+    || value.payload?.conflictKey
+    || value.meta?.conflictKey
+    || value.diagnostics?.conflictKey
+  );
+}
+
+function getTierRank(item = {}) {
+  const raw = normalizeText(item.tier || item.finalTier || item.evidenceTier || item.meta?.tier || item.payload?.tier).toUpperCase();
+  if (TIER_RANK[raw]) return TIER_RANK[raw];
+  const importance = Number(item.importance || item.memoryStrength || item.score || 0);
+  if (!Number.isFinite(importance)) return 0;
+  if (importance >= 0.9) return TIER_RANK.S;
+  if (importance >= 0.75) return TIER_RANK.A;
+  if (importance >= 0.45) return TIER_RANK.B;
+  if (importance > 0) return TIER_RANK.C;
+  return 0;
+}
+
+function getSourceRank(item = {}) {
+  const sourceKind = normalizeText(item.sourceKind || item.source || item.meta?.sourceKind || item.payload?.sourceKind).toLowerCase();
+  if (sourceKind === 'explicit' || sourceKind === 'manual') return 5;
+  if (sourceKind === 'runtime') return 3;
+  if (sourceKind === 'extractor') return 2;
+  if (sourceKind === 'openviking') return 1;
+  return 1;
+}
+
+function getStatusRank(item = {}) {
+  const status = normalizeText(item.status || item.lifecycleStatus || item.meta?.lifecycleStatus || item.payload?.lifecycleStatus).toLowerCase();
+  if (status === 'active') return 5;
+  if (status === 'confirmed') return 4;
+  if (status === 'candidate') return 2;
+  if (status === 'superseded' || status === 'stale' || status === 'suspect' || status === 'archived') return -5;
+  return 1;
+}
+
+function memoryEvidenceRank(item = {}) {
+  return (getStatusRank(item) * 100000)
+    + (getSourceRank(item) * 10000)
+    + (getTierRank(item) * 1000)
+    + (Number(item.confidence || 0) * 100)
+    + (Number(item.score || 0) * 10)
+    + (Number(item.updatedAt || item.createdAt || 0) / 100000000000);
+}
+
+function extractEvidenceItems(value, output = [], depth = 0) {
+  if (depth > 6 || value === null || value === undefined) return output;
+  if (Array.isArray(value)) {
+    for (const item of value) extractEvidenceItems(item, output, depth + 1);
+    return output;
+  }
+  if (typeof value !== 'object') return output;
+  const text = normalizeText(
+    value.text
+    || value.content
+    || value.preview
+    || value.summary
+    || value.memory
+    || value.fact
+    || value.value
+  );
+  const conflictKey = getConflictKey(value);
+  if (text || conflictKey) {
+    output.push({ ...value, text, conflictKey });
+  }
+  for (const key of [
+    'items',
+    'hits',
+    'results',
+    'strictResults',
+    'weakResults',
+    'journalHits',
+    'taskHits',
+    'groupHits',
+    'styleHits',
+    'retrievedMemory',
+    'weakEvidence',
+    'dailyJournal',
+    'taskMemory',
+    'groupMemory',
+    'styleSignals',
+    'sessionContinuity',
+    'longTermProfile',
+    'traceItems',
+    'profile_trace_items'
+  ]) {
+    if (Object.prototype.hasOwnProperty.call(value, key)) {
+      extractEvidenceItems(value[key], output, depth + 1);
+    }
+  }
+  return output;
+}
+
+function collectLocalMemoryEvidence(memoryContext = {}) {
+  const context = normalizeObject(memoryContext, {});
+  const sourceValues = [
+    context.hits,
+    context.strictResults,
+    context.weakResults,
+    context.journalHits,
+    context.taskHits,
+    context.groupHits,
+    context.styleHits,
+    context.dailyJournalItems,
+    context.stableProfile?.traceItems,
+    context.stableProfile?.conflicts,
+    context.stableProfile?.suppressed,
+    context.profile?.conflicts,
+    context.diagnostics?.memoryTrace?.hits,
+    context.diagnostics?.memoryTrace?.profile_trace_items,
+    context.diagnostics?.memoryTrace?.profile_conflicts,
+    context.diagnostics?.memoryTrace?.profile_suppressed
+  ];
+  const seen = new Set();
+  return sourceValues
+    .flatMap((value) => extractEvidenceItems(value, []))
+    .map((item) => normalizeObject(item, {}))
+    .filter((item) => {
+      const text = normalizeText(item.text || item.winnerText);
+      const conflictKey = getConflictKey(item);
+      const key = `${conflictKey}|${canonicalRecallText(text)}`;
+      if (!conflictKey && !text) return false;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function findStructuredLocalReason(item = {}, localEvidence = [], options = {}) {
+  const remote = normalizeObject(item, {});
+  const remoteConflictKey = getConflictKey(remote);
+  if (!remoteConflictKey) return '';
+  const remoteRank = memoryEvidenceRank({
+    sourceKind: 'openviking',
+    status: 'active',
+    ...remote
+  });
+  const margin = Number.isFinite(Number(options.localPriorityMargin))
+    ? Number(options.localPriorityMargin)
+    : 0;
+  for (const local of localEvidence) {
+    const localConflictKey = getConflictKey(local);
+    if (!localConflictKey || localConflictKey !== remoteConflictKey) continue;
+    const localText = normalizeText(local.winnerText || local.text || local.preview || local.summary);
+    const remoteText = normalizeText(remote.text || remote.content || remote.abstract || remote.overview);
+    if (localText && remoteText && findDuplicateReason(remoteText, [localText], options)) {
+      return 'local_conflict_key_duplicate';
+    }
+    if (memoryEvidenceRank(local) + margin >= remoteRank) {
+      return 'local_conflict_key_priority';
+    }
+  }
+  return '';
+}
+
 function findDuplicateReason(itemText = '', localTexts = [], options = {}) {
   const canonical = canonicalRecallText(itemText);
   if (!canonical || canonical.length < 8) return '';
@@ -145,7 +318,8 @@ function dedupeOpenVikingRecallAgainstMemoryContext(recall = {}, memoryContext =
   const items = normalizeArray(payload.items).filter((item) => normalizeText(item?.text || item?.content || item?.abstract || item?.overview));
   if (items.length === 0) return payload;
   const localTexts = collectLocalMemoryTexts(memoryContext);
-  if (localTexts.length === 0) {
+  const localEvidence = collectLocalMemoryEvidence(memoryContext);
+  if (localTexts.length === 0 && localEvidence.length === 0) {
     return {
       ...payload,
       items,
@@ -155,6 +329,7 @@ function dedupeOpenVikingRecallAgainstMemoryContext(recall = {}, memoryContext =
         dedupe: {
           enabled: true,
           localEvidenceCount: 0,
+          localStructuredEvidenceCount: 0,
           kept: items.length,
           removed: 0,
           removedItems: []
@@ -175,6 +350,11 @@ function dedupeOpenVikingRecallAgainstMemoryContext(recall = {}, memoryContext =
       continue;
     }
     seen.add(canonical);
+    const structuredReason = findStructuredLocalReason(item, localEvidence, options);
+    if (structuredReason) {
+      removedItems.push({ id: item.id || item.uri || item.ref, reason: structuredReason, text });
+      continue;
+    }
     const duplicateReason = findDuplicateReason(text, localTexts, options);
     if (duplicateReason) {
       removedItems.push({ id: item.id || item.uri || item.ref, reason: duplicateReason, text });
@@ -200,6 +380,7 @@ function dedupeOpenVikingRecallAgainstMemoryContext(recall = {}, memoryContext =
       dedupe: {
         enabled: true,
         localEvidenceCount: localTexts.length,
+        localStructuredEvidenceCount: localEvidence.length,
         kept: kept.length,
         removed: removedItems.length,
         removedItems: removedItems.map((item) => ({
@@ -213,8 +394,10 @@ function dedupeOpenVikingRecallAgainstMemoryContext(recall = {}, memoryContext =
 }
 
 module.exports = {
+  collectLocalMemoryEvidence,
   collectLocalMemoryTexts,
   dedupeOpenVikingRecallAgainstMemoryContext,
   findConflictReason,
-  findDuplicateReason
+  findDuplicateReason,
+  findStructuredLocalReason
 };
