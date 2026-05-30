@@ -11,7 +11,6 @@ function resolveFinalBranch(executionPlan = {}) {
   if (executionPlan.allowTools === true) return 'tool';
   if (executor === 'direct') return 'direct';
   if (executor === 'admin') return 'admin';
-  if (executor === 'full_subagent') return 'background';
   if (executor === 'ignore') return 'ignore';
   if (executor === 'refuse') return 'refuse';
   return executor || 'unknown';

@@ -1,6 +1,4 @@
 const { buildRoutePromptBundle } = require('../../utils/routePromptPolicy');
-const { buildSessionId } = require('../../api/subagentSessionManager');
-const { getClaudeSessionRuntime } = require('../../utils/claudeSessionRuntime');
 const { buildImageModelConfig } = require('../../utils/imageModelConfigResolver');
 const {
   buildReplyEnvelope,
@@ -34,7 +32,6 @@ const {
 } = require('../../utils/modelSelfCheck');
 const {
   parseJsonTail,
-  shouldUseFullMultiAgent,
   buildUnavailableRouteReply,
   buildQzoneAutodraftPrompt,
   buildSupplementedTaskText,
@@ -53,9 +50,6 @@ const {
   applyGroupDirectGuardToReplyEnvelopeInput
 } = require('./groupDirectGuard');
 const {
-  createClaudeSessionAdminHandler
-} = require('./claudeSessionAdmin');
-const {
   createAdminTaskHandlers
 } = require('./adminTaskHandlers');
 
@@ -71,10 +65,8 @@ function createMessageRouteFlow(deps = {}) {
     planDirectChat,
     askAIDispatch,
     askToolTaskLocally,
-    askToolTaskWithSubagentReview,
     runBackgroundToolTask,
     handleAdminCommand,
-    handleHapiAdminCommand,
     handleMemoryOpsAdminCommand = async () => ({ handled: true, replyText: 'memoryops 管理命令不可用。' }),
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
@@ -103,7 +95,6 @@ function createMessageRouteFlow(deps = {}) {
     saveData,
     recordMemoryScope,
     buildToolGuidancePrompt,
-    buildBridgeGuidancePrompt,
     buildStreamingSegmentationPrompt,
     buildQqRichReplyPrompt,
     shouldPreferQqRichReply,
@@ -122,25 +113,11 @@ function createMessageRouteFlow(deps = {}) {
     buildSubagentContextSummary,
     generateGroupSummary = generateGroupSummaryDefault
   } = deps;
-  const claudeSessionRuntime = getClaudeSessionRuntime();
-  const handleClaudeSessionAdminCommand = createClaudeSessionAdminHandler({
-    buildSessionId,
-    claudeSessionRuntime,
+  const {
+    hasAdminAccess
+  } = createAdminTaskHandlers({
     isAdminUser,
     sendGroupReply
-  });
-  const {
-    hasAdminAccess,
-    handleFullAdminCommand,
-    handleClaudeAdminCommand
-  } = createAdminTaskHandlers({
-    config,
-    routeExecution,
-    askToolTaskWithSubagentReview,
-    runBackgroundToolTask,
-    isAdminUser,
-    sendGroupReply,
-    normalizeUserFacingReply
   });
 
   async function handleBackgroundTaskControl({
@@ -299,7 +276,6 @@ function createMessageRouteFlow(deps = {}) {
       cleanText: supplementedText,
       maxStreamSegments: getStreamMaxSegments(config),
       buildToolGuidancePrompt,
-      buildBridgeGuidancePrompt: (currentRoute) => buildBridgeGuidancePrompt(currentRoute, config.SUBAGENT_BACKEND || 'command', routeExecutionPlan),
       buildStreamingSegmentationPrompt,
       shouldPreferQqRichReply,
       buildQqRichReplyPrompt
@@ -368,16 +344,12 @@ function createMessageRouteFlow(deps = {}) {
       cleanText,
       maxStreamSegments: getStreamMaxSegments(config),
       buildToolGuidancePrompt,
-      buildBridgeGuidancePrompt: routeExecutionPlan?.executor === 'full_subagent'
-        ? (currentRoute) => buildBridgeGuidancePrompt(currentRoute, config.SUBAGENT_BACKEND || 'command', routeExecutionPlan)
-        : null,
       buildStreamingSegmentationPrompt,
       shouldPreferQqRichReply,
       buildQqRichReplyPrompt
     });
     const {
       toolGuidancePrompt,
-      bridgeGuidancePrompt,
       streamingSegmentationPrompt,
       qqRichReplyPrompt,
       disableStreamForReply
@@ -408,7 +380,7 @@ function createMessageRouteFlow(deps = {}) {
           : 'tool_plan';
         emitRouteDiag('dispatch_branch_selected', buildRouteDiagPayload(routeExecutionPlan, dispatchBranch));
         const toolTaskOptions = {
-          routePrompt: [toolGuidancePrompt, bridgeGuidancePrompt, perceptionPrompt].filter(Boolean).join('\n\n') || null,
+          routePrompt: [toolGuidancePrompt, perceptionPrompt].filter(Boolean).join('\n\n') || null,
           sessionChannel: chatType === 'private' ? 'qq-private' : 'qq-group',
           sessionChatId: chatType === 'private' ? `direct_${senderId}` : `group_${groupId}_user_${senderId}`,
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
@@ -525,7 +497,6 @@ function createMessageRouteFlow(deps = {}) {
           streamFallbackToNonStream: false,
           routePrompt: composeDirectRoutePrompt({
             toolGuidancePrompt,
-            bridgeGuidancePrompt,
             perceptionPrompt,
             safetyBoundaryRoutePrompt,
             streamingSegmentationPrompt,
@@ -676,29 +647,6 @@ function createMessageRouteFlow(deps = {}) {
         userId: senderId
       });
       adminReply = String(memeAdminResult?.replyText || '').trim() || 'meme 管理命令已处理。';
-    } else if (cmd === 'claude') {
-      return handleClaudeAdminCommand({
-        route,
-        groupId,
-        senderId,
-        userInfo,
-        rawText,
-        chatType: normalizedChatType
-      });
-    } else if (cmd === 'claude-open' || cmd === 'claude-send' || cmd === 'claude-tail' || cmd === 'claude-stop') {
-      return handleClaudeSessionAdminCommand({
-        route,
-        groupId,
-        senderId,
-        chatType: normalizedChatType
-      });
-    } else if (cmd === 'hapi') {
-      const hapiAdminResult = await handleHapiAdminCommand({
-        rawText: route?.meta?.command?.raw || route?.cleanText || rawText,
-        groupId,
-        userId: senderId
-      });
-      adminReply = String(hapiAdminResult?.replyText || '').trim() || 'HAPI 管理命令已处理。';
     } else if (cmd === 'memoryops') {
       const memoryOpsResult = await handleMemoryOpsAdminCommand({
         rawText: route?.meta?.command?.raw || route?.cleanText || rawText,
@@ -769,7 +717,7 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /check, /群总结 [条数], /claude <任务>, /claude-open, /claude-send <内容>, /claude-tail, /claude-stop, /create <prompt>, /full <任务>, /debug runtime|hotspots|replydiag|replycache|provider, /status, /reload, /hapi status|approve <id>|deny <id>, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /check, /群总结 [条数], /create <prompt>, /debug runtime|hotspots|replydiag|replycache|provider, /status, /reload, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
     } else if (cmd === 'check') {
       adminReply = formatModelSelfCheckReport(await runModelSelfCheck({
         adminUserId: senderId,
@@ -828,15 +776,11 @@ function createMessageRouteFlow(deps = {}) {
   }
 
   return {
-    handleClaudeSessionAdminCommand,
-    handleClaudeAdminCommand,
     dispatchAdminRoute,
     dispatchByRoutePlan,
     dispatchFormalRoute: dispatchByRoutePlan,
     handleBackgroundTaskControl,
-    handleBackgroundControl: handleBackgroundTaskControl,
-    handleFullAdminCommand,
-    handleFullAdmin: handleFullAdminCommand
+    handleBackgroundControl: handleBackgroundTaskControl
   };
 }
 

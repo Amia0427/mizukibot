@@ -595,13 +595,6 @@
         "include_in_system_prompt": false
       },
       {
-        "id": "runtime_bridge_guidance",
-        "path": "runtime/bridge-guidance.txt",
-        "required": false,
-        "kind": "runtime_template",
-        "include_in_system_prompt": false
-      },
-      {
         "id": "runtime_direct_chat_planner",
         "path": "runtime/direct-chat-planner.txt",
         "required": false,

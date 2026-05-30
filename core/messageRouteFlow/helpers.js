@@ -12,36 +12,10 @@ function parseJsonTail(text = '') {
   }
 }
 
-function scoreFullSubagentComplexity(question = '', options = {}) {
-  const text = String(question || '').trim();
-  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
-  let score = 0;
-  if (/并行|多代理|多线程|分工|多个\s*worker|multi[- ]?agent|parallel/i.test(text)) score += 0.35;
-  if (/实现|优化|重构|修复|排查|迁移|部署|测试|方案|计划|完整|全流程/i.test(text)) score += 0.18;
-  if (/文件|代码|接口|schema|数据库|缓存|队列|worker|agent|工具|热路径|性能/i.test(text)) score += 0.18;
-  if (/(^|\n)\s*(?:\d+[\.\、)]|[-*]\s+)/.test(text) || /首先|然后|最后|同时|分别|步骤/i.test(text)) score += 0.18;
-  if (text.length >= 400) score += 0.16;
-  if (text.length >= 900) score += 0.18;
-  const allowedTools = Array.isArray(routeMeta.allowedTools) ? routeMeta.allowedTools : [];
-  if (allowedTools.length >= 2) score += 0.12;
-  if (routeMeta.forceFullMultiAgent === true || routeMeta.fullMultiAgent === true) score = 1;
-  return Math.max(0, Math.min(1, score));
-}
-
-function shouldUseFullMultiAgent(config = {}, question = '', options = {}) {
-  if (config.FULL_SUBAGENT_MULTI_AGENT_ENABLED !== true) return false;
-  if (config.FULL_SUBAGENT_AUTO_UPGRADE_ENABLED === false) return true;
-  const threshold = Math.max(0, Math.min(1, Number(config.FULL_SUBAGENT_COMPLEXITY_THRESHOLD || 0.65) || 0.65));
-  return scoreFullSubagentComplexity(question, options) >= threshold;
-}
-
 function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}, { isAdminUser } = {}) {
   const unavailableReason = String(routeExecutionPlan?.unavailableReason || '').trim().toLowerCase();
   if (unavailableReason === 'private-group-only') {
     const command = String(route?.meta?.command?.cmd || '').trim().toLowerCase();
-    if (command === 'full') {
-      return '私聊不支持 /full，请在目标群内 @我后使用。';
-    }
     if (command === 'group_summary') {
       return '仅群聊可用。';
     }
@@ -105,7 +79,6 @@ function buildSupplementedTaskText(session = {}, supplement = '') {
 
 function composeDirectRoutePrompt({
   toolGuidancePrompt = null,
-  bridgeGuidancePrompt = null,
   perceptionPrompt = null,
   safetyBoundaryRoutePrompt = null,
   streamingSegmentationPrompt = null,
@@ -113,7 +86,6 @@ function composeDirectRoutePrompt({
 } = {}) {
   return [
     toolGuidancePrompt,
-    bridgeGuidancePrompt,
     perceptionPrompt,
     safetyBoundaryRoutePrompt,
     streamingSegmentationPrompt,
@@ -151,8 +123,6 @@ function buildRouteDiagPayload(routeExecutionPlan = {}, branch = '', extra = {})
 
 module.exports = {
   parseJsonTail,
-  scoreFullSubagentComplexity,
-  shouldUseFullMultiAgent,
   buildUnavailableRouteReply,
   buildQzoneAutodraftPrompt,
   buildSupplementedTaskText,

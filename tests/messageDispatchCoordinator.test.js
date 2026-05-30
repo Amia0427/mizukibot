@@ -21,19 +21,16 @@ module.exports = (async () => {
 
   const coordinator = createMessageDispatchCoordinator({
     config: {
-      BACKGROUND_TOOL_TASKS_ENABLED: true,
-      SUBAGENT_BACKEND: 'command'
+      BACKGROUND_TOOL_TASKS_ENABLED: true
     },
     buildRoutePromptBundle: () => ({
       toolGuidancePrompt: 'tool',
-      bridgeGuidancePrompt: 'bridge',
       streamingSegmentationPrompt: 'stream',
       qqRichReplyPrompt: 'qq',
       disableStreamForReply: false
     }),
     getStreamMaxSegments: () => 3,
     buildToolGuidancePrompt: () => 'tool',
-    buildBridgeGuidancePrompt: () => 'bridge',
     buildStreamingSegmentationPrompt: () => 'stream',
     shouldPreferQqRichReply: () => false,
     buildQqRichReplyPrompt: () => 'qq',

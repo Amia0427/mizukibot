@@ -2,10 +2,6 @@
 const fs = require('fs');
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 const {
-  defaultOpenclawWorkdir,
-  defaultSubagentArgs,
-  defaultSubagentCommand,
-  defaultSubagentWorkdir,
   loadEnvironment,
   pick,
   pickBool,
@@ -134,81 +130,6 @@ module.exports = {
   ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS: pickNum('ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS', 120000),
   ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE: pickNum('ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE', 768),
 
-  // ===== Subagent Bridge (multi-agent) =====
-  // 寮€鍏充负 true 鏃讹紝mizuki 浼氭妸宸ュ叿鍨嬩换鍔¤浆鍙戠粰鍙浛鎹㈢殑澶栭儴瀛?agent銆?
-  SUBAGENT_ENABLED: pickBool('SUBAGENT_ENABLED', pickBool('NANOBOT_BRIDGE_ENABLED', false)),
-  // 鏀寔 `command`銆乣openclaw`銆乣gateway`銆乣hapi` 鍥涚鍚庣锛岄粯璁や繚鎸侀€氱敤鍛戒护妯″紡銆?
-  SUBAGENT_BACKEND: pick('SUBAGENT_BACKEND', 'command').toLowerCase(),
-  // 瀛?agent 鍚嶇О鍙敤浜庢棩蹇楀拰鏂囨。灞曠ず銆?
-  SUBAGENT_NAME: pick('SUBAGENT_NAME', 'external-subagent'),
-  // 浣庣疆淇″害璺敱涓嶈繘鍏ュ閮ㄥ瓙 agent锛屼紭鍏堣蛋鏈湴閾捐矾闄嶄綆璇垎娴佹垚鏈€?
-  SUBAGENT_ROUTE_MIN_CONFIDENCE: pickNum('SUBAGENT_ROUTE_MIN_CONFIDENCE', pickNum('NANOBOT_ROUTE_MIN_CONFIDENCE', 0.62)),
-  // 鍙寜闇€鍏抽棴浜屾瀹℃牳锛屽噺灏戜竴娆￠澶栨ā鍨嬭皟鐢ㄥ欢杩熴€?
-  SUBAGENT_REVIEW_ENABLED: pickBool('SUBAGENT_REVIEW_ENABLED', pickBool('NANOBOT_REVIEW_ENABLED', true)),
-  // 鎵ц瀛?agent 鐨勫懡浠や笌宸ヤ綔鐩綍銆?
-  SUBAGENT_COMMAND: pick('SUBAGENT_COMMAND', defaultSubagentCommand()),
-  SUBAGENT_WORKDIR: pick('SUBAGENT_WORKDIR', pick('NANOBOT_WORKDIR', defaultSubagentWorkdir())),
-  SUBAGENT_MAX_CONCURRENCY: Math.max(1, pickNum('SUBAGENT_MAX_CONCURRENCY', 2)),
-  SUBAGENT_COMMAND_MODE: pick('SUBAGENT_COMMAND_MODE', 'persistent').trim().toLowerCase() || 'persistent',
-  SUBAGENT_WORKER_IDLE_TTL_MS: Math.max(1000, pickNum('SUBAGENT_WORKER_IDLE_TTL_MS', 300000)),
-  SUBAGENT_WORKER_MAX_REUSE: Math.max(1, pickNum('SUBAGENT_WORKER_MAX_REUSE', 100)),
-  SUBAGENT_WORKER_HEALTHCHECK_TTL_MS: Math.max(0, pickNum('SUBAGENT_WORKER_HEALTHCHECK_TTL_MS', 5000)),
-  SUBAGENT_PERSISTENT_BUSY_QUEUE_ENABLED: pickBool('SUBAGENT_PERSISTENT_BUSY_QUEUE_ENABLED', true),
-  SUBAGENT_PERSISTENT_BUSY_QUEUE_MAX: Math.max(0, pickNum('SUBAGENT_PERSISTENT_BUSY_QUEUE_MAX', 1)),
-  SUBAGENT_PERSISTENT_BUSY_QUEUE_TIMEOUT_MS: Math.max(0, pickNum('SUBAGENT_PERSISTENT_BUSY_QUEUE_TIMEOUT_MS', 30000)),
-  FULL_SUBAGENT_MULTI_AGENT_ENABLED: pickBool('FULL_SUBAGENT_MULTI_AGENT_ENABLED', false),
-  FULL_SUBAGENT_AUTO_UPGRADE_ENABLED: pickBool('FULL_SUBAGENT_AUTO_UPGRADE_ENABLED', true),
-  FULL_SUBAGENT_COMPLEXITY_THRESHOLD: pickNum('FULL_SUBAGENT_COMPLEXITY_THRESHOLD', 0.65),
-  FULL_SUBAGENT_MAX_WORKERS: Math.max(1, Math.min(2, pickNum('FULL_SUBAGENT_MAX_WORKERS', 2))),
-  FULL_SUBAGENT_WORKER_TIMEOUT_MS: Math.max(0, pickNum('FULL_SUBAGENT_WORKER_TIMEOUT_MS', 180000)),
-  FULL_SUBAGENT_REVIEW_TIMEOUT_MS: Math.max(0, pickNum('FULL_SUBAGENT_REVIEW_TIMEOUT_MS', 120000)),
-  // 鏀寔 JSON 鏁扮粍鏍煎紡鍙傛暟锛屼娇鐢?{message} / {sessionId} 鍗犱綅绗︺€?
-  SUBAGENT_ARGS: (() => {
-    const raw = pick('SUBAGENT_ARGS', '');
-    if (!raw) return defaultSubagentArgs();
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map((item) => String(item));
-    } catch (_) {}
-    return raw.split(/\s+/).map((item) => item.trim()).filter(Boolean);
-  })(),
-  SUBAGENT_TIMEOUT_MS: pickNum('SUBAGENT_TIMEOUT_MS', pickNum('NANOBOT_TIMEOUT_MS', 120000)),
-  // OpenClaw backend: when SUBAGENT_BACKEND=openclaw, bridge calls are forwarded
-  // to the server's installed OpenClaw CLI instead of a custom child-process command.
-  OPENCLAW_COMMAND: pick('OPENCLAW_COMMAND', 'openclaw'),
-  OPENCLAW_BASE_ARGS: (() => {
-    const raw = pick('OPENCLAW_BASE_ARGS', '');
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map((item) => String(item));
-    } catch (_) {}
-    return raw.split(/\s+/).map((item) => item.trim()).filter(Boolean);
-  })(),
-  OPENCLAW_WORKDIR: pick('OPENCLAW_WORKDIR', defaultOpenclawWorkdir()),
-  OPENCLAW_CONFIG_PATH: pick('OPENCLAW_CONFIG_PATH', ''),
-  OPENCLAW_STATE_DIR: pick('OPENCLAW_STATE_DIR', ''),
-  OPENCLAW_AGENT_ID: pick('OPENCLAW_AGENT_ID', 'main'),
-  OPENCLAW_TIMEOUT_MS: pickNum('OPENCLAW_TIMEOUT_MS', 180000),
-  OPENCLAW_VERBOSE: pick('OPENCLAW_VERBOSE', 'off'),
-  OPENCLAW_THINKING: pick('OPENCLAW_THINKING', 'off'),
-  OPENCLAW_JSON_OUTPUT: pickBool('OPENCLAW_JSON_OUTPUT', true),
-  SUBAGENT_GATEWAY_URL: pick('SUBAGENT_GATEWAY_URL', ''),
-  SUBAGENT_GATEWAY_AUTH_TOKEN: pick('SUBAGENT_GATEWAY_AUTH_TOKEN', ''),
-  SUBAGENT_GATEWAY_AGENT_ID: pick('SUBAGENT_GATEWAY_AGENT_ID', 'main'),
-  SUBAGENT_GATEWAY_TIMEOUT_MS: pickNum('SUBAGENT_GATEWAY_TIMEOUT_MS', 180000),
-  SUBAGENT_GATEWAY_STREAM: pickBool('SUBAGENT_GATEWAY_STREAM', true),
-  SUBAGENT_GATEWAY_USE_RESPONSES_API: pickBool('SUBAGENT_GATEWAY_USE_RESPONSES_API', true),
-  HAPI_BASE_URL: pick('HAPI_BASE_URL', ''),
-  HAPI_AUTH_TOKEN: pick('HAPI_AUTH_TOKEN', ''),
-  HAPI_TIMEOUT_MS: pickNum('HAPI_TIMEOUT_MS', 180000),
-  HAPI_STREAM: pickBool('HAPI_STREAM', true),
-  HAPI_DEFAULT_MACHINE: pick('HAPI_DEFAULT_MACHINE', 'claude-local'),
-  HAPI_CODEX_MACHINE: pick('HAPI_CODEX_MACHINE', 'codex-local'),
-  HAPI_CLAUDE_MACHINE: pick('HAPI_CLAUDE_MACHINE', 'claude-local'),
-  HAPI_APPROVAL_MODE: pick('HAPI_APPROVAL_MODE', 'manual'),
-  HAPI_WORKSPACE_ROOT: pick('HAPI_WORKSPACE_ROOT', PROJECT_ROOT),
-  HAPI_APPROVAL_REQUEST_TTL_MS: pickNum('HAPI_APPROVAL_REQUEST_TTL_MS', 24 * 60 * 60 * 1000),
   LOCAL_COMMAND_BRIDGE_ENABLED: pickBool('LOCAL_COMMAND_BRIDGE_ENABLED', true),
   LOCAL_COMMAND_BRIDGE_URL: pick('LOCAL_COMMAND_BRIDGE_URL', 'http://127.0.0.1:3210'),
   LOCAL_COMMAND_BRIDGE_TOKEN: pick('LOCAL_COMMAND_BRIDGE_TOKEN', ''),
@@ -321,14 +242,6 @@ module.exports = {
   LLM_PERCEPTION_ENABLE_SOLAR_TERM: pickBool('LLM_PERCEPTION_ENABLE_SOLAR_TERM', true),
   LLM_PERCEPTION_ENABLE_ALMANAC: pickBool('LLM_PERCEPTION_ENABLE_ALMANAC', true),
   LLM_PERCEPTION_INCLUDE_GROUP_NAME: pickBool('LLM_PERCEPTION_INCLUDE_GROUP_NAME', true),
-  // Compatibility aliases kept so untouched runtime code can keep working in the bundle.
-  NANOBOT_BRIDGE_ENABLED: pickBool('NANOBOT_BRIDGE_ENABLED', pickBool('SUBAGENT_ENABLED', false)),
-  NANOBOT_ROUTE_MIN_CONFIDENCE: pickNum('NANOBOT_ROUTE_MIN_CONFIDENCE', pickNum('SUBAGENT_ROUTE_MIN_CONFIDENCE', 0.62)),
-  NANOBOT_REVIEW_ENABLED: pickBool('NANOBOT_REVIEW_ENABLED', pickBool('SUBAGENT_REVIEW_ENABLED', true)),
-  NANOBOT_PYTHON: pick('NANOBOT_PYTHON', pick('SUBAGENT_COMMAND', defaultSubagentCommand())),
-  NANOBOT_WORKDIR: pick('NANOBOT_WORKDIR', pick('SUBAGENT_WORKDIR', defaultSubagentWorkdir())),
-  NANOBOT_TIMEOUT_MS: pickNum('NANOBOT_TIMEOUT_MS', pickNum('SUBAGENT_TIMEOUT_MS', 120000)),
-
   // ===== Unified AI  =====
   API_BASE_URL: pick('API_BASE_URL', 'https://api2.gemai.cc/v1/chat/completions'),
   API_KEY: pick('API_KEY', ''),
@@ -767,7 +680,6 @@ module.exports = {
   MCP_SESSION_IDLE_TTL_MS: Math.max(0, pickNum('MCP_SESSION_IDLE_TTL_MS', lowResourceMode ? 120000 : 0)),
   ...buildMemosRuntimeConfig({ pick, pickNum, pickBool, pickList }),
   ...buildOpenVikingRuntimeConfig({ pick, pickNum, pickBool, pickList }),
-  DIAGNOSTICS_EXCLUDE_OPENCLAW_GATEWAY: pickBool('DIAGNOSTICS_EXCLUDE_OPENCLAW_GATEWAY', true),
   GRAPH_TOOL_SUCCESS_LOG_ENABLED: pickBool('GRAPH_TOOL_SUCCESS_LOG_ENABLED', false),
   ENABLE_DEBUG_LOG: pickBool('ENABLE_DEBUG_LOG', true),
   PERF_LOG_ENABLED: pickBool('PERF_LOG_ENABLED', false),
@@ -1186,8 +1098,6 @@ module.exports = {
   MEME_MANAGER_DATA_FILE: pick('MEME_MANAGER_DATA_FILE', path.join(DATA_DIR, 'meme_manager.json')),
   MEME_MANAGER_ASSET_DIR: pick('MEME_MANAGER_ASSET_DIR', path.join(DATA_DIR, 'memes')),
   MEME_MANAGER_RUNTIME_FILE: pick('MEME_MANAGER_RUNTIME_FILE', path.join(DATA_DIR, 'meme_runtime.json')),
-  HAPI_CONTROL_FILE: pick('HAPI_CONTROL_FILE', path.join(DATA_DIR, 'hapi_control.json')),
-
   // ===== Telegram =====
   TG_BOT_TOKEN: process.env.TG_BOT_TOKEN || '',
   TG_ENABLE: String(process.env.TG_ENABLE || 'false').toLowerCase() === 'true',

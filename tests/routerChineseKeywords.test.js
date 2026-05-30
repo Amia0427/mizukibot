@@ -67,8 +67,8 @@ assert.deepStrictEqual(explicitDeadlineRoute.meta.allowedTools, ['schedule_group
 assert.strictEqual(explicitDeadlineRoute.meta.responseIntent, 'action_guidance');
 
 const hapiCommand = parseAdminCommand('/hapi status');
-assert.strictEqual(hapiCommand.cmd, 'hapi');
-assert.strictEqual(hapiCommand.payload, 'status');
+assert.strictEqual(hapiCommand.cmd, 'unknown');
+assert.strictEqual(hapiCommand.raw, '/hapi status');
 
 const checkCommand = parseAdminCommand('/check');
 assert.strictEqual(checkCommand.cmd, 'check');
@@ -79,15 +79,16 @@ assert.strictEqual(groupSummaryCommand.payload, '50');
 assert.deepStrictEqual(groupSummaryCommand.args, ['50']);
 
 const claudeCommand = parseAdminCommand('/claude 帮我看下这个仓库');
-assert.strictEqual(claudeCommand.cmd, 'claude');
-assert.strictEqual(claudeCommand.payload, '帮我看下这个仓库');
+assert.strictEqual(claudeCommand.cmd, 'unknown');
+assert.strictEqual(claudeCommand.raw, '/claude 帮我看下这个仓库');
 
 const claudeOpenCommand = parseAdminCommand('/claude-open');
-assert.strictEqual(claudeOpenCommand.cmd, 'claude-open');
+assert.strictEqual(claudeOpenCommand.cmd, 'unknown');
+assert.strictEqual(claudeOpenCommand.raw, '/claude-open');
 
 const claudeSendCommand = parseAdminCommand('/claude-send 继续');
-assert.strictEqual(claudeSendCommand.cmd, 'claude-send');
-assert.strictEqual(claudeSendCommand.payload, '继续');
+assert.strictEqual(claudeSendCommand.cmd, 'unknown');
+assert.strictEqual(claudeSendCommand.raw, '/claude-send 继续');
 
 const notebookLookupRoute = detectIntent({
   rawText: '宝我昨天给你发了什么图',

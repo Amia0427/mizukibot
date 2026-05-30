@@ -415,36 +415,6 @@ function matchTerminalLocalRoute({ rawText = '', cleanText = '', imageUrl = null
         meta: { admin: false, command: adminCmd }
       });
     }
-    if (
-      adminCmd.cmd === 'full'
-      || adminCmd.cmd === 'claude'
-      || adminCmd.cmd === 'claude-open'
-      || adminCmd.cmd === 'claude-send'
-      || adminCmd.cmd === 'claude-tail'
-      || adminCmd.cmd === 'claude-stop'
-    ) {
-      return makeRoute({
-        confidence: 1,
-        cleanText,
-        rawText,
-        imageUrl,
-        topRouteType: 'admin',
-        intent: {
-          risk: 'high',
-          toolNeed: ['local-write'],
-          executionMode: 'delegated',
-          needsPlanning: true,
-          needsMemory: false
-        },
-        facets: { modality: 'text', sourceScope: 'mixed', domain: 'admin', outputKind: 'action', freshness: 'unknown' },
-        meta: {
-          admin: isAdmin(userId),
-          command: adminCmd,
-          toolIntent: 'force_tools',
-          responseIntent: 'action_guidance'
-        }
-      });
-    }
     if (isAdmin(userId)) {
       return makeRoute({
         confidence: 1,

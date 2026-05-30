@@ -78,12 +78,6 @@ function summarizeRuntimeCounts(runtimeStatus = {}, postReplyWorkerActive = {}) 
       queue: runtimeStatus?.summary?.postReplyWorker?.queue || {},
       active: postReplyWorkerActive
     },
-    subagents: {
-      processCount: normalizeNumber(runtimeStatus?.summary?.activeSubagentProcesses, 0),
-      persistentWorkers: normalizeNumber(runtimeStatus?.summary?.persistentSubagentWorkers, 0),
-      backend: normalizeText(runtimeStatus?.components?.subagents?.backend),
-      maxConcurrency: normalizeNumber(runtimeStatus?.components?.subagents?.maxConcurrency, 0)
-    },
     backgroundTasks: {
       active: normalizeNumber(runtimeStatus?.summary?.activeBackgroundTasks, 0),
       stale: normalizeNumber(runtimeStatus?.summary?.staleBackgroundTasks, 0)

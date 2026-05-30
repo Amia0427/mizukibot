@@ -12,10 +12,6 @@ const DEFAULT_ROUTE_PROMPT_POLICY = {
       include_streaming_segmentation: true,
       include_qq_rich_reply_when_requested: true,
       disable_stream_when_qq_rich_requested: true
-    },
-    subagent: {
-      include_tool_guidance: true,
-      include_bridge_guidance: true
     }
   },
   routes: {}
@@ -89,13 +85,6 @@ function resolveRoutePromptPolicy(routeKey = 'chat/default') {
         topRoutePolicy.chat
       ),
       routeDebugPolicy.chat
-    ),
-    subagent: mergePolicy(
-      mergePolicy(
-        policy.defaults?.subagent,
-        topRoutePolicy.subagent
-      ),
-      routeDebugPolicy.subagent
     )
   };
   return resolved;
@@ -107,7 +96,6 @@ function buildRoutePromptBundle({
   cleanText,
   maxStreamSegments,
   buildToolGuidancePrompt,
-  buildBridgeGuidancePrompt,
   buildStreamingSegmentationPrompt,
   shouldPreferQqRichReply,
   buildQqRichReplyPrompt
@@ -128,9 +116,6 @@ function buildRoutePromptBundle({
   const toolGuidancePrompt = policy.chat.include_tool_guidance
     ? buildToolGuidancePrompt(route)
     : null;
-  const bridgeGuidancePrompt = policy.subagent.include_bridge_guidance && typeof buildBridgeGuidancePrompt === 'function'
-    ? buildBridgeGuidancePrompt(route)
-    : null;
   const streamingSegmentationPrompt = policy.chat.include_streaming_segmentation
     ? buildStreamingSegmentationPrompt(maxStreamSegments)
     : null;
@@ -144,7 +129,6 @@ function buildRoutePromptBundle({
   return {
     policy,
     toolGuidancePrompt,
-    bridgeGuidancePrompt,
     streamingSegmentationPrompt,
     streamRoutePrompt: [toolGuidancePrompt, streamingSegmentationPrompt].filter(Boolean).join('\n'),
     preferQqRichReply,

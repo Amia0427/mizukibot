@@ -28,8 +28,8 @@
 - 更新 2026-05-23 11:25 +08:00：`diagnose-memory-ops.js recall --gate` 会把 lifecycle leakage、category mismatch、recent recall miss 纳入门禁指标。
 - `diagnose-persona-memory-state.js`
 - `diagnose-persona-modules.js`
-- `diagnose-runtime-hotspots.js`：运行时资源热点诊断，汇总 RSS/heap/event loop delay、timer/interval、post-reply worker、子 agent 和高频模块
-- `diagnose-runtime-status.js`：运行时状态诊断，汇总主进程、post-reply worker、后台任务、锁和子 agent
+- `diagnose-runtime-hotspots.js`：运行时资源热点诊断，汇总 RSS/heap/event loop delay、timer/interval、post-reply worker 和高频模块
+- `diagnose-runtime-status.js`：运行时状态诊断，汇总主进程、post-reply worker、后台任务和锁
 - `analyze-foreground-concurrency.js`
 
 ## Setup / Install
@@ -58,12 +58,7 @@
 - `local-command-bridge.js`
 - `local-command-bridge.ps1`
 - `configure-napcat-onebot.js`
-- `use-hapi-local.ps1`
-- `status-hapi-local.ps1`
-- `watch-openclaw-gateway.ps1`
-- `run-openclaw-dev-feishu.ps1`
-- `run-openclaw-main-feishu.ps1`
-- `run-openclaw-userprofile-gateway.ps1`
+- 更新 2026-05-30 +08:00：OpenClaw / Claude CLI / HAPI 外部子 agent 激活链路已移除；相关本地启动脚本等待删除确认后移出仓库。
 
 ## Small Utility
 

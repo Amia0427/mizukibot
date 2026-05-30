@@ -1,6 +1,5 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
-const config = require('../../config');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -81,7 +80,7 @@ function getDiagnosticProjectRoot() {
 
 function extractKnownProjectScriptTokens(cmd = '') {
   const tokens = [];
-  const pattern = /"([^"]*(?:index|post-reply-worker|subagent-command-worker|backfill-memory-v3-embeddings|local-mcp-server)\.js)"|'([^']*(?:index|post-reply-worker|subagent-command-worker|backfill-memory-v3-embeddings|local-mcp-server)\.js)'|([^\s"]*(?:index|post-reply-worker|subagent-command-worker|backfill-memory-v3-embeddings|local-mcp-server)\.js)/ig;
+  const pattern = /"([^"]*(?:index|post-reply-worker|backfill-memory-v3-embeddings|local-mcp-server)\.js)"|'([^']*(?:index|post-reply-worker|backfill-memory-v3-embeddings|local-mcp-server)\.js)'|([^\s"]*(?:index|post-reply-worker|backfill-memory-v3-embeddings|local-mcp-server)\.js)/ig;
   let match = pattern.exec(cmd);
   while (match) {
     tokens.push(normalizeText(match[1] || match[2] || match[3]).replace(/\\/g, '/').toLowerCase());
@@ -108,15 +107,8 @@ function processMatchesProjectRoot(proc = {}) {
   return true;
 }
 
-function shouldExcludeOpenclawGatewayProcess(proc = {}) {
-  if (config.DIAGNOSTICS_EXCLUDE_OPENCLAW_GATEWAY === false) return false;
-  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
-  return cmd.includes('/openclaw/') && /\bgateway\b/.test(cmd);
-}
-
 function processMatchesMain(proc = {}) {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  if (shouldExcludeOpenclawGatewayProcess(proc)) return false;
   return /(^|[\s/])index\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
 }
 
@@ -135,15 +127,6 @@ function processMatchesLocalMcpChild(proc = {}) {
   return /(^|[\s/])local-mcp-server\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
 }
 
-function processMatchesSubagent(proc = {}) {
-  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
-  if (shouldExcludeOpenclawGatewayProcess(proc)) return false;
-  if (!processMatchesProjectRoot(proc)) return false;
-  return cmd.includes('subagent-command-worker.js')
-    || cmd.includes('run-claude.ps1')
-    || cmd.includes('subagent');
-}
-
 function compactProcessResource(proc = {}) {
   return {
     pid: Math.max(0, Math.floor(normalizeNumber(proc.pid, 0))),
@@ -157,7 +140,6 @@ function compactProcessResource(proc = {}) {
 function summarizeProcessResources(processes = []) {
   const main = processes.filter(processMatchesMain);
   const postReply = processes.filter(processMatchesPostReplyWorker);
-  const subagents = processes.filter(processMatchesSubagent);
   const memoryBackfill = processes.filter(processMatchesMemoryBackfill);
   const localMcpChildren = processes.filter(processMatchesLocalMcpChild);
   const summarize = (rows = []) => ({
@@ -172,7 +154,6 @@ function summarizeProcessResources(processes = []) {
   return {
     main: summarize(main),
     postReplyWorker: summarize(postReply),
-    subagents: summarize(subagents),
     memoryBackfill: summarize(memoryBackfill),
     localMcpChildren: summarize(localMcpChildren),
     allNodeLike: summarize(processes)

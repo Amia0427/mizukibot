@@ -56,12 +56,34 @@ function createMessageHandler({
   const getDailyShareEngine = () => getDailyShareEngineModule().getDailyShareEngine();
   const lifeSchedulerEngine = getSafeLifeSchedulerEngine();
   const backgroundTaskRuntime = getBackgroundTaskRuntime();
-  const hapiControlRuntime = getHapiControlRuntime();
-  hapiControlRuntime.expireApprovals();
   backgroundTaskRuntime.expireSessions();
   const routeResolver = typeof detectIntentHybridOverride === 'function'
     ? detectIntentHybridOverride
     : detectIntentHybrid;
+  function buildSessionId(userId, options = {}) {
+    const opts = options && typeof options === 'object' ? options : {};
+    const explicitSessionId = String(opts.sessionId || opts.session_id || opts.sessionKey || opts.session_key || '').trim();
+    if (explicitSessionId) return explicitSessionId;
+
+    const senderId = String(userId || opts.userId || opts.user_id || '').trim();
+    const sessionChatId = String(opts.sessionChatId || opts.session_chat_id || opts.chatId || opts.chat_id || '').trim();
+    const groupMatch = /^group_(.+)_user_(.+)$/.exec(sessionChatId);
+    if (groupMatch) {
+      return resolveShortTermSessionKey(groupMatch[2] || senderId, { groupId: groupMatch[1] });
+    }
+
+    const directMatch = /^direct_(.+)$/.exec(sessionChatId);
+    if (directMatch) {
+      return resolveShortTermSessionKey(directMatch[1], {});
+    }
+
+    const groupId = String(opts.groupId || opts.group_id || '').trim();
+    const channelId = String(opts.channelId || opts.channel_id || '').trim();
+    const routeMeta = {};
+    if (groupId) routeMeta.groupId = groupId;
+    if (channelId) routeMeta.channelId = channelId;
+    return resolveShortTermSessionKey(senderId, routeMeta) || [opts.sessionChannel, sessionChatId, senderId].filter(Boolean).join(':');
+  }
   const routePromptCache = createRequestScopeCache({ maxEntries: 128 });
   const formattingPreferenceCache = new Map();
   function getFormattingPreferences(question = '') {
@@ -111,25 +133,6 @@ function createMessageHandler({
         reasonLine: reason ? `路由原因: ${reason}` : ''
       });
     },
-    buildBridgeGuidancePrompt(route, backend = 'command', routeExecutionPlan = {}) {
-      const routeKey = getRouteDisplayType(route, routeExecutionPlan);
-      const routeDescription = String(routeKey || '').trim();
-      const reason = String(route?.meta?.reason || '').trim();
-      const toolLine = buildSubagentToolReasonLine(route, backend);
-      const executionLine = buildSubagentExecutionGuidanceLine(route, backend, routeExecutionPlan);
-      const executionPlanLines = buildSubagentExecutionPlanLines(routeExecutionPlan, backend);
-      const styleGuardLine = buildSubagentStyleGuardInstruction();
-      return buildCachedRuntimePrompt('bridge-guidance', {
-        routeKey,
-        routeDescription,
-        planId: 'none',
-        styleGuardLine,
-        toolLine,
-        executionLine,
-        executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',
-        reasonLine: reason ? `路由原因: ${reason}` : ''
-      });
-    },
     buildStreamingSegmentationPrompt(maxSegments) {
       return buildCachedRuntimePrompt('streaming-segmentation', { maxSegments });
     },
@@ -154,7 +157,6 @@ function createMessageHandler({
     runPersistInBackgroundFromCheckpoint
   });
   let adminCoordinator = null;
-  let fullSubagentCoordinator = null;
   let backgroundTaskCoordinator = null;
   let visualContextTools = null;
   function getAdminCoordinator() {
@@ -173,28 +175,10 @@ function createMessageHandler({
         clearGroupMute,
         setGroupMute,
         scheduleGroupMessage,
-        createScheduledCommand,
-        hapiControlRuntime,
-        createHapiControlClient: createDefaultHapiControlClientFactory(config)
+        createScheduledCommand
       });
     }
     return adminCoordinator;
-  }
-  function getFullSubagentCoordinator() {
-    if (!config.LAZY_COORDINATOR_INIT_ENABLED && fullSubagentCoordinator) return fullSubagentCoordinator;
-    if (!fullSubagentCoordinator) {
-      fullSubagentCoordinator = createMessageFullSubagentCoordinator({
-        config,
-        askAIByGraph,
-        extractJsonSafely,
-        cleanToolReplyText,
-        resolveToolReplyFormattingPreferences,
-        buildToolReplyFormatInstruction,
-        startSubagentBridgeCall,
-        buildRuntimePromptOverride: buildRuntimePrompt
-      });
-    }
-    return fullSubagentCoordinator;
   }
   function getBackgroundTaskCoordinator() {
     if (!config.LAZY_COORDINATOR_INIT_ENABLED && backgroundTaskCoordinator) return backgroundTaskCoordinator;
@@ -225,30 +209,16 @@ function createMessageHandler({
   }
   if (!config.LAZY_COORDINATOR_INIT_ENABLED) {
     void getAdminCoordinator();
-    void getFullSubagentCoordinator();
     void getBackgroundTaskCoordinator();
     void getVisualContextTools();
   }
   const runBackgroundToolTask = (...args) => getBackgroundTaskCoordinator().runBackgroundToolTask(...args);
   const maybeRunDeferredPersist = telemetryCoordinator.maybeRunDeferredPersist;
   const handleSessionSummaryCommand = (...args) => getAdminCoordinator().handleSessionSummaryCommand(...args);
-  const handleHapiAdminCommand = (...args) => getAdminCoordinator().handleHapiAdminCommand(...args);
   const handleInitiativeAdminCommand = (...args) => getAdminCoordinator().handleInitiativeAdminCommand(...args);
   const handleMemoryOpsAdminCommand = (...args) => getAdminCoordinator().handleMemoryOpsAdminCommand(...args);
   const handleRestartAdminCommand = (...args) => getAdminCoordinator().handleRestartAdminCommand(...args);
   const handleQqScheduleAdminCommand = (...args) => getAdminCoordinator().handleQqScheduleAdminCommand(...args);
-  const reviewSubagentOutput = (...args) => getFullSubagentCoordinator().reviewSubagentOutput(...args);
-  const planFullSubagentWorkers = (...args) => getFullSubagentCoordinator().planFullSubagentWorkers(...args);
-  const reviewFullMultiWorkerOutput = (...args) => getFullSubagentCoordinator().reviewFullMultiWorkerOutput(...args);
-  const handleFullAdminCommand = (args) => getFullSubagentCoordinator().handleFullAdminCommand({
-    ...args,
-    sendGroupReply,
-    normalizeUserFacingReply,
-    askToolTaskWithSubagentReview,
-    routeExecution,
-    runBackgroundToolTask,
-    executeFullSubagentTaskWithHandle
-  });
   const inboundConcurrency = inboundConcurrencyControllerOverride || createInboundConcurrencyController({
     globalLimit: config.INBOUND_GLOBAL_MAX_CONCURRENCY,
     generalLimit: config.INBOUND_GENERAL_MAX_CONCURRENCY,
@@ -318,16 +288,13 @@ function createMessageHandler({
     buildRoutePromptBundle,
     getStreamMaxSegments,
     buildToolGuidancePrompt: cachedPromptHelpers.buildToolGuidancePrompt,
-    buildBridgeGuidancePrompt: cachedPromptHelpers.buildBridgeGuidancePrompt,
     buildStreamingSegmentationPrompt: cachedPromptHelpers.buildStreamingSegmentationPrompt,
     shouldPreferQqRichReply,
     buildQqRichReplyPrompt: cachedPromptHelpers.buildQqRichReplyPrompt,
     getEffectivePolicyKey,
     sendGroupReply: (...args) => replyRuntime.sendGroupReply(...args),
     runBackgroundToolTask,
-    config,
-    hapiControlRuntime,
-    createHapiControlClient: createDefaultHapiControlClientFactory(config)
+    config
   });
   const handleBackgroundTaskControl = (...args) => taskControlCoordinator.handleBackgroundTaskControl(...args);
   const dispatchCoordinator = createMessageDispatchCoordinator({
@@ -335,7 +302,6 @@ function createMessageHandler({
     buildRoutePromptBundle,
     getStreamMaxSegments,
     buildToolGuidancePrompt: cachedPromptHelpers.buildToolGuidancePrompt,
-    buildBridgeGuidancePrompt: cachedPromptHelpers.buildBridgeGuidancePrompt,
     buildStreamingSegmentationPrompt: cachedPromptHelpers.buildStreamingSegmentationPrompt,
     shouldPreferQqRichReply,
     buildQqRichReplyPrompt: cachedPromptHelpers.buildQqRichReplyPrompt,
@@ -360,161 +326,3 @@ function createMessageHandler({
   });
   const dispatchByRoutePlan = (...args) => dispatchCoordinator.dispatchByRoutePlan(...args);
   let routeFlow = null;
-
-  async function executeFullMultiWorkerTaskWithHandle(question, userInfo, userId, imageUrl = null, options = {}) {
-    const mutableOptions = options && typeof options === 'object' ? { ...options } : {};
-    mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
-    const routePolicyKey = String(mutableOptions.routePolicyKey || 'admin/full').trim() || 'admin/full';
-    const formattingPreferences = getFormattingPreferences(question);
-    const backgroundTaskId = String(mutableOptions.backgroundTaskId || '').trim();
-    const shouldContinue = typeof mutableOptions?.shouldContinue === 'function'
-      ? mutableOptions.shouldContinue
-      : () => true;
-    const workerCancels = [];
-    let completedWorkers = 0;
-
-    const updateTaskStage = (stage, latestSummary = '') => {
-      if (!backgroundTaskId) return;
-      backgroundTaskRuntime.markTaskStatus(backgroundTaskId, {
-        status: stage === 'reviewing' ? 'reviewing' : 'running',
-        stage,
-        latest_summary: String(latestSummary || '').trim()
-      });
-    };
-
-    if (!(config.SUBAGENT_ENABLED || config.NANOBOT_BRIDGE_ENABLED)) {
-      return {
-        promise: Promise.resolve('?????????????? agent??? agent ?????????? `.env` ?? `SUBAGENT_ENABLED`?`SUBAGENT_COMMAND` ? `OPENCLAW_*` ???'),
-        cancel() {}
-      };
-    }
-
-    const promise = (async () => {
-      console.log('[full-subagent] multi-agent start', {
-        executor: 'full_subagent',
-        multiAgent: true,
-        subagentBackend: String(config.SUBAGENT_BACKEND || 'command').trim() || 'command'
-      });
-
-      updateTaskStage('planning', 'planning worker split');
-      const planStartedAt = Date.now();
-      const plan = await planFullSubagentWorkers({
-        question,
-        userInfo,
-        userId,
-        imageUrl,
-        routePrompt: mutableOptions.routePrompt,
-        routePolicyKey
-      });
-      const workerCount = clampFullSubagentWorkerCount(plan?.workerCount, 1, config.FULL_SUBAGENT_MAX_WORKERS);
-      console.log('[full-subagent] planning completed', {
-        executor: 'full_subagent',
-        multiAgent: true,
-        workerCount,
-        planDurationMs: Date.now() - planStartedAt
-      });
-
-      if (!shouldContinue()) return '';
-
-      updateTaskStage('workers_running', `workers 0/${workerCount}`);
-      const workerStartedAt = Date.now();
-      const workerPromises = (Array.isArray(plan?.workers) ? plan.workers : []).slice(0, workerCount).map(async (worker, index) => {
-        const workerId = String(worker?.id || `w${index + 1}`).trim() || `w${index + 1}`;
-        const workerPrompt = buildFullSubagentWorkerPrompt(question, worker, plan);
-        console.log('[full-subagent] worker started', {
-          executor: 'full_subagent',
-          multiAgent: true,
-          workerId,
-          workerTitle: String(worker?.title || '').trim(),
-          workerCount
-        });
-
-        try {
-          const bridgeCall = await startSubagentBridgeCall(question, userInfo, userId, null, imageUrl, {
-            ...mutableOptions,
-            sessionSuffix: `full:${workerId}`,
-            routePrompt: mutableOptions.routePrompt,
-            subagentRoutePrompt: workerPrompt,
-            routePolicyKey,
-            topRouteType: 'admin'
-          });
-          workerCancels.push((reason) => bridgeCall.cancel(reason));
-          const output = await bridgeCall.promise;
-          const cleanOutput = prepareSubagentOutputForReview(
-            cleanToolReplyText(output, formattingPreferences),
-            { requestText: question }
-          );
-          console.log('[full-subagent] worker completed', {
-            executor: 'full_subagent',
-            multiAgent: true,
-            workerId,
-            workerCount
-          });
-          return {
-            worker,
-            status: 'fulfilled',
-            output: cleanOutput,
-            error: ''
-          };
-        } catch (error) {
-          const failureText = summarizeFullWorkerError(error, worker);
-          console.error('[full-subagent] worker failed', {
-            executor: 'full_subagent',
-            multiAgent: true,
-            workerId,
-            workerCount,
-            error: failureText
-          });
-          return {
-            worker,
-            status: 'rejected',
-            output: '',
-            error: failureText
-          };
-        } finally {
-          if (backgroundTaskId) {
-            completedWorkers += 1;
-            backgroundTaskRuntime.markTaskStatus(backgroundTaskId, {
-              status: 'running',
-              stage: 'workers_running',
-              latest_summary: `workers ${Math.min(completedWorkers, workerCount)}/${workerCount}`
-            });
-          }
-        }
-      });
-
-      const settled = await Promise.allSettled(workerPromises);
-      const workerResults = settled.map((entry, index) => {
-        if (entry.status === 'fulfilled') return entry.value;
-        const worker = plan.workers[index] || { id: `w${index + 1}` };
-        return {
-          worker,
-          status: 'rejected',
-          output: '',
-          error: summarizeFullWorkerError(entry.reason, worker)
-        };
-      });
-
-      const successCount = workerResults.filter((entry) => entry.status === 'fulfilled' && String(entry.output || '').trim()).length;
-      console.log('[full-subagent] workers finished', {
-        executor: 'full_subagent',
-        multiAgent: true,
-        workerCount,
-        successCount,
-        workerDurationMs: Date.now() - workerStartedAt
-      });
-
-      if (!shouldContinue()) return '';
-      if (successCount <= 0) {
-        return buildFullSubagentAllWorkersFailedReply(workerResults);
-      }
-
-      updateTaskStage('reviewing', `workers ${workerCount}/${workerCount}, reviewing`);
-      const reviewStartedAt = Date.now();
-      console.log('[full-subagent] review started', {
-        executor: 'full_subagent',
-        multiAgent: true,
-        workerCount
-      });
-      try {
-        const reviewed = await reviewFullMultiWorkerOutput({

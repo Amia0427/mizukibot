@@ -175,8 +175,7 @@ module.exports = (async () => {
   const replyOptionsSeen = [];
   const flow = createMessageRouteFlow({
     config: {
-      BACKGROUND_TOOL_TASKS_ENABLED: false,
-      SUBAGENT_BACKEND: 'command'
+      BACKGROUND_TOOL_TASKS_ENABLED: false
     },
     routeResolver: async () => null,
     routeExecution: {},
@@ -187,10 +186,8 @@ module.exports = (async () => {
       return '<think>visible chain</think>display reply';
     },
     askToolTaskLocally: async () => 'tool reply',
-    askToolTaskWithSubagentReview: async () => 'subagent reply',
     runBackgroundToolTask: async () => ({ backgroundHandled: false, reply: 'background reply' }),
     handleAdminCommand: async () => ({ handled: false }),
-    handleHapiAdminCommand: async () => ({ handled: false }),
     handleQqScheduleAdminCommand: async () => ({ handled: false }),
     detectQzonePostDraftMode: () => 'manual',
     generateBotDiaryDraft: async () => ({ ok: false, reason: 'skip' }),
@@ -226,7 +223,6 @@ module.exports = (async () => {
     saveData: () => {},
     recordMemoryScope: () => {},
     buildToolGuidancePrompt: () => 'tool',
-    buildBridgeGuidancePrompt: () => 'bridge',
     buildStreamingSegmentationPrompt: () => 'stream',
     buildQqRichReplyPrompt: () => 'qq',
     shouldPreferQqRichReply: () => false,
@@ -245,7 +241,6 @@ module.exports = (async () => {
     buildSubagentContextSummary: () => '',
     buildRoutePromptBundle: () => ({
       toolGuidancePrompt: 'tool',
-      bridgeGuidancePrompt: 'bridge',
       streamingSegmentationPrompt: 'stream',
       qqRichReplyPrompt: 'qq',
       disableStreamForReply: false

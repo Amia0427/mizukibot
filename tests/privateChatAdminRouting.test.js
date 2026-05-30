@@ -54,10 +54,10 @@ module.exports = (async () => {
   assert.strictEqual(sent[0].atSender, false);
   assert.ok(String(sent[0].replyText || '').includes('/create <prompt>'));
 
-  const unavailableReply = buildUnavailableRouteReply(
+  const unknownPrivateReply = buildUnavailableRouteReply(
     {
       meta: {
-        command: { cmd: 'full' },
+        command: { cmd: 'unknown' },
         chatType: 'private'
       }
     },
@@ -69,7 +69,7 @@ module.exports = (async () => {
     }
   );
 
-  assert.strictEqual(unavailableReply, '私聊不支持 /full，请在目标群内 @我后使用。');
+  assert.strictEqual(unknownPrivateReply, '该能力当前仅支持群聊中使用，请在目标群内 @我。');
 
   const groupSummaryPrivateReply = buildUnavailableRouteReply(
     {

@@ -7,8 +7,7 @@ const {
   listProcesses,
   listProcessesDefault,
   processMatchesMain,
-  processMatchesPostReplyWorker,
-  processMatchesSubagent
+  processMatchesPostReplyWorker
 } = require('./processes');
 const {
   buildCreateAgentRuntimeState,
@@ -32,51 +31,6 @@ const {
 const SCHEMA_VERSION = 'runtime_status_diagnostic_v1';
 const DEFAULT_BACKGROUND_TASK_STALE_MS = 30 * 60 * 1000;
 const DEFAULT_LANGGRAPH_V2_CHECKPOINT_STALE_MS = 30 * 60 * 1000;
-
-function getSubagentRuntimeSnapshots() {
-  const fallback = {
-    executor: null,
-    persistentWorkers: [],
-    persistentWorkerStats: null,
-    snapshotScope: 'current_process_only'
-  };
-  try {
-    const executor = require('../../api/subagentExecutor');
-    if (typeof executor.getSubagentExecutorSnapshot === 'function') {
-      fallback.executor = executor.getSubagentExecutorSnapshot();
-    }
-  } catch (_) {}
-  try {
-    const commandBackend = require('../../api/subagentBackends/commandBackend');
-    if (typeof commandBackend.getPersistentWorkerSnapshot === 'function') {
-      fallback.persistentWorkers = commandBackend.getPersistentWorkerSnapshot();
-    }
-    if (commandBackend.__persistentWorkerStats) {
-      fallback.persistentWorkerStats = { ...commandBackend.__persistentWorkerStats };
-    }
-  } catch (_) {}
-  return fallback;
-}
-
-function buildSubagentSummary(processes = []) {
-  const snapshots = getSubagentRuntimeSnapshots();
-  const osProcesses = processes
-    .filter(processMatchesSubagent)
-    .map(compactProcess)
-    .slice(0, 20);
-  return {
-    enabled: config.SUBAGENT_ENABLED === true,
-    backend: normalizeText(config.SUBAGENT_BACKEND || 'command'),
-    commandMode: normalizeText(config.SUBAGENT_COMMAND_MODE || ''),
-    maxConcurrency: Math.max(1, normalizeNumber(config.SUBAGENT_MAX_CONCURRENCY, 1)),
-    processes: osProcesses,
-    processCount: osProcesses.length,
-    executor: snapshots.executor,
-    persistentWorkers: snapshots.persistentWorkers,
-    persistentWorkerStats: snapshots.persistentWorkerStats,
-    snapshotScope: snapshots.snapshotScope
-  };
-}
 
 function addSignal(signals, level, component, code, message, extra = {}) {
   signals.push({
@@ -170,7 +124,6 @@ function buildRuntimeStatusDiagnostic(options = {}) {
     safeReadJson,
     safeStat
   });
-  const subagents = buildSubagentSummary(processes);
   const journalHealth = (() => {
     try {
       const { buildJournalHealthSummary } = require('../memory-v3/journalDiagnostics');
@@ -234,13 +187,6 @@ function buildRuntimeStatusDiagnostic(options = {}) {
   if (createAgentRuntime.status === 'stale') {
     addSignal(signals, 'warning', 'locks', 'create_agent_runtime_stale', 'create-agent runtime reports active work but owner pid is not alive', { pid: createAgentRuntime.ownerPid });
   }
-  if (subagents.persistentWorkers.some((worker) => worker?.broken)) {
-    addSignal(signals, 'warning', 'subagents', 'subagent_persistent_worker_broken', 'persistent subagent worker snapshot contains broken workers');
-  }
-  if (normalizeNumber(subagents.executor?.pendingSubagentRuns, 0) > 0) {
-    addSignal(signals, 'warning', 'subagents', 'subagent_executor_queue_pending', 'subagent executor has queued calls', { count: normalizeNumber(subagents.executor?.pendingSubagentRuns, 0) });
-  }
-
   const mainStatus = (() => {
     if (singleInstanceLock.status === 'running' || linuxMainPidFile.status === 'running' || mainProcesses.length > 0) return 'running';
     if (singleInstanceLock.status === 'stale' || linuxMainPidFile.status === 'stale') return 'stale_pid';
@@ -292,8 +238,6 @@ function buildRuntimeStatusDiagnostic(options = {}) {
         checkpointBytes: langGraphV2Store.totalCheckpointBytes,
         eventBytes: langGraphV2Store.totalEventBytes
       },
-      activeSubagentProcesses: subagents.processCount,
-      persistentSubagentWorkers: subagents.persistentWorkers.length,
       journalHealth: journalHealth.totals || {}
     },
     components: {
@@ -319,7 +263,6 @@ function buildRuntimeStatusDiagnostic(options = {}) {
       ],
       backgroundTasks,
       langGraphV2Store,
-      subagents,
       journalHealth
     },
     signals
@@ -336,8 +279,7 @@ function buildRuntimeStatusText(report = {}) {
     `main: ${summary.mainProcess?.status || 'unknown'} pid=${summary.mainProcess?.lockPid || 0} processes=${summary.mainProcess?.processCount || 0}`,
     `post-reply: ${summary.postReplyWorker?.status || 'unknown'} pid=${summary.postReplyWorker?.pid || 0} processes=${summary.postReplyWorker?.processCount || 0} queue=queued:${postQueue.queued || 0} processing:${postQueue.processing || 0} failed:${postQueue.failed || 0} oldestQueuedMs=${summary.postReplyWorker?.oldestQueuedAgeMs || 0}`,
     `background-tasks: active=${summary.activeBackgroundTasks || 0} stale=${summary.staleBackgroundTasks || 0}`,
-    `langgraph-v2: checkpoints=${langGraphV2.checkpoints || 0} active=${langGraphV2.activeCheckpoints || 0} stale=${langGraphV2.staleRunningCheckpoints || 0} events=${langGraphV2.events || 0}`,
-    `subagents: osProcesses=${summary.activeSubagentProcesses || 0} persistentWorkers=${summary.persistentSubagentWorkers || 0}`
+    `langgraph-v2: checkpoints=${langGraphV2.checkpoints || 0} active=${langGraphV2.activeCheckpoints || 0} stale=${langGraphV2.staleRunningCheckpoints || 0} events=${langGraphV2.events || 0}`
   ];
   const journal = summary.journalHealth || {};
   if (Object.keys(journal).length > 0) {

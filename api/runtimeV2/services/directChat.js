@@ -8,7 +8,7 @@ function isExcludedDirectChatToolName(toolName = '') {
   const normalized = String(toolName || '').trim().toLowerCase();
   if (!normalized) return true;
   if (DIRECT_CHAT_EXCLUDED_TOOL_NAMES.has(normalized)) return true;
-  return /subagent|openclaw|nanobot/i.test(normalized);
+  return false;
 }
 
 function parseToolCallArgs(toolCall = {}) {

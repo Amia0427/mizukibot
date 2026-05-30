@@ -210,11 +210,11 @@ function main() {
   const defaults = runtimePolicy.defaults && typeof runtimePolicy.defaults === 'object'
     ? runtimePolicy.defaults
     : {};
-  if (!defaults.chat || !defaults.subagent) {
-    fail('route prompt policy defaults.chat/defaults.subagent missing');
+  if (!defaults.chat) {
+    fail('route prompt policy defaults.chat missing');
     failureCount += 1;
   } else {
-    ok('route prompt policy defaults present');
+    ok('route prompt policy chat defaults present');
   }
 
   const knownChatKeys = new Set([
@@ -223,17 +223,12 @@ function main() {
     'include_qq_rich_reply_when_requested',
     'disable_stream_when_qq_rich_requested'
   ]);
-  const knownSubagentKeys = new Set([
-    'include_tool_guidance',
-    'include_bridge_guidance'
-  ]);
-
   const routeEntries = runtimePolicy.routes && typeof runtimePolicy.routes === 'object'
     ? Object.entries(runtimePolicy.routes)
     : [];
   for (const [routeType, routePolicy] of routeEntries) {
     for (const [mode, modePolicy] of Object.entries(routePolicy || {})) {
-      const knownKeys = mode === 'chat' ? knownChatKeys : mode === 'subagent' ? knownSubagentKeys : null;
+      const knownKeys = mode === 'chat' ? knownChatKeys : null;
       if (!knownKeys) {
         fail(`unknown route policy mode: ${routeType}.${mode}`);
         failureCount += 1;

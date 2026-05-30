@@ -133,7 +133,7 @@ module.exports = (async () => {
     assert.ok(Array.isArray(runtimeReport.signals));
     assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport.components, 'postReplyWorker'));
     assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport.components, 'backgroundTasks'));
-    assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport.components, 'subagents'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(runtimeReport.components, 'subagents'));
 
     const hotspotsResult = await routeFlow.dispatchAdminRoute({
       route: {

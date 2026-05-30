@@ -654,8 +654,14 @@ function shouldRuntimeAddRetrievedMemoryBlock(question = '', options = {}, dynam
   const hasMemoryEvidence = Boolean(normalizeText(memoryContext?.promptRetrievedMemoryText || memoryContext?.memoryForPrompt));
   if (!hasMemoryEvidence) return false;
   if (shouldForceMemoryContextForQuestion(question, options)) return true;
+  const trace = memoryContext?.diagnostics?.memoryTrace && typeof memoryContext.diagnostics.memoryTrace === 'object'
+    ? memoryContext.diagnostics.memoryTrace
+    : {};
+  const traceBackedEvidence = normalizeArray(trace.hits).some((item) => item && typeof item === 'object')
+    || Number(trace.retrieved_count || trace.retrievedCount || 0) > 0
+    || normalizeArray(trace.injected_block_ids || trace.injectedBlockIds).map((item) => normalizeText(item)).includes('retrieved_memory_lite');
   if (dynamicPromptPlan?.plannerProvided === true) {
-    return planIncludesBlock(dynamicPromptPlan, 'retrieved_memory_lite');
+    return planIncludesBlock(dynamicPromptPlan, 'retrieved_memory_lite') || traceBackedEvidence;
   }
   return true;
 }

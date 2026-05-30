@@ -6,7 +6,6 @@ const {
   prepareSubagentFallbackReply,
   prepareSubagentOutputForReview
 } = require('../utils/subagentStyleGuard');
-const { buildForwardPrompt } = require('../api/subagentBackends/commandBackend');
 
 (() => {
   const tutorialOutput = [
@@ -37,9 +36,6 @@ const { buildForwardPrompt } = require('../api/subagentBackends/commandBackend')
   const instruction = buildSubagentStyleGuardInstruction({ maxChars: 1600 });
   assert.ok(instruction.includes('Subagent style budget'));
   assert.ok(instruction.includes('within 1600'));
-
-  const prompt = buildForwardPrompt('正常问题', null, null, 'trusted route');
-  assert.ok(prompt.includes('Subagent style budget'), 'subagent prompt must carry the style guard');
 
   console.log('subagentStyleGuard.test.js passed');
 })();

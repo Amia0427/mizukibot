@@ -72,7 +72,6 @@ module.exports = (async () => {
     buildRoutePromptBundle: () => ({ toolGuidancePrompt: 'prompt' }),
     getStreamMaxSegments: () => 3,
     buildToolGuidancePrompt: () => 'tool',
-    buildBridgeGuidancePrompt: () => 'bridge',
     buildStreamingSegmentationPrompt: () => 'stream',
     shouldPreferQqRichReply: () => false,
     buildQqRichReplyPrompt: () => 'qq',

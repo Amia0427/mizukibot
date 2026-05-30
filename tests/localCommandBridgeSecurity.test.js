@@ -30,12 +30,9 @@ for (const fileName of fs.readdirSync(scriptsDir)) {
 }
 assert.ok(bridgeSource.includes('console.warn'));
 
-const hapiSpec = bridge.buildCommandSpec('hapi', { args: ['--version'] });
-assert.ok(!Object.prototype.hasOwnProperty.call(hapiSpec.env, 'CLI_API_TOKEN'));
-
 process.env.CLI_API_TOKEN = 'test-token';
 const hapiSpecWithToken = bridge.buildCommandSpec('hapi', { args: ['--version'] });
-assert.strictEqual(hapiSpecWithToken.env.CLI_API_TOKEN, 'test-token');
+assert.strictEqual(hapiSpecWithToken, null);
 delete process.env.CLI_API_TOKEN;
 
 console.log('localCommandBridgeSecurity.test.js passed');

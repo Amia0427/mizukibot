@@ -1,64 +1,3 @@
-          question,
-          plan,
-          workerResults,
-          userInfo,
-          userId,
-          imageUrl,
-          routePrompt: mutableOptions.routePrompt,
-          routePolicyKey
-        });
-        if (!shouldContinue()) return '';
-        if (String(reviewed || '').trim()) {
-          const cleanReviewed = prepareSubagentFallbackReply(
-            cleanToolReplyText(reviewed, formattingPreferences),
-            { requestText: question }
-          );
-          if (cleanReviewed && !looksLikeModelFailureText(cleanReviewed)) {
-            console.log('[full-subagent] review completed', {
-              executor: 'full_subagent',
-              multiAgent: true,
-              workerCount,
-              reviewCompleted: true,
-              reviewDurationMs: Date.now() - reviewStartedAt
-            });
-            return cleanReviewed;
-          }
-        }
-      } catch (error) {
-        console.error('[full-subagent] review failed, fallback to best worker output', {
-          executor: 'full_subagent',
-          multiAgent: true,
-          workerCount,
-          error: error?.message || error
-        });
-      }
-
-      console.log('[full-subagent] review fallback', {
-        executor: 'full_subagent',
-        multiAgent: true,
-        workerCount,
-        reviewFallback: true
-      });
-      return buildFullSubagentFallbackReply(workerResults);
-    })().catch((error) => {
-      if (error && /cancelled/i.test(String(error?.message || ''))) {
-        return '';
-      }
-      console.error('[full-subagent] multi-agent execute failed:', error?.message || error);
-      return '?? `/full` ? worker ????????????????';
-    });
-
-    return {
-      promise,
-      cancel(reason = 'cancelled') {
-        for (const fn of workerCancels) {
-          try { fn(reason); } catch (_) {}
-        }
-        return reason;
-      }
-    };
-  }
-
   async function askAIDispatch(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
     const mutableOptions = options && typeof options === 'object' ? options : {};
     mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
@@ -129,63 +68,6 @@
     return true;
   }
 
-  async function askToolTaskWithSubagentReview(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
-    const mutableOptions = options && typeof options === 'object' ? options : {};
-    mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
-    const routePolicyKey = String(mutableOptions.routePolicyKey || 'admin/full').trim() || 'admin/full';
-    const formattingPreferences = getFormattingPreferences(question);
-
-    if (!(config.SUBAGENT_ENABLED || config.NANOBOT_BRIDGE_ENABLED)) {
-      return '?????????????? agent ????? agent ?????????? `.env` ?? `SUBAGENT_ENABLED`?`SUBAGENT_COMMAND` ? `OPENCLAW_*` ???';
-    }
-
-    let subagentOutput = '';
-    try {
-      const bridgeCall = await startSubagentBridgeCall(question, userInfo, userId, customPrompt, imageUrl, mutableOptions);
-      subagentOutput = await bridgeCall.promise;
-    } catch (bridgeErr) {
-      console.error('[subagent-bridge] execute failed:', bridgeErr?.message || bridgeErr);
-      return '????????????? agent ??????????????????????????? agent ????????';
-    }
-
-    if (looksLikeModelFailureText(subagentOutput)) {
-      return '? agent ???????????????????????????????????????????? agent ???????????';
-    }
-
-    if (!(config.SUBAGENT_REVIEW_ENABLED || config.NANOBOT_REVIEW_ENABLED)) {
-      return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
-    }
-
-    try {
-      const reviewed = await reviewSubagentOutput({
-        question,
-        subagentOutput: prepareSubagentOutputForReview(subagentOutput, { requestText: question }),
-        userInfo,
-        userId,
-        imageUrl,
-        routePrompt: mutableOptions.routePrompt,
-        routePolicyKey
-      });
-
-      if (String(reviewed || '').trim()) {
-        if (looksLikeModelFailureText(reviewed) && String(subagentOutput || '').trim()) {
-          return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
-        }
-        return prepareSubagentFallbackReply(cleanToolReplyText(reviewed, formattingPreferences), { requestText: question });
-      }
-      if (String(subagentOutput || '').trim()) {
-        return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
-      }
-      return '? agent ???????? Mizuki ????????????????????????';
-    } catch (reviewErr) {
-      console.error('[subagent-review] failed, fallback to raw subagent output:', reviewErr?.message || reviewErr);
-      if (String(subagentOutput || '').trim()) {
-        return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
-      }
-      return '??? agent ????????????????????????';
-    }
-  }
-
   async function askToolTaskLocally(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
     const mutableOptions = options && typeof options === 'object' ? options : {};
     const formattingPreferences = getFormattingPreferences(question);
@@ -215,79 +97,6 @@
     return askToolTaskLocally(question, userInfo, userId, null, imageUrl, options);
   }
 
-  async function executeFullSubagentTaskWithHandle(question, userInfo, userId, imageUrl = null, options = {}) {
-    const mutableOptions = options && typeof options === 'object' ? { ...options } : {};
-    mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
-    const routePolicyKey = String(mutableOptions.routePolicyKey || 'admin/full').trim() || 'admin/full';
-    const formattingPreferences = getFormattingPreferences(question);
-
-      if (!(config.SUBAGENT_ENABLED || config.NANOBOT_BRIDGE_ENABLED)) {
-        return {
-          promise: Promise.resolve('?????????????? agent??? agent ?????????? `.env` ?? `SUBAGENT_ENABLED`?`SUBAGENT_COMMAND` ? `OPENCLAW_*` ???'),
-          cancel() {}
-        };
-      }
-
-      const bridgeCall = await startSubagentBridgeCall(question, userInfo, userId, null, imageUrl, mutableOptions);
-      const promise = bridgeCall.promise.then(async (subagentOutput) => {
-        if (looksLikeModelFailureText(subagentOutput)) {
-          return '? agent ???????????????????????????????????????????? agent ???????????';
-        }
-
-        if (!(config.SUBAGENT_REVIEW_ENABLED || config.NANOBOT_REVIEW_ENABLED)) {
-          return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
-        }
-
-        const shouldContinue = typeof mutableOptions?.shouldContinue === 'function'
-          ? mutableOptions.shouldContinue
-          : () => true;
-
-        try {
-          if (!shouldContinue()) return '';
-          const reviewed = await reviewSubagentOutput({
-            question,
-            subagentOutput: prepareSubagentOutputForReview(subagentOutput, { requestText: question }),
-            userInfo,
-            userId,
-            imageUrl,
-            routePrompt: mutableOptions.routePrompt,
-            routePolicyKey
-          });
-          if (!shouldContinue()) return '';
-
-          if (String(reviewed || '').trim()) {
-            if (looksLikeModelFailureText(reviewed) && String(subagentOutput || '').trim()) {
-              return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
-            }
-            return prepareSubagentFallbackReply(cleanToolReplyText(reviewed, formattingPreferences), { requestText: question });
-          }
-          if (String(subagentOutput || '').trim()) {
-            return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
-          }
-          return '? agent ???????? Mizuki ????????????????????????';
-        } catch (reviewErr) {
-          console.error('[subagent-review] failed, fallback to raw subagent output:', reviewErr?.message || reviewErr);
-          if (String(subagentOutput || '').trim()) {
-            return prepareSubagentFallbackReply(cleanToolReplyText(subagentOutput, formattingPreferences), { requestText: question });
-          }
-          return '??? agent ????????????????????????';
-        }
-      }).catch((bridgeErr) => {
-        if (bridgeErr && /cancelled/i.test(String(bridgeErr?.message || ''))) {
-          return '';
-        }
-        console.error('[subagent-bridge] execute failed:', bridgeErr?.message || bridgeErr);
-        return '????????????? agent ??????????????????????????? agent ????????';
-      });
-
-      return {
-        promise,
-        cancel(reason = 'cancelled') {
-          return bridgeCall.cancel(reason);
-        }
-      };
-  }
-
   async function executeDirectChatToolTaskWithHandle(question, userInfo, userId, imageUrl = null, options = {}) {
     return {
       promise: executeDirectChatToolTask(question, userInfo, userId, imageUrl, options),
@@ -302,10 +111,8 @@
     planDirectChat,
     askAIDispatch,
     askToolTaskLocally,
-    askToolTaskWithSubagentReview,
     runBackgroundToolTask,
     handleAdminCommand,
-    handleHapiAdminCommand,
     handleMemoryOpsAdminCommand,
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
@@ -337,7 +144,6 @@
     saveData,
     recordMemoryScope,
     buildToolGuidancePrompt: promptComposerBuildToolGuidancePrompt,
-    buildBridgeGuidancePrompt: promptComposerBuildBridgeGuidancePrompt,
     buildStreamingSegmentationPrompt: promptComposerBuildStreamingSegmentationPrompt,
     buildQqRichReplyPrompt: promptComposerBuildQqRichReplyPrompt,
     shouldPreferQqRichReply: promptComposerShouldPreferQqRichReply,

@@ -1,7 +1,5 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
-const config = require('../../config');
-
 function normalizeText(value = '') {
   return String(value || '').trim();
 }
@@ -142,7 +140,7 @@ function getDiagnosticProjectRoot() {
 
 function extractKnownProjectScriptTokens(cmd = '') {
   const tokens = [];
-  const pattern = /"([^"]*(?:index|post-reply-worker|subagent-command-worker)\.js)"|'([^']*(?:index|post-reply-worker|subagent-command-worker)\.js)'|([^\s"]*(?:index|post-reply-worker|subagent-command-worker)\.js)/ig;
+  const pattern = /"([^"]*(?:index|post-reply-worker)\.js)"|'([^']*(?:index|post-reply-worker)\.js)'|([^\s"]*(?:index|post-reply-worker)\.js)/ig;
   let match = pattern.exec(cmd);
   while (match) {
     tokens.push(normalizeText(match[1] || match[2] || match[3]).replace(/\\/g, '/').toLowerCase());
@@ -169,31 +167,14 @@ function processMatchesProjectRoot(proc = {}) {
   return true;
 }
 
-function shouldExcludeOpenclawGatewayProcess(proc = {}) {
-  if (config.DIAGNOSTICS_EXCLUDE_OPENCLAW_GATEWAY === false) return false;
-  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
-  return cmd.includes('/openclaw/') && /\bgateway\b/.test(cmd);
-}
-
 function processMatchesMain(proc = {}) {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  if (shouldExcludeOpenclawGatewayProcess(proc)) return false;
   return /(^|[\s/])index\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
 }
 
 function processMatchesPostReplyWorker(proc = {}) {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
   return /(^|[\s/])post-reply-worker\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
-}
-
-function processMatchesSubagent(proc = {}) {
-  const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
-  if (!cmd) return false;
-  if (shouldExcludeOpenclawGatewayProcess(proc)) return false;
-  if (!processMatchesProjectRoot(proc)) return false;
-  return cmd.includes('subagent-command-worker.js')
-    || cmd.includes('run-claude.ps1')
-    || cmd.includes('subagent');
 }
 
 function compactProcess(proc = null) {
@@ -217,6 +198,5 @@ module.exports = {
   parseWindowsGetProcessList,
   parseWindowsProcessList,
   processMatchesMain,
-  processMatchesPostReplyWorker,
-  processMatchesSubagent
+  processMatchesPostReplyWorker
 };

@@ -4,7 +4,7 @@
 
 - `deploy/linux/LINUX_DEPLOY_FULL.md`
 - `deploy/linux/README_LINUX.md`
-- `deploy/linux/subagent.env.linux.example`
+- `deploy/linux/subagent.env.linux.example`（2026-05-30 +08:00 起仅保留退役占位说明）
 
 ## Windows
 
