@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-31 07:03 +08:00：普通用户快速回复链路默认关闭；仅当 `NORMAL_FAST_REPLY_ENABLED=true` 时启用，设为 `false` 或留空都会回到完整旧链路。
+
 更新 2026-05-31 00:47 +08:00：复查 `req_7a970bf9e2770973` 的 superapi 连续失败，管理员主模型 `claude-opus-4-6` 在 `https://superapi.buzz/v1/messages` 依次出现 `ECONNRESET`、HTTP 429 和 HTTP 400 `invalid_grant`；复测矩阵显示该 Anthropic Messages 路由在 admin key 下存在配额/鉴权状态抖动，非流式可返回 HTTP 429 `Individual quota reached`，而 `/v1/chat/completions` 非流式和流式均返回 200。新增 `API_PROVIDER`、`ADMIN_API_PROVIDER` 和 fallback provider 覆盖项，本地管理员主回复固定为 `ADMIN_API_PROVIDER=openai_compatible` + `/v1/chat/completions`。
 
 更新 2026-05-30 19:40 +08:00：新增普通用户快速回复链路；非管理员的简单纯文本 direct_chat 可跳过 planner、工具预检和 LangGraph prepare，使用最近 12 轮轻量上下文调用主模型快速回复，复杂/图片/工具/召回/admin 请求保持旧链路。
