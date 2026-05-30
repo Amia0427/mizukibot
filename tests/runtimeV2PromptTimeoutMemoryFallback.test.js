@@ -165,12 +165,23 @@ module.exports = (async () => {
       routeMeta: {
         directChatPlanner: {
           dynamicPromptPlan: {
-            enabledBlockIds: ['memos_recall']
+            enabledBlockIds: ['memos_recall', 'openviking_recall']
           },
           memosRecall: {
             used: true,
             items: [{ id: 'm1', text: 'planner 选中的远端知识。' }],
             promptText: '[MemOSRecall]\nplanner 选中的远端知识。'
+          },
+          openVikingRecall: {
+            used: true,
+            items: [
+              {
+                id: 'ov_timeout_dup',
+                text: '之前约定先排查 prompt 组装。',
+                score: 0.93
+              }
+            ],
+            promptText: '[OpenVikingRecall]\n1. source=openviking score=0.93 之前约定先排查 prompt 组装。'
           }
         }
       },
@@ -196,11 +207,13 @@ module.exports = (async () => {
   assert.ok(dynamicIds.includes('daily_journal'), 'timeout fallback should inject daily journal block');
   assert.ok(dynamicIds.includes('short_term_continuity'), 'timeout fallback should inject short-term continuity block');
   assert.ok(dynamicIds.includes('memos_recall'), 'timeout fallback should preserve planner-selected MemOS recall');
+  assert.ok(!dynamicIds.includes('openviking_recall'), 'timeout fallback should dedupe OpenViking against local Memory V3');
   assert.ok(promptIds.includes('retrieved_memory_lite'), 'rebuilt prompt snapshot should include fallback memory');
   assert.ok(sentText.includes('[RetrievedMemoryLite]'), 'main reply messages should include retrieved memory text');
   assert.ok(sentText.includes('[DailyJournal]'), 'main reply messages should include daily journal text');
   assert.ok(sentText.includes('[ShortTermContinuity]'), 'main reply messages should include short-term continuity text');
   assert.ok(sentText.includes('[MemOSRecall]'), 'main reply messages should include MemOS recall text');
+  assert.ok(!sentText.includes('[OpenVikingRecall]'), 'main reply messages should not include deduped OpenViking recall');
 
   console.log('runtimeV2PromptTimeoutMemoryFallback.test.js passed');
 })().catch((error) => {

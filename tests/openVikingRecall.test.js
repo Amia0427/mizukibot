@@ -98,6 +98,41 @@ module.exports = (async () => {
   assert.strictEqual(duplicateRecall.used, false);
   assert.strictEqual(duplicateRecall.rejectedReason, 'deduped_by_local_memory');
 
+  const synonymDedupe = dedupeOpenVikingRecallAgainstMemoryContext({
+    used: true,
+    items: [{ id: 'syn1', text: 'User likes keyboard-only workflows.' }]
+  }, {
+    memoryForPrompt: 'User prefers keyboard-only workflows.'
+  });
+  assert.strictEqual(synonymDedupe.used, false, 'synonymous local Memory V3 evidence should suppress OpenViking');
+  assert.strictEqual(synonymDedupe.rejectedReason, 'deduped_by_local_memory');
+
+  const conflictKeyDedupe = dedupeOpenVikingRecallAgainstMemoryContext({
+    used: true,
+    items: [{
+      id: 'old-project-status',
+      text: 'waifu 项目部署状态：失败',
+      conflictKey: 'u1|project|waifu|deploy-status',
+      tier: 'B'
+    }]
+  }, {
+    hits: [{
+      id: 'new-project-status',
+      text: 'waifu 项目部署状态：已恢复',
+      conflictKey: 'u1|project|waifu|deploy-status',
+      tier: 'S',
+      sourceKind: 'explicit',
+      status: 'active',
+      lifecycleStatus: 'active'
+    }]
+  });
+  assert.strictEqual(conflictKeyDedupe.used, false, 'higher-priority local Memory V3 conflict winner should suppress OpenViking');
+  assert.strictEqual(conflictKeyDedupe.rejectedReason, 'deduped_by_local_memory');
+  assert.ok(
+    conflictKeyDedupe.diagnostics.dedupe.removedItems.some((item) => item.reason === 'local_conflict_key_priority'),
+    'dedupe diagnostics should explain conflict-key suppression'
+  );
+
   assert.strictEqual(
     findConflictReason('用户喜欢咖啡', ['用户不喜欢咖啡']),
     'remote_conflict_with_local'

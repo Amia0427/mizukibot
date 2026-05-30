@@ -110,6 +110,17 @@ function createPrepareNode(deps = {}) {
           return '';
         }
       });
+  const dedupeOpenVikingRecallImpl = typeof deps.dedupeOpenVikingRecall === 'function'
+    ? deps.dedupeOpenVikingRecall
+    : ((openVikingRecall = {}, memoryContext = {}) => {
+        try {
+          return require('../../../utils/openVikingMemory/deduper').dedupeOpenVikingRecallAgainstMemoryContext(openVikingRecall, memoryContext);
+        } catch (_) {
+          return openVikingRecall && typeof openVikingRecall === 'object' && !Array.isArray(openVikingRecall)
+            ? openVikingRecall
+            : {};
+        }
+      });
   const buildPreparedMainConversationContext = typeof deps.buildPreparedMainConversationContext === 'function'
     ? deps.buildPreparedMainConversationContext
     : (() => null);
@@ -493,7 +504,7 @@ function createPrepareNode(deps = {}) {
       }
     ));
 
-    const openVikingRecall = resolvePlannerOpenVikingRecall(request);
+    const openVikingRecall = dedupeOpenVikingRecallImpl(resolvePlannerOpenVikingRecall(request), context);
     const shouldInjectOpenViking = openVikingRecall.used === true && planIncludesBlock(dynamicPlan, 'openviking_recall');
     const openVikingText = shouldInjectOpenViking ? String(getOpenVikingRecallPromptTextImpl(openVikingRecall) || '').trim() : '';
     appendUniquePromptBlock(blocks, createFallbackPromptBlock(
