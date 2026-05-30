@@ -107,6 +107,222 @@
     }
 
     if (route?.topRouteType === 'direct_chat') {
+      const normalFastRoutePlan = {
+        executor: 'direct',
+        topRouteType: 'direct_chat',
+        policyKey: 'chat/default',
+        routeDebugKey: 'direct_chat/text_chat/answer',
+        allowTools: false,
+        allowedTools: [],
+        allowedToolBuckets: [],
+        allowStream: false,
+        needsBackground: false,
+        unavailableReason: ''
+      };
+      const normalFastDecision = buildNormalFastReplyDecision({
+        userId: senderId,
+        cleanText: route?.cleanText || runtimeQuestionText || effectiveCleanText || rawText,
+        rawText,
+        route,
+        routeExecutionPlan: normalFastRoutePlan,
+        imageUrl: visualContext?.worker?.succeeded ? null : (effectiveVisualInput || route?.imageUrl || ''),
+        imageUrls: visualContext?.worker?.succeeded ? [] : effectiveVisualInputUrls,
+        visualContext
+      }, config, { isAdminUser });
+      if (normalFastDecision.eligible) {
+        const normalFastStartedAt = Date.now();
+        try {
+          const fastGroupId = isPrivateChatType(chatType) ? '' : groupId;
+          const normalFastReplyResult = await runNormalFastReply({
+            userId: senderId,
+            routeMeta: {
+              ...(route.meta || {}),
+              userId: String(senderId || '').trim(),
+              groupId: String(fastGroupId || '').trim(),
+              chatType,
+              routePolicyKey: 'chat/default',
+              routeDebugKey: 'direct_chat/text_chat/answer',
+              topRouteType: 'direct_chat',
+              threadId: stableThreadId,
+              messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+              requestTrace: cloneTraceForMeta(requestTrace)
+            },
+            text: runtimeQuestionText || normalFastDecision.text,
+            route,
+            chatHistory,
+            sessionKey
+          });
+          let fastReplyText = String(normalFastReplyResult?.replyText || '').trim();
+          if (!fastReplyText) throw new Error('normal_fast_reply_empty');
+          if (!freshnessGuard.shouldSend()) {
+            appendTraceTiming('normal_fast_reply_stale', {
+              stage: 'normal_fast_reply_stale',
+              messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+              groupId: String(groupId || '').trim(),
+              userId: String(senderId || '').trim(),
+              chatType,
+              durationMs: Math.max(0, Date.now() - normalFastStartedAt),
+              sessionKey: String(freshnessGuard.sessionKey || '').trim(),
+              flushVersion: Number(freshnessGuard.flushVersion || 0) || 0
+            });
+            appendRequestCompleteTrace({
+              routePolicyKey: 'chat/default',
+              topRouteType: 'direct_chat',
+              replyPath: 'normal_fast_reply',
+              sent: false,
+              finalErrorCode: 'stale_reply_discarded'
+            });
+            return;
+          }
+          fastReplyText = normalizeUserFacingReply(fastReplyText, {
+            policyKey: 'chat/default',
+            routeDebugKey: 'direct_chat/text_chat/answer',
+            topRouteType: 'direct_chat',
+            allowTools: false,
+            requestText: runtimeQuestionText || normalFastDecision.text
+          });
+          appendTraceTiming('normal_fast_reply_send_start', {
+            stage: 'normal_fast_reply_send_start',
+            messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+            groupId: String(groupId || '').trim(),
+            userId: String(senderId || '').trim(),
+            chatType,
+            replyChars: Array.from(fastReplyText).length,
+            recentMessageCount: Number(normalFastReplyResult?.recentMessageCount || 0) || 0,
+            summaryChars: Number(normalFastReplyResult?.summaryChars || 0) || 0
+          });
+          const sent = await sendGroupReply({
+            chatType,
+            groupId,
+            userId: senderId,
+            senderId,
+            replyText: fastReplyText,
+            atSender: !isPrivateChatType(chatType),
+            retries: 2,
+            waitMs: 500,
+            telemetry: buildReplyTelemetry({
+              senderId,
+              groupId: fastGroupId,
+              chatType,
+              routePolicyKey: 'chat/default',
+              topRouteType: 'direct_chat',
+              routeMeta: buildRouteMetaEnvelope(route, normalFastRoutePlan, null, {
+                threadId: stableThreadId,
+                messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+                requestTrace: cloneTraceForMeta(requestTrace),
+                replyPath: 'normal_fast_reply'
+              })
+            })
+          });
+          appendTraceTiming('normal_fast_reply_send_done', {
+            stage: 'normal_fast_reply_send_done',
+            messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+            groupId: String(groupId || '').trim(),
+            userId: String(senderId || '').trim(),
+            chatType,
+            sent: Boolean(sent),
+            durationMs: Math.max(0, Date.now() - normalFastStartedAt),
+            finalErrorCode: sent ? '' : 'reply_send_failed'
+          });
+          if (!sent) {
+            console.warn('[normal-fast-reply] send failed, fallback to formal route');
+          } else {
+            if (!isPrivateChatType(chatType)) {
+              sideEffects.recordInboundHumanMessage({
+                groupId,
+                senderId,
+                senderName: String(effectiveMsg.sender?.card || effectiveMsg.sender?.nickname || effectiveMsg.sender?.nick || senderId || '').trim(),
+                text: persistUserText || normalFastDecision.text || rawText,
+                timestamp: Number(continuousMeta?.firstTimestamp || Date.now()),
+                messageId: String(effectiveMsg.message_id || '').trim(),
+                replyToMessageId: String(directedContext?.quote?.messageId || continuousMeta?.replyMessageId || '').trim(),
+                replyToSenderId: String(directedContext?.quote?.senderId || '').trim(),
+                replyToSenderName: String(directedContext?.quote?.senderName || '').trim()
+              });
+            }
+            const normalFastUserInfo = sideEffects.updateUserPresence(
+              senderId,
+              persistUserText || normalFastDecision.text,
+              fastGroupId
+            );
+            const persistedFastReplyText = String(normalFastReplyResult?.persistedReplyText || fastReplyText).trim() || fastReplyText;
+            appendShortTermHistory(
+              senderId,
+              persistUserText || normalFastDecision.text,
+              persistedFastReplyText,
+              normalFastUserInfo || {},
+              {
+                chatHistory,
+                shortTermMemory,
+                routeMeta: {
+                  ...(route.meta || {}),
+                  groupId: fastGroupId,
+                  chatType
+                },
+                sessionKey
+              }
+            );
+            saveData();
+            markDirectSessionPresenceReplied({ groupId: fastGroupId, senderId });
+            replyRuntime.recordBotReply({
+              chatType,
+              groupId: fastGroupId,
+              senderId,
+              replyText: persistedFastReplyText
+            });
+            if (!isPrivateChatType(chatType)) {
+              await sideEffects.runDirectReplyFollowup({
+                groupId,
+                senderId,
+                sendWithRetry,
+                routePolicyKey: 'chat/default',
+                topRouteType: 'direct_chat',
+                userText: persistUserText || normalFastDecision.text,
+                replyText: persistedFastReplyText,
+                rawMessage: rawText,
+                routeMeta: {
+                  ...(route.meta || {}),
+                  replyPath: 'normal_fast_reply'
+                },
+                replyToMessageId: String(effectiveMsg.message_id || '').trim()
+              });
+            }
+            appendRequestCompleteTrace({
+              routePolicyKey: 'chat/default',
+              topRouteType: 'direct_chat',
+              replyPath: 'normal_fast_reply',
+              sent: true,
+              stream: false,
+              finalErrorCode: ''
+            });
+            return;
+          }
+        } catch (error) {
+          appendTraceTiming('normal_fast_reply_failed', {
+            stage: 'normal_fast_reply_failed',
+            messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+            groupId: String(groupId || '').trim(),
+            userId: String(senderId || '').trim(),
+            chatType,
+            durationMs: Math.max(0, Date.now() - normalFastStartedAt),
+            finalErrorCode: extractErrorCode(error),
+            error: error?.message || String(error || '')
+          });
+          console.warn('[normal-fast-reply] failed, fallback to formal route:', error?.message || error);
+        }
+      } else {
+        appendTraceTiming('normal_fast_reply_skipped', {
+          stage: 'normal_fast_reply_skipped',
+          messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+          groupId: String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          reason: String(normalFastDecision.reason || '').trim()
+        });
+      }
+    }
+
+    if (route?.topRouteType === 'direct_chat') {
       const plannerStartedAt = Date.now();
       let plannerDecision = null;
       try {

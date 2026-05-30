@@ -465,6 +465,11 @@ module.exports = {
   // Streaming replies: send at most N chunks, with chunk boundaries chosen by model output.
   AI_STREAM_MAX_SEGMENTS: pickNum('AI_STREAM_MAX_SEGMENTS', 3),
   AI_REPLY_CHUNK_CHARS: pickNum('AI_REPLY_CHUNK_CHARS', 1200),
+  NORMAL_FAST_REPLY_ENABLED: pickBool('NORMAL_FAST_REPLY_ENABLED', true),
+  NORMAL_FAST_REPLY_RECENT_TURNS: Math.max(1, pickNum('NORMAL_FAST_REPLY_RECENT_TURNS', 12)),
+  NORMAL_FAST_REPLY_CONTEXT_MAX_CHARS: Math.max(1000, pickNum('NORMAL_FAST_REPLY_CONTEXT_MAX_CHARS', 8000)),
+  NORMAL_FAST_REPLY_SUMMARY_MAX_CHARS: Math.max(0, pickNum('NORMAL_FAST_REPLY_SUMMARY_MAX_CHARS', 1500)),
+  NORMAL_FAST_REPLY_MAX_TOKENS: Math.max(64, pickNum('NORMAL_FAST_REPLY_MAX_TOKENS', 512)),
   // Keep de-AI cleanup stable by default: disable stream path when strict humanizer is required.
   HUMANIZER_FORCE_NON_STREAM: pickBool('HUMANIZER_FORCE_NON_STREAM', true),
   HUMANIZER_AGENT_ENABLED: humanizerAgentEnabled,

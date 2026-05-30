@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-30 19:40 +08:00：新增普通用户快速回复链路；非管理员的简单纯文本 direct_chat 可跳过 planner、工具预检和 LangGraph prepare，使用最近 12 轮轻量上下文调用主模型快速回复，复杂/图片/工具/召回/admin 请求保持旧链路。
+
 更新 2026-05-30 18:56 +08:00：OpenViking recall 注入前新增本地 Memory V3 同义证据和结构化 `conflictKey` 优先级兜底；本地已有同义记忆或更高优先级冲突 winner 时，`openviking_recall` 不进入主 prompt，prepare 软超时 fallback 也复用同一去重路径。
 
 更新 2026-05-30 18:47 +08:00：新增主回复卡顿单入口 `npm run diag:main-reply-lag`，串联 runtime、hotspots、provider 请求和低资源诊断，直接汇总 planner p95、主模型 p95、发送 p95、post-reply worker RSS 压力与最可能瓶颈；`--json` 输出完整报告，`--no-provider-diagnostic` 可跳过 provider 请求形状检查。
