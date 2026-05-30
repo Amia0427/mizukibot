@@ -87,7 +87,9 @@ function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
   if (options && typeof options === 'object' && String(options.provider || '').trim()) {
     return normalizeApiProvider(options.provider);
   }
-  return 'anthropic';
+  const normalizedUrl = String(apiBaseUrl || '').trim();
+  if (/\/messages(?:\/)?$/i.test(normalizedUrl)) return 'anthropic';
+  return 'openai_compatible';
 }
 
 function ensureMainModelUrl(apiBaseUrl = '', options = {}) {
@@ -194,6 +196,11 @@ function getApiBaseUrl(overrides = null) {
 function getApiKey(overrides = null) {
   const raw = overrides && typeof overrides === 'object' ? overrides.apiKey : '';
   return String(raw || config.API_KEY || '').trim();
+}
+
+function getProvider(overrides = null) {
+  const raw = overrides && typeof overrides === 'object' ? overrides.provider : '';
+  return String(raw || (!overrides ? config.API_PROVIDER : '') || '').trim();
 }
 
 function normalizeDomainList(values = []) {
@@ -430,7 +437,12 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
 
 function buildMainModelRequest(resolvedConfig = null, options = {}) {
   const apiBaseUrl = getApiBaseUrl(resolvedConfig);
-  const provider = resolveMainProvider(apiBaseUrl, getModelName(resolvedConfig), resolvedConfig);
+  const providerOverride = getProvider(resolvedConfig);
+  const provider = resolveMainProvider(
+    apiBaseUrl,
+    getModelName(resolvedConfig),
+    providerOverride ? { provider: providerOverride } : null
+  );
   const protocol = resolveOpenAIMainProtocol(apiBaseUrl, {
     ...options,
     provider
@@ -479,7 +491,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
         fallbackActive: true,
         fallbackForced: resolvedConfig.__mainFallbackForced === true,
         model: getModelName(resolvedConfig),
-        provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig))
+        provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig), resolvedConfig)
       });
     }
     return result;
@@ -487,7 +499,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
     emitFallbackTrace('fallback_primary_failure', {
       fallbackActive: false,
       model: getModelName(resolvedConfig),
-      provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig)),
+      provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig), resolvedConfig),
       finalErrorCode: extractErrorCode(error),
       error: String(error?.message || error || '').slice(0, 400)
     });
@@ -503,7 +515,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
         fallbackActive: true,
         fallbackScope: scope || '',
         model: getModelName(forcedFallbackConfig),
-        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig)),
+        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig), forcedFallbackConfig),
         finalErrorCode: extractErrorCode(error)
       });
       const fallbackResult = await action(forcedFallbackConfig);
@@ -512,7 +524,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
         fallbackActive: true,
         fallbackForced: true,
         model: getModelName(forcedFallbackConfig),
-        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig))
+        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig), forcedFallbackConfig)
       });
       return fallbackResult;
     }
@@ -570,6 +582,7 @@ module.exports = {
   getMainReplyDefaultMaxTokens,
   getMaxTokens,
   getModelName,
+  getProvider,
   getRepetitionPenalty,
   getReasoningEffort,
   getRetries,

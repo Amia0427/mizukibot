@@ -10,6 +10,8 @@
 
 更新 2026-05-24 21:36 +08:00：修复按需联网后暴露出的 planner normalization 回归：companion 安全工具纠正不会被提前过滤成空计划，MemOS 已召回时不再重复升级为 `memory_cli` 工具计划；全量 `npm test` 通过。
 
+更新 2026-05-31 00:47 +08:00：superapi 管理员主模型原 `/v1/messages` 链路曾在 `req_7a970bf9e2770973` 返回 HTTP 400 `invalid_grant`，复测又出现非流式 HTTP 429 `Individual quota reached`，同一模型走 `/v1/chat/completions` 非流式和流式均返回 200；管理员主回复改为 `ADMIN_API_PROVIDER=openai_compatible` + `ADMIN_API_BASE_URL=https://superapi.buzz/v1/chat/completions`。需要继续测 Anthropic 原生 server tool 时，必须显式选择 Anthropic provider/`/messages` 链路。
+
 ## 诊断命令
 
 ```bash
@@ -30,7 +32,7 @@ node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
 测试时间：2026-05-23 23:18-23:24 +08:00。
 
 - 普通主回复模型：`AI_MODEL=claude-opus-4-6`，`API_BASE_URL=https://superapi.buzz/v1/chat/completions`。
-- 管理员主回复模型：`ADMIN_AI_MODEL=claude-opus-4-6`，`ADMIN_API_BASE_URL=https://superapi.buzz/v1/messages`。
+- 管理员主回复模型：`ADMIN_AI_MODEL=claude-opus-4-6`，`ADMIN_API_PROVIDER=openai_compatible`，`ADMIN_API_BASE_URL=https://superapi.buzz/v1/chat/completions`。
 - 管理员 fallback 参考：`ADMIN_AI_FALLBACK_MODEL=按量K-claude-opus-4-6`，`ADMIN_AI_FALLBACK_API_BASE_URL=https://api.ekan8.com/v1/messages`。
 
 结论：

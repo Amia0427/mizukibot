@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-31 00:47 +08:00：复查 `req_7a970bf9e2770973` 的 superapi 连续失败，管理员主模型 `claude-opus-4-6` 在 `https://superapi.buzz/v1/messages` 依次出现 `ECONNRESET`、HTTP 429 和 HTTP 400 `invalid_grant`；复测矩阵显示该 Anthropic Messages 路由在 admin key 下存在配额/鉴权状态抖动，非流式可返回 HTTP 429 `Individual quota reached`，而 `/v1/chat/completions` 非流式和流式均返回 200。新增 `API_PROVIDER`、`ADMIN_API_PROVIDER` 和 fallback provider 覆盖项，本地管理员主回复固定为 `ADMIN_API_PROVIDER=openai_compatible` + `/v1/chat/completions`。
+
 更新 2026-05-30 19:40 +08:00：新增普通用户快速回复链路；非管理员的简单纯文本 direct_chat 可跳过 planner、工具预检和 LangGraph prepare，使用最近 12 轮轻量上下文调用主模型快速回复，复杂/图片/工具/召回/admin 请求保持旧链路。
 
 更新 2026-05-30 18:56 +08:00：OpenViking recall 注入前新增本地 Memory V3 同义证据和结构化 `conflictKey` 优先级兜底；本地已有同义记忆或更高优先级冲突 winner 时，`openviking_recall` 不进入主 prompt，prepare 软超时 fallback 也复用同一去重路径。
@@ -322,7 +324,7 @@ MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3600
 MEMORY_V3_SESSION_RECENT_MESSAGES=96
 ```
 
-主回复默认协议：`API_BASE_URL` 即使配置为 `/v1/chat/completions` 或 `/v1/responses`，主回复调用也会规范化为 Claude `/v1/messages`；OpenAI prompt cache 字段只保留给显式 OpenAI-compatible HTTP 路径，主回复缓存以 Claude `cache_control` 为准。
+主回复协议：显式 `API_PROVIDER=anthropic` 或 URL 以 `/messages` 结尾时走 Claude Messages；`/v1/chat/completions` 和 `/v1/responses` 默认保持 OpenAI-compatible。`ADMIN_API_PROVIDER`、`AI_FALLBACK_PROVIDER`、`ADMIN_AI_FALLBACK_PROVIDER` 可覆盖推断，避免 Claude 模型名被错误强制切到 `/messages`。
 
 配置入口优先看 `config/index.js` 和 `config/*Runtime.js`。MemOS 细节见 `docs/memos-mcp-planner-recall.md`，主回复上下文见 `docs/main-reply-context.md`。
 

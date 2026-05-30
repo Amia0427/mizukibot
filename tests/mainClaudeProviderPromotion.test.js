@@ -22,6 +22,7 @@ module.exports = (async () => {
   try {
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://superapi.buzz/v1/chat/completions';
+    process.env.API_PROVIDER = 'anthropic';
     process.env.AI_MODEL = 'claude-opus-4-6';
     process.env.MODEL_HTTP_USER_AGENT = 'codex-test-agent';
     clearProjectCache();
@@ -53,6 +54,18 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'tool_choice'));
     assert.strictEqual(prepared.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestHeaders || {}, 'Authorization'));
+
+    clearProjectCache();
+    process.env.API_PROVIDER = '';
+    const { buildMainModelRequest: buildChatMainModelRequest } = require('../api/runtimeV2/model/shared');
+    const chatRequest = buildChatMainModelRequest(null, {
+      messages: [{ role: 'user', content: 'hello' }],
+      stream: false,
+      defaultMaxTokens: 200
+    });
+    assert.strictEqual(chatRequest.provider, 'openai_compatible');
+    assert.strictEqual(chatRequest.url, 'https://superapi.buzz/v1/chat/completions');
+    assert.strictEqual(chatRequest.body.__requestHeaders.Authorization, 'Bearer main-key');
 
     console.log('mainClaudeProviderPromotion.test.js passed');
   } finally {

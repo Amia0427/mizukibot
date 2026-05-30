@@ -1,6 +1,6 @@
 # Main Reply Context
 
-更新时间：2026-05-27 01:18 +08:00
+更新时间：2026-05-31 00:47 +08:00
 
 ## 已调整
 
@@ -20,6 +20,7 @@
 - 2026-05-21 21:38 +08:00：`prepare` 软超时 fallback 会同步补 `retrieved_memory_lite`、`daily_journal`、`short_term_continuity`、planner 已选择的 `memos_recall` 和摘要块；主模型调用日志新增 `prompt_integrity` 摘要。
 - 2026-05-21 22:02 +08:00：八个目标已落地：`short_term_continuity` 观测新增 token/raw/summary/trim；普通聊天、长任务、记忆追问、管理员私聊使用不同 context profile；raw turns 会按引用、承诺、未闭环、纠错和信息量保留；session summary 关键字段有独立数量/字符配置；`diag:continuity -- prompt --user <id>` 可输出实际短期块；bridge 过 48h 只恢复结构化摘要；新增主回复失忆 eval；Web 面板新增只读上下文预览。
 - 2026-05-23 23:45 +08:00：主回复请求默认使用 Claude `/v1/messages` 协议，稳定 system/tool 前缀使用 Anthropic `cache_control` 断点；主回复不再使用 OpenAI `prompt_cache_key/prompt_cache_retention`。
+- 2026-05-31 00:47 +08:00：主回复 provider 改为可配置和按 URL 推断：显式 `API_PROVIDER/ADMIN_API_PROVIDER` 优先，URL 以 `/messages` 结尾才默认 Anthropic，否则保持 OpenAI-compatible。superapi 管理员主模型 `/v1/messages` 已出现 `invalid_grant`、HTTP 429 和非流式配额异常，管理员主回复改走 `/v1/chat/completions`。
 - 2026-05-24 08:35 +08:00：Anthropic 缓存断点适配官方 automatic prompt caching：可用时追加顶层 `cache_control`，显式断点总量按 `tools -> system -> messages` 保持在 4 个以内；如果兼容网关拒绝顶层 automatic，会先去掉顶层字段并保留稳定 system/tool 断点重试。
 - 2026-05-24 17:23 +08:00：Anthropic 图片输入新增 `ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS`，默认 `120000`；cached 图片超过内联预算时不再转 base64，优先发送安全原始 URL，否则注入文本占位，避免图片路由把 base64 字符串计成 10 万级输入 token。
 - 2026-05-24 22:22 +08:00：Anthropic 超大 cached 图片优先用 `sharp` 压缩为小 JPEG 内联，最大边长由 `ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE` 控制，转后仍必须低于 `ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS`；QQ 临时图不再回退裸 URL，避免网关取不到图导致“看不清”。

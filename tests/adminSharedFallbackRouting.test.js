@@ -21,18 +21,22 @@ try {
   const snapshot = { ...process.env };
   process.env.API_KEY = 'main-key';
   process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
+  process.env.API_PROVIDER = 'openai_compatible';
   process.env.AI_MODEL = 'main-model';
   process.env.AI_FALLBACK_ENABLED = 'true';
   process.env.AI_FALLBACK_MODEL = 'main-fallback-model';
   process.env.AI_FALLBACK_API_BASE_URL = 'https://main-fallback.example/v1/chat/completions';
+  process.env.AI_FALLBACK_PROVIDER = 'openai_compatible';
   process.env.AI_FALLBACK_API_KEY = 'main-fallback-key';
   process.env.ADMIN_USER_IDS = 'admin-1';
   process.env.ADMIN_API_BASE_URL = 'https://admin.example/v1/chat/completions';
+  process.env.ADMIN_API_PROVIDER = 'openai_compatible';
   process.env.ADMIN_API_KEY = 'admin-key';
   process.env.ADMIN_AI_MODEL = 'admin-model';
   process.env.ADMIN_AI_FALLBACK_ENABLED = 'true';
   process.env.ADMIN_AI_FALLBACK_MODEL = 'admin-fallback-model';
   process.env.ADMIN_AI_FALLBACK_API_BASE_URL = 'https://admin-fallback.example/v1/chat/completions';
+  process.env.ADMIN_AI_FALLBACK_PROVIDER = 'openai_compatible';
   process.env.ADMIN_AI_FALLBACK_API_KEY = 'admin-fallback-key';
 
   clearProjectCache();
@@ -53,12 +57,14 @@ try {
 
   let adminConfig = mainModelConfigResolver.resolveUserScopedMainModelConfig('admin-1', null, {});
   assert.strictEqual(adminConfig.model, 'admin-model');
+  assert.strictEqual(adminConfig.provider, 'openai_compatible');
   assert.strictEqual(adminConfig.apiBaseUrl, 'https://admin.example/v1/chat/completions');
   assert.strictEqual(adminConfig.apiKey, 'admin-key');
   assert.strictEqual(adminConfig.__mainFallbackActive, false);
   assert.strictEqual(adminConfig.__mainFallbackScope, ADMIN_SHARED_FALLBACK_SCOPE);
   assert.strictEqual(adminConfig.__mainModelUserRole, 'admin');
   assert.strictEqual(adminConfig.__mainModelSource, 'ADMIN_AI_MODEL');
+  assert.strictEqual(adminConfig.__mainProviderSource, 'ADMIN_API_PROVIDER');
   assert.strictEqual(adminConfig.__adminDedicatedModelConfigured, true);
 
   const adminError = (status, message) => ({
@@ -79,16 +85,20 @@ try {
 
   adminConfig = mainModelConfigResolver.resolveUserScopedMainModelConfig('admin-1', null, {});
   assert.strictEqual(adminConfig.model, 'admin-fallback-model');
+  assert.strictEqual(adminConfig.provider, 'openai_compatible');
   assert.strictEqual(adminConfig.apiBaseUrl, 'https://admin-fallback.example/v1/chat/completions');
   assert.strictEqual(adminConfig.apiKey, 'admin-fallback-key');
   assert.strictEqual(adminConfig.__mainFallbackActive, true);
   assert.strictEqual(adminConfig.__mainFallbackScope, ADMIN_SHARED_FALLBACK_SCOPE);
+  assert.strictEqual(adminConfig.__mainProviderSource, 'admin_shared.fallbackProvider');
 
   const normalConfig = mainModelConfigResolver.resolveUserScopedMainModelConfig('user-1', null, {});
   assert.strictEqual(normalConfig.model, 'main-model');
+  assert.strictEqual(normalConfig.provider, 'openai_compatible');
   assert.strictEqual(normalConfig.__mainFallbackScope, 'default');
   assert.strictEqual(normalConfig.__mainModelUserRole, 'user');
   assert.strictEqual(normalConfig.__mainModelSource, 'AI_MODEL');
+  assert.strictEqual(normalConfig.__mainProviderSource, 'API_PROVIDER');
   assert.strictEqual(normalConfig.__adminDedicatedModelConfigured, null);
 
   console.log('adminSharedFallbackRouting.test.js passed');
