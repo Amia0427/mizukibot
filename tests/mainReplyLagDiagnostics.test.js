@@ -198,6 +198,41 @@ module.exports = (async () => {
   assert.strictEqual(traceFallbackReport.metrics.planner.p95Ms, 1200);
   assert.strictEqual(traceFallbackReport.metrics.send.p95Ms, 35);
 
+  const degradedReport = await buildMainReplyLagDiagnostic({
+    now: () => now,
+    windowMs: 30 * 60 * 1000,
+    perfEvents,
+    modelCallRows,
+    includeProvider: true,
+    config: {
+      POST_REPLY_WORKER_RSS_RECYCLE_MB: 768
+    },
+    buildRuntimeStatusDiagnostic: () => {
+      throw new Error('status unavailable');
+    },
+    buildRuntimeHotspotsDiagnostic: () => {
+      throw new Error('hotspots unavailable');
+    },
+    buildLowResourceHealthReport: () => {
+      throw new Error('low resource unavailable');
+    },
+    runProviderRequestDiagnostics: async () => {
+      throw new Error('provider unavailable');
+    }
+  });
+  assert.strictEqual(degradedReport.metrics.planner.p95Ms, 62000);
+  assert.strictEqual(degradedReport.metrics.mainModel.p95Ms, 47000);
+  assert.strictEqual(degradedReport.metrics.postReplyWorker.pressure, 'ok');
+  assert.strictEqual(degradedReport.diagnostics.runtimeStatus.overallStatus, 'error');
+  assert.strictEqual(degradedReport.diagnostics.hotspots.overallStatus, 'error');
+  assert.strictEqual(degradedReport.diagnostics.lowResource.ok, false);
+  assert.strictEqual(degradedReport.providerRequest.summary.overallStatus, 'error');
+  assert.deepStrictEqual(
+    degradedReport.diagnostics.errors.map((item) => item.component),
+    ['runtime_status', 'runtime_hotspots', 'low_resource', 'provider_request']
+  );
+  assert.ok(buildMainReplyLagDiagnosticText(degradedReport).includes('provider-request: scenarios=0 anomalies=1'));
+
   console.log('mainReplyLagDiagnostics.test.js passed');
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));
