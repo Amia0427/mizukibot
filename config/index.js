@@ -244,6 +244,7 @@ module.exports = {
   LLM_PERCEPTION_INCLUDE_GROUP_NAME: pickBool('LLM_PERCEPTION_INCLUDE_GROUP_NAME', true),
   // ===== Unified AI  =====
   API_BASE_URL: pick('API_BASE_URL', 'https://api2.gemai.cc/v1/chat/completions'),
+  API_PROVIDER: pick('API_PROVIDER', ''),
   API_KEY: pick('API_KEY', ''),
   UNIFIED_API_KEY: pick('API_KEY', ''),
   OPENAI_MAIN_API_MODE: pick('OPENAI_MAIN_API_MODE', 'auto'),
@@ -265,6 +266,7 @@ module.exports = {
   AI_REASONING_EFFORT: pick('MAIN_MODEL_REASONING_EFFORT', pick('AI_REASONING_EFFORT', 'high')),
   // Admin chat requests can use a dedicated main model. Empty values fall back to the default AI_* config.
   ADMIN_API_BASE_URL: pick('ADMIN_API_BASE_URL', ''),
+  ADMIN_API_PROVIDER: pick('ADMIN_API_PROVIDER', ''),
   ADMIN_API_KEY: pick('ADMIN_API_KEY', ''),
   ADMIN_AI_MODEL: pick('ADMIN_AI_MODEL', ''),
   ADMIN_AI_TEMPERATURE: pickNum('ADMIN_AI_TEMPERATURE', NaN),
@@ -281,6 +283,7 @@ module.exports = {
   ADMIN_AI_FALLBACK_ENABLED: pickBool('ADMIN_AI_FALLBACK_ENABLED', false),
   ADMIN_AI_FALLBACK_MODEL: pick('ADMIN_AI_FALLBACK_MODEL', ''),
   ADMIN_AI_FALLBACK_API_BASE_URL: pick('ADMIN_AI_FALLBACK_API_BASE_URL', pick('ADMIN_AI_FALLBACK_API_BASEURI', '')),
+  ADMIN_AI_FALLBACK_PROVIDER: pick('ADMIN_AI_FALLBACK_PROVIDER', ''),
   ADMIN_AI_FALLBACK_API_KEY: pick('ADMIN_AI_FALLBACK_API_KEY', pick('ADMIN_AI_FALLBACK_APIKEY', '')),
   ADMIN_AI_FALLBACK_FAILURE_THRESHOLD: pickNum('ADMIN_AI_FALLBACK_FAILURE_THRESHOLD', 3),
   ADMIN_AI_FALLBACK_COOLDOWN_MS: pickNum('ADMIN_AI_FALLBACK_COOLDOWN_MS', 900000),
@@ -304,6 +307,7 @@ module.exports = {
   CREATE_AGENT_OUTPUT_DIR: pick('CREATE_AGENT_OUTPUT_DIR', path.join(DATA_DIR, 'create-agent', 'output')),
   AI_FALLBACK_ENABLED: pickBool('AI_FALLBACK_ENABLED', false),
   AI_FALLBACK_MODEL: pick('AI_FALLBACK_MODEL', ''),
+  AI_FALLBACK_PROVIDER: pick('AI_FALLBACK_PROVIDER', ''),
   // Optional dedicated endpoint/key for the degraded backup model. Empty = follow main AI config.
   AI_FALLBACK_API_BASE_URL: pick('AI_FALLBACK_API_BASE_URL', pick('AI_FALLBACK_API_BASEURI', '')),
   AI_FALLBACK_API_KEY: pick('AI_FALLBACK_API_KEY', pick('AI_FALLBACK_APIKEY', '')),
