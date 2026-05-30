@@ -25,12 +25,6 @@ function parseAdminCommand(cleanText = '') {
   const t = String(cleanText || '').trim();
   if (!t.startsWith(ADMIN_PREFIX)) return null;
 
-  if (/^\/full(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/full/i, 'full');
-  if (/^\/claude(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/claude/i, 'claude');
-  if (/^\/claude-open(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/claude-open/i, 'claude-open');
-  if (/^\/claude-send(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/claude-send/i, 'claude-send');
-  if (/^\/claude-tail(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/claude-tail/i, 'claude-tail');
-  if (/^\/claude-stop(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/claude-stop/i, 'claude-stop');
   if (/^\/create(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/create/i, 'create');
 
   if (/^\/meme(?:\s|$)/i.test(t)) {
@@ -42,7 +36,6 @@ function parseAdminCommand(cleanText = '') {
   if (/^\/schedule_list(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/schedule_list/i, 'schedule_list');
   if (/^\/schedule_cancel(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/schedule_cancel/i, 'schedule_cancel');
   if (/^\/schedule_delete(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/schedule_delete/i, 'schedule_delete');
-  if (/^\/hapi(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/hapi/i, 'hapi', true);
   if (/^\/memoryops(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/memoryops/i, 'memoryops', true);
   if (/^\/check(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/check/i, 'check', true);
   if (/^\/群总结(?:\s|$)/i.test(t)) return parsePayloadCommand(t, /^\/群总结/i, 'group_summary', true);
@@ -97,7 +90,7 @@ function parseAdminCommand(cleanText = '') {
   const parts = t.slice(ADMIN_PREFIX.length).trim().split(/\s+/);
   const cmd = (parts[0] || '').toLowerCase();
   const args = parts.slice(1);
-  const supported = new Set(['debug', 'status', 'reload', 'help', 'hapi', 'memoryops', 'check']);
+  const supported = new Set(['debug', 'status', 'reload', 'help', 'memoryops', 'check']);
 
   if (!supported.has(cmd)) return { cmd: 'unknown', args, raw: t };
   return { cmd, args, raw: t };

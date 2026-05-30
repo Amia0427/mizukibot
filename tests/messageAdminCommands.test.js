@@ -25,12 +25,7 @@ const coordinator = createMessageAdminCoordinator({
   clearGroupMute: () => { cleared = true; },
   setGroupMute: (_groupId, payload) => { muted = payload; },
   scheduleGroupMessage: async (message, when) => ({ ok: true, kind: 'message', message, when }),
-  createScheduledCommand: async (action, when, payload) => ({ ok: true, kind: 'command', action, when, payload }),
-  hapiControlRuntime: {
-    listSessions: () => [{ session_id: 'sess_1', machine_id: 'claude-local', status: 'running' }],
-    listApprovals: () => [{ id: 'appr_1', summary: 'need permission' }],
-    getApproval: () => null
-  }
+  createScheduledCommand: async (action, when, payload) => ({ ok: true, kind: 'command', action, when, payload })
 });
 
 module.exports = (async () => {
@@ -65,13 +60,7 @@ module.exports = (async () => {
   assert.strictEqual(schedule.ok, true);
   assert.strictEqual(schedule.kind, 'message');
 
-  const hapiStatus = await coordinator.handleHapiAdminCommand({
-    rawText: '/hapi status',
-    groupId: 'g1',
-    userId: 'admin_1'
-  });
-  assert.strictEqual(hapiStatus.handled, true);
-  assert.ok(String(hapiStatus.replyText).includes('sess_1'));
+  assert.strictEqual(coordinator.handleHapiAdminCommand, undefined);
 
   const restart = await coordinator.handleRestartAdminCommand({
     rawText: '/restart',

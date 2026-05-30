@@ -21,8 +21,7 @@ function createBaseDeps(overrides = {}) {
   const backgroundCallsSeen = [];
   const deps = {
     config: {
-      BACKGROUND_TOOL_TASKS_ENABLED: false,
-      SUBAGENT_BACKEND: 'command'
+      BACKGROUND_TOOL_TASKS_ENABLED: false
     },
     routeResolver: async () => null,
     routeExecution: {},
@@ -36,13 +35,11 @@ function createBaseDeps(overrides = {}) {
       toolOptionsSeen.push({ ...(options || {}) });
       return 'tool reply';
     },
-    askToolTaskWithSubagentReview: async () => 'subagent reply',
     runBackgroundToolTask: async (payload) => {
       backgroundCallsSeen.push(payload);
       return { backgroundHandled: false, reply: 'background reply' };
     },
     handleAdminCommand: async () => ({ handled: false }),
-    handleHapiAdminCommand: async () => ({ handled: false }),
     handleQqScheduleAdminCommand: async () => ({ handled: false }),
     detectQzonePostDraftMode: () => 'manual',
     generateBotDiaryDraft: async () => ({ ok: false, reason: 'skip' }),
@@ -78,7 +75,6 @@ function createBaseDeps(overrides = {}) {
     saveData: () => {},
     recordMemoryScope: () => {},
     buildToolGuidancePrompt: () => 'tool',
-    buildBridgeGuidancePrompt: () => 'bridge',
     buildStreamingSegmentationPrompt: () => 'stream',
     buildQqRichReplyPrompt: () => 'qq',
     shouldPreferQqRichReply: () => false,
@@ -97,7 +93,6 @@ function createBaseDeps(overrides = {}) {
     buildSubagentContextSummary: () => '',
     buildRoutePromptBundle: () => ({
       toolGuidancePrompt: 'tool',
-      bridgeGuidancePrompt: 'bridge',
       streamingSegmentationPrompt: 'stream',
       qqRichReplyPrompt: 'qq',
       disableStreamForReply: false

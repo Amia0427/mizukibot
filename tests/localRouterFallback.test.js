@@ -57,6 +57,7 @@ function restoreEnv(snapshot = {}) {
     });
     assert.strictEqual(nonAdminFullRoute.topRouteType, 'admin');
     assert.strictEqual(nonAdminFullRoute.meta.admin, false);
+    assert.strictEqual(nonAdminFullRoute.meta.command.cmd, 'unknown');
     assert.strictEqual(nonAdminFullRoute.meta.userRole, 'user');
     assert.strictEqual(nonAdminFullRoute.meta.localRuleId, 'admin-command');
 
@@ -68,6 +69,7 @@ function restoreEnv(snapshot = {}) {
     });
     assert.strictEqual(adminClaudeRoute.topRouteType, 'admin');
     assert.strictEqual(adminClaudeRoute.meta.admin, true);
+    assert.strictEqual(adminClaudeRoute.meta.command.cmd, 'unknown');
     assert.strictEqual(adminClaudeRoute.meta.userRole, 'admin');
 
     const harmfulRoute = router.detectIntent({

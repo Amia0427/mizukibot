@@ -353,7 +353,7 @@ NapCat / OneBot WebSocket
   -> core/messageRouteFlow/index.js
   -> api/runtimeV2/host/index.js
   -> api/runtimeV2/nodes/*
-  -> 工具 / 记忆 / 子代理 / 本地知识
+  -> 工具 / 记忆 / 本地知识
   -> 回复润色
   -> 持久化 / 后台任务
 ```
@@ -372,7 +372,6 @@ NapCat / OneBot WebSocket
 - `admin`
 - `direct`
 - `background_direct`
-- `full_subagent`
 
 LangGraph V2 主图：
 
@@ -452,13 +451,14 @@ Prompt 和人格：
 - `utils/postReplyWorkerRuntime.js`
 - `utils/postReplyJobQueue/index.js`
 
-子代理和生图：
+生图和内部代理能力：
 
-- `core/messageFullSubagent.js`
-- `api/subagentExecutor.js`
-- `api/openclawExecutor.js`
 - `api/createAgentExecutor/index.js`
 - `api/createAgent/`
+
+外部子 agent 链路：
+
+- 2026-05-30 +08:00：已移除 OpenClaw / Claude CLI / HAPI 外部子 agent 的 `/` 指令激活和运行期唤起链路。
 
 ## 排障顺序
 

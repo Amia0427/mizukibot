@@ -61,19 +61,6 @@ function Run-Command($command, $args, $cwd, $timeoutMs, $envMap) {
   }
 }
 
-function Build-HapiEnv() {
-  $envMap = @{
-    HAPI_HOME = 'D:\waifu\data\hapi-home'
-    HAPI_API_URL = 'http://127.0.0.1:3006'
-  }
-  if ($env:CLI_API_TOKEN) {
-    $envMap.CLI_API_TOKEN = $env:CLI_API_TOKEN
-  } elseif ($env:HAPI_CLI_API_TOKEN) {
-    $envMap.CLI_API_TOKEN = $env:HAPI_CLI_API_TOKEN
-  }
-  return $envMap
-}
-
 while ($listener.IsListening) {
   try {
     $context = $listener.GetContext()
@@ -133,27 +120,8 @@ while ($listener.IsListening) {
     }
 
     if ($request.HttpMethod -eq 'POST' -and $request.Url.AbsolutePath -eq '/mcp/call') {
-      $payload = Read-Body $request | ConvertFrom-Json
-      $serverName = [string]$payload.serverName
-      $toolName = [string]$payload.toolName
-      $argsObj = if ($payload.args) { $payload.args | ConvertTo-Json -Compress -Depth 8 } else { '{}' }
-      $cmd = 'C:\Users\Administrator\AppData\Roaming\npm\hapi.cmd'
-      $cmdArgs = @('hub', '--help')
-      $run = Run-Command $cmd $cmdArgs 'D:\waifu' 30000 (Build-HapiEnv)
-      if ($run.ok) {
-        Write-Json $response 200 @{
-          ok = $true
-          safeArgs = $payload.args
-          result = @{
-            text = "MCP bridge placeholder for ${serverName}/${toolName}. HAPI reachable; dedicated MCP command binding still needs implementation."
-          }
-        }
-      } else {
-        Write-Json $response 500 @{
-          ok = $false
-          error = $run.stderr
-        }
-      }
+      [void](Read-Body $request)
+      Write-Json $response 410 @{ ok = $false; error = 'external_mcp_bridge_removed' }
       continue
     }
 

@@ -1,11 +1,4 @@
 const { buildRuntimePrompt } = require('../utils/runtimePrompts');
-const {
-  buildSubagentStyleGuardInstruction,
-  buildSubagentExecutionGuidanceLine,
-  buildSubagentExecutionPlanLines,
-  buildSubagentToolReasonLine
-} = require('../utils/subagentPrompting');
-
 function getRouteDisplayType(route = {}, routeExecutionPlan = {}) {
   return String(
     routeExecutionPlan?.policyKey
@@ -28,26 +21,6 @@ function buildToolGuidancePrompt(route = {}) {
   return buildRuntimePrompt('tool-guidance', {
     routeKey,
     toolHints: toolHints.join(', '),
-    reasonLine: reason ? `路由原因: ${reason}` : ''
-  });
-}
-
-function buildBridgeGuidancePrompt(route = {}, backend = 'command', routeExecutionPlan = {}) {
-  const routeKey = getRouteDisplayType(route, routeExecutionPlan);
-  const routeDescription = String(routeKey || '').trim();
-  const reason = String(route?.meta?.reason || '').trim();
-  const toolLine = buildSubagentToolReasonLine(route, backend);
-  const executionLine = buildSubagentExecutionGuidanceLine(route, backend, routeExecutionPlan);
-  const executionPlanLines = buildSubagentExecutionPlanLines(routeExecutionPlan, backend);
-  const styleGuardLine = buildSubagentStyleGuardInstruction();
-  return buildRuntimePrompt('bridge-guidance', {
-    routeKey,
-    routeDescription,
-    planId: 'none',
-    styleGuardLine,
-    toolLine,
-    executionLine,
-    executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',
     reasonLine: reason ? `路由原因: ${reason}` : ''
   });
 }
@@ -77,7 +50,6 @@ function buildSafetyBoundaryRoutePrompt(route = {}) {
 }
 
 module.exports = {
-  buildBridgeGuidancePrompt,
   buildQqRichReplyPrompt,
   buildSafetyBoundaryRoutePrompt,
   buildStreamingSegmentationPrompt,

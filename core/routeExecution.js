@@ -21,8 +21,7 @@ const EXECUTORS = Object.freeze([
   'refuse',
   'admin',
   'direct',
-  'background_direct',
-  'full_subagent'
+  'background_direct'
 ]);
 
 function getToolPlanner(route = {}) {
@@ -40,7 +39,7 @@ function getCapabilityForExecutor(executor = 'direct') {
   const normalized = String(executor || '').trim();
   if (normalized === 'ignore') return 'ignore';
   if (normalized === 'refuse') return 'refuse';
-  if (normalized === 'admin' || normalized === 'full_subagent') return 'admin';
+  if (normalized === 'admin') return 'admin';
   return 'direct';
 }
 
@@ -52,7 +51,6 @@ function buildRouteDebugKey(route = {}) {
   if (contract.topRouteType === 'refuse') return 'refuse/default';
   if (contract.topRouteType === 'admin') {
     if (command) {
-      if (command === 'full' && route?.meta?.admin !== true) return 'admin/unauthorized';
       return `admin/${command}`;
     }
     return 'admin/default';
@@ -78,7 +76,6 @@ function resolvePolicyKey(route = {}) {
   if (contract.topRouteType === 'ignore') return 'ignore/default';
   if (contract.topRouteType === 'refuse') return 'refuse/default';
   if (contract.topRouteType === 'admin') {
-    if (command === 'full') return 'admin/full';
     return 'admin/default';
   }
 
@@ -386,18 +383,6 @@ function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
         unavailableReason: 'private-group-only'
       });
     }
-    const command = String(route?.meta?.command?.cmd || '').trim().toLowerCase();
-    if (command === 'full' && route?.meta?.admin === true) {
-      return withRouteTrace(route, {
-        ...base,
-        executor: 'full_subagent',
-        policyKey: 'admin/full',
-        routeDebugKey: 'admin/full',
-        allowStream: false,
-        needsBackground: true
-      });
-    }
-
     return withRouteTrace(route, {
       ...base,
       executor: 'admin',
@@ -422,9 +407,7 @@ function shouldUseToolRoute(route = {}) {
 }
 
 function shouldUseSubagentToolRoute(route = {}) {
-  return sanitizeTopRouteType(route?.topRouteType || '') === 'admin'
-    && String(route?.meta?.command?.cmd || '').trim().toLowerCase() === 'full'
-    && route?.meta?.admin === true;
+  return false;
 }
 
 function getPolicyDefinition(policyKey = '') {

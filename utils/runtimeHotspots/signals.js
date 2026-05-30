@@ -76,12 +76,6 @@ function analyzeResourceSignals({
   if (normalizeNumber(postReplyQueue.processing, 0) > 0 && postReplyWorkerActive.max === 0) {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_processing_without_active_worker', 'post-reply queue has processing jobs but no active worker sample was seen');
   }
-  if (normalizeNumber(runtimeStatus?.summary?.activeSubagentProcesses, 0) > normalizeNumber(runtimeStatus?.components?.subagents?.maxConcurrency, 1) * 2) {
-    addSignal(signals, 'warning', 'subagents', 'subagent_process_count_high', 'subagent process count is much higher than configured concurrency', {
-      processCount: normalizeNumber(runtimeStatus?.summary?.activeSubagentProcesses, 0),
-      maxConcurrency: normalizeNumber(runtimeStatus?.components?.subagents?.maxConcurrency, 1)
-    });
-  }
   if (modules.backgroundPressure.count > 0) {
     addSignal(signals, 'warning', 'modules', 'background_pressure_deferred', 'background modules were deferred because of resource pressure', {
       count: modules.backgroundPressure.count,
@@ -91,8 +85,7 @@ function analyzeResourceSignals({
 
   for (const [component, summary] of Object.entries({
     mainProcess: processResources?.main,
-    postReplyWorker: processResources?.postReplyWorker,
-    subagents: processResources?.subagents
+    postReplyWorker: processResources?.postReplyWorker
   })) {
     if (normalizeNumber(summary?.rssMb?.max, 0) >= thresholds.rssMb) {
       addSignal(signals, 'warning', component, 'process_rss_high', 'OS process RSS exceeded configured threshold', {

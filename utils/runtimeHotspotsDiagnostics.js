@@ -92,7 +92,6 @@ function buildRuntimeHotspotsDiagnostic(options = {}) {
       activeTimers: Math.round(normalizeNumber(resources.activeTimers.max, 0)),
       activeIntervals: Math.round(normalizeNumber(resources.activeIntervals.max, 0)),
       postReplyWorker: runtime.postReplyWorker,
-      subagents: runtime.subagents,
       memoryBackfill: {
         processCount: processes.memoryBackfill.processCount,
         rssMb: processes.memoryBackfill.rssMb
@@ -103,8 +102,7 @@ function buildRuntimeHotspotsDiagnostic(options = {}) {
       },
       processRssMb: {
         mainMax: processes.main.rssMb.max,
-        postReplyMax: processes.postReplyWorker.rssMb.max,
-        subagentMax: processes.subagents.rssMb.max
+        postReplyMax: processes.postReplyWorker.rssMb.max
       },
       topModules: modules.topModules.slice(0, 5),
       signals: signals.map((signal) => signal.code)

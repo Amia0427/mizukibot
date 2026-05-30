@@ -15,7 +15,6 @@ const { initializeMemeManager } = require('./core/memeManager');
 const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
 const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
 const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
-const { shutdownSubagentExecutor } = require('./api/subagentExecutor');
 const { getNapCatActionClient } = require('./api/napcatActionClient');
 const { getSchedulerRuntime } = require('./core/schedulerRuntime');
 const { sendGroupMessage } = require('./api/qqActionService');
@@ -318,9 +317,6 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
     console.error('[shutdown] web server close failed:', error?.message || error);
   }
 
-  try { shutdownSubagentExecutor(reason); } catch (error) {
-    console.error('[shutdown] subagent cleanup failed:', error?.message || error);
-  }
   try { clearMcpRuntimeCaches(); } catch (error) {
     console.error('[shutdown] mcp cleanup failed:', error?.message || error);
   }
@@ -368,7 +364,6 @@ function drainForScheduledRestart(meta = {}) {
     napcatActionClient.handleDisconnect('MizukiBot restart draining');
     napcatActionClient.setWebSocket(null);
   } catch (_) {}
-  try { shutdownSubagentExecutor('restart_draining'); } catch (_) {}
 }
 
 process.on('mizuki:restartScheduled', drainForScheduledRestart);

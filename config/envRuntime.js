@@ -1,5 +1,4 @@
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
 const REQUIRED_ENV_KEYS = ['API_KEY'];
@@ -39,28 +38,6 @@ function loadEnvironment(rootDir = path.resolve(__dirname, '..')) {
   } catch (_) {
     loadLocalEnvFallback(rootDir);
   }
-}
-
-function isWindows() {
-  return process.platform === 'win32';
-}
-
-function defaultSubagentCommand() {
-  return isWindows() ? 'python' : 'python3';
-}
-
-function defaultSubagentWorkdir() {
-  return isWindows() ? 'D:/subagent-workdir' : path.join(os.homedir(), 'subagent');
-}
-
-function defaultOpenclawWorkdir() {
-  return path.join(os.homedir(), '.openclaw', 'workspace');
-}
-
-function defaultSubagentArgs() {
-  // Default disabled-friendly placeholder.
-  // Replace it with the concrete child agent command line in .env before enabling.
-  return ['-c', 'print("Assistant:")', '-c', 'print("Configure SUBAGENT_ARGS before enabling SUBAGENT_ENABLED.")'];
 }
 
 function pick(key, fallback) {
@@ -173,11 +150,6 @@ function validateRequiredConfig() {
 }
 
 module.exports = {
-  defaultOpenclawWorkdir,
-  defaultSubagentArgs,
-  defaultSubagentCommand,
-  defaultSubagentWorkdir,
-  isWindows,
   loadEnvironment,
   loadLocalEnvFallback,
   pick,

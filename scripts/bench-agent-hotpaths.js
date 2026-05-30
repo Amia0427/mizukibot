@@ -1,5 +1,3 @@
-const path = require('path');
-
 function parseArgs(argv = process.argv.slice(2)) {
   const out = {
     caseName: 'all',
@@ -353,65 +351,9 @@ async function benchReadonlyTool() {
   };
 }
 
-async function benchSubagentSequentialCalls() {
-  process.env.API_KEY = process.env.API_KEY || 'bench-key';
-  process.env.SUBAGENT_COMMAND = process.execPath;
-  process.env.SUBAGENT_WORKDIR = path.join(__dirname, '..');
-  process.env.SUBAGENT_ARGS = JSON.stringify([
-    path.join(__dirname, '..', 'tests', 'fixtures', 'subagent-cli-stub.js'),
-    '--session',
-    '{sessionId}',
-    '--message',
-    '{message}'
-  ]);
-  process.env.SUBAGENT_COMMAND_MODE = 'persistent';
-  process.env.SUBAGENT_WORKER_IDLE_TTL_MS = '1000';
-  process.env.SUBAGENT_WORKER_MAX_REUSE = '100';
-  process.env.SUBAGENT_TIMEOUT_MS = '2000';
-
-  clearRequireCache([
-    '../config',
-    '../api/subagentBackends/commandBackend'
-  ]);
-  const backend = require('../api/subagentBackends/commandBackend');
-  backend.resetPersistentWorkerState();
-
-  const run = async (text) => {
-    const call = backend.createCommandBridgeCall({
-      question: text,
-      sessionId: 'bench-session',
-      options: {}
-    });
-    return call.promise;
-  };
-
-  try {
-    const cold = await timeRun(() => run('subagent first'));
-    const warm = [];
-    for (let i = 0; i < 12; i += 1) {
-      warm.push(await timeRun(() => run(`subagent warm ${i}`)));
-    }
-    const snapshot = backend.getPersistentWorkerSnapshot();
-    return {
-      coldMs: cold,
-      warm: summarize(warm),
-      activeWorkers: snapshot.length,
-      reuseCount: snapshot[0]?.reuseCount || 0
-    };
-  } catch (error) {
-    return {
-      skipped: true,
-      reason: String(error?.message || error || 'subagent benchmark failed')
-    };
-  } finally {
-    backend.resetPersistentWorkerState();
-  }
-}
-
 const BENCH_CASES = {
   direct_chat_no_tool: benchDirectReplyNoTool,
-  direct_chat_one_readonly_tool: benchReadonlyTool,
-  subagent_sequential_calls: benchSubagentSequentialCalls
+  direct_chat_one_readonly_tool: benchReadonlyTool
 };
 
 async function runBenchCase(name, fn, timeoutMs) {

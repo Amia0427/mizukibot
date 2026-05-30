@@ -2,7 +2,7 @@
   "name": "mizukibot",
   "version": "1.0.0",
   "private": true,
-  "description": "MizukiBot Linux migration pack with LangGraph, local tools, and pluggable subagent bridge",
+  "description": "MizukiBot Linux migration pack with LangGraph and local tools",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {

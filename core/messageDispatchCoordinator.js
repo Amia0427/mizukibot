@@ -12,7 +12,6 @@ function createMessageDispatchCoordinator(deps = {}) {
     buildRoutePromptBundle,
     getStreamMaxSegments,
     buildToolGuidancePrompt,
-    buildBridgeGuidancePrompt,
     buildStreamingSegmentationPrompt,
     shouldPreferQqRichReply,
     buildQqRichReplyPrompt,
@@ -76,16 +75,12 @@ function createMessageDispatchCoordinator(deps = {}) {
       cleanText,
       maxStreamSegments: getStreamMaxSegments(config),
       buildToolGuidancePrompt,
-      buildBridgeGuidancePrompt: routeExecutionPlan?.executor === 'full_subagent'
-        ? (currentRoute) => buildBridgeGuidancePrompt(currentRoute, config.SUBAGENT_BACKEND || 'command', routeExecutionPlan)
-        : null,
       buildStreamingSegmentationPrompt,
       shouldPreferQqRichReply,
       buildQqRichReplyPrompt
     });
     const {
       toolGuidancePrompt,
-      bridgeGuidancePrompt,
       streamingSegmentationPrompt,
       qqRichReplyPrompt,
       disableStreamForReply
@@ -113,7 +108,7 @@ function createMessageDispatchCoordinator(deps = {}) {
         reply = buildUnavailableRouteReply(route, routeExecutionPlan);
       } else if (routeExecutionPlan.allowTools || routeExecutionPlan.executor === 'background_direct') {
         const toolTaskOptions = {
-          routePrompt: [toolGuidancePrompt, bridgeGuidancePrompt, perceptionPrompt].filter(Boolean).join('\n\n') || null,
+          routePrompt: [toolGuidancePrompt, perceptionPrompt].filter(Boolean).join('\n\n') || null,
           sessionChannel: 'qq-group',
           sessionChatId: `group_${groupId}_user_${senderId}`,
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
@@ -222,7 +217,6 @@ function createMessageDispatchCoordinator(deps = {}) {
           streamFallbackToNonStream: false,
           routePrompt: composeDirectRoutePrompt({
             toolGuidancePrompt,
-            bridgeGuidancePrompt,
             perceptionPrompt,
             safetyBoundaryRoutePrompt,
             streamingSegmentationPrompt,

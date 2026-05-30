@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前 `.env` 有 305 个变量，303 个唯一变量；重复项仅保留 `MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE` 和 `MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN` 两组历史调优项。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；重复项已在本地 `.env` 注释中标明实际生效顺序。
+- 2026-05-30 +08:00：已移除 OpenClaw / Claude CLI / HAPI 外部子 agent 激活链路；`SUBAGENT_*`、`OPENCLAW_*` 和外部桥接专用 `HAPI_*` 不再作为支持配置项记录或读取。
 - 2026-05-30 19:40 +08:00：新增普通用户快速回复配置 `NORMAL_FAST_REPLY_ENABLED`、`NORMAL_FAST_REPLY_RECENT_TURNS`、`NORMAL_FAST_REPLY_CONTEXT_MAX_CHARS`、`NORMAL_FAST_REPLY_SUMMARY_MAX_CHARS`、`NORMAL_FAST_REPLY_MAX_TOKENS`；只影响非管理员简单纯文本 direct_chat。
 - 2026-05-29 17:43 +08:00：`HTTP_USER_AGENT`、`MAIN_REPLY_USER_AGENT`、`MODEL_HTTP_USER_AGENT` 默认统一为 `codex-cli/0.121.0 (external, cli)`；配置值不包含 `codex` 时会回落到该默认值。
 
@@ -22,7 +23,7 @@
 - Humanizer / 拒答代理 / 感知开关
 - Native Skills 本地路径
 - Minecraft 工具链
-- 子代理 / OpenClaw / HAPI
+- 内部 Router / Planner / Research 子代理
 - 被动群感知 / 跟随者日志
 - 低资源 / 后台 Worker / 并发控制
 - LangGraph / 短期上下文 / 会话摘要

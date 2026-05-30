@@ -1,6 +1,5 @@
 function composeDirectRoutePrompt({
   toolGuidancePrompt = null,
-  bridgeGuidancePrompt = null,
   perceptionPrompt = null,
   safetyBoundaryRoutePrompt = null,
   streamingSegmentationPrompt = null,
@@ -8,7 +7,6 @@ function composeDirectRoutePrompt({
 } = {}) {
   return [
     toolGuidancePrompt,
-    bridgeGuidancePrompt,
     perceptionPrompt,
     safetyBoundaryRoutePrompt,
     streamingSegmentationPrompt,

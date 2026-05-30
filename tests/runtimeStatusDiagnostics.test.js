@@ -46,9 +46,6 @@ module.exports = (() => {
     process.env.POST_REPLY_WORKER_STALE_PROCESSING_MS = '300000';
     process.env.MEMORY_V3_MATERIALIZE_LOCK_FILE = memoryLockFile;
     process.env.MEMORY_V3_MATERIALIZE_LOCK_STALE_MS = '600000';
-    process.env.SUBAGENT_ENABLED = 'true';
-    process.env.SUBAGENT_BACKEND = 'command';
-    process.env.SUBAGENT_COMMAND_MODE = 'persistent';
     process.env.API_KEY = process.env.API_KEY || 'test-key';
 
     clearProjectCache();
@@ -61,7 +58,7 @@ module.exports = (() => {
       status: 'running',
       stage: 'running',
       session_key: 'session_1',
-      executor_type: 'full_subagent',
+      executor_type: 'background_direct',
       updated_at: '2026-05-02T23:00:00.000Z',
       started_at: '2026-05-02T23:00:00.000Z',
       group_id: 'g1',
@@ -129,7 +126,7 @@ module.exports = (() => {
     const processes = [
       { pid: 111, ppid: 1, name: 'node.exe', commandLine: 'node index.js' },
       { pid: 222, ppid: 1, name: 'node.exe', commandLine: '"C:\\Program Files\\nodejs\\node.exe" scripts/post-reply-worker.js' },
-      { pid: 333, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js' }
+      { pid: 333, ppid: 222, name: 'node.exe', commandLine: 'node scripts/other-worker.js' }
     ];
     const alive = new Set([111, 222, 333]);
     const { buildRuntimeStatusDiagnostic } = require('../utils/runtimeStatusDiagnostics');
@@ -151,7 +148,6 @@ module.exports = (() => {
     assert.strictEqual(report.summary.postReplyWorker.status, 'running');
     assert.strictEqual(report.summary.postReplyWorker.pidFileMatch, true);
     assert.strictEqual(report.summary.activeBackgroundTasks, 1);
-    assert.strictEqual(report.summary.activeSubagentProcesses, 1);
     assert.strictEqual(report.summary.langGraphV2.checkpoints, 2);
     assert.strictEqual(report.summary.langGraphV2.events, 1);
     assert.strictEqual(report.summary.langGraphV2.activeCheckpoints, 1);
@@ -174,7 +170,7 @@ module.exports = (() => {
     assert.strictEqual(report.components.langGraphV2Store.countsByCheckpointStatus.completed, 1);
     assert.strictEqual(report.components.langGraphV2Store.staleRunningCheckpoints[0].threadId, 'thread_stale');
     assert.strictEqual(report.components.langGraphV2Store.latestEventFiles[0].eventCount, 2);
-    assert.strictEqual(report.components.subagents.processes[0].pid, 333);
+    assert.strictEqual(report.components.subagents, undefined);
     assert.ok(Array.isArray(report.components.lockFiles));
     assert.ok(report.components.lockFiles.some((item) => item.name === 'memoryMaterializeLock'));
 

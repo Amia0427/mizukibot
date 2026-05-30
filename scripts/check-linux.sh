@@ -46,30 +46,6 @@ if [[ -n "${NAPCAT_TOKEN_VAL// }" ]]; then
   echo "[linux-check] NAPCAT_WS_TOKEN is configured"
 fi
 
-SUBAGENT_ENABLED_VAL="$(grep -E '^SUBAGENT_ENABLED=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- || true)"
-if [[ "${SUBAGENT_ENABLED_VAL,,}" == "true" ]]; then
-  SUBAGENT_COMMAND_VAL="$(grep -E '^SUBAGENT_COMMAND=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- || true)"
-  SUBAGENT_WORKDIR_VAL="$(grep -E '^SUBAGENT_WORKDIR=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- || true)"
-  SUBAGENT_ARGS_VAL="$(grep -E '^SUBAGENT_ARGS=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- || true)"
-
-  if [[ -z "${SUBAGENT_COMMAND_VAL// }" ]]; then
-    echo "[linux-check] FAIL: SUBAGENT_ENABLED=true but SUBAGENT_COMMAND is empty"
-    exit 1
-  fi
-
-  if [[ -z "${SUBAGENT_WORKDIR_VAL// }" ]]; then
-    echo "[linux-check] FAIL: SUBAGENT_ENABLED=true but SUBAGENT_WORKDIR is empty"
-    exit 1
-  fi
-
-  if [[ -z "${SUBAGENT_ARGS_VAL// }" ]]; then
-    echo "[linux-check] FAIL: SUBAGENT_ENABLED=true but SUBAGENT_ARGS is empty"
-    exit 1
-  fi
-
-  echo "[linux-check] SUBAGENT bridge is enabled"
-fi
-
 cd "$ROOT_DIR"
 
 node -c config/index.js

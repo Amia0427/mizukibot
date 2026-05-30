@@ -13,32 +13,17 @@ const {
 } = require('../utils/memory');
 const { recordMemoryScope } = require('../utils/memoryScopeIndex');
 const { extractJsonSafely } = require('../api/parser');
-const {
-  startSubagentBridgeCall
-} = require('../api/subagentExecutor');
-const { buildSessionId } = require('../api/subagentSessionManager');
 const { humanizeReply } = require('../utils/humanizer');
 const { classifyReplyFailure, isReplyFailure } = require('../utils/replyFailure');
 const { sanitizeUserFacingText } = require('../utils/userFacingText');
 const { buildRoutePromptBundle } = require('../utils/routePromptPolicy');
 const { buildRuntimePrompt } = require('../utils/runtimePrompts');
 const { getBackgroundTaskRuntime, summarizeReply: summarizeBackgroundReply } = require('../utils/backgroundTaskRuntime');
-const { getHapiControlRuntime } = require('../utils/hapiControlRuntime');
 const {
   buildToolReplyFormatInstruction,
   cleanToolReplyText,
   resolveToolReplyFormattingPreferences
 } = require('../utils/toolReplyFormatting');
-const {
-  buildSubagentStyleGuardInstruction,
-  buildSubagentExecutionGuidanceLine,
-  buildSubagentExecutionPlanLines,
-  buildSubagentToolReasonLine
-} = require('../utils/subagentPrompting');
-const {
-  prepareSubagentFallbackReply,
-  prepareSubagentOutputForReview
-} = require('../utils/subagentStyleGuard');
 const { isAtBot, detectIntentHybrid } = require('./router');
 const routeExecution = require('./routeExecution');
 const { buildRouteMetaEnvelope } = require('./executablePlan');
@@ -72,10 +57,7 @@ const { runPassiveFlow } = require('./messagePassiveFlow');
 const { createMessageReplyRuntime } = require('./messageReplyRuntime');
 const { createMessageSideEffects } = require('./messageSideEffects');
 const { createMessageRouteFlow } = require('./messageRouteFlow');
-const {
-  createDefaultHapiControlClientFactory,
-  createMessageAdminCoordinator
-} = require('./messageAdminCommands');
+const { createMessageAdminCoordinator } = require('./messageAdminCommands');
 const { createMessageBackgroundTaskCoordinator } = require('./messageBackgroundTasks');
 const { createMessageDispatchCoordinator } = require('./messageDispatchCoordinator');
 const { createMessageTaskControlCoordinator } = require('./messageTaskControl');
@@ -98,7 +80,6 @@ const {
 const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
 const { triggerRemoteRestart } = require('../utils/remoteRestart');
 const {
-  buildBridgeGuidancePrompt: buildBridgeGuidancePromptOwner,
   buildQqRichReplyPrompt: buildQqRichReplyPromptOwner,
   buildSafetyBoundaryRoutePrompt: buildSafetyBoundaryRoutePromptOwner,
   buildStreamingSegmentationPrompt: buildStreamingSegmentationPromptOwner,
@@ -172,10 +153,6 @@ function runPersistInBackgroundFromCheckpoint(...args) {
   return require('../api/agentGraph').runPersistInBackgroundFromCheckpoint(...args);
 }
 
-function getMessageFullSubagentModule() {
-  return require('./messageFullSubagent');
-}
-
 function getMemeManagerModule() {
   return require('./memeManager');
 }
@@ -206,42 +183,6 @@ function generateGenericQzoneDraft(...args) {
 
 function normalizeGeneratedQzoneContent(...args) {
   return getQzoneDiaryServiceModule().normalizeGeneratedQzoneContent(...args);
-}
-
-function buildFullSubagentAllWorkersFailedReply(...args) {
-  return getMessageFullSubagentModule().buildFullSubagentAllWorkersFailedReply(...args);
-}
-
-function buildFullSubagentCoordinatorPayload(...args) {
-  return getMessageFullSubagentModule().buildFullSubagentCoordinatorPayload(...args);
-}
-
-function buildFullSubagentFallbackReply(...args) {
-  return getMessageFullSubagentModule().buildFullSubagentFallbackReply(...args);
-}
-
-function buildFullSubagentReviewPayload(...args) {
-  return getMessageFullSubagentModule().buildFullSubagentReviewPayload(...args);
-}
-
-function buildFullSubagentWorkerPrompt(...args) {
-  return getMessageFullSubagentModule().buildFullSubagentWorkerPrompt(...args);
-}
-
-function chooseBestFullSubagentWorkerOutput(...args) {
-  return getMessageFullSubagentModule().chooseBestFullSubagentWorkerOutput(...args);
-}
-
-function createMessageFullSubagentCoordinator(...args) {
-  return getMessageFullSubagentModule().createMessageFullSubagentCoordinator(...args);
-}
-
-function normalizeFullSubagentPlan(...args) {
-  return getMessageFullSubagentModule().normalizeFullSubagentPlan(...args);
-}
-
-function summarizeFullWorkerError(...args) {
-  return getMessageFullSubagentModule().summarizeFullWorkerError(...args);
 }
 
 function consumePendingUploadFromMessage(...args) {
@@ -306,11 +247,9 @@ const {
   sendGroupReply: sendSystemGroupReply
 } = require('./systemGroupReply');
 
-const shouldUseSubagentToolRoute = (...args) => routeExecution.shouldUseSubagentToolRoute(...args);
 const shouldUseToolRoute = (...args) => routeExecution.shouldUseToolRoute(...args);
 const promptComposerGetRouteDisplayType = (...args) => getRouteDisplayTypeOwner(...args);
 const promptComposerBuildToolGuidancePrompt = (...args) => buildToolGuidancePromptOwner(...args);
-const promptComposerBuildBridgeGuidancePrompt = (...args) => buildBridgeGuidancePromptOwner(...args);
 const promptComposerBuildStreamingSegmentationPrompt = (...args) => buildStreamingSegmentationPromptOwner(...args);
 const promptComposerShouldPreferQqRichReply = (...args) => shouldPreferQqRichReplyOwner(...args);
 const promptComposerBuildQqRichReplyPrompt = (...args) => buildQqRichReplyPromptOwner(...args);

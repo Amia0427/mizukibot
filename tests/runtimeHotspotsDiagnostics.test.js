@@ -45,9 +45,6 @@ module.exports = (() => {
     process.env.RUNTIME_HOTSPOT_INTERVAL_WARNING_COUNT = '3';
     process.env.POST_REPLY_WORKER_ENABLED = 'true';
     process.env.POST_REPLY_WORKER_INLINE = 'false';
-    process.env.SUBAGENT_ENABLED = 'true';
-    process.env.SUBAGENT_BACKEND = 'command';
-    process.env.SUBAGENT_MAX_CONCURRENCY = '1';
     clearProjectCache();
 
     appendJsonLine(resourceFile, {
@@ -128,36 +125,27 @@ module.exports = (() => {
       },
       listProcesses: () => [
         { pid: 111, ppid: 1, name: 'node.exe', commandLine: 'node index.js' },
-        { pid: 222, ppid: 1, name: 'node.exe', commandLine: 'node scripts/post-reply-worker.js' },
-        { pid: 333, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js' },
-        { pid: 334, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js' },
-        { pid: 335, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js' }
+        { pid: 222, ppid: 1, name: 'node.exe', commandLine: 'node scripts/post-reply-worker.js' }
       ],
       processResources: [
         { pid: 111, ppid: 1, name: 'node.exe', commandLine: 'node index.js', rss: 170 * 1024 * 1024 },
         { pid: 222, ppid: 1, name: 'node.exe', commandLine: 'node scripts/post-reply-worker.js', rss: 80 * 1024 * 1024 },
-        { pid: 333, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js', rss: 75 * 1024 * 1024 },
-        { pid: 334, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js', rss: 70 * 1024 * 1024 },
-        { pid: 335, ppid: 222, name: 'node.exe', commandLine: 'node scripts/subagent-command-worker.js', rss: 65 * 1024 * 1024 },
         { pid: 336, ppid: 111, name: 'node.exe', commandLine: 'node scripts/backfill-memory-v3-embeddings.js --source all --limit 3000', rss: 240 * 1024 * 1024 },
-        { pid: 337, ppid: 111, name: 'node.exe', commandLine: 'node scripts/local-mcp-server.js fetch', rss: 45 * 1024 * 1024 },
-        { pid: 444, ppid: 1, name: 'node.exe', commandLine: 'C:/Program Files/nodejs/node.exe C:/Users/Administrator/openclaw/node_modules/openclaw/dist/index.js gateway --port 18789', rss: 330 * 1024 * 1024 }
+        { pid: 337, ppid: 111, name: 'node.exe', commandLine: 'node scripts/local-mcp-server.js fetch', rss: 45 * 1024 * 1024 }
       ],
-      isProcessAlive: (pid) => [111, 222, 333, 334, 335].includes(Number(pid))
+      isProcessAlive: (pid) => [111, 222].includes(Number(pid))
     });
 
     assert.strictEqual(report.schemaVersion, 'runtime_hotspots_diagnostic_v1');
     assert.strictEqual(report.summary.currentPressure, 'pressured');
     assert.strictEqual(report.summary.postReplyWorker.active.max, 2);
-    assert.strictEqual(report.summary.subagents.processCount, 3);
     assert.strictEqual(report.summary.processRssMb.mainMax, 170);
-    assert.strictEqual(report.processes.subagents.rssMb.total, 210);
     assert.strictEqual(report.summary.memoryBackfill.processCount, 1);
     assert.strictEqual(report.summary.memoryBackfill.rssMb.total, 240);
     assert.strictEqual(report.summary.localMcpChildren.processCount, 1);
     assert.strictEqual(report.summary.localMcpChildren.rssMb.total, 45);
-    assert.ok(!report.processes.main.processes.some((item) => String(item.commandLine || '').includes('openclaw')));
-    assert.ok(!report.processes.subagents.processes.some((item) => String(item.commandLine || '').includes('openclaw')));
+    assert.strictEqual(report.summary.subagents, undefined);
+    assert.strictEqual(report.processes.subagents, undefined);
     assert.ok(report.summary.topModules.some((item) => item.key === 'planner' && item.count === 3));
     assert.ok(report.inputs.resourceSnapshotFile.includesCurrentProcessSample);
 
@@ -169,7 +157,6 @@ module.exports = (() => {
     assert.ok(signalCodes.includes('active_timer_count_high'));
     assert.ok(signalCodes.includes('active_interval_count_high'));
     assert.ok(signalCodes.includes('background_pressure_deferred'));
-    assert.ok(signalCodes.includes('subagent_process_count_high'));
     assert.ok(signalCodes.includes('process_rss_high'));
 
     const text = buildRuntimeHotspotsText(report);

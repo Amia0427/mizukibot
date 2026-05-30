@@ -12,16 +12,13 @@ function createMessageTaskControlCoordinator(deps = {}) {
     buildRoutePromptBundle,
     getStreamMaxSegments,
     buildToolGuidancePrompt,
-    buildBridgeGuidancePrompt,
     buildStreamingSegmentationPrompt,
     shouldPreferQqRichReply,
     buildQqRichReplyPrompt,
     getEffectivePolicyKey,
     sendGroupReply,
     runBackgroundToolTask,
-    config,
-    hapiControlRuntime = null,
-    createHapiControlClient = null
+    config
   } = deps;
 
   async function handleBackgroundTaskControl({
@@ -45,17 +42,12 @@ function createMessageTaskControlCoordinator(deps = {}) {
     });
     const session = backgroundTaskRuntime.getSessionState(sessionId);
     const activeTask = backgroundTaskRuntime.getActiveTask(sessionId);
-    const remoteSession = hapiControlRuntime?.getSession(sessionId) || null;
-    const pendingApproval = hapiControlRuntime?.findPendingApprovalBySession(sessionId) || null;
 
     if (command.type === 'status') {
       await sendGroupReply({
         groupId,
         senderId,
-        replyText: [
-          buildSessionStatusReply(session || remoteSession, activeTask),
-          pendingApproval ? `待处理权限请求：${String(pendingApproval.summary || 'remote permission request').trim()}` : ''
-        ].filter(Boolean).join('\n'),
+        replyText: buildSessionStatusReply(session, activeTask),
         atSender: true,
         retries: 1,
         waitMs: 300
@@ -89,144 +81,6 @@ function createMessageTaskControlCoordinator(deps = {}) {
         retries: 1,
         waitMs: 300
       });
-      return true;
-    }
-
-    if (command.type === 'approve' || command.type === 'deny') {
-      const approvalId = String(command.payload || '').trim();
-      const approval = approvalId
-        ? hapiControlRuntime?.getApproval(approvalId)
-        : pendingApproval;
-      if (!approval || !createHapiControlClient) {
-        await sendGroupReply({
-          groupId,
-          senderId,
-          replyText: '当前没有待处理的远程权限请求。',
-          atSender: true,
-          retries: 1,
-          waitMs: 300
-        });
-        return true;
-      }
-
-      try {
-        const client = createHapiControlClient();
-        const resolution = command.type === 'approve' ? 'approve' : 'deny';
-        const action = resolution === 'approve' ? 'approve' : 'deny';
-        const requestId = String(approval.request_id || approval.id || '').trim();
-        await client.post(
-          `/api/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(requestId)}/${action}`,
-          {
-            note: resolution === 'approve' ? 'approved from QQ control' : 'denied from QQ control'
-          }
-        );
-        hapiControlRuntime.resolveApproval(String(approval.id || '').trim(), resolution, `resolved by ${senderId}`);
-        await sendGroupReply({
-          groupId,
-          senderId,
-          replyText: resolution === 'approve' ? '已批准远程权限请求。' : '已拒绝远程权限请求。',
-          atSender: true,
-          retries: 1,
-          waitMs: 300
-        });
-      } catch (error) {
-        await sendGroupReply({
-          groupId,
-          senderId,
-          replyText: `远程权限处理失败：${String(error?.message || error || 'unknown error').trim()}`,
-          atSender: true,
-          retries: 1,
-          waitMs: 300
-        });
-      }
-      return true;
-    }
-
-    if (command.type === 'switch_agent') {
-      const machineId = String(command.payload || '').trim();
-      if (!machineId || !createHapiControlClient) {
-        await sendGroupReply({
-          groupId,
-          senderId,
-          replyText: '请发送“切 agent codex-local”或“切 agent claude-local”。',
-          atSender: true,
-          retries: 1,
-          waitMs: 300
-        });
-        return true;
-      }
-
-      try {
-        const client = createHapiControlClient();
-        await client.post(`/api/sessions/${encodeURIComponent(sessionId)}/switch`, {
-          machineId
-        });
-        hapiControlRuntime?.markSessionEvent(sessionId, {
-          machine_id: machineId,
-          status: 'idle',
-          last_event_type: 'switch'
-        });
-        await sendGroupReply({
-          groupId,
-          senderId,
-          replyText: `远程会话已切换到 ${machineId}。`,
-          atSender: true,
-          retries: 1,
-          waitMs: 300
-        });
-      } catch (error) {
-        await sendGroupReply({
-          groupId,
-          senderId,
-          replyText: `切换远程 agent 失败：${String(error?.message || error || 'unknown error').trim()}`,
-          atSender: true,
-          retries: 1,
-          waitMs: 300
-        });
-      }
-      return true;
-    }
-
-    if (command.type === 'resume_session') {
-      if (!createHapiControlClient) {
-        await sendGroupReply({
-          groupId,
-          senderId,
-          replyText: '当前未启用远程 HAPI 控制。',
-          atSender: true,
-          retries: 1,
-          waitMs: 300
-        });
-        return true;
-      }
-
-      try {
-        const client = createHapiControlClient();
-        await client.post(`/api/sessions/${encodeURIComponent(sessionId)}/resume`, {
-          reason: String(command.payload || '').trim() || 'resumed from QQ control'
-        });
-        hapiControlRuntime?.markSessionEvent(sessionId, {
-          status: 'running',
-          last_event_type: 'resume'
-        });
-        await sendGroupReply({
-          groupId,
-          senderId,
-          replyText: '远程会话已请求恢复。',
-          atSender: true,
-          retries: 1,
-          waitMs: 300
-        });
-      } catch (error) {
-        await sendGroupReply({
-          groupId,
-          senderId,
-          replyText: `重连远程会话失败：${String(error?.message || error || 'unknown error').trim()}`,
-          atSender: true,
-          retries: 1,
-          waitMs: 300
-        });
-      }
       return true;
     }
 
@@ -319,7 +173,6 @@ function createMessageTaskControlCoordinator(deps = {}) {
         cleanText: supplementedText,
         maxStreamSegments: getStreamMaxSegments(config),
         buildToolGuidancePrompt,
-        buildBridgeGuidancePrompt: (currentRoute) => buildBridgeGuidancePrompt(currentRoute, config.SUBAGENT_BACKEND || 'command', routeExecutionPlan),
         buildStreamingSegmentationPrompt,
         shouldPreferQqRichReply,
         buildQqRichReplyPrompt

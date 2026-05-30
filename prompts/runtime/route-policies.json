@@ -1,15 +1,11 @@
 {
-  "version": 2,
+  "version": 3,
   "defaults": {
     "chat": {
       "include_tool_guidance": true,
       "include_streaming_segmentation": true,
       "include_qq_rich_reply_when_requested": true,
       "disable_stream_when_qq_rich_requested": true
-    },
-    "subagent": {
-      "include_tool_guidance": true,
-      "include_bridge_guidance": true
     }
   },
   "routes": {
@@ -24,48 +20,28 @@
         "include_streaming_segmentation": false,
         "include_qq_rich_reply_when_requested": false,
         "disable_stream_when_qq_rich_requested": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     },
     "lookup/vision-answer": {
       "chat": {
         "include_tool_guidance": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     },
     "transform/vision-summary": {
       "chat": {
         "include_tool_guidance": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     },
     "transform/self-contained-direct": {
       "chat": {
         "include_tool_guidance": false,
         "include_streaming_segmentation": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     },
     "plan/general-direct": {
       "chat": {
         "include_tool_guidance": false,
         "include_streaming_segmentation": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     },
     "admin": {
@@ -74,10 +50,6 @@
         "include_streaming_segmentation": false,
         "include_qq_rich_reply_when_requested": false,
         "disable_stream_when_qq_rich_requested": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     },
     "admin/default": {
@@ -86,22 +58,6 @@
         "include_streaming_segmentation": false,
         "include_qq_rich_reply_when_requested": false,
         "disable_stream_when_qq_rich_requested": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
-      }
-    },
-    "admin/full": {
-      "chat": {
-        "include_tool_guidance": true,
-        "include_streaming_segmentation": false,
-        "include_qq_rich_reply_when_requested": false,
-        "disable_stream_when_qq_rich_requested": false
-      },
-      "subagent": {
-        "include_tool_guidance": true,
-        "include_bridge_guidance": true
       }
     },
     "refuse": {
@@ -110,10 +66,6 @@
         "include_streaming_segmentation": false,
         "include_qq_rich_reply_when_requested": false,
         "disable_stream_when_qq_rich_requested": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     },
     "refuse/default": {
@@ -122,10 +74,6 @@
         "include_streaming_segmentation": false,
         "include_qq_rich_reply_when_requested": false,
         "disable_stream_when_qq_rich_requested": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     },
     "ignore": {
@@ -134,10 +82,6 @@
         "include_streaming_segmentation": false,
         "include_qq_rich_reply_when_requested": false,
         "disable_stream_when_qq_rich_requested": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     },
     "ignore/default": {
@@ -146,10 +90,6 @@
         "include_streaming_segmentation": false,
         "include_qq_rich_reply_when_requested": false,
         "disable_stream_when_qq_rich_requested": false
-      },
-      "subagent": {
-        "include_tool_guidance": false,
-        "include_bridge_guidance": false
       }
     }
   }

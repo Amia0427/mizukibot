@@ -136,13 +136,6 @@ function buildCommandSpec(name = '', payload = {}) {
   validateRuntimeArgs(commandName, args);
   validatePackageRunnerArgs(commandName, args);
   const cwd = resolveSafeCwd(payload.cwd || repoRoot);
-  const hapiEnv = {
-    ...process.env,
-    HAPI_HOME: 'D:\\waifu\\data\\hapi-home',
-    HAPI_API_URL: 'http://127.0.0.1:3006'
-  };
-  const cliApiToken = normalizeText(process.env.CLI_API_TOKEN || process.env.HAPI_CLI_API_TOKEN || '');
-  if (cliApiToken) hapiEnv.CLI_API_TOKEN = cliApiToken;
   const specs = {
     python: {
       command: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
@@ -168,12 +161,6 @@ function buildCommandSpec(name = '', payload = {}) {
       command: 'C:\\Program Files\\nodejs\\npx.cmd',
       args,
       cwd
-    },
-    hapi: {
-      command: 'C:\\Users\\Administrator\\AppData\\Roaming\\npm\\hapi.cmd',
-      args,
-      cwd,
-      env: hapiEnv
     }
   };
   return specs[commandName] || null;

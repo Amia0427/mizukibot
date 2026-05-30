@@ -3,18 +3,18 @@ const assert = require('assert');
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
 const { parseDecision } = require('../core/passiveGroupAwareness');
-const { buildBridgeGuidancePrompt } = require('../core/messageHandler');
+const { buildToolGuidancePrompt } = require('../core/messagePromptComposer');
 
 const exitDecision = parseDecision('{"should_reply":false,"confidence":0.9,"reason":"先这样，晚安"}');
 assert.strictEqual(exitDecision.shouldReply, false);
 
-const prompt = buildBridgeGuidancePrompt({
+const prompt = buildToolGuidancePrompt({
   meta: {
-    reason: '需要工具'
+    reason: '需要工具',
+    directChatPlanner: {
+      allowedToolNames: ['memory_cli']
+    }
   }
-}, 'command', {
-  routeDebugKey: 'direct_chat/text_chat/action',
-  topRouteType: 'direct_chat'
 });
 
 assert.ok(prompt.includes('路由原因'));
