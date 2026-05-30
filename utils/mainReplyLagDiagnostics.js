@@ -160,6 +160,56 @@ function readModelRows(options = {}) {
   });
 }
 
+function serializeDiagnosticError(component, error) {
+  return {
+    component,
+    message: normalizeText(error?.message || error || 'unknown diagnostic error'),
+    name: normalizeText(error?.name || 'Error')
+  };
+}
+
+function fallbackDiagnostic(component, error) {
+  const serialized = serializeDiagnosticError(component, error);
+  return {
+    summary: {
+      overallStatus: 'error',
+      component,
+      error: serialized.message
+    },
+    __mainReplyLagDiagnosticError: serialized
+  };
+}
+
+function fallbackLowResourceReport(component, error) {
+  const fallback = fallbackDiagnostic(component, error);
+  return {
+    ok: false,
+    failedChecks: [`${component}_error`],
+    summary: fallback.summary,
+    __mainReplyLagDiagnosticError: fallback.__mainReplyLagDiagnosticError
+  };
+}
+
+function callDiagnostic(component, builder, args, fallbackFactory, errors) {
+  try {
+    return builder(...args);
+  } catch (error) {
+    const fallback = fallbackFactory(component, error);
+    if (Array.isArray(errors)) errors.push(fallback.__mainReplyLagDiagnosticError);
+    return fallback;
+  }
+}
+
+async function callAsyncDiagnostic(component, builder, args, fallbackFactory, errors) {
+  try {
+    return await builder(...args);
+  } catch (error) {
+    const fallback = fallbackFactory(component, error);
+    if (Array.isArray(errors)) errors.push(fallback.__mainReplyLagDiagnosticError);
+    return fallback;
+  }
+}
+
 function filterRowsByWindow(rows = [], sinceMs = 0, untilMs = Date.now()) {
   return filterWindow(rows, { sinceMs, untilMs });
 }
@@ -284,6 +334,7 @@ function scoreBottleneck(report = {}) {
 }
 
 async function buildMainReplyLagDiagnostic(options = {}) {
+  const diagnosticErrors = [];
   const now = typeof options.now === 'function' ? options.now() : Date.now();
   const untilMs = now instanceof Date ? now.getTime() : nonNegativeNumber(now, Date.now());
   const windowMs = Math.max(60 * 1000, nonNegativeNumber(options.windowMs, DEFAULT_WINDOW_MS));
@@ -304,23 +355,63 @@ async function buildMainReplyLagDiagnostic(options = {}) {
     ...options,
     maxLines
   }), sinceMs, untilMs);
-  const status = options.status || buildRuntimeStatusDiagnostic(options);
-  const hotspots = options.hotspots || buildRuntimeHotspotsDiagnostic({
-    ...options,
-    runtimeStatus: status,
-    windowMs,
-    maxLines
-  });
-  const lowResource = options.lowResource || buildLowResourceHealthReport({
-    ...options,
-    status,
-    hotspots
-  });
+  const status = options.status || callDiagnostic(
+    'runtime_status',
+    options.buildRuntimeStatusDiagnostic || buildRuntimeStatusDiagnostic,
+    [options],
+    fallbackDiagnostic,
+    diagnosticErrors
+  );
+  const hotspots = options.hotspots || callDiagnostic(
+    'runtime_hotspots',
+    options.buildRuntimeHotspotsDiagnostic || buildRuntimeHotspotsDiagnostic,
+    [{
+      ...options,
+      runtimeStatus: status,
+      windowMs,
+      maxLines
+    }],
+    fallbackDiagnostic,
+    diagnosticErrors
+  );
+  const lowResource = options.lowResource || callDiagnostic(
+    'low_resource',
+    options.buildLowResourceHealthReport || buildLowResourceHealthReport,
+    [{
+      ...options,
+      status,
+      hotspots
+    }],
+    fallbackLowResourceReport,
+    diagnosticErrors
+  );
   const providerRequest = options.includeProvider === true
-    ? await runProviderRequestDiagnostics({
-        provider: options.provider,
-        scenarios: options.providerScenarios || 'main_reply'
-      })
+    ? await callAsyncDiagnostic(
+        'provider_request',
+        options.runProviderRequestDiagnostics || runProviderRequestDiagnostics,
+        [{
+          provider: options.provider,
+          scenarios: options.providerScenarios || 'main_reply'
+        }],
+        (component, error) => {
+          const serialized = serializeDiagnosticError(component, error);
+          return {
+            ok: false,
+            requested: {
+              provider: normalizeText(options.provider)
+            },
+            scenarios: [],
+            anomalies: [`${component}_error:${serialized.message}`],
+            summary: {
+              overallStatus: 'error',
+              component,
+              error: serialized.message
+            },
+            __mainReplyLagDiagnosticError: serialized
+          };
+        },
+        diagnosticErrors
+      )
     : null;
 
   const metrics = {
@@ -366,7 +457,8 @@ async function buildMainReplyLagDiagnostic(options = {}) {
       lowResource: {
         ok: lowResource.ok === true,
         failedChecks: Array.isArray(lowResource.failedChecks) ? lowResource.failedChecks.slice() : []
-      }
+      },
+      errors: diagnosticErrors
     }
   };
   if (metrics.planner.missing) report.summary.missingFields.push('planner_duration');
