@@ -70,10 +70,12 @@ module.exports = (async () => {
     };
 
     const {
+      clampTimeoutMs,
       buildSelfCheckSpecs,
       formatModelSelfCheckReport,
       runModelSelfCheck
     } = require('../utils/modelSelfCheck');
+    assert.strictEqual(clampTimeoutMs('not-a-number'), 25000);
 
     const specs = buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
     assert.deepStrictEqual(specs.map((item) => item.type), [
