@@ -110,8 +110,11 @@ function formatSurfacePolicyText(surface = '', policy = {}) {
     `include_recent_reply_frame=${policy.includeRecentReplyFrame !== false}`,
     `include_deep_history=${policy.includeDeepHistory !== false}`,
     `allow_jargon=${policy.allowJargon || 'off'}`,
-    `max_memory_digest_items=${Number(policy.maxMemoryDigestItems || 0) || 0}`
-  ].join('\n');
+    `max_memory_digest_items=${Number(policy.maxMemoryDigestItems || 0) || 0}`,
+    policy.privacyMode ? `privacy_mode=${policy.privacyMode}` : '',
+    policy.chatDiscipline ? `chat_discipline=${policy.chatDiscipline}` : '',
+    policy.replyRhythm ? `reply_rhythm=${policy.replyRhythm}` : ''
+  ].filter(Boolean).join('\n');
 }
 
 function renderPersonaMemoryPrompt(state = {}, surface = '') {

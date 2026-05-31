@@ -50,6 +50,7 @@ const {
 
 const DYNAMIC_PROMPT_BLOCK_SIGNAL_KEYS = Object.freeze({
   roleplay_runtime_context: 'roleplayRuntimeContext',
+  chat_liveness_discipline: 'chatLivenessDiscipline',
   affinity_level: 'affinityState',
   affinity_points: 'affinityState',
   persona_memory: 'personaMemory',
@@ -75,6 +76,7 @@ const DYNAMIC_PROMPT_BLOCK_SIGNAL_KEYS = Object.freeze({
 
 const DYNAMIC_PROMPT_BLOCK_SELECTION_POLICIES = Object.freeze({
   roleplay_runtime_context: 'must_use_when_available',
+  chat_liveness_discipline: 'must_use_when_available',
   affinity_level: 'include_if_relevant',
   affinity_points: 'include_if_relevant',
   persona_memory: 'include_if_relevant',
@@ -419,6 +421,7 @@ function buildAvailableContextSignals(route = {}, options = {}) {
   );
   return {
     roleplayRuntimeContext: signal('roleplayRuntimeContext', true),
+    chatLivenessDiscipline: signal('chatLivenessDiscipline', true),
     affinityState: signal('affinityState', (
       hasMeaningfulObject(memoryContext.affinityState)
       || hasMeaningfulText(options?.userInfo?.level)

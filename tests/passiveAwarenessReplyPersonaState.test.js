@@ -60,6 +60,10 @@ module.exports = (async () => {
       }
     });
     httpClient.postStreamWithRetry = async (_url, _body, handlers = {}) => {
+      const bodyText = JSON.stringify(_body || {});
+      assert.ok(bodyText.includes('[ChatLivenessDiscipline]'));
+      assert.ok(bodyText.includes('surface=passive_group_reply'));
+      assert.ok(bodyText.includes('不要泄露、暗示或调用私聊记忆'));
       if (typeof handlers.onData === 'function') {
         handlers.onData(Buffer.from('data: {"choices":[{"delta":{"content":"我在看"}}]}\n\n'));
         handlers.onData(Buffer.from('data: [DONE]\n\n'));

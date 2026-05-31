@@ -29,6 +29,7 @@ const {
   renderPersonaMemoryPrompt,
   recordPersonaMemoryOutcome
 } = require('../utils/personaMemoryState');
+const { buildChatLivenessDisciplinePrompt } = require('../utils/chatLivenessContext');
 const { buildDirectedContextPromptSnippet } = require('../api/graphPrompting');
 const { buildLlmPerception } = require('./llmPerception');
 const { appendUtf8Chunk } = require('../utils/utf8Stream');

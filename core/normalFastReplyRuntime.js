@@ -2,6 +2,7 @@ const config = require('../config');
 const { requestNonStreamingReply } = require('../api/runtimeV2/model/service');
 const { getRecentSessionContextSummaries } = require('../utils/sessionContextSummaryStore');
 const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
+const { buildChatLivenessDisciplinePrompt } = require('../utils/chatLivenessContext');
 
 function clampNumber(value, fallback, min = 0) {
   const n = Number(value);
@@ -93,10 +94,21 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
   const rawHistory = Array.isArray(historyStore[sessionKey]) ? historyStore[sessionKey] : [];
   const recentMessages = trimRecentMessagesByChars(rawHistory.slice(-maxMessages), recentBudget);
   const userText = normalizeText(input.text || input.cleanText || input.requestText || input.route?.cleanText || input.route?.question);
+  const livenessPrompt = buildChatLivenessDisciplinePrompt({
+    routeMeta,
+    topRouteType: 'direct_chat',
+    question: userText,
+    userId,
+    sharedShortTermContext: {
+      shortTermSummary: trimmedSummary,
+      recentHistory: recentMessages
+    }
+  });
   const systemParts = [
     '你是 Mizuki。当前走普通用户快速回复链路。',
     '只根据用户本轮消息和下方轻量上下文自然回复；不要声称查了记忆、网页或工具。',
-    '回答保持简洁、直接、像日常聊天；信息不足时先说明不确定。'
+    '回答保持简洁、直接、像日常聊天；信息不足时先说明不确定。',
+    livenessPrompt
   ];
   if (trimmedSummary) {
     systemParts.push(`[最近会话摘要]\n${trimmedSummary}`);

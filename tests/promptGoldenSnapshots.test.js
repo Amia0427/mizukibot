@@ -40,10 +40,12 @@ module.exports = (async () => {
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'core_baseline_patch'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'chat_liveness_discipline'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'main_persona_system'));
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'chat_liveness_discipline'));
   const roleplayRuntimeContext = main.dynamicContextBlocks.find((item) => item.id === 'roleplay_runtime_context');
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('[RoleplayRuntimeContext]'));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('current_user='));
@@ -57,6 +59,14 @@ module.exports = (async () => {
     main.dynamicContextBlocks.filter((item) => item.id === 'roleplay_runtime_context').length,
     1,
     'roleplay runtime context should not be duplicated after session/runtime merge'
+  );
+  const livenessContext = main.dynamicContextBlocks.find((item) => item.id === 'chat_liveness_discipline');
+  assert.ok(String(livenessContext?.content || '').includes('[ChatLivenessDiscipline]'));
+  assert.ok(String(livenessContext?.content || '').includes('surface=private_chat'));
+  assert.strictEqual(
+    main.dynamicContextBlocks.filter((item) => item.id === 'chat_liveness_discipline').length,
+    1,
+    'chat liveness discipline should not be duplicated after session/runtime merge'
   );
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'directed_context'));
   if (main.latencyMeta?.optionalBudgetExceeded || !String(main.dynamicFewShotPrompt || '').trim()) {
@@ -116,7 +126,9 @@ module.exports = (async () => {
   );
   assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'chat_liveness_discipline'));
   assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'chat_liveness_discipline'));
   assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(directedMustUsePrompt.promptSnapshot.selectionTrace.some((item) => (
     item.id === 'directed_context'
@@ -415,6 +427,32 @@ module.exports = (async () => {
     assert.ok(privatePrompt.promptSnapshot.activatedPersonaModules.includes('scene_private_chat'));
     assert.ok(privatePrompt.promptSnapshot.activatedPersonaModules.length <= 3);
   }
+  const privateLiveness = privatePrompt.promptSnapshot.assembledBlocks.find((item) => item.id === 'chat_liveness_discipline');
+  assert.ok(String(privateLiveness?.content || '').includes('surface=private_chat'));
+
+  const groupPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 12 },
+    'u_prompt_group_direct',
+    '瑞希这个要怎么弄',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: 'g-live',
+        chatType: 'group',
+        directedContext: {
+          scene: 'reply_to_bot',
+          addressee: { senderName: '测试用户', userId: 'u_prompt_group_direct', kind: 'user' }
+        }
+      }
+    }
+  );
+  const groupLiveness = groupPrompt.promptSnapshot.assembledBlocks.find((item) => item.id === 'chat_liveness_discipline');
+  assert.ok(String(groupLiveness?.content || '').includes('surface=group_direct_chat'));
+  assert.ok(groupPrompt.promptSnapshot.dynamicBlockIds.includes('chat_liveness_discipline'));
+  assert.ok(groupPrompt.promptSnapshot.dynamicBlockIds.includes('group_direct_chat_style_guard'));
+  assert.strictEqual(groupPrompt.promptSnapshot.dynamicBlockIds.filter((id) => id === 'chat_liveness_discipline').length, 1);
 
   const roleplayPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 16 },

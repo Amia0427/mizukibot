@@ -44,6 +44,9 @@ module.exports = (async () => {
   assert.strictEqual(historyMessages[0].content, 'user-4');
   assert.strictEqual(historyMessages[23].content, 'assistant-15');
   assert.ok(built.messages[0].content.includes('最近会话摘要'), '应注入 1 条最近会话摘要');
+  assert.ok(built.messages[0].content.includes('[ChatLivenessDiscipline]'), '应注入快速回复活人感纪律');
+  assert.ok(built.messages[0].content.includes('surface=group_direct_chat'), '群快速回复应识别群聊 surface');
+  assert.ok(built.messages[0].content.includes('不要泄露、暗示或调用私聊记忆'), '群快速回复应保留隐私边界');
 
   const longSummary = 's'.repeat(3000);
   const longHistory = {

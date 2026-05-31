@@ -93,7 +93,12 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       routePolicyKey,
       topRouteType,
       mainReplyPromptMode,
-      surface: buildPromptSurface(topRouteType, routeMeta),
+      surface: resolveChatSurface({
+        routeMeta,
+        topRouteType,
+        routePolicyKey,
+        chatType: options.chatType || options.chat_type
+      }),
       affinity: fallbackAffinity,
       sharedShortTermContext,
       memoryContext: fallbackMemoryContext,
@@ -253,6 +258,20 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     continuitySignals: options?.continuitySignals,
     options
   });
+  const chatLivenessDisciplineText = buildChatLivenessDisciplinePrompt({
+    userInfo,
+    userId,
+    question,
+    routeMeta,
+    routePolicyKey,
+    topRouteType,
+    surface: promptMaterials?.surface,
+    memoryContext: promptMaterials?.memoryContext || fallbackMemoryContext,
+    sharedShortTermContext,
+    personaMemoryState: promptMaterials?.personaMemoryState,
+    continuitySignals: options?.continuitySignals,
+    options
+  });
 
   if (roleplayRuntimeContextText) {
     extraBlocks.push(createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {
@@ -260,6 +279,20 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       priority: 205,
       authority: 'runtime_context',
       kind: 'roleplay_runtime_context',
+      source: 'runtime',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true
+      }
+    }));
+  }
+
+  if (chatLivenessDisciplineText) {
+    extraBlocks.push(createPromptBlock('chat_liveness_discipline', 'Chat Liveness Discipline', chatLivenessDisciplineText, {
+      stage: 'main',
+      priority: 206,
+      authority: 'runtime_context',
+      kind: 'chat_liveness',
       source: 'runtime',
       lane: 'dynamic_context',
       meta: {
@@ -521,6 +554,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     directedContext: options?.routeMeta?.directedContext,
     personaModules: dynamicPromptPlan.personaModules,
     hasRoleplayRuntimeContext: Boolean(roleplayRuntimeContextText),
+    hasChatLivenessDiscipline: Boolean(chatLivenessDisciplineText),
     hasAffinityState: true,
     hasShortTermContinuity: combinedDynamicBlocks.some((item) => item?.id === 'short_term_continuity'),
     hasMemoryRecallPolicy: combinedDynamicBlocks.some((item) => item?.id === 'memory_recall_policy' || normalizeText(item?.meta?.blockId) === 'memory_recall_policy')
@@ -545,7 +579,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   });
   const plannerProvidedDynamicPlan = dynamicPromptPlan.plannerProvided === true;
   const shouldUseHeuristicDynamicPlan = !plannerProvidedDynamicPlan;
-  const runtimeAddedIds = ['roleplay_runtime_context'];
+  const runtimeAddedIds = ['roleplay_runtime_context', 'chat_liveness_discipline'];
   if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
     runtimeAddedIds.push('group_direct_chat_style_guard', 'persona_module:scene_group_insert');
   }

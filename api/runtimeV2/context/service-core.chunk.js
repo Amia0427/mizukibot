@@ -51,6 +51,10 @@ const {
   GROUP_DIRECT_REPLY_TARGET_MIN_CHARS
 } = require('../guards/groupDirectReplyStyleGuard');
 const {
+  buildChatLivenessDisciplinePrompt,
+  resolveChatSurface
+} = require('../../../utils/chatLivenessContext');
+const {
   formatDateInTz,
   formatTimeInTz,
   formatWeekdayInTz,
@@ -219,10 +223,17 @@ function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
   const groupId = getRouteMetaGroupId(routeMeta);
   const chatType = normalizeText(routeMeta.chatType || routeMeta.chat_type || (groupId ? 'group' : 'private'), groupId ? 'group' : 'private');
   const topRouteType = normalizeText(input.topRouteType || routeMeta.topRouteType || options.topRouteType, 'direct_chat');
-  const surface = normalizeText(input.surface || buildPromptSurface(topRouteType, routeMeta), 'direct_chat');
-  const outputMode = groupId
+  const surface = normalizeText(input.surface || resolveChatSurface({
+    ...input,
+    routeMeta,
+    topRouteType,
+    chatType,
+    groupId
+  }), 'private_chat');
+  const isGroupSurface = chatType === 'group' || surface === 'group_direct_chat' || surface === 'passive_group_reply';
+  const outputMode = isGroupSurface
     ? 'group_chat'
-    : (surface === 'passive_group_reply' ? 'group_chat' : 'mobile_chat');
+    : 'mobile_chat';
   const directedContext = routeMeta.directedContext && typeof routeMeta.directedContext === 'object' ? routeMeta.directedContext : {};
   const addressee = directedContext.addressee && typeof directedContext.addressee === 'object' ? directedContext.addressee : {};
   const currentUser = resolveCurrentUserForRoleplay(userInfo, routeMeta, input.userId);
@@ -263,9 +274,9 @@ function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
     `surface=${surface}`,
     `chat_type=${chatType}`,
     `output_mode=${outputMode}`,
-    `scene=${compactRuntimeLineValue(directedContext.scene || routeMeta.scene || routeMeta.currentScene || routeMeta.current_scene || (groupId ? 'group chat' : 'private chat'), 60)}`,
+    `scene=${compactRuntimeLineValue(directedContext.scene || routeMeta.scene || routeMeta.currentScene || routeMeta.current_scene || (isGroupSurface ? 'group chat' : 'private chat'), 60)}`,
     `current_user=${currentUser}`,
-    `current_addressee=${compactRuntimeLineValue(addressee.senderName || addressee.userId || addressee.kind || (groupId ? 'group member' : 'user'), 40)}`,
+    `current_addressee=${compactRuntimeLineValue(addressee.senderName || addressee.userId || addressee.kind || (isGroupSurface ? 'group member' : 'user'), 40)}`,
     `relationship_state=${relationStage}`,
     recentEvents ? `recent_events=${recentEvents}` : '',
     continuity ? `open_threads=${continuity}` : '',
