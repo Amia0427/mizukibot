@@ -56,7 +56,8 @@ PLAN_REASONING_EFFORT=off
 
 - 2026-05-23 22:10 +08:00：远端召回新增总闸 `MEMOS_REMOTE_RECALL_ENABLED=false`。即使旧环境变量 `MEMOS_MCP_ENABLED=true`，planner 也不会触发 MemOS 远端召回；如需恢复，必须同时显式开启两个变量。
 - 2026-05-23 22:10 +08:00：planner 模型调用固定单轮，`PLANNER_MAX_MODEL_CALLS=1`，语义 refine 只记录诊断，不再追加第二轮 planner 请求。
-- 2026-05-23 22:20 +08:00：planner 推理程度默认关闭，`PLAN_REASONING_EFFORT=off` 会让 planner 请求不携带 `reasoning_effort`。本地主回复模型当前 `AI_REASONING_EFFORT=on`，运行时会归一化为 `high`。
+- 2026-05-23 22:20 +08:00：planner 推理程度默认关闭，`PLAN_REASONING_EFFORT=off` 会让 planner 请求不携带 `reasoning_effort`。
+- 2026-05-31 15:13 +08:00：主回复请求体保留缓存配置不变，仅收敛非缓存参数：`AI_REASONING_EFFORT=off`、`AI_MAX_TOKENS=1200`，并清空 `AI_TOP_A` / `AI_REPETITION_PENALTY`。
 - planner 可增加一次 MCP recall/discovery 判断，主回复模型调用次数不增加。
 - MemOS 工具发现固定对 `memos-api-mcp` 做真实 discovery；即使全局 `MCP_DISCOVERY_MODE=lazy`，也会校验实际工具列表。
 - `memos_recall` 优先级低于 `short_term_continuity`，高于 `background_research`。
