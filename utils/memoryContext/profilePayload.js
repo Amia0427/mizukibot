@@ -13,6 +13,7 @@ function createMemoryContextProfilePayloadHelpers(deps = {}) {
     const profile = getUserProfile(userId);
     const stableProfile = buildStableProfileText(userId, {
       question,
+      userNickname: options.userNickname || options.senderName || options.card || options.nickname || '',
       includeWeakForProfileQuery: true,
       disableStableProfile: options.disableStableProfile,
       forceStableProfile: options.forceStableProfile,

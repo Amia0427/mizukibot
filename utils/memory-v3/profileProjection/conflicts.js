@@ -58,6 +58,23 @@ function resolveProfileNodeConflicts(nodes = []) {
       continue;
     }
     const winner = winners.get(key);
+    const winnerText = normalizeText(winner?.text || '');
+    if (!winnerText) {
+      selected.push(node);
+      conflicts.push({
+        userId: node.userId,
+        conflictKey: key,
+        fieldKey: node.fieldKey,
+        canonicalKey: node.canonicalKey,
+        id: node.id,
+        text: node.text,
+        suppressedBy: '',
+        winnerText: '',
+        winnerId: '',
+        reason: 'profile_conflict_empty_winner_ignored'
+      });
+      continue;
+    }
     node.suppressedBy = String(winner?.id || '');
     conflicts.push({
       userId: node.userId,
@@ -67,7 +84,7 @@ function resolveProfileNodeConflicts(nodes = []) {
       id: node.id,
       text: node.text,
       suppressedBy: node.suppressedBy,
-      winnerText: winner?.text || '',
+      winnerText,
       winnerId: winner?.id || '',
       reason: 'profile_conflict'
     });

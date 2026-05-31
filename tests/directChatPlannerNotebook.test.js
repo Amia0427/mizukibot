@@ -110,6 +110,19 @@ module.exports = (async () => {
   assert.strictEqual(identityDecision.shouldUseTools, true);
   assert.deepStrictEqual(identityDecision.allowedToolNames, ['memory_cli']);
 
+  const amnesiaRecallRoute = detectIntent({
+    rawText: '宝你忘了我们的往日种种吗😢',
+    botQQ: '123456',
+    userId: 'u1',
+    chatType: 'group'
+  });
+  assert.strictEqual(amnesiaRecallRoute.intent.needsMemory, true);
+  assert.ok(amnesiaRecallRoute.meta.allowedTools.includes('memory_cli'));
+  const amnesiaDecision = await planDirectChat(amnesiaRecallRoute, { userId: 'u1' });
+  assert.strictEqual(amnesiaDecision.shouldUseTools, true);
+  assert.deepStrictEqual(amnesiaDecision.allowedToolNames, ['memory_cli']);
+  assert.notStrictEqual(amnesiaDecision.executionPlan.mode, 'chat_only');
+
   const groupRecallRoute = detectIntent({
     rawText: '群里之前怎么说这个活动',
     botQQ: '123456',

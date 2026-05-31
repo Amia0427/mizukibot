@@ -201,7 +201,15 @@ function buildV3ProfileText(profile = {}, options = {}) {
   const fullSurface = shouldUseFullProfileSurface(options);
   const styleSurface = fullSurface || options.forcePersonaStyleSurface === true || hasPersonaStyleNeed(options.question || options.query || '');
   const basicLikes = fullSurface ? strict.likes : filterBasicSurfaceLikes(profile, strict.likes);
+  const anchorLines = [];
+  if (config.MEMORY_PROFILE_CURRENT_USER_ANCHOR !== false) {
+    const userId = sanitizeText(options.userId || options.currentUserId || '');
+    const nickname = sanitizeText(options.userNickname || options.senderName || options.card || options.nickname || '');
+    if (userId) anchorLines.push(`当前用户ID：${userId}`);
+    if (nickname) anchorLines.push(`当前用户昵称：${nickname}`);
+  }
   const lines = [
+    ...anchorLines,
     sanitizeText(profile.relation_stage) ? `关系阶段：${sanitizeText(profile.relation_stage)}` : '',
     fullSurface && sanitizeText(persona.summary) ? `总结：${sanitizeText(persona.summary)}` : '',
     fullSurface && sanitizeText(persona.impression) ? `印象：${sanitizeText(persona.impression)}` : '',

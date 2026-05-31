@@ -62,12 +62,31 @@ function isProfileProjectionBlockedByExtractionClass(node = {}) {
   return extractionClass === 'episodic_observation' || extractionClass === 'journal_only';
 }
 
+function isNoisyIdentityText(text = '') {
+  const value = normalizeText(text);
+  if (!value) return true;
+  if (/^(?:someone|somebody|the user|user|assistant|bot)\b/i.test(value)) return true;
+  if (/\b(?:being reprimanded|assumed role|nurturer|caretaker|ordering others around|feels comfortable ordering|role as)\b/i.test(value)) return true;
+  if (/(?:被训斥|被责备|照顾者角色|养育者角色|临时扮演|角色扮演|发号施令|命令别人|被安慰的人|正在被)/i.test(value)) return true;
+  if (/(?:今天|刚刚|刚才|这次|这局|今晚|昨天|临时|暂时|正在).{0,12}(?:的人|状态|角色|用户)/i.test(value)) return true;
+  return false;
+}
+
+function isProfileProjectionBlockedByNoise(node = {}) {
+  if (config.MEMORY_PROFILE_IDENTITY_NOISE_FILTER === false) return false;
+  const fieldKey = normalizeText(node.fieldKey || node.semanticSlot || node.type).toLowerCase();
+  if (fieldKey !== 'identity') return false;
+  return isNoisyIdentityText(node.text || node.canonicalText || '');
+}
+
 module.exports = {
   applyPersonaRecencyDecay,
   computeStabilityScore,
   getRecentTopicTtlMs,
+  isNoisyIdentityText,
   isExpiredRecentTopic,
   isExpiringSoonRecentTopic,
   isProfileProjectionBlockedByExtractionClass,
+  isProfileProjectionBlockedByNoise,
   resolveEvidenceTier
 };

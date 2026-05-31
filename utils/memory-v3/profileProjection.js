@@ -19,6 +19,7 @@ const {
   isExpiredRecentTopic,
   isExpiringSoonRecentTopic,
   isProfileProjectionBlockedByExtractionClass,
+  isProfileProjectionBlockedByNoise,
   resolveEvidenceTier
 } = require('./profileProjection/evidence');
 const { buildPersonaCore } = require('./profileProjection/personaCore');
@@ -37,6 +38,7 @@ module.exports = {
   isExpiredRecentTopic,
   isExpiringSoonRecentTopic,
   isProfileProjectionBlockedByExtractionClass,
+  isProfileProjectionBlockedByNoise,
   pushProfileItem,
   resolveEvidenceTier,
   resolveProfileNodeConflicts

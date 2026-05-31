@@ -86,6 +86,7 @@ function assembleMemoryPacket(result = {}, options = {}) {
   const profileSurface = buildStableProfileText(userId, {
     question: options.question || result.query || '',
     profileProjection,
+    userNickname: options.userNickname || options.senderName || options.card || options.nickname || '',
     forceStableProfile: options.forceStableProfile,
     disableStableProfile: options.disableStableProfile,
     legacyFallbackEnabled: options.legacyProfileFallbackEnabled

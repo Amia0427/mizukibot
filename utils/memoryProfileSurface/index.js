@@ -92,6 +92,7 @@ function buildStableProfileText(userId, options = {}) {
   if (shouldUseV3) {
     const text = buildV3ProfileText(v3Profile, {
       ...options,
+      userId: String(userId || '').trim(),
       includeWeak,
       forceFullProfileSurface: fullSurface
     });

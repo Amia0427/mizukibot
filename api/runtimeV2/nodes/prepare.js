@@ -3,6 +3,7 @@ const { buildMainStableSystemBlocks } = require('../../../utils/stagePromptContr
 const {
   recordMainPromptBlockObservation
 } = require('../../../utils/memoryRecallObservability');
+const { classifyMemoryNeed } = require('../../../utils/recallHeuristics');
 
 function createPrepareNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
@@ -384,6 +385,12 @@ function createPrepareNode(deps = {}) {
     const userId = String(request.userId || '').trim();
     const question = String(request.runtimeQuestionText || request.question || '').trim();
     if (!userId || !question) return null;
+    const recallNeed = classifyMemoryNeed(question, {
+      facets: request.facets || routeMeta.facets || {},
+      intent: request.intent || routeMeta.intent || {},
+      meta: routeMeta
+    });
+    const forceLocalRag = config.MEMORY_RECALL_FORCE_LOCAL_RAG !== false && recallNeed.needsMemory;
     return buildFallbackMemoryContextImpl(userId, question, {
       routePolicyKey: request.routePolicyKey,
       topRouteType: request.topRouteType || routeMeta.topRouteType || '',
@@ -399,7 +406,9 @@ function createPrepareNode(deps = {}) {
       dailyJournalYearMonth: request.dailyJournalYearMonth,
       dailyJournalMaxFourDayFiles: 1,
       dailyJournalMaxMonthlyFiles: 0,
-      ragEnabled: false
+      forceMemoryContext: recallNeed.needsMemory,
+      ragEnabled: forceLocalRag ? true : false,
+      retrievalPath: forceLocalRag ? 'prepare_fallback_forced_local_rag' : 'prepare_fallback_no_rag'
     }) || null;
   }
 

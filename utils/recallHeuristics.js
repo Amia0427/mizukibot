@@ -70,6 +70,24 @@ function isExternalFreshnessQuery(text = '') {
   return /(?:今天天气|今天.{0,8}(天气|气温|下雨|温度|股价|股票|行情|新闻|日期|星期|几点)|现在几点|当前时间|北京时间|当地时间|today.{0,12}(weather|temperature|stock|news|date|time)|(?:search|look up|find|google|latest|news|official|docs?|documentation|官网|查一下|搜索|最新|新闻|实时|当前))/i.test(q);
 }
 
+function isForgetReminderOnlyQuery(text = '') {
+  const q = sanitizeText(text);
+  if (!q) return false;
+  return /(?:别|不要|记得|提醒我|帮我).{0,6}忘了.{0,18}(?:带|拿|买|交|提交|发|发给|提醒|叫我|通知|上传|下载|开会|签到|打卡|吃药|喝水|出门|睡觉|起床|做|写)/i.test(q)
+    || /(?:别忘了|不要忘了|记得).{0,18}(?:带伞|提交|提醒我|叫我|发给|打卡|签到|开会|吃药|喝水)/i.test(q);
+}
+
+function isAmnesiaRelationshipRecallQuery(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q || isForgetReminderOnlyQuery(q)) return false;
+  if (/(?:你|宝|宝宝|bot|assistant).{0,8}(?:忘了|不记得|记不得|想不起来).{0,14}(?:我|我们|咱|俺|me|us|our|往日种种|过去|以前|关系|是谁)/i.test(q)) return true;
+  if (/(?:忘了|不记得|记不得|想不起来).{0,10}(?:我|我们|咱|俺|me|us|our|往日种种|过去|关系)/i.test(q)) return true;
+  if (/(?:不认识我|不认得我|你认识我吗|你认得我吗|你知道我是谁吗|知道我是谁吗|还认识我吗|还记得我是谁吗)/i.test(q)) return true;
+  if (/(?:我们的|咱们的|我和你).{0,8}(?:往日种种|过去|以前|回忆|经历|关系|故事|历史)/i.test(q)) return true;
+  if (/(?:我们之间|咱们之间|我和你之间).{0,12}(?:什么关系|关系|经历|过去|发生过什么|聊过什么)/i.test(q)) return true;
+  return false;
+}
+
 function isSubjectiveOpinionOnlyQuery(text = '') {
   const q = sanitizeText(text);
   if (!q) return false;
@@ -91,7 +109,8 @@ function classifyRecallFacet(question = '') {
   if (/(where did we leave off|what were we(?: just)? talking about|what were we doing|what was the thing from before|from before|earlier|previously|last time|continuity|recent|上次|刚才|刚刚|聊到哪|做到哪|接上)/i.test(q)) return 'recent_continuity';
   if (/(continue|continue with|resume|pick back up|next step|next steps|what should we do next|plan|task|todo|roadmap|继续|接着|接上|计划|任务|待办|推进)/i.test(q)) return 'task_or_plan';
   if (/(喜欢|不喜欢|讨厌|偏好|爱好|口味|习惯|风格|like|likes|prefer|preference|favorite|favourite|dislike|hobby)/i.test(q)) return 'preference';
-  if (/(我是谁|身份|设定|画像|人设|总结|印象|identity|who am i|profile|summary|impression)/i.test(q)) return 'identity';
+  if (/(我是谁|你认识我吗|你认得我吗|你知道我是谁吗|知道我是谁吗|不认识我|不认得我|身份|设定|画像|人设|总结|印象|identity|who am i|profile|summary|impression)/i.test(q)) return 'identity';
+  if (isAmnesiaRelationshipRecallQuery(q)) return 'relationship';
   if (/(关系|相处|熟悉|朋友|friend|relationship|stage)/i.test(q)) return 'relationship';
   if (/(群|群里|频道|channel|group|大家|上下文|群友|群内)/i.test(q)) return 'group_context';
   if (/(回想|想起来|记得什么|都记得什么|都记得我什么|记得我什么|全部记忆|anything|all memory|broad recall)/i.test(q)) return 'broad_recall';
@@ -209,24 +228,27 @@ function classifyMemoryNeed(text = '', routeContext = {}) {
   }
 
   const q = cleanText.toLowerCase();
-  const explicitRecall = /(?:记得|记不记得|还记得|想得起来|回忆|回想|之前|以前|上次|刚才|刚刚|最近|前几天|昨天|履历|历史|记录|日志|remember|recall|previous|earlier|before|last time|history)/i.test(q);
+  const amnesiaRelationshipRecall = isAmnesiaRelationshipRecallQuery(cleanText);
+  const explicitRecall = !isForgetReminderOnlyQuery(cleanText) && /(?:记得|记不记得|还记得|想得起来|回忆|回想|忘了|不记得|记不得|想不起来|之前|以前|上次|刚才|刚刚|最近|前几天|昨天|往日种种|我们的过去|我们之间|履历|历史|记录|日志|remember|recall|previous|earlier|before|last time|history)/i.test(q);
   const personalSubject = /(?:我|我们|俺|咱|我的|我们的|me|my|we|our)/i.test(q);
-  const personalFactQuestion = personalSubject && /(?:喜欢|爱好|讨厌|偏好|是谁|身份|画像|人设|性格|目标|关系|熟悉|是不是|有没有|会不会|要不要|说过|提过|聊过|发过|打过|玩过|看过|听过|做过|去过|买过|吃过|喝过|练过|测过|试过|哪些|什么|啥|哪几)/i.test(q);
+  const personalFactQuestion = personalSubject && /(?:喜欢|爱好|讨厌|偏好|是谁|认识我|认得我|知道我|身份|画像|人设|性格|目标|关系|熟悉|是不是|有没有|会不会|要不要|说过|提过|聊过|发过|打过|玩过|看过|听过|做过|去过|买过|吃过|喝过|练过|测过|试过|哪些|什么|啥|哪几)/i.test(q);
   const groupHistory = /(?:群里|群内|大家|群友|这个群).{0,16}(?:之前|以前|上次|刚才|最近|说过|聊过|怎么说|记录|日志|历史|叫|称呼)/i.test(q);
   const continuity = isMemoryContinuationQuestion(cleanText);
-  if (!explicitRecall && !personalFactQuestion && !groupHistory && !continuity) {
+  if (!explicitRecall && !personalFactQuestion && !groupHistory && !continuity && !amnesiaRelationshipRecall) {
     return { needsMemory: false, facet: classifyRecallFacet(cleanText), confidence: 0.12, reason: 'no_memory_dependency_signal' };
   }
 
   const facet = groupHistory ? 'group_context' : classifyRecallFacet(cleanText);
   const reason = groupHistory
     ? 'group_history_recall'
-    : explicitRecall
+    : amnesiaRelationshipRecall
+      ? `amnesia_relationship_recall:${facet}`
+      : explicitRecall
       ? `explicit_recall:${facet}`
       : personalFactQuestion
         ? `personal_history_question:${facet}`
         : `continuity_question:${facet}`;
-  const confidence = explicitRecall || groupHistory ? 0.9 : (personalFactQuestion ? 0.82 : 0.72);
+  const confidence = explicitRecall || groupHistory || amnesiaRelationshipRecall ? 0.9 : (personalFactQuestion ? 0.82 : 0.72);
   return { needsMemory: true, facet, confidence, reason };
 }
 
@@ -244,8 +266,10 @@ module.exports = {
   getFacetSourceWeights,
   isConversationalNoop,
   isConversationRecapQuery,
+  isAmnesiaRelationshipRecallQuery,
   isRecentPersonalActivityRecallQuery,
   isRecentRecallQuery,
+  isForgetReminderOnlyQuery,
   isMemoryContinuationQuestion,
   sanitizeText,
   shouldBiasToContinuity,

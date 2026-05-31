@@ -25,6 +25,14 @@ module.exports = (() => {
   assert.strictEqual(isMemoryContinuationQuestion('我们刚才聊到哪了'), true);
   assert.strictEqual(classifyMemoryNeed('你记得我喜欢什么吗').facet, 'preference');
   assert.strictEqual(classifyMemoryNeed('我之前说我是谁').facet, 'identity');
+  const amnesiaRecall = classifyMemoryNeed('宝你忘了我们的往日种种吗😢');
+  assert.strictEqual(amnesiaRecall.needsMemory, true);
+  assert.strictEqual(amnesiaRecall.facet, 'relationship');
+  assert.strictEqual(classifyMemoryNeed('你认识我吗').facet, 'identity');
+  assert.strictEqual(classifyMemoryNeed('你知道我是谁吗').facet, 'identity');
+  assert.strictEqual(classifyMemoryNeed('别忘了带伞').needsMemory, false);
+  assert.strictEqual(classifyMemoryNeed('别忘了提交').needsMemory, false);
+  assert.strictEqual(classifyMemoryNeed('别忘了提醒我开会').needsMemory, false);
   assert.strictEqual(classifyMemoryNeed('我上次在干嘛').facet, 'recent_continuity');
   assert.strictEqual(classifyMemoryNeed('群里之前怎么说这个活动').facet, 'group_context');
   assert.strictEqual(shouldPrioritizeMemoryProbe({

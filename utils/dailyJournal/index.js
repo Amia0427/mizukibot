@@ -62,6 +62,10 @@ const { createDailyJournalSegments } = require('./segments');
 const { createDailyJournalMemorySync } = require('./memorySync');
 const { createDailyJournalSummaryRunner } = require('./summaryRunner');
 const { createDailyJournalViews } = require('./views');
+const {
+  classifyJournalEntrySafety,
+  filterInjectableJournalEntries
+} = require('./safety');
 
 const {
   syncEpisodeMemory,
@@ -103,6 +107,7 @@ const {
   readEntrySidecar: (...args) => readEntrySidecar(...args),
   readSegmentSummaries: (...args) => readSegmentSummaries(...args),
   safeReadText,
+  filterInjectableJournalEntries,
   shiftDate,
   strictClampText
 });
@@ -167,6 +172,7 @@ const {
   normalizeTimestampToDay,
   normalizeYearMonth,
   parseJournalEntries,
+  filterInjectableJournalEntries,
   readEntrySidecar: (...args) => readEntrySidecar(...args),
   readJsonLines,
   safeReadText,
@@ -204,6 +210,7 @@ const {
   normalizeContinuitySnapshot,
   normalizeTimestampToDay,
   parseJournalEntries,
+  filterInjectableJournalEntries,
   postWithRetry,
   readJsonLines,
   safeReadText,
@@ -255,6 +262,17 @@ async function appendDailyJournalEntry(userId, question, reply, userInfo = {}, o
   const day = formatDateInTz(now, config.TIMEZONE);
   const record = buildJournalEntryRecord(question, reply, userInfo, now);
   if (!record) return false;
+  const safety = classifyJournalEntrySafety(record, { question, reply });
+  if (config.MEMORY_JOURNAL_UNSAFE_REPLY_FILTER !== false && !safety.safe) {
+    ensureUserJournalDir(uid);
+    appendJsonLine(getEntrySidecarFilePath(uid, day), {
+      ...buildEntrySidecarRecord(record, options, day),
+      unsafe: true,
+      unsafeReason: safety.reason,
+      journalWriteSkipped: true
+    }, { flushNow: true });
+    return false;
+  }
 
   ensureUserJournalDir(uid);
   const filePath = getJournalFilePath(uid, day);
@@ -361,6 +379,7 @@ const {
   loadSummaryState,
   maintainDailyJournalRollups,
   parseJournalEntries,
+  filterInjectableJournalEntries,
   postWithRetry,
   readSegmentSummaries,
   safeReadText,
@@ -378,6 +397,7 @@ module.exports = {
   getRecentDailySummaries,
   getDailyJournalStats,
   getDailyJournalRetrievalBundle,
+  classifyJournalEntrySafety,
   maintainDailyJournalRollups,
   runDailyJournalSummaries,
   shouldRunDailySummaryNow,

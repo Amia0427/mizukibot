@@ -19,6 +19,7 @@ function createDailyJournalViews(deps = {}) {
     readEntrySidecar,
     readSegmentSummaries,
     safeReadText,
+    filterInjectableJournalEntries,
     shiftDate,
     strictClampText
   } = deps;
@@ -95,7 +96,7 @@ function createDailyJournalViews(deps = {}) {
   function getDailySummaryItem(userId, day) {
     const uid = String(userId || '').trim();
     if (!uid || !isValidDayString(day)) return null;
-    const sidecarEntries = readEntrySidecar(uid, day);
+    const sidecarEntries = readEntrySidecar(uid, day).filter((item) => item?.journalWriteSkipped !== true && item?.unsafe !== true);
 
     const summaryText = safeReadText(getSummaryFilePath(uid, day), '').trim();
     if (summaryText) {
@@ -110,7 +111,7 @@ function createDailyJournalViews(deps = {}) {
       }
     }
 
-    const rawEntries = parseJournalEntries(safeReadText(getJournalFilePath(uid, day), ''));
+    const rawEntries = filterInjectableJournalEntries(parseJournalEntries(safeReadText(getJournalFilePath(uid, day), '')));
     if (rawEntries.length > 0) {
       const keepTail = Math.max(1, Number(config.DAILY_JOURNAL_ACTIVE_RAW_MAX_ENTRIES) || 8);
       const rawText = strictClampText(formatJournalEntries(rawEntries.slice(-keepTail)), Math.max(600, Number(config.MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS || 160) * 12));
@@ -200,7 +201,7 @@ function createDailyJournalViews(deps = {}) {
         stats.segmentChars += segments.reduce((sum, item) => sum + String(item.text || '').length, 0);
       }
 
-      const rawEntries = parseJournalEntries(safeReadText(getJournalFilePath(uid, day), ''));
+      const rawEntries = filterInjectableJournalEntries(parseJournalEntries(safeReadText(getJournalFilePath(uid, day), '')));
       stats.rawTailEntries += rawEntries.length;
       stats.rawTailChars += rawEntries.reduce((sum, item) => {
         return sum + String(item.user || '').length + String(item.assistant || '').length;

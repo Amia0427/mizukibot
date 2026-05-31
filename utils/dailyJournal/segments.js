@@ -21,6 +21,7 @@ function createDailyJournalSegments(deps = {}) {
     normalizeContinuitySnapshot,
     normalizeTimestampToDay,
     parseJournalEntries,
+    filterInjectableJournalEntries,
     postWithRetry,
     readJsonLines,
     safeReadText,
@@ -100,7 +101,8 @@ function createDailyJournalSegments(deps = {}) {
   function readEntrySidecar(userId, day) {
     const uid = String(userId || '').trim();
     if (!uid || !isValidDayString(day)) return [];
-    return readJsonLines(getEntrySidecarFilePath(uid, day));
+    return readJsonLines(getEntrySidecarFilePath(uid, day))
+      .filter((item) => item?.journalWriteSkipped !== true && item?.unsafe !== true);
   }
 
   function collectRecentEntrySidecars(userId, options = {}) {
@@ -132,7 +134,7 @@ function createDailyJournalSegments(deps = {}) {
 
   function readUnsegmentedEntries(userId, day, state) {
     const journalText = safeReadText(getJournalFilePath(userId, day), '');
-    const entries = parseJournalEntries(journalText);
+    const entries = filterInjectableJournalEntries(parseJournalEntries(journalText));
     const segmentState = getSegmentState(state, userId, day);
     if (!segmentState) return [];
     const offset = Math.max(0, Number(segmentState.journal_offset) || 0);
@@ -159,7 +161,7 @@ function createDailyJournalSegments(deps = {}) {
 
   function trimActiveJournalWindow(userId, day, state) {
     const filePath = getJournalFilePath(userId, day);
-    const entries = parseJournalEntries(safeReadText(filePath, ''));
+    const entries = filterInjectableJournalEntries(parseJournalEntries(safeReadText(filePath, '')));
     const segmentState = getSegmentState(state, userId, day);
     if (!segmentState) return;
 
