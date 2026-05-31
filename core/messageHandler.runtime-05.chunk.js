@@ -277,6 +277,7 @@
           dynamicPromptBlockCatalog: route?.meta?.dynamicPromptBlockCatalog || [],
           dynamicPromptGuide: route?.meta?.dynamicPromptGuide || '',
           dynamicFewShotPrompt: inboundContext?.dynamicFewShotPrompt || route?.meta?.dynamicFewShotPrompt || '',
+          mainReplyPromptMode: inboundContext?.mainReplyPromptMode || route?.meta?.mainReplyPromptMode || '',
           memoryCliTurn: inboundContext?.memoryCliTurn || route?.meta?.memoryCliTurn || {},
           schedulerInjection: inboundContext?.schedulerInjection || route?.meta?.schedulerInjection || route?.meta?.lifeSchedulerInjection || '',
           sharedShortTermContext: inboundContext?.sharedShortTermContext || route?.meta?.sharedShortTermContext || {},

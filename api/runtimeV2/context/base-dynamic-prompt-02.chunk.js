@@ -88,6 +88,7 @@
     summaryText,
     promptBudget: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens),
     dynamicFewShotPrompt,
+    mainReplyPromptMode,
     optionalContextBlocksIncluded: includeOptionalContextBlocks,
     optionalPersonaModuleBlocksIncluded: includePersonaModuleBlocks,
     optionalDynamicFewShotIncluded: includeDynamicFewShotBlock,

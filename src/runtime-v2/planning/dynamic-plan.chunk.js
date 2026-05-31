@@ -19,6 +19,7 @@ function normalizeDynamicPromptPlan(plan = {}, options = {}) {
   const blockCatalog = normalizeArray(options.dynamicPromptBlockCatalog);
   const legacyPersonaModules = normalizeArray(options.legacyPersonaModules);
   const planSource = normalizeText(options.source || plan?.source || plan?._source || 'planner');
+  const unavailableBlocks = new Set(normalizeArray(options.unavailableBlockIds).map((item) => normalizeText(item)).filter(Boolean));
   const plannerProvided = options.plannerProvided !== undefined
     ? options.plannerProvided === true
     : !['heuristic', 'rule', 'fallback'].includes(planSource);
@@ -40,7 +41,8 @@ function normalizeDynamicPromptPlan(plan = {}, options = {}) {
   const skippedPersonaModuleSet = new Set();
   const legacyEnabledBlockIds = normalizeArray(plan?.enabledBlockIds)
     .map((item) => normalizeText(item))
-    .filter((blockId) => validDynamicBlockIds.has(blockId));
+    .filter((blockId) => validDynamicBlockIds.has(blockId))
+    .filter((blockId) => !unavailableBlocks.has(blockId));
   const personaModuleLimit = Math.max(
     1,
     Number(options.maxActivePersonaModules || options.maxActiveModules || 0)
@@ -61,7 +63,7 @@ function normalizeDynamicPromptPlan(plan = {}, options = {}) {
     }
     const isPersonaModule = Boolean(moduleId);
     if (isPersonaModule && !validPersonaModuleIds.has(moduleId)) continue;
-    if (!isPersonaModule && !validDynamicBlockIds.has(blockId)) continue;
+    if (!isPersonaModule && (!validDynamicBlockIds.has(blockId) || unavailableBlocks.has(blockId))) continue;
     if (isPersonaModule) blockId = normalizeText(blockId) || `persona_module:${moduleId}`;
     const decision = normalizeText(rawDecision.decision).toLowerCase() === 'skip' ? 'skip' : 'include';
     const key = isPersonaModule ? `persona_module:${moduleId}` : blockId;
@@ -117,6 +119,7 @@ function normalizeDynamicPromptPlan(plan = {}, options = {}) {
   }
 
   for (const blockId of skippedBlockSet) enabledBlockSet.delete(blockId);
+  for (const blockId of unavailableBlocks) enabledBlockSet.delete(blockId);
   for (const moduleId of skippedPersonaModuleSet) personaModuleSet.delete(moduleId);
 
   const enabledBlockIds = Array.from(enabledBlockSet);

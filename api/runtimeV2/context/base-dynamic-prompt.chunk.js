@@ -6,6 +6,10 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     ? promptMaterials.affinity
     : getAffinitySettings(userInfo, { userId });
   const routeMeta = options.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const mainReplyPromptMode = resolveMainReplyPromptMode({
+    ...options,
+    mainReplyPromptMode: options.mainReplyPromptMode || promptMaterials?.mainReplyPromptMode
+  });
   const dynamicPromptPlan = promptMaterials?.dynamicPromptPlan && typeof promptMaterials.dynamicPromptPlan === 'object'
     ? promptMaterials.dynamicPromptPlan
     : normalizeDynamicPromptPlan(options);
@@ -115,8 +119,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       directedContext: routeMeta.directedContext,
       continuitySignals: options?.continuitySignals,
       personaPhase: routeMeta.personaPhase || '',
-      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
-      maxPersonaModuleCandidates: options.maxPersonaModuleCandidates
+      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || options.chatType || options.chat_type || 'private').trim(),
+      maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
+      mainReplyPromptMode
     }))
     : [];
   const personaWorldbookSearch = promptMaterials?.personaWorldbookSearch && typeof promptMaterials.personaWorldbookSearch === 'object'
@@ -137,9 +142,10 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         directedContext: routeMeta.directedContext,
         continuitySignals: options?.continuitySignals,
         personaPhase: routeMeta.personaPhase || '',
-        chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
+        chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || options.chatType || options.chat_type || 'private').trim(),
         maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
-        personaModuleCandidates
+        personaModuleCandidates,
+        mainReplyPromptMode
       }
     ))
     : { selected: [], rejected: [] };
@@ -463,18 +469,23 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       }));
     }
   }
-  const dynamicFewShotPrompt = includeDynamicFewShotBlock
+  const dynamicFewShotContext = {
+    question,
+    routePolicyKey: options.routePolicyKey,
+    topRouteType: options.topRouteType,
+    routePrompt: options.routePrompt,
+    maxExamples: 3,
+    continuitySignals: options?.continuitySignals,
+    contextDensity: estimateTokens(memoryContext.memoryForPrompt || '') + estimateTokens(summaryText || ''),
+    mainReplyPromptMode,
+    forceDynamicFewShot: options.forceDynamicFewShot === true || routeMeta.forceDynamicFewShot === true,
+    dynamicFewShotEnabled: options.dynamicFewShotEnabled === true || routeMeta.dynamicFewShotEnabled === true
+  };
+  const dynamicFewShotAllowed = shouldBuildDynamicFewShot(dynamicFewShotContext);
+  const dynamicFewShotPrompt = includeDynamicFewShotBlock && dynamicFewShotAllowed
     ? (promptMaterials?.dynamicFewShotPrompt !== undefined
       ? promptMaterials.dynamicFewShotPrompt
-      : buildDynamicFewShotPrompt({
-        question,
-        routePolicyKey: options.routePolicyKey,
-        topRouteType: options.topRouteType,
-        routePrompt: options.routePrompt,
-        maxExamples: 3,
-        continuitySignals: options?.continuitySignals,
-        contextDensity: estimateTokens(memoryContext.memoryForPrompt || '') + estimateTokens(summaryText || '')
-      }))
+      : buildDynamicFewShotPrompt(dynamicFewShotContext))
     : '';
   if (dynamicFewShotPrompt) {
     promptBlocks.push(createPromptBlock('dynamic_few_shot', 'Dynamic Few Shot', dynamicFewShotPrompt, {
@@ -508,7 +519,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     hasImpression: Boolean(memoryContext.promptImpressionText || memoryContext.impressionText),
     hasRelationshipState: true,
     hasDynamicFewShot: Boolean(dynamicFewShotPrompt),
-    hasMemoryCliInstruction: shouldExposeMemoryCli({ ...options, customPrompt })
+    hasMemoryCliInstruction: shouldExposeMemoryCli({ ...options, customPrompt }),
+    mainReplyPromptMode
   });
   const useHeuristicBasePlan = dynamicPromptPlan.plannerProvided !== true;
   const effectiveBaseDynamicPromptPlan = {
@@ -543,6 +555,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     slot: item.slot
   })));
   const baseRuntimeAddedIds = ['roleplay_runtime_context'];
+  if (isBalancedOrMinimalPromptMode(mainReplyPromptMode) && includeOptionalContextBlocks && shortTermContinuityText) {
+    baseRuntimeAddedIds.push('short_term_continuity');
+  }
   if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
     baseRuntimeAddedIds.push('persona_module:scene_group_insert');
   }
@@ -564,6 +579,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   }
   if (openVikingRecall.used === false && normalizeText(openVikingRecall.rejectedReason) === 'deduped_by_local_memory') {
     baseBlockedIds.push('openviking_recall');
+  }
+  if (!dynamicFewShotAllowed) {
+    baseBlockedIds.push('dynamic_few_shot');
   }
   const selectedPromptBlocks = filterBlocksByPlan(promptBlocks, effectiveBaseDynamicPromptPlan, {
     requiredIds: [],

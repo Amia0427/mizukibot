@@ -25,6 +25,11 @@ const {
   getDynamicContextBlockSpec,
   getMainReplyDynamicBlockCatalog
 } = require('./mainReplyPromptBlocks/catalog');
+const {
+  isBalancedOrMinimalPromptMode,
+  resolveMainReplyPromptMode,
+  shouldBuildDynamicFewShot
+} = require('./mainReplyPromptMode');
 
 function getPromptBlockPlanIds(block = {}) {
   const blockId = normalizeText(block?.id);
@@ -312,6 +317,8 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   const directedContext = input?.directedContext && typeof input.directedContext === 'object'
     ? input.directedContext
     : null;
+  const promptMode = resolveMainReplyPromptMode(input);
+  const conservativePromptMode = isBalancedOrMinimalPromptMode(promptMode);
 
   if (directedContext && (normalizeText(directedContext.scene) || normalizeText(directedContext?.addressee?.senderName) || normalizeText(directedContext?.quote?.text))) {
     push('directed_context', 'directed or quoted conversation context is available');
@@ -346,10 +353,18 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   if (input.hasLongTermProfile) push('long_term_profile', 'long-term profile is available and may help continuity');
   if (input.hasImpression) push('impression', 'prior impression can shape reply tone');
   if (input.hasRelationshipState) push('relationship_state', 'relationship state helps social distance calibration');
-  if (input.hasStyleProfile) push('style_profile', 'style profile is available for local adaptation');
-  if (input.hasSocialContext) push('social_context', 'social context is available for this scene');
-  if (input.hasSelfImprovement) push('self_improvement', 'learned self-improvement snippet is available');
-  if (input.hasDynamicFewShot) push('dynamic_few_shot', 'few-shot examples are available for this turn');
+  if (input.hasStyleProfile && (!conservativePromptMode || input.forceStyleProfile === true)) {
+    push('style_profile', 'style profile is explicitly useful for local adaptation');
+  }
+  if (input.hasSocialContext && (!conservativePromptMode || input.forceSocialContext === true)) {
+    push('social_context', 'social context is explicitly useful for this scene');
+  }
+  if (input.hasSelfImprovement && (!conservativePromptMode || input.forceSelfImprovement === true)) {
+    push('self_improvement', 'learned self-improvement snippet is explicitly useful for this reply pattern');
+  }
+  if (input.hasDynamicFewShot && shouldBuildDynamicFewShot({ ...input, promptMode })) {
+    push('dynamic_few_shot', 'few-shot examples are explicitly useful for style diagnostics or complex formatting');
+  }
   if (input.hasMemoryCliInstruction) push('memory_cli_instruction', 'memory_cli is exposed this turn');
   if (input.hasContextStatsInstruction) push('context_stats_instruction', 'context stats tool is exposed this turn');
   if (input.hasLifeScheduler) push('life_scheduler', 'life scheduler provided a live injection');

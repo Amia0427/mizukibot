@@ -10,6 +10,7 @@ async function renderPromptLayers(materials = {}, policy = {}) {
       routeMeta: policy.routeMeta || normalizedMaterials.routeMeta,
       routePolicyKey: policy.routePolicyKey || normalizedMaterials.routePolicyKey,
       topRouteType: policy.topRouteType || normalizedMaterials.topRouteType,
+      mainReplyPromptMode: policy.mainReplyPromptMode || normalizedMaterials.mainReplyPromptMode,
       promptMaterials: normalizedMaterials
     }
   );

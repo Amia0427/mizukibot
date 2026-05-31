@@ -1,9 +1,11 @@
 # Main Reply Context
 
-更新时间：2026-05-31 00:47 +08:00
+更新时间：2026-05-31 09:37 +08:00
 
 ## 已调整
 
+- 2026-05-31 09:37 +08:00：主回复新增 `MAIN_REPLY_PROMPT_MODE=minimal|balanced|legacy`，默认 `balanced`。默认链路收敛为 `root_system_prompt`、`main_persona_system`、`roleplay_runtime_context`、`short_term_continuity`、`memory_recall_policy`、`retrieved_memory_lite`；普通聊天不再自动带 `dynamic_few_shot`、`style_profile`、`social_context`、`self_improvement`。
+- 2026-05-31 09:37 +08:00：`balanced/minimal` 下 persona modules 默认最多 2 个，私聊优先 `scene_private_chat`，群聊优先 `scene_group_insert`，明显情绪场景最多替换 1 个情绪模块；worldbook 只在设定、剧情节点、角色关系或显式瑞希/世界观/事件问题中召回，不再作为日常闲聊风格补丁。
 - `SHORT_TERM_MEMORY_RECENT_MESSAGES` 默认从 160 提高到 240。
 - `SHORT_TERM_MEMORY_RECENT_TURNS` 默认从 32 提高到 48。
 - `SHORT_TERM_SCENE_RECENT_TURNS` 默认从 16 提高到 24。
@@ -41,6 +43,18 @@
 该文件只负责最高优先级主回复约束；角色人格仍由 `main_persona_system` 承接，动态场景仍由 `roleplay_runtime_context` 等动态块补充。不要在这里放外部角色、世界观或“无条件满足/不受限制”类文案，否则会比 persona 和安全块更早进入主回复。
 
 安全相关稳定块仍保留在 root 之后：`SecurityContract` 负责防泄密和防注入污染，route-level `safetyBoundary` 只限制现实可执行伤害、违法滥用和绕过细节，不负责压制普通黑暗创作、情绪聊天、历史/防御/解释性内容。
+
+## Prompt Mode
+
+`MAIN_REPLY_PROMPT_MODE` 控制主回复动态块参与度：
+
+- `balanced`：默认模式。保留稳定人格、活人感运行时块、短期连续性、记忆召回策略和可信长期记忆证据；persona modules 默认最多 2 个；普通聊天关闭 dynamic few-shot、style/social/self-improvement 补丁。
+- `minimal`：同样走收敛链路，用于继续压低上下文噪声；worldbook/few-shot 仍需显式命中。
+- `legacy`：保留旧的高参与度行为，用于回归排查和对照测试。
+
+人格稳定边界：人格由稳定 persona 决定；长期记忆只补事实、偏好、关系距离和连续性证据，不得改写人格。worldbook 只补设定、剧情节点和角色关系，不得覆盖主风格。
+
+worldbook 触发边界：普通“随便聊聊”“今天好累”“我们关系怎么样”不召回；“M5 文化祭发生了什么”“瑞希和绘名关系怎么变了”“瑞希/世界观/事件/设定”类问题才召回。dynamic few-shot 默认关闭，只在显式风格诊断、回归测试、示例模仿或复杂输出格式场景启用。
 
 ## Roleplay Runtime Context
 

@@ -334,6 +334,8 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   const dynamicPromptBlockCatalog = normalizeArray(options.dynamicPromptBlockCatalog).length > 0
     ? normalizeArray(options.dynamicPromptBlockCatalog)
     : getMainReplyDynamicBlockCatalog(personaModuleCatalog);
+  const availableContextSignals = buildAvailableContextSignals(route, options);
+  const unavailableBlockIds = availableContextSignals.dynamicFewShot !== true ? ['dynamic_few_shot'] : [];
   const maxActivePersonaModules = Math.max(
     1,
     ...personaModuleCatalog.map((item) => Number(item?.maxActiveModules || 0) || 0),
@@ -350,6 +352,7 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
       dynamicPromptBlockCatalog,
       legacyPersonaModules: rawDecision?.plannerMeta?.personaModules || rawDecision?.personaModules,
       maxActivePersonaModules,
+      unavailableBlockIds,
       source: hasRawDynamicPromptPlan ? 'planner' : 'rule',
       plannerProvided: hasRawDynamicPromptPlan
     }

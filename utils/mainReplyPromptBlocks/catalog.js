@@ -222,7 +222,7 @@ const DYNAMIC_CONTEXT_BLOCK_SPEC_OVERRIDES = Object.freeze({
     criticality: 'critical',
     emptyPolicy: 'reject_optional_empty',
     mustUseWhen: 'main roleplay reply has current-turn runtime context',
-    budget: { configKey: '', hardCapTokens: 420 }
+    budget: { configKey: '', hardCapTokens: 520 }
   },
   affinity_level: {
     criticality: 'optional',

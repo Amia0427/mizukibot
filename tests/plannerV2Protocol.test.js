@@ -760,7 +760,7 @@ module.exports = (async () => {
   assert.strictEqual(directedBlockMeta.signalKey, 'directedContext');
   assert.strictEqual(directedBlockMeta.available, true);
   assert.strictEqual(fewShotBlockMeta.selectionPolicy, 'high_value_only');
-  assert.strictEqual(fewShotBlockMeta.available, true);
+  assert.strictEqual(fewShotBlockMeta.available, false);
   assert.strictEqual(memoryBlockMeta.signalKey, 'retrievedMemory');
   assert.strictEqual(memoryBlockMeta.available, true);
   assert.strictEqual(openVikingBlockMeta.selectionPolicy, 'high_value_only');
@@ -773,7 +773,7 @@ module.exports = (async () => {
   assert.strictEqual(plannerPayload.availableContextSignals.longTermProfile, true);
   assert.strictEqual(plannerPayload.availableContextSignals.impression, true);
   assert.strictEqual(plannerPayload.availableContextSignals.summary, true);
-  assert.strictEqual(plannerPayload.availableContextSignals.dynamicFewShot, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.dynamicFewShot, false);
   assert.strictEqual(plannerPayload.availableContextSignals.memoryCliInstruction, true);
   assert.strictEqual(plannerPayload.availableContextSignals.openVikingRecall, true);
   assert.strictEqual(plannerPayload.availableContextSignals.schedulerInjection, true);

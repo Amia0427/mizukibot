@@ -138,6 +138,7 @@ function createMessageTaskControlCoordinator(deps = {}) {
           dynamicPromptBlockCatalog: route?.meta?.dynamicPromptBlockCatalog || [],
           dynamicPromptGuide: route?.meta?.dynamicPromptGuide || '',
           dynamicFewShotPrompt: route?.meta?.dynamicFewShotPrompt || '',
+          mainReplyPromptMode: route?.meta?.mainReplyPromptMode || '',
           memoryCliTurn: route?.meta?.memoryCliTurn || {},
           schedulerInjection: route?.meta?.schedulerInjection || route?.meta?.lifeSchedulerInjection || '',
           sharedShortTermContext: route?.meta?.sharedShortTermContext || {},
