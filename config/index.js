@@ -346,7 +346,7 @@ module.exports = {
   GLOBAL_TOOLS_MAX_PLANNER_TURNS: 1,
   GLOBAL_TOOLS_MAX_EVIDENCE_CHARS: pickNum('GLOBAL_TOOLS_MAX_EVIDENCE_CHARS', 6000),
   ...buildPlannerRuntimeConfig({ pick, pickNum, pickBool }),
-  MODEL_SELF_CHECK_TIMEOUT_MS: Math.max(1000, pickNum('MODEL_SELF_CHECK_TIMEOUT_MS', 12000)),
+  MODEL_SELF_CHECK_TIMEOUT_MS: Math.max(1000, pickNum('MODEL_SELF_CHECK_TIMEOUT_MS', 25000)),
   // AI router can use a dedicated endpoint/key/model. Empty values fall back to the main AI config.
   AI_ROUTER_BASE_URL: pick('AI_ROUTER_BASE_URL', pick('AI_ROUTER_BASEURI', '')),
   AI_ROUTER_API_KEY: pick('AI_ROUTER_API_KEY', pick('AI_ROUTER_APIKEY', '')),

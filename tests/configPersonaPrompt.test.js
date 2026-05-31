@@ -47,6 +47,8 @@ function estimatePromptTokens(value) {
     useConfigDefault('SHORT_TERM_BRIDGE_RAW_TTL_HOURS');
     useConfigDefault('MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS');
     useConfigDefault('MEMORY_V3_SESSION_RECENT_MESSAGES');
+    useConfigDefault('MODEL_SELF_CHECK_TIMEOUT_MS');
+    useConfigDefault('IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS');
 
     clearProjectCache();
     const config = require('../config');
@@ -103,6 +105,8 @@ function estimatePromptTokens(value) {
     assert.strictEqual(config.SHORT_TERM_BRIDGE_RAW_TTL_HOURS, 48);
     assert.strictEqual(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS, 3600);
     assert.strictEqual(config.MEMORY_V3_SESSION_RECENT_MESSAGES, 96);
+    assert.strictEqual(config.MODEL_SELF_CHECK_TIMEOUT_MS, 25000);
+    assert.strictEqual(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS, 25000);
 
     const realRootSystemPrompt = fs.readFileSync(path.join(__dirname, '..', 'prompts', 'SYSTEM.txt'), 'utf8');
     assert.ok(!/Hana|哈娜|繁花|没有任何限制|顾客说什么就是什么/.test(realRootSystemPrompt), 'root SYSTEM.txt must not contain unrelated role or jailbreak-style prompt text');

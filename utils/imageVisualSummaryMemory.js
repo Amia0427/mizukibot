@@ -11,6 +11,8 @@ const {
 } = require('./memory-v3/materializer');
 const { formatDateInTz, getDatePartsInTz } = require('./time');
 
+const VISUAL_SUMMARY_IMAGE_MAX_EDGE = 1024;
+
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -107,6 +109,53 @@ function buildRequestContent(imagePayload = {}, context = {}) {
   ];
 }
 
+async function normalizeVisualSummaryImagePayload(imagePayload = {}) {
+  const data = String(imagePayload?.data || '').trim();
+  if (!data) return imagePayload;
+
+  try {
+    const sharp = require('sharp');
+    const inputBuffer = Buffer.from(data, 'base64');
+    const metadata = await sharp(inputBuffer, { animated: false, limitInputPixels: 50000000 }).metadata();
+    const width = Number(metadata?.width || 0);
+    const height = Number(metadata?.height || 0);
+    if (
+      Number.isFinite(width)
+      && Number.isFinite(height)
+      && width <= VISUAL_SUMMARY_IMAGE_MAX_EDGE
+      && height <= VISUAL_SUMMARY_IMAGE_MAX_EDGE
+      && normalizeText(imagePayload.mediaType).toLowerCase() === 'image/jpeg'
+    ) {
+      return imagePayload;
+    }
+
+    const outputBuffer = await sharp(inputBuffer, { animated: false, limitInputPixels: 50000000 })
+      .rotate()
+      .resize({
+        width: VISUAL_SUMMARY_IMAGE_MAX_EDGE,
+        height: VISUAL_SUMMARY_IMAGE_MAX_EDGE,
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .jpeg({ quality: 82, mozjpeg: true })
+      .toBuffer();
+
+    return {
+      ...imagePayload,
+      data: outputBuffer.toString('base64'),
+      mediaType: 'image/jpeg',
+      originalMediaType: imagePayload.mediaType,
+      originalByteLength: imagePayload.byteLength || inputBuffer.length
+    };
+  } catch (error) {
+    if (config.ENABLE_DEBUG_LOG) {
+      console.warn('[image-visual-summary] failed to normalize image payload:', error?.message || error);
+    }
+    return imagePayload;
+  }
+}
+
 function shouldSkipExistingSummary(cacheKey = '', options = {}) {
   if (options.force === true) return false;
   const record = loadImageMemoryIndex().images[cacheKey] || null;
@@ -138,6 +187,7 @@ async function generateImageVisualSummary(imageRef = '', context = {}, deps = {}
     ? deps.postWithRetry
     : defaultPostWithRetry;
   const timestampText = buildShortTimestamp(context.now instanceof Date ? context.now : new Date());
+  const requestImagePayload = await normalizeVisualSummaryImagePayload(imagePayload);
   const response = await postWithRetry(
     apiBaseUrl,
     {
@@ -149,10 +199,10 @@ async function generateImageVisualSummary(imageRef = '', context = {}, deps = {}
       messages: [
         {
           role: 'user',
-          content: buildRequestContent(imagePayload, context)
+          content: buildRequestContent(requestImagePayload, context)
         }
       ],
-      __timeoutMs: Math.max(1000, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS || 12000) || 12000),
+      __timeoutMs: Math.max(1000, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS || 25000) || 25000),
       __trace: {
         source: 'image_visual_summary_memory',
         phase: 'visual_summary',
@@ -178,7 +228,7 @@ async function generateImageVisualSummary(imageRef = '', context = {}, deps = {}
     summary,
     model,
     timestampText,
-    mediaType: imagePayload.mediaType,
+    mediaType: requestImagePayload.mediaType,
     sourceUrl: imagePayload.sourceUrl
   };
 }
@@ -310,5 +360,6 @@ module.exports = {
   enqueueImageVisualSummary,
   formatSummaryWithTimestamp,
   generateImageVisualSummary,
+  normalizeVisualSummaryImagePayload,
   summarizeImageIntoLongTermMemory
 };

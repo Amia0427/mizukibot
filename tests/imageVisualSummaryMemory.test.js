@@ -23,7 +23,10 @@ process.env.TIMEZONE = 'Asia/Shanghai';
 
 const cacheDir = path.join(tempRoot, 'inbound_image_cache');
 fs.mkdirSync(cacheDir, { recursive: true });
-fs.writeFileSync(path.join(cacheDir, 'score_img.bin'), Buffer.from('fake-image'));
+fs.writeFileSync(
+  path.join(cacheDir, 'score_img.bin'),
+  Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/ASP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/AgP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/ISP/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z', 'base64')
+);
 fs.writeFileSync(path.join(cacheDir, 'score_img.json'), JSON.stringify({
   cacheKey: 'score_img',
   sourceUrl: 'https://example.com/score.png',
@@ -38,10 +41,30 @@ const { loadMemoryEvents } = require('../utils/memory-v3/events');
 const { loadMemoryNodes } = require('../utils/memory-v3/storage');
 const {
   buildShortTimestamp,
+  normalizeVisualSummaryImagePayload,
   summarizeImageIntoLongTermMemory
 } = require('../utils/imageVisualSummaryMemory');
 
 module.exports = (async () => {
+  const sharp = require('sharp');
+  const tallJpeg = await sharp({
+    create: {
+      width: 1200,
+      height: 2600,
+      channels: 3,
+      background: { r: 255, g: 255, b: 255 }
+    }
+  }).jpeg({ quality: 95 }).toBuffer();
+  const normalizedTallImage = await normalizeVisualSummaryImagePayload({
+    mediaType: 'image/jpeg',
+    byteLength: tallJpeg.length,
+    data: tallJpeg.toString('base64')
+  });
+  const normalizedTallMetadata = await sharp(Buffer.from(normalizedTallImage.data, 'base64')).metadata();
+  assert.strictEqual(normalizedTallImage.mediaType, 'image/jpeg');
+  assert.ok(normalizedTallMetadata.width <= 1024);
+  assert.ok(normalizedTallMetadata.height <= 1024);
+
   const calls = [];
   const result = await summarizeImageIntoLongTermMemory('cached-image://score_img', {
     userId: 'u_img',

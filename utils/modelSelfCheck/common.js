@@ -17,7 +17,7 @@ function normalizeText(value = '') {
 
 function clampTimeoutMs(value = config.MODEL_SELF_CHECK_TIMEOUT_MS) {
   const n = Number(value);
-  if (!Number.isFinite(n)) return 12000;
+  if (!Number.isFinite(n)) return 25000;
   return Math.max(1000, Math.floor(n));
 }
 
