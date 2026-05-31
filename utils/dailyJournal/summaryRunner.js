@@ -19,6 +19,7 @@ function createDailyJournalSummaryRunner(deps = {}) {
     loadSummaryState,
     maintainDailyJournalRollups,
     parseJournalEntries,
+    filterInjectableJournalEntries,
     postWithRetry,
     readSegmentSummaries,
     safeReadText,
@@ -40,7 +41,7 @@ function createDailyJournalSummaryRunner(deps = {}) {
 
     const segments = readSegmentSummaries(uid, day);
     const journalText = safeReadText(getJournalFilePath(uid, day), '').trim();
-    const activeEntries = parseJournalEntries(journalText);
+    const activeEntries = filterInjectableJournalEntries(parseJournalEntries(journalText));
     const activeText = formatJournalEntries(activeEntries.slice(-Math.max(1, Number(config.DAILY_JOURNAL_ACTIVE_RAW_MAX_ENTRIES) || 8)));
 
     const sourceParts = [];
@@ -126,13 +127,14 @@ function createDailyJournalSummaryRunner(deps = {}) {
     let monthlyCreated = 0;
     for (const userId of Object.keys(favorites || {})) {
       const journalText = safeReadText(getJournalFilePath(userId, targetDay), '').trim();
+      const safeJournalText = formatJournalEntries(filterInjectableJournalEntries(parseJournalEntries(journalText))).trim();
       const segments = readSegmentSummaries(userId, targetDay);
 
       try {
-        if (journalText || segments.length > 0) {
+        if (safeJournalText || segments.length > 0) {
           const summary = typeof options.summarySummarizer === 'function'
             ? strictClampText(
-              await options.summarySummarizer({ userId, day: targetDay, journalText, segments }),
+              await options.summarySummarizer({ userId, day: targetDay, journalText: safeJournalText, segments }),
               Math.max(40, Number(config.DAILY_JOURNAL_SUMMARY_MAX_TOKENS) || 2500)
             )
             : await summarizeJournalForDay(userId, targetDay);

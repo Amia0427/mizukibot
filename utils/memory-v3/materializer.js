@@ -60,6 +60,7 @@ const {
   isExpiredRecentTopic,
   isExpiringSoonRecentTopic,
   isProfileProjectionBlockedByExtractionClass,
+  isProfileProjectionBlockedByNoise,
   pushProfileItem,
   resolveEvidenceTier,
   resolveProfileNodeConflicts
@@ -487,7 +488,7 @@ function materializeMemoryViews(options = {}) {
         expiresAt: node.expiresAt || 0
       });
     }
-    const profileProjectionBlocked = isProfileProjectionBlockedByExtractionClass(node);
+    const profileProjectionBlocked = isProfileProjectionBlockedByExtractionClass(node) || isProfileProjectionBlockedByNoise(node);
     if (!profileProjectionBlocked && STRICT_PROFILE_FIELD_MAP[node.fieldKey] && node.evidenceTier === 'strict') {
       pushProfileItem(profile, 'strictProfile', STRICT_PROFILE_FIELD_MAP[node.fieldKey], node, 20);
     } else if (!profileProjectionBlocked && WEAK_PROFILE_FIELD_MAP[node.fieldKey]) {

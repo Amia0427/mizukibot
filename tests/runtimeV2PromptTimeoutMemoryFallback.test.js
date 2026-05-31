@@ -117,12 +117,15 @@ function createDeps(overrides = {}) {
     },
     config: {
       SYSTEM_PROMPT: 'Test persona stays present.',
-      SHORT_TERM_PENDING_SNAPSHOT_ENABLED: false
+      SHORT_TERM_PENDING_SNAPSHOT_ENABLED: false,
+      MEMORY_RECALL_FORCE_LOCAL_RAG: true
     },
     chatHistory: {},
     shortTermMemory: {},
     runtimeOptions: {},
-    buildFallbackMemoryContextImpl() {
+    buildFallbackMemoryContextImpl(_userId, _question, options = {}) {
+      assert.strictEqual(options.ragEnabled, true, 'recall soft-timeout fallback should force local RAG');
+      assert.strictEqual(options.forceMemoryContext, true, 'recall soft-timeout fallback should mark memory context forced');
       return {
         promptRetrievedMemoryText: '之前约定先排查 prompt 拼装。',
         promptDailyJournalText: '2026-05-21 主回复 prompt 需要验证记忆注入。',

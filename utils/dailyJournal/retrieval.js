@@ -25,6 +25,7 @@ function createDailyJournalRetrieval(deps = {}) {
     readJsonLines,
     safeReadText,
     selectMostRecentItems,
+    filterInjectableJournalEntries,
     shiftDate,
     strictClampText
   } = deps;
@@ -66,12 +67,12 @@ function createDailyJournalRetrieval(deps = {}) {
   function buildActiveRawJournalItem(userId, day, options = {}) {
     const uid = String(userId || '').trim();
     if (!uid || !isValidDayString(day)) return null;
-    const rawEntries = parseJournalEntries(safeReadText(getJournalFilePath(uid, day), ''));
+    const rawEntries = filterInjectableJournalEntries(parseJournalEntries(safeReadText(getJournalFilePath(uid, day), '')));
     if (rawEntries.length === 0) return null;
 
     const maxEntries = Math.max(1, Number(options.activeRawMaxEntries) || Number(config.DAILY_JOURNAL_ACTIVE_RAW_MAX_ENTRIES) || 8);
     const sessionKey = String(options.sessionKey || '').trim();
-    const sidecars = readEntrySidecar(uid, day);
+    const sidecars = readEntrySidecar(uid, day).filter((item) => item?.journalWriteSkipped !== true && item?.unsafe !== true);
     const alignedSidecars = sidecars.length >= rawEntries.length
       ? sidecars.slice(-rawEntries.length)
       : Array.from({ length: rawEntries.length - sidecars.length }, () => null).concat(sidecars);
@@ -224,7 +225,9 @@ function createDailyJournalRetrieval(deps = {}) {
     }
 
     const items = [...activeRawItems, ...dailyItems, ...fourDayItems, ...monthlyItems];
-    const continuityEntries = items.flatMap((item) => Array.isArray(item.sidecarEntries) ? item.sidecarEntries : []);
+    const continuityEntries = items
+      .flatMap((item) => Array.isArray(item.sidecarEntries) ? item.sidecarEntries : [])
+      .filter((item) => item?.journalWriteSkipped !== true && item?.unsafe !== true);
     const continuity = matchSidecarEntries(continuityEntries, {
       sessionKey: options.sessionKey,
       topic: options.topic || options.question || ''

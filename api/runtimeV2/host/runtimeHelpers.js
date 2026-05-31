@@ -1,6 +1,6 @@
 const config = require('../../../config');
 
-const MEMORY_RECALL_LATENCY_RE = /(昨天|昨日|前天|大前天|今天|今日|刚才|刚刚|上次|之前|前面|前几天|那天|聊了什么|聊过什么|聊到哪|说了什么|讲了什么|还记得|记得|记不记得|回忆|想起来|接着|继续|断片|失忆|\byesterday\b|\bremember\b|\blast time\b|\bearlier\b|what did we talk|where did we leave)/i;
+const MEMORY_RECALL_LATENCY_RE = /(昨天|昨日|前天|大前天|今天|今日|刚才|刚刚|上次|之前|前面|前几天|那天|聊了什么|聊过什么|聊到哪|说了什么|讲了什么|还记得|记得|记不记得|回忆|想起来|忘了|不记得|记不得|不认识我|不认得我|你认识我吗|你认得我吗|你知道我是谁吗|往日种种|我们的过去|我们之间|接着|继续|断片|失忆|\byesterday\b|\bremember\b|\blast time\b|\bearlier\b|what did we talk|where did we leave)/i;
 const MEMORY_RECALL_MIN_MEMORY_BUDGET_MS = 6000;
 const MEMORY_RECALL_MIN_PREPARE_BUDGET_MS = 8000;
 
@@ -36,6 +36,14 @@ function isMemoryRecallLatencyRequest(request = {}) {
   ).trim();
   if (!text) return false;
   if (/^(查一下|搜索|搜一下|最新|新闻|官网|search|look up|google)\b/i.test(text)) return false;
+  try {
+    const { classifyMemoryNeed } = require('../../../utils/recallHeuristics');
+    if (classifyMemoryNeed(text, {
+      facets: routeMeta.facets || {},
+      intent: request.intent || routeMeta.intent || {},
+      meta: routeMeta
+    }).needsMemory) return true;
+  } catch (_) {}
   return MEMORY_RECALL_LATENCY_RE.test(text);
 }
 

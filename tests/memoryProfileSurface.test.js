@@ -87,6 +87,7 @@ const { buildStableProfileText } = require('../utils/memoryProfileSurface');
 const v3 = buildStableProfileText('u_profile', { question: '普通聊天' });
 assert.strictEqual(v3.source, 'v3');
 assert.ok(v3.text.includes('稳定画像'));
+assert.ok(v3.text.includes('当前用户ID：u_profile'));
 assert.ok(v3.text.includes('v3 身份'));
 assert.ok(!v3.text.includes('v3 喜欢新证据'));
 assert.ok(!v3.text.includes('legacy 喜欢旧梗'));

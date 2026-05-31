@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-05-31 18:05 +08:00：修复身份/关系类记忆召回漏判和污染回注；“忘了我/你认识我吗/往日种种”等会强制走本地记忆链路，journal 会隔离“你是谁来着”等失败回复，profile 投影过滤噪声身份并注入当前用户锚点。
+
 更新 2026-05-31 11:25 +08:00：模型自检和图片视觉摘要默认超时从 12s 调整为 25s；图片长期记忆视觉摘要会先把 cached 图片归一到 1024px 内 JPEG，避免硅基流动 ALB 对超长 JPEG 直接返回 HTML `400 Bad Request`。
 
 更新 2026-05-31 09:37 +08:00：主回复 prompt 默认收敛到 `MAIN_REPLY_PROMPT_MODE=balanced`：保留 root/persona/runtime/短期连续性/记忆策略/轻量长期记忆证据，persona modules 默认最多 2 个，worldbook 只做设定/剧情/角色关系召回，dynamic few-shot 和风格补丁不再进入普通闲聊。
