@@ -137,7 +137,10 @@
       promptRenderMs,
       prompt_assembly_ms: promptRenderMs
     },
-    dynamicFewShotPrompt: effectiveOptionalLayer?.dynamicFewShotPrompt || sessionCandidateLayer.dynamicFewShotPrompt || promptMaterials.dynamicFewShotPrompt || ''
+    dynamicFewShotPrompt: effectiveCombinedAssistantOnlyBlocks.some((item) => item?.id === 'dynamic_few_shot')
+      ? (effectiveOptionalLayer?.dynamicFewShotPrompt || sessionCandidateLayer.dynamicFewShotPrompt || promptMaterials.dynamicFewShotPrompt || '')
+      : '',
+    mainReplyPromptMode
   };
 }
 

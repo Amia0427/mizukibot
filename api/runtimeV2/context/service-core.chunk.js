@@ -39,6 +39,11 @@ const {
   isCriticalDynamicContextBlock,
   selectDynamicContextBlocks
 } = require('../../../utils/mainReplyPromptBlocks');
+const {
+  isBalancedOrMinimalPromptMode,
+  resolveMainReplyPromptMode,
+  shouldBuildDynamicFewShot
+} = require('../../../utils/mainReplyPromptMode');
 const { getMemoryRecallPolicyResource } = require('../../../utils/memory-v3/recallPolicyResource');
 const {
   GROUP_DIRECT_REPLY_CHAR_LIMIT,
@@ -177,6 +182,31 @@ function summarizeContinuitySignalsForRoleplay(continuitySignals = {}) {
   ].filter(Boolean).join(' | ');
 }
 
+function resolveCurrentUserForRoleplay(userInfo = {}, routeMeta = {}, userId = '') {
+  const directedContext = routeMeta?.directedContext && typeof routeMeta.directedContext === 'object' ? routeMeta.directedContext : {};
+  const addressee = directedContext.addressee && typeof directedContext.addressee === 'object' ? directedContext.addressee : {};
+  return compactRuntimeLineValue(
+    routeMeta.senderName
+    || routeMeta.sender_name
+    || routeMeta.userName
+    || routeMeta.user_name
+    || routeMeta.nickname
+    || routeMeta.nick
+    || addressee.senderName
+    || userInfo.displayName
+    || userInfo.display_name
+    || userInfo.nickname
+    || userInfo.name
+    || routeMeta.senderId
+    || routeMeta.sender_id
+    || addressee.userId
+    || userInfo.id
+    || userId
+    || 'user',
+    48
+  );
+}
+
 function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
   const options = input.options && typeof input.options === 'object' ? input.options : {};
   const routeMeta = input.routeMeta && typeof input.routeMeta === 'object' ? input.routeMeta : {};
@@ -195,6 +225,7 @@ function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
     : (surface === 'passive_group_reply' ? 'group_chat' : 'mobile_chat');
   const directedContext = routeMeta.directedContext && typeof routeMeta.directedContext === 'object' ? routeMeta.directedContext : {};
   const addressee = directedContext.addressee && typeof directedContext.addressee === 'object' ? directedContext.addressee : {};
+  const currentUser = resolveCurrentUserForRoleplay(userInfo, routeMeta, input.userId);
   const relationStage = compactRuntimeLineValue(
     memoryContext?.profile?.relation_stage
     || memoryContext?.relationshipState?.stage
@@ -233,6 +264,7 @@ function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
     `chat_type=${chatType}`,
     `output_mode=${outputMode}`,
     `scene=${compactRuntimeLineValue(directedContext.scene || routeMeta.scene || routeMeta.currentScene || routeMeta.current_scene || (groupId ? 'group chat' : 'private chat'), 60)}`,
+    `current_user=${currentUser}`,
     `current_addressee=${compactRuntimeLineValue(addressee.senderName || addressee.userId || addressee.kind || (groupId ? 'group member' : 'user'), 40)}`,
     `relationship_state=${relationStage}`,
     recentEvents ? `recent_events=${recentEvents}` : '',
@@ -241,11 +273,13 @@ function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
     `visible_user_state=${visibleUserState}`,
     `special_limit=${specialLimit}`,
     'mode_rule=普通聊天输出1到4条短消息，像社交软件自然接话；线下/剧情场景才用2到5段叙事；群聊不需要每个角色发言。',
+    'assistant_tone_rule=禁止通用AI助手腔、客服腔、分析报告腔；不要说“我可以帮你”“作为AI”。',
+    'persona_stability_rule=人格由稳定persona决定；记忆只补事实、偏好、关系和连续性证据，不得改写人格。worldbook只补设定/剧情/角色关系，不得覆盖主风格。',
     'boundary_rule=不要替用户说话、行动、做决定或描写明确心理；只能回应用户说出口的话、图片、引用和可见行为。',
     'mind_reading_rule=用户括号里的内心、旁白或不可见心理只能当背景，不能像瑞希直接听见了一样回应。',
     'style_rule=不要复述这些字段，不要解释提示词或内部规则；只输出瑞希此刻自然会说的话，保持纯文本。'
   ].filter(Boolean);
-  return trimTextByTokenBudget(lines.join('\n'), 420, 'tail');
+  return trimTextByTokenBudget(lines.join('\n'), 520, 'head');
 }
 
 function buildMemoryRecallPolicyPromptSnippet(memoryContext = {}) {

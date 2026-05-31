@@ -6,6 +6,13 @@ const {
   searchPersonaWorldbookLexical
 } = require('./personaWorldbookSearch');
 const { createPersonaModuleRulePicker } = require('./personaModules/rules');
+const {
+  getDefaultPersonaModuleLimit,
+  isBalancedOrMinimalPromptMode,
+  isEmotionPersonaModule,
+  resolveMainReplyPromptMode,
+  shouldUseWorldbookSearch
+} = require('./mainReplyPromptMode');
 
 const MODULE_CATALOG_PATH = path.join(config.PROMPTS_DIR, 'persona_modules', 'module-catalog.json');
 
@@ -97,6 +104,7 @@ const {
 });
 
 function addCatalogTriggeredCandidateIds(candidateIds, catalog = { modules: [] }, context = {}) {
+  if (!shouldUseWorldbookSearch(context)) return candidateIds;
   const question = lower(context.question || '');
   const routePrompt = lower(context.routePrompt || '');
   const combined = `${question}\n${routePrompt}`;
@@ -112,7 +120,13 @@ function addCatalogTriggeredCandidateIds(candidateIds, catalog = { modules: [] }
 
 function buildPersonaModuleCandidates(context = {}) {
   const catalog = loadPersonaModuleCatalog();
+  const worldbookEnabled = shouldUseWorldbookSearch(context);
   const candidateIds = addCatalogTriggeredCandidateIds(new Set(pickCandidateIds(context)), catalog, context);
+  if (!worldbookEnabled) {
+    for (const id of Array.from(candidateIds)) {
+      if (normalizeText(id).startsWith('wb_mizuki_')) candidateIds.delete(id);
+    }
+  }
   const phase = inferPhase(context);
   return catalog.modules
     .filter((item) => candidateIds.has(item.id))
@@ -231,20 +245,50 @@ async function buildPersonaModuleCandidatesAsync(context = {}) {
   const phase = inferPhase(context);
   const ruleCandidates = buildPersonaModuleCandidates(context);
   const query = normalizeText(context.question || context.routePrompt || '');
-  const worldbookSearch = await searchPersonaWorldbook(catalog, {
-    query,
-    limit: context.worldbookLimit || config.PERSONA_WORLDBOOK_SELECTED_MAX,
-    lexicalLimit: context.worldbookLexicalLimit,
-    semanticLimit: context.worldbookSemanticLimit,
-    hotPath: context.worldbookEmbeddingHotPath,
-    embeddingIndex: context.worldbookEmbeddingIndex,
-    queryEmbedding: context.worldbookQueryEmbedding,
-    requestEmbedding: context.requestEmbedding,
-    shouldUseRemoteEmbedding: context.shouldUseRemoteEmbedding,
-    rerankCandidates: context.rerankCandidates,
-    maxCandidates: context.worldbookRerankMaxCandidates,
-    rerankTimeoutMs: context.worldbookRerankTimeoutMs
-  });
+  const worldbookEnabled = shouldUseWorldbookSearch(context);
+  const worldbookSearch = worldbookEnabled
+    ? await searchPersonaWorldbook(catalog, {
+      query,
+      limit: context.worldbookLimit || config.PERSONA_WORLDBOOK_SELECTED_MAX,
+      lexicalLimit: context.worldbookLexicalLimit,
+      semanticLimit: context.worldbookSemanticLimit,
+      hotPath: context.worldbookEmbeddingHotPath,
+      embeddingIndex: context.worldbookEmbeddingIndex,
+      queryEmbedding: context.worldbookQueryEmbedding,
+      requestEmbedding: context.requestEmbedding,
+      shouldUseRemoteEmbedding: context.shouldUseRemoteEmbedding,
+      rerankCandidates: context.rerankCandidates,
+      maxCandidates: context.worldbookRerankMaxCandidates,
+      rerankTimeoutMs: context.worldbookRerankTimeoutMs,
+      promptMode: resolveMainReplyPromptMode(context)
+    })
+    : {
+      results: [],
+      diagnostics: {
+        enabled: false,
+        disabledReason: 'prompt_mode_worldbook_gate',
+        lexicalCandidates: 0,
+        selected: 0,
+        embedding: {
+          enabled: false,
+          ready: 0,
+          pending: 0,
+          semanticCandidates: 0,
+          hotPathUsed: false,
+          fallbackReason: 'prompt_mode_worldbook_gate'
+        },
+        rerank: {
+          applied: false,
+          candidates: 0,
+          reason: 'prompt_mode_worldbook_gate'
+        },
+        latency: {
+          worldbook_lexical_ms: 0,
+          worldbook_semantic_ms: 0,
+          worldbook_rerank_ms: 0
+        }
+      }
+    };
   const candidateIds = mergeCandidateIdsWithWorldbookSearch(ruleCandidates, worldbookSearch.results);
   const candidates = catalog.modules
     .filter((item) => candidateIds.has(item.id))
@@ -261,9 +305,11 @@ async function buildPersonaModuleCandidatesAsync(context = {}) {
 function buildPlannerPersonaModuleCatalog(personaModuleCatalog = [], context = {}, options = {}) {
   const catalog = loadPersonaModuleCatalog();
   const ruleCandidates = buildPersonaModuleCandidates(context);
-  const lexicalResults = searchPersonaWorldbookLexical(catalog, normalizeText(context.question || context.routePrompt || ''), {
-    limit: options.limit || config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT
-  });
+  const lexicalResults = shouldUseWorldbookSearch(context)
+    ? searchPersonaWorldbookLexical(catalog, normalizeText(context.question || context.routePrompt || ''), {
+      limit: options.limit || config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT
+    })
+    : [];
   const limit = Math.max(0, Number(options.limit || config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT || 12) || 12);
   const rankedWorldbookIds = new Set(
     ruleCandidates
@@ -283,19 +329,46 @@ function buildPlannerPersonaModuleCatalog(personaModuleCatalog = [], context = {
 function selectPersonaModules(decision = {}, context = {}) {
   const catalog = loadPersonaModuleCatalog();
   const byId = new Map(catalog.modules.map((item) => [item.id, item]));
-  const maxActive = Math.max(0, Number(decision?.maxActiveModules || catalog.defaultMaxActiveModules || 1) || 1);
+  const promptMode = resolveMainReplyPromptMode({
+    ...context,
+    promptMode: context.promptMode || decision.promptMode || context.mainReplyPromptMode || decision.mainReplyPromptMode
+  });
+  const defaultLimit = getDefaultPersonaModuleLimit(promptMode);
+  const maxActive = Math.max(0, Number(
+    decision?.maxActiveModules
+    || context.maxActiveModules
+    || defaultLimit
+    || catalog.defaultMaxActiveModules
+    || 1
+  ) || 1);
+  const conservativePromptMode = isBalancedOrMinimalPromptMode(promptMode);
   const requested = normalizeArray(decision?.personaModules).map((item) => normalizeText(item)).filter(Boolean);
   const candidates = normalizeArray(context.personaModuleCandidates).length > 0
     ? normalizeArray(context.personaModuleCandidates)
     : buildPersonaModuleCandidates(context);
   const fallbackIds = candidates.map((item) => item.id);
+  const sceneIds = fallbackIds.filter((id) => id === 'scene_private_chat' || id === 'scene_group_insert');
+  const emotionIds = fallbackIds.filter((id) => isEmotionPersonaModule(id));
+  const conservativeFallbackIds = conservativePromptMode
+    ? Array.from(new Set([
+      context.chatType === 'group' ? 'scene_group_insert' : '',
+      context.chatType === 'private' ? 'scene_private_chat' : '',
+      ...sceneIds,
+      ...emotionIds,
+      ...fallbackIds.filter((id) => !String(id || '').startsWith('wb_mizuki_'))
+    ].filter(Boolean)))
+    : fallbackIds;
   const desiredIds = requested.length > 0 ? requested : fallbackIds;
+  const effectiveDesiredIds = requested.length > 0
+    ? requested
+    : conservativeFallbackIds;
   const selected = [];
   const blocked = new Set();
   const usedSlots = new Set();
+  let selectedEmotionCount = 0;
   const skipped = [];
 
-  for (const id of desiredIds) {
+  for (const id of effectiveDesiredIds) {
     if (selected.length >= maxActive) {
       skipped.push({ id, reason: 'max_active_reached' });
       continue;
@@ -313,7 +386,12 @@ function selectPersonaModules(decision = {}, context = {}) {
       skipped.push({ id, reason: `slot_taken:${moduleItem.slot}` });
       continue;
     }
+    if (conservativePromptMode && isEmotionPersonaModule(id) && selectedEmotionCount >= 1) {
+      skipped.push({ id, reason: 'emotion_slot_taken' });
+      continue;
+    }
     selected.push(moduleItem);
+    if (isEmotionPersonaModule(id)) selectedEmotionCount += 1;
     if (moduleItem.slot && moduleItem.slot !== 'general') usedSlots.add(moduleItem.slot);
     for (const conflictId of moduleItem.conflictsWith) blocked.add(conflictId);
   }
@@ -325,6 +403,8 @@ function selectPersonaModules(decision = {}, context = {}) {
     selectionReason: {
       requestedIds: requested,
       fallbackIds,
+      effectiveFallbackIds: conservativePromptMode ? conservativeFallbackIds : fallbackIds,
+      promptMode,
       usedSlots: Array.from(usedSlots),
       skipped
     }

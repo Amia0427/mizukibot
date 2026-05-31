@@ -46,6 +46,9 @@ module.exports = (async () => {
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'roleplay_runtime_context'));
   const roleplayRuntimeContext = main.dynamicContextBlocks.find((item) => item.id === 'roleplay_runtime_context');
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('[RoleplayRuntimeContext]'));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('current_user='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('assistant_tone_rule='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('persona_stability_rule='));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('mind_reading_rule='));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('boundary_rule='));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('pure_text_reply_only') || String(roleplayRuntimeContext?.content || '').includes('纯文本'));

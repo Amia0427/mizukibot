@@ -247,12 +247,25 @@ function runTestFile(file) {
   });
 }
 
+function resolveRequestedTestFile(item, testsDir) {
+  const raw = String(item || '').trim();
+  if (!raw) return '';
+  const directPath = path.resolve(process.cwd(), raw);
+  if (fs.existsSync(directPath)) return directPath;
+  if (!raw.includes('/') && !raw.includes('\\')) {
+    const byNamePath = path.join(testsDir, raw);
+    if (fs.existsSync(byNamePath)) return byNamePath;
+  }
+  return directPath;
+}
+
 async function runAllTests() {
   let failed = 0;
+  const testsDir = path.join(__dirname, '..', 'tests');
   const requestedFiles = process.argv.slice(2)
     .filter((item) => String(item || '').trim() && !String(item || '').startsWith('--'))
-    .map((item) => path.resolve(process.cwd(), item));
-  const discoveredTestFiles = listTestFiles(path.join(__dirname, '..', 'tests'));
+    .map((item) => resolveRequestedTestFile(item, testsDir));
+  const discoveredTestFiles = listTestFiles(testsDir);
   const runnableFiles = requestedFiles.length > 0
     ? requestedFiles.filter((candidate) => fs.existsSync(candidate))
     : discoveredTestFiles.length > 0

@@ -43,6 +43,10 @@ const {
   requiresToolEvidence,
   shouldPrioritizeContextStats
 } = require('./tool-selection.chunk');
+const {
+  resolveMainReplyPromptMode,
+  shouldBuildDynamicFewShot
+} = require('../../../utils/mainReplyPromptMode');
 
 const DYNAMIC_PROMPT_BLOCK_SIGNAL_KEYS = Object.freeze({
   roleplay_runtime_context: 'roleplayRuntimeContext',
@@ -136,6 +140,7 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
     ? normalizeArray(options.dynamicPromptBlockCatalog)
     : getMainReplyDynamicBlockCatalog(personaModuleCatalog);
   const availableContextSignals = buildAvailableContextSignals(route, options);
+  const unavailableBlockIds = availableContextSignals.dynamicFewShot !== true ? ['dynamic_few_shot'] : [];
   const heuristicDynamicPromptPlan = buildHeuristicDynamicPromptPlan({
     continuitySignals: options.continuitySignals,
     directedContext: options.directedContext,
@@ -155,13 +160,15 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
     hasDynamicFewShot: availableContextSignals.dynamicFewShot,
     hasMemoryCliInstruction: availableContextSignals.memoryCliInstruction,
     hasContextStatsInstruction: availableContextSignals.contextStatsInstruction,
-    hasLifeScheduler: availableContextSignals.schedulerInjection
+    hasLifeScheduler: availableContextSignals.schedulerInjection,
+    mainReplyPromptMode: resolveMainReplyPromptMode(options)
   });
 
   if (isConversationalNoop(cleanText)) {
     const dynamicPromptPlan = normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
       personaModuleCatalog,
       dynamicPromptBlockCatalog,
+      unavailableBlockIds,
       source: 'rule',
       plannerProvided: false
     });
@@ -290,6 +297,7 @@ function buildRuleBasedPlannerDecision(route = {}, options = {}) {
   const dynamicPromptPlan = normalizeDynamicPromptPlan(heuristicDynamicPromptPlan, {
     personaModuleCatalog,
     dynamicPromptBlockCatalog,
+    unavailableBlockIds,
     source: 'rule',
     plannerProvided: false
   });
@@ -395,6 +403,10 @@ function hasMeaningfulObject(value) {
 
 function buildAvailableContextSignals(route = {}, options = {}) {
   const routeMeta = normalizeObject(route?.meta, {});
+  const mainReplyPromptMode = resolveMainReplyPromptMode({
+    ...options,
+    routeMeta
+  });
   const memoryContext = normalizeObject(options.memoryContext, {});
   const directedContext = normalizeObject(options.directedContext || routeMeta.directedContext, null);
   const continuitySignals = normalizeObject(options.continuitySignals || routeMeta.continuitySignals, {});
@@ -482,7 +494,19 @@ function buildAvailableContextSignals(route = {}, options = {}) {
       || hasMeaningfulObject(routeMeta.socialContext)
       || hasMeaningfulText(routeMeta.groupId || routeMeta.group_id)
     )),
-    dynamicFewShot: signal('dynamicFewShot', hasMeaningfulText(options.dynamicFewShotPrompt)),
+    dynamicFewShot: signal(
+      'dynamicFewShot',
+      hasMeaningfulText(options.dynamicFewShotPrompt)
+      && shouldBuildDynamicFewShot({
+        question: getPlannerRequestText(route),
+        routePolicyKey: options.routePolicyKey || routeMeta.routePolicyKey,
+        topRouteType: options.topRouteType || route?.topRouteType || routeMeta.topRouteType,
+        routePrompt: options.routePrompt || routeMeta.routePrompt,
+        mainReplyPromptMode,
+        forceDynamicFewShot: options.forceDynamicFewShot === true || routeMeta.forceDynamicFewShot === true,
+        dynamicFewShotEnabled: options.dynamicFewShotEnabled === true || routeMeta.dynamicFewShotEnabled === true
+      })
+    ),
     memoryCliInstruction: signal('memoryCliInstruction', (
       hasMeaningfulObject(options.memoryCliTurn)
       || normalizeArray(options.allowedTools || routeMeta.allowedTools).includes('memory_cli')

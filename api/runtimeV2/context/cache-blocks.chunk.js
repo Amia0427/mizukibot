@@ -83,6 +83,7 @@ function buildPromptCacheKeys(userId = '', routeMeta = {}, options = {}) {
     normalizeText(options.topRouteType),
     normalizeText(options.reviewMode),
     normalizeText(options.featureFingerprint),
+    normalizeText(options.promptModeFingerprint),
     normalizeText(options.promptManifestFingerprint),
     normalizeText(options.systemPromptFingerprint)
   ].join('|'));

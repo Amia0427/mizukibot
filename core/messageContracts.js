@@ -36,6 +36,27 @@ function buildInboundMessageContext(input = {}) {
     visualContext: source.visualContext && typeof source.visualContext === 'object'
       ? { ...source.visualContext }
       : null,
+    mainReplyPromptMode: String(source.mainReplyPromptMode || '').trim(),
+    availableContextSignals: source.availableContextSignals && typeof source.availableContextSignals === 'object'
+      ? { ...source.availableContextSignals }
+      : {},
+    dynamicFewShotPrompt: String(source.dynamicFewShotPrompt || ''),
+    memoryCliTurn: source.memoryCliTurn && typeof source.memoryCliTurn === 'object'
+      ? { ...source.memoryCliTurn }
+      : {},
+    schedulerInjection: source.schedulerInjection || '',
+    sharedShortTermContext: source.sharedShortTermContext && typeof source.sharedShortTermContext === 'object'
+      ? { ...source.sharedShortTermContext }
+      : {},
+    personaMemoryState: source.personaMemoryState && typeof source.personaMemoryState === 'object'
+      ? { ...source.personaMemoryState }
+      : {},
+    memoryContext: source.memoryContext && typeof source.memoryContext === 'object'
+      ? { ...source.memoryContext }
+      : {},
+    userInfo: source.userInfo && typeof source.userInfo === 'object'
+      ? { ...source.userInfo }
+      : {},
     isAtBot: Boolean(source.isAtBot),
     preprocessedText: String(source.preprocessedText || source.cleanText || ''),
     botQQ: String(source.botQQ || '').trim(),

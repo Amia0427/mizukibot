@@ -1,5 +1,6 @@
 async function collectPromptInputs(userInfo, userId, question, customPrompt = null, options = {}) {
   const routeMeta = options.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const mainReplyPromptMode = resolveMainReplyPromptMode(options);
   const dynamicPromptPlan = normalizeDynamicPromptPlan(options);
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
@@ -26,8 +27,9 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     directedContext: routeMeta.directedContext,
     continuitySignals: options?.continuitySignals,
     personaPhase: routeMeta.personaPhase || '',
-    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
-    maxPersonaModuleCandidates: options.maxPersonaModuleCandidates
+    chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || options.chatType || options.chat_type || 'private').trim(),
+    maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
+    mainReplyPromptMode
   };
   const personaModuleCandidatesPromise = buildPersonaModuleCandidatesAsync(personaModuleContext)
     .catch((error) => ({ __personaModuleCandidatesError: error }));
@@ -123,22 +125,29 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       directedContext: routeMeta.directedContext,
       continuitySignals: options?.continuitySignals,
       personaPhase: routeMeta.personaPhase || '',
-      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || '').trim(),
-      personaModuleCandidates
+      chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || options.chatType || options.chat_type || 'private').trim(),
+      personaModuleCandidates,
+      mainReplyPromptMode
     }
   );
   const summaryText = memoryContext?.promptSummaryText
     || trimTextByTokenBudget(memoryContext?.summary || 'none', affinity.shortTermMemoryTokens, 'tail')
     || 'none';
-  const dynamicFewShotPrompt = buildDynamicFewShotPrompt({
+  const dynamicFewShotContext = {
     question,
     routePolicyKey: options.routePolicyKey,
     topRouteType: options.topRouteType,
     routePrompt: options.routePrompt,
     maxExamples: 3,
     continuitySignals: options?.continuitySignals,
-    contextDensity: estimateTokens(memoryContext?.memoryForPrompt || '') + estimateTokens(summaryText || '')
-  });
+    contextDensity: estimateTokens(memoryContext?.memoryForPrompt || '') + estimateTokens(summaryText || ''),
+    mainReplyPromptMode,
+    forceDynamicFewShot: options.forceDynamicFewShot === true || routeMeta.forceDynamicFewShot === true,
+    dynamicFewShotEnabled: options.dynamicFewShotEnabled === true || routeMeta.dynamicFewShotEnabled === true
+  };
+  const dynamicFewShotPrompt = shouldBuildDynamicFewShot(dynamicFewShotContext)
+    ? buildDynamicFewShotPrompt(dynamicFewShotContext)
+    : '';
   return {
     userInfo,
     userId,
@@ -147,6 +156,7 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     routeMeta,
     routePolicyKey,
     topRouteType,
+    mainReplyPromptMode,
     surface,
     affinity,
     sharedShortTermContext,

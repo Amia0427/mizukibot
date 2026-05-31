@@ -117,7 +117,8 @@ function normalizePlannerDynamicContextPlan(options = {}) {
     directedContext: options?.routeMeta?.directedContext,
     personaModules: normalizeArray(options?.routeMeta?.directChatPlanner?.personaModules || options?.routeMeta?.toolPlanner?.personaModules),
     hasRoleplayRuntimeContext: true,
-    hasAffinityState: true
+    hasAffinityState: true,
+    mainReplyPromptMode: resolveMainReplyPromptMode(options)
   });
   const fallbackPlan = {
     schemaVersion: DYNAMIC_CONTEXT_PLAN_VERSION,

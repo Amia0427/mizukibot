@@ -484,6 +484,7 @@ async function planRequestV2(input = {}) {
       : normalizeArray(route?.meta?.dynamicPromptBlockCatalog),
     dynamicPromptGuide: normalizeText(input.dynamicPromptGuide || route?.meta?.dynamicPromptGuide),
     dynamicFewShotPrompt: normalizeText(input.dynamicFewShotPrompt || route?.meta?.dynamicFewShotPrompt),
+    mainReplyPromptMode: normalizeText(input.mainReplyPromptMode || route?.meta?.mainReplyPromptMode),
     memoryCliTurn: normalizeObject(input.memoryCliTurn, normalizeObject(route?.meta?.memoryCliTurn, {})),
     schedulerInjection: input.schedulerInjection || route?.meta?.schedulerInjection || route?.meta?.lifeSchedulerInjection,
     sharedShortTermContext: normalizeObject(input.sharedShortTermContext, normalizeObject(route?.meta?.sharedShortTermContext, {})),

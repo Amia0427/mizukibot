@@ -81,6 +81,7 @@ async function planDirectChat(route = {}, options = {}) {
     dynamicPromptBlockCatalog: pickArrayOption(options, routeMeta, 'dynamicPromptBlockCatalog'),
     dynamicPromptGuide: pickTextOption(options, routeMeta, 'dynamicPromptGuide'),
     dynamicFewShotPrompt: pickTextOption(options, routeMeta, 'dynamicFewShotPrompt'),
+    mainReplyPromptMode: pickTextOption(options, routeMeta, 'mainReplyPromptMode'),
     memoryCliTurn: pickObjectOption(options, routeMeta, 'memoryCliTurn'),
     schedulerInjection: options?.schedulerInjection || routeMeta.schedulerInjection || routeMeta.lifeSchedulerInjection,
     sharedShortTermContext: pickObjectOption(options, routeMeta, 'sharedShortTermContext'),
