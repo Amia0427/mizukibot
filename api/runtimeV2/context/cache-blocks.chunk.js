@@ -230,9 +230,10 @@ function clonePromptLayerValue(value = {}) {
 function buildPromptSurface(topRouteType = '', routeMeta = {}) {
   const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
   if (String(topRouteType || '').trim().toLowerCase() === 'proactive') return 'proactive_touch';
-  return getRouteMetaGroupId(normalizedRouteMeta) && normalizedRouteMeta.directedContext
-    ? 'passive_group_reply'
-    : 'direct_chat';
+  return resolveChatSurface({
+    topRouteType,
+    routeMeta: normalizedRouteMeta
+  });
 }
 
 function dedupePromptBlocks(blocks = []) {

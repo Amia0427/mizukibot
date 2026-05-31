@@ -13,13 +13,38 @@ const CONTINUITY_PRIORITY = Object.freeze({
 });
 
 const SURFACE_POLICIES = Object.freeze({
+  private_chat: {
+    includeContinuity: true,
+    includeRelationship: true,
+    includeRecentReplyFrame: true,
+    includeDeepHistory: true,
+    allowJargon: 'off',
+    maxMemoryDigestItems: 5,
+    privacyMode: 'private',
+    chatDiscipline: 'single',
+    replyRhythm: '1_to_4_short_messages'
+  },
+  group_direct_chat: {
+    includeContinuity: true,
+    includeRelationship: true,
+    includeRecentReplyFrame: true,
+    includeDeepHistory: false,
+    allowJargon: 'group_only',
+    maxMemoryDigestItems: 3,
+    privacyMode: 'group_visible',
+    chatDiscipline: 'group',
+    replyRhythm: 'short_interjection'
+  },
   direct_chat: {
     includeContinuity: true,
     includeRelationship: true,
     includeRecentReplyFrame: true,
     includeDeepHistory: true,
     allowJargon: 'group_only',
-    maxMemoryDigestItems: 5
+    maxMemoryDigestItems: 5,
+    privacyMode: 'legacy_direct',
+    chatDiscipline: 'single_or_group_legacy',
+    replyRhythm: '1_to_4_short_messages'
   },
   passive_group_reply: {
     includeContinuity: true,
@@ -27,7 +52,10 @@ const SURFACE_POLICIES = Object.freeze({
     includeRecentReplyFrame: true,
     includeDeepHistory: false,
     allowJargon: 'group_only',
-    maxMemoryDigestItems: 3
+    maxMemoryDigestItems: 3,
+    privacyMode: 'group_visible',
+    chatDiscipline: 'group',
+    replyRhythm: 'one_short_line'
   },
   proactive_touch: {
     includeContinuity: true,
@@ -35,7 +63,10 @@ const SURFACE_POLICIES = Object.freeze({
     includeRecentReplyFrame: true,
     includeDeepHistory: false,
     allowJargon: 'off',
-    maxMemoryDigestItems: 3
+    maxMemoryDigestItems: 3,
+    privacyMode: 'private',
+    chatDiscipline: 'single',
+    replyRhythm: 'brief_proactive_touch'
   },
   qzone_diary: {
     includeContinuity: true,
@@ -43,7 +74,10 @@ const SURFACE_POLICIES = Object.freeze({
     includeRecentReplyFrame: false,
     includeDeepHistory: false,
     allowJargon: 'off',
-    maxMemoryDigestItems: 3
+    maxMemoryDigestItems: 3,
+    privacyMode: 'public_surface',
+    chatDiscipline: 'broadcast',
+    replyRhythm: 'diary'
   },
   bot_diary: {
     includeContinuity: true,
@@ -51,7 +85,10 @@ const SURFACE_POLICIES = Object.freeze({
     includeRecentReplyFrame: false,
     includeDeepHistory: false,
     allowJargon: 'off',
-    maxMemoryDigestItems: 3
+    maxMemoryDigestItems: 3,
+    privacyMode: 'internal_diary',
+    chatDiscipline: 'diary',
+    replyRhythm: 'diary'
   },
   daily_share: {
     includeContinuity: true,
@@ -59,7 +96,10 @@ const SURFACE_POLICIES = Object.freeze({
     includeRecentReplyFrame: false,
     includeDeepHistory: false,
     allowJargon: 'off',
-    maxMemoryDigestItems: 2
+    maxMemoryDigestItems: 2,
+    privacyMode: 'group_visible',
+    chatDiscipline: 'broadcast',
+    replyRhythm: 'short_share'
   }
 });
 
@@ -230,7 +270,7 @@ function inferPlayfulness(styleProfile = {}, socialContext = {}, surface = '') {
 
 function inferVerbosity(surface = '', styleProfile = {}) {
   const normalizedSurface = normalizeText(surface).toLowerCase();
-  if (normalizedSurface === 'passive_group_reply' || normalizedSurface === 'proactive_touch') return 'terse';
+  if (normalizedSurface === 'passive_group_reply' || normalizedSurface === 'group_direct_chat' || normalizedSurface === 'proactive_touch') return 'terse';
   if (normalizedSurface === 'qzone_diary' || normalizedSurface === 'bot_diary') return 'rich';
   const sentenceLength = normalizeText(styleProfile?.globalBotBase?.sentenceLength || '', 16).toLowerCase();
   if (sentenceLength === 'short') return 'terse';
@@ -249,7 +289,7 @@ function inferTease(styleProfile = {}, socialContext = {}, surface = '') {
 function inferJargon(surface = '', groupId = '', styleSignals = '') {
   const normalizedSurface = normalizeText(surface).toLowerCase();
   if (!groupId) return 'off';
-  if (normalizedSurface === 'passive_group_reply' || normalizedSurface === 'direct_chat') {
+  if (normalizedSurface === 'passive_group_reply' || normalizedSurface === 'group_direct_chat' || normalizedSurface === 'direct_chat') {
     return 'group_only';
   }
   return 'off';

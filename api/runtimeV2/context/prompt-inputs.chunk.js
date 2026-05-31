@@ -4,7 +4,12 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
   const dynamicPromptPlan = normalizeDynamicPromptPlan(options);
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
-  const surface = buildPromptSurface(topRouteType, routeMeta);
+  const surface = resolveChatSurface({
+    routeMeta,
+    topRouteType,
+    routePolicyKey,
+    chatType: options.chatType || options.chat_type
+  });
   const rawMemosRecall = resolveMemosRecallObject(options, routeMeta, null);
   const affinity = options.affinity && typeof options.affinity === 'object'
     ? options.affinity
@@ -105,7 +110,7 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     });
   const personaMemoryPrompt = options.personaMemoryPrompt && typeof options.personaMemoryPrompt === 'object'
     ? options.personaMemoryPrompt
-    : renderPersonaMemoryPrompt(personaMemoryState, topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat');
+    : renderPersonaMemoryPrompt(personaMemoryState, surface);
   const personaModuleCandidates = await personaModuleCandidatesPromise;
   if (personaModuleCandidates?.__personaModuleCandidatesError) {
     throw personaModuleCandidates.__personaModuleCandidatesError;

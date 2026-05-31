@@ -18,6 +18,15 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
     avoidWhen: 'Skip only outside main roleplay replies or when no current-turn runtime context exists.'
   },
   {
+    blockId: 'chat_liveness_discipline',
+    label: 'Chat Liveness Discipline',
+    lane: 'dynamic_context',
+    category: 'roleplay_context',
+    defaultPolicy: 'must_use_when_available',
+    useWhen: 'Always use for main private and group chat replies so Mizuki preserves live chat rhythm, limited knowledge, privacy boundaries, and single-chat/group-chat discipline.',
+    avoidWhen: 'Skip only outside chat roleplay replies or when no current-turn chat surface exists.'
+  },
+  {
     blockId: 'affinity_level',
     label: 'Affinity Level',
     lane: 'dynamic_context',
@@ -223,6 +232,12 @@ const DYNAMIC_CONTEXT_BLOCK_SPEC_OVERRIDES = Object.freeze({
     emptyPolicy: 'reject_optional_empty',
     mustUseWhen: 'main roleplay reply has current-turn runtime context',
     budget: { configKey: '', hardCapTokens: 520 }
+  },
+  chat_liveness_discipline: {
+    criticality: 'critical',
+    emptyPolicy: 'reject_optional_empty',
+    mustUseWhen: 'main roleplay reply has current-turn private/group chat surface',
+    budget: { configKey: '', hardCapTokens: 360 }
   },
   affinity_level: {
     criticality: 'optional',

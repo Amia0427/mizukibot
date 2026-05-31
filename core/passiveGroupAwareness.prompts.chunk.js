@@ -156,6 +156,14 @@ async function buildReplyPrompt({
     chatHistory
   });
   const personaPrompt = renderPersonaMemoryPrompt(personaState, 'passive_group_reply');
+  const livenessPrompt = buildChatLivenessDisciplinePrompt({
+    surface: 'passive_group_reply',
+    routeMeta: { groupId, directedContext },
+    groupId,
+    userId: senderId,
+    question: text,
+    personaMemoryState: personaState
+  });
   const contextLines = recentMessages
     .slice(-12)
     .map((item) => {
@@ -188,6 +196,7 @@ async function buildReplyPrompt({
     '5. If the type is presence_ack, acknowledge briefly. If the type is brief_clarify, ask at most one very light clarification.',
     '',
     ...personaPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean),
+    livenessPrompt,
     '',
     `group_id: ${String(groupId || '')}`,
     `sender_name: ${senderName || 'unknown'}`,
@@ -299,6 +308,14 @@ async function buildReplyPromptV2({
     chatHistory
   });
   const personaPrompt = renderPersonaMemoryPrompt(personaState, 'passive_group_reply');
+  const livenessPrompt = buildChatLivenessDisciplinePrompt({
+    surface: 'passive_group_reply',
+    routeMeta: { groupId, directedContext },
+    groupId,
+    userId: senderId,
+    question: text,
+    personaMemoryState: personaState
+  });
   const memoryContext = personaState?.evidence?.memoryContext && typeof personaState.evidence.memoryContext === 'object'
     ? personaState.evidence.memoryContext
     : {};
@@ -351,6 +368,7 @@ async function buildReplyPromptV2({
       : '4. This is a reply. Speak like a one-time natural interjection.',
     '',
     ...personaPrompt.systemMessages.map((message) => String(message?.content || '').trim()).filter(Boolean),
+    livenessPrompt,
     '',
     `group_id: ${String(groupId || '')}`,
     `sender_name: ${senderName || 'unknown'}`,

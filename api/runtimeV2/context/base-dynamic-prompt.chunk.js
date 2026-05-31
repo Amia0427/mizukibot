@@ -15,6 +15,13 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     : normalizeDynamicPromptPlan(options);
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  const chatSurface = resolveChatSurface({
+    routeMeta,
+    topRouteType,
+    routePolicyKey,
+    chatType: options.chatType || options.chat_type,
+    surface: promptMaterials?.surface
+  });
   const includeOptionalContextBlocks = options.includeOptionalContextBlocks !== false;
   const includePersonaModuleBlocks = options.includePersonaModuleBlocks !== false;
   const includeDynamicFewShotBlock = options.includeDynamicFewShotBlock !== false;
@@ -96,7 +103,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       topRouteType
     }, {
       userInfo,
-      surface: promptMaterials?.surface || buildPromptSurface(topRouteType, routeMeta),
+      surface: chatSurface,
       sessionKey: options.sessionKey,
       shortTermMemory: options.shortTermMemory,
       chatHistory: options.chatHistory,
@@ -106,10 +113,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     });
   const personaMemoryPrompt = promptMaterials?.personaMemoryPrompt && typeof promptMaterials.personaMemoryPrompt === 'object'
     ? promptMaterials.personaMemoryPrompt
-    : renderPersonaMemoryPrompt(
-      personaMemoryState,
-      topRouteType === 'proactive' ? 'proactive_touch' : 'direct_chat'
-    );
+    : renderPersonaMemoryPrompt(personaMemoryState, chatSurface);
   const shouldResolvePersonaModules = options.resolvePersonaModules !== false;
   const personaModuleCandidates = shouldResolvePersonaModules
     ? (promptMaterials?.personaModuleCandidates || buildPersonaModuleCandidates({
@@ -213,9 +217,23 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     routeMeta,
     routePolicyKey,
     topRouteType,
-    surface: promptMaterials?.surface,
+    surface: chatSurface,
     memoryContext,
     sharedShortTermContext,
+    continuitySignals: options?.continuitySignals,
+    options
+  });
+  const chatLivenessDisciplineText = buildChatLivenessDisciplinePrompt({
+    userInfo,
+    userId,
+    question,
+    routeMeta,
+    routePolicyKey,
+    topRouteType,
+    surface: chatSurface,
+    memoryContext,
+    sharedShortTermContext,
+    personaMemoryState,
     continuitySignals: options?.continuitySignals,
     options
   });
@@ -224,6 +242,17 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     priority: 205,
     authority: 'runtime_context',
     kind: 'roleplay_runtime_context',
+    source: 'runtime',
+    lane: 'dynamic_context',
+    meta: {
+      optional: true
+    }
+  }));
+  promptBlocks.push(createPromptBlock('chat_liveness_discipline', 'Chat Liveness Discipline', chatLivenessDisciplineText, {
+    stage: 'main',
+    priority: 206,
+    authority: 'runtime_context',
+    kind: 'chat_liveness',
     source: 'runtime',
     lane: 'dynamic_context',
     meta: {
@@ -509,6 +538,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     personaModules: dynamicPromptPlan.personaModules,
     hasAffinityState: true,
     hasRoleplayRuntimeContext: Boolean(roleplayRuntimeContextText),
+    hasChatLivenessDiscipline: Boolean(chatLivenessDisciplineText),
     hasShortTermContinuity: Boolean(shortTermContinuityText),
     hasMemoryRecallPolicy: Boolean(memoryRecallPolicyText),
     hasRetrievedMemory: Boolean(memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt),
@@ -554,7 +584,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     phase: item.phase,
     slot: item.slot
   })));
-  const baseRuntimeAddedIds = ['roleplay_runtime_context'];
+  const baseRuntimeAddedIds = ['roleplay_runtime_context', 'chat_liveness_discipline'];
   if (isBalancedOrMinimalPromptMode(mainReplyPromptMode) && includeOptionalContextBlocks && shortTermContinuityText) {
     baseRuntimeAddedIds.push('short_term_continuity');
   }
@@ -625,6 +655,17 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
           priority: 205,
           authority: 'runtime_context',
           kind: 'roleplay_runtime_context',
+          source: 'runtime',
+          lane: 'dynamic_context',
+          meta: {
+            optional: true
+          }
+        }),
+        createPromptBlock('chat_liveness_discipline', 'Chat Liveness Discipline', chatLivenessDisciplineText, {
+          stage: 'main',
+          priority: 206,
+          authority: 'runtime_context',
+          kind: 'chat_liveness',
           source: 'runtime',
           lane: 'dynamic_context',
           meta: {
