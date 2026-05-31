@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-05-31 18:12 +08:00
+更新时间：2026-05-31 18:28 +08:00
 
 ## 维护约定
 
@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前 `.env` 有 309 个变量，307 个唯一变量；重复项仅保留 `MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE` 和 `MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN` 两组历史调优项。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；重复项已在本地 `.env` 注释中标明实际生效顺序。
+- 2026-05-31 18:28 +08:00：主回复和管理员主模型开启中等推理，`AI_REASONING_EFFORT=medium`、`ADMIN_AI_REASONING_EFFORT=medium`；采样参数和缓存配置保持不变。
 - 2026-05-31 18:12 +08:00：主回复和管理员主模型进入自然灵动采样档，`AI_TEMPERATURE=1.05`、`AI_TOP_A=0.72`、`AI_REPETITION_PENALTY=1.08`、`ADMIN_AI_TEMPERATURE=1.05`；缓存配置不变，`AI_REASONING_EFFORT=off` 继续避免高推理闲聊。
 - 2026-05-31 18:05 +08:00：新增记忆召回污染防护配置：`MEMORY_RECALL_FORCE_LOCAL_RAG=true`、`MEMORY_JOURNAL_UNSAFE_REPLY_FILTER=true`、`MEMORY_PROFILE_IDENTITY_NOISE_FILTER=true`、`MEMORY_PROFILE_CURRENT_USER_ANCHOR=true`；可用 `node scripts/audit-memory-pollution.js --user <id>` dry-run 审计，`--apply` 只写 quarantine 标记不删除原文。
 - 2026-05-31 15:13 +08:00：主回复请求体保留缓存配置不变，仅收敛非缓存参数：`AI_REASONING_EFFORT=off`、`AI_MAX_TOKENS=3500`，并清空 `AI_TOP_A` / `AI_REPETITION_PENALTY`，避免主回复上游按高推理/扩展采样任务处理闲聊。
