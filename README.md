@@ -106,6 +106,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-05-31 18:12 +08:00：主回复和管理员主模型进入自然灵动采样档，`.env` 设置 `AI_TEMPERATURE=1.05`、`AI_TOP_A=0.72`、`AI_REPETITION_PENALTY=1.08`、`ADMIN_AI_TEMPERATURE=1.05`；继续保留缓存并保持 `AI_REASONING_EFFORT=off`。
 
+更新 2026-05-31 18:28 +08:00：主回复和管理员主模型开启中等推理，`.env` 设置 `AI_REASONING_EFFORT=medium`、`ADMIN_AI_REASONING_EFFORT=medium`；采样参数和缓存配置保持不变。
+
 更新 2026-05-23 22:23 +08:00：补充回复后学习子进程改进计划，见 `docs/post-reply-worker-improvement-plan.md`；计划覆盖 job schema、队列索引、租约心跳、任务 DAG、学习质量门禁、trace、失败重放、健康诊断、背压、回滚和评测集。
 
 更新 2026-05-23 22:37 +08:00：本地启用 post-reply worker，`.env` 增加 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 继续使用 `npm run start:post-reply-worker` 启动，运行状态用 `npm run diag:runtime` 查看。
