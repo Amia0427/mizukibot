@@ -412,10 +412,215 @@ function Test-WorkerOwnedByRunningNode {
     }
 
     $proc = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
-    return ($null -ne $proc -and $proc.ProcessName -ieq 'node')
+    if ($null -eq $proc -or $proc.ProcessName -ine 'node') {
+      return $false
+    }
+
+    $commandLine = Get-ProcessCommandLine -ProcessId $ownerPid
+    if ([string]::IsNullOrWhiteSpace($commandLine)) {
+      return $true
+    }
+
+    return ($commandLine -match 'post-reply-worker\.js')
   } catch {
     return $false
   }
+}
+
+function Get-NodeProcessSnapshot {
+  try {
+    return @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.Name -eq 'node.exe' })
+  } catch {
+    return @()
+  }
+}
+
+function Test-ProcessLooksLikePostReplyWorker {
+  param([Parameter(Mandatory = $true)]$Process)
+
+  $commandLine = [string]$Process.CommandLine
+  if ([string]::IsNullOrWhiteSpace($commandLine)) {
+    return $false
+  }
+
+  $normalizedRoot = ([string]$repoRoot).TrimEnd('\')
+  return ($commandLine -match 'post-reply-worker\.js') -and (
+    $commandLine -like "*$normalizedRoot*" -or
+    $commandLine -match '(^|[\\/\s])scripts[\\/]post-reply-worker\.js(\s|$)' -or
+    $commandLine -match '(^|[\\/\s])post-reply-worker\.js(\s|$)'
+  )
+}
+
+function Get-RunningPostReplyWorkerProcesses {
+  param([object[]]$Processes = @())
+
+  if ($null -eq $Processes -or $Processes.Count -le 0) {
+    $Processes = Get-NodeProcessSnapshot
+  }
+
+  return @($Processes | Where-Object { Test-ProcessLooksLikePostReplyWorker -Process $_ } | Sort-Object ProcessId)
+}
+
+function Repair-WorkerPidFileFromProcess {
+  param([Parameter(Mandatory = $true)]$WorkerProcess)
+
+  $pidNum = [int]$WorkerProcess.ProcessId
+  if ($pidNum -le 0) {
+    return $false
+  }
+
+  try {
+    Set-Content -Path $workerPidFile -Value $pidNum -Encoding utf8
+    Write-DaemonLog -Message "repaired post-reply worker pid file from running process pid=$pidNum"
+    return $true
+  } catch {
+    Write-DaemonLog -Message "failed to repair post-reply worker pid file from pid=$pidNum error=$($_.Exception.Message)"
+    return $false
+  }
+}
+
+function Get-WorkerRuntimeState {
+  $processes = Get-NodeProcessSnapshot
+  $workers = @(Get-RunningPostReplyWorkerProcesses -Processes $processes)
+  $pidOwnerRunning = Test-WorkerOwnedByRunningNode -PidFile $workerPidFile
+
+  if ($workers.Count -gt 0) {
+    if (-not $pidOwnerRunning) {
+      $null = Repair-WorkerPidFileFromProcess -WorkerProcess $workers[0]
+    }
+    return [pscustomobject]@{
+      Running = $true
+      Source = if ($pidOwnerRunning) { 'pid_file' } else { 'process_scan' }
+      Pid = [int]$workers[0].ProcessId
+      Count = $workers.Count
+      Processes = $workers
+    }
+  }
+
+  if ($pidOwnerRunning) {
+    $pidText = (Read-PidFileText -FilePath $workerPidFile).Trim()
+    $pidNum = 0
+    [void][int]::TryParse($pidText, [ref]$pidNum)
+    return [pscustomobject]@{
+      Running = $true
+      Source = 'pid_file'
+      Pid = $pidNum
+      Count = 1
+      Processes = @()
+    }
+  }
+
+  return [pscustomobject]@{
+    Running = $false
+    Source = if (Test-Path $workerPidFile) { 'pid_file_stale_or_invalid' } else { 'missing' }
+    Pid = 0
+    Count = 0
+    Processes = @()
+  }
+}
+
+function Read-JsonFileSafe {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  try {
+    if (-not (Test-Path $Path)) { return $null }
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding utf8 -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+    return $raw | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    return $null
+  }
+}
+
+function Test-PostReplyJobDue {
+  param(
+    [Parameter(Mandatory = $true)]$Job,
+    [Parameter(Mandatory = $true)][datetime]$Now
+  )
+
+  $availableAtText = [string]$Job.availableAt
+  $nextRetryAtText = [string]$Job.nextRetryAt
+  $availableAt = [datetime]::MinValue
+  $nextRetryAt = [datetime]::MinValue
+
+  if (-not [string]::IsNullOrWhiteSpace($availableAtText)) {
+    if ([datetime]::TryParse($availableAtText, [ref]$availableAt) -and $availableAt.ToUniversalTime() -gt $Now.ToUniversalTime()) {
+      return $false
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($nextRetryAtText)) {
+    if ([datetime]::TryParse($nextRetryAtText, [ref]$nextRetryAt) -and $nextRetryAt.ToUniversalTime() -gt $Now.ToUniversalTime()) {
+      return $false
+    }
+  }
+
+  return $true
+}
+
+function Test-PostReplyProcessingRecoverable {
+  param(
+    [Parameter(Mandatory = $true)]$Job,
+    [Parameter(Mandatory = $true)][datetime]$Now,
+    [Parameter(Mandatory = $true)][int]$StaleProcessingMs
+  )
+
+  $leaseUntilText = [string]$Job.leaseUntil
+  $leaseUntil = [datetime]::MinValue
+  if (-not [string]::IsNullOrWhiteSpace($leaseUntilText) -and [datetime]::TryParse($leaseUntilText, [ref]$leaseUntil)) {
+    return $leaseUntil.ToUniversalTime() -le $Now.ToUniversalTime()
+  }
+
+  $updatedAtText = [string]$Job.updatedAt
+  $updatedAt = [datetime]::MinValue
+  if (-not [string]::IsNullOrWhiteSpace($updatedAtText) -and [datetime]::TryParse($updatedAtText, [ref]$updatedAt)) {
+    return ($Now.ToUniversalTime() - $updatedAt.ToUniversalTime()).TotalMilliseconds -ge $StaleProcessingMs
+  }
+
+  return $true
+}
+
+function Get-PostReplyQueueStartReason {
+  $queueRoot = [Environment]::GetEnvironmentVariable('POST_REPLY_QUEUE_DIR', 'Process')
+  if ([string]::IsNullOrWhiteSpace($queueRoot)) {
+    $queueRoot = Join-Path (Join-Path $repoRoot 'data') 'post_reply_jobs'
+  }
+  if (-not [System.IO.Path]::IsPathRooted($queueRoot)) {
+    $queueRoot = Join-Path $repoRoot $queueRoot
+  }
+
+  $now = Get-Date
+  $staleProcessingMs = [int](Get-PositiveInt64Env -Name 'POST_REPLY_WORKER_STALE_PROCESSING_MS' -DefaultValue 300000)
+  $queuedDir = Join-Path $queueRoot 'queued'
+  $processingDir = Join-Path $queueRoot 'processing'
+
+  $firstPendingQueuedJob = ''
+  if (Test-Path $queuedDir) {
+    foreach ($file in @(Get-ChildItem -LiteralPath $queuedDir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+      $job = Read-JsonFileSafe -Path $file.FullName
+      if ($null -ne $job -and (Test-PostReplyJobDue -Job $job -Now $now)) {
+        return "queued job due: $($file.Name)"
+      }
+      if ($null -ne $job -and [string]::IsNullOrWhiteSpace($firstPendingQueuedJob)) {
+        $firstPendingQueuedJob = $file.Name
+      }
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($firstPendingQueuedJob)) {
+    return "queued job pending: $firstPendingQueuedJob"
+  }
+
+  if (Test-Path $processingDir) {
+    foreach ($file in @(Get-ChildItem -LiteralPath $processingDir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+      $job = Read-JsonFileSafe -Path $file.FullName
+      if ($null -ne $job -and (Test-PostReplyProcessingRecoverable -Job $job -Now $now -StaleProcessingMs $staleProcessingMs)) {
+        return "processing job recoverable: $($file.Name)"
+      }
+    }
+  }
+
+  return ''
 }
 
 Write-DaemonLog -Message 'daemon task started'
@@ -454,12 +659,19 @@ try {
     }
   }
 
-  if (Test-WorkerOwnedByRunningNode -PidFile $workerPidFile) {
-    Write-DaemonLog -Message 'post-reply worker already running, skip duplicate start.'
+  $workerState = Get-WorkerRuntimeState
+  if ($workerState.Running) {
+    $detail = if ($workerState.Count -gt 1) { " count=$($workerState.Count)" } else { '' }
+    Write-DaemonLog -Message "post-reply worker already running, skip duplicate start. pid=$($workerState.Pid) source=$($workerState.Source)$detail"
   } else {
-    $workerProc = Start-NodeDaemonProcess -NodeExe $nodeExe -ArgumentList @('scripts/post-reply-worker.js') -StdoutLog $workerStdoutLogFile -StderrLog $workerStderrLogFile
-    Set-Content -Path $workerPidFile -Value $workerProc.Id -Encoding utf8
-    Write-DaemonLog -Message "started post-reply worker pid=$($workerProc.Id), stdout=$workerStdoutLogFile, stderr=$workerStderrLogFile"
+    $workerStartReason = Get-PostReplyQueueStartReason
+    if ([string]::IsNullOrWhiteSpace($workerStartReason)) {
+      Write-DaemonLog -Message 'post-reply worker not running, queue idle; skip idle restart.'
+    } else {
+      $workerProc = Start-NodeDaemonProcess -NodeExe $nodeExe -ArgumentList @('scripts/post-reply-worker.js') -StdoutLog $workerStdoutLogFile -StderrLog $workerStderrLogFile
+      Set-Content -Path $workerPidFile -Value $workerProc.Id -Encoding utf8
+      Write-DaemonLog -Message "started post-reply worker pid=$($workerProc.Id), reason=$workerStartReason, stdout=$workerStdoutLogFile, stderr=$workerStderrLogFile"
+    }
   }
 } catch {
   $exitCode = 1

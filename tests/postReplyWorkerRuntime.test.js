@@ -846,6 +846,25 @@ module.exports = (async () => {
     assert.strictEqual(recycleCalls.length, 1);
     assert.ok(recycleRuntime.getStats().recycleRequested, 'runtime should expose recycle state');
 
+    const queuedRecycleRuntime = createPostReplyWorkerRuntime({
+      queue: {
+        ...circuitQueue,
+        listJobs(statuses = []) {
+          return Array.isArray(statuses) && statuses.includes('queued')
+            ? [{ jobId: 'queued_job', status: 'queued' }]
+            : [];
+        }
+      },
+      rssRecycleMb: 1,
+      rssRecycleIdleMs: 0,
+      onRecycle: () => {
+        throw new Error('worker with queued jobs should not request idle recycle');
+      },
+      processJob: async () => ({ ok: true })
+    });
+    assert.strictEqual(queuedRecycleRuntime.hasPendingQueueWorkForRecycle(), true);
+    assert.strictEqual(queuedRecycleRuntime.maybeRequestIdleRecycle('queued'), false, 'queued work should keep worker alive');
+
     memoryExtraction.learnSomethingNew = originalLearnSomethingNew;
     memoryExtraction.extractPostReplyEnrichment = originalExtractPostReplyEnrichment;
     dailyJournal.appendDailyJournalEntry = originalAppendDailyJournalEntry;
