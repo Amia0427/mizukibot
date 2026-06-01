@@ -75,6 +75,8 @@ function shouldUseWorldbookSearch(input = {}) {
 function shouldBuildDynamicFewShot(input = {}) {
   if (input.forceDynamicFewShot === true || input.dynamicFewShotEnabled === true) return true;
   if (isLegacyPromptMode(input.mainReplyPromptMode || input.promptMode)) return true;
+  if (Array.isArray(input.preferredExampleIds) && input.preferredExampleIds.some((item) => normalizeText(item))) return true;
+  if (Array.isArray(input.activeWorldbookIds) && input.activeWorldbookIds.some((item) => normalizeText(item))) return true;
   const text = normalizeText([
     input.question,
     input.routePrompt,

@@ -23,7 +23,14 @@ function normalizeModuleCatalogItem(item = {}) {
     priority: Number.isFinite(Number(item.priority)) ? Number(item.priority) : 100,
     conflictsWith: normalizeArray(item.conflictsWith).map((entry) => normalizeText(entry)).filter(Boolean),
     phase: normalizeText(item.phase, 'all'),
-    slot: normalizeText(item.slot, 'general')
+    slot: normalizeText(item.slot, 'general'),
+    activationMode: normalizeText(item.activationMode),
+    durationTurns: Object.prototype.hasOwnProperty.call(item, 'durationTurns') ? Math.max(0, Number(item.durationTurns || 0) || 0) : undefined,
+    durationMs: Object.prototype.hasOwnProperty.call(item, 'durationMs') ? Math.max(0, Number(item.durationMs || 0) || 0) : undefined,
+    scope: normalizeArray(item.scope).map((entry) => normalizeText(entry)).filter(Boolean),
+    probability: Object.prototype.hasOwnProperty.call(item, 'probability') ? Math.max(0, Math.min(1, Number(item.probability || 0) || 0)) : undefined,
+    template: normalizeText(item.template),
+    exampleIds: normalizeArray(item.exampleIds).map((entry) => normalizeText(entry)).filter(Boolean)
   };
 }
 

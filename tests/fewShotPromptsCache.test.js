@@ -107,6 +107,40 @@ module.exports = (() => {
 
       assert.ok(changed.includes('[示例:second_example]'));
       assert.strictEqual(indexReads, 2);
+
+      fs.writeFileSync(indexFile, JSON.stringify({
+        version: 2,
+        max_examples: 2,
+        examples: [
+          {
+            id: 'plain_match',
+            priority: 90,
+            match: { keywords_any: ['继续'] },
+            user: 'plain user',
+            assistant: 'plain assistant'
+          },
+          {
+            id: 'linked_worldbook',
+            priority: 1,
+            match: {
+              worldbook_ids: ['wb_mizuki_future_two_tracks']
+            },
+            user: 'linked user',
+            assistant: 'linked assistant'
+          }
+        ]
+      }), 'utf8');
+      const linked = fewShotPrompts.buildDynamicFewShotPrompt({
+        question: '继续',
+        routePolicyKey: 'chat/default',
+        topRouteType: 'chat',
+        maxExamples: 2,
+        activeWorldbookIds: ['wb_mizuki_future_two_tracks'],
+        preferredExampleIds: ['linked_worldbook']
+      });
+      assert.ok(linked.indexOf('[示例:linked_worldbook]') >= 0);
+      assert.ok(linked.indexOf('[示例:plain_match]') >= 0);
+      assert.ok(linked.indexOf('[示例:linked_worldbook]') < linked.indexOf('[示例:plain_match]'));
     } finally {
       fs.readFileSync = originalReadFileSync;
     }

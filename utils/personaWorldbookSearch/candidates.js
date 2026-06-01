@@ -56,6 +56,14 @@ function normalizeCandidate(doc = {}, score = 0, matchMode = 'lexical', reason =
     purpose: doc.purpose,
     triggerHints: normalizeArray(doc.triggerHints),
     path: doc.path,
+    activationMode: doc.activationMode,
+    durationTurns: doc.durationTurns,
+    durationMs: doc.durationMs,
+    scope: normalizeArray(doc.scope),
+    probability: doc.probability,
+    template: doc.template,
+    exampleIds: normalizeArray(doc.exampleIds),
+    linkedExamples: normalizeArray(doc.exampleIds),
     text: doc.text
   };
 }

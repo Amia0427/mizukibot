@@ -5,6 +5,13 @@ const {
   searchPersonaWorldbook,
   searchPersonaWorldbookLexical
 } = require('./personaWorldbookSearch');
+const {
+  activateWorldbookSessionCandidates,
+  decorateActivatedWorldbookCandidates,
+  getActiveWorldbookSessionCandidates,
+  getWorldbookSessionState,
+  normalizeWorldbookRuntimeMeta
+} = require('./personaWorldbookSearch/sessionState');
 const { createPersonaModuleRulePicker } = require('./personaModules/rules');
 const {
   getDefaultPersonaModuleLimit,
@@ -56,7 +63,14 @@ function loadPersonaModuleCatalog() {
     priority: Number.isFinite(Number(item?.priority)) ? Number(item.priority) : 100,
     conflictsWith: normalizeArray(item?.conflictsWith).map((entry) => normalizeText(entry)).filter(Boolean),
     phase: normalizeText(item?.phase, 'all'),
-    slot: normalizeText(item?.slot, 'general')
+    slot: normalizeText(item?.slot, 'general'),
+    activationMode: normalizeText(item?.activationMode),
+    durationTurns: Object.prototype.hasOwnProperty.call(item || {}, 'durationTurns') ? Math.max(0, Number(item.durationTurns || 0) || 0) : undefined,
+    durationMs: Object.prototype.hasOwnProperty.call(item || {}, 'durationMs') ? Math.max(0, Number(item.durationMs || 0) || 0) : undefined,
+    scope: normalizeArray(item?.scope).map((entry) => normalizeText(entry)).filter(Boolean),
+    probability: Object.prototype.hasOwnProperty.call(item || {}, 'probability') ? Math.max(0, Math.min(1, Number(item.probability || 0) || 0)) : undefined,
+    template: normalizeText(item?.template),
+    exampleIds: normalizeArray(item?.exampleIds).map((entry) => normalizeText(entry)).filter(Boolean)
   })).filter((item) => item.id && item.path);
 
   return {
@@ -78,6 +92,13 @@ function getPersonaModuleCatalogSummary() {
     priority: item.priority,
     phase: item.phase,
     slot: item.slot,
+    activationMode: item.activationMode,
+    durationTurns: item.durationTurns,
+    durationMs: item.durationMs,
+    scope: item.scope,
+    probability: item.probability,
+    template: item.template,
+    exampleIds: item.exampleIds,
     maxActiveModules: catalog.maxActiveModules,
     defaultMaxActiveModules: catalog.defaultMaxActiveModules
   }));
@@ -157,7 +178,10 @@ function sortCandidatesWithWorldbookScores(candidates = [], worldbookResults = [
         ...item,
         worldbookScore: Number(hit.score || 0) || 0,
         worldbookMatchMode: normalizeText(hit.matchMode),
-        worldbookReason: normalizeText(hit.reason)
+        worldbookReason: normalizeText(hit.reason),
+        activationState: hit.activationState,
+        linkedExamples: normalizeArray(hit.linkedExamples || hit.exampleIds),
+        sessionLinkedExamples: normalizeArray(hit.sessionLinkedExamples || hit.linkedExamples || hit.exampleIds)
       };
     })
     .sort((a, b) => {
@@ -220,7 +244,9 @@ function prunePersonaModuleCandidates(candidates = [], context = {}, options = {
     selectedIds.add(row.item.id);
     selected.push({
       ...row.item,
-      candidateScore: row.score
+      candidateScore: row.score,
+      linkedExamples: normalizeArray(row.item.linkedExamples || row.item.exampleIds),
+      sessionLinkedExamples: normalizeArray(row.item.sessionLinkedExamples || row.item.linkedExamples || row.item.exampleIds)
     });
   }
   const selectedSorted = selected.sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
@@ -289,16 +315,47 @@ async function buildPersonaModuleCandidatesAsync(context = {}) {
         }
       }
     };
-  const candidateIds = mergeCandidateIdsWithWorldbookSearch(ruleCandidates, worldbookSearch.results);
+  const sessionContext = {
+    ...context,
+    sessionKey: context.sessionKey || context.sessionId || context.routeMeta?.sessionKey || context.routeMeta?.session_key
+  };
+  const activationResult = worldbookEnabled
+    ? activateWorldbookSessionCandidates(worldbookSearch.results, sessionContext, {
+      now: context.worldbookSessionNow,
+      random: context.worldbookSessionRandom
+    })
+    : { activated: [], skipped: [] };
+  const activatedWorldbookResults = decorateActivatedWorldbookCandidates(worldbookSearch.results, activationResult);
+  const activeSessionWorldbook = getActiveWorldbookSessionCandidates(catalog, sessionContext, {
+    now: context.worldbookSessionNow,
+    consume: context.worldbookSessionConsume !== false
+  });
+  const effectiveWorldbookResults = activatedWorldbookResults.concat(
+    activeSessionWorldbook.filter((item) => !activatedWorldbookResults.some((hit) => normalizeText(hit.moduleId || hit.id) === normalizeText(item.moduleId || item.id)))
+  );
+  worldbookSearch.sessionState = {
+    enabled: config.PERSONA_WORLDBOOK_SESSION_STATE_ENABLED !== false,
+    activated: activationResult.activated,
+    skipped: activationResult.skipped,
+    active: activeSessionWorldbook.map((item) => ({
+      moduleId: item.moduleId || item.id,
+      activationState: item.activationState,
+      linkedExamples: normalizeArray(item.linkedExamples || item.exampleIds)
+    }))
+  };
+  const candidateIds = mergeCandidateIdsWithWorldbookSearch(ruleCandidates, effectiveWorldbookResults);
   const candidates = catalog.modules
     .filter((item) => candidateIds.has(item.id))
     .filter((item) => item.phase === 'all' || item.phase === phase);
-  const sorted = sortCandidatesWithWorldbookScores(candidates, worldbookSearch.results);
+  const sorted = sortCandidatesWithWorldbookScores(candidates, effectiveWorldbookResults);
   sorted.personaWorldbookSearch = worldbookSearch.diagnostics;
   const pruned = prunePersonaModuleCandidates(sorted, context, {
     maxCandidates: context.maxPersonaModuleCandidates
   });
-  pruned.personaWorldbookSearch = worldbookSearch.diagnostics;
+  pruned.personaWorldbookSearch = {
+    ...(worldbookSearch.diagnostics || {}),
+    sessionState: worldbookSearch.sessionState
+  };
   return pruned;
 }
 
@@ -347,6 +404,15 @@ function selectPersonaModules(decision = {}, context = {}) {
     ? normalizeArray(context.personaModuleCandidates)
     : buildPersonaModuleCandidates(context);
   const fallbackIds = candidates.map((item) => item.id);
+  const stickyWorldbookIds = fallbackIds.filter((id) => (
+    normalizeText(id).startsWith('wb_mizuki_')
+    && candidates.some((item) => item.id === id && item.activationState)
+  ));
+  const scoredWorldbookIds = fallbackIds.filter((id) => (
+    normalizeText(id).startsWith('wb_mizuki_')
+    && !stickyWorldbookIds.includes(id)
+    && candidates.some((item) => item.id === id && Number(item.worldbookScore || 0) > 0)
+  ));
   const sceneIds = fallbackIds.filter((id) => id === 'scene_private_chat' || id === 'scene_group_insert');
   const emotionIds = fallbackIds.filter((id) => isEmotionPersonaModule(id));
   const conservativeFallbackIds = conservativePromptMode
@@ -355,6 +421,8 @@ function selectPersonaModules(decision = {}, context = {}) {
       context.chatType === 'private' ? 'scene_private_chat' : '',
       ...sceneIds,
       ...emotionIds,
+      ...stickyWorldbookIds,
+      ...scoredWorldbookIds,
       ...fallbackIds.filter((id) => !String(id || '').startsWith('wb_mizuki_'))
     ].filter(Boolean)))
     : fallbackIds;
@@ -399,6 +467,10 @@ function selectPersonaModules(decision = {}, context = {}) {
   return {
     selected,
     candidates,
+    activeWorldbookIds: selected
+      .map((item) => normalizeText(item.id))
+      .filter((id) => id.startsWith('wb_mizuki_')),
+    linkedExamples: Array.from(new Set(selected.flatMap((item) => normalizeArray(item.linkedExamples || item.exampleIds)))),
     maxActive,
     selectionReason: {
       requestedIds: requested,
@@ -414,6 +486,7 @@ function selectPersonaModules(decision = {}, context = {}) {
 function diagnosePersonaModules(input = {}) {
   const candidates = buildPersonaModuleCandidates(input);
   const selection = selectPersonaModules(input?.decision || {}, input);
+  const sessionKey = input.sessionKey || input.sessionId || input.routeMeta?.sessionKey || input.routeMeta?.session_key || '';
   return {
     question: normalizeText(input.question),
     phase: inferPhase(input),
@@ -422,14 +495,22 @@ function diagnosePersonaModules(input = {}) {
       slot: item.slot,
       priority: item.priority,
       tokenCost: item.tokenCost,
-      conflictsWith: item.conflictsWith
+      conflictsWith: item.conflictsWith,
+      runtimeMeta: normalizeWorldbookRuntimeMeta(item),
+      activationState: item.activationState || null,
+      linkedExamples: normalizeArray(item.linkedExamples || item.exampleIds)
     })),
     selected: selection.selected.map((item) => ({
       id: item.id,
       slot: item.slot,
-      tokenCost: item.tokenCost
+      tokenCost: item.tokenCost,
+      activationState: item.activationState || null,
+      linkedExamples: normalizeArray(item.linkedExamples || item.exampleIds)
     })),
     selectionReason: selection.selectionReason,
+    activeWorldbookIds: selection.activeWorldbookIds,
+    linkedExamples: selection.linkedExamples,
+    worldbookSessionState: getWorldbookSessionState(sessionKey),
     totalTokenCost: selection.selected.reduce((sum, item) => sum + Number(item.tokenCost || 0), 0)
   };
 }

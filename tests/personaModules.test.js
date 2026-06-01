@@ -11,6 +11,9 @@ const {
 const {
   searchPersonaWorldbook
 } = require('../utils/personaWorldbookSearch');
+const {
+  clearWorldbookSessionState
+} = require('../utils/personaWorldbookSearch/sessionState');
 
 (async () => {
   const catalog = getPersonaModuleCatalogSummary();
@@ -237,6 +240,37 @@ const {
     worldbookSemanticLimit: 0
   });
   assert.ok(characterRelationBalancedCandidates.some((item) => item.id.startsWith('wb_mizuki_')));
+
+  clearWorldbookSessionState('worldbook-session-test');
+  const firstFutureSessionCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '你之后真的会去服饰专门学校吗，open campus 看得怎么样',
+    chatType: 'private',
+    sessionKey: 'worldbook-session-test',
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(firstFutureSessionCandidates.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
+  assert.ok(firstFutureSessionCandidates.personaWorldbookSearch.sessionState.activated.some((item) => item.moduleId === 'wb_mizuki_future_two_tracks'));
+  const secondFutureSessionCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '刚才那个话题继续说',
+    chatType: 'private',
+    sessionKey: 'worldbook-session-test',
+    forceWorldbook: true,
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(secondFutureSessionCandidates.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
+  assert.ok(secondFutureSessionCandidates.find((item) => item.id === 'wb_mizuki_future_two_tracks').activationState);
+  const thirdFutureSessionCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '再继续一下',
+    chatType: 'private',
+    sessionKey: 'worldbook-session-test',
+    forceWorldbook: true,
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(!thirdFutureSessionCandidates.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
+  clearWorldbookSessionState('worldbook-session-test');
 
   const ordinaryPrivateSelection = selectPersonaModules({}, {
     question: '随便聊聊',
