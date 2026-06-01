@@ -62,6 +62,7 @@ for (const testCase of cases) {
   const prompt = buildShortTermContinuityPrompt(context);
   assert.ok(prompt.includes('[ShortTermContinuity]'), `${testCase.name}: continuity marker missing`);
   assert.ok(prompt.includes('[RecentRawTurns]'), `${testCase.name}: raw turns missing`);
+  assert.ok(prompt.includes('Continue from the newest relevant RecentRawTurns first'), `${testCase.name}: newest-turn priority instruction missing`);
   assert.ok(prompt.includes(testCase.expected), `${testCase.name}: expected continuity evidence missing`);
   assert.strictEqual(context.contextProfile.name, 'memory_recall');
   assert.ok(context.contextObservability.selectedImportantRawTurnCount > 0);

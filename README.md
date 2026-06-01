@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-01 08:22 +08:00：主回复短期连续性预算已扩大：`MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=5200`、普通聊天 recent raw turns `128/16/0.9`，`MEMORY_V3_SESSION_RECENT_MESSAGES=128`；`short_term_continuity` 指令明确要求优先从最新 `RecentRawTurns` 承接，再用摘要和长期记忆补空。
+
 更新 2026-06-01 08:22 +08:00：主回复输入 token 降低已定位为 prompt 收敛策略和 prompt 文件缩短共同作用，不是上下文窗口变小；`.env` 仍保持 `CONTEXT_WINDOW_MAX_TOKENS=400000`、`SHORT_TERM_MEMORY_MAX_TOKENS=120000`。2026-05-31 `chat/default` 估算 p95 降至约 7,635，建议优先扩大 `short_term_continuity` 和 recent raw turns，而不是回退到 `legacy` 全量 prompt。
 
 更新 2026-05-31 18:53 +08:00：主回复新增 `chat_liveness_discipline` critical 动态块，私聊/群聊 surface 拆为 `private_chat`、`group_direct_chat`，群 direct/被动群/快速回复统一注入活人感纪律，强化限知、隐私不外泄、短插话和一对一连续性。
@@ -340,17 +342,11 @@ MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT=100000
 SHORT_TERM_MEMORY_RECENT_MESSAGES=240
 SHORT_TERM_MEMORY_RECENT_TURNS=48
 SHORT_TERM_SCENE_RECENT_TURNS=24
-MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3600
-MEMORY_V3_SESSION_RECENT_MESSAGES=96
-```
-
-如果目标是提高记忆连续性，优先在保持 `MAIN_REPLY_PROMPT_MODE=balanced` 的前提下小步增加：
-
-```env
 MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=5200
 MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=128
 MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=16
 MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.9
+MEMORY_V3_SESSION_RECENT_MESSAGES=128
 ```
 
 不建议直接切 `MAIN_REPLY_PROMPT_MODE=legacy` 作为常态方案；它会重新带入 ordinary chat 中已收敛掉的 few-shot、style/social/self-improvement/worldbook 噪声，输入 token 会增加，但记忆命中精度不一定提高。

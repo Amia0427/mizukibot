@@ -102,9 +102,9 @@ function resolveShortTermContextProfile(userInfo = {}, options = {}) {
   return {
     name: 'normal_chat',
     reason: 'default',
-    recentRawMessageLimit: readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES', 96),
-    recentRawNewestMin: readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES', 12),
-    rawTokenMultiplier: readPositiveNumber('MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER', 0.75),
+    recentRawMessageLimit: readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES', 128),
+    recentRawNewestMin: readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES', 16),
+    rawTokenMultiplier: readPositiveNumber('MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER', 0.9),
     summaryLoadCount: readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT', config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT || 5),
     affinity
   };

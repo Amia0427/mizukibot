@@ -46,6 +46,9 @@ function estimatePromptTokens(value) {
     useConfigDefault('SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS');
     useConfigDefault('SHORT_TERM_BRIDGE_RAW_TTL_HOURS');
     useConfigDefault('MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS');
+    useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES');
+    useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES');
+    useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER');
     useConfigDefault('MEMORY_V3_SESSION_RECENT_MESSAGES');
     useConfigDefault('MODEL_SELF_CHECK_TIMEOUT_MS');
     useConfigDefault('IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS');
@@ -103,8 +106,11 @@ function estimatePromptTokens(value) {
     assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_ITEMS, 6);
     assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS, 16);
     assert.strictEqual(config.SHORT_TERM_BRIDGE_RAW_TTL_HOURS, 48);
-    assert.strictEqual(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS, 3600);
-    assert.strictEqual(config.MEMORY_V3_SESSION_RECENT_MESSAGES, 96);
+    assert.strictEqual(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS, 5200);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES, 128);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES, 16);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER, 0.9);
+    assert.strictEqual(config.MEMORY_V3_SESSION_RECENT_MESSAGES, 128);
     assert.strictEqual(config.MODEL_SELF_CHECK_TIMEOUT_MS, 25000);
     assert.strictEqual(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS, 25000);
 
