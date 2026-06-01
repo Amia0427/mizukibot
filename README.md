@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-01 19:34 +08:00：群聊活人感纪律新增群聊专属安全规范，仅在 `group_direct_chat` / `passive_group_reply` 生效；遇到政治敏感、淫秽色情、违法违规或规避法律法规话题时，用瑞希式短句轻轻带过，不改私聊约束。
 
+更新 2026-06-01 22:45 +08:00：post-reply worker 启动改为单实例可重入；`scripts/post-reply-worker.js` 会持有 `.mizukibot-postreply-worker.lock`，Windows daemon / one-click / Linux fallback 会先扫描已有 `post-reply-worker.js` 进程并修复 PID 文件。Windows daemon 只在有 queued job 或可恢复 processing job 时补启 worker，避免主 bot 已运行时因 worker RSS 空闲回收反复空拉新 worker。详见 `docs/post-reply-worker.md`。
+
 更新 2026-06-01 09:10 +08:00：世界书支持可选会话态元数据（`template`、`activationMode`、`durationTurns`、`durationMs`、`scope`、`probability`、`exampleIds`），显式剧情/设定命中后可在当前 session 短暂持续；动态示例可由已激活 worldbook 的 `exampleIds` 优先选取。新增 `npm run diag:worldbook -- --question "..." --json` 只读诊断候选、注入、跳过原因和示例联动。
 
 更新 2026-06-01 08:22 +08:00：主回复短期连续性预算已扩大：`MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=5200`、普通聊天 recent raw turns `128/16/0.9`，`MEMORY_V3_SESSION_RECENT_MESSAGES=128`；`short_term_continuity` 指令明确要求优先从最新 `RecentRawTurns` 承接，再用摘要和长期记忆补空。

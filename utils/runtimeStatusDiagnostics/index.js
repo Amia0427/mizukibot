@@ -219,7 +219,7 @@ function buildRuntimeStatusDiagnostic(options = {}) {
       },
       postReplyWorker: {
         status: postReplyStatus,
-        pid: postReplyPidFile.pid,
+        pid: postReplyPidFile.pid || workerProcesses[0]?.pid || 0,
         pidFileMatch: postReplyPidFile.status !== 'mismatch',
         processCount: workerProcesses.length,
         queue: postReplyQueue.counts,

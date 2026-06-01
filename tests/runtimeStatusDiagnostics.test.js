@@ -202,6 +202,21 @@ module.exports = (() => {
     });
     assert.strictEqual(explicitWorkerReport.summary.postReplyWorker.status, 'running');
 
+    fs.rmSync(path.join(tempDir, '.mizukibot-postreply-worker.pid'), { force: true });
+    process.env.POST_REPLY_WORKER_ENABLED = 'true';
+    clearProjectCache();
+    const { buildRuntimeStatusDiagnostic: buildNoPidRuntimeStatusDiagnostic } = require('../utils/runtimeStatusDiagnostics');
+    const workerWithoutPidReport = buildNoPidRuntimeStatusDiagnostic({
+      projectRoot: tempDir,
+      now: () => now,
+      listProcesses: () => processes.filter((item) => item.pid === 222),
+      isProcessAlive: (pid) => Number(pid) === 222
+    });
+    assert.strictEqual(workerWithoutPidReport.summary.postReplyWorker.status, 'running');
+    assert.strictEqual(workerWithoutPidReport.summary.postReplyWorker.pid, 222);
+    assert.strictEqual(workerWithoutPidReport.summary.postReplyWorker.processCount, 1);
+    assert.ok(!workerWithoutPidReport.signals.some((item) => item.code === 'post_reply_pid_missing'), 'running worker without pid file should not be reported as missing');
+
     console.log('runtimeStatusDiagnostics.test.js passed');
   } finally {
     restoreEnv(snapshot);

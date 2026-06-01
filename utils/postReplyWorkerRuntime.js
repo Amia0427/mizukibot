@@ -106,8 +106,18 @@ function createPostReplyWorkerRuntime(options = {}) {
     };
   }
 
+  function hasPendingQueueWorkForRecycle() {
+    if (typeof queue.listJobs !== 'function') return false;
+    try {
+      return normalizeArray(queue.listJobs(['queued', 'processing'])).length > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function maybeRequestIdleRecycle(reason = 'rss_high') {
     if (!rssRecycleBytes || recycleRequested || activeCount > 0) return false;
+    if (hasPendingQueueWorkForRecycle()) return false;
     const idleMs = Math.max(0, Date.now() - lastActiveAt);
     if (idleMs < rssRecycleIdleMs) return false;
     const rssBytes = process.memoryUsage().rss;
@@ -616,6 +626,7 @@ function createPostReplyWorkerRuntime(options = {}) {
     getActiveUserIds,
     getStats,
     maybeRequestIdleRecycle,
+    hasPendingQueueWorkForRecycle,
     vectorWatchdogLoop
   };
 }

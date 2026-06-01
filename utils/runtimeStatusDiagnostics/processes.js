@@ -14,6 +14,14 @@ function normalizePid(value) {
   return pid > 0 ? pid : 0;
 }
 
+function normalizeTimeMs(value) {
+  if (value instanceof Date) return value.getTime();
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  const parsed = Date.parse(normalizeText(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function isProcessAliveDefault(pid = 0) {
   const targetPid = normalizePid(pid);
   if (!targetPid) return false;
@@ -39,7 +47,8 @@ function parseWindowsProcessList(raw = '') {
     pid: normalizePid(row.ProcessId),
     ppid: normalizePid(row.ParentProcessId),
     name: normalizeText(row.Name),
-    commandLine: normalizeText(row.CommandLine)
+    commandLine: normalizeText(row.CommandLine),
+    startTimeMs: normalizeTimeMs(row.StartTimeMs || row.CreationDate)
   })).filter((row) => row.pid);
 }
 
@@ -57,19 +66,26 @@ function parseWindowsGetProcessList(raw = '') {
     pid: normalizePid(row.Id),
     ppid: 0,
     name: normalizeText(row.ProcessName || row.Name),
-    commandLine: normalizeText(row.Path)
+    commandLine: normalizeText(row.Path),
+    startTimeMs: normalizeTimeMs(row.StartTimeMs || row.StartTime)
   })).filter((row) => row.pid);
 }
 
 function parsePosixProcessList(raw = '') {
+  const now = Date.now();
   return String(raw || '').split(/\r?\n/).map((line) => {
     const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/);
     if (!match) return null;
+    const rest = normalizeText(match[4]);
+    const restParts = rest.split(/\s+/);
+    const maybeElapsedSeconds = normalizeNumber(restParts[0], NaN);
+    const hasElapsedSeconds = Number.isFinite(maybeElapsedSeconds) && /^\d+$/.test(restParts[0] || '');
     return {
       pid: normalizePid(match[1]),
       ppid: normalizePid(match[2]),
       name: normalizeText(match[3]),
-      commandLine: normalizeText(match[4])
+      commandLine: hasElapsedSeconds ? normalizeText(restParts.slice(1).join(' ')) : rest,
+      startTimeMs: hasElapsedSeconds ? Math.max(0, now - (maybeElapsedSeconds * 1000)) : 0
     };
   }).filter(Boolean);
 }
@@ -77,7 +93,7 @@ function parsePosixProcessList(raw = '') {
 function listProcessesDefault() {
   try {
     if (process.platform === 'win32') {
-      const command = "Get-CimInstance Win32_Process -Filter \"Name = 'node.exe' OR Name = 'powershell.exe' OR Name = 'pwsh.exe' OR Name = 'cmd.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress";
+      const command = "Get-CimInstance Win32_Process -Filter \"Name = 'node.exe' OR Name = 'powershell.exe' OR Name = 'pwsh.exe' OR Name = 'cmd.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine,@{Name='StartTimeMs';Expression={if ($_.CreationDate) { ([DateTimeOffset]$_.CreationDate.ToUniversalTime()).ToUnixTimeMilliseconds() } else { 0 }}} | ConvertTo-Json -Compress";
       const raw = execFileSync('powershell.exe', [
         '-NoProfile',
         '-ExecutionPolicy',
@@ -97,7 +113,7 @@ function listProcessesDefault() {
         '-ExecutionPolicy',
         'Bypass',
         '-Command',
-        "Get-Process node,powershell,pwsh,cmd -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path | ConvertTo-Json -Compress"
+        "Get-Process node,powershell,pwsh,cmd -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Path,@{Name='StartTimeMs';Expression={try { ([DateTimeOffset]$_.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds() } catch { 0 }}} | ConvertTo-Json -Compress"
       ], {
         encoding: 'utf8',
         timeout: 5000,
@@ -106,7 +122,7 @@ function listProcessesDefault() {
       return parseWindowsGetProcessList(fallbackRaw);
     }
 
-    const raw = execFileSync('ps', ['-eo', 'pid=,ppid=,comm=,args='], {
+    const raw = execFileSync('ps', ['-eo', 'pid=,ppid=,comm=,etimes=,args='], {
       encoding: 'utf8',
       timeout: 5000
     });
@@ -122,7 +138,8 @@ function listProcesses(options = {}) {
       pid: normalizePid(row.pid ?? row.ProcessId),
       ppid: normalizePid(row.ppid ?? row.ParentProcessId),
       name: normalizeText(row.name ?? row.Name),
-      commandLine: normalizeText(row.commandLine ?? row.CommandLine)
+      commandLine: normalizeText(row.commandLine ?? row.CommandLine),
+      startTimeMs: normalizeTimeMs(row.startTimeMs ?? row.StartTimeMs ?? row.startTime ?? row.StartTime)
     })).filter((row) => row.pid);
   }
   return listProcessesDefault();
@@ -183,7 +200,8 @@ function compactProcess(proc = null) {
     pid: normalizePid(proc.pid),
     ppid: normalizePid(proc.ppid),
     name: normalizeText(proc.name),
-    commandLine: normalizeText(proc.commandLine).slice(0, 500)
+    commandLine: normalizeText(proc.commandLine).slice(0, 500),
+    startTimeMs: normalizeTimeMs(proc.startTimeMs)
   };
 }
 
@@ -194,6 +212,7 @@ module.exports = {
   listProcesses,
   listProcessesDefault,
   normalizePid,
+  normalizeTimeMs,
   parsePosixProcessList,
   parseWindowsGetProcessList,
   parseWindowsProcessList,

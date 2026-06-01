@@ -87,8 +87,28 @@ $loadedCount = Import-DotEnv -FilePath $envPath
 Write-Host "[INFO] 已加载环境变量: $loadedCount"
 
 $proc = Start-Process -FilePath $nodeCmd.Source -ArgumentList 'index.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
-$workerProc = Start-Process -FilePath $nodeCmd.Source -ArgumentList 'scripts/post-reply-worker.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
-Set-Content -Path $workerPidFile -Value $workerProc.Id -Encoding utf8
+
+function Get-PostReplyWorkerProcess {
+  try {
+    $rootText = ([string]$repoRoot).TrimEnd('\')
+    return @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+      $_.Name -eq 'node.exe' -and
+      $_.CommandLine -match 'post-reply-worker\.js' -and
+      ($_.CommandLine -like "*$rootText*" -or $_.CommandLine -match '(^|[\\/\s])scripts[\\/]post-reply-worker\.js(\s|$)')
+    } | Sort-Object ProcessId | Select-Object -First 1)
+  } catch {
+    return @()
+  }
+}
+
+$existingWorker = @(Get-PostReplyWorkerProcess)
+if ($existingWorker.Count -gt 0) {
+  Set-Content -Path $workerPidFile -Value ([int]$existingWorker[0].ProcessId) -Encoding utf8
+  $workerProc = $null
+} else {
+  $workerProc = Start-Process -FilePath $nodeCmd.Source -ArgumentList 'scripts/post-reply-worker.js' -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
+  Set-Content -Path $workerPidFile -Value $workerProc.Id -Encoding utf8
+}
 Start-Sleep -Seconds 2
 
 if (Test-Path $lockFile) {
@@ -110,7 +130,9 @@ if (Test-Path $lockFile) {
     Write-Host "[WARN] 未发现 lock 文件，但进程仍在运行（PID=$($proc.Id)）。" -ForegroundColor Yellow
   }
 }
-if ($workerProc.HasExited) {
+if ($null -eq $workerProc -and $existingWorker.Count -gt 0) {
+  Write-Host "[OK] WORKER_PID=$([int]$existingWorker[0].ProcessId)（已在运行）"
+} elseif ($workerProc.HasExited) {
   Write-Host "[WARN] post-reply worker 已退出，ExitCode=$($workerProc.ExitCode)" -ForegroundColor Yellow
 } else {
   Write-Host "[OK] WORKER_PID=$($workerProc.Id)"

@@ -1,6 +1,8 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-05-24 02:16 +08:00
+更新时间：2026-06-01 22:45 +08:00
+
+更新 2026-06-01 22:45 +08:00：今天 `data/bot-daemon.log` 显示 00:22、01:49、03:49、05:22、05:49、07:49、09:49、10:22、11:49、13:49、15:22、15:49、20:22、21:49 都是在主 bot 已运行时再次 `started post-reply worker`；同期 `data/post-reply-worker.err.log` 记录 worker 因 `idle RSS recycle requested` 退出并清掉 PID 文件。修复后 worker 入口和 daemon 均可重入：已有 worker 时只修复 PID 并跳过启动；没有 worker 时，daemon 只有发现 queued job 或可恢复 processing job 才会补启。
 
 ## 最短操作路径
 
@@ -58,6 +60,17 @@ POST_REPLY_WORKER_INLINE=true
 - `POST_REPLY_QUEUE_DIR/index.json`：队列轻量索引，可自动重建。
 - `POST_REPLY_TRACE_DIR`：默认 `data/post_reply_traces`。
 - `.mizukibot-postreply-worker.pid`：独立 worker PID 文件。
+- `.mizukibot-postreply-worker.lock`：独立 worker 单实例锁，只由真实 worker 持有。
+
+## 单实例启动
+
+`scripts/post-reply-worker.js` 启动时先执行单实例守卫：
+
+- 发现已有 `post-reply-worker.js` 进程：写回 `.mizukibot-postreply-worker.pid`，当前启动尝试直接退出。
+- PID/lock 指向已退出进程或非 worker 进程：清理 stale owner 后再获取锁。
+- 近同时并发启动：优先让更早/更低 PID 的启动尝试获得锁，其余进程退出。
+
+Windows daemon、`scripts/one-click-start.ps1` 和 Linux fallback 启动都会先扫描现有 worker 进程；PID 文件缺失但进程存在时只补 PID，不会误杀正常任务，也不会再起第二个 worker。Windows daemon 在 worker 不存在时会检查队列：存在 queued job 或租约已过期的 processing job 才补启；队列空闲时记录 `queue idle; skip idle restart`。worker 自身在 queued/processing 未清空时不会触发 RSS idle recycle，`processing` job 仍靠 `leaseOwner/leaseUntil` 做恢复边界，只有租约过期才会由下一轮 worker recovery。
 
 ## 配置速查
 

@@ -1,6 +1,8 @@
 # Post-Reply Worker Improvement Plan
 
-更新时间：2026-05-24 02:16 +08:00
+更新时间：2026-06-01 22:45 +08:00
+
+运行状态更新 2026-06-01 22:45 +08:00：补强目标 9/11，worker 入口新增 `.mizukibot-postreply-worker.lock` 单实例守卫；Windows daemon、one-click 和 Linux fallback 启动改为先扫描现有 `post-reply-worker.js` 进程并修复 PID 文件。2026-06-01 日志里的“主 bot already running 但反复 started post-reply worker”由 RSS 空闲回收清 PID 后 daemon 盲起导致；现改为可重入，且 Windows daemon 只有在 queued job 或可恢复 processing job 存在时补启 worker，worker 自身有 queued/processing 时不做 RSS idle recycle，不误杀正常 worker/job。
 
 运行状态更新 2026-05-23 22:37 +08:00：本地 `.env` 已显式启用 `POST_REPLY_WORKER_ENABLED=true`；独立 worker 由 `npm run start:post-reply-worker` 启动，队列、PID 和禁用状态通过 `npm run diag:runtime` 诊断。
 
