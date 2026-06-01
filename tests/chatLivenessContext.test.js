@@ -25,6 +25,10 @@ module.exports = (async () => {
   assert.ok(privatePrompt.includes('一对一熟人聊天'));
   assert.ok(privatePrompt.includes('不要把普通闲聊自动升级成危机'));
   assert.ok(privatePrompt.includes('允许迟疑'));
+  assert.ok(!privatePrompt.includes('政治敏感'));
+  assert.ok(!privatePrompt.includes('淫秽色情'));
+  assert.ok(!privatePrompt.includes('违法违规'));
+  assert.ok(!privatePrompt.includes('打哈哈'));
   assert.ok(!privatePrompt.includes('线下模式'));
   assert.ok(!privatePrompt.includes('小说叙事输出'));
 
@@ -48,8 +52,25 @@ module.exports = (async () => {
   assert.ok(groupPrompt.includes('不要泄露、暗示或调用私聊记忆'));
   assert.ok(groupPrompt.includes('不需要覆盖所有人'));
   assert.ok(groupPrompt.includes('不要让所有注意力围着用户转'));
+  assert.ok(groupPrompt.includes('政治敏感'));
+  assert.ok(groupPrompt.includes('淫秽色情'));
+  assert.ok(groupPrompt.includes('违法违规'));
+  assert.ok(groupPrompt.includes('规避法律法规'));
+  assert.ok(groupPrompt.includes('打哈哈'));
+  assert.ok(groupPrompt.includes('不要用“作为AI”'));
   assert.ok(!groupPrompt.includes('线下模式'));
   assert.ok(!groupPrompt.includes('小说叙事输出'));
+
+  const passiveGroupPrompt = buildChatLivenessDisciplinePrompt({
+    surface: 'passive_group_reply',
+    routeMeta: { groupId: 'g1', chatType: 'group' },
+    question: '群里这个话题怎么接'
+  });
+  assert.ok(passiveGroupPrompt.includes('surface=passive_group_reply'));
+  assert.ok(passiveGroupPrompt.includes('政治敏感'));
+  assert.ok(passiveGroupPrompt.includes('淫秽色情'));
+  assert.ok(passiveGroupPrompt.includes('违法违规'));
+  assert.ok(passiveGroupPrompt.includes('打哈哈'));
 
   const state = buildChatLiveState({
     routeMeta: { groupId: 'g1', directedContext: { scene: 'reply_to_bot' } },
