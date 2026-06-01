@@ -64,7 +64,9 @@ function normalizeFewShotExample(example = {}) {
       excludeKeywords: normalizeStringList(match.exclude_keywords),
       keywordsAny: normalizeStringList(match.keywords_any),
       keywordsAll: normalizeStringList(match.keywords_all),
-      regexAny: compileRegexList(match.regex_any)
+      regexAny: compileRegexList(match.regex_any),
+      worldbookIds: normalizeStringList(match.worldbook_ids || source.worldbookIds),
+      tags: normalizeStringList(source.tags)
     },
     enumerable: false,
     configurable: true
@@ -185,9 +187,15 @@ function resolveFewShotMaxExamples(context = {}, index = null) {
     Number(context.maxExamples ?? index?.max_examples ?? 0) || 0
   );
   if (baseMaxExamples <= 0) return 0;
+  const hasWorldbookLinkedExamples = normalizeStringList(context.preferredExampleIds).length > 0
+    || normalizeStringList(context.activeWorldbookIds).length > 0;
 
   const emotionalIntensity = classifyEmotionalIntensity(context);
   const cappedBase = Math.min(baseMaxExamples, emotionalIntensity === 'high' ? 2 : 1);
+  if (hasWorldbookLinkedExamples) {
+    if ((Number(context.contextDensity || 0) || 0) > 1200) return Math.min(cappedBase, 1);
+    return Math.min(baseMaxExamples, 2);
+  }
   if (!shouldUseExtraFewShotSlot(context) && emotionalIntensity !== 'medium') return cappedBase;
   if ((Number(context.contextDensity || 0) || 0) > 1200) return Math.min(cappedBase, 1);
   return Math.min(cappedBase + 1, 2);
@@ -227,8 +235,12 @@ function scoreFewShotExample(example = {}, context = {}) {
   const text = normalizeText(`${rawQuestion}\n${routePrompt}`).toLowerCase();
   const match = example && typeof example.match === 'object' ? example.match : {};
   const runtime = example && typeof example.__fewShotRuntime === 'object' ? example.__fewShotRuntime : {};
+  const activeWorldbookIds = normalizeStringList(context.activeWorldbookIds);
+  const preferredExampleIds = normalizeStringList(context.preferredExampleIds);
 
   if (!text) return 0;
+
+  if (preferredExampleIds.includes(normalizeText(example.id).toLowerCase())) return Number(runtime.priority ?? example.priority ?? 0) + 80;
 
   const routeTypes = Array.isArray(runtime.routeTypes) ? runtime.routeTypes : normalizeStringList(match.route_types);
   if (routeTypes.length > 0 && routeKey && !routeTypes.includes(routeKey)) return 0;
@@ -237,6 +249,8 @@ function scoreFewShotExample(example = {}, context = {}) {
   if (excludeKeywords.some((needle) => text.includes(needle))) return 0;
 
   let score = Number(runtime.priority ?? example.priority ?? 0) || 0;
+  const worldbookIds = Array.isArray(runtime.worldbookIds) ? runtime.worldbookIds : normalizeStringList(match.worldbook_ids || example.worldbookIds);
+  if (activeWorldbookIds.length > 0 && worldbookIds.some((id) => activeWorldbookIds.includes(id))) score += 55;
   score += scoreKeywords(text, Array.isArray(runtime.keywordsAny) ? runtime.keywordsAny : normalizeStringList(match.keywords_any), 14);
   score += scoreKeywords(text, Array.isArray(runtime.keywordsAll) ? runtime.keywordsAll : normalizeStringList(match.keywords_all), 10);
   score += scoreRegexes(rawQuestion, Array.isArray(runtime.regexAny) ? runtime.regexAny : match.regex_any, 18);
@@ -260,16 +274,41 @@ function scoreFewShotExample(example = {}, context = {}) {
 
 function selectDynamicFewShotExamples(context = {}) {
   const index = loadFewShotIndex();
+  const maxExamples = resolveFewShotMaxExamples(context, index);
+  if (maxExamples <= 0) return [];
+
+  const preferredExampleIds = normalizeStringList(context.preferredExampleIds);
+  const activeWorldbookIds = normalizeStringList(context.activeWorldbookIds);
+  const preferred = index.examples
+    .map((example) => ({
+      example,
+      score: scoreFewShotExample(example, {
+        ...context,
+        preferredExampleIds,
+        activeWorldbookIds
+      })
+    }))
+    .filter((item) => item.score > 0)
+    .filter((item) => {
+      const id = normalizeText(item.example.id).toLowerCase();
+      const runtime = item.example && typeof item.example.__fewShotRuntime === 'object' ? item.example.__fewShotRuntime : {};
+      const worldbookIds = Array.isArray(runtime.worldbookIds) ? runtime.worldbookIds : [];
+      return preferredExampleIds.includes(id) || worldbookIds.some((entry) => activeWorldbookIds.includes(entry));
+    })
+    .sort((a, b) => b.score - a.score || String(a.example.id || '').localeCompare(String(b.example.id || '')))
+    .slice(0, Math.min(1, maxExamples))
+    .map((item) => item.example);
+  const preferredIds = new Set(preferred.map((example) => normalizeText(example.id).toLowerCase()));
   const scored = index.examples
     .map((example) => ({
       example,
       score: scoreFewShotExample(example, context)
     }))
     .filter((item) => item.score > 0)
+    .filter((item) => !preferredIds.has(normalizeText(item.example.id).toLowerCase()))
     .sort((a, b) => b.score - a.score || String(a.example.id || '').localeCompare(String(b.example.id || '')));
 
-  const maxExamples = resolveFewShotMaxExamples(context, index);
-  return scored.slice(0, maxExamples).map((item) => item.example);
+  return preferred.concat(scored.slice(0, Math.max(0, maxExamples - preferred.length)).map((item) => item.example));
 }
 
 function buildDynamicFewShotPrompt(context = {}) {

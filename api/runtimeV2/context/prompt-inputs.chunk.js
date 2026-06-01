@@ -33,6 +33,11 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     continuitySignals: options?.continuitySignals,
     personaPhase: routeMeta.personaPhase || '',
     chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || options.chatType || options.chat_type || 'private').trim(),
+    sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+    userId,
+    senderId: routeMeta.senderId || routeMeta.sender_id || userId,
+    groupId: routeMeta.groupId || routeMeta.group_id || '',
+    isAdmin: options.isAdmin === true || routeMeta.isAdmin === true,
     maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
     mainReplyPromptMode
   };
@@ -131,6 +136,11 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
       continuitySignals: options?.continuitySignals,
       personaPhase: routeMeta.personaPhase || '',
       chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || options.chatType || options.chat_type || 'private').trim(),
+      sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+      userId,
+      senderId: routeMeta.senderId || routeMeta.sender_id || userId,
+      groupId: routeMeta.groupId || routeMeta.group_id || '',
+      isAdmin: options.isAdmin === true || routeMeta.isAdmin === true,
       personaModuleCandidates,
       mainReplyPromptMode
     }
@@ -147,6 +157,8 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     continuitySignals: options?.continuitySignals,
     contextDensity: estimateTokens(memoryContext?.memoryForPrompt || '') + estimateTokens(summaryText || ''),
     mainReplyPromptMode,
+    activeWorldbookIds: normalizeArray(personaModuleDecision.activeWorldbookIds),
+    preferredExampleIds: normalizeArray(personaModuleDecision.linkedExamples),
     forceDynamicFewShot: options.forceDynamicFewShot === true || routeMeta.forceDynamicFewShot === true,
     dynamicFewShotEnabled: options.dynamicFewShotEnabled === true || routeMeta.dynamicFewShotEnabled === true
   };

@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-01 08:22 +08:00
+更新时间：2026-06-01 09:10 +08:00
 
 ## 已调整
 
+- 2026-06-01 09:10 +08:00：世界书新增可选 session state：显式剧情/设定/角色关系命中后，可按条目的 `durationTurns` / `durationMs` 在当前 `sessionKey` 内短暂持续；`exampleIds` 会把已激活 worldbook 关联到动态示例，普通闲聊仍不会触发 worldbook 或 few-shot。新增 `npm run diag:worldbook -- --question "..." --json` 查看候选分数、激活态、最终注入、跳过原因和示例选择。
 - 2026-06-01 08:22 +08:00：主回复短期连续性默认预算从 3600 提高到 5200，普通聊天 recent raw turns 档位从 `96/12/0.75` 提高到 `128/16/0.9`，`MEMORY_V3_SESSION_RECENT_MESSAGES` 从 96 提高到 128；`short_term_continuity` 末尾指令明确要求优先承接最新 `RecentRawTurns`，摘要和长期记忆只补空或解冲突。
 - 2026-06-01 08:22 +08:00：复查“输入 token 突然降低”：窗口上限未变，`.env` 仍为 `CONTEXT_WINDOW_MAX_TOKENS=400000`、`ADMIN_CONTEXT_WINDOW_MAX_TOKENS=400000`、`SHORT_TERM_MEMORY_MAX_TOKENS=120000`、`ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS=120000`；下降主因是 2026-05-31 的 `MAIN_REPLY_PROMPT_MODE=balanced` 收敛普通聊天 prompt，以及当前未提交 prompt 文件把 `root_system_prompt` 缩到约 14 token、`main_persona_system` 缩到约 3,964 token。
 - 2026-05-31 18:53 +08:00：新增 `chat_liveness_discipline` critical 动态块，运行时强制进入主回复并区分 `private_chat`、`group_direct_chat`、`passive_group_reply`。私聊保留一对一连续性、轻微主动性和不升级普通话题；群聊限制为共享可见现场，禁止泄露私聊记忆，允许短插话、半句、岔题和不覆盖所有人。

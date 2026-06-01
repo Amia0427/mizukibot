@@ -1055,7 +1055,15 @@
       "priority": 18,
       "conflictsWith": [],
       "phase": "all",
-      "slot": "worldbook_future"
+      "slot": "worldbook_future",
+      "template": "event",
+      "activationMode": "session",
+      "durationTurns": 2,
+      "durationMs": 900000,
+      "probability": 1,
+      "exampleIds": [
+        "future_two_tracks"
+      ]
     },
     {
       "id": "wb_mizuki_outside_n25_mode",
