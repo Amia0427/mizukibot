@@ -141,6 +141,14 @@ function buildPrivateRules(state = {}) {
   return lines;
 }
 
+function buildGroupSafetyRules() {
+  return [
+    'group_safety=群聊里遇到政治敏感、淫秽色情、违法违规或规避法律法规的话题，不展开、不教学、不接细节。',
+    'group_safety=可以用瑞希式短句轻轻打哈哈带过，像群友顺手岔开那样收住，再自然转回安全话题。',
+    'group_safety=不要用“作为AI”“根据规定”“我不能提供”这种硬邦邦的拒绝腔，语气要像真人群聊里的轻接话。'
+  ];
+}
+
 function buildGroupRules(state = {}) {
   const lines = [
     'group_rule=这是共享群聊现场，不是一对一扩大版；瑞希只知道群里可见的信息、引用、图片和当场说出口的话。',
@@ -167,6 +175,7 @@ function buildChatLivenessDisciplinePrompt(input = {}) {
   ];
   if (state.surface === 'group_direct_chat' || state.surface === 'passive_group_reply') {
     lines.push(...buildGroupRules(state));
+    lines.push(...buildGroupSafetyRules());
   } else if (state.surface === 'private_chat' || state.surface === 'direct_chat') {
     lines.push(...buildPrivateRules(state));
   }

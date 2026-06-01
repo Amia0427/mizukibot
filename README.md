@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-01 19:34 +08:00：群聊活人感纪律新增群聊专属安全规范，仅在 `group_direct_chat` / `passive_group_reply` 生效；遇到政治敏感、淫秽色情、违法违规或规避法律法规话题时，用瑞希式短句轻轻带过，不改私聊约束。
+
 更新 2026-06-01 09:10 +08:00：世界书支持可选会话态元数据（`template`、`activationMode`、`durationTurns`、`durationMs`、`scope`、`probability`、`exampleIds`），显式剧情/设定命中后可在当前 session 短暂持续；动态示例可由已激活 worldbook 的 `exampleIds` 优先选取。新增 `npm run diag:worldbook -- --question "..." --json` 只读诊断候选、注入、跳过原因和示例联动。
 
 更新 2026-06-01 08:22 +08:00：主回复短期连续性预算已扩大：`MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=5200`、普通聊天 recent raw turns `128/16/0.9`，`MEMORY_V3_SESSION_RECENT_MESSAGES=128`；`short_term_continuity` 指令明确要求优先从最新 `RecentRawTurns` 承接，再用摘要和长期记忆补空。
