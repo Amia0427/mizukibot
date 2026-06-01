@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-05-31 18:53 +08:00
+更新时间：2026-06-01 08:22 +08:00
 
 ## 已调整
 
+- 2026-06-01 08:22 +08:00：复查“输入 token 突然降低”：窗口上限未变，`.env` 仍为 `CONTEXT_WINDOW_MAX_TOKENS=400000`、`ADMIN_CONTEXT_WINDOW_MAX_TOKENS=400000`、`SHORT_TERM_MEMORY_MAX_TOKENS=120000`、`ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS=120000`；下降主因是 2026-05-31 的 `MAIN_REPLY_PROMPT_MODE=balanced` 收敛普通聊天 prompt，以及当前未提交 prompt 文件把 `root_system_prompt` 缩到约 14 token、`main_persona_system` 缩到约 3,964 token。
 - 2026-05-31 18:53 +08:00：新增 `chat_liveness_discipline` critical 动态块，运行时强制进入主回复并区分 `private_chat`、`group_direct_chat`、`passive_group_reply`。私聊保留一对一连续性、轻微主动性和不升级普通话题；群聊限制为共享可见现场，禁止泄露私聊记忆，允许短插话、半句、岔题和不覆盖所有人。
 - 2026-05-31 09:37 +08:00：主回复新增 `MAIN_REPLY_PROMPT_MODE=minimal|balanced|legacy`，默认 `balanced`。默认链路收敛为 `root_system_prompt`、`main_persona_system`、`roleplay_runtime_context`、`short_term_continuity`、`memory_recall_policy`、`retrieved_memory_lite`；普通聊天不再自动带 `dynamic_few_shot`、`style_profile`、`social_context`、`self_improvement`。
 - 2026-05-31 09:37 +08:00：`balanced/minimal` 下 persona modules 默认最多 2 个，私聊优先 `scene_private_chat`，群聊优先 `scene_group_insert`，明显情绪场景最多替换 1 个情绪模块；worldbook 只在设定、剧情节点、角色关系或显式瑞希/世界观/事件问题中召回，不再作为日常闲聊风格补丁。
@@ -56,6 +57,61 @@
 人格稳定边界：人格由稳定 persona 决定；长期记忆只补事实、偏好、关系距离和连续性证据，不得改写人格。worldbook 只补设定、剧情节点和角色关系，不得覆盖主风格。
 
 worldbook 触发边界：普通“随便聊聊”“今天好累”“我们关系怎么样”不召回；“M5 文化祭发生了什么”“瑞希和绘名关系怎么变了”“瑞希/世界观/事件/设定”类问题才召回。dynamic few-shot 默认关闭，只在显式风格诊断、回归测试、示例模仿或复杂输出格式场景启用。
+
+## Input Token Composition
+
+主回复输入 token 由出站 `messages`、system/tool 前缀和可选工具结果共同组成。普通 `chat/default` 在 `balanced` 下主要是：
+
+- stable system：`root_system_prompt`、`security_contract`、`main_persona_system`、`core_baseline_patch`。
+- dynamic context：`roleplay_runtime_context`、`chat_liveness_discipline`、`short_term_continuity`、`memory_recall_policy`、`retrieved_memory_lite`、`daily_journal`。
+- assistant-only / tool / current user：planner 或工具 follow-up 才会增加，普通直聊通常很小。
+
+2026-06-01 08:22 +08:00 复查最近 `prepare_main_prompt_blocks`，普通 `chat/default` 常见块组成约为：
+
+```text
+main_persona_system      3964
+short_term_continuity     769-1493
+retrieved_memory_lite     413-423
+daily_journal             142-164
+security_contract         155
+core_baseline_patch        89
+root_system_prompt         14
+```
+
+`npm run diag:main-reply-prompt -- --limit 30 --json` 的 `chat/default` 估算分布：
+
+```text
+2026-05-27 p50 7842, p95 11603
+2026-05-28 p50 8235, p95 10564
+2026-05-31 p50 7032, p95 7635
+```
+
+最近 provider 实际 usage 与本地估算不完全一致：Sonnet `usage.prompt_tokens` 多在 4.8k-5.2k，Opus 多在 8.8k-10.4k 且包含较大的 `cache_read_input_tokens`。因此排查“输入 token”时要同时看 `prompt_integrity.token_budget.estimated_input_tokens`、`usage.prompt_tokens` 和 `usage.cache_read_input_tokens`。
+
+## Memory Continuity Tuning
+
+结论：可以增大输入 token 来提高连续性，但应把新增预算投给“近期真实对话和结构化摘要”，不要只恢复噪声块。
+
+推荐小步配置：
+
+```env
+MAIN_REPLY_PROMPT_MODE=balanced
+MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=5200
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=128
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=16
+MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.9
+```
+
+更激进但仍可控：
+
+```env
+MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=6400
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=160
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=20
+MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT=7
+```
+
+不建议常态切回 `MAIN_REPLY_PROMPT_MODE=legacy`：它会扩大输入 token，但增加的是 ordinary chat 已去掉的 few-shot、style/social/self-improvement 和非必要 worldbook，容易让风格补丁与旧记忆压过当前轮次。只有回归对照或临时诊断时再用。
 
 ## Roleplay Runtime Context
 
