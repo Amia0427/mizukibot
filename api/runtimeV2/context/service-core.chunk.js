@@ -368,7 +368,7 @@ function buildShortTermContinuityPrompt(sharedShortTermContext = {}) {
   }
 
   if (lines.length <= 1) return '';
-  lines.push('instruction=Use this as high-priority short-term continuity. Prefer exact recent raw turns over vague long-term memory when they conflict.');
+  lines.push('instruction=Continue from the newest relevant RecentRawTurns first. Treat the latest user/assistant turns as the primary anchor, use StateSummary/RestartRecovery only to fill gaps, and prefer exact recent raw turns over vague long-term memory when they conflict.');
   return trimTextByTokenBudget(lines.join('\n'), maxTokens, 'tail');
 }
 

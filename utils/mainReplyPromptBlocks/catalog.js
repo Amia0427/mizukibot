@@ -303,7 +303,7 @@ const DYNAMIC_CONTEXT_BLOCK_SPEC_OVERRIDES = Object.freeze({
   short_term_continuity: {
     criticality: 'critical',
     emptyPolicy: 'reject_optional_empty',
-    budget: { configKey: 'MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS', hardCapTokens: 3600 }
+    budget: { configKey: 'MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS', hardCapTokens: 5200 }
   },
   continuity_state: {
     criticality: 'critical',

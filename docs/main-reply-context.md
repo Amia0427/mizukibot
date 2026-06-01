@@ -4,6 +4,7 @@
 
 ## 已调整
 
+- 2026-06-01 08:22 +08:00：主回复短期连续性默认预算从 3600 提高到 5200，普通聊天 recent raw turns 档位从 `96/12/0.75` 提高到 `128/16/0.9`，`MEMORY_V3_SESSION_RECENT_MESSAGES` 从 96 提高到 128；`short_term_continuity` 末尾指令明确要求优先承接最新 `RecentRawTurns`，摘要和长期记忆只补空或解冲突。
 - 2026-06-01 08:22 +08:00：复查“输入 token 突然降低”：窗口上限未变，`.env` 仍为 `CONTEXT_WINDOW_MAX_TOKENS=400000`、`ADMIN_CONTEXT_WINDOW_MAX_TOKENS=400000`、`SHORT_TERM_MEMORY_MAX_TOKENS=120000`、`ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS=120000`；下降主因是 2026-05-31 的 `MAIN_REPLY_PROMPT_MODE=balanced` 收敛普通聊天 prompt，以及当前未提交 prompt 文件把 `root_system_prompt` 缩到约 14 token、`main_persona_system` 缩到约 3,964 token。
 - 2026-05-31 18:53 +08:00：新增 `chat_liveness_discipline` critical 动态块，运行时强制进入主回复并区分 `private_chat`、`group_direct_chat`、`passive_group_reply`。私聊保留一对一连续性、轻微主动性和不升级普通话题；群聊限制为共享可见现场，禁止泄露私聊记忆，允许短插话、半句、岔题和不覆盖所有人。
 - 2026-05-31 09:37 +08:00：主回复新增 `MAIN_REPLY_PROMPT_MODE=minimal|balanced|legacy`，默认 `balanced`。默认链路收敛为 `root_system_prompt`、`main_persona_system`、`roleplay_runtime_context`、`short_term_continuity`、`memory_recall_policy`、`retrieved_memory_lite`；普通聊天不再自动带 `dynamic_few_shot`、`style_profile`、`social_context`、`self_improvement`。
@@ -15,8 +16,8 @@
 - `SESSION_CONTEXT_SUMMARY_LOAD_COUNT` 默认从 3 提高到 5。
 - `SESSION_CONTEXT_SUMMARY_MAX_ITEMS_PER_SESSION` 默认从 20 提高到 32。
 - `SHORT_TERM_BRIDGE_RECENT_MESSAGES` 默认从 64 提高到 96。
-- `MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS` 默认从 2200 提高到 3600。
-- `MEMORY_V3_SESSION_RECENT_MESSAGES` 默认从 64 提高到 96。
+- `MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS` 默认从 2200 提高到 3600；2026-06-01 继续提高到 5200。
+- `MEMORY_V3_SESSION_RECENT_MESSAGES` 默认从 64 提高到 96；2026-06-01 继续提高到 128。
 - 2026-05-27 01:04 +08:00：完成“前天脚臭排行”最小回放：非回忆新话题里，即使 `memoryContext` 残留该 episode，planner 明确 skip `retrieved_memory_lite` 后主 prompt 不再强制注入；显式“昨天/刚才/where did we put”类回忆仍保留运行时兜底。`prompts/SYSTEM.txt` 同步收窄为记忆使用边界，移除与瑞希人格冲突的外部角色设定。
 - 2026-05-27 01:18 +08:00：主回复 token 体检显示当前端到端样例约 6,597 估算输入 token，块合计 6,571；stable system 5,058（76.97%）、dynamic context 1,348（20.51%）、assistant-only 165（2.51%）。最大块是 `main_persona_system` 4,594（69.91%），其中 `persona/01_identity.txt` 2,414（36.74%）、`00_roleplay_liveness_prelude.txt` 683（10.39%）、`SYSTEM.txt` 220（3.35%）。修复 session/runtime 合并后 `roleplay_runtime_context` 重复注入，并在模型出站层新增 50k warning、100k hard block。
 - 2026-05-26 08:11 +08:00：`tests/configPersonaPrompt.test.js` 不再要求 `00_roleplay_liveness_prelude.txt` 固定包含“当前项目没有线下模式”，改为校验线上聊天锚点和避免线下/小说叙事语义。
@@ -90,9 +91,7 @@ root_system_prompt         14
 
 ## Memory Continuity Tuning
 
-结论：可以增大输入 token 来提高连续性，但应把新增预算投给“近期真实对话和结构化摘要”，不要只恢复噪声块。
-
-推荐小步配置：
+结论：可以增大输入 token 来提高连续性，但应把新增预算投给“近期真实对话和结构化摘要”，不要只恢复噪声块。当前默认推荐配置：
 
 ```env
 MAIN_REPLY_PROMPT_MODE=balanced
@@ -100,6 +99,7 @@ MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=5200
 MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=128
 MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=16
 MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.9
+MEMORY_V3_SESSION_RECENT_MESSAGES=128
 ```
 
 更激进但仍可控：
