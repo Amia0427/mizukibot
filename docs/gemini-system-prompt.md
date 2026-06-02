@@ -2,6 +2,8 @@
 
 更新 2026-06-02 20:43 +08:00：新增 `prompts/GEMINI.txt`，作为 Gemini 模型独立系统提示词资产。
 
+更新 2026-06-02 21:39 +08:00：将 `prompts/GEMINI.txt` 从通用写作提示词收敛为 MizukiBot QQ 群聊瑞希运行适配层，只补充 Gemini 在群聊、被动感知、图片/引用、记忆证据和工具结果场景的输出纪律，不重复 persona 正文。
+
 ## 使用方式
 
 - `prompts/GEMINI.txt` 不在 `prompts/prompt-manifest.json` 中注册，不参与当前主回复 prompt 编译链。
@@ -17,4 +19,5 @@
 ## 边界
 
 - `GEMINI.txt` 是稳定提示词文本，不是角色卡、世界书或运行时策略。
+- 项目特化只写适配规则：QQ 群聊短消息、被动群感知、上下文证据使用、工具结果转述和 Gemini 出戏防护；瑞希人设仍以 persona 目录为准。
 - 后续若需要接入 manifest，应单独评估优先级、预算裁剪、与主回复 persona 的冲突，再补充测试。
