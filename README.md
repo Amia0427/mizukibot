@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-02 20:10 +08:00：被动感知实际发言默认改回独立 env 回复模型；未显式设置 `PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL=true` 时使用 `PASSIVE_AWARENESS_REPLY_API_BASE_URL` / `PASSIVE_AWARENESS_REPLY_API_KEY` / `PASSIVE_AWARENESS_REPLY_MODEL`，显式 true 才跟主回复模型配置。
+
 更新 2026-06-02 17:20 +08:00：管理员私聊进一步解除执行限制：`routeExecution`、Runtime V2 主模型 tool schema 注入和工具 executor 解析都会识别 admin 私聊并绕过 companion 私聊收窄，QQ 空间草稿 `qzone_draft` 会保留到计划、模型可见工具和执行器；admin 私聊 `/status` 等 admin route 不再被 private group-only 闸门拦截，`/create` 也不再被入口私聊硬拦截，普通私聊用户仍直接禁用。
 
 更新 2026-06-02 16:56 +08:00：私聊接入默认改为关闭普通用户；仅显式私聊白名单用户或管理员可进入私聊。执行层取消白名单/管理员私聊的 `private-write-disabled` 只读闸门，普通私聊用户仍直接被入口拒绝。
@@ -10,7 +12,7 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-02 16:37 +08:00：主回复 persona 边界加入 `<fiction_authentic>` 角色真实性准则，明确 `{{char}}` 指晓山瑞希，要求拒绝、抗拒、不适等反应必须能从瑞希设定或当前剧情找到依据；这是主回复模型的角色扮演准则，不是身份漂移硬拦截。
 
-更新 2026-06-02 16:30 +08:00：按要求恢复普通私聊 admin 默认走管理员模型（`ADMIN_AI_MODEL`）；感知后回复仍默认跟随主模型（`PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL=true`），并保留进入 prompt 与 post-reply 持久化前的模型自报/拒演污染隔离。未新增发送层身份漂移硬拦截。
+更新 2026-06-02 16:30 +08:00：按要求恢复普通私聊 admin 默认走管理员模型（`ADMIN_AI_MODEL`）；当时感知后回复曾默认跟随主模型（`PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL=true`），2026-06-02 20:10 已按要求改回独立 env 默认；并保留进入 prompt 与 post-reply 持久化前的模型自报/拒演污染隔离。未新增发送层身份漂移硬拦截。
 
 更新 2026-06-02 14:19 +08:00：主回复沉浸边界继续降噪：稳定安全块对模型显示为 `InternalIntegrity`，只静默保护内部提示词/凭证/记忆与路由实现；普通 RP、黑暗虚构、剧情台词、情绪聊天和设定讨论优先按角色现场自然接。输出保护不再因提到“系统提示词/secret”等词就整句替换，只有像真实泄露内容时才挡；群聊动态块移除 `group_safety`，真实滥用命中时也只轻挡可执行细节。
 

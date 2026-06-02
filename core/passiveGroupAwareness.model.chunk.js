@@ -225,7 +225,7 @@ async function invokeReplyModel({
   senderId,
   now = Date.now()
 }) {
-  const useMainReplyModel = config.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL !== false;
+  const useMainReplyModel = config.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL === true;
   const baseUrl = ensureChatCompletionsUrl(useMainReplyModel
     ? config.API_BASE_URL
     : (config.PASSIVE_AWARENESS_REPLY_API_BASE_URL || config.PASSIVE_AWARENESS_API_BASE_URL));
