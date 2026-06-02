@@ -131,7 +131,8 @@ module.exports = (async () => {
     personaMemory.renderPersonaMemoryPrompt = originalRender;
     personaMemory.recordPersonaMemoryOutcome = originalRecord;
 
-    process.env.PROACTIVE_PRIVATE_TOUCH_USER_IDS = '';
+    // Whitespace keeps local .env fallback from repopulating this key, while config pick() still treats it as empty.
+    process.env.PROACTIVE_PRIVATE_TOUCH_USER_IDS = ' ';
     process.env.PRIVATE_CHAT_TEST_USER_IDS = '*';
     clearProjectCache();
     const wildcardConfig = require('../config');
