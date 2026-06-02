@@ -1090,7 +1090,7 @@ module.exports = {
   SESSION_CONTEXT_SUMMARY_FILE: pick('SESSION_CONTEXT_SUMMARY_FILE', path.join(DATA_DIR, 'session_context_summaries.json')),
   MEMORY_SCOPE_INDEX_FILE: path.join(DATA_DIR, 'memory_scope_index.json'),
   IMAGE_MEMORY_RECALL_ENABLED: pickBool('IMAGE_MEMORY_RECALL_ENABLED', true),
-  ...buildImageVisualSummaryRuntimeConfig({ pickNum, pickBool }),
+  ...buildImageVisualSummaryRuntimeConfig({ pick, pickNum, pickBool }),
   IMAGE_MEMORY_INDEX_FILE: pick('IMAGE_MEMORY_INDEX_FILE', path.join(DATA_DIR, 'image_memory_index.json')),
   IMAGE_MEMORY_OBSERVATION_LIMIT: Math.max(1, pickLiteBudgetNum('IMAGE_MEMORY_OBSERVATION_LIMIT', 20, 4)),
   SHORT_TERM_BRIDGE_FILE: path.join(DATA_DIR, 'short_term_bridge.json'),

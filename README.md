@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-02 10:17 +08:00：Memory V3 召回降级治理完成；reranker 默认链路取消外层/内层重复 hard timeout，连续 timeout 后进入短冷却并暴露 `rerankRuntime`，embedding 对端点不可用和瞬态失败分层冷却，`coverageAtQuery.embeddingRuntime` 可直接解释 base recall 降级原因。详见 `docs/memory-quality-governance.md`。
 
+更新 2026-06-02 10:19 +08:00：图片长期记忆视觉摘要改为专用可选配置 `IMAGE_MEMORY_VISUAL_SUMMARY_MODEL/API_BASE_URL/API_KEY`，请求固定走 chat-completions + `image_url` data URL，失败会在 `image_memory_index.visualSummaryState` 写入图片级冷却并设置路由短冷却；已知文本模型、非法/过大图片、HTTP 400/413/415 和 socket hang up 不再对同类图片反复刷 `bot-runtime.err.log`。详见 `docs/memory-quality-governance.md`。
+
 更新 2026-06-02 10:10 +08:00：Memory V3 新增 Nocturne 风格 URI/Boot/alias/trigger/changeset review 外壳；现有事件日志、projection、版本化更新和冲突治理保持不替换，新增 `system://boot`、`mem read`、`mem boot`、`mem alias`、`mem trigger`、`mem review` 与管理端 Memory Explorer / Review。
 
 更新 2026-06-01 19:34 +08:00：群聊活人感纪律新增群聊专属安全规范，仅在 `group_direct_chat` / `passive_group_reply` 生效；遇到政治敏感、淫秽色情、违法违规或规避法律法规话题时，用瑞希式短句轻轻带过，不改私聊约束。
