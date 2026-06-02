@@ -82,6 +82,56 @@ module.exports = (async () => {
   });
   assert.strictEqual(objectStreamed.finalReply, 'persisted object reply');
 
+  const privateDeltas = [];
+  const privateGuardHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => ({
+      segments: {},
+      compactionPlan: {
+        compactedSegments: [{ name: 'user', messages: input.userTurnMessages || [] }]
+      }
+    }),
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: []
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async (_messages, options) => {
+      if (typeof options.onDelta === 'function') {
+        options.onDelta('buffered private reply', 'buffered private reply');
+      }
+      return 'buffered private reply';
+    },
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
+    isHumanizerEnabledImpl: () => false,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    createEvent: (type, payload) => ({ type, ...payload }),
+    config: { AI_MAX_TOKENS: 3500 },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const privateGuarded = await privateGuardHelpers.streamDirectReply([{ role: 'user', content: 'hi' }], {
+    request: {
+      routePolicyKey: 'direct_chat/default',
+      routeMeta: { chatType: 'private' },
+      modelConfig: {},
+      onDelta(text) { privateDeltas.push(text); }
+    },
+    memory: {},
+    output: {}
+  });
+  assert.strictEqual(privateGuarded.finalReply, 'buffered private reply');
+  assert.deepStrictEqual(privateDeltas, ['buffered private reply']);
+
   const direct = await helpers.maybeStreamFinalReply({
     request: {
       streaming: true,

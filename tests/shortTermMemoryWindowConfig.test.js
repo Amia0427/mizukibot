@@ -72,8 +72,10 @@ module.exports = (async () => {
     routeMeta: {}
   });
   const store = loadBridgeStore();
-  assert.strictEqual(store.sessions[sessionKey].recentMessages.length, 12);
-  assert.strictEqual(store.sessions[sessionKey].recentMessages[0].content, 'user turn 1');
+  assert.strictEqual(store.sessions[sessionKey].recentMessages.length, 7);
+  assert.strictEqual(store.sessions[sessionKey].recentMessages[0].content, 'user turn 0');
+  assert.strictEqual(store.sessions[sessionKey].recentMessages.some((item) => item.role === 'assistant'), false);
+  assert.strictEqual(store.sessions[sessionKey].interactionState.recentTurns.some((item) => item.role === 'assistant'), false);
 
   const restoredHistory = {};
   const restoredShortTermMemory = {};
@@ -84,9 +86,46 @@ module.exports = (async () => {
     routeMeta: {}
   });
   assert.strictEqual(restored.restored, true);
-  assert.strictEqual(restoredHistory[sessionKey].length, 12);
+  assert.strictEqual(restoredHistory[sessionKey].length, 7);
+  assert.strictEqual(restoredHistory[sessionKey].some((item) => item.role === 'assistant'), false);
   assert.strictEqual(restored.freshnessTier, 'raw_recent');
   assert.strictEqual(restored.rawMessagesRestored, true);
+
+  const groupUserId = 'u_window_group';
+  const groupSessionKey = `qq-group:g_window:user:${groupUserId}`;
+  const groupChatHistory = {};
+  const groupShortTermMemory = {};
+  for (let index = 0; index < 2; index += 1) {
+    appendShortTermHistory(
+      groupUserId,
+      `group user turn ${index}`,
+      `group assistant turn ${index}`,
+      {},
+      {
+        chatHistory: groupChatHistory,
+        shortTermMemory: groupShortTermMemory,
+        sessionKey: groupSessionKey,
+        routeMeta: { groupId: 'g_window' }
+      }
+    );
+  }
+  persistShortTermBridgeSnapshot(groupUserId, {
+    chatHistory: groupChatHistory,
+    shortTermMemory: groupShortTermMemory,
+    sessionKey: groupSessionKey,
+    routeMeta: { groupId: 'g_window' }
+  });
+  const groupedStore = loadBridgeStore();
+  assert.strictEqual(groupedStore.sessions[groupSessionKey].recentMessages.some((item) => item.role === 'assistant'), true);
+  const groupedRestoredHistory = {};
+  const groupedRestored = restoreShortTermBridgeAfterRestartIfNeeded(groupUserId, {
+    chatHistory: groupedRestoredHistory,
+    shortTermMemory: {},
+    sessionKey: groupSessionKey,
+    routeMeta: { groupId: 'g_window' }
+  });
+  assert.strictEqual(groupedRestored.restored, true);
+  assert.strictEqual(groupedRestoredHistory[groupSessionKey].some((item) => item.role === 'assistant'), true);
 
   const staleStore = loadBridgeStore();
   staleStore.sessions[sessionKey].updatedAt = Date.now() - (2 * 60 * 60 * 1000);
@@ -111,8 +150,10 @@ module.exports = (async () => {
     sessionKey,
     routeMeta: {}
   });
-  assert.strictEqual(sharedContext.shortTermState.interaction.recentTurns.length, 14);
-  assert.strictEqual(sharedContext.shortTermState.scene.recentTurns.length, 8);
+  assert.strictEqual(sharedContext.shortTermState.interaction.recentTurns.length, 7);
+  assert.strictEqual(sharedContext.shortTermState.interaction.recentTurns.some((item) => item.role === 'assistant'), false);
+  assert.strictEqual(sharedContext.shortTermState.scene.recentTurns.length, 4);
+  assert.strictEqual(sharedContext.shortTermState.scene.recentTurns.some((item) => item.role === 'assistant'), false);
 
   const compressionHistory = Array.from({ length: 70 }, (_, index) => ({
     role: index % 2 === 0 ? 'user' : 'assistant',
@@ -154,7 +195,7 @@ module.exports = (async () => {
   assert.ok(shortTermBlock, 'short-term continuity should be a first-class dynamic prompt block');
   assert.ok(String(shortTermBlock.content || '').includes('[RecentRawTurns]'));
   assert.ok(String(shortTermBlock.content || '').includes('user turn 0'));
-  assert.ok(String(shortTermBlock.content || '').includes('assistant turn 6'));
+  assert.ok(!String(shortTermBlock.content || '').includes('assistant turn 6'));
 
   console.log('shortTermMemoryWindowConfig.test.js passed');
 })().catch((error) => {

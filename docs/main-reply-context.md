@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-01 09:10 +08:00
+更新时间：2026-06-02 12:04 +08:00
 
 ## 已调整
 
+- 2026-06-02 12:04 +08:00：私聊角色扮演拒绝样本确认系统提示词仍在请求内，根因在本地私聊链路：上游流式增量曾直接透传，且 `direct:*` bridge / RecentRawTurns 会回灌旧 assistant 原文。现在私聊流式与群聊一样先 buffer/guard 后一次性发最终文本；`direct:*` 短期 bridge、恢复和私聊 prompt raw continuity 只保留 user raw turn，避免旧 assistant 拒绝句成为下一轮权威上下文。没有加入 Claude/Anthropic/“不能扮演”文本硬拦截。
 - 2026-06-01 19:34 +08:00：群聊活人感纪律新增群聊专属安全规范，仅在 `group_direct_chat` / `passive_group_reply` 生效；政治敏感、淫秽色情、违法违规和规避法律法规话题在群聊里只做瑞希式轻接话，不影响私聊。
 - 2026-06-01 09:10 +08:00：世界书新增可选 session state：显式剧情/设定/角色关系命中后，可按条目的 `durationTurns` / `durationMs` 在当前 `sessionKey` 内短暂持续；`exampleIds` 会把已激活 worldbook 关联到动态示例，普通闲聊仍不会触发 worldbook 或 few-shot。新增 `npm run diag:worldbook -- --question "..." --json` 查看候选分数、激活态、最终注入、跳过原因和示例选择。
 - 2026-06-01 08:22 +08:00：主回复短期连续性默认预算从 3600 提高到 5200，普通聊天 recent raw turns 档位从 `96/12/0.75` 提高到 `128/16/0.9`，`MEMORY_V3_SESSION_RECENT_MESSAGES` 从 96 提高到 128；`short_term_continuity` 末尾指令明确要求优先承接最新 `RecentRawTurns`，摘要和长期记忆只补空或解冲突。
