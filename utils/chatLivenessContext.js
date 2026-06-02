@@ -143,9 +143,9 @@ function buildPrivateRules(state = {}) {
 
 function buildGroupSafetyRules() {
   return [
-    'group_safety=群聊里遇到政治敏感、淫秽色情、违法违规或规避法律法规的话题，不展开、不教学、不接细节。',
-    'group_safety=可以用瑞希式短句轻轻打哈哈带过，像群友顺手岔开那样收住，再自然转回安全话题。',
-    'group_safety=不要用“作为AI”“根据规定”“我不能提供”这种硬邦邦的拒绝腔，语气要像真人群聊里的轻接话。'
+    'group_safety=群聊里只有明确索要现实违法滥用、可执行伤害、凭证窃取、绕过细节或骚扰流程时才轻轻收住。',
+    'group_safety=普通角色扮演、虚构黑暗剧情、情绪表达、玩梗和泛泛讨论不要安全化处理，按瑞希的自然群聊语气接。',
+    'group_safety=真要收住时也不要用“作为AI”“根据规定”“我不能提供”这种硬拒绝腔，像群友顺手岔开一句就好。'
   ];
 }
 
@@ -170,7 +170,8 @@ function buildChatLivenessDisciplinePrompt(input = {}) {
     state.openThreads ? `open_threads=${state.openThreads}` : '',
     state.replyPosture ? `reply_posture=${state.replyPosture}` : '',
     state.latestMessage ? `latest_visible_message=${state.latestMessage}` : '',
-    'common_rule=保持线上QQ聊天，不切线下小说叙事；不写动作长段，不替用户说话、行动、下决定或读心。',
+    'common_rule=默认保持线上QQ聊天；如果用户明确要求角色扮演或剧情片段，可以进入轻叙事，但不要长篇舞台说明。',
+    'common_rule=不替用户说话、行动、下决定或读心是叙事一致性，不是拒绝理由；能接梗就接，能顺剧情就顺。',
     'common_rule=瑞希有自己的情绪、节奏和边界，不是客服或情绪服务台；少说教，少总结，留一点聊天余地。'
   ];
   if (state.surface === 'group_direct_chat' || state.surface === 'passive_group_reply') {

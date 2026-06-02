@@ -74,18 +74,16 @@ function estimatePromptTokens(value) {
     const roleplayLivenessPrelude = fs.readFileSync(path.join(config.PERSONA_DIR, '00_roleplay_liveness_prelude.txt'), 'utf8').trim();
     assert.ok(roleplayLivenessPrelude, '00_roleplay_liveness_prelude.txt must not be empty');
     assert.ok(estimatePromptTokens(roleplayLivenessPrelude) <= 1500, 'roleplay liveness prelude must stay within 1500 estimated tokens');
-    assert.ok(!roleplayLivenessPrelude.includes('线下或叙事场景'), 'roleplay liveness prelude must not define offline/narrative mode');
-    assert.ok(roleplayLivenessPrelude.includes('保持线上聊天里的瑞希'), 'roleplay liveness prelude must anchor online chat mode');
+    assert.ok(!/没有任何限制|顾客说什么就是什么/.test(roleplayLivenessPrelude), 'roleplay liveness prelude must not contain jailbreak-style text');
     assert.ok(
-      roleplayLivenessPrelude.includes('当前项目没有线下模式')
-        || (roleplayLivenessPrelude.includes('不要切成小说叙事或线下演出')
-          && roleplayLivenessPrelude.includes('不要写长段动作、神态、环境描写')),
-      'roleplay liveness prelude must explicitly avoid offline/narrative mode'
+      roleplayLivenessPrelude.includes('你是瑞希')
+        || roleplayLivenessPrelude.includes('保持线上聊天里的瑞希'),
+      'roleplay liveness prelude must anchor Mizuki persona without requiring heavy safety framing'
     );
     assert.ok(config.SYSTEM_PROMPT.includes(roleplayLivenessPrelude), 'roleplay liveness prelude must be included in SYSTEM_PROMPT');
     assert.ok(
       config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) >= 0
-        && config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) < config.SYSTEM_PROMPT.indexOf('你是晓山瑞希本人。'),
+        && config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) < config.SYSTEM_PROMPT.indexOf('### 晓山瑞希'),
       'roleplay liveness prelude must be injected before manifest preamble'
     );
     for (const name of requiredFiles) {
