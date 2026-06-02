@@ -204,6 +204,10 @@ const {
 } = require('../utils/shortTermMemory');
 const { buildNormalFastReplyDecision } = require('../utils/normalFastReplyGate');
 const { runNormalFastReply } = require('./normalFastReplyRuntime');
+const {
+  NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE,
+  createNormalGroupMainReplyRateLimiter
+} = require('../utils/normalGroupMainReplyRateLimiter');
 const { createCheckpointStore, resolveThreadId } = require('../utils/langgraphV2Store');
 const {
   saveSessionContextSummary,

@@ -61,6 +61,40 @@
         const normalFastStartedAt = Date.now();
         try {
           const fastGroupId = isPrivateChatType(chatType) ? '' : groupId;
+          const normalFastLimit = normalGroupMainReplyRateLimiter.tryAcquire({
+            userId: senderId,
+            groupId: fastGroupId,
+            chatType,
+            topRouteType: 'direct_chat'
+          }, { isAdminUser });
+          if (normalFastLimit.limited) {
+            const pokeSent = await sendRateLimitGroupPoke(fastGroupId, senderId, {
+              source: 'normal_fast_reply'
+            });
+            appendTraceTiming('normal_fast_reply_rate_limited', {
+              stage: 'normal_fast_reply_rate_limited',
+              messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+              groupId: String(fastGroupId || '').trim(),
+              userId: String(senderId || '').trim(),
+              chatType,
+              limit: Number(normalFastLimit.limit || 0) || 0,
+              windowMs: Number(normalFastLimit.windowMs || 0) || 0,
+              count: Number(normalFastLimit.count || 0) || 0,
+              retryAfterMs: Number(normalFastLimit.retryAfterMs || 0) || 0,
+              pokeSent: Boolean(pokeSent),
+              durationMs: Math.max(0, Date.now() - normalFastStartedAt),
+              finalErrorCode: NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE
+            });
+            appendRequestCompleteTrace({
+              routePolicyKey: 'chat/default',
+              topRouteType: 'direct_chat',
+              replyPath: 'normal_fast_reply',
+              sent: Boolean(pokeSent),
+              stream: false,
+              finalErrorCode: NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE
+            });
+            return;
+          }
           const normalFastReplyResult = await runNormalFastReply({
             userId: senderId,
             routeMeta: {
@@ -639,6 +673,34 @@
     const persistedReplyText = String(replyEnvelope?.persistedReplyText || replyEnvelope?.replyText || '').trim();
     const usedStreamingSend = Boolean(replyEnvelope?.sendStrategy === 'stream' || replyEnvelope?.usedStreamingSend);
     const replyOptions = replyEnvelope?.replyOptions || null;
+    if (
+      replyEnvelope?.sendStrategy === 'rate_limit_poke'
+      || String(replyEnvelope?.finalErrorCode || '').trim() === NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE
+    ) {
+      appendTraceTiming('formal_route_rate_limited', {
+        stage: 'formal_route_rate_limited',
+        messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+        groupId: String(groupId || '').trim(),
+        userId: String(senderId || '').trim(),
+        chatType,
+        limit: Number(replyEnvelope?.rateLimit?.limit || 0) || 0,
+        windowMs: Number(replyEnvelope?.rateLimit?.windowMs || 0) || 0,
+        count: Number(replyEnvelope?.rateLimit?.count || 0) || 0,
+        retryAfterMs: Number(replyEnvelope?.rateLimit?.retryAfterMs || 0) || 0,
+        pokeSent: Boolean(replyEnvelope?.rateLimit?.pokeSent),
+        durationMs: Math.max(0, Date.now() - formalDispatchStartedAt),
+        finalErrorCode: NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE,
+        ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
+      });
+      appendRequestCompleteTrace({
+        routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+        topRouteType: routeExecutionPlan.topRouteType,
+        sent: Boolean(replyEnvelope?.rateLimit?.pokeSent),
+        stream: false,
+        finalErrorCode: NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE
+      });
+      return;
+    }
     if (!usedStreamingSend) {
       if (!freshnessGuard.shouldSend()) {
         appendTraceTiming('final_reply_discarded_stale', {

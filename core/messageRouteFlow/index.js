@@ -52,9 +52,49 @@ const {
 const {
   createAdminTaskHandlers
 } = require('./adminTaskHandlers');
+const {
+  NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE
+} = require('../../utils/normalGroupMainReplyRateLimiter');
 
 function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = '') {
   return resolveVisionFallbackModelConfigBase(route, imageUrl, userId, buildImageModelConfig);
+}
+
+async function sendRateLimitGroupPokeSafely({
+  sendGroupPoke,
+  sendWithRetry,
+  groupId = '',
+  senderId = '',
+  source = ''
+} = {}) {
+  const targetGroupId = String(groupId || '').trim();
+  const targetUserId = String(senderId || '').trim();
+  if (typeof sendGroupPoke !== 'function' || !targetGroupId || !targetUserId) return false;
+  try {
+    const options = typeof sendWithRetry === 'function'
+      ? {
+          actionClient: {
+            callAction: async (action, params) => {
+              const ok = await sendWithRetry({ action, params }, 1, 300);
+              if (!ok) {
+                throw new Error(`sendWithRetry failed for ${String(action || '').trim() || 'group_poke'}`);
+              }
+              return {};
+            }
+          }
+        }
+      : {};
+    await sendGroupPoke(targetGroupId, targetUserId, options);
+    return true;
+  } catch (error) {
+    console.warn('[normal-group-main-reply-rate-limit] group poke failed', {
+      groupId: targetGroupId,
+      senderId: targetUserId,
+      source,
+      error: error?.message || String(error || '')
+    });
+    return false;
+  }
 }
 
 function createMessageRouteFlow(deps = {}) {
@@ -111,6 +151,8 @@ function createMessageRouteFlow(deps = {}) {
     sendWithRetry,
     markThinkingEmojiBeforeLlm,
     buildSubagentContextSummary,
+    normalGroupMainReplyRateLimiter,
+    sendGroupPoke,
     generateGroupSummary = generateGroupSummaryDefault
   } = deps;
   const {
@@ -544,6 +586,62 @@ function createMessageRouteFlow(deps = {}) {
           replyOptions.disableStream = true;
         }
         finalReplyOptions = replyOptions;
+
+        const normalGroupMainReplyLimit = normalGroupMainReplyRateLimiter
+          && typeof normalGroupMainReplyRateLimiter.tryAcquire === 'function'
+          ? normalGroupMainReplyRateLimiter.tryAcquire({
+              userId: senderId,
+              groupId,
+              chatType,
+              topRouteType: routeExecutionPlan.topRouteType,
+              routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+              routeMeta: replyOptions.routeMeta
+            }, { isAdminUser })
+          : { allowed: true, limited: false };
+        if (normalGroupMainReplyLimit?.limited) {
+          const pokeSent = await sendRateLimitGroupPokeSafely({
+            sendGroupPoke,
+            sendWithRetry,
+            groupId,
+            senderId,
+            source: 'direct_reply'
+          });
+          inboundContext?.onEvent?.({
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            ts: Date.now(),
+            type: 'normal_group_main_reply_rate_limited',
+            node: 'pre_model',
+            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+            topRouteType: String(routeExecutionPlan?.topRouteType || '').trim(),
+            limit: Number(normalGroupMainReplyLimit.limit || 0) || 0,
+            windowMs: Number(normalGroupMainReplyLimit.windowMs || 0) || 0,
+            count: Number(normalGroupMainReplyLimit.count || 0) || 0,
+            retryAfterMs: Number(normalGroupMainReplyLimit.retryAfterMs || 0) || 0,
+            pokeSent: Boolean(pokeSent)
+          });
+          return buildReplyEnvelope({
+            replyText: '',
+            persistedReplyText: '',
+            allowStream: false,
+            atSender: false,
+            routeContext: routeDecision,
+            sendStrategy: 'rate_limit_poke',
+            postActions: [],
+            backgroundTaskState: null,
+            replySegments: [],
+            usedStreamingSend: false,
+            replyOptions,
+            freshness,
+            finalErrorCode: NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE,
+            rateLimit: {
+              limit: Number(normalGroupMainReplyLimit.limit || 0) || 0,
+              windowMs: Number(normalGroupMainReplyLimit.windowMs || 0) || 0,
+              count: Number(normalGroupMainReplyLimit.count || 0) || 0,
+              retryAfterMs: Number(normalGroupMainReplyLimit.retryAfterMs || 0) || 0,
+              pokeSent: Boolean(pokeSent)
+            }
+          });
+        }
 
         const thinkingEmojiStartedAt = Date.now();
         const thinkingEmojiApplied = await markThinkingEmojiBeforeLlm?.({

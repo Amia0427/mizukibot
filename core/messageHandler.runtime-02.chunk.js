@@ -104,6 +104,37 @@
     };
   }
 
+  async function sendRateLimitGroupPoke(groupId = '', userId = '', context = {}) {
+    const targetGroupId = String(groupId || '').trim();
+    const targetUserId = String(userId || '').trim();
+    if (!targetGroupId || !targetUserId) return false;
+    try {
+      await sendGroupPoke(targetGroupId, targetUserId, {
+        actionClient: {
+          callAction: async (action, params) => {
+            const ok = await sendWithRetry({
+              action,
+              params
+            }, 1, 300);
+            if (!ok) {
+              throw new Error(`sendWithRetry failed for ${String(action || '').trim() || 'group_poke'}`);
+            }
+            return {};
+          }
+        }
+      });
+      return true;
+    } catch (error) {
+      console.warn('[normal-group-main-reply-rate-limit] group poke failed', {
+        groupId: targetGroupId,
+        userId: targetUserId,
+        source: String(context?.source || '').trim(),
+        error: error?.message || String(error || '')
+      });
+      return false;
+    }
+  }
+
   routeFlow = createMessageRouteFlow({
     config,
     routeResolver,
@@ -159,7 +190,8 @@
     getStreamMaxSegments,
     sendWithRetry,
     markThinkingEmojiBeforeLlm,
-    buildSubagentContextSummary
+    buildSubagentContextSummary,
+    normalGroupMainReplyRateLimiter
   });
 
   async function sendGroupReplyFallback({ groupId, senderId, replyText, atSender = true, retries = 2, waitMs = 500 }) {
