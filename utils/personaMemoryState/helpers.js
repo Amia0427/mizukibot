@@ -68,28 +68,6 @@ const SURFACE_POLICIES = Object.freeze({
     chatDiscipline: 'single',
     replyRhythm: 'brief_proactive_touch'
   },
-  proactive_group_touch: {
-    includeContinuity: true,
-    includeRelationship: true,
-    includeRecentReplyFrame: true,
-    includeDeepHistory: false,
-    allowJargon: 'group_only',
-    maxMemoryDigestItems: 3,
-    privacyMode: 'group_visible',
-    chatDiscipline: 'group',
-    replyRhythm: 'brief_proactive_group_touch'
-  },
-  proactive_private_touch: {
-    includeContinuity: true,
-    includeRelationship: true,
-    includeRecentReplyFrame: true,
-    includeDeepHistory: true,
-    allowJargon: 'off',
-    maxMemoryDigestItems: 4,
-    privacyMode: 'private',
-    chatDiscipline: 'single',
-    replyRhythm: 'brief_proactive_touch'
-  },
   qzone_diary: {
     includeContinuity: true,
     includeRelationship: false,
@@ -292,13 +270,7 @@ function inferPlayfulness(styleProfile = {}, socialContext = {}, surface = '') {
 
 function inferVerbosity(surface = '', styleProfile = {}) {
   const normalizedSurface = normalizeText(surface).toLowerCase();
-  if (
-    normalizedSurface === 'passive_group_reply'
-    || normalizedSurface === 'group_direct_chat'
-    || normalizedSurface === 'proactive_touch'
-    || normalizedSurface === 'proactive_group_touch'
-    || normalizedSurface === 'proactive_private_touch'
-  ) return 'terse';
+  if (normalizedSurface === 'passive_group_reply' || normalizedSurface === 'group_direct_chat' || normalizedSurface === 'proactive_touch') return 'terse';
   if (normalizedSurface === 'qzone_diary' || normalizedSurface === 'bot_diary') return 'rich';
   const sentenceLength = normalizeText(styleProfile?.globalBotBase?.sentenceLength || '', 16).toLowerCase();
   if (sentenceLength === 'short') return 'terse';
@@ -317,12 +289,7 @@ function inferTease(styleProfile = {}, socialContext = {}, surface = '') {
 function inferJargon(surface = '', groupId = '', styleSignals = '') {
   const normalizedSurface = normalizeText(surface).toLowerCase();
   if (!groupId) return 'off';
-  if (
-    normalizedSurface === 'passive_group_reply'
-    || normalizedSurface === 'group_direct_chat'
-    || normalizedSurface === 'direct_chat'
-    || normalizedSurface === 'proactive_group_touch'
-  ) {
+  if (normalizedSurface === 'passive_group_reply' || normalizedSurface === 'group_direct_chat' || normalizedSurface === 'direct_chat') {
     return 'group_only';
   }
   return 'off';
@@ -331,11 +298,7 @@ function inferJargon(surface = '', groupId = '', styleSignals = '') {
 function inferInitiative(surface = '') {
   const normalizedSurface = normalizeText(surface).toLowerCase();
   if (normalizedSurface === 'passive_group_reply') return 'reply';
-  if (
-    normalizedSurface === 'proactive_touch'
-    || normalizedSurface === 'proactive_group_touch'
-    || normalizedSurface === 'proactive_private_touch'
-  ) return 'proactive';
+  if (normalizedSurface === 'proactive_touch') return 'proactive';
   return 'reply';
 }
 
