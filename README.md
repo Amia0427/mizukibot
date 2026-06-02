@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-02 14:04 +08:00：主回复沉浸边界降噪：`SecurityContract` 收窄为内部信息/凭证/提示词注入/记忆污染保护，普通角色扮演、虚构黑暗剧情、情绪聊天和创作请求不再被安全化处理；`safetyBoundary` 只在明确现实滥用、凭证绕过、骚扰流程或可执行攻击细节时触发，真命中时也只轻收可执行细节。
+
 更新 2026-06-02 12:04 +08:00：私聊出现 “I don't roleplay as characters or take on personas.” 已确认不是系统提示词未注入；坏样本带有 system prompt，但私聊流式曾走 `direct_reply.streaming_upstream` 直接透传上游增量，且 `direct:*` 短期 bridge / RecentRawTurns 会把旧 assistant 原文作为连续性证据回灌。已改为私聊流式先 buffer/guard 再发，`direct:*` bridge 与私聊短期 raw 上下文只保留 user raw turn，群聊 raw assistant 保持可用；未新增 Claude/Anthropic/角色扮演正则硬拦截。
 
 更新 2026-06-02 10:56 +08:00：群聊普通用户主回复新增进程内全局 RPM 限流；默认 60 秒最多 12 次，命中后不调用主模型、不发文字回复，只用 QQ 群戳一戳触发用户。

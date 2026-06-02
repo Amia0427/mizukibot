@@ -53,6 +53,7 @@ module.exports = (async () => {
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('persona_stability_rule='));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('mind_reading_rule='));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('boundary_rule='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('叙事一致性规则，不是安全拒绝'));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('pure_text_reply_only') || String(roleplayRuntimeContext?.content || '').includes('纯文本'));
   assert.ok(!String(roleplayRuntimeContext?.content || '').includes('current_time=1970-'));
   assert.strictEqual(
@@ -228,8 +229,8 @@ module.exports = (async () => {
   );
   const mindReadingBlock = mindReadingGuardPrompt.promptSnapshot.assembledBlocks.find((item) => item.id === 'roleplay_runtime_context');
   const mindReadingText = String(mindReadingBlock?.content || '');
-  assert.ok(mindReadingText.includes('用户括号里的内心、旁白或不可见心理只能当背景'));
-  assert.ok(mindReadingText.includes('不要替用户说话、行动、做决定'));
+  assert.ok(mindReadingText.includes('用户括号里的内心、旁白或不可见心理当作创作背景处理'));
+  assert.ok(mindReadingText.includes('不要代替用户说话、行动或做决定'));
   assert.ok(mindReadingText.includes('pure_text_reply_only'));
   assert.ok(!mindReadingText.includes('Return JSON only'));
 
@@ -450,6 +451,8 @@ module.exports = (async () => {
   );
   const groupLiveness = groupPrompt.promptSnapshot.assembledBlocks.find((item) => item.id === 'chat_liveness_discipline');
   assert.ok(String(groupLiveness?.content || '').includes('surface=group_direct_chat'));
+  assert.ok(String(groupLiveness?.content || '').includes('普通角色扮演、虚构黑暗剧情'));
+  assert.ok(String(groupLiveness?.content || '').includes('不是拒绝理由'));
   assert.ok(groupPrompt.promptSnapshot.dynamicBlockIds.includes('chat_liveness_discipline'));
   assert.ok(groupPrompt.promptSnapshot.dynamicBlockIds.includes('group_direct_chat_style_guard'));
   assert.strictEqual(groupPrompt.promptSnapshot.dynamicBlockIds.filter((id) => id === 'chat_liveness_discipline').length, 1);

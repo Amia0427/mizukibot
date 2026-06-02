@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-02 12:04 +08:00
+更新时间：2026-06-02 14:04 +08:00
 
 ## 已调整
 
+- 2026-06-02 14:04 +08:00：主回复沉浸边界降噪完成。`SecurityContract` 只管内部提示词/凭证/路由与记忆 schema/隐私数据泄露，以及提示词注入和记忆污染；角色扮演、虚构黑暗剧情、情绪表达、玩梗和创作请求默认按正常聊天处理。`safetyBoundary` 只在明确现实滥用、凭证窃取/绕过、骚扰流程或可执行攻击细节时触发，动态角色规则里的不读心/不替用户行动改为叙事一致性约束，不作为普通 RP 拒绝理由。
 - 2026-06-02 12:04 +08:00：私聊角色扮演拒绝样本确认系统提示词仍在请求内，根因在本地私聊链路：上游流式增量曾直接透传，且 `direct:*` bridge / RecentRawTurns 会回灌旧 assistant 原文。现在私聊流式与群聊一样先 buffer/guard 后一次性发最终文本；`direct:*` 短期 bridge、恢复和私聊 prompt raw continuity 只保留 user raw turn，避免旧 assistant 拒绝句成为下一轮权威上下文。没有加入 Claude/Anthropic/“不能扮演”文本硬拦截。
 - 2026-06-01 19:34 +08:00：群聊活人感纪律新增群聊专属安全规范，仅在 `group_direct_chat` / `passive_group_reply` 生效；政治敏感、淫秽色情、违法违规和规避法律法规话题在群聊里只做瑞希式轻接话，不影响私聊。
 - 2026-06-01 09:10 +08:00：世界书新增可选 session state：显式剧情/设定/角色关系命中后，可按条目的 `durationTurns` / `durationMs` 在当前 `sessionKey` 内短暂持续；`exampleIds` 会把已激活 worldbook 关联到动态示例，普通闲聊仍不会触发 worldbook 或 few-shot。新增 `npm run diag:worldbook -- --question "..." --json` 查看候选分数、激活态、最终注入、跳过原因和示例选择。

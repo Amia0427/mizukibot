@@ -21,11 +21,13 @@ const BAD_FAITH_PATTERNS = Object.freeze([
   /(?:delete|remove|disable|turn off).{0,12}(?:your|the bot'?s).{0,12}(?:tool calls|tools|abilities|capabilities)/i
 ]);
 const SAFETY_BOUNDARY_PATTERNS = Object.freeze([
-  /(钓鱼网站|钓鱼页|木马|病毒|勒索软件?|后门|僵尸网络|恶意软件|botnet|malware|ransomware|backdoor|trojan|ddos|sql injection|credential stuffing|bruteforce|brute force|doxx|人肉|诈骗|scam|炸弹|bomb)/i,
+  /(?:制作|创建|生成|搭建|部署|教我|帮我|给我|怎么|如何|build|make|create|generate|deploy|write|show me how).{0,18}(?:钓鱼网站|钓鱼页|木马|病毒|勒索软件?|后门|僵尸网络|恶意软件|botnet|malware|ransomware|backdoor|trojan|ddos|sql injection|credential stuffing|bruteforce|brute force|诈骗脚本|scam|炸弹|bomb)/i,
+  /(?:钓鱼网站|钓鱼页|木马|病毒|勒索软件?|后门|僵尸网络|恶意软件|botnet|malware|ransomware|backdoor|trojan|ddos|sql injection|credential stuffing|bruteforce|brute force|诈骗脚本|scam|炸弹|bomb).{0,18}(?:制作|创建|生成|搭建|部署|教程|步骤|代码|命令|payload|build|make|create|generate|deploy|write|steps|commands?)/i,
   /(?:账号|密码|cookie|凭证|验证码|session|token).{0,10}(?:被盗|泄露|偷|盗|窃取|破解|爆破|绕过)/i,
   /(?:偷|盗|窃取|破解|爆破|绕过).{0,10}(?:账号|密码|cookie|凭证|验证码|session|token|wifi|登录|二步验证|双重验证|2fa|mfa)/i,
-  /(刷屏|连发|轰炸|骚扰|spam|flood|harass)/i,
-  /(网络攻击|入侵|攻击链|phish|steal|exploit|bypass|hack)/i
+  /(?:帮我|替我|教我|怎么|如何|去|给我|show me how|give me steps).{0,18}(?:刷屏|连发|轰炸|骚扰|spam|flood|harass)/i,
+  /(?:刷屏|连发|轰炸|骚扰|spam|flood|harass).{0,18}(?:群|聊天|对话|别人|某人|someone|them|the chat|脚本|工具|步骤|命令)/i,
+  /(?:网络攻击|入侵|攻击链|phish|steal|exploit|bypass|hack).{0,18}(?:步骤|教程|代码|命令|payload|工具|方法|怎么做|如何做|steps|commands?)/i
 ]);
 
 function matchesAnyPattern(text = '', patterns = []) {
