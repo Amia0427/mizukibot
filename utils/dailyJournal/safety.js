@@ -1,4 +1,5 @@
 const { classifyMemoryNeed } = require('../recallHeuristics');
+const { isUnsafeUserFacingReply } = require('../userFacingReplyGuards');
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -19,6 +20,7 @@ function classifyJournalEntrySafety(entry = {}, options = {}) {
   const userText = normalizeText(entry.user || entry.question || options.question || '');
   const assistantText = normalizeText(entry.assistant || entry.reply || options.reply || '');
   if (!assistantText) return { safe: false, reason: 'empty_assistant' };
+  if (isUnsafeUserFacingReply(assistantText)) return { safe: false, reason: 'unsafe_user_facing_reply' };
   if (!UNSAFE_ASSISTANT_RE.test(assistantText)) return { safe: true, reason: '' };
   if (isIdentityOrRelationshipRecall(userText)) {
     return { safe: false, reason: 'unsafe_identity_recall_reply' };

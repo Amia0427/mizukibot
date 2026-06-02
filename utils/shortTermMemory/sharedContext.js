@@ -120,12 +120,26 @@ function logShortTermScopeDecision(userId, sessionKey, scopeMeta = {}) {
   });
 }
 
-function normalizeHistoryMessages(messages = []) {
+function shouldOmitAssistantRawForSession(sessionKey = '', routeMeta = {}) {
+  const key = String(sessionKey || '').trim();
+  if (/^(?:qq-group|channel):/i.test(key)) return false;
+  if (/^direct:/i.test(key)) return true;
+
+  const meta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
+  const chatType = String(meta.chatType || meta.chat_type || '').trim().toLowerCase();
+  if (chatType) return chatType === 'private';
+  if (String(meta.groupId || meta.group_id || meta.channelId || meta.channel_id || '').trim()) return false;
+  return false;
+}
+
+function normalizeHistoryMessages(messages = [], options = {}) {
+  const omitAssistant = options.omitAssistant === true;
   return (Array.isArray(messages) ? messages : [])
     .map((item) => {
       const role = String(item?.role || '').trim().toLowerCase();
       const content = normalizeMessageContent(item?.content);
       if ((role !== 'user' && role !== 'assistant') || !content) return null;
+      if (omitAssistant && role === 'assistant') return null;
       return { role, content };
     })
     .filter(Boolean);
@@ -144,8 +158,9 @@ function collectSharedShortTermSessionEntries(userId, deps = {}) {
   }
 
   const entries = selectedKeys.map((sessionKey) => {
+    const omitAssistantRaw = shouldOmitAssistantRawForSession(sessionKey, deps.routeMeta);
     const state = ensureShortTermMemoryState(sessionKey, shortTermStore);
-    const history = normalizeHistoryMessages(historyStore[sessionKey]);
+    const history = normalizeHistoryMessages(historyStore[sessionKey], { omitAssistant: omitAssistantRaw });
     const presence = normalizeShortTermPresence(state.presence);
     const updatedAt = Math.max(
       Number(state.lastCompressedAt || 0) || 0,
@@ -159,7 +174,8 @@ function collectSharedShortTermSessionEntries(userId, deps = {}) {
       history,
       historyLength: history.length,
       updatedAt,
-      isCurrent: sessionKey === currentSessionKey
+      isCurrent: sessionKey === currentSessionKey,
+      omitAssistantRaw
     };
   });
 
@@ -345,15 +361,19 @@ function buildSharedRecentHistory(entries = [], tokenBudget = 0, options = {}) {
 
 function collectSharedRecentTurns(entries = [], selector, limit = getRecentTurnsMaxItems()) {
   const ordered = [];
+  const pushEntryTurns = (entry) => {
+    const turns = typeof selector === 'function' ? selector(entry.state || {}) : [];
+    const normalized = normalizeRecentTurns(turns, limit)
+      .filter((item) => !(entry.omitAssistantRaw === true && String(item?.role || '').trim().toLowerCase() === 'assistant'));
+    ordered.push(...normalized);
+  };
   for (const entry of entries) {
     if (!entry || entry.isCurrent) continue;
-    const turns = typeof selector === 'function' ? selector(entry.state || {}) : [];
-    ordered.push(...normalizeRecentTurns(turns, limit));
+    pushEntryTurns(entry);
   }
   const current = entries.find((entry) => entry?.isCurrent);
   if (current) {
-    const turns = typeof selector === 'function' ? selector(current.state || {}) : [];
-    ordered.push(...normalizeRecentTurns(turns, limit));
+    pushEntryTurns(current);
   }
   return normalizeRecentTurns(ordered, limit);
 }
@@ -525,5 +545,6 @@ module.exports = {
   collectSharedShortTermSessionEntries,
   listUserSessionKeys,
   normalizeHistoryMessages,
+  shouldOmitAssistantRawForSession,
   trimMessagesByImportanceAndTokenBudget
 };

@@ -2,6 +2,7 @@ const {
   applyGroupDirectStyleGuard,
   isGroupDirectChatRequest
 } = require('../guards/groupDirectReplyStyleGuard');
+const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
@@ -32,6 +33,7 @@ function isHumanizerFirstTokenTimeout(error) {
 }
 
 const EMPTY_STREAM_FALLBACK_REPLY = '刚才网络有点不稳，你再发一次我接着回。';
+const UNSAFE_STREAM_FALLBACK_REPLY = '刚才那句不适合直接发出来。你再叫我一次，我按现在这个语境接回去。';
 
 function getHumanizerFailureReason(error) {
   if (isHumanizerFirstTokenTimeout(error)) return 'humanizer_first_token_timeout';
@@ -115,7 +117,8 @@ function createStreamingCoordinatorHelpers(deps = {}) {
 
   async function streamDirectReply(messagesToSend, state) {
     const request = normalizeObject(state.request, {});
-    const shouldGuardStreamBeforeSend = isGroupDirectChatRequest(request);
+    const shouldGuardStreamBeforeSend = isGroupDirectChatRequest(request)
+      || String(request.routeMeta?.chatType || request.routeMeta?.chat_type || request.chatType || '').trim().toLowerCase() === 'private';
     const useHumanizerStreaming = isHumanizerEnabledImpl() && !shouldBypassHumanizerForPolicy(request.routePolicyKey);
     const upstreamStreamOptions = useHumanizerStreaming
       ? {
@@ -147,6 +150,34 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     try {
       const streamedReply = await requestStreamingReplyImpl(messagesToSend, upstreamStreamOptions, request.modelConfig);
       const originalReply = sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted')).trim();
+      if (isUnsafeUserFacingReply(originalReply)) {
+        emitRuntimeEvent(state, 'unsafe_reply_blocked', {
+          node: 'direct_reply',
+          stage: 'streaming_upstream',
+          fallbackSource: 'unsafe_stream_reply',
+          preview: originalReply.slice(0, 220)
+        });
+        const safeFallback = UNSAFE_STREAM_FALLBACK_REPLY;
+        if (typeof request.onDelta === 'function') {
+          request.onDelta(safeFallback, safeFallback);
+        }
+        return {
+          finalReply: safeFallback,
+          visibleText: safeFallback,
+          persistedText: '',
+          unsafeBlocked: true,
+          humanizerTimedOut: false,
+          humanizerFailed: false,
+          humanizerFailureReason: '',
+          stream: {
+            ...markStreamCompleted(state.output, true),
+            ...mirrorStreamingFlags(state.output, safeFallback),
+            unsafeBlocked: true,
+            fallbackToNonStream: false,
+            mode: 'direct'
+          }
+        };
+      }
       let finalReply = originalReply;
       let humanizerTimedOut = false;
       let humanizerFailed = false;
@@ -176,6 +207,37 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       }
       const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
       const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
+      if (isUnsafeUserFacingReply(safeFinalReply)) {
+        emitRuntimeEvent(state, 'unsafe_reply_blocked', {
+          node: 'direct_reply',
+          stage: 'streaming_final',
+          fallbackSource: 'unsafe_stream_final',
+          preview: safeFinalReply.slice(0, 220)
+        });
+        const safeFallback = UNSAFE_STREAM_FALLBACK_REPLY;
+        if (typeof request.onDelta === 'function') {
+          request.onDelta(safeFallback, safeFallback);
+        }
+        return {
+          finalReply: safeFallback,
+          visibleText: safeFallback,
+          persistedText: '',
+          unsafeBlocked: true,
+          humanizerTimedOut,
+          humanizerFailed,
+          humanizerFailureReason,
+          stream: {
+            ...markStreamCompleted(state.output, true),
+            ...mirrorStreamingFlags(state.output, safeFallback),
+            humanizerTimedOut,
+            humanizerFailed,
+            humanizerFailureReason,
+            unsafeBlocked: true,
+            fallbackToNonStream: false,
+            mode: 'direct'
+          }
+        };
+      }
       const shouldEmitFinalOnce = (
         shouldGuardStreamBeforeSend
         || humanizerTimedOut
@@ -231,6 +293,37 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         }
         const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
         const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
+        if (isUnsafeUserFacingReply(safeFinalReply)) {
+          emitRuntimeEvent(state, 'unsafe_reply_blocked', {
+            node: 'direct_reply',
+            stage: 'streaming_partial',
+            fallbackSource: 'unsafe_stream_partial',
+            preview: safeFinalReply.slice(0, 220)
+          });
+          const safeFallback = UNSAFE_STREAM_FALLBACK_REPLY;
+          if (typeof request.onDelta === 'function') {
+            request.onDelta(safeFallback, safeFallback);
+          }
+          return {
+            finalReply: safeFallback,
+            visibleText: safeFallback,
+            persistedText: '',
+            unsafeBlocked: true,
+            humanizerTimedOut,
+            humanizerFailed,
+            humanizerFailureReason,
+            stream: {
+              ...markStreamCompleted(state.output, true),
+              ...mirrorStreamingFlags(state.output, safeFallback),
+              humanizerTimedOut,
+              humanizerFailed,
+              humanizerFailureReason,
+              unsafeBlocked: true,
+              fallbackToNonStream: false,
+              mode: 'direct'
+            }
+          };
+        }
         const shouldEmitFinalOnce = (
           shouldGuardStreamBeforeSend
           || humanizerTimedOut
