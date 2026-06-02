@@ -175,8 +175,8 @@ module.exports = (async () => {
       'private inbound telemetry should identify the private inbound pool'
     );
     assert.ok(
-      lockEvents.every((event) => event.privilegedPrivateChat === false),
-      'test users should remain non-privileged while still using the private pool'
+      lockEvents.every((event) => event.privilegedPrivateChat === true && event.inbound_lane === 'general'),
+      'private allowlist users should be privileged for private access while staying in the general inbound lane'
     );
 
     console.log('messageHandlerPrivateConcurrencySource.test.js passed');

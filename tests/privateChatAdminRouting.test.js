@@ -88,6 +88,20 @@ module.exports = (async () => {
 
   assert.strictEqual(groupSummaryPrivateReply, '仅群聊可用。');
 
+  const privateWriteDisabledReply = buildUnavailableRouteReply(
+    {
+      meta: {
+        chatType: 'private'
+      }
+    },
+    {
+      unavailableReason: 'private-write-disabled'
+    }
+  );
+
+  assert.strictEqual(privateWriteDisabledReply, '当前私聊已关闭，仅对白名单用户和管理员开放。');
+  assert.ok(!privateWriteDisabledReply.includes('只读能力'));
+
   console.log('privateChatAdminRouting.test.js passed');
 })().catch((error) => {
   console.error(error);

@@ -34,20 +34,35 @@ function isPrivateChatTestUser({
   return allowSet.has('*') || allowSet.has(normalizedUserId);
 }
 
+function isAdminUserId(userId = '', runtimeConfig = config) {
+  const normalizedUserId = normalizeText(userId);
+  if (!normalizedUserId) return false;
+  const adminSet = normalizeIdSet(runtimeConfig?.ADMIN_USER_IDS);
+  return adminSet.has(normalizedUserId);
+}
+
+function isPrivateChatAccessAllowed({
+  chatType = '',
+  userId = '',
+  config: runtimeConfig = config
+} = {}) {
+  if (!isPrivateChatType(chatType)) return false;
+  return isPrivateChatTestUser({ chatType, userId, config: runtimeConfig })
+    || isAdminUserId(userId, runtimeConfig);
+}
+
 function isPrivilegedPrivateChatUser({
   chatType = '',
   userId = '',
   config: runtimeConfig = config
 } = {}) {
-  if (!isPrivateChatTestUser({ chatType, userId, config: runtimeConfig })) return false;
-  const normalizedUserId = normalizeText(userId);
-
-  const adminSet = normalizeIdSet(runtimeConfig?.ADMIN_USER_IDS);
-  return adminSet.has(normalizedUserId);
+  return isPrivateChatAccessAllowed({ chatType, userId, config: runtimeConfig });
 }
 
 module.exports = {
   getPrivateChatTestUserIdSet,
+  isAdminUserId,
+  isPrivateChatAccessAllowed,
   isPrivateChatTestUser,
   isPrivateChatType,
   isPrivilegedPrivateChatUser

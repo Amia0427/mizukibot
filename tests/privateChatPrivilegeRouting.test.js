@@ -33,7 +33,7 @@ module.exports = (() => {
     );
     assert.strictEqual(
       contextBudget.isHighAffinityUser({}, { userId: 'admin_only', chatType: 'private' }),
-      false
+      true
     );
     assert.strictEqual(
       contextBudget.isHighAffinityUser({}, { userId: 'admin_1', chatType: 'private' }),

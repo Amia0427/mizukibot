@@ -423,9 +423,9 @@ module.exports = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  // Preferred private-chat test-user allowlist.
-  // Empty means open private-chat test-user access to everyone by default.
-  // Use '*' to make the intent explicit in env files.
+  // Preferred private-chat user allowlist.
+  // Empty disables ordinary private chat access by default; admins are checked separately.
+  // Use '*' only when private chat should explicitly be open to everyone.
   PRIVATE_CHAT_TEST_USER_IDS: (() => {
     const preferredRaw = pick('PRIVATE_CHAT_TEST_USER_IDS', '');
     const preferred = preferredRaw
@@ -438,7 +438,7 @@ module.exports = {
       .map((s) => s.trim())
       .filter(Boolean);
     if (legacy.length > 0) return legacy;
-    return ['*'];
+    return [];
   })(),
   // Legacy alias kept for backward compatibility with older env files.
   // Semantics are the same as PRIVATE_CHAT_TEST_USER_IDS and should not be used for admin privilege checks.
