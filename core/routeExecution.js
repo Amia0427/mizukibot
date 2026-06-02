@@ -12,6 +12,7 @@ const {
 } = require('./executablePlan');
 const config = require('../config');
 const { filterCompanionAllowedTools } = require('../utils/companionTools');
+const { isPrivateChatAccessAllowed } = require('../utils/privilegedPrivateChat');
 
 // routeExecution consumes only canonical contract data plus planner output.
 // It must not infer a new top route type or treat routeProfiles as routing truth.
@@ -141,6 +142,17 @@ function normalizeChatType(route = {}) {
     : 'group';
 }
 
+function isPrivateActionExempt(route = {}, runtimeConfig = config) {
+  if (normalizeChatType(route) !== 'private') return false;
+  const userId = String(route?.meta?.userId || route?.meta?.senderId || '').trim();
+  if (!userId) return false;
+  return isPrivateChatAccessAllowed({
+    chatType: 'private',
+    userId,
+    config: runtimeConfig
+  });
+}
+
 function isPrivateSafeTool(toolName = '') {
   const normalized = String(toolName || '').trim();
   if (!normalized) return false;
@@ -163,14 +175,16 @@ function isPrivateSafeTool(toolName = '') {
   return true;
 }
 
-function filterAllowedToolsForChatType(route = {}, allowedTools = []) {
-  const normalizedTools = filterCompanionAllowedTools(normalizeToolNames(allowedTools), config);
+function filterAllowedToolsForChatType(route = {}, allowedTools = [], runtimeConfig = config) {
+  const normalizedTools = filterCompanionAllowedTools(normalizeToolNames(allowedTools), runtimeConfig);
   if (normalizeChatType(route) !== 'private') return normalizedTools;
+  if (isPrivateActionExempt(route, runtimeConfig)) return normalizedTools;
   return normalizedTools.filter((toolName) => isPrivateSafeTool(toolName));
 }
 
-function resolvePrivateRestrictionReason(route = {}, normalizedAllowedTools = [], originalAllowedTools = []) {
+function resolvePrivateRestrictionReason(route = {}, normalizedAllowedTools = [], originalAllowedTools = [], runtimeConfig = config) {
   if (normalizeChatType(route) !== 'private') return '';
+  if (isPrivateActionExempt(route, runtimeConfig)) return '';
   const command = String(route?.meta?.command?.cmd || '').trim().toLowerCase();
   if (command) return 'private-group-only';
   const qqActionKey = String(route?.meta?.qqActionKey || '').trim().toLowerCase();
@@ -242,7 +256,7 @@ function withRouteTrace(route = {}, plan = {}) {
   };
 }
 
-function resolveDirectChatExecution(route = {}) {
+function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
   const base = buildBasePlan(route);
   const plannerDecision = getToolPlanner(route);
   const toolIntent = String(route?.meta?.toolIntent || '').trim();
@@ -279,7 +293,7 @@ function resolveDirectChatExecution(route = {}) {
   const rawAllowedTools = qqActionTools.length > 0
     ? plannerAllowedTools.filter((toolName) => qqActionTools.includes(toolName))
     : plannerAllowedTools;
-  const allowedTools = filterAllowedToolsForChatType(route, rawAllowedTools);
+  const allowedTools = filterAllowedToolsForChatType(route, rawAllowedTools, runtimeConfig);
   const executablePlan = plannerDecision?.executablePlan || buildExecutablePlanFromPlannerDecision(plannerDecision || {}, resolvePolicyKey(route), route);
   const validation = validateExecutablePlanTools(executablePlan, allowedTools);
   const toolPlanAllowedSteps = validation.allowedPlanSteps.filter((step) => step.action && step.action !== 'reply');
@@ -287,7 +301,7 @@ function resolveDirectChatExecution(route = {}) {
   const needsBackground = Boolean(plannerDecision?.needsBackground);
   const routeDebugKey = buildRouteDebugKey(route);
   const policyKey = resolvePolicyKey(route);
-  const privateRestrictionReason = resolvePrivateRestrictionReason(route, allowedTools, rawAllowedTools);
+  const privateRestrictionReason = resolvePrivateRestrictionReason(route, allowedTools, rawAllowedTools, runtimeConfig);
   const chatMode = String(route?.meta?.chatMode || '').trim().toLowerCase();
   const visionDirectReply = normalizeChatType(route) === 'private'
     && (chatMode === 'image_qa' || chatMode === 'image_summary')
@@ -352,7 +366,7 @@ function resolveDirectChatExecution(route = {}) {
   });
 }
 
-function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
+function resolveRouteExecution(route = {}, runtimeConfig = config, _options = {}) {
   const contract = buildCanonicalRouteContract(route);
   const base = buildBasePlan(route);
   const chatType = normalizeChatType(route);
@@ -392,7 +406,7 @@ function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
   }
 
   if (contract.topRouteType === 'direct_chat') {
-    return resolveDirectChatExecution(route);
+    return resolveDirectChatExecution(route, runtimeConfig || config);
   }
 
   return withRouteTrace(route, {

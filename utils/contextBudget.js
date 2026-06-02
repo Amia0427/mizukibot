@@ -1,5 +1,5 @@
 const config = require('../config');
-const { isPrivilegedPrivateChatUser } = require('./privilegedPrivateChat');
+const { isAdminUserId, isPrivateChatType } = require('./privilegedPrivateChat');
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -50,11 +50,7 @@ function getAffinityPoints(userInfo = {}) {
 
 function isHighAffinityUser(userInfo = {}, options = {}) {
   const userId = String(options && options.userId || '').trim();
-  return isPrivilegedPrivateChatUser({
-    chatType: options?.chatType,
-    userId,
-    config
-  });
+  return isPrivateChatType(options?.chatType) && isAdminUserId(userId, config);
 }
 
 function getAffinitySettings(userInfo = {}, options = {}) {

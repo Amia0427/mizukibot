@@ -22,7 +22,7 @@ function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}, { isAdm
     return '该能力当前仅支持群聊中使用，请在目标群内 @我。';
   }
   if (unavailableReason === 'private-write-disabled') {
-    return '私聊当前仅支持问答和只读能力，暂不支持执行动作。';
+    return '当前私聊已关闭，仅对白名单用户和管理员开放。';
   }
   if (unavailableReason !== 'no-allowed-tools') {
     return 'The required tool is temporarily unavailable. Please try again later.';
