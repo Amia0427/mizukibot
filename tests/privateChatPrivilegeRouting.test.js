@@ -22,7 +22,6 @@ module.exports = (() => {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.AI_MODEL = 'base-model';
     process.env.ADMIN_AI_MODEL = 'admin-model';
-    process.env.ADMIN_PRIVATE_CHAT_USE_DEFAULT_MODEL = 'true';
     process.env.PRIVATE_CHAT_TEST_USER_IDS = 'tester_1,admin_1';
     process.env.ADMIN_USER_IDS = 'admin_1,admin_only';
 
@@ -47,11 +46,11 @@ module.exports = (() => {
     );
     assert.strictEqual(
       mainModelConfigResolver.isAdminMainModelUser('admin_only', { chatType: 'private' }),
-      false
+      true
     );
     assert.strictEqual(
       mainModelConfigResolver.isAdminMainModelUser('admin_1', { chatType: 'private' }),
-      false
+      true
     );
 
     const testerModel = mainModelConfigResolver.resolveRoleAwareMainModelConfig('tester_1', null, { chatType: 'private' });
@@ -78,9 +77,8 @@ module.exports = (() => {
     });
 
     assert.strictEqual(testerModel.model, 'base-model');
-    assert.strictEqual(adminOnlyModel.model, 'base-model');
-    assert.strictEqual(privilegedModel.model, 'base-model');
-    assert.strictEqual(privilegedModel.__adminPrivateChatDefaultModel, true);
+    assert.strictEqual(adminOnlyModel.model, 'admin-model');
+    assert.strictEqual(privilegedModel.model, 'admin-model');
     assert.strictEqual(adminCommandModel.model, 'admin-model');
     assert.strictEqual(groupAdminModel.model, 'admin-model');
 

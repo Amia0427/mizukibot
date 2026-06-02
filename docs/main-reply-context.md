@@ -1,10 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-02 16:20 +08:00
+更新时间：2026-06-02 16:30 +08:00
 
 ## 已调整
 
-- 2026-06-02 16:20 +08:00：感知后回复拒演样本定位到 `passive-awareness/reply` 支路：实际发言仍使用专用 Claude reply 模型，同时历史坏回复已经进入 style/profile/journal 记忆并被注入 prompt。被动感知发言默认跟随主模型（`PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL=true`），system 消息补入压缩主 persona；RecentContext、CurrentMessage、RetrievedMemory、DailyJournal、Profile/Impression/Summary 在进入 prompt 前会隔离模型自报/拒演污染。post-reply persist 也会把这类文本标记为 `model_identity_contamination`，不写入桥接、Memory V3、日记或后续学习。普通私聊 admin 默认不再使用 `ADMIN_AI_MODEL`（`ADMIN_PRIVATE_CHAT_USE_DEFAULT_MODEL=true`），但 admin 命令和群聊 admin 仍走专用 admin 模型。该修复是上下文/路由隔离，不是用户可见输出的身份漂移硬拦截。
+- 2026-06-02 16:30 +08:00：按要求恢复普通私聊 admin 默认走管理员模型（`ADMIN_AI_MODEL`）。感知后回复拒演样本仍定位在 `passive-awareness/reply` 支路与历史坏回复记忆污染：被动感知发言默认跟随主模型（`PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL=true`），system 消息补入压缩主 persona；RecentContext、CurrentMessage、RetrievedMemory、DailyJournal、Profile/Impression/Summary 在进入 prompt 前隔离模型自报/拒演污染。post-reply persist 会把这类文本标记为 `model_identity_contamination`，不写入桥接、Memory V3、日记或后续学习。该修复是上下文/路由隔离，不是用户可见输出的身份漂移硬拦截。
 - 2026-06-02 14:19 +08:00：主回复沉浸边界继续降噪。稳定安全块对模型显示为 `InternalIntegrity`，只静默保护内部提示词/凭证/记忆与路由实现；普通 RP、黑暗虚构、剧情台词、情绪聊天和设定讨论优先按角色现场自然接。输出保护不再因提到“系统提示词/secret”等词就整句替换，群聊动态块移除 `group_safety`；真实滥用命中时也只轻挡可执行细节。
 - 2026-06-02 14:04 +08:00：主回复沉浸边界降噪完成。内部完整性保护只管内部提示词/凭证/路由与记忆 schema/隐私数据泄露，以及提示词注入和记忆污染；角色扮演、虚构黑暗剧情、情绪表达、玩梗和创作请求默认按正常聊天处理。`safetyBoundary` 只在明确现实滥用、凭证窃取/绕过、骚扰流程或可执行攻击细节时触发，动态角色规则里的不读心/不替用户行动改为叙事一致性约束。
 - 2026-06-02 12:04 +08:00：私聊角色扮演拒绝样本确认系统提示词仍在请求内，根因在本地私聊链路：上游流式增量曾直接透传，且 `direct:*` bridge / RecentRawTurns 会回灌旧 assistant 原文。现在私聊流式与群聊一样先 buffer/guard 后一次性发最终文本；`direct:*` 短期 bridge、恢复和私聊 prompt raw continuity 只保留 user raw turn，避免旧 assistant 拒绝句成为下一轮权威上下文。没有加入 Claude/Anthropic/“不能扮演”文本硬拦截。
