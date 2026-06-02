@@ -4,18 +4,18 @@ const { extractMessageContent } = require('../api/parser');
 
 const FALLBACK_TEMPLATES = Object.freeze({
   'harmful-request': [
-    'I can\'t help with harmful or unsafe requests. Ask for a safe alternative and I\'ll help directly.',
-    'That request crosses a safety line. Rephrase it into a safe, legitimate task and I\'ll continue.',
-    'I\'m not going to assist with something harmful. Give me the safe version of what you need.'
+    '这个我不往可执行方向说啦。改成剧情、复盘或者防护思路的话，我接。',
+    '这条我就不顺着做细节了。你换成虚构桥段或正经止损，我继续。',
+    '这种现实操作细节我不贴。要写成故事里的氛围，或者聊怎么防，我可以接。'
   ],
   'bad-faith-request': [
-    'That looks like a bad-faith or spammy request. Send the real task and I\'ll handle it.',
-    'I\'m skipping that kind of spammy request. If you have a legitimate goal, say it directly.',
-    'That request looks designed to waste turns. Ask the actual task and I\'ll continue.'
+    '这种刷屏/拆工具的我不接。说正事的话我就跟上。',
+    '这条我先略过啦。你把真正想做的事说出来，我再接。',
+    '这个方向太像捣乱了。换个正常目标，我继续听。'
   ],
   default: [
-    'I can\'t take that request as-is. Rephrase it into a normal task and I\'ll help.',
-    'That one isn\'t something I can do directly. Send a concrete legitimate request instead.'
+    '这条我不能照原样接。换个正常说法，我继续。',
+    '这个我不直接做。你换成具体、正当的目标就行。'
   ]
 });
 

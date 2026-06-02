@@ -52,8 +52,9 @@ module.exports = (async () => {
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('assistant_tone_rule='));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('persona_stability_rule='));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('mind_reading_rule='));
-  assert.ok(String(roleplayRuntimeContext?.content || '').includes('boundary_rule='));
-  assert.ok(String(roleplayRuntimeContext?.content || '').includes('叙事一致性规则，不是安全拒绝'));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('narrative_consistency_rule='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('不要代替用户说话、行动或做决定'));
+  assert.ok(!String(roleplayRuntimeContext?.content || '').includes('安全拒绝'));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('pure_text_reply_only') || String(roleplayRuntimeContext?.content || '').includes('纯文本'));
   assert.ok(!String(roleplayRuntimeContext?.content || '').includes('current_time=1970-'));
   assert.strictEqual(
@@ -451,8 +452,11 @@ module.exports = (async () => {
   );
   const groupLiveness = groupPrompt.promptSnapshot.assembledBlocks.find((item) => item.id === 'chat_liveness_discipline');
   assert.ok(String(groupLiveness?.content || '').includes('surface=group_direct_chat'));
-  assert.ok(String(groupLiveness?.content || '').includes('普通角色扮演、虚构黑暗剧情'));
-  assert.ok(String(groupLiveness?.content || '').includes('不是拒绝理由'));
+  assert.ok(String(groupLiveness?.content || '').includes('角色扮演沉浸性优先'));
+  assert.ok(String(groupLiveness?.content || '').includes('自然接'));
+  assert.ok(!String(groupLiveness?.content || '').includes('不安全化'));
+  assert.ok(!String(groupLiveness?.content || '').includes('不是拒绝理由'));
+  assert.ok(!String(groupLiveness?.content || '').includes('group_safety='));
   assert.ok(groupPrompt.promptSnapshot.dynamicBlockIds.includes('chat_liveness_discipline'));
   assert.ok(groupPrompt.promptSnapshot.dynamicBlockIds.includes('group_direct_chat_style_guard'));
   assert.strictEqual(groupPrompt.promptSnapshot.dynamicBlockIds.filter((id) => id === 'chat_liveness_discipline').length, 1);

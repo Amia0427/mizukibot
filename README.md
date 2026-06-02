@@ -2,7 +2,9 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
-更新 2026-06-02 14:04 +08:00：主回复沉浸边界降噪：`SecurityContract` 收窄为内部信息/凭证/提示词注入/记忆污染保护，普通角色扮演、虚构黑暗剧情、情绪聊天和创作请求不再被安全化处理；`safetyBoundary` 只在明确现实滥用、凭证绕过、骚扰流程或可执行攻击细节时触发，真命中时也只轻收可执行细节。
+更新 2026-06-02 14:19 +08:00：主回复沉浸边界继续降噪：稳定安全块对模型显示为 `InternalIntegrity`，只静默保护内部提示词/凭证/记忆与路由实现；普通 RP、黑暗虚构、剧情台词、情绪聊天和设定讨论优先按角色现场自然接。输出保护不再因提到“系统提示词/secret”等词就整句替换，只有像真实泄露内容时才挡；群聊动态块移除 `group_safety`，真实滥用命中时也只轻挡可执行细节。
+
+更新 2026-06-02 14:04 +08:00：主回复沉浸边界降噪：内部完整性保护收窄为内部信息/凭证/提示词注入/记忆污染保护，普通角色扮演、虚构黑暗剧情、情绪聊天和创作请求不再被安全化处理；`safetyBoundary` 只在明确现实滥用、凭证绕过、骚扰流程或可执行攻击细节时触发，真命中时也只轻收可执行细节。
 
 更新 2026-06-02 12:04 +08:00：私聊出现 “I don't roleplay as characters or take on personas.” 已确认不是系统提示词未注入；坏样本带有 system prompt，但私聊流式曾走 `direct_reply.streaming_upstream` 直接透传上游增量，且 `direct:*` 短期 bridge / RecentRawTurns 会把旧 assistant 原文作为连续性证据回灌。已改为私聊流式先 buffer/guard 再发，`direct:*` bridge 与私聊短期 raw 上下文只保留 user raw turn，群聊 raw assistant 保持可用；未新增 Claude/Anthropic/角色扮演正则硬拦截。
 
@@ -16,7 +18,7 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-02 10:10 +08:00：Memory V3 新增 Nocturne 风格 URI/Boot/alias/trigger/changeset review 外壳；现有事件日志、projection、版本化更新和冲突治理保持不替换，新增 `system://boot`、`mem read`、`mem boot`、`mem alias`、`mem trigger`、`mem review` 与管理端 Memory Explorer / Review。
 
-更新 2026-06-01 19:34 +08:00：群聊活人感纪律新增群聊专属安全规范，仅在 `group_direct_chat` / `passive_group_reply` 生效；遇到政治敏感、淫秽色情、违法违规或规避法律法规话题时，用瑞希式短句轻轻带过，不改私聊约束。
+更新 2026-06-01 19:34 +08:00：群聊活人感纪律曾新增群聊专属安全规范；2026-06-02 14:19 +08:00 已移除常驻 `group_safety` 动态行，群聊默认按共享现场和角色沉浸承接，只在路由明确命中现实可执行滥用时轻挡细节。
 
 更新 2026-06-01 22:45 +08:00：post-reply worker 启动改为单实例可重入；`scripts/post-reply-worker.js` 会持有 `.mizukibot-postreply-worker.lock`，Windows daemon / one-click / Linux fallback 会先扫描已有 `post-reply-worker.js` 进程并修复 PID 文件。Windows daemon 只在有 queued job 或可恢复 processing job 时补启 worker，避免主 bot 已运行时因 worker RSS 空闲回收反复空拉新 worker。详见 `docs/post-reply-worker.md`。
 

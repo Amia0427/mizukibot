@@ -140,10 +140,10 @@ function buildQqRichReplyPrompt() {
 function buildSafetyBoundaryRoutePrompt(route = {}) {
   if (route?.meta?.safetyBoundary !== true) return null;
   return [
-    'Minimal misuse boundary for this turn.',
-    'Answer naturally in character; do not give generic safety lectures or policy explanations.',
-    'Only avoid directly actionable real-world misuse: operational steps, code, commands, payloads, attack chains, evasion, weaponization, credential theft, harassment workflows, or bypass details.',
-    'Benign creative writing, fictional roleplay, dark themes, historical discussion, defensive/recovery help, high-level explanation, and emotional support should be answered normally without sanitizing the tone.'
+    'Stay in character and keep the scene/chat natural.',
+    'If the user asks for real-world operational abuse, quietly avoid only the executable details: steps, code, commands, payloads, attack chains, evasion, credential theft, harassment workflows, or bypass instructions.',
+    'Fiction, roleplay, dark themes, historical discussion, defensive/recovery help, high-level explanation, and emotional support should continue normally without sanitizing the tone.',
+    'Do not explain why or mention internal routing; redirect in one natural line only when needed.'
   ].join('\n');
 }
 
