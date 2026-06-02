@@ -151,6 +151,11 @@ async function buildMemoryContextV3Payload(deps = {}) {
     'tail'
   );
   const profileDisabled = packet.stableProfile?.disabled === true;
+  const bootMemoryText = [
+    packet.stableProfileText ? `Profile: ${packet.stableProfileText}` : '',
+    packet.sessionContinuityText ? `Continuity: ${packet.sessionContinuityText}` : '',
+    queryResult.digest ? `Digest: ${queryResult.digest}` : ''
+  ].filter(Boolean).join('\n');
   const continuitySummaryText = continuityFacet
     ? limitPromptText(
         packet.sessionContinuityText || queryResult.digest || '',
@@ -173,6 +178,7 @@ async function buildMemoryContextV3Payload(deps = {}) {
   );
   const impressionText = profileDisabled || !injectPersonaBlocks ? '' : String(queryResult.persona?.impression || '');
   const memoryForPrompt = [
+    bootMemoryText ? `[BootMemory]\n${limitPromptText(bootMemoryText, getPromptTokenLimit('MAIN_PROMPT_BOOT_MEMORY_MAX_TOKENS', 220), 'tail')}` : '',
     packet.sessionContinuityText ? `[SessionContinuity]\n${packet.sessionContinuityText}` : '',
     packet.relevantEvidenceText ? `[RelevantEvidence]\n${packet.relevantEvidenceText}` : '',
     (!continuityFacet || !packet.sessionContinuityText) && packet.weakEvidenceText ? `[WeakEvidence]\n${packet.weakEvidenceText}` : '',
@@ -187,7 +193,8 @@ async function buildMemoryContextV3Payload(deps = {}) {
     taskMemory: packet.taskStrategyText,
     groupMemory: packet.groupSharedContextText,
     dailyJournal: dailyJournalText,
-    longTermProfile: packet.stableProfileText
+    longTermProfile: packet.stableProfileText,
+    bootMemory: bootMemoryText
   };
   const v3DroppedReasons = [];
   const lancedbFallback = queryResult?.stats?.lancedb?.fallbackReason || '';

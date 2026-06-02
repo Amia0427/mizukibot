@@ -242,6 +242,7 @@ function isUsableEvidenceRow(row = {}) {
 }
 
 function trimPackedResults(rows = [], limit = 8) {
+  const { uriForDoc } = require('./uriResolver');
   const results = [];
   let outputChars = 0;
   let droppedResultCount = 0;
@@ -257,6 +258,7 @@ function trimPackedResults(rows = [], limit = 8) {
     }
     results.push({
       ref: resultRefForDoc(doc),
+      uri: uriForDoc(doc),
       source: doc.source,
       type: resultTypeForDoc(doc),
       id: doc.source === 'notebook' && doc.notebookRef ? doc.notebookRef.docId : doc.id,

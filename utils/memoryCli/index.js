@@ -44,6 +44,28 @@ const {
   parseOpenVikingRef,
   searchOpenVikingForMemoryCli
 } = require('../openVikingMemory/cli');
+const {
+  addMemoryAlias,
+  listMemoryAliases,
+  removeMemoryAlias
+} = require('../memory-v3/aliasIndex');
+const {
+  buildBootMemory
+} = require('../memory-v3/bootMemory');
+const {
+  acceptChangeset,
+  listPendingChangesets,
+  rejectChangeset
+} = require('../memory-v3/changesetReview');
+const {
+  addMemoryTriggers,
+  listMemoryTriggers,
+  removeMemoryTriggers
+} = require('../memory-v3/triggerGlossary');
+const {
+  buildMemoryUriTree,
+  readMemoryUri
+} = require('../memory-v3/uriResolver');
 
 function preloadMemoryCli(options = {}) {
   return ensureSnapshot(options);
@@ -83,6 +105,149 @@ async function runMemoryCli(commandText = '', context = {}) {
   const userId = sanitizeText(context.userId);
   let payload = null;
 
+  if (parsed.commandName === 'boot') {
+    const boot = await buildBootMemory({
+      ...context,
+      userId,
+      query: parsed.query,
+      namespace: parsed.namespace || context.namespace
+    });
+    payload = {
+      ok: boot.ok,
+      command: 'boot',
+      rawCommandText: prepared.rawCommandText,
+      normalizedCommandText: prepared.normalizedCommandText,
+      repairApplied: prepared.repairApplied,
+      repairStrategy: prepared.repairStrategy,
+      uri: 'system://boot',
+      text: boot.text || '',
+      digest: boot.digest || [],
+      results: boot.results || [],
+      triggerMatches: boot.triggerMatches || [],
+      diagnostics: boot.diagnostics || {},
+      reason: boot.reason || ''
+    };
+  }
+
+  if (!payload && parsed.commandName === 'read') {
+    if (String(parsed.uri || '').trim().toLowerCase() === 'system://boot') {
+      const boot = await buildBootMemory({
+        ...context,
+        userId,
+        namespace: parsed.namespace || context.namespace
+      });
+      payload = {
+        ok: boot.ok,
+        command: 'read',
+        rawCommandText: prepared.rawCommandText,
+        normalizedCommandText: prepared.normalizedCommandText,
+        repairApplied: prepared.repairApplied,
+        repairStrategy: prepared.repairStrategy,
+        uri: 'system://boot',
+        source: 'system',
+        id: 'boot',
+        text: boot.text || '',
+        data: boot,
+        reason: boot.reason || ''
+      };
+    } else {
+      const read = readMemoryUri(parsed.uri, {
+        ...context,
+        userId,
+        namespace: parsed.namespace || context.namespace
+      }, {
+        namespace: parsed.namespace || context.namespace
+      });
+      payload = {
+        ok: read.ok,
+        command: 'read',
+        rawCommandText: prepared.rawCommandText,
+        normalizedCommandText: prepared.normalizedCommandText,
+        repairApplied: prepared.repairApplied,
+        repairStrategy: prepared.repairStrategy,
+        uri: read.uri || parsed.uri,
+        requestedUri: read.requestedUri || parsed.uri,
+        targetUri: read.targetUri || '',
+        source: read.source || '',
+        id: read.id || '',
+        text: read.text || '',
+        data: read.data || null,
+        alias: read.alias || null,
+        reason: read.reason || ''
+      };
+    }
+  }
+
+  if (!payload && parsed.commandName === 'alias') {
+    if (parsed.action === 'add') {
+      payload = {
+        ...addMemoryAlias({
+          namespace: parsed.namespace || context.namespace,
+          aliasUri: parsed.aliasUri,
+          targetUri: parsed.targetUri,
+          priority: parsed.priority,
+          disclosure: parsed.disclosure
+        }),
+        command: 'alias'
+      };
+    } else if (parsed.action === 'remove') {
+      payload = {
+        ...removeMemoryAlias({
+          namespace: parsed.namespace || context.namespace,
+          aliasUri: parsed.aliasUri
+        }),
+        command: 'alias'
+      };
+    } else {
+      payload = {
+        ok: true,
+        command: 'alias',
+        aliases: listMemoryAliases({ namespace: parsed.namespace || context.namespace })
+      };
+    }
+    payload.rawCommandText = prepared.rawCommandText;
+    payload.normalizedCommandText = prepared.normalizedCommandText;
+    payload.repairApplied = prepared.repairApplied;
+    payload.repairStrategy = prepared.repairStrategy;
+  }
+
+  if (!payload && parsed.commandName === 'trigger') {
+    if (parsed.action === 'add') {
+      payload = {
+        ...addMemoryTriggers({
+          namespace: parsed.namespace || context.namespace,
+          uri: parsed.uri,
+          keywords: parsed.keywords,
+          priority: parsed.priority,
+          disclosure: parsed.disclosure
+        }),
+        command: 'trigger'
+      };
+    } else if (parsed.action === 'remove') {
+      payload = {
+        ...removeMemoryTriggers({
+          namespace: parsed.namespace || context.namespace,
+          uri: parsed.uri,
+          keywords: parsed.keywords
+        }),
+        command: 'trigger'
+      };
+    } else {
+      payload = {
+        ok: true,
+        command: 'trigger',
+        triggers: listMemoryTriggers({
+          namespace: parsed.namespace || context.namespace,
+          uri: parsed.uri
+        })
+      };
+    }
+    payload.rawCommandText = prepared.rawCommandText;
+    payload.normalizedCommandText = prepared.normalizedCommandText;
+    payload.repairApplied = prepared.repairApplied;
+    payload.repairStrategy = prepared.repairStrategy;
+  }
+
   if (parsed.commandName === 'search') {
     if (parsed.source === 'openviking') {
       payload = await searchOpenVikingForMemoryCli(parsed, context);
@@ -107,6 +272,10 @@ async function runMemoryCli(commandText = '', context = {}) {
           repairStrategy: prepared.repairStrategy,
           count: fastSearch.results.length,
           results: fastSearch.results,
+          uriResults: (fastSearch.results || []).map((item) => ({
+            ...item,
+            uri: item.uri || (item.source && item.id ? `${item.source}:${item.id}` : '')
+          })),
           digest: fastSearch.digest,
           sourceCoverage: fastSearch.sourceCoverage,
           queryFacet: fastSearch.queryFacet,
@@ -164,8 +333,21 @@ async function runMemoryCli(commandText = '', context = {}) {
   }
 
   if (!payload && parsed.commandName === 'review') {
+    if (parsed.action === 'accept') {
+      payload = await acceptChangeset(parsed.id);
+    } else if (parsed.action === 'reject') {
+      payload = await rejectChangeset(parsed.id);
+    } else if (parsed.action === 'list') {
+      payload = listPendingChangesets({
+        userId,
+        status: parsed.status,
+        limit: parsed.limit
+      });
+    } else {
+      payload = reviewMemories(context, parsed);
+    }
     payload = {
-      ...reviewMemories(context, parsed),
+      ...payload,
       command: 'review',
       rawCommandText: prepared.rawCommandText,
       normalizedCommandText: prepared.normalizedCommandText,
@@ -195,7 +377,25 @@ async function runMemoryCli(commandText = '', context = {}) {
 
   if (!payload && parsed.commandName === 'open') {
     let opened = null;
-    if (String(config.MEMORY_CLI_SEARCH_ENGINE || 'fast').trim().toLowerCase() !== 'legacy') {
+    if (parsed.ref && /^(core|group|journal|image|system):\/\//i.test(parsed.ref)) {
+      const read = readMemoryUri(parsed.ref, {
+        ...context,
+        userId
+      }, {});
+      opened = read.ok
+        ? {
+            source: read.source || 'uri',
+            id: read.id || read.uri,
+            data: {
+              uri: read.uri,
+              text: read.text,
+              data: read.data,
+              alias: read.alias || null
+            }
+          }
+        : null;
+    }
+    if (!opened && String(config.MEMORY_CLI_SEARCH_ENGINE || 'fast').trim().toLowerCase() !== 'legacy') {
       try {
         opened = await openMemoryCliFast(parsed, context);
       } catch (error) {
@@ -249,8 +449,15 @@ async function runMemoryCli(commandText = '', context = {}) {
   }
 
   if (!payload && parsed.commandName === 'ls') {
+    const tree = buildMemoryUriTree({
+      ...context,
+      userId
+    }, {
+      namespace: context.namespace
+    });
     payload = {
       ...listUnifiedMemorySources(context),
+      uriTree: tree,
       command: 'ls',
       rawCommandText: prepared.rawCommandText,
       normalizedCommandText: prepared.normalizedCommandText,

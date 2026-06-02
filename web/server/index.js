@@ -32,6 +32,11 @@ const {
 } = require('../mainReplyContextPreviewAdmin');
 const { registerMainReplyContextPreviewRoute } = require('../mainReplyContextPreviewRoute');
 const {
+  renderMemoryV3NocturneClientScript,
+  renderMemoryV3NocturnePanel
+} = require('../memoryV3NocturneAdmin');
+const { registerMemoryV3NocturneRoutes } = require('../memoryV3NocturneRoute');
+const {
   getCurrentSettings,
   getSettingsEndpointError,
   IMAGE_MODEL_PRESETS,
@@ -94,6 +99,7 @@ function startServer() {
   });
 
   registerMainReplyContextPreviewRoute(app);
+  registerMemoryV3NocturneRoutes(app);
 
   app.get('/api/settings', (req, res) => {
     return res.json({ ok: true, settings: getCurrentSettings() });
@@ -404,6 +410,8 @@ function startServer() {
   </div>
 
   ${renderMainReplyContextPreviewPanel()}
+
+  ${renderMemoryV3NocturnePanel()}
 
   <div class="card">
     <h3>长期记忆治理（压缩 + 纯洁）</h3>
@@ -887,6 +895,7 @@ function startServer() {
     }
 
 ${renderMainReplyContextPreviewClientScript()}
+${renderMemoryV3NocturneClientScript()}
 
     document.getElementById('settings-form').addEventListener('submit', saveSettings);
     document.getElementById('btn-model-calls-load').addEventListener('click', loadModelCalls);
@@ -946,6 +955,7 @@ ${renderMainReplyContextPreviewClientScript()}
     refreshThinking();
     loadModelCalls();
     initMainReplyContextPreview();
+    initMemoryV3NocturnePanel();
     setInterval(refreshThinking, 1500);
     setInterval(loadModelCalls, 2500);
   </script>

@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-02 10:10 +08:00：Memory V3 新增 Nocturne 风格 URI/Boot/alias/trigger/changeset review 外壳；现有事件日志、projection、版本化更新和冲突治理保持不替换，新增 `system://boot`、`mem read`、`mem boot`、`mem alias`、`mem trigger`、`mem review` 与管理端 Memory Explorer / Review。
+
 更新 2026-06-01 19:34 +08:00：群聊活人感纪律新增群聊专属安全规范，仅在 `group_direct_chat` / `passive_group_reply` 生效；遇到政治敏感、淫秽色情、违法违规或规避法律法规话题时，用瑞希式短句轻轻带过，不改私聊约束。
 
 更新 2026-06-01 22:45 +08:00：post-reply worker 启动改为单实例可重入；`scripts/post-reply-worker.js` 会持有 `.mizukibot-postreply-worker.lock`，Windows daemon / one-click / Linux fallback 会先扫描已有 `post-reply-worker.js` 进程并修复 PID 文件。Windows daemon 只在有 queued job 或可恢复 processing job 时补启 worker，避免主 bot 已运行时因 worker RSS 空闲回收反复空拉新 worker。详见 `docs/post-reply-worker.md`。
@@ -270,9 +272,25 @@ node scripts/repair-memory-vector-index.js --apply --compact
 node scripts/sync-lancedb-memory-index.js --full --compact --dir data/lancedb_user_bucket --partition-mode user_bucket --bucket-count 32
 ```
 
+Nocturne 风格结构化入口：
+
+```bash
+mem boot
+mem read system://boot
+mem read core://user/<userId>/memory/<nodeId>
+mem alias add <alias> <uri> --namespace <namespace>
+mem trigger add <phrase> <uri> --namespace <namespace>
+mem trigger list --namespace <namespace>
+mem review list --status candidate
+mem review accept <changesetId>
+mem review reject <changesetId> --reason "..."
+```
+
 `diag:memory -- diagnose` 的 `summary.categoryManifest` 会列出当前可召回类别、来源覆盖、热门 tags 和 intent，可用于判断查询应优先查 profile/personal/recent/task/journal/group/style 中哪一层。
 
 Memory V3 projection 会保留冲突 loser 供审计，但默认标记不可召回；主回复 prompt 会随记忆证据加入短 `memory_recall_policy`，避免把 stale/superseded/弱证据当确定事实。
+
+Memory V3 URI 层支持 `core://user/<userId>/...`、`group://<groupId>/...`、`journal://...`、`image://...`、`system://boot` 和 `system://glossary`；alias/trigger/glossary 按 namespace 隔离，reject 只追加 archive/supersede 事件，不物理删除原始事件。
 
 `memory:v3:import-file` 支持 `.md/.markdown/.txt`；Markdown 按标题切块，普通文本按段落切块。默认写入 `source=file_import`、`intent=bulk_import`，并复用版本化 update，重复导入不会扩大 active chunk 数。
 

@@ -2,6 +2,7 @@ const config = require('../../config');
 
 const VALID_SEARCH_SOURCES = new Set(['all', 'profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook', 'image', 'openviking']);
 const VALID_OPEN_SOURCES = new Set(['profile', 'personal', 'task', 'group', 'journal', 'recent', 'style', 'jargon', 'notebook', 'image', 'openviking']);
+const URI_SCHEMES = new Set(['core', 'group', 'journal', 'image', 'system']);
 
 function sanitizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -200,6 +201,11 @@ function parseOpenArgs(tokens = [], raw = '') {
       continue;
     }
 
+    if (!ref && isMemoryUri(token)) {
+      ref = sanitizeText(token);
+      continue;
+    }
+
     throw new Error(`Unexpected token: ${token}`);
   }
 
@@ -218,6 +224,218 @@ function parseOpenArgs(tokens = [], raw = '') {
     id,
     raw
   };
+}
+
+function isMemoryUri(value = '') {
+  const match = String(value || '').trim().match(/^([a-z][a-z0-9_-]*):\/\//i);
+  return Boolean(match && URI_SCHEMES.has(String(match[1] || '').toLowerCase()));
+}
+
+function parseReadArgs(tokens = [], raw = '') {
+  let uri = '';
+  let namespace = '';
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = String(tokens[i] || '').trim();
+    if (!token) continue;
+    if (token === '--uri') {
+      uri = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--uri=')) {
+      uri = sanitizeText(token.slice('--uri='.length));
+      continue;
+    }
+    if (token === '--namespace') {
+      namespace = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--namespace=')) {
+      namespace = sanitizeText(token.slice('--namespace='.length));
+      continue;
+    }
+    if (!uri && isMemoryUri(token)) {
+      uri = sanitizeText(token);
+      continue;
+    }
+    throw new Error(`Unexpected token: ${token}`);
+  }
+  if (!uri) throw new Error(`Unexpected token: missing read uri in ${raw}`);
+  return { commandName: 'read', uri, namespace, raw };
+}
+
+function parseBootArgs(tokens = [], raw = '') {
+  let query = '';
+  let namespace = '';
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = String(tokens[i] || '').trim();
+    if (!token) continue;
+    if (token === '--query') {
+      query = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--query=')) {
+      query = sanitizeText(token.slice('--query='.length));
+      continue;
+    }
+    if (token === '--namespace') {
+      namespace = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--namespace=')) {
+      namespace = sanitizeText(token.slice('--namespace='.length));
+      continue;
+    }
+    throw new Error(`Unexpected token: ${token}`);
+  }
+  return { commandName: 'boot', query, namespace, raw };
+}
+
+function parseAliasArgs(tokens = [], raw = '') {
+  const action = sanitizeText(tokens[0] || '').toLowerCase();
+  if (!action) throw new Error(`Unexpected token: missing alias action in ${raw}`);
+  let aliasUri = '';
+  let targetUri = '';
+  let namespace = '';
+  let priority = 0;
+  let disclosure = '';
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = String(tokens[i] || '').trim();
+    if (!token) continue;
+    if (token === '--alias' || token === '--uri') {
+      aliasUri = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--alias=')) {
+      aliasUri = sanitizeText(token.slice('--alias='.length));
+      continue;
+    }
+    if (token.startsWith('--uri=')) {
+      aliasUri = sanitizeText(token.slice('--uri='.length));
+      continue;
+    }
+    if (token === '--target') {
+      targetUri = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--target=')) {
+      targetUri = sanitizeText(token.slice('--target='.length));
+      continue;
+    }
+    if (token === '--namespace') {
+      namespace = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--namespace=')) {
+      namespace = sanitizeText(token.slice('--namespace='.length));
+      continue;
+    }
+    if (token === '--priority') {
+      priority = Math.max(0, Number(tokens[i + 1] || 0) || 0);
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--priority=')) {
+      priority = Math.max(0, Number(token.slice('--priority='.length)) || 0);
+      continue;
+    }
+    if (token === '--disclosure') {
+      disclosure = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--disclosure=')) {
+      disclosure = sanitizeText(token.slice('--disclosure='.length));
+      continue;
+    }
+    if (!aliasUri && isMemoryUri(token)) {
+      aliasUri = sanitizeText(token);
+      continue;
+    }
+    if (!targetUri && isMemoryUri(token)) {
+      targetUri = sanitizeText(token);
+      continue;
+    }
+    throw new Error(`Unexpected token: ${token}`);
+  }
+  if (!['add', 'remove', 'list'].includes(action)) throw new Error(`Unsupported alias action: ${action}`);
+  if (action !== 'list' && !aliasUri) throw new Error(`Unexpected token: missing alias uri in ${raw}`);
+  if (action === 'add' && !targetUri) throw new Error(`Unexpected token: missing alias target in ${raw}`);
+  return { commandName: 'alias', action, aliasUri, targetUri, namespace, priority, disclosure, raw };
+}
+
+function parseTriggerArgs(tokens = [], raw = '') {
+  const action = sanitizeText(tokens[0] || '').toLowerCase();
+  if (!action) throw new Error(`Unexpected token: missing trigger action in ${raw}`);
+  let uri = '';
+  let namespace = '';
+  let priority = 0;
+  let disclosure = '';
+  const keywords = [];
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = String(tokens[i] || '').trim();
+    if (!token) continue;
+    if (token === '--uri') {
+      uri = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--uri=')) {
+      uri = sanitizeText(token.slice('--uri='.length));
+      continue;
+    }
+    if (token === '--keyword') {
+      keywords.push(sanitizeText(tokens[i + 1] || ''));
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--keyword=')) {
+      keywords.push(sanitizeText(token.slice('--keyword='.length)));
+      continue;
+    }
+    if (token === '--namespace') {
+      namespace = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--namespace=')) {
+      namespace = sanitizeText(token.slice('--namespace='.length));
+      continue;
+    }
+    if (token === '--priority') {
+      priority = Math.max(0, Number(tokens[i + 1] || 0) || 0);
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--priority=')) {
+      priority = Math.max(0, Number(token.slice('--priority='.length)) || 0);
+      continue;
+    }
+    if (token === '--disclosure') {
+      disclosure = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--disclosure=')) {
+      disclosure = sanitizeText(token.slice('--disclosure='.length));
+      continue;
+    }
+    if (!uri && isMemoryUri(token)) {
+      uri = sanitizeText(token);
+      continue;
+    }
+    keywords.push(sanitizeText(token));
+  }
+  const filteredKeywords = keywords.filter(Boolean);
+  if (!['add', 'remove', 'list'].includes(action)) throw new Error(`Unsupported trigger action: ${action}`);
+  if (action === 'add' && (!uri || filteredKeywords.length === 0)) throw new Error(`Unexpected token: missing trigger uri or keyword in ${raw}`);
+  return { commandName: 'trigger', action, uri, keywords: filteredKeywords, namespace, priority, disclosure, raw };
 }
 
 function parseRememberArgs(tokens = [], raw = '') {
@@ -262,8 +480,14 @@ function parseRememberArgs(tokens = [], raw = '') {
 }
 
 function parseReviewArgs(tokens = [], raw = '') {
+  let action = 'legacy';
+  let id = '';
   let status = 'candidate';
   let limit = 20;
+  if (tokens.length > 0 && ['list', 'accept', 'reject'].includes(sanitizeText(tokens[0]).toLowerCase())) {
+    action = sanitizeText(tokens[0]).toLowerCase();
+    tokens = tokens.slice(1);
+  }
 
   for (let i = 0; i < tokens.length; i += 1) {
     const token = String(tokens[i] || '').trim();
@@ -288,6 +512,19 @@ function parseReviewArgs(tokens = [], raw = '') {
       limit = Math.max(1, Math.min(100, Number(token.slice('--limit='.length)) || limit));
       continue;
     }
+    if (token === '--id') {
+      id = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--id=')) {
+      id = sanitizeText(token.slice('--id='.length));
+      continue;
+    }
+    if (!id && action !== 'legacy') {
+      id = sanitizeText(token);
+      continue;
+    }
 
     throw new Error(`Unexpected token: ${token}`);
   }
@@ -295,9 +532,14 @@ function parseReviewArgs(tokens = [], raw = '') {
   if (status !== 'candidate' && status !== 'active') {
     throw new Error(`Unsupported review status: ${status}`);
   }
+  if ((action === 'accept' || action === 'reject') && !id) {
+    throw new Error(`Unexpected token: missing review id in ${raw}`);
+  }
 
   return {
     commandName: 'review',
+    action,
+    id,
     status,
     limit,
     raw
@@ -364,6 +606,10 @@ function parseMemoryCliCommand(commandText = '') {
 
   if (subcommand === 'search') return parseSearchArgs(args, raw);
   if (subcommand === 'open') return parseOpenArgs(args, raw);
+  if (subcommand === 'read') return parseReadArgs(args, raw);
+  if (subcommand === 'boot') return parseBootArgs(args, raw);
+  if (subcommand === 'alias') return parseAliasArgs(args, raw);
+  if (subcommand === 'trigger') return parseTriggerArgs(args, raw);
   if (subcommand === 'remember') return parseRememberArgs(args, raw);
   if (subcommand === 'review') return parseReviewArgs(args, raw);
   if (subcommand === 'profile') return parseProfileArgs(args, raw);
@@ -399,6 +645,18 @@ function tryRepairPrefix(text = '', repairStrategy = []) {
     } else if (/^open\b/i.test(normalized)) {
       normalized = normalized.replace(/^open\b/i, 'mem open');
       repairStrategy.push('prefix_mem_open');
+    } else if (/^read\b/i.test(normalized)) {
+      normalized = normalized.replace(/^read\b/i, 'mem read');
+      repairStrategy.push('prefix_mem_read');
+    } else if (/^boot\b/i.test(normalized)) {
+      normalized = normalized.replace(/^boot\b/i, 'mem boot');
+      repairStrategy.push('prefix_mem_boot');
+    } else if (/^alias\b/i.test(normalized)) {
+      normalized = normalized.replace(/^alias\b/i, 'mem alias');
+      repairStrategy.push('prefix_mem_alias');
+    } else if (/^trigger\b/i.test(normalized)) {
+      normalized = normalized.replace(/^trigger\b/i, 'mem trigger');
+      repairStrategy.push('prefix_mem_trigger');
     } else if (/^remember\b/i.test(normalized)) {
       normalized = normalized.replace(/^remember\b/i, 'mem remember');
       repairStrategy.push('prefix_mem_remember');
@@ -451,10 +709,17 @@ function tryRepairImplicitSearch(text = '', repairStrategy = []) {
 }
 
 function tryRepairImplicitOpen(text = '', repairStrategy = []) {
-  const match = text.match(/^mem open\s+((?:mc_ref|ov_ref):[^\s]+)$/i);
+  const match = text.match(/^mem open\s+((?:(?:mc_ref|ov_ref):|(?:core|group|journal|image|system):\/\/)[^\s]+)$/i);
   if (!match) return text;
   repairStrategy.push('implicit_open_ref');
   return `mem open --ref ${buildQuotedCommandValue(match[1])}`;
+}
+
+function tryRepairImplicitRead(text = '', repairStrategy = []) {
+  const match = text.match(/^mem read\s+((?:core|group|journal|image|system):\/\/[^\s]+)$/i);
+  if (!match) return text;
+  repairStrategy.push('implicit_read_uri');
+  return `mem read --uri ${buildQuotedCommandValue(match[1])}`;
 }
 
 function prepareMemoryCliCommand(commandText = '') {
@@ -491,6 +756,7 @@ function prepareMemoryCliCommand(commandText = '') {
   normalized = tryRepairAssignedFlags(normalized, repairStrategy);
   normalized = tryRepairImplicitSearch(normalized, repairStrategy);
   normalized = tryRepairImplicitOpen(normalized, repairStrategy);
+  normalized = tryRepairImplicitRead(normalized, repairStrategy);
   normalized = normalizeCommandSpacing(normalized);
 
   try {
@@ -532,6 +798,10 @@ module.exports = {
   coerceSearchSource,
   parseSearchArgs,
   parseOpenArgs,
+  parseReadArgs,
+  parseBootArgs,
+  parseAliasArgs,
+  parseTriggerArgs,
   parseProfileArgs,
   parseRememberArgs,
   parseReviewArgs,
@@ -541,5 +811,6 @@ module.exports = {
   tryRepairAssignedFlags,
   tryRepairImplicitSearch,
   tryRepairImplicitOpen,
+  tryRepairImplicitRead,
   prepareMemoryCliCommand
 };
