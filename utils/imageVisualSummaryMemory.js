@@ -4,6 +4,7 @@ const { extractMessageContent } = require('../api/parser');
 const { readCachedImagePayload } = require('./imageInputCache');
 const {
   loadImageMemoryIndex,
+  saveImageMemoryIndex,
   upsertImageMemory
 } = require('./imageMemoryIndex');
 const {
@@ -12,6 +13,8 @@ const {
 const { formatDateInTz, getDatePartsInTz } = require('./time');
 
 const VISUAL_SUMMARY_IMAGE_MAX_EDGE = 1024;
+const VISUAL_SUMMARY_REQUEST_SHAPE = 'chat_completions_image_url_data_url';
+const routeCooldowns = new Map();
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -19,6 +22,23 @@ function normalizeText(value = '') {
 
 function normalizeId(value = '') {
   return normalizeText(value).replace(/[^\w:-]/g, '').slice(0, 160);
+}
+
+function buildCacheRef(cacheKey = '') {
+  const normalized = normalizeId(cacheKey);
+  return normalized ? `cached-image://${normalized}` : '';
+}
+
+function parseCacheKeyFromImageRef(value = '') {
+  const text = normalizeText(value);
+  if (!text.startsWith('cached-image://')) return '';
+  return normalizeId(text.slice('cached-image://'.length));
+}
+
+function normalizeTimestampMs(value = null) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value.getTime();
+  const num = Number(value || 0);
+  return Number.isFinite(num) && num > 0 ? num : Date.now();
 }
 
 function ensureChatCompletionsUrl(url = '') {
@@ -30,14 +50,17 @@ function ensureChatCompletionsUrl(url = '') {
 }
 
 function getMemoryModelName() {
-  return normalizeText(config.MEMORY_MODEL || config.AI_MODEL || 'gpt-5.4') || 'gpt-5.4';
+  return normalizeText(config.IMAGE_MEMORY_VISUAL_SUMMARY_MODEL || config.MEMORY_MODEL || config.AI_MODEL || 'gpt-5.4') || 'gpt-5.4';
 }
 
 function getMemoryApiBaseUrl() {
-  return normalizeText(config.MEMORY_API_BASE_URL || config.API_BASE_URL);
+  return normalizeText(config.IMAGE_MEMORY_VISUAL_SUMMARY_API_BASE_URL || config.MEMORY_API_BASE_URL || config.API_BASE_URL);
 }
 
 function getMemoryApiKey() {
+  if (normalizeText(config.IMAGE_MEMORY_VISUAL_SUMMARY_API_BASE_URL)) {
+    return normalizeText(config.IMAGE_MEMORY_VISUAL_SUMMARY_API_KEY || config.MEMORY_API_KEY || config.API_KEY);
+  }
   if (normalizeText(config.MEMORY_API_BASE_URL)) {
     return normalizeText(config.MEMORY_API_KEY || config.API_KEY);
   }
@@ -67,6 +90,49 @@ function formatSummaryWithTimestamp(summary = '', timestampText = '') {
   if (!ts) return clean;
   if (clean.startsWith(`[${ts}]`)) return clean;
   return `[${ts}] ${clean}`;
+}
+
+function isLikelyUnsupportedVisualSummaryModel(model = '') {
+  const text = normalizeText(model).toLowerCase();
+  if (!text) return true;
+  if (/(vision|visual|vl\b|qwen2(?:\.5)?-vl|qwen-vl|internvl|llava|glm-4v|gpt-4o|gpt-4\.1|gpt-5|gemini|claude)/i.test(text)) {
+    return false;
+  }
+  return /(^|[/\s:_-])deepseek(?!.*(?:vl|vision|visual))/.test(text)
+    || /embedding|rerank|bge|text-embedding/.test(text);
+}
+
+function validateVisualSummaryImagePayload(imagePayload = {}) {
+  const mediaType = normalizeText(imagePayload.mediaType || 'image/jpeg').toLowerCase();
+  const data = String(imagePayload.data || '').trim();
+  if (!data) return { ok: false, reason: 'missing_image_data' };
+  if (!/^image\/(?:jpeg|jpg|png|webp|gif)$/i.test(mediaType)) {
+    return { ok: false, reason: 'unsupported_image_media_type' };
+  }
+
+  let buffer = null;
+  try {
+    buffer = Buffer.from(data, 'base64');
+  } catch (_) {
+    return { ok: false, reason: 'invalid_image_base64' };
+  }
+  if (!buffer || !buffer.length) return { ok: false, reason: 'empty_image_payload' };
+  const maxBytes = Math.max(1024, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_MAX_BYTES || 4 * 1024 * 1024) || 4 * 1024 * 1024);
+  if (buffer.length > maxBytes) return { ok: false, reason: 'image_payload_too_large' };
+
+  const startsWithHex = (hex) => buffer.subarray(0, hex.length / 2).equals(Buffer.from(hex, 'hex'));
+  const isPng = startsWithHex('89504e470d0a1a0a');
+  const isJpeg = startsWithHex('ffd8ff');
+  const isWebp = buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+  const gifSig = buffer.subarray(0, 6).toString('ascii');
+  const isGif = gifSig === 'GIF87a' || gifSig === 'GIF89a';
+  if (!isPng && !isJpeg && !isWebp && !isGif) return { ok: false, reason: 'invalid_image_signature' };
+  return { ok: true, reason: '', byteLength: buffer.length };
+}
+
+function buildImageDataUrl(imagePayload = {}) {
+  const mediaType = normalizeText(imagePayload.mediaType || 'image/jpeg') || 'image/jpeg';
+  return `data:${mediaType};base64,${String(imagePayload.data || '').trim()}`;
 }
 
 function extractResponseText(response = {}) {
@@ -102,9 +168,11 @@ function buildRequestContent(imagePayload = {}, context = {}) {
       text: buildVisualSummaryPrompt(context)
     },
     {
-      type: 'input_image',
-      media_type: normalizeText(imagePayload.mediaType || 'image/jpeg') || 'image/jpeg',
-      data: String(imagePayload.data || '')
+      type: 'image_url',
+      image_url: {
+        url: buildImageDataUrl(imagePayload),
+        detail: 'low'
+      }
     }
   ];
 }
@@ -162,6 +230,100 @@ function shouldSkipExistingSummary(cacheKey = '', options = {}) {
   return Boolean(normalizeText(record?.summary));
 }
 
+function getActiveImageCooldown(cacheKey = '', options = {}) {
+  if (options.force === true) return null;
+  const now = normalizeTimestampMs(options.now);
+  const state = loadImageMemoryIndex().images[cacheKey]?.visualSummaryState || null;
+  const nextRetryAt = Number(state?.nextRetryAt || 0);
+  if (Number.isFinite(nextRetryAt) && nextRetryAt > now) {
+    return { ...state, nextRetryAt };
+  }
+  return null;
+}
+
+function buildRouteCooldownKey(apiBaseUrl = '', model = '') {
+  return `${normalizeText(apiBaseUrl).toLowerCase()}|${normalizeText(model).toLowerCase()}`;
+}
+
+function getActiveRouteCooldown(apiBaseUrl = '', model = '', options = {}) {
+  if (options.force === true) return null;
+  const key = buildRouteCooldownKey(apiBaseUrl, model);
+  const state = routeCooldowns.get(key);
+  const now = normalizeTimestampMs(options.now);
+  if (state && Number(state.nextRetryAt || 0) > now) return { ...state };
+  if (state) routeCooldowns.delete(key);
+  return null;
+}
+
+function classifyVisualSummaryError(error = null) {
+  const status = Number(error?.response?.status || error?.status || 0);
+  const message = normalizeText(error?.message || error);
+  const lower = message.toLowerCase();
+  if (status === 400) return { reason: 'http_400', errorClass: 'http_400', transient: false };
+  if (status === 413) return { reason: 'http_413', errorClass: 'http_413', transient: false };
+  if (status === 415) return { reason: 'http_415', errorClass: 'http_415', transient: false };
+  if (status === 429) return { reason: 'rate_limited', errorClass: 'http_429', transient: true };
+  if (status >= 500) return { reason: `http_${status}`, errorClass: `http_${status}`, transient: true };
+  if (/socket hang up|econnreset/.test(lower)) return { reason: 'socket_hang_up', errorClass: 'socket_hang_up', transient: true };
+  if (/timeout|etimedout|aborted/.test(lower)) return { reason: 'request_timeout', errorClass: 'request_timeout', transient: true };
+  return { reason: message || 'visual_summary_failed', errorClass: 'request_failed', transient: true };
+}
+
+function getVisualSummaryCooldownMs(transient = false) {
+  const fallback = transient ? 30 * 60 * 1000 : 6 * 60 * 60 * 1000;
+  const configured = transient
+    ? config.IMAGE_MEMORY_VISUAL_SUMMARY_TRANSIENT_COOLDOWN_MS
+    : config.IMAGE_MEMORY_VISUAL_SUMMARY_COOLDOWN_MS;
+  return Math.max(60 * 1000, Number(configured || fallback) || fallback);
+}
+
+function recordVisualSummaryFailure(cacheKey = '', input = {}) {
+  const normalizedCacheKey = normalizeId(cacheKey || input.cacheKey || parseCacheKeyFromImageRef(input.imageRef));
+  if (!normalizedCacheKey) return null;
+  const now = normalizeTimestampMs(input.now);
+  const index = loadImageMemoryIndex();
+  const existing = index.images[normalizedCacheKey] || {};
+  const existingState = existing.visualSummaryState || {};
+  const classified = input.classified || { reason: normalizeText(input.reason || 'visual_summary_failed'), errorClass: normalizeText(input.errorClass || 'request_failed'), transient: Boolean(input.transient) };
+  const cooldownMs = Math.max(60 * 1000, Number(input.cooldownMs || getVisualSummaryCooldownMs(classified.transient)) || getVisualSummaryCooldownMs(classified.transient));
+  const state = {
+    status: 'cooldown',
+    failureCount: Math.max(0, Number(existingState.failureCount || 0) || 0) + 1,
+    lastAttemptAt: now,
+    lastFailedAt: now,
+    nextRetryAt: now + cooldownMs,
+    reason: normalizeText(classified.reason || input.reason || 'visual_summary_failed').slice(0, 160),
+    errorClass: normalizeText(classified.errorClass || input.errorClass || 'request_failed').slice(0, 80),
+    model: normalizeText(input.model).slice(0, 160),
+    apiBaseUrl: normalizeText(input.apiBaseUrl).slice(0, 240),
+    requestShape: VISUAL_SUMMARY_REQUEST_SHAPE
+  };
+  index.images[normalizedCacheKey] = {
+    ...(existing || {}),
+    cacheKey: normalizedCacheKey,
+    imageRef: normalizeText(existing.imageRef || input.imageRef || buildCacheRef(normalizedCacheKey)),
+    sourceUrl: normalizeText(existing.sourceUrl || input.sourceUrl),
+    mediaType: normalizeText(existing.mediaType || input.mediaType || 'image/jpeg') || 'image/jpeg',
+    visualSummaryState: state
+  };
+  saveImageMemoryIndex(index);
+  return state;
+}
+
+function activateRouteCooldown(apiBaseUrl = '', model = '', classified = {}, options = {}) {
+  if (!apiBaseUrl || !model) return null;
+  if (classified.transient !== true && classified.reason !== 'http_400' && classified.reason !== 'http_413' && classified.reason !== 'http_415') return null;
+  const now = normalizeTimestampMs(options.now);
+  const configured = Math.max(60 * 1000, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_ROUTE_COOLDOWN_MS || 30 * 60 * 1000) || 30 * 60 * 1000);
+  const state = {
+    reason: classified.reason || 'visual_summary_failed',
+    errorClass: classified.errorClass || 'request_failed',
+    nextRetryAt: now + configured
+  };
+  routeCooldowns.set(buildRouteCooldownKey(apiBaseUrl, model), state);
+  return state;
+}
+
 async function generateImageVisualSummary(imageRef = '', context = {}, deps = {}) {
   if (config.IMAGE_MEMORY_VISUAL_SUMMARY_ENABLED === false && context.force !== true) {
     return { ok: false, skipped: true, reason: 'disabled', summary: '' };
@@ -182,43 +344,113 @@ async function generateImageVisualSummary(imageRef = '', context = {}, deps = {}
   if (!apiBaseUrl || !model) {
     return { ok: false, skipped: true, reason: 'memory_model_missing', summary: '', cacheKey };
   }
+  if (isLikelyUnsupportedVisualSummaryModel(model) && context.force !== true) {
+    const state = recordVisualSummaryFailure(cacheKey, {
+      ...context,
+      imageRef,
+      sourceUrl: imagePayload.sourceUrl,
+      mediaType: imagePayload.mediaType,
+      model,
+      apiBaseUrl,
+      reason: 'visual_model_not_vision_capable',
+      errorClass: 'model_precheck',
+      transient: false
+    });
+    return { ok: false, skipped: true, reason: 'visual_model_not_vision_capable', summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
+  }
+  const imageCooldown = getActiveImageCooldown(cacheKey, context);
+  if (imageCooldown) {
+    return { ok: false, skipped: true, reason: 'visual_summary_cooldown', summary: '', cacheKey, model, cooldownUntil: imageCooldown.nextRetryAt };
+  }
+  const routeCooldown = getActiveRouteCooldown(apiBaseUrl, model, context);
+  if (routeCooldown) {
+    return { ok: false, skipped: true, reason: 'visual_summary_route_cooldown', summary: '', cacheKey, model, cooldownUntil: routeCooldown.nextRetryAt };
+  }
 
   const postWithRetry = typeof deps.postWithRetry === 'function'
     ? deps.postWithRetry
     : defaultPostWithRetry;
   const timestampText = buildShortTimestamp(context.now instanceof Date ? context.now : new Date());
   const requestImagePayload = await normalizeVisualSummaryImagePayload(imagePayload);
-  const response = await postWithRetry(
-    apiBaseUrl,
-    {
+  const validation = validateVisualSummaryImagePayload(requestImagePayload);
+  if (!validation.ok) {
+    const state = recordVisualSummaryFailure(cacheKey, {
+      ...context,
+      imageRef,
+      sourceUrl: imagePayload.sourceUrl,
+      mediaType: requestImagePayload.mediaType,
       model,
-      temperature: 0.1,
-      top_p: 0.85,
-      max_tokens: Math.max(80, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_MAX_TOKENS || 180) || 180),
-      stream: false,
-      messages: [
-        {
-          role: 'user',
-          content: buildRequestContent(requestImagePayload, context)
+      apiBaseUrl,
+      reason: validation.reason,
+      errorClass: 'payload_precheck',
+      transient: false
+    });
+    return { ok: false, skipped: true, reason: validation.reason, summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
+  }
+
+  let response = null;
+  try {
+    response = await postWithRetry(
+      apiBaseUrl,
+      {
+        model,
+        temperature: 0.1,
+        max_tokens: Math.max(80, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_MAX_TOKENS || 180) || 180),
+        stream: false,
+        messages: [
+          {
+            role: 'user',
+            content: buildRequestContent(requestImagePayload, context)
+          }
+        ],
+        __preferredProtocol: 'chat_completions',
+        __timeoutMs: Math.max(1000, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS || 25000) || 25000),
+        __trace: {
+          source: 'image_visual_summary_memory',
+          phase: 'visual_summary',
+          purpose: 'image_long_term_memory',
+          routePolicyKey: 'memory/image-visual-summary',
+          routeDebugKey: 'memory/image-visual-summary',
+          topRouteType: 'vision',
+          userId: normalizeText(context.userId)
         }
-      ],
-      __timeoutMs: Math.max(1000, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS || 25000) || 25000),
-      __trace: {
-        source: 'image_visual_summary_memory',
-        phase: 'visual_summary',
-        purpose: 'image_long_term_memory',
-        routePolicyKey: 'memory/image-visual-summary',
-        topRouteType: 'vision',
-        userId: normalizeText(context.userId)
-      }
-    },
-    Math.max(0, Math.min(1, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_RETRIES || 0) || 0)),
-    getMemoryApiKey()
-  );
+      },
+      Math.max(0, Math.min(1, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_RETRIES || 0) || 0)),
+      getMemoryApiKey()
+    );
+  } catch (error) {
+    const classified = classifyVisualSummaryError(error);
+    const state = recordVisualSummaryFailure(cacheKey, {
+      ...context,
+      imageRef,
+      sourceUrl: imagePayload.sourceUrl,
+      mediaType: requestImagePayload.mediaType,
+      model,
+      apiBaseUrl,
+      classified
+    });
+    activateRouteCooldown(apiBaseUrl, model, classified, context);
+    if (config.ENABLE_DEBUG_LOG) {
+      const until = state?.nextRetryAt ? new Date(state.nextRetryAt).toISOString() : '';
+      console.warn(`[image-visual-summary] failed: ${classified.reason}${until ? `; cooldown until ${until}` : ''}`);
+    }
+    return { ok: false, skipped: false, reason: classified.reason, summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
+  }
 
   const summary = formatSummaryWithTimestamp(extractResponseText(response), timestampText);
   if (!summary) {
-    return { ok: false, skipped: false, reason: 'empty_summary', summary: '', cacheKey, model };
+    const state = recordVisualSummaryFailure(cacheKey, {
+      ...context,
+      imageRef,
+      sourceUrl: imagePayload.sourceUrl,
+      mediaType: requestImagePayload.mediaType,
+      model,
+      apiBaseUrl,
+      reason: 'empty_summary',
+      errorClass: 'empty_summary',
+      transient: true
+    });
+    return { ok: false, skipped: false, reason: 'empty_summary', summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
   }
   return {
     ok: true,
@@ -297,7 +529,13 @@ async function summarizeImageIntoLongTermMemory(imageRef = '', context = {}, dep
       label: context.label,
       source: 'image_visual_summary',
       userText: context.userText,
-      summary: generated.summary
+      summary: generated.summary,
+      visualSummaryState: {
+        status: 'ok',
+        lastAttemptAt: Date.now(),
+        requestShape: VISUAL_SUMMARY_REQUEST_SHAPE,
+        model: generated.model
+      }
     });
 
     let event = null;

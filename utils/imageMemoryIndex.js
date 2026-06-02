@@ -42,6 +42,11 @@ function normalizeTimestamp(value = 0) {
   return Number.isFinite(num) && num > 0 ? num : Date.now();
 }
 
+function normalizeOptionalTimestamp(value = 0) {
+  const num = Number(value || 0);
+  return Number.isFinite(num) && num > 0 ? num : 0;
+}
+
 function normalizeDate(value = null) {
   if (value instanceof Date && Number.isFinite(value.getTime())) return value;
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return new Date(value);
@@ -128,6 +133,24 @@ function normalizeObservation(input = {}) {
   return Object.fromEntries(Object.entries(observation).filter(([, value]) => value !== '' && value !== 0));
 }
 
+function normalizeVisualSummaryState(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const state = {
+    status: normalizeText(input.status).slice(0, 40),
+    failureCount: Math.max(0, Math.floor(Number(input.failureCount || 0) || 0)),
+    lastAttemptAt: normalizeOptionalTimestamp(input.lastAttemptAt),
+    lastFailedAt: normalizeOptionalTimestamp(input.lastFailedAt),
+    nextRetryAt: normalizeOptionalTimestamp(input.nextRetryAt || input.cooldownUntil),
+    reason: normalizeText(input.reason).slice(0, 160),
+    errorClass: normalizeText(input.errorClass).slice(0, 80),
+    model: normalizeText(input.model).slice(0, 160),
+    apiBaseUrl: normalizeText(input.apiBaseUrl).slice(0, 240),
+    requestShape: normalizeText(input.requestShape).slice(0, 80)
+  };
+  const compact = Object.fromEntries(Object.entries(state).filter(([, value]) => value !== '' && value !== 0));
+  return Object.keys(compact).length > 0 ? compact : null;
+}
+
 function normalizeImageRecord(input = {}) {
   const cacheKey = normalizeId(input.cacheKey || parseCacheRef(input.imageRef || input.ref));
   if (!cacheKey) return null;
@@ -139,7 +162,7 @@ function normalizeImageRecord(input = {}) {
     createdAt,
     normalizeTimestamp(input.lastSeenAt || observations[observations.length - 1]?.observedAt || createdAt)
   );
-  return {
+  const record = {
     cacheKey,
     imageRef: normalizeText(input.imageRef || buildCacheRef(cacheKey)),
     mediaType: normalizeText(input.mediaType || 'image/jpeg') || 'image/jpeg',
@@ -156,6 +179,9 @@ function normalizeImageRecord(input = {}) {
     visibleText: normalizeText(input.visibleText),
     observations
   };
+  const visualSummaryState = normalizeVisualSummaryState(input.visualSummaryState);
+  if (visualSummaryState) record.visualSummaryState = visualSummaryState;
+  return record;
 }
 
 function normalizeIndex(raw = {}) {

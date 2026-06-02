@@ -155,6 +155,10 @@ function buildUnavailableImageText(imageUrl = '') {
     : `[Image URL] ${imageUrl}`;
 }
 
+function isImageDataUrl(url = '') {
+  return /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=\s]+$/i.test(String(url || '').trim());
+}
+
 function getAnthropicInlineImageMaxBase64Chars() {
   const raw = normalizeText(
     process.env.ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS
@@ -376,6 +380,15 @@ async function resolveOpenAICompatibleImagePart(part = {}) {
 
   const imageUrl = String(normalizedPart?.image_url?.url || normalizedPart?.url || '').trim();
   if (!imageUrl) return null;
+  if (isImageDataUrl(imageUrl)) {
+    return {
+      type: 'image_url',
+      image_url: {
+        url: imageUrl,
+        ...(imageDetail ? { detail: imageDetail } : {})
+      }
+    };
+  }
   const cacheRef = parseCacheRef(imageUrl);
   const cachedImage = cacheRef ? readCachedImagePayload(imageUrl) : null;
   if (cachedImage?.data) {

@@ -19,26 +19,35 @@ process.env.MEMORY_HYBRID_RECALL_ENABLED = 'false';
 process.env.MEMORY_API_BASE_URL = 'https://memory.example/v1';
 process.env.MEMORY_API_KEY = 'memory-key';
 process.env.MEMORY_MODEL = 'memory-vision-model';
+process.env.ENABLE_DEBUG_LOG = 'false';
 process.env.TIMEZONE = 'Asia/Shanghai';
 
 const cacheDir = path.join(tempRoot, 'inbound_image_cache');
 fs.mkdirSync(cacheDir, { recursive: true });
-fs.writeFileSync(
-  path.join(cacheDir, 'score_img.bin'),
-  Buffer.from('/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/ASP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/AgP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/ISP/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z', 'base64')
-);
-fs.writeFileSync(path.join(cacheDir, 'score_img.json'), JSON.stringify({
-  cacheKey: 'score_img',
-  sourceUrl: 'https://example.com/score.png',
-  mediaType: 'image/png',
-  byteLength: 10,
-  createdAt: new Date().toISOString()
-}, null, 2));
+const tinyJpegBase64 = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/ASP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/AgP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/ISP/2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z';
+
+function writeCachedImage(cacheKey, sourceUrl) {
+  const buffer = Buffer.from(tinyJpegBase64, 'base64');
+  fs.writeFileSync(path.join(cacheDir, `${cacheKey}.bin`), buffer);
+  fs.writeFileSync(path.join(cacheDir, `${cacheKey}.json`), JSON.stringify({
+    cacheKey,
+    sourceUrl,
+    mediaType: 'image/png',
+    byteLength: buffer.length,
+    createdAt: new Date().toISOString()
+  }, null, 2));
+}
+
+writeCachedImage('score_img', 'https://example.com/score.png');
+writeCachedImage('text_model_img', 'https://example.com/text-model.png');
+writeCachedImage('failure_img', 'https://example.com/failure.png');
 fs.writeFileSync(process.env.MEMORY_SCOPE_INDEX_FILE, JSON.stringify({ version: 1, users: {} }, null, 2));
 
+const config = require('../config');
 const { loadImageMemoryIndex } = require('../utils/imageMemoryIndex');
 const { loadMemoryEvents } = require('../utils/memory-v3/events');
 const { loadMemoryNodes } = require('../utils/memory-v3/storage');
+const { prepareRequest } = require('../api/httpClient');
 const {
   buildShortTimestamp,
   normalizeVisualSummaryImagePayload,
@@ -96,8 +105,16 @@ module.exports = (async () => {
   assert.strictEqual(calls[0].url, 'https://memory.example/v1/chat/completions');
   assert.strictEqual(calls[0].apiKey, 'memory-key');
   assert.strictEqual(calls[0].body.model, 'memory-vision-model');
-  assert.ok(JSON.stringify(calls[0].body.messages).includes('"type":"input_image"'));
+  assert.strictEqual(calls[0].body.__preferredProtocol, 'chat_completions');
+  const imagePart = calls[0].body.messages[0].content.find((part) => part.type === 'image_url');
+  assert.ok(imagePart, 'visual summary should use OpenAI-compatible image_url parts');
+  assert.ok(/^data:image\/jpeg;base64,/i.test(String(imagePart.image_url?.url || '')));
+  assert.strictEqual(imagePart.image_url.detail, 'low');
   assert.ok(JSON.stringify(calls[0].body.messages).includes('战绩'));
+  const prepared = await prepareRequest(calls[0].url, calls[0].body);
+  assert.strictEqual(prepared.requestUrl, 'https://memory.example/v1/chat/completions');
+  const preparedImagePart = prepared.requestBody.messages[0].content.find((part) => part.type === 'image_url');
+  assert.ok(/^data:image\/jpeg;base64,/i.test(String(preparedImagePart?.image_url?.url || '')));
 
   const imageIndex = loadImageMemoryIndex();
   assert.ok(imageIndex.images.score_img.summary.includes('战绩结算截图'));
@@ -130,6 +147,63 @@ module.exports = (async () => {
   assert.strictEqual(skipped.skipped, true);
   assert.strictEqual(skipped.reason, 'summary_exists');
   assert.strictEqual(buildShortTimestamp(new Date('2026-05-20T01:23:00+08:00')), '2026-05-20 01:23');
+
+  const originalMemoryModel = config.MEMORY_MODEL;
+  const originalSummaryModel = config.IMAGE_MEMORY_VISUAL_SUMMARY_MODEL;
+  try {
+    config.MEMORY_MODEL = 'deepseek-ai/DeepSeek-V4-Flash';
+    config.IMAGE_MEMORY_VISUAL_SUMMARY_MODEL = '';
+    const textOnlySkipped = await summarizeImageIntoLongTermMemory('cached-image://text_model_img', {
+      userId: 'u_img',
+      now: new Date('2026-05-20T01:24:00+08:00')
+    }, {
+      postWithRetry: async () => {
+        throw new Error('should not call model for known text-only visual summary model');
+      }
+    });
+    assert.strictEqual(textOnlySkipped.ok, false);
+    assert.strictEqual(textOnlySkipped.skipped, true);
+    assert.strictEqual(textOnlySkipped.reason, 'visual_model_not_vision_capable');
+    assert.strictEqual(loadImageMemoryIndex().images.text_model_img.visualSummaryState.reason, 'visual_model_not_vision_capable');
+  } finally {
+    config.MEMORY_MODEL = originalMemoryModel;
+    config.IMAGE_MEMORY_VISUAL_SUMMARY_MODEL = originalSummaryModel;
+  }
+
+  let failureCalls = 0;
+  const firstFailure = await summarizeImageIntoLongTermMemory('cached-image://failure_img', {
+    userId: 'u_img',
+    now: new Date('2026-05-20T01:25:00+08:00')
+  }, {
+    postWithRetry: async () => {
+      failureCalls += 1;
+      const error = new Error('Request failed with status code 400');
+      error.response = { status: 400 };
+      throw error;
+    }
+  });
+  assert.strictEqual(firstFailure.ok, false);
+  assert.strictEqual(firstFailure.skipped, false);
+  assert.strictEqual(firstFailure.reason, 'http_400');
+  assert.strictEqual(failureCalls, 1);
+  const failureState = loadImageMemoryIndex().images.failure_img.visualSummaryState;
+  assert.strictEqual(failureState.reason, 'http_400');
+  assert.strictEqual(failureState.requestShape, 'chat_completions_image_url_data_url');
+  assert.ok(Number(failureState.nextRetryAt) > Date.parse('2026-05-20T01:25:00+08:00'));
+
+  const cooledFailure = await summarizeImageIntoLongTermMemory('cached-image://failure_img', {
+    userId: 'u_img',
+    now: new Date('2026-05-20T01:26:00+08:00')
+  }, {
+    postWithRetry: async () => {
+      failureCalls += 1;
+      throw new Error('should not call model while image visual summary is cooling down');
+    }
+  });
+  assert.strictEqual(cooledFailure.ok, false);
+  assert.strictEqual(cooledFailure.skipped, true);
+  assert.strictEqual(cooledFailure.reason, 'visual_summary_cooldown');
+  assert.strictEqual(failureCalls, 1);
 
   console.log('imageVisualSummaryMemory.test.js passed');
 })().catch((error) => {

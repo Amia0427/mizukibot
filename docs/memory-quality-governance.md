@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-02 10:17 +08:00
+更新时间：2026-06-02 10:19 +08:00
+
+更新 2026-06-02 10:19 +08:00：图片视觉摘要链路修复 `bot-runtime.err.log` 中 `[image-visual-summary] failed: Request failed with status code 400` / `socket hang up` 放大问题。`utils/imageVisualSummaryMemory.js` 现在先校验 cached 图片 base64、签名、大小和已知文本模型，模型请求固定 `__preferredProtocol=chat_completions` 且使用标准 `image_url.data:` 请求块；HTTP 400/413/415、socket hang up、timeout、空摘要会写入 `image_memory_index.images[cacheKey].visualSummaryState` 图片级冷却，并对同一 endpoint/model 设置进程级短冷却，避免同图或同路由连续失败刷屏。可用 `IMAGE_MEMORY_VISUAL_SUMMARY_MODEL/API_BASE_URL/API_KEY` 单独指定视觉摘要模型，不再只能跟随 `MEMORY_MODEL`。
 
 更新 2026-06-02 10:17 +08:00：Memory V3 recall 降级治理：`utils/memoryReranker.js` 对默认 rerank 请求只保留单层 hard timeout，连续 timeout 先自适应抬高下一次预算，再按 `MEMORY_RERANK_TIMEOUT_FAILURE_THRESHOLD` 进入 `MEMORY_RERANK_TIMEOUT_COOLDOWN_MS` 短冷却；embedding 客户端把 400/401/403/404 类端点不可用冷却和 timeout/429/5xx 瞬态冷却拆开，分别由 `MEMORY_EMBEDDING_ENDPOINT_COOLDOWN_MS`、`MEMORY_EMBEDDING_TRANSIENT_COOLDOWN_MS` 和 `MEMORY_EMBEDDING_FAILURE_THRESHOLD` 控制。`queryMemory().stats.coverageAtQuery` 新增 `embeddingRuntime` / `rerankRuntime`，用于解释 base recall 降级原因。
 
@@ -24,7 +26,7 @@
 - `utils/memoryGovernance/recallEvalGate.js` 和 `lancedbMigrationGate.js` 将 recall eval/LanceDB shadow 迁移变成可失败门禁。
 - `npm run diag:memory` 在 `summary.quality` 中显示 Memory V3、worldbook、social context、image asset、notebook 的跨来源质量统计和样本。
 - `utils/postReplyWorker/vectorWatchdog.js` 在 post-reply worker 内独立低频巡检，自动处理 projection materialize、LanceDB reconcile、pending embedding 小批量 backfill+sync。
-- `utils/imageVisualSummaryMemory.js` 在图片缓存入库后调用 `MEMORY_MODEL` 生成带简短时间戳的视觉摘要，同时写入图片索引和 Memory V3。
+- `utils/imageVisualSummaryMemory.js` 在图片缓存入库后调用 `IMAGE_MEMORY_VISUAL_SUMMARY_MODEL` 或 `MEMORY_MODEL` 生成带简短时间戳的视觉摘要，同时写入图片索引和 Memory V3；失败状态落在图片索引的 `visualSummaryState`，冷却期不再重复请求同图。
 - `utils/memory-v3/materializer.js` 对重复 legacy migration、node 和 episode 事件做投影期语义去重，只压缩 projection 输入，不删除 raw events。
 - `scripts/diagnose-memory-ops.js --auto-gold` 可从当前 active projection 生成 recall 评估集，并使用 case 自带时间戳解析“今天/昨天”。
 - `utils/memory-v3/categoryMetadata.js` 和 `categoryManifest.js` 提供 Memory-Plus 风格的类别清单：召回文档统一派生 `category/tags/intent/privacyLevel`，`memory_cli_fast`、Memory V3 查询和 LanceDB 行都带 category-aware 过滤/boost。
