@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-02 20:43 +08:00：新增独立 Gemini 系统提示词资产 `prompts/GEMINI.txt`，仅整合通用输出纪律、上下文处理和叙事质量约束；不接入 `prompt-manifest.json`，不改变主回复瑞希人格与运行时注入顺序。详见 `docs/gemini-system-prompt.md`。
+
 更新 2026-06-02 20:10 +08:00：被动感知实际发言默认改回独立 env 回复模型；未显式设置 `PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL=true` 时使用 `PASSIVE_AWARENESS_REPLY_API_BASE_URL` / `PASSIVE_AWARENESS_REPLY_API_KEY` / `PASSIVE_AWARENESS_REPLY_MODEL`，显式 true 才跟主回复模型配置。
 
 更新 2026-06-02 17:20 +08:00：管理员私聊进一步解除执行限制：`routeExecution`、Runtime V2 主模型 tool schema 注入和工具 executor 解析都会识别 admin 私聊并绕过 companion 私聊收窄，QQ 空间草稿 `qzone_draft` 会保留到计划、模型可见工具和执行器；admin 私聊 `/status` 等 admin route 不再被 private group-only 闸门拦截，`/create` 也不再被入口私聊硬拦截，普通私聊用户仍直接禁用。
