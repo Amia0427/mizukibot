@@ -169,6 +169,48 @@ function createDailyJournalRetrieval(deps = {}) {
       return buildEmptyRetrievalBundle(options);
     }
 
+    if (config.PROFILE_JOURNAL_DB_ENABLED !== false && config.PROFILE_JOURNAL_DB_PRIMARY_READ !== false && options.profileJournalDbFallback !== true) {
+      try {
+        const { getJournalRetrievalBundleFromDb } = require('../profileJournalDb');
+        const structured = getJournalRetrievalBundleFromDb(uid, options);
+        if (structured?.ok && String(structured.text || '').trim()) {
+          const result = {
+            text: strictClampText(
+              structured.text,
+              Math.max(600, Number(config.MAIN_PROMPT_DAILY_JOURNAL_MAX_TOKENS || 160) * 12)
+            ),
+            items: structured.items || [],
+            byLayer: structured.byLayer || { daily: [], fourDay: [], monthly: [] },
+            continuity: structured.continuity || { sameSession: [], sameTopic: [] },
+            query: structured.query || {},
+            stats: structured.stats || {}
+          };
+          logDailyJournalRead({
+            userId: uid,
+            lookbackDays: Number(result.query.lookbackDays || options.lookbackDays || 0) || 0,
+            durationMs: nowMs() - startedAt,
+            queryHash: hashText(result.text),
+            queryMode: 'profile_journal_db',
+            day: result.query.day || '',
+            yearMonth: result.query.yearMonth || '',
+            selectedDays: result.stats.dailyCount || 0,
+            selectedKinds: (result.items || []).map((item) => item.kind || 'unknown'),
+            activeRawCount: result.stats.activeRawCount || 0,
+            fourDayCount: result.stats.fourDayCount || 0,
+            monthlyCount: result.stats.monthlyCount || 0
+          });
+          return {
+            ...result,
+            source: 'profile_journal_db'
+          };
+        }
+      } catch (error) {
+        if (config.ENABLE_DEBUG_LOG) {
+          console.warn('[profile_journal_db] journal retrieval fallback:', error?.message || error);
+        }
+      }
+    }
+
     const lookbackDays = Math.max(1, Number(options.lookbackDays || options.dailyLookbackDays) || Number(config.DAILY_JOURNAL_LOOKBACK_DAYS) || 2);
     const maxFourDayFiles = Math.max(0, Number(options.maxFourDayFiles) || Number(config.DAILY_JOURNAL_4DAY_PROMPT_MAX_FILES) || 0);
     const maxMonthlyFiles = Math.max(0, Number(options.maxMonthlyFiles) || Number(config.DAILY_JOURNAL_MONTHLY_PROMPT_MAX_FILES) || 0);

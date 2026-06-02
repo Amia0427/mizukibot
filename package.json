@@ -49,6 +49,7 @@
     "@langchain/langgraph": "^0.2.40",
     "@langchain/openai": "^0.4.5",
     "axios": "^1.7.9",
+    "better-sqlite3": "^12.10.0",
     "cheerio": "^1.0.0",
     "date-holidays": "^3.26.13",
     "dayjs": "^1.11.13",

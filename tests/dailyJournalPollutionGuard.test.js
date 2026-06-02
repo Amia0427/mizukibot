@@ -10,6 +10,10 @@ process.env.DAILY_JOURNAL_ENABLED = 'true';
 process.env.MEMORY_JOURNAL_UNSAFE_REPLY_FILTER = 'true';
 process.env.MEMORY_FILE = path.join(tempRoot, 'memories.json');
 process.env.DATA_FILE = path.join(tempRoot, 'favorites.json');
+process.env.PROFILE_JOURNAL_DB_ENABLED = 'true';
+process.env.PROFILE_JOURNAL_DB_PRIMARY_READ = 'true';
+process.env.PROFILE_JOURNAL_AUTO_CLEAN_ENABLED = 'true';
+process.env.PROFILE_JOURNAL_DB_FILE = path.join(tempRoot, 'profile_journal.sqlite');
 fs.mkdirSync(tempRoot, { recursive: true });
 fs.writeFileSync(process.env.DATA_FILE, JSON.stringify({}, null, 2));
 fs.writeFileSync(process.env.MEMORY_FILE, JSON.stringify({}, null, 2));
@@ -22,6 +26,10 @@ const {
 } = require('../utils/dailyJournal/storage');
 const { formatJournalEntries } = require('../utils/dailyJournal/text');
 const { auditJournal, writeQuarantine } = require('../scripts/audit-memory-pollution');
+const {
+  listJournalEntries,
+  upsertJournalEntry
+} = require('../utils/profileJournalDb');
 
 module.exports = (async () => {
   const date = new Date('2026-05-31T08:00:00.000Z');
@@ -35,6 +43,8 @@ module.exports = (async () => {
   assert.strictEqual(unsafeWritten, false);
   assert.strictEqual(safeReadText(getJournalFilePath('u_pollution', '2026-05-31'), ''), '');
   assert.ok(safeReadText(getEntrySidecarFilePath('u_pollution', '2026-05-31'), '').includes('unsafe_identity_recall_reply'));
+  const unsafeEntries = listJournalEntries({ userId: 'u_pollution', day: '2026-05-31', status: 'unsafe' }).entries;
+  assert.ok(unsafeEntries.some((item) => item.assistantText.includes('你是谁来着')));
 
   fs.writeFileSync(
     getJournalFilePath('u_pollution', '2026-05-31'),
@@ -44,11 +54,21 @@ module.exports = (async () => {
     ])}\n`,
     'utf8'
   );
+  upsertJournalEntry({
+    userId: 'u_pollution',
+    day: '2026-05-31',
+    ts: '2026-05-31T08:02:00.000Z',
+    userText: '我们昨天聊了什么',
+    assistantText: '昨天说了 prompt 修复。',
+    safety: 'safe',
+    status: 'active'
+  });
 
   const bundle = dailyJournal.getDailyJournalRetrievalBundle('u_pollution', {
     timestamp: '2026-05-31',
     includeActiveRaw: true
   });
+  assert.strictEqual(bundle.source, 'profile_journal_db');
   assert.ok(!bundle.text.includes('你是谁来着'));
   assert.ok(bundle.text.includes('prompt 修复'));
 

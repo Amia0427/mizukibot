@@ -67,6 +67,29 @@ const {
   filterInjectableJournalEntries
 } = require('./safety');
 
+function syncJournalEntryToProfileJournalDb(userId, day, record = {}, options = {}, patch = {}) {
+  try {
+    const { upsertJournalEntry } = require('../profileJournalDb');
+    return upsertJournalEntry({
+      userId,
+      day,
+      ts: record.ts,
+      sessionKey: options.sessionKey,
+      turnId: options.turnId,
+      userText: record.user,
+      assistantText: record.assistant,
+      safety: patch.safety || 'safe',
+      status: patch.status || 'active',
+      unsafeReason: patch.unsafeReason
+    }, options);
+  } catch (error) {
+    if (config.ENABLE_DEBUG_LOG) {
+      console.warn('[profile_journal_db] failed to sync journal entry:', error?.message || error);
+    }
+    return { ok: false, reason: error?.message || String(error) };
+  }
+}
+
 const {
   syncEpisodeMemory,
   scheduleDailyJournalEmbeddingBackfill,
@@ -271,6 +294,11 @@ async function appendDailyJournalEntry(userId, question, reply, userInfo = {}, o
       unsafeReason: safety.reason,
       journalWriteSkipped: true
     }, { flushNow: true });
+    syncJournalEntryToProfileJournalDb(uid, day, record, options, {
+      status: 'unsafe',
+      safety: safety.reason,
+      unsafeReason: safety.reason
+    });
     return false;
   }
 
@@ -280,6 +308,10 @@ async function appendDailyJournalEntry(userId, question, reply, userInfo = {}, o
   currentEntries.push(record);
   atomicWriteText(filePath, `${formatJournalEntries(currentEntries)}\n`);
   appendJsonLine(getEntrySidecarFilePath(uid, day), buildEntrySidecarRecord(record, options, day), { flushNow: true });
+  syncJournalEntryToProfileJournalDb(uid, day, record, options, {
+    status: 'active',
+    safety: 'safe'
+  });
   updateJournalIndex(uid, (index) => ({
     ...index,
     summaryDays: index.summaryDays.filter((item) => item !== day)

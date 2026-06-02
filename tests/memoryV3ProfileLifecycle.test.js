@@ -16,6 +16,10 @@ process.env.MEMORY_EMBEDDING_MODEL = '';
 process.env.MEMORY_PROFILE_DEFAULT_TTL_DAYS = '7';
 process.env.MEMORY_PROFILE_RECENT_TOPIC_TTL_DAYS = '3';
 process.env.MEMORY_PROFILE_INJECT_WEAK_ITEMS = 'true';
+process.env.PROFILE_JOURNAL_DB_ENABLED = 'true';
+process.env.PROFILE_JOURNAL_DB_PRIMARY_READ = 'true';
+process.env.PROFILE_JOURNAL_AUTO_CLEAN_ENABLED = 'true';
+process.env.PROFILE_JOURNAL_DB_FILE = path.join(tempRoot, 'profile_journal.sqlite');
 
 fs.mkdirSync(tempRoot, { recursive: true });
 fs.writeFileSync(process.env.DATA_FILE, JSON.stringify({}, null, 2));
@@ -139,8 +143,11 @@ module.exports = (async () => {
   assert.ok(!recall.results.some((item) => item.text.includes('临时喜欢')));
 
   const surface = buildStableProfileText('u_life', { question: '你怎么看我的画像', includeWeak: true });
+  assert.strictEqual(surface.source, 'profile_journal_db');
   assert.ok(surface.text.includes('稳定画像'));
   assert.ok(surface.text.includes('新目标：先写 B'));
+  assert.ok(!surface.text.includes('旧目标：先写 A'));
+  assert.ok(!surface.text.includes('临时喜欢'));
   assert.ok(surface.text.includes('使用规则'));
 
   console.log('memoryV3ProfileLifecycle.test.js passed');

@@ -10,6 +10,33 @@ const { sanitizeText } = require('./commandParser');
 const { sanitizePreviewText } = require('./text');
 
 function getProfileResult(userId) {
+  if (config.PROFILE_JOURNAL_DB_ENABLED !== false && config.PROFILE_JOURNAL_DB_PRIMARY_READ !== false) {
+    try {
+      const { profileProjectionFromDb } = require('../profileJournalDb');
+      const structured = profileProjectionFromDb(userId);
+      if (structured?.ok && structured.profile) {
+        const profile = structured.profile;
+        const strict = profile.strictProfile || {};
+        const weak = profile.weakProfile || {};
+        return {
+          profile: {
+            identities: strict.identities || [],
+            personality_traits: strict.personality_traits || [],
+            hobbies: strict.hobbies || [],
+            likes: strict.likes || [],
+            dislikes: strict.dislikes || [],
+            goals: strict.goals || [],
+            recent_topics: weak.recent_topics || [],
+            relation_stage: profile.relation_stage || ''
+          },
+          summary: profile.personaCore?.summary || '',
+          impression: profile.personaCore?.impression || '',
+          facts: Array.isArray(structured.facts) ? structured.facts.map((item) => item.value).filter(Boolean) : [],
+          source: 'profile_journal_db'
+        };
+      }
+    } catch (_) {}
+  }
   return {
     profile: getUserProfile(userId) || {},
     summary: getUserSummary(userId) || '',
@@ -43,6 +70,17 @@ function profileArrayHits(field, values = [], score = 0.6, title = '') {
 }
 
 function buildProfileSearchCandidates(userId) {
+  if (config.PROFILE_JOURNAL_DB_ENABLED !== false && config.PROFILE_JOURNAL_DB_PRIMARY_READ !== false) {
+    try {
+      const { searchProfileFacts } = require('../profileJournalDb');
+      const structured = searchProfileFacts(userId, '', {
+        limit: Math.max(10, Number(config.MEMORY_CLI_PROFILE_FIELD_MAX_ITEMS || 4) * 4)
+      });
+      if (structured?.ok && Array.isArray(structured.results) && structured.results.length > 0) {
+        return structured.results;
+      }
+    } catch (_) {}
+  }
   const result = getProfileResult(userId);
   const profile = result.profile || {};
   return [

@@ -114,6 +114,42 @@ async function searchMemoryCliFast(query = '', options = {}, context = {}) {
   const queryText = normalizeText(query);
   const limit = Math.max(1, Math.min(20, Number(options.limit || config.MEMORY_CLI_MAX_RESULTS || 8) || 8));
   const requestedSource = normalizeText(options.source || 'all').toLowerCase() || 'all';
+  if (config.PROFILE_JOURNAL_DB_ENABLED !== false && config.PROFILE_JOURNAL_DB_PRIMARY_READ !== false && (requestedSource === 'profile' || requestedSource === 'journal')) {
+    try {
+      const structured = requestedSource === 'profile'
+        ? require('../profileJournalDb').searchProfileFacts(context.userId, queryText, { limit })
+        : require('../profileJournalDb').searchJournalEntries(context.userId, queryText, { limit });
+      if (structured?.ok && Array.isArray(structured.results) && structured.results.length > 0) {
+        const sourceCoverage = { [requestedSource]: structured.results.length };
+        return {
+          results: structured.results,
+          digest: structured.results.slice(0, 4).map((item) => `[${requestedSource}] ${clampText(item.preview || item.text, 140)}`),
+          sourceCoverage,
+          queryFacet: requestedSource === 'journal' ? 'journal' : 'identity',
+          candidateCounts: sourceCoverage,
+          diagnostics: {
+            source: 'profile_journal_db',
+            fallback: false
+          },
+          fallbackUsed: false,
+          outputChars: structured.results.reduce((sum, item) => sum + String(item.preview || item.text || '').length, 0),
+          recentUsed: false,
+          droppedResultCount: 0,
+          rejectedResultCount: 0,
+          qualitySummary: {
+            hasUsableEvidence: true,
+            topResultQuality: 'strong',
+            counts: { strong: structured.results.length },
+            rejectedResultCount: 0
+          }
+        };
+      }
+    } catch (error) {
+      if (config.ENABLE_DEBUG_LOG) {
+        console.warn('[profile_journal_db] memory_cli fast fallback:', error?.message || error);
+      }
+    }
+  }
   const searchContext = {
     ...context,
     ...options

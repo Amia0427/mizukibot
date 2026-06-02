@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-02 10:19 +08:00
+更新时间：2026-06-02 10:47 +08:00
+
+更新 2026-06-02 10:47 +08:00：新增结构化 Profile + Daily Journal SQLite 治理层。默认库为 `data/profile_journal.sqlite`，由 `PROFILE_JOURNAL_DB_ENABLED`、`PROFILE_JOURNAL_DB_PRIMARY_READ` 和 `PROFILE_JOURNAL_AUTO_CLEAN_ENABLED` 控制；profile surface 与 daily journal retrieval 优先主读 SQLite active 数据，旧 Memory V3 projection / journal 文件保留 fallback 和审计来源。新增 `mem profile list/clean`、`mem journal list/clean`、`scripts/migrate-profile-journal-db.js --apply` 和 `npm run diag:memory -- profile-journal-db`。
 
 更新 2026-06-02 10:19 +08:00：图片视觉摘要链路修复 `bot-runtime.err.log` 中 `[image-visual-summary] failed: Request failed with status code 400` / `socket hang up` 放大问题。`utils/imageVisualSummaryMemory.js` 现在先校验 cached 图片 base64、签名、大小和已知文本模型，模型请求固定 `__preferredProtocol=chat_completions` 且使用标准 `image_url.data:` 请求块；HTTP 400/413/415、socket hang up、timeout、空摘要会写入 `image_memory_index.images[cacheKey].visualSummaryState` 图片级冷却，并对同一 endpoint/model 设置进程级短冷却，避免同图或同路由连续失败刷屏。可用 `IMAGE_MEMORY_VISUAL_SUMMARY_MODEL/API_BASE_URL/API_KEY` 单独指定视觉摘要模型，不再只能跟随 `MEMORY_MODEL`。
 
@@ -40,6 +42,12 @@
 - `utils/memory-v3/uriResolver.js`、`bootMemory.js`、`aliasIndex.js`、`triggerGlossary.js` 和 `changesetReview.js` 提供 Nocturne 风格的可导航外壳：`core://user/<userId>/...`、`group://...`、`journal://...`、`image://...`、`system://boot` / `system://glossary`，并按 namespace 隔离 persona、runtime、user、group。
 - `utils/memoryContext/v3Payload.js` 会在主回复记忆上下文前生成短 `boot digest`，默认聚合用户画像、关系锚点、最近连续性、活跃任务和关键偏好，不额外触发模型调用。
 - `utils/memoryCli/index.js` 支持 `mem read`、`mem boot`、`mem alias`、`mem trigger` 和 `mem review`；管理端新增 Memory Explorer / Review 只读和审核入口，可查看 URI 树、alias、trigger、版本链与召回命中原因。
+- `utils/profileJournalDb/` 提供独立 SQLite 治理库：`profile_facts` 保存结构化画像事实，`journal_entries` 保存原始日记轮次，`journal_rollups` 保存 segment/daily/4day/monthly 摘要，`memory_cleanups` 保存 TTL、冲突、纠错和 unsafe 清洗审计。
+- profile 写入仍先走 Memory V3 / `memoryWritePipeline` 质量门禁，`memory_confirmed`、`memory_candidate_extracted`、`memory_archived`、`migration_bootstrap` 会同步写入 SQLite；daily journal 在写文件成功后同步写 `journal_entries`，unsafe/skipped 条目保留审计但不会进入召回。
+- `memoryProfileSurface.buildStableProfileText` 默认主读 SQLite active facts；`dailyJournal.getDailyJournalRetrievalBundle` 默认主读 SQLite active entries/rollups，数据库不可用或空结果时才回退旧 projection / markdown / jsonl。
+- `mem profile list --user <id> --status active|candidate|stale|superseded`、`mem profile clean --user <id> --apply`、`mem journal list --user <id> --day YYYY-MM-DD` 和 `mem journal clean --user <id> --apply` 返回结构化命中、status 和清洗状态。
+- `scripts/migrate-profile-journal-db.js --apply` 从 Memory V3 memory nodes、profile projection、episode projection 和 daily journal 文件构建 SQLite；默认不带 `--apply` 为 dry-run。
+- 管理端 Memory V3 面板展示 Profile Journal DB diagnostics / clean 结果，第一版只做诊断和自动清洗，不做复杂人工编辑。
 
 更新 2026-05-24 17:13 +08:00：主回复系统提示词顶部新增 `prompts/persona/00_roleplay_liveness_prelude.txt`，由 `prompts/prompt-manifest.json` 以负优先级注入，用于强化角色活人感、关系温度和记忆连续性；验证入口为 `npm run check:prompts` 与 `node tests/configPersonaPrompt.test.js`。
 更新 2026-05-27 01:04 +08:00：回放“脚臭排行”误召回确认责任层是主回复 runtime 强制注入，而不是记忆筛选本身；planner skip 的 `retrieved_memory_lite` 不再被普通新话题的非空 `memoryContext` 反向加回，persona/root prompt 仅作为已注入噪声的放大因素处理。
@@ -64,10 +72,12 @@
 2. 查看 `summary.categoryManifest`，确认目标类别是否存在、来源是否合理；例如偏好类应主要落在 `preference/profile/personal`，最近上下文应落在 `continuity/journal/task`。
 3. 文件导入先 dry-run：`npm run memory:v3:import-file -- --user <id> --file <path.md> --dry-run`，确认 chunk 数和 category/tags 后去掉 `--dry-run`。
 4. 若 `projectionFreshness.projectionStale=true`，运行 `npm run memory:v3:migrate` 安全物化 projection。
-5. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。
-6. 修复后运行 `npm run diag:memory -- recall --limit 50 --auto-gold --gate`，观察 `recallAt8`、`mrrAt8`、`leakage`、`lifecycleLeakage`、`categoryMismatches`、`recentRecallMisses`、`emptyResultRate`。
-7. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10`。
-8. 人工审核新 changeset：`mem review list --status candidate` 查看候选，确认后 `mem review accept <changesetId>`；拒绝用 `mem review reject <changesetId> --reason "..."`，只追加归档/替代事件。
+5. 首次启用结构化 Profile Journal DB 时先 dry-run：`node scripts/migrate-profile-journal-db.js`；确认 counters 后运行 `node scripts/migrate-profile-journal-db.js --apply`。
+6. 结构化库巡检：`npm run diag:memory -- profile-journal-db`，观察 `profileStatus.active/stale/superseded`、`journalStatus.unsafe`、`fallbackCount` 和 `recentCleanups`。
+7. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。
+8. 修复后运行 `npm run diag:memory -- recall --limit 50 --auto-gold --gate`，观察 `recallAt8`、`mrrAt8`、`leakage`、`lifecycleLeakage`、`categoryMismatches`、`recentRecallMisses`、`emptyResultRate`。
+9. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10`。
+10. 人工审核新 changeset：`mem review list --status candidate` 查看候选，确认后 `mem review accept <changesetId>`；拒绝用 `mem review reject <changesetId> --reason "..."`，只追加归档/替代事件。
 
 ## 清洗策略
 
@@ -76,6 +86,8 @@
 - `archive`：类型 TTL 已硬过期的 active 记忆，例如旧 topic、任务和短期语境。
 - `superseded`：版本更新或冲突仲裁输掉的旧事实，保留在 projection 供审计，但 `notRecallable=true`，查询和 prompt 默认过滤。
 - `keep`：稳定且可复用的事实、偏好、身份、画像和日记 rollup。
+- Profile Journal DB 清洗只改 `status` 并追加 `memory_cleanups`，不物理删除。`expires_at <= now` 标记 `stale`；同 `conflict_key` 只保留最高 rank active/candidate winner，其余标记 `superseded`；显式纠错会把旧 fact 归档为 `superseded` 并让新 fact 保持 active。
+- 低质量、临时、助手自说自话或污染回复相关 profile fact 只能停留在 `candidate/rejected`，不会进入主 prompt；journal `unsafe/skipped` 条目保留在 `journal_entries` 供审计，但 SQLite 主读召回只取 active。
 
 ## 召回评估注意
 
@@ -115,10 +127,15 @@ node tests/memoryRecallAutoGoldEval.test.js
 node tests/mainReplyContextPreview.test.js
 node tests/memoryV3NocturneShell.test.js
 node tests/memoryCliV3.test.js
+node tests/profileJournalDb.test.js
+node tests/profileJournalDbMigration.test.js
+node tests/memoryV3ProfileLifecycle.test.js
+node tests/dailyJournalPollutionGuard.test.js
 node tests/memoryGovernanceConflictReport.test.js
 node tests/memoryCorrectionSupersede.test.js
 node tests/postReplyVectorWatchdog.test.js
 node tests/imageVisualSummaryMemory.test.js
 node scripts/diagnose-memory-ops.js diagnose --skip-probe --limit 5
+node scripts/diagnose-memory-ops.js profile-journal-db
 node scripts/diagnose-memory-ops.js lancedb-gate --limit 50 --auto-gold
 ```

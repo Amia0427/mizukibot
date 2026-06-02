@@ -27,6 +27,8 @@ function renderMemoryV3NocturnePanel() {
       <button type="button" id="btn-m3-alias-list">Alias 列表</button>
       <button type="button" id="btn-m3-trigger-add">保存 Trigger</button>
       <button type="button" id="btn-m3-trigger-list">Trigger 列表</button>
+      <button type="button" id="btn-pjdb-diag">结构库诊断</button>
+      <button type="button" id="btn-pjdb-clean">结构库清洗</button>
     </div>
   </div>`;
 }
@@ -194,6 +196,55 @@ function renderMemoryV3NocturneClientScript() {
       }
     }
 
+    async function loadProfileJournalDbDiag() {
+      m3Status('Loading structured memory...', true);
+      try {
+        const res = await authedFetch('/api/profile-journal-db/diagnostics?limit=12');
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || data.reason || 'diagnostics failed');
+        renderM3Rows([
+          {
+            uri: data.dbFile || 'profile_journal_db',
+            source: 'profile_journal_db',
+            type: data.primaryRead ? 'primary_read' : 'fallback',
+            text: JSON.stringify({
+              profileStatus: data.profileStatus,
+              journalStatus: data.journalStatus,
+              rollups: data.rollups,
+              recentCleanups: data.recentCleanups
+            })
+          }
+        ], 'diag');
+        m3Status('Structured memory OK', true);
+      } catch (e) {
+        m3Status(e.message, false);
+      }
+    }
+
+    async function cleanProfileJournalDb() {
+      m3Status('Cleaning structured memory...', true);
+      try {
+        const res = await authedFetch('/api/profile-journal-db/clean', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: document.getElementById('m3_user_id').value.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'clean failed');
+        renderM3Rows([
+          {
+            uri: 'profile_journal_db_clean',
+            source: 'profile_journal_db',
+            type: 'cleanup',
+            text: JSON.stringify({ profile: data.profile, journal: data.journal })
+          }
+        ], 'diag');
+        m3Status('Structured memory cleaned', true);
+      } catch (e) {
+        m3Status(e.message, false);
+      }
+    }
+
     async function reviewM3(id, action) {
       if (!id) return;
       try {
@@ -220,6 +271,8 @@ function renderMemoryV3NocturneClientScript() {
       document.getElementById('btn-m3-alias-list').addEventListener('click', listM3Aliases);
       document.getElementById('btn-m3-trigger-add').addEventListener('click', saveM3Trigger);
       document.getElementById('btn-m3-trigger-list').addEventListener('click', listM3Triggers);
+      document.getElementById('btn-pjdb-diag').addEventListener('click', loadProfileJournalDbDiag);
+      document.getElementById('btn-pjdb-clean').addEventListener('click', cleanProfileJournalDb);
       document.getElementById('m3-body').addEventListener('click', function (ev) {
         const target = ev.target;
         if (!target) return;
