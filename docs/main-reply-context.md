@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-02 16:56 +08:00
+更新时间：2026-06-02 17:20 +08:00
 
 ## 已调整
 
+- 2026-06-02 17:20 +08:00：继续解除管理员私聊限制：admin 私聊在 `routeExecution` 中保留 planner 原始工具集，Runtime V2 主模型 `getFilteredToolSchemas` 对 admin 私聊不再套用 companion 工具白名单，executor 解析可回退到 raw tool registry，因此 `qq_publish_qzone` 的 `qzone_draft` 不会在计划、schema 或执行阶段被清空成 `no-allowed-tools`/`Unknown tool`。admin 私聊的 `topRouteType=admin` 路由不再转成 `private-group-only`，`/create` 入口也不再对管理员/白名单私聊提前返回群聊限制；普通私聊用户仍直接禁用。
 - 2026-06-02 16:56 +08:00：私聊入口默认不再使用 `PRIVATE_CHAT_TEST_USER_IDS=*` 放开普通用户；未在私聊白名单且非管理员的普通私聊用户会直接收到私聊关闭提示，不再进入问答/只读半开放状态。`routeExecution` 同步取消白名单用户和管理员私聊的 `private-write-disabled` 写动作闸门，避免这类用户在执行型请求里被本地固定文案拦截。
 - 2026-06-02 16:37 +08:00：主回复 `main_persona_system` 的 `persona/03_boundaries.txt` 加入 `<fiction_authentic>` 角色真实性准则，绑定 `{{char}}` 为晓山瑞希。后续拒绝、抗拒、不适和“应该停下来”等反应必须从瑞希设定或当前剧情找到依据，避免模型凭空套入非瑞希人格的道德化拒演；该规则属于 persona 内部角色扮演准则，不是用户可见输出硬拦截。
 - 2026-06-02 16:30 +08:00：按要求恢复普通私聊 admin 默认走管理员模型（`ADMIN_AI_MODEL`）。感知后回复拒演样本仍定位在 `passive-awareness/reply` 支路与历史坏回复记忆污染：被动感知发言默认跟随主模型（`PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL=true`），system 消息补入压缩主 persona；RecentContext、CurrentMessage、RetrievedMemory、DailyJournal、Profile/Impression/Summary 在进入 prompt 前隔离模型自报/拒演污染。post-reply persist 会把这类文本标记为 `model_identity_contamination`，不写入桥接、Memory V3、日记或后续学习。该修复是上下文/路由隔离，不是用户可见输出的身份漂移硬拦截。

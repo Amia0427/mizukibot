@@ -1,7 +1,21 @@
 const { callMcpTool } = require('../../mcpRuntime');
-const { getStaticToolSchemas, getDynamicToolDescriptors, getToolExecutor, getToolSchemaNames } = require('../toolRegistryFacade');
+const {
+  getStaticToolSchemas,
+  getDynamicToolDescriptors,
+  getRawToolExecutor,
+  getToolExecutor,
+  getToolSchemaNames
+} = require('../toolRegistryFacade');
 const { GLOBAL_TOOL_REGISTRY } = require('../globalToolRuntimeFacade');
 const { createCapabilityDescriptor, normalizeArray, normalizeObject, normalizeText } = require('../contracts');
+const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
+
+function resolveStaticToolExecutor(toolName = '', args = {}) {
+  const context = normalizeObject(args?.__context, {});
+  return isAdminPrivateChatContext(context)
+    ? getRawToolExecutor(toolName)
+    : getToolExecutor(toolName);
+}
 
 function buildStaticToolDescriptors() {
   const schemas = normalizeArray(getStaticToolSchemas());
@@ -20,7 +34,7 @@ function buildStaticToolDescriptors() {
     kind: 'tool',
     schema: schemaByName.get(toolName) || null,
     executor: async (args = {}) => {
-      const executor = getToolExecutor(toolName);
+      const executor = resolveStaticToolExecutor(toolName, args);
       if (typeof executor !== 'function') return `Unknown tool: ${toolName}`;
       return executor(args);
     },

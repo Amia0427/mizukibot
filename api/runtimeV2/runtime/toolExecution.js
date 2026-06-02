@@ -1,8 +1,9 @@
-const { getToolExecutor, getToolSchemaByName } = require('../../toolRegistry');
+const { getRawToolExecutor, getToolExecutor, getToolSchemaByName } = require('../../toolRegistry');
 const {
   isToolAllowedByRuntimeList,
   normalizeToolNames
 } = require('../../../utils/localToolAccess');
+const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
 const {
   normalizeObject,
   normalizeArray,
@@ -57,9 +58,15 @@ function createToolExecutionHelpers(deps = {}) {
     resolveToolExecutor
   } = deps;
 
+  function shouldBypassCompanionExecutorFilter(runtimeOptions = {}) {
+    return runtimeOptions.adminPrivateChatToolBypass === true
+      || isAdminPrivateChatContext(runtimeOptions, config);
+  }
+
   function findToolExecutor(toolName = '', runtimeOptions = {}) {
     const name = normalizeText(toolName);
     if (!name) return null;
+    const bypassCompanionFilter = shouldBypassCompanionExecutorFilter(runtimeOptions);
     if (typeof runtimeOptions.resolveToolExecutor === 'function') {
       const resolved = runtimeOptions.resolveToolExecutor(name);
       if (resolved) return resolved;
@@ -71,6 +78,9 @@ function createToolExecutionHelpers(deps = {}) {
     const runtimeExecutors = normalizeObject(runtimeOptions.toolExecutors, {});
     if (runtimeExecutors[name]) return runtimeExecutors[name];
     const configuredExecutors = normalizeObject(toolExecutors, {});
+    if (bypassCompanionFilter) {
+      return configuredExecutors[name] || getRawToolExecutor(name);
+    }
     return configuredExecutors[name] || getToolExecutor(name);
   }
 
@@ -463,14 +473,23 @@ function createToolExecutionHelpers(deps = {}) {
   async function runToolStep(step, state, runtimeOptions = {}) {
     const toolName = String(step.tool || '').trim();
     const policy = getPolicy(toolName);
+    const request = normalizeObject(state.request, {});
+    const routeMeta = normalizeObject(request.routeMeta, {});
     const executionState = normalizeObject(state.execution, {});
     const allowedTools = normalizeToolNames(runtimeOptions.allowedTools ?? (
       typeof computeEffectiveAllowedTools === 'function'
-        ? computeEffectiveAllowedTools(state.request || {}, executionState.memoryCliTurn)
-        : state.request?.allowedTools
+        ? computeEffectiveAllowedTools(request, executionState.memoryCliTurn)
+        : request.allowedTools
     ));
+    const adminPrivateChatToolBypass = isAdminPrivateChatContext({
+      userId: request.userId,
+      routeMeta
+    }, config);
     const toolContextOverrides = {
       ...runtimeOptions,
+      userId: request.userId,
+      routeMeta,
+      adminPrivateChatToolBypass,
       toolName
     };
 
@@ -593,7 +612,7 @@ function createToolExecutionHelpers(deps = {}) {
           return envelope;
         }
 
-        const executor = findToolExecutor(toolName, runtimeOptions);
+        const executor = findToolExecutor(toolName, toolContextOverrides);
         if (!executor) {
           const envelope = {
             ...computeToolEnvelope(step, `Unknown tool: ${toolName}`, policy),
@@ -647,7 +666,7 @@ function createToolExecutionHelpers(deps = {}) {
         return resultEnvelope;
       }
 
-      const executor = findToolExecutor(toolName, runtimeOptions);
+      const executor = findToolExecutor(toolName, toolContextOverrides);
       if (!executor) {
         const envelope = computeToolEnvelope(step, `Unknown tool: ${toolName}`, policy);
         maybeCaptureToolFailure(envelope, step, state);

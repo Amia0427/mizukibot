@@ -4,6 +4,7 @@ const { extractMessageContent, extractSSEEvents, flushSSEState } = require('../.
 const { getToolSchemaByName } = require('../../toolRegistry');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
+const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
 const { isToolSchemaValidationError } = require('../../../utils/modelCompat');
 const {
   extractUserFacingDelta,
@@ -52,7 +53,10 @@ function getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig = null) {
 
 function getAllowedToolNames(context = {}) {
   if (!Array.isArray(context.allowedTools)) return [];
-  return filterCompanionAllowedTools(normalizeToolNames(context.allowedTools), config);
+  const runtimeConfig = context.runtimeConfig || context.config || config;
+  const normalizedTools = normalizeToolNames(context.allowedTools);
+  if (isAdminPrivateChatContext(context, runtimeConfig)) return normalizedTools;
+  return filterCompanionAllowedTools(normalizedTools, runtimeConfig);
 }
 
 const filteredToolSchemaCache = new Map();
