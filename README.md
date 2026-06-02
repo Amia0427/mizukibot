@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-02 10:56 +08:00：群聊普通用户主回复新增进程内全局 RPM 限流；默认 60 秒最多 12 次，命中后不调用主模型、不发文字回复，只用 QQ 群戳一戳触发用户。
 
+更新 2026-06-02 11:01 +08:00：本地 `.env` 已启用主动私聊；tick engine 与 `PROACTIVE_PRIVATE_TOUCH_ENABLED` 打开，主动私聊白名单锁定 `1960901788`，仍要求上下文且禁用 wildcard / 泛化轻问候。
+
 更新 2026-06-02 10:47 +08:00：新增结构化 Profile + Daily Journal SQLite 治理层，`profile_facts` / `journal_entries` / `journal_rollups` 主读可防过期画像和 unsafe journal 进入 prompt；新增迁移脚本、CLI list/clean 和 `npm run diag:memory -- profile-journal-db`。
 
 更新 2026-06-02 23:48 +08:00：主动触达拆分为 `proactive_group_touch` / `proactive_private_touch`；群聊触达只用群可见纪律，主动私聊默认关闭，仅对白名单具体 userId 且有记忆上下文时发送。
