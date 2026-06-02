@@ -225,9 +225,16 @@ async function invokeReplyModel({
   senderId,
   now = Date.now()
 }) {
-  const baseUrl = ensureChatCompletionsUrl(config.PASSIVE_AWARENESS_REPLY_API_BASE_URL || config.PASSIVE_AWARENESS_API_BASE_URL);
-  const apiKey = String(config.PASSIVE_AWARENESS_REPLY_API_KEY || config.PASSIVE_AWARENESS_API_KEY || '').trim();
-  const model = String(config.PASSIVE_AWARENESS_REPLY_MODEL || config.PASSIVE_AWARENESS_MODEL || '').trim();
+  const useMainReplyModel = config.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL !== false;
+  const baseUrl = ensureChatCompletionsUrl(useMainReplyModel
+    ? config.API_BASE_URL
+    : (config.PASSIVE_AWARENESS_REPLY_API_BASE_URL || config.PASSIVE_AWARENESS_API_BASE_URL));
+  const apiKey = String(useMainReplyModel
+    ? config.API_KEY
+    : (config.PASSIVE_AWARENESS_REPLY_API_KEY || config.PASSIVE_AWARENESS_API_KEY || '')).trim();
+  const model = String(useMainReplyModel
+    ? config.AI_MODEL
+    : (config.PASSIVE_AWARENESS_REPLY_MODEL || config.PASSIVE_AWARENESS_MODEL || '')).trim();
   if (!baseUrl || !apiKey || !model) {
     return {
       replyText: '',
@@ -274,7 +281,7 @@ async function invokeReplyModel({
         topPFallback: 0.92
       }),
       messages: [
-        { role: 'system', content: 'You generate a final passive QQ group reply. Output only the reply text.' },
+        { role: 'system', content: buildPassiveReplySystemMessage() },
         { role: 'user', content: buildPassiveModelUserContent(prompt, visualInputs) }
       ],
       max_tokens: Math.max(160, Number(config.PASSIVE_AWARENESS_REPLY_MAX_TOKENS || 320)),
@@ -287,7 +294,7 @@ async function invokeReplyModel({
         purpose: 'group_passive_reply_generation',
         routePolicyKey: 'passive-awareness/reply',
         topRouteType: 'chat',
-        userId: ''
+        userId: String(senderId || '').trim()
       }
     },
     {

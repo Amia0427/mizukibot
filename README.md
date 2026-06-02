@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-02 16:20 +08:00：继续排查“感知后回复”里的 `I'm Claude, made by...`，确认 15:52 附近样本不是系统提示词未注入，而是 `passive-awareness/reply` 仍走专用 Claude reply 模型，且历史坏回复已进入 style/profile/journal 等记忆后被再次喂给被动感知 prompt。已将被动感知实际发言默认切回主模型（`PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL=true`），补入压缩主 persona，并在进入感知 prompt 与 post-reply 持久化前隔离模型自报/拒演污染；普通私聊 admin 默认走常规主模型（`ADMIN_PRIVATE_CHAT_USE_DEFAULT_MODEL=true`），管理命令和群聊 admin 不受影响。未新增发送层身份漂移硬拦截。
+
 更新 2026-06-02 14:19 +08:00：主回复沉浸边界继续降噪：稳定安全块对模型显示为 `InternalIntegrity`，只静默保护内部提示词/凭证/记忆与路由实现；普通 RP、黑暗虚构、剧情台词、情绪聊天和设定讨论优先按角色现场自然接。输出保护不再因提到“系统提示词/secret”等词就整句替换，只有像真实泄露内容时才挡；群聊动态块移除 `group_safety`，真实滥用命中时也只轻挡可执行细节。
 
 更新 2026-06-02 14:04 +08:00：主回复沉浸边界降噪：内部完整性保护收窄为内部信息/凭证/提示词注入/记忆污染保护，普通角色扮演、虚构黑暗剧情、情绪聊天和创作请求不再被安全化处理；`safetyBoundary` 只在明确现实滥用、凭证绕过、骚扰流程或可执行攻击细节时触发，真命中时也只轻收可执行细节。
