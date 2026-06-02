@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-02 21:55 +08:00：`prompts/GEMINI.txt` 继续补充 Gemini 语言风格约束，参考源预设中“文风3-语言特化”“情感基准”“防重复”和语言选择类安全片段，强化简体中文、QQ 短消息、活人对白、节奏变化、情绪落点与去模板化。
+
 更新 2026-06-02 21:44 +08:00：`prompts/GEMINI.txt` 增加安全源预设原文占比，保留“视角有限”“人格基底”“全局写作”“生活切片”等可迁移句式；仍排除高风险、不合规、特定人格接管和重复 persona 内容。
 
 更新 2026-06-02 21:39 +08:00：`prompts/GEMINI.txt` 进一步特化为 MizukiBot QQ 群聊瑞希运行适配层，补充群聊 surface、被动感知、图片/引用、记忆证据和工具结果的 Gemini 输出纪律；不复述 persona 文本，也不接入 manifest。
