@@ -357,12 +357,109 @@ async function runMemoryCli(commandText = '', context = {}) {
   }
 
   if (!payload && parsed.commandName === 'profile') {
-    if (parsed.action === 'review') {
+    if (parsed.action === 'list') {
+      const { listProfileFacts } = require('../profileJournalDb');
+      const targetUserId = sanitizeText(parsed.userId || userId);
+      const result = listProfileFacts({
+        userId: targetUserId,
+        status: parsed.status,
+        limit: parsed.limit
+      });
+      payload = {
+        ...result,
+        ok: result.ok !== false,
+        command: 'profile',
+        action: 'list',
+        userId: targetUserId,
+        status: parsed.status,
+        results: (result.facts || []).map((item) => ({
+          ref: `mc_ref:profile-db:${item.id}`,
+          source: 'profile',
+          sourceKind: 'profile_journal_db',
+          type: item.type,
+          fieldKey: item.fieldKey,
+          id: item.id,
+          preview: item.value,
+          text: item.value,
+          status: item.status,
+          confidence: item.confidence,
+          updatedAt: item.updatedAt,
+          expiresAt: item.expiresAt,
+          cleanupState: item.status
+        }))
+      };
+    } else if (parsed.action === 'clean') {
+      const { cleanProfileFacts, getDiagnostics } = require('../profileJournalDb');
+      payload = parsed.apply
+        ? cleanProfileFacts({ userId: sanitizeText(parsed.userId || userId) })
+        : { ok: true, dryRun: true, diagnostics: getDiagnostics({ autoClean: false }) };
+      payload = {
+        ...payload,
+        command: 'profile',
+        action: 'clean',
+        applied: parsed.apply === true
+      };
+    } else if (parsed.action === 'review') {
       payload = reviewProfileMemories(context, parsed);
     } else if (parsed.action === 'stale') {
       payload = listStaleProfileMemories(context, parsed);
     } else if (parsed.action === 'why-injected') {
       payload = explainProfileInjection(context, parsed);
+    }
+    if (payload) {
+      payload = {
+        ...payload,
+        rawCommandText: prepared.rawCommandText,
+        normalizedCommandText: prepared.normalizedCommandText,
+        repairApplied: prepared.repairApplied,
+        repairStrategy: prepared.repairStrategy
+      };
+    }
+  }
+
+  if (!payload && parsed.commandName === 'journal') {
+    if (parsed.action === 'list') {
+      const { listJournalEntries } = require('../profileJournalDb');
+      const targetUserId = sanitizeText(parsed.userId || userId);
+      const result = listJournalEntries({
+        userId: targetUserId,
+        day: parsed.day,
+        status: parsed.status,
+        limit: parsed.limit
+      });
+      payload = {
+        ...result,
+        ok: result.ok !== false,
+        command: 'journal',
+        action: 'list',
+        userId: targetUserId,
+        day: parsed.day,
+        status: parsed.status,
+        results: (result.entries || []).map((item) => ({
+          ref: `mc_ref:journal-db:${item.id}`,
+          source: 'journal',
+          sourceKind: 'profile_journal_db',
+          type: 'journal_entry',
+          id: item.id,
+          preview: [item.userText, item.assistantText].filter(Boolean).join(' / '),
+          text: `User: ${item.userText}\nAssistant: ${item.assistantText}`,
+          status: item.status,
+          safety: item.safety,
+          day: item.day,
+          updatedAt: item.ts
+        }))
+      };
+    } else if (parsed.action === 'clean') {
+      const { cleanJournalEntries, getDiagnostics } = require('../profileJournalDb');
+      payload = parsed.apply
+        ? cleanJournalEntries({ userId: sanitizeText(parsed.userId || userId), day: parsed.day })
+        : { ok: true, dryRun: true, diagnostics: getDiagnostics({ autoClean: false }) };
+      payload = {
+        ...payload,
+        command: 'journal',
+        action: 'clean',
+        applied: parsed.apply === true
+      };
     }
     if (payload) {
       payload = {

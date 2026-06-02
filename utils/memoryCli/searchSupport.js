@@ -157,6 +157,15 @@ function searchJargonCandidates(userId, query, limit) {
 }
 
 function searchJournalCandidates(userId, query) {
+  if (config.PROFILE_JOURNAL_DB_ENABLED !== false && config.PROFILE_JOURNAL_DB_PRIMARY_READ !== false) {
+    try {
+      const { searchJournalEntries } = require('../profileJournalDb');
+      const structured = searchJournalEntries(userId, query, { limit: 12 });
+      if (structured?.ok && Array.isArray(structured.results) && structured.results.length > 0) {
+        return structured.results;
+      }
+    } catch (_) {}
+  }
   const episodeHits = retrieveUnifiedMemories(userId, query, 12, {
     sourceFilter: 'journal',
     includePersonal: false,

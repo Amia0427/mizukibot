@@ -21,6 +21,11 @@ const {
   readMemoryUri,
   searchMemoryUris
 } = require('../utils/memory-v3/uriResolver');
+const {
+  cleanJournalEntries,
+  cleanProfileFacts,
+  getDiagnostics: getProfileJournalDbDiagnostics
+} = require('../utils/profileJournalDb');
 
 function text(value = '') {
   return String(value || '').trim();
@@ -188,6 +193,32 @@ function registerMemoryV3NocturneRoutes(app) {
       return res.json(await rejectChangeset(text(req.body?.id), { reason: text(req.body?.reason) }));
     } catch (e) {
       return res.status(400).json({ ok: false, error: e.message || 'Failed to reject changeset' });
+    }
+  });
+
+  app.get('/api/profile-journal-db/diagnostics', (req, res) => {
+    try {
+      return res.json(getProfileJournalDbDiagnostics({
+        limit: Number(req.query.limit || 10),
+        autoClean: req.query.auto_clean !== 'false'
+      }));
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e.message || 'Failed to diagnose profile journal db' });
+    }
+  });
+
+  app.post('/api/profile-journal-db/clean', (req, res) => {
+    try {
+      const profile = cleanProfileFacts({ userId: text(req.body?.user_id || req.body?.userId) });
+      const journal = cleanJournalEntries({ userId: text(req.body?.user_id || req.body?.userId) });
+      return res.json({
+        ok: profile.ok !== false && journal.ok !== false,
+        profile,
+        journal,
+        diagnostics: getProfileJournalDbDiagnostics({ limit: 10 })
+      });
+    } catch (e) {
+      return res.status(500).json({ ok: false, error: e.message || 'Failed to clean profile journal db' });
     }
   });
 }

@@ -102,6 +102,23 @@ function normalizeMemoryEvent(input = {}) {
   return event;
 }
 
+function syncProfileJournalDbEvent(event = {}) {
+  try {
+    if (
+      !event
+      || !['memory_confirmed', 'memory_candidate_extracted', 'memory_archived', 'episode_rollup_generated', 'migration_bootstrap'].includes(event.type)
+    ) {
+      return;
+    }
+    const { syncMemoryEvent } = require('../profileJournalDb');
+    syncMemoryEvent(event, { now: event.ts });
+  } catch (error) {
+    if (config.ENABLE_DEBUG_LOG) {
+      console.warn('[profile_journal_db] failed to sync memory event:', error?.message || error);
+    }
+  }
+}
+
 async function appendMemoryEvent(event = {}) {
   const correction = detectProfileCorrection(event?.text || '');
   const shouldRewriteCorrection = correction.isCorrection
@@ -156,9 +173,11 @@ async function appendMemoryEvent(event = {}) {
     const correctionWriter = getJsonLineWriter(eventFileForTs(normalizedCorrection.ts));
     correctionWriter.append(normalizedCorrection);
     correctionWriter.flushSync();
+    syncProfileJournalDbEvent(normalizedCorrection);
   }
   writer.append(normalized);
   writer.flushSync();
+  syncProfileJournalDbEvent(normalized);
   return normalized;
 }
 

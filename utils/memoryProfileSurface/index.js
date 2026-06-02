@@ -89,6 +89,56 @@ function buildStableProfileText(userId, options = {}) {
     };
   }
 
+  if (config.PROFILE_JOURNAL_DB_ENABLED !== false && config.PROFILE_JOURNAL_DB_PRIMARY_READ !== false) {
+    try {
+      const { profileProjectionFromDb } = require('../profileJournalDb');
+      const structured = profileProjectionFromDb(userId, {
+        ...options,
+        autoClean: true
+      });
+      const structuredProfile = structured?.profile || {};
+      if (structured?.ok && hasStableV3Profile(structuredProfile)) {
+        const dbStrictItems = normalizeStrictItems(structuredProfile);
+        const dbWeakItems = normalizeWeakItemsForSurface(structuredProfile, options);
+        const dbTraceItems = collectTraceItems(structuredProfile, {
+          ...options,
+          includeWeak
+        });
+        const text = buildV3ProfileText(structuredProfile, {
+          ...options,
+          userId: String(userId || '').trim(),
+          includeWeak,
+          forceFullProfileSurface: fullSurface
+        });
+        return {
+          text,
+          source: 'profile_journal_db',
+          disabled: false,
+          reason: '',
+          strictItems: dbStrictItems,
+          weakItems: dbWeakItems,
+          traceItems: dbTraceItems,
+          conflicts: normalizeIssueList(structuredProfile.conflicts || []),
+          suppressed: normalizeIssueList(structuredProfile.suppressed || []),
+          expiresSoon: Array.isArray(structuredProfile.expiresSoon) ? structuredProfile.expiresSoon.slice(0, 12) : [],
+          legacyFallbackUsed: false,
+          profile: structuredProfile,
+          persona: structuredProfile.personaCore || {},
+          diagnostics: {
+            profileJournalDb: {
+              primaryRead: true,
+              factCount: Array.isArray(structured.facts) ? structured.facts.length : 0
+            }
+          }
+        };
+      }
+    } catch (error) {
+      if (config.ENABLE_DEBUG_LOG) {
+        console.warn('[profile_journal_db] profile surface fallback:', error?.message || error);
+      }
+    }
+  }
+
   if (shouldUseV3) {
     const text = buildV3ProfileText(v3Profile, {
       ...options,

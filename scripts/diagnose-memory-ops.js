@@ -11,6 +11,7 @@ const { buildRecallEvalGate } = require('../utils/memoryGovernance/recallEvalGat
 const { buildLanceDbReadMigrationGate } = require('../utils/memoryGovernance/lancedbMigrationGate');
 const { diagnoseMemosPlannerRecall } = require('../utils/memosPlannerRecall');
 const { diagnoseOpenVikingMemory } = require('../utils/openVikingMemory/diagnostics');
+const { getDiagnostics: diagnoseProfileJournalDb } = require('../utils/profileJournalDb');
 
 const SCHEMA_VERSION = 'memory_ops_diagnostic_v1';
 const CASES_FILE = path.join(__dirname, '..', 'artifacts', 'memory-recall-eval', 'cases.jsonl');
@@ -45,7 +46,10 @@ const MODE_ALIASES = {
   'memos-diagnose': 'memos',
   openviking: 'openviking',
   'openviking-health': 'openviking',
-  'openviking-diagnose': 'openviking'
+  'openviking-diagnose': 'openviking',
+  'profile-journal-db': 'profile-journal-db',
+  profilejournaldb: 'profile-journal-db',
+  'structured-memory': 'profile-journal-db'
 };
 
 function normalizeText(value = '') {
@@ -189,7 +193,7 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
 
 function buildUsageSummary() {
   return {
-    usage: 'npm run diag:memory -- <diagnose|backfill|recall|lancedb-gate|audit|memos|openviking> [--limit N]',
+    usage: 'npm run diag:memory -- <diagnose|backfill|recall|lancedb-gate|audit|memos|openviking|profile-journal-db> [--limit N]',
     modes: {
       diagnose: 'coverage and LanceDB fallback probe summary',
       backfill: 'dry-run embedding backfill plan',
@@ -197,7 +201,8 @@ function buildUsageSummary() {
       'lancedb-gate': 'compare local_jsonl baseline with LanceDB candidate and decide whether read promotion is safe',
       audit: 'sampled memory semantic quality audit plus hard metric warnings',
       memos: 'MemOS remote recall health, read-only tool discovery, cache, circuit and KB partition summary',
-      openviking: 'OpenViking recall/ingest health, cache, circuit and prompt injection readiness'
+      openviking: 'OpenViking recall/ingest health, cache, circuit and prompt injection readiness',
+      'profile-journal-db': 'structured SQLite profile + daily journal health, cleanup counts and fallback summary'
     }
   };
 }
@@ -394,6 +399,21 @@ function summarizeOpenViking(result = {}, args = {}) {
   };
 }
 
+function summarizeProfileJournalDb(result = {}, args = {}) {
+  return {
+    enabled: result.enabled === true,
+    dbFile: result.dbFile || '',
+    primaryRead: result.primaryRead === true,
+    autoClean: result.autoClean === true,
+    fallbackCount: Number(result.fallbackCount || 0) || 0,
+    profileStatus: result.profileStatus || {},
+    journalStatus: result.journalStatus || {},
+    rollups: result.rollups || {},
+    recentCleanups: Array.isArray(result.recentCleanups) ? result.recentCleanups.slice(0, Math.max(1, Number(args.limit || 10) || 10)) : [],
+    reason: result.reason || ''
+  };
+}
+
 function summarizeLanceDbGate(result = {}, args = {}) {
   const gate = result.gate || {};
   return {
@@ -445,7 +465,8 @@ function getDefaultRunners() {
     runMode,
     runMemoryQualityAudit,
     diagnoseMemosPlannerRecall,
-    diagnoseOpenVikingMemory
+    diagnoseOpenVikingMemory,
+    diagnoseProfileJournalDb
   };
 }
 
@@ -572,7 +593,7 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
     });
   }
 
-  if (!['diagnose', 'backfill', 'recall', 'lancedb-gate', 'audit', 'memos', 'openviking'].includes(args.mode)) {
+  if (!['diagnose', 'backfill', 'recall', 'lancedb-gate', 'audit', 'memos', 'openviking', 'profile-journal-db'].includes(args.mode)) {
     return createEnvelope({
       mode: args.mode,
       ok: false,
@@ -670,6 +691,22 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
         ok: result.ok !== false,
         exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
         summary: summarizeOpenViking(result, args),
+        details: result,
+        startedAt
+      });
+    }
+
+    if (args.mode === 'profile-journal-db') {
+      const limit = args.limit ?? 10;
+      const result = runners.diagnoseProfileJournalDb({
+        limit,
+        autoClean: true
+      });
+      return createEnvelope({
+        mode: 'profile-journal-db',
+        ok: result.ok !== false,
+        exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
+        summary: summarizeProfileJournalDb(result, { ...args, limit }),
         details: result,
         startedAt
       });
@@ -796,6 +833,7 @@ module.exports = {
   summarizeLanceDbGate,
   summarizeMemos,
   summarizeOpenViking,
+  summarizeProfileJournalDb,
   summarizeRecall,
   summarizeAudit,
   buildLanceDbReadMigrationGate,

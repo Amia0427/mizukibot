@@ -551,6 +551,9 @@ function parseProfileArgs(tokens = [], raw = '') {
   if (!action) throw new Error(`Unexpected token: missing profile action in ${raw}`);
   let limit = 20;
   let query = '';
+  let userId = '';
+  let status = 'active';
+  let apply = false;
 
   for (let i = 1; i < tokens.length; i += 1) {
     const token = String(tokens[i] || '').trim();
@@ -574,12 +577,45 @@ function parseProfileArgs(tokens = [], raw = '') {
       query = sanitizeText(token.slice('--query='.length));
       continue;
     }
+    if (token === '--user' || token === '--user-id' || token === '--user_id') {
+      userId = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--user=')) {
+      userId = sanitizeText(token.slice('--user='.length));
+      continue;
+    }
+    if (token.startsWith('--user-id=')) {
+      userId = sanitizeText(token.slice('--user-id='.length));
+      continue;
+    }
+    if (token.startsWith('--user_id=')) {
+      userId = sanitizeText(token.slice('--user_id='.length));
+      continue;
+    }
+    if (token === '--status') {
+      status = sanitizeText(tokens[i + 1] || status).toLowerCase();
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--status=')) {
+      status = sanitizeText(token.slice('--status='.length)).toLowerCase();
+      continue;
+    }
+    if (token === '--apply') {
+      apply = true;
+      continue;
+    }
 
     throw new Error(`Unexpected token: ${token}`);
   }
 
-  if (action !== 'review' && action !== 'stale' && action !== 'why-injected') {
+  if (action !== 'review' && action !== 'stale' && action !== 'why-injected' && action !== 'list' && action !== 'clean') {
     throw new Error(`Unsupported profile action: ${action}`);
+  }
+  if (!['active', 'candidate', 'stale', 'superseded'].includes(status)) {
+    throw new Error(`Unsupported profile status: ${status}`);
   }
   if (action === 'why-injected' && !query) {
     throw new Error(`Unexpected token: missing profile injection query in ${raw}`);
@@ -589,6 +625,90 @@ function parseProfileArgs(tokens = [], raw = '') {
     action,
     limit,
     query,
+    userId,
+    status,
+    apply,
+    raw
+  };
+}
+
+function parseJournalArgs(tokens = [], raw = '') {
+  const action = sanitizeText(tokens[0] || '').toLowerCase();
+  if (!action) throw new Error(`Unexpected token: missing journal action in ${raw}`);
+  let userId = '';
+  let day = '';
+  let status = '';
+  let limit = 20;
+  let apply = false;
+
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = String(tokens[i] || '').trim();
+    if (!token) continue;
+    if (token === '--user' || token === '--user-id' || token === '--user_id') {
+      userId = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--user=')) {
+      userId = sanitizeText(token.slice('--user='.length));
+      continue;
+    }
+    if (token.startsWith('--user-id=')) {
+      userId = sanitizeText(token.slice('--user-id='.length));
+      continue;
+    }
+    if (token.startsWith('--user_id=')) {
+      userId = sanitizeText(token.slice('--user_id='.length));
+      continue;
+    }
+    if (token === '--day') {
+      day = sanitizeText(tokens[i + 1] || '');
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--day=')) {
+      day = sanitizeText(token.slice('--day='.length));
+      continue;
+    }
+    if (token === '--status') {
+      status = sanitizeText(tokens[i + 1] || '').toLowerCase();
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--status=')) {
+      status = sanitizeText(token.slice('--status='.length)).toLowerCase();
+      continue;
+    }
+    if (token === '--limit') {
+      limit = Math.max(1, Math.min(100, Number(tokens[i + 1] || limit) || limit));
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--limit=')) {
+      limit = Math.max(1, Math.min(100, Number(token.slice('--limit='.length)) || limit));
+      continue;
+    }
+    if (token === '--apply') {
+      apply = true;
+      continue;
+    }
+    throw new Error(`Unexpected token: ${token}`);
+  }
+
+  if (action !== 'list' && action !== 'clean') {
+    throw new Error(`Unsupported journal action: ${action}`);
+  }
+  if (status && !['active', 'unsafe', 'skipped', 'archived', 'stale'].includes(status)) {
+    throw new Error(`Unsupported journal status: ${status}`);
+  }
+  return {
+    commandName: 'journal',
+    action,
+    userId,
+    day,
+    status,
+    limit,
+    apply,
     raw
   };
 }
@@ -613,6 +733,7 @@ function parseMemoryCliCommand(commandText = '') {
   if (subcommand === 'remember') return parseRememberArgs(args, raw);
   if (subcommand === 'review') return parseReviewArgs(args, raw);
   if (subcommand === 'profile') return parseProfileArgs(args, raw);
+  if (subcommand === 'journal') return parseJournalArgs(args, raw);
   if (subcommand === 'ls' || subcommand === 'stats') {
     return { commandName: subcommand, raw };
   }
@@ -666,6 +787,9 @@ function tryRepairPrefix(text = '', repairStrategy = []) {
     } else if (/^profile\b/i.test(normalized)) {
       normalized = normalized.replace(/^profile\b/i, 'mem profile');
       repairStrategy.push('prefix_mem_profile');
+    } else if (/^journal\b/i.test(normalized)) {
+      normalized = normalized.replace(/^journal\b/i, 'mem journal');
+      repairStrategy.push('prefix_mem_journal');
     } else if (/^ls\b/i.test(normalized)) {
       normalized = normalized.replace(/^ls\b/i, 'mem ls');
       repairStrategy.push('prefix_mem_ls');
@@ -803,6 +927,7 @@ module.exports = {
   parseAliasArgs,
   parseTriggerArgs,
   parseProfileArgs,
+  parseJournalArgs,
   parseRememberArgs,
   parseReviewArgs,
   parseMemoryCliCommand,

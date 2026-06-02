@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-02 10:47 +08:00：新增结构化 Profile + Daily Journal SQLite 治理层，`profile_facts` / `journal_entries` / `journal_rollups` 主读可防过期画像和 unsafe journal 进入 prompt；新增迁移脚本、CLI list/clean 和 `npm run diag:memory -- profile-journal-db`。
+
 更新 2026-06-02 23:48 +08:00：主动触达拆分为 `proactive_group_touch` / `proactive_private_touch`；群聊触达只用群可见纪律，主动私聊默认关闭，仅对白名单具体 userId 且有记忆上下文时发送。
 
 更新 2026-06-02 10:17 +08:00：Memory V3 召回降级治理完成；reranker 默认链路取消外层/内层重复 hard timeout，连续 timeout 后进入短冷却并暴露 `rerankRuntime`，embedding 对端点不可用和瞬态失败分层冷却，`coverageAtQuery.embeddingRuntime` 可直接解释 base recall 降级原因。详见 `docs/memory-quality-governance.md`。
