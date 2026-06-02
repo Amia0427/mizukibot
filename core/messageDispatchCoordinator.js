@@ -5,6 +5,9 @@ const {
 const {
   shouldForceDisableGroupMainModelStream
 } = require('../utils/groupMainModelStreamPolicy');
+const {
+  shouldDowngradeUnavailableRouteToDirectReply
+} = require('./messageRouteFlow/helpers');
 
 function createMessageDispatchCoordinator(deps = {}) {
   const {
@@ -90,6 +93,8 @@ function createMessageDispatchCoordinator(deps = {}) {
       passive: false
     });
     const perceptionPrompt = String(perceptionResult?.text || '').trim() || null;
+    const downgradeUnavailableToDirectReply = shouldDowngradeUnavailableRouteToDirectReply(route, routeExecutionPlan);
+    const effectiveToolGuidancePrompt = downgradeUnavailableToDirectReply ? null : toolGuidancePrompt;
     console.log('[dispatch] route plan resolved', buildRoutePlanLogPayload(routeExecutionPlan, {
       groupId,
       senderId,
@@ -97,7 +102,7 @@ function createMessageDispatchCoordinator(deps = {}) {
     }, route));
 
     try {
-      if (routeExecutionPlan.unavailableReason) {
+      if (routeExecutionPlan.unavailableReason && !downgradeUnavailableToDirectReply) {
         maybeCaptureUnavailableFeatureRequest({
           routeExecutionPlan,
           cleanText,
@@ -216,7 +221,7 @@ function createMessageDispatchCoordinator(deps = {}) {
           streamCompleted: false,
           streamFallbackToNonStream: false,
           routePrompt: composeDirectRoutePrompt({
-            toolGuidancePrompt,
+            toolGuidancePrompt: effectiveToolGuidancePrompt,
             perceptionPrompt,
             safetyBoundaryRoutePrompt,
             streamingSegmentationPrompt,

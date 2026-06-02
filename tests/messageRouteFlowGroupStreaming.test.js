@@ -192,6 +192,24 @@ module.exports = (async () => {
   assert.strictEqual(privateCase.replyOptionsSeen.length, 1);
   assert.strictEqual(privateCase.replyOptionsSeen[0].disableStream, false, 'private direct replies should keep the original stream setting');
 
+  const unavailableToolCase = createBaseDeps();
+  const unavailableToolEnvelope = await unavailableToolCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('group'),
+    executionPlan: {
+      executor: 'direct',
+      allowTools: false,
+      allowStream: false,
+      topRouteType: 'direct_chat',
+      routeDebugKey: 'direct_chat/tool-missing',
+      unavailableReason: 'no-allowed-tools',
+      allowedTools: []
+    }
+  });
+  assert.strictEqual(unavailableToolEnvelope.replyText, 'ai reply');
+  assert.strictEqual(unavailableToolCase.toolOptionsSeen.length, 0, 'unavailable generic tool route should not enter tool task path');
+  assert.strictEqual(unavailableToolCase.replyOptionsSeen.length, 1, 'unavailable generic tool route should fall back to main direct reply');
+  assert.ok(!String(unavailableToolCase.replyOptionsSeen[0].routePrompt || '').includes('tool'));
+
   const cotCase = createBaseDeps();
   const cotEnvelope = await cotCase.routeFlow.dispatchByRoutePlan({
     ...buildRouteDecision('private'),

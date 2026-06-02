@@ -33,6 +33,7 @@ const {
 const {
   parseJsonTail,
   buildUnavailableRouteReply,
+  shouldDowngradeUnavailableRouteToDirectReply,
   buildQzoneAutodraftPrompt,
   buildSupplementedTaskText,
   composeDirectRoutePrompt,
@@ -364,6 +365,7 @@ function createMessageRouteFlow(deps = {}) {
       : 'group';
     const requestTrace = normalizeRequestTrace(route?.meta?.requestTrace)
       || normalizeRequestTrace(inboundContext?.requestTrace);
+    const downgradeUnavailableToDirectReply = shouldDowngradeUnavailableRouteToDirectReply(route, routeExecutionPlan);
     const emitRouteDiag = (phase = '', payload = {}) => {
       if (!requestTrace) return;
       appendRequestTraceEvent(nextTracePhase(requestTrace, phase, {
@@ -391,12 +393,15 @@ function createMessageRouteFlow(deps = {}) {
       shouldPreferQqRichReply,
       buildQqRichReplyPrompt
     });
-    const {
+    let {
       toolGuidancePrompt,
       streamingSegmentationPrompt,
       qqRichReplyPrompt,
       disableStreamForReply
     } = promptBundle;
+    if (downgradeUnavailableToDirectReply) {
+      toolGuidancePrompt = null;
+    }
     const safetyBoundaryRoutePrompt = buildSafetyBoundaryRoutePrompt(route);
     const perceptionBuilder = typeof injectedBuildLlmPerception === 'function'
       ? injectedBuildLlmPerception
@@ -407,7 +412,7 @@ function createMessageRouteFlow(deps = {}) {
     const perceptionPrompt = String(perceptionResult?.text || '').trim() || null;
 
     try {
-      if (routeExecutionPlan.unavailableReason) {
+      if (routeExecutionPlan.unavailableReason && !downgradeUnavailableToDirectReply) {
         emitRouteDiag('dispatch_unavailable', buildRouteDiagPayload(routeExecutionPlan, 'unavailable'));
         maybeCaptureUnavailableFeatureRequest?.({
           routeExecutionPlan,
