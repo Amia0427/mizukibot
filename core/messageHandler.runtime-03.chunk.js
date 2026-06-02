@@ -23,7 +23,7 @@
     const rawMessageText = String(msg?.raw_message || '').trim();
     const createCommandText = stripLeadingCqControlSegments(rawMessageText, resolveEffectiveBotQQ(msg, config));
     if (/^\s*\/create(?:\s|$)/i.test(createCommandText)) {
-      if (isPrivateChatType(chatType)) {
+      if (isPrivateChatType(chatType) && !privilegedPrivateChat) {
         const sendStartedAt = Date.now();
         appendTraceTiming('final_reply_send_start', {
           stage: 'final_reply_send_start',
@@ -37,7 +37,7 @@
           groupId,
           userId: senderId,
           senderId,
-          replyText: '仅群聊可用',
+          replyText: PRIVATE_CHAT_WHITELIST_REPLY,
           atSender: false,
           retries: 1,
           waitMs: 300
@@ -54,7 +54,7 @@
         appendRequestCompleteTrace({
           routePolicyKey: 'admin/create',
           topRouteType: 'admin',
-          finalErrorCode: 'group_only'
+          finalErrorCode: 'private_chat_disabled'
         });
         return;
       }

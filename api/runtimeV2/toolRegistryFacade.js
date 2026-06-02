@@ -1,5 +1,8 @@
 const {
   getDynamicToolDescriptors,
+  getRawToolExecutor,
+  getRawToolExecutors,
+  getRawToolSchemas,
   getToolExecutor,
   getStaticToolSchemas,
   getToolExecutors,
@@ -9,6 +12,9 @@ const {
 
 module.exports = {
   getDynamicToolDescriptors,
+  getRawToolExecutor,
+  getRawToolExecutors,
+  getRawToolSchemas,
   getToolExecutor,
   getStaticToolSchemas,
   getToolExecutors,

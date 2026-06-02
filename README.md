@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-02 17:20 +08:00：管理员私聊进一步解除执行限制：`routeExecution`、Runtime V2 主模型 tool schema 注入和工具 executor 解析都会识别 admin 私聊并绕过 companion 私聊收窄，QQ 空间草稿 `qzone_draft` 会保留到计划、模型可见工具和执行器；admin 私聊 `/status` 等 admin route 不再被 private group-only 闸门拦截，`/create` 也不再被入口私聊硬拦截，普通私聊用户仍直接禁用。
+
 更新 2026-06-02 16:56 +08:00：私聊接入默认改为关闭普通用户；仅显式私聊白名单用户或管理员可进入私聊。执行层取消白名单/管理员私聊的 `private-write-disabled` 只读闸门，普通私聊用户仍直接被入口拒绝。
 
 更新 2026-06-02 16:55 +08:00：普通用户主回复流式请求新增首个可见字超时保护，默认 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=35000`；35 秒内无首字会 abort 上游并回复“上游繁忙，请稍后重试”，管理员不受该限制影响。

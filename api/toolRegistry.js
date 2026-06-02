@@ -128,9 +128,21 @@ function getStaticToolExecutors() {
   return loadStaticToolExecutors();
 }
 
-function getToolSchemas() {
+function getRawToolSchemas() {
   refreshDynamicCachesFromRegistry();
-  return filterCompanionToolSchemas([...getStaticToolSchemas(), ...dynamicSchemaCache], config);
+  return [...getStaticToolSchemas(), ...dynamicSchemaCache];
+}
+
+function getRawToolExecutors() {
+  refreshDynamicCachesFromRegistry();
+  return {
+    ...getStaticToolExecutors(),
+    ...dynamicExecutorCache
+  };
+}
+
+function getToolSchemas() {
+  return filterCompanionToolSchemas(getRawToolSchemas(), config);
 }
 
 
@@ -151,11 +163,14 @@ function getToolSchemaNames() {
 }
 
 function getToolExecutors() {
+  return filterCompanionToolExecutors(getRawToolExecutors(), config);
+}
+
+function getRawToolExecutor(toolName = '') {
+  const name = String(toolName || '').trim();
+  if (!name) return null;
   refreshDynamicCachesFromRegistry();
-  return filterCompanionToolExecutors({
-    ...getStaticToolExecutors(),
-    ...dynamicExecutorCache
-  }, config);
+  return getStaticToolExecutors()[name] || dynamicExecutorCache[name] || null;
 }
 
 function getToolExecutor(toolName = '') {
@@ -202,6 +217,9 @@ module.exports = {
   TOOL_EXECUTORS,
   getDynamicToolDescriptors,
   getDynamicToolNames,
+  getRawToolExecutor,
+  getRawToolExecutors,
+  getRawToolSchemas,
   getStaticToolExecutors,
   getStaticToolSchemas,
   getToolExecutor,

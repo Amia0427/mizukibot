@@ -168,6 +168,96 @@ module.exports = (async () => {
   assert.strictEqual(allowedByScheduler.status, 'completed');
   assert.strictEqual(allowedByScheduler.result, 'scheduler ok');
 
+  const companionConfig = require('../config');
+  const toolRegistry = require('../api/toolRegistry');
+  const originalBotToolMode = companionConfig.BOT_TOOL_MODE;
+  const originalCompanionEnabled = companionConfig.COMPANION_TOOL_MODE_ENABLED;
+  const originalAdminUserIds = companionConfig.ADMIN_USER_IDS;
+  const rawRegistryTestToolName = '__admin_private_raw_lookup_test';
+  try {
+    companionConfig.BOT_TOOL_MODE = 'companion';
+    companionConfig.COMPANION_TOOL_MODE_ENABLED = true;
+    companionConfig.ADMIN_USER_IDS = ['admin_1'];
+    toolRegistry.TOOL_EXECUTORS[rawRegistryTestToolName] = async () => 'admin raw registry ok';
+
+    assert.strictEqual(toolRegistry.getToolExecutor(rawRegistryTestToolName), null);
+    assert.strictEqual(typeof toolRegistry.getRawToolExecutor(rawRegistryTestToolName), 'function');
+
+    const companionHelpers = createToolExecutionHelpers({
+      config: companionConfig,
+      stableHash(value) {
+        return JSON.stringify(value || {});
+      },
+      summarizeToolLogValue(value) {
+        return typeof value === 'string' ? value : JSON.stringify(value);
+      },
+      getPolicy() {
+        return {};
+      },
+      enforceToolPolicy(_toolName, args) {
+        return args;
+      },
+      shouldRunParallel() {
+        return false;
+      },
+      capabilityRegistry: { byName: new Map() },
+      buildLiveMainConversationSnapshot() {
+        return null;
+      },
+      computeEffectiveAllowedTools(request = {}) {
+        return request.allowedTools || [];
+      },
+      createMemoryCliTurnState(value = {}) {
+        return value;
+      },
+      updateMemoryCliTurnStateAfterError(state = {}) {
+        return state;
+      },
+      updateMemoryCliTurnStateAfterResult(state = {}) {
+        return state;
+      },
+      decideMemoryCliTurnAction() {
+        return { ok: true };
+      },
+      safeParseMemoryCliResult() {
+        return null;
+      },
+      captureToolFailure() {},
+      isPlannerSingleAuthorityEnabled() {
+        return false;
+      },
+      toolExecutors: {}
+    });
+
+    const adminPrivateRawRegistryStep = await companionHelpers.runToolStep({
+      id: 'raw_registry_executor_resolution',
+      tool: rawRegistryTestToolName,
+      inputs: {}
+    }, {
+      request: {
+        userId: 'admin_1',
+        routeMeta: {
+          chatType: 'private',
+          userId: 'admin_1'
+        },
+        allowedTools: [rawRegistryTestToolName]
+      },
+      execution: {},
+      plan: { steps: [] }
+    }, {
+      node: 'dispatch',
+      allowedTools: [rawRegistryTestToolName]
+    });
+
+    assert.strictEqual(adminPrivateRawRegistryStep.status, 'completed');
+    assert.strictEqual(adminPrivateRawRegistryStep.result, 'admin raw registry ok');
+  } finally {
+    delete toolRegistry.TOOL_EXECUTORS[rawRegistryTestToolName];
+    companionConfig.BOT_TOOL_MODE = originalBotToolMode;
+    companionConfig.COMPANION_TOOL_MODE_ENABLED = originalCompanionEnabled;
+    companionConfig.ADMIN_USER_IDS = originalAdminUserIds;
+  }
+
   console.log('localToolRuntimeAllowlist.test.js passed');
 })().catch((error) => {
   console.error(error);

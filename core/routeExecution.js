@@ -12,7 +12,7 @@ const {
 } = require('./executablePlan');
 const config = require('../config');
 const { filterCompanionAllowedTools } = require('../utils/companionTools');
-const { isPrivateChatAccessAllowed } = require('../utils/privilegedPrivateChat');
+const { isAdminUserId, isPrivateChatAccessAllowed } = require('../utils/privilegedPrivateChat');
 
 // routeExecution consumes only canonical contract data plus planner output.
 // It must not infer a new top route type or treat routeProfiles as routing truth.
@@ -153,6 +153,12 @@ function isPrivateActionExempt(route = {}, runtimeConfig = config) {
   });
 }
 
+function isPrivateAdminUser(route = {}, runtimeConfig = config) {
+  if (normalizeChatType(route) !== 'private') return false;
+  const userId = String(route?.meta?.userId || route?.meta?.senderId || '').trim();
+  return isAdminUserId(userId, runtimeConfig);
+}
+
 function isPrivateSafeTool(toolName = '') {
   const normalized = String(toolName || '').trim();
   if (!normalized) return false;
@@ -176,7 +182,9 @@ function isPrivateSafeTool(toolName = '') {
 }
 
 function filterAllowedToolsForChatType(route = {}, allowedTools = [], runtimeConfig = config) {
-  const normalizedTools = filterCompanionAllowedTools(normalizeToolNames(allowedTools), runtimeConfig);
+  const rawTools = normalizeToolNames(allowedTools);
+  if (isPrivateAdminUser(route, runtimeConfig)) return rawTools;
+  const normalizedTools = filterCompanionAllowedTools(rawTools, runtimeConfig);
   if (normalizeChatType(route) !== 'private') return normalizedTools;
   if (isPrivateActionExempt(route, runtimeConfig)) return normalizedTools;
   return normalizedTools.filter((toolName) => isPrivateSafeTool(toolName));
@@ -388,7 +396,7 @@ function resolveRouteExecution(route = {}, runtimeConfig = config, _options = {}
   }
 
   if (contract.topRouteType === 'admin') {
-    if (chatType === 'private') {
+    if (chatType === 'private' && !isPrivateAdminUser(route, runtimeConfig || config)) {
       return withRouteTrace(route, {
         ...base,
         executor: 'direct',
