@@ -27,7 +27,6 @@ try {
   process.env.ADMIN_AI_MODEL = 'admin-model';
   process.env.ADMIN_API_BASE_URL = 'https://admin.example/v1/chat/completions';
   process.env.ADMIN_API_KEY = 'admin-key';
-  process.env.ADMIN_PRIVATE_CHAT_USE_DEFAULT_MODEL = 'true';
   process.env.AI_FALLBACK_ENABLED = 'false';
   process.env.ADMIN_AI_FALLBACK_ENABLED = 'false';
   process.env.ENABLE_AI_ROUTER = 'false';
@@ -111,9 +110,9 @@ try {
     topRouteType: 'direct_chat',
     routePolicyKey: 'chat/default'
   });
-  assert.strictEqual(adminPrivateChatConfig.model, 'main-model');
-  assert.strictEqual(adminPrivateChatConfig.__mainModelUserRole, 'user');
-  assert.strictEqual(adminPrivateChatConfig.__mainFallbackScope, 'default');
+  assert.strictEqual(adminPrivateChatConfig.model, 'admin-model');
+  assert.strictEqual(adminPrivateChatConfig.__mainModelUserRole, 'admin');
+  assert.strictEqual(adminPrivateChatConfig.__mainFallbackScope, 'admin_shared');
 
   console.log('mainModelRoleRoutingLocalRouter.test.js passed');
   restoreEnv(snapshot);

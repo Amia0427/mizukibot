@@ -56,58 +56,8 @@ function getAdminUserIdSet() {
   );
 }
 
-function normalizeRouteMeta(options = {}) {
-  return options?.routeMeta && typeof options.routeMeta === 'object'
-    ? options.routeMeta
-    : {};
-}
-
-function resolveChatType(options = {}) {
-  const routeMeta = normalizeRouteMeta(options);
-  return normalizeText(
-    options.chatType
-    || routeMeta.chatType
-    || routeMeta.chat_type
-  ).toLowerCase();
-}
-
-function resolveTopRouteType(options = {}) {
-  const routeMeta = normalizeRouteMeta(options);
-  return normalizeText(
-    options.topRouteType
-    || routeMeta.topRouteType
-    || routeMeta.top_route_type
-  ).toLowerCase();
-}
-
-function resolveRoutePolicyKey(options = {}) {
-  const routeMeta = normalizeRouteMeta(options);
-  return normalizeText(
-    options.routePolicyKey
-    || routeMeta.routePolicyKey
-    || routeMeta.route_policy_key
-  ).toLowerCase();
-}
-
-function shouldUseDefaultMainModelForAdmin(userId = '', options = {}) {
-  if (!getAdminUserIdSet().has(normalizeText(userId))) return false;
-  if (config.ADMIN_PRIVATE_CHAT_USE_DEFAULT_MODEL !== true) return false;
-  const chatType = resolveChatType(options);
-  const topRouteType = resolveTopRouteType(options);
-  const routePolicyKey = resolveRoutePolicyKey(options);
-  const isPrivate = chatType === 'private';
-  const isOrdinaryChat = topRouteType === 'direct_chat'
-    || topRouteType === 'chat'
-    || routePolicyKey === 'chat/default'
-    || routePolicyKey === 'direct_chat/default'
-    || (!topRouteType && !routePolicyKey);
-  return isPrivate && isOrdinaryChat;
-}
-
-function isAdminMainModelUser(userId = '', options = {}) {
-  const normalizedUserId = normalizeText(userId);
-  if (shouldUseDefaultMainModelForAdmin(normalizedUserId, options)) return false;
-  return getAdminUserIdSet().has(normalizedUserId);
+function isAdminMainModelUser(userId = '') {
+  return getAdminUserIdSet().has(normalizeText(userId));
 }
 
 function shouldBypassMainModelFallback(userId = '', options = {}) {
@@ -117,7 +67,6 @@ function shouldBypassMainModelFallback(userId = '', options = {}) {
 function resolveRoleAwareMainModelConfig(userId = '', overrides = null, options = {}) {
   const base = overrides && typeof overrides === 'object' ? { ...overrides } : {};
   const isAdmin = isAdminMainModelUser(userId, options);
-  const defaultedAdminPrivateChat = shouldUseDefaultMainModelForAdmin(userId, options);
   const resolved = {
     ...base
   };
@@ -182,7 +131,6 @@ function resolveRoleAwareMainModelConfig(userId = '', overrides = null, options 
     __mainProviderSource: providerPick.source,
     __mainApiBaseUrlSource: apiBaseUrlPick.source,
     __mainApiKeySource: apiKeyPick.source,
-    __adminPrivateChatDefaultModel: defaultedAdminPrivateChat,
     __adminDedicatedModelConfigured: isAdmin ? Boolean(normalizeText(base.model) || normalizeText(config.ADMIN_AI_MODEL)) : null,
     __adminConfigWarnings: adminConfigWarnings
   };
@@ -199,7 +147,6 @@ function resolveUserScopedMainModelConfig(userId = '', overrides = null, options
 module.exports = {
   isAdminMainModelUser,
   shouldBypassMainModelFallback,
-  shouldUseDefaultMainModelForAdmin,
   resolveRoleAwareMainModelConfig,
   resolveUserScopedMainModelConfig
 };
