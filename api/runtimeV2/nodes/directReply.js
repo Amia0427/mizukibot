@@ -3,6 +3,10 @@ const {
   createGroupDirectStyleGuardEvent
 } = require('../guards/groupDirectReplyStyleGuard');
 const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
+const {
+  getNormalUserMainReplyStreamTimeoutReply,
+  isNormalUserMainReplyStreamFirstTokenTimeout
+} = require('../../../utils/normalUserMainReplyStreamTimeout');
 
 function createRouteAfterDirectReply() {
   return function routeAfterDirectReply(state) {
@@ -497,31 +501,53 @@ function createDirectReplyNode(deps = {}) {
         nextStream = error?.outputStream
           ? { ...ensureOutputStream(state.output, 'direct'), ...normalizeObject(error.outputStream, {}) }
           : { ...ensureOutputStream(state.output, 'direct'), fallbackToNonStream: true };
-        try {
-          const replyResult = await requestReplyImpl(
-            messagesToSend,
-            {
-              ...directContext,
-              triggerBranch: 'direct_reply.stream_non_stream_fallback',
-              disableTools: true,
-              allowedTools: []
-            }
-          );
-          reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
-          displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
-        } catch (fallbackError) {
-          const failureType = classifyDirectReplyError(fallbackError);
+        if (isNormalUserMainReplyStreamFirstTokenTimeout(error)) {
+          const timeoutReply = getNormalUserMainReplyStreamTimeoutReply(error);
+          reply = timeoutReply;
+          displayReply = timeoutReply;
+          nextStream = {
+            ...ensureOutputStream(state.output, 'direct'),
+            ...mirrorStreamingFlags(state.output, timeoutReply),
+            completed: true,
+            fallbackToNonStream: false,
+            mode: 'direct',
+            normalUserStreamFirstTokenTimedOut: true
+          };
           directLoopEvents = directLoopEvents.concat([
-            createEvent('direct_reply_failure', {
+            createEvent('normal_user_stream_first_token_timeout', {
               node: 'direct_reply',
-              stage: 'stream_non_stream_fallback',
-              failureType,
-              fallbackSource: 'controlled_failure',
-              rawErrorMessage: summarizeDirectReplyError(fallbackError)
+              stage: 'streaming_upstream',
+              fallbackSource: 'normal_user_stream_first_token_timeout',
+              timeoutMs: Number(error?.timeoutMs || 0) || 0
             })
           ]);
-          reply = getControlledFailureReply(failureType);
-          displayReply = reply;
+        } else {
+          try {
+            const replyResult = await requestReplyImpl(
+              messagesToSend,
+              {
+                ...directContext,
+                triggerBranch: 'direct_reply.stream_non_stream_fallback',
+                disableTools: true,
+                allowedTools: []
+              }
+            );
+            reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
+            displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
+          } catch (fallbackError) {
+            const failureType = classifyDirectReplyError(fallbackError);
+            directLoopEvents = directLoopEvents.concat([
+              createEvent('direct_reply_failure', {
+                node: 'direct_reply',
+                stage: 'stream_non_stream_fallback',
+                failureType,
+                fallbackSource: 'controlled_failure',
+                rawErrorMessage: summarizeDirectReplyError(fallbackError)
+              })
+            ]);
+            reply = getControlledFailureReply(failureType);
+            displayReply = reply;
+          }
         }
       }
     } else {
