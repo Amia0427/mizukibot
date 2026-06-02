@@ -51,6 +51,20 @@ function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}, { isAdm
   return '这轮没有可用工具可以处理这个请求。你可以稍后重试，或把需求说得更具体一些。';
 }
 
+function shouldDowngradeUnavailableRouteToDirectReply(route = {}, routeExecutionPlan = {}) {
+  const unavailableReason = String(routeExecutionPlan?.unavailableReason || '').trim().toLowerCase();
+  if (!['no-allowed-tools', 'planner-missing'].includes(unavailableReason)) return false;
+
+  const topRouteType = String(routeExecutionPlan?.topRouteType || route?.topRouteType || '').trim().toLowerCase();
+  if (topRouteType && topRouteType !== 'direct_chat') return false;
+
+  const meta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  if (String(meta.qqActionKey || '').trim()) return false;
+  if (String(meta.command?.cmd || '').trim()) return false;
+
+  return true;
+}
+
 function buildQzoneAutodraftPrompt(requestText = '') {
   return [
     '你现在只负责代写一条可以直接发布到 QQ 空间的中文正文。',
@@ -124,6 +138,7 @@ function buildRouteDiagPayload(routeExecutionPlan = {}, branch = '', extra = {})
 module.exports = {
   parseJsonTail,
   buildUnavailableRouteReply,
+  shouldDowngradeUnavailableRouteToDirectReply,
   buildQzoneAutodraftPrompt,
   buildSupplementedTaskText,
   composeDirectRoutePrompt,

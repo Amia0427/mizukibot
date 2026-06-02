@@ -18,6 +18,7 @@ module.exports = (async () => {
   let backgroundCalled = false;
   let toolCalled = false;
   let aiCalled = false;
+  const aiReplyOptionsSeen = [];
 
   const coordinator = createMessageDispatchCoordinator({
     config: {
@@ -49,8 +50,15 @@ module.exports = (async () => {
     markThinkingEmojiBeforeLlm: async () => true,
     askToolTaskLocally: async () => { toolCalled = true; return 'tool reply'; },
     createStreamingDispatcher: () => ({ onDelta() {}, async finish() {} }),
-    composeDirectRoutePrompt: () => 'prompt',
-    askAIDispatch: async () => { aiCalled = true; return 'ai reply'; },
+    composeDirectRoutePrompt: (parts = {}) => Object.entries(parts)
+      .filter(([, value]) => String(value || '').trim())
+      .map(([key, value]) => `${key}:${value}`)
+      .join('\n'),
+    askAIDispatch: async (_text, _userInfo, _senderId, _customPrompt, _imageUrl, replyOptions) => {
+      aiCalled = true;
+      aiReplyOptionsSeen.push({ ...(replyOptions || {}) });
+      return 'ai reply';
+    },
     sendWithRetry: async () => true
   });
 
@@ -102,6 +110,28 @@ module.exports = (async () => {
   assert.strictEqual(typeof chat.replyOptions.modelConfig.model, 'string');
   assert.strictEqual(chat.replyOptions.disableStream, false, 'group chat should stream by default');
   assert.strictEqual(chat.replyOptions.deferPersist, true, 'direct chat replies should defer persist until send succeeds');
+
+  const unavailableToolChat = await coordinator.dispatchByRoutePlan({
+    route: { meta: {} },
+    routeExecutionPlan: {
+      executor: 'direct',
+      allowTools: false,
+      allowStream: false,
+      topRouteType: 'direct_chat',
+      routeDebugKey: 'direct_chat/tool-missing',
+      unavailableReason: 'no-allowed-tools',
+      allowedTools: []
+    },
+    cleanText: '不要用工具，直接聊',
+    imageUrl: null,
+    userInfo: {},
+    senderId: 'u1',
+    groupId: 'g1'
+  });
+  assert.strictEqual(unavailableToolChat.reply, 'ai reply');
+  assert.strictEqual(toolCalled, true, 'previous tool route should be the only tool call');
+  assert.ok(aiReplyOptionsSeen.length >= 2);
+  assert.ok(!String(aiReplyOptionsSeen.at(-1).routePrompt || '').includes('toolGuidancePrompt:tool'));
 
   setGroupPublic('g1', true, 'test', Date.parse('2026-05-23T23:20:00+08:00'));
   setGroupMainModelStreamEnabled('g1', true, 'test', Date.parse('2026-05-23T23:20:01+08:00'));

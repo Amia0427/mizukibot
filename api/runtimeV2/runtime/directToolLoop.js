@@ -384,12 +384,17 @@ function createDirectToolLoopHelpers(deps = {}) {
         reason: 'tool_not_allowed',
         allowedTools: effectiveAllowedTools
       }));
-      assistantMessage = await requestAssistantMessageForLoop({
-        disableTools: true,
-        allowedTools: []
-      });
-      loopMessages.push(assistantMessage);
-      const replyResolution = await resolveToolLoopReply(assistantMessage, loopMessages.slice(0, -1), directContext, 'tool_error', executedToolEnvelopes);
+      const replyResolution = await resolveToolLoopReply(
+        { role: 'assistant', content: '' },
+        normalizeArray(messagesToSend),
+        {
+          ...directContext,
+          disableTools: true,
+          allowedTools: []
+        },
+        'tool_error',
+        []
+      );
       return {
         reply: replyResolution.text,
         noToolCalls: false,

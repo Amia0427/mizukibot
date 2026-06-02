@@ -636,7 +636,7 @@ function createDirectReplyNode(deps = {}) {
         const retryResult = await requestReplyImpl(
           messagesToSend.concat([{
             role: 'system',
-            content: 'Do not emit any <tool_calls> markup or any tool/function call. No tool is available for this turn. Reply with plain natural language only.'
+            content: 'Ignore the previous structured tool-call markup. Reply to the user in plain natural language. Do not mention tools, tool availability, or internal routing.'
           }]),
           {
             ...directContext,

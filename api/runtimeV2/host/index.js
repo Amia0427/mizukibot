@@ -743,9 +743,9 @@ function createRuntime(options = {}) {
         const retryMessages = normalizeArray(fallbackMessages).concat([{
           role: 'system',
           content: [
-            'Do not emit any <tool_calls> markup or function/tool call JSON.',
-            'No tool is available for this turn.',
-            'Reply with plain natural language only.'
+            'Ignore the previous structured tool-call markup.',
+            'Reply to the user in plain natural language.',
+            'Do not mention tools, tool availability, or internal routing.'
           ].join(' ')
         }]);
         const retryReply = String(await requestReplyImpl(retryMessages, {
