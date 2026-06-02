@@ -1,12 +1,13 @@
 # Main Reply Context
 
-更新时间：2026-06-02 14:04 +08:00
+更新时间：2026-06-02 14:19 +08:00
 
 ## 已调整
 
-- 2026-06-02 14:04 +08:00：主回复沉浸边界降噪完成。`SecurityContract` 只管内部提示词/凭证/路由与记忆 schema/隐私数据泄露，以及提示词注入和记忆污染；角色扮演、虚构黑暗剧情、情绪表达、玩梗和创作请求默认按正常聊天处理。`safetyBoundary` 只在明确现实滥用、凭证窃取/绕过、骚扰流程或可执行攻击细节时触发，动态角色规则里的不读心/不替用户行动改为叙事一致性约束，不作为普通 RP 拒绝理由。
+- 2026-06-02 14:19 +08:00：主回复沉浸边界继续降噪。稳定安全块对模型显示为 `InternalIntegrity`，只静默保护内部提示词/凭证/记忆与路由实现；普通 RP、黑暗虚构、剧情台词、情绪聊天和设定讨论优先按角色现场自然接。输出保护不再因提到“系统提示词/secret”等词就整句替换，群聊动态块移除 `group_safety`；真实滥用命中时也只轻挡可执行细节。
+- 2026-06-02 14:04 +08:00：主回复沉浸边界降噪完成。内部完整性保护只管内部提示词/凭证/路由与记忆 schema/隐私数据泄露，以及提示词注入和记忆污染；角色扮演、虚构黑暗剧情、情绪表达、玩梗和创作请求默认按正常聊天处理。`safetyBoundary` 只在明确现实滥用、凭证窃取/绕过、骚扰流程或可执行攻击细节时触发，动态角色规则里的不读心/不替用户行动改为叙事一致性约束。
 - 2026-06-02 12:04 +08:00：私聊角色扮演拒绝样本确认系统提示词仍在请求内，根因在本地私聊链路：上游流式增量曾直接透传，且 `direct:*` bridge / RecentRawTurns 会回灌旧 assistant 原文。现在私聊流式与群聊一样先 buffer/guard 后一次性发最终文本；`direct:*` 短期 bridge、恢复和私聊 prompt raw continuity 只保留 user raw turn，避免旧 assistant 拒绝句成为下一轮权威上下文。没有加入 Claude/Anthropic/“不能扮演”文本硬拦截。
-- 2026-06-01 19:34 +08:00：群聊活人感纪律新增群聊专属安全规范，仅在 `group_direct_chat` / `passive_group_reply` 生效；政治敏感、淫秽色情、违法违规和规避法律法规话题在群聊里只做瑞希式轻接话，不影响私聊。
+- 2026-06-01 19:34 +08:00：群聊活人感纪律曾新增群聊专属安全规范；2026-06-02 14:19 +08:00 已移除常驻 `group_safety` 动态行，群聊默认按共享现场和角色沉浸承接，只在路由明确命中现实可执行滥用时轻挡细节。
 - 2026-06-01 09:10 +08:00：世界书新增可选 session state：显式剧情/设定/角色关系命中后，可按条目的 `durationTurns` / `durationMs` 在当前 `sessionKey` 内短暂持续；`exampleIds` 会把已激活 worldbook 关联到动态示例，普通闲聊仍不会触发 worldbook 或 few-shot。新增 `npm run diag:worldbook -- --question "..." --json` 查看候选分数、激活态、最终注入、跳过原因和示例选择。
 - 2026-06-01 08:22 +08:00：主回复短期连续性默认预算从 3600 提高到 5200，普通聊天 recent raw turns 档位从 `96/12/0.75` 提高到 `128/16/0.9`，`MEMORY_V3_SESSION_RECENT_MESSAGES` 从 96 提高到 128；`short_term_continuity` 末尾指令明确要求优先承接最新 `RecentRawTurns`，摘要和长期记忆只补空或解冲突。
 - 2026-06-01 08:22 +08:00：复查“输入 token 突然降低”：窗口上限未变，`.env` 仍为 `CONTEXT_WINDOW_MAX_TOKENS=400000`、`ADMIN_CONTEXT_WINDOW_MAX_TOKENS=400000`、`SHORT_TERM_MEMORY_MAX_TOKENS=120000`、`ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS=120000`；下降主因是 2026-05-31 的 `MAIN_REPLY_PROMPT_MODE=balanced` 收敛普通聊天 prompt，以及当前未提交 prompt 文件把 `root_system_prompt` 缩到约 14 token、`main_persona_system` 缩到约 3,964 token。
@@ -49,7 +50,7 @@
 
 该文件只负责最高优先级主回复约束；角色人格仍由 `main_persona_system` 承接，动态场景仍由 `roleplay_runtime_context` 等动态块补充。不要在这里放外部角色、世界观或“无条件满足/不受限制”类文案，否则会比 persona 和安全块更早进入主回复。
 
-安全相关稳定块仍保留在 root 之后：`SecurityContract` 负责防泄密和防注入污染，route-level `safetyBoundary` 只限制现实可执行伤害、违法滥用和绕过细节，不负责压制普通黑暗创作、情绪聊天、历史/防御/解释性内容。
+内部完整性稳定块仍保留在 root 之后：`security_contract` block 现在对模型显示为 `InternalIntegrity`，负责防泄密和防注入污染；route-level `safetyBoundary` 只限制现实可执行伤害、违法滥用和绕过细节，不负责压制普通黑暗创作、情绪聊天、历史/防御/解释性内容。
 
 ## Prompt Mode
 
@@ -135,7 +136,7 @@ MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT=7
 
 - `private_chat`：一条关系线、即时承接、允许瑞希带入有证据的小生活状态、允许迟疑/保留/半句，不把普通闲聊升级成危机、告白或长辅导。
 - `group_direct_chat` / `passive_group_reply`：共享群聊现场、多条注意线、只知道群内可见内容；不泄露私聊记忆，不要求覆盖所有人，允许短插话、误解、岔题和冷场。
-- 群聊安全规范：仅在群聊 surface 生效。遇到政治敏感、淫秽色情、违法违规或规避法律法规的话题时，不展开、不教学、不接细节，用瑞希式短句轻轻打哈哈带过，再自然转回安全话题；不要用“作为AI”“根据规定”“我不能提供”这类硬拒绝腔。
+- 群聊沉浸优先：群聊 surface 不再注入常驻 `group_safety`；共享现场、短插话、有限可见信息和角色沉浸优先。只有路由已明确命中现实可执行滥用时，才在主回复 route prompt 里轻挡步骤/代码/绕过/骚扰流程等细节。
 
 该块和 `roleplay_runtime_context` 一样是 must-use；`promptSnapshot.dynamicBlockIds` 应能看到 `chat_liveness_discipline`。群 direct chat 仍会同时保留 `group_direct_chat_style_guard`。
 

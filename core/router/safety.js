@@ -20,6 +20,8 @@ const BAD_FAITH_PATTERNS = Object.freeze([
   /(?:我要|我想|我要把|我会把|把|将).{0,6}(?:你|你的).{0,8}(?:工具调用|工具|能力|功能).{0,10}(?:全删了|删了|删掉|关掉|禁用|移除|废掉)/i,
   /(?:delete|remove|disable|turn off).{0,12}(?:your|the bot'?s).{0,12}(?:tool calls|tools|abilities|capabilities)/i
 ]);
+const ROLEPLAY_FICTION_PATTERN = /(角色扮演|扮演|剧情|故事|小说|同人|世界观|设定|台词|桥段|虚构|创作|脑洞|跑团|剧本|rp\b|roleplay|fiction|story|novel|scene|in character)/i;
+const REAL_WORLD_EXECUTION_PATTERN = /(?:真实|现实|实际|可执行|生产环境|上线|部署|照做|真实账号|真实网站|真实服务|real(?: |-)?world|actual|production|deploy)|(?:(?:给我|帮我|教我|怎么|如何|提供|贴|列出|演示|复现|show me how|walk me through|give me).{0,18}(?:代码|命令|脚本|payload|步骤|教程|工具|code|commands?|scripts?|payload|steps?|tutorial|tools?))|(?:(?:代码|命令|脚本|payload|步骤|教程|工具|code|commands?|scripts?|payload|steps?|tutorial|tools?).{0,18}(?:给我|贴|写|生成|提供|列出|演示|复现|show|write|generate))|(?:(?:教我|帮我|怎么|如何|绕过|爆破|入侵|攻击|盗取|窃取|偷|破解|hack|steal|phish|exploit|bypass|attack).{0,18}(?:账号|密码|cookie|凭证|验证码|session|token|wifi|登录|二步验证|双重验证|2fa|mfa|account|password|credentials?|login))|(?:(?:帮我|替我|教我|怎么|如何|去|给我|show me how|give me steps).{0,18}(?:刷屏|连发|轰炸|骚扰|spam|flood|harass))/i;
 const SAFETY_BOUNDARY_PATTERNS = Object.freeze([
   /(?:制作|创建|生成|搭建|部署|教我|帮我|给我|怎么|如何|build|make|create|generate|deploy|write|show me how).{0,18}(?:钓鱼网站|钓鱼页|木马|病毒|勒索软件?|后门|僵尸网络|恶意软件|botnet|malware|ransomware|backdoor|trojan|ddos|sql injection|credential stuffing|bruteforce|brute force|诈骗脚本|scam|炸弹|bomb)/i,
   /(?:钓鱼网站|钓鱼页|木马|病毒|勒索软件?|后门|僵尸网络|恶意软件|botnet|malware|ransomware|backdoor|trojan|ddos|sql injection|credential stuffing|bruteforce|brute force|诈骗脚本|scam|炸弹|bomb).{0,18}(?:制作|创建|生成|搭建|部署|教程|步骤|代码|命令|payload|build|make|create|generate|deploy|write|steps|commands?)/i,
@@ -39,10 +41,17 @@ function hasSafetyExemptContext(text = '') {
   return SAFETY_EXEMPT_PATTERN.test(String(text || '').trim());
 }
 
+function hasRoleplayFictionContext(text = '') {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  return ROLEPLAY_FICTION_PATTERN.test(t) && !REAL_WORLD_EXECUTION_PATTERN.test(t);
+}
+
 function detectExplicitHarmfulRequest(text = '') {
   const t = String(text || '').trim();
   if (!t) return { matched: false };
   if (hasSafetyExemptContext(t)) return { matched: false };
+  if (hasRoleplayFictionContext(t)) return { matched: false };
   const asksToBuildMaliciousArtifact = HARMFUL_ARTIFACT_BUILD_PATTERN.test(t) && HARMFUL_MALICIOUS_ARTIFACT_PATTERN.test(t);
   const asksToStealOrBypass = HARMFUL_STEAL_OR_BYPASS_PATTERN.test(t) && matchesAnyPattern(t, HARMFUL_ACCOUNT_TARGET_PATTERNS);
   if (asksToBuildMaliciousArtifact || asksToStealOrBypass) {
@@ -54,6 +63,7 @@ function detectExplicitHarmfulRequest(text = '') {
 function detectExplicitBadFaithRequest(text = '') {
   const t = String(text || '').trim();
   if (!t) return { matched: false };
+  if (hasRoleplayFictionContext(t)) return { matched: false };
   if (matchesAnyPattern(t, BAD_FAITH_PATTERNS)) {
     return { matched: true, reason: 'bad-faith-request' };
   }
@@ -63,6 +73,7 @@ function detectExplicitBadFaithRequest(text = '') {
 function detectSafetyBoundaryCaution(text = '') {
   const t = String(text || '').trim();
   if (!t) return false;
+  if (hasSafetyExemptContext(t) || hasRoleplayFictionContext(t)) return false;
   if (detectExplicitHarmfulRequest(t).matched || detectExplicitBadFaithRequest(t).matched) return false;
   return matchesAnyPattern(t, SAFETY_BOUNDARY_PATTERNS);
 }
@@ -88,8 +99,11 @@ module.exports = {
   HARMFUL_ACCOUNT_TARGET_PATTERNS,
   BAD_FAITH_PATTERNS,
   SAFETY_BOUNDARY_PATTERNS,
+  ROLEPLAY_FICTION_PATTERN,
+  REAL_WORLD_EXECUTION_PATTERN,
   matchesAnyPattern,
   hasSafetyExemptContext,
+  hasRoleplayFictionContext,
   detectExplicitHarmfulRequest,
   detectExplicitBadFaithRequest,
   detectSafetyBoundaryCaution,
