@@ -22,6 +22,28 @@ function getPrivateChatTestUserIdSet(runtimeConfig = config) {
   return normalizeIdSet(runtimeConfig?.PRIVATE_CHAT_ALLOWED_USER_IDS);
 }
 
+function getProactivePrivateTouchUserIdSet(runtimeConfig = config) {
+  const explicit = normalizeIdSet(runtimeConfig?.PROACTIVE_PRIVATE_TOUCH_USER_IDS);
+  const sourceSet = explicit.size > 0 ? explicit : getPrivateChatTestUserIdSet(runtimeConfig);
+  const allowWildcard = runtimeConfig?.PROACTIVE_PRIVATE_TOUCH_ALLOW_WILDCARD === true;
+  const result = new Set();
+  for (const userId of sourceSet) {
+    if (userId === '*' && !allowWildcard) continue;
+    result.add(userId);
+  }
+  return result;
+}
+
+function isProactivePrivateTouchUser({
+  userId = '',
+  config: runtimeConfig = config
+} = {}) {
+  const normalizedUserId = normalizeText(userId);
+  if (!normalizedUserId) return false;
+  const allowSet = getProactivePrivateTouchUserIdSet(runtimeConfig);
+  return allowSet.has('*') || allowSet.has(normalizedUserId);
+}
+
 function isPrivateChatTestUser({
   chatType = '',
   userId = '',
@@ -48,7 +70,9 @@ function isPrivilegedPrivateChatUser({
 
 module.exports = {
   getPrivateChatTestUserIdSet,
+  getProactivePrivateTouchUserIdSet,
   isPrivateChatTestUser,
   isPrivateChatType,
+  isProactivePrivateTouchUser,
   isPrivilegedPrivateChatUser
 };

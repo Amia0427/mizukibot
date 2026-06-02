@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-01 09:10 +08:00
+更新时间：2026-06-02 23:48 +08:00
 
 ## 已调整
 
+- 2026-06-02 23:48 +08:00：主动触达 surface 拆分为 `proactive_group_touch` / `proactive_private_touch`；群触达使用群可见纪律，主动私聊默认关闭，只允许 `PROACTIVE_PRIVATE_TOUCH_USER_IDS` 或私聊白名单里的具体 userId，在有记忆上下文时发起。
 - 2026-06-01 19:34 +08:00：群聊活人感纪律新增群聊专属安全规范，仅在 `group_direct_chat` / `passive_group_reply` 生效；政治敏感、淫秽色情、违法违规和规避法律法规话题在群聊里只做瑞希式轻接话，不影响私聊。
 - 2026-06-01 09:10 +08:00：世界书新增可选 session state：显式剧情/设定/角色关系命中后，可按条目的 `durationTurns` / `durationMs` 在当前 `sessionKey` 内短暂持续；`exampleIds` 会把已激活 worldbook 关联到动态示例，普通闲聊仍不会触发 worldbook 或 few-shot。新增 `npm run diag:worldbook -- --question "..." --json` 查看候选分数、激活态、最终注入、跳过原因和示例选择。
 - 2026-06-01 08:22 +08:00：主回复短期连续性默认预算从 3600 提高到 5200，普通聊天 recent raw turns 档位从 `96/12/0.75` 提高到 `128/16/0.9`，`MEMORY_V3_SESSION_RECENT_MESSAGES` 从 96 提高到 128；`short_term_continuity` 末尾指令明确要求优先承接最新 `RecentRawTurns`，摘要和长期记忆只补空或解冲突。
@@ -133,6 +134,8 @@ MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT=7
 
 - `private_chat`：一条关系线、即时承接、允许瑞希带入有证据的小生活状态、允许迟疑/保留/半句，不把普通闲聊升级成危机、告白或长辅导。
 - `group_direct_chat` / `passive_group_reply`：共享群聊现场、多条注意线、只知道群内可见内容；不泄露私聊记忆，不要求覆盖所有人，允许短插话、误解、岔题和冷场。
+- `proactive_private_touch`：瑞希主动发起的一对一私聊，只面向当前白名单用户；必须接有证据的未完话题、近期状态、journal 或关系线索，不把泛泛关心写成系统回访。
+- `proactive_group_touch`：群聊里的主动轻触达，只基于群内可见上下文和公开信息；不泄露私聊记忆，不把一对一关系线扩写成群事实。
 - 群聊安全规范：仅在群聊 surface 生效。遇到政治敏感、淫秽色情、违法违规或规避法律法规的话题时，不展开、不教学、不接细节，用瑞希式短句轻轻打哈哈带过，再自然转回安全话题；不要用“作为AI”“根据规定”“我不能提供”这类硬拒绝腔。
 
 该块和 `roleplay_runtime_context` 一样是 must-use；`promptSnapshot.dynamicBlockIds` 应能看到 `chat_liveness_discipline`。群 direct chat 仍会同时保留 `group_direct_chat_style_guard`。
