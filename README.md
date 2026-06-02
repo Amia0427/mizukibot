@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-02 16:55 +08:00：普通用户主回复流式请求新增首个可见字超时保护，默认 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=35000`；35 秒内无首字会 abort 上游并回复“上游繁忙，请稍后重试”，管理员不受该限制影响。
+
 更新 2026-06-02 16:37 +08:00：主回复 persona 边界加入 `<fiction_authentic>` 角色真实性准则，明确 `{{char}}` 指晓山瑞希，要求拒绝、抗拒、不适等反应必须能从瑞希设定或当前剧情找到依据；这是主回复模型的角色扮演准则，不是身份漂移硬拦截。
 
 更新 2026-06-02 16:30 +08:00：按要求恢复普通私聊 admin 默认走管理员模型（`ADMIN_AI_MODEL`）；感知后回复仍默认跟随主模型（`PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL=true`），并保留进入 prompt 与 post-reply 持久化前的模型自报/拒演污染隔离。未新增发送层身份漂移硬拦截。

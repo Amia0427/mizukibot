@@ -503,6 +503,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
       finalErrorCode: extractErrorCode(error),
       error: String(error?.message || error || '').slice(0, 400)
     });
+    if (error?.bypassMainModelFallback === true) throw error;
     if (bypassFallback) throw error;
     if (resolvedConfig.__mainFallbackActive) throw error;
     const failureState = recordMainModelFailure(error, { scope });

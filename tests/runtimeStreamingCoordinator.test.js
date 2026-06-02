@@ -1,6 +1,10 @@
 const assert = require('assert');
 
 const { createStreamingCoordinatorHelpers } = require('../api/runtimeV2/runtime/streamingCoordinator');
+const {
+  NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY,
+  createNormalUserMainReplyStreamFirstTokenTimeoutError
+} = require('../utils/normalUserMainReplyStreamTimeout');
 
 module.exports = (async () => {
   const deltas = [];
@@ -81,6 +85,72 @@ module.exports = (async () => {
     output: {}
   });
   assert.strictEqual(objectStreamed.finalReply, 'persisted object reply');
+
+  const normalUserTimeoutDeltas = [];
+  const normalUserTimeoutEvents = [];
+  let normalUserTimeoutFallbackCalls = 0;
+  const normalUserTimeoutHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => ({
+      segments: {},
+      compactionPlan: {
+        compactedSegments: [{ name: 'user', messages: input.userTurnMessages || [] }]
+      }
+    }),
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: []
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async () => {
+      throw createNormalUserMainReplyStreamFirstTokenTimeoutError(35);
+    },
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
+    isHumanizerEnabledImpl: () => false,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => {
+      normalUserTimeoutFallbackCalls += 1;
+      return 'non-stream fallback';
+    },
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    createEvent: (type, payload) => ({ type, ...payload }),
+    config: { AI_MAX_TOKENS: 3500 },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const normalUserTimeoutStreamed = await normalUserTimeoutHelpers.streamDirectReply([{ role: 'user', content: 'hi' }], {
+    request: {
+      routePolicyKey: 'direct_chat/default',
+      modelConfig: {},
+      onDelta(text, fullText) {
+        normalUserTimeoutDeltas.push({ text, fullText });
+      },
+      onEvent(event) {
+        normalUserTimeoutEvents.push(event);
+      }
+    },
+    memory: {},
+    output: {}
+  });
+  assert.strictEqual(normalUserTimeoutStreamed.finalReply, NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY);
+  assert.strictEqual(normalUserTimeoutStreamed.visibleText, NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY);
+  assert.strictEqual(normalUserTimeoutStreamed.persistedText, NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY);
+  assert.strictEqual(normalUserTimeoutStreamed.normalUserStreamFirstTokenTimedOut, true);
+  assert.strictEqual(normalUserTimeoutStreamed.stream.normalUserStreamFirstTokenTimedOut, true);
+  assert.strictEqual(normalUserTimeoutStreamed.stream.fallbackToNonStream, false);
+  assert.strictEqual(normalUserTimeoutFallbackCalls, 0);
+  assert.deepStrictEqual(normalUserTimeoutDeltas, [{
+    text: NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY,
+    fullText: NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY
+  }]);
+  assert.ok(normalUserTimeoutEvents.some((event) => event.type === 'normal_user_stream_first_token_timeout'));
 
   const privateDeltas = [];
   const privateGuardHelpers = createStreamingCoordinatorHelpers({

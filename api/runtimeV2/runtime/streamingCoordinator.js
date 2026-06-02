@@ -3,6 +3,11 @@ const {
   isGroupDirectChatRequest
 } = require('../guards/groupDirectReplyStyleGuard');
 const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
+const {
+  NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY,
+  getNormalUserMainReplyStreamTimeoutReply,
+  isNormalUserMainReplyStreamFirstTokenTimeout
+} = require('../../../utils/normalUserMainReplyStreamTimeout');
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
@@ -262,6 +267,36 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         }
       };
     } catch (error) {
+      if (isNormalUserMainReplyStreamFirstTokenTimeout(error)) {
+        const safeFinalReply = sanitizeUserFacingText(
+          getNormalUserMainReplyStreamTimeoutReply(error)
+        ).trim() || NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY;
+        emitRuntimeEvent(state, 'normal_user_stream_first_token_timeout', {
+          node: 'direct_reply',
+          stage: 'streaming_upstream',
+          fallbackSource: 'normal_user_stream_first_token_timeout',
+          timeoutMs: Number(error?.timeoutMs || 0) || 0
+        });
+        if (typeof request.onDelta === 'function') {
+          request.onDelta(safeFinalReply, safeFinalReply);
+        }
+        return {
+          finalReply: safeFinalReply,
+          visibleText: safeFinalReply,
+          persistedText: safeFinalReply,
+          normalUserStreamFirstTokenTimedOut: true,
+          humanizerTimedOut: false,
+          humanizerFailed: false,
+          humanizerFailureReason: '',
+          stream: {
+            ...markStreamCompleted(state.output, true),
+            ...mirrorStreamingFlags(state.output, safeFinalReply),
+            normalUserStreamFirstTokenTimedOut: true,
+            fallbackToNonStream: false,
+            mode: 'direct'
+          }
+        };
+      }
       if (String(error?.partialText || '').trim()) {
         const originalPartialReply = sanitizeUserFacingText(error.partialText).trim();
         let finalReply = originalPartialReply;

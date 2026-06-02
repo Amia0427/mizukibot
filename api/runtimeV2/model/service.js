@@ -18,6 +18,9 @@ const {
 const { isReplyFailure } = require('../../../utils/replyFailure');
 const { runHumanizerAgent } = require('../../humanizerAgent');
 const {
+  createNormalUserMainReplyStreamFirstTokenTimeoutError
+} = require('../../../utils/normalUserMainReplyStreamTimeout');
+const {
   buildMainModelRequest,
   getApiBaseUrl,
   getApiKey,
@@ -41,6 +44,11 @@ const {
 // const resolvedConfig = resolveUserScopedMainModelConfig(userId, modelConfig, options);
 // const bypassFallback = shouldBypassMainModelFallback(userId, options);
 const MODEL_RESPONSE_MALFORMED_REPLY = '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。';
+
+function getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig = null) {
+  if (String(resolvedConfig?.__mainModelUserRole || '').trim().toLowerCase() === 'admin') return 0;
+  return Math.max(0, Math.floor(Number(config.NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS) || 0));
+}
 
 function getAllowedToolNames(context = {}) {
   if (!Array.isArray(context.allowedTools)) return [];
@@ -328,8 +336,18 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
   const parserState = { buffer: '' };
   let collected = '';
   let lastVisibleText = '';
+  let firstVisibleOutputSeen = false;
+  let cancelActiveFirstTokenTimer = null;
   const userId = String(options.userId || options.routeMeta?.userId || options.routeMeta?.user_id || '').trim();
   const preserveThink = options.preserveThink === true;
+
+  const markFirstVisibleOutput = () => {
+    firstVisibleOutputSeen = true;
+    if (typeof cancelActiveFirstTokenTimer === 'function') {
+      cancelActiveFirstTokenTimer();
+      cancelActiveFirstTokenTimer = null;
+    }
+  };
 
   const emitVisibleDelta = (eventDelta = '') => {
     collected += eventDelta;
@@ -340,6 +358,9 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
     if (visibleCollected !== lastVisibleText) {
       lastVisibleText = visibleCollected;
       options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
+      if (options.streamHadOutput) {
+        markFirstVisibleOutput();
+      }
       if (typeof options.onDelta === 'function') {
         options.onDelta(visibleDelta, visibleCollected);
       }
@@ -349,6 +370,11 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
   try {
     await withMainModelFallback(async (resolvedConfig) => {
       const requestStreamOnce = async (messages) => {
+        const normalUserFirstTokenTimeoutMs = getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig);
+        const useNormalUserFirstTokenTimeout = normalUserFirstTokenTimeoutMs > 0 && !firstVisibleOutputSeen;
+        const abortController = useNormalUserFirstTokenTimeout && typeof AbortController !== 'undefined'
+          ? new AbortController()
+          : null;
         const callTrace = logResolvedModelCall(options, resolvedConfig, 'v2_streaming_reply');
         const request = buildMainModelRequest(resolvedConfig, {
           messages,
@@ -359,9 +385,12 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
           topRouteType: options?.topRouteType,
           allowedTools: options?.allowedTools
         });
-        await postStreamWithRetry(
+        const requestBody = abortController
+          ? { ...request.body, __abortSignal: abortController.signal }
+          : request.body;
+        const streamPromise = postStreamWithRetry(
           request.url,
-          request.body,
+          requestBody,
           {
             onData(chunk) {
               const parsed = extractSSEEvents(parserState, chunk);
@@ -375,6 +404,37 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
           getRetries(1, resolvedConfig),
           getApiKey(resolvedConfig)
         );
+        if (!useNormalUserFirstTokenTimeout) {
+          await streamPromise;
+          return;
+        }
+
+        let timeoutError = null;
+        const timeoutPromise = new Promise((_, reject) => {
+          const timer = setTimeout(() => {
+            if (firstVisibleOutputSeen) return;
+            timeoutError = createNormalUserMainReplyStreamFirstTokenTimeoutError(normalUserFirstTokenTimeoutMs);
+            if (abortController && !abortController.signal.aborted) {
+              try { abortController.abort(timeoutError); } catch (_) {}
+            }
+            reject(timeoutError);
+          }, normalUserFirstTokenTimeoutMs);
+          cancelActiveFirstTokenTimer = () => {
+            clearTimeout(timer);
+          };
+        });
+
+        try {
+          await Promise.race([streamPromise, timeoutPromise]);
+        } catch (error) {
+          if (timeoutError) throw timeoutError;
+          throw error;
+        } finally {
+          if (typeof cancelActiveFirstTokenTimer === 'function') {
+            cancelActiveFirstTokenTimer();
+            cancelActiveFirstTokenTimer = null;
+          }
+        }
       };
 
       try {
