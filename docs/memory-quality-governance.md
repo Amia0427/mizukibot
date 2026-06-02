@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-05-27 01:04 +08:00
+更新时间：2026-06-02 10:10 +08:00
+
+更新 2026-06-02 10:10 +08:00：Memory V3 新增 Nocturne 风格结构化外壳：URI resolver、Boot Memory、alias index、trigger/glossary 和 changeset review；写入仍先走 candidate/quality gate，审核 reject 只追加 archive/supersede 事件，不删除 raw events。
 
 更新 2026-05-31 11:25 +08:00：图片视觉摘要默认请求超时提升到 25s；发送给视觉摘要模型前会把 cached 图片归一到 1024px 内 JPEG，规避硅基流动 ALB 对 2304x9146 等超长 JPEG 直接返回 HTML `400 Bad Request`。
 
@@ -31,6 +33,9 @@
 - `utils/memory-v3/recallPolicyResource.js` 已接入主回复动态上下文，运行时在有记忆证据时注入 `memory_recall_policy`，约束 category/source/lifecycle/弱证据使用。
 - `utils/memoryGovernance/recallEvalGate.js` 对 recall eval 增加 lifecycle leakage、category mismatch 和 recent recall miss 门禁，`utils/mainReplyContextPreview.js` 汇总 memory trace lifecycle/conflict/policy 信号。
 - `utils/mainReplyContextPreview.js`、`utils/memoryContext/formatters.js` 和 `scripts/eval-memory-recall.js` 已扩展 source/category/tags/lifecycle/drop reason 观测，便于定位错召、旧版本误召和类别漏召。
+- `utils/memory-v3/uriResolver.js`、`bootMemory.js`、`aliasIndex.js`、`triggerGlossary.js` 和 `changesetReview.js` 提供 Nocturne 风格的可导航外壳：`core://user/<userId>/...`、`group://...`、`journal://...`、`image://...`、`system://boot` / `system://glossary`，并按 namespace 隔离 persona、runtime、user、group。
+- `utils/memoryContext/v3Payload.js` 会在主回复记忆上下文前生成短 `boot digest`，默认聚合用户画像、关系锚点、最近连续性、活跃任务和关键偏好，不额外触发模型调用。
+- `utils/memoryCli/index.js` 支持 `mem read`、`mem boot`、`mem alias`、`mem trigger` 和 `mem review`；管理端新增 Memory Explorer / Review 只读和审核入口，可查看 URI 树、alias、trigger、版本链与召回命中原因。
 
 更新 2026-05-24 17:13 +08:00：主回复系统提示词顶部新增 `prompts/persona/00_roleplay_liveness_prelude.txt`，由 `prompts/prompt-manifest.json` 以负优先级注入，用于强化角色活人感、关系温度和记忆连续性；验证入口为 `npm run check:prompts` 与 `node tests/configPersonaPrompt.test.js`。
 更新 2026-05-27 01:04 +08:00：回放“脚臭排行”误召回确认责任层是主回复 runtime 强制注入，而不是记忆筛选本身；planner skip 的 `retrieved_memory_lite` 不再被普通新话题的非空 `memoryContext` 反向加回，persona/root prompt 仅作为已注入噪声的放大因素处理。
@@ -58,6 +63,7 @@
 5. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。
 6. 修复后运行 `npm run diag:memory -- recall --limit 50 --auto-gold --gate`，观察 `recallAt8`、`mrrAt8`、`leakage`、`lifecycleLeakage`、`categoryMismatches`、`recentRecallMisses`、`emptyResultRate`。
 7. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10`。
+8. 人工审核新 changeset：`mem review list --status candidate` 查看候选，确认后 `mem review accept <changesetId>`；拒绝用 `mem review reject <changesetId> --reason "..."`，只追加归档/替代事件。
 
 ## 清洗策略
 
@@ -103,6 +109,8 @@ node tests/memoryRecallPolicyPromptBlock.test.js
 node tests/memoryV3RecentRecallFastPath.test.js
 node tests/memoryRecallAutoGoldEval.test.js
 node tests/mainReplyContextPreview.test.js
+node tests/memoryV3NocturneShell.test.js
+node tests/memoryCliV3.test.js
 node tests/memoryGovernanceConflictReport.test.js
 node tests/memoryCorrectionSupersede.test.js
 node tests/postReplyVectorWatchdog.test.js

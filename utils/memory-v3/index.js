@@ -20,6 +20,32 @@ const {
 const {
   resolveMemoryConflicts
 } = require('./memoryConflictResolver');
+const {
+  addMemoryAlias,
+  listMemoryAliases,
+  removeMemoryAlias,
+  resolveMemoryAlias
+} = require('./aliasIndex');
+const {
+  buildBootMemory
+} = require('./bootMemory');
+const {
+  acceptChangeset,
+  listPendingChangesets,
+  rejectChangeset
+} = require('./changesetReview');
+const {
+  addMemoryTriggers,
+  listMemoryTriggers,
+  matchMemoryTriggers,
+  removeMemoryTriggers
+} = require('./triggerGlossary');
+const {
+  buildMemoryUriTree,
+  readMemoryUri,
+  searchMemoryUris,
+  uriForDoc
+} = require('./uriResolver');
 
 module.exports = {
   appendMemoryEvent,
@@ -37,5 +63,21 @@ module.exports = {
   importMemoryFile,
   splitMemoryImportChunks,
   getMemoryRecallPolicyResource,
-  resolveMemoryConflicts
+  resolveMemoryConflicts,
+  addMemoryAlias,
+  listMemoryAliases,
+  removeMemoryAlias,
+  resolveMemoryAlias,
+  buildBootMemory,
+  acceptChangeset,
+  listPendingChangesets,
+  rejectChangeset,
+  addMemoryTriggers,
+  listMemoryTriggers,
+  matchMemoryTriggers,
+  removeMemoryTriggers,
+  buildMemoryUriTree,
+  readMemoryUri,
+  searchMemoryUris,
+  uriForDoc
 };
