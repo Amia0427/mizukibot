@@ -10,8 +10,6 @@ module.exports = (async () => {
   assert.strictEqual(resolveChatSurface({ routeMeta: {}, topRouteType: 'direct_chat' }), 'private_chat');
   assert.strictEqual(resolveChatSurface({ routeMeta: { groupId: 'g1' }, topRouteType: 'direct_chat' }), 'group_direct_chat');
   assert.strictEqual(resolveChatSurface({ surface: 'passive_group_reply', routeMeta: { groupId: 'g1' } }), 'passive_group_reply');
-  assert.strictEqual(resolveChatSurface({ routeMeta: { chatType: 'private' }, topRouteType: 'proactive' }), 'proactive_private_touch');
-  assert.strictEqual(resolveChatSurface({ routeMeta: { groupId: 'g1', chatType: 'group' }, topRouteType: 'proactive' }), 'proactive_group_touch');
 
   const privatePrompt = buildChatLivenessDisciplinePrompt({
     routeMeta: {},
@@ -73,31 +71,6 @@ module.exports = (async () => {
   assert.ok(passiveGroupPrompt.includes('淫秽色情'));
   assert.ok(passiveGroupPrompt.includes('违法违规'));
   assert.ok(passiveGroupPrompt.includes('打哈哈'));
-
-  const proactivePrivatePrompt = buildChatLivenessDisciplinePrompt({
-    topRouteType: 'proactive',
-    routeMeta: { chatType: 'private', surface: 'proactive_private_touch' },
-    personaMemoryState: {
-      relationshipState: { relationship: '普通朋友' },
-      continuityState: { openLoops: ['还没聊完模型部署'] }
-    }
-  });
-  assert.ok(proactivePrivatePrompt.includes('surface=proactive_private_touch'));
-  assert.ok(proactivePrivatePrompt.includes('chat_type=private'));
-  assert.ok(proactivePrivatePrompt.includes('一对一私聊'));
-  assert.ok(!proactivePrivatePrompt.includes('共享群聊现场'));
-
-  const proactiveGroupPrompt = buildChatLivenessDisciplinePrompt({
-    topRouteType: 'proactive',
-    routeMeta: { groupId: 'g1', chatType: 'group', surface: 'proactive_group_touch' },
-    personaMemoryState: {
-      continuityState: { activeTopic: '群里接入状态' }
-    }
-  });
-  assert.ok(proactiveGroupPrompt.includes('surface=proactive_group_touch'));
-  assert.ok(proactiveGroupPrompt.includes('chat_type=group'));
-  assert.ok(proactiveGroupPrompt.includes('群聊里轻触达'));
-  assert.ok(proactiveGroupPrompt.includes('不要泄露、暗示或调用私聊记忆'));
 
   const state = buildChatLiveState({
     routeMeta: { groupId: 'g1', directedContext: { scene: 'reply_to_bot' } },

@@ -55,17 +55,6 @@ module.exports = (() => {
     assert.deepStrictEqual(config.PRIVATE_CHAT_TEST_USER_IDS, ['*']);
     assert.strictEqual(privileged.isPrivateChatTestUser({ chatType: 'private', userId: 'random_user', config }), true);
     assert.strictEqual(privileged.isPrivilegedPrivateChatUser({ chatType: 'private', userId: 'random_user', config }), false);
-    assert.deepStrictEqual(Array.from(privileged.getProactivePrivateTouchUserIdSet(config)), []);
-    assert.strictEqual(privileged.isProactivePrivateTouchUser({ userId: 'random_user', config }), false);
-
-    process.env.PROACTIVE_PRIVATE_TOUCH_USER_IDS = 'touch_1,*';
-    process.env.PROACTIVE_PRIVATE_TOUCH_ALLOW_WILDCARD = 'false';
-
-    ({ config, privileged } = reloadModules());
-
-    assert.deepStrictEqual(Array.from(privileged.getProactivePrivateTouchUserIdSet(config)), ['touch_1']);
-    assert.strictEqual(privileged.isProactivePrivateTouchUser({ userId: 'touch_1', config }), true);
-    assert.strictEqual(privileged.isProactivePrivateTouchUser({ userId: 'random_user', config }), false);
 
     console.log('privateChatTestUserConfig.test.js passed');
   } finally {

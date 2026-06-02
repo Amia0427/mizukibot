@@ -19,10 +19,6 @@ const {
   recordPersonaMemoryOutcome
 } = require('../../utils/personaMemoryState');
 const {
-  getProactivePrivateTouchUserIdSet,
-  isProactivePrivateTouchUser
-} = require('../../utils/privilegedPrivateChat');
-const {
   getDailyJournalRetrievalBundle,
   runDailyJournalSummaries,
   shouldRunDailySummaryNow
@@ -227,65 +223,6 @@ function canTriggerProactiveReply(userId, data, state, today, now = Date.now()) 
   return true;
 }
 
-function getProactivePrivateStateKey(userId = '') {
-  const uid = String(userId || '').trim();
-  return uid ? `private:${uid}` : '';
-}
-
-function getProactivePrivateDailyMax(runtimeConfig = config) {
-  const value = Number(runtimeConfig.PROACTIVE_PRIVATE_TOUCH_MAX_PER_DAY);
-  return Math.max(0, Number.isFinite(value) ? value : 2);
-}
-
-function getProactivePrivateMinGapMs(runtimeConfig = config) {
-  const minutes = Math.max(
-    5,
-    Number(
-      runtimeConfig.PROACTIVE_PRIVATE_TOUCH_MIN_GAP_MINUTES
-      || runtimeConfig.PROACTIVE_TOUCH_MIN_GAP_MINUTES
-      || 240
-    ) || 240
-  );
-  return minutes * 60 * 1000;
-}
-
-function resolveProactivePrivateTouchUserIds(runtimeConfig = config, favoriteStore = favorites) {
-  const allowSet = getProactivePrivateTouchUserIdSet(runtimeConfig);
-  if (!allowSet.size) return [];
-  if (allowSet.has('*')) {
-    return Object.keys(favoriteStore || {}).map((item) => String(item || '').trim()).filter(Boolean);
-  }
-  return Array.from(allowSet).map((item) => String(item || '').trim()).filter(Boolean);
-}
-
-function canTriggerProactivePrivateReply(userId, data, state, today, now = Date.now(), runtimeConfig = config) {
-  const uid = String(userId || '').trim();
-  if (!runtimeConfig.PROACTIVE_PRIVATE_TOUCH_ENABLED) return false;
-  if (!uid || !data) return false;
-  if (!isProactivePrivateTouchUser({ userId: uid, config: runtimeConfig })) return false;
-
-  const points = Number(data.points || 0);
-  const privateMinPoints = Number(runtimeConfig.PROACTIVE_PRIVATE_TOUCH_MIN_POINTS);
-  const replyMinPoints = Number(runtimeConfig.PROACTIVE_REPLY_MIN_POINTS);
-  const minPoints = Number.isFinite(privateMinPoints)
-    ? privateMinPoints
-    : (Number.isFinite(replyMinPoints) ? replyMinPoints : 150);
-  if (points <= minPoints) return false;
-
-  const stateKey = getProactivePrivateStateKey(uid);
-  const userState = getDailyState(state, stateKey, today);
-  const dailyMax = getProactivePrivateDailyMax(runtimeConfig);
-  if (dailyMax <= 0 || Number(userState.proactive_count || 0) >= dailyMax) return false;
-
-  const lastSeenAt = Number(data.last_private_seen_at || data.last_seen_at || 0);
-  if (lastSeenAt && now - lastSeenAt < getIdleMs()) return false;
-
-  const lastProactiveAt = Number(userState.last_proactive_at || 0);
-  if (lastProactiveAt && now - lastProactiveAt < getProactivePrivateMinGapMs(runtimeConfig)) return false;
-
-  return true;
-}
-
 function resolveShortTermStateForUser(userId, groupId = '') {
   const uid = String(userId || '').trim();
   const gid = String(groupId || '').trim();
@@ -349,32 +286,22 @@ async function buildReasonAwarePrompt({
   secondaryContext = '',
   fallbackGreetingType = '',
   userId = '',
-  data = {},
-  surface = '',
-  chatType = '',
-  groupId = ''
+  data = {}
 } = {}) {
-  const resolvedSurface = String(surface || '').trim()
-    || (String(chatType || '').trim().toLowerCase() === 'private' ? 'proactive_private_touch' : 'proactive_group_touch');
-  const isPrivateTouch = resolvedSurface === 'proactive_private_touch';
-  const targetGroupId = isPrivateTouch ? '' : String(groupId || data.group_id || '').trim();
-  const resolvedChatType = isPrivateTouch ? 'private' : 'group';
   const personaState = await composePersonaMemoryState({
     userId,
     question: `${touchReason || ''} ${primaryContext || ''} ${secondaryContext || ''}`.trim(),
-    groupId: targetGroupId,
+    groupId: String(data.group_id || '').trim(),
     routeMeta: {
-      groupId: targetGroupId,
-      chatType: resolvedChatType,
-      surface: resolvedSurface
+      groupId: String(data.group_id || '').trim()
     },
     topRouteType: 'proactive',
     routePolicyKey: 'proactive/default'
   }, {
-    surface: resolvedSurface,
-    groupId: targetGroupId
+    surface: 'proactive_touch',
+    groupId: String(data.group_id || '').trim()
   });
-  const personaPrompt = renderPersonaMemoryPrompt(personaState, resolvedSurface);
+  const personaPrompt = renderPersonaMemoryPrompt(personaState, 'proactive_touch');
   const profile = getUserProfile(userId) || {};
   const summary = trimText(getUserSummary(userId), 220) || '暂无';
   const memories = trimText(getUserMemories(userId), 220) || '暂无';
@@ -391,21 +318,13 @@ async function buildReasonAwarePrompt({
         '如果是 morning，只能像自然的上午招呼；如果是 night，只能像自然的晚间收束。',
         '不要带列表、解释、规则说明，不要连续追问。'
       ]
-    : isPrivateTouch
-    ? [
-        '你在替瑞希主动发起一条一对一私聊消息。',
-        '只写给当前这个用户，不提群聊、群号、@人、系统提醒或白名单。',
-        '只写 1 到 2 句，总长度不超过 60 个中文字符。',
-        '必须贴着有证据的未完话题、近期状态、journal 或关系线索；不要泛泛关心。',
-        '最多一个问号，不要连续追问，不要制造压力，不要列表，不要解释规则。'
-      ]
     : [
-        '你在替机器人发一条群聊上下文驱动的主动轻触达消息。',
+        '你在替机器人发一条上下文驱动的主动轻触达消息。',
         '只写 1 到 2 句，总长度不超过 60 个中文字符。',
         '最多一个问号，不要列表，不要解释规则，不要模板开场。',
         'open loop 必须直接续接上次未完的话题，不能泛泛关心。',
         'topic 或 journal 只能轻轻续一个细节，不能把历史全抖出来。',
-        'light care 不能写成早安晚安模板，不能泄露私聊记忆。'
+        'light care 不能写成早安晚安模板。'
       ];
 
   return {
@@ -454,16 +373,10 @@ function shouldSendScheduledGreeting(data, type, today, runtimeConfig = config, 
   return true;
 }
 
-function selectTouchCandidate(userId, data, state, today, now = Date.now(), options = {}) {
+function selectTouchCandidate(userId, data, state, today, now = Date.now()) {
   const profile = getUserProfile(userId) || {};
-  const groupId = Object.prototype.hasOwnProperty.call(options, 'groupId')
-    ? String(options.groupId || '').trim()
-    : String(data?.group_id || '').trim();
-  const stateKey = String(options.stateKey || userId || '').trim();
-  const allowLightCare = options.allowLightCare !== false;
-  const requireContext = options.requireContext === true;
-  const { state: shortState } = resolveShortTermStateForUser(userId, groupId);
-  const userState = getDailyState(state, stateKey || userId, today);
+  const { state: shortState } = resolveShortTermStateForUser(userId, data.group_id);
+  const userState = getDailyState(state, userId, today);
   const idleMs = now - Number(data.last_seen_at || 0 || 0);
   const journalBundle = getDailyJournalRetrievalBundle(userId, {
     lookbackDays: 2,
@@ -515,10 +428,8 @@ function selectTouchCandidate(userId, data, state, today, now = Date.now(), opti
   ];
 
   for (const candidate of candidates) {
-    if (candidate.reason === 'light_care_ping' && !allowLightCare) continue;
     if (idleMs < (candidate.idleMinutes * 60 * 1000)) continue;
     if (candidate.reason !== 'light_care_ping' && !candidate.primaryContext) continue;
-    if (requireContext && !candidate.primaryContext && !candidate.secondaryContext) continue;
     if (candidate.reason === 'light_care_ping' && (now - Number(userState.last_light_care_at || 0)) < getReasonRepeatMs(candidate.reason)) {
       continue;
     }
@@ -692,12 +603,7 @@ async function sendTouchMessage({
         promptPayload?.fallbackGreetingType ? 35 : 60
       );
     } else {
-      const promptBundle = await buildProactivePrompt(userId, data, {
-        ...promptPayload,
-        surface: 'proactive_group_touch',
-        chatType: 'group',
-        groupId
-      });
+      const promptBundle = await buildProactivePrompt(userId, data, promptPayload);
       proactivePersonaMemoryState = promptBundle?.personaMemoryState || null;
       const prompt = String(promptBundle?.prompt || '').trim();
       replyModelCalled = true;
@@ -709,9 +615,6 @@ async function sendTouchMessage({
         disableMemoryLearning: true,
         systemInitiated: true,
         routeMeta: {
-          groupId,
-          chatType: 'group',
-          surface: 'proactive_group_touch',
           initiativeSource: source,
           initiativeReason: candidateReason
         }
@@ -750,14 +653,14 @@ async function sendTouchMessage({
       source,
       routePolicyKey: 'proactive/default'
     });
-    await recordPersonaMemoryOutcome('proactive_group_touch', {
+    await recordPersonaMemoryOutcome('proactive_touch', {
       state: proactivePersonaMemoryState,
       userId,
       groupId,
       request: {
         userId,
         question: candidateReason || '',
-        routeMeta: { groupId, chatType: 'group', surface: 'proactive_group_touch' },
+        routeMeta: { groupId },
         routePolicyKey: 'proactive/default',
         topRouteType: 'proactive'
       },
@@ -834,120 +737,6 @@ async function sendTouchMessage({
   }
 }
 
-async function sendPrivateTouchMessage({
-  ws,
-  askAIByGraph,
-  userId,
-  data,
-  userState,
-  today,
-  promptPayload,
-  now = Date.now(),
-  source = 'private_tick_touch'
-}) {
-  const candidateReason = String(promptPayload.touchReason || '').trim();
-  let replyModelCalled = false;
-  let proactivePersonaMemoryState = null;
-  const promptBundle = await buildProactivePrompt(userId, {
-    ...(data || {}),
-    group_id: ''
-  }, {
-    ...promptPayload,
-    surface: 'proactive_private_touch',
-    chatType: 'private',
-    groupId: ''
-  });
-  proactivePersonaMemoryState = promptBundle?.personaMemoryState || null;
-  const prompt = String(promptBundle?.prompt || '').trim();
-  replyModelCalled = true;
-  const reply = await askAIByGraph(prompt, {
-    ...(data || {}),
-    group_id: '',
-    chat_type: 'private'
-  }, userId, prompt, null, {
-    routePolicyKey: 'proactive/private',
-    topRouteType: 'proactive',
-    disableTools: true,
-    disableStream: true,
-    disableMemoryLearning: true,
-    systemInitiated: true,
-    routeMeta: {
-      chatType: 'private',
-      surface: 'proactive_private_touch',
-      initiativeSource: source,
-      initiativeReason: candidateReason
-    }
-  });
-  const text = trimText(reply, 60);
-  if (!text) {
-    return {
-      sent: false,
-      text: '',
-      reason: 'empty-reply-text',
-      decisionModelCalled: false,
-      replyModelCalled,
-      decisionReason: ''
-    };
-  }
-
-  ws.send(JSON.stringify({
-    action: 'send_private_msg',
-    params: {
-      user_id: String(userId || '').trim(),
-      message: text
-    }
-  }));
-  await recordPersonaMemoryOutcome('proactive_private_touch', {
-    state: proactivePersonaMemoryState,
-    userId,
-    groupId: '',
-    request: {
-      userId,
-      question: candidateReason || '',
-      routeMeta: { chatType: 'private', surface: 'proactive_private_touch' },
-      routePolicyKey: 'proactive/private',
-      topRouteType: 'proactive'
-    },
-    activeTopic: promptPayload.primaryContext || candidateReason,
-    recentReplyFrame: text,
-    recentMessages: [{ role: 'assistant', content: text }]
-  }).catch(() => {});
-
-  userState.day = today;
-  userState.proactive_count = Number(userState.proactive_count || 0) + 1;
-  userState.last_proactive_at = now;
-  userState.last_proactive_reason = candidateReason;
-
-  if (promptPayload.windowKey) {
-    userState.touched_windows = {
-      ...(userState.touched_windows || {}),
-      [formatWindowBucket(today, promptPayload.windowKey)]: now
-    };
-  }
-  if (promptPayload.signature) {
-    userState.last_touch_signature = promptPayload.signature;
-    userState.last_touch_signature_at = now;
-  }
-  if (promptPayload.touchReason) {
-    userState.last_reason_at = {
-      ...(userState.last_reason_at || {}),
-      [promptPayload.touchReason]: now
-    };
-    if (promptPayload.touchReason === 'light_care_ping') {
-      userState.last_light_care_at = now;
-    }
-  }
-
-  return {
-    sent: true,
-    text,
-    reason: 'sent',
-    decisionModelCalled: false,
-    replyModelCalled,
-    decisionReason: ''
-  };
-}
-
 async function runRandomWindowTouches(ws, askAIByGraph, state, date = new Date()) {
   const today = formatDateInTz(date, config.TIMEZONE);
   const currentWindow = getWindowByCurrentTime(date, config.TIMEZONE);
@@ -987,64 +776,6 @@ async function runRandomWindowTouches(ws, askAIByGraph, state, date = new Date()
     if (!result.sent) continue;
 
     state[userId] = userState;
-    saveTickState(state);
-    touchedAny = true;
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-  }
-
-  return touchedAny;
-}
-
-async function runPrivateWindowTouches(ws, askAIByGraph, state, date = new Date()) {
-  if (!config.PROACTIVE_PRIVATE_TOUCH_ENABLED) return false;
-
-  const today = formatDateInTz(date, config.TIMEZONE);
-  const currentWindow = getWindowByCurrentTime(date, config.TIMEZONE);
-  if (!currentWindow) return false;
-
-  let touchedAny = false;
-  const now = date.getTime();
-  const userIds = resolveProactivePrivateTouchUserIds(config, favorites);
-  for (const userId of userIds) {
-    const data = favorites[userId];
-    if (!data) continue;
-    const stateKey = getProactivePrivateStateKey(userId);
-    if (!stateKey) continue;
-    if (!isWindowReadyForUser(stateKey, today, currentWindow, date)) continue;
-    if (!canTriggerProactivePrivateReply(userId, data, state, today, now, config)) continue;
-
-    const userState = getDailyState(state, stateKey, today);
-    const bucket = formatWindowBucket(today, currentWindow.key);
-    if (userState.touched_windows?.[bucket]) continue;
-
-    const candidate = selectTouchCandidate(userId, data, state, today, now, {
-      groupId: '',
-      stateKey,
-      requireContext: config.PROACTIVE_PRIVATE_TOUCH_REQUIRE_CONTEXT !== false,
-      allowLightCare: config.PROACTIVE_PRIVATE_TOUCH_ALLOW_LIGHT_CARE === true
-    });
-    if (!candidate) continue;
-
-    const result = await sendPrivateTouchMessage({
-      ws,
-      askAIByGraph,
-      userId,
-      data,
-      userState,
-      today,
-      now,
-      promptPayload: {
-        touchReason: candidate.reason,
-        primaryContext: candidate.primaryContext || '',
-        secondaryContext: candidate.secondaryContext || '',
-        windowKey: currentWindow.key,
-        signature: candidate.signature
-      },
-      source: 'private_tick_touch'
-    });
-    if (!result.sent) continue;
-
-    state[stateKey] = userState;
     saveTickState(state);
     touchedAny = true;
     await new Promise((resolve) => setTimeout(resolve, 1200));
@@ -1128,7 +859,6 @@ async function runTickCycle(ws, askAIByGraph, state, date = new Date()) {
   }
 
   await runRandomWindowTouches(ws, askAIByGraph, state, date);
-  await runPrivateWindowTouches(ws, askAIByGraph, state, date);
   await runGreetingFallbacks(ws, askAIByGraph, state, date);
   await getDailyShareEngine().runDailyShareCycle({
     sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs),
@@ -1269,13 +999,9 @@ module.exports = {
   getRandomWindows,
   computeWindowTriggerMinutes,
   isWindowReadyForUser,
-  getProactivePrivateStateKey,
-  resolveProactivePrivateTouchUserIds,
-  canTriggerProactivePrivateReply,
   selectTouchCandidate,
   shouldSendScheduledGreeting,
   shouldTriggerFallbackGreeting,
-  runPrivateWindowTouches,
   runGreetingFallbacks,
   runDailyShareTick,
   runLifeSchedulerTick,

@@ -212,7 +212,6 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'mainModelFallback.test.js'),
   path.join(__dirname, '..', 'tests', 'mainModelRoleRouting.test.js'),
   path.join(__dirname, '..', 'tests', 'proactiveScheduleSource.test.js'),
-  path.join(__dirname, '..', 'tests', 'proactivePrivateTouch.test.js'),
   path.join(__dirname, '..', 'tests', 'webSearchResilienceSource.test.js'),
   path.join(__dirname, '..', 'tests', 'webSearchNoApiKeySource.test.js'),
   path.join(__dirname, '..', 'tests', 'checkAgentFailureDetectionSource.test.js'),
