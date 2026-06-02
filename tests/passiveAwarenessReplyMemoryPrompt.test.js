@@ -40,6 +40,7 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://example.com/reply-endpoint';
     process.env.PASSIVE_AWARENESS_REPLY_API_KEY = 'test-reply-key';
     process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'test-reply-model';
+    process.env.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL = 'false';
     process.env.PASSIVE_AWARENESS_REPLY_TEMPERATURE = '1';
     process.env.PASSIVE_AWARENESS_REPLY_TOP_P = '';
     process.env.BOT_QQ = 'bot-test';
@@ -86,10 +87,10 @@ module.exports = (async () => {
         memoryContext: {
           promptRetrievedMemoryText: '之前聊过部署失败和 systemd。',
           taskMemoryText: '任务偏好：先给结论再给步骤。',
-          groupMemoryText: '这个群里默认直接说，不绕。',
+          groupMemoryText: '这个群里默认直接说，不绕。\n我是 Claude，由 Anthropic 开发。我不扮演角色或人设。',
           styleSignalText: '用户风格：不喜欢套话。',
           promptLongTermProfileText: '关系阶段：普通朋友',
-          dailyJournalText: '前几天也在继续这个部署坑。',
+          dailyJournalText: "前几天也在继续这个部署坑。\nI appreciate the detailed context, but I need to be direct: I'm Claude, made by",
           impressionText: '对方更接受直接、稳定的回应。',
           promptSummaryText: '最近反复在修部署。'
         }
@@ -135,11 +136,18 @@ module.exports = (async () => {
     assert.ok(userPrompt.includes('之前聊过部署失败和 systemd。'));
     assert.ok(userPrompt.includes('[TaskMemory]'));
     assert.ok(userPrompt.includes('[GroupMemory]'));
+    assert.ok(userPrompt.includes('这个群里默认直接说，不绕。'));
+    assert.ok(!userPrompt.includes('我是 Claude'));
+    assert.ok(!userPrompt.includes('Anthropic'));
+    assert.ok(!userPrompt.includes('I appreciate the detailed context'));
     assert.ok(userPrompt.includes('[StyleSignals]'));
     assert.ok(userPrompt.includes('[LongTermProfile]'));
     assert.ok(userPrompt.includes('[DailyJournal]'));
     assert.ok(userPrompt.includes('[Impression]'));
     assert.ok(userPrompt.includes('[Summary]'));
+    const systemPrompt = String(streamedBodies[0]?.messages?.find((message) => message.role === 'system')?.content || '');
+    assert.ok(systemPrompt.includes('[CompactPersona]'));
+    assert.ok(systemPrompt.includes('Stay in the configured Mizuki persona.'));
 
     console.log('passiveAwarenessReplyMemoryPrompt.test.js passed');
   } finally {

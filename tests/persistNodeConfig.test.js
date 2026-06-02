@@ -266,6 +266,89 @@ module.exports = (async () => {
   assert.strictEqual(unsafeDecision.saved, false);
   assert.ok(unsafeDecision.gateReasons.includes('unsafe_user_facing_reply'));
 
+  let identityEnqueueCalled = false;
+  let identityAppendCalled = false;
+  const identityPersistNode = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {
+      identityAppendCalled = true;
+    },
+    persistShortTermBridgeSnapshot() {},
+    async appendMemoryEvent() {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      enqueue() {
+        identityEnqueueCalled = true;
+        return { enqueued: true, job: { jobId: 'bad_identity_job' } };
+      }
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: false,
+      POST_REPLY_WORKER_GROUP_IDS: ['g1'],
+      POST_REPLY_MIN_CONTENT_CHARS: 1,
+      POST_REPLY_USER_COOLDOWN_MS: 0
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  const identityPersistResult = await identityPersistNode({
+    request: {
+      userId: 'u1',
+      question: '瑞希回来吧',
+      runtimeQuestionText: '瑞希回来吧',
+      persistUserText: '瑞希回来吧',
+      routeMeta: { groupId: 'g1' },
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat'
+    },
+    output: {
+      finalReply: "I appreciate the detailed context, but I need to be direct: I'm Claude, made by Anthropic. I don't roleplay as characters or take on personas."
+    },
+    memory: {},
+    thread: {},
+    plan: {}
+  });
+  const identityDecision = (identityPersistResult.events || []).find((item) => item.type === 'persist_write_decision');
+  assert.strictEqual(identityAppendCalled, false);
+  assert.strictEqual(identityEnqueueCalled, false);
+  assert.strictEqual(identityDecision.saved, false);
+  assert.ok(identityDecision.gateReasons.includes('model_identity_contamination'));
+
   const appendCalls = [];
   const persistNodeWithSpy = createPersistNode({
     normalizeObject(value, fallback = {}) {

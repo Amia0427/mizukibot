@@ -79,7 +79,10 @@ function buildDecisionPrompt({
     .slice(-12)
     .map((item) => {
       const name = normalizeText(item.sender_name) || item.sender_id || 'unknown';
-      return `${name}: ${normalizeText(item.text)}`;
+      const clean = sanitizePassivePromptContext(item.text, {
+        replacement: '[omitted previous model self-identification/refusal text]'
+      });
+      return clean ? `${name}: ${normalizeText(clean)}` : '';
     })
     .filter(Boolean)
     .join('\n');
@@ -346,14 +349,17 @@ async function buildReplyPromptV2({
   });
 
   const action = normalizePresenceAction(presenceAction, 'reply');
-  const retrievedMemoryText = normalizeText(memoryContext.promptRetrievedMemoryText || '', 1200);
-  const taskMemoryText = normalizeText(memoryContext.taskMemoryText || '', 700);
-  const groupMemoryText = normalizeText(memoryContext.groupMemoryText || '', 700);
-  const styleSignalText = normalizeText(memoryContext.styleSignalText || '', 500);
-  const longTermProfileText = normalizeText(memoryContext.promptLongTermProfileText || '', 900);
-  const dailyJournalText = normalizeText(memoryContext.dailyJournalText || '', 700);
-  const impressionText = normalizeText(memoryContext.impressionText || '', 320);
-  const summaryText = normalizeText(memoryContext.promptSummaryText || '', 320);
+  const currentMessageText = sanitizePassivePromptContext(text, {
+    replacement: '[current message quoted a previous model self-identification/refusal]'
+  }) || text;
+  const retrievedMemoryText = normalizeText(sanitizePassivePromptContext(memoryContext.promptRetrievedMemoryText || ''), 1200);
+  const taskMemoryText = normalizeText(sanitizePassivePromptContext(memoryContext.taskMemoryText || ''), 700);
+  const groupMemoryText = normalizeText(sanitizePassivePromptContext(memoryContext.groupMemoryText || ''), 700);
+  const styleSignalText = normalizeText(sanitizePassivePromptContext(memoryContext.styleSignalText || ''), 500);
+  const longTermProfileText = normalizeText(sanitizePassivePromptContext(memoryContext.promptLongTermProfileText || ''), 900);
+  const dailyJournalText = normalizeText(sanitizePassivePromptContext(memoryContext.dailyJournalText || ''), 700);
+  const impressionText = normalizeText(sanitizePassivePromptContext(memoryContext.impressionText || ''), 320);
+  const summaryText = normalizeText(sanitizePassivePromptContext(memoryContext.promptSummaryText || ''), 320);
   return {
     prompt: [
     'You are generating a passive QQ group reply.',
@@ -418,7 +424,7 @@ async function buildReplyPromptV2({
     contextLines || '(empty)',
     '',
     '[CurrentMessage]',
-    text || '(empty)',
+    currentMessageText || '(empty)',
     '',
     'Output only the final reply text.'
   ].filter((item) => item !== null).join('\n'),

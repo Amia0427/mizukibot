@@ -49,6 +49,7 @@ module.exports = (async () => {
       PASSIVE_AWARENESS_REPLY_API_BASE_URL: 'https://passive-reply.example/v1',
       PASSIVE_AWARENESS_REPLY_API_KEY: 'passive-reply-key',
       PASSIVE_AWARENESS_REPLY_MODEL: 'passive-reply-model',
+      PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL: 'true',
       MODEL_SELF_CHECK_TIMEOUT_MS: '1200'
     });
 
@@ -109,8 +110,8 @@ module.exports = (async () => {
     assert.strictEqual(specs[6].body.max_tokens, 8);
     assert.strictEqual(specs[6].body.stream, false);
     assert.strictEqual(specs[6].body.__preferredProtocol, 'chat_completions');
-    assert.strictEqual(specs[7].url, 'https://passive-reply.example/v1/chat/completions');
-    assert.strictEqual(specs[7].model, 'passive-reply-model');
+    assert.strictEqual(specs[7].url, 'https://main.example/v1/chat/completions');
+    assert.strictEqual(specs[7].model, 'main-model');
     assert.strictEqual(specs[7].body.max_tokens, 8);
     assert.strictEqual(specs[7].body.stream, false);
     assert.strictEqual(specs[7].body.__preferredProtocol, 'chat_completions');
@@ -128,7 +129,7 @@ module.exports = (async () => {
     assert.ok(report.includes('模型自检:'));
     assert.ok(report.includes('rerank | rerank-model |'));
     assert.ok(report.includes('passive_awareness_decision | passive-decision-model |'));
-    assert.ok(report.includes('passive_awareness_reply | passive-reply-model |'));
+    assert.ok(report.includes('passive_awareness_reply | main-model |'));
     assert.ok(report.includes('timeout=true'));
     assert.ok(!report.includes('provider internal detail'));
     assert.ok(!report.includes('https://'));
@@ -152,8 +153,15 @@ module.exports = (async () => {
     assert.strictEqual(disabledSpecs.find((item) => item.type === 'embedding').url, '');
     assert.strictEqual(disabledSpecs.find((item) => item.type === 'rerank').url, '');
     assert.strictEqual(disabledSpecs.find((item) => item.type === 'passive_awareness_decision').url, '');
-    assert.strictEqual(disabledSpecs.find((item) => item.type === 'passive_awareness_reply').url, 'https://passive-decision.example/v1/chat/completions');
-    assert.strictEqual(disabledSpecs.find((item) => item.type === 'passive_awareness_reply').model, 'passive-decision-model');
+    assert.strictEqual(disabledSpecs.find((item) => item.type === 'passive_awareness_reply').url, 'https://main.example/v1/chat/completions');
+    assert.strictEqual(disabledSpecs.find((item) => item.type === 'passive_awareness_reply').model, 'main-model');
+
+    process.env.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL = 'false';
+    clearProjectCache();
+    const dedicatedReplySelfCheck = require('../utils/modelSelfCheck');
+    const dedicatedSpecs = dedicatedReplySelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
+    assert.strictEqual(dedicatedSpecs.find((item) => item.type === 'passive_awareness_reply').url, 'https://passive-decision.example/v1/chat/completions');
+    assert.strictEqual(dedicatedSpecs.find((item) => item.type === 'passive_awareness_reply').model, 'passive-decision-model');
 
     console.log('modelSelfCheck.test.js passed');
   } finally {

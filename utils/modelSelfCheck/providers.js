@@ -66,14 +66,17 @@ function isPassiveAwarenessDecisionConfigured() {
 }
 
 function getPassiveAwarenessReplyModel() {
+  if (config.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL !== false) return normalizeText(config.AI_MODEL);
   return normalizeText(config.PASSIVE_AWARENESS_REPLY_MODEL || config.PASSIVE_AWARENESS_MODEL);
 }
 
 function getPassiveAwarenessReplyApiBaseUrl() {
+  if (config.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL !== false) return normalizeText(config.API_BASE_URL);
   return normalizeText(config.PASSIVE_AWARENESS_REPLY_API_BASE_URL || config.PASSIVE_AWARENESS_API_BASE_URL);
 }
 
 function getPassiveAwarenessReplyApiKey() {
+  if (config.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL !== false) return normalizeText(config.API_KEY);
   return normalizeText(config.PASSIVE_AWARENESS_REPLY_API_KEY || config.PASSIVE_AWARENESS_API_KEY);
 }
 
