@@ -4,7 +4,8 @@ function createMessageHandler({
   detectIntentHybridOverride = null,
   generateSessionContextSummaryOverride = null,
   inboundConcurrencyControllerOverride = null,
-  runVisionCaptionWorkerOverride = null
+  runVisionCaptionWorkerOverride = null,
+  normalGroupMainReplyRateLimiterOverride = null
 }) {
   const inboundTimingLogFile = path.join(config.DATA_DIR, 'inbound_timing.jsonl');
   const logInboundTiming = createInboundTimingLogger(inboundTimingLogFile, config.ENABLE_DEBUG_LOG);
@@ -12,6 +13,7 @@ function createMessageHandler({
     ttlMs: 90 * 1000,
     maxEntries: 4096
   });
+  const normalGroupMainReplyRateLimiter = normalGroupMainReplyRateLimiterOverride || createNormalGroupMainReplyRateLimiter(config);
   const privateTypingPokeCooldownByUser = new Map();
   const sessionFreshnessVersionByKey = new Map();
   function updateSessionFreshnessVersion(sessionKey = '', version = 0) {
