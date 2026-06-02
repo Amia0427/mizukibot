@@ -74,7 +74,7 @@ module.exports = (async () => {
     assert.strictEqual(sentPackets.length, 1);
     assert.ok(String(sentPackets[0].params.message || '').includes('早呀，今天也慢慢来。'));
     assert.strictEqual(recordedPayloads.length, 1);
-    assert.strictEqual(recordedPayloads[0].surface, 'proactive_touch');
+    assert.strictEqual(recordedPayloads[0].surface, 'proactive_group_touch');
     assert.strictEqual(recordedPayloads[0].payload.state, null);
     assert.strictEqual(state['u-fallback'].last_morning_fallback_day, '2026-04-17');
     assert.strictEqual(state['u-fallback'].proactive_count, 1);

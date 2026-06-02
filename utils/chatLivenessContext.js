@@ -49,7 +49,13 @@ function resolveChatSurface(input = {}) {
   if (topRouteType === 'passive_group_reply' || /passive_group_reply|passive_awareness/.test(routePolicyKey)) {
     return 'passive_group_reply';
   }
-  if (explicit === 'proactive_touch' || topRouteType === 'proactive') return 'proactive_touch';
+  if (explicit === 'proactive_private_touch' || explicit === 'proactive_group_touch') return explicit;
+  if (explicit === 'proactive_touch') {
+    return hasGroupEvidence(input, routeMeta) ? 'proactive_group_touch' : 'proactive_private_touch';
+  }
+  if (topRouteType === 'proactive') {
+    return hasGroupEvidence(input, routeMeta) ? 'proactive_group_touch' : 'proactive_private_touch';
+  }
   if (['qzone_diary', 'bot_diary', 'daily_share'].includes(explicit)) return explicit;
   if (explicit === 'group_direct_chat') return 'group_direct_chat';
   if (explicit === 'private_chat') return 'private_chat';
@@ -92,7 +98,7 @@ function buildChatLiveState(input = {}) {
   const relationshipState = normalizeObject(personaMemoryState.relationshipState);
   const surface = resolveChatSurface(input);
   const groupId = normalizeText(input.groupId || input.group_id || routeMeta.groupId || routeMeta.group_id);
-  const chatType = groupId || surface === 'group_direct_chat' || surface === 'passive_group_reply'
+  const chatType = groupId || surface === 'group_direct_chat' || surface === 'passive_group_reply' || surface === 'proactive_group_touch'
     ? 'group'
     : 'private';
 
@@ -160,6 +166,25 @@ function buildGroupRules(state = {}) {
   return lines;
 }
 
+function buildProactivePrivateRules(state = {}) {
+  const lines = [
+    'private_proactive_rule=这是瑞希主动发起的一对一私聊，只面向当前这个用户；不要把它写成群公告、系统提醒或客服回访。',
+    'private_proactive_rule=只能接记忆里有证据的未完话题、近期状态或关系线索；没有证据就少说或不说，不编新的生活事件。',
+    'private_proactive_rule=主动私聊要轻、短、可被自然忽略；不要连续追问，不要制造压力，不要暗示自己看见了群里之外的隐私来源。',
+    'private_proactive_rule=输出1到2句短消息，像刚想起一件具体小事一样接住。'
+  ];
+  if (state.relationshipState) lines.push(`private_anchor_relationship=${state.relationshipState}`);
+  return lines;
+}
+
+function buildProactiveGroupRules(state = {}) {
+  return [
+    'group_proactive_rule=这是瑞希主动在群聊里轻触达，只能基于群里可见上下文、群绑定和当场可公开的信息。',
+    'group_proactive_rule=不要泄露、暗示或调用私聊记忆；不要把一对一关系线扩写成群聊事实。',
+    'group_proactive_rule=默认短、轻、顺手，像群友插一句；不要把群聊变成面向单个用户的长私聊。'
+  ].concat(state.groupAttention ? [`group_attention=${state.groupAttention}`] : []);
+}
+
 function buildChatLivenessDisciplinePrompt(input = {}) {
   const state = buildChatLiveState(input);
   const lines = [
@@ -173,9 +198,14 @@ function buildChatLivenessDisciplinePrompt(input = {}) {
     'common_rule=保持线上QQ聊天，不切线下小说叙事；不写动作长段，不替用户说话、行动、下决定或读心。',
     'common_rule=瑞希有自己的情绪、节奏和边界，不是客服或情绪服务台；少说教，少总结，留一点聊天余地。'
   ];
-  if (state.surface === 'group_direct_chat' || state.surface === 'passive_group_reply') {
+  if (state.surface === 'group_direct_chat' || state.surface === 'passive_group_reply' || state.surface === 'proactive_group_touch') {
+    if (state.surface === 'proactive_group_touch') {
+      lines.push(...buildProactiveGroupRules(state));
+    }
     lines.push(...buildGroupRules(state));
     lines.push(...buildGroupSafetyRules());
+  } else if (state.surface === 'proactive_private_touch') {
+    lines.push(...buildProactivePrivateRules(state));
   } else if (state.surface === 'private_chat' || state.surface === 'direct_chat') {
     lines.push(...buildPrivateRules(state));
   }

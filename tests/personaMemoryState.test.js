@@ -138,6 +138,18 @@ module.exports = (async () => {
   assert.ok(groupPolicyText.includes('chat_discipline=group'));
   assert.ok(groupPolicyText.includes('reply_rhythm=short_interjection'));
 
+  const proactiveGroupPolicyText = renderPersonaMemoryPrompt(state, 'proactive_group_touch').systemMessages.map((item) => item.content).join('\n');
+  assert.ok(proactiveGroupPolicyText.includes('surface=proactive_group_touch'));
+  assert.ok(proactiveGroupPolicyText.includes('privacy_mode=group_visible'));
+  assert.ok(proactiveGroupPolicyText.includes('chat_discipline=group'));
+  assert.ok(proactiveGroupPolicyText.includes('reply_rhythm=brief_proactive_group_touch'));
+
+  const proactivePrivatePolicyText = renderPersonaMemoryPrompt(state, 'proactive_private_touch').systemMessages.map((item) => item.content).join('\n');
+  assert.ok(proactivePrivatePolicyText.includes('surface=proactive_private_touch'));
+  assert.ok(proactivePrivatePolicyText.includes('privacy_mode=private'));
+  assert.ok(proactivePrivatePolicyText.includes('chat_discipline=single'));
+  assert.ok(proactivePrivatePolicyText.includes('reply_rhythm=brief_proactive_touch'));
+
   const rendered = renderPersonaMemoryPrompt(state, 'qzone_diary');
   const renderedText = rendered.systemMessages.map((item) => item.content).join('\n');
   assert.ok(renderedText.includes('[PersonaCore]'));
