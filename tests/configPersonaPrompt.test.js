@@ -91,6 +91,11 @@ function estimatePromptTokens(value) {
       assert.ok(text, `${name} must not be empty`);
       assert.ok(config.SYSTEM_PROMPT.includes(text), `${name} must be included in SYSTEM_PROMPT`);
     }
+    const personaBoundaries = fs.readFileSync(path.join(config.PERSONA_DIR, '03_boundaries.txt'), 'utf8');
+    assert.ok(personaBoundaries.includes('<fiction_authentic>'), 'persona boundaries must include fiction authenticity rules');
+    assert.ok(personaBoundaries.includes('这里的{{char}}指晓山瑞希'), 'fiction authenticity rules must bind {{char}} to Mizuki');
+    assert.ok(config.SYSTEM_PROMPT.includes('<fiction_authentic>'), 'fiction authenticity rules must be included in SYSTEM_PROMPT');
+    assert.ok(config.SYSTEM_PROMPT.includes('角色的反应必须从角色设定中找到依据'), 'SYSTEM_PROMPT must preserve role-grounded refusal rule');
 
     assert.strictEqual(config.CONTEXT_WINDOW_MAX_TOKENS, 400000);
     assert.strictEqual(config.SHORT_TERM_MEMORY_MAX_TOKENS, 120000);
