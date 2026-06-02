@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-02 10:10 +08:00
+更新时间：2026-06-02 10:17 +08:00
+
+更新 2026-06-02 10:17 +08:00：Memory V3 recall 降级治理：`utils/memoryReranker.js` 对默认 rerank 请求只保留单层 hard timeout，连续 timeout 先自适应抬高下一次预算，再按 `MEMORY_RERANK_TIMEOUT_FAILURE_THRESHOLD` 进入 `MEMORY_RERANK_TIMEOUT_COOLDOWN_MS` 短冷却；embedding 客户端把 400/401/403/404 类端点不可用冷却和 timeout/429/5xx 瞬态冷却拆开，分别由 `MEMORY_EMBEDDING_ENDPOINT_COOLDOWN_MS`、`MEMORY_EMBEDDING_TRANSIENT_COOLDOWN_MS` 和 `MEMORY_EMBEDDING_FAILURE_THRESHOLD` 控制。`queryMemory().stats.coverageAtQuery` 新增 `embeddingRuntime` / `rerankRuntime`，用于解释 base recall 降级原因。
 
 更新 2026-06-02 10:10 +08:00：Memory V3 新增 Nocturne 风格结构化外壳：URI resolver、Boot Memory、alias index、trigger/glossary 和 changeset review；写入仍先走 candidate/quality gate，审核 reject 只追加 archive/supersede 事件，不删除 raw events。
 

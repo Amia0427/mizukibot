@@ -56,6 +56,8 @@ const {
   scoreLocalCandidatePool
 } = require('./queryScoring');
 const { detectRecentRecallIntent } = require('./recentRecallPolicy');
+const { getEmbeddingRuntimeState } = require('../memoryEmbeddingClient');
+const { getMemoryRerankRuntimeState } = require('../memoryReranker');
 const {
   searchLanceDbWithHelper,
   shouldUseLanceDbHelper
@@ -319,6 +321,7 @@ async function queryMemory(input = {}) {
   });
   const coverageAtQuery = {
     embedding: embeddingCoverage,
+    embeddingRuntime: getEmbeddingRuntimeState(),
     lancedb: {
       enabled: lancedbDiagnostics.enabled === true,
       mode: lancedbDiagnostics.mode,
@@ -327,6 +330,7 @@ async function queryMemory(input = {}) {
       rows: Number(lancedbDiagnostics.rows || 0) || 0,
       vectorCandidates: Number(lancedbDiagnostics.vectorCandidates || 0) || 0
     },
+    rerankRuntime: getMemoryRerankRuntimeState(),
     projectionStale: projectionFreshness.projectionStale === true,
     projectionStaleReason: projectionFreshness.projectionStaleReason || ''
   };

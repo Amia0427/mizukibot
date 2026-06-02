@@ -8,6 +8,14 @@ let lastEmbeddingFailure = {
   at: 0
 };
 
+const embeddingRuntimeState = {
+  disabledUntil: 0,
+  disabledReason: '',
+  failureStreak: 0,
+  lastStatus: 0,
+  lastLatencyMs: 0
+};
+
 function sanitizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -107,8 +115,40 @@ function classifyEmbeddingFailure(error = null, fallbackReason = 'embedding_requ
   if (status === 408 || status === 504 || code.includes('timeout') || code === 'etimedout' || code === 'econnaborted' || message.includes('timeout')) {
     return 'timeout';
   }
+  if (status === 400 || status === 404) return 'endpoint_unavailable';
+  if (status >= 500) return 'server_error';
   if (fallbackReason) return fallbackReason;
   return 'embedding_request_failed';
+}
+
+function resolvePositiveMs(value, fallback = 0, min = 0) {
+  const n = Number(value);
+  const base = Number.isFinite(n) ? n : Number(fallback);
+  if (!Number.isFinite(base)) return Math.max(0, min);
+  return Math.max(min, Math.floor(base));
+}
+
+function resolveEmbeddingEndpointCooldownMs() {
+  return resolvePositiveMs(
+    config.MEMORY_EMBEDDING_ENDPOINT_COOLDOWN_MS,
+    config.MEMORY_EMBEDDING_RETRY_COOLDOWN_MS || 30 * 60 * 1000,
+    0
+  );
+}
+
+function resolveEmbeddingTransientCooldownMs() {
+  return resolvePositiveMs(config.MEMORY_EMBEDDING_TRANSIENT_COOLDOWN_MS, 60 * 1000, 0);
+}
+
+function resolveEmbeddingFailureThreshold() {
+  return Math.max(1, Math.floor(Number(config.MEMORY_EMBEDDING_FAILURE_THRESHOLD || 2) || 2));
+}
+
+function formatMsForLog(value) {
+  const ms = resolvePositiveMs(value, 0, 0);
+  if (ms >= 60000 && ms % 60000 === 0) return `${ms / 60000}m`;
+  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`;
+  return `${ms}ms`;
 }
 
 function setLastEmbeddingFailure(reason = 'embedding_request_failed', details = {}) {
@@ -128,10 +168,71 @@ function clearLastEmbeddingFailure() {
     message: '',
     at: 0
   };
+  embeddingRuntimeState.disabledUntil = 0;
+  embeddingRuntimeState.disabledReason = '';
+  embeddingRuntimeState.failureStreak = 0;
+  embeddingRuntimeState.lastStatus = 0;
+  embeddingRuntimeState.lastLatencyMs = 0;
+  embedTexts.disabledUntil = 0;
 }
 
 function getLastEmbeddingFailure() {
   return { ...lastEmbeddingFailure };
+}
+
+function setEmbeddingDisabled(reason = '', cooldownMs = 0) {
+  const ms = resolvePositiveMs(cooldownMs, 0, 0);
+  const until = ms > 0 ? Date.now() + ms : 0;
+  embeddingRuntimeState.disabledUntil = until;
+  embeddingRuntimeState.disabledReason = sanitizeText(reason);
+  embedTexts.disabledUntil = until;
+  return until;
+}
+
+function recordEmbeddingFailure(reason = 'embedding_request_failed', details = {}) {
+  const normalizedReason = sanitizeText(reason) || 'embedding_request_failed';
+  const status = Number(details.status || 0) || 0;
+  embeddingRuntimeState.failureStreak += 1;
+  embeddingRuntimeState.lastStatus = status;
+  embeddingRuntimeState.lastLatencyMs = Math.max(0, Math.floor(Number(details.latencyMs) || 0));
+
+  const endpointReasons = new Set(['endpoint_unavailable', 'auth_failed']);
+  const transientReasons = new Set(['timeout', 'rate_limit', 'server_error']);
+  const threshold = resolveEmbeddingFailureThreshold();
+  let cooldownMs = 0;
+  if (endpointReasons.has(normalizedReason)) {
+    cooldownMs = resolveEmbeddingEndpointCooldownMs();
+  } else if (transientReasons.has(normalizedReason) && embeddingRuntimeState.failureStreak >= threshold) {
+    cooldownMs = resolveEmbeddingTransientCooldownMs();
+  }
+  if (cooldownMs > 0) setEmbeddingDisabled(normalizedReason, cooldownMs);
+  setLastEmbeddingFailure(normalizedReason, details);
+  return {
+    cooldownMs,
+    threshold,
+    failureStreak: embeddingRuntimeState.failureStreak
+  };
+}
+
+function getEmbeddingRuntimeState(now = Date.now()) {
+  const disabledUntil = Math.max(
+    Number(embeddingRuntimeState.disabledUntil || 0) || 0,
+    Number(embedTexts.disabledUntil || 0) || 0
+  );
+  return {
+    disabled: disabledUntil > now,
+    disabledUntil,
+    disabledForMs: Math.max(0, disabledUntil - now),
+    disabledReason: embeddingRuntimeState.disabledReason || '',
+    failureStreak: embeddingRuntimeState.failureStreak,
+    lastStatus: embeddingRuntimeState.lastStatus,
+    lastLatencyMs: embeddingRuntimeState.lastLatencyMs,
+    lastFailure: getLastEmbeddingFailure()
+  };
+}
+
+function resetEmbeddingRuntimeState() {
+  clearLastEmbeddingFailure();
 }
 
 function hashText(text = '') {
@@ -156,8 +257,14 @@ async function embedTexts(texts = [], options = {}) {
     return [];
   }
 
-  if (embedTexts.disabledUntil && Date.now() < embedTexts.disabledUntil && !options.force) {
-    setLastEmbeddingFailure('embedding_request_failed', { message: 'embedding_temporarily_disabled' });
+  const disabledUntil = Math.max(
+    Number(embeddingRuntimeState.disabledUntil || 0) || 0,
+    Number(embedTexts.disabledUntil || 0) || 0
+  );
+  if (disabledUntil && Date.now() < disabledUntil && !options.force) {
+    setLastEmbeddingFailure(embeddingRuntimeState.disabledReason || 'embedding_temporarily_disabled', {
+      message: 'embedding_temporarily_disabled'
+    });
     return [];
   }
 
@@ -169,6 +276,7 @@ async function embedTexts(texts = [], options = {}) {
     return [];
   }
 
+  const startedAt = Date.now();
   try {
     const postWithRetry = getPostWithRetry();
     if (typeof postWithRetry !== 'function') {
@@ -189,7 +297,6 @@ async function embedTexts(texts = [], options = {}) {
       0,
       key
     );
-    embedTexts.disabledUntil = 0;
     const vectors = parseEmbeddingResponse(response);
     if (vectors.length === 0) {
       setLastEmbeddingFailure('empty_embedding', { message: 'empty_embedding_response' });
@@ -200,13 +307,14 @@ async function embedTexts(texts = [], options = {}) {
   } catch (error) {
     const status = Number(error?.response?.status || 0) || 0;
     const reason = classifyEmbeddingFailure(error, 'embedding_request_failed');
-    setLastEmbeddingFailure(reason, {
+    const failure = recordEmbeddingFailure(reason, {
       status,
-      message: error.message
+      message: error.message,
+      latencyMs: Date.now() - startedAt
     });
-    if (status === 400 || status === 404) {
-      embedTexts.disabledUntil = Date.now() + (30 * 60 * 1000);
-      console.warn('[memoryEmbeddingClient] embedding endpoint unavailable, falling back for 30 minutes');
+    if (failure.cooldownMs > 0) {
+      const scope = reason === 'endpoint_unavailable' || reason === 'auth_failed' ? 'endpoint unavailable' : `transient ${reason}`;
+      console.warn(`[memoryEmbeddingClient] embedding ${scope}, falling back for ${formatMsForLog(failure.cooldownMs)}`);
     } else {
       console.error('[memoryEmbeddingClient] embedding request failed:', error.message);
     }
@@ -229,6 +337,8 @@ module.exports = {
   parseEmbeddingResponse,
   classifyEmbeddingFailure,
   getLastEmbeddingFailure,
+  getEmbeddingRuntimeState,
+  resetEmbeddingRuntimeState,
   hashText,
   embedTexts,
   embedText
