@@ -19,8 +19,6 @@ module.exports = (() => {
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
-    // Whitespace blocks local .env fallback, while config pick() still treats the proactive list as empty.
-    process.env.PROACTIVE_PRIVATE_TOUCH_USER_IDS = ' ';
 
     process.env.PRIVATE_CHAT_TEST_USER_IDS = 'tester_1,tester_2';
     process.env.PRIVATE_CHAT_ALLOWED_USER_IDS = 'legacy_1';
