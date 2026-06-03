@@ -15,8 +15,11 @@ module.exports = (async () => {
   resetRemoteRestartForTest();
 
   const winSpec = resolveRestartCommand('win32');
-  assert.strictEqual(path.basename(winSpec.command).toLowerCase(), 'restart-bot.cmd');
-  assert.deepStrictEqual(winSpec.args, []);
+  assert.ok(String(winSpec.command).toLowerCase().endsWith('cmd.exe'));
+  assert.strictEqual(path.basename(winSpec.script).toLowerCase(), 'restart-bot.cmd');
+  assert.deepStrictEqual(winSpec.args.slice(0, 2), ['/d', '/c']);
+  assert.ok(winSpec.args[2].includes('restart-bot.cmd'));
+  assert.strictEqual(winSpec.windowsVerbatimArguments, true);
 
   const spawned = [];
   const restartEvents = [];
@@ -51,10 +54,11 @@ module.exports = (async () => {
   await wait(20);
 
   assert.strictEqual(spawned.length, 1);
-  assert.strictEqual(path.basename(spawned[0].command).toLowerCase(), 'restart-bot.cmd');
-  assert.deepStrictEqual(spawned[0].args, []);
+  assert.ok(String(spawned[0].command).toLowerCase().endsWith('cmd.exe'));
+  assert.deepStrictEqual(spawned[0].args, winSpec.args);
   assert.strictEqual(spawned[0].options.detached, true);
   assert.strictEqual(spawned[0].options.stdio, 'ignore');
+  assert.strictEqual(spawned[0].options.windowsVerbatimArguments, true);
   assert.strictEqual(spawned[0].unrefCalled, true);
 
   resetRemoteRestartForTest();
