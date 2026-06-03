@@ -60,7 +60,6 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://example.com/reply-endpoint';
     process.env.PASSIVE_AWARENESS_REPLY_API_KEY = 'test-reply-key';
     process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'test-reply-model';
-    process.env.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL = 'false';
     process.env.PASSIVE_AWARENESS_MIN_INTERVAL_MS = '0';
     process.env.PASSIVE_AWARENESS_GLOBAL_MIN_INTERVAL_MS = '0';
     process.env.PASSIVE_AWARENESS_REPLY_COOLDOWN_MS = '0';

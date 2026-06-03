@@ -2,7 +2,6 @@ const {
   detectPostReplyLearningIntent,
   isExplicitRememberText
 } = require('../../../utils/postReplyWorker/learningIntent');
-const { isModelIdentityContamination } = require('../../../utils/modelIdentityContext');
 const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
 
 function createPersistNode(deps = {}) {
@@ -165,7 +164,6 @@ function createPersistNode(deps = {}) {
     if (request.systemInitiated) reasons.push('system_initiated');
     if (state.output?.failure) reasons.push('output_failure');
     if (isUnsafeUserFacingReply(finalReply)) reasons.push('unsafe_user_facing_reply');
-    if (isModelIdentityContamination(finalReply)) reasons.push('model_identity_contamination');
     if (!userContent) reasons.push('empty_user_content');
     if (!finalReply) reasons.push('empty_final_reply');
     if (isReviewMode(request.reviewMode)) reasons.push('review_mode');
@@ -224,7 +222,6 @@ function createPersistNode(deps = {}) {
       && userContent
       && finalReply
       && !isUnsafeUserFacingReply(finalReply)
-      && !isModelIdentityContamination(finalReply)
       && !isReviewMode(request.reviewMode)
     );
     const shouldPersistBridge = shouldPersistChatArtifacts

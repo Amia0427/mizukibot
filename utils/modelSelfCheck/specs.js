@@ -57,10 +57,7 @@ function buildChatBody(model, purpose, timeoutMs) {
 }
 
 function buildMainReplySpec(userId = '', type = 'main_reply', timeoutMs = clampTimeoutMs()) {
-  const routeOptions = type === 'admin_reply'
-    ? { topRouteType: 'admin', routePolicyKey: 'admin/default' }
-    : { topRouteType: 'direct_chat', routePolicyKey: 'chat/default', chatType: 'private' };
-  const resolvedConfig = resolveUserScopedMainModelConfig(userId, null, routeOptions);
+  const resolvedConfig = resolveUserScopedMainModelConfig(userId, null, {});
   const selfCheckConfig = {
     ...resolvedConfig,
     temperature: 0,

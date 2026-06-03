@@ -281,7 +281,7 @@ async function invokeReplyModel({
         topPFallback: 0.92
       }),
       messages: [
-        { role: 'system', content: buildPassiveReplySystemMessage() },
+        { role: 'system', content: 'You generate a final passive QQ group reply. Output only the reply text.' },
         { role: 'user', content: buildPassiveModelUserContent(prompt, visualInputs) }
       ],
       max_tokens: Math.max(160, Number(config.PASSIVE_AWARENESS_REPLY_MAX_TOKENS || 320)),
