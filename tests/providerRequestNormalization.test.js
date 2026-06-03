@@ -209,6 +209,19 @@ module.exports = (async () => {
     assert.strictEqual(explicitSummaryOpenAI.url, 'https://summary.example/v1/chat/completions');
     assert.strictEqual(explicitSummaryOpenAI.body.__requestHeaders.Authorization, 'Bearer summary-key');
 
+    const bareOriginOpenAI = buildMainModelRequest({
+      model: 'claude-sonnet-4-6',
+      apiBaseUrl: 'https://superapi.buzz/',
+      apiKey: 'image-key',
+      provider: 'openai_compatible'
+    }, {
+      messages: [{ role: 'user', content: 'image reply' }],
+      stream: true,
+      defaultMaxTokens: 200
+    });
+    assert.strictEqual(bareOriginOpenAI.provider, 'openai_compatible');
+    assert.strictEqual(bareOriginOpenAI.url, 'https://superapi.buzz/v1/chat/completions');
+
     const geminiMain = buildMainModelRequest({
       model: 'gemini-3-pro-preview',
       apiBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
