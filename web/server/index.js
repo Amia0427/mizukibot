@@ -552,6 +552,7 @@ function startServer() {
           '<div>LOCAL_COMMAND_BRIDGE_TOKEN: ' + escapeCell(posture.localCommandBridgeToken || '-') + '</div>',
           '<div>WEB_BIND_HOST: ' + escapeCell(posture.webBindHost || '-') + '</div>',
           '<div>command bridge: ' + (posture.localCommandBridgeEnabled ? 'enabled' : 'disabled') + '</div>',
+          '<div>command execution: ' + escapeCell(posture.localCommandBridgeExecution || '-') + '</div>',
           '<div>API Base URL risks: ' + unsafeApiCount + '</div>'
         ].join('');
       } catch (e) {

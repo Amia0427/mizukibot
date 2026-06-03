@@ -24,7 +24,9 @@ function timingSafeEqualText(left = '', right = '') {
 
 function ensureAuthorized(req, res, next) {
   const expected = normalizeText(config.LOCAL_COMMAND_BRIDGE_TOKEN);
-  if (!expected) return next();
+  if (!expected) {
+    return res.status(503).json({ ok: false, error: 'local_command_bridge_token_missing' });
+  }
   const auth = normalizeText(req.headers.authorization || '');
   if (timingSafeEqualText(auth, `Bearer ${expected}`)) return next();
   return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -177,11 +179,12 @@ async function main() {
   warnIfBridgeTokenMissing();
   const app = express();
   app.use(express.json({ limit: '1mb' }));
-  app.use(ensureAuthorized);
 
   app.get('/health', (_req, res) => {
     res.json({ ok: true });
   });
+
+  app.use(ensureAuthorized);
 
   app.post('/run', async (req, res) => {
     try {
