@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-03 17:42 +08:00：普通用户主回复 gcli 网关固定为 `API_PROVIDER=openai_compatible`；`AI_MODEL=gemini-3-flash-preview` 仍走 `https://gcli.ggchan.dev/v1/chat/completions`，避免按模型名自动切到 Gemini native 后访问 `.../models/gemini-3-flash-preview:generateContent` 返回 HTTP 404。主回复/Provider 诊断同步尊重显式 provider，避免 `/check` 继续误报 native 链路。
+
 更新 2026-06-03 17:25 +08:00：修复 Windows 远程重启触发：Node 不能直接 `spawn` `.cmd`，现在通过 `cmd.exe /d /c call restart-bot.cmd` 启动，并保留 `windowsVerbatimArguments`；`restart-bot.cmd restart/status` 也会按命令归一化，不再误当计划任务名。
 
 更新 2026-06-03 17:16 +08:00：Gemini native 主回复流式不再统一降级为非流式；`stream=true` 的主回复请求会归一到 `:streamGenerateContent?alt=sse`，复用现有 SSE parser、streaming coordinator、guard 和普通用户首字超时语义。普通主回复可直接产出增量，私聊/群聊仍按既有 guard 先缓冲校验再发最终文本。
