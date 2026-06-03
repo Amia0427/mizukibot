@@ -45,6 +45,7 @@ function ensureChatCompletionsUrl(url) {
   if (/\/responses$/i.test(normalized)) return normalized.replace(/\/responses$/i, '/chat/completions');
   if (/\/messages$/i.test(normalized)) return normalized.replace(/\/messages$/i, '/chat/completions');
   if (/\/v\d+$/i.test(normalized)) return `${normalized}/chat/completions`;
+  if (/^https?:\/\/[^/]+$/i.test(normalized)) return `${normalized}/v1/chat/completions`;
   return normalized;
 }
 
@@ -54,6 +55,7 @@ function ensureResponsesUrl(url) {
   if (/\/chat\/completions$/i.test(normalized)) return normalized.replace(/\/chat\/completions$/i, '/responses');
   if (/\/messages$/i.test(normalized)) return normalized.replace(/\/messages$/i, '/responses');
   if (/\/v\d+$/i.test(normalized)) return `${normalized}/responses`;
+  if (/^https?:\/\/[^/]+$/i.test(normalized)) return `${normalized}/v1/responses`;
   return normalized;
 }
 

@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-03 10:02 +08:00：修复图片主回复模型裸域名 endpoint 导致的空流兜底；`https://superapi.buzz/` 这类 OpenAI-compatible 主模型地址现在会自动补为 `/v1/chat/completions`，本地 `IMAGE_API_BASE_URL` 已同步改为完整 chat-completions 地址。
+
 更新 2026-06-03 09:29 +08:00：按要求撤回 `6d4d1c9 fix: isolate passive persona refusal contamination`；移除被动感知 prompt/持久化里的模型身份污染隔离代码和相关自检断言，保留后续已明确修正的被动感知回复模型独立 env 默认配置。
 
 更新 2026-06-03 08:37 +08:00：Memory V3 召回按“先评测、再 chunking、稳 reranker、加 BM25+RRF”的顺序完成小步增强；新增 `Recall@5/MRR@5`、BM25+RRF rank fusion 诊断、rerank 前后 top trace 和 100 条 eval 样例补齐，默认不更换 embedding 模型或 LanceDB。
