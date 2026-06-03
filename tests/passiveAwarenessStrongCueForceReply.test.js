@@ -37,7 +37,6 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://example.com/reply';
     process.env.PASSIVE_AWARENESS_REPLY_API_KEY = 'reply-key';
     process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'reply-model';
-    process.env.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL = 'false';
     process.env.PASSIVE_AWARENESS_STRONG_CUE_FORCE_REPLY = 'true';
     process.env.PASSIVE_AWARENESS_CHEAP_GATE_MIN_SCORE = '1';
     process.env.BOT_QQ = 'bot-test';
