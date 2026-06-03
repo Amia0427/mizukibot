@@ -500,27 +500,27 @@ function createRuntime(options = {}) {
 
   function getControlledFailureReply(failureType = 'generic_model_failure') {
     if (failureType === 'tool_loop_limit') {
-      return 'Model invocation failed: tool loop limit reached after the direct memory turn. Please ask again with a more specific memory target.';
+      return '记忆那边刚刚绕住了。你把想找的点再捏具体一点，我接着翻。';
     }
     if (failureType === 'tool_error') {
-      return 'Tool error: direct memory lookup could not produce a stable answer just now.';
+      return '刚刚翻记忆没翻稳。换个更具体的关键词问我，我再捞一次。';
     }
     if (failureType === 'post_tool_empty_reply') {
-      return 'Model reply was empty after the direct memory tool path. Please retry with a more specific request.';
+      return '翻完以后那句空掉了。你把要问的点再收窄一点，我重新接。';
     }
     if (failureType === 'context_overflow') {
-      return 'The assembled context is too large to answer safely right now. Please narrow the request or continue from the latest step.';
+      return '上下文塞得太满啦。你从最近那一步接着问，或者把范围缩小一点。';
     }
     if (failureType === 'provider_auth') {
-      return 'invalid api key';
+      return '这边配置像是没扣好，先检查一下模型钥匙吧。';
     }
     if (failureType === 'provider_quota') {
-      return '上游模型额度不足，暂时没法正常回答。';
+      return '模型额度好像见底了。先换个模型或者补一下额度，我再继续。';
     }
     if (failureType === 'provider_blocked') {
-      return 'request was blocked by upstream safety';
+      return '刚刚那句被卡掉了。你换个更短更明确的说法，我马上接。';
     }
-    return '我刚才没有稳定组织出回复。你可以直接再说一次，或者把需求说得更具体一点。';
+    return '刚刚那句没组织稳。你再发一次，我继续接。';
   }
 
   function classifyDirectReplyError(error) {

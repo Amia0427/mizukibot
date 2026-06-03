@@ -108,8 +108,8 @@ module.exports = (async () => {
     rawText: '/群总结',
     chatType: 'group'
   });
-  assert.strictEqual(deniedResult.replyText, '仅管理员可用。');
-  assert.strictEqual(deniedCase.sent[0].replyText, '仅管理员可用。');
+  assert.strictEqual(deniedResult.replyText, '这个按钮现在只给管理员按哦。');
+  assert.strictEqual(deniedCase.sent[0].replyText, '这个按钮现在只给管理员按哦。');
 
   const privateCase = createFlow();
   const privateResult = await privateCase.routeFlow.dispatchAdminRoute({
@@ -119,7 +119,7 @@ module.exports = (async () => {
     rawText: '/群总结',
     chatType: 'private'
   });
-  assert.strictEqual(privateResult.replyText, '仅群聊可用。');
+  assert.strictEqual(privateResult.replyText, '这个要在群里才接得住啦。');
   assert.strictEqual(privateCase.sent[0].atSender, false);
 
   console.log('groupSummaryAdminRoute.test.js passed');

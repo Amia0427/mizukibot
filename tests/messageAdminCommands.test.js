@@ -76,7 +76,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(restartDenied.handled, true);
   assert.strictEqual(restartDenied.restartRequested, undefined);
-  assert.strictEqual(restartDenied.replyText, '仅管理员可用。');
+  assert.strictEqual(restartDenied.replyText, '这个按钮现在只给管理员按哦。');
 
   const restartWithTail = await coordinator.handleRestartAdminCommand({
     rawText: '/restart now',

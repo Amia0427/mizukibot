@@ -244,7 +244,7 @@ function shouldPreferRawMessageReactiveTrim(messages = []) {
 function createContextCompactionHardBlockError(plan = null, message = '') {
   const error = new Error(
     normalizeText(message)
-      || 'Model invocation failed: context budget hard block after reactive compaction.'
+      || '上下文塞得太满啦。你从最近那一步接着问，或者把范围缩小一点。'
   );
   error.code = 'CONTEXT_COMPACTION_HARD_BLOCK';
   error.isContextHardBlock = true;
@@ -253,7 +253,7 @@ function createContextCompactionHardBlockError(plan = null, message = '') {
 }
 
 function getContextCompactionFailureReply() {
-  return 'The assembled context is too large to answer safely right now. Please narrow the request or continue from the latest step.';
+  return '上下文塞得太满啦。你从最近那一步接着问，或者把范围缩小一点。';
 }
 
 function buildReactiveRawTrimPlan(messages = [], input = {}) {

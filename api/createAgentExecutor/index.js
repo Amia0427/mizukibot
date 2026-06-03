@@ -847,17 +847,17 @@ async function executeCreateCommand(context = {}, deps = {}) {
   }
   if (runtimeConfig.groupOnly && chatType === 'private') {
     emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'group_only' });
-    return { ok: false, replyText: '仅群聊可用', code: 'group_only' };
+    return { ok: false, replyText: '这个要在群里才接得住啦', code: 'group_only' };
   }
   if (!groupId) {
     emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'missing_group' });
-    return { ok: false, replyText: '仅群聊可用', code: 'missing_group' };
+    return { ok: false, replyText: '这个要在群里才接得住啦', code: 'missing_group' };
   }
 
   const runtimeSlot = tryAcquireRuntimeSlot(runtimeConfig);
   if (!runtimeSlot.ok) {
     emitCommandTrace('create_agent_runtime_failure', { finalErrorCode: 'busy' });
-    return { ok: false, replyText: '生图 worker 正忙，请稍后重试', code: 'busy' };
+    return { ok: false, replyText: '生图那边现在正忙着呢，等一下再丢给我试试。', code: 'busy' };
   }
 
   let quotaConsumed = false;

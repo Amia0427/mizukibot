@@ -759,7 +759,7 @@ module.exports = (async () => {
     });
     assert.strictEqual(busy.ok, false);
     assert.strictEqual(busy.code, 'busy');
-    assert.strictEqual(busy.replyText, '生图 worker 正忙，请稍后重试');
+    assert.strictEqual(busy.replyText, '生图那边现在正忙着呢，等一下再丢给我试试。');
 
     const staleBusyConfig = {
       ...runtimeConfig,
@@ -841,7 +841,7 @@ module.exports = (async () => {
     });
     assert.strictEqual(privateOnly.ok, false);
     assert.strictEqual(privateOnly.code, 'group_only');
-    assert.strictEqual(privateOnly.replyText, '仅群聊可用');
+    assert.strictEqual(privateOnly.replyText, '这个要在群里才接得住啦');
 
     const missingConfig = await executeCreateCommand({
       prompt: 'missing config',
@@ -954,7 +954,7 @@ module.exports = (async () => {
       }
     });
     assert.strictEqual(upstreamTimeoutFailure.ok, false);
-    assert.strictEqual(upstreamTimeoutFailure.replyText, '生图上游超时，请稍后重试或更换供应商');
+    assert.strictEqual(upstreamTimeoutFailure.replyText, '生图那边等太久没回声。等一下再试，或者换个供应商。');
 
     const expiredResourceFailure = await executeCreateCommand({
       prompt: 'expired resource failure',

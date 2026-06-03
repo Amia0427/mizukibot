@@ -6,7 +6,7 @@ const {
 const { parseToggleSubcommand } = require('./helpers');
 
 function handleGroupPublicAdminCommand(command = {}, groupId = '', senderId = '') {
-  if (!String(groupId || '').trim()) return '仅群聊可用。';
+  if (!String(groupId || '').trim()) return '这个要在群里才接得住啦。';
   const subcommand = parseToggleSubcommand(command);
   if (subcommand === 'status') return formatGroupMainModelStreamStatus(groupId);
   if (subcommand === 'on') {
@@ -21,7 +21,7 @@ function handleGroupPublicAdminCommand(command = {}, groupId = '', senderId = ''
 }
 
 function handleMainStreamAdminCommand(command = {}, groupId = '', senderId = '') {
-  if (!String(groupId || '').trim()) return '仅群聊可用。';
+  if (!String(groupId || '').trim()) return '这个要在群里才接得住啦。';
   const subcommand = parseToggleSubcommand(command);
   if (subcommand === 'status') return formatGroupMainModelStreamStatus(groupId);
   if (subcommand === 'on') {

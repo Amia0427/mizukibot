@@ -3,8 +3,8 @@ const {
   isPrivilegedPrivateChatUser
 } = require('../../../utils/privilegedPrivateChat');
 
-const PRIVATE_GROUP_ONLY_REPLY = '该能力当前仅支持群聊中使用，请在目标群内 @我。';
-const PRIVATE_CHAT_WHITELIST_REPLY = '当前私聊已关闭，仅对白名单用户和管理员开放。';
+const PRIVATE_GROUP_ONLY_REPLY = '这个得在目标群里喊我才行哦。';
+const PRIVATE_CHAT_WHITELIST_REPLY = '私聊现在先收起来了，只对白名单和管理员开放哦。';
 
 function isPrivateChatType(chatType = '') {
   return String(chatType || '').trim().toLowerCase() === 'private';

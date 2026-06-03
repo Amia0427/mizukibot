@@ -108,7 +108,7 @@ function createMessageRouteFlow(deps = {}) {
     askToolTaskLocally,
     runBackgroundToolTask,
     handleAdminCommand,
-    handleMemoryOpsAdminCommand = async () => ({ handled: true, replyText: 'memoryops 管理命令不可用。' }),
+    handleMemoryOpsAdminCommand = async () => ({ handled: true, replyText: 'memoryops 这边现在没接上。' }),
     handleQqScheduleAdminCommand,
     detectQzonePostDraftMode,
     publishQzoneForContext,
@@ -680,7 +680,7 @@ function createMessageRouteFlow(deps = {}) {
         error: dispatchErr?.message || String(dispatchErr || '')
       });
       if (!String(reply || '').trim()) {
-        reply = '这次处理过程中出了点问题。你可以稍后再试一次。';
+        reply = '刚刚处理到一半卡住了。等一下再丢给我试试。';
         persistedReplyText = reply;
         finalReplyOptions = finalReplyOptions
           ? { ...finalReplyOptions, deferPersist: false, __dispatchFailed: true }
@@ -727,7 +727,7 @@ function createMessageRouteFlow(deps = {}) {
 
     let adminReply = '';
     if (!hasAdminAccess(route, senderId)) {
-      adminReply = '仅管理员可用。';
+      adminReply = '这个按钮现在只给管理员按哦。';
       await sendGroupReply({
         chatType: normalizedChatType,
         groupId,
@@ -760,7 +760,7 @@ function createMessageRouteFlow(deps = {}) {
       adminReply = String(memoryOpsResult?.replyText || '').trim() || 'memoryops 管理命令已处理。';
     } else if (cmd === 'group_summary') {
       if (normalizedChatType === 'private' || !String(groupId || '').trim()) {
-        adminReply = '仅群聊可用。';
+        adminReply = '这个要在群里才接得住啦。';
       } else {
         const summaryResult = await generateGroupSummary({
           groupId,
@@ -768,7 +768,7 @@ function createMessageRouteFlow(deps = {}) {
           botQQ: config.BOT_QQ,
           command: route?.meta?.command || {}
         });
-        adminReply = String(summaryResult?.text || '').trim() || '群总结生成失败，请稍后再试。';
+        adminReply = String(summaryResult?.text || '').trim() || '群总结这次没生成稳。等一下再试一次吧。';
       }
     } else if (cmd === 'qzone_post') {
       const payload = parseJsonTail(route?.meta?.command?.payload);
@@ -859,7 +859,7 @@ function createMessageRouteFlow(deps = {}) {
         adminReply = `debug 参数: ${args.join(' ') || '无'}`;
       }
     } else {
-      adminReply = '未知管理员命令。可以发 /help 查看支持项。';
+      adminReply = '这个管理员命令我没认出来。发 /help 看看能用哪些吧。';
     }
 
     await sendGroupReply({

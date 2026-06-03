@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-03 08:24 +08:00：所有主回复兜底、路由不可用、私聊关闭、管理员/群聊限制、生图失败、流式首字超时和发送层空回复文案已统一改成瑞希口吻；Runtime V2 controlled failure 不再外发英文 `Model invocation failed` / `Tool error` / `invalid api key` / `request was blocked`，并同步扩展 `replyFailure` 与工具失败识别，避免新兜底文本被写入记忆或当作正常回复。
+
 更新 2026-06-03 08:13 +08:00：已清理 2026-06-02 私聊拒演坏样本及同类历史污染的可召回落盘数据；`daily_journal`、短期 bridge、Memory V3 events/projections、post-reply job、LangGraph 缓存和 style/social 缓存中的 “I'm Claude / 不扮演角色” 类文本已 scrub 或标记 unsafe。新增 `utils/recallPollutionGuard.js` 与 `node scripts/audit-memory-pollution.js --scrub [--apply]`，Memory V3/LanceDB/bridge 召回会过滤同类坏样本，不重复改流式/上下文隔离链路。
 
 更新 2026-06-03 08:08 +08:00：Daily Journal 的 daily / 4day / monthly rollup 生成和维护现在会自动 upsert 到 `profile_journal.sqlite` 的 `journal_rollups`，历史 daily / 4day 文件已轻量补写进 SQLite，当前主读诊断可直接看到 rollup 层数量。
@@ -24,7 +26,7 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-02 16:56 +08:00：私聊接入默认改为关闭普通用户；仅显式私聊白名单用户或管理员可进入私聊。执行层取消白名单/管理员私聊的 `private-write-disabled` 只读闸门，普通私聊用户仍直接被入口拒绝。
 
-更新 2026-06-03 07:52 +08:00：普通用户主回复流式请求首个可见字超时保护默认 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=75000`；75 秒内无首字会 abort 上游并回复“流式输出75秒超时，已自动断开”，管理员不受该限制影响。
+更新 2026-06-03 07:52 +08:00：普通用户主回复流式请求首个可见字超时保护默认 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=75000`；75 秒内无首字会 abort 上游并回复“我刚刚卡了 75 秒还没冒出字……先断开啦，你再发一次我重新接。”，管理员不受该限制影响。
 
 更新 2026-06-02 16:37 +08:00：主回复 persona 边界加入 `<fiction_authentic>` 角色真实性准则，明确 `{{char}}` 指晓山瑞希，要求拒绝、抗拒、不适等反应必须能从瑞希设定或当前剧情找到依据；这是主回复模型的角色扮演准则，不是身份漂移硬拦截。
 

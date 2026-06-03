@@ -561,7 +561,7 @@ module.exports = (async () => {
       return null;
     },
     getControlledFailureReply() {
-      return '我刚才没有稳定组织出回复。你可以直接再说一次，或者把需求说得更具体一点。';
+      return '刚刚那句没组织稳。你再发一次，我继续接。';
     },
     updateMemoryCliTurnStateAfterError(state = {}, failureType = 'tool_error') {
       return {
@@ -612,7 +612,7 @@ module.exports = (async () => {
   assert.ok(finalOutput, 'expected final_output event');
   assert.strictEqual(
     finalOutput.text,
-    '我刚才没有稳定组织出回复。你可以直接再说一次，或者把需求说得更具体一点。'
+    '刚刚那句没组织稳。你再发一次，我继续接。'
   );
 
   console.log('runtimeV2DirectReplyFailureTelemetry.test.js passed');

@@ -273,7 +273,8 @@ function isToolFailureText(resultText = '') {
     || /^页面提取失败[:：]/i.test(text)
     || /^MCP tool failed:/i.test(text)
     || /^request was blocked/i.test(text)
-    || /^invalid api key$/i.test(text);
+    || /^invalid api key$/i.test(text)
+    || /刚刚翻记忆没翻稳|记忆那边刚刚绕住了|翻完以后那句空掉了|刚刚那句被卡掉了|配置像是没扣好|额度好像见底/i.test(text);
 }
 
 function isMemorySearchCommand(commandText = '') {

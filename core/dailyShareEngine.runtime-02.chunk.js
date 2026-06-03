@@ -313,8 +313,8 @@
   }) {
     const text = String(rawText || '').trim();
     if (!/^\/dailyshare(?:\s|$)/i.test(text)) return null;
-    if (!String(groupId || '').trim()) return { handled: true, replyText: '仅群聊可用。' };
-    if (!isAdmin(userId)) return { handled: true, replyText: '仅管理员可用。' };
+    if (!String(groupId || '').trim()) return { handled: true, replyText: '这个要在群里才接得住啦。' };
+    if (!isAdmin(userId)) return { handled: true, replyText: '这个按钮现在只给管理员按哦。' };
 
     const today = getToday(date);
     const parts = text.split(/\s+/).slice(1);
