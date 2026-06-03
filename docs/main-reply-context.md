@@ -1,11 +1,12 @@
 # Main Reply Context
 
-更新时间：2026-06-03 09:29 +08:00
+更新时间：2026-06-03 17:16 +08:00
 
 ## 已调整
 
+- 2026-06-03 17:16 +08:00：Gemini native 主回复流式改为真正 SSE 路径；`buildMainModelRequest` 保留 `stream=true`，`prepareRequest` 将流式 Gemini 请求归一到 `:streamGenerateContent?alt=sse`，runtime 复用现有 streaming coordinator、guard、partial recovery 和普通用户首字超时。普通主回复可增量出字，私聊/群聊继续按既有 guard 缓冲校验后发最终文本。
 - 2026-06-03 09:29 +08:00：按要求撤回 `6d4d1c9 fix: isolate passive persona refusal contamination`；被动感知 prompt/持久化不再使用该提交加入的模型身份污染隔离逻辑，`modelIdentityContext` 相关测试和自检断言同步移除。后续 2026-06-02 20:10 的被动感知回复模型独立 env 默认配置仍保留。
-- 2026-06-03 08:24 +08:00：Gemini native 已接入主模型出站层。显式 `API_PROVIDER=gemini_native` 或主模型名匹配 `gemini-*` 时，`buildMainModelRequest` 选择 `gemini_generate_content`，`prepareRequest` 将 OpenAI-style `messages/tools` 转为 Gemini `contents/systemInstruction/tools`，并注入 `prompts/GEMINI.txt`；私聊、群聊、群总结等复用该模型服务的路径同步生效。Gemini native 流式请求当前转非流式，保留普通用户首字超时保护。
+- 2026-06-03 08:24 +08:00：Gemini native 已接入主模型出站层。显式 `API_PROVIDER=gemini_native` 或主模型名匹配 `gemini-*` 时，`buildMainModelRequest` 选择 `gemini_generate_content`，`prepareRequest` 将 OpenAI-style `messages/tools` 转为 Gemini `contents/systemInstruction/tools`，并注入 `prompts/GEMINI.txt`；私聊、群聊、群总结等复用该模型服务的路径同步生效。
 - 2026-06-03 08:24 +08:00：主回复兜底、Runtime V2 controlled failure、路由不可用、私聊关闭、管理员/群聊限制、生图失败、普通用户流式首字超时和发送层空回复文案统一改为瑞希口吻；同时保留权限/配置/额度/上下文过载等原语义，并扩展 `replyFailure` / 工具失败识别，避免这些新兜底被后续记忆、表情或工具链当作正常回答。
 - 2026-06-03 07:52 +08:00：普通聊天/问答如果因工具规划缺失或无可用工具进入 `no-allowed-tools` / `planner-missing`，现在降级回 `direct_reply` 主对话模型链路，不再直接返回“工具不可用”本地兜底，也不再把“No tool is available”这类提示塞给模型；QQ 空间、定时、私聊关闭、群聊限定等权限/动作限制仍保持固定回复。
 - 2026-06-02 20:10 +08:00：按当前要求，被动感知实际发言默认回到 `PASSIVE_AWARENESS_REPLY_API_BASE_URL` / `PASSIVE_AWARENESS_REPLY_API_KEY` / `PASSIVE_AWARENESS_REPLY_MODEL` 独立 env 配置；`PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL` 默认值改为 `false`，只有显式设为 `true` 才跟主回复模型配置。

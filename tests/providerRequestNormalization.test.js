@@ -156,6 +156,20 @@ module.exports = (async () => {
     assert.strictEqual(geminiAxiosHeaders['sec-ch-ua-mobile'], '?0');
     assert.strictEqual(preparedGeminiNative.requestHeaders['x-goog-api-key'], 'gemini-key');
 
+    const preparedGeminiNativeStream = await httpClient.prepareRequest(
+      'https://generativelanguage.googleapis.com/v1beta',
+      {
+        model: 'gemini-3-pro-preview',
+        messages: [{ role: 'user', content: 'stream me' }],
+        stream: true
+      }
+    );
+    assert.strictEqual(
+      preparedGeminiNativeStream.requestUrl,
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse'
+    );
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNativeStream.requestBody, 'stream'));
+
     clearProjectCache();
     const { buildBotDiaryQzoneImageHeaders } = require('../api/imageGeneration');
     const geminiImageHeaders = buildBotDiaryQzoneImageHeaders(
@@ -248,10 +262,17 @@ module.exports = (async () => {
     assert.strictEqual(geminiMain.protocol, 'gemini_generate_content');
     assert.strictEqual(
       geminiMain.url,
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent'
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse'
     );
-    assert.strictEqual(geminiMain.body.stream, false);
+    assert.strictEqual(geminiMain.body.stream, true);
     assert.strictEqual(geminiMain.body.__provider, 'gemini_native');
+    const preparedGeminiMain = await httpClient.prepareRequest(geminiMain.url, geminiMain.body);
+    assert.strictEqual(
+      preparedGeminiMain.requestUrl,
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse'
+    );
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiMain.requestBody, 'stream'));
+    assert.strictEqual(preparedGeminiMain.requestBody.contents[0].parts[0].text, 'gemini main');
 
     const explicitOpenAIWithGeminiModel = buildMainModelRequest({
       model: 'gemini-3-pro-preview',

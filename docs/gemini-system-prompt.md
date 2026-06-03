@@ -10,6 +10,8 @@
 
 更新 2026-06-03 08:24 +08:00：该文件已接入 Gemini native 出站适配层。显式 `API_PROVIDER=gemini_native` 或模型名匹配 `gemini-*` 时，HTTP 请求会转换为 Gemini `generateContent` body，并将 `prompts/GEMINI.txt` 作为 `[GeminiRuntimeAdapter]` 注入 `systemInstruction`；它仍不进入 prompt manifest，不改变非 Gemini 主回复编译顺序。
 
+更新 2026-06-03 17:16 +08:00：Gemini native 主回复流式请求现在走 `streamGenerateContent?alt=sse`，不再为了该系统提示词适配层降级成非流式；`systemInstruction` 注入、工具声明转换和图片 part 转换逻辑与非流式共用。
+
 ## 使用方式
 
 - `prompts/GEMINI.txt` 不在 `prompts/prompt-manifest.json` 中注册；只在 Gemini native provider 出站请求中作为 `systemInstruction` 追加。

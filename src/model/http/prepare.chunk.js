@@ -65,9 +65,11 @@ async function prepareRequest(url, body = {}) {
       ? stripTopPField(stripProviderCacheFields(provider, stripInternalRequestFields({ ...body })))
       : body;
     if (isGeminiNativeProvider(provider)) {
+      const geminiStream = requestBody?.stream === true
+        || normalizeText(requestBody?.stream).toLowerCase() === 'true';
       return {
         provider,
-        requestUrl: normalizeGeminiNativeApiBaseUrl(url, body?.model || config.AI_MODEL),
+        requestUrl: normalizeGeminiNativeApiBaseUrl(url, body?.model || config.AI_MODEL, { stream: geminiStream }),
         requestBody: await buildGeminiNativeRequestBody(requestBody),
         requestHeaders: internalRequestHeaders
       };

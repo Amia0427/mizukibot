@@ -107,7 +107,7 @@ function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
 function ensureMainModelUrl(apiBaseUrl = '', options = {}) {
   if (isAnthropicProvider(options.provider)) return ensureAnthropicMessagesUrl(apiBaseUrl);
   if (isGeminiNativeProvider(options.provider)) {
-    return normalizeGeminiNativeApiBaseUrl(apiBaseUrl, options.model);
+    return normalizeGeminiNativeApiBaseUrl(apiBaseUrl, options.model, { stream: options.stream === true });
   }
   return ensureOpenAIMainUrl(apiBaseUrl, options);
 }
@@ -400,7 +400,7 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
     messages: Array.isArray(options.messages) ? options.messages : [],
     max_tokens: getMaxTokens(options.defaultMaxTokens || getMainReplyDefaultMaxTokens(), resolvedConfig),
     reasoning_effort: getReasoningEffort(resolvedConfig),
-    stream: isGeminiNativeProvider(options.provider) ? false : Boolean(options.stream)
+    stream: Boolean(options.stream)
   };
 
   const topA = getTopA(resolvedConfig);
@@ -479,7 +479,7 @@ function buildMainModelRequest(resolvedConfig = null, options = {}) {
   return {
     provider,
     protocol,
-    url: ensureMainModelUrl(apiBaseUrl, { apiMode: protocol, provider, model: getModelName(resolvedConfig) }),
+    url: ensureMainModelUrl(apiBaseUrl, { apiMode: protocol, provider, model: getModelName(resolvedConfig), stream: Boolean(options.stream) }),
     body: buildGenerationRequestBody(resolvedConfig, {
       ...options,
       provider,

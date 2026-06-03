@@ -17,16 +17,46 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 const DEFAULT_GEMINI_SYSTEM_PROMPT_PATH = path.join(PROJECT_ROOT, 'prompts', 'GEMINI.txt');
 const geminiSystemPromptCache = new Map();
 
-function normalizeGeminiNativeApiBaseUrl(url = '', model = '') {
+function ensureGeminiStreamSseUrl(url = '') {
+  const raw = String(url || '').trim();
+  if (!raw) return raw;
+  try {
+    const parsed = new URL(raw);
+    parsed.searchParams.set('alt', 'sse');
+    return parsed.toString();
+  } catch (_) {
+    const hashIndex = raw.indexOf('#');
+    const base = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+    const hash = hashIndex >= 0 ? raw.slice(hashIndex) : '';
+    if (/[?&]alt=/i.test(base)) {
+      return `${base.replace(/([?&]alt=)[^&#]*/i, '$1sse')}${hash}`;
+    }
+    return `${base}${base.includes('?') ? '&' : '?'}alt=sse${hash}`;
+  }
+}
+
+function finalizeGeminiNativeEndpoint(url = '', stream = false) {
+  if (!stream) return url;
+  const streamUrl = String(url || '').replace(/:generateContent(?=([?#]|$))/i, ':streamGenerateContent');
+  return ensureGeminiStreamSseUrl(streamUrl);
+}
+
+function normalizeGeminiNativeApiBaseUrl(url = '', model = '', options = {}) {
+  const stream = options === true || Boolean(options?.stream);
   const raw = String(url || '').trim().replace(/\/+$/, '');
   if (!raw) return raw;
-  if (/\/models\/[^/?#]+:(?:stream)?generatecontent(?:[?#].*)?$/i.test(raw)) return raw;
+  if (/\/models\/[^/?#]+:(?:stream)?generatecontent(?:[?#].*)?$/i.test(raw)) {
+    return finalizeGeminiNativeEndpoint(raw, stream);
+  }
   const modelName = normalizeText(model || process.env.AI_MODEL || 'gemini-3-pro-preview') || 'gemini-3-pro-preview';
+  const action = stream ? 'streamGenerateContent' : 'generateContent';
   if (/\/(?:chat\/completions|responses|messages)(?:\/)?$/i.test(raw)) {
     const versionRoot = raw.replace(/\/(?:chat\/completions|responses|messages)(?:\/)?$/i, '');
-    return `${versionRoot}/models/${encodeURIComponent(modelName)}:generateContent`;
+    return finalizeGeminiNativeEndpoint(`${versionRoot}/models/${encodeURIComponent(modelName)}:${action}`, stream);
   }
-  if (/\/v(?:1|1beta)(?:\/)?$/i.test(raw)) return `${raw}/models/${encodeURIComponent(modelName)}:generateContent`;
+  if (/\/v(?:1|1beta)(?:\/)?$/i.test(raw)) {
+    return finalizeGeminiNativeEndpoint(`${raw}/models/${encodeURIComponent(modelName)}:${action}`, stream);
+  }
   return raw;
 }
 

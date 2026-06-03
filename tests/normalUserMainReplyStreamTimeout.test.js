@@ -151,6 +151,37 @@ module.exports = (async () => {
   });
   assert.strictEqual(adminSignalSeen, false, 'admin stream should bypass normal-user first token timeout');
 
+  const geminiDeltas = [];
+  let geminiStreamRequest = null;
+  await withPatchedStreamingService({
+    API_BASE_URL: 'https://generativelanguage.googleapis.com/v1beta',
+    API_PROVIDER: 'gemini_native',
+    AI_MODEL: 'gemini-3-pro-preview',
+    NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS: '15'
+  }, async (url, body, handlers = {}) => {
+    geminiStreamRequest = { url, body };
+    handlers.onData(Buffer.from('data: {"candidates":[{"content":{"parts":[{"text":"Gem"}],"role":"model"}}]}\n\n'));
+    handlers.onData(Buffer.from('data: {"candidates":[{"content":{"parts":[{"text":"ini"}],"role":"model"}}]}\n\n'));
+    return true;
+  }, async (service) => {
+    const streamed = await withDeadline(service.requestStreamingReply([{ role: 'user', content: 'hi' }], {
+      userId: 'user_1',
+      onDelta(delta, fullText) {
+        geminiDeltas.push({ delta, fullText });
+      }
+    }), 500);
+    assert.strictEqual(streamed.persistedText, 'Gemini');
+  });
+  assert.strictEqual(
+    geminiStreamRequest.url,
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:streamGenerateContent?alt=sse'
+  );
+  assert.strictEqual(geminiStreamRequest.body.stream, true);
+  assert.deepStrictEqual(geminiDeltas, [
+    { delta: 'Gem', fullText: 'Gem' },
+    { delta: 'ini', fullText: 'Gemini' }
+  ]);
+
   console.log('normalUserMainReplyStreamTimeout.test.js passed');
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));
