@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-03 08:08 +08:00：Daily Journal 的 daily / 4day / monthly rollup 生成和维护现在会自动 upsert 到 `profile_journal.sqlite` 的 `journal_rollups`，历史 daily / 4day 文件已轻量补写进 SQLite，当前主读诊断可直接看到 rollup 层数量。
+
 更新 2026-06-03 07:52 +08:00：普通聊天/问答命中 `no-allowed-tools` 或 `planner-missing` 时不再发送本地工具不可用兜底文案，也不再向模型补入“No tool is available”提示；调度会降级回正常主对话模型链路，并隐藏工具引导，权限类限制如私聊关闭、群聊限定、QQ 空间/定时动作仍保留固定拦截。
 
 更新 2026-06-02 21:55 +08:00：`prompts/GEMINI.txt` 继续补充 Gemini 语言风格约束，参考源预设中“文风3-语言特化”“情感基准”“防重复”和语言选择类安全片段，强化简体中文、QQ 短消息、活人对白、节奏变化、情绪落点与去模板化。

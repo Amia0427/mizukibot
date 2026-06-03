@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-02 10:47 +08:00
+更新时间：2026-06-03 08:08 +08:00
+
+更新 2026-06-03 08:08 +08:00：Daily Journal rollup 维护已接入结构化库自动写入：`runDailyJournalSummaries` 写 daily summary 后同步 `journal_rollups(level=daily)`，`maintainDailyJournalRollups` 生成或发现已有 4day/monthly markdown 时同步 `level=4day/monthly`。已对现有 `daily_journal` 文件执行轻量补写，当前 SQLite 主读可直接召回 daily / 4day rollup；monthly 会在满足 7 个连续 4day rollup 后自动生成并写入。
 
 更新 2026-06-02 10:47 +08:00：新增结构化 Profile + Daily Journal SQLite 治理层。默认库为 `data/profile_journal.sqlite`，由 `PROFILE_JOURNAL_DB_ENABLED`、`PROFILE_JOURNAL_DB_PRIMARY_READ` 和 `PROFILE_JOURNAL_AUTO_CLEAN_ENABLED` 控制；profile surface 与 daily journal retrieval 优先主读 SQLite active 数据，旧 Memory V3 projection / journal 文件保留 fallback 和审计来源。新增 `mem profile list/clean`、`mem journal list/clean`、`scripts/migrate-profile-journal-db.js --apply` 和 `npm run diag:memory -- profile-journal-db`。
 
@@ -43,7 +45,7 @@
 - `utils/memoryContext/v3Payload.js` 会在主回复记忆上下文前生成短 `boot digest`，默认聚合用户画像、关系锚点、最近连续性、活跃任务和关键偏好，不额外触发模型调用。
 - `utils/memoryCli/index.js` 支持 `mem read`、`mem boot`、`mem alias`、`mem trigger` 和 `mem review`；管理端新增 Memory Explorer / Review 只读和审核入口，可查看 URI 树、alias、trigger、版本链与召回命中原因。
 - `utils/profileJournalDb/` 提供独立 SQLite 治理库：`profile_facts` 保存结构化画像事实，`journal_entries` 保存原始日记轮次，`journal_rollups` 保存 segment/daily/4day/monthly 摘要，`memory_cleanups` 保存 TTL、冲突、纠错和 unsafe 清洗审计。
-- profile 写入仍先走 Memory V3 / `memoryWritePipeline` 质量门禁，`memory_confirmed`、`memory_candidate_extracted`、`memory_archived`、`migration_bootstrap` 会同步写入 SQLite；daily journal 在写文件成功后同步写 `journal_entries`，unsafe/skipped 条目保留审计但不会进入召回。
+- profile 写入仍先走 Memory V3 / `memoryWritePipeline` 质量门禁，`memory_confirmed`、`memory_candidate_extracted`、`memory_archived`、`migration_bootstrap` 会同步写入 SQLite；daily journal 在写文件成功后同步写 `journal_entries`，daily / 4day / monthly rollup 生成和维护时同步写 `journal_rollups`，unsafe/skipped 条目保留审计但不会进入召回。
 - `memoryProfileSurface.buildStableProfileText` 默认主读 SQLite active facts；`dailyJournal.getDailyJournalRetrievalBundle` 默认主读 SQLite active entries/rollups，数据库不可用或空结果时才回退旧 projection / markdown / jsonl。
 - `mem profile list --user <id> --status active|candidate|stale|superseded`、`mem profile clean --user <id> --apply`、`mem journal list --user <id> --day YYYY-MM-DD` 和 `mem journal clean --user <id> --apply` 返回结构化命中、status 和清洗状态。
 - `scripts/migrate-profile-journal-db.js --apply` 从 Memory V3 memory nodes、profile projection、episode projection 和 daily journal 文件构建 SQLite；默认不带 `--apply` 为 dry-run。

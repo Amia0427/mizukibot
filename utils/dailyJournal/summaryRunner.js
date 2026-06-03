@@ -28,6 +28,7 @@ function createDailyJournalSummaryRunner(deps = {}) {
     shiftDate,
     strictClampText,
     syncEpisodeMemory,
+    syncJournalRollupToProfileJournalDb,
     updateJournalIndex,
     sortUniqueStrings
   } = deps;
@@ -152,6 +153,23 @@ function createDailyJournalSummaryRunner(deps = {}) {
               sourceFile: getSummaryFilePath(userId, targetDay),
               textKind: 'journal_daily_summary',
               maxChars: config.DAILY_JOURNAL_SUMMARY_MAX_TOKENS
+            });
+            syncJournalRollupToProfileJournalDb(userId, {
+              id: `daily:${userId}:${targetDay}`,
+              level: 'daily',
+              day: targetDay,
+              startDay: targetDay,
+              endDay: targetDay,
+              text: summary,
+              status: 'active',
+              sourceEventIds: [],
+              quality: {
+                source: 'daily_journal_summary',
+                textKind: 'journal_daily_summary',
+                sourceFile: getSummaryFilePath(userId, targetDay),
+                segmentCount: segments.length,
+                activeRaw: Boolean(safeJournalText)
+              }
             });
             scheduleDailyJournalEmbeddingBackfill(userId, { days: [targetDay] });
             count += 1;
