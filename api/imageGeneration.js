@@ -54,9 +54,9 @@ function resolveBotDiaryQzoneImageRequestUrl(apiBaseUrl = '', model = '') {
   return `${base}/models/${encodeURIComponent(safeModel)}:generateContent`;
 }
 
-function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '') {
+function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '', model = '') {
   const key = normalizeText(apiKey);
-  const provider = getApiProvider(apiBaseUrl, '');
+  const provider = getApiProvider(apiBaseUrl, model);
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json, text/plain, */*'
@@ -226,7 +226,7 @@ async function drawBotDiaryQzonePicture(prompt = '', options = {}) {
       {
         timeout: timeoutMs,
         proxy: false,
-        headers: buildBotDiaryQzoneImageHeaders(provider.apiKey, requestUrl)
+        headers: buildBotDiaryQzoneImageHeaders(provider.apiKey, requestUrl, provider.model)
       }
     );
     const imageSource = extractBotDiaryQzoneImageSource(response?.data);

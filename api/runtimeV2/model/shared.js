@@ -2,10 +2,15 @@ const config = require('../../../config');
 const crypto = require('crypto');
 const {
   isAnthropicProvider,
+  isGeminiModelName,
+  isGeminiNativeProvider,
   isOpenAICompatibleProvider,
   normalizeApiProvider,
   ensureAnthropicMessagesUrl
 } = require('../../../utils/modelProvider');
+const {
+  normalizeGeminiNativeApiBaseUrl
+} = require('../../../src/model/http/gemini-native.chunk');
 const {
   ADMIN_SHARED_FALLBACK_SCOPE,
   resolveForcedFallbackMainModelConfig,
@@ -63,6 +68,7 @@ function normalizeOpenAIMainApiMode(value = '') {
 
 function resolveOpenAIMainProtocol(apiBaseUrl = '', options = {}) {
   if (isAnthropicProvider(options.provider)) return 'anthropic_messages';
+  if (isGeminiNativeProvider(options.provider)) return 'gemini_generate_content';
   const mode = normalizeOpenAIMainApiMode(options.apiMode || config.OPENAI_MAIN_API_MODE);
   if (mode === 'responses') return 'responses';
   if (mode === 'chat_completions') return 'chat_completions';
@@ -87,6 +93,7 @@ function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
   if (options && typeof options === 'object' && String(options.provider || '').trim()) {
     return normalizeApiProvider(options.provider);
   }
+  if (isGeminiModelName(model)) return 'gemini_native';
   const normalizedUrl = String(apiBaseUrl || '').trim();
   if (/\/messages(?:\/)?$/i.test(normalizedUrl)) return 'anthropic';
   return 'openai_compatible';
@@ -94,6 +101,9 @@ function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
 
 function ensureMainModelUrl(apiBaseUrl = '', options = {}) {
   if (isAnthropicProvider(options.provider)) return ensureAnthropicMessagesUrl(apiBaseUrl);
+  if (isGeminiNativeProvider(options.provider)) {
+    return normalizeGeminiNativeApiBaseUrl(apiBaseUrl, options.model);
+  }
   return ensureOpenAIMainUrl(apiBaseUrl, options);
 }
 
@@ -385,7 +395,7 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
     messages: Array.isArray(options.messages) ? options.messages : [],
     max_tokens: getMaxTokens(options.defaultMaxTokens || getMainReplyDefaultMaxTokens(), resolvedConfig),
     reasoning_effort: getReasoningEffort(resolvedConfig),
-    stream: Boolean(options.stream)
+    stream: isGeminiNativeProvider(options.provider) ? false : Boolean(options.stream)
   };
 
   const topA = getTopA(resolvedConfig);
@@ -410,6 +420,9 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   body.__promptTokenWarningThreshold = promptBudget.warning_threshold_tokens;
   body.__promptTokenHardLimit = promptBudget.hard_limit_tokens;
   body.__preferredProtocol = protocol;
+  if (String(options.provider || '').trim()) {
+    body.__provider = normalizeApiProvider(options.provider);
+  }
 
   const finalPromptBudget = summarizePromptTokenBudget(body);
   if (finalPromptBudget.over_hard_limit) {
@@ -450,7 +463,7 @@ function buildMainModelRequest(resolvedConfig = null, options = {}) {
   return {
     provider,
     protocol,
-    url: ensureMainModelUrl(apiBaseUrl, { apiMode: protocol, provider }),
+    url: ensureMainModelUrl(apiBaseUrl, { apiMode: protocol, provider, model: getModelName(resolvedConfig) }),
     body: buildGenerationRequestBody(resolvedConfig, {
       ...options,
       provider,

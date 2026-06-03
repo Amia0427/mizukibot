@@ -40,6 +40,8 @@ const INTERNAL_FIELD_NAMES = [
   '__requestHeaders',
   '__responsesProtocolFallbackAttempted',
   '__timeoutMs',
+  '__provider',
+  '__apiProvider',
   '__trace'
 ];
 
@@ -292,6 +294,21 @@ function buildHttpDiagnosticBody(scenarioConfig = {}, options = {}) {
   };
 }
 
+function summarizeGeminiSystemInstruction(body = {}) {
+  const parts = Array.isArray(body?.systemInstruction?.parts)
+    ? body.systemInstruction.parts
+    : [];
+  const text = parts
+    .map((part) => normalizeText(part?.text))
+    .filter(Boolean)
+    .join('\n');
+  return {
+    present: Boolean(text),
+    hasGeminiRuntimeAdapter: text.includes('[GeminiRuntimeAdapter]'),
+    chars: text.length
+  };
+}
+
 function summarizeAuth(headers = {}, apiKeySource = '') {
   const entries = [
     ['Authorization', 'bearer'],
@@ -365,6 +382,15 @@ function collectAnomalies({
   if (isGeminiNativeProvider(provider) && cache.anthropicCacheBreakpoints > 0) {
     anomalies.push('gemini_native_has_anthropic_cache_control');
   }
+  if (isGeminiNativeProvider(provider)) {
+    const geminiSystem = prepared?.requestBody?.systemInstruction;
+    const systemText = (Array.isArray(geminiSystem?.parts) ? geminiSystem.parts : [])
+      .map((part) => normalizeText(part?.text))
+      .filter(Boolean)
+      .join('\n');
+    if (!systemText) anomalies.push('gemini_native_missing_system_instruction');
+    else if (!systemText.includes('[GeminiRuntimeAdapter]')) anomalies.push('gemini_native_missing_runtime_adapter_prompt');
+  }
   if (isOpenAICompatibleProvider(provider) && body.prompt_cache_key && cache.anthropicCacheBreakpoints > 0) {
     anomalies.push('openai_prompt_cache_and_cache_control_both_present');
   }
@@ -401,6 +427,9 @@ async function buildHttpScenario(name, requestUrl, requestBody, scenarioConfig, 
     headerNames: Object.keys(finalHeaders || {}).sort(),
     auth: summarizeAuth(finalHeaders, scenarioConfig.apiKeySource),
     cache,
+    geminiSystemInstruction: isGeminiNativeProvider(finalProvider)
+      ? summarizeGeminiSystemInstruction(prepared.requestBody)
+      : null,
     strippedFields,
     anomalies: collectAnomalies({
       requestedProvider: scenarioConfig.requestedProvider,
@@ -495,7 +524,7 @@ function buildQzoneImageScenario(scenarioConfig) {
   );
   const requestBody = buildBotDiaryQzoneImageRequestBody('provider request diagnostic');
   const finalProvider = normalizeApiProvider(getApiProvider(requestUrl, scenarioConfig.model, { preferUnifiedResponses: true }));
-  const headers = buildBotDiaryQzoneImageHeaders(scenarioConfig.apiKey, requestUrl);
+  const headers = buildBotDiaryQzoneImageHeaders(scenarioConfig.apiKey, requestUrl, scenarioConfig.model);
   const prepared = {
     provider: finalProvider,
     requestBody,

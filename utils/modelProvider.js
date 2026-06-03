@@ -6,6 +6,16 @@ function isClaudeModelName(model) {
   return /^claude/i.test(String(model || '').trim());
 }
 
+function isGeminiModelName(model) {
+  const raw = String(model || '').trim().toLowerCase();
+  if (!raw) return false;
+  const withoutPrefix = raw.replace(/^models\//i, '');
+  const candidate = withoutPrefix.includes('/')
+    ? withoutPrefix.split('/').filter(Boolean).pop()
+    : withoutPrefix;
+  return /^gemini(?:[-_.:\d]|$)/i.test(String(candidate || ''));
+}
+
 function isAnthropicApiBase(url) {
   const normalized = normalizeApiBaseUrl(url).toLowerCase();
   if (!normalized) return false;
@@ -20,22 +30,24 @@ function isGeminiNativeApiBase(url) {
   const normalized = normalizeApiBaseUrl(url).toLowerCase();
   if (!normalized) return false;
 
-  return /\/models\/[^/?#]+:generatecontent(?:[?#].*)?$/i.test(normalized)
-    || /:generatecontent(?:[?#].*)?$/i.test(normalized);
+  return /\/models\/[^/?#]+:(?:stream)?generatecontent(?:[?#].*)?$/i.test(normalized)
+    || /:(?:stream)?generatecontent(?:[?#].*)?$/i.test(normalized);
 }
 
 function getApiProvider(url, model = '', options = {}) {
+  if (options && typeof options === 'object' && String(options.provider || '').trim()) {
+    return normalizeApiProvider(options.provider);
+  }
+  if (isGeminiModelName(model)) return 'gemini_native';
   if (options && typeof options === 'object' && options.preferUnifiedResponses === true) {
     if (isAnthropicApiBase(url)) return 'anthropic';
     const normalized = normalizeApiBaseUrl(url).toLowerCase();
     if (/\/v1\/messages(?:\/)?$/i.test(normalized) && isClaudeModelName(model)) {
       return 'anthropic';
     }
-    if (isGeminiNativeApiBase(url)) return 'gemini_native';
     return 'openai_compatible';
   }
   if (isAnthropicApiBase(url)) return 'anthropic';
-  if (isGeminiNativeApiBase(url)) return 'gemini_native';
 
   // Some gateways expose Anthropic-style endpoints behind non-anthropic hosts.
   const normalized = normalizeApiBaseUrl(url).toLowerCase();
@@ -131,6 +143,7 @@ function ensureAnthropicMessagesUrl(url) {
 module.exports = {
   normalizeApiBaseUrl,
   isClaudeModelName,
+  isGeminiModelName,
   isAnthropicApiBase,
   isGeminiNativeApiBase,
   getApiProvider,

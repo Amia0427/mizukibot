@@ -8,10 +8,12 @@
 
 更新 2026-06-02 21:55 +08:00：新增“Gemini 语言风格约束”小节，参考源预设中“文风3-语言特化”“情感基准”“防重复”和语言选择类安全片段，强化简体中文、QQ 短消息、活人对白、节奏变化、情绪落点与去模板化；仍不引入脚本变量、隐藏思考输出、HTML 互动、特定人格身份或高风险内容。
 
+更新 2026-06-03 08:24 +08:00：该文件已接入 Gemini native 出站适配层。显式 `API_PROVIDER=gemini_native` 或模型名匹配 `gemini-*` 时，HTTP 请求会转换为 Gemini `generateContent` body，并将 `prompts/GEMINI.txt` 作为 `[GeminiRuntimeAdapter]` 注入 `systemInstruction`；它仍不进入 prompt manifest，不改变非 Gemini 主回复编译顺序。
+
 ## 使用方式
 
-- `prompts/GEMINI.txt` 不在 `prompts/prompt-manifest.json` 中注册，不参与当前主回复 prompt 编译链。
-- 需要给 Gemini 单独注入稳定系统提示词时，外部调用方可直接读取该文件内容。
+- `prompts/GEMINI.txt` 不在 `prompts/prompt-manifest.json` 中注册；只在 Gemini native provider 出站请求中作为 `systemInstruction` 追加。
+- `GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED=false` 可关闭自动注入；`GEMINI_SYSTEM_PROMPT_PATH` 可指向替代文件。
 - 该文件不会改变瑞希 persona、runtime 动态块、security contract 或现有主回复注入顺序。
 
 ## 筛选原则

@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-03 08:24 +08:00：Gemini native 调用链已真正接入 `prompts/GEMINI.txt`：显式 `API_PROVIDER=gemini_native` 或模型名匹配 `gemini-*` 时，主回复、私聊、群聊、群总结等复用 `buildMainModelRequest` / `prepareRequest` 的路径会转换为 Gemini `generateContent` 请求，并把该文件注入 `systemInstruction`。可用 `GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED=false` 关闭，或用 `GEMINI_SYSTEM_PROMPT_PATH` 指向替代文件；Gemini native 流式当前安全降级为非流式返回。
+
 更新 2026-06-03 08:29 +08:00：结构化 Profile Journal DB 自动清洗已收紧，`quality_json.ok=false`、`reserved`/schema-like placeholder 和污染式关系占位内容不再保留 active；profile 读链路改为 60 秒进程内节流清洗，写入/CLI clean/诊断仍强制清洗，`diag:memory -- profile-journal-db` 新增质量计数和召回耗时摘要。
 
 更新 2026-06-03 08:24 +08:00：所有主回复兜底、路由不可用、私聊关闭、管理员/群聊限制、生图失败、流式首字超时和发送层空回复文案已统一改成瑞希口吻；Runtime V2 controlled failure 不再外发英文 `Model invocation failed` / `Tool error` / `invalid api key` / `request was blocked`，并同步扩展 `replyFailure` 与工具失败识别，避免新兜底文本被写入记忆或当作正常回复。

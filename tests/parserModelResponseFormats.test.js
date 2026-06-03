@@ -101,6 +101,46 @@ module.exports = (() => {
     role: 'assistant',
     content: 'object content text'
   });
+  const geminiText = extractMessageContent({
+    data: {
+      candidates: [
+        {
+          content: {
+            parts: [
+              { text: 'gemini ok' }
+            ]
+          }
+        }
+      ]
+    }
+  });
+  assert.deepStrictEqual(geminiText, {
+    role: 'assistant',
+    content: 'gemini ok'
+  });
+  const geminiFunctionCall = extractMessageContent({
+    data: {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'lookup',
+                  args: { q: 'x' }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  });
+  assert.strictEqual(geminiFunctionCall.role, 'assistant');
+  assert.strictEqual(geminiFunctionCall.content, '');
+  assert.strictEqual(geminiFunctionCall.tool_calls[0].type, 'function');
+  assert.strictEqual(geminiFunctionCall.tool_calls[0].function.name, 'lookup');
+  assert.strictEqual(geminiFunctionCall.tool_calls[0].function.arguments, JSON.stringify({ q: 'x' }));
   assert.notStrictEqual(String(objectContentMessage.content), '[object Object]');
   assert.strictEqual(
     normalizeTextContent({ type: 'text', text: 'shared object content' }),

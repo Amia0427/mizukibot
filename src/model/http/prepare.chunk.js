@@ -33,6 +33,13 @@ const {
 } = require('./request-shaping.chunk');
 const { buildAnthropicRequestHeaders } = require('./runtime-core.chunk');
 const { sanitizeOpenAICompatibleToolWithoutCache } = require('./images.chunk');
+const {
+  normalizeApiProvider
+} = require('../../../utils/modelProvider');
+const {
+  buildGeminiNativeRequestBody,
+  normalizeGeminiNativeApiBaseUrl
+} = require('./gemini-native.chunk');
 
 function shouldPreferResponsesProtocol(provider = '', url = '', requestBody = {}, originalBody = {}) {
   if (provider !== 'openai_compatible') return false;
@@ -45,12 +52,23 @@ function shouldPreferResponsesProtocol(provider = '', url = '', requestBody = {}
 }
 
 async function prepareRequest(url, body = {}) {
-  const provider = getApiProvider(url, body?.model || config.AI_MODEL, { preferUnifiedResponses: true });
+  const explicitProvider = normalizeText(body?.__provider || body?.__apiProvider);
+  const provider = explicitProvider
+    ? normalizeApiProvider(explicitProvider)
+    : getApiProvider(url, body?.model || config.AI_MODEL, { preferUnifiedResponses: true });
   const internalRequestHeaders = extractProviderRequestHeaders(provider, body);
   if (!isAnthropicProvider(provider)) {
     const requestBody = body && typeof body === 'object'
       ? stripTopPField(stripProviderCacheFields(provider, stripInternalRequestFields({ ...body })))
       : body;
+    if (isGeminiNativeProvider(provider)) {
+      return {
+        provider,
+        requestUrl: normalizeGeminiNativeApiBaseUrl(url, body?.model || config.AI_MODEL),
+        requestBody: await buildGeminiNativeRequestBody(requestBody),
+        requestHeaders: internalRequestHeaders
+      };
+    }
     const shouldUseOpenAIPromptCache = Boolean(
       providerAllowsOpenAIPromptCache(provider)
       && requestBody
