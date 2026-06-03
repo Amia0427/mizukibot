@@ -34,7 +34,7 @@ function loadLocalEnvFallback(rootDir = path.resolve(__dirname, '..')) {
 function loadEnvironment(rootDir = path.resolve(__dirname, '..')) {
   // Prefer dotenv when available, but keep startup independent from that optional dependency.
   try {
-    require('dotenv').config();
+    require('dotenv').config({ path: path.join(rootDir, '.env') });
   } catch (_) {
     loadLocalEnvFallback(rootDir);
   }

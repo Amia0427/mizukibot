@@ -6,6 +6,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-03 07:52 +08:00：普通聊天/问答命中 `no-allowed-tools` 或 `planner-missing` 时不再发送本地工具不可用兜底文案，也不再向模型补入“No tool is available”提示；调度会降级回正常主对话模型链路，并隐藏工具引导，权限类限制如私聊关闭、群聊限定、QQ 空间/定时动作仍保留固定拦截。
 
+更新 2026-06-03 07:53 +08:00：本地命令桥 `LOCAL_COMMAND_BRIDGE_TOKEN` 改为执行入口必需；token 从进程环境或 `.env` 加载，缺失时 `/health` 仍可用，但 `/run`、`/mcp/discover`、`/mcp/call` 阻断。生成后用 `node scripts/set-env.js LOCAL_COMMAND_BRIDGE_TOKEN <token>` 写入本地 `.env`。
+
 更新 2026-06-02 21:55 +08:00：`prompts/GEMINI.txt` 继续补充 Gemini 语言风格约束，参考源预设中“文风3-语言特化”“情感基准”“防重复”和语言选择类安全片段，强化简体中文、QQ 短消息、活人对白、节奏变化、情绪落点与去模板化。
 
 更新 2026-06-02 21:44 +08:00：`prompts/GEMINI.txt` 增加安全源预设原文占比，保留“视角有限”“人格基底”“全局写作”“生活切片”等可迁移句式；仍排除高风险、不合规、特定人格接管和重复 persona 内容。
@@ -244,6 +246,13 @@ NAPCAT_WS_TOKEN=
 DATA_DIR=./data
 ```
 
+本地命令桥 token：
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+node scripts/set-env.js LOCAL_COMMAND_BRIDGE_TOKEN <上一步输出>
+```
+
 启动：
 
 ```bash
@@ -351,6 +360,8 @@ npm run linux:logs
 ## 关键配置
 
 `.env` 不要提交到仓库。`API_KEY` 是唯一强制必填项；`NAPCAT_WS_URL` 默认 `ws://127.0.0.1:3001`；`DATA_DIR` 默认 `./data`。
+
+`LOCAL_COMMAND_BRIDGE_TOKEN` 用于保护 `scripts/local-command-bridge.js` / `scripts/local-command-bridge.ps1` 的本地执行入口。`config/index.js` 会通过 `dotenv` 或内置 fallback 读取 `.env`；Windows daemon 和 one-click 启动脚本也会先导入 `.env` 到进程环境。缺 token 时桥服务只保留 `/health`，高风险命令执行入口直接拒绝。
 
 MemOS MCP 远端知识库召回：
 

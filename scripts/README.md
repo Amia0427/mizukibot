@@ -55,8 +55,8 @@
 
 ## Local Integration
 
-- `local-command-bridge.js`
-- `local-command-bridge.ps1`
+- `local-command-bridge.js`：更新 2026-06-03 07:53 +08:00，`LOCAL_COMMAND_BRIDGE_TOKEN` 缺失时仅保留 `/health`，`/run` 和 MCP 入口阻断；token 从 `.env`/进程环境读取
+- `local-command-bridge.ps1`：更新 2026-06-03 07:53 +08:00，兼容旧 PowerShell 桥的 `.env` token 加载和执行入口鉴权
 - `configure-napcat-onebot.js`
 - 更新 2026-05-30 +08:00：OpenClaw / Claude CLI / HAPI 外部子 agent 激活链路已移除；相关本地启动脚本等待删除确认后移出仓库。
 
