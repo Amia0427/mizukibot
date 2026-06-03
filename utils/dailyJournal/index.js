@@ -90,6 +90,21 @@ function syncJournalEntryToProfileJournalDb(userId, day, record = {}, options = 
   }
 }
 
+function syncJournalRollupToProfileJournalDb(userId, rollup = {}) {
+  try {
+    const { upsertJournalRollup } = require('../profileJournalDb');
+    return upsertJournalRollup({
+      userId,
+      ...rollup
+    });
+  } catch (error) {
+    if (config.ENABLE_DEBUG_LOG) {
+      console.warn('[profile_journal_db] failed to sync journal rollup:', error?.message || error);
+    }
+    return { ok: false, reason: error?.message || String(error) };
+  }
+}
+
 const {
   syncEpisodeMemory,
   scheduleDailyJournalEmbeddingBackfill,
@@ -160,6 +175,7 @@ const {
   shiftDate,
   strictClampText,
   syncEpisodeMemory,
+  syncJournalRollupToProfileJournalDb,
   updateJournalIndex,
   updateRollupIndex
 });
@@ -421,6 +437,7 @@ const {
   sortUniqueStrings,
   strictClampText,
   syncEpisodeMemory,
+  syncJournalRollupToProfileJournalDb,
   updateJournalIndex
 });
 

@@ -20,6 +20,7 @@ function createDailyJournalRollupMaintenance(deps = {}) {
     shiftDate,
     strictClampText,
     syncEpisodeMemory,
+    syncJournalRollupToProfileJournalDb = () => ({ ok: false, reason: 'profile_journal_db_sync_unavailable' }),
     updateJournalIndex,
     updateRollupIndex
   } = deps;
@@ -92,14 +93,56 @@ function createDailyJournalRollupMaintenance(deps = {}) {
       };
     }
 
+    let dailySynced = 0;
     let fourDayCreated = 0;
     let monthlyCreated = 0;
+    const summaryDays = listUserSummaryDays(uid);
+
+    for (const day of summaryDays) {
+      const text = safeReadText(getSummaryFilePath(uid, day), '').trim();
+      if (!text) continue;
+      const result = syncJournalRollupToProfileJournalDb(uid, {
+        id: `daily:${uid}:${day}`,
+        level: 'daily',
+        day,
+        startDay: day,
+        endDay: day,
+        text,
+        status: 'active',
+        sourceEventIds: [],
+        quality: {
+          source: 'daily_journal_summary',
+          textKind: 'journal_daily_summary',
+          sourceFile: getSummaryFilePath(uid, day),
+          syncedFrom: 'rollup_maintenance'
+        }
+      });
+      if (result?.ok) dailySynced += 1;
+    }
 
     if (config.DAILY_JOURNAL_4DAY_ENABLED) {
-      const fourDayPlans = buildFourDayRollupPlans(listUserSummaryDays(uid));
+      const fourDayPlans = buildFourDayRollupPlans(summaryDays);
       for (const plan of fourDayPlans) {
         const filePath = getFourDayRollupFilePath(uid, plan.startDay, plan.endDay);
-        if (deps.fs.existsSync(filePath)) continue;
+        if (deps.fs.existsSync(filePath)) {
+          syncJournalRollupToProfileJournalDb(uid, {
+            id: `4day:${uid}:${plan.startDay}:${plan.endDay}`,
+            level: '4day',
+            day: plan.endDay,
+            startDay: plan.startDay,
+            endDay: plan.endDay,
+            text: safeReadText(filePath, '').trim(),
+            status: 'active',
+            sourceEventIds: [],
+            quality: {
+              source: 'daily_journal_rollup',
+              textKind: 'journal_4day_rollup',
+              sourceFile: filePath,
+              syncedFrom: 'existing_file'
+            }
+          });
+          continue;
+        }
 
         const sourceItems = plan.days
           .map((day) => ({ day, text: safeReadText(getSummaryFilePath(uid, day), '').trim() }))
@@ -163,6 +206,22 @@ function createDailyJournalRollupMaintenance(deps = {}) {
           conflictKeys: plan.days.map((day) => `journal|${uid}|daily|${day}`),
           coveredByRollups: ['4day']
         });
+        syncJournalRollupToProfileJournalDb(uid, {
+          id: `4day:${uid}:${plan.startDay}:${plan.endDay}`,
+          level: '4day',
+          day: plan.endDay,
+          startDay: plan.startDay,
+          endDay: plan.endDay,
+          text: summary,
+          status: 'active',
+          sourceEventIds: [],
+          quality: {
+            source: 'daily_journal_rollup',
+            textKind: 'journal_4day_rollup',
+            sourceFile: filePath,
+            sourceDays: plan.days
+          }
+        });
         fourDayCreated += 1;
       }
     }
@@ -172,7 +231,27 @@ function createDailyJournalRollupMaintenance(deps = {}) {
       for (const plan of monthlyPlans) {
         if (!plan.yearMonth) continue;
         const filePath = getMonthlyRollupFilePath(uid, plan.yearMonth, plan.part);
-        if (deps.fs.existsSync(filePath)) continue;
+        if (deps.fs.existsSync(filePath)) {
+          syncJournalRollupToProfileJournalDb(uid, {
+            id: `monthly:${uid}:${plan.yearMonth}:${plan.part}`,
+            level: 'monthly',
+            day: plan.endDay,
+            startDay: plan.startDay,
+            endDay: plan.endDay,
+            text: safeReadText(filePath, '').trim(),
+            status: 'active',
+            sourceEventIds: [],
+            quality: {
+              source: 'daily_journal_rollup',
+              textKind: 'journal_monthly_rollup',
+              sourceFile: filePath,
+              yearMonth: plan.yearMonth,
+              part: plan.part,
+              syncedFrom: 'existing_file'
+            }
+          });
+          continue;
+        }
 
         const sourceText = plan.items
           .map((item) => `[${item.startDay}..${item.endDay}]\n${item.text}`)
@@ -245,12 +324,34 @@ function createDailyJournalRollupMaintenance(deps = {}) {
           }),
           coveredByRollups: ['monthly']
         });
+        syncJournalRollupToProfileJournalDb(uid, {
+          id: `monthly:${uid}:${plan.yearMonth}:${plan.part}`,
+          level: 'monthly',
+          day: plan.endDay,
+          startDay: plan.startDay,
+          endDay: plan.endDay,
+          text: summary,
+          status: 'active',
+          sourceEventIds: [],
+          quality: {
+            source: 'daily_journal_rollup',
+            textKind: 'journal_monthly_rollup',
+            sourceFile: filePath,
+            yearMonth: plan.yearMonth,
+            part: plan.part,
+            sourceRollups: plan.items.map((item) => ({
+              startDay: item.startDay,
+              endDay: item.endDay
+            }))
+          }
+        });
         monthlyCreated += 1;
       }
     }
 
     return {
       userId: uid,
+      dailySynced,
       fourDayCreated,
       monthlyCreated
     };
