@@ -38,6 +38,7 @@ module.exports = (async () => {
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
     process.env.MODEL_HTTP_USER_AGENT = 'codex-diagnostic-agent';
+    process.env.GEMINI_SYSTEM_PROMPT_PATH = path.join(__dirname, 'fixtures', 'gemini-system-prompt.txt');
     clearProjectCache();
 
     const { runProviderRequestDiagnostics } = require('../utils/providerRequestDiagnostics');
@@ -77,6 +78,9 @@ module.exports = (async () => {
     assert.ok(findRemoved(geminiDirect.strippedFields, 'prompt_cache_key') > 0);
     assert.ok(findRemoved(geminiDirect.strippedFields, 'prompt_cache_retention') > 0);
     assert.ok(findRemoved(geminiDirect.strippedFields, 'cache_control') > 0);
+    assert.strictEqual(geminiDirect.geminiSystemInstruction.present, true);
+    assert.strictEqual(geminiDirect.geminiSystemInstruction.hasGeminiRuntimeAdapter, true);
+    assert.ok(geminiDirect.geminiSystemInstruction.chars > 0);
     assert.deepStrictEqual(geminiDirect.anomalies, []);
 
     const anthropicReport = await runProviderRequestDiagnostics({

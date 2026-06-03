@@ -167,6 +167,58 @@ function toolCallsFromAnthropicContent(content) {
   return calls;
 }
 
+function textFromGeminiParts(parts) {
+  if (!Array.isArray(parts)) return '';
+  return parts
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (!part || typeof part !== 'object') return '';
+      if (typeof part.text === 'string') return part.text;
+      if (typeof part.output_text === 'string') return part.output_text;
+      if (typeof part.outputText === 'string') return part.outputText;
+      return '';
+    })
+    .join('');
+}
+
+function toolCallsFromGeminiParts(parts) {
+  if (!Array.isArray(parts)) return [];
+  return parts
+    .map((part, index) => {
+      const call = part?.functionCall || part?.function_call;
+      if (!call || typeof call !== 'object') return null;
+      const name = String(call.name || '').trim();
+      if (!name) return null;
+      return {
+        id: String(call.id || `gemini_call_${Date.now()}_${index}`),
+        type: 'function',
+        function: {
+          name,
+          arguments: JSON.stringify(
+            (call.args && typeof call.args === 'object' && !Array.isArray(call.args))
+              ? call.args
+              : {}
+          )
+        }
+      };
+    })
+    .filter(Boolean);
+}
+
+function extractGeminiCandidateMessage(data) {
+  const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
+  const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+  if (parts.length === 0) return null;
+  const msg = {
+    role: 'assistant',
+    content: textFromGeminiParts(parts)
+  };
+  const toolCalls = toolCallsFromGeminiParts(parts);
+  if (toolCalls.length > 0) msg.tool_calls = toolCalls;
+  if (msg.content || toolCalls.length > 0) return msg;
+  return null;
+}
+
 function parseSSEToText(raw) {
   if (typeof raw !== 'string') return null;
   const lines = raw.split('\n');
@@ -475,6 +527,9 @@ function extractMessageContent(resp) {
     }
     return msg;
   }
+
+  const geminiMessage = extractGeminiCandidateMessage(data);
+  if (geminiMessage) return geminiMessage;
 
   const msg = data?.choices?.[0]?.message;
   if (msg) {

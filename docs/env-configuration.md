@@ -11,6 +11,7 @@
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；重复项已在本地 `.env` 注释中标明实际生效顺序。
 - 2026-06-03 07:53 +08:00：`LOCAL_COMMAND_BRIDGE_TOKEN` 应在本机启动前生成并写入 `.env` 或进程环境；`config/index.js`、Windows daemon 和 one-click 启动都会加载 `.env`。缺失时本地命令桥只允许 `/health`，执行类入口阻断。
 - 2026-06-03 08:24 +08:00：主回复相关兜底文案统一改为瑞希口吻；`NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=75000` 的超时回复同步改为“我刚刚卡了 75 秒还没冒出字……先断开啦，你再发一次我重新接。”，配置语义不变。
+- 2026-06-03 08:24 +08:00：Gemini native 按显式 `API_PROVIDER=gemini_native` 或 `AI_MODEL/ADMIN_AI_MODEL/GROUP_SUMMARY_MODEL=gemini-*` 识别，不再按 `API_BASE_URL` 单独推断；`GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED` 控制是否注入 `prompts/GEMINI.txt`，`GEMINI_SYSTEM_PROMPT_PATH` 可覆盖提示词路径。
 - 2026-06-03 07:52 +08:00：普通用户主回复流式首个可见字超时配置为 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=75000`；仅限制普通用户主回复流式请求，超时 abort 上游并回复瑞希口吻兜底，管理员不受影响。
 - 2026-06-02 10:56 +08:00：新增群聊普通用户主回复全局 RPM 限流配置：`NORMAL_GROUP_MAIN_REPLY_RPM_LIMIT_ENABLED=true`、`NORMAL_GROUP_MAIN_REPLY_RPM_LIMIT=12`、`NORMAL_GROUP_MAIN_REPLY_RPM_WINDOW_MS=60000`；只限制群聊普通用户 direct_chat 主回复和普通快速回复，命中后只群戳一戳，不调用主模型。
 - 2026-05-31 19:43 +08:00：主回复和管理员主模型输出上限提高到 8192，`AI_MAX_TOKENS=8192`、`ADMIN_AI_MAX_TOKENS=8192`；为中等推理留出更充足输出预算，缓存和采样参数不变。
