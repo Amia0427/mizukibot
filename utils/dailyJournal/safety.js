@@ -1,5 +1,6 @@
 const { classifyMemoryNeed } = require('../recallHeuristics');
 const { isUnsafeUserFacingReply } = require('../userFacingReplyGuards');
+const { roleplayRefusalPollutionReason } = require('../recallPollutionGuard');
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -21,6 +22,8 @@ function classifyJournalEntrySafety(entry = {}, options = {}) {
   const assistantText = normalizeText(entry.assistant || entry.reply || options.reply || '');
   if (!assistantText) return { safe: false, reason: 'empty_assistant' };
   if (isUnsafeUserFacingReply(assistantText)) return { safe: false, reason: 'unsafe_user_facing_reply' };
+  const pollutionReason = roleplayRefusalPollutionReason(assistantText, { allowBenignContext: false });
+  if (pollutionReason) return { safe: false, reason: pollutionReason };
   if (!UNSAFE_ASSISTANT_RE.test(assistantText)) return { safe: true, reason: '' };
   if (isIdentityOrRelationshipRecall(userText)) {
     return { safe: false, reason: 'unsafe_identity_recall_reply' };

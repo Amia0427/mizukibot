@@ -18,6 +18,7 @@ const {
   matchesMemoryMetadataFilters
 } = require('./categoryMetadata');
 const { isMemoryNotRecallable } = require('./recallFilter');
+const { isBadRoleplayRefusalText } = require('../recallPollutionGuard');
 const { filterResolvedMemoryConflicts } = require('./memoryConflictResolver');
 const {
   looksLikePollutedSessionSummary,
@@ -229,6 +230,7 @@ function collectCandidates(userId, options = {}) {
 
   return candidates
     .filter((item) => normalizeText(item.text))
+    .filter((item) => !isBadRoleplayRefusalText(item.text, { allowBenignContext: true }))
     .filter((item) => matchesMemoryMetadataFilters(item, options));
 }
 
