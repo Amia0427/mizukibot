@@ -29,21 +29,33 @@ function isEmbeddingIndexEnabled() {
 }
 
 function buildEmbeddingText(node = {}) {
+  const rawTags = Array.isArray(node.tags)
+    ? node.tags
+    : String(node.tagsText || node.tags || '').split(/[,\s]+/);
+  const tagsText = rawTags.map(normalizeText).filter(Boolean).join(', ');
   const tags = [
     node.source,
     node.sourceKind,
     node.scopeType,
+    node.category,
     node.fieldKey || node.semanticSlot,
     node.type || node.memoryKind,
+    node.intent,
+    node.privacyLevel,
     node.evidenceTier,
     node.status
   ].map(normalizeText).filter(Boolean);
   const canonical = normalizeText(node.canonicalKey || canonicalizeText(node.text));
   const text = normalizeText(node.text);
   return clampText([
-    tags.length ? `[${tags.join('|')}]` : '',
-    canonical ? `key: ${canonical}` : '',
-    text
+    node.source ? `source: ${normalizeText(node.source)}` : '',
+    node.scopeType ? `scope: ${normalizeText(node.scopeType)}` : '',
+    node.category ? `category: ${normalizeText(node.category)}` : '',
+    tagsText ? `tags: ${tagsText}` : '',
+    node.intent ? `intent: ${normalizeText(node.intent)}` : '',
+    tags.length ? `metadata: ${tags.join(' | ')}` : '',
+    canonical ? `canonicalKey: ${canonical}` : '',
+    text ? `text: ${text}` : ''
   ].filter(Boolean).join('\n'), DEFAULT_DOC_MAX_CHARS);
 }
 

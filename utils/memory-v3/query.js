@@ -51,8 +51,10 @@ const {
 const {
   appendRerankTail,
   applyJournalTargetDayPriority,
+  buildRankFusionSnapshot,
   buildLexicalCandidatePool,
   ensureTargetJournalCandidates,
+  fuseRankedCandidateGroups,
   scoreLocalCandidatePool
 } = require('./queryScoring');
 const { detectRecentRecallIntent } = require('./recentRecallPolicy');
@@ -63,7 +65,6 @@ const {
   shouldUseLanceDbHelper
 } = require('../lancedbMemoryStore/helperClient');
 const {
-  fuseRecallCandidates,
   resolveVectorCandidates
 } = require('../lancedbMemoryStore/rows');
 
@@ -142,6 +143,13 @@ async function queryMemory(input = {}) {
     ? String(input.facet || '').trim().toLowerCase()
     : classifyFacet(query, input);
   const rewrites = rewriteQuery(query, facet);
+  const bm25Enabled = input.bm25Enabled !== false && config.MEMORY_BM25_ENABLED !== false;
+  const rrfEnabled = input.rrfEnabled !== false && config.MEMORY_RRF_ENABLED !== false;
+  const hydeEnabled = input.hydeEnabled === true || config.MEMORY_HYDE_ENABLED === true;
+  const multiQueryEnabled = input.multiQueryEnabled === true || config.MEMORY_MULTI_QUERY_ENABLED === true;
+  const skippedRewriteReasons = [];
+  if (!hydeEnabled) skippedRewriteReasons.push('hyde_skipped_disabled');
+  if (!multiQueryEnabled) skippedRewriteReasons.push('multi_query_skipped_disabled');
   const resolvedSourcePlan = chooseSourcePlan(query, input.source || 'all', input);
   const sourcePlan = {
     ...resolvedSourcePlan,
@@ -243,25 +251,42 @@ async function queryMemory(input = {}) {
     timing.fusionMs = getNowMs() - stageStartedAt;
   }
   stageStartedAt = getNowMs();
+  const lexicalPool = buildLexicalCandidatePool(candidates, query, facet, {
+    ...input,
+    rewrites,
+    bm25Enabled
+  });
+  const bm25Candidates = lexicalPool.filter((item) => Number(item.bm25 || 0) > 0);
+  const fallbackCandidates = lexicalPool.filter((item) => {
+    const reason = normalizeText(`${item.matchMode || ''} ${item.selectionReason || ''}`);
+    return reason.includes('fallback')
+      || Number(item.scoreParts?.dateBoost || 0) > 0
+      || Number(item.scoreParts?.recentBonus || 0) > 0;
+  });
   const localPool = vectorStoreMode === 'lancedb' && vectorCandidates.length > 0
     ? mergeCandidateLists(
       vectorCandidates,
-      buildLexicalCandidatePool(candidates, query, facet, {
-        ...input,
-        rewrites
-      })
+      lexicalPool
     )
     : candidates;
   const scored = await scoreLocalCandidatePool(localPool, query, facet, {
     ...input,
     rewrites,
-    queryEmbedding
+    queryEmbedding,
+    bm25Enabled
   });
   timing.localLexicalMs = getNowMs() - stageStartedAt;
   let rankedForRerank = scored;
-  if (vectorStoreMode === 'lancedb' && vectorCandidates.length > 0) {
+  const rrfGroups = {
+    local: scored,
+    vector: vectorCandidates,
+    bm25: bm25Candidates,
+    fallback: fallbackCandidates
+  };
+  const activeRrfGroupCount = Object.values(rrfGroups).filter((items) => Array.isArray(items) && items.length > 0).length;
+  if (rrfEnabled && activeRrfGroupCount > 1) {
     stageStartedAt = getNowMs();
-    rankedForRerank = fuseRecallCandidates(scored, vectorCandidates, {
+    rankedForRerank = fuseRankedCandidateGroups(rrfGroups, {
       rrfK: config.MEMORY_V3_RRF_K
     });
     timing.fusionMs += getNowMs() - stageStartedAt;
@@ -283,6 +308,7 @@ async function queryMemory(input = {}) {
   const sortedForRerank = stableSortByScore(conflictResolved);
   const rerankPool = sortedForRerank.slice(0, rerankCandidateLimit);
   const rerankTail = sortedForRerank.slice(rerankCandidateLimit);
+  const rerankBeforeRuntime = getMemoryRerankRuntimeState();
   stageStartedAt = getNowMs();
   const rerankedHead = await rerankMemoryCandidates(query, rerankPool, {
     ...input,
@@ -299,6 +325,7 @@ async function queryMemory(input = {}) {
       : item.matchMode
   })), journalTargetDays));
   timing.rerankMs = getNowMs() - stageStartedAt;
+  const rerankAfterRuntime = getMemoryRerankRuntimeState();
   const reranked = appendRerankTail(rerankedHead, rerankTail);
   stageStartedAt = getNowMs();
   const selected = diversify(ensureTargetJournalCandidates(reranked, candidates, journalTargetDays), topK, {
@@ -334,6 +361,40 @@ async function queryMemory(input = {}) {
     projectionStale: projectionFreshness.projectionStale === true,
     projectionStaleReason: projectionFreshness.projectionStaleReason || ''
   };
+  const rerankDiagnostics = {
+    enabled: config.MEMORY_RERANK_ENABLED !== false && input.disableRerank !== true,
+    applied: rerankedHead.some((item) => Number(item.rerankScore || 0) > 0),
+    candidates: rerankPool.length,
+    limit: rerankCandidateLimit,
+    tail: rerankTail.length,
+    beforeTop: buildRankFusionSnapshot({ rerankBefore: rerankPool }, 5).rerankBefore,
+    afterTop: buildRankFusionSnapshot({ rerankAfter: rerankedHead }, 5).rerankAfter,
+    beforeRuntime: rerankBeforeRuntime,
+    afterRuntime: rerankAfterRuntime
+  };
+  const retrievalPlan = {
+    facet,
+    sourcePlan,
+    rewriteMode: multiQueryEnabled ? 'multi_query' : (hydeEnabled ? 'hyde' : 'basic'),
+    rewrites,
+    vectorEnabled: lancedbDiagnostics.enabled === true,
+    vectorStoreMode,
+    bm25Enabled,
+    rrfEnabled,
+    rerankEnabled: rerankDiagnostics.enabled,
+    hydeEnabled,
+    multiQueryEnabled,
+    skippedRewriteReasons
+  };
+  const rankFusion = buildRankFusionSnapshot({
+    vector: vectorCandidates,
+    bm25: bm25Candidates,
+    fallback: fallbackCandidates,
+    local: scored,
+    fused: rankedForRerank,
+    rerank: rerankedHead,
+    selected
+  }, 8);
   return {
     ok: true,
     userId,
@@ -365,6 +426,8 @@ async function queryMemory(input = {}) {
         projectionEventHighWatermarkTs: Number(projectionFreshness.projectionEventHighWatermarkTs || 0) || 0
       },
       coverageAtQuery,
+      retrievalPlan,
+      rerank: rerankDiagnostics,
       journalIntent,
       sourcePlan,
       recentRecallIntent,
@@ -374,6 +437,7 @@ async function queryMemory(input = {}) {
     diagnostics: {
       projectionFreshness,
       coverageAtQuery,
+      retrievalPlan,
       journalIntent,
       sourcePlan,
       recentRecallIntent,
@@ -381,6 +445,9 @@ async function queryMemory(input = {}) {
       timings: timing,
       recall: {
         strongSemanticThreshold: getStrongSemanticThreshold(input),
+        rankFusion,
+        retrievalPlan,
+        rerank: rerankDiagnostics,
         selected: selected.map((item) => ({
           id: item.id,
           source: item.source,

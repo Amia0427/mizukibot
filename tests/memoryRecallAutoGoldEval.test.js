@@ -80,7 +80,9 @@ const {
   countCategoryMismatches,
   countLifecycleLeaks,
   countRecentRecallMisses,
-  runMode
+  parseArgs,
+  runMode,
+  supplementCasesWithAutoGold
 } = require('../scripts/eval-memory-recall');
 
 const cases = buildAutoGoldCases(10);
@@ -88,6 +90,14 @@ assert.ok(cases.some((item) => item.expectedIds.includes('node_like_tea')), 'aut
 assert.ok(cases.some((item) => item.expectedIds.includes('wb_test_jasmine')), 'auto gold should include worldbook expected id');
 assert.ok(cases.every((item) => item.expectedIds.length > 0), 'all auto gold cases should be judged');
 assert.ok(new Set(cases.map((item) => item.facet)).size >= 2, 'auto gold should not collapse to one facet');
+assert.strictEqual(parseArgs(['--mode', 'lancedb', '--limit', '5']).mode, 'lancedb');
+const supplementedCases = supplementCasesWithAutoGold([
+  { id: 'manual_1', query: 'manual judged case', expectedIds: ['manual_node'] }
+], 3, () => [
+  { id: 'gold_1', query: 'gold case one', expectedIds: ['gold_node_1'] },
+  { id: 'gold_2', query: 'gold case two', expectedIds: ['gold_node_2'] }
+]);
+assert.deepStrictEqual(supplementedCases.map((item) => item.id), ['manual_1', 'gold_1', 'gold_2']);
 assert.strictEqual(
   buildCaseQueryOptions({ createdAt: 1777268735 }).journalNow.toISOString(),
   '2026-04-27T05:45:35.000Z'
@@ -99,8 +109,14 @@ assert.strictEqual(countRecentRecallMisses([{ source: 'recent' }], { query: '刚
 
 module.exports = runMode('local_jsonl', cases, { memoryCli: false }).then((result) => {
   assert.ok(result.judgedCases > 0);
+  assert.notStrictEqual(result.recallAt5, null);
   assert.notStrictEqual(result.recallAt8, null);
+  assert.notStrictEqual(result.mrrAt5, null);
   assert.notStrictEqual(result.mrrAt8, null);
+  assert.notStrictEqual(result.promptInjectionRate, null);
+  assert.strictEqual(typeof result.wrongHitRate, 'number');
+  assert.notStrictEqual(result.answerRelevance, null);
+  assert.notStrictEqual(result.faithfulness, null);
   assert.ok(result.bySource.preference || result.bySource.memory || result.byFacet.preference);
   assert.strictEqual(typeof result.lifecycleLeakage, 'number');
   assert.strictEqual(typeof result.categoryMismatches, 'number');

@@ -199,6 +199,22 @@ async function buildMemoryContextV3Payload(deps = {}) {
   const v3DroppedReasons = [];
   const lancedbFallback = queryResult?.stats?.lancedb?.fallbackReason || '';
   if (lancedbFallback) v3DroppedReasons.push(`lancedb_${lancedbFallback}`);
+  const retrievalPlan = queryResult?.stats?.retrievalPlan || queryResult?.diagnostics?.retrievalPlan || {};
+  if (lancedbFallback) v3DroppedReasons.push(`vector_fallback_${lancedbFallback}`);
+  if (retrievalPlan.bm25Enabled === true && !(queryResult?.diagnostics?.recall?.rankFusion?.bm25 || []).length) {
+    v3DroppedReasons.push('bm25_empty');
+  }
+  for (const reason of Array.isArray(retrievalPlan.skippedRewriteReasons) ? retrievalPlan.skippedRewriteReasons : []) {
+    if (reason) v3DroppedReasons.push(reason);
+  }
+  const rerankStats = queryResult?.stats?.rerank || queryResult?.diagnostics?.recall?.rerank || {};
+  const rerankRuntime = rerankStats.afterRuntime || queryResult?.stats?.coverageAtQuery?.rerankRuntime || {};
+  if (rerankRuntime.disabledReason === 'timeout' || Number(rerankRuntime.timeoutStreak || 0) > 0) {
+    v3DroppedReasons.push('rerank_timeout');
+  }
+  if (rerankRuntime.disabled === true) {
+    v3DroppedReasons.push(`rerank_cooldown${rerankRuntime.disabledReason ? `_${rerankRuntime.disabledReason}` : ''}`);
+  }
 
   const notebookText = normalizeArray(localKnowledge.bySource?.notebook_doc)
     .map((item) => String(item.preview || item.text || '').trim())

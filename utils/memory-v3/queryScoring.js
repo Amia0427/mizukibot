@@ -37,6 +37,159 @@ function getEmbeddingIndex() {
   return require('./embeddingIndex');
 }
 
+function buildLexicalText(candidate = {}) {
+  return [
+    candidate.title,
+    candidate.category,
+    Array.isArray(candidate.tags) ? candidate.tags.join(' ') : candidate.tags,
+    candidate.intent,
+    candidate.type || candidate.memoryKind,
+    candidate.fieldKey || candidate.semanticSlot,
+    candidate.canonicalKey || canonicalizeText(candidate.text),
+    candidate.text
+  ].map(normalizeText).filter(Boolean).join(' ');
+}
+
+function countTokens(tokens = []) {
+  const counts = new Map();
+  for (const token of Array.isArray(tokens) ? tokens : []) {
+    if (!token) continue;
+    counts.set(token, (counts.get(token) || 0) + 1);
+  }
+  return counts;
+}
+
+function buildBm25Index(candidates = [], facet = 'default') {
+  const docs = [];
+  const df = new Map();
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
+    if (!matchesFacetCandidate(facet, candidate)) continue;
+    const text = normalizeText(candidate.text);
+    if (!text) continue;
+    const tokens = tokenize(buildLexicalText(candidate));
+    if (tokens.length === 0) continue;
+    const tf = countTokens(tokens);
+    docs.push({
+      key: candidateKey(candidate),
+      length: tokens.length,
+      tf
+    });
+    for (const token of tf.keys()) df.set(token, (df.get(token) || 0) + 1);
+  }
+  const avgDocLength = docs.length > 0
+    ? docs.reduce((sum, doc) => sum + doc.length, 0) / docs.length
+    : 1;
+  return {
+    docsByKey: new Map(docs.map((doc) => [doc.key, doc])),
+    df,
+    docCount: docs.length,
+    avgDocLength: Math.max(1, avgDocLength)
+  };
+}
+
+function calcBm25Score(queryTokens = [], candidate = {}, index = null, options = {}) {
+  if (!index || !index.docCount) return 0;
+  const key = candidateKey(candidate);
+  const doc = index.docsByKey.get(key);
+  if (!doc) return 0;
+  const k1 = Math.max(0.1, Number(options.bm25K1 || config.MEMORY_BM25_K1 || 1.2) || 1.2);
+  const b = Math.max(0, Math.min(1, Number(options.bm25B || config.MEMORY_BM25_B || 0.75) || 0.75));
+  let score = 0;
+  for (const token of uniqueBy(queryTokens, (item) => item)) {
+    const tf = Number(doc.tf.get(token) || 0);
+    if (tf <= 0) continue;
+    const df = Math.max(0, Number(index.df.get(token) || 0) || 0);
+    const idf = Math.log(1 + ((index.docCount - df + 0.5) / (df + 0.5)));
+    const lengthNorm = 1 - b + (b * (doc.length / index.avgDocLength));
+    score += idf * ((tf * (k1 + 1)) / (tf + (k1 * lengthNorm)));
+  }
+  return Math.max(0, score);
+}
+
+function normalizeBm25Score(score = 0) {
+  const value = Math.max(0, Number(score || 0) || 0);
+  if (value <= 0) return 0;
+  return value / (value + 2);
+}
+
+function buildRankFusionSnapshot(groups = {}, limit = 5) {
+  const max = Math.max(1, Number(limit || 5) || 5);
+  const out = {};
+  for (const [name, items] of Object.entries(groups || {})) {
+    out[name] = (Array.isArray(items) ? items : [])
+      .slice(0, max)
+      .map((item, index) => ({
+        rank: index + 1,
+        id: item.id || item.nodeId || '',
+        score: Number(item.score || 0) || 0,
+        bm25: Number(item.bm25 || 0) || 0,
+        lexical: Number(item.lexical || 0) || 0,
+        semantic: Number(item.embedding || item.vectorScore || item.semantic || 0) || 0,
+        rerankScore: Number(item.rerankScore || 0) || 0,
+        matchMode: normalizeText(item.matchMode)
+      }));
+  }
+  return out;
+}
+
+function rankFusionContributionWeight(groupName = '', options = {}) {
+  const key = normalizeText(groupName).toLowerCase();
+  if (key === 'vector') return Math.max(0, Number(options.vectorWeight || config.MEMORY_LANCEDB_RRF_VECTOR_WEIGHT || 1.18) || 1.18);
+  if (key === 'bm25') return Math.max(0, Number(options.bm25Weight || config.MEMORY_BM25_RRF_WEIGHT || 1.08) || 1.08);
+  if (key === 'fallback') return Math.max(0, Number(options.fallbackWeight || config.MEMORY_FALLBACK_RRF_WEIGHT || 0.92) || 0.92);
+  return Math.max(0, Number(options.localWeight || config.MEMORY_LANCEDB_RRF_LOCAL_WEIGHT || 1) || 1);
+}
+
+function fuseRankedCandidateGroups(groups = {}, options = {}) {
+  const rrfK = Math.max(1, Number(options.rrfK || config.MEMORY_V3_RRF_K || 50) || 50);
+  const strongVectorThreshold = Math.max(0, Math.min(1, Number(options.strongVectorThreshold || config.MEMORY_LANCEDB_STRONG_VECTOR_THRESHOLD || 0.72) || 0.72));
+  const strongVectorBoost = Math.max(0, Number(options.strongVectorBoost || config.MEMORY_LANCEDB_STRONG_VECTOR_BOOST || 0.08) || 0.08);
+  const slots = new Map();
+
+  function addGroup(items = [], groupName = 'local') {
+    const weight = rankFusionContributionWeight(groupName, options);
+    if (weight <= 0) return;
+    stableSortByScore(items).forEach((item, index) => {
+      const key = candidateKey(item);
+      if (!key) return;
+      const current = slots.get(key) || {
+        item,
+        rrfScore: 0,
+        rrfRanks: {},
+        rrfSources: new Set()
+      };
+      current.rrfScore += weight / (rrfK + index + 1);
+      current.rrfRanks[groupName] = current.rrfRanks[groupName] || (index + 1);
+      current.rrfSources.add(groupName);
+      current.item = Number(item.score || 0) > Number(current.item.score || 0)
+        ? { ...current.item, ...item }
+        : { ...item, ...current.item };
+      slots.set(key, current);
+    });
+  }
+
+  for (const [groupName, items] of Object.entries(groups || {})) {
+    addGroup(items, groupName);
+  }
+
+  return Array.from(slots.values())
+    .map((entry) => ({
+      ...entry.item,
+      score: Number(entry.item.score || 0)
+        + entry.rrfScore
+        + (Number(entry.item.vectorScore || entry.item.embedding || 0) >= strongVectorThreshold ? strongVectorBoost : 0),
+      rrfScore: entry.rrfScore,
+      rrfSources: Array.from(entry.rrfSources),
+      rrfRanks: entry.rrfRanks,
+      localRank: entry.rrfRanks.local ?? entry.item.localRank,
+      vectorRank: entry.rrfRanks.vector ?? entry.item.vectorRank,
+      bm25Rank: entry.rrfRanks.bm25 ?? entry.item.bm25Rank,
+      fallbackRank: entry.rrfRanks.fallback ?? entry.item.fallbackRank,
+      matchMode: entry.rrfSources.size > 1 ? 'hybrid_rrf' : entry.item.matchMode
+    }))
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || String(a.id || '').localeCompare(String(b.id || '')));
+}
+
 function facetSourceWeight(facet, source) {
   const key = `${facet}:${source}`;
   const table = {
@@ -61,6 +214,8 @@ function facetSourceWeight(facet, source) {
 function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default', options = {}) {
   const rewrites = Array.isArray(options.rewrites) ? options.rewrites : rewriteQuery(query, facet);
   const queryTokens = uniqueBy(rewrites.flatMap((item) => tokenize(item)), (item) => item);
+  const bm25Enabled = options.bm25Enabled !== false && config.MEMORY_BM25_ENABLED !== false;
+  const bm25Index = bm25Enabled ? buildBm25Index(candidates, facet) : null;
   const journalTargetDays = resolveJournalTargetDays(query, {
     today: options.journalToday,
     now: options.journalNow
@@ -77,7 +232,10 @@ function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default
     const text = normalizeText(candidate.text);
     if (!text) continue;
     const docTokens = tokenize(`${text} ${candidate.canonicalKey || canonicalizeText(text)}`);
-    const lexical = cosineFromTokenSets(queryTokens, docTokens);
+    const lexicalCosine = cosineFromTokenSets(queryTokens, docTokens);
+    const bm25 = calcBm25Score(queryTokens, candidate, bm25Index, options);
+    const bm25Normalized = normalizeBm25Score(bm25);
+    const lexical = bm25Enabled ? Math.max(bm25Normalized, lexicalCosine * 0.75) : lexicalCosine;
     const canonical = canonicalizeText(candidate.canonicalKey || text);
     const direct = canonical && rewrites.some((rewrite) => canonical.includes(canonicalizeText(rewrite))) ? 0.25 : 0;
     const dateBoost = journalDateMatchBoost(candidate, journalTargetDays);
@@ -94,10 +252,16 @@ function buildLexicalCandidatePool(candidates = [], query = '', facet = 'default
       ...candidate,
       score: Math.max(Number(candidate.score || 0) || 0, score),
       lexical: Math.max(Number(candidate.lexical || 0) || 0, lexical),
-      matchMode: Number(candidate.embedding || candidate.vectorScore || 0) > 0 ? 'hybrid' : 'lexical',
+      bm25,
+      bm25Normalized,
+      lexicalCosine,
+      matchMode: Number(candidate.embedding || candidate.vectorScore || 0) > 0 ? 'hybrid' : (bm25Enabled && bm25 > 0 ? 'bm25' : 'lexical'),
       scoreParts: {
         ...(candidate.scoreParts || {}),
         lexical,
+        bm25,
+        bm25Normalized,
+        lexicalCosine,
         direct,
         dateBoost,
         recency,
@@ -182,6 +346,8 @@ function appendRerankTail(rerankedHead = [], rerankTail = []) {
 async function scoreCandidates(candidates = [], query = '', facet = 'default', options = {}) {
   const rewrites = Array.isArray(options.rewrites) ? options.rewrites : rewriteQuery(query, facet);
   const queryTokens = uniqueBy(rewrites.flatMap((item) => tokenize(item)), (item) => item);
+  const bm25Enabled = options.bm25Enabled !== false && config.MEMORY_BM25_ENABLED !== false;
+  const bm25Index = bm25Enabled ? buildBm25Index(candidates, facet) : null;
   const journalTargetDays = resolveJournalTargetDays(query, {
     today: options.journalToday,
     now: options.journalNow
@@ -205,7 +371,10 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
     const text = normalizeText(candidate.text);
     if (!text) continue;
     const docTokens = tokenize(`${text} ${candidate.canonicalKey || canonicalizeText(text)}`);
-    const lexical = cosineFromTokenSets(queryTokens, docTokens);
+    const lexicalCosine = cosineFromTokenSets(queryTokens, docTokens);
+    const bm25 = calcBm25Score(queryTokens, candidate, bm25Index, options);
+    const bm25Normalized = normalizeBm25Score(bm25);
+    const lexical = bm25Enabled ? Math.max(bm25Normalized, lexicalCosine * 0.75) : lexicalCosine;
     const direct = candidate.canonicalKey && rewrites.some((rewrite) => candidate.canonicalKey.includes(canonicalizeText(rewrite))) ? 0.25 : 0;
     const recency = candidate.updatedAt ? Math.max(0.2, 1 - ((Date.now() - candidate.updatedAt) / (180 * 24 * 3600 * 1000))) : 0.4;
     const support = Math.min(0.3, (Number(candidate.evidenceCount || 1) - 1) * 0.05);
@@ -232,10 +401,16 @@ async function scoreCandidates(candidates = [], query = '', facet = 'default', o
       ...candidate,
       score: semanticOnly ? Math.max(score, minScore + (embedding * semanticWeight)) : score,
       lexical,
+      bm25,
+      bm25Normalized,
+      lexicalCosine,
       embedding,
       matchMode,
       scoreParts: {
         lexical,
+        bm25,
+        bm25Normalized,
+        lexicalCosine,
         embedding,
         direct,
         dateBoost,
@@ -299,10 +474,15 @@ async function scoreLocalCandidatePool(candidates = [], query = '', facet = 'def
 module.exports = {
   appendRerankTail,
   applyJournalTargetDayPriority,
+  buildBm25Index,
+  fuseRankedCandidateGroups,
   buildLexicalCandidatePool,
+  buildRankFusionSnapshot,
+  calcBm25Score,
   ensureTargetJournalCandidates,
   facetSourceWeight,
   isJournalTargetDayCandidate,
+  normalizeBm25Score,
   scoreCandidates,
   scoreLocalCandidatePool
 };
