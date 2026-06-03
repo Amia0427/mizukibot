@@ -13,6 +13,7 @@ set "SKIP_LOG_WINDOW="
 for %%A in (%*) do (
   if /i "%%~A"=="-StatusOnly" set "SKIP_LOG_WINDOW=1"
   if /i "%%~A"=="/StatusOnly" set "SKIP_LOG_WINDOW=1"
+  if /i "%%~A"=="status" set "SKIP_LOG_WINDOW=1"
 )
 if defined SKIP_LOG_WINDOW exit /b 0
 
@@ -39,6 +40,26 @@ if ($env:MIZUKI_RESTART_DEFAULT -eq '1') {
 
 if ([string]::IsNullOrWhiteSpace($TaskName)) {
   $TaskName = 'MizukiBotDaemon'
+}
+
+$positionalCommand = [string]$TaskName
+if (-not [string]::IsNullOrWhiteSpace($positionalCommand)) {
+  switch -Regex ($positionalCommand.Trim()) {
+    '^(?i:restart)$' {
+      $TaskName = 'MizukiBotDaemon'
+      $Restart = $true
+      break
+    }
+    '^(?i:status|statusonly)$' {
+      $TaskName = 'MizukiBotDaemon'
+      $StatusOnly = $true
+      break
+    }
+    '^(?i:start)$' {
+      $TaskName = 'MizukiBotDaemon'
+      break
+    }
+  }
 }
 
 $repoRoot = Resolve-Path $env:MIZUKI_RESTART_BOT_ROOT
