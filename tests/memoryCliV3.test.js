@@ -14,6 +14,7 @@ process.env.MEMORY_EMBEDDING_MODEL = '';
 process.env.PROFILE_JOURNAL_DB_ENABLED = 'true';
 process.env.PROFILE_JOURNAL_DB_PRIMARY_READ = 'true';
 process.env.PROFILE_JOURNAL_AUTO_CLEAN_ENABLED = 'true';
+process.env.PROFILE_JOURNAL_AUTO_CLEAN_INTERVAL_MS = '60000';
 process.env.PROFILE_JOURNAL_DB_FILE = path.join(tempRoot, 'profile_journal.sqlite');
 
 fs.mkdirSync(tempRoot, { recursive: true });
@@ -21,7 +22,8 @@ fs.mkdirSync(tempRoot, { recursive: true });
 const { appendMemoryEvent } = require('../utils/memory-v3/events');
 const { materializeMemoryViews } = require('../utils/memory-v3/materializer');
 const { runMemoryCli } = require('../utils/memoryCli');
-const { upsertJournalEntry } = require('../utils/profileJournalDb');
+const { getDb, getDiagnostics, upsertJournalEntry } = require('../utils/profileJournalDb');
+const { summarizeProfileJournalDb } = require('../scripts/diagnose-memory-ops');
 
 module.exports = (async () => {
   await appendMemoryEvent({
@@ -73,6 +75,45 @@ module.exports = (async () => {
   });
   assert.strictEqual(journalList.ok, true);
   assert.ok(journalList.results.some((item) => item.sourceKind === 'profile_journal_db' && item.text.includes('结构化日记命中')));
+
+  getDb().prepare(`
+    INSERT INTO profile_facts (
+      id, user_id, type, field_key, value, conflict_key, status, confidence, source_kind,
+      evidence_count, created_at, updated_at, expires_at, superseded_by, correction_of, quality_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'cli-bad-active',
+    'u_cli',
+    'like',
+    'preference_like',
+    'CLI 低质量 active',
+    'u_cli|personal|preference_like|cli-bad-active',
+    'active',
+    0.9,
+    'extractor',
+    1,
+    Date.now(),
+    Date.now(),
+    0,
+    '',
+    '',
+    JSON.stringify({ ok: false, reasons: ['generic_text'] })
+  );
+  const clean = await runMemoryCli('mem profile clean --user u_cli --apply', {
+    userId: 'u_cli',
+    routePolicyKey: 'direct_chat/default',
+    topRouteType: 'direct_chat'
+  });
+  assert.strictEqual(clean.ok, true);
+  assert.strictEqual(clean.applied, true);
+  const afterClean = getDiagnostics({ autoClean: false, benchmark: false });
+  assert.strictEqual(afterClean.quality.lowQualityActive, 0);
+  const summary = summarizeProfileJournalDb({
+    ...afterClean,
+    recallSpeed: { profileProjectionFromDb: { p95Ms: 1 } }
+  }, { limit: 5 });
+  assert.ok(Object.prototype.hasOwnProperty.call(summary, 'quality'));
+  assert.ok(Object.prototype.hasOwnProperty.call(summary, 'recallSpeed'));
   console.log('memoryCliV3.test.js passed');
 })().catch((error) => {
   console.error(error);

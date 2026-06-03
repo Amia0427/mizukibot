@@ -50,6 +50,7 @@ const ROLLUP_LEVELS = new Set(['segment', 'daily', '4day', 'monthly']);
 let dbInstance = null;
 let dbError = null;
 let fallbackCount = 0;
+let lastProfileAutoCleanAt = 0;
 
 function nowMs(options = {}) {
   return Math.max(0, Number(options.now || options.nowTs || Date.now()) || Date.now());
@@ -231,6 +232,7 @@ function resetDbForTests() {
   dbInstance = null;
   dbError = null;
   fallbackCount = 0;
+  lastProfileAutoCleanAt = 0;
 }
 
 function stableId(prefix = 'pf', parts = []) {
@@ -395,11 +397,64 @@ function rankProfileFact(row = {}) {
     + (Number(row.updated_at || row.updatedAt || 0) / 1000000000000);
 }
 
+function getProfileAutoCleanIntervalMs() {
+  return Math.max(0, Number(config.PROFILE_JOURNAL_AUTO_CLEAN_INTERVAL_MS || 0) || 0);
+}
+
+function shouldRunProfileAutoClean(options = {}) {
+  if (options.force === true || options.forceClean === true) return true;
+  const intervalMs = getProfileAutoCleanIntervalMs();
+  if (intervalMs <= 0) return true;
+  const current = nowMs(options);
+  return !lastProfileAutoCleanAt || current - lastProfileAutoCleanAt >= intervalMs;
+}
+
+function maybeApplyProfileAutoClean(db, options = {}) {
+  if (!shouldRunProfileAutoClean(options)) {
+    return { ok: true, skipped: true, throttled: true, stale: 0, superseded: 0, rejected: 0 };
+  }
+  return applyProfileAutoClean(db, options);
+}
+
+function isProfilePlaceholderFact(row = {}) {
+  const value = normalizeText(row.value || row.text || '');
+  if (!value) return true;
+  const canonicalValue = canonicalizeText(value).toLowerCase();
+  const fieldKey = normalizeText(row.field_key || row.fieldKey).toLowerCase();
+  const type = normalizeText(row.type || row.memoryKind).toLowerCase();
+  if (['reserved', 'unknown', 'null', 'none', 'n/a', 'na', 'undefined'].includes(canonicalValue)) return true;
+  if (/^(reserved[\s,;|/\\_-]*){2,}$/i.test(value)) return true;
+  if (/^reserved\s+reserved(?:\s+reserved)*$/i.test(value)) return true;
+  const reservedHits = (value.match(/\breserved\b/gi) || []).length;
+  if (reservedHits >= 2 && normalizeText(row.source_kind || row.sourceKind).toLowerCase() !== 'explicit') return true;
+  if (reservedHits >= 1 && /relationship[_\s-]+reply[_\s-]+st/i.test(value)) return true;
+  if (reservedHits >= 1 && /用户修正[:：]/.test(value)) return true;
+  if (fieldKey && canonicalValue === canonicalizeText(fieldKey).toLowerCase()) return true;
+  if (type && canonicalValue === canonicalizeText(type).toLowerCase()) return true;
+  const schemaTokens = [
+    fieldKey,
+    type
+  ].filter(Boolean).map((item) => canonicalizeText(item).toLowerCase());
+  return schemaTokens.some((token) => token && canonicalValue === token);
+}
+
+function buildProfileQualityRejectReason(row = {}) {
+  if (isProfilePlaceholderFact(row)) return 'profile_quality_placeholder';
+  const quality = parseJson(row.quality_json, {});
+  const reasons = Array.isArray(quality?.reasons) ? quality.reasons.filter(Boolean) : [];
+  if (quality && quality.ok === false) return `profile_quality_${reasons[0] || 'not_ok'}`;
+  if (reasons.some((reason) => ['temporary_language', 'generic_text', 'label_only', 'too_short', 'correction_command'].includes(reason))) {
+    return `profile_quality_${reasons[0]}`;
+  }
+  return '';
+}
+
 function applyProfileAutoClean(db, options = {}) {
   if (!db || config.PROFILE_JOURNAL_AUTO_CLEAN_ENABLED === false) {
     return { ok: true, skipped: true, stale: 0, superseded: 0, rejected: 0 };
   }
   const current = nowMs(options);
+  lastProfileAutoCleanAt = current;
   let stale = 0;
   let superseded = 0;
   let rejected = 0;
@@ -424,16 +479,18 @@ function applyProfileAutoClean(db, options = {}) {
 
   const lowQualityRows = db.prepare(`
     SELECT * FROM profile_facts
-    WHERE status = 'active'
+    WHERE status IN ('active', 'candidate')
   `).all();
   for (const row of lowQualityRows) {
-    const quality = parseJson(row.quality_json, {});
-    const reasons = Array.isArray(quality?.reasons) ? quality.reasons : [];
-    if (!reasons.some((reason) => ['temporary_language', 'generic_text', 'label_only', 'too_short', 'correction_command'].includes(reason))) continue;
-    const nextStatus = row.source_kind === 'explicit' ? 'candidate' : 'rejected';
+    const reason = buildProfileQualityRejectReason(row);
+    if (!reason) continue;
+    const nextStatus = reason === 'profile_quality_placeholder'
+      ? 'rejected'
+      : row.source_kind === 'explicit' ? 'candidate' : 'rejected';
+    if (row.status === nextStatus) continue;
     const next = { ...row, status: nextStatus, updated_at: current };
     markProfileStatus.run(nextStatus, current, row.id);
-    cleanupLog(db, 'profile_facts', row.id, nextStatus === 'candidate' ? 'demote_candidate' : 'reject', `profile_quality_${reasons[0]}`, row, next, { now: current });
+    cleanupLog(db, 'profile_facts', row.id, nextStatus === 'candidate' ? 'demote_candidate' : 'reject', reason, row, next, { now: current });
     rejected += 1;
   }
 
@@ -598,7 +655,7 @@ function rowToProfileFact(row = {}) {
 function listProfileFacts(options = {}) {
   const db = getDb();
   if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable', facts: [] };
-  if (options.autoClean !== false) applyProfileAutoClean(db, options);
+  if (options.autoClean !== false) maybeApplyProfileAutoClean(db, options);
   const userId = normalizeText(options.userId);
   const status = normalizeProfileStatus(options.status || 'active', 'active');
   const limit = Math.max(1, Math.min(500, Number(options.limit || 100) || 100));
@@ -621,7 +678,7 @@ function listProfileFacts(options = {}) {
 function searchProfileFacts(userId, query = '', options = {}) {
   const db = getDb();
   if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable', results: [] };
-  if (options.autoClean !== false) applyProfileAutoClean(db, options);
+  if (options.autoClean !== false) maybeApplyProfileAutoClean(db, options);
   const uid = normalizeText(userId);
   if (!uid) return { ok: false, reason: 'missing_user_id', results: [] };
   const limit = Math.max(1, Math.min(50, Number(options.limit || 12) || 12));
@@ -669,7 +726,7 @@ function searchProfileFacts(userId, query = '', options = {}) {
 function profileProjectionFromDb(userId, options = {}) {
   const db = getDb();
   if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable', profile: null };
-  if (options.autoClean !== false) applyProfileAutoClean(db, options);
+  if (options.autoClean !== false) maybeApplyProfileAutoClean(db, options);
   const uid = normalizeText(userId);
   if (!uid) return { ok: false, reason: 'missing_user_id', profile: null };
   const rows = db.prepare(`
@@ -1162,10 +1219,52 @@ function getJournalRetrievalBundleFromDb(userId, options = {}) {
   };
 }
 
+function measureProfileJournalRecall(db, options = {}) {
+  const uid = normalizeText(options.userId)
+    || normalizeText(db.prepare(`
+      SELECT user_id FROM profile_facts WHERE status = 'active'
+      GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT 1
+    `).get()?.user_id)
+    || normalizeText(db.prepare(`
+      SELECT user_id FROM journal_entries WHERE status = 'active'
+      GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT 1
+    `).get()?.user_id);
+  if (!uid) return { skipped: true, reason: 'no_active_user' };
+  const iterations = Math.max(1, Math.min(20, Number(options.benchmarkIterations || 5) || 5));
+  const bench = (fn) => {
+    const samples = [];
+    for (let index = 0; index < iterations; index += 1) {
+      const start = process.hrtime.bigint();
+      fn();
+      const end = process.hrtime.bigint();
+      samples.push(Number(end - start) / 1000000);
+    }
+    samples.sort((a, b) => a - b);
+    const avg = samples.reduce((sum, item) => sum + item, 0) / samples.length;
+    const p95 = samples[Math.max(0, Math.ceil(samples.length * 0.95) - 1)] || samples[samples.length - 1] || 0;
+    return {
+      avgMs: Number(avg.toFixed(2)),
+      p95Ms: Number(p95.toFixed(2)),
+      maxMs: Number((samples[samples.length - 1] || 0).toFixed(2))
+    };
+  };
+  return {
+    userId: uid,
+    iterations,
+    profileProjectionFromDb: bench(() => profileProjectionFromDb(uid, { autoClean: false })),
+    searchProfileFacts: bench(() => searchProfileFacts(uid, options.query || '记忆 prompt 用户偏好', { autoClean: false, limit: 12 })),
+    searchJournalEntries: bench(() => searchJournalEntries(uid, options.query || '昨天 修复 prompt 记忆', { limit: 12 })),
+    getJournalRetrievalBundleFromDb: bench(() => getJournalRetrievalBundleFromDb(uid, {
+      day: normalizeDay(options.day) || new Date(nowMs(options)).toISOString().slice(0, 10),
+      lookbackDays: 2
+    }))
+  };
+}
+
 function cleanProfileFacts(options = {}) {
   const db = getDb();
   if (!db) return { ok: false, reason: dbError?.message || 'profile_journal_db_unavailable' };
-  return applyProfileAutoClean(db, options);
+  return applyProfileAutoClean(db, { ...options, force: true });
 }
 
 function cleanJournalEntries(options = {}) {
@@ -1203,7 +1302,7 @@ function getDiagnostics(options = {}) {
     };
   }
   if (options.autoClean !== false) {
-    applyProfileAutoClean(db, options);
+    applyProfileAutoClean(db, { ...options, force: true });
     cleanJournalEntries(options);
   }
   const scalar = (sql, params = []) => {
@@ -1222,6 +1321,24 @@ function getDiagnostics(options = {}) {
   for (const level of ROLLUP_LEVELS) {
     rollups[level] = scalar('SELECT COUNT(*) AS c FROM journal_rollups WHERE level = ? AND status = ?', [level, 'active']);
   }
+  const activeProfileRows = db.prepare(`
+    SELECT id, type, field_key, value, conflict_key, source_kind, quality_json
+    FROM profile_facts
+    WHERE status = 'active'
+  `).all();
+  const quality = {
+    lowQualityActive: activeProfileRows.filter((row) => parseJson(row.quality_json, {})?.ok === false).length,
+    placeholderActive: activeProfileRows.filter((row) => isProfilePlaceholderFact(row)).length,
+    expiredActive: scalar(`
+      SELECT COUNT(*) AS c FROM profile_facts
+      WHERE status = 'active' AND expires_at > 0 AND expires_at <= ?
+    `, [nowMs(options)]),
+    unsafeJournalRecallable: scalar(`
+      SELECT COUNT(*) AS c FROM journal_entries
+      WHERE status = 'active' AND (safety = 'unsafe' OR safety LIKE 'unsafe_%')
+    `)
+  };
+  const recallSpeed = options.benchmark === false ? null : measureProfileJournalRecall(db, options);
   const recentCleanups = db.prepare(`
     SELECT * FROM memory_cleanups
     ORDER BY created_at DESC, id DESC
@@ -1244,6 +1361,8 @@ function getDiagnostics(options = {}) {
     profileStatus,
     journalStatus,
     rollups,
+    quality,
+    recallSpeed,
     recentCleanups
   };
 }

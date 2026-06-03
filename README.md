@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-03 08:29 +08:00：结构化 Profile Journal DB 自动清洗已收紧，`quality_json.ok=false`、`reserved`/schema-like placeholder 和污染式关系占位内容不再保留 active；profile 读链路改为 60 秒进程内节流清洗，写入/CLI clean/诊断仍强制清洗，`diag:memory -- profile-journal-db` 新增质量计数和召回耗时摘要。
+
 更新 2026-06-03 08:24 +08:00：所有主回复兜底、路由不可用、私聊关闭、管理员/群聊限制、生图失败、流式首字超时和发送层空回复文案已统一改成瑞希口吻；Runtime V2 controlled failure 不再外发英文 `Model invocation failed` / `Tool error` / `invalid api key` / `request was blocked`，并同步扩展 `replyFailure` 与工具失败识别，避免新兜底文本被写入记忆或当作正常回复。
 
 更新 2026-06-03 08:13 +08:00：已清理 2026-06-02 私聊拒演坏样本及同类历史污染的可召回落盘数据；`daily_journal`、短期 bridge、Memory V3 events/projections、post-reply job、LangGraph 缓存和 style/social 缓存中的 “I'm Claude / 不扮演角色” 类文本已 scrub 或标记 unsafe。新增 `utils/recallPollutionGuard.js` 与 `node scripts/audit-memory-pollution.js --scrub [--apply]`，Memory V3/LanceDB/bridge 召回会过滤同类坏样本，不重复改流式/上下文隔离链路。
