@@ -2,6 +2,10 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-03 17:55 +08:00：主进程单实例锁增加命令行校验：`.mizukibot.lock` 的旧 PID 若被 `conhost.exe` 等非 bot 进程复用，会被视为 stale lock 并替换，不再让新 `node index.js` 误报 “already running” 后退出。
+
+更新 2026-06-03 17:50 +08:00：修复 Windows 重启脚本健康门禁：post-reply worker 在队列空闲时按 daemon 策略保持 idle，不再被 `restart-bot.cmd` 误判为重启失败；状态表会显示 `Idle; queue idle`。
+
 更新 2026-06-03 17:42 +08:00：普通用户主回复 gcli 网关固定为 `API_PROVIDER=openai_compatible`；`AI_MODEL=gemini-3-flash-preview` 仍走 `https://gcli.ggchan.dev/v1/chat/completions`，避免按模型名自动切到 Gemini native 后访问 `.../models/gemini-3-flash-preview:generateContent` 返回 HTTP 404。主回复/Provider 诊断同步尊重显式 provider，避免 `/check` 继续误报 native 链路。
 
 更新 2026-06-03 17:25 +08:00：修复 Windows 远程重启触发：Node 不能直接 `spawn` `.cmd`，现在通过 `cmd.exe /d /c call restart-bot.cmd` 启动，并保留 `windowsVerbatimArguments`；`restart-bot.cmd restart/status` 也会按命令归一化，不再误当计划任务名。

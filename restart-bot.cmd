@@ -91,6 +91,127 @@ function Read-FirstLine {
   }
 }
 
+function Get-PositiveInt64Env {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)][Int64]$DefaultValue
+  )
+
+  $raw = [Environment]::GetEnvironmentVariable($Name, 'Process')
+  if ([string]::IsNullOrWhiteSpace($raw)) { return $DefaultValue }
+
+  [Int64]$parsed = 0
+  if ([Int64]::TryParse($raw.Trim(), [ref]$parsed) -and $parsed -ge 0) {
+    return $parsed
+  }
+
+  return $DefaultValue
+}
+
+function Read-JsonFileSafe {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  try {
+    if (-not (Test-Path $Path)) { return $null }
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding utf8 -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+    return $raw | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    return $null
+  }
+}
+
+function Test-PostReplyJobDue {
+  param(
+    [Parameter(Mandatory = $true)]$Job,
+    [Parameter(Mandatory = $true)][datetime]$Now
+  )
+
+  $availableAtText = [string]$Job.availableAt
+  $nextRetryAtText = [string]$Job.nextRetryAt
+  $availableAt = [datetime]::MinValue
+  $nextRetryAt = [datetime]::MinValue
+
+  if (-not [string]::IsNullOrWhiteSpace($availableAtText)) {
+    if ([datetime]::TryParse($availableAtText, [ref]$availableAt) -and $availableAt.ToUniversalTime() -gt $Now.ToUniversalTime()) {
+      return $false
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($nextRetryAtText)) {
+    if ([datetime]::TryParse($nextRetryAtText, [ref]$nextRetryAt) -and $nextRetryAt.ToUniversalTime() -gt $Now.ToUniversalTime()) {
+      return $false
+    }
+  }
+
+  return $true
+}
+
+function Test-PostReplyProcessingRecoverable {
+  param(
+    [Parameter(Mandatory = $true)]$Job,
+    [Parameter(Mandatory = $true)][datetime]$Now,
+    [Parameter(Mandatory = $true)][Int64]$StaleProcessingMs
+  )
+
+  $leaseUntilText = [string]$Job.leaseUntil
+  $leaseUntil = [datetime]::MinValue
+  if (-not [string]::IsNullOrWhiteSpace($leaseUntilText) -and [datetime]::TryParse($leaseUntilText, [ref]$leaseUntil)) {
+    return $leaseUntil.ToUniversalTime() -le $Now.ToUniversalTime()
+  }
+
+  $updatedAtText = [string]$Job.updatedAt
+  $updatedAt = [datetime]::MinValue
+  if (-not [string]::IsNullOrWhiteSpace($updatedAtText) -and [datetime]::TryParse($updatedAtText, [ref]$updatedAt)) {
+    return ($Now.ToUniversalTime() - $updatedAt.ToUniversalTime()).TotalMilliseconds -ge $StaleProcessingMs
+  }
+
+  return $true
+}
+
+function Get-PostReplyQueueStartReason {
+  $queueRoot = [Environment]::GetEnvironmentVariable('POST_REPLY_QUEUE_DIR', 'Process')
+  if ([string]::IsNullOrWhiteSpace($queueRoot)) {
+    $queueRoot = Join-Path (Join-Path $repoRoot 'data') 'post_reply_jobs'
+  }
+  if (-not [System.IO.Path]::IsPathRooted($queueRoot)) {
+    $queueRoot = Join-Path $repoRoot $queueRoot
+  }
+
+  $now = Get-Date
+  $staleProcessingMs = Get-PositiveInt64Env -Name 'POST_REPLY_WORKER_STALE_PROCESSING_MS' -DefaultValue 300000
+  $queuedDir = Join-Path $queueRoot 'queued'
+  $processingDir = Join-Path $queueRoot 'processing'
+
+  $firstPendingQueuedJob = ''
+  if (Test-Path $queuedDir) {
+    foreach ($file in @(Get-ChildItem -LiteralPath $queuedDir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+      $job = Read-JsonFileSafe -Path $file.FullName
+      if ($null -ne $job -and (Test-PostReplyJobDue -Job $job -Now $now)) {
+        return "queued job due: $($file.Name)"
+      }
+      if ($null -ne $job -and [string]::IsNullOrWhiteSpace($firstPendingQueuedJob)) {
+        $firstPendingQueuedJob = $file.Name
+      }
+    }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace($firstPendingQueuedJob)) {
+    return "queued job pending: $firstPendingQueuedJob"
+  }
+
+  if (Test-Path $processingDir) {
+    foreach ($file in @(Get-ChildItem -LiteralPath $processingDir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+      $job = Read-JsonFileSafe -Path $file.FullName
+      if ($null -ne $job -and (Test-PostReplyProcessingRecoverable -Job $job -Now $now -StaleProcessingMs $staleProcessingMs)) {
+        return "processing job recoverable: $($file.Name)"
+      }
+    }
+  }
+
+  return ''
+}
+
 function Get-ProcessCommandLineSafe {
   param([Parameter(Mandatory = $true)][int]$ProcessId)
 
@@ -141,10 +262,15 @@ function Get-PidFileProcessStatus {
 function Get-BotRuntimeStatus {
   $main = Get-PidFileProcessStatus -Name 'main bot' -PidFile $mainPidFile -ExpectedCommandPattern 'index\.js'
   $worker = Get-PidFileProcessStatus -Name 'post-reply worker' -PidFile $workerPidFile -ExpectedCommandPattern 'post-reply-worker\.js'
+  $workerHealthy = ($worker.Running -and $worker.Match)
+  $workerStartReason = if ($workerHealthy) { '' } else { Get-PostReplyQueueStartReason }
+  $workerIdleAllowed = ((-not $workerHealthy) -and [string]::IsNullOrWhiteSpace($workerStartReason))
   return [pscustomobject]@{
     Main = $main
     Worker = $worker
-    Healthy = ($main.Running -and $main.Match -and $worker.Running -and $worker.Match)
+    WorkerStartReason = $workerStartReason
+    WorkerIdleAllowed = $workerIdleAllowed
+    Healthy = ($main.Running -and $main.Match -and ($workerHealthy -or $workerIdleAllowed))
   }
 }
 
@@ -370,6 +496,14 @@ function Write-DaemonReport {
   $taskStatus = Get-ScheduledTaskStatus -TaskName $TaskName
   $startupStatus = Get-StartupLauncherStatus -TaskName $TaskName
   $runtimeStatus = Get-BotRuntimeStatus
+  $workerRunning = ($runtimeStatus.Worker.Running -and $runtimeStatus.Worker.Match)
+  $workerState = if ($workerRunning) { 'Running' } elseif ($runtimeStatus.WorkerIdleAllowed) { 'Idle' } else { 'Missing' }
+  $workerDetail = "PID=$($runtimeStatus.Worker.Pid); $($runtimeStatus.Worker.Detail)"
+  if ($runtimeStatus.WorkerIdleAllowed) {
+    $workerDetail = "$workerDetail; queue idle"
+  } elseif (-not [string]::IsNullOrWhiteSpace($runtimeStatus.WorkerStartReason)) {
+    $workerDetail = "$workerDetail; expected: $($runtimeStatus.WorkerStartReason)"
+  }
 
   Write-Host ''
   Write-Host '=== Daemon Actions ==='
@@ -385,7 +519,7 @@ function Write-DaemonReport {
     [pscustomobject]@{ Component = 'scheduled task'; Name = $taskStatus.Name; Exists = $taskStatus.Exists; Enabled = $taskStatus.Enabled; State = $taskStatus.State; Detail = "Last=$($taskStatus.LastRunTime); Next=$($taskStatus.NextRunTime); Result=$($taskStatus.LastTaskResult)" }
     [pscustomobject]@{ Component = 'startup fallback'; Name = $startupStatus.Name; Exists = $startupStatus.Exists; Enabled = $startupStatus.Exists; State = if ($startupStatus.Exists) { 'Installed' } else { 'Missing' }; Detail = $startupStatus.Path }
     [pscustomobject]@{ Component = 'main bot'; Name = $runtimeStatus.Main.Name; Exists = (Test-Path $mainPidFile); Enabled = ''; State = if ($runtimeStatus.Main.Running -and $runtimeStatus.Main.Match) { 'Running' } else { 'Missing' }; Detail = "PID=$($runtimeStatus.Main.Pid); $($runtimeStatus.Main.Detail)" }
-    [pscustomobject]@{ Component = 'post-reply worker'; Name = $runtimeStatus.Worker.Name; Exists = (Test-Path $workerPidFile); Enabled = ''; State = if ($runtimeStatus.Worker.Running -and $runtimeStatus.Worker.Match) { 'Running' } else { 'Missing' }; Detail = "PID=$($runtimeStatus.Worker.Pid); $($runtimeStatus.Worker.Detail)" }
+    [pscustomobject]@{ Component = 'post-reply worker'; Name = $runtimeStatus.Worker.Name; Exists = (Test-Path $workerPidFile); Enabled = ''; State = $workerState; Detail = $workerDetail }
   ) | Format-Table -Wrap -AutoSize | Out-Host
 
   Write-Host ''
@@ -435,7 +569,11 @@ if ($Restart) {
 } else {
   $runtimeBefore = Get-BotRuntimeStatus
   if ($runtimeBefore.Healthy) {
-    [void]$actions.Add('bot and worker already running')
+    if ($runtimeBefore.WorkerIdleAllowed) {
+      [void]$actions.Add('bot running; post-reply worker idle')
+    } else {
+      [void]$actions.Add('bot and worker already running')
+    }
   } else {
     [void]$actions.Add("runtime incomplete: main=$($runtimeBefore.Main.Detail); worker=$($runtimeBefore.Worker.Detail)")
     foreach ($action in Start-BotIfNeeded -TaskName $TaskName) {

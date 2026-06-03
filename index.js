@@ -1,6 +1,7 @@
 ﻿const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 process.env.MIZUKIBOT_RUNTIME_ROLE = process.env.MIZUKIBOT_RUNTIME_ROLE || 'main';
 
@@ -36,6 +37,46 @@ function isProcessAlive(pid) {
   }
 }
 
+function getProcessCommandLine(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return '';
+
+  try {
+    if (process.platform === 'win32') {
+      const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction SilentlyContinue; if ($p) { [string]$p.CommandLine }`;
+      return String(execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+        encoding: 'utf8',
+        timeout: 2000,
+        windowsHide: true
+      }) || '').trim();
+    }
+
+    const procCmdline = `/proc/${pid}/cmdline`;
+    if (fs.existsSync(procCmdline)) {
+      return fs.readFileSync(procCmdline, 'utf8').replace(/\0/g, ' ').trim();
+    }
+
+    return String(execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      encoding: 'utf8',
+      timeout: 2000
+    }) || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function commandLineLooksLikeMainBot(commandLine) {
+  const value = String(commandLine || '').trim();
+  if (!value) return false;
+  return /\bnode(?:\.exe)?\b/i.test(value) && /(^|[\\/\s"'])index\.js(["'\s]|$)/i.test(value);
+}
+
+function isMainBotProcess(pid) {
+  if (!isProcessAlive(pid)) return false;
+  const commandLine = getProcessCommandLine(pid);
+  if (!commandLine) return true;
+  return commandLineLooksLikeMainBot(commandLine);
+}
+
 function acquireSingleInstanceLock() {
   const writeLock = () => {
     fs.writeFileSync(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
@@ -55,9 +96,17 @@ function acquireSingleInstanceLock() {
       existingPid = Number.parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
     } catch (_) {}
 
-    if (isProcessAlive(existingPid)) {
+    if (isMainBotProcess(existingPid)) {
       console.error('[Startup] MizukiBot is already running (PID=' + existingPid + ').');
       process.exit(1);
+    }
+
+    if (isProcessAlive(existingPid)) {
+      const commandLine = getProcessCommandLine(existingPid);
+      console.warn('[Startup] Replacing stale lock owned by non-bot process:', {
+        pid: existingPid,
+        commandLine: commandLine.slice(0, 240)
+      });
     }
 
     try {
