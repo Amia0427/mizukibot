@@ -21,12 +21,13 @@ module.exports = (async () => {
   const snapshot = { ...process.env };
   let axios = null;
   let originalPost = null;
+  const browserUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.7827.54 Safari/537.36';
 
   try {
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://api.anthropic.com/v1/messages';
     process.env.AI_MODEL = 'claude-3-5-sonnet-latest';
-    process.env.MODEL_HTTP_USER_AGENT = 'codex-test-agent';
+    process.env.MODEL_HTTP_USER_AGENT = browserUA;
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
     process.env.GEMINI_SYSTEM_PROMPT_PATH = path.join(__dirname, 'fixtures', 'gemini-system-prompt.txt');
@@ -44,7 +45,9 @@ module.exports = (async () => {
     assert.strictEqual(anthropicMain.url, 'https://api.anthropic.com/v1/messages');
     assert.ok(!Object.prototype.hasOwnProperty.call(anthropicMain.body, 'prompt_cache_key'));
     assert.ok(!Object.prototype.hasOwnProperty.call(anthropicMain.body, 'prompt_cache_retention'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicMain.body, '__requestHeaders'));
+    assert.strictEqual(anthropicMain.body.__requestHeaders['User-Agent'], browserUA);
+    assert.strictEqual(anthropicMain.body.__requestHeaders['x-api-key'], 'main-key');
+    assert.strictEqual(anthropicMain.body.__requestHeaders['Sec-Fetch-Mode'], 'cors');
 
     assert.throws(
       () => buildMainModelRequest(null, {
@@ -61,6 +64,8 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestBody, 'prompt_cache_key'));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestBody, 'prompt_cache_retention'));
     assert.strictEqual(preparedAnthropic.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
+    assert.strictEqual(preparedAnthropic.requestHeaders['User-Agent'], browserUA);
+    assert.strictEqual(preparedAnthropic.requestHeaders['sec-ch-ua-platform'], '"Windows"');
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestHeaders || {}, 'Authorization'));
 
     axios = require('axios');
@@ -73,7 +78,8 @@ module.exports = (async () => {
     await httpClient.postWithRetry(anthropicMain.url, anthropicMain.body, 0, 'main-key');
     assert.strictEqual(sentAnthropicOptions.headers['x-api-key'], 'main-key');
     assert.ok(!Object.prototype.hasOwnProperty.call(sentAnthropicOptions.headers, 'Authorization'));
-    assert.strictEqual(sentAnthropicOptions.headers['User-Agent'], false);
+    assert.strictEqual(sentAnthropicOptions.headers['User-Agent'], browserUA);
+    assert.strictEqual(sentAnthropicOptions.headers['Sec-Fetch-Mode'], 'cors');
     axios.post = originalPost;
 
     const preparedGeminiNative = await httpClient.prepareRequest(
@@ -140,7 +146,14 @@ module.exports = (async () => {
       'cache_control'
     ));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestHeaders || {}, 'Authorization'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedGeminiNative.requestHeaders || {}, 'User-Agent'));
+    assert.ok(/^Mozilla\/5\.0/.test(preparedGeminiNative.requestHeaders['User-Agent']));
+    const geminiAxiosHeaders = httpClient.getAxiosOptions(
+      preparedGeminiNative.provider,
+      'gemini-key',
+      10000,
+      preparedGeminiNative.requestHeaders
+    ).headers;
+    assert.strictEqual(geminiAxiosHeaders['sec-ch-ua-mobile'], '?0');
     assert.strictEqual(preparedGeminiNative.requestHeaders['x-goog-api-key'], 'gemini-key');
 
     clearProjectCache();
@@ -192,7 +205,7 @@ module.exports = (async () => {
       'https://example.com/v1/images/generations'
     );
     assert.strictEqual(openAIImageHeaders.Authorization, 'Bearer openai-image-key');
-    assert.strictEqual(openAIImageHeaders['User-Agent'], 'codex-test-agent');
+    assert.strictEqual(openAIImageHeaders['User-Agent'], browserUA);
     assert.ok(!Object.prototype.hasOwnProperty.call(openAIImageHeaders, 'x-goog-api-key'));
 
     const explicitSummaryOpenAI = buildMainModelRequest({
@@ -258,7 +271,8 @@ module.exports = (async () => {
     delete process.env.HTTP_USER_AGENT;
     clearProjectCache();
     const defaultConfig = require('../config');
-    assert.strictEqual(defaultConfig.MODEL_HTTP_USER_AGENT, 'codex-cli/0.121.0 (external, cli)');
+    assert.strictEqual(defaultConfig.MODEL_HTTP_USER_AGENT, browserUA);
+    assert.strictEqual(defaultConfig.HTTP_USER_AGENT, 'codex-cli/0.121.0 (external, cli)');
 
     console.log('providerRequestNormalization.test.js passed');
   } finally {

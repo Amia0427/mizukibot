@@ -32,12 +32,13 @@ function findRemoved(strippedFields, field) {
 module.exports = (async () => {
   const snapshot = { ...process.env };
   try {
+    const browserUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.7827.54 Safari/537.36';
     process.env.API_KEY = 'diagnostic-test-key';
     process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
     process.env.AI_MODEL = 'main-model';
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
-    process.env.MODEL_HTTP_USER_AGENT = 'codex-diagnostic-agent';
+    process.env.MODEL_HTTP_USER_AGENT = browserUA;
     process.env.GEMINI_SYSTEM_PROMPT_PATH = path.join(__dirname, 'fixtures', 'gemini-system-prompt.txt');
     clearProjectCache();
 
@@ -52,6 +53,8 @@ module.exports = (async () => {
     assert.strictEqual(openaiDirect.finalProvider, 'openai_compatible');
     assert.strictEqual(openaiDirect.auth.header, 'Authorization');
     assert.ok(openaiDirect.headerNames.includes('User-Agent'));
+    assert.ok(openaiDirect.headerNames.includes('sec-ch-ua'));
+    assert.strictEqual(openaiDirect.headers['User-Agent'], browserUA);
     assert.ok(openaiDirect.headerNames.includes('Authorization'));
     assert.ok(!openaiDirect.headerNames.includes('x-goog-api-key'));
     assert.strictEqual(openaiDirect.cache.openaiPromptCacheKey, 'provider-diagnostic-cache-key');
@@ -69,7 +72,8 @@ module.exports = (async () => {
     assert.ok(geminiDirect);
     assert.strictEqual(geminiDirect.finalProvider, 'gemini_native');
     assert.strictEqual(geminiDirect.auth.header, 'x-goog-api-key');
-    assert.strictEqual(geminiDirect.headers['User-Agent'], false);
+    assert.strictEqual(geminiDirect.headers['User-Agent'], browserUA);
+    assert.ok(geminiDirect.headerNames.includes('sec-ch-ua-platform'));
     assert.ok(!geminiDirect.headerNames.includes('Authorization'));
     assert.ok(geminiDirect.headerNames.includes('x-goog-api-key'));
     assert.strictEqual(geminiDirect.cache.openaiPromptCacheKey, '');
@@ -91,7 +95,8 @@ module.exports = (async () => {
     assert.ok(anthropicDirect);
     assert.strictEqual(anthropicDirect.finalProvider, 'anthropic');
     assert.strictEqual(anthropicDirect.auth.header, 'x-api-key');
-    assert.strictEqual(anthropicDirect.headers['User-Agent'], false);
+    assert.strictEqual(anthropicDirect.headers['User-Agent'], browserUA);
+    assert.ok(anthropicDirect.headerNames.includes('Sec-Fetch-Mode'));
     assert.ok(!anthropicDirect.headerNames.includes('Authorization'));
     assert.strictEqual(anthropicDirect.cache.openaiPromptCacheKey, '');
     assert.strictEqual(anthropicDirect.cache.openaiPromptCacheRetention, '');

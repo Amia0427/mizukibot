@@ -373,9 +373,6 @@ function collectAnomalies({
   if (isGeminiNativeProvider(provider) && !headers['x-goog-api-key']) {
     anomalies.push('gemini_native_missing_x_goog_api_key');
   }
-  if (!isOpenAICompatibleProvider(provider) && headers['User-Agent'] && headers['User-Agent'] !== false) {
-    anomalies.push('non_openai_provider_has_user_agent_value');
-  }
   if (!isOpenAICompatibleProvider(provider) && (body.prompt_cache_key || body.prompt_cache_retention)) {
     anomalies.push('non_openai_provider_has_openai_prompt_cache_fields');
   }
