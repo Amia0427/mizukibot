@@ -159,6 +159,10 @@ function buildDailyJournalSegmentDocs(uid, day) {
       const text = normalizeText(segment.text);
       if (!text) return null;
       const updatedAt = Number(segment.createdAt || Date.parse(segment.created_at || '')) || dayUpdatedAt;
+      const segmentTitle = normalizeText(segment.title || `${day} segment ${index}`);
+      const topics = Array.isArray(segment.topics)
+        ? segment.topics.map(normalizeText).filter(Boolean)
+        : [];
       return {
         id: `journal-segment:${uid}:${day}:${index}`,
         source: 'journal',
@@ -171,9 +175,15 @@ function buildDailyJournalSegmentDocs(uid, day) {
         semanticSlot: 'episode',
         fieldKey: 'daily_journal_segment',
         canonicalKey: `journal segment ${uid} ${day} ${index}`,
-        text: `date: ${day}\nsegment: ${index}\n${text}`,
+        text: [
+          `date: ${day}`,
+          `title: ${segmentTitle}`,
+          `segment: ${index}`,
+          topics.length ? `topics: ${topics.join(', ')}` : '',
+          text
+        ].filter(Boolean).join('\n'),
         preview: text,
-        title: `${day} segment ${index}`,
+        title: segmentTitle,
         updatedAt,
         confidence: 0.9,
         importance: 1.08,
@@ -188,11 +198,15 @@ function buildDailyJournalSegmentDocs(uid, day) {
         textKind: 'journal_segment',
         sourceCompleteness: 'segment',
         sessionKeys: [],
-        topics: [],
+        topics,
+        category: 'journal',
+        tags: ['journal', 'segment', day].concat(topics).filter(Boolean),
+        intent: 'episode_recall',
+        privacyLevel: 'private',
         openPayload: {
           id: `journal-segment:${uid}:${day}:${index}`,
           type: 'daily_journal_segment',
-          title: `${day} segment ${index}`,
+          title: segmentTitle,
           text,
           updatedAt,
           episodeDay: day,

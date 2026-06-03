@@ -129,6 +129,10 @@ module.exports = queryMemory({
   assert.ok(result.results.some((item) => item.id === 'node_vector'), 'lancedb vector target should be included');
   assert.ok(!result.results.some((item) => item.id === 'node_other_user'), 'other user vector row must be filtered');
   assert.strictEqual(result.stats.lancedb.fused, true);
+  assert.strictEqual(result.stats.retrievalPlan.vectorEnabled, true);
+  assert.strictEqual(result.stats.retrievalPlan.bm25Enabled, true);
+  assert.ok(result.diagnostics.recall.rankFusion.vector.some((item) => item.id === 'node_vector'));
+  assert.ok(result.diagnostics.recall.rankFusion.fused.some((item) => item.id === 'node_vector'));
   const vectorHit = result.results.find((item) => item.id === 'node_vector');
   assert.ok(vectorHit.selectionReason.includes('strong_semantic_protected') || vectorHit.selectionReason.includes('facet_default_selected'), 'vector hit should include selection reason');
   assert.strictEqual(typeof vectorHit.diagnostics.recall.semantic, 'number', 'vector hit should expose semantic diagnostic');

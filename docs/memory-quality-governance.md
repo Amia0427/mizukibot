@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-03 08:29 +08:00
+更新时间：2026-06-03 08:37 +08:00
+
+更新 2026-06-03 08:37 +08:00：Memory V3 召回流水线新增轻量 BM25、本地/vector/BM25/recent-date 通用 RRF 融合、`queryMemory().stats.retrievalPlan` 和 `diagnostics.recall.rankFusion`；`scripts/eval-memory-recall.js` 支持 `--mode`、不足 100 条时用 auto-gold 补齐，并输出 `Recall@5`、`MRR@5`、wrong-hit、prompt injection、answer relevance 和 faithfulness。Reranker 诊断记录候选数、limit、tail、前后 top 和 runtime/cooldown，timeout 降级继续不阻塞召回。
 
 更新 2026-06-03 08:29 +08:00：结构化 Profile Journal DB 自动清洗收紧。`quality_json.ok=false` 的 active/candidate 不再进入 active，explicit 只降为 candidate，其他来源 reject；`reserved`、重复占位、字段名/schema-like 和污染式关系占位内容会 reject。profile 读链路新增 `PROFILE_JOURNAL_AUTO_CLEAN_INTERVAL_MS` 进程内节流，默认 60000ms；写入、`mem profile clean --apply` 和 `npm run diag:memory -- profile-journal-db` 仍强制清洗。诊断新增 `quality.lowQualityActive`、`quality.placeholderActive`、`quality.expiredActive`、`quality.unsafeJournalRecallable` 和 `recallSpeed`。
 

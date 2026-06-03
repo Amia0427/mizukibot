@@ -31,6 +31,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     autoGold: false,
     baseline: '',
     candidate: '',
+    mode: '',
     limit: 100,
     memoryCli: false
   };
@@ -38,6 +39,10 @@ function parseArgs(argv = process.argv.slice(2)) {
     const item = argv[index];
     if (item === '--build-cases') args.buildCases = true;
     else if (item === '--auto-gold') args.autoGold = true;
+    else if (item === '--mode') {
+      args.mode = normalizeText(argv[index + 1]).toLowerCase();
+      index += 1;
+    }
     else if (item === '--baseline') {
       args.baseline = normalizeText(argv[index + 1]).toLowerCase();
       index += 1;
@@ -249,6 +254,22 @@ function buildAutoGoldCases(limit = 100) {
   return roundRobinGoldCases(cases, max, (item) => item.facet || item.targetSource || item.source);
 }
 
+function supplementCasesWithAutoGold(cases = [], limit = 100, buildGold = buildAutoGoldCases) {
+  const max = Math.max(1, Number(limit || 100) || 100);
+  const selected = (Array.isArray(cases) ? cases : []).slice(0, max);
+  if (!selected.some((item) => normalizeExpectedIds(item).length > 0)) return buildGold(max);
+  if (selected.length >= max) return selected;
+  const seen = new Set(selected.map((item) => normalizeText(item.id)));
+  const supplement = buildGold(max)
+    .filter((item) => {
+      const key = normalizeText(item.id);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return selected.concat(supplement).slice(0, max);
+}
+
 function readNapcatEvents(limit = 5000) {
   const file = config.FOLLOWER_NAPCAT_LOG_PATH || path.join(config.DATA_DIR, 'napcat-message-events.jsonl');
   return safeReadJsonLines(file).slice(-Math.max(1, limit));
@@ -322,8 +343,9 @@ function buildCases(args = {}) {
 function loadCases(limit = 100, options = {}) {
   if (options.autoGold === true) return buildAutoGoldCases(limit);
   if (!fs.existsSync(CASES_FILE)) return buildCases({ limit });
-  const cases = safeReadJsonLines(CASES_FILE).slice(0, limit);
-  return cases.some((item) => normalizeExpectedIds(item).length > 0) ? cases : buildAutoGoldCases(limit);
+  const max = Math.max(1, Number(limit || 100) || 100);
+  const cases = safeReadJsonLines(CASES_FILE).slice(0, max);
+  return supplementCasesWithAutoGold(cases, max);
 }
 
 function normalizeExpectedIds(testCase = {}) {
@@ -405,6 +427,8 @@ function ensureSourceMetrics(metrics = {}, source = 'unknown') {
     metrics[key] = {
       cases: 0,
       judgedCases: 0,
+      recallHitsAt5: 0,
+      reciprocalSumAt5: 0,
       recallHits: 0,
       reciprocalSum: 0,
       emptyResults: 0,
@@ -462,6 +486,8 @@ function finalizeGroupedMetrics(metrics = {}) {
     out[key] = {
       cases: value.cases,
       judgedCases: value.judgedCases,
+      recallAt5: value.judgedCases ? value.recallHitsAt5 / value.judgedCases : null,
+      mrrAt5: value.judgedCases ? value.reciprocalSumAt5 / value.judgedCases : null,
       recallAt8: value.judgedCases ? value.recallHits / value.judgedCases : null,
       mrrAt8: value.judgedCases ? value.reciprocalSum / value.judgedCases : null,
       emptyResultRate: value.cases ? value.emptyResults / value.cases : 0,
@@ -491,6 +517,63 @@ function countScopeLeaks(results = [], testCase = {}) {
   return leaks;
 }
 
+function countWrongHits(results = [], testCase = {}) {
+  const shouldUseMemory = testCase.shouldUseMemory !== false;
+  const expectedIds = normalizeExpectedIds(testCase);
+  if (shouldUseMemory || expectedIds.length > 0) return 0;
+  const meaningful = (Array.isArray(results) ? results : []).filter((item) => {
+    const score = Number(item.score || 0) || 0;
+    const source = normalizeSource(item.source);
+    return score > 0.18 && source !== 'recent';
+  });
+  return meaningful.length > 0 ? 1 : 0;
+}
+
+function countPromptInjectionHits(result = {}, expectedIds = []) {
+  if (!expectedIds.length) return 0;
+  const digest = normalizeText(result.digest);
+  const injectedText = [
+    result.memoryForPrompt,
+    result.retrievedMemoryForPrompt,
+    result.promptRetrievedMemoryText,
+    digest
+  ].map(normalizeText).join('\n');
+  if (!injectedText) return 0;
+  const results = Array.isArray(result.results) ? result.results : [];
+  return results.some((item) => (
+    expectedIds.includes(normalizeText(item.id || item.nodeId || item.moduleId))
+    && normalizeText(item.text)
+    && injectedText.includes(normalizeText(item.text).slice(0, 48))
+  )) ? 1 : 0;
+}
+
+function estimateAnswerRelevance(results = [], testCase = {}) {
+  const queryTokens = new Set(String(testCase.query || '').split(/\s+/).map(normalizeText).filter(Boolean));
+  if (!queryTokens.size) return null;
+  const topText = (Array.isArray(results) ? results : []).slice(0, 3).map((item) => normalizeText(item.text)).join(' ');
+  if (!topText) return 0;
+  let overlap = 0;
+  for (const token of queryTokens) {
+    if (token && topText.includes(token)) overlap += 1;
+  }
+  return Math.min(1, overlap / Math.max(1, queryTokens.size));
+}
+
+function estimateFaithfulness(results = []) {
+  const list = Array.isArray(results) ? results : [];
+  if (!list.length) return null;
+  const supported = list.filter((item) => {
+    const tier = normalizeText(item.evidenceTier).toLowerCase();
+    const source = normalizeSource(item.source);
+    const lifecycle = normalizeText(item.lifecycleStatus).toLowerCase();
+    return lifecycle !== 'stale'
+      && lifecycle !== 'suspect'
+      && lifecycle !== 'superseded'
+      && (tier === 'strict' || source === 'journal' || source === 'recent' || Number(item.score || 0) >= 0.2);
+  }).length;
+  return supported / list.length;
+}
+
 async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
   configureMode(mode);
   const mainLatencies = [];
@@ -505,8 +588,16 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
   let categoryMismatches = 0;
   let recentRecallMisses = 0;
   let recallHits = 0;
+  let recallHitsAt5 = 0;
   let reciprocalSum = 0;
+  let reciprocalSumAt5 = 0;
   let judgedCases = 0;
+  let promptInjectionHits = 0;
+  let wrongHits = 0;
+  let answerRelevanceSum = 0;
+  let answerRelevanceCases = 0;
+  let faithfulnessSum = 0;
+  let faithfulnessCases = 0;
   let promptChars = 0;
   let emptyResults = 0;
   let noVisibleCandidates = 0;
@@ -586,6 +677,17 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     }
     if (isWeakTopHit(results)) weakTopHits += 1;
     if (isProfileOnlyHit(results)) profileOnlyHits += 1;
+    wrongHits += countWrongHits(results, testCase);
+    const relevance = estimateAnswerRelevance(results, testCase);
+    if (relevance !== null) {
+      answerRelevanceSum += relevance;
+      answerRelevanceCases += 1;
+    }
+    const faithfulness = estimateFaithfulness(results);
+    if (faithfulness !== null) {
+      faithfulnessSum += faithfulness;
+      faithfulnessCases += 1;
+    }
     const fallbackReason = normalizeText(result.stats?.lancedb?.fallbackReason || result.stats?.worldbook?.embedding?.fallbackReason || '');
     if (fallbackReason) incrementMetric(fallbackCounts, fallbackReason);
     if (/no_visible_candidates/.test(fallbackReason)) {
@@ -598,6 +700,15 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
       sourceMetric.judgedCases += 1;
       facetMetric.judgedCases += 1;
       const rank = results.findIndex((item) => expectedIds.includes(normalizeText(item.id || item.nodeId || item.moduleId))) + 1;
+      promptInjectionHits += countPromptInjectionHits(result, expectedIds);
+      if (rank > 0 && rank <= 5) {
+        recallHitsAt5 += 1;
+        reciprocalSumAt5 += 1 / rank;
+        sourceMetric.recallHitsAt5 += 1;
+        sourceMetric.reciprocalSumAt5 += 1 / rank;
+        facetMetric.recallHitsAt5 += 1;
+        facetMetric.reciprocalSumAt5 += 1 / rank;
+      }
       if (rank > 0 && rank <= 8) {
         recallHits += 1;
         reciprocalSum += 1 / rank;
@@ -636,7 +747,13 @@ async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
     cases: cases.length,
     judgedCases,
     recallAt8: judgedCases ? recallHits / judgedCases : null,
+    recallAt5: judgedCases ? recallHitsAt5 / judgedCases : null,
     mrrAt8: judgedCases ? reciprocalSum / judgedCases : null,
+    mrrAt5: judgedCases ? reciprocalSumAt5 / judgedCases : null,
+    promptInjectionRate: judgedCases ? promptInjectionHits / judgedCases : null,
+    wrongHitRate: cases.length ? wrongHits / cases.length : 0,
+    answerRelevance: answerRelevanceCases ? answerRelevanceSum / answerRelevanceCases : null,
+    faithfulness: faithfulnessCases ? faithfulnessSum / faithfulnessCases : null,
     sourceCoverage,
     fallbackCounts,
     leakage,
@@ -682,7 +799,7 @@ async function main() {
     return;
   }
 
-  const mode = args.candidate || args.baseline || 'local_jsonl';
+  const mode = args.mode || args.candidate || args.baseline || 'local_jsonl';
   const cases = loadCases(args.limit, {
     autoGold: args.autoGold
   });
@@ -718,5 +835,6 @@ module.exports = {
   normalizeExpectedIds,
   parseArgs,
   percentile,
-  runMode
+  runMode,
+  supplementCasesWithAutoGold
 };
