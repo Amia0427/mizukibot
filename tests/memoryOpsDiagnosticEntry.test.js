@@ -256,7 +256,7 @@ module.exports = (async () => {
     rawText: '/memoryops diagnose',
     userId: 'user_1'
   });
-  assert.strictEqual(denied.replyText, '仅管理员可用。');
+  assert.strictEqual(denied.replyText, '这个按钮现在只给管理员按哦。');
 
   const adminResult = await coordinator.handleMemoryOpsAdminCommand({
     rawText: '/memoryops recall --limit 1',

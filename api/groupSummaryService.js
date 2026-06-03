@@ -281,7 +281,7 @@ function buildSummaryPrompt({
 async function generateGroupSummary(input = {}, deps = {}) {
   const runtimeConfig = deps.config || config;
   const groupId = normalizeText(input.groupId);
-  if (!groupId) return { ok: false, text: '仅群聊可用。', reason: 'group_required' };
+  if (!groupId) return { ok: false, text: '这个要在群里才接得住啦。', reason: 'group_required' };
 
   const limit = parseGroupSummaryLimit(input.command || {}, runtimeConfig);
   const historyReader = deps.getGroupMessageHistoryCached || getGroupMessageHistoryCached;

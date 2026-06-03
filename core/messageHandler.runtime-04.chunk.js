@@ -47,7 +47,7 @@
         senderId,
         replyText: armed
           ? `已开启一次性思维链显示。请在 ${ttlSeconds} 秒内发送下一条正常对话消息；仅该次回复生效。`
-          : '当前无法开启一次性思维链显示，请稍后再试。',
+          : '一次性思维链显示刚刚没开起来。等一下再试试。',
         atSender: true,
         retries: 1,
         waitMs: 300

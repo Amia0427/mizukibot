@@ -100,7 +100,7 @@ function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
   const shouldBypassLocalHumanize = routeCapability === 'admin' || toolReplyRoute;
 
   if (!t) {
-    return '刚才网络有点抖，我再试一次。';
+    return '刚刚空了一拍……你再说一次，我接住。';
   }
 
   if (!isReplyFailure(t)) {
@@ -132,38 +132,38 @@ function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
   });
 
   if (failure.type === 'tool_loop_limit') {
-    return '这轮查记忆时有点绕住了。你可以把想找的记忆点再说具体一点，我直接接着答。';
+    return '记忆那边刚刚绕住了。你把想找的点再捏具体一点，我接着翻。';
   }
 
   if (failure.type === 'tool_error') {
-    return '刚才读记忆时出了点问题，我没拿到稳定结果。你可以换个更具体的记忆点再问我一次。';
+    return '刚刚翻记忆没翻稳。换个更具体的关键词问我，我再捞一次。';
   }
 
   if (failure.type === 'provider_auth') {
-    return '当前上游模型鉴权或配置有问题，暂时没法正常回答，需要先检查配置。';
+    return '这边配置像是没扣好，先检查一下模型钥匙吧。';
   }
 
   if (failure.type === 'provider_quota') {
-    return '当前上游模型额度不足，暂时没法正常回答，需要先切换模型或补额度。';
+    return '模型额度好像见底了。先换个模型或者补一下额度，我再继续。';
   }
 
   if (failure.type === 'generic_model_failure') {
-    return '刚才回复时出了点问题，你可以再发一次，我继续。';
+    return '刚刚那句没组织稳。你再发一次，我继续接。';
   }
 
   if (toolReplyRoute) {
-    return '这次工具任务被上游拦截或拒答了。你可以稍后再发一次同样的请求。';
+    return '这个任务刚刚被卡住了。等一下再丢给我，我重新跑。';
   }
 
-  return '这次回复被上游拦截或拒答了。你可以换个更简短或更明确的问法，我马上继续。';
+  return '刚刚那句被卡掉了。你换个更短更明确的说法，我马上接。';
 }
 
 function buildBackgroundAckText() {
-  return '这类任务我先在后台跑。你可以随时发“任务状态”“取消任务”“结束任务”，或用“任务补充 ...”追加要求。';
+  return '这类任务我先放后台跑。你随时发“任务状态”“取消任务”“结束任务”，或者用“任务补充 ...”加要求。';
 }
 
 function buildNoTaskControlText() {
-  return '当前没有可控制的后台任务。';
+  return '现在没有正在挂着的后台任务哦。';
 }
 
 function buildSessionStatusReply(session = {}, activeTask = null) {
@@ -180,8 +180,8 @@ function buildSessionStatusReply(session = {}, activeTask = null) {
   if (session && String(session.status || '').trim() === 'retained') {
     const summary = String(session.latest_summary || session.latest_result_excerpt || '').trim();
     return summary
-      ? `当前没有运行中的后台任务。\n最近一次结果：${summary}\n如果要继续，可以发“任务补充 ...”。`
-      : '当前没有运行中的后台任务。如果要继续，可以发“任务补充 ...”。';
+      ? `现在没有正在跑的后台任务。\n最近一次结果：${summary}\n要继续的话，发“任务补充 ...”就行。`
+      : '现在没有正在跑的后台任务。要继续的话，发“任务补充 ...”就行。';
   }
 
   if (session && String(session.status || '').trim()) {

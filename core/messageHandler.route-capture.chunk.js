@@ -1,7 +1,7 @@
 function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}) {
   const unavailableReason = String(routeExecutionPlan?.unavailableReason || '').trim().toLowerCase();
   if (unavailableReason !== 'no-allowed-tools') {
-    return 'The required tool is temporarily unavailable. Please try again later.';
+    return '这边刚刚没接稳，你等一下再叫我试试。';
   }
 
   const qqActionKey = String(route?.meta?.qqActionKey || '').trim().toLowerCase();
@@ -10,21 +10,21 @@ function buildUnavailableRouteReply(route = {}, routeExecutionPlan = {}) {
 
   if (qqActionKey === 'qq_publish_qzone') {
     return adminUser
-      ? 'QQ 空间草稿工具暂时不可用。你可以稍后重试，或直接使用 /qzone_post。'
-      : 'QQ 空间草稿当前仅管理员可用。';
+      ? 'QQ 空间草稿那边现在没接稳。等一下再试，或者直接用 /qzone_post。'
+      : 'QQ 空间草稿这件事现在只给管理员开着啦。';
   }
 
   if (qqActionKey === 'qq_schedule_qzone') {
     return adminUser
-      ? '定时 QQ 空间工具暂时不可用。你可以稍后重试，或直接使用 /schedule_create。'
-      : '定时 QQ 空间发布当前仅管理员可用。';
+      ? '定时 QQ 空间那边现在没接稳。等一下再试，或者直接用 /schedule_create。'
+      : '定时 QQ 空间这件事现在只给管理员开着啦。';
   }
 
   if (qqActionKey === 'qq_schedule_message') {
-    return '定时消息工具当前不可用。你可以换个更清晰的时间表达再试一次。';
+    return '定时消息这边刚刚没接住。把时间说得更清楚一点，我再试一次。';
   }
 
-  return '这轮没有可用工具可以处理这个请求。你可以稍后重试，或把需求说得更具体一些。';
+  return '这个操作现在没接上。你把想做的事再说具体一点，我重新接。';
 }
 
 function isCorrectionSignal(text = '') {

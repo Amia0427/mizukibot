@@ -93,7 +93,7 @@ module.exports = (async () => {
     createAgentExecutor.executeCreateCommand = async ({ chatType }) => {
       executorCalls += 1;
       if (chatType === 'private') {
-        return { ok: false, code: 'group_only', replyText: '仅群聊可用' };
+        return { ok: false, code: 'group_only', replyText: '这个要在群里才接得住啦' };
       }
       return { ok: true, code: 'sent' };
     };
@@ -171,7 +171,7 @@ module.exports = (async () => {
       assert.strictEqual(executorCalls, 3, 'admin private /create should reach executor instead of the private entry gate');
       assert.strictEqual(sentPayloads.length, 3, 'admin private /create should send executor result');
       assert.strictEqual(sendCalls[2]?.action, 'send_private_msg');
-      assert.ok(String(sentPayloads[2]?.params?.message || '').includes('仅群聊可用'));
+      assert.ok(String(sentPayloads[2]?.params?.message || '').includes('这个要在群里才接得住啦'));
 
       await handleIncomingMessage(buildPrivateMessage({
         userId: 'user_private',
@@ -182,7 +182,7 @@ module.exports = (async () => {
       assert.strictEqual(executorCalls, 3);
       assert.strictEqual(sentPayloads.length, 4, 'ordinary private /create should send private chat disabled reply');
       assert.strictEqual(sendCalls[3]?.action, 'send_private_msg');
-      assert.ok(String(sentPayloads[3]?.params?.message || '').includes('当前私聊已关闭'));
+      assert.ok(String(sentPayloads[3]?.params?.message || '').includes('私聊现在先收起来了'));
     } finally {
       createAgentExecutor.executeCreateCommand = originalExecuteCreateCommand;
     }

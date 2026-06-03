@@ -69,7 +69,7 @@ module.exports = (async () => {
     }
   );
 
-  assert.strictEqual(unknownPrivateReply, '该能力当前仅支持群聊中使用，请在目标群内 @我。');
+  assert.strictEqual(unknownPrivateReply, '这个得在目标群里喊我才行哦。');
 
   const groupSummaryPrivateReply = buildUnavailableRouteReply(
     {
@@ -86,7 +86,7 @@ module.exports = (async () => {
     }
   );
 
-  assert.strictEqual(groupSummaryPrivateReply, '仅群聊可用。');
+  assert.strictEqual(groupSummaryPrivateReply, '这个要在群里才接得住啦。');
 
   const privateWriteDisabledReply = buildUnavailableRouteReply(
     {
@@ -99,7 +99,7 @@ module.exports = (async () => {
     }
   );
 
-  assert.strictEqual(privateWriteDisabledReply, '当前私聊已关闭，仅对白名单用户和管理员开放。');
+  assert.strictEqual(privateWriteDisabledReply, '私聊现在先收起来了，只对白名单和管理员开放哦。');
   assert.ok(!privateWriteDisabledReply.includes('只读能力'));
 
   console.log('privateChatAdminRouting.test.js passed');

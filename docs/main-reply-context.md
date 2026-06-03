@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-03 07:52 +08:00
+更新时间：2026-06-03 08:24 +08:00
 
 ## 已调整
 
+- 2026-06-03 08:24 +08:00：主回复兜底、Runtime V2 controlled failure、路由不可用、私聊关闭、管理员/群聊限制、生图失败、普通用户流式首字超时和发送层空回复文案统一改为瑞希口吻；同时保留权限/配置/额度/上下文过载等原语义，并扩展 `replyFailure` / 工具失败识别，避免这些新兜底被后续记忆、表情或工具链当作正常回答。
 - 2026-06-03 07:52 +08:00：普通聊天/问答如果因工具规划缺失或无可用工具进入 `no-allowed-tools` / `planner-missing`，现在降级回 `direct_reply` 主对话模型链路，不再直接返回“工具不可用”本地兜底，也不再把“No tool is available”这类提示塞给模型；QQ 空间、定时、私聊关闭、群聊限定等权限/动作限制仍保持固定回复。
 - 2026-06-02 20:10 +08:00：按当前要求，被动感知实际发言默认回到 `PASSIVE_AWARENESS_REPLY_API_BASE_URL` / `PASSIVE_AWARENESS_REPLY_API_KEY` / `PASSIVE_AWARENESS_REPLY_MODEL` 独立 env 配置；`PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL` 默认值改为 `false`，只有显式设为 `true` 才跟主回复模型配置。
 - 2026-06-02 17:20 +08:00：继续解除管理员私聊限制：admin 私聊在 `routeExecution` 中保留 planner 原始工具集，Runtime V2 主模型 `getFilteredToolSchemas` 对 admin 私聊不再套用 companion 工具白名单，executor 解析可回退到 raw tool registry，因此 `qq_publish_qzone` 的 `qzone_draft` 不会在计划、schema 或执行阶段被清空成 `no-allowed-tools`/`Unknown tool`。admin 私聊的 `topRouteType=admin` 路由不再转成 `private-group-only`，`/create` 入口也不再对管理员/白名单私聊提前返回群聊限制；普通私聊用户仍直接禁用。

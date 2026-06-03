@@ -84,7 +84,7 @@ function createMessageAdminCoordinator(deps = {}) {
     if (!summaryText) {
       return {
         handled: true,
-        replyText: '当前会话总结生成失败，请稍后再试。'
+        replyText: '这次会话总结没生成稳。等一下再试一次吧。'
       };
     }
 
@@ -114,7 +114,7 @@ function createMessageAdminCoordinator(deps = {}) {
     if (!saved.saved) {
       return {
         handled: true,
-        replyText: '当前会话总结保存失败，请稍后再试。'
+        replyText: '会话总结保存那下没稳住。等一下再试一次吧。'
       };
     }
 
@@ -128,10 +128,10 @@ function createMessageAdminCoordinator(deps = {}) {
     const text = String(rawText || '').trim();
     if (!/^\s*\/initiative(?:\s|$)/i.test(text)) return null;
     if (!String(groupId || '').trim()) {
-      return { handled: true, replyText: '仅群聊可用。' };
+      return { handled: true, replyText: '这个要在群里才接得住啦。' };
     }
     if (!isAdminUser(userId)) {
-      return { handled: true, replyText: '仅管理员可用。' };
+      return { handled: true, replyText: '这个按钮现在只给管理员按哦。' };
     }
     const parts = text.split(/\s+/).slice(1);
     const sub = String(parts[0] || 'status').trim().toLowerCase();
@@ -167,7 +167,7 @@ function createMessageAdminCoordinator(deps = {}) {
     const text = normalizeText(rawText);
     if (!/^\/restart$/i.test(text)) return null;
     if (!isAdminUser(userId)) {
-      return { handled: true, replyText: '仅管理员可用。' };
+      return { handled: true, replyText: '这个按钮现在只给管理员按哦。' };
     }
     return {
       handled: true,
@@ -196,7 +196,7 @@ function createMessageAdminCoordinator(deps = {}) {
     const argv = parseMemoryOpsPayload(rawText);
     if (!argv) return null;
     if (!isAdminUser(userId)) {
-      return { handled: true, replyText: '仅管理员可用。' };
+      return { handled: true, replyText: '这个按钮现在只给管理员按哦。' };
     }
     const runner = runMemoryOpsFromArgv || require('../scripts/diagnose-memory-ops').runMemoryOpsFromArgv;
     const formatter = formatMemoryOpsAdminReply || require('../scripts/diagnose-memory-ops').formatMemoryOpsAdminReply;

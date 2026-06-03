@@ -1170,7 +1170,7 @@ function buildApp() {
   }
 
 function buildToolLoopLimitMessage(toolLoopCount) {
-  return `Model invocation failed: tool loop limit reached after ${toolLoopCount} rounds`;
+  return `记忆那边刚刚绕住了，连续转了 ${toolLoopCount} 轮。`;
 }
 
 async function invokeAgentTurn(state, options = {}) {
@@ -1354,7 +1354,7 @@ async function invokeAgentTurn(state, options = {}) {
         ...cachedState.messages,
         {
           role: 'assistant',
-          content: `Model invocation failed: ${String(e.message || 'unknown error')}`
+          content: `模型调用刚刚卡住了：${String(e.message || 'unknown error')}`
         }
       ]
     };

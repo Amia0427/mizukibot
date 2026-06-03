@@ -108,7 +108,7 @@ async function handleAdminCommand({ rawText, groupId, userId }) {
   if (!command) return null;
 
   if (!isAdmin(userId)) {
-    return { handled: true, replyText: '仅管理员可用。' };
+    return { handled: true, replyText: '这个按钮现在只给管理员按哦。' };
   }
 
   try {

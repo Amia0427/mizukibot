@@ -132,7 +132,7 @@
           groupId,
           userId: senderId,
           senderId,
-          replyText: String(createResult?.replyText || '生图失败，请稍后重试').trim(),
+          replyText: String(createResult?.replyText || '生图那边刚刚没跑成。等一下再丢给我试试。').trim(),
           atSender: false,
           retries: 1,
           waitMs: 300

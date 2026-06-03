@@ -1,6 +1,6 @@
 const NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_CODE = 'NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT';
 const NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REASON = 'normal_user_main_reply_stream_first_token_timeout';
-const NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY = '流式输出75秒超时，已自动断开';
+const NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY = '我刚刚卡了 75 秒还没冒出字……先断开啦，你再发一次我重新接。';
 
 function createNormalUserMainReplyStreamFirstTokenTimeoutError(timeoutMs = 0) {
   const normalizedTimeoutMs = Math.max(0, Math.floor(Number(timeoutMs) || 0));

@@ -236,7 +236,7 @@ module.exports = (async () => {
 
     assert.strictEqual(deniedCheckResult.handled, true);
     assert.strictEqual(sent.length, 7);
-    assert.strictEqual(sent[6].replyText, '仅管理员可用。');
+    assert.strictEqual(sent[6].replyText, '这个按钮现在只给管理员按哦。');
 
     const helpResult = await routeFlow.dispatchAdminRoute({
       route: {

@@ -11,7 +11,7 @@ function getSafeLifeSchedulerEngine() {
     async handleAdminCommand() {
       return {
         handled: true,
-        replyText: 'Life Scheduler 当前环境不可用。'
+        replyText: 'Life Scheduler 这边现在没接上。'
       };
     }
   };
