@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-03 10:02 +08:00
+更新时间：2026-06-03 13:02 +08:00
 
 ## 维护约定
 
@@ -10,7 +10,7 @@
 - 目前 `.env` 有 313 个变量，311 个唯一变量；重复项仅保留 `MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE` 和 `MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN` 两组历史调优项。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；重复项已在本地 `.env` 注释中标明实际生效顺序。
 - 2026-06-03 07:53 +08:00：`LOCAL_COMMAND_BRIDGE_TOKEN` 应在本机启动前生成并写入 `.env` 或进程环境；`config/index.js`、Windows daemon 和 one-click 启动都会加载 `.env`。缺失时本地命令桥只允许 `/health`，执行类入口阻断。
-- 2026-06-03 08:24 +08:00：主回复相关兜底文案统一改为瑞希口吻；`NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=75000` 的超时回复同步改为“我刚刚卡了 75 秒还没冒出字……先断开啦，你再发一次我重新接。”，配置语义不变。
+- 2026-06-03 13:02 +08:00：普通用户主回复流式首个可见字超时配置改为 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=180000`；超时回复同步改为“我刚刚卡了 180 秒还没冒出字……先断开啦，你再发一次我重新接。”，管理员不受影响。
 - 2026-06-03 10:02 +08:00：OpenAI-compatible 主模型地址支持裸域名自动补全；`IMAGE_API_BASE_URL=https://superapi.buzz/` 这类值会归一为 `https://superapi.buzz/v1/chat/completions`，但 `.env` 仍建议写完整 endpoint，降低诊断歧义。
 - 2026-06-03 09:54 +08:00：主回复/模型请求默认使用 Windows Chrome 浏览器 UA，并在模型 HTTP 请求中补齐 `sec-ch-ua`、`Sec-Fetch-*`、`Origin/Referer`、`Cache-Control`、`Pragma` 和 `Priority` 等浏览器 fetch 头；`MODEL_HTTP_ORIGIN`、`MODEL_HTTP_REFERER`、`MODEL_HTTP_SEC_FETCH_SITE`、`MODEL_HTTP_ACCEPT_LANGUAGE` 可覆盖请求来源和语言。普通工具抓取仍使用 `HTTP_USER_AGENT`。
 - 2026-06-03 08:24 +08:00：Gemini native 按显式 `API_PROVIDER=gemini_native` 或 `AI_MODEL/ADMIN_AI_MODEL/GROUP_SUMMARY_MODEL=gemini-*` 识别，不再按 `API_BASE_URL` 单独推断；`GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED` 控制是否注入 `prompts/GEMINI.txt`，`GEMINI_SYSTEM_PROMPT_PATH` 可覆盖提示词路径。
