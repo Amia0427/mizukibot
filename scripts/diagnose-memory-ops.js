@@ -409,6 +409,8 @@ function summarizeProfileJournalDb(result = {}, args = {}) {
     profileStatus: result.profileStatus || {},
     journalStatus: result.journalStatus || {},
     rollups: result.rollups || {},
+    quality: result.quality || {},
+    recallSpeed: result.recallSpeed || null,
     recentCleanups: Array.isArray(result.recentCleanups) ? result.recentCleanups.slice(0, Math.max(1, Number(args.limit || 10) || 10)) : [],
     reason: result.reason || ''
   };

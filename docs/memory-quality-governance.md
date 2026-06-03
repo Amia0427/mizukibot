@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-03 08:13 +08:00
+更新时间：2026-06-03 08:29 +08:00
+
+更新 2026-06-03 08:29 +08:00：结构化 Profile Journal DB 自动清洗收紧。`quality_json.ok=false` 的 active/candidate 不再进入 active，explicit 只降为 candidate，其他来源 reject；`reserved`、重复占位、字段名/schema-like 和污染式关系占位内容会 reject。profile 读链路新增 `PROFILE_JOURNAL_AUTO_CLEAN_INTERVAL_MS` 进程内节流，默认 60000ms；写入、`mem profile clean --apply` 和 `npm run diag:memory -- profile-journal-db` 仍强制清洗。诊断新增 `quality.lowQualityActive`、`quality.placeholderActive`、`quality.expiredActive`、`quality.unsafeJournalRecallable` 和 `recallSpeed`。
 
 更新 2026-06-03 08:13 +08:00：完成拒演/模型自报污染清理。新增 `utils/recallPollutionGuard.js` 统一识别 “I'm Claude / made by Anthropic / 不扮演角色或人设” 类坏回复；`userFacingReplyGuards`、Daily Journal safety、short-term bridge、Memory V3 candidate collection 和 LanceDB row filter 会屏蔽同类文本。`scripts/audit-memory-pollution.js --scrub --apply` 已对 `daily_journal`、`short_term_bridge.json`、Memory V3 events/projections、post-reply jobs、LangGraph 缓存及 style/social 缓存做一次性 scrub，SQLite `journal_entries` 中 9 条 active 污染行已标记 `unsafe`。
 
@@ -77,7 +79,7 @@
 3. 文件导入先 dry-run：`npm run memory:v3:import-file -- --user <id> --file <path.md> --dry-run`，确认 chunk 数和 category/tags 后去掉 `--dry-run`。
 4. 若 `projectionFreshness.projectionStale=true`，运行 `npm run memory:v3:migrate` 安全物化 projection。
 5. 首次启用结构化 Profile Journal DB 时先 dry-run：`node scripts/migrate-profile-journal-db.js`；确认 counters 后运行 `node scripts/migrate-profile-journal-db.js --apply`。
-6. 结构化库巡检：`npm run diag:memory -- profile-journal-db`，观察 `profileStatus.active/stale/superseded`、`journalStatus.unsafe`、`fallbackCount` 和 `recentCleanups`。
+6. 结构化库巡检：`npm run diag:memory -- profile-journal-db`，观察 `profileStatus.active/stale/superseded`、`quality.lowQualityActive/placeholderActive/expiredActive/unsafeJournalRecallable`、`recallSpeed`、`fallbackCount` 和 `recentCleanups`。
 7. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。
 8. 修复后运行 `npm run diag:memory -- recall --limit 50 --auto-gold --gate`，观察 `recallAt8`、`mrrAt8`、`leakage`、`lifecycleLeakage`、`categoryMismatches`、`recentRecallMisses`、`emptyResultRate`。
 9. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10`。
@@ -91,7 +93,8 @@
 - `superseded`：版本更新或冲突仲裁输掉的旧事实，保留在 projection 供审计，但 `notRecallable=true`，查询和 prompt 默认过滤。
 - `keep`：稳定且可复用的事实、偏好、身份、画像和日记 rollup。
 - Profile Journal DB 清洗只改 `status` 并追加 `memory_cleanups`，不物理删除。`expires_at <= now` 标记 `stale`；同 `conflict_key` 只保留最高 rank active/candidate winner，其余标记 `superseded`；显式纠错会把旧 fact 归档为 `superseded` 并让新 fact 保持 active。
-- 低质量、临时、助手自说自话或污染回复相关 profile fact 只能停留在 `candidate/rejected`，不会进入主 prompt；journal `unsafe/skipped` 条目保留在 `journal_entries` 供审计，但 SQLite 主读召回只取 active。
+- 低质量、临时、助手自说自话或污染回复相关 profile fact 只能停留在 `candidate/rejected`，不会进入主 prompt；`quality_json.ok=false` 的 explicit fact 降为 `candidate`，其他来源标记 `rejected`；`reserved`、重复占位、字段名/schema-like 和污染式关系占位内容一律 `rejected`。journal `unsafe/skipped` 条目保留在 `journal_entries` 供审计，但 SQLite 主读召回只取 active。
+- profile 读链路默认按 `PROFILE_JOURNAL_AUTO_CLEAN_INTERVAL_MS=60000` 做进程内清洗节流，降低 hot path 扫库成本；写入链路、`mem profile clean --apply` 和诊断命令使用强制清洗，不受节流影响。
 
 ## 召回评估注意
 

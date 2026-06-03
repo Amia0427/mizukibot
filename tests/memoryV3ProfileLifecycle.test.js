@@ -19,6 +19,7 @@ process.env.MEMORY_PROFILE_INJECT_WEAK_ITEMS = 'true';
 process.env.PROFILE_JOURNAL_DB_ENABLED = 'true';
 process.env.PROFILE_JOURNAL_DB_PRIMARY_READ = 'true';
 process.env.PROFILE_JOURNAL_AUTO_CLEAN_ENABLED = 'true';
+process.env.PROFILE_JOURNAL_AUTO_CLEAN_INTERVAL_MS = '60000';
 process.env.PROFILE_JOURNAL_DB_FILE = path.join(tempRoot, 'profile_journal.sqlite');
 
 fs.mkdirSync(tempRoot, { recursive: true });
@@ -111,6 +112,44 @@ module.exports = (async () => {
     confidence: 0.99,
     payload: { fieldKey: 'goal', type: 'goal', conflictKey: 'u_life|personal|goal|current-main-goal' }
   });
+  await appendMemoryEvent({
+    id: 'placeholder-life',
+    type: 'memory_confirmed',
+    ts: now + 3000,
+    userId: 'u_life',
+    scopeType: 'personal',
+    source: 'runtime',
+    sourceKind: 'runtime',
+    status: 'active',
+    memoryKind: 'relationship',
+    semanticSlot: 'relationship_reply_style',
+    text: 'reserved reserved',
+    confidence: 0.95,
+    payload: {
+      fieldKey: 'relationship_reply_style',
+      type: 'relationship',
+      profileQuality: { ok: true, reasons: [] }
+    }
+  });
+  await appendMemoryEvent({
+    id: 'low-quality-active-life',
+    type: 'memory_confirmed',
+    ts: now + 4000,
+    userId: 'u_life',
+    scopeType: 'personal',
+    source: 'extractor',
+    sourceKind: 'extractor',
+    status: 'active',
+    memoryKind: 'like',
+    semanticSlot: 'preference_like',
+    text: '低质量 active surface 不应出现',
+    confidence: 0.95,
+    payload: {
+      fieldKey: 'preference_like',
+      type: 'like',
+      profileQuality: { ok: false, reasons: ['generic_text'] }
+    }
+  });
 
   const materialized = materializeMemoryViews({ force: true });
   const nodes = materialized.nodes;
@@ -148,6 +187,8 @@ module.exports = (async () => {
   assert.ok(surface.text.includes('新目标：先写 B'));
   assert.ok(!surface.text.includes('旧目标：先写 A'));
   assert.ok(!surface.text.includes('临时喜欢'));
+  assert.ok(!surface.text.includes('reserved reserved'));
+  assert.ok(!surface.text.includes('低质量 active surface 不应出现'));
   assert.ok(surface.text.includes('使用规则'));
 
   console.log('memoryV3ProfileLifecycle.test.js passed');
