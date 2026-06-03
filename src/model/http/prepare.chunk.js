@@ -37,6 +37,9 @@ const {
   normalizeApiProvider
 } = require('../../../utils/modelProvider');
 const {
+  buildBrowserLikeRequestHeaders
+} = require('../../../config/userAgentRuntime');
+const {
   buildGeminiNativeRequestBody,
   normalizeGeminiNativeApiBaseUrl
 } = require('./gemini-native.chunk');
@@ -228,20 +231,22 @@ function getRetryDelayMs(err, attempt) {
 
 function getHeaders(provider, specificKey = null, extraHeaders = null) {
   const apiKey = specificKey || config.API_KEY;
-  const userAgent = String(
-    config.MODEL_HTTP_USER_AGENT
+  const browserHeaders = buildBrowserLikeRequestHeaders({
+    userAgent: config.MODEL_HTTP_USER_AGENT
       || config.MAIN_REPLY_USER_AGENT
       || config.HTTP_USER_AGENT
-      || CODEX_USER_AGENT
-  ).trim();
-  const acceptLanguage = String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim();
+      || CODEX_USER_AGENT,
+    acceptLanguage: config.MODEL_HTTP_ACCEPT_LANGUAGE || config.HTTP_ACCEPT_LANGUAGE,
+    origin: config.MODEL_HTTP_ORIGIN,
+    referer: config.MODEL_HTTP_REFERER,
+    secFetchSite: config.MODEL_HTTP_SEC_FETCH_SITE
+  });
   if (isAnthropicProvider(provider)) {
     const headers = {
+      ...browserHeaders,
       'x-api-key': apiKey,
       'anthropic-version': config.ANTHROPIC_VERSION || '2023-06-01',
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/plain, */*',
-      'Accept-Language': acceptLanguage
+      'Content-Type': 'application/json'
     };
     if (config.ANTHROPIC_BETA) {
       headers['anthropic-beta'] = String(config.ANTHROPIC_BETA).trim();
@@ -249,32 +254,25 @@ function getHeaders(provider, specificKey = null, extraHeaders = null) {
     if (extraHeaders && typeof extraHeaders === 'object') {
       Object.assign(headers, extraHeaders);
     }
-    const normalizedHeaders = normalizeProviderRequestHeaders(provider, headers) || {};
-    normalizedHeaders['User-Agent'] = false;
-    return normalizedHeaders;
+    return normalizeProviderRequestHeaders(provider, headers) || {};
   }
 
   if (isGeminiNativeProvider(provider)) {
     const headers = {
+      ...browserHeaders,
       'x-goog-api-key': apiKey,
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/plain, */*',
-      'Accept-Language': acceptLanguage
+      'Content-Type': 'application/json'
     };
     if (extraHeaders && typeof extraHeaders === 'object') {
       Object.assign(headers, extraHeaders);
     }
-    const normalizedHeaders = normalizeProviderRequestHeaders(provider, headers) || {};
-    normalizedHeaders['User-Agent'] = false;
-    return normalizedHeaders;
+    return normalizeProviderRequestHeaders(provider, headers) || {};
   }
 
   const headers = {
+    ...browserHeaders,
     Authorization: `Bearer ${apiKey}`,
-    'Content-Type': 'application/json',
-    Accept: 'application/json, text/plain, */*',
-    'Accept-Language': acceptLanguage,
-    'User-Agent': userAgent
+    'Content-Type': 'application/json'
   };
   if (extraHeaders && typeof extraHeaders === 'object') {
     Object.assign(headers, extraHeaders);

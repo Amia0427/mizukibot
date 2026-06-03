@@ -34,6 +34,9 @@ const {
 const {
   buildImageModelConfig
 } = require('../../../utils/imageModelConfigResolver');
+const {
+  buildBrowserLikeRequestHeaders
+} = require('../../../config/userAgentRuntime');
 
 function getMainReplyDefaultMaxTokens() {
   return Math.max(64, Number(config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192) || 8192);
@@ -441,10 +444,21 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
 
   const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || config.CODEX_USER_AGENT || '').trim();
   const apiKey = getApiKey(resolvedConfig);
-  if (isOpenAICompatibleProvider(options.provider) && (userAgent || apiKey)) {
-    body.__requestHeaders = {};
+  const browserHeaders = buildBrowserLikeRequestHeaders({
+    userAgent,
+    acceptLanguage: config.MODEL_HTTP_ACCEPT_LANGUAGE || config.HTTP_ACCEPT_LANGUAGE,
+    apiBaseUrl: getApiBaseUrl(resolvedConfig),
+    origin: config.MODEL_HTTP_ORIGIN,
+    referer: config.MODEL_HTTP_REFERER,
+    secFetchSite: config.MODEL_HTTP_SEC_FETCH_SITE
+  });
+  body.__requestHeaders = { ...browserHeaders };
+  if (isOpenAICompatibleProvider(options.provider)) {
     if (apiKey) body.__requestHeaders.Authorization = `Bearer ${apiKey}`;
-    if (userAgent) body.__requestHeaders['User-Agent'] = userAgent;
+  } else if (isAnthropicProvider(options.provider)) {
+    if (apiKey) body.__requestHeaders['x-api-key'] = apiKey;
+  } else if (isGeminiNativeProvider(options.provider)) {
+    if (apiKey) body.__requestHeaders['x-goog-api-key'] = apiKey;
   }
 
   return applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig, options);

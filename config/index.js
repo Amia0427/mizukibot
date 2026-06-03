@@ -27,7 +27,13 @@ const {
   buildSessionContextRuntimeConfig
 } = require('./mainReplyContextRuntime');
 const { buildImageVisualSummaryRuntimeConfig } = require('./imageMemoryRuntime');
-const { CODEX_USER_AGENT, normalizeUserAgent } = require('./userAgentRuntime');
+const {
+  BROWSER_ACCEPT_LANGUAGE,
+  BROWSER_USER_AGENT,
+  CODEX_USER_AGENT,
+  normalizeBrowserUserAgent,
+  normalizeUserAgent
+} = require('./userAgentRuntime');
 
 loadEnvironment(PROJECT_ROOT);
 
@@ -121,12 +127,17 @@ module.exports = {
   // ===== Network =====
   // Clear-by-default to avoid startup failures when no local proxy is running.
   PROXY_URL: pick('PROXY_URL', ''),
-  // Default all outbound User-Agent headers to the Codex client identity.
+  // Keep generic outbound tooling identifiable; model traffic uses a browser-shaped header set.
   CODEX_USER_AGENT,
   HTTP_USER_AGENT: normalizeUserAgent(pick('HTTP_USER_AGENT', CODEX_USER_AGENT)),
-  MAIN_REPLY_USER_AGENT: normalizeUserAgent(pick('MAIN_REPLY_USER_AGENT', CODEX_USER_AGENT)),
-  MODEL_HTTP_USER_AGENT: normalizeUserAgent(pick('MODEL_HTTP_USER_AGENT', pick('MAIN_REPLY_USER_AGENT', CODEX_USER_AGENT))),
+  BROWSER_USER_AGENT,
+  MAIN_REPLY_USER_AGENT: normalizeBrowserUserAgent(pick('MAIN_REPLY_USER_AGENT', BROWSER_USER_AGENT)),
+  MODEL_HTTP_USER_AGENT: normalizeBrowserUserAgent(pick('MODEL_HTTP_USER_AGENT', pick('MAIN_REPLY_USER_AGENT', BROWSER_USER_AGENT))),
+  MODEL_HTTP_ORIGIN: pick('MODEL_HTTP_ORIGIN', ''),
+  MODEL_HTTP_REFERER: pick('MODEL_HTTP_REFERER', ''),
+  MODEL_HTTP_SEC_FETCH_SITE: pick('MODEL_HTTP_SEC_FETCH_SITE', ''),
   HTTP_ACCEPT_LANGUAGE: pick('HTTP_ACCEPT_LANGUAGE', 'zh-CN,zh;q=0.9,en;q=0.8'),
+  MODEL_HTTP_ACCEPT_LANGUAGE: pick('MODEL_HTTP_ACCEPT_LANGUAGE', pick('HTTP_ACCEPT_LANGUAGE', BROWSER_ACCEPT_LANGUAGE)),
   MODEL_TOP_P_ENABLED: pickBool('MODEL_TOP_P_ENABLED', false),
   ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS: pickNum('ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS', 120000),
   ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE: pickNum('ANTHROPIC_DOWNSAMPLED_IMAGE_MAX_EDGE', 768),

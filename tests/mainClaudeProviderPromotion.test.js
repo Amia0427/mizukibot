@@ -20,11 +20,12 @@ function restoreEnv(snapshot = {}) {
 module.exports = (async () => {
   const snapshot = { ...process.env };
   try {
+    const browserUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.7827.54 Safari/537.36';
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://superapi.buzz/v1/chat/completions';
     process.env.API_PROVIDER = 'anthropic';
     process.env.AI_MODEL = 'claude-opus-4-6';
-    process.env.MODEL_HTTP_USER_AGENT = 'codex-test-agent';
+    process.env.MODEL_HTTP_USER_AGENT = browserUA;
     clearProjectCache();
 
     const httpClient = require('../api/httpClient');
@@ -41,7 +42,8 @@ module.exports = (async () => {
 
     assert.strictEqual(request.provider, 'anthropic');
     assert.strictEqual(request.url, 'https://superapi.buzz/v1/messages');
-    assert.ok(!Object.prototype.hasOwnProperty.call(request.body, '__requestHeaders'));
+    assert.strictEqual(request.body.__requestHeaders['User-Agent'], browserUA);
+    assert.strictEqual(request.body.__requestHeaders['x-api-key'], 'main-key');
     assert.ok(!Object.prototype.hasOwnProperty.call(request.body, 'prompt_cache_key'));
     assert.ok(!Array.isArray(request.body.tools));
 
@@ -53,6 +55,7 @@ module.exports = (async () => {
     assert.ok(!Array.isArray(prepared.requestBody.tools));
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'tool_choice'));
     assert.strictEqual(prepared.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
+    assert.strictEqual(prepared.requestHeaders['User-Agent'], browserUA);
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestHeaders || {}, 'Authorization'));
 
     clearProjectCache();
@@ -66,6 +69,7 @@ module.exports = (async () => {
     assert.strictEqual(chatRequest.provider, 'openai_compatible');
     assert.strictEqual(chatRequest.url, 'https://superapi.buzz/v1/chat/completions');
     assert.strictEqual(chatRequest.body.__requestHeaders.Authorization, 'Bearer main-key');
+    assert.strictEqual(chatRequest.body.__requestHeaders['User-Agent'], browserUA);
 
     console.log('mainClaudeProviderPromotion.test.js passed');
   } finally {

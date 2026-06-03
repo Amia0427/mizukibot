@@ -1,3 +1,5 @@
+const { normalizeBrowserUserAgent } = require('../config/userAgentRuntime');
+
 function normalizeApiBaseUrl(url) {
   return String(url || '').trim();
 }
@@ -88,7 +90,18 @@ const PROVIDER_HEADER_ALLOWLISTS = {
     ['openai-project', 'OpenAI-Project'],
     ['http-referer', 'HTTP-Referer'],
     ['x-title', 'X-Title'],
-    ['x-request-id', 'X-Request-Id']
+    ['x-request-id', 'X-Request-Id'],
+    ['origin', 'Origin'],
+    ['referer', 'Referer'],
+    ['sec-ch-ua', 'sec-ch-ua'],
+    ['sec-ch-ua-mobile', 'sec-ch-ua-mobile'],
+    ['sec-ch-ua-platform', 'sec-ch-ua-platform'],
+    ['sec-fetch-dest', 'Sec-Fetch-Dest'],
+    ['sec-fetch-mode', 'Sec-Fetch-Mode'],
+    ['sec-fetch-site', 'Sec-Fetch-Site'],
+    ['cache-control', 'Cache-Control'],
+    ['pragma', 'Pragma'],
+    ['priority', 'Priority']
   ]),
   anthropic: new Map([
     ['x-api-key', 'x-api-key'],
@@ -96,13 +109,37 @@ const PROVIDER_HEADER_ALLOWLISTS = {
     ['anthropic-beta', 'anthropic-beta'],
     ['content-type', 'Content-Type'],
     ['accept', 'Accept'],
-    ['accept-language', 'Accept-Language']
+    ['accept-language', 'Accept-Language'],
+    ['user-agent', 'User-Agent'],
+    ['origin', 'Origin'],
+    ['referer', 'Referer'],
+    ['sec-ch-ua', 'sec-ch-ua'],
+    ['sec-ch-ua-mobile', 'sec-ch-ua-mobile'],
+    ['sec-ch-ua-platform', 'sec-ch-ua-platform'],
+    ['sec-fetch-dest', 'Sec-Fetch-Dest'],
+    ['sec-fetch-mode', 'Sec-Fetch-Mode'],
+    ['sec-fetch-site', 'Sec-Fetch-Site'],
+    ['cache-control', 'Cache-Control'],
+    ['pragma', 'Pragma'],
+    ['priority', 'Priority']
   ]),
   gemini_native: new Map([
     ['x-goog-api-key', 'x-goog-api-key'],
     ['content-type', 'Content-Type'],
     ['accept', 'Accept'],
-    ['accept-language', 'Accept-Language']
+    ['accept-language', 'Accept-Language'],
+    ['user-agent', 'User-Agent'],
+    ['origin', 'Origin'],
+    ['referer', 'Referer'],
+    ['sec-ch-ua', 'sec-ch-ua'],
+    ['sec-ch-ua-mobile', 'sec-ch-ua-mobile'],
+    ['sec-ch-ua-platform', 'sec-ch-ua-platform'],
+    ['sec-fetch-dest', 'Sec-Fetch-Dest'],
+    ['sec-fetch-mode', 'Sec-Fetch-Mode'],
+    ['sec-fetch-site', 'Sec-Fetch-Site'],
+    ['cache-control', 'Cache-Control'],
+    ['pragma', 'Pragma'],
+    ['priority', 'Priority']
   ])
 };
 
@@ -115,10 +152,13 @@ function normalizeProviderRequestHeaders(provider = 'openai_compatible', headers
 
   for (const [rawKey, rawValue] of Object.entries(headers)) {
     const lowerKey = String(rawKey || '').trim().toLowerCase();
-    const value = String(rawValue || '').trim();
+    let value = String(rawValue || '').trim();
     if (!lowerKey || !value) continue;
     const canonicalKey = allowlist.get(lowerKey);
     if (!canonicalKey) continue;
+    if (canonicalKey === 'User-Agent') {
+      value = normalizeBrowserUserAgent(value);
+    }
     normalizedHeaders[canonicalKey] = value;
   }
 
