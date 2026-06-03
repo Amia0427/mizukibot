@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-03 08:13 +08:00：已清理 2026-06-02 私聊拒演坏样本及同类历史污染的可召回落盘数据；`daily_journal`、短期 bridge、Memory V3 events/projections、post-reply job、LangGraph 缓存和 style/social 缓存中的 “I'm Claude / 不扮演角色” 类文本已 scrub 或标记 unsafe。新增 `utils/recallPollutionGuard.js` 与 `node scripts/audit-memory-pollution.js --scrub [--apply]`，Memory V3/LanceDB/bridge 召回会过滤同类坏样本，不重复改流式/上下文隔离链路。
+
 更新 2026-06-03 08:08 +08:00：Daily Journal 的 daily / 4day / monthly rollup 生成和维护现在会自动 upsert 到 `profile_journal.sqlite` 的 `journal_rollups`，历史 daily / 4day 文件已轻量补写进 SQLite，当前主读诊断可直接看到 rollup 层数量。
 
 更新 2026-06-03 07:52 +08:00：普通聊天/问答命中 `no-allowed-tools` 或 `planner-missing` 时不再发送本地工具不可用兜底文案，也不再向模型补入“No tool is available”提示；调度会降级回正常主对话模型链路，并隐藏工具引导，权限类限制如私聊关闭、群聊限定、QQ 空间/定时动作仍保留固定拦截。

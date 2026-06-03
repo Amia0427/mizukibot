@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-03 08:08 +08:00
+更新时间：2026-06-03 08:13 +08:00
+
+更新 2026-06-03 08:13 +08:00：完成拒演/模型自报污染清理。新增 `utils/recallPollutionGuard.js` 统一识别 “I'm Claude / made by Anthropic / 不扮演角色或人设” 类坏回复；`userFacingReplyGuards`、Daily Journal safety、short-term bridge、Memory V3 candidate collection 和 LanceDB row filter 会屏蔽同类文本。`scripts/audit-memory-pollution.js --scrub --apply` 已对 `daily_journal`、`short_term_bridge.json`、Memory V3 events/projections、post-reply jobs、LangGraph 缓存及 style/social 缓存做一次性 scrub，SQLite `journal_entries` 中 9 条 active 污染行已标记 `unsafe`。
 
 更新 2026-06-03 08:08 +08:00：Daily Journal rollup 维护已接入结构化库自动写入：`runDailyJournalSummaries` 写 daily summary 后同步 `journal_rollups(level=daily)`，`maintainDailyJournalRollups` 生成或发现已有 4day/monthly markdown 时同步 `level=4day/monthly`。已对现有 `daily_journal` 文件执行轻量补写，当前 SQLite 主读可直接召回 daily / 4day rollup；monthly 会在满足 7 个连续 4day rollup 后自动生成并写入。
 
