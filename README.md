@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-03 17:16 +08:00：Gemini native 主回复流式不再统一降级为非流式；`stream=true` 的主回复请求会归一到 `:streamGenerateContent?alt=sse`，复用现有 SSE parser、streaming coordinator、guard 和普通用户首字超时语义。普通主回复可直接产出增量，私聊/群聊仍按既有 guard 先缓冲校验再发最终文本。
+
 更新 2026-06-03 10:02 +08:00：修复图片主回复模型裸域名 endpoint 导致的空流兜底；`https://superapi.buzz/` 这类 OpenAI-compatible 主模型地址现在会自动补为 `/v1/chat/completions`，本地 `IMAGE_API_BASE_URL` 已同步改为完整 chat-completions 地址。
 
 更新 2026-06-03 09:54 +08:00：主回复/模型 HTTP 请求头改为默认伪装 Windows Chrome 真实浏览器请求：`MODEL_HTTP_USER_AGENT` / `MAIN_REPLY_USER_AGENT` 默认使用 Chrome UA，并随主回复请求携带 `sec-ch-ua`、`Sec-Fetch-*`、`Origin/Referer`、`Cache-Control`、`Pragma` 和 `Priority` 等浏览器 fetch 头；普通工具抓取的 `HTTP_USER_AGENT` 仍保持 Codex 身份，避免扩大影响面。可用 `MODEL_HTTP_ORIGIN`、`MODEL_HTTP_REFERER`、`MODEL_HTTP_SEC_FETCH_SITE`、`MODEL_HTTP_ACCEPT_LANGUAGE` 微调模型请求头。
@@ -10,7 +12,7 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-03 08:37 +08:00：Memory V3 召回按“先评测、再 chunking、稳 reranker、加 BM25+RRF”的顺序完成小步增强；新增 `Recall@5/MRR@5`、BM25+RRF rank fusion 诊断、rerank 前后 top trace 和 100 条 eval 样例补齐，默认不更换 embedding 模型或 LanceDB。
 
-更新 2026-06-03 08:24 +08:00：Gemini native 调用链已真正接入 `prompts/GEMINI.txt`：显式 `API_PROVIDER=gemini_native` 或模型名匹配 `gemini-*` 时，主回复、私聊、群聊、群总结等复用 `buildMainModelRequest` / `prepareRequest` 的路径会转换为 Gemini `generateContent` 请求，并把该文件注入 `systemInstruction`。可用 `GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED=false` 关闭，或用 `GEMINI_SYSTEM_PROMPT_PATH` 指向替代文件；Gemini native 流式当前安全降级为非流式返回。
+更新 2026-06-03 08:24 +08:00：Gemini native 调用链已真正接入 `prompts/GEMINI.txt`：显式 `API_PROVIDER=gemini_native` 或模型名匹配 `gemini-*` 时，主回复、私聊、群聊、群总结等复用 `buildMainModelRequest` / `prepareRequest` 的路径会转换为 Gemini `generateContent` / `streamGenerateContent` 请求，并把该文件注入 `systemInstruction`。可用 `GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED=false` 关闭，或用 `GEMINI_SYSTEM_PROMPT_PATH` 指向替代文件。
 
 更新 2026-06-03 08:29 +08:00：结构化 Profile Journal DB 自动清洗已收紧，`quality_json.ok=false`、`reserved`/schema-like placeholder 和污染式关系占位内容不再保留 active；profile 读链路改为 60 秒进程内节流清洗，写入/CLI clean/诊断仍强制清洗，`diag:memory -- profile-journal-db` 新增质量计数和召回耗时摘要。
 

@@ -244,6 +244,7 @@ function normalizeUsageObject(raw) {
     ?? raw.promptTokens
     ?? raw.inputTokens
     ?? raw.input_token_count
+    ?? raw.promptTokenCount
   );
   const completionTokens = Number(
     raw.completion_tokens
@@ -251,10 +252,12 @@ function normalizeUsageObject(raw) {
     ?? raw.completionTokens
     ?? raw.outputTokens
     ?? raw.output_token_count
+    ?? raw.candidatesTokenCount
   );
   const totalTokens = Number(
     raw.total_tokens
     ?? raw.totalTokens
+    ?? raw.totalTokenCount
   );
   const cacheReadInputTokens = Number(
     raw.cache_read_input_tokens
@@ -265,6 +268,7 @@ function normalizeUsageObject(raw) {
     ?? raw.promptTokensDetails?.cachedTokens
     ?? raw.input_tokens_details?.cached_tokens
     ?? raw.inputTokensDetails?.cachedTokens
+    ?? raw.cachedContentTokenCount
   );
   const cacheCreationInputTokens = Number(
     raw.cache_creation_input_tokens
@@ -327,6 +331,7 @@ function extractUsageFromSSEObject(obj) {
   if (!obj || typeof obj !== 'object') return null;
   return (
     normalizeUsageObject(obj.usage)
+    || normalizeUsageObject(obj.usageMetadata)
     || normalizeUsageObject(obj?.message?.usage)
     || normalizeUsageObject(obj?.delta?.usage)
     || normalizeUsageObject(obj?.response?.usage)
@@ -462,6 +467,10 @@ function extractDeltaText(obj) {
   if (obj.content && typeof obj.content === 'object') {
     return extractTextFromObject(obj.content);
   }
+
+  const candidate = Array.isArray(obj.candidates) ? obj.candidates[0] : null;
+  const geminiCandidateText = textFromGeminiParts(candidate?.content?.parts);
+  if (geminiCandidateText) return geminiCandidateText;
 
   return '';
 }

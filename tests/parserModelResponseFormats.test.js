@@ -1,6 +1,6 @@
 const assert = require('assert');
 
-const { extractMessageContent } = require('../api/parser');
+const { extractMessageContent, extractSSEEvents } = require('../api/parser');
 const { normalizeTextContent } = require('../api/runtimeV2/model/shared');
 
 module.exports = (() => {
@@ -158,6 +158,18 @@ module.exports = (() => {
     normalizeTextContent({ finalReply: 'final runtime reply' }),
     'final runtime reply'
   );
+
+  const geminiStreamState = { buffer: '' };
+  const geminiStream = extractSSEEvents(
+    geminiStreamState,
+    'data: {"candidates":[{"content":{"parts":[{"text":"首字"}],"role":"model"}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"totalTokenCount":9,"cachedContentTokenCount":3}}\n\n'
+  );
+  assert.strictEqual(geminiStream.events.length, 1);
+  assert.strictEqual(geminiStream.events[0].delta, '首字');
+  assert.strictEqual(geminiStream.events[0].usage.prompt_tokens, 7);
+  assert.strictEqual(geminiStream.events[0].usage.completion_tokens, 2);
+  assert.strictEqual(geminiStream.events[0].usage.total_tokens, 9);
+  assert.strictEqual(geminiStream.events[0].usage.cache_read_input_tokens, 3);
 
   console.log('parserModelResponseFormats.test.js passed');
 })()

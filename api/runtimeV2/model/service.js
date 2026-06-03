@@ -33,9 +33,6 @@ const {
   normalizeTextContent,
   withMainModelFallback
 } = require('./shared');
-const {
-  isGeminiNativeProvider
-} = require('../../../utils/modelProvider');
 const { shouldUsePlanModeForRequest } = require('../planning/service');
 const { normalizeRequestTrace } = require('../../../utils/requestTrace');
 const {
@@ -395,49 +392,6 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
         const requestBody = abortController
           ? { ...request.body, __abortSignal: abortController.signal }
           : request.body;
-        const runGeminiNonStream = async () => {
-          const response = await postWithRetry(
-            request.url,
-            requestBody,
-            getRetries(1, resolvedConfig),
-            getApiKey(resolvedConfig)
-          );
-          const message = extractMessageContent(response);
-          emitVisibleDelta(normalizeTextContent(message?.content || ''));
-        };
-        if (isGeminiNativeProvider(request.provider)) {
-          const geminiPromise = runGeminiNonStream();
-          if (!useNormalUserFirstTokenTimeout) {
-            await geminiPromise;
-            return;
-          }
-          let timeoutError = null;
-          const timeoutPromise = new Promise((_, reject) => {
-            const timer = setTimeout(() => {
-              if (firstVisibleOutputSeen) return;
-              timeoutError = createNormalUserMainReplyStreamFirstTokenTimeoutError(normalUserFirstTokenTimeoutMs);
-              if (abortController && !abortController.signal.aborted) {
-                try { abortController.abort(timeoutError); } catch (_) {}
-              }
-              reject(timeoutError);
-            }, normalUserFirstTokenTimeoutMs);
-            cancelActiveFirstTokenTimer = () => {
-              clearTimeout(timer);
-            };
-          });
-          try {
-            await Promise.race([geminiPromise, timeoutPromise]);
-          } catch (error) {
-            if (timeoutError) throw timeoutError;
-            throw error;
-          } finally {
-            if (typeof cancelActiveFirstTokenTimer === 'function') {
-              cancelActiveFirstTokenTimer();
-              cancelActiveFirstTokenTimer = null;
-            }
-          }
-          return;
-        }
         const streamPromise = postStreamWithRetry(
           request.url,
           requestBody,
