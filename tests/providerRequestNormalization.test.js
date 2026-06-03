@@ -26,6 +26,7 @@ module.exports = (async () => {
   try {
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://api.anthropic.com/v1/messages';
+    process.env.API_PROVIDER = 'anthropic';
     process.env.AI_MODEL = 'claude-3-5-sonnet-latest';
     process.env.MODEL_HTTP_USER_AGENT = browserUA;
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';

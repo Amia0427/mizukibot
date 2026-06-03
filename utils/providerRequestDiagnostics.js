@@ -150,8 +150,9 @@ function pickCliOrConfig(value, fallbackValue, valueSource, fallbackSource) {
 
 function buildRequestedProviderConfig(options = {}) {
   const hasProvider = Boolean(normalizeText(options.provider));
-  const inferredProvider = hasProvider
-    ? normalizeApiProvider(options.provider)
+  const explicitProvider = hasProvider ? options.provider : config.API_PROVIDER;
+  const inferredProvider = normalizeText(explicitProvider)
+    ? normalizeApiProvider(explicitProvider)
     : getApiProvider(options.apiBaseUrl || config.API_BASE_URL, options.model || config.AI_MODEL, { preferUnifiedResponses: true });
   const preset = getProviderPreset(inferredProvider);
   const apiBaseUrlPick = pickCliOrConfig(
@@ -279,6 +280,7 @@ function buildHttpDiagnosticBody(scenarioConfig = {}, options = {}) {
     prompt_cache_key: 'provider-diagnostic-cache-key',
     prompt_cache_retention: '24h',
     stream: false,
+    __provider: scenarioConfig.requestedProvider,
     __preferredProtocol: 'chat_completions',
     __trace: {
       source: 'provider_request_diagnostic',
@@ -448,6 +450,7 @@ async function buildHttpScenario(name, requestUrl, requestBody, scenarioConfig, 
 function buildMainScenarioConfig(baseConfig, role = 'main') {
   return {
     ...baseConfig,
+    provider: baseConfig.provider || baseConfig.requestedProvider,
     __mainModelUserRole: role === 'admin' ? 'admin' : 'user',
     __mainModelSource: baseConfig.modelSource,
     __mainApiBaseUrlSource: baseConfig.apiBaseUrlSource,
@@ -572,7 +575,10 @@ function buildConfigBackedScenarioConfig(role = 'main') {
     const adminId = normalizeText((config.ADMIN_USER_IDS || [])[0] || '__provider_diag_admin__');
     const resolved = resolveRoleAwareMainModelConfig(adminId, null, {});
     return {
-      requestedProvider: getApiProvider(resolved.apiBaseUrl, resolved.model, { preferUnifiedResponses: true }),
+      requestedProvider: getApiProvider(resolved.apiBaseUrl, resolved.model, {
+        provider: resolved.provider,
+        preferUnifiedResponses: true
+      }),
       model: resolved.model,
       modelSource: resolved.__mainModelSource || '',
       apiBaseUrl: resolved.apiBaseUrl,

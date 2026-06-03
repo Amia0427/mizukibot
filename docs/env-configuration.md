@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-03 17:16 +08:00
+更新时间：2026-06-03 17:42 +08:00
 
 ## 维护约定
 
@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前 `.env` 有 313 个变量，311 个唯一变量；重复项仅保留 `MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE` 和 `MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN` 两组历史调优项。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；重复项已在本地 `.env` 注释中标明实际生效顺序。
+- 2026-06-03 17:42 +08:00：当前普通主回复 `API_BASE_URL=https://gcli.ggchan.dev/v1/chat/completions` 是 OpenAI-compatible 网关，已显式设置 `API_PROVIDER=openai_compatible`；否则 `AI_MODEL=gemini-3-flash-preview` 会按模型名自动切到 Gemini native 并改写为 `.../models/gemini-3-flash-preview:generateContent`，该地址在 gcli 返回 HTTP 404。主回复/Provider 诊断也会读取显式 provider，避免诊断输出与真实请求分叉。
 - 2026-06-03 17:16 +08:00：`API_PROVIDER=gemini_native` 或 `AI_MODEL=gemini-*` 的主回复流式请求无需新增 env；只要 `AI_STREAM_ENABLED=true` 且链路允许流式，Gemini endpoint 会从 `generateContent` 自动切到 `streamGenerateContent?alt=sse`，普通用户首字超时仍由 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 控制。
 - 2026-06-03 07:53 +08:00：`LOCAL_COMMAND_BRIDGE_TOKEN` 应在本机启动前生成并写入 `.env` 或进程环境；`config/index.js`、Windows daemon 和 one-click 启动都会加载 `.env`。缺失时本地命令桥只允许 `/health`，执行类入口阻断。
 - 2026-06-03 13:02 +08:00：普通用户主回复流式首个可见字超时配置改为 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=180000`；超时回复同步改为“我刚刚卡了 180 秒还没冒出字……先断开啦，你再发一次我重新接。”，管理员不受影响。

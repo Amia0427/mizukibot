@@ -204,7 +204,9 @@ function buildModelSummary(userId = '', routeMeta = {}) {
   const scope = resolveFallbackScope(userId);
   const effective = resolveMainModelConfig(primary, { scope });
   const fallbackStatus = getMainModelFallbackStatus({ scope });
-  const provider = getApiProvider(effective.apiBaseUrl, effective.model);
+  const provider = getApiProvider(effective.apiBaseUrl, effective.model, {
+    provider: effective.provider
+  });
   return {
     provider,
     model: normalizeText(effective.model),

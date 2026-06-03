@@ -28,6 +28,7 @@ module.exports = (async () => {
     process.env.API_BASE_URL = 'https://diag.example/v1/chat/completions';
     process.env.API_KEY = 'diag-key';
     process.env.AI_MODEL = 'diag-model';
+    process.env.API_PROVIDER = '';
     process.env.AI_FALLBACK_ENABLED = 'true';
     process.env.AI_FALLBACK_MODEL = 'diag-fallback-model';
     process.env.PLANNER_SUBAGENT_ENABLED = 'false';
@@ -79,6 +80,23 @@ module.exports = (async () => {
     assert.ok(report.guards.groupDirectStyle.reasons.includes('too_long'));
     assert.ok(report.guards.groupDirectStyle.reasons.includes('teaching_structure'));
     assert.strictEqual(report.diagnostics.plannerSource, 'rule');
+
+    process.env.API_PROVIDER = 'openai_compatible';
+    process.env.AI_MODEL = 'gemini-3-flash-preview';
+    clearProjectCache();
+    const { buildMainReplyDiagnosticReport: buildGatewayReport } = require('../utils/mainReplyDiagnostics');
+    const gatewayReport = await buildGatewayReport({
+      rawText: '你好',
+      requestText: '你好',
+      userId: 'u_diag',
+      groupId: '',
+      chatType: 'private',
+      plannerMode: 'rule'
+    }, {
+      plannerMode: 'rule'
+    });
+    assert.strictEqual(gatewayReport.summary.provider, 'openai_compatible');
+    assert.strictEqual(gatewayReport.model.provider, 'openai_compatible');
 
     console.log('mainReplyUnifiedDiagnostics.test.js passed');
   } finally {

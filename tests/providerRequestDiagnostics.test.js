@@ -87,7 +87,29 @@ module.exports = (async () => {
     assert.ok(geminiDirect.geminiSystemInstruction.chars > 0);
     assert.deepStrictEqual(geminiDirect.anomalies, []);
 
-    const anthropicReport = await runProviderRequestDiagnostics({
+    process.env.API_PROVIDER = 'openai_compatible';
+    process.env.API_BASE_URL = 'https://gcli.example/v1/chat/completions';
+    process.env.AI_MODEL = 'gemini-3-flash-preview';
+    clearProjectCache();
+    const { runProviderRequestDiagnostics: runGatewayDiagnostics } = require('../utils/providerRequestDiagnostics');
+    const gatewayReport = await runGatewayDiagnostics({
+      scenarios: 'main_reply'
+    });
+    const gatewayMain = findScenario(gatewayReport, 'main_reply');
+    assert.ok(gatewayMain);
+    assert.strictEqual(gatewayReport.requested.provider, 'openai_compatible');
+    assert.strictEqual(gatewayMain.finalProvider, 'openai_compatible');
+    assert.strictEqual(gatewayMain.requestUrl, 'https://gcli.example/v1/chat/completions');
+    assert.ok(gatewayMain.headerNames.includes('Authorization'));
+    assert.ok(!gatewayMain.headerNames.includes('x-goog-api-key'));
+    assert.deepStrictEqual(gatewayMain.anomalies, []);
+
+    process.env.API_PROVIDER = '';
+    process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
+    process.env.AI_MODEL = 'main-model';
+    clearProjectCache();
+    const { runProviderRequestDiagnostics: runAnthropicDiagnostics } = require('../utils/providerRequestDiagnostics');
+    const anthropicReport = await runAnthropicDiagnostics({
       provider: 'anthropic',
       scenarios: 'http_client_direct'
     });
