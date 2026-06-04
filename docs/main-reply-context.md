@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-03 17:16 +08:00
+更新时间：2026-06-04 22:04 +08:00
 
 ## 已调整
 
+- 2026-06-04 22:04 +08:00：群聊主回复流式发送新增本地“群聊消息感”分段策略：短回复保持单条，中等/长回复才按语义完整断点拆成最多 `AI_STREAM_MAX_SEGMENTS` 条；群聊段间隔不再使用固定 260ms，而是按段长生成稳定动态间隔。流式发送器也会在段间等待后再次检查 freshness，群里有新消息时停止追发旧后续段。
 - 2026-06-03 17:16 +08:00：Gemini native 主回复流式改为真正 SSE 路径；`buildMainModelRequest` 保留 `stream=true`，`prepareRequest` 将流式 Gemini 请求归一到 `:streamGenerateContent?alt=sse`，runtime 复用现有 streaming coordinator、guard、partial recovery 和普通用户首字超时。普通主回复可增量出字，私聊/群聊继续按既有 guard 缓冲校验后发最终文本。
 - 2026-06-03 09:29 +08:00：按要求撤回 `6d4d1c9 fix: isolate passive persona refusal contamination`；被动感知 prompt/持久化不再使用该提交加入的模型身份污染隔离逻辑，`modelIdentityContext` 相关测试和自检断言同步移除。后续 2026-06-02 20:10 的被动感知回复模型独立 env 默认配置仍保留。
 - 2026-06-03 08:24 +08:00：Gemini native 已接入主模型出站层。显式 `API_PROVIDER=gemini_native` 或主模型名匹配 `gemini-*` 时，`buildMainModelRequest` 选择 `gemini_generate_content`，`prepareRequest` 将 OpenAI-style `messages/tools` 转为 Gemini `contents/systemInstruction/tools`，并注入 `prompts/GEMINI.txt`；私聊、群聊、群总结等复用该模型服务的路径同步生效。

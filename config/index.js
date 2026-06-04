@@ -392,8 +392,9 @@ module.exports = {
   MODEL_ENDPOINT_ALLOW_LOCAL_HTTP: pickBool('MODEL_ENDPOINT_ALLOW_LOCAL_HTTP', false),
   AI_STREAM_ENABLED: pickBool('AI_STREAM_ENABLED', false),
   AI_STREAM_CHUNK_MS: pickNum('AI_STREAM_CHUNK_MS', 900),
+  // Private/non-group stream gap. QQ group direct replies use local chat-like dynamic gaps.
   AI_STREAM_SEND_GAP_MS: pickNum('AI_STREAM_SEND_GAP_MS', 260),
-  // Streaming replies: send at most N chunks, with chunk boundaries chosen by model output.
+  // Streaming replies: send at most N chunks; group chat chunks are additionally shaped locally.
   AI_STREAM_MAX_SEGMENTS: pickNum('AI_STREAM_MAX_SEGMENTS', 3),
   AI_REPLY_CHUNK_CHARS: pickNum('AI_REPLY_CHUNK_CHARS', 1200),
   NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS: Math.max(0, pickNum('NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS', 180000)),

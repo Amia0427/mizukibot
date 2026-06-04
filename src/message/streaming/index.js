@@ -2,6 +2,7 @@ const { sanitizeUserFacingText } = require('../../../utils/userFacingText');
 const {
   findExplicitSegmentBreakIndex,
   findNaturalSplitIndex,
+  getGroupChatStreamSendGapMs,
   getStreamingSplitIndex
 } = require('../../../core/streamingSegmentation');
 
@@ -39,6 +40,7 @@ function createStreamingDispatcher({
   groupId,
   userId,
   senderId,
+  shouldSend = null,
   telemetry = null
 } = {}) {
   const effectiveConfig = runtimeConfig && typeof runtimeConfig === 'object'
@@ -72,15 +74,27 @@ function createStreamingDispatcher({
     const chunkIndex = state.sentSegments + 1;
 
     const task = async () => {
+      if (typeof shouldSend === 'function' && shouldSend() === false) return false;
       // Keep streamed chunk sending strictly serialized (unit-test anchor).
       const now = Date.now();
-      const minGap = getStreamSendGapMs(effectiveConfig);
+      const isPrivate = String(chatType || '').trim().toLowerCase() === 'private';
+      const groupGap = getGroupChatStreamSendGapMs(text, {
+        chatType,
+        groupId,
+        userId,
+        senderId,
+        chunkIndex,
+        sentSegments: state.sentSegments
+      });
+      const minGap = groupGap > 0 && !isPrivate
+        ? groupGap
+        : getStreamSendGapMs(effectiveConfig);
       const elapsed = now - state.lastSendAt;
       if (state.lastSendAt > 0 && elapsed < minGap) {
         await new Promise((r) => setTimeout(r, minGap - elapsed));
       }
+      if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
-      const isPrivate = String(chatType || '').trim().toLowerCase() === 'private';
       const payload = isPrivate
         ? {
             action: 'send_private_msg',
@@ -151,10 +165,25 @@ function createStreamingDispatcher({
     let sendUntil = -1;
     const canSplitMore = state.sentSegments < (maxSegments - 1);
     if (canSplitMore) {
-      sendUntil = getStreamingSplitIndex(pending);
+      sendUntil = getStreamingSplitIndex(pending, {
+        chatType,
+        groupId,
+        userId,
+        senderId,
+        sentSegments: state.sentSegments
+      });
     }
 
-    if (sendUntil <= 0 && force) sendUntil = getStreamingSplitIndex(pending, { force: true });
+    if (sendUntil <= 0 && force) {
+      sendUntil = getStreamingSplitIndex(pending, {
+        force: true,
+        chatType,
+        groupId,
+        userId,
+        senderId,
+        sentSegments: state.sentSegments
+      });
+    }
     if (sendUntil <= 0) return false;
 
     const rawChunk = pending.slice(0, sendUntil);
@@ -176,6 +205,7 @@ function createStreamingDispatcher({
       await flush(false);
     },
     async finish(finalReply) {
+      if (typeof shouldSend === 'function' && shouldSend() === false) return;
       const visibleFinalReply = sanitizeUserFacingText(finalReply).trim();
       state.fullText = visibleFinalReply || state.fullText || '';
       while (state.sentSegments < maxSegments && await flush(true)) {}
