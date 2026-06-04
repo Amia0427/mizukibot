@@ -26,6 +26,7 @@ const {
   applyContextProfileToTokenBudget,
   resolveShortTermContextProfile
 } = require('./contextProfile');
+const { isUnsafeUserFacingReply } = require('../userFacingReplyGuards');
 
 const shortTermScopeLogCache = new Map();
 
@@ -82,6 +83,18 @@ function shouldIncludeSiblingShortTermSessions(deps = {}) {
   return text === 'true' || text === '1' || text === 'yes';
 }
 
+function isSessionKeyForUser(sessionKey = '', userId = '') {
+  const key = String(sessionKey || '').trim();
+  const uid = String(userId || '').trim();
+  if (!key || !uid) return false;
+  return (
+    key === uid
+    || key === `direct:${uid}`
+    || (key.startsWith('qq-group:') && key.endsWith(`:user:${uid}`))
+    || (key.startsWith('channel:') && key.endsWith(`:user:${uid}`))
+  );
+}
+
 function pruneShortTermScopeLogCache(now = Date.now()) {
   if (shortTermScopeLogCache.size <= 200) return;
   const cutoff = now - 60 * 1000;
@@ -120,14 +133,16 @@ function logShortTermScopeDecision(userId, sessionKey, scopeMeta = {}) {
   });
 }
 
-function shouldOmitAssistantRawForSession(sessionKey = '', routeMeta = {}) {
+function shouldOmitAssistantRawForSession(sessionKey = '', routeMeta = {}, options = {}) {
+  if (options.sameUser === true) return false;
   const key = String(sessionKey || '').trim();
   if (/^(?:qq-group|channel):/i.test(key)) return false;
-  if (/^direct:/i.test(key)) return true;
+  if (/^direct:/i.test(key)) return options.isCurrent !== true;
 
   const meta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
   const chatType = String(meta.chatType || meta.chat_type || '').trim().toLowerCase();
-  if (chatType) return chatType === 'private';
+  if (chatType === 'private') return options.isCurrent !== true;
+  if (chatType) return false;
   if (String(meta.groupId || meta.group_id || meta.channelId || meta.channel_id || '').trim()) return false;
   return false;
 }
@@ -140,6 +155,7 @@ function normalizeHistoryMessages(messages = [], options = {}) {
       const content = normalizeMessageContent(item?.content);
       if ((role !== 'user' && role !== 'assistant') || !content) return null;
       if (omitAssistant && role === 'assistant') return null;
+      if (role === 'assistant' && isUnsafeUserFacingReply(content)) return null;
       return { role, content };
     })
     .filter(Boolean);
@@ -158,7 +174,11 @@ function collectSharedShortTermSessionEntries(userId, deps = {}) {
   }
 
   const entries = selectedKeys.map((sessionKey) => {
-    const omitAssistantRaw = shouldOmitAssistantRawForSession(sessionKey, deps.routeMeta);
+    const isCurrent = sessionKey === currentSessionKey;
+    const omitAssistantRaw = shouldOmitAssistantRawForSession(sessionKey, deps.routeMeta, {
+      isCurrent,
+      sameUser: isSessionKeyForUser(sessionKey, uid)
+    });
     const state = ensureShortTermMemoryState(sessionKey, shortTermStore);
     const history = normalizeHistoryMessages(historyStore[sessionKey], { omitAssistant: omitAssistantRaw });
     const presence = normalizeShortTermPresence(state.presence);
@@ -174,7 +194,7 @@ function collectSharedShortTermSessionEntries(userId, deps = {}) {
       history,
       historyLength: history.length,
       updatedAt,
-      isCurrent: sessionKey === currentSessionKey,
+      isCurrent,
       omitAssistantRaw
     };
   });
@@ -364,7 +384,12 @@ function collectSharedRecentTurns(entries = [], selector, limit = getRecentTurns
   const pushEntryTurns = (entry) => {
     const turns = typeof selector === 'function' ? selector(entry.state || {}) : [];
     const normalized = normalizeRecentTurns(turns, limit)
-      .filter((item) => !(entry.omitAssistantRaw === true && String(item?.role || '').trim().toLowerCase() === 'assistant'));
+      .filter((item) => {
+        const role = String(item?.role || '').trim().toLowerCase();
+        if (role !== 'assistant') return true;
+        if (entry.omitAssistantRaw === true) return false;
+        return !isUnsafeUserFacingReply(item?.content);
+      });
     ordered.push(...normalized);
   };
   for (const entry of entries) {
