@@ -103,6 +103,29 @@ assert.strictEqual(searchImageMemories('私聊暗号', { userId: 'u_allowed' }).
 assert.strictEqual(searchImageMemories('公开说明', { userId: 'u_allowed' }).length, 1);
 assert.strictEqual(searchImageMemories('私聊暗号', { userId: 'u_owner' }).length, 1);
 
+const rawProviderSummary = JSON.stringify({
+  id: 'chatcmpl-test',
+  object: 'chat.completion',
+  choices: [{
+    message: {
+      role: 'assistant',
+      content: '',
+      reasoning_content: '这里是模型推理，不应进入图片记忆。'
+    }
+  }]
+});
+upsertImageMemory({
+  cacheKey: 'img_raw_provider_summary',
+  imageRef: 'cached-image://img_raw_provider_summary',
+  userId: 'u_owner',
+  summary: `[2026-06-04 13:40] ${rawProviderSummary}`,
+  messageId: 'raw_provider_summary_1'
+});
+const rawProviderRecord = loadImageMemoryIndex().images.img_raw_provider_summary;
+assert.strictEqual(rawProviderRecord.summary || '', '');
+assert.strictEqual(rawProviderRecord.observations[0].summary || '', '');
+assert.strictEqual(searchImageMemories('reasoning_content', { userId: 'u_owner' }).length, 0);
+
 const scoreImageTime = Date.parse('2026-05-19T16:57:02+08:00');
 upsertImageMemory({
   cacheKey: 'img_score_blank',

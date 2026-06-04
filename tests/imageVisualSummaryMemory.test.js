@@ -41,6 +41,7 @@ function writeCachedImage(cacheKey, sourceUrl) {
 writeCachedImage('score_img', 'https://example.com/score.png');
 writeCachedImage('text_model_img', 'https://example.com/text-model.png');
 writeCachedImage('failure_img', 'https://example.com/failure.png');
+writeCachedImage('raw_provider_img', 'https://example.com/raw-provider.png');
 fs.writeFileSync(process.env.MEMORY_SCOPE_INDEX_FILE, JSON.stringify({ version: 1, users: {} }, null, 2));
 
 const config = require('../config');
@@ -119,6 +120,30 @@ module.exports = (async () => {
   const imageIndex = loadImageMemoryIndex();
   assert.ok(imageIndex.images.score_img.summary.includes('战绩结算截图'));
   assert.ok(imageIndex.images.score_img.summary.includes('[2026-05-20 01:23]'));
+
+  const rawProviderResult = await summarizeImageIntoLongTermMemory('cached-image://raw_provider_img', {
+    userId: 'u_img',
+    now: new Date('2026-06-04T13:40:00+08:00'),
+    force: true
+  }, {
+    postWithRetry: async () => ({
+      data: JSON.stringify({
+        id: 'chatcmpl-raw-provider',
+        object: 'chat.completion',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: '',
+            reasoning_content: '这里是模型推理，不应进入图片记忆。'
+          }
+        }]
+      })
+    })
+  });
+  assert.strictEqual(rawProviderResult.ok, false);
+  assert.strictEqual(rawProviderResult.reason, 'empty_summary');
+  assert.strictEqual(loadImageMemoryIndex().images.raw_provider_img.summary || '', '');
 
   const events = loadMemoryEvents();
   assert.ok(events.some((event) => (

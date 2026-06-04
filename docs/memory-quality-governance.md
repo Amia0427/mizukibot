@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-03 08:37 +08:00
+更新时间：2026-06-04 13:46 +08:00
+
+更新 2026-06-04 13:46 +08:00：图片视觉摘要写入链路新增 `utils/imageMemorySummarySanitizer.js`。`utils/imageVisualSummaryMemory.js` 在模型响应抽取后先清洗摘要，`utils/imageMemoryIndex.js` 在最终索引写入边界再次清洗，防止供应商完整 `chat.completion` JSON、`choices` 包或 `reasoning_content` 被当作图片摘要落盘。新增 `scripts/repair-image-memory-summaries.js --day YYYY-MM-DD [--apply]`，默认 dry-run，只按日期清空同类坏 summary 字段；已对 `2026-06-04` 执行一次 apply，清理 19 条图片记录、53 个字段。
 
 更新 2026-06-03 08:37 +08:00：Memory V3 召回流水线新增轻量 BM25、本地/vector/BM25/recent-date 通用 RRF 融合、`queryMemory().stats.retrievalPlan` 和 `diagnostics.recall.rankFusion`；`scripts/eval-memory-recall.js` 支持 `--mode`、不足 100 条时用 auto-gold 补齐，并输出 `Recall@5`、`MRR@5`、wrong-hit、prompt injection、answer relevance 和 faithfulness。Reranker 诊断记录候选数、limit、tail、前后 top 和 runtime/cooldown，timeout 降级继续不阻塞召回。
 
