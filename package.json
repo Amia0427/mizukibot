@@ -25,6 +25,7 @@
     "diag:runtime": "node scripts/diagnose-runtime-status.js",
     "diag:runtime-hotspots": "node scripts/diagnose-runtime-hotspots.js",
     "diag:low-resource": "node scripts/diagnose-low-resource.js",
+    "export:gemini-dialogues": "node scripts/export-gemini-user-dialogues.js",
     "memory:v3:migrate": "node scripts/migrate-memory-v3.js",
     "memory:v3:import-file": "node scripts/import-memory-file.js",
     "check:prompts": "node scripts/check-prompts.js",
