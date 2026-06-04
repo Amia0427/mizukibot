@@ -29,6 +29,9 @@ const {
   mergeLearningIntent
 } = require('./postReplyWorker/learningIntent');
 const {
+  buildPostReplyJobWithoutRecapTurns
+} = require('./postReplyWorker/recapPolicy');
+const {
   isTransientPostReplyError,
   logStructured,
   normalizeArray,
@@ -229,10 +232,24 @@ function createPostReplyWorkerRuntime(options = {}) {
 
   function enqueueEnrichJob(job = {}) {
     if (!config.POST_REPLY_ENRICH_ENABLED) return null;
-    const turns = normalizeArray(job.turns).filter((item) => item && typeof item === 'object');
+    const recapFiltered = buildPostReplyJobWithoutRecapTurns(job);
+    if (!recapFiltered.job) {
+      logStructured('post_reply_enrich_skipped', {
+        jobId: normalizeText(job.jobId),
+        reason: 'recap_query',
+        skippedTurns: recapFiltered.skippedCount
+      });
+      appendPostReplyJobTrace(job, 'enrich_skipped', {
+        reason: 'recap_query',
+        skippedTurns: recapFiltered.skippedCount
+      });
+      return null;
+    }
+    const sourceJob = recapFiltered.job;
+    const turns = normalizeArray(sourceJob.turns).filter((item) => item && typeof item === 'object');
     const joinedChars = Array.from(turns.map((item) => `${item.question || ''}\n${item.finalReply || ''}`).join('\n').replace(/\s+/g, '')).length;
     const hasExplicitRemember = turns.some((item) => isExplicitRememberText(item?.question));
-    const routeMeta = normalizeObject(job.routeMeta, {});
+    const routeMeta = normalizeObject(sourceJob.routeMeta, {});
     const groupId = normalizeText(routeMeta.groupId || routeMeta.group_id);
     const shouldEnrich = turns.length >= Math.max(1, Number(config.POST_REPLY_ENRICH_MIN_TURNS) || 2)
       || joinedChars >= Math.max(0, Number(config.POST_REPLY_ENRICH_MIN_CONTENT_CHARS) || 0)
@@ -240,7 +257,7 @@ function createPostReplyWorkerRuntime(options = {}) {
       || Boolean(groupId);
     if (!shouldEnrich) return null;
 
-    const aggregateKey = buildEnrichAggregateKey(job);
+    const aggregateKey = buildEnrichAggregateKey(sourceJob);
     const nowIso = new Date().toISOString();
     const enrichBudget = {
       maxTurns: Math.max(1, Number(config.POST_REPLY_ENRICH_MAX_TURNS) || 12),
@@ -248,7 +265,7 @@ function createPostReplyWorkerRuntime(options = {}) {
       maxWrites: Math.max(1, Number(config.POST_REPLY_ENRICH_MAX_WRITES) || 12),
       maxCostHint: 0
     };
-    const learningIntent = detectPostReplyLearningIntent(job, turns);
+    const learningIntent = detectPostReplyLearningIntent(sourceJob, turns);
     const existing = typeof queue.findQueuedJobByAggregateKey === 'function'
       ? queue.findQueuedJobByAggregateKey(aggregateKey, 'enrich')
       : null;
@@ -256,10 +273,10 @@ function createPostReplyWorkerRuntime(options = {}) {
       const merged = queue.mergeQueuedJob(existing, {
         turns,
         routeMeta,
-        continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
-        contextStats: normalizeObject(job.contextStats, {}),
+        continuitySnapshot: normalizeObject(sourceJob.continuitySnapshot, {}),
+        contextStats: normalizeObject(sourceJob.contextStats, {}),
         lastMergedAt: nowIso,
-        tasks: normalizeObject(job.tasks, {}),
+        tasks: normalizeObject(sourceJob.tasks, {}),
         learningIntent: mergeLearningIntent(existing.learningIntent, learningIntent),
         enrichBudget
       }, {
@@ -275,7 +292,7 @@ function createPostReplyWorkerRuntime(options = {}) {
     }
 
     const result = queue.enqueue({
-      ...job,
+      ...sourceJob,
       phase: 'enrich',
       aggregateKey,
       dedupeKey: '',

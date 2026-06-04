@@ -1,6 +1,8 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-06-01 22:45 +08:00
+更新时间：2026-06-04 14:09 +08:00
+
+更新 2026-06-04 14:09 +08:00：recap/近期回忆类用户问题（如“宝说一下我们今天聊的”“宝我今天发给你什么战绩图了”）只用于当前回复和短期连续性，不再触发 post-reply `memoryLearning/selfImprovement/dailyJournal` 排队；已存在的 enrich aggregate 若最新 turn 是 recap，会把 `dailyJournal/enrich` 标记为 `skipped`，`lastError=recap_query`，不会继续写日记、自改进或 enrich 记忆。
 
 更新 2026-06-01 22:45 +08:00：今天 `data/bot-daemon.log` 显示 00:22、01:49、03:49、05:22、05:49、07:49、09:49、10:22、11:49、13:49、15:22、15:49、20:22、21:49 都是在主 bot 已运行时再次 `started post-reply worker`；同期 `data/post-reply-worker.err.log` 记录 worker 因 `idle RSS recycle requested` 退出并清掉 PID 文件。修复后 worker 入口和 daemon 均可重入：已有 worker 时只修复 PID 并跳过启动；没有 worker 时，daemon 只有发现 queued job 或可恢复 processing job 才会补启。
 
@@ -231,6 +233,8 @@ POST_REPLY_AUTO_REQUEUE_MAX_PER_TICK=3
 ```env
 POST_REPLY_EXPLICIT_MEMORY_BYPASS_GROUP_ALLOWLIST=true
 ```
+
+recap/近期回忆查询默认不做回复后学习。命中规则包括“总结/说一下今天聊了什么”“今天我发了什么图/打过哪些歌”等近期回忆问题；显式“记住...”请求不受该规则影响，“我们刚才聊到哪了”这类恢复连续性问题也不按 recap 学习降噪处理。新请求会在 persist 阶段写入 `gateReasons=["post_reply_recap_query"]` 并跳过 post-reply job；旧 queued enrich 会在执行时安全跳过。
 
 ## Enrich 门禁
 

@@ -2,6 +2,9 @@ const {
   detectPostReplyLearningIntent,
   isExplicitRememberText
 } = require('../../../utils/postReplyWorker/learningIntent');
+const {
+  isPostReplyRecapText
+} = require('../../../utils/postReplyWorker/recapPolicy');
 const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
 
 function createPersistNode(deps = {}) {
@@ -158,7 +161,8 @@ function createPersistNode(deps = {}) {
     hasEnoughPostReplyContent,
     postReplyCooldownReady,
     shouldAllowPostReplyForGroup,
-    explicitPostReplyMemoryBypassGroup
+    explicitPostReplyMemoryBypassGroup,
+    postReplyRecapQuery
   }) {
     const reasons = [];
     if (request.systemInitiated) reasons.push('system_initiated');
@@ -170,6 +174,7 @@ function createPersistNode(deps = {}) {
     if (String(request.customPrompt || '').trim()) reasons.push('custom_prompt');
     if (!hasEnoughPostReplyContent) reasons.push('post_reply_min_chars');
     if (!postReplyCooldownReady) reasons.push('post_reply_cooldown');
+    if (postReplyRecapQuery) reasons.push('post_reply_recap_query');
     if (!routeGroupId && !explicitPostReplyMemoryBypassGroup) reasons.push('post_reply_no_group');
     if (allowedPostReplyGroupIds.length === 0 && !explicitPostReplyMemoryBypassGroup) reasons.push('post_reply_no_group_allowlist');
     if (routeGroupId && allowedPostReplyGroupIds.length > 0 && !shouldAllowPostReplyForGroup && !explicitPostReplyMemoryBypassGroup) {
@@ -224,13 +229,18 @@ function createPersistNode(deps = {}) {
       && !isUnsafeUserFacingReply(finalReply)
       && !isReviewMode(request.reviewMode)
     );
+    const explicitPostReplyMemoryRequest = isExplicitRememberText(userContent);
+    const postReplyRecapQuery = !explicitPostReplyMemoryRequest && isPostReplyRecapText(userContent);
     const shouldPersistBridge = shouldPersistChatArtifacts
       && isChatLikeRoute(request);
     const shouldPersistJournal = shouldPersistChatArtifacts
+      && !postReplyRecapQuery
       && shouldAppendDailyJournalForV2(request, finalReply);
     const shouldLearn = shouldPersistChatArtifacts
+      && !postReplyRecapQuery
       && shouldQueueMemoryLearningForV2(request, finalReply);
     const shouldLearnSelfImprovementValue = shouldPersistChatArtifacts
+      && !postReplyRecapQuery
       && shouldLearnSelfImprovement(request, finalReply);
     const normalizedUserId = String(request.userId || '').trim();
     const visualContext = normalizeObject(request.visualContext || request.routeMeta?.visualContext, null);
@@ -260,7 +270,6 @@ function createPersistNode(deps = {}) {
     const shouldAllowPostReplyForGroup = routeGroupId
       && allowedPostReplyGroupIds.length > 0
       && allowedPostReplyGroupIds.includes(routeGroupId);
-    const explicitPostReplyMemoryRequest = isExplicitRememberText(userContent);
     const explicitPostReplyMemoryBypassGroup = Boolean(
       config.POST_REPLY_EXPLICIT_MEMORY_BYPASS_GROUP_ALLOWLIST === true
       && explicitPostReplyMemoryRequest
@@ -293,6 +302,7 @@ function createPersistNode(deps = {}) {
       shouldQueuePostReplyMemoryTasks: Boolean(shouldQueuePostReplyMemoryTasks),
       shouldQueuePostReplyJournalTask: Boolean(shouldQueuePostReplyJournalTask),
       shouldEnqueuePostReplyJob: Boolean(shouldEnqueuePostReplyJob),
+      postReplyRecapQuery: Boolean(postReplyRecapQuery),
       userContentChars: Array.from(userContent).length,
       finalReplyChars: Array.from(finalReply).length,
       gateReasons: buildPersistGateReasons({
@@ -305,7 +315,8 @@ function createPersistNode(deps = {}) {
         hasEnoughPostReplyContent,
         postReplyCooldownReady,
         shouldAllowPostReplyForGroup,
-        explicitPostReplyMemoryBypassGroup
+        explicitPostReplyMemoryBypassGroup,
+        postReplyRecapQuery
       })
     };
     let enqueuedPostReplyJob = null;

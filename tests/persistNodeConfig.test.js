@@ -442,6 +442,91 @@ module.exports = (async () => {
   assert.strictEqual(enqueueCount, 1, 'post-reply enqueue should respect per-user cooldown');
   assert.strictEqual(mergeCount, 0, 'cooldown should prevent merge in the strict cooldown case');
 
+  let recapEnqueueCalled = false;
+  let recapBridgeCalled = false;
+  const persistNodeWithRecapGate = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {},
+    persistShortTermBridgeSnapshot() {
+      recapBridgeCalled = true;
+    },
+    async appendMemoryEvent() {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      enqueue() {
+        recapEnqueueCalled = true;
+        throw new Error('recap reply should not enqueue post-reply work');
+      }
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: false,
+      POST_REPLY_WORKER_GROUP_IDS: ['1083095371'],
+      POST_REPLY_MIN_CONTENT_CHARS: 10,
+      POST_REPLY_USER_COOLDOWN_MS: 0
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  const recapResult = await persistNodeWithRecapGate({
+    request: {
+      userId: 'u_recap',
+      question: '宝说一下我们今天聊的',
+      runtimeQuestionText: '宝说一下我们今天聊的',
+      persistUserText: '宝说一下我们今天聊的',
+      routeMeta: { groupId: '1083095371' },
+      sessionKey: 's_recap',
+      routePolicyKey: 'lookup/notebook-answer',
+      topRouteType: 'direct_chat'
+    },
+    output: {
+      finalReply: '今天聊了音游抽卡和前面的几件事。'
+    },
+    memory: {},
+    thread: { threadId: 't_recap' },
+    plan: {}
+  });
+  const recapDecision = (recapResult.events || []).find((item) => item.type === 'persist_write_decision');
+  assert.strictEqual(recapEnqueueCalled, false, 'recap replies should not enqueue post-reply work');
+  assert.strictEqual(recapBridgeCalled, true, 'recap replies should still preserve short-term bridge continuity');
+  assert.strictEqual(recapDecision.postReplyRecapQuery, true);
+  assert.strictEqual(recapDecision.shouldQueuePostReplyJournalTask, false);
+  assert.strictEqual(recapDecision.shouldQueuePostReplyMemoryTasks, false);
+  assert.ok(recapDecision.gateReasons.includes('post_reply_recap_query'));
+
   let directChatQueuedJob = null;
   const persistNodeWithDirectJournal = createPersistNode({
     normalizeObject(value, fallback = {}) {

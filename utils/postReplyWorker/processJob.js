@@ -18,6 +18,10 @@ const {
   detectPostReplyLearningIntent
 } = require('./learningIntent');
 const {
+  buildPostReplyJobWithoutRecapTurns,
+  isPostReplyRecapJob
+} = require('./recapPolicy');
+const {
   buildPostReplyCanceledError,
   isTaskCompleted,
   logStructured,
@@ -89,8 +93,13 @@ async function processPostReplyJob(job = {}, deps = {}) {
   };
   currentJob.completedTasks = normalizeCompletedTasks(job.completedTasks, currentJob.taskStates);
   const tasks = normalizeObject(job.tasks, {});
-  const meta = buildLearningMeta(job);
   const phase = normalizePhase(job.phase);
+  const recapJob = isPostReplyRecapJob(job);
+  const recapFiltered = phase === 'enrich'
+    ? buildPostReplyJobWithoutRecapTurns(job)
+    : { job, skippedCount: 0 };
+  const runnableEnrichJob = recapFiltered.job || job;
+  const meta = buildLearningMeta(runnableEnrichJob);
   const pressureMode = normalizeText(job.postReplyPressureMode).toLowerCase();
   const coreMinimalUnderPressure = phase === 'core' && pressureMode === 'minimal';
   const workerTaskOptions = {
@@ -175,7 +184,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
     currentJob = taskRunner.skipTask(...args);
     return currentJob;
   };
-
+  if (phase === 'core' && tasks.memoryLearning && !isTaskCompleted(currentJob, 'memoryLearning') && recapJob) {
+    currentJob = skipTask('memoryLearning', 'learnSomethingNew', 'recap_query');
+  }
   if (phase === 'core' && tasks.memoryLearning && !isTaskCompleted(currentJob, 'memoryLearning')) {
     const { learnSomethingNew } = getMemoryExtractionModule();
     currentJob = await runTask('memoryLearning', async () => {
@@ -185,6 +196,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
       logStart: { learningIntent: meta.learningIntent }
     });
   }
+  if (phase === 'core' && tasks.selfImprovement && !isTaskCompleted(currentJob, 'selfImprovement') && recapJob) {
+    currentJob = skipTask('selfImprovement', 'learnSelfImprovement', 'recap_query');
+  }
   if (phase === 'core' && tasks.selfImprovement && !isTaskCompleted(currentJob, 'selfImprovement') && coreMinimalUnderPressure) {
     currentJob = skipTask('selfImprovement', 'learnSelfImprovement', 'pressure_minimal_core');
   }
@@ -193,6 +207,9 @@ async function processPostReplyJob(job = {}, deps = {}) {
     currentJob = await runTask('selfImprovement', async () => {
       await learnSelfImprovement(job.userId, job.question, job.finalReply, workerTaskOptions);
     });
+  }
+  if (tasks.dailyJournal && !isTaskCompleted(currentJob, 'dailyJournal') && recapJob) {
+    currentJob = skipTask('dailyJournal', 'appendDailyJournalEntry', 'recap_query');
   }
   if (tasks.dailyJournal && !isTaskCompleted(currentJob, 'dailyJournal')) {
     const { appendDailyJournalEntry } = getDailyJournalModule();
@@ -370,9 +387,24 @@ async function processPostReplyJob(job = {}, deps = {}) {
     }
   }
   if (phase === 'enrich' && !isTaskCompleted(currentJob, 'enrich')) {
-    currentJob = await runTask('enrich', async () => {
-      return runEnrichPhase(job, meta);
-    });
+    if (!recapFiltered.job) {
+      currentJob = skipTask('enrich', 'runEnrichPhase', 'recap_query');
+    } else {
+      currentJob = await runTask('enrich', async () => {
+        const result = await runEnrichPhase(runnableEnrichJob, meta);
+        return recapFiltered.skippedCount > 0
+          ? {
+              ...normalizeObject(result, {}),
+              skippedRecapTurns: recapFiltered.skippedCount
+            }
+          : result;
+      }, {
+        traceStart: {
+          step: 'runEnrichPhase',
+          skippedRecapTurns: recapFiltered.skippedCount
+        }
+      });
+    }
   }
   return {
     ok: true,
