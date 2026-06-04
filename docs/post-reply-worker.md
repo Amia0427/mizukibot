@@ -1,6 +1,8 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-06-04 14:09 +08:00
+更新时间：2026-06-05 07:37 +08:00
+
+更新 2026-06-05 07:37 +08:00：复查今日 recap 降噪后仍出现 queued enrich 和根目录 `.mizukibot-postreply-worker.pid/.lock` 的情况：PID/lock 指向真实运行的 `scripts/post-reply-worker.js` 时属于正常单实例运行标记；queued enrich 来自 worker 重启后处理历史非 recap core 积压。修复派生 enrich 复用 core `jobId` 的问题，避免 `index.json` 用 queued enrich 覆盖同名 done core；新派生 enrich 会生成独立 jobId，旧 core job 仍保留 done 状态。已把历史同名 queued/failed enrich 改成独立 jobId 并重建索引，当前队列无跨状态重复 jobId。队列空闲且无 worker 时诊断显示 `idle`，不再误报 `post_reply_pid_missing`。补充死 PID/lock owner 恢复回归测试。
 
 更新 2026-06-04 14:09 +08:00：recap/近期回忆类用户问题（如“宝说一下我们今天聊的”“宝我今天发给你什么战绩图了”）只用于当前回复和短期连续性，不再触发 post-reply `memoryLearning/selfImprovement/dailyJournal` 排队；已存在的 enrich aggregate 若最新 turn 是 recap，会把 `dailyJournal/enrich` 标记为 `skipped`，`lastError=recap_query`，不会继续写日记、自改进或 enrich 记忆。
 
@@ -62,7 +64,7 @@ POST_REPLY_WORKER_INLINE=true
 - `POST_REPLY_QUEUE_DIR/index.json`：队列轻量索引，可自动重建。
 - `POST_REPLY_TRACE_DIR`：默认 `data/post_reply_traces`。
 - `.mizukibot-postreply-worker.pid`：独立 worker PID 文件。
-- `.mizukibot-postreply-worker.lock`：独立 worker 单实例锁，只由真实 worker 持有。
+- `.mizukibot-postreply-worker.lock`：独立 worker 单实例锁，只由真实 worker 持有；worker 正常运行时它应存在，只有记录 PID 不存在或不是 post-reply worker 时才视为 stale。
 
 ## 单实例启动
 
@@ -71,6 +73,7 @@ POST_REPLY_WORKER_INLINE=true
 - 发现已有 `post-reply-worker.js` 进程：写回 `.mizukibot-postreply-worker.pid`，当前启动尝试直接退出。
 - PID/lock 指向已退出进程或非 worker 进程：清理 stale owner 后再获取锁。
 - 近同时并发启动：优先让更早/更低 PID 的启动尝试获得锁，其余进程退出。
+- 派生 enrich 不复用 core `jobId`，避免 queued enrich 与 done core 在队列索引里互相覆盖；排查时应按 `traceId/sourceMessageIds/aggregateKey` 关联两阶段 job。
 
 Windows daemon、`scripts/one-click-start.ps1` 和 Linux fallback 启动都会先扫描现有 worker 进程；PID 文件缺失但进程存在时只补 PID，不会误杀正常任务，也不会再起第二个 worker。Windows daemon 在 worker 不存在时会检查队列：存在 queued job 或租约已过期的 processing job 才补启；队列空闲时记录 `queue idle; skip idle restart`。worker 自身在 queued/processing 未清空时不会触发 RSS idle recycle，`processing` job 仍靠 `leaseOwner/leaseUntil` 做恢复边界，只有租约过期才会由下一轮 worker recovery。
 

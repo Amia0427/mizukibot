@@ -217,6 +217,23 @@ module.exports = (() => {
     assert.strictEqual(workerWithoutPidReport.summary.postReplyWorker.processCount, 1);
     assert.ok(!workerWithoutPidReport.signals.some((item) => item.code === 'post_reply_pid_missing'), 'running worker without pid file should not be reported as missing');
 
+    const idleQueueDir = path.join(dataDir, 'post_reply_idle_jobs');
+    fs.mkdirSync(path.join(idleQueueDir, 'queued'), { recursive: true });
+    fs.mkdirSync(path.join(idleQueueDir, 'processing'), { recursive: true });
+    fs.mkdirSync(path.join(idleQueueDir, 'failed'), { recursive: true });
+    fs.mkdirSync(path.join(idleQueueDir, 'done'), { recursive: true });
+    process.env.POST_REPLY_QUEUE_DIR = idleQueueDir;
+    clearProjectCache();
+    const { buildRuntimeStatusDiagnostic: buildIdleRuntimeStatusDiagnostic } = require('../utils/runtimeStatusDiagnostics');
+    const idleWorkerReport = buildIdleRuntimeStatusDiagnostic({
+      projectRoot: tempDir,
+      now: () => now,
+      listProcesses: () => [],
+      isProcessAlive: () => false
+    });
+    assert.strictEqual(idleWorkerReport.summary.postReplyWorker.status, 'idle');
+    assert.ok(!idleWorkerReport.signals.some((item) => item.code === 'post_reply_pid_missing'), 'idle worker queue should not require a pid file');
+
     console.log('runtimeStatusDiagnostics.test.js passed');
   } finally {
     restoreEnv(snapshot);

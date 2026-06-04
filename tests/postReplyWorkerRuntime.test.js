@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 function clearProjectCache() {
   const projectRoot = require('path').resolve(__dirname, '..') + require('path').sep;
@@ -264,6 +267,48 @@ module.exports = (async () => {
 
     assert.strictEqual(queued.length, 1, 'core completion should schedule one enrich job when thresholds pass');
     assert.strictEqual(queued[0].phase, 'enrich');
+    assert.strictEqual(queued[0].jobId, '', 'enrich enqueue should not reuse the completed core job id');
+
+    const queueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-post-reply-runtime-ids-'));
+    const { createPostReplyJobQueue } = require('../utils/postReplyJobQueue');
+    const realQueue = createPostReplyJobQueue({ queueDir });
+    const realQueueRuntime = createPostReplyWorkerRuntime({
+      queue: realQueue,
+      processJob: async (job) => ({ ok: true, job })
+    });
+    await realQueueRuntime.runOneJob({
+      jobId: 'core_shared_id_regression',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      turns: [
+        { turnId: 'turn-shared-1', question: 'q1', finalReply: 'r1', createdAt: '2026-04-18T10:00:00.000Z', routeMeta: { groupId: '1083095371' } },
+        { turnId: 'turn-shared-2', question: 'q2', finalReply: 'r2', createdAt: '2026-04-18T10:02:00.000Z', routeMeta: { groupId: '1083095371' } }
+      ],
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    const doneCoreJobs = realQueue.listJobs(['done']);
+    const queuedEnrichJobs = realQueue.listJobs(['queued']);
+    assert.strictEqual(doneCoreJobs.length, 1);
+    assert.strictEqual(queuedEnrichJobs.length, 1);
+    assert.strictEqual(doneCoreJobs[0].jobId, 'core_shared_id_regression');
+    assert.strictEqual(queuedEnrichJobs[0].phase, 'enrich');
+    assert.notStrictEqual(queuedEnrichJobs[0].jobId, doneCoreJobs[0].jobId, 'queued enrich must not shadow done core in queue index');
+    assert.strictEqual(realQueue.listJobs(['done', 'queued']).length, 2, 'index should retain both core done and enrich queued entries');
+    try {
+      fs.rmSync(queueDir, { recursive: true, force: true });
+    } catch (_) {}
 
     await runtime.runOneJob({
       jobId: 'core_recap_job',
