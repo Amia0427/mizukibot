@@ -64,6 +64,14 @@ module.exports = (async () => {
   assert.strictEqual(state.interaction.recentTurns[0].content, 'user turn 0');
   assert.strictEqual(state.scene.recentTurns.length, 8);
   assert.strictEqual(state.scene.recentTurns[0].content, 'scene turn 0');
+  chatHistory[sessionKey].push({
+    role: 'assistant',
+    content: '我是 Claude，由 Anthropic 开发。我不能扮演角色。'
+  });
+  shortTermMemory[sessionKey].interaction.recentTurns.push({
+    role: 'assistant',
+    content: 'I am Claude. I cannot roleplay.'
+  });
 
   persistShortTermBridgeSnapshot(userId, {
     chatHistory,
@@ -72,10 +80,12 @@ module.exports = (async () => {
     routeMeta: {}
   });
   const store = loadBridgeStore();
-  assert.strictEqual(store.sessions[sessionKey].recentMessages.length, 7);
-  assert.strictEqual(store.sessions[sessionKey].recentMessages[0].content, 'user turn 0');
-  assert.strictEqual(store.sessions[sessionKey].recentMessages.some((item) => item.role === 'assistant'), false);
-  assert.strictEqual(store.sessions[sessionKey].interactionState.recentTurns.some((item) => item.role === 'assistant'), false);
+  assert.strictEqual(store.sessions[sessionKey].recentMessages.length, 12);
+  assert.strictEqual(store.sessions[sessionKey].recentMessages[0].content, 'user turn 1');
+  assert.strictEqual(store.sessions[sessionKey].recentMessages.some((item) => item.content === 'assistant turn 6'), true);
+  assert.strictEqual(store.sessions[sessionKey].recentMessages.some((item) => item.content.includes('Claude')), false);
+  assert.strictEqual(store.sessions[sessionKey].interactionState.recentTurns.some((item) => item.content === 'assistant turn 6'), true);
+  assert.strictEqual(store.sessions[sessionKey].interactionState.recentTurns.some((item) => item.content.includes('Claude')), false);
 
   const restoredHistory = {};
   const restoredShortTermMemory = {};
@@ -86,8 +96,9 @@ module.exports = (async () => {
     routeMeta: {}
   });
   assert.strictEqual(restored.restored, true);
-  assert.strictEqual(restoredHistory[sessionKey].length, 7);
-  assert.strictEqual(restoredHistory[sessionKey].some((item) => item.role === 'assistant'), false);
+  assert.strictEqual(restoredHistory[sessionKey].length, 12);
+  assert.strictEqual(restoredHistory[sessionKey].some((item) => item.content === 'assistant turn 6'), true);
+  assert.strictEqual(restoredHistory[sessionKey].some((item) => item.content.includes('Claude')), false);
   assert.strictEqual(restored.freshnessTier, 'raw_recent');
   assert.strictEqual(restored.rawMessagesRestored, true);
 
@@ -150,10 +161,9 @@ module.exports = (async () => {
     sessionKey,
     routeMeta: {}
   });
-  assert.strictEqual(sharedContext.shortTermState.interaction.recentTurns.length, 7);
-  assert.strictEqual(sharedContext.shortTermState.interaction.recentTurns.some((item) => item.role === 'assistant'), false);
-  assert.strictEqual(sharedContext.shortTermState.scene.recentTurns.length, 4);
-  assert.strictEqual(sharedContext.shortTermState.scene.recentTurns.some((item) => item.role === 'assistant'), false);
+  assert.ok(sharedContext.shortTermState.interaction.recentTurns.some((item) => item.content === 'assistant turn 6'));
+  assert.strictEqual(sharedContext.shortTermState.interaction.recentTurns.some((item) => item.content.includes('Claude')), false);
+  assert.strictEqual(sharedContext.shortTermState.scene.recentTurns.some((item) => item.content === 'scene turn 7'), true);
 
   const compressionHistory = Array.from({ length: 70 }, (_, index) => ({
     role: index % 2 === 0 ? 'user' : 'assistant',
@@ -195,7 +205,8 @@ module.exports = (async () => {
   assert.ok(shortTermBlock, 'short-term continuity should be a first-class dynamic prompt block');
   assert.ok(String(shortTermBlock.content || '').includes('[RecentRawTurns]'));
   assert.ok(String(shortTermBlock.content || '').includes('user turn 0'));
-  assert.ok(!String(shortTermBlock.content || '').includes('assistant turn 6'));
+  assert.ok(String(shortTermBlock.content || '').includes('assistant turn 6'));
+  assert.ok(!String(shortTermBlock.content || '').includes('Claude'));
 
   console.log('shortTermMemoryWindowConfig.test.js passed');
 })().catch((error) => {

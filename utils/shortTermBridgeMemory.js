@@ -82,24 +82,29 @@ function isPrivateBridgeSession(sessionKey = '', routeMeta = {}, scope = {}) {
   return /^direct:/i.test(key);
 }
 
-function stripAssistantRawTurnsForPrivateBridge(state) {
+function sanitizeBridgeRawTurns(state) {
   const normalized = normalizeShortTermState(state);
   normalized.interaction = normalizeInteractionState({
     ...normalized.interaction,
     recentTurns: (Array.isArray(normalized.interaction?.recentTurns) ? normalized.interaction.recentTurns : [])
-      .filter((item) => String(item?.role || '').trim().toLowerCase() !== 'assistant')
+      .filter((item) => {
+        const role = String(item?.role || '').trim().toLowerCase();
+        return role !== 'assistant' || !isUnsafeUserFacingReply(item?.content);
+      })
   });
   normalized.scene = normalizeSceneState({
     ...normalized.scene,
     recentTurns: (Array.isArray(normalized.scene?.recentTurns) ? normalized.scene.recentTurns : [])
-      .filter((item) => String(item?.role || '').trim().toLowerCase() !== 'assistant')
+      .filter((item) => {
+        const role = String(item?.role || '').trim().toLowerCase();
+        return role !== 'assistant' || !isUnsafeUserFacingReply(item?.content);
+      })
   });
   return normalized;
 }
 
-function normalizeBridgeShortTermState(state = {}, privateScope = false) {
-  const normalized = normalizeShortTermState(state);
-  return privateScope ? stripAssistantRawTurnsForPrivateBridge(normalized) : normalized;
+function normalizeBridgeShortTermState(state = {}) {
+  return sanitizeBridgeRawTurns(state);
 }
 
 function normalizeBridgeMessage(message, options = {}) {
@@ -161,8 +166,7 @@ function sanitizeBridgeSessionEntry(sessionKey, entry, now = Date.now()) {
   const scope = normalizeScope(entry.scope, key, entry.userId);
   if (!scope.sessionKey || !scope.userId) return null;
 
-  const privateScope = isPrivateBridgeSession(key, entry.routeMeta, scope);
-  const recentMessages = normalizeRecentMessages(entry.recentMessages, { omitAssistant: privateScope });
+  const recentMessages = normalizeRecentMessages(entry.recentMessages);
   const rawShortTermState = {
     ...defaultShortTermState(),
     ...(entry.shortTermState && typeof entry.shortTermState === 'object'
@@ -184,7 +188,7 @@ function sanitizeBridgeSessionEntry(sessionKey, entry, now = Date.now()) {
       ? { moduleState: entry.moduleState }
       : {})
   };
-  const shortTermState = normalizeBridgeShortTermState(rawShortTermState, privateScope);
+  const shortTermState = normalizeBridgeShortTermState(rawShortTermState);
   if (looksLikePollutedBridgeSummary(shortTermState.summary)) {
     shortTermState.summary = '';
     shortTermState.summarySource = '';
@@ -341,12 +345,11 @@ function buildBridgeSnapshotPayload(userId, deps = {}) {
     sessionKey,
     uid
   );
-  const privateScope = isPrivateBridgeSession(sessionKey, deps.routeMeta, scope);
-  const recentMessages = normalizeRecentMessages(historyStore[sessionKey], { omitAssistant: privateScope });
+  const recentMessages = normalizeRecentMessages(historyStore[sessionKey]);
   const shortTermState = normalizeBridgeShortTermState({
     ...state,
     ...(deps.shortTermState && typeof deps.shortTermState === 'object' ? deps.shortTermState : {})
-  }, privateScope);
+  });
 
   if (!hasMeaningfulShortTermState(shortTermState) && recentMessages.length === 0) {
     return null;
@@ -363,7 +366,7 @@ function buildBridgeSnapshotPayload(userId, deps = {}) {
         'tail'
       ),
       summarySource: String(shortTermState.summarySource || '').trim()
-    }, privateScope),
+    }),
     interactionState: normalizeInteractionState(shortTermState.interaction),
     sceneState: normalizeSceneState(shortTermState.scene),
     expressionState: normalizeExpressionState(shortTermState.expression),
@@ -402,6 +405,10 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
     return { restored: false, restoredMessages: 0, summaryLength: 0, snapshotType: '', carryOverRestored: false };
   }
 
+  if (String(entry.userId || entry.scope?.userId || '').trim() !== uid) {
+    return { restored: false, restoredMessages: 0, summaryLength: 0, snapshotType: '', carryOverRestored: false };
+  }
+
   Object.assign(state, normalizeShortTermState({
     ...entry.shortTermState,
     interaction: entry.interactionState,
@@ -411,8 +418,7 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
   }));
   state.lastCompressedAt = Date.now();
 
-  const privateScope = isPrivateBridgeSession(sessionKey, deps.routeMeta, entry.scope);
-  const recentMessages = normalizeRecentMessages(entry.recentMessages, { omitAssistant: privateScope });
+  const recentMessages = normalizeRecentMessages(entry.recentMessages);
   const freshnessTier = resolveBridgeFreshnessTier(entry);
   const allowRawRestore = freshnessTier === 'raw_recent';
   let restoredMessages = 0;

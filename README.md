@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-05 01:32 +08:00：私聊“看懂笑话但后文跳太快”类反馈断层已修复：同一用户的短期上下文和 bridge 不再全量丢弃安全 assistant raw，模型能看到自己上一条被评价的回复；仍过滤 Claude/拒演、内部上下文泄露和工具叙事坏样本。普通快速回复同步过滤 unsafe assistant 历史，并增加“评价上一条回复时锚定最近 assistant”的轻量规则。详见 `docs/main-reply-context.md`。
+
 更新 2026-06-04 22:41 +08:00：主回复旧话题续写问题已定位并修复：回忆触发不再把普通“今天吃什么/今天天气”等新话题误判成近期回忆；planner 明确 skip 的 `retrieved_memory_lite` 不会再被 memory trace 强制回灌；`short_term_continuity` 改为先渲染 `RecentRawTurns`，再用摘要补空，并过滤只有默认 `[ReplyPosture] light` 的空连续性块。详见 `docs/main-reply-context.md`。
 
 更新 2026-06-04 22:04 +08:00：群聊主回复流式分段改为“QQ 连续消息”策略：短回复不硬拆，中等/长回复优先按语义完整的聊天消息切成 1-3 段，群聊段间隔改为按段长加稳定抖动的动态节奏；若等待期间同一会话有新消息导致 freshness 失效，后续旧段会停止追发。`streaming-segmentation` prompt 同步要求群聊分段像自然发消息而不是文章段落。

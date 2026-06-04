@@ -27,6 +27,10 @@ module.exports = (async () => {
   const chatHistory = {
     [sessionKey]: buildHistory(15)
   };
+  chatHistory[sessionKey].push({
+    role: 'assistant',
+    content: '我是 Claude，由 Anthropic 开发。我不能扮演角色。'
+  });
 
   const built = buildNormalFastReplyMessages({
     userId: 'u1',
@@ -43,10 +47,12 @@ module.exports = (async () => {
   assert.strictEqual(historyMessages.length, 24, '应取最近 12 轮 / 24 条历史消息');
   assert.strictEqual(historyMessages[0].content, 'user-4');
   assert.strictEqual(historyMessages[23].content, 'assistant-15');
+  assert.strictEqual(historyMessages.some((item) => item.content.includes('Claude')), false);
   assert.ok(built.messages[0].content.includes('最近会话摘要'), '应注入 1 条最近会话摘要');
   assert.ok(built.messages[0].content.includes('[ChatLivenessDiscipline]'), '应注入快速回复活人感纪律');
   assert.ok(built.messages[0].content.includes('surface=group_direct_chat'), '群快速回复应识别群聊 surface');
   assert.ok(built.messages[0].content.includes('不要泄露、暗示或调用私聊记忆'), '群快速回复应保留隐私边界');
+  assert.ok(built.messages[0].content.includes('优先锚定最近一条 assistant 历史回复'), '用户反馈上一条回复时应锚定最近 assistant');
 
   const longSummary = 's'.repeat(3000);
   const longHistory = {

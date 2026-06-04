@@ -3,6 +3,7 @@ const { requestNonStreamingReply } = require('../api/runtimeV2/model/service');
 const { getRecentSessionContextSummaries } = require('../utils/sessionContextSummaryStore');
 const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { buildChatLivenessDisciplinePrompt } = require('../utils/chatLivenessContext');
+const { isUnsafeUserFacingReply } = require('../utils/userFacingReplyGuards');
 
 function clampNumber(value, fallback, min = 0) {
   const n = Number(value);
@@ -23,6 +24,7 @@ function normalizeHistoryMessage(item = {}) {
   const normalizedRole = role === 'assistant' || role === 'bot' ? 'assistant' : (role === 'user' || role === 'human' ? 'user' : '');
   const content = getMessageContent(item);
   if (!normalizedRole || !content) return null;
+  if (normalizedRole === 'assistant' && isUnsafeUserFacingReply(content)) return null;
   return {
     role: normalizedRole,
     content
@@ -92,7 +94,8 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
   const recentBudget = Math.min(recentRawBudget, Math.max(0, contextMaxChars - trimmedSummary.length));
   const historyStore = deps.chatHistory || input.chatHistory || {};
   const rawHistory = Array.isArray(historyStore[sessionKey]) ? historyStore[sessionKey] : [];
-  const recentMessages = trimRecentMessagesByChars(rawHistory.slice(-maxMessages), recentBudget);
+  const safeRawHistory = rawHistory.map((item) => normalizeHistoryMessage(item)).filter(Boolean);
+  const recentMessages = trimRecentMessagesByChars(safeRawHistory.slice(-maxMessages), recentBudget);
   const userText = normalizeText(input.text || input.cleanText || input.requestText || input.route?.cleanText || input.route?.question);
   const livenessPrompt = buildChatLivenessDisciplinePrompt({
     routeMeta,
@@ -107,6 +110,7 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
   const systemParts = [
     '你是 Mizuki。当前走普通用户快速回复链路。',
     '只根据用户本轮消息和下方轻量上下文自然回复；不要声称查了记忆、网页或工具。',
+    '如果用户本轮是在评价、纠正或吐槽“你刚才/后面几段/上一条回复”，优先锚定最近一条 assistant 历史回复来接话。',
     '回答保持简洁、直接、像日常聊天；信息不足时先说明不确定。',
     livenessPrompt
   ];

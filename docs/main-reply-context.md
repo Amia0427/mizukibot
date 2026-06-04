@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-04 22:41 +08:00
+更新时间：2026-06-05 01:32 +08:00
 
 ## 已调整
 
+- 2026-06-05 01:32 +08:00：私聊“用户在评价上一条回复”断层修复。根因是 2026-06-02 为隔离拒演污染而把 `direct:*` / 私聊 raw continuity 中的 assistant 原文全量省略，导致用户说“后面几段跳太快”时模型看不到自己上一条回复，只能从用户话里的“敏感日期/个人卫生/童年经历”猜上下文。现在短期上下文和重启 bridge 在确认同一用户 session 后保留安全 assistant raw，同时继续过滤 `isUnsafeUserFacingReply` 命中的 Claude/拒演、内部上下文泄露和隐藏工具叙事；普通快速回复也过滤 unsafe assistant 历史，并加入“评价/纠正/吐槽上一条回复时优先锚定最近 assistant 历史回复”的规则。
 - 2026-06-04 22:41 +08:00：主回复“从很久之前的问题继续话题”的根因定位为两条叠加路径：一是回忆启发式把裸 `今天/今日/最近` 和“今天吃什么”类新话题误判为近期回忆，二是 planner 明确 `skip retrieved_memory_lite` 后，`shouldRuntimeAddRetrievedMemoryBlock` 仍会因 memory trace 有 hit / `injected_block_ids` 把旧长期记忆强制回灌。现在回忆触发收窄到明确“今天/昨天聊了、说过、做过什么”或“刚才/上次/继续/where did we put”等召回句；planner skip 对 `retrieved_memory_lite` 生效，非召回新话题不会被 trace-backed old memory 覆盖。
 - 2026-06-04 22:41 +08:00：上下文窗口优化：`short_term_continuity` 渲染顺序改为 `[RecentRawTurns]` 在前、`[StateSummary]` / `[RestartRecoverySummaries]` 在后，裁剪策略在存在 raw turns 时保留头部，确保最近原文和“优先承接最新 raw turns”指令不被尾裁剪挤掉；只有默认 `[ReplyPosture] light` 的空短期摘要不再生成 marker-only `ShortTermContinuity` 块。prepare 软超时 fallback 同步使用 raw turns 优先顺序。
 - 2026-06-04 22:04 +08:00：群聊主回复流式发送新增本地“群聊消息感”分段策略：短回复保持单条，中等/长回复才按语义完整断点拆成最多 `AI_STREAM_MAX_SEGMENTS` 条；群聊段间隔不再使用固定 260ms，而是按段长生成稳定动态间隔。流式发送器也会在段间等待后再次检查 freshness，群里有新消息时停止追发旧后续段。
