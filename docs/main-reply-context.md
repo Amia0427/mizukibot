@@ -1,9 +1,11 @@
 # Main Reply Context
 
-更新时间：2026-06-04 22:04 +08:00
+更新时间：2026-06-04 22:41 +08:00
 
 ## 已调整
 
+- 2026-06-04 22:41 +08:00：主回复“从很久之前的问题继续话题”的根因定位为两条叠加路径：一是回忆启发式把裸 `今天/今日/最近` 和“今天吃什么”类新话题误判为近期回忆，二是 planner 明确 `skip retrieved_memory_lite` 后，`shouldRuntimeAddRetrievedMemoryBlock` 仍会因 memory trace 有 hit / `injected_block_ids` 把旧长期记忆强制回灌。现在回忆触发收窄到明确“今天/昨天聊了、说过、做过什么”或“刚才/上次/继续/where did we put”等召回句；planner skip 对 `retrieved_memory_lite` 生效，非召回新话题不会被 trace-backed old memory 覆盖。
+- 2026-06-04 22:41 +08:00：上下文窗口优化：`short_term_continuity` 渲染顺序改为 `[RecentRawTurns]` 在前、`[StateSummary]` / `[RestartRecoverySummaries]` 在后，裁剪策略在存在 raw turns 时保留头部，确保最近原文和“优先承接最新 raw turns”指令不被尾裁剪挤掉；只有默认 `[ReplyPosture] light` 的空短期摘要不再生成 marker-only `ShortTermContinuity` 块。prepare 软超时 fallback 同步使用 raw turns 优先顺序。
 - 2026-06-04 22:04 +08:00：群聊主回复流式发送新增本地“群聊消息感”分段策略：短回复保持单条，中等/长回复才按语义完整断点拆成最多 `AI_STREAM_MAX_SEGMENTS` 条；群聊段间隔不再使用固定 260ms，而是按段长生成稳定动态间隔。流式发送器也会在段间等待后再次检查 freshness，群里有新消息时停止追发旧后续段。
 - 2026-06-03 17:16 +08:00：Gemini native 主回复流式改为真正 SSE 路径；`buildMainModelRequest` 保留 `stream=true`，`prepareRequest` 将流式 Gemini 请求归一到 `:streamGenerateContent?alt=sse`，runtime 复用现有 streaming coordinator、guard、partial recovery 和普通用户首字超时。普通主回复可增量出字，私聊/群聊继续按既有 guard 缓冲校验后发最终文本。
 - 2026-06-03 09:29 +08:00：按要求撤回 `6d4d1c9 fix: isolate passive persona refusal contamination`；被动感知 prompt/持久化不再使用该提交加入的模型身份污染隔离逻辑，`modelIdentityContext` 相关测试和自检断言同步移除。后续 2026-06-02 20:10 的被动感知回复模型独立 env 默认配置仍保留。
@@ -165,6 +167,8 @@ npm run diag:continuity -- prompt --user <id> --json
 `prompt_integrity.token_budget` 会记录估算输入 token、文本/系统/消息/工具分项、最大消息索引和阈值状态；默认 `MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD=50000` 打 warning，`MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT=100000` 在出站构造主回复请求时硬拦截。
 
 误召回排查可对照 `memory-recall-observability.ndjson` 的 `prepare_main_prompt_blocks` 和 `model-calls.ndjson` 的 `prompt_integrity`：如果 planner 未启用 `continuity_state` 或 `retrieved_memory_lite`，但主模型调用仍出现对应块，优先查 runtime 注入层。2026-05-24 23:06 +08:00 起，单独旧 `active_topic` 不再触发 `continuity_state` 强制路径；2026-05-27 01:04 +08:00 起，普通新话题不再仅因 `memoryContext` 非空绕过 planner skip 强制注入 `retrieved_memory_lite`。
+
+2026-06-04 22:41 +08:00 起，继续排查“旧话题续写”时还要检查 `classifyMemoryNeed` / `MEMORY_RECALL_QUERY_RE` 是否把当前问题误判为回忆查询；普通“今天吃什么”“今天天气”等新话题应为 `needsMemory=false`，且 planner `skip retrieved_memory_lite` 后即使 `memoryTrace.hits` 非空也不应注入 `[RetrievedMemoryLite]`。
 
 主回复缓存诊断看 `prompt_caching.request_cache_breakpoints/system_cache_breakpoints/tool_cache_breakpoints` 和 usage 中的 `cache_read_input_tokens/cache_creation_input_tokens`；`openai_prompt_cache_key` 对主回复应为空。
 

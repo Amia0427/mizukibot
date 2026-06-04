@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-04 22:41 +08:00：主回复旧话题续写问题已定位并修复：回忆触发不再把普通“今天吃什么/今天天气”等新话题误判成近期回忆；planner 明确 skip 的 `retrieved_memory_lite` 不会再被 memory trace 强制回灌；`short_term_continuity` 改为先渲染 `RecentRawTurns`，再用摘要补空，并过滤只有默认 `[ReplyPosture] light` 的空连续性块。详见 `docs/main-reply-context.md`。
+
 更新 2026-06-04 22:04 +08:00：群聊主回复流式分段改为“QQ 连续消息”策略：短回复不硬拆，中等/长回复优先按语义完整的聊天消息切成 1-3 段，群聊段间隔改为按段长加稳定抖动的动态节奏；若等待期间同一会话有新消息导致 freshness 失效，后续旧段会停止追发。`streaming-segmentation` prompt 同步要求群聊分段像自然发消息而不是文章段落。
 
 更新 2026-06-04 14:15 +08:00：按顺序完成 `data/` 瘦身：清理旧图片缓存/旧 checkpoint/完成 job 约 969.1MB，删除历史诊断轮转日志约 600.2MB，重建 `data/lancedb_user_bucket` 从约 19.98GB 降到 28.1MB，并关闭 `MEMORY_LANCEDB_LEGACY_FALLBACK_ENABLED=false` 后删除旧 `data/lancedb` 约 9.93GB。当前 `data/` 约 2.52GB，LanceDB dry-run 覆盖为 `readyButNotSynced=0`、`staleTableRows=0`。详见 `docs/lancedb-partitioning.md`。
@@ -457,6 +459,8 @@ MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=16
 MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.9
 MEMORY_V3_SESSION_RECENT_MESSAGES=128
 ```
+
+窗口优化原则：优先保留真实近期原文和显式回忆证据；普通新话题不要靠扩大摘要/长期记忆预算补连续性，否则旧摘要会比当前用户消息更容易带偏。
 
 不建议直接切 `MAIN_REPLY_PROMPT_MODE=legacy` 作为常态方案；它会重新带入 ordinary chat 中已收敛掉的 few-shot、style/social/self-improvement/worldbook 噪声，输入 token 会增加，但记忆命中精度不一定提高。
 

@@ -25,11 +25,13 @@ function isConversationalNoop(text = '') {
 function isConversationRecapQuery(text = '') {
   const q = sanitizeText(text).toLowerCase();
   if (!q) return false;
-  if (/(今天天气|今天.{0,8}(天气|气温|下雨|温度|股价|股票|行情|新闻|日期|星期|几点)|today.{0,12}(weather|temperature|stock|news|date|time))/i.test(q)) {
+  if (/(今天天气|今天.{0,8}(天气|气温|下雨|温度|股价|股票|行情|新闻|日期|星期|几点|吃什么|喝什么|吃啥|喝啥)|today.{0,12}(weather|temperature|stock|news|date|time|eat|drink))/i.test(q)) {
     return false;
   }
   if (/(今天|今日).{0,10}(和你|我们|我).{0,14}(说|聊|讲|提).{0,10}(什么|啥|哪些|过|了|的)/i.test(q)) return true;
+  if (/(最近).{0,10}(和你|我们|我).{0,14}(说|聊|讲|提).{0,10}(什么|啥|哪些|过|了|的)/i.test(q)) return true;
   if (/(今天|今日).{0,10}(聊天|对话|说的|聊的|说过|聊过).{0,10}(总结|回顾|复述|说一下|讲一下|什么|啥|哪些)/i.test(q)) return true;
+  if (/(最近).{0,10}(聊天|对话|说的|聊的|说过|聊过).{0,10}(总结|回顾|复述|说一下|讲一下|什么|啥|哪些)/i.test(q)) return true;
   if (/(总结|回顾|复述|说一下|讲一下).{0,12}(今天|今日).{0,14}(聊天|对话|说的|聊的|说过|聊过|说了什么|聊了什么|说了啥|聊了啥|和你说|和你聊|我们说|我们聊)/i.test(q)) return true;
   if (/(刚刚|刚才|刚).{0,10}(我|我们).{0,10}(说|聊|讲|提).{0,10}(什么|啥|了|过|的)/i.test(q)) return true;
   if (/(我|我们).{0,10}(刚刚|刚才|刚).{0,10}(说|聊|讲|提).{0,10}(什么|啥|了|过|的)/i.test(q)) return true;
@@ -40,7 +42,7 @@ function isConversationRecapQuery(text = '') {
 function isRecentPersonalActivityRecallQuery(text = '') {
   const q = sanitizeText(text).toLowerCase();
   if (!q) return false;
-  if (/(今天天气|今天.{0,8}(天气|气温|下雨|温度|股价|股票|行情|新闻|日期|星期|几点)|today.{0,12}(weather|temperature|stock|news|date|time))/i.test(q)) {
+  if (/(今天天气|今天.{0,8}(天气|气温|下雨|温度|股价|股票|行情|新闻|日期|星期|几点|吃什么|喝什么|吃啥|喝啥)|today.{0,12}(weather|temperature|stock|news|date|time|eat|drink))/i.test(q)) {
     return false;
   }
   const recent = '(?:今天|今日|刚刚|刚才|刚)';
@@ -229,7 +231,10 @@ function classifyMemoryNeed(text = '', routeContext = {}) {
 
   const q = cleanText.toLowerCase();
   const amnesiaRelationshipRecall = isAmnesiaRelationshipRecallQuery(cleanText);
-  const explicitRecall = !isForgetReminderOnlyQuery(cleanText) && /(?:记得|记不记得|还记得|想得起来|回忆|回想|忘了|不记得|记不得|想不起来|之前|以前|上次|刚才|刚刚|最近|前几天|昨天|往日种种|我们的过去|我们之间|履历|历史|记录|日志|remember|recall|previous|earlier|before|last time|history)/i.test(q);
+  const explicitRecall = !isForgetReminderOnlyQuery(cleanText) && (
+    /(?:记得|记不记得|还记得|想得起来|回忆|回想|忘了|不记得|记不得|想不起来|之前|以前|上次|刚才|刚刚|前几天|昨天|往日种种|我们的过去|我们之间|履历|历史|记录|日志|remember|recall|previous|earlier|before|last time|history)/i.test(q)
+    || /(?:最近|今天|今日).{0,14}(?:我|我们|咱|俺|和你).{0,14}(?:聊|说|讲|提|做|打|玩|听|看|刷|发|买|吃|喝|练|测|试|去).{0,12}(?:什么|啥|哪些|哪几|过|了|的)/i.test(q)
+  );
   const personalSubject = /(?:我|我们|俺|咱|我的|我们的|me|my|we|our)/i.test(q);
   const personalFactQuestion = personalSubject && /(?:喜欢|爱好|讨厌|偏好|是谁|认识我|认得我|知道我|身份|画像|人设|性格|目标|关系|熟悉|是不是|有没有|会不会|要不要|说过|提过|聊过|发过|打过|玩过|看过|听过|做过|去过|买过|吃过|喝过|练过|测过|试过|哪些|什么|啥|哪几)/i.test(q);
   const groupHistory = /(?:群里|群内|大家|群友|这个群).{0,16}(?:之前|以前|上次|刚才|最近|说过|聊过|怎么说|记录|日志|历史|叫|称呼)/i.test(q);

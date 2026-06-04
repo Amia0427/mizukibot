@@ -13,6 +13,8 @@ module.exports = (() => {
   assert.strictEqual(isMemoryContinuationQuestion('你觉得这个名字好听吗'), false);
   assert.strictEqual(classifyMemoryNeed('你觉得这首歌怎么样').needsMemory, false);
   assert.strictEqual(classifyMemoryNeed('今天天气怎么样').needsMemory, false);
+  assert.strictEqual(classifyMemoryNeed('今天吃什么比较省事').needsMemory, false);
+  assert.strictEqual(classifyMemoryNeed('最近吃什么比较省事').needsMemory, false);
   assert.strictEqual(classifyMemoryNeed('现在几点').needsMemory, false);
   assert.strictEqual(classifyMemoryNeed('哈哈收到').needsMemory, false);
   assert.strictEqual(shouldPrioritizeMemoryProbe({
@@ -44,6 +46,7 @@ module.exports = (() => {
 
   assert.strictEqual(classifyRecallFacet('宝说一下我今天和你说的'), 'recent_continuity');
   assert.strictEqual(isConversationRecapQuery('今天我们聊了啥'), true);
+  assert.strictEqual(isConversationRecapQuery('最近我们聊了啥'), true);
   assert.strictEqual(isConversationRecapQuery('今天天气怎么样'), false);
   assert.strictEqual(classifyRecallFacet('宝我今天打了哪些歌'), 'recent_continuity');
   assert.strictEqual(isRecentPersonalActivityRecallQuery('我今天听了什么歌'), true);
@@ -59,6 +62,8 @@ module.exports = (() => {
   }), true);
   assert.strictEqual(isRecentRecallQuery('宝我今天打了哪些歌'), true);
   assert.strictEqual(isRecentRecallQuery('今天天气怎么样'), false);
+  assert.strictEqual(isRecentRecallQuery('今天吃什么比较省事'), false);
+  assert.strictEqual(isRecentRecallQuery('最近吃什么比较省事'), false);
   assert.strictEqual(isRecentPersonalActivityRecallQuery('今天股票怎么样'), false);
 
   console.log('recallHeuristics.test.js passed');

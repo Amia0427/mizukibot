@@ -315,6 +315,55 @@ module.exports = (async () => {
   assert.ok(!unrelatedMemoryLeakPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
   assert.ok(!unrelatedMemoryPromptText.includes('脚臭排名'));
 
+  const traceBackedUnrelatedMemoryPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 10 },
+    'u_prompt_trace_backed_unrelated_memory',
+    '今天吃什么比较省事',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      memoryContext: {
+        memoryForPrompt: '1. [episode|tier:B] 很久之前的问题：用户追问模型部署失败。',
+        promptRetrievedMemoryText: '1. [episode|tier:B] 很久之前的问题：用户追问模型部署失败。',
+        diagnostics: {
+          memoryTrace: {
+            retrieval_path: 'v3',
+            retrieved_count: 1,
+            injected_block_ids: ['retrieved_memory_lite'],
+            hits: [{
+              id: 'old_deploy_issue',
+              category: 'episode',
+              lifecycleStatus: 'active',
+              preview: '很久之前的问题：用户追问模型部署失败。'
+            }]
+          }
+        }
+      },
+      routeMeta: {
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: [],
+            personaModules: [],
+            blockDecisions: [
+              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.98, priority: 20, reason: 'new self-contained topic' }
+            ],
+            rationaleByBlock: {},
+            source: 'planner',
+            _source: 'planner'
+          }
+        }
+      }
+    }
+  );
+  const traceBackedText = traceBackedUnrelatedMemoryPrompt.promptSnapshot.assembledBlocks
+    .map((item) => String(item.content || ''))
+    .join('\n');
+  assert.ok(!traceBackedUnrelatedMemoryPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!traceBackedUnrelatedMemoryPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!traceBackedText.includes('模型部署失败'));
+
   const personaRejectedPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 14 },
     'u_prompt_persona_rejected',

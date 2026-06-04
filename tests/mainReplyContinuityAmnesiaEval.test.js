@@ -64,8 +64,24 @@ for (const testCase of cases) {
   assert.ok(prompt.includes('[RecentRawTurns]'), `${testCase.name}: raw turns missing`);
   assert.ok(prompt.includes('Continue from the newest relevant RecentRawTurns first'), `${testCase.name}: newest-turn priority instruction missing`);
   assert.ok(prompt.includes(testCase.expected), `${testCase.name}: expected continuity evidence missing`);
+  assert.ok(prompt.indexOf('[RecentRawTurns]') < prompt.indexOf('[StateSummary]'), `${testCase.name}: recent raw turns should render before summaries`);
   assert.strictEqual(context.contextProfile.name, 'memory_recall');
   assert.ok(context.contextObservability.selectedImportantRawTurnCount > 0);
 }
+
+const tightPrompt = buildShortTermContinuityPrompt({
+  sessionKey: 'direct:tight',
+  shortTermScope: { mode: 'session' },
+  shortTermSummary: '[OpenLoops] 旧摘要里有很多很长的上下文。'.repeat(80),
+  recentSessionSummaries: [
+    { summary: '很久之前的部署问题。'.repeat(80) }
+  ],
+  recentHistory: Array.from({ length: 18 }, (_, index) => ({
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    content: index === 17 ? '最新一句：现在只需要继续检查上下文窗口。' : `较早 raw ${index} ` + 'x'.repeat(80)
+  }))
+});
+assert.ok(tightPrompt.includes('最新一句：现在只需要继续检查上下文窗口。'), 'tight continuity budget should keep newest raw turn');
+assert.ok(tightPrompt.indexOf('[RecentRawTurns]') < tightPrompt.indexOf('[StateSummary]'), 'tight continuity prompt should keep raw section before summaries');
 
 console.log('mainReplyContinuityAmnesiaEval.test.js passed');
