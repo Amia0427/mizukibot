@@ -88,6 +88,45 @@ module.exports = (async () => {
     assert.strictEqual(acquired.cleanup(), true);
     assert.strictEqual(fs.existsSync(guardPidFile), false);
     assert.strictEqual(fs.existsSync(guardLockFile), false);
+
+    fs.writeFileSync(guardPidFile, '66666\n', 'utf8');
+    fs.writeFileSync(guardLockFile, JSON.stringify({ pid: 66666 }) + '\n', 'utf8');
+    const recoveredFromDeadOwner = acquirePostReplyWorkerSingleInstance({
+      pidFile: guardPidFile,
+      lockFile: guardLockFile,
+      currentPid: 77777,
+      listProcesses: () => [],
+      isProcessAlive: (pid) => Number(pid) === 77777
+    });
+
+    assert.strictEqual(recoveredFromDeadOwner.acquired, true, 'dead pid/lock owner should be cleaned and replaced');
+    assert.strictEqual(recoveredFromDeadOwner.ownerPid, 77777);
+    assert.strictEqual(fs.readFileSync(guardPidFile, 'utf8').trim(), '77777');
+    assert.strictEqual(recoveredFromDeadOwner.cleanup(), true);
+    assert.strictEqual(fs.existsSync(guardPidFile), false);
+    assert.strictEqual(fs.existsSync(guardLockFile), false);
+
+    fs.writeFileSync(guardPidFile, '88888\n', 'utf8');
+    fs.writeFileSync(guardLockFile, JSON.stringify({ pid: 88888 }) + '\n', 'utf8');
+    const recoveredWhenOwnerMissingFromSnapshot = acquirePostReplyWorkerSingleInstance({
+      pidFile: guardPidFile,
+      lockFile: guardLockFile,
+      currentPid: 99999,
+      listProcesses: () => [{
+        pid: 12345,
+        ppid: 1,
+        name: 'node.exe',
+        commandLine: 'node scripts/other-worker.js'
+      }],
+      isProcessAlive: (pid) => Number(pid) === 88888 || Number(pid) === 99999 || Number(pid) === 12345
+    });
+
+    assert.strictEqual(recoveredWhenOwnerMissingFromSnapshot.acquired, true, 'missing owner in a successful process snapshot should be treated as stale');
+    assert.strictEqual(recoveredWhenOwnerMissingFromSnapshot.ownerPid, 99999);
+    assert.strictEqual(fs.readFileSync(guardPidFile, 'utf8').trim(), '99999');
+    assert.strictEqual(recoveredWhenOwnerMissingFromSnapshot.cleanup(), true);
+    assert.strictEqual(fs.existsSync(guardPidFile), false);
+    assert.strictEqual(fs.existsSync(guardLockFile), false);
   } finally {
     try {
       fs.rmSync(guardDir, { recursive: true, force: true });

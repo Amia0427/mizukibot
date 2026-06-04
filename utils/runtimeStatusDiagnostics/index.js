@@ -150,7 +150,10 @@ function buildRuntimeStatusDiagnostic(options = {}) {
 
   const postReplyExpected = config.POST_REPLY_WORKER_ENABLED === true && config.POST_REPLY_WORKER_INLINE !== true;
   const postReplyDiagnosticsEnabled = postReplyExpected || config.POST_REPLY_WORKER_INLINE === true;
-  if (postReplyExpected && postReplyPidFile.status === 'missing' && workerProcesses.length === 0) {
+  const postReplyHasRunnableQueueWork = Number(postReplyQueue.counts.queued || 0) > 0
+    || Number(postReplyQueue.counts.processing || 0) > 0
+    || Number(postReplyQueue.staleProcessingCount || 0) > 0;
+  if (postReplyExpected && postReplyPidFile.status === 'missing' && workerProcesses.length === 0 && postReplyHasRunnableQueueWork) {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_pid_missing', 'post-reply worker pid file is missing and no worker process was found');
   }
   if (postReplyDiagnosticsEnabled && postReplyPidFile.status === 'stale') {
@@ -197,6 +200,7 @@ function buildRuntimeStatusDiagnostic(options = {}) {
     if (config.POST_REPLY_WORKER_INLINE === true) return 'inline';
     if (postReplyPidFile.status === 'running' || workerProcesses.length > 0) return 'running';
     if (config.POST_REPLY_WORKER_ENABLED !== true) return 'disabled';
+    if (!postReplyHasRunnableQueueWork) return 'idle';
     if (postReplyPidFile.status === 'stale') return 'stale_pid';
     if (postReplyPidFile.status === 'invalid') return 'invalid_pid';
     return 'missing';

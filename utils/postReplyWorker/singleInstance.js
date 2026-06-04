@@ -111,7 +111,7 @@ function getAliveRecordedWorker({
     return null;
   }
   const proc = findProcessByPid(processes, ownerPid);
-  if (processLooksLikeWorker(proc) || !proc) {
+  if (processLooksLikeWorker(proc) || (!proc && processes.length === 0)) {
     return {
       pid: ownerPid,
       process: proc ? compactProcess(proc) : null
@@ -137,6 +137,10 @@ function cleanupStaleOwnerFile({
   }
   const proc = findProcessByPid(processes, ownerPid);
   if (proc && !processLooksLikeWorker(proc)) {
+    try { fs.unlinkSync(filePath); } catch (_) {}
+    return true;
+  }
+  if (!proc && processes.length > 0) {
     try { fs.unlinkSync(filePath); } catch (_) {}
     return true;
   }

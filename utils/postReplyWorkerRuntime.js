@@ -293,6 +293,7 @@ function createPostReplyWorkerRuntime(options = {}) {
 
     const result = queue.enqueue({
       ...sourceJob,
+      jobId: '',
       phase: 'enrich',
       aggregateKey,
       dedupeKey: '',

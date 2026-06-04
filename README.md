@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-05 07:13 +08:00：转发消息后的追问上下文修复：转发摘要现在作为 `forwardContext` 进入 directed context、正式主回复和普通快速回复；用户问“那句话当时在说什么/是不是对转发内容的反应”时会优先查看本轮转发内容，不再把当前可见转发误当成缺失记忆。详见 `docs/main-reply-context.md`。
 
+更新 2026-06-05 07:37 +08:00：post-reply worker 当前根目录 `.mizukibot-postreply-worker.pid/.lock` 指向真实运行的 `scripts/post-reply-worker.js` 时才保留，不是孤儿残留；今日新增 queued enrich 来自重启后处理历史非 recap core 积压。修复派生 enrich 复用 core `jobId` 导致 `index.json` 被 queued enrich 覆盖 done core 的问题，新 enrich 会生成独立 jobId；已把历史同名 queued/failed enrich 改成独立 jobId 并重建索引，队列空闲时诊断显示 `idle` 而不再误报缺 PID。详见 `docs/post-reply-worker.md`。
+
 更新 2026-06-05 01:32 +08:00：私聊“看懂笑话但后文跳太快”类反馈断层已修复：同一用户的短期上下文和 bridge 不再全量丢弃安全 assistant raw，模型能看到自己上一条被评价的回复；仍过滤 Claude/拒演、内部上下文泄露和工具叙事坏样本。普通快速回复同步过滤 unsafe assistant 历史，并增加“评价上一条回复时锚定最近 assistant”的轻量规则。详见 `docs/main-reply-context.md`。
 
 更新 2026-06-04 22:41 +08:00：主回复旧话题续写问题已定位并修复：回忆触发不再把普通“今天吃什么/今天天气”等新话题误判成近期回忆；planner 明确 skip 的 `retrieved_memory_lite` 不会再被 memory trace 强制回灌；`short_term_continuity` 改为先渲染 `RecentRawTurns`，再用摘要补空，并过滤只有默认 `[ReplyPosture] light` 的空连续性块。详见 `docs/main-reply-context.md`。
