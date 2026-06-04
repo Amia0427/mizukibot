@@ -265,6 +265,86 @@ module.exports = (async () => {
     assert.strictEqual(queued.length, 1, 'core completion should schedule one enrich job when thresholds pass');
     assert.strictEqual(queued[0].phase, 'enrich');
 
+    await runtime.runOneJob({
+      jobId: 'core_recap_job',
+      phase: 'core',
+      userId: 'u1',
+      question: '宝说一下我们今天聊的',
+      finalReply: '今天聊了音游抽卡。',
+      sessionKey: 's1',
+      routePolicyKey: 'lookup/notebook-answer',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      turns: [
+        { turnId: 'recap-turn', question: '宝说一下我们今天聊的', finalReply: '今天聊了音游抽卡。', createdAt: new Date().toISOString(), routeMeta: { groupId: '1083095371' } }
+      ],
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    assert.strictEqual(queued.length, 1, 'recap core completion should not schedule or merge enrich work');
+
+    calls.length = 0;
+    const recapEnrichResult = await processPostReplyJob({
+      jobId: 'enrich_recap_skip_job',
+      userId: 'u1',
+      question: '宝说一下我们今天聊的',
+      finalReply: '今天聊了音游抽卡。',
+      sessionKey: 's1',
+      routePolicyKey: 'lookup/notebook-answer',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      phase: 'enrich',
+      turns: [
+        { turnId: 'recap-turn', question: '宝说一下我们今天聊的', finalReply: '今天聊了音游抽卡。', createdAt: '2026-04-18T10:04:00.000Z', routeMeta: { groupId: '1083095371' } }
+      ],
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    assert.strictEqual(recapEnrichResult.job.taskStates.dailyJournal.status, 'skipped');
+    assert.strictEqual(recapEnrichResult.job.taskStates.dailyJournal.lastError, 'recap_query');
+    assert.strictEqual(recapEnrichResult.job.taskStates.enrich.status, 'skipped');
+    assert.strictEqual(recapEnrichResult.job.taskStates.enrich.lastError, 'recap_query');
+    assert.ok(!calls.some((item) => item.type === 'journal'), 'recap enrich job should not append daily journal');
+    assert.ok(!calls.some((item) => item.type === 'enrich'), 'recap enrich job should not run enrichment extractor');
+
+    calls.length = 0;
+    const recapLatestEnrichResult = await processPostReplyJob({
+      jobId: 'enrich_recap_latest_skip_job',
+      userId: 'u1',
+      question: '宝说一下我们今天聊的',
+      finalReply: '今天聊了音游抽卡。',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      phase: 'enrich',
+      turns: [
+        { turnId: 'normal-turn', question: '今天打音游好累', finalReply: '先休息一下。', createdAt: '2026-04-18T10:00:00.000Z', routeMeta: { groupId: '1083095371' } },
+        { turnId: 'recap-latest-turn', question: '宝说一下我们今天聊的', finalReply: '今天聊了音游抽卡。', createdAt: '2026-04-18T10:04:00.000Z', routeMeta: { groupId: '1083095371' } }
+      ],
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    assert.strictEqual(recapLatestEnrichResult.job.taskStates.dailyJournal.status, 'skipped');
+    assert.strictEqual(recapLatestEnrichResult.job.taskStates.enrich.status, 'skipped');
+    assert.ok(!calls.some((item) => item.type === 'journal'), 'latest recap enrich aggregate should not append daily journal');
+    assert.ok(!calls.some((item) => item.type === 'enrich'), 'latest recap enrich aggregate should not run enrichment extractor');
+
     calls.length = 0;
     await processPostReplyJob({
       jobId: 'enrich_trace_ids_job',

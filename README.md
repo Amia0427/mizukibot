@@ -4,6 +4,8 @@ MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 
 
 更新 2026-06-04 14:15 +08:00：按顺序完成 `data/` 瘦身：清理旧图片缓存/旧 checkpoint/完成 job 约 969.1MB，删除历史诊断轮转日志约 600.2MB，重建 `data/lancedb_user_bucket` 从约 19.98GB 降到 28.1MB，并关闭 `MEMORY_LANCEDB_LEGACY_FALLBACK_ENABLED=false` 后删除旧 `data/lancedb` 约 9.93GB。当前 `data/` 约 2.52GB，LanceDB dry-run 覆盖为 `readyButNotSynced=0`、`staleTableRows=0`。详见 `docs/lancedb-partitioning.md`。
 
+更新 2026-06-04 14:09 +08:00：post-reply worker 对“总结今天聊了什么 / 我今天发了什么图”这类 recap/近期回忆查询增加降噪门禁：persist 不再为其排队 `memoryLearning/selfImprovement/dailyJournal`，已有 queued enrich 若最新 turn 是 recap 会直接 `skipped:recap_query`，避免继续写自改进、日记或 enrich 记忆。详见 `docs/post-reply-worker.md`。
+
 更新 2026-06-04 13:46 +08:00：图片长期记忆摘要链路新增原始响应清洗：`image_memory_index.summary` 和 observation summary 会拒绝 `chat.completion` 原始 JSON、`choices` 包和 `reasoning_content`，只保留可见 `message.content` 或清洗后的摘要；`scripts/repair-image-memory-summaries.js --day YYYY-MM-DD [--apply]` 可按日期 dry-run/apply 清理同类坏样本，本次已清理 `2026-06-04` 的 19 条图片记录、53 个坏 summary 字段。详见 `docs/memory-quality-governance.md`。
 
 更新 2026-06-04 13:26 +08:00：新增 Gemini 用户对话导出脚本 `scripts/export-gemini-user-dialogues.js` 与 `npm run export:gemini-dialogues`；本次导出最近 24 小时使用 Gemini 模型的用户对话到 `data/exports/gemini-user-dialogues-20260604-052608Z.jsonl`，共 39 条用户消息、60 次 Gemini 调用，原始对话文件保留在被忽略的本地 `data/` 目录。详见 `docs/gemini-user-dialogue-export.md`。
