@@ -428,10 +428,11 @@ function createPrepareNode(deps = {}) {
     const sessionKey = String(context?.sessionKey || request.sessionKey || '').trim();
     if (sessionKey) lines.push(`session=${sessionKey}`);
     const summary = String(context?.shortTermSummary || '').trim();
-    if (summary) {
-      hasContinuityEvidence = true;
-      lines.push(`[StateSummary]\n${summary}`);
-    }
+    const meaningfulSummary = summary
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .some((line) => !/^\[ReplyPosture\]\s*light$/i.test(line));
     const sessionSummaries = normalizeArray(context?.recentSessionSummaries)
       .map((item, index) => {
         const text = String(item?.summary || item?.content || '').replace(/\s+/g, ' ').trim();
@@ -456,6 +457,10 @@ function createPrepareNode(deps = {}) {
       hasContinuityEvidence = true;
       lines.push('[RecentRawTurns]');
       lines.push(...recentHistory);
+    }
+    if (meaningfulSummary) {
+      hasContinuityEvidence = true;
+      lines.push(`[StateSummary]\n${summary}`);
     }
     if (!hasContinuityEvidence) return '';
     lines.push('instruction=Use this as high-priority short-term continuity. Prefer exact recent raw turns over vague long-term memory when they conflict.');

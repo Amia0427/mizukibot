@@ -63,7 +63,7 @@ const {
 
 const DYNAMIC_CONTEXT_PLAN_VERSION = 'dynamic_context_plan_v2';
 const MEMORY_RECALL_PROMPT_MIN_BUDGET_MS = 6000;
-const MEMORY_RECALL_QUERY_RE = /(昨天|昨日|前天|大前天|今天|今日|刚才|刚刚|上次|之前|前面|前几天|那天|聊了什么|聊过什么|聊到哪|说了什么|讲了什么|还记得|记得|记不记得|回忆|想起来|忘了|不记得|记不得|不认识我|不认得我|你认识我吗|你认得我吗|你知道我是谁吗|往日种种|我们的过去|我们之间|接着|继续|断片|失忆|\byesterday\b|\bremember\b|\blast time\b|\bearlier\b|what did we talk|where did we leave|where did (?:i|we) put)/i;
+const MEMORY_RECALL_QUERY_RE = /(昨日|前天|大前天|昨天.{0,12}(?:聊|说|讲|提|做|打|玩|听|看|刷|发|买|吃|喝|练|测|试|去)|(?:今天|今日|最近).{0,12}(?:和你|我们|我).{0,12}(?:聊|说|讲|提|做|打|玩|听|看|刷|发|买|吃|喝|练|测|试|去)|刚才|刚刚|上次|之前|前面|前几天|那天|聊了什么|聊过什么|聊到哪|说了什么|讲了什么|还记得|记得|记不记得|回忆|想起来|忘了|不记得|记不得|不认识我|不认得我|你认识我吗|你认得我吗|你知道我是谁吗|往日种种|我们的过去|我们之间|接着|继续|断片|失忆|\byesterday\b|\bremember\b|\blast time\b|\bearlier\b|what did we talk|where did we leave|where did (?:i|we) put)/i;
 
 function getConfig() {
   try {
@@ -341,11 +341,59 @@ function formatShortTermMessageLine(message = {}) {
   return `${role}: ${trimTextByTokenBudget(content, 260, 'tail')}`;
 }
 
+function hasMeaningfulShortTermSummary(summary = '') {
+  const lines = normalizeText(summary)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return false;
+  return lines.some((line) => !/^\[ReplyPosture\]\s*light$/i.test(line));
+}
+
+function estimateLineBlockTokens(lines = []) {
+  return estimateTokens(normalizeArray(lines).join('\n'));
+}
+
+function trimLineSectionFromTail(label = '', lines = [], tokenBudget = 0) {
+  const sectionLabel = normalizeText(label);
+  const candidates = normalizeArray(lines).map((line) => normalizeText(line)).filter(Boolean);
+  const budget = Math.max(0, Math.floor(Number(tokenBudget || 0) || 0));
+  if (!sectionLabel || candidates.length === 0 || budget <= estimateTokens(sectionLabel)) return [];
+
+  const kept = [];
+  let used = estimateTokens(sectionLabel);
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const line = candidates[index];
+    const cost = estimateTokens(line) + 1;
+    if (used + cost > budget) {
+      if (kept.length === 0) {
+        const trimmed = trimTextByTokenBudget(line, Math.max(24, budget - used - 1), 'tail');
+        if (trimmed) kept.unshift(trimmed);
+      }
+      break;
+    }
+    kept.unshift(line);
+    used += cost;
+  }
+
+  return kept.length > 0 ? [sectionLabel, ...kept] : [];
+}
+
+function trimLineBlock(lines = [], tokenBudget = 0, strategy = 'head') {
+  const text = normalizeArray(lines).map((line) => normalizeText(line)).filter(Boolean).join('\n');
+  if (!text) return [];
+  return trimTextByTokenBudget(text, tokenBudget, strategy)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function buildShortTermContinuityPrompt(sharedShortTermContext = {}) {
   const context = sharedShortTermContext && typeof sharedShortTermContext === 'object' ? sharedShortTermContext : {};
   const maxTokens = Math.max(256, Number(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS || 3600) || 3600);
   const scope = context.shortTermScope && typeof context.shortTermScope === 'object' ? context.shortTermScope : {};
   const summary = normalizeText(context.shortTermSummary);
+  const meaningfulSummary = hasMeaningfulShortTermSummary(summary);
   const recentHistory = normalizeArray(context.recentHistory).map(formatShortTermMessageLine).filter(Boolean);
   const sessionSummaries = normalizeArray(context.recentSessionSummaries)
     .map((item, index) => {
@@ -353,23 +401,49 @@ function buildShortTermContinuityPrompt(sharedShortTermContext = {}) {
       return text ? `${index + 1}. ${trimTextByTokenBudget(text, 220, 'tail')}` : '';
     })
     .filter(Boolean);
-  const lines = ['[ShortTermContinuity]'];
+  const baseLines = ['[ShortTermContinuity]'];
+  let hasContinuityEvidence = false;
 
-  if (normalizeText(context.sessionKey)) lines.push(`session=${normalizeText(context.sessionKey)}`);
-  if (normalizeText(scope.mode)) lines.push(`scope=${normalizeText(scope.mode)}`);
-  if (summary) lines.push(`[StateSummary]\n${trimTextByTokenBudget(summary, Math.floor(maxTokens * 0.28), 'tail')}`);
+  if (normalizeText(context.sessionKey)) baseLines.push(`session=${normalizeText(context.sessionKey)}`);
+  if (normalizeText(scope.mode)) baseLines.push(`scope=${normalizeText(scope.mode)}`);
+  baseLines.push('instruction=Continue from the newest relevant RecentRawTurns first. Treat the latest user/assistant turns as the primary anchor, use StateSummary/RestartRecovery only to fill gaps, and prefer exact recent raw turns over vague long-term memory when they conflict.');
+
+  const secondaryLines = [];
+  if (meaningfulSummary) {
+    hasContinuityEvidence = true;
+    secondaryLines.push('[StateSummary]');
+    secondaryLines.push(trimTextByTokenBudget(summary, Math.floor(maxTokens * 0.18), 'tail'));
+  }
   if (sessionSummaries.length > 0) {
-    lines.push('[RestartRecoverySummaries]');
-    lines.push(...sessionSummaries.slice(0, Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT || 3) || 3)));
-  }
-  if (recentHistory.length > 0) {
-    lines.push('[RecentRawTurns]');
-    lines.push(...recentHistory.slice(-Math.max(1, Math.floor(Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 64) || 64))));
+    hasContinuityEvidence = true;
+    secondaryLines.push('[RestartRecoverySummaries]');
+    secondaryLines.push(...sessionSummaries.slice(0, Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT || 3) || 3)));
   }
 
-  if (lines.length <= 1) return '';
-  lines.push('instruction=Continue from the newest relevant RecentRawTurns first. Treat the latest user/assistant turns as the primary anchor, use StateSummary/RestartRecovery only to fill gaps, and prefer exact recent raw turns over vague long-term memory when they conflict.');
-  return trimTextByTokenBudget(lines.join('\n'), maxTokens, 'tail');
+  const limitedRecentHistory = recentHistory.slice(-Math.max(1, Math.floor(Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 64) || 64)));
+  if (limitedRecentHistory.length > 0) {
+    hasContinuityEvidence = true;
+  }
+
+  if (!hasContinuityEvidence) return '';
+
+  const secondaryBudget = limitedRecentHistory.length > 0
+    ? Math.max(96, Math.floor(maxTokens * 0.26))
+    : Math.max(96, maxTokens - estimateLineBlockTokens(baseLines) - 16);
+  const secondarySection = trimLineBlock(secondaryLines, secondaryBudget, 'head');
+  const rawBudget = Math.max(
+    limitedRecentHistory.length > 0 ? 128 : 0,
+    maxTokens - estimateLineBlockTokens(baseLines) - estimateLineBlockTokens(secondarySection) - 16
+  );
+  const rawSection = limitedRecentHistory.length > 0
+    ? trimLineSectionFromTail('[RecentRawTurns]', limitedRecentHistory, rawBudget)
+    : [];
+  const lines = [
+    ...baseLines,
+    ...rawSection,
+    ...secondarySection
+  ];
+  return trimTextByTokenBudget(lines.join('\n'), maxTokens, 'head');
 }
 
 function summarizeShortTermContinuityForPrompt(sharedShortTermContext = {}) {
@@ -703,10 +777,15 @@ function planIncludesBlock(dynamicPromptPlan = {}, blockId = '') {
     || planHasBlockDecision(dynamicPromptPlan, targetBlockId, 'include');
 }
 
+function planSkipsBlock(dynamicPromptPlan = {}, blockId = '') {
+  return planHasBlockDecision(dynamicPromptPlan, blockId, 'skip');
+}
+
 function shouldRuntimeAddRetrievedMemoryBlock(question = '', options = {}, dynamicPromptPlan = {}, memoryContext = {}) {
   const hasMemoryEvidence = Boolean(normalizeText(memoryContext?.promptRetrievedMemoryText || memoryContext?.memoryForPrompt));
   if (!hasMemoryEvidence) return false;
   if (shouldForceMemoryContextForQuestion(question, options)) return true;
+  if (planSkipsBlock(dynamicPromptPlan, 'retrieved_memory_lite')) return false;
   const trace = memoryContext?.diagnostics?.memoryTrace && typeof memoryContext.diagnostics.memoryTrace === 'object'
     ? memoryContext.diagnostics.memoryTrace
     : {};

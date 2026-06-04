@@ -49,9 +49,9 @@ module.exports = (async () => {
     assert.strictEqual(first.promptSnapshot.assembledBlocks[0]?.id, 'root_system_prompt');
     assert.ok(first.promptSnapshot.assembledBlocks.some((item) => item.id === 'main_persona_system'));
     assert.ok(first.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_runtime_context'));
-    assert.ok(first.promptSnapshot.assembledBlocks.some((item) => item.id === 'short_term_continuity'));
     assert.ok(first.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
     assert.ok(first.promptSnapshot.assembledBlocks.some((item) => item.id === 'memory_recall_policy'));
+    assert.ok(!first.promptSnapshot.assembledBlocks.some((item) => item.id === 'short_term_continuity'), 'empty sessions should not inject a marker-only short-term block');
     assert.ok(!first.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
 
     const second = await service.buildDynamicPrompt(
