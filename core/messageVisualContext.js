@@ -42,6 +42,13 @@ function buildDirectedConversationSummary(directedContext = {}, { maxLength = 22
     if (String(quotePriority.reason || '').trim()) lines.push(`Quote priority reason: ${String(quotePriority.reason || '').trim()}`);
     if (String(quotePriority.quoteAnchoredText || '').trim()) lines.push(`Quote anchored text: ${String(quotePriority.quoteAnchoredText || '').trim()}`);
   }
+  const forwardContext = context.forwardContext && typeof context.forwardContext === 'object' ? context.forwardContext : null;
+  if (forwardContext) {
+    const imageCount = Math.max(0, Number(forwardContext.imageCount || forwardContext.imageUrls?.length || 0) || 0);
+    if (String(forwardContext.source || '').trim()) lines.push(`Forward context source: ${String(forwardContext.source || '').trim()}`);
+    if (imageCount > 0) lines.push(`Forward image count: ${imageCount}`);
+    if (String(forwardContext.summaryText || '').trim()) lines.push(`Forwarded text: ${String(forwardContext.summaryText || '').trim()}`);
+  }
   if (context.activePair?.userA && context.activePair?.userB) {
     lines.push(`Active pair: ${context.activePair.userA}<->${context.activePair.userB}`);
   }

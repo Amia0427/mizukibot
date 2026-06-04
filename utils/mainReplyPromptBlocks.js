@@ -320,7 +320,12 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   const promptMode = resolveMainReplyPromptMode(input);
   const conservativePromptMode = isBalancedOrMinimalPromptMode(promptMode);
 
-  if (directedContext && (normalizeText(directedContext.scene) || normalizeText(directedContext?.addressee?.senderName) || normalizeText(directedContext?.quote?.text))) {
+  if (directedContext && (
+    normalizeText(directedContext.scene)
+    || normalizeText(directedContext?.addressee?.senderName)
+    || normalizeText(directedContext?.quote?.text)
+    || normalizeText(directedContext?.forwardContext?.summaryText)
+  )) {
     push('directed_context', 'directed or quoted conversation context is available');
   }
   if (input.hasRoleplayRuntimeContext !== false) {

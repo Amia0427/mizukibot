@@ -109,6 +109,7 @@ function buildDirectedContextPromptSnippet(directedContext = {}) {
   const context = directedContext && typeof directedContext === 'object' ? directedContext : {};
   const addressee = context.addressee && typeof context.addressee === 'object' ? context.addressee : {};
   const quote = context.quote && typeof context.quote === 'object' ? context.quote : null;
+  const forwardContext = context.forwardContext && typeof context.forwardContext === 'object' ? context.forwardContext : null;
   const quotePriority = context.quotePriority && typeof context.quotePriority === 'object' ? context.quotePriority : null;
   const lines = ['[CurrentConversation]'];
   lines.push(`scene=${String(context.scene || 'unclear').trim() || 'unclear'}`);
@@ -122,6 +123,19 @@ function buildDirectedContextPromptSnippet(directedContext = {}) {
   }
   if (context.activePair?.userA && context.activePair?.userB) {
     lines.push(`active_pair=${context.activePair.userA}<->${context.activePair.userB}`);
+  }
+  if (forwardContext) {
+    const forwardIds = Array.isArray(forwardContext.ids)
+      ? forwardContext.ids.map((item) => String(item || '').trim()).filter(Boolean)
+      : [];
+    const imageCount = Math.max(0, Number(forwardContext.imageCount || forwardContext.imageUrls?.length || 0) || 0);
+    const forwardedText = String(forwardContext.summaryText || '').replace(/\s+/g, ' ').trim();
+    lines.push(`forward_context_source=${String(forwardContext.source || 'current_message_forward').trim() || 'current_message_forward'}`);
+    if (forwardIds.length) lines.push(`forwarded_message_ids=${forwardIds.join(',')}`);
+    if (imageCount > 0) lines.push(`forwarded_message_image_count=${imageCount}`);
+    if (forwardedText) lines.push(`forwarded_message_text=${forwardedText.length > 1200 ? forwardedText.slice(0, 1200).trim() : forwardedText}`);
+    lines.push('instruction=Treat forwarded_message_text from the current turn as visible conversation context, not as missing memory.');
+    lines.push('instruction=When the user asks what a quoted sentence or reaction referred to, check forwarded_message_text before saying the prior context is unknown.');
   }
   lines.push(`quote_priority_mode=${String(quotePriority?.mode || 'none').trim() || 'none'}`);
   if (String(quotePriority?.reason || '').trim()) lines.push(`quote_priority_reason=${String(quotePriority.reason || '').trim()}`);
