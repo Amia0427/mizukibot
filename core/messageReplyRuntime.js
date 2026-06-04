@@ -20,6 +20,7 @@ const {
 const {
   findExplicitSegmentBreakIndex,
   findNaturalSplitIndex,
+  getGroupChatStreamSendGapMs,
   getStreamingSplitIndex
 } = require('./streamingSegmentation');
 
@@ -273,13 +274,24 @@ function createStreamingDispatcher({
     const task = async () => {
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
       const now = Date.now();
-      const minGap = getStreamSendGapMs(effectiveConfig);
+      const isPrivate = String(chatType || '').trim() === 'private';
+      const groupGap = getGroupChatStreamSendGapMs(text, {
+        chatType,
+        groupId,
+        userId,
+        senderId,
+        chunkIndex: state.sentSegments + 1,
+        sentSegments: state.sentSegments
+      });
+      const minGap = groupGap > 0 && !isPrivate
+        ? groupGap
+        : getStreamSendGapMs(effectiveConfig);
       const elapsed = now - state.lastSendAt;
       if (state.lastSendAt > 0 && elapsed < minGap) {
         await new Promise((resolve) => setTimeout(resolve, minGap - elapsed));
       }
+      if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
-      const isPrivate = String(chatType || '').trim() === 'private';
       const payload = isPrivate
         ? {
             action: 'send_private_msg',
@@ -320,10 +332,25 @@ function createStreamingDispatcher({
     let sendUntil = -1;
     const canSplitMore = state.sentSegments < (maxSegments - 1);
     if (canSplitMore) {
-      sendUntil = getStreamingSplitIndex(pending);
+      sendUntil = getStreamingSplitIndex(pending, {
+        chatType,
+        groupId,
+        userId,
+        senderId,
+        sentSegments: state.sentSegments
+      });
     }
 
-    if (sendUntil <= 0 && force) sendUntil = getStreamingSplitIndex(pending, { force: true });
+    if (sendUntil <= 0 && force) {
+      sendUntil = getStreamingSplitIndex(pending, {
+        force: true,
+        chatType,
+        groupId,
+        userId,
+        senderId,
+        sentSegments: state.sentSegments
+      });
+    }
     if (sendUntil <= 0) return false;
 
     const rawChunk = pending.slice(0, sendUntil);

@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-04 22:04 +08:00：群聊主回复流式分段改为“QQ 连续消息”策略：短回复不硬拆，中等/长回复优先按语义完整的聊天消息切成 1-3 段，群聊段间隔改为按段长加稳定抖动的动态节奏；若等待期间同一会话有新消息导致 freshness 失效，后续旧段会停止追发。`streaming-segmentation` prompt 同步要求群聊分段像自然发消息而不是文章段落。
+
 更新 2026-06-04 14:15 +08:00：按顺序完成 `data/` 瘦身：清理旧图片缓存/旧 checkpoint/完成 job 约 969.1MB，删除历史诊断轮转日志约 600.2MB，重建 `data/lancedb_user_bucket` 从约 19.98GB 降到 28.1MB，并关闭 `MEMORY_LANCEDB_LEGACY_FALLBACK_ENABLED=false` 后删除旧 `data/lancedb` 约 9.93GB。当前 `data/` 约 2.52GB，LanceDB dry-run 覆盖为 `readyButNotSynced=0`、`staleTableRows=0`。详见 `docs/lancedb-partitioning.md`。
 
 更新 2026-06-04 14:09 +08:00：post-reply worker 对“总结今天聊了什么 / 我今天发了什么图”这类 recap/近期回忆查询增加降噪门禁：persist 不再为其排队 `memoryLearning/selfImprovement/dailyJournal`，已有 queued enrich 若最新 turn 是 recap 会直接 `skipped:recap_query`，避免继续写自改进、日记或 enrich 记忆。详见 `docs/post-reply-worker.md`。

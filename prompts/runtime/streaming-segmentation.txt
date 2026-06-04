@@ -1,6 +1,8 @@
 # Streaming output rule:
-1) decide chunk boundaries yourself, send at most {{maxSegments}} chunks total.
-2) separate chunks with ONE blank line (\n\n).
-3) every chunk must be semantically complete on its own; do not split a sentence, list item, code block, quote, or markdown structure in the middle.
-4) no numbering and no labels like "part 1".
-5) if the answer is short, return a single chunk instead of forcing multiple chunks.
+1) Decide chat-message boundaries yourself, send at most {{maxSegments}} chunks total.
+2) Separate chunks with ONE blank line (\n\n).
+3) In QQ group chat, make each chunk feel like one natural message: first接住现场，后面只补真正需要的信息。
+4) Short replies must stay as one chunk; do not split just because streaming is available.
+5) Every chunk must be semantically complete on its own; do not split a sentence, list item, code block, quote, or markdown structure in the middle.
+6) No numbering and no labels like "part 1".
+7) Avoid article-like paragraphs in casual group chat; 1-3 compact chat messages are enough unless the user explicitly asks for a long explanation.
