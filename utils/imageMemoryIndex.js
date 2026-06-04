@@ -7,6 +7,7 @@ const {
   formatDateInTz,
   getDatePartsInTz
 } = require('./time');
+const { cleanImageMemorySummary } = require('./imageMemorySummarySanitizer');
 
 const DEFAULT_INDEX = Object.freeze({
   version: 1,
@@ -20,6 +21,10 @@ const EARLY_MORNING_PREV_DAY_HOUR = 4;
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizeSummaryText(value = '') {
+  return cleanImageMemorySummary(value).summary;
 }
 
 function normalizeId(value = '') {
@@ -127,7 +132,7 @@ function normalizeObservation(input = {}) {
     imageSource: normalizeText(input.imageSource),
     label: normalizeText(input.label),
     userText: normalizeText(input.userText || input.text || input.cleanText),
-    summary: normalizeText(input.summary),
+    summary: normalizeSummaryText(input.summary),
     ocrText: normalizeText(input.ocrText || input.visibleText)
   };
   return Object.fromEntries(Object.entries(observation).filter(([, value]) => value !== '' && value !== 0));
@@ -174,7 +179,7 @@ function normalizeImageRecord(input = {}) {
     createdAt,
     lastSeenAt,
     userText: normalizeText(input.userText),
-    summary: normalizeText(input.summary),
+    summary: normalizeSummaryText(input.summary),
     ocrText: normalizeText(input.ocrText),
     visibleText: normalizeText(input.visibleText),
     observations

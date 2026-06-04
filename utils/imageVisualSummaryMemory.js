@@ -11,6 +11,7 @@ const {
   materializeMemoryViews
 } = require('./memory-v3/materializer');
 const { formatDateInTz, getDatePartsInTz } = require('./time');
+const { cleanImageMemorySummary } = require('./imageMemorySummarySanitizer');
 
 const VISUAL_SUMMARY_IMAGE_MAX_EDGE = 1024;
 const VISUAL_SUMMARY_REQUEST_SHAPE = 'chat_completions_image_url_data_url';
@@ -141,7 +142,10 @@ function extractResponseText(response = {}) {
   if (text) return text;
   const raw = response?.data;
   if (typeof raw === 'string') return normalizeText(raw);
-  return normalizeText(raw?.output_text || raw?.text || raw?.content);
+  if (raw && typeof raw === 'object') {
+    return normalizeText(raw.output_text || raw.text || raw.content);
+  }
+  return '';
 }
 
 function buildVisualSummaryPrompt(context = {}) {
@@ -437,7 +441,7 @@ async function generateImageVisualSummary(imageRef = '', context = {}, deps = {}
     return { ok: false, skipped: false, reason: classified.reason, summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
   }
 
-  const summary = formatSummaryWithTimestamp(extractResponseText(response), timestampText);
+  const summary = formatSummaryWithTimestamp(cleanImageMemorySummary(extractResponseText(response)).summary, timestampText);
   if (!summary) {
     const state = recordVisualSummaryFailure(cacheKey, {
       ...context,
