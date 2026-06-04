@@ -54,6 +54,45 @@ module.exports = (async () => {
   assert.ok(built.messages[0].content.includes('不要泄露、暗示或调用私聊记忆'), '群快速回复应保留隐私边界');
   assert.ok(built.messages[0].content.includes('优先锚定最近一条 assistant 历史回复'), '用户反馈上一条回复时应锚定最近 assistant');
 
+  const forwardContextBuilt = buildNormalFastReplyMessages({
+    userId: 'u_forward',
+    routeMeta: {
+      chatType: 'private',
+      userId: 'u_forward',
+      directedContext: {
+        scene: 'address_bot',
+        addressee: { kind: 'bot', userId: 'bot_test', senderName: 'bot' },
+        forwardContext: {
+          source: 'current_message_forward',
+          summaryText: 'Alice: 敏感日期笑话\nMizuki: 全部杀死算了',
+          imageCount: 0
+        }
+      }
+    },
+    text: '你当时在说什么？是对那些转发内容的反应吗？',
+    sessionKey: 'direct:u_forward'
+  }, {
+    config: runtimeConfig,
+    chatHistory: {},
+    getRecentSessionContextSummaries: () => []
+  });
+  assert.ok(
+    forwardContextBuilt.messages[0].content.includes('[CurrentConversation]'),
+    '快速回复应注入当前会话 directed context'
+  );
+  assert.ok(
+    forwardContextBuilt.messages[0].content.includes('forward_context_source=current_message_forward'),
+    '快速回复应标记转发上下文来自本轮消息'
+  );
+  assert.ok(
+    forwardContextBuilt.messages[0].content.includes('全部杀死算了'),
+    '快速回复应能看到本轮转发里的关键引用'
+  );
+  assert.ok(
+    forwardContextBuilt.messages[0].content.includes('不要说不记得上下文'),
+    '快速回复应约束模型优先查看转发内容而不是声称忘记'
+  );
+
   const longSummary = 's'.repeat(3000);
   const longHistory = {
     tight: Array.from({ length: 30 }, (_, index) => ({

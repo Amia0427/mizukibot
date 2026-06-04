@@ -38,6 +38,53 @@ function trimTextToChars(text = '', maxChars = 0) {
   return normalized.length > limit ? normalized.slice(-limit) : normalized;
 }
 
+function buildDirectedContextPrompt(routeMeta = {}) {
+  const directedContext = routeMeta?.directedContext && typeof routeMeta.directedContext === 'object'
+    ? routeMeta.directedContext
+    : null;
+  if (!directedContext) return '';
+  const addressee = directedContext.addressee && typeof directedContext.addressee === 'object'
+    ? directedContext.addressee
+    : {};
+  const quote = directedContext.quote && typeof directedContext.quote === 'object'
+    ? directedContext.quote
+    : null;
+  const forwardContext = directedContext.forwardContext && typeof directedContext.forwardContext === 'object'
+    ? directedContext.forwardContext
+    : null;
+  const quotePriority = directedContext.quotePriority && typeof directedContext.quotePriority === 'object'
+    ? directedContext.quotePriority
+    : null;
+  const lines = [
+    '[CurrentConversation]',
+    `scene=${normalizeText(directedContext.scene || 'unclear') || 'unclear'}`,
+    `current_message_to=${normalizeText(addressee.senderName || addressee.userId || addressee.kind || 'unclear') || 'unclear'}`
+  ];
+  if (quote) {
+    const quoteFrom = normalizeText(quote.senderName || quote.senderId);
+    if (normalizeText(quote.origin)) lines.push(`quoted_message_origin=${normalizeText(quote.origin)}`);
+    if (quoteFrom) lines.push(`quoted_message_from=${quoteFrom}`);
+    if (quote.hasImage === true) lines.push('quoted_message_has_image=true');
+    if (normalizeText(quote.text)) lines.push(`quoted_message_text=${trimTextToChars(quote.text, 360)}`);
+  }
+  if (forwardContext) {
+    const forwardIds = Array.isArray(forwardContext.ids)
+      ? forwardContext.ids.map((item) => normalizeText(item)).filter(Boolean)
+      : [];
+    const imageCount = Math.max(0, Number(forwardContext.imageCount || forwardContext.imageUrls?.length || 0) || 0);
+    const forwardedText = trimTextToChars(forwardContext.summaryText || '', 900);
+    lines.push(`forward_context_source=${normalizeText(forwardContext.source || 'current_message_forward') || 'current_message_forward'}`);
+    if (forwardIds.length) lines.push(`forwarded_message_ids=${forwardIds.join(',')}`);
+    if (imageCount > 0) lines.push(`forwarded_message_image_count=${imageCount}`);
+    if (forwardedText) lines.push(`forwarded_message_text=${forwardedText}`);
+    lines.push('instruction=本轮转发内容就是当前可见上下文；用户问“那句话/当时在说什么/是不是对转发内容的反应”时，先看 forwarded_message_text，不要说不记得上下文。');
+  }
+  lines.push(`quote_priority_mode=${normalizeText(quotePriority?.mode || 'none') || 'none'}`);
+  if (normalizeText(quotePriority?.reason)) lines.push(`quote_priority_reason=${normalizeText(quotePriority.reason)}`);
+  if (normalizeText(quotePriority?.quoteAnchoredText)) lines.push(`quote_anchored_text=${trimTextToChars(quotePriority.quoteAnchoredText, 360)}`);
+  return lines.join('\n');
+}
+
 function trimRecentMessagesByChars(messages = [], maxChars = 0) {
   const limit = clampNumber(maxChars, 0, 0);
   if (limit <= 0) return [];
@@ -107,11 +154,13 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
       recentHistory: recentMessages
     }
   });
+  const directedPrompt = buildDirectedContextPrompt(routeMeta);
   const systemParts = [
     '你是 Mizuki。当前走普通用户快速回复链路。',
     '只根据用户本轮消息和下方轻量上下文自然回复；不要声称查了记忆、网页或工具。',
     '如果用户本轮是在评价、纠正或吐槽“你刚才/后面几段/上一条回复”，优先锚定最近一条 assistant 历史回复来接话。',
     '回答保持简洁、直接、像日常聊天；信息不足时先说明不确定。',
+    directedPrompt,
     livenessPrompt
   ];
   if (trimmedSummary) {
@@ -170,6 +219,7 @@ async function runNormalFastReply(input = {}, deps = {}) {
 }
 
 module.exports = {
+  buildDirectedContextPrompt,
   buildNormalFastReplyMessages,
   runNormalFastReply,
   trimRecentMessagesByChars
