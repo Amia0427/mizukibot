@@ -1,5 +1,7 @@
 # Runtime Latency Diagnosis
 
+更新 2026-06-05 10:11 +08:00：排查 `data/request-trace.ndjson` 每 30 秒出现一次 `messageId/groupId/userId` 全空的 `handle_incoming_start`，来源是 NapCat / OneBot `meta_event` heartbeat 被入口先创建 request trace 后才被 `shouldSkipNonGroupMessage` 丢弃。影响是 request-trace 与 inbound timing 样本被心跳噪声污染，不会进入 dedupe、路由、模型或发送链路。修复为入口先处理 notice 并过滤非 `post_type=message` / 非 `message_type=group|private`，再创建 request trace；补 `tests/messageHandlerRequestTrace.test.js` 覆盖 heartbeat/空包不写 trace、正式私聊消息仍写 trace。
+
 更新 2026-05-30 18:47 +08:00：新增 `npm run diag:main-reply-lag` 作为面向主回复卡顿的单入口。它会合并 `diag:runtime`、`diag:runtime-hotspots`、provider 请求诊断和低资源诊断，优先从 `perf-events.jsonl` 与 `request-trace.ndjson` 提取 planner/发送耗时，从 `model-calls.ndjson` 提取主模型耗时，并输出 post-reply worker RSS 压力和 `mostLikelyBottleneck`；流式主回复的最终发送事件已补 `durationMs` 作为最小埋点。
 
 更新 2026-05-27 01:45 +08:00：已落地低内存主进程轻量档位：主进程默认不再启动 embedding backfill，并在 `LOW_RESOURCE_MODE=true` 下保留 LanceDB 读、memory/worldbook rerank、worldbook semantic 和 image memory recall；LanceDB 读改由一次性 helper 执行，同时降低候选数、单次 backfill 数和超时预算；post-reply worker 保留完整学习维护，并设置 `POST_REPLY_WORKER_RSS_RECYCLE_MB=768`、`POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS=30000` 以便空闲自回收。
