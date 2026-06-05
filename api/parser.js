@@ -339,6 +339,34 @@ function extractUsageFromSSEObject(obj) {
   );
 }
 
+function extractFinishReason(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  const choice = Array.isArray(obj.choices) ? obj.choices[0] : null;
+  const candidate = Array.isArray(obj.candidates) ? obj.candidates[0] : null;
+  const response = obj.response && typeof obj.response === 'object' ? obj.response : null;
+  const incompleteDetails = response?.incomplete_details || response?.incompleteDetails || obj.incomplete_details || obj.incompleteDetails;
+  const incompleteReason = typeof incompleteDetails?.reason === 'string' ? incompleteDetails.reason : '';
+  const direct = String(
+    choice?.finish_reason
+    || choice?.finishReason
+    || candidate?.finishReason
+    || candidate?.finish_reason
+    || obj.finish_reason
+    || obj.finishReason
+    || obj.stop_reason
+    || obj.stopReason
+    || response?.status
+    || obj.status
+    || ''
+  ).trim();
+  if (incompleteReason) return direct ? `${direct}:${incompleteReason}` : `incomplete:${incompleteReason}`;
+  if (direct) return direct;
+  if (obj.type === 'message_stop') return 'message_stop';
+  if (obj.type === 'response.completed') return 'completed';
+  if (obj.type === 'response.incomplete') return 'incomplete';
+  return '';
+}
+
 function extractSSEEvents(state, chunk) {
   const nextState = normalizeSSEState(state);
 
@@ -377,8 +405,9 @@ function extractSSEEvents(state, chunk) {
       const delta = extractDeltaText(obj);
       const reasoning = extractReasoningText(obj);
       const usage = extractUsageFromSSEObject(obj);
+      const finishReason = extractFinishReason(obj);
       if (reasoning) latestReasoning = reasoning;
-      events.push({ done: false, delta, reasoning, usage, json: obj, raw: payload });
+      events.push({ done: false, delta, reasoning, usage, finishReason, json: obj, raw: payload });
     } catch (_) {
       // Ignore non-JSON heartbeat or provider-specific control lines.
     }
@@ -409,8 +438,9 @@ function flushSSEState(state) {
     const delta = extractDeltaText(obj);
     const reasoning = extractReasoningText(obj);
     const usage = extractUsageFromSSEObject(obj);
+    const finishReason = extractFinishReason(obj);
     if (reasoning) latestReasoning = reasoning;
-    return [{ done: false, delta, reasoning, usage, json: obj, raw: payload }];
+    return [{ done: false, delta, reasoning, usage, finishReason, json: obj, raw: payload }];
   } catch (_) {
     return [];
   }
@@ -585,6 +615,7 @@ module.exports = {
   extractJsonSafely,
   parseSSEToText,
   extractSSEEvents,
+  extractFinishReason,
   flushSSEState,
   extractUsageFromSSEObject,
   mergeUsageObjects,

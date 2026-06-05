@@ -105,6 +105,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
     let pinnedLookup = null;
     const usageParserState = { buffer: '' };
     let streamUsage = null;
+    let streamFinishReason = '';
+    let streamDoneSeen = false;
     const attemptStartedAt = Date.now();
 
     try {
@@ -411,13 +413,15 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           }
           const tailEvents = flushSSEState(usageParserState);
           for (const event of tailEvents) {
-            if (!event?.usage) continue;
-            streamUsage = mergeUsageObjects(streamUsage, event.usage);
+            if (event?.done) streamDoneSeen = true;
+            if (event?.finishReason) streamFinishReason = String(event.finishReason || '').trim();
+            if (event?.usage) streamUsage = mergeUsageObjects(streamUsage, event.usage);
           }
           finishModelCall(callId, {
             response: resp,
             attempts: i + 1,
             usage: streamUsage,
+            finishReason: streamFinishReason || (streamDoneSeen ? 'done' : 'stream_closed_without_terminal_event'),
             requestUrl: prepared?.requestUrl,
             request: prepared?.requestBody,
             requestHeaders: prepared?.requestHeaders
@@ -426,6 +430,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             attempt: i + 1,
             statusCode: Number(resp?.status || 0) || null,
             stream: true,
+            streamDoneSeen,
+            finishReason: streamFinishReason || (streamDoneSeen ? 'done' : 'stream_closed_without_terminal_event'),
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           resolve();
@@ -435,8 +441,9 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           const parsed = extractSSEEvents(usageParserState, chunk);
           usageParserState.buffer = parsed.state.buffer;
           for (const event of parsed.events) {
-            if (!event?.usage) continue;
-            streamUsage = mergeUsageObjects(streamUsage, event.usage);
+            if (event?.done) streamDoneSeen = true;
+            if (event?.finishReason) streamFinishReason = String(event.finishReason || '').trim();
+            if (event?.usage) streamUsage = mergeUsageObjects(streamUsage, event.usage);
           }
           if (!firstChunkSeen) {
             firstChunkSeen = true;

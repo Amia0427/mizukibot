@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-05 20:54 +08:00
+更新时间：2026-06-05 23:03 +08:00
 
 ## 已调整
 
+- 2026-06-05 23:03 +08:00：主回复截断排查增加可观测性和输出约束。日志中已能看到用户多次反馈“截断/宝你没说完/谷歌正常聊天都截断”，样本附近的本地发送预览与 `finalReplyChars` 显示当前回复文本本身偏短，未见流式分段 `finish()` 漏发尾段的直接证据；同时 Gemini/gcli 流式调用存在多次 `ECONNRESET/socket hang up` 和低 completion token 的成功记录。现在 `api/parser.js` 会抽取 OpenAI-compatible `finish_reason`、Gemini `finishReason`、Anthropic/Responses 停止状态，`data/model-calls.ndjson` 写入 `finish_reason`，流式成功但没有终止事件时标为 `stream_closed_without_terminal_event`。`prompts/runtime/streaming-segmentation.txt` 同步要求段数限制只能压缩内容，不能省略结尾，最终可见句必须自然闭合。
 - 2026-06-05 20:54 +08:00：管理员主回复新增 admin-only 亲密/恋爱感动态规则，位于 must-use `chat_liveness_discipline`；私聊允许更明显的亲近称呼、偏爱和轻微撒娇/吃醋，群聊只保留含蓄偏爱与护短，不公开复述私聊细节或把关系公告化。本次不改已有未提交的 `prompts/admin.txt`。
 - 2026-06-05 20:38 +08:00：同一用户私聊/群聊上下文共享边界调整。短期上下文原本已聚合 `direct:<user>` 与 `qq-group:<group>:user:<user>`，本次移除群聊活人感规则里“不得调用私聊记忆”的硬隔离，改为可把同一用户私聊/群聊记忆作为背景连续性使用；群聊输出仍不得泄露来源或复述私聊细节，除非用户已在群里说出口。私聊规则同步明确允许更私密、更深的情感讨论，以及敏感议题和政治相关批判的自然承接。
 - 2026-06-05 19:44 +08:00：管理员主回复新增专用稳定系统提示词入口 `prompts/admin.txt`。manifest 注册为 `admin_system_prompt`，`priority=-1100`，只在发起用户命中 `ADMIN_USER_IDS` 的主回复 stable system blocks 中注入，并排在 `root_system_prompt` 之前；普通用户、review/planner stage 和全局 `config.SYSTEM_PROMPT` 不包含该文本。空文件保持跳过。当前未跟踪 `prompts/admin.txt` 此前未被消费的原因是未进入 `prompts/prompt-manifest.json`，且文件大小为 0 字节。

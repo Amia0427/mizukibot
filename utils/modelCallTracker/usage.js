@@ -87,8 +87,31 @@ function extractResponseModel(response) {
   );
 }
 
+function extractFinishReason(response) {
+  const data = response?.data ?? response;
+  if (!data || typeof data !== 'object') return '';
+  const choice = Array.isArray(data.choices) ? data.choices[0] : null;
+  const candidate = Array.isArray(data.candidates) ? data.candidates[0] : null;
+  const incompleteDetails = data.incomplete_details || data.incompleteDetails;
+  const incompleteReason = normalizeText(incompleteDetails?.reason);
+  const direct = normalizeText(
+    choice?.finish_reason
+    || choice?.finishReason
+    || candidate?.finishReason
+    || candidate?.finish_reason
+    || data.finish_reason
+    || data.finishReason
+    || data.stop_reason
+    || data.stopReason
+    || data.status
+  );
+  if (incompleteReason) return direct ? `${direct}:${incompleteReason}` : `incomplete:${incompleteReason}`;
+  return direct;
+}
+
 module.exports = {
   extractResponseModel,
+  extractFinishReason,
   extractUsage,
   normalizeUsage
 };
