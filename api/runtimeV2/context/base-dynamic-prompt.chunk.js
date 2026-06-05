@@ -6,6 +6,11 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     ? promptMaterials.affinity
     : getAffinitySettings(userInfo, { userId });
   const routeMeta = options.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const adminPromptContext = resolveMainReplyAdminPromptContext({
+    userId,
+    routeMeta,
+    options
+  });
   const mainReplyPromptMode = resolveMainReplyPromptMode({
     ...options,
     mainReplyPromptMode: options.mainReplyPromptMode || promptMaterials?.mainReplyPromptMode
@@ -192,7 +197,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     });
     const customSnapshot = buildPromptSnapshot(customPromptBlock ? [customPromptBlock] : [], {
       stage: customStage,
-      policyKey: String(options?.routePolicyKey || '').trim() || customStage
+      policyKey: String(options?.routePolicyKey || '').trim() || customStage,
+      isAdmin: adminPromptContext
     });
     return {
       dynamicPrompt: customSnapshot.renderedSystemMessages.map((message) => String(message.content || '').trim()).filter(Boolean).join('\n\n'),
@@ -217,7 +223,10 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   const stablePromptBlocks = normalizeArray(options.cachedStableSystemBlocks).length > 0
     ? normalizeArray(options.cachedStableSystemBlocks).map((block) => ({ ...block }))
     : buildMainStableSystemBlocks({
-      systemPrompt: config.SYSTEM_PROMPT
+      systemPrompt: config.SYSTEM_PROMPT,
+      userId,
+      routeMeta,
+      isAdmin: adminPromptContext
     }).filter(Boolean);
   promptBlocks.push(...stablePromptBlocks);
   const roleplayRuntimeContextText = buildRoleplayRuntimeContextPromptSnippet({
@@ -666,13 +675,17 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   let promptSnapshot = buildPromptSnapshot(snapshotBlocks.filter(Boolean), {
     stage: 'main',
     policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
-    budgetTokens: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens)
+    budgetTokens: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens),
+    isAdmin: adminPromptContext
   });
   let dynamicPrompt = serializePromptBlocks(snapshotBlocks);
   const promptBudget = Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens);
   if (estimateTokens(dynamicPrompt) > promptBudget) {
     const compactPromptBlocks = buildMainStableSystemBlocks({
-      systemPrompt: config.SYSTEM_PROMPT
+      systemPrompt: config.SYSTEM_PROMPT,
+      userId,
+      routeMeta,
+      isAdmin: adminPromptContext
     }).concat(
       [
         createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {

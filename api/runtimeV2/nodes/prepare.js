@@ -237,9 +237,31 @@ function createPrepareNode(deps = {}) {
     return !String(request.customPrompt || '').trim();
   }
 
-  function buildDefaultStableSystemBlocks() {
+  function isAdminPromptRequest(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    if (request.isAdmin === true || routeMeta.isAdmin === true || routeMeta.admin === true) return true;
+    const userId = String(
+      request.userId
+      || request.user_id
+      || routeMeta.userId
+      || routeMeta.user_id
+      || routeMeta.senderId
+      || routeMeta.sender_id
+      || ''
+    ).trim();
+    if (!userId) return false;
+    return normalizeArray(config.ADMIN_USER_IDS)
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+      .includes(userId);
+  }
+
+  function buildDefaultStableSystemBlocks(request = {}) {
     return normalizePromptBlocks(buildMainStableSystemBlocks({
-      systemPrompt: config.SYSTEM_PROMPT
+      systemPrompt: config.SYSTEM_PROMPT,
+      userId: request.userId,
+      routeMeta: request.routeMeta,
+      isAdmin: isAdminPromptRequest(request)
     }));
   }
 
@@ -247,7 +269,7 @@ function createPrepareNode(deps = {}) {
     const stableBlocks = normalizePromptBlocks(blocks);
     if (!isMainPromptGuardEnabled(request)) return stableBlocks;
 
-    const defaults = buildDefaultStableSystemBlocks();
+    const defaults = buildDefaultStableSystemBlocks(request);
     const existingIds = new Set(stableBlocks.map(blockId).filter(Boolean));
     const missingDefaults = defaults.filter((block) => {
       const id = blockId(block);
@@ -565,7 +587,8 @@ function createPrepareNode(deps = {}) {
     const compiledSnapshot = shouldRebuildSnapshot
       ? buildPromptSnapshot(allBlocks, {
         stage: 'main',
-        policyKey: String(request.routePolicyKey || '').trim() || 'direct_chat/main'
+        policyKey: String(request.routePolicyKey || '').trim() || 'direct_chat/main',
+        isAdmin: isAdminPromptRequest(request)
       })
       : null;
     const promptSnapshot = {

@@ -20,6 +20,11 @@ function normalizePromptRelPath(relPath = '') {
   return String(relPath || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
 }
 
+function normalizeAppliesWhen(section = {}) {
+  const value = section?.appliesWhen || section?.applies_when;
+  return value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+}
+
 function isRequiredSystemPersonaPath(relPath = '') {
   return REQUIRED_SYSTEM_PERSONA_PATHS.has(normalizePromptRelPath(relPath));
 }
@@ -36,6 +41,7 @@ function normalizeManifestSectionBlock(section = {}, relPath = '', text = '') {
     conflictTags: Array.isArray(section?.conflictTags || section?.conflict_tags)
       ? (section.conflictTags || section.conflict_tags).map((item) => String(item || '').trim()).filter(Boolean)
       : [],
+    appliesWhen: normalizeAppliesWhen(section),
     source: normalizedRelPath,
     kind: String(section?.kind || 'prompt_asset').trim() || 'prompt_asset',
     content: String(text || '').trim()
@@ -185,10 +191,15 @@ function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeR
 
     const rootSnapshot = buildPromptSnapshot(rootBlocks, {
       stage: 'main',
-      policyKey: 'config/system_prompt/root'
+      policyKey: 'config/system_prompt/root',
+      includeConditionalBlocks: true
+    });
+    const publicRootSnapshot = buildPromptSnapshot(rootBlocks, {
+      stage: 'main',
+      policyKey: 'config/system_prompt/root/public'
     });
     const rootIds = new Set(rootSnapshot.assembledBlocks.map((block) => block.id));
-    const rootPrompt = rootSnapshot.renderedSystemMessages
+    const rootPrompt = publicRootSnapshot.renderedSystemMessages
       .map((message) => String(message.content || '').trim())
       .filter(Boolean)
       .join('\n');

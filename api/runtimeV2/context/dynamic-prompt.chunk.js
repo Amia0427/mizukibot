@@ -4,6 +4,12 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const reviewMode = String(options?.reviewMode || '').trim().toLowerCase();
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  const adminPromptContext = resolveMainReplyAdminPromptContext({
+    userId,
+    routeMeta,
+    options,
+    config: currentConfig
+  });
   const mainReplyPromptMode = resolveMainReplyPromptMode(options);
   const baseDynamicPromptPlan = normalizeDynamicPromptPlan(options);
   const fallbackAffinity = getAffinitySettings(userInfo, { userId });
@@ -17,7 +23,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     String(currentConfig.LIFE_SCHEDULER_ENABLED),
     String(currentConfig.PROMPT_OPTIONAL_BUILD_ENABLED)
   ].join('|'));
-  const systemPromptFingerprint = hashText(String(config.SYSTEM_PROMPT || ''));
+  const systemPromptFingerprint = buildStableSystemPromptFingerprint(currentConfig);
   const promptModeFingerprint = hashText(mainReplyPromptMode);
   const sharedShortTermContext = buildSharedShortTermContextMessages(userId, userInfo, {
     chatHistory: options.chatHistory,
@@ -125,6 +131,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const promptMaterials = await withSoftTimeout(
     () => collectPromptInputs(userInfo, userId, question, customPrompt, {
       ...options,
+      isAdmin: adminPromptContext,
       sharedShortTermContext
     }),
     memoryPromptBudgetMs,
@@ -141,6 +148,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     promptModeFingerprint,
     promptManifestFingerprint: systemPromptFingerprint,
     systemPromptFingerprint,
+    adminPromptContext,
     sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
     sessionCacheFingerprint
   });
@@ -154,6 +162,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     const customBuilt = await withSoftTimeout(
       () => renderPromptLayers(promptMaterials, {
         ...options,
+        isAdmin: adminPromptContext,
         sharedShortTermContext
       }),
       memoryPromptBudgetMs,
@@ -202,6 +211,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const essentialRenderStartedAt = Date.now();
   const stableLayer = stableCacheHit || await renderPromptLayers(promptMaterials, {
     ...options,
+    isAdmin: adminPromptContext,
     sharedShortTermContext,
     includeOptionalContextBlocks: false,
     includePersonaModuleBlocks: false,
@@ -211,6 +221,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   });
   const sessionCandidateLayer = await renderPromptLayers(promptMaterials, {
     ...options,
+    isAdmin: adminPromptContext,
     sharedShortTermContext,
     cachedStableSystemBlocks: stableLayer.stableSystemBlocks,
     includeOptionalContextBlocks: true,
@@ -354,6 +365,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     optionalLayer = await withSoftTimeout(
       () => renderPromptLayers(promptMaterials, {
         ...options,
+        isAdmin: adminPromptContext,
         sharedShortTermContext,
         cachedStableSystemBlocks: stableLayer.stableSystemBlocks,
         includeOptionalContextBlocks: true,
@@ -754,6 +766,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     ].filter(Boolean),
     {
       stage: 'main',
-      policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main'
+      policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
+      isAdmin: adminPromptContext
     }
   );
