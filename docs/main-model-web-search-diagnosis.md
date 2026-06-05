@@ -1,5 +1,9 @@
 # 主回复模型内置联网搜索诊断
 
+更新 2026-06-05 10:17 +08:00：复盘 `qq-group:1092700300:user:1626492260` 的纳斯达克提问，日志实际命中为 `messageId=1637531363`、`requestId=req_0fdfcce493aef4fe`、`2026-06-04T17:15:42Z` 入站，非 17:41 UTC。该请求文本明确包含“联网搜索 / 必须网络搜索再回答”，但当时 planner 输出 `shouldUseTools=false`、`allowedToolCount=0`，route execution 走 `dispatchBranch=direct_reply`、`allowTools=false`，LangGraph 事件里 `allowedTools=[]/routeAllowedTools=[]`，最终主模型直接生成了“刚才偷偷瞄了一眼 / 查也查过了”的假搜索话术。根因是显式 web 需求没有贯穿到 `meta.allowedTools`，且 companion 工具模式会过滤泛用 `web_search/web_fetch`；不是工具执行失败回退。
+
+更新 2026-06-05 10:17 +08:00：修复链路限定在显式搜索需求：新增 `utils/webSearchRequirement.js` 统一识别“联网搜索/必须网络搜索再回答”等强制 web 查询；router 对非记忆 web 查询写入 `meta.explicitWebSearchRequired=true` 和 `allowedTools=['web_search','web_fetch']`；planner catalog/gate、planner normalizer、route execution、主模型 tool schema 和 executor 解析在 companion 模式下只为该标记放行 `web_search/web_fetch`。用户可见 reply guard 同步拦截中文假工具叙事，避免无工具证据时输出“已搜索”口吻。
+
 更新 2026-05-23 23:20 +08:00：新增 `scripts/diagnose-main-model-web-search.js`，用于分别探测普通主回复、管理员主回复和管理员 fallback 参考链路是否具备模型/供应商内置联网搜索能力。
 
 更新 2026-05-23 23:55 +08:00：主回复 Claude Messages 请求默认注入 Anthropic 原生 `web_search_20250305` server tool。诊断脚本新增 `runtime_without_native_search` 和 `runtime_with_native_search` 对照探针，用同一套主回复构建器验证关闭/开启原生搜索后的真实请求结果。

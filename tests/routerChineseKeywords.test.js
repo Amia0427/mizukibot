@@ -206,6 +206,20 @@ assert.strictEqual(textOnlyPlanRoute.meta.toolIntent, 'none');
 assert.strictEqual(textOnlyPlanRoute.facets.outputKind, 'plan');
 assert.strictEqual(textOnlyPlanRoute.facets.sourceScope, 'none');
 
+const explicitNasdaqWebSearchRoute = detectIntent({
+  rawText: '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答',
+  botQQ: '123456',
+  userId: '1626492260',
+  chatType: 'group'
+});
+
+assert.strictEqual(explicitNasdaqWebSearchRoute.topRouteType, 'direct_chat');
+assert.strictEqual(explicitNasdaqWebSearchRoute.meta.toolIntent, 'maybe_tools');
+assert.strictEqual(explicitNasdaqWebSearchRoute.meta.explicitWebSearchRequired, true);
+assert.deepStrictEqual(explicitNasdaqWebSearchRoute.meta.allowedTools, ['web_search', 'web_fetch']);
+assert.strictEqual(explicitNasdaqWebSearchRoute.facets.sourceScope, 'web');
+assert.strictEqual(explicitNasdaqWebSearchRoute.facets.freshness, 'latest');
+
 const fallbackChatRoute = detectIntent({
   rawText: 'hello there',
   botQQ: '123456',

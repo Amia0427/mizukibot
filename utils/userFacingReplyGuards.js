@@ -36,6 +36,9 @@ function isHiddenToolNarration(text = '') {
   if (/^i\s+will\s+(?:search|look up|check|browse)\s+(?:for\s+)?["'`]/i.test(compact)) return true;
   if (/^(?:searching|looking up|checking|browsing)\s+(?:for\s+)?["'`]/i.test(compact)) return true;
   if (/^(?:let me|i(?:'|’)m going to)\s+(?:search|look up|check|browse)\b/i.test(compact)) return true;
+  if (/(?:刚才|刚刚)?偷偷(?:瞄|看)了一眼/i.test(compact)) return true;
+  if (/(?:我|这边|刚才|刚刚).{0,6}(?:去)?(?:网上|网络|联网|网页).{0,6}(?:搜|搜索|查|查询|看|瞄)(?:了|过|完|了一下|了一眼|了一遍)/i.test(compact)) return true;
+  if (/(?:查也查过了|搜也搜过了|搜索过了|联网看过了|网上看了一眼|去网上看了一眼)/i.test(compact)) return true;
   return false;
 }
 

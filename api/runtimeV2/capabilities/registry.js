@@ -9,9 +9,24 @@ const {
 const { GLOBAL_TOOL_REGISTRY } = require('../globalToolRuntimeFacade');
 const { createCapabilityDescriptor, normalizeArray, normalizeObject, normalizeText } = require('../contracts');
 const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
+const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  routeHasExplicitWebSearchRequirement
+} = require('../../../utils/webSearchRequirement');
 
 function resolveStaticToolExecutor(toolName = '', args = {}) {
   const context = normalizeObject(args?.__context, {});
+  if (
+    WEB_LOOKUP_ALLOWED_TOOLS.includes(normalizeText(toolName))
+    && routeHasExplicitWebSearchRequirement({
+      question: context.question || context.routeMeta?.effectiveIntentText || context.routeMeta?.cleanText,
+      cleanText: context.cleanText || context.routeMeta?.cleanText || context.routeMeta?.effectiveIntentText,
+      rawText: context.rawText || context.routeMeta?.rawText,
+      meta: normalizeObject(context.routeMeta, {})
+    })
+  ) {
+    return getRawToolExecutor(toolName);
+  }
   return isAdminPrivateChatContext(context)
     ? getRawToolExecutor(toolName)
     : getToolExecutor(toolName);

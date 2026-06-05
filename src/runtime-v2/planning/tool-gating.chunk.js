@@ -48,6 +48,10 @@ const {
 } = require('./runtime-core.chunk');
 const crypto = require('crypto');
 const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  routeHasExplicitWebSearchRequirement
+} = require('../../../utils/webSearchRequirement');
+const {
   buildExplicitAllowedToolCatalog,
   buildToolCatalogByName
 } = require('./dynamic-plan.chunk');
@@ -58,6 +62,10 @@ const {
 
 function getPromptNormalizer() {
   return require('./prompt-normalizer.chunk');
+}
+
+function isWebLookupTool(toolName = '') {
+  return WEB_LOOKUP_ALLOWED_TOOLS.includes(normalizeText(toolName));
 }
 
 function collectAvailableToolSummary(route = {}, options = {}) {
@@ -88,10 +96,17 @@ function collectAvailableToolSummary(route = {}, options = {}) {
   const explicitFilteredCatalog = hasExplicitAllowedTools
     ? rawToolCatalog.filter((item) => routeAllowedTools.includes(normalizeText(item?.name)))
     : rawToolCatalog;
-  const allowedByCompanionMode = new Set(filterCompanionAllowedTools(
+  const companionAllowedToolNames = filterCompanionAllowedTools(
     explicitFilteredCatalog.map((item) => item.name),
     currentConfig
-  ));
+  );
+  const explicitWebToolNames = routeHasExplicitWebSearchRequirement(route)
+    ? routeAllowedTools.filter((toolName) => isWebLookupTool(toolName))
+    : [];
+  const allowedByCompanionMode = new Set([
+    ...companionAllowedToolNames,
+    ...explicitWebToolNames
+  ]);
   const toolCatalog = explicitFilteredCatalog.filter((item) => allowedByCompanionMode.has(normalizeText(item?.name)));
   return {
     toolCatalog,
@@ -117,6 +132,13 @@ function resolveCompanionPlannerToolGateReason(route = {}, toolNames = [], optio
   if (!isCompanionPlannerMode(options)) return 'not_companion_mode';
   const allowed = normalizeToolNames(toolNames);
   if (allowed.length === 0) return 'no_tools_requested';
+  if (
+    routeHasExplicitWebSearchRequirement(route)
+    && allowed.length > 0
+    && allowed.every((toolName) => isWebLookupTool(toolName))
+  ) {
+    return 'allow_safe_explicit_web_search';
+  }
   const unsafe = allowed.filter((toolName) => !isCompanionPlannerSafeReadTool(toolName));
   if (unsafe.length > 0) return `blocked_unsafe_tools:${unsafe.join(',')}`;
   const cleanText = getPlannerRequestText(route);
@@ -167,6 +189,13 @@ function shouldUseDeterministicPlannerPreflight(route = {}, options = {}) {
   const available = collectAvailableToolSummary(route, options);
   const selected = pickMinimalToolAllowlist(route, available);
   if (selected.length === 0) return false;
+  if (
+    routeHasExplicitWebSearchRequirement(route)
+    && selected.every((toolName) => isWebLookupTool(toolName))
+  ) {
+    return !isCompanionPlannerMode(options)
+      || isCompanionPlannerToolUseAllowed(route, selected, options);
+  }
   if (!selected.every(isCompanionPlannerSafeReadTool)) return false;
   if (isCompanionPlannerMode(options)) {
     return isCompanionPlannerToolUseAllowed(route, selected, options);

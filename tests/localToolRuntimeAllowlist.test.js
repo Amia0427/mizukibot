@@ -1,6 +1,7 @@
 const assert = require('assert');
 
 const { executeStep } = require('../api/runtimeV2/capabilities/scheduler');
+const { buildCapabilityRegistry } = require('../api/runtimeV2/capabilities/registry');
 const { createToolExecutionHelpers } = require('../api/runtimeV2/runtime/toolExecution');
 
 function createToolHelpers(executor) {
@@ -256,6 +257,118 @@ module.exports = (async () => {
     companionConfig.BOT_TOOL_MODE = originalBotToolMode;
     companionConfig.COMPANION_TOOL_MODE_ENABLED = originalCompanionEnabled;
     companionConfig.ADMIN_USER_IDS = originalAdminUserIds;
+  }
+
+  const originalWebSearchExecutor = toolRegistry.TOOL_EXECUTORS.web_search;
+  try {
+    companionConfig.BOT_TOOL_MODE = 'companion';
+    companionConfig.COMPANION_TOOL_MODE_ENABLED = true;
+    toolRegistry.TOOL_EXECUTORS.web_search = async () => 'explicit web search ok';
+
+    assert.strictEqual(toolRegistry.getToolExecutor('web_search'), null);
+    assert.strictEqual(typeof toolRegistry.getRawToolExecutor('web_search'), 'function');
+
+    const companionWebHelpers = createToolExecutionHelpers({
+      config: companionConfig,
+      stableHash(value) {
+        return JSON.stringify(value || {});
+      },
+      summarizeToolLogValue(value) {
+        return typeof value === 'string' ? value : JSON.stringify(value);
+      },
+      getPolicy() {
+        return {};
+      },
+      enforceToolPolicy(_toolName, args) {
+        return args;
+      },
+      shouldRunParallel() {
+        return false;
+      },
+      capabilityRegistry: { byName: new Map() },
+      buildLiveMainConversationSnapshot() {
+        return null;
+      },
+      computeEffectiveAllowedTools(request = {}) {
+        return request.allowedTools || [];
+      },
+      createMemoryCliTurnState(value = {}) {
+        return value;
+      },
+      updateMemoryCliTurnStateAfterError(state = {}) {
+        return state;
+      },
+      updateMemoryCliTurnStateAfterResult(state = {}) {
+        return state;
+      },
+      decideMemoryCliTurnAction() {
+        return { ok: true };
+      },
+      safeParseMemoryCliResult() {
+        return null;
+      },
+      captureToolFailure() {},
+      isPlannerSingleAuthorityEnabled() {
+        return false;
+      },
+      toolExecutors: {}
+    });
+
+    const explicitWebStep = await companionWebHelpers.runToolStep({
+      id: 'explicit_web_search_executor',
+      tool: 'web_search',
+      inputs: { query: '纳斯达克 2026 最高点' }
+    }, {
+      request: {
+        userId: 'u1',
+        routeMeta: {
+          explicitWebSearchRequired: true,
+          effectiveIntentText: '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答'
+        },
+        allowedTools: ['web_search']
+      },
+      execution: {},
+      plan: { steps: [] }
+    }, {
+      node: 'dispatch',
+      allowedTools: ['web_search']
+    });
+
+    assert.strictEqual(explicitWebStep.status, 'completed');
+    assert.strictEqual(explicitWebStep.result, 'explicit web search ok');
+
+    const explicitWebRegistryStep = await executeStep({
+      id: 'explicit_web_search_registry_executor',
+      tool: 'web_search',
+      inputs: { query: '纳斯达克 2026 最高点' }
+    }, {
+      request: {
+        userId: 'u1',
+        routeMeta: {
+          explicitWebSearchRequired: true,
+          effectiveIntentText: '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答'
+        },
+        allowedTools: ['web_search']
+      },
+      execution: {},
+      plan: { steps: [] }
+    }, {
+      node: 'dispatch',
+      registry: buildCapabilityRegistry(),
+      executors: {},
+      helpers: {
+        enforceToolPolicy(_toolName, args) {
+          return args;
+        }
+      }
+    });
+
+    assert.strictEqual(explicitWebRegistryStep.status, 'completed');
+    assert.strictEqual(explicitWebRegistryStep.result, 'explicit web search ok');
+  } finally {
+    toolRegistry.TOOL_EXECUTORS.web_search = originalWebSearchExecutor;
+    companionConfig.BOT_TOOL_MODE = originalBotToolMode;
+    companionConfig.COMPANION_TOOL_MODE_ENABLED = originalCompanionEnabled;
   }
 
   console.log('localToolRuntimeAllowlist.test.js passed');

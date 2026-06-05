@@ -5,6 +5,10 @@ const { getToolSchemaByName } = require('../../toolRegistry');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
 const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
+const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  routeHasExplicitWebSearchRequirement
+} = require('../../../utils/webSearchRequirement');
 const { isToolSchemaValidationError } = require('../../../utils/modelCompat');
 const {
   extractUserFacingDelta,
@@ -56,7 +60,20 @@ function getAllowedToolNames(context = {}) {
   const runtimeConfig = context.runtimeConfig || context.config || config;
   const normalizedTools = normalizeToolNames(context.allowedTools);
   if (isAdminPrivateChatContext(context, runtimeConfig)) return normalizedTools;
-  return filterCompanionAllowedTools(normalizedTools, runtimeConfig);
+  const companionTools = filterCompanionAllowedTools(normalizedTools, runtimeConfig);
+  const routeMeta = context.routeMeta && typeof context.routeMeta === 'object' ? context.routeMeta : {};
+  if (!routeHasExplicitWebSearchRequirement({
+    question: context.question || routeMeta.effectiveIntentText || routeMeta.cleanText,
+    cleanText: context.cleanText || routeMeta.cleanText || routeMeta.effectiveIntentText,
+    rawText: context.rawText || routeMeta.rawText,
+    meta: routeMeta
+  })) {
+    return companionTools;
+  }
+  return normalizeToolNames([
+    ...companionTools,
+    ...normalizedTools.filter((toolName) => WEB_LOOKUP_ALLOWED_TOOLS.includes(toolName))
+  ]);
 }
 
 const filteredToolSchemaCache = new Map();

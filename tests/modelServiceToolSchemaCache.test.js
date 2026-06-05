@@ -39,6 +39,21 @@ try {
   assert.strictEqual(first.length, second.length);
   assert.ok(third.length <= first.length);
 
+  const explicitWebSchemas = service.getFilteredToolSchemas({
+    allowedTools: ['web_search', 'web_fetch'],
+    disableTools: false,
+    question: '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答',
+    routeMeta: {
+      explicitWebSearchRequired: true,
+      effectiveIntentText: '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答'
+    }
+  });
+  assert.deepStrictEqual(
+    explicitWebSchemas.map((schema) => schema.function.name),
+    ['web_search', 'web_fetch'],
+    'explicit web-search requests must keep web tools visible in companion mode'
+  );
+
   const ordinaryPrivateQzoneSchemas = service.getFilteredToolSchemas({
     userId: 'user_1',
     routeMeta: {
