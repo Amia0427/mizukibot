@@ -1,4 +1,5 @@
 const config = require('../config');
+const { classifyRecallPollution } = require('./recallPollutionGuard');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -156,6 +157,10 @@ function evaluateMemoryQuality(item = {}, options = {}) {
   if (confidence < Math.max(0.01, Number(options.minConfidence || config.MEMORY_EXTRACT_MIN_CONFIDENCE || 0.72) || 0.72)) reasons.push('low_confidence');
   if (hasPromptPollution(text)) reasons.push('prompt_pollution');
   if (hasAssistantSelfInstruction(text)) reasons.push('assistant_self_instruction');
+  const pollution = classifyRecallPollution(text, { allowBenignContext: true });
+  if (pollution.polluted) {
+    reasons.push('memory_pollution', ...pollution.reasons);
+  }
   if (hasVolatileLanguage(text)) reasons.push('volatile_or_hypothetical');
   if (stale.expired) reasons.push(stale.reason || 'stale');
 
@@ -178,7 +183,10 @@ function evaluateMemoryQuality(item = {}, options = {}) {
 
   const rejectThreshold = clamp(options.rejectThreshold ?? process.env.MEMORY_QUALITY_REJECT_THRESHOLD ?? 0.26, 0.01, 0.95);
   const candidateThreshold = clamp(options.candidateThreshold ?? process.env.MEMORY_QUALITY_CANDIDATE_THRESHOLD ?? 0.58, rejectThreshold, 0.99);
-  const severe = reasons.includes('prompt_pollution') || reasons.includes('assistant_self_instruction') || reasons.includes('empty_text');
+  const severe = reasons.includes('prompt_pollution')
+    || reasons.includes('assistant_self_instruction')
+    || reasons.includes('memory_pollution')
+    || reasons.includes('empty_text');
   const type = normalizeType(item);
   const stableProfileType = ['summary', 'impression', 'identity', 'like', 'dislike', 'personality', 'hobby'].includes(type);
   const shouldReject = severe || score < rejectThreshold;

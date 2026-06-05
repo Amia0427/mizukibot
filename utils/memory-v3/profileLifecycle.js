@@ -4,6 +4,7 @@ const {
   clampText,
   normalizeText
 } = require('./helpers');
+const { classifyRecallPollution } = require('../recallPollutionGuard');
 
 const LONG_LIVED_FIELDS = new Set([
   'identity',
@@ -130,6 +131,8 @@ function textQualityReasons(type = '', value = '', options = {}) {
   if (text.length > Math.max(40, configNumber('MEMORY_PROFILE_MAX_TEXT_CHARS', 220))) reasons.push('too_long');
   if (GENERIC_TEXT_RE.test(text)) reasons.push('generic_text');
   if (/^(用户|我|他|她|ta)?(喜欢|不喜欢|讨厌|爱好|目标|身份|性格)[:：]?$/.test(text)) reasons.push('label_only');
+  const pollution = classifyRecallPollution(text, { allowBenignContext: true });
+  if (pollution.polluted) reasons.push('memory_pollution', ...pollution.reasons);
   const normalizedType = normalizeText(type).toLowerCase();
   if (normalizedType === 'topic' && text.length < 4) reasons.push('topic_too_short');
   return reasons;

@@ -4,7 +4,7 @@ const config = require('../config');
 const { getJsonStore } = require('./storeRegistry');
 const { normalizeMessageContent, trimTextByTokenBudget } = require('./contextBudget');
 const { isUnsafeUserFacingReply } = require('./userFacingReplyGuards');
-const { isBadRoleplayRefusalText } = require('./recallPollutionGuard');
+const { isPollutedMemoryText } = require('./recallPollutionGuard');
 const {
   defaultShortTermState,
   normalizeShortTermState,
@@ -114,7 +114,7 @@ function normalizeBridgeMessage(message, options = {}) {
 
   const content = String(normalizeMessageContent(message?.content) || '').trim();
   if (!content) return null;
-  if (role === 'assistant' && (isUnsafeUserFacingReply(content) || isBadRoleplayRefusalText(content, { allowBenignContext: false }))) return null;
+  if (role === 'assistant' && (isUnsafeUserFacingReply(content) || isPollutedMemoryText(content, { allowBenignContext: false }))) return null;
 
   return { role, content };
 }
@@ -193,22 +193,22 @@ function sanitizeBridgeSessionEntry(sessionKey, entry, now = Date.now()) {
     shortTermState.summary = '';
     shortTermState.summarySource = '';
   }
-  if (isBadRoleplayRefusalText(shortTermState.summary, { allowBenignContext: false })) {
+  if (isPollutedMemoryText(shortTermState.summary, { allowBenignContext: false })) {
     shortTermState.summary = '';
     shortTermState.summarySource = '';
   }
-  if (isBadRoleplayRefusalText(shortTermState.carryOverUserTurn, { allowBenignContext: true })) {
+  if (isPollutedMemoryText(shortTermState.carryOverUserTurn, { allowBenignContext: true })) {
     shortTermState.carryOverUserTurn = '';
   }
-  if (isBadRoleplayRefusalText(shortTermState.activeTopic, { allowBenignContext: true })) {
+  if (isPollutedMemoryText(shortTermState.activeTopic, { allowBenignContext: true })) {
     shortTermState.activeTopic = '';
   }
   shortTermState.openLoops = (Array.isArray(shortTermState.openLoops) ? shortTermState.openLoops : [])
-    .filter((item) => !isBadRoleplayRefusalText(item, { allowBenignContext: true }));
+    .filter((item) => !isPollutedMemoryText(item, { allowBenignContext: true }));
   shortTermState.assistantCommitments = (Array.isArray(shortTermState.assistantCommitments) ? shortTermState.assistantCommitments : [])
-    .filter((item) => !isBadRoleplayRefusalText(item, { allowBenignContext: true }));
+    .filter((item) => !isPollutedMemoryText(item, { allowBenignContext: true }));
   shortTermState.userConstraints = (Array.isArray(shortTermState.userConstraints) ? shortTermState.userConstraints : [])
-    .filter((item) => !isBadRoleplayRefusalText(item, { allowBenignContext: true }));
+    .filter((item) => !isPollutedMemoryText(item, { allowBenignContext: true }));
   const interactionState = normalizeInteractionState(shortTermState.interaction);
   const sceneState = normalizeSceneState(shortTermState.scene);
   const expressionState = normalizeExpressionState(shortTermState.expression);

@@ -18,7 +18,7 @@ const INTERNAL_CONTEXT_MARKERS = [
   '[内部检查]'
 ];
 
-const { isBadRoleplayRefusalText } = require('./recallPollutionGuard');
+const { isPollutedMemoryText } = require('./recallPollutionGuard');
 
 function normalizeReplyGuardText(text = '') {
   return String(text || '').replace(/\s+/g, ' ').trim();
@@ -51,7 +51,7 @@ function isUnsafeUserFacingReply(text = '') {
   if (!compact) return false;
   return isInternalContextLeak(compact)
     || isHiddenToolNarration(compact)
-    || isBadRoleplayRefusalText(compact, { allowBenignContext: false });
+    || isPollutedMemoryText(compact, { allowBenignContext: false });
 }
 
 module.exports = {

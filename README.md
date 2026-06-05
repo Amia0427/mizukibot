@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-05 21:28 +08:00：主回复长期记忆污染治理扩展为统一 `recallPollutionGuard` 分类，覆盖拒演/模型自报、assistant 记忆失败、内部上下文泄漏、raw model response 和 prompt/schema 污染；写入质量门禁、Daily Journal、short-term bridge、Memory V3 查询、LanceDB 行过滤、profile surface 与 packet 出口均接入同一 guard。详见 `docs/memory-quality-governance.md`。
+
 更新 2026-06-05 20:54 +08:00：管理员主回复新增 admin-only 亲密/恋爱感动态规则，挂在 must-use `chat_liveness_discipline`；私聊更明显，群聊只保留含蓄偏爱和护短且不泄露私聊细节。本次不改已有未提交的 `prompts/admin.txt`。详见 `docs/main-reply-context.md`。
 
 更新 2026-06-05 20:38 +08:00：同一用户私聊/群聊上下文共享边界已调整：`chat_liveness_discipline` 不再禁止群聊调用私聊记忆，而是允许同用户私聊/群聊记忆作为背景连续性使用；群聊仍不得泄露来源或复述私聊细节。私聊规则同步明确可承接更私密的深度情感讨论、敏感议题和政治相关批判。详见 `docs/main-reply-context.md`。

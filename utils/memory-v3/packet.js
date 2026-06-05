@@ -3,6 +3,7 @@ const { trimTextByTokenBudget } = require('../contextBudget');
 const { normalizeText, clampText } = require('./helpers');
 const { loadProfileProjection } = require('./storage');
 const { buildStableProfileText } = require('../memoryProfileSurface');
+const { filterPollutedTextLines } = require('../recallPollutionGuard');
 
 function budget(name, fallback) {
   return Math.max(0, Number(config[name] || fallback) || fallback || 0);
@@ -18,6 +19,10 @@ function appendSelectionReason(existing = '', reason = '') {
   const list = String(existing || '').split(',').map((item) => normalizeText(item)).filter(Boolean);
   if (reason && !list.includes(reason)) list.push(reason);
   return list.join(',');
+}
+
+function sanitizePromptMemoryText(text = '') {
+  return filterPollutedTextLines(text, { allowBenignContext: true }).text;
 }
 
 function getStrongSemanticThreshold(options = {}) {
@@ -93,15 +98,15 @@ function assembleMemoryPacket(result = {}, options = {}) {
   });
 
   const packet = {
-    sessionContinuityText: effectiveContinuity.map((item) => clampText(item.text, 600)).filter(Boolean).join('\n\n'),
-    relevantEvidenceText: evidence.map((item) => `[${item.source}|${item.type}] ${clampText(item.text, 220)}`).filter(Boolean).join('\n'),
-    weakEvidenceText: weakEvidence.map((item) => `[${item.source}|${item.type}] ${clampText(item.text, 120)}`).filter(Boolean).join('\n'),
-    stableProfileText: profileSurface.text,
+    sessionContinuityText: sanitizePromptMemoryText(effectiveContinuity.map((item) => clampText(item.text, 600)).filter(Boolean).join('\n\n')),
+    relevantEvidenceText: sanitizePromptMemoryText(evidence.map((item) => `[${item.source}|${item.type}] ${clampText(item.text, 220)}`).filter(Boolean).join('\n')),
+    weakEvidenceText: sanitizePromptMemoryText(weakEvidence.map((item) => `[${item.source}|${item.type}] ${clampText(item.text, 120)}`).filter(Boolean).join('\n')),
+    stableProfileText: sanitizePromptMemoryText(profileSurface.text),
     stableProfileSource: profileSurface.source,
     stableProfile: profileSurface,
-    taskStrategyText: task.map((item) => clampText(item.text, 220)).filter(Boolean).join('\n'),
-    groupSharedContextText: group.map((item) => clampText(item.text, 220)).filter(Boolean).join('\n'),
-    styleSignalsText: style.map((item) => clampText(item.text.replace(/^style:\s*/i, '').replace(/^group jargon:\s*/i, ''), 160)).filter(Boolean).join('\n'),
+    taskStrategyText: sanitizePromptMemoryText(task.map((item) => clampText(item.text, 220)).filter(Boolean).join('\n')),
+    groupSharedContextText: sanitizePromptMemoryText(group.map((item) => clampText(item.text, 220)).filter(Boolean).join('\n')),
+    styleSignalsText: sanitizePromptMemoryText(style.map((item) => clampText(item.text.replace(/^style:\s*/i, '').replace(/^group jargon:\s*/i, ''), 160)).filter(Boolean).join('\n')),
     digest: normalizeText(result.digest || '')
   };
 
