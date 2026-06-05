@@ -1,8 +1,3 @@
-    if (noticeResult.handled) {
-      await maybeHandlePrivateTypingNotice(noticeResult);
-      return;
-    }
-    if (shouldSkipNonGroupMessage(msg)) return;
     if (inboundDeduper.shouldSkip(msg)) {
       console.log('[message] deduped', {
         messageId: msg.message_id,

@@ -316,6 +316,13 @@
   async function handleIncomingMessage(msg) {
     const handlerStartedAt = Date.now();
     const rawMessageTimestampMs = getRawMessageTimestampMs(msg);
+    const noticeResult = shouldHandleNotice(msg, config);
+    if (noticeResult.handled) {
+      await maybeHandlePrivateTypingNotice(noticeResult);
+      return;
+    }
+    if (shouldSkipNonGroupMessage(msg)) return;
+
     const requestTrace = createRequestTrace({
       source: 'message_ingress',
       messageId: String(msg?.message_id || '').trim(),
@@ -354,5 +361,3 @@
       rawMessageTimestampMs,
       lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, handlerStartedAt - rawMessageTimestampMs) : null
     });
-
-    const noticeResult = shouldHandleNotice(msg, config);
