@@ -44,6 +44,10 @@ const {
   shouldUseToolBackedSummary
 } = require('./intentScoring');
 const { getNotebookAllowedTools } = require('./memoryTools');
+const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  isExplicitWebSearchRequired
+} = require('../../utils/webSearchRequirement');
 
 const ADMIN_USER_IDS = new Set(config.ADMIN_USER_IDS || []);
 const REFUSE_BYPASS_USER_IDS = new Set(config.REFUSE_BYPASS_USER_IDS || []);
@@ -281,7 +285,14 @@ function buildPreferredToolRoute({
     topRouteType: 'direct_chat',
     intent: { risk: 'low', toolNeed, executionMode: 'staged', needsPlanning: false, needsMemory },
     facets: { modality: 'text', sourceScope, domain: needsMemory ? 'personal' : 'general', outputKind: 'answer', freshness },
-    meta: { reason, allowedTools, chatMode: 'text_chat', toolIntent: 'maybe_tools', responseIntent: 'answer' }
+    meta: {
+      reason,
+      ...(Array.isArray(allowedTools) ? { allowedTools } : {}),
+      ...(isExplicitWebSearchRequired(cleanText) && !needsMemory ? { explicitWebSearchRequired: true } : {}),
+      chatMode: 'text_chat',
+      toolIntent: 'maybe_tools',
+      responseIntent: 'answer'
+    }
   });
 }
 
@@ -524,7 +535,9 @@ function matchLegacyFineDirectLocalRoute({ rawText = '', cleanText = '', imageUr
       toolNeed: prefersMemory && prefersWeb ? ['mixed'] : (prefersMemory ? ['local-read'] : ['web']),
       needsMemory: prefersMemory,
       freshness: prefersWeb ? 'latest' : 'unknown',
-      allowedTools: prefersMemory ? getNotebookAllowedTools({ needsMemory: true }) : undefined
+      allowedTools: prefersMemory
+        ? getNotebookAllowedTools({ needsMemory: true })
+        : (isExplicitWebSearchRequired(cleanText) ? [...WEB_LOOKUP_ALLOWED_TOOLS] : undefined)
     });
   }
 
@@ -742,7 +755,7 @@ function matchLegacyFineDirectLocalRoute({ rawText = '', cleanText = '', imageUr
     const toolNeed = domain === 'personal' ? ['local-read'] : (imageUrl ? ['image'] : ['web']);
     const allowedTools = domain === 'personal'
       ? getNotebookAllowedTools({ needsMemory: true })
-      : undefined;
+      : (isExplicitWebSearchRequired(cleanText) ? [...WEB_LOOKUP_ALLOWED_TOOLS] : undefined);
 
     return makeRoute({
       confidence: lookupScore,
@@ -879,7 +892,7 @@ function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = 
         : 'answer';
   const allowedTools = sourceScope === 'notebook'
     ? getNotebookAllowedTools({ needsMemory: s.needsMemory })
-    : undefined;
+    : (sourceScope === 'web' && isExplicitWebSearchRequired(cleanText) ? [...WEB_LOOKUP_ALLOWED_TOOLS] : undefined);
 
   return makeRoute({
     confidence: s.isExplicitAction || s.hasImage || s.needsTools || s.isPlanLike || s.isTransformLike ? 0.86 : 0.6,
@@ -905,6 +918,7 @@ function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = 
       reason: s.isExplicitAction ? 'explicit-action' : 'direct-chat',
       localRuleId: s.isExplicitAction ? 'explicit-action' : 'direct-chat',
       ...(allowedTools ? { allowedTools } : {}),
+      ...(sourceScope === 'web' && isExplicitWebSearchRequired(cleanText) ? { explicitWebSearchRequired: true } : {}),
       ...(s.hasSafetyBoundary ? { safetyBoundary: true } : {}),
       ...(s.memoryNeed?.needsMemory ? {
         needsMemoryReason: s.memoryNeed.reason || 'memory_dependency',

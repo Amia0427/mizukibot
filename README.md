@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-05 10:17 +08:00：显式“联网搜索/必须网络搜索再回答”链路已修复：路由会标记 `explicitWebSearchRequired` 并暴露 `web_search/web_fetch`，companion 模式下 planner、route execution、主模型工具 schema 和 executor 都只对该显式需求放行 web 工具；用户可见回复 guard 同步拦截“刚才偷偷瞄了一眼/查也查过了”这类假搜索话术。详见 `docs/main-model-web-search-diagnosis.md`。
+
 更新 2026-06-05 10:11 +08:00：消息入口 request trace 降噪：`handle_incoming_start` 现在只在 OneBot `post_type=message` 且 `message_type=group/private` 后创建；NapCat 30 秒 heartbeat、空包和 notice 不再写入 `data/request-trace.ndjson` 的空 `messageId/groupId/userId` 行。详见 `docs/runtime-latency-diagnosis.md`。
 
 更新 2026-06-05 08:51 +08:00：主回复新增 `roleplay_inner_protocol` 静默内在审稿动态块，和 `roleplay_runtime_context` / `chat_liveness_discipline` 一起强制进入主回复；模型回复前内部检查现场、人设动机、关系距离、活人破绽和最终压缩，只输出最终用户可见文本。用户可见清理同步剥离明显 `reasoning_content` / `internal_check` / `[RoleplayInnerProtocol]` 泄漏，`/cot` 调试保留。详见 `docs/main-reply-context.md`。

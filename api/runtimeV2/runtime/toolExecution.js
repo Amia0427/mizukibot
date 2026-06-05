@@ -5,6 +5,10 @@ const {
 } = require('../../../utils/localToolAccess');
 const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
 const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  routeHasExplicitWebSearchRequirement
+} = require('../../../utils/webSearchRequirement');
+const {
   normalizeObject,
   normalizeArray,
   normalizeText,
@@ -63,6 +67,16 @@ function createToolExecutionHelpers(deps = {}) {
       || isAdminPrivateChatContext(runtimeOptions, config);
   }
 
+  function shouldUseExplicitWebExecutorBypass(toolName = '', runtimeOptions = {}) {
+    return WEB_LOOKUP_ALLOWED_TOOLS.includes(normalizeText(toolName))
+      && routeHasExplicitWebSearchRequirement({
+        question: runtimeOptions.question || runtimeOptions.routeMeta?.effectiveIntentText || runtimeOptions.routeMeta?.cleanText,
+        cleanText: runtimeOptions.cleanText || runtimeOptions.routeMeta?.cleanText || runtimeOptions.routeMeta?.effectiveIntentText,
+        rawText: runtimeOptions.rawText || runtimeOptions.routeMeta?.rawText,
+        meta: normalizeObject(runtimeOptions.routeMeta, {})
+      });
+  }
+
   function findToolExecutor(toolName = '', runtimeOptions = {}) {
     const name = normalizeText(toolName);
     if (!name) return null;
@@ -76,6 +90,9 @@ function createToolExecutionHelpers(deps = {}) {
       if (resolved) return resolved;
     }
     const runtimeExecutors = normalizeObject(runtimeOptions.toolExecutors, {});
+    if (shouldUseExplicitWebExecutorBypass(name, runtimeOptions)) {
+      return runtimeExecutors[name] || getRawToolExecutor(name);
+    }
     if (runtimeExecutors[name]) return runtimeExecutors[name];
     const configuredExecutors = normalizeObject(toolExecutors, {});
     if (bypassCompanionFilter) {

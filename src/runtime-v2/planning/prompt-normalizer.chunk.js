@@ -52,6 +52,10 @@ const {
   shouldForceWebSearchFetchPlan
 } = require('./tool-selection.chunk');
 const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  routeHasExplicitWebSearchRequirement
+} = require('../../../utils/webSearchRequirement');
+const {
   buildAvailableContextSignals,
   buildRuleBasedPlannerDecision,
   isDynamicPromptBlockAvailable,
@@ -288,6 +292,10 @@ function normalizeRuntimeBindingDescriptor(step = {}, route = {}) {
   return rawBinding ? { ...rawBinding } : null;
 }
 
+function isWebLookupTool(toolName = '') {
+  return WEB_LOOKUP_ALLOWED_TOOLS.includes(normalizeText(toolName));
+}
+
 function pruneUnavailableDynamicPromptPlan(plan = {}, route = {}, options = {}) {
   const availableContextSignals = buildAvailableContextSignals(route, options);
   const enabledBlockIds = normalizeArray(plan.enabledBlockIds)
@@ -477,6 +485,15 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     taskShape = 'tool_augmented_reply';
     normalizedByRule = true;
     normalizationReason = 'force memory recall tool plan';
+  }
+  if (
+    routeHasExplicitWebSearchRequirement(route)
+    && normalizedAllowedToolNames.some((toolName) => isWebLookupTool(toolName))
+    && taskShape === 'fast_reply'
+  ) {
+    taskShape = 'tool_augmented_reply';
+    normalizedByRule = true;
+    normalizationReason = 'force explicit web search tool plan';
   }
   if (isCompanionPlannerMode(options) && !isCompanionPlannerToolUseAllowed(route, normalizedAllowedToolNames, options)) {
     toolGateReason = normalizedAllowedToolNames.length > 0

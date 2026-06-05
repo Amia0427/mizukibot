@@ -13,6 +13,10 @@ const {
 const config = require('../config');
 const { filterCompanionAllowedTools } = require('../utils/companionTools');
 const { isAdminUserId, isPrivateChatAccessAllowed } = require('../utils/privilegedPrivateChat');
+const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  routeHasExplicitWebSearchRequirement
+} = require('../utils/webSearchRequirement');
 
 // routeExecution consumes only canonical contract data plus planner output.
 // It must not infer a new top route type or treat routeProfiles as routing truth.
@@ -184,7 +188,13 @@ function isPrivateSafeTool(toolName = '') {
 function filterAllowedToolsForChatType(route = {}, allowedTools = [], runtimeConfig = config) {
   const rawTools = normalizeToolNames(allowedTools);
   if (isPrivateAdminUser(route, runtimeConfig)) return rawTools;
-  const normalizedTools = filterCompanionAllowedTools(rawTools, runtimeConfig);
+  const companionTools = filterCompanionAllowedTools(rawTools, runtimeConfig);
+  const normalizedTools = routeHasExplicitWebSearchRequirement(route)
+    ? normalizeToolNames([
+        ...companionTools,
+        ...rawTools.filter((toolName) => WEB_LOOKUP_ALLOWED_TOOLS.includes(toolName))
+      ])
+    : companionTools;
   if (normalizeChatType(route) !== 'private') return normalizedTools;
   if (isPrivateActionExempt(route, runtimeConfig)) return normalizedTools;
   return normalizedTools.filter((toolName) => isPrivateSafeTool(toolName));

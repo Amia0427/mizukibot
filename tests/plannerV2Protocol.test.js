@@ -340,6 +340,48 @@ module.exports = (async () => {
   assert.strictEqual(companionMemoryPreflight.steps[0].tool, 'memory_cli');
   assert.strictEqual(companionMemoryPreflight.plannerMeta.toolGateReason, 'allow_safe_memory_recall');
 
+  const explicitNasdaqWebSearchPreflight = await planRequestV2({
+    question: '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答',
+    cleanText: '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答',
+    topRouteType: 'direct_chat',
+    routeMeta: {
+      chatMode: 'text_chat',
+      toolIntent: 'maybe_tools',
+      responseIntent: 'answer',
+      allowedTools: ['web_search', 'web_fetch'],
+      explicitWebSearchRequired: true
+    },
+    route: {
+      question: '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答',
+      cleanText: '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答',
+      topRouteType: 'direct_chat',
+      meta: {
+        chatMode: 'text_chat',
+        toolIntent: 'maybe_tools',
+        responseIntent: 'answer',
+        allowedTools: ['web_search', 'web_fetch'],
+        explicitWebSearchRequired: true
+      },
+      intent: {
+        needsMemory: false
+      },
+      facets: {
+        sourceScope: 'web',
+        freshness: 'latest'
+      }
+    },
+    allowedTools: ['web_search', 'web_fetch'],
+    config: {
+      COMPANION_TOOL_MODE_ENABLED: true
+    }
+  });
+
+  assert.strictEqual(explicitNasdaqWebSearchPreflight.mode, 'tool_plan');
+  assert.deepStrictEqual(explicitNasdaqWebSearchPreflight.allowedToolNames, ['web_search']);
+  assert.strictEqual(explicitNasdaqWebSearchPreflight.steps[0].tool, 'web_search');
+  assert.strictEqual(explicitNasdaqWebSearchPreflight.plannerMeta.decisionSource, 'rule_preflight');
+  assert.strictEqual(explicitNasdaqWebSearchPreflight.plannerMeta.toolGateReason, 'allow_safe_explicit_web_search');
+
   const notebookCorrection = await planRequestV2({
     question: '帮我查一下我笔记里关于 LangGraph 的内容',
     cleanText: '帮我查一下我笔记里关于 LangGraph 的内容',
