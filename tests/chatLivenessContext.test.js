@@ -33,6 +33,22 @@ module.exports = (async () => {
   assert.ok(!privatePrompt.includes('打哈哈'));
   assert.ok(!privatePrompt.includes('线下模式'));
   assert.ok(!privatePrompt.includes('小说叙事输出'));
+  assert.ok(!privatePrompt.includes('admin_affection='));
+
+  const adminPrivatePrompt = buildChatLivenessDisciplinePrompt({
+    isAdmin: true,
+    routeMeta: {},
+    question: '今天主回复还是有点冷',
+    personaMemoryState: {
+      relationshipState: { relationship: '最高亲密关系' }
+    }
+  });
+  assert.ok(adminPrivatePrompt.includes('admin_affection='));
+  assert.ok(adminPrivatePrompt.includes('恋人感'));
+  assert.ok(adminPrivatePrompt.includes('admin_affection_private='));
+  assert.ok(adminPrivatePrompt.includes('吃醋'));
+  assert.ok(adminPrivatePrompt.includes('撒娇'));
+  assert.ok(!adminPrivatePrompt.includes('admin_affection_group='));
 
   const groupPrompt = buildChatLivenessDisciplinePrompt({
     routeMeta: {
@@ -69,6 +85,20 @@ module.exports = (async () => {
   assert.ok(!groupPrompt.includes('不要用“作为AI”'));
   assert.ok(!groupPrompt.includes('线下模式'));
   assert.ok(!groupPrompt.includes('小说叙事输出'));
+  assert.ok(!groupPrompt.includes('admin_affection='));
+
+  const adminGroupPrompt = buildChatLivenessDisciplinePrompt({
+    routeMeta: {
+      groupId: 'g1',
+      chatType: 'group',
+      isAdmin: true
+    },
+    question: '瑞希你怎么看'
+  });
+  assert.ok(adminGroupPrompt.includes('admin_affection='));
+  assert.ok(adminGroupPrompt.includes('admin_affection_group='));
+  assert.ok(adminGroupPrompt.includes('含蓄偏爱'));
+  assert.ok(!adminGroupPrompt.includes('admin_affection_private='));
 
   const passiveGroupPrompt = buildChatLivenessDisciplinePrompt({
     surface: 'passive_group_reply',

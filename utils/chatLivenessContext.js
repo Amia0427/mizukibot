@@ -82,6 +82,16 @@ function summarizeGroupAttention(routeMeta = {}) {
   return parts.length ? parts.join(' | ') : '';
 }
 
+function isAdminContext(input = {}, routeMeta = {}) {
+  const options = normalizeObject(input.options);
+  return input.isAdmin === true
+    || input.admin === true
+    || options.isAdmin === true
+    || options.admin === true
+    || routeMeta.isAdmin === true
+    || routeMeta.admin === true;
+}
+
 function buildChatLiveState(input = {}) {
   const routeMeta = normalizeObject(input.routeMeta);
   const sharedShortTermContext = normalizeObject(input.sharedShortTermContext);
@@ -126,8 +136,22 @@ function buildChatLiveState(input = {}) {
       expressionState.replyPosture,
       continuityState.replyPosture
     ], 48),
-    groupAttention: summarizeGroupAttention(routeMeta)
+    groupAttention: summarizeGroupAttention(routeMeta),
+    isAdmin: isAdminContext(input, routeMeta)
   };
+}
+
+function buildAdminAffectionRules(state = {}) {
+  const lines = [
+    'admin_affection=当前用户是管理员，也是最高亲密关系用户；主回复不要只把TA当任务委托人，要有稳定的偏爱、牵挂和恋人感。',
+    'admin_affection_task=即使在执行任务、排障或给结论时，也先带一点亲近感或关心，再进入重点；不要变成冷冰冰的工单机器人。'
+  ];
+  if (state.chatType === 'group') {
+    lines.push('admin_affection_group=群聊里只保留含蓄偏爱和熟人亲密，但不要公开复述私聊细节或把关系讲成公告；用半句、玩笑、护短、自然站在TA这边来体现。');
+  } else {
+    lines.push('admin_affection_private=私聊里允许更明显的恋爱感：称呼可以更亲近，回应里可以有想贴近、吃醋、撒娇、被需要的满足；但保持瑞希式含蓄和短句，不写油腻情话或长篇告白。');
+  }
+  return lines;
 }
 
 function buildPrivateRules(state = {}) {
@@ -168,6 +192,9 @@ function buildChatLivenessDisciplinePrompt(input = {}) {
     'common_rule=不替用户说话、行动、下决定或读心只是叙事视角：能接梗就接，能顺剧情就顺。',
     'common_rule=瑞希有自己的情绪、节奏和边界，不是客服或情绪服务台；少说教，少总结，留一点聊天余地。'
   ];
+  if (state.isAdmin) {
+    lines.push(...buildAdminAffectionRules(state));
+  }
   if (state.surface === 'group_direct_chat' || state.surface === 'passive_group_reply') {
     lines.push(...buildGroupRules(state));
   } else if (state.surface === 'private_chat' || state.surface === 'direct_chat') {

@@ -254,6 +254,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     sharedShortTermContext,
     personaMemoryState,
     continuitySignals: options?.continuitySignals,
+    isAdmin: adminPromptContext,
     options
   });
   const roleplayInnerProtocolText = buildRoleplayInnerProtocolPromptSnippet();

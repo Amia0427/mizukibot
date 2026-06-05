@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-05 20:38 +08:00
+更新时间：2026-06-05 20:54 +08:00
 
 ## 已调整
 
+- 2026-06-05 20:54 +08:00：管理员主回复新增 admin-only 亲密/恋爱感动态规则，位于 must-use `chat_liveness_discipline`；私聊允许更明显的亲近称呼、偏爱和轻微撒娇/吃醋，群聊只保留含蓄偏爱与护短，不公开复述私聊细节或把关系公告化。本次不改已有未提交的 `prompts/admin.txt`。
 - 2026-06-05 20:38 +08:00：同一用户私聊/群聊上下文共享边界调整。短期上下文原本已聚合 `direct:<user>` 与 `qq-group:<group>:user:<user>`，本次移除群聊活人感规则里“不得调用私聊记忆”的硬隔离，改为可把同一用户私聊/群聊记忆作为背景连续性使用；群聊输出仍不得泄露来源或复述私聊细节，除非用户已在群里说出口。私聊规则同步明确允许更私密、更深的情感讨论，以及敏感议题和政治相关批判的自然承接。
 - 2026-06-05 19:44 +08:00：管理员主回复新增专用稳定系统提示词入口 `prompts/admin.txt`。manifest 注册为 `admin_system_prompt`，`priority=-1100`，只在发起用户命中 `ADMIN_USER_IDS` 的主回复 stable system blocks 中注入，并排在 `root_system_prompt` 之前；普通用户、review/planner stage 和全局 `config.SYSTEM_PROMPT` 不包含该文本。空文件保持跳过。当前未跟踪 `prompts/admin.txt` 此前未被消费的原因是未进入 `prompts/prompt-manifest.json`，且文件大小为 0 字节。
 - 2026-06-05 10:37 +08:00：私聊最新输入后旧回复仍插回来的上下文错位已修复。根因不是 prompt 缺上下文，而是 freshness guard 只绑定 continuous flush 的 `sessionKey/flushVersion`；私聊单条 synthetic meta 曾是空 sessionKey，且同一用户新消息在 deferred/排队阶段没有提前推进 handler 级 freshness，导致旧模型请求重试完成后还能发送。现在原始入站消息在自消息过滤后立即推进 `direct:<user>` / 群 session freshness token，正式发送前使用 `freshnessSessionKey` 检查；连续消息合并会保留最后一条输入的 token，避免图片+补充文字同轮被自己误杀。
