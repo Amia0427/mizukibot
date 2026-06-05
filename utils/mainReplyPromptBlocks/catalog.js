@@ -27,6 +27,15 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
     avoidWhen: 'Skip only outside chat roleplay replies or when no current-turn chat surface exists.'
   },
   {
+    blockId: 'roleplay_inner_protocol',
+    label: 'Roleplay Inner Protocol',
+    lane: 'dynamic_context',
+    category: 'roleplay_context',
+    defaultPolicy: 'must_use_when_available',
+    useWhen: 'Always use for main roleplay replies as a silent pre-reply check for surface, Mizuki motive, relationship distance, live-chat rhythm, and anti-leak final compression.',
+    avoidWhen: 'Skip only outside main roleplay replies.'
+  },
+  {
     blockId: 'affinity_level',
     label: 'Affinity Level',
     lane: 'dynamic_context',
@@ -238,6 +247,12 @@ const DYNAMIC_CONTEXT_BLOCK_SPEC_OVERRIDES = Object.freeze({
     emptyPolicy: 'reject_optional_empty',
     mustUseWhen: 'main roleplay reply has current-turn private/group chat surface',
     budget: { configKey: '', hardCapTokens: 360 }
+  },
+  roleplay_inner_protocol: {
+    criticality: 'critical',
+    emptyPolicy: 'reject_optional_empty',
+    mustUseWhen: 'main roleplay reply needs silent pre-reply roleplay quality checks',
+    budget: { configKey: '', hardCapTokens: 420 }
   },
   affinity_level: {
     criticality: 'optional',
