@@ -272,6 +272,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     continuitySignals: options?.continuitySignals,
     options
   });
+  const roleplayInnerProtocolText = buildRoleplayInnerProtocolPromptSnippet();
 
   if (roleplayRuntimeContextText) {
     extraBlocks.push(createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {
@@ -293,6 +294,20 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       priority: 206,
       authority: 'runtime_context',
       kind: 'chat_liveness',
+      source: 'runtime',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true
+      }
+    }));
+  }
+
+  if (roleplayInnerProtocolText) {
+    extraBlocks.push(createPromptBlock('roleplay_inner_protocol', 'Roleplay Inner Protocol', roleplayInnerProtocolText, {
+      stage: 'main',
+      priority: 207,
+      authority: 'runtime_context',
+      kind: 'roleplay_inner_protocol',
       source: 'runtime',
       lane: 'dynamic_context',
       meta: {
@@ -555,6 +570,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     personaModules: dynamicPromptPlan.personaModules,
     hasRoleplayRuntimeContext: Boolean(roleplayRuntimeContextText),
     hasChatLivenessDiscipline: Boolean(chatLivenessDisciplineText),
+    hasRoleplayInnerProtocol: Boolean(roleplayInnerProtocolText),
     hasAffinityState: true,
     hasShortTermContinuity: combinedDynamicBlocks.some((item) => item?.id === 'short_term_continuity'),
     hasMemoryRecallPolicy: combinedDynamicBlocks.some((item) => item?.id === 'memory_recall_policy' || normalizeText(item?.meta?.blockId) === 'memory_recall_policy')
@@ -579,7 +595,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   });
   const plannerProvidedDynamicPlan = dynamicPromptPlan.plannerProvided === true;
   const shouldUseHeuristicDynamicPlan = !plannerProvidedDynamicPlan;
-  const runtimeAddedIds = ['roleplay_runtime_context', 'chat_liveness_discipline'];
+  const runtimeAddedIds = ['roleplay_runtime_context', 'chat_liveness_discipline', 'roleplay_inner_protocol'];
   if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
     runtimeAddedIds.push('group_direct_chat_style_guard', 'persona_module:scene_group_insert');
   }

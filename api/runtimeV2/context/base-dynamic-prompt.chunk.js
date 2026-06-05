@@ -247,6 +247,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     continuitySignals: options?.continuitySignals,
     options
   });
+  const roleplayInnerProtocolText = buildRoleplayInnerProtocolPromptSnippet();
   promptBlocks.push(createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {
     stage: 'main',
     priority: 205,
@@ -263,6 +264,17 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     priority: 206,
     authority: 'runtime_context',
     kind: 'chat_liveness',
+    source: 'runtime',
+    lane: 'dynamic_context',
+    meta: {
+      optional: true
+    }
+  }));
+  promptBlocks.push(createPromptBlock('roleplay_inner_protocol', 'Roleplay Inner Protocol', roleplayInnerProtocolText, {
+    stage: 'main',
+    priority: 207,
+    authority: 'runtime_context',
+    kind: 'roleplay_inner_protocol',
     source: 'runtime',
     lane: 'dynamic_context',
     meta: {
@@ -551,6 +563,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     hasAffinityState: true,
     hasRoleplayRuntimeContext: Boolean(roleplayRuntimeContextText),
     hasChatLivenessDiscipline: Boolean(chatLivenessDisciplineText),
+    hasRoleplayInnerProtocol: Boolean(roleplayInnerProtocolText),
     hasShortTermContinuity: Boolean(shortTermContinuityText),
     hasMemoryRecallPolicy: Boolean(memoryRecallPolicyText),
     hasRetrievedMemory: Boolean(memoryContext.promptRetrievedMemoryText || memoryContext.memoryForPrompt),
@@ -596,7 +609,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     phase: item.phase,
     slot: item.slot
   })));
-  const baseRuntimeAddedIds = ['roleplay_runtime_context', 'chat_liveness_discipline'];
+  const baseRuntimeAddedIds = ['roleplay_runtime_context', 'chat_liveness_discipline', 'roleplay_inner_protocol'];
   if (isBalancedOrMinimalPromptMode(mainReplyPromptMode) && includeOptionalContextBlocks && shortTermContinuityText) {
     baseRuntimeAddedIds.push('short_term_continuity');
   }
@@ -678,6 +691,17 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
           priority: 206,
           authority: 'runtime_context',
           kind: 'chat_liveness',
+          source: 'runtime',
+          lane: 'dynamic_context',
+          meta: {
+            optional: true
+          }
+        }),
+        createPromptBlock('roleplay_inner_protocol', 'Roleplay Inner Protocol', roleplayInnerProtocolText, {
+          stage: 'main',
+          priority: 207,
+          authority: 'runtime_context',
+          kind: 'roleplay_inner_protocol',
           source: 'runtime',
           lane: 'dynamic_context',
           meta: {

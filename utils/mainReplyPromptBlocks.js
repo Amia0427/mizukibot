@@ -334,6 +334,9 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   if (input.hasChatLivenessDiscipline !== false) {
     push('chat_liveness_discipline', 'chat liveness discipline anchors private/group reply rhythm and boundaries');
   }
+  if (input.hasRoleplayInnerProtocol !== false) {
+    push('roleplay_inner_protocol', 'silent inner protocol checks roleplay motive, relationship distance, live-chat rhythm, and final compression');
+  }
   if (continuitySignals.hasCarryOverTopic || continuitySignals.hasOpenLoop || continuitySignals.quoteAnchored) {
     push('short_term_continuity', 'short-term continuity should anchor carry-over context');
     push('continuity_state', 'carry-over topic or open loop detected');
@@ -425,6 +428,7 @@ function buildMainReplyDynamicPromptGuide(personaModuleCatalog = []) {
     '- `directed_context`: must enable when quoted reply resolution, addressee disambiguation, or group targeting is needed. Do not skip it if the current turn is elliptical or deictic.',
     '- `roleplay_runtime_context`: must enable for main roleplay replies. It anchors current time, scene, chat mode, visible user state, no-mind-reading, no-user-action, and pure-text output rhythm.',
     '- `chat_liveness_discipline`: must enable for main roleplay replies. It separates private-chat and group-chat rhythm, limited knowledge, privacy boundaries, and live-chat behavior from factual runtime context.',
+    '- `roleplay_inner_protocol`: must enable for main roleplay replies. It is a silent pre-reply check for surface, Mizuki motive, relationship distance, human breaks, anti-leak behavior, and final live-chat compression; never expose it in the final reply.',
     '- `memory_recall_policy`: enable when any recalled memory evidence is included. It tells the main reply how to treat source/category/lifecycle/certainty.',
     '- `continuity_state`: must enable when there is a carry-over topic, unresolved thread, prior promise, or open loop that should affect the reply. Skip when the user clearly starts a new topic.',
     '- `short_term_continuity`: usually enable when available. It carries recent raw turns, restart summaries, and short-term state; it is the main defense against short-term amnesia.',

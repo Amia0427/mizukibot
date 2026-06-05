@@ -12,7 +12,10 @@ const INTERNAL_CONTEXT_MARKERS = [
   '[RetrievedMemoryLite]',
   '[ShortTermContinuity]',
   '[DailyJournal]',
-  '[MemoryCLI]'
+  '[MemoryCLI]',
+  '[RoleplayInnerProtocol]',
+  '[InternalCheck]',
+  '[内部检查]'
 ];
 
 const { isBadRoleplayRefusalText } = require('./recallPollutionGuard');

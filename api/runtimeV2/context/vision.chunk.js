@@ -75,6 +75,7 @@ module.exports = {
   buildBaseDynamicPrompt,
   buildDirectedContextPromptSnippet,
   buildDynamicPrompt,
+  buildRoleplayInnerProtocolPromptSnippet,
   buildRoleplayRuntimeContextPromptSnippet,
   buildShortTermContinuityPrompt,
   buildVisionMessageContent,

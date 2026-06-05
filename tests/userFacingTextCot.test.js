@@ -32,6 +32,16 @@ module.exports = (() => {
     '注意：这个要明天再试。',
     'ordinary colon-prefixed text should stay intact'
   );
+  assert.strictEqual(
+    sanitizeUserFacingText('前缀\nreasoning_content: 这里是内部推理\ninternal_check=先检查现场\n后缀'),
+    '前缀\n\n\n后缀',
+    'reasoning_content and internal_check leaks should be stripped'
+  );
+  assert.strictEqual(
+    sanitizeUserFacingText('[RoleplayInnerProtocol]\nsurface: private chat\nmizuki_motive: assistant-like draft\n\n诶，先别急，我接着说。'),
+    '诶，先别急，我接着说。',
+    'roleplay inner protocol leak blocks should be stripped'
+  );
 
   console.log('userFacingTextCot.test.js passed');
 })();

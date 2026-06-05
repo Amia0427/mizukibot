@@ -307,6 +307,10 @@ function buildRoleplayRuntimeContextPromptSnippet(input = {}) {
   return trimTextByTokenBudget(lines.join('\n'), 520, 'head');
 }
 
+function buildRoleplayInnerProtocolPromptSnippet() {
+  return trimTextByTokenBudget(buildRuntimePrompt('roleplay-inner-protocol'), 420, 'head');
+}
+
 function buildMemoryRecallPolicyPromptSnippet(memoryContext = {}) {
   const context = memoryContext && typeof memoryContext === 'object' ? memoryContext : {};
   const trace = context?.diagnostics?.memoryTrace && typeof context.diagnostics.memoryTrace === 'object'

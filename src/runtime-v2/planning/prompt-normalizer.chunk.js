@@ -87,6 +87,7 @@ function buildPlannerPrompt(toolCatalog = []) {
     'Selection policy: must_use_when_available blocks are required when available; include_if_relevant blocks need clear turn-level value; high_value_only blocks need specific information gain; tool_policy_only blocks require the corresponding tool exposure.',
     '`roleplay_runtime_context` is a must-use main-reply block. Do not skip it when available; it anchors current time, scene, visible user state, no-mind-reading/no-user-action boundaries, and pure-text chat rhythm.',
     '`chat_liveness_discipline` is a must-use main-reply block. Do not skip it when available; it keeps private chat and group chat live, limited, privacy-safe, and non-novelistic.',
+    '`roleplay_inner_protocol` is a must-use main-reply block. Do not skip it when available; it silently checks surface, Mizuki motive, relationship distance, human breaks, anti-leak behavior, and final live-chat compression without exposing chain-of-thought.',
     'Never include empty, unavailable, conflicting, or purely noisy dynamic blocks.',
     'For ordinary self-contained questions, skip memory/profile blocks unless availableContextSignals shows real content and the block helps the answer.',
     'MemOS recall is internal planner-side evidence. You may enable memos_recall when it contains specific useful memory, but never expose or request MemOS MCP tools in allowedToolNames.',

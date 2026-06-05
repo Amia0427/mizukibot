@@ -750,12 +750,16 @@ module.exports = (async () => {
   assert.ok(plannerPayload.dynamicPromptBlockCatalog.every((item) => item.lane && item.category && item.defaultPolicy));
   const directedBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'directed_context');
   const roleplayRuntimeBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'roleplay_runtime_context');
+  const roleplayInnerProtocolBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'roleplay_inner_protocol');
   const fewShotBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'dynamic_few_shot');
   const memoryBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'retrieved_memory_lite');
   const openVikingBlockMeta = plannerPayload.dynamicPromptBlockCatalog.find((item) => item.blockId === 'openviking_recall');
   assert.strictEqual(roleplayRuntimeBlockMeta.selectionPolicy, 'must_use_when_available');
   assert.strictEqual(roleplayRuntimeBlockMeta.signalKey, 'roleplayRuntimeContext');
   assert.strictEqual(roleplayRuntimeBlockMeta.available, true);
+  assert.strictEqual(roleplayInnerProtocolBlockMeta.selectionPolicy, 'must_use_when_available');
+  assert.strictEqual(roleplayInnerProtocolBlockMeta.signalKey, 'roleplayInnerProtocol');
+  assert.strictEqual(roleplayInnerProtocolBlockMeta.available, true);
   assert.strictEqual(directedBlockMeta.selectionPolicy, 'must_use_when_available');
   assert.strictEqual(directedBlockMeta.signalKey, 'directedContext');
   assert.strictEqual(directedBlockMeta.available, true);
@@ -768,6 +772,7 @@ module.exports = (async () => {
   assert.strictEqual(openVikingBlockMeta.available, true);
   assert.strictEqual(plannerPayload.availableContextSignals.directedContext, true);
   assert.strictEqual(plannerPayload.availableContextSignals.roleplayRuntimeContext, true);
+  assert.strictEqual(plannerPayload.availableContextSignals.roleplayInnerProtocol, true);
   assert.strictEqual(plannerPayload.availableContextSignals.continuity, true);
   assert.strictEqual(plannerPayload.availableContextSignals.retrievedMemory, true);
   assert.strictEqual(plannerPayload.availableContextSignals.longTermProfile, true);
@@ -779,6 +784,7 @@ module.exports = (async () => {
   assert.strictEqual(plannerPayload.availableContextSignals.schedulerInjection, true);
   assert.ok(String(plannerPayload.dynamicPromptGuide || '').includes('dynamic_few_shot'));
   assert.ok(String(plannerPayload.dynamicPromptGuide || '').includes('roleplay_runtime_context'));
+  assert.ok(String(plannerPayload.dynamicPromptGuide || '').includes('roleplay_inner_protocol'));
 
   const financeTickerGuard = await planRequestV2({
     question: 'PLEASE 分析一下这个方案',

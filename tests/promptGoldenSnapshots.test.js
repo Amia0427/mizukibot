@@ -41,11 +41,13 @@ module.exports = (async () => {
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'core_baseline_patch'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_runtime_context'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'chat_liveness_discipline'));
+  assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_inner_protocol'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'main_persona_system'));
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'roleplay_runtime_context'));
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'chat_liveness_discipline'));
+  assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'roleplay_inner_protocol'));
   const roleplayRuntimeContext = main.dynamicContextBlocks.find((item) => item.id === 'roleplay_runtime_context');
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('[RoleplayRuntimeContext]'));
   assert.ok(String(roleplayRuntimeContext?.content || '').includes('current_user='));
@@ -69,6 +71,20 @@ module.exports = (async () => {
     main.dynamicContextBlocks.filter((item) => item.id === 'chat_liveness_discipline').length,
     1,
     'chat liveness discipline should not be duplicated after session/runtime merge'
+  );
+  const innerProtocol = main.dynamicContextBlocks.find((item) => item.id === 'roleplay_inner_protocol');
+  const innerProtocolText = String(innerProtocol?.content || '');
+  assert.ok(innerProtocolText.includes('[RoleplayInnerProtocol]'));
+  assert.ok(innerProtocolText.includes('surface:'));
+  assert.ok(innerProtocolText.includes('mizuki_motive'));
+  assert.ok(innerProtocolText.includes('relationship_distance'));
+  assert.ok(innerProtocolText.includes('human_breaks'));
+  assert.ok(innerProtocolText.includes('final_compression'));
+  assert.ok(innerProtocolText.includes('Only output the final user-facing text.'));
+  assert.strictEqual(
+    main.dynamicContextBlocks.filter((item) => item.id === 'roleplay_inner_protocol').length,
+    1,
+    'roleplay inner protocol should not be duplicated after session/runtime merge'
   );
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'directed_context'));
   if (main.latencyMeta?.optionalBudgetExceeded || !String(main.dynamicFewShotPrompt || '').trim()) {
@@ -129,8 +145,10 @@ module.exports = (async () => {
   assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_runtime_context'));
   assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'chat_liveness_discipline'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_inner_protocol'));
   assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'roleplay_runtime_context'));
   assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'chat_liveness_discipline'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'roleplay_inner_protocol'));
   assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(directedMustUsePrompt.promptSnapshot.selectionTrace.some((item) => (
     item.id === 'directed_context'
@@ -402,7 +420,9 @@ module.exports = (async () => {
   const plannerPrompt = buildPlannerStageSystemPrompt([{ name: 'web_search', description: 'search web' }]);
 
   assert.ok(!reviewPrompt.includes('你是晓山瑞希风格的聊天伙伴'));
+  assert.ok(!reviewPrompt.includes('[RoleplayInnerProtocol]'));
   assert.ok(!plannerPrompt.includes('你是晓山瑞希风格的聊天伙伴'));
+  assert.ok(!plannerPrompt.includes('[RoleplayInnerProtocol]'));
   assert.ok(reviewPrompt.includes('Do not add new facts'));
   assert.ok(plannerPrompt.includes('task judgment'));
 
