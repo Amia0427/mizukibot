@@ -20,6 +20,7 @@ module.exports = (async () => {
   const snapshot = { ...process.env };
   try {
     process.env.API_KEY = 'test-key';
+    process.env.API_PROVIDER = 'anthropic';
     process.env.API_BASE_URL = 'https://example.com/v1/chat/completions';
     process.env.AI_MODEL = 'claude-3-5-sonnet-latest';
     process.env.AI_MAX_TOKENS = '200';

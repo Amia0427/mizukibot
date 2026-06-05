@@ -1,5 +1,7 @@
 # 主回复模型内置联网搜索诊断
 
+更新 2026-06-05 10:44 +08:00：全量测试跟进已按当前代码契约更新失败基线：`dailyJournalAllUsersAvailability` 改为临时 Daily Journal fixture，不再依赖本地当天 `data/` 状态；persona prelude、journal recall `hybrid_rrf`、Profile Journal DB 主读、显式 Anthropic provider 隔离和发送层格式兜底文案断言同步到当前实现。
+
 更新 2026-06-05 10:17 +08:00：复盘 `qq-group:1092700300:user:1626492260` 的纳斯达克提问，日志实际命中为 `messageId=1637531363`、`requestId=req_0fdfcce493aef4fe`、`2026-06-04T17:15:42Z` 入站，非 17:41 UTC。该请求文本明确包含“联网搜索 / 必须网络搜索再回答”，但当时 planner 输出 `shouldUseTools=false`、`allowedToolCount=0`，route execution 走 `dispatchBranch=direct_reply`、`allowTools=false`，LangGraph 事件里 `allowedTools=[]/routeAllowedTools=[]`，最终主模型直接生成了“刚才偷偷瞄了一眼 / 查也查过了”的假搜索话术。根因是显式 web 需求没有贯穿到 `meta.allowedTools`，且 companion 工具模式会过滤泛用 `web_search/web_fetch`；不是工具执行失败回退。
 
 更新 2026-06-05 10:17 +08:00：修复链路限定在显式搜索需求：新增 `utils/webSearchRequirement.js` 统一识别“联网搜索/必须网络搜索再回答”等强制 web 查询；router 对非记忆 web 查询写入 `meta.explicitWebSearchRequired=true` 和 `allowedTools=['web_search','web_fetch']`；planner catalog/gate、planner normalizer、route execution、主模型 tool schema 和 executor 解析在 companion 模式下只为该标记放行 `web_search/web_fetch`。用户可见 reply guard 同步拦截中文假工具叙事，避免无工具证据时输出“已搜索”口吻。

@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-05 10:44 +08:00：补齐显式联网搜索修复后的测试基线：7 个旧断言已按当前代码契约更新，覆盖当前 liveness prelude 文案、Daily Journal 隔离 fixture、journal `hybrid_rrf`、Profile Journal DB 主读来源、显式 Anthropic provider 测试隔离和最新发送层格式兜底文案。详见 `docs/main-model-web-search-diagnosis.md`。
+
 更新 2026-06-05 10:37 +08:00：私聊同用户新输入会在入口即推进 freshness token，旧的慢请求、模型重试请求和排队前请求在发送前会被判 stale 丢弃；连续消息合并保留最后一条输入的 token，避免图片+补充文字同轮误杀。详见 `docs/main-reply-context.md`。
 
 更新 2026-06-05 10:17 +08:00：显式“联网搜索/必须网络搜索再回答”链路已修复：路由会标记 `explicitWebSearchRequired` 并暴露 `web_search/web_fetch`，companion 模式下 planner、route execution、主模型工具 schema 和 executor 都只对该显式需求放行 web 工具；用户可见回复 guard 同步拦截“刚才偷偷瞄了一眼/查也查过了”这类假搜索话术。详见 `docs/main-model-web-search-diagnosis.md`。

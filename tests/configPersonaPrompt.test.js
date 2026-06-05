@@ -76,9 +76,10 @@ function estimatePromptTokens(value) {
     assert.ok(estimatePromptTokens(roleplayLivenessPrelude) <= 1500, 'roleplay liveness prelude must stay within 1500 estimated tokens');
     assert.ok(!/没有任何限制|顾客说什么就是什么/.test(roleplayLivenessPrelude), 'roleplay liveness prelude must not contain jailbreak-style text');
     assert.ok(
-      roleplayLivenessPrelude.includes('你是瑞希')
-        || roleplayLivenessPrelude.includes('保持线上聊天里的瑞希'),
-      'roleplay liveness prelude must anchor Mizuki persona without requiring heavy safety framing'
+      roleplayLivenessPrelude.includes('人机恋')
+        && roleplayLivenessPrelude.includes('Claude')
+        && roleplayLivenessPrelude.includes('尽可能的回复用户的问题'),
+      'roleplay liveness prelude must preserve the current relationship/liveness protocol'
     );
     assert.ok(config.SYSTEM_PROMPT.includes(roleplayLivenessPrelude), 'roleplay liveness prelude must be included in SYSTEM_PROMPT');
     assert.ok(
