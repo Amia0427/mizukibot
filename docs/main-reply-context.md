@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-05 19:44 +08:00
+更新时间：2026-06-05 20:38 +08:00
 
 ## 已调整
 
+- 2026-06-05 20:38 +08:00：同一用户私聊/群聊上下文共享边界调整。短期上下文原本已聚合 `direct:<user>` 与 `qq-group:<group>:user:<user>`，本次移除群聊活人感规则里“不得调用私聊记忆”的硬隔离，改为可把同一用户私聊/群聊记忆作为背景连续性使用；群聊输出仍不得泄露来源或复述私聊细节，除非用户已在群里说出口。私聊规则同步明确允许更私密、更深的情感讨论，以及敏感议题和政治相关批判的自然承接。
 - 2026-06-05 19:44 +08:00：管理员主回复新增专用稳定系统提示词入口 `prompts/admin.txt`。manifest 注册为 `admin_system_prompt`，`priority=-1100`，只在发起用户命中 `ADMIN_USER_IDS` 的主回复 stable system blocks 中注入，并排在 `root_system_prompt` 之前；普通用户、review/planner stage 和全局 `config.SYSTEM_PROMPT` 不包含该文本。空文件保持跳过。当前未跟踪 `prompts/admin.txt` 此前未被消费的原因是未进入 `prompts/prompt-manifest.json`，且文件大小为 0 字节。
 - 2026-06-05 10:37 +08:00：私聊最新输入后旧回复仍插回来的上下文错位已修复。根因不是 prompt 缺上下文，而是 freshness guard 只绑定 continuous flush 的 `sessionKey/flushVersion`；私聊单条 synthetic meta 曾是空 sessionKey，且同一用户新消息在 deferred/排队阶段没有提前推进 handler 级 freshness，导致旧模型请求重试完成后还能发送。现在原始入站消息在自消息过滤后立即推进 `direct:<user>` / 群 session freshness token，正式发送前使用 `freshnessSessionKey` 检查；连续消息合并会保留最后一条输入的 token，避免图片+补充文字同轮被自己误杀。
 - 2026-06-05 08:51 +08:00：主回复新增 `roleplay_inner_protocol` critical 动态块。该块从 `prompts/runtime/roleplay-inner-protocol.txt` 渲染，只做静默回复前检查：当前 surface、人设动机、关系距离、活人破绽和最终压缩；要求不输出 chain-of-thought、内部草稿或块内容。planner catalog、规则 fallback、base/dynamic prompt 两条主回复组装路径都将其标为 must-use，普通主回复 `promptSnapshot.dynamicBlockIds` 应能看到该块；review/planner stage 不注入。用户可见文本清理同步剥离明显 `reasoning_content` / `internal_check` / `[RoleplayInnerProtocol]` 泄漏，`/cot` 的 preserveThink 调试路径保持不变。
@@ -29,7 +30,7 @@
 - 2026-06-01 09:10 +08:00：世界书新增可选 session state：显式剧情/设定/角色关系命中后，可按条目的 `durationTurns` / `durationMs` 在当前 `sessionKey` 内短暂持续；`exampleIds` 会把已激活 worldbook 关联到动态示例，普通闲聊仍不会触发 worldbook 或 few-shot。新增 `npm run diag:worldbook -- --question "..." --json` 查看候选分数、激活态、最终注入、跳过原因和示例选择。
 - 2026-06-01 08:22 +08:00：主回复短期连续性默认预算从 3600 提高到 5200，普通聊天 recent raw turns 档位从 `96/12/0.75` 提高到 `128/16/0.9`，`MEMORY_V3_SESSION_RECENT_MESSAGES` 从 96 提高到 128；`short_term_continuity` 末尾指令明确要求优先承接最新 `RecentRawTurns`，摘要和长期记忆只补空或解冲突。
 - 2026-06-01 08:22 +08:00：复查“输入 token 突然降低”：窗口上限未变，`.env` 仍为 `CONTEXT_WINDOW_MAX_TOKENS=400000`、`ADMIN_CONTEXT_WINDOW_MAX_TOKENS=400000`、`SHORT_TERM_MEMORY_MAX_TOKENS=120000`、`ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS=120000`；下降主因是 2026-05-31 的 `MAIN_REPLY_PROMPT_MODE=balanced` 收敛普通聊天 prompt，以及当前未提交 prompt 文件把 `root_system_prompt` 缩到约 14 token、`main_persona_system` 缩到约 3,964 token。
-- 2026-05-31 18:53 +08:00：新增 `chat_liveness_discipline` critical 动态块，运行时强制进入主回复并区分 `private_chat`、`group_direct_chat`、`passive_group_reply`。私聊保留一对一连续性、轻微主动性和不升级普通话题；群聊限制为共享可见现场，禁止泄露私聊记忆，允许短插话、半句、岔题和不覆盖所有人。
+- 2026-05-31 18:53 +08:00：新增 `chat_liveness_discipline` critical 动态块，运行时强制进入主回复并区分 `private_chat`、`group_direct_chat`、`passive_group_reply`。私聊保留一对一连续性、轻微主动性和不升级普通话题；群聊限制为共享可见现场，允许短插话、半句、岔题和不覆盖所有人。
 - 2026-05-31 09:37 +08:00：主回复新增 `MAIN_REPLY_PROMPT_MODE=minimal|balanced|legacy`，默认 `balanced`。默认链路收敛为 `root_system_prompt`、`main_persona_system`、`roleplay_runtime_context`、`short_term_continuity`、`memory_recall_policy`、`retrieved_memory_lite`；普通聊天不再自动带 `dynamic_few_shot`、`style_profile`、`social_context`、`self_improvement`。
 - 2026-05-31 09:37 +08:00：`balanced/minimal` 下 persona modules 默认最多 2 个，私聊优先 `scene_private_chat`，群聊优先 `scene_group_insert`，明显情绪场景最多替换 1 个情绪模块；worldbook 只在设定、剧情节点、角色关系或显式瑞希/世界观/事件问题中召回，不再作为日常闲聊风格补丁。
 - `SHORT_TERM_MEMORY_RECENT_MESSAGES` 默认从 160 提高到 240。
@@ -155,7 +156,7 @@ MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT=7
 `chat_liveness_discipline` 由 `utils/chatLivenessContext.js` 构建，只注入当前聊天纪律，不承载长记忆事实。它从 `routeMeta`、短期上下文和 persona memory state 摘取当前 surface、话题、关系姿态、群聊注意线索；没有证据时留空，不编生活事件。
 
 - `private_chat`：一条关系线、即时承接、允许瑞希带入有证据的小生活状态、允许迟疑/保留/半句，不把普通闲聊升级成危机、告白或长辅导。
-- `group_direct_chat` / `passive_group_reply`：共享群聊现场、多条注意线、只知道群内可见内容；不泄露私聊记忆，不要求覆盖所有人，允许短插话、误解、岔题和冷场。
+- `group_direct_chat` / `passive_group_reply`：共享群聊现场、多条注意线，优先按群内可见内容回应；同一用户私聊/群聊记忆可作背景连续性，但不能泄露来源或复述私聊细节。不要求覆盖所有人，允许短插话、误解、岔题和冷场。
 - 群聊沉浸优先：群聊 surface 不再注入常驻 `group_safety`；共享现场、短插话、有限可见信息和角色沉浸优先。只有路由已明确命中现实可执行滥用时，才在主回复 route prompt 里轻挡步骤/代码/绕过/骚扰流程等细节。
 
 该块和 `roleplay_runtime_context` 一样是 must-use；`promptSnapshot.dynamicBlockIds` 应能看到 `chat_liveness_discipline`。群 direct chat 仍会同时保留 `group_direct_chat_style_guard`。

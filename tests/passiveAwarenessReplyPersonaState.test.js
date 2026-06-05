@@ -68,7 +68,8 @@ module.exports = (async () => {
       const bodyText = JSON.stringify(_body || {});
       assert.ok(bodyText.includes('[ChatLivenessDiscipline]'));
       assert.ok(bodyText.includes('surface=passive_group_reply'));
-      assert.ok(bodyText.includes('不要泄露、暗示或调用私聊记忆'));
+      assert.ok(bodyText.includes('同一用户的私聊/群聊记忆和上下文可以作为背景连续性使用'));
+      assert.ok(bodyText.includes('不得泄露来源、复述私聊细节'));
       if (typeof handlers.onData === 'function') {
         handlers.onData(Buffer.from('data: {"choices":[{"delta":{"content":"我在看"}}]}\n\n'));
         handlers.onData(Buffer.from('data: [DONE]\n\n'));

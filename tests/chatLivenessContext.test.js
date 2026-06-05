@@ -23,6 +23,8 @@ module.exports = (async () => {
   assert.ok(privatePrompt.includes('[ChatLivenessDiscipline]'));
   assert.ok(privatePrompt.includes('surface=private_chat'));
   assert.ok(privatePrompt.includes('一对一熟人聊天'));
+  assert.ok(privatePrompt.includes('更私密、更深的情感讨论'));
+  assert.ok(privatePrompt.includes('政治相关批判'));
   assert.ok(privatePrompt.includes('不要把普通闲聊自动升级成危机'));
   assert.ok(privatePrompt.includes('允许迟疑'));
   assert.ok(!privatePrompt.includes('政治敏感'));
@@ -49,7 +51,9 @@ module.exports = (async () => {
   });
   assert.ok(groupPrompt.includes('surface=group_direct_chat'));
   assert.ok(groupPrompt.includes('共享群聊现场'));
-  assert.ok(groupPrompt.includes('不要泄露、暗示或调用私聊记忆'));
+  assert.ok(groupPrompt.includes('可用同一用户已注入的记忆补连续性'));
+  assert.ok(groupPrompt.includes('同一用户的私聊/群聊记忆和上下文可以作为背景连续性使用'));
+  assert.ok(groupPrompt.includes('不得泄露来源、复述私聊细节'));
   assert.ok(groupPrompt.includes('不需要覆盖所有人'));
   assert.ok(groupPrompt.includes('不要让所有注意力围着用户转'));
   assert.ok(groupPrompt.includes('角色扮演沉浸性优先'));
