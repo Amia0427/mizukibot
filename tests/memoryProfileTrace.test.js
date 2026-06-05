@@ -43,13 +43,14 @@ module.exports = (async () => {
 
   materializeMemoryViews({ force: true });
   const surface = buildStableProfileText('u_trace', { question: '普通聊天' });
+  assert.strictEqual(surface.source, 'profile_journal_db');
   assert.ok(surface.text.includes('喜欢可审计画像'));
   assert.ok(surface.traceItems.some((item) => item.text === '喜欢可审计画像' && item.sourceEventIds.includes('trace-like-explicit')));
   assert.ok(surface.traceItems.some((item) => item.confidence === 1 && item.evidenceCount >= 1));
 
   const ctx = buildMemoryContext('u_trace', '普通聊天', { ragEnabled: false });
   assert.ok(ctx.diagnostics.memoryTrace.profile_trace_items.some((item) => item.text === '喜欢可审计画像'));
-  assert.strictEqual(ctx.diagnostics.memoryTrace.profile_source, 'v3');
+  assert.strictEqual(ctx.diagnostics.memoryTrace.profile_source, 'profile_journal_db');
 
   console.log('memoryProfileTrace.test.js passed');
 })().catch((error) => {

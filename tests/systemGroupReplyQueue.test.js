@@ -144,7 +144,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(
     String(payloads[payloads.length - 1]?.params?.message || ''),
-    '刚才回复出了点格式问题，你再发一次，我马上接住。',
+    '刚刚这句格式歪掉了。你再发一次，我马上接住。',
     'stringified object payloads should be blocked before sending to the user'
   );
 

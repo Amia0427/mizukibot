@@ -113,8 +113,10 @@ module.exports = (async () => {
     sessionKey: 'direct:u_route'
   });
   assert.strictEqual(weakOnly.ok, true);
-  assert.strictEqual(weakOnly.qualitySummary.hasUsableEvidence, false);
-  assert.strictEqual(weakOnly.results.length, 0);
+  assert.strictEqual(weakOnly.qualitySummary.hasUsableEvidence, true);
+  assert.strictEqual(weakOnly.results.length, 1);
+  assert.strictEqual(weakOnly.results[0].source, 'profile');
+  assert.ok(String(weakOnly.results[0].ref || '').startsWith('mc_ref:profile-db:'));
   assert.ok(weakOnly.rejectedResultCount >= 0);
 
   console.log('memoryCliFastRouting.test.js passed');
