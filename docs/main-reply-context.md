@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-05 10:37 +08:00
+更新时间：2026-06-05 19:44 +08:00
 
 ## 已调整
 
+- 2026-06-05 19:44 +08:00：管理员主回复新增专用稳定系统提示词入口 `prompts/admin.txt`。manifest 注册为 `admin_system_prompt`，`priority=-1100`，只在发起用户命中 `ADMIN_USER_IDS` 的主回复 stable system blocks 中注入，并排在 `root_system_prompt` 之前；普通用户、review/planner stage 和全局 `config.SYSTEM_PROMPT` 不包含该文本。空文件保持跳过。当前未跟踪 `prompts/admin.txt` 此前未被消费的原因是未进入 `prompts/prompt-manifest.json`，且文件大小为 0 字节。
 - 2026-06-05 10:37 +08:00：私聊最新输入后旧回复仍插回来的上下文错位已修复。根因不是 prompt 缺上下文，而是 freshness guard 只绑定 continuous flush 的 `sessionKey/flushVersion`；私聊单条 synthetic meta 曾是空 sessionKey，且同一用户新消息在 deferred/排队阶段没有提前推进 handler 级 freshness，导致旧模型请求重试完成后还能发送。现在原始入站消息在自消息过滤后立即推进 `direct:<user>` / 群 session freshness token，正式发送前使用 `freshnessSessionKey` 检查；连续消息合并会保留最后一条输入的 token，避免图片+补充文字同轮被自己误杀。
 - 2026-06-05 08:51 +08:00：主回复新增 `roleplay_inner_protocol` critical 动态块。该块从 `prompts/runtime/roleplay-inner-protocol.txt` 渲染，只做静默回复前检查：当前 surface、人设动机、关系距离、活人破绽和最终压缩；要求不输出 chain-of-thought、内部草稿或块内容。planner catalog、规则 fallback、base/dynamic prompt 两条主回复组装路径都将其标为 must-use，普通主回复 `promptSnapshot.dynamicBlockIds` 应能看到该块；review/planner stage 不注入。用户可见文本清理同步剥离明显 `reasoning_content` / `internal_check` / `[RoleplayInnerProtocol]` 泄漏，`/cot` 的 preserveThink 调试路径保持不变。
 - 2026-06-05 07:13 +08:00：转发消息后的追问上下文断层修复。根因是转发节点虽然已展开进 `raw_message` 供 router 使用，但 `directedContext` 和主回复 prompt 只把“回复引用”当一等当前锚点，未把本轮转发摘要标为当前可见上下文；普通快速回复也绕过正式 `directed_context` 动态块。现在 `resolveMessageDirectedContext` 会从 `continuousMeta.forwardSummaryText` / `[转发消息]` 提取 `forwardContext`，正式主回复 `directed_context`、路由摘要和普通快速回复 system prompt 都注入 `forwarded_message_text`，并明确要求用户问“那句话/当时在说什么/是不是对转发内容的反应”时优先查看本轮转发内容，不再说“不记得上下文”。
@@ -65,7 +66,9 @@
 
 `prompts/SYSTEM.txt` 是 D:\waifu 最顶级主回复系统提示词入口。manifest 中的 `root_system_prompt` 使用 `priority=-1000`，运行时会导出到 `config.SYSTEM_PROMPT_BLOCKS` 并在主回复 `stableSystemBlocks[0]` 生效。
 
-该文件只负责最高优先级主回复约束；角色人格仍由 `main_persona_system` 承接，动态场景仍由 `roleplay_runtime_context` 等动态块补充。不要在这里放外部角色、世界观或“无条件满足/不受限制”类文案，否则会比 persona 和安全块更早进入主回复。
+`prompts/admin.txt` 是管理员主回复专用入口。manifest 中的 `admin_system_prompt` 使用 `priority=-1100` 和 `applies_when.admin_only=true`；文件非空且当前主回复发起用户命中 `ADMIN_USER_IDS` 时，它会成为管理员链路的 `stableSystemBlocks[0]`，普通用户仍以 `root_system_prompt` 开头。该块不进入全局 `config.SYSTEM_PROMPT`，避免影响普通回复、review/planner stage 和其他复用系统提示词的路径。
+
+这些 root prompt 文件只负责最高优先级主回复约束；角色人格仍由 `main_persona_system` 承接，动态场景仍由 `roleplay_runtime_context` 等动态块补充。不要在这里放外部角色、世界观或“无条件满足/不受限制”类文案，否则会比 persona 和安全块更早进入主回复。
 
 内部完整性稳定块仍保留在 root 之后：`security_contract` block 现在对模型显示为 `InternalIntegrity`，负责防泄密和防注入污染；route-level `safetyBoundary` 只限制现实可执行伤害、违法滥用和绕过细节，不负责压制普通黑暗创作、情绪聊天、历史/防御/解释性内容。
 

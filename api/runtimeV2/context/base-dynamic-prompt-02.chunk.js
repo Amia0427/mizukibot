@@ -21,7 +21,8 @@
     promptSnapshot = buildPromptSnapshot(compactSelectedBlocks.filter(Boolean), {
       stage: 'main',
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main_compact',
-      budgetTokens: promptBudget
+      budgetTokens: promptBudget,
+      isAdmin: adminPromptContext
     });
     dynamicPrompt = serializePromptBlocks(compactSelectedBlocks);
   }

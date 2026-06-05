@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-05 19:44 +08:00：新增管理员主回复专用稳定系统提示词入口 `prompts/admin.txt`。该文件经 manifest 导出为 `admin_system_prompt`，只在发起用户命中 `ADMIN_USER_IDS` 的主回复链路注入，并排在 `root_system_prompt` 前；空文件继续跳过。当前未跟踪文件此前没生效的原因是未注册进 `prompts/prompt-manifest.json`，且文件大小为 0 字节。详见 `docs/main-reply-context.md`。
+
 更新 2026-06-05 10:44 +08:00：补齐显式联网搜索修复后的测试基线：7 个旧断言已按当前代码契约更新，覆盖当前 liveness prelude 文案、Daily Journal 隔离 fixture、journal `hybrid_rrf`、Profile Journal DB 主读来源、显式 Anthropic provider 测试隔离和最新发送层格式兜底文案。详见 `docs/main-model-web-search-diagnosis.md`。
 
 更新 2026-06-05 10:37 +08:00：私聊同用户新输入会在入口即推进 freshness token，旧的慢请求、模型重试请求和排队前请求在发送前会被判 stale 丢弃；连续消息合并保留最后一条输入的 token，避免图片+补充文字同轮误杀。详见 `docs/main-reply-context.md`。
@@ -641,6 +643,7 @@ Prompt 改了但没生效：
 
 - 先查 `prompts/prompt-manifest.json`、`utils/promptCompiler.js`、`utils/stagePromptContracts.js`、`scripts/check-prompts.js`。
 - `prompts/SYSTEM.txt` 是主回复最高优先级稳定系统提示词入口；空文件会被跳过，写入内容后应在 `promptSnapshot.stableBlockIds[0]` 看到 `root_system_prompt`。
+- `prompts/admin.txt` 是管理员主回复专用入口；只有 `ADMIN_USER_IDS` 用户会看到 `admin_system_prompt`，普通用户不会注入，空文件同样跳过。
 - 改后运行 `npm run check:prompts`。
 
 记忆或 notebook 检索不对：

@@ -7,6 +7,17 @@
     ],
     "sections": [
       {
+        "id": "admin_system_prompt",
+        "path": "admin.txt",
+        "required": false,
+        "kind": "system_root",
+        "authority": "system_root",
+        "priority": -1100,
+        "applies_when": {
+          "admin_only": true
+        }
+      },
+      {
         "id": "root_system_prompt",
         "path": "SYSTEM.txt",
         "required": false,

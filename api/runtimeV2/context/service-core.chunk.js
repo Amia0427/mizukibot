@@ -73,6 +73,44 @@ function getConfig() {
   }
 }
 
+function resolveMainReplyAdminPromptContext(input = {}) {
+  const options = normalizeObject(input.options, {});
+  const routeMeta = normalizeObject(input.routeMeta || options.routeMeta, {});
+  if (input.isAdmin === true || options.isAdmin === true || routeMeta.isAdmin === true || routeMeta.admin === true) return true;
+  const userId = normalizeText(
+    input.userId
+    || options.userId
+    || options.user_id
+    || routeMeta.userId
+    || routeMeta.user_id
+    || routeMeta.senderId
+    || routeMeta.sender_id
+  );
+  if (!userId) return false;
+  const currentConfig = normalizeObject(input.config, getConfig());
+  return normalizeArray(currentConfig.ADMIN_USER_IDS)
+    .map((item) => normalizeText(item))
+    .filter(Boolean)
+    .includes(userId);
+}
+
+function buildStableSystemPromptFingerprint(runtimeConfig = config) {
+  const currentConfig = normalizeObject(runtimeConfig, config);
+  const blockFingerprint = normalizeArray(currentConfig.SYSTEM_PROMPT_BLOCKS)
+    .map((block) => [
+      normalizeText(block?.id),
+      normalizeText(block?.authority),
+      normalizeText(block?.kind),
+      normalizeText(block?.content),
+      JSON.stringify(normalizeObject(block?.appliesWhen || block?.applies_when, {}))
+    ].join('::'))
+    .join('\n---\n');
+  return hashText([
+    normalizeText(currentConfig.SYSTEM_PROMPT),
+    blockFingerprint
+  ].join('\n===\n'));
+}
+
 function buildMemoryContext(...args) {
   return require('../../../utils/memoryContext').buildMemoryContext(...args);
 }
