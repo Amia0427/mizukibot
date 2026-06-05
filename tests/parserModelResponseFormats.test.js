@@ -1,6 +1,6 @@
 const assert = require('assert');
 
-const { extractMessageContent, extractSSEEvents } = require('../api/parser');
+const { extractFinishReason, extractMessageContent, extractSSEEvents } = require('../api/parser');
 const { normalizeTextContent } = require('../api/runtimeV2/model/shared');
 
 module.exports = (() => {
@@ -170,6 +170,20 @@ module.exports = (() => {
   assert.strictEqual(geminiStream.events[0].usage.completion_tokens, 2);
   assert.strictEqual(geminiStream.events[0].usage.total_tokens, 9);
   assert.strictEqual(geminiStream.events[0].usage.cache_read_input_tokens, 3);
+
+  const openAiFinish = extractSSEEvents(
+    { buffer: '' },
+    'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'
+  );
+  assert.strictEqual(openAiFinish.events[0].finishReason, 'length');
+  assert.strictEqual(extractFinishReason(openAiFinish.events[0].json), 'length');
+
+  const geminiFinish = extractSSEEvents(
+    { buffer: '' },
+    'data: {"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[{"text":"没说完"}]}}]}\n\n'
+  );
+  assert.strictEqual(geminiFinish.events[0].delta, '没说完');
+  assert.strictEqual(geminiFinish.events[0].finishReason, 'MAX_TOKENS');
 
   console.log('parserModelResponseFormats.test.js passed');
 })()

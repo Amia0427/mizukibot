@@ -449,6 +449,7 @@ module.exports = (async () => {
     assert.strictEqual(streamedCalls[0].usage.prompt_tokens, 18);
     assert.strictEqual(streamedCalls[0].usage.completion_tokens, 3);
     assert.strictEqual(streamedCalls[0].usage.cache_read_input_tokens, 12);
+    assert.strictEqual(streamedCalls[0].finish_reason, 'completed');
 
     console.log('httpClientAnthropicPromptCache.test.js passed');
   } finally {

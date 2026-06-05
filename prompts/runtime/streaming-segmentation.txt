@@ -4,5 +4,7 @@
 3) In QQ group chat, make each chunk feel like one natural message: first接住现场，后面只补真正需要的信息。
 4) Short replies must stay as one chunk; do not split just because streaming is available.
 5) Every chunk must be semantically complete on its own; do not split a sentence, list item, code block, quote, or markdown structure in the middle.
-6) No numbering and no labels like "part 1".
-7) Avoid article-like paragraphs in casual group chat; 1-3 compact chat messages are enough unless the user explicitly asks for a long explanation.
+6) The chunk limit is a formatting limit, not permission to omit the ending. If the answer would exceed {{maxSegments}} chunks, compress it until the final chunk is still a complete answer.
+7) Before stopping, make sure the final visible sentence is closed naturally; do not end mid-thought, mid-comparison, after "and/with/like/比如/然后/和/但", or with an unfinished list.
+8) No numbering and no labels like "part 1".
+9) Avoid article-like paragraphs in casual group chat; 1-3 compact chat messages are enough unless the user explicitly asks for a long explanation.

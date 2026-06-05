@@ -18,7 +18,7 @@ const {
 const { createModelCallLogWriter } = require('./logFile');
 const { summarizePromptCaching } = require('./promptCaching');
 const { summarizeRequest } = require('./requestSummary');
-const { extractResponseModel, extractUsage } = require('./usage');
+const { extractFinishReason, extractResponseModel, extractUsage } = require('./usage');
 
 const MAX_RECENT_MODEL_CALLS = 200;
 const MODEL_CALL_LOG_FILE = path.join(config.DATA_DIR || path.join(process.cwd(), 'data'), 'model-calls.ndjson');
@@ -109,6 +109,7 @@ function startModelCall(meta = {}) {
       : Boolean(meta.adminDedicatedModelConfigured),
     attempts: 0,
     usage: null,
+    finish_reason: '',
     error: '',
     final_error_code: '',
     started_at: nowIso(),
@@ -155,6 +156,13 @@ function finalizeRecord(id, patch = {}) {
   const usage = patch.usage || extractUsage(patch.response);
   if (usage) record.usage = usage;
 
+  record.finish_reason = normalizeText(
+    patch.finishReason
+    || patch.finish_reason
+    || extractFinishReason(patch.response)
+    || record.finish_reason
+  );
+
   const actualModel = extractResponseModel(patch.response);
   if (actualModel) record.model = actualModel;
 
@@ -179,6 +187,7 @@ function finalizeRecord(id, patch = {}) {
     prompt_integrity: cloned.prompt_integrity,
     prompt_caching: cloned.prompt_caching,
     usage: cloned.usage,
+    finish_reason: cloned.finish_reason,
     user_id: cloned.user_id,
     user_role: cloned.user_role,
     route_policy_key: cloned.route_policy_key,
