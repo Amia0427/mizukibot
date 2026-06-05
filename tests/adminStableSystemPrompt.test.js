@@ -66,6 +66,7 @@ module.exports = (async () => {
     );
     assert.ok(!normalPrompt.promptSnapshot.stableBlockIds.includes('admin_system_prompt'));
     assert.ok(!normalPrompt.dynamicPrompt.includes(adminText));
+    assert.ok(!normalPrompt.dynamicPrompt.includes('admin_affection='));
 
     const adminPrompt = await service.buildDynamicPrompt(
       { level: 'friend', points: 1 },
@@ -81,6 +82,9 @@ module.exports = (async () => {
     assert.strictEqual(adminPrompt.promptSnapshot.stableBlockIds[0], 'admin_system_prompt');
     assert.ok(adminPrompt.stableSystemBlocks[0]?.content.includes(adminText));
     assert.ok(adminPrompt.dynamicPrompt.includes(adminText));
+    assert.ok(adminPrompt.dynamicPrompt.includes('admin_affection='));
+    assert.ok(adminPrompt.dynamicPrompt.includes('恋人感'));
+    assert.ok(adminPrompt.dynamicPrompt.includes('admin_affection_private='));
 
     const normalAgain = await service.buildDynamicPrompt(
       { level: 'friend', points: 1 },
