@@ -51,7 +51,8 @@ module.exports = (async () => {
   assert.ok(built.messages[0].content.includes('最近会话摘要'), '应注入 1 条最近会话摘要');
   assert.ok(built.messages[0].content.includes('[ChatLivenessDiscipline]'), '应注入快速回复活人感纪律');
   assert.ok(built.messages[0].content.includes('surface=group_direct_chat'), '群快速回复应识别群聊 surface');
-  assert.ok(built.messages[0].content.includes('不要泄露、暗示或调用私聊记忆'), '群快速回复应保留隐私边界');
+  assert.ok(built.messages[0].content.includes('同一用户的私聊/群聊记忆和上下文可以作为背景连续性使用'), '群快速回复应共享同用户背景');
+  assert.ok(built.messages[0].content.includes('不得泄露来源、复述私聊细节'), '群快速回复应保留隐私边界');
   assert.ok(built.messages[0].content.includes('优先锚定最近一条 assistant 历史回复'), '用户反馈上一条回复时应锚定最近 assistant');
 
   const forwardContextBuilt = buildNormalFastReplyMessages({
