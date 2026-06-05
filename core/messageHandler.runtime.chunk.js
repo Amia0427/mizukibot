@@ -16,6 +16,13 @@ function createMessageHandler({
   const normalGroupMainReplyRateLimiter = normalGroupMainReplyRateLimiterOverride || createNormalGroupMainReplyRateLimiter(config);
   const privateTypingPokeCooldownByUser = new Map();
   const sessionFreshnessVersionByKey = new Map();
+  function nextSessionFreshnessVersion(sessionKey = '') {
+    const normalized = String(sessionKey || '').trim();
+    if (!normalized) return 0;
+    const next = (Number(sessionFreshnessVersionByKey.get(normalized) || 0) || 0) + 1;
+    sessionFreshnessVersionByKey.set(normalized, next);
+    return next;
+  }
   function updateSessionFreshnessVersion(sessionKey = '', version = 0) {
     const normalized = String(sessionKey || '').trim();
     if (!normalized) return;
@@ -26,7 +33,7 @@ function createMessageHandler({
     sessionFreshnessVersionByKey.set(normalized, next);
   }
   function buildFreshnessGuard(continuousMeta = null) {
-    const sessionKey = String(continuousMeta?.sessionKey || '').trim();
+    const sessionKey = String(continuousMeta?.freshnessSessionKey || continuousMeta?.sessionKey || '').trim();
     const flushVersion = Number(continuousMeta?.flushVersion || 0) || 0;
     if (
       !sessionKey

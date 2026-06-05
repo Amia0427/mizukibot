@@ -15,6 +15,15 @@
       userId: senderId,
       config
     });
+    if (shouldSkipSelfMessage(msg, config)) {
+      return;
+    }
+
+    const rawInboundFreshnessSessionKey = resolveShortTermSessionKey(
+      senderId,
+      isPrivateChatType(chatType) ? {} : { groupId }
+    );
+    const rawInboundFreshnessVersion = nextSessionFreshnessVersion(rawInboundFreshnessSessionKey);
     const rawMessageText = String(msg?.raw_message || '').trim();
     const createCommandText = stripLeadingCqControlSegments(rawMessageText, resolveEffectiveBotQQ(msg, config));
     if (/^\s*\/create(?:\s|$)/i.test(createCommandText)) {
@@ -189,12 +198,10 @@
     }
 
     const effectiveBotQQ = resolveEffectiveBotQQ(msg, config);
-    if (shouldSkipSelfMessage(msg, config)) {
-      return;
-    }
-
     const preprocessed = await continuousMessagePreprocessor.handleMessage(msg, {
-      effectiveBotQQ
+      effectiveBotQQ,
+      freshnessSessionKey: rawInboundFreshnessSessionKey,
+      freshnessVersion: rawInboundFreshnessVersion
     });
     appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
       stage: 'continuous_preprocess_done',
@@ -224,6 +231,8 @@
         resolveCards: Array.isArray(syntheticContinuousMeta.qqCardUrls) && syntheticContinuousMeta.qqCardUrls.length > 0
       });
       syntheticContinuousMeta.sessionKey = '';
+      syntheticContinuousMeta.freshnessSessionKey = rawInboundFreshnessSessionKey;
+      syntheticContinuousMeta.flushVersion = rawInboundFreshnessVersion;
       syntheticContinuousMeta.firstTimestamp = syntheticContinuousMeta.firstTimestamp || syntheticContinuousMeta.timestamp || Date.now();
       syntheticContinuousMeta.lastTimestamp = syntheticContinuousMeta.lastTimestamp || syntheticContinuousMeta.timestamp || Date.now();
       syntheticContinuousMeta.sourceMessageIds = Array.isArray(syntheticContinuousMeta.sourceMessageIds) && syntheticContinuousMeta.sourceMessageIds.length
@@ -233,13 +242,17 @@
       continuousMeta = syntheticContinuousMeta;
       effectiveMsg.__continuousMessageMeta = continuousMeta;
     }
+    if (continuousMeta && typeof continuousMeta === 'object') {
+      continuousMeta.freshnessSessionKey = String(continuousMeta.freshnessSessionKey || rawInboundFreshnessSessionKey || '').trim();
+      continuousMeta.flushVersion = Number(continuousMeta.flushVersion || rawInboundFreshnessVersion || 0) || 0;
+    }
     updateSessionFreshnessVersion(
-      String(continuousMeta?.sessionKey || '').trim(),
+      String(continuousMeta?.freshnessSessionKey || continuousMeta?.sessionKey || '').trim(),
       Number(continuousMeta?.flushVersion || 0) || 0
     );
     const freshnessGuard = buildFreshnessGuard(continuousMeta);
     const rawText = effectiveMsg.raw_message || '';
-    const inboundSessionKey = resolveShortTermSessionKey(senderId, isPrivateChatType(chatType) ? {} : { groupId });
+    const inboundSessionKey = rawInboundFreshnessSessionKey;
     const isPrivateInbound = isPrivateChatType(chatType);
     const concurrencyScope = isPrivateInbound ? 'private' : 'default';
     const concurrencyLane = isAdminUser(senderId) ? 'admin' : 'general';

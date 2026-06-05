@@ -247,6 +247,7 @@ function normalizeMessageForDownstream(baseMsg = {}, merged = {}, effectiveBotQQ
     message_id: String(baseMsg?.message_id || merged.sourceMessageIds?.[0] || '').trim() || baseMsg?.message_id,
     __continuousMessageMeta: {
       sessionKey: merged.sessionKey,
+      freshnessSessionKey: normalizeText(merged.freshnessSessionKey || ''),
       firstTimestamp: merged.firstTimestamp,
       lastTimestamp: merged.lastTimestamp,
       sourceMessageIds: merged.sourceMessageIds,
@@ -711,6 +712,8 @@ function createContinuousMessagePreprocessor(options = {}) {
     }
 
     const activityVersion = bumpSessionActivityVersion(sessionKey);
+    const freshnessSessionKey = normalizeText(context.freshnessSessionKey || '');
+    const freshnessVersion = Math.max(0, Number(context.freshnessVersion || 0) || 0) || activityVersion;
     const effectiveBotQQ = normalizeText(context.effectiveBotQQ);
     const imageMemoryContext = {
       userId: normalizeText(msg?.user_id),
@@ -723,6 +726,8 @@ function createContinuousMessagePreprocessor(options = {}) {
       effectiveBotQQ,
       ...imageMemoryContext
     });
+    entry.freshnessSessionKey = freshnessSessionKey;
+    entry.freshnessVersion = freshnessVersion;
     const bypass = isCommandBypass(msg, { effectiveBotQQ });
 
     if (bypass && sessions.has(sessionKey)) {
@@ -746,7 +751,8 @@ function createContinuousMessagePreprocessor(options = {}) {
         effectiveMsg: msg,
         meta: {
           sessionKey,
-          flushVersion: activityVersion,
+          freshnessSessionKey,
+          flushVersion: freshnessVersion,
           firstTimestamp: entry.timestamp,
           lastTimestamp: entry.timestamp,
           sourceMessageIds: entry.messageId ? [entry.messageId] : [],
@@ -772,7 +778,8 @@ function createContinuousMessagePreprocessor(options = {}) {
       const session = sessions.get(sessionKey);
       session.entries.push(entry);
       session.mentionedBot = session.mentionedBot || entry.mentionedBot;
-      session.activityVersion = activityVersion;
+      session.activityVersion = freshnessVersion;
+      session.freshnessSessionKey = freshnessSessionKey || session.freshnessSessionKey || '';
       refreshSessionFollowupState(session);
       scheduleFlush(sessionKey);
       console.log('[continuous-message] session append', {
@@ -787,6 +794,7 @@ function createContinuousMessagePreprocessor(options = {}) {
         effectiveMsg: null,
         meta: {
           sessionKey,
+          freshnessSessionKey: session.freshnessSessionKey || '',
           flushVersion: session.activityVersion,
           firstTimestamp: session.entries[0]?.timestamp || entry.timestamp,
           lastTimestamp: entry.timestamp,
@@ -826,7 +834,8 @@ function createContinuousMessagePreprocessor(options = {}) {
       mentionedBot: entry.mentionedBot === true,
       messageType: normalizeText(msg?.message_type).toLowerCase(),
       awaitingFollowup: false,
-      activityVersion
+      activityVersion: freshnessVersion,
+      freshnessSessionKey
     };
     refreshSessionFollowupState(nextSession);
     sessions.set(sessionKey, nextSession);
@@ -849,6 +858,7 @@ function createContinuousMessagePreprocessor(options = {}) {
     }
 
     const merged = buildMergedMessagePayload(session.entries, { sessionKey });
+    merged.freshnessSessionKey = session.freshnessSessionKey || '';
     merged.flushReason = session.flushReason || 'debounce';
     merged.flushVersion = session.activityVersion;
     merged.semanticScore = null;
@@ -877,6 +887,7 @@ function createContinuousMessagePreprocessor(options = {}) {
             sessions.delete(sessionKey);
             clearTimer(resumed);
             const resumedMerged = buildMergedMessagePayload(resumed.entries, { sessionKey });
+            resumedMerged.freshnessSessionKey = resumed.freshnessSessionKey || '';
             resumedMerged.flushReason = resumed.flushReason || 'sentence_window';
             resumedMerged.flushVersion = resumed.activityVersion;
             resumedMerged.semanticScore = null;
