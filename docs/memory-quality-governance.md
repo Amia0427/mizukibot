@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-04 13:46 +08:00
+更新时间：2026-06-05 21:28 +08:00
+
+更新 2026-06-05 21:28 +08:00：主回复长期记忆污染治理扩展为统一分类器。`utils/recallPollutionGuard.js` 现在识别五类污染：拒演/模型自报、assistant 记忆失败回复、内部上下文块泄漏、供应商 raw model response、prompt/schema/助手自我指令污染；`memoryQuality` 写入门禁会把这些标为 `memory_pollution` 并直接 reject，profile lifecycle 会把旧污染画像标为 suspect/notRecallable。Memory V3 candidate collection、LanceDB row filter、profile surface、`assembleMemoryPacket` 出口、Daily Journal safety、short-term bridge 和用户可见回复 guard 均复用同一分类器。`scripts/audit-memory-pollution.js --scrub [--apply]` 同步使用新分类，可 dry-run 定位旧数据后再 apply。
 
 更新 2026-06-04 13:46 +08:00：图片视觉摘要写入链路新增 `utils/imageMemorySummarySanitizer.js`。`utils/imageVisualSummaryMemory.js` 在模型响应抽取后先清洗摘要，`utils/imageMemoryIndex.js` 在最终索引写入边界再次清洗，防止供应商完整 `chat.completion` JSON、`choices` 包或 `reasoning_content` 被当作图片摘要落盘。新增 `scripts/repair-image-memory-summaries.js --day YYYY-MM-DD [--apply]`，默认 dry-run，只按日期清空同类坏 summary 字段；已对 `2026-06-04` 执行一次 apply，清理 19 条图片记录、53 个字段。
 
@@ -30,7 +32,8 @@
 
 ## 当前机制
 
-- `utils/memoryQuality.js` 统一评估记忆质量，输出 `score`、`grade`、`reasons`、`cleanupAction` 和 staleness。
+- `utils/recallPollutionGuard.js` 是长期记忆污染统一分类器，覆盖 `bad_roleplay_refusal_reply`、`assistant_memory_failure_reply`、`internal_context_leak`、`raw_model_response`、`prompt_or_schema_pollution` 和 `assistant_self_instruction`。
+- `utils/memoryQuality.js` 统一评估记忆质量，输出 `score`、`grade`、`reasons`、`cleanupAction` 和 staleness；命中通用污染时追加 `memory_pollution` 并拒绝写入。
 - `utils/memoryWritePipeline.js` 在写入前调用质量评估：污染直接拒绝，低信号/过时/临时性内容转为 `candidate`，并写入 `meta.quality`。
 - `utils/memoryGovernance/plan.js` 在治理预览中识别 `quality_reject` 和 `quality_hard_stale`。
 - `utils/memoryGovernance/conflictReport.js` 输出冲突聚类、推荐 winner 和 loser 清理建议。
@@ -46,6 +49,8 @@
 - `utils/memory-v3/fileImport.js` 和 `scripts/import-memory-file.js` 提供 `.md/.txt` 文件导入管线，导入 chunk 默认带 `source=file_import`、`intent=bulk_import`、文件名和 chunk index，并复用版本化 update 防止重复导入扩散。
 - `utils/memory-v3/memoryConflictResolver.js` 在 projection 阶段处理非 profile 通用冲突：同 `conflictKey` 下按 active/explicit/confidence/recency 选 winner，loser 标记 `lifecycleStatus=superseded`、`conflictWinnerId` 和 `recallHiddenReason=memory_conflict_resolved`，默认不进入召回。
 - `utils/memory-v3/recentRecallPolicy.js` 强化“刚才/最近/今天/昨天”召回：本地评分优先 `recent/journal/task`，并在词面弱匹配时补 recent fallback candidates。
+- `utils/memory-v3/queryCandidates.js`、`utils/lancedbMemoryStore/rows.js` 和 `utils/memory-v3/packet.js` 在召回、向量行可见性和 prompt packet 出口分别过滤污染文本；即使旧 projection / 旧向量行还存在，主回复 prompt 默认看不到。
+- `utils/memoryProfileSurface/surface.js` 在长期画像渲染时跳过污染 strict/weak/profile persona 字段，避免旧 profile projection 的坏字段进入 `LongTermProfile`。
 - `utils/memory-v3/recallPolicyResource.js` 已接入主回复动态上下文，运行时在有记忆证据时注入 `memory_recall_policy`，约束 category/source/lifecycle/弱证据使用。
 - `utils/memoryGovernance/recallEvalGate.js` 对 recall eval 增加 lifecycle leakage、category mismatch 和 recent recall miss 门禁，`utils/mainReplyContextPreview.js` 汇总 memory trace lifecycle/conflict/policy 信号。
 - `utils/mainReplyContextPreview.js`、`utils/memoryContext/formatters.js` 和 `scripts/eval-memory-recall.js` 已扩展 source/category/tags/lifecycle/drop reason 观测，便于定位错召、旧版本误召和类别漏召。
@@ -84,14 +89,16 @@
 4. 若 `projectionFreshness.projectionStale=true`，运行 `npm run memory:v3:migrate` 安全物化 projection。
 5. 首次启用结构化 Profile Journal DB 时先 dry-run：`node scripts/migrate-profile-journal-db.js`；确认 counters 后运行 `node scripts/migrate-profile-journal-db.js --apply`。
 6. 结构化库巡检：`npm run diag:memory -- profile-journal-db`，观察 `profileStatus.active/stale/superseded`、`quality.lowQualityActive/placeholderActive/expiredActive/unsafeJournalRecallable`、`recallSpeed`、`fallbackCount` 和 `recentCleanups`。
-7. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。
-8. 修复后运行 `npm run diag:memory -- recall --limit 50 --auto-gold --gate`，观察 `recallAt8`、`mrrAt8`、`leakage`、`lifecycleLeakage`、`categoryMismatches`、`recentRecallMisses`、`emptyResultRate`。
-9. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10`。
-10. 人工审核新 changeset：`mem review list --status candidate` 查看候选，确认后 `mem review accept <changesetId>`；拒绝用 `mem review reject <changesetId> --reason "..."`，只追加归档/替代事件。
+7. 长期记忆污染巡检先 dry-run：`node scripts/audit-memory-pollution.js --scrub --user <id>`；确认命中后再加 `--apply`，全局文件扫描可省略 `--user`。
+8. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。
+9. 修复后运行 `npm run diag:memory -- recall --limit 50 --auto-gold --gate`，观察 `recallAt8`、`mrrAt8`、`leakage`、`lifecycleLeakage`、`categoryMismatches`、`recentRecallMisses`、`emptyResultRate`。
+10. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10`。
+11. 人工审核新 changeset：`mem review list --status candidate` 查看候选，确认后 `mem review accept <changesetId>`；拒绝用 `mem review reject <changesetId> --reason "..."`，只追加归档/替代事件。
 
 ## 清洗策略
 
 - `reject`：prompt/schema 泄露、助手永久行为指令、空文本等严重污染。
+- `reject`：拒演/模型自报、assistant 记忆失败、内部上下文泄漏、raw model response、prompt/schema 污染、助手永久行为指令、空文本等严重污染。
 - `candidate`：临时、假设、低信号或接近置信阈值内容，等待更多证据或人工治理。
 - `archive`：类型 TTL 已硬过期的 active 记忆，例如旧 topic、任务和短期语境。
 - `superseded`：版本更新或冲突仲裁输掉的旧事实，保留在 projection 供审计，但 `notRecallable=true`，查询和 prompt 默认过滤。
@@ -136,6 +143,7 @@ node tests/memoryRecallPolicyPromptBlock.test.js
 node tests/memoryV3RecentRecallFastPath.test.js
 node tests/memoryRecallAutoGoldEval.test.js
 node tests/mainReplyContextPreview.test.js
+node tests/recallPollutionGuard.test.js
 node tests/memoryV3NocturneShell.test.js
 node tests/memoryCliV3.test.js
 node tests/profileJournalDb.test.js

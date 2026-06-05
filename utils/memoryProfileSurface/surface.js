@@ -3,6 +3,7 @@ const { canonicalizeText } = require('../memory-v3/helpers');
 const {
   formatPromptProfileSurface
 } = require('../memory-v3/profileLifecycle');
+const { isPollutedMemoryText } = require('../recallPollutionGuard');
 const { isRecentRecallQuery, classifyRecallFacet } = require('../recallHeuristics');
 
 function sanitizeText(value = '') {
@@ -20,6 +21,19 @@ function uniqueStrings(values = [], limit = 20, maxChars = 180) {
     if (out.length >= Math.max(1, Number(limit) || 1)) break;
   }
   return out;
+}
+
+function isSafeProfileSurfaceText(text = '') {
+  return !isPollutedMemoryText(text, { allowBenignContext: true });
+}
+
+function safeProfileText(value = '') {
+  const text = sanitizeText(value);
+  return text && isSafeProfileSurfaceText(text) ? text : '';
+}
+
+function safeProfileStrings(values = [], limit = 20, maxChars = 180) {
+  return uniqueStrings(values, limit, maxChars).filter((item) => isSafeProfileSurfaceText(item));
 }
 
 function nowMs(options = {}) {
@@ -69,7 +83,7 @@ function buildTraceItem(profile = {}, tier = '', field = '', text = '', options 
 }
 
 function joinList(values = [], fallback = '') {
-  const list = uniqueStrings(values);
+  const list = safeProfileStrings(values);
   return list.length ? list.join('、') : fallback;
 }
 
@@ -91,13 +105,13 @@ function normalizeStrictItems(profile = {}) {
     ? profile.strictProfile
     : {};
   return {
-    identities: uniqueStrings(strict.identities, 20),
-    personality_traits: uniqueStrings(strict.personality_traits, 20),
-    hobbies: uniqueStrings(strict.hobbies, 20),
-    likes: uniqueStrings(strict.likes, 20),
-    dislikes: uniqueStrings(strict.dislikes, 20),
-    goals: uniqueStrings(strict.goals, 20),
-    boundaries: uniqueStrings(strict.boundaries, 20)
+    identities: safeProfileStrings(strict.identities, 20),
+    personality_traits: safeProfileStrings(strict.personality_traits, 20),
+    hobbies: safeProfileStrings(strict.hobbies, 20),
+    likes: safeProfileStrings(strict.likes, 20),
+    dislikes: safeProfileStrings(strict.dislikes, 20),
+    goals: safeProfileStrings(strict.goals, 20),
+    boundaries: safeProfileStrings(strict.boundaries, 20)
   };
 }
 
@@ -106,9 +120,9 @@ function normalizeWeakItems(profile = {}) {
     ? profile.weakProfile
     : {};
   return {
-    single_hit_preferences: uniqueStrings(weak.single_hit_preferences, 12),
-    single_hit_traits: uniqueStrings(weak.single_hit_traits, 12),
-    recent_topics: uniqueStrings(weak.recent_topics, 12)
+    single_hit_preferences: safeProfileStrings(weak.single_hit_preferences, 12),
+    single_hit_traits: safeProfileStrings(weak.single_hit_traits, 12),
+    recent_topics: safeProfileStrings(weak.recent_topics, 12)
   };
 }
 
@@ -139,13 +153,13 @@ function hasStableV3Profile(profile = {}) {
   return Boolean(
     sanitizeText(profile.relation_stage)
     || Object.values(strict).some((items) => Array.isArray(items) && items.length > 0)
-    || sanitizeText(persona.summary)
-    || sanitizeText(persona.impression)
-    || sanitizeText(persona.botBasePersona)
-    || sanitizeText(persona.userAdaptationPersona)
-    || sanitizeText(persona.relationshipStyle)
-    || sanitizeText(persona.replyStyle)
-    || sanitizeText(persona.relationshipTone)
+    || safeProfileText(persona.summary)
+    || safeProfileText(persona.impression)
+    || safeProfileText(persona.botBasePersona)
+    || safeProfileText(persona.userAdaptationPersona)
+    || safeProfileText(persona.relationshipStyle)
+    || safeProfileText(persona.replyStyle)
+    || safeProfileText(persona.relationshipTone)
   );
 }
 
@@ -197,6 +211,15 @@ function buildV3ProfileText(profile = {}, options = {}) {
   const persona = profile.personaCore && typeof profile.personaCore === 'object'
     ? profile.personaCore
     : {};
+  const safePersona = {
+    summary: safeProfileText(persona.summary),
+    impression: safeProfileText(persona.impression),
+    botBasePersona: safeProfileText(persona.botBasePersona),
+    userAdaptationPersona: safeProfileText(persona.userAdaptationPersona),
+    relationshipStyle: safeProfileText(persona.relationshipStyle),
+    replyStyle: safeProfileText(persona.replyStyle),
+    relationshipTone: safeProfileText(persona.relationshipTone)
+  };
   const includeWeak = options.includeWeak === true || config.MEMORY_PROFILE_INJECT_WEAK_ITEMS === true;
   const fullSurface = shouldUseFullProfileSurface(options);
   const styleSurface = fullSurface || options.forcePersonaStyleSurface === true || hasPersonaStyleNeed(options.question || options.query || '');
@@ -211,13 +234,13 @@ function buildV3ProfileText(profile = {}, options = {}) {
   const lines = [
     ...anchorLines,
     sanitizeText(profile.relation_stage) ? `关系阶段：${sanitizeText(profile.relation_stage)}` : '',
-    fullSurface && sanitizeText(persona.summary) ? `总结：${sanitizeText(persona.summary)}` : '',
-    fullSurface && sanitizeText(persona.impression) ? `印象：${sanitizeText(persona.impression)}` : '',
-    styleSurface && sanitizeText(persona.botBasePersona) ? `基础人格：${sanitizeText(persona.botBasePersona)}` : '',
-    styleSurface && sanitizeText(persona.userAdaptationPersona) ? `用户修正：${sanitizeText(persona.userAdaptationPersona)}` : '',
-    styleSurface && sanitizeText(persona.relationshipStyle) ? `关系风格：${sanitizeText(persona.relationshipStyle)}` : '',
-    styleSurface && sanitizeText(persona.replyStyle) ? `表达风格：${sanitizeText(persona.replyStyle)}` : '',
-    styleSurface && sanitizeText(persona.relationshipTone) ? `关系语气：${sanitizeText(persona.relationshipTone)}` : '',
+    fullSurface && safePersona.summary ? `总结：${safePersona.summary}` : '',
+    fullSurface && safePersona.impression ? `印象：${safePersona.impression}` : '',
+    styleSurface && safePersona.botBasePersona ? `基础人格：${safePersona.botBasePersona}` : '',
+    styleSurface && safePersona.userAdaptationPersona ? `用户修正：${safePersona.userAdaptationPersona}` : '',
+    styleSurface && safePersona.relationshipStyle ? `关系风格：${safePersona.relationshipStyle}` : '',
+    styleSurface && safePersona.replyStyle ? `表达风格：${safePersona.replyStyle}` : '',
+    styleSurface && safePersona.relationshipTone ? `关系语气：${safePersona.relationshipTone}` : '',
     strict.identities.length ? `身份信息：${strict.identities.join('、')}` : '',
     fullSurface && strict.personality_traits.length ? `性格特征：${strict.personality_traits.join('、')}` : '',
     fullSurface && strict.hobbies.length ? `爱好：${strict.hobbies.join('、')}` : '',
@@ -264,6 +287,7 @@ module.exports = {
   formatLegacyProfile,
   hasStableV3Profile,
   isProfileQuery,
+  isSafeProfileSurfaceText,
   joinList,
   normalizeStrictItems,
   normalizeWeakItems,

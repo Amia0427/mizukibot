@@ -16,12 +16,13 @@ const { classifyJournalEntrySafety } = require('../utils/dailyJournal/safety');
 const { loadProfileProjection } = require('../utils/memory-v3/storage');
 const { isNoisyIdentityText } = require('../utils/memory-v3/profileProjection/evidence');
 const {
-  hasBadRoleplayRefusalInObject,
-  isBadRoleplayRefusalText,
-  roleplayRefusalPollutionReason
+  classifyRecallPollution,
+  hasRecallPollutionInObject,
+  isPollutedMemoryText,
+  recallPollutionReason
 } = require('../utils/recallPollutionGuard');
 
-const REDACTED_TEXT = '[memory-pollution-redacted:bad-roleplay-refusal]';
+const REDACTED_TEXT = '[memory-pollution-redacted]';
 const TEXT_EXTENSIONS = new Set(['.json', '.jsonl', '.ndjson', '.md', '.txt']);
 const DEFAULT_RELATIVE_SCAN_ROOTS = [
   'daily_journal',
@@ -93,7 +94,7 @@ function auditJournal(userId = '') {
         });
         return;
       }
-      const pollutionReason = roleplayRefusalPollutionReason(entry.assistant, { allowBenignContext: false });
+      const pollutionReason = recallPollutionReason(entry.assistant, { allowBenignContext: false });
       if (pollutionReason) {
         findings.push({
           type: 'journal',
@@ -163,7 +164,7 @@ function listScanFiles(roots = [], options = {}) {
 
 function redactPollutedString(value = '', options = {}) {
   const text = String(value || '');
-  if (!text || !isBadRoleplayRefusalText(text, { allowBenignContext: options.allowBenignContext !== false })) {
+  if (!text || !isPollutedMemoryText(text, { allowBenignContext: options.allowBenignContext !== false })) {
     return { changed: false, value: text };
   }
   return { changed: true, value: REDACTED_TEXT };
@@ -186,7 +187,7 @@ function scrubJsonValue(value, options = {}) {
   let redactedKeyCount = 0;
   for (const [key, item] of Object.entries(value)) {
     let nextKey = key;
-    if (isBadRoleplayRefusalText(key, { allowBenignContext: options.allowBenignContext !== false })) {
+    if (isPollutedMemoryText(key, { allowBenignContext: options.allowBenignContext !== false })) {
       changed = true;
       redactedKeyCount += 1;
       nextKey = `${REDACTED_TEXT}:${redactedKeyCount}`;
@@ -199,7 +200,7 @@ function scrubJsonValue(value, options = {}) {
     next.memoryPollution = {
       ...(next.memoryPollution && typeof next.memoryPollution === 'object' ? next.memoryPollution : {}),
       redacted: true,
-      reason: 'bad_roleplay_refusal_reply',
+      reason: 'recall_pollution',
       redactedAt: new Date().toISOString()
     };
     if (typeof next.status === 'string' && ['active', 'candidate'].includes(next.status)) {
@@ -266,7 +267,7 @@ function scrubJournalMarkdownFile(filePath, raw, apply = false) {
       continue;
     }
     const unsafe = entries.some((entry) => !classifyJournalEntrySafety(entry).safe
-      || isBadRoleplayRefusalText(entry.assistant, { allowBenignContext: false }));
+      || isPollutedMemoryText(entry.assistant, { allowBenignContext: false }));
     if (unsafe) {
       removed += 1;
       continue;
@@ -287,7 +288,7 @@ function scrubTextFile(filePath, apply = false) {
   } catch (error) {
     return { file: filePath, changed: false, reason: `read_failed:${error.message}` };
   }
-  if (!raw || !isBadRoleplayRefusalText(raw, { allowBenignContext: false }) && !hasBadRoleplayRefusalInObject(raw, { allowBenignContext: false })) {
+  if (!raw || !isPollutedMemoryText(raw, { allowBenignContext: false }) && !hasRecallPollutionInObject(raw, { allowBenignContext: false })) {
     return { file: filePath, changed: false, reason: '' };
   }
   const journalResult = scrubJournalMarkdownFile(filePath, raw, apply);
@@ -301,7 +302,7 @@ function scrubTextFile(filePath, apply = false) {
     const result = scrubJsonLinesFile(filePath, raw, apply);
     return { file: filePath, ...result };
   }
-  if (isBadRoleplayRefusalText(raw, { allowBenignContext: false })) {
+  if (isPollutedMemoryText(raw, { allowBenignContext: false })) {
     const next = REDACTED_TEXT;
     if (apply) atomicWriteText(filePath, next);
     return { file: filePath, changed: true, reason: 'text_redacted' };
@@ -346,32 +347,36 @@ function scrubProfileJournalDb(options = {}) {
   `);
   const markProfile = db.prepare(`UPDATE profile_facts SET status = 'rejected', updated_at = ? WHERE id = ?`);
   for (const row of db.prepare(`SELECT * FROM profile_facts WHERE status IN ('active', 'candidate')`).all()) {
-    if (!isBadRoleplayRefusalText(row.value, { allowBenignContext: false })) continue;
-    findings.profileFacts.push({ id: row.id, userId: row.user_id, fieldKey: row.field_key });
+    const pollution = classifyRecallPollution(row.value, { allowBenignContext: false });
+    if (!pollution.polluted) continue;
+    findings.profileFacts.push({ id: row.id, userId: row.user_id, fieldKey: row.field_key, reason: pollution.reason });
     if (options.apply === true) {
       const next = { ...row, status: 'rejected', updated_at: now };
       markProfile.run(now, row.id);
-      cleanupStmt.run('profile_facts', row.id, 'reject', 'bad_roleplay_refusal_reply', JSON.stringify(row), JSON.stringify(next), now);
+      cleanupStmt.run('profile_facts', row.id, 'reject', pollution.reason || 'recall_pollution', JSON.stringify(row), JSON.stringify(next), now);
     }
   }
   const markJournal = db.prepare(`UPDATE journal_entries SET status = 'unsafe', safety = ? WHERE id = ?`);
   for (const row of db.prepare(`SELECT * FROM journal_entries WHERE status = 'active'`).all()) {
-    if (!isBadRoleplayRefusalText(`${row.user_text}\n${row.assistant_text}`, { allowBenignContext: false })) continue;
-    findings.journalEntries.push({ id: row.id, userId: row.user_id, day: row.day });
+    const pollution = classifyRecallPollution(`${row.user_text}\n${row.assistant_text}`, { allowBenignContext: false });
+    if (!pollution.polluted) continue;
+    findings.journalEntries.push({ id: row.id, userId: row.user_id, day: row.day, reason: pollution.reason });
     if (options.apply === true) {
-      const next = { ...row, status: 'unsafe', safety: 'bad_roleplay_refusal_reply' };
-      markJournal.run('bad_roleplay_refusal_reply', row.id);
-      cleanupStmt.run('journal_entries', row.id, 'mark_unsafe', 'bad_roleplay_refusal_reply', JSON.stringify(row), JSON.stringify(next), now);
+      const reason = pollution.reason || 'recall_pollution';
+      const next = { ...row, status: 'unsafe', safety: reason };
+      markJournal.run(reason, row.id);
+      cleanupStmt.run('journal_entries', row.id, 'mark_unsafe', reason, JSON.stringify(row), JSON.stringify(next), now);
     }
   }
   const markRollup = db.prepare(`UPDATE journal_rollups SET status = 'archived' WHERE id = ?`);
   for (const row of db.prepare(`SELECT * FROM journal_rollups WHERE status = 'active'`).all()) {
-    if (!isBadRoleplayRefusalText(row.text, { allowBenignContext: true })) continue;
-    findings.journalRollups.push({ id: row.id, userId: row.user_id, level: row.level, day: row.day || row.end_day || row.start_day });
+    const pollution = classifyRecallPollution(row.text, { allowBenignContext: true });
+    if (!pollution.polluted) continue;
+    findings.journalRollups.push({ id: row.id, userId: row.user_id, level: row.level, day: row.day || row.end_day || row.start_day, reason: pollution.reason });
     if (options.apply === true) {
       const next = { ...row, status: 'archived' };
       markRollup.run(row.id);
-      cleanupStmt.run('journal_rollups', row.id, 'archive', 'bad_roleplay_refusal_reply', JSON.stringify(row), JSON.stringify(next), now);
+      cleanupStmt.run('journal_rollups', row.id, 'archive', pollution.reason || 'recall_pollution', JSON.stringify(row), JSON.stringify(next), now);
     }
   }
   return { ok: true, findings };

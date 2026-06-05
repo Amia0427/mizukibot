@@ -4,6 +4,20 @@ function defaultNormalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function isPollutionRejectReason(reasons = []) {
+  const list = Array.isArray(reasons) ? reasons : [];
+  return list.some((reason) => [
+    'prompt_pollution',
+    'assistant_self_instruction',
+    'memory_pollution',
+    'bad_roleplay_refusal_reply',
+    'assistant_memory_failure_reply',
+    'internal_context_leak',
+    'raw_model_response',
+    'prompt_or_schema_pollution'
+  ].includes(String(reason || '').trim()));
+}
+
 function createMemoryWriteQualityGate(deps = {}) {
   const normalizeText = typeof deps.normalizeText === 'function' ? deps.normalizeText : defaultNormalizeText;
   const mergeLearningDecisionMeta = typeof deps.mergeLearningDecisionMeta === 'function'
@@ -22,7 +36,7 @@ function createMemoryWriteQualityGate(deps = {}) {
         qualityMeta,
         rejected: {
           ok: false,
-          reason: quality.reasons.includes('prompt_pollution') || quality.reasons.includes('assistant_self_instruction')
+          reason: isPollutionRejectReason(quality.reasons)
             ? 'quality_reject_polluted'
             : 'quality_reject_low_signal',
           quality: qualityMeta

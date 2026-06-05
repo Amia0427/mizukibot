@@ -34,6 +34,16 @@ const polluted = gate.evaluate({
 assert.strictEqual(polluted.rejected.reason, 'quality_reject_polluted');
 assert.ok(polluted.rejected.quality.reasons.includes('assistant_self_instruction'));
 
+const rawModelResponse = gate.evaluate({
+  type: 'fact',
+  text: '{"object":"chat.completion","choices":[{"message":{"reasoning_content":"hidden","content":"ok"},"finish_reason":"stop"}]}',
+  sourceKind: 'extractor',
+  confidence: 0.99
+}, { minConfidence: 0.72 });
+assert.strictEqual(rawModelResponse.rejected.reason, 'quality_reject_polluted');
+assert.ok(rawModelResponse.rejected.quality.reasons.includes('memory_pollution'));
+assert.ok(rawModelResponse.rejected.quality.reasons.includes('raw_model_response'));
+
 const volatileDecision = gate.evaluate({
   type: 'fact',
   text: 'maybe likes temporary blue notebooks for now',

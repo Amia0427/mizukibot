@@ -8,7 +8,7 @@ const {
 } = require('../memory-v3/helpers');
 const { deriveMemoryMetadata } = require('../memory-v3/categoryMetadata');
 const { lifecycleStatusOf } = require('../memory-v3/recallFilter');
-const { isBadRoleplayRefusalText } = require('../recallPollutionGuard');
+const { isPollutedMemoryText } = require('../recallPollutionGuard');
 
 const VECTOR_STORE_MODES = new Set(['local_jsonl', 'lancedb', 'shadow']);
 const LANCEDB_ROW_COLUMNS = [
@@ -213,7 +213,7 @@ function buildMemoryFilter(input = {}) {
 function rowPassesMemoryFilter(row = {}, filter = {}) {
   const status = normalizeText(row.status || 'active').toLowerCase();
   if (status === 'archived') return false;
-  if (isBadRoleplayRefusalText(row.preview || row.text || row.canonicalKey, { allowBenignContext: true })) return false;
+  if (isPollutedMemoryText(row.preview || row.text || row.canonicalKey, { allowBenignContext: true })) return false;
   const lifecycleStatus = lifecycleStatusOf(row);
   if (lifecycleStatus === 'stale' || lifecycleStatus === 'suspect' || lifecycleStatus === 'superseded') return false;
   const source = normalizeSourceFilter(filter.source);
