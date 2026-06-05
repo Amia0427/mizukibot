@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-05 08:51 +08:00
+更新时间：2026-06-05 10:37 +08:00
 
 ## 已调整
 
+- 2026-06-05 10:37 +08:00：私聊最新输入后旧回复仍插回来的上下文错位已修复。根因不是 prompt 缺上下文，而是 freshness guard 只绑定 continuous flush 的 `sessionKey/flushVersion`；私聊单条 synthetic meta 曾是空 sessionKey，且同一用户新消息在 deferred/排队阶段没有提前推进 handler 级 freshness，导致旧模型请求重试完成后还能发送。现在原始入站消息在自消息过滤后立即推进 `direct:<user>` / 群 session freshness token，正式发送前使用 `freshnessSessionKey` 检查；连续消息合并会保留最后一条输入的 token，避免图片+补充文字同轮被自己误杀。
 - 2026-06-05 08:51 +08:00：主回复新增 `roleplay_inner_protocol` critical 动态块。该块从 `prompts/runtime/roleplay-inner-protocol.txt` 渲染，只做静默回复前检查：当前 surface、人设动机、关系距离、活人破绽和最终压缩；要求不输出 chain-of-thought、内部草稿或块内容。planner catalog、规则 fallback、base/dynamic prompt 两条主回复组装路径都将其标为 must-use，普通主回复 `promptSnapshot.dynamicBlockIds` 应能看到该块；review/planner stage 不注入。用户可见文本清理同步剥离明显 `reasoning_content` / `internal_check` / `[RoleplayInnerProtocol]` 泄漏，`/cot` 的 preserveThink 调试路径保持不变。
 - 2026-06-05 07:13 +08:00：转发消息后的追问上下文断层修复。根因是转发节点虽然已展开进 `raw_message` 供 router 使用，但 `directedContext` 和主回复 prompt 只把“回复引用”当一等当前锚点，未把本轮转发摘要标为当前可见上下文；普通快速回复也绕过正式 `directed_context` 动态块。现在 `resolveMessageDirectedContext` 会从 `continuousMeta.forwardSummaryText` / `[转发消息]` 提取 `forwardContext`，正式主回复 `directed_context`、路由摘要和普通快速回复 system prompt 都注入 `forwarded_message_text`，并明确要求用户问“那句话/当时在说什么/是不是对转发内容的反应”时优先查看本轮转发内容，不再说“不记得上下文”。
 - 2026-06-05 01:32 +08:00：私聊“用户在评价上一条回复”断层修复。根因是 2026-06-02 为隔离拒演污染而把 `direct:*` / 私聊 raw continuity 中的 assistant 原文全量省略，导致用户说“后面几段跳太快”时模型看不到自己上一条回复，只能从用户话里的“敏感日期/个人卫生/童年经历”猜上下文。现在短期上下文和重启 bridge 在确认同一用户 session 后保留安全 assistant raw，同时继续过滤 `isUnsafeUserFacingReply` 命中的 Claude/拒演、内部上下文泄露和隐藏工具叙事；普通快速回复也过滤 unsafe assistant 历史，并加入“评价/纠正/吐槽上一条回复时优先锚定最近 assistant 历史回复”的规则。

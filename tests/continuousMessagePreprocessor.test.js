@@ -162,6 +162,45 @@ async function testImageRefsPreferCachedHandles() {
   );
 }
 
+async function testMergedFlushKeepsLatestFreshnessToken() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 50,
+    atBotDebounceMs: 50,
+    privateDebounceMs: 50,
+    maxHoldMs: 180
+  });
+
+  const firstMsg = makeMessage({
+    messageId: 'fresh-img-1',
+    message: [{ type: 'image', data: { url: 'https://example.com/fresh.png' } }],
+    rawMessage: '[CQ:image,url=https://example.com/fresh.png]'
+  });
+  const secondMsg = makeMessage({
+    messageId: 'fresh-text-1',
+    time: 1710000011,
+    message: [{ type: 'text', data: { text: '这是同一轮补充' } }],
+    rawMessage: '这是同一轮补充'
+  });
+
+  const firstPromise = preprocessor.handleMessage(firstMsg, {
+    freshnessSessionKey: 'direct:u1',
+    freshnessVersion: 7
+  });
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  const second = await preprocessor.handleMessage(secondMsg, {
+    freshnessSessionKey: 'direct:u1',
+    freshnessVersion: 8
+  });
+  assert.strictEqual(second.mode, 'deferred');
+
+  const first = await firstPromise;
+  assert.strictEqual(first.mode, 'ready');
+  assert.strictEqual(first.meta.freshnessSessionKey, 'direct:u1');
+  assert.strictEqual(first.meta.flushVersion, 8);
+  assert.deepStrictEqual(first.meta.sourceMessageIds, ['fresh-img-1', 'fresh-text-1']);
+}
+
 async function testSentenceWindowWaitsForContinuation() {
   const preprocessor = createContinuousMessagePreprocessor({
     enabled: true,
@@ -217,6 +256,7 @@ async function testSentenceStableTailFlushesWithoutExtraWait() {
   await testImageThenTextMergesIntoOneTurn();
   await testPlainTextStillFlushesOnBaseDebounce();
   await testImageRefsPreferCachedHandles();
+  await testMergedFlushKeepsLatestFreshnessToken();
   await testSentenceWindowWaitsForContinuation();
   await testSentenceStableTailFlushesWithoutExtraWait();
   console.log('continuousMessagePreprocessor.test.js passed');
