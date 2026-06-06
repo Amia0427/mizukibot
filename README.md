@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-06 12:05 +08:00：用扩展后的 `recallPollutionGuard` dry-run 复查长期记忆与 Profile Journal DB，重点清理 `raw_model_response`、`prompt_or_schema_pollution`、`assistant_self_instruction` 旧样本；已最小 apply 标记 SQLite 污染行并 scrub 小型落盘缓存，finalcheck 在本次受控范围内归零。详见 `docs/memory-quality-governance.md`。
+
 更新 2026-06-06 11:28 +08:00：修复主回复模型时间感知异常：`roleplay_runtime_context` 现在会把 OneBot/QQ 秒级 `routeMeta.timestamp` 按 Unix seconds 解析后再按 `TIMEZONE` 注入 `current_time`，避免秒级时间戳被当成毫秒导致模型看到 1970 年。详见 `docs/main-reply-context.md`。
 
 更新 2026-06-06 11:02 +08:00：post-reply worker 高优先级积压修复：Runtime V2 persist 写入 post-reply job 后会主动唤醒外置 `scripts/post-reply-worker.js`，不再只等待 Windows daemon 下一轮巡检；新增 supervisor 冷却和项目根感知单实例检测，避免重复启动。运行态诊断新增 `post_reply_due_queued_without_worker` 与 `dueQueued` 字段，当前 `post_reply_pid_missing` 已恢复为 worker running。详见 `docs/post-reply-worker.md`。
