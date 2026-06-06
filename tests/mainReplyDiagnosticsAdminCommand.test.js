@@ -105,6 +105,32 @@ module.exports = (async () => {
     assert.ok(Array.isArray(cacheReport.sources));
     assert.strictEqual(cacheReport.signals.noRecentMainReplyCalls, true);
 
+    const truncResult = await routeFlow.dispatchAdminRoute({
+      route: {
+        topRouteType: 'admin',
+        meta: {
+          admin: true,
+          command: {
+            cmd: 'debug',
+            args: ['replytrunc'],
+            raw: '/debug replytrunc'
+          }
+        }
+      },
+      groupId: 'g_diag',
+      senderId: 'admin_1',
+      rawText: '/debug replytrunc',
+      userInfo: null,
+      chatType: 'group'
+    });
+
+    assert.strictEqual(truncResult.handled, true);
+    assert.strictEqual(sent.length, 3);
+    const truncReport = JSON.parse(sent[2].replyText);
+    assert.strictEqual(truncReport.schemaVersion, 'main_reply_truncation_diagnostic_v1');
+    assert.ok(Array.isArray(truncReport.summary.topReasons));
+    assert.strictEqual(truncReport.summary.noRecentTruncationCandidates, true);
+
     const runtimeResult = await routeFlow.dispatchAdminRoute({
       route: {
         topRouteType: 'admin',
@@ -125,8 +151,8 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(runtimeResult.handled, true);
-    assert.strictEqual(sent.length, 3);
-    const runtimeReport = JSON.parse(sent[2].replyText);
+    assert.strictEqual(sent.length, 4);
+    const runtimeReport = JSON.parse(sent[3].replyText);
     assert.strictEqual(runtimeReport.schemaVersion, 'runtime_status_diagnostic_v1');
     assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport, 'summary'));
     assert.ok(Object.prototype.hasOwnProperty.call(runtimeReport, 'components'));
@@ -155,8 +181,8 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(hotspotsResult.handled, true);
-    assert.strictEqual(sent.length, 4);
-    const hotspotsReport = JSON.parse(sent[3].replyText);
+    assert.strictEqual(sent.length, 5);
+    const hotspotsReport = JSON.parse(sent[4].replyText);
     assert.strictEqual(hotspotsReport.schemaVersion, 'runtime_hotspots_diagnostic_v1');
     assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'resources'));
     assert.ok(Object.prototype.hasOwnProperty.call(hotspotsReport, 'runtime'));
@@ -182,8 +208,8 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(providerResult.handled, true);
-    assert.strictEqual(sent.length, 5);
-    const providerReport = JSON.parse(sent[4].replyText);
+    assert.strictEqual(sent.length, 6);
+    const providerReport = JSON.parse(sent[5].replyText);
     assert.strictEqual(providerReport.schemaVersion, 'provider_request_diagnostic_v1');
     assert.strictEqual(providerReport.scenarios[0].finalProvider, 'gemini_native');
     assert.strictEqual(providerReport.scenarios[0].auth.header, 'x-goog-api-key');
@@ -208,12 +234,12 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(checkResult.handled, true);
-    assert.strictEqual(sent.length, 6);
-    assert.ok(sent[5].replyText.includes('模型自检:'));
-    assert.ok(sent[5].replyText.includes('plan |'));
-    assert.ok(sent[5].replyText.includes('main_reply |'));
-    assert.ok(!sent[5].replyText.includes('https://'));
-    assert.ok(!sent[5].replyText.includes('diag-key'));
+    assert.strictEqual(sent.length, 7);
+    assert.ok(sent[6].replyText.includes('模型自检:'));
+    assert.ok(sent[6].replyText.includes('plan |'));
+    assert.ok(sent[6].replyText.includes('main_reply |'));
+    assert.ok(!sent[6].replyText.includes('https://'));
+    assert.ok(!sent[6].replyText.includes('diag-key'));
 
     const deniedCheckResult = await routeFlow.dispatchAdminRoute({
       route: {
@@ -235,8 +261,8 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(deniedCheckResult.handled, true);
-    assert.strictEqual(sent.length, 7);
-    assert.strictEqual(sent[6].replyText, '这个按钮现在只给管理员按哦。');
+    assert.strictEqual(sent.length, 8);
+    assert.strictEqual(sent[7].replyText, '这个按钮现在只给管理员按哦。');
 
     const helpResult = await routeFlow.dispatchAdminRoute({
       route: {
@@ -258,8 +284,8 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(helpResult.handled, true);
-    assert.strictEqual(sent.length, 8);
-    assert.ok(sent[7].replyText.includes('/check'));
+    assert.strictEqual(sent.length, 9);
+    assert.ok(sent[8].replyText.includes('/check'));
 
     console.log('mainReplyDiagnosticsAdminCommand.test.js passed');
   } finally {

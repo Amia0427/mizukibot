@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-06 12:44 +08:00：新增主回复截断诊断入口 `npm run diag:main-reply-truncation`（等价于 `npm run diag:main-reply -- --truncation`），会合并 `data/model-calls.ndjson` 与 `data/request-trace.ndjson`，汇总最近截断候选并区分 `MAX_TOKENS`、上游断流/`ECONNRESET`、无 terminal event 和本地发送层失败；管理员可用 `/debug replytrunc [limit]`。详见 `docs/main-reply-context.md`。
+
 更新 2026-06-06 12:05 +08:00：用扩展后的 `recallPollutionGuard` dry-run 复查长期记忆与 Profile Journal DB，重点清理 `raw_model_response`、`prompt_or_schema_pollution`、`assistant_self_instruction` 旧样本；已最小 apply 标记 SQLite 污染行并 scrub 小型落盘缓存，finalcheck 在本次受控范围内归零。详见 `docs/memory-quality-governance.md`。
 
 更新 2026-06-06 11:28 +08:00：修复主回复模型时间感知异常：`roleplay_runtime_context` 现在会把 OneBot/QQ 秒级 `routeMeta.timestamp` 按 Unix seconds 解析后再按 `TIMEZONE` 注入 `current_time`，避免秒级时间戳被当成毫秒导致模型看到 1970 年。详见 `docs/main-reply-context.md`。
@@ -368,6 +370,7 @@ npm run diag:continuity
 npm run diag:continuity -- prompt --user <id>
 npm run diag:main-reply
 npm run diag:main-reply-lag
+npm run diag:main-reply-truncation
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:runtime
 npm run diag:runtime-hotspots
