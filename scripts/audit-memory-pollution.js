@@ -38,6 +38,134 @@ const DEFAULT_RELATIVE_SCAN_ROOTS = [
   'passive-awareness-decisions.jsonl'
 ];
 const DEFAULT_MAX_FILE_BYTES = 512 * 1024 * 1024;
+const FOCUS_RECALL_POLLUTION_REASONS = [
+  'raw_model_response',
+  'prompt_or_schema_pollution',
+  'assistant_self_instruction'
+];
+const FOCUS_RECALL_POLLUTION_REASON_SET = new Set(FOCUS_RECALL_POLLUTION_REASONS);
+
+function bumpCount(target, key = '') {
+  const normalized = String(key || '').trim() || 'unknown';
+  target[normalized] = (target[normalized] || 0) + 1;
+}
+
+function collectRecallPollutionReasonsFromText(text = '', options = {}) {
+  const raw = String(text || '');
+  if (!raw.trim()) return [];
+  const reasons = new Set();
+  const classifyOptions = { allowBenignContext: options.allowBenignContext !== false };
+  const whole = classifyRecallPollution(raw, classifyOptions);
+  for (const reason of whole.reasons || []) reasons.add(reason);
+  if (/\r?\n/.test(raw)) {
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const lineResult = classifyRecallPollution(trimmed, classifyOptions);
+      for (const reason of lineResult.reasons || []) reasons.add(reason);
+    }
+  }
+  return Array.from(reasons);
+}
+
+function summarizeFindingRows(rows = [], options = {}) {
+  const summary = {
+    total: 0,
+    byReason: {},
+    focusTotal: 0,
+    focusByReason: {},
+    focusHits: []
+  };
+  const limit = Math.max(0, Number(options.focusLimit || 50) || 50);
+  for (const row of rows || []) {
+    const reason = String(row?.reason || '').trim() || 'unknown';
+    summary.total += 1;
+    bumpCount(summary.byReason, reason);
+    if (!FOCUS_RECALL_POLLUTION_REASON_SET.has(reason)) continue;
+    summary.focusTotal += 1;
+    bumpCount(summary.focusByReason, reason);
+    if (summary.focusHits.length < limit) summary.focusHits.push(row);
+  }
+  return summary;
+}
+
+function buildPollutionSummary(result = {}, options = {}) {
+  const focusLimit = Math.max(0, Number(options.focusLimit || 50) || 50);
+  const summary = {
+    focusReasons: FOCUS_RECALL_POLLUTION_REASONS.slice()
+  };
+
+  if (Array.isArray(result.findings)) {
+    const audit = summarizeFindingRows(result.findings, { focusLimit });
+    audit.byType = {};
+    for (const finding of result.findings) bumpCount(audit.byType, finding.type);
+    summary.audit = audit;
+  }
+
+  if (result.fileScrub) {
+    const changed = Array.isArray(result.fileScrub.changed) ? result.fileScrub.changed : [];
+    const fileSummary = {
+      scanned: Number(result.fileScrub.scanned || 0) || 0,
+      changed: changed.length,
+      byScrubReason: {},
+      byPollutionReason: {},
+      focusChanged: 0,
+      focusByReason: {},
+      focusFiles: []
+    };
+    for (const item of changed) {
+      bumpCount(fileSummary.byScrubReason, item.reason);
+      const reasons = Array.isArray(item.pollutionReasons) ? item.pollutionReasons : [];
+      for (const reason of reasons) {
+        bumpCount(fileSummary.byPollutionReason, reason);
+        if (!FOCUS_RECALL_POLLUTION_REASON_SET.has(reason)) continue;
+        bumpCount(fileSummary.focusByReason, reason);
+      }
+      const focusReasons = reasons.filter((reason) => FOCUS_RECALL_POLLUTION_REASON_SET.has(reason));
+      if (!focusReasons.length) continue;
+      fileSummary.focusChanged += 1;
+      if (fileSummary.focusFiles.length < focusLimit) {
+        fileSummary.focusFiles.push({
+          file: item.file,
+          reason: item.reason,
+          pollutionReasons: focusReasons
+        });
+      }
+    }
+    summary.fileScrub = fileSummary;
+  }
+
+  if (result.profileJournalDbScrub) {
+    const dbResult = result.profileJournalDbScrub;
+    const findings = dbResult.findings || {};
+    const dbSummary = {
+      ok: dbResult.ok === true,
+      reason: dbResult.reason || '',
+      tables: {},
+      byReason: {},
+      focusTotal: 0,
+      focusByReason: {},
+      focusHits: []
+    };
+    for (const [table, rows] of Object.entries(findings)) {
+      const tableRows = Array.isArray(rows) ? rows : [];
+      dbSummary.tables[table] = summarizeFindingRows(tableRows, { focusLimit });
+      for (const row of tableRows) {
+        const reason = String(row?.reason || '').trim() || 'unknown';
+        bumpCount(dbSummary.byReason, `${table}:${reason}`);
+        if (!FOCUS_RECALL_POLLUTION_REASON_SET.has(reason)) continue;
+        dbSummary.focusTotal += 1;
+        bumpCount(dbSummary.focusByReason, reason);
+        if (dbSummary.focusHits.length < focusLimit) {
+          dbSummary.focusHits.push({ table, ...row });
+        }
+      }
+    }
+    summary.profileJournalDbScrub = dbSummary;
+  }
+
+  return summary;
+}
 
 function parseArgs(argv = []) {
   const out = { user: '', apply: false, scrub: false, roots: [], includeBackups: false, maxFileBytes: DEFAULT_MAX_FILE_BYTES };
@@ -288,24 +416,27 @@ function scrubTextFile(filePath, apply = false) {
   } catch (error) {
     return { file: filePath, changed: false, reason: `read_failed:${error.message}` };
   }
-  if (!raw || !isPollutedMemoryText(raw, { allowBenignContext: false }) && !hasRecallPollutionInObject(raw, { allowBenignContext: false })) {
+  const polluted = isPollutedMemoryText(raw, { allowBenignContext: false })
+    || hasRecallPollutionInObject(raw, { allowBenignContext: false });
+  if (!raw || !polluted) {
     return { file: filePath, changed: false, reason: '' };
   }
+  const pollutionReasons = collectRecallPollutionReasonsFromText(raw, { allowBenignContext: false });
   const journalResult = scrubJournalMarkdownFile(filePath, raw, apply);
-  if (journalResult.changed) return { file: filePath, ...journalResult };
+  if (journalResult.changed) return { file: filePath, pollutionReasons, ...journalResult };
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.json') {
     const result = scrubJsonFile(filePath, raw, apply);
-    return { file: filePath, ...result };
+    return { file: filePath, pollutionReasons, ...result };
   }
   if (ext === '.jsonl' || ext === '.ndjson') {
     const result = scrubJsonLinesFile(filePath, raw, apply);
-    return { file: filePath, ...result };
+    return { file: filePath, pollutionReasons, ...result };
   }
   if (isPollutedMemoryText(raw, { allowBenignContext: false })) {
     const next = REDACTED_TEXT;
     if (apply) atomicWriteText(filePath, next);
-    return { file: filePath, changed: true, reason: 'text_redacted' };
+    return { file: filePath, changed: true, reason: 'text_redacted', pollutionReasons };
   }
   return { file: filePath, changed: false, reason: 'benign_context_only' };
 }
@@ -440,6 +571,7 @@ function main() {
     result.fileScrub = scrubFiles(args);
     result.profileJournalDbScrub = scrubProfileJournalDb(args);
   }
+  result.summary = buildPollutionSummary(result);
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
@@ -450,6 +582,9 @@ if (require.main === module) {
 module.exports = {
   auditJournal,
   auditProfile,
+  buildPollutionSummary,
+  collectRecallPollutionReasonsFromText,
+  FOCUS_RECALL_POLLUTION_REASONS,
   parseArgs,
   scrubFiles,
   scrubProfileJournalDb,

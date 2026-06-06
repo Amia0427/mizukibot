@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-05 21:28 +08:00
+更新时间：2026-06-06 12:05 +08:00
+
+更新 2026-06-06 12:05 +08:00：用扩展后的 `recallPollutionGuard` 对长期记忆和 Profile Journal DB 做受控 dry-run。SQLite 命中 `profile_facts=43`、`journal_entries=23`、`journal_rollups=10`，其中新三类重点为 `raw_model_response=40`、`prompt_or_schema_pollution=6`、`assistant_self_instruction=9`；文件层在 `daily_journal`、`short_term_bridge`、`post_reply_jobs`、style/social 和 passive-awareness 小根中命中 54 个可 scrub 文件。已执行最小 apply：profile facts 标记 `rejected`，journal entries 标记 `unsafe`，rollups 标记 `archived`，文件层只 redacted/移除污染块；`artifacts/tmp-recall-pollution-2026-06-06-finalcheck.json` 显示本次受控范围 `fileChanged=0`、Profile Journal DB focus 命中为 0。新增 `tests/auditMemoryPollutionSummary.test.js` 覆盖 dry-run summary 与 apply 状态转换。
 
 更新 2026-06-05 21:28 +08:00：主回复长期记忆污染治理扩展为统一分类器。`utils/recallPollutionGuard.js` 现在识别五类污染：拒演/模型自报、assistant 记忆失败回复、内部上下文块泄漏、供应商 raw model response、prompt/schema/助手自我指令污染；`memoryQuality` 写入门禁会把这些标为 `memory_pollution` 并直接 reject，profile lifecycle 会把旧污染画像标为 suspect/notRecallable。Memory V3 candidate collection、LanceDB row filter、profile surface、`assembleMemoryPacket` 出口、Daily Journal safety、short-term bridge 和用户可见回复 guard 均复用同一分类器。`scripts/audit-memory-pollution.js --scrub [--apply]` 同步使用新分类，可 dry-run 定位旧数据后再 apply。
 
