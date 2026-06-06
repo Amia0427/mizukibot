@@ -65,6 +65,13 @@
         "include_in_system_prompt": false
       },
       {
+        "id": "persona_voice_samples",
+        "path": "persona/05_voice_samples.txt",
+        "required": false,
+        "kind": "persona_examples_reference",
+        "include_in_system_prompt": false
+      },
+      {
         "id": "persona_examples_index",
         "path": "persona/05_examples.index.json",
         "required": false,
@@ -76,6 +83,14 @@
         "path": "persona/06_state_modulation.txt",
         "required": true,
         "kind": "persona_modulation"
+      },
+      {
+        "id": "persona_human_imperfection",
+        "path": "persona/08_human_imperfection.txt",
+        "required": true,
+        "kind": "persona_quality",
+        "authority": "persona_core",
+        "priority": 50
       },
       {
         "id": "persona_opus_localization",
@@ -536,6 +551,18 @@
         "authority": "persona_module",
         "priority": 617,
         "budget_tokens": 70,
+        "conflict_tags": [],
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "persona_module_micro_behavior",
+        "path": "persona_modules/micro_behavior.txt",
+        "required": false,
+        "kind": "persona_module",
+        "stage": "main",
+        "authority": "persona_module",
+        "priority": 619,
+        "budget_tokens": 90,
         "conflict_tags": [],
         "include_in_system_prompt": false
       },
