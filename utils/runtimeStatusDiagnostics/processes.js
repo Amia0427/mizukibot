@@ -151,8 +151,8 @@ function findProcessByPid(processes = [], pid = 0) {
   return processes.find((proc) => normalizePid(proc.pid) === targetPid) || null;
 }
 
-function getDiagnosticProjectRoot() {
-  return path.resolve(__dirname, '..', '..').replace(/\\/g, '/').toLowerCase();
+function getDiagnosticProjectRoot(projectRoot = '') {
+  return path.resolve(projectRoot || process.env.MIZUKIBOT_PROJECT_ROOT || path.join(__dirname, '..', '..')).replace(/\\/g, '/').toLowerCase();
 }
 
 function extractKnownProjectScriptTokens(cmd = '') {
@@ -170,10 +170,10 @@ function isAbsoluteLikePath(value = '') {
   return /^[a-z]:\//i.test(value) || value.startsWith('/');
 }
 
-function processMatchesProjectRoot(proc = {}) {
+function processMatchesProjectRoot(proc = {}, projectRoot = '') {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/').toLowerCase();
   if (!cmd) return false;
-  const root = getDiagnosticProjectRoot();
+  const root = getDiagnosticProjectRoot(projectRoot);
   const rootWithSlash = root.endsWith('/') ? root : `${root}/`;
   if (cmd.includes(rootWithSlash)) return true;
 
@@ -184,14 +184,14 @@ function processMatchesProjectRoot(proc = {}) {
   return true;
 }
 
-function processMatchesMain(proc = {}) {
+function processMatchesMain(proc = {}, projectRoot = '') {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  return /(^|[\s/])index\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
+  return /(^|[\s/"'])index\.js(["']?)(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc, projectRoot);
 }
 
-function processMatchesPostReplyWorker(proc = {}) {
+function processMatchesPostReplyWorker(proc = {}, projectRoot = '') {
   const cmd = normalizeText(proc.commandLine).replace(/\\/g, '/');
-  return /(^|[\s/])post-reply-worker\.js(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc);
+  return /(^|[\s/"'])post-reply-worker\.js(["']?)(\s|$)/i.test(cmd) && processMatchesProjectRoot(proc, projectRoot);
 }
 
 function compactProcess(proc = null) {
@@ -216,6 +216,7 @@ module.exports = {
   parsePosixProcessList,
   parseWindowsGetProcessList,
   parseWindowsProcessList,
+  processMatchesProjectRoot,
   processMatchesMain,
   processMatchesPostReplyWorker
 };

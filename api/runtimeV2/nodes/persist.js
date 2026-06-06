@@ -74,6 +74,15 @@ function createPersistNode(deps = {}) {
   const postReplyJobQueue = deps.postReplyJobQueue && typeof deps.postReplyJobQueue.enqueue === 'function'
     ? deps.postReplyJobQueue
     : { enqueue() { return { enqueued: false, job: null }; } };
+  const ensurePostReplyWorkerRunning = typeof deps.ensurePostReplyWorkerRunning === 'function'
+    ? deps.ensurePostReplyWorkerRunning
+    : (() => {
+        try {
+          return require('../../../utils/postReplyWorkerSupervisor').ensurePostReplyWorkerRunning();
+        } catch (_) {
+          return { started: false, skipped: true, reason: 'unavailable' };
+        }
+      });
   const appendRequestTraceEvent = typeof deps.appendRequestTraceEvent === 'function'
     ? deps.appendRequestTraceEvent
     : (() => {});
@@ -671,6 +680,21 @@ function createPersistNode(deps = {}) {
             userId: String(request.userId || '').trim(),
             enqueued: Boolean(enqueueResult.enqueued)
           });
+          if (enqueueResult.job?.jobId) {
+            const workerWake = ensurePostReplyWorkerRunning({
+              jobId: enqueueResult.job.jobId,
+              enqueued: Boolean(enqueueResult.enqueued),
+              aggregateKey
+            });
+            if (workerWake?.started || workerWake?.reason) {
+              emitPersistTrace('persist_post_reply_worker_wake', {
+                jobId: enqueueResult.job.jobId,
+                workerStarted: Boolean(workerWake.started),
+                reason: String(workerWake.reason || '').slice(0, 120),
+                pid: Number(workerWake.pid || 0) || 0
+              });
+            }
+          }
           if (enqueueResult.enqueued && normalizedUserId) {
             postReplyLastEnqueueAtByUser.set(normalizedUserId, now);
           }

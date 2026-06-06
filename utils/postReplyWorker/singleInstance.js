@@ -80,22 +80,23 @@ function safeListProcesses(listProcesses) {
   }
 }
 
-function processLooksLikeWorker(proc = null) {
+function processLooksLikeWorker(proc = null, projectRoot = '') {
   if (!proc) return false;
-  if (processMatchesPostReplyWorker(proc)) return true;
+  if (processMatchesPostReplyWorker(proc, projectRoot || process.env.MIZUKIBOT_PROJECT_ROOT || '')) return true;
   return !normalizeText(proc.commandLine) && /node/i.test(normalizeText(proc.name));
 }
 
 function findExistingWorkerProcess({
   processes = [],
   currentPid = process.pid,
-  isProcessAlive = isProcessAliveDefault
+  isProcessAlive = isProcessAliveDefault,
+  projectRoot = ''
 } = {}) {
   const current = normalizePid(currentPid);
   return processes
     .filter((proc) => {
       const pid = normalizePid(proc.pid);
-      return pid && pid !== current && isProcessAlive(pid) && processMatchesPostReplyWorker(proc);
+      return pid && pid !== current && isProcessAlive(pid) && processMatchesPostReplyWorker(proc, projectRoot || process.env.MIZUKIBOT_PROJECT_ROOT || '');
     })
     .sort((a, b) => normalizePid(a.pid) - normalizePid(b.pid))[0] || null;
 }
@@ -104,14 +105,15 @@ function getAliveRecordedWorker({
   filePath = '',
   processes = [],
   currentPid = process.pid,
-  isProcessAlive = isProcessAliveDefault
+  isProcessAlive = isProcessAliveDefault,
+  projectRoot = ''
 } = {}) {
   const ownerPid = readOwnerPid(filePath);
   if (!ownerPid || ownerPid === normalizePid(currentPid) || !isProcessAlive(ownerPid)) {
     return null;
   }
   const proc = findProcessByPid(processes, ownerPid);
-  if (processLooksLikeWorker(proc) || (!proc && processes.length === 0)) {
+  if (processLooksLikeWorker(proc, projectRoot) || (!proc && processes.length === 0)) {
     return {
       pid: ownerPid,
       process: proc ? compactProcess(proc) : null
@@ -124,7 +126,8 @@ function cleanupStaleOwnerFile({
   filePath = '',
   processes = [],
   currentPid = process.pid,
-  isProcessAlive = isProcessAliveDefault
+  isProcessAlive = isProcessAliveDefault,
+  projectRoot = ''
 } = {}) {
   const ownerPid = readOwnerPid(filePath);
   if (!ownerPid || ownerPid === normalizePid(currentPid)) {
@@ -136,7 +139,7 @@ function cleanupStaleOwnerFile({
     return true;
   }
   const proc = findProcessByPid(processes, ownerPid);
-  if (proc && !processLooksLikeWorker(proc)) {
+  if (proc && !processLooksLikeWorker(proc, projectRoot)) {
     try { fs.unlinkSync(filePath); } catch (_) {}
     return true;
   }
@@ -166,7 +169,8 @@ function acquirePostReplyWorkerSingleInstance(options = {}) {
     filePath: lockFile,
     processes,
     currentPid,
-    isProcessAlive
+    isProcessAlive,
+    projectRoot
   });
   if (recordedLockWorker) {
     writePidFile(pidFile, recordedLockWorker.pid);
@@ -183,7 +187,8 @@ function acquirePostReplyWorkerSingleInstance(options = {}) {
     filePath: pidFile,
     processes,
     currentPid,
-    isProcessAlive
+    isProcessAlive,
+    projectRoot
   });
   if (recordedPidWorker) {
     return {
@@ -195,10 +200,10 @@ function acquirePostReplyWorkerSingleInstance(options = {}) {
     };
   }
 
-  cleanupStaleOwnerFile({ filePath: lockFile, processes, currentPid, isProcessAlive });
-  cleanupStaleOwnerFile({ filePath: pidFile, processes, currentPid, isProcessAlive });
+  cleanupStaleOwnerFile({ filePath: lockFile, processes, currentPid, isProcessAlive, projectRoot });
+  cleanupStaleOwnerFile({ filePath: pidFile, processes, currentPid, isProcessAlive, projectRoot });
 
-  const existingProcess = findExistingWorkerProcess({ processes, currentPid, isProcessAlive });
+  const existingProcess = findExistingWorkerProcess({ processes, currentPid, isProcessAlive, projectRoot });
   const existingStartMs = Math.max(0, Number(existingProcess?.startTimeMs || 0) || 0);
   const existingIsConcurrentPeer = existingProcess
     && existingStartMs > 0
@@ -221,7 +226,8 @@ function acquirePostReplyWorkerSingleInstance(options = {}) {
       filePath: lockFile,
       processes,
       currentPid,
-      isProcessAlive
+      isProcessAlive,
+      projectRoot
     });
     if (recordedLockWorker) {
       writePidFile(pidFile, recordedLockWorker.pid);
@@ -234,7 +240,7 @@ function acquirePostReplyWorkerSingleInstance(options = {}) {
       };
     }
 
-    cleanupStaleOwnerFile({ filePath: lockFile, processes, currentPid, isProcessAlive });
+    cleanupStaleOwnerFile({ filePath: lockFile, processes, currentPid, isProcessAlive, projectRoot });
 
     try {
       writeLockFile(lockFile, currentPid);
