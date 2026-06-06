@@ -58,10 +58,10 @@
         "kind": "persona_behavior"
       },
       {
-        "id": "persona_examples_reference",
-        "path": "persona/05_examples.txt",
+        "id": "persona_examples_index",
+        "path": "persona/05_examples.index.json",
         "required": false,
-        "kind": "persona_examples_reference",
+        "kind": "persona_examples_index",
         "include_in_system_prompt": false
       },
       {
@@ -69,13 +69,6 @@
         "path": "persona/05_voice_samples.txt",
         "required": false,
         "kind": "persona_examples_reference",
-        "include_in_system_prompt": false
-      },
-      {
-        "id": "persona_examples_index",
-        "path": "persona/05_examples.index.json",
-        "required": false,
-        "kind": "persona_examples_index",
         "include_in_system_prompt": false
       },
       {
@@ -90,13 +83,7 @@
         "required": true,
         "kind": "persona_quality",
         "authority": "persona_core",
-        "priority": 50
-      },
-      {
-        "id": "persona_opus_localization",
-        "path": "persona/07_opus_localization.txt",
-        "required": true,
-        "kind": "persona_modulation"
+        "priority": 150
       },
       {
         "id": "persona_core_baseline_patch",
@@ -562,8 +549,8 @@
         "stage": "main",
         "authority": "persona_module",
         "priority": 619,
-        "budget_tokens": 90,
-        "conflict_tags": [],
+        "budget_tokens": 120,
+        "conflict_tags": ["persona_roleplay"],
         "include_in_system_prompt": false
       },
       {
