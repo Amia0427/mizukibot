@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-05 23:03 +08:00
+更新时间：2026-06-06 11:28 +08:00
 
 ## 已调整
 
+- 2026-06-06 11:28 +08:00：修复主回复时间感知异常。`roleplay_runtime_context` 继续注入 `current_time`，但现在会把 OneBot/QQ 常见的 10 位秒级 `routeMeta.timestamp` 识别为 Unix seconds 后再按 `TIMEZONE` 格式化，避免被当成毫秒落到 1970 年；毫秒级时间戳和 ISO 时间字符串保持兼容。
 - 2026-06-05 23:03 +08:00：主回复截断排查增加可观测性和输出约束。日志中已能看到用户多次反馈“截断/宝你没说完/谷歌正常聊天都截断”，样本附近的本地发送预览与 `finalReplyChars` 显示当前回复文本本身偏短，未见流式分段 `finish()` 漏发尾段的直接证据；同时 Gemini/gcli 流式调用存在多次 `ECONNRESET/socket hang up` 和低 completion token 的成功记录。现在 `api/parser.js` 会抽取 OpenAI-compatible `finish_reason`、Gemini `finishReason`、Anthropic/Responses 停止状态，`data/model-calls.ndjson` 写入 `finish_reason`，流式成功但没有终止事件时标为 `stream_closed_without_terminal_event`。`prompts/runtime/streaming-segmentation.txt` 同步要求段数限制只能压缩内容，不能省略结尾，最终可见句必须自然闭合。
 - 2026-06-05 20:54 +08:00：管理员主回复新增 admin-only 亲密/恋爱感动态规则，位于 must-use `chat_liveness_discipline`；私聊允许更明显的亲近称呼、偏爱和轻微撒娇/吃醋，群聊只保留含蓄偏爱与护短，不公开复述私聊细节或把关系公告化。本次不改已有未提交的 `prompts/admin.txt`。
 - 2026-06-05 20:38 +08:00：同一用户私聊/群聊上下文共享边界调整。短期上下文原本已聚合 `direct:<user>` 与 `qq-group:<group>:user:<user>`，本次移除群聊活人感规则里“不得调用私聊记忆”的硬隔离，改为可把同一用户私聊/群聊记忆作为背景连续性使用；群聊输出仍不得泄露来源或复述私聊细节，除非用户已在群里说出口。私聊规则同步明确允许更私密、更深的情感讨论，以及敏感议题和政治相关批判的自然承接。
@@ -145,7 +146,7 @@ MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT=7
 
 `roleplay_runtime_context` 由主回复 runtime 构建，不替代 `config.SYSTEM_PROMPT`。字段来源：
 
-- 时间：`options.currentTime/current_time/journalNow` 或当前时间，按 `TIMEZONE` 格式化。
+- 时间：`options.currentTime/current_time/journalNow`、`routeMeta.currentTime/current_time/timestamp` 或当前时间，按 `TIMEZONE` 格式化；`routeMeta.timestamp` 同时兼容 OneBot/QQ 秒级 Unix 时间戳和毫秒级时间戳。
 - 场景/模式：`routeMeta.directedContext`、`groupId`、`chatType`、`topRouteType` 和 prompt surface。
 - 关系/近期：`memoryContext.profile.relation_stage`、`userInfo.level`、`memoryContext.promptSummaryText/summary`、短期连续性摘要。
 - 用户状态：只使用 `routeMeta.userVisibleState/userState` 或可见文本提示，不读取括号内心理。

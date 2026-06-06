@@ -206,11 +206,22 @@ function buildContinuityStatePromptSnippet(continuitySignals = {}) {
   return ['[ContinuityState]', ...lines].join('\n');
 }
 
+function normalizeRuntimeTimestampMs(value = null) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  if (numeric === 0) return 0;
+  const abs = Math.abs(numeric);
+  return abs >= 1000000000 && abs < 1000000000000
+    ? numeric * 1000
+    : numeric;
+}
+
 function normalizeRuntimeDate(value = null) {
   if (value === null || value === undefined || value === '') return new Date();
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-  if (Number.isFinite(Number(value))) {
-    const date = new Date(Number(value));
+  const timestampMs = normalizeRuntimeTimestampMs(value);
+  if (timestampMs !== null) {
+    const date = new Date(timestampMs);
     if (!Number.isNaN(date.getTime())) return date;
   }
   const text = normalizeText(value);

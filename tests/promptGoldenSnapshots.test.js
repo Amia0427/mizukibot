@@ -64,6 +64,26 @@ module.exports = (async () => {
     1,
     'roleplay runtime context should not be duplicated after session/runtime merge'
   );
+  const oneBotTimestampPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 12 },
+    'u_prompt_onebot_timestamp',
+    '现在几点',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      timezone: 'Asia/Shanghai',
+      routeMeta: {
+        timestamp: Math.floor(Date.parse('2026-06-06T03:04:05.000Z') / 1000)
+      }
+    }
+  );
+  const oneBotRuntimeContext = oneBotTimestampPrompt.dynamicContextBlocks.find((item) => item.id === 'roleplay_runtime_context');
+  assert.ok(
+    String(oneBotRuntimeContext?.content || '').includes('current_time=2026-06-06 11:04:05 星期六 (Asia/Shanghai)'),
+    'roleplay runtime context should parse OneBot/QQ second timestamps as Unix seconds, not milliseconds'
+  );
+  assert.ok(!String(oneBotRuntimeContext?.content || '').includes('current_time=1970-'));
   const livenessContext = main.dynamicContextBlocks.find((item) => item.id === 'chat_liveness_discipline');
   assert.ok(String(livenessContext?.content || '').includes('[ChatLivenessDiscipline]'));
   assert.ok(String(livenessContext?.content || '').includes('surface=private_chat'));

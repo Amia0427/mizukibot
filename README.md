@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-06 11:28 +08:00：修复主回复模型时间感知异常：`roleplay_runtime_context` 现在会把 OneBot/QQ 秒级 `routeMeta.timestamp` 按 Unix seconds 解析后再按 `TIMEZONE` 注入 `current_time`，避免秒级时间戳被当成毫秒导致模型看到 1970 年。详见 `docs/main-reply-context.md`。
+
 更新 2026-06-06 11:02 +08:00：post-reply worker 高优先级积压修复：Runtime V2 persist 写入 post-reply job 后会主动唤醒外置 `scripts/post-reply-worker.js`，不再只等待 Windows daemon 下一轮巡检；新增 supervisor 冷却和项目根感知单实例检测，避免重复启动。运行态诊断新增 `post_reply_due_queued_without_worker` 与 `dueQueued` 字段，当前 `post_reply_pid_missing` 已恢复为 worker running。详见 `docs/post-reply-worker.md`。
 
 更新 2026-06-05 23:03 +08:00：主回复截断排查确认日志里已有多次用户反馈“截断/没说完”，近似样本集中在 Gemini/gcli 主回复链路；当前未发现本地流式分段 `finish()` 丢尾证据。SSE parser 与 `model-calls.ndjson` 新增 `finish_reason` 记录，流式成功日志会标记 `stop/length/MAX_TOKENS/SAFETY/done/stream_closed_without_terminal_event`；`streaming-segmentation` prompt 同步要求段数限制只能触发压缩，不能省略结尾或停在半句。详见 `docs/main-reply-context.md`。
