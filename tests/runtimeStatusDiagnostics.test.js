@@ -47,6 +47,7 @@ module.exports = (() => {
     process.env.MEMORY_V3_MATERIALIZE_LOCK_FILE = memoryLockFile;
     process.env.MEMORY_V3_MATERIALIZE_LOCK_STALE_MS = '600000';
     process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.MIZUKIBOT_PROJECT_ROOT = tempDir;
 
     clearProjectCache();
 
@@ -179,6 +180,7 @@ module.exports = (() => {
     assert.ok(signalCodes.includes('post_reply_processing_stale'));
     assert.ok(signalCodes.includes('memory_materialize_lock_stale'));
     assert.ok(signalCodes.includes('langgraph_v2_checkpoint_stale'));
+    assert.ok(!signalCodes.includes('post_reply_due_queued_without_worker'));
 
     assert.doesNotThrow(() => JSON.parse(JSON.stringify(report)));
 
@@ -233,6 +235,27 @@ module.exports = (() => {
     });
     assert.strictEqual(idleWorkerReport.summary.postReplyWorker.status, 'idle');
     assert.ok(!idleWorkerReport.signals.some((item) => item.code === 'post_reply_pid_missing'), 'idle worker queue should not require a pid file');
+
+    writeJson(path.join(idleQueueDir, 'queued', 'post_reply_due.json'), {
+      jobId: 'post_reply_due',
+      schemaVersion: 2,
+      status: 'queued',
+      phase: 'core',
+      userId: 'u4',
+      availableAt: '2026-05-02T23:59:00.000Z',
+      updatedAt: '2026-05-02T23:59:00.000Z'
+    });
+    clearProjectCache();
+    const { buildRuntimeStatusDiagnostic: buildDueRuntimeStatusDiagnostic } = require('../utils/runtimeStatusDiagnostics');
+    const dueWorkerReport = buildDueRuntimeStatusDiagnostic({
+      projectRoot: tempDir,
+      now: () => now,
+      listProcesses: () => [],
+      isProcessAlive: () => false
+    });
+    assert.strictEqual(dueWorkerReport.summary.postReplyWorker.status, 'missing');
+    assert.strictEqual(dueWorkerReport.summary.postReplyWorker.dueQueued, 1);
+    assert.ok(dueWorkerReport.signals.some((item) => item.code === 'post_reply_due_queued_without_worker'));
 
     console.log('runtimeStatusDiagnostics.test.js passed');
   } finally {

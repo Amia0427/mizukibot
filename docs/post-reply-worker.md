@@ -1,6 +1,8 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-06-05 07:37 +08:00
+更新时间：2026-06-06 11:02 +08:00
+
+更新 2026-06-06 11:02 +08:00：修复高优先级 worker 缺席积压。Runtime V2 persist 在成功写入或合并 post-reply job 后会调用 `ensurePostReplyWorkerRunning()` 主动唤醒外置 worker；supervisor 会先检查 pid file 和项目根感知进程列表，命中运行中 worker 则跳过，未运行时用当前 Node 启动 `scripts/post-reply-worker.js`，并通过 `POST_REPLY_WORKER_SUPERVISOR_COOLDOWN_MS` 控制重复拉起。`diag:runtime` 现在额外输出 `dueQueued`，并在到期 queued job 无 worker 时报告 `post_reply_due_queued_without_worker`，便于区分“未来可用 enrich 延迟队列”和真正积压。
 
 更新 2026-06-05 07:37 +08:00：复查今日 recap 降噪后仍出现 queued enrich 和根目录 `.mizukibot-postreply-worker.pid/.lock` 的情况：PID/lock 指向真实运行的 `scripts/post-reply-worker.js` 时属于正常单实例运行标记；queued enrich 来自 worker 重启后处理历史非 recap core 积压。修复派生 enrich 复用 core `jobId` 的问题，避免 `index.json` 用 queued enrich 覆盖同名 done core；新派生 enrich 会生成独立 jobId，旧 core job 仍保留 done 状态。已把历史同名 queued/failed enrich 改成独立 jobId 并重建索引，当前队列无跨状态重复 jobId。队列空闲且无 worker 时诊断显示 `idle`，不再误报 `post_reply_pid_missing`。补充死 PID/lock owner 恢复回归测试。
 

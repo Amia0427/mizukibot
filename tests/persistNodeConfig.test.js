@@ -345,6 +345,8 @@ module.exports = (async () => {
   let enqueueCount = 0;
   let mergeCount = 0;
   let queuedJob = null;
+  const workerWakeCalls = [];
+  const workerWakeTraceEvents = [];
   const persistNodeWithPostReplyGate = createPersistNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;
@@ -405,6 +407,16 @@ module.exports = (async () => {
         return { enqueued: true, job: queuedJob };
       }
     },
+    ensurePostReplyWorkerRunning(info) {
+      workerWakeCalls.push(info);
+      return { started: true, reason: 'started', pid: 1234 };
+    },
+    appendRequestTraceEvent(event) {
+      workerWakeTraceEvents.push(event);
+    },
+    normalizeRequestTrace(value) {
+      return value && value.requestId ? value : null;
+    },
     chatHistory: {},
     shortTermMemory: {},
     config: {
@@ -425,6 +437,7 @@ module.exports = (async () => {
       runtimeQuestionText: 'hello there',
       persistUserText: 'hello there',
       routeMeta: { groupId: '1083095371' },
+      requestTrace: { requestId: 'trace-post-reply-wake' },
       sessionKey: 's1',
       routePolicyKey: 'chat/default',
       topRouteType: 'direct_chat'
@@ -441,6 +454,9 @@ module.exports = (async () => {
   await persistNodeWithPostReplyGate(gatedState);
   assert.strictEqual(enqueueCount, 1, 'post-reply enqueue should respect per-user cooldown');
   assert.strictEqual(mergeCount, 0, 'cooldown should prevent merge in the strict cooldown case');
+  assert.strictEqual(workerWakeCalls.length, 1, 'post-reply worker should be woken after a queued job is written');
+  assert.strictEqual(workerWakeCalls[0].jobId, 'job_1');
+  assert.ok(workerWakeTraceEvents.some((event) => event.stage === 'persist_post_reply_worker_wake' && event.workerStarted === true));
 
   let recapEnqueueCalled = false;
   let recapBridgeCalled = false;
@@ -487,6 +503,16 @@ module.exports = (async () => {
         recapEnqueueCalled = true;
         throw new Error('recap reply should not enqueue post-reply work');
       }
+    },
+    ensurePostReplyWorkerRunning(info) {
+      workerWakeCalls.push(info);
+      return { started: true, reason: 'started', pid: 1234 };
+    },
+    appendRequestTraceEvent(event) {
+      workerWakeTraceEvents.push(event);
+    },
+    normalizeRequestTrace(value) {
+      return value && value.requestId ? value : null;
     },
     chatHistory: {},
     shortTermMemory: {},

@@ -86,8 +86,8 @@ function buildRuntimeStatusDiagnostic(options = {}) {
     now
   });
 
-  const mainProcesses = processes.filter(processMatchesMain).map(compactProcess);
-  const workerProcesses = processes.filter(processMatchesPostReplyWorker).map(compactProcess);
+  const mainProcesses = processes.filter((proc) => processMatchesMain(proc, projectRoot)).map(compactProcess);
+  const workerProcesses = processes.filter((proc) => processMatchesPostReplyWorker(proc, projectRoot)).map(compactProcess);
   const backgroundTaskStaleMs = Math.max(
     1000,
     normalizeNumber(options.backgroundTaskStaleMs || process.env.BACKGROUND_TASK_STALE_MS, DEFAULT_BACKGROUND_TASK_STALE_MS)
@@ -155,6 +155,12 @@ function buildRuntimeStatusDiagnostic(options = {}) {
     || Number(postReplyQueue.staleProcessingCount || 0) > 0;
   if (postReplyExpected && postReplyPidFile.status === 'missing' && workerProcesses.length === 0 && postReplyHasRunnableQueueWork) {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_pid_missing', 'post-reply worker pid file is missing and no worker process was found');
+  }
+  if (postReplyExpected && workerProcesses.length === 0 && Number(postReplyQueue.dueQueuedCount || 0) > 0) {
+    addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_due_queued_without_worker', 'post-reply queue has due jobs but no worker process was found', {
+      count: postReplyQueue.dueQueuedCount,
+      oldestQueuedAgeMs: postReplyQueue.oldestDueQueued?.availableAgeMs || 0
+    });
   }
   if (postReplyDiagnosticsEnabled && postReplyPidFile.status === 'stale') {
     addSignal(signals, 'warning', 'postReplyWorker', 'post_reply_pid_stale', 'post-reply worker pid is not alive', { pid: postReplyPidFile.pid });
@@ -230,6 +236,7 @@ function buildRuntimeStatusDiagnostic(options = {}) {
         queueByPhase: postReplyQueue.countsByPhase,
         failedByErrorClass: postReplyQueue.failedByErrorClass,
         oldestQueuedAgeMs: postReplyQueue.oldestQueued?.availableAgeMs || 0,
+        dueQueued: postReplyQueue.dueQueuedCount || 0,
         oldestProcessingLeaseAgeMs: postReplyQueue.oldestProcessingLease?.leaseAgeMs || 0
       },
       activeBackgroundTasks: backgroundTasks.activeCount,

@@ -264,6 +264,9 @@ function buildPostReplyQueueSummary({ queueDir, now, staleProcessingMs, safeRead
   const oldestQueued = allJobs
     .filter((job) => job.status === 'queued')
     .sort((a, b) => b.availableAgeMs - a.availableAgeMs)[0] || null;
+  const dueQueuedJobs = allJobs
+    .filter((job) => job.status === 'queued' && (!job.availableAt || job.availableAgeMs > 0))
+    .sort((a, b) => b.availableAgeMs - a.availableAgeMs);
   const oldestProcessingLease = allJobs
     .filter((job) => job.status === 'processing' && job.leaseUntil)
     .sort((a, b) => b.leaseAgeMs - a.leaseAgeMs)[0] || null;
@@ -274,6 +277,8 @@ function buildPostReplyQueueSummary({ queueDir, now, staleProcessingMs, safeRead
     countsByPhase,
     failedByErrorClass,
     oldestQueued,
+    dueQueuedCount: dueQueuedJobs.length,
+    oldestDueQueued: dueQueuedJobs[0] || null,
     oldestProcessingLease,
     staleProcessingMs,
     staleProcessingCount: staleProcessingJobs.length,
