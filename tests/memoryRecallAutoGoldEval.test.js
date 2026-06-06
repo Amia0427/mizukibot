@@ -29,8 +29,7 @@ for (const fileName of [
   '02_style.txt',
   '03_boundaries.txt',
   '04_behavior.txt',
-  '06_state_modulation.txt',
-  '07_opus_localization.txt'
+  '06_state_modulation.txt'
 ]) {
   fs.writeFileSync(path.join(process.env.PROMPTS_DIR, 'persona', fileName), 'test persona prompt', 'utf8');
 }

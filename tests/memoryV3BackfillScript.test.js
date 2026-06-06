@@ -23,7 +23,7 @@ fs.mkdirSync(process.env.MEMORY_V3_PROJECTIONS_DIR, { recursive: true });
 fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona_worldbook'), { recursive: true });
 fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona_modules'), { recursive: true });
 fs.mkdirSync(path.join(process.env.PROMPTS_DIR, 'persona'), { recursive: true });
-for (const name of ['01_identity.txt', '02_style.txt', '03_boundaries.txt', '04_behavior.txt', '06_state_modulation.txt', '07_opus_localization.txt']) {
+for (const name of ['01_identity.txt', '02_style.txt', '03_boundaries.txt', '04_behavior.txt', '06_state_modulation.txt']) {
   fs.writeFileSync(path.join(process.env.PROMPTS_DIR, 'persona', name), 'test persona text', 'utf8');
 }
 fs.writeFileSync(

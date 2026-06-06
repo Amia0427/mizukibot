@@ -60,17 +60,21 @@ function estimatePromptTokens(value) {
       '02_style.txt',
       '03_boundaries.txt',
       '04_behavior.txt',
-      '06_state_modulation.txt',
-      '07_opus_localization.txt'
+      '06_state_modulation.txt'
     ];
 
     assert.deepStrictEqual(config.PERSONA_FILES, requiredFiles);
     assert.ok(config.SYSTEM_PROMPT.startsWith('主回复根系统提示词测试块：最高优先级。'), 'SYSTEM.txt must be the first compiled SYSTEM_PROMPT text');
     assert.ok(Array.isArray(config.SYSTEM_PROMPT_BLOCKS), 'SYSTEM_PROMPT_BLOCKS must be exported');
-    assert.strictEqual(config.SYSTEM_PROMPT_BLOCKS[0]?.id, 'root_system_prompt');
-    assert.strictEqual(config.SYSTEM_PROMPT_BLOCKS[0]?.authority, 'system_root');
-    assert.ok(config.SYSTEM_PROMPT_BLOCKS[0]?.content.includes('主回复根系统提示词测试块：最高优先级。'));
-    assert.strictEqual(config.SYSTEM_PROMPT_BLOCKS[1]?.id, 'main_persona_system');
+    const rootBlock = config.SYSTEM_PROMPT_BLOCKS.find((block) => block.id === 'root_system_prompt');
+    const adminBlock = config.SYSTEM_PROMPT_BLOCKS.find((block) => block.id === 'admin_system_prompt');
+    const personaBlock = config.SYSTEM_PROMPT_BLOCKS.find((block) => block.id === 'main_persona_system');
+    assert.ok(rootBlock, 'root_system_prompt block must be exported');
+    assert.strictEqual(rootBlock.authority, 'system_root');
+    assert.ok(rootBlock.content.includes('主回复根系统提示词测试块：最高优先级。'));
+    assert.ok(adminBlock, 'admin_system_prompt block must be exported when admin.txt is non-empty');
+    assert.strictEqual(adminBlock.authority, 'system_root');
+    assert.ok(personaBlock, 'main_persona_system block must be exported');
     const roleplayLivenessPrelude = fs.readFileSync(path.join(config.PERSONA_DIR, '00_roleplay_liveness_prelude.txt'), 'utf8').trim();
     assert.ok(roleplayLivenessPrelude, '00_roleplay_liveness_prelude.txt must not be empty');
     assert.ok(estimatePromptTokens(roleplayLivenessPrelude) <= 1500, 'roleplay liveness prelude must stay within 1500 estimated tokens');
@@ -96,7 +100,7 @@ function estimatePromptTokens(value) {
     assert.ok(personaBoundaries.includes('<fiction_authentic>'), 'persona boundaries must include fiction authenticity rules');
     assert.ok(personaBoundaries.includes('这里的{{char}}指晓山瑞希'), 'fiction authenticity rules must bind {{char}} to Mizuki');
     assert.ok(config.SYSTEM_PROMPT.includes('<fiction_authentic>'), 'fiction authenticity rules must be included in SYSTEM_PROMPT');
-    assert.ok(config.SYSTEM_PROMPT.includes('角色的反应必须从角色设定中找到依据'), 'SYSTEM_PROMPT must preserve role-grounded refusal rule');
+    assert.ok(config.SYSTEM_PROMPT.includes('不要添加设定中不存在的拒绝、不适或道德判断'), 'SYSTEM_PROMPT must preserve role-grounded refusal rule');
 
     assert.strictEqual(config.CONTEXT_WINDOW_MAX_TOKENS, 400000);
     assert.strictEqual(config.SHORT_TERM_MEMORY_MAX_TOKENS, 120000);
