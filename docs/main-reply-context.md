@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-06 11:28 +08:00
+更新时间：2026-06-06 12:44 +08:00
 
 ## 已调整
 
+- 2026-06-06 12:44 +08:00：新增主回复截断诊断入口。`npm run diag:main-reply-truncation` / `npm run diag:main-reply -- --truncation --limit 50` 会读取 `data/model-calls.ndjson` 并按 `request_id` 关联 `data/request-trace.ndjson`，输出最近截断候选的高频原因分布、样本和 trace 摘要；分类优先级为 `MAX_TOKENS`、上游断流/`ECONNRESET`、`stream_closed_without_terminal_event`、本地发送层失败。管理员可发 `/debug replytrunc [limit]` 查看同一报告。
 - 2026-06-06 11:28 +08:00：修复主回复时间感知异常。`roleplay_runtime_context` 继续注入 `current_time`，但现在会把 OneBot/QQ 常见的 10 位秒级 `routeMeta.timestamp` 识别为 Unix seconds 后再按 `TIMEZONE` 格式化，避免被当成毫秒落到 1970 年；毫秒级时间戳和 ISO 时间字符串保持兼容。
 - 2026-06-05 23:03 +08:00：主回复截断排查增加可观测性和输出约束。日志中已能看到用户多次反馈“截断/宝你没说完/谷歌正常聊天都截断”，样本附近的本地发送预览与 `finalReplyChars` 显示当前回复文本本身偏短，未见流式分段 `finish()` 漏发尾段的直接证据；同时 Gemini/gcli 流式调用存在多次 `ECONNRESET/socket hang up` 和低 completion token 的成功记录。现在 `api/parser.js` 会抽取 OpenAI-compatible `finish_reason`、Gemini `finishReason`、Anthropic/Responses 停止状态，`data/model-calls.ndjson` 写入 `finish_reason`，流式成功但没有终止事件时标为 `stream_closed_without_terminal_event`。`prompts/runtime/streaming-segmentation.txt` 同步要求段数限制只能压缩内容，不能省略结尾，最终可见句必须自然闭合。
 - 2026-06-05 20:54 +08:00：管理员主回复新增 admin-only 亲密/恋爱感动态规则，位于 must-use `chat_liveness_discipline`；私聊允许更明显的亲近称呼、偏爱和轻微撒娇/吃醋，群聊只保留含蓄偏爱与护短，不公开复述私聊细节或把关系公告化。本次不改已有未提交的 `prompts/admin.txt`。

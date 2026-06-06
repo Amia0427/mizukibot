@@ -6,6 +6,7 @@ const {
 const { getPersonaModuleCatalogSummary } = require('../utils/personaModules');
 const {
   buildCacheStatsDiagnostic,
+  buildMainReplyTruncationDiagnostic,
   buildMainReplyDiagnosticReport
 } = require('../utils/mainReplyDiagnostics');
 
@@ -14,6 +15,10 @@ function parseArgs(argv = []) {
   const flags = new Set();
   const positional = [];
   let maxCandidates = 0;
+  let limit = 0;
+  let readLimit = 0;
+  let logFile = '';
+  let traceFile = '';
   for (let i = 0; i < args.length; i += 1) {
     const item = String(args[i] || '').trim();
     if (!item.startsWith('--')) {
@@ -29,6 +34,42 @@ function parseArgs(argv = []) {
       maxCandidates = Math.max(0, Math.floor(Number(item.slice('--max-candidates='.length) || 0) || 0));
       continue;
     }
+    if (item === '--limit') {
+      limit = Math.max(0, Math.floor(Number(args[i + 1] || 0) || 0));
+      i += 1;
+      continue;
+    }
+    if (item.startsWith('--limit=')) {
+      limit = Math.max(0, Math.floor(Number(item.slice('--limit='.length) || 0) || 0));
+      continue;
+    }
+    if (item === '--read-limit') {
+      readLimit = Math.max(0, Math.floor(Number(args[i + 1] || 0) || 0));
+      i += 1;
+      continue;
+    }
+    if (item.startsWith('--read-limit=')) {
+      readLimit = Math.max(0, Math.floor(Number(item.slice('--read-limit='.length) || 0) || 0));
+      continue;
+    }
+    if (item === '--log-file') {
+      logFile = String(args[i + 1] || '').trim();
+      i += 1;
+      continue;
+    }
+    if (item.startsWith('--log-file=')) {
+      logFile = item.slice('--log-file='.length).trim();
+      continue;
+    }
+    if (item === '--trace-file') {
+      traceFile = String(args[i + 1] || '').trim();
+      i += 1;
+      continue;
+    }
+    if (item.startsWith('--trace-file=')) {
+      traceFile = item.slice('--trace-file='.length).trim();
+      continue;
+    }
     flags.add(item);
   }
   const text = positional.join(' ').trim();
@@ -39,15 +80,20 @@ function parseArgs(argv = []) {
     promptBlocks: flags.has('--prompt-blocks'),
     realPrompt: flags.has('--real-prompt'),
     explainBudget: flags.has('--explain-budget'),
+    truncation: flags.has('--truncation') || flags.has('--truncations') || flags.has('--truncated'),
     maxCandidates,
+    limit,
+    readLimit,
+    logFile,
+    traceFile,
     plannerMode: flags.has('--live-planner') ? 'live' : 'rule'
   };
 }
 
 function main() {
   const args = parseArgs(process.argv);
-  if (!args.text && !args.cacheStats) {
-    console.error('usage: node scripts/diagnose-main-reply.js [--live-planner] [--prompt-blocks] [--real-prompt] [--explain-budget] [--max-candidates n] [--cache-stats] <text-or-json>');
+  if (!args.text && !args.cacheStats && !args.truncation) {
+    console.error('usage: node scripts/diagnose-main-reply.js [--live-planner] [--prompt-blocks] [--real-prompt] [--explain-budget] [--max-candidates n] [--cache-stats] [--truncation --limit n] <text-or-json>');
     process.exit(1);
   }
 
@@ -60,6 +106,10 @@ function main() {
 async function run(args) {
   if (args.cacheStats) {
     console.log(JSON.stringify(buildCacheStatsDiagnostic(args), null, 2));
+    return;
+  }
+  if (args.truncation) {
+    console.log(JSON.stringify(buildMainReplyTruncationDiagnostic(args), null, 2));
     return;
   }
   if (args.promptBlocks) {

@@ -25,6 +25,10 @@ const {
   readModelCallLogRows
 } = require('./cacheStats');
 const {
+  TRUNCATION_SCHEMA_VERSION,
+  buildMainReplyTruncationDiagnostic
+} = require('./truncation');
+const {
   normalizeArray,
   normalizeDiagnosticContext,
   normalizeObject,
@@ -298,7 +302,9 @@ async function buildMainReplyDiagnosticReport(rawInput = {}, deps = {}) {
 module.exports = {
   CACHE_STATS_SCHEMA_VERSION,
   SCHEMA_VERSION,
+  TRUNCATION_SCHEMA_VERSION,
   buildCacheStatsDiagnostic,
+  buildMainReplyTruncationDiagnostic,
   buildMainReplyDiagnosticReport,
   parseMainReplyDiagnosticInput,
   readModelCallLogRows,

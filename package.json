@@ -22,6 +22,7 @@
     "diag:worldbook": "node scripts/diagnose-worldbook.js",
     "diag:provider-request": "node scripts/diagnose-provider-request.js",
     "diag:main-reply-lag": "node scripts/diagnose-main-reply-lag.js",
+    "diag:main-reply-truncation": "node scripts/diagnose-main-reply.js --truncation",
     "diag:runtime": "node scripts/diagnose-runtime-status.js",
     "diag:runtime-hotspots": "node scripts/diagnose-runtime-hotspots.js",
     "diag:low-resource": "node scripts/diagnose-low-resource.js",

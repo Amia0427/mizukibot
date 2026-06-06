@@ -17,6 +17,7 @@ const {
 } = require('../../utils/groupMainModelStreamPolicy');
 const {
   buildCacheStatsDiagnostic,
+  buildMainReplyTruncationDiagnostic,
   buildMainReplyDiagnosticReport,
   parseMainReplyDiagnosticInput
 } = require('../../utils/mainReplyDiagnostics');
@@ -821,7 +822,7 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /check, /群总结 [条数], /create <prompt>, /debug runtime|hotspots|replydiag|replycache|provider, /status, /reload, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /check, /群总结 [条数], /create <prompt>, /debug runtime|hotspots|replydiag|replycache|replytrunc|provider, /status, /reload, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
     } else if (cmd === 'check') {
       adminReply = formatModelSelfCheckReport(await runModelSelfCheck({
         adminUserId: senderId,
@@ -835,6 +836,9 @@ function createMessageRouteFlow(deps = {}) {
       const subcmd = String(args[0] || '').trim().toLowerCase();
       if (subcmd === 'replycache' || subcmd === 'main-reply-cache' || subcmd === 'cache-stats') {
         adminReply = JSON.stringify(buildCacheStatsDiagnostic(), null, 2);
+      } else if (subcmd === 'replytrunc' || subcmd === 'reply-truncation' || subcmd === 'truncation' || subcmd === 'truncated') {
+        const limit = Math.max(1, Math.min(200, Number(args[1] || 50) || 50));
+        adminReply = JSON.stringify(buildMainReplyTruncationDiagnostic({ limit }), null, 2);
       } else if (subcmd === 'runtime' || subcmd === 'status' || subcmd === 'daemon') {
         adminReply = JSON.stringify(buildRuntimeStatusDiagnostic(), null, 2);
       } else if (subcmd === 'hotspots' || subcmd === 'hotspot' || subcmd === 'resources' || subcmd === 'resource') {
