@@ -8,8 +8,7 @@ const REQUIRED_SYSTEM_PERSONA_FILES = [
   '02_style.txt',
   '03_boundaries.txt',
   '04_behavior.txt',
-  '06_state_modulation.txt',
-  '07_opus_localization.txt'
+  '06_state_modulation.txt'
 ];
 const PERSONA_FILES = REQUIRED_SYSTEM_PERSONA_FILES;
 const REQUIRED_SYSTEM_PERSONA_PATHS = new Set(

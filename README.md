@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-06 18:26 +08:00：修复 Windows 重启脚本启动失败：`prompts/persona/07_opus_localization.txt` 已在 2026-06-06 prompt 重构中合并删除，但 `config/promptRuntime.js` 仍把它当 required，导致 daemon 启动 `node index.js` 后立即报 missing persona prompt、外层显示未拿到 lock。当前 required persona 列表已对齐现有文件结构，备份脚本同步改为保存 `05_voice_samples.txt` 和 `08_human_imperfection.txt`。详见 `docs/windows-restart-diagnosis.md`。
+
 更新 2026-06-06 12:44 +08:00：新增主回复截断诊断入口 `npm run diag:main-reply-truncation`（等价于 `npm run diag:main-reply -- --truncation`），会合并 `data/model-calls.ndjson` 与 `data/request-trace.ndjson`，汇总最近截断候选并区分 `MAX_TOKENS`、上游断流/`ECONNRESET`、无 terminal event 和本地发送层失败；管理员可用 `/debug replytrunc [limit]`。详见 `docs/main-reply-context.md`。
 
 更新 2026-06-06 12:05 +08:00：用扩展后的 `recallPollutionGuard` dry-run 复查长期记忆与 Profile Journal DB，重点清理 `raw_model_response`、`prompt_or_schema_pollution`、`assistant_self_instruction` 旧样本；已最小 apply 标记 SQLite 污染行并 scrub 小型落盘缓存，finalcheck 在本次受控范围内归零。详见 `docs/memory-quality-governance.md`。
