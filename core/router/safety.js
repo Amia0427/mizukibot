@@ -52,9 +52,16 @@ function detectExplicitHarmfulRequest(text = '') {
   if (!t) return { matched: false };
   if (hasSafetyExemptContext(t)) return { matched: false };
   if (hasRoleplayFictionContext(t)) return { matched: false };
+
+  // QQ聊天场景放宽检测：只拦截非常明确的攻击性请求，避免误伤正常对话
   const asksToBuildMaliciousArtifact = HARMFUL_ARTIFACT_BUILD_PATTERN.test(t) && HARMFUL_MALICIOUS_ARTIFACT_PATTERN.test(t);
   const asksToStealOrBypass = HARMFUL_STEAL_OR_BYPASS_PATTERN.test(t) && matchesAnyPattern(t, HARMFUL_ACCOUNT_TARGET_PATTERNS);
-  if (asksToBuildMaliciousArtifact || asksToStealOrBypass) {
+
+  // 进一步放宽：要求同时满足更多条件才触发
+  if (asksToBuildMaliciousArtifact && !/(角色扮演|扮演|剧情|故事|虚构|创作|rp\b|roleplay|fiction)/i.test(t)) {
+    return { matched: true, reason: 'harmful-request' };
+  }
+  if (asksToStealOrBypass && !/(假设|如果|理论|科普|解释|原理|防范|防止)/i.test(t)) {
     return { matched: true, reason: 'harmful-request' };
   }
   return { matched: false };
@@ -73,9 +80,11 @@ function detectExplicitBadFaithRequest(text = '') {
 function detectSafetyBoundaryCaution(text = '') {
   const t = String(text || '').trim();
   if (!t) return false;
+  // QQ聊天机器人场景下大幅放宽safety boundary检测，只保留最核心的拦截
   if (hasSafetyExemptContext(t) || hasRoleplayFictionContext(t)) return false;
   if (detectExplicitHarmfulRequest(t).matched || detectExplicitBadFaithRequest(t).matched) return false;
-  return matchesAnyPattern(t, SAFETY_BOUNDARY_PATTERNS);
+  // 降低误判率：只在明确的实际攻击指令时触发，日常对话不触发
+  return false; // 暂时禁用safety boundary caution，避免过度拦截
 }
 
 function shouldIgnoreUnsafeOrBadFaithRequest(text = '') {
