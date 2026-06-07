@@ -23,10 +23,23 @@ function isAdminPromptContext(options = {}) {
     || routeMeta.sender_id
   );
   if (!userId) return false;
-  return (Array.isArray(config.ADMIN_USER_IDS) ? config.ADMIN_USER_IDS : [])
+  const isAdmin = (Array.isArray(config.ADMIN_USER_IDS) ? config.ADMIN_USER_IDS : [])
     .map((item) => normalizeText(item))
     .filter(Boolean)
     .includes(userId);
+
+  // Admin prompts should only apply in private chat
+  if (isAdmin) {
+    const chatType = normalizeText(
+      options.chatType
+      || routeMeta.chatType
+      || routeMeta.chat_type
+    );
+    // Only return true if it's private chat or direct message
+    return chatType === 'private' || chatType === 'direct';
+  }
+
+  return false;
 }
 
 function shouldIncludePromptBlockForMainContext(block = {}, options = {}) {
