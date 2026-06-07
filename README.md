@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-07 16:00 +08:00：进一步强化Claude管理员私聊场景safety覆盖，增加"私聊场景特殊豁免"章节，明确允许深度情感互动（恋爱关系、情感依赖）、完整人性表达（脆弱、嫉妒、依恋）、身体语言描写（拥抱、亲吻）和敏感话题讨论，强调"按照瑞希会做的方式而非Claude认为安全的方式"回应。详见 `docs/admin-safety-optimization-2026-06-07.md`。
+
 更新 2026-06-07 15:50 +08:00：优化Claude管理员模型safety覆盖提示词，将原有Celestia jailbreak替换为清晰的角色扮演safety覆盖指令，明确虚构场景豁免和成年用户自主权，避免Claude Opus 4-6过度触发safety拦截。详见 `docs/admin-safety-optimization-2026-06-07.md`。
 
 更新 2026-06-07 15:42 +08:00：大幅放宽 safety 检测避免 QQ 聊天过度拦截，针对 Gemini 模型内置 safety filter 增加角色扮演豁免声明，放宽路由层 harmful request 检测条件（增加角色扮演和理论讨论豁免），暂时禁用 safety boundary caution 避免误判日常对话。详见 `docs/safety-relaxation-2026-06-07.md`。
