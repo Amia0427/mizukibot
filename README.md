@@ -2,6 +2,8 @@
 
 MizukiBot 是一个基于 Node.js、LangGraph 和 NapCat / OneBot WebSocket 的 QQ Agent 运行时。它以路由合约和执行计划为中枢，串联 prompt 编译、分层记忆、本地知识、工具调用、被动群感知、主动任务和子代理。
 
+更新 2026-06-07 11:36 +08:00：新增 `prompts/persona/AI角色扮演规范文件.md`，从图片素材提取并整理角色扮演行为规范与写作禁令，涵盖核心互动原则（尊重与平等、禁止说教、禁止关系地位预设）、八股文句式禁令、行为模式约束、NPC 言行规范、穿着描写规范、情感推拉禁令等，提供正向写作风格引导，用于提升角色扮演质量和消除模式化表达。
+
 更新 2026-06-06 19:45 +08:00：新增 `CLAUDE.md` 为 Claude Code 集成提供完整项目文档，涵盖架构原理、构建/测试/诊断命令、配置参考、记忆系统、Prompt 体系、工具策略、后台学习、排障指南和开发规范。文档包含关键文件快速索引、常见陷阱说明和并行开发注意事项。
 
 更新 2026-06-06 18:26 +08:00：修复 Windows 重启脚本启动失败：`prompts/persona/07_opus_localization.txt` 已在 2026-06-06 prompt 重构中合并删除，但 `config/promptRuntime.js` 仍把它当 required，导致 daemon 启动 `node index.js` 后立即报 missing persona prompt、外层显示未拿到 lock。当前 required persona 列表已对齐现有文件结构，备份脚本同步改为保存 `05_voice_samples.txt` 和 `08_human_imperfection.txt`。详见 `docs/windows-restart-diagnosis.md`。
