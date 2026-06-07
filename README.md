@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-07 20:40**：完成长期记忆优化分析，新增优化脚本和监控工具。当前存储 3.1GB（SQLite 226MB + LanceDB 2.2GB + Memory V3 668MB），系统健康度 9/10。详见 [优化报告](./docs/memory-optimization-report-20260607.md)
+
 **2026-06-07**：Safety 架构收窄为三层（路由/普通用户/管理员），新增角色扮演规范文件。详见 [CHANGELOG.md](./CHANGELOG.md)
 
 **2026-06-06**：新增 Claude Code 项目文档 `CLAUDE.md`，修复 Windows 重启和时间感知问题。
