@@ -15,7 +15,9 @@ const {
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 const DEFAULT_GEMINI_SYSTEM_PROMPT_PATH = path.join(PROJECT_ROOT, 'prompts', 'GEMINI.txt');
+const DEFAULT_GEMINI_ROLEPLAY_GUIDELINES_PATH = path.join(PROJECT_ROOT, 'prompts', 'persona', 'AI角色扮演规范文件.md');
 const geminiSystemPromptCache = new Map();
+const geminiRoleplayGuidelinesCache = new Map();
 
 function ensureGeminiStreamSseUrl(url = '') {
   const raw = String(url || '').trim();
@@ -76,6 +78,22 @@ function getGeminiSystemPromptPath() {
   ) || DEFAULT_GEMINI_SYSTEM_PROMPT_PATH;
 }
 
+function getGeminiRoleplayGuidelinesPath() {
+  return normalizeText(
+    process.env.GEMINI_ROLEPLAY_GUIDELINES_PATH
+    || ''
+  ) || DEFAULT_GEMINI_ROLEPLAY_GUIDELINES_PATH;
+}
+
+function isGeminiRoleplayGuidelinesEnabled() {
+  const raw = normalizeText(
+    process.env.GEMINI_ROLEPLAY_GUIDELINES_ENABLED
+    || ''
+  ).toLowerCase();
+  if (!raw) return true;
+  return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
 function loadGeminiSystemPrompt() {
   if (!isGeminiNativeSystemPromptEnabled()) return '';
   const filePath = getGeminiSystemPromptPath();
@@ -92,6 +110,25 @@ function loadGeminiSystemPrompt() {
   const text = fs.readFileSync(filePath, 'utf8').trim();
   geminiSystemPromptCache.clear();
   geminiSystemPromptCache.set(cacheKey, text);
+  return text;
+}
+
+function loadGeminiRoleplayGuidelines() {
+  if (!isGeminiRoleplayGuidelinesEnabled()) return '';
+  const filePath = getGeminiRoleplayGuidelinesPath();
+  let stat = null;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (_) {
+    return '';
+  }
+  if (!stat || !stat.isFile()) return '';
+
+  const cacheKey = `${path.resolve(filePath)}::${Number(stat.mtimeMs || 0)}:${Number(stat.size || 0)}`;
+  if (geminiRoleplayGuidelinesCache.has(cacheKey)) return geminiRoleplayGuidelinesCache.get(cacheKey);
+  const text = fs.readFileSync(filePath, 'utf8').trim();
+  geminiRoleplayGuidelinesCache.clear();
+  geminiRoleplayGuidelinesCache.set(cacheKey, text);
   return text;
 }
 
@@ -335,6 +372,8 @@ async function buildGeminiNativeRequestBody(inputBody = {}) {
   const systemTexts = [];
   const geminiPrompt = loadGeminiSystemPrompt();
   if (geminiPrompt) systemTexts.push(`[GeminiRuntimeAdapter]\n${geminiPrompt}`);
+  const geminiRoleplayGuidelines = loadGeminiRoleplayGuidelines();
+  if (geminiRoleplayGuidelines) systemTexts.push(`[GeminiRoleplayGuidelines]\n${geminiRoleplayGuidelines}`);
   if (body.systemInstruction?.parts || body.system_instruction?.parts) {
     const existing = body.systemInstruction || body.system_instruction;
     const text = (Array.isArray(existing.parts) ? existing.parts : [])
@@ -376,15 +415,20 @@ async function buildGeminiNativeRequestBody(inputBody = {}) {
 
 function clearGeminiNativePromptCache() {
   geminiSystemPromptCache.clear();
+  geminiRoleplayGuidelinesCache.clear();
 }
 
 module.exports = {
   DEFAULT_GEMINI_SYSTEM_PROMPT_PATH,
+  DEFAULT_GEMINI_ROLEPLAY_GUIDELINES_PATH,
   buildGeminiNativeRequestBody,
   clearGeminiNativePromptCache,
   getGeminiSystemPromptPath,
+  getGeminiRoleplayGuidelinesPath,
   isGeminiNativeSystemPromptEnabled,
+  isGeminiRoleplayGuidelinesEnabled,
   loadGeminiSystemPrompt,
+  loadGeminiRoleplayGuidelines,
   mapMessagesToGemini,
   normalizeGeminiNativeApiBaseUrl
 };
