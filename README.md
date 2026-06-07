@@ -8,7 +8,7 @@
 
 **2026-06-07 13:10**：内存优化 - Post-reply worker内存从2.2GB降到512MB以内。热存储缓存TTL从30分钟降到5分钟，缓存条目从512降到128，RSS回收阈值从768MB降到512MB。分析worker内存占用主要来源：memory_items.json(97MB)+memory_index.json(86MB)常驻内存，LanceDB(2.3GB)部分加载，Memory V3(671MB)事件遍历。
 
-**2026-06-07 21:05**：完成第一轮向量回填优化。覆盖率 23.8%→24.3%，Journal记忆100%向量化，LanceDB同步健康。制定完整优化计划（5阶段16任务），预计3天达到60%覆盖率。详见 [优化计划](./docs/memory-optimization-plan.md) 和 [执行报告](./docs/memory-optimization-execution-report-round1.md)
+**2026-06-07 21:40**：完成10轮向量回填优化。覆盖率 23.8%→28.6% (+4.8%)，新增1,415个向量，成功率100%，LanceDB增长+300MB。本周进度47.7%，预计2026-06-11达到60%目标。详见 [今日总结](./docs/memory-optimization-execution-summary.md)
 
 **2026-06-07 20:40**：完成长期记忆优化分析，新增优化脚本和监控工具。当前存储 3.1GB（SQLite 226MB + LanceDB 2.2GB + Memory V3 668MB），系统健康度 9/10。详见 [优化报告](./docs/memory-optimization-report-20260607.md)
 
