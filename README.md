@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-07 13:30**：Worker架构适配优化 - 关闭实时向量化改为批处理，停止Legacy Profile写入转纯Memory V3模式。预计Worker内存从512MB再降到256MB。分析worker学习内容：8大任务(memoryLearning/selfImprovement/dailyJournal/memoryEvent/materialize/vectorMaintenance/memoryQualityAudit/profileMaintenance)，写入4层存储(Memory V3 Events/LanceDB/Daily Journal/Profile Journal SQLite)。
+
 **2026-06-07 21:30**：参考MoM梦中身强化admin.txt，引入角色主体性、创伤映射、生理真实性等成熟破限技术。
 
 **2026-06-07 13:10**：内存优化 - Post-reply worker内存从2.2GB降到512MB以内。热存储缓存TTL从30分钟降到5分钟，缓存条目从512降到128，RSS回收阈值从768MB降到512MB。分析worker内存占用主要来源：memory_items.json(97MB)+memory_index.json(86MB)常驻内存，LanceDB(2.3GB)部分加载，Memory V3(671MB)事件遍历。
