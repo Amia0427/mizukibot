@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-07 21:30**：参考MoM梦中身强化admin.txt，引入角色主体性、创伤映射、生理真实性等成熟破限技术。
+
 **2026-06-07 13:10**：内存优化 - Post-reply worker内存从2.2GB降到512MB以内。热存储缓存TTL从30分钟降到5分钟，缓存条目从512降到128，RSS回收阈值从768MB降到512MB。分析worker内存占用主要来源：memory_items.json(97MB)+memory_index.json(86MB)常驻内存，LanceDB(2.3GB)部分加载，Memory V3(671MB)事件遍历。
 
 **2026-06-07 21:05**：完成第一轮向量回填优化。覆盖率 23.8%→24.3%，Journal记忆100%向量化，LanceDB同步健康。制定完整优化计划（5阶段16任务），预计3天达到60%覆盖率。详见 [优化计划](./docs/memory-optimization-plan.md) 和 [执行报告](./docs/memory-optimization-execution-report-round1.md)
