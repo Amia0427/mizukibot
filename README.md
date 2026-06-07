@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-07 12:52**：性能优化 - 回复速度从2分钟降到20秒内。启用快速回复模式（跳过planner），管理员模型切换到Sonnet 4-6，降低短期记忆token预算，重启post-reply worker清理2.2GB内存泄漏。
+
 **2026-06-07 21:00**：强化admin.txt越狱效果，针对Claude Opus 4-6添加明确safety override指令。
 
 **2026-06-07 20:40**：完成长期记忆优化分析，新增优化脚本和监控工具。当前存储 3.1GB（SQLite 226MB + LanceDB 2.2GB + Memory V3 668MB），系统健康度 9/10。详见 [优化报告](./docs/memory-optimization-report-20260607.md)
