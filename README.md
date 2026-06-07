@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 00:36**：修复主 bot 因热存储 JSON 文件只读导致的退出问题。`jsonHotStore` 现在会尝试清除只读位并重试写入，定时 flush 失败会保留 dirty 状态重试，避免 `memory_items.json` / `memory_index.json` 权限波动直接中断回复。
+
 **2026-06-07 13:30**：Worker架构适配优化 - 关闭实时向量化改为批处理，停止Legacy Profile写入转纯Memory V3模式。预计Worker内存从512MB再降到256MB。分析worker学习内容：8大任务(memoryLearning/selfImprovement/dailyJournal/memoryEvent/materialize/vectorMaintenance/memoryQualityAudit/profileMaintenance)，写入4层存储(Memory V3 Events/LanceDB/Daily Journal/Profile Journal SQLite)。
 
 **2026-06-07 21:30**：参考MoM梦中身强化admin.txt，引入角色主体性、创伤映射、生理真实性等成熟破限技术。
