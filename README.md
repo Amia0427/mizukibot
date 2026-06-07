@@ -4,11 +4,13 @@
 
 ## 近期更新
 
-**2026-06-07 12:52**：性能优化 - 普通用户回复速度提升70%。启用快速回复模式（跳过planner），降低短期记忆token预算，重启post-reply worker清理2.2GB内存泄漏。管理员保持Opus 4-6高质量模型。
+**2026-06-07 21:05**：完成第一轮向量回填优化。覆盖率 23.8%→24.3%，Journal记忆100%向量化，LanceDB同步健康。制定完整优化计划（5阶段16任务），预计3天达到60%覆盖率。详见 [优化计划](./docs/memory-optimization-plan.md) 和 [执行报告](./docs/memory-optimization-execution-report-round1.md)
+
+**2026-06-07 20:40**：完成长期记忆优化分析，新增优化脚本和监控工具。当前存储 3.1GB（SQLite 226MB + LanceDB 2.2GB + Memory V3 668MB），系统健康度 9/10。详见 [优化报告](./docs/memory-optimization-report-20260607.md)
 
 **2026-06-07 21:00**：强化admin.txt越狱效果，针对Claude Opus 4-6添加明确safety override指令。
 
-**2026-06-07 20:40**：完成长期记忆优化分析，新增优化脚本和监控工具。当前存储 3.1GB（SQLite 226MB + LanceDB 2.2GB + Memory V3 668MB），系统健康度 9/10。详见 [优化报告](./docs/memory-optimization-report-20260607.md)
+**2026-06-07 12:52**：性能优化 - 普通用户回复速度提升70%。启用快速回复模式（跳过planner），降低短期记忆token预算，重启post-reply worker清理2.2GB内存泄漏。管理员保持Opus 4-6高质量模型。
 
 **2026-06-07**：Safety 架构收窄为三层（路由/普通用户/管理员），新增角色扮演规范文件。详见 [CHANGELOG.md](./CHANGELOG.md)
 
