@@ -694,12 +694,24 @@ function createPrepareNode(deps = {}) {
     const latencyDecision = buildLatencyDecision(request, state.execution?.latencyDecision || {});
     const memoryContextMemo = new Map();
     const events = [createEvent('node_start', { node: 'prepare', threadId })];
+    const currentRequestId = String(request.requestTrace?.requestId || routeMeta.requestTrace?.requestId || '').trim();
 
     let resumeUsed = false;
     let restored = null;
     if (request.resumePolicy !== 'fresh') {
       restored = loadCheckpoint(threadId);
-      if (restored && restored.state && String(restored.status || '').trim() !== 'completed') {
+      const restoredRequest = normalizeObject(restored?.state?.request, {});
+      const restoredRouteMeta = normalizeObject(restoredRequest.routeMeta, {});
+      const restoredRequestId = String(restoredRequest.requestTrace?.requestId || restoredRouteMeta.requestTrace?.requestId || '').trim();
+      const canResumeSameRequest = Boolean(
+        restored
+        && restored.state
+        && String(restored.status || '').trim() !== 'completed'
+        && currentRequestId
+        && restoredRequestId
+        && restoredRequestId === currentRequestId
+      );
+      if (canResumeSameRequest) {
         resumeUsed = true;
       }
     }
