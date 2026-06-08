@@ -12,6 +12,7 @@
 
 - `post-reply-worker.js`：post-reply worker 入口
 - `run-bot-daemon.ps1`：Windows 守护启动脚本
+- `restart-bot-periodic.ps1`：Windows 定时重启脚本；更新 2026-06-08 13:36 +08:00，直接解析 `node.exe` 启动 `index.js`，避免计划任务 `Start-Process npm` 命中 shim 报 `%1 不是有效的 Win32 应用程序`
 - `restart-windows-daemon.ps1`：Windows 守护重启
 - `status-windows-daemon.ps1`：Windows 守护状态
 - `mizukibot.sh`：Linux 启停/日志
@@ -41,6 +42,7 @@
 - `setup-systemd.sh`
 - `setup-wireguard-jump-host.sh`
 - `install-windows-daemon.ps1`
+- `install-periodic-restart.ps1`
 - `uninstall-windows-daemon.ps1`
 - `setup-windows-management-plane.ps1`
 - `install-skill-deps.ps1`
