@@ -125,9 +125,11 @@ module.exports = runBackfill({ dryRun: true, source: 'all', limit: 3 }).then((dr
   assert.strictEqual(safeReadJsonLines(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE)[0].error, 'rate_limit');
   const syncRows = [];
   let summaryCalls = 0;
+  const summaryOptions = [];
   return syncAfterBackfill(1000, 'memory', {
     buildSyncSummary: async (options) => {
       summaryCalls += 1;
+      summaryOptions.push(options);
       if (options.since) {
         return {
           coverage: { memory: { readyButNotSynced: 1 }, worldbook: {} },
@@ -149,12 +151,15 @@ module.exports = runBackfill({ dryRun: true, source: 'all', limit: 3 }).then((dr
       return { ok: true, rows: rows.length };
     },
     syncWorldbookRows: async () => ({ ok: true, rows: 0 })
-  });
-}).then((syncSummary) => {
+  }).then((syncSummary) => ({ syncSummary, summaryOptions }));
+}).then(({ syncSummary, summaryOptions }) => {
   assert.strictEqual(syncSummary.coverage.memory.readyButNotSynced, 0);
   assert.strictEqual(syncSummary.beforeCoverage.memory.readyButNotSynced, 1);
   assert.strictEqual(syncSummary.incrementalCoverage.memory.readyButNotSynced, 1);
   assert.strictEqual(syncSummary.healthGate.canBackfill, true);
+  assert.strictEqual(summaryOptions[0].includeRows, true, 'incremental sync needs only changed vector rows');
+  assert.strictEqual(summaryOptions[1].includeRows, false, 'pre-sync full gate should not retain vector rows');
+  assert.strictEqual(summaryOptions[2].includeRows, false, 'post-sync full gate should not retain vector rows');
   const gateCheckpoint = path.join(tempRoot, 'gate-checkpoint.json');
   let syncCalls = 0;
   return runBackfill({

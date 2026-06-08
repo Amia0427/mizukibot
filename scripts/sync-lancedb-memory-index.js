@@ -3,14 +3,18 @@
 const path = require('path');
 const config = require('../config');
 const {
+  buildAllMemoryBucketTableNames,
   buildMemoryVectorRow,
   buildWorldbookVectorRow,
   compactLanceDbTables,
   dedupeVectorRows,
+  isUserBucketPartitionMode,
   isLanceDbSyncEnabled,
   listTableIds,
   normalizeLanceDbPartitionMode,
+  resolveMemoryBucketTableName,
   resolveLanceDbBucketCount,
+  syncMemoryBucketRows,
   syncMemoryRows,
   syncWorldbookRows
 } = require('../utils/lancedbMemoryStore');
@@ -78,6 +82,158 @@ function buildLanceDbOptions(args = {}) {
   };
 }
 
+function includeVectorRows(args = {}) {
+  return args.includeRows !== false;
+}
+
+function buildMemoryRowId(nodeId = '') {
+  const normalized = normalizeText(nodeId);
+  return normalized ? `memory:${normalized}` : '';
+}
+
+function buildWorldbookRowId(moduleId = '') {
+  const normalized = normalizeText(moduleId);
+  return normalized ? `worldbook:${normalized}` : '';
+}
+
+function dedupeCoverageRows(rows = []) {
+  const byId = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const id = normalizeText(row?.id);
+    if (!id) continue;
+    if (!byId.has(id) || Number(row.updatedAt || 0) >= Number(byId.get(id).updatedAt || 0)) {
+      byId.set(id, row);
+    }
+  }
+  return Array.from(byId.values());
+}
+
+function dedupeRows(rows = [], options = {}) {
+  return includeVectorRows(options) ? dedupeVectorRows(rows) : dedupeCoverageRows(rows);
+}
+
+function resolveSyncBatchSize(options = {}) {
+  return Math.max(1, Math.floor(Number(options.syncBatchSize || config.MEMORY_LANCEDB_SYNC_BATCH_SIZE || 256) || 256));
+}
+
+function chunkRows(rows = [], size = 256) {
+  const chunkSize = Math.max(1, Math.floor(Number(size) || 256));
+  const out = [];
+  for (let index = 0; index < rows.length; index += chunkSize) {
+    out.push(rows.slice(index, index + chunkSize));
+  }
+  return out;
+}
+
+function summarizeWriteResults(results = [], mode = 'batched') {
+  const list = Array.isArray(results) ? results : [];
+  return {
+    ok: list.every((item) => item && item.ok !== false),
+    mode,
+    rows: list.reduce((sum, item) => sum + (Number(item?.rows || 0) || 0), 0),
+    batches: list.length,
+    results: list
+  };
+}
+
+function buildMemorySourceState() {
+  const index = loadEmbeddingIndex();
+  const nodesById = new Map(collectEmbeddingBackfillNodes()
+    .filter(isHotRecallableMemoryNode)
+    .map((node) => [normalizeText(node.id || node.nodeId), node]));
+  return { index, nodesById };
+}
+
+function buildMemoryVectorRowFromState(state = {}, embeddingRow = {}) {
+  const node = state.nodesById?.get(normalizeText(embeddingRow.nodeId));
+  return node ? buildMemoryVectorRow(node, embeddingRow) : null;
+}
+
+async function syncMemoryRowsLowMemory(args = {}) {
+  const lanceDbOptions = buildLanceDbOptions(args);
+  if (!isUserBucketPartitionMode(lanceDbOptions)) {
+    const memory = buildMemoryRows({ ...args, includeRows: true });
+    const reconcileAllRows = args.full === true || args.fullReconcile === true || args.deleteStaleRows === true;
+    return syncMemoryRows(dedupeVectorRows(reconcileAllRows ? memory.readyRows : memory.rows), {
+      full: args.full,
+      fullReconcile: args.fullReconcile,
+      deleteStaleRows: args.deleteStaleRows,
+      createIndex: args.full,
+      ...lanceDbOptions
+    });
+  }
+
+  const memoryTable = normalizeText(config.MEMORY_LANCEDB_MEMORY_TABLE || 'memory_v3_vectors');
+  const reconcileAllRows = args.full === true || args.fullReconcile === true || args.deleteStaleRows === true;
+  const batchSize = resolveSyncBatchSize(args);
+  const state = buildMemorySourceState();
+  const targetTables = reconcileAllRows
+    ? buildAllMemoryBucketTableNames(memoryTable, lanceDbOptions)
+    : [];
+  const pendingByTable = new Map(targetTables.map((table) => [table, []]));
+  const results = [];
+
+  async function flushTable(tableName = '', force = false) {
+    const pending = pendingByTable.get(tableName) || [];
+    if (pending.length === 0 && !force) return;
+    const rows = pending.splice(0, pending.length);
+    results.push(await syncMemoryBucketRows(tableName, rows, {
+      full: reconcileAllRows && args.full === true,
+      fullReconcile: reconcileAllRows && args.fullReconcile === true,
+      deleteStaleRows: reconcileAllRows && args.deleteStaleRows === true,
+      createIndex: args.full,
+      ...lanceDbOptions
+    }));
+  }
+
+  for (const embeddingRow of state.index.readyRows) {
+    if (!reconcileAllRows && args.since && Number(embeddingRow.lastEmbeddedAt || embeddingRow.updatedAt || 0) < args.since) {
+      continue;
+    }
+    const vectorRow = buildMemoryVectorRowFromState(state, embeddingRow);
+    if (!vectorRow) continue;
+    const tableName = resolveMemoryBucketTableName(memoryTable, vectorRow, lanceDbOptions);
+    if (!pendingByTable.has(tableName)) pendingByTable.set(tableName, []);
+    const pending = pendingByTable.get(tableName);
+    pending.push(vectorRow);
+    if (!reconcileAllRows && pending.length >= batchSize) {
+      await flushTable(tableName);
+    }
+  }
+
+  for (const tableName of Array.from(pendingByTable.keys()).sort()) {
+    await flushTable(tableName, reconcileAllRows);
+  }
+
+  return summarizeWriteResults(results, reconcileAllRows ? 'bucket_reconcile' : 'bucket_incremental');
+}
+
+async function syncWorldbookRowsLowMemory(args = {}) {
+  const lanceDbOptions = buildLanceDbOptions(args);
+  const worldbook = buildWorldbookRows({ ...args, includeRows: true });
+  const reconcileAllRows = args.full === true || args.fullReconcile === true || args.deleteStaleRows === true;
+  const rows = dedupeVectorRows(reconcileAllRows ? worldbook.readyRows : worldbook.rows);
+  if (reconcileAllRows || rows.length <= resolveSyncBatchSize(args)) {
+    return syncWorldbookRows(rows, {
+      full: args.full,
+      fullReconcile: args.fullReconcile,
+      deleteStaleRows: args.deleteStaleRows,
+      createIndex: args.full,
+      ...lanceDbOptions
+    });
+  }
+  const results = [];
+  for (const chunk of chunkRows(rows, resolveSyncBatchSize(args))) {
+    results.push(await syncWorldbookRows(chunk, {
+      full: false,
+      fullReconcile: false,
+      deleteStaleRows: false,
+      ...lanceDbOptions
+    }));
+  }
+  return summarizeWriteResults(results, 'worldbook_incremental');
+}
+
 function isHotRecallableMemoryNode(node = {}) {
   const status = normalizeText(node.status || 'active').toLowerCase();
   if (status === 'archived') return false;
@@ -86,23 +242,25 @@ function isHotRecallableMemoryNode(node = {}) {
   return !['stale', 'suspect', 'superseded'].includes(lifecycleStatus);
 }
 
-function buildMemoryRows({ since = 0 } = {}) {
+function buildMemoryRows({ since = 0, includeRows = true } = {}) {
   const index = loadEmbeddingIndex();
   const nodesById = new Map(collectEmbeddingBackfillNodes()
     .filter(isHotRecallableMemoryNode)
     .map((node) => [normalizeText(node.id || node.nodeId), node]));
-  const allReadyRows = index.readyRows
-    .map((row) => {
-      const node = nodesById.get(row.nodeId);
-      return node ? buildMemoryVectorRow(node, row) : null;
-    })
-    .filter(Boolean);
+  const sourceReadyRows = index.readyRows.filter((row) => nodesById.has(normalizeText(row.nodeId)));
+  const makeRow = (row) => {
+    const node = nodesById.get(normalizeText(row.nodeId));
+    if (!node) return null;
+    if (!includeRows) {
+      const id = buildMemoryRowId(row.nodeId);
+      return id ? { id, updatedAt: Number(row.lastEmbeddedAt || row.updatedAt || 0) || 0 } : null;
+    }
+    return buildMemoryVectorRow(node, row);
+  };
+  const allReadyRows = sourceReadyRows.map(makeRow).filter(Boolean);
   const readyRows = index.readyRows.filter((row) => !since || Number(row.lastEmbeddedAt || row.updatedAt || 0) >= since);
   const rows = readyRows
-    .map((row) => {
-      const node = nodesById.get(row.nodeId);
-      return node ? buildMemoryVectorRow(node, row) : null;
-    })
+    .map(makeRow)
     .filter(Boolean);
   return {
     rows,
@@ -116,22 +274,23 @@ function buildMemoryRows({ since = 0 } = {}) {
   };
 }
 
-function buildWorldbookRows({ since = 0 } = {}) {
+function buildWorldbookRows({ since = 0, includeRows = true } = {}) {
   const catalog = loadPersonaModuleCatalog();
   const docsByModuleId = new Map(buildWorldbookDocuments(catalog).map((doc) => [doc.moduleId, doc]));
   const index = loadWorldbookEmbeddingIndex();
-  const allReadyRows = index.readyRows
-    .map((row) => {
-      const doc = docsByModuleId.get(row.moduleId);
-      return doc ? buildWorldbookVectorRow(doc, row) : null;
-    })
-    .filter(Boolean);
+  const makeRow = (row) => {
+    const doc = docsByModuleId.get(row.moduleId);
+    if (!doc) return null;
+    if (!includeRows) {
+      const id = buildWorldbookRowId(row.moduleId);
+      return id ? { id, updatedAt: Number(row.lastEmbeddedAt || row.updatedAt || 0) || 0 } : null;
+    }
+    return buildWorldbookVectorRow(doc, row);
+  };
+  const allReadyRows = index.readyRows.map(makeRow).filter(Boolean);
   const readyRows = index.readyRows.filter((row) => !since || Number(row.lastEmbeddedAt || row.updatedAt || 0) >= since);
   const rows = readyRows
-    .map((row) => {
-      const doc = docsByModuleId.get(row.moduleId);
-      return doc ? buildWorldbookVectorRow(doc, row) : null;
-    })
+    .map(makeRow)
     .filter(Boolean);
   return {
     rows,
@@ -190,11 +349,12 @@ function buildCoverage(source = {}, table = {}) {
 
 async function buildSyncSummary(args = {}) {
   const lanceDbOptions = buildLanceDbOptions(args);
-  const memory = buildMemoryRows(args);
-  const worldbook = buildWorldbookRows(args);
+  const shouldIncludeRows = includeVectorRows(args);
+  const memory = buildMemoryRows({ ...args, includeRows: shouldIncludeRows });
+  const worldbook = buildWorldbookRows({ ...args, includeRows: shouldIncludeRows });
   const reconcileAllRows = args.full === true || args.fullReconcile === true || args.deleteStaleRows === true;
-  const memoryRowsToSync = dedupeVectorRows(reconcileAllRows ? memory.readyRows : memory.rows);
-  const worldbookRowsToSync = dedupeVectorRows(reconcileAllRows ? worldbook.readyRows : worldbook.rows);
+  const memoryRowsToSync = dedupeRows(reconcileAllRows ? memory.readyRows : memory.rows, { includeRows: shouldIncludeRows });
+  const worldbookRowsToSync = dedupeRows(reconcileAllRows ? worldbook.readyRows : worldbook.rows, { includeRows: shouldIncludeRows });
   const memoryTable = normalizeText(config.MEMORY_LANCEDB_MEMORY_TABLE || 'memory_v3_vectors');
   const worldbookTable = normalizeText(config.MEMORY_LANCEDB_WORLDBOOK_TABLE || 'persona_worldbook_vectors');
   const [memoryTableStats, worldbookTableStats] = await Promise.all([
@@ -264,16 +424,21 @@ async function buildSyncSummary(args = {}) {
     },
     healthGate,
     recommendedActions,
-    _rows: {
-      memory: memoryRowsToSync,
-      worldbook: worldbookRowsToSync
-    }
+    ...(shouldIncludeRows ? {
+      _rows: {
+        memory: memoryRowsToSync,
+        worldbook: worldbookRowsToSync
+      }
+    } : {})
   };
 }
 
 async function main() {
   const args = parseArgs();
-  const summary = await buildSyncSummary(args);
+  const summary = await buildSyncSummary({
+    ...args,
+    includeRows: args.dryRun === true
+  });
 
   if (!summary.syncEnabled && !args.dryRun) {
     summary.ok = false;
@@ -285,20 +450,8 @@ async function main() {
 
   if (!args.dryRun) {
     summary.beforeCoverage = summary.coverage;
-    summary.writes.push(await syncMemoryRows(summary._rows.memory, {
-      full: args.full,
-      fullReconcile: args.fullReconcile,
-      deleteStaleRows: args.deleteStaleRows,
-      createIndex: args.full,
-      ...buildLanceDbOptions(args)
-    }));
-    summary.writes.push(await syncWorldbookRows(summary._rows.worldbook, {
-      full: args.full,
-      fullReconcile: args.fullReconcile,
-      deleteStaleRows: args.deleteStaleRows,
-      createIndex: args.full,
-      ...buildLanceDbOptions(args)
-    }));
+    summary.writes.push(await syncMemoryRowsLowMemory(args));
+    summary.writes.push(await syncWorldbookRowsLowMemory(args));
     if (args.compact) {
       const lanceDbOptions = buildLanceDbOptions(args);
       const activeDir = path.resolve(config.MEMORY_LANCEDB_DIR);
@@ -317,7 +470,8 @@ async function main() {
       since: args.since,
       dir: args.dir,
       partitionMode: args.partitionMode,
-      bucketCount: args.bucketCount
+      bucketCount: args.bucketCount,
+      includeRows: false
     });
     summary.afterCoverage = after.coverage;
     summary.coverage = after.coverage;
@@ -347,5 +501,7 @@ module.exports = {
   buildWorldbookRows,
   buildLanceDbOptions,
   isHotRecallableMemoryNode,
-  parseArgs
+  parseArgs,
+  syncMemoryRowsLowMemory,
+  syncWorldbookRowsLowMemory
 };

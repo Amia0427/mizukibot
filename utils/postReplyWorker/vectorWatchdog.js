@@ -137,7 +137,8 @@ async function buildSyncSummary(deps = {}) {
   const summary = await builder({
     dryRun: true,
     fullReconcile: true,
-    deleteStaleRows: true
+    deleteStaleRows: true,
+    includeRows: false
   });
   if (summary && summary._rows) delete summary._rows;
   return summary;
