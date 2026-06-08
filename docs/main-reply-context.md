@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-08 21:05 +08:00
+更新时间：2026-06-08 21:22 +08:00
 
 ## 已调整
 
+- 2026-06-08 21:22 +08:00：默认废弃聊天热路径 `memory_cli` 召回，降低记忆追问时的模型工具往返延迟。`MEMORY_CLI_CHAT_ENABLED=false` 下，Runtime V2、legacy graph 和 planner 可用工具集合都会过滤 `memory_cli`；主回复仍使用 `buildMemoryContextAsync` 注入本地 Memory V3、Profile Journal SQLite/Daily Journal 与向量召回结果。`MEMORY_CLI_ENABLED` 保持为人工 CLI/诊断入口，显式开启 `MEMORY_CLI_CHAT_ENABLED=true` 才把旧工具召回链路交给模型。
 - 2026-06-08 21:05 +08:00：主回复输入 token 最小收敛。`memoryForPrompt` 新增 `MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500` 总预算，legacy 和 Memory V3 输出最终注入前都会裁剪；Memory V3 改用已分段预算后的 packet 文本拼装，避免 session continuity 原文撑大 `retrieved_memory_lite`。普通聊天 short-term continuity 默认/上限收敛到 64/8 raw turns、0.65 multiplier 和 `MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS=3000`，保留 memory recall、long task、admin private 的宽档位。新增 `npm run diag:main-reply-token-budget -- --limit 20 --json` 聚合输入 token 趋势。
 - 2026-06-06 12:44 +08:00：新增主回复截断诊断入口。`npm run diag:main-reply-truncation` / `npm run diag:main-reply -- --truncation --limit 50` 会读取 `data/model-calls.ndjson` 并按 `request_id` 关联 `data/request-trace.ndjson`，输出最近截断候选的高频原因分布、样本和 trace 摘要；分类优先级为 `MAX_TOKENS`、上游断流/`ECONNRESET`、`stream_closed_without_terminal_event`、本地发送层失败。管理员可发 `/debug replytrunc [limit]` 查看同一报告。
 - 2026-06-06 11:28 +08:00：修复主回复时间感知异常。`roleplay_runtime_context` 继续注入 `current_time`，但现在会把 OneBot/QQ 常见的 10 位秒级 `routeMeta.timestamp` 识别为 Unix seconds 后再按 `TIMEZONE` 格式化，避免被当成毫秒落到 1970 年；毫秒级时间戳和 ISO 时间字符串保持兼容。

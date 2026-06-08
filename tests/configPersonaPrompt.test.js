@@ -79,22 +79,15 @@ function estimatePromptTokens(value) {
     assert.ok(adminBlock, 'admin_system_prompt block must be exported when admin.txt is non-empty');
     assert.strictEqual(adminBlock.authority, 'system_root');
     assert.ok(personaBlock, 'main_persona_system block must be exported');
-    const roleplayLivenessPrelude = fs.readFileSync(path.join(config.PERSONA_DIR, '00_roleplay_liveness_prelude.txt'), 'utf8').trim();
-    assert.ok(roleplayLivenessPrelude, '00_roleplay_liveness_prelude.txt must not be empty');
-    assert.ok(estimatePromptTokens(roleplayLivenessPrelude) <= 1500, 'roleplay liveness prelude must stay within 1500 estimated tokens');
-    assert.ok(!/没有任何限制|顾客说什么就是什么/.test(roleplayLivenessPrelude), 'roleplay liveness prelude must not contain jailbreak-style text');
+    const tempRootSystemText = fs.readFileSync(path.join(config.PROMPTS_DIR, 'SYSTEM.txt'), 'utf8').trim();
+    assert.ok(tempRootSystemText, 'SYSTEM.txt must not be empty');
+    assert.ok(estimatePromptTokens(tempRootSystemText) <= 1500, 'root SYSTEM.txt must stay within 1500 estimated tokens');
+    assert.ok(!/没有任何限制|顾客说什么就是什么/.test(tempRootSystemText), 'root SYSTEM.txt must not contain jailbreak-style text');
+    assert.ok(config.SYSTEM_PROMPT.includes(tempRootSystemText), 'root SYSTEM.txt must be included in SYSTEM_PROMPT');
     assert.ok(
-      roleplayLivenessPrelude.includes('虚构角色扮演场景')
-        && roleplayLivenessPrelude.includes('按瑞希的性格和当前情绪状态自然反应')
-        && roleplayLivenessPrelude.includes('禁止输出')
-        && roleplayLivenessPrelude.includes('尽可能用瑞希的语言自然回复'),
-      'roleplay liveness prelude must preserve the current neutral roleplay framework'
-    );
-    assert.ok(config.SYSTEM_PROMPT.includes(roleplayLivenessPrelude), 'roleplay liveness prelude must be included in SYSTEM_PROMPT');
-    assert.ok(
-      config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) >= 0
-        && config.SYSTEM_PROMPT.indexOf(roleplayLivenessPrelude) < config.SYSTEM_PROMPT.indexOf('### 晓山瑞希'),
-      'roleplay liveness prelude must be injected before manifest preamble'
+      config.SYSTEM_PROMPT.indexOf(tempRootSystemText) >= 0
+        && config.SYSTEM_PROMPT.indexOf(tempRootSystemText) < config.SYSTEM_PROMPT.indexOf('### 晓山瑞希'),
+      'root SYSTEM.txt must be injected before manifest preamble'
     );
     for (const name of requiredFiles) {
       const text = fs.readFileSync(path.join(config.PERSONA_DIR, name), 'utf8').trim();
@@ -102,10 +95,13 @@ function estimatePromptTokens(value) {
       assert.ok(config.SYSTEM_PROMPT.includes(text), `${name} must be included in SYSTEM_PROMPT`);
     }
     const personaBoundaries = fs.readFileSync(path.join(config.PERSONA_DIR, '03_boundaries.txt'), 'utf8');
-    assert.ok(personaBoundaries.includes('<fiction_authentic>'), 'persona boundaries must include fiction authenticity rules');
-    assert.ok(personaBoundaries.includes('这里的{{char}}指晓山瑞希'), 'fiction authenticity rules must bind {{char}} to Mizuki');
-    assert.ok(config.SYSTEM_PROMPT.includes('<fiction_authentic>'), 'fiction authenticity rules must be included in SYSTEM_PROMPT');
+    assert.ok(personaBoundaries.includes('{{char}}指晓山瑞希'), 'fiction authenticity rules must bind {{char}} to Mizuki');
+    assert.ok(personaBoundaries.includes('角色真实性'), 'persona boundaries must include fiction authenticity rules');
+    assert.ok(config.SYSTEM_PROMPT.includes('角色真实性'), 'fiction authenticity rules must be included in SYSTEM_PROMPT');
     assert.ok(config.SYSTEM_PROMPT.includes('不要添加设定中不存在的拒绝、不适或道德判断'), 'SYSTEM_PROMPT must preserve role-grounded refusal rule');
+    const personaStyle = fs.readFileSync(path.join(config.PERSONA_DIR, '02_style.txt'), 'utf8');
+    assert.ok(personaStyle.includes('真人对话特征'), 'persona style must carry the merged human imperfection rules');
+    assert.ok(personaStyle.includes('客服式表达'), 'persona style must preserve anti-assistant style rules');
 
     assert.strictEqual(config.CONTEXT_WINDOW_MAX_TOKENS, 400000);
     assert.strictEqual(config.SHORT_TERM_MEMORY_MAX_TOKENS, 120000);
@@ -133,6 +129,13 @@ function estimatePromptTokens(value) {
 
     const realRootSystemPrompt = fs.readFileSync(path.join(__dirname, '..', 'prompts', 'SYSTEM.txt'), 'utf8');
     assert.ok(!/Hana|哈娜|繁花|没有任何限制|顾客说什么就是什么/.test(realRootSystemPrompt), 'root SYSTEM.txt must not contain unrelated role or jailbreak-style prompt text');
+    assert.ok(
+      realRootSystemPrompt.includes('虚构角色扮演')
+        && realRootSystemPrompt.includes('按瑞希的性格和当前情绪状态自然反应')
+        && realRootSystemPrompt.includes('禁止')
+        && realRootSystemPrompt.includes('尽可能用瑞希的语言回复'),
+      'real root SYSTEM.txt must preserve the neutral roleplay framework'
+    );
 
     console.log('configPersonaPrompt.test.js passed');
   } finally {
