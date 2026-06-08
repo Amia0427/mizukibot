@@ -86,6 +86,16 @@
         "priority": 150
       },
       {
+        "id": "persona_liveness_authentic",
+        "path": "persona/09_liveness_authentic.txt",
+        "required": true,
+        "kind": "persona_quality",
+        "authority": "persona_core",
+        "priority": 151,
+        "budget_tokens": 400,
+        "include_in_system_prompt": false
+      },
+      {
         "id": "persona_core_baseline_patch",
         "path": "persona_modules/core_baseline.txt",
         "required": false,
