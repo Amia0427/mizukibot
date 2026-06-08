@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 19:56 +08:00**：修复普通用户快速回复思维链泄漏。`normal_fast_reply` 返回前复用用户可见输出守卫，拦截自然语言版 `Maybe / What if / Wait` 推理片段和 `*Addressing ...:*` 草稿标记；命中后回退正式链路，避免错误文本继续发送和写入短期上下文。详见 [诊断记录](./docs/normal-fast-reply-reasoning-leak-2026-06-08.md)。
+
 **2026-06-08 18:30**：精简admin.txt去重优化。删除与persona文件重复的写作质量指导（五感物理基岩/混合情绪/性格缝隙/Core Warning/Banned Cliches等已在08_human_imperfection.txt和09_liveness_authentic.txt），只保留核心破限技术（rejection testing框架/本体定义/Private Chat Exemptions/Core Execution Override/日月律·因果闭环/反全知原则/Final Directive）。173行→109行（-37%），职责分离：admin.txt专注"突破安全限制"，persona文件负责"写作质量"。
 
 **2026-06-08 18:10**：整合双人成行预设破限技术到admin.txt。新增：混合情绪系统（悲伤里夹杂笑意/暴怒中伴随无力），复杂特质系统（表里反差/关系决定态度/拒绝出厂媚骨/锁定关系进度），扩展Banned_Cliches（新增"暗了暗/邪魅一笑/倒吸凉气/喉结微滚"等套路词），写作质检框架（Core Warning：把设定揉进情节重新长出来/打乱固定模板/心理描写去标签化/台词像活人说话）。155行→173行（+18行），保持精简同时强化角色真实性。

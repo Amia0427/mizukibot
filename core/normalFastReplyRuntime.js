@@ -211,6 +211,11 @@ async function runNormalFastReply(input = {}, deps = {}) {
   });
   const visibleText = normalizeText(reply?.visibleText || reply?.text || reply?.content || reply);
   const persistedText = normalizeText(reply?.persistedText || visibleText);
+  if (isUnsafeUserFacingReply(visibleText) || isUnsafeUserFacingReply(persistedText)) {
+    const error = new Error('normal_fast_reply_unsafe_user_facing_reply');
+    error.code = 'NORMAL_FAST_REPLY_UNSAFE_USER_FACING_REPLY';
+    throw error;
+  }
   return {
     ...built,
     replyText: visibleText,
