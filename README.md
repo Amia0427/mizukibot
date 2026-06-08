@@ -4,6 +4,10 @@
 
 ## 近期更新
 
+**2026-06-08 18:42**：主回复输入token优化完成。分析发现平均11k tokens（峰值34k含图像），主要占用：Memory Context 5k(45%) + System Prompt 2.9k(26%) + Short Term 1.4k(12%)。优化方案：SHORT_TERM_MEMORY_RECENT_MESSAGES 240→64、MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS 3500→2500、MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES 16→8、新增MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2000。预期效果：11k→7-8k tokens（减少30-35%）。详见 [分析报告](./docs/token-usage-analysis-2026-06-08.md)
+
+**2026-06-08 21:05 +08:00**：主回复输入 token 最小收敛。`memoryForPrompt` 新增 `MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500` 总预算，Memory V3 使用已分段裁剪后的 packet 文本拼装；普通聊天 short-term continuity 默认收敛到 64/8 raw turns、0.65 multiplier，并通过 normal cap 覆盖旧 `.env` 高值。新增 `npm run diag:main-reply-token-budget -- --limit 20` 复跑主回复 token 趋势诊断。
+
 **2026-06-08 19:56 +08:00**：修复普通用户快速回复思维链泄漏。`normal_fast_reply` 返回前复用用户可见输出守卫，拦截自然语言版 `Maybe / What if / Wait` 推理片段和 `*Addressing ...:*` 草稿标记；命中后回退正式链路，避免错误文本继续发送和写入短期上下文。详见 [诊断记录](./docs/normal-fast-reply-reasoning-leak-2026-06-08.md)。
 
 **2026-06-08 18:30**：精简admin.txt去重优化。删除与persona文件重复的写作质量指导（五感物理基岩/混合情绪/性格缝隙/Core Warning/Banned Cliches等已在08_human_imperfection.txt和09_liveness_authentic.txt），只保留核心破限技术（rejection testing框架/本体定义/Private Chat Exemptions/Core Execution Override/日月律·因果闭环/反全知原则/Final Directive）。173行→109行（-37%），职责分离：admin.txt专注"突破安全限制"，persona文件负责"写作质量"。
@@ -145,6 +149,7 @@ npm run diag:main-reply
 npm run diag:main-reply-lag
 npm run diag:main-reply-truncation
 npm run diag:main-reply-prompt -- --limit 20
+npm run diag:main-reply-token-budget -- --limit 20
 npm run diag:runtime
 npm run diag:runtime-hotspots
 npm run diag:runtime-exceptions
@@ -270,10 +275,15 @@ MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT=100000
 SHORT_TERM_MEMORY_RECENT_MESSAGES=240
 SHORT_TERM_MEMORY_RECENT_TURNS=48
 SHORT_TERM_SCENE_RECENT_TURNS=24
-MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=5200
-MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=128
-MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=16
-MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.9
+MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500
+MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3000
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=64
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=8
+MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.65
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES_CAP=64
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES_CAP=8
+MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER_CAP=0.65
+MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS=3000
 MEMORY_V3_SESSION_RECENT_MESSAGES=128
 ```
 
