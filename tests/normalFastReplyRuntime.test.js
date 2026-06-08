@@ -141,6 +141,25 @@ module.exports = (async () => {
   assert.strictEqual(seenContext.disableHumanizer, true, '应禁用 humanizer');
   assert.strictEqual(seenContext.modelConfig.maxTokens, 1024, '应使用快速回复输出上限');
 
+  await assert.rejects(
+    () => runNormalFastReply({
+      userId: 'u1',
+      routeMeta,
+      text: '宝你说说看',
+      sessionKey
+    }, {
+      config: runtimeConfig,
+      chatHistory,
+      getRecentSessionContextSummaries: () => [],
+      requestNonStreamingReply: async () => ({
+        visibleText: '花"? Maybe "化作鬼之花"? * What if they meant "诡化之花"? Wait, there is an original song called "化作诡之花"? No,',
+        persistedText: '花"? Maybe "化作鬼之花"? * What if they meant "诡化之花"? Wait, there is an original song called "化作诡之花"? No,'
+      })
+    }),
+    (error) => error?.code === 'NORMAL_FAST_REPLY_UNSAFE_USER_FACING_REPLY',
+    '快速回复不应放行自然语言思维链泄漏'
+  );
+
   console.log('normalFastReplyRuntime.test.js passed');
 })().catch((error) => {
   console.error(error);

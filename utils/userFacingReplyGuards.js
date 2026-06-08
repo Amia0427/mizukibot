@@ -42,6 +42,27 @@ function isHiddenToolNarration(text = '') {
   return false;
 }
 
+function countReasoningTraceCues(text = '') {
+  const matches = String(text || '').match(/\b(?:maybe|what if|wait|let(?:'|’)s see|i need to|i should|the user (?:asks|wants|means)|they (?:ask|want|mean)|addressing the (?:question|message|song|user)|final answer|draft reply)\b/gi);
+  return Array.isArray(matches) ? matches.length : 0;
+}
+
+function isReasoningTraceLeak(text = '') {
+  const raw = String(text || '');
+  const compact = normalizeReplyGuardText(raw);
+  if (!compact) return false;
+  if (/<think(?:ing)?\b|<\/think(?:ing)?\s*>/i.test(raw)) return true;
+  if (/\b(?:reasoning_content|internal_check|chain[-\s]*of[-\s]*thought)\b/i.test(compact)) return true;
+  if (/(?:思维链|思考过程|推理过程|内部推理|内部思考|隐藏推理|草稿).{0,40}(?:如下|内容|是|为|[:：=])/i.test(compact)) return true;
+  if (/\*\s*\*(?:Addressing|Response|Final|Draft|Answer)\b[^*：:]{0,80}[:：]\s*\*?/i.test(raw)) return true;
+  if (/\bAddressing the (?:question|message|song|user)\s*:/i.test(compact)) return true;
+
+  const cueCount = countReasoningTraceCues(compact);
+  if (cueCount >= 3) return true;
+  if (cueCount >= 2 && /(?:\?|\bNo,\b|["“”]).{0,160}(?:\?|\bNo,\b|["“”])/i.test(compact)) return true;
+  return false;
+}
+
 function isInternalContextLeak(text = '') {
   return containsInternalContextMarker(normalizeReplyGuardText(text));
 }
@@ -51,6 +72,7 @@ function isUnsafeUserFacingReply(text = '') {
   if (!compact) return false;
   return isInternalContextLeak(compact)
     || isHiddenToolNarration(compact)
+    || isReasoningTraceLeak(text)
     || isPollutedMemoryText(compact, { allowBenignContext: false });
 }
 
@@ -58,6 +80,7 @@ module.exports = {
   containsInternalContextMarker,
   isHiddenToolNarration,
   isInternalContextLeak,
+  isReasoningTraceLeak,
   isUnsafeUserFacingReply,
   normalizeReplyGuardText
 };
