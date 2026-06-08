@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 16:59 +08:00**：临时关闭 `MODEL_TOP_P_ENABLED`。真实请求验证确认管理员 `ADMIN_API_BASE_URL=https://apiapipp.com/v1/chat/completions` 搭配 `claude-opus-4-6` 时，只要请求体携带 `top_p` 就会返回泛化 `400 bad_response_status_code`；先全局停发 `top_p` 止血，`top_a` 和 `repetition_penalty` 保持不变。
+
 **2026-06-08 16:35 +08:00**：提高普通用户快速回复输出预算。`NORMAL_FAST_REPLY_MAX_TOKENS` 默认值和本地生效值从 512 提到 1024，给 Gemini reasoning/隐藏预算留空间，降低 `normal_fast_reply` 半句截断概率。
 
 **2026-06-08 13:35**：优化prompt注入顺序，利用模型注意力的首尾效应（primacy & recency effect）。身份/边界前置到-40/-30利用首部强注意力建立WHO和红线，活人感指令从150/151后移到800/810利用尾部recency effect作为最终执行准则。新顺序：admin(-1100)→SYSTEM(-1000)→框架(-50)→身份(-40)→边界(-30)→风格(10)→行为(20)→状态(100)→modules(610-620)→真人质感(800)→活人感(810)。
