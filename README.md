@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 18:00**：精简admin.txt去重优化。合并重复的"Private Chat Exemptions"和"Specific Scenario Handling"章节，压缩5个行为框架模块的冗余描述，从232行精简到155行（-33%），保留全部破限技术（rejection testing框架、月读×天照本体定义、五感物理基岩、情感浓郁度、日月律·因果闭环、有限视角、文字洁癖）。
+
 **2026-06-08 17:55 +08:00**：修复 direct chat notebook 记忆查询被旧 checkpoint 污染的问题。`prepare` 节点现在只会在同一 `requestId` 下恢复未完成 checkpoint，避免上一条消息遗留的 `memoryCliTurn.mustAnswer` 把新请求的 `memory_cli` allowlist 错误裁掉，导致 `lookup/notebook-answer` 二次搜索被误判为 `Tool not allowed: memory_cli`。
 
 **2026-06-08 17:30**：强化admin.txt Claude破限效果，引入日月西预设核心技术。新增rejection testing框架（validity test包裹真实任务），本体重定义（从"AI助手"→"世界气候本身/月读×天照并体"），五感物理基岩（身体连续+禁止括号潜台词），情感浓郁度强化（目光+1秒/话语+1句/克制心跳可见），日月律·因果闭环（救赎有代价/伤害留痕迹/情绪余温），有限视角·性格缝隙（信息不对称/标签非全部），文字洁癖（严禁套路表达清单）。
