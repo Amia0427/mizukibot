@@ -6,6 +6,8 @@
 
 更新 2026-06-04 14:15 +08:00：执行 `data/` 瘦身后重建 `data/lancedb_user_bucket`，活动索引从约 19.98 GiB 降到 28.1 MiB；随后关闭 `MEMORY_LANCEDB_LEGACY_FALLBACK_ENABLED=false` 并删除旧 `data/lancedb` 回滚库约 9.93 GiB。复查 `sync-lancedb-memory-index --dry-run --full --dir data/lancedb_user_bucket --partition-mode user_bucket --bucket-count 32` 显示 memory/worldbook 均 `readyButNotSynced=0`、`staleTableRows=0`，当前 `data/` 总量约 2.52 GiB。
 
+更新 2026-06-09 07:21 +08:00：针对历史 3GB 级向量同步 RSS 峰值，apply 路径改为轻量 summary + 逐 bucket 写入；full/user_bucket reconcile 不再一次构造所有 LanceDB vector rows。`backfill --sync-after` 只对增量 rows 携带向量，全量 gate 改用 ID 覆盖率。新增 `MEMORY_LANCEDB_SYNC_BATCH_SIZE`，本地回填批量收敛到 `MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE=8`、`MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN=24`。
+
 ## 目标
 
 - 旧 `data/lancedb` 已在 2026-06-04 清理时删除；需要回滚时先重建 legacy 库，再恢复 legacy 配置。
@@ -20,6 +22,7 @@ MEMORY_LANCEDB_DIR=./data/lancedb_user_bucket
 MEMORY_LANCEDB_PARTITION_MODE=user_bucket
 MEMORY_LANCEDB_BUCKET_COUNT=32
 MEMORY_LANCEDB_LEGACY_FALLBACK_ENABLED=false
+MEMORY_LANCEDB_SYNC_BATCH_SIZE=64
 ```
 
 `MEMORY_LANCEDB_PARTITION_MODE=legacy` 会保持旧单表行为。当前旧单表目录已删除，`MEMORY_LANCEDB_LEGACY_FALLBACK_ENABLED=false` 可避免 bucket 读路径回查不存在的 legacy 库。
@@ -52,6 +55,7 @@ npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10
 ## 维护
 
 - 常规增量写入会按 `userId` 或 `groupId` 进入固定 bucket 表。
+- 全量 reconcile/apply 阶段逐 bucket 构造并写入向量 row，避免 JS 同时持有所有 1024 维向量对象。
 - `repair-memory-vector-index.js` 支持同样的 `--dir`、`--partition-mode`、`--bucket-count` 参数。
 - 活动目录 compact 不使用 `deleteUnverified:true`；只有 `--dir` 指向非当前活动目录的 shadow rebuild 才会在 compact 时使用强清理。
 - `lancedb-gate` 的 `summary.acceptedRecallFailures` 表示 baseline 自身未达绝对 recall/recent 门但 candidate 未相对回退的项；`summary.blockingRecallFailures` 才会阻断 promotion。

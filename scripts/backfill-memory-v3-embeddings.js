@@ -248,22 +248,26 @@ async function syncAfterBackfill(startedAt = Date.now(), source = 'all', deps = 
   const projectionFreshness = (deps.diagnoseProjectionFreshness || diagnoseProjectionFreshness)();
   const summary = await syncSummaryBuilder({
     dryRun: false,
-    since: startedAt
+    since: startedAt,
+    includeRows: true
   });
   const beforeFullSummary = await syncSummaryBuilder({
     dryRun: true,
-    fullReconcile: true
+    fullReconcile: true,
+    includeRows: false
   });
   const writes = [];
+  const rows = summary._rows || { memory: [], worldbook: [] };
   if (source === 'all' || source === 'memory' || source === 'journal') {
-    writes.push(await memorySync(summary._rows.memory, { full: false }));
+    writes.push(await memorySync(rows.memory, { full: false }));
   }
   if (source === 'all' || source === 'worldbook') {
-    writes.push(await worldbookSync(summary._rows.worldbook, { full: false }));
+    writes.push(await worldbookSync(rows.worldbook, { full: false }));
   }
   const afterFullSummary = await syncSummaryBuilder({
     dryRun: true,
-    fullReconcile: true
+    fullReconcile: true,
+    includeRows: false
   });
   delete summary._rows;
   delete beforeFullSummary._rows;

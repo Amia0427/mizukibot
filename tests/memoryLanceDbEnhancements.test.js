@@ -172,16 +172,44 @@ assert.strictEqual(driftGate.canBackfill, false);
 assert.strictEqual(driftGate.mustReconcileFirst, true);
 assert.ok(driftGate.nextSafeCommand.includes('repair-memory-vector-index.js'));
 
+writeJsonLines(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, [{
+  version: 1,
+  key: 'diag-key',
+  nodeId: 'node_diag',
+  canonicalKey: 'green cable',
+  model: 'test-embedding-model',
+  textHash: 'diag-hash',
+  embedding: [1, 0, 0],
+  updatedAt: Date.now(),
+  lastEmbeddedAt: Date.now(),
+  status: 'ready'
+}]);
+
 module.exports = buildSyncSummary({
   dryRun: true,
   full: true,
+  includeRows: false,
   dir: path.join(tempRoot, 'lancedb_bucket_shadow'),
   partitionMode: 'user_bucket',
   bucketCount: 8
+}).then((lightBucketSummary) => {
+  assert.strictEqual(lightBucketSummary.partitionMode, 'user_bucket');
+  assert.strictEqual(lightBucketSummary.bucketCount, 8);
+  assert.strictEqual(lightBucketSummary.memory.ready, 1);
+  assert.strictEqual(lightBucketSummary.repairPlan.memory.syncRows, 1);
+  assert.ok(!Object.prototype.hasOwnProperty.call(lightBucketSummary, '_rows'), 'includeRows=false should not retain vector row arrays');
+  return buildSyncSummary({
+    dryRun: true,
+    full: true,
+    dir: path.join(tempRoot, 'lancedb_bucket_shadow'),
+    partitionMode: 'user_bucket',
+    bucketCount: 8
+  });
 }).then((bucketSummary) => {
   assert.strictEqual(bucketSummary.partitionMode, 'user_bucket');
   assert.strictEqual(bucketSummary.bucketCount, 8);
   assert.strictEqual(bucketSummary.coverage.memory.tableRows, 0);
+  assert.ok(bucketSummary._rows.memory.every((row) => Array.isArray(row.vector)), 'default summary keeps vector rows for dry-run compatibility');
   assert.ok(bucketSummary.lancedbDir.endsWith('lancedb_bucket_shadow'));
   return runDiagnostics({
   skipProbe: true,

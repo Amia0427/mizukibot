@@ -57,13 +57,15 @@ function shouldReconcileVectorSource(summary = {}, source = 'all') {
 
 async function reconcilePostReplyVectorStore(source = 'all', deps = {}) {
   const normalized = normalizeVectorMaintenanceSource(source);
+  const syncScript = getLanceDbSyncScript();
   const buildSyncSummary = typeof deps.buildSyncSummary === 'function'
     ? deps.buildSyncSummary
-    : getLanceDbSyncScript().buildSyncSummary;
+    : syncScript.buildSyncSummary;
   const lanceDbStore = deps.lanceDbStore || getLanceDbMemoryStoreModule();
   const before = await buildSyncSummary({
     dryRun: true,
-    fullReconcile: true
+    fullReconcile: true,
+    includeRows: Boolean(deps.lanceDbStore)
   });
   if (!shouldReconcileVectorSource(before, normalized)) {
     if (before && before._rows) delete before._rows;
@@ -72,24 +74,35 @@ async function reconcilePostReplyVectorStore(source = 'all', deps = {}) {
 
   const writes = [];
   if (normalized === 'all' || normalized === 'memory' || normalized === 'journal') {
-    writes.push(await lanceDbStore.syncMemoryRows(before._rows?.memory || [], {
-      full: false,
-      fullReconcile: true,
-      deleteStaleRows: true
-    }));
+    writes.push(deps.lanceDbStore
+      ? await lanceDbStore.syncMemoryRows(before._rows?.memory || [], {
+        full: false,
+        fullReconcile: true,
+        deleteStaleRows: true
+      })
+      : await syncScript.syncMemoryRowsLowMemory({
+        fullReconcile: true,
+        deleteStaleRows: true
+      }));
   }
   if (normalized === 'all' || normalized === 'worldbook') {
-    writes.push(await lanceDbStore.syncWorldbookRows(before._rows?.worldbook || [], {
-      full: false,
-      fullReconcile: true,
-      deleteStaleRows: true
-    }));
+    writes.push(deps.lanceDbStore
+      ? await lanceDbStore.syncWorldbookRows(before._rows?.worldbook || [], {
+        full: false,
+        fullReconcile: true,
+        deleteStaleRows: true
+      })
+      : await syncScript.syncWorldbookRowsLowMemory({
+        fullReconcile: true,
+        deleteStaleRows: true
+      }));
   }
   const beforeCoverage = before.coverage;
   if (before && before._rows) delete before._rows;
   const after = await buildSyncSummary({
     dryRun: true,
-    fullReconcile: true
+    fullReconcile: true,
+    includeRows: false
   });
   if (after && after._rows) delete after._rows;
   return {

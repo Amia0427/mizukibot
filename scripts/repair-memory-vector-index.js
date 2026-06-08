@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
-const { buildLanceDbOptions, buildSyncSummary } = require('./sync-lancedb-memory-index');
+const {
+  buildLanceDbOptions,
+  buildSyncSummary,
+  syncMemoryRowsLowMemory,
+  syncWorldbookRowsLowMemory
+} = require('./sync-lancedb-memory-index');
 const {
   buildEmbeddingCacheReconcilePlan,
   collectEmbeddingBackfillNodes,
@@ -12,9 +17,7 @@ const {
 } = require('../utils/personaWorldbookSearch');
 const { loadPersonaModuleCatalog } = require('../utils/personaModules');
 const {
-  compactLanceDbTables,
-  syncMemoryRows,
-  syncWorldbookRows
+  compactLanceDbTables
 } = require('../utils/lancedbMemoryStore');
 const {
   buildMemoryIndexHealthGate,
@@ -134,7 +137,8 @@ async function runRepair(args = {}, deps = {}) {
     deleteStaleRows: true,
     dir: options.dir,
     partitionMode: options.partitionMode,
-    bucketCount: options.bucketCount
+    bucketCount: options.bucketCount,
+    includeRows: Boolean(deps.syncMemoryRows || deps.syncWorldbookRows)
   });
   result.before = {
     coverage: syncSummary.coverage || {},
@@ -152,18 +156,34 @@ async function runRepair(args = {}, deps = {}) {
 
   if (!options.dryRun) {
     if (includeMemory) {
-      result.writes.push(await (deps.syncMemoryRows || syncMemoryRows)(syncSummary._rows.memory, {
-        fullReconcile: true,
-        deleteStaleRows: true,
-        ...lanceDbOptions
-      }));
+      result.writes.push(deps.syncMemoryRows
+        ? await deps.syncMemoryRows(syncSummary._rows?.memory || [], {
+          fullReconcile: true,
+          deleteStaleRows: true,
+          ...lanceDbOptions
+        })
+        : await syncMemoryRowsLowMemory({
+          fullReconcile: true,
+          deleteStaleRows: true,
+          dir: options.dir,
+          partitionMode: options.partitionMode,
+          bucketCount: options.bucketCount
+        }));
     }
     if (includeWorldbook) {
-      result.writes.push(await (deps.syncWorldbookRows || syncWorldbookRows)(syncSummary._rows.worldbook, {
-        fullReconcile: true,
-        deleteStaleRows: true,
-        ...lanceDbOptions
-      }));
+      result.writes.push(deps.syncWorldbookRows
+        ? await deps.syncWorldbookRows(syncSummary._rows?.worldbook || [], {
+          fullReconcile: true,
+          deleteStaleRows: true,
+          ...lanceDbOptions
+        })
+        : await syncWorldbookRowsLowMemory({
+          fullReconcile: true,
+          deleteStaleRows: true,
+          dir: options.dir,
+          partitionMode: options.partitionMode,
+          bucketCount: options.bucketCount
+        }));
     }
     if (options.compact) {
       result.compact = await (deps.compactLanceDbTables || compactLanceDbTables)(lanceDbOptions);
@@ -174,7 +194,8 @@ async function runRepair(args = {}, deps = {}) {
       deleteStaleRows: true,
       dir: options.dir,
       partitionMode: options.partitionMode,
-      bucketCount: options.bucketCount
+      bucketCount: options.bucketCount,
+      includeRows: false
     });
     const afterCoverage = after.coverage || {};
     result.after = {

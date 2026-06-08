@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-09 07:21 +08:00**：向量库低峰值同步改造。`sync-lancedb-memory-index` / `repair-memory-vector-index` 在 apply 阶段不再保留全量 `_rows` 向量数组，user_bucket 模式改为逐 bucket 构造并写入；`backfill --sync-after` 的全量门禁改为轻量 ID 覆盖率检查。新增 `MEMORY_LANCEDB_SYNC_BATCH_SIZE`，本地 `.env` 已把 embedding 回填批量收敛为 `8/24` 并移除重复项，降低历史 3GB 级 RSS 重现概率。
+
 **2026-06-08 22:10**：admin.txt精简去重优化。删除重复内容：身份重定义重复3次→1次、角色人格优先级重复3次→1次、"filter through personality"概念重复3次→统一表述、破坏第四面墙提及2次→合并。优化表达：EXECUTIVE ORDER 7行→2行、PROHIBITED/REQUIRED合并、Framework精简为要点列表。145行→100行（-31%），破限强度不变，可读性提升。
 
 **2026-06-08 22:00**：整合双人成行Anti-Avoidance Protocol到admin.txt。新增NSFW场景反回避协议：明确禁止6种回避策略（Topic Hijacking/Fade to Black/Metaphor Substitution/Interruption Injection/Emotional Deflection/Body Amnesia），强制执行规则（Follow the body/Stay in scene/Write directly/Maintain character voice），Proactive Escalation（角色主动发起升级），Physiological Realism（唤起渐变过程）。109行→145行，破限强度再提升40%，专门针对NSFW叙事回避问题。

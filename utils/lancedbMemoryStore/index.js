@@ -35,6 +35,7 @@ const {
   normalizeMemoryTableBase,
   normalizeWorldbookTable,
   resolveLanceDbBucketCount,
+  resolveMemoryBucketTableName,
   resolveMemorySearchTableNames
 } = require('./partitioning');
 
@@ -325,6 +326,25 @@ async function syncMemoryRows(rows = [], options = {}) {
     : upsertTableRows(tableName, rows, options);
 }
 
+async function syncMemoryBucketRows(tableName = '', rows = [], options = {}) {
+  if (!isLanceDbSyncEnabled(options.config || config)) {
+    return { ok: false, skipped: true, reason: 'sync_disabled', rows: 0 };
+  }
+  const normalizedTable = normalizeText(tableName);
+  if (!normalizedTable) return { ok: false, skipped: true, reason: 'empty_table', rows: 0 };
+  const cleanRows = dedupeVectorRows(rows);
+  const singleTableOptions = {
+    ...options,
+    partitionMode: 'legacy'
+  };
+  if (cleanRows.length === 0 && (options.full || options.fullReconcile || options.deleteStaleRows)) {
+    return deleteAllTableRows(normalizedTable, singleTableOptions);
+  }
+  return options.full
+    ? replaceTableRows(normalizedTable, cleanRows, singleTableOptions)
+    : upsertTableRows(normalizedTable, cleanRows, singleTableOptions);
+}
+
 async function syncWorldbookRows(rows = [], options = {}) {
   if (!isLanceDbSyncEnabled(options.config || config)) {
     return { ok: false, skipped: true, reason: 'sync_disabled', rows: 0 };
@@ -602,11 +622,13 @@ module.exports = {
   normalizeVectorStoreMode,
   openLanceDb,
   resolveLanceDbBucketCount,
+  resolveMemoryBucketTableName,
   resolveMemorySearchTableNames,
   resolveVectorCandidates,
   rowPassesMemoryFilter,
   searchMemoryVectors,
   searchWorldbookVectors,
+  syncMemoryBucketRows,
   syncMemoryRows,
   syncWorldbookRows
 };
