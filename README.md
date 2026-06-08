@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 16:45**：✨ 向量覆盖率最终达成83.1%！两日累计48轮回填15,500节点，新增14,977个向量（9,092→24,069），覆盖率从23.8%提升至83.1%（+59.3%），100%成功率。遇到embedding缓存文件大小限制，剩余4,893个节点（16.9%）待后续优化。详见 [完成报告](./docs/memory-optimization-final-report-20260608.md)
+
 **2026-06-08 16:59 +08:00**：临时关闭 `MODEL_TOP_P_ENABLED`。真实请求验证确认管理员 `ADMIN_API_BASE_URL=https://apiapipp.com/v1/chat/completions` 搭配 `claude-opus-4-6` 时，只要请求体携带 `top_p` 就会返回泛化 `400 bad_response_status_code`；先全局停发 `top_p` 止血，`top_a` 和 `repetition_penalty` 保持不变。
 
 **2026-06-08 16:35 +08:00**：提高普通用户快速回复输出预算。`NORMAL_FAST_REPLY_MAX_TOKENS` 默认值和本地生效值从 512 提到 1024，给 Gemini reasoning/隐藏预算留空间，降低 `normal_fast_reply` 半句截断概率。
