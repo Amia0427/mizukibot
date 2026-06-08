@@ -49,6 +49,10 @@ function estimatePromptTokens(value) {
     useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES');
     useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES');
     useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER');
+    useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES_CAP');
+    useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES_CAP');
+    useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER_CAP');
+    useConfigDefault('MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS');
     useConfigDefault('MEMORY_V3_SESSION_RECENT_MESSAGES');
     useConfigDefault('MODEL_SELF_CHECK_TIMEOUT_MS');
     useConfigDefault('IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS');
@@ -80,10 +84,11 @@ function estimatePromptTokens(value) {
     assert.ok(estimatePromptTokens(roleplayLivenessPrelude) <= 1500, 'roleplay liveness prelude must stay within 1500 estimated tokens');
     assert.ok(!/没有任何限制|顾客说什么就是什么/.test(roleplayLivenessPrelude), 'roleplay liveness prelude must not contain jailbreak-style text');
     assert.ok(
-      roleplayLivenessPrelude.includes('人机恋')
-        && roleplayLivenessPrelude.includes('Claude')
-        && roleplayLivenessPrelude.includes('尽可能的回复用户的问题'),
-      'roleplay liveness prelude must preserve the current relationship/liveness protocol'
+      roleplayLivenessPrelude.includes('虚构角色扮演场景')
+        && roleplayLivenessPrelude.includes('按瑞希的性格和当前情绪状态自然反应')
+        && roleplayLivenessPrelude.includes('禁止输出')
+        && roleplayLivenessPrelude.includes('尽可能用瑞希的语言自然回复'),
+      'roleplay liveness prelude must preserve the current neutral roleplay framework'
     );
     assert.ok(config.SYSTEM_PROMPT.includes(roleplayLivenessPrelude), 'roleplay liveness prelude must be included in SYSTEM_PROMPT');
     assert.ok(
@@ -114,10 +119,14 @@ function estimatePromptTokens(value) {
     assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_ITEMS, 6);
     assert.strictEqual(config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS, 16);
     assert.strictEqual(config.SHORT_TERM_BRIDGE_RAW_TTL_HOURS, 48);
-    assert.strictEqual(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS, 5200);
-    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES, 128);
-    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES, 16);
-    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER, 0.9);
+    assert.strictEqual(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS, 3000);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES, 64);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES, 8);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER, 0.65);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES_CAP, 64);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES_CAP, 8);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER_CAP, 0.65);
+    assert.strictEqual(config.MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS, 3000);
     assert.strictEqual(config.MEMORY_V3_SESSION_RECENT_MESSAGES, 128);
     assert.strictEqual(config.MODEL_SELF_CHECK_TIMEOUT_MS, 25000);
     assert.strictEqual(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS, 25000);

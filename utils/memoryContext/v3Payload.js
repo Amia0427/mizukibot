@@ -17,11 +17,15 @@ const { queryLocalKnowledge } = require('../localKnowledge');
 const { isRecentRecallQuery } = require('../recallHeuristics');
 const {
   buildMemoryTrace,
-  getPromptTokenLimit,
-  limitPromptText,
   resolveDroppedReasons,
   resolveInjectedBlockIds
 } = require('./formatters');
+const {
+  extractPromptSectionText,
+  getPromptTokenLimit,
+  limitMemoryForPrompt,
+  limitPromptText
+} = require('./budget');
 const {
   buildMemoKey,
   buildUnifiedRecallOptions,
@@ -177,15 +181,64 @@ async function buildMemoryContextV3Payload(deps = {}) {
       : (queryResult.digest || ''))
   );
   const impressionText = profileDisabled || !injectPersonaBlocks ? '' : String(queryResult.persona?.impression || '');
-  const memoryForPrompt = [
+  const promptSessionContinuityText = extractPromptSectionText(
+    packet.messages.sessionContinuity,
+    packet.sessionContinuityText,
+    {
+      tokenLimitName: 'MAIN_PROMPT_CONTINUITY_MAX_CHARS',
+      fallbackTokens: 220
+    }
+  );
+  const promptRelevantEvidenceText = extractPromptSectionText(
+    packet.messages.relevantEvidence,
+    packet.relevantEvidenceText,
+    {
+      tokenLimitName: 'MAIN_PROMPT_RETRIEVED_MEMORY_MAX_TOKENS',
+      fallbackTokens: 420
+    }
+  );
+  const promptWeakEvidenceText = extractPromptSectionText(
+    packet.messages.weakEvidence,
+    packet.weakEvidenceText,
+    {
+      tokenLimitName: 'MEMORY_V3_WEAK_EVIDENCE_MAX_TOKENS',
+      fallbackTokens: 80
+    }
+  );
+  const promptTaskStrategyText = extractPromptSectionText(
+    packet.messages.taskStrategy,
+    packet.taskStrategyText,
+    {
+      tokenLimitName: 'MAIN_PROMPT_TASK_MEMORY_MAX_TOKENS',
+      fallbackTokens: 160
+    }
+  );
+  const promptGroupSharedContextText = extractPromptSectionText(
+    packet.messages.groupSharedContext,
+    packet.groupSharedContextText,
+    {
+      tokenLimitName: 'MAIN_PROMPT_GROUP_MEMORY_MAX_TOKENS',
+      fallbackTokens: 160
+    }
+  );
+  const promptStyleSignalsText = extractPromptSectionText(
+    packet.messages.styleSignals,
+    packet.styleSignalsText,
+    {
+      tokenLimitName: 'MAIN_PROMPT_STYLE_SIGNALS_MAX_TOKENS',
+      fallbackTokens: 80
+    }
+  );
+  const rawMemoryForPrompt = [
     bootMemoryText ? `[BootMemory]\n${limitPromptText(bootMemoryText, getPromptTokenLimit('MAIN_PROMPT_BOOT_MEMORY_MAX_TOKENS', 220), 'tail')}` : '',
-    packet.sessionContinuityText ? `[SessionContinuity]\n${packet.sessionContinuityText}` : '',
-    packet.relevantEvidenceText ? `[RelevantEvidence]\n${packet.relevantEvidenceText}` : '',
-    (!continuityFacet || !packet.sessionContinuityText) && packet.weakEvidenceText ? `[WeakEvidence]\n${packet.weakEvidenceText}` : '',
-    packet.taskStrategyText ? `[TaskMemory]\n${packet.taskStrategyText}` : '',
-    packet.groupSharedContextText ? `[GroupMemory]\n${packet.groupSharedContextText}` : '',
-    packet.styleSignalsText ? `[StyleSignals]\n${packet.styleSignalsText}` : ''
+    promptSessionContinuityText ? `[SessionContinuity]\n${promptSessionContinuityText}` : '',
+    promptRelevantEvidenceText ? `[RelevantEvidence]\n${promptRelevantEvidenceText}` : '',
+    (!continuityFacet || !promptSessionContinuityText) && promptWeakEvidenceText ? `[WeakEvidence]\n${promptWeakEvidenceText}` : '',
+    promptTaskStrategyText ? `[TaskMemory]\n${promptTaskStrategyText}` : '',
+    promptGroupSharedContextText ? `[GroupMemory]\n${promptGroupSharedContextText}` : '',
+    promptStyleSignalsText ? `[StyleSignals]\n${promptStyleSignalsText}` : ''
   ].filter(Boolean).join('\n\n');
+  const memoryForPrompt = limitMemoryForPrompt(rawMemoryForPrompt, { strategy: 'head' });
   const injectedForTrace = {
     retrievedMemory: retrievedPromptText,
     weakEvidence: packet.weakEvidenceText,

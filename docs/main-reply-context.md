@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-06 12:44 +08:00
+更新时间：2026-06-08 21:05 +08:00
 
 ## 已调整
 
+- 2026-06-08 21:05 +08:00：主回复输入 token 最小收敛。`memoryForPrompt` 新增 `MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500` 总预算，legacy 和 Memory V3 输出最终注入前都会裁剪；Memory V3 改用已分段预算后的 packet 文本拼装，避免 session continuity 原文撑大 `retrieved_memory_lite`。普通聊天 short-term continuity 默认/上限收敛到 64/8 raw turns、0.65 multiplier 和 `MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS=3000`，保留 memory recall、long task、admin private 的宽档位。新增 `npm run diag:main-reply-token-budget -- --limit 20 --json` 聚合输入 token 趋势。
 - 2026-06-06 12:44 +08:00：新增主回复截断诊断入口。`npm run diag:main-reply-truncation` / `npm run diag:main-reply -- --truncation --limit 50` 会读取 `data/model-calls.ndjson` 并按 `request_id` 关联 `data/request-trace.ndjson`，输出最近截断候选的高频原因分布、样本和 trace 摘要；分类优先级为 `MAX_TOKENS`、上游断流/`ECONNRESET`、`stream_closed_without_terminal_event`、本地发送层失败。管理员可发 `/debug replytrunc [limit]` 查看同一报告。
 - 2026-06-06 11:28 +08:00：修复主回复时间感知异常。`roleplay_runtime_context` 继续注入 `current_time`，但现在会把 OneBot/QQ 常见的 10 位秒级 `routeMeta.timestamp` 识别为 Unix seconds 后再按 `TIMEZONE` 格式化，避免被当成毫秒落到 1970 年；毫秒级时间戳和 ISO 时间字符串保持兼容。
 - 2026-06-05 23:03 +08:00：主回复截断排查增加可观测性和输出约束。日志中已能看到用户多次反馈“截断/宝你没说完/谷歌正常聊天都截断”，样本附近的本地发送预览与 `finalReplyChars` 显示当前回复文本本身偏短，未见流式分段 `finish()` 漏发尾段的直接证据；同时 Gemini/gcli 流式调用存在多次 `ECONNRESET/socket hang up` 和低 completion token 的成功记录。现在 `api/parser.js` 会抽取 OpenAI-compatible `finish_reason`、Gemini `finishReason`、Anthropic/Responses 停止状态，`data/model-calls.ndjson` 写入 `finish_reason`，流式成功但没有终止事件时标为 `stream_closed_without_terminal_event`。`prompts/runtime/streaming-segmentation.txt` 同步要求段数限制只能压缩内容，不能省略结尾，最终可见句必须自然闭合。
@@ -125,10 +126,15 @@ root_system_prompt         14
 
 ```env
 MAIN_REPLY_PROMPT_MODE=balanced
-MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=5200
-MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=128
-MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=16
-MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.9
+MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500
+MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3000
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=64
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=8
+MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.65
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES_CAP=64
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES_CAP=8
+MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER_CAP=0.65
+MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS=3000
 MEMORY_V3_SESSION_RECENT_MESSAGES=128
 ```
 
@@ -176,6 +182,7 @@ MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT=7
 ```bash
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:main-reply-prompt -- --limit 20 --json
+npm run diag:main-reply-token-budget -- --limit 20 --json
 npm run diag:continuity -- prompt --user <id>
 npm run diag:continuity -- prompt --user <id> --json
 ```

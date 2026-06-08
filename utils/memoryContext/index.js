@@ -48,6 +48,9 @@ const {
   resolveDailyJournalTimestamp,
   resolveReadableGroupIds
 } = require('./recallOptions');
+const {
+  limitMemoryForPrompt
+} = require('./budget');
 const { createMemoryContextHitHelpers } = require('./hits');
 const { createMemoryContextProfilePayloadHelpers } = require('./profilePayload');
 const { createMemoryContextPromptSegmentHelpers } = require('./promptSegments');
@@ -245,8 +248,10 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
     }
   });
 
+  const rawMemoryForPrompt = memorySections.filter(Boolean).join('\n\n') || promptRetrievedMemoryText;
+
   return {
-    memoryForPrompt: memorySections.filter(Boolean).join('\n\n') || promptRetrievedMemoryText,
+    memoryForPrompt: limitMemoryForPrompt(rawMemoryForPrompt, { strategy: 'head' }),
     retrievedMemoryForPrompt,
     promptRetrievedMemoryText,
     hits,
