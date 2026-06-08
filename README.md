@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 13:32 +08:00**：新增最小运行时异常汇总入口 `npm run diag:runtime-exceptions`。默认统计最近 24h 的 `main-model-fallback:admin_shared` 备用模型触发/前置失败，以及 `memoryReranker` 超时回退，输出异常次数、最后出现时间和受影响模块；可用 `-- --window=2h` 或 `-- --json` 调整窗口/输出。
+
 **2026-06-08 13:15 +08:00**：修复 `direct_chat/image_summary/summary` 慢回复链路。普通图片总结在无显式工具需求时直接生成 chat-only 决策，不再先远程跑 planner；视觉路由即使 `imageUrl` 被 worker 清空也强制非流式，并使用图片模型独立预算 `IMAGE_MODEL_TIMEOUT_MS=18000` / `IMAGE_MODEL_RETRIES=0`，避免首次 `ECONNRESET` 卡长超时后继续重试。
 
 **2026-06-08 00:36**：修复主 bot 因热存储 JSON 文件只读导致的退出问题。`jsonHotStore` 现在会尝试清除只读位并重试写入，定时 flush 失败会保留 dirty 状态重试，避免 `memory_items.json` / `memory_index.json` 权限波动直接中断回复。
@@ -109,6 +111,7 @@ npm run diag:main-reply-truncation
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:runtime
 npm run diag:runtime-hotspots
+npm run diag:runtime-exceptions
 npm run diag:low-resource
 npm run diag:provider-request -- --provider openai_compatible
 node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
