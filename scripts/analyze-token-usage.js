@@ -1,5 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const {
+  isImageCall,
+  isMainReplyCall
+} = require('./diagnose-main-reply-token-budget');
 
 const DATA_DIR = path.join(__dirname, '../data');
 const MODEL_CALLS_FILE = path.join(DATA_DIR, 'model-calls.ndjson');
@@ -17,11 +21,16 @@ function analyzeTokenUsage() {
       }
     })
     .filter(Boolean)
-    .filter(r => r.source === 'direct_reply')
-    .filter(r => !r.route_debug_key || !r.route_debug_key.includes('image'))
+    .filter(isMainReplyCall)
+    .filter(r => !isImageCall(r))
     .slice(-20);  // 最近20条
 
   console.log('===== 主回复Token占用分析（最近20条非图像对话）=====\n');
+
+  if (records.length === 0) {
+    console.log('未找到符合条件的主回复记录');
+    return;
+  }
 
   const stats = {
     total: records.length,

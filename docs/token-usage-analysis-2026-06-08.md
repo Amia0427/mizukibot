@@ -3,9 +3,17 @@
 ## 概况
 
 **分析时间**: 2026-06-08  
+**修复更新时间**: 2026-06-08 21:05 +08:00  
 **样本**: 最近的主回复请求  
 **平均输入tokens**: 10,000-12,000  
 **最高可达**: 34,000+ (包含图像时)
+
+## 已落地修复（2026-06-08 21:05 +08:00）
+
+1. `memoryForPrompt` 加总预算：新增 `MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500`，legacy 和 Memory V3 两条 `memoryContext` 输出都会在最终注入前裁剪。
+2. Memory V3 拼装改用已分段预算后的 packet 文本，避免未裁剪的 `sessionContinuityText` / evidence 原文重新撑大 `retrieved_memory_lite`。
+3. 普通聊天 short-term continuity 收敛到 64 条 raw 上限、至少保留最新 8 条、token multiplier 0.65，并新增 normal cap 覆盖旧 `.env` 高值：`MAIN_REPLY_CONTEXT_NORMAL_*_CAP` 和 `MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS=3000`。
+4. 新增可复跑诊断入口：`npm run diag:main-reply-token-budget -- --limit 20 --json`。
 
 ## Token占用分布（典型11,192 tokens案例）
 
@@ -86,21 +94,20 @@
 
 ## 优化建议
 
-### 方案1: 快速优化（推荐）
+### 方案1: 快速优化（已落地为默认/cap）
 
-在 `.env` 文件添加以下配置：
+当前代码默认/上限：
 
 ```bash
-# 1. 减少短期对话上下文消息数（问题3）
-SHORT_TERM_MEMORY_RECENT_MESSAGES=64           # 从128降到64
-MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=64   # 从128降到64
-MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=8    # 从16降到8
-
-# 2. 减少短期连续性的token预算（问题3）
-MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3000  # 从5200降到3000
-
-# 3. 限制Memory Context的召回量（问题1）
-# 这需要修改代码，见方案2
+MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500
+MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3000
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=64
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=8
+MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.65
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES_CAP=64
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES_CAP=8
+MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER_CAP=0.65
+MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS=3000
 ```
 
 **预期效果**: 11,192 tokens → **~7,500-8,500 tokens** (减少25-35%)
@@ -109,30 +116,13 @@ MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3000  # 从5200降到3000
 
 ### 方案2: 深度优化（需要代码修改）
 
-#### 2.1 优化Memory Context召回（问题1，最高优先级）
+#### 2.1 优化Memory Context召回（问题1，已完成最小修复）
 
 **目标**: 将5,044 tokens降到2,000-2,500 tokens
 
-**修改位置**: `utils/memoryContext/index.js`
+**修改位置**: `utils/memoryContext/index.js`、`utils/memoryContext/v3Payload.js`、`utils/memoryContext/budget.js`
 
-**方法**:
-1. 减少 LanceDB 召回的向量数量
-2. 对召回的记忆进行token预算限制
-3. 优先保留最相关和最新的记忆
-4. 压缩 Daily Journal 的输出
-
-**建议修改**:
-```javascript
-// 在 buildMemoryContextAsync 中添加token限制
-const MEMORY_CONTEXT_MAX_TOKENS = 2500;  // 新增限制
-
-// 召回后按相关性排序并裁剪
-const trimmedMemory = trimTextByTokenBudget(
-  memoryForPrompt, 
-  MEMORY_CONTEXT_MAX_TOKENS, 
-  'relevance'  // 按相关性保留
-);
-```
+**结果**: 最终 `memoryForPrompt` 被 `MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS` 限制；V3 不再把未裁剪 packet 原文拼回 prompt。
 
 #### 2.2 精简System Prompt（问题2）
 
@@ -183,14 +173,14 @@ MAIN_REPLY_PROMPT_MODE=minimal
 ## 实施路线图
 
 ### 第一阶段（立即执行）
-1. ✅ 添加 `.env` 配置（方案1）
-2. ✅ 重启bot验证效果
-3. ✅ 观察1-2天，确认没有功能退化
+1. ✅ 添加默认/cap 配置（方案1）
+2. ✅ 修改 Memory Context 最终预算（方案2.1）
+3. ✅ 添加可复跑诊断入口
+4. ⏳ 等下一批主回复样本验证均值趋势
 
 ### 第二阶段（1周内）
-1. 🔧 修改Memory Context召回逻辑（方案2.1）
-2. 🔧 精简System Prompt文件（方案2.2）
-3. 🔧 添加token预算硬限制
+1. 🔧 如均值仍高，再精简 System Prompt（方案2.2）
+2. 🔧 按真实样本微调 `MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS` / normal cap
 
 ### 第三阶段（持续优化）
 1. 📊 监控token占用趋势
@@ -207,8 +197,8 @@ MAIN_REPLY_PROMPT_MODE=minimal
 # 查看最近的token占用
 npm run diag:main-reply-prompt -- --limit 10
 
-# 详细分析
-node scripts/analyze-token-usage.js
+# 聚合输入 token 趋势
+npm run diag:main-reply-token-budget -- --limit 20 --json
 ```
 
 **目标值**:
@@ -221,7 +211,7 @@ node scripts/analyze-token-usage.js
 
 ## 附录：配置文件对照
 
-### 当前配置（推测）
+### 修复前配置（典型/推测）
 
 ```bash
 SHORT_TERM_MEMORY_RECENT_MESSAGES=128
@@ -234,14 +224,20 @@ MAIN_REPLY_PROMPT_MODE=balanced
 ### 优化后配置（推荐）
 
 ```bash
-SHORT_TERM_MEMORY_RECENT_MESSAGES=64          # ↓ 50%
-MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=64   # ↓ 50%
-MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=8    # ↓ 50%
-MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3000  # ↓ 42%
-MAIN_REPLY_PROMPT_MODE=balanced                     # 保持
+MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500
+MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS=3000
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES=64
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES=8
+MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER=0.65
+MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES_CAP=64
+MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES_CAP=8
+MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER_CAP=0.65
+MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS=3000
+MAIN_REPLY_PROMPT_MODE=balanced
 ```
 
 ---
 
 生成时间: 2026-06-08 18:37
-分析工具: scripts/analyze-token-usage.js
+更新时间: 2026-06-08 21:05 +08:00
+分析工具: scripts/analyze-token-usage.js / scripts/diagnose-main-reply-token-budget.js
