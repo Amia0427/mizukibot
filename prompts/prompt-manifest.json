@@ -31,31 +31,35 @@
         "required": true,
         "kind": "persona_policy",
         "authority": "persona_core",
-        "priority": -20
+        "priority": -50
       },
       {
         "id": "persona_identity",
         "path": "persona/01_identity.txt",
         "required": true,
-        "kind": "persona_core"
-      },
-      {
-        "id": "persona_style",
-        "path": "persona/02_style.txt",
-        "required": true,
-        "kind": "persona_style"
+        "kind": "persona_core",
+        "priority": -40
       },
       {
         "id": "persona_boundaries",
         "path": "persona/03_boundaries.txt",
         "required": true,
-        "kind": "persona_policy"
+        "kind": "persona_policy",
+        "priority": -30
+      },
+      {
+        "id": "persona_style",
+        "path": "persona/02_style.txt",
+        "required": true,
+        "kind": "persona_style",
+        "priority": 10
       },
       {
         "id": "persona_behavior",
         "path": "persona/04_behavior.txt",
         "required": true,
-        "kind": "persona_behavior"
+        "kind": "persona_behavior",
+        "priority": 20
       },
       {
         "id": "persona_examples_index",
@@ -75,7 +79,8 @@
         "id": "persona_state_modulation",
         "path": "persona/06_state_modulation.txt",
         "required": true,
-        "kind": "persona_modulation"
+        "kind": "persona_modulation",
+        "priority": 100
       },
       {
         "id": "persona_human_imperfection",
@@ -83,7 +88,7 @@
         "required": true,
         "kind": "persona_quality",
         "authority": "persona_core",
-        "priority": 150
+        "priority": 800
       },
       {
         "id": "persona_liveness_authentic",
@@ -91,7 +96,7 @@
         "required": true,
         "kind": "persona_quality",
         "authority": "persona_core",
-        "priority": 151,
+        "priority": 810,
         "budget_tokens": 400,
         "include_in_system_prompt": false
       },
