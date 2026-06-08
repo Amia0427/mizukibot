@@ -11,7 +11,7 @@ module.exports = (async () => {
   assert.ok(script.includes('function Resolve-NodeExecutable'), 'periodic restart should resolve a real node.exe');
   assert.ok(script.includes('Start-Process -FilePath $nodeExe'), 'periodic restart should start node.exe directly');
   assert.ok(script.includes('-ArgumentList @("index.js")'), 'periodic restart should run the main bot entrypoint');
-  assert.ok(script.includes('Test-LockOwnedByRunningNode'), 'periodic restart should verify the bot reacquires the lock');
+  assert.ok(script.includes('Test-LockOwnedByRunningMainBot'), 'periodic restart should verify the bot reacquires the lock');
   assert.ok(!/Start-Process\s+-FilePath\s+["']npm["']/i.test(script), 'periodic restart must not Start-Process npm on Windows');
   assert.ok(!/Start-Process\s+-FilePath\s+["']npm\.ps1["']/i.test(script), 'periodic restart must not Start-Process npm.ps1 on Windows');
   assert.ok(!/Start-Process\s+-FilePath\s+["']npm\.cmd["']/i.test(script), 'periodic restart should not depend on npm shims');
