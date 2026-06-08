@@ -216,9 +216,9 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'webSearchNoApiKeySource.test.js'),
   path.join(__dirname, '..', 'tests', 'checkAgentFailureDetectionSource.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryExtractionRetriesSource.test.js'),
+  path.join(__dirname, '..', 'tests', 'imageSummaryLatencyPath.test.js'),
   path.join(__dirname, '..', 'tests', 'modelTimeoutConfigSource.test.js'),
-  path.join(__dirname, '..', 'tests', 'messageSendChunkingSource.test.js')
-  ,
+  path.join(__dirname, '..', 'tests', 'messageSendChunkingSource.test.js'),
   path.join(__dirname, '..', 'tests', 'messageHandlerInboundConcurrency.test.js')
 ];
 

@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 13:15 +08:00**：修复 `direct_chat/image_summary/summary` 慢回复链路。普通图片总结在无显式工具需求时直接生成 chat-only 决策，不再先远程跑 planner；视觉路由即使 `imageUrl` 被 worker 清空也强制非流式，并使用图片模型独立预算 `IMAGE_MODEL_TIMEOUT_MS=18000` / `IMAGE_MODEL_RETRIES=0`，避免首次 `ECONNRESET` 卡长超时后继续重试。
+
 **2026-06-08 00:36**：修复主 bot 因热存储 JSON 文件只读导致的退出问题。`jsonHotStore` 现在会尝试清除只读位并重试写入，定时 flush 失败会保留 dirty 状态重试，避免 `memory_items.json` / `memory_index.json` 权限波动直接中断回复。
 
 **2026-06-07 13:30**：Worker架构适配优化 - 关闭实时向量化改为批处理，停止Legacy Profile写入转纯Memory V3模式。预计Worker内存从512MB再降到256MB。分析worker学习内容：8大任务(memoryLearning/selfImprovement/dailyJournal/memoryEvent/materialize/vectorMaintenance/memoryQualityAudit/profileMaintenance)，写入4层存储(Memory V3 Events/LanceDB/Daily Journal/Profile Journal SQLite)。
@@ -211,6 +213,13 @@ Anthropic 图片输入预算：
 
 ```env
 ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS=120000
+```
+
+图片主回复模型请求预算：
+
+```env
+IMAGE_MODEL_TIMEOUT_MS=18000
+IMAGE_MODEL_RETRIES=0
 ```
 
 主回复短期上下文常用调节项：

@@ -421,6 +421,9 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   if (options.trace && typeof options.trace === 'object') {
     body.__trace = options.trace;
   }
+  if (resolvedConfig && typeof resolvedConfig === 'object' && Number.isFinite(Number(resolvedConfig.timeoutMs))) {
+    body.__timeoutMs = Math.max(1000, Math.floor(Number(resolvedConfig.timeoutMs)));
+  }
 
   body.__promptTokenWarningThreshold = promptBudget.warning_threshold_tokens;
   body.__promptTokenHardLimit = promptBudget.hard_limit_tokens;

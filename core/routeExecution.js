@@ -219,6 +219,8 @@ function buildBasePlan(route = {}) {
   const topRouteType = sanitizeTopRouteType(route?.topRouteType || 'direct_chat');
   const policyKey = resolvePolicyKey(route);
   const routeDebugKey = buildRouteDebugKey(route);
+  const chatMode = String(route?.meta?.chatMode || '').trim().toLowerCase();
+  const isVisionRoute = Boolean(route?.imageUrl) || chatMode === 'image_qa' || chatMode === 'image_summary';
   return {
     executor: 'direct',
     topRouteType,
@@ -227,7 +229,7 @@ function buildBasePlan(route = {}) {
     allowTools: false,
     allowedTools: [],
     allowedToolBuckets: [],
-    allowStream: topRouteType === 'direct_chat' && !route?.imageUrl,
+    allowStream: topRouteType === 'direct_chat' && !isVisionRoute,
     needsBackground: false,
     unavailableReason: '',
     routeTrace: buildRouteTrace(route, {
@@ -321,6 +323,7 @@ function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
   const policyKey = resolvePolicyKey(route);
   const privateRestrictionReason = resolvePrivateRestrictionReason(route, allowedTools, rawAllowedTools, runtimeConfig);
   const chatMode = String(route?.meta?.chatMode || '').trim().toLowerCase();
+  const isVisionRoute = Boolean(route?.imageUrl) || chatMode === 'image_qa' || chatMode === 'image_summary';
   const visionDirectReply = normalizeChatType(route) === 'private'
     && (chatMode === 'image_qa' || chatMode === 'image_summary')
     && rawAllowedTools.length === 0;
@@ -332,13 +335,13 @@ function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
         executor: needsBackground ? 'background_direct' : 'direct',
         policyKey,
         routeDebugKey,
-      allowStream: false,
-      needsBackground,
-      executablePlan: validation.executablePlan,
-      allowedPlanSteps: validation.allowedPlanSteps,
-      blockedPlanSteps: validation.blockedPlanSteps,
-      unavailableReason: ''
-    });
+        allowStream: false,
+        needsBackground,
+        executablePlan: validation.executablePlan,
+        allowedPlanSteps: validation.allowedPlanSteps,
+        blockedPlanSteps: validation.blockedPlanSteps,
+        unavailableReason: ''
+      });
     }
     if (toolIntent === 'force_tools') {
       return withRouteTrace(route, {
@@ -359,7 +362,7 @@ function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
       executor: needsBackground ? 'background_direct' : 'direct',
       policyKey,
       routeDebugKey,
-      allowStream: !needsBackground && !route?.imageUrl,
+      allowStream: !needsBackground && !isVisionRoute,
       needsBackground,
       executablePlan: validation.executablePlan,
       allowedPlanSteps: validation.allowedPlanSteps,

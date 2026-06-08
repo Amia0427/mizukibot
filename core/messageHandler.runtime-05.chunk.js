@@ -383,7 +383,7 @@
         allowTools: false,
         allowedTools: [],
         allowedToolBuckets: [],
-        allowStream: !route?.imageUrl,
+        allowStream: !route?.imageUrl && !['image_qa', 'image_summary'].includes(String(route?.meta?.chatMode || '').trim().toLowerCase()),
         needsBackground: false,
         unavailableReason: 'route-execution-failed'
       };
