@@ -19,7 +19,7 @@ module.exports = (async () => {
     NORMAL_FAST_REPLY_RECENT_TURNS: 12,
     NORMAL_FAST_REPLY_CONTEXT_MAX_CHARS: 8000,
     NORMAL_FAST_REPLY_SUMMARY_MAX_CHARS: 1500,
-    NORMAL_FAST_REPLY_MAX_TOKENS: 512
+    NORMAL_FAST_REPLY_MAX_TOKENS: 1024
   };
 
   const routeMeta = { groupId: 'g1', chatType: 'group', userId: 'u1' };
@@ -139,7 +139,7 @@ module.exports = (async () => {
   assert.strictEqual(seenContext.disableTools, true, '应禁用工具');
   assert.deepStrictEqual(seenContext.allowedTools, [], '应清空工具');
   assert.strictEqual(seenContext.disableHumanizer, true, '应禁用 humanizer');
-  assert.strictEqual(seenContext.modelConfig.maxTokens, 512, '应使用快速回复输出上限');
+  assert.strictEqual(seenContext.modelConfig.maxTokens, 1024, '应使用快速回复输出上限');
 
   console.log('normalFastReplyRuntime.test.js passed');
 })().catch((error) => {
