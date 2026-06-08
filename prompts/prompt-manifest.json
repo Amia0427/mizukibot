@@ -26,14 +26,6 @@
         "priority": -1000
       },
       {
-        "id": "persona_roleplay_liveness_prelude",
-        "path": "persona/00_roleplay_liveness_prelude.txt",
-        "required": true,
-        "kind": "persona_policy",
-        "authority": "persona_core",
-        "priority": -50
-      },
-      {
         "id": "persona_identity",
         "path": "persona/01_identity.txt",
         "required": true,
@@ -81,14 +73,6 @@
         "required": true,
         "kind": "persona_modulation",
         "priority": 100
-      },
-      {
-        "id": "persona_human_imperfection",
-        "path": "persona/08_human_imperfection.txt",
-        "required": true,
-        "kind": "persona_quality",
-        "authority": "persona_core",
-        "priority": 800
       },
       {
         "id": "persona_liveness_authentic",

@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 21:22 +08:00**：主回复默认废弃聊天热路径 `memory_cli` 召回。`MEMORY_CLI_CHAT_ENABLED=false` 时，planner 和主模型工具 allowlist 会过滤 `memory_cli`，只使用已注入的本地 Memory V3、Profile Journal SQLite/Daily Journal 和向量召回证据；`mem search/open` 仍保留为人工诊断入口，显式设 `MEMORY_CLI_CHAT_ENABLED=true` 可回到旧工具召回链路。
+
 **2026-06-08 21:15**：清除所有长期记忆系统。删除Memory V3事件存储（1.1G）、LanceDB向量索引（5.3G）、Daily Journal、Profile状态、Image Memory，总计6.4G数据。已重建空LanceDB用户分桶结构（32 buckets）、初始化Memory V3目录，bot已重启。备份已创建：memory-backup-20260608-210913.tar.gz
 
 **2026-06-08 21:30**：精简System Prompt完成，减少27.5% token占用。合并重复内容：00_roleplay_liveness_prelude.txt→SYSTEM.txt、08_human_imperfection.txt→02_style.txt。精简核心文件：01_identity.txt -31%、02_style.txt -36%、03_boundaries.txt -13%。优化前10,511 tokens→优化后7,622 tokens（-2,889 tokens）。保留完整角色设定、输出风格规则、硬性边界和真人质感要求。
