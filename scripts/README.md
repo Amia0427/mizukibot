@@ -28,6 +28,7 @@
 - 更新 2026-05-23 11:25 +08:00：`diagnose-memory-ops.js recall --gate` 会把 lifecycle leakage、category mismatch、recent recall miss 纳入门禁指标。
 - `diagnose-persona-memory-state.js`
 - `diagnose-persona-modules.js`
+- `diagnose-runtime-exceptions.js`：更新 2026-06-08 13:32 +08:00，最小运行时异常汇总入口；聚合 `model-calls.ndjson`、memory recall observability 和 runtime 日志里的 `main-model-fallback:admin_shared` / `memoryReranker` 超时回退信号
 - `diagnose-runtime-hotspots.js`：运行时资源热点诊断，汇总 RSS/heap/event loop delay、timer/interval、post-reply worker 和高频模块
 - `diagnose-runtime-status.js`：运行时状态诊断，汇总主进程、post-reply worker、后台任务和锁
 - `analyze-foreground-concurrency.js`

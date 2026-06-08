@@ -25,6 +25,7 @@
     "diag:main-reply-truncation": "node scripts/diagnose-main-reply.js --truncation",
     "diag:runtime": "node scripts/diagnose-runtime-status.js",
     "diag:runtime-hotspots": "node scripts/diagnose-runtime-hotspots.js",
+    "diag:runtime-exceptions": "node scripts/diagnose-runtime-exceptions.js",
     "diag:low-resource": "node scripts/diagnose-low-resource.js",
     "export:gemini-dialogues": "node scripts/export-gemini-user-dialogues.js",
     "memory:v3:migrate": "node scripts/migrate-memory-v3.js",
