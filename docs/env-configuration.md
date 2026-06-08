@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前 `.env` 有 325 个变量，323 个唯一变量；重复项仅保留 `MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE` 和 `MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN` 两组历史调优项。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；重复项已在本地 `.env` 注释中标明实际生效顺序。
+- 2026-06-08 16:59 +08:00：当前本地配置已把 `MODEL_TOP_P_ENABLED=false`。真实请求确认管理员 `apiapipp.com/v1/chat/completions` + `claude-opus-4-6` 组合只要携带 `top_p` 就会返回泛化 `400 bad_response_status_code`；`top_a` / `repetition_penalty` 仍可保留。
 - 2026-06-08 16:35 +08:00：普通用户快速回复输出预算提高到 `NORMAL_FAST_REPLY_MAX_TOKENS=1024`；为 Gemini reasoning/隐藏预算留出空间，降低 `normal_fast_reply` 半句截断概率。
 - 2026-06-03 17:42 +08:00：当前普通主回复 `API_BASE_URL=https://gcli.ggchan.dev/v1/chat/completions` 是 OpenAI-compatible 网关，已显式设置 `API_PROVIDER=openai_compatible`；否则 `AI_MODEL=gemini-3-flash-preview` 会按模型名自动切到 Gemini native 并改写为 `.../models/gemini-3-flash-preview:generateContent`，该地址在 gcli 返回 HTTP 404。主回复/Provider 诊断也会读取显式 provider，避免诊断输出与真实请求分叉。
 - 2026-06-03 17:16 +08:00：`API_PROVIDER=gemini_native` 或 `AI_MODEL=gemini-*` 的主回复流式请求无需新增 env；只要 `AI_STREAM_ENABLED=true` 且链路允许流式，Gemini endpoint 会从 `generateContent` 自动切到 `streamGenerateContent?alt=sse`，普通用户首字超时仍由 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 控制。

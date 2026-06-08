@@ -1,5 +1,10 @@
 # 更新记录
 
+## 2026-06-08
+
+### Bug 修复
+- **16:59** 临时关闭 `MODEL_TOP_P_ENABLED`；真实请求确认 `apiapipp.com` 的管理员 `claude-opus-4-6` 网关对 `top_p` 返回泛化 `400 bad_response_status_code`，先全局停发 `top_p` 止血。
+
 ## 2026-06-07
 
 ### Safety 架构优化
