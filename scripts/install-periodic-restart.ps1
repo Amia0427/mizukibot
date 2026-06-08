@@ -86,8 +86,8 @@ try {
 "@
 
   # 保存XML到临时文件
-  $tempXml = Join-Path $env:TEMP "mizuki-periodic-restart.xml"
-  $taskXml | Out-File -FilePath $tempXml -Encoding Unicode
+  $tempXml = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "mizuki-periodic-restart.xml")
+  [System.IO.File]::WriteAllText($tempXml, $taskXml, [System.Text.Encoding]::Unicode)
 
   # 注册任务
   schtasks /create /tn $TaskName /xml $tempXml /f | Out-Null

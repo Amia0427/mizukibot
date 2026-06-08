@@ -4,6 +4,10 @@
 
 ## 近期更新
 
+**2026-06-08 13:40**：向量覆盖率突破43.9%！启用正常模式后速度提升6.2倍（37→231节点/分钟），6轮大批次回填新增3,603个向量（9,092→12,695），失败节点从81清零。本周进度73.2%，预计2026-06-10提前完成60%目标。详见 [今日报告](./docs/memory-optimization-execution-report-20260608.md)
+
+**2026-06-08 13:36 +08:00**：修复 Windows 定时重启拉不起 bot。`scripts/restart-bot-periodic.ps1` 不再 `Start-Process npm`，改为解析真实 `node.exe` 后直接启动 `index.js`，并在重启后校验 `.mizukibot.lock` 确认主 bot 已重新上线。
+
 **2026-06-08 13:32 +08:00**：新增最小运行时异常汇总入口 `npm run diag:runtime-exceptions`。默认统计最近 24h 的 `main-model-fallback:admin_shared` 备用模型触发/前置失败，以及 `memoryReranker` 超时回退，输出异常次数、最后出现时间和受影响模块；可用 `-- --window=2h` 或 `-- --json` 调整窗口/输出。
 
 **2026-06-08 13:15 +08:00**：修复 `direct_chat/image_summary/summary` 慢回复链路。普通图片总结在无显式工具需求时直接生成 chat-only 决策，不再先远程跑 planner；视觉路由即使 `imageUrl` 被 worker 清空也强制非流式，并使用图片模型独立预算 `IMAGE_MODEL_TIMEOUT_MS=18000` / `IMAGE_MODEL_RETRIES=0`，避免首次 `ECONNRESET` 卡长超时后继续重试。
@@ -161,6 +165,7 @@ LanceDB 用户分桶影子迁移默认不删除旧库；验证通过后配置 `M
 ```bash
 npm run win:daemon:install
 npm run win:daemon:status
+powershell -ExecutionPolicy Bypass -File scripts/restart-bot-periodic.ps1 -ValidateOnly
 npm run linux:install
 npm run linux:check
 npm run linux:start
