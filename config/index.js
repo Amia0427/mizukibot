@@ -1067,7 +1067,10 @@ module.exports = {
   MEMORY_RECALL_MAX_PROMPT_STRONG: pickNum('MEMORY_RECALL_MAX_PROMPT_STRONG', 6),  MEMORY_TOPIC_TTL_DAYS: pickNum('MEMORY_TOPIC_TTL_DAYS', 21),
   MEMORY_EXTRACT_MIN_CONFIDENCE: pickNum('MEMORY_EXTRACT_MIN_CONFIDENCE', 0.72),
   MEMORY_CLI_ENABLED: pickBool('MEMORY_CLI_ENABLED', true),
-  MEMORY_CLI_CHAT_ENABLED: pickBool('MEMORY_CLI_CHAT_ENABLED', true),
+  // Chat hot path uses injected local Memory V3/Profile Journal/LanceDB recall by default.
+  // Keep memory_cli available for manual diagnostics, but do not expose it to the main model
+  // unless explicitly re-enabled.
+  MEMORY_CLI_CHAT_ENABLED: pickBool('MEMORY_CLI_CHAT_ENABLED', false),
   MEMORY_CLI_MAX_RESULTS: pickNum('MEMORY_CLI_MAX_RESULTS', 8),
   MEMORY_CLI_MAX_OPEN_CHARS: pickNum('MEMORY_CLI_MAX_OPEN_CHARS', 12000),
   MEMORY_CLI_MAX_OPEN_ITEMS: pickNum('MEMORY_CLI_MAX_OPEN_ITEMS', 200),

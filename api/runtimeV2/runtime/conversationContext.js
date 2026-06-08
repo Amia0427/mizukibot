@@ -47,7 +47,10 @@ function createConversationContextHelpers(deps = {}) {
       const plannedTools = normalizeToolNames(
         Array.isArray(planner?.allowedToolNames) ? planner.allowedToolNames : []
       );
-      return filterAllowedToolsForMemoryCliTurn(plannedTools, memoryCliTurn);
+      const filteredPlannedTools = config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED
+        ? plannedTools
+        : plannedTools.filter((toolName) => toolName !== 'memory_cli');
+      return filterAllowedToolsForMemoryCliTurn(filteredPlannedTools, memoryCliTurn);
     }
     return mergeAllowedToolsWithMemoryCli(request.allowedTools, {
       ...request,

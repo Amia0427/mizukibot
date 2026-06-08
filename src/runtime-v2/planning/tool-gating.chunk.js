@@ -85,23 +85,28 @@ function collectAvailableToolSummary(route = {}, options = {}) {
   const routeAllowedTools = normalizeToolNames(
     Array.isArray(options.allowedTools) ? options.allowedTools : route?.meta?.allowedTools
   );
+  const memoryCliChatEnabled = currentConfig.MEMORY_CLI_ENABLED !== false
+    && currentConfig.MEMORY_CLI_CHAT_ENABLED === true;
+  const effectiveRouteAllowedTools = memoryCliChatEnabled
+    ? routeAllowedTools
+    : routeAllowedTools.filter((toolName) => toolName !== 'memory_cli');
   const rawToolCatalog = normalizeArray(options.toolCatalog).length > 0
     ? normalizeArray(options.toolCatalog).map((item) => ({ ...item }))
     : hasExplicitAllowedTools
-      ? buildExplicitAllowedToolCatalog(routeAllowedTools)
+      ? buildExplicitAllowedToolCatalog(effectiveRouteAllowedTools)
       : buildDirectChatToolCatalog({
         userId: options.userId || route?.meta?.userId || '',
         routeMeta: route?.meta || {}
       });
   const explicitFilteredCatalog = hasExplicitAllowedTools
-    ? rawToolCatalog.filter((item) => routeAllowedTools.includes(normalizeText(item?.name)))
-    : rawToolCatalog;
+    ? rawToolCatalog.filter((item) => effectiveRouteAllowedTools.includes(normalizeText(item?.name)))
+    : rawToolCatalog.filter((item) => memoryCliChatEnabled || normalizeText(item?.name) !== 'memory_cli');
   const companionAllowedToolNames = filterCompanionAllowedTools(
     explicitFilteredCatalog.map((item) => item.name),
     currentConfig
   );
   const explicitWebToolNames = routeHasExplicitWebSearchRequirement(route)
-    ? routeAllowedTools.filter((toolName) => isWebLookupTool(toolName))
+    ? effectiveRouteAllowedTools.filter((toolName) => isWebLookupTool(toolName))
     : [];
   const allowedByCompanionMode = new Set([
     ...companionAllowedToolNames,

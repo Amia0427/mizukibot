@@ -5,6 +5,7 @@ const {
   normalizePlannerDecisionV2,
   planRequestV2
 } = require('../api/runtimeV2/planning/service');
+const config = require('../config');
 
 module.exports = (async () => {
   const webRoute = {
@@ -24,7 +25,21 @@ module.exports = (async () => {
       { name: 'getWeather', bucket: 'local_tools' }
     ]
   });
-  assert.deepStrictEqual(available.allowedToolNames.sort(), ['getWeather', 'memory_cli'].sort());
+  assert.deepStrictEqual(available.allowedToolNames, ['getWeather']);
+
+  const oldMemoryCliChatEnabled = config.MEMORY_CLI_CHAT_ENABLED;
+  config.MEMORY_CLI_CHAT_ENABLED = true;
+  const memoryCliEnabledAvailable = collectAvailableToolSummary(webRoute, {
+    allowedTools: ['web_search', 'web_fetch', 'memory_cli', 'getWeather'],
+    toolCatalog: [
+      { name: 'web_search', bucket: 'global_tools' },
+      { name: 'web_fetch', bucket: 'global_tools' },
+      { name: 'memory_cli', bucket: 'global_tools' },
+      { name: 'getWeather', bucket: 'local_tools' }
+    ]
+  });
+  assert.deepStrictEqual(memoryCliEnabledAvailable.allowedToolNames.sort(), ['getWeather', 'memory_cli'].sort());
+  config.MEMORY_CLI_CHAT_ENABLED = oldMemoryCliChatEnabled;
 
   const normalizedWeb = normalizePlannerDecisionV2({
     mode: 'tool_plan',
