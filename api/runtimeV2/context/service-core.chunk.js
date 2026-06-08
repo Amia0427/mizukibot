@@ -457,7 +457,12 @@ function trimLineBlock(lines = [], tokenBudget = 0, strategy = 'head') {
 
 function buildShortTermContinuityPrompt(sharedShortTermContext = {}) {
   const context = sharedShortTermContext && typeof sharedShortTermContext === 'object' ? sharedShortTermContext : {};
-  const maxTokens = Math.max(256, Number(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS || 3600) || 3600);
+  const profile = context.contextProfile && typeof context.contextProfile === 'object' ? context.contextProfile : {};
+  const configuredMaxTokens = Math.max(256, Number(config.MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS || 3000) || 3000);
+  const normalCap = Math.max(256, Number(config.MAIN_REPLY_CONTEXT_NORMAL_SHORT_TERM_MAX_TOKENS || 3000) || 3000);
+  const maxTokens = profile.name === 'normal_chat'
+    ? Math.min(configuredMaxTokens, normalCap)
+    : configuredMaxTokens;
   const scope = context.shortTermScope && typeof context.shortTermScope === 'object' ? context.shortTermScope : {};
   const summary = normalizeText(context.shortTermSummary);
   const meaningfulSummary = hasMeaningfulShortTermSummary(summary);

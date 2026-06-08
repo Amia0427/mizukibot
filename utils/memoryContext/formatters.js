@@ -1,5 +1,8 @@
 const config = require('../../config');
-const { trimTextByTokenBudget } = require('../contextBudget');
+const {
+  getPromptTokenLimit,
+  limitPromptText
+} = require('./budget');
 
 function sanitizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -52,18 +55,6 @@ function formatRetrievedMemories(hits, options = {}) {
     if (showReason && hit.reason) parts.push(String(hit.reason));
     return `${index + 1}. [${parts.join('|')}] ${hit.text}`;
   }).join('\n');
-}
-
-function getPromptTokenLimit(name, fallback) {
-  return Math.max(0, Number(config[name] || fallback) || fallback || 0);
-}
-
-function limitPromptText(text, tokenBudget, strategy = 'tail') {
-  const value = String(text || '').trim();
-  if (!value) return '';
-  const budget = Math.max(0, Number(tokenBudget) || 0);
-  if (budget <= 0) return '';
-  return trimTextByTokenBudget(value, budget, strategy);
 }
 
 function clampPromptMessage(label, text, tokenBudget, strategy = 'tail') {

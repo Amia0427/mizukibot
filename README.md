@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 21:15**：清除所有长期记忆系统。删除Memory V3事件存储（1.1G）、LanceDB向量索引（5.3G）、Daily Journal、Profile状态、Image Memory，总计6.4G数据。已重建空LanceDB用户分桶结构（32 buckets）、初始化Memory V3目录，bot已重启。备份已创建：memory-backup-20260608-210913.tar.gz
+
 **2026-06-08 18:42**：主回复输入token优化完成。分析发现平均11k tokens（峰值34k含图像），主要占用：Memory Context 5k(45%) + System Prompt 2.9k(26%) + Short Term 1.4k(12%)。优化方案：SHORT_TERM_MEMORY_RECENT_MESSAGES 240→64、MAIN_PROMPT_SHORT_TERM_CONTINUITY_MAX_TOKENS 3500→2500、MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES 16→8、新增MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2000。预期效果：11k→7-8k tokens（减少30-35%）。详见 [分析报告](./docs/token-usage-analysis-2026-06-08.md)
 
 **2026-06-08 21:05 +08:00**：主回复输入 token 最小收敛。`memoryForPrompt` 新增 `MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500` 总预算，Memory V3 使用已分段裁剪后的 packet 文本拼装；普通聊天 short-term continuity 默认收敛到 64/8 raw turns、0.65 multiplier，并通过 normal cap 覆盖旧 `.env` 高值。新增 `npm run diag:main-reply-token-budget -- --limit 20` 复跑主回复 token 趋势诊断。

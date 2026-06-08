@@ -16,6 +16,18 @@ function readPositiveNumber(key, fallback, min = 0.05) {
   return Math.max(min, Number(config[key] || fallback) || fallback);
 }
 
+function capPositiveInt(value, capKey, fallbackCap, min = 1) {
+  const numeric = Math.max(min, Math.floor(Number(value || 0) || 0));
+  const cap = readPositiveInt(capKey, fallbackCap, min);
+  return Math.min(numeric, cap);
+}
+
+function capPositiveNumber(value, capKey, fallbackCap, min = 0.05) {
+  const numeric = Math.max(min, Number(value || 0) || 0);
+  const cap = readPositiveNumber(capKey, fallbackCap, min);
+  return Math.min(numeric, cap);
+}
+
 function getRouteText(options = {}) {
   const routeMeta = options.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
   return normalizeText([
@@ -102,9 +114,21 @@ function resolveShortTermContextProfile(userInfo = {}, options = {}) {
   return {
     name: 'normal_chat',
     reason: 'default',
-    recentRawMessageLimit: readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES', 128),
-    recentRawNewestMin: readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES', 16),
-    rawTokenMultiplier: readPositiveNumber('MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER', 0.9),
+    recentRawMessageLimit: capPositiveInt(
+      readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES', 64),
+      'MAIN_REPLY_CONTEXT_NORMAL_RECENT_RAW_MESSAGES_CAP',
+      64
+    ),
+    recentRawNewestMin: capPositiveInt(
+      readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES', 8),
+      'MAIN_REPLY_CONTEXT_NORMAL_NEWEST_RAW_MESSAGES_CAP',
+      8
+    ),
+    rawTokenMultiplier: capPositiveNumber(
+      readPositiveNumber('MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER', 0.65),
+      'MAIN_REPLY_CONTEXT_NORMAL_TOKEN_MULTIPLIER_CAP',
+      0.65
+    ),
     summaryLoadCount: readPositiveInt('MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT', config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT || 5),
     affinity
   };
