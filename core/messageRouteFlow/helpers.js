@@ -108,7 +108,11 @@ function composeDirectRoutePrompt({
 }
 
 function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = '', buildImageModelConfig) {
-  if (!String(imageUrl || '').trim()) return null;
+  const chatMode = String(route?.meta?.chatMode || '').trim().toLowerCase();
+  const hasVisionInput = Boolean(String(imageUrl || '').trim())
+    || chatMode === 'image_qa'
+    || chatMode === 'image_summary';
+  if (!hasVisionInput) return null;
   const visualContext = route?.meta?.visualContext && typeof route.meta.visualContext === 'object'
     ? route.meta.visualContext
     : null;

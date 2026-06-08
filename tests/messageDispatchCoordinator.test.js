@@ -108,7 +108,7 @@ module.exports = (async () => {
   assert.strictEqual(aiCalled, true);
   assert.ok(chat.replyOptions.modelConfig);
   assert.strictEqual(typeof chat.replyOptions.modelConfig.model, 'string');
-  assert.strictEqual(chat.replyOptions.disableStream, false, 'group chat should stream by default');
+  assert.strictEqual(chat.replyOptions.disableStream, true, 'vision fallback should stay non-streaming');
   assert.strictEqual(chat.replyOptions.deferPersist, true, 'direct chat replies should defer persist until send succeeds');
 
   const unavailableToolChat = await coordinator.dispatchByRoutePlan({
@@ -137,7 +137,7 @@ module.exports = (async () => {
   setGroupMainModelStreamEnabled('g1', true, 'test', Date.parse('2026-05-23T23:20:01+08:00'));
   const publicGroupChat = await coordinator.dispatchByRoutePlan({
     route: { meta: {} },
-    routeExecutionPlan: { executor: 'direct', allowTools: false, topRouteType: 'direct_chat', allowedTools: [] },
+    routeExecutionPlan: { executor: 'direct', allowTools: false, allowStream: true, topRouteType: 'direct_chat', allowedTools: [] },
     cleanText: 'task',
     imageUrl: null,
     userInfo: {},
@@ -150,7 +150,7 @@ module.exports = (async () => {
   setGroupMainModelStreamEnabled('g1', false, 'test', Date.parse('2026-05-23T23:20:02+08:00'));
   const explicitOffGroupChat = await coordinator.dispatchByRoutePlan({
     route: { meta: {} },
-    routeExecutionPlan: { executor: 'direct', allowTools: false, topRouteType: 'direct_chat', allowedTools: [] },
+    routeExecutionPlan: { executor: 'direct', allowTools: false, allowStream: true, topRouteType: 'direct_chat', allowedTools: [] },
     cleanText: 'task',
     imageUrl: null,
     userInfo: {},
@@ -166,7 +166,7 @@ module.exports = (async () => {
         chatType: 'private'
       }
     },
-    routeExecutionPlan: { executor: 'direct', allowTools: false, topRouteType: 'direct_chat', allowedTools: [] },
+    routeExecutionPlan: { executor: 'direct', allowTools: false, allowStream: true, topRouteType: 'direct_chat', allowedTools: [] },
     cleanText: 'task',
     imageUrl: null,
     userInfo: {},

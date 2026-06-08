@@ -2,6 +2,7 @@ const planning = require('../api/runtimeV2/planning/service');
 const { enqueueResearchTask } = require('./researchTaskQueue');
 const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { resolvePolicyKey } = require('./routeExecution');
+const { routeHasExplicitWebSearchRequirement } = require('../utils/webSearchRequirement');
 const {
   attachExecutablePlanToPlannerDecision,
   buildExecutablePlanFromPlannerDecision,
@@ -49,8 +50,67 @@ function maybeEnqueueBackgroundResearch(route = {}, decision = {}, options = {})
   });
 }
 
+function shouldBypassImageSummaryPlanner(route = {}, _available = {}, options = {}) {
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  const chatMode = String(routeMeta.chatMode || '').trim().toLowerCase();
+  if (chatMode !== 'image_summary') return false;
+  if (String(routeMeta.toolIntent || '').trim().toLowerCase() === 'force_tools') return false;
+  if (routeHasExplicitWebSearchRequirement(route)) return false;
+  const explicitAllowedTools = Array.isArray(options?.allowedTools)
+    ? options.allowedTools
+    : (Array.isArray(routeMeta.allowedTools) ? routeMeta.allowedTools : null);
+  if (Array.isArray(explicitAllowedTools) && explicitAllowedTools.length > 0) return false;
+  return true;
+}
+
+function buildChatOnlyPlannerDecision(route = {}, available = {}, options = {}) {
+  const policyKey = resolvePolicyKey(route);
+  const decision = planning.normalizePlannerDecisionV2({
+    mode: 'chat_only',
+    taskShape: 'fast_reply',
+    allowedToolNames: [],
+    steps: [],
+    plannerMeta: {
+      decisionVersion: planning.PLANNER_DECISION_VERSION,
+      plannerVersion: planning.DIRECT_CHAT_PLANNER_VERSION,
+      reason: String(options.reason || 'no planner tools available').trim(),
+      plannerModel: planning.getPlannerModelName(),
+      decisionSource: String(options.decisionSource || 'rule_preflight_no_tools').trim(),
+      fallbackUsed: false,
+      semanticConfidence: 0.92,
+      needsSemanticRefinement: false,
+      semanticAssessment: {
+        intentSummary: 'image summary direct reply',
+        sourceScope: 'current_context',
+        contextDependencies: [],
+        ambiguity: [],
+        confidence: 0.92,
+        needsRefinement: false
+      }
+    }
+  }, route, {
+    ...options,
+    toolCatalog: available.toolCatalog,
+    fallbackUsed: false
+  });
+  const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, {
+    toolCatalog: available.toolCatalog
+  });
+  return attachExecutablePlanToPlannerDecision(
+    directChatDecision,
+    buildExecutablePlanFromPlannerDecision(directChatDecision, policyKey, route)
+  );
+}
+
 async function planDirectChat(route = {}, options = {}) {
   const available = planning.collectAvailableToolSummary(route, options);
+  if (shouldBypassImageSummaryPlanner(route, available, options)) {
+    return buildChatOnlyPlannerDecision(route, available, {
+      ...options,
+      reason: 'image_summary has no explicit tool requirement; skip remote planner',
+      decisionSource: 'rule_preflight_image_summary'
+    });
+  }
   const policyKey = resolvePolicyKey(route);
   const routeMeta = route?.meta || {};
   const explicitAllowedTools = Array.isArray(options?.allowedTools)

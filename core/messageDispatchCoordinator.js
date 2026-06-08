@@ -35,7 +35,11 @@ function createMessageDispatchCoordinator(deps = {}) {
   } = deps;
 
   function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = '') {
-    if (!String(imageUrl || '').trim()) return null;
+    const chatMode = String(route?.meta?.chatMode || '').trim().toLowerCase();
+    const hasVisionInput = Boolean(String(imageUrl || '').trim())
+      || chatMode === 'image_qa'
+      || chatMode === 'image_summary';
+    if (!hasVisionInput) return null;
     const visualContext = route?.meta?.visualContext && typeof route.meta.visualContext === 'object'
       ? route.meta.visualContext
       : null;
@@ -241,7 +245,7 @@ function createMessageDispatchCoordinator(deps = {}) {
             messageId: String(sourceMessageId || '').trim(),
             threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
           }),
-          disableStream: disableStreamForReply,
+          disableStream: disableStreamForReply || routeExecutionPlan.allowStream !== true,
           deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat',
           threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
         };

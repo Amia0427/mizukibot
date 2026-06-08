@@ -118,6 +118,10 @@ function buildImageModelConfig(overrides = null, userId = '', options = {}) {
   const imageModel = getImageModelName(overrides, userId, options);
   const imageApiBaseUrl = getImageApiBaseUrl(overrides, userId, options);
   const imageApiKey = getImageApiKey(overrides, userId, options);
+  const timeoutMs = Math.max(1000, Number(base.timeoutMs || config.IMAGE_MODEL_TIMEOUT_MS || 18000) || 18000);
+  const retries = Math.max(0, Math.min(1, Number.isFinite(Number(base.retries))
+    ? Number(base.retries)
+    : Number(config.IMAGE_MODEL_RETRIES || 0)));
 
   return {
     ...base,
@@ -126,7 +130,9 @@ function buildImageModelConfig(overrides = null, userId = '', options = {}) {
     apiBaseUrl: imageApiBaseUrl,
     imageApiBaseUrl,
     apiKey: imageApiKey,
-    imageApiKey
+    imageApiKey,
+    timeoutMs,
+    retries: Math.floor(retries)
   };
 }
 

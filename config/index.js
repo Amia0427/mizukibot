@@ -333,6 +333,8 @@ module.exports = {
   // Keep these aliases for compatibility, but runtime calls are unified to AI_MODEL.
   MEMORY_MODEL: pick('MEMORY_MODEL', 'gemini-3-pro-preview'),
   IMAGE_MODEL: pick('IMAGE_MODEL', 'gemini-3-pro-preview'),
+  IMAGE_MODEL_TIMEOUT_MS: Math.max(1000, pickNum('IMAGE_MODEL_TIMEOUT_MS', 18000)),
+  IMAGE_MODEL_RETRIES: Math.max(0, Math.min(1, pickNum('IMAGE_MODEL_RETRIES', 0))),
   VISION_CAPTION_WORKER_ENABLED: pickBool('VISION_CAPTION_WORKER_ENABLED', false),
   VISION_CAPTION_WORKER_API_BASE_URL: pick('VISION_CAPTION_WORKER_API_BASE_URL', ''),
   VISION_CAPTION_WORKER_API_KEY: pick('VISION_CAPTION_WORKER_API_KEY', ''),

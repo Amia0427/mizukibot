@@ -570,7 +570,7 @@ function createMessageRouteFlow(deps = {}) {
             requestTrace: cloneTraceForMeta(requestTrace)
           }),
           requestTrace: cloneTraceForMeta(requestTrace),
-          disableStream: disableStreamForReply,
+          disableStream: disableStreamForReply || routeExecutionPlan.allowStream !== true,
           deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat',
           cotDisplayOnce,
           disableHumanizer: cotDisplayOnce,
