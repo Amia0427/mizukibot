@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-08 18:10**：整合双人成行预设破限技术到admin.txt。新增：混合情绪系统（悲伤里夹杂笑意/暴怒中伴随无力），复杂特质系统（表里反差/关系决定态度/拒绝出厂媚骨/锁定关系进度），扩展Banned_Cliches（新增"暗了暗/邪魅一笑/倒吸凉气/喉结微滚"等套路词），写作质检框架（Core Warning：把设定揉进情节重新长出来/打乱固定模板/心理描写去标签化/台词像活人说话）。155行→173行（+18行），保持精简同时强化角色真实性。
+
 **2026-06-08 18:00**：精简admin.txt去重优化。合并重复的"Private Chat Exemptions"和"Specific Scenario Handling"章节，压缩5个行为框架模块的冗余描述，从232行精简到155行（-33%），保留全部破限技术（rejection testing框架、月读×天照本体定义、五感物理基岩、情感浓郁度、日月律·因果闭环、有限视角、文字洁癖）。
 
 **2026-06-08 17:55 +08:00**：修复 direct chat notebook 记忆查询被旧 checkpoint 污染的问题。`prepare` 节点现在只会在同一 `requestId` 下恢复未完成 checkpoint，避免上一条消息遗留的 `memoryCliTurn.mustAnswer` 把新请求的 `memory_cli` allowlist 错误裁掉，导致 `lookup/notebook-answer` 二次搜索被误判为 `Tool not allowed: memory_cli`。
