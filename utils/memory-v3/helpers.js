@@ -72,7 +72,34 @@ function writeJsonLines(filePath, rows = []) {
   const lines = (Array.isArray(rows) ? rows : [])
     .filter(Boolean)
     .map((row) => JSON.stringify(row));
-  atomicWriteText(filePath, lines.join('\n'));
+
+  // 优化：使用流式写入避免超大字符串导致"Invalid string length"
+  // 当行数超过10,000时，分批写入
+  if (lines.length > 10000) {
+    const tmpPath = `${filePath}.tmp`;
+    const fd = fs.openSync(tmpPath, 'w');
+    try {
+      for (let i = 0; i < lines.length; i++) {
+        fs.writeSync(fd, lines[i]);
+        if (i < lines.length - 1) {
+          fs.writeSync(fd, '\n');
+        }
+      }
+      fs.closeSync(fd);
+      fs.renameSync(tmpPath, filePath);
+    } catch (error) {
+      try {
+        fs.closeSync(fd);
+        fs.unlinkSync(tmpPath);
+      } catch (_) {
+        // ignore cleanup errors
+      }
+      throw error;
+    }
+  } else {
+    // 小文件使用原有逻辑
+    atomicWriteText(filePath, lines.join('\n'));
+  }
 }
 
 function normalizeText(value) {
