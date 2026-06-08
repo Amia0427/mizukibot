@@ -709,9 +709,12 @@ function shouldExposeMemoryCli(options = {}) {
 
 function mergeAllowedToolsWithMemoryCli(allowedTools, options = {}) {
   const base = Array.isArray(allowedTools) ? normalizeToolNames(allowedTools) : [];
-  const withMemoryCli = (!shouldExposeMemoryCli(options) || base.includes('memory_cli'))
+  const filteredBase = (config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED)
     ? base
-    : [...base, 'memory_cli'];
+    : base.filter((toolName) => toolName !== 'memory_cli');
+  const withMemoryCli = (!shouldExposeMemoryCli(options) || base.includes('memory_cli'))
+    ? filteredBase
+    : [...filteredBase, 'memory_cli'];
   return filterAllowedToolsForMemoryCliTurn(withMemoryCli, options?.memoryCliTurn);
 }
 

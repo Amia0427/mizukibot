@@ -713,9 +713,12 @@ function shouldExposeMemoryCliForGraphState(state = {}) {
 
 function mergeAllowedToolsWithMemoryCliForGraph(state = {}) {
   const base = Array.isArray(state?.allowedTools) ? normalizeToolNames(state.allowedTools) : [];
-  const withMemoryCli = (!shouldExposeMemoryCliForGraphState(state) || base.includes('memory_cli'))
+  const filteredBase = (config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED)
     ? base
-    : [...base, 'memory_cli'];
+    : base.filter((toolName) => toolName !== 'memory_cli');
+  const withMemoryCli = (!shouldExposeMemoryCliForGraphState(state) || base.includes('memory_cli'))
+    ? filteredBase
+    : [...filteredBase, 'memory_cli'];
   return filterAllowedToolsForMemoryCliTurn(withMemoryCli, state?.memoryCliTurn);
 }
 

@@ -6,6 +6,7 @@ const oldPlanApiKey = process.env.PLAN_API_KEY;
 const oldPlanModel = process.env.PLAN_MODEL;
 const oldPlanReasoningEffort = process.env.PLAN_REASONING_EFFORT;
 const oldMemosMcpEnabled = process.env.MEMOS_MCP_ENABLED;
+const oldMemoryCliChatEnabled = process.env.MEMORY_CLI_CHAT_ENABLED;
 const oldPlannerAllowMainModelFallback = process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK;
 const oldApiBaseUrl = process.env.API_BASE_URL;
 const oldApiKey = process.env.API_KEY;
@@ -15,6 +16,7 @@ process.env.PLAN_API_KEY = 'planner-test-key';
 process.env.PLAN_MODEL = 'planner-test-model';
 process.env.PLAN_REASONING_EFFORT = 'high';
 process.env.MEMOS_MCP_ENABLED = 'false';
+process.env.MEMORY_CLI_CHAT_ENABLED = 'true';
 process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = 'false';
 process.env.API_BASE_URL = 'https://main.example.test/v1';
 process.env.API_KEY = 'main-test-key';
@@ -39,7 +41,9 @@ const { planDirectChat } = require('../core/directChatPlanner');
 const config = require('../config');
 const { getPersonaModuleCatalogSummary } = require('../utils/personaModules');
 const oldConfigMemosMcpEnabled = config.MEMOS_MCP_ENABLED;
+const oldConfigMemoryCliChatEnabled = config.MEMORY_CLI_CHAT_ENABLED;
 config.MEMOS_MCP_ENABLED = false;
+config.MEMORY_CLI_CHAT_ENABLED = true;
 
 module.exports = (async () => {
   assert.strictEqual(getPlannerApiBaseUrl(), 'https://planner.example.test/v1');
@@ -1287,6 +1291,8 @@ module.exports = (async () => {
   else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
   if (oldMemosMcpEnabled === undefined) delete process.env.MEMOS_MCP_ENABLED;
   else process.env.MEMOS_MCP_ENABLED = oldMemosMcpEnabled;
+  if (oldMemoryCliChatEnabled === undefined) delete process.env.MEMORY_CLI_CHAT_ENABLED;
+  else process.env.MEMORY_CLI_CHAT_ENABLED = oldMemoryCliChatEnabled;
   if (oldPlannerAllowMainModelFallback === undefined) delete process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK;
   else process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = oldPlannerAllowMainModelFallback;
   if (oldApiBaseUrl === undefined) delete process.env.API_BASE_URL;
@@ -1294,6 +1300,7 @@ module.exports = (async () => {
   if (oldApiKey === undefined) delete process.env.API_KEY;
   else process.env.API_KEY = oldApiKey;
   config.MEMOS_MCP_ENABLED = oldConfigMemosMcpEnabled;
+  config.MEMORY_CLI_CHAT_ENABLED = oldConfigMemoryCliChatEnabled;
 })().catch((error) => {
   if (oldBotToolMode === undefined) delete process.env.BOT_TOOL_MODE;
   else process.env.BOT_TOOL_MODE = oldBotToolMode;
@@ -1307,6 +1314,8 @@ module.exports = (async () => {
   else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
   if (oldMemosMcpEnabled === undefined) delete process.env.MEMOS_MCP_ENABLED;
   else process.env.MEMOS_MCP_ENABLED = oldMemosMcpEnabled;
+  if (oldMemoryCliChatEnabled === undefined) delete process.env.MEMORY_CLI_CHAT_ENABLED;
+  else process.env.MEMORY_CLI_CHAT_ENABLED = oldMemoryCliChatEnabled;
   if (oldPlannerAllowMainModelFallback === undefined) delete process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK;
   else process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = oldPlannerAllowMainModelFallback;
   if (oldApiBaseUrl === undefined) delete process.env.API_BASE_URL;
@@ -1314,6 +1323,7 @@ module.exports = (async () => {
   if (oldApiKey === undefined) delete process.env.API_KEY;
   else process.env.API_KEY = oldApiKey;
   config.MEMOS_MCP_ENABLED = oldConfigMemosMcpEnabled;
+  config.MEMORY_CLI_CHAT_ENABLED = oldConfigMemoryCliChatEnabled;
   console.error(error);
   process.exit(1);
 });

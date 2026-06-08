@@ -42,9 +42,13 @@ function shouldExposeContextStats(options = {}) {
 
 function mergeAllowedToolsWithMemoryCli(allowedTools, options = {}) {
   const base = Array.isArray(allowedTools) ? normalizeToolNames(allowedTools) : [];
-  const withContextStats = (!shouldExposeContextStats(options) || base.includes('get_context_stats'))
+  const chatMemoryCliEnabled = config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED;
+  const filteredBase = chatMemoryCliEnabled
     ? base
-    : [...base, 'get_context_stats'];
+    : base.filter((toolName) => toolName !== 'memory_cli');
+  const withContextStats = (!shouldExposeContextStats(options) || base.includes('get_context_stats'))
+    ? filteredBase
+    : [...filteredBase, 'get_context_stats'];
   const withMemoryCli = (!shouldExposeMemoryCli(options) || withContextStats.includes('memory_cli'))
     ? withContextStats
     : [...withContextStats, 'memory_cli'];

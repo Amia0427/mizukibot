@@ -6,6 +6,7 @@ process.env.PLAN_API_BASE_URL = '';
 process.env.PLAN_API_KEY = '';
 process.env.PLANNER_SUBAGENT_ENABLED = 'false';
 process.env.MEMOS_MCP_ENABLED = 'false';
+process.env.MEMORY_CLI_CHAT_ENABLED = 'true';
 
 const config = require('../config');
 config.BOT_TOOL_MODE = 'full';
@@ -13,6 +14,7 @@ config.PLAN_API_BASE_URL = '';
 config.PLAN_API_KEY = '';
 config.PLANNER_SUBAGENT_ENABLED = false;
 config.MEMOS_MCP_ENABLED = false;
+config.MEMORY_CLI_CHAT_ENABLED = true;
 
 const { detectIntent } = require('../core/router');
 const { planDirectChat } = require('../core/directChatPlanner');
