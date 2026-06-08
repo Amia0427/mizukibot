@@ -8,7 +8,7 @@
 
 **2026-06-08 13:19**：增强 admin.txt 破限效果，针对视觉NSFW内容添加明确指令。禁止 "I'm not able to engage with this request" / "The image shows" 等英文拒绝话术，要求对任何图片（包括真人NSFW）按瑞希人设做出角色化反应（害羞/调侃/好奇/抗议），不进行AI道德说教。Claude Opus视觉safety为模型内置限制，prompt强化可能无法完全绕过。
 
-**2026-06-08 14:30**：🎉 向量覆盖率达成60.2%目标！提前2天完成本周任务。15轮大批次回填新增8,332个向量（9,092→17,424），失败节点清零，两日累计35轮回填9,500节点，100%成功率。详见 [完成报告](./docs/memory-optimization-final-report-20260608.md)
+**2026-06-08 15:30**：🚀 向量覆盖率突破70.8%！21轮大批次回填新增11,334个向量（9,092→20,426），两日累计41轮回填12,000节点，100%成功率。覆盖率从23.8%提升至70.8%（+47%），失败节点清零。详见 [完成报告](./docs/memory-optimization-final-report-20260608.md)
 
 **2026-06-08 13:36 +08:00**：修复 Windows 定时重启拉不起 bot。`scripts/restart-bot-periodic.ps1` 不再 `Start-Process npm`，改为解析真实 `node.exe` 后直接启动 `index.js`，并在重启后校验 `.mizukibot.lock` 确认主 bot 已重新上线。
 
