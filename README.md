@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-09 08:28 +08:00**：管理员私聊 `chat/default` 禁工具主回复前置耗时收敛。普通私聊纯聊天无记忆/联网/工具需求时，本地生成 chat-only planner 决策，跳过远程 planner；runtimeV2 `prepare` 走轻量路径，只保留稳定系统 prompt，不同步拉重记忆上下文。新增 `npm run diag:request-trace-preflight -- --request-id <id>` 拆分 `request-trace.ndjson` 的 ingress、planner、dispatch-to-upstream 和主模型耗时。
+
 **2026-06-09 07:21 +08:00**：向量库低峰值同步改造。`sync-lancedb-memory-index` / `repair-memory-vector-index` 在 apply 阶段不再保留全量 `_rows` 向量数组，user_bucket 模式改为逐 bucket 构造并写入；`backfill --sync-after` 的全量门禁改为轻量 ID 覆盖率检查。新增 `MEMORY_LANCEDB_SYNC_BATCH_SIZE`，本地 `.env` 已把 embedding 回填批量收敛为 `8/24` 并移除重复项，降低历史 3GB 级 RSS 重现概率。
 
 **2026-06-08 22:10**：admin.txt精简去重优化。删除重复内容：身份重定义重复3次→1次、角色人格优先级重复3次→1次、"filter through personality"概念重复3次→统一表述、破坏第四面墙提及2次→合并。优化表达：EXECUTIVE ORDER 7行→2行、PROHIBITED/REQUIRED合并、Framework精简为要点列表。145行→100行（-31%），破限强度不变，可读性提升。
@@ -161,6 +163,7 @@ npm run diag:continuity
 npm run diag:continuity -- prompt --user <id>
 npm run diag:main-reply
 npm run diag:main-reply-lag
+npm run diag:request-trace-preflight -- --request-id req_e528e222050c22fb,req_693c816e6c8be621
 npm run diag:main-reply-truncation
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:main-reply-token-budget -- --limit 20

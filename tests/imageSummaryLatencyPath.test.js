@@ -80,6 +80,43 @@ module.exports = (async () => {
   assert.strictEqual(implicitCatalogDecision.executionPlan.mode, 'chat_only');
   assert.deepStrictEqual(implicitCatalogDecision.allowedToolNames, []);
 
+  let plainChatPlannerCalled = false;
+  const plainChatDecision = await planDirectChat({
+    topRouteType: 'direct_chat',
+    question: '今晚就这么睡吧',
+    cleanText: '今晚就这么睡吧',
+    intent: {
+      risk: 'low',
+      toolNeed: ['none'],
+      executionMode: 'immediate',
+      needsPlanning: false,
+      needsMemory: false
+    },
+    facets: {
+      modality: 'text',
+      sourceScope: 'none',
+      domain: 'general',
+      outputKind: 'answer',
+      freshness: 'unknown'
+    },
+    meta: {
+      chatMode: 'text_chat',
+      responseIntent: 'answer',
+      toolIntent: 'none',
+      chatType: 'private',
+      userId: 'u_plain_chat'
+    }
+  }, {
+    userId: 'u_plain_chat',
+    planner: async () => {
+      plainChatPlannerCalled = true;
+      return { mode: 'tool_plan', allowedToolNames: ['memory_cli'], steps: [] };
+    }
+  });
+  assert.strictEqual(plainChatPlannerCalled, false, 'plain chat/default should not call the remote planner');
+  assert.strictEqual(plainChatDecision.executionPlan.mode, 'chat_only');
+  assert.strictEqual(plainChatDecision.decisionSource, 'rule_preflight_plain_chat');
+
   const routeExecution = resolveRouteExecution({
     ...imageSummaryRoute,
     imageUrl: null,
