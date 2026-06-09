@@ -8,6 +8,9 @@ const {
   buildExecutablePlanFromPlannerDecision,
   buildExecutablePlanFromPolicy
 } = require('./executablePlan');
+const {
+  buildCanonicalRouteContract
+} = require('./routeSchema');
 
 function hasOwnValue(source = {}, key = '') {
   return Boolean(source && Object.prototype.hasOwnProperty.call(source, key));
@@ -63,6 +66,28 @@ function shouldBypassImageSummaryPlanner(route = {}, _available = {}, options = 
   return true;
 }
 
+function hasExplicitAllowedTools(route = {}, options = {}) {
+  if (Array.isArray(options?.allowedTools) && options.allowedTools.length > 0) return true;
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  return Array.isArray(routeMeta.allowedTools) && routeMeta.allowedTools.length > 0;
+}
+
+function shouldBypassPlainChatPlanner(route = {}, _available = {}, options = {}) {
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  const contract = buildCanonicalRouteContract(route);
+  if (contract.topRouteType !== 'direct_chat') return false;
+  if (contract.chatMode !== 'text_chat') return false;
+  if (contract.toolIntent !== 'none') return false;
+  if (contract.intent.needsMemory === true) return false;
+  if (contract.intent.needsPlanning === true) return false;
+  if (resolvePolicyKey(route) !== 'chat/default') return false;
+  if (contract.facets.sourceScope !== 'none') return false;
+  if (routeHasExplicitWebSearchRequirement(route)) return false;
+  if (hasExplicitAllowedTools(route, options)) return false;
+  if (routeMeta.needsMemoryReason || routeMeta.recallFacet) return false;
+  return true;
+}
+
 function buildChatOnlyPlannerDecision(route = {}, available = {}, options = {}) {
   const policyKey = resolvePolicyKey(route);
   const decision = planning.normalizePlannerDecisionV2({
@@ -109,6 +134,13 @@ async function planDirectChat(route = {}, options = {}) {
       ...options,
       reason: 'image_summary has no explicit tool requirement; skip remote planner',
       decisionSource: 'rule_preflight_image_summary'
+    });
+  }
+  if (shouldBypassPlainChatPlanner(route, available, options)) {
+    return buildChatOnlyPlannerDecision(route, available, {
+      ...options,
+      reason: 'plain chat/default has no tool or memory dependency; skip remote planner',
+      decisionSource: 'rule_preflight_plain_chat'
     });
   }
   const policyKey = resolvePolicyKey(route);

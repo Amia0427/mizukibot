@@ -684,6 +684,75 @@ function createPrepareNode(deps = {}) {
     }, request, { forceGuardApplied: true });
   }
 
+  function isPlainChatPrepareFastPath(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const chatType = String(routeMeta.chatType || routeMeta.chat_type || request.chatType || '').trim().toLowerCase();
+    const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+    const routePolicyKey = String(request.routePolicyKey || routeMeta.routePolicyKey || '').trim().toLowerCase();
+    const routeDebugKey = String(request.routeDebugKey || routeMeta.routeDebugKey || '').trim().toLowerCase();
+    const chatMode = String(routeMeta.chatMode || '').trim().toLowerCase();
+    const toolIntent = String(routeMeta.toolIntent || '').trim().toLowerCase();
+    const responseIntent = String(routeMeta.responseIntent || '').trim().toLowerCase();
+    const sourceScope = String(request.facets?.sourceScope || routeMeta.facets?.sourceScope || routeMeta.sourceScope || '').trim().toLowerCase();
+    const needsMemory = request.intent?.needsMemory === true
+      || routeMeta.intent?.needsMemory === true
+      || Boolean(routeMeta.needsMemoryReason || routeMeta.recallFacet);
+    const needsPlanning = request.intent?.needsPlanning === true || routeMeta.intent?.needsPlanning === true;
+    return Boolean(
+      chatType === 'private'
+      && topRouteType === 'direct_chat'
+      && (routePolicyKey === 'chat/default' || routeDebugKey === 'direct_chat/text_chat/answer')
+      && request.allowTools === false
+      && normalizeArray(request.allowedTools).length === 0
+      && !request.systemInitiated
+      && !request.imageUrl
+      && normalizeArray(request.imageUrls).length === 0
+      && !String(request.customPrompt || '').trim()
+      && !needsMemory
+      && !needsPlanning
+      && (!chatMode || chatMode === 'text_chat')
+      && (!toolIntent || toolIntent === 'none')
+      && (!responseIntent || responseIntent === 'answer')
+      && (!sourceScope || sourceScope === 'none')
+    );
+  }
+
+  function buildPlainChatFastPromptArtifacts(state = {}, request = {}) {
+    return buildGuardedPromptArtifacts({
+      dynamicPrompt: String(state.memory?.dynamicPrompt || ''),
+      stableSystemBlocks: normalizeArray(state.memory?.stableSystemBlocks),
+      dynamicContextBlocks: [],
+      assistantOnlyContextBlocks: [],
+      affinity: state.memory?.affinity || null,
+      memoryContext: null,
+      personaMemoryState: state.memory?.personaMemoryState || null,
+      promptSnapshot: state.memory?.promptSnapshot || null,
+      promptSegments: state.memory?.promptSegments || null,
+      freshness: {
+        stableSystem: 'fast_path',
+        sessionContext: 'skipped',
+        continuity: 'skipped'
+      },
+      cacheMeta: {
+        stableKey: '',
+        sessionKey: '',
+        hit: false
+      },
+      criticalBlocks: [],
+      optionalBlocks: [],
+      latencyMeta: {
+        essentialDurationMs: 0,
+        optionalDurationMs: 0,
+        optionalBuildEnabled: false,
+        optionalBudgetMs: 0,
+        optionalBudgetExceeded: true,
+        promptCollectMs: 0,
+        promptRenderMs: 0
+      },
+      fastPath: 'plain_private_chat'
+    }, request, { forceGuardApplied: true });
+  }
+
   return async function prepareNode(state) {
     const startedAt = nowTs();
     const request = normalizeObject(state.request, {});
@@ -695,6 +764,7 @@ function createPrepareNode(deps = {}) {
     const memoryContextMemo = new Map();
     const events = [createEvent('node_start', { node: 'prepare', threadId })];
     const currentRequestId = String(request.requestTrace?.requestId || routeMeta.requestTrace?.requestId || '').trim();
+    const plainChatFastPath = isPlainChatPrepareFastPath(request);
 
     let resumeUsed = false;
     let restored = null;
@@ -729,6 +799,8 @@ function createPrepareNode(deps = {}) {
 
     let bridgeRestored = false;
     if (
+      !plainChatFastPath
+      &&
       !request.systemInitiated
       && !String(request.customPrompt || '').trim()
       && String(request.userId || '').trim()
@@ -752,6 +824,8 @@ function createPrepareNode(deps = {}) {
     }
 
     if (
+      !plainChatFastPath
+      &&
       isChatLikeRoute(request)
       && !request.systemInitiated
       && !String(request.customPrompt || '').trim()
@@ -777,6 +851,8 @@ function createPrepareNode(deps = {}) {
     const restoredState = resumeUsed ? normalizeObject(restored?.state, {}) : {};
 
     if (
+      !plainChatFastPath
+      &&
       config.SHORT_TERM_PENDING_SNAPSHOT_ENABLED
       && !request.systemInitiated
       && String(request.userId || '').trim()
@@ -820,33 +896,35 @@ function createPrepareNode(deps = {}) {
       topRouteType: request.topRouteType
     });
 
-    const promptBuildResult = await withSoftTimeout(
-      () => buildDynamicPromptImpl(
-        request.userInfo,
-        request.userId,
-        requestQuestionText,
-        request.customPrompt,
-        {
-          routePrompt: request.routePrompt,
-          routePolicyKey: request.routePolicyKey,
-          topRouteType: request.topRouteType,
-          reviewMode: request.reviewMode,
-          routeMeta: request.routeMeta,
-          customPrompt: request.customPrompt,
-          disableTools: !request.allowTools,
-          modelConfig: request.modelConfig,
-          memoryCliTurn: executionMemoryCliTurn,
-          securityLabels: normalizeArray(threatMeta.labels),
-          chatHistory,
-          shortTermMemory,
-          sessionKey: request.sessionKey,
-          latencyDecision,
-          __memoryContextMemo: memoryContextMemo
-        }
-      ),
-      latencyDecision.prepareSoftBudgetMs,
-      () => buildPromptSoftTimeoutFallback(state, request)
-    );
+    const promptBuildResult = plainChatFastPath
+      ? buildPlainChatFastPromptArtifacts(state, request)
+      : await withSoftTimeout(
+          () => buildDynamicPromptImpl(
+            request.userInfo,
+            request.userId,
+            requestQuestionText,
+            request.customPrompt,
+            {
+              routePrompt: request.routePrompt,
+              routePolicyKey: request.routePolicyKey,
+              topRouteType: request.topRouteType,
+              reviewMode: request.reviewMode,
+              routeMeta: request.routeMeta,
+              customPrompt: request.customPrompt,
+              disableTools: !request.allowTools,
+              modelConfig: request.modelConfig,
+              memoryCliTurn: executionMemoryCliTurn,
+              securityLabels: normalizeArray(threatMeta.labels),
+              chatHistory,
+              shortTermMemory,
+              sessionKey: request.sessionKey,
+              latencyDecision,
+              __memoryContextMemo: memoryContextMemo
+            }
+          ),
+          latencyDecision.prepareSoftBudgetMs,
+          () => buildPromptSoftTimeoutFallback(state, request)
+        );
     const guardedPromptBuildResult = buildGuardedPromptArtifacts(promptBuildResult, request);
     const {
       dynamicPrompt,
@@ -861,7 +939,7 @@ function createPrepareNode(deps = {}) {
       latencyMeta,
       stablePromptGuardApplied
     } = guardedPromptBuildResult;
-    recordMainPromptBlockObservation({
+    if (!plainChatFastPath) recordMainPromptBlockObservation({
       requestTrace: request.requestTrace || request.routeMeta?.requestTrace || null,
       routeMeta: request.routeMeta,
       routePolicyKey: request.routePolicyKey,
@@ -874,28 +952,36 @@ function createPrepareNode(deps = {}) {
       dynamicPromptPlan: resolveDynamicPromptPlanForObservation(request, guardedPromptBuildResult),
       stage: 'prepare_main_prompt_blocks'
     });
-    const continuityProbe = await withSoftTimeout(
-      () => maybeRunAutoContinuityProbe({
-        ...state,
-        memory: {
-          ...state.memory,
-          context: memoryContext || null
-        },
-        execution: {
-          ...state.execution,
-          memoryCliTurn: executionMemoryCliTurn,
-          latencyDecision
+    const continuityProbe = plainChatFastPath
+      ? {
+          skipped: true,
+          reason: 'plain_chat_fast_path',
+          events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'plain_chat_fast_path' })],
+          probeResult: null,
+          probeMeta: null
         }
-      }),
-      latencyDecision.continuityBudgetMs,
-      {
-        skipped: true,
-        reason: 'soft_timeout',
-        events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'soft_timeout' })],
-        probeResult: null,
-        probeMeta: null
-      }
-    );
+      : await withSoftTimeout(
+          () => maybeRunAutoContinuityProbe({
+            ...state,
+            memory: {
+              ...state.memory,
+              context: memoryContext || null
+            },
+            execution: {
+              ...state.execution,
+              memoryCliTurn: executionMemoryCliTurn,
+              latencyDecision
+            }
+          }),
+          latencyDecision.continuityBudgetMs,
+          {
+            skipped: true,
+            reason: 'soft_timeout',
+            events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'soft_timeout' })],
+            probeResult: null,
+            probeMeta: null
+          }
+        );
     const continuityBuilt = buildContinuityState({
       request,
       thread: state.thread,
@@ -1031,6 +1117,7 @@ function createPrepareNode(deps = {}) {
             prompt_build_optional_ms: Number(latencyMeta?.optionalDurationMs || 0) || 0,
             prompt_collect_ms: Number(latencyMeta?.promptCollectMs || 0) || 0,
             prompt_render_ms: Number(latencyMeta?.promptRenderMs || 0) || 0,
+            fast_path: plainChatFastPath ? 'plain_private_chat' : '',
             mcp_warm_wait_ms: 0
           }
         }
@@ -1074,7 +1161,8 @@ function createPrepareNode(deps = {}) {
       createEvent('latency_profile', {
         node: 'prepare',
         profile: latencyDecision.profile,
-        deferPersist: Boolean(latencyDecision.deferPersist)
+        deferPersist: Boolean(latencyDecision.deferPersist),
+        fastPath: plainChatFastPath ? 'plain_private_chat' : ''
       }),
       createEvent('memoryCliTurn', {
         node: 'prepare',

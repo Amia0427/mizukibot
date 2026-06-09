@@ -1,5 +1,7 @@
 # Runtime Latency Diagnosis
 
+更新 2026-06-09 08:28 +08:00：复盘管理员私聊 `req_e528e222050c22fb` / `req_693c816e6c8be621`。真正主回复上游请求前分别已耗约 38s / 25s，其中 `req_e528` 额外包含约 16s `direct_chat_plan` 远程 planner；两条都有约 15-19s 入站前空档和约 3s dispatch 到 runtimeV2 prepare 前空档。修复为 `chat/default`、私聊、`allowTools=false`、无记忆/联网/工具需求时跳过远程 planner，并让 runtimeV2 `prepare` 走 `plain_private_chat` 轻量路径，只保留稳定系统 prompt；新增 `npm run diag:request-trace-preflight -- --request-id <id>` 复跑拆分诊断。
+
 更新 2026-06-08 13:15 +08:00：复盘 `2026-06-07 17:59 +08:00` 的 `req_a81b0a7f6c8565c0`，`direct_chat/image_summary/summary` 约 95.6s 主要由入口排队约 17s、无工具 planner 约 11s、`gcli.ggchan.dev` 首次流式请求 `ECONNRESET` 约 47s、随后重试约 14s 叠加。修复为普通图片总结无显式工具需求时跳过远程 planner，视觉路由按 `chatMode=image_qa/image_summary` 禁用主回复流式，图片模型主回复携带 `IMAGE_MODEL_TIMEOUT_MS=18000` 和 `IMAGE_MODEL_RETRIES=0`；补 `tests/imageSummaryLatencyPath.test.js` 覆盖 planner 短路、非流式和图片模型预算。
 
 更新 2026-06-05 10:11 +08:00：排查 `data/request-trace.ndjson` 每 30 秒出现一次 `messageId/groupId/userId` 全空的 `handle_incoming_start`，来源是 NapCat / OneBot `meta_event` heartbeat 被入口先创建 request trace 后才被 `shouldSkipNonGroupMessage` 丢弃。影响是 request-trace 与 inbound timing 样本被心跳噪声污染，不会进入 dedupe、路由、模型或发送链路。修复为入口先处理 notice 并过滤非 `post_type=message` / 非 `message_type=group|private`，再创建 request trace；补 `tests/messageHandlerRequestTrace.test.js` 覆盖 heartbeat/空包不写 trace、正式私聊消息仍写 trace。

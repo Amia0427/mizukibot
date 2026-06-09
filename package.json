@@ -22,6 +22,7 @@
     "diag:worldbook": "node scripts/diagnose-worldbook.js",
     "diag:provider-request": "node scripts/diagnose-provider-request.js",
     "diag:main-reply-lag": "node scripts/diagnose-main-reply-lag.js",
+    "diag:request-trace-preflight": "node scripts/diagnose-request-trace-preflight.js",
     "diag:main-reply-token-budget": "node scripts/diagnose-main-reply-token-budget.js",
     "diag:main-reply-truncation": "node scripts/diagnose-main-reply.js --truncation",
     "diag:runtime": "node scripts/diagnose-runtime-status.js",
