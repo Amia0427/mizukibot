@@ -192,6 +192,28 @@ module.exports = (async () => {
   assert.strictEqual(privateCase.replyOptionsSeen.length, 1);
   assert.strictEqual(privateCase.replyOptionsSeen[0].disableStream, false, 'private direct replies should keep the original stream setting');
 
+  let privateThinkingEmojiCalls = 0;
+  const privateNoToolEvents = [];
+  const privateNoToolCase = createBaseDeps({
+    markThinkingEmojiBeforeLlm: async () => {
+      privateThinkingEmojiCalls += 1;
+      throw new Error('private no-tool direct reply should skip thinking emoji preflight');
+    }
+  });
+  const privateNoToolEnvelope = await privateNoToolCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('private'),
+    inboundContext: {
+      chatType: 'private',
+      messageMeta: { messageId: 'm_private' },
+      onEvent(event) {
+        privateNoToolEvents.push(event);
+      }
+    }
+  });
+  assert.strictEqual(privateNoToolEnvelope.replyText, 'ai reply');
+  assert.strictEqual(privateThinkingEmojiCalls, 0);
+  assert.ok(privateNoToolEvents.some((event) => event.type === 'thinking_emoji_skipped' && event.reason === 'private_no_tool_direct_reply'));
+
   const unavailableToolCase = createBaseDeps();
   const unavailableToolEnvelope = await unavailableToolCase.routeFlow.dispatchByRoutePlan({
     ...buildRouteDecision('group'),

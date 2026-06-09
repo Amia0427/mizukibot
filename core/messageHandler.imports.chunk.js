@@ -214,6 +214,7 @@ const {
   getSessionSummaryCooldownStatus
 } = require('../utils/sessionContextSummaryStore');
 const {
+  appendRequestTraceEvent,
   cloneTraceForMeta,
   createRequestTrace,
   extractErrorCode,

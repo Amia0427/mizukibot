@@ -164,6 +164,21 @@ function summarizePrepareEvents(events = []) {
   };
 }
 
+function summarizePreModelEvents(events = []) {
+  const thinkingEmoji = events.find((event) => {
+    const phase = normalizeText(event.tracePhase || event.stage);
+    return phase === 'thinking_emoji_done' || phase === 'thinking_emoji_skipped';
+  }) || null;
+  const askAiStart = events.find((event) => normalizeText(event.tracePhase || event.stage) === 'ask_ai_dispatch_start') || null;
+  const askAiDone = events.find((event) => normalizeText(event.tracePhase || event.stage) === 'ask_ai_dispatch_done') || null;
+  return {
+    thinkingEmojiStage: normalizeText(thinkingEmoji?.tracePhase || thinkingEmoji?.stage),
+    thinkingEmojiReason: normalizeText(thinkingEmoji?.reason),
+    thinkingEmojiDurationMs: duration(thinkingEmoji),
+    askAiDispatchMs: duration(askAiDone) ?? deltaBetween(askAiStart, askAiDone)
+  };
+}
+
 function pickDominant(segments = {}) {
   const candidates = Object.entries(segments)
     .map(([code, ms]) => ({ code, ms: Number(ms) }))
@@ -188,7 +203,15 @@ function summarizeRequest(events = [], options = {}) {
   const dispatchStart = firstEvent(sorted, ['runtime_dispatch_start', 'formal_route_dispatch_start']);
   const dispatchSelected = firstEvent(sorted, ['dispatch_branch_selected']);
   const prepareStart = firstBy(sorted, (event) => normalizeText(event.node) === 'prepare' && normalizeText(event.stage) === 'node_start');
+  const prepareDone = firstBy(sorted, (event) => normalizeText(event.node) === 'prepare' && normalizeText(event.stage) === 'node_complete');
+  const routeNodeStart = firstBy(sorted, (event) => normalizeText(event.node) === 'route' && normalizeText(event.stage) === 'node_start');
   const routeNodeDone = firstBy(sorted, (event) => normalizeText(event.node) === 'route' && normalizeText(event.stage) === 'node_complete');
+  const thinkingEmoji = firstBy(sorted, (event) => {
+    const phase = normalizeText(event.tracePhase || event.stage);
+    return phase === 'thinking_emoji_done' || phase === 'thinking_emoji_skipped';
+  });
+  const askAiStart = firstBy(sorted, (event) => normalizeText(event.tracePhase || event.stage) === 'ask_ai_dispatch_start');
+  const preModelDone = askAiStart || thinkingEmoji || routeNodeDone || prepareDone;
   const upstreamStart = firstBy(sorted, (event) => normalizeText(event.tracePhase) === 'http_client_start' && normalizeText(event.source) === 'v2_streaming_reply');
   const upstreamSuccess = firstBy(sorted, (event) => normalizeText(event.tracePhase) === 'http_client_success' && normalizeText(event.source) === 'v2_streaming_reply');
   const requestComplete = firstEvent(sorted.slice().reverse(), ['request_complete']);
@@ -199,7 +222,11 @@ function summarizeRequest(events = [], options = {}) {
     routeEntryToRouterStartMs: deltaBetween(routeEntry, routerStart),
     plannerMs: duration(plannerDone) ?? deltaBetween(plannerStart, plannerDone),
     dispatchToPrepareMs: deltaBetween(dispatchSelected || dispatchStart, prepareStart),
+    prepareMs: deltaBetween(prepareStart, prepareDone),
+    routeNodeMs: deltaBetween(routeNodeStart, routeNodeDone),
     prepareAndRouteToUpstreamMs: deltaBetween(prepareStart, upstreamStart),
+    routeDoneToUpstreamMs: deltaBetween(routeNodeDone || prepareDone, upstreamStart),
+    preModelToUpstreamMs: deltaBetween(preModelDone, upstreamStart),
     dispatchToUpstreamMs: deltaBetween(dispatchSelected || dispatchStart, upstreamStart),
     upstreamMs: duration(upstreamSuccess) ?? deltaBetween(upstreamStart, upstreamSuccess),
     sendEnvelopeMs: duration(finalSend),
@@ -210,7 +237,9 @@ function summarizeRequest(events = [], options = {}) {
     route_pre_resolver_gap: segments.routeEntryToRouterStartMs,
     planner: segments.plannerMs,
     dispatch_pre_model_gap: segments.dispatchToPrepareMs,
-    prepare_route_to_upstream: segments.prepareAndRouteToUpstreamMs
+    prepare: segments.prepareMs,
+    route_node: segments.routeNodeMs,
+    route_done_to_upstream: segments.routeDoneToUpstreamMs
   });
   return {
     requestId: normalizeText(sorted[0]?.requestId),
@@ -226,6 +255,7 @@ function summarizeRequest(events = [], options = {}) {
     upstreamStartedAtMs: elapsedFromStart(upstreamStart, ingress),
     segments,
     prepare: summarizePrepareEvents(sorted),
+    preModel: summarizePreModelEvents(sorted),
     dominantPreUpstream,
     slowFlags: Object.fromEntries(
       Object.entries(segments)
@@ -299,7 +329,17 @@ function formatRequestTracePreflightDiagnostic(report = {}) {
       `routeGap=${formatMs(request.segments.routeEntryToRouterStartMs)}`,
       `planner=${formatMs(request.segments.plannerMs)}`,
       `dispatchToPrepare=${formatMs(request.segments.dispatchToPrepareMs)}`,
-      `prepareToUpstream=${formatMs(request.segments.prepareAndRouteToUpstreamMs)}`
+      `prepare=${formatMs(request.segments.prepareMs)}`,
+      `route=${formatMs(request.segments.routeNodeMs)}`,
+      `routeDoneToUpstream=${formatMs(request.segments.routeDoneToUpstreamMs)}`
+    ].join(' '));
+    lines.push([
+      '  pre-model:',
+      `thinkingEmoji=${request.preModel?.thinkingEmojiStage || 'none'}`,
+      `emojiMs=${formatMs(request.preModel?.thinkingEmojiDurationMs)}`,
+      `emojiReason=${request.preModel?.thinkingEmojiReason || 'none'}`,
+      `askAiDispatch=${formatMs(request.preModel?.askAiDispatchMs)}`,
+      `lastPreModelToUpstream=${formatMs(request.segments.preModelToUpstreamMs)}`
     ].join(' '));
     lines.push([
       '  upstream:',

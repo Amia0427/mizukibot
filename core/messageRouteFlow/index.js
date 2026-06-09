@@ -62,6 +62,19 @@ function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = 
   return resolveVisionFallbackModelConfigBase(route, imageUrl, userId, buildImageModelConfig);
 }
 
+function isPrivateNoToolDirectReply(routeExecutionPlan = {}, replyOptions = {}, chatType = '') {
+  return Boolean(
+    String(chatType || replyOptions?.routeMeta?.chatType || replyOptions?.routeMeta?.chat_type || '').trim().toLowerCase() === 'private'
+    && String(routeExecutionPlan?.topRouteType || replyOptions?.topRouteType || '').trim().toLowerCase() === 'direct_chat'
+    && routeExecutionPlan?.allowTools !== true
+    && replyOptions?.allowTools !== true
+    && Array.isArray(routeExecutionPlan?.allowedTools)
+    && routeExecutionPlan.allowedTools.length === 0
+    && Array.isArray(replyOptions?.allowedTools)
+    && replyOptions.allowedTools.length === 0
+  );
+}
+
 async function sendRateLimitGroupPokeSafely({
   sendGroupPoke,
   sendWithRetry,
@@ -649,19 +662,23 @@ function createMessageRouteFlow(deps = {}) {
           });
         }
 
+        const skipThinkingEmoji = isPrivateNoToolDirectReply(routeExecutionPlan, replyOptions, chatType);
         const thinkingEmojiStartedAt = Date.now();
-        const thinkingEmojiApplied = await markThinkingEmojiBeforeLlm?.({
-          messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
-          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-          routeMeta: route.meta || {}
-        });
+        const thinkingEmojiApplied = skipThinkingEmoji
+          ? false
+          : await markThinkingEmojiBeforeLlm?.({
+              messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
+              routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+              routeMeta: route.meta || {}
+            });
         inboundContext?.onEvent?.({
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           ts: Date.now(),
-          type: 'thinking_emoji_done',
+          type: skipThinkingEmoji ? 'thinking_emoji_skipped' : 'thinking_emoji_done',
           node: 'pre_model',
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
           topRouteType: String(routeExecutionPlan?.topRouteType || '').trim(),
+          reason: skipThinkingEmoji ? 'private_no_tool_direct_reply' : '',
           applied: Boolean(thinkingEmojiApplied),
           durationMs: Math.max(0, Date.now() - thinkingEmojiStartedAt)
         });

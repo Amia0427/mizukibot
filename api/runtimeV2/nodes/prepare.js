@@ -717,7 +717,50 @@ function createPrepareNode(deps = {}) {
     );
   }
 
-  function buildPlainChatFastPromptArtifacts(state = {}, request = {}) {
+  function isNotebookChatOnlyPrepareFastPath(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const chatType = String(routeMeta.chatType || routeMeta.chat_type || request.chatType || '').trim().toLowerCase();
+    const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+    const routePolicyKey = String(request.routePolicyKey || routeMeta.routePolicyKey || '').trim().toLowerCase();
+    const chatMode = String(routeMeta.chatMode || '').trim().toLowerCase();
+    const toolIntent = String(routeMeta.toolIntent || '').trim().toLowerCase();
+    const responseIntent = String(routeMeta.responseIntent || '').trim().toLowerCase();
+    const sourceScope = String(request.facets?.sourceScope || routeMeta.facets?.sourceScope || routeMeta.sourceScope || '').trim().toLowerCase();
+    const domain = String(request.facets?.domain || routeMeta.facets?.domain || routeMeta.domain || '').trim().toLowerCase();
+    const directChatPlanner = normalizeObject(routeMeta.directChatPlanner || routeMeta.toolPlanner, {});
+    const plannerMode = String(directChatPlanner.executionPlan?.mode || directChatPlanner.mode || '').trim().toLowerCase();
+    const plannerDecisionSource = String(directChatPlanner.decisionSource || directChatPlanner.plannerMeta?.decisionSource || '').trim().toLowerCase();
+    const needsMemory = request.intent?.needsMemory === true
+      || routeMeta.intent?.needsMemory === true
+      || Boolean(routeMeta.needsMemoryReason || routeMeta.recallFacet);
+    const needsPlanning = request.intent?.needsPlanning === true || routeMeta.intent?.needsPlanning === true;
+    return Boolean(
+      chatType === 'private'
+      && topRouteType === 'direct_chat'
+      && routePolicyKey === 'lookup/notebook-answer'
+      && request.allowTools === false
+      && normalizeArray(request.allowedTools).length === 0
+      && !request.systemInitiated
+      && !request.imageUrl
+      && normalizeArray(request.imageUrls).length === 0
+      && !String(request.customPrompt || '').trim()
+      && !needsMemory
+      && !needsPlanning
+      && (!chatMode || chatMode === 'text_chat')
+      && (!toolIntent || toolIntent === 'maybe_tools' || toolIntent === 'none')
+      && (!responseIntent || responseIntent === 'answer')
+      && (sourceScope === 'notebook' || domain === 'personal')
+      && (plannerMode === 'chat_only' || plannerDecisionSource === 'rule_preflight_notebook_chat_only')
+    );
+  }
+
+  function resolvePrepareFastPath(request = {}) {
+    if (isPlainChatPrepareFastPath(request)) return 'plain_private_chat';
+    if (isNotebookChatOnlyPrepareFastPath(request)) return 'notebook_chat_only';
+    return '';
+  }
+
+  function buildLightDirectFastPromptArtifacts(state = {}, request = {}, fastPath = 'plain_private_chat') {
     return buildGuardedPromptArtifacts({
       dynamicPrompt: String(state.memory?.dynamicPrompt || ''),
       stableSystemBlocks: normalizeArray(state.memory?.stableSystemBlocks),
@@ -749,7 +792,7 @@ function createPrepareNode(deps = {}) {
         promptCollectMs: 0,
         promptRenderMs: 0
       },
-      fastPath: 'plain_private_chat'
+      fastPath
     }, request, { forceGuardApplied: true });
   }
 
@@ -764,7 +807,8 @@ function createPrepareNode(deps = {}) {
     const memoryContextMemo = new Map();
     const events = [createEvent('node_start', { node: 'prepare', threadId })];
     const currentRequestId = String(request.requestTrace?.requestId || routeMeta.requestTrace?.requestId || '').trim();
-    const plainChatFastPath = isPlainChatPrepareFastPath(request);
+    const prepareFastPath = resolvePrepareFastPath(request);
+    const lightDirectFastPath = Boolean(prepareFastPath);
 
     let resumeUsed = false;
     let restored = null;
@@ -799,7 +843,7 @@ function createPrepareNode(deps = {}) {
 
     let bridgeRestored = false;
     if (
-      !plainChatFastPath
+      !lightDirectFastPath
       &&
       !request.systemInitiated
       && !String(request.customPrompt || '').trim()
@@ -824,7 +868,7 @@ function createPrepareNode(deps = {}) {
     }
 
     if (
-      !plainChatFastPath
+      !lightDirectFastPath
       &&
       isChatLikeRoute(request)
       && !request.systemInitiated
@@ -851,7 +895,7 @@ function createPrepareNode(deps = {}) {
     const restoredState = resumeUsed ? normalizeObject(restored?.state, {}) : {};
 
     if (
-      !plainChatFastPath
+      !lightDirectFastPath
       &&
       config.SHORT_TERM_PENDING_SNAPSHOT_ENABLED
       && !request.systemInitiated
@@ -896,8 +940,8 @@ function createPrepareNode(deps = {}) {
       topRouteType: request.topRouteType
     });
 
-    const promptBuildResult = plainChatFastPath
-      ? buildPlainChatFastPromptArtifacts(state, request)
+    const promptBuildResult = lightDirectFastPath
+      ? buildLightDirectFastPromptArtifacts(state, request, prepareFastPath)
       : await withSoftTimeout(
           () => buildDynamicPromptImpl(
             request.userInfo,
@@ -939,7 +983,7 @@ function createPrepareNode(deps = {}) {
       latencyMeta,
       stablePromptGuardApplied
     } = guardedPromptBuildResult;
-    if (!plainChatFastPath) recordMainPromptBlockObservation({
+    if (!lightDirectFastPath) recordMainPromptBlockObservation({
       requestTrace: request.requestTrace || request.routeMeta?.requestTrace || null,
       routeMeta: request.routeMeta,
       routePolicyKey: request.routePolicyKey,
@@ -952,11 +996,11 @@ function createPrepareNode(deps = {}) {
       dynamicPromptPlan: resolveDynamicPromptPlanForObservation(request, guardedPromptBuildResult),
       stage: 'prepare_main_prompt_blocks'
     });
-    const continuityProbe = plainChatFastPath
+    const continuityProbe = lightDirectFastPath
       ? {
           skipped: true,
-          reason: 'plain_chat_fast_path',
-          events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: 'plain_chat_fast_path' })],
+          reason: prepareFastPath,
+          events: [createEvent('continuity_probe_skipped', { node: 'prepare', reason: prepareFastPath })],
           probeResult: null,
           probeMeta: null
         }
@@ -1117,7 +1161,7 @@ function createPrepareNode(deps = {}) {
             prompt_build_optional_ms: Number(latencyMeta?.optionalDurationMs || 0) || 0,
             prompt_collect_ms: Number(latencyMeta?.promptCollectMs || 0) || 0,
             prompt_render_ms: Number(latencyMeta?.promptRenderMs || 0) || 0,
-            fast_path: plainChatFastPath ? 'plain_private_chat' : '',
+            fast_path: prepareFastPath,
             mcp_warm_wait_ms: 0
           }
         }
@@ -1162,7 +1206,7 @@ function createPrepareNode(deps = {}) {
         node: 'prepare',
         profile: latencyDecision.profile,
         deferPersist: Boolean(latencyDecision.deferPersist),
-        fastPath: plainChatFastPath ? 'plain_private_chat' : ''
+        fastPath: prepareFastPath
       }),
       createEvent('memoryCliTurn', {
         node: 'prepare',

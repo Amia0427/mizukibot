@@ -88,6 +88,22 @@ function shouldBypassPlainChatPlanner(route = {}, _available = {}, options = {})
   return true;
 }
 
+function shouldBypassNotebookChatOnlyPlanner(route = {}, _available = {}, options = {}) {
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  const contract = buildCanonicalRouteContract(route);
+  if (contract.topRouteType !== 'direct_chat') return false;
+  if (contract.chatMode !== 'text_chat') return false;
+  if (contract.toolIntent === 'force_tools') return false;
+  if (contract.intent.needsMemory === true) return false;
+  if (contract.intent.needsPlanning === true) return false;
+  if (resolvePolicyKey(route) !== 'lookup/notebook-answer') return false;
+  if (contract.facets.sourceScope !== 'notebook' && contract.facets.domain !== 'personal') return false;
+  if (routeHasExplicitWebSearchRequirement(route)) return false;
+  if (hasExplicitAllowedTools(route, options)) return false;
+  if (routeMeta.needsMemoryReason || routeMeta.recallFacet) return false;
+  return true;
+}
+
 function buildChatOnlyPlannerDecision(route = {}, available = {}, options = {}) {
   const policyKey = resolvePolicyKey(route);
   const decision = planning.normalizePlannerDecisionV2({
@@ -105,8 +121,8 @@ function buildChatOnlyPlannerDecision(route = {}, available = {}, options = {}) 
       semanticConfidence: 0.92,
       needsSemanticRefinement: false,
       semanticAssessment: {
-        intentSummary: 'image summary direct reply',
-        sourceScope: 'current_context',
+        intentSummary: String(options.intentSummary || 'direct chat reply').trim() || 'direct chat reply',
+        sourceScope: String(options.sourceScope || 'current_context').trim() || 'current_context',
         contextDependencies: [],
         ambiguity: [],
         confidence: 0.92,
@@ -140,7 +156,18 @@ async function planDirectChat(route = {}, options = {}) {
     return buildChatOnlyPlannerDecision(route, available, {
       ...options,
       reason: 'plain chat/default has no tool or memory dependency; skip remote planner',
-      decisionSource: 'rule_preflight_plain_chat'
+      decisionSource: 'rule_preflight_plain_chat',
+      intentSummary: 'plain private chat direct reply',
+      sourceScope: 'current_context'
+    });
+  }
+  if (shouldBypassNotebookChatOnlyPlanner(route, available, options)) {
+    return buildChatOnlyPlannerDecision(route, available, {
+      ...options,
+      reason: 'notebook-answer route has no explicit notebook/memory dependency; skip remote planner',
+      decisionSource: 'rule_preflight_notebook_chat_only',
+      intentSummary: 'notebook-labeled direct reply without retrieval',
+      sourceScope: 'notebook_route_without_retrieval'
     });
   }
   const policyKey = resolvePolicyKey(route);

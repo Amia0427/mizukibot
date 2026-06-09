@@ -351,6 +351,41 @@
     inboundContext.requestTrace = cloneTraceForMeta(requestTrace);
     inboundContext.onEvent = (event = {}) => {
       const normalizedEvent = event && typeof event === 'object' ? event : {};
+      const normalizedEventType = String(normalizedEvent.type || normalizedEvent.stage || 'reply_event').trim() || 'reply_event';
+      const shouldTraceReplyEvent = Boolean(
+        requestTrace
+        && normalizedEventType
+        && !normalizedEventType.startsWith('runtime_v2_')
+        && [
+          'ask_ai_dispatch_start',
+          'ask_ai_dispatch_done',
+          'thinking_emoji_done',
+          'thinking_emoji_skipped',
+          'normal_group_main_reply_rate_limited'
+        ].includes(normalizedEventType)
+      );
+      if (shouldTraceReplyEvent) {
+        appendRequestTraceEvent(nextTracePhase(requestTrace, normalizedEventType, {
+          tracePhase: normalizedEventType,
+          stage: normalizedEventType,
+          source: 'message_route_flow',
+          node: String(normalizedEvent.node || '').trim(),
+          messageId: String(effectiveMsg?.message_id || msg?.message_id || '').trim(),
+          groupId: isPrivateChatType(chatType) ? '' : String(groupId || '').trim(),
+          userId: String(senderId || '').trim(),
+          chatType,
+          routePolicyKey: String(normalizedEvent.routePolicyKey || '').trim(),
+          topRouteType: String(normalizedEvent.topRouteType || '').trim(),
+          reason: String(normalizedEvent.reason || '').trim(),
+          durationMs: Number.isFinite(Number(normalizedEvent.durationMs))
+            ? Math.max(0, Math.floor(Number(normalizedEvent.durationMs)))
+            : null,
+          applied: normalizedEvent.applied === true,
+          rawMessageTimestampMs,
+          elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
+          lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
+        }));
+      }
       if (String(normalizedEvent.type || '').trim() === 'direct_reply_failure') {
         appendInboundTimingLog(inboundTimingLogFile, config.ENABLE_DEBUG_LOG, {
           ...nextTracePhase(requestTrace, 'runtime_direct_reply_failure', {}),

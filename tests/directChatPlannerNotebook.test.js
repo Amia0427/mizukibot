@@ -39,6 +39,27 @@ module.exports = (async () => {
   assert.strictEqual(plannerDecision.executablePlan.policyKey, 'lookup/notebook-answer');
   assert.ok(plannerDecision.executablePlan.steps.every((step) => step.action !== 'notebook_search'));
 
+  const privateNotebookChatOnlyRoute = {
+    topRouteType: 'direct_chat',
+    question: 'check my notebook for LangGraph notes',
+    cleanText: 'check my notebook for LangGraph notes',
+    intent: { needsMemory: false, needsPlanning: false, toolNeed: [] },
+    facets: { sourceScope: 'notebook', domain: 'general', outputKind: 'answer' },
+    meta: {
+      chatType: 'private',
+      chatMode: 'text_chat',
+      toolIntent: 'maybe_tools',
+      responseIntent: 'answer',
+      facets: { sourceScope: 'notebook', domain: 'general', outputKind: 'answer' },
+      allowedTools: []
+    }
+  };
+  const privateNotebookDecision = await planDirectChat(privateNotebookChatOnlyRoute, { userId: 'u1', allowedTools: [] });
+  assert.strictEqual(privateNotebookDecision.shouldUseTools, false);
+  assert.strictEqual(privateNotebookDecision.decisionSource, 'rule_preflight_notebook_chat_only');
+  assert.strictEqual(privateNotebookDecision.executionPlan.mode, 'chat_only');
+  assert.strictEqual(privateNotebookDecision.executablePlan.policyKey, 'lookup/notebook-answer');
+
   const recallRoute = detectIntent({
     rawText: '宝说一下我们今天聊的，我今天发给你什么战绩图了',
     botQQ: '123456',
