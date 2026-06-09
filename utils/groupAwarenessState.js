@@ -1,6 +1,7 @@
 const fs = require('fs');
 const config = require('../config');
 const { createJsonHotStore } = require('./jsonHotStore');
+const { isUnsafeUserFacingReply } = require('./userFacingReplyGuards');
 
 const GROUP_PRESENCE_STATES = new Set([
   'observing',
@@ -82,13 +83,39 @@ function normalizeGroupPresence(input = {}) {
 function normalizeGroupEntry(entry) {
   const raw = entry && typeof entry === 'object' ? entry : {};
   return {
-    recent_messages: Array.isArray(raw.recent_messages) ? raw.recent_messages : [],
+    recent_messages: normalizeRecentGroupMessages(raw.recent_messages),
     last_awareness_at: Number(raw.last_awareness_at || 0),
     last_reply_at: Number(raw.last_reply_at || 0),
     reply_hour_bucket: String(raw.reply_hour_bucket || ''),
     reply_count_in_hour: Number(raw.reply_count_in_hour || 0),
     presence: normalizeGroupPresence(raw.presence)
   };
+}
+
+function isBotGroupMessage(entry = {}) {
+  const senderId = String(entry.sender_id || '').trim();
+  const botId = String(config.BOT_QQ || 'bot').trim() || 'bot';
+  return senderId && senderId === botId;
+}
+
+function normalizeGroupMessage(entry = {}) {
+  const raw = entry && typeof entry === 'object' ? entry : {};
+  const message = {
+    sender_id: String(raw.sender_id || ''),
+    sender_name: String(raw.sender_name || ''),
+    message_id: String(raw.message_id || raw.id || '').trim(),
+    text: String(raw.text || '').trim(),
+    timestamp: Number(raw.timestamp || Date.now())
+  };
+  if (!message.text) return message;
+  if (isBotGroupMessage(message) && isUnsafeUserFacingReply(message.text)) return null;
+  return message;
+}
+
+function normalizeRecentGroupMessages(messages = []) {
+  return (Array.isArray(messages) ? messages : [])
+    .map((item) => normalizeGroupMessage(item))
+    .filter(Boolean);
 }
 
 function normalizeState(state) {
@@ -164,14 +191,12 @@ function getHourBucket(ts = Date.now()) {
 function appendGroupMessage(groupId, message, maxSize = 20) {
   const group = ensureGroupState(groupId);
   const limit = Math.max(5, Math.min(100, Number(maxSize) || 20));
-  const entry = message && typeof message === 'object' ? message : {};
-  group.recent_messages.push({
-    sender_id: String(entry.sender_id || ''),
-    sender_name: String(entry.sender_name || ''),
-    message_id: String(entry.message_id || entry.id || '').trim(),
-    text: String(entry.text || '').trim(),
-    timestamp: Number(entry.timestamp || Date.now())
-  });
+  const normalizedMessage = normalizeGroupMessage(message);
+  if (!normalizedMessage) {
+    scheduleFlush();
+    return group.recent_messages;
+  }
+  group.recent_messages.push(normalizedMessage);
 
   group.recent_messages.sort((a, b) => {
     const tsDiff = Number(a?.timestamp || 0) - Number(b?.timestamp || 0);
@@ -259,6 +284,7 @@ function recordReply(groupId, now = Date.now()) {
 
 module.exports = {
   appendGroupMessage,
+  normalizeRecentGroupMessages,
   getRecentMessages,
   defaultGroupPresence,
   normalizeGroupPresence,

@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-06 12:05 +08:00
+更新时间：2026-06-09 08:45 +08:00
+
+更新 2026-06-09 08:45 +08:00：`recallPollutionGuard` 新增 `reasoning_trace_leak`，覆盖普通快速回复泄漏的自然语言思维链片段（`Maybe / What if / Wait`）和 `Addressing the ...:` 草稿标记。群感知 recent window 读写边界同步复用用户可见输出守卫，旧 unsafe 机器人回复不会继续进入被动群感知上下文。
 
 更新 2026-06-06 12:05 +08:00：用扩展后的 `recallPollutionGuard` 对长期记忆和 Profile Journal DB 做受控 dry-run。SQLite 命中 `profile_facts=43`、`journal_entries=23`、`journal_rollups=10`，其中新三类重点为 `raw_model_response=40`、`prompt_or_schema_pollution=6`、`assistant_self_instruction=9`；文件层在 `daily_journal`、`short_term_bridge`、`post_reply_jobs`、style/social 和 passive-awareness 小根中命中 54 个可 scrub 文件。已执行最小 apply：profile facts 标记 `rejected`，journal entries 标记 `unsafe`，rollups 标记 `archived`，文件层只 redacted/移除污染块；`artifacts/tmp-recall-pollution-2026-06-06-finalcheck.json` 显示本次受控范围 `fileChanged=0`、Profile Journal DB focus 命中为 0。新增 `tests/auditMemoryPollutionSummary.test.js` 覆盖 dry-run summary 与 apply 状态转换。
 

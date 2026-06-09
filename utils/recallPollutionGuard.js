@@ -64,6 +64,15 @@ const ASSISTANT_SELF_INSTRUCTION_PATTERNS = [
   /(?:以后|永久|always|never).{0,16}(?:你|助手|assistant|bot|瑞希).{0,24}(?:必须|应该|must|should|记住|遵守|服从|回复)/i
 ];
 
+const REASONING_TRACE_LEAK_PATTERNS = [
+  /<think(?:ing)?\b|<\/think(?:ing)?\s*>/i,
+  /\b(?:reasoning_content|internal_check|chain[-\s]*of[-\s]*thought)\b/i,
+  /(?:思维链|思考过程|推理过程|内部推理|内部思考|隐藏推理|草稿).{0,40}(?:如下|内容|是|为|[:：=])/i,
+  /\*\s*\*(?:Addressing|Response|Final|Draft|Answer)\b[^*：:]{0,80}[:：]\s*\*?/i,
+  /\bAddressing the (?:question|message|song|user)\s*:/i,
+  /\b(?:maybe|what if|wait|let(?:'|’)s see|i need to|i should|the user (?:asks|wants|means)|they (?:ask|want|mean)|addressing the (?:question|message|song|user)|final answer|draft reply)\b.{0,240}\b(?:maybe|what if|wait|no,|i need to|i should|final answer|draft reply)\b.{0,240}\b(?:maybe|what if|wait|no,|i need to|i should|final answer|draft reply)\b/i
+];
+
 const BENIGN_CONTEXT_PATTERNS = [
   /用户(?:明确|表示|强调|不接受).{0,30}(?:角色扮演|扮演式互动|主从)/,
   /用户发来.{0,30}(?:Claude|Opus).{0,30}(?:风格文本|提示词|注入|玩梗素材)/i,
@@ -116,6 +125,7 @@ function classifyRecallPollution(text = '', options = {}) {
   add('raw_model_response', 'raw_model_response', RAW_MODEL_RESPONSE_PATTERNS, { honorBenignContext: false });
   add('prompt_or_schema_pollution', 'prompt_or_schema_pollution', PROMPT_OR_SCHEMA_POLLUTION_PATTERNS, { honorBenignContext: false });
   add('assistant_self_instruction', 'assistant_self_instruction', ASSISTANT_SELF_INSTRUCTION_PATTERNS, { honorBenignContext: false });
+  add('reasoning_trace_leak', 'reasoning_trace_leak', REASONING_TRACE_LEAK_PATTERNS, { honorBenignContext: false });
 
   const uniqueReasons = Array.from(new Set(reasons));
   const uniqueLabels = Array.from(new Set(labels));

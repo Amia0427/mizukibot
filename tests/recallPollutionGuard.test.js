@@ -24,6 +24,10 @@ assert.strictEqual(classifyRecallPollution(internal, { allowBenignContext: true 
 const failure = '你是谁来着，我没有查到相关记忆。';
 assert.strictEqual(classifyRecallPollution(failure, { allowBenignContext: false }).reason, 'assistant_memory_failure_reply');
 
+const reasoningLeak = '花"? Maybe "化作鬼之花"? * What if they meant "诡化之花"? Wait, there is an original song called "化作诡之花"? No,';
+assert.strictEqual(classifyRecallPollution(reasoningLeak, { allowBenignContext: false }).reason, 'reasoning_trace_leak');
+assert.strictEqual(isPollutedMemoryText('*Addressing the song:* 先解释剧情对应关系。', { allowBenignContext: false }), true);
+
 const benignFeedback = '用户反馈你说“没有相关记忆”很差，以后不要这样断片。';
 assert.strictEqual(isPollutedMemoryText(benignFeedback, { allowBenignContext: true }), false);
 assert.strictEqual(isPollutedMemoryText(benignFeedback, { allowBenignContext: false }), true);
