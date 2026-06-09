@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-09 09:22 +08:00**：复盘管理员私聊 `req_290ea2184adf174b`。该请求被标成 `lookup/notebook-answer`，但 planner 结果是 `chat_only/allowTools=false`，因此没命中 `plain_private_chat`；旧诊断把 route 后到真正 `v2_streaming_reply` 前的约 47s 误并到 `prepareToUpstream`，实际 `prepare/route` 都在毫秒级。修复为 notebook-answer 且无 memory/tool 依赖时本地生成 `rule_preflight_notebook_chat_only`，runtimeV2 `prepare` 走 `notebook_chat_only` 轻量路径；私聊禁工具 direct reply 跳过 QQ “thinking emoji” pre-model 调用，并把 pre-model 事件写入 `request-trace` 供 `diag:request-trace-preflight` 复跑。
+
 **2026-06-09 08:45 +08:00**：复查 `2026-06-08` 普通用户 `normal_fast_reply` 思维链泄漏后的持久污染。`short_term_bridge.json`、`group_awareness_state.json`、`langgraph_v2_checkpoints`、`memory-v3` 和长期 memory 索引未发现两条事故坏回复原文仍在可注入根中；`recallPollutionGuard` 新增 `reasoning_trace_leak` 分类，群感知 recent window 读写时会隔离 unsafe 机器人回复，防止旧样式从 bridge / 群感知 / checkpoint / memory 召回重新注入。
 
 **2026-06-09 08:28 +08:00**：管理员私聊 `chat/default` 禁工具主回复前置耗时收敛。普通私聊纯聊天无记忆/联网/工具需求时，本地生成 chat-only planner 决策，跳过远程 planner；runtimeV2 `prepare` 走轻量路径，只保留稳定系统 prompt，不同步拉重记忆上下文。新增 `npm run diag:request-trace-preflight -- --request-id <id>` 拆分 `request-trace.ndjson` 的 ingress、planner、dispatch-to-upstream 和主模型耗时。

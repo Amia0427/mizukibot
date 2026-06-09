@@ -60,24 +60,40 @@ module.exports = (() => {
       stage: 'node_complete',
       node: 'prepare'
     }),
-    ev(requestId, 12, 'runtime_v2_node_complete', 37020, {
+    ev(requestId, 12, 'runtime_v2_node_start', 37010, {
+      stage: 'node_start',
+      node: 'route'
+    }),
+    ev(requestId, 13, 'runtime_v2_node_complete', 37020, {
       stage: 'node_complete',
       node: 'route'
     }),
-    ev(requestId, 13, 'http_client_start', 37500, {
+    ev(requestId, 14, 'thinking_emoji_skipped', 37030, {
+      stage: 'thinking_emoji_skipped',
+      reason: 'private_no_tool_direct_reply',
+      durationMs: 0
+    }),
+    ev(requestId, 15, 'ask_ai_dispatch_start', 37040, {
+      stage: 'ask_ai_dispatch_start'
+    }),
+    ev(requestId, 16, 'http_client_start', 37500, {
       stage: 'http_client_start',
       source: 'v2_streaming_reply'
     }),
-    ev(requestId, 14, 'http_client_success', 87500, {
+    ev(requestId, 17, 'http_client_success', 87500, {
       stage: 'http_client_success',
       source: 'v2_streaming_reply',
       durationMs: 50000
     }),
-    ev(requestId, 15, 'final_reply_send_done', 88000, {
+    ev(requestId, 18, 'ask_ai_dispatch_done', 88000, {
+      stage: 'ask_ai_dispatch_done',
+      durationMs: 50960
+    }),
+    ev(requestId, 19, 'final_reply_send_done', 88000, {
       stage: 'final_reply_send_done',
       durationMs: 54000
     }),
-    ev(requestId, 16, 'request_complete', 88010, {
+    ev(requestId, 20, 'request_complete', 88010, {
       stage: 'request_complete',
       durationMs: 88010,
       routePolicyKey: 'chat/default'
@@ -98,11 +114,19 @@ module.exports = (() => {
   assert.strictEqual(request.segments.plannerMs, 16000);
   assert.strictEqual(request.segments.dispatchToPrepareMs, 2970);
   assert.strictEqual(request.segments.prepareAndRouteToUpstreamMs, 500);
+  assert.strictEqual(request.segments.prepareMs, 5);
+  assert.strictEqual(request.segments.routeNodeMs, 10);
+  assert.strictEqual(request.segments.routeDoneToUpstreamMs, 480);
+  assert.strictEqual(request.segments.preModelToUpstreamMs, 460);
   assert.strictEqual(request.segments.upstreamMs, 50000);
   assert.strictEqual(request.prepare.fastPath, 'plain_private_chat');
+  assert.strictEqual(request.preModel.thinkingEmojiStage, 'thinking_emoji_skipped');
+  assert.strictEqual(request.preModel.thinkingEmojiReason, 'private_no_tool_direct_reply');
   assert.strictEqual(request.dominantPreUpstream.code, 'planner');
   assert.strictEqual(request.slowFlags.plannerMs, 16000);
   assert.ok(formatRequestTracePreflightDiagnostic(report).includes('dominant=planner:16000ms'));
+  assert.ok(formatRequestTracePreflightDiagnostic(report).includes('routeDoneToUpstream=480ms'));
+  assert.ok(formatRequestTracePreflightDiagnostic(report).includes('thinkingEmoji=thinking_emoji_skipped'));
 
   const parsed = parseArgs(['node', 'script', '--request-id', 'a,b', '--window=2h', '--slow-ms=2500', '--json']);
   assert.deepStrictEqual(parsed.requestIds, ['a', 'b']);

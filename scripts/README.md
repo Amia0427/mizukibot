@@ -25,7 +25,7 @@
 - `diagnose-main-model-web-search.js`：更新 2026-05-23 23:20 +08:00，探测主回复/管理员主回复实际链路及 provider-native 参数是否具备内置联网搜索能力
 - `diagnose-provider-request.js`：更新 2026-05-26 18:35 +08:00，输出指定 provider 在 `http_client_direct/main_reply/admin_reply/vision_reply/qzone_image_generation` 下最终 headers、cache、鉴权来源、剔除字段和异常信号；可用 `npm run diag:provider-request -- --provider gemini_native`
 - `diagnose-main-reply.js`：统一主回复诊断，输出 route/model/fallback、memory freshness、群聊回复守卫、direct/tool/background 分支；更新 2026-06-06 12:44 +08:00：`--truncation` 汇总最近主回复截断候选，区分 `MAX_TOKENS`、上游断流、无 terminal event 和本地发送层失败
-- `diagnose-request-trace-preflight.js`：更新 2026-06-09 08:28 +08:00，按 requestId 拆分 `request-trace.ndjson` 的入站等待、planner、dispatch-to-upstream、prepare fast path 和主模型耗时；可用 `npm run diag:request-trace-preflight -- --request-id req_e528e222050c22fb,req_693c816e6c8be621`
+- `diagnose-request-trace-preflight.js`：更新 2026-06-09 09:22 +08:00，按 requestId 拆分 `request-trace.ndjson` 的入站等待、planner、prepare、route、routeDoneToUpstream、pre-model 事件（thinking emoji / ask_ai_dispatch）和主模型耗时；可用 `npm run diag:request-trace-preflight -- --request-id req_290ea2184adf174b`
 - `diagnose-main-reply-token-budget.js`：更新 2026-06-08 21:05 +08:00，聚合最近主回复输入 token、分布区间和最大消息索引；默认扫尾部 5000 行避开 embedding 噪声，可用 `npm run diag:main-reply-token-budget -- --limit 20 --json`
 - `diagnose-memory-ops.js`：记忆诊断入口，支持 `diagnose/backfill/recall/audit`；更新 2026-05-19 21:45 +08:00：`audit` 会运行抽样记忆质量审查，只报告不改库
 - 更新 2026-05-23 11:25 +08:00：`diagnose-memory-ops.js recall --gate` 会把 lifecycle leakage、category mismatch、recent recall miss 纳入门禁指标。

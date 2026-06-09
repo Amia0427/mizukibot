@@ -172,8 +172,33 @@ module.exports = (async () => {
   assert.strictEqual(result.memory.context, null);
   assert.strictEqual(result.execution.latencyBreakdown.prepare.fast_path, 'plain_private_chat');
   assert.ok(result.events.some((event) => event.type === 'latency_profile' && event.fastPath === 'plain_private_chat'));
-  assert.ok(result.events.some((event) => event.type === 'continuity_probe_skipped' && event.reason === 'plain_chat_fast_path'));
+  assert.ok(result.events.some((event) => event.type === 'continuity_probe_skipped' && event.reason === 'plain_private_chat'));
   assert.ok(result.memory.mainConversationMessages.some((message) => String(message.content || '').includes('今晚就这么睡吧')));
+
+  const notebookChatOnlyPrepareNode = createPrepareNode(createDeps());
+  const notebookChatOnlyResult = await notebookChatOnlyPrepareNode(createState({
+    question: 'check my notebook for LangGraph notes',
+    runtimeQuestionText: 'check my notebook for LangGraph notes',
+    persistUserText: 'check my notebook for LangGraph notes',
+    routePolicyKey: 'lookup/notebook-answer',
+    routeMeta: {
+      chatType: 'private',
+      topRouteType: 'direct_chat',
+      chatMode: 'text_chat',
+      toolIntent: 'maybe_tools',
+      responseIntent: 'answer',
+      facets: { sourceScope: 'notebook' },
+      intent: { needsMemory: false, needsPlanning: false },
+      directChatPlanner: {
+        decisionSource: 'rule_preflight_notebook_chat_only',
+        executionPlan: { mode: 'chat_only', steps: [] },
+        allowedToolNames: []
+      }
+    }
+  }));
+  assert.strictEqual(notebookChatOnlyResult.execution.latencyBreakdown.prepare.fast_path, 'notebook_chat_only');
+  assert.ok(notebookChatOnlyResult.events.some((event) => event.type === 'latency_profile' && event.fastPath === 'notebook_chat_only'));
+  assert.ok(notebookChatOnlyResult.events.some((event) => event.type === 'continuity_probe_skipped' && event.reason === 'notebook_chat_only'));
 
   let dynamicPromptCalled = false;
   const memoryRecallPrepareNode = createPrepareNode(createDeps({
