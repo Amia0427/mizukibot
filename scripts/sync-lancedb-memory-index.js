@@ -7,6 +7,7 @@ const {
   buildMemoryVectorRow,
   buildWorldbookVectorRow,
   compactLanceDbTables,
+  createVectorIndexesForExistingTables,
   dedupeVectorRows,
   isUserBucketPartitionMode,
   isLanceDbSyncEnabled,
@@ -35,6 +36,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     full: false,
     fullReconcile: false,
     deleteStaleRows: false,
+    indexOnly: false,
     compact: false,
     since: 0,
     dir: '',
@@ -50,6 +52,7 @@ function parseArgs(argv = process.argv.slice(2)) {
     }
     else if (item === '--full-reconcile') args.fullReconcile = true;
     else if (item === '--delete-stale-rows') args.deleteStaleRows = true;
+    else if (item === '--index-only') args.indexOnly = true;
     else if (item === '--compact') args.compact = true;
     else if (item === '--dir') {
       args.dir = String(argv[index + 1] || '').trim();
@@ -386,6 +389,7 @@ async function buildSyncSummary(args = {}) {
     full: Boolean(args.full),
     fullReconcile: Boolean(args.fullReconcile || args.full),
     deleteStaleRows: Boolean(args.deleteStaleRows || args.fullReconcile || args.full),
+    indexOnly: Boolean(args.indexOnly),
     since: args.since || null,
     lancedbDir: path.resolve(lanceDbOptions.dir || config.MEMORY_LANCEDB_DIR),
     partitionMode: lanceDbOptions.partitionMode,
@@ -437,7 +441,7 @@ async function main() {
   const args = parseArgs();
   const summary = await buildSyncSummary({
     ...args,
-    includeRows: args.dryRun === true
+    includeRows: args.dryRun === true && args.indexOnly !== true
   });
 
   if (!summary.syncEnabled && !args.dryRun) {
@@ -450,8 +454,12 @@ async function main() {
 
   if (!args.dryRun) {
     summary.beforeCoverage = summary.coverage;
-    summary.writes.push(await syncMemoryRowsLowMemory(args));
-    summary.writes.push(await syncWorldbookRowsLowMemory(args));
+    if (args.indexOnly) {
+      summary.writes.push(await createVectorIndexesForExistingTables(buildLanceDbOptions(args)));
+    } else {
+      summary.writes.push(await syncMemoryRowsLowMemory(args));
+      summary.writes.push(await syncWorldbookRowsLowMemory(args));
+    }
     if (args.compact) {
       const lanceDbOptions = buildLanceDbOptions(args);
       const activeDir = path.resolve(config.MEMORY_LANCEDB_DIR);
@@ -481,6 +489,8 @@ async function main() {
     if (after._rows) delete after._rows;
   } else if (args.compact) {
     summary.compact = { skipped: true, reason: 'dry_run' };
+  } else if (args.indexOnly) {
+    summary.indexOnly = { skipped: true, reason: 'dry_run' };
   }
 
   delete summary._rows;

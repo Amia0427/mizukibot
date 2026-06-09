@@ -121,17 +121,117 @@ function shouldAggregateMemoryBuckets(tableName = '', options = {}) {
   return normalizedTable === memoryBase;
 }
 
+function normalizeVectorIndexType(value = '') {
+  const normalized = normalizeText(value || config.MEMORY_LANCEDB_VECTOR_INDEX_TYPE || 'ivf_pq').toLowerCase();
+  if (['ivf_pq', 'ivfpq', 'pq'].includes(normalized)) return 'ivf_pq';
+  if (['ivf_flat', 'ivfflat', 'flat'].includes(normalized)) return 'ivf_flat';
+  if (['ivf_rq', 'ivfrq', 'rq'].includes(normalized)) return 'ivf_rq';
+  if (['hnsw_pq', 'hnswpq'].includes(normalized)) return 'hnsw_pq';
+  if (['hnsw_sq', 'hnswsq', 'sq'].includes(normalized)) return 'hnsw_sq';
+  return 'ivf_pq';
+}
+
+function resolveVectorIndexOptions(rowCount = 0, options = {}) {
+  const type = normalizeVectorIndexType(options.indexType);
+  const numPartitions = Math.max(0, Number(options.numPartitions || config.MEMORY_LANCEDB_VECTOR_INDEX_NUM_PARTITIONS || 0) || 0);
+  const numSubVectors = Math.max(0, Number(options.numSubVectors || config.MEMORY_LANCEDB_VECTOR_INDEX_NUM_SUB_VECTORS || 0) || 0);
+  const numBits = Math.max(4, Math.min(8, Number(options.numBits || config.MEMORY_LANCEDB_VECTOR_INDEX_NUM_BITS || 8) || 8));
+  const waitTimeoutSeconds = Math.max(1, Number(options.waitTimeoutSeconds || config.MEMORY_LANCEDB_VECTOR_INDEX_WAIT_TIMEOUT_SECONDS || 120) || 120);
+  return {
+    type,
+    distanceType: 'cosine',
+    rowCount: Math.max(0, Number(rowCount || 0) || 0),
+    numPartitions,
+    numSubVectors,
+    numBits,
+    waitTimeoutSeconds
+  };
+}
+
+function buildVectorIndexConfig(lancedb, rowCount = 0, options = {}) {
+  const resolved = resolveVectorIndexOptions(rowCount, options);
+  const baseOptions = {
+    name: 'vector_idx',
+    replace: true,
+    waitTimeoutSeconds: resolved.waitTimeoutSeconds
+  };
+  const indexApi = lancedb && lancedb.Index;
+  if (!indexApi) return baseOptions;
+  const common = {
+    distanceType: resolved.distanceType,
+    ...(resolved.numPartitions > 0 ? { numPartitions: resolved.numPartitions } : {})
+  };
+  if (resolved.type === 'ivf_pq' && typeof indexApi.ivfPq === 'function') {
+    return {
+      ...baseOptions,
+      config: indexApi.ivfPq({
+        ...common,
+        ...(resolved.numSubVectors > 0 ? { numSubVectors: resolved.numSubVectors } : {}),
+        numBits: resolved.numBits
+      })
+    };
+  }
+  if (resolved.type === 'ivf_rq' && typeof indexApi.ivfRq === 'function') {
+    return {
+      ...baseOptions,
+      config: indexApi.ivfRq({ ...common, numBits: resolved.numBits })
+    };
+  }
+  if (resolved.type === 'hnsw_pq' && typeof indexApi.hnswPq === 'function') {
+    return {
+      ...baseOptions,
+      config: indexApi.hnswPq({
+        ...common,
+        ...(resolved.numSubVectors > 0 ? { numSubVectors: resolved.numSubVectors } : {})
+      })
+    };
+  }
+  if (resolved.type === 'hnsw_sq' && typeof indexApi.hnswSq === 'function') {
+    return {
+      ...baseOptions,
+      config: indexApi.hnswSq(common)
+    };
+  }
+  if (typeof indexApi.ivfFlat === 'function') {
+    return {
+      ...baseOptions,
+      config: indexApi.ivfFlat(common)
+    };
+  }
+  return baseOptions;
+}
+
+async function dropExistingVectorIndexes(table, indexName = 'vector_idx') {
+  if (!table || typeof table.listIndices !== 'function' || typeof table.dropIndex !== 'function') return 0;
+  let dropped = 0;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const indices = await table.listIndices();
+    const hasIndex = (Array.isArray(indices) ? indices : [])
+      .some((item) => normalizeText(item?.name) === indexName);
+    if (!hasIndex) return dropped;
+    await table.dropIndex(indexName);
+    dropped += 1;
+  }
+  return dropped;
+}
+
 async function createVectorIndex(table, rowCount = 0) {
-  if (!table || typeof table.createIndex !== 'function' || rowCount < 256) return false;
+  const minRows = Math.max(1, Number(config.MEMORY_LANCEDB_VECTOR_INDEX_MIN_ROWS || 256) || 256);
+  if (!table || typeof table.createIndex !== 'function') {
+    return { ok: false, skipped: true, reason: 'index_unavailable', rowCount };
+  }
+  if (rowCount < minRows) {
+    return { ok: true, skipped: true, reason: 'below_min_rows', rowCount, minRows };
+  }
   try {
     const lancedb = await loadLanceDbModule();
-    const indexConfig = lancedb.Index && typeof lancedb.Index.ivfFlat === 'function'
-      ? { config: lancedb.Index.ivfFlat({ distanceType: 'cosine' }), replace: true, waitTimeoutSeconds: 60 }
-      : { replace: true, waitTimeoutSeconds: 60 };
+    const indexConfig = buildVectorIndexConfig(lancedb, rowCount);
+    const droppedIndexes = await dropExistingVectorIndexes(table);
     await table.createIndex('vector', indexConfig);
-    return true;
-  } catch (_) {
-    return false;
+    const resolved = resolveVectorIndexOptions(rowCount);
+    return { ok: true, skipped: false, rowCount, indexType: resolved.type, numBits: resolved.numBits, droppedIndexes };
+  } catch (error) {
+    return { ok: false, skipped: true, reason: error.message };
   }
 }
 
@@ -599,15 +699,55 @@ async function compactLanceDbTables(options = {}) {
   return { ok: true, results };
 }
 
+async function createVectorIndexesForExistingTables(options = {}) {
+  const openResult = await openLanceDb(options);
+  if (!openResult.ok) return openResult;
+  const memoryTable = normalizeMemoryTableBase(options.memoryTable || config.MEMORY_LANCEDB_MEMORY_TABLE || 'memory_v3_vectors');
+  const memoryTargets = isUserBucketPartitionMode(options)
+    ? await listExistingMemoryTables(openResult.db, memoryTable, options)
+    : [memoryTable];
+  const targets = Array.from(new Set([
+    ...memoryTargets,
+    normalizeWorldbookTable(options.worldbookTable || config.MEMORY_LANCEDB_WORLDBOOK_TABLE || 'persona_worldbook_vectors')
+  ].filter(Boolean)));
+  const results = [];
+  for (const tableName of targets) {
+    try {
+      const table = await openTable(openResult.db, tableName);
+      if (!table) {
+        results.push({ table: tableName, ok: true, skipped: true, reason: 'table_missing', rowCount: 0 });
+        continue;
+      }
+      const rowCount = typeof table.countRows === 'function'
+        ? Number(await table.countRows() || 0) || 0
+        : 0;
+      const index = await createVectorIndex(table, rowCount);
+      results.push({ table: tableName, ...index });
+    } catch (error) {
+      results.push({ table: tableName, ok: false, skipped: true, reason: error.message });
+    }
+  }
+  return {
+    ok: results.every((item) => item && item.ok !== false),
+    indexType: normalizeVectorIndexType(options.indexType),
+    numBits: Math.max(4, Math.min(8, Number(options.numBits || config.MEMORY_LANCEDB_VECTOR_INDEX_NUM_BITS || 8) || 8)),
+    minRows: Math.max(1, Number(config.MEMORY_LANCEDB_VECTOR_INDEX_MIN_ROWS || 256) || 256),
+    results
+  };
+}
+
 module.exports = {
   LANCEDB_ROW_COLUMNS,
   PARTITION_USER_BUCKET,
+  buildVectorIndexConfig,
   buildMemoryFilter,
   buildMemoryVectorRow,
   buildWorldbookVectorRow,
   buildAllMemoryBucketTableNames,
   compactLanceDbTables,
   countTableRows,
+  createVectorIndex,
+  createVectorIndexesForExistingTables,
   dedupeVectorRows,
   deleteStaleTableRows,
   diffStaleTableIds,
@@ -619,6 +759,7 @@ module.exports = {
   lancedbDistanceToScore,
   listTableIds,
   normalizeLanceDbPartitionMode,
+  normalizeVectorIndexType,
   normalizeVectorStoreMode,
   openLanceDb,
   resolveLanceDbBucketCount,

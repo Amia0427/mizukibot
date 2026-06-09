@@ -115,6 +115,7 @@ assert.deepStrictEqual(parseArgs(['--full-reconcile', '--delete-stale-rows', '--
   full: false,
   fullReconcile: true,
   deleteStaleRows: true,
+  indexOnly: false,
   compact: false,
   since: 1000,
   dir: '',
@@ -126,17 +127,19 @@ assert.deepStrictEqual(parseArgs(['--full']), {
   full: true,
   fullReconcile: true,
   deleteStaleRows: false,
+  indexOnly: false,
   compact: false,
   since: 0,
   dir: '',
   partitionMode: '',
   bucketCount: 0
 });
-assert.deepStrictEqual(parseArgs(['--dir', 'data/lancedb_user_bucket', '--partition-mode', 'user_bucket', '--bucket-count', '32']), {
+assert.deepStrictEqual(parseArgs(['--index-only', '--dir', 'data/lancedb_user_bucket', '--partition-mode', 'user_bucket', '--bucket-count', '32']), {
   dryRun: false,
   full: false,
   fullReconcile: false,
   deleteStaleRows: false,
+  indexOnly: true,
   compact: false,
   since: 0,
   dir: 'data/lancedb_user_bucket',
