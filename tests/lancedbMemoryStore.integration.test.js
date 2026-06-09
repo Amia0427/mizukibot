@@ -11,6 +11,7 @@ process.env.MEMORY_LANCEDB_READ_ENABLED = 'true';
 process.env.MEMORY_LANCEDB_SYNC_ENABLED = 'true';
 process.env.MEMORY_LANCEDB_MEMORY_TABLE = 'memory_v3_vectors';
 process.env.MEMORY_LANCEDB_TIMEOUT_MS = '1000';
+process.env.MEMORY_LANCEDB_VECTOR_INDEX_MIN_ROWS = '999999';
 process.env.MEMORY_FILE = path.join(tempRoot, 'memories.json');
 process.env.DATA_FILE = path.join(tempRoot, 'favorites.json');
 process.env.MEMORY_SCOPE_INDEX_FILE = path.join(tempRoot, 'memory_scope_index.json');

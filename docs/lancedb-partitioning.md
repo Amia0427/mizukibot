@@ -8,6 +8,8 @@
 
 更新 2026-06-09 07:21 +08:00：针对历史 3GB 级向量同步 RSS 峰值，apply 路径改为轻量 summary + 逐 bucket 写入；full/user_bucket reconcile 不再一次构造所有 LanceDB vector rows。`backfill --sync-after` 只对增量 rows 携带向量，全量 gate 改用 ID 覆盖率。新增 `MEMORY_LANCEDB_SYNC_BATCH_SIZE`，本地回填批量收敛到 `MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE=8`、`MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN=24`。
 
+更新 2026-06-09 08:35 +08:00：当前 `@lancedb/lancedb` JS SDK 支持 `Index.ivfPq`，LanceDB vector index 默认改为 `IVF_PQ` 8bit 产品量化（`numBits=8`、`numSubVectors=64`、cosine）。这是索引副本量化，不会把表内原始 `Float32[1024]` vector 列改为 int8。已用 `node scripts/sync-lancedb-memory-index.js --index-only --compact` 给现有 3 张超过 256 行的 memory bucket 表重建量化索引，`indexStats('vector_idx')` 显示 `IVF_PQ`、`numUnindexedRows=0`，搜索验证通过。
+
 ## 目标
 
 - 旧 `data/lancedb` 已在 2026-06-04 清理时删除；需要回滚时先重建 legacy 库，再恢复 legacy 配置。
@@ -23,6 +25,10 @@ MEMORY_LANCEDB_PARTITION_MODE=user_bucket
 MEMORY_LANCEDB_BUCKET_COUNT=32
 MEMORY_LANCEDB_LEGACY_FALLBACK_ENABLED=false
 MEMORY_LANCEDB_SYNC_BATCH_SIZE=64
+MEMORY_LANCEDB_VECTOR_INDEX_TYPE=ivf_pq
+MEMORY_LANCEDB_VECTOR_INDEX_NUM_BITS=8
+MEMORY_LANCEDB_VECTOR_INDEX_NUM_SUB_VECTORS=64
+MEMORY_LANCEDB_VECTOR_INDEX_MIN_ROWS=256
 ```
 
 `MEMORY_LANCEDB_PARTITION_MODE=legacy` 会保持旧单表行为。当前旧单表目录已删除，`MEMORY_LANCEDB_LEGACY_FALLBACK_ENABLED=false` 可避免 bucket 读路径回查不存在的 legacy 库。
@@ -41,6 +47,12 @@ node scripts/sync-lancedb-memory-index.js --dry-run --full
 node scripts/sync-lancedb-memory-index.js --full --compact --dir data/lancedb_user_bucket --partition-mode user_bucket --bucket-count 32
 ```
 
+只给现有表创建/替换量化索引：
+
+```bash
+node scripts/sync-lancedb-memory-index.js --index-only --compact
+```
+
 验证影子库：
 
 ```bash
@@ -56,6 +68,8 @@ npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10
 
 - 常规增量写入会按 `userId` 或 `groupId` 进入固定 bucket 表。
 - 全量 reconcile/apply 阶段逐 bucket 构造并写入向量 row，避免 JS 同时持有所有 1024 维向量对象。
+- 超过 `MEMORY_LANCEDB_VECTOR_INDEX_MIN_ROWS` 的表会创建 `IVF_PQ` 8bit 量化索引；小表保留无索引扫描，避免训练开销大于收益。
+- `listIndices()` 对当前 `IVF_PQ` 表会显示两条同名 `vector_idx`，对应 `indexStats().numIndices=2` 的内部分片；维护判断以 `indexStats('vector_idx')` 的 `indexType` / `numUnindexedRows` 为准。
 - `repair-memory-vector-index.js` 支持同样的 `--dir`、`--partition-mode`、`--bucket-count` 参数。
 - 活动目录 compact 不使用 `deleteUnverified:true`；只有 `--dir` 指向非当前活动目录的 shadow rebuild 才会在 compact 时使用强清理。
 - `lancedb-gate` 的 `summary.acceptedRecallFailures` 表示 baseline 自身未达绝对 recall/recent 门但 candidate 未相对回退的项；`summary.blockingRecallFailures` 才会阻断 promotion。
