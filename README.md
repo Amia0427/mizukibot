@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-09 08:45 +08:00**：复查 `2026-06-08` 普通用户 `normal_fast_reply` 思维链泄漏后的持久污染。`short_term_bridge.json`、`group_awareness_state.json`、`langgraph_v2_checkpoints`、`memory-v3` 和长期 memory 索引未发现两条事故坏回复原文仍在可注入根中；`recallPollutionGuard` 新增 `reasoning_trace_leak` 分类，群感知 recent window 读写时会隔离 unsafe 机器人回复，防止旧样式从 bridge / 群感知 / checkpoint / memory 召回重新注入。
+
 **2026-06-09 08:28 +08:00**：管理员私聊 `chat/default` 禁工具主回复前置耗时收敛。普通私聊纯聊天无记忆/联网/工具需求时，本地生成 chat-only planner 决策，跳过远程 planner；runtimeV2 `prepare` 走轻量路径，只保留稳定系统 prompt，不同步拉重记忆上下文。新增 `npm run diag:request-trace-preflight -- --request-id <id>` 拆分 `request-trace.ndjson` 的 ingress、planner、dispatch-to-upstream 和主模型耗时。
 
 **2026-06-09 08:35 +08:00**：LanceDB 向量索引启用 8bit 量化。确认当前 `@lancedb/lancedb` 支持 `Index.ivfPq`，默认 vector index 从 `IVF_FLAT` 改为 `IVF_PQ numBits=8`、`numSubVectors=64`、cosine；新增 `sync-lancedb-memory-index --index-only` 可只给现有表重建量化索引。本地 3 张超过 256 行的 memory bucket 表已重建 `IVF_PQ` 索引且搜索验证通过。说明：这是索引副本量化，原始 `vector: Float32[1024]` 列仍保留。
