@@ -131,6 +131,7 @@ function buildV2CanonicalSegments(state, input = {}, deps = {}) {
   const userTurnMessages = normalizeArray(input.userTurnMessages);
   const toolEvidenceMessages = normalizeArray(input.toolEvidenceMessages);
   const plannerArtifactMessages = normalizeArray(input.plannerArtifactMessages);
+  const includeMemoryContextSegments = input.disableMemoryContextSegments !== true;
   const modelName = String(input.modelName || request.modelConfig?.model || '').trim();
   const modelWindowTokens = Math.max(
     2048,
@@ -150,11 +151,11 @@ function buildV2CanonicalSegments(state, input = {}, deps = {}) {
     recent_history: recentHistoryMessages,
     assistant_only_context: normalizeArray(input.assistantOnlyContextMessages),
     current_user_turn: userTurnMessages,
-    retrieved_memory: normalizeArray(memoryContext.segments?.retrievedMemory),
-    daily_journal: normalizeArray(memoryContext.segments?.dailyJournal),
-    task_memory: normalizeArray(memoryContext.segments?.taskMemory),
-    group_memory: normalizeArray(memoryContext.segments?.groupMemory),
-    style_signals: normalizeArray(memoryContext.segments?.styleSignals),
+    retrieved_memory: includeMemoryContextSegments ? normalizeArray(memoryContext.segments?.retrievedMemory) : [],
+    daily_journal: includeMemoryContextSegments ? normalizeArray(memoryContext.segments?.dailyJournal) : [],
+    task_memory: includeMemoryContextSegments ? normalizeArray(memoryContext.segments?.taskMemory) : [],
+    group_memory: includeMemoryContextSegments ? normalizeArray(memoryContext.segments?.groupMemory) : [],
+    style_signals: includeMemoryContextSegments ? normalizeArray(memoryContext.segments?.styleSignals) : [],
     tool_evidence: toolEvidenceMessages,
     planner_artifacts: plannerArtifactMessages
   };

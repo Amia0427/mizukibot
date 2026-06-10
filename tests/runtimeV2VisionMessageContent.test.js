@@ -1,5 +1,6 @@
 const assert = require('assert');
 
+const config = require('../config');
 const { buildVisionMessageContent } = require('../api/runtimeV2/context/service');
 
 module.exports = (async () => {
@@ -52,6 +53,13 @@ module.exports = (async () => {
   assert.ok(textFor('帮我看哪里错了').includes('用户图片意图：analyze_image'));
   assert.ok(textFor('图里写了啥').includes('用户图片意图：analyze_image'));
   assert.ok(textFor('识别一下文字').includes('用户图片意图：analyze_image'));
+
+  config.VISION_ROUTE_USER_TEXT_MAX_TOKENS = 64;
+  const longQuestion = `BEGIN_QUOTE ${'很长的引用内容'.repeat(120)}\n真正的问题：总结这张图`;
+  const truncated = textFor(longQuestion);
+  assert.ok(truncated.includes('真正的问题：总结这张图'), 'vision prompt should keep the tail user instruction');
+  assert.ok(!truncated.includes('BEGIN_QUOTE'), 'vision prompt should trim oversized quoted/raw text');
+  assert.ok(truncated.length < longQuestion.length, 'vision prompt should be shorter than the raw oversized question');
 
   console.log('runtimeV2VisionMessageContent.test.js passed');
 })().catch((error) => {

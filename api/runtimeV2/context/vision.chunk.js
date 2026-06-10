@@ -41,9 +41,13 @@ function inferVisionChatIntent(question = '') {
 }
 
 function buildVisionTextPart(question = '', imageCount = 0) {
-  const userText = String(question || '').trim() || 'Please answer with the provided image context.';
+  const rawUserText = String(question || '').trim();
+  const userTextBudget = Math.max(256, Number(config.VISION_ROUTE_USER_TEXT_MAX_TOKENS || 6000) || 6000);
+  const userText = rawUserText
+    ? trimTextByTokenBudget(rawUserText, userTextBudget, 'tail')
+    : 'Please answer with the provided image context.';
   const count = Math.max(1, Number(imageCount || 0) || 1);
-  const imageIntent = inferVisionChatIntent(question);
+  const imageIntent = rawUserText ? inferVisionChatIntent(userText) : 'meme_reaction';
   const pragmaticsPrompt = buildRuntimePrompt('image-chat-pragmatics', {
     imageCount: String(count),
     imageIntent

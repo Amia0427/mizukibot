@@ -119,9 +119,17 @@ function buildImageModelConfig(overrides = null, userId = '', options = {}) {
   const imageApiBaseUrl = getImageApiBaseUrl(overrides, userId, options);
   const imageApiKey = getImageApiKey(overrides, userId, options);
   const timeoutMs = Math.max(1000, Number(base.timeoutMs || config.IMAGE_MODEL_TIMEOUT_MS || 18000) || 18000);
-  const retries = Math.max(0, Math.min(1, Number.isFinite(Number(base.retries))
+  const retries = Math.max(0, Math.min(3, Number.isFinite(Number(base.retries))
     ? Number(base.retries)
     : Number(config.IMAGE_MODEL_RETRIES || 0)));
+  const promptTokenWarningThreshold = Math.max(
+    1024,
+    Number(base.promptTokenWarningThreshold || config.IMAGE_MODEL_INPUT_TOKEN_WARN_THRESHOLD || 18000) || 18000
+  );
+  const promptTokenHardLimit = Math.max(
+    2048,
+    Number(base.promptTokenHardLimit || config.IMAGE_MODEL_INPUT_TOKEN_HARD_LIMIT || 20000) || 20000
+  );
 
   return {
     ...base,
@@ -132,7 +140,9 @@ function buildImageModelConfig(overrides = null, userId = '', options = {}) {
     apiKey: imageApiKey,
     imageApiKey,
     timeoutMs,
-    retries: Math.floor(retries)
+    retries: Math.floor(retries),
+    promptTokenWarningThreshold: Math.floor(promptTokenWarningThreshold),
+    promptTokenHardLimit: Math.floor(promptTokenHardLimit)
   };
 }
 

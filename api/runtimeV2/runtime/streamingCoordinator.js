@@ -8,6 +8,11 @@ const {
   getNormalUserMainReplyStreamTimeoutReply,
   isNormalUserMainReplyStreamFirstTokenTimeout
 } = require('../../../utils/normalUserMainReplyStreamTimeout');
+const {
+  estimateMessageTokens,
+  normalizeMessageContent,
+  trimTextByTokenBudget
+} = require('../../../utils/contextBudget');
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
@@ -400,6 +405,53 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     return emitWholeReplyAsSingleStream(state, finalReply);
   }
 
+  function isVisionLiteContextRequest(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const routePolicyKey = String(request.routePolicyKey || routeMeta.routePolicyKey || '').trim().toLowerCase();
+    const chatMode = String(routeMeta.chatMode || routeMeta.chat_mode || '').trim().toLowerCase();
+    return Boolean(
+      request.imageUrl
+      || normalizeArray(request.imageUrls).length > 0
+      || routePolicyKey === 'transform/vision-summary'
+      || routePolicyKey === 'lookup/vision-answer'
+      || chatMode === 'image_summary'
+      || chatMode === 'image_qa'
+    );
+  }
+
+  function shouldDropVisionSystemContext(message = {}) {
+    const text = normalizeMessageContent(message.content);
+    if (!text) return true;
+    return /\[(?:RecentRawTurns|RetrievedMemoryLite|RetrievedMemory|DailyJournal|TaskMemory|GroupMemory|StyleSignals|ShortTermContinuity|MemOSRecall|OpenVikingRecall|LongTermProfile|Impression|Summary|ContinuityState|GlobalToolEvidence)\]|引用消息|quoted message|reply_quote|quoteAnchored|quote raw|raw quote/i
+      .test(text);
+  }
+
+  function buildVisionLiteSystemMessages(messages = []) {
+    const budget = Math.max(512, Number(config?.VISION_ROUTE_SYSTEM_CONTEXT_MAX_TOKENS || 10000) || 10000);
+    const kept = normalizeArray(messages)
+      .filter((item) => item && typeof item === 'object')
+      .filter((item) => !shouldDropVisionSystemContext(item));
+    const out = [];
+    let used = 0;
+    for (const message of kept) {
+      const cost = estimateMessageTokens(message);
+      if (used + cost <= budget) {
+        out.push(message);
+        used += cost;
+        continue;
+      }
+      const remaining = Math.max(0, budget - used - 6);
+      if (remaining >= 64) {
+        out.push({
+          ...message,
+          content: trimTextByTokenBudget(normalizeMessageContent(message.content), remaining, 'head')
+        });
+      }
+      break;
+    }
+    return out;
+  }
+
   function buildDirectReplyMessages(state, messageContent, systemMessages = []) {
     const request = normalizeObject(state.request, {});
     const baseMessages = normalizeArray(systemMessages)
@@ -437,6 +489,40 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         ...base
       ];
     };
+
+    if (isVisionLiteContextRequest(request)) {
+      const maxOutputTokens = Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192);
+      const inputHardLimit = Math.max(2048, Number(config.IMAGE_MODEL_INPUT_TOKEN_HARD_LIMIT || 20000) || 20000);
+      const visionSystemMessages = buildVisionLiteSystemMessages(pureSystemMessages);
+      const canonical = buildV2CanonicalSegments(state, {
+        systemPromptMessages: visionSystemMessages,
+        continuityMessages: [],
+        shortTermSummaryMessages: [],
+        recentHistoryMessages: [],
+        assistantOnlyContextMessages: [],
+        userTurnMessages,
+        toolEvidenceMessages: [],
+        modelName: resolveMainConversationModelName(request),
+        modelWindowTokens: inputHardLimit + Math.max(64, maxOutputTokens || 8192),
+        maxOutputTokens,
+        source: 'direct_reply_vision_lite',
+        disableMemoryContextSegments: true
+      });
+      return {
+        messages: canonical.compactionPlan.compactedSegments.flatMap((segment) => segment.messages),
+        systemMessages: visionSystemMessages,
+        continuityStateMessages: [],
+        summaryMessages: [],
+        recentHistory: [],
+        assistantOnlyContextMessages: [],
+        userTurnMessages,
+        globalToolEvidenceMessages: [],
+        compactionPlan: canonical.compactionPlan,
+        canonicalSegments: canonical.segments,
+        disableMemoryContextSegments: true,
+        contextBudgetMode: 'vision_lite'
+      };
+    }
 
     if (!isChatLikeRoute(request) || request.systemInitiated || String(request.customPrompt || '').trim()) {
       const canonical = buildV2CanonicalSegments(state, {

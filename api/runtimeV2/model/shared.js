@@ -203,6 +203,15 @@ function getRetries(defaultValue = 1, overrides = null) {
   return Math.max(0, Math.floor(n));
 }
 
+function resolvePromptTokenThreshold(overrides = null, key = '', fallback = 0) {
+  const raw = overrides && typeof overrides === 'object' && overrides[key] !== undefined
+    ? overrides[key]
+    : fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return Math.max(0, Number(fallback) || 0);
+  return Math.max(0, Math.floor(n));
+}
+
 function getApiBaseUrl(overrides = null) {
   const raw = overrides && typeof overrides === 'object' ? overrides.apiBaseUrl : '';
   return String(raw || config.API_BASE_URL || '').trim();
@@ -388,12 +397,16 @@ function applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig = null, op
 function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   const protocol = String(options.protocol || 'chat_completions').trim() || 'chat_completions';
   const baseTools = withAnthropicWebSearchTool(options.tools, protocol, options);
-  const promptBudget = summarizePromptTokenBudget({
-    messages: Array.isArray(options.messages) ? options.messages : [],
-    tools: baseTools,
-    __promptTokenWarningThreshold: config.MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD,
-    __promptTokenHardLimit: config.MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT
-  });
+  const promptTokenWarningThreshold = resolvePromptTokenThreshold(
+    resolvedConfig,
+    'promptTokenWarningThreshold',
+    config.MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD
+  );
+  const promptTokenHardLimit = resolvePromptTokenThreshold(
+    resolvedConfig,
+    'promptTokenHardLimit',
+    config.MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT
+  );
   const body = {
     model: getModelName(resolvedConfig),
     temperature: getTemperature(resolvedConfig),
@@ -425,8 +438,8 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
     body.__timeoutMs = Math.max(1000, Math.floor(Number(resolvedConfig.timeoutMs)));
   }
 
-  body.__promptTokenWarningThreshold = promptBudget.warning_threshold_tokens;
-  body.__promptTokenHardLimit = promptBudget.hard_limit_tokens;
+  body.__promptTokenWarningThreshold = promptTokenWarningThreshold;
+  body.__promptTokenHardLimit = promptTokenHardLimit;
   body.__preferredProtocol = protocol;
   if (String(options.provider || '').trim()) {
     body.__provider = normalizeApiProvider(options.provider);

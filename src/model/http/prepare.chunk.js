@@ -220,6 +220,10 @@ function getRetryDelayMs(err, attempt) {
     return capped + Math.floor(Math.random() * 250);
   }
 
+  if (attempt === 0 && isRetryableTransportError(err)) {
+    return 80 + Math.floor(Math.random() * 40);
+  }
+
   // Cloudflare challenge usually needs a longer cool-down than normal transient errors.
   if (isCloudflare403(err)) {
     const base = 2500 * Math.pow(2, attempt);
@@ -352,7 +356,7 @@ function buildPinnedLookup(safeEndpoint = null) {
 
 function shouldRetry(err) {
   const code = String(err?.code || '').toUpperCase();
-  if (['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND'].includes(code)) return true;
+  if (['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'ENETRESET', 'ENETUNREACH'].includes(code)) return true;
   const status = Number(err?.response?.status);
   if (isCloudflare403(err)) return true;
   if (status === 408 || status === 409 || status === 425 || status === 429) return true;
@@ -360,6 +364,23 @@ function shouldRetry(err) {
   // Network errors usually have no response object.
   if (!err?.response) return true;
   return false;
+}
+
+function isRetryableTransportError(err) {
+  if (!shouldRetry(err)) return false;
+  if (err?.response) return false;
+  const code = String(err?.code || '').toUpperCase();
+  if ([
+    'ECONNABORTED',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'EAI_AGAIN',
+    'EPIPE',
+    'ENETRESET',
+    'ENETUNREACH'
+  ].includes(code)) return true;
+  return /socket hang up|tls connection|network socket|connection reset|timeout|timed out|econnreset|etimedout/i
+    .test(String(err?.message || ''));
 }
 
 function shouldRetryStreamRequest(err, handlers = {}) {
@@ -382,6 +403,7 @@ module.exports = {
   getStreamTimeoutMs,
   buildPinnedLookup,
   isCloudflare403,
+  isRetryableTransportError,
   parseRetryAfterMs,
   prepareRequest,
   shouldRetry,
