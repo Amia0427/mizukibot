@@ -1,66 +1,36 @@
 $ErrorActionPreference = 'Stop'
 
-$taskName = 'OpenClawGatewayStable'
-$gatewayPort = 18789
-$gatewayPattern = 'C:\Users\Administrator\openclaw\node_modules\openclaw\dist\index.js gateway --port 18789'
-$launcherPattern = 'run-openclaw-userprofile-gateway.ps1'
+$Port = 18789
+$RunScript = 'D:\waifu\scripts\run-openclaw-userprofile-gateway.ps1'
+$LogDir = 'C:\Users\Administrator\AppData\Local\Temp\openclaw'
+$LogPath = Join-Path $LogDir 'gateway-watchdog.log'
 
-function Get-GatewayPids {
-  @(Get-NetTCPConnection -State Listen -LocalPort $gatewayPort -ErrorAction SilentlyContinue |
-    Select-Object -ExpandProperty OwningProcess -Unique)
+function Write-WatchdogLog {
+    param([string] $Message)
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+    $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
+    Add-Content -LiteralPath $LogPath -Value "$stamp $Message"
 }
 
-function Get-GatewayProcesses {
-  $pids = Get-GatewayPids
-  if (-not $pids -or $pids.Count -eq 0) {
-    return @()
-  }
-
-  @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object {
-      $pids -contains $_.ProcessId -and (
-        ($_.CommandLine -like "*$gatewayPattern*") -or
-        ($_.CommandLine -like "*$launcherPattern*")
-      )
-    })
-}
-
-function Test-GatewayHealthy {
-  $procs = Get-GatewayProcesses
-  return $procs.Count -gt 0
-}
-
-function Stop-StaleGateway {
-  $pids = Get-GatewayPids
-  if ($pids -and $pids.Count -gt 0) {
-    foreach ($pid in $pids) {
-      try {
-        Stop-Process -Id $pid -Force -ErrorAction Stop
-      } catch {
-      }
+function Test-GatewayPort {
+    try {
+        $listeners = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop
+        return ($null -ne $listeners)
+    } catch {
+        return $false
     }
-  }
-}
-
-if (Test-GatewayHealthy) {
-  Write-Output 'GATEWAY_HEALTHY'
-  exit 0
 }
 
 try {
-  Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue | Out-Null
+    if (Test-GatewayPort) {
+        Write-WatchdogLog "watch ok: gateway listening on port $Port"
+        exit 0
+    }
+
+    Write-WatchdogLog "watch detected port $Port is not listening; invoking recovery"
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $RunScript
+    exit $LASTEXITCODE
 } catch {
+    Write-WatchdogLog "watch failed: $($_.Exception.Message)"
+    exit 1
 }
-
-Stop-StaleGateway
-
-Start-ScheduledTask -TaskName $taskName
-Start-Sleep -Seconds 15
-
-if (Test-GatewayHealthy) {
-  Write-Output 'GATEWAY_RECOVERED'
-  exit 0
-}
-
-Write-Error 'OpenClaw gateway watchdog failed to recover the gateway.'
-exit 1

@@ -1,7 +1,7 @@
 const assert = require('assert');
 const path = require('path');
 
-;(async () => {
+module.exports = (async () => {
 try {
   const snapshot = { ...process.env };
   process.env.API_KEY = 'main-key';

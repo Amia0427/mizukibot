@@ -2,6 +2,12 @@ const { buildRouteMetaEnvelope } = require('./executablePlan');
 const {
   applyGroupDirectStyleGuard
 } = require('../api/runtimeV2/guards/groupDirectReplyStyleGuard');
+const {
+  shouldForceDisableGroupMainModelStream
+} = require('../utils/groupMainModelStreamPolicy');
+const {
+  shouldDowngradeUnavailableRouteToDirectReply
+} = require('./messageRouteFlow/helpers');
 
 function createMessageDispatchCoordinator(deps = {}) {
   const {
@@ -9,7 +15,6 @@ function createMessageDispatchCoordinator(deps = {}) {
     buildRoutePromptBundle,
     getStreamMaxSegments,
     buildToolGuidancePrompt,
-    buildBridgeGuidancePrompt,
     buildStreamingSegmentationPrompt,
     shouldPreferQqRichReply,
     buildQqRichReplyPrompt,
@@ -21,9 +26,6 @@ function createMessageDispatchCoordinator(deps = {}) {
     getEffectivePolicyKey,
     runBackgroundToolTask,
     detectQzonePostDraftMode,
-    generateBotDiaryDraft,
-    generateGenericQzoneDraft,
-    normalizeGeneratedQzoneContent,
     publishQzoneForContext,
     markThinkingEmojiBeforeLlm,
     askToolTaskLocally,
@@ -33,7 +35,11 @@ function createMessageDispatchCoordinator(deps = {}) {
   } = deps;
 
   function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = '') {
-    if (!String(imageUrl || '').trim()) return null;
+    const chatMode = String(route?.meta?.chatMode || '').trim().toLowerCase();
+    const hasVisionInput = Boolean(String(imageUrl || '').trim())
+      || chatMode === 'image_qa'
+      || chatMode === 'image_summary';
+    if (!hasVisionInput) return null;
     const visualContext = route?.meta?.visualContext && typeof route.meta.visualContext === 'object'
       ? route.meta.visualContext
       : null;
@@ -76,16 +82,12 @@ function createMessageDispatchCoordinator(deps = {}) {
       cleanText,
       maxStreamSegments: getStreamMaxSegments(config),
       buildToolGuidancePrompt,
-      buildBridgeGuidancePrompt: routeExecutionPlan?.executor === 'full_subagent'
-        ? (currentRoute) => buildBridgeGuidancePrompt(currentRoute, config.SUBAGENT_BACKEND || 'command', routeExecutionPlan)
-        : null,
       buildStreamingSegmentationPrompt,
       shouldPreferQqRichReply,
       buildQqRichReplyPrompt
     });
     const {
       toolGuidancePrompt,
-      bridgeGuidancePrompt,
       streamingSegmentationPrompt,
       qqRichReplyPrompt,
       disableStreamForReply
@@ -95,6 +97,8 @@ function createMessageDispatchCoordinator(deps = {}) {
       passive: false
     });
     const perceptionPrompt = String(perceptionResult?.text || '').trim() || null;
+    const downgradeUnavailableToDirectReply = shouldDowngradeUnavailableRouteToDirectReply(route, routeExecutionPlan);
+    const effectiveToolGuidancePrompt = downgradeUnavailableToDirectReply ? null : toolGuidancePrompt;
     console.log('[dispatch] route plan resolved', buildRoutePlanLogPayload(routeExecutionPlan, {
       groupId,
       senderId,
@@ -102,7 +106,7 @@ function createMessageDispatchCoordinator(deps = {}) {
     }, route));
 
     try {
-      if (routeExecutionPlan.unavailableReason) {
+      if (routeExecutionPlan.unavailableReason && !downgradeUnavailableToDirectReply) {
         maybeCaptureUnavailableFeatureRequest({
           routeExecutionPlan,
           cleanText,
@@ -113,12 +117,14 @@ function createMessageDispatchCoordinator(deps = {}) {
         reply = buildUnavailableRouteReply(route, routeExecutionPlan);
       } else if (routeExecutionPlan.allowTools || routeExecutionPlan.executor === 'background_direct') {
         const toolTaskOptions = {
-          routePrompt: [toolGuidancePrompt, bridgeGuidancePrompt, perceptionPrompt].filter(Boolean).join('\n\n') || null,
+          routePrompt: [toolGuidancePrompt, perceptionPrompt].filter(Boolean).join('\n\n') || null,
           sessionChannel: 'qq-group',
           sessionChatId: `group_${groupId}_user_${senderId}`,
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-          routeDebugKey: getEffectivePolicyKey(routeExecutionPlan),
+          routeDebugKey: routeExecutionPlan.routeDebugKey,
           topRouteType: routeExecutionPlan.topRouteType,
+          dispatchBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct' : 'tool_plan',
+          triggerBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct.final_send' : 'tool_plan.final_send',
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
           imageUrls,
@@ -156,57 +162,38 @@ function createMessageDispatchCoordinator(deps = {}) {
 
         const qzoneDraftMode = detectQzonePostDraftMode(route, cleanText);
         if (qzoneDraftMode === 'bot_diary') {
-          const diaryDraft = await generateBotDiaryDraft({
-            groupId: String(groupId || ''),
+          const draftResult = await publishQzoneForContext({
+            mode: 'bot_diary',
             hint: cleanText
-          });
-          if (!diaryDraft.ok) {
-            reply = `?????????? bot ???\n\n?????${diaryDraft.reason || '????'}`;
-          } else {
-            const publishResult = await publishQzoneForContext({
-              mode: 'manual',
-              content: diaryDraft.content
-            }, {
+          }, {
+            userId: String(senderId || ''),
+            routeMeta: {
+              ...(route.meta || {}),
               userId: String(senderId || ''),
-              routeMeta: {
-                ...(route.meta || {}),
-                userId: String(senderId || ''),
-                groupId: String(groupId || '')
-              }
-            });
-            reply = publishResult?.ok
-              ? `??? bot ??? QQ ?????\n\n???\n${diaryDraft.content}`
-              : `?? bot ????????? QQ ??????\n\n?????${publishResult?.text || '????'}`;
-          }
+              groupId: String(groupId || '')
+            }
+          });
+          reply = draftResult?.ok
+            ? `已生成 QQ 空间 bot 日记草稿，未发布。\n\n内容：\n${draftResult.content}`
+            : `生成 bot 日记草稿失败。\n\n原因：${draftResult?.reason || draftResult?.text || '未知错误'}`;
         } else if (qzoneDraftMode === 'generic_autodraft') {
-          const drafted = await generateGenericQzoneDraft({
-            requestText: cleanText,
-            groupId: String(groupId || '')
-          });
-          const draftedContent = drafted.ok ? normalizeGeneratedQzoneContent(drafted.content) : '';
-
-          if (!draftedContent) {
-            reply = '????????????????????????????????????';
-          } else {
-            const publishResult = await publishQzoneForContext(draftedContent, {
+          const draftResult = await publishQzoneForContext({
+            mode: 'agent',
+            hint: cleanText
+          }, {
+            userId: String(senderId || ''),
+            routeMeta: {
+              ...(route.meta || {}),
               userId: String(senderId || ''),
-              qzoneSource: 'generic_autodraft',
-              qzoneType: 'generic_autodraft',
-              lens: drafted?.meta?.lens,
-              emotion: drafted?.meta?.emotion,
-              anchor: drafted?.meta?.anchor,
-              structure: drafted?.meta?.structure,
-              ending: drafted?.meta?.ending,
-              routeMeta: {
-                ...(route.meta || {}),
-                userId: String(senderId || ''),
-                groupId: String(groupId || '')
-              }
-            });
-            reply = publishResult?.ok
-              ? `???????? QQ ???\n\n???\n${draftedContent}`
-              : `????????????? QQ ??????\n\n?????${publishResult?.text || '????'}\n\n???\n${draftedContent}`;
-          }
+              groupId: String(groupId || '')
+            }
+          }, {
+            qzoneSource: 'generic_autodraft',
+            qzoneType: 'generic_autodraft'
+          });
+          reply = draftResult?.ok
+            ? `已生成 QQ 空间草稿，未发布。\n\n内容：\n${draftResult.content}`
+            : `这次没能生成可发布的 QQ 空间草稿。\n\n原因：${draftResult?.reason || draftResult?.text || '未知错误'}`;
         } else {
           await markThinkingEmojiBeforeLlm({
             messageId: sourceMessageId,
@@ -238,16 +225,17 @@ function createMessageDispatchCoordinator(deps = {}) {
           streamCompleted: false,
           streamFallbackToNonStream: false,
           routePrompt: composeDirectRoutePrompt({
-            toolGuidancePrompt,
-            bridgeGuidancePrompt,
+            toolGuidancePrompt: effectiveToolGuidancePrompt,
             perceptionPrompt,
             safetyBoundaryRoutePrompt,
             streamingSegmentationPrompt,
             qqRichReplyPrompt
           }),
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-          routeDebugKey: getEffectivePolicyKey(routeExecutionPlan),
+          routeDebugKey: routeExecutionPlan.routeDebugKey,
           topRouteType: routeExecutionPlan.topRouteType,
+          dispatchBranch: 'direct_reply',
+          triggerBranch: 'direct_reply.final_send',
           disableTools: !routeExecutionPlan.allowTools,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
@@ -257,7 +245,7 @@ function createMessageDispatchCoordinator(deps = {}) {
             messageId: String(sourceMessageId || '').trim(),
             threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
           }),
-          disableStream: disableStreamForReply,
+          disableStream: disableStreamForReply || routeExecutionPlan.allowStream !== true,
           deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat',
           threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
         };
@@ -266,7 +254,12 @@ function createMessageDispatchCoordinator(deps = {}) {
           streamOptions.modelConfig = fallbackModelConfig;
         }
         const replyOptions = streamOptions;
-        if (String(route?.meta?.chatType || 'group').trim().toLowerCase() === 'group') {
+        if (shouldForceDisableGroupMainModelStream({
+          groupId,
+          routeMeta: replyOptions.routeMeta,
+          isQqGroup: String(route?.meta?.chatType || 'group').trim().toLowerCase() === 'group',
+          isDirectMainModelReply: true
+        })) {
           replyOptions.disableStream = true;
         }
         finalReplyOptions = replyOptions;

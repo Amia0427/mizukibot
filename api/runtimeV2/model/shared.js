@@ -1,12 +1,25 @@
 const config = require('../../../config');
 const crypto = require('crypto');
-const { getApiProvider, isOpenAICompatibleProvider } = require('../../../utils/modelProvider');
+const {
+  isAnthropicProvider,
+  isGeminiModelName,
+  isGeminiNativeProvider,
+  isOpenAICompatibleProvider,
+  normalizeApiProvider,
+  ensureAnthropicMessagesUrl
+} = require('../../../utils/modelProvider');
+const {
+  normalizeGeminiNativeApiBaseUrl
+} = require('../../../src/model/http/gemini-native.chunk');
 const {
   ADMIN_SHARED_FALLBACK_SCOPE,
   resolveForcedFallbackMainModelConfig,
   recordMainModelFailure,
   recordMainModelSuccess
 } = require('../../../utils/mainModelFallback');
+const {
+  summarizePromptTokenBudget
+} = require('../../../utils/modelCallTracker/requestSummary');
 const {
   appendRequestTraceEvent,
   extractErrorCode,
@@ -21,11 +34,21 @@ const {
 const {
   buildImageModelConfig
 } = require('../../../utils/imageModelConfigResolver');
+const {
+  buildBrowserLikeRequestHeaders
+} = require('../../../config/userAgentRuntime');
+
+function getMainReplyDefaultMaxTokens() {
+  return Math.max(64, Number(config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192) || 8192);
+}
 
 function ensureChatCompletionsUrl(url) {
   const normalized = String(url || '').replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(normalized)) return normalized;
+  if (/\/responses$/i.test(normalized)) return normalized.replace(/\/responses$/i, '/chat/completions');
+  if (/\/messages$/i.test(normalized)) return normalized.replace(/\/messages$/i, '/chat/completions');
   if (/\/v\d+$/i.test(normalized)) return `${normalized}/chat/completions`;
+  if (/^https?:\/\/[^/]+$/i.test(normalized)) return `${normalized}/v1/chat/completions`;
   return normalized;
 }
 
@@ -33,7 +56,9 @@ function ensureResponsesUrl(url) {
   const normalized = String(url || '').replace(/\/+$/, '');
   if (/\/responses$/i.test(normalized)) return normalized;
   if (/\/chat\/completions$/i.test(normalized)) return normalized.replace(/\/chat\/completions$/i, '/responses');
+  if (/\/messages$/i.test(normalized)) return normalized.replace(/\/messages$/i, '/responses');
   if (/\/v\d+$/i.test(normalized)) return `${normalized}/responses`;
+  if (/^https?:\/\/[^/]+$/i.test(normalized)) return `${normalized}/v1/responses`;
   return normalized;
 }
 
@@ -47,24 +72,44 @@ function normalizeOpenAIMainApiMode(value = '') {
 }
 
 function resolveOpenAIMainProtocol(apiBaseUrl = '', options = {}) {
+  if (isAnthropicProvider(options.provider)) return 'anthropic_messages';
+  if (isGeminiNativeProvider(options.provider)) return 'gemini_generate_content';
   const mode = normalizeOpenAIMainApiMode(options.apiMode || config.OPENAI_MAIN_API_MODE);
   if (mode === 'responses') return 'responses';
   if (mode === 'chat_completions') return 'chat_completions';
 
   const normalized = String(apiBaseUrl || '').replace(/\/+$/, '').toLowerCase();
   if (/\/responses$/i.test(normalized)) return 'responses';
+  if (/\/chat\/completions$/i.test(normalized)) return 'chat_completions';
+  if (/\/messages$/i.test(normalized)) return 'chat_completions';
+  if (/\/v\d+$/i.test(normalized)) return 'chat_completions';
   return 'chat_completions';
 }
 
 function ensureOpenAIMainUrl(apiBaseUrl = '', options = {}) {
   const protocol = resolveOpenAIMainProtocol(apiBaseUrl, options);
+  if (protocol === 'anthropic_messages') return ensureAnthropicMessagesUrl(apiBaseUrl);
   return protocol === 'responses'
     ? ensureResponsesUrl(apiBaseUrl)
     : ensureChatCompletionsUrl(apiBaseUrl);
 }
 
-function resolveMainProvider(apiBaseUrl = '', model = '') {
-  return getApiProvider(apiBaseUrl, model || config.AI_MODEL);
+function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
+  if (options && typeof options === 'object' && String(options.provider || '').trim()) {
+    return normalizeApiProvider(options.provider);
+  }
+  if (isGeminiModelName(model)) return 'gemini_native';
+  const normalizedUrl = String(apiBaseUrl || '').trim();
+  if (/\/messages(?:\/)?$/i.test(normalizedUrl)) return 'anthropic';
+  return 'openai_compatible';
+}
+
+function ensureMainModelUrl(apiBaseUrl = '', options = {}) {
+  if (isAnthropicProvider(options.provider)) return ensureAnthropicMessagesUrl(apiBaseUrl);
+  if (isGeminiNativeProvider(options.provider)) {
+    return normalizeGeminiNativeApiBaseUrl(apiBaseUrl, options.model, { stream: options.stream === true });
+  }
+  return ensureOpenAIMainUrl(apiBaseUrl, options);
 }
 
 function getModelName(overrides = null) {
@@ -129,7 +174,7 @@ function getRepetitionPenalty(overrides = null) {
   return getOptionalPositiveNumber(raw);
 }
 
-function getMaxTokens(defaultValue = 3500, overrides = null) {
+function getMaxTokens(defaultValue = getMainReplyDefaultMaxTokens(), overrides = null) {
   const raw = overrides && typeof overrides === 'object' && overrides.maxTokens !== undefined
     ? overrides.maxTokens
     : config.AI_MAX_TOKENS;
@@ -158,6 +203,15 @@ function getRetries(defaultValue = 1, overrides = null) {
   return Math.max(0, Math.floor(n));
 }
 
+function resolvePromptTokenThreshold(overrides = null, key = '', fallback = 0) {
+  const raw = overrides && typeof overrides === 'object' && overrides[key] !== undefined
+    ? overrides[key]
+    : fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return Math.max(0, Number(fallback) || 0);
+  return Math.max(0, Math.floor(n));
+}
+
 function getApiBaseUrl(overrides = null) {
   const raw = overrides && typeof overrides === 'object' ? overrides.apiBaseUrl : '';
   return String(raw || config.API_BASE_URL || '').trim();
@@ -166,6 +220,75 @@ function getApiBaseUrl(overrides = null) {
 function getApiKey(overrides = null) {
   const raw = overrides && typeof overrides === 'object' ? overrides.apiKey : '';
   return String(raw || config.API_KEY || '').trim();
+}
+
+function getProvider(overrides = null) {
+  const raw = overrides && typeof overrides === 'object' ? overrides.provider : '';
+  return String(raw || (!overrides ? config.API_PROVIDER : '') || '').trim();
+}
+
+function normalizeDomainList(values = []) {
+  return (Array.isArray(values) ? values : [])
+    .map((item) => String(item || '').trim().toLowerCase())
+    .map((item) => item
+      .replace(/^https?:\/\//i, '')
+      .replace(/[?#].*$/g, '')
+      .replace(/^\/+|\/+$/g, '')
+      .replace(/^\.+|\.+$/g, ''))
+    .filter(Boolean)
+    .filter((item, index, arr) => arr.indexOf(item) === index);
+}
+
+function buildAnthropicWebSearchUserLocation(currentConfig = config) {
+  const userLocation = { type: 'approximate' };
+  const city = String(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_CITY || '').trim();
+  const region = String(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_REGION || '').trim();
+  const country = String(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_COUNTRY || '').trim();
+  const timezone = String(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_TIMEZONE || '').trim();
+  if (city) userLocation.city = city;
+  if (region) userLocation.region = region;
+  if (country) userLocation.country = country;
+  if (timezone) userLocation.timezone = timezone;
+  return Object.keys(userLocation).length > 1 ? userLocation : null;
+}
+
+function buildAnthropicWebSearchTool(currentConfig = config) {
+  const maxUses = Math.max(1, Math.floor(Number(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_MAX_USES) || 2));
+  const tool = {
+    type: 'web_search_20250305',
+    name: 'web_search',
+    max_uses: maxUses
+  };
+  const allowedDomains = normalizeDomainList(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ALLOWED_DOMAINS);
+  const blockedDomains = normalizeDomainList(currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_BLOCKED_DOMAINS);
+  if (allowedDomains.length > 0) tool.allowed_domains = allowedDomains;
+  else if (blockedDomains.length > 0) tool.blocked_domains = blockedDomains;
+  const userLocation = buildAnthropicWebSearchUserLocation(currentConfig);
+  if (userLocation) tool.user_location = userLocation;
+  return tool;
+}
+
+function isAnthropicWebSearchServerTool(tool) {
+  return String(tool?.type || '').trim() === 'web_search_20250305';
+}
+
+function shouldInjectAnthropicWebSearchTool(protocol = '', options = {}, currentConfig = config) {
+  if (String(protocol || '').trim() !== 'anthropic_messages') return false;
+  if (currentConfig.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED === false) return false;
+  if (options.disableAnthropicWebSearch === true || options.anthropicWebSearch === false) return false;
+  if (options.anthropicWebSearch === true) return true;
+  const allowedTools = Array.isArray(options.allowedTools) ? options.allowedTools : [];
+  return allowedTools
+    .map((item) => String(item || '').trim())
+    .some((toolName) => toolName === 'web_search' || toolName === 'skill_web_search');
+}
+
+function withAnthropicWebSearchTool(tools = [], protocol = '', options = {}, currentConfig = config) {
+  const items = Array.isArray(tools) ? [...tools] : [];
+  if (!shouldInjectAnthropicWebSearchTool(protocol, options, currentConfig)) return items;
+  if (items.some((tool) => String(tool?.type || '').trim() === 'web_search_20250305')) return items;
+  items.push(buildAnthropicWebSearchTool(currentConfig));
+  return items;
 }
 
 function normalizeOpenAIPromptCacheRetention(value = '') {
@@ -245,6 +368,7 @@ function buildOpenAIPromptCacheKey(protocol, resolvedConfig = null, options = {}
     namespaceHash,
     model,
     routeType,
+    allowedTools: Array.isArray(options?.allowedTools) ? options.allowedTools : [],
     stablePrompt: buildStablePromptFingerprint(options.messages, options.tools)
   });
   const hash = crypto
@@ -259,6 +383,7 @@ function applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig = null, op
   if (!body || typeof body !== 'object') return body;
   if (config.OPENAI_PROMPT_CACHE_ENABLED === false) return body;
   if (!isOpenAICompatibleProvider(options.provider)) return body;
+  if (protocol === 'anthropic_messages') return body;
 
   const nextBody = {
     ...body,
@@ -271,18 +396,25 @@ function applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig = null, op
 
 function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   const protocol = String(options.protocol || 'chat_completions').trim() || 'chat_completions';
+  const baseTools = withAnthropicWebSearchTool(options.tools, protocol, options);
+  const promptTokenWarningThreshold = resolvePromptTokenThreshold(
+    resolvedConfig,
+    'promptTokenWarningThreshold',
+    config.MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD
+  );
+  const promptTokenHardLimit = resolvePromptTokenThreshold(
+    resolvedConfig,
+    'promptTokenHardLimit',
+    config.MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT
+  );
   const body = {
     model: getModelName(resolvedConfig),
     temperature: getTemperature(resolvedConfig),
-    top_p: getTopP(resolvedConfig),
     messages: Array.isArray(options.messages) ? options.messages : [],
-    max_tokens: getMaxTokens(options.defaultMaxTokens || 3500, resolvedConfig),
+    max_tokens: getMaxTokens(options.defaultMaxTokens || getMainReplyDefaultMaxTokens(), resolvedConfig),
     reasoning_effort: getReasoningEffort(resolvedConfig),
     stream: Boolean(options.stream)
   };
-
-  const topK = getTopK(resolvedConfig);
-  if (topK !== undefined) body.top_k = topK;
 
   const topA = getTopA(resolvedConfig);
   if (topA !== undefined) body.top_a = topA;
@@ -290,21 +422,59 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   const repetitionPenalty = getRepetitionPenalty(resolvedConfig);
   if (repetitionPenalty !== undefined) body.repetition_penalty = repetitionPenalty;
 
-  if (Array.isArray(options.tools) && options.tools.length > 0) {
-    body.tools = options.tools;
-    body.tool_choice = options.toolChoice || options.tool_choice || 'auto';
+  const tools = baseTools;
+  if (tools.length > 0) {
+    body.tools = tools;
+    const explicitToolChoice = options.toolChoice || options.tool_choice || null;
+    const hasClientTool = tools.some((tool) => !isAnthropicWebSearchServerTool(tool));
+    if (explicitToolChoice) body.tool_choice = explicitToolChoice;
+    else if (hasClientTool) body.tool_choice = 'auto';
   }
 
   if (options.trace && typeof options.trace === 'object') {
     body.__trace = options.trace;
   }
+  if (resolvedConfig && typeof resolvedConfig === 'object' && Number.isFinite(Number(resolvedConfig.timeoutMs))) {
+    body.__timeoutMs = Math.max(1000, Math.floor(Number(resolvedConfig.timeoutMs)));
+  }
 
-  const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || '').trim();
+  body.__promptTokenWarningThreshold = promptTokenWarningThreshold;
+  body.__promptTokenHardLimit = promptTokenHardLimit;
+  body.__preferredProtocol = protocol;
+  if (String(options.provider || '').trim()) {
+    body.__provider = normalizeApiProvider(options.provider);
+  }
+
+  const finalPromptBudget = summarizePromptTokenBudget(body);
+  if (finalPromptBudget.over_hard_limit) {
+    const error = new Error(
+      `[main-reply-token-budget] estimated input ${finalPromptBudget.estimated_input_tokens} tokens exceeds hard limit ${finalPromptBudget.hard_limit_tokens}`
+    );
+    error.code = 'MAIN_REPLY_INPUT_TOKEN_BUDGET_EXCEEDED';
+    error.promptTokenBudget = finalPromptBudget;
+    throw error;
+  }
+  if (finalPromptBudget.over_warning_threshold) {
+    console.warn('[main-reply-token-budget] high estimated input tokens', finalPromptBudget);
+  }
+
+  const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || config.CODEX_USER_AGENT || '').trim();
   const apiKey = getApiKey(resolvedConfig);
-  if (isOpenAICompatibleProvider(options.provider) && (userAgent || apiKey)) {
-    body.__requestHeaders = {};
+  const browserHeaders = buildBrowserLikeRequestHeaders({
+    userAgent,
+    acceptLanguage: config.MODEL_HTTP_ACCEPT_LANGUAGE || config.HTTP_ACCEPT_LANGUAGE,
+    apiBaseUrl: getApiBaseUrl(resolvedConfig),
+    origin: config.MODEL_HTTP_ORIGIN,
+    referer: config.MODEL_HTTP_REFERER,
+    secFetchSite: config.MODEL_HTTP_SEC_FETCH_SITE
+  });
+  body.__requestHeaders = { ...browserHeaders };
+  if (isOpenAICompatibleProvider(options.provider)) {
     if (apiKey) body.__requestHeaders.Authorization = `Bearer ${apiKey}`;
-    if (userAgent) body.__requestHeaders['User-Agent'] = userAgent;
+  } else if (isAnthropicProvider(options.provider)) {
+    if (apiKey) body.__requestHeaders['x-api-key'] = apiKey;
+  } else if (isGeminiNativeProvider(options.provider)) {
+    if (apiKey) body.__requestHeaders['x-goog-api-key'] = apiKey;
   }
 
   return applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig, options);
@@ -312,12 +482,20 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
 
 function buildMainModelRequest(resolvedConfig = null, options = {}) {
   const apiBaseUrl = getApiBaseUrl(resolvedConfig);
-  const provider = resolveMainProvider(apiBaseUrl, getModelName(resolvedConfig));
-  const protocol = resolveOpenAIMainProtocol(apiBaseUrl, options);
+  const providerOverride = getProvider(resolvedConfig);
+  const provider = resolveMainProvider(
+    apiBaseUrl,
+    getModelName(resolvedConfig),
+    providerOverride ? { provider: providerOverride } : null
+  );
+  const protocol = resolveOpenAIMainProtocol(apiBaseUrl, {
+    ...options,
+    provider
+  });
   return {
     provider,
     protocol,
-    url: ensureOpenAIMainUrl(apiBaseUrl, { apiMode: protocol }),
+    url: ensureMainModelUrl(apiBaseUrl, { apiMode: protocol, provider, model: getModelName(resolvedConfig), stream: Boolean(options.stream) }),
     body: buildGenerationRequestBody(resolvedConfig, {
       ...options,
       provider,
@@ -358,7 +536,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
         fallbackActive: true,
         fallbackForced: resolvedConfig.__mainFallbackForced === true,
         model: getModelName(resolvedConfig),
-        provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig))
+        provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig), resolvedConfig)
       });
     }
     return result;
@@ -366,10 +544,11 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
     emitFallbackTrace('fallback_primary_failure', {
       fallbackActive: false,
       model: getModelName(resolvedConfig),
-      provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig)),
+      provider: resolveMainProvider(getApiBaseUrl(resolvedConfig), getModelName(resolvedConfig), resolvedConfig),
       finalErrorCode: extractErrorCode(error),
       error: String(error?.message || error || '').slice(0, 400)
     });
+    if (error?.bypassMainModelFallback === true) throw error;
     if (bypassFallback) throw error;
     if (resolvedConfig.__mainFallbackActive) throw error;
     const failureState = recordMainModelFailure(error, { scope });
@@ -382,7 +561,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
         fallbackActive: true,
         fallbackScope: scope || '',
         model: getModelName(forcedFallbackConfig),
-        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig)),
+        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig), forcedFallbackConfig),
         finalErrorCode: extractErrorCode(error)
       });
       const fallbackResult = await action(forcedFallbackConfig);
@@ -391,7 +570,7 @@ async function withMainModelFallback(action, modelConfig = null, userId = '', op
         fallbackActive: true,
         fallbackForced: true,
         model: getModelName(forcedFallbackConfig),
-        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig))
+        provider: resolveMainProvider(getApiBaseUrl(forcedFallbackConfig), getModelName(forcedFallbackConfig), forcedFallbackConfig)
       });
       return fallbackResult;
     }
@@ -406,22 +585,50 @@ function shouldUseAdminSharedFallbackScope(userId = '', options = {}) {
 function normalizeTextContent(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    return content.map((part) => (typeof part === 'string' ? part : (part?.text || ''))).join('');
+    return content.map((part) => {
+      if (typeof part === 'string') return part;
+      if (typeof part?.text === 'string') return part.text;
+      if (typeof part?.content === 'string') return part.content;
+      if (typeof part?.output_text === 'string') return part.output_text;
+      if (typeof part?.outputText === 'string') return part.outputText;
+      if (Array.isArray(part?.content)) return normalizeTextContent(part.content);
+      if (part?.content && typeof part.content === 'object') return normalizeTextContent(part.content);
+      return '';
+    }).join('');
+  }
+  if (content && typeof content === 'object') {
+    if (typeof content.persistedText === 'string') return content.persistedText;
+    if (typeof content.visibleText === 'string') return content.visibleText;
+    if (typeof content.finalReply === 'string') return content.finalReply;
+    if (typeof content.text === 'string') return content.text;
+    if (typeof content.content === 'string') return content.content;
+    if (typeof content.output_text === 'string') return content.output_text;
+    if (typeof content.outputText === 'string') return content.outputText;
+    if (Array.isArray(content.content)) return normalizeTextContent(content.content);
+    if (Array.isArray(content.output)) return normalizeTextContent(content.output);
+    if (content.message && typeof content.message === 'object') return normalizeTextContent(content.message);
+    if (content.response && typeof content.response === 'object') return normalizeTextContent(content.response);
+    if (content.result && typeof content.result === 'object') return normalizeTextContent(content.result);
+    return '';
   }
   return String(content || '');
 }
 
 module.exports = {
   buildMainModelRequest,
+  buildAnthropicWebSearchTool,
   buildGenerationRequestBody,
   buildImageModelConfig,
   ensureChatCompletionsUrl,
+  ensureMainModelUrl,
   ensureOpenAIMainUrl,
   ensureResponsesUrl,
   getApiBaseUrl,
   getApiKey,
+  getMainReplyDefaultMaxTokens,
   getMaxTokens,
   getModelName,
+  getProvider,
   getRepetitionPenalty,
   getReasoningEffort,
   getRetries,

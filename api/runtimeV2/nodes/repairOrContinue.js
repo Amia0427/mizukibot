@@ -33,7 +33,7 @@ function createRepairOrContinueNode(deps = {}) {
       normalizeArray(verification.retryable_steps).map((item) => String(item || '').trim()).filter(Boolean)
     );
     const retryQueue = normalizeArray(verification.failures)
-      .filter((item) => retryableStepIds.size === 0 || retryableStepIds.has(String(item?.step_id || '').trim()));
+      .filter((item) => retryableStepIds.has(String(item?.step_id || '').trim()));
     const retryStepIds = new Set(retryQueue.map((item) => String(item?.step_id || '').trim()).filter(Boolean));
     const nextSteps = normalizeArray(state.plan?.steps).map((step) => {
       if (!retryStepIds.has(String(step.id || '').trim())) return { ...step };

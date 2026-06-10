@@ -56,9 +56,8 @@ function getAdminUserIdSet() {
   );
 }
 
-function isAdminMainModelUser(userId = '', options = {}) {
-  const normalizedUserId = normalizeText(userId);
-  return getAdminUserIdSet().has(normalizedUserId);
+function isAdminMainModelUser(userId = '') {
+  return getAdminUserIdSet().has(normalizeText(userId));
 }
 
 function shouldBypassMainModelFallback(userId = '', options = {}) {
@@ -87,6 +86,11 @@ function resolveRoleAwareMainModelConfig(userId = '', overrides = null, options 
     { value: isAdmin ? config.ADMIN_AI_MODEL : '', source: 'ADMIN_AI_MODEL' },
     { value: config.AI_MODEL, source: 'AI_MODEL' }
   ], 'gpt-5.4', 'hardcoded:gpt-5.4');
+  const providerPick = pickTextWithSource([
+    { value: base.provider, source: 'override.provider' },
+    { value: isAdmin ? config.ADMIN_API_PROVIDER : '', source: 'ADMIN_API_PROVIDER' },
+    { value: config.API_PROVIDER, source: 'API_PROVIDER' }
+  ], '', 'empty');
   const apiBaseUrlPick = pickTextWithSource([
     { value: base.apiBaseUrl, source: 'override.apiBaseUrl' },
     { value: isAdmin ? config.ADMIN_API_BASE_URL : '', source: 'ADMIN_API_BASE_URL' },
@@ -119,10 +123,12 @@ function resolveRoleAwareMainModelConfig(userId = '', overrides = null, options 
   return {
     ...resolved,
     model: modelPick.value || 'gpt-5.4',
+    provider: providerPick.value || '',
     apiBaseUrl: apiBaseUrlPick.value,
     apiKey: apiKeyPick.value,
     __mainModelUserRole: isAdmin ? 'admin' : 'user',
     __mainModelSource: modelPick.source,
+    __mainProviderSource: providerPick.source,
     __mainApiBaseUrlSource: apiBaseUrlPick.source,
     __mainApiKeySource: apiKeyPick.source,
     __adminDedicatedModelConfigured: isAdmin ? Boolean(normalizeText(base.model) || normalizeText(config.ADMIN_AI_MODEL)) : null,

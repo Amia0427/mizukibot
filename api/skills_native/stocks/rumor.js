@@ -1,5 +1,6 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const config = require('../../../config');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -18,7 +19,7 @@ async function fetchAlphaVantageRumors() {
     timeout: 12000,
     proxy: false,
     headers: {
-      'User-Agent': 'MizukiBot/1.0 (stocks rumor native client)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
   return Array.isArray(response?.data?.feed) ? response.data.feed : [];
@@ -36,7 +37,7 @@ async function fetchFinanceHeadlines() {
         timeout: 8000,
         proxy: false,
         headers: {
-          'User-Agent': 'MizukiBot/1.0 (stocks rumor native client)'
+          'User-Agent': config.HTTP_USER_AGENT
         }
       });
       return String(response.data || '');

@@ -22,5 +22,25 @@ module.exports = (() => {
   assert.strictEqual(merged.cache_read_input_tokens, 8);
   assert.strictEqual(merged.cache_creation_input_tokens, 3);
 
+  const deepSeekStyle = extractSSEEvents(
+    { buffer: '' },
+    'data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":20,"completion_tokens":4,"prompt_cache_hit_tokens":12,"prompt_cache_miss_tokens":8}}\n\n'
+  );
+  assert.strictEqual(deepSeekStyle.events.length, 1);
+  assert.strictEqual(deepSeekStyle.events[0].usage.cache_read_input_tokens, 12);
+  assert.strictEqual(deepSeekStyle.events[0].usage.cache_creation_input_tokens, 8);
+
+  const chinesePayload = 'data: {"choices":[{"delta":{"content":"你坏了啊"}}]}\n\n';
+  const splitIndex = Buffer.from(chinesePayload, 'utf8').indexOf(Buffer.from('坏', 'utf8')) + 1;
+  const rawBuffer = Buffer.from(chinesePayload, 'utf8');
+  let splitState = { buffer: '' };
+  const splitFirst = extractSSEEvents(splitState, rawBuffer.subarray(0, splitIndex));
+  splitState = splitFirst.state;
+  assert.strictEqual(splitFirst.events.length, 0);
+  const splitSecond = extractSSEEvents(splitState, rawBuffer.subarray(splitIndex));
+  assert.strictEqual(splitSecond.events.length, 1);
+  assert.strictEqual(splitSecond.events[0].delta, '你坏了啊');
+  assert.ok(!splitSecond.events[0].delta.includes('�'));
+
   console.log('parserOpenAICompatibleCacheUsage.test.js passed');
 })();

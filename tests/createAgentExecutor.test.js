@@ -137,6 +137,10 @@ module.exports = (async () => {
       buildCreateAgentGenerationUrlCandidates('https://www.packyapi.com'),
       ['https://www.packyapi.com/images/generations', 'https://www.packyapi.com/v1/images/generations']
     );
+    assert.deepStrictEqual(
+      buildCreateAgentGenerationUrlCandidates('https://www.right.codes/draw'),
+      ['https://www.right.codes/draw/v1/images/generations', 'https://www.right.codes/draw/images/generations']
+    );
 
     assert.deepStrictEqual(
       extractImageFromGenerationResponse({ data: [{ b64_json: 'Zm9v' }] }),
@@ -688,6 +692,26 @@ module.exports = (async () => {
     );
     assert.ok(fs.existsSync(downloadedFromDataUrl.filePath));
 
+    await assert.rejects(
+      () => downloadImageFromUrl('https://example.com/expired.png', 'expired url sample', runtimeConfig, {
+        httpClient: {
+          async get() {
+            const error = new Error('not found');
+            error.response = {
+              status: 404,
+              data: Buffer.from('file not found, The resource is valid for 2 hours', 'utf8')
+            };
+            throw error;
+          }
+        }
+      }),
+      (error) => {
+        assert.strictEqual(error.requestUrl, 'https://example.com/expired.png');
+        assert.strictEqual(error.message, 'http_error status=404 body=file not found, The resource is valid for 2 hours');
+        return true;
+      }
+    );
+
     const overQuotaConfig = {
       ...runtimeConfig,
       quotaFile: path.join(tempRoot, 'quota-limit.json'),
@@ -735,7 +759,7 @@ module.exports = (async () => {
     });
     assert.strictEqual(busy.ok, false);
     assert.strictEqual(busy.code, 'busy');
-    assert.strictEqual(busy.replyText, '生图 worker 正忙，请稍后重试');
+    assert.strictEqual(busy.replyText, '生图那边现在正忙着呢，等一下再丢给我试试。');
 
     const staleBusyConfig = {
       ...runtimeConfig,
@@ -817,7 +841,7 @@ module.exports = (async () => {
     });
     assert.strictEqual(privateOnly.ok, false);
     assert.strictEqual(privateOnly.code, 'group_only');
-    assert.strictEqual(privateOnly.replyText, '仅群聊可用');
+    assert.strictEqual(privateOnly.replyText, '这个要在群里才接得住啦');
 
     const missingConfig = await executeCreateCommand({
       prompt: 'missing config',
@@ -930,11 +954,39 @@ module.exports = (async () => {
       }
     });
     assert.strictEqual(upstreamTimeoutFailure.ok, false);
-    assert.strictEqual(upstreamTimeoutFailure.replyText, '生图上游超时，请稍后重试或更换供应商');
+    assert.strictEqual(upstreamTimeoutFailure.replyText, '生图那边等太久没回声。等一下再试，或者换个供应商。');
+
+    const expiredResourceFailure = await executeCreateCommand({
+      prompt: 'expired resource failure',
+      chatType: 'group',
+      groupId: 'g12',
+      senderId: 'u12'
+    }, {
+      config: {
+        ...runtimeConfig,
+        quotaFile: path.join(tempRoot, 'quota-expired-resource.json'),
+        runtimeFile: path.join(tempRoot, 'runtime-expired-resource.json'),
+        errorLogFile: path.join(tempRoot, 'errors-expired-resource.log')
+      },
+      generateImage: async () => {
+        throw new Error('http_error status=404 body=file not found, The resource is valid for 2 hours');
+      }
+    });
+    assert.strictEqual(expiredResourceFailure.ok, false);
+    assert.strictEqual(expiredResourceFailure.replyText, '生图临时资源已失效，请重试或更换提示词');
 
     assert.strictEqual(
       normalizeRequestError({ response: { status: 429, data: { error: 'rate_limited' } } }),
       'http_error status=429 body={"error":"rate_limited"}'
+    );
+    assert.strictEqual(
+      normalizeRequestError({
+        response: {
+          status: 404,
+          data: Buffer.from('file not found, The resource is valid for 2 hours', 'utf8')
+        }
+      }),
+      'http_error status=404 body=file not found, The resource is valid for 2 hours'
     );
 
     console.log('createAgentExecutor.test.js passed');

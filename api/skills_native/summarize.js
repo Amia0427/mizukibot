@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const cheerio = require('cheerio');
 const axios = require('axios');
+const config = require('../../config');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -24,7 +25,7 @@ async function summarizeInput({ input = '', length = 'short' } = {}, dataDir) {
         timeout: 15000,
         proxy: false,
         headers: {
-          'User-Agent': 'MizukiBot/1.0 (summarize native client)'
+          'User-Agent': config.HTTP_USER_AGENT
         }
       });
       const html = String(response.data || '');

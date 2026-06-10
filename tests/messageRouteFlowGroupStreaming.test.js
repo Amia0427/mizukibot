@@ -1,6 +1,19 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-group-stream-'));
+process.env.DATA_DIR = tempDir;
+process.env.GROUP_MAIN_MODEL_STREAM_POLICY_FILE = path.join(tempDir, 'group_main_model_stream_policy.json');
+process.env.AI_STREAM_ENABLED = 'true';
 
 const { createMessageRouteFlow } = require('../core/messageRouteFlow');
+const {
+  reloadGroupMainModelStreamPolicyStore,
+  setGroupMainModelStreamEnabled,
+  setGroupPublic
+} = require('../utils/groupMainModelStreamPolicy');
 
 function createBaseDeps(overrides = {}) {
   const replyOptionsSeen = [];
@@ -8,8 +21,7 @@ function createBaseDeps(overrides = {}) {
   const backgroundCallsSeen = [];
   const deps = {
     config: {
-      BACKGROUND_TOOL_TASKS_ENABLED: false,
-      SUBAGENT_BACKEND: 'command'
+      BACKGROUND_TOOL_TASKS_ENABLED: false
     },
     routeResolver: async () => null,
     routeExecution: {},
@@ -23,13 +35,11 @@ function createBaseDeps(overrides = {}) {
       toolOptionsSeen.push({ ...(options || {}) });
       return 'tool reply';
     },
-    askToolTaskWithSubagentReview: async () => 'subagent reply',
     runBackgroundToolTask: async (payload) => {
       backgroundCallsSeen.push(payload);
       return { backgroundHandled: false, reply: 'background reply' };
     },
     handleAdminCommand: async () => ({ handled: false }),
-    handleHapiAdminCommand: async () => ({ handled: false }),
     handleQqScheduleAdminCommand: async () => ({ handled: false }),
     detectQzonePostDraftMode: () => 'manual',
     generateBotDiaryDraft: async () => ({ ok: false, reason: 'skip' }),
@@ -65,7 +75,6 @@ function createBaseDeps(overrides = {}) {
     saveData: () => {},
     recordMemoryScope: () => {},
     buildToolGuidancePrompt: () => 'tool',
-    buildBridgeGuidancePrompt: () => 'bridge',
     buildStreamingSegmentationPrompt: () => 'stream',
     buildQqRichReplyPrompt: () => 'qq',
     shouldPreferQqRichReply: () => false,
@@ -84,7 +93,6 @@ function createBaseDeps(overrides = {}) {
     buildSubagentContextSummary: () => '',
     buildRoutePromptBundle: () => ({
       toolGuidancePrompt: 'tool',
-      bridgeGuidancePrompt: 'bridge',
       streamingSegmentationPrompt: 'stream',
       qqRichReplyPrompt: 'qq',
       disableStreamForReply: false
@@ -140,13 +148,89 @@ module.exports = (async () => {
   const groupEnvelope = await groupCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('group'));
   assert.strictEqual(groupEnvelope.replyText, 'ai reply');
   assert.strictEqual(groupCase.replyOptionsSeen.length, 1);
-  assert.strictEqual(groupCase.replyOptionsSeen[0].disableStream, true, 'group direct replies should force non-streaming');
+  assert.strictEqual(groupCase.replyOptionsSeen[0].disableStream, false, 'group direct replies should stream by default');
+
+  fs.writeFileSync(process.env.GROUP_MAIN_MODEL_STREAM_POLICY_FILE, JSON.stringify({
+    version: 1,
+    groups: {
+      group_legacy: {
+        isPublic: true,
+        mainModelStreamEnabled: false,
+        updatedAt: Date.parse('2026-05-23T23:20:00+08:00'),
+        updatedBy: 'legacy'
+      }
+    }
+  }, null, 2));
+  reloadGroupMainModelStreamPolicyStore();
+  const legacyPolicyCase = createBaseDeps();
+  const legacyPolicyEnvelope = await legacyPolicyCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('group'),
+    groupId: 'group_legacy'
+  });
+  assert.strictEqual(legacyPolicyEnvelope.replyText, 'ai reply');
+  assert.strictEqual(legacyPolicyCase.replyOptionsSeen.length, 1);
+  assert.strictEqual(legacyPolicyCase.replyOptionsSeen[0].disableStream, false, 'legacy public group policy without explicit toggle should stream by default');
+
+  setGroupPublic('group_1', true, 'test', Date.parse('2026-05-23T23:20:00+08:00'));
+  setGroupMainModelStreamEnabled('group_1', true, 'test', Date.parse('2026-05-23T23:20:01+08:00'));
+  const publicStreamCase = createBaseDeps();
+  const publicStreamEnvelope = await publicStreamCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('group'));
+  assert.strictEqual(publicStreamEnvelope.replyText, 'ai reply');
+  assert.strictEqual(publicStreamCase.replyOptionsSeen.length, 1);
+  assert.strictEqual(publicStreamCase.replyOptionsSeen[0].disableStream, false, 'public group with /main_stream on should allow streaming');
+
+  setGroupMainModelStreamEnabled('group_1', false, 'test', Date.parse('2026-05-23T23:20:02+08:00'));
+  const explicitOffCase = createBaseDeps();
+  const explicitOffEnvelope = await explicitOffCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('group'));
+  assert.strictEqual(explicitOffEnvelope.replyText, 'ai reply');
+  assert.strictEqual(explicitOffCase.replyOptionsSeen.length, 1);
+  assert.strictEqual(explicitOffCase.replyOptionsSeen[0].disableStream, true, 'public group with /main_stream off should disable streaming');
 
   const privateCase = createBaseDeps();
   const privateEnvelope = await privateCase.routeFlow.dispatchByRoutePlan(buildRouteDecision('private'));
   assert.strictEqual(privateEnvelope.replyText, 'ai reply');
   assert.strictEqual(privateCase.replyOptionsSeen.length, 1);
   assert.strictEqual(privateCase.replyOptionsSeen[0].disableStream, false, 'private direct replies should keep the original stream setting');
+
+  let privateThinkingEmojiCalls = 0;
+  const privateNoToolEvents = [];
+  const privateNoToolCase = createBaseDeps({
+    markThinkingEmojiBeforeLlm: async () => {
+      privateThinkingEmojiCalls += 1;
+      throw new Error('private no-tool direct reply should skip thinking emoji preflight');
+    }
+  });
+  const privateNoToolEnvelope = await privateNoToolCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('private'),
+    inboundContext: {
+      chatType: 'private',
+      messageMeta: { messageId: 'm_private' },
+      onEvent(event) {
+        privateNoToolEvents.push(event);
+      }
+    }
+  });
+  assert.strictEqual(privateNoToolEnvelope.replyText, 'ai reply');
+  assert.strictEqual(privateThinkingEmojiCalls, 0);
+  assert.ok(privateNoToolEvents.some((event) => event.type === 'thinking_emoji_skipped' && event.reason === 'private_no_tool_direct_reply'));
+
+  const unavailableToolCase = createBaseDeps();
+  const unavailableToolEnvelope = await unavailableToolCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('group'),
+    executionPlan: {
+      executor: 'direct',
+      allowTools: false,
+      allowStream: false,
+      topRouteType: 'direct_chat',
+      routeDebugKey: 'direct_chat/tool-missing',
+      unavailableReason: 'no-allowed-tools',
+      allowedTools: []
+    }
+  });
+  assert.strictEqual(unavailableToolEnvelope.replyText, 'ai reply');
+  assert.strictEqual(unavailableToolCase.toolOptionsSeen.length, 0, 'unavailable generic tool route should not enter tool task path');
+  assert.strictEqual(unavailableToolCase.replyOptionsSeen.length, 1, 'unavailable generic tool route should fall back to main direct reply');
+  assert.ok(!String(unavailableToolCase.replyOptionsSeen[0].routePrompt || '').includes('tool'));
 
   const cotCase = createBaseDeps();
   const cotEnvelope = await cotCase.routeFlow.dispatchByRoutePlan({

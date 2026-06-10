@@ -54,11 +54,12 @@ module.exports = (async () => {
   });
 
   const profile = getUserProfile('u_extract_profile');
-  assert.ok(profile.identities.includes('明确身份'));
+  assert.ok(!profile.identities.includes('明确身份'));
   assert.ok(!profile.likes.includes('一次性偏好'));
   assert.ok(!profile.recent_topics.includes('一次性话题'));
 
   const events = loadMemoryEvents();
+  assert.ok(events.some((event) => event.semanticSlot === 'identity' && event.text === '明确身份'));
   assert.ok(events.some((event) => event.semanticSlot === 'preference_like' && event.text === '一次性偏好'));
   assert.ok(events.some((event) => event.semanticSlot === 'topic' && event.text === '一次性话题'));
 

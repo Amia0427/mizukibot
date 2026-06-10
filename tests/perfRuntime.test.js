@@ -33,9 +33,13 @@ module.exports = (async () => {
     process.env.RESOURCE_SNAPSHOT_INTERVAL_MS = '1000';
     clearProjectCache();
 
-    const { appendPerfEvent, appendResourceSnapshot, flushPerfLogsSync } = require('../utils/perfRuntime');
+    const { appendPerfEvent, appendResourceSnapshot, flushPerfLogsSync, getActiveTimerSnapshot } = require('../utils/perfRuntime');
+    const interval = setInterval(() => {}, 10000);
+    let timers = null;
     appendPerfEvent({ type: 'reply_send_start', routePolicyKey: 'direct_chat/default' });
     appendResourceSnapshot({ component: 'test' });
+    timers = getActiveTimerSnapshot();
+    clearInterval(interval);
     flushPerfLogsSync();
 
     const perfLines = fs.readFileSync(path.join(tempDir, 'perf.jsonl'), 'utf8').trim().split(/\r?\n/);
@@ -49,6 +53,8 @@ module.exports = (async () => {
     assert.strictEqual(perf.type, 'reply_send_start');
     assert.strictEqual(resource.component, 'test');
     assert.ok(Number(resource.rss) >= 0);
+    assert.ok(Object.prototype.hasOwnProperty.call(resource, 'timers'));
+    assert.ok(timers.intervals >= 1);
 
     console.log('perfRuntime.test.js passed');
   } finally {

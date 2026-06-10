@@ -1,31 +1,53 @@
 $ErrorActionPreference = 'Stop'
 
-$openclawHome = 'C:\Users\Administrator'
-$tempDir = 'C:\Users\Administrator\AppData\Local\Temp'
-if (-not (Test-Path $tempDir)) {
-  $tempDir = 'C:\Windows\Temp'
+$TaskName = 'OpenClaw Gateway'
+$Port = 18789
+$LogDir = 'C:\Users\Administrator\AppData\Local\Temp\openclaw'
+$LogPath = Join-Path $LogDir 'gateway-watchdog.log'
+
+function Write-WatchdogLog {
+    param([string] $Message)
+    New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+    $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
+    Add-Content -LiteralPath $LogPath -Value "$stamp $Message"
 }
 
-$env:OPENCLAW_HOME = $openclawHome
-$env:TMPDIR = $tempDir
-$env:TEMP = $tempDir
-$env:TMP = $tempDir
-$env:OPENCLAW_GATEWAY_PORT = '18789'
-
-foreach ($name in @(
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'ALL_PROXY',
-  'http_proxy',
-  'https_proxy',
-  'all_proxy'
-)) {
-  Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+function Test-GatewayPort {
+    try {
+        $listeners = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop
+        return ($null -ne $listeners)
+    } catch {
+        return $false
+    }
 }
 
-$env:NO_PROXY = 'localhost,127.0.0.1,::1'
-$env:no_proxy = 'localhost,127.0.0.1,::1'
+try {
+    if (Test-GatewayPort) {
+        Write-WatchdogLog "gateway already listening on port $Port"
+        exit 0
+    }
 
-Set-Location 'C:\Users\Administrator\openclaw'
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    if ($task.State -eq 'Disabled') {
+        Write-WatchdogLog "task '$TaskName' is disabled"
+        exit 1
+    }
 
-& 'C:\Program Files\nodejs\node.exe' 'C:\Users\Administrator\openclaw\node_modules\openclaw\dist\index.js' gateway --port 18789
+    Write-WatchdogLog "starting scheduled task '$TaskName'"
+    schtasks.exe /Run /TN $TaskName | Out-Null
+
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        if (Test-GatewayPort) {
+            Write-WatchdogLog "gateway is listening on port $Port"
+            exit 0
+        }
+    }
+
+    Write-WatchdogLog "gateway did not bind port $Port within 60 seconds"
+    exit 1
+} catch {
+    Write-WatchdogLog "failed: $($_.Exception.Message)"
+    exit 1
+}

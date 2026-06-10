@@ -5,6 +5,7 @@ const {
   normalizePlannerDecisionV2,
   planRequestV2
 } = require('../api/runtimeV2/planning/service');
+const config = require('../config');
 
 module.exports = (async () => {
   const webRoute = {
@@ -24,7 +25,21 @@ module.exports = (async () => {
       { name: 'getWeather', bucket: 'local_tools' }
     ]
   });
-  assert.deepStrictEqual(available.allowedToolNames.sort(), ['getWeather', 'memory_cli'].sort());
+  assert.deepStrictEqual(available.allowedToolNames, ['getWeather']);
+
+  const oldMemoryCliChatEnabled = config.MEMORY_CLI_CHAT_ENABLED;
+  config.MEMORY_CLI_CHAT_ENABLED = true;
+  const memoryCliEnabledAvailable = collectAvailableToolSummary(webRoute, {
+    allowedTools: ['web_search', 'web_fetch', 'memory_cli', 'getWeather'],
+    toolCatalog: [
+      { name: 'web_search', bucket: 'global_tools' },
+      { name: 'web_fetch', bucket: 'global_tools' },
+      { name: 'memory_cli', bucket: 'global_tools' },
+      { name: 'getWeather', bucket: 'local_tools' }
+    ]
+  });
+  assert.deepStrictEqual(memoryCliEnabledAvailable.allowedToolNames.sort(), ['getWeather', 'memory_cli'].sort());
+  config.MEMORY_CLI_CHAT_ENABLED = oldMemoryCliChatEnabled;
 
   const normalizedWeb = normalizePlannerDecisionV2({
     mode: 'tool_plan',
@@ -47,6 +62,52 @@ module.exports = (async () => {
   assert.deepStrictEqual(normalizedWeb.steps, []);
   assert.strictEqual(normalizedWeb.plannerMeta.backgroundResearchRequested, true);
   assert.ok(normalizedWeb.plannerMeta.backgroundResearchQuery);
+
+  const explicitNasdaqQuestion = '据说你能联网搜索 那我问你纳斯达克2026年的最高点是多少 必须网络搜索再回答';
+  const explicitWebRoute = {
+    question: explicitNasdaqQuestion,
+    cleanText: explicitNasdaqQuestion,
+    topRouteType: 'direct_chat',
+    meta: {
+      chatMode: 'text_chat',
+      toolIntent: 'maybe_tools',
+      responseIntent: 'answer',
+      allowedTools: ['web_search', 'web_fetch'],
+      explicitWebSearchRequired: true
+    },
+    facets: { sourceScope: 'web', freshness: 'latest' }
+  };
+
+  const explicitAvailable = collectAvailableToolSummary(explicitWebRoute, {
+    allowedTools: ['web_search', 'web_fetch'],
+    toolCatalog: [
+      { name: 'web_search', bucket: 'global_tools' },
+      { name: 'web_fetch', bucket: 'global_tools' }
+    ],
+    config: { COMPANION_TOOL_MODE_ENABLED: true }
+  });
+  assert.deepStrictEqual(explicitAvailable.allowedToolNames.sort(), ['web_fetch', 'web_search'].sort());
+
+  const correctedExplicitWeb = normalizePlannerDecisionV2({
+    mode: 'chat_only',
+    taskShape: 'fast_reply',
+    allowedToolNames: [],
+    steps: [],
+    plannerMeta: { decisionSource: 'planner' }
+  }, explicitWebRoute, {
+    allowedTools: ['web_search', 'web_fetch'],
+    toolCatalog: [
+      { name: 'web_search', bucket: 'global_tools' },
+      { name: 'web_fetch', bucket: 'global_tools' }
+    ],
+    config: { COMPANION_TOOL_MODE_ENABLED: true }
+  });
+  assert.strictEqual(correctedExplicitWeb.mode, 'tool_plan');
+  assert.deepStrictEqual(correctedExplicitWeb.allowedToolNames, ['web_search']);
+  assert.strictEqual(correctedExplicitWeb.steps[0].tool, 'web_search');
+  assert.strictEqual(correctedExplicitWeb.taskShape, 'tool_augmented_reply');
+  assert.strictEqual(correctedExplicitWeb.plannerMeta.toolGateReason, 'allow_safe_explicit_web_search');
+  assert.strictEqual(correctedExplicitWeb.plannerMeta.normalizedByRule, true);
 
   const weatherDecision = await planRequestV2({
     question: '??????',

@@ -1,6 +1,22 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-continuous-message-'));
+process.env.DATA_DIR = tempRoot;
+process.env.IMAGE_MEMORY_INDEX_FILE = path.join(tempRoot, 'image_memory_index.json');
+process.env.IMAGE_MEMORY_RECALL_ENABLED = 'true';
+process.env.IMAGE_MEMORY_VISUAL_SUMMARY_ENABLED = 'false';
+process.env.MEMORY_SCOPE_INDEX_FILE = path.join(tempRoot, 'memory_scope_index.json');
+fs.writeFileSync(process.env.MEMORY_SCOPE_INDEX_FILE, JSON.stringify({ version: 1, users: {} }, null, 2));
 
 const { createContinuousMessagePreprocessor } = require('../core/continuousMessagePreprocessor');
+
+function isProjectModuleLoaded(relPath) {
+  const abs = path.resolve(__dirname, '..', relPath);
+  return Object.keys(require.cache).some((key) => key === abs);
+}
 
 function makeMessage({
   messageId,
@@ -107,7 +123,9 @@ async function testImageRefsPreferCachedHandles() {
     maxHoldMs: 240,
     ensureCachedImageRef: async (url) => ({
       ok: true,
-      ref: `cached-image://${String(url || '').split('/').pop().replace(/\W+/g, '-')}`
+      ref: `cached-image://${String(url || '').split('/').pop().replace(/\W+/g, '-')}`,
+      mediaType: 'image/png',
+      sourceUrl: url
     })
   });
 
@@ -132,6 +150,55 @@ async function testImageRefsPreferCachedHandles() {
   assert.strictEqual(first.mode, 'ready');
   assert.strictEqual(first.meta.selectedImageRef, 'cached-image://current-png');
   assert.strictEqual(first.meta.imageRefMap['https://example.com/current.png'], 'cached-image://current-png');
+  assert.strictEqual(
+    isProjectModuleLoaded('utils/imageVisualSummaryMemory.js'),
+    false,
+    'disabled visual summary should not load the memory summarizer on the message path'
+  );
+  assert.strictEqual(
+    isProjectModuleLoaded('utils/memory-v3/materializer.js'),
+    false,
+    'disabled visual summary should not load the memory materializer on the message path'
+  );
+}
+
+async function testMergedFlushKeepsLatestFreshnessToken() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 50,
+    atBotDebounceMs: 50,
+    privateDebounceMs: 50,
+    maxHoldMs: 180
+  });
+
+  const firstMsg = makeMessage({
+    messageId: 'fresh-img-1',
+    message: [{ type: 'image', data: { url: 'https://example.com/fresh.png' } }],
+    rawMessage: '[CQ:image,url=https://example.com/fresh.png]'
+  });
+  const secondMsg = makeMessage({
+    messageId: 'fresh-text-1',
+    time: 1710000011,
+    message: [{ type: 'text', data: { text: '这是同一轮补充' } }],
+    rawMessage: '这是同一轮补充'
+  });
+
+  const firstPromise = preprocessor.handleMessage(firstMsg, {
+    freshnessSessionKey: 'direct:u1',
+    freshnessVersion: 7
+  });
+  await new Promise((resolve) => setTimeout(resolve, 70));
+  const second = await preprocessor.handleMessage(secondMsg, {
+    freshnessSessionKey: 'direct:u1',
+    freshnessVersion: 8
+  });
+  assert.strictEqual(second.mode, 'deferred');
+
+  const first = await firstPromise;
+  assert.strictEqual(first.mode, 'ready');
+  assert.strictEqual(first.meta.freshnessSessionKey, 'direct:u1');
+  assert.strictEqual(first.meta.flushVersion, 8);
+  assert.deepStrictEqual(first.meta.sourceMessageIds, ['fresh-img-1', 'fresh-text-1']);
 }
 
 async function testSentenceWindowWaitsForContinuation() {
@@ -189,6 +256,7 @@ async function testSentenceStableTailFlushesWithoutExtraWait() {
   await testImageThenTextMergesIntoOneTurn();
   await testPlainTextStillFlushesOnBaseDebounce();
   await testImageRefsPreferCachedHandles();
+  await testMergedFlushKeepsLatestFreshnessToken();
   await testSentenceWindowWaitsForContinuation();
   await testSentenceStableTailFlushesWithoutExtraWait();
   console.log('continuousMessagePreprocessor.test.js passed');

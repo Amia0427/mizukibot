@@ -1,13 +1,79 @@
 const config = require('../config');
 const { buildRuntimePrompt } = require('./runtimePrompts');
 const { buildSecuritySystemPrompt } = require('./promptSecurity');
+const { loadPersonaModuleText } = require('./personaModules');
 
 function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function normalizeObject(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function isAdminPromptContext(options = {}) {
+  const routeMeta = normalizeObject(options.routeMeta, {});
+  if (options.isAdmin === true || routeMeta.isAdmin === true || routeMeta.admin === true) return true;
+  const userId = normalizeText(
+    options.userId
+    || options.user_id
+    || routeMeta.userId
+    || routeMeta.user_id
+    || routeMeta.senderId
+    || routeMeta.sender_id
+  );
+  if (!userId) return false;
+  const isAdmin = (Array.isArray(config.ADMIN_USER_IDS) ? config.ADMIN_USER_IDS : [])
+    .map((item) => normalizeText(item))
+    .filter(Boolean)
+    .includes(userId);
+
+  // Admin prompts should only apply in private chat
+  if (isAdmin) {
+    const chatType = normalizeText(
+      options.chatType
+      || routeMeta.chatType
+      || routeMeta.chat_type
+    );
+    // Only return true if it's private chat or direct message
+    return chatType === 'private' || chatType === 'direct';
+  }
+
+  return false;
+}
+
+function shouldIncludePromptBlockForMainContext(block = {}, options = {}) {
+  const appliesWhen = normalizeObject(block.appliesWhen || block.applies_when, {});
+  const adminOnly = appliesWhen.adminOnly === true || appliesWhen.admin_only === true;
+  if (adminOnly && !isAdminPromptContext(options)) return false;
+  return true;
+}
+
 function buildMainStageBlocks(options = {}) {
   const blocks = [];
+  const optionSystemPrompt = normalizeText(options.systemPrompt);
+  const configSystemPrompt = normalizeText(config.SYSTEM_PROMPT);
+  const hasSystemPromptOverride = Boolean(optionSystemPrompt && optionSystemPrompt !== configSystemPrompt);
+  const configuredSystemBlocks = Array.isArray(options.systemPromptBlocks)
+    ? options.systemPromptBlocks
+    : (!hasSystemPromptOverride && Array.isArray(config.SYSTEM_PROMPT_BLOCKS) ? config.SYSTEM_PROMPT_BLOCKS : []);
+  const normalizedSystemBlocks = configuredSystemBlocks.map((block, index) => ({
+    ...block,
+    id: normalizeText(block.id, `system_prompt_block_${index + 1}`),
+    label: normalizeText(block.label, normalizeText(block.id, `System Prompt Block ${index + 1}`)),
+    stage: normalizeText(block.stage, 'main'),
+    priority: Number.isFinite(Number(block.priority)) ? Number(block.priority) : 500 + index,
+    authority: normalizeText(block.authority, 'persona'),
+    kind: normalizeText(block.kind, 'persona'),
+    appliesWhen: normalizeObject(block.appliesWhen || block.applies_when, {}),
+    content: normalizeText(block.content)
+  }))
+    .filter((block) => block.content)
+    .filter((block) => shouldIncludePromptBlockForMainContext(block, options));
+  const rootSystemBlocks = normalizedSystemBlocks.filter((block) => block.authority === 'system_root' || block.kind === 'system_root');
+  const nonRootSystemBlocks = normalizedSystemBlocks.filter((block) => !(block.authority === 'system_root' || block.kind === 'system_root'));
+  const hasConfiguredSystemBlocks = normalizedSystemBlocks.length > 0;
+  blocks.push(...rootSystemBlocks);
   blocks.push({
     id: 'security_contract',
     label: 'Security Contract',
@@ -17,16 +83,45 @@ function buildMainStageBlocks(options = {}) {
     kind: 'security',
     content: buildSecuritySystemPrompt()
   });
-  const systemPrompt = normalizeText(options.systemPrompt || config.SYSTEM_PROMPT);
-  if (systemPrompt) {
+  if (hasConfiguredSystemBlocks) {
+    blocks.push(...nonRootSystemBlocks);
+  } else {
+    const systemPrompt = optionSystemPrompt || configSystemPrompt;
+    if (systemPrompt) {
+      blocks.push({
+        id: 'main_persona_system',
+        label: 'Main Persona',
+        stage: 'main',
+        priority: 500,
+        authority: 'persona',
+        kind: 'persona',
+        content: systemPrompt
+      });
+    }
+  }
+  return blocks;
+}
+
+function buildMainStableSystemBlocks(options = {}) {
+  const blocks = buildMainStageBlocks(options).map((block) => ({
+    ...block,
+    lane: 'stable_system'
+  }));
+  const coreBaseline = normalizeText(loadPersonaModuleText('core_baseline'));
+  if (coreBaseline) {
     blocks.push({
-      id: 'main_persona_system',
-      label: 'Main Persona',
+      id: 'core_baseline_patch',
+      label: 'Core Baseline Patch',
       stage: 'main',
-      priority: 500,
-      authority: 'persona',
-      kind: 'persona',
-      content: systemPrompt
+      priority: 145,
+      authority: 'persona_module',
+      kind: 'persona_core_patch',
+      content: coreBaseline,
+      budgetTokens: 120,
+      conflictTags: [],
+      source: 'persona_modules/core_baseline.txt',
+      lane: 'stable_system',
+      meta: {}
     });
   }
   return blocks;
@@ -65,6 +160,7 @@ function buildPlannerStageSystemPrompt(toolCatalog = [], options = {}) {
     buildSecuritySystemPrompt(),
     'You are the direct-chat planner stage.',
     'Your responsibility is task judgment, evidence policy, and tool planning only.',
+    'Make the final planner decision in one pass; do not request or depend on a second planner pass.',
     'You may also decide at most 2 persona modules for the main reply.',
     'Only choose persona modules from the provided personaModuleCatalog.',
     'Do not imitate the full main persona.',
@@ -89,6 +185,7 @@ function buildRouterStageSystemPrompt(options = {}) {
 
 module.exports = {
   buildMainStageBlocks,
+  buildMainStableSystemBlocks,
   buildPlannerStageSystemPrompt,
   buildReviewStageRoutePrompt,
   buildReviewStageSystemPrompt,

@@ -31,15 +31,20 @@ module.exports = (async () => {
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
+    process.env.API_PROVIDER = 'openai_compatible';
+    process.env.AI_MODEL = 'different-main-model';
     process.env.DATA_DIR = tempDataDir;
     process.env.PASSIVE_AWARENESS_ENABLED = 'true';
     process.env.PASSIVE_AWARENESS_GROUP_IDS = 'g-passive-memory';
     process.env.PASSIVE_AWARENESS_API_BASE_URL = 'https://example.com/decision-endpoint';
     process.env.PASSIVE_AWARENESS_API_KEY = 'test-passive-key';
     process.env.PASSIVE_AWARENESS_MODEL = 'test-decision-model';
-    process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://example.com/reply-endpoint';
+    process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://gcli.example/v1/chat/completions';
     process.env.PASSIVE_AWARENESS_REPLY_API_KEY = 'test-reply-key';
-    process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'test-reply-model';
+    process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'gemini-3-flash-preview';
+    process.env.PASSIVE_AWARENESS_REPLY_TEMPERATURE = '1';
+    process.env.PASSIVE_AWARENESS_REPLY_TOP_P = '';
     process.env.BOT_QQ = 'bot-test';
 
     clearProjectCache();
@@ -124,6 +129,10 @@ module.exports = (async () => {
     assert.strictEqual(result.handled, true);
     assert.strictEqual(result.replyText, '我来接一句');
     assert.strictEqual(streamedBodies.length, 1);
+    assert.strictEqual(streamedBodies[0].temperature, 1);
+    assert.ok(!Object.prototype.hasOwnProperty.call(streamedBodies[0], 'top_p'));
+    assert.strictEqual(streamedBodies[0].__preferredProtocol, 'chat_completions');
+    assert.strictEqual(streamedBodies[0].__provider, 'openai_compatible');
 
     const userPrompt = String(streamedBodies[0]?.messages?.[1]?.content || '');
     assert.ok(userPrompt.includes('[RetrievedMemory]'));

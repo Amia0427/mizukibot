@@ -20,6 +20,19 @@ try {
     fallback: () => ({ recovered: 'bad-json' })
   });
   assert.deepStrictEqual(badJsonStore.read(), { recovered: 'bad-json' });
+
+  const readOnlyFile = path.join(tmpDir, 'readonly.json');
+  fs.writeFileSync(readOnlyFile, JSON.stringify({ old: true }), 'utf8');
+  fs.chmodSync(readOnlyFile, 0o444);
+  const readOnlyStore = createJsonHotStore(readOnlyFile, {
+    fallback: () => ({ recovered: 'readonly' })
+  });
+  assert.deepStrictEqual(readOnlyStore.read(), { old: true });
+  readOnlyStore.replace({ ok: true }, { flushNow: true });
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(readOnlyFile, 'utf8')), { ok: true });
 } finally {
+  try {
+    fs.chmodSync(path.join(tmpDir, 'readonly.json'), 0o666);
+  } catch (_) {}
   fs.rmSync(tmpDir, { recursive: true, force: true });
 }

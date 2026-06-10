@@ -80,6 +80,7 @@ function getScopeConfig(scope = DEFAULT_FALLBACK_SCOPE) {
       scope: normalizedScope,
       enabled: Boolean(config.ADMIN_AI_FALLBACK_ENABLED),
       fallbackModel: normalizeText(config.ADMIN_AI_FALLBACK_MODEL),
+      fallbackProvider: normalizeText(config.ADMIN_AI_FALLBACK_PROVIDER),
       fallbackApiBaseUrl: normalizeText(config.ADMIN_AI_FALLBACK_API_BASE_URL),
       fallbackApiKey: normalizeText(config.ADMIN_AI_FALLBACK_API_KEY),
       failureThreshold: Number(config.ADMIN_AI_FALLBACK_FAILURE_THRESHOLD),
@@ -93,6 +94,7 @@ function getScopeConfig(scope = DEFAULT_FALLBACK_SCOPE) {
     scope: DEFAULT_FALLBACK_SCOPE,
     enabled: Boolean(config.AI_FALLBACK_ENABLED),
     fallbackModel: normalizeText(config.AI_FALLBACK_MODEL),
+    fallbackProvider: normalizeText(config.AI_FALLBACK_PROVIDER),
     fallbackApiBaseUrl: normalizeText(config.AI_FALLBACK_API_BASE_URL),
     fallbackApiKey: normalizeText(config.AI_FALLBACK_API_KEY),
     failureThreshold: Number(config.AI_FALLBACK_FAILURE_THRESHOLD),
@@ -123,6 +125,10 @@ function getFallbackModelName(scope = DEFAULT_FALLBACK_SCOPE) {
 
 function getFallbackApiBaseUrl(scope = DEFAULT_FALLBACK_SCOPE) {
   return normalizeText(getScopeConfig(scope).fallbackApiBaseUrl);
+}
+
+function getFallbackProvider(scope = DEFAULT_FALLBACK_SCOPE) {
+  return normalizeText(getScopeConfig(scope).fallbackProvider);
 }
 
 function getFallbackApiKey(scope = DEFAULT_FALLBACK_SCOPE) {
@@ -207,24 +213,29 @@ function resolveMainModelConfig(baseConfig = null, options = null) {
   const normalized = normalizeScopeOptions(options);
   const primaryConfig = buildPrimaryConfig(baseConfig);
   warnIfFallbackEnabledButIncomplete(normalized.scope);
+  const state = getScopeState(normalized.scope);
   if (!isFallbackActive(normalized)) {
     return {
       ...primaryConfig,
       __mainFallbackActive: false,
-      __mainFallbackScope: normalized.scope
+      __mainFallbackScope: normalized.scope,
+      __mainFallbackReason: normalizeText(state.lastError)
     };
   }
 
   return {
     ...primaryConfig,
     model: getFallbackModelName(normalized.scope) || primaryConfig.model,
+    provider: getFallbackProvider(normalized.scope) || primaryConfig.provider,
     apiBaseUrl: getFallbackApiBaseUrl(normalized.scope) || primaryConfig.apiBaseUrl,
     apiKey: getFallbackApiKey(normalized.scope) || primaryConfig.apiKey,
     __mainModelSource: getFallbackModelName(normalized.scope) ? `${normalized.scope}.fallbackModel` : primaryConfig.__mainModelSource,
+    __mainProviderSource: getFallbackProvider(normalized.scope) ? `${normalized.scope}.fallbackProvider` : primaryConfig.__mainProviderSource,
     __mainApiBaseUrlSource: getFallbackApiBaseUrl(normalized.scope) ? `${normalized.scope}.fallbackApiBaseUrl` : primaryConfig.__mainApiBaseUrlSource,
     __mainApiKeySource: getFallbackApiKey(normalized.scope) ? `${normalized.scope}.fallbackApiKey` : primaryConfig.__mainApiKeySource,
     __mainFallbackActive: true,
-    __mainFallbackScope: normalized.scope
+    __mainFallbackScope: normalized.scope,
+    __mainFallbackReason: normalizeText(state.lastError)
   };
 }
 
@@ -232,17 +243,21 @@ function resolveForcedFallbackMainModelConfig(baseConfig = null, options = null)
   const normalized = normalizeScopeOptions(options);
   const primaryConfig = buildPrimaryConfig(baseConfig);
   warnIfFallbackEnabledButIncomplete(normalized.scope);
+  const state = getScopeState(normalized.scope);
   return {
     ...primaryConfig,
     model: getFallbackModelName(normalized.scope) || primaryConfig.model,
+    provider: getFallbackProvider(normalized.scope) || primaryConfig.provider,
     apiBaseUrl: getFallbackApiBaseUrl(normalized.scope) || primaryConfig.apiBaseUrl,
     apiKey: getFallbackApiKey(normalized.scope) || primaryConfig.apiKey,
     __mainModelSource: getFallbackModelName(normalized.scope) ? `${normalized.scope}.fallbackModel` : primaryConfig.__mainModelSource,
+    __mainProviderSource: getFallbackProvider(normalized.scope) ? `${normalized.scope}.fallbackProvider` : primaryConfig.__mainProviderSource,
     __mainApiBaseUrlSource: getFallbackApiBaseUrl(normalized.scope) ? `${normalized.scope}.fallbackApiBaseUrl` : primaryConfig.__mainApiBaseUrlSource,
     __mainApiKeySource: getFallbackApiKey(normalized.scope) ? `${normalized.scope}.fallbackApiKey` : primaryConfig.__mainApiKeySource,
     __mainFallbackActive: true,
     __mainFallbackForced: true,
-    __mainFallbackScope: normalized.scope
+    __mainFallbackScope: normalized.scope,
+    __mainFallbackReason: normalizeText(state.lastError)
   };
 }
 

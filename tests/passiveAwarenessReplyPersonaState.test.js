@@ -29,9 +29,12 @@ module.exports = (async () => {
   let originalCompose = null;
   let originalRender = null;
   let originalRecord = null;
+  const replyModelCalls = [];
 
   try {
-    process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.API_BASE_URL = 'https://example.com/main-endpoint';
+    process.env.API_KEY = 'main-key';
+    process.env.AI_MODEL = 'main-model';
     process.env.DATA_DIR = tempDataDir;
     process.env.PASSIVE_AWARENESS_ENABLED = 'true';
     process.env.PASSIVE_AWARENESS_GROUP_IDS = 'g-passive-test';
@@ -41,6 +44,7 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://example.com/reply-endpoint';
     process.env.PASSIVE_AWARENESS_REPLY_API_KEY = 'test-reply-key';
     process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'test-reply-model';
+    delete process.env.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL;
     process.env.BOT_QQ = 'bot-test';
 
     clearProjectCache();
@@ -59,7 +63,13 @@ module.exports = (async () => {
         ]
       }
     });
-    httpClient.postStreamWithRetry = async (_url, _body, handlers = {}) => {
+    httpClient.postStreamWithRetry = async (_url, _body, handlers = {}, _retries = 0, _apiKey = '') => {
+      replyModelCalls.push({ url: _url, body: _body, apiKey: _apiKey });
+      const bodyText = JSON.stringify(_body || {});
+      assert.ok(bodyText.includes('[ChatLivenessDiscipline]'));
+      assert.ok(bodyText.includes('surface=passive_group_reply'));
+      assert.ok(bodyText.includes('同一用户的私聊/群聊记忆和上下文可以作为背景连续性使用'));
+      assert.ok(bodyText.includes('不得泄露来源、复述私聊细节'));
       if (typeof handlers.onData === 'function') {
         handlers.onData(Buffer.from('data: {"choices":[{"delta":{"content":"我在看"}}]}\n\n'));
         handlers.onData(Buffer.from('data: [DONE]\n\n'));
@@ -119,6 +129,10 @@ module.exports = (async () => {
     assert.strictEqual(result.handled, true);
     assert.strictEqual(result.replyModelCalled, true);
     assert.strictEqual(result.replyText, '我在看');
+    assert.strictEqual(replyModelCalls.length, 1);
+    assert.strictEqual(replyModelCalls[0].url, 'https://example.com/reply-endpoint');
+    assert.strictEqual(replyModelCalls[0].body.model, 'test-reply-model');
+    assert.strictEqual(replyModelCalls[0].apiKey, 'test-reply-key');
     assert.strictEqual(recordedPayloads.length, 1);
     assert.strictEqual(recordedPayloads[0].surface, 'passive_group_reply');
     assert.deepStrictEqual(recordedPayloads[0].payload.state, mockedState);

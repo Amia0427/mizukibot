@@ -166,6 +166,15 @@ function buildInboundMessageContext({
     visualContext: visualContext && typeof visualContext === 'object'
       ? { ...visualContext }
       : null,
+    mainReplyPromptMode: '',
+    availableContextSignals: {},
+    dynamicFewShotPrompt: '',
+    memoryCliTurn: {},
+    schedulerInjection: '',
+    sharedShortTermContext: {},
+    personaMemoryState: {},
+    memoryContext: {},
+    userInfo: {},
     messageMeta: {
       messageId: String(nextMsg.message_id || '').trim(),
       senderName: safeSenderName(nextMsg),

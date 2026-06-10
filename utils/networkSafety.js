@@ -69,13 +69,34 @@ function parseHttpUrl(rawUrl = '') {
   return parsed;
 }
 
+function normalizeResolvedAddressEntry(entry = null) {
+  const address = normalizeHost(entry && entry.address ? entry.address : entry);
+  if (!address) return null;
+  const family = Number(entry && entry.family ? entry.family : net.isIP(address));
+  return {
+    address,
+    family: family === 6 ? 6 : 4
+  };
+}
+
+function splitSafeResolvedAddresses(addresses = []) {
+  const normalized = (Array.isArray(addresses) ? addresses : [addresses])
+    .map(normalizeResolvedAddressEntry)
+    .filter(Boolean);
+  return {
+    all: normalized,
+    safe: normalized.filter((entry) => !isUnsafeHost(entry.address)),
+    unsafe: normalized.filter((entry) => isUnsafeHost(entry.address))
+  };
+}
+
 function isUnsafeHttpUrl(rawUrl = '') {
   const parsed = parseHttpUrl(rawUrl);
   if (!parsed) return true;
   return isUnsafeHost(parsed.hostname);
 }
 
-async function assertSafeHttpUrl(rawUrl = '', options = {}) {
+async function resolveSafeHttpUrl(rawUrl = '', options = {}) {
   const parsed = parseHttpUrl(rawUrl);
   if (!parsed) throw new Error('URL must use http or https');
 
@@ -86,15 +107,25 @@ async function assertSafeHttpUrl(rawUrl = '', options = {}) {
     ? options.lookup
     : dns.promises.lookup.bind(dns.promises);
   const addresses = await lookup(hostname, { all: true });
-  const resolved = Array.isArray(addresses) ? addresses : [addresses];
-  if (!resolved.length) throw new Error('URL host could not be resolved');
+  const resolved = splitSafeResolvedAddresses(addresses);
+  if (!resolved.all.length) throw new Error('URL host could not be resolved');
 
-  for (const entry of resolved) {
-    const address = normalizeHost(entry && entry.address ? entry.address : entry);
-    if (isUnsafeHost(address)) throw new Error('URL resolves to a disallowed address');
+  if (resolved.unsafe.length > 0 && options.allowMixedResolvedAddresses !== true) {
+    throw new Error('URL resolves to a disallowed address');
   }
+  if (!resolved.safe.length) throw new Error('URL resolves only to disallowed addresses');
 
-  return parsed;
+  return {
+    url: parsed,
+    hostname,
+    safeAddresses: resolved.safe,
+    unsafeAddresses: resolved.unsafe
+  };
+}
+
+async function assertSafeHttpUrl(rawUrl = '', options = {}) {
+  const result = await resolveSafeHttpUrl(rawUrl, options);
+  return result.url;
 }
 
 function isLoopbackHost(hostname = '') {
@@ -103,6 +134,11 @@ function isLoopbackHost(hostname = '') {
 }
 
 async function assertSafeModelEndpoint(rawUrl = '', options = {}) {
+  const result = await resolveSafeModelEndpoint(rawUrl, options);
+  return result.url;
+}
+
+async function resolveSafeModelEndpoint(rawUrl = '', options = {}) {
   const parsed = parseHttpUrl(rawUrl);
   if (!parsed) throw new Error('endpoint must use http or https');
 
@@ -111,15 +147,25 @@ async function assertSafeModelEndpoint(rawUrl = '', options = {}) {
     if (!allowLocalHttp || !isLoopbackHost(parsed.hostname)) {
       throw new Error('endpoint must use https');
     }
-    return parsed;
+    return {
+      url: parsed,
+      hostname: normalizeHost(parsed.hostname),
+      safeAddresses: [],
+      unsafeAddresses: []
+    };
   }
 
-  return assertSafeHttpUrl(rawUrl, options);
+  return resolveSafeHttpUrl(rawUrl, {
+    ...options,
+    allowMixedResolvedAddresses: options.allowMixedResolvedAddresses !== false
+  });
 }
 
 module.exports = {
   assertSafeHttpUrl,
   assertSafeModelEndpoint,
+  resolveSafeHttpUrl,
+  resolveSafeModelEndpoint,
   isUnsafeHost,
   isUnsafeHttpUrl
 };

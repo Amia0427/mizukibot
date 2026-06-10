@@ -2,7 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../../config');
 const {
-  appendMemoryEvent
+  appendMemoryEvent,
+  loadMemoryEvents
 } = require('./events');
 const { materializeMemoryViews } = require('./materializer');
 const { memories, favorites } = require('../memory');
@@ -29,6 +30,30 @@ function isPersonalUserId(userId = '') {
   return true;
 }
 
+function hasExistingLegacyMigrationEvents() {
+  return loadMemoryEvents().some((event) => {
+    const type = String(event?.type || '').trim().toLowerCase();
+    const source = String(event?.source || '').trim().toLowerCase();
+    const sourceKind = String(event?.sourceKind || '').trim().toLowerCase();
+    return type === 'migration_bootstrap'
+      && (sourceKind === 'migration' || source === 'legacy_memories' || source === 'memory_scope_index');
+  });
+}
+
+function materializeMemoryV3Views(options = {}) {
+  const result = materializeMemoryViews({
+    force: options.force !== false,
+    source: options.source || 'memory_v3_materialize'
+  });
+  return {
+    ok: result?.ok === true && result?.deferred !== true,
+    mode: 'materialize',
+    deferred: result?.deferred === true,
+    reason: result?.reason || '',
+    materialized: result?.stats || null
+  };
+}
+
 function backupLegacyFiles() {
   const backupDir = path.join(config.DATA_DIR, `memory-v3-backup-${Date.now()}`);
   ensureDir(backupDir);
@@ -50,7 +75,22 @@ function backupLegacyFiles() {
   return backupDir;
 }
 
-async function migrateLegacyMemoryToV3() {
+async function migrateLegacyMemoryToV3(options = {}) {
+  if (options.forceImport !== true && hasExistingLegacyMigrationEvents()) {
+    const materialized = materializeMemoryV3Views({
+      force: true,
+      source: 'legacy_migration_existing_events'
+    });
+    return {
+      ok: materialized.ok,
+      skipped: true,
+      reason: 'legacy_migration_events_exist',
+      backupDir: '',
+      materialized: materialized.materialized,
+      favoritesUsers: Object.keys(favorites || {}).length
+    };
+  }
+
   const backupDir = backupLegacyFiles();
   const importedUsers = new Set();
 
@@ -169,15 +209,19 @@ async function migrateLegacyMemoryToV3() {
     }
   }
 
-  const materialized = materializeMemoryViews();
+  const materialized = materializeMemoryV3Views({
+    force: true,
+    source: 'legacy_migration_import'
+  });
   return {
     ok: true,
     backupDir,
-    materialized: materialized.stats,
+    materialized: materialized.materialized,
     favoritesUsers: Object.keys(favorites || {}).length
   };
 }
 
 module.exports = {
+  materializeMemoryV3Views,
   migrateLegacyMemoryToV3
 };

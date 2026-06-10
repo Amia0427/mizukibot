@@ -21,6 +21,10 @@ function getToolSchemas() {
 const { postWithRetry } = require('../httpClient');
 const { extractMessageContent } = require('../parser');
 
+function getMainReplyDefaultMaxTokens() {
+  return Math.max(64, Number(config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192) || 8192);
+}
+
 const { chatHistory, shortTermMemory, addProfileItem, buildReplyStylePolicy } = require('../../utils/memory');
 const { buildMemoryContext, buildMemoryContextAsync } = require('../../utils/memoryContext');
 const { HUMANIZER_SYSTEM_PROMPT } = require('../../utils/humanizer');
@@ -88,7 +92,7 @@ function getBaseURLForOpenAI() {
 
 function getDefaultClientHeaders() {
   return {
-    'User-Agent': String(config.HTTP_USER_AGENT || 'MizukiBot/1.0 (Windows; Node.js)').trim(),
+    'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT).trim(),
     'Accept-Language': String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim()
   };
 }
@@ -118,7 +122,7 @@ function createGraphModelClient({ apiBaseUrl, apiKey, model, temperature, topP, 
             messages,
             tools: Array.isArray(options.tools) ? options.tools : [],
             tool_choice: options.tool_choice,
-            max_tokens: Math.max(64, Number(config.AI_MAX_TOKENS) || 2500),
+            max_tokens: Math.max(64, Number(config.AI_MAX_TOKENS) || getMainReplyDefaultMaxTokens()),
             stream: false
           },
           retries,
@@ -709,9 +713,12 @@ function shouldExposeMemoryCliForGraphState(state = {}) {
 
 function mergeAllowedToolsWithMemoryCliForGraph(state = {}) {
   const base = Array.isArray(state?.allowedTools) ? normalizeToolNames(state.allowedTools) : [];
-  const withMemoryCli = (!shouldExposeMemoryCliForGraphState(state) || base.includes('memory_cli'))
+  const filteredBase = (config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED)
     ? base
-    : [...base, 'memory_cli'];
+    : base.filter((toolName) => toolName !== 'memory_cli');
+  const withMemoryCli = (!shouldExposeMemoryCliForGraphState(state) || base.includes('memory_cli'))
+    ? filteredBase
+    : [...filteredBase, 'memory_cli'];
   return filterAllowedToolsForMemoryCliTurn(withMemoryCli, state?.memoryCliTurn);
 }
 
@@ -1166,7 +1173,7 @@ function buildApp() {
   }
 
 function buildToolLoopLimitMessage(toolLoopCount) {
-  return `Model invocation failed: tool loop limit reached after ${toolLoopCount} rounds`;
+  return `记忆那边刚刚绕住了，连续转了 ${toolLoopCount} 轮。`;
 }
 
 async function invokeAgentTurn(state, options = {}) {
@@ -1350,7 +1357,7 @@ async function invokeAgentTurn(state, options = {}) {
         ...cachedState.messages,
         {
           role: 'assistant',
-          content: `Model invocation failed: ${String(e.message || 'unknown error')}`
+          content: `模型调用刚刚卡住了：${String(e.message || 'unknown error')}`
         }
       ]
     };

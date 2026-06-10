@@ -1,5 +1,10 @@
 const { Annotation } = require('@langchain/langgraph');
-const { normalizePlanStep, normalizeArray, normalizeObject } = require('./contracts');
+const {
+  normalizePlanStep,
+  normalizeArray,
+  normalizeObject,
+  validatePlannerExecutionPlan
+} = require('./contracts');
 const { cloneTraceForMeta, normalizeRequestTrace } = require('../../utils/requestTrace');
 
 function appendReducer(left, right) {
@@ -49,8 +54,44 @@ function buildInitialPlanSlice(request = {}, options = {}) {
     : ((step, index) => normalizePlanStep(step, 'route', index));
 
   const plannerExecutionPlan = getToolPlannerExecutionPlan(request.routeMeta);
-  const directPlannerSteps = Array.isArray(plannerExecutionPlan?.steps) ? plannerExecutionPlan.steps : [];
+  const plannerValidation = plannerExecutionPlan
+    ? validatePlannerExecutionPlan(plannerExecutionPlan, {
+      allowedTools: request.allowedTools || request.routeMeta?.allowedTools || []
+    })
+    : {
+      ok: true,
+      status: 'not_applicable',
+      reasons: [],
+      steps: [],
+      stepCount: 0,
+      allowedToolNames: normalizeArray(request.allowedTools || request.routeMeta?.allowedTools)
+    };
+  const directPlannerSteps = plannerValidation.ok && Array.isArray(plannerExecutionPlan?.steps)
+    ? plannerValidation.steps
+    : [];
   const legacySteps = Array.isArray(request.routeMeta?.planSteps) ? request.routeMeta.planSteps : [];
+  if (plannerExecutionPlan && !plannerValidation.ok) {
+    return {
+      status: 'idle',
+      currentStepId: '',
+      steps: [],
+      planner: {
+        legacyRoutePlanDetected: legacySteps.length > 0,
+        directChatPlannerSingleAuthority: false,
+        toolPlannerSingleAuthority: false,
+        validation: plannerValidation
+      },
+      verification: null,
+      rounds: [],
+      finalPlan: {
+        goal: String(request.question || '').trim(),
+        need_tools: false,
+        steps: []
+      },
+      finalExecLogs: [],
+      lastRepairPlan: null
+    };
+  }
   const steps = directPlannerSteps.length > 0
     ? directPlannerSteps.map((step, index) => normalizeDirectChatPlannerPlanStep(step, index))
     : legacySteps.map((step, index) => normalizeRoutePlanStep(step, index));
@@ -61,7 +102,8 @@ function buildInitialPlanSlice(request = {}, options = {}) {
     planner: {
       legacyRoutePlanDetected: legacySteps.length > 0,
       directChatPlannerSingleAuthority: directPlannerSteps.length > 0,
-      toolPlannerSingleAuthority: directPlannerSteps.length > 0
+      toolPlannerSingleAuthority: directPlannerSteps.length > 0,
+      validation: plannerValidation
     },
     verification: null,
     rounds: [],
@@ -155,7 +197,10 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
     imageUrls,
     routePrompt: String(options.routePrompt || '').trim(),
     routePolicyKey: String(options.routePolicyKey || '').trim(),
+    routeDebugKey: String(options.routeDebugKey || routeMeta?.routeDebugKey || routeMeta?.route_debug_key || '').trim(),
     topRouteType: String(options.topRouteType || routeMeta?.topRouteType || '').trim(),
+    dispatchBranch: String(options.dispatchBranch || routeMeta?.dispatchBranch || '').trim(),
+    triggerBranch: String(options.triggerBranch || '').trim(),
     reviewMode: String(options.reviewMode || '').trim(),
     routeMeta,
     requestTrace: cloneTraceForMeta(requestTrace),
@@ -261,12 +306,77 @@ function createInitialState(question, userInfo, userId, customPrompt = null, ima
 }
 
 function snapshotState(state) {
+  const memory = normalizeObject(state.memory, {});
+  const execution = normalizeObject(state.execution, {});
+  const promptSnapshot = normalizeObject(memory.promptSnapshot, null);
+  const promptSegments = normalizeObject(memory.promptSegments, null);
+  const contextStats = normalizeObject(memory.contextStats, null);
+  const mainConversationSnapshot = normalizeObject(memory.mainConversationSnapshot, null);
+  const compactContextStats = contextStats || (mainConversationSnapshot
+    ? {
+        usageRatio: Number(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.usageRatio || 0) || 0,
+        compactionLevel: String(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
+      }
+    : null);
+
   return {
     request: state.request,
     thread: state.thread,
-    memory: state.memory,
+    memory: {
+      dynamicPrompt: String(memory.dynamicPrompt || ''),
+      stableSystemBlocks: normalizeArray(memory.stableSystemBlocks),
+      dynamicContextBlocks: normalizeArray(memory.dynamicContextBlocks),
+      assistantOnlyContextBlocks: normalizeArray(memory.assistantOnlyContextBlocks),
+      promptSnapshot: promptSnapshot
+        ? {
+            stableBlockIds: normalizeArray(promptSnapshot.stableBlockIds),
+            dynamicBlockIds: normalizeArray(promptSnapshot.dynamicBlockIds),
+            assistantOnlyBlockIds: normalizeArray(promptSnapshot.assistantOnlyBlockIds),
+            cacheFriendlyFingerprint: String(promptSnapshot.cacheFriendlyFingerprint || '').trim(),
+            cacheMeta: normalizeObject(promptSnapshot.cacheMeta, {}),
+            freshness: normalizeObject(promptSnapshot.freshness, {}),
+            dynamicPromptPlan: normalizeObject(promptSnapshot.dynamicPromptPlan, null)
+          }
+        : null,
+      promptSegments: promptSegments
+        ? {
+            cacheMeta: normalizeObject(promptSegments.cacheMeta, {}),
+            freshness: normalizeObject(promptSegments.freshness, {}),
+            securityLabels: normalizeArray(promptSegments.securityLabels),
+            activatedPersonaModules: normalizeArray(promptSegments.activatedPersonaModules),
+            personaModuleCandidates: normalizeArray(promptSegments.personaModuleCandidates)
+          }
+        : null,
+      securityLabels: normalizeArray(memory.securityLabels),
+      blockedLearningEvents: normalizeArray(memory.blockedLearningEvents),
+      redactionEvents: normalizeArray(memory.redactionEvents),
+      affinity: memory.affinity || null,
+      context: memory.context || null,
+      personaMemoryState: memory.personaMemoryState || null,
+      dirty: Boolean(memory.dirty),
+      restoredBridge: Boolean(memory.restoredBridge),
+      memoryScopeRecorded: Boolean(memory.memoryScopeRecorded),
+      persisted: Boolean(memory.persisted),
+      learningQueued: Boolean(memory.learningQueued),
+      globalToolEvidence: String(memory.globalToolEvidence || ''),
+      globalToolResults: normalizeArray(memory.globalToolResults),
+      globalToolMemoryCliTurn: memory.globalToolMemoryCliTurn || null,
+      continuityState: memory.continuityState || null,
+      contextStats: compactContextStats,
+      pendingReplySnapshot: memory.pendingReplySnapshot || null,
+      checkpointCompacted: true
+    },
     plan: state.plan,
-    execution: state.execution,
+    execution: {
+      ...execution,
+      directChatToolCompile: execution.directChatToolCompile
+        ? {
+            enabled: Boolean(execution.directChatToolCompile.enabled),
+            assistantMessage: execution.directChatToolCompile.assistantMessage || null,
+            directContext: execution.directChatToolCompile.directContext || null
+          }
+        : undefined
+    },
     output: state.output,
     messages: state.messages
   };

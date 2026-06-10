@@ -22,8 +22,10 @@ try {
   process.env.API_KEY = 'main-key';
   process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
   process.env.AI_MODEL = 'main-model';
-  process.env.IMAGE_API_BASE_URL = '';
-  process.env.IMAGE_API_KEY = '';
+  process.env.IMAGE_API_BASE_URL = ' ';
+  process.env.IMAGE_API_BASEURI = ' ';
+  process.env.IMAGE_API_KEY = ' ';
+  process.env.IMAGE_APIKEY = ' ';
   process.env.IMAGE_MODEL = 'image-model';
   process.env.ADMIN_USER_IDS = 'admin-1';
   process.env.ADMIN_API_BASE_URL = 'https://admin-main.example/v1/messages';
@@ -38,6 +40,10 @@ try {
   process.env.ADMIN_IMAGE_API_BASE_URL = 'https://admin-image.example/v1/messages';
   process.env.ADMIN_IMAGE_API_KEY = 'admin-image-key';
   process.env.ADMIN_IMAGE_MODEL = 'admin-image-model';
+  process.env.AI_FALLBACK_ENABLED = 'false';
+  process.env.AI_FALLBACK_MODEL = ' ';
+  process.env.AI_FALLBACK_API_BASE_URL = ' ';
+  process.env.AI_FALLBACK_API_KEY = ' ';
 
   clearProjectCache();
   const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
@@ -54,6 +60,8 @@ try {
   assert.strictEqual(adminConfig.model, 'admin-image-model');
   assert.strictEqual(adminConfig.apiBaseUrl, 'https://admin-image.example/v1/messages');
   assert.strictEqual(adminConfig.apiKey, 'admin-image-key');
+  assert.strictEqual(adminConfig.retries, 3);
+  assert.strictEqual(adminConfig.promptTokenHardLimit, 20000);
 
   const adminError = (status, message) => ({
     response: {
@@ -82,7 +90,9 @@ try {
   assert.strictEqual(normalConfig.apiKey, 'main-key');
 
   process.env.IMAGE_API_BASE_URL = 'https://image.example/v1/chat/completions';
+  process.env.IMAGE_API_BASEURI = ' ';
   process.env.IMAGE_API_KEY = 'image-key';
+  process.env.IMAGE_APIKEY = ' ';
   clearProjectCache();
   const { buildImageModelConfig: buildImageModelConfigReloaded } = require('../utils/imageModelConfigResolver');
   const normalDedicatedConfig = buildImageModelConfigReloaded(null, 'user-1', {});

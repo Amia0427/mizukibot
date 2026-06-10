@@ -75,10 +75,10 @@ function extractReplyTextValue(value) {
 function sanitizeReplyPayloadText(replyText) {
   const extracted = extractReplyTextValue(replyText);
   const normalized = String(extracted || '').trim();
-  if (!normalized) return '刚才网络有点抖，我再试一次。';
+  if (!normalized) return '刚刚空了一拍……你再说一次，我接住。';
   if (/^\[object Object\]$/i.test(normalized)) {
     console.error('[reply-guard] blocked object-stringified payload');
-    return '刚才回复出了点格式问题，你再发一次，我马上接住。';
+    return '刚刚这句格式歪掉了。你再发一次，我马上接住。';
   }
   return normalized;
 }

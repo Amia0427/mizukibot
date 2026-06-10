@@ -52,15 +52,49 @@ module.exports = (() => {
   const currentConversationMessage = systemMessages.find((item) => String(item.content || '').includes('[CurrentConversation]'));
 
   assert.deepStrictEqual(stableSystem.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
-  assert.deepStrictEqual(affinityMessage.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
-  assert.deepStrictEqual(relationshipMessage.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
+  assert.strictEqual(typeof affinityMessage.content, 'string');
+  assert.strictEqual(typeof relationshipMessage.content, 'string');
   assert.strictEqual(typeof continuityMessage.content, 'string');
   assert.strictEqual(typeof currentConversationMessage.content, 'string');
 
+  const activeTopicOnlyState = {
+    request: {},
+    memory: {
+      stableSystemBlocks: [
+        { id: 'main_persona_system', content: 'persona stable' }
+      ],
+      dynamicContextBlocks: [],
+      assistantOnlyContextBlocks: [],
+      promptSnapshot: {
+        dynamicPromptPlan: {
+          enabledBlockIds: []
+        }
+      },
+      continuityState: {
+        text: '[ContinuityState]\n[ActiveTopic] old joke topic',
+        payload: {
+          active_topic: 'old joke topic'
+        }
+      }
+    }
+  };
+  const activeTopicOnlyMessages = helpers.getMainConversationSystemMessages(activeTopicOnlyState);
+  assert.ok(
+    !activeTopicOnlyMessages.some((item) => String(item.content || '').includes('[ContinuityState]')),
+    'active_topic alone should not force ContinuityState into the main prompt'
+  );
+
+  activeTopicOnlyState.memory.promptSnapshot.dynamicPromptPlan.enabledBlockIds = ['continuity_state'];
+  const plannerEnabledMessages = helpers.getMainConversationSystemMessages(activeTopicOnlyState);
+  assert.ok(
+    plannerEnabledMessages.some((item) => String(item.content || '').includes('[ContinuityState]')),
+    'planner-selected continuity_state should still be included'
+  );
+
   const assistantOnly = helpers.buildAssistantOnlyContextMessages(state);
-  const fewShot = assistantOnly.find((item) => Array.isArray(item.content) && item.content[0]?.text === 'few-shot example');
+  const fewShot = assistantOnly.find((item) => item.content === 'few-shot example');
   const hint = assistantOnly.find((item) => item.content === 'plain hint');
-  assert.deepStrictEqual(fewShot.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
+  assert.strictEqual(typeof fewShot.content, 'string');
   assert.strictEqual(typeof hint.content, 'string');
 
   console.log('conversationContextClaudeCacheMarkers.test.js passed');

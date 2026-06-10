@@ -1,5 +1,6 @@
 ﻿const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 
 function listTestFiles(rootDir) {
   const discovered = [];
@@ -59,8 +60,6 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'llmPerceptionSenderName.test.js'),
   path.join(__dirname, '..', 'tests', 'messageAdminCommands.test.js'),
   path.join(__dirname, '..', 'tests', 'messageReplyRuntimeControl.test.js'),
-  path.join(__dirname, '..', 'tests', 'claudeAdminRouting.test.js'),
-  path.join(__dirname, '..', 'tests', 'claudeSessionRuntime.test.js'),
   path.join(__dirname, '..', 'tests', 'messageTelemetry.test.js'),
   path.join(__dirname, '..', 'tests', 'messageBackgroundTasks.test.js'),
   path.join(__dirname, '..', 'tests', 'directToolLoop.test.js'),
@@ -71,7 +70,6 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'promptGoldenSnapshots.test.js'),
   path.join(__dirname, '..', 'tests', 'personaModules.test.js'),
   path.join(__dirname, '..', 'tests', 'langgraphStoreSanitize.test.js'),
-  path.join(__dirname, '..', 'tests', 'subagentPromptSecurity.test.js'),
   path.join(__dirname, '..', 'tests', 'agentLoopV2.test.js'),
   path.join(__dirname, '..', 'tests', 'dispatchRuntimeBinding.test.js'),
   path.join(__dirname, '..', 'tests', 'persistNodeConfig.test.js'),
@@ -87,9 +85,6 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'nativePptImage.test.js'),
   path.join(__dirname, '..', 'tests', 'noExternalProcessSkillsSource.test.js'),
   path.join(__dirname, '..', 'tests', 'runtimeStreamingCoordinator.test.js'),
-  path.join(__dirname, '..', 'tests', 'fullSubagentCoordinator.test.js'),
-  path.join(__dirname, '..', 'tests', 'persistentSubagentCommandBackend.test.js'),
-  path.join(__dirname, '..', 'tests', 'subagentShutdown.test.js'),
   path.join(__dirname, '..', 'tests', 'messageTaskControl.test.js'),
   path.join(__dirname, '..', 'tests', 'messageDispatchCoordinator.test.js'),
   path.join(__dirname, '..', 'tests', 'sessionContextSummaryStore.test.js'),
@@ -114,6 +109,7 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'dailyJournalSegments.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyJournalRollups.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyJournalRetrieval.test.js'),
+  path.join(__dirname, '..', 'tests', 'backfillJournalV3Events.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyShareStore.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyShareContent.test.js'),
   path.join(__dirname, '..', 'tests', 'dailyShareEngine.test.js'),
@@ -146,8 +142,6 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'schedulerRuntime.test.js'),
   path.join(__dirname, '..', 'tests', 'qqActionService.test.js'),
   path.join(__dirname, '..', 'tests', 'qqActionServicePrivatePoke.test.js'),
-  path.join(__dirname, '..', 'tests', 'hapiControlRuntime.test.js'),
-  path.join(__dirname, '..', 'tests', 'hapiBackend.test.js'),
   path.join(__dirname, '..', 'tests', 'directChatPlannerQqTools.test.js'),
   path.join(__dirname, '..', 'tests', 'directChatSingleAuthority.test.js'),
   path.join(__dirname, '..', 'tests', 'directChatSingleAuthoritySource.test.js'),
@@ -190,10 +184,6 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'routeExecutionSource.test.js'),
   path.join(__dirname, '..', 'tests', 'routeProfiles.test.js'),
   path.join(__dirname, '..', 'tests', 'routePromptPolicySource.test.js'),
-  path.join(__dirname, '..', 'tests', 'subagentBridgeRoutingSource.test.js'),
-  path.join(__dirname, '..', 'tests', 'subagentBridge.test.js'),
-  path.join(__dirname, '..', 'tests', 'subagentGatewayBackend.test.js'),
-  path.join(__dirname, '..', 'tests', 'fullSubagentMultiWorker.test.js'),
   path.join(__dirname, '..', 'tests', 'toolReplyFormatting.test.js'),
   path.join(__dirname, '..', 'tests', 'promptCheck.test.js'),
   path.join(__dirname, '..', 'tests', 'promptCheckSource.test.js'),
@@ -226,50 +216,78 @@ const testFiles = [
   path.join(__dirname, '..', 'tests', 'webSearchNoApiKeySource.test.js'),
   path.join(__dirname, '..', 'tests', 'checkAgentFailureDetectionSource.test.js'),
   path.join(__dirname, '..', 'tests', 'memoryExtractionRetriesSource.test.js'),
+  path.join(__dirname, '..', 'tests', 'imageSummaryLatencyPath.test.js'),
   path.join(__dirname, '..', 'tests', 'modelTimeoutConfigSource.test.js'),
-  path.join(__dirname, '..', 'tests', 'messageSendChunkingSource.test.js')
-  ,
+  path.join(__dirname, '..', 'tests', 'messageSendChunkingSource.test.js'),
   path.join(__dirname, '..', 'tests', 'messageHandlerInboundConcurrency.test.js')
 ];
 
-function restoreEnv(snapshot = {}) {
-  for (const key of Object.keys(process.env)) {
-    if (!(key in snapshot)) delete process.env[key];
+function applyDefaultTestEnv(env = process.env) {
+  if (env.RESOURCE_PRESSURE_ENABLED === undefined) {
+    env.RESOURCE_PRESSURE_ENABLED = 'false';
   }
-  for (const [key, value] of Object.entries(snapshot)) {
-    process.env[key] = value;
-  }
+  return env;
 }
 
-function clearProjectModuleCache() {
-  const projectRoot = path.resolve(__dirname, '..');
-  for (const cacheKey of Object.keys(require.cache)) {
-    if (!cacheKey.startsWith(projectRoot)) continue;
-    delete require.cache[cacheKey];
+function runTestFile(file) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--unhandled-rejections=strict', file], {
+      cwd: path.resolve(__dirname, '..'),
+      env: applyDefaultTestEnv({ ...process.env }),
+      stdio: 'inherit',
+      windowsHide: true
+    });
+
+    child.on('error', (error) => {
+      resolve({ ok: false, error });
+    });
+    child.on('exit', (code, signal) => {
+      resolve({ ok: code === 0, code, signal });
+    });
+  });
+}
+
+function resolveRequestedTestFile(item, testsDir) {
+  const raw = String(item || '').trim();
+  if (!raw) return '';
+  const directPath = path.resolve(process.cwd(), raw);
+  if (fs.existsSync(directPath)) return directPath;
+  if (!raw.includes('/') && !raw.includes('\\')) {
+    const byNamePath = path.join(testsDir, raw);
+    if (fs.existsSync(byNamePath)) return byNamePath;
   }
+  return directPath;
 }
 
 async function runAllTests() {
   let failed = 0;
-  const discoveredTestFiles = listTestFiles(path.join(__dirname, '..', 'tests'));
-  const runnableFiles = discoveredTestFiles.length > 0
+  const testsDir = path.join(__dirname, '..', 'tests');
+  const requestedFiles = process.argv.slice(2)
+    .filter((item) => String(item || '').trim() && !String(item || '').startsWith('--'))
+    .map((item) => resolveRequestedTestFile(item, testsDir));
+  const discoveredTestFiles = listTestFiles(testsDir);
+  const runnableFiles = requestedFiles.length > 0
+    ? requestedFiles.filter((candidate) => fs.existsSync(candidate))
+    : discoveredTestFiles.length > 0
     ? discoveredTestFiles
     : testFiles.filter((candidate) => fs.existsSync(candidate));
+  if (requestedFiles.length > 0 && runnableFiles.length !== requestedFiles.length) {
+    const missing = requestedFiles.filter((candidate) => !fs.existsSync(candidate));
+    console.error('[test] missing requested files: ' + missing.join(', '));
+    process.exit(1);
+  }
   for (const file of runnableFiles) {
-    const envSnapshot = { ...process.env };
-    clearProjectModuleCache();
-    try {
-      const out = require(file);
-      // Allow async test modules to export a Promise for hermetic integration tests.
-      if (out && typeof out.then === 'function') await out;
+    const result = await runTestFile(file);
+    if (result.ok) {
       console.log(`[test] pass ${path.basename(file)}`);
-    } catch (e) {
-      failed += 1;
-      console.error(`[test] fail ${path.basename(file)}`);
-      console.error('       ' + (e && e.stack ? e.stack : String(e)));
-    } finally {
-      clearProjectModuleCache();
-      restoreEnv(envSnapshot);
+      continue;
+    }
+    failed += 1;
+    console.error(`[test] fail ${path.basename(file)}`);
+    if (result.error) {
+      console.error('       ' + (result.error.stack || String(result.error)));
+    } else {
+      console.error(`       exited with code ${result.code}${result.signal ? ` signal ${result.signal}` : ''}`);
     }
   }
 

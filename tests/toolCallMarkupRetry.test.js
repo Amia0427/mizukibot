@@ -35,7 +35,10 @@ module.exports = (async () => {
       if (replyCalls === 1) {
         return '<tool_calls><tool_call><name>memory_cli</name></tool_call></tool_calls>';
       }
-      return '这次直接正常回答，不调用工具。';
+      return {
+        persistedText: '这次直接正常回答，不调用工具。',
+        visibleText: '这次直接正常回答，不调用工具。'
+      };
     },
     classifyDirectReplyError: () => 'tool_error',
     attemptDirectMemoryRecovery: async () => null,

@@ -1,345 +1,47 @@
 const config = require('../config');
-const { learnSomethingNew, extractPostReplyEnrichment } = require('../api/memoryExtraction');
-const { appendDailyJournalEntry, maybeSegmentJournalByThreshold } = require('./dailyJournal');
-const { learnSelfImprovement, storeExtractedSelfImprovementItems } = require('./selfImprovementRuntime');
 const { createPostReplyJobQueue, getPostReplyJobQueue } = require('./postReplyJobQueue');
-const { appendMemoryEvent, materializeMemoryViews } = require('./memory-v3');
-const { applyAffinityProposal } = require('./memory');
-const { addTaskMemory } = require('./taskMemory');
-const { addGroupMemory } = require('./groupMemory');
-const { addMemoryItemsBatch } = require('./vectorMemory');
-const { getResourcePressureState, appendPerfEvent } = require('./perfRuntime');
+const {
+  flushPostReplyMaterialize,
+  schedulePostReplyMaterialize
+} = require('./postReplyWorker/materialize');
+const {
+  runPostReplyVectorMaintenance
+} = require('./postReplyWorker/vectorMaintenance');
+const {
+  createPostReplyVectorWatchdogLoop,
+  runPostReplyVectorWatchdog
+} = require('./postReplyWorker/vectorWatchdog');
+const {
+  buildCoreLearningConversation,
+  buildCoreLearningEvidence
+} = require('./postReplyWorker/enrichPhase');
+const { processPostReplyJob } = require('./postReplyWorker/processJob');
+const {
+  isRequeueSafePostReplyError,
+  isTerminalPostReplyError
+} = require('./postReplyWorker/errorClassifier');
+const {
+  appendPostReplyJobTrace
+} = require('./postReplyWorker/jobTrace');
+const {
+  detectPostReplyLearningIntent,
+  isExplicitRememberText,
+  mergeLearningIntent
+} = require('./postReplyWorker/learningIntent');
+const {
+  buildPostReplyJobWithoutRecapTurns
+} = require('./postReplyWorker/recapPolicy');
+const {
+  isTransientPostReplyError,
+  logStructured,
+  normalizeArray,
+  normalizeObject,
+  normalizePhase,
+  normalizeText
+} = require('./postReplyWorker/common');
 
-function normalizePhase(value = '') {
-  const phase = String(value || '').trim().toLowerCase();
-  return phase === 'enrich' ? 'enrich' : 'core';
-}
-
-function logStructured(event = '', payload = {}) {
-  console.log(`[${event}]`, payload);
-}
-
-function isRateLimitError(errorText = '') {
-  const value = String(errorText || '').toLowerCase();
-  return /(429|rate limit|too many requests)/.test(value);
-}
-
-function normalizeTurnItems(turns = []) {
-  return normalizeArray(turns).filter((item) => item && typeof item === 'object');
-}
-
-function buildTurnsConversation(turns = []) {
-  return normalizeTurnItems(turns)
-    .map((item) => ({
-      question: normalizeText(item.question),
-      finalReply: normalizeText(item.finalReply)
-    }))
-    .filter((item) => item.question || item.finalReply);
-}
-
-function buildMinimalStyleMemoryItems(userId = '', styleMemory = {}, meta = {}) {
-  const uid = normalizeText(userId);
-  if (!uid) return [];
-  const confidence = Number(styleMemory?.confidence || 0) || 0;
-  const patterns = normalizeArray(styleMemory?.style_patterns).map((item) => normalizeText(item)).filter(Boolean).slice(0, 1);
-  const avoids = normalizeArray(styleMemory?.style_avoid).map((item) => normalizeText(item)).filter(Boolean).slice(0, 1);
-  const out = [];
-  if (patterns[0]) {
-    out.push({
-      userId: uid,
-      text: `style: ${patterns[0]}`,
-      type: 'fact',
-      weight: 1.02,
-      source: 'post_reply_enrich',
-      confidence,
-      semanticSlot: 'style_pattern',
-      meta: {
-        source: 'post_reply_enrich',
-        confidence,
-        sourceKind: 'extractor',
-        status: 'active',
-        memoryKind: 'style',
-        fieldKey: 'style_pattern',
-        participants: [],
-        entities: [],
-        relations: [],
-        routePolicyKey: normalizeText(meta.routePolicyKey),
-        topRouteType: normalizeText(meta.topRouteType)
-      }
-    });
-  }
-  if (!patterns[0] && avoids[0]) {
-    out.push({
-      userId: uid,
-      text: `style: ${avoids[0]}`,
-      type: 'fact',
-      weight: 1.01,
-      source: 'post_reply_enrich',
-      confidence,
-      semanticSlot: 'style_avoid',
-      meta: {
-        source: 'post_reply_enrich',
-        confidence,
-        sourceKind: 'extractor',
-        status: 'active',
-        memoryKind: 'style',
-        fieldKey: 'style_avoid',
-        participants: [],
-        entities: [],
-        relations: [],
-        routePolicyKey: normalizeText(meta.routePolicyKey),
-        topRouteType: normalizeText(meta.topRouteType)
-      }
-    });
-  }
-  return out;
-}
-
-function buildMinimalJargonMemoryItems(groupId = '', jargonMemory = {}, meta = {}) {
-  const gid = normalizeText(groupId);
-  if (!gid) return [];
-  const confidence = Number(jargonMemory?.confidence || 0) || 0;
-  const terms = normalizeArray(jargonMemory?.jargon_terms).map((item) => normalizeText(item)).filter(Boolean).slice(0, 1);
-  const patterns = normalizeArray(jargonMemory?.jargon_patterns).map((item) => normalizeText(item)).filter(Boolean).slice(0, 1);
-  const selected = terms[0] || patterns[0];
-  if (!selected) return [];
-  return [{
-    userId: `group:${gid}`,
-    text: `group jargon: ${selected}`,
-    type: 'fact',
-    weight: 0.98,
-    source: 'post_reply_enrich',
-    confidence,
-    semanticSlot: 'group_jargon',
-    meta: {
-      source: 'post_reply_enrich',
-      confidence,
-      sourceKind: 'extractor',
-      status: 'active',
-      memoryKind: 'jargon',
-      fieldKey: 'group_jargon',
-      participants: [],
-      entities: [],
-      relations: [],
-      routePolicyKey: normalizeText(meta.routePolicyKey),
-      topRouteType: normalizeText(meta.topRouteType)
-    }
-  }];
-}
-
-async function runEnrichPhase(job = {}, meta = {}) {
-  const turns = buildTurnsConversation(job.turns);
-  const latest = turns[turns.length - 1] || { question: normalizeText(job.question), finalReply: normalizeText(job.finalReply) };
-  const enrichment = await extractPostReplyEnrichment(job.userId, turns, {
-    routePolicyKey: meta.routePolicyKey,
-    topRouteType: meta.topRouteType,
-    groupId: meta.groupId
-  });
-
-  if (enrichment?.affinity && typeof enrichment.affinity === 'object') {
-    applyAffinityProposal(job.userId, enrichment.affinity, {
-      userText: latest.question,
-      assistantText: latest.finalReply,
-      routePolicyKey: meta.routePolicyKey,
-      topRouteType: meta.topRouteType,
-      groupId: meta.groupId,
-      sessionId: meta.sessionId
-    });
-  }
-
-  if (enrichment?.task_memory && typeof enrichment.task_memory === 'object') {
-    const taskMemory = enrichment.task_memory;
-    const confidence = Number(taskMemory.confidence || 0) || 0;
-    if (confidence > 0 && normalizeText(taskMemory.task_type)) {
-      addTaskMemory(job.userId, {
-        taskType: normalizeText(taskMemory.task_type),
-        trigger: normalizeText(taskMemory.trigger),
-        strategy: normalizeText(taskMemory.strategy),
-        avoid: normalizeText(taskMemory.avoid),
-        outcome: normalizeText(taskMemory.outcome) || 'success',
-        confidence,
-        source: 'post_reply_enrich',
-        routePolicyKey: meta.routePolicyKey,
-        topRouteType: meta.topRouteType,
-        agentName: meta.agentName,
-        toolName: meta.toolName,
-        sessionId: meta.sessionId,
-        channelId: meta.channelId,
-        sourceKind: 'extractor',
-        status: 'candidate',
-        sourceSessionId: meta.sessionId,
-        participants: [],
-        entities: [],
-        relations: []
-      });
-    }
-  }
-
-  if (meta.groupId && enrichment?.group_memory && typeof enrichment.group_memory === 'object') {
-    const confidence = Number(enrichment.group_memory.confidence || 0) || 0;
-    for (const value of normalizeArray(enrichment.group_memory.shared_facts).map((item) => normalizeText(item)).filter(Boolean)) {
-      addGroupMemory(meta.groupId, value, 'fact', { confidence, sourceKind: 'extractor', status: 'candidate' }, 1.08);
-    }
-    for (const value of normalizeArray(enrichment.group_memory.shared_goals).map((item) => normalizeText(item)).filter(Boolean)) {
-      addGroupMemory(meta.groupId, `group goal: ${value}`, 'goal', { confidence, sourceKind: 'extractor', status: 'active' }, 1.15);
-    }
-    for (const value of normalizeArray(enrichment.group_memory.shared_topics).map((item) => normalizeText(item)).filter(Boolean)) {
-      addGroupMemory(meta.groupId, `group topic: ${value}`, 'topic', { confidence, sourceKind: 'extractor', status: 'candidate' }, 0.96);
-    }
-  }
-
-  const signalItems = [
-    ...buildMinimalStyleMemoryItems(job.userId, enrichment?.style_memory, meta),
-    ...buildMinimalJargonMemoryItems(meta.groupId, enrichment?.jargon_memory, meta)
-  ];
-  if (signalItems.length > 0) addMemoryItemsBatch(signalItems);
-
-  if (enrichment?.self_improvement && typeof enrichment.self_improvement === 'object') {
-    storeExtractedSelfImprovementItems(job.userId, enrichment.self_improvement.items, {
-      routePolicyKey: meta.routePolicyKey,
-      topRouteType: meta.topRouteType,
-      toolName: meta.toolName,
-      taskType: meta.taskType,
-      sessionId: meta.sessionId,
-      channelId: meta.channelId,
-      groupId: meta.groupId
-    });
-  }
-
-  const latestTurn = normalizeTurnItems(job.turns).slice(-1)[0] || {};
-  const latestTurnCreatedAt = normalizeText(latestTurn.createdAt);
-  const targetDay = latestTurnCreatedAt
-    ? String(latestTurnCreatedAt).slice(0, 10)
-    : '';
-  if (targetDay) {
-    await maybeSegmentJournalByThreshold(job.userId, targetDay, {
-      sessionKey: meta.sessionKey,
-      routePolicyKey: meta.routePolicyKey,
-      topRouteType: meta.topRouteType,
-      routeMeta: normalizeObject(job.routeMeta, {}),
-      continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
-      contextStats: normalizeObject(job.contextStats, {}),
-      groupId: meta.groupId,
-      channelId: meta.channelId,
-      taskType: meta.taskType
-    });
-  }
-}
-
-function normalizeObject(value, fallback = {}) {
-  return value && typeof value === 'object' ? value : fallback;
-}
-
-function normalizeArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-
-function normalizeText(value) {
-  return String(value || '').trim();
-}
-
-function buildLearningMeta(job = {}) {
-  const routeMeta = normalizeObject(job.routeMeta, {});
-  return {
-    routePolicyKey: normalizeText(job.routePolicyKey),
-    topRouteType: normalizeText(job.topRouteType || routeMeta.topRouteType),
-    sessionKey: normalizeText(job.sessionKey),
-    groupId: normalizeText(routeMeta.groupId || routeMeta.group_id),
-    sessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id),
-    taskType: normalizeText(routeMeta.taskType || routeMeta.task_type),
-    agentName: normalizeText(routeMeta.agentName || routeMeta.agent_name),
-    toolName: normalizeText(routeMeta.toolName || routeMeta.tool_name),
-    channelId: normalizeText(routeMeta.channelId || routeMeta.channel_id),
-    continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
-    contextStats: normalizeObject(job.contextStats, {}),
-    execLogs: normalizeArray(job.execLogs)
-  };
-}
-
-async function processPostReplyJob(job = {}, deps = {}) {
-  const tasks = normalizeObject(job.tasks, {});
-  const meta = buildLearningMeta(job);
-  const phase = normalizePhase(job.phase);
-  const workerTaskOptions = {
-    ...meta,
-    postReplyMemoryMode: String(config.POST_REPLY_MEMORY_MODE || 'core').trim().toLowerCase() || 'core',
-    throwOnError: true
-  };
-  const traceBase = {
-    jobId: normalizeText(job.jobId),
-    phase,
-    userId: normalizeText(job.userId),
-    routePolicyKey: normalizeText(job.routePolicyKey),
-    topRouteType: normalizeText(job.topRouteType)
-  };
-
-  if (phase === 'core' && tasks.memoryLearning) {
-    logStructured('post_reply_step_start', { ...traceBase, step: 'learnSomethingNew' });
-    await learnSomethingNew(job.userId, job.question, job.finalReply, workerTaskOptions);
-    logStructured('post_reply_step_done', { ...traceBase, step: 'learnSomethingNew' });
-  }
-  if (phase === 'core' && tasks.selfImprovement) {
-    logStructured('post_reply_step_start', { ...traceBase, step: 'learnSelfImprovement' });
-    await learnSelfImprovement(job.userId, job.question, job.finalReply, workerTaskOptions);
-    logStructured('post_reply_step_done', { ...traceBase, step: 'learnSelfImprovement' });
-  }
-  if (tasks.dailyJournal) {
-    logStructured('post_reply_step_start', { ...traceBase, step: 'appendDailyJournalEntry' });
-    await appendDailyJournalEntry(
-      job.userId,
-      job.question,
-      job.finalReply,
-      normalizeObject(job.userInfo, {}),
-      {
-        segmentNow: phase === 'enrich'
-          ? config.POST_REPLY_DAILY_JOURNAL_SEGMENT_NOW === true
-          : false,
-        throwOnError: true,
-        sessionKey: normalizeText(job.sessionKey),
-        routePolicyKey: normalizeText(job.routePolicyKey),
-        topRouteType: normalizeText(job.topRouteType),
-        routeMeta: normalizeObject(job.routeMeta, {}),
-        continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
-        contextStats: normalizeObject(job.contextStats, {}),
-        groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
-        channelId: normalizeText(job.routeMeta?.channelId || job.routeMeta?.channel_id),
-        taskType: normalizeText(job.routeMeta?.taskType || job.routeMeta?.task_type)
-      }
-    );
-    logStructured('post_reply_step_done', { ...traceBase, step: 'appendDailyJournalEntry' });
-  }
-  if (phase === 'core' && config.MEMORY_V3_ENABLED) {
-    logStructured('post_reply_step_start', { ...traceBase, step: 'appendMemoryEvent' });
-    await appendMemoryEvent({
-      type: 'memory_confirmed',
-      userId: job.userId,
-      sessionKey: normalizeText(job.sessionKey),
-      groupId: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id),
-      channelId: normalizeText(job.routeMeta?.channelId || job.routeMeta?.channel_id),
-      sessionId: normalizeText(job.routeMeta?.sessionId || job.routeMeta?.session_id),
-      routePolicyKey: normalizeText(job.routePolicyKey),
-      topRouteType: normalizeText(job.topRouteType),
-      scopeType: normalizeText(job.routeMeta?.groupId || job.routeMeta?.group_id) ? 'group' : 'personal',
-      source: 'post_reply_worker',
-      sourceKind: 'runtime',
-      memoryKind: 'turn_summary',
-      semanticSlot: 'turn_summary',
-      text: `Q: ${normalizeText(job.question)}\nA: ${normalizeText(job.finalReply)}`,
-      payload: {
-        type: 'fact'
-      }
-    });
-    materializeMemoryViews();
-    logStructured('post_reply_step_done', { ...traceBase, step: 'appendMemoryEvent' });
-  }
-  if (phase === 'enrich') {
-    logStructured('post_reply_step_start', { ...traceBase, step: 'runEnrichPhase' });
-    await runEnrichPhase(job, meta);
-    logStructured('post_reply_step_done', { ...traceBase, step: 'runEnrichPhase' });
-  }
-  return {
-    ok: true
-  };
+function getPerfRuntimeModule() {
+  return require('./perfRuntime');
 }
 
 function createPostReplyWorkerRuntime(options = {}) {
@@ -355,17 +57,94 @@ function createPostReplyWorkerRuntime(options = {}) {
   const retryBaseMs = Math.max(0, Number(config.POST_REPLY_RETRY_BASE_MS) || 1000);
   const retryMaxMs = Math.max(0, Number(config.POST_REPLY_RETRY_MAX_MS) || 30000);
   const retryJitterMs = Math.max(0, Number(config.POST_REPLY_RETRY_JITTER_MS) || 0);
+  const autoRequeueTransientEnabled = options.autoRequeueTransientEnabled !== undefined
+    ? options.autoRequeueTransientEnabled === true
+    : config.POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED === true;
+  const autoRequeueMaxPerTick = Math.max(1, Number(options.autoRequeueMaxPerTick || config.POST_REPLY_AUTO_REQUEUE_MAX_PER_TICK) || 3);
+  const rssRecycleBytes = Math.max(0, Number(options.rssRecycleMb ?? config.POST_REPLY_WORKER_RSS_RECYCLE_MB) || 0) * 1024 * 1024;
+  const rssRecycleIdleMs = Math.max(0, Number(options.rssRecycleIdleMs ?? config.POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS) || 0);
+  const onRecycle = typeof options.onRecycle === 'function' ? options.onRecycle : null;
+  const vectorWatchdogLoop = options.vectorWatchdogLoop === false
+    ? null
+    : (options.vectorWatchdogLoop || createPostReplyVectorWatchdogLoop({
+        isBusy: () => activeCount > 0,
+        source: config.POST_REPLY_VECTOR_WATCHDOG_SOURCE,
+        limit: config.POST_REPLY_VECTOR_WATCHDOG_LIMIT,
+        maxBatches: config.POST_REPLY_VECTOR_WATCHDOG_MAX_BATCHES
+      }));
 
   let timer = null;
   let stopped = true;
   let activeCount = 0;
+  let lastActiveAt = Date.now();
+  let recycleRequested = false;
   const activeUserIds = new Set();
   let scheduledTick = false;
   const phaseCircuitState = new Map();
   const phaseRateLimitState = new Map();
+  let pressureBackoffState = {
+    active: false,
+    delayMs: 0,
+    pressureLevel: 'normal',
+    pressureReasons: []
+  };
 
   function getActiveUserIds() {
     return Array.from(activeUserIds);
+  }
+
+  function getStats() {
+    return {
+      activeCount,
+      activeUserIds: getActiveUserIds(),
+      lastActiveAt,
+      rssBytes: process.memoryUsage().rss,
+      recycleRequested,
+      pressureBackoff: {
+        ...pressureBackoffState,
+        pressureReasons: Array.isArray(pressureBackoffState.pressureReasons)
+          ? pressureBackoffState.pressureReasons.slice()
+          : []
+      }
+    };
+  }
+
+  function hasPendingQueueWorkForRecycle() {
+    if (typeof queue.listJobs !== 'function') return false;
+    try {
+      return normalizeArray(queue.listJobs(['queued', 'processing'])).length > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function maybeRequestIdleRecycle(reason = 'rss_high') {
+    if (!rssRecycleBytes || recycleRequested || activeCount > 0) return false;
+    if (hasPendingQueueWorkForRecycle()) return false;
+    const idleMs = Math.max(0, Date.now() - lastActiveAt);
+    if (idleMs < rssRecycleIdleMs) return false;
+    const rssBytes = process.memoryUsage().rss;
+    if (rssBytes < rssRecycleBytes) return false;
+    recycleRequested = true;
+    logStructured('post_reply_worker_recycle_requested', {
+      reason,
+      rssMb: Math.round((rssBytes / 1024 / 1024) * 10) / 10,
+      thresholdMb: Math.round((rssRecycleBytes / 1024 / 1024) * 10) / 10,
+      idleMs
+    });
+    if (onRecycle) {
+      try {
+        onRecycle({
+          reason,
+          rssBytes,
+          thresholdBytes: rssRecycleBytes,
+          idleMs
+        });
+      } catch (error) {
+        console.error('[post-reply-worker] recycle callback failed:', error?.message || error);
+      }
+    }
+    return true;
   }
 
   function getCircuitKey(job = {}) {
@@ -408,11 +187,6 @@ function createPostReplyWorkerRuntime(options = {}) {
     return normalizePhase(phase) === 'enrich'
       ? Math.max(0, Number(config.POST_REPLY_ENRICH_CIRCUIT_COOLDOWN_MS) || 0)
       : Math.max(0, Number(config.POST_REPLY_CORE_CIRCUIT_COOLDOWN_MS) || 0);
-  }
-
-  function isTerminalPostReplyError(errorText = '') {
-    const value = String(errorText || '').toLowerCase();
-    return /(401|403|404|forbidden|unauthorized|not found|model not supported|unsupported model)/.test(value);
   }
 
   function canRunPhase(job = {}) {
@@ -458,10 +232,24 @@ function createPostReplyWorkerRuntime(options = {}) {
 
   function enqueueEnrichJob(job = {}) {
     if (!config.POST_REPLY_ENRICH_ENABLED) return null;
-    const turns = normalizeArray(job.turns).filter((item) => item && typeof item === 'object');
+    const recapFiltered = buildPostReplyJobWithoutRecapTurns(job);
+    if (!recapFiltered.job) {
+      logStructured('post_reply_enrich_skipped', {
+        jobId: normalizeText(job.jobId),
+        reason: 'recap_query',
+        skippedTurns: recapFiltered.skippedCount
+      });
+      appendPostReplyJobTrace(job, 'enrich_skipped', {
+        reason: 'recap_query',
+        skippedTurns: recapFiltered.skippedCount
+      });
+      return null;
+    }
+    const sourceJob = recapFiltered.job;
+    const turns = normalizeArray(sourceJob.turns).filter((item) => item && typeof item === 'object');
     const joinedChars = Array.from(turns.map((item) => `${item.question || ''}\n${item.finalReply || ''}`).join('\n').replace(/\s+/g, '')).length;
-    const hasExplicitRemember = turns.some((item) => /^(?:记住|记一下|帮我记住|remember)\b/i.test(String(item?.question || '').trim()));
-    const routeMeta = normalizeObject(job.routeMeta, {});
+    const hasExplicitRemember = turns.some((item) => isExplicitRememberText(item?.question));
+    const routeMeta = normalizeObject(sourceJob.routeMeta, {});
     const groupId = normalizeText(routeMeta.groupId || routeMeta.group_id);
     const shouldEnrich = turns.length >= Math.max(1, Number(config.POST_REPLY_ENRICH_MIN_TURNS) || 2)
       || joinedChars >= Math.max(0, Number(config.POST_REPLY_ENRICH_MIN_CONTENT_CHARS) || 0)
@@ -469,8 +257,15 @@ function createPostReplyWorkerRuntime(options = {}) {
       || Boolean(groupId);
     if (!shouldEnrich) return null;
 
-    const aggregateKey = buildEnrichAggregateKey(job);
+    const aggregateKey = buildEnrichAggregateKey(sourceJob);
     const nowIso = new Date().toISOString();
+    const enrichBudget = {
+      maxTurns: Math.max(1, Number(config.POST_REPLY_ENRICH_MAX_TURNS) || 12),
+      maxChars: Math.max(200, Number(config.POST_REPLY_ENRICH_MAX_CHARS) || 6000),
+      maxWrites: Math.max(1, Number(config.POST_REPLY_ENRICH_MAX_WRITES) || 12),
+      maxCostHint: 0
+    };
+    const learningIntent = detectPostReplyLearningIntent(sourceJob, turns);
     const existing = typeof queue.findQueuedJobByAggregateKey === 'function'
       ? queue.findQueuedJobByAggregateKey(aggregateKey, 'enrich')
       : null;
@@ -478,10 +273,12 @@ function createPostReplyWorkerRuntime(options = {}) {
       const merged = queue.mergeQueuedJob(existing, {
         turns,
         routeMeta,
-        continuitySnapshot: normalizeObject(job.continuitySnapshot, {}),
-        contextStats: normalizeObject(job.contextStats, {}),
+        continuitySnapshot: normalizeObject(sourceJob.continuitySnapshot, {}),
+        contextStats: normalizeObject(sourceJob.contextStats, {}),
         lastMergedAt: nowIso,
-        tasks: normalizeObject(job.tasks, {})
+        tasks: normalizeObject(sourceJob.tasks, {}),
+        learningIntent: mergeLearningIntent(existing.learningIntent, learningIntent),
+        enrichBudget
       }, {
         aggregateWindowMs: Number(config.POST_REPLY_ENRICH_DELAY_MS) || 0,
         idleFlushMs: Number(config.POST_REPLY_ENRICH_DELAY_MS) || 0
@@ -495,12 +292,15 @@ function createPostReplyWorkerRuntime(options = {}) {
     }
 
     const result = queue.enqueue({
-      ...job,
+      ...sourceJob,
+      jobId: '',
       phase: 'enrich',
       aggregateKey,
       dedupeKey: '',
       firstQueuedAt: nowIso,
       lastMergedAt: nowIso,
+      learningIntent,
+      enrichBudget,
       availableAt: new Date(Date.now() + Math.max(0, Number(config.POST_REPLY_ENRICH_DELAY_MS) || 0)).toISOString()
     });
     if (result?.job) {
@@ -526,21 +326,130 @@ function createPostReplyWorkerRuntime(options = {}) {
 
   function tryClaimJob() {
     const staleBefore = Date.now() - staleProcessingMs;
-    queue.recoverStaleProcessingJobs({ staleBefore });
+    const recovered = queue.recoverStaleProcessingJobs({ staleBefore });
+    for (const recoveredJob of normalizeArray(recovered)) {
+      appendPostReplyJobTrace(recoveredJob, 'job_recovered_stale', {
+        staleBefore: new Date(staleBefore).toISOString()
+      });
+    }
     return queue.claimNextJob(new Date(), {
-      activeUserIds: getActiveUserIds()
+      activeUserIds: getActiveUserIds(),
+      deferredPhases: pressureBackoffState.active && config.POST_REPLY_ENRICH_PRESSURE_PAUSE_ENABLED === true
+        ? ['enrich']
+        : [],
+      leaseOwner: `post-reply-worker:${process.pid}`,
+      leaseMs: staleProcessingMs
     });
   }
 
+  function requeueTransientFailedJobs() {
+    if (!autoRequeueTransientEnabled) {
+      return {
+        enabled: false,
+        scanned: 0,
+        requeued: 0
+      };
+    }
+    if (typeof queue.listJobs !== 'function' || typeof queue.requeueFailedJob !== 'function') {
+      return {
+        enabled: true,
+        skipped: true,
+        reason: 'queue_api_missing',
+        scanned: 0,
+        requeued: 0
+      };
+    }
+    const failedJobs = normalizeArray(queue.listJobs(['failed']));
+    let scanned = 0;
+    let requeued = 0;
+    for (const job of failedJobs) {
+      if (requeued >= autoRequeueMaxPerTick) break;
+      scanned += 1;
+      if (!isRequeueSafePostReplyError(job)) continue;
+      const requeuedJob = queue.requeueFailedJob(job, {
+        availableAt: new Date().toISOString(),
+        nextRetryAt: '',
+        retryDelayMs: 0,
+        lastError: normalizeText(job.lastError),
+        errorClass: normalizeText(job.errorClass),
+        requeueReason: 'auto_transient_failed_requeue'
+      });
+      requeued += 1;
+      appendPostReplyJobTrace(requeuedJob, 'job_auto_requeued', {
+        errorClass: normalizeText(job.errorClass),
+        lastError: normalizeText(job.lastError).slice(0, 240)
+      });
+    }
+    if (requeued > 0) {
+      logStructured('post_reply_auto_requeue_transient', {
+        scanned,
+        requeued,
+        maxPerTick: autoRequeueMaxPerTick
+      });
+    }
+    return {
+      enabled: true,
+      scanned,
+      requeued
+    };
+  }
+
   function getPressureDeferMs() {
+    return getPerfRuntimeModule().getBackgroundPressureDelayMs();
+  }
+
+  function updatePressureBackoff(delayMs = 0) {
+    const {
+      getResourcePressureState
+    } = getPerfRuntimeModule();
     const pressure = getResourcePressureState();
-    if (!pressure || pressure.level === 'normal') return 0;
-    return Math.max(1000, Number(config.BACKGROUND_PRESSURE_DEFER_MS || 15000) || 15000);
+    pressureBackoffState = {
+      active: Math.max(0, Number(delayMs) || 0) > 0,
+      delayMs: Math.max(0, Number(delayMs) || 0),
+      pressureLevel: normalizeText(pressure.level || 'normal') || 'normal',
+      pressureReasons: normalizeArray(pressure.reasons)
+        .map((item) => normalizeText(item))
+        .filter(Boolean)
+    };
+    return pressureBackoffState;
+  }
+
+  function buildJobForCurrentPressure(job = {}) {
+    if (!pressureBackoffState.active) return job;
+    const phase = normalizePhase(job.phase);
+    if (phase !== 'core' || config.POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE !== true) return job;
+    return {
+      ...job,
+      postReplyPressureMode: 'minimal',
+      postReplyPressure: {
+        level: pressureBackoffState.pressureLevel,
+        reasons: pressureBackoffState.pressureReasons.slice(),
+        delayMs: pressureBackoffState.delayMs
+      }
+    };
   }
 
   async function runOneJob(job) {
     if (!job) return null;
     if (!job) return null;
+    let latestJob = job;
+    const progressQueue = Object.create(queue);
+    progressQueue.updateProcessingJob = (...args) => {
+      if (typeof queue.updateProcessingJob !== 'function') return args[0];
+      const updated = queue.updateProcessingJob(...args);
+      if (updated && typeof updated === 'object') latestJob = updated;
+      return updated;
+    };
+    progressQueue.heartbeatProcessingJob = (...args) => {
+      if (typeof queue.heartbeatProcessingJob !== 'function') return args[0];
+      const updated = queue.heartbeatProcessingJob(...args);
+      if (updated && typeof updated === 'object') latestJob = updated;
+      return updated;
+    };
+    progressQueue.readProcessingJob = (...args) => {
+      if (typeof queue.readProcessingJob !== 'function') return null;
+      return queue.readProcessingJob(...args);
+    };
     const activeUserId = normalizeText(job.userId);
     const phase = normalizePhase(job.phase);
     if (!canRunPhase(job)) {
@@ -549,17 +458,43 @@ function createPostReplyWorkerRuntime(options = {}) {
         reason: 'circuit_open',
         jobId: job.jobId
       });
-      return queue.markDone(job, {
+      appendPostReplyJobTrace(job, 'job_skipped', {
+        reason: 'circuit_open'
+      });
+      const skipped = queue.markDone(job, {
         lastError: 'skipped:circuit_open'
       });
+      appendPostReplyJobTrace(skipped, 'job_done', {
+        skipped: true,
+        reason: 'circuit_open'
+      });
+      return skipped;
     }
     activeCount += 1;
+    lastActiveAt = Date.now();
     if (activeUserId) activeUserIds.add(activeUserId);
 
     try {
-      await processJobImpl(job, options);
+      appendPostReplyJobTrace(job, 'job_started', {
+        activeCount,
+        phase,
+        attempt: Number(job.attempt || 0) || 0,
+        pressureMode: pressureBackoffState.active
+          ? (normalizePhase(job.phase) === 'core' && config.POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE === true ? 'minimal' : 'normal')
+          : 'normal',
+        pressureLevel: pressureBackoffState.pressureLevel
+      });
+      const runnableJob = buildJobForCurrentPressure(job);
+      const processResult = await processJobImpl(runnableJob, {
+        ...options,
+        queue: progressQueue
+      });
       recordPhaseSuccess(job);
-      const completed = queue.markDone(job);
+      const completed = queue.markDone(processResult?.job || job);
+      appendPostReplyJobTrace(completed, 'job_done', {
+        turns: normalizeArray(completed.turns).length,
+        attempt: completed.attempt
+      });
       logStructured(phase === 'core' ? 'post_reply_core_completed' : 'post_reply_enrich_completed', {
         jobId: completed.jobId,
         dedupeKey: completed.dedupeKey,
@@ -567,12 +502,25 @@ function createPostReplyWorkerRuntime(options = {}) {
         turns: normalizeArray(completed.turns).length,
         post_reply_worker_active: Math.max(1, activeCount)
       });
-      if (phase === 'core') enqueueEnrichJob(completed);
+      if (phase === 'core') {
+        const enrichJob = enqueueEnrichJob(completed);
+        if (enrichJob) {
+          appendPostReplyJobTrace(enrichJob, 'job_enqueued', {
+            sourceJobId: completed.jobId,
+            phase: 'enrich'
+          });
+        }
+      }
       return completed;
     } catch (error) {
       const errorText = error?.message || error;
       if (isTerminalPostReplyError(errorText)) {
-        const failed = queue.markFailed(job, errorText);
+        const failed = queue.markFailed(latestJob, errorText);
+        appendPostReplyJobTrace(failed, 'job_failed', {
+          terminal: true,
+          errorClass: failed.errorClass,
+          error: errorText
+        });
         logStructured('post_reply_terminal_error', {
           phase,
           jobId: failed.jobId,
@@ -581,13 +529,20 @@ function createPostReplyWorkerRuntime(options = {}) {
         return failed;
       }
       recordPhaseFailure(job, errorText);
-      const retryDelayMs = isRateLimitError(errorText)
+      const retryDelayMs = isTransientPostReplyError(errorText)
         ? applyRateLimitBackoff(job, errorText)
         : 0;
       const result = queue.retryOrFail({
-        ...job,
-        retryDelayMs
+        ...latestJob,
+        retryDelayMs,
+        lastTransientErrorAt: retryDelayMs > 0 ? new Date().toISOString() : latestJob.lastTransientErrorAt
       }, error?.message || error);
+      appendPostReplyJobTrace(result.job, result.retried ? 'job_retry_scheduled' : 'job_failed', {
+        retried: result.retried,
+        retryDelayMs,
+        errorClass: result.job?.errorClass,
+        error: errorText
+      });
       console.error('[post-reply-worker] job failed', {
         jobId: job.jobId,
         dedupeKey: job.dedupeKey,
@@ -599,6 +554,7 @@ function createPostReplyWorkerRuntime(options = {}) {
       return result.job;
     } finally {
       activeCount = Math.max(0, activeCount - 1);
+      if (activeCount === 0) lastActiveAt = Date.now();
       if (activeUserId) activeUserIds.delete(activeUserId);
       scheduleTick(0);
     }
@@ -606,15 +562,31 @@ function createPostReplyWorkerRuntime(options = {}) {
 
   async function tick() {
     if (stopped) return;
+    if (maybeRequestIdleRecycle()) return;
+    requeueTransientFailedJobs();
 
     const pressureDeferMs = getPressureDeferMs();
-    if (pressureDeferMs > 0) {
+    updatePressureBackoff(pressureDeferMs);
+    const selectivePressureMode = pressureDeferMs > 0
+      && (config.POST_REPLY_ENRICH_PRESSURE_PAUSE_ENABLED === true || config.POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE === true);
+    if (pressureDeferMs > 0 && !selectivePressureMode) {
+      const {
+        getResourcePressureState,
+        appendPerfEvent,
+        appendResourceSnapshot
+      } = getPerfRuntimeModule();
       appendPerfEvent({
         category: 'background_pressure',
         type: 'post_reply_deferred',
         delayMs: pressureDeferMs,
         activeCount,
         pressureLevel: getResourcePressureState().level
+      });
+      appendResourceSnapshot({
+        component: 'post_reply_worker',
+        postReplyActiveCount: activeCount,
+        postReplyEffectiveConcurrency: getEffectiveConcurrency(),
+        postReplyQueuedDeferMs: pressureDeferMs
       });
       scheduleTick(pressureDeferMs);
       return;
@@ -631,7 +603,7 @@ function createPostReplyWorkerRuntime(options = {}) {
       }
     }
 
-    if (startedJobs === 0) scheduleTick(pollMs);
+    if (startedJobs === 0) scheduleTick(selectivePressureMode ? Math.max(pollMs, pressureDeferMs) : pollMs);
   }
 
   function start() {
@@ -641,6 +613,9 @@ function createPostReplyWorkerRuntime(options = {}) {
     if (!stopped) return true;
     stopped = false;
     scheduleTick(0);
+    if (vectorWatchdogLoop && config.POST_REPLY_VECTOR_WATCHDOG_ENABLED === true) {
+      vectorWatchdogLoop.start();
+    }
     return true;
   }
 
@@ -650,6 +625,9 @@ function createPostReplyWorkerRuntime(options = {}) {
     if (timer) {
       clearTimeout(timer);
       timer = null;
+    }
+    if (vectorWatchdogLoop && typeof vectorWatchdogLoop.stop === 'function') {
+      vectorWatchdogLoop.stop();
     }
   }
 
@@ -662,11 +640,22 @@ function createPostReplyWorkerRuntime(options = {}) {
     stop,
     tick,
     runOneJob,
-    getActiveUserIds
+    requeueTransientFailedJobs,
+    getActiveUserIds,
+    getStats,
+    maybeRequestIdleRecycle,
+    hasPendingQueueWorkForRecycle,
+    vectorWatchdogLoop
   };
 }
 
 module.exports = {
   createPostReplyWorkerRuntime,
+  flushPostReplyMaterialize,
+  runPostReplyVectorMaintenance,
+  runPostReplyVectorWatchdog,
+  schedulePostReplyMaterialize,
+  buildCoreLearningConversation,
+  buildCoreLearningEvidence,
   processPostReplyJob
 };

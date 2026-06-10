@@ -18,8 +18,12 @@ function buildHeaders() {
   return headers;
 }
 
+function hasBridgeToken() {
+  return Boolean(normalizeText(config.LOCAL_COMMAND_BRIDGE_TOKEN));
+}
+
 function isLocalCommandBridgeEnabled() {
-  return Boolean(config.LOCAL_COMMAND_BRIDGE_ENABLED) && Boolean(getBridgeBaseUrl());
+  return Boolean(config.LOCAL_COMMAND_BRIDGE_ENABLED) && Boolean(getBridgeBaseUrl()) && hasBridgeToken();
 }
 
 async function runLocalCommandViaBridge(payload = {}, timeoutMs = 30000) {
@@ -77,6 +81,7 @@ module.exports = {
   callMcpViaBridge,
   discoverMcpViaBridge,
   getBridgeBaseUrl,
+  hasBridgeToken,
   isLocalCommandBridgeEnabled,
   runLocalCommandViaBridge
 };

@@ -1,0 +1,104 @@
+const assert = require('assert');
+const path = require('path');
+
+function clearProjectCache() {
+  const projectRoot = path.resolve(__dirname, '..') + path.sep;
+  for (const key of Object.keys(require.cache)) {
+    if (key.startsWith(projectRoot)) delete require.cache[key];
+  }
+}
+
+function isLoaded(relPath) {
+  const abs = path.resolve(__dirname, '..', relPath);
+  return Object.keys(require.cache).some((key) => key === abs);
+}
+
+function loadConfigWithEnv(env = {}) {
+  const snapshot = { ...process.env };
+  try {
+    Object.assign(process.env, env);
+    clearProjectCache();
+    return require('../config');
+  } finally {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in snapshot)) delete process.env[key];
+    }
+    for (const [key, value] of Object.entries(snapshot)) {
+      process.env[key] = value;
+    }
+  }
+}
+
+module.exports = (async () => {
+  const snapshot = { ...process.env };
+  try {
+    process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.MCP_WARM_ON_RUNTIME_INIT = 'false';
+    clearProjectCache();
+
+    require('../api/runtimeV2/host');
+
+    assert.strictEqual(isLoaded('api/toolExecutors/index.js'), false, 'runtime host should not load full static tool executors on require');
+    assert.strictEqual(isLoaded('api/legacy/aiHost.js'), false, 'runtime host should not load legacy aiHost on require');
+    assert.strictEqual(isLoaded('utils/memory-v3/materializer.js'), false, 'runtime host should not load memory materializer on require');
+
+    clearProjectCache();
+    require('../web/server');
+    assert.strictEqual(isLoaded('api/legacy/aiHost.js'), false, 'web server should not load legacy aiHost on require');
+    assert.strictEqual(isLoaded('api/ai.js'), false, 'web server should not load api/ai barrel for reasoning endpoint');
+
+    clearProjectCache();
+    require('../api/imageGeneration');
+    assert.strictEqual(isLoaded('api/legacy/aiHost.js'), false, 'imageGeneration should lazy-load legacy drawPicture');
+
+    clearProjectCache();
+    require('../api/toolExecutors');
+    assert.strictEqual(isLoaded('api/skills_native/stocks/quote.js'), false, 'toolExecutors should lazy-load stock tools');
+    assert.strictEqual(isLoaded('api/skills_native/ppt.js'), false, 'toolExecutors should lazy-load ppt tools');
+    assert.strictEqual(isLoaded('api/minecraftAgent.js'), false, 'toolExecutors should lazy-load minecraft tools');
+
+    const config = loadConfigWithEnv({
+      API_KEY: process.env.API_KEY || 'test-key',
+      POST_REPLY_WORKER_ENABLED: 'false',
+      TICK_ENGINE_ENABLED: 'false',
+      SCHEDULER_RUNTIME_ENABLED: 'false',
+      QZONE_AUTO_PUBLISH_ENABLED: 'false'
+    });
+    assert.strictEqual(config.MCP_DISCOVERY_MODE, 'lazy');
+    assert.strictEqual(config.MCP_WARM_ON_RUNTIME_INIT, false);
+    assert.strictEqual(config.POST_REPLY_WORKER_ENABLED, false);
+    assert.strictEqual(config.TICK_ENGINE_ENABLED, false);
+    assert.strictEqual(config.SCHEDULER_RUNTIME_ENABLED, false);
+    assert.strictEqual(config.QZONE_AUTO_PUBLISH_ENABLED, false);
+
+    const indexSource = require('fs').readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+    assert.ok(!indexSource.includes("const { askAIByGraph } = require('./api/agentGraph')"), 'main entrypoint should lazy-load agentGraph until first model call');
+    assert.ok(!/^const\s+\{\s*enqueueMissingEmbeddings\s*\}\s*=\s*require\('\.\/utils\/memory-v3\/embeddingIndex'\)/m.test(indexSource), 'main entrypoint should not top-level load embedding backfill');
+    assert.ok(indexSource.includes('config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START'), 'main entrypoint should gate startup embedding backfill behind config');
+    const memoryQuerySource = require('fs').readFileSync(path.join(__dirname, '..', 'utils', 'memory-v3', 'query.js'), 'utf8');
+    assert.ok(!/^const\s+\{[\s\S]*?\}\s*=\s*require\('\.\.\/lancedbMemoryStore'\)/m.test(memoryQuerySource), 'memory query should lazy-load LanceDB only when vector recall runs');
+    assert.ok(memoryQuerySource.includes("require('../lancedbMemoryStore/helperClient')"), 'memory query should route low-resource main LanceDB reads through the helper');
+    const memoryQueryScoringSource = require('fs').readFileSync(path.join(__dirname, '..', 'utils', 'memory-v3', 'queryScoring.js'), 'utf8');
+    assert.ok(!/^const\s+\{[\s\S]*?\}\s*=\s*require\('\.\/embeddingIndex'\)/m.test(memoryQueryScoringSource), 'memory scoring should lazy-load embeddingIndex only for semantic scoring');
+
+    clearProjectCache();
+    require('../src/runtime-v2/context/memory-inputs');
+
+    assert.strictEqual(isLoaded('api/runtimeV2/context/service.js'), false, 'memory input helpers should not load runtime-v2 context service');
+    assert.strictEqual(isLoaded('src/runtime-v2/context/index.js'), false, 'memory input helpers should not load full runtime-v2 context service');
+    assert.strictEqual(isLoaded('utils/memory-v3/materializer.js'), false, 'memory input helpers should not load memory materializer on require');
+
+    console.log('hotpathRequireGuard.test.js passed');
+  } finally {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in snapshot)) delete process.env[key];
+    }
+    for (const [key, value] of Object.entries(snapshot)) {
+      process.env[key] = value;
+    }
+    clearProjectCache();
+  }
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

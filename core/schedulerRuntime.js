@@ -40,6 +40,15 @@ function createSchedulerRuntime(options = {}) {
     }
 
     if (commandType === 'qzone_post') {
+      const qzoneAutoPublishEnabled = options.qzoneAutoPublishEnabled !== undefined
+        ? options.qzoneAutoPublishEnabled
+        : config.QZONE_AUTO_PUBLISH_ENABLED;
+      if (!qzoneAutoPublishEnabled) {
+        return {
+          success: false,
+          reason: 'QZone auto publish disabled'
+        };
+      }
       if (!isAdmin(task.ownerUserId)) {
         return {
           success: false,
@@ -48,14 +57,23 @@ function createSchedulerRuntime(options = {}) {
         };
       }
       const result = await publishQzone({
-        mode: String(task.payload?.mode || '').trim() === 'bot_diary' ? 'bot_diary' : 'manual',
+        mode: (() => {
+          const mode = String(task.payload?.mode || '').trim().toLowerCase();
+          if (mode === 'bot_diary' || mode === 'agent' || mode === 'generic_autodraft') return mode;
+          return 'manual';
+        })(),
         content: task.payload?.content || '',
-        hint: task.payload?.hint || ''
+        hint: task.payload?.hint || task.payload?.content || '',
+        publishPolicy: 'auto_publish'
       }, {
         userId: String(task.ownerUserId || ''),
         routeMeta: {
           groupId: String(task.groupId || '')
         }
+      }, {
+        publishPolicy: 'auto_publish',
+        qzoneSource: 'scheduled_qzone_post',
+        qzoneType: String(task.payload?.mode || '').trim().toLowerCase() || 'agent'
       });
       return {
         success: Boolean(result?.ok),

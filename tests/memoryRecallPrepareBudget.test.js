@@ -27,6 +27,7 @@ module.exports = (async () => {
   );
 
   let capturedPreparedState = null;
+  let continuityMemoryContext = null;
   const prepareNode = createPrepareNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;
@@ -70,7 +71,8 @@ module.exports = (async () => {
       probeResult: null,
       probeMeta: null
     }),
-    buildContinuityState() {
+    buildContinuityState(options = {}) {
+      continuityMemoryContext = options.memoryContext || null;
       return {
         payload: { active_topic: '昨天回忆', source_flags: ['test'] },
         text: '[ContinuityState] 昨天回忆',
@@ -194,6 +196,11 @@ module.exports = (async () => {
   assert.ok(
     capturedPreparedState.memory?.context?.segments?.dailyJournal?.length > 0,
     'prepared context should see memory context built in the same prepare pass'
+  );
+  assert.strictEqual(
+    continuityMemoryContext,
+    capturedPreparedState.memory?.context,
+    'continuity state should reuse the memory context already built during prepare'
   );
 
   console.log('memoryRecallPrepareBudget.test.js passed');

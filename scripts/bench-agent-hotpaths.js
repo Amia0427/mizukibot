@@ -1,4 +1,30 @@
-const path = require('path');
+function parseArgs(argv = process.argv.slice(2)) {
+  const out = {
+    caseName: 'all',
+    timeoutMs: 30000
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const item = String(argv[i] || '').trim();
+    if (item === '--case' && argv[i + 1]) {
+      out.caseName = String(argv[i + 1] || '').trim() || 'all';
+      i += 1;
+      continue;
+    }
+    if (item.startsWith('--case=')) {
+      out.caseName = item.slice('--case='.length).trim() || 'all';
+      continue;
+    }
+    if (item === '--timeout-ms' && argv[i + 1]) {
+      out.timeoutMs = Math.max(1000, Number(argv[i + 1]) || out.timeoutMs);
+      i += 1;
+      continue;
+    }
+    if (item.startsWith('--timeout-ms=')) {
+      out.timeoutMs = Math.max(1000, Number(item.slice('--timeout-ms='.length)) || out.timeoutMs);
+    }
+  }
+  return out;
+}
 
 function percentile(values = [], ratio = 0.5) {
   const list = Array.isArray(values) ? values.slice().sort((a, b) => a - b) : [];
@@ -15,6 +41,14 @@ function summarize(values = []) {
   };
 }
 
+function clearRequireCache(relativeIds = []) {
+  for (const relativeId of relativeIds) {
+    try {
+      delete require.cache[require.resolve(relativeId)];
+    } catch (_) {}
+  }
+}
+
 async function timeRun(fn) {
   const startedAt = Date.now();
   await fn();
@@ -27,6 +61,23 @@ async function sample(fn, count = 8) {
     values.push(await timeRun(fn));
   }
   return values;
+}
+
+async function withTimeout(label = '', timeoutMs = 30000, fn) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(fn),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label || 'benchmark'} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+        if (typeof timer.unref === 'function') timer.unref();
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function benchDirectReplyNoTool() {
@@ -300,63 +351,49 @@ async function benchReadonlyTool() {
   };
 }
 
-async function benchSubagentSequentialCalls() {
-  process.env.API_KEY = process.env.API_KEY || 'bench-key';
-  process.env.SUBAGENT_COMMAND = process.execPath;
-  process.env.SUBAGENT_WORKDIR = path.join(__dirname, '..');
-  process.env.SUBAGENT_ARGS = JSON.stringify([
-    path.join(__dirname, '..', 'tests', 'fixtures', 'subagent-cli-stub.js'),
-    '--session',
-    '{sessionId}',
-    '--message',
-    '{message}'
-  ]);
-  process.env.SUBAGENT_COMMAND_MODE = 'persistent';
-  process.env.SUBAGENT_WORKER_IDLE_TTL_MS = '1000';
-  process.env.SUBAGENT_WORKER_MAX_REUSE = '100';
-  process.env.SUBAGENT_TIMEOUT_MS = '2000';
+const BENCH_CASES = {
+  direct_chat_no_tool: benchDirectReplyNoTool,
+  direct_chat_one_readonly_tool: benchReadonlyTool
+};
 
-  const backend = require('../api/subagentBackends/commandBackend');
-  backend.resetPersistentWorkerState();
-
-  const run = async (text) => {
-    const call = backend.createCommandBridgeCall({
-      question: text,
-      sessionId: 'bench-session',
-      options: {}
-    });
-    return call.promise;
-  };
-
+async function runBenchCase(name, fn, timeoutMs) {
+  const startedAt = Date.now();
   try {
-    const cold = await timeRun(() => run('subagent first'));
-    const warm = [];
-    for (let i = 0; i < 12; i += 1) {
-      warm.push(await timeRun(() => run(`subagent warm ${i}`)));
-    }
-    const snapshot = backend.getPersistentWorkerSnapshot();
+    const result = await withTimeout(name, timeoutMs, fn);
     return {
-      coldMs: cold,
-      warm: summarize(warm),
-      activeWorkers: snapshot.length,
-      reuseCount: snapshot[0]?.reuseCount || 0
+      ok: true,
+      durationMs: Date.now() - startedAt,
+      result
     };
   } catch (error) {
     return {
-      skipped: true,
-      reason: String(error?.message || error || 'subagent benchmark failed')
+      ok: false,
+      durationMs: Date.now() - startedAt,
+      error: String(error?.message || error || 'benchmark failed')
     };
   }
 }
 
 async function main() {
+  const args = parseArgs();
+  const selectedNames = args.caseName === 'all'
+    ? Object.keys(BENCH_CASES)
+    : [args.caseName];
+  const unknown = selectedNames.filter((name) => !BENCH_CASES[name]);
+  if (unknown.length > 0) {
+    throw new Error(`Unknown benchmark case: ${unknown.join(', ')}. Available: ${Object.keys(BENCH_CASES).join(', ')}`);
+  }
+
   const results = {
     generatedAt: new Date().toISOString(),
-    direct_chat_no_tool: await benchDirectReplyNoTool(),
-    direct_chat_one_readonly_tool: await benchReadonlyTool(),
-    subagent_sequential_calls: await benchSubagentSequentialCalls()
+    selectedCase: args.caseName,
+    timeoutMs: args.timeoutMs
   };
-  if (results.direct_chat_no_tool.modelCallsPerRun !== 1) {
+  for (const name of selectedNames) {
+    results[name] = await runBenchCase(name, BENCH_CASES[name], args.timeoutMs);
+  }
+  const direct = results.direct_chat_no_tool?.result;
+  if (direct && direct.modelCallsPerRun !== 1) {
     throw new Error('direct_chat_no_tool benchmark is invalid: expected at least 1 model call');
   }
   console.log(JSON.stringify(results, null, 2));

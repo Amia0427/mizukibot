@@ -1,6 +1,10 @@
 ﻿const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
+
+process.env.MIZUKIBOT_RUNTIME_ROLE = process.env.MIZUKIBOT_RUNTIME_ROLE || 'main';
+
 const config = require('./config');
 
 config.validateRequiredConfig();
@@ -9,19 +13,15 @@ const { startServer } = require('./web/server');
 const { startTickEngine } = require('./core/tickEngine');
 const { createMessageHandler } = require('./core/messageHandler');
 const { initializeMemeManager } = require('./core/memeManager');
-const { askAIByGraph } = require('./api/agentGraph');
 const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
 const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
-const { warmMcpRegistry } = require('./api/toolRegistry');
 const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
-const { shutdownSubagentExecutor } = require('./api/subagentExecutor');
 const { getNapCatActionClient } = require('./api/napcatActionClient');
 const { getSchedulerRuntime } = require('./core/schedulerRuntime');
 const { sendGroupMessage } = require('./api/qqActionService');
 const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime');
 const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/napcatLogFollower');
 const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
-const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
 const { cleanupStaleDataTmpFiles, DEFAULT_MAX_AGE_MS } = require('./utils/dataTmpCleanup');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
@@ -35,6 +35,46 @@ function isProcessAlive(pid) {
   } catch (_) {
     return false;
   }
+}
+
+function getProcessCommandLine(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return '';
+
+  try {
+    if (process.platform === 'win32') {
+      const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction SilentlyContinue; if ($p) { [string]$p.CommandLine }`;
+      return String(execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+        encoding: 'utf8',
+        timeout: 2000,
+        windowsHide: true
+      }) || '').trim();
+    }
+
+    const procCmdline = `/proc/${pid}/cmdline`;
+    if (fs.existsSync(procCmdline)) {
+      return fs.readFileSync(procCmdline, 'utf8').replace(/\0/g, ' ').trim();
+    }
+
+    return String(execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      encoding: 'utf8',
+      timeout: 2000
+    }) || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function commandLineLooksLikeMainBot(commandLine) {
+  const value = String(commandLine || '').trim();
+  if (!value) return false;
+  return /\bnode(?:\.exe)?\b/i.test(value) && /(^|[\\/\s"'])index\.js(["'\s]|$)/i.test(value);
+}
+
+function isMainBotProcess(pid) {
+  if (!isProcessAlive(pid)) return false;
+  const commandLine = getProcessCommandLine(pid);
+  if (!commandLine) return true;
+  return commandLineLooksLikeMainBot(commandLine);
 }
 
 function acquireSingleInstanceLock() {
@@ -56,9 +96,17 @@ function acquireSingleInstanceLock() {
       existingPid = Number.parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
     } catch (_) {}
 
-    if (isProcessAlive(existingPid)) {
+    if (isMainBotProcess(existingPid)) {
       console.error('[Startup] MizukiBot is already running (PID=' + existingPid + ').');
       process.exit(1);
+    }
+
+    if (isProcessAlive(existingPid)) {
+      const commandLine = getProcessCommandLine(existingPid);
+      console.warn('[Startup] Replacing stale lock owned by non-bot process:', {
+        pid: existingPid,
+        commandLine: commandLine.slice(0, 240)
+      });
     }
 
     try {
@@ -109,12 +157,14 @@ try {
 }
 const webServer = startServer();
 initializeMemeManager();
-void warmMcpRegistry();
-enqueueMissingEmbeddings(null, {
-  schedule: true,
-  delayMs: 15000,
-  continueDelayMs: 60000
-});
+if (config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START) {
+  const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
+  enqueueMissingEmbeddings(null, {
+    schedule: true,
+    delayMs: 15000,
+    continueDelayMs: 60000
+  });
+}
 
 let ws = null;
 let shuttingDown = false;
@@ -126,6 +176,10 @@ let reconnectAttempts = 0;
 let schedulerStarted = false;
 const napcatActionClient = getNapCatActionClient();
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
+
+function askAIByGraph(...args) {
+  return require('./api/agentGraph').askAIByGraph(...args);
+}
 
 function scheduleReconnect() {
   if (shuttingDown) return;
@@ -213,12 +267,12 @@ function connectNapCat() {
     reconnectAttempts = 0;
     console.log('✅ 瑞希上线啦！已连接到 NapCat');
 
-    if (!tickStarted) {
+    if (config.TICK_ENGINE_ENABLED && !tickStarted) {
       tickRuntime = startTickEngine(ws, askAIByGraph);
       tickStarted = true;
     }
 
-    if (!schedulerStarted) {
+    if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
       schedulerRuntime.start();
       schedulerStarted = true;
     }
@@ -312,9 +366,6 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
     console.error('[shutdown] web server close failed:', error?.message || error);
   }
 
-  try { shutdownSubagentExecutor(reason); } catch (error) {
-    console.error('[shutdown] subagent cleanup failed:', error?.message || error);
-  }
   try { clearMcpRuntimeCaches(); } catch (error) {
     console.error('[shutdown] mcp cleanup failed:', error?.message || error);
   }
@@ -362,7 +413,6 @@ function drainForScheduledRestart(meta = {}) {
     napcatActionClient.handleDisconnect('MizukiBot restart draining');
     napcatActionClient.setWebSocket(null);
   } catch (_) {}
-  try { shutdownSubagentExecutor('restart_draining'); } catch (_) {}
 }
 
 process.on('mizuki:restartScheduled', drainForScheduledRestart);

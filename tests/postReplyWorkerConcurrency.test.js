@@ -30,6 +30,7 @@ module.exports = (async () => {
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.POST_REPLY_QUEUE_DIR = queueDir;
+    process.env.POST_REPLY_TRACE_DIR = path.join(queueDir, 'traces');
     process.env.POST_REPLY_WORKER_ENABLED = 'true';
     process.env.POST_REPLY_WORKER_CONCURRENCY = '2';
     clearProjectCache();

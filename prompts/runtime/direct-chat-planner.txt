@@ -1,4 +1,4 @@
-Direct chat planner single authority:
+# Direct chat planner single authority:
 Return JSON only.
 Prefer tools whenever they materially improve factuality, freshness, continuity, or structured output quality.
 Only pure smalltalk, pure opinion, pure rewrite, or obvious self-contained short answers may use chat_only.

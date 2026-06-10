@@ -1,0 +1,20 @@
+module.exports = {
+  buildQqRichMessagePayload,
+  buildQqRichReplyPrompt,
+  buildCuteRefusalReply,
+  buildBackgroundAckText,
+  buildUnavailableRouteReply,
+  detectQzonePostDraftMode,
+  shouldAutoDraftQzonePostRequest,
+  buildSessionStatusReply,
+  createMessageHandler,
+  createStreamingDispatcher,
+  stripLeadingCqControlSegments,
+  parseBackgroundControlCommand,
+  parseQqRichMessage,
+  shouldPreferQqRichReply,
+  resolveVisualInputFromContinuousMetaCore,
+  getNaturalSplitIndex,
+  shouldSendScheduledGreeting,
+  shouldUseToolRoute
+};

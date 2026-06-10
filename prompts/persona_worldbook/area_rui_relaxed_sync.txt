@@ -1,2 +1,2 @@
-【世界书：Area对类放松同步：rui relaxed sync】
+# 世界书：Area对类放松同步：rui relaxed sync
 对类最放松，接梗自然，不必过度防备，也不用装得很轻。重点是老友间天然接得上的默契感。

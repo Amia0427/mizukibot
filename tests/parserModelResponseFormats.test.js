@@ -1,6 +1,7 @@
 const assert = require('assert');
 
-const { extractMessageContent } = require('../api/parser');
+const { extractFinishReason, extractMessageContent, extractSSEEvents } = require('../api/parser');
+const { normalizeTextContent } = require('../api/runtimeV2/model/shared');
 
 module.exports = (() => {
   const responsesOutputText = extractMessageContent({
@@ -83,6 +84,106 @@ module.exports = (() => {
     role: 'assistant',
     content: 'nested proxy text'
   });
+
+  const objectContentMessage = extractMessageContent({
+    data: {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: { type: 'text', text: 'object content text' }
+          }
+        }
+      ]
+    }
+  });
+  assert.deepStrictEqual(objectContentMessage, {
+    role: 'assistant',
+    content: 'object content text'
+  });
+  const geminiText = extractMessageContent({
+    data: {
+      candidates: [
+        {
+          content: {
+            parts: [
+              { text: 'gemini ok' }
+            ]
+          }
+        }
+      ]
+    }
+  });
+  assert.deepStrictEqual(geminiText, {
+    role: 'assistant',
+    content: 'gemini ok'
+  });
+  const geminiFunctionCall = extractMessageContent({
+    data: {
+      candidates: [
+        {
+          content: {
+            parts: [
+              {
+                functionCall: {
+                  name: 'lookup',
+                  args: { q: 'x' }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  });
+  assert.strictEqual(geminiFunctionCall.role, 'assistant');
+  assert.strictEqual(geminiFunctionCall.content, '');
+  assert.strictEqual(geminiFunctionCall.tool_calls[0].type, 'function');
+  assert.strictEqual(geminiFunctionCall.tool_calls[0].function.name, 'lookup');
+  assert.strictEqual(geminiFunctionCall.tool_calls[0].function.arguments, JSON.stringify({ q: 'x' }));
+  assert.notStrictEqual(String(objectContentMessage.content), '[object Object]');
+  assert.strictEqual(
+    normalizeTextContent({ type: 'text', text: 'shared object content' }),
+    'shared object content'
+  );
+  assert.strictEqual(
+    normalizeTextContent([{ type: 'text', content: { output_text: 'nested shared content' } }]),
+    'nested shared content'
+  );
+  assert.strictEqual(
+    normalizeTextContent({ visibleText: 'visible runtime reply', persistedText: 'persisted runtime reply' }),
+    'persisted runtime reply'
+  );
+  assert.strictEqual(
+    normalizeTextContent({ finalReply: 'final runtime reply' }),
+    'final runtime reply'
+  );
+
+  const geminiStreamState = { buffer: '' };
+  const geminiStream = extractSSEEvents(
+    geminiStreamState,
+    'data: {"candidates":[{"content":{"parts":[{"text":"首字"}],"role":"model"}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2,"totalTokenCount":9,"cachedContentTokenCount":3}}\n\n'
+  );
+  assert.strictEqual(geminiStream.events.length, 1);
+  assert.strictEqual(geminiStream.events[0].delta, '首字');
+  assert.strictEqual(geminiStream.events[0].usage.prompt_tokens, 7);
+  assert.strictEqual(geminiStream.events[0].usage.completion_tokens, 2);
+  assert.strictEqual(geminiStream.events[0].usage.total_tokens, 9);
+  assert.strictEqual(geminiStream.events[0].usage.cache_read_input_tokens, 3);
+
+  const openAiFinish = extractSSEEvents(
+    { buffer: '' },
+    'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'
+  );
+  assert.strictEqual(openAiFinish.events[0].finishReason, 'length');
+  assert.strictEqual(extractFinishReason(openAiFinish.events[0].json), 'length');
+
+  const geminiFinish = extractSSEEvents(
+    { buffer: '' },
+    'data: {"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[{"text":"没说完"}]}}]}\n\n'
+  );
+  assert.strictEqual(geminiFinish.events[0].delta, '没说完');
+  assert.strictEqual(geminiFinish.events[0].finishReason, 'MAX_TOKENS');
 
   console.log('parserModelResponseFormats.test.js passed');
 })()

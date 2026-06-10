@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = (() => {
-  const filePath = path.join(__dirname, '..', 'api', 'runtimeV2', 'host.js');
+  const filePath = path.join(__dirname, '..', 'api', 'runtimeV2', 'host', 'index.js');
   const source = fs.readFileSync(filePath, 'utf8');
 
   assert.ok(

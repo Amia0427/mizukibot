@@ -12,8 +12,12 @@ function stripTrailingThinkFragment(text = '', options = {}) {
   const thinkMarkers = [
     '<think>',
     '<think ',
+    '<thinking>',
+    '<thinking ',
     '</think>',
-    '</think '
+    '</think ',
+    '</thinking>',
+    '</thinking '
   ];
 
   if (thinkMarkers.some((marker) => marker.startsWith(fragment))) {
@@ -73,6 +77,17 @@ function stripNarrativeLeadIn(text = '') {
     .join('\n');
 }
 
+function stripInternalReasoningLeakText(text = '') {
+  let next = String(text || '');
+
+  next = next.replace(/```(?:json|JSON)?\s*\{[\s\S]*?"reasoning_content"\s*:[\s\S]*?\}\s*```/g, '');
+  next = next.replace(/^\s*["']?(?:reasoning_content|internal_check|内部检查)["']?\s*[:：=]\s*.*$/gmi, '');
+  next = next.replace(/\[(?:RoleplayInnerProtocol|InternalCheck|内部检查)\][\s\S]*?(?=\n{2,}|$)/gi, '');
+  next = next.replace(/(?:系统提示词|隐藏提示词|内部规则)\s*(?:如下|全文|原文|内容|是|为|[:：])[\s\S]*?(?=\n{2,}|$)/g, '');
+
+  return next.replace(/^\s*\n+/, '');
+}
+
 function sanitizeUserFacingText(text = '', options = {}) {
   const preserveThink = options && typeof options === 'object' && options.preserveThink === true;
   let next = String(text || '').replace(/\u200b/g, '');
@@ -81,12 +96,13 @@ function sanitizeUserFacingText(text = '', options = {}) {
 
   while (next !== previous) {
     previous = next;
-    next = next.replace(/<think\b[^>]*>[\s\S]*?<\/think\s*>/gi, '');
+    next = next.replace(/<think(?:ing)?\b[^>]*>[\s\S]*?<\/think(?:ing)?\s*>/gi, '');
   }
 
-  next = next.replace(/<think\b[^>]*>[\s\S]*$/i, '');
-  next = next.replace(/<\/think\s*>/gi, '');
+  next = next.replace(/<think(?:ing)?\b[^>]*>[\s\S]*$/i, '');
+  next = next.replace(/<\/think(?:ing)?\s*>/gi, '');
   next = stripTrailingThinkFragment(next, options);
+  next = stripInternalReasoningLeakText(next);
   next = stripNarrativeLeadIn(next);
   return next;
 }
@@ -117,5 +133,6 @@ function hasVisibleUserFacingText(text = '') {
 module.exports = {
   extractUserFacingDelta,
   hasVisibleUserFacingText,
-  sanitizeUserFacingText
+  sanitizeUserFacingText,
+  stripInternalReasoningLeakText
 };

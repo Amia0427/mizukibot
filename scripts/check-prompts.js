@@ -5,6 +5,9 @@ const { PROMPTS_DIR, PROMPT_MANIFEST, PROMPT_MANIFEST_PATH } = require('../confi
 const { RUNTIME_PROMPT_DEFAULTS, renderRuntimePromptTemplate } = require('../utils/runtimePrompts');
 const { buildPromptSnapshot } = require('../utils/promptCompiler');
 const {
+  loadAgentPromptsFromRoots
+} = require('../utils/agentPrompts');
+const {
   buildPlannerStageSystemPrompt,
   buildReviewStageSystemPrompt
 } = require('../utils/stagePromptContracts');
@@ -69,9 +72,36 @@ function collectConflictTags(sections = []) {
   return conflicts;
 }
 
+function collectExtraAgentPromptRoots() {
+  return String(process.env.AGENT_PROMPT_EXTRA_ROOTS || '')
+    .split(path.delimiter)
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
+function summarizeAgentPromptFormats(agentPrompts = []) {
+  const summary = {
+    total: 0,
+    markdown: 0,
+    yaml: 0,
+    invalid: 0
+  };
+
+  for (const prompt of Array.isArray(agentPrompts) ? agentPrompts : []) {
+    summary.total += 1;
+    const format = String(prompt?.format || '').trim().toLowerCase();
+    if (format === 'markdown') summary.markdown += 1;
+    if (format === 'yaml') summary.yaml += 1;
+    if (!prompt?.ok) summary.invalid += 1;
+  }
+
+  return summary;
+}
+
 function main() {
   let failureCount = 0;
   console.log('================ Prompt Check Start ================');
+  const projectRoot = path.join(__dirname, '..');
   const ignoredRelPaths = new Set([
     'prompt-manifest.json',
     'persona_modules/module-catalog.json',
@@ -89,6 +119,18 @@ function main() {
   const referencedRelPaths = new Set(sections.map((section) => section.path).filter(Boolean));
   const promptFiles = collectPromptFiles(PROMPTS_DIR);
   const runtimePolicy = readRoutePromptPolicy();
+  let agentPrompts = [];
+  try {
+    agentPrompts = loadAgentPromptsFromRoots([
+      PROMPTS_DIR,
+      path.join(projectRoot, 'skills'),
+      path.join(projectRoot, 'artifacts'),
+      ...collectExtraAgentPromptRoots()
+    ], { rootDir: projectRoot });
+  } catch (error) {
+    fail(`agent prompt load failed: ${error.message || error}`);
+    failureCount += 1;
+  }
 
   for (const section of sections) {
     const fullPath = path.join(PROMPTS_DIR, ...section.path.split('/'));
@@ -137,6 +179,27 @@ function main() {
     }
   }
 
+  if (agentPrompts.length === 0) {
+    warn('no agent prompt files found under prompts/, skills/, or artifacts/');
+  }
+
+  const agentPromptSummary = summarizeAgentPromptFormats(agentPrompts);
+  ok(`agent prompt formats: total=${agentPromptSummary.total}, markdown=${agentPromptSummary.markdown}, yaml=${agentPromptSummary.yaml}, invalid=${agentPromptSummary.invalid}`);
+
+  for (const parsed of agentPrompts) {
+    try {
+      if (!parsed.ok) {
+        fail(`agent prompt invalid ${parsed.relativePath}: ${(parsed.problems || []).join('; ')}`);
+        failureCount += 1;
+        continue;
+      }
+      ok(`agent prompt parsed ${parsed.relativePath}: ${parsed.displayName}`);
+    } catch (error) {
+      fail(`agent prompt parse failed: ${error.message || error}`);
+      failureCount += 1;
+    }
+  }
+
   if (!fs.existsSync(ROUTE_PROMPT_POLICY_PATH)) {
     fail(`route prompt policy missing: ${ROUTE_PROMPT_POLICY_PATH}`);
     failureCount += 1;
@@ -147,11 +210,11 @@ function main() {
   const defaults = runtimePolicy.defaults && typeof runtimePolicy.defaults === 'object'
     ? runtimePolicy.defaults
     : {};
-  if (!defaults.chat || !defaults.subagent) {
-    fail('route prompt policy defaults.chat/defaults.subagent missing');
+  if (!defaults.chat) {
+    fail('route prompt policy defaults.chat missing');
     failureCount += 1;
   } else {
-    ok('route prompt policy defaults present');
+    ok('route prompt policy chat defaults present');
   }
 
   const knownChatKeys = new Set([
@@ -160,17 +223,12 @@ function main() {
     'include_qq_rich_reply_when_requested',
     'disable_stream_when_qq_rich_requested'
   ]);
-  const knownSubagentKeys = new Set([
-    'include_tool_guidance',
-    'include_bridge_guidance'
-  ]);
-
   const routeEntries = runtimePolicy.routes && typeof runtimePolicy.routes === 'object'
     ? Object.entries(runtimePolicy.routes)
     : [];
   for (const [routeType, routePolicy] of routeEntries) {
     for (const [mode, modePolicy] of Object.entries(routePolicy || {})) {
-      const knownKeys = mode === 'chat' ? knownChatKeys : mode === 'subagent' ? knownSubagentKeys : null;
+      const knownKeys = mode === 'chat' ? knownChatKeys : null;
       if (!knownKeys) {
         fail(`unknown route policy mode: ${routeType}.${mode}`);
         failureCount += 1;
@@ -232,10 +290,18 @@ function main() {
 
   if (failureCount > 0) {
     console.log('================ Prompt Check Failed ================');
-    process.exit(1);
+    return 1;
   }
 
   console.log('================ Prompt Check Passed ================');
+  return 0;
 }
 
-main();
+if (require.main === module) {
+  process.exit(main());
+}
+
+module.exports = {
+  main,
+  summarizeAgentPromptFormats
+};

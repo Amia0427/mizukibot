@@ -8,9 +8,13 @@ const {
 
 module.exports = (async () => {
   const raw = '答复前<think>内部推理</think>答复后';
+  const rawThinking = '答复前<thinking>内部推理</thinking>答复后';
   const variants = buildReplyTextVariants(raw, '', { preserveThink: true });
   assert.strictEqual(variants.visibleText, raw);
   assert.strictEqual(variants.persistedText, '答复前答复后');
+  const thinkingVariants = buildReplyTextVariants(rawThinking, '', { preserveThink: true });
+  assert.strictEqual(thinkingVariants.visibleText, rawThinking);
+  assert.strictEqual(thinkingVariants.persistedText, '答复前答复后');
 
   const finalized = await finalizeReplyText(raw, '', {
     preserveThink: true,
@@ -18,6 +22,12 @@ module.exports = (async () => {
   });
   assert.strictEqual(finalized.visibleText, raw);
   assert.strictEqual(finalized.persistedText, '答复前答复后');
+  const finalizedThinking = await finalizeReplyText(rawThinking, '', {
+    preserveThink: true,
+    disableHumanizer: true
+  });
+  assert.strictEqual(finalizedThinking.visibleText, rawThinking);
+  assert.strictEqual(finalizedThinking.persistedText, '答复前答复后');
 
   const axios = require('axios');
   const originalPost = axios.post;

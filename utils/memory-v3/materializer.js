@@ -1,4 +1,3 @@
-const crypto = require('crypto');
 const config = require('../../config');
 const { getBackgroundPressureDelayMs, appendPerfEvent } = require('../perfRuntime');
 const { getUserAffinityState } = require('../memory');
@@ -13,550 +12,202 @@ const {
 } = require('./helpers');
 const { loadMemoryEvents } = require('./events');
 const {
+  clearProjectionReadCache,
   defaultSessionProjection,
   defaultProfileProjection,
   defaultScopeProjection,
-  defaultEpisodeProjection
+  defaultEpisodeProjection,
+  loadSessionProjection,
+  loadProfileProjection,
+  loadScopeProjection,
+  loadEpisodeProjection,
+  loadMemoryNodes
 } = require('./storage');
-const { enqueueMissingEmbeddings } = require('./embeddingIndex');
+const { collectEmbeddingBackfillNodes, enqueueMissingEmbeddings } = require('./embeddingIndex');
 const { acquireMaterializeLock, DEFAULT_STALE_MS: DEFAULT_MATERIALIZE_LOCK_STALE_MS } = require('./materializeLock');
+const { isMemoryNotRecallable } = require('./recallFilter');
+const {
+  applyNearDuplicateMerges,
+  applyProfileLifecycle,
+  applySupersession,
+  isProfileField,
+  lifecycleHiddenReason
+} = require('./profileLifecycle');
+const {
+  buildLanceDbSyncPlan,
+  createNodeFromEvent,
+  upsertNode
+} = require('./materializerNodes');
+const { applySessionEvent } = require('./materializerSessions');
+const {
+  countDirtyScopes,
+  eventMatchesDirtyScopes,
+  getLatestEventTs,
+  mergeIncrementalProjection,
+  normalizeDirtyScopes
+} = require('./materializerIncremental');
+const {
+  BOT_PERSONA_FIELDS,
+  PERSONA_SUPPORT_FIELDS,
+  RELATIONSHIP_STYLE_FIELDS,
+  STRICT_PROFILE_FIELD_MAP,
+  WEAK_PROFILE_FIELD_MAP,
+  buildPersonaCore,
+  buildProfileConflictKey,
+  computeStabilityScore,
+  createEmptyProfileProjection,
+  getRecentTopicTtlMs,
+  isExpiredRecentTopic,
+  isExpiringSoonRecentTopic,
+  isProfileProjectionBlockedByExtractionClass,
+  isProfileProjectionBlockedByNoise,
+  pushProfileItem,
+  resolveEvidenceTier,
+  resolveProfileNodeConflicts
+} = require('./profileProjection');
+const { resolveMemoryConflicts } = require('./memoryConflictResolver');
 
-const PERSONA_SUPPORT_FIELDS = new Set([
-  'persona_summary_support',
-  'persona_impression_support'
+const NODE_EVENT_TYPES = new Set([
+  'memory_candidate_extracted',
+  'memory_confirmed',
+  'memory_archived',
+  'migration_bootstrap'
 ]);
 
-const BOT_PERSONA_FIELDS = new Set([
-  'bot_persona_tone',
-  'bot_persona_initiative',
-  'bot_persona_boundaries',
-  'bot_persona_playfulness',
-  'bot_persona_guardedness',
-  'bot_persona_verbosity'
-]);
-
-const RELATIONSHIP_STYLE_FIELDS = new Set([
-  'relationship_tone',
-  'relationship_distance',
-  'relationship_salutation',
-  'relationship_reply_style',
-  'relationship_engagement',
-  'relationship_boundaries'
-]);
-
-const STRICT_PROFILE_FIELD_MAP = Object.freeze({
-  identity: 'identities',
-  personality: 'personality_traits',
-  hobby: 'hobbies',
-  preference_like: 'likes',
-  preference_dislike: 'dislikes',
-  goal: 'goals',
-  boundary: 'boundaries'
-});
-
-const WEAK_PROFILE_FIELD_MAP = Object.freeze({
-  preference_like: 'single_hit_preferences',
-  preference_dislike: 'single_hit_preferences',
-  hobby: 'single_hit_preferences',
-  personality: 'single_hit_traits',
-  topic: 'recent_topics'
-});
-
-const PERSONA_DECAY_WINDOWS = Object.freeze({
-  bot_persona: 365,
-  relationship_style: 120
-});
-
-function createEmptyProfileProjection() {
-  return {
-    personaCore: {
-      summary: '',
-      impression: '',
-      replyStyle: '',
-      relationshipTone: '',
-      botBasePersona: '',
-      userAdaptationPersona: '',
-      relationshipStyle: '',
-      supportHash: '',
-      personaSupportHash: '',
-      relationshipSupportHash: '',
-      personaVersion: 2,
-      updatedAt: 0
-    },
-    strictProfile: {
-      identities: [],
-      personality_traits: [],
-      hobbies: [],
-      likes: [],
-      dislikes: [],
-      goals: [],
-      boundaries: []
-    },
-    weakProfile: {
-      single_hit_preferences: [],
-      single_hit_traits: [],
-      recent_topics: []
-    },
-    profileMeta: {},
-    suppressed: [],
-    conflicts: [],
-    expiresSoon: [],
-    relation_stage: '陌生人'
-  };
+function normalizeDedupeValue(value = '') {
+  return normalizeText(value).toLowerCase();
 }
 
-function createNodeFromEvent(event) {
-  const text = normalizeText(event.text);
-  if (!text) return null;
-  const fieldKey = normalizeText(
-    event.payload?.fieldKey
+function getEventPayload(event = {}) {
+  return event && event.payload && typeof event.payload === 'object' ? event.payload : {};
+}
+
+function buildNodeEventSemanticKey(event = {}) {
+  const payload = getEventPayload(event);
+  const explicitId = normalizeDedupeValue(event.id);
+  if (explicitId && normalizeDedupeValue(event.type) !== 'migration_bootstrap') {
+    return [
+      event.type,
+      explicitId
+    ].map(normalizeDedupeValue).join('|');
+  }
+  const fieldKey = normalizeDedupeValue(
+    payload.fieldKey
     || event.fieldKey
-    || event.payload?.type
+    || payload.type
     || event.memoryKind
-    || event.payload?.memoryKind
+    || payload.memoryKind
     || event.semanticSlot
-    || event.payload?.semanticSlot
+    || payload.semanticSlot
     || 'fact'
-  ).toLowerCase();
-  const normalizedFieldKey = fieldKey === 'like'
-    ? 'preference_like'
-    : fieldKey === 'dislike'
-      ? 'preference_dislike'
-      : fieldKey;
-  return {
-    id: String(event.id || '').trim(),
-    userId: normalizeText(event.userId),
-    groupId: normalizeText(event.groupId),
-    channelId: normalizeText(event.channelId),
-    sessionId: normalizeText(event.sessionId),
-    sessionKey: normalizeText(event.sessionKey),
-    routePolicyKey: normalizeText(event.routePolicyKey),
-    topRouteType: normalizeText(event.topRouteType),
-    scopeType: normalizeText(event.scopeType || 'personal').toLowerCase() || 'personal',
-    source: normalizeText(event.source),
-    sourceKind: normalizeText(event.sourceKind || event.source),
-    status: normalizeText(event.status || (event.type === 'memory_candidate_extracted' ? 'candidate' : 'active')).toLowerCase(),
-    type: normalizeText(event.payload?.type || event.memoryKind || 'fact').toLowerCase() || 'fact',
-    memoryKind: normalizeText(event.memoryKind || event.payload?.memoryKind).toLowerCase(),
-    fieldKey: normalizedFieldKey,
-    semanticSlot: normalizeText(event.semanticSlot || event.payload?.semanticSlot || normalizedFieldKey).toLowerCase(),
-    conflictKey: normalizeText(event.conflictKey || event.payload?.conflictKey),
-    canonicalKey: normalizeText(event.canonicalKey || canonicalizeText(text)).toLowerCase(),
-    text,
-    confidence: Number(event.confidence || event.payload?.confidence || 0) || 0,
-    importance: Number(event.importance || event.payload?.importance || 0) || 0,
-    evidenceCount: Math.max(1, Number(event.evidenceCount || event.payload?.evidenceCount || 1) || 1),
-    evidenceTier: 'weak',
-    stabilityScore: 0,
-    suppressedBy: '',
-    participants: Array.isArray(event.participants) ? event.participants : [],
-    entities: Array.isArray(event.entities) ? event.entities : [],
-    relations: Array.isArray(event.relations) ? event.relations : [],
-    taskType: normalizeText(event.taskType || event.payload?.taskType),
-    extractionClass: normalizeText(event.payload?.extractionClass || event.payload?.classification || event.extractionClass).toLowerCase(),
-    toolName: normalizeText(event.toolName || event.payload?.toolName),
-    agentName: normalizeText(event.agentName || event.payload?.agentName),
-    updatedAt: Number(event.ts || 0) || 0,
-    createdAt: Number(event.ts || 0) || 0
-  };
+  );
+  return [
+    event.type,
+    event.userId,
+    event.groupId,
+    event.channelId,
+    event.sessionId,
+    event.routePolicyKey,
+    event.topRouteType,
+    event.scopeType,
+    event.source,
+    event.sourceKind,
+    event.status,
+    fieldKey,
+    event.memoryKind,
+    event.semanticSlot,
+    event.conflictKey,
+    event.canonicalKey || event.dedupeKey || canonicalizeText(event.text),
+    event.text,
+    payload.lifecycleStatus,
+    payload.extractionClass || payload.classification
+  ].map(normalizeDedupeValue).join('|');
 }
 
-function upsertNode(nodeMap, node) {
-  if (!node || !node.id) return;
-  const existing = nodeMap.get(node.id);
-  if (!existing) {
-    nodeMap.set(node.id, node);
-    return;
-  }
-  nodeMap.set(node.id, {
-    ...existing,
-    ...node,
-    evidenceCount: Math.max(Number(existing.evidenceCount || 1), Number(node.evidenceCount || 1)),
-    confidence: Math.max(Number(existing.confidence || 0), Number(node.confidence || 0)),
-    importance: Math.max(Number(existing.importance || 0), Number(node.importance || 0)),
-    updatedAt: Math.max(Number(existing.updatedAt || 0), Number(node.updatedAt || 0))
-  });
+function buildEpisodeEventSemanticKey(event = {}) {
+  const payload = getEventPayload(event);
+  return [
+    event.type,
+    event.userId,
+    event.groupId,
+    event.channelId,
+    event.sessionKey,
+    event.scopeType,
+    event.source,
+    event.sourceKind,
+    event.memoryKind,
+    event.semanticSlot,
+    event.canonicalKey || event.dedupeKey || canonicalizeText(event.text),
+    payload.rollupLevel,
+    payload.episodeDay,
+    payload.startDay,
+    payload.endDay,
+    payload.yearMonth,
+    payload.part,
+    payload.sourceFile,
+    event.text
+  ].map(normalizeDedupeValue).join('|');
 }
 
-function pushUnique(list, value, limit = 8) {
-  const text = clampText(value, 180);
-  if (!text) return;
-  if (!list.includes(text)) list.push(text);
-  if (list.length > limit) list.shift();
+function shouldDedupeMaterializeEvent(event = {}) {
+  if (!event || typeof event !== 'object') return false;
+  return NODE_EVENT_TYPES.has(normalizeDedupeValue(event.type))
+    || normalizeDedupeValue(event.type) === 'episode_rollup_generated';
 }
 
-function pushProfileItem(profile, tier, field, node, limit = 8) {
-  if (!profile || !profile[tier] || !field || !node) return;
-  pushUnique(profile[tier][field], node.text, limit);
-  if (!profile.profileMeta || typeof profile.profileMeta !== 'object') profile.profileMeta = {};
-  if (!profile.profileMeta[tier] || typeof profile.profileMeta[tier] !== 'object') profile.profileMeta[tier] = {};
-  if (!profile.profileMeta[tier][field] || typeof profile.profileMeta[tier][field] !== 'object') profile.profileMeta[tier][field] = {};
-  const key = canonicalizeText(node.text);
-  if (!key) return;
-  const existing = profile.profileMeta[tier][field][key] || {};
-  const sourceIds = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds.slice() : [];
-  if (node.id && !sourceIds.includes(node.id)) sourceIds.push(node.id);
-  const sourceKinds = Array.isArray(existing.sourceKinds) ? existing.sourceKinds.slice() : [];
-  if (node.sourceKind && !sourceKinds.includes(node.sourceKind)) sourceKinds.push(node.sourceKind);
-  profile.profileMeta[tier][field][key] = {
-    text: node.text,
-    fieldKey: node.fieldKey,
-    field,
-    tier: tier === 'strictProfile' ? 'strict' : 'weak',
-    sourceEventIds: sourceIds.slice(0, 12),
-    evidenceCount: Math.max(Number(existing.evidenceCount || 0), Number(node.evidenceCount || 1)),
-    confidence: Math.max(Number(existing.confidence || 0), Number(node.confidence || 0)),
-    stabilityScore: Math.max(Number(existing.stabilityScore || 0), Number(node.stabilityScore || 0)),
-    firstSeenAt: existing.firstSeenAt
-      ? Math.min(Number(existing.firstSeenAt || 0), Number(node.createdAt || node.updatedAt || 0) || 0)
-      : (Number(node.createdAt || node.updatedAt || 0) || 0),
-    lastSeenAt: Math.max(Number(existing.lastSeenAt || 0), Number(node.updatedAt || node.createdAt || 0) || 0),
-    sourceKinds: sourceKinds.slice(0, 8),
-    conflictKey: normalizeText(node.conflictKey),
-    extractionClass: normalizeText(node.extractionClass),
-    expiresAt: Number(node.expiresAt || 0) || 0
-  };
-}
-
-function computeStabilityScore(node, supportCount = 1) {
-  const confidence = Math.max(0, Math.min(1, Number(node.confidence || 0)));
-  const support = Math.max(1, Number(supportCount || node.evidenceCount || 1));
-  const sourceBonus = node.sourceKind === 'explicit' ? 0.35 : (node.status === 'active' ? 0.18 : 0);
-  const importance = Math.max(0, Math.min(1, Number(node.importance || 0) / 2.5));
-  return Math.max(0, Math.min(1, (confidence * 0.45) + (Math.min(3, support) * 0.12) + sourceBonus + (importance * 0.1)));
-}
-
-function buildProfileConflictKey(node = {}) {
-  if (node.conflictKey) return normalizeText(node.conflictKey).toLowerCase();
-  const userId = normalizeText(node.userId);
-  const scope = normalizeText(node.scopeType || 'personal').toLowerCase() || 'personal';
-  const fieldKey = normalizeText(node.fieldKey).toLowerCase();
-  const semanticSlot = normalizeText(node.semanticSlot || fieldKey).toLowerCase();
-  const canonical = canonicalizeText(node.text);
-  if (!userId || !canonical) return '';
-  if (fieldKey === 'preference_like' || fieldKey === 'preference_dislike') {
-    return `${userId}|${scope}|preference|${canonical}`;
-  }
-  if (fieldKey === 'identity') return `${userId}|${scope}|identity|${semanticSlot || 'identity'}`;
-  if (fieldKey === 'goal') return `${userId}|${scope}|goal|${semanticSlot || 'goal'}`;
-  if (RELATIONSHIP_STYLE_FIELDS.has(fieldKey)) return `${userId}|${scope}|relationship_style|${fieldKey}`;
-  if (BOT_PERSONA_FIELDS.has(fieldKey)) return `${userId}|${scope}|bot_persona|${fieldKey}`;
+function buildMaterializeEventSemanticKey(event = {}) {
+  const type = normalizeDedupeValue(event.type);
+  if (type === 'episode_rollup_generated') return buildEpisodeEventSemanticKey(event);
+  if (NODE_EVENT_TYPES.has(type)) return buildNodeEventSemanticKey(event);
   return '';
 }
 
-function rankProfileNode(node = {}) {
-  const statusRank = node.status === 'active' ? 2 : 1;
-  const sourceRank = node.sourceKind === 'explicit' ? 4 : (node.sourceKind === 'migration_bootstrap' ? 2 : 1);
-  const tierRank = node.evidenceTier === 'strict' ? 3 : 1;
-  const typeRank = String(node.type || '').toLowerCase() === 'dislike' ? 0.2 : 0;
-  return (sourceRank * 1000)
-    + (tierRank * 100)
-    + (statusRank * 20)
-    + (Number(node.stabilityScore || 0) * 10)
-    + Number(node.confidence || 0)
-    + typeRank;
+function preferMaterializeEvent(left = {}, right = {}) {
+  const leftTs = Number(left.ts || 0) || 0;
+  const rightTs = Number(right.ts || 0) || 0;
+  if (leftTs !== rightTs) return leftTs < rightTs ? left : right;
+  return String(left.id || '').localeCompare(String(right.id || '')) <= 0 ? left : right;
 }
 
-function resolveProfileNodeConflicts(nodes = []) {
-  const sorted = (Array.isArray(nodes) ? nodes : []).slice().sort((a, b) => {
-    if (rankProfileNode(b) !== rankProfileNode(a)) return rankProfileNode(b) - rankProfileNode(a);
-    return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
-  });
-  const winners = new Map();
-  const selected = [];
-  const conflicts = [];
-  for (const node of sorted) {
-    const key = buildProfileConflictKey(node);
-    if (!key) {
-      selected.push(node);
+function dedupeMaterializeEvents(events = []) {
+  const list = Array.isArray(events) ? events : [];
+  const byKey = new Map();
+  let suppressed = 0;
+  for (const event of list) {
+    if (!shouldDedupeMaterializeEvent(event)) continue;
+    const key = buildMaterializeEventSemanticKey(event);
+    if (!key) continue;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, event);
       continue;
     }
-    if (!winners.has(key)) {
-      winners.set(key, node);
-      selected.push(node);
-      continue;
-    }
-    const winner = winners.get(key);
-    node.suppressedBy = String(winner?.id || '');
-    conflicts.push({
-      userId: node.userId,
-      conflictKey: key,
-      fieldKey: node.fieldKey,
-      canonicalKey: node.canonicalKey,
-      id: node.id,
-      text: node.text,
-      suppressedBy: node.suppressedBy,
-      winnerText: winner?.text || '',
-      winnerId: winner?.id || '',
-      reason: 'profile_conflict'
-    });
+    byKey.set(key, preferMaterializeEvent(existing, event));
+    suppressed += 1;
   }
-  return { selected, conflicts };
-}
-
-function getRecentTopicTtlMs() {
-  const days = Math.max(0, Number(config.MEMORY_PROFILE_RECENT_TOPIC_TTL_DAYS || 14) || 0);
-  return days > 0 ? days * 24 * 3600 * 1000 : 0;
-}
-
-function isExpiredRecentTopic(node = {}, now = Date.now()) {
-  if (node.fieldKey !== 'topic' && node.type !== 'topic') return false;
-  const ttlMs = getRecentTopicTtlMs();
-  if (!ttlMs) return false;
-  const ts = Number(node.updatedAt || node.createdAt || 0) || 0;
-  return ts > 0 && now - ts > ttlMs;
-}
-
-function isExpiringSoonRecentTopic(node = {}, now = Date.now()) {
-  if (node.fieldKey !== 'topic' && node.type !== 'topic') return false;
-  const ttlMs = getRecentTopicTtlMs();
-  if (!ttlMs) return false;
-  const ts = Number(node.updatedAt || node.createdAt || 0) || 0;
-  if (!ts) return false;
-  const age = now - ts;
-  return age >= ttlMs * 0.75 && age <= ttlMs;
-}
-
-function applyPersonaRecencyDecay(node, now = Date.now()) {
-  const memoryKind = normalizeText(node?.memoryKind).toLowerCase();
-  const maxDays = PERSONA_DECAY_WINDOWS[memoryKind];
-  if (!maxDays) return 1;
-  const updatedAt = Number(node?.updatedAt || node?.createdAt || 0) || 0;
-  if (!updatedAt) return 0.75;
-  const ageDays = Math.max(0, (now - updatedAt) / (24 * 3600 * 1000));
-  const ratio = Math.min(1, ageDays / Math.max(1, maxDays));
-  return Math.max(0.3, 1 - (ratio * 0.55));
-}
-
-function resolveEvidenceTier(node, supportCount = 1) {
-  if (node.sourceKind === 'explicit') return 'strict';
-  if (
-    supportCount >= Math.max(2, Number(config.MEMORY_V3_CANDIDATE_CONFIRMATIONS_REQUIRED || 2))
-    && Number(node.confidence || 0) >= Number(config.MEMORY_V3_STRICT_CONFIRM_CONFIDENCE || 0.82)
-  ) {
-    return 'strict';
-  }
-  if (Number(node.confidence || 0) >= Number(config.MEMORY_V3_WEAK_HIGH_CONFIDENCE || 0.9)) return 'weak';
-  return 'weak';
-}
-
-function buildPersonaSupportHash(supports = []) {
-  const payload = (Array.isArray(supports) ? supports : [])
-    .map((item) => `${item.fieldKey}|${item.canonicalKey}|${item.text}`)
-    .sort()
-    .join('\n');
-  return crypto.createHash('sha1').update(payload).digest('hex');
-}
-
-function buildFieldSummary(nodes = [], fieldOrder = []) {
-  const fieldMap = new Map();
-  for (const fieldKey of fieldOrder) fieldMap.set(fieldKey, []);
-  for (const item of Array.isArray(nodes) ? nodes : []) {
-    if (!fieldMap.has(item.fieldKey)) continue;
-    fieldMap.get(item.fieldKey).push(item.text);
-  }
-  return fieldOrder
-    .map((fieldKey) => {
-      const values = uniqueBy((fieldMap.get(fieldKey) || []).filter(Boolean), (item) => canonicalizeText(item));
-      if (!values.length) return '';
-      return `${fieldKey}: ${values.slice(0, 2).join('；')}`;
-    })
-    .filter(Boolean)
-    .join('\n');
-}
-
-function pickStrongestNodesPerField(nodes = [], limitPerField = 1) {
-  const byField = new Map();
-  for (const item of Array.isArray(nodes) ? nodes : []) {
-    const fieldKey = normalizeText(item.fieldKey);
-    if (!fieldKey) continue;
-    if (!byField.has(fieldKey)) byField.set(fieldKey, []);
-    byField.get(fieldKey).push(item);
-  }
-  const selected = [];
-  for (const items of byField.values()) {
-    selected.push(
-      ...items
-        .slice()
-        .sort((a, b) => Number(b.decayedStabilityScore || b.stabilityScore || 0) - Number(a.decayedStabilityScore || a.stabilityScore || 0))
-        .slice(0, Math.max(1, Number(limitPerField) || 1))
-    );
-  }
-  return selected;
-}
-
-function buildPersonaCore(profileProjection, supportNodes = [], styleNodes = [], affinityState = {}, previousPersonaCore = {}, botPersonaNodes = [], relationshipNodes = []) {
-  const supports = (Array.isArray(supportNodes) ? supportNodes : [])
-    .filter((item) => item.evidenceTier === 'strict')
-    .sort((a, b) => Number(b.stabilityScore || 0) - Number(a.stabilityScore || 0))
-    .slice(0, 6);
-  const botPersonaStrict = (Array.isArray(botPersonaNodes) ? botPersonaNodes : [])
-    .filter((item) => item.evidenceTier === 'strict')
-    .map((item) => ({ ...item, decayedStabilityScore: Number(item.stabilityScore || 0) * applyPersonaRecencyDecay(item) }))
-    .sort((a, b) => Number(b.decayedStabilityScore || 0) - Number(a.decayedStabilityScore || 0));
-  const relationshipStrict = (Array.isArray(relationshipNodes) ? relationshipNodes : [])
-    .filter((item) => item.evidenceTier === 'strict')
-    .map((item) => ({ ...item, decayedStabilityScore: Number(item.stabilityScore || 0) * applyPersonaRecencyDecay(item) }))
-    .sort((a, b) => Number(b.decayedStabilityScore || 0) - Number(a.decayedStabilityScore || 0));
-  const supportHash = buildPersonaSupportHash(supports);
-  const personaSupportHash = buildPersonaSupportHash(botPersonaStrict);
-  const relationshipSupportHash = buildPersonaSupportHash(relationshipStrict);
-  const next = {
-    summary: '',
-    impression: '',
-    replyStyle: '',
-    relationshipTone: '',
-    botBasePersona: '',
-    userAdaptationPersona: '',
-    relationshipStyle: '',
-    supportHash,
-    personaSupportHash,
-    relationshipSupportHash,
-    personaVersion: 2,
-    updatedAt: Date.now()
-  };
-
-  const hasLegacyPersonaSupport = supports.length >= Math.max(1, Number(config.MEMORY_V3_PERSONA_SUPPORT_MIN_ITEMS || 3));
-  const hasDerivedPersonaSupport = botPersonaStrict.length > 0 || relationshipStrict.length > 0;
-
-  if (!hasLegacyPersonaSupport && !hasDerivedPersonaSupport) {
+  if (!suppressed) {
     return {
-      ...next,
-      summary: String(previousPersonaCore.summary || ''),
-      impression: String(previousPersonaCore.impression || ''),
-      replyStyle: String(previousPersonaCore.replyStyle || ''),
-      relationshipTone: String(previousPersonaCore.relationshipTone || ''),
-      botBasePersona: String(previousPersonaCore.botBasePersona || ''),
-      userAdaptationPersona: String(previousPersonaCore.userAdaptationPersona || ''),
-      relationshipStyle: String(previousPersonaCore.relationshipStyle || ''),
-      supportHash: String(previousPersonaCore.supportHash || supportHash || ''),
-      personaSupportHash: String(previousPersonaCore.personaSupportHash || personaSupportHash || ''),
-      relationshipSupportHash: String(previousPersonaCore.relationshipSupportHash || relationshipSupportHash || '')
+      events: list,
+      stats: {
+        enabled: true,
+        inputEvents: list.length,
+        outputEvents: list.length,
+        suppressedEvents: 0
+      }
     };
   }
 
-  const summarySupports = supports
-    .filter((item) => item.fieldKey === 'persona_summary_support')
-    .map((item) => item.text)
-    .filter(Boolean)
-    .slice(0, 2);
-  const impressionSupports = supports
-    .filter((item) => item.fieldKey === 'persona_impression_support')
-    .map((item) => item.text)
-    .filter(Boolean)
-    .slice(0, 2);
-
-  if (
-    supportHash === String(previousPersonaCore.supportHash || '').trim()
-    && personaSupportHash === String(previousPersonaCore.personaSupportHash || '').trim()
-    && relationshipSupportHash === String(previousPersonaCore.relationshipSupportHash || '').trim()
-  ) {
-    return {
-      ...next,
-      summary: String(previousPersonaCore.summary || ''),
-      impression: String(previousPersonaCore.impression || ''),
-      replyStyle: String(previousPersonaCore.replyStyle || ''),
-      relationshipTone: String(previousPersonaCore.relationshipTone || ''),
-      botBasePersona: String(previousPersonaCore.botBasePersona || ''),
-      userAdaptationPersona: String(previousPersonaCore.userAdaptationPersona || ''),
-      relationshipStyle: String(previousPersonaCore.relationshipStyle || ''),
-      personaSupportHash: String(previousPersonaCore.personaSupportHash || personaSupportHash || ''),
-      relationshipSupportHash: String(previousPersonaCore.relationshipSupportHash || relationshipSupportHash || '')
-    };
-  }
-
-  next.summary = hasLegacyPersonaSupport
-    ? clampText(summarySupports.join('；'), 220)
-    : String(previousPersonaCore.summary || '');
-  next.impression = hasLegacyPersonaSupport
-    ? clampText(impressionSupports.join('；'), 180)
-    : String(previousPersonaCore.impression || '');
-
-  const stylePatterns = (Array.isArray(styleNodes) ? styleNodes : [])
-    .filter((item) => item.fieldKey === 'style_pattern' && item.evidenceTier === 'strict')
-    .map((item) => item.text.replace(/^style:\s*/i, '').trim())
-    .filter(Boolean)
-    .slice(0, 2);
-  const styleAvoids = (Array.isArray(styleNodes) ? styleNodes : [])
-    .filter((item) => item.fieldKey === 'style_avoid' && item.evidenceTier === 'strict')
-    .map((item) => item.text.replace(/^style:\s*/i, '').trim())
-    .filter(Boolean)
-    .slice(0, 1);
-
-  const botBasePersona = clampText(buildFieldSummary(pickStrongestNodesPerField(botPersonaStrict, 1), [
-    'bot_persona_tone',
-    'bot_persona_initiative',
-    'bot_persona_boundaries',
-    'bot_persona_playfulness',
-    'bot_persona_guardedness',
-    'bot_persona_verbosity'
-  ]), 320);
-
-  const relationshipStyle = clampText(buildFieldSummary(pickStrongestNodesPerField(relationshipStrict, 1), [
-    'relationship_tone',
-    'relationship_distance',
-    'relationship_salutation',
-    'relationship_reply_style',
-    'relationship_engagement',
-    'relationship_boundaries'
-  ]), 320);
-
-  const userAdaptationPersona = clampText([
-    relationshipStyle,
-    normalizeText(affinityState.attitude || '')
-  ].filter(Boolean).join('\n'), 260);
-
-  next.replyStyle = clampText([
-    botBasePersona ? `基础人格：${botBasePersona}` : '',
-    userAdaptationPersona ? `用户修正：${userAdaptationPersona}` : '',
-    stylePatterns.length ? `偏好：${stylePatterns.join('；')}` : '',
-    styleAvoids.length ? `避免：${styleAvoids.join('；')}` : ''
-  ].filter(Boolean).join(' | '), 180);
-
-  next.botBasePersona = botBasePersona;
-  next.relationshipStyle = relationshipStyle;
-  next.userAdaptationPersona = userAdaptationPersona;
-  next.relationshipTone = clampText([
-    relationshipStyle,
-    normalizeText(affinityState.relationship || ''),
-    normalizeText(affinityState.attitude || '')
-  ].filter(Boolean).join(' | '), 220);
-
-  void profileProjection;
-  return next;
-}
-
-function normalizeSessionScopeFromEvent(event = {}) {
+  const kept = new Set(byKey.values());
+  const output = list.filter((event) => !shouldDedupeMaterializeEvent(event) || kept.has(event));
   return {
-    sessionKey: normalizeText(event.sessionKey),
-    userId: normalizeText(event.userId),
-    groupId: normalizeText(event.groupId),
-    channelId: normalizeText(event.channelId),
-    sessionId: normalizeText(event.sessionId)
+    events: output,
+    stats: {
+      enabled: true,
+      inputEvents: list.length,
+      outputEvents: output.length,
+      suppressedEvents: suppressed
+    }
   };
-}
-
-function resolveNodeConflicts(nodes = []) {
-  const winners = new Map();
-  for (const node of (Array.isArray(nodes) ? nodes : []).slice().sort((a, b) => {
-    const aRank = (a.status === 'active' ? 2 : 1) + (a.sourceKind === 'explicit' ? 2 : 0) + (String(a.type || '').toLowerCase() === 'dislike' ? 1 : 0);
-    const bRank = (b.status === 'active' ? 2 : 1) + (b.sourceKind === 'explicit' ? 2 : 0) + (String(b.type || '').toLowerCase() === 'dislike' ? 1 : 0);
-    if (bRank !== aRank) return bRank - aRank;
-    if (Number(b.confidence || 0) !== Number(a.confidence || 0)) return Number(b.confidence || 0) - Number(a.confidence || 0);
-    return Number(b.updatedAt || 0) - Number(a.updatedAt || 0);
-  })) {
-    const slot = `${node.userId}|${node.scopeType}|${node.semanticSlot || node.type}|${node.canonicalKey}`;
-    if (!winners.has(slot)) winners.set(slot, node);
-  }
-  return Array.from(winners.values());
-}
-
-function getLatestEventTs(events = []) {
-  let latest = 0;
-  for (const event of Array.isArray(events) ? events : []) {
-    latest = Math.max(latest, Number(event?.ts || 0) || 0);
-  }
-  return latest;
 }
 
 function materializeMemoryViews(options = {}) {
@@ -594,9 +245,30 @@ function materializeMemoryViews(options = {}) {
     };
   }
   try {
-  const events = Array.isArray(options.events) ? options.events : loadMemoryEvents();
+  const allEvents = Array.isArray(options.events) ? options.events : loadMemoryEvents();
+  const deduped = options.dedupeEvents === false
+    ? {
+        events: allEvents,
+        stats: {
+          enabled: false,
+          inputEvents: allEvents.length,
+          outputEvents: allEvents.length,
+          suppressedEvents: 0
+        }
+      }
+    : dedupeMaterializeEvents(allEvents);
+  const dirtyScopes = normalizeDirtyScopes(options.dirtyScopes || options);
+  const dirtyScopeCount = countDirtyScopes(dirtyScopes);
+  const incrementalRequested = config.MEMORY_V3_INCREMENTAL_MATERIALIZE_ENABLED !== false
+    && options.force !== true
+    && (options.mode === 'incremental' || dirtyScopeCount > 0);
+  const incrementalLimit = Math.max(1, Number(config.MEMORY_V3_INCREMENTAL_SCOPE_LIMIT || 100) || 100);
+  const incrementalMode = incrementalRequested && dirtyScopeCount > 0 && dirtyScopeCount <= incrementalLimit;
+  const events = incrementalMode
+    ? deduped.events.filter((event) => eventMatchesDirtyScopes(event, dirtyScopes))
+    : deduped.events;
   const now = Date.now();
-  const eventHighWatermarkTs = getLatestEventTs(events);
+  const eventHighWatermarkTs = getLatestEventTs(allEvents);
   const sessionProjection = defaultSessionProjection();
   const previousProfileProjection = options.previousProfileProjection || defaultProfileProjection();
   const profileProjection = defaultProfileProjection();
@@ -606,83 +278,8 @@ function materializeMemoryViews(options = {}) {
 
   for (const event of events) {
     const userId = normalizeText(event.userId);
-    const sessionKey = normalizeText(event.sessionKey);
 
-    if (event.type === 'turn_received' || event.type === 'turn_replied' || event.type === 'session_checkpoint') {
-      if (sessionKey) {
-        const existing = sessionProjection.sessions[sessionKey] || {
-          sessionKey,
-          userId,
-          groupId: '',
-          channelId: '',
-          sessionId: '',
-          updatedAt: 0,
-          snapshotType: '',
-          activeTopic: '',
-          openLoops: [],
-          assistantCommitments: [],
-          userConstraints: [],
-          recentMessages: [],
-          carryOverUserTurn: '',
-          summary: '',
-          phaseHint: '',
-          interactionState: {},
-          sceneState: {},
-          expressionState: {},
-          moduleState: {}
-        };
-        const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
-        const clearsRestartRecallTopic = event.type === 'session_checkpoint'
-          && Object.prototype.hasOwnProperty.call(payload, 'activeTopic')
-          && (normalizeText(event.sourceKind).toLowerCase() === 'restart_recall_clear'
-            || normalizeText(payload.summarySource || payload.source || '').toLowerCase() === 'restart_recall_clear');
-        sessionProjection.sessions[sessionKey] = {
-          ...existing,
-          ...normalizeSessionScopeFromEvent(event),
-          updatedAt: Math.max(Number(existing.updatedAt || 0), Number(event.ts || 0)),
-          snapshotType: normalizeText(payload.snapshotType || existing.snapshotType),
-          activeTopic: Object.prototype.hasOwnProperty.call(payload, 'activeTopic')
-            ? normalizeText(payload.activeTopic)
-            : normalizeText(existing.activeTopic),
-          carryOverUserTurn: Object.prototype.hasOwnProperty.call(payload, 'carryOverUserTurn')
-            ? normalizeText(payload.carryOverUserTurn)
-            : normalizeText(existing.carryOverUserTurn),
-          summary: Object.prototype.hasOwnProperty.call(payload, 'summary')
-            ? clampText(payload.summary, 2400)
-            : clampText(existing.summary, 2400),
-          phaseHint: normalizeText(payload.phaseHint || existing.phaseHint),
-          openLoops: Array.isArray(payload.openLoops) ? payload.openLoops.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.openLoops,
-          assistantCommitments: Array.isArray(payload.assistantCommitments) ? payload.assistantCommitments.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.assistantCommitments,
-          userConstraints: Array.isArray(payload.userConstraints) ? payload.userConstraints.map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4) : existing.userConstraints,
-          interactionState: clearsRestartRecallTopic
-            ? {
-                ...(existing.interactionState && typeof existing.interactionState === 'object' ? existing.interactionState : {}),
-                activeTopic: normalizeText(payload.activeTopic)
-              }
-            : payload.interactionState && typeof payload.interactionState === 'object'
-              ? payload.interactionState
-            : existing.interactionState,
-          sceneState: payload.sceneState && typeof payload.sceneState === 'object'
-            ? payload.sceneState
-            : existing.sceneState,
-          expressionState: payload.expressionState && typeof payload.expressionState === 'object'
-            ? payload.expressionState
-            : existing.expressionState,
-          moduleState: payload.moduleState && typeof payload.moduleState === 'object'
-            ? payload.moduleState
-            : existing.moduleState,
-          recentMessages: Array.isArray(payload.recentMessages)
-            ? payload.recentMessages
-              .map((item) => ({
-                role: normalizeText(item?.role).toLowerCase(),
-                content: clampText(item?.content, 320)
-              }))
-              .filter((item) => item.role && item.content)
-              .slice(-Math.max(1, Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 6)))
-            : existing.recentMessages
-        };
-      }
-    }
+    applySessionEvent(sessionProjection, event);
 
     if (event.type === 'turn_received' || event.type === 'turn_replied' || event.type === 'migration_bootstrap') {
       if (userId) {
@@ -708,15 +305,36 @@ function materializeMemoryViews(options = {}) {
       }
       const target = episodeProjection.users[userId];
       target.updatedAt = Math.max(Number(target.updatedAt || 0), Number(event.ts || 0));
+      const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+      const rollupLevel = normalizeText(payload.rollupLevel || event.memoryKind || 'daily') || 'daily';
+      const sourceFile = normalizeText(payload.sourceFile);
       const item = {
         id: String(event.id || '').trim(),
-        type: normalizeText(event.payload?.rollupLevel || event.memoryKind || 'daily'),
+        type: rollupLevel,
+        rollupLevel,
         text: clampText(event.text, 4000),
-        episodeDay: normalizeText(event.payload?.episodeDay),
-        yearMonth: normalizeText(event.payload?.yearMonth),
-        startDay: normalizeText(event.payload?.startDay),
-        endDay: normalizeText(event.payload?.endDay),
-        updatedAt: Number(event.ts || 0) || 0
+        episodeDay: normalizeText(payload.episodeDay),
+        yearMonth: normalizeText(payload.yearMonth),
+        startDay: normalizeText(payload.startDay),
+        endDay: normalizeText(payload.endDay),
+        part: Math.max(0, Number(payload.part || 0) || 0),
+        source: normalizeText(event.source),
+        sourceKind: normalizeText(event.sourceKind || payload.sourceKind || 'journal'),
+        sourceFile,
+        sourceCompleteness: normalizeText(payload.sourceCompleteness || 'summary'),
+        textKind: normalizeText(payload.textKind) || `journal_${rollupLevel}`,
+        sessionKeys: Array.isArray(payload.sessionKeys) ? payload.sessionKeys.map(normalizeText).filter(Boolean).slice(0, 16) : [],
+        topics: Array.isArray(payload.topics) ? payload.topics.map(normalizeText).filter(Boolean).slice(0, 16) : [],
+        canonicalKey: normalizeText(event.canonicalKey || event.dedupeKey).toLowerCase(),
+        dedupeKey: normalizeText(event.dedupeKey),
+        confidence: Number(event.confidence || 0) || 0.92,
+        importance: Number(event.importance || 0) || (rollupLevel === 'monthly' ? 1.2 : 1.0),
+        evidenceCount: Math.max(1, Number(event.evidenceCount || payload.evidenceCount || 1) || 1),
+        updatedAt: Number(event.ts || 0) || 0,
+        notRecallable: isMemoryNotRecallable(event),
+        recallVerification: payload.recallVerification && typeof payload.recallVerification === 'object'
+          ? payload.recallVerification
+          : null
       };
       if (item.text) target.items.push(item);
     }
@@ -742,7 +360,58 @@ function materializeMemoryViews(options = {}) {
         : 0;
     }
   }
-  const activeNodes = nodes.filter((item) => item.status !== 'archived');
+  const conflictResolution = resolveMemoryConflicts(
+    applyNearDuplicateMerges(applySupersession(nodes.map((item) => applyProfileLifecycle(item, { now }))), { now })
+  );
+  const lifecycleNodes = conflictResolution.nodes;
+  const activeNodes = lifecycleNodes.filter((item) => item.status !== 'archived' && !isMemoryNotRecallable(item));
+  const hiddenRecallNodes = lifecycleNodes
+    .filter((item) => item.status !== 'archived' && isMemoryNotRecallable(item))
+    .map((item) => ({
+      ...item,
+      suppressedBy: item.suppressedBy || item.supersededBy || 'not_recallable',
+      recallHiddenReason: item.recallHiddenReason || lifecycleHiddenReason(item, { now }) || 'not_recallable'
+    }));
+  const hiddenProfileSuppressed = hiddenRecallNodes
+    .filter((item) => isProfileField(item))
+    .map((item) => ({
+      userId: item.userId,
+      fieldKey: item.fieldKey,
+      canonicalKey: item.canonicalKey,
+      conflictKey: item.conflictKey || '',
+      id: item.id,
+      suppressedBy: item.suppressedBy || item.supersededBy || '',
+      text: item.text,
+      reason: item.recallHiddenReason || lifecycleHiddenReason(item, { now }) || 'profile_lifecycle_hidden',
+      expiresAt: item.expiresAt || 0
+    }));
+  const hiddenExpiredRecentTopicSuppressed = hiddenRecallNodes
+    .filter((item) => isProfileField(item) && isExpiredRecentTopic(item, now))
+    .map((item) => ({
+      userId: item.userId,
+      fieldKey: item.fieldKey,
+      canonicalKey: item.canonicalKey,
+      conflictKey: item.conflictKey || '',
+      id: item.id,
+      suppressedBy: item.suppressedBy || item.supersededBy || '',
+      text: item.text,
+      reason: 'recent_topic_expired',
+      expiresAt: item.expiresAt || 0
+    }));
+  const hiddenProfileConflicts = hiddenProfileSuppressed
+    .filter((item) => item.reason === 'profile_lifecycle_superseded')
+    .map((item) => ({
+      userId: item.userId,
+      conflictKey: item.conflictKey,
+      fieldKey: item.fieldKey,
+      canonicalKey: item.canonicalKey,
+      id: item.id,
+      text: item.text,
+      suppressedBy: item.suppressedBy,
+      winnerId: item.suppressedBy,
+      winnerText: '',
+      reason: 'profile_superseded'
+    }));
   const winners = new Map();
   const suppressed = [];
   for (const node of activeNodes.slice().sort((a, b) => {
@@ -768,6 +437,7 @@ function materializeMemoryViews(options = {}) {
   }
 
   const resolvedNodes = Array.from(winners.values());
+  const outputResolvedNodes = resolvedNodes.concat(hiddenRecallNodes);
   const profileConflictResolution = resolveProfileNodeConflicts(resolvedNodes);
   const profileNodes = profileConflictResolution.selected;
   const profileConflicts = profileConflictResolution.conflicts;
@@ -793,6 +463,21 @@ function materializeMemoryViews(options = {}) {
       });
       continue;
     }
+    const hiddenReason = lifecycleHiddenReason(node, { now });
+    if (hiddenReason) {
+      expiredProfileNodes.push({
+        userId,
+        fieldKey: node.fieldKey,
+        canonicalKey: node.canonicalKey,
+        conflictKey: node.conflictKey || '',
+        id: node.id,
+        text: node.text,
+        reason: hiddenReason,
+        suppressedBy: node.suppressedBy || node.supersededBy || '',
+        expiresAt: node.expiresAt || 0
+      });
+      continue;
+    }
     if (isExpiringSoonRecentTopic(node, now)) {
       expiringProfileNodes.push({
         userId,
@@ -803,11 +488,14 @@ function materializeMemoryViews(options = {}) {
         expiresAt: node.expiresAt || 0
       });
     }
-    if (STRICT_PROFILE_FIELD_MAP[node.fieldKey] && node.evidenceTier === 'strict') {
+    const profileProjectionBlocked = isProfileProjectionBlockedByExtractionClass(node) || isProfileProjectionBlockedByNoise(node);
+    if (!profileProjectionBlocked && STRICT_PROFILE_FIELD_MAP[node.fieldKey] && node.evidenceTier === 'strict') {
       pushProfileItem(profile, 'strictProfile', STRICT_PROFILE_FIELD_MAP[node.fieldKey], node, 20);
-    } else if (WEAK_PROFILE_FIELD_MAP[node.fieldKey]) {
+    } else if (!profileProjectionBlocked && WEAK_PROFILE_FIELD_MAP[node.fieldKey]) {
       pushProfileItem(profile, 'weakProfile', WEAK_PROFILE_FIELD_MAP[node.fieldKey], node, 12);
     } else if (
+      !profileProjectionBlocked
+      &&
       !PERSONA_SUPPORT_FIELDS.has(node.fieldKey)
       && node.fieldKey !== 'episode'
       && node.fieldKey !== 'topic'
@@ -821,7 +509,10 @@ function materializeMemoryViews(options = {}) {
     const affinity = getUserAffinityState(userId);
     profile.relation_stage = normalizeText(affinity?.relationship || profile.relation_stage || '陌生人') || '陌生人';
     const userNodes = resolvedNodes.filter((item) => item.userId === userId && item.scopeType !== 'group');
-    const personaSupports = userNodes.filter((item) => PERSONA_SUPPORT_FIELDS.has(item.fieldKey));
+    const personaSupports = userNodes.filter((item) => (
+      PERSONA_SUPPORT_FIELDS.has(item.fieldKey)
+      && !isProfileProjectionBlockedByExtractionClass(item)
+    ));
     const styleNodes = userNodes.filter((item) => item.fieldKey === 'style_pattern' || item.fieldKey === 'style_avoid');
     const botPersonaNodes = userNodes.filter((item) => BOT_PERSONA_FIELDS.has(item.fieldKey));
     const relationshipNodes = userNodes.filter((item) => RELATIONSHIP_STYLE_FIELDS.has(item.fieldKey));
@@ -836,10 +527,17 @@ function materializeMemoryViews(options = {}) {
     );
     profile.suppressed = [
       ...suppressed.filter((item) => item.userId === userId),
+      ...hiddenProfileSuppressed.filter((item) => item.userId === userId),
+      ...hiddenExpiredRecentTopicSuppressed.filter((item) => item.userId === userId),
       ...expiredProfileNodes.filter((item) => item.userId === userId),
-      ...profileConflicts.filter((item) => item.userId === userId)
+      ...profileConflicts.filter((item) => item.userId === userId),
+      ...conflictResolution.suppressed.filter((item) => item.userId === userId)
     ];
-    profile.conflicts = profileConflicts.filter((item) => item.userId === userId);
+    profile.conflicts = [
+      ...profileConflicts.filter((item) => item.userId === userId),
+      ...hiddenProfileConflicts.filter((item) => item.userId === userId),
+      ...conflictResolution.conflicts.filter((item) => item.userId === userId)
+    ];
     profile.expiresSoon = expiringProfileNodes.filter((item) => item.userId === userId);
   }
 
@@ -861,32 +559,71 @@ function materializeMemoryViews(options = {}) {
     projection.eventHighWatermarkTs = eventHighWatermarkTs;
   }
 
-  atomicWriteJson(config.MEMORY_V3_SESSION_PROJECTION_FILE, sessionProjection);
-  atomicWriteJson(config.MEMORY_V3_PROFILE_PROJECTION_FILE, profileProjection);
-  atomicWriteJson(config.MEMORY_V3_SCOPE_PROJECTION_FILE, scopeProjection);
-  atomicWriteJson(config.MEMORY_V3_EPISODE_PROJECTION_FILE, episodeProjection);
-  writeJsonLines(config.MEMORY_V3_NODES_FILE, resolvedNodes);
-  const embeddingIndex = enqueueMissingEmbeddings(resolvedNodes, {
+  const outputSessionProjection = incrementalMode
+    ? mergeIncrementalProjection(loadSessionProjection(), sessionProjection, 'sessions', dirtyScopes.sessionKeys)
+    : sessionProjection;
+  const outputProfileProjection = incrementalMode
+    ? mergeIncrementalProjection(loadProfileProjection(), profileProjection, 'users', dirtyScopes.userIds)
+    : profileProjection;
+  const outputScopeProjection = incrementalMode
+    ? mergeIncrementalProjection(loadScopeProjection(), scopeProjection, 'users', dirtyScopes.userIds)
+    : scopeProjection;
+  const outputEpisodeProjection = incrementalMode
+    ? mergeIncrementalProjection(loadEpisodeProjection(), episodeProjection, 'users', dirtyScopes.userIds)
+    : episodeProjection;
+  for (const projection of [outputSessionProjection, outputProfileProjection, outputScopeProjection, outputEpisodeProjection]) {
+    projection.updatedAt = now;
+    projection.materializedAt = now;
+    projection.eventHighWatermarkTs = eventHighWatermarkTs;
+    projection.materializeMode = incrementalMode ? 'incremental' : 'full';
+  }
+
+  const outputNodes = incrementalMode
+    ? [
+        ...loadMemoryNodes().filter((node) => !eventMatchesDirtyScopes(node, dirtyScopes)),
+        ...outputResolvedNodes
+      ]
+    : outputResolvedNodes;
+
+  atomicWriteJson(config.MEMORY_V3_SESSION_PROJECTION_FILE, outputSessionProjection);
+  atomicWriteJson(config.MEMORY_V3_PROFILE_PROJECTION_FILE, outputProfileProjection);
+  atomicWriteJson(config.MEMORY_V3_SCOPE_PROJECTION_FILE, outputScopeProjection);
+  atomicWriteJson(config.MEMORY_V3_EPISODE_PROJECTION_FILE, outputEpisodeProjection);
+  writeJsonLines(config.MEMORY_V3_NODES_FILE, outputNodes);
+  clearProjectionReadCache();
+  const embeddingNodes = incrementalMode ? resolvedNodes : collectEmbeddingBackfillNodes();
+  const embeddingIndex = enqueueMissingEmbeddings(embeddingNodes, {
+    fullReconcile: !incrementalMode,
     schedule: options.scheduleEmbeddingBackfill !== false,
     delayMs: options.embeddingBackfillDelayMs
+  });
+  const lancedbSyncPlan = buildLanceDbSyncPlan(incrementalMode ? outputNodes : embeddingNodes, {
+    fullReconcile: !incrementalMode,
+    dryRun: true
   });
 
   return {
     ok: true,
     stats: {
       events: events.length,
+      totalEvents: allEvents.length,
       latestEventTs: eventHighWatermarkTs,
-      nodes: resolvedNodes.length,
+      nodes: outputNodes.length,
+      materializeMode: incrementalMode ? 'incremental' : 'full',
+      dirtyScopes: dirtyScopeCount,
       embeddings: embeddingIndex,
-      sessions: Object.keys(sessionProjection.sessions).length,
-      profiles: Object.keys(profileProjection.users).length,
-      episodeUsers: Object.keys(episodeProjection.users).length
+      lancedbSyncPlan,
+      conflictsResolved: conflictResolution.conflicts.length,
+      dedupe: deduped.stats,
+      sessions: Object.keys(outputSessionProjection.sessions).length,
+      profiles: Object.keys(outputProfileProjection.users).length,
+      episodeUsers: Object.keys(outputEpisodeProjection.users).length
     },
-    sessionProjection,
-    profileProjection,
-    scopeProjection,
-    episodeProjection,
-    nodes: resolvedNodes
+    sessionProjection: outputSessionProjection,
+    profileProjection: outputProfileProjection,
+    scopeProjection: outputScopeProjection,
+    episodeProjection: outputEpisodeProjection,
+    nodes: outputNodes
   };
   } finally {
     lock.release();
@@ -895,5 +632,7 @@ function materializeMemoryViews(options = {}) {
 
 module.exports = {
   materializeMemoryViews,
-  createNodeFromEvent
+  createNodeFromEvent,
+  buildLanceDbSyncPlan,
+  dedupeMaterializeEvents
 };

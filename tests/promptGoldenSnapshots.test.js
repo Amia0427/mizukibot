@@ -39,9 +39,73 @@ module.exports = (async () => {
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'main_persona_system'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'core_baseline_patch'));
+  assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'chat_liveness_discipline'));
+  assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_inner_protocol'));
   assert.ok(main.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'security_contract'));
   assert.ok(main.stableSystemBlocks.some((item) => item.id === 'main_persona_system'));
+  assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'chat_liveness_discipline'));
+  assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'roleplay_inner_protocol'));
+  const roleplayRuntimeContext = main.dynamicContextBlocks.find((item) => item.id === 'roleplay_runtime_context');
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('[RoleplayRuntimeContext]'));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('current_user='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('assistant_tone_rule='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('persona_stability_rule='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('mind_reading_rule='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('narrative_consistency_rule='));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('不要代替用户说话、行动或做决定'));
+  assert.ok(!String(roleplayRuntimeContext?.content || '').includes('安全拒绝'));
+  assert.ok(String(roleplayRuntimeContext?.content || '').includes('pure_text_reply_only') || String(roleplayRuntimeContext?.content || '').includes('纯文本'));
+  assert.ok(!String(roleplayRuntimeContext?.content || '').includes('current_time=1970-'));
+  assert.strictEqual(
+    main.dynamicContextBlocks.filter((item) => item.id === 'roleplay_runtime_context').length,
+    1,
+    'roleplay runtime context should not be duplicated after session/runtime merge'
+  );
+  const oneBotTimestampPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 12 },
+    'u_prompt_onebot_timestamp',
+    '现在几点',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      timezone: 'Asia/Shanghai',
+      routeMeta: {
+        timestamp: Math.floor(Date.parse('2026-06-06T03:04:05.000Z') / 1000)
+      }
+    }
+  );
+  const oneBotRuntimeContext = oneBotTimestampPrompt.dynamicContextBlocks.find((item) => item.id === 'roleplay_runtime_context');
+  assert.ok(
+    String(oneBotRuntimeContext?.content || '').includes('current_time=2026-06-06 11:04:05 星期六 (Asia/Shanghai)'),
+    'roleplay runtime context should parse OneBot/QQ second timestamps as Unix seconds, not milliseconds'
+  );
+  assert.ok(!String(oneBotRuntimeContext?.content || '').includes('current_time=1970-'));
+  const livenessContext = main.dynamicContextBlocks.find((item) => item.id === 'chat_liveness_discipline');
+  assert.ok(String(livenessContext?.content || '').includes('[ChatLivenessDiscipline]'));
+  assert.ok(String(livenessContext?.content || '').includes('surface=private_chat'));
+  assert.strictEqual(
+    main.dynamicContextBlocks.filter((item) => item.id === 'chat_liveness_discipline').length,
+    1,
+    'chat liveness discipline should not be duplicated after session/runtime merge'
+  );
+  const innerProtocol = main.dynamicContextBlocks.find((item) => item.id === 'roleplay_inner_protocol');
+  const innerProtocolText = String(innerProtocol?.content || '');
+  assert.ok(innerProtocolText.includes('[RoleplayInnerProtocol]'));
+  assert.ok(innerProtocolText.includes('surface:'));
+  assert.ok(innerProtocolText.includes('mizuki_motive'));
+  assert.ok(innerProtocolText.includes('relationship_distance'));
+  assert.ok(innerProtocolText.includes('human_breaks'));
+  assert.ok(innerProtocolText.includes('final_compression'));
+  assert.ok(innerProtocolText.includes('Only output the final user-facing text.'));
+  assert.strictEqual(
+    main.dynamicContextBlocks.filter((item) => item.id === 'roleplay_inner_protocol').length,
+    1,
+    'roleplay inner protocol should not be duplicated after session/runtime merge'
+  );
   assert.ok(main.dynamicContextBlocks.some((item) => item.id === 'directed_context'));
   if (main.latencyMeta?.optionalBudgetExceeded || !String(main.dynamicFewShotPrompt || '').trim()) {
     assert.ok(!main.promptSnapshot.assembledBlocks.some((item) => item.id === 'dynamic_few_shot'));
@@ -60,6 +124,11 @@ module.exports = (async () => {
   assert.ok(Array.isArray(main.promptSnapshot.plannerSkippedBlocks));
   assert.ok(Array.isArray(main.promptSnapshot.runtimeAddedBlocks));
   assert.ok(Array.isArray(main.promptSnapshot.runtimeRejectedBlocks));
+  assert.ok(Array.isArray(main.promptSnapshot.selectionTrace));
+  assert.ok(main.promptSnapshot.selectionTrace.some((item) => item.id === 'directed_context' && item.selected === true));
+  assert.ok(main.promptSnapshot.budgetReport && main.promptSnapshot.budgetReport.schemaVersion === 'context_budget_report_v1');
+  assert.ok(Object.prototype.hasOwnProperty.call(main.promptSnapshot.budgetReport, 'usedByLane'));
+  assert.ok(main.promptSnapshot.candidatePruning && typeof main.promptSnapshot.candidatePruning === 'object');
   assert.ok(main.promptSnapshot.personaWorldbookSearch && typeof main.promptSnapshot.personaWorldbookSearch === 'object');
   assert.ok(main.promptSnapshot.plannerDynamicContextPlan);
   assert.ok(main.promptSnapshot.cacheLanes && Array.isArray(main.promptSnapshot.cacheLanes.stable));
@@ -94,7 +163,19 @@ module.exports = (async () => {
     }
   );
   assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'directed_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'chat_liveness_discipline'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'roleplay_inner_protocol'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'roleplay_runtime_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'chat_liveness_discipline'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'roleplay_inner_protocol'));
   assert.ok(directedMustUsePrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'directed_context'));
+  assert.ok(directedMustUsePrompt.promptSnapshot.selectionTrace.some((item) => (
+    item.id === 'directed_context'
+    && item.selected === true
+    && item.skippedByPlanner === true
+    && item.reason === 'runtime_must_use_overrode_planner_skip'
+  )));
 
   const plannerIncludedMemoryPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 9 },
@@ -170,6 +251,27 @@ module.exports = (async () => {
   assert.ok(!emptyContentPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'impression'));
   assert.ok(!emptyContentPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
   assert.ok(emptyContentPrompt.promptSnapshot.runtimeRejectedBlocks.some((item) => item.id === 'retrieved_memory_lite' && /empty|content/i.test(item.reason)));
+  assert.ok(emptyContentPrompt.promptSnapshot.selectionTrace.some((item) => item.id === 'summary' && item.decision === 'reject'));
+
+  const mindReadingGuardPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 11 },
+    'u_prompt_mind_reading_guard',
+    '没事。（其实我很难过）你替我跟绘名说我先走了',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        userVisibleState: '用户只发出“没事”和一段括号背景，没有可见动作。'
+      }
+    }
+  );
+  const mindReadingBlock = mindReadingGuardPrompt.promptSnapshot.assembledBlocks.find((item) => item.id === 'roleplay_runtime_context');
+  const mindReadingText = String(mindReadingBlock?.content || '');
+  assert.ok(mindReadingText.includes('用户括号里的内心、旁白或不可见心理当作创作背景处理'));
+  assert.ok(mindReadingText.includes('不要代替用户说话、行动或做决定'));
+  assert.ok(mindReadingText.includes('pure_text_reply_only'));
+  assert.ok(!mindReadingText.includes('Return JSON only'));
 
   const selfContainedPrompt = await buildDynamicPrompt(
     { level: '', points: 0 },
@@ -203,8 +305,102 @@ module.exports = (async () => {
     }
   );
   assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!selfContainedPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
   assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'long_term_profile'));
   assert.ok(!selfContainedPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'summary'));
+  assert.ok(!selfContainedPrompt.promptSnapshot.selectionTrace.some((item) => item.id === 'long_term_profile' && item.selected === true));
+
+  const unrelatedMemoryLeakPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 10 },
+    'u_prompt_unrelated_memory_leak',
+    '今晚吃什么比较省事',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      memoryContext: {
+        memoryForPrompt: '1. [episode|tier:B] 用户前天追问脚臭排名，助手拒绝回答。',
+        promptRetrievedMemoryText: '1. [episode|tier:B] 用户前天追问脚臭排名，助手拒绝回答。',
+        promptDailyJournalText: '',
+        promptLongTermProfileText: '',
+        promptImpressionText: '',
+        summary: '',
+        promptSummaryText: ''
+      },
+      routeMeta: {
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: [],
+            personaModules: [],
+            blockDecisions: [
+              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.98, priority: 20, reason: 'unrelated noisy memory' },
+              { blockId: 'memory_recall_policy', decision: 'skip', confidence: 0.98, priority: 21, reason: 'no usable evidence' },
+              { blockId: 'daily_journal', decision: 'skip', confidence: 0.98, priority: 22, reason: 'not a recall turn' }
+            ],
+            rationaleByBlock: {},
+            source: 'planner',
+            _source: 'planner'
+          }
+        }
+      }
+    }
+  );
+  const unrelatedMemoryPromptText = unrelatedMemoryLeakPrompt.promptSnapshot.assembledBlocks
+    .map((item) => String(item.content || ''))
+    .join('\n');
+  assert.ok(!unrelatedMemoryLeakPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!unrelatedMemoryLeakPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!unrelatedMemoryPromptText.includes('脚臭排名'));
+
+  const traceBackedUnrelatedMemoryPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 10 },
+    'u_prompt_trace_backed_unrelated_memory',
+    '今天吃什么比较省事',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      memoryContext: {
+        memoryForPrompt: '1. [episode|tier:B] 很久之前的问题：用户追问模型部署失败。',
+        promptRetrievedMemoryText: '1. [episode|tier:B] 很久之前的问题：用户追问模型部署失败。',
+        diagnostics: {
+          memoryTrace: {
+            retrieval_path: 'v3',
+            retrieved_count: 1,
+            injected_block_ids: ['retrieved_memory_lite'],
+            hits: [{
+              id: 'old_deploy_issue',
+              category: 'episode',
+              lifecycleStatus: 'active',
+              preview: '很久之前的问题：用户追问模型部署失败。'
+            }]
+          }
+        }
+      },
+      routeMeta: {
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: [],
+            personaModules: [],
+            blockDecisions: [
+              { blockId: 'retrieved_memory_lite', decision: 'skip', confidence: 0.98, priority: 20, reason: 'new self-contained topic' }
+            ],
+            rationaleByBlock: {},
+            source: 'planner',
+            _source: 'planner'
+          }
+        }
+      }
+    }
+  );
+  const traceBackedText = traceBackedUnrelatedMemoryPrompt.promptSnapshot.assembledBlocks
+    .map((item) => String(item.content || ''))
+    .join('\n');
+  assert.ok(!traceBackedUnrelatedMemoryPrompt.promptSnapshot.assembledBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!traceBackedUnrelatedMemoryPrompt.promptSnapshot.runtimeAddedBlocks.some((item) => item.id === 'retrieved_memory_lite'));
+  assert.ok(!traceBackedText.includes('模型部署失败'));
 
   const personaRejectedPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 14 },
@@ -244,7 +440,9 @@ module.exports = (async () => {
   const plannerPrompt = buildPlannerStageSystemPrompt([{ name: 'web_search', description: 'search web' }]);
 
   assert.ok(!reviewPrompt.includes('你是晓山瑞希风格的聊天伙伴'));
+  assert.ok(!reviewPrompt.includes('[RoleplayInnerProtocol]'));
   assert.ok(!plannerPrompt.includes('你是晓山瑞希风格的聊天伙伴'));
+  assert.ok(!plannerPrompt.includes('[RoleplayInnerProtocol]'));
   assert.ok(reviewPrompt.includes('Do not add new facts'));
   assert.ok(plannerPrompt.includes('task judgment'));
 
@@ -320,6 +518,37 @@ module.exports = (async () => {
     assert.ok(privatePrompt.promptSnapshot.activatedPersonaModules.includes('scene_private_chat'));
     assert.ok(privatePrompt.promptSnapshot.activatedPersonaModules.length <= 3);
   }
+  const privateLiveness = privatePrompt.promptSnapshot.assembledBlocks.find((item) => item.id === 'chat_liveness_discipline');
+  assert.ok(String(privateLiveness?.content || '').includes('surface=private_chat'));
+
+  const groupPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 12 },
+    'u_prompt_group_direct',
+    '瑞希这个要怎么弄',
+    null,
+    {
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: 'g-live',
+        chatType: 'group',
+        directedContext: {
+          scene: 'reply_to_bot',
+          addressee: { senderName: '测试用户', userId: 'u_prompt_group_direct', kind: 'user' }
+        }
+      }
+    }
+  );
+  const groupLiveness = groupPrompt.promptSnapshot.assembledBlocks.find((item) => item.id === 'chat_liveness_discipline');
+  assert.ok(String(groupLiveness?.content || '').includes('surface=group_direct_chat'));
+  assert.ok(String(groupLiveness?.content || '').includes('角色扮演沉浸性优先'));
+  assert.ok(String(groupLiveness?.content || '').includes('自然接'));
+  assert.ok(!String(groupLiveness?.content || '').includes('不安全化'));
+  assert.ok(!String(groupLiveness?.content || '').includes('不是拒绝理由'));
+  assert.ok(!String(groupLiveness?.content || '').includes('group_safety='));
+  assert.ok(groupPrompt.promptSnapshot.dynamicBlockIds.includes('chat_liveness_discipline'));
+  assert.ok(groupPrompt.promptSnapshot.dynamicBlockIds.includes('group_direct_chat_style_guard'));
+  assert.strictEqual(groupPrompt.promptSnapshot.dynamicBlockIds.filter((id) => id === 'chat_liveness_discipline').length, 1);
 
   const roleplayPrompt = await buildDynamicPrompt(
     { level: 'friend', points: 16 },
@@ -342,6 +571,46 @@ module.exports = (async () => {
   } else {
     assert.ok(roleplayPrompt.promptSnapshot.activatedPersonaModules.includes('roleplay_friend_bit'));
   }
+
+  const worldbookPlannerPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 18 },
+    'u_prompt_worldbook_future_two_tracks',
+    '围绕M7未来双轨：服饰专门学校、open campus、N25、两个都不放弃、撑到撑不住。真冬说想继续N25但也想去服饰学校，绘名怎么接？',
+    null,
+    {
+      routePolicyKey: 'chat/worldbook_future_two_tracks',
+      topRouteType: 'direct_chat',
+      sessionKey: 'worldbook_future_two_tracks_prompt_test',
+      routeMeta: {
+        directChatPlanner: {
+          dynamicPromptPlan: {
+            schemaVersion: 'dynamic_context_plan_v2',
+            enabledBlockIds: ['continuity_state'],
+            personaModules: ['wb_mizuki_future_two_tracks'],
+            blockDecisions: [
+              { blockId: 'continuity_state', decision: 'include', confidence: 0.9, priority: 20, reason: 'future two tracks continuity' },
+              { moduleId: 'wb_mizuki_future_two_tracks', decision: 'include', confidence: 0.95, priority: 40, reason: 'strong worldbook future two tracks request' }
+            ],
+            rationaleByBlock: {
+              continuity_state: 'future two tracks continuity',
+              wb_mizuki_future_two_tracks: 'strong worldbook future two tracks request'
+            }
+          }
+        }
+      },
+      continuitySignals: {
+        hasCarryOverTopic: true
+      }
+    }
+  );
+
+  if (!worldbookPlannerPrompt.latencyMeta?.optionalBudgetExceeded) {
+    assert.ok(worldbookPlannerPrompt.promptSnapshot.activatedPersonaModules.includes('wb_mizuki_future_two_tracks'));
+    assert.ok(worldbookPlannerPrompt.promptSnapshot.plannerIncludedBlocks.some((item) => item.id === 'persona_module:wb_mizuki_future_two_tracks'));
+    assert.ok(worldbookPlannerPrompt.promptSnapshot.assembledBlocks.some((item) => item.meta?.moduleId === 'wb_mizuki_future_two_tracks'));
+    assert.ok(worldbookPlannerPrompt.promptSegments.systemPrompt.some((message) => String(message.content || '').includes('服饰专门学校')));
+  }
+  assert.ok(Number(worldbookPlannerPrompt.latencyMeta?.prompt_assembly_ms) >= 0);
 
   console.log('promptGoldenSnapshots.test.js passed');
 })().catch((error) => {

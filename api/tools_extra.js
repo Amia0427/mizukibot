@@ -13,7 +13,7 @@ function createHttpClient() {
   return axios.create({
     timeout: config.TOOL_TIMEOUT_MS || 10000,
     proxy: false,
-    headers: { 'User-Agent': 'Mozilla/5.0 MizukiBot/ToolsExtra' }
+    headers: { 'User-Agent': config.HTTP_USER_AGENT }
   });
 }
 const http = createHttpClient();

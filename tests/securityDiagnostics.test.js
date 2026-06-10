@@ -20,6 +20,7 @@ const missingTokens = inspectTokenPosture(baseConfig);
 assert.strictEqual(missingTokens.status, 'warn');
 assert.strictEqual(missingTokens.webToken, 'missing');
 assert.strictEqual(missingTokens.localCommandBridgeToken, 'missing');
+assert.strictEqual(missingTokens.localCommandBridgeExecution, 'blocked');
 
 const configuredTokens = inspectTokenPosture({
   ...baseConfig,
@@ -27,6 +28,7 @@ const configuredTokens = inspectTokenPosture({
   LOCAL_COMMAND_BRIDGE_TOKEN: 'bridge-token'
 });
 assert.strictEqual(configuredTokens.status, 'ok');
+assert.strictEqual(configuredTokens.localCommandBridgeExecution, 'available');
 
 const publicBind = inspectTokenPosture({ ...baseConfig, WEB_BIND_HOST: '0.0.0.0' });
 assert.ok(publicBind.findings.some((finding) => finding.id === 'web-token-missing-public-bind'));

@@ -1,13 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../../config');
-const { formatDateInTz } = require('../time');
 const {
   getDailyJournalRetrievalBundle,
   readSegmentSummaries
 } = require('../dailyJournal');
+const {
+  resolveJournalTargetDays,
+  journalDateMatchBoost,
+  shiftDate
+} = require('./journalRecallPolicy');
 
-const DAY_RE = /\b\d{4}-\d{2}-\d{2}\b/g;
 const JOURNAL_DAY_FILE_RE = /^(\d{4}-\d{2}-\d{2})\.(?:summary\.md|segments\.jsonl|journal\.md)$/i;
 
 function normalizeText(value) {
@@ -19,33 +22,10 @@ function normalizeDay(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : '';
 }
 
-function shiftDate(day, offsetDays) {
-  const normalized = normalizeDay(day);
-  if (!normalized) return '';
-  const [year, month, date] = normalized.split('-').map((part) => Number(part));
-  const utc = new Date(Date.UTC(year, month - 1, date));
-  utc.setUTCDate(utc.getUTCDate() + Number(offsetDays || 0));
-  return utc.toISOString().slice(0, 10);
-}
-
 function uniqueStrings(values = []) {
   return Array.from(new Set((Array.isArray(values) ? values : [])
     .map((item) => String(item || '').trim())
     .filter(Boolean)));
-}
-
-function resolveJournalTargetDays(query = '', options = {}) {
-  const text = String(query || '');
-  const days = text.match(DAY_RE) || [];
-  const today = normalizeDay(options.today)
-    || formatDateInTz(options.now instanceof Date ? options.now : new Date(), config.TIMEZONE);
-
-  if (/大前天/.test(text)) days.push(shiftDate(today, -3));
-  if (/(?:前天|day before yesterday)/i.test(text)) days.push(shiftDate(today, -2));
-  if (/(?:昨天|昨日|yesterday)/i.test(text)) days.push(shiftDate(today, -1));
-  if (/(?:今天|今日|today)/i.test(text)) days.push(today);
-
-  return uniqueStrings(days.map(normalizeDay));
 }
 
 function readDailyJournalUsers() {
@@ -155,6 +135,11 @@ function buildDailyJournalDayDoc(uid, day, text = '') {
     stabilityScore: 0.86,
     rollupLevel: 'daily',
     episodeDay: day,
+    day,
+    textKind: 'journal_day',
+    sourceCompleteness: 'daily_or_raw',
+    sessionKeys: [],
+    topics: [],
     openPayload: {
       id: `journal-day:${uid}:${day}`,
       type: 'daily_journal',
@@ -174,6 +159,10 @@ function buildDailyJournalSegmentDocs(uid, day) {
       const text = normalizeText(segment.text);
       if (!text) return null;
       const updatedAt = Number(segment.createdAt || Date.parse(segment.created_at || '')) || dayUpdatedAt;
+      const segmentTitle = normalizeText(segment.title || `${day} segment ${index}`);
+      const topics = Array.isArray(segment.topics)
+        ? segment.topics.map(normalizeText).filter(Boolean)
+        : [];
       return {
         id: `journal-segment:${uid}:${day}:${index}`,
         source: 'journal',
@@ -186,9 +175,15 @@ function buildDailyJournalSegmentDocs(uid, day) {
         semanticSlot: 'episode',
         fieldKey: 'daily_journal_segment',
         canonicalKey: `journal segment ${uid} ${day} ${index}`,
-        text: `date: ${day}\nsegment: ${index}\n${text}`,
+        text: [
+          `date: ${day}`,
+          `title: ${segmentTitle}`,
+          `segment: ${index}`,
+          topics.length ? `topics: ${topics.join(', ')}` : '',
+          text
+        ].filter(Boolean).join('\n'),
         preview: text,
-        title: `${day} segment ${index}`,
+        title: segmentTitle,
         updatedAt,
         confidence: 0.9,
         importance: 1.08,
@@ -197,12 +192,21 @@ function buildDailyJournalSegmentDocs(uid, day) {
         stabilityScore: 0.8,
         rollupLevel: 'segment',
         episodeDay: day,
+        day,
         segmentIndex: index,
         entryCount: Math.max(0, Number(segment.entryCount || 0) || 0),
+        textKind: 'journal_segment',
+        sourceCompleteness: 'segment',
+        sessionKeys: [],
+        topics,
+        category: 'journal',
+        tags: ['journal', 'segment', day].concat(topics).filter(Boolean),
+        intent: 'episode_recall',
+        privacyLevel: 'private',
         openPayload: {
           id: `journal-segment:${uid}:${day}:${index}`,
           type: 'daily_journal_segment',
-          title: `${day} segment ${index}`,
+          title: segmentTitle,
           text,
           updatedAt,
           episodeDay: day,
@@ -236,9 +240,14 @@ function buildDailyJournalDocsForUser(userId, options = {}) {
     });
     const text = normalizeText(bundle?.byLayer?.daily?.[0]?.text || bundle?.text || '');
     const dayDoc = buildDailyJournalDayDoc(uid, day, text);
-    if (dayDoc) docs.push(dayDoc);
+    const sidecars = Array.isArray(bundle?.byLayer?.daily?.[0]?.sidecarEntries)
+      ? bundle.byLayer.daily[0].sidecarEntries
+      : [];
+    const sessionKeys = uniqueStrings(sidecars.map((item) => item?.sessionKey));
+    const topics = uniqueStrings(sidecars.map((item) => item?.continuitySnapshot?.activeTopic));
+    if (dayDoc) docs.push({ ...dayDoc, sessionKeys, topics });
     if (shouldIncludeSegmentDocs(options)) {
-      docs.push(...buildDailyJournalSegmentDocs(uid, day));
+      docs.push(...buildDailyJournalSegmentDocs(uid, day).map((doc) => ({ ...doc, sessionKeys, topics })));
     }
   }
   return docs;
@@ -252,19 +261,13 @@ function getJournalDocDay(doc = {}) {
   return normalizeDay(doc.episodeDay || doc.day || doc.title || String(doc.id || '').split(':').pop());
 }
 
-function journalDateMatchBoost(doc = {}, targetDays = []) {
-  if (String(doc.source || '').toLowerCase() !== 'journal') return 0;
-  const day = getJournalDocDay(doc);
-  if (!day || !Array.isArray(targetDays) || targetDays.length === 0) return 0;
-  return targetDays.includes(day) ? 0.72 : 0;
-}
-
 module.exports = {
   buildDailyJournalDocsForAllUsers,
   buildDailyJournalDocsForUser,
   getDailyJournalFileStats,
   getJournalDocDay,
   journalDateMatchBoost,
+  readDailyJournalUsers,
   resolveJournalTargetDays,
   scanDailyJournalDays,
   shiftDate

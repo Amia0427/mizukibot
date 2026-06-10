@@ -26,7 +26,7 @@ const targetSkills = [
 ];
 
 function main() {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'toolExecutors.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'toolExecutors', 'index.js'), 'utf8');
   const results = targetSkills.map((name) => {
     const idx = source.indexOf(`${name}: async`);
     const chunk = idx >= 0 ? source.slice(idx, idx + 1500) : '';

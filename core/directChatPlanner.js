@@ -2,12 +2,43 @@ const planning = require('../api/runtimeV2/planning/service');
 const { enqueueResearchTask } = require('./researchTaskQueue');
 const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { resolvePolicyKey } = require('./routeExecution');
+const { routeHasExplicitWebSearchRequirement } = require('../utils/webSearchRequirement');
 const {
   attachExecutablePlanToPlannerDecision,
   buildExecutablePlanFromPlannerDecision,
   buildExecutablePlanFromPolicy
 } = require('./executablePlan');
+const {
+  buildCanonicalRouteContract
+} = require('./routeSchema');
 
+function hasOwnValue(source = {}, key = '') {
+  return Boolean(source && Object.prototype.hasOwnProperty.call(source, key));
+}
+
+function hasMeaningfulObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0;
+}
+
+function pickObjectOption(options = {}, routeMeta = {}, key = '', fallback = {}) {
+  if (hasOwnValue(options, key) && hasMeaningfulObject(options[key])) return options[key];
+  if (hasOwnValue(routeMeta, key) && hasMeaningfulObject(routeMeta[key])) return routeMeta[key];
+  if (hasOwnValue(options, key) && options[key] && typeof options[key] === 'object' && !Array.isArray(options[key])) return options[key];
+  if (hasOwnValue(routeMeta, key) && routeMeta[key] && typeof routeMeta[key] === 'object' && !Array.isArray(routeMeta[key])) return routeMeta[key];
+  return fallback;
+}
+
+function pickArrayOption(options = {}, routeMeta = {}, key = '') {
+  if (Array.isArray(options[key]) && options[key].length > 0) return options[key];
+  if (Array.isArray(routeMeta[key]) && routeMeta[key].length > 0) return routeMeta[key];
+  if (Array.isArray(options[key])) return options[key];
+  if (Array.isArray(routeMeta[key])) return routeMeta[key];
+  return [];
+}
+
+function pickTextOption(options = {}, routeMeta = {}, key = '') {
+  return options[key] || routeMeta[key] || '';
+}
 
 function maybeEnqueueBackgroundResearch(route = {}, decision = {}, options = {}) {
   const meta = decision?.plannerMeta && typeof decision.plannerMeta === 'object' ? decision.plannerMeta : {};
@@ -22,18 +53,134 @@ function maybeEnqueueBackgroundResearch(route = {}, decision = {}, options = {})
   });
 }
 
-async function planDirectChat(route = {}, options = {}) {
-  const available = planning.collectAvailableToolSummary(route, options);
-  const policyKey = resolvePolicyKey(route);
+function shouldBypassImageSummaryPlanner(route = {}, _available = {}, options = {}) {
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  const chatMode = String(routeMeta.chatMode || '').trim().toLowerCase();
+  if (chatMode !== 'image_summary') return false;
+  if (String(routeMeta.toolIntent || '').trim().toLowerCase() === 'force_tools') return false;
+  if (routeHasExplicitWebSearchRequirement(route)) return false;
   const explicitAllowedTools = Array.isArray(options?.allowedTools)
     ? options.allowedTools
-    : (Array.isArray(route?.meta?.allowedTools) ? route.meta.allowedTools : undefined);
+    : (Array.isArray(routeMeta.allowedTools) ? routeMeta.allowedTools : null);
+  if (Array.isArray(explicitAllowedTools) && explicitAllowedTools.length > 0) return false;
+  return true;
+}
+
+function hasExplicitAllowedTools(route = {}, options = {}) {
+  if (Array.isArray(options?.allowedTools) && options.allowedTools.length > 0) return true;
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  return Array.isArray(routeMeta.allowedTools) && routeMeta.allowedTools.length > 0;
+}
+
+function shouldBypassPlainChatPlanner(route = {}, _available = {}, options = {}) {
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  const contract = buildCanonicalRouteContract(route);
+  if (contract.topRouteType !== 'direct_chat') return false;
+  if (contract.chatMode !== 'text_chat') return false;
+  if (contract.toolIntent !== 'none') return false;
+  if (contract.intent.needsMemory === true) return false;
+  if (contract.intent.needsPlanning === true) return false;
+  if (resolvePolicyKey(route) !== 'chat/default') return false;
+  if (contract.facets.sourceScope !== 'none') return false;
+  if (routeHasExplicitWebSearchRequirement(route)) return false;
+  if (hasExplicitAllowedTools(route, options)) return false;
+  if (routeMeta.needsMemoryReason || routeMeta.recallFacet) return false;
+  return true;
+}
+
+function shouldBypassNotebookChatOnlyPlanner(route = {}, _available = {}, options = {}) {
+  const routeMeta = route?.meta && typeof route.meta === 'object' ? route.meta : {};
+  const contract = buildCanonicalRouteContract(route);
+  if (contract.topRouteType !== 'direct_chat') return false;
+  if (contract.chatMode !== 'text_chat') return false;
+  if (contract.toolIntent === 'force_tools') return false;
+  if (contract.intent.needsMemory === true) return false;
+  if (contract.intent.needsPlanning === true) return false;
+  if (resolvePolicyKey(route) !== 'lookup/notebook-answer') return false;
+  if (contract.facets.sourceScope !== 'notebook' && contract.facets.domain !== 'personal') return false;
+  if (routeHasExplicitWebSearchRequirement(route)) return false;
+  if (hasExplicitAllowedTools(route, options)) return false;
+  if (routeMeta.needsMemoryReason || routeMeta.recallFacet) return false;
+  return true;
+}
+
+function buildChatOnlyPlannerDecision(route = {}, available = {}, options = {}) {
+  const policyKey = resolvePolicyKey(route);
+  const decision = planning.normalizePlannerDecisionV2({
+    mode: 'chat_only',
+    taskShape: 'fast_reply',
+    allowedToolNames: [],
+    steps: [],
+    plannerMeta: {
+      decisionVersion: planning.PLANNER_DECISION_VERSION,
+      plannerVersion: planning.DIRECT_CHAT_PLANNER_VERSION,
+      reason: String(options.reason || 'no planner tools available').trim(),
+      plannerModel: planning.getPlannerModelName(),
+      decisionSource: String(options.decisionSource || 'rule_preflight_no_tools').trim(),
+      fallbackUsed: false,
+      semanticConfidence: 0.92,
+      needsSemanticRefinement: false,
+      semanticAssessment: {
+        intentSummary: String(options.intentSummary || 'direct chat reply').trim() || 'direct chat reply',
+        sourceScope: String(options.sourceScope || 'current_context').trim() || 'current_context',
+        contextDependencies: [],
+        ambiguity: [],
+        confidence: 0.92,
+        needsRefinement: false
+      }
+    }
+  }, route, {
+    ...options,
+    toolCatalog: available.toolCatalog,
+    fallbackUsed: false
+  });
+  const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, {
+    toolCatalog: available.toolCatalog
+  });
+  return attachExecutablePlanToPlannerDecision(
+    directChatDecision,
+    buildExecutablePlanFromPlannerDecision(directChatDecision, policyKey, route)
+  );
+}
+
+async function planDirectChat(route = {}, options = {}) {
+  const available = planning.collectAvailableToolSummary(route, options);
+  if (shouldBypassImageSummaryPlanner(route, available, options)) {
+    return buildChatOnlyPlannerDecision(route, available, {
+      ...options,
+      reason: 'image_summary has no explicit tool requirement; skip remote planner',
+      decisionSource: 'rule_preflight_image_summary'
+    });
+  }
+  if (shouldBypassPlainChatPlanner(route, available, options)) {
+    return buildChatOnlyPlannerDecision(route, available, {
+      ...options,
+      reason: 'plain chat/default has no tool or memory dependency; skip remote planner',
+      decisionSource: 'rule_preflight_plain_chat',
+      intentSummary: 'plain private chat direct reply',
+      sourceScope: 'current_context'
+    });
+  }
+  if (shouldBypassNotebookChatOnlyPlanner(route, available, options)) {
+    return buildChatOnlyPlannerDecision(route, available, {
+      ...options,
+      reason: 'notebook-answer route has no explicit notebook/memory dependency; skip remote planner',
+      decisionSource: 'rule_preflight_notebook_chat_only',
+      intentSummary: 'notebook-labeled direct reply without retrieval',
+      sourceScope: 'notebook_route_without_retrieval'
+    });
+  }
+  const policyKey = resolvePolicyKey(route);
+  const routeMeta = route?.meta || {};
+  const explicitAllowedTools = Array.isArray(options?.allowedTools)
+    ? options.allowedTools
+    : (Array.isArray(routeMeta.allowedTools) ? routeMeta.allowedTools : undefined);
   const decision = await planning.planRequestV2({
     question: route?.question || route?.cleanText || '',
     cleanText: route?.cleanText || route?.question || '',
     imageUrl: route?.imageUrl || null,
     topRouteType: route?.topRouteType || 'direct_chat',
-    routeMeta: route?.meta || {},
+    routeMeta,
     route: {
       ...route,
       question: route?.question || route?.cleanText || '',
@@ -45,10 +192,22 @@ async function planDirectChat(route = {}, options = {}) {
     ...(explicitAllowedTools ? { allowedTools: explicitAllowedTools } : {}),
     toolCatalog: available.toolCatalog,
     contextSummary: options?.contextSummary || route?.meta?.contextSummary || route?.meta?.conversationSummary || '',
-    directedContext: options?.directedContext || route?.meta?.directedContext || null,
-    continuitySignals: options?.continuitySignals || {},
+    directedContext: options?.directedContext || routeMeta.directedContext || null,
+    continuitySignals: pickObjectOption(options, routeMeta, 'continuitySignals'),
+    memoryContext: pickObjectOption(options, routeMeta, 'memoryContext'),
+    availableContextSignals: pickObjectOption(options, routeMeta, 'availableContextSignals'),
+    personaModuleCatalog: pickArrayOption(options, routeMeta, 'personaModuleCatalog'),
+    dynamicPromptBlockCatalog: pickArrayOption(options, routeMeta, 'dynamicPromptBlockCatalog'),
+    dynamicPromptGuide: pickTextOption(options, routeMeta, 'dynamicPromptGuide'),
+    dynamicFewShotPrompt: pickTextOption(options, routeMeta, 'dynamicFewShotPrompt'),
+    mainReplyPromptMode: pickTextOption(options, routeMeta, 'mainReplyPromptMode'),
+    memoryCliTurn: pickObjectOption(options, routeMeta, 'memoryCliTurn'),
+    schedulerInjection: options?.schedulerInjection || routeMeta.schedulerInjection || routeMeta.lifeSchedulerInjection,
+    sharedShortTermContext: pickObjectOption(options, routeMeta, 'sharedShortTermContext'),
+    personaMemoryState: pickObjectOption(options, routeMeta, 'personaMemoryState'),
+    userInfo: pickObjectOption(options, routeMeta, 'userInfo'),
     constraints: options?.constraints || {},
-    requestTrace: options?.requestTrace || route?.meta?.requestTrace || null,
+    requestTrace: options?.requestTrace || routeMeta.requestTrace || null,
     planner: options?.planner
   });
   const directChatDecision = planning.convertPlannerDecisionToDirectChatDecision(decision, route, {

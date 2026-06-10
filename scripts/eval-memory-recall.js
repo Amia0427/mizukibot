@@ -5,6 +5,17 @@ const path = require('path');
 const config = require('../config');
 const { queryMemory } = require('../utils/memory-v3/query');
 const {
+  loadMemoryNodes,
+  loadScopeProjection
+} = require('../utils/memory-v3/storage');
+const { runMemoryCli } = require('../utils/memoryCli');
+const { buildDailyJournalDocsForAllUsers } = require('../utils/memory-v3/journalDocs');
+const { loadPersonaModuleCatalog } = require('../utils/personaModules');
+const {
+  buildWorldbookDocuments,
+  searchPersonaWorldbook
+} = require('../utils/personaWorldbookSearch');
+const {
   ensureDir,
   safeReadJsonLines,
   atomicWriteText,
@@ -17,13 +28,21 @@ const CASES_FILE = path.join(OUT_DIR, 'cases.jsonl');
 function parseArgs(argv = process.argv.slice(2)) {
   const args = {
     buildCases: false,
+    autoGold: false,
     baseline: '',
     candidate: '',
-    limit: 100
+    mode: '',
+    limit: 100,
+    memoryCli: false
   };
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
     if (item === '--build-cases') args.buildCases = true;
+    else if (item === '--auto-gold') args.autoGold = true;
+    else if (item === '--mode') {
+      args.mode = normalizeText(argv[index + 1]).toLowerCase();
+      index += 1;
+    }
     else if (item === '--baseline') {
       args.baseline = normalizeText(argv[index + 1]).toLowerCase();
       index += 1;
@@ -33,9 +52,222 @@ function parseArgs(argv = process.argv.slice(2)) {
     } else if (item === '--limit') {
       args.limit = Math.max(1, Number(argv[index + 1] || 100) || 100);
       index += 1;
+    } else if (item === '--memory-cli') {
+      args.memoryCli = true;
     }
   }
   return args;
+}
+
+function normalizeSource(value = '') {
+  return normalizeText(value).toLowerCase() || 'unknown';
+}
+
+function inferGoldFacet(doc = {}) {
+  const source = normalizeSource(doc.source);
+  const memoryKind = normalizeSource(doc.memoryKind);
+  const slot = normalizeSource(doc.semanticSlot || doc.fieldKey || doc.type || doc.memoryKind);
+  if (source === 'journal' || slot.includes('journal') || slot === 'episode') return 'journal';
+  if (source === 'group' || source === 'jargon' || normalizeSource(doc.scopeType) === 'group') return 'group';
+  if (source === 'style' || memoryKind === 'style' || slot.includes('style') || source === 'jargon') return 'style';
+  if (slot.includes('relationship')) return 'relationship';
+  if (slot.includes('identity') || slot.includes('persona')) return 'identity';
+  if (slot.includes('like') || slot.includes('dislike') || slot.includes('preference') || slot === 'hobby') return 'preference';
+  if (source === 'task' || slot.includes('task')) return 'task';
+  return 'default';
+}
+
+function buildGoldQuery(doc = {}) {
+  const facet = inferGoldFacet(doc);
+  const canonical = normalizeText(doc.canonicalKey || doc.title || doc.moduleId || doc.id);
+  const preview = normalizeText(doc.preview || doc.text || doc.purpose);
+  const snippet = preview.split(/[。！？.!?\n]/).map(normalizeText).find(Boolean) || preview;
+  const compactSnippet = snippet.length > 160 ? snippet.slice(0, 160) : snippet;
+  if (facet === 'journal') {
+    const day = normalizeText(doc.episodeDay || doc.title || '').slice(0, 10);
+    return normalizeText(day ? `${day} ${compactSnippet}` : compactSnippet);
+  }
+  if (facet === 'worldbook') return normalizeText(`${canonical} ${compactSnippet}`);
+  return normalizeText(canonical && canonical !== 'unknown' ? `${canonical} ${compactSnippet}` : compactSnippet);
+}
+
+function caseSortKey(item = {}) {
+  return [
+    normalizeSource(item.evalSource || item.source),
+    normalizeText(item.userId),
+    normalizeText(item.groupId),
+    normalizeText(item.id || item.moduleId || item.nodeId)
+  ].join('|');
+}
+
+function bucketGoldCases(cases = [], keyFn = (item) => item.source || item.facet || 'unknown') {
+  const buckets = new Map();
+  for (const item of Array.isArray(cases) ? cases : []) {
+    const key = normalizeText(keyFn(item)) || 'unknown';
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(item);
+  }
+  return Array.from(buckets.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, items]) => ({
+      key,
+      items: items.sort((a, b) => caseSortKey(a).localeCompare(caseSortKey(b)))
+    }));
+}
+
+function roundRobinGoldCases(cases = [], limit = 100, keyFn = (item) => item.source || item.facet || 'unknown') {
+  const max = Math.max(1, Number(limit || 100) || 100);
+  const buckets = bucketGoldCases(cases, keyFn);
+  const selected = [];
+  let cursor = 0;
+  while (selected.length < max && buckets.some((bucket) => bucket.items.length > 0)) {
+    const bucket = buckets[cursor % buckets.length];
+    const item = bucket.items.shift();
+    if (item) selected.push(item);
+    cursor += 1;
+  }
+  return selected;
+}
+
+function isStableMemoryGoldCase(item = {}) {
+  const source = normalizeSource(item.targetSource || item.source);
+  const facet = normalizeSource(item.facet);
+  if (source === 'worldbook') return true;
+  if (source === 'test' || source === 'unknown') return false;
+  if (source === 'post_reply_worker' || source === 'self_improvement') return false;
+  if (source === 'legacy_memories' || source === 'daily_journal_summary' || source === 'daily_journal_rollup') return false;
+  if (source === 'direct_chat' || source === 'passive_group_reply' || source === 'bot_diary') return false;
+  if (source === 'explicit') return false;
+  if (facet === 'default' || facet === 'identity' || facet === 'relationship') return false;
+  return ['journal', 'group', 'preference', 'style', 'task'].includes(facet);
+}
+
+function goldCanonicalKey(item = {}) {
+  const facet = normalizeText(item.facet);
+  let canonical = normalizeText(item.canonicalKey || item.query).toLowerCase();
+  if (facet === 'style') {
+    canonical = canonical
+      .replace(/^style\s*/i, '')
+      .replace(/\b(style|语气|偏好|常用|回应|表达|口语化|轻松|自然|亲切|俏皮|温柔|安抚|带一点|一点|的|和|用)\b/gi, ' ')
+      .replace(/[，。、“”"':：；;（）()~…]/g, ' ');
+  }
+  return [
+    normalizeText(item.userId),
+    normalizeText(item.groupId),
+    facet,
+    normalizeText(canonical)
+  ].join('|');
+}
+
+function keepUniqueGoldCases(cases = []) {
+  const counts = new Map();
+  for (const item of Array.isArray(cases) ? cases : []) {
+    const key = goldCanonicalKey(item);
+    if (!key) continue;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return (Array.isArray(cases) ? cases : []).filter((item) => (counts.get(goldCanonicalKey(item)) || 0) === 1);
+}
+
+function buildMemoryGoldCases(limit = 100) {
+  const nodes = loadMemoryNodes()
+    .filter((node) => normalizeText(node.id) && normalizeText(node.text))
+    .filter((node) => normalizeText(node.status || 'active').toLowerCase() !== 'archived')
+    .filter((node) => normalizeText(node.userId) || normalizeText(node.scopeType).toLowerCase() === 'group')
+    .map((node) => {
+      const facet = inferGoldFacet(node);
+      const query = buildGoldQuery(node);
+      if (!query) return null;
+      return {
+        id: `gold-memory:${node.id}`,
+        evalSource: 'memory',
+        userId: normalizeText(node.userId),
+        groupId: normalizeText(node.groupId),
+        query,
+        facet,
+        expectedIds: [normalizeText(node.id)],
+        source: normalizeSource(node.scopeType) === 'group' ? 'group' : normalizeSource(node.source || node.memoryKind || 'memory'),
+        targetSource: normalizeSource(node.source || node.memoryKind || 'memory'),
+        canonicalKey: normalizeText(node.canonicalKey || node.text).toLowerCase(),
+        createdAt: Number(node.updatedAt || node.createdAt || 0) || 0
+      };
+    })
+    .filter((item) => item && item.userId && item.query && isStableMemoryGoldCase(item));
+
+  const journals = buildDailyJournalDocsForAllUsers({ includeSegments: true })
+    .map((doc) => {
+      const query = buildGoldQuery(doc);
+      if (!query) return null;
+      return {
+        id: `gold-journal:${doc.id}`,
+        evalSource: 'memory',
+        userId: normalizeText(doc.userId),
+        groupId: '',
+        query,
+        facet: 'journal',
+        expectedIds: [normalizeText(doc.id)],
+        source: 'journal',
+        targetSource: 'journal',
+        canonicalKey: normalizeText(doc.id),
+        createdAt: Number(doc.updatedAt || 0) || 0
+      };
+    })
+    .filter((item) => item && item.userId && item.query && isStableMemoryGoldCase(item));
+
+  return roundRobinGoldCases(keepUniqueGoldCases(nodes.concat(journals)), limit, (item) => `${item.facet}:${item.targetSource || item.source}`);
+}
+
+function buildWorldbookGoldCases(limit = 100) {
+  const catalog = loadPersonaModuleCatalog();
+  return buildWorldbookDocuments(catalog)
+    .map((doc) => {
+      const moduleId = normalizeText(doc.moduleId || doc.id);
+      const query = buildGoldQuery({
+        ...doc,
+        source: 'worldbook',
+        semanticSlot: 'worldbook'
+      });
+      if (!moduleId || !query) return null;
+      return {
+        id: `gold-worldbook:${moduleId}`,
+        evalSource: 'worldbook',
+        userId: '',
+        groupId: '',
+        query,
+        facet: 'worldbook',
+        expectedIds: [moduleId],
+        source: 'worldbook',
+        targetSource: 'worldbook',
+        createdAt: Number(doc.fileMtimeMs || 0) || 0
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => caseSortKey(a).localeCompare(caseSortKey(b)))
+    .slice(0, Math.max(1, Number(limit || 100) || 100));
+}
+
+function buildAutoGoldCases(limit = 100) {
+  const max = Math.max(1, Number(limit || 100) || 100);
+  const worldbookLimit = Math.max(1, Math.min(Math.ceil(max * 0.2), 40));
+  const memoryLimit = Math.max(1, max - worldbookLimit);
+  const cases = buildMemoryGoldCases(memoryLimit).concat(buildWorldbookGoldCases(worldbookLimit));
+  return roundRobinGoldCases(cases, max, (item) => item.facet || item.targetSource || item.source);
+}
+
+function supplementCasesWithAutoGold(cases = [], limit = 100, buildGold = buildAutoGoldCases) {
+  const max = Math.max(1, Number(limit || 100) || 100);
+  const selected = (Array.isArray(cases) ? cases : []).slice(0, max);
+  if (!selected.some((item) => normalizeExpectedIds(item).length > 0)) return buildGold(max);
+  if (selected.length >= max) return selected;
+  const seen = new Set(selected.map((item) => normalizeText(item.id)));
+  const supplement = buildGold(max)
+    .filter((item) => {
+      const key = normalizeText(item.id);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  return selected.concat(supplement).slice(0, max);
 }
 
 function readNapcatEvents(limit = 5000) {
@@ -108,9 +340,31 @@ function buildCases(args = {}) {
   return cases;
 }
 
-function loadCases(limit = 100) {
+function loadCases(limit = 100, options = {}) {
+  if (options.autoGold === true) return buildAutoGoldCases(limit);
   if (!fs.existsSync(CASES_FILE)) return buildCases({ limit });
-  return safeReadJsonLines(CASES_FILE).slice(0, limit);
+  const max = Math.max(1, Number(limit || 100) || 100);
+  const cases = safeReadJsonLines(CASES_FILE).slice(0, max);
+  return supplementCasesWithAutoGold(cases, max);
+}
+
+function normalizeExpectedIds(testCase = {}) {
+  const explicit = Array.isArray(testCase.expectedIds) ? testCase.expectedIds : [];
+  const aliases = Array.isArray(testCase.expected_ids) ? testCase.expected_ids : [];
+  return explicit.concat(aliases).map(normalizeText).filter(Boolean);
+}
+
+function normalizeCaseTimestampMs(value = 0) {
+  const ts = Number(value || 0) || 0;
+  if (ts <= 0) return 0;
+  return ts < 100000000000 ? ts * 1000 : ts;
+}
+
+function buildCaseQueryOptions(testCase = {}) {
+  const createdAtMs = normalizeCaseTimestampMs(testCase.createdAt || testCase.created_at || testCase.timestamp || testCase.time);
+  return createdAtMs > 0
+    ? { journalNow: new Date(createdAtMs) }
+    : {};
 }
 
 function configureMode(mode = '') {
@@ -133,14 +387,129 @@ function percentile(values = [], p = 0.5) {
   return sorted[index];
 }
 
+function emptyStageStats() {
+  return {
+    queryEmbeddingMs: [],
+    lancedbSearchMs: [],
+    localLexicalMs: [],
+    fusionMs: [],
+    rerankMs: [],
+    totalMs: []
+  };
+}
+
+function addStageStats(stageStats = emptyStageStats(), timings = {}) {
+  for (const key of Object.keys(stageStats)) {
+    const value = Number(timings?.[key]);
+    if (Number.isFinite(value)) stageStats[key].push(value);
+  }
+}
+
+function summarizeStageStats(stageStats = emptyStageStats()) {
+  const out = {};
+  for (const [key, values] of Object.entries(stageStats)) {
+    out[key] = {
+      p50Ms: percentile(values, 0.5),
+      p95Ms: percentile(values, 0.95)
+    };
+  }
+  return out;
+}
+
+function incrementMetric(map = {}, key = 'unknown', amount = 1) {
+  const normalized = normalizeText(key) || 'unknown';
+  map[normalized] = (map[normalized] || 0) + amount;
+}
+
+function ensureSourceMetrics(metrics = {}, source = 'unknown') {
+  const key = normalizeText(source) || 'unknown';
+  if (!metrics[key]) {
+    metrics[key] = {
+      cases: 0,
+      judgedCases: 0,
+      recallHitsAt5: 0,
+      reciprocalSumAt5: 0,
+      recallHits: 0,
+      reciprocalSum: 0,
+      emptyResults: 0,
+      noVisibleCandidates: 0
+    };
+  }
+  return metrics[key];
+}
+
+function countLifecycleLeaks(results = []) {
+  let leaks = 0;
+  for (const item of Array.isArray(results) ? results : []) {
+    const status = normalizeText(item.lifecycleStatus || item.meta?.lifecycleStatus || item.payload?.lifecycleStatus).toLowerCase();
+    if (status === 'stale' || status === 'suspect' || status === 'superseded') leaks += 1;
+  }
+  return leaks;
+}
+
+function countCategoryMismatches(results = [], testCase = {}) {
+  const expected = normalizeText(testCase.category || testCase.memoryCategory).toLowerCase();
+  if (!expected) return 0;
+  return (Array.isArray(results) ? results : [])
+    .filter((item) => normalizeText(item.category || item.meta?.category || item.payload?.category).toLowerCase() !== expected)
+    .length;
+}
+
+function countRecentRecallMisses(results = [], testCase = {}) {
+  const query = normalizeText(testCase.query);
+  const facet = normalizeText(testCase.facet).toLowerCase();
+  if (!/(刚才|刚刚|最近|今天|今日|昨天|昨日|继续|接着|聊到哪|说到哪|\brecent\b|\btoday\b|\byesterday\b|\bcontinue\b)/i.test(query)) {
+    return 0;
+  }
+  const expectedSources = facet === 'journal'
+    ? new Set(['journal', 'recent'])
+    : new Set(['recent', 'journal', 'task']);
+  const top = (Array.isArray(results) ? results : []).slice(0, 3);
+  return top.some((item) => expectedSources.has(normalizeSource(item.source))) ? 0 : 1;
+}
+
+function isWeakTopHit(results = []) {
+  const top = (Array.isArray(results) ? results : [])[0] || null;
+  if (!top) return false;
+  const quality = normalizeText(top.evidenceQuality || top.qualitySummary?.topResultQuality).toLowerCase();
+  return quality === 'weak' || quality === 'reject';
+}
+
+function isProfileOnlyHit(results = []) {
+  const list = Array.isArray(results) ? results : [];
+  return list.length > 0 && list.every((item) => normalizeSource(item.source) === 'profile');
+}
+
+function finalizeGroupedMetrics(metrics = {}) {
+  const out = {};
+  for (const [key, value] of Object.entries(metrics)) {
+    out[key] = {
+      cases: value.cases,
+      judgedCases: value.judgedCases,
+      recallAt5: value.judgedCases ? value.recallHitsAt5 / value.judgedCases : null,
+      mrrAt5: value.judgedCases ? value.reciprocalSumAt5 / value.judgedCases : null,
+      recallAt8: value.judgedCases ? value.recallHits / value.judgedCases : null,
+      mrrAt8: value.judgedCases ? value.reciprocalSum / value.judgedCases : null,
+      emptyResultRate: value.cases ? value.emptyResults / value.cases : 0,
+      noVisibleCandidateRate: value.cases ? value.noVisibleCandidates / value.cases : 0
+    };
+  }
+  return out;
+}
+
 function countScopeLeaks(results = [], testCase = {}) {
   const userId = normalizeText(testCase.userId);
   const groupId = normalizeText(testCase.groupId);
+  const scope = loadScopeProjection();
+  const allowedGroups = new Set([
+    groupId,
+    ...(Array.isArray(scope.users?.[userId]?.groups) ? scope.users[userId].groups : [])
+  ].map(normalizeText).filter(Boolean));
   let leaks = 0;
   for (const item of Array.isArray(results) ? results : []) {
     const scopeType = normalizeText(item.scopeType).toLowerCase();
     if (scopeType === 'group') {
-      if (normalizeText(item.groupId) && normalizeText(item.groupId) !== groupId) leaks += 1;
+      if (normalizeText(item.groupId) && !allowedGroups.has(normalizeText(item.groupId))) leaks += 1;
     } else if (normalizeText(item.userId) && normalizeText(item.userId) !== userId) {
       leaks += 1;
     }
@@ -148,49 +517,228 @@ function countScopeLeaks(results = [], testCase = {}) {
   return leaks;
 }
 
-async function runMode(mode = 'local_jsonl', cases = []) {
+function countWrongHits(results = [], testCase = {}) {
+  const shouldUseMemory = testCase.shouldUseMemory !== false;
+  const expectedIds = normalizeExpectedIds(testCase);
+  if (shouldUseMemory || expectedIds.length > 0) return 0;
+  const meaningful = (Array.isArray(results) ? results : []).filter((item) => {
+    const score = Number(item.score || 0) || 0;
+    const source = normalizeSource(item.source);
+    return score > 0.18 && source !== 'recent';
+  });
+  return meaningful.length > 0 ? 1 : 0;
+}
+
+function countPromptInjectionHits(result = {}, expectedIds = []) {
+  if (!expectedIds.length) return 0;
+  const digest = normalizeText(result.digest);
+  const injectedText = [
+    result.memoryForPrompt,
+    result.retrievedMemoryForPrompt,
+    result.promptRetrievedMemoryText,
+    digest
+  ].map(normalizeText).join('\n');
+  if (!injectedText) return 0;
+  const results = Array.isArray(result.results) ? result.results : [];
+  return results.some((item) => (
+    expectedIds.includes(normalizeText(item.id || item.nodeId || item.moduleId))
+    && normalizeText(item.text)
+    && injectedText.includes(normalizeText(item.text).slice(0, 48))
+  )) ? 1 : 0;
+}
+
+function estimateAnswerRelevance(results = [], testCase = {}) {
+  const queryTokens = new Set(String(testCase.query || '').split(/\s+/).map(normalizeText).filter(Boolean));
+  if (!queryTokens.size) return null;
+  const topText = (Array.isArray(results) ? results : []).slice(0, 3).map((item) => normalizeText(item.text)).join(' ');
+  if (!topText) return 0;
+  let overlap = 0;
+  for (const token of queryTokens) {
+    if (token && topText.includes(token)) overlap += 1;
+  }
+  return Math.min(1, overlap / Math.max(1, queryTokens.size));
+}
+
+function estimateFaithfulness(results = []) {
+  const list = Array.isArray(results) ? results : [];
+  if (!list.length) return null;
+  const supported = list.filter((item) => {
+    const tier = normalizeText(item.evidenceTier).toLowerCase();
+    const source = normalizeSource(item.source);
+    const lifecycle = normalizeText(item.lifecycleStatus).toLowerCase();
+    return lifecycle !== 'stale'
+      && lifecycle !== 'suspect'
+      && lifecycle !== 'superseded'
+      && (tier === 'strict' || source === 'journal' || source === 'recent' || Number(item.score || 0) >= 0.2);
+  }).length;
+  return supported / list.length;
+}
+
+async function runMode(mode = 'local_jsonl', cases = [], options = {}) {
   configureMode(mode);
-  const latencies = [];
+  const mainLatencies = [];
+  const memoryCliLatencies = [];
+  const stageStats = emptyStageStats();
   const sourceCoverage = {};
+  const fallbackCounts = {};
+  const bySourceRaw = {};
+  const byFacetRaw = {};
   let leakage = 0;
+  let lifecycleLeakage = 0;
+  let categoryMismatches = 0;
+  let recentRecallMisses = 0;
   let recallHits = 0;
+  let recallHitsAt5 = 0;
   let reciprocalSum = 0;
+  let reciprocalSumAt5 = 0;
   let judgedCases = 0;
+  let promptInjectionHits = 0;
+  let wrongHits = 0;
+  let answerRelevanceSum = 0;
+  let answerRelevanceCases = 0;
+  let faithfulnessSum = 0;
+  let faithfulnessCases = 0;
   let promptChars = 0;
+  let emptyResults = 0;
+  let noVisibleCandidates = 0;
+  let noRetrieval = 0;
+  let weakTopHits = 0;
+  let profileOnlyHits = 0;
+  let coverageReady = 0;
+  let coverageTotal = 0;
   const details = [];
 
   for (const testCase of cases) {
     const start = Date.now();
-    const result = await queryMemory({
-      userId: testCase.userId,
-      groupId: testCase.groupId,
-      query: testCase.query,
-      facet: testCase.facet,
-      topK: 8
-    });
+    const isWorldbookCase = normalizeText(testCase.evalSource || testCase.source) === 'worldbook' || normalizeText(testCase.facet) === 'worldbook';
+    let result = null;
+    if (isWorldbookCase) {
+      const catalog = loadPersonaModuleCatalog();
+      const worldbookResult = await searchPersonaWorldbook(catalog, {
+        query: testCase.query,
+        limit: 8
+      });
+      result = {
+        results: Array.isArray(worldbookResult.results) ? worldbookResult.results : [],
+        stats: {
+          worldbook: worldbookResult.diagnostics || null
+        },
+        diagnostics: {}
+      };
+    } else {
+      result = await queryMemory({
+        userId: testCase.userId,
+        groupId: testCase.groupId,
+        query: testCase.query,
+        facet: testCase.facet,
+        topK: 8,
+        ...buildCaseQueryOptions(testCase)
+      });
+      addStageStats(stageStats, result.stats?.timings || result.diagnostics?.timings || {});
+    }
     const latencyMs = Date.now() - start;
-    latencies.push(latencyMs);
+    mainLatencies.push(latencyMs);
+    let memoryCli = null;
+    if (options.memoryCli === true) {
+      const cliStart = Date.now();
+      const cliResult = await runMemoryCli(`mem search --query "${testCase.query.replace(/"/g, '\\"')}" --source all --limit 8`, {
+        userId: testCase.userId,
+        groupId: testCase.groupId
+      });
+      memoryCli = {
+        latencyMs: Date.now() - cliStart,
+        ok: cliResult?.ok !== false,
+        count: Number(cliResult?.count || cliResult?.results?.length || 0) || 0
+      };
+      memoryCliLatencies.push(memoryCli.latencyMs);
+    }
     const results = Array.isArray(result.results) ? result.results : [];
+    const embeddingCoverage = result.stats?.lancedb?.coverage || result.diagnostics?.coverageAtQuery?.embedding || null;
+    coverageReady += Number(embeddingCoverage?.ready || 0) || 0;
+    coverageTotal += Number(embeddingCoverage?.total || 0) || 0;
     for (const item of results) {
       sourceCoverage[item.source || 'unknown'] = (sourceCoverage[item.source || 'unknown'] || 0) + 1;
     }
-    leakage += countScopeLeaks(results, testCase);
+    if (!isWorldbookCase) leakage += countScopeLeaks(results, testCase);
+    lifecycleLeakage += countLifecycleLeaks(results);
+    categoryMismatches += countCategoryMismatches(results, testCase);
+    recentRecallMisses += countRecentRecallMisses(results, testCase);
     promptChars += normalizeText(result.digest).length;
-    const expectedIds = Array.isArray(testCase.expectedIds) ? testCase.expectedIds.map(normalizeText).filter(Boolean) : [];
+    const expectedIds = normalizeExpectedIds(testCase);
+    const sourceMetric = ensureSourceMetrics(bySourceRaw, testCase.targetSource || testCase.source || testCase.evalSource || 'unknown');
+    const facetMetric = ensureSourceMetrics(byFacetRaw, testCase.facet || 'default');
+    sourceMetric.cases += 1;
+    facetMetric.cases += 1;
+    if (results.length === 0) {
+      emptyResults += 1;
+      noRetrieval += 1;
+      sourceMetric.emptyResults += 1;
+      facetMetric.emptyResults += 1;
+    }
+    if (isWeakTopHit(results)) weakTopHits += 1;
+    if (isProfileOnlyHit(results)) profileOnlyHits += 1;
+    wrongHits += countWrongHits(results, testCase);
+    const relevance = estimateAnswerRelevance(results, testCase);
+    if (relevance !== null) {
+      answerRelevanceSum += relevance;
+      answerRelevanceCases += 1;
+    }
+    const faithfulness = estimateFaithfulness(results);
+    if (faithfulness !== null) {
+      faithfulnessSum += faithfulness;
+      faithfulnessCases += 1;
+    }
+    const fallbackReason = normalizeText(result.stats?.lancedb?.fallbackReason || result.stats?.worldbook?.embedding?.fallbackReason || '');
+    if (fallbackReason) incrementMetric(fallbackCounts, fallbackReason);
+    if (/no_visible_candidates/.test(fallbackReason)) {
+      noVisibleCandidates += 1;
+      sourceMetric.noVisibleCandidates += 1;
+      facetMetric.noVisibleCandidates += 1;
+    }
     if (expectedIds.length > 0) {
       judgedCases += 1;
-      const rank = results.findIndex((item) => expectedIds.includes(normalizeText(item.id || item.nodeId))) + 1;
+      sourceMetric.judgedCases += 1;
+      facetMetric.judgedCases += 1;
+      const rank = results.findIndex((item) => expectedIds.includes(normalizeText(item.id || item.nodeId || item.moduleId))) + 1;
+      promptInjectionHits += countPromptInjectionHits(result, expectedIds);
+      if (rank > 0 && rank <= 5) {
+        recallHitsAt5 += 1;
+        reciprocalSumAt5 += 1 / rank;
+        sourceMetric.recallHitsAt5 += 1;
+        sourceMetric.reciprocalSumAt5 += 1 / rank;
+        facetMetric.recallHitsAt5 += 1;
+        facetMetric.reciprocalSumAt5 += 1 / rank;
+      }
       if (rank > 0 && rank <= 8) {
         recallHits += 1;
         reciprocalSum += 1 / rank;
+        sourceMetric.recallHits += 1;
+        sourceMetric.reciprocalSum += 1 / rank;
+        facetMetric.recallHits += 1;
+        facetMetric.reciprocalSum += 1 / rank;
       }
     }
     details.push({
       id: testCase.id,
+      evalSource: testCase.evalSource || '',
+      userId: testCase.userId || '',
+      groupId: testCase.groupId || '',
       latencyMs,
-      resultIds: results.map((item) => item.id),
+      resultIds: results.map((item) => item.id || item.nodeId || item.moduleId),
+      query: testCase.query,
+      facet: testCase.facet || '',
+      source: testCase.source || '',
+      targetSource: testCase.targetSource || '',
+      expectedIds,
       sources: results.map((item) => item.source),
-      lancedb: result.stats?.lancedb || null
+      categories: results.map((item) => item.category || ''),
+      lifecycleStatuses: results.map((item) => item.lifecycleStatus || ''),
+      sourcePlan: result.stats?.sourcePlan || result.diagnostics?.sourcePlan || null,
+      recentRecallIntent: result.stats?.recentRecallIntent || result.diagnostics?.recentRecallIntent || null,
+      lancedb: result.stats?.lancedb || null,
+      worldbook: result.stats?.worldbook || null,
+      timings: result.stats?.timings || result.diagnostics?.timings || null,
+      memoryCli
     });
   }
 
@@ -199,13 +747,45 @@ async function runMode(mode = 'local_jsonl', cases = []) {
     cases: cases.length,
     judgedCases,
     recallAt8: judgedCases ? recallHits / judgedCases : null,
+    recallAt5: judgedCases ? recallHitsAt5 / judgedCases : null,
     mrrAt8: judgedCases ? reciprocalSum / judgedCases : null,
+    mrrAt5: judgedCases ? reciprocalSumAt5 / judgedCases : null,
+    promptInjectionRate: judgedCases ? promptInjectionHits / judgedCases : null,
+    wrongHitRate: cases.length ? wrongHits / cases.length : 0,
+    answerRelevance: answerRelevanceCases ? answerRelevanceSum / answerRelevanceCases : null,
+    faithfulness: faithfulnessCases ? faithfulnessSum / faithfulnessCases : null,
     sourceCoverage,
+    fallbackCounts,
     leakage,
+    lifecycleLeakage,
+    categoryMismatches,
+    recentRecallMisses,
+    weakTopHitRate: cases.length ? weakTopHits / cases.length : 0,
+    profileOnlyHitRate: cases.length ? profileOnlyHits / cases.length : 0,
+    noRetrievalRate: cases.length ? noRetrieval / cases.length : 0,
+    emptyResultRate: cases.length ? emptyResults / cases.length : 0,
+    noVisibleCandidateRate: cases.length ? noVisibleCandidates / cases.length : 0,
+    coverageReady,
+    coverageTotal,
+    coverageReadyRatio: coverageTotal > 0 ? coverageReady / coverageTotal : 1,
+    bySource: finalizeGroupedMetrics(bySourceRaw),
+    byFacet: finalizeGroupedMetrics(byFacetRaw),
     avgPromptChars: cases.length ? promptChars / cases.length : 0,
     avgPromptTokenEstimate: cases.length ? Math.ceil((promptChars / cases.length) / 2) : 0,
-    p50LatencyMs: percentile(latencies, 0.5),
-    p95LatencyMs: percentile(latencies, 0.95),
+    p50LatencyMs: percentile(mainLatencies, 0.5),
+    p95LatencyMs: percentile(mainLatencies, 0.95),
+    latency: {
+      main: {
+        p50Ms: percentile(mainLatencies, 0.5),
+        p95Ms: percentile(mainLatencies, 0.95)
+      },
+      memoryCli: {
+        enabled: options.memoryCli === true,
+        p50Ms: percentile(memoryCliLatencies, 0.5),
+        p95Ms: percentile(memoryCliLatencies, 0.95)
+      },
+      stages: summarizeStageStats(stageStats)
+    },
     details
   };
 }
@@ -219,15 +799,42 @@ async function main() {
     return;
   }
 
-  const mode = args.candidate || args.baseline || 'local_jsonl';
-  const cases = loadCases(args.limit);
-  const result = await runMode(mode, cases);
+  const mode = args.mode || args.candidate || args.baseline || 'local_jsonl';
+  const cases = loadCases(args.limit, {
+    autoGold: args.autoGold
+  });
+  const result = await runMode(mode, cases, {
+    memoryCli: args.memoryCli
+  });
   const outFile = path.join(OUT_DIR, `${mode}-${Date.now()}.json`);
   atomicWriteText(outFile, JSON.stringify(result, null, 2));
   console.log(JSON.stringify({ ok: true, file: outFile, ...result, details: undefined }, null, 2));
 }
 
-main().catch((error) => {
-  console.error('[eval-memory-recall] failed:', error && error.stack ? error.stack : String(error));
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('[eval-memory-recall] failed:', error && error.stack ? error.stack : String(error));
+    process.exit(1);
+  }).then(() => {
+    process.exit(0);
+  });
+}
+
+module.exports = {
+  buildCases,
+  buildAutoGoldCases,
+  buildCaseQueryOptions,
+  buildMemoryGoldCases,
+  buildWorldbookGoldCases,
+  countCategoryMismatches,
+  countLifecycleLeaks,
+  countRecentRecallMisses,
+  countScopeLeaks,
+  isStableMemoryGoldCase,
+  loadCases,
+  normalizeExpectedIds,
+  parseArgs,
+  percentile,
+  runMode,
+  supplementCasesWithAutoGold
+};

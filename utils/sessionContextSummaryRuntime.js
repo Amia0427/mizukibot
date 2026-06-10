@@ -58,18 +58,22 @@ function serializeRecentHistory(history = [], limit = 12, itemMaxChars = 160) {
     .join('\n');
 }
 
+function getSessionSummaryRecentTurnsLimit() {
+  return Math.max(2, Math.min(80, Math.floor(Number(config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS || config.SHORT_TERM_MEMORY_RECENT_TURNS || config.MEMORY_V3_SESSION_RECENT_MESSAGES || 32) || 32)));
+}
+
 function buildFallbackSummary(state = {}, history = []) {
   const normalized = normalizeShortTermState(state);
   const segments = [];
 
   if (normalized.activeTopic) segments.push(`主线:${normalized.activeTopic}`);
-  if (normalized.openLoops.length > 0) segments.push(`待办:${normalized.openLoops.join('；')}`);
-  if (normalized.assistantCommitments.length > 0) segments.push(`承诺:${normalized.assistantCommitments.join('；')}`);
-  if (normalized.userConstraints.length > 0) segments.push(`约束:${normalized.userConstraints.join('；')}`);
+  if (normalized.openLoops.length > 0) segments.push(`待办:${normalized.openLoops.slice(0, Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_OPEN_LOOPS_MAX_ITEMS || 4) || 4)).join('；')}`);
+  if (normalized.assistantCommitments.length > 0) segments.push(`承诺:${normalized.assistantCommitments.slice(0, Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_ASSISTANT_COMMITMENTS_MAX_ITEMS || 4) || 4)).join('；')}`);
+  if (normalized.userConstraints.length > 0) segments.push(`约束:${normalized.userConstraints.slice(0, Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_USER_CONSTRAINTS_MAX_ITEMS || 4) || 4)).join('；')}`);
   if (normalized.recentToolResults.length > 0) segments.push(`结果:${normalized.recentToolResults.join('；')}`);
   if (normalized.summary) segments.push(`摘要:${normalized.summary}`);
 
-  const latestHistory = serializeRecentHistory(history, 4, 90);
+  const latestHistory = serializeRecentHistory(history, getSessionSummaryRecentTurnsLimit(), 90);
   if (latestHistory) segments.push(`近况:${latestHistory.replace(/\n/g, ' | ')}`);
 
   return clampText(segments.join('；'));
@@ -84,10 +88,10 @@ function buildStructuredSummaryPayload(state = {}, history = []) {
     assistantCommitments: normalized.interaction.assistantCommitments.length > 0 ? normalized.interaction.assistantCommitments : normalized.assistantCommitments,
     userConstraints: normalized.interaction.userConstraints.length > 0 ? normalized.interaction.userConstraints : normalized.userConstraints,
     recentTurns: (Array.isArray(history) ? history : [])
-      .slice(-4)
+      .slice(-getSessionSummaryRecentTurnsLimit())
       .map((item) => ({
         role: String(item?.role || '').trim().toLowerCase(),
-        content: clampText(item?.content, 140)
+        content: clampText(item?.content, config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_CHARS || 140)
       }))
       .filter((item) => (item.role === 'user' || item.role === 'assistant') && item.content),
     interaction: normalized.interaction,

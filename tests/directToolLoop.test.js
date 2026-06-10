@@ -47,6 +47,53 @@ module.exports = (async () => {
   assert.strictEqual(withBlockedTool.noToolCalls, false);
   assert.ok(Array.isArray(withBlockedTool.events));
 
+  const fallbackMessagesSeen = [];
+  const blockedNoToolHintsHelpers = createDirectToolLoopHelpers({
+    createEvent: (type, payload = {}) => ({ type, ...payload }),
+    normalizeMessageForToolLoop: (message) => message,
+    requestAssistantMessageImpl: async () => {
+      throw new Error('blocked path should not ask the model for another no-tool assistant message');
+    },
+    buildDirectChatToolStep: (toolCall, index) => ({
+      parsedArgs: {},
+      toolName: String(toolCall?.function?.name || '').trim(),
+      step: { id: `blocked_${index}`, tool: String(toolCall?.function?.name || '').trim(), inputs: {} }
+    }),
+    buildDirectChatExecutionBatches: (items) => [{ items, mode: 'serial', batchId: 'blocked', batchIndex: 0 }],
+    parseToolCallArgs: () => ({}),
+    isExcludedDirectChatToolName: () => false,
+    computeEffectiveAllowedTools: () => [],
+    createMemoryCliTurnState: (value) => value || { allowedTools: [] },
+    updateMemoryCliTurnStateAfterError: (state) => state,
+    runToolStep: async () => {
+      throw new Error('blocked tool should not execute');
+    },
+    computeToolEnvelope: (step, result) => ({ tool_call_id: step.id, tool_name: step.tool, result }),
+    getPolicy: () => ({}),
+    logToolExecution: () => {},
+    resolveToolLoopReply: async (_message, fallbackMessages) => {
+      fallbackMessagesSeen.push(fallbackMessages);
+      return { text: 'normal main reply', source: 'non_stream_fallback' };
+    }
+  });
+  const blockedNoToolHints = await blockedNoToolHintsHelpers.runDirectChatToolLoop([
+    { role: 'system', content: 'persona' },
+    { role: 'user', content: '正常回答就行' }
+  ], {
+    request: {},
+    execution: { memoryCliTurn: { allowedTools: [] } }
+  }, { question: '正常回答就行' }, {
+    firstAssistantMessage: {
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 'tc_blocked_search', function: { name: 'web_search', arguments: '{}' } }]
+    }
+  });
+  assert.strictEqual(blockedNoToolHints.reply, 'normal main reply');
+  assert.strictEqual(fallbackMessagesSeen.length, 1);
+  assert.ok(!JSON.stringify(fallbackMessagesSeen[0]).includes('Tool not allowed'));
+  assert.ok(!JSON.stringify(fallbackMessagesSeen[0]).includes('No tool is available'));
+
   const followupMessages = [
     {
       role: 'assistant',
@@ -205,6 +252,51 @@ module.exports = (async () => {
   });
   assert.strictEqual(limitRunCount, 1);
   assert.ok(limitResult.executedToolEnvelopes.some((item) => item.blockedReason === 'tool_call_limit_reached'));
+
+  let activeParallelCalls = 0;
+  let maxParallelCalls = 0;
+  const parallelHelpers = createDirectToolLoopHelpers({
+    createEvent: (type, payload = {}) => ({ type, ...payload }),
+    normalizeMessageForToolLoop: (message) => message,
+    requestAssistantMessageImpl: async () => ({ role: 'assistant', content: 'parallel final', tool_calls: [] }),
+    buildDirectChatToolStep: (toolCall, index) => ({
+      parsedArgs: { query: String(index) },
+      toolName: String(toolCall?.function?.name || '').trim(),
+      step: { id: `parallel_${index}`, tool: String(toolCall?.function?.name || '').trim(), inputs: { query: String(index) } }
+    }),
+    buildDirectChatExecutionBatches: (items) => [{ items, mode: 'parallel', batchId: 'parallel', batchIndex: 0 }],
+    parseToolCallArgs: () => ({}),
+    isExcludedDirectChatToolName: () => false,
+    computeEffectiveAllowedTools: () => ['search_tool'],
+    createMemoryCliTurnState: (value) => value || { allowedTools: ['search_tool'] },
+    updateMemoryCliTurnStateAfterError: (state) => state,
+    runToolStep: async (step) => {
+      activeParallelCalls += 1;
+      maxParallelCalls = Math.max(maxParallelCalls, activeParallelCalls);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      activeParallelCalls -= 1;
+      return { status: 'completed', result: step.id, tool_name: step.tool, tool_call_id: step.id };
+    },
+    computeToolEnvelope: (step, result) => ({ tool_call_id: step.id, tool_name: step.tool, result }),
+    getPolicy: () => ({}),
+    logToolExecution: () => {},
+    resolveToolLoopReply: async (message) => ({ text: message.content || 'resolved reply', source: 'assistant' }),
+    config: { DIRECT_TOOL_MAX_CALLS_PER_TURN: 4 }
+  });
+  await parallelHelpers.runDirectChatToolLoop([], {
+    request: {},
+    execution: { memoryCliTurn: { allowedTools: ['search_tool'] } }
+  }, { question: 'parallel' }, {
+    firstAssistantMessage: {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        { id: 'parallel1', function: { name: 'search_tool', arguments: '{"query":"1"}' } },
+        { id: 'parallel2', function: { name: 'search_tool', arguments: '{"query":"2"}' } }
+      ]
+    }
+  });
+  assert.ok(maxParallelCalls >= 2, 'safe parallel direct tool batch should overlap executions');
 
   console.log('directToolLoop.test.js passed');
 })().catch((error) => {

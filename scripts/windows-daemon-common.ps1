@@ -4,11 +4,19 @@ function Get-DaemonPaths {
   param(
     [Parameter(Mandatory = $true)]
     [string]$ScriptRoot,
+    [AllowEmptyString()]
     [string]$TaskName = 'MizukiBotDaemon'
   )
 
+  if ([string]::IsNullOrWhiteSpace($TaskName)) {
+    $TaskName = 'MizukiBotDaemon'
+  }
+
   $runner = Resolve-Path (Join-Path $ScriptRoot 'run-bot-daemon.ps1')
   $startupDir = [Environment]::GetFolderPath('Startup')
+  if ([string]::IsNullOrWhiteSpace($startupDir)) {
+    $startupDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup'
+  }
   $powerShellExe = (Get-Command powershell.exe -ErrorAction SilentlyContinue).Source
   if (-not $powerShellExe) {
     $powerShellExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -75,7 +83,7 @@ function Register-DaemonScheduledTask {
   $daily.StartBoundary = (Get-Date).ToString("yyyy-MM-dd'T'HH:mm:ss")
   $daily.DaysInterval = 1
   $daily.Enabled = $true
-  $daily.Repetition.Interval = 'PT5M'
+  $daily.Repetition.Interval = 'PT2H'
   $daily.Repetition.Duration = 'P1D'
   $daily.Repetition.StopAtDurationEnd = $false
 
@@ -164,11 +172,15 @@ function Remove-DaemonStartupLauncher {
 
 function Get-DaemonStartupLauncherPath {
   param(
-    [Parameter(Mandatory = $true)]
-    [string]$TaskName,
+    [AllowEmptyString()]
+    [string]$TaskName = 'MizukiBotDaemon',
     [Parameter(Mandatory = $true)]
     [string]$ScriptRoot
   )
+
+  if ([string]::IsNullOrWhiteSpace($TaskName)) {
+    $TaskName = 'MizukiBotDaemon'
+  }
 
   $paths = Get-DaemonPaths -ScriptRoot $ScriptRoot -TaskName $TaskName
   return $paths.StartupLauncher

@@ -1,11 +1,38 @@
 const { callMcpTool } = require('../../mcpRuntime');
-const { askSubagentByBridge } = require('../../subagentExecutor');
-const { getStaticToolExecutors, getStaticToolSchemas, getDynamicToolDescriptors } = require('../toolRegistryFacade');
+const {
+  getStaticToolSchemas,
+  getDynamicToolDescriptors,
+  getRawToolExecutor,
+  getToolExecutor,
+  getToolSchemaNames
+} = require('../toolRegistryFacade');
 const { GLOBAL_TOOL_REGISTRY } = require('../globalToolRuntimeFacade');
 const { createCapabilityDescriptor, normalizeArray, normalizeObject, normalizeText } = require('../contracts');
+const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
+const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  routeHasExplicitWebSearchRequirement
+} = require('../../../utils/webSearchRequirement');
+
+function resolveStaticToolExecutor(toolName = '', args = {}) {
+  const context = normalizeObject(args?.__context, {});
+  if (
+    WEB_LOOKUP_ALLOWED_TOOLS.includes(normalizeText(toolName))
+    && routeHasExplicitWebSearchRequirement({
+      question: context.question || context.routeMeta?.effectiveIntentText || context.routeMeta?.cleanText,
+      cleanText: context.cleanText || context.routeMeta?.cleanText || context.routeMeta?.effectiveIntentText,
+      rawText: context.rawText || context.routeMeta?.rawText,
+      meta: normalizeObject(context.routeMeta, {})
+    })
+  ) {
+    return getRawToolExecutor(toolName);
+  }
+  return isAdminPrivateChatContext(context)
+    ? getRawToolExecutor(toolName)
+    : getToolExecutor(toolName);
+}
 
 function buildStaticToolDescriptors() {
-  const executors = normalizeObject(getStaticToolExecutors(), {});
   const schemas = normalizeArray(getStaticToolSchemas());
   const schemaByName = new Map(
     schemas
@@ -15,12 +42,17 @@ function buildStaticToolDescriptors() {
       })
       .filter(Boolean)
   );
+  const names = getToolSchemaNames().filter((name) => schemaByName.has(name));
 
-  return Object.entries(executors).map(([toolName, executor]) => createCapabilityDescriptor({
+  return names.map((toolName) => createCapabilityDescriptor({
     name: toolName,
     kind: 'tool',
     schema: schemaByName.get(toolName) || null,
-    executor,
+    executor: async (args = {}) => {
+      const executor = resolveStaticToolExecutor(toolName, args);
+      if (typeof executor !== 'function') return `Unknown tool: ${toolName}`;
+      return executor(args);
+    },
     metadata: {
       source: 'static'
     }
@@ -73,34 +105,14 @@ function buildDynamicMcpDescriptors() {
 }
 
 function buildSubagentDescriptors() {
-  return [
-    createCapabilityDescriptor({
-      name: 'subagent_bridge',
-      kind: 'subagent',
-      executor: async (args = {}) => askSubagentByBridge(
-        String(args.question || args.prompt || args.input || '').trim(),
-        args.userInfo || null,
-        String(args.userId || args.user_id || '').trim() || 'subagent',
-        args.customPrompt || null,
-        args.imageUrl || null,
-        normalizeObject(args.options, {})
-      ),
-      readOnly: false,
-      parallelSafe: false,
-      resumable: false,
-      metadata: {
-        source: 'subagent'
-      }
-    })
-  ];
+  return [];
 }
 
 function buildCapabilityRegistry() {
   const descriptors = [
     ...buildStaticToolDescriptors(),
     ...buildGlobalToolDescriptors(),
-    ...buildDynamicMcpDescriptors(),
-    ...buildSubagentDescriptors()
+    ...buildDynamicMcpDescriptors()
   ];
   const byName = new Map();
   for (const descriptor of descriptors) {

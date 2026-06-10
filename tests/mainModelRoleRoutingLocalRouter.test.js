@@ -101,6 +101,19 @@ try {
   assert.strictEqual(adminHybridRoute.topRouteType, 'admin');
   assert.strictEqual(adminHybridRoute.meta.admin, true);
 
+  const adminPrivateChatConfig = modelResolver.resolveUserScopedMainModelConfig('admin-1', null, {
+    routeMeta: {
+      chatType: 'private',
+      topRouteType: 'direct_chat',
+      routePolicyKey: 'chat/default'
+    },
+    topRouteType: 'direct_chat',
+    routePolicyKey: 'chat/default'
+  });
+  assert.strictEqual(adminPrivateChatConfig.model, 'admin-model');
+  assert.strictEqual(adminPrivateChatConfig.__mainModelUserRole, 'admin');
+  assert.strictEqual(adminPrivateChatConfig.__mainFallbackScope, 'admin_shared');
+
   console.log('mainModelRoleRoutingLocalRouter.test.js passed');
   restoreEnv(snapshot);
   clearProjectCache();

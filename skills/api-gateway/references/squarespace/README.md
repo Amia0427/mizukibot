@@ -219,7 +219,7 @@ Content-Type: multipart/form-data
 
 curl "https://gateway.maton.ai/squarespace/v2/commerce/products/{productId}/images" \
   -H "Authorization: Bearer $MATON_API_KEY" \
-  -H "User-Agent: MyClaude/1.0" \
+  -H "User-Agent: codex-cli/0.121.0 (external, cli)" \
   -X POST \
   -F file=@image.png
 ```

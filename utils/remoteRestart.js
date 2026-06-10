@@ -10,10 +10,13 @@ function getRepoRoot() {
 function resolveRestartCommand(platform = process.platform) {
   const repoRoot = getRepoRoot();
   if (platform === 'win32') {
+    const restartScript = path.join(repoRoot, 'restart-bot.cmd');
     return {
-      command: path.join(repoRoot, 'restart-bot.cmd'),
-      args: [],
-      cwd: repoRoot
+      command: process.env.ComSpec || 'cmd.exe',
+      args: ['/d', '/c', `call "${restartScript}"`],
+      cwd: repoRoot,
+      script: restartScript,
+      windowsVerbatimArguments: true
     };
   }
   return {
@@ -38,17 +41,29 @@ function triggerRemoteRestart(options = {}) {
   const commandSpec = resolveRestartCommand(platform);
 
   const timer = setTimeout(() => {
-    try {
-      const child = spawn(commandSpec.command, commandSpec.args, {
-        cwd: commandSpec.cwd,
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true
-      });
-      if (child && typeof child.unref === 'function') child.unref();
-    } catch (error) {
+    const spawnOptions = {
+      cwd: commandSpec.cwd,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true
+    };
+    if (commandSpec.windowsVerbatimArguments) {
+      spawnOptions.windowsVerbatimArguments = true;
+    }
+
+    const onSpawnError = (error) => {
       restartScheduled = false;
       console.error('[remote-restart] failed to spawn restart command:', error?.message || error);
+    };
+
+    try {
+      const child = spawn(commandSpec.command, commandSpec.args, spawnOptions);
+      if (child && typeof child.once === 'function') {
+        child.once('error', onSpawnError);
+      }
+      if (child && typeof child.unref === 'function') child.unref();
+    } catch (error) {
+      onSpawnError(error);
     }
   }, delayMs);
 

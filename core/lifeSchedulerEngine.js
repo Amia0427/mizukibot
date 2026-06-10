@@ -560,7 +560,7 @@ async function generateDay(askAIByGraph, date = new Date(), options = {}) {
       return { handled: true, replyText: formatLifeShowReply(entry, date) };
     }
 
-    if (!isAdmin(userId)) return { handled: true, replyText: '仅管理员可用。' };
+    if (!isAdmin(userId)) return { handled: true, replyText: '这个按钮现在只给管理员按哦。' };
 
     if (sub === 'status') {
       return {
@@ -577,14 +577,14 @@ async function generateDay(askAIByGraph, date = new Date(), options = {}) {
     }
 
     if (sub === 'enable') {
-      if (!String(groupId || '').trim()) return { handled: true, replyText: '仅群聊可用。' };
+      if (!String(groupId || '').trim()) return { handled: true, replyText: '这个要在群里才接得住啦。' };
       setLifeTargetEnabled(targets, groupId, true);
       persist();
       return { handled: true, replyText: '当前群已启用 life 主动发送。' };
     }
 
     if (sub === 'disable') {
-      if (!String(groupId || '').trim()) return { handled: true, replyText: '仅群聊可用。' };
+      if (!String(groupId || '').trim()) return { handled: true, replyText: '这个要在群里才接得住啦。' };
       setLifeTargetEnabled(targets, groupId, false);
       persist();
       return { handled: true, replyText: '当前群已禁用 life 主动发送。' };
@@ -619,7 +619,7 @@ async function generateDay(askAIByGraph, date = new Date(), options = {}) {
     if (sub === 'broadcast') {
       const mode = String(parts[1] || 'current').trim().toLowerCase();
       if (mode === 'current') {
-        if (!String(groupId || '').trim()) return { handled: true, replyText: '仅群聊可用。' };
+        if (!String(groupId || '').trim()) return { handled: true, replyText: '这个要在群里才接得住啦。' };
         const currentEntry = getLifeDay(state, dayKey);
         if (!currentEntry || String(currentEntry.status || '').trim() !== 'ok') {
           return { handled: true, replyText: '今天还没有可补发的 life 状态。' };

@@ -68,6 +68,17 @@ function writeJsonFile(filePath = '', value = {}) {
   }).replace(value, { flushNow: true });
 }
 
+function tryUpsertImageMemory(payload = {}) {
+  try {
+    const { upsertImageMemory } = require('./imageMemoryIndex');
+    upsertImageMemory(payload);
+  } catch (error) {
+    if (config.ENABLE_DEBUG_LOG) {
+      console.warn('[image-cache] image memory index upsert failed:', error?.message || error);
+    }
+  }
+}
+
 async function ensureCachedImageRef(url = '', options = {}) {
   const sourceUrl = normalizeText(url);
   if (!/^https?:\/\//i.test(sourceUrl)) {
@@ -87,6 +98,13 @@ async function ensureCachedImageRef(url = '', options = {}) {
   const binPath = getBinPath(cacheKey);
   const existingMeta = readJsonFile(metaPath);
   if (existingMeta && fs.existsSync(binPath)) {
+    tryUpsertImageMemory({
+      cacheKey,
+      imageRef: buildCacheRef(cacheKey),
+      sourceUrl,
+      mediaType: normalizeText(existingMeta.mediaType || 'image/jpeg') || 'image/jpeg',
+      source: 'cache_hit'
+    });
     return {
       ok: true,
       ref: buildCacheRef(cacheKey),
@@ -108,7 +126,7 @@ async function ensureCachedImageRef(url = '', options = {}) {
       maxBodyLength: maxBytes,
       proxy: false,
       headers: {
-        'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
+        'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT || '').trim() || config.CODEX_USER_AGENT
       }
     });
     const buffer = Buffer.from(response?.data || []);
@@ -131,6 +149,13 @@ async function ensureCachedImageRef(url = '', options = {}) {
       mediaType,
       byteLength: buffer.length,
       createdAt: new Date().toISOString()
+    });
+    tryUpsertImageMemory({
+      cacheKey,
+      imageRef: buildCacheRef(cacheKey),
+      sourceUrl,
+      mediaType,
+      source: 'cache_write'
     });
     return {
       ok: true,

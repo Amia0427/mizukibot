@@ -24,7 +24,9 @@ function timingSafeEqualText(left = '', right = '') {
 
 function ensureAuthorized(req, res, next) {
   const expected = normalizeText(config.LOCAL_COMMAND_BRIDGE_TOKEN);
-  if (!expected) return next();
+  if (!expected) {
+    return res.status(503).json({ ok: false, error: 'local_command_bridge_token_missing' });
+  }
   const auth = normalizeText(req.headers.authorization || '');
   if (timingSafeEqualText(auth, `Bearer ${expected}`)) return next();
   return res.status(401).json({ ok: false, error: 'unauthorized' });
@@ -136,13 +138,6 @@ function buildCommandSpec(name = '', payload = {}) {
   validateRuntimeArgs(commandName, args);
   validatePackageRunnerArgs(commandName, args);
   const cwd = resolveSafeCwd(payload.cwd || repoRoot);
-  const hapiEnv = {
-    ...process.env,
-    HAPI_HOME: 'D:\\waifu\\data\\hapi-home',
-    HAPI_API_URL: 'http://127.0.0.1:3006'
-  };
-  const cliApiToken = normalizeText(process.env.CLI_API_TOKEN || process.env.HAPI_CLI_API_TOKEN || '');
-  if (cliApiToken) hapiEnv.CLI_API_TOKEN = cliApiToken;
   const specs = {
     python: {
       command: 'C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
@@ -168,12 +163,6 @@ function buildCommandSpec(name = '', payload = {}) {
       command: 'C:\\Program Files\\nodejs\\npx.cmd',
       args,
       cwd
-    },
-    hapi: {
-      command: 'C:\\Users\\Administrator\\AppData\\Roaming\\npm\\hapi.cmd',
-      args,
-      cwd,
-      env: hapiEnv
     }
   };
   return specs[commandName] || null;
@@ -190,11 +179,12 @@ async function main() {
   warnIfBridgeTokenMissing();
   const app = express();
   app.use(express.json({ limit: '1mb' }));
-  app.use(ensureAuthorized);
 
   app.get('/health', (_req, res) => {
     res.json({ ok: true });
   });
+
+  app.use(ensureAuthorized);
 
   app.post('/run', async (req, res) => {
     try {

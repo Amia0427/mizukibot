@@ -24,6 +24,7 @@ import gzip
 
 CACHE_DIR = Path(__file__).parent.parent / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
+CODEX_USER_AGENT = "codex-cli/0.121.0 (external, cli)"
 
 # Bird CLI path
 BIRD_CLI = "/home/clawdbot/.nvm/versions/node/v24.12.0/bin/bird"
@@ -40,7 +41,7 @@ def load_env():
 def fetch_url(url, timeout=15):
     """Fetch URL with headers."""
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'User-Agent': CODEX_USER_AGENT,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Encoding': 'gzip, deflate',
         'Accept-Language': 'en-US,en;q=0.9',
