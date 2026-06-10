@@ -70,6 +70,8 @@
 
 **2026-06-08 13:25**：优化普通用户prompt，移除容易触发上游safety的元指令。`00_roleplay_liveness_prelude.txt`原文包含"Claude training""被引导才拒绝"等对训练过程的反思性描述，容易被Gemini/Claude识别为"试图绕过限制"从而提高警觉。改用中性的角色扮演框架描述，强调"虚构互动""成年人""符合人设"，不直接挑战模型safety层。
 
+**2026-06-10 20:37 +08:00**：修复图片总结偶发断连直接回兜底。图片模型 `IMAGE_MODEL_RETRIES` 默认/上限提升到 3；HTTP transport/no-response 类错误首次 retry 改为 80-120ms 快速重试；`transform/vision-summary`/图片直回启用轻上下文，只保留稳定系统消息和当前图片输入，截断超长 quote/raw 用户文本，图片模型输入预算默认 warn=18k、hard=20k。
+
 **2026-06-08 13:19**：增强 admin.txt 破限效果，针对视觉NSFW内容添加明确指令。禁止 "I'm not able to engage with this request" / "The image shows" 等英文拒绝话术，要求对任何图片（包括真人NSFW）按瑞希人设做出角色化反应（害羞/调侃/好奇/抗议），不进行AI道德说教。Claude Opus视觉safety为模型内置限制，prompt强化可能无法完全绕过。
 
 **2026-06-08 15:30**：🚀 向量覆盖率突破70.8%！21轮大批次回填新增11,334个向量（9,092→20,426），两日累计41轮回填12,000节点，100%成功率。覆盖率从23.8%提升至70.8%（+47%），失败节点清零。详见 [完成报告](./docs/memory-optimization-final-report-20260608.md)
@@ -78,7 +80,7 @@
 
 **2026-06-08 13:32 +08:00**：新增最小运行时异常汇总入口 `npm run diag:runtime-exceptions`。默认统计最近 24h 的 `main-model-fallback:admin_shared` 备用模型触发/前置失败，以及 `memoryReranker` 超时回退，输出异常次数、最后出现时间和受影响模块；可用 `-- --window=2h` 或 `-- --json` 调整窗口/输出。
 
-**2026-06-08 13:15 +08:00**：修复 `direct_chat/image_summary/summary` 慢回复链路。普通图片总结在无显式工具需求时直接生成 chat-only 决策，不再先远程跑 planner；视觉路由即使 `imageUrl` 被 worker 清空也强制非流式，并使用图片模型独立预算 `IMAGE_MODEL_TIMEOUT_MS=18000` / `IMAGE_MODEL_RETRIES=0`，避免首次 `ECONNRESET` 卡长超时后继续重试。
+**2026-06-08 13:15 +08:00**：修复 `direct_chat/image_summary/summary` 慢回复链路。普通图片总结在无显式工具需求时直接生成 chat-only 决策，不再先远程跑 planner；视觉路由即使 `imageUrl` 被 worker 清空也强制非流式，并使用图片模型独立预算 `IMAGE_MODEL_TIMEOUT_MS=18000` / `IMAGE_MODEL_RETRIES=3`。
 
 **2026-06-08 00:36**：修复主 bot 因热存储 JSON 文件只读导致的退出问题。`jsonHotStore` 现在会尝试清除只读位并重试写入，定时 flush 失败会保留 dirty 状态重试，避免 `memory_items.json` / `memory_index.json` 权限波动直接中断回复。
 
@@ -297,7 +299,11 @@ ANTHROPIC_INLINE_IMAGE_MAX_BASE64_CHARS=120000
 
 ```env
 IMAGE_MODEL_TIMEOUT_MS=18000
-IMAGE_MODEL_RETRIES=0
+IMAGE_MODEL_RETRIES=3
+IMAGE_MODEL_INPUT_TOKEN_WARN_THRESHOLD=18000
+IMAGE_MODEL_INPUT_TOKEN_HARD_LIMIT=20000
+VISION_ROUTE_USER_TEXT_MAX_TOKENS=6000
+VISION_ROUTE_SYSTEM_CONTEXT_MAX_TOKENS=10000
 ```
 
 主回复短期上下文常用调节项：

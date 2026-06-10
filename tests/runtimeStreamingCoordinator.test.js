@@ -227,6 +227,88 @@ module.exports = (async () => {
   assert.ok(assistantOnlyIndex < lastUserIndex);
   assert.ok(String(replyMessages.messages[assistantOnlyIndex].content || '').startsWith('[Context for assistant only]'));
 
+  let visionCanonicalInput = null;
+  const visionLiteHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => {
+      visionCanonicalInput = input;
+      return {
+        segments: {
+          system_prompt: input.systemPromptMessages || [],
+          short_term_summary: input.shortTermSummaryMessages || [],
+          recent_history: input.recentHistoryMessages || [],
+          retrieved_memory: input.disableMemoryContextSegments ? [] : [{ role: 'system', content: '[RetrievedMemory] should not appear' }],
+          current_user_turn: input.userTurnMessages || []
+        },
+        compactionPlan: {
+          compactedSegments: [
+            { name: 'system_prompt', messages: input.systemPromptMessages || [] },
+            { name: 'current_user_turn', messages: input.userTurnMessages || [] }
+          ]
+        }
+      };
+    },
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [{ role: 'system', content: '[Summary] should drop' }],
+      summaryMessage: { role: 'system', content: '[Summary] should also drop' },
+      recentHistory: [{ role: 'user', content: 'recent raw should drop' }]
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async () => 'streamed answer',
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
+    isHumanizerEnabledImpl: () => false,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    config: {
+      AI_MAX_TOKENS: 3500,
+      IMAGE_MODEL_INPUT_TOKEN_HARD_LIMIT: 20000,
+      VISION_ROUTE_SYSTEM_CONTEXT_MAX_TOKENS: 10000
+    },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const visionReplyMessages = visionLiteHelpers.buildDirectReplyMessages({
+    request: {
+      routePolicyKey: 'transform/vision-summary',
+      routeMeta: { chatMode: 'image_summary' },
+      userId: 'u1',
+      imageUrl: 'https://example.com/a.png',
+      modelConfig: { maxTokens: 512 }
+    },
+    thread: {},
+    memory: {
+      assistantOnlyContextBlocks: [{ id: 'dynamic_few_shot', content: 'assistant-only should drop' }],
+      context: {
+        segments: {
+          retrievedMemory: [{ role: 'system', content: '[RetrievedMemory] should drop' }]
+        }
+      }
+    }
+  }, [{ type: 'text', text: '用户原文：总结图片' }], [
+    { role: 'system', content: 'stable system prompt' },
+    { role: 'system', content: '[Summary]\nraw quote should drop' },
+    { role: 'system', content: '[GlobalToolEvidence]\nshould drop' }
+  ]);
+  const visionText = JSON.stringify(visionReplyMessages.messages);
+  assert.strictEqual(visionReplyMessages.contextBudgetMode, 'vision_lite');
+  assert.strictEqual(visionReplyMessages.disableMemoryContextSegments, true);
+  assert.strictEqual(visionCanonicalInput.disableMemoryContextSegments, true);
+  assert.deepStrictEqual(visionCanonicalInput.shortTermSummaryMessages, []);
+  assert.deepStrictEqual(visionCanonicalInput.recentHistoryMessages, []);
+  assert.deepStrictEqual(visionCanonicalInput.assistantOnlyContextMessages, []);
+  assert.ok(visionText.includes('stable system prompt'));
+  assert.ok(visionText.includes('总结图片'));
+  assert.ok(!visionText.includes('raw quote should drop'));
+  assert.ok(!visionText.includes('RetrievedMemory'));
+  assert.ok(!visionText.includes('assistant-only should drop'));
+
   const humanizerDeltas = [];
   const humanizerHelpers = createStreamingCoordinatorHelpers({
     sanitizeUserFacingText: (text) => String(text || ''),

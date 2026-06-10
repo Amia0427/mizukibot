@@ -294,6 +294,7 @@ function createRuntime(options = {}) {
       userTurnMessages: normalizeArray(segmentedMessages.userTurnMessages),
       toolEvidenceMessages: normalizeArray(segmentedMessages.globalToolEvidenceMessages),
       plannerArtifactMessages: normalizeArray(options.plannerArtifactMessages),
+      disableMemoryContextSegments: segmentedMessages.disableMemoryContextSegments === true || options.disableMemoryContextSegments === true,
       modelName: resolveMainConversationModelName(request),
       modelWindowTokens: resolveMainConversationTokenLimit(request, affinity),
       maxOutputTokens: Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192),
@@ -367,6 +368,8 @@ function createRuntime(options = {}) {
       assistantOnlyContextMessages: normalizeArray(directReplyPayload.assistantOnlyContextMessages),
       canonicalSegments: directReplyPayload.canonicalSegments || null,
       compactionPlan: directReplyPayload.compactionPlan || null,
+      disableMemoryContextSegments: directReplyPayload.disableMemoryContextSegments === true,
+      contextBudgetMode: String(directReplyPayload.contextBudgetMode || '').trim(),
       mainConversationSnapshot,
       contextStats: {
         usageRatio: Number(mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.usageRatio || 0) || 0,

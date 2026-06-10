@@ -8,7 +8,7 @@ process.env.PLANNER_SUBAGENT_ENABLED = 'false';
 process.env.MEMOS_MCP_ENABLED = 'false';
 process.env.OPENVIKING_RECALL_ENABLED = 'false';
 process.env.IMAGE_MODEL_TIMEOUT_MS = '18000';
-process.env.IMAGE_MODEL_RETRIES = '0';
+process.env.IMAGE_MODEL_RETRIES = '3';
 
 const config = require('../config');
 config.BOT_TOOL_MODE = 'companion';
@@ -18,7 +18,7 @@ config.PLANNER_SUBAGENT_ENABLED = false;
 config.MEMOS_MCP_ENABLED = false;
 config.OPENVIKING_RECALL_ENABLED = false;
 config.IMAGE_MODEL_TIMEOUT_MS = 18000;
-config.IMAGE_MODEL_RETRIES = 0;
+config.IMAGE_MODEL_RETRIES = 3;
 
 const { planDirectChat } = require('../core/directChatPlanner');
 const { resolveRouteExecution } = require('../core/routeExecution');
@@ -146,11 +146,12 @@ module.exports = (async () => {
   }, null, 'u_image_summary', buildImageModelConfig);
   assert.ok(fallbackModelConfig, 'image_summary should keep image model config when imageUrl was cleared but worker did not succeed');
   assert.strictEqual(fallbackModelConfig.timeoutMs, 18000);
-  assert.strictEqual(fallbackModelConfig.retries, 0);
+  assert.strictEqual(fallbackModelConfig.retries, 3);
 
   const imageModelConfig = buildImageModelConfig(null, 'u_image_summary', { routeMeta: imageSummaryRoute.meta });
   assert.strictEqual(imageModelConfig.timeoutMs, 18000);
-  assert.strictEqual(imageModelConfig.retries, 0);
+  assert.strictEqual(imageModelConfig.retries, 3);
+  assert.strictEqual(imageModelConfig.promptTokenHardLimit, 20000);
 
   const request = buildMainModelRequest(imageModelConfig, {
     messages: [{ role: 'user', content: '总结图片' }],
@@ -169,6 +170,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(request.body.stream, false);
   assert.strictEqual(request.body.__timeoutMs, 18000);
+  assert.strictEqual(request.body.__promptTokenHardLimit, 20000);
 
   console.log('imageSummaryLatencyPath.test.js passed');
 })().catch((error) => {
