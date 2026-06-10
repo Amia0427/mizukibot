@@ -11,7 +11,8 @@ function formatModelSelfCheckReport(results = []) {
     const duration = Number.isFinite(Number(row?.durationMs))
       ? `${Math.max(0, Math.floor(Number(row.durationMs)))}ms`
       : 'skipped';
-    lines.push(`${type} | ${model} | ${duration} | ${status} | timeout=${timeout}`);
+    const reason = normalizeText(row?.reason);
+    lines.push(`${type} | ${model} | ${duration} | ${status} | timeout=${timeout}${reason ? ` | reason=${reason}` : ''}`);
   }
   return lines.join('\n');
 }

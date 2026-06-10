@@ -6,6 +6,14 @@ const {
   normalizeText
 } = require('./common');
 
+function extractFailureReason(error = null, timedOut = false) {
+  const status = Number(error?.response?.status || error?.status || error?.statusCode || 0);
+  if (status > 0) return `http_${status}`;
+  const code = normalizeText(error?.code).toUpperCase();
+  if (code) return code;
+  return timedOut ? 'timeout' : 'request_failed';
+}
+
 async function runCheckRequest(spec = {}, options = {}) {
   const type = normalizeText(spec.type);
   const model = normalizeText(spec.model);
@@ -42,11 +50,13 @@ async function runCheckRequest(spec = {}, options = {}) {
       model,
       durationMs: Math.max(0, Date.now() - startedAt),
       status: timedOut ? 'timeout' : 'failed',
-      timedOut
+      timedOut,
+      reason: extractFailureReason(error, timedOut)
     };
   }
 }
 
 module.exports = {
+  extractFailureReason,
   runCheckRequest
 };
