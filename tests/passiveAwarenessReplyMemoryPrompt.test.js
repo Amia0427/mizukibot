@@ -31,6 +31,9 @@ module.exports = (async () => {
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.API_BASE_URL = 'https://example.com/reply-endpoint';
+    process.env.API_PROVIDER = 'openai_compatible';
+    process.env.AI_MODEL = 'test-reply-model';
     process.env.DATA_DIR = tempDataDir;
     process.env.PASSIVE_AWARENESS_ENABLED = 'true';
     process.env.PASSIVE_AWARENESS_GROUP_IDS = 'g-passive-memory';
@@ -129,6 +132,7 @@ module.exports = (async () => {
     assert.strictEqual(streamedBodies[0].temperature, 1);
     assert.ok(!Object.prototype.hasOwnProperty.call(streamedBodies[0], 'top_p'));
     assert.strictEqual(streamedBodies[0].__preferredProtocol, 'chat_completions');
+    assert.strictEqual(streamedBodies[0].__provider, 'openai_compatible');
 
     const userPrompt = String(streamedBodies[0]?.messages?.[1]?.content || '');
     assert.ok(userPrompt.includes('[RetrievedMemory]'));

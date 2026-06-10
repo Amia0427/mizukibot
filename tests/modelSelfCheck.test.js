@@ -22,6 +22,7 @@ module.exports = (async () => {
   try {
     Object.assign(process.env, {
       API_BASE_URL: 'https://main.example/v1/chat/completions',
+      API_PROVIDER: 'openai_compatible',
       API_KEY: 'main-key',
       AI_MODEL: 'main-model',
       ADMIN_USER_IDS: 'admin_1',
@@ -144,8 +145,28 @@ module.exports = (async () => {
     const defaultDedicatedSpecs = defaultDedicatedSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
     assert.strictEqual(defaultDedicatedSpecs.find((item) => item.type === 'passive_awareness_reply').url, 'https://passive-reply.example/v1/chat/completions');
     assert.strictEqual(defaultDedicatedSpecs.find((item) => item.type === 'passive_awareness_reply').model, 'passive-reply-model');
+    assert.ok(!Object.prototype.hasOwnProperty.call(defaultDedicatedSpecs.find((item) => item.type === 'passive_awareness_reply').body, '__provider'));
+
+    process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://main.example/v1/chat/completions';
+    process.env.PASSIVE_AWARENESS_REPLY_API_KEY = 'passive-reply-key';
+    process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'main-model';
+    delete process.env.PASSIVE_AWARENESS_REPLY_API_PROVIDER;
+    delete process.env.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL;
+    clearProjectCache();
+    const mirroredMainSelfCheck = require('../utils/modelSelfCheck');
+    const mirroredSpecs = mirroredMainSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
+    assert.strictEqual(mirroredSpecs.find((item) => item.type === 'passive_awareness_reply').body.__provider, 'openai_compatible');
+
+    process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://passive-reply.example/v1';
+    process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'passive-reply-model';
+    process.env.PASSIVE_AWARENESS_REPLY_API_PROVIDER = 'openai_compatible';
+    clearProjectCache();
+    const explicitPassiveProviderSelfCheck = require('../utils/modelSelfCheck');
+    const explicitPassiveProviderSpecs = explicitPassiveProviderSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
+    assert.strictEqual(explicitPassiveProviderSpecs.find((item) => item.type === 'passive_awareness_reply').body.__provider, 'openai_compatible');
 
     process.env.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL = 'true';
+    delete process.env.PASSIVE_AWARENESS_REPLY_API_PROVIDER;
     process.env.MEMORY_EMBEDDING_ENABLED = '0';
     process.env.MEMORY_RERANK_ENABLED = '0';
     process.env.PASSIVE_AWARENESS_DECISION_ENABLED = '0';

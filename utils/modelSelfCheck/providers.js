@@ -80,6 +80,20 @@ function getPassiveAwarenessReplyApiKey() {
   return normalizeText(config.PASSIVE_AWARENESS_REPLY_API_KEY || config.PASSIVE_AWARENESS_API_KEY);
 }
 
+function getPassiveAwarenessReplyApiProvider() {
+  if (config.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL === true) return normalizeText(config.API_PROVIDER);
+  const explicit = normalizeText(config.PASSIVE_AWARENESS_REPLY_API_PROVIDER);
+  if (explicit) return explicit;
+  if (
+    normalizeText(config.API_PROVIDER)
+    && getPassiveAwarenessReplyApiBaseUrl() === normalizeText(config.API_BASE_URL)
+    && getPassiveAwarenessReplyModel() === normalizeText(config.AI_MODEL)
+  ) {
+    return normalizeText(config.API_PROVIDER);
+  }
+  return '';
+}
+
 function isPassiveAwarenessReplyConfigured() {
   return Boolean(
     getPassiveAwarenessReplyModel()
@@ -98,6 +112,7 @@ module.exports = {
   getPassiveAwarenessReplyApiBaseUrl,
   getPassiveAwarenessReplyApiKey,
   getPassiveAwarenessReplyModel,
+  getPassiveAwarenessReplyApiProvider,
   getPlannerApiBaseUrl,
   getPlannerApiKey,
   getPlannerModel,

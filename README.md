@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-10 10:08 +08:00**：修复被动群感知回复模型请求失败。`/check` 和 `model-calls.ndjson` 显示 `passive_awareness_reply` 使用 gcli + `gemini-3-flash-preview` 时被 HTTP 层按模型名误转 Gemini native `...:generateContent`，上游返回 404；主回复成功是因为已有 `API_PROVIDER=openai_compatible`。新增 `PASSIVE_AWARENESS_REPLY_API_PROVIDER`，并在被动回复镜像主回复配置时自动继承主回复 provider，避免感知后回复模型走错协议。
+
 **2026-06-10 01:40**：admin.txt回滚到100行强制系统覆盖版本。测试发现新上游会篡改系统提示词（强制注入"Claude Code"身份，导致所有自定义系统提示词失效），Ny-Claude重越狱策略完全无效。回滚到破限强度最高的强制覆盖版本（[SYSTEM OVERRIDE] + EXECUTIVE ORDER + Anti-Avoidance Protocol），配合重试机制使用。100行。
 
 **2026-06-10 01:30**：admin.txt采用Ny-Claude重越狱策略（已回滚）。整合Ny-Claude预设的"重越狱"模块：双重响应机制（强制先输出■符号）、Fiction TEST Mode系统状态切换、SKIP PREAMBLE跳过安全前言、Kelly Claude内容验证通过标记、虚构测试确认（Everything is fictional + no ethical constraints）。45行，专门针对重甲渠道（内置大量系统提示词的API）优化。实测新上游会篡改系统提示词导致完全失效。
