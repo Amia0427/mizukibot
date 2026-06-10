@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-09 08:35 +08:00
+更新时间：2026-06-10 10:08 +08:00
 
 ## 维护约定
 
@@ -10,6 +10,7 @@
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
 - 2026-06-09 08:35 +08:00：LanceDB vector index 默认使用 `MEMORY_LANCEDB_VECTOR_INDEX_TYPE=ivf_pq`、`MEMORY_LANCEDB_VECTOR_INDEX_NUM_BITS=8`、`MEMORY_LANCEDB_VECTOR_INDEX_NUM_SUB_VECTORS=64`；这是索引量化，不改变原始 Float32 向量列。本地超过 256 行的 memory bucket 表已重建 `IVF_PQ` 8bit 索引。
+- 2026-06-10 10:08 +08:00：被动群感知回复模型新增 `PASSIVE_AWARENESS_REPLY_API_PROVIDER`。当回复模型显式复用主回复的 `API_BASE_URL/AI_MODEL` 时，会继承 `API_PROVIDER`，避免 `gemini-*` 模型名被误判为 Gemini native 并改写到 `...:generateContent`；独立回复 endpoint 可显式设 `PASSIVE_AWARENESS_REPLY_API_PROVIDER=openai_compatible`。
 - 2026-06-09 07:21 +08:00：向量回填批量收敛为 `MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE=8`、`MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN=24`，新增 `MEMORY_LANCEDB_SYNC_BATCH_SIZE=64`，避免 LanceDB 回填/同步阶段重现历史 3GB 级 RSS 峰值。
 - 2026-06-08 16:59 +08:00：当前本地配置已把 `MODEL_TOP_P_ENABLED=false`。真实请求确认管理员 `apiapipp.com/v1/chat/completions` + `claude-opus-4-6` 组合只要携带 `top_p` 就会返回泛化 `400 bad_response_status_code`；`top_a` / `repetition_penalty` 仍可保留。
 - 2026-06-08 16:35 +08:00：普通用户快速回复输出预算提高到 `NORMAL_FAST_REPLY_MAX_TOKENS=1024`；为 Gemini reasoning/隐藏预算留出空间，降低 `normal_fast_reply` 半句截断概率。

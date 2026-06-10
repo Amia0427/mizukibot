@@ -29,6 +29,7 @@ const {
   getPassiveAwarenessReplyApiBaseUrl,
   getPassiveAwarenessReplyApiKey,
   getPassiveAwarenessReplyModel,
+  getPassiveAwarenessReplyApiProvider,
   getPlannerApiBaseUrl,
   getPlannerApiKey,
   getPlannerModel,
@@ -37,7 +38,8 @@ const {
 } = require('./providers');
 const { ensureEmbeddingsUrl, ensureRerankUrl } = require('./urls');
 
-function buildChatBody(model, purpose, timeoutMs) {
+function buildChatBody(model, purpose, timeoutMs, options = {}) {
+  const provider = normalizeText(options.provider);
   return {
     model,
     temperature: 0,
@@ -48,6 +50,7 @@ function buildChatBody(model, purpose, timeoutMs) {
     max_tokens: 8,
     stream: false,
     __preferredProtocol: 'chat_completions',
+    ...(provider ? { __provider: provider } : {}),
     __timeoutMs: timeoutMs,
     __trace: {
       source: 'model_self_check',
@@ -122,6 +125,7 @@ function buildSelfCheckSpecs(options = {}) {
   const rerankModel = getRerankModel();
   const passiveDecisionModel = getPassiveAwarenessDecisionModel();
   const passiveReplyModel = getPassiveAwarenessReplyModel();
+  const passiveReplyProvider = getPassiveAwarenessReplyApiProvider();
 
   return [
     {
@@ -209,7 +213,9 @@ function buildSelfCheckSpecs(options = {}) {
           model: passiveReplyModel,
           url: ensureChatCompletionsUrl(getPassiveAwarenessReplyApiBaseUrl()),
           apiKey: getPassiveAwarenessReplyApiKey(),
-          body: buildChatBody(passiveReplyModel, 'passive_awareness_reply', timeoutMs)
+          body: buildChatBody(passiveReplyModel, 'passive_awareness_reply', timeoutMs, {
+            provider: passiveReplyProvider
+          })
         }
       : {
           type: 'passive_awareness_reply',

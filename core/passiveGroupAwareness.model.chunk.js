@@ -105,6 +105,26 @@ function buildPassiveSamplingFields({
   return out;
 }
 
+function resolvePassiveAwarenessReplyProvider({ useMainReplyModel, baseUrl, model }) {
+  if (useMainReplyModel) return String(config.API_PROVIDER || '').trim();
+  const explicit = String(config.PASSIVE_AWARENESS_REPLY_API_PROVIDER || '').trim();
+  if (explicit) return explicit;
+
+  const mainBaseUrl = ensureChatCompletionsUrl(config.API_BASE_URL);
+  const mainModel = String(config.AI_MODEL || '').trim();
+  if (
+    baseUrl
+    && model
+    && mainBaseUrl
+    && mainModel
+    && String(baseUrl).trim() === mainBaseUrl
+    && String(model).trim() === mainModel
+  ) {
+    return String(config.API_PROVIDER || '').trim();
+  }
+  return '';
+}
+
 async function invokeDecisionModel({
   groupId,
   senderId,
@@ -241,6 +261,7 @@ async function invokeReplyModel({
       personaMemoryState: null
     };
   }
+  const provider = resolvePassiveAwarenessReplyProvider({ useMainReplyModel, baseUrl, model });
 
   const promptBundle = await buildReplyPromptV2({
     groupId,
@@ -287,6 +308,7 @@ async function invokeReplyModel({
       max_tokens: Math.max(160, Number(config.PASSIVE_AWARENESS_REPLY_MAX_TOKENS || 320)),
       stream: true,
       __preferredProtocol: 'chat_completions',
+      ...(provider ? { __provider: provider } : {}),
       __timeoutMs: Math.max(1000, Number(config.PASSIVE_AWARENESS_REPLY_TIMEOUT_MS || 20000)),
       __trace: {
         source: 'passive_awareness',
