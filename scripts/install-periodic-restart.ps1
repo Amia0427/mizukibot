@@ -1,9 +1,9 @@
 # 安装定期重启计划任务
-# 每6小时重启一次Bot
+# 每天凌晨 04:00 重启一次Bot
 
 param(
   [string]$TaskName = 'MizukiBotPeriodicRestart',
-  [int]$IntervalHours = 6
+  [string]$DailyTime = '04:00'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +13,7 @@ $RestartScript = Join-Path $ScriptRoot "restart-bot-periodic.ps1"
 
 Write-Host "Installing periodic restart task..."
 Write-Host "  Task name: $TaskName"
-Write-Host "  Interval: Every $IntervalHours hours"
+Write-Host "  Schedule: Daily at $DailyTime"
 Write-Host "  Script: $RestartScript"
 
 # 检查管理员权限
@@ -32,26 +32,40 @@ try {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
   }
 
-  # 计算首次运行时间（6小时后）
-  $startTime = (Get-Date).AddHours($IntervalHours).ToString("yyyy-MM-ddTHH:mm:ss")
-  $intervalString = "PT${IntervalHours}H"
+  # 计算首次运行时间（当天已过则顺延到明天）
+  $dailyTimeMatch = [regex]::Match($DailyTime, '^(?<hour>\d{1,2}):(?<minute>\d{2})$')
+  if (-not $dailyTimeMatch.Success) {
+    throw "DailyTime must be HH:mm, for example 04:00."
+  }
+  $dailyHour = [int]$dailyTimeMatch.Groups['hour'].Value
+  $dailyMinute = [int]$dailyTimeMatch.Groups['minute'].Value
+  if ($dailyHour -lt 0 -or $dailyHour -gt 23 -or $dailyMinute -lt 0 -or $dailyMinute -gt 59) {
+    throw "DailyTime must be a valid 24-hour time, for example 04:00."
+  }
+
+  $now = Get-Date
+  $firstRun = Get-Date -Date $now.Date -Hour $dailyHour -Minute $dailyMinute -Second 0
+  if ($firstRun -le $now) {
+    $firstRun = $firstRun.AddDays(1)
+  }
+  $startTime = $firstRun.ToString("yyyy-MM-ddTHH:mm:ss")
+  $dailyTimeLabel = '{0:D2}:{1:D2}' -f $dailyHour, $dailyMinute
 
   # 创建任务XML
   $taskXml = @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>MizukiBot periodic restart every $IntervalHours hours</Description>
+    <Description>MizukiBot periodic restart daily at $dailyTimeLabel</Description>
   </RegistrationInfo>
   <Triggers>
-    <TimeTrigger>
-      <Repetition>
-        <Interval>$intervalString</Interval>
-        <StopAtDurationEnd>false</StopAtDurationEnd>
-      </Repetition>
+    <CalendarTrigger>
       <StartBoundary>$startTime</StartBoundary>
       <Enabled>true</Enabled>
-    </TimeTrigger>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
   </Triggers>
   <Settings>
     <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
@@ -100,7 +114,7 @@ try {
   Write-Host ""
   Write-Host "Task details:"
   Write-Host "  - Name: $TaskName"
-  Write-Host "  - Interval: Every $IntervalHours hours"
+  Write-Host "  - Schedule: Daily at $dailyTimeLabel"
   Write-Host "  - First run: $startTime"
   Write-Host ""
   Write-Host "To check task status, run:"
