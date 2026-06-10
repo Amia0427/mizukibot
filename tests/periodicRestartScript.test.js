@@ -18,6 +18,12 @@ module.exports = (async () => {
 
   assert.ok(installScript.includes('-File "$RestartScript"'), 'scheduled task should invoke the restart PowerShell file');
   assert.ok(installScript.includes('<WorkingDirectory>$ProjectRoot</WorkingDirectory>'), 'scheduled task should run from the project root');
+  assert.ok(installScript.includes("[string]$DailyTime = '04:00'"), 'scheduled task should default to 04:00 daily restart');
+  assert.ok(installScript.includes('<CalendarTrigger>'), 'scheduled task should use a daily calendar trigger');
+  assert.ok(installScript.includes('<ScheduleByDay>'), 'scheduled task should schedule by day');
+  assert.ok(installScript.includes('<DaysInterval>1</DaysInterval>'), 'scheduled task should run every 1 day');
+  assert.ok(!installScript.includes('[int]$IntervalHours = 6'), 'scheduled task should no longer default to every 6 hours');
+  assert.ok(!installScript.includes('<Repetition>'), 'scheduled task should not repeat every few hours');
 
   console.log('periodicRestartScript.test.js passed');
 })().catch((error) => {

@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-10 23:51 +08:00**：Windows 定时重启改为每天凌晨 04:00 执行。`scripts/install-periodic-restart.ps1` 默认注册每日 CalendarTrigger，不再每 6 小时重复触发，减少主模型长回复被重启强杀的窗口。
+
 **2026-06-10 20:10 +08:00**：排查最新模型自检失败。`admin_reply` 的 `claude-opus-4-6` 本次失败记录为 `apiapipp.com` OpenAI-compatible 请求 `ECONNABORTED`，触发 `MODEL_SELF_CHECK_TIMEOUT_MS=25000` 上限；30s 单项复测约 4.6s 成功，按上游瞬时慢响应处理。`passive_awareness_reply` 的 `gemini-3-flash-preview` 失败记录为 gcli 被误按 `gemini_native` 改写到 `...:generateContent` 后 HTTP 404；现在自检和真实被动回复会对显式 `/chat/completions` endpoint 自动使用 `openai_compatible`，失败行也会带非敏感 `reason=` 便于下一次直接定位。
 
 **2026-06-10 10:08 +08:00**：修复被动群感知回复模型请求失败。`/check` 和 `model-calls.ndjson` 显示 `passive_awareness_reply` 使用 gcli + `gemini-3-flash-preview` 时被 HTTP 层按模型名误转 Gemini native `...:generateContent`，上游返回 404；主回复成功是因为已有 `API_PROVIDER=openai_compatible`。新增 `PASSIVE_AWARENESS_REPLY_API_PROVIDER`，并在被动回复镜像主回复配置时自动继承主回复 provider，避免感知后回复模型走错协议。
