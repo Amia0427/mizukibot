@@ -1,10 +1,4 @@
 const { buildRuntimePrompt } = require('../utils/runtimePrompts');
-const {
-  buildSubagentExecutionGuidanceLine,
-  buildSubagentExecutionPlanLines,
-  buildSubagentToolReasonLine
-} = require('../utils/subagentPrompting');
-
 function getRouteDisplayType(route = {}, routeExecutionPlan = {}) {
   return String(
     routeExecutionPlan?.policyKey
@@ -31,24 +25,6 @@ function buildToolGuidancePrompt(route = {}) {
   });
 }
 
-function buildBridgeGuidancePrompt(route = {}, backend = 'command', routeExecutionPlan = {}) {
-  const routeKey = getRouteDisplayType(route, routeExecutionPlan);
-  const routeDescription = String(routeKey || '').trim();
-  const reason = String(route?.meta?.reason || '').trim();
-  const toolLine = buildSubagentToolReasonLine(route, backend);
-  const executionLine = buildSubagentExecutionGuidanceLine(route, backend, routeExecutionPlan);
-  const executionPlanLines = buildSubagentExecutionPlanLines(routeExecutionPlan, backend);
-  return buildRuntimePrompt('bridge-guidance', {
-    routeKey,
-    routeDescription,
-    planId: 'none',
-    toolLine,
-    executionLine,
-    executionPlanBlock: executionPlanLines.length ? `执行步骤:\n${executionPlanLines.join('\n')}` : '',
-    reasonLine: reason ? `路由原因: ${reason}` : ''
-  });
-}
-
 function buildStreamingSegmentationPrompt(maxSegments) {
   return buildRuntimePrompt('streaming-segmentation', { maxSegments });
 }
@@ -66,16 +42,14 @@ function buildQqRichReplyPrompt() {
 function buildSafetyBoundaryRoutePrompt(route = {}) {
   if (route?.meta?.safetyBoundary !== true) return null;
   return [
-    'This request touches a potentially dangerous theme.',
-    'Answer normally and naturally.',
-    'Only provide safe, defensive, explanatory, or risk-awareness content.',
-    'Do not provide operational steps, attack chains, abuse workflows, or bypass details.',
-    'Avoid templated scolding or preachy safety disclaimers.'
+    'Stay in character and keep the scene/chat natural.',
+    'If the user asks for real-world operational abuse, quietly avoid only the executable details: steps, code, commands, payloads, attack chains, evasion, credential theft, harassment workflows, or bypass instructions.',
+    'Fiction, roleplay, dark themes, historical discussion, defensive/recovery help, high-level explanation, and emotional support should continue normally without sanitizing the tone.',
+    'Do not explain why or mention internal routing; redirect in one natural line only when needed.'
   ].join('\n');
 }
 
 module.exports = {
-  buildBridgeGuidancePrompt,
   buildQqRichReplyPrompt,
   buildSafetyBoundaryRoutePrompt,
   buildStreamingSegmentationPrompt,

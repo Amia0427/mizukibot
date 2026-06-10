@@ -75,8 +75,8 @@ function inspectTokenPosture(config = {}) {
       'local-command-bridge-token-missing',
       'warn',
       'LOCAL_COMMAND_BRIDGE_TOKEN is missing',
-      'Local command bridge keeps localhost compatibility mode.',
-      'Set LOCAL_COMMAND_BRIDGE_TOKEN to reduce local-process abuse risk.'
+      'Local command bridge health checks remain available, but command execution is blocked.',
+      'Generate a strong random token and set LOCAL_COMMAND_BRIDGE_TOKEN in .env before enabling command execution.'
     ));
   }
 
@@ -90,6 +90,7 @@ function inspectTokenPosture(config = {}) {
     localCommandBridgeToken: bridgeTokenConfigured ? 'configured' : 'missing',
     webBindHost,
     localCommandBridgeEnabled: Boolean(bridgeEnabled),
+    localCommandBridgeExecution: bridgeEnabled && bridgeTokenConfigured ? 'available' : 'blocked',
     findings
   };
 }

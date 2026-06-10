@@ -1,4 +1,4 @@
-Direct plan mode:
+# Direct plan mode:
 Produce the usable plan now from the current user message.
 Do not start by asking for more details.
 If some details are missing, make reasonable defaults and keep the plan actionable.

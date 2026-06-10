@@ -11,6 +11,18 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
+const rerankRuntimeState = {
+  disabledUntil: 0,
+  disabledReason: '',
+  timeoutStreak: 0,
+  failureStreak: 0,
+  lastErrorAt: 0,
+  lastErrorMessage: '',
+  lastStatus: 0,
+  lastTimeoutMs: 0,
+  lastLatencyMs: 0
+};
+
 class RerankTimeoutError extends Error {
   constructor(timeoutMs) {
     super(`rerank request timed out after ${timeoutMs}ms`);
@@ -20,11 +32,131 @@ class RerankTimeoutError extends Error {
   }
 }
 
+function resolvePositiveMs(value, fallback = 0, min = 0) {
+  const n = Number(value);
+  const base = Number.isFinite(n) ? n : Number(fallback);
+  if (!Number.isFinite(base)) return Math.max(0, min);
+  return Math.max(min, Math.floor(base));
+}
+
+function resolveRerankEndpointCooldownMs() {
+  return resolvePositiveMs(config.MEMORY_RERANK_ENDPOINT_COOLDOWN_MS, 30 * 60 * 1000, 0);
+}
+
+function resolveRerankTimeoutCooldownMs() {
+  return resolvePositiveMs(config.MEMORY_RERANK_TIMEOUT_COOLDOWN_MS, 60 * 1000, 0);
+}
+
+function resolveRerankTimeoutFailureThreshold() {
+  return Math.max(1, Math.floor(Number(config.MEMORY_RERANK_TIMEOUT_FAILURE_THRESHOLD || 2) || 2));
+}
+
+function resolveRerankMaxTimeoutMs(baseTimeoutMs) {
+  const configured = Number(config.MEMORY_RERANK_MAX_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) {
+    return Math.max(baseTimeoutMs, Math.floor(configured));
+  }
+  return Math.max(baseTimeoutMs, Math.min(5000, baseTimeoutMs * 3));
+}
+
 function resolveRerankTimeoutMs(options = {}) {
   const raw = options.timeoutMs ?? options.rerankTimeoutMs ?? config.MEMORY_RERANK_TIMEOUT_MS ?? 8000;
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  return Math.max(100, Math.floor(n));
+  const baseTimeoutMs = Math.max(100, Math.floor(n));
+  const hasExplicitTimeout = options.timeoutMs !== undefined || options.rerankTimeoutMs !== undefined;
+  if (hasExplicitTimeout || options.disableAdaptiveTimeout === true) return baseTimeoutMs;
+  const timeoutStreak = Math.max(0, Math.floor(Number(rerankRuntimeState.timeoutStreak || 0) || 0));
+  if (timeoutStreak <= 0) return baseTimeoutMs;
+  const stepMs = Math.max(100, Math.floor(baseTimeoutMs * 0.5));
+  return Math.min(resolveRerankMaxTimeoutMs(baseTimeoutMs), baseTimeoutMs + (timeoutStreak * stepMs));
+}
+
+function formatMsForLog(value) {
+  const ms = resolvePositiveMs(value, 0, 0);
+  if (ms >= 60000 && ms % 60000 === 0) return `${ms / 60000}m`;
+  if (ms >= 1000 && ms % 1000 === 0) return `${ms / 1000}s`;
+  return `${ms}ms`;
+}
+
+function setRerankDisabled(reason = '', cooldownMs = 0) {
+  const ms = resolvePositiveMs(cooldownMs, 0, 0);
+  const until = ms > 0 ? Date.now() + ms : 0;
+  rerankRuntimeState.disabledUntil = until;
+  rerankRuntimeState.disabledReason = normalizeText(reason);
+  requestMemoryRerank.disabledUntil = until;
+  return until;
+}
+
+function clearRerankFailureState(latencyMs = 0) {
+  rerankRuntimeState.disabledUntil = 0;
+  rerankRuntimeState.disabledReason = '';
+  rerankRuntimeState.timeoutStreak = 0;
+  rerankRuntimeState.failureStreak = 0;
+  rerankRuntimeState.lastErrorAt = 0;
+  rerankRuntimeState.lastErrorMessage = '';
+  rerankRuntimeState.lastStatus = 0;
+  rerankRuntimeState.lastTimeoutMs = 0;
+  rerankRuntimeState.lastLatencyMs = Math.max(0, Math.floor(Number(latencyMs) || 0));
+  requestMemoryRerank.disabledUntil = 0;
+}
+
+function recordRerankFailure(reason = 'request_failed', details = {}) {
+  const normalizedReason = normalizeText(reason) || 'request_failed';
+  const status = Number(details.status || 0) || 0;
+  const timeoutMs = Number(details.timeoutMs || 0) || 0;
+  const message = normalizeText(details.message || '');
+  const now = Date.now();
+  rerankRuntimeState.failureStreak += 1;
+  rerankRuntimeState.timeoutStreak = normalizedReason === 'timeout'
+    ? rerankRuntimeState.timeoutStreak + 1
+    : 0;
+  rerankRuntimeState.lastErrorAt = now;
+  rerankRuntimeState.lastErrorMessage = message;
+  rerankRuntimeState.lastStatus = status;
+  rerankRuntimeState.lastTimeoutMs = timeoutMs;
+  rerankRuntimeState.lastLatencyMs = Math.max(0, Math.floor(Number(details.latencyMs) || 0));
+
+  const threshold = resolveRerankTimeoutFailureThreshold();
+  let cooldownMs = 0;
+  if (normalizedReason === 'endpoint_unavailable') {
+    cooldownMs = resolveRerankEndpointCooldownMs();
+  } else if (normalizedReason === 'timeout' && rerankRuntimeState.timeoutStreak >= threshold) {
+    cooldownMs = resolveRerankTimeoutCooldownMs();
+  } else if ((normalizedReason === 'rate_limit' || normalizedReason === 'transient_failure') && rerankRuntimeState.failureStreak >= threshold) {
+    cooldownMs = resolveRerankTimeoutCooldownMs();
+  }
+  if (cooldownMs > 0) setRerankDisabled(normalizedReason, cooldownMs);
+  return {
+    cooldownMs,
+    threshold,
+    timeoutStreak: rerankRuntimeState.timeoutStreak,
+    failureStreak: rerankRuntimeState.failureStreak
+  };
+}
+
+function getMemoryRerankRuntimeState(now = Date.now()) {
+  const disabledUntil = Math.max(
+    Number(rerankRuntimeState.disabledUntil || 0) || 0,
+    Number(requestMemoryRerank.disabledUntil || 0) || 0
+  );
+  return {
+    disabled: disabledUntil > now,
+    disabledUntil,
+    disabledForMs: Math.max(0, disabledUntil - now),
+    disabledReason: rerankRuntimeState.disabledReason || '',
+    timeoutStreak: rerankRuntimeState.timeoutStreak,
+    failureStreak: rerankRuntimeState.failureStreak,
+    lastErrorAt: rerankRuntimeState.lastErrorAt,
+    lastErrorMessage: rerankRuntimeState.lastErrorMessage,
+    lastStatus: rerankRuntimeState.lastStatus,
+    lastTimeoutMs: rerankRuntimeState.lastTimeoutMs,
+    lastLatencyMs: rerankRuntimeState.lastLatencyMs
+  };
+}
+
+function resetMemoryRerankRuntimeState() {
+  clearRerankFailureState(0);
 }
 
 function isAbortLikeError(error) {
@@ -125,7 +257,11 @@ function getRerankApiKey() {
 
 function shouldUseMemoryRerank(options = {}) {
   if (options.disableRerank) return false;
-  if (requestMemoryRerank.disabledUntil && Date.now() < requestMemoryRerank.disabledUntil) return false;
+  const disabledUntil = Math.max(
+    Number(rerankRuntimeState.disabledUntil || 0) || 0,
+    Number(requestMemoryRerank.disabledUntil || 0) || 0
+  );
+  if (disabledUntil && Date.now() < disabledUntil) return false;
   return Boolean(
     config.MEMORY_RERANK_ENABLED
       && String(config.MEMORY_RERANK_MODEL || '').trim()
@@ -229,6 +365,7 @@ async function requestMemoryRerank(query, documents = [], options = {}) {
     body.instruction = String(config.MEMORY_RERANK_INSTRUCTION).trim();
   }
 
+  const startedAt = Date.now();
   try {
     const resp = await withHardTimeout(
       ({ signal }) => postWithRetry(
@@ -240,18 +377,49 @@ async function requestMemoryRerank(query, documents = [], options = {}) {
       timeoutMs,
       options.abortSignal || null
     );
-    requestMemoryRerank.disabledUntil = 0;
+    clearRerankFailureState(Date.now() - startedAt);
     return extractRerankResults(resp);
   } catch (error) {
     const status = Number(error?.response?.status || 0) || 0;
     if (isAbortLikeError(error)) {
-      console.warn(`[memoryReranker] rerank request timed out after ${timeoutMs || 'unknown'}ms, fallback to base recall`);
+      const failure = recordRerankFailure('timeout', {
+        status,
+        timeoutMs,
+        message: error.message,
+        latencyMs: Date.now() - startedAt
+      });
+      if (failure.cooldownMs > 0) {
+        console.warn(`[memoryReranker] rerank request timed out after ${timeoutMs || 'unknown'}ms (${failure.timeoutStreak}/${failure.threshold}), cooling down for ${formatMsForLog(failure.cooldownMs)}; fallback to base recall`);
+      } else {
+        console.warn(`[memoryReranker] rerank request timed out after ${timeoutMs || 'unknown'}ms, fallback to base recall`);
+      }
       return null;
     }
     if (status === 400 || status === 401 || status === 403 || status === 404) {
-      requestMemoryRerank.disabledUntil = Date.now() + (30 * 60 * 1000);
-      console.warn('[memoryReranker] rerank endpoint unavailable, fallback to base recall for 30 minutes');
+      const failure = recordRerankFailure('endpoint_unavailable', {
+        status,
+        message: error.message,
+        latencyMs: Date.now() - startedAt
+      });
+      console.warn(`[memoryReranker] rerank endpoint unavailable (status ${status || 'unknown'}), fallback to base recall for ${formatMsForLog(failure.cooldownMs || resolveRerankEndpointCooldownMs())}`);
       return null;
+    }
+    if (status === 429 || status >= 500) {
+      const failure = recordRerankFailure(status === 429 ? 'rate_limit' : 'transient_failure', {
+        status,
+        message: error.message,
+        latencyMs: Date.now() - startedAt
+      });
+      if (failure.cooldownMs > 0) {
+        console.warn(`[memoryReranker] rerank transient failure (status ${status || 'unknown'}), cooling down for ${formatMsForLog(failure.cooldownMs)}; fallback to base recall`);
+        return null;
+      }
+    } else {
+      recordRerankFailure('request_failed', {
+        status,
+        message: error.message,
+        latencyMs: Date.now() - startedAt
+      });
     }
     console.warn('[memoryReranker] rerank request failed, fallback to base recall:', error.message);
     return null;
@@ -271,20 +439,38 @@ async function rerankMemoryCandidates(query, candidates = [], options = {}) {
 
   let rows = null;
   try {
-    rows = await withHardTimeout(
-      ({ signal }) => request(query, documents, {
+    if (request === requestMemoryRerank) {
+      rows = await request(query, documents, {
         ...options,
         topN: head.length,
         timeoutMs,
-        abortSignal: signal || options.abortSignal || null
-      }),
-      timeoutMs,
-      options.abortSignal || null
-    );
+        abortSignal: options.abortSignal || null
+      });
+    } else {
+      const startedAt = Date.now();
+      rows = await withHardTimeout(
+        ({ signal }) => request(query, documents, {
+          ...options,
+          topN: head.length,
+          timeoutMs,
+          abortSignal: signal || options.abortSignal || null
+        }),
+        timeoutMs,
+        options.abortSignal || null
+      );
+      clearRerankFailureState(Date.now() - startedAt);
+    }
   } catch (error) {
     if (isAbortLikeError(error)) {
+      recordRerankFailure('timeout', {
+        timeoutMs,
+        message: error.message
+      });
       console.warn(`[memoryReranker] rerank candidate scoring timed out after ${timeoutMs || 'unknown'}ms, fallback to base recall`);
     } else {
+      recordRerankFailure('request_failed', {
+        message: error.message
+      });
       console.warn('[memoryReranker] injected rerank request failed, fallback to base recall:', error.message);
     }
     return list;
@@ -347,6 +533,8 @@ module.exports = {
   extractRerankResults,
   buildMemoryRerankDocument,
   resolveRerankTimeoutMs,
+  getMemoryRerankRuntimeState,
+  resetMemoryRerankRuntimeState,
   requestMemoryRerank,
   rerankMemoryCandidates
 };

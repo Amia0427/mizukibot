@@ -7,6 +7,7 @@ module.exports = (async () => {
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     const httpClient = require('../api/httpClient');
 
     const prepared = await httpClient.prepareRequest('https://example.com/v1/chat/completions', {
@@ -41,31 +42,16 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(prepared.provider, 'openai_compatible');
-    assert.ok(Array.isArray(prepared.requestBody.messages));
-    assert.deepStrictEqual(
-      prepared.requestBody.messages[0].content[0].cache_control,
-      { type: 'ephemeral', ttl: '5m' }
-    );
-    assert.deepStrictEqual(
-      prepared.requestBody.messages[1].content[0].cache_control,
-      { type: 'ephemeral', ttl: '5m' }
-    );
+    assert.strictEqual(prepared.requestUrl, 'https://example.com/v1/responses');
+    assert.ok(Array.isArray(prepared.requestBody.input));
+    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody.input[0].content[0], 'cache_control'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody.input[1].content[0], 'cache_control'));
 
     let attemptCount = 0;
     let firstAttemptBody = null;
-    let secondAttemptBody = null;
     axios.post = async (_url, body) => {
       attemptCount += 1;
-      if (attemptCount === 1) {
-        firstAttemptBody = body;
-        const error = new Error('unsupported cache control');
-        error.response = {
-          status: 400,
-          data: { error: { message: 'unknown field cache_control' } }
-        };
-        throw error;
-      }
-      secondAttemptBody = body;
+      firstAttemptBody = body;
       return {
         data: {
           choices: [
@@ -82,14 +68,13 @@ module.exports = (async () => {
 
     await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
       model: 'gpt-4.1-mini',
-      messages: prepared.requestBody.messages,
+      input: prepared.requestBody.input,
       stream: false
     }, 0, 'test-key');
 
-    assert.strictEqual(attemptCount, 2);
-    assert.ok(firstAttemptBody.messages[0].content[0].cache_control);
-    assert.ok(!('cache_control' in secondAttemptBody.messages[0].content[0]));
-    assert.ok(!('cache_control' in secondAttemptBody.messages[1].content[0]));
+    assert.strictEqual(attemptCount, 1);
+    assert.ok(!Object.prototype.hasOwnProperty.call(firstAttemptBody.input[0].content[0], 'cache_control'));
+    assert.ok(!('cache_control' in firstAttemptBody.input[1].content[0]));
 
     console.log('httpClientChatCompletionsPromptCache.test.js passed');
   } finally {

@@ -12,10 +12,14 @@ const {
   const router = buildRouterStageSystemPrompt();
 
   assert.ok(planner.includes('Do not imitate the full main persona.'));
+  assert.ok(planner.includes('one pass'));
   assert.ok(review.includes('Preserve evidence'));
   assert.ok(router.includes('route classification'));
-  assert.ok(planner.includes('[SecurityContract]'));
-  assert.ok(review.includes('[SecurityContract]'));
-  assert.ok(router.includes('[SecurityContract]'));
+  assert.ok(planner.includes('[InternalIntegrity]'));
+  assert.ok(review.includes('[InternalIntegrity]'));
+  assert.ok(router.includes('[InternalIntegrity]'));
+  assert.ok(!planner.includes('[SecurityContract]'));
+  assert.ok(!review.includes('[SecurityContract]'));
+  assert.ok(!router.includes('[SecurityContract]'));
   console.log('promptStageContracts.test.js passed');
 })();

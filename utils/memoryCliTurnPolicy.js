@@ -1,4 +1,16 @@
-const { prepareMemoryCliCommand } = require('./memoryCli');
+let cachedPrepareMemoryCliCommand = null;
+
+function getPrepareMemoryCliCommand() {
+  if (cachedPrepareMemoryCliCommand) return cachedPrepareMemoryCliCommand;
+  const memoryCli = require('./memoryCli');
+  cachedPrepareMemoryCliCommand = typeof memoryCli.prepareMemoryCliCommand === 'function'
+    ? memoryCli.prepareMemoryCliCommand
+    : null;
+  if (!cachedPrepareMemoryCliCommand) {
+    throw new Error('prepareMemoryCliCommand unavailable');
+  }
+  return cachedPrepareMemoryCliCommand;
+}
 
 function createMemoryCliTurnState(overrides = {}) {
   return {
@@ -58,7 +70,7 @@ function buildBlockedMemoryCliResult(commandName, reason, errorType, commandText
 
 function decideMemoryCliTurnAction(command, turnState = {}) {
   const state = normalizeMemoryCliTurnState(turnState);
-  const prepared = prepareMemoryCliCommand(command);
+  const prepared = getPrepareMemoryCliCommand()(command);
   const parsed = prepared.parsed || null;
 
   if (!prepared.ok || !parsed) {

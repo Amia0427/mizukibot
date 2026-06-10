@@ -1,3 +1,5 @@
+# Character State Injection
+
 <character_state>
 时间: {{timeDesc}}
 穿着: {{outfit}}

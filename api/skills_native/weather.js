@@ -1,4 +1,5 @@
 const axios = require('axios');
+const config = require('../../config');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -14,7 +15,7 @@ async function getWeatherSummary({ location = '', format = '%l:+%c+%t+%h+%w' } =
       timeout: 10000,
       proxy: false,
       headers: {
-        'User-Agent': 'MizukiBot/1.0 (weather native client)'
+        'User-Agent': config.HTTP_USER_AGENT
       }
     });
     return normalizeText(response.data) || '未获取到天气信息';

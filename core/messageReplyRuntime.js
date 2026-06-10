@@ -11,6 +11,7 @@ const routeExecution = require('./routeExecution');
 const { humanizeReply } = require('../utils/humanizer');
 const { classifyReplyFailure, isReplyFailure } = require('../utils/replyFailure');
 const { sanitizeUserFacingText } = require('../utils/userFacingText');
+const { prepareSubagentFallbackReply } = require('../utils/subagentStyleGuard');
 const { buildCuteRefusalReply } = require('./refusalReply');
 const {
   cleanToolReplyText,
@@ -19,6 +20,7 @@ const {
 const {
   findExplicitSegmentBreakIndex,
   findNaturalSplitIndex,
+  getGroupChatStreamSendGapMs,
   getStreamingSplitIndex
 } = require('./streamingSegmentation');
 
@@ -87,18 +89,37 @@ function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
     : String(routeContext?.topRouteType || '').trim();
   const routeCapability = String(routeExecution.getPolicyDefinition(routePolicyKey)?.capability || '').trim();
   const toolReplyRoute = isToolReplyRoute(routeContext);
+  const subagentRefill = typeof routeContext === 'string'
+    ? false
+    : (
+        routeContext?.subagentRefill === true
+        || /subagent/i.test(String(routeContext?.source || routeContext?.executor || '').trim())
+      );
   const formattingPreferences = resolveToolReplyFormattingPreferences(
     typeof routeContext === 'string' ? '' : String(routeContext?.requestText || '').trim()
   );
   const shouldBypassLocalHumanize = routeCapability === 'admin' || toolReplyRoute;
 
   if (!t) {
-    return '刚才网络有点抖，我再试一次。';
+    return '刚刚空了一拍……你再说一次，我接住。';
   }
 
   if (!isReplyFailure(t)) {
-    if (toolReplyRoute) return cleanToolReplyText(t, formattingPreferences);
-    if (shouldBypassLocalHumanize) return t;
+    if (toolReplyRoute) {
+      const cleanedToolReply = cleanToolReplyText(t, formattingPreferences);
+      return subagentRefill
+        ? prepareSubagentFallbackReply(cleanedToolReply, {
+            requestText: typeof routeContext === 'string' ? '' : String(routeContext?.requestText || '').trim()
+          })
+        : cleanedToolReply;
+    }
+    if (shouldBypassLocalHumanize) {
+      return subagentRefill
+        ? prepareSubagentFallbackReply(t, {
+            requestText: typeof routeContext === 'string' ? '' : String(routeContext?.requestText || '').trim()
+          })
+        : t;
+    }
     if (runtimeConfig.HUMANIZER_AGENT_ENABLED || runtimeConfig.LLM_HUMANIZER_ENABLED) return t;
     const cleaned = humanizeReply(t);
     return cleaned || t;
@@ -112,38 +133,38 @@ function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
   });
 
   if (failure.type === 'tool_loop_limit') {
-    return '这轮查记忆时有点绕住了。你可以把想找的记忆点再说具体一点，我直接接着答。';
+    return '记忆那边刚刚绕住了。你把想找的点再捏具体一点，我接着翻。';
   }
 
   if (failure.type === 'tool_error') {
-    return '刚才读记忆时出了点问题，我没拿到稳定结果。你可以换个更具体的记忆点再问我一次。';
+    return '刚刚翻记忆没翻稳。换个更具体的关键词问我，我再捞一次。';
   }
 
   if (failure.type === 'provider_auth') {
-    return '当前上游模型鉴权或配置有问题，暂时没法正常回答，需要先检查配置。';
+    return '这边配置像是没扣好，先检查一下模型钥匙吧。';
   }
 
   if (failure.type === 'provider_quota') {
-    return '当前上游模型额度不足，暂时没法正常回答，需要先切换模型或补额度。';
+    return '模型额度好像见底了。先换个模型或者补一下额度，我再继续。';
   }
 
   if (failure.type === 'generic_model_failure') {
-    return '刚才回复时出了点问题，你可以再发一次，我继续。';
+    return '刚刚那句没组织稳。你再发一次，我继续接。';
   }
 
   if (toolReplyRoute) {
-    return '这次工具任务被上游拦截或拒答了。你可以稍后再发一次同样的请求。';
+    return '这个任务刚刚被卡住了。等一下再丢给我，我重新跑。';
   }
 
-  return '这次回复被上游拦截或拒答了。你可以换个更简短或更明确的问法，我马上继续。';
+  return '刚刚那句被卡掉了。你换个更短更明确的说法，我马上接。';
 }
 
 function buildBackgroundAckText() {
-  return '这类任务我先在后台跑。你可以随时发“任务状态”“取消任务”“结束任务”，或用“任务补充 ...”追加要求。';
+  return '这类任务我先放后台跑。你随时发“任务状态”“取消任务”“结束任务”，或者用“任务补充 ...”加要求。';
 }
 
 function buildNoTaskControlText() {
-  return '当前没有可控制的后台任务。';
+  return '现在没有正在挂着的后台任务哦。';
 }
 
 function buildSessionStatusReply(session = {}, activeTask = null) {
@@ -160,8 +181,8 @@ function buildSessionStatusReply(session = {}, activeTask = null) {
   if (session && String(session.status || '').trim() === 'retained') {
     const summary = String(session.latest_summary || session.latest_result_excerpt || '').trim();
     return summary
-      ? `当前没有运行中的后台任务。\n最近一次结果：${summary}\n如果要继续，可以发“任务补充 ...”。`
-      : '当前没有运行中的后台任务。如果要继续，可以发“任务补充 ...”。';
+      ? `现在没有正在跑的后台任务。\n最近一次结果：${summary}\n要继续的话，发“任务补充 ...”就行。`
+      : '现在没有正在跑的后台任务。要继续的话，发“任务补充 ...”就行。';
   }
 
   if (session && String(session.status || '').trim()) {
@@ -193,30 +214,6 @@ function parseBackgroundControlCommand(text = '') {
   if (plain === '任务状态') return { type: 'status', payload: '' };
   if (plain === '取消任务') return { type: 'cancel', payload: '' };
   if (plain === '结束任务') return { type: 'close', payload: '' };
-  if (/^批准(?:\s|$)/i.test(plain)) {
-    return {
-      type: 'approve',
-      payload: plain.replace(/^批准\s*/i, '').trim()
-    };
-  }
-  if (/^拒绝(?:\s|$)/i.test(plain)) {
-    return {
-      type: 'deny',
-      payload: plain.replace(/^拒绝\s*/i, '').trim()
-    };
-  }
-  if (/^切\s*agent(?:\s|$)/i.test(plain)) {
-    return {
-      type: 'switch_agent',
-      payload: plain.replace(/^切\s*agent\s*/i, '').trim()
-    };
-  }
-  if (/^重连会话(?:\s|$)/i.test(plain)) {
-    return {
-      type: 'resume_session',
-      payload: plain.replace(/^重连会话\s*/i, '').trim()
-    };
-  }
   if (/^任务(?:补充|继续)\s+/i.test(plain)) {
     return {
       type: 'supplement',
@@ -277,13 +274,24 @@ function createStreamingDispatcher({
     const task = async () => {
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
       const now = Date.now();
-      const minGap = getStreamSendGapMs(effectiveConfig);
+      const isPrivate = String(chatType || '').trim() === 'private';
+      const groupGap = getGroupChatStreamSendGapMs(text, {
+        chatType,
+        groupId,
+        userId,
+        senderId,
+        chunkIndex: state.sentSegments + 1,
+        sentSegments: state.sentSegments
+      });
+      const minGap = groupGap > 0 && !isPrivate
+        ? groupGap
+        : getStreamSendGapMs(effectiveConfig);
       const elapsed = now - state.lastSendAt;
       if (state.lastSendAt > 0 && elapsed < minGap) {
         await new Promise((resolve) => setTimeout(resolve, minGap - elapsed));
       }
+      if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
-      const isPrivate = String(chatType || '').trim() === 'private';
       const payload = isPrivate
         ? {
             action: 'send_private_msg',
@@ -324,10 +332,25 @@ function createStreamingDispatcher({
     let sendUntil = -1;
     const canSplitMore = state.sentSegments < (maxSegments - 1);
     if (canSplitMore) {
-      sendUntil = getStreamingSplitIndex(pending);
+      sendUntil = getStreamingSplitIndex(pending, {
+        chatType,
+        groupId,
+        userId,
+        senderId,
+        sentSegments: state.sentSegments
+      });
     }
 
-    if (sendUntil <= 0 && force) sendUntil = getStreamingSplitIndex(pending, { force: true });
+    if (sendUntil <= 0 && force) {
+      sendUntil = getStreamingSplitIndex(pending, {
+        force: true,
+        chatType,
+        groupId,
+        userId,
+        senderId,
+        sentSegments: state.sentSegments
+      });
+    }
     if (sendUntil <= 0) return false;
 
     const rawChunk = pending.slice(0, sendUntil);

@@ -62,6 +62,8 @@ module.exports = (async () => {
 
   let profile = materializeMemoryViews({ force: true }).profileProjection.users.u_extract_class;
   assert.ok(!profile.strictProfile.likes.includes('今天打了 Kitty'));
+  assert.ok(!profile.weakProfile.single_hit_preferences.includes('今天打了 Kitty'));
+  assert.ok(!profile.weakProfile.recent_topics.includes('今天解释钕铜谐音梗'));
 
   parserPayload = { confidence: 0.1 };
   await learnSomethingNew('u_extract_class', '记住我喜欢稳定画像测试', '记住了', {

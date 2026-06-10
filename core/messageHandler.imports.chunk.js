@@ -1,0 +1,268 @@
+const fs = require('fs');
+const path = require('path');
+const { getDatePartsInTz, todayStrInTz } = require('../utils/time');
+const {
+  favorites,
+  chatHistory,
+  shortTermMemory,
+  updateFavor,
+  saveData,
+  hasFreshGroupBinding,
+  clearGroupBindingsByGroupId,
+  clearGroupBindingForUser
+} = require('../utils/memory');
+const { recordMemoryScope } = require('../utils/memoryScopeIndex');
+const { extractJsonSafely } = require('../api/parser');
+const { humanizeReply } = require('../utils/humanizer');
+const { classifyReplyFailure, isReplyFailure } = require('../utils/replyFailure');
+const { sanitizeUserFacingText } = require('../utils/userFacingText');
+const { buildRoutePromptBundle } = require('../utils/routePromptPolicy');
+const { buildRuntimePrompt } = require('../utils/runtimePrompts');
+const { getBackgroundTaskRuntime, summarizeReply: summarizeBackgroundReply } = require('../utils/backgroundTaskRuntime');
+const {
+  buildToolReplyFormatInstruction,
+  cleanToolReplyText,
+  resolveToolReplyFormattingPreferences
+} = require('../utils/toolReplyFormatting');
+const { isAtBot, detectIntentHybrid } = require('./router');
+const routeExecution = require('./routeExecution');
+const { buildRouteMetaEnvelope } = require('./executablePlan');
+const { createMessageEventDeduper } = require('./messageDeduper');
+const { createInboundConcurrencyController } = require('./inboundConcurrency');
+const { createForegroundConcurrencyController } = require('./foregroundConcurrency');
+const { isPrivilegedPrivateChatUser } = require('../utils/privilegedPrivateChat');
+const { handlePassiveGroupAwareness } = require('./passiveGroupAwareness');
+const {
+  createContinuousMessagePreprocessor,
+  cheapParseMessageEntry,
+  resolveContinuousEntryDetails
+} = require('./continuousMessagePreprocessor');
+const {
+  buildCuteRefusalReply,
+  buildRefusalReply
+} = require('./refusalReply');
+const { resolveMessageDirectedContext } = require('./messageDirectedContext');
+const { buildLlmPerception } = require('./llmPerception');
+// source-compat note: passive flow is delegated, but the historical call site
+// remains documented here for source regression coverage:
+// const passiveResult = await handlePassiveGroupAwareness({
+const {
+  buildInboundMessageContext,
+  resolveEffectiveBotQQ,
+  shouldHandleNotice,
+  shouldSkipNonGroupMessage,
+  shouldSkipSelfMessage
+} = require('./messageIngress');
+const { runPassiveFlow } = require('./messagePassiveFlow');
+const { createMessageReplyRuntime } = require('./messageReplyRuntime');
+const { createMessageSideEffects } = require('./messageSideEffects');
+const { createMessageRouteFlow } = require('./messageRouteFlow');
+const { createMessageAdminCoordinator } = require('./messageAdminCommands');
+const { createMessageBackgroundTaskCoordinator } = require('./messageBackgroundTasks');
+const { createMessageDispatchCoordinator } = require('./messageDispatchCoordinator');
+const { createMessageTaskControlCoordinator } = require('./messageTaskControl');
+const {
+  appendInboundTimingLog,
+  createInboundTimingLogger,
+  createMessageTelemetryCoordinator,
+  createReplyTelemetryBridge,
+  getRawMessageTimestampMs
+} = require('./messageTelemetry');
+const { ensureCachedImageRef } = require('../utils/imageInputCache');
+const {
+  buildDirectedConversationSummary,
+  createMessageVisualContext,
+  buildVisualImageCollection,
+  buildVisualImageCollectionDetails,
+  resolveVisualInputFromContinuousMeta,
+  resolveVisualInputFromContinuousMetaCore
+} = require('./messageVisualContext');
+const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
+const { triggerRemoteRestart } = require('../utils/remoteRestart');
+const {
+  buildQqRichReplyPrompt: buildQqRichReplyPromptOwner,
+  buildSafetyBoundaryRoutePrompt: buildSafetyBoundaryRoutePromptOwner,
+  buildStreamingSegmentationPrompt: buildStreamingSegmentationPromptOwner,
+  buildToolGuidancePrompt: buildToolGuidancePromptOwner,
+  getRouteDisplayType: getRouteDisplayTypeOwner,
+  shouldPreferQqRichReply: shouldPreferQqRichReplyOwner
+} = require('./messagePromptComposer');
+const {
+  createProactiveGreetingFlow,
+  shouldSendScheduledGreeting: proactiveShouldSendScheduledGreeting
+} = require('./proactiveGreetingFlow');
+const { planDirectChat } = require('./directChatPlanner');
+const {
+  PRIVATE_CHAT_WHITELIST_REPLY,
+  PRIVATE_GROUP_ONLY_REPLY,
+  canBypassPrivateGroupOnly,
+  isPrivateChatType,
+  isPrivateChatUserAllowed
+} = require('../src/message/private-chat');
+const {
+  buildBackgroundAckText,
+  buildNoTaskControlText,
+  buildSessionStatusReply,
+  buildSupplementedTaskText,
+  parseBackgroundControlCommand
+} = require('../src/message/background-control');
+const {
+  buildQqRichMessagePayload,
+  parseQqRichMessage,
+  shouldPreferQqRichReply
+} = require('../src/message/rich-message');
+const {
+  buildQzoneAutodraftPrompt,
+  shouldAutoDraftQzonePostRequest: shouldAutoDraftQzonePostRequestBase
+} = require('../src/message/qzone');
+const {
+  createStreamingDispatcher,
+  getModelSegmentBreakIndex,
+  getNaturalSplitIndex,
+  getReplyChunkChars,
+  getStreamMaxSegments,
+  getStreamSendGapMs,
+  splitReplyForSend
+} = require('../src/message/streaming');
+const {
+  cancelScheduledTask,
+  createScheduledCommand,
+  deleteScheduledTask,
+  isAdminUser,
+  listScheduledTasks,
+  publishQzoneForContext,
+  scheduleGroupMessage,
+  sendGroupPoke,
+  sendPrivatePoke,
+  setMessageEmojiLike
+} = require('../api/qqActionService');
+const {
+  armCotOnce,
+  consumeCotOnce,
+  getCotOnceTtlMs
+} = require('../utils/cotOnceRuntime');
+function getVisionCaptionWorkerModule() {
+  return require('./visionCaptionWorker');
+}
+
+function askAIByGraph(...args) {
+  return require('../api/agentGraph').askAIByGraph(...args);
+}
+
+function runPersistInBackgroundFromCheckpoint(...args) {
+  return require('../api/agentGraph').runPersistInBackgroundFromCheckpoint(...args);
+}
+
+function getMemeManagerModule() {
+  return require('./memeManager');
+}
+
+function getDailyShareEngineModule() {
+  return require('./dailyShareEngine');
+}
+
+function getCreateAgentExecutorModule() {
+  return require('../api/createAgentExecutor');
+}
+
+function getQzoneDiaryServiceModule() {
+  return require('../api/qzoneDiaryService');
+}
+
+function detectQzonePostDraftMode(...args) {
+  return getQzoneDiaryServiceModule().detectQzonePostDraftMode(...args);
+}
+
+function generateBotDiaryDraft(...args) {
+  return getQzoneDiaryServiceModule().generateBotDiaryDraft(...args);
+}
+
+function generateGenericQzoneDraft(...args) {
+  return getQzoneDiaryServiceModule().generateGenericQzoneDraft(...args);
+}
+
+function normalizeGeneratedQzoneContent(...args) {
+  return getQzoneDiaryServiceModule().normalizeGeneratedQzoneContent(...args);
+}
+
+function consumePendingUploadFromMessage(...args) {
+  return getMemeManagerModule().consumePendingUploadFromMessage(...args);
+}
+
+function handleAdminCommand(...args) {
+  return getMemeManagerModule().handleAdminCommand(...args);
+}
+
+function maybeSendMemeFollowup(...args) {
+  return getMemeManagerModule().maybeSendMemeFollowup(...args);
+}
+const {
+  appendShortTermHistory,
+  resolveShortTermSessionKey,
+  getShortTermPresence,
+  updateShortTermPresence
+} = require('../utils/shortTermMemory');
+const { buildNormalFastReplyDecision } = require('../utils/normalFastReplyGate');
+const { runNormalFastReply } = require('./normalFastReplyRuntime');
+const {
+  NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE,
+  createNormalGroupMainReplyRateLimiter
+} = require('../utils/normalGroupMainReplyRateLimiter');
+const { createCheckpointStore, resolveThreadId } = require('../utils/langgraphV2Store');
+const {
+  saveSessionContextSummary,
+  getSessionSummaryCooldownStatus
+} = require('../utils/sessionContextSummaryStore');
+const {
+  appendRequestTraceEvent,
+  cloneTraceForMeta,
+  createRequestTrace,
+  extractErrorCode,
+  nextTracePhase
+} = require('../utils/requestTrace');
+const {
+  generateSessionContextSummary
+} = require('../utils/sessionContextSummaryRuntime');
+const {
+  captureCorrection,
+  captureFeatureRequest,
+  formatEventsAsText,
+  formatGuidesAsText,
+  formatPatternsAsText,
+  formatRulesAsText,
+  listGuides,
+  listPatterns,
+  listRecentEvents,
+  listRules,
+  searchEvents
+} = require('../utils/selfImprovementRuntime');
+const {
+  formatStyleProfileAsText,
+  recordHumanGroupMessage: recordStyleHumanGroupMessage
+} = require('../utils/styleProfileRuntime');
+const {
+  formatRelationshipGraphAsText,
+  formatSocialContextAsText,
+  recordHumanGroupMessage: recordSocialHumanGroupMessage
+} = require('../utils/socialContextRuntime');
+const { appendGroupMessage, getLastReplyAt } = require('../utils/groupAwarenessState');
+const { recordHumanInbound } = require('./initiativeState');
+const { clearGroupMute, getGroupInitiativeState, setGroupMute } = require('./initiativeState');
+const {
+  sendGroupReply: sendSystemGroupReply
+} = require('./systemGroupReply');
+
+const shouldUseToolRoute = (...args) => routeExecution.shouldUseToolRoute(...args);
+const promptComposerGetRouteDisplayType = (...args) => getRouteDisplayTypeOwner(...args);
+const promptComposerBuildToolGuidancePrompt = (...args) => buildToolGuidancePromptOwner(...args);
+const promptComposerBuildStreamingSegmentationPrompt = (...args) => buildStreamingSegmentationPromptOwner(...args);
+const promptComposerShouldPreferQqRichReply = (...args) => shouldPreferQqRichReplyOwner(...args);
+const promptComposerBuildQqRichReplyPrompt = (...args) => buildQqRichReplyPromptOwner(...args);
+const promptComposerBuildSafetyBoundaryRoutePrompt = (...args) => buildSafetyBoundaryRoutePromptOwner(...args);
+// source-compat anchors for admin route handling now owned by messageRouteFlow:
+// cmd === 'learn_recent'
+// cmd === 'learn_search'
+// cmd === 'learn_patterns'
+// cmd === 'learn_rules'
+// cmd === 'learn_guide'
+

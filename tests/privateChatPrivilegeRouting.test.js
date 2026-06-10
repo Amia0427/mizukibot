@@ -33,7 +33,7 @@ module.exports = (() => {
     );
     assert.strictEqual(
       contextBudget.isHighAffinityUser({}, { userId: 'admin_only', chatType: 'private' }),
-      false
+      true
     );
     assert.strictEqual(
       contextBudget.isHighAffinityUser({}, { userId: 'admin_1', chatType: 'private' }),
@@ -54,12 +54,33 @@ module.exports = (() => {
     );
 
     const testerModel = mainModelConfigResolver.resolveRoleAwareMainModelConfig('tester_1', null, { chatType: 'private' });
-    const adminOnlyModel = mainModelConfigResolver.resolveRoleAwareMainModelConfig('admin_only', null, { chatType: 'private' });
-    const privilegedModel = mainModelConfigResolver.resolveRoleAwareMainModelConfig('admin_1', null, { chatType: 'private' });
+    const adminOnlyModel = mainModelConfigResolver.resolveRoleAwareMainModelConfig('admin_only', null, {
+      chatType: 'private',
+      topRouteType: 'direct_chat',
+      routePolicyKey: 'chat/default'
+    });
+    const privilegedModel = mainModelConfigResolver.resolveRoleAwareMainModelConfig('admin_1', null, {
+      chatType: 'private',
+      topRouteType: 'direct_chat',
+      routePolicyKey: 'chat/default'
+    });
+    const adminCommandModel = mainModelConfigResolver.resolveRoleAwareMainModelConfig('admin_1', null, {
+      chatType: 'private',
+      topRouteType: 'admin',
+      routePolicyKey: 'admin/default'
+    });
+    const groupAdminModel = mainModelConfigResolver.resolveRoleAwareMainModelConfig('admin_1', null, {
+      chatType: 'group',
+      topRouteType: 'direct_chat',
+      routePolicyKey: 'chat/default',
+      routeMeta: { groupId: 'g1' }
+    });
 
     assert.strictEqual(testerModel.model, 'base-model');
     assert.strictEqual(adminOnlyModel.model, 'admin-model');
     assert.strictEqual(privilegedModel.model, 'admin-model');
+    assert.strictEqual(adminCommandModel.model, 'admin-model');
+    assert.strictEqual(groupAdminModel.model, 'admin-model');
 
     console.log('privateChatPrivilegeRouting.test.js passed');
   } finally {

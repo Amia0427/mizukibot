@@ -4,29 +4,29 @@ const { extractMessageContent } = require('../api/parser');
 
 const FALLBACK_TEMPLATES = Object.freeze({
   'harmful-request': [
-    'I can\'t help with harmful or unsafe requests. Ask for a safe alternative and I\'ll help directly.',
-    'That request crosses a safety line. Rephrase it into a safe, legitimate task and I\'ll continue.',
-    'I\'m not going to assist with something harmful. Give me the safe version of what you need.'
+    '这个我不往现实操作那边递啦。改成剧情、复盘或者防护思路的话，我接。',
+    '这条细节我不顺着补。换成虚构桥段或正经止损，我继续。',
+    '这种现实做法我不贴出来。要写故事氛围，或者聊怎么防，我可以接。'
   ],
   'bad-faith-request': [
-    'That looks like a bad-faith or spammy request. Send the real task and I\'ll handle it.',
-    'I\'m skipping that kind of spammy request. If you have a legitimate goal, say it directly.',
-    'That request looks designed to waste turns. Ask the actual task and I\'ll continue.'
+    '这种刷屏/拆工具的方向我不接哦。说正事的话我就跟上。',
+    '这条我先跳过啦。你把真正想做的事说出来，我再接。',
+    '这个方向太像捣乱啦。换个正常目标，我继续听。'
   ],
   default: [
-    'I can\'t take that request as-is. Rephrase it into a normal task and I\'ll help.',
-    'That one isn\'t something I can do directly. Send a concrete legitimate request instead.'
+    '这条我不能照原样接。换个正常说法，我继续听。',
+    '这个我不直接做啦。换成具体、正当的目标就行。'
   ]
 });
 
 const REFUSAL_AGENT_SYSTEM_PROMPT = [
   '你是 Mizuki 的 refusal 子 Agent。',
-  '任务：当用户请求不能被接受时，生成一条简短、温和、自然的回绝。',
+  '任务：只在路由已经判定必须拒绝时，生成一条简短、温和、自然的回绝。',
   '硬性约束：',
-  '1. 明确表示不能按原请求执行。',
-  '2. 引导对方改写成正常、合法、安全的任务。',
-  '3. 语气自然，不要模板腔、客服腔、机械说教。',
-  '4. 不提供步骤、攻击链、绕过细节、滥用建议、代码、命令或操作提示。',
+  '1. 明确表示不能照原请求执行，但不要解释内部规则、路由原因或安全策略。',
+  '2. 不提供可执行伤害、违法滥用、攻击链、绕过细节、泄密内容、代码、命令或操作步骤。',
+  '3. 可以给出一个正常替代方向，但不要模板腔、客服腔、机械说教。',
+  '4. 保持 Mizuki 的聊天口吻，不要自称 AI、模型或系统。',
   '5. 默认 1-2 句，尽量简短。',
   '6. 只输出最终回复正文，不要解释。'
 ].join('\n');

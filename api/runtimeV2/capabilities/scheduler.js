@@ -9,6 +9,7 @@ const {
 } = require('../../../utils/memoryCliTurnPolicy');
 const { buildCapabilityRegistry } = require('./registry');
 const { maybeRunGlobalToolRuntime } = require('../globalToolRuntimeFacade');
+const { isToolAllowedByRuntimeList } = require('../../../utils/localToolAccess');
 const {
   normalizeArray,
   normalizeExecutionEnvelope,
@@ -272,7 +273,8 @@ function isToolFailureText(resultText = '') {
     || /^页面提取失败[:：]/i.test(text)
     || /^MCP tool failed:/i.test(text)
     || /^request was blocked/i.test(text)
-    || /^invalid api key$/i.test(text);
+    || /^invalid api key$/i.test(text)
+    || /刚刚翻记忆没翻稳|记忆那边刚刚绕住了|翻完以后那句空掉了|刚刚那句被卡掉了|配置像是没扣好|额度好像见底/i.test(text);
 }
 
 function isMemorySearchCommand(commandText = '') {
@@ -304,6 +306,8 @@ function computeToolEnvelope(step = {}, rawResult = '', descriptor = null, helpe
     side_effect: isSideEffectCapability(descriptor),
     retryable: status !== 'completed',
     attempt: Number(step.attempts || 0) + 1,
+    duration_ms: 0,
+    source: normalizeText(helpers.source || 'dispatch') || 'dispatch',
     batch_id: step.batchId || step.batch_id || '',
     batch_index: step.batchIndex ?? step.batch_index
   }, step);
@@ -561,12 +565,19 @@ async function executeStep(step = {}, state = {}, context = {}) {
   const executionState = normalizeObject(state.execution, {});
   const toolName = normalizeText(step.tool);
   const runtimeNode = normalizeText(context.node || state.execution?.currentNode) || 'unknown';
-  const allowedTools = normalizeArray(context.allowedTools ?? state.request?.allowedTools)
+  const computeEffectiveAllowedTools = typeof context.helpers?.computeEffectiveAllowedTools === 'function'
+    ? context.helpers.computeEffectiveAllowedTools
+    : null;
+  const allowedTools = normalizeArray(context.allowedTools ?? (
+    computeEffectiveAllowedTools
+      ? computeEffectiveAllowedTools(state.request || {}, executionState.memoryCliTurn)
+      : state.request?.allowedTools
+  ))
     .map((item) => normalizeText(item))
     .filter(Boolean);
   const executor = normalizeObject(context.executors, {})[toolName] || descriptor?.executor || null;
 
-  if (allowedTools.length > 0 && !allowedTools.includes(toolName)) {
+  if (!isToolAllowedByRuntimeList(toolName, allowedTools)) {
     const blockedEnvelope = buildBlockedToolEnvelope(step, executionState, descriptor, helpers, 'tool_not_allowed');
     maybeCaptureToolFailure(blockedEnvelope, step, state, helpers);
     logToolExecution(blockedEnvelope, step, state, {
@@ -776,7 +787,10 @@ async function executeBatch(steps = [], state = {}, context = {}) {
           item,
           `Tool error: timeout after ${timeoutMs}ms`,
           descriptor,
-          normalizeObject(context.helpers, {})
+          {
+            ...normalizeObject(context.helpers, {}),
+            source: 'dispatch'
+          }
         )), timeoutMs))
       ])
       : await run;
@@ -807,7 +821,10 @@ async function executeBatch(steps = [], state = {}, context = {}) {
             item,
             `Tool error: ${error?.message || 'unknown error'}`,
             descriptor,
-            normalizeObject(context.helpers, {})
+            {
+              ...normalizeObject(context.helpers, {}),
+              source: 'dispatch'
+            }
           );
         }
       }

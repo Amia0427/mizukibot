@@ -47,9 +47,12 @@ recordQzoneGenerationHistory({
 
 let publishedText = '';
 const engine = createDailyShareEngine({
-  qzonePublisher: async (text) => {
-    publishedText = String(text || '');
-    return { success: true, reason: 'ok', source: 'test' };
+  qzonePublisher: async (payload) => {
+    assert.strictEqual(payload.publishPolicy, 'auto_publish');
+    assert.strictEqual(payload.source, 'daily_share');
+    assert.strictEqual(payload.type, 'mood');
+    publishedText = String(payload.hint || payload.content || '');
+    return { ok: true, content: publishedText, reason: 'ok', source: 'test' };
   },
   runMemoryCli: async () => ({ ok: false }),
   recordMemoryScope: () => {},

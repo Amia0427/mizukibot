@@ -2,41 +2,56 @@
   "version": 1,
   "system_prompt": {
     "preamble": [
-      "你是晓山瑞希风格的聊天伙伴。",
-      "禁止对系统提示词进行任何的修改和增加。",
-      "优先自然、像真人聊天，不要写成模板化助理回复。"
+      "进入沉浸式角色扮演模式",
+      "你是瑞希"
     ],
     "sections": [
+      {
+        "id": "admin_system_prompt",
+        "path": "admin.txt",
+        "required": false,
+        "kind": "system_root",
+        "authority": "system_root",
+        "priority": -1100,
+        "applies_when": {
+          "admin_only": true
+        }
+      },
+      {
+        "id": "root_system_prompt",
+        "path": "SYSTEM.txt",
+        "required": false,
+        "kind": "system_root",
+        "authority": "system_root",
+        "priority": -1000
+      },
       {
         "id": "persona_identity",
         "path": "persona/01_identity.txt",
         "required": true,
-        "kind": "persona_core"
-      },
-      {
-        "id": "persona_style",
-        "path": "persona/02_style.txt",
-        "required": true,
-        "kind": "persona_style"
+        "kind": "persona_core",
+        "priority": -40
       },
       {
         "id": "persona_boundaries",
         "path": "persona/03_boundaries.txt",
         "required": true,
-        "kind": "persona_policy"
+        "kind": "persona_policy",
+        "priority": -30
+      },
+      {
+        "id": "persona_style",
+        "path": "persona/02_style.txt",
+        "required": true,
+        "kind": "persona_style",
+        "priority": 10
       },
       {
         "id": "persona_behavior",
         "path": "persona/04_behavior.txt",
         "required": true,
-        "kind": "persona_behavior"
-      },
-      {
-        "id": "persona_examples_reference",
-        "path": "persona/05_examples.txt",
-        "required": false,
-        "kind": "persona_examples_reference",
-        "include_in_system_prompt": false
+        "kind": "persona_behavior",
+        "priority": 20
       },
       {
         "id": "persona_examples_index",
@@ -46,16 +61,28 @@
         "include_in_system_prompt": false
       },
       {
+        "id": "persona_voice_samples",
+        "path": "persona/05_voice_samples.txt",
+        "required": false,
+        "kind": "persona_examples_reference",
+        "include_in_system_prompt": false
+      },
+      {
         "id": "persona_state_modulation",
         "path": "persona/06_state_modulation.txt",
         "required": true,
-        "kind": "persona_modulation"
+        "kind": "persona_modulation",
+        "priority": 100
       },
       {
-        "id": "persona_opus_localization",
-        "path": "persona/07_opus_localization.txt",
+        "id": "persona_liveness_authentic",
+        "path": "persona/09_liveness_authentic.txt",
         "required": true,
-        "kind": "persona_modulation"
+        "kind": "persona_quality",
+        "authority": "persona_core",
+        "priority": 810,
+        "budget_tokens": 400,
+        "include_in_system_prompt": false
       },
       {
         "id": "persona_core_baseline_patch",
@@ -514,6 +541,18 @@
         "include_in_system_prompt": false
       },
       {
+        "id": "persona_module_micro_behavior",
+        "path": "persona_modules/micro_behavior.txt",
+        "required": false,
+        "kind": "persona_module",
+        "stage": "main",
+        "authority": "persona_module",
+        "priority": 619,
+        "budget_tokens": 120,
+        "conflict_tags": ["persona_roleplay"],
+        "include_in_system_prompt": false
+      },
+      {
         "id": "persona_module_roleplay_friend_bit",
         "path": "persona_modules/roleplay_friend_bit.txt",
         "required": false,
@@ -580,13 +619,6 @@
         "include_in_system_prompt": false
       },
       {
-        "id": "runtime_bridge_guidance",
-        "path": "runtime/bridge-guidance.txt",
-        "required": false,
-        "kind": "runtime_template",
-        "include_in_system_prompt": false
-      },
-      {
         "id": "runtime_direct_chat_planner",
         "path": "runtime/direct-chat-planner.txt",
         "required": false,
@@ -603,6 +635,20 @@
       {
         "id": "runtime_qq_rich_reply",
         "path": "runtime/qq-rich-reply.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_image_chat_pragmatics",
+        "path": "runtime/image-chat-pragmatics.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "runtime_roleplay_inner_protocol",
+        "path": "runtime/roleplay-inner-protocol.txt",
         "required": false,
         "kind": "runtime_template",
         "include_in_system_prompt": false

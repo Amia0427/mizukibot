@@ -12,6 +12,11 @@ const {
 } = require('./executablePlan');
 const config = require('../config');
 const { filterCompanionAllowedTools } = require('../utils/companionTools');
+const { isAdminUserId, isPrivateChatAccessAllowed } = require('../utils/privilegedPrivateChat');
+const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  routeHasExplicitWebSearchRequirement
+} = require('../utils/webSearchRequirement');
 
 // routeExecution consumes only canonical contract data plus planner output.
 // It must not infer a new top route type or treat routeProfiles as routing truth.
@@ -21,8 +26,7 @@ const EXECUTORS = Object.freeze([
   'refuse',
   'admin',
   'direct',
-  'background_direct',
-  'full_subagent'
+  'background_direct'
 ]);
 
 function getToolPlanner(route = {}) {
@@ -40,7 +44,7 @@ function getCapabilityForExecutor(executor = 'direct') {
   const normalized = String(executor || '').trim();
   if (normalized === 'ignore') return 'ignore';
   if (normalized === 'refuse') return 'refuse';
-  if (normalized === 'admin' || normalized === 'full_subagent') return 'admin';
+  if (normalized === 'admin') return 'admin';
   return 'direct';
 }
 
@@ -52,7 +56,6 @@ function buildRouteDebugKey(route = {}) {
   if (contract.topRouteType === 'refuse') return 'refuse/default';
   if (contract.topRouteType === 'admin') {
     if (command) {
-      if (command === 'full' && route?.meta?.admin !== true) return 'admin/unauthorized';
       return `admin/${command}`;
     }
     return 'admin/default';
@@ -78,7 +81,6 @@ function resolvePolicyKey(route = {}) {
   if (contract.topRouteType === 'ignore') return 'ignore/default';
   if (contract.topRouteType === 'refuse') return 'refuse/default';
   if (contract.topRouteType === 'admin') {
-    if (command === 'full') return 'admin/full';
     return 'admin/default';
   }
 
@@ -114,9 +116,9 @@ function resolvePolicyKey(route = {}) {
 
 function resolveQqActionTools(route = {}) {
   const qqActionKey = String(route?.meta?.qqActionKey || '').trim().toLowerCase();
-  if (qqActionKey === 'qq_publish_qzone') return ['publish_qzone'];
+  if (qqActionKey === 'qq_publish_qzone') return ['qzone_draft'];
   if (qqActionKey === 'qq_schedule_message') return ['schedule_group_message', 'create_scheduled_command'];
-  if (qqActionKey === 'qq_schedule_qzone') return ['create_scheduled_command'];
+  if (qqActionKey === 'qq_schedule_qzone') return ['create_qzone_auto_task', 'create_scheduled_command'];
   if (qqActionKey === 'qq_list_scheduled') return ['list_scheduled_tasks'];
   if (qqActionKey === 'qq_cancel_scheduled') return ['list_scheduled_tasks', 'cancel_scheduled_task', 'delete_scheduled_task'];
   return [];
@@ -144,13 +146,32 @@ function normalizeChatType(route = {}) {
     : 'group';
 }
 
+function isPrivateActionExempt(route = {}, runtimeConfig = config) {
+  if (normalizeChatType(route) !== 'private') return false;
+  const userId = String(route?.meta?.userId || route?.meta?.senderId || '').trim();
+  if (!userId) return false;
+  return isPrivateChatAccessAllowed({
+    chatType: 'private',
+    userId,
+    config: runtimeConfig
+  });
+}
+
+function isPrivateAdminUser(route = {}, runtimeConfig = config) {
+  if (normalizeChatType(route) !== 'private') return false;
+  const userId = String(route?.meta?.userId || route?.meta?.senderId || '').trim();
+  return isAdminUserId(userId, runtimeConfig);
+}
+
 function isPrivateSafeTool(toolName = '') {
   const normalized = String(toolName || '').trim();
   if (!normalized) return false;
 
   const blockedByName = new Set([
     'publish_qzone',
+    'qzone_draft',
     'schedule_group_message',
+    'create_qzone_auto_task',
     'create_scheduled_command',
     'list_scheduled_tasks',
     'cancel_scheduled_task',
@@ -164,14 +185,24 @@ function isPrivateSafeTool(toolName = '') {
   return true;
 }
 
-function filterAllowedToolsForChatType(route = {}, allowedTools = []) {
-  const normalizedTools = filterCompanionAllowedTools(normalizeToolNames(allowedTools), config);
+function filterAllowedToolsForChatType(route = {}, allowedTools = [], runtimeConfig = config) {
+  const rawTools = normalizeToolNames(allowedTools);
+  if (isPrivateAdminUser(route, runtimeConfig)) return rawTools;
+  const companionTools = filterCompanionAllowedTools(rawTools, runtimeConfig);
+  const normalizedTools = routeHasExplicitWebSearchRequirement(route)
+    ? normalizeToolNames([
+        ...companionTools,
+        ...rawTools.filter((toolName) => WEB_LOOKUP_ALLOWED_TOOLS.includes(toolName))
+      ])
+    : companionTools;
   if (normalizeChatType(route) !== 'private') return normalizedTools;
+  if (isPrivateActionExempt(route, runtimeConfig)) return normalizedTools;
   return normalizedTools.filter((toolName) => isPrivateSafeTool(toolName));
 }
 
-function resolvePrivateRestrictionReason(route = {}, normalizedAllowedTools = [], originalAllowedTools = []) {
+function resolvePrivateRestrictionReason(route = {}, normalizedAllowedTools = [], originalAllowedTools = [], runtimeConfig = config) {
   if (normalizeChatType(route) !== 'private') return '';
+  if (isPrivateActionExempt(route, runtimeConfig)) return '';
   const command = String(route?.meta?.command?.cmd || '').trim().toLowerCase();
   if (command) return 'private-group-only';
   const qqActionKey = String(route?.meta?.qqActionKey || '').trim().toLowerCase();
@@ -188,6 +219,8 @@ function buildBasePlan(route = {}) {
   const topRouteType = sanitizeTopRouteType(route?.topRouteType || 'direct_chat');
   const policyKey = resolvePolicyKey(route);
   const routeDebugKey = buildRouteDebugKey(route);
+  const chatMode = String(route?.meta?.chatMode || '').trim().toLowerCase();
+  const isVisionRoute = Boolean(route?.imageUrl) || chatMode === 'image_qa' || chatMode === 'image_summary';
   return {
     executor: 'direct',
     topRouteType,
@@ -196,7 +229,7 @@ function buildBasePlan(route = {}) {
     allowTools: false,
     allowedTools: [],
     allowedToolBuckets: [],
-    allowStream: topRouteType === 'direct_chat' && !route?.imageUrl,
+    allowStream: topRouteType === 'direct_chat' && !isVisionRoute,
     needsBackground: false,
     unavailableReason: '',
     routeTrace: buildRouteTrace(route, {
@@ -243,7 +276,7 @@ function withRouteTrace(route = {}, plan = {}) {
   };
 }
 
-function resolveDirectChatExecution(route = {}) {
+function resolveDirectChatExecution(route = {}, runtimeConfig = config) {
   const base = buildBasePlan(route);
   const plannerDecision = getToolPlanner(route);
   const toolIntent = String(route?.meta?.toolIntent || '').trim();
@@ -280,7 +313,7 @@ function resolveDirectChatExecution(route = {}) {
   const rawAllowedTools = qqActionTools.length > 0
     ? plannerAllowedTools.filter((toolName) => qqActionTools.includes(toolName))
     : plannerAllowedTools;
-  const allowedTools = filterAllowedToolsForChatType(route, rawAllowedTools);
+  const allowedTools = filterAllowedToolsForChatType(route, rawAllowedTools, runtimeConfig);
   const executablePlan = plannerDecision?.executablePlan || buildExecutablePlanFromPlannerDecision(plannerDecision || {}, resolvePolicyKey(route), route);
   const validation = validateExecutablePlanTools(executablePlan, allowedTools);
   const toolPlanAllowedSteps = validation.allowedPlanSteps.filter((step) => step.action && step.action !== 'reply');
@@ -288,8 +321,9 @@ function resolveDirectChatExecution(route = {}) {
   const needsBackground = Boolean(plannerDecision?.needsBackground);
   const routeDebugKey = buildRouteDebugKey(route);
   const policyKey = resolvePolicyKey(route);
-  const privateRestrictionReason = resolvePrivateRestrictionReason(route, allowedTools, rawAllowedTools);
+  const privateRestrictionReason = resolvePrivateRestrictionReason(route, allowedTools, rawAllowedTools, runtimeConfig);
   const chatMode = String(route?.meta?.chatMode || '').trim().toLowerCase();
+  const isVisionRoute = Boolean(route?.imageUrl) || chatMode === 'image_qa' || chatMode === 'image_summary';
   const visionDirectReply = normalizeChatType(route) === 'private'
     && (chatMode === 'image_qa' || chatMode === 'image_summary')
     && rawAllowedTools.length === 0;
@@ -301,13 +335,13 @@ function resolveDirectChatExecution(route = {}) {
         executor: needsBackground ? 'background_direct' : 'direct',
         policyKey,
         routeDebugKey,
-      allowStream: false,
-      needsBackground,
-      executablePlan: validation.executablePlan,
-      allowedPlanSteps: validation.allowedPlanSteps,
-      blockedPlanSteps: validation.blockedPlanSteps,
-      unavailableReason: ''
-    });
+        allowStream: false,
+        needsBackground,
+        executablePlan: validation.executablePlan,
+        allowedPlanSteps: validation.allowedPlanSteps,
+        blockedPlanSteps: validation.blockedPlanSteps,
+        unavailableReason: ''
+      });
     }
     if (toolIntent === 'force_tools') {
       return withRouteTrace(route, {
@@ -328,7 +362,7 @@ function resolveDirectChatExecution(route = {}) {
       executor: needsBackground ? 'background_direct' : 'direct',
       policyKey,
       routeDebugKey,
-      allowStream: !needsBackground && !route?.imageUrl,
+      allowStream: !needsBackground && !isVisionRoute,
       needsBackground,
       executablePlan: validation.executablePlan,
       allowedPlanSteps: validation.allowedPlanSteps,
@@ -353,7 +387,7 @@ function resolveDirectChatExecution(route = {}) {
   });
 }
 
-function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
+function resolveRouteExecution(route = {}, runtimeConfig = config, _options = {}) {
   const contract = buildCanonicalRouteContract(route);
   const base = buildBasePlan(route);
   const chatType = normalizeChatType(route);
@@ -375,7 +409,7 @@ function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
   }
 
   if (contract.topRouteType === 'admin') {
-    if (chatType === 'private') {
+    if (chatType === 'private' && !isPrivateAdminUser(route, runtimeConfig || config)) {
       return withRouteTrace(route, {
         ...base,
         executor: 'direct',
@@ -384,18 +418,6 @@ function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
         unavailableReason: 'private-group-only'
       });
     }
-    const command = String(route?.meta?.command?.cmd || '').trim().toLowerCase();
-    if (command === 'full' && route?.meta?.admin === true) {
-      return withRouteTrace(route, {
-        ...base,
-        executor: 'full_subagent',
-        policyKey: 'admin/full',
-        routeDebugKey: 'admin/full',
-        allowStream: false,
-        needsBackground: true
-      });
-    }
-
     return withRouteTrace(route, {
       ...base,
       executor: 'admin',
@@ -405,7 +427,7 @@ function resolveRouteExecution(route = {}, _config = {}, _options = {}) {
   }
 
   if (contract.topRouteType === 'direct_chat') {
-    return resolveDirectChatExecution(route);
+    return resolveDirectChatExecution(route, runtimeConfig || config);
   }
 
   return withRouteTrace(route, {
@@ -420,9 +442,7 @@ function shouldUseToolRoute(route = {}) {
 }
 
 function shouldUseSubagentToolRoute(route = {}) {
-  return sanitizeTopRouteType(route?.topRouteType || '') === 'admin'
-    && String(route?.meta?.command?.cmd || '').trim().toLowerCase() === 'full'
-    && route?.meta?.admin === true;
+  return false;
 }
 
 function getPolicyDefinition(policyKey = '') {

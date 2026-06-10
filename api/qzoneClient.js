@@ -243,7 +243,7 @@ async function submitQzonePublish(payload, session = {}, options = {}) {
         Cookie: session.cookie,
         Origin: 'https://user.qzone.qq.com',
         Referer: `https://user.qzone.qq.com/${session.uin}/infocenter`,
-        'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
+        'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT || '').trim() || config.CODEX_USER_AGENT
       }
     });
 
@@ -382,7 +382,7 @@ async function uploadQzoneImage(imagePath, options = {}) {
           Cookie: session.cookie,
           Origin: 'https://ctc.qzs.qq.com',
           Referer: 'https://ctc.qzs.qq.com/qzone/client/photo/swf/SimpleLocalFileUploader/Main.swf?refer=shuoshuo',
-          'User-Agent': String(config.HTTP_USER_AGENT || '').trim() || 'Mozilla/5.0'
+          'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT || '').trim() || config.CODEX_USER_AGENT
         }
       }
     );

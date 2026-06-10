@@ -35,19 +35,23 @@ try {
   const snapshot = { ...process.env };
   process.env.API_KEY = 'main-key';
   process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
+  process.env.API_PROVIDER = 'openai_compatible';
   process.env.AI_MODEL = 'main-model';
   process.env.AI_FALLBACK_ENABLED = 'true';
   process.env.AI_FALLBACK_MODEL = 'main-fallback-model';
   process.env.AI_FALLBACK_API_BASE_URL = 'https://main-fallback.example/v1/chat/completions';
+  process.env.AI_FALLBACK_PROVIDER = 'openai_compatible';
   process.env.AI_FALLBACK_API_KEY = 'main-fallback-key';
   process.env.AI_FALLBACK_FAILURE_THRESHOLD = '3';
   process.env.AI_FALLBACK_COOLDOWN_MS = '600000';
   process.env.ADMIN_AI_MODEL = 'admin-model';
   process.env.ADMIN_API_BASE_URL = 'https://admin.example/v1/chat/completions';
+  process.env.ADMIN_API_PROVIDER = 'openai_compatible';
   process.env.ADMIN_API_KEY = 'admin-key';
   process.env.ADMIN_AI_FALLBACK_ENABLED = 'true';
   process.env.ADMIN_AI_FALLBACK_MODEL = 'admin-fallback-model';
   process.env.ADMIN_AI_FALLBACK_API_BASE_URL = 'https://admin-fallback.example/v1/chat/completions';
+  process.env.ADMIN_AI_FALLBACK_PROVIDER = 'openai_compatible';
   process.env.ADMIN_AI_FALLBACK_API_KEY = 'admin-fallback-key';
   process.env.ADMIN_AI_FALLBACK_FAILURE_THRESHOLD = '3';
   process.env.ADMIN_AI_FALLBACK_COOLDOWN_MS = '900000';
@@ -89,21 +93,26 @@ try {
 
   let adminFallbackConfig = resolveMainModelConfig({
     model: 'admin-model',
+    provider: 'anthropic',
     apiBaseUrl: 'https://admin.example/v1/chat/completions',
     apiKey: 'admin-key'
   }, { scope: ADMIN_SHARED_FALLBACK_SCOPE, now: baseTime + 3 });
   assert.strictEqual(adminFallbackConfig.__mainFallbackActive, true);
   assert.strictEqual(adminFallbackConfig.model, 'admin-fallback-model');
+  assert.strictEqual(adminFallbackConfig.provider, 'openai_compatible');
+  assert.strictEqual(adminFallbackConfig.__mainProviderSource, 'admin_shared.fallbackProvider');
   assert.strictEqual(adminFallbackConfig.apiBaseUrl, 'https://admin-fallback.example/v1/chat/completions');
   assert.strictEqual(adminFallbackConfig.apiKey, 'admin-fallback-key');
 
   adminFallbackConfig = resolveForcedFallbackMainModelConfig({
     model: 'admin-model',
+    provider: 'anthropic',
     apiBaseUrl: 'https://admin.example/v1/chat/completions',
     apiKey: 'admin-key'
   }, { scope: ADMIN_SHARED_FALLBACK_SCOPE });
   assert.strictEqual(adminFallbackConfig.__mainFallbackForced, true);
   assert.strictEqual(adminFallbackConfig.model, 'admin-fallback-model');
+  assert.strictEqual(adminFallbackConfig.provider, 'openai_compatible');
 
   status = recordMainModelSuccess({ usingFallback: false }, { scope: ADMIN_SHARED_FALLBACK_SCOPE, now: baseTime + 4 });
   assert.strictEqual(status.consecutiveFailures, 0);

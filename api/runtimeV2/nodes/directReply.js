@@ -2,6 +2,11 @@ const {
   applyGroupDirectStyleGuard,
   createGroupDirectStyleGuardEvent
 } = require('../guards/groupDirectReplyStyleGuard');
+const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
+const {
+  getNormalUserMainReplyStreamTimeoutReply,
+  isNormalUserMainReplyStreamFirstTokenTimeout
+} = require('../../../utils/normalUserMainReplyStreamTimeout');
 
 function createRouteAfterDirectReply() {
   return function routeAfterDirectReply(state) {
@@ -92,6 +97,7 @@ function createDirectReplyNode(deps = {}) {
         const trimmed = String(text || '').trim();
         if (!trimmed) return false;
         if (isPureToolCallMarkup(trimmed)) return false;
+        if (isUnsafeUserFacingReply(trimmed)) return false;
         return classifyReplyFailure(trimmed).type === 'none';
       });
   const classifyDirectReplyError = typeof deps.classifyDirectReplyError === 'function'
@@ -120,6 +126,13 @@ function createDirectReplyNode(deps = {}) {
         const limit = Math.max(80, Number(maxChars) || 240);
         return compact.length > limit ? `${compact.slice(0, limit - 3).trim()}...` : compact;
       });
+  const buildUnsafeReplyRetryInstruction = typeof deps.buildUnsafeReplyRetryInstruction === 'function'
+    ? deps.buildUnsafeReplyRetryInstruction
+    : (() => [
+        'The previous candidate narrated hidden tool/search work or exposed internal context markers.',
+        'Do not mention tools, searches, commands, or bracketed internal context.',
+        'Reply with plain natural language only, using the context silently.'
+      ].join(' '));
   const buildReplyTextVariants = typeof deps.buildReplyTextVariants === 'function'
     ? deps.buildReplyTextVariants
     : ((text = '') => ({
@@ -172,6 +185,7 @@ function createDirectReplyNode(deps = {}) {
       dynamicPrompt,
       modelConfig: request.modelConfig,
       routePolicyKey: request.routePolicyKey,
+      routeDebugKey: request.routeDebugKey || request.routeMeta?.routeDebugKey,
       reviewMode: request.reviewMode,
       routeMeta: request.routeMeta,
       requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
@@ -180,6 +194,7 @@ function createDirectReplyNode(deps = {}) {
       disableTools: !request.allowTools,
       allowedTools: normalizeArray(request.allowedTools),
       source: 'direct_reply',
+      dispatchBranch: 'direct_reply',
       preserveThink: request.cotDisplayOnce === true
     };
     const baseSystemMessages = getMainConversationSystemMessages(state, {
@@ -220,6 +235,7 @@ function createDirectReplyNode(deps = {}) {
     let executedToolEnvelopes = [];
     let compiledToolPlan = null;
     let firstAssistantReused = false;
+    let humanizerTimedOut = false;
     const initialDirectLoopState = cloneDirectToolLoopState({
       messages: messagesToSend,
       events: [
@@ -243,6 +259,7 @@ function createDirectReplyNode(deps = {}) {
       try {
         const firstAssistantMessage = normalizeMessageForToolLoop(await requestAssistantMessageImpl(messagesToSend, {
           ...directContext,
+          triggerBranch: 'direct_reply.tool_probe',
           disableTools: directEffectiveAllowedTools.length === 0,
           allowedTools: directEffectiveAllowedTools
         }));
@@ -335,22 +352,45 @@ function createDirectReplyNode(deps = {}) {
               mode: 'direct'
             };
           }
+        } else if (isUnsafeUserFacingReply(assistantText)) {
+          directLoopEvents.push(createEvent('unsafe_reply_blocked', {
+            node: 'direct_reply',
+            stage: 'tool_probe',
+            preview: summarizeToolMarkupText(assistantText, 320)
+          }));
+          const replyResult = await requestReplyImpl(
+            messagesToSend.concat([{
+              role: 'system',
+              content: buildUnsafeReplyRetryInstruction()
+            }]),
+            {
+              ...directContext,
+              triggerBranch: 'direct_reply.unsafe_tool_probe_retry',
+              disableTools: true,
+              allowedTools: []
+            }
+          );
+          reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
+          displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
         } else if (request.streaming) {
           const streamed = await streamDirectReply(messagesToSend, {
             ...state,
             request: {
               ...request,
-              routePolicyKey: directContext.routePolicyKey
+              routePolicyKey: directContext.routePolicyKey,
+              routeDebugKey: directContext.routeDebugKey
             }
           });
           reply = streamed.persistedText || streamed.finalReply || '';
           displayReply = streamed.visibleText || streamed.finalReply || '';
           nextStream = streamed.stream;
+          humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
         } else {
           const replyResult = await requestReplyImpl(
             messagesToSend,
             {
               ...directContext,
+              triggerBranch: 'direct_reply.tool_probe_non_stream_fallback',
               disableTools: true,
               allowedTools: []
             }
@@ -416,6 +456,7 @@ function createDirectReplyNode(deps = {}) {
           messagesToSend,
           {
             ...directContext,
+            triggerBranch: 'direct_reply.planner_single_authority',
             disableTools: true,
             allowedTools: []
           }
@@ -448,40 +489,65 @@ function createDirectReplyNode(deps = {}) {
           ...state,
           request: {
             ...request,
-            routePolicyKey: directContext.routePolicyKey
+            routePolicyKey: directContext.routePolicyKey,
+            routeDebugKey: directContext.routeDebugKey
           }
         });
         reply = streamed.persistedText || streamed.finalReply || '';
         displayReply = streamed.visibleText || streamed.finalReply || '';
         nextStream = streamed.stream;
+        humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
       } catch (error) {
         nextStream = error?.outputStream
           ? { ...ensureOutputStream(state.output, 'direct'), ...normalizeObject(error.outputStream, {}) }
           : { ...ensureOutputStream(state.output, 'direct'), fallbackToNonStream: true };
-        try {
-          const replyResult = await requestReplyImpl(
-            messagesToSend,
-            {
-              ...directContext,
-              disableTools: true,
-              allowedTools: []
-            }
-          );
-          reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
-          displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
-        } catch (fallbackError) {
-          const failureType = classifyDirectReplyError(fallbackError);
+        if (isNormalUserMainReplyStreamFirstTokenTimeout(error)) {
+          const timeoutReply = getNormalUserMainReplyStreamTimeoutReply(error);
+          reply = timeoutReply;
+          displayReply = timeoutReply;
+          nextStream = {
+            ...ensureOutputStream(state.output, 'direct'),
+            ...mirrorStreamingFlags(state.output, timeoutReply),
+            completed: true,
+            fallbackToNonStream: false,
+            mode: 'direct',
+            normalUserStreamFirstTokenTimedOut: true
+          };
           directLoopEvents = directLoopEvents.concat([
-            createEvent('direct_reply_failure', {
+            createEvent('normal_user_stream_first_token_timeout', {
               node: 'direct_reply',
-              stage: 'stream_non_stream_fallback',
-              failureType,
-              fallbackSource: 'controlled_failure',
-              rawErrorMessage: summarizeDirectReplyError(fallbackError)
+              stage: 'streaming_upstream',
+              fallbackSource: 'normal_user_stream_first_token_timeout',
+              timeoutMs: Number(error?.timeoutMs || 0) || 0
             })
           ]);
-          reply = getControlledFailureReply(failureType);
-          displayReply = reply;
+        } else {
+          try {
+            const replyResult = await requestReplyImpl(
+              messagesToSend,
+              {
+                ...directContext,
+                triggerBranch: 'direct_reply.stream_non_stream_fallback',
+                disableTools: true,
+                allowedTools: []
+              }
+            );
+            reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
+            displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
+          } catch (fallbackError) {
+            const failureType = classifyDirectReplyError(fallbackError);
+            directLoopEvents = directLoopEvents.concat([
+              createEvent('direct_reply_failure', {
+                node: 'direct_reply',
+                stage: 'stream_non_stream_fallback',
+                failureType,
+                fallbackSource: 'controlled_failure',
+                rawErrorMessage: summarizeDirectReplyError(fallbackError)
+              })
+            ]);
+            reply = getControlledFailureReply(failureType);
+            displayReply = reply;
+          }
         }
       }
     } else {
@@ -490,6 +556,7 @@ function createDirectReplyNode(deps = {}) {
           messagesToSend,
           {
             ...directContext,
+            triggerBranch: 'direct_reply.non_stream',
             disableTools: true,
             allowedTools: []
           }
@@ -516,6 +583,46 @@ function createDirectReplyNode(deps = {}) {
       displayReply = reply;
     }
 
+    if (isUnsafeUserFacingReply(reply)) {
+      directLoopEvents = directLoopEvents.concat([
+        createEvent('unsafe_reply_blocked', {
+          node: 'direct_reply',
+          stage: 'final_reply',
+          preview: summarizeToolMarkupText(reply, 320)
+        })
+      ]);
+      let retriedReply = '';
+      try {
+        const retryResult = await requestReplyImpl(
+          messagesToSend.concat([{
+            role: 'system',
+            content: buildUnsafeReplyRetryInstruction()
+          }]),
+          {
+            ...directContext,
+            triggerBranch: 'direct_reply.unsafe_final_retry',
+            disableTools: true,
+            allowedTools: []
+          }
+        );
+        retriedReply = String(
+          retryResult?.persistedText
+          || retryResult?.finalReply
+          || retryResult?.visibleText
+          || retryResult
+          || ''
+        ).trim();
+      } catch (_) {}
+
+      if (isStableDirectReplyText(retriedReply)) {
+        reply = retriedReply;
+        displayReply = retriedReply;
+      } else {
+        reply = getControlledFailureReply('generic_model_failure');
+        displayReply = reply;
+      }
+    }
+
     if (isPureToolCallMarkup(reply) && executedToolEnvelopes.length === 0) {
       directLoopEvents = directLoopEvents.concat([
         createEvent('tool_markup_blocked', {
@@ -526,17 +633,25 @@ function createDirectReplyNode(deps = {}) {
       ]);
       let retriedReply = '';
       try {
-        retriedReply = String(await requestReplyImpl(
+        const retryResult = await requestReplyImpl(
           messagesToSend.concat([{
             role: 'system',
-            content: 'Do not emit any <tool_calls> markup or any tool/function call. No tool is available for this turn. Reply with plain natural language only.'
+            content: 'Ignore the previous structured tool-call markup. Reply to the user in plain natural language. Do not mention tools, tool availability, or internal routing.'
           }]),
           {
             ...directContext,
+            triggerBranch: 'direct_reply.pure_tool_markup_retry',
             disableTools: true,
             allowedTools: []
           }
-        ) || '').trim();
+        );
+        retriedReply = String(
+          retryResult?.persistedText
+          || retryResult?.finalReply
+          || retryResult?.visibleText
+          || retryResult
+          || ''
+        ).trim();
       } catch (_) {}
 
       if (isStableDirectReplyText(retriedReply)) {
@@ -598,6 +713,10 @@ function createDirectReplyNode(deps = {}) {
       : null;
 
     const nextEvents = events.concat(directLoopEvents).concat([
+      ...(humanizerTimedOut ? [createEvent('humanizer_first_token_timeout', {
+        node: 'direct_reply',
+        fallbackSource: 'original_streamed_reply'
+      })] : []),
       createEvent('model_reply', {
         node: 'direct_reply',
         preview: String(reply || '').slice(0, 180)
@@ -632,6 +751,7 @@ function createDirectReplyNode(deps = {}) {
             firstAssistantReused,
             hadToolCalls: Boolean(compiledToolPlan),
             mode: request.streaming ? 'streaming' : 'non_stream',
+            humanizerFirstTokenTimeout: humanizerTimedOut,
             tool_probe_ms: toolProbeDurationMs,
             total_direct_reply_ms: Math.max(0, Date.now() - directReplyStartedAt)
           }

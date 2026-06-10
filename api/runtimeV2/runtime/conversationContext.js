@@ -21,6 +21,10 @@ function hasMessageContent(message = {}) {
   return false;
 }
 
+function dynamicPromptHasContextMarker(text = '') {
+  return /\[(?:RetrievedMemoryLite|RetrievedMemory|DailyJournal|TaskMemory|GroupMemory|StyleSignals|ShortTermContinuity|MemOSRecall|LongTermProfile|Impression|Summary|ContinuityState)\]/i.test(String(text || ''));
+}
+
 function createConversationContextHelpers(deps = {}) {
   const OPENAI_COMPATIBLE_CACHE_CONTROL = Object.freeze({
     type: 'ephemeral',
@@ -43,7 +47,10 @@ function createConversationContextHelpers(deps = {}) {
       const plannedTools = normalizeToolNames(
         Array.isArray(planner?.allowedToolNames) ? planner.allowedToolNames : []
       );
-      return filterAllowedToolsForMemoryCliTurn(plannedTools, memoryCliTurn);
+      const filteredPlannedTools = config.MEMORY_CLI_ENABLED && config.MEMORY_CLI_CHAT_ENABLED
+        ? plannedTools
+        : plannedTools.filter((toolName) => toolName !== 'memory_cli');
+      return filterAllowedToolsForMemoryCliTurn(filteredPlannedTools, memoryCliTurn);
     }
     return mergeAllowedToolsWithMemoryCli(request.allowedTools, {
       ...request,
@@ -136,17 +143,11 @@ function createConversationContextHelpers(deps = {}) {
     const blockId = String(block?.id || '').trim();
     if (!blockId) return false;
     return [
+      'root_system_prompt',
       'main_persona_system',
       'security_contract',
       'core_baseline_patch'
     ].includes(blockId);
-  }
-
-  function shouldCacheSessionContextBlock(block = {}) {
-    const blockId = String(block?.id || '').trim();
-    return blockId === 'affinity_level'
-      || blockId === 'affinity_points'
-      || blockId.startsWith('relationship_');
   }
 
   function mapStableSystemBlocksToMessages(blocks = []) {
@@ -167,15 +168,10 @@ function createConversationContextHelpers(deps = {}) {
   function mapDynamicContextBlocksToMessages(blocks = []) {
     return normalizeArray(blocks)
       .filter((item) => item && typeof item === 'object')
-      .map((item) => {
-        const base = {
-          role: 'system',
-          content: String(item.content || '').trim()
-        };
-        return shouldCacheSessionContextBlock(item)
-          ? attachCacheControlToMessage(base, OPENAI_COMPATIBLE_CACHE_CONTROL)
-          : base;
-      })
+      .map((item) => ({
+        role: 'system',
+        content: String(item.content || '').trim()
+      }))
       .filter((item) => hasMessageContent(item));
   }
 
@@ -187,9 +183,6 @@ function createConversationContextHelpers(deps = {}) {
           role: 'assistant',
           content: String(item.content || '').trim()
         };
-        if (String(item?.id || '').trim() === 'dynamic_few_shot') {
-          return attachCacheControlToMessage(message, OPENAI_COMPATIBLE_CACHE_CONTROL);
-        }
         return message;
       })
       .filter((item) => hasMessageContent(item));
@@ -207,15 +200,21 @@ function createConversationContextHelpers(deps = {}) {
     const continuityProbePolicyMessage = buildSilentContinuityProbeSystemMessage(state);
     const dynamicPlan = normalizeObject(state.memory?.promptSnapshot?.dynamicPromptPlan, {});
     const enabledDynamicIds = new Set(normalizeArray(dynamicPlan.enabledBlockIds).map((item) => String(item || '').trim()).filter(Boolean));
+    const continuityPayload = normalizeObject(state.memory?.continuityState?.payload, {});
     const forceIncludeContinuity = Boolean(
-      state.memory?.continuityState?.payload?.active_topic
-      || normalizeArray(state.memory?.continuityState?.payload?.open_loops).length > 0
-      || normalizeArray(state.memory?.continuityState?.payload?.assistant_commitments).length > 0
+      String(continuityPayload.carry_over_user_turn || '').trim()
+      || normalizeArray(continuityPayload.open_loops).length > 0
+      || normalizeArray(continuityPayload.assistant_commitments).length > 0
+      || normalizeArray(continuityPayload.user_constraints).length > 0
+      || normalizeArray(continuityPayload.continuity_probe_digest).length > 0
     );
     const stableBlockMessages = mapStableSystemBlocksToMessages(stableSystemBlocks);
     const dynamicBlockMessages = mapDynamicContextBlocksToMessages(dynamicContextBlocks)
       .filter((message) => hasMessageContent(message));
-    const fallbackDynamicMessages = (!stableBlockMessages.length && dynamicPrompt)
+    const fallbackDynamicMessages = (
+      dynamicPrompt
+      && (!stableBlockMessages.length || (dynamicBlockMessages.length === 0 && dynamicPromptHasContextMarker(dynamicPrompt)))
+    )
       ? [{ role: 'system', content: dynamicPrompt }]
       : [];
     return [

@@ -1,4 +1,5 @@
 const axios = require('axios');
+const config = require('../../../config');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -20,7 +21,7 @@ async function fetchYahooDividend(symbol = '') {
     timeout: 15000,
     proxy: false,
     headers: {
-      'User-Agent': 'MizukiBot/1.0 (stocks native client)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
   return response?.data?.chart?.result?.[0] || null;
@@ -37,7 +38,7 @@ async function fetchTwelveDataDividends(symbol = '') {
     timeout: 15000,
     proxy: false,
     headers: {
-      'User-Agent': 'MizukiBot/1.0 (stocks native client)'
+      'User-Agent': config.HTTP_USER_AGENT
     }
   });
   const payload = response?.data;

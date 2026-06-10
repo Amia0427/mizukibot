@@ -6,14 +6,14 @@ const assert = require('assert');
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-bridge-summary-guard-'));
 process.env.DATA_DIR = tempRoot;
 process.env.SHORT_TERM_BRIDGE_ENABLED = 'true';
-process.env.SHORT_TERM_BRIDGE_FILE = path.join(tempRoot, 'short-term-bridge.json');
 
 fs.mkdirSync(tempRoot, { recursive: true });
 
 const { loadBridgeStore } = require('../utils/shortTermBridgeMemory');
+const config = require('../config');
 
 module.exports = (async () => {
-  const bridgeFile = process.env.SHORT_TERM_BRIDGE_FILE;
+  const bridgeFile = config.SHORT_TERM_BRIDGE_FILE;
   fs.writeFileSync(bridgeFile, JSON.stringify({
     version: 3,
     sessions: {

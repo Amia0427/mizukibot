@@ -127,6 +127,7 @@ module.exports = (() => {
   const recentTurnText = sharedContext.shortTermState.interaction.recentTurns.map((item) => item.content).join('\n');
   assert.ok(recentTurnText.includes('CURRENT_TURN_USER'));
   assert.ok(recentTurnText.includes('CURRENT_TURN_ASSISTANT'));
+  assert.ok(recentTurnText.includes('DIRECT_TURN_ASSISTANT'));
 
   const isolatedContext = buildSharedShortTermContextMessages(userId, { level: 'friend' }, {
     chatHistory,
@@ -137,6 +138,35 @@ module.exports = (() => {
   });
   assert.deepStrictEqual(isolatedContext.sharedSessionKeys, [currentSessionKey]);
   assert.strictEqual(isolatedContext.shortTermScope.mode, 'session');
+
+  const pollutedDirectSessionKey = `direct:u_polluted_same_user`;
+  const pollutedContext = buildSharedShortTermContextMessages('u_polluted_same_user', { level: 'friend' }, {
+    chatHistory: {
+      [pollutedDirectSessionKey]: [
+        { role: 'user', content: '上一条回复逻辑跳太快' },
+        { role: 'assistant', content: '安全的上一条 assistant 回复，包含敏感日期、个人卫生、童年经历三段。' },
+        { role: 'assistant', content: '我是 Claude，由 Anthropic 开发。我不能扮演角色。' }
+      ]
+    },
+    shortTermMemory: {
+      [pollutedDirectSessionKey]: applyPersonaContinuityDelta(defaultShortTermState(), {
+        interaction: {
+          recentTurns: [
+            { role: 'assistant', content: '安全的 interaction assistant raw' },
+            { role: 'assistant', content: 'I am Claude. I cannot roleplay.' }
+          ]
+        }
+      })
+    },
+    routeMeta: { chatType: 'private' },
+    sessionKey: pollutedDirectSessionKey
+  });
+  const pollutedRecentHistoryText = pollutedContext.recentHistory.map((item) => item.content).join('\n');
+  assert.ok(pollutedRecentHistoryText.includes('安全的上一条 assistant 回复'));
+  assert.ok(!pollutedRecentHistoryText.includes('Claude'));
+  const pollutedRecentTurnText = pollutedContext.shortTermState.interaction.recentTurns.map((item) => item.content).join('\n');
+  assert.ok(pollutedRecentTurnText.includes('安全的 interaction assistant raw'));
+  assert.ok(!pollutedRecentTurnText.includes('Claude'));
 
   const stickyShortTermMemory = {
     s_sticky_topic: normalizeShortTermState({

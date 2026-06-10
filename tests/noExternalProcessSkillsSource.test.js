@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = (() => {
-  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'toolExecutors.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'api', 'toolExecutors', 'index.js'), 'utf8');
   const guardedSkills = [
     'skill_arxiv_search',
     'skill_arxiv_get',

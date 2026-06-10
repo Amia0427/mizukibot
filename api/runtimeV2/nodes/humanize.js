@@ -1,3 +1,5 @@
+const { applyGroupDirectStyleGuard } = require('../guards/groupDirectReplyStyleGuard');
+
 function createHumanizeNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
     ? deps.normalizeObject
@@ -35,6 +37,14 @@ function createHumanizeNode(deps = {}) {
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
+
+  function isHumanizerFirstTokenTimeout(error) {
+    return Boolean(
+      error?.humanizerFirstTokenTimeout
+      || String(error?.code || '').trim() === 'HUMANIZER_FIRST_TOKEN_TIMEOUT'
+      || String(error?.reason || '').trim() === 'humanizer_first_token_timeout'
+    );
+  }
 
   function countSentenceLikeUnits(text = '') {
     return Math.max(
@@ -98,33 +108,58 @@ function createHumanizeNode(deps = {}) {
         execution: {
           ...state.execution,
           currentNode: 'humanize',
-          humanizerInvoked: false
+          humanizerInvoked: false,
+          latencyBreakdown: {
+            ...normalizeObject(state.execution?.latencyBreakdown, {}),
+            model: {
+              ...normalizeObject(state.execution?.latencyBreakdown?.model, {}),
+              humanizer_model_calls: Number(state.execution?.latencyBreakdown?.model?.humanizer_model_calls || 0),
+              total_model_calls: Number(state.execution?.latencyBreakdown?.model?.total_model_calls || 0)
+            }
+          }
         },
         events: skippedEvents
       }, 'humanize', 'running', skippedEvents);
     }
 
-    const finalReply = await runHumanizerImpl(draftReply, {
-      question: request.question,
-      dynamicPrompt: [
-        state.memory?.dynamicPrompt || '',
-        request.routePrompt ? `[RoutePrompt]\n${request.routePrompt}` : ''
-      ].filter(Boolean).join('\n\n'),
-      stream: request.streaming,
-      onDelta: request.onDelta,
-      streamHadOutput: Boolean(state.output?.stream?.hadOutput),
-      maxSegments: getMaxSegments()
-    });
+    let humanizerTimedOut = false;
+    let finalReply = '';
+    try {
+      finalReply = await runHumanizerImpl(draftReply, {
+        question: request.question,
+        dynamicPrompt: [
+          state.memory?.dynamicPrompt || '',
+          request.routePrompt ? `[RoutePrompt]\n${request.routePrompt}` : ''
+        ].filter(Boolean).join('\n\n'),
+        stream: request.streaming,
+        onDelta: request.onDelta,
+        streamHadOutput: Boolean(state.output?.stream?.hadOutput),
+        maxSegments: getMaxSegments()
+      });
+    } catch (error) {
+      if (!isHumanizerFirstTokenTimeout(error)) throw error;
+      humanizerTimedOut = true;
+      finalReply = applyGroupDirectStyleGuard(draftReply, request).text || draftReply;
+      if (request.streaming && typeof request.onDelta === 'function' && String(finalReply || '').trim()) {
+        request.onDelta(String(finalReply || '').trim(), String(finalReply || '').trim());
+      }
+    }
     const nextStream = request.streaming
       ? {
         ...ensureOutputStream(state.output, 'final_only'),
         ...mirrorStreamingFlags(state.output, finalReply),
         completed: Boolean(String(finalReply || '').trim()),
+        humanizerTimedOut,
+        fallbackToNonStream: false,
         mode: 'final_only'
       }
       : ensureOutputStream(state.output, 'none');
 
     const nextEvents = events.concat([
+      ...(humanizerTimedOut ? [createEvent('humanizer_first_token_timeout', {
+        node: 'humanize',
+        fallbackSource: 'draft_reply'
+      })] : []),
       createEvent('model_reply', {
         node: 'humanize',
         preview: String(finalReply || '').slice(0, 180)
@@ -143,7 +178,16 @@ function createHumanizeNode(deps = {}) {
       execution: {
         ...state.execution,
         currentNode: 'humanize',
-        humanizerInvoked: true
+        humanizerInvoked: !humanizerTimedOut,
+        humanizerFirstTokenTimeout: humanizerTimedOut,
+        latencyBreakdown: {
+          ...normalizeObject(state.execution?.latencyBreakdown, {}),
+          model: {
+            ...normalizeObject(state.execution?.latencyBreakdown?.model, {}),
+            humanizer_model_calls: Number(state.execution?.latencyBreakdown?.model?.humanizer_model_calls || 0) + 1,
+            total_model_calls: Number(state.execution?.latencyBreakdown?.model?.total_model_calls || 0) + 1
+          }
+        }
       },
       events: nextEvents
     }, 'humanize', 'running', nextEvents);

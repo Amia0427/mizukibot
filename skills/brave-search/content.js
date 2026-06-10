@@ -5,6 +5,7 @@ import { JSDOM } from "jsdom";
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
 
+const CODEX_USER_AGENT = "codex-cli/0.121.0 (external, cli)";
 const url = process.argv[2];
 
 if (!url) {
@@ -36,7 +37,7 @@ function htmlToMarkdown(html) {
 try {
 	const response = await fetch(url, {
 		headers: {
-			"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+			"User-Agent": CODEX_USER_AGENT,
 			"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 			"Accept-Language": "en-US,en;q=0.9",
 		},

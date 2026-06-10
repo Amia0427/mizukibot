@@ -3,15 +3,26 @@ const assert = require('assert');
 process.env.MEMORY_VECTOR_STORE = 'lancedb';
 process.env.MEMORY_LANCEDB_READ_ENABLED = 'true';
 process.env.MEMORY_LANCEDB_SYNC_ENABLED = 'true';
+process.env.MEMORY_LANCEDB_PARTITION_MODE = 'legacy';
 process.env.MEMORY_EMBEDDING_MODEL = 'test-model';
+process.env.MEMORY_LANCEDB_VECTOR_INDEX_TYPE = 'ivf_pq';
+process.env.MEMORY_LANCEDB_VECTOR_INDEX_NUM_BITS = '8';
 
 const {
   buildMemoryFilter,
   buildMemoryVectorRow,
+  buildAllMemoryBucketTableNames,
+  buildVectorIndexConfig,
+  createVectorIndex,
   dedupeVectorRows,
+  diffStaleTableIds,
   fuseRecallCandidates,
+  groupRowsByMemoryBucket,
   isLanceDbReadEnabled,
+  normalizeVectorIndexType,
   normalizeVectorStoreMode,
+  resolveMemorySearchTableNames,
+  syncMemoryRows,
   rowPassesMemoryFilter
 } = require('../utils/lancedbMemoryStore');
 
@@ -43,6 +54,18 @@ assert.ok(!Object.prototype.hasOwnProperty.call(row, 'text'));
 
 assert.strictEqual(normalizeVectorStoreMode('bad-mode'), 'local_jsonl');
 assert.strictEqual(normalizeVectorStoreMode('shadow'), 'shadow');
+assert.strictEqual(normalizeVectorIndexType('pq'), 'ivf_pq');
+assert.strictEqual(normalizeVectorIndexType('flat'), 'ivf_flat');
+const fakeIndexConfig = buildVectorIndexConfig({
+  Index: {
+    ivfPq: (options) => ({ type: 'ivfPq', options }),
+    ivfFlat: (options) => ({ type: 'ivfFlat', options })
+  }
+}, 1024);
+assert.strictEqual(fakeIndexConfig.config.type, 'ivfPq');
+assert.strictEqual(fakeIndexConfig.config.options.numBits, 8);
+assert.strictEqual(fakeIndexConfig.config.options.numSubVectors, 64);
+assert.strictEqual(fakeIndexConfig.config.options.distanceType, 'cosine');
 assert.strictEqual(isLanceDbReadEnabled({
   MEMORY_VECTOR_STORE: 'lancedb',
   MEMORY_LANCEDB_READ_ENABLED: true
@@ -84,5 +107,67 @@ const deduped = dedupeVectorRows([
 ]);
 assert.strictEqual(deduped.length, 2);
 assert.deepStrictEqual(deduped.find((item) => item.id === 'memory:a').vector, [2]);
+assert.deepStrictEqual(diffStaleTableIds(['memory:a', 'memory:c'], deduped), ['memory:c']);
 
-console.log('lancedbMemoryStore.test.js passed');
+const bucketedRows = [
+  { id: 'memory:u1', userId: 'u_bucket_a', scopeType: 'personal', vector: [1], updatedAt: 1 },
+  { id: 'memory:u2', userId: 'u_bucket_a', scopeType: 'session', vector: [1], updatedAt: 1 },
+  { id: 'memory:g1', userId: 'u_bucket_b', groupId: 'g_bucket', scopeType: 'group', vector: [1], updatedAt: 1 }
+];
+const grouped = groupRowsByMemoryBucket('memory_v3_vectors', bucketedRows, { partitionMode: 'user_bucket', bucketCount: 4 });
+assert.strictEqual(grouped.size, 2, 'same user personal/session rows should share one user bucket and group row uses group bucket');
+const bucketTables = Array.from(grouped.keys()).sort();
+assert.ok(bucketTables.some((name) => /^memory_v3_vectors_u_b\d\d$/.test(name)));
+assert.ok(bucketTables.some((name) => /^memory_v3_vectors_g_b\d\d$/.test(name)));
+assert.strictEqual(buildAllMemoryBucketTableNames('memory_v3_vectors', { bucketCount: 4 }).length, 8);
+const searchTables = resolveMemorySearchTableNames('memory_v3_vectors', {
+  userId: 'u_bucket_a',
+  groupId: 'g_bucket'
+}, { partitionMode: 'user_bucket', bucketCount: 4 });
+assert.strictEqual(searchTables.length, 2);
+assert.ok(searchTables.some((name) => /^memory_v3_vectors_u_b\d\d$/.test(name)));
+assert.ok(searchTables.some((name) => /^memory_v3_vectors_g_b\d\d$/.test(name)));
+
+module.exports = (async () => {
+  let fakeExistingIndexes = 2;
+  let fakeDropCalls = 0;
+  let fakeCreateIndexArgs = null;
+  const fakeIndexResult = await createVectorIndex({
+    createIndex: async (...args) => {
+      fakeCreateIndexArgs = args;
+    },
+    dropIndex: async (name) => {
+      assert.strictEqual(name, 'vector_idx');
+      fakeDropCalls += 1;
+      fakeExistingIndexes -= 1;
+    },
+    listIndices: async () => Array.from({ length: fakeExistingIndexes }, () => ({ name: 'vector_idx' }))
+  }, 512);
+  assert.strictEqual(fakeIndexResult.ok, true);
+  assert.strictEqual(fakeIndexResult.skipped, false);
+  assert.strictEqual(fakeIndexResult.droppedIndexes, 2);
+  assert.strictEqual(fakeDropCalls, 2);
+  assert.strictEqual(fakeCreateIndexArgs[0], 'vector');
+  assert.strictEqual(fakeCreateIndexArgs[1].name, 'vector_idx');
+  assert.strictEqual(fakeCreateIndexArgs[1].replace, true);
+
+  const fullDryRun = await syncMemoryRows(deduped, { full: true, dryRun: true, tableName: 'memory_v3_vectors' });
+  assert.strictEqual(fullDryRun.mode, 'overwrite');
+  const reconcileDryRun = await syncMemoryRows(deduped, { fullReconcile: true, dryRun: true, tableName: 'memory_v3_vectors' });
+  assert.strictEqual(reconcileDryRun.mode, 'merge_reconcile');
+  const bucketDryRun = await syncMemoryRows(bucketedRows, {
+    dryRun: true,
+    full: true,
+    tableName: 'memory_v3_vectors',
+    partitionMode: 'user_bucket',
+    bucketCount: 4
+  });
+  assert.strictEqual(bucketDryRun.partitionMode, 'user_bucket');
+  assert.strictEqual(bucketDryRun.tableCount, 8);
+  assert.strictEqual(bucketDryRun.results.filter((item) => Number(item.rows || 0) > 0).length, 2);
+  assert.strictEqual(bucketDryRun.rows, 3);
+  console.log('lancedbMemoryStore.test.js passed');
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

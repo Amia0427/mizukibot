@@ -2,6 +2,7 @@
 const path = require('path');
 
 const ROUTE_PROMPT_POLICY_PATH = path.join(__dirname, '..', 'prompts', 'runtime', 'route-policies.json');
+let routePromptPolicyCache = null;
 
 const DEFAULT_ROUTE_PROMPT_POLICY = {
   version: 1,
@@ -11,10 +12,6 @@ const DEFAULT_ROUTE_PROMPT_POLICY = {
       include_streaming_segmentation: true,
       include_qq_rich_reply_when_requested: true,
       disable_stream_when_qq_rich_requested: true
-    },
-    subagent: {
-      include_tool_guidance: true,
-      include_bridge_guidance: true
     }
   },
   routes: {}
@@ -37,8 +34,26 @@ function safeReadJson(filePath, fallback) {
   }
 }
 
+function safeStatFile(filePath) {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat && stat.isFile() ? stat : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function readRoutePromptPolicy() {
-  return safeReadJson(ROUTE_PROMPT_POLICY_PATH, DEFAULT_ROUTE_PROMPT_POLICY);
+  const stat = safeStatFile(ROUTE_PROMPT_POLICY_PATH);
+  const fileVersion = stat ? `${Number(stat.mtimeMs || 0)}:${Number(stat.size || 0)}` : 'missing';
+  if (routePromptPolicyCache && routePromptPolicyCache.fileVersion === fileVersion) {
+    return routePromptPolicyCache.policy;
+  }
+  const policy = stat
+    ? safeReadJson(ROUTE_PROMPT_POLICY_PATH, DEFAULT_ROUTE_PROMPT_POLICY)
+    : DEFAULT_ROUTE_PROMPT_POLICY;
+  routePromptPolicyCache = { fileVersion, policy };
+  return policy;
 }
 
 function mergePolicy(basePolicy, overridePolicy) {
@@ -70,13 +85,6 @@ function resolveRoutePromptPolicy(routeKey = 'chat/default') {
         topRoutePolicy.chat
       ),
       routeDebugPolicy.chat
-    ),
-    subagent: mergePolicy(
-      mergePolicy(
-        policy.defaults?.subagent,
-        topRoutePolicy.subagent
-      ),
-      routeDebugPolicy.subagent
     )
   };
   return resolved;
@@ -88,7 +96,6 @@ function buildRoutePromptBundle({
   cleanText,
   maxStreamSegments,
   buildToolGuidancePrompt,
-  buildBridgeGuidancePrompt,
   buildStreamingSegmentationPrompt,
   shouldPreferQqRichReply,
   buildQqRichReplyPrompt
@@ -109,9 +116,6 @@ function buildRoutePromptBundle({
   const toolGuidancePrompt = policy.chat.include_tool_guidance
     ? buildToolGuidancePrompt(route)
     : null;
-  const bridgeGuidancePrompt = policy.subagent.include_bridge_guidance && typeof buildBridgeGuidancePrompt === 'function'
-    ? buildBridgeGuidancePrompt(route)
-    : null;
   const streamingSegmentationPrompt = policy.chat.include_streaming_segmentation
     ? buildStreamingSegmentationPrompt(maxStreamSegments)
     : null;
@@ -125,7 +129,6 @@ function buildRoutePromptBundle({
   return {
     policy,
     toolGuidancePrompt,
-    bridgeGuidancePrompt,
     streamingSegmentationPrompt,
     streamRoutePrompt: [toolGuidancePrompt, streamingSegmentationPrompt].filter(Boolean).join('\n'),
     preferQqRichReply,
@@ -137,10 +140,15 @@ function buildRoutePromptBundle({
   };
 }
 
+function clearRoutePromptPolicyCache() {
+  routePromptPolicyCache = null;
+}
+
 module.exports = {
   DEFAULT_ROUTE_PROMPT_POLICY,
   ROUTE_PROMPT_POLICY_PATH,
   buildRoutePromptBundle,
+  clearRoutePromptPolicyCache,
   readRoutePromptPolicy,
   resolveRoutePromptPolicy
 };

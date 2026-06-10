@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 function clearProjectCache() {
   const projectRoot = require('path').resolve(__dirname, '..') + require('path').sep;
@@ -26,6 +29,13 @@ module.exports = (async () => {
     process.env.POST_REPLY_ENRICH_DELAY_MS = '300000';
     process.env.POST_REPLY_ENRICH_MIN_TURNS = '2';
     process.env.POST_REPLY_ENRICH_MIN_CONTENT_CHARS = '120';
+    process.env.POST_REPLY_ENRICH_MAX_TURNS = '2';
+    process.env.POST_REPLY_ENRICH_MAX_CHARS = '6000';
+    process.env.POST_REPLY_ENRICH_MAX_WRITES = '12';
+    process.env.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = 'false';
+    process.env.POST_REPLY_VECTOR_WATCHDOG_ENABLED = 'false';
+    process.env.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED = 'false';
+    process.env.POST_REPLY_TRACE_DIR = require('path').join(require('os').tmpdir(), `mizuki-post-reply-runtime-trace-${process.pid}`);
     clearProjectCache();
 
     const memoryExtraction = require('../api/memoryExtraction');
@@ -45,11 +55,14 @@ module.exports = (async () => {
     const originalStoreExtractedSelfImprovementItems = selfImprovementRuntime.storeExtractedSelfImprovementItems;
     const originalApplyAffinityProposal = memory.applyAffinityProposal;
     const originalAddTaskMemory = taskMemory.addTaskMemory;
+    const originalAddTaskMemoryWithVectorBackfill = taskMemory.addTaskMemoryWithVectorBackfill;
     const originalAddGroupMemory = groupMemory.addGroupMemory;
+    const originalAddGroupMemoryWithVectorBackfill = groupMemory.addGroupMemoryWithVectorBackfill;
     const originalAddMemoryItemsBatch = vectorMemory.addMemoryItemsBatch;
+    const originalAddMemoryItemsBatchWithVectorBackfill = vectorMemory.addMemoryItemsBatchWithVectorBackfill;
 
     memoryExtraction.learnSomethingNew = async (...args) => {
-      calls.push({ type: 'memory', options: args[3] || {} });
+      calls.push({ type: 'memory', userText: args[1], botReply: args[2], options: args[3] || {} });
       return null;
     };
     memoryExtraction.extractPostReplyEnrichment = async (...args) => {
@@ -86,16 +99,34 @@ module.exports = (async () => {
     taskMemory.addTaskMemory = (...args) => {
       calls.push({ type: 'task', args });
     };
+    taskMemory.addTaskMemoryWithVectorBackfill = async (...args) => {
+      calls.push({ type: 'task_vector', args });
+      return { ids: ['task-write-id'], accepted: [{}], rejected: [] };
+    };
     groupMemory.addGroupMemory = (...args) => {
       calls.push({ type: 'group', args });
+    };
+    groupMemory.addGroupMemoryWithVectorBackfill = async (...args) => {
+      calls.push({ type: 'group_vector', args });
+      return { ids: [`group-write-${calls.filter((item) => item.type === 'group_vector').length}`], accepted: [{}], rejected: [] };
     };
     vectorMemory.addMemoryItemsBatch = (...args) => {
       calls.push({ type: 'vector', args });
       return [];
     };
+    vectorMemory.addMemoryItemsBatchWithVectorBackfill = async (...args) => {
+      calls.push({ type: 'vector_backfill', args });
+      return { ids: ['style-write-id', 'jargon-write-id'], accepted: [{}, {}], rejected: [] };
+    };
 
     delete require.cache[require.resolve('../utils/postReplyWorkerRuntime')];
-    const { processPostReplyJob, createPostReplyWorkerRuntime } = require('../utils/postReplyWorkerRuntime');
+    const {
+      processPostReplyJob,
+      createPostReplyWorkerRuntime,
+      schedulePostReplyMaterialize,
+      flushPostReplyMaterialize,
+      runPostReplyVectorMaintenance
+    } = require('../utils/postReplyWorkerRuntime');
 
     await processPostReplyJob({
       userId: 'u1',
@@ -105,8 +136,13 @@ module.exports = (async () => {
       routePolicyKey: 'chat/default',
       topRouteType: 'direct_chat',
       routeMeta: {
-        groupId: '1083095371'
+        groupId: '1083095371',
+        sessionId: 'session-1'
       },
+      jobId: 'core_job_meta_1',
+      turns: [
+        { turnId: 'turn-1', question: 'hello world', finalReply: 'reply text', createdAt: '2026-04-18T10:00:00.000Z', sourceSessionId: 'session-1', evidence: { userText: 'hello world', assistantText: 'reply text' }, routeMeta: { groupId: '1083095371', sessionId: 'session-1' } }
+      ],
       tasks: {
         memoryLearning: true,
         selfImprovement: true,
@@ -121,7 +157,55 @@ module.exports = (async () => {
     assert.ok(journalCall, 'daily journal should run');
     assert.ok(selfCall, 'self improvement should run');
     assert.strictEqual(memoryCall.options.postReplyMemoryMode, 'core');
+    assert.strictEqual(memoryCall.options.jobId, 'core_job_meta_1');
+    assert.strictEqual(memoryCall.options.turnId, 'turn-1');
+    assert.deepStrictEqual(memoryCall.options.turnIds, ['turn-1']);
+    assert.strictEqual(memoryCall.options.sourceSessionId, 'session-1');
+    assert.strictEqual(memoryCall.options.evidence[0].turnId, 'turn-1');
     assert.strictEqual(journalCall.options.segmentNow, false);
+    assert.strictEqual(journalCall.options.jobId, 'core_job_meta_1');
+    assert.strictEqual(journalCall.options.postReplyJobId, 'core_job_meta_1');
+    assert.strictEqual(journalCall.options.turnId, 'turn-1');
+    assert.deepStrictEqual(journalCall.options.turnIds, ['turn-1']);
+    assert.strictEqual(journalCall.options.sourceSessionId, 'session-1');
+    assert.strictEqual(journalCall.options.evidence[0].turnId, 'turn-1');
+    await flushPostReplyMaterialize({ force: true, source: 'test_cleanup' });
+
+    calls.length = 0;
+    await processPostReplyJob({
+      userId: 'u1',
+      question: 'latest q',
+      finalReply: 'latest r',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371',
+        sessionId: 'session-1'
+      },
+      jobId: 'core_job_merged_turns',
+      turns: [
+        { turnId: 'turn-a', question: 'q1', finalReply: 'r1', createdAt: '2026-04-18T10:00:00.000Z', sourceSessionId: 'session-1', routeMeta: { groupId: '1083095371', sessionId: 'session-1' } },
+        { turnId: 'turn-b', question: 'q2', finalReply: 'r2', createdAt: '2026-04-18T10:02:00.000Z', sourceSessionId: 'session-1', routeMeta: { groupId: '1083095371', sessionId: 'session-1' } }
+      ],
+      tasks: {
+        memoryLearning: true
+      }
+    });
+    const mergedMemoryCall = calls.find((item) => item.type === 'memory');
+    assert.ok(mergedMemoryCall.userText.includes('Turn 1 User: q1'), 'core learning should receive merged user turns');
+    assert.ok(mergedMemoryCall.botReply.includes('Turn 2 Assistant: r2'), 'core learning should receive merged assistant turns');
+    assert.deepStrictEqual(mergedMemoryCall.options.turnIds, ['turn-a', 'turn-b']);
+    await flushPostReplyMaterialize({ force: true, source: 'test_merged_cleanup' });
+
+    const materializeFirst = schedulePostReplyMaterialize({ delayMs: 60000 });
+    const materializeSecond = schedulePostReplyMaterialize({ delayMs: 60000 });
+    assert.strictEqual(materializeFirst.scheduled, true);
+    assert.strictEqual(materializeFirst.coalesced, false);
+    assert.strictEqual(materializeSecond.scheduled, true);
+    assert.strictEqual(materializeSecond.coalesced, true);
+    assert.strictEqual(materializeSecond.pendingCount, 2);
+    await flushPostReplyMaterialize({ force: true, source: 'test_flush' });
 
     const queued = [];
     const runtime = createPostReplyWorkerRuntime({
@@ -183,9 +267,132 @@ module.exports = (async () => {
 
     assert.strictEqual(queued.length, 1, 'core completion should schedule one enrich job when thresholds pass');
     assert.strictEqual(queued[0].phase, 'enrich');
+    assert.strictEqual(queued[0].jobId, '', 'enrich enqueue should not reuse the completed core job id');
+
+    const queueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-post-reply-runtime-ids-'));
+    const { createPostReplyJobQueue } = require('../utils/postReplyJobQueue');
+    const realQueue = createPostReplyJobQueue({ queueDir });
+    const realQueueRuntime = createPostReplyWorkerRuntime({
+      queue: realQueue,
+      processJob: async (job) => ({ ok: true, job })
+    });
+    await realQueueRuntime.runOneJob({
+      jobId: 'core_shared_id_regression',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      turns: [
+        { turnId: 'turn-shared-1', question: 'q1', finalReply: 'r1', createdAt: '2026-04-18T10:00:00.000Z', routeMeta: { groupId: '1083095371' } },
+        { turnId: 'turn-shared-2', question: 'q2', finalReply: 'r2', createdAt: '2026-04-18T10:02:00.000Z', routeMeta: { groupId: '1083095371' } }
+      ],
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    const doneCoreJobs = realQueue.listJobs(['done']);
+    const queuedEnrichJobs = realQueue.listJobs(['queued']);
+    assert.strictEqual(doneCoreJobs.length, 1);
+    assert.strictEqual(queuedEnrichJobs.length, 1);
+    assert.strictEqual(doneCoreJobs[0].jobId, 'core_shared_id_regression');
+    assert.strictEqual(queuedEnrichJobs[0].phase, 'enrich');
+    assert.notStrictEqual(queuedEnrichJobs[0].jobId, doneCoreJobs[0].jobId, 'queued enrich must not shadow done core in queue index');
+    assert.strictEqual(realQueue.listJobs(['done', 'queued']).length, 2, 'index should retain both core done and enrich queued entries');
+    try {
+      fs.rmSync(queueDir, { recursive: true, force: true });
+    } catch (_) {}
+
+    await runtime.runOneJob({
+      jobId: 'core_recap_job',
+      phase: 'core',
+      userId: 'u1',
+      question: '宝说一下我们今天聊的',
+      finalReply: '今天聊了音游抽卡。',
+      sessionKey: 's1',
+      routePolicyKey: 'lookup/notebook-answer',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      turns: [
+        { turnId: 'recap-turn', question: '宝说一下我们今天聊的', finalReply: '今天聊了音游抽卡。', createdAt: new Date().toISOString(), routeMeta: { groupId: '1083095371' } }
+      ],
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    assert.strictEqual(queued.length, 1, 'recap core completion should not schedule or merge enrich work');
+
+    calls.length = 0;
+    const recapEnrichResult = await processPostReplyJob({
+      jobId: 'enrich_recap_skip_job',
+      userId: 'u1',
+      question: '宝说一下我们今天聊的',
+      finalReply: '今天聊了音游抽卡。',
+      sessionKey: 's1',
+      routePolicyKey: 'lookup/notebook-answer',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      phase: 'enrich',
+      turns: [
+        { turnId: 'recap-turn', question: '宝说一下我们今天聊的', finalReply: '今天聊了音游抽卡。', createdAt: '2026-04-18T10:04:00.000Z', routeMeta: { groupId: '1083095371' } }
+      ],
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    assert.strictEqual(recapEnrichResult.job.taskStates.dailyJournal.status, 'skipped');
+    assert.strictEqual(recapEnrichResult.job.taskStates.dailyJournal.lastError, 'recap_query');
+    assert.strictEqual(recapEnrichResult.job.taskStates.enrich.status, 'skipped');
+    assert.strictEqual(recapEnrichResult.job.taskStates.enrich.lastError, 'recap_query');
+    assert.ok(!calls.some((item) => item.type === 'journal'), 'recap enrich job should not append daily journal');
+    assert.ok(!calls.some((item) => item.type === 'enrich'), 'recap enrich job should not run enrichment extractor');
+
+    calls.length = 0;
+    const recapLatestEnrichResult = await processPostReplyJob({
+      jobId: 'enrich_recap_latest_skip_job',
+      userId: 'u1',
+      question: '宝说一下我们今天聊的',
+      finalReply: '今天聊了音游抽卡。',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      phase: 'enrich',
+      turns: [
+        { turnId: 'normal-turn', question: '今天打音游好累', finalReply: '先休息一下。', createdAt: '2026-04-18T10:00:00.000Z', routeMeta: { groupId: '1083095371' } },
+        { turnId: 'recap-latest-turn', question: '宝说一下我们今天聊的', finalReply: '今天聊了音游抽卡。', createdAt: '2026-04-18T10:04:00.000Z', routeMeta: { groupId: '1083095371' } }
+      ],
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    assert.strictEqual(recapLatestEnrichResult.job.taskStates.dailyJournal.status, 'skipped');
+    assert.strictEqual(recapLatestEnrichResult.job.taskStates.enrich.status, 'skipped');
+    assert.ok(!calls.some((item) => item.type === 'journal'), 'latest recap enrich aggregate should not append daily journal');
+    assert.ok(!calls.some((item) => item.type === 'enrich'), 'latest recap enrich aggregate should not run enrichment extractor');
 
     calls.length = 0;
     await processPostReplyJob({
+      jobId: 'enrich_trace_ids_job',
       userId: 'u1',
       question: 'hello world',
       finalReply: 'reply text',
@@ -209,11 +416,57 @@ module.exports = (async () => {
 
     assert.ok(calls.some((item) => item.type === 'enrich'), 'enrich phase should use merged extractor');
     assert.ok(calls.some((item) => item.type === 'affinity'), 'enrich phase should apply affinity');
-    assert.ok(calls.some((item) => item.type === 'task'), 'enrich phase should store task memory');
-    assert.ok(calls.some((item) => item.type === 'group'), 'enrich phase should store group memory');
-    assert.ok(calls.some((item) => item.type === 'vector'), 'enrich phase should store style/jargon vectors');
+    assert.ok(calls.some((item) => item.type === 'task_vector'), 'enrich phase should store task memory with vector backfill');
+    assert.ok(calls.some((item) => item.type === 'group_vector'), 'enrich phase should store group memory with vector backfill');
+    assert.ok(calls.some((item) => item.type === 'vector_backfill'), 'enrich phase should store style/jargon vectors with backfill');
     assert.ok(calls.some((item) => item.type === 'self_store'), 'enrich phase should store self-improvement items');
     assert.ok(calls.some((item) => item.type === 'segment'), 'enrich phase should trigger threshold segmentation');
+    const { readPostReplyJobTrace } = require('../utils/postReplyWorker/jobTrace');
+    const enrichTraceWriteIds = readPostReplyJobTrace('enrich_trace_ids_job')
+      .filter((item) => item.event === 'enrich_write_ids')
+      .flatMap((item) => item.payload?.ids || []);
+    assert.ok(enrichTraceWriteIds.includes('task-write-id'), 'task write id should be traceable for rollback audit');
+    assert.ok(enrichTraceWriteIds.includes('style-write-id'), 'style write id should be traceable for rollback audit');
+    assert.ok(enrichTraceWriteIds.includes('jargon-write-id'), 'jargon write id should be traceable for rollback audit');
+
+    calls.length = 0;
+    const budgetResult = await processPostReplyJob({
+      jobId: 'enrich_budget_job',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      phase: 'enrich',
+      turns: [
+        { turnId: 'old', question: 'old question', finalReply: 'old reply', createdAt: '2026-04-18T09:58:00.000Z', routeMeta: { groupId: '1083095371' } },
+        { turnId: 'keep-1', question: 'q1', finalReply: 'r1', createdAt: '2026-04-18T10:00:00.000Z', routeMeta: { groupId: '1083095371' } },
+        { turnId: 'keep-2', question: 'q2', finalReply: 'r2', createdAt: '2026-04-18T10:02:00.000Z', routeMeta: { groupId: '1083095371' } }
+      ],
+      enrichBudget: {
+        maxTurns: 2,
+        maxChars: 120,
+        maxWrites: 2
+      },
+      tasks: {
+        dailyJournal: false
+      }
+    });
+    const budgetEnrichCall = calls.find((item) => item.type === 'enrich');
+    assert.deepStrictEqual(budgetEnrichCall.turns.map((item) => item.question), ['q1', 'q2']);
+    assert.strictEqual(budgetResult.job.taskStates.enrich.result.budget.truncated, true);
+    assert.strictEqual(budgetResult.job.taskStates.enrich.result.budget.selectedTurns, 2);
+    assert.strictEqual(budgetResult.job.taskStates.enrich.result.writes.maxWrites, 2);
+    assert.strictEqual(budgetResult.job.taskStates.enrich.result.writes.accepted, 2);
+    assert.ok(budgetResult.job.taskStates.enrich.result.writes.dropped > 0, 'maxWrites should make later enrich writes visible as drops');
+    const budgetTraceWriteIds = readPostReplyJobTrace('enrich_budget_job')
+      .filter((item) => item.event === 'enrich_write_ids')
+      .flatMap((item) => item.payload?.ids || []);
+    assert.ok(budgetTraceWriteIds.includes('task-write-id'), 'task write id should be traceable for rollback audit');
 
     const circuitQueue = {
       recoverStaleProcessingJobs() {
@@ -267,6 +520,476 @@ module.exports = (async () => {
     assert.strictEqual(retried.status, 'queued', '429 should remain retryable for post-reply phase');
     assert.ok(Number(retried.retryDelayMs || 0) >= 1000 || /429/.test(String(retried.lastError || '')));
 
+    calls.length = 0;
+    let firstPartialRun = true;
+    const partialQueue = {
+      updatedJobs: [],
+      recoverStaleProcessingJobs() {
+        return [];
+      },
+      claimNextJob() {
+        return null;
+      },
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      },
+      markDone(job) {
+        return { ...job, status: 'done' };
+      },
+      markFailed(job, error) {
+        return { ...job, status: 'failed', lastError: error };
+      },
+      retryOrFail(job, error) {
+        return { job: { ...job, status: 'queued', lastError: error }, retried: true };
+      },
+      findQueuedJobByAggregateKey() {
+        return null;
+      },
+      enqueue(job) {
+        return { enqueued: true, job };
+      }
+    };
+    const partialRuntime = createPostReplyWorkerRuntime({
+      queue: partialQueue,
+      processJob: async (job, deps) => {
+        const result = await processPostReplyJob(job, deps);
+        if (firstPartialRun) {
+          firstPartialRun = false;
+          throw new Error('Request failed with status code 503');
+        }
+        return result;
+      }
+    });
+    const partialFirst = await partialRuntime.runOneJob({
+      jobId: 'partial_retry_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true,
+        dailyJournal: true
+      }
+    });
+    assert.strictEqual(partialFirst.status, 'queued');
+    assert.ok(partialFirst.completedTasks.memoryLearning, 'completed memory task should be persisted before retry');
+    assert.ok(partialFirst.completedTasks.selfImprovement, 'completed self task should be persisted before retry');
+    assert.ok(partialFirst.completedTasks.dailyJournal, 'completed journal task should be persisted before retry');
+
+    calls.length = 0;
+    const partialSecond = await partialRuntime.runOneJob(partialFirst);
+    assert.strictEqual(partialSecond.status, 'done');
+    assert.ok(!calls.some((item) => item.type === 'memory'), 'retry should not rerun completed memory learning');
+    assert.ok(!calls.some((item) => item.type === 'self'), 'retry should not rerun completed self improvement');
+    assert.ok(!calls.some((item) => item.type === 'journal'), 'retry should not rerun completed daily journal');
+
+    calls.length = 0;
+    const cancelQueue = {
+      updatedJobs: [],
+      readCount: 0,
+      recoverStaleProcessingJobs() {
+        return [];
+      },
+      claimNextJob() {
+        return null;
+      },
+      heartbeatProcessingJob(job, patch = {}) {
+        const next = {
+          ...job,
+          ...patch,
+          leaseUntil: '2026-05-23T12:05:00.000Z',
+          lastHeartbeatAt: '2026-05-23T12:00:00.000Z'
+        };
+        this.updatedJobs.push(next);
+        return next;
+      },
+      readProcessingJob(jobId) {
+        this.readCount += 1;
+        if (this.readCount >= 2) {
+          return {
+            jobId,
+            status: 'processing',
+            cancelRequested: true,
+            cancelReason: 'test_cancel'
+          };
+        }
+        return null;
+      },
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      },
+      markDone(job) {
+        return { ...job, status: 'done' };
+      },
+      markFailed(job, error) {
+        return { ...job, status: 'failed', lastError: error, errorClass: 'canceled' };
+      },
+      retryOrFail(job, error) {
+        return { job: { ...job, status: 'queued', lastError: error }, retried: true };
+      },
+      findQueuedJobByAggregateKey() {
+        return null;
+      },
+      enqueue(job) {
+        return { enqueued: true, job };
+      }
+    };
+    const cancelRuntime = createPostReplyWorkerRuntime({
+      queue: cancelQueue,
+      processJob: async (job, deps) => processPostReplyJob(job, deps)
+    });
+    const canceledJob = await cancelRuntime.runOneJob({
+      jobId: 'cancel_runtime_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {
+        memoryLearning: true,
+        selfImprovement: true
+      }
+    });
+    assert.strictEqual(canceledJob.status, 'failed', 'canceled processing job should fail terminally');
+    assert.strictEqual(canceledJob.errorClass, 'canceled');
+    assert.ok(calls.some((item) => item.type === 'memory'), 'first step should have run before cancel boundary');
+    assert.ok(!calls.some((item) => item.type === 'self'), 'cancel boundary should stop next step');
+    assert.ok(cancelQueue.updatedJobs.some((item) => item.leaseUntil), 'heartbeat should extend lease around steps');
+
+    calls.length = 0;
+    const materializeResumeCalls = [];
+    const materializeResumeQueue = {
+      updatedJobs: [],
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      }
+    };
+    const materializeResume = await processPostReplyJob({
+      jobId: 'materialize_resume_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true
+      }
+    }, {
+      queue: materializeResumeQueue,
+      scheduleMaterializeMemoryViews: async (options = {}) => {
+        materializeResumeCalls.push(options);
+        return { scheduled: true, coalesced: false, delayMs: 1, pendingCount: 1 };
+      }
+    });
+    assert.strictEqual(materializeResumeCalls.length, 1, 'retry should still schedule materialize when only memory event completed');
+    assert.strictEqual(materializeResume.job.completedTasks.memoryEvent, true);
+    assert.strictEqual(materializeResume.job.completedTasks.materialize, true);
+    assert.ok(!calls.some((item) => item.type === 'memory'), 'materialize resume should not rerun heavy memory learning');
+
+    const config = require('../config');
+    config.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = true;
+    config.MEMORY_V3_ENABLED = true;
+    config.MEMORY_EMBEDDING_INDEX_ENABLED = true;
+    config.MEMORY_LANCEDB_SYNC_ENABLED = true;
+    const vectorMaintenanceCalls = [];
+    const vectorQueue = {
+      updatedJobs: [],
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      }
+    };
+    const vectorMaintenanceResult = await processPostReplyJob({
+      jobId: 'vector_maintenance_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true
+      }
+    }, {
+      queue: vectorQueue,
+      runVectorMaintenance: async (options = {}) => {
+        vectorMaintenanceCalls.push(options);
+        return { ok: true, skipped: false, embedded: 1, failed: 0, remaining: 0, durationMs: 1 };
+      }
+    });
+    assert.strictEqual(vectorMaintenanceCalls.length, 1, 'core job should run vector maintenance when enabled');
+    assert.strictEqual(vectorMaintenanceCalls[0].jobId, 'vector_maintenance_job');
+    assert.strictEqual(vectorMaintenanceResult.job.completedTasks.vectorMaintenance, true);
+
+    vectorMaintenanceCalls.length = 0;
+    await processPostReplyJob({
+      jobId: 'vector_maintenance_resume_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true,
+        vectorMaintenance: true
+      }
+    }, {
+      runVectorMaintenance: async (options = {}) => {
+        vectorMaintenanceCalls.push(options);
+        return { ok: true };
+      }
+    });
+    assert.strictEqual(vectorMaintenanceCalls.length, 0, 'retry should not rerun completed vector maintenance');
+    config.POST_REPLY_VECTOR_MAINTENANCE_ENABLED = false;
+
+    config.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED = true;
+    config.MEMORY_V3_ENABLED = true;
+    const memoryQualityAuditCalls = [];
+    const auditQueue = {
+      updatedJobs: [],
+      updateProcessingJob(job, patch = {}) {
+        const next = { ...job, ...patch };
+        this.updatedJobs.push(next);
+        return next;
+      }
+    };
+    const auditResult = await processPostReplyJob({
+      jobId: 'memory_quality_audit_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        groupId: '1083095371'
+      },
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true,
+        vectorMaintenance: true
+      }
+    }, {
+      queue: auditQueue,
+      runMemoryQualityAudit: async (options = {}) => {
+        memoryQualityAuditCalls.push(options);
+        return { ok: true, score: 1, warnings: [], writeFindings: [], recallFindings: [], durationMs: 1 };
+      }
+    });
+    assert.strictEqual(memoryQualityAuditCalls.length, 1, 'core job should run memory quality audit when enabled');
+    assert.strictEqual(memoryQualityAuditCalls[0].jobId, 'memory_quality_audit_job');
+    assert.strictEqual(auditResult.job.completedTasks.memoryQualityAudit, true);
+
+    memoryQualityAuditCalls.length = 0;
+    await processPostReplyJob({
+      jobId: 'memory_quality_audit_resume_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true,
+        vectorMaintenance: true,
+        memoryQualityAudit: true
+      }
+    }, {
+      runMemoryQualityAudit: async (options = {}) => {
+        memoryQualityAuditCalls.push(options);
+        return { ok: true };
+      }
+    });
+    assert.strictEqual(memoryQualityAuditCalls.length, 0, 'retry should not rerun completed memory quality audit');
+
+    const auditFailure = await processPostReplyJob({
+      jobId: 'memory_quality_audit_failure_job',
+      phase: 'core',
+      userId: 'u1',
+      question: 'hello world',
+      finalReply: 'reply text',
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      tasks: {},
+      completedTasks: {
+        memoryEvent: true,
+        materialize: true,
+        vectorMaintenance: true
+      }
+    }, {
+      runMemoryQualityAudit: async () => {
+        throw new Error('audit failed');
+      }
+    });
+    assert.strictEqual(auditFailure.ok, true, 'audit failure should not fail core post-reply job');
+    assert.strictEqual(auditFailure.job.completedTasks.memoryQualityAudit, true);
+    config.POST_REPLY_MEMORY_QUALITY_AUDIT_ENABLED = false;
+
+    const reconcileCalls = [];
+    config.POST_REPLY_VECTOR_MAINTENANCE_RECONCILE_ENABLED = true;
+    const directMaintenance = await runPostReplyVectorMaintenance({
+      enabled: true,
+      force: true,
+      source: 'all',
+      limit: 1,
+      intervalMs: 0
+    }, {
+      flushPostReplyMaterialize: async () => ({ flushed: true }),
+      runMemoryVectorBackfill: async () => ({
+        ok: true,
+        source: 'all',
+        considered: 0,
+        embedded: 0,
+        failed: 0,
+        remaining: 0,
+        syncRuns: []
+      }),
+      reconcileDeps: {
+        buildSyncSummary: async () => ({
+          ok: true,
+          coverage: {
+            memory: { readyButNotSynced: 1, staleTableRows: 0 },
+            worldbook: { readyButNotSynced: 0, staleTableRows: 0 }
+          },
+          _rows: {
+            memory: [{ id: 'm1', vector: [0.1], updatedAt: 1 }],
+            worldbook: []
+          }
+        }),
+        lanceDbStore: {
+          syncMemoryRows: async (rows, options) => {
+            reconcileCalls.push({ type: 'memory', rows, options });
+            return { ok: true, rows: rows.length };
+          },
+          syncWorldbookRows: async (rows, options) => {
+            reconcileCalls.push({ type: 'worldbook', rows, options });
+            return { ok: true, rows: rows.length };
+          }
+        }
+      }
+    });
+    assert.strictEqual(directMaintenance.reconciled, true, 'maintenance should reconcile LanceDB drift even without new embeddings');
+    assert.ok(reconcileCalls.some((item) => item.type === 'memory'), 'memory reconcile should run when coverage drifts');
+
+    reconcileCalls.length = 0;
+    const healthGateMaintenance = await runPostReplyVectorMaintenance({
+      enabled: true,
+      force: true,
+      source: 'all',
+      limit: 1,
+      intervalMs: 0
+    }, {
+      flushPostReplyMaterialize: async () => ({ flushed: true }),
+      runMemoryVectorBackfill: async () => ({
+        ok: false,
+        source: 'all',
+        considered: 1,
+        embedded: 1,
+        failed: 0,
+        remaining: 0,
+        syncRuns: [{ step: { kind: 'memory' } }],
+        stoppedBy: 'post_sync_health_gate'
+      }),
+      reconcileDeps: {
+        buildSyncSummary: async () => ({
+          ok: true,
+          coverage: {
+            memory: { readyButNotSynced: 1, staleTableRows: 1 },
+            worldbook: { readyButNotSynced: 0, staleTableRows: 0 }
+          },
+          _rows: {
+            memory: [{ id: 'm2', vector: [0.2], updatedAt: 2 }],
+            worldbook: []
+          }
+        }),
+        lanceDbStore: {
+          syncMemoryRows: async (rows, options) => {
+            reconcileCalls.push({ type: 'memory', rows, options });
+            return { ok: true, rows: rows.length };
+          },
+          syncWorldbookRows: async (rows, options) => {
+            reconcileCalls.push({ type: 'worldbook', rows, options });
+            return { ok: true, rows: rows.length };
+          }
+        }
+      }
+    });
+    assert.strictEqual(healthGateMaintenance.ok, true, 'health gate stop should recover when reconcile succeeds');
+    assert.strictEqual(healthGateMaintenance.reconciled, true, 'health gate stop should trigger reconcile');
+    config.POST_REPLY_VECTOR_MAINTENANCE_RECONCILE_ENABLED = false;
+
+    const recycleCalls = [];
+    const recycleRuntime = createPostReplyWorkerRuntime({
+      queue: circuitQueue,
+      rssRecycleMb: 1,
+      rssRecycleIdleMs: 0,
+      onRecycle: (info) => recycleCalls.push(info),
+      processJob: async () => ({ ok: true })
+    });
+    assert.strictEqual(recycleRuntime.maybeRequestIdleRecycle('test'), true, 'idle high RSS should request recycle');
+    assert.strictEqual(recycleCalls.length, 1);
+    assert.ok(recycleRuntime.getStats().recycleRequested, 'runtime should expose recycle state');
+
+    const queuedRecycleRuntime = createPostReplyWorkerRuntime({
+      queue: {
+        ...circuitQueue,
+        listJobs(statuses = []) {
+          return Array.isArray(statuses) && statuses.includes('queued')
+            ? [{ jobId: 'queued_job', status: 'queued' }]
+            : [];
+        }
+      },
+      rssRecycleMb: 1,
+      rssRecycleIdleMs: 0,
+      onRecycle: () => {
+        throw new Error('worker with queued jobs should not request idle recycle');
+      },
+      processJob: async () => ({ ok: true })
+    });
+    assert.strictEqual(queuedRecycleRuntime.hasPendingQueueWorkForRecycle(), true);
+    assert.strictEqual(queuedRecycleRuntime.maybeRequestIdleRecycle('queued'), false, 'queued work should keep worker alive');
+
     memoryExtraction.learnSomethingNew = originalLearnSomethingNew;
     memoryExtraction.extractPostReplyEnrichment = originalExtractPostReplyEnrichment;
     dailyJournal.appendDailyJournalEntry = originalAppendDailyJournalEntry;
@@ -275,8 +998,11 @@ module.exports = (async () => {
     selfImprovementRuntime.storeExtractedSelfImprovementItems = originalStoreExtractedSelfImprovementItems;
     memory.applyAffinityProposal = originalApplyAffinityProposal;
     taskMemory.addTaskMemory = originalAddTaskMemory;
+    taskMemory.addTaskMemoryWithVectorBackfill = originalAddTaskMemoryWithVectorBackfill;
     groupMemory.addGroupMemory = originalAddGroupMemory;
+    groupMemory.addGroupMemoryWithVectorBackfill = originalAddGroupMemoryWithVectorBackfill;
     vectorMemory.addMemoryItemsBatch = originalAddMemoryItemsBatch;
+    vectorMemory.addMemoryItemsBatchWithVectorBackfill = originalAddMemoryItemsBatchWithVectorBackfill;
 
     console.log('postReplyWorkerRuntime.test.js passed');
   } finally {

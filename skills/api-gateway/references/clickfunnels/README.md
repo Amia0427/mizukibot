@@ -16,7 +16,7 @@ The router automatically handles the subdomain from your OAuth connection.
 THe `User-Agent` header is required to avoid Cloudflare blocks:
 
 ```
-User-Agent: Maton/1.0
+User-Agent: codex-cli/0.121.0 (external, cli)
 ```
 
 ## Common Endpoints

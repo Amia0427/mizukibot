@@ -1,3 +1,12 @@
+const {
+  detectPostReplyLearningIntent,
+  isExplicitRememberText
+} = require('../../../utils/postReplyWorker/learningIntent');
+const {
+  isPostReplyRecapText
+} = require('../../../utils/postReplyWorker/recapPolicy');
+const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
+
 function createPersistNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
     ? deps.normalizeObject
@@ -65,6 +74,15 @@ function createPersistNode(deps = {}) {
   const postReplyJobQueue = deps.postReplyJobQueue && typeof deps.postReplyJobQueue.enqueue === 'function'
     ? deps.postReplyJobQueue
     : { enqueue() { return { enqueued: false, job: null }; } };
+  const ensurePostReplyWorkerRunning = typeof deps.ensurePostReplyWorkerRunning === 'function'
+    ? deps.ensurePostReplyWorkerRunning
+    : (() => {
+        try {
+          return require('../../../utils/postReplyWorkerSupervisor').ensurePostReplyWorkerRunning();
+        } catch (_) {
+          return { started: false, skipped: true, reason: 'unavailable' };
+        }
+      });
   const appendRequestTraceEvent = typeof deps.appendRequestTraceEvent === 'function'
     ? deps.appendRequestTraceEvent
     : (() => {});
@@ -80,6 +98,24 @@ function createPersistNode(deps = {}) {
   const logPostReplyEnqueueError = typeof deps.logPostReplyEnqueueError === 'function'
     ? deps.logPostReplyEnqueueError
     : (() => {});
+  const recordVisualContextImages = typeof deps.recordVisualContextImages === 'function'
+    ? deps.recordVisualContextImages
+    : ((visualContext, context) => {
+        try {
+          return require('../../../utils/imageMemoryIndex').recordVisualContextImages(visualContext, context);
+        } catch (_) {
+          return [];
+        }
+      });
+  const ingestOpenVikingTurnAsync = typeof deps.ingestOpenVikingTurnAsync === 'function'
+    ? deps.ingestOpenVikingTurnAsync
+    : ((input = {}) => {
+        try {
+          return require('../../../utils/openVikingMemory/ingest').ingestTurnAsync(input);
+        } catch (_) {
+          return undefined;
+        }
+      });
   const postReplyLastEnqueueAtByUser = new Map();
 
   function normalizeText(value) {
@@ -102,6 +138,28 @@ function createPersistNode(deps = {}) {
     return new Date(Math.min(...candidates)).toISOString();
   }
 
+  function buildPostReplyTurnId({ routeMeta = {}, sessionKey = '', createdAt = '', userContent = '', finalReply = '' } = {}) {
+    const explicit = normalizeText(routeMeta.messageId || routeMeta.message_id);
+    if (explicit) return explicit;
+    return stableHash({
+      sessionKey: normalizeText(sessionKey),
+      createdAt: normalizeText(createdAt),
+      userContent: String(userContent || '').slice(0, 1000),
+      finalReply: String(finalReply || '').slice(0, 1000)
+    });
+  }
+
+  function buildPostReplyTurnEvidence({ routeMeta = {}, userContent = '', finalReply = '', createdAt = '', routePolicyKey = '', topRouteType = '' } = {}) {
+    return {
+      userText: String(userContent || '').slice(0, 500),
+      assistantText: String(finalReply || '').slice(0, 500),
+      createdAt: normalizeText(createdAt),
+      routePolicyKey: normalizeText(routePolicyKey),
+      topRouteType: normalizeText(topRouteType || routeMeta.topRouteType),
+      messageId: normalizeText(routeMeta.messageId || routeMeta.message_id)
+    };
+  }
+
   function buildPersistGateReasons({
     request,
     state,
@@ -111,20 +169,24 @@ function createPersistNode(deps = {}) {
     allowedPostReplyGroupIds,
     hasEnoughPostReplyContent,
     postReplyCooldownReady,
-    shouldAllowPostReplyForGroup
+    shouldAllowPostReplyForGroup,
+    explicitPostReplyMemoryBypassGroup,
+    postReplyRecapQuery
   }) {
     const reasons = [];
     if (request.systemInitiated) reasons.push('system_initiated');
     if (state.output?.failure) reasons.push('output_failure');
+    if (isUnsafeUserFacingReply(finalReply)) reasons.push('unsafe_user_facing_reply');
     if (!userContent) reasons.push('empty_user_content');
     if (!finalReply) reasons.push('empty_final_reply');
     if (isReviewMode(request.reviewMode)) reasons.push('review_mode');
     if (String(request.customPrompt || '').trim()) reasons.push('custom_prompt');
     if (!hasEnoughPostReplyContent) reasons.push('post_reply_min_chars');
     if (!postReplyCooldownReady) reasons.push('post_reply_cooldown');
-    if (!routeGroupId) reasons.push('post_reply_no_group');
-    if (allowedPostReplyGroupIds.length === 0) reasons.push('post_reply_no_group_allowlist');
-    if (routeGroupId && allowedPostReplyGroupIds.length > 0 && !shouldAllowPostReplyForGroup) {
+    if (postReplyRecapQuery) reasons.push('post_reply_recap_query');
+    if (!routeGroupId && !explicitPostReplyMemoryBypassGroup) reasons.push('post_reply_no_group');
+    if (allowedPostReplyGroupIds.length === 0 && !explicitPostReplyMemoryBypassGroup) reasons.push('post_reply_no_group_allowlist');
+    if (routeGroupId && allowedPostReplyGroupIds.length > 0 && !shouldAllowPostReplyForGroup && !explicitPostReplyMemoryBypassGroup) {
       reasons.push('post_reply_group_not_allowed');
     }
     return reasons;
@@ -161,6 +223,8 @@ function createPersistNode(deps = {}) {
     emitPersistTrace('persist_start');
     const finalReply = String(state.output?.finalReply || state.output?.draftReply || '').trim();
     const latencyDecision = normalizeObject(state.execution?.latencyDecision, {});
+    const persistMode = String(config.FAST_REPLY_PERSIST_MODE || '').trim().toLowerCase();
+    const fastCommitMode = persistMode === 'fast_commit';
     const userContent = String(
       request.persistUserText
       || request.runtimeQuestionText
@@ -171,17 +235,33 @@ function createPersistNode(deps = {}) {
       && !state.output?.failure
       && userContent
       && finalReply
+      && !isUnsafeUserFacingReply(finalReply)
       && !isReviewMode(request.reviewMode)
     );
+    const explicitPostReplyMemoryRequest = isExplicitRememberText(userContent);
+    const postReplyRecapQuery = !explicitPostReplyMemoryRequest && isPostReplyRecapText(userContent);
     const shouldPersistBridge = shouldPersistChatArtifacts
       && isChatLikeRoute(request);
     const shouldPersistJournal = shouldPersistChatArtifacts
+      && !postReplyRecapQuery
       && shouldAppendDailyJournalForV2(request, finalReply);
     const shouldLearn = shouldPersistChatArtifacts
+      && !postReplyRecapQuery
       && shouldQueueMemoryLearningForV2(request, finalReply);
     const shouldLearnSelfImprovementValue = shouldPersistChatArtifacts
+      && !postReplyRecapQuery
       && shouldLearnSelfImprovement(request, finalReply);
     const normalizedUserId = String(request.userId || '').trim();
+    const visualContext = normalizeObject(request.visualContext || request.routeMeta?.visualContext, null);
+    if (visualContext?.hasVisualInput === true) {
+      recordVisualContextImages(visualContext, {
+        userId: normalizedUserId,
+        groupId: String(request.routeMeta?.groupId || request.routeMeta?.group_id || '').trim(),
+        sessionKey: String(request.sessionKey || '').trim(),
+        messageId: String(request.routeMeta?.messageId || request.routeMeta?.message_id || '').trim(),
+        userText: userContent
+      });
+    }
     const postReplyContentChars = Array.from(`${userContent}\n${finalReply}`.replace(/\s+/g, '')).length;
     const minPostReplyContentChars = Math.max(0, Number(config.POST_REPLY_MIN_CONTENT_CHARS) || 0);
     const hasEnoughPostReplyContent = postReplyContentChars >= minPostReplyContentChars;
@@ -199,11 +279,21 @@ function createPersistNode(deps = {}) {
     const shouldAllowPostReplyForGroup = routeGroupId
       && allowedPostReplyGroupIds.length > 0
       && allowedPostReplyGroupIds.includes(routeGroupId);
+    const explicitPostReplyMemoryBypassGroup = Boolean(
+      config.POST_REPLY_EXPLICIT_MEMORY_BYPASS_GROUP_ALLOWLIST === true
+      && explicitPostReplyMemoryRequest
+    );
+    const shouldRunGroupScopedPostReplyTasks = Boolean(
+      shouldAllowPostReplyForGroup
+      || explicitPostReplyMemoryBypassGroup
+    );
+    const shouldQueuePostReplyMemoryTasks = shouldRunGroupScopedPostReplyTasks
+      && (shouldLearn || shouldLearnSelfImprovementValue);
+    const shouldQueuePostReplyJournalTask = Boolean(shouldPersistJournal);
     const shouldEnqueuePostReplyJob = shouldPersistChatArtifacts
       && hasEnoughPostReplyContent
       && postReplyCooldownReady
-      && shouldAllowPostReplyForGroup
-      && (shouldLearn || shouldLearnSelfImprovementValue || shouldPersistJournal);
+      && (shouldQueuePostReplyMemoryTasks || shouldQueuePostReplyJournalTask);
     const persistDecisionPayload = {
       userId: normalizedUserId,
       sessionKey: String(request.sessionKey || '').trim(),
@@ -218,7 +308,10 @@ function createPersistNode(deps = {}) {
       shouldPersistJournal: Boolean(shouldPersistJournal),
       shouldLearn: Boolean(shouldLearn),
       shouldLearnSelfImprovement: Boolean(shouldLearnSelfImprovementValue),
+      shouldQueuePostReplyMemoryTasks: Boolean(shouldQueuePostReplyMemoryTasks),
+      shouldQueuePostReplyJournalTask: Boolean(shouldQueuePostReplyJournalTask),
       shouldEnqueuePostReplyJob: Boolean(shouldEnqueuePostReplyJob),
+      postReplyRecapQuery: Boolean(postReplyRecapQuery),
       userContentChars: Array.from(userContent).length,
       finalReplyChars: Array.from(finalReply).length,
       gateReasons: buildPersistGateReasons({
@@ -230,7 +323,9 @@ function createPersistNode(deps = {}) {
         allowedPostReplyGroupIds,
         hasEnoughPostReplyContent,
         postReplyCooldownReady,
-        shouldAllowPostReplyForGroup
+        shouldAllowPostReplyForGroup,
+        explicitPostReplyMemoryBypassGroup,
+        postReplyRecapQuery
       })
     };
     let enqueuedPostReplyJob = null;
@@ -293,6 +388,22 @@ function createPersistNode(deps = {}) {
     console.log('[memory-write] persist decision', persistDecisionPayload);
 
     if (shouldPersistChatArtifacts) {
+      try {
+        ingestOpenVikingTurnAsync({
+          userId: request.userId,
+          senderId: request.routeMeta?.senderId || request.routeMeta?.sender_id || request.userId,
+          groupId: routeGroupId,
+          channelId: request.routeMeta?.channelId || request.routeMeta?.channel_id || '',
+          sessionKey: request.sessionKey,
+          sessionId: request.routeMeta?.sessionId || request.routeMeta?.session_id || '',
+          platform: request.routeMeta?.platform || request.routeMeta?.channel || 'qq',
+          routePolicyKey: request.routePolicyKey,
+          topRouteType: request.topRouteType,
+          senderName: request.userInfo?.name || request.userInfo?.nickname || request.routeMeta?.senderName || request.routeMeta?.sender_name || '',
+          userText: userContent,
+          assistantText: finalReply
+        });
+      } catch (_) {}
       if (config.MEMORY_V3_ENABLED) {
         await appendMemoryEvent({
           type: 'turn_replied',
@@ -317,7 +428,9 @@ function createPersistNode(deps = {}) {
             }
           }
         });
-        materializeMemoryViews();
+        if (!fastCommitMode) {
+          materializeMemoryViews();
+        }
       }
       appendShortTermHistory(request.userId, userContent, finalReply, request.userInfo, {
         chatHistory,
@@ -344,6 +457,7 @@ function createPersistNode(deps = {}) {
           const stateSlice = shortTermMemory?.[request.sessionKey] || {};
           const historySlice = Array.isArray(chatHistory?.[request.sessionKey]) ? chatHistory[request.sessionKey] : [];
           const summarySource = String(stateSlice.summarySource || '').trim().toLowerCase();
+          const sessionRecentMessagesLimit = Math.max(1, Math.floor(Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 64) || 64));
           const persistedSummary = summarySource === 'restart_recall'
             ? ''
             : String(stateSlice.summary || '').trim();
@@ -369,10 +483,12 @@ function createPersistNode(deps = {}) {
               openLoops: normalizeArray(stateSlice.openLoops),
               assistantCommitments: normalizeArray(stateSlice.assistantCommitments),
               userConstraints: normalizeArray(stateSlice.userConstraints),
-              recentMessages: historySlice.slice(-6)
+              recentMessages: historySlice.slice(-sessionRecentMessagesLimit)
             }
           });
-          materializeMemoryViews();
+          if (!fastCommitMode) {
+            materializeMemoryViews();
+          }
         }
         persistShortTermBridgeSnapshot(request.userId, {
           chatHistory,
@@ -384,7 +500,7 @@ function createPersistNode(deps = {}) {
         });
       }
 
-      if (shouldPersistBridge) {
+      if (shouldPersistBridge && !fastCommitMode) {
         const summaryCooldown = getSessionSummaryCooldownStatus(request.sessionKey, now);
         if (!summaryCooldown.limited) {
           try {
@@ -412,7 +528,7 @@ function createPersistNode(deps = {}) {
         }
       }
 
-      await recordPersonaMemoryOutcome('direct_chat', {
+      if (!fastCommitMode) await recordPersonaMemoryOutcome('direct_chat', {
         state: state.memory?.personaMemoryState,
         request,
         routeMeta: request.routeMeta,
@@ -427,21 +543,42 @@ function createPersistNode(deps = {}) {
         assistantCommitments: normalizeArray(shortTermMemory?.[request.sessionKey]?.assistantCommitments),
         userConstraints: normalizeArray(shortTermMemory?.[request.sessionKey]?.userConstraints),
         carryOverUserTurn: String(shortTermMemory?.[request.sessionKey]?.carryOverUserTurn || '').trim(),
-        recentMessages: Array.isArray(chatHistory?.[request.sessionKey]) ? chatHistory[request.sessionKey].slice(-6) : []
+        recentMessages: Array.isArray(chatHistory?.[request.sessionKey])
+          ? chatHistory[request.sessionKey].slice(-Math.max(1, Math.floor(Number(config.MEMORY_V3_SESSION_RECENT_MESSAGES || 64) || 64)))
+          : []
       });
 
       addProfileItem(request.userId, 'recent_topics', String(request.question || '').slice(0, 20), 12);
       if (shouldEnqueuePostReplyJob) {
         const routeMeta = pickRouteMetaForPostReplyJob(request.routeMeta);
+        const createdAtIso = new Date(now).toISOString();
+        const routeMessageId = normalizeText(routeMeta.messageId || routeMeta.message_id);
+        const sourceMessageIds = [routeMessageId].filter(Boolean);
         const aggregateKey = buildCoreAggregateKey({
           userId: normalizedUserId,
           sessionKey: String(request.sessionKey || '').trim(),
           groupId: routeGroupId
         });
         const coreTurn = {
+          turnId: buildPostReplyTurnId({
+            routeMeta,
+            sessionKey: request.sessionKey,
+            createdAt: createdAtIso,
+            userContent,
+            finalReply
+          }),
           question: userContent,
           finalReply,
-          createdAt: new Date(now).toISOString(),
+          createdAt: createdAtIso,
+          evidence: buildPostReplyTurnEvidence({
+            routeMeta,
+            userContent,
+            finalReply,
+            createdAt: createdAtIso,
+            routePolicyKey: request.routePolicyKey,
+            topRouteType: request.topRouteType
+          }),
+          sourceSessionId: normalizeText(routeMeta.sessionId || routeMeta.session_id || request.sessionKey),
           routeMeta,
           continuitySnapshot: {
             activeTopic: String(state.memory?.continuityState?.payload?.active_topic || '').trim(),
@@ -455,6 +592,22 @@ function createPersistNode(deps = {}) {
             compactionLevel: String(state.memory?.contextStats?.compactionLevel || state.memory?.mainConversationSnapshot?.snapshotMeta?.compactionDiagnostics?.level || 'normal').trim() || 'normal'
           }
         };
+        const traceId = stableHash({
+          aggregateKey,
+          turnId: coreTurn.turnId,
+          threadId: String(state.thread?.threadId || '').trim(),
+          createdAt: createdAtIso
+        });
+        const learningIntent = detectPostReplyLearningIntent({
+          question: userContent,
+          finalReply,
+          turns: [coreTurn],
+          tasks: {
+            memoryLearning: shouldRunGroupScopedPostReplyTasks && shouldLearn,
+            selfImprovement: shouldRunGroupScopedPostReplyTasks && shouldLearnSelfImprovementValue,
+            dailyJournal: shouldQueuePostReplyJournalTask
+          }
+        });
         try {
           const existingQueuedCoreJob = typeof postReplyJobQueue.findQueuedJobByAggregateKey === 'function'
             ? postReplyJobQueue.findQueuedJobByAggregateKey(aggregateKey, 'core')
@@ -469,10 +622,14 @@ function createPersistNode(deps = {}) {
                       contextStats: coreTurn.contextStats,
                       lastMergedAt: coreTurn.createdAt,
                       turns: [coreTurn],
+                      traceId: existingQueuedCoreJob.traceId || traceId,
+                      learningIntent,
+                      sourceMessageIds: Array.from(new Set(normalizeArray(existingQueuedCoreJob.sourceMessageIds).concat(sourceMessageIds))),
+                      tags: Array.from(new Set(normalizeArray(existingQueuedCoreJob.tags).concat(['runtime_v2_persist', 'core']))),
                       tasks: {
-                        memoryLearning: Boolean(existingQueuedCoreJob.tasks?.memoryLearning) || shouldLearn,
-                        selfImprovement: Boolean(existingQueuedCoreJob.tasks?.selfImprovement) || shouldLearnSelfImprovementValue,
-                        dailyJournal: Boolean(existingQueuedCoreJob.tasks?.dailyJournal) || shouldPersistJournal
+                        memoryLearning: Boolean(existingQueuedCoreJob.tasks?.memoryLearning) || (shouldRunGroupScopedPostReplyTasks && shouldLearn),
+                        selfImprovement: Boolean(existingQueuedCoreJob.tasks?.selfImprovement) || (shouldRunGroupScopedPostReplyTasks && shouldLearnSelfImprovementValue),
+                        dailyJournal: Boolean(existingQueuedCoreJob.tasks?.dailyJournal) || shouldQueuePostReplyJournalTask
                       },
                       userInfo: normalizeObject(request.userInfo, {})
                     }, {
@@ -496,6 +653,11 @@ function createPersistNode(deps = {}) {
                 routePolicyKey: String(request.routePolicyKey || '').trim(),
                 topRouteType: String(request.topRouteType || routeMeta.topRouteType || '').trim(),
                 routeMeta,
+                traceId,
+                sourceMessageIds,
+                learningIntent,
+                priority: shouldLearn ? 10 : 0,
+                tags: ['runtime_v2_persist', 'core'],
                 sessionKey: String(request.sessionKey || '').trim(),
                 continuitySnapshot: coreTurn.continuitySnapshot,
                 contextStats: coreTurn.contextStats,
@@ -506,9 +668,9 @@ function createPersistNode(deps = {}) {
                 mergeCount: 1,
                 availableAt: buildAggregateAvailableAt(coreTurn.createdAt, coreTurn.createdAt),
                 tasks: {
-                  memoryLearning: shouldLearn,
-                  selfImprovement: shouldLearnSelfImprovementValue,
-                  dailyJournal: shouldPersistJournal
+                  memoryLearning: shouldRunGroupScopedPostReplyTasks && shouldLearn,
+                  selfImprovement: shouldRunGroupScopedPostReplyTasks && shouldLearnSelfImprovementValue,
+                  dailyJournal: shouldQueuePostReplyJournalTask
                 },
                 threadId: String(state.thread?.threadId || '').trim()
               });
@@ -518,6 +680,21 @@ function createPersistNode(deps = {}) {
             userId: String(request.userId || '').trim(),
             enqueued: Boolean(enqueueResult.enqueued)
           });
+          if (enqueueResult.job?.jobId) {
+            const workerWake = ensurePostReplyWorkerRunning({
+              jobId: enqueueResult.job.jobId,
+              enqueued: Boolean(enqueueResult.enqueued),
+              aggregateKey
+            });
+            if (workerWake?.started || workerWake?.reason) {
+              emitPersistTrace('persist_post_reply_worker_wake', {
+                jobId: enqueueResult.job.jobId,
+                workerStarted: Boolean(workerWake.started),
+                reason: String(workerWake.reason || '').slice(0, 120),
+                pid: Number(workerWake.pid || 0) || 0
+              });
+            }
+          }
           if (enqueueResult.enqueued && normalizedUserId) {
             postReplyLastEnqueueAtByUser.set(normalizedUserId, now);
           }

@@ -55,6 +55,10 @@ module.exports = (() => {
     userId: 'user_c',
     sessionKey: 'session_c',
     routeMeta: { groupId: '1083095371' },
+    completedTasks: {
+      memoryLearning: true,
+      memoryQualityAudit: true
+    },
     turns: [{
       question: 'q1',
       finalReply: 'r1'
@@ -71,6 +75,7 @@ module.exports = (() => {
   assert.strictEqual(merged.aggregateKey, aggregateKey);
   assert.strictEqual(merged.turns.length, 2);
   assert.ok(merged.mergeCount >= 2);
+  assert.strictEqual(merged.completedTasks.memoryQualityAudit, false, 'merged queued turn should reset memory quality audit completion');
   const found = aggregateQueue.findQueuedJobByAggregateKey(aggregateKey, 'core');
   assert.ok(found, 'merged queued aggregate job should be discoverable');
   assert.strictEqual(found.turns.length, 2);

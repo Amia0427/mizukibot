@@ -9,6 +9,7 @@ process.env.MEMORY_V3_DIR = path.join(tempRoot, 'memory-v3');
 process.env.MEMORY_V3_EVENTS_DIR = path.join(process.env.MEMORY_V3_DIR, 'events');
 process.env.MEMORY_V3_PROJECTIONS_DIR = path.join(process.env.MEMORY_V3_DIR, 'projections');
 process.env.MEMORY_V3_NODES_FILE = path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'memory_nodes.jsonl');
+process.env.MEMORY_V3_EPISODE_PROJECTION_FILE = path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'episode_projection.json');
 process.env.MEMORY_V3_EMBEDDING_CACHE_FILE = path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'embedding_cache.jsonl');
 process.env.MEMORY_EMBEDDING_INDEX_ENABLED = 'true';
 process.env.MEMORY_EMBEDDING_MODEL = 'test-embedding-model';
@@ -28,6 +29,8 @@ httpClient.postWithRetry = async () => ({
 const { writeJsonLines } = require('../utils/memory-v3/helpers');
 const {
   buildEmbeddingIdentity,
+  classifyEmbeddingPriority,
+  clearEmbeddingIndexCache,
   reconcileEmbeddingCache,
   loadEmbeddingIndex,
   backfillMissingEmbeddings
@@ -35,7 +38,27 @@ const {
 
 fs.mkdirSync(process.env.MEMORY_V3_PROJECTIONS_DIR, { recursive: true });
 fs.mkdirSync(path.join(tempRoot, 'daily_journal', 'u_embed'), { recursive: true });
-fs.writeFileSync(path.join(process.env.MEMORY_V3_PROJECTIONS_DIR, 'episode_projection.json'), JSON.stringify({ version: 1, users: {} }), 'utf8');
+fs.writeFileSync(path.join(process.env.MEMORY_V3_EPISODE_PROJECTION_FILE), JSON.stringify({
+  version: 1,
+  users: {
+    u_embed: {
+      updatedAt: 456,
+      items: [{
+        id: 'evt_rollup_1',
+        type: '4day',
+        rollupLevel: '4day',
+        text: '四日汇总：清真寿司、口腔溃疡和男朋友饮食计划。',
+        episodeDay: '2026-04-26',
+        startDay: '2026-04-23',
+        endDay: '2026-04-26',
+        yearMonth: '2026-04',
+        textKind: 'journal_4day_rollup',
+        sourceCompleteness: 'summary',
+        updatedAt: 456
+      }]
+    }
+  }
+}), 'utf8');
 
 const node = {
   id: 'node_1',
@@ -67,6 +90,7 @@ const reused = reconcileEmbeddingCache([node]);
 assert.strictEqual(reused.ready, 1);
 assert.strictEqual(reused.reused, 1);
 assert.strictEqual(loadEmbeddingIndex().readyRows.length, 1);
+assert.strictEqual(classifyEmbeddingPriority(node).priority, 'profile');
 
 const changedNode = {
   ...node,
@@ -76,6 +100,47 @@ const changed = reconcileEmbeddingCache([changedNode]);
 assert.strictEqual(changed.ready, 0);
 assert.strictEqual(changed.pending, 1);
 assert.strictEqual(changed.created, 1);
+writeJsonLines(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, [{
+  ...identity,
+  version: 1,
+  embedding: [0, 1, 0],
+  lastEmbeddedAt: 222,
+  status: 'ready'
+}]);
+const otherNode = {
+  ...node,
+  id: 'node_other',
+  canonicalKey: 'other',
+  text: 'other stable profile row',
+  updatedAt: 200
+};
+const partial = reconcileEmbeddingCache([otherNode]);
+assert.strictEqual(partial.ready, 1, 'incremental reconciliation should preserve unrelated ready rows');
+const sharedCanonicalIdentity = buildEmbeddingIdentity({
+  ...node,
+  id: 'node_shared_old',
+  canonicalKey: 'shared preference',
+  text: 'old shared profile row',
+  updatedAt: 210
+});
+const sharedCanonicalNode = {
+  ...node,
+  id: 'node_shared_new',
+  canonicalKey: 'shared preference',
+  text: 'new shared profile row',
+  updatedAt: 220
+};
+writeJsonLines(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, [{
+  ...sharedCanonicalIdentity,
+  version: 1,
+  embedding: [0, 0, 1],
+  lastEmbeddedAt: 333,
+  status: 'ready'
+}]);
+const sharedCanonicalPartial = reconcileEmbeddingCache([sharedCanonicalNode]);
+assert.strictEqual(sharedCanonicalPartial.ready, 1, 'incremental reconciliation should not evict a different node only because canonicalKey matches');
+const full = reconcileEmbeddingCache([otherNode], { fullReconcile: true });
+assert.strictEqual(full.ready, 0, 'full reconciliation should drop rows not present in the active node set');
 writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [changedNode]);
 
 fs.writeFileSync(
@@ -94,15 +159,18 @@ module.exports = backfillMissingEmbeddings({ batchSize: 10, maxPerRun: 10, force
   assert.ok(result.embedded >= 3);
   const index = loadEmbeddingIndex();
   assert.ok(index.byNodeId.has('node_1'));
+  assert.strictEqual(classifyEmbeddingPriority({ source: 'episode', type: 'episode', id: 'episode:x' }).priority, 'journal');
+  assert.ok(index.byNodeId.has('episode:evt_rollup_1'));
   assert.ok(index.byNodeId.has('journal-day:u_embed:2026-04-26'));
   assert.ok(index.byNodeId.has('journal-segment:u_embed:2026-04-26:0'));
-  assert.ok(index.readyRows.length >= 3);
+  assert.ok(index.readyRows.length >= 4);
   writeJsonLines(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, index.rows.map((row) => ({
     ...row,
     embedding: [],
     lastEmbeddedAt: 0,
     status: 'pending'
   })));
+  clearEmbeddingIndexCache();
   return backfillMissingEmbeddings({ batchSize: 2, maxPerRun: 2, force: true });
 }).then((result) => {
   assert.strictEqual(result.ok, true);

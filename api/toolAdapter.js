@@ -1,7 +1,7 @@
 // api/toolAdapter.js
 const { tool } = require('@langchain/core/tools');
 const { z } = require('zod');
-const { getToolExecutors, getToolSchemas } = require('./toolRegistry');
+const { getToolExecutor, getToolSchemas } = require('./toolRegistry');
 const { enforceToolPolicy } = require('../utils/toolPolicy');
 
 /**
@@ -15,7 +15,7 @@ function buildLangChainTools() {
 
     return tool(
       async (input) => {
-        const executor = getToolExecutors()[name];
+        const executor = getToolExecutor(name);
         if (!executor) return `鏈煡宸ュ叿锛?{name}`;
 
         try {

@@ -1,11 +1,46 @@
 ﻿let latestReasoning = ''; // Keep latest model reasoning for the web panel.
 
+const { StringDecoder } = require('string_decoder');
+
+const SSE_UTF8_DECODER = Symbol('sseUtf8Decoder');
+
+function normalizeSSEState(state) {
+  const nextState = state && typeof state === 'object' ? state : {};
+  nextState.buffer = String(nextState.buffer || '');
+  return nextState;
+}
+
+function decodeSSEChunk(state, chunk) {
+  if (!Buffer.isBuffer(chunk)) return String(chunk || '');
+  if (!state[SSE_UTF8_DECODER]) {
+    Object.defineProperty(state, SSE_UTF8_DECODER, {
+      value: new StringDecoder('utf8'),
+      enumerable: false,
+      configurable: true
+    });
+  }
+  return state[SSE_UTF8_DECODER].write(chunk);
+}
+
+function flushSSEDecoder(state) {
+  if (!state || typeof state !== 'object' || !state[SSE_UTF8_DECODER]) return '';
+  const tail = state[SSE_UTF8_DECODER].end();
+  delete state[SSE_UTF8_DECODER];
+  return tail;
+}
+
 function textFromContentArray(content) {
   if (!Array.isArray(content)) return '';
   return content
     .map((part) => {
       if (typeof part === 'string') return part;
       if (typeof part?.text === 'string') return part.text;
+      if (typeof part?.content === 'string') return part.content;
+      if (typeof part?.output_text === 'string') return part.output_text;
+      if (typeof part?.outputText === 'string') return part.outputText;
+      if (Array.isArray(part?.content)) return textFromContentArray(part.content);
+      if (part?.content && typeof part.content === 'object') return extractTextFromObject(part.content);
+      if (part && typeof part === 'object') return extractTextFromObject(part);
       return '';
     })
     .join('');
@@ -132,6 +167,58 @@ function toolCallsFromAnthropicContent(content) {
   return calls;
 }
 
+function textFromGeminiParts(parts) {
+  if (!Array.isArray(parts)) return '';
+  return parts
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (!part || typeof part !== 'object') return '';
+      if (typeof part.text === 'string') return part.text;
+      if (typeof part.output_text === 'string') return part.output_text;
+      if (typeof part.outputText === 'string') return part.outputText;
+      return '';
+    })
+    .join('');
+}
+
+function toolCallsFromGeminiParts(parts) {
+  if (!Array.isArray(parts)) return [];
+  return parts
+    .map((part, index) => {
+      const call = part?.functionCall || part?.function_call;
+      if (!call || typeof call !== 'object') return null;
+      const name = String(call.name || '').trim();
+      if (!name) return null;
+      return {
+        id: String(call.id || `gemini_call_${Date.now()}_${index}`),
+        type: 'function',
+        function: {
+          name,
+          arguments: JSON.stringify(
+            (call.args && typeof call.args === 'object' && !Array.isArray(call.args))
+              ? call.args
+              : {}
+          )
+        }
+      };
+    })
+    .filter(Boolean);
+}
+
+function extractGeminiCandidateMessage(data) {
+  const candidate = Array.isArray(data?.candidates) ? data.candidates[0] : null;
+  const parts = Array.isArray(candidate?.content?.parts) ? candidate.content.parts : [];
+  if (parts.length === 0) return null;
+  const msg = {
+    role: 'assistant',
+    content: textFromGeminiParts(parts)
+  };
+  const toolCalls = toolCallsFromGeminiParts(parts);
+  if (toolCalls.length > 0) msg.tool_calls = toolCalls;
+  if (msg.content || toolCalls.length > 0) return msg;
+  return null;
+}
+
 function parseSSEToText(raw) {
   if (typeof raw !== 'string') return null;
   const lines = raw.split('\n');
@@ -157,6 +244,7 @@ function normalizeUsageObject(raw) {
     ?? raw.promptTokens
     ?? raw.inputTokens
     ?? raw.input_token_count
+    ?? raw.promptTokenCount
   );
   const completionTokens = Number(
     raw.completion_tokens
@@ -164,22 +252,29 @@ function normalizeUsageObject(raw) {
     ?? raw.completionTokens
     ?? raw.outputTokens
     ?? raw.output_token_count
+    ?? raw.candidatesTokenCount
   );
   const totalTokens = Number(
     raw.total_tokens
     ?? raw.totalTokens
+    ?? raw.totalTokenCount
   );
   const cacheReadInputTokens = Number(
     raw.cache_read_input_tokens
     ?? raw.cacheReadInputTokens
+    ?? raw.prompt_cache_hit_tokens
+    ?? raw.promptCacheHitTokens
     ?? raw.prompt_tokens_details?.cached_tokens
     ?? raw.promptTokensDetails?.cachedTokens
     ?? raw.input_tokens_details?.cached_tokens
     ?? raw.inputTokensDetails?.cachedTokens
+    ?? raw.cachedContentTokenCount
   );
   const cacheCreationInputTokens = Number(
     raw.cache_creation_input_tokens
     ?? raw.cacheCreationInputTokens
+    ?? raw.prompt_cache_miss_tokens
+    ?? raw.promptCacheMissTokens
     ?? raw.prompt_tokens_details?.cache_write_tokens
     ?? raw.promptTokensDetails?.cacheWriteTokens
     ?? raw.input_tokens_details?.cache_write_tokens
@@ -236,6 +331,7 @@ function extractUsageFromSSEObject(obj) {
   if (!obj || typeof obj !== 'object') return null;
   return (
     normalizeUsageObject(obj.usage)
+    || normalizeUsageObject(obj.usageMetadata)
     || normalizeUsageObject(obj?.message?.usage)
     || normalizeUsageObject(obj?.delta?.usage)
     || normalizeUsageObject(obj?.response?.usage)
@@ -243,12 +339,38 @@ function extractUsageFromSSEObject(obj) {
   );
 }
 
-function extractSSEEvents(state, chunk) {
-  const nextState = state && typeof state === 'object'
-    ? { buffer: String(state.buffer || '') }
-    : { buffer: '' };
+function extractFinishReason(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  const choice = Array.isArray(obj.choices) ? obj.choices[0] : null;
+  const candidate = Array.isArray(obj.candidates) ? obj.candidates[0] : null;
+  const response = obj.response && typeof obj.response === 'object' ? obj.response : null;
+  const incompleteDetails = response?.incomplete_details || response?.incompleteDetails || obj.incomplete_details || obj.incompleteDetails;
+  const incompleteReason = typeof incompleteDetails?.reason === 'string' ? incompleteDetails.reason : '';
+  const direct = String(
+    choice?.finish_reason
+    || choice?.finishReason
+    || candidate?.finishReason
+    || candidate?.finish_reason
+    || obj.finish_reason
+    || obj.finishReason
+    || obj.stop_reason
+    || obj.stopReason
+    || response?.status
+    || obj.status
+    || ''
+  ).trim();
+  if (incompleteReason) return direct ? `${direct}:${incompleteReason}` : `incomplete:${incompleteReason}`;
+  if (direct) return direct;
+  if (obj.type === 'message_stop') return 'message_stop';
+  if (obj.type === 'response.completed') return 'completed';
+  if (obj.type === 'response.incomplete') return 'incomplete';
+  return '';
+}
 
-  nextState.buffer += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '');
+function extractSSEEvents(state, chunk) {
+  const nextState = normalizeSSEState(state);
+
+  nextState.buffer += decodeSSEChunk(nextState, chunk);
   const events = [];
 
   while (true) {
@@ -283,8 +405,9 @@ function extractSSEEvents(state, chunk) {
       const delta = extractDeltaText(obj);
       const reasoning = extractReasoningText(obj);
       const usage = extractUsageFromSSEObject(obj);
+      const finishReason = extractFinishReason(obj);
       if (reasoning) latestReasoning = reasoning;
-      events.push({ done: false, delta, reasoning, usage, json: obj, raw: payload });
+      events.push({ done: false, delta, reasoning, usage, finishReason, json: obj, raw: payload });
     } catch (_) {
       // Ignore non-JSON heartbeat or provider-specific control lines.
     }
@@ -294,7 +417,9 @@ function extractSSEEvents(state, chunk) {
 }
 
 function flushSSEState(state) {
-  const tail = String(state?.buffer || '').trim();
+  const nextState = normalizeSSEState(state);
+  nextState.buffer += flushSSEDecoder(nextState);
+  const tail = String(nextState.buffer || '').trim();
   if (!tail) return [];
 
   const lines = tail.split(/\r?\n/);
@@ -313,8 +438,9 @@ function flushSSEState(state) {
     const delta = extractDeltaText(obj);
     const reasoning = extractReasoningText(obj);
     const usage = extractUsageFromSSEObject(obj);
+    const finishReason = extractFinishReason(obj);
     if (reasoning) latestReasoning = reasoning;
-    return [{ done: false, delta, reasoning, usage, json: obj, raw: payload }];
+    return [{ done: false, delta, reasoning, usage, finishReason, json: obj, raw: payload }];
   } catch (_) {
     return [];
   }
@@ -361,10 +487,20 @@ function extractDeltaText(obj) {
   if (Array.isArray(choice?.message?.content)) {
     return textFromContentArray(choice.message.content);
   }
+  if (choice?.message?.content && typeof choice.message.content === 'object') {
+    return extractTextFromObject(choice.message.content);
+  }
 
   if (Array.isArray(obj.content)) {
     return textFromContentArray(obj.content);
   }
+  if (obj.content && typeof obj.content === 'object') {
+    return extractTextFromObject(obj.content);
+  }
+
+  const candidate = Array.isArray(obj.candidates) ? obj.candidates[0] : null;
+  const geminiCandidateText = textFromGeminiParts(candidate?.content?.parts);
+  if (geminiCandidateText) return geminiCandidateText;
 
   return '';
 }
@@ -431,10 +567,19 @@ function extractMessageContent(resp) {
     return msg;
   }
 
+  const geminiMessage = extractGeminiCandidateMessage(data);
+  if (geminiMessage) return geminiMessage;
+
   const msg = data?.choices?.[0]?.message;
   if (msg) {
     latestReasoning = msg.reasoning_content || msg.reasoning || '';
-    return msg;
+    const normalized = { ...msg };
+    if (Array.isArray(normalized.content)) {
+      normalized.content = textFromContentArray(normalized.content);
+    } else if (normalized.content && typeof normalized.content === 'object') {
+      normalized.content = extractTextFromObject(normalized.content);
+    }
+    return normalized;
   }
 
   const choice = data?.choices?.[0];
@@ -470,6 +615,7 @@ module.exports = {
   extractJsonSafely,
   parseSSEToText,
   extractSSEEvents,
+  extractFinishReason,
   flushSSEState,
   extractUsageFromSSEObject,
   mergeUsageObjects,

@@ -1,3 +1,6 @@
+const { normalizeExecutionEnvelope } = require('../contracts');
+const { buildMemoryToolTelemetry } = require('../runtime/memoryToolTelemetry');
+
 function createDispatchNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
     ? deps.normalizeObject
@@ -74,12 +77,26 @@ function createDispatchNode(deps = {}) {
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
+  const normalizeExecutionEnvelopeImpl = typeof deps.normalizeExecutionEnvelope === 'function'
+    ? deps.normalizeExecutionEnvelope
+    : normalizeExecutionEnvelope;
   const config = deps.config || {};
 
   return async function dispatchNode(state) {
     const request = normalizeObject(state.request, {});
     const dispatchStartedAt = Date.now();
     const allSteps = normalizeArray(state.plan?.steps).map((step) => ({ ...step }));
+    const normalizeStepDependencies = (step = {}) => {
+      const deps = normalizeArray(step.dependsOn || step.depends_on || step.dependencies)
+        .map((item) => String(typeof item === 'string' ? item : item?.id || item?.step_id || '').trim())
+        .filter(Boolean);
+      const runtimeSourceStepId = String(step.runtimeBinding?.sourceStepId || '').trim();
+      return Array.from(new Set(runtimeSourceStepId ? deps.concat([runtimeSourceStepId]) : deps));
+    };
+    const withImplicitDependencies = (step = {}) => ({
+      ...step,
+      dependsOn: normalizeStepDependencies(step)
+    });
     const resolveRuntimeBoundStep = (step, currentSteps = allSteps) => {
       const binding = normalizeObject(step?.runtimeBinding, null);
       if (!binding) return { ...step };
@@ -152,11 +169,9 @@ function createDispatchNode(deps = {}) {
     const selectedSteps = [];
     const selectedIds = new Set();
     for (const step of selectedBase) {
-      const deps = normalizeArray(step.dependsOn || step.depends_on || step.dependencies)
-        .map((item) => String(typeof item === 'string' ? item : item?.id || item?.step_id || '').trim())
-        .filter(Boolean);
+      const deps = normalizeStepDependencies(step);
       if (!deps.every((dep) => dependencyCompletedIds.has(dep) || selectedIds.has(dep))) continue;
-      selectedSteps.push(step);
+      selectedSteps.push(withImplicitDependencies(step));
       const stepId = String(step.id || '').trim();
       if (stepId) selectedIds.add(stepId);
       if (selectedSteps.length >= Math.max(1, Number(config.PLAN_MAX_STEPS) || 5)) break;
@@ -179,7 +194,22 @@ function createDispatchNode(deps = {}) {
         meta: normalizeObject(request.routeMeta, {})
       })
     );
+    const selectedStepCount = selectedSteps.length;
+    const preflightEvents = [createEvent('node_start', {
+      node: 'dispatch',
+      stepCount: selectedStepCount,
+      preflightRequired: mustRunPreflight
+    })];
     const preflightStartedAt = Date.now();
+    const preflightCalls = mustRunPreflight ? 1 : 0;
+    if (mustRunPreflight) {
+      preflightEvents.push(createEvent('dispatch_preflight_start', {
+        node: 'dispatch',
+        allowedTools: selectedStepToolNames,
+        stepCount: selectedStepCount
+      }));
+      appendRuntimeEvents(state, preflightEvents);
+    }
     const preflight = mustRunPreflight
       ? await runCapabilityPreflight(request.question || '', {
         question: String(request.question || '').trim(),
@@ -204,7 +234,16 @@ function createDispatchNode(deps = {}) {
         memoryCliTurn: state.execution?.memoryCliTurn || null
       };
     const preflightDurationMs = Math.max(0, Date.now() - preflightStartedAt);
-    const hasExplicitDependencies = selectedSteps.some((step) => normalizeArray(step.dependsOn).length > 0);
+    if (mustRunPreflight) {
+      appendRuntimeEvents(state, [createEvent('dispatch_preflight_complete', {
+        node: 'dispatch',
+        durationMs: preflightDurationMs,
+        skipped: Boolean(preflight?.skipped),
+        reason: String(preflight?.reason || '').trim(),
+        resultCount: normalizeArray(preflight?.results).length
+      })]);
+    }
+    const hasExplicitDependencies = selectedSteps.some((step) => normalizeStepDependencies(step).length > 0);
     const directChatBatchExecution = isDirectChatRequest(request) && !hasExplicitDependencies;
     const directChatBatches = directChatBatchExecution
       ? buildDirectChatExecutionBatches(selectedSteps, (step) => step)
@@ -224,7 +263,14 @@ function createDispatchNode(deps = {}) {
     const parallelExecution = directChatBatchExecution
       ? directChatBatches.some((batch) => batch.mode === 'parallel' && normalizeArray(batch.items).length > 1)
       : scheduledBatches.some((batch) => batch.mode === 'parallel' && normalizeArray(batch.items).length > 1);
-    const events = [createEvent('node_start', { node: 'dispatch', stepCount: selectedSteps.length, parallelExecution })];
+    const events = mustRunPreflight ? [] : preflightEvents;
+    events.push(createEvent('dispatch_schedule_ready', {
+      node: 'dispatch',
+      stepCount: selectedSteps.length,
+      parallelExecution,
+      preflightRequired: mustRunPreflight,
+      preflightDurationMs
+    }));
     if (String(preflight?.evidenceMessage || '').trim()) {
       events.push(createEvent('dispatch_preflight', {
         node: 'dispatch',
@@ -270,6 +316,25 @@ function createDispatchNode(deps = {}) {
         memoryCliTurn: nextMemoryCliTurn
       }
     });
+    const isRuntimeBindingUnresolved = (step = {}) => (
+      String(step.blockingReason || '').trim().startsWith('runtime_binding_unresolved:')
+    );
+    const buildRuntimeBindingFailureEnvelope = (step = {}) => ({
+      tool_call_id: `${step.id}_binding_${Date.now()}`,
+      step_id: String(step.id || '').trim(),
+      tool_name: String(step.tool || '').trim(),
+      args_hash: stableHash(step.inputs || {}),
+      args: step.inputs || {},
+      status: 'failed',
+      result: `Tool error: ${step.blockingReason}`,
+      side_effect: false,
+      retryable: true,
+      attempt: Number(step.attempts || 0) + 1,
+      duration_ms: 0,
+      source: 'dispatch',
+      unsatisfiedRequirement: step.blockingReason,
+      runtimeBinding: step.runtimeBinding
+    });
 
     const persistDispatchCheckpoint = (pendingInterrupt) => {
       persistCheckpoint({
@@ -307,18 +372,29 @@ function createDispatchNode(deps = {}) {
       persistDispatchCheckpoint(false);
     };
 
+    const normalizeDispatchEnvelope = (envelope = {}) => {
+      const fallbackStep = nextSteps.find((step) => String(step?.id || '').trim() === String(envelope?.step_id || envelope?.stepId || '').trim())
+        || selectedSteps.find((step) => String(step?.id || '').trim() === String(envelope?.step_id || envelope?.stepId || '').trim())
+        || {};
+      return normalizeExecutionEnvelopeImpl(envelope, fallbackStep, {
+        stableHash,
+        source: envelope?.source || 'dispatch'
+      });
+    };
+
     const applyEnvelope = (envelope) => {
-      toolResults.push(envelope);
-      const updatedSteps = updatePlanStepsWithEnvelope(nextSteps, envelope);
+      const normalizedEnvelope = normalizeDispatchEnvelope(envelope);
+      toolResults.push(normalizedEnvelope);
+      const updatedSteps = updatePlanStepsWithEnvelope(nextSteps, normalizedEnvelope);
       nextSteps.splice(0, nextSteps.length, ...updatedSteps);
-      if (envelope.memoryCliTurn) {
-        nextMemoryCliTurn = createMemoryCliTurnState(envelope.memoryCliTurn);
+      if (normalizedEnvelope.memoryCliTurn) {
+        nextMemoryCliTurn = createMemoryCliTurnState(normalizedEnvelope.memoryCliTurn);
       }
-      if (envelope.invalidateMemoryPrompt) {
+      if (normalizedEnvelope.invalidateMemoryPrompt) {
         memoryDirty = true;
       }
-      if (envelope.side_effect) {
-        checkpointAfterSideEffect(envelope);
+      if (normalizedEnvelope.side_effect) {
+        checkpointAfterSideEffect(normalizedEnvelope);
       }
     };
 
@@ -327,7 +403,7 @@ function createDispatchNode(deps = {}) {
       const argsHash = stableHash(step.inputs || {});
       const reusableEnvelope = findEvidenceEnvelope(step, argsHash);
       if (String(step.status || '').trim() === 'completed' && reusableEnvelope && reusableEnvelope.side_effect) {
-        toolResults.push({
+        toolResults.push(normalizeDispatchEnvelope({
           ...reusableEnvelope,
           ...(String(reusableEnvelope?.batch_id || step.batchId || '').trim()
             ? { batch_id: String(reusableEnvelope?.batch_id || step.batchId).trim() }
@@ -338,7 +414,7 @@ function createDispatchNode(deps = {}) {
               : (Number.isFinite(Number(step.batchIndex)) ? { batch_index: Number(step.batchIndex) } : {})
           ),
           reused: true
-        });
+        }));
         continue;
       }
 
@@ -346,21 +422,8 @@ function createDispatchNode(deps = {}) {
       if (parallelExecution) continue;
 
       const preparedStep = resolveRuntimeBoundStep(step, nextSteps);
-      if (String(preparedStep.blockingReason || '').trim().startsWith('runtime_binding_unresolved:')) {
-        applyEnvelope({
-          tool_call_id: `${preparedStep.id}_binding_${Date.now()}`,
-          step_id: String(preparedStep.id || '').trim(),
-          tool_name: String(preparedStep.tool || '').trim(),
-          args_hash: stableHash(preparedStep.inputs || {}),
-          args: preparedStep.inputs || {},
-          status: 'failed',
-          result: `Tool error: ${preparedStep.blockingReason}`,
-          side_effect: false,
-          retryable: true,
-          attempt: Number(preparedStep.attempts || 0) + 1,
-          unsatisfiedRequirement: preparedStep.blockingReason,
-          runtimeBinding: preparedStep.runtimeBinding
-        });
+      if (isRuntimeBindingUnresolved(preparedStep)) {
+        applyEnvelope(buildRuntimeBindingFailureEnvelope(preparedStep));
         continue;
       }
 
@@ -386,21 +449,8 @@ function createDispatchNode(deps = {}) {
               ...(String(batch.batchId || '').trim() ? { batchId: String(batch.batchId).trim() } : {}),
               ...(Number.isFinite(Number(batch.batchIndex)) ? { batchIndex: Number(batch.batchIndex) } : {})
             }, nextSteps);
-            if (String(runnableStep.blockingReason || '').trim().startsWith('runtime_binding_unresolved:')) {
-              applyEnvelope({
-                tool_call_id: `${runnableStep.id}_binding_${Date.now()}`,
-                step_id: String(runnableStep.id || '').trim(),
-                tool_name: String(runnableStep.tool || '').trim(),
-                args_hash: stableHash(runnableStep.inputs || {}),
-                args: runnableStep.inputs || {},
-                status: 'failed',
-                result: `Tool error: ${runnableStep.blockingReason}`,
-                side_effect: false,
-                retryable: true,
-                attempt: Number(runnableStep.attempts || 0) + 1,
-                unsatisfiedRequirement: runnableStep.blockingReason,
-                runtimeBinding: runnableStep.runtimeBinding
-              });
+            if (isRuntimeBindingUnresolved(runnableStep)) {
+              applyEnvelope(buildRuntimeBindingFailureEnvelope(runnableStep));
               continue;
             }
             if (isSideEffectPolicy(getPolicy(step.tool))) {
@@ -418,11 +468,15 @@ function createDispatchNode(deps = {}) {
           }
           continue;
         }
-        const runnableBatchItems = batchItems.map((step) => resolveRuntimeBoundStep({
+        const resolvedBatchItems = batchItems.map((step) => resolveRuntimeBoundStep({
           ...step,
           ...(String(batch.batchId || '').trim() ? { batchId: String(batch.batchId).trim() } : {}),
           ...(Number.isFinite(Number(batch.batchIndex)) ? { batchIndex: Number(batch.batchIndex) } : {})
-        }, nextSteps)).filter((step) => !String(step.blockingReason || '').trim().startsWith('runtime_binding_unresolved:'));
+        }, nextSteps));
+        for (const step of resolvedBatchItems.filter(isRuntimeBindingUnresolved)) {
+          applyEnvelope(buildRuntimeBindingFailureEnvelope(step));
+        }
+        const runnableBatchItems = resolvedBatchItems.filter((step) => !isRuntimeBindingUnresolved(step));
         const sideEffectSteps = runnableBatchItems.filter((step) => isSideEffectPolicy(getPolicy(step.tool)));
         if (sideEffectSteps.length > 0) {
           const preEvents = sideEffectSteps.map((step) => createEvent('checkpoint', {
@@ -448,9 +502,12 @@ function createDispatchNode(deps = {}) {
       }
     } else if (parallelExecution && selectedSteps.length > 0) {
       for (const batch of scheduledBatches) {
-        const runnableBatchItems = normalizeArray(batch.items)
-          .map((step) => resolveRuntimeBoundStep(step, nextSteps))
-          .filter((step) => !String(step.blockingReason || '').trim().startsWith('runtime_binding_unresolved:'));
+        const resolvedBatchItems = normalizeArray(batch.items)
+          .map((step) => resolveRuntimeBoundStep(step, nextSteps));
+        for (const step of resolvedBatchItems.filter(isRuntimeBindingUnresolved)) {
+          applyEnvelope(buildRuntimeBindingFailureEnvelope(step));
+        }
+        const runnableBatchItems = resolvedBatchItems.filter((step) => !isRuntimeBindingUnresolved(step));
         if (runnableBatchItems.length === 0) continue;
         for (const step of runnableBatchItems.filter((item) => isSideEffectPolicy(getPolicy(item.tool)))) {
           checkpointBeforeSideEffect(step);
@@ -470,7 +527,10 @@ function createDispatchNode(deps = {}) {
     }
 
     const nextEvents = events
-      .concat(toolResults.map((item) => createEvent('tool_result', item)))
+      .concat(toolResults.map((item) => createEvent('tool_result', {
+        ...item,
+        ...buildMemoryToolTelemetry(item)
+      })))
       .concat([createEvent('node_complete', { node: 'dispatch' })]);
 
     return saveAndEmit({
@@ -502,9 +562,16 @@ function createDispatchNode(deps = {}) {
           dispatch: {
             tool_exec_ms: Math.max(0, Date.now() - dispatchStartedAt - preflightDurationMs),
             capability_preflight_ms: preflightDurationMs,
+            capability_preflight_calls: preflightCalls,
             tool_result_count: toolResults.length,
             scheduled_batch_count: scheduledBatches.length,
             parallel_batch_count: scheduledBatches.filter((batch) => batch.mode === 'parallel').length
+          },
+          model: {
+            ...normalizeObject(state.execution?.latencyBreakdown?.model, {}),
+            global_preflight_calls: Number(state.execution?.latencyBreakdown?.model?.global_preflight_calls || 0)
+              + preflightCalls,
+            total_model_calls: Number(state.execution?.latencyBreakdown?.model?.total_model_calls || 0)
           }
         }
       },

@@ -51,26 +51,7 @@ AMAP_KEY=your_amap_key
 - `ADMIN_API_BASE_URL` / `ADMIN_AI_MODEL` / `ADMIN_API_KEY` 留空时，分别回退到 `API_BASE_URL` / `AI_MODEL` / `API_KEY`
 - 当前 Web 设置页不会展示或编辑这些字段，需要手工维护 `.env`
 
-如果你现在的执行链是“工具任务统一交给子 agent”，还要额外确认这组字段：
-
-```env
-SUBAGENT_ENABLED=true
-SUBAGENT_BACKEND=openclaw
-SUBAGENT_NAME=openclaw
-SUBAGENT_REVIEW_ENABLED=true
-
-OPENCLAW_COMMAND=/path/to/node_or_openclaw
-OPENCLAW_BASE_ARGS=["/path/to/openclaw.mjs"]
-OPENCLAW_WORKDIR=/root/.openclaw/workspace
-OPENCLAW_AGENT_ID=main
-OPENCLAW_TIMEOUT_MS=180000
-OPENCLAW_JSON_OUTPUT=true
-```
-
-说明：
-- 工具型请求会统一转发给子 agent 执行。
-- Mizuki 本地不再执行这类工具调用，只负责审核子 agent 结果并发回当前 QQ 通路。
-- 普通聊天仍然由 Mizuki 本地直接处理。
+2026-05-30 +08:00：外部子 agent 执行链路已退役，Linux 部署不再支持把工具任务统一转发到外部子进程。工具、记忆、planner 和主回复继续由 Mizuki 本项目运行时处理。
 
 ## 4. 启动前检查
 ```bash
@@ -110,22 +91,8 @@ systemctl stop mizukibot
 确保 NapCat OneBot WebSocket 地址与 `.env` 中一致：
 - `NAPCAT_WS_URL=ws://<napcat_host>:<port>`
 
-## 8. 子 Agent 执行链
-推荐线上配置：
-
-```env
-SUBAGENT_ENABLED=true
-SUBAGENT_BACKEND=openclaw
-SUBAGENT_REVIEW_ENABLED=true
-```
-
-这样线上行为会变成：
-- 工具任务：Mizuki 路由到子 agent
-- 子 agent：执行搜索、总结、资料查询等工具型任务
-- Mizuki：审核和润色子 agent 输出
-- QQ：把审核后的最终回复发回当前聊天
-
-如果你关闭 `SUBAGENT_REVIEW_ENABLED`，子 agent 原始输出会直接返回给用户。
+## 8. 工具执行链
+外部子 agent 桥接已退役。线上工具请求仍按 `core/routeExecution.js` 和 `api/runtimeV2` 的本地工具、MCP、记忆与 planner 链路执行。
 
 ## 9. Web 面板访问
 - 默认仅本机访问：`WEB_BIND_HOST=127.0.0.1`
@@ -149,10 +116,9 @@ SUBAGENT_REVIEW_ENABLED=true
 3) API 调用超时
 - 检查服务器网络，必要时设置 `PROXY_URL`。
 
-4) 工具请求没有走子 agent
-- 检查 `SUBAGENT_ENABLED=true`
-- 检查 `SUBAGENT_BACKEND` 是否与你实际部署的子 agent 一致
-- 如果是 OpenClaw，检查 `OPENCLAW_COMMAND`、`OPENCLAW_BASE_ARGS`、`OPENCLAW_WORKDIR`
+4) 工具请求没有执行
+- 检查路由是否进入工具执行计划。
+- 检查本地工具/MCP 配置、权限策略和运行时诊断。
 
 5) systemd 启动失败
 - 查看 `journalctl -u mizukibot -n 200 --no-pager`

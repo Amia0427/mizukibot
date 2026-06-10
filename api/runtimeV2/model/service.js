@@ -1,9 +1,14 @@
 const config = require('../../../config');
 const { postWithRetry, postStreamWithRetry } = require('../../httpClient');
 const { extractMessageContent, extractSSEEvents, flushSSEState } = require('../../parser');
-const { getToolSchemas } = require('../../toolRegistry');
+const { getToolSchemaByName } = require('../../toolRegistry');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
+const { isAdminPrivateChatContext } = require('../../../utils/privilegedPrivateChat');
+const {
+  WEB_LOOKUP_ALLOWED_TOOLS,
+  routeHasExplicitWebSearchRequirement
+} = require('../../../utils/webSearchRequirement');
 const { isToolSchemaValidationError } = require('../../../utils/modelCompat');
 const {
   extractUserFacingDelta,
@@ -18,17 +23,26 @@ const {
 const { isReplyFailure } = require('../../../utils/replyFailure');
 const { runHumanizerAgent } = require('../../humanizerAgent');
 const {
+  createNormalUserMainReplyStreamFirstTokenTimeoutError
+} = require('../../../utils/normalUserMainReplyStreamTimeout');
+const {
   buildMainModelRequest,
   getApiBaseUrl,
   getApiKey,
+  getMainReplyDefaultMaxTokens,
   getMaxTokens,
   getModelName,
   getRetries,
+  resolveMainProvider,
   normalizeTextContent,
   withMainModelFallback
 } = require('./shared');
 const { shouldUsePlanModeForRequest } = require('../planning/service');
 const { normalizeRequestTrace } = require('../../../utils/requestTrace');
+const {
+  buildModelRouteDiagnostics,
+  createModelRouteTracePatch
+} = require('../../../utils/modelRouteDiagnostics');
 // source-compat anchors for role-aware main model routing:
 // require('../../../utils/mainModelConfigResolver');
 // function buildPrimaryMainModelConfig(overrides = null, userId = '') {
@@ -36,9 +50,30 @@ const { normalizeRequestTrace } = require('../../../utils/requestTrace');
 // const bypassFallback = shouldBypassMainModelFallback(userId, options);
 const MODEL_RESPONSE_MALFORMED_REPLY = '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。';
 
+function getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig = null) {
+  if (String(resolvedConfig?.__mainModelUserRole || '').trim().toLowerCase() === 'admin') return 0;
+  return Math.max(0, Math.floor(Number(config.NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS) || 0));
+}
+
 function getAllowedToolNames(context = {}) {
   if (!Array.isArray(context.allowedTools)) return [];
-  return filterCompanionAllowedTools(normalizeToolNames(context.allowedTools), config);
+  const runtimeConfig = context.runtimeConfig || context.config || config;
+  const normalizedTools = normalizeToolNames(context.allowedTools);
+  if (isAdminPrivateChatContext(context, runtimeConfig)) return normalizedTools;
+  const companionTools = filterCompanionAllowedTools(normalizedTools, runtimeConfig);
+  const routeMeta = context.routeMeta && typeof context.routeMeta === 'object' ? context.routeMeta : {};
+  if (!routeHasExplicitWebSearchRequirement({
+    question: context.question || routeMeta.effectiveIntentText || routeMeta.cleanText,
+    cleanText: context.cleanText || routeMeta.cleanText || routeMeta.effectiveIntentText,
+    rawText: context.rawText || routeMeta.rawText,
+    meta: routeMeta
+  })) {
+    return companionTools;
+  }
+  return normalizeToolNames([
+    ...companionTools,
+    ...normalizedTools.filter((toolName) => WEB_LOOKUP_ALLOWED_TOOLS.includes(toolName))
+  ]);
 }
 
 const filteredToolSchemaCache = new Map();
@@ -54,11 +89,9 @@ function getFilteredToolSchemas(context = {}) {
   if (cached) {
     return cached.map((schema) => ({ ...schema, function: schema.function ? { ...schema.function } : schema.function }));
   }
-  const allowedSet = new Set(allowedNames);
-  const filtered = getToolSchemas().filter((schema) => {
-    const toolName = String(schema?.function?.name || '').trim();
-    return allowedSet.has(toolName);
-  });
+  const filtered = allowedNames
+    .map((toolName) => getToolSchemaByName(toolName))
+    .filter(Boolean);
   filteredToolSchemaCache.set(cacheKey, filtered.map((schema) => ({
     ...schema,
     function: schema.function ? { ...schema.function } : schema.function
@@ -86,6 +119,9 @@ function buildReplyTextVariants(rawReply, fallbackText, options = {}) {
 function buildModelCallTrace(context = {}, source = 'v2_model') {
   const requestTrace = normalizeRequestTrace(context?.requestTrace)
     || normalizeRequestTrace(context?.routeMeta?.requestTrace);
+  const routeMeta = context?.routeMeta && typeof context.routeMeta === 'object'
+    ? context.routeMeta
+    : {};
   return {
     source: String(context?.source || source).trim() || source,
     phase: String(context?.phase || '').trim(),
@@ -97,7 +133,11 @@ function buildModelCallTrace(context = {}, source = 'v2_model') {
     userId: String(context?.userId || context?.routeMeta?.userId || context?.routeMeta?.user_id || '').trim(),
     taskId: String(context?.taskId || '').trim(),
     routePolicyKey: String(context?.routePolicyKey || context?.routeMeta?.routePolicyKey || '').trim(),
+    routeDebugKey: String(context?.routeDebugKey || routeMeta.routeDebugKey || routeMeta.route_debug_key || '').trim(),
     topRouteType: String(context?.topRouteType || context?.routeMeta?.topRouteType || '').trim(),
+    dispatchBranch: String(context?.dispatchBranch || context?.replyBranch || '').trim(),
+    triggerBranch: String(context?.triggerBranch || '').trim(),
+    fallbackReason: String(context?.fallbackReason || routeMeta.routeFallbackReason || routeMeta.fallbackReason || '').trim(),
     memoryInjected: context?.memoryInjected
   };
 }
@@ -108,6 +148,26 @@ function buildResolvedModelTrace(context = {}, resolvedConfig = null, source = '
   const warnings = Array.isArray(resolvedConfig?.__adminConfigWarnings)
     ? resolvedConfig.__adminConfigWarnings
     : [];
+  const apiBaseUrl = getApiBaseUrl(resolvedConfig);
+  const model = getModelName(resolvedConfig);
+  const diagnostics = buildModelRouteDiagnostics({
+    routeMeta: context?.routeMeta,
+    routeDebugKey: trace.routeDebugKey,
+    routePolicyKey: trace.routePolicyKey,
+    topRouteType: trace.topRouteType,
+    branch: trace.dispatchBranch,
+    triggerBranch: trace.triggerBranch || source,
+    provider: resolveMainProvider(apiBaseUrl, model, resolvedConfig),
+    apiBaseUrl,
+    model,
+    modelSource: resolvedConfig?.__mainModelSource,
+    apiBaseUrlSource: resolvedConfig?.__mainApiBaseUrlSource,
+    apiKeySource: resolvedConfig?.__mainApiKeySource,
+    fallbackReason: resolvedConfig?.__mainFallbackReason || trace.fallbackReason,
+    fallbackScope: resolvedConfig?.__mainFallbackScope,
+    fallbackActive: resolvedConfig?.__mainFallbackActive === true,
+    fallbackForced: resolvedConfig?.__mainFallbackForced === true
+  });
   return {
     ...trace,
     userRole: role,
@@ -116,8 +176,11 @@ function buildResolvedModelTrace(context = {}, resolvedConfig = null, source = '
     apiKeySource: String(resolvedConfig?.__mainApiKeySource || '').trim(),
     mainFallbackScope: String(resolvedConfig?.__mainFallbackScope || '').trim(),
     mainFallbackActive: resolvedConfig?.__mainFallbackActive === true,
+    mainFallbackForced: resolvedConfig?.__mainFallbackForced === true,
+    fallbackReason: String(resolvedConfig?.__mainFallbackReason || trace.fallbackReason || '').trim(),
     adminDedicatedModelConfigured: resolvedConfig?.__adminDedicatedModelConfigured,
-    adminConfigWarnings: warnings
+    adminConfigWarnings: warnings,
+    ...createModelRouteTracePatch(diagnostics)
   };
 }
 
@@ -128,12 +191,18 @@ function logResolvedModelCall(context = {}, resolvedConfig = null, source = 'v2_
     userId: trace.userId,
     userRole: trace.userRole || 'user',
     routePolicyKey: trace.routePolicyKey,
+    routeDebugKey: trace.routeDebugKey,
     topRouteType: trace.topRouteType,
+    dispatchBranch: trace.dispatchBranch,
     model: getModelName(resolvedConfig),
+    provider: trace.provider,
+    apiBaseUrlHost: trace.apiBaseUrlHost,
     modelSource: trace.modelSource,
     apiBaseUrlSource: trace.apiBaseUrlSource,
     fallbackScope: trace.mainFallbackScope,
     fallbackActive: trace.mainFallbackActive,
+    fallbackForced: trace.mainFallbackForced,
+    fallbackReason: trace.fallbackReason,
     adminDedicatedModelConfigured: trace.adminDedicatedModelConfigured,
     adminConfigWarnings: trace.adminConfigWarnings
   };
@@ -173,7 +242,15 @@ async function finalizeReplyText(rawReply, fallbackText, options = {}) {
     model: getModelName(options.modelConfig),
     apiBaseUrl: getApiBaseUrl(options.modelConfig),
     apiKey: getApiKey(options.modelConfig),
-    retries: getRetries(1, options.modelConfig)
+    retries: getRetries(1, options.modelConfig),
+    userId: options.userId,
+    routeMeta: options.routeMeta,
+    routePolicyKey: options.routePolicyKey,
+    routeDebugKey: options.routeDebugKey || options.routeMeta?.routeDebugKey,
+    topRouteType: options.topRouteType,
+    requestTrace: options.requestTrace || options.routeMeta?.requestTrace,
+    dispatchBranch: options.dispatchBranch || 'humanizer',
+    triggerBranch: options.triggerBranch || 'humanizer.finalize_reply'
   });
   const persistedText = String(humanized || '').trim() || base;
   return {
@@ -192,10 +269,11 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
     const request = buildMainModelRequest(resolvedConfig, {
       messages,
       stream: false,
-      defaultMaxTokens: 3500,
+      defaultMaxTokens: getMainReplyDefaultMaxTokens(),
       trace: callTrace,
       routeMeta: context?.routeMeta,
       topRouteType: context?.topRouteType,
+      allowedTools: context?.allowedTools,
       tools: includeTools ? toolSchemas : []
     });
     const body = request.body;
@@ -231,7 +309,7 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
           || config.CONTEXT_WINDOW_MAX_TOKENS
           || 32000
         ) || 32000,
-        maxOutputTokens: getMaxTokens(3500, resolvedConfig),
+        maxOutputTokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
         preferRawTrim: !context?.canonicalSegments
       });
       try {
@@ -278,49 +356,106 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
 async function requestStreamingReply(messagesToSend, options = {}, modelConfig = null) {
   const parserState = { buffer: '' };
   let collected = '';
+  let lastVisibleText = '';
+  let firstVisibleOutputSeen = false;
+  let cancelActiveFirstTokenTimer = null;
   const userId = String(options.userId || options.routeMeta?.userId || options.routeMeta?.user_id || '').trim();
+  const preserveThink = options.preserveThink === true;
+
+  const markFirstVisibleOutput = () => {
+    firstVisibleOutputSeen = true;
+    if (typeof cancelActiveFirstTokenTimer === 'function') {
+      cancelActiveFirstTokenTimer();
+      cancelActiveFirstTokenTimer = null;
+    }
+  };
+
+  const emitVisibleDelta = (eventDelta = '') => {
+    collected += eventDelta;
+    const visibleCollected = sanitizeUserFacingText(collected, {
+      preserveThink
+    });
+    const visibleDelta = extractUserFacingDelta(lastVisibleText, visibleCollected);
+    if (visibleCollected !== lastVisibleText) {
+      lastVisibleText = visibleCollected;
+      options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
+      if (options.streamHadOutput) {
+        markFirstVisibleOutput();
+      }
+      if (typeof options.onDelta === 'function') {
+        options.onDelta(visibleDelta, visibleCollected);
+      }
+    }
+  };
 
   try {
     await withMainModelFallback(async (resolvedConfig) => {
       const requestStreamOnce = async (messages) => {
+        const normalUserFirstTokenTimeoutMs = getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig);
+        const useNormalUserFirstTokenTimeout = normalUserFirstTokenTimeoutMs > 0 && !firstVisibleOutputSeen;
+        const abortController = useNormalUserFirstTokenTimeout && typeof AbortController !== 'undefined'
+          ? new AbortController()
+          : null;
         const callTrace = logResolvedModelCall(options, resolvedConfig, 'v2_streaming_reply');
         const request = buildMainModelRequest(resolvedConfig, {
           messages,
           stream: true,
-          defaultMaxTokens: 3500,
+          defaultMaxTokens: getMainReplyDefaultMaxTokens(),
           trace: callTrace,
           routeMeta: options?.routeMeta,
-          topRouteType: options?.topRouteType
+          topRouteType: options?.topRouteType,
+          allowedTools: options?.allowedTools
         });
-        await postStreamWithRetry(
+        const requestBody = abortController
+          ? { ...request.body, __abortSignal: abortController.signal }
+          : request.body;
+        const streamPromise = postStreamWithRetry(
           request.url,
-          request.body,
+          requestBody,
           {
             onData(chunk) {
               const parsed = extractSSEEvents(parserState, chunk);
               parserState.buffer = parsed.state.buffer;
               for (const event of parsed.events) {
                 if (!event || event.done || !event.delta) continue;
-                const previousVisible = sanitizeUserFacingText(collected, {
-                  preserveThink: options.preserveThink === true
-                });
-                collected += event.delta;
-                const visibleCollected = sanitizeUserFacingText(collected, {
-                  preserveThink: options.preserveThink === true
-                });
-                const visibleDelta = extractUserFacingDelta(previousVisible, visibleCollected);
-                if (visibleCollected !== previousVisible) {
-                  options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
-                  if (typeof options.onDelta === 'function') {
-                    options.onDelta(visibleDelta, visibleCollected);
-                  }
-                }
+                emitVisibleDelta(event.delta);
               }
             }
           },
           getRetries(1, resolvedConfig),
           getApiKey(resolvedConfig)
         );
+        if (!useNormalUserFirstTokenTimeout) {
+          await streamPromise;
+          return;
+        }
+
+        let timeoutError = null;
+        const timeoutPromise = new Promise((_, reject) => {
+          const timer = setTimeout(() => {
+            if (firstVisibleOutputSeen) return;
+            timeoutError = createNormalUserMainReplyStreamFirstTokenTimeoutError(normalUserFirstTokenTimeoutMs);
+            if (abortController && !abortController.signal.aborted) {
+              try { abortController.abort(timeoutError); } catch (_) {}
+            }
+            reject(timeoutError);
+          }, normalUserFirstTokenTimeoutMs);
+          cancelActiveFirstTokenTimer = () => {
+            clearTimeout(timer);
+          };
+        });
+
+        try {
+          await Promise.race([streamPromise, timeoutPromise]);
+        } catch (error) {
+          if (timeoutError) throw timeoutError;
+          throw error;
+        } finally {
+          if (typeof cancelActiveFirstTokenTimer === 'function') {
+            cancelActiveFirstTokenTimer();
+            cancelActiveFirstTokenTimer = null;
+          }
+        }
       };
 
       try {
@@ -339,7 +474,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
             || config.CONTEXT_WINDOW_MAX_TOKENS
             || 32000
           ) || 32000,
-          maxOutputTokens: getMaxTokens(3500, resolvedConfig),
+          maxOutputTokens: getMaxTokens(getMainReplyDefaultMaxTokens(), resolvedConfig),
           preferRawTrim: !options?.canonicalSegments
         });
         try {
@@ -369,20 +504,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
   const tailEvents = flushSSEState(parserState);
   for (const event of tailEvents) {
     if (!event || event.done || !event.delta) continue;
-    const previousVisible = sanitizeUserFacingText(collected, {
-      preserveThink: options.preserveThink === true
-    });
-    collected += event.delta;
-    const visibleCollected = sanitizeUserFacingText(collected, {
-      preserveThink: options.preserveThink === true
-    });
-    const visibleDelta = extractUserFacingDelta(previousVisible, visibleCollected);
-    if (visibleCollected !== previousVisible) {
-      options.streamHadOutput = Boolean(options.streamHadOutput || hasVisibleUserFacingText(visibleCollected));
-      if (typeof options.onDelta === 'function') {
-        options.onDelta(visibleDelta, visibleCollected);
-      }
-    }
+    emitVisibleDelta(event.delta);
   }
 
   return buildReplyTextVariants(collected, '', options);
@@ -401,7 +523,15 @@ function finalizeStreamingReplyWithHumanizer(rawReply, fallbackText, options = {
     stream: true,
     onDelta: options.onDelta,
     streamHadOutput: options.streamHadOutput,
-    maxSegments: Number(config.AI_STREAM_MAX_SEGMENTS) || 3
+    maxSegments: Number(config.AI_STREAM_MAX_SEGMENTS) || 3,
+    userId: options.userId,
+    routeMeta: options.routeMeta,
+    routePolicyKey: options.routePolicyKey,
+    routeDebugKey: options.routeDebugKey || options.routeMeta?.routeDebugKey,
+    topRouteType: options.topRouteType,
+    requestTrace: options.requestTrace || options.routeMeta?.requestTrace,
+    dispatchBranch: options.dispatchBranch || 'humanizer',
+    triggerBranch: options.triggerBranch || 'humanizer.streaming'
   });
 }
 

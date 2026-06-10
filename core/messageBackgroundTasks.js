@@ -77,7 +77,7 @@ function createMessageBackgroundTaskCoordinator(deps = {}) {
 
     const finalizeSuccess = (rawReply) => {
       const normalizedReply = normalizeUserFacingReply(rawReply, {
-        routeDebugKey: getEffectivePolicyKey(routeExecutionPlan),
+        routeDebugKey: routeExecutionPlan?.routeDebugKey || getEffectivePolicyKey(routeExecutionPlan),
         topRouteType: routeExecutionPlan.topRouteType,
         allowTools: routeExecutionPlan.allowTools,
         requestText: cleanText

@@ -1,6 +1,5 @@
 const axios = require('axios');
 const config = require('../config');
-const { drawPicture } = require('./legacy/aiHost');
 const { getApiProvider, normalizeProviderRequestHeaders } = require('../utils/modelProvider');
 
 function normalizeText(value) {
@@ -55,9 +54,9 @@ function resolveBotDiaryQzoneImageRequestUrl(apiBaseUrl = '', model = '') {
   return `${base}/models/${encodeURIComponent(safeModel)}:generateContent`;
 }
 
-function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '') {
+function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '', model = '') {
   const key = normalizeText(apiKey);
-  const provider = getApiProvider(apiBaseUrl, '');
+  const provider = getApiProvider(apiBaseUrl, model);
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json, text/plain, */*'
@@ -72,8 +71,9 @@ function buildBotDiaryQzoneImageHeaders(apiKey = '', apiBaseUrl = '') {
       config.MODEL_HTTP_USER_AGENT
       || config.MAIN_REPLY_USER_AGENT
       || config.HTTP_USER_AGENT
+      || config.CODEX_USER_AGENT
       || ''
-    ).trim() || 'Mozilla/5.0';
+    ).trim() || config.CODEX_USER_AGENT;
   }
   const normalizedHeaders = normalizeProviderRequestHeaders(provider, headers) || headers;
   if (provider !== 'openai_compatible') normalizedHeaders['User-Agent'] = false;
@@ -201,6 +201,10 @@ function describeBotDiaryQzoneImageFailure(payload) {
   return 'image generation returned no image';
 }
 
+async function drawPicture(prompt) {
+  return require('./legacy/aiHost').drawPicture(prompt);
+}
+
 async function drawBotDiaryQzonePicture(prompt = '', options = {}) {
   const provider = typeof options.buildProviderConfig === 'function'
     ? options.buildProviderConfig()
@@ -222,7 +226,7 @@ async function drawBotDiaryQzonePicture(prompt = '', options = {}) {
       {
         timeout: timeoutMs,
         proxy: false,
-        headers: buildBotDiaryQzoneImageHeaders(provider.apiKey, requestUrl)
+        headers: buildBotDiaryQzoneImageHeaders(provider.apiKey, requestUrl, provider.model)
       }
     );
     const imageSource = extractBotDiaryQzoneImageSource(response?.data);

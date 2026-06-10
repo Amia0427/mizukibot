@@ -1,4 +1,4 @@
-Direct transform mode:
+# Direct transform mode:
 Transform only the content already present in the current user message.
 Do not ask for a source that is already provided inline.
 Do not chat, roleplay, or expand beyond the requested transformation.

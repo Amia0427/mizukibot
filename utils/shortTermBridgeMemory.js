@@ -3,6 +3,8 @@ const path = require('path');
 const config = require('../config');
 const { getJsonStore } = require('./storeRegistry');
 const { normalizeMessageContent, trimTextByTokenBudget } = require('./contextBudget');
+const { isUnsafeUserFacingReply } = require('./userFacingReplyGuards');
+const { isPollutedMemoryText } = require('./recallPollutionGuard');
 const {
   defaultShortTermState,
   normalizeShortTermState,
@@ -50,6 +52,19 @@ function getBridgeTtlMs() {
   return ttlHours * 60 * 60 * 1000;
 }
 
+function getBridgeRawTtlMs() {
+  const ttlHours = Math.max(1, Number(config.SHORT_TERM_BRIDGE_RAW_TTL_HOURS || 48));
+  return ttlHours * 60 * 60 * 1000;
+}
+
+function resolveBridgeFreshnessTier(entry = {}, now = Date.now()) {
+  const updatedAt = Number(entry?.updatedAt || 0) || 0;
+  if (!updatedAt) return 'unknown';
+  const ageMs = Math.max(0, now - updatedAt);
+  if (ageMs <= getBridgeRawTtlMs()) return 'raw_recent';
+  return 'summary_only';
+}
+
 function getBridgeRecentMessagesLimit() {
   return Math.max(1, Math.floor(Number(config.SHORT_TERM_BRIDGE_RECENT_MESSAGES || 4)));
 }
@@ -58,20 +73,56 @@ function getBridgeMaxUsers() {
   return Math.max(1, Math.floor(Number(config.SHORT_TERM_BRIDGE_MAX_USERS || 500)));
 }
 
-function normalizeBridgeMessage(message) {
+function isPrivateBridgeSession(sessionKey = '', routeMeta = {}, scope = {}) {
+  const chatType = String(routeMeta?.chatType || routeMeta?.chat_type || '').trim().toLowerCase();
+  if (chatType) return chatType === 'private';
+  if (String(scope?.groupId || '').trim()) return false;
+  const key = String(sessionKey || scope?.sessionKey || '').trim();
+  if (/^(?:qq-group|channel):/i.test(key)) return false;
+  return /^direct:/i.test(key);
+}
+
+function sanitizeBridgeRawTurns(state) {
+  const normalized = normalizeShortTermState(state);
+  normalized.interaction = normalizeInteractionState({
+    ...normalized.interaction,
+    recentTurns: (Array.isArray(normalized.interaction?.recentTurns) ? normalized.interaction.recentTurns : [])
+      .filter((item) => {
+        const role = String(item?.role || '').trim().toLowerCase();
+        return role !== 'assistant' || !isUnsafeUserFacingReply(item?.content);
+      })
+  });
+  normalized.scene = normalizeSceneState({
+    ...normalized.scene,
+    recentTurns: (Array.isArray(normalized.scene?.recentTurns) ? normalized.scene.recentTurns : [])
+      .filter((item) => {
+        const role = String(item?.role || '').trim().toLowerCase();
+        return role !== 'assistant' || !isUnsafeUserFacingReply(item?.content);
+      })
+  });
+  return normalized;
+}
+
+function normalizeBridgeShortTermState(state = {}) {
+  return sanitizeBridgeRawTurns(state);
+}
+
+function normalizeBridgeMessage(message, options = {}) {
   const role = String(message?.role || '').trim().toLowerCase();
   if (!BRIDGE_ALLOWED_ROLES.has(role)) return null;
+  if (options.omitAssistant === true && role === 'assistant') return null;
 
   const content = String(normalizeMessageContent(message?.content) || '').trim();
   if (!content) return null;
+  if (role === 'assistant' && (isUnsafeUserFacingReply(content) || isPollutedMemoryText(content, { allowBenignContext: false }))) return null;
 
   return { role, content };
 }
 
-function normalizeRecentMessages(messages = []) {
+function normalizeRecentMessages(messages = [], options = {}) {
   const limit = getBridgeRecentMessagesLimit();
   return (Array.isArray(messages) ? messages : [])
-    .map((item) => normalizeBridgeMessage(item))
+    .map((item) => normalizeBridgeMessage(item, options))
     .filter(Boolean)
     .slice(-limit);
 }
@@ -116,23 +167,52 @@ function sanitizeBridgeSessionEntry(sessionKey, entry, now = Date.now()) {
   if (!scope.sessionKey || !scope.userId) return null;
 
   const recentMessages = normalizeRecentMessages(entry.recentMessages);
-  const shortTermState = normalizeShortTermState({
+  const rawShortTermState = {
     ...defaultShortTermState(),
     ...(entry.shortTermState && typeof entry.shortTermState === 'object'
       ? entry.shortTermState
       : {
           summary: String(entry.shortTermSummary || '').trim(),
           summarySource: String(entry.shortTermSummary ? 'bridge_legacy' : '').trim()
-        })
-  });
+        }),
+    ...(entry.interactionState && typeof entry.interactionState === 'object'
+      ? { interaction: entry.interactionState }
+      : {}),
+    ...(entry.sceneState && typeof entry.sceneState === 'object'
+      ? { scene: entry.sceneState }
+      : {}),
+    ...(entry.expressionState && typeof entry.expressionState === 'object'
+      ? { expression: entry.expressionState }
+      : {}),
+    ...(entry.moduleState && typeof entry.moduleState === 'object'
+      ? { moduleState: entry.moduleState }
+      : {})
+  };
+  const shortTermState = normalizeBridgeShortTermState(rawShortTermState);
   if (looksLikePollutedBridgeSummary(shortTermState.summary)) {
     shortTermState.summary = '';
     shortTermState.summarySource = '';
   }
-  const interactionState = normalizeInteractionState(entry.interactionState || shortTermState.interaction);
-  const sceneState = normalizeSceneState(entry.sceneState || shortTermState.scene);
-  const expressionState = normalizeExpressionState(entry.expressionState || shortTermState.expression);
-  const moduleState = normalizeModuleState(entry.moduleState || shortTermState.moduleState);
+  if (isPollutedMemoryText(shortTermState.summary, { allowBenignContext: false })) {
+    shortTermState.summary = '';
+    shortTermState.summarySource = '';
+  }
+  if (isPollutedMemoryText(shortTermState.carryOverUserTurn, { allowBenignContext: true })) {
+    shortTermState.carryOverUserTurn = '';
+  }
+  if (isPollutedMemoryText(shortTermState.activeTopic, { allowBenignContext: true })) {
+    shortTermState.activeTopic = '';
+  }
+  shortTermState.openLoops = (Array.isArray(shortTermState.openLoops) ? shortTermState.openLoops : [])
+    .filter((item) => !isPollutedMemoryText(item, { allowBenignContext: true }));
+  shortTermState.assistantCommitments = (Array.isArray(shortTermState.assistantCommitments) ? shortTermState.assistantCommitments : [])
+    .filter((item) => !isPollutedMemoryText(item, { allowBenignContext: true }));
+  shortTermState.userConstraints = (Array.isArray(shortTermState.userConstraints) ? shortTermState.userConstraints : [])
+    .filter((item) => !isPollutedMemoryText(item, { allowBenignContext: true }));
+  const interactionState = normalizeInteractionState(shortTermState.interaction);
+  const sceneState = normalizeSceneState(shortTermState.scene);
+  const expressionState = normalizeExpressionState(shortTermState.expression);
+  const moduleState = normalizeModuleState(shortTermState.moduleState);
 
   if (!hasMeaningfulShortTermState(shortTermState) && recentMessages.length === 0) {
     return null;
@@ -260,8 +340,13 @@ function buildBridgeSnapshotPayload(userId, deps = {}) {
 
   const state = ensureShortTermMemoryState(sessionKey, deps.shortTermMemory);
   const historyStore = deps.chatHistory || {};
+  const scope = normalizeScope(
+    deps.scope && typeof deps.scope === 'object' ? deps.scope : resolveShortTermScope(uid, deps.routeMeta, sessionKey),
+    sessionKey,
+    uid
+  );
   const recentMessages = normalizeRecentMessages(historyStore[sessionKey]);
-  const shortTermState = normalizeShortTermState({
+  const shortTermState = normalizeBridgeShortTermState({
     ...state,
     ...(deps.shortTermState && typeof deps.shortTermState === 'object' ? deps.shortTermState : {})
   });
@@ -272,12 +357,8 @@ function buildBridgeSnapshotPayload(userId, deps = {}) {
 
   return {
     userId: uid,
-    scope: normalizeScope(
-      deps.scope && typeof deps.scope === 'object' ? deps.scope : resolveShortTermScope(uid, deps.routeMeta, sessionKey),
-      sessionKey,
-      uid
-    ),
-    shortTermState: normalizeShortTermState({
+    scope,
+    shortTermState: normalizeBridgeShortTermState({
       ...shortTermState,
       summary: trimTextByTokenBudget(
         String(shortTermState.summary || '').trim(),
@@ -324,6 +405,10 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
     return { restored: false, restoredMessages: 0, summaryLength: 0, snapshotType: '', carryOverRestored: false };
   }
 
+  if (String(entry.userId || entry.scope?.userId || '').trim() !== uid) {
+    return { restored: false, restoredMessages: 0, summaryLength: 0, snapshotType: '', carryOverRestored: false };
+  }
+
   Object.assign(state, normalizeShortTermState({
     ...entry.shortTermState,
     interaction: entry.interactionState,
@@ -334,8 +419,10 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
   state.lastCompressedAt = Date.now();
 
   const recentMessages = normalizeRecentMessages(entry.recentMessages);
+  const freshnessTier = resolveBridgeFreshnessTier(entry);
+  const allowRawRestore = freshnessTier === 'raw_recent';
   let restoredMessages = 0;
-  if (entry.snapshotType === 'post_reply') {
+  if (entry.snapshotType === 'post_reply' && allowRawRestore) {
     if (recentMessages.length > 0) {
       historyStore[sessionKey] = recentMessages.map((item) => ({ ...item }));
       restoredMessages = historyStore[sessionKey].length;
@@ -352,6 +439,7 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
   console.log('[memory] short-term bridge restored', {
     sessionKey,
     snapshotType: entry.snapshotType,
+    freshnessTier,
     restoredMessages,
     summaryLength: String(state.summary || '').length
   });
@@ -361,6 +449,8 @@ function restoreShortTermBridgeAfterRestartIfNeeded(userId, deps = {}) {
     restoredMessages,
     summaryLength: String(state.summary || '').length,
     snapshotType: entry.snapshotType,
+    freshnessTier,
+    rawMessagesRestored: restoredMessages > 0,
     carryOverRestored: Boolean(String(state.carryOverUserTurn || '').trim())
   };
 }
@@ -418,7 +508,9 @@ function persistShortTermBridgeSnapshot(userId, deps = {}) {
 module.exports = {
   BRIDGE_FILE_VERSION,
   defaultBridgeStore,
+  getBridgeRawTtlMs,
   loadBridgeStore,
+  resolveBridgeFreshnessTier,
   saveBridgeStore,
   sanitizeBridgeStore,
   restoreShortTermBridgeAfterRestartIfNeeded,

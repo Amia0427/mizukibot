@@ -5,11 +5,15 @@ const {
   buildPersonaModuleCandidates,
   diagnosePersonaModules,
   getPersonaModuleCatalogSummary,
+  prunePersonaModuleCandidates,
   selectPersonaModules
 } = require('../utils/personaModules');
 const {
   searchPersonaWorldbook
 } = require('../utils/personaWorldbookSearch');
+const {
+  clearWorldbookSessionState
+} = require('../utils/personaWorldbookSearch/sessionState');
 
 (async () => {
   const catalog = getPersonaModuleCatalogSummary();
@@ -36,7 +40,8 @@ const {
 
   const deepCandidates = buildPersonaModuleCandidates({
     question: '我知道他们是好意，可我还是怕关系会变，真的说不出口',
-    continuitySignals: { hasCarryOverTopic: true }
+    continuitySignals: { hasCarryOverTopic: true },
+    mainReplyPromptMode: 'legacy'
   });
   assert.ok(deepCandidates.some((item) => item.id === 'deep_pain'));
   assert.ok(deepCandidates.some((item) => item.id === 'boundary_touch'));
@@ -64,30 +69,35 @@ const {
 
   const sceneCandidates = buildPersonaModuleCandidates({
     question: '今天逛街看到一个超可爱的限定发夹，包装字体也太会了',
-    chatType: 'private'
+    chatType: 'private',
+    mainReplyPromptMode: 'legacy'
   });
   assert.ok(sceneCandidates.some((item) => item.id === 'cute_obsession'));
   assert.ok(sceneCandidates.some((item) => item.id === 'scene_shopping_walk'));
   assert.ok(sceneCandidates.some((item) => item.id === 'wb_mizuki_daily_liveliness'));
 
   const careCandidates = buildPersonaModuleCandidates({
-    question: '我不想说，但有点难受，你不用追问我'
+    question: '我不想说，但有点难受，你不用追问我',
+    mainReplyPromptMode: 'legacy'
   });
   assert.ok(careCandidates.some((item) => item.id === 'wb_mizuki_care_chains'));
   assert.ok(!careCandidates.some((item) => item.id === 'wb_mizuki_shutdown_recovery'));
 
   const relationFearCandidates = buildPersonaModuleCandidates({
-    question: '如果你知道以后，会不会用不同眼神看我'
+    question: '如果你知道以后，会不会用不同眼神看我',
+    mainReplyPromptMode: 'legacy'
   });
   assert.ok(relationFearCandidates.some((item) => item.id === 'wb_mizuki_emotional_architecture'));
 
   const escapeCandidates = buildPersonaModuleCandidates({
-    question: '撑不住可以逃吗，还是说这也算不负责任'
+    question: '撑不住可以逃吗，还是说这也算不负责任',
+    mainReplyPromptMode: 'legacy'
   });
   assert.ok(escapeCandidates.some((item) => item.id === 'wb_mizuki_escape_and_return'));
 
   const shutdownCandidates = buildPersonaModuleCandidates({
-    question: '我不想看消息，什么都做不了，好像整个人都停摆了'
+    question: '我不想看消息，什么都做不了，好像整个人都停摆了',
+    mainReplyPromptMode: 'legacy'
   });
   assert.ok(shutdownCandidates.some((item) => item.id === 'wb_mizuki_shutdown_recovery'));
 
@@ -102,7 +112,8 @@ const {
   assert.ok(creativeCandidates.some((item) => item.id === 'wb_mizuki_creative_safe_channel'));
 
   const collapseCandidates = buildPersonaModuleCandidates({
-    question: '她是我都知道不是不懂，但就是做不到那种わかってる结构吗'
+    question: '她是我都知道不是不懂，但就是做不到那种わかってる结构吗',
+    mainReplyPromptMode: 'legacy'
   });
   assert.ok(collapseCandidates.some((item) => item.id === 'wb_mizuki_wakatteru_collapse'));
 
@@ -112,7 +123,8 @@ const {
   assert.ok(returnCandidates.some((item) => item.id === 'wb_mizuki_post_e5_return'));
 
   const fakeCharacterCandidates = buildPersonaModuleCandidates({
-    question: '被说キャラ作り像装的，这种否认真实很刺痛'
+    question: '被说キャラ作り像装的，这种否认真实很刺痛',
+    mainReplyPromptMode: 'legacy'
   });
   assert.ok(fakeCharacterCandidates.some((item) => item.id === 'wb_mizuki_m5_intrusive_fake_character'));
 
@@ -175,11 +187,147 @@ const {
   const fallbackAsyncCandidates = await buildPersonaModuleCandidatesAsync({
     question: '我不想说，但有点难受，你不用追问我',
     worldbookEmbeddingHotPath: false,
-    worldbookSemanticLimit: 0
+    worldbookSemanticLimit: 0,
+    maxPersonaModuleCandidates: 3,
+    mainReplyPromptMode: 'legacy'
   });
   assert.ok(fallbackAsyncCandidates.some((item) => item.id === 'wb_mizuki_care_chains'));
   assert.ok(fallbackAsyncCandidates.personaWorldbookSearch);
+  assert.ok(fallbackAsyncCandidates.candidatePruning);
+  assert.ok(fallbackAsyncCandidates.candidatePruning.keptCount <= 3 || fallbackAsyncCandidates.candidatePruning.alwaysKeepIds.length > 0);
   assert.strictEqual(fallbackAsyncCandidates.personaWorldbookSearch.embedding.hotPathUsed, false);
+
+  const casualBalancedAsyncCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '随便聊聊',
+    chatType: 'private',
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(casualBalancedAsyncCandidates.some((item) => item.id === 'scene_private_chat'));
+  assert.ok(!casualBalancedAsyncCandidates.some((item) => item.id.startsWith('wb_mizuki_')));
+  assert.strictEqual(casualBalancedAsyncCandidates.personaWorldbookSearch.disabledReason, 'prompt_mode_worldbook_gate');
+
+  const tiredBalancedAsyncCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '今天好累',
+    chatType: 'private',
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(!tiredBalancedAsyncCandidates.some((item) => item.id.startsWith('wb_mizuki_')));
+  assert.strictEqual(tiredBalancedAsyncCandidates.personaWorldbookSearch.disabledReason, 'prompt_mode_worldbook_gate');
+
+  const ordinaryRelationBalancedCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '你觉得我们关系怎么样',
+    chatType: 'private',
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(!ordinaryRelationBalancedCandidates.some((item) => item.id.startsWith('wb_mizuki_')));
+  assert.strictEqual(ordinaryRelationBalancedCandidates.personaWorldbookSearch.disabledReason, 'prompt_mode_worldbook_gate');
+
+  const loreBalancedAsyncCandidates = await buildPersonaModuleCandidatesAsync({
+    question: 'M5 文化祭发生了什么，瑞希和绘名关系怎么变了',
+    chatType: 'private',
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(loreBalancedAsyncCandidates.some((item) => item.id.startsWith('wb_mizuki_')));
+
+  const characterRelationBalancedCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '瑞希和绘名关系怎么变了',
+    chatType: 'private',
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(characterRelationBalancedCandidates.some((item) => item.id.startsWith('wb_mizuki_')));
+
+  clearWorldbookSessionState('worldbook-session-test');
+  const firstFutureSessionCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '你之后真的会去服饰专门学校吗，open campus 看得怎么样',
+    chatType: 'private',
+    sessionKey: 'worldbook-session-test',
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(firstFutureSessionCandidates.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
+  assert.ok(firstFutureSessionCandidates.personaWorldbookSearch.sessionState.activated.some((item) => item.moduleId === 'wb_mizuki_future_two_tracks'));
+  const secondFutureSessionCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '刚才那个话题继续说',
+    chatType: 'private',
+    sessionKey: 'worldbook-session-test',
+    forceWorldbook: true,
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(secondFutureSessionCandidates.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
+  assert.ok(secondFutureSessionCandidates.find((item) => item.id === 'wb_mizuki_future_two_tracks').activationState);
+  const thirdFutureSessionCandidates = await buildPersonaModuleCandidatesAsync({
+    question: '再继续一下',
+    chatType: 'private',
+    sessionKey: 'worldbook-session-test',
+    forceWorldbook: true,
+    worldbookEmbeddingHotPath: false,
+    worldbookSemanticLimit: 0
+  });
+  assert.ok(!thirdFutureSessionCandidates.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
+  clearWorldbookSessionState('worldbook-session-test');
+
+  const ordinaryPrivateSelection = selectPersonaModules({}, {
+    question: '随便聊聊',
+    chatType: 'private',
+    personaModuleCandidates: casualBalancedAsyncCandidates
+  });
+  assert.ok(ordinaryPrivateSelection.selected.length <= 2);
+  assert.ok(ordinaryPrivateSelection.selected.some((item) => item.id === 'scene_private_chat'));
+
+  const groupSelection = selectPersonaModules({}, {
+    question: '会四川麻将，如何学习日麻？',
+    chatType: 'group',
+    personaModuleCandidates: buildPersonaModuleCandidates({
+      question: '会四川麻将，如何学习日麻？',
+      chatType: 'group'
+    })
+  });
+  assert.ok(groupSelection.selected.length <= 2);
+  assert.ok(groupSelection.selected.some((item) => item.id === 'scene_group_insert'));
+
+  const deepEmotionSelection = selectPersonaModules({
+    maxActiveModules: 2
+  }, {
+    question: '我知道他们是好意，可我还是怕关系会变，真的说不出口',
+    chatType: 'private',
+    personaModuleCandidates: catalog
+      .filter((item) => ['scene_private_chat', 'deep_pain', 'boundary_touch', 'care_light'].includes(item.moduleId))
+      .map((item) => ({
+        id: item.moduleId,
+        slot: item.slot,
+        priority: item.priority,
+        tokenCost: item.tokenCost,
+        conflictsWith: item.conflictsWith,
+        phase: item.phase,
+        path: 'persona_modules/test.txt'
+      }))
+  });
+  assert.ok(deepEmotionSelection.selected.length <= 2);
+  assert.ok(
+    deepEmotionSelection.selected.filter((item) => ['care_light', 'boundary_touch', 'deep_pain'].includes(item.id)).length <= 1,
+    'balanced mode should use at most one emotion module slot'
+  );
+
+  const prunedStrongHit = prunePersonaModuleCandidates([
+    { id: 'daily_energy', priority: 30, triggerHints: [], conflictsWith: [], phase: 'all', slot: 'energy' },
+    { id: 'scene_group_insert', priority: 50, triggerHints: [], conflictsWith: [], phase: 'all', slot: 'scene' },
+    { id: 'wb_mizuki_future_two_tracks', priority: 999, triggerHints: [], conflictsWith: [], phase: 'all', slot: 'general', worldbookScore: 0.99 },
+    { id: 'care_light', priority: 20, triggerHints: [], conflictsWith: [], phase: 'all', slot: 'emotion' }
+  ], {
+    question: '服饰专门学校和N25两个都不放弃',
+    chatType: 'group'
+  }, {
+    maxCandidates: 2
+  });
+  assert.ok(prunedStrongHit.some((item) => item.id === 'wb_mizuki_future_two_tracks'));
+  assert.ok(prunedStrongHit.some((item) => item.id === 'scene_group_insert'));
+  assert.ok(prunedStrongHit.candidatePruning.droppedCount >= 1);
 
   const fakeCatalog = {
     modules: [
@@ -230,6 +378,82 @@ const {
   });
   assert.strictEqual(semanticWorldbook.results[0].moduleId, 'wb_mizuki_beta');
   assert.ok(semanticWorldbook.diagnostics.embedding.semanticCandidates >= 1);
+  assert.ok(Number(semanticWorldbook.diagnostics.latency.worldbook_lexical_ms) >= 0);
+  assert.ok(Number(semanticWorldbook.diagnostics.latency.worldbook_semantic_ms) >= 0);
+  assert.ok(Number(semanticWorldbook.diagnostics.latency.worldbook_rerank_ms) >= 0);
+
+  let lancedbSearchCalls = 0;
+  const lancedbMismatchWorldbook = await searchPersonaWorldbook(fakeCatalog, {
+    query: '服饰学业和活动冲突',
+    lexicalLimit: 0,
+    semanticLimit: 2,
+    limit: 2,
+    hotPath: true,
+    shouldUseRemoteEmbedding: () => true,
+    queryEmbedding: [1, 0],
+    embeddingIndex: {
+      rows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      readyRows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      byKey: new Map(),
+      byModuleId: new Map()
+    },
+    lancedbTableName: 'persona_worldbook_vectors_dimension_mismatch_test',
+    config: {
+      MEMORY_VECTOR_STORE: 'lancedb',
+      MEMORY_LANCEDB_READ_ENABLED: true
+    },
+    searchWorldbookVectors: async () => {
+      lancedbSearchCalls += 1;
+      return {
+        ok: false,
+        rows: [],
+        reason: 'search_failed:No vector column found to match query dimension 2'
+      };
+    }
+  });
+  assert.strictEqual(lancedbMismatchWorldbook.results[0].moduleId, 'wb_mizuki_beta');
+  assert.strictEqual(lancedbMismatchWorldbook.diagnostics.embedding.lancedb.lancedbDisabledReason, 'dimension_mismatch');
+  assert.ok(/sync-lancedb-memory-index\.js --full --compact/.test(lancedbMismatchWorldbook.diagnostics.embedding.lancedb.rebuildCommand));
+
+  const lancedbCachedMismatchWorldbook = await searchPersonaWorldbook(fakeCatalog, {
+    query: '服饰学业和活动冲突',
+    lexicalLimit: 0,
+    semanticLimit: 2,
+    limit: 2,
+    hotPath: true,
+    shouldUseRemoteEmbedding: () => true,
+    queryEmbedding: [1, 0],
+    embeddingIndex: {
+      rows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      readyRows: [
+        { moduleId: 'wb_mizuki_alpha', status: 'ready', embedding: [0, 1] },
+        { moduleId: 'wb_mizuki_beta', status: 'ready', embedding: [1, 0] }
+      ],
+      byKey: new Map(),
+      byModuleId: new Map()
+    },
+    lancedbTableName: 'persona_worldbook_vectors_dimension_mismatch_test',
+    config: {
+      MEMORY_VECTOR_STORE: 'lancedb',
+      MEMORY_LANCEDB_READ_ENABLED: true
+    },
+    searchWorldbookVectors: async () => {
+      lancedbSearchCalls += 1;
+      return { ok: true, rows: [{ id: 'wb_mizuki_alpha', score: 1 }], reason: '' };
+    }
+  });
+  assert.strictEqual(lancedbCachedMismatchWorldbook.diagnostics.embedding.lancedb.reason, 'dimension_mismatch');
+  assert.strictEqual(lancedbCachedMismatchWorldbook.diagnostics.embedding.lancedb.skipped, true);
+  assert.strictEqual(lancedbSearchCalls, 1);
 
   const rerankedWorldbook = await searchPersonaWorldbook(fakeCatalog, {
     query: '冲突',

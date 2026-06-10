@@ -69,6 +69,24 @@ is_worker_running() {
   return 1
 }
 
+find_worker_pid_by_process_scan() {
+  local pid
+  pid="$(pgrep -f "$ROOT_DIR/.*/post-reply-worker\\.js|$ROOT_DIR/scripts/post-reply-worker\\.js|node .*scripts/post-reply-worker\\.js" 2>/dev/null | awk -v self="$$" '$1 != self { print $1; exit }' || true)"
+  if [[ -n "$pid" ]] && [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    echo "$pid"
+  fi
+}
+
+repair_worker_pid_file_if_running() {
+  local pid
+  pid="$(find_worker_pid_by_process_scan)"
+  if [[ -n "$pid" ]]; then
+    echo "$pid" > "$WORKER_PID_FILE"
+    return 0
+  fi
+  return 1
+}
+
 list_child_tree_pids() {
   local root_pid="$1"
   local child
@@ -172,8 +190,12 @@ start_app() {
   echo $! > "$PID_FILE"
 
   if ! is_worker_running; then
-    nohup node scripts/post-reply-worker.js >>"$WORKER_LOG_FILE" 2>&1 &
-    echo $! > "$WORKER_PID_FILE"
+    if repair_worker_pid_file_if_running; then
+      :
+    else
+      nohup node scripts/post-reply-worker.js >>"$WORKER_LOG_FILE" 2>&1 &
+      echo $! > "$WORKER_PID_FILE"
+    fi
   fi
 
   sleep 1

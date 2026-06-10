@@ -1,5 +1,4 @@
 const assert = require('assert');
-const { PassThrough } = require('stream');
 
 function clearProjectCache() {
   const projectRoot = 'D:\\waifu\\';
@@ -19,305 +18,128 @@ function restoreEnv(snapshot = {}) {
 
 module.exports = (async () => {
   const snapshot = { ...process.env };
-  let axios = null;
-  let originalPost = null;
-
   try {
     process.env.API_KEY = 'test-key';
+    process.env.API_PROVIDER = 'anthropic';
     process.env.API_BASE_URL = 'https://example.com/v1/chat/completions';
-    process.env.AI_MODEL = 'gpt-5.4-mini';
+    process.env.AI_MODEL = 'claude-3-5-sonnet-latest';
     process.env.AI_MAX_TOKENS = '200';
     process.env.AI_RETRIES = '0';
+    process.env.OPENAI_MAIN_API_MODE = 'responses';
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
-    process.env.OPENAI_PROMPT_CACHE_RETENTION = '';
+    process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
     clearProjectCache();
 
-    axios = require('axios');
-    originalPost = axios.post;
     const httpClient = require('../api/httpClient');
     const { buildMainModelRequest } = require('../api/runtimeV2/model/shared');
-    const parser = require('../api/parser');
 
-    const messages = [
-      {
-        role: 'system',
-        content: [
-          {
-            type: 'text',
-            text: 'stable system prompt',
-            cache_control: { type: 'ephemeral', ttl: '5m' }
-          }
-        ]
-      },
-      { role: 'user', content: 'hello' }
-    ];
-    const tools = [
-      {
-        type: 'function',
-        function: {
-          name: 'lookup_memory',
-          description: 'search memory',
-          parameters: {
-            type: 'object',
-            properties: {
-              query: { type: 'string' }
-            },
-            required: ['query']
-          },
-          strict: true,
-          cache_control: { type: 'ephemeral', ttl: '5m' }
-        }
-      }
-    ];
-
-    const chatRequest = buildMainModelRequest(null, {
-      messages,
-      tools,
-      stream: false,
-      routeMeta: { topRouteType: 'direct_chat' },
-      defaultMaxTokens: 200
-    });
-    assert.strictEqual(chatRequest.url, 'https://example.com/v1/chat/completions');
-    assert.ok(/^mizukibot:main:chat_completions:[a-f0-9]{24}$/.test(chatRequest.body.prompt_cache_key));
-    assert.ok(!Object.prototype.hasOwnProperty.call(chatRequest.body, 'prompt_cache_retention'));
-
-    const dynamicChangedRequest = buildMainModelRequest(null, {
-      messages: [
-        { role: 'system', content: 'different turn-local memory' },
-        { role: 'user', content: 'different user text' }
-      ],
-      tools,
-      stream: false,
-      routeMeta: { topRouteType: 'direct_chat' },
-      defaultMaxTokens: 200
-    });
-    assert.strictEqual(dynamicChangedRequest.body.prompt_cache_key, chatRequest.body.prompt_cache_key);
-
-    const { buildSecuritySystemPrompt } = require('../utils/promptSecurity');
-    const securityPromptRequest = buildMainModelRequest(null, {
-      messages: [
-        { role: 'system', content: buildSecuritySystemPrompt() },
-        { role: 'user', content: 'hello' }
-      ],
-      tools,
-      stream: false,
-      routeMeta: { topRouteType: 'direct_chat' },
-      defaultMaxTokens: 200
-    });
-    const securityPromptWithDynamicTailRequest = buildMainModelRequest(null, {
+    const mainRequest = buildMainModelRequest(null, {
       messages: [
         {
           role: 'system',
           content: [
             {
               type: 'text',
-              text: `${buildSecuritySystemPrompt()}\n[DailyMemory] turn-local memory`
+              text: 'stable system prompt',
+              cache_control: { type: 'ephemeral', ttl: '5m' }
             }
           ]
         },
         { role: 'user', content: 'hello' }
       ],
-      tools,
-      stream: false,
-      routeMeta: { topRouteType: 'direct_chat' },
-      defaultMaxTokens: 200
-    });
-    assert.notStrictEqual(securityPromptRequest.body.prompt_cache_key, chatRequest.body.prompt_cache_key);
-    assert.strictEqual(securityPromptWithDynamicTailRequest.body.prompt_cache_key, securityPromptRequest.body.prompt_cache_key);
-
-    const preparedChat = await httpClient.prepareRequest(chatRequest.url, chatRequest.body);
-    assert.strictEqual(preparedChat.provider, 'openai_compatible');
-    assert.strictEqual(preparedChat.requestBody.prompt_cache_key, chatRequest.body.prompt_cache_key);
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedChat.requestBody, 'prompt_cache_retention'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedChat.requestBody.messages[0].content[0], 'cache_control'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedChat.requestBody.tools[0].function, 'cache_control'));
-
-    process.env.OPENAI_PROMPT_CACHE_KEY_PREFIX = 'tenant-user-session-secret';
-    clearProjectCache();
-    const { buildMainModelRequest: buildMainModelRequestCustomPrefix } = require('../api/runtimeV2/model/shared');
-    const customPrefixRequest = buildMainModelRequestCustomPrefix(null, {
-      messages,
-      tools,
-      stream: false,
-      defaultMaxTokens: 200
-    });
-    assert.ok(/^mizukibot:main:chat_completions:[a-f0-9]{24}$/.test(customPrefixRequest.body.prompt_cache_key));
-    assert.ok(!customPrefixRequest.body.prompt_cache_key.includes('tenant-user-session-secret'));
-
-    process.env.OPENAI_MAIN_API_MODE = 'responses';
-    process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
-    delete process.env.OPENAI_PROMPT_CACHE_KEY_PREFIX;
-    clearProjectCache();
-    const httpClientResponses = require('../api/httpClient');
-    const { buildMainModelRequest: buildMainModelRequestResponses } = require('../api/runtimeV2/model/shared');
-    const responsesRequest = buildMainModelRequestResponses(null, {
-      messages: [
-        ...messages,
+      tools: [
         {
-          role: 'assistant',
-          tool_calls: [
-            {
-              id: 'call_1',
-              type: 'function',
-              function: {
-                name: 'lookup_memory',
-                arguments: '{"query":"x"}'
-              }
+          type: 'function',
+          function: {
+            name: 'lookup_memory',
+            description: 'search memory',
+            parameters: {
+              type: 'object',
+              properties: {
+                query: { type: 'string' }
+              },
+              required: ['query']
             }
-          ]
-        },
-        {
-          role: 'tool',
-          tool_call_id: 'call_1',
-          content: '{"ok":true}'
+          }
         }
       ],
-      tools,
       stream: false,
       routeMeta: { topRouteType: 'direct_chat' },
       defaultMaxTokens: 200
     });
-    assert.strictEqual(responsesRequest.url, 'https://example.com/v1/responses');
-    assert.ok(/^mizukibot:main:responses:[a-f0-9]{24}$/.test(responsesRequest.body.prompt_cache_key));
-    assert.strictEqual(responsesRequest.body.prompt_cache_retention, '24h');
 
-    const preparedResponses = await httpClientResponses.prepareRequest(responsesRequest.url, responsesRequest.body);
-    assert.strictEqual(preparedResponses.requestUrl, 'https://example.com/v1/responses');
-    assert.ok(Array.isArray(preparedResponses.requestBody.input));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedResponses.requestBody, 'messages'));
-    assert.strictEqual(preparedResponses.requestBody.max_output_tokens, 200);
-    assert.deepStrictEqual(preparedResponses.requestBody.tools[0], {
-      type: 'function',
-      name: 'lookup_memory',
-      parameters: tools[0].function.parameters,
-      description: 'search memory',
-      strict: true
+    assert.strictEqual(mainRequest.provider, 'anthropic');
+    assert.strictEqual(mainRequest.protocol, 'anthropic_messages');
+    assert.strictEqual(mainRequest.url, 'https://example.com/v1/messages');
+    assert.ok(!Object.prototype.hasOwnProperty.call(mainRequest.body, 'prompt_cache_key'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(mainRequest.body, 'prompt_cache_retention'));
+
+    const preparedMain = await httpClient.prepareRequest(mainRequest.url, mainRequest.body);
+    assert.strictEqual(preparedMain.provider, 'anthropic');
+    assert.strictEqual(preparedMain.requestUrl, 'https://example.com/v1/messages');
+    assert.ok(Array.isArray(preparedMain.requestBody.system));
+    assert.ok(preparedMain.requestBody.system.some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(preparedMain.requestBody.tools.some((tool) => tool.name === 'lookup_memory' && tool.cache_control?.type === 'ephemeral'));
+    assert.ok(!preparedMain.requestBody.tools.some((tool) => tool.type === 'web_search_20250305'));
+    assert.deepStrictEqual(preparedMain.requestBody.tool_choice, { type: 'auto' });
+    assert.strictEqual(preparedMain.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestBody, 'prompt_cache_key'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestBody, 'input'));
+
+    process.env.API_BASE_URL = 'https://example.com/v1/responses';
+    clearProjectCache();
+    const { buildMainModelRequest: buildMainModelRequestFromResponsesUrl } = require('../api/runtimeV2/model/shared');
+    const responsesUrlMainRequest = buildMainModelRequestFromResponsesUrl(null, {
+      messages: [{ role: 'user', content: 'hello from responses url' }],
+      stream: false,
+      routeMeta: { topRouteType: 'direct_chat' },
+      defaultMaxTokens: 200
     });
-    assert.ok(preparedResponses.requestBody.input.some((item) => item.type === 'function_call' && item.call_id === 'call_1'));
-    assert.ok(preparedResponses.requestBody.input.some((item) => item.type === 'function_call_output' && item.call_id === 'call_1'));
-    assert.strictEqual(preparedResponses.requestBody.prompt_cache_key, responsesRequest.body.prompt_cache_key);
-    assert.strictEqual(preparedResponses.requestBody.prompt_cache_retention, '24h');
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedResponses.requestBody.input[0].content[0], 'cache_control'));
+    assert.strictEqual(responsesUrlMainRequest.provider, 'anthropic');
+    assert.strictEqual(responsesUrlMainRequest.protocol, 'anthropic_messages');
+    assert.strictEqual(responsesUrlMainRequest.url, 'https://example.com/v1/messages');
+    assert.ok(!Object.prototype.hasOwnProperty.call(responsesUrlMainRequest.body, 'prompt_cache_key'));
 
-    axios = require('axios');
-    originalPost = axios.post;
-    let attemptCount = 0;
-    const bodies = [];
-    axios.post = async (_url, body) => {
-      bodies.push(body);
-      attemptCount += 1;
-      if (attemptCount === 1) {
-        const error = new Error('unsupported retention');
-        error.response = { status: 400, data: { error: { message: 'Unknown parameter prompt_cache_retention' } } };
-        throw error;
-      }
-      return { data: { output_text: 'ok' } };
-    };
-    await httpClientResponses.postWithRetry(responsesRequest.url, responsesRequest.body, 0, 'test-key');
-    assert.strictEqual(attemptCount, 2);
-    assert.ok(bodies[0].prompt_cache_retention);
-    assert.ok(bodies[1].prompt_cache_key);
-    assert.ok(!Object.prototype.hasOwnProperty.call(bodies[1], 'prompt_cache_retention'));
-
-    attemptCount = 0;
-    bodies.length = 0;
-    axios.post = async (_url, body) => {
-      bodies.push(body);
-      attemptCount += 1;
-      if (attemptCount === 1) {
-        const error = new Error('unsupported retention');
-        error.response = { status: 400, data: { error: { message: 'Unknown parameter prompt_cache_retention' } } };
-        throw error;
-      }
-      if (attemptCount === 2) {
-        const error = new Error('unsupported prompt cache key');
-        error.response = { status: 422, data: { error: { message: 'Unknown parameter prompt_cache_key' } } };
-        throw error;
-      }
-      return { data: { output_text: 'ok' } };
-    };
-    await httpClientResponses.postWithRetry(responsesRequest.url, responsesRequest.body, 0, 'test-key');
-    assert.strictEqual(attemptCount, 3);
-    assert.ok(bodies[0].prompt_cache_retention);
-    assert.ok(bodies[1].prompt_cache_key);
-    assert.ok(!Object.prototype.hasOwnProperty.call(bodies[1], 'prompt_cache_retention'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(bodies[2], 'prompt_cache_key'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(bodies[2], 'prompt_cache_retention'));
-
-    attemptCount = 0;
-    bodies.length = 0;
-    axios.post = async (_url, body) => {
-      bodies.push(body);
-      attemptCount += 1;
-      if (attemptCount === 1) {
-        const error = new Error('unsupported prompt cache key');
-        error.response = { status: 422, data: { error: { message: 'Unknown parameter prompt_cache_key' } } };
-        throw error;
-      }
-      return { data: { output_text: 'ok' } };
-    };
-    await httpClientResponses.postWithRetry(responsesRequest.url, responsesRequest.body, 0, 'test-key');
-    assert.strictEqual(attemptCount, 2);
-    assert.ok(bodies[0].prompt_cache_key);
-    assert.ok(!Object.prototype.hasOwnProperty.call(bodies[1], 'prompt_cache_key'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(bodies[1], 'prompt_cache_retention'));
-
-    const extracted = parser.extractMessageContent({
-      data: {
-        output: [
-          {
-            type: 'function_call',
-            call_id: 'call_parser',
-            name: 'lookup_memory',
-            arguments: '{"query":"parser"}'
-          },
-          {
-            type: 'message',
-            role: 'assistant',
-            content: [{ type: 'output_text', text: 'done' }]
-          }
-        ],
-        usage: {
-          input_tokens: 100,
-          output_tokens: 10,
-          input_tokens_details: { cached_tokens: 64 }
-        }
-      }
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED = 'false';
+    clearProjectCache();
+    const { buildMainModelRequest: buildMainModelRequestWithoutSearch } = require('../api/runtimeV2/model/shared');
+    const noSearchRequest = buildMainModelRequestWithoutSearch(null, {
+      messages: [{ role: 'user', content: 'hello without web search' }],
+      stream: false,
+      defaultMaxTokens: 200
     });
-    assert.strictEqual(extracted.content, 'done');
-    assert.strictEqual(extracted.tool_calls[0].id, 'call_parser');
+    assert.ok(!Array.isArray(noSearchRequest.body.tools));
 
-    const parsed = parser.extractSSEEvents(
-      { buffer: '' },
-      'data: {"type":"response.output_text.delta","delta":"he"}\n\n'
-      + 'data: {"type":"response.completed","response":{"output_text":"hello","usage":{"input_tokens":12,"output_tokens":2,"input_tokens_details":{"cached_tokens":8}}}}\n\n'
-    );
-    assert.strictEqual(parsed.events[0].delta, 'he');
-    assert.strictEqual(parsed.events[1].usage.cache_read_input_tokens, 8);
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ENABLED = 'true';
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_MAX_USES = '3';
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_ALLOWED_DOMAINS = 'https://reuters.com/world, apnews.com';
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_CITY = 'Shanghai';
+    process.env.MAIN_MODEL_ANTHROPIC_WEB_SEARCH_LOCATION_COUNTRY = 'CN';
+    clearProjectCache();
+    const { buildMainModelRequest: buildMainModelRequestWithSearchConfig } = require('../api/runtimeV2/model/shared');
+    const plainChatRequest = buildMainModelRequestWithSearchConfig(null, {
+      messages: [{ role: 'user', content: 'plain chat should not search' }],
+      stream: false,
+      defaultMaxTokens: 200
+    });
+    assert.ok(!Array.isArray(plainChatRequest.body.tools));
 
-    let streamed = '';
-    axios.post = async () => {
-      const stream = new PassThrough();
-      setImmediate(() => {
-        stream.write('data: {"type":"response.output_text.delta","delta":"hi"}\n\n');
-        stream.write('data: [DONE]\n\n');
-        stream.end();
-      });
-      return { data: stream };
-    };
-    await httpClientResponses.postStreamWithRetry(responsesRequest.url, {
-      ...responsesRequest.body,
-      stream: true
-    }, {
-      onData(chunk) {
-        streamed += chunk.toString('utf8');
-      }
-    }, 0, 'test-key');
-    assert.ok(streamed.includes('response.output_text.delta'));
+    const configuredSearchRequest = buildMainModelRequestWithSearchConfig(null, {
+      messages: [{ role: 'user', content: 'latest news' }],
+      stream: false,
+      allowedTools: ['web_search'],
+      defaultMaxTokens: 200
+    });
+    const configuredPrepared = await httpClient.prepareRequest(configuredSearchRequest.url, configuredSearchRequest.body);
+    const searchTool = configuredPrepared.requestBody.tools.find((tool) => tool.type === 'web_search_20250305');
+    assert.strictEqual(searchTool.max_uses, 3);
+    assert.deepStrictEqual(searchTool.allowed_domains, ['reuters.com/world', 'apnews.com']);
+    assert.deepStrictEqual(searchTool.user_location, { type: 'approximate', city: 'Shanghai', country: 'CN' });
+    assert.ok(!Object.prototype.hasOwnProperty.call(configuredPrepared.requestBody, 'tool_choice'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(searchTool, 'cache_control'));
 
     console.log('openAIMainPromptCacheDualProtocol.test.js passed');
   } finally {
-    if (axios && originalPost) axios.post = originalPost;
     restoreEnv(snapshot);
     clearProjectCache();
   }

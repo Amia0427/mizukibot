@@ -63,6 +63,16 @@ function checkAppliesWhen(block = {}, env = {}) {
     const allowedStages = normalizeArray(appliesWhen.stage).map((item) => normalizeStage(item));
     if (allowedStages.length > 0 && !allowedStages.includes(stage)) return false;
   }
+  const adminOnly = appliesWhen.adminOnly === true || appliesWhen.admin_only === true;
+  if (
+    adminOnly
+    && env.includeConditionalBlocks !== true
+    && env.isAdmin !== true
+    && env.admin !== true
+    && normalizeText(env.userRole).toLowerCase() !== 'admin'
+  ) {
+    return false;
+  }
   return true;
 }
 

@@ -83,6 +83,48 @@ function createDefaultQuotePriority() {
   };
 }
 
+function uniqueStrings(values = []) {
+  const out = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = normalizeText(value, 300);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
+}
+
+function extractForwardSummaryFromRawText(rawText = '') {
+  const raw = String(rawText || '').trim();
+  if (!raw || !raw.includes('[转发消息]')) return '';
+  const afterMarker = raw.split('[转发消息]').slice(1).join('[转发消息]').trim();
+  if (!afterMarker) return '';
+  const stopIndex = afterMarker.search(/\n\s*(?:\[转发图片\]|\[CQ:image,)/i);
+  const candidate = stopIndex >= 0 ? afterMarker.slice(0, stopIndex) : afterMarker;
+  return normalizeText(candidate, 1000);
+}
+
+function createForwardContext(input = {}) {
+  const meta = input?.continuousMeta && typeof input.continuousMeta === 'object'
+    ? input.continuousMeta
+    : {};
+  const summaryText = normalizeText(
+    meta.forwardSummaryText || input.forwardSummaryText || extractForwardSummaryFromRawText(input.rawText || input.cleanText || ''),
+    1000
+  );
+  const forwardIds = uniqueStrings(meta.forwardIds || input.forwardIds || []);
+  const imageUrls = uniqueStrings(meta.forwardImageUrls || input.forwardImageUrls || []);
+  if (!summaryText && forwardIds.length === 0 && imageUrls.length === 0) return null;
+  return {
+    source: 'current_message_forward',
+    ids: forwardIds,
+    summaryText,
+    imageUrls,
+    imageCount: imageUrls.length
+  };
+}
+
 function charLength(text = '') {
   return Array.from(String(text || '').trim()).length;
 }
@@ -200,6 +242,9 @@ function resolveQuotePriority({ cleanText = '', resolved = null, quote = null } 
 
 function buildPromptSnippet(resolved = {}) {
   const addresseeText = formatAddresseeText(resolved.addressee);
+  const forwardContext = resolved.forwardContext && typeof resolved.forwardContext === 'object'
+    ? resolved.forwardContext
+    : null;
   const lines = [
     '[CurrentConversation]',
     `scene=${normalizeText(resolved.scene || 'unclear', 40) || 'unclear'}`,
@@ -214,6 +259,17 @@ function buildPromptSnippet(resolved = {}) {
   }
   if (resolved.activePair?.userA && resolved.activePair?.userB) {
     lines.push(`active_pair=${resolved.activePair.userA}<->${resolved.activePair.userB}`);
+  }
+  if (forwardContext) {
+    lines.push(`forward_context_source=${normalizeText(forwardContext.source || 'current_message_forward', 60) || 'current_message_forward'}`);
+    if (Array.isArray(forwardContext.ids) && forwardContext.ids.length) {
+      lines.push(`forwarded_message_ids=${forwardContext.ids.map((item) => normalizeText(item, 60)).filter(Boolean).join(',')}`);
+    }
+    const imageCount = Math.max(0, Number(forwardContext.imageCount || forwardContext.imageUrls?.length || 0) || 0);
+    if (imageCount > 0) lines.push(`forwarded_message_image_count=${imageCount}`);
+    if (forwardContext.summaryText) lines.push(`forwarded_message_text=${normalizeText(forwardContext.summaryText, 900)}`);
+    lines.push('instruction=Treat forwarded_message_text from the current turn as visible conversation context, not as missing memory.');
+    lines.push('instruction=When the user asks what a quoted sentence or reaction referred to, check forwarded_message_text before saying the prior context is unknown.');
   }
   const quotePriority = resolved.quotePriority && typeof resolved.quotePriority === 'object'
     ? resolved.quotePriority
@@ -316,6 +372,7 @@ function resolveFromActivePair({ recentMessages, senderId, groupId }) {
 
 function buildDirectedContextBase(input = {}, recentMessages = []) {
   const quote = createQuoteFromReplyContext(input.replyContext || input.continuousMeta?.replyContext || null);
+  const forwardContext = createForwardContext(input);
   const base = {
     scene: 'unclear',
     addressee: {
@@ -326,9 +383,12 @@ function buildDirectedContextBase(input = {}, recentMessages = []) {
       reason: 'unresolved'
     },
     quote,
+    forwardContext,
     quotePriority: createDefaultQuotePriority(),
     signals: {
       hasReplyQuote: Boolean(quote),
+      hasForwardContext: Boolean(forwardContext),
+      hasForwardImages: Boolean(forwardContext?.imageCount),
       hasAtBot: Boolean(input.isAtBot),
       hasBotCue: containsBotCue(input.cleanText || input.rawText || ''),
       hasGroupCue: containsGroupCue(input.cleanText || input.rawText || ''),
@@ -342,7 +402,7 @@ function buildDirectedContextBase(input = {}, recentMessages = []) {
   return base;
 }
 
-function buildFallbackPayload({ cleanText, rawText, botQQ, quote, signals, recentMessages }) {
+function buildFallbackPayload({ cleanText, rawText, botQQ, quote, forwardContext, signals, recentMessages }) {
   return {
     currentMessage: {
       rawText: normalizeText(rawText, 400),
@@ -350,6 +410,13 @@ function buildFallbackPayload({ cleanText, rawText, botQQ, quote, signals, recen
       botQQ: normalizeText(botQQ, 80)
     },
     quote: quote || null,
+    forwardContext: forwardContext
+      ? {
+          source: normalizeText(forwardContext.source || 'current_message_forward', 60),
+          summaryText: normalizeText(forwardContext.summaryText || '', 500),
+          imageCount: Math.max(0, Number(forwardContext.imageCount || 0) || 0)
+        }
+      : null,
     signals,
     recentMessages: recentMessages.slice(-6).map((item) => ({
       senderId: item.senderId,
@@ -403,6 +470,7 @@ async function resolveByLlmFallback(input = {}, base = {}, recentMessages = []) 
                     text: normalizeText(base.quote.text, 180)
                   }
                 : null,
+              forwardContext: base.forwardContext,
               signals: base.signals,
               recentMessages
             }))

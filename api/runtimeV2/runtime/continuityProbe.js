@@ -68,11 +68,18 @@ function createContinuityProbeHelpers(deps = {}) {
         command: `mem search --query ${JSON.stringify(String(question || '').trim())} --source all --limit ${Math.max(6, maxResults)}`
       };
     }
+    if (new Set(['preference', 'identity', 'relationship', 'broad_recall', 'group_context']).has(facet)) {
+      return {
+        facet,
+        command: `mem search --query ${JSON.stringify(String(question || '').trim())} --source all --limit ${Math.max(6, maxResults)}`
+      };
+    }
     return { facet, command: '' };
   }
 
   async function maybeRunAutoContinuityProbe(state, runtimeOptions = {}) {
     const request = normalizeObject(state.request, {});
+    const routeMeta = normalizeObject(request.routeMeta, {});
     const mode = String(state.execution?.mode || runtimeOptions.normalizeMode?.(request)).trim().toLowerCase();
     if (request.allowTools === false) {
       return {
@@ -122,7 +129,9 @@ function createContinuityProbeHelpers(deps = {}) {
     }
 
     const probeMeta = buildAutoContinuityProbeCommand(request.question || '');
-    if (!probeMeta.command || !shouldBiasToContinuity(probeMeta.facet)) {
+    const supportedFacet = shouldBiasToContinuity(probeMeta.facet)
+      || new Set(['preference', 'identity', 'relationship', 'broad_recall', 'group_context']).has(probeMeta.facet);
+    if (!probeMeta.command || !supportedFacet) {
       return {
         skipped: true,
         reason: 'facet_not_supported',
@@ -148,6 +157,7 @@ function createContinuityProbeHelpers(deps = {}) {
         node: 'prepare',
         facet: probeMeta.facet,
         mode,
+        memoryNeedReason: routeMeta.meta?.needsMemoryReason || routeMeta.needsMemoryReason || '',
         command: probeMeta.command
       })
     ];
@@ -165,7 +175,9 @@ function createContinuityProbeHelpers(deps = {}) {
             node: 'prepare',
             facet: probeMeta.facet,
             ok: String(envelope?.status || '').trim() === 'completed',
-            resultCount: Number(parsed?.count || normalizeArray(parsed?.results).length || 0) || 0
+            resultCount: Number(parsed?.count || normalizeArray(parsed?.results).length || 0) || 0,
+            memoryEvidenceQuality: parsed?.qualitySummary || null,
+            rejectedResultCount: Number(parsed?.rejectedResultCount || 0) || 0
           })
         ])
       };

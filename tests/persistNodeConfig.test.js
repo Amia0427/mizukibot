@@ -187,6 +187,85 @@ module.exports = (async () => {
   assert.strictEqual(writeDecision.shouldPersistBridge, true);
   assert.strictEqual(writeDecision.shouldPersistJournal, false);
   assert.strictEqual(writeDecision.shouldLearn, false);
+
+  let unsafeAppendCalled = false;
+  const unsafePersistNode = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {
+      unsafeAppendCalled = true;
+    },
+    persistShortTermBridgeSnapshot() {},
+    async appendMemoryEvent() {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      enqueue() {
+        throw new Error('unsafe reply should not enqueue post-reply work');
+      }
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: false,
+      POST_REPLY_WORKER_GROUP_IDS: ['g1']
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  const unsafePersistResult = await unsafePersistNode({
+    request: {
+      userId: 'u1',
+      question: '喂猪50一天去不去',
+      runtimeQuestionText: '喂猪50一天去不去',
+      persistUserText: '喂猪50一天去不去',
+      routeMeta: { groupId: 'g1' },
+      sessionKey: 's1',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat'
+    },
+    output: {
+      finalReply: 'I\'ll search for "[Context for assistant only] [ContinuityState] [ActiveTopic] 喂猪50一天去不去"'
+    },
+    memory: {},
+    thread: {},
+    plan: {}
+  });
+  const unsafeDecision = (unsafePersistResult.events || []).find((item) => item.type === 'persist_write_decision');
+  assert.strictEqual(unsafeAppendCalled, false);
+  assert.strictEqual(unsafeDecision.saved, false);
+  assert.ok(unsafeDecision.gateReasons.includes('unsafe_user_facing_reply'));
+
   const appendCalls = [];
   const persistNodeWithSpy = createPersistNode({
     normalizeObject(value, fallback = {}) {
@@ -266,6 +345,8 @@ module.exports = (async () => {
   let enqueueCount = 0;
   let mergeCount = 0;
   let queuedJob = null;
+  const workerWakeCalls = [];
+  const workerWakeTraceEvents = [];
   const persistNodeWithPostReplyGate = createPersistNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;
@@ -326,6 +407,16 @@ module.exports = (async () => {
         return { enqueued: true, job: queuedJob };
       }
     },
+    ensurePostReplyWorkerRunning(info) {
+      workerWakeCalls.push(info);
+      return { started: true, reason: 'started', pid: 1234 };
+    },
+    appendRequestTraceEvent(event) {
+      workerWakeTraceEvents.push(event);
+    },
+    normalizeRequestTrace(value) {
+      return value && value.requestId ? value : null;
+    },
     chatHistory: {},
     shortTermMemory: {},
     config: {
@@ -346,6 +437,7 @@ module.exports = (async () => {
       runtimeQuestionText: 'hello there',
       persistUserText: 'hello there',
       routeMeta: { groupId: '1083095371' },
+      requestTrace: { requestId: 'trace-post-reply-wake' },
       sessionKey: 's1',
       routePolicyKey: 'chat/default',
       topRouteType: 'direct_chat'
@@ -362,6 +454,193 @@ module.exports = (async () => {
   await persistNodeWithPostReplyGate(gatedState);
   assert.strictEqual(enqueueCount, 1, 'post-reply enqueue should respect per-user cooldown');
   assert.strictEqual(mergeCount, 0, 'cooldown should prevent merge in the strict cooldown case');
+  assert.strictEqual(workerWakeCalls.length, 1, 'post-reply worker should be woken after a queued job is written');
+  assert.strictEqual(workerWakeCalls[0].jobId, 'job_1');
+  assert.ok(workerWakeTraceEvents.some((event) => event.stage === 'persist_post_reply_worker_wake' && event.workerStarted === true));
+
+  let recapEnqueueCalled = false;
+  let recapBridgeCalled = false;
+  const persistNodeWithRecapGate = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {},
+    persistShortTermBridgeSnapshot() {
+      recapBridgeCalled = true;
+    },
+    async appendMemoryEvent() {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      enqueue() {
+        recapEnqueueCalled = true;
+        throw new Error('recap reply should not enqueue post-reply work');
+      }
+    },
+    ensurePostReplyWorkerRunning(info) {
+      workerWakeCalls.push(info);
+      return { started: true, reason: 'started', pid: 1234 };
+    },
+    appendRequestTraceEvent(event) {
+      workerWakeTraceEvents.push(event);
+    },
+    normalizeRequestTrace(value) {
+      return value && value.requestId ? value : null;
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: false,
+      POST_REPLY_WORKER_GROUP_IDS: ['1083095371'],
+      POST_REPLY_MIN_CONTENT_CHARS: 10,
+      POST_REPLY_USER_COOLDOWN_MS: 0
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  const recapResult = await persistNodeWithRecapGate({
+    request: {
+      userId: 'u_recap',
+      question: '宝说一下我们今天聊的',
+      runtimeQuestionText: '宝说一下我们今天聊的',
+      persistUserText: '宝说一下我们今天聊的',
+      routeMeta: { groupId: '1083095371' },
+      sessionKey: 's_recap',
+      routePolicyKey: 'lookup/notebook-answer',
+      topRouteType: 'direct_chat'
+    },
+    output: {
+      finalReply: '今天聊了音游抽卡和前面的几件事。'
+    },
+    memory: {},
+    thread: { threadId: 't_recap' },
+    plan: {}
+  });
+  const recapDecision = (recapResult.events || []).find((item) => item.type === 'persist_write_decision');
+  assert.strictEqual(recapEnqueueCalled, false, 'recap replies should not enqueue post-reply work');
+  assert.strictEqual(recapBridgeCalled, true, 'recap replies should still preserve short-term bridge continuity');
+  assert.strictEqual(recapDecision.postReplyRecapQuery, true);
+  assert.strictEqual(recapDecision.shouldQueuePostReplyJournalTask, false);
+  assert.strictEqual(recapDecision.shouldQueuePostReplyMemoryTasks, false);
+  assert.ok(recapDecision.gateReasons.includes('post_reply_recap_query'));
+
+  let directChatQueuedJob = null;
+  const persistNodeWithDirectJournal = createPersistNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    isChatLikeRoute() {
+      return true;
+    },
+    shouldAppendDailyJournalForV2() {
+      return true;
+    },
+    shouldQueueMemoryLearningForV2() {
+      return true;
+    },
+    shouldLearnSelfImprovement() {
+      return true;
+    },
+    appendShortTermHistory() {},
+    persistShortTermBridgeSnapshot() {},
+    async appendMemoryEvent() {},
+    materializeMemoryViews() {},
+    addProfileItem() {},
+    pickRouteMetaForPostReplyJob(routeMeta) {
+      return routeMeta || {};
+    },
+    stableHash(value) {
+      return JSON.stringify(value || {});
+    },
+    postReplyJobQueue: {
+      findQueuedJobByAggregateKey() {
+        return null;
+      },
+      enqueue(job) {
+        directChatQueuedJob = {
+          ...job,
+          jobId: 'direct_journal_job',
+          dedupeKey: 'direct_journal_dedupe'
+        };
+        return { enqueued: true, job: directChatQueuedJob };
+      }
+    },
+    chatHistory: {},
+    shortTermMemory: {},
+    config: {
+      MEMORY_V3_ENABLED: false,
+      POST_REPLY_WORKER_GROUP_IDS: ['allowed_group'],
+      POST_REPLY_MIN_CONTENT_CHARS: 10,
+      POST_REPLY_USER_COOLDOWN_MS: 0
+    },
+    saveAndEmit(state) {
+      return state;
+    }
+  });
+
+  const directJournalResult = await persistNodeWithDirectJournal({
+    request: {
+      userId: 'u_direct',
+      question: 'direct chat daily journal input',
+      runtimeQuestionText: 'direct chat daily journal input',
+      persistUserText: 'direct chat daily journal input',
+      routeMeta: {},
+      sessionKey: 's_direct',
+      routePolicyKey: 'direct_chat/default',
+      topRouteType: 'direct_chat'
+    },
+    output: {
+      finalReply: 'direct chat daily journal reply'
+    },
+    memory: {},
+    thread: { threadId: 't_direct' },
+    plan: {}
+  });
+  assert.ok(directChatQueuedJob, 'direct_chat should enqueue journal even without group allowlist');
+  assert.strictEqual(directChatQueuedJob.tasks.dailyJournal, true);
+  assert.strictEqual(directChatQueuedJob.tasks.memoryLearning, false);
+  assert.strictEqual(directChatQueuedJob.tasks.selfImprovement, false);
+  const directDecision = (directJournalResult.events || []).find((item) => item.type === 'persist_write_decision');
+  assert.strictEqual(directDecision.shouldQueuePostReplyJournalTask, true);
+  assert.strictEqual(directDecision.shouldQueuePostReplyMemoryTasks, false);
 
   let aggregateEnqueueCount = 0;
   let aggregateMergeCount = 0;

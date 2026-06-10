@@ -4,6 +4,7 @@
 
 # Dependencies
 node_modules/
+__pycache__/
 
 # Runtime data / generated assets
 data/
@@ -22,8 +23,13 @@ _migration_backup_*/
 _tmp_*.txt
 _tmp_*.log
 _tmp_*.tar.gz
+*.bak_codex_*
+*.bak-*
+*.before.json
 artifacts/tmp/
 artifacts/logs/
+artifacts/lancedb-gate-shadow.json
+artifacts/memory-recall-eval/*.tmp
 
 # Local Windows ops artifacts
 windows-mgmt.conf
@@ -32,3 +38,4 @@ toggle_ipv4_via_*.cmd
 turn_off_ipv4_via_*.cmd
 turn_on_ipv4_via_*.cmd
 ops/windows/
+memory-backup-*.tar.gz

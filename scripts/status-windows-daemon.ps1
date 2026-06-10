@@ -1,8 +1,12 @@
 param(
+  [AllowEmptyString()]
   [string]$TaskName = 'MizukiBotDaemon'
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($TaskName)) {
+  $TaskName = 'MizukiBotDaemon'
+}
 if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
   $PSNativeCommandUseErrorActionPreference = $false
 }
@@ -26,7 +30,9 @@ if ($task) {
 
 Write-Host ""
 Write-Host "=== Startup Launcher ==="
-$launcher = Get-DaemonStartupLauncherPath -TaskName $TaskName -ScriptRoot $PSScriptRoot
+$safeTaskName = if ([string]::IsNullOrWhiteSpace($TaskName)) { 'MizukiBotDaemon' } else { $TaskName }
+$launcherPaths = Get-DaemonPaths -ScriptRoot $PSScriptRoot -TaskName $safeTaskName
+$launcher = $launcherPaths.StartupLauncher
 if (Test-Path $launcher) {
   [pscustomobject]@{
     Path = $launcher
@@ -43,4 +49,14 @@ if ($nodeProcs) {
   $nodeProcs | Select-Object Id, ProcessName, StartTime | Format-Table -AutoSize
 } else {
   Write-Host "No node process found."
+}
+
+Write-Host ""
+Write-Host "=== Runtime Hotspots ==="
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+$hotspotScript = Join-Path $PSScriptRoot 'diagnose-runtime-hotspots.js'
+if ($nodeCmd -and (Test-Path $hotspotScript)) {
+  & $nodeCmd.Source $hotspotScript --text --window 30m
+} else {
+  Write-Host "Node or diagnose-runtime-hotspots.js not found."
 }

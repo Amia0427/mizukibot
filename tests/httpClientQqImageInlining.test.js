@@ -14,6 +14,7 @@ module.exports = (async () => {
 
   try {
     process.env.DATA_DIR = tempDataDir;
+    process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     const httpClient = require('../api/httpClient');
     originalAxios.get = async () => ({
       headers: { 'content-type': 'image/png' },
@@ -51,10 +52,10 @@ module.exports = (async () => {
     }, 0, 'test-key');
 
     assert.ok(capturedBody);
-    const imagePart = capturedBody.messages[0].content[1];
-    assert.strictEqual(imagePart.type, 'image_url');
-    assert.ok(/^data:image\/png;base64,/i.test(String(imagePart.image_url?.url || '')));
-    assert.ok(!Object.prototype.hasOwnProperty.call(imagePart.image_url || {}, 'detail'));
+    const imagePart = capturedBody.input[0].content[1];
+    assert.strictEqual(imagePart.type, 'input_image');
+    assert.ok(/^data:image\/png;base64,/i.test(String(imagePart.image_url || '')));
+    assert.ok(!Object.prototype.hasOwnProperty.call(imagePart, 'detail'));
 
     await httpClient.postWithRetry('https://example.com/v1/chat/completions', {
       model: 'gpt-4.1-mini',
@@ -70,8 +71,8 @@ module.exports = (async () => {
       stream: false
     }, 0, 'test-key');
 
-    const secondImagePart = capturedBody.messages[0].content[1];
-    assert.strictEqual(secondImagePart.image_url?.detail, 'low');
+    const secondImagePart = capturedBody.input[0].content[1];
+    assert.strictEqual(secondImagePart.detail, 'low');
 
     const cacheDir = path.join(tempDataDir, 'inbound_image_cache');
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -96,9 +97,9 @@ module.exports = (async () => {
       stream: false
     }, 0, 'test-key');
 
-    const cachedHitImagePart = capturedBody.messages[0].content[1];
-    assert.strictEqual(cachedHitImagePart.type, 'image_url');
-    assert.ok(/^data:image\/png;base64,/i.test(String(cachedHitImagePart.image_url?.url || '')));
+    const cachedHitImagePart = capturedBody.input[0].content[1];
+    assert.strictEqual(cachedHitImagePart.type, 'input_image');
+    assert.ok(/^data:image\/png;base64,/i.test(String(cachedHitImagePart.image_url || '')));
 
     fs.rmSync(path.join(cacheDir, 'cached-ref.bin'));
 
@@ -116,8 +117,8 @@ module.exports = (async () => {
       stream: false
     }, 0, 'test-key');
 
-    const cachedImagePart = capturedBody.messages[0].content[1];
-    assert.strictEqual(cachedImagePart.type, 'text');
+    const cachedImagePart = capturedBody.input[0].content[1];
+    assert.strictEqual(cachedImagePart.type, 'input_text');
     assert.strictEqual(cachedImagePart.text, '[Image unavailable: cached image payload missing.]');
 
     console.log('httpClientQqImageInlining.test.js passed');

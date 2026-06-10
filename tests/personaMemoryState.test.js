@@ -126,6 +126,18 @@ module.exports = (async () => {
   assert.strictEqual(state.expressionState.jargon.source, 'surface_policy');
   assert.ok(renderPersonaMemoryPrompt(state, 'direct_chat').systemMessages.some((item) => item.content.includes('reply_posture=')));
 
+  const privatePolicyText = renderPersonaMemoryPrompt(state, 'private_chat').systemMessages.map((item) => item.content).join('\n');
+  assert.ok(privatePolicyText.includes('surface=private_chat'));
+  assert.ok(privatePolicyText.includes('privacy_mode=private'));
+  assert.ok(privatePolicyText.includes('chat_discipline=single'));
+  assert.ok(privatePolicyText.includes('reply_rhythm=1_to_4_short_messages'));
+
+  const groupPolicyText = renderPersonaMemoryPrompt(state, 'group_direct_chat').systemMessages.map((item) => item.content).join('\n');
+  assert.ok(groupPolicyText.includes('surface=group_direct_chat'));
+  assert.ok(groupPolicyText.includes('privacy_mode=group_visible'));
+  assert.ok(groupPolicyText.includes('chat_discipline=group'));
+  assert.ok(groupPolicyText.includes('reply_rhythm=short_interjection'));
+
   const rendered = renderPersonaMemoryPrompt(state, 'qzone_diary');
   const renderedText = rendered.systemMessages.map((item) => item.content).join('\n');
   assert.ok(renderedText.includes('[PersonaCore]'));

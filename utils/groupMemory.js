@@ -1,5 +1,6 @@
 const {
   addMemoryItem,
+  addMemoryItemsBatchWithVectorBackfill,
   retrieveRelevantMemories,
   retrieveRelevantMemoriesAsync
 } = require('./vectorMemory');
@@ -25,6 +26,51 @@ function addGroupMemory(groupId, text, type = 'fact', meta = {}, weight = 1.0) {
     },
     weight
   );
+}
+
+function buildGroupMemoryCandidate(groupId, text, type = 'fact', meta = {}, weight = 1.0) {
+  const gid = sanitizeText(groupId);
+  const content = sanitizeText(text);
+  if (!gid || !content) return null;
+  const nextMeta = {
+    ...meta,
+    scopeType: 'group',
+    groupId: gid,
+    source: meta?.source || 'group_extractor'
+  };
+  return {
+    userId: `group:${gid}`,
+    text: content,
+    type,
+    weight,
+    source: nextMeta.source,
+    confidence: nextMeta.confidence,
+    scopeType: 'group',
+    groupId: gid,
+    routePolicyKey: nextMeta.routePolicyKey,
+    topRouteType: nextMeta.topRouteType,
+    sessionId: nextMeta.sessionId,
+    channelId: nextMeta.channelId,
+    status: nextMeta.status,
+    sourceKind: nextMeta.sourceKind,
+    sourceSessionId: nextMeta.sourceSessionId,
+    turnId: nextMeta.turnId,
+    turnIds: Array.isArray(nextMeta.turnIds) ? nextMeta.turnIds : [],
+    evidence: Array.isArray(nextMeta.evidence) ? nextMeta.evidence : [],
+    participants: Array.isArray(nextMeta.participants) ? nextMeta.participants : [],
+    entities: Array.isArray(nextMeta.entities) ? nextMeta.entities : [],
+    relations: Array.isArray(nextMeta.relations) ? nextMeta.relations : [],
+    meta: nextMeta
+  };
+}
+
+async function addGroupMemoryWithVectorBackfill(groupId, text, type = 'fact', meta = {}, weight = 1.0, options = {}) {
+  const candidate = buildGroupMemoryCandidate(groupId, text, type, meta, weight);
+  if (!candidate) return { ids: [], accepted: [], rejected: [] };
+  return addMemoryItemsBatchWithVectorBackfill([candidate], {
+    ...options,
+    phase: 'group_memory_write'
+  });
 }
 
 function retrieveRelevantGroupMemoriesSync(groupId, query, topK = 4, options = {}) {
@@ -68,6 +114,7 @@ function formatGroupMemoriesCompat(hits = [], options = {}) {
 
 module.exports = {
   addGroupMemory,
+  addGroupMemoryWithVectorBackfill,
   retrieveRelevantGroupMemoriesSync,
   retrieveRelevantGroupMemories,
   formatGroupMemories: formatGroupMemoriesCompat

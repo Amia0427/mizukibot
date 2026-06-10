@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { loadSkillAgentPrompts } = require('../../utils/agentPrompts');
 
 function normalizeText(value = '') {
   return String(value || '').trim();
@@ -33,22 +34,42 @@ function validateSkillPackage(skillRoot) {
   }
 
   const files = listFiles(skillRoot);
-  const hasScript = files.some((file) => /[\\/](scripts|assets|references)[\\/]/i.test(file));
+  const hasScript = files.some((file) => /[\\/](scripts|assets|references|agents)[\\/]/i.test(file));
   if (!hasScript) {
-    warnings.push('No scripts/assets/references directory found');
+    warnings.push('No scripts/assets/references/agents directory found');
   }
 
   for (const file of files) {
     const ext = path.extname(file).toLowerCase();
-    if (['.js', '.ts', '.py', '.sh', '.md', '.json', '.yaml', '.yml', '.txt'].includes(ext)) continue;
+    if (['.js', '.ts', '.py', '.sh', '.md', '.markdown', '.json', '.yaml', '.yml', '.txt'].includes(ext)) continue;
     warnings.push(`Unexpected file type: ${path.relative(skillRoot, file)}`);
+  }
+
+  let agentPrompts = [];
+  try {
+    agentPrompts = loadSkillAgentPrompts(skillRoot);
+  } catch (error) {
+    problems.push(`Agent prompt parse failed: ${error.message || error}`);
+  }
+
+  for (const agentPrompt of agentPrompts) {
+    if (!agentPrompt.ok) {
+      for (const problem of agentPrompt.problems || []) {
+        problems.push(`Agent prompt ${agentPrompt.relativePath}: ${problem}`);
+      }
+      continue;
+    }
+    if (!normalizeText(agentPrompt.defaultPrompt)) {
+      problems.push(`Agent prompt ${agentPrompt.relativePath}: Missing default prompt text`);
+    }
   }
 
   return {
     ok: problems.length === 0,
     problems,
     warnings,
-    files
+    files,
+    agentPrompts
   };
 }
 
@@ -56,7 +77,8 @@ function formatValidation(skillName, validation = {}) {
   const lines = [
     `Skill: ${skillName}`,
     `Valid: ${validation.ok ? 'yes' : 'no'}`,
-    `Files: ${Array.isArray(validation.files) ? validation.files.length : 0}`
+    `Files: ${Array.isArray(validation.files) ? validation.files.length : 0}`,
+    `Agent prompts: ${Array.isArray(validation.agentPrompts) ? validation.agentPrompts.length : 0}`
   ];
   if (validation.problems?.length) {
     lines.push('Problems:');

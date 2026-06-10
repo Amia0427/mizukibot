@@ -180,7 +180,7 @@ function getGlobalToolModelConfig() {
     temperature: 0.1,
     topP: 0.9,
     maxCallsPerTurn: Math.max(1, Math.min(8, Number(config.GLOBAL_TOOLS_MAX_CALLS_PER_TURN) || 4)),
-    maxPlannerTurns: Math.max(1, Math.min(2, Number(config.GLOBAL_TOOLS_MAX_PLANNER_TURNS) || 2)),
+    maxPlannerTurns: 1,
     maxEvidenceChars: Math.max(800, Math.min(20000, Number(config.GLOBAL_TOOLS_MAX_EVIDENCE_CHARS) || 6000))
   };
 }
@@ -385,9 +385,10 @@ function buildPlannerSystemPrompt(allowedToolNames = [], options = {}) {
     : [
         'Decide whether external evidence is needed before the main answer.',
         'Only call tools when they materially improve accuracy.',
-        'Do not use more than one call per tool except memory_cli, which may search first and open later in a follow-up round.',
+        'Use a single planner round. Do not rely on follow-up planner calls.',
+        'Do not use more than one call per tool.',
         'Do not stop at search snippets when the user wants detailed information, webpage content, official guidance, documentation detail, or source-backed explanation.',
-        'When detailed web content is needed, search first and then fetch the best source page.'
+        'When detailed web content is needed, plan search and fetch together in this one round.'
       ];
 
   return [

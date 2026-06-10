@@ -2,6 +2,17 @@ const {
   applyGroupDirectStyleGuard,
   isGroupDirectChatRequest
 } = require('../guards/groupDirectReplyStyleGuard');
+const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
+const {
+  NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY,
+  getNormalUserMainReplyStreamTimeoutReply,
+  isNormalUserMainReplyStreamFirstTokenTimeout
+} = require('../../../utils/normalUserMainReplyStreamTimeout');
+const {
+  estimateMessageTokens,
+  normalizeMessageContent,
+  trimTextByTokenBudget
+} = require('../../../utils/contextBudget');
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
@@ -21,6 +32,22 @@ function extractReplyText(value, preferredKey = 'persisted') {
     return visibleText || persistedText || finalReply;
   }
   return persistedText || visibleText || finalReply;
+}
+
+function isHumanizerFirstTokenTimeout(error) {
+  return Boolean(
+    error?.humanizerFirstTokenTimeout
+    || String(error?.code || '').trim() === 'HUMANIZER_FIRST_TOKEN_TIMEOUT'
+    || String(error?.reason || '').trim() === 'humanizer_first_token_timeout'
+  );
+}
+
+const EMPTY_STREAM_FALLBACK_REPLY = '刚才网络有点不稳，你再发一次我接着回。';
+const UNSAFE_STREAM_FALLBACK_REPLY = '刚才那句不适合直接发出来。你再叫我一次，我按现在这个语境接回去。';
+
+function getHumanizerFailureReason(error) {
+  if (isHumanizerFirstTokenTimeout(error)) return 'humanizer_first_token_timeout';
+  return String(error?.code || error?.reason || error?.message || 'humanizer_failed').trim() || 'humanizer_failed';
 }
 
 function createStreamingCoordinatorHelpers(deps = {}) {
@@ -44,8 +71,20 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     resolveToolLoopReply,
     config,
     chatHistory,
-    shortTermMemory
+    shortTermMemory,
+    createEvent
   } = deps;
+
+  function emitRuntimeEvent(state, type = '', payload = {}) {
+    const request = normalizeObject(state.request, {});
+    const event = typeof createEvent === 'function'
+      ? createEvent(type, payload)
+      : { type, ...payload };
+    if (typeof request.onEvent === 'function') {
+      try { request.onEvent(event); } catch (_) {}
+    }
+    return event;
+  }
 
   async function emitWholeReplyAsSingleStream(state, finalReply) {
     const request = normalizeObject(state.request, {});
@@ -56,9 +95,40 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     return text;
   }
 
+  function createHumanizerDeltaForwarder(request, shouldGuardStreamBeforeSend) {
+    const state = {
+      userVisibleOutput: false,
+      fullText: ''
+    };
+    const forward = (delta, fullText) => {
+      const visibleDelta = String(delta || '');
+      const visibleFullText = String(fullText || '');
+      if (visibleDelta.trim() || visibleFullText.trim()) {
+        state.userVisibleOutput = !shouldGuardStreamBeforeSend;
+        state.fullText = visibleFullText || state.fullText;
+      }
+      if (!shouldGuardStreamBeforeSend && typeof request.onDelta === 'function') {
+        request.onDelta(delta, fullText);
+      }
+    };
+    return { state, forward };
+  }
+
+  function emitHumanizerFallbackEvent(state, error, stage, fallbackSource) {
+    const firstTokenTimeout = isHumanizerFirstTokenTimeout(error);
+    emitRuntimeEvent(state, firstTokenTimeout ? 'humanizer_first_token_timeout' : 'humanizer_failed_fallback', {
+      node: 'direct_reply',
+      stage,
+      fallbackSource,
+      reason: getHumanizerFailureReason(error)
+    });
+    return firstTokenTimeout;
+  }
+
   async function streamDirectReply(messagesToSend, state) {
     const request = normalizeObject(state.request, {});
-    const shouldGuardStreamBeforeSend = isGroupDirectChatRequest(request);
+    const shouldGuardStreamBeforeSend = isGroupDirectChatRequest(request)
+      || String(request.routeMeta?.chatType || request.routeMeta?.chat_type || request.chatType || '').trim().toLowerCase() === 'private';
     const useHumanizerStreaming = isHumanizerEnabledImpl() && !shouldBypassHumanizerForPolicy(request.routePolicyKey);
     const upstreamStreamOptions = useHumanizerStreaming
       ? {
@@ -66,61 +136,254 @@ function createStreamingCoordinatorHelpers(deps = {}) {
           streamHadOutput: false,
           userId: request.userId,
           requestTrace: request.requestTrace || request.routeMeta?.requestTrace,
-          routeMeta: normalizeObject(request.routeMeta, {})
+          routeMeta: normalizeObject(request.routeMeta, {}),
+          routeDebugKey: request.routeDebugKey || request.routeMeta?.routeDebugKey,
+          routePolicyKey: request.routePolicyKey,
+          topRouteType: request.topRouteType,
+          dispatchBranch: 'direct_reply',
+          triggerBranch: 'direct_reply.streaming_humanizer_upstream'
         }
       : shouldGuardStreamBeforeSend
         ? {
             ...request,
             onDelta() {},
-            streamHadOutput: false
+            streamHadOutput: false,
+            dispatchBranch: 'direct_reply',
+            triggerBranch: 'direct_reply.streaming_guarded_upstream'
           }
-      : request;
+      : {
+          ...request,
+          dispatchBranch: 'direct_reply',
+          triggerBranch: 'direct_reply.streaming_upstream'
+        };
 
     try {
       const streamedReply = await requestStreamingReplyImpl(messagesToSend, upstreamStreamOptions, request.modelConfig);
-      const finalReply = useHumanizerStreaming
-        ? await finalizeStreamingReplyWithHumanizerImpl(streamedReply, 'The network was unstable just now. Please try again.', {
+      const originalReply = sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted')).trim();
+      if (isUnsafeUserFacingReply(originalReply)) {
+        emitRuntimeEvent(state, 'unsafe_reply_blocked', {
+          node: 'direct_reply',
+          stage: 'streaming_upstream',
+          fallbackSource: 'unsafe_stream_reply',
+          preview: originalReply.slice(0, 220)
+        });
+        const safeFallback = UNSAFE_STREAM_FALLBACK_REPLY;
+        if (typeof request.onDelta === 'function') {
+          request.onDelta(safeFallback, safeFallback);
+        }
+        return {
+          finalReply: safeFallback,
+          visibleText: safeFallback,
+          persistedText: '',
+          unsafeBlocked: true,
+          humanizerTimedOut: false,
+          humanizerFailed: false,
+          humanizerFailureReason: '',
+          stream: {
+            ...markStreamCompleted(state.output, true),
+            ...mirrorStreamingFlags(state.output, safeFallback),
+            unsafeBlocked: true,
+            fallbackToNonStream: false,
+            mode: 'direct'
+          }
+        };
+      }
+      let finalReply = originalReply;
+      let humanizerTimedOut = false;
+      let humanizerFailed = false;
+      let humanizerFailureReason = '';
+      const humanizerForwarder = createHumanizerDeltaForwarder(request, shouldGuardStreamBeforeSend);
+      if (useHumanizerStreaming) {
+        try {
+          finalReply = await finalizeStreamingReplyWithHumanizerImpl(originalReply, '', {
             question: request.question,
             dynamicPrompt: state.memory?.dynamicPrompt || '',
             modelConfig: request.modelConfig,
-            onDelta: shouldGuardStreamBeforeSend ? (() => {}) : request.onDelta,
-            streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput)
-          })
-        : sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted')).trim();
+            onDelta: humanizerForwarder.forward,
+            streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput),
+            routeMeta: normalizeObject(request.routeMeta, {}),
+            routePolicyKey: request.routePolicyKey,
+            routeDebugKey: request.routeDebugKey || request.routeMeta?.routeDebugKey,
+            topRouteType: request.topRouteType,
+            dispatchBranch: 'direct_reply',
+            triggerBranch: 'direct_reply.streaming_humanizer'
+          });
+        } catch (error) {
+          humanizerFailureReason = getHumanizerFailureReason(error);
+          humanizerFailed = true;
+          humanizerTimedOut = emitHumanizerFallbackEvent(state, error, 'streaming_humanizer', 'original_streamed_reply');
+          finalReply = originalReply;
+        }
+      }
       const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
-      const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || 'The network was unstable just now. Please try again.';
-      if (shouldGuardStreamBeforeSend && typeof request.onDelta === 'function' && safeFinalReply) {
+      const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
+      if (isUnsafeUserFacingReply(safeFinalReply)) {
+        emitRuntimeEvent(state, 'unsafe_reply_blocked', {
+          node: 'direct_reply',
+          stage: 'streaming_final',
+          fallbackSource: 'unsafe_stream_final',
+          preview: safeFinalReply.slice(0, 220)
+        });
+        const safeFallback = UNSAFE_STREAM_FALLBACK_REPLY;
+        if (typeof request.onDelta === 'function') {
+          request.onDelta(safeFallback, safeFallback);
+        }
+        return {
+          finalReply: safeFallback,
+          visibleText: safeFallback,
+          persistedText: '',
+          unsafeBlocked: true,
+          humanizerTimedOut,
+          humanizerFailed,
+          humanizerFailureReason,
+          stream: {
+            ...markStreamCompleted(state.output, true),
+            ...mirrorStreamingFlags(state.output, safeFallback),
+            humanizerTimedOut,
+            humanizerFailed,
+            humanizerFailureReason,
+            unsafeBlocked: true,
+            fallbackToNonStream: false,
+            mode: 'direct'
+          }
+        };
+      }
+      const shouldEmitFinalOnce = (
+        shouldGuardStreamBeforeSend
+        || humanizerTimedOut
+        || (useHumanizerStreaming && !humanizerForwarder.state.userVisibleOutput)
+      );
+      if (shouldEmitFinalOnce && typeof request.onDelta === 'function' && safeFinalReply) {
         request.onDelta(safeFinalReply, safeFinalReply);
       }
       return {
         finalReply: safeFinalReply,
+        humanizerTimedOut,
+        humanizerFailed,
+        humanizerFailureReason,
         stream: {
           ...markStreamCompleted(state.output, true),
           ...mirrorStreamingFlags(state.output, safeFinalReply),
+          humanizerTimedOut,
+          humanizerFailed,
+          humanizerFailureReason,
+          fallbackToNonStream: false,
           mode: 'direct'
         }
       };
     } catch (error) {
-      if (String(error?.partialText || '').trim()) {
-        const finalReply = useHumanizerStreaming
-          ? await finalizeStreamingReplyWithHumanizerImpl(error.partialText, 'The network was unstable just now. Please try again.', {
-              question: request.question,
-              dynamicPrompt: state.memory?.dynamicPrompt || '',
-              modelConfig: request.modelConfig,
-              onDelta: shouldGuardStreamBeforeSend ? (() => {}) : request.onDelta,
-              streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput)
-            })
-          : sanitizeUserFacingText(error.partialText).trim();
-        const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
-        const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || 'The network was unstable just now. Please try again.';
-        if (shouldGuardStreamBeforeSend && typeof request.onDelta === 'function' && safeFinalReply) {
+      if (isNormalUserMainReplyStreamFirstTokenTimeout(error)) {
+        const safeFinalReply = sanitizeUserFacingText(
+          getNormalUserMainReplyStreamTimeoutReply(error)
+        ).trim() || NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY;
+        emitRuntimeEvent(state, 'normal_user_stream_first_token_timeout', {
+          node: 'direct_reply',
+          stage: 'streaming_upstream',
+          fallbackSource: 'normal_user_stream_first_token_timeout',
+          timeoutMs: Number(error?.timeoutMs || 0) || 0
+        });
+        if (typeof request.onDelta === 'function') {
           request.onDelta(safeFinalReply, safeFinalReply);
         }
         return {
           finalReply: safeFinalReply,
+          visibleText: safeFinalReply,
+          persistedText: safeFinalReply,
+          normalUserStreamFirstTokenTimedOut: true,
+          humanizerTimedOut: false,
+          humanizerFailed: false,
+          humanizerFailureReason: '',
           stream: {
             ...markStreamCompleted(state.output, true),
             ...mirrorStreamingFlags(state.output, safeFinalReply),
+            normalUserStreamFirstTokenTimedOut: true,
+            fallbackToNonStream: false,
+            mode: 'direct'
+          }
+        };
+      }
+      if (String(error?.partialText || '').trim()) {
+        const originalPartialReply = sanitizeUserFacingText(error.partialText).trim();
+        let finalReply = originalPartialReply;
+        let humanizerTimedOut = false;
+        let humanizerFailed = false;
+        let humanizerFailureReason = '';
+        const humanizerForwarder = createHumanizerDeltaForwarder(request, shouldGuardStreamBeforeSend);
+        if (useHumanizerStreaming) {
+          try {
+            finalReply = await finalizeStreamingReplyWithHumanizerImpl(originalPartialReply, '', {
+              question: request.question,
+              dynamicPrompt: state.memory?.dynamicPrompt || '',
+              modelConfig: request.modelConfig,
+              onDelta: humanizerForwarder.forward,
+              streamHadOutput: shouldGuardStreamBeforeSend ? false : Boolean(state.output?.stream?.hadOutput),
+              routeMeta: normalizeObject(request.routeMeta, {}),
+              routePolicyKey: request.routePolicyKey,
+              routeDebugKey: request.routeDebugKey || request.routeMeta?.routeDebugKey,
+              topRouteType: request.topRouteType,
+              dispatchBranch: 'direct_reply',
+              triggerBranch: 'direct_reply.streaming_partial_humanizer'
+            });
+          } catch (humanizerError) {
+            humanizerFailureReason = getHumanizerFailureReason(humanizerError);
+            humanizerFailed = true;
+            humanizerTimedOut = emitHumanizerFallbackEvent(state, humanizerError, 'streaming_partial_humanizer', 'original_partial_reply');
+            finalReply = originalPartialReply;
+          }
+        }
+        const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
+        const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
+        if (isUnsafeUserFacingReply(safeFinalReply)) {
+          emitRuntimeEvent(state, 'unsafe_reply_blocked', {
+            node: 'direct_reply',
+            stage: 'streaming_partial',
+            fallbackSource: 'unsafe_stream_partial',
+            preview: safeFinalReply.slice(0, 220)
+          });
+          const safeFallback = UNSAFE_STREAM_FALLBACK_REPLY;
+          if (typeof request.onDelta === 'function') {
+            request.onDelta(safeFallback, safeFallback);
+          }
+          return {
+            finalReply: safeFallback,
+            visibleText: safeFallback,
+            persistedText: '',
+            unsafeBlocked: true,
+            humanizerTimedOut,
+            humanizerFailed,
+            humanizerFailureReason,
+            stream: {
+              ...markStreamCompleted(state.output, true),
+              ...mirrorStreamingFlags(state.output, safeFallback),
+              humanizerTimedOut,
+              humanizerFailed,
+              humanizerFailureReason,
+              unsafeBlocked: true,
+              fallbackToNonStream: false,
+              mode: 'direct'
+            }
+          };
+        }
+        const shouldEmitFinalOnce = (
+          shouldGuardStreamBeforeSend
+          || humanizerTimedOut
+          || (useHumanizerStreaming && !humanizerForwarder.state.userVisibleOutput)
+        );
+        if (shouldEmitFinalOnce && typeof request.onDelta === 'function' && safeFinalReply) {
+          request.onDelta(safeFinalReply, safeFinalReply);
+        }
+        return {
+          finalReply: safeFinalReply,
+          humanizerTimedOut,
+          humanizerFailed,
+          humanizerFailureReason,
+          stream: {
+            ...markStreamCompleted(state.output, true),
+            ...mirrorStreamingFlags(state.output, safeFinalReply),
+            humanizerTimedOut,
+            humanizerFailed,
+            humanizerFailureReason,
+            fallbackToNonStream: false,
             mode: 'direct'
           }
         };
@@ -140,6 +403,53 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       return String(finalReply || '').trim();
     }
     return emitWholeReplyAsSingleStream(state, finalReply);
+  }
+
+  function isVisionLiteContextRequest(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const routePolicyKey = String(request.routePolicyKey || routeMeta.routePolicyKey || '').trim().toLowerCase();
+    const chatMode = String(routeMeta.chatMode || routeMeta.chat_mode || '').trim().toLowerCase();
+    return Boolean(
+      request.imageUrl
+      || normalizeArray(request.imageUrls).length > 0
+      || routePolicyKey === 'transform/vision-summary'
+      || routePolicyKey === 'lookup/vision-answer'
+      || chatMode === 'image_summary'
+      || chatMode === 'image_qa'
+    );
+  }
+
+  function shouldDropVisionSystemContext(message = {}) {
+    const text = normalizeMessageContent(message.content);
+    if (!text) return true;
+    return /\[(?:RecentRawTurns|RetrievedMemoryLite|RetrievedMemory|DailyJournal|TaskMemory|GroupMemory|StyleSignals|ShortTermContinuity|MemOSRecall|OpenVikingRecall|LongTermProfile|Impression|Summary|ContinuityState|GlobalToolEvidence)\]|引用消息|quoted message|reply_quote|quoteAnchored|quote raw|raw quote/i
+      .test(text);
+  }
+
+  function buildVisionLiteSystemMessages(messages = []) {
+    const budget = Math.max(512, Number(config?.VISION_ROUTE_SYSTEM_CONTEXT_MAX_TOKENS || 10000) || 10000);
+    const kept = normalizeArray(messages)
+      .filter((item) => item && typeof item === 'object')
+      .filter((item) => !shouldDropVisionSystemContext(item));
+    const out = [];
+    let used = 0;
+    for (const message of kept) {
+      const cost = estimateMessageTokens(message);
+      if (used + cost <= budget) {
+        out.push(message);
+        used += cost;
+        continue;
+      }
+      const remaining = Math.max(0, budget - used - 6);
+      if (remaining >= 64) {
+        out.push({
+          ...message,
+          content: trimTextByTokenBudget(normalizeMessageContent(message.content), remaining, 'head')
+        });
+      }
+      break;
+    }
+    return out;
   }
 
   function buildDirectReplyMessages(state, messageContent, systemMessages = []) {
@@ -179,6 +489,40 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         ...base
       ];
     };
+
+    if (isVisionLiteContextRequest(request)) {
+      const maxOutputTokens = Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192);
+      const inputHardLimit = Math.max(2048, Number(config.IMAGE_MODEL_INPUT_TOKEN_HARD_LIMIT || 20000) || 20000);
+      const visionSystemMessages = buildVisionLiteSystemMessages(pureSystemMessages);
+      const canonical = buildV2CanonicalSegments(state, {
+        systemPromptMessages: visionSystemMessages,
+        continuityMessages: [],
+        shortTermSummaryMessages: [],
+        recentHistoryMessages: [],
+        assistantOnlyContextMessages: [],
+        userTurnMessages,
+        toolEvidenceMessages: [],
+        modelName: resolveMainConversationModelName(request),
+        modelWindowTokens: inputHardLimit + Math.max(64, maxOutputTokens || 8192),
+        maxOutputTokens,
+        source: 'direct_reply_vision_lite',
+        disableMemoryContextSegments: true
+      });
+      return {
+        messages: canonical.compactionPlan.compactedSegments.flatMap((segment) => segment.messages),
+        systemMessages: visionSystemMessages,
+        continuityStateMessages: [],
+        summaryMessages: [],
+        recentHistory: [],
+        assistantOnlyContextMessages: [],
+        userTurnMessages,
+        globalToolEvidenceMessages: [],
+        compactionPlan: canonical.compactionPlan,
+        canonicalSegments: canonical.segments,
+        disableMemoryContextSegments: true,
+        contextBudgetMode: 'vision_lite'
+      };
+    }
 
     if (!isChatLikeRoute(request) || request.systemInitiated || String(request.customPrompt || '').trim()) {
       const canonical = buildV2CanonicalSegments(state, {
@@ -231,7 +575,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       toolEvidenceMessages: globalToolEvidenceMessages,
       modelName: resolveMainConversationModelName(request),
       modelWindowTokens: Math.max(2048, Number(affinity?.contextWindowTokens || 0) || 2048),
-      maxOutputTokens: Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || 3500),
+      maxOutputTokens: Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192),
       source: 'direct_reply'
     });
     const trimmedRecentHistory = normalizeArray(
@@ -266,5 +610,6 @@ function createStreamingCoordinatorHelpers(deps = {}) {
 }
 
 module.exports = {
-  createStreamingCoordinatorHelpers
+  createStreamingCoordinatorHelpers,
+  isHumanizerFirstTokenTimeout
 };

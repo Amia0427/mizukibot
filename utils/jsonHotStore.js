@@ -6,6 +6,7 @@ const DEFAULT_DEBOUNCE_MS = 500;
 const DEFAULT_MAX_DELAY_MS = 3000;
 const STORE_REGISTRY = new Set();
 const JSON_HOT_STORE_HOOK_KEY = '__mizuki_json_hot_store_flush_hooks_registered__';
+const DEFAULT_FLUSH_RETRY_MS = 5000;
 
 function ensureDir(filePath) {
   const dir = path.dirname(String(filePath || ''));
@@ -14,21 +15,57 @@ function ensureDir(filePath) {
   }
 }
 
+function isRecoverableWriteError(error) {
+  return error && ['EPERM', 'EACCES', 'EXDEV'].includes(error.code);
+}
+
+function isPermissionWriteError(error) {
+  return error && ['EPERM', 'EACCES'].includes(error.code);
+}
+
+function clearReadOnlyBit(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    fs.chmodSync(filePath, 0o666);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function atomicWriteFile(filePath, text, encoding = 'utf8') {
   ensureDir(filePath);
   const tempFile = `${filePath}.${process.pid}.tmp`;
   try {
     fs.writeFileSync(tempFile, text, encoding);
-    fs.renameSync(tempFile, filePath);
-  } catch (error) {
     try {
-      fs.writeFileSync(filePath, text, encoding);
-    } finally {
+      fs.renameSync(tempFile, filePath);
+    } catch (renameError) {
+      if (isPermissionWriteError(renameError) && clearReadOnlyBit(filePath)) {
+        fs.renameSync(tempFile, filePath);
+        return;
+      }
+      throw renameError;
+    }
+  } catch (error) {
+    let fallbackError = null;
+    if (isRecoverableWriteError(error)) {
+      try {
+        if (isPermissionWriteError(error)) clearReadOnlyBit(filePath);
+        fs.writeFileSync(filePath, text, encoding);
+        return;
+      } catch (writeError) {
+        fallbackError = writeError;
+      }
+    }
+    try {
       try {
         if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
       } catch (_) {}
+    } finally {
+      if (fallbackError) throw fallbackError;
     }
-    if (error && error.code !== 'EPERM' && error.code !== 'EXDEV') throw error;
+    throw error;
   }
 }
 
@@ -86,7 +123,8 @@ function createHotStore(filePath, options = {}) {
     lastLoadedAt: 0,
     lastLoadedMtimeMs: 0,
     flushCount: 0,
-    readCount: 0
+    readCount: 0,
+    flushErrorCount: 0
   };
 
   function clearTimer() {
@@ -162,17 +200,35 @@ function createHotStore(filePath, options = {}) {
     store.lastLoadedAt = Date.now();
     store.lastLoadedMtimeMs = Number(stat?.mtimeMs || Date.now()) || Date.now();
     store.flushCount += 1;
+    store.flushErrorCount = 0;
     clearTimer();
     return true;
   }
 
-  function scheduleFlush() {
+  function scheduleFlush(options = {}) {
     clearTimer();
-    const elapsed = store.firstDirtyAt ? (Date.now() - store.firstDirtyAt) : 0;
-    const remaining = Math.max(0, store.maxDelayMs - elapsed);
-    const waitMs = Math.min(store.debounceMs, remaining);
+    const retryDelayMs = Number(options.retryDelayMs);
+    const waitMs = Number.isFinite(retryDelayMs) && retryDelayMs > 0
+      ? retryDelayMs
+      : (() => {
+          const elapsed = store.firstDirtyAt ? (Date.now() - store.firstDirtyAt) : 0;
+          const remaining = Math.max(0, store.maxDelayMs - elapsed);
+          return Math.min(store.debounceMs, remaining);
+        })();
     store.timer = setTimeout(() => {
-      flushSync();
+      try {
+        flushSync();
+      } catch (error) {
+        store.flushErrorCount += 1;
+        console.error('[jsonHotStore] scheduled flush failed, will retry:', {
+          filePath: store.filePath,
+          error: error?.message || String(error || ''),
+          flushErrorCount: store.flushErrorCount
+        });
+        if (store.dirty) {
+          scheduleFlush({ retryDelayMs: DEFAULT_FLUSH_RETRY_MS });
+        }
+      }
     }, waitMs);
   }
 
@@ -232,6 +288,7 @@ function createHotStore(filePath, options = {}) {
       lastLoadedAt: store.lastLoadedAt,
       lastLoadedMtimeMs: store.lastLoadedMtimeMs,
       flushCount: store.flushCount,
+      flushErrorCount: store.flushErrorCount,
       readCount: store.readCount
     };
   }
@@ -375,6 +432,7 @@ function flushAllHotStoresSync() {
 module.exports = {
   DEFAULT_DEBOUNCE_MS,
   DEFAULT_MAX_DELAY_MS,
+  DEFAULT_FLUSH_RETRY_MS,
   createJsonLineHotWriter,
   createJsonHotStore,
   createTextHotStore,
