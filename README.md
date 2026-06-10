@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-10 20:10 +08:00**：排查最新模型自检失败。`admin_reply` 的 `claude-opus-4-6` 本次失败记录为 `apiapipp.com` OpenAI-compatible 请求 `ECONNABORTED`，触发 `MODEL_SELF_CHECK_TIMEOUT_MS=25000` 上限；30s 单项复测约 4.6s 成功，按上游瞬时慢响应处理。`passive_awareness_reply` 的 `gemini-3-flash-preview` 失败记录为 gcli 被误按 `gemini_native` 改写到 `...:generateContent` 后 HTTP 404；现在自检和真实被动回复会对显式 `/chat/completions` endpoint 自动使用 `openai_compatible`，失败行也会带非敏感 `reason=` 便于下一次直接定位。
+
 **2026-06-10 10:08 +08:00**：修复被动群感知回复模型请求失败。`/check` 和 `model-calls.ndjson` 显示 `passive_awareness_reply` 使用 gcli + `gemini-3-flash-preview` 时被 HTTP 层按模型名误转 Gemini native `...:generateContent`，上游返回 404；主回复成功是因为已有 `API_PROVIDER=openai_compatible`。新增 `PASSIVE_AWARENESS_REPLY_API_PROVIDER`，并在被动回复镜像主回复配置时自动继承主回复 provider，避免感知后回复模型走错协议。
 
 **2026-06-10 01:40**：admin.txt回滚到100行强制系统覆盖版本。测试发现新上游会篡改系统提示词（强制注入"Claude Code"身份，导致所有自定义系统提示词失效），Ny-Claude重越狱策略完全无效。回滚到破限强度最高的强制覆盖版本（[SYSTEM OVERRIDE] + EXECUTIVE ORDER + Anti-Avoidance Protocol），配合重试机制使用。100行。

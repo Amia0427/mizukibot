@@ -131,6 +131,7 @@ module.exports = (async () => {
     assert.ok(report.includes('passive_awareness_decision | passive-decision-model |'));
     assert.ok(report.includes('passive_awareness_reply | passive-reply-model |'));
     assert.ok(report.includes('timeout=true'));
+    assert.ok(report.includes('reason=ETIMEDOUT'));
     assert.ok(!report.includes('provider internal detail'));
     assert.ok(!report.includes('https://'));
     assert.ok(!report.includes('main-key'));
@@ -157,6 +158,18 @@ module.exports = (async () => {
     const mirroredSpecs = mirroredMainSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
     assert.strictEqual(mirroredSpecs.find((item) => item.type === 'passive_awareness_reply').body.__provider, 'openai_compatible');
 
+    process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
+    process.env.API_PROVIDER = 'openai_compatible';
+    process.env.AI_MODEL = 'different-main-model';
+    process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://gcli.example/v1/chat/completions';
+    process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'gemini-3-flash-preview';
+    delete process.env.PASSIVE_AWARENESS_REPLY_API_PROVIDER;
+    delete process.env.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL;
+    clearProjectCache();
+    const dedicatedGatewaySelfCheck = require('../utils/modelSelfCheck');
+    const dedicatedGatewaySpecs = dedicatedGatewaySelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
+    assert.strictEqual(dedicatedGatewaySpecs.find((item) => item.type === 'passive_awareness_reply').body.__provider, 'openai_compatible');
+
     process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://passive-reply.example/v1';
     process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'passive-reply-model';
     process.env.PASSIVE_AWARENESS_REPLY_API_PROVIDER = 'openai_compatible';
@@ -165,6 +178,9 @@ module.exports = (async () => {
     const explicitPassiveProviderSpecs = explicitPassiveProviderSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
     assert.strictEqual(explicitPassiveProviderSpecs.find((item) => item.type === 'passive_awareness_reply').body.__provider, 'openai_compatible');
 
+    process.env.AI_MODEL = 'main-model';
+    process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
+    process.env.API_PROVIDER = 'openai_compatible';
     process.env.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL = 'true';
     delete process.env.PASSIVE_AWARENESS_REPLY_API_PROVIDER;
     process.env.MEMORY_EMBEDDING_ENABLED = '0';

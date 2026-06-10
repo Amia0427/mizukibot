@@ -80,6 +80,17 @@ function getPassiveAwarenessReplyApiKey() {
   return normalizeText(config.PASSIVE_AWARENESS_REPLY_API_KEY || config.PASSIVE_AWARENESS_API_KEY);
 }
 
+function inferProviderFromExplicitEndpoint(apiBaseUrl = '') {
+  const normalized = normalizeText(apiBaseUrl).replace(/\/+$/, '').toLowerCase();
+  if (!normalized) return '';
+  if (/\/chat\/completions$/i.test(normalized) || /\/responses$/i.test(normalized)) {
+    return 'openai_compatible';
+  }
+  if (/\/messages$/i.test(normalized)) return 'anthropic';
+  if (/:(?:stream)?generatecontent(?:[?#].*)?$/i.test(normalized)) return 'gemini_native';
+  return '';
+}
+
 function getPassiveAwarenessReplyApiProvider() {
   if (config.PASSIVE_AWARENESS_REPLY_USE_MAIN_MODEL === true) return normalizeText(config.API_PROVIDER);
   const explicit = normalizeText(config.PASSIVE_AWARENESS_REPLY_API_PROVIDER);
@@ -91,7 +102,7 @@ function getPassiveAwarenessReplyApiProvider() {
   ) {
     return normalizeText(config.API_PROVIDER);
   }
-  return '';
+  return inferProviderFromExplicitEndpoint(getPassiveAwarenessReplyApiBaseUrl());
 }
 
 function isPassiveAwarenessReplyConfigured() {
@@ -113,6 +124,7 @@ module.exports = {
   getPassiveAwarenessReplyApiKey,
   getPassiveAwarenessReplyModel,
   getPassiveAwarenessReplyApiProvider,
+  inferProviderFromExplicitEndpoint,
   getPlannerApiBaseUrl,
   getPlannerApiKey,
   getPlannerModel,

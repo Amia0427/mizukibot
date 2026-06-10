@@ -122,6 +122,12 @@ function resolvePassiveAwarenessReplyProvider({ useMainReplyModel, baseUrl, mode
   ) {
     return String(config.API_PROVIDER || '').trim();
   }
+  const normalizedBaseUrl = String(baseUrl || '').trim().replace(/\/+$/, '').toLowerCase();
+  if (/\/chat\/completions$/i.test(normalizedBaseUrl) || /\/responses$/i.test(normalizedBaseUrl)) {
+    return 'openai_compatible';
+  }
+  if (/\/messages$/i.test(normalizedBaseUrl)) return 'anthropic';
+  if (/:(?:stream)?generatecontent(?:[?#].*)?$/i.test(normalizedBaseUrl)) return 'gemini_native';
   return '';
 }
 
