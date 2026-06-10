@@ -577,6 +577,54 @@
         "include_in_system_prompt": false
       },
       {
+        "id": "persona_module_roleplay_emotion_recognition",
+        "path": "persona_modules/roleplay_emotion_recognition.txt",
+        "required": false,
+        "kind": "persona_module",
+        "stage": "main",
+        "authority": "persona_module",
+        "priority": 605,
+        "budget_tokens": 420,
+        "conflict_tags": ["persona_roleplay_core"],
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "persona_module_roleplay_dynamic_shift",
+        "path": "persona_modules/roleplay_dynamic_shift.txt",
+        "required": false,
+        "kind": "persona_module",
+        "stage": "main",
+        "authority": "persona_module",
+        "priority": 606,
+        "budget_tokens": 480,
+        "conflict_tags": ["persona_roleplay_core"],
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "persona_module_roleplay_expression_craft",
+        "path": "persona_modules/roleplay_expression_craft.txt",
+        "required": false,
+        "kind": "persona_module",
+        "stage": "main",
+        "authority": "persona_module",
+        "priority": 607,
+        "budget_tokens": 520,
+        "conflict_tags": ["persona_roleplay_core"],
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "persona_module_roleplay_self_check",
+        "path": "persona_modules/roleplay_self_check.txt",
+        "required": false,
+        "kind": "persona_module",
+        "stage": "main",
+        "authority": "persona_module",
+        "priority": 620,
+        "budget_tokens": 280,
+        "conflict_tags": ["persona_roleplay_core"],
+        "include_in_system_prompt": false
+      },
+      {
         "id": "runtime_tool_guidance",
         "path": "runtime/tool-guidance.txt",
         "required": false,

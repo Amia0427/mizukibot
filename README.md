@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-11 00:15 +08:00**：拆分 SYSTEM.txt 角色扮演规则到 persona_modules。原 197 行通用角色扮演规则（情感识别、动态转变、表达手法、自检清单）增加 ~3k tokens，直接拖高所有主回复基线；现拆分为 4 个按需注入模块：`roleplay_emotion_recognition.txt`（420 tokens）、`roleplay_dynamic_shift.txt`（480 tokens）、`roleplay_expression_craft.txt`（520 tokens）、`roleplay_self_check.txt`（280 tokens），priority 605-620，conflict_tags `persona_roleplay_core`，balanced 模式下最多注入 2 个。SYSTEM.txt 恢复到 20 行 baseline。
+
 **2026-06-10 23:51 +08:00**：Windows 定时重启改为每天凌晨 04:00 执行。`scripts/install-periodic-restart.ps1` 默认注册每日 CalendarTrigger，不再每 6 小时重复触发，减少主模型长回复被重启强杀的窗口。
 
 **2026-06-10 20:10 +08:00**：排查最新模型自检失败。`admin_reply` 的 `claude-opus-4-6` 本次失败记录为 `apiapipp.com` OpenAI-compatible 请求 `ECONNABORTED`，触发 `MODEL_SELF_CHECK_TIMEOUT_MS=25000` 上限；30s 单项复测约 4.6s 成功，按上游瞬时慢响应处理。`passive_awareness_reply` 的 `gemini-3-flash-preview` 失败记录为 gcli 被误按 `gemini_native` 改写到 `...:generateContent` 后 HTTP 404；现在自检和真实被动回复会对显式 `/chat/completions` endpoint 自动使用 `openai_compatible`，失败行也会带非敏感 `reason=` 便于下一次直接定位。
