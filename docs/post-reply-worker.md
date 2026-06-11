@@ -1,6 +1,8 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-06-11 18:59 +08:00
+更新时间：2026-06-11 19:02 +08:00
+
+更新 2026-06-11 19:02 +08:00：复查今天 10:18 左右 `memoryWritePipeline` 连续 `memory_write_review` 408 后，当前队列无 `queued/processing`，`failed` 里也没有 review timeout 造成的新积压或重复重试；对应 enrich job 已在 10:18:39 完成，后续 embedding/rerank 仍继续。修复后 review 请求固定 chat 协议并加本地硬超时，超时降级为 candidate 后继续执行后续学习任务。
 
 更新 2026-06-11 18:59 +08:00：修复 Windows daemon 拉起主 bot 后 worker 长时间缺席。今天 `data/bot-daemon.log` 反复出现 `post-reply worker not running, queue idle; skip idle restart.`，原因是 worker 因空闲 RSS 回收退出后，daemon 只在 queued job 或可恢复 processing job 存在时补启；主 bot 被 daemon 重新拉起时也沿用这个队列门禁，导致外置 worker 可在无队列窗口长期缺席。现 `scripts/run-bot-daemon.ps1` 在本轮成功启动主 bot 且 `POST_REPLY_WORKER_ENABLED=true`、`POST_REPLY_WORKER_INLINE!=true` 时会补启一次外置 worker；补启前仍先用 PID 文件和进程扫描去重，已有 worker 只修 PID/跳过，不会误起重复进程。小目标完成：主 bot 守护自愈后 post-reply worker 启动自愈已恢复。
 

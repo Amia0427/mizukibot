@@ -6,6 +6,7 @@ function ensureChatCompletionsUrl(url = '') {
   const value = String(url || '').replace(/\/+$/, '');
   if (!value) return '';
   if (/\/chat\/completions$/i.test(value)) return value;
+  if (/\/responses$/i.test(value)) return value.replace(/\/responses$/i, '/chat/completions');
   if (/\/v\d+$/i.test(value)) return `${value}/chat/completions`;
   return value;
 }
@@ -23,6 +24,49 @@ function getMemoryApiKey() {
     return String(config.MEMORY_API_KEY || config.API_KEY || '').trim();
   }
   return String(config.API_KEY || '').trim();
+}
+
+function normalizeReviewTimeoutMs(value) {
+  return Math.max(500, Number(value || config.MEMORY_WRITE_REVIEW_TIMEOUT_MS || 2500) || 2500);
+}
+
+function createReviewTimeoutError(timeoutMs) {
+  const error = new Error(`memory_write_review_timeout after ${timeoutMs}ms`);
+  error.code = 'MEMORY_WRITE_REVIEW_TIMEOUT';
+  error.reviewTimedOut = true;
+  return error;
+}
+
+function isWriteReviewTimeoutError(error = null) {
+  const code = String(error?.code || '').trim().toUpperCase();
+  if (error?.reviewTimedOut === true) return true;
+  if (code === 'MEMORY_WRITE_REVIEW_TIMEOUT') return true;
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT' || code === 'ERR_CANCELED') return true;
+  const status = Number(error?.response?.status || error?.status || 0);
+  if (status === 408) return true;
+  return /timeout|timed out|status code 408/i.test(String(error?.message || error || ''));
+}
+
+async function withReviewTimeout(timeoutMs, factory) {
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  let timer = null;
+  const requestPromise = Promise.resolve().then(() => factory(controller?.signal || null));
+  requestPromise.catch(() => {});
+  try {
+    return await Promise.race([
+      requestPromise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(createReviewTimeoutError(timeoutMs));
+          try {
+            if (controller) controller.abort();
+          } catch (_) {}
+        }, timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function normalizeContent(content) {
@@ -166,7 +210,8 @@ function createWriteReviewHelpers(deps = {}) {
       throw new Error('memory_write_review_not_configured');
     }
 
-    const response = await postWithRetry(
+    const timeoutMs = normalizeReviewTimeoutMs(context.timeoutMs);
+    const response = await withReviewTimeout(timeoutMs, (abortSignal) => postWithRetry(
       url,
       {
         model,
@@ -178,7 +223,9 @@ function createWriteReviewHelpers(deps = {}) {
         ],
         max_tokens: 180,
         stream: false,
-        __timeoutMs: Math.max(500, Number(context.timeoutMs || config.MEMORY_WRITE_REVIEW_TIMEOUT_MS || 2500) || 2500),
+        __preferredProtocol: 'chat_completions',
+        __timeoutMs: timeoutMs,
+        ...(abortSignal ? { __abortSignal: abortSignal } : {}),
         __trace: {
           source: 'memoryWritePipeline',
           phase: 'memory_write_review',
@@ -188,7 +235,7 @@ function createWriteReviewHelpers(deps = {}) {
       },
       0,
       apiKey
-    );
+    ));
     const message = extractMessageContent(response);
     const parsed = extractJsonSafely(normalizeContent(message?.content));
     if (!parsed || typeof parsed !== 'object') {
@@ -212,6 +259,8 @@ function createWriteReviewHelpers(deps = {}) {
       failedOpen: Boolean(extra.failedOpen),
       failedClosed: Boolean(extra.failedClosed),
       failedCandidate: Boolean(extra.failedCandidate),
+      timedOut: Boolean(extra.timedOut),
+      degraded: Boolean(extra.degraded),
       failurePolicy: normalizeText(extra.failurePolicy || ''),
       error: normalizeText(extra.error || '')
     };
@@ -265,20 +314,23 @@ function createWriteReviewHelpers(deps = {}) {
     const highRisk = risk.severe || isHighRiskProfileField(candidate);
     const configuredPolicy = normalizeText(options.reviewFailurePolicy || config.MEMORY_WRITE_REVIEW_FAILURE_POLICY).toLowerCase();
     const legacyFailOpen = options.reviewFailOpen ?? config.MEMORY_WRITE_REVIEW_FAIL_OPEN;
-    const failurePolicy = configuredPolicy || (legacyFailOpen && !highRisk ? 'fail_open' : 'fail_candidate');
+    const timedOut = isWriteReviewTimeoutError(error);
+    const rawFailurePolicy = configuredPolicy || (legacyFailOpen && !highRisk ? 'fail_open' : 'fail_candidate');
+    const failurePolicy = timedOut && !risk.severe ? 'timeout_candidate' : rawFailurePolicy;
     const failOpen = failurePolicy === 'fail_open';
     const failClosed = failurePolicy === 'fail_closed';
     const failCandidate = !failClosed && !failOpen;
+    const failureReason = timedOut ? 'write_review_timeout_downgraded' : 'write_review_failed';
     const review = {
       decision: failOpen ? 'accept' : (risk.severe || failClosed ? 'reject' : 'candidate'),
-      reason: 'write_review_failed',
+      reason: failureReason,
       riskTags: [],
       model: getMemoryModelName()
     };
     const meta = {
       ...mergeLearningDecisionMeta(candidate, {
         status: review.decision === 'candidate' ? 'candidate' : candidate.status || 'active',
-        reason: 'write_review_failed',
+        reason: failureReason,
         reviewDecision: review.decision,
         riskReasons: risk.riskReasons,
         riskLevel: risk.riskLevel,
@@ -288,6 +340,8 @@ function createWriteReviewHelpers(deps = {}) {
         failedOpen: Boolean(failOpen),
         failedClosed: Boolean(failClosed || risk.severe),
         failedCandidate: Boolean(failCandidate && !risk.severe),
+        timedOut,
+        degraded: Boolean(timedOut && !risk.severe && !failClosed),
         failurePolicy,
         error: error?.message || String(error || '')
       })
