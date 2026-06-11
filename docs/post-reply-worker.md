@@ -1,6 +1,8 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-06-06 11:02 +08:00
+更新时间：2026-06-11 18:59 +08:00
+
+更新 2026-06-11 18:59 +08:00：修复 Windows daemon 拉起主 bot 后 worker 长时间缺席。今天 `data/bot-daemon.log` 反复出现 `post-reply worker not running, queue idle; skip idle restart.`，原因是 worker 因空闲 RSS 回收退出后，daemon 只在 queued job 或可恢复 processing job 存在时补启；主 bot 被 daemon 重新拉起时也沿用这个队列门禁，导致外置 worker 可在无队列窗口长期缺席。现 `scripts/run-bot-daemon.ps1` 在本轮成功启动主 bot 且 `POST_REPLY_WORKER_ENABLED=true`、`POST_REPLY_WORKER_INLINE!=true` 时会补启一次外置 worker；补启前仍先用 PID 文件和进程扫描去重，已有 worker 只修 PID/跳过，不会误起重复进程。小目标完成：主 bot 守护自愈后 post-reply worker 启动自愈已恢复。
 
 更新 2026-06-06 11:02 +08:00：修复高优先级 worker 缺席积压。Runtime V2 persist 在成功写入或合并 post-reply job 后会调用 `ensurePostReplyWorkerRunning()` 主动唤醒外置 worker；supervisor 会先检查 pid file 和项目根感知进程列表，命中运行中 worker 则跳过，未运行时用当前 Node 启动 `scripts/post-reply-worker.js`，并通过 `POST_REPLY_WORKER_SUPERVISOR_COOLDOWN_MS` 控制重复拉起。`diag:runtime` 现在额外输出 `dueQueued`，并在到期 queued job 无 worker 时报告 `post_reply_due_queued_without_worker`，便于区分“未来可用 enrich 延迟队列”和真正积压。
 
@@ -77,7 +79,7 @@ POST_REPLY_WORKER_INLINE=true
 - 近同时并发启动：优先让更早/更低 PID 的启动尝试获得锁，其余进程退出。
 - 派生 enrich 不复用 core `jobId`，避免 queued enrich 与 done core 在队列索引里互相覆盖；排查时应按 `traceId/sourceMessageIds/aggregateKey` 关联两阶段 job。
 
-Windows daemon、`scripts/one-click-start.ps1` 和 Linux fallback 启动都会先扫描现有 worker 进程；PID 文件缺失但进程存在时只补 PID，不会误杀正常任务，也不会再起第二个 worker。Windows daemon 在 worker 不存在时会检查队列：存在 queued job 或租约已过期的 processing job 才补启；队列空闲时记录 `queue idle; skip idle restart`。worker 自身在 queued/processing 未清空时不会触发 RSS idle recycle，`processing` job 仍靠 `leaseOwner/leaseUntil` 做恢复边界，只有租约过期才会由下一轮 worker recovery。
+Windows daemon、`scripts/one-click-start.ps1` 和 Linux fallback 启动都会先扫描现有 worker 进程；PID 文件缺失但进程存在时只补 PID，不会误杀正常任务，也不会再起第二个 worker。Windows daemon 在 worker 不存在时会检查队列：存在 queued job 或租约已过期的 processing job 会补启；队列空闲且主 bot 原本已在运行时记录 `queue idle; skip idle restart`；如果本轮 daemon 刚成功拉起主 bot，则会在外置 worker 启用时补启一次，避免主进程自愈后 worker 长期缺席。worker 自身在 queued/processing 未清空时不会触发 RSS idle recycle，`processing` job 仍靠 `leaseOwner/leaseUntil` 做恢复边界，只有租约过期才会由下一轮 worker recovery。
 
 ## 配置速查
 
