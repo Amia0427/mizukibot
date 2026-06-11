@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-11 17:20 +08:00**：新增模型条件提示词注入。Prompt manifest 支持 `applies_when.model_pattern`，模型名包含匹配字符串时自动注入对应提示词。`GEMINI.txt` 配置为仅在使用 Gemini 模型（如 `gemini-3-flash-preview`）时注入，优先级 -900（在 SYSTEM.txt 之后）。适用于模型特定的风格约束、输出规范和角色适配。
+
 **2026-06-11 16:54 +08:00**：按当前 SQL/向量重复治理原则重构历史 LanceDB 热索引副本。执行 `node scripts/sync-lancedb-memory-index.js --full --compact`，memory bucket 覆盖写入 `3368` 条、worldbook 覆盖写入 `48` 条；复查 `storage-overlap` 为 `rawJournalRows=0`、`unexpectedVectorRows=0`、`missingVectorRows=0`、`vectorOnlyRows=0`。SQLite、Memory V3 和原始 journal 数据未删除，仍只作为源库/治理库保留。
 
 **2026-06-11 13:52 +08:00**：管理员私聊首字硬兜底默认改为 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=150000`。保留只作用于 `userRole=admin + chatType=private`、超时 abort 上游、跳过 admin shared fallback 和非流式二次请求的行为；只是把等待窗口从 45s 调到 150s。
