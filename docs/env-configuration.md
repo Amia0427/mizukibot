@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-11 13:43 +08:00
+更新时间：2026-06-11 13:52 +08:00
 
 ## 维护约定
 
@@ -9,7 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
-- 2026-06-11 13:43 +08:00：管理员私聊流式主回复新增 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=45000`。只限制 `userRole=admin + chatType=private` 的 `v2_streaming_reply` 上游首字等待；超时会 abort 当前流式请求并直接发明确兜底，不触发 admin shared fallback 或非流式二次慢请求。普通用户仍由 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 控制，管理员群聊不受影响。
+- 2026-06-11 13:52 +08:00：管理员私聊流式主回复 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 默认值改为 `150000`。只限制 `userRole=admin + chatType=private` 的 `v2_streaming_reply` 上游首字等待；超时会 abort 当前流式请求并直接发明确兜底，不触发 admin shared fallback 或非流式二次慢请求。普通用户仍由 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 控制，管理员群聊不受影响。
 - 2026-06-10 20:10 +08:00：模型自检与被动群感知真实回复现在会把显式 `/chat/completions` 或 `/responses` 的独立回复 endpoint 推断为 `openai_compatible`，避免 `PASSIVE_AWARENESS_REPLY_MODEL=gemini-*` 在 gcli 这类 OpenAI-compatible 网关上被误改写为 Gemini native；如确实使用 Gemini native，继续显式配置 `PASSIVE_AWARENESS_REPLY_API_PROVIDER=gemini_native`。
 - 2026-06-09 08:35 +08:00：LanceDB vector index 默认使用 `MEMORY_LANCEDB_VECTOR_INDEX_TYPE=ivf_pq`、`MEMORY_LANCEDB_VECTOR_INDEX_NUM_BITS=8`、`MEMORY_LANCEDB_VECTOR_INDEX_NUM_SUB_VECTORS=64`；这是索引量化，不改变原始 Float32 向量列。本地超过 256 行的 memory bucket 表已重建 `IVF_PQ` 8bit 索引。
 - 2026-06-10 10:08 +08:00：被动群感知回复模型新增 `PASSIVE_AWARENESS_REPLY_API_PROVIDER`。当回复模型显式复用主回复的 `API_BASE_URL/AI_MODEL` 时，会继承 `API_PROVIDER`，避免 `gemini-*` 模型名被误判为 Gemini native 并改写到 `...:generateContent`；独立回复 endpoint 可显式设 `PASSIVE_AWARENESS_REPLY_API_PROVIDER=openai_compatible`。
