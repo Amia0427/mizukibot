@@ -226,7 +226,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       systemPrompt: config.SYSTEM_PROMPT,
       userId,
       routeMeta,
-      isAdmin: adminPromptContext
+      isAdmin: adminPromptContext,
+      modelName: options.modelName || options.model_name || options.model
     }).filter(Boolean);
   promptBlocks.push(...stablePromptBlocks);
   const roleplayRuntimeContextText = buildRoleplayRuntimeContextPromptSnippet({
@@ -686,7 +687,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       systemPrompt: config.SYSTEM_PROMPT,
       userId,
       routeMeta,
-      isAdmin: adminPromptContext
+      isAdmin: adminPromptContext,
+      modelName: options.modelName || options.model_name || options.model
     }).concat(
       [
         createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {

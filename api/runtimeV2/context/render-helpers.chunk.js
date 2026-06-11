@@ -1,5 +1,7 @@
 async function renderPromptLayers(materials = {}, policy = {}) {
   const normalizedMaterials = materials && typeof materials === 'object' ? materials : {};
+  const modelConfig = policy.modelConfig || normalizedMaterials.modelConfig;
+  const modelName = modelConfig && typeof modelConfig === 'object' ? modelConfig.model : undefined;
   return buildBaseDynamicPrompt(
     normalizedMaterials.userInfo,
     normalizedMaterials.userId,
@@ -11,7 +13,8 @@ async function renderPromptLayers(materials = {}, policy = {}) {
       routePolicyKey: policy.routePolicyKey || normalizedMaterials.routePolicyKey,
       topRouteType: policy.topRouteType || normalizedMaterials.topRouteType,
       mainReplyPromptMode: policy.mainReplyPromptMode || normalizedMaterials.mainReplyPromptMode,
-      promptMaterials: normalizedMaterials
+      promptMaterials: normalizedMaterials,
+      modelName
     }
   );
 }

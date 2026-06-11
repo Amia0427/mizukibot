@@ -73,6 +73,14 @@ function checkAppliesWhen(block = {}, env = {}) {
   ) {
     return false;
   }
+  if (appliesWhen.modelPattern || appliesWhen.model_pattern) {
+    const pattern = normalizeText(appliesWhen.modelPattern || appliesWhen.model_pattern);
+    const modelName = normalizeText(env.modelName || env.model_name || env.model || '');
+    if (pattern) {
+      if (!modelName) return false;
+      if (!modelName.toLowerCase().includes(pattern.toLowerCase())) return false;
+    }
+  }
   return true;
 }
 

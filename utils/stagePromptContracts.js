@@ -46,6 +46,14 @@ function shouldIncludePromptBlockForMainContext(block = {}, options = {}) {
   const appliesWhen = normalizeObject(block.appliesWhen || block.applies_when, {});
   const adminOnly = appliesWhen.adminOnly === true || appliesWhen.admin_only === true;
   if (adminOnly && !isAdminPromptContext(options)) return false;
+  if (appliesWhen.modelPattern || appliesWhen.model_pattern) {
+    const pattern = normalizeText(appliesWhen.modelPattern || appliesWhen.model_pattern);
+    const modelName = normalizeText(options.modelName || options.model_name || options.model || '');
+    if (pattern) {
+      if (!modelName) return false;
+      if (!modelName.toLowerCase().includes(pattern.toLowerCase())) return false;
+    }
+  }
   return true;
 }
 
