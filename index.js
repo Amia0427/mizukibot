@@ -23,6 +23,7 @@ const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime
 const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/napcatLogFollower');
 const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
 const { cleanupStaleDataTmpFiles, DEFAULT_MAX_AGE_MS } = require('./utils/dataTmpCleanup');
+const { startNapCatHttpReverseServer } = require('./core/napcatHttpReverseServer');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
@@ -314,7 +315,43 @@ function connectNapCat() {
   });
 }
 
-connectNapCat();
+let httpReverseServer = null;
+
+if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
+  httpReverseServer = startNapCatHttpReverseServer({
+    handleMessage: async (msg) => {
+      if (shuttingDown) return;
+      try {
+        appendNapcatPacketToLog(msg);
+        if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
+          void napcatLogFollower.handleLivePacket(msg).catch((error) => {
+            console.error('[NapCat follower live packet error]', error?.message || error);
+          });
+        }
+        if (napcatActionClient.handleMessage(msg)) return;
+        await handleIncomingMessage(msg);
+      } catch (e) {
+        console.error('[HTTP reverse message error]', e);
+      }
+    }
+  });
+
+  if (config.TICK_ENGINE_ENABLED && !tickStarted) {
+    tickRuntime = startTickEngine(null, askAIByGraph);
+    tickStarted = true;
+  }
+  if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
+    schedulerRuntime.start();
+    schedulerStarted = true;
+  }
+  if (postReplyWorkerRuntime) {
+    postReplyWorkerRuntime.start();
+  }
+  napcatLogFollower.start();
+  console.log('✅ HTTP 反向连接模式启动，等待 NapCat POST 消息');
+} else {
+  connectNapCat();
+}
 
 async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   if (shutdownInProgress) return;
@@ -364,6 +401,9 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   }
   try { webServer?.close?.(); } catch (error) {
     console.error('[shutdown] web server close failed:', error?.message || error);
+  }
+  try { httpReverseServer?.close?.(); } catch (error) {
+    console.error('[shutdown] http reverse server close failed:', error?.message || error);
   }
 
   try { clearMcpRuntimeCaches(); } catch (error) {
