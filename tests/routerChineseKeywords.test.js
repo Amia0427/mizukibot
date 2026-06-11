@@ -2,7 +2,7 @@ const assert = require('assert');
 
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
-const { detectIntent, sanitizeAiRoute } = require('../core/router');
+const { buildRouterSubagentPayload, detectIntent, sanitizeAiRoute } = require('../core/router');
 const { parseAdminCommand } = require('../core/router');
 
 const imageSummaryRoute = detectIntent({
@@ -188,6 +188,65 @@ assert.strictEqual(shortRecallFollowupRoute.intent.needsMemory, true);
 assert.strictEqual(shortRecallFollowupRoute.facets.sourceScope, 'notebook');
 assert.strictEqual(shortRecallFollowupRoute.meta.recallFacet, 'recent_continuity');
 assert.deepStrictEqual(shortRecallFollowupRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
+
+const contextualRecallFollowupRoute = detectIntent({
+  rawText: '然后呢',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'private',
+  contextSummary: 'Previous user: 回忆一下我们相处最搞笑的一件趣事'
+});
+assert.strictEqual(contextualRecallFollowupRoute.topRouteType, 'direct_chat');
+assert.strictEqual(contextualRecallFollowupRoute.intent.needsMemory, true);
+assert.strictEqual(contextualRecallFollowupRoute.facets.sourceScope, 'notebook');
+assert.strictEqual(contextualRecallFollowupRoute.meta.recallFacet, 'relationship');
+assert.strictEqual(contextualRecallFollowupRoute.meta.needsMemoryReason, 'contextual_recall_followup:relationship');
+assert.deepStrictEqual(contextualRecallFollowupRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
+
+const contextualRecallSignalRoute = detectIntent({
+  rawText: '还有呢',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'private',
+  continuitySignals: {
+    activeTopic: '回忆一下我们相处最搞笑的一件趣事'
+  }
+});
+assert.strictEqual(contextualRecallSignalRoute.intent.needsMemory, true);
+assert.strictEqual(contextualRecallSignalRoute.meta.needsMemoryReason, 'contextual_recall_followup:relationship');
+
+const isolatedEllipticalRoute = detectIntent({
+  rawText: '然后呢',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'private'
+});
+assert.notStrictEqual(isolatedEllipticalRoute.intent.needsMemory, true);
+assert.strictEqual(isolatedEllipticalRoute.facets.sourceScope, 'none');
+
+const memoryStickyRoute = sanitizeAiRoute({
+  confidence: 0.92,
+  topRouteType: 'direct_chat',
+  intent: { risk: 'low', toolNeed: ['none'], executionMode: 'immediate', needsPlanning: false, needsMemory: false },
+  facets: { modality: 'text', sourceScope: 'none', domain: 'general', outputKind: 'answer', freshness: 'unknown' },
+  meta: { toolIntent: 'none', responseIntent: 'answer' }
+}, contextualRecallFollowupRoute, { userId: 'u1', imageUrl: null });
+assert.strictEqual(memoryStickyRoute.intent.needsMemory, true);
+assert.strictEqual(memoryStickyRoute.facets.sourceScope, 'notebook');
+
+const routerPayload = buildRouterSubagentPayload({
+  cleanText: '还有呢',
+  fallbackRoute: contextualRecallSignalRoute,
+  continuitySignals: {
+    activeTopic: '回忆一下我们相处最搞笑的一件趣事',
+    recentTurns: [
+      { role: 'user', content: '回忆一下我们相处最搞笑的一件趣事' },
+      { role: 'assistant', content: '我想起了一个片段。' }
+    ]
+  }
+});
+assert.strictEqual(routerPayload.continuitySignals.activeTopic, '回忆一下我们相处最搞笑的一件趣事');
+assert.strictEqual(routerPayload.continuitySignals.recentTurns.length, 2);
 
 const weatherRoute = detectIntent({
   rawText: '今天天气怎么样',

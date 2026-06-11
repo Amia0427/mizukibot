@@ -792,7 +792,7 @@ function matchLegacyFineDirectLocalRoute({ rawText = '', cleanText = '', imageUr
   });
 }
 
-function extractDirectRouteSignals(cleanText = '', imageUrl = null) {
+function extractDirectRouteSignals(cleanText = '', imageUrl = null, routeContext = {}) {
   const text = String(cleanText || '').trim();
   const hasImage = Boolean(imageUrl);
   const isExplicitAction = hasExplicitActSignal(text);
@@ -803,6 +803,9 @@ function extractDirectRouteSignals(cleanText = '', imageUrl = null) {
     ? { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'image_chat' }
     : classifyMemoryNeed(text, {
         cleanText: text,
+        contextSummary: routeContext?.contextSummary || '',
+        directedContext: routeContext?.directedContext || null,
+        continuitySignals: routeContext?.continuitySignals || {},
         facets: { sourceScope: 'none', freshness: 'unknown' },
         intent: { needsMemory: false },
         meta: { chatMode: 'text_chat' }
@@ -842,8 +845,8 @@ function extractDirectRouteSignals(cleanText = '', imageUrl = null) {
   };
 }
 
-function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = null, signals = null } = {}) {
-  const s = signals || extractDirectRouteSignals(cleanText, imageUrl);
+function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = null, signals = null, routeContext = {} } = {}) {
+  const s = signals || extractDirectRouteSignals(cleanText, imageUrl, routeContext);
   const chatMode = s.hasImage
     ? (s.isTransformLike ? 'image_summary' : 'image_qa')
     : 'text_chat';
@@ -932,12 +935,13 @@ function buildDirectRouteFromSignals({ rawText = '', cleanText = '', imageUrl = 
   });
 }
 
-function matchDirectLocalRoute({ rawText = '', cleanText = '', imageUrl = null }) {
+function matchDirectLocalRoute({ rawText = '', cleanText = '', imageUrl = null, contextSummary = '', directedContext = null, continuitySignals = {} }) {
   return buildDirectRouteFromSignals({
     rawText,
     cleanText,
     imageUrl,
-    signals: extractDirectRouteSignals(cleanText, imageUrl)
+    signals: extractDirectRouteSignals(cleanText, imageUrl, { contextSummary, directedContext, continuitySignals }),
+    routeContext: { contextSummary, directedContext, continuitySignals }
   });
 }
 
@@ -947,8 +951,8 @@ const LOCAL_ROUTE_RULE_GROUPS = Object.freeze([
   matchDirectLocalRoute
 ]);
 
-function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null, userId = '', chatType = '' }) {
-  const input = { rawText, cleanText, currentTurnText, imageUrl, userId, chatType };
+function buildCanonicalFallbackRoute({ rawText = '', cleanText = '', currentTurnText = '', imageUrl = null, userId = '', chatType = '', contextSummary = '', directedContext = null, continuitySignals = {} }) {
+  const input = { rawText, cleanText, currentTurnText, imageUrl, userId, chatType, contextSummary, directedContext, continuitySignals };
   for (const matchRuleGroup of LOCAL_ROUTE_RULE_GROUPS) {
     const route = matchRuleGroup(input);
     if (route) return route;
@@ -1004,6 +1008,28 @@ function sanitizeContextSummary(summary = '', maxLength = 220) {
   return `${text.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
 }
 
+function sanitizeContinuitySignalsForRouter(signals = {}) {
+  const source = signals && typeof signals === 'object' ? signals : {};
+  const sanitizeSignalText = (value = '', maxLength = 180) => sanitizeContextSummary(value, maxLength);
+  const recentTurns = Array.isArray(source.recentTurns)
+    ? source.recentTurns
+        .map((turn) => {
+          const role = String(turn?.role || '').trim().toLowerCase();
+          const content = sanitizeSignalText(turn?.content || turn?.text || '', 180);
+          if ((role !== 'user' && role !== 'assistant') || !content) return null;
+          return { role, content };
+        })
+        .filter(Boolean)
+        .slice(-4)
+    : [];
+  return {
+    activeTopic: sanitizeSignalText(source.activeTopic || source.active_topic, 180),
+    carryOverUserTurn: sanitizeSignalText(source.carryOverUserTurn || source.carry_over_user_turn, 220),
+    sceneTopic: sanitizeSignalText(source.sceneTopic || source.scene_topic, 180),
+    recentTurns
+  };
+}
+
 function buildRouterSubagentPrompt() {
   return [
     buildRouterStageSystemPrompt(),
@@ -1051,6 +1077,7 @@ function buildRouterSubagentPayload({
   fallbackRoute = null,
   contextSummary = '',
   directedContext = null,
+  continuitySignals = {},
   requestTrace = null
 } = {}) {
   const fallbackContract = buildCanonicalRouteContract(fallbackRoute || {});
@@ -1063,6 +1090,7 @@ function buildRouterSubagentPayload({
       imageUrl: imageUrl || null
     },
     contextSummary: sanitizeContextSummary(contextSummary, 220),
+    continuitySignals: sanitizeContinuitySignalsForRouter(continuitySignals),
     directedContext: directedContext && typeof directedContext === 'object'
       ? {
           scene: String(directedContext.scene || '').trim(),
@@ -1139,7 +1167,9 @@ async function detectIntentBySubagent({
   imageUrl = null,
   fallbackRoute = null,
   contextSummary = '',
-  directedContext = null
+  directedContext = null,
+  continuitySignals = {},
+  requestTrace = null
 } = {}) {
   const result = await runStructuredSubagent({
     agentName: 'router',
@@ -1151,7 +1181,8 @@ async function detectIntentBySubagent({
       imageUrl,
       fallbackRoute,
       contextSummary,
-      directedContext
+      directedContext,
+      continuitySignals
     }),
     modelResolver: getRouterSubagentModelConfig,
     validateOutput: validateRouterSubagentOutput,
@@ -1219,14 +1250,25 @@ function sanitizeAiRoute(aiRoute, fallbackRoute, { userId, imageUrl }) {
   const normalizedFacets = normalizeFacets(aiRoute.facets, fallbackRoute.facets, imageUrl ?? fallbackRoute.imageUrl);
   const fallbackMeta = fallbackRoute.meta && typeof fallbackRoute.meta === 'object' ? fallbackRoute.meta : {};
   const aiMeta = aiRoute.meta && typeof aiRoute.meta === 'object' ? aiRoute.meta : {};
+  const localMemoryIsSticky = fallbackRoute?.intent?.needsMemory === true || String(fallbackMeta.needsMemoryReason || '').trim();
+  const stickyMemoryToolNeed = Array.isArray(normalizedIntent.toolNeed)
+    && normalizedIntent.toolNeed.some((item) => item === 'local-read' || item === 'mixed')
+    ? normalizedIntent.toolNeed
+    : (Array.isArray(fallbackRoute?.intent?.toolNeed) ? fallbackRoute.intent.toolNeed : ['local-read']);
+  const nextIntent = localMemoryIsSticky
+    ? { ...normalizedIntent, needsMemory: true, toolNeed: stickyMemoryToolNeed }
+    : normalizedIntent;
+  const nextFacets = localMemoryIsSticky && fallbackRoute?.facets?.sourceScope === 'notebook' && normalizedFacets.sourceScope === 'none'
+    ? { ...normalizedFacets, sourceScope: 'notebook' }
+    : normalizedFacets;
   const nextRoute = makeRoute({
     confidence,
     cleanText: cleanText || fallbackRoute.cleanText,
     rawText: fallbackRoute.rawText,
     imageUrl: imageUrl ?? fallbackRoute.imageUrl,
     topRouteType,
-    intent: normalizedIntent,
-    facets: normalizedFacets,
+    intent: nextIntent,
+    facets: nextFacets,
     meta: {
       ...fallbackMeta,
       ...sanitizeAiMeta(aiMeta, {
@@ -1242,21 +1284,33 @@ function sanitizeAiRoute(aiRoute, fallbackRoute, { userId, imageUrl }) {
   return nextRoute;
 }
 
-function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, effectiveIntentText = '', chatType = '' }) {
-  void contextSummary;
+function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, continuitySignals = {}, effectiveIntentText = '', chatType = '' }) {
   const {
     imageUrl,
     cleanText,
     intentText,
     quotePriority
   } = resolveIntentInputs({ rawText, botQQ, directedContext, effectiveIntentText });
-  let route = buildCanonicalFallbackRoute({ rawText, cleanText: intentText, currentTurnText: cleanText, imageUrl, userId, chatType });
+  let route = buildCanonicalFallbackRoute({
+    rawText,
+    cleanText: intentText,
+    currentTurnText: cleanText,
+    imageUrl,
+    userId,
+    chatType,
+    contextSummary,
+    directedContext,
+    continuitySignals
+  });
   route.cleanText = cleanText;
   route.rawText = rawText;
   route.meta = {
     ...(route.meta || {}),
     effectiveIntentText: intentText || cleanText,
-    quotePriority
+    quotePriority,
+    contextSummary: sanitizeContextSummary(contextSummary, 220),
+    directedContext,
+    continuitySignals: sanitizeContinuitySignalsForRouter(continuitySignals)
   };
   route = markLocalRuleRoute(route, userId);
   if (sanitizeTopRouteType(route?.topRouteType) !== 'direct_chat') return route;
@@ -1272,8 +1326,8 @@ function detectIntent({ rawText = '', botQQ = '', userId = '', contextSummary = 
   }), userId);
 }
 
-async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, effectiveIntentText = '', chatType = '' }, options = {}) {
-  const fallbackRoute = detectIntent({ rawText, botQQ, userId, contextSummary, directedContext, effectiveIntentText, chatType });
+async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', contextSummary = '', directedContext = null, continuitySignals = {}, effectiveIntentText = '', chatType = '' }, options = {}) {
+  const fallbackRoute = detectIntent({ rawText, botQQ, userId, contextSummary, directedContext, continuitySignals, effectiveIntentText, chatType });
   if (sanitizeTopRouteType(fallbackRoute.topRouteType) !== 'direct_chat') return fallbackRoute;
   if (!config.ENABLE_AI_ROUTER) return fallbackRoute;
 
@@ -1295,6 +1349,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
         fallbackRoute,
         contextSummary,
         directedContext,
+        continuitySignals,
         requestTrace: options.requestTrace
       });
       if (subagentRoute && typeof subagentRoute === 'object') {
@@ -1313,6 +1368,7 @@ async function detectIntentHybrid({ rawText = '', botQQ = '', userId = '', conte
       userId,
       contextSummary,
       directedContext,
+      continuitySignals,
       requestTrace: options.requestTrace
     });
     const sanitizedRoute = sanitizeAiRoute(aiRoute, fallbackRoute, { userId, imageUrl });

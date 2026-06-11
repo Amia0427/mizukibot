@@ -14,9 +14,16 @@ const history = {
     { role: 'assistant', content: '好的，我继续拆模块。' }
   ]
 };
+const shortTermMemory = {
+  'qq-group:g1:user:u1': {
+    activeTopic: '回忆一下我们相处最搞笑的一件趣事',
+    carryOverUserTurn: '继续围绕共同经历找例子'
+  }
+};
 
 const visualContext = createMessageVisualContext({
-  chatHistory: history
+  chatHistory: history,
+  shortTermMemory
 });
 
 const summary = buildDirectedConversationSummary({
@@ -30,6 +37,7 @@ assert.ok(summary.includes('Current message to: Alice'));
 assert.ok(summary.includes('Quoted message from: Bob'));
 
 const subagentSummary = visualContext.buildSubagentContextSummary('u1', 'g1');
+assert.ok(subagentSummary.includes('Short-term active topic: 回忆一下我们相处最搞笑的一件趣事'));
 assert.ok(subagentSummary.includes('Previous user: 前面我们在聊测试重构'));
 assert.ok(subagentSummary.includes('Previous assistant: 好的，我继续拆模块。'));
 
