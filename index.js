@@ -285,6 +285,7 @@ function connectNapCat() {
 
   ws.on('open', () => {
     reconnectAttempts = 0;
+    napcatActionClient.handleConnect();
     console.log('✅ 瑞希上线啦！已连接到 NapCat');
 
     if (config.TICK_ENGINE_ENABLED && !tickStarted) {

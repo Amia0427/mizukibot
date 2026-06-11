@@ -199,6 +199,7 @@
 
     const effectiveBotQQ = resolveEffectiveBotQQ(msg, config);
     const preprocessed = await continuousMessagePreprocessor.handleMessage(msg, {
+      actionClient: globalNapCatActionClient,
       effectiveBotQQ,
       freshnessSessionKey: rawInboundFreshnessSessionKey,
       freshnessVersion: rawInboundFreshnessVersion
@@ -225,6 +226,7 @@
         effectiveBotQQ
       });
       await resolveContinuousEntryDetails(syntheticContinuousMeta, {
+        actionClient: globalNapCatActionClient,
         effectiveBotQQ,
         resolveReply: Boolean(syntheticContinuousMeta.replyMessageId),
         resolveForward: Array.isArray(syntheticContinuousMeta.forwardIds) && syntheticContinuousMeta.forwardIds.length > 0,

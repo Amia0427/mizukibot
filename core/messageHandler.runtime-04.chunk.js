@@ -65,6 +65,7 @@
     const cleanTextWithoutControls = getCachedRouteValue(`cleanTextWithoutControls:${String(rawText || '')}:${effectiveBotQQ}`, () => stripLeadingCqControlSegments(rawText, effectiveBotQQ));
     if (continuousMeta && typeof continuousMeta === 'object') {
       await resolveContinuousEntryDetails(continuousMeta, {
+        actionClient: globalNapCatActionClient,
         effectiveBotQQ,
         resolveReply: Boolean(continuousMeta.replyMessageId),
         resolveForward: Array.isArray(continuousMeta.forwardIds) && continuousMeta.forwardIds.length > 0,

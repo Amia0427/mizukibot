@@ -48,7 +48,28 @@ function createNapCatHttpActionClient() {
     }
   }
 
-  return { callAction, isConnected: () => true, handleMessage: () => false, handleDisconnect: () => {}, setWebSocket: () => {} };
+  function getConnectionState() {
+    return {
+      connected: true,
+      readyState: null,
+      readyStateName: 'http',
+      pendingCount: null,
+      connectedSince: 0,
+      lastConnectedAt: 0,
+      lastDisconnectedAt: 0,
+      lastDisconnectReason: ''
+    };
+  }
+
+  return {
+    callAction,
+    getConnectionState,
+    handleConnect: () => {},
+    handleMessage: () => false,
+    handleDisconnect: () => {},
+    isConnected: () => true,
+    setWebSocket: () => {}
+  };
 }
 
 module.exports = { createNapCatHttpActionClient, NapCatActionError };

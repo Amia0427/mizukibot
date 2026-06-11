@@ -59,6 +59,7 @@ function createMessageHandler({
     };
   }
   const continuousMessagePreprocessor = createContinuousMessagePreprocessor({
+    actionClient: globalNapCatActionClient,
     enabled: config.CONTINUOUS_MESSAGE_ENABLED,
     debounceMs: config.CONTINUOUS_MESSAGE_DEBOUNCE_MS,
     sentenceWindowMs: config.CONTINUOUS_MESSAGE_SENTENCE_WINDOW_MS,

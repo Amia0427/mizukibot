@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 07:16 +08:00**：修复 NapCat WebSocket 断连污染非关键链路。`data/bot-runtime.err.log` 中 `NapCat websocket is not connected` 反复打到 `thinking-emoji` 与 `continuous-message reply expand`，根因是上层没有共享连接健康状态，断连后仍持续尝试 `set_msg_emoji_like/get_msg/get_forward_msg`，还可能把离线失败写入展开负缓存。现 action client 暴露连接快照，thinking emoji 离线直接 `napcat_offline` 跳过，连续消息 reply/forward 展开离线标记 `degraded` 且不写负缓存；WebSocket `open` 后自动恢复正常 action。小目标完成：NapCat 断连不再持续打坏 thinking emoji 和连续消息展开，恢复后会自动回正。
+
 **2026-06-12 07:10 +08:00**：召回路由从“短句关键词补丁”升级为上下文继承。`detectIntent` 现在会使用 `contextSummary` / `continuitySignals` 判断“然后呢/还有呢/继续说”等椭圆追问是否承接上一轮记忆召回；短句独立出现不触发记忆，只有上一轮 active topic、carry-over 或 previous user 明确是回忆/日志/历史问题时才继承 `needsMemory`。同时本地已判定的 memory route 对 AI router refine 保持 sticky，避免被降回 `chat/default`。小目标完成：短追问召回不再依赖枚举短语。
 
 **2026-06-12 07:09 +08:00**：补齐 `memoryWritePipeline` 写入审核降级漏口。复查 `data/model-calls.ndjson` 在 `2026-06-11T19:40:00Z` 到 `20:20:00Z` 的 `memory_write_review` 失败，修复后已不再双端点回退，但 `Request failed with status code 0` 仍只落 `write_review_failed`，缺少明确降级语义。现 review provider 快速断连/status 0 会写入 `meta.writeReview.reason=write_review_unavailable_downgraded`、`unavailable=true`、`degraded=true`、`failurePolicy=unavailable_candidate`，继续按 candidate 持久化；408/timeout 仍走 `write_review_timeout_downgraded`。小目标完成：review 传输失败和超时都能稳定降级，不再留下隐性学习失败。

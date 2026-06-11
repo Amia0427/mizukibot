@@ -3,6 +3,11 @@ const {
   getMessageByIdCached,
   getForwardMessagesByIdCached
 } = require('../../api/napcatMessageReader');
+const {
+  getActionClientConnectionState,
+  isActionClientConnected,
+  isNapCatOfflineError
+} = require('../../api/napcatActionClient');
 const { ensureCachedImageRef } = require('../../utils/imageInputCache');
 const { upsertImageMemory } = require('../../utils/imageMemoryIndex');
 const { enqueueImageVisualSummarySafe } = require('../continuousMessage/imageVisualSummary');
@@ -36,6 +41,20 @@ function stripSemanticClassifierNoise(text = '') {
     .filter((line) => !/^\[CQ:image,/i.test(line))
     .join('\n')
     .trim();
+}
+
+function canUseNapCatActionClient(options = {}) {
+  const actionClient = options.actionClient;
+  if (!actionClient || typeof actionClient.isConnected !== 'function') return true;
+  return isActionClientConnected(actionClient);
+}
+
+function buildNapCatDegradedState(options = {}) {
+  return {
+    reason: 'napcat_offline',
+    retryable: true,
+    connectionState: getActionClientConnectionState(options.actionClient)
+  };
 }
 
 function seemsSentenceComplete(text = '', options = {}) {
@@ -267,9 +286,12 @@ function normalizeMessageForDownstream(baseMsg = {}, merged = {}, effectiveBotQQ
         : {},
       qqCardUrls: Array.isArray(merged.qqCardUrls) ? merged.qqCardUrls.slice() : [],
       expansionState: {
-        reply: merged.replyContext ? 'resolved' : (merged.replyMessageId ? 'pending' : 'skipped'),
-        forward: Array.isArray(merged.forwardIds) && merged.forwardIds.length ? 'pending' : 'skipped',
-        card: Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length ? 'pending' : 'skipped'
+        reply: normalizeText(merged.expansionState?.reply)
+          || (merged.replyContext ? 'resolved' : (merged.replyMessageId ? 'pending' : 'skipped')),
+        forward: normalizeText(merged.expansionState?.forward)
+          || (Array.isArray(merged.forwardIds) && merged.forwardIds.length ? 'pending' : 'skipped'),
+        card: normalizeText(merged.expansionState?.card)
+          || (Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length ? 'pending' : 'skipped')
       }
     }
   };
@@ -354,6 +376,14 @@ async function enrichEntryFromReply(entry, options = {}) {
   if (!config.CONTINUOUS_MESSAGE_REPLY_EXPANSION_ENABLED) return entry;
   const replyMessageId = normalizeText(entry.replyMessageId);
   if (!replyMessageId) return entry;
+  if (!canUseNapCatActionClient(options)) {
+    entry.replyExpansionDegraded = buildNapCatDegradedState(options);
+    console.warn('[continuous-message] reply expand skipped', {
+      replyMessageId,
+      reason: 'napcat_offline'
+    });
+    return entry;
+  }
   try {
     const original = await getMessageByIdCached(replyMessageId, options);
     const senderName = senderNameFromMessage(original);
@@ -398,6 +428,14 @@ async function enrichEntryFromReply(entry, options = {}) {
       imageCount: Array.isArray(originalParsed.imageUrls) ? originalParsed.imageUrls.length : 0
     });
   } catch (error) {
+    if (isNapCatOfflineError(error)) {
+      entry.replyExpansionDegraded = buildNapCatDegradedState(options);
+      console.warn('[continuous-message] reply expand skipped', {
+        replyMessageId,
+        reason: 'napcat_offline'
+      });
+      return entry;
+    }
     console.warn('[continuous-message] reply expand failed', {
       replyMessageId,
       error: error?.message || String(error || '')
@@ -410,6 +448,14 @@ async function enrichEntryFromForward(entry, options = {}) {
   if (!config.CONTINUOUS_MESSAGE_FORWARD_EXPANSION_ENABLED) return entry;
   const ids = Array.isArray(entry.forwardIds) ? entry.forwardIds.filter(Boolean) : [];
   if (!ids.length) return entry;
+  if (!canUseNapCatActionClient(options)) {
+    entry.forwardExpansionDegraded = buildNapCatDegradedState(options);
+    console.warn('[continuous-message] forward expand skipped', {
+      forwardIds: ids,
+      reason: 'napcat_offline'
+    });
+    return entry;
+  }
   const lines = [];
   const forwardImageUrls = [];
   for (const forwardId of ids) {
@@ -432,6 +478,14 @@ async function enrichEntryFromForward(entry, options = {}) {
         imageCount
       });
     } catch (error) {
+      if (isNapCatOfflineError(error)) {
+        entry.forwardExpansionDegraded = buildNapCatDegradedState(options);
+        console.warn('[continuous-message] forward expand skipped', {
+          forwardId,
+          reason: 'napcat_offline'
+        });
+        continue;
+      }
       console.warn('[continuous-message] forward expand failed', {
         forwardId,
         error: error?.message || String(error || '')
@@ -517,11 +571,15 @@ async function resolveContinuousEntryDetails(entry = {}, options = {}) {
   const qqCardLinksEnabled = options.qqCardLinksEnabled ?? config.CONTINUOUS_MESSAGE_QQ_CARD_LINKS_ENABLED;
   if (options.resolveReply !== false) {
     await enrichEntryFromReply(entry, options);
-    entry.expansionState.reply = entry.replyContext ? 'resolved' : (entry.replyMessageId ? 'failed' : 'skipped');
+    entry.expansionState.reply = entry.replyContext
+      ? 'resolved'
+      : (entry.replyExpansionDegraded ? 'degraded' : (entry.replyMessageId ? 'failed' : 'skipped'));
   }
   if (options.resolveForward === true) {
     await enrichEntryFromForward(entry, options);
-    entry.expansionState.forward = Array.isArray(entry.forwardIds) && entry.forwardIds.length ? 'resolved' : 'skipped';
+    entry.expansionState.forward = entry.forwardExpansionDegraded
+      ? 'degraded'
+      : (Array.isArray(entry.forwardIds) && entry.forwardIds.length ? 'resolved' : 'skipped');
   }
   if (options.resolveCards !== false && qqCardLinksEnabled) {
     entry.text = appendCardUrlsToText(entry.text, entry.qqCardUrls || [], { qqCardLinksEnabled });
@@ -636,6 +694,7 @@ function createContinuousMessagePreprocessor(options = {}) {
   );
   const sentenceMinChars = Math.max(1, Number(options.sentenceMinChars ?? config.CONTINUOUS_MESSAGE_SENTENCE_MIN_CHARS) || 6);
   const sharedResolveOptions = {
+    actionClient: options.actionClient,
     ensureCachedImageRef: typeof options.ensureCachedImageRef === 'function' ? options.ensureCachedImageRef : undefined,
     imageCacheTimeoutMs: options.imageCacheTimeoutMs,
     imageCacheMaxBytes: options.imageCacheMaxBytes,

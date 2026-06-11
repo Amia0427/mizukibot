@@ -3,7 +3,12 @@ const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
 const config = require('../config');
-const { getNapCatActionClient } = require('./napcatActionClient');
+const {
+  getActionClientConnectionState,
+  getNapCatActionClient,
+  isActionClientConnected,
+  isNapCatOfflineError
+} = require('./napcatActionClient');
 const { AUTO_PUBLISH, DRAFT_ONLY, runQzoneAgent } = require('./qzoneAgentService');
 const { getScheduledTaskStore } = require('../utils/scheduledTaskStore');
 const {
@@ -571,6 +576,18 @@ async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) 
     return { success: true, reason: 'no emoji ids configured', appliedEmojiIds: [] };
   }
 
+  if (!isActionClientConnected(actionClient)) {
+    return {
+      success: false,
+      reason: 'napcat_offline',
+      retryable: true,
+      skipped: true,
+      connectionState: getActionClientConnectionState(actionClient),
+      appliedEmojiIds: [],
+      failures: []
+    };
+  }
+
   const failures = [];
   for (const emojiId of normalizedEmojiIds) {
     try {
@@ -582,15 +599,20 @@ async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) 
     } catch (error) {
       failures.push({
         emojiId,
-        error: error?.message || String(error || 'unknown error')
+        error: error?.message || String(error || 'unknown error'),
+        offline: isNapCatOfflineError(error)
       });
     }
   }
 
   if (failures.length > 0) {
+    const offline = failures.some((item) => item.offline === true);
     return {
       success: false,
-      reason: failures[0]?.error || 'set_msg_emoji_like failed',
+      reason: offline ? 'napcat_offline' : (failures[0]?.error || 'set_msg_emoji_like failed'),
+      retryable: offline,
+      skipped: offline,
+      connectionState: offline ? getActionClientConnectionState(actionClient) : undefined,
       appliedEmojiIds: normalizedEmojiIds.filter((emojiId) => !failures.some((item) => item.emojiId === emojiId)),
       failures
     };
