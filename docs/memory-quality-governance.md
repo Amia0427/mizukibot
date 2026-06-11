@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-11 16:54 +08:00
+更新时间：2026-06-11 19:02 +08:00
+
+更新 2026-06-11 19:02 +08:00：`memoryWritePipeline` 写入审核新增明确超时降级。今天 10:18 左右 `data/model-calls.ndjson` 的连续 `memory_write_review` 408 同时落 `/v1/responses` 和 `/v1/chat/completions`，不是业务层并发双打，而是通用 HTTP 层先按 Responses 协议准备请求、失败后回退 chat，外层/内层各写一条模型调用日志。现 `utils/memoryWritePipeline/review.js` 对 review 请求显式设置 `__preferredProtocol=chat_completions`，并用本地硬超时包裹 provider 调用；超时或 408 会写入 `meta.writeReview.reason=write_review_timeout_downgraded`、`timedOut=true`、`degraded=true`，按 fail-candidate 语义落为 candidate，后续 embedding/rerank/enrich 继续执行。小目标完成：memory write review 超时不再阻塞后续学习任务。
 
 更新 2026-06-11 16:54 +08:00：历史 LanceDB 热索引副本已按当前治理边界重构。执行 full sync + compact 后，Memory V3 热索引副本为 `3368` 条、worldbook semantic docs 为 `48` 条；`storage-overlap` 复查 `rawJournalRows=0`、`unexpectedVectorRows=0`、`missingVectorRows=0`、`vectorOnlyRows=0`，推荐动作 `none`。小目标完成：本次只覆盖/压实 LanceDB 索引副本，没有删除 SQLite、Memory V3 或原始 journal 数据。
 

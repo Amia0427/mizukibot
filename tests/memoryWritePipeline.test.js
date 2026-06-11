@@ -15,6 +15,8 @@ process.env.MEMORY_WRITE_REVIEW_TIMEOUT_MS = '500';
 process.env.MEMORY_WRITE_REVIEW_FAIL_OPEN = 'true';
 process.env.MEMORY_WRITE_REVIEW_FAILURE_POLICY = '';
 process.env.MEMORY_WRITE_RECALL_VERIFY_ENABLED = 'true';
+process.env.MEMORY_API_BASE_URL = 'https://memory-review.example/v1/responses';
+process.env.MEMORY_API_KEY = 'review-key';
 process.env.API_BASE_URL = 'https://memory-review.example/v1/chat/completions';
 process.env.API_KEY = 'review-key';
 process.env.MEMORY_HYBRID_RECALL_ENABLED = 'true';
@@ -64,6 +66,9 @@ httpClient.postWithRetry = async (url, body) => {
     reviewCalls.push({ url, body });
     if (payload.includes('review candidate fallback failure')) {
       throw new Error('review timeout');
+    }
+    if (payload.includes('review timeout should downgrade without blocking')) {
+      return new Promise(() => {});
     }
     if (reviewText.includes('system prompt leak memory')) {
       return {
@@ -267,6 +272,39 @@ module.exports = (async () => {
   const failOpenItem = getMemoryItems('u_pipeline_review').find((item) => item.text.includes('fallback failure'));
   assert.strictEqual(failOpenItem.status, 'candidate', 'high-risk review failure should not fail open to active');
   assert.strictEqual(failOpenItem.meta.writeReview.failedCandidate, true, 'fail-candidate review metadata should be persisted');
+
+  const timeoutStartedAt = Date.now();
+  const timeoutDegraded = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_review_timeout',
+    type: 'like',
+    text: 'review timeout should downgrade without blocking',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.9,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true, timeoutMs: 500 });
+  assert.ok(Date.now() - timeoutStartedAt < 1000, 'local review timeout should not wait for a hung provider call');
+  assert.strictEqual(timeoutDegraded.ids.length, 1, 'review timeout should downgrade and persist candidate');
+  const timeoutItem = getMemoryItems('u_pipeline_review_timeout')[0];
+  assert.strictEqual(timeoutItem.status, 'candidate');
+  assert.strictEqual(timeoutItem.meta.writeReview.reason, 'write_review_timeout_downgraded');
+  assert.strictEqual(timeoutItem.meta.writeReview.timedOut, true);
+  assert.strictEqual(timeoutItem.meta.writeReview.degraded, true);
+  const timeoutReviewCall = reviewCalls.find((call) => JSON.stringify(call.body).includes('review timeout should downgrade without blocking'));
+  assert.ok(timeoutReviewCall, 'timeout case should call review model once');
+  assert.strictEqual(timeoutReviewCall.url, 'https://memory-review.example/v1/chat/completions');
+  assert.strictEqual(timeoutReviewCall.body.__preferredProtocol, 'chat_completions');
+
+  const afterTimeout = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_after_timeout',
+    type: 'like',
+    text: 'likes risky review nickname',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.9,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(afterTimeout.ids.length, 1, 'subsequent review should still run after timeout downgrade');
 
   const explicitActive = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_explicit',

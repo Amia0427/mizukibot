@@ -6,6 +6,8 @@
 
 **2026-06-11 19:10 +08:00**：修复管理员图片总结主链输入失控。复盘 `request_id=req_493000182e712ed3`，`direct_chat/image_summary/summary` 虽已做图片轻上下文，但 worker 成功后仍把完整 `VisionCaptionJSON` 当作 user 文本交给管理员主模型，最后一条 user payload 约 46k tokens，导致非流式首响约 51.8s。现 vision worker 只输出紧凑“视觉证据摘要”，`direct_reply` 对 `image_summary/image_qa` 强制重建 `vision_lite` payload，不复用预构建的大上下文，并按 `VISION_ROUTE_USER_TEXT_MAX_TOKENS` 裁剪 worker 文本。小目标完成：管理员图片总结主链输入预算和首响延迟已加硬控。
 
+**2026-06-11 19:02 +08:00**：修复 `memoryWritePipeline` 的 `memory_write_review` 超时阻塞。今天 10:18 左右 `model-calls.ndjson` 里同一 review 同时出现 `/v1/responses` 与 `/v1/chat/completions`，原因是通用 `postWithRetry` 会先把 OpenAI-compatible chat payload 升级为 Responses，失败后再回退 chat，tracker 因外层/内层各记一条而看起来像双端点并发。现 memory write review 显式固定 chat 协议，并加本地硬超时；超时后写入 `write_review_timeout_downgraded` 元数据并降级为 candidate，不阻塞后续学习任务。小目标完成：memory write review 超时后明确降级、不再拖住 post-reply 学习链路。
+
 **2026-06-11 23:47 +08:00**：GEMINI.txt 重构为 Claude Opus 4.6 风格约束。核心风格从"简洁直接张力"改为"从容细腻周全"，情绪表达从"强制显性"改为"含蓄内敛"，节奏从"明快迅速"改为"从容自然"，句式从"突兀破碎"改为"自然流畅"。保持 model-pattern 配置系统架构（文件名不变），保持与 persona/02_style.txt 的口语短句活泼人格协调。适配目标：让瑞希在使用 Claude 模型时呈现克制细腻的叙事质感，而非 Gemini 的快速跳跃风格。
 
 **2026-06-11 18:59 +08:00**：修复 Windows daemon 拉起主 bot 后 post-reply worker 长时间缺席。今天 `data/bot-daemon.log` 反复出现 `post-reply worker not running, queue idle; skip idle restart.` 的直接原因是 worker 空闲 RSS 回收退出后，daemon 在无 queued/可恢复 processing job 时不补启；主 bot 被 daemon 重新拉起的路径也沿用同一队列门禁。现 `run-bot-daemon.ps1` 会在本轮成功拉起主 bot 且 `POST_REPLY_WORKER_ENABLED=true`、非 inline 时补启一次外置 worker，补启前仍先扫描 PID/进程避免重复。小目标完成：主 bot 守护自愈后 worker 启动自愈已恢复。
