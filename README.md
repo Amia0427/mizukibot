@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-11 10:51 +08:00**：普通快速回复的模型格式异常不再直接发给群。主模型 HTTP 200 但 `extractMessageContent` 抽不到正文时，`model-calls.ndjson` 会追加同 `model_call_*` id 的 `status=parse_failed` 诊断行，记录非敏感响应结构摘要；`normal_fast_reply` 识别“模型返回格式不稳定/没拿到可用正文”后抛错回退正式回复链路。小目标完成：10:38:59 群聊兜底发送原因已定位并加观测。
+
 **2026-06-11 15:45 +08:00**：新增 HTTP 反向连接模式。`NAPCAT_HTTP_REVERSE_ENABLED=true` 启用后 Bot 监听 `NAPCAT_HTTP_REVERSE_PORT=3002`，NapCat 通过 HTTP POST 推送消息（不需要公网 IP，全程 localhost）。HTTP 模式比 WebSocket 更稳定，无需重连机制，适合 NapCat 频繁断线场景。配置示例见 `.env.example`。
 
 **2026-06-11 08:44 +08:00**：SQL/向量记忆重复治理落地为“主存储 + 索引副本”边界。SQLite `profile_facts / journal_entries / journal_rollups` 继续做结构化主读和治理，Memory V3 作为事件/节点源，LanceDB 只保留 active/relevant Memory V3 节点、journal segment/day rollup 和 worldbook semantic docs 的热向量索引副本；raw journal turn、stale/orphan row、同一 `canonicalKey/textHash` 多条 active vector row 归为异常重复。新增 `npm run diag:memory -- storage-overlap --json` 只读诊断，`sync-lancedb-memory-index --dry-run --full` 会显示 overlap/repair summary。

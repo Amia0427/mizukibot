@@ -153,6 +153,11 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         durationMs: Math.max(0, Date.now() - attemptStartedAt),
         fallbackActive: trace.mainFallbackActive === true
       });
+      Object.defineProperty(response, '__modelCallId', {
+        value: callId,
+        enumerable: false,
+        configurable: true
+      });
       finishModelCall(callId, {
         response,
         attempts: i + 1,

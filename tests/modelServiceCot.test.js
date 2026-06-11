@@ -1,12 +1,30 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
-const {
-  buildReplyTextVariants,
-  finalizeReplyText,
-  requestAssistantMessage
-} = require('../api/runtimeV2/model/service');
+function clearProjectCache() {
+  for (const key of Object.keys(require.cache)) {
+    if (key.includes(`${path.sep}waifu${path.sep}`)) {
+      delete require.cache[key];
+    }
+  }
+}
 
 module.exports = (async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-model-service-cot-'));
+  process.env.DATA_DIR = tempDir;
+  clearProjectCache();
+
+  const {
+    buildReplyTextVariants,
+    finalizeReplyText,
+    requestAssistantMessage
+  } = require('../api/runtimeV2/model/service');
+  const {
+    flushModelCallLogsSync
+  } = require('../utils/modelCallTracker');
+
   const raw = '答复前<think>内部推理</think>答复后';
   const rawThinking = '答复前<thinking>内部推理</thinking>答复后';
   const variants = buildReplyTextVariants(raw, '', { preserveThink: true });
@@ -46,6 +64,16 @@ module.exports = (async () => {
     assert.strictEqual(malformed.role, 'assistant');
     assert.ok(!String(malformed.content).includes('The model response format was malformed'));
     assert.ok(String(malformed.content).includes('模型返回格式不稳定'));
+    flushModelCallLogsSync();
+    const rows = fs.readFileSync(path.join(tempDir, 'model-calls.ndjson'), 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const parseFailure = rows.find((row) => row.status === 'parse_failed');
+    assert.ok(parseFailure, 'malformed model response should append a parse_failed diagnostic row');
+    assert.strictEqual(parseFailure.final_error_code, 'response_parse_empty');
+    assert.strictEqual(parseFailure.parse_stage, 'extract_message_content');
+    assert.deepStrictEqual(parseFailure.parse_diagnostic.top_level_keys, ['unexpected']);
   } finally {
     axios.post = originalPost;
   }
