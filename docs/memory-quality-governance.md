@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-09 08:45 +08:00
+更新时间：2026-06-11 08:44 +08:00
+
+更新 2026-06-11 08:44 +08:00：SQL/向量记忆重复治理完成。正常重复定义为 SQLite/Memory V3 源数据加 LanceDB 热索引副本；异常重复定义为 raw journal turn 被向量化、stale/superseded/orphan LanceDB row、同一 `canonicalKey/textHash` 下多条 active vector row。新增只读诊断 `npm run diag:memory -- storage-overlap --json`，输出 `expectedIndexCopies`、`unexpectedVectorRows`、`missingVectorRows`、`sqliteOnlyRows`、`vectorOnlyRows`，只含 id/hash/短 metadata，不输出完整隐私文本。小目标完成：full reconcile 仍只清理 LanceDB stale rows，不删除 SQLite、Memory V3 或原始 journal 数据。
 
 更新 2026-06-09 08:45 +08:00：`recallPollutionGuard` 新增 `reasoning_trace_leak`，覆盖普通快速回复泄漏的自然语言思维链片段（`Maybe / What if / Wait`）和 `Addressing the ...:` 草稿标记。群感知 recent window 读写边界同步复用用户可见输出守卫，旧 unsafe 机器人回复不会继续进入被动群感知上下文。
 
@@ -64,6 +66,7 @@
 - `utils/profileJournalDb/` 提供独立 SQLite 治理库：`profile_facts` 保存结构化画像事实，`journal_entries` 保存原始日记轮次，`journal_rollups` 保存 segment/daily/4day/monthly 摘要，`memory_cleanups` 保存 TTL、冲突、纠错和 unsafe 清洗审计。
 - profile 写入仍先走 Memory V3 / `memoryWritePipeline` 质量门禁，`memory_confirmed`、`memory_candidate_extracted`、`memory_archived`、`migration_bootstrap` 会同步写入 SQLite；daily journal 在写文件成功后同步写 `journal_entries`，daily / 4day / monthly rollup 生成和维护时同步写 `journal_rollups`，unsafe/skipped 条目保留审计但不会进入召回。
 - `memoryProfileSurface.buildStableProfileText` 默认主读 SQLite active facts；`dailyJournal.getDailyJournalRetrievalBundle` 默认主读 SQLite active entries/rollups，数据库不可用或空结果时才回退旧 projection / markdown / jsonl。
+- `utils/memoryStorageOverlap.js` 对齐 SQLite、Memory V3 embedding cache 和 LanceDB table ids/metadata。SQLite 是结构化主读和治理库，Memory V3 是事件/节点源，LanceDB 只允许保存 active/relevant Memory V3 节点、journal segment/day rollup、worldbook semantic docs 的向量索引副本；raw `journal_entries` 只作为精确日期 fallback，不参与向量召回。
 - `mem profile list --user <id> --status active|candidate|stale|superseded`、`mem profile clean --user <id> --apply`、`mem journal list --user <id> --day YYYY-MM-DD` 和 `mem journal clean --user <id> --apply` 返回结构化命中、status 和清洗状态。
 - `scripts/migrate-profile-journal-db.js --apply` 从 Memory V3 memory nodes、profile projection、episode projection 和 daily journal 文件构建 SQLite；默认不带 `--apply` 为 dry-run。
 - 管理端 Memory V3 面板展示 Profile Journal DB diagnostics / clean 结果，第一版只做诊断和自动清洗，不做复杂人工编辑。
@@ -94,10 +97,11 @@
 5. 首次启用结构化 Profile Journal DB 时先 dry-run：`node scripts/migrate-profile-journal-db.js`；确认 counters 后运行 `node scripts/migrate-profile-journal-db.js --apply`。
 6. 结构化库巡检：`npm run diag:memory -- profile-journal-db`，观察 `profileStatus.active/stale/superseded`、`quality.lowQualityActive/placeholderActive/expiredActive/unsafeJournalRecallable`、`recallSpeed`、`fallbackCount` 和 `recentCleanups`。
 7. 长期记忆污染巡检先 dry-run：`node scripts/audit-memory-pollution.js --scrub --user <id>`；确认命中后再加 `--apply`，全局文件扫描可省略 `--user`。
-8. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。
-9. 修复后运行 `npm run diag:memory -- recall --limit 50 --auto-gold --gate`，观察 `recallAt8`、`mrrAt8`、`leakage`、`lifecycleLeakage`、`categoryMismatches`、`recentRecallMisses`、`emptyResultRate`。
-10. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10`。
-11. 人工审核新 changeset：`mem review list --status candidate` 查看候选，确认后 `mem review accept <changesetId>`；拒绝用 `mem review reject <changesetId> --reason "..."`，只追加归档/替代事件。
+8. 重复/漂移巡检：`npm run diag:memory -- storage-overlap --json`。若 `rawJournalRows > 0`，先调查 raw entry vector 来源；若只有 `vectorOnlyRows/missingVectorRows`，运行 full LanceDB reconcile，不改 SQLite/Memory V3 原始数据。
+9. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。
+10. 修复后运行 `npm run diag:memory -- recall --limit 50 --auto-gold --gate`，观察 `recallAt8`、`mrrAt8`、`leakage`、`lifecycleLeakage`、`categoryMismatches`、`recentRecallMisses`、`emptyResultRate`。
+11. 切换 LanceDB 主读前运行 `npm run diag:memory -- lancedb-gate --limit 50 --auto-gold --min-judged-cases 10`。
+12. 人工审核新 changeset：`mem review list --status candidate` 查看候选，确认后 `mem review accept <changesetId>`；拒绝用 `mem review reject <changesetId> --reason "..."`，只追加归档/替代事件。
 
 ## 清洗策略
 

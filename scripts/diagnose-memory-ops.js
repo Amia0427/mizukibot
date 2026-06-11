@@ -12,6 +12,7 @@ const { buildLanceDbReadMigrationGate } = require('../utils/memoryGovernance/lan
 const { diagnoseMemosPlannerRecall } = require('../utils/memosPlannerRecall');
 const { diagnoseOpenVikingMemory } = require('../utils/openVikingMemory/diagnostics');
 const { getDiagnostics: diagnoseProfileJournalDb } = require('../utils/profileJournalDb');
+const { buildStorageOverlapSummary } = require('../utils/memoryStorageOverlap');
 
 const SCHEMA_VERSION = 'memory_ops_diagnostic_v1';
 const CASES_FILE = path.join(__dirname, '..', 'artifacts', 'memory-recall-eval', 'cases.jsonl');
@@ -49,7 +50,10 @@ const MODE_ALIASES = {
   'openviking-diagnose': 'openviking',
   'profile-journal-db': 'profile-journal-db',
   profilejournaldb: 'profile-journal-db',
-  'structured-memory': 'profile-journal-db'
+  'structured-memory': 'profile-journal-db',
+  'storage-overlap': 'storage-overlap',
+  overlap: 'storage-overlap',
+  'memory-overlap': 'storage-overlap'
 };
 
 function normalizeText(value = '') {
@@ -193,7 +197,7 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
 
 function buildUsageSummary() {
   return {
-    usage: 'npm run diag:memory -- <diagnose|backfill|recall|lancedb-gate|audit|memos|openviking|profile-journal-db> [--limit N]',
+    usage: 'npm run diag:memory -- <diagnose|backfill|recall|lancedb-gate|audit|memos|openviking|profile-journal-db|storage-overlap> [--limit N]',
     modes: {
       diagnose: 'coverage and LanceDB fallback probe summary',
       backfill: 'dry-run embedding backfill plan',
@@ -202,7 +206,8 @@ function buildUsageSummary() {
       audit: 'sampled memory semantic quality audit plus hard metric warnings',
       memos: 'MemOS remote recall health, read-only tool discovery, cache, circuit and KB partition summary',
       openviking: 'OpenViking recall/ingest health, cache, circuit and prompt injection readiness',
-      'profile-journal-db': 'structured SQLite profile + daily journal health, cleanup counts and fallback summary'
+      'profile-journal-db': 'structured SQLite profile + daily journal health, cleanup counts and fallback summary',
+      'storage-overlap': 'read-only SQLite / Memory V3 / LanceDB overlap diagnostics without private full text'
     }
   };
 }
@@ -416,6 +421,18 @@ function summarizeProfileJournalDb(result = {}, args = {}) {
   };
 }
 
+function summarizeStorageOverlap(result = {}) {
+  return {
+    expectedIndexCopies: result.expectedIndexCopies || {},
+    unexpectedVectorRows: result.unexpectedVectorRows || {},
+    missingVectorRows: result.missingVectorRows || {},
+    sqliteOnlyRows: result.sqliteOnlyRows || {},
+    vectorOnlyRows: result.vectorOnlyRows || {},
+    alignment: result.alignment || {},
+    recommendedAction: result.recommendedAction || 'none'
+  };
+}
+
 function summarizeLanceDbGate(result = {}, args = {}) {
   const gate = result.gate || {};
   return {
@@ -468,7 +485,8 @@ function getDefaultRunners() {
     runMemoryQualityAudit,
     diagnoseMemosPlannerRecall,
     diagnoseOpenVikingMemory,
-    diagnoseProfileJournalDb
+    diagnoseProfileJournalDb,
+    buildStorageOverlapSummary
   };
 }
 
@@ -595,7 +613,7 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
     });
   }
 
-  if (!['diagnose', 'backfill', 'recall', 'lancedb-gate', 'audit', 'memos', 'openviking', 'profile-journal-db'].includes(args.mode)) {
+  if (!['diagnose', 'backfill', 'recall', 'lancedb-gate', 'audit', 'memos', 'openviking', 'profile-journal-db', 'storage-overlap'].includes(args.mode)) {
     return createEnvelope({
       mode: args.mode,
       ok: false,
@@ -709,6 +727,19 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
         ok: result.ok !== false,
         exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
         summary: summarizeProfileJournalDb(result, { ...args, limit }),
+        details: result,
+        startedAt
+      });
+    }
+
+    if (args.mode === 'storage-overlap') {
+      const limit = args.limit ?? 10;
+      const result = await runners.buildStorageOverlapSummary({ limit });
+      return createEnvelope({
+        mode: 'storage-overlap',
+        ok: result.ok !== false,
+        exitCode: result.ok === false ? EXIT_CODES.failed : EXIT_CODES.ok,
+        summary: summarizeStorageOverlap(result, { ...args, limit }),
         details: result,
         startedAt
       });
@@ -836,6 +867,7 @@ module.exports = {
   summarizeMemos,
   summarizeOpenViking,
   summarizeProfileJournalDb,
+  summarizeStorageOverlap,
   summarizeRecall,
   summarizeAudit,
   buildLanceDbReadMigrationGate,
