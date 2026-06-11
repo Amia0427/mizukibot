@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-11 08:44 +08:00
+更新时间：2026-06-11 16:54 +08:00
+
+更新 2026-06-11 16:54 +08:00：历史 LanceDB 热索引副本已按当前治理边界重构。执行 full sync + compact 后，Memory V3 热索引副本为 `3368` 条、worldbook semantic docs 为 `48` 条；`storage-overlap` 复查 `rawJournalRows=0`、`unexpectedVectorRows=0`、`missingVectorRows=0`、`vectorOnlyRows=0`，推荐动作 `none`。小目标完成：本次只覆盖/压实 LanceDB 索引副本，没有删除 SQLite、Memory V3 或原始 journal 数据。
 
 更新 2026-06-11 08:44 +08:00：SQL/向量记忆重复治理完成。正常重复定义为 SQLite/Memory V3 源数据加 LanceDB 热索引副本；异常重复定义为 raw journal turn 被向量化、stale/superseded/orphan LanceDB row、同一 `canonicalKey/textHash` 下多条 active vector row。新增只读诊断 `npm run diag:memory -- storage-overlap --json`，输出 `expectedIndexCopies`、`unexpectedVectorRows`、`missingVectorRows`、`sqliteOnlyRows`、`vectorOnlyRows`，只含 id/hash/短 metadata，不输出完整隐私文本。小目标完成：full reconcile 仍只清理 LanceDB stale rows，不删除 SQLite、Memory V3 或原始 journal 数据。
 
@@ -123,6 +125,7 @@
 
 ## 运维记录
 
+- 2026-06-11 16:54 +08:00：执行 `node scripts/sync-lancedb-memory-index.js --full --compact` 重建历史 LanceDB 热索引副本；复查 `npm run diag:memory -- storage-overlap --json` 返回 `expected=3368`、`raw=0`、`unexpected=0`、`missing=0`、`vectorOnly=0`，`node scripts/sync-lancedb-memory-index.js --dry-run --full` 推荐动作 `none`。
 - 2026-05-19 22:24 +08:00：执行 `repair-memory-vector-index --apply --compact`、强制 materialize、`backfill-memory-v3-embeddings --source memory --sync-after`，最终 `pendingRows=0`、`readyButNotSynced=0`、`staleTableRows=0`，`diag:memory audit --limit 5` 硬指标通过。
 - 2026-05-20 00:42 +08:00：post-reply worker 接入自动向量 watchdog，默认 30 分钟巡检一次；健康时跳过，发现 projection stale / LanceDB drift / pending embedding 时自动小批量维护。
 - 2026-05-21 21:30 +08:00：发现旧维护入口会重复导入 legacy migration events，已将默认命令收敛为只物化；重导旧数据必须显式加 `--import-legacy`。

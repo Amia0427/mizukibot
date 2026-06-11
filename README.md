@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-11 16:54 +08:00**：按当前 SQL/向量重复治理原则重构历史 LanceDB 热索引副本。执行 `node scripts/sync-lancedb-memory-index.js --full --compact`，memory bucket 覆盖写入 `3368` 条、worldbook 覆盖写入 `48` 条；复查 `storage-overlap` 为 `rawJournalRows=0`、`unexpectedVectorRows=0`、`missingVectorRows=0`、`vectorOnlyRows=0`。SQLite、Memory V3 和原始 journal 数据未删除，仍只作为源库/治理库保留。
+
 **2026-06-11 13:52 +08:00**：管理员私聊首字硬兜底默认改为 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=150000`。保留只作用于 `userRole=admin + chatType=private`、超时 abort 上游、跳过 admin shared fallback 和非流式二次请求的行为；只是把等待窗口从 45s 调到 150s。
 
 **2026-06-11 13:35 +08:00**：修复 Windows daemon 锁接管误判。`data/bot-daemon.log` 中 2026-06-11 11:14:50-11:14:52 的失败并非新 bot 崩溃，而是 `run-bot-daemon.ps1` 只等 2 秒检查 `.mizukibot.lock`；新进程 pid=8872 后续已接管锁。守护脚本改为轮询等待锁归属，默认 `BOT_DAEMON_LOCK_WAIT_MS=30000`、`BOT_DAEMON_LOCK_POLL_MS=500`，并记录接管耗时。小目标完成：守护进程锁接管窗口过短问题已修复。
