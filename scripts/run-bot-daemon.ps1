@@ -394,6 +394,70 @@ function Get-LockProcessDiagnostics {
   }
 }
 
+function Wait-MainBotLockOwnership {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$LockPath,
+
+    [Parameter(Mandatory = $true)]
+    [System.Diagnostics.Process]$StartedProcess
+  )
+
+  $timeoutMs = Get-PositiveInt64Env -Name 'BOT_DAEMON_LOCK_WAIT_MS' -DefaultValue ([Int64]30000)
+  $pollMs = Get-PositiveInt64Env -Name 'BOT_DAEMON_LOCK_POLL_MS' -DefaultValue ([Int64]500)
+  if ($pollMs -lt 100) {
+    $pollMs = 100
+  }
+  if ($pollMs -gt 2000) {
+    $pollMs = 2000
+  }
+
+  $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+  while ($true) {
+    if (Test-LockOwnedByRunningNode -LockPath $LockPath) {
+      return [pscustomobject]@{
+        Acquired = $true
+        Reason = 'acquired'
+        ElapsedMs = [Int64]$stopwatch.ElapsedMilliseconds
+        TimeoutMs = [Int64]$timeoutMs
+        ProcessExited = $false
+        ExitCode = $null
+      }
+    }
+
+    try {
+      $StartedProcess.Refresh()
+      if ($StartedProcess.HasExited) {
+        return [pscustomobject]@{
+          Acquired = $false
+          Reason = 'process_exited_before_lock'
+          ElapsedMs = [Int64]$stopwatch.ElapsedMilliseconds
+          TimeoutMs = [Int64]$timeoutMs
+          ProcessExited = $true
+          ExitCode = $StartedProcess.ExitCode
+        }
+      }
+    } catch {
+      # If process inspection fails, keep polling the lock until the deadline.
+    }
+
+    if ($stopwatch.ElapsedMilliseconds -ge $timeoutMs) {
+      return [pscustomobject]@{
+        Acquired = $false
+        Reason = 'timeout'
+        ElapsedMs = [Int64]$stopwatch.ElapsedMilliseconds
+        TimeoutMs = [Int64]$timeoutMs
+        ProcessExited = $false
+        ExitCode = $null
+      }
+    }
+
+    $remainingMs = [Int64]($timeoutMs - $stopwatch.ElapsedMilliseconds)
+    $sleepMs = [int][Math]::Max(50, [Math]::Min($pollMs, $remainingMs))
+    Start-Sleep -Milliseconds $sleepMs
+  }
+}
+
 function Test-WorkerOwnedByRunningNode {
   param(
     [Parameter(Mandatory = $true)]
@@ -652,11 +716,13 @@ try {
     }
     $mainProc = Start-NodeDaemonProcess -NodeExe $nodeExe -ArgumentList @('index.js') -StdoutLog $mainStdoutLogFile -StderrLog $mainStderrLogFile
     Write-DaemonLog -Message "started main bot pid=$($mainProc.Id), stdout=$mainStdoutLogFile, stderr=$mainStderrLogFile"
-    Start-Sleep -Seconds 2
-    if (-not (Test-LockOwnedByRunningNode -LockPath $lockFile)) {
+    $lockWait = Wait-MainBotLockOwnership -LockPath $lockFile -StartedProcess $mainProc
+    if (-not $lockWait.Acquired) {
       $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
-      throw "main bot did not acquire lock after daemon start ($lockDiag)"
+      throw "main bot did not acquire lock after daemon start (reason=$($lockWait.Reason), elapsed_ms=$($lockWait.ElapsedMs), timeout_ms=$($lockWait.TimeoutMs), exit_code=$($lockWait.ExitCode), $lockDiag)"
     }
+    $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
+    Write-DaemonLog -Message "main bot lock acquired after daemon start. started_pid=$($mainProc.Id), elapsed_ms=$($lockWait.ElapsedMs), $lockDiag"
   }
 
   $workerState = Get-WorkerRuntimeState

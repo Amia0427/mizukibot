@@ -1,5 +1,7 @@
 # Windows 重启脚本诊断
 
+更新 2026-06-11 13:35 +08:00：`data/bot-daemon.log` 在 2026-06-11 11:14:50-11:14:52 报 `main bot did not acquire lock after daemon start (lock pid=38436 not running)`。直接原因是 daemon 启动 pid=8872 后固定 `Start-Sleep -Seconds 2` 就检查 `.mizukibot.lock`，而 `index.js` 先加载配置和模块再写锁，2 秒窗口不足；11:49:40 后续日志确认 pid=8872 已成为 `node index.js` 并持有锁。修复：`scripts/run-bot-daemon.ps1` 改为 `Wait-MainBotLockOwnership` 轮询等待锁归属，默认 `BOT_DAEMON_LOCK_WAIT_MS=30000`、`BOT_DAEMON_LOCK_POLL_MS=500`，进程提前退出则立即失败并写明原因。验证：`node scripts/run-tests.js windowsDaemonScript.test.js`。
+
 更新 2026-06-10 23:51 +08:00：`scripts/install-periodic-restart.ps1` 改为默认注册每天 04:00 的 `CalendarTrigger`，不再使用每 6 小时 `TimeTrigger/Repetition`。目的：降低固定 23:38 等高活跃时段强制重启打断管理员主模型流式回复的概率。验证：`node scripts/run-tests.js periodicRestartScript.test.js`。
 
 更新 2026-06-08 13:36 +08:00：`data/bot-restart.log` 在 2026-06-08 05:38、11:38 的 `%1 不是有效的 Win32 应用程序` 来自 `scripts/restart-bot-periodic.ps1` 直接 `Start-Process -FilePath "npm"`。Windows 计划任务环境会把 `npm` 解析到非 exe shim，现改为解析真实 `node.exe` 并直接启动 `index.js`，启动后校验 `.mizukibot.lock` 归属，避免定时重启后 bot 离线。验证：`powershell -ExecutionPolicy Bypass -File scripts/restart-bot-periodic.ps1 -ValidateOnly`、`node scripts/run-tests.js periodicRestartScript.test.js`。

@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-11 13:35 +08:00**：修复 Windows daemon 锁接管误判。`data/bot-daemon.log` 中 2026-06-11 11:14:50-11:14:52 的失败并非新 bot 崩溃，而是 `run-bot-daemon.ps1` 只等 2 秒检查 `.mizukibot.lock`；新进程 pid=8872 后续已接管锁。守护脚本改为轮询等待锁归属，默认 `BOT_DAEMON_LOCK_WAIT_MS=30000`、`BOT_DAEMON_LOCK_POLL_MS=500`，并记录接管耗时。小目标完成：守护进程锁接管窗口过短问题已修复。
+
 **2026-06-11 10:51 +08:00**：普通快速回复的模型格式异常不再直接发给群。主模型 HTTP 200 但 `extractMessageContent` 抽不到正文时，`model-calls.ndjson` 会追加同 `model_call_*` id 的 `status=parse_failed` 诊断行，记录非敏感响应结构摘要；`normal_fast_reply` 识别“模型返回格式不稳定/没拿到可用正文”后抛错回退正式回复链路。小目标完成：10:38:59 群聊兜底发送原因已定位并加观测。
 
 **2026-06-11 15:45 +08:00**：新增 HTTP 反向连接模式。`NAPCAT_HTTP_REVERSE_ENABLED=true` 启用后 Bot 监听 `NAPCAT_HTTP_REVERSE_PORT=3002`，NapCat 通过 HTTP POST 推送消息（不需要公网 IP，全程 localhost）。HTTP 模式比 WebSocket 更稳定，无需重连机制，适合 NapCat 频繁断线场景。配置示例见 `.env.example`。
@@ -256,6 +258,8 @@ npm run linux:start
 npm run linux:status
 npm run linux:logs
 ```
+
+Windows daemon 启动主 bot 后会等待 `.mizukibot.lock` 被新进程接管，避免启动阶段加载配置较慢时误报失败。可用 `BOT_DAEMON_LOCK_WAIT_MS` 调整最长等待时间，默认 `30000`；`BOT_DAEMON_LOCK_POLL_MS` 调整轮询间隔，默认 `500`。
 
 ## 关键配置
 
