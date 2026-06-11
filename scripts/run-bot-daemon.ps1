@@ -41,6 +41,31 @@ function Get-PositiveInt64Env {
   return $DefaultValue
 }
 
+function Get-BoolEnv {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name,
+
+    [Parameter(Mandatory = $true)]
+    [bool]$DefaultValue
+  )
+
+  $raw = [Environment]::GetEnvironmentVariable($Name, 'Process')
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    return $DefaultValue
+  }
+
+  switch ($raw.Trim().ToLowerInvariant()) {
+    { $_ -in @('1', 'true', 'yes', 'y', 'on') } { return $true }
+    { $_ -in @('0', 'false', 'no', 'n', 'off') } { return $false }
+    default { return $DefaultValue }
+  }
+}
+
+function Test-ExternalPostReplyWorkerEnabled {
+  return ((Get-BoolEnv -Name 'POST_REPLY_WORKER_ENABLED' -DefaultValue $false) -and (-not (Get-BoolEnv -Name 'POST_REPLY_WORKER_INLINE' -DefaultValue $false)))
+}
+
 function Rotate-DaemonLogIfNeeded {
   param(
     [Parameter(Mandatory = $true)]
@@ -706,6 +731,7 @@ try {
   }
 
   Write-DaemonLog -Message "using node: $nodeExe"
+  $mainBotStartedByDaemon = $false
   if (Test-LockOwnedByRunningNode -LockPath $lockFile) {
     $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
     Write-DaemonLog -Message "bot already running, skip duplicate start. $lockDiag"
@@ -723,6 +749,7 @@ try {
     }
     $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
     Write-DaemonLog -Message "main bot lock acquired after daemon start. started_pid=$($mainProc.Id), elapsed_ms=$($lockWait.ElapsedMs), $lockDiag"
+    $mainBotStartedByDaemon = $true
   }
 
   $workerState = Get-WorkerRuntimeState
@@ -731,6 +758,9 @@ try {
     Write-DaemonLog -Message "post-reply worker already running, skip duplicate start. pid=$($workerState.Pid) source=$($workerState.Source)$detail"
   } else {
     $workerStartReason = Get-PostReplyQueueStartReason
+    if ([string]::IsNullOrWhiteSpace($workerStartReason) -and $mainBotStartedByDaemon -and (Test-ExternalPostReplyWorkerEnabled)) {
+      $workerStartReason = 'main bot started by daemon; ensure external worker'
+    }
     if ([string]::IsNullOrWhiteSpace($workerStartReason)) {
       Write-DaemonLog -Message 'post-reply worker not running, queue idle; skip idle restart.'
     } else {
