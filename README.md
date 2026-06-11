@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-11 08:13 +08:00**：QQ 聊天长期检索粒度收敛为约 10 轮对话生成一个 journal segment 摘要后再向量化；身份、偏好、承诺、纠错等事实型 Memory V3 节点仍即时抽取。LanceDB 继续使用 `IVF_PQ numBits=8` 索引副本量化，原始 Float32 向量列保留。
+
 **2026-06-11 00:15 +08:00**：拆分 SYSTEM.txt 角色扮演规则到 persona_modules。原 197 行通用角色扮演规则（情感识别、动态转变、表达手法、自检清单）增加 ~3k tokens，直接拖高所有主回复基线；现拆分为 4 个按需注入模块：`roleplay_emotion_recognition.txt`（420 tokens）、`roleplay_dynamic_shift.txt`（480 tokens）、`roleplay_expression_craft.txt`（520 tokens）、`roleplay_self_check.txt`（280 tokens），priority 605-620，conflict_tags `persona_roleplay_core`，balanced 模式下最多注入 2 个。SYSTEM.txt 恢复到 20 行 baseline。
 
 **2026-06-10 23:51 +08:00**：Windows 定时重启改为每天凌晨 04:00 执行。`scripts/install-periodic-restart.ps1` 默认注册每日 CalendarTrigger，不再每 6 小时重复触发，减少主模型长回复被重启强杀的窗口。
