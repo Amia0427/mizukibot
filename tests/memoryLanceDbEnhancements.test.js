@@ -52,6 +52,39 @@ writeJsonLines(process.env.MEMORY_V3_NODES_FILE, [{
   importance: 0.8,
   evidenceTier: 'strict',
   updatedAt: Date.now()
+}, {
+  id: 'journal-entry:u_diag:2026-06-10:turn_1',
+  userId: 'u_diag',
+  scopeType: 'personal',
+  source: 'journal',
+  sourceKind: 'journal_entry',
+  status: 'active',
+  type: 'journal_entry',
+  memoryKind: 'journal_entry',
+  semanticSlot: 'journal_entry',
+  canonicalKey: 'raw journal turn',
+  text: 'raw journal turn should stay out of LanceDB hot rows',
+  confidence: 0.9,
+  importance: 0.8,
+  evidenceTier: 'strict',
+  updatedAt: Date.now()
+}, {
+  id: 'node_superseded',
+  userId: 'u_diag',
+  scopeType: 'personal',
+  source: 'explicit',
+  sourceKind: 'explicit',
+  status: 'active',
+  lifecycleStatus: 'superseded',
+  type: 'fact',
+  memoryKind: 'fact',
+  semanticSlot: 'fact',
+  canonicalKey: 'old green cable',
+  text: 'old green cable location should not be hot recallable',
+  confidence: 0.9,
+  importance: 0.8,
+  evidenceTier: 'strict',
+  updatedAt: Date.now()
 }]);
 
 const {
@@ -186,6 +219,28 @@ writeJsonLines(process.env.MEMORY_V3_EMBEDDING_CACHE_FILE, [{
   updatedAt: Date.now(),
   lastEmbeddedAt: Date.now(),
   status: 'ready'
+}, {
+  version: 1,
+  key: 'raw-key',
+  nodeId: 'journal-entry:u_diag:2026-06-10:turn_1',
+  canonicalKey: 'raw journal turn',
+  model: 'test-embedding-model',
+  textHash: 'raw-hash',
+  embedding: [1, 0, 0],
+  updatedAt: Date.now(),
+  lastEmbeddedAt: Date.now(),
+  status: 'ready'
+}, {
+  version: 1,
+  key: 'superseded-key',
+  nodeId: 'node_superseded',
+  canonicalKey: 'old green cable',
+  model: 'test-embedding-model',
+  textHash: 'superseded-hash',
+  embedding: [1, 0, 0],
+  updatedAt: Date.now(),
+  lastEmbeddedAt: Date.now(),
+  status: 'ready'
 }]);
 
 module.exports = buildSyncSummary({
@@ -198,8 +253,10 @@ module.exports = buildSyncSummary({
 }).then((lightBucketSummary) => {
   assert.strictEqual(lightBucketSummary.partitionMode, 'user_bucket');
   assert.strictEqual(lightBucketSummary.bucketCount, 8);
-  assert.strictEqual(lightBucketSummary.memory.ready, 1);
+  assert.strictEqual(lightBucketSummary.memory.ready, 3);
   assert.strictEqual(lightBucketSummary.repairPlan.memory.syncRows, 1);
+  assert.strictEqual(lightBucketSummary.repairPlan.memory.expectedIndexCopies, 1);
+  assert.strictEqual(lightBucketSummary.storageOverlap.expectedIndexCopies.count, 1);
   assert.ok(!Object.prototype.hasOwnProperty.call(lightBucketSummary, '_rows'), 'includeRows=false should not retain vector row arrays');
   return buildSyncSummary({
     dryRun: true,
@@ -212,6 +269,8 @@ module.exports = buildSyncSummary({
   assert.strictEqual(bucketSummary.partitionMode, 'user_bucket');
   assert.strictEqual(bucketSummary.bucketCount, 8);
   assert.strictEqual(bucketSummary.coverage.memory.tableRows, 0);
+  assert.strictEqual(bucketSummary._rows.memory.length, 1);
+  assert.strictEqual(bucketSummary._rows.memory[0].id, 'memory:node_diag');
   assert.ok(bucketSummary._rows.memory.every((row) => Array.isArray(row.vector)), 'default summary keeps vector rows for dry-run compatibility');
   assert.ok(bucketSummary.lancedbDir.endsWith('lancedb_bucket_shadow'));
   return runDiagnostics({

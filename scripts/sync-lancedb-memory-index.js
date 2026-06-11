@@ -25,7 +25,10 @@ const { collectEmbeddingBackfillNodes } = require('../utils/memory-v3/embeddingI
 const { buildWorldbookDocuments, loadWorldbookEmbeddingIndex } = require('../utils/personaWorldbookSearch');
 const { loadPersonaModuleCatalog } = require('../utils/personaModules');
 const { normalizeText } = require('../utils/memory-v3/helpers');
-const { buildStorageOverlapSummary } = require('../utils/memoryStorageOverlap');
+const {
+  buildStorageOverlapSummary,
+  isRawJournalVectorLike
+} = require('../utils/memoryStorageOverlap');
 const {
   buildMemoryIndexHealthGate,
   buildRecommendedActions
@@ -241,6 +244,7 @@ async function syncWorldbookRowsLowMemory(args = {}) {
 function isHotRecallableMemoryNode(node = {}) {
   const status = normalizeText(node.status || 'active').toLowerCase();
   if (status === 'archived') return false;
+  if (isRawJournalVectorLike(node)) return false;
   if (isMemoryNotRecallable(node)) return false;
   const lifecycleStatus = lifecycleStatusOf(node);
   return !['stale', 'suspect', 'superseded'].includes(lifecycleStatus);
@@ -362,7 +366,7 @@ async function buildSyncSummary(args = {}) {
   const memoryTable = normalizeText(config.MEMORY_LANCEDB_MEMORY_TABLE || 'memory_v3_vectors');
   const worldbookTable = normalizeText(config.MEMORY_LANCEDB_WORLDBOOK_TABLE || 'persona_worldbook_vectors');
   const [memoryTableStats, worldbookTableStats] = await Promise.all([
-    listTableIds(memoryTable, lanceDbOptions),
+    listTableIds(memoryTable, { ...lanceDbOptions, includeRows: true }),
     listTableIds(worldbookTable, lanceDbOptions)
   ]);
   const memoryCoverage = buildCoverage(memory, memoryTableStats);

@@ -1,10 +1,10 @@
 const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
 
 const config = require('../config');
 const {
   canonicalizeText,
-  clampText,
   normalizeText
 } = require('./memory-v3/helpers');
 const { isMemoryNotRecallable, lifecycleStatusOf } = require('./memory-v3/recallFilter');
@@ -112,7 +112,7 @@ function isExpectedHotNode(node = {}) {
 
 function normalizeVectorRows(input = {}) {
   if (Array.isArray(input)) return input;
-  if (Array.isArray(input.vectorRows)) return input.vectorRows;
+  if (Array.isArray(input.vectorRows) && input.vectorRows.length > 0) return input.vectorRows;
   if (Array.isArray(input.rows)) return input.rows;
   if (Array.isArray(input.ids)) return input.ids.map((id) => ({ id }));
   return [];
@@ -126,14 +126,14 @@ function buildExpectedIndexCopies({ embeddingRows = [], embeddingNodes = [] } = 
     hotNodesById.set(nodeId, node);
   }
 
-  const expected = [];
+  const expectedById = new Map();
   for (const embeddingRow of Array.isArray(embeddingRows) ? embeddingRows : []) {
     const nodeId = normalizeId(embeddingRow.nodeId || embeddingRow.id);
     const node = hotNodesById.get(nodeId);
     if (!node) continue;
     const rowId = buildMemoryRowId(nodeId);
     if (!rowId) continue;
-    expected.push({
+    const expected = {
       id: rowId,
       nodeId,
       source: normalizeText(node.source).toLowerCase(),
@@ -147,9 +147,13 @@ function buildExpectedIndexCopies({ embeddingRows = [], embeddingNodes = [] } = 
       canonicalKey: normalizeCanonicalKey(embeddingRow.canonicalKey || node.canonicalKey || canonicalizeText(node.text)),
       textHash: normalizeText(embeddingRow.textHash),
       updatedAt: Number(node.updatedAt || node.createdAt || embeddingRow.updatedAt || 0) || 0
-    });
+    };
+    const existing = expectedById.get(rowId);
+    if (!existing || Number(expected.updatedAt || 0) >= Number(existing.updatedAt || 0)) {
+      expectedById.set(rowId, expected);
+    }
   }
-  return expected;
+  return Array.from(expectedById.values());
 }
 
 function vectorDuplicateSlot(row = {}) {
@@ -216,13 +220,23 @@ function normalizeSqliteSnapshot(snapshot = {}) {
 function loadSqliteSnapshot(options = {}, deps = {}) {
   if (deps.sqliteSnapshot) return normalizeSqliteSnapshot(deps.sqliteSnapshot);
   const profileJournalDb = deps.profileJournalDb || require('./profileJournalDb');
-  const getDb = deps.getDb || profileJournalDb.getDb;
   const getDbFile = deps.getDbFile || profileJournalDb.getDbFile;
+  const getDb = deps.getDb;
   const maxRows = Math.max(1, Math.min(100000, Number(options.maxSqliteRows || 100000) || 100000));
   const dbFile = typeof getDbFile === 'function' ? getDbFile() : '';
   let db;
+  let shouldClose = false;
   try {
-    db = typeof getDb === 'function' ? getDb() : null;
+    if (typeof getDb === 'function') {
+      db = getDb();
+    } else {
+      if (!dbFile || !fs.existsSync(dbFile)) {
+        return normalizeSqliteSnapshot({ ok: false, dbFile, reason: 'sqlite_file_missing' });
+      }
+      const Database = require('better-sqlite3');
+      db = new Database(dbFile, { readonly: true, fileMustExist: true });
+      shouldClose = true;
+    }
   } catch (error) {
     return normalizeSqliteSnapshot({ ok: false, dbFile, reason: `sqlite_open_failed:${error.message}` });
   }
@@ -296,7 +310,7 @@ function loadSqliteSnapshot(options = {}, deps = {}) {
     journalEntries: scalar("SELECT COUNT(*) AS c FROM journal_entries WHERE status = 'active'")
   };
 
-  return normalizeSqliteSnapshot({
+  const snapshot = normalizeSqliteSnapshot({
     ok: true,
     dbFile,
     counts,
@@ -307,6 +321,12 @@ function loadSqliteSnapshot(options = {}, deps = {}) {
       || journalRollups.length < counts.journalRollups
       || journalEntries.length < counts.journalEntries
   });
+  if (shouldClose && db && typeof db.close === 'function') {
+    try {
+      db.close();
+    } catch (_) {}
+  }
+  return snapshot;
 }
 
 function rollupHasVectorCopy(rollup = {}, vectorIds = new Set(), expectedIds = new Set()) {

@@ -128,6 +128,19 @@ const runners = {
         circuit: { open: false, failures: 0, shortCircuits: 0 }
       }
     };
+  },
+  buildStorageOverlapSummary: async (args) => {
+    calls.push(['storage-overlap', args]);
+    return {
+      ok: true,
+      expectedIndexCopies: { count: 2, samples: [] },
+      unexpectedVectorRows: { count: 1, rawJournalRows: 0, samples: [] },
+      missingVectorRows: { count: 0, samples: [] },
+      sqliteOnlyRows: { count: 3, expectedSourceOnlyJournalEntries: 1, samples: [] },
+      vectorOnlyRows: { count: 1, samples: [] },
+      alignment: { keys: ['nodeId', 'canonicalKeyHash', 'textHash', 'rollupId'] },
+      recommendedAction: 'run_full_lancedb_reconcile'
+    };
   }
 };
 
@@ -150,6 +163,8 @@ module.exports = (async () => {
   const parsedMemos = parseMemoryOpsArgs(['memos', '--query', '世界观规则']);
   assert.strictEqual(parsedMemos.mode, 'memos');
   assert.strictEqual(parsedMemos.query, '世界观规则');
+  assert.strictEqual(parseMemoryOpsArgs(['storage-overlap', '--limit', '3']).mode, 'storage-overlap');
+  assert.strictEqual(parseMemoryOpsArgs(['overlap']).mode, 'storage-overlap');
 
   const diagnose = await runMemoryOps(parseMemoryOpsArgs(['diagnose', '--limit', '2']), { runners });
   assert.strictEqual(diagnose.schemaVersion, SCHEMA_VERSION);
@@ -177,6 +192,14 @@ module.exports = (async () => {
   assert.strictEqual(memosHealth.summary.discovery.searchToolName, 'search_memory');
   assert.strictEqual(memosHealth.summary.cache.hits, 2);
   assert.strictEqual(calls.find((entry) => entry[0] === 'memos')[1].query, '世界观规则');
+
+  const storageOverlap = await runMemoryOps(parseMemoryOpsArgs(['storage-overlap', '--limit', '3']), { runners });
+  assert.strictEqual(storageOverlap.mode, 'storage-overlap');
+  assert.strictEqual(storageOverlap.ok, true);
+  assert.strictEqual(storageOverlap.summary.expectedIndexCopies.count, 2);
+  assert.strictEqual(storageOverlap.summary.vectorOnlyRows.count, 1);
+  assert.strictEqual(storageOverlap.summary.recommendedAction, 'run_full_lancedb_reconcile');
+  assert.strictEqual(calls.find((entry) => entry[0] === 'storage-overlap')[1].limit, 3);
 
   const recall = await runMemoryOps(parseMemoryOpsArgs(['recall', '--candidate', 'shadow', '--limit', '1']), { runners });
   assert.strictEqual(recall.mode, 'recall');
