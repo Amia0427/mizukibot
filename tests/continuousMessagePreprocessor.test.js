@@ -11,7 +11,11 @@ process.env.IMAGE_MEMORY_VISUAL_SUMMARY_ENABLED = 'false';
 process.env.MEMORY_SCOPE_INDEX_FILE = path.join(tempRoot, 'memory_scope_index.json');
 fs.writeFileSync(process.env.MEMORY_SCOPE_INDEX_FILE, JSON.stringify({ version: 1, users: {} }, null, 2));
 
-const { createContinuousMessagePreprocessor } = require('../core/continuousMessagePreprocessor');
+const {
+  cheapParseMessageEntry,
+  createContinuousMessagePreprocessor,
+  resolveContinuousEntryDetails
+} = require('../core/continuousMessagePreprocessor');
 
 function isProjectModuleLoaded(relPath) {
   const abs = path.resolve(__dirname, '..', relPath);
@@ -252,6 +256,71 @@ async function testSentenceStableTailFlushesWithoutExtraWait() {
   assert.strictEqual(result.meta.semanticScore, null);
 }
 
+async function testReplyExpansionSkipsOfflineAndRecovers() {
+  const calls = [];
+  const actionClient = {
+    online: false,
+    isConnected() {
+      return this.online;
+    },
+    getConnectionState() {
+      return {
+        connected: this.online,
+        readyStateName: this.online ? 'open' : 'closed'
+      };
+    },
+    async callAction(action, params) {
+      calls.push({ action, params });
+      if (!this.online) throw new Error('should not call NapCat while offline');
+      return {
+        message_id: String(params.message_id),
+        sender: {
+          user_id: 'quoted-user',
+          nickname: 'Quoted'
+        },
+        message: [
+          { type: 'text', data: { text: '被引用的内容' } }
+        ],
+        raw_message: '被引用的内容'
+      };
+    }
+  };
+  const ensureCachedImageRef = async () => ({ ok: false });
+  const msg = makeMessage({
+    messageId: 'reply-current',
+    rawMessage: '[CQ:reply,id=42]现在这句',
+    message: [
+      { type: 'reply', data: { id: '42' } },
+      { type: 'text', data: { text: '现在这句' } }
+    ]
+  });
+
+  const offlineEntry = cheapParseMessageEntry(msg);
+  await resolveContinuousEntryDetails(offlineEntry, {
+    actionClient,
+    ensureCachedImageRef,
+    resolveReply: true,
+    resolveForward: false,
+    resolveCards: false
+  });
+  assert.strictEqual(calls.length, 0, 'offline reply expansion should skip NapCat action');
+  assert.strictEqual(offlineEntry.expansionState.reply, 'degraded');
+  assert.strictEqual(offlineEntry.replyContext, null);
+
+  actionClient.online = true;
+  const recoveredEntry = cheapParseMessageEntry(msg);
+  await resolveContinuousEntryDetails(recoveredEntry, {
+    actionClient,
+    ensureCachedImageRef,
+    resolveReply: true,
+    resolveForward: false,
+    resolveCards: false
+  });
+  assert.strictEqual(calls.length, 1, 'recovered reply expansion should call NapCat once');
+  assert.strictEqual(recoveredEntry.expansionState.reply, 'resolved');
+  assert.ok(String(recoveredEntry.replyContext?.text || '').includes('被引用的内容'));
+}
+
 (async () => {
   await testImageThenTextMergesIntoOneTurn();
   await testPlainTextStillFlushesOnBaseDebounce();
@@ -259,6 +328,7 @@ async function testSentenceStableTailFlushesWithoutExtraWait() {
   await testMergedFlushKeepsLatestFreshnessToken();
   await testSentenceWindowWaitsForContinuation();
   await testSentenceStableTailFlushesWithoutExtraWait();
+  await testReplyExpansionSkipsOfflineAndRecovers();
   console.log('continuousMessagePreprocessor.test.js passed');
 })().catch((error) => {
   console.error(error);

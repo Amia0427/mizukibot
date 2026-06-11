@@ -9,7 +9,12 @@ process.env.QZONE_GENERATION_HISTORY_FILE = path.join(tempRoot, 'qzone_generatio
 process.env.ADMIN_USER_IDS = 'u-admin';
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
-const { createScheduledCommand, publishQzoneForContext, sendGroupImageMessage } = require('../api/qqActionService');
+const {
+  createScheduledCommand,
+  publishQzoneForContext,
+  sendGroupImageMessage,
+  setMessageEmojiLike
+} = require('../api/qqActionService');
 const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
 
 (async () => {
@@ -90,6 +95,21 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
     }
   }), /QZone auto publish disabled/);
   assert.strictEqual(createdTasks.length, 0);
+
+  const emojiCalls = [];
+  const emojiResult = await setMessageEmojiLike('m1', [14], {
+    actionClient: {
+      isConnected: () => false,
+      getConnectionState: () => ({ connected: false, readyStateName: 'closed' }),
+      async callAction(action, params) {
+        emojiCalls.push({ action, params });
+      }
+    }
+  });
+  assert.strictEqual(emojiResult.success, false);
+  assert.strictEqual(emojiResult.reason, 'napcat_offline');
+  assert.strictEqual(emojiResult.skipped, true);
+  assert.strictEqual(emojiCalls.length, 0, 'offline thinking emoji should not call NapCat');
 
   console.log('qqActionService.test.js passed');
 })().catch((error) => {

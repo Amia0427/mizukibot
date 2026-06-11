@@ -56,11 +56,21 @@
     }));
 
     if (!result?.success) {
+      const reason = result?.reason || 'unknown error';
+      if (result?.skipped && reason === 'napcat_offline') {
+        console.warn('[thinking-emoji] skipped', {
+          messageId: normalizedMessageId,
+          routePolicyKey: String(routePolicyKey || '').trim(),
+          groupId: String(routeMeta?.groupId || routeMeta?.group_id || '').trim(),
+          reason
+        });
+        return false;
+      }
       console.warn('[thinking-emoji] failed', {
         messageId: normalizedMessageId,
         routePolicyKey: String(routePolicyKey || '').trim(),
         groupId: String(routeMeta?.groupId || routeMeta?.group_id || '').trim(),
-        reason: result?.reason || 'unknown error'
+        reason
       });
       return false;
     }

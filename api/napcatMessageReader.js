@@ -1,4 +1,9 @@
-const { getNapCatActionClient } = require('./napcatActionClient');
+const {
+  getActionClientConnectionState,
+  getNapCatActionClient,
+  isActionClientConnected,
+  isNapCatOfflineError
+} = require('./napcatActionClient');
 const MESSAGE_CACHE_TTL_MS = 120 * 1000;
 const FORWARD_CACHE_TTL_MS = 300 * 1000;
 const GROUP_HISTORY_CACHE_TTL_MS = 30 * 1000;
@@ -9,6 +14,20 @@ const GROUP_HISTORY_CACHE_LIMIT = 100;
 const messageCache = new Map();
 const forwardCache = new Map();
 const groupHistoryCache = new Map();
+const actionClientCacheIds = new WeakMap();
+let nextActionClientCacheId = 0;
+
+class NapCatUnavailableError extends Error {
+  constructor(message = 'NapCat action client is offline', options = {}) {
+    super(String(message || 'NapCat action client is offline'));
+    this.name = 'NapCatUnavailableError';
+    this.code = 'NAPCAT_OFFLINE';
+    this.offline = true;
+    this.retryable = true;
+    this.action = String(options.action || '').trim();
+    this.data = options.data;
+  }
+}
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -64,6 +83,10 @@ async function runCached(cache, key, loader, { ttlMs, maxSize }) {
       pruneCache(cache, maxSize);
       return value;
     } catch (error) {
+      if (isNapCatOfflineError(error)) {
+        cache.delete(key);
+        throw error;
+      }
       cache.set(key, {
         error,
         expiresAt: now + NEGATIVE_CACHE_TTL_MS
@@ -79,9 +102,28 @@ async function runCached(cache, key, loader, { ttlMs, maxSize }) {
   return inFlight;
 }
 
+function getActionClientCacheScope(options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  if (!actionClient || typeof actionClient !== 'object') return 'default';
+  if (!actionClientCacheIds.has(actionClient)) {
+    nextActionClientCacheId += 1;
+    actionClientCacheIds.set(actionClient, `client${nextActionClientCacheId}`);
+  }
+  return actionClientCacheIds.get(actionClient);
+}
+
+function assertActionClientOnline(actionClient, actionName = '') {
+  if (isActionClientConnected(actionClient)) return;
+  throw new NapCatUnavailableError('NapCat action client is offline', {
+    action: actionName,
+    data: getActionClientConnectionState(actionClient)
+  });
+}
+
 async function getMessageById(messageId = '', options = {}) {
   const actionClient = options.actionClient || getNapCatActionClient();
   const id = normalizeMessageId(messageId);
+  assertActionClientOnline(actionClient, 'get_msg');
   return actionClient.callAction('get_msg', {
     message_id: /^\d+$/.test(id) ? Number(id) : id
   }, options);
@@ -90,6 +132,7 @@ async function getMessageById(messageId = '', options = {}) {
 async function getForwardMessagesById(forwardId = '', options = {}) {
   const actionClient = options.actionClient || getNapCatActionClient();
   const id = normalizeForwardId(forwardId);
+  assertActionClientOnline(actionClient, 'get_forward_msg');
   const data = await actionClient.callAction('get_forward_msg', { id }, options);
 
   if (Array.isArray(data)) return data;
@@ -111,6 +154,7 @@ async function getGroupMessageHistory(groupId = '', options = {}) {
     params.message_seq = /^\d+$/.test(messageSeq) ? Number(messageSeq) : messageSeq;
   }
 
+  assertActionClientOnline(actionClient, 'get_group_msg_history');
   const data = await actionClient.callAction('get_group_msg_history', params, options);
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.messages)) return data.messages;
@@ -121,7 +165,8 @@ async function getGroupMessageHistory(groupId = '', options = {}) {
 
 async function getMessageByIdCached(messageId = '', options = {}) {
   const id = normalizeMessageId(messageId);
-  return runCached(messageCache, id, () => getMessageById(id, options), {
+  const cacheKey = `${getActionClientCacheScope(options)}:${id}`;
+  return runCached(messageCache, cacheKey, () => getMessageById(id, options), {
     ttlMs: MESSAGE_CACHE_TTL_MS,
     maxSize: MESSAGE_CACHE_LIMIT
   });
@@ -129,7 +174,8 @@ async function getMessageByIdCached(messageId = '', options = {}) {
 
 async function getForwardMessagesByIdCached(forwardId = '', options = {}) {
   const id = normalizeForwardId(forwardId);
-  return runCached(forwardCache, id, () => getForwardMessagesById(id, options), {
+  const cacheKey = `${getActionClientCacheScope(options)}:${id}`;
+  return runCached(forwardCache, cacheKey, () => getForwardMessagesById(id, options), {
     ttlMs: FORWARD_CACHE_TTL_MS,
     maxSize: FORWARD_CACHE_LIMIT
   });
@@ -139,7 +185,7 @@ async function getGroupMessageHistoryCached(groupId = '', options = {}) {
   const id = normalizeGroupId(groupId);
   const count = normalizeHistoryCount(options.count, 200);
   const messageSeq = normalizeText(options.messageSeq || options.message_seq);
-  const cacheKey = `${id}:${count}:${messageSeq}`;
+  const cacheKey = `${getActionClientCacheScope(options)}:${id}:${count}:${messageSeq}`;
   return runCached(groupHistoryCache, cacheKey, () => getGroupMessageHistory(id, options), {
     ttlMs: GROUP_HISTORY_CACHE_TTL_MS,
     maxSize: GROUP_HISTORY_CACHE_LIMIT
@@ -147,6 +193,7 @@ async function getGroupMessageHistoryCached(groupId = '', options = {}) {
 }
 
 module.exports = {
+  NapCatUnavailableError,
   getMessageById,
   getForwardMessagesById,
   getGroupMessageHistory,
