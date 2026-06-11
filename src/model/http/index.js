@@ -5,6 +5,7 @@ const requestShaping = require('./request-shaping.chunk');
 const transport = require('./prepare.chunk');
 const postRetry = require('./post-retry.chunk');
 const streamRetry = require('./stream-retry.chunk');
+const cycleTlsTransport = require('./cycle-tls-transport.chunk');
 
 module.exports = {
   buildAnthropicRequestHeaders: runtimeCore.buildAnthropicRequestHeaders,
@@ -17,6 +18,7 @@ module.exports = {
   isResponsesUrl: openaiCompatible.isResponsesUrl,
   postWithRetry: postRetry.postWithRetry,
   postStreamWithRetry: streamRetry.postStreamWithRetry,
+  shutdownCycleTLS: cycleTlsTransport.shutdownCycleTLS,
   prepareRequest: transport.prepareRequest,
   mapMessagesToAnthropic: requestShaping.mapMessagesToAnthropic,
   preprocessOpenAICompatibleMessages: openaiCompatible.preprocessOpenAICompatibleMessages,

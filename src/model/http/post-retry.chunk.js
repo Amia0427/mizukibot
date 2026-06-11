@@ -1,5 +1,4 @@
 const {
-  axios,
   createModelRouteTracePatch,
   extractErrorCode,
   extractHttpStatus,
@@ -9,6 +8,7 @@ const {
   startModelCall,
   buildModelRouteDiagnostics
 } = require('./runtime-core.chunk');
+const { postModelHttp } = require('./model-post.chunk');
 const {
   buildPinnedLookup,
   getAxiosOptions,
@@ -138,7 +138,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         requestHeaders: prepared.requestHeaders,
         memoryInjected: trace.memoryInjected
       });
-      const response = await axios.post(
+      const response = await postModelHttp(
         prepared.requestUrl,
         prepared.requestBody,
         getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -151,6 +151,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         requestUrl: prepared.requestUrl,
         statusCode: Number(response?.status || 0) || null,
         durationMs: Math.max(0, Date.now() - attemptStartedAt),
+        transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
         fallbackActive: trace.mainFallbackActive === true
       });
       Object.defineProperty(response, '__modelCallId', {
@@ -235,7 +236,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         });
         try {
           const strippedRequestBody = stripReasoningFields(prepared.requestBody);
-          const response = await axios.post(
+          const response = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -244,6 +245,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             attempt: i + 1,
             statusCode: Number(response?.status || 0) || null,
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
             downgraded: true,
             downgradeReason: 'strip_reasoning_fields'
           });
@@ -290,7 +292,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         });
         try {
           const strippedRequestBody = stripExtendedSamplingFields(prepared.requestBody);
-          const response = await axios.post(
+          const response = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -299,6 +301,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             attempt: i + 1,
             statusCode: Number(response?.status || 0) || null,
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
             downgraded: true,
             downgradeReason: 'strip_extended_sampling_fields'
           });
@@ -345,7 +348,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         });
         try {
           const strippedRequestBody = stripTemperatureField(prepared.requestBody);
-          const response = await axios.post(
+          const response = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -354,6 +357,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             attempt: i + 1,
             statusCode: Number(response?.status || 0) || null,
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
             downgraded: true,
             downgradeReason: 'strip_temperature_field'
           });
@@ -405,7 +409,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         });
         try {
           const strippedRequestBody = stripTopPRequestField(prepared.requestBody);
-          const response = await axios.post(
+          const response = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -414,6 +418,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             attempt: i + 1,
             statusCode: Number(response?.status || 0) || null,
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
             downgraded: true,
             downgradeReason: 'strip_top_p_field'
           });
@@ -465,7 +470,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         });
         try {
           const strippedRequestBody = stripOpenAIPromptCacheRetentionFromRequest(prepared.requestBody);
-          const response = await axios.post(
+          const response = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -474,6 +479,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             attempt: i + 1,
             statusCode: Number(response?.status || 0) || null,
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
             downgraded: true,
             downgradeReason: 'strip_openai_prompt_cache_retention'
           });
@@ -501,7 +507,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             });
             try {
               const strippedCacheRequestBody = stripOpenAICompatiblePromptCaching(strippedRetentionRequestBody);
-              const response = await axios.post(
+              const response = await postModelHttp(
                 prepared.requestUrl,
                 strippedCacheRequestBody,
                 getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -510,6 +516,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
                 attempt: i + 1,
                 statusCode: Number(response?.status || 0) || null,
                 durationMs: Math.max(0, Date.now() - attemptStartedAt),
+                transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
                 downgraded: true,
                 downgradeReason: 'strip_openai_prompt_cache'
               });
@@ -583,7 +590,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         });
         try {
           const strippedRequestBody = stripOpenAICompatiblePromptCaching(prepared.requestBody);
-          const response = await axios.post(
+          const response = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -592,6 +599,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             attempt: i + 1,
             statusCode: Number(response?.status || 0) || null,
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
             downgraded: true,
             downgradeReason: 'strip_openai_prompt_cache'
           });
@@ -644,7 +652,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         try {
           const automaticDowngrade = stripAnthropicAutomaticPromptCaching(prepared.requestBody, prepared.requestHeaders);
           try {
-            const response = await axios.post(
+            const response = await postModelHttp(
               prepared.requestUrl,
               automaticDowngrade.requestBody,
               getAxiosOptions(prepared.provider, specificKey, timeoutMs, automaticDowngrade.requestHeaders, abortSignal, pinnedLookup)
@@ -653,6 +661,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
               attempt: i + 1,
               statusCode: Number(response?.status || 0) || null,
               durationMs: Math.max(0, Date.now() - attemptStartedAt),
+              transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
               downgraded: true,
               downgradeReason: 'strip_anthropic_automatic_prompt_cache'
             });
@@ -671,7 +680,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           }
 
           const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
-          const response = await axios.post(
+          const response = await postModelHttp(
             prepared.requestUrl,
             downgraded.requestBody,
             getAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal, pinnedLookup)
@@ -680,6 +689,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             attempt: i + 1,
             statusCode: Number(response?.status || 0) || null,
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
+            transport: response?.__modelHttpTransport || response?.request?.transport || 'axios',
             downgraded: true,
             downgradeReason: 'strip_anthropic_prompt_cache'
           });
