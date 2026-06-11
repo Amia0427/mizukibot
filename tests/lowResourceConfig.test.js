@@ -43,12 +43,14 @@ function loadConfigWithEnv(env = {}) {
     'PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS',
     'IMAGE_MEMORY_RECALL_ENABLED',
     'IMAGE_MEMORY_OBSERVATION_LIMIT',
+    'POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED',
     'POST_REPLY_WORKER_RSS_RECYCLE_MB',
-    'POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS'
+    'POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS',
+    'POST_REPLY_VECTOR_MAINTENANCE_ENABLED'
   ];
   try {
     for (const key of controlledKeys) delete process.env[key];
-    for (const key of controlledKeys) process.env[key] = '';
+    for (const key of controlledKeys) process.env[key] = '__TEST_DEFAULT__';
     Object.assign(process.env, env);
     clearProjectCache();
     return require('../config');
@@ -91,6 +93,7 @@ assert.strictEqual(mainConfig.PERSONA_WORLDBOOK_EMBEDDING_ENABLED, true);
 assert.strictEqual(mainConfig.PERSONA_WORLDBOOK_SEMANTIC_LIMIT, 6);
 assert.strictEqual(mainConfig.PERSONA_WORLDBOOK_RERANK_ENABLED, true);
 assert.strictEqual(mainConfig.IMAGE_MEMORY_RECALL_ENABLED, true);
+assert.strictEqual(mainConfig.POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED, false);
 assert.strictEqual(mainConfig.POST_REPLY_WORKER_RSS_RECYCLE_MB, 768);
 assert.strictEqual(mainConfig.POST_REPLY_ENRICH_ENABLED, true);
 assert.strictEqual(mainConfig.POST_REPLY_VECTOR_MAINTENANCE_ENABLED, true);
@@ -198,6 +201,7 @@ assert.strictEqual(workerConfig.PERSONA_WORLDBOOK_RERANK_ENABLED, true);
 assert.strictEqual(workerConfig.PERSONA_WORLDBOOK_RERANK_MAX_CANDIDATES, 24);
 assert.strictEqual(workerConfig.PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS, 2000);
 assert.strictEqual(workerConfig.IMAGE_MEMORY_RECALL_ENABLED, true);
+assert.strictEqual(workerConfig.POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED, false);
 assert.strictEqual(workerConfig.POST_REPLY_WORKER_RSS_RECYCLE_MB, 768);
 
 console.log('lowResourceConfig.test.js passed');

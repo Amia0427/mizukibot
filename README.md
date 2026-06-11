@@ -8,6 +8,8 @@
 
 **2026-06-12 07:10 +08:00**：召回路由从“短句关键词补丁”升级为上下文继承。`detectIntent` 现在会使用 `contextSummary` / `continuitySignals` 判断“然后呢/还有呢/继续说”等椭圆追问是否承接上一轮记忆召回；短句独立出现不触发记忆，只有上一轮 active topic、carry-over 或 previous user 明确是回忆/日志/历史问题时才继承 `needsMemory`。同时本地已判定的 memory route 对 AI router refine 保持 sticky，避免被降回 `chat/default`。小目标完成：短追问召回不再依赖枚举短语。
 
+**2026-06-12 07:10 +08:00**：修复外置 post-reply worker 空闲后长期缺席。复盘 `data/bot-daemon.log` 中 2026-06-11 21:11:58 daemon 已拉起 worker，但随后 21:49、23:49、2026-06-12 01:49、06:22 又出现 `queue idle; skip idle restart`；真正原因是 worker 在 `data/post-reply-worker.err.log` 记录 `idle RSS recycle requested` 后主动退出，daemon 只在队列有到期 job 或本轮刚拉起主 bot 时补启。现新增 `POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED=false` 默认关闭空闲 RSS 自回收；常驻模式下 daemon 发现 worker 缺席会补启，即使队列暂空也不再跳过。只有显式打开该开关时，低资源诊断才把 missing worker 视为可接受的 idle recycle。小目标完成：外置 worker 不再因空闲回收留下长时间空窗。
+
 **2026-06-12 07:09 +08:00**：补齐 `memoryWritePipeline` 写入审核降级漏口。复查 `data/model-calls.ndjson` 在 `2026-06-11T19:40:00Z` 到 `20:20:00Z` 的 `memory_write_review` 失败，修复后已不再双端点回退，但 `Request failed with status code 0` 仍只落 `write_review_failed`，缺少明确降级语义。现 review provider 快速断连/status 0 会写入 `meta.writeReview.reason=write_review_unavailable_downgraded`、`unavailable=true`、`degraded=true`、`failurePolicy=unavailable_candidate`，继续按 candidate 持久化；408/timeout 仍走 `write_review_timeout_downgraded`。小目标完成：review 传输失败和超时都能稳定降级，不再留下隐性学习失败。
 
 **2026-06-12 06:48 +08:00**：修复短追问记忆召回漏判。复盘 `request_id=req_fbe5ff402ae28f6c` / `messageId=1011704550`，用户问“更早的呢”时路由只看当前 4 字短句，未继承上一轮“回忆一下我们相处最搞笑的一件趣事”的记忆意图，导致 `chat/default`、`allowTools=false`，主回复 prompt 中 `memory_marker_count=0`。现“更早的呢/再之前呢/往前一点”等短召回追问会归入 `recent_continuity`，进入 `lookup/notebook-answer` 记忆链路；小目标完成：短追问不会再绕过记忆召回。

@@ -66,6 +66,14 @@ function Test-ExternalPostReplyWorkerEnabled {
   return ((Get-BoolEnv -Name 'POST_REPLY_WORKER_ENABLED' -DefaultValue $false) -and (-not (Get-BoolEnv -Name 'POST_REPLY_WORKER_INLINE' -DefaultValue $false)))
 }
 
+function Test-PostReplyWorkerIdleRecycleEnabled {
+  return (Get-BoolEnv -Name 'POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED' -DefaultValue $false)
+}
+
+function Test-ExternalPostReplyWorkerResidentExpected {
+  return ((Test-ExternalPostReplyWorkerEnabled) -and (-not (Test-PostReplyWorkerIdleRecycleEnabled)))
+}
+
 function Rotate-DaemonLogIfNeeded {
   param(
     [Parameter(Mandatory = $true)]
@@ -760,6 +768,8 @@ try {
     $workerStartReason = Get-PostReplyQueueStartReason
     if ([string]::IsNullOrWhiteSpace($workerStartReason) -and $mainBotStartedByDaemon -and (Test-ExternalPostReplyWorkerEnabled)) {
       $workerStartReason = 'main bot started by daemon; ensure external worker'
+    } elseif ([string]::IsNullOrWhiteSpace($workerStartReason) -and (Test-ExternalPostReplyWorkerResidentExpected)) {
+      $workerStartReason = 'external worker expected resident; restart missing worker'
     }
     if ([string]::IsNullOrWhiteSpace($workerStartReason)) {
       Write-DaemonLog -Message 'post-reply worker not running, queue idle; skip idle restart.'

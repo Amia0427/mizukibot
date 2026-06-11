@@ -15,6 +15,8 @@ module.exports = (() => {
   assert.ok(script.includes('elapsed_ms=$($lockWait.ElapsedMs)'), 'daemon failure logs should include handoff wait duration');
   assert.ok(!script.includes('Start-Sleep -Seconds 2'), 'daemon should not use a fixed two-second lock handoff window');
   assert.ok(script.includes('function Test-ExternalPostReplyWorkerEnabled'), 'daemon should honor external post-reply worker mode');
+  assert.ok(script.includes('function Test-PostReplyWorkerIdleRecycleEnabled'), 'daemon should honor explicit idle recycle mode');
+  assert.ok(script.includes('function Test-ExternalPostReplyWorkerResidentExpected'), 'daemon should model resident external worker mode');
   assert.ok(script.includes('$mainBotStartedByDaemon = $false'), 'daemon should track whether this run started the main bot');
   assert.ok(script.includes('$mainBotStartedByDaemon = $true'), 'daemon should mark successful daemon-owned main bot startup');
   assert.ok(
@@ -24,6 +26,14 @@ module.exports = (() => {
   assert.ok(
     script.indexOf('$workerState = Get-WorkerRuntimeState') < script.indexOf("main bot started by daemon; ensure external worker"),
     'daemon should check for an existing worker before daemon-owned startup recovery'
+  );
+  assert.ok(
+    script.includes("external worker expected resident; restart missing worker"),
+    'daemon should restart a missing external worker in resident mode even when the queue is idle'
+  );
+  assert.ok(
+    script.indexOf("main bot started by daemon; ensure external worker") < script.indexOf("external worker expected resident; restart missing worker"),
+    'daemon-owned startup reason should remain more specific than resident-mode recovery'
   );
 
   console.log('windowsDaemonScript.test.js passed');
