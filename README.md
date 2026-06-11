@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-11 23:47 +08:00**：GEMINI.txt 重构为 Claude Opus 4.6 风格约束。核心风格从"简洁直接张力"改为"从容细腻周全"，情绪表达从"强制显性"改为"含蓄内敛"，节奏从"明快迅速"改为"从容自然"，句式从"突兀破碎"改为"自然流畅"。保持 model-pattern 配置系统架构（文件名不变），保持与 persona/02_style.txt 的口语短句活泼人格协调。适配目标：让瑞希在使用 Claude 模型时呈现克制细腻的叙事质感，而非 Gemini 的快速跳跃风格。
+
 **2026-06-11 17:06 +08:00**：主回复模型 HTTP 传输新增浏览器 TLS/JA3 指纹伪装。`MODEL_TLS_IMPERSONATION_ENABLED=true` 后模型 POST 通过 CycleTLS 发送，默认 Chrome-like JA3 + Chrome HTTP/2 fingerprint，流式主回复同样启用；`MODEL_TLS_IMPERSONATION_FALLBACK_ENABLED=true` 时传输异常自动回落原 axios，避免主回复中断。小目标完成：主回复模型 TLS 不再只暴露 Node/OpenSSL 默认指纹。
 
 **2026-06-11 17:20 +08:00**：新增模型条件提示词注入。Prompt manifest 支持 `applies_when.model_pattern`，模型名包含匹配字符串时自动注入对应提示词。`GEMINI.txt` 配置为仅在使用 Gemini 模型（如 `gemini-3-flash-preview`）时注入，优先级 -900（在 SYSTEM.txt 之后）。适用于模型特定的风格约束、输出规范和角色适配。
