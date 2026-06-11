@@ -5,6 +5,10 @@ const {
   NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY,
   createNormalUserMainReplyStreamFirstTokenTimeoutError
 } = require('../utils/normalUserMainReplyStreamTimeout');
+const {
+  buildAdminPrivateMainReplyStreamTimeoutReply,
+  createAdminPrivateMainReplyStreamFirstTokenTimeoutError
+} = require('../utils/adminPrivateMainReplyStreamTimeout');
 
 module.exports = (async () => {
   const deltas = [];
@@ -151,6 +155,74 @@ module.exports = (async () => {
     fullText: NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY
   }]);
   assert.ok(normalUserTimeoutEvents.some((event) => event.type === 'normal_user_stream_first_token_timeout'));
+
+  const adminPrivateTimeoutDeltas = [];
+  const adminPrivateTimeoutEvents = [];
+  let adminPrivateTimeoutFallbackCalls = 0;
+  const adminPrivateTimeoutReply = buildAdminPrivateMainReplyStreamTimeoutReply(45000);
+  const adminPrivateTimeoutHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => ({
+      segments: {},
+      compactionPlan: {
+        compactedSegments: [{ name: 'user', messages: input.userTurnMessages || [] }]
+      }
+    }),
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: []
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async () => {
+      throw createAdminPrivateMainReplyStreamFirstTokenTimeoutError(45000);
+    },
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
+    isHumanizerEnabledImpl: () => false,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => {
+      adminPrivateTimeoutFallbackCalls += 1;
+      return 'non-stream fallback';
+    },
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    createEvent: (type, payload) => ({ type, ...payload }),
+    config: { AI_MAX_TOKENS: 3500 },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const adminPrivateTimeoutStreamed = await adminPrivateTimeoutHelpers.streamDirectReply([{ role: 'user', content: 'hi' }], {
+    request: {
+      routePolicyKey: 'direct_chat/default',
+      routeMeta: { chatType: 'private', userId: 'admin_1' },
+      modelConfig: {},
+      onDelta(text, fullText) {
+        adminPrivateTimeoutDeltas.push({ text, fullText });
+      },
+      onEvent(event) {
+        adminPrivateTimeoutEvents.push(event);
+      }
+    },
+    memory: {},
+    output: {}
+  });
+  assert.strictEqual(adminPrivateTimeoutStreamed.finalReply, adminPrivateTimeoutReply);
+  assert.strictEqual(adminPrivateTimeoutStreamed.visibleText, adminPrivateTimeoutReply);
+  assert.strictEqual(adminPrivateTimeoutStreamed.persistedText, adminPrivateTimeoutReply);
+  assert.strictEqual(adminPrivateTimeoutStreamed.adminPrivateStreamFirstTokenTimedOut, true);
+  assert.strictEqual(adminPrivateTimeoutStreamed.stream.adminPrivateStreamFirstTokenTimedOut, true);
+  assert.strictEqual(adminPrivateTimeoutStreamed.stream.fallbackToNonStream, false);
+  assert.strictEqual(adminPrivateTimeoutFallbackCalls, 0);
+  assert.deepStrictEqual(adminPrivateTimeoutDeltas, [{
+    text: adminPrivateTimeoutReply,
+    fullText: adminPrivateTimeoutReply
+  }]);
+  assert.ok(adminPrivateTimeoutEvents.some((event) => event.type === 'admin_private_stream_first_token_timeout'));
 
   const privateDeltas = [];
   const privateGuardHelpers = createStreamingCoordinatorHelpers({

@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-11 13:43 +08:00**：管理员私聊主回复新增首字超时硬兜底。`v2_streaming_reply` 以前只给普通用户挂 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS`，管理员私聊会继续等 `AI_STREAM_FIRST_TOKEN_TIMEOUT_MS/REQUEST_STREAM_TIMEOUT_MS`，慢上游可接近 60s 甚至更久。现在 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=45000` 默认只作用于 `userRole=admin + chatType=private`：超时 abort 上游、跳过 admin shared fallback 和非流式二次请求，直接发明确兜底。小目标已完成：管理员私聊上游首字超慢时稳定落兜底，不再悬挂。
+
 **2026-06-11 13:35 +08:00**：修复 Windows daemon 锁接管误判。`data/bot-daemon.log` 中 2026-06-11 11:14:50-11:14:52 的失败并非新 bot 崩溃，而是 `run-bot-daemon.ps1` 只等 2 秒检查 `.mizukibot.lock`；新进程 pid=8872 后续已接管锁。守护脚本改为轮询等待锁归属，默认 `BOT_DAEMON_LOCK_WAIT_MS=30000`、`BOT_DAEMON_LOCK_POLL_MS=500`，并记录接管耗时。小目标完成：守护进程锁接管窗口过短问题已修复。
 
 **2026-06-11 10:51 +08:00**：普通快速回复的模型格式异常不再直接发给群。主模型 HTTP 200 但 `extractMessageContent` 抽不到正文时，`model-calls.ndjson` 会追加同 `model_call_*` id 的 `status=parse_failed` 诊断行，记录非敏感响应结构摘要；`normal_fast_reply` 识别“模型返回格式不稳定/没拿到可用正文”后抛错回退正式回复链路。小目标完成：10:38:59 群聊兜底发送原因已定位并加观测。

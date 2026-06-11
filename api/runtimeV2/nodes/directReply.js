@@ -7,6 +7,10 @@ const {
   getNormalUserMainReplyStreamTimeoutReply,
   isNormalUserMainReplyStreamFirstTokenTimeout
 } = require('../../../utils/normalUserMainReplyStreamTimeout');
+const {
+  getAdminPrivateMainReplyStreamTimeoutReply,
+  isAdminPrivateMainReplyStreamFirstTokenTimeout
+} = require('../../../utils/adminPrivateMainReplyStreamTimeout');
 
 function createRouteAfterDirectReply() {
   return function routeAfterDirectReply(state) {
@@ -518,6 +522,26 @@ function createDirectReplyNode(deps = {}) {
               node: 'direct_reply',
               stage: 'streaming_upstream',
               fallbackSource: 'normal_user_stream_first_token_timeout',
+              timeoutMs: Number(error?.timeoutMs || 0) || 0
+            })
+          ]);
+        } else if (isAdminPrivateMainReplyStreamFirstTokenTimeout(error)) {
+          const timeoutReply = getAdminPrivateMainReplyStreamTimeoutReply(error);
+          reply = timeoutReply;
+          displayReply = timeoutReply;
+          nextStream = {
+            ...ensureOutputStream(state.output, 'direct'),
+            ...mirrorStreamingFlags(state.output, timeoutReply),
+            completed: true,
+            fallbackToNonStream: false,
+            mode: 'direct',
+            adminPrivateStreamFirstTokenTimedOut: true
+          };
+          directLoopEvents = directLoopEvents.concat([
+            createEvent('admin_private_stream_first_token_timeout', {
+              node: 'direct_reply',
+              stage: 'streaming_upstream',
+              fallbackSource: 'admin_private_stream_first_token_timeout',
               timeoutMs: Number(error?.timeoutMs || 0) || 0
             })
           ]);
