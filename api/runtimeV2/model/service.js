@@ -27,6 +27,9 @@ const {
   createNormalUserMainReplyStreamFirstTokenTimeoutError
 } = require('../../../utils/normalUserMainReplyStreamTimeout');
 const {
+  createAdminPrivateMainReplyStreamFirstTokenTimeoutError
+} = require('../../../utils/adminPrivateMainReplyStreamTimeout');
+const {
   buildMainModelRequest,
   getApiBaseUrl,
   getApiKey,
@@ -97,6 +100,12 @@ function summarizeMalformedResponse(response = null) {
 function getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig = null) {
   if (String(resolvedConfig?.__mainModelUserRole || '').trim().toLowerCase() === 'admin') return 0;
   return Math.max(0, Math.floor(Number(config.NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS) || 0));
+}
+
+function getAdminPrivateStreamFirstTokenTimeoutMs(resolvedConfig = null, context = {}) {
+  if (String(resolvedConfig?.__mainModelUserRole || '').trim().toLowerCase() !== 'admin') return 0;
+  if (!isAdminPrivateChatContext(context, config)) return 0;
+  return Math.max(0, Math.floor(Number(config.ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS) || 0));
 }
 
 function getAllowedToolNames(context = {}) {
@@ -441,8 +450,11 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
     await withMainModelFallback(async (resolvedConfig) => {
       const requestStreamOnce = async (messages) => {
         const normalUserFirstTokenTimeoutMs = getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig);
-        const useNormalUserFirstTokenTimeout = normalUserFirstTokenTimeoutMs > 0 && !firstVisibleOutputSeen;
-        const abortController = useNormalUserFirstTokenTimeout && typeof AbortController !== 'undefined'
+        const adminPrivateFirstTokenTimeoutMs = getAdminPrivateStreamFirstTokenTimeoutMs(resolvedConfig, options);
+        const firstTokenTimeoutMs = normalUserFirstTokenTimeoutMs || adminPrivateFirstTokenTimeoutMs;
+        const firstTokenTimeoutType = normalUserFirstTokenTimeoutMs > 0 ? 'normal_user' : (adminPrivateFirstTokenTimeoutMs > 0 ? 'admin_private' : '');
+        const useFirstTokenTimeout = firstTokenTimeoutMs > 0 && !firstVisibleOutputSeen;
+        const abortController = useFirstTokenTimeout && typeof AbortController !== 'undefined'
           ? new AbortController()
           : null;
         const callTrace = logResolvedModelCall(options, resolvedConfig, 'v2_streaming_reply');
@@ -474,7 +486,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
           getRetries(1, resolvedConfig),
           getApiKey(resolvedConfig)
         );
-        if (!useNormalUserFirstTokenTimeout) {
+        if (!useFirstTokenTimeout) {
           await streamPromise;
           return;
         }
@@ -483,12 +495,14 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
         const timeoutPromise = new Promise((_, reject) => {
           const timer = setTimeout(() => {
             if (firstVisibleOutputSeen) return;
-            timeoutError = createNormalUserMainReplyStreamFirstTokenTimeoutError(normalUserFirstTokenTimeoutMs);
+            timeoutError = firstTokenTimeoutType === 'admin_private'
+              ? createAdminPrivateMainReplyStreamFirstTokenTimeoutError(firstTokenTimeoutMs)
+              : createNormalUserMainReplyStreamFirstTokenTimeoutError(firstTokenTimeoutMs);
             if (abortController && !abortController.signal.aborted) {
               try { abortController.abort(timeoutError); } catch (_) {}
             }
             reject(timeoutError);
-          }, normalUserFirstTokenTimeoutMs);
+          }, firstTokenTimeoutMs);
           cancelActiveFirstTokenTimer = () => {
             clearTimeout(timer);
           };

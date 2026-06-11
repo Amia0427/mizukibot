@@ -34,3 +34,9 @@
 
 - Windows 定时重启计划改为每天 04:00 执行，取消每 6 小时重复触发。
 - 小目标已完成：降低晚间管理员主模型流式回复被计划任务强杀的概率。
+
+## 运行维护 2026-06-11 13:43
+
+- 管理员私聊 `v2_streaming_reply` 首字等待补齐超时保护：新增 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS=45000`，超时后 abort 当前上游流并直接返回明确兜底。
+- 根因：已有 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 在 `userRole=admin` 时显式跳过，管理员私聊只能等通用流式首 chunk/请求超时，慢上游会继续悬挂到接近 60s。
+- 小目标已完成：管理员私聊主回复链路超慢时不再转入 admin shared fallback 或非流式二次慢请求。

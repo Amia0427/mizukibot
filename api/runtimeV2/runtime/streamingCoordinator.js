@@ -9,6 +9,11 @@ const {
   isNormalUserMainReplyStreamFirstTokenTimeout
 } = require('../../../utils/normalUserMainReplyStreamTimeout');
 const {
+  ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY,
+  getAdminPrivateMainReplyStreamTimeoutReply,
+  isAdminPrivateMainReplyStreamFirstTokenTimeout
+} = require('../../../utils/adminPrivateMainReplyStreamTimeout');
+const {
   estimateMessageTokens,
   normalizeMessageContent,
   trimTextByTokenBudget
@@ -297,6 +302,36 @@ function createStreamingCoordinatorHelpers(deps = {}) {
             ...markStreamCompleted(state.output, true),
             ...mirrorStreamingFlags(state.output, safeFinalReply),
             normalUserStreamFirstTokenTimedOut: true,
+            fallbackToNonStream: false,
+            mode: 'direct'
+          }
+        };
+      }
+      if (isAdminPrivateMainReplyStreamFirstTokenTimeout(error)) {
+        const safeFinalReply = sanitizeUserFacingText(
+          getAdminPrivateMainReplyStreamTimeoutReply(error)
+        ).trim() || ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY;
+        emitRuntimeEvent(state, 'admin_private_stream_first_token_timeout', {
+          node: 'direct_reply',
+          stage: 'streaming_upstream',
+          fallbackSource: 'admin_private_stream_first_token_timeout',
+          timeoutMs: Number(error?.timeoutMs || 0) || 0
+        });
+        if (typeof request.onDelta === 'function') {
+          request.onDelta(safeFinalReply, safeFinalReply);
+        }
+        return {
+          finalReply: safeFinalReply,
+          visibleText: safeFinalReply,
+          persistedText: safeFinalReply,
+          adminPrivateStreamFirstTokenTimedOut: true,
+          humanizerTimedOut: false,
+          humanizerFailed: false,
+          humanizerFailureReason: '',
+          stream: {
+            ...markStreamCompleted(state.output, true),
+            ...mirrorStreamingFlags(state.output, safeFinalReply),
+            adminPrivateStreamFirstTokenTimedOut: true,
             fallbackToNonStream: false,
             mode: 'direct'
           }
