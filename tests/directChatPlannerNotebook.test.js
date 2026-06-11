@@ -146,6 +146,19 @@ module.exports = (async () => {
   assert.deepStrictEqual(amnesiaDecision.allowedToolNames, ['memory_cli']);
   assert.notStrictEqual(amnesiaDecision.executionPlan.mode, 'chat_only');
 
+  const shortRecallFollowupRoute = detectIntent({
+    rawText: '更早的呢',
+    botQQ: '123456',
+    userId: 'u1',
+    chatType: 'private'
+  });
+  assert.strictEqual(shortRecallFollowupRoute.intent.needsMemory, true);
+  assert.ok(shortRecallFollowupRoute.meta.allowedTools.includes('memory_cli'));
+  const shortRecallFollowupDecision = await planDirectChat(shortRecallFollowupRoute, { userId: 'u1' });
+  assert.strictEqual(shortRecallFollowupDecision.shouldUseTools, true);
+  assert.deepStrictEqual(shortRecallFollowupDecision.allowedToolNames, ['memory_cli']);
+  assert.strictEqual(shortRecallFollowupDecision.executionPlan.mode, 'tool_plan');
+
   const groupRecallRoute = detectIntent({
     rawText: '群里之前怎么说这个活动',
     botQQ: '123456',

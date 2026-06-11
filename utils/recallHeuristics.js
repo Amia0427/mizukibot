@@ -66,6 +66,13 @@ function isRecentRecallQuery(text = '') {
   return isConversationRecapQuery(text) || isRecentPersonalActivityRecallQuery(text);
 }
 
+function isShortRecallFollowupQuery(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q) return false;
+  if (q.length > 24) return false;
+  return /^(?:更早(?:的)?(?:呢|吗|一点|一些)?|再(?:早|早些|之前|往前)(?:一点|一些|呢|吗)?|往前(?:一点|一些|呢|吗)?|还有(?:更早|之前)(?:的)?(?:呢|吗)?)$/i.test(q);
+}
+
 function isExternalFreshnessQuery(text = '') {
   const q = sanitizeText(text).toLowerCase();
   if (!q) return false;
@@ -107,6 +114,7 @@ function isSelfContainedPlanLikeQuery(text = '') {
 function classifyRecallFacet(question = '') {
   const q = sanitizeText(question).toLowerCase();
   if (!q) return 'default_continuity';
+  if (isShortRecallFollowupQuery(q)) return 'recent_continuity';
   if (isRecentRecallQuery(q)) return 'recent_continuity';
   if (/(where did we leave off|what were we(?: just)? talking about|what were we doing|what was the thing from before|from before|earlier|previously|last time|continuity|recent|上次|刚才|刚刚|聊到哪|做到哪|接上)/i.test(q)) return 'recent_continuity';
   if (/(continue|continue with|resume|pick back up|next step|next steps|what should we do next|plan|task|todo|roadmap|继续|接着|接上|计划|任务|待办|推进)/i.test(q)) return 'task_or_plan';
@@ -188,6 +196,7 @@ function isMemoryContinuationQuestion(text = '') {
     return false;
   }
   if (isRecentRecallQuery(normalized)) return true;
+  if (isShortRecallFollowupQuery(normalized)) return true;
   const facet = classifyRecallFacet(normalized);
   if (facet === 'task_or_plan') return true;
   if (facet === 'recent_continuity') return true;
@@ -231,6 +240,7 @@ function classifyMemoryNeed(text = '', routeContext = {}) {
 
   const q = cleanText.toLowerCase();
   const amnesiaRelationshipRecall = isAmnesiaRelationshipRecallQuery(cleanText);
+  const shortRecallFollowup = isShortRecallFollowupQuery(cleanText);
   const explicitRecall = !isForgetReminderOnlyQuery(cleanText) && (
     /(?:记得|记不记得|还记得|想得起来|回忆|回想|忘了|不记得|记不得|想不起来|之前|以前|上次|刚才|刚刚|前几天|昨天|往日种种|我们的过去|我们之间|履历|历史|记录|日志|remember|recall|previous|earlier|before|last time|history)/i.test(q)
     || /(?:最近|今天|今日).{0,14}(?:我|我们|咱|俺|和你).{0,14}(?:聊|说|讲|提|做|打|玩|听|看|刷|发|买|吃|喝|练|测|试|去).{0,12}(?:什么|啥|哪些|哪几|过|了|的)/i.test(q)
@@ -239,7 +249,7 @@ function classifyMemoryNeed(text = '', routeContext = {}) {
   const personalFactQuestion = personalSubject && /(?:喜欢|爱好|讨厌|偏好|是谁|认识我|认得我|知道我|身份|画像|人设|性格|目标|关系|熟悉|是不是|有没有|会不会|要不要|说过|提过|聊过|发过|打过|玩过|看过|听过|做过|去过|买过|吃过|喝过|练过|测过|试过|哪些|什么|啥|哪几)/i.test(q);
   const groupHistory = /(?:群里|群内|大家|群友|这个群).{0,16}(?:之前|以前|上次|刚才|最近|说过|聊过|怎么说|记录|日志|历史|叫|称呼)/i.test(q);
   const continuity = isMemoryContinuationQuestion(cleanText);
-  if (!explicitRecall && !personalFactQuestion && !groupHistory && !continuity && !amnesiaRelationshipRecall) {
+  if (!explicitRecall && !personalFactQuestion && !groupHistory && !continuity && !amnesiaRelationshipRecall && !shortRecallFollowup) {
     return { needsMemory: false, facet: classifyRecallFacet(cleanText), confidence: 0.12, reason: 'no_memory_dependency_signal' };
   }
 
@@ -248,12 +258,14 @@ function classifyMemoryNeed(text = '', routeContext = {}) {
     ? 'group_history_recall'
     : amnesiaRelationshipRecall
       ? `amnesia_relationship_recall:${facet}`
+      : shortRecallFollowup
+      ? `short_recall_followup:${facet}`
       : explicitRecall
       ? `explicit_recall:${facet}`
       : personalFactQuestion
         ? `personal_history_question:${facet}`
         : `continuity_question:${facet}`;
-  const confidence = explicitRecall || groupHistory || amnesiaRelationshipRecall ? 0.9 : (personalFactQuestion ? 0.82 : 0.72);
+  const confidence = explicitRecall || groupHistory || amnesiaRelationshipRecall || shortRecallFollowup ? 0.9 : (personalFactQuestion ? 0.82 : 0.72);
   return { needsMemory: true, facet, confidence, reason };
 }
 
@@ -274,6 +286,7 @@ module.exports = {
   isAmnesiaRelationshipRecallQuery,
   isRecentPersonalActivityRecallQuery,
   isRecentRecallQuery,
+  isShortRecallFollowupQuery,
   isForgetReminderOnlyQuery,
   isMemoryContinuationQuestion,
   sanitizeText,

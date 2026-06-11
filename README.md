@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 06:48 +08:00**：修复短追问记忆召回漏判。复盘 `request_id=req_fbe5ff402ae28f6c` / `messageId=1011704550`，用户问“更早的呢”时路由只看当前 4 字短句，未继承上一轮“回忆一下我们相处最搞笑的一件趣事”的记忆意图，导致 `chat/default`、`allowTools=false`，主回复 prompt 中 `memory_marker_count=0`。现“更早的呢/再之前呢/往前一点”等短召回追问会归入 `recent_continuity`，进入 `lookup/notebook-answer` 记忆链路；小目标完成：短追问不会再绕过记忆召回。
+
 **2026-06-11 19:10 +08:00**：修复管理员图片总结主链输入失控。复盘 `request_id=req_493000182e712ed3`，`direct_chat/image_summary/summary` 虽已做图片轻上下文，但 worker 成功后仍把完整 `VisionCaptionJSON` 当作 user 文本交给管理员主模型，最后一条 user payload 约 46k tokens，导致非流式首响约 51.8s。现 vision worker 只输出紧凑“视觉证据摘要”，`direct_reply` 对 `image_summary/image_qa` 强制重建 `vision_lite` payload，不复用预构建的大上下文，并按 `VISION_ROUTE_USER_TEXT_MAX_TOKENS` 裁剪 worker 文本。小目标完成：管理员图片总结主链输入预算和首响延迟已加硬控。
 
 **2026-06-11 19:02 +08:00**：修复 `memoryWritePipeline` 的 `memory_write_review` 超时阻塞。今天 10:18 左右 `model-calls.ndjson` 里同一 review 同时出现 `/v1/responses` 与 `/v1/chat/completions`，原因是通用 `postWithRetry` 会先把 OpenAI-compatible chat payload 升级为 Responses，失败后再回退 chat，tracker 因外层/内层各记一条而看起来像双端点并发。现 memory write review 显式固定 chat 协议，并加本地硬超时；超时后写入 `write_review_timeout_downgraded` 元数据并降级为 candidate，不阻塞后续学习任务。小目标完成：memory write review 超时后明确降级、不再拖住 post-reply 学习链路。
