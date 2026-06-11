@@ -188,7 +188,20 @@ async function invokeInitiativeDecisionModel(input = {}) {
   return parseInitiativeDecision(String(msg?.content || ''), fallbackStyle, fallbackAtSender);
 }
 
-async function sendTickPayloadWithRetry(ws, payload, retries = 1, waitMs = 500) {
+async function sendTickPayloadWithRetry(ws, payload, retries = 1, waitMs = 500, actionClient = null) {
+  if (actionClient && typeof actionClient.callAction === 'function') {
+    const maxRetry = Math.max(0, Number(retries) || 0);
+    for (let i = 0; i <= maxRetry; i += 1) {
+      try {
+        await actionClient.callAction(payload.action, payload.params);
+        return true;
+      } catch (error) {
+        if (i < maxRetry) await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+    }
+    return false;
+  }
+
   const maxRetry = Math.max(0, Number(retries) || 0);
   for (let i = 0; i <= maxRetry; i += 1) {
     if (ws && typeof ws.send === 'function') {
@@ -853,7 +866,7 @@ async function runGreetingFallbacks(ws, askAIByGraph, state, date = new Date()) 
   return sentAny;
 }
 
-async function runTickCycle(ws, askAIByGraph, state, date = new Date()) {
+async function runTickCycle(ws, askAIByGraph, state, date = new Date(), actionClient = null) {
   if (shouldRunDailySummaryNow(date)) {
     await runDailyJournalSummaries();
   }
@@ -861,29 +874,29 @@ async function runTickCycle(ws, askAIByGraph, state, date = new Date()) {
   await runRandomWindowTouches(ws, askAIByGraph, state, date);
   await runGreetingFallbacks(ws, askAIByGraph, state, date);
   await getDailyShareEngine().runDailyShareCycle({
-    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs),
+    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs, actionClient),
     askAIByGraph,
     date
   });
 }
 
-async function runDailyShareTick(ws, askAIByGraph, date = new Date()) {
+async function runDailyShareTick(ws, askAIByGraph, date = new Date(), actionClient = null) {
   await getDailyShareEngine().runDailyShareCycle({
-    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs),
+    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs, actionClient),
     askAIByGraph,
     date
   });
 }
 
-async function runLifeSchedulerTick(ws, askAIByGraph, date = new Date()) {
+async function runLifeSchedulerTick(ws, askAIByGraph, date = new Date(), actionClient = null) {
   await getLifeSchedulerEngine().runLifeCycle({
-    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs),
+    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs, actionClient),
     askAIByGraph,
     date
   });
 }
 
-function startTickEngine(ws, askAIByGraph) {
+function startTickEngine(ws, askAIByGraph, actionClient = null) {
   const state = loadTickState();
   let stopped = false;
   const timers = {
@@ -895,7 +908,7 @@ function startTickEngine(ws, askAIByGraph) {
   async function runOnce() {
     if (stopped) return;
     try {
-      await runTickCycle(ws, askAIByGraph, state, new Date());
+      await runTickCycle(ws, askAIByGraph, state, new Date(), actionClient);
     } catch (error) {
       console.error('[tick] execution failed:', error?.message || error);
     } finally {
@@ -906,7 +919,7 @@ function startTickEngine(ws, askAIByGraph) {
   async function runDailyShareOnce() {
     if (stopped) return;
     try {
-      await runDailyShareTick(ws, askAIByGraph, new Date());
+      await runDailyShareTick(ws, askAIByGraph, new Date(), actionClient);
     } catch (error) {
       console.error('[tick] daily share execution failed:', error?.message || error);
     } finally {
@@ -917,7 +930,7 @@ function startTickEngine(ws, askAIByGraph) {
   async function runLifeSchedulerOnce() {
     if (stopped) return;
     try {
-      await runLifeSchedulerTick(ws, askAIByGraph, new Date());
+      await runLifeSchedulerTick(ws, askAIByGraph, new Date(), actionClient);
     } catch (error) {
       console.error('[tick] life scheduler execution failed:', error?.message || error);
     } finally {

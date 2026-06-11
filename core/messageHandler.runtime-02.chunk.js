@@ -296,7 +296,7 @@
 
     privateTypingPokeCooldownByUser.set(userId, now);
     try {
-      await sendPrivatePoke(userId);
+      await sendPrivatePoke(userId, { actionClient: globalNapCatActionClient });
       console.log('[notice] private typing poke sent', {
         userId,
         eventType,

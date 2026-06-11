@@ -17,6 +17,7 @@ const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecuto
 const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
 const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
 const { getNapCatActionClient } = require('./api/napcatActionClient');
+const { createNapCatHttpActionClient } = require('./api/napcatHttpActionClient');
 const { getSchedulerRuntime } = require('./core/schedulerRuntime');
 const { sendGroupMessage } = require('./api/qqActionService');
 const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime');
@@ -175,7 +176,9 @@ let tickRuntime = null;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 let schedulerStarted = false;
-const napcatActionClient = getNapCatActionClient();
+const napcatActionClient = config.NAPCAT_HTTP_REVERSE_ENABLED
+  ? createNapCatHttpActionClient()
+  : getNapCatActionClient();
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
 
 function askAIByGraph(...args) {
@@ -202,19 +205,34 @@ function safeSend(payload) {
 }
 
 async function sendWithRetry(payload, retries = 1, waitMs = 500) {
-  const maxRetry = Math.max(0, Number(retries) || 0);
-  for (let i = 0; i <= maxRetry; i++) {
-    if (safeSend(payload)) return true;
-    if (i < maxRetry) {
-      await new Promise((r) => setTimeout(r, waitMs));
+  if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
+    const maxRetry = Math.max(0, Number(retries) || 0);
+    for (let i = 0; i <= maxRetry; i++) {
+      try {
+        await napcatActionClient.callAction(payload.action, payload.params);
+        return true;
+      } catch (error) {
+        console.error(`[HTTP action] ${payload.action} failed (attempt ${i+1}/${maxRetry+1}):`, error.message);
+        if (i < maxRetry) await new Promise(r => setTimeout(r, waitMs));
+      }
     }
+    return false;
+  } else {
+    const maxRetry = Math.max(0, Number(retries) || 0);
+    for (let i = 0; i <= maxRetry; i++) {
+      if (safeSend(payload)) return true;
+      if (i < maxRetry) {
+        await new Promise((r) => setTimeout(r, waitMs));
+      }
+    }
+    return false;
   }
-  return false;
 }
 
 const { handleIncomingMessage } = createMessageHandler({
   config,
-  sendWithRetry
+  sendWithRetry,
+  actionClient: napcatActionClient
 });
 const napcatLogFollower = createNapcatLogFollower({
   sendWithRetry,
@@ -269,7 +287,7 @@ function connectNapCat() {
     console.log('✅ 瑞希上线啦！已连接到 NapCat');
 
     if (config.TICK_ENGINE_ENABLED && !tickStarted) {
-      tickRuntime = startTickEngine(ws, askAIByGraph);
+      tickRuntime = startTickEngine(ws, askAIByGraph, napcatActionClient);
       tickStarted = true;
     }
 
@@ -337,7 +355,7 @@ if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
   });
 
   if (config.TICK_ENGINE_ENABLED && !tickStarted) {
-    tickRuntime = startTickEngine(null, askAIByGraph);
+    tickRuntime = startTickEngine(null, askAIByGraph, napcatActionClient);
     tickStarted = true;
   }
   if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {

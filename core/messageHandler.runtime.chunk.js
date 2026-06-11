@@ -1,12 +1,14 @@
 function createMessageHandler({
   config,
   sendWithRetry,
+  actionClient = null,
   detectIntentHybridOverride = null,
   generateSessionContextSummaryOverride = null,
   inboundConcurrencyControllerOverride = null,
   runVisionCaptionWorkerOverride = null,
   normalGroupMainReplyRateLimiterOverride = null
 }) {
+  const globalNapCatActionClient = actionClient;
   const inboundTimingLogFile = path.join(config.DATA_DIR, 'inbound_timing.jsonl');
   const logInboundTiming = createInboundTimingLogger(inboundTimingLogFile, config.ENABLE_DEBUG_LOG);
   const inboundDeduper = createMessageEventDeduper({
