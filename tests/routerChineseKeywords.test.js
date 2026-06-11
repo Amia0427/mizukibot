@@ -177,6 +177,18 @@ const groupRecallRoute = detectIntent({
 assert.strictEqual(groupRecallRoute.intent.needsMemory, true);
 assert.strictEqual(groupRecallRoute.meta.recallFacet, 'group_context');
 
+const shortRecallFollowupRoute = detectIntent({
+  rawText: '更早的呢',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'private'
+});
+assert.strictEqual(shortRecallFollowupRoute.topRouteType, 'direct_chat');
+assert.strictEqual(shortRecallFollowupRoute.intent.needsMemory, true);
+assert.strictEqual(shortRecallFollowupRoute.facets.sourceScope, 'notebook');
+assert.strictEqual(shortRecallFollowupRoute.meta.recallFacet, 'recent_continuity');
+assert.deepStrictEqual(shortRecallFollowupRoute.meta.allowedTools, ['memory_cli', 'notebook_search', 'notebook_list_docs']);
+
 const weatherRoute = detectIntent({
   rawText: '今天天气怎么样',
   botQQ: '123456',

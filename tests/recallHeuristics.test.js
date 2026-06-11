@@ -5,6 +5,7 @@ const {
   isConversationRecapQuery,
   isRecentPersonalActivityRecallQuery,
   isRecentRecallQuery,
+  isShortRecallFollowupQuery,
   shouldPrioritizeMemoryProbe,
   isMemoryContinuationQuestion
 } = require('../utils/recallHeuristics');
@@ -32,6 +33,11 @@ module.exports = (() => {
   assert.strictEqual(amnesiaRecall.facet, 'relationship');
   assert.strictEqual(classifyMemoryNeed('你认识我吗').facet, 'identity');
   assert.strictEqual(classifyMemoryNeed('你知道我是谁吗').facet, 'identity');
+  const shortRecallFollowup = classifyMemoryNeed('更早的呢');
+  assert.strictEqual(isShortRecallFollowupQuery('更早的呢'), true);
+  assert.strictEqual(shortRecallFollowup.needsMemory, true);
+  assert.strictEqual(shortRecallFollowup.facet, 'recent_continuity');
+  assert.ok(String(shortRecallFollowup.reason || '').startsWith('short_recall_followup'));
   assert.strictEqual(classifyMemoryNeed('别忘了带伞').needsMemory, false);
   assert.strictEqual(classifyMemoryNeed('别忘了提交').needsMemory, false);
   assert.strictEqual(classifyMemoryNeed('别忘了提醒我开会').needsMemory, false);
