@@ -526,28 +526,46 @@ async function countTableRows(tableName = '', options = {}) {
 
 async function listTableIds(tableName = '', options = {}) {
   const normalizedTable = normalizeText(tableName);
-  if (!normalizedTable) return { ok: false, skipped: true, reason: 'empty_table', rows: 0, ids: [] };
+  if (!normalizedTable) return { ok: false, skipped: true, reason: 'empty_table', rows: 0, ids: [], vectorRows: [] };
   const openResult = await openLanceDb(options);
-  if (!openResult.ok) return { ...openResult, rows: 0, ids: [] };
+  if (!openResult.ok) return { ...openResult, rows: 0, ids: [], vectorRows: [] };
   try {
     const targetTables = shouldAggregateMemoryBuckets(normalizedTable, options)
       ? await listExistingMemoryTables(openResult.db, normalizedTable, options)
       : [normalizedTable];
-    if (targetTables.length === 0) return { ok: false, skipped: true, reason: 'table_missing', rows: 0, ids: [] };
+    if (targetTables.length === 0) return { ok: false, skipped: true, reason: 'table_missing', rows: 0, ids: [], vectorRows: [] };
     const maxIds = Math.max(1, Math.floor(Number(options.maxIds || 1000000) || 1000000));
+    const includeRows = options.includeRows === true || options.includeMetadata === true;
+    const metadataColumns = Array.from(new Set((Array.isArray(options.selectColumns) && options.selectColumns.length
+      ? options.selectColumns
+      : LANCEDB_ROW_COLUMNS.filter((column) => column !== 'vector'))
+      .map(normalizeText)
+      .filter(Boolean)));
     const ids = [];
+    const vectorRows = [];
     const tables = [];
     let rowCount = 0;
     for (const targetTable of targetTables) {
       const remaining = Math.max(0, maxIds - ids.length);
       const table = await openTable(openResult.db, targetTable);
       if (!table) continue;
-      const idRows = remaining > 0
-        ? await table.query().select(['id']).limit(remaining).toArray()
-        : [];
+      let idRows = [];
+      if (remaining > 0) {
+        try {
+          idRows = await table.query().select(includeRows ? metadataColumns : ['id']).limit(remaining).toArray();
+        } catch (error) {
+          if (!includeRows || !looksLikeMissingColumnError(error)) throw error;
+          idRows = await table.query().select(['id']).limit(remaining).toArray();
+        }
+      }
       const tableIds = (Array.isArray(idRows) ? idRows : [])
         .map((row) => normalizeText(row.id))
         .filter(Boolean);
+      if (includeRows) {
+        vectorRows.push(...(Array.isArray(idRows) ? idRows : [])
+          .map((row) => ({ ...row, table: targetTable }))
+          .filter((row) => normalizeText(row.id)));
+      }
       const tableRowCount = typeof table.countRows === 'function'
         ? Number(await table.countRows() || 0) || tableIds.length
         : tableIds.length;
@@ -560,13 +578,14 @@ async function listTableIds(tableName = '', options = {}) {
       table: normalizedTable,
       rows: rowCount,
       ids,
+      vectorRows,
       partitionMode: isUserBucketPartitionMode(options) ? PARTITION_USER_BUCKET : 'legacy',
       tableCount: tables.length,
       tables,
       truncated: ids.length < rowCount
     };
   } catch (error) {
-    return { ok: false, skipped: true, table: normalizedTable, reason: `list_ids_failed:${error.message}`, rows: 0, ids: [] };
+    return { ok: false, skipped: true, table: normalizedTable, reason: `list_ids_failed:${error.message}`, rows: 0, ids: [], vectorRows: [] };
   }
 }
 

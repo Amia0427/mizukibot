@@ -96,6 +96,9 @@ module.exports = {
   // OneBot / NapCat server token for websocket authentication.
   NAPCAT_WS_TOKEN: pick('NAPCAT_WS_TOKEN', ''),
   NAPCAT_ACTION_TIMEOUT_MS: pickNum('NAPCAT_ACTION_TIMEOUT_MS', 15000),
+  // HTTP reverse connection mode (NapCat posts to bot)
+  NAPCAT_HTTP_REVERSE_ENABLED: pickBool('NAPCAT_HTTP_REVERSE_ENABLED', false),
+  NAPCAT_HTTP_REVERSE_PORT: pickNum('NAPCAT_HTTP_REVERSE_PORT', 3002),
   FOLLOWER_RULE_ENABLED: pickBool('FOLLOWER_RULE_ENABLED', false),
   FOLLOWER_LOG_MONITOR_ENABLED: pickBool('FOLLOWER_LOG_MONITOR_ENABLED', false),
   FOLLOWER_NAPCAT_LOG_PATH: pick('FOLLOWER_NAPCAT_LOG_PATH', path.join(DATA_DIR, 'napcat-message-events.jsonl')),
