@@ -1,5 +1,10 @@
 # 更新记录
 
+## 2026-06-11
+
+### 模型与 Provider
+- **17:06** 主回复模型 HTTP 传输新增浏览器 TLS/JA3 指纹伪装，`MODEL_TLS_IMPERSONATION_ENABLED=true` 时使用 CycleTLS，异常自动回落 axios。
+
 ## 2026-06-08
 
 ### Bug 修复

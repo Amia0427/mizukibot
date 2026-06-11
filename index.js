@@ -15,6 +15,7 @@ const { createMessageHandler } = require('./core/messageHandler');
 const { initializeMemeManager } = require('./core/memeManager');
 const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
 const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
+const { shutdownCycleTLS } = require('./api/httpClient');
 const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
 const { getNapCatActionClient } = require('./api/napcatActionClient');
 const { createNapCatHttpActionClient } = require('./api/napcatHttpActionClient');
@@ -432,6 +433,9 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   }
   try { await shutdownMinecraftAgent(); } catch (error) {
     console.error('[shutdown] minecraft cleanup failed:', error?.message || error);
+  }
+  try { await shutdownCycleTLS(); } catch (error) {
+    console.error('[shutdown] cycletls cleanup failed:', error?.message || error);
   }
 
   cleanupSingleInstanceLock();

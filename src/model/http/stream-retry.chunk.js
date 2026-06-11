@@ -1,5 +1,4 @@
 const {
-  axios,
   createModelRouteTracePatch,
   extractErrorCode,
   extractHttpStatus,
@@ -13,6 +12,7 @@ const {
   buildAnthropicRequestHeaders,
   buildModelRouteDiagnostics
 } = require('./runtime-core.chunk');
+const { postModelHttp } = require('./model-post.chunk');
 const {
   buildOpenAICompatibleImageFallbackText,
   resolveAnthropicImageBlock,
@@ -166,7 +166,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
       });
       let resp;
       try {
-        resp = await axios.post(
+        resp = await postModelHttp(
           prepared.requestUrl,
           prepared.requestBody,
           getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -178,7 +178,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           const strippedRequestBody = stripReasoningFields(prepared.requestBody);
-          resp = await axios.post(
+          resp = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -221,7 +221,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           const strippedRequestBody = stripExtendedSamplingFields(prepared.requestBody);
-          resp = await axios.post(
+          resp = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -237,7 +237,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           const strippedRequestBody = stripTemperatureField(prepared.requestBody);
-          resp = await axios.post(
+          resp = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -257,7 +257,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           const strippedRequestBody = stripTopPRequestField(prepared.requestBody);
-          resp = await axios.post(
+          resp = await postModelHttp(
             prepared.requestUrl,
             strippedRequestBody,
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -278,7 +278,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           });
           const strippedRequestBody = stripOpenAIPromptCacheRetentionFromRequest(prepared.requestBody);
           try {
-            resp = await axios.post(
+            resp = await postModelHttp(
               prepared.requestUrl,
               strippedRequestBody,
               getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -298,7 +298,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
                 durationMs: Math.max(0, Date.now() - attemptStartedAt)
               });
               const strippedCacheRequestBody = stripOpenAICompatiblePromptCaching(strippedRequestBody);
-              resp = await axios.post(
+              resp = await postModelHttp(
                 prepared.requestUrl,
                 strippedCacheRequestBody,
                 getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -321,7 +321,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             attempt: i + 1,
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
-          resp = await axios.post(
+          resp = await postModelHttp(
             prepared.requestUrl,
             stripOpenAICompatiblePromptCaching(prepared.requestBody),
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -342,7 +342,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           });
           const automaticDowngrade = stripAnthropicAutomaticPromptCaching(prepared.requestBody, prepared.requestHeaders);
           try {
-            resp = await axios.post(
+            resp = await postModelHttp(
               prepared.requestUrl,
               automaticDowngrade.requestBody,
               getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, automaticDowngrade.requestHeaders, abortSignal, pinnedLookup)
@@ -357,7 +357,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
               throw automaticDowngradeError;
             }
             const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
-            resp = await axios.post(
+            resp = await postModelHttp(
               prepared.requestUrl,
               downgraded.requestBody,
               getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal, pinnedLookup)
@@ -432,6 +432,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             stream: true,
             streamDoneSeen,
             finishReason: streamFinishReason || (streamDoneSeen ? 'done' : 'stream_closed_without_terminal_event'),
+            transport: resp?.__modelHttpTransport || resp?.request?.transport || 'axios',
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           resolve();

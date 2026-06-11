@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-11 17:06 +08:00**：主回复模型 HTTP 传输新增浏览器 TLS/JA3 指纹伪装。`MODEL_TLS_IMPERSONATION_ENABLED=true` 后模型 POST 通过 CycleTLS 发送，默认 Chrome-like JA3 + Chrome HTTP/2 fingerprint，流式主回复同样启用；`MODEL_TLS_IMPERSONATION_FALLBACK_ENABLED=true` 时传输异常自动回落原 axios，避免主回复中断。小目标完成：主回复模型 TLS 不再只暴露 Node/OpenSSL 默认指纹。
+
 **2026-06-11 17:20 +08:00**：新增模型条件提示词注入。Prompt manifest 支持 `applies_when.model_pattern`，模型名包含匹配字符串时自动注入对应提示词。`GEMINI.txt` 配置为仅在使用 Gemini 模型（如 `gemini-3-flash-preview`）时注入，优先级 -900（在 SYSTEM.txt 之后）。适用于模型特定的风格约束、输出规范和角色适配。
 
 **2026-06-11 16:54 +08:00**：按当前 SQL/向量重复治理原则重构历史 LanceDB 热索引副本。执行 `node scripts/sync-lancedb-memory-index.js --full --compact`，memory bucket 覆盖写入 `3368` 条、worldbook 覆盖写入 `48` 条；复查 `storage-overlap` 为 `rawJournalRows=0`、`unexpectedVectorRows=0`、`missingVectorRows=0`、`vectorOnlyRows=0`。SQLite、Memory V3 和原始 journal 数据未删除，仍只作为源库/治理库保留。
