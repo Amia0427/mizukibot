@@ -44,6 +44,7 @@ function buildLowResourceHealthReport(options = {}) {
   const postReplyStatus = String(postReply.status || '');
   const postReplyIdleRecycled = postReplyStatus === 'missing'
     && config.POST_REPLY_WORKER_ENABLED === true
+    && config.POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED === true
     && Number(config.POST_REPLY_WORKER_RSS_RECYCLE_MB || 0) > 0
     && Number(postReply.processCount || 0) === 0;
   const checks = {
@@ -96,6 +97,7 @@ function buildLowResourceHealthReport(options = {}) {
         worldbookRerankTimeoutMs: Number(config.PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS || 0) || 0,
         imageMemoryRecallEnabled: config.IMAGE_MEMORY_RECALL_ENABLED === true,
         imageMemoryObservationLimit: Number(config.IMAGE_MEMORY_OBSERVATION_LIMIT || 0) || 0,
+        postReplyWorkerIdleRecycleEnabled: config.POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED === true,
         postReplyWorkerRssRecycleMb: Number(config.POST_REPLY_WORKER_RSS_RECYCLE_MB || 0) || 0,
         postReplyWorkerRssRecycleIdleMs: Number(config.POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS || 0) || 0,
         postReplyIdleRecycled
@@ -115,7 +117,7 @@ function buildLowResourceHealthText(report = {}) {
     `local-mcp: processes=${summary.localMcpChildren?.processCount || 0} rss=${summary.localMcpChildren?.rssMb?.total || 0}MB`,
     `memory-backfill: processes=${summary.memoryBackfill?.processCount || 0} rss=${summary.memoryBackfill?.rssMb?.total || 0}MB max=${summary.memoryBackfill?.rssMb?.max || 0}MB`,
     `post-reply: status=${summary.postReplyWorker?.status || 'unknown'} pid=${summary.postReplyWorker?.pid || 0} pidFileMatch=${summary.postReplyWorker?.pidFileMatch !== false} queue=queued:${queue.queued || 0} processing:${queue.processing || 0} failed:${queue.failed || 0}`,
-    `config: lowResource=${summary.config?.lowResourceMode === true} role=${summary.config?.runtimeRole || ''} mainBackfill=${summary.config?.mainEmbeddingBackfillOnStart === true} lancedbHelper=${summary.config?.lancedbHelperEnabled === true} skipLocalEmbeddingIndex=${summary.config?.localEmbeddingIndexScoringSkipped === true} lancedbRead=${summary.config?.lancedbReadEnabled === true} lancedbSync=${summary.config?.lancedbSyncEnabled === true} lancedbLimit=${summary.config?.lancedbCandidateLimit || 0}/${summary.config?.lancedbTimeoutMs || 0}ms rerank=${summary.config?.memoryRerankEnabled === true} rerankLimit=${summary.config?.memoryRerankCandidateLimit || 0}/${summary.config?.memoryRerankTimeoutMs || 0}ms worldbookLexicalLimit=${summary.config?.worldbookLexicalLimit || 0} worldbookSemanticLimit=${summary.config?.worldbookSemanticLimit || 0} worldbookRerankLimit=${summary.config?.worldbookRerankCandidateLimit || 0}/${summary.config?.worldbookRerankTimeoutMs || 0}ms imageMemory=${summary.config?.imageMemoryRecallEnabled === true}:${summary.config?.imageMemoryObservationLimit || 0} workerRecycle=${summary.config?.postReplyWorkerRssRecycleMb || 0}MB/${summary.config?.postReplyWorkerRssRecycleIdleMs || 0}ms idleRecycled=${summary.config?.postReplyIdleRecycled === true}`
+    `config: lowResource=${summary.config?.lowResourceMode === true} role=${summary.config?.runtimeRole || ''} mainBackfill=${summary.config?.mainEmbeddingBackfillOnStart === true} lancedbHelper=${summary.config?.lancedbHelperEnabled === true} skipLocalEmbeddingIndex=${summary.config?.localEmbeddingIndexScoringSkipped === true} lancedbRead=${summary.config?.lancedbReadEnabled === true} lancedbSync=${summary.config?.lancedbSyncEnabled === true} lancedbLimit=${summary.config?.lancedbCandidateLimit || 0}/${summary.config?.lancedbTimeoutMs || 0}ms rerank=${summary.config?.memoryRerankEnabled === true} rerankLimit=${summary.config?.memoryRerankCandidateLimit || 0}/${summary.config?.memoryRerankTimeoutMs || 0}ms worldbookLexicalLimit=${summary.config?.worldbookLexicalLimit || 0} worldbookSemanticLimit=${summary.config?.worldbookSemanticLimit || 0} worldbookRerankLimit=${summary.config?.worldbookRerankCandidateLimit || 0}/${summary.config?.worldbookRerankTimeoutMs || 0}ms imageMemory=${summary.config?.imageMemoryRecallEnabled === true}:${summary.config?.imageMemoryObservationLimit || 0} workerRecycleEnabled=${summary.config?.postReplyWorkerIdleRecycleEnabled === true} workerRecycle=${summary.config?.postReplyWorkerRssRecycleMb || 0}MB/${summary.config?.postReplyWorkerRssRecycleIdleMs || 0}ms idleRecycled=${summary.config?.postReplyIdleRecycled === true}`
   ];
   if (Array.isArray(report.failedChecks) && report.failedChecks.length > 0) {
     lines.push(`failed-checks: ${report.failedChecks.join(', ')}`);

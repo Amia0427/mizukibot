@@ -1,5 +1,7 @@
 # Windows 重启脚本诊断
 
+更新 2026-06-12 07:10 +08:00：复查 2026-06-11 21:11:58 后仍出现的 `post-reply worker not running, queue idle; skip idle restart.`，不是 daemon 本轮拉起主 bot 的补启逻辑再次失效，而是外置 worker 在空闲 RSS 回收后主动退出；随后 daemon 看见队列空闲，按旧策略不补启，导致空窗持续到下一次有队列或主 bot 重启。修复：新增 `POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED=false` 默认关闭外置 worker 空闲自回收，常驻优先；常驻模式下 daemon 发现 worker 缺席会补启，即使队列暂空也不再跳过；低资源诊断仅在显式启用该开关时接受 missing worker 作为正常 idle recycle。小目标完成：外置 worker 不再因空闲 RSS 回收长期缺席。
+
 更新 2026-06-11 18:59 +08:00：今天 `data/bot-daemon.log` 的 `post-reply worker not running, queue idle; skip idle restart.` 反复出现，不是队列判断错误，而是守护语义缺口：worker 空闲 RSS 回收退出后，daemon 只有发现 queued/可恢复 processing job 才补启；当主 bot 本轮刚被 daemon 拉起但队列暂空时，也会跳过 worker，导致外置 worker 长时间缺席。修复：`scripts/run-bot-daemon.ps1` 新增 daemon-owned startup 标记；本轮成功拉起主 bot 且 `POST_REPLY_WORKER_ENABLED=true`、非 inline 时，即使队列暂空也补启一次 worker，启动前仍先执行 PID/进程扫描去重。验证：`node scripts/run-tests.js windowsDaemonScript.test.js`。
 
 更新 2026-06-11 13:35 +08:00：`data/bot-daemon.log` 在 2026-06-11 11:14:50-11:14:52 报 `main bot did not acquire lock after daemon start (lock pid=38436 not running)`。直接原因是 daemon 启动 pid=8872 后固定 `Start-Sleep -Seconds 2` 就检查 `.mizukibot.lock`，而 `index.js` 先加载配置和模块再写锁，2 秒窗口不足；11:49:40 后续日志确认 pid=8872 已成为 `node index.js` 并持有锁。修复：`scripts/run-bot-daemon.ps1` 改为 `Wait-MainBotLockOwnership` 轮询等待锁归属，默认 `BOT_DAEMON_LOCK_WAIT_MS=30000`、`BOT_DAEMON_LOCK_POLL_MS=500`，进程提前退出则立即失败并写明原因。验证：`node scripts/run-tests.js windowsDaemonScript.test.js`。

@@ -962,6 +962,7 @@ module.exports = (async () => {
     const recycleCalls = [];
     const recycleRuntime = createPostReplyWorkerRuntime({
       queue: circuitQueue,
+      idleRecycleEnabled: true,
       rssRecycleMb: 1,
       rssRecycleIdleMs: 0,
       onRecycle: (info) => recycleCalls.push(info),
@@ -980,6 +981,7 @@ module.exports = (async () => {
             : [];
         }
       },
+      idleRecycleEnabled: true,
       rssRecycleMb: 1,
       rssRecycleIdleMs: 0,
       onRecycle: () => {

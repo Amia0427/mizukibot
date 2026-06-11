@@ -61,6 +61,9 @@ function createPostReplyWorkerRuntime(options = {}) {
     ? options.autoRequeueTransientEnabled === true
     : config.POST_REPLY_AUTO_REQUEUE_TRANSIENT_ENABLED === true;
   const autoRequeueMaxPerTick = Math.max(1, Number(options.autoRequeueMaxPerTick || config.POST_REPLY_AUTO_REQUEUE_MAX_PER_TICK) || 3);
+  const idleRecycleEnabled = options.idleRecycleEnabled !== undefined
+    ? options.idleRecycleEnabled === true
+    : config.POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED === true;
   const rssRecycleBytes = Math.max(0, Number(options.rssRecycleMb ?? config.POST_REPLY_WORKER_RSS_RECYCLE_MB) || 0) * 1024 * 1024;
   const rssRecycleIdleMs = Math.max(0, Number(options.rssRecycleIdleMs ?? config.POST_REPLY_WORKER_RSS_RECYCLE_IDLE_MS) || 0);
   const onRecycle = typeof options.onRecycle === 'function' ? options.onRecycle : null;
@@ -119,6 +122,7 @@ function createPostReplyWorkerRuntime(options = {}) {
   }
 
   function maybeRequestIdleRecycle(reason = 'rss_high') {
+    if (!idleRecycleEnabled) return false;
     if (!rssRecycleBytes || recycleRequested || activeCount > 0) return false;
     if (hasPendingQueueWorkForRecycle()) return false;
     const idleMs = Math.max(0, Date.now() - lastActiveAt);
