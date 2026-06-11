@@ -26,6 +26,17 @@
         "priority": -1000
       },
       {
+        "id": "gemini_system_prompt",
+        "path": "GEMINI.txt",
+        "required": false,
+        "kind": "system_root",
+        "authority": "system_root",
+        "priority": -900,
+        "applies_when": {
+          "model_pattern": "gemini"
+        }
+      },
+      {
         "id": "persona_identity",
         "path": "persona/01_identity.txt",
         "required": true,

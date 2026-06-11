@@ -205,7 +205,7 @@ function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeR
     const personaPrompt = fullPrompt.slice(rootPrompt.length).trim() || fullPrompt;
 
     return [
-      ...rootSnapshot.assembledBlocks.map((block) => ({
+      ...rootBlocks.map((block) => ({
         ...block,
         lane: 'stable_system'
       })),
