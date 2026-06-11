@@ -1,6 +1,7 @@
 const config = require('../config');
 const { runStructuredSubagent } = require('./structuredSubagent');
 const { buildVisionCaptionWorkerModelConfig } = require('../utils/imageModelConfigResolver');
+const { trimTextByTokenBudget } = require('../utils/contextBudget');
 
 const ALLOWED_IMAGE_SOURCES = new Set(['current', 'reply', 'forward']);
 
@@ -194,12 +195,30 @@ function sanitizeVisionCaptionOutput(output = {}) {
 
 function buildRuntimeQuestionText(originalUserText = '', visionJson = {}) {
   const original = normalizeText(originalUserText);
-  const serialized = JSON.stringify(visionJson);
+  const evidenceBudget = Math.max(256, Number(config.VISION_ROUTE_USER_TEXT_MAX_TOKENS || 6000) || 6000);
+  const originalBudget = Math.max(256, Math.floor(evidenceBudget / 4));
+  const compactOriginal = trimTextByTokenBudget(original, originalBudget, 'tail');
+  const imageCount = normalizeArray(visionJson.images).length;
+  const visibleText = sanitizeStringList(visionJson.ocr_text)
+    .concat(normalizeArray(visionJson.images).flatMap((item) => sanitizeStringList(item?.visible_text)))
+    .filter((item, index, arr) => arr.indexOf(item) === index);
+  const uncertainties = sanitizeStringList(visionJson.uncertainties)
+    .concat(normalizeArray(visionJson.images).flatMap((item) => sanitizeStringList(item?.uncertainties)))
+    .filter((item, index, arr) => arr.indexOf(item) === index);
+  const evidence = [
+    normalizeText(visionJson.recommended_prompt_context),
+    normalizeText(visionJson.summary),
+    sanitizeStringList(visionJson.user_relevant_facts).join('；'),
+    sanitizeStringList(visionJson.cross_image_relations).join('；'),
+    visibleText.length ? `可见文字：${visibleText.slice(0, 8).join('；')}` : '',
+    uncertainties.length ? `不确定项：${uncertainties.slice(0, 6).join('；')}` : ''
+  ].filter(Boolean).join('\n');
   return [
-    original ? `用户原始文本：${original}` : '用户原始文本：（用户只发送了图片）',
-    'VisionCaptionJSON:',
-    serialized,
-    '约束：后续主链只能把上面的 VisionCaptionJSON 作为视觉证据，不要假设自己直接看到了图片。'
+    compactOriginal ? `用户原始文本：${compactOriginal}` : '用户原始文本：（用户只发送了图片）',
+    `图片数量：${Math.max(1, Number(imageCount || 0) || 1)}`,
+    '视觉证据摘要：',
+    trimTextByTokenBudget(evidence || normalizeText(visionJson.short_persist_summary), evidenceBudget, 'head'),
+    '约束：后续主链只能把上面的视觉证据摘要作为依据，不要假设自己直接看到了图片。'
   ].join('\n');
 }
 

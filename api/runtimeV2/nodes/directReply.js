@@ -160,6 +160,20 @@ function createDirectReplyNode(deps = {}) {
     return '';
   }
 
+  function isVisionLiteContextRequest(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const routePolicyKey = String(request.routePolicyKey || routeMeta.routePolicyKey || '').trim().toLowerCase();
+    const chatMode = String(routeMeta.chatMode || routeMeta.chat_mode || '').trim().toLowerCase();
+    return Boolean(
+      request.imageUrl
+      || normalizeArray(request.imageUrls).length > 0
+      || routePolicyKey === 'transform/vision-summary'
+      || routePolicyKey === 'lookup/vision-answer'
+      || chatMode === 'image_summary'
+      || chatMode === 'image_qa'
+    );
+  }
+
   return async function directReplyNode(state) {
     const directReplyStartedAt = Date.now();
     const request = normalizeObject(state.request, {});
@@ -206,7 +220,10 @@ function createDirectReplyNode(deps = {}) {
       disableMemoryCliInstruction: !shouldProbeToolCalls
     });
     const preparedContext = normalizeObject(state.memory?.preparedMainConversationContext, {});
-    const directReplyPayload = normalizeArray(preparedContext.messages).length > 0
+    const shouldReusePreparedContext = normalizeArray(preparedContext.messages).length > 0
+      && !isVisionLiteContextRequest(request)
+      && String(preparedContext.contextBudgetMode || '').trim() !== 'vision_lite';
+    const directReplyPayload = shouldReusePreparedContext
       ? {
           messages: normalizeArray(preparedContext.messages),
           assistantOnlyContextMessages: normalizeArray(preparedContext.assistantOnlyContextMessages),

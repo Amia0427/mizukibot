@@ -60,12 +60,24 @@ function buildVisionTextPart(question = '', imageCount = 0) {
   ].filter(Boolean).join('\n\n');
 }
 
+function normalizeVisionEvidenceText(text = '', tokenBudget = null) {
+  const budget = Math.max(256, Number(tokenBudget || config.VISION_ROUTE_USER_TEXT_MAX_TOKENS || 6000) || 6000);
+  return trimTextByTokenBudget(String(text || '').trim(), budget, 'tail');
+}
+
+function buildVisionLiteTextContent(question = '', imageCount = 0, tokenBudget = null) {
+  return buildVisionTextPart(
+    normalizeVisionEvidenceText(question, tokenBudget),
+    imageCount
+  );
+}
+
 function buildVisionMessageContent(...args) {
   const [question = '', imageUrl = null, imageUrlsOrOptions = null] = args;
   const imageUrls = normalizeVisionImageUrls(imageUrl, imageUrlsOrOptions);
   if (imageUrls.length === 0) return question || '';
   return [
-    { type: 'text', text: buildVisionTextPart(question, imageUrls.length) },
+    { type: 'text', text: buildVisionLiteTextContent(question, imageUrls.length) },
     ...imageUrls.map((url) => ({ type: 'image_url', image_url: { url } }))
   ];
 }
@@ -79,6 +91,7 @@ module.exports = {
   buildBaseDynamicPrompt,
   buildDirectedContextPromptSnippet,
   buildDynamicPrompt,
+  buildVisionLiteTextContent,
   buildRoleplayInnerProtocolPromptSnippet,
   buildRoleplayRuntimeContextPromptSnippet,
   buildShortTermContinuityPrompt,

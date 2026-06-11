@@ -61,6 +61,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     sanitizeUserFacingText,
     isChatLikeRoute,
     buildVisionMessageContent,
+    buildVisionLiteTextContent,
     buildV2CanonicalSegments,
     buildShortTermContextMessages,
     resolveShortTermSessionKey,
@@ -487,6 +488,29 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     return out;
   }
 
+  function buildVisionLiteUserMessageContent(request = {}, messageContent = '') {
+    if (Array.isArray(messageContent)) return messageContent;
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const visualContext = normalizeObject(request.visualContext || routeMeta.visualContext, {});
+    const imageCount = Math.max(
+      1,
+      normalizeArray(request.imageUrls || routeMeta.imageUrls).length,
+      Number(visualContext?.worker?.imageCount || 0) || 0,
+      normalizeArray(visualContext?.images).length
+    );
+    if (typeof buildVisionLiteTextContent === 'function') {
+      return [{
+        type: 'text',
+        text: buildVisionLiteTextContent(messageContent, imageCount)
+      }];
+    }
+    const budget = Math.max(256, Number(config?.VISION_ROUTE_USER_TEXT_MAX_TOKENS || 6000) || 6000);
+    return [{
+      type: 'text',
+      text: trimTextByTokenBudget(normalizeMessageContent(messageContent), budget, 'tail')
+    }];
+  }
+
   function buildDirectReplyMessages(state, messageContent, systemMessages = []) {
     const request = normalizeObject(state.request, {});
     const baseMessages = normalizeArray(systemMessages)
@@ -529,13 +553,17 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       const maxOutputTokens = Number(request.modelConfig?.maxTokens || config.AI_MAX_TOKENS || config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192);
       const inputHardLimit = Math.max(2048, Number(config.IMAGE_MODEL_INPUT_TOKEN_HARD_LIMIT || 20000) || 20000);
       const visionSystemMessages = buildVisionLiteSystemMessages(pureSystemMessages);
+      const visionUserTurnMessages = [{
+        role: 'user',
+        content: buildVisionLiteUserMessageContent(request, messageContent)
+      }];
       const canonical = buildV2CanonicalSegments(state, {
         systemPromptMessages: visionSystemMessages,
         continuityMessages: [],
         shortTermSummaryMessages: [],
         recentHistoryMessages: [],
         assistantOnlyContextMessages: [],
-        userTurnMessages,
+        userTurnMessages: visionUserTurnMessages,
         toolEvidenceMessages: [],
         modelName: resolveMainConversationModelName(request),
         modelWindowTokens: inputHardLimit + Math.max(64, maxOutputTokens || 8192),
@@ -550,7 +578,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         summaryMessages: [],
         recentHistory: [],
         assistantOnlyContextMessages: [],
-        userTurnMessages,
+        userTurnMessages: visionUserTurnMessages,
         globalToolEvidenceMessages: [],
         compactionPlan: canonical.compactionPlan,
         canonicalSegments: canonical.segments,
