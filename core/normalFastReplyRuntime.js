@@ -4,6 +4,7 @@ const { getRecentSessionContextSummaries } = require('../utils/sessionContextSum
 const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { buildChatLivenessDisciplinePrompt } = require('../utils/chatLivenessContext');
 const { isUnsafeUserFacingReply } = require('../utils/userFacingReplyGuards');
+const { classifyReplyFailure, isReplyFailure } = require('../utils/replyFailure');
 
 function clampNumber(value, fallback, min = 0) {
   const n = Number(value);
@@ -211,6 +212,13 @@ async function runNormalFastReply(input = {}, deps = {}) {
   });
   const visibleText = normalizeText(reply?.visibleText || reply?.text || reply?.content || reply);
   const persistedText = normalizeText(reply?.persistedText || visibleText);
+  if (isReplyFailure(visibleText, { emptyIsFailure: true }) || isReplyFailure(persistedText, { emptyIsFailure: true })) {
+    const failure = classifyReplyFailure(persistedText || visibleText);
+    const error = new Error(`normal_fast_reply_model_failure:${failure.type || 'empty'}`);
+    error.code = 'NORMAL_FAST_REPLY_MODEL_FAILURE';
+    error.failureType = failure.type || 'empty';
+    throw error;
+  }
   if (isUnsafeUserFacingReply(visibleText) || isUnsafeUserFacingReply(persistedText)) {
     const error = new Error('normal_fast_reply_unsafe_user_facing_reply');
     error.code = 'NORMAL_FAST_REPLY_UNSAFE_USER_FACING_REPLY';

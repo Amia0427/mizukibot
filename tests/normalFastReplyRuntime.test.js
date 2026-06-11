@@ -145,6 +145,26 @@ module.exports = (async () => {
     () => runNormalFastReply({
       userId: 'u1',
       routeMeta,
+      text: '宝你们团有哪些歌',
+      sessionKey
+    }, {
+      config: runtimeConfig,
+      chatHistory,
+      getRecentSessionContextSummaries: () => [],
+      requestNonStreamingReply: async () => ({
+        visibleText: '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。',
+        persistedText: '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。'
+      })
+    }),
+    (error) => error?.code === 'NORMAL_FAST_REPLY_MODEL_FAILURE'
+      && error?.failureType === 'generic_model_failure',
+    '快速回复不应直接发送模型格式异常兜底，应抛错交给正式链路'
+  );
+
+  await assert.rejects(
+    () => runNormalFastReply({
+      userId: 'u1',
+      routeMeta,
       text: '宝你说说看',
       sessionKey
     }, {

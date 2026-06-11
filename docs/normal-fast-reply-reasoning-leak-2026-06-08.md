@@ -1,5 +1,7 @@
 # 普通用户快速回复思维链泄漏诊断
 
+更新 2026-06-11 10:51 +08:00：复盘 `2026-06-11 10:38:59 +08:00` 群 `1092700300` 的“模型返回格式不稳定”兜底。根因是 `normal_fast_reply` 的模型 HTTP 调用返回 200 后，`extractMessageContent` 没抽到可用 assistant 正文，但该兜底文本此前未被快速链路当失败处理，导致直接发群。现在 HTTP response 会携带不可枚举 `__modelCallId`，解析失败时 `model-calls.ndjson` 追加同 id 的 `status=parse_failed` 诊断行和非敏感响应结构摘要；快速回复识别该兜底后抛 `NORMAL_FAST_REPLY_MODEL_FAILURE`，由既有 catch 回退正式链路。小目标完成。
+
 更新 2026-06-09 08:45 +08:00：复查持久污染，`short_term_bridge.json`、`group_awareness_state.json`、`langgraph_v2_checkpoints`、`memory-v3` 和长期 memory 索引没有命中两条事故坏回复原文；`recallPollutionGuard` 补 `reasoning_trace_leak` 分类，群感知 recent window 在读写时隔离 unsafe 机器人回复，避免旧样式后续从 bridge / 群感知 / checkpoint / memory 注入。
 
 更新 2026-06-08 19:56 +08:00：最近普通用户群聊回复错误来自 `normal_fast_reply` 快速链路绕过正式 runtime V2 的最终输出校验。

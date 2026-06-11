@@ -221,6 +221,15 @@ function finalizeRecord(id, patch = {}) {
 }
 
 function finishModelCall(id, meta = {}) {
+  if (meta?.response && typeof meta.response === 'object') {
+    try {
+      Object.defineProperty(meta.response, '__modelCallId', {
+        value: id,
+        enumerable: false,
+        configurable: true
+      });
+    } catch (_) {}
+  }
   return finalizeRecord(id, {
     ...meta,
     status: 'succeeded',
@@ -245,6 +254,62 @@ function failModelCall(id, error, meta = {}) {
   });
 }
 
+function recordModelCallParseFailure(id, meta = {}) {
+  const record = findRecord(id);
+  if (!record) return null;
+
+  const cloned = safeClone(record, {});
+  const parseDiagnostic = safeClone(meta.parseDiagnostic || meta.responseDiagnostic || {}, {});
+  appendModelCallLog({
+    ts: nowIso(),
+    id: cloned.id,
+    status: 'parse_failed',
+    source: cloned.source,
+    phase: cloned.phase,
+    purpose: cloned.purpose,
+    request_id: cloned.request_id,
+    trace_phase_seq: cloned.trace_phase_seq,
+    provider: cloned.provider,
+    host: safeHost(meta.url || meta.requestUrl || cloned.api_base_url || ''),
+    model: cloned.model,
+    stream: cloned.stream,
+    max_tokens: cloned.max_tokens,
+    message_count: cloned.message_count,
+    tool_count: cloned.tool_count,
+    memory_injected: cloned.memory_injected,
+    prompt_integrity: cloned.prompt_integrity,
+    prompt_caching: cloned.prompt_caching,
+    usage: cloned.usage,
+    finish_reason: cloned.finish_reason,
+    user_id: cloned.user_id,
+    user_role: cloned.user_role,
+    route_policy_key: cloned.route_policy_key,
+    route_debug_key: cloned.route_debug_key,
+    top_route_type: cloned.top_route_type,
+    dispatch_branch: cloned.dispatch_branch,
+    trigger_branch: cloned.trigger_branch,
+    api_base_url: cloned.api_base_url,
+    api_base_url_host: cloned.api_base_url_host,
+    fallback_reason: cloned.fallback_reason,
+    model_route_diagnostic: cloned.model_route_diagnostic,
+    model_source: cloned.model_source,
+    api_base_url_source: cloned.api_base_url_source,
+    api_key_source: cloned.api_key_source,
+    main_fallback_scope: cloned.main_fallback_scope,
+    main_fallback_active: cloned.main_fallback_active,
+    main_fallback_forced: cloned.main_fallback_forced,
+    admin_dedicated_model_configured: cloned.admin_dedicated_model_configured,
+    attempts: cloned.attempts,
+    duration_ms: cloned.duration_ms,
+    error: normalizeText(meta.error || 'model response parsed without usable assistant content'),
+    final_error_code: normalizeText(meta.final_error_code || meta.finalErrorCode || 'response_parse_empty'),
+    status_code: Number(meta.statusCode || meta.status_code || 0) || null,
+    parse_stage: normalizeText(meta.parseStage || meta.stage || 'extract_message_content'),
+    parse_diagnostic: parseDiagnostic
+  });
+  return cloned;
+}
+
 function listRecentModelCalls(limit = 50) {
   const max = Math.max(1, Math.min(MAX_RECENT_MODEL_CALLS, Number(limit) || 50));
   return safeClone(recentModelCalls.slice(0, max), []);
@@ -261,5 +326,6 @@ module.exports = {
   failModelCall,
   flushModelCallLogsSync,
   listRecentModelCalls,
+  recordModelCallParseFailure,
   resetModelCallTracker
 };

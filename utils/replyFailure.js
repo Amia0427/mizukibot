@@ -81,6 +81,7 @@ function classifyReplyFailure(text = '') {
     || /^i drifted for a second\./i.test(compact)
     || /^我刚才在整理最终回答时没有拿到稳定正文/i.test(compact)
     || /^the network or upstream model did not respond correctly/i.test(compact)
+    || /模型返回格式不稳定|没拿到可用正文/i.test(compact)
     || /刚刚那句没组织稳|刚刚空了一拍|这句格式歪掉了|刚刚处理到一半卡住了|这边刚刚没接稳/i.test(compact)
     || /记忆那边刚刚绕住了|刚刚翻记忆没翻稳|翻完以后那句空掉了|上下文塞得太满啦|模型调用刚刚卡住了/i.test(compact)
     || /\btimeout\b/i.test(compact)

@@ -1,6 +1,7 @@
 const config = require('../../../config');
 const { postWithRetry, postStreamWithRetry } = require('../../httpClient');
 const { extractMessageContent, extractSSEEvents, flushSSEState } = require('../../parser');
+const { recordModelCallParseFailure } = require('../../../utils/modelCallTracker');
 const { getToolSchemaByName } = require('../../toolRegistry');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
 const { filterCompanionAllowedTools } = require('../../../utils/companionTools');
@@ -49,6 +50,49 @@ const {
 // const resolvedConfig = resolveUserScopedMainModelConfig(userId, modelConfig, options);
 // const bypassFallback = shouldBypassMainModelFallback(userId, options);
 const MODEL_RESPONSE_MALFORMED_REPLY = '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。';
+
+function listObjectKeys(value, limit = 12) {
+  if (!value || typeof value !== 'object') return [];
+  return Object.keys(value).slice(0, limit);
+}
+
+function summarizeMalformedResponse(response = null) {
+  const data = response?.data;
+  let parsed = data;
+  let stringJsonParsed = false;
+  if (typeof data === 'string') {
+    try {
+      parsed = JSON.parse(data);
+      stringJsonParsed = true;
+    } catch (_) {}
+  }
+  const firstChoice = Array.isArray(parsed?.choices) ? parsed.choices[0] : null;
+  const firstCandidate = Array.isArray(parsed?.candidates) ? parsed.candidates[0] : null;
+  const firstOutput = Array.isArray(parsed?.output) ? parsed.output[0] : null;
+  const geminiParts = Array.isArray(firstCandidate?.content?.parts)
+    ? firstCandidate.content.parts
+    : [];
+  return {
+    response_data_type: Array.isArray(data) ? 'array' : typeof data,
+    parsed_type: Array.isArray(parsed) ? 'array' : typeof parsed,
+    string_json_parsed: stringJsonParsed,
+    status_code: Number(response?.status || 0) || null,
+    top_level_keys: listObjectKeys(parsed),
+    choices_count: Array.isArray(parsed?.choices) ? parsed.choices.length : null,
+    first_choice_keys: listObjectKeys(firstChoice),
+    first_choice_finish_reason: String(firstChoice?.finish_reason || '').trim(),
+    candidates_count: Array.isArray(parsed?.candidates) ? parsed.candidates.length : null,
+    first_candidate_keys: listObjectKeys(firstCandidate),
+    first_candidate_finish_reason: String(firstCandidate?.finishReason || firstCandidate?.finish_reason || '').trim(),
+    gemini_part_count: geminiParts.length,
+    gemini_part_keys: geminiParts.slice(0, 5).map((part) => listObjectKeys(part, 8)),
+    output_count: Array.isArray(parsed?.output) ? parsed.output.length : null,
+    first_output_keys: listObjectKeys(firstOutput),
+    has_error: Boolean(parsed?.error),
+    error_keys: listObjectKeys(parsed?.error),
+    error_message_preview: String(parsed?.error?.message || parsed?.message || '').slice(0, 240)
+  };
+}
 
 function getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig = null) {
   if (String(resolvedConfig?.__mainModelUserRole || '').trim().toLowerCase() === 'admin') return 0;
@@ -329,6 +373,11 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
   const message = extractMessageContent(response);
   if (message) return message;
 
+  const parseDiagnostic = summarizeMalformedResponse(response);
+  recordModelCallParseFailure(response?.__modelCallId, {
+    statusCode: Number(response?.status || 0) || null,
+    parseDiagnostic
+  });
   console.error('AI response malformed(raw assistant):', String(response?.data).slice(0, 500));
   return {
     role: 'assistant',
