@@ -67,6 +67,11 @@ httpClient.postWithRetry = async (url, body) => {
     if (payload.includes('review candidate fallback failure')) {
       throw new Error('review timeout');
     }
+    if (payload.includes('review provider status zero should downgrade')) {
+      const error = new Error('Request failed with status code 0');
+      error.code = 'ERR_BAD_REQUEST';
+      throw error;
+    }
     if (payload.includes('review timeout should downgrade without blocking')) {
       return new Promise(() => {});
     }
@@ -294,6 +299,23 @@ module.exports = (async () => {
   assert.ok(timeoutReviewCall, 'timeout case should call review model once');
   assert.strictEqual(timeoutReviewCall.url, 'https://memory-review.example/v1/chat/completions');
   assert.strictEqual(timeoutReviewCall.body.__preferredProtocol, 'chat_completions');
+
+  const unavailableDegraded = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_review_unavailable',
+    type: 'like',
+    text: 'review provider status zero should downgrade',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.9,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(unavailableDegraded.ids.length, 1, 'review transport failure should downgrade and persist candidate');
+  const unavailableItem = getMemoryItems('u_pipeline_review_unavailable')[0];
+  assert.strictEqual(unavailableItem.status, 'candidate');
+  assert.strictEqual(unavailableItem.meta.writeReview.reason, 'write_review_unavailable_downgraded');
+  assert.strictEqual(unavailableItem.meta.writeReview.unavailable, true);
+  assert.strictEqual(unavailableItem.meta.writeReview.degraded, true);
+  assert.strictEqual(unavailableItem.meta.writeReview.failurePolicy, 'unavailable_candidate');
 
   const afterTimeout = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_after_timeout',

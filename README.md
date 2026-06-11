@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 07:09 +08:00**：补齐 `memoryWritePipeline` 写入审核降级漏口。复查 `data/model-calls.ndjson` 在 `2026-06-11T19:40:00Z` 到 `20:20:00Z` 的 `memory_write_review` 失败，修复后已不再双端点回退，但 `Request failed with status code 0` 仍只落 `write_review_failed`，缺少明确降级语义。现 review provider 快速断连/status 0 会写入 `meta.writeReview.reason=write_review_unavailable_downgraded`、`unavailable=true`、`degraded=true`、`failurePolicy=unavailable_candidate`，继续按 candidate 持久化；408/timeout 仍走 `write_review_timeout_downgraded`。小目标完成：review 传输失败和超时都能稳定降级，不再留下隐性学习失败。
+
 **2026-06-12 06:48 +08:00**：修复短追问记忆召回漏判。复盘 `request_id=req_fbe5ff402ae28f6c` / `messageId=1011704550`，用户问“更早的呢”时路由只看当前 4 字短句，未继承上一轮“回忆一下我们相处最搞笑的一件趣事”的记忆意图，导致 `chat/default`、`allowTools=false`，主回复 prompt 中 `memory_marker_count=0`。现“更早的呢/再之前呢/往前一点”等短召回追问会归入 `recent_continuity`，进入 `lookup/notebook-answer` 记忆链路；小目标完成：短追问不会再绕过记忆召回。
 
 **2026-06-11 19:10 +08:00**：修复管理员图片总结主链输入失控。复盘 `request_id=req_493000182e712ed3`，`direct_chat/image_summary/summary` 虽已做图片轻上下文，但 worker 成功后仍把完整 `VisionCaptionJSON` 当作 user 文本交给管理员主模型，最后一条 user payload 约 46k tokens，导致非流式首响约 51.8s。现 vision worker 只输出紧凑“视觉证据摘要”，`direct_reply` 对 `image_summary/image_qa` 强制重建 `vision_lite` payload，不复用预构建的大上下文，并按 `VISION_ROUTE_USER_TEXT_MAX_TOKENS` 裁剪 worker 文本。小目标完成：管理员图片总结主链输入预算和首响延迟已加硬控。

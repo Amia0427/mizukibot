@@ -47,6 +47,16 @@ function isWriteReviewTimeoutError(error = null) {
   return /timeout|timed out|status code 408/i.test(String(error?.message || error || ''));
 }
 
+function isWriteReviewUnavailableError(error = null) {
+  const code = String(error?.code || error?.final_error_code || '').trim().toUpperCase();
+  const status = Number(error?.response?.status || error?.status || error?.statusCode || error?.status_code || 0);
+  const message = String(error?.message || error || '');
+  if (status === 0) return true;
+  if (/status code 0/i.test(message)) return true;
+  if (['ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'ERR_NETWORK', 'UND_ERR_CONNECT_TIMEOUT'].includes(code)) return true;
+  return /network error|socket hang up|fetch failed|connection (?:reset|refused)|no response|provider unavailable/i.test(message);
+}
+
 async function withReviewTimeout(timeoutMs, factory) {
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   let timer = null;
@@ -260,6 +270,7 @@ function createWriteReviewHelpers(deps = {}) {
       failedClosed: Boolean(extra.failedClosed),
       failedCandidate: Boolean(extra.failedCandidate),
       timedOut: Boolean(extra.timedOut),
+      unavailable: Boolean(extra.unavailable),
       degraded: Boolean(extra.degraded),
       failurePolicy: normalizeText(extra.failurePolicy || ''),
       error: normalizeText(extra.error || '')
@@ -315,12 +326,18 @@ function createWriteReviewHelpers(deps = {}) {
     const configuredPolicy = normalizeText(options.reviewFailurePolicy || config.MEMORY_WRITE_REVIEW_FAILURE_POLICY).toLowerCase();
     const legacyFailOpen = options.reviewFailOpen ?? config.MEMORY_WRITE_REVIEW_FAIL_OPEN;
     const timedOut = isWriteReviewTimeoutError(error);
+    const unavailable = !timedOut && isWriteReviewUnavailableError(error);
+    const shouldDegrade = timedOut || unavailable;
     const rawFailurePolicy = configuredPolicy || (legacyFailOpen && !highRisk ? 'fail_open' : 'fail_candidate');
-    const failurePolicy = timedOut && !risk.severe ? 'timeout_candidate' : rawFailurePolicy;
+    const failurePolicy = shouldDegrade && !risk.severe
+      ? (timedOut ? 'timeout_candidate' : 'unavailable_candidate')
+      : rawFailurePolicy;
     const failOpen = failurePolicy === 'fail_open';
     const failClosed = failurePolicy === 'fail_closed';
     const failCandidate = !failClosed && !failOpen;
-    const failureReason = timedOut ? 'write_review_timeout_downgraded' : 'write_review_failed';
+    const failureReason = timedOut
+      ? 'write_review_timeout_downgraded'
+      : (unavailable ? 'write_review_unavailable_downgraded' : 'write_review_failed');
     const review = {
       decision: failOpen ? 'accept' : (risk.severe || failClosed ? 'reject' : 'candidate'),
       reason: failureReason,
@@ -341,7 +358,8 @@ function createWriteReviewHelpers(deps = {}) {
         failedClosed: Boolean(failClosed || risk.severe),
         failedCandidate: Boolean(failCandidate && !risk.severe),
         timedOut,
-        degraded: Boolean(timedOut && !risk.severe && !failClosed),
+        unavailable,
+        degraded: Boolean(shouldDegrade && !risk.severe && !failClosed),
         failurePolicy,
         error: error?.message || String(error || '')
       })

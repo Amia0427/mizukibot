@@ -1,6 +1,8 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-06-11 19:02 +08:00
+更新时间：2026-06-12 07:09 +08:00
+
+更新 2026-06-12 07:09 +08:00：复查 `2026-06-11T19:40:00Z` 到 `20:20:00Z` 的 `memoryWritePipeline/memory_write_review` 失败，剩余漏口不是 worker 队列阻塞，而是 `Request failed with status code 0` 只写成普通 `write_review_failed`，缺少 provider unavailable 降级标记。现 status 0/断连/无响应会按 `write_review_unavailable_downgraded` 落 candidate，并写入 `unavailable=true`、`degraded=true`、`failurePolicy=unavailable_candidate`；408/timeout 继续按 timeout 降级。小目标完成：post-reply 学习链路能区分“审核不可用已降级”和真正审核拒绝。
 
 更新 2026-06-11 19:02 +08:00：复查今天 10:18 左右 `memoryWritePipeline` 连续 `memory_write_review` 408 后，当前队列无 `queued/processing`，`failed` 里也没有 review timeout 造成的新积压或重复重试；对应 enrich job 已在 10:18:39 完成，后续 embedding/rerank 仍继续。修复后 review 请求固定 chat 协议并加本地硬超时，超时降级为 candidate 后继续执行后续学习任务。
 
