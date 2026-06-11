@@ -25,6 +25,7 @@ const { collectEmbeddingBackfillNodes } = require('../utils/memory-v3/embeddingI
 const { buildWorldbookDocuments, loadWorldbookEmbeddingIndex } = require('../utils/personaWorldbookSearch');
 const { loadPersonaModuleCatalog } = require('../utils/personaModules');
 const { normalizeText } = require('../utils/memory-v3/helpers');
+const { buildStorageOverlapSummary } = require('../utils/memoryStorageOverlap');
 const {
   buildMemoryIndexHealthGate,
   buildRecommendedActions
@@ -366,11 +367,24 @@ async function buildSyncSummary(args = {}) {
   ]);
   const memoryCoverage = buildCoverage(memory, memoryTableStats);
   const worldbookCoverage = buildCoverage(worldbook, worldbookTableStats);
+  const storageOverlap = await buildStorageOverlapSummary({
+    ...args,
+    limit: args.overlapLimit || args.limit || 10,
+    lanceDbOptions,
+    tableName: memoryTable,
+    tableStats: memoryTableStats
+  });
   const memoryRepair = {
     syncRows: memoryRowsToSync.length,
     readyButNotSynced: Number(memoryCoverage.readyButNotSynced || 0) || 0,
     staleTableRows: Number(memoryCoverage.staleTableRows || 0) || 0,
-    pendingEmbeddingRows: Number(memoryCoverage.pendingRows || 0) || 0
+    pendingEmbeddingRows: Number(memoryCoverage.pendingRows || 0) || 0,
+    expectedIndexCopies: Number(storageOverlap.expectedIndexCopies?.count || 0) || 0,
+    unexpectedVectorRows: Number(storageOverlap.unexpectedVectorRows?.count || 0) || 0,
+    missingVectorRows: Number(storageOverlap.missingVectorRows?.count || 0) || 0,
+    sqliteOnlyRows: Number(storageOverlap.sqliteOnlyRows?.count || 0) || 0,
+    vectorOnlyRows: Number(storageOverlap.vectorOnlyRows?.count || 0) || 0,
+    rawJournalVectorRows: Number(storageOverlap.unexpectedVectorRows?.rawJournalRows || 0) || 0
   };
   const worldbookRepair = {
     syncRows: worldbookRowsToSync.length,
@@ -378,9 +392,11 @@ async function buildSyncSummary(args = {}) {
     staleTableRows: Number(worldbookCoverage.staleTableRows || 0) || 0,
     pendingEmbeddingRows: Number(worldbookCoverage.pendingRows || 0) || 0
   };
-  const recommendedAction = memoryRepair.readyButNotSynced > 0 || worldbookRepair.readyButNotSynced > 0 || memoryRepair.staleTableRows > 0 || worldbookRepair.staleTableRows > 0
-    ? 'run_full_lancedb_reconcile'
-    : (memoryRepair.pendingEmbeddingRows > 0 ? 'run_embedding_backfill' : 'none');
+  const recommendedAction = storageOverlap.recommendedAction === 'investigate_raw_entry_vectors'
+    ? 'investigate_raw_entry_vectors'
+    : (memoryRepair.readyButNotSynced > 0 || worldbookRepair.readyButNotSynced > 0 || memoryRepair.staleTableRows > 0 || worldbookRepair.staleTableRows > 0 || memoryRepair.missingVectorRows > 0 || memoryRepair.vectorOnlyRows > 0
+      ? 'run_full_lancedb_reconcile'
+      : (memoryRepair.pendingEmbeddingRows > 0 ? 'run_embedding_backfill' : 'none'));
   const healthGate = buildMemoryIndexHealthGate({ coverage: { memory: memoryCoverage, worldbook: worldbookCoverage } });
   const recommendedActions = buildRecommendedActions(healthGate, { memory: memoryCoverage, worldbook: worldbookCoverage });
   return {
@@ -415,8 +431,10 @@ async function buildSyncSummary(args = {}) {
     },
     coverage: {
       memory: memoryCoverage,
-      worldbook: worldbookCoverage
+      worldbook: worldbookCoverage,
+      storageOverlap
     },
+    storageOverlap,
     writes: [],
     repairPlan: {
       memory: memoryRepair,
