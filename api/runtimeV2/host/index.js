@@ -6,6 +6,7 @@ const { applyLangGraphV2Topology } = require('../topology');
 const {
   buildDynamicPrompt,
   buildVisionMessageContent,
+  buildVisionLiteTextContent,
   mergeAllowedToolsWithMemoryCli,
   shouldExposeMemoryCli,
   shouldBypassHumanizerForPolicy
@@ -1002,6 +1003,7 @@ function createRuntime(options = {}) {
     sanitizeUserFacingText,
     isChatLikeRoute,
     buildVisionMessageContent,
+    buildVisionLiteTextContent,
     buildV2CanonicalSegments,
     buildShortTermContextMessages,
     resolveShortTermSessionKey,

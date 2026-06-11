@@ -164,13 +164,14 @@ module.exports = (async () => {
         summary: 'cat',
         recommendedPromptContext: '一张猫图',
         shortPersistSummary: '猫图',
-        runtimeQuestionText: '用户原始文本：这是谁\nVisionCaptionJSON:{"summary":"cat"}',
+        runtimeQuestionText: '用户原始文本：这是谁\n图片数量：1\n视觉证据摘要：\n一张猫图\n约束：后续主链只能把上面的视觉证据摘要作为依据，不要假设自己直接看到了图片。',
         persistUserText: '用户原始文本：这是谁\n视觉摘要：猫图',
         originalUserText: '这是谁'
       }
     });
 
-    assert.ok(successObserved.askQuestion.includes('VisionCaptionJSON'));
+    assert.ok(successObserved.askQuestion.includes('视觉证据摘要'));
+    assert.ok(!successObserved.askQuestion.includes('VisionCaptionJSON'));
     assert.strictEqual(successObserved.askImageUrl, null);
 
     clearProjectCache();
