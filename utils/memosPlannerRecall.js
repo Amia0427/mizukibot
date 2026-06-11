@@ -1527,6 +1527,7 @@ async function diagnoseMemosPlannerRecall(options = {}) {
     ...getConfig(),
     ...normalizeObject(options.config, {})
   };
+  const startedAt = Date.now();
   const serverName = getMemosServerName({ ...options, config: currentConfig });
   const recallSource = getMemosRecallSource({ ...options, config: currentConfig });
   const timeoutMs = clampNumber(options.timeoutMs ?? currentConfig.MEMOS_RECALL_TIMEOUT_MS, 100, 30000, 1200);
@@ -1542,10 +1543,54 @@ async function diagnoseMemosPlannerRecall(options = {}) {
   );
   const routeGate = evaluateMemosRouteGate(options.query || '', { ...options, config: currentConfig });
   const queryPlan = buildMemosRecallQuery(options.query || '', { ...options, config: currentConfig });
+  const enabled = isMemosPlannerRecallEnabled({ ...options, config: currentConfig });
+  if (!enabled && options.forceDiscovery !== true) {
+    const skippedReason = currentConfig.MEMOS_MCP_ENABLED === true
+      ? 'remote_recall_disabled'
+      : 'memos_disabled';
+    return {
+      ok: true,
+      enabled: false,
+      mcpEnabled: currentConfig.MEMOS_MCP_ENABLED === true,
+      remoteRecallEnabled: currentConfig.MEMOS_REMOTE_RECALL_ENABLED === true,
+      serverName,
+      recallSource,
+      readOnly: true,
+      configured: {
+        knowledgebaseIdsCount: kbPartition.ids.length,
+        fallbackKnowledgebaseIdsCount: kbPartition.fallbackIds.length,
+        kbFileIdsCount: fileIds.length,
+        kbAliasCount: Object.keys(kbPartition.aliasMap).length,
+        matchedAliases: kbPartition.matchedAliases,
+        usedAliasPartition: kbPartition.usedAliasPartition,
+        routeAllowlistCount: normalizeConfigList(currentConfig.MEMOS_RECALL_ROUTE_ALLOWLIST).length,
+        localQueryGuardEnabled: currentConfig.MEMOS_RECALL_LOCAL_QUERY_GUARD_ENABLED !== false,
+        queryMode: queryPlan.mode,
+        queryChanged: queryPlan.changed,
+        topK: clampNumber(options.topK ?? currentConfig.MEMOS_RECALL_TOP_K, 1, 20, 5),
+        maxChars: clampNumber(options.maxChars ?? currentConfig.MEMOS_RECALL_MAX_CHARS, 120, 8000, 900),
+        timeoutMs
+      },
+      routeGate,
+      discovery: {
+        availableTools: [],
+        kbToolName: '',
+        searchToolName: '',
+        addToolName: '',
+        mutatingToolNames: [],
+        mutatingToolsDetected: false,
+        error: '',
+        skipped: true,
+        skippedReason
+      },
+      runtime: getMemosRecallRuntimeDiagnostics({ ...options, config: currentConfig }),
+      durationMs: Math.max(0, Date.now() - startedAt)
+    };
+  }
   const discovery = await discoverMemosTools({ ...options, config: currentConfig, timeoutMs });
   return {
     ok: discovery.error ? false : true,
-    enabled: isMemosPlannerRecallEnabled({ ...options, config: currentConfig }),
+    enabled,
     mcpEnabled: currentConfig.MEMOS_MCP_ENABLED === true,
     remoteRecallEnabled: currentConfig.MEMOS_REMOTE_RECALL_ENABLED === true,
     serverName,

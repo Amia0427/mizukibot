@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-12 07:09 +08:00
+更新时间：2026-06-12 07:32 +08:00
+
+更新 2026-06-12 07:32 +08:00：长期记忆诊断入口补齐只读边界。`utils/memosPlannerRecall.diagnoseMemosPlannerRecall()` 在 `MEMOS_MCP_ENABLED=false` 或 `MEMOS_REMOTE_RECALL_ENABLED=false` 时跳过 MCP discovery，仍返回配置、route gate、cache/circuit 摘要；本地 `npm run diag:memory -- memos --query "长期记忆 偏好" --json` 实测 7ms 返回 `discovery.skippedReason=memos_disabled`。`scripts/diagnose-memory-ops.js profile-journal-db` 默认传 `autoClean=false`、`benchmark=false`，摘要新增 `cleaned/benchmarked`，只有显式 `--clean` / `--benchmark` 才清洗或测速。复查 `storage-overlap` 为 `unexpectedVectorRows=0`、`missingVectorRows=0`、`recommendedAction=none`。小目标完成：默认长期记忆巡检不再隐式改库，也不会因关闭的 MemOS 远端层卡住。
 
 更新 2026-06-12 07:09 +08:00：补齐 `memoryWritePipeline` review provider 不可用降级。复查 `data/model-calls.ndjson` 在 `2026-06-11T19:40:00Z` 到 `20:20:00Z` 之间仍连续出现的 `memory_write_review` 失败：`408` 已落 `write_review_timeout_downgraded`，但 `Request failed with status code 0` 只被归为普通 `write_review_failed`，虽然最终 candidate 持久化，治理元数据缺少明确“已降级”语义。现 `utils/memoryWritePipeline/review.js` 将 status 0、断连、无响应等 provider unavailable 错误归为 `write_review_unavailable_downgraded`，写入 `unavailable=true`、`degraded=true`、`failurePolicy=unavailable_candidate`；408/timeout 保持 `write_review_timeout_downgraded`。小目标完成：review 传输失败和超时都能稳定降级、不再留下隐性学习失败。
 
@@ -101,7 +103,7 @@
 3. 文件导入先 dry-run：`npm run memory:v3:import-file -- --user <id> --file <path.md> --dry-run`，确认 chunk 数和 category/tags 后去掉 `--dry-run`。
 4. 若 `projectionFreshness.projectionStale=true`，运行 `npm run memory:v3:migrate` 安全物化 projection。
 5. 首次启用结构化 Profile Journal DB 时先 dry-run：`node scripts/migrate-profile-journal-db.js`；确认 counters 后运行 `node scripts/migrate-profile-journal-db.js --apply`。
-6. 结构化库巡检：`npm run diag:memory -- profile-journal-db`，观察 `profileStatus.active/stale/superseded`、`quality.lowQualityActive/placeholderActive/expiredActive/unsafeJournalRecallable`、`recallSpeed`、`fallbackCount` 和 `recentCleanups`。
+6. 结构化库巡检：`npm run diag:memory -- profile-journal-db` 默认只读，观察 `profileStatus.active/stale/superseded`、`quality.lowQualityActive/placeholderActive/expiredActive/unsafeJournalRecallable`、`fallbackCount` 和 `recentCleanups`；需要执行清洗或测速时显式加 `--clean` / `--benchmark`。
 7. 长期记忆污染巡检先 dry-run：`node scripts/audit-memory-pollution.js --scrub --user <id>`；确认命中后再加 `--apply`，全局文件扫描可省略 `--user`。
 8. 重复/漂移巡检：`npm run diag:memory -- storage-overlap --json`。若 `rawJournalRows > 0`，先调查 raw entry vector 来源；若只有 `vectorOnlyRows/missingVectorRows`，运行 full LanceDB reconcile，不改 SQLite/Memory V3 原始数据。
 9. 若 `staleTableRows` 或 `readyButNotSynced` 大于 0，运行 `node scripts/repair-memory-vector-index.js --apply --compact`。

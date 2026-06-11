@@ -63,6 +63,32 @@ module.exports = (async () => {
 
   const memos = require('../utils/memosPlannerRecall');
   memos.resetMemosRecallRuntimeState();
+  const disabledDiagnostics = await memos.diagnoseMemosPlannerRecall({
+    query: '长期记忆 偏好',
+    config: {
+      MEMOS_MCP_ENABLED: false,
+      MEMOS_REMOTE_RECALL_ENABLED: false,
+      MEMOS_KB_IDS: ['basea6e3658a-4f31-4c54-ba83-821fa21f9a44']
+    }
+  });
+  assert.strictEqual(disabledDiagnostics.ok, true);
+  assert.strictEqual(disabledDiagnostics.enabled, false);
+  assert.strictEqual(disabledDiagnostics.discovery.skipped, true);
+  assert.strictEqual(disabledDiagnostics.discovery.skippedReason, 'memos_disabled');
+  assert.strictEqual(disabledDiagnostics.discovery.availableTools.length, 0);
+
+  const remoteDisabledDiagnostics = await memos.diagnoseMemosPlannerRecall({
+    query: '长期记忆 偏好',
+    config: {
+      MEMOS_MCP_ENABLED: true,
+      MEMOS_REMOTE_RECALL_ENABLED: false
+    }
+  });
+  assert.strictEqual(remoteDisabledDiagnostics.ok, true);
+  assert.strictEqual(remoteDisabledDiagnostics.enabled, false);
+  assert.strictEqual(remoteDisabledDiagnostics.discovery.skipped, true);
+  assert.strictEqual(remoteDisabledDiagnostics.discovery.skippedReason, 'remote_recall_disabled');
+
   assert.strictEqual(
     memos.isMemosPlannerRecallEnabled({
       config: {

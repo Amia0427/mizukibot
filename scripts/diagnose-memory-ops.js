@@ -85,6 +85,8 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
     evalMode: 'lancedb',
     memoryCli: false,
     gate: false,
+    profileAutoClean: false,
+    profileBenchmark: false,
     minRecallAt8: null,
     minMrrAt8: null,
     minJudgedCases: null,
@@ -140,6 +142,14 @@ function parseMemoryOpsArgs(argv = process.argv.slice(2)) {
       args.memoryCli = true;
     } else if (item === '--gate') {
       args.gate = true;
+    } else if (item === '--clean' || item === '--apply-clean' || item === '--auto-clean') {
+      args.profileAutoClean = true;
+    } else if (item === '--benchmark') {
+      args.profileBenchmark = true;
+    } else if (item === '--no-clean' || item === '--read-only') {
+      args.profileAutoClean = false;
+    } else if (item === '--no-benchmark') {
+      args.profileBenchmark = false;
     } else if (item === '--min-recall-at8') {
       args.minRecallAt8 = Number(argv[index + 1]);
       index += 1;
@@ -206,7 +216,7 @@ function buildUsageSummary() {
       audit: 'sampled memory semantic quality audit plus hard metric warnings',
       memos: 'MemOS remote recall health, read-only tool discovery, cache, circuit and KB partition summary',
       openviking: 'OpenViking recall/ingest health, cache, circuit and prompt injection readiness',
-      'profile-journal-db': 'structured SQLite profile + daily journal health, cleanup counts and fallback summary',
+      'profile-journal-db': 'read-only structured SQLite profile + daily journal health; pass --clean to apply auto-clean',
       'storage-overlap': 'read-only SQLite / Memory V3 / LanceDB overlap diagnostics without private full text'
     }
   };
@@ -410,6 +420,8 @@ function summarizeProfileJournalDb(result = {}, args = {}) {
     dbFile: result.dbFile || '',
     primaryRead: result.primaryRead === true,
     autoClean: result.autoClean === true,
+    cleaned: args.profileAutoClean === true,
+    benchmarked: args.profileBenchmark === true,
     fallbackCount: Number(result.fallbackCount || 0) || 0,
     profileStatus: result.profileStatus || {},
     journalStatus: result.journalStatus || {},
@@ -720,7 +732,8 @@ async function runMemoryOps(parsedArgs = {}, options = {}) {
       const limit = args.limit ?? 10;
       const result = runners.diagnoseProfileJournalDb({
         limit,
-        autoClean: true
+        autoClean: args.profileAutoClean === true,
+        benchmark: args.profileBenchmark === true
       });
       return createEnvelope({
         mode: 'profile-journal-db',

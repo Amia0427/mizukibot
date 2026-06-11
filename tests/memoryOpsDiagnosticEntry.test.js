@@ -129,6 +129,28 @@ const runners = {
       }
     };
   },
+  diagnoseProfileJournalDb: (args) => {
+    calls.push(['profile-journal-db', args]);
+    return {
+      ok: true,
+      enabled: true,
+      dbFile: 'D:/tmp/profile_journal.sqlite',
+      primaryRead: true,
+      autoClean: true,
+      fallbackCount: 0,
+      profileStatus: { active: 2, candidate: 1 },
+      journalStatus: { active: 3, unsafe: 0 },
+      rollups: { daily: 1, '4day': 0, monthly: 0 },
+      quality: {
+        lowQualityActive: 0,
+        placeholderActive: 0,
+        expiredActive: 0,
+        unsafeJournalRecallable: 0
+      },
+      recallSpeed: args.benchmark === true ? { searchProfileFacts: { ok: true, ms: 1 } } : null,
+      recentCleanups: []
+    };
+  },
   buildStorageOverlapSummary: async (args) => {
     calls.push(['storage-overlap', args]);
     return {
@@ -163,6 +185,13 @@ module.exports = (async () => {
   const parsedMemos = parseMemoryOpsArgs(['memos', '--query', '世界观规则']);
   assert.strictEqual(parsedMemos.mode, 'memos');
   assert.strictEqual(parsedMemos.query, '世界观规则');
+  const parsedProfileReadOnly = parseMemoryOpsArgs(['profile-journal-db']);
+  assert.strictEqual(parsedProfileReadOnly.mode, 'profile-journal-db');
+  assert.strictEqual(parsedProfileReadOnly.profileAutoClean, false);
+  assert.strictEqual(parsedProfileReadOnly.profileBenchmark, false);
+  const parsedProfileClean = parseMemoryOpsArgs(['profile-journal-db', '--clean', '--benchmark']);
+  assert.strictEqual(parsedProfileClean.profileAutoClean, true);
+  assert.strictEqual(parsedProfileClean.profileBenchmark, true);
   assert.strictEqual(parseMemoryOpsArgs(['storage-overlap', '--limit', '3']).mode, 'storage-overlap');
   assert.strictEqual(parseMemoryOpsArgs(['overlap']).mode, 'storage-overlap');
 
@@ -192,6 +221,23 @@ module.exports = (async () => {
   assert.strictEqual(memosHealth.summary.discovery.searchToolName, 'search_memory');
   assert.strictEqual(memosHealth.summary.cache.hits, 2);
   assert.strictEqual(calls.find((entry) => entry[0] === 'memos')[1].query, '世界观规则');
+
+  const profileReadOnly = await runMemoryOps(parseMemoryOpsArgs(['profile-journal-db', '--limit', '2']), { runners });
+  assert.strictEqual(profileReadOnly.mode, 'profile-journal-db');
+  assert.strictEqual(profileReadOnly.ok, true);
+  assert.strictEqual(profileReadOnly.summary.cleaned, false);
+  assert.strictEqual(profileReadOnly.summary.benchmarked, false);
+  assert.strictEqual(profileReadOnly.summary.quality.lowQualityActive, 0);
+  const profileReadOnlyCall = calls.find((entry) => entry[0] === 'profile-journal-db');
+  assert.strictEqual(profileReadOnlyCall[1].autoClean, false);
+  assert.strictEqual(profileReadOnlyCall[1].benchmark, false);
+
+  const profileClean = await runMemoryOps(parseMemoryOpsArgs(['profile-journal-db', '--clean', '--benchmark']), { runners });
+  assert.strictEqual(profileClean.summary.cleaned, true);
+  assert.strictEqual(profileClean.summary.benchmarked, true);
+  const profileCleanCall = calls.filter((entry) => entry[0] === 'profile-journal-db').at(-1);
+  assert.strictEqual(profileCleanCall[1].autoClean, true);
+  assert.strictEqual(profileCleanCall[1].benchmark, true);
 
   const storageOverlap = await runMemoryOps(parseMemoryOpsArgs(['storage-overlap', '--limit', '3']), { runners });
   assert.strictEqual(storageOverlap.mode, 'storage-overlap');
