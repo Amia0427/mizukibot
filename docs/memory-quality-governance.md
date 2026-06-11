@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-11 19:02 +08:00
+更新时间：2026-06-12 07:09 +08:00
+
+更新 2026-06-12 07:09 +08:00：补齐 `memoryWritePipeline` review provider 不可用降级。复查 `data/model-calls.ndjson` 在 `2026-06-11T19:40:00Z` 到 `20:20:00Z` 之间仍连续出现的 `memory_write_review` 失败：`408` 已落 `write_review_timeout_downgraded`，但 `Request failed with status code 0` 只被归为普通 `write_review_failed`，虽然最终 candidate 持久化，治理元数据缺少明确“已降级”语义。现 `utils/memoryWritePipeline/review.js` 将 status 0、断连、无响应等 provider unavailable 错误归为 `write_review_unavailable_downgraded`，写入 `unavailable=true`、`degraded=true`、`failurePolicy=unavailable_candidate`；408/timeout 保持 `write_review_timeout_downgraded`。小目标完成：review 传输失败和超时都能稳定降级、不再留下隐性学习失败。
 
 更新 2026-06-11 19:02 +08:00：`memoryWritePipeline` 写入审核新增明确超时降级。今天 10:18 左右 `data/model-calls.ndjson` 的连续 `memory_write_review` 408 同时落 `/v1/responses` 和 `/v1/chat/completions`，不是业务层并发双打，而是通用 HTTP 层先按 Responses 协议准备请求、失败后回退 chat，外层/内层各写一条模型调用日志。现 `utils/memoryWritePipeline/review.js` 对 review 请求显式设置 `__preferredProtocol=chat_completions`，并用本地硬超时包裹 provider 调用；超时或 408 会写入 `meta.writeReview.reason=write_review_timeout_downgraded`、`timedOut=true`、`degraded=true`，按 fail-candidate 语义落为 candidate，后续 embedding/rerank/enrich 继续执行。小目标完成：memory write review 超时不再阻塞后续学习任务。
 
