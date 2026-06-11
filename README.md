@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 07:34 +08:00**：完成 MizukiBot 可复用架构提炼，输出到 `E:\qq-bot-0.1\doc\mizukibot0`。新增总索引和 40 个可并行开发主题文档，覆盖路由契约、Runtime V2、prompt manifest、记忆治理、post-reply worker、诊断体系、NapCat 健康态、部署运维和 Rust 迁移拆解。小目标完成：其他 agent/QQ 聊天机器人可按主题并行学习和迁移。
+
 **2026-06-12 07:32 +08:00**：长期记忆诊断入口收敛为默认只读。`diag:memory memos` 在 `MEMOS_MCP_ENABLED=false` 或 `MEMOS_REMOTE_RECALL_ENABLED=false` 时不再做 MCP discovery，直接返回 disabled 摘要，实测从超时降为 7ms；`diag:memory profile-journal-db` 默认不再触发 Profile Journal DB auto-clean / benchmark，只输出健康状态，需显式 `--clean` / `--benchmark` 才执行写入清洗或测速。复查 `storage-overlap` 当前 `unexpectedVectorRows=0`、`missingVectorRows=0`、`recommendedAction=none`。小目标完成：长期记忆维护诊断不再因关闭的远端层卡住，也不会在默认巡检中隐式改库。
 
 **2026-06-12 07:16 +08:00**：修复 NapCat WebSocket 断连污染非关键链路。`data/bot-runtime.err.log` 中 `NapCat websocket is not connected` 反复打到 `thinking-emoji` 与 `continuous-message reply expand`，根因是上层没有共享连接健康状态，断连后仍持续尝试 `set_msg_emoji_like/get_msg/get_forward_msg`，还可能把离线失败写入展开负缓存。现 action client 暴露连接快照，thinking emoji 离线直接 `napcat_offline` 跳过，连续消息 reply/forward 展开离线标记 `degraded` 且不写负缓存；WebSocket `open` 后自动恢复正常 action。小目标完成：NapCat 断连不再持续打坏 thinking emoji 和连续消息展开，恢复后会自动回正。
