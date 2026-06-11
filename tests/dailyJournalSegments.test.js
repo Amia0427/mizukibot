@@ -2,6 +2,8 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { createDailyJournalSegments } = require('../utils/dailyJournal/segments');
+const { formatJournalEntries, parseJournalEntries, strictClampText } = require('../utils/dailyJournal/text');
 
 function clearProjectCache() {
   const projectRoot = path.resolve(__dirname, '..') + path.sep;
@@ -41,7 +43,8 @@ module.exports = (async () => {
     process.env.MEMORY_HYBRID_RECALL_ENABLED = 'false';
     process.env.HOT_STORE_DEBOUNCE_MS = '0';
     process.env.HOT_STORE_MAX_DELAY_MS = '0';
-    process.env.DAILY_JOURNAL_SEGMENT_MIN_PENDING_ENTRIES = '3';
+    process.env.DAILY_JOURNAL_SEGMENT_MIN_PENDING_ENTRIES = '10';
+    process.env.DAILY_JOURNAL_SEGMENT_MAX_ENTRIES = '10';
     process.env.DAILY_JOURNAL_SEGMENT_MAX_PENDING_AGE_MS = '999999999';
     clearProjectCache();
 
@@ -53,21 +56,27 @@ module.exports = (async () => {
       return true;
     };
 
-    const now = new Date('2026-04-18T10:00:00.000Z');
-    await dailyJournal.appendDailyJournalEntry('u1', 'q1', 'r1', {}, { date: now, segmentNow: false });
-    await dailyJournal.appendDailyJournalEntry('u1', 'q2', 'r2', {}, { date: new Date('2026-04-18T10:01:00.000Z'), segmentNow: false });
+    for (let i = 1; i <= 9; i += 1) {
+      await dailyJournal.appendDailyJournalEntry('u1', `q${i}`, `r${i}`, {}, {
+        date: new Date(`2026-04-18T10:${String(i).padStart(2, '0')}:00.000Z`),
+        segmentNow: false
+      });
+    }
     assert.strictEqual(calls.length, 0, 'appendDailyJournalEntry should not segment immediately when segmentNow=false');
 
     const triggered = await originalMaybeSegmentJournalByThreshold('u1', '2026-04-18', {
       segmentSummarizer: async () => 'summary text'
     });
-    assert.strictEqual(triggered, false, 'threshold helper should not segment before min pending entries');
+    assert.strictEqual(triggered, false, 'threshold helper should not segment at 9 pending turns');
 
-    await dailyJournal.appendDailyJournalEntry('u1', 'q3', 'r3', {}, { date: new Date('2026-04-18T10:02:00.000Z'), segmentNow: false });
+    await dailyJournal.appendDailyJournalEntry('u1', 'q10', 'r10', {}, { date: new Date('2026-04-18T10:10:00.000Z'), segmentNow: false });
     const triggeredAfterThreshold = await originalMaybeSegmentJournalByThreshold('u1', '2026-04-18', {
       segmentSummarizer: async () => 'summary text'
     });
-    assert.strictEqual(triggeredAfterThreshold, true, 'threshold helper should segment when min pending entries is reached');
+    assert.strictEqual(triggeredAfterThreshold, true, 'threshold helper should segment when 10 pending turns are reached');
+    const segments = dailyJournal.readSegmentSummaries('u1', '2026-04-18');
+    assert.strictEqual(segments.length, 1, '10 pending turns should produce one segment summary');
+    assert.strictEqual(segments[0].entryCount, 10, 'segment summary should cover 10 turns');
     const { loadEmbeddingIndex } = require('../utils/memory-v3/embeddingIndex');
     assert.ok(
       loadEmbeddingIndex().byNodeId.has('journal-segment:u1:2026-04-18:0'),
@@ -87,6 +96,7 @@ module.exports = (async () => {
     assert.ok(segmentEvent, 'segment generation should write a V3 episode event');
     assert.strictEqual(segmentEvent.payload.episodeDay, '2026-04-18');
     assert.strictEqual(segmentEvent.payload.textKind, 'journal_segment');
+    assert.strictEqual(segmentEvent.payload.sourceCompleteness, 'segment');
 
     assert.strictEqual(summaryEvent.type, 'episode_rollup_generated');
     assert.strictEqual(summaryEvent.payload.rollupLevel, 'daily');
@@ -94,6 +104,74 @@ module.exports = (async () => {
     assert.strictEqual(summaryEvent.payload.textKind, 'journal_daily_summary');
 
     dailyJournal.maybeSegmentJournalByThreshold = originalMaybeSegmentJournalByThreshold;
+
+    const injectedState = { users: {} };
+    let syncedEpisode = null;
+    let embeddingBackfill = null;
+    const injectedJournalEntries = Array.from({ length: 10 }, (_, index) => ({
+      time: `11:${String(index).padStart(2, '0')}`,
+      user: `user ${index + 1}`,
+      assistant: `assistant ${index + 1}`
+    }));
+    const injectedSegments = createDailyJournalSegments({
+      appendJsonLine: () => {},
+      appendPerfEvent: () => {},
+      atomicWriteText: () => {},
+      buildUserSnapshot: () => '',
+      config: {
+        CONTINUITY_JOURNAL_LOOKBACK_DAYS: 7,
+        DAILY_JOURNAL_ACTIVE_RAW_MAX_ENTRIES: 8,
+        DAILY_JOURNAL_ENABLED: true,
+        DAILY_JOURNAL_SEGMENT_MAX_BYTES: 8192,
+        DAILY_JOURNAL_SEGMENT_MAX_ENTRIES: 10,
+        DAILY_JOURNAL_SEGMENT_MIN_PENDING_ENTRIES: 10,
+        DAILY_JOURNAL_SEGMENT_MAX_PENDING_AGE_MS: 999999999,
+        DAILY_JOURNAL_SEGMENT_SUMMARY_MAX_TOKENS: 320,
+        TIMEZONE: 'Asia/Shanghai'
+      },
+      extractMessageContent: () => ({ content: 'summary text' }),
+      formatDateInTz: () => '2026-04-18',
+      formatJournalEntries,
+      getBackgroundPressureDelayMs: () => 0,
+      getEntrySidecarFilePath: () => '',
+      getJournalFilePath: () => '',
+      getMemoryApiKey: () => '',
+      getMemoryChatCompletionsUrl: () => '',
+      getMemoryModelName: () => 'test-model',
+      getSegmentsFilePath: () => path.join(dataDir, 'injected-segments.jsonl'),
+      getYearMonthFromDay: () => '2026-04',
+      isValidDayString: (day) => /^\d{4}-\d{2}-\d{2}$/.test(day),
+      loadSummaryState: () => injectedState,
+      normalizeContinuitySnapshot: () => ({}),
+      normalizeTimestampToDay: () => '2026-04-18',
+      parseJournalEntries,
+      filterInjectableJournalEntries: (entries) => entries,
+      postWithRetry: async () => ({ choices: [{ message: { content: 'summary text' } }] }),
+      readJsonLines: () => [],
+      safeReadText: () => formatJournalEntries(injectedJournalEntries),
+      saveSummaryState: () => {},
+      scheduleDailyJournalEmbeddingBackfill: (...args) => {
+        embeddingBackfill = args;
+      },
+      shiftDate: (day) => day,
+      strictClampText,
+      syncEpisodeMemory: async (...args) => {
+        syncedEpisode = args;
+        return { ok: true };
+      }
+    });
+    assert.strictEqual(
+      await injectedSegments.maybeSegmentJournalByThreshold('u_param', '2026-04-18', {
+        segmentSummarizer: async () => 'summary text'
+      }),
+      true,
+      'injected segment helper should run at 10 pending turns'
+    );
+    assert.strictEqual(syncedEpisode[0], 'u_param');
+    assert.strictEqual(syncedEpisode[2].rollupLevel, 'segment');
+    assert.strictEqual(syncedEpisode[2].textKind, 'journal_segment');
+    assert.strictEqual(syncedEpisode[2].scheduleEmbeddingBackfill, false);
+    assert.deepStrictEqual(embeddingBackfill, ['u_param', { days: ['2026-04-18'] }]);
     console.log('dailyJournalSegments.test.js passed');
   } finally {
     restoreEnv(snapshot);
