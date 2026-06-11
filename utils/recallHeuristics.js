@@ -73,6 +73,15 @@ function isShortRecallFollowupQuery(text = '') {
   return /^(?:更早(?:的)?(?:呢|吗|一点|一些)?|再(?:早|早些|之前|往前)(?:一点|一些|呢|吗)?|往前(?:一点|一些|呢|吗)?|还有(?:更早|之前)(?:的)?(?:呢|吗)?)$/i.test(q);
 }
 
+function isEllipticalFollowupQuery(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q) return false;
+  if (q.length > 28) return false;
+  if (isConversationalNoop(q)) return false;
+  if (isShortRecallFollowupQuery(q)) return true;
+  return /^(?:然后呢|那然后呢|还有呢|还有吗|还有么|还有没有|还有别的吗|还有别的呢|前面呢|之前呢|那之前呢|继续|继续说|接着|接着说|往下说|说下去|细说|展开讲讲|再说点|再讲点|再来点|more|what else|anything else|and then|go on|continue)$/i.test(q);
+}
+
 function isExternalFreshnessQuery(text = '') {
   const q = sanitizeText(text).toLowerCase();
   if (!q) return false;
@@ -111,11 +120,127 @@ function isSelfContainedPlanLikeQuery(text = '') {
     || /(?:plan a|roadmap|study plan|学习计划|学习路线|规划一下|制定.*计划)/i.test(q);
 }
 
+function hasImpressionRecallSignal(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q || isForgetReminderOnlyQuery(q)) return false;
+  return /(?:有印象|印象里|印象中|记性.{0,8}(?:不好|不太好|没那么好|差)|想起(?:来)?|想得起(?:来)?)/i.test(q)
+    && /(?:提醒我一下|提醒我|告诉我|说一下|讲一下|回忆|记得|记不记得|还记得|印象|previous|remember|recall)/i.test(q);
+}
+
+function pushContextCandidate(values, seen, value) {
+  const text = sanitizeText(value);
+  if (!text || seen.has(text)) return;
+  seen.add(text);
+  values.push(text);
+}
+
+function pushContextObjectCandidates(values, seen, source = {}) {
+  if (!source || typeof source !== 'object') return;
+  pushContextCandidate(values, seen, source.previousUserText || source.priorUserText || source.lastUserText);
+  pushContextCandidate(values, seen, source.activeTopic || source.active_topic);
+  pushContextCandidate(values, seen, source.carryOverUserTurn || source.carry_over_user_turn);
+  pushContextCandidate(values, seen, source.sceneTopic || source.scene_topic);
+  pushContextCandidate(values, seen, source.quoteAnchor || source.quote_anchor);
+  if (source.interaction && typeof source.interaction === 'object') {
+    pushContextObjectCandidates(values, seen, source.interaction);
+  }
+  if (source.scene && typeof source.scene === 'object') {
+    pushContextObjectCandidates(values, seen, source.scene);
+  }
+  if (Array.isArray(source.recentTurns)) {
+    for (let i = source.recentTurns.length - 1; i >= 0; i -= 1) {
+      const turn = source.recentTurns[i];
+      if (String(turn?.role || '').trim().toLowerCase() !== 'user') continue;
+      pushContextCandidate(values, seen, turn.content || turn.text);
+      break;
+    }
+  }
+}
+
+function pushLabeledSummaryCandidates(values, seen, summary = '') {
+  const text = sanitizeText(summary);
+  if (!text) return;
+  const labels = [
+    'Previous user',
+    'Short-term active topic',
+    'Short-term carry-over',
+    'Active topic',
+    'Carry-over user turn',
+    'Quote anchored text',
+    'Quoted text',
+    'UnresolvedUserTurn',
+    'ActiveTopic'
+  ];
+  const labelPattern = labels
+    .map((label) => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  const boundary = new RegExp(`\\s+(?:${labelPattern}|Previous assistant|Scene|Current message to|Quoted message from|Quoted origin|Quote priority mode|Quote priority reason):`, 'i');
+  let foundLabeledCandidate = false;
+  for (const label of labels) {
+    const pattern = new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*([\\s\\S]*?)(?=${boundary.source}|$)`, 'i');
+    const match = text.match(pattern);
+    if (match) {
+      foundLabeledCandidate = true;
+      pushContextCandidate(values, seen, match[1]);
+    }
+  }
+  if (!foundLabeledCandidate) pushContextCandidate(values, seen, text);
+}
+
+function collectContextualRecallCandidates(routeContext = {}) {
+  const values = [];
+  const seen = new Set();
+  const context = routeContext && typeof routeContext === 'object' ? routeContext : {};
+  pushLabeledSummaryCandidates(values, seen, context.contextSummary || context.historySummary || '');
+  pushContextObjectCandidates(values, seen, context.continuitySignals || context.continuityContext || context.shortTermContext);
+  pushContextObjectCandidates(values, seen, context.sharedShortTermContext || context.personaMemoryState);
+  if (context.meta && typeof context.meta === 'object') {
+    pushLabeledSummaryCandidates(values, seen, context.meta.contextSummary || '');
+    pushContextObjectCandidates(values, seen, context.meta.continuitySignals || context.meta.continuityContext || context.meta.shortTermContext);
+  }
+  const directedContext = context.directedContext || context.meta?.directedContext;
+  if (directedContext && typeof directedContext === 'object') {
+    pushContextCandidate(values, seen, directedContext.quotePriority?.quoteAnchoredText);
+    pushContextCandidate(values, seen, directedContext.quote?.text);
+  }
+  return values;
+}
+
+function classifyContextualRecallFollowup(cleanText = '', routeContext = {}) {
+  if (routeContext?.disableContextualRecallFollowup === true) return null;
+  if (!isEllipticalFollowupQuery(cleanText)) return null;
+
+  const current = sanitizeText(cleanText);
+  for (const candidate of collectContextualRecallCandidates(routeContext)) {
+    if (!candidate || candidate === current) continue;
+    const priorNeed = classifyMemoryNeed(candidate, {
+      cleanText: candidate,
+      facets: { sourceScope: 'none', freshness: 'unknown' },
+      intent: { needsMemory: false },
+      meta: { chatMode: 'text_chat' },
+      disableContextualRecallFollowup: true
+    });
+    if (!priorNeed.needsMemory) continue;
+    if (priorNeed.facet === 'task_or_plan') continue;
+    const facet = priorNeed.facet && priorNeed.facet !== 'default_continuity'
+      ? priorNeed.facet
+      : 'recent_continuity';
+    return {
+      needsMemory: true,
+      facet,
+      confidence: Math.max(0.84, Number(priorNeed.confidence || 0)),
+      reason: `contextual_recall_followup:${facet}`
+    };
+  }
+  return null;
+}
+
 function classifyRecallFacet(question = '') {
   const q = sanitizeText(question).toLowerCase();
   if (!q) return 'default_continuity';
   if (isShortRecallFollowupQuery(q)) return 'recent_continuity';
   if (isRecentRecallQuery(q)) return 'recent_continuity';
+  if (hasImpressionRecallSignal(q)) return 'recent_continuity';
   if (/(where did we leave off|what were we(?: just)? talking about|what were we doing|what was the thing from before|from before|earlier|previously|last time|continuity|recent|上次|刚才|刚刚|聊到哪|做到哪|接上)/i.test(q)) return 'recent_continuity';
   if (/(continue|continue with|resume|pick back up|next step|next steps|what should we do next|plan|task|todo|roadmap|继续|接着|接上|计划|任务|待办|推进)/i.test(q)) return 'task_or_plan';
   if (/(喜欢|不喜欢|讨厌|偏好|爱好|口味|习惯|风格|like|likes|prefer|preference|favorite|favourite|dislike|hobby)/i.test(q)) return 'preference';
@@ -240,10 +365,13 @@ function classifyMemoryNeed(text = '', routeContext = {}) {
 
   const q = cleanText.toLowerCase();
   const amnesiaRelationshipRecall = isAmnesiaRelationshipRecallQuery(cleanText);
+  const contextualRecallFollowup = classifyContextualRecallFollowup(cleanText, routeContext);
+  if (contextualRecallFollowup) return contextualRecallFollowup;
   const shortRecallFollowup = isShortRecallFollowupQuery(cleanText);
   const explicitRecall = !isForgetReminderOnlyQuery(cleanText) && (
     /(?:记得|记不记得|还记得|想得起来|回忆|回想|忘了|不记得|记不得|想不起来|之前|以前|上次|刚才|刚刚|前几天|昨天|往日种种|我们的过去|我们之间|履历|历史|记录|日志|remember|recall|previous|earlier|before|last time|history)/i.test(q)
     || /(?:最近|今天|今日).{0,14}(?:我|我们|咱|俺|和你).{0,14}(?:聊|说|讲|提|做|打|玩|听|看|刷|发|买|吃|喝|练|测|试|去).{0,12}(?:什么|啥|哪些|哪几|过|了|的)/i.test(q)
+    || hasImpressionRecallSignal(cleanText)
   );
   const personalSubject = /(?:我|我们|俺|咱|我的|我们的|me|my|we|our)/i.test(q);
   const personalFactQuestion = personalSubject && /(?:喜欢|爱好|讨厌|偏好|是谁|认识我|认得我|知道我|身份|画像|人设|性格|目标|关系|熟悉|是不是|有没有|会不会|要不要|说过|提过|聊过|发过|打过|玩过|看过|听过|做过|去过|买过|吃过|喝过|练过|测过|试过|哪些|什么|啥|哪几)/i.test(q);
@@ -283,6 +411,7 @@ module.exports = {
   getFacetSourceWeights,
   isConversationalNoop,
   isConversationRecapQuery,
+  isEllipticalFollowupQuery,
   isAmnesiaRelationshipRecallQuery,
   isRecentPersonalActivityRecallQuery,
   isRecentRecallQuery,

@@ -508,6 +508,17 @@
       if (handled) return;
     }
 
+    const previousShortTermState = shortTermMemory?.[sessionKey] && typeof shortTermMemory[sessionKey] === 'object'
+      ? shortTermMemory[sessionKey]
+      : {};
+    const routeContinuitySignals = {
+      activeTopic: String(previousShortTermState?.interaction?.activeTopic || previousShortTermState?.activeTopic || '').trim(),
+      carryOverUserTurn: String(previousShortTermState?.interaction?.carryOverUserTurn || previousShortTermState?.carryOverUserTurn || '').trim(),
+      sceneTopic: String(previousShortTermState?.scene?.activeTopic || '').trim(),
+      recentTurns: Array.isArray(previousShortTermState?.interaction?.recentTurns)
+        ? previousShortTermState.interaction.recentTurns.slice(-4)
+        : []
+    };
     const routerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 180, directedContext });
     const plannerContextSummary = buildSubagentContextSummary(senderId, groupId, { maxLength: 320, directedContext });
     const routeResolverStartedAt = Date.now();
@@ -531,6 +542,7 @@
         chatType,
         contextSummary: routerContextSummary,
         directedContext,
+        continuitySignals: routeContinuitySignals,
         effectiveIntentText: runtimeQuestionText
       }, { requestTrace: cloneTraceForMeta(requestTrace) });
     } catch (error) {

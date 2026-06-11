@@ -1,4 +1,7 @@
-const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
+const {
+  normalizeShortTermState,
+  resolveShortTermSessionKey
+} = require('../utils/shortTermMemory');
 
 function sanitizeSubagentContextSnippet(text = '') {
   return String(text || '')
@@ -214,7 +217,8 @@ function buildVisualImageCollection(continuousMeta = null, directedContext = nul
 
 function createMessageVisualContext(deps = {}) {
   const {
-    chatHistory
+    chatHistory,
+    shortTermMemory
   } = deps;
 
   function getLastAssistantReplyForSession(senderId = '', groupId = '') {
@@ -244,11 +248,19 @@ function createMessageVisualContext(deps = {}) {
   }
 
   function buildSubagentContextSummary(senderId = '', groupId = '', { maxLength = 220, directedContext = null } = {}) {
+    const sessionKey = resolveShortTermSessionKey(senderId, { groupId });
+    const shortTermState = shortTermMemory?.[sessionKey]
+      ? normalizeShortTermState(shortTermMemory[sessionKey])
+      : null;
     const lastUserText = getLastUserMessageForSession(senderId, groupId);
     const lastAssistantReply = getLastAssistantReplyForSession(senderId, groupId);
     const lines = [];
     const directedSummary = buildDirectedConversationSummary(directedContext, { maxLength });
     if (directedSummary) lines.push(directedSummary);
+    const activeTopic = String(shortTermState?.interaction?.activeTopic || shortTermState?.activeTopic || '').trim();
+    const carryOverUserTurn = String(shortTermState?.interaction?.carryOverUserTurn || shortTermState?.carryOverUserTurn || '').trim();
+    if (activeTopic) lines.push(`Short-term active topic: ${activeTopic}`);
+    if (carryOverUserTurn) lines.push(`Short-term carry-over: ${carryOverUserTurn}`);
     if (lastUserText) lines.push(`Previous user: ${lastUserText}`);
     if (lastAssistantReply) lines.push(`Previous assistant: ${lastAssistantReply}`);
     return clipSubagentContextSummary(lines.join('\n'), maxLength);

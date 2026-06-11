@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 07:10 +08:00**：召回路由从“短句关键词补丁”升级为上下文继承。`detectIntent` 现在会使用 `contextSummary` / `continuitySignals` 判断“然后呢/还有呢/继续说”等椭圆追问是否承接上一轮记忆召回；短句独立出现不触发记忆，只有上一轮 active topic、carry-over 或 previous user 明确是回忆/日志/历史问题时才继承 `needsMemory`。同时本地已判定的 memory route 对 AI router refine 保持 sticky，避免被降回 `chat/default`。小目标完成：短追问召回不再依赖枚举短语。
+
 **2026-06-12 07:09 +08:00**：补齐 `memoryWritePipeline` 写入审核降级漏口。复查 `data/model-calls.ndjson` 在 `2026-06-11T19:40:00Z` 到 `20:20:00Z` 的 `memory_write_review` 失败，修复后已不再双端点回退，但 `Request failed with status code 0` 仍只落 `write_review_failed`，缺少明确降级语义。现 review provider 快速断连/status 0 会写入 `meta.writeReview.reason=write_review_unavailable_downgraded`、`unavailable=true`、`degraded=true`、`failurePolicy=unavailable_candidate`，继续按 candidate 持久化；408/timeout 仍走 `write_review_timeout_downgraded`。小目标完成：review 传输失败和超时都能稳定降级，不再留下隐性学习失败。
 
 **2026-06-12 06:48 +08:00**：修复短追问记忆召回漏判。复盘 `request_id=req_fbe5ff402ae28f6c` / `messageId=1011704550`，用户问“更早的呢”时路由只看当前 4 字短句，未继承上一轮“回忆一下我们相处最搞笑的一件趣事”的记忆意图，导致 `chat/default`、`allowTools=false`，主回复 prompt 中 `memory_marker_count=0`。现“更早的呢/再之前呢/往前一点”等短召回追问会归入 `recent_continuity`，进入 `lookup/notebook-answer` 记忆链路；小目标完成：短追问不会再绕过记忆召回。

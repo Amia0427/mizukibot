@@ -213,7 +213,8 @@ function createMessageHandler({
     if (!config.LAZY_COORDINATOR_INIT_ENABLED && visualContextTools) return visualContextTools;
     if (!visualContextTools) {
       visualContextTools = createMessageVisualContext({
-        chatHistory
+        chatHistory,
+        shortTermMemory
       });
     }
     return visualContextTools;
