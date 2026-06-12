@@ -4,6 +4,10 @@
 
 ## 近期更新
 
+**2026-06-12 23:08 +08:00**：修复长期记忆对主观关系问题的误召回。复盘私聊 `messageId=699530001`“你最喜欢我的哪一点”：路由误判为 `lookup/notebook-answer`，召回注入 2026-05-27 无关成人内容 journal segment 和多个背景级 Q/A，虽最终回复未完全跑偏但 prompt 已被污染。现“你最喜欢我的哪一点”这类当前主观看法不触发长期记忆；明确“记得/之前/回忆”时仍召回。`retrieved_memory_lite` 自动注入改为需要强证据或明确召回意图，heuristic 也只在 `forceMemoryContext` 时默认带 Retrieved/Daily Journal。小目标完成：普通主观情感提问不再被长期记忆噪声带偏。
+
+**2026-06-12 23:03 +08:00**：修复管理员 `/check` 被同会话慢请求堵住。复盘 22:48:55 +08:00 的 `messageId=2039086334`：消息已进入 NapCat 与 `message_ingress`，但 22:47:22 的同管理员图片摘要仍占用 `qq-group:1092700300:user:1960901788` 会话入站锁，`/check` 在 22:49:08 进入 admin 队列后 30s 内没拿到锁，最终 `queued request timed out after 30000ms`。现 `/check` 这类管理员快命令可绕过同会话 per-user 入站限制，并在 trace/log 写入 `ignoreSessionLimitReason=admin_fast_check`。小目标完成：模型自检指令不再被上一条同用户长回复吞掉。
+
 **2026-06-12 20:32 +08:00**：修复 fcapp Claude 主回复端点协议选择。仅当主回复 host 为 `a-ocnfniawgw.cn-shanghai.fcapp.run` 时，出站层强制走 Anthropic `/v1/messages` 并合并 `context-1m-2025-08-07` beta；其它端点不默认改走 `/v1/messages`。真实请求确认 `claude-haiku-4-5-20251001` 在该链路返回 200，本地运行配置切到该模型。小目标完成：fcapp 端点不再误走 `/v1/chat/completions`。
 
 **2026-06-12 20:28 +08:00**：修复 HTTP 反向模式重启后 `127.0.0.1:3002` 空窗。复盘 NapCat `ECONNREFUSED 127.0.0.1:3002`：主 bot 已硬退出，daemon 又因连续早退进入冷却，导致 NapCat 上报端口无人监听。现 daemon 在 HTTP reverse 启用时会检查 `NAPCAT_HTTP_REVERSE_PORT` listener，端口空且本轮处于早退冷却时允许一次受节流恢复，并写入 `data/bot-main-port-recovery-state.json`；主进程增加 `beforeExit/exit/SIGBREAK/SIGHUP` 和 Node diagnostic report 证据。小目标完成：3002 端口空窗不会被早退冷却长期放大。

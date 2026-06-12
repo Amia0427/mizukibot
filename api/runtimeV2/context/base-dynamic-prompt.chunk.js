@@ -571,6 +571,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     continuitySignals: options?.continuitySignals,
     directedContext: options?.routeMeta?.directedContext,
     personaModules: dynamicPromptPlan.personaModules,
+    forceMemoryContext,
     hasAffinityState: true,
     hasRoleplayRuntimeContext: Boolean(roleplayRuntimeContextText),
     hasChatLivenessDiscipline: Boolean(chatLivenessDisciplineText),

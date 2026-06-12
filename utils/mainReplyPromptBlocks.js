@@ -349,7 +349,7 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   if (input.hasMemoryRecallPolicy) {
     push('memory_recall_policy', 'memory recall policy should govern recalled evidence use');
   }
-  if (input.hasRetrievedMemory) {
+  if (input.hasRetrievedMemory && input.forceMemoryContext) {
     push('retrieved_memory_lite', 'retrieved memory candidates are available for this turn');
   }
   if (input.hasMemosRecall) {
@@ -358,7 +358,7 @@ function buildHeuristicDynamicPromptPlan(input = {}) {
   if (input.hasOpenVikingRecall) {
     push('openviking_recall', 'OpenViking external long-term recall is available for this turn');
   }
-  if (input.hasDailyJournal) {
+  if (input.hasDailyJournal && input.forceMemoryContext) {
     push('daily_journal', 'daily journal recall is available for this turn');
   }
   if (input.hasLongTermProfile) push('long_term_profile', 'long-term profile is available and may help continuity');

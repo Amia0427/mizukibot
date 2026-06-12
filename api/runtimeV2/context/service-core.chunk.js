@@ -861,13 +861,16 @@ function shouldRuntimeAddRetrievedMemoryBlock(question = '', options = {}, dynam
   const trace = memoryContext?.diagnostics?.memoryTrace && typeof memoryContext.diagnostics.memoryTrace === 'object'
     ? memoryContext.diagnostics.memoryTrace
     : {};
-  const traceBackedEvidence = normalizeArray(trace.hits).some((item) => item && typeof item === 'object')
-    || Number(trace.retrieved_count || trace.retrievedCount || 0) > 0
-    || normalizeArray(trace.injected_block_ids || trace.injectedBlockIds).map((item) => normalizeText(item)).includes('retrieved_memory_lite');
+  const strongTraceEvidence = normalizeArray(trace.hits).some((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const tier = normalizeText(item.finalTier || item.tier).toLowerCase();
+    if (tier === 'strong') return true;
+    return Number(item.score || 0) >= Number(getConfig().MEMORY_STRONG_RECALL_MIN_SCORE || 0.2);
+  });
   if (dynamicPromptPlan?.plannerProvided === true) {
-    return planIncludesBlock(dynamicPromptPlan, 'retrieved_memory_lite') || traceBackedEvidence;
+    return planIncludesBlock(dynamicPromptPlan, 'retrieved_memory_lite') || strongTraceEvidence;
   }
-  return true;
+  return strongTraceEvidence;
 }
 
 function resolveMemoryPromptBudgetMs(options = {}, question = '') {
