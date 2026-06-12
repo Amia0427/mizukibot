@@ -85,10 +85,11 @@ function createInboundConcurrencyController(options = {}) {
   function canAcquire(request = {}) {
     const lane = String(request.lane || '').trim().toLowerCase();
     const sessionKey = String(request.sessionKey || request.userId || '').trim();
+    const ignoreSessionLimit = request.ignoreSessionLimit === true;
     if (!Object.prototype.hasOwnProperty.call(laneLimits, lane)) return false;
     if (!sessionKey) return false;
     if (!hasLaneCapacity(lane)) return false;
-    if (getActiveForSession(sessionKey) >= perUserLimit) return false;
+    if (!ignoreSessionLimit && getActiveForSession(sessionKey) >= perUserLimit) return false;
     return true;
   }
 
@@ -116,6 +117,7 @@ function createInboundConcurrencyController(options = {}) {
       chatType: String(request.chatType || '').trim(),
       concurrencyScope: String(request.concurrencyScope || '').trim(),
       privilegedPrivateChat: request.privilegedPrivateChat === true,
+      ignoreSessionLimit: request.ignoreSessionLimit === true,
       waitMs,
       ...buildSnapshot()
     });
@@ -146,6 +148,7 @@ function createInboundConcurrencyController(options = {}) {
           chatType: String(request.chatType || '').trim(),
           concurrencyScope: String(request.concurrencyScope || '').trim(),
           privilegedPrivateChat: request.privilegedPrivateChat === true,
+          ignoreSessionLimit: request.ignoreSessionLimit === true,
           abnormalEnd: meta.hadError === true,
           runtimeMs: Math.max(0, Date.now() - acquiredAt),
           ...buildSnapshot()
@@ -212,6 +215,7 @@ function createInboundConcurrencyController(options = {}) {
       chatType: String(request.chatType || '').trim(),
       concurrencyScope: String(request.concurrencyScope || '').trim(),
       privilegedPrivateChat: request.privilegedPrivateChat === true,
+      ignoreSessionLimit: request.ignoreSessionLimit === true,
       enqueuedAt: Date.now()
     };
 
@@ -252,6 +256,7 @@ function createInboundConcurrencyController(options = {}) {
         chatType: normalized.chatType,
         concurrencyScope: normalized.concurrencyScope,
         privilegedPrivateChat: normalized.privilegedPrivateChat,
+        ignoreSessionLimit: normalized.ignoreSessionLimit,
         queueLength: queues[normalized.lane].length,
         ...buildSnapshot()
       });

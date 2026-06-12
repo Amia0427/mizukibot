@@ -38,6 +38,32 @@ module.exports = (async () => {
   const same = await sameSessionQueued;
   same.release();
 
+  const adminInbound = createInboundConcurrencyController({
+    globalLimit: 2,
+    generalLimit: 0,
+    adminLimit: 2,
+    perUserLimit: 1,
+    maxQueueLength: 0,
+    queueTimeoutMs: 0
+  });
+  const slowAdmin = await adminInbound.acquire({
+    userId: 'admin',
+    sessionKey: 'qq-group:g:user:admin',
+    lane: 'admin',
+    messageId: 'slow'
+  });
+  const fastAdmin = await adminInbound.acquire({
+    userId: 'admin',
+    sessionKey: 'qq-group:g:user:admin',
+    lane: 'admin',
+    messageId: 'check',
+    ignoreSessionLimit: true
+  });
+  assert.ok(fastAdmin, 'admin fast command should bypass same-session inbound limit');
+  assert.strictEqual(adminInbound.getSnapshot().activeAdmin, 2);
+  fastAdmin.release();
+  slowAdmin.release();
+
   console.log('concurrencyBackpressure.test.js passed');
 })().catch((error) => {
   console.error(error);
