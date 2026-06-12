@@ -14,6 +14,10 @@ const {
 module.exports = (() => {
   assert.strictEqual(isMemoryContinuationQuestion('你觉得这个名字好听吗'), false);
   assert.strictEqual(classifyMemoryNeed('你觉得这首歌怎么样').needsMemory, false);
+  const subjectiveRelationship = classifyMemoryNeed('你最喜欢我的哪一点');
+  assert.strictEqual(subjectiveRelationship.needsMemory, false);
+  assert.strictEqual(subjectiveRelationship.reason, 'current_subjective_relationship_question');
+  assert.strictEqual(classifyMemoryNeed('你记得你最喜欢我的哪一点吗').needsMemory, true);
   assert.strictEqual(classifyMemoryNeed('今天天气怎么样').needsMemory, false);
   assert.strictEqual(classifyMemoryNeed('今天吃什么比较省事').needsMemory, false);
   assert.strictEqual(classifyMemoryNeed('最近吃什么比较省事').needsMemory, false);

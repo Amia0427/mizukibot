@@ -264,6 +264,15 @@ const subjectiveRoute = detectIntent({
 });
 assert.notStrictEqual(subjectiveRoute.intent.needsMemory, true);
 
+const subjectiveRelationshipRoute = detectIntent({
+  rawText: '你最喜欢我的哪一点',
+  botQQ: '123456',
+  userId: 'u1',
+  chatType: 'private'
+});
+assert.notStrictEqual(subjectiveRelationshipRoute.intent.needsMemory, true);
+assert.strictEqual(subjectiveRelationshipRoute.facets.sourceScope, 'none');
+
 const textOnlyPlanRoute = detectIntent({
   rawText: 'plan a study roadmap',
   botQQ: '123456',

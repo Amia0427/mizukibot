@@ -13,6 +13,15 @@
 ### 原因
 防止误报的机械故障污染上下文，历史拒绝记录不影响新prompt效果。
 
+## 运行维护 2026-06-12 23:03
+
+- 现场症状：22:48:55 +08:00 群内 `[CQ:at] /check` 没有发送模型自检结果。
+- 证据：`data/napcat-message-events.jsonl` 有 `messageId=2039086334`；`data/inbound_timing.jsonl` 只有 `message_ingress` 与 `continuous_preprocess_done`，没有 `inbound_lock_acquired/admin_route_dispatch_start`。
+- 根因：同管理员同会话上一条图片摘要请求 `messageId=594059169` 从 22:47:22 跑到 22:49:52，`perUserLimit=1` 阻止 `/check` 并行进入；30s 队列超时后被 `message-ingress async job failed` 吞掉。
+- 最小修复：入站并发控制新增 `ignoreSessionLimit`，仅群/私聊管理员 `/check` 在 acquire 前识别后启用；trace/log 写入 `ignoreSessionLimitReason=admin_fast_check`。
+- 验证：`node scripts/run-tests.js concurrencyBackpressure.test.js messageHandlerAdminCheckConcurrency.test.js messageHandlerInboundConcurrency.test.js`。
+- 小目标已完成：管理员模型自检快命令不再被同用户上一条长耗时回复压到队列超时。
+
 ## 运行维护 2026-06-12 20:32
 
 - 修复 fcapp Claude 主回复端点协议选择：仅 `a-ocnfniawgw.cn-shanghai.fcapp.run` host 被强制切到 Anthropic `/v1/messages`。
@@ -57,6 +66,14 @@
 - 密钥仅写入本地 `.env`，文档不记录明文 key。
 - 复跑模型自检：plan、embedding、rerank、memory、main_reply、admin_reply、passive_awareness_decision、passive_awareness_reply 全部 OK。
 - 小目标已完成：原 plan / passive awareness decision 的 `http_403` 已通过配置切换消除。
+
+## 运行维护 2026-06-12 23:08
+
+- 定位私聊 `messageId=699530001`：“你最喜欢我的哪一点”被误判为 `lookup/notebook-answer`，`memory-recall-observability.ndjson` 中 `req_f868b8d545f88b5b` 注入了 2026-05-27 无关成人内容 journal segment 与背景级 Q/A。
+- 根因：召回规则把“我的 + 喜欢/哪一点”当作 preference history；prompt runtime 又把有 trace 命中的弱证据自动升级为 `retrieved_memory_lite`。
+- 最小修复：当前主观关系提问不触发 memory；明确“记得/之前/回忆”仍召回；`retrieved_memory_lite` 自动注入要求强证据或强制记忆上下文；heuristic 仅在 `forceMemoryContext` 时默认带 Retrieved/Daily Journal。
+- 回归覆盖：`tests/subjectiveRelationshipMemoryGate.test.js`、`tests/recallHeuristics.test.js`、`tests/routerChineseKeywords.test.js`。
+- 小目标已完成：普通主观情感提问不再被长期记忆噪声带偏。
 
 ## 运行维护 2026-06-12 12:42
 

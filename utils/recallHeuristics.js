@@ -112,6 +112,16 @@ function isSubjectiveOpinionOnlyQuery(text = '') {
   return /^(?:你觉得|你认为|你喜不喜欢|你喜歡|你怎么看|觉得.*好听吗|觉得.*怎么样|what do you think|how do you feel)/i.test(q);
 }
 
+function isCurrentSubjectiveRelationshipQuestion(text = '') {
+  const q = sanitizeText(text).toLowerCase();
+  if (!q || isForgetReminderOnlyQuery(q)) return false;
+  if (/(?:记得|记不记得|还记得|之前|以前|上次|刚才|刚刚|昨天|前天|回忆|回想|聊过|说过|提过|记录|日志|history|remember|recall|previous|earlier|last time)/i.test(q)) {
+    return false;
+  }
+  return /^(?:你|宝|宝宝|bot|assistant|mizuki|瑞希)?\s*(?:最)?(?:喜欢|喜歡|欣赏|在意|看重|讨厌|討厭|不喜欢|不喜歡|觉得|认为|認為|怎么看|如何看待).{0,18}(?:我|我的|我们|我們|咱|咱们|俺|me|my|us|our).{0,14}(?:哪|什么|啥|哪里|哪一点|哪一點|一点|一點|地方|部分|性格|特质|特質|优点|優點|缺点|缺點|感觉|看法)?[吗嘛呢呀啊？?]*$/i.test(q)
+    || /^(?:我|我的|我们|我們|咱|咱们|俺|me|my|us|our).{0,14}(?:哪里|哪一点|哪一點|什么|啥|哪个地方|哪方面).{0,12}(?:让你|令你|使你)?(?:喜欢|喜歡|欣赏|在意|看重|讨厌|討厭|不喜欢|不喜歡)[吗嘛呢呀啊？?]*$/i.test(q);
+}
+
 function isSelfContainedPlanLikeQuery(text = '') {
   const q = sanitizeText(text).toLowerCase();
   if (!q) return false;
@@ -352,6 +362,9 @@ function classifyMemoryNeed(text = '', routeContext = {}) {
   if (isSubjectiveOpinionOnlyQuery(cleanText)) {
     return { needsMemory: false, facet: 'default_continuity', confidence: 0, reason: 'subjective_opinion_only' };
   }
+  if (isCurrentSubjectiveRelationshipQuestion(cleanText)) {
+    return { needsMemory: false, facet: classifyRecallFacet(cleanText), confidence: 0, reason: 'current_subjective_relationship_question' };
+  }
   if (isSelfContainedPlanLikeQuery(cleanText)) {
     return { needsMemory: false, facet: 'task_or_plan', confidence: 0, reason: 'self_contained_plan' };
   }
@@ -411,6 +424,7 @@ module.exports = {
   getFacetSourceWeights,
   isConversationalNoop,
   isConversationRecapQuery,
+  isCurrentSubjectiveRelationshipQuestion,
   isEllipticalFollowupQuery,
   isAmnesiaRelationshipRecallQuery,
   isRecentPersonalActivityRecallQuery,
