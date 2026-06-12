@@ -198,7 +198,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     const customSnapshot = buildPromptSnapshot(customPromptBlock ? [customPromptBlock] : [], {
       stage: customStage,
       policyKey: String(options?.routePolicyKey || '').trim() || customStage,
-      isAdmin: adminPromptContext
+      isAdmin: adminPromptContext,
+      modelName: options.modelName || options.model_name || options.model
     });
     return {
       dynamicPrompt: customSnapshot.renderedSystemMessages.map((message) => String(message.content || '').trim()).filter(Boolean).join('\n\n'),
@@ -685,7 +686,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     stage: 'main',
     policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
     budgetTokens: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens),
-    isAdmin: adminPromptContext
+    isAdmin: adminPromptContext,
+    modelName: options.modelName || options.model_name || options.model
   });
   let dynamicPrompt = serializePromptBlocks(snapshotBlocks);
   const promptBudget = Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens);

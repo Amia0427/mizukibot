@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-10 20:10 +08:00
+更新时间：2026-06-13 02:23 +08:00
 
 ## 已调整
 
+- 2026-06-13 02:23 +08:00：Gemini 主回复提示词注入链路按 `modelName` 收敛，不修改模型采样配置。稳定 prompt cache key、base prompt snapshot、compact/custom prompt snapshot 和 render helper 都会传递显式 `modelName`，避免非 Gemini 缓存污染 Gemini 条件块；native Gemini 出站层识别 manifest 已注入的 `prompts/GEMINI.txt` 后只保留 `[GeminiRuntimeAdapter]` 标记，防止重复全文把输出推向模板化、过度顺从或僵硬节奏。`tests/promptGoldenSnapshots.test.js` 已覆盖当前 `GEMINI.txt`、Gemini 稳定块和 native systemInstruction。
 - 2026-06-10 20:10 +08:00：最新模型自检失败拆分为两类：`admin_reply` 在 `apiapipp.com/v1/chat/completions` 上超过 25s 自检上限，30s 单项复测成功，暂归为上游瞬时慢响应；`passive_awareness_reply` 因独立 gcli + `gemini-3-flash-preview` 未带 provider 被 HTTP 层按 Gemini native 改写并 404。自检报告新增非敏感 `reason=`，自检和被动群感知真实回复都会对显式 `/chat/completions` endpoint 推断 `openai_compatible`。
 - 2026-06-10 10:08 +08:00：修复被动群感知回复模型 provider 误判。当前本地 `PASSIVE_AWARENESS_REPLY_API_BASE_URL/PASSIVE_AWARENESS_REPLY_MODEL` 与主回复 `API_BASE_URL/AI_MODEL` 同为 gcli + `gemini-3-flash-preview`，但被动回复请求未携带 provider，导致 HTTP 层按模型名切到 Gemini native `.../models/gemini-3-flash-preview:generateContent` 并返回 404。现在被动回复可用 `PASSIVE_AWARENESS_REPLY_API_PROVIDER` 显式指定协议；当回复模型镜像主回复配置时自动继承 `API_PROVIDER=openai_compatible`。
 - 2026-06-08 21:22 +08:00：默认废弃聊天热路径 `memory_cli` 召回，降低记忆追问时的模型工具往返延迟。`MEMORY_CLI_CHAT_ENABLED=false` 下，Runtime V2、legacy graph 和 planner 可用工具集合都会过滤 `memory_cli`；主回复仍使用 `buildMemoryContextAsync` 注入本地 Memory V3、Profile Journal SQLite/Daily Journal 与向量召回结果。`MEMORY_CLI_ENABLED` 保持为人工 CLI/诊断入口，显式开启 `MEMORY_CLI_CHAT_ENABLED=true` 才把旧工具召回链路交给模型。

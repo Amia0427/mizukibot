@@ -138,6 +138,17 @@ function normalizePartText(part) {
   return String(part.text || part.content || part.output_text || part.outputText || '');
 }
 
+function normalizePromptForCompare(value = '') {
+  return normalizeText(value).replace(/\s+/g, ' ');
+}
+
+function systemTextsContainPrompt(systemTexts = [], prompt = '') {
+  const needle = normalizePromptForCompare(prompt);
+  if (!needle) return false;
+  return (Array.isArray(systemTexts) ? systemTexts : [])
+    .some((item) => normalizePromptForCompare(item).includes(needle));
+}
+
 function extractDataUrlPayload(url = '') {
   const match = String(url || '').trim().match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
   if (!match) return null;
@@ -369,21 +380,27 @@ async function buildGeminiNativeRequestBody(inputBody = {}) {
   const mapped = Array.isArray(body.contents)
     ? { systemTexts: [], contents: body.contents }
     : await mapMessagesToGemini(body.messages);
-  const systemTexts = [];
-  const geminiPrompt = loadGeminiSystemPrompt();
-  if (geminiPrompt) systemTexts.push(`[GeminiRuntimeAdapter]\n${geminiPrompt}`);
-  const geminiRoleplayGuidelines = loadGeminiRoleplayGuidelines();
-  if (geminiRoleplayGuidelines) systemTexts.push(`[GeminiRoleplayGuidelines]\n${geminiRoleplayGuidelines}`);
+  const sourceSystemTexts = [];
   if (body.systemInstruction?.parts || body.system_instruction?.parts) {
     const existing = body.systemInstruction || body.system_instruction;
     const text = (Array.isArray(existing.parts) ? existing.parts : [])
       .map((part) => normalizeText(part?.text))
       .filter(Boolean)
       .join('\n');
-    if (text) systemTexts.push(text);
+    if (text) sourceSystemTexts.push(text);
   } else {
-    systemTexts.push(...mapped.systemTexts);
+    sourceSystemTexts.push(...mapped.systemTexts);
   }
+  const systemTexts = [];
+  const geminiPrompt = loadGeminiSystemPrompt();
+  if (geminiPrompt) {
+    systemTexts.push(systemTextsContainPrompt(sourceSystemTexts, geminiPrompt)
+      ? '[GeminiRuntimeAdapter]'
+      : `[GeminiRuntimeAdapter]\n${geminiPrompt}`);
+  }
+  const geminiRoleplayGuidelines = loadGeminiRoleplayGuidelines();
+  if (geminiRoleplayGuidelines) systemTexts.push(`[GeminiRoleplayGuidelines]\n${geminiRoleplayGuidelines}`);
+  systemTexts.push(...sourceSystemTexts);
 
   const requestBody = {
     contents: mapped.contents

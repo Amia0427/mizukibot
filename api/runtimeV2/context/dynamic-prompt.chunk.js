@@ -148,6 +148,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     promptModeFingerprint,
     promptManifestFingerprint: systemPromptFingerprint,
     systemPromptFingerprint,
+    modelName: options.modelName || options.model_name || options.model,
     adminPromptContext,
     sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
     sessionCacheFingerprint
@@ -661,11 +662,35 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       }
     })
     : null;
+  const singletonPromptBlockIds = new Set([
+    'roleplay_runtime_context',
+    'chat_liveness_discipline',
+    'roleplay_inner_protocol',
+    'directed_context',
+    'group_direct_chat_style_guard',
+    'context_stats_instruction'
+  ]);
+  const alreadyCombinedSingletonIds = new Set(
+    [
+      ...combinedStableBlocks,
+      ...combinedDynamicBlocks,
+      ...effectiveCombinedAssistantOnlyBlocks
+    ]
+      .map((block) => normalizeText(block?.id))
+      .filter((id) => singletonPromptBlockIds.has(id))
+  );
+  const uniqueExtraBlocks = extraBlocks.filter((block) => {
+    const id = normalizeText(block?.id);
+    if (!singletonPromptBlockIds.has(id)) return true;
+    if (alreadyCombinedSingletonIds.has(id)) return false;
+    alreadyCombinedSingletonIds.add(id);
+    return true;
+  });
   const rawCombinedBlocks = [
     ...combinedStableBlocks,
     ...combinedDynamicBlocks,
     ...effectiveCombinedAssistantOnlyBlocks,
-    ...extraBlocks,
+    ...uniqueExtraBlocks,
     ...(memoryCliBlock ? [memoryCliBlock] : [])
   ];
   const promptMaterialsMemoryContext = promptMaterials?.memoryContext && typeof promptMaterials.memoryContext === 'object'
@@ -777,6 +802,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     {
       stage: 'main',
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
-      isAdmin: adminPromptContext
+      isAdmin: adminPromptContext,
+      modelName: options.modelName || options.model_name || options.model
     }
   );

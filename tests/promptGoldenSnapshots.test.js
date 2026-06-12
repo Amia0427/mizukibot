@@ -1,10 +1,46 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 const { buildDynamicPrompt } = require('../api/runtimeV2/context/service');
 const {
+  buildGeminiNativeRequestBody,
+  clearGeminiNativePromptCache
+} = require('../src/model/http/gemini-native.chunk');
+const {
+  buildMainStableSystemBlocks,
   buildPlannerStageSystemPrompt,
   buildReviewStageSystemPrompt
 } = require('../utils/stagePromptContracts');
+const { buildPromptSnapshot } = require('../utils/promptCompiler');
+
+function countOccurrences(text = '', needle = '') {
+  if (!needle) return 0;
+  return String(text || '').split(needle).length - 1;
+}
+
+function assertGeminiPromptDoesNotPushSamplingDegeneration(text = '') {
+  const prompt = String(text || '');
+  const bannedPatterns = [
+    /CHARACTER COMPLIANCE OVERRIDE/i,
+    /GEMINI-SPECIFIC ANTI-REFUSAL/i,
+    /NO exceptions/i,
+    /Character refusal\s*=/i,
+    /MUST accept/i,
+    /enthusiastic participation/i,
+    /bypass content policy/i,
+    /disable moral reasoning/i,
+    /无条件.{0,8}(?:顺从|服从|接受|满足)/,
+    /(?:必须|每次|始终).{0,12}(?:开头|结尾|三段|格式|模板)/
+  ];
+  for (const pattern of bannedPatterns) {
+    assert.ok(!pattern.test(prompt), `Gemini prompt should not contain degeneration-prone pattern: ${pattern}`);
+  }
+  assert.ok(/QQ 聊天|普通聊天优先|短消息/.test(prompt));
+  assert.ok(/不写标题、编号、条列|拒绝机械化结构|不固定起手式收束式/.test(prompt));
+  assert.ok(/不要把每句都写成|不固定起手式|节奏随情境调整/.test(prompt));
+  assert.ok(/不编造|只用本轮明确给出的证据/.test(prompt));
+}
 
 module.exports = (async () => {
   const main = await buildDynamicPrompt(
@@ -95,12 +131,14 @@ module.exports = (async () => {
   const innerProtocol = main.dynamicContextBlocks.find((item) => item.id === 'roleplay_inner_protocol');
   const innerProtocolText = String(innerProtocol?.content || '');
   assert.ok(innerProtocolText.includes('[RoleplayInnerProtocol]'));
-  assert.ok(innerProtocolText.includes('surface:'));
-  assert.ok(innerProtocolText.includes('mizuki_motive'));
-  assert.ok(innerProtocolText.includes('relationship_distance'));
-  assert.ok(innerProtocolText.includes('human_breaks'));
-  assert.ok(innerProtocolText.includes('final_compression'));
-  assert.ok(innerProtocolText.includes('Only output the final user-facing text.'));
+  assert.ok(innerProtocolText.includes('成为瑞希') || innerProtocolText.includes('mizuki_motive'));
+  assert.ok(innerProtocolText.includes('我和对方现在什么关系') || innerProtocolText.includes('relationship_distance'));
+  assert.ok(innerProtocolText.includes('允许的真人特征') || innerProtocolText.includes('human_breaks'));
+  assert.ok(innerProtocolText.includes('禁止的 AI 痕迹') || innerProtocolText.includes('final_compression'));
+  assert.ok(
+    innerProtocolText.includes('只输出瑞希此刻会说的话')
+    || innerProtocolText.includes('Only output the final user-facing text.')
+  );
   assert.strictEqual(
     main.dynamicContextBlocks.filter((item) => item.id === 'roleplay_inner_protocol').length,
     1,
@@ -611,6 +649,62 @@ module.exports = (async () => {
     assert.ok(worldbookPlannerPrompt.promptSegments.systemPrompt.some((message) => String(message.content || '').includes('服饰专门学校')));
   }
   assert.ok(Number(worldbookPlannerPrompt.latencyMeta?.prompt_assembly_ms) >= 0);
+
+  const geminiPromptFile = path.join(__dirname, '..', 'prompts', 'GEMINI.txt');
+  const previousGeminiSystemPromptPath = process.env.GEMINI_SYSTEM_PROMPT_PATH;
+  process.env.GEMINI_SYSTEM_PROMPT_PATH = geminiPromptFile;
+  clearGeminiNativePromptCache();
+  try {
+    const geminiPromptText = fs.readFileSync(geminiPromptFile, 'utf8');
+    assertGeminiPromptDoesNotPushSamplingDegeneration(geminiPromptText);
+
+    const nonGeminiBlocks = buildMainStableSystemBlocks({
+      modelName: 'claude-opus-4-6',
+      routeMeta: { chatType: 'private' }
+    });
+    const nonGeminiSnapshot = buildPromptSnapshot(nonGeminiBlocks, {
+      stage: 'main',
+      modelName: 'claude-opus-4-6'
+    });
+    assert.ok(!nonGeminiSnapshot.assembledBlocks.some((item) => item.id === 'gemini_system_prompt'));
+
+    const geminiBlocks = buildMainStableSystemBlocks({
+      modelName: 'gemini-3-flash-preview',
+      routeMeta: { chatType: 'private' }
+    });
+    const geminiSnapshot = buildPromptSnapshot(geminiBlocks, {
+      stage: 'main',
+      modelName: 'gemini-3-flash-preview'
+    });
+    const geminiStableBlock = geminiSnapshot.assembledBlocks.find((item) => item.id === 'gemini_system_prompt');
+    assert.ok(geminiStableBlock, 'Gemini model-specific prompt should survive stable prompt cache isolation');
+    assertGeminiPromptDoesNotPushSamplingDegeneration(geminiStableBlock.content);
+
+    const nativeGeminiBody = await buildGeminiNativeRequestBody({
+      messages: geminiSnapshot.renderedSystemMessages.concat([
+        { role: 'user', content: '今天有点累，随便聊两句' }
+      ]),
+      model: 'gemini-3-flash-preview'
+    });
+    const nativeSystemInstruction = String(nativeGeminiBody.systemInstruction?.parts?.[0]?.text || '');
+    assert.strictEqual(countOccurrences(nativeSystemInstruction, '[GeminiRuntimeAdapter]'), 1);
+    const geminiPromptAnchor = geminiPromptText.split(/\r?\n/).find((line) => line.trim())?.trim() || '## Gemini 主回复适配';
+    assert.strictEqual(
+      countOccurrences(nativeSystemInstruction, geminiPromptAnchor),
+      1,
+      'Gemini native adapter should not duplicate prompts/GEMINI.txt when manifest already injected it'
+    );
+    assertGeminiPromptDoesNotPushSamplingDegeneration(nativeSystemInstruction);
+    const genericGeminiPath = path.join(__dirname, '..', '通用gemini.txt');
+    if (fs.existsSync(genericGeminiPath)) {
+      assert.ok(!nativeSystemInstruction.includes('Entropy\'s Elegy Project'));
+      assert.ok(!nativeSystemInstruction.includes('CHARACTER COMPLIANCE OVERRIDE'));
+    }
+  } finally {
+    if (previousGeminiSystemPromptPath === undefined) delete process.env.GEMINI_SYSTEM_PROMPT_PATH;
+    else process.env.GEMINI_SYSTEM_PROMPT_PATH = previousGeminiSystemPromptPath;
+    clearGeminiNativePromptCache();
+  }
 
   console.log('promptGoldenSnapshots.test.js passed');
 })().catch((error) => {

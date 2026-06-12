@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 02:23 +08:00**：补齐 Gemini 主回复提示词注入链路回归，不改变任何模型配置。稳定 prompt cache 与 prompt snapshot 编译现在按 `modelName` 隔离，`gemini_system_prompt` 只在 `model_pattern=gemini` 时进入主回复；Gemini native 出站层会识别 manifest 已注入的 `prompts/GEMINI.txt`，只补 `[GeminiRuntimeAdapter]` 标记，避免同一适配词重复放大。`tests/promptGoldenSnapshots.test.js` 新增对 `GEMINI.txt` / 通用 Gemini 高风险模板化、过度顺从和僵硬节奏文案的最小回归。小目标完成：Gemini 主回复采样退化只从提示词链路缓解，不触碰温度、top_p 等模型配置。
+
 **2026-06-13 01:53 +08:00**：新增主回复采样退化输出守卫，不改变任何模型配置。主回复最终边界会检测重复句段、n-gram 循环、低字符多样性、填充语循环和异常标点循环；非流式命中后用同模型同配置追加一次修复指令重试，流式回复先裁掉重复尾巴，严重退化再走同配置非流式修复；最终校验层补充漏网裁剪和 `main_reply_degeneration_detected/main_reply_degeneration_repair` 事件。小目标完成：成功返回但陷入循环/复读的主回复不再直接发送或入库。
 
 **2026-06-13 01:53 +08:00**：完成 Gemini 采样退化真实样本诊断。基于 `scripts/export-gemini-user-dialogues.js` 导出最近 48 小时 198 条 Gemini 对话，定位最可能根因是 `prompts/GEMINI.txt` 作为 manifest 条件系统根提示过度叙事化，以及 `chat/default` 二段 direct reply 在无明确召回意图时仍带 `retrieved_memory_lite/daily_journal`。现 Gemini 专属提示词收敛为短消息适配层，普通聊天阻断 ambient memory 强块；显式“昨天/记得/之前”召回仍保留证据注入。小目标完成：最近 Gemini 口吻塌缩不再被系统风格块和旧记忆块叠加放大。

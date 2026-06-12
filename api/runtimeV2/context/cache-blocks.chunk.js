@@ -86,6 +86,7 @@ function buildPromptCacheKeys(userId = '', routeMeta = {}, options = {}) {
     normalizeText(options.promptModeFingerprint),
     normalizeText(options.promptManifestFingerprint),
     normalizeText(options.systemPromptFingerprint),
+    normalizeText(options.modelName || options.model_name || options.model),
     options.adminPromptContext === true ? 'admin' : 'user'
   ].join('|'));
   const sessionKey = hashText([

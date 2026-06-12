@@ -22,7 +22,8 @@
       stage: 'main',
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main_compact',
       budgetTokens: promptBudget,
-      isAdmin: adminPromptContext
+      isAdmin: adminPromptContext,
+      modelName: options.modelName || options.model_name || options.model
     });
     dynamicPrompt = serializePromptBlocks(compactSelectedBlocks);
   }
