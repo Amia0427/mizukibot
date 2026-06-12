@@ -1,0 +1,127 @@
+const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+function writeText(filePath, text) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, text, 'utf8');
+}
+
+function writeJson(filePath, value) {
+  writeText(filePath, JSON.stringify(value, null, 2));
+}
+
+module.exports = (() => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-main-bot-restart-diag-'));
+  const dataDir = path.join(tempRoot, 'data');
+  const now = Date.parse('2026-06-12T12:10:00.000Z');
+
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    writeText(path.join(tempRoot, '.mizukibot.lock'), '49136\n');
+    writeJson(path.join(dataDir, 'bot-main-restart-state.json'), {
+      firstExitAt: '2026-06-12T11:55:00.000Z',
+      lastExitAt: '2026-06-12T12:06:57.877Z',
+      count: 2,
+      cooldownUntil: '2026-06-12T12:21:57.877Z',
+      lastPid: 49136,
+      lastReason: 'hard_exit_while_lock_owned',
+      lockAgeMs: 131408,
+      windowMs: 900000,
+      maxRestarts: 2,
+      cooldownMs: 900000
+    });
+    writeJson(path.join(dataDir, 'bot-main-expected-shutdown.json'), {
+      pid: 111,
+      reason: 'remote_restart_scheduled',
+      expiresAt: '2026-06-12T12:00:00.000Z'
+    });
+    writeText(
+      path.join(dataDir, 'bot-daemon.log'),
+      [
+        '[2026-06-12 06:55:00] lock present but not owned by active main bot. lock pid=49136 not running',
+        '[2026-06-12 06:55:00] main bot early-exit state updated. reason=counted, previous_pid=49136, count=1, cooldown_until=',
+        '[2026-06-12 06:55:01] archived runtime redirect log before restart. source=D:\\waifu\\data\\bot-runtime.out.log archive=D:\\waifu\\data\\bot-runtime.out.20260612-065501-001.log',
+        '[2026-06-12 06:55:01] archived runtime redirect log before restart. source=D:\\waifu\\data\\bot-runtime.err.log archive=D:\\waifu\\data\\bot-runtime.err.20260612-065501-001.log',
+        '[2026-06-12 06:55:02] started main bot pid=50001, stdout=D:\\waifu\\data\\bot-runtime.out.log, stderr=D:\\waifu\\data\\bot-runtime.err.log',
+        '[2026-06-12 06:55:03] main bot lock acquired after daemon start. started_pid=50001, elapsed_ms=1000, lock pid=50001 name=node',
+        '[2026-06-12 07:08:00] daemon task error: main bot exited repeatedly soon after startup; backoff active (reason=threshold_reached, count=2, cooldown_until=2026-06-12T12:21:57.877Z, lock pid=49136 not running)'
+      ].join('\n')
+    );
+    writeText(
+      path.join(dataDir, 'bot-runtime.out.20260612-065501-001.log'),
+      [
+        '[startup] main bot initialized',
+        '[fatal] unhandledRejection Error: boom'
+      ].join('\n')
+    );
+    writeText(
+      path.join(dataDir, 'bot-runtime.err.20260612-065501-001.log'),
+      [
+        'Error: crash evidence',
+        'at directReply'
+      ].join('\n')
+    );
+    writeText(path.join(dataDir, 'bot-runtime.out.log'), '');
+    writeText(path.join(dataDir, 'bot-runtime.err.log'), '');
+
+    const {
+      buildMainBotRestartDiagnostic,
+      buildMainBotRestartText,
+      classifyDaemonMessage
+    } = require('../utils/mainBotRestartDiagnostics');
+    const report = buildMainBotRestartDiagnostic({
+      projectRoot: tempRoot,
+      dataDir,
+      now: () => now,
+      listProcesses: () => [],
+      isProcessAlive: () => false,
+      tailLines: 5,
+      maxArchiveLogs: 1,
+      maxDaemonEvents: 10
+    });
+
+    assert.strictEqual(report.schemaVersion, 'main_bot_restart_diagnostic_v1');
+    assert.strictEqual(report.summary.restartCount, 2);
+    assert.strictEqual(report.summary.cooldownActive, true);
+    assert.strictEqual(report.summary.lockStatus, 'stale');
+    assert.strictEqual(report.lock.pid, 49136);
+    assert.strictEqual(report.expectedShutdown.active, false);
+    assert.strictEqual(report.runtimeLogs.archived.stdout.length, 1);
+    assert.strictEqual(report.runtimeLogs.archived.stderr.length, 1);
+    assert.ok(report.runtimeLogs.archived.stderr[0].tail.some((line) => line.includes('crash evidence')));
+    assert.ok(report.daemon.events.some((event) => event.type === 'early_exit_backoff_active'));
+    assert.ok(report.daemon.events.some((event) => event.type === 'runtime_log_archived'));
+    assert.ok(report.signals.some((signal) => signal.code === 'main_bot_restart_cooldown_active'));
+    assert.ok(report.signals.some((signal) => signal.code === 'main_bot_lock_stale'));
+    assert.strictEqual(
+      classifyDaemonMessage('main bot early-exit state updated. reason=counted, previous_pid=1, count=1'),
+      'early_exit_state_updated'
+    );
+
+    const text = buildMainBotRestartText(report);
+    assert.ok(text.includes('main-bot-restarts: warning'));
+    assert.ok(text.includes('state: count=2'));
+    assert.ok(text.includes('archived-stderr:'));
+    assert.ok(text.includes('crash evidence'));
+
+    const script = require('../scripts/diagnose-main-bot-restarts');
+    assert.deepStrictEqual(
+      script.parseArgs(['node', 'x', '--json', '--tail-lines=7', '--max-archive-logs', '3', '--max-daemon-events=4']),
+      {
+        json: true,
+        text: false,
+        tailLines: 7,
+        maxArchiveLogs: 3,
+        maxDaemonEvents: 4
+      }
+    );
+
+    console.log('mainBotRestartDiagnostics.test.js passed');
+  } finally {
+    try {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    } catch (_) {}
+  }
+})();

@@ -21,6 +21,13 @@
 - 最小加固：daemon 启动前归档旧 runtime 日志，主 bot 15 分钟内连续 2 次硬退出后退避 15 分钟，`index.js` 写入启动/fatal/expected-shutdown 诊断。
 - 小目标已完成：主 bot 硬退出时不再短时间无证据连续重启。
 
+## 运行维护 2026-06-12 20:11
+
+- 新增只读诊断入口：`npm run diag:main-bot-restarts`。
+- 聚合证据：`bot-main-restart-state.json`、`.mizukibot.lock`、`bot-main-expected-shutdown.json`、`bot-daemon.log` 最近重拉/退避事件、daemon 归档的 runtime stdout/stderr tail。
+- 支持 `-- --json` 供后续脚本采集；默认不写入任何运行状态，不调整 daemon 重启/退避策略。
+- 小目标已完成：主 bot 短时间连续早退时，一条命令可汇总关键证据。
+
 ## 运行维护 2026-06-12 12:55
 
 - 按新网关配置切换 `PLAN_*` 与 `PASSIVE_AWARENESS_*`，目标 host 为 `catiecli.sukaka.top`，模型为 `gcli-gemini-3-flash-preview-nothinking`。
