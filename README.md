@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 12:55 +08:00**：切换 403 模型配置。`PLAN_*` 与 `PASSIVE_AWARENESS_*` 已从 `token.memoh.net` 切到 `catiecli.sukaka.top/v1`，模型为 `gcli-gemini-3-flash-preview-nothinking`；真实模型自检 8 项全部 OK。小目标完成：原 plan / passive awareness decision 的 403 已消除。
+
 **2026-06-12 12:42 +08:00**：修复模型自检并发请求的网关误路由。`MODEL_TLS_IMPERSONATION_CONNECTION_REUSE_ENABLED=false` 默认关闭 CycleTLS 连接复用，避免不同模型网关在 HTTP/2 连接复用下触发 `421 Misdirected Request`；CycleTLS 返回 421 时会自动回落 axios 重试一次。`token.memoh.net` 当前仍返回 `403`，按上游账号 TLS router 客户端匹配限制保留原状。小目标完成：模型自检不再被 421 批量打断。
 
 **2026-06-12 07:34 +08:00**：完成 MizukiBot 可复用架构提炼，输出到 `E:\qq-bot-0.1\doc\mizukibot0`。新增总索引和 40 个可并行开发主题文档，覆盖路由契约、Runtime V2、prompt manifest、记忆治理、post-reply worker、诊断体系、NapCat 健康态、部署运维和 Rust 迁移拆解。小目标完成：其他 agent/QQ 聊天机器人可按主题并行学习和迁移。
@@ -314,7 +316,7 @@ MEMOS_KB_IDS=knowledgebase_id_1
 Planner refinement：
 
 ```env
-PLAN_MODEL=gpt-5.4-mini
+PLAN_MODEL=gcli-gemini-3-flash-preview-nothinking
 PLANNER_MAX_MODEL_CALLS=1
 PLANNER_REQUEST_TIMEOUT_MS=60000
 PLANNER_SEMANTIC_REFINE_ENABLED=false

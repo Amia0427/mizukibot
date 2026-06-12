@@ -13,6 +13,13 @@
 ### 原因
 防止误报的机械故障污染上下文，历史拒绝记录不影响新prompt效果。
 
+## 运行维护 2026-06-12 12:55
+
+- 按新网关配置切换 `PLAN_*` 与 `PASSIVE_AWARENESS_*`，目标 host 为 `catiecli.sukaka.top`，模型为 `gcli-gemini-3-flash-preview-nothinking`。
+- 密钥仅写入本地 `.env`，文档不记录明文 key。
+- 复跑模型自检：plan、embedding、rerank、memory、main_reply、admin_reply、passive_awareness_decision、passive_awareness_reply 全部 OK。
+- 小目标已完成：原 plan / passive awareness decision 的 `http_403` 已通过配置切换消除。
+
 ## 运行维护 2026-06-12 12:42
 
 - 定位模型自检批量 `http_421`：同一轮并发自检跨 `token.memoh.net`、`gcli.ggchan.dev`、`apiapipp.com` 时，CycleTLS/HTTP2 连接复用会触发网关 `421 Misdirected Request`。
