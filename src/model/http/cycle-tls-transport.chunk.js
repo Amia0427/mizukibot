@@ -82,7 +82,7 @@ function buildCycleTlsOptions(body, axiosOptions = {}, stream = false) {
     timeout: Math.max(1, Math.ceil(timeoutMs / 1000)),
     disableRedirect: true,
     responseType: stream ? 'stream' : 'text',
-    enableConnectionReuse: true,
+    enableConnectionReuse: config.MODEL_TLS_IMPERSONATION_CONNECTION_REUSE_ENABLED === true,
     insecureSkipVerify: config.MODEL_TLS_IMPERSONATION_INSECURE_SKIP_VERIFY === true,
     forceHTTP1: config.MODEL_TLS_IMPERSONATION_FORCE_HTTP1 === true
   };

@@ -9,9 +9,21 @@ const {
 
 let warnedCycleTlsFallback = false;
 
+function isCycleTlsMisdirectedRequest(error) {
+  const status = Number(error?.response?.status || error?.status || 0);
+  if (status !== 421) return false;
+  const transport = String(
+    error?.request?.transport
+    || error?.response?.request?.transport
+    || error?.response?.__modelHttpTransport
+    || ''
+  ).toLowerCase();
+  return transport === 'cycletls';
+}
+
 function shouldFallbackToAxios(error) {
   if (!isFallbackEnabled()) return false;
-  if (error?.response) return false;
+  if (error?.response) return isCycleTlsMisdirectedRequest(error);
   return true;
 }
 
@@ -51,5 +63,6 @@ function getModelHttpTransportStatus() {
 
 module.exports = {
   getModelHttpTransportStatus,
+  isCycleTlsMisdirectedRequest,
   postModelHttp
 };

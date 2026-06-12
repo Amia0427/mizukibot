@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-11 17:06 +08:00
+更新时间：2026-06-12 12:42 +08:00
 
 ## 维护约定
 
@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
+- 2026-06-12 12:42 +08:00：模型自检 `http_421` 根因是 CycleTLS/HTTP2 连接复用在并发跨网关请求中触发 misdirected request；新增 `MODEL_TLS_IMPERSONATION_CONNECTION_REUSE_ENABLED=false` 默认关闭连接复用，并在 CycleTLS 返回 421 时自动回落 axios。`token.memoh.net` 返回的 `403` 是账号 TLS router 客户端匹配限制，需切到可用网关或调整上游账号规则。
 - 2026-06-11 17:06 +08:00：主回复模型新增浏览器 TLS/JA3 指纹伪装配置：`MODEL_TLS_IMPERSONATION_ENABLED=true` 启用 CycleTLS 传输，默认 Chrome-like JA3 与 Chrome HTTP/2 fingerprint；`MODEL_TLS_IMPERSONATION_STREAM_ENABLED=true` 覆盖流式主回复；`MODEL_TLS_IMPERSONATION_FALLBACK_ENABLED=true` 保留 axios 回落，避免 CycleTLS 异常时中断主回复。
 - 2026-06-11 13:52 +08:00：管理员私聊流式主回复 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 默认值改为 `150000`。只限制 `userRole=admin + chatType=private` 的 `v2_streaming_reply` 上游首字等待；超时会 abort 当前流式请求并直接发明确兜底，不触发 admin shared fallback 或非流式二次慢请求。普通用户仍由 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 控制，管理员群聊不受影响。
 - 2026-06-10 20:10 +08:00：模型自检与被动群感知真实回复现在会把显式 `/chat/completions` 或 `/responses` 的独立回复 endpoint 推断为 `openai_compatible`，避免 `PASSIVE_AWARENESS_REPLY_MODEL=gemini-*` 在 gcli 这类 OpenAI-compatible 网关上被误改写为 Gemini native；如确实使用 Gemini native，继续显式配置 `PASSIVE_AWARENESS_REPLY_API_PROVIDER=gemini_native`。
