@@ -26,6 +26,7 @@ const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/nap
 const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
 const { cleanupStaleDataTmpFiles, DEFAULT_MAX_AGE_MS } = require('./utils/dataTmpCleanup');
 const { startNapCatHttpReverseServer } = require('./core/napcatHttpReverseServer');
+const { createMessageIngressDispatcher } = require('./core/messageIngressDispatcher');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
@@ -281,6 +282,22 @@ const { handleIncomingMessage } = createMessageHandler({
   sendWithRetry,
   actionClient: napcatActionClient
 });
+const messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
+  ? createMessageIngressDispatcher({
+    handleMessage: handleIncomingMessage,
+    maxActive: config.MESSAGE_INGRESS_ASYNC_MAX_ACTIVE,
+    maxQueueLength: config.MESSAGE_INGRESS_ASYNC_MAX_QUEUE_LENGTH
+  })
+  : null;
+
+async function acceptIncomingMessage(msg, source = '') {
+  if (messageIngressDispatcher) {
+    messageIngressDispatcher.enqueue(msg, { source });
+    return true;
+  }
+  await handleIncomingMessage(msg);
+  return true;
+}
 const napcatLogFollower = createNapcatLogFollower({
   sendWithRetry,
   sendGroupReply: async ({
@@ -374,7 +391,7 @@ function connectNapCat() {
         });
       }
       if (napcatActionClient.handleMessage(msg)) return;
-      await handleIncomingMessage(msg);
+      await acceptIncomingMessage(msg, 'napcat_ws');
     } catch (e) {
       console.error('[消息处理异常]', e);
     }
@@ -395,7 +412,7 @@ if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
           });
         }
         if (napcatActionClient.handleMessage(msg)) return;
-        await handleIncomingMessage(msg);
+        await acceptIncomingMessage(msg, 'napcat_http_reverse');
       } catch (e) {
         console.error('[HTTP reverse message error]', e);
       }
@@ -468,6 +485,14 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   try { postReplyWorkerRuntime?.stop?.(); } catch (error) {
     console.error('[shutdown] post-reply worker stop failed:', error?.message || error);
   }
+  try {
+    await messageIngressDispatcher?.stop?.({
+      drain: true,
+      timeoutMs: config.MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS
+    });
+  } catch (error) {
+    console.error('[shutdown] message ingress drain failed:', error?.message || error);
+  }
   try { resourceSnapshotLoop.stop(); } catch (error) {
     console.error('[shutdown] resource snapshot stop failed:', error?.message || error);
   }
@@ -513,6 +538,7 @@ function drainForScheduledRestart(meta = {}) {
   try { tickRuntime?.stop?.(); } catch (_) {}
   try { napcatLogFollower.stop(); } catch (_) {}
   try { postReplyWorkerRuntime?.stop?.(); } catch (_) {}
+  try { messageIngressDispatcher?.stop?.({ drain: false }); } catch (_) {}
   try { resourceSnapshotLoop.stop(); } catch (_) {}
   try {
     if (ws) {
