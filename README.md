@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 13:36 +08:00**：加固 Windows daemon 主 bot 短命退出诊断。复盘 `data/bot-daemon.log` 在 06:55、07:04、07:08 +08:00 连续重拉，确认不是 post-reply worker 空窗，也没有 `/restart` 触发；daemon 看到的是 `.mizukibot.lock` 中的主 bot PID 已死亡，且旧 `bot-runtime.out/err.log` 被下一次启动重定向清空。现 daemon 启动前会归档旧 runtime 日志，并对 15 分钟窗口内连续 2 次主 bot 硬退出启用 15 分钟退避；`index.js` 增加 fatal/startup/expected-shutdown 诊断，正常 SIGTERM/远程重启不计入退避。小目标完成：主 bot 不再短时间无证据连续重启。
+
 **2026-06-12 12:55 +08:00**：切换 403 模型配置。`PLAN_*` 与 `PASSIVE_AWARENESS_*` 已从 `token.memoh.net` 切到 `catiecli.sukaka.top/v1`，模型为 `gcli-gemini-3-flash-preview-nothinking`；真实模型自检 8 项全部 OK。小目标完成：原 plan / passive awareness decision 的 403 已消除。
 
 **2026-06-12 12:42 +08:00**：修复模型自检并发请求的网关误路由。`MODEL_TLS_IMPERSONATION_CONNECTION_REUSE_ENABLED=false` 默认关闭 CycleTLS 连接复用，避免不同模型网关在 HTTP/2 连接复用下触发 `421 Misdirected Request`；CycleTLS 返回 421 时会自动回落 axios 重试一次。`token.memoh.net` 当前仍返回 `403`，按上游账号 TLS router 客户端匹配限制保留原状。小目标完成：模型自检不再被 421 批量打断。

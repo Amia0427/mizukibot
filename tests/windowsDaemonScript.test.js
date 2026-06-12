@@ -9,6 +9,15 @@ module.exports = (() => {
   assert.ok(script.includes('function Wait-MainBotLockOwnership'), 'daemon should wait for main bot lock handoff');
   assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_LOCK_WAIT_MS'"), 'daemon lock wait timeout should be configurable');
   assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_LOCK_POLL_MS'"), 'daemon lock polling interval should be configurable');
+  assert.ok(script.includes('function Archive-DaemonRedirectLogIfNeeded'), 'daemon should archive runtime logs before redirect truncates them');
+  assert.ok(script.includes('archived runtime redirect log before restart'), 'daemon should log archived runtime stdout/stderr paths');
+  assert.ok(script.includes("Join-Path $logDir 'bot-main-restart-state.json'"), 'daemon should persist main bot restart backoff state');
+  assert.ok(script.includes('function Update-MainBotEarlyExitState'), 'daemon should track repeated short-lived main bot exits');
+  assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_WINDOW_MS'"), 'daemon early-exit window should be configurable');
+  assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_MAX_RESTARTS'"), 'daemon early-exit threshold should be configurable');
+  assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_COOLDOWN_MS'"), 'daemon early-exit cooldown should be configurable');
+  assert.ok(script.includes('main bot exited repeatedly soon after startup; backoff active'), 'daemon should stop immediate restart loops after repeated early exits');
+  assert.ok(script.includes('bot-main-expected-shutdown.json'), 'daemon should exempt expected main bot shutdowns from early-exit backoff');
   assert.ok(script.includes('$StartedProcess.Refresh()'), 'daemon should observe whether the newly started bot exits before lock handoff');
   assert.ok(script.includes("Reason = 'process_exited_before_lock'"), 'daemon should report early process exit during lock handoff');
   assert.ok(script.includes('main bot lock acquired after daemon start'), 'daemon should log successful lock handoff timing');
