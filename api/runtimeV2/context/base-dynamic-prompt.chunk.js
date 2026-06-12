@@ -641,6 +641,12 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     baseRuntimeAddedIds.push('short_term_continuity', 'memory_recall_policy', 'retrieved_memory_lite', 'daily_journal');
   }
   const baseBlockedIds = [];
+  if (shouldBlockAmbientMemoryForPlainChat(question, {
+    ...options,
+    routeMeta
+  }, effectiveBaseDynamicPromptPlan)) {
+    baseBlockedIds.push('retrieved_memory_lite', 'daily_journal', 'memory_recall_policy');
+  }
   if (memosRecall.used === false && normalizeText(memosRecall.rejectedReason) === 'deduped_by_local_memory') {
     baseBlockedIds.push('memos_recall');
   }

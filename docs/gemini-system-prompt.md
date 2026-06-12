@@ -12,20 +12,23 @@
 
 更新 2026-06-03 17:16 +08:00：Gemini native 主回复流式请求现在走 `streamGenerateContent?alt=sse`，不再为了该系统提示词适配层降级成非流式；`systemInstruction` 注入、工具声明转换和图片 part 转换逻辑与非流式共用。
 
+更新 2026-06-13 01:53 +08:00：最近 48 小时真实样本诊断显示，当前 `prompts/GEMINI.txt` 已通过 `prompts/prompt-manifest.json` 的 `model_pattern=gemini` 进入 OpenAI-compatible Gemini 主回复，不再只是 Gemini native `systemInstruction` 适配层。旧文本中的“从容、细腻、周全”“张力呼吸”等叙事写作锚点会压过 QQ 短消息 persona，放大 `诶——/呜哇/呢/喔/♪` 固定口吻。现已收敛为短消息、防出戏、证据使用和重复口癖抑制规则。小目标已完成：Gemini 条件系统提示词不再推动轻小说式口吻坍缩。
+
 ## 使用方式
 
-- `prompts/GEMINI.txt` 不在 `prompts/prompt-manifest.json` 中注册；只在 Gemini native provider 出站请求中作为 `systemInstruction` 追加。
+- `prompts/GEMINI.txt` 已在 `prompts/prompt-manifest.json` 中注册为 `gemini_system_prompt`，当模型名包含 `gemini` 时作为稳定系统块进入主回复 prompt。
+- Gemini native provider 仍会把 `prompts/GEMINI.txt` 作为 `[GeminiRuntimeAdapter]` 注入 `systemInstruction`；若同时使用 native provider 和 manifest 条件块，需额外复查重复注入风险。
 - `GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED=false` 可关闭自动注入；`GEMINI_SYSTEM_PROMPT_PATH` 可指向替代文件。
-- 该文件不会改变瑞希 persona、runtime 动态块、security contract 或现有主回复注入顺序。
+- 该文件只做模型适配，不写独立人设、世界观、叙事文风或安全绕过。
 
 ## 筛选原则
 
 - 来源目录：`C:\Users\Administrator\Downloads\预设 gemini`。
-- 只保留通用且可迁移的规则与安全原文：有限视角、上下文承接、因果一致、用户自主权、语言风格、节奏控制、动作和感官落地、减少模板腔。
+- 只保留通用且可迁移的模型适配规则：有限视角、上下文承接、QQ 短消息、防模板腔、防出戏、证据边界和重复口癖抑制。
 - 排除所有特定人格、神格身份、来源元信息、预设教程、SillyTavern 变量/脚本、HTML 交互、外显思维链和高风险内容。
 
 ## 边界
 
-- `GEMINI.txt` 是稳定提示词文本，不是角色卡、世界书或运行时策略。
-- 项目特化只写适配规则：QQ 群聊短消息、被动群感知、上下文证据使用、工具结果转述和 Gemini 出戏防护；瑞希人设仍以 persona 目录为准。
-- 后续若需要接入 manifest，应单独评估优先级、预算裁剪、与主回复 persona 的冲突，再补充测试。
+- `GEMINI.txt` 是稳定模型适配文本，不是角色卡、世界书或通用写作预设。
+- 项目特化只写适配规则：QQ 短消息、上下文证据使用、工具结果转述和 Gemini 出戏防护；瑞希人设仍以 persona 目录为准。
+- 后续若调整 manifest 优先级或 native 注入策略，应单独评估预算裁剪、重复注入和与 `persona/02_style.txt` 的冲突。
