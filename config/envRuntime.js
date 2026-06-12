@@ -124,6 +124,9 @@ function validateRequiredConfig() {
   const foregroundGlobal = pickNum('FOREGROUND_GLOBAL_MAX_CONCURRENCY', 10);
   const foregroundAdminReserved = pickNum('FOREGROUND_ADMIN_RESERVED_SLOTS', 1);
   const foregroundPerUser = pickNum('FOREGROUND_PER_USER_MAX_INFLIGHT', 1);
+  const messageIngressAsyncMaxActive = pickNum('MESSAGE_INGRESS_ASYNC_MAX_ACTIVE', 64);
+  const messageIngressAsyncMaxQueueLength = pickNum('MESSAGE_INGRESS_ASYNC_MAX_QUEUE_LENGTH', 200);
+  const messageIngressAsyncShutdownDrainMs = pickNum('MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS', 15000);
   const inboundValues = [
     ['INBOUND_GLOBAL_MAX_CONCURRENCY', inboundGlobal],
     ['INBOUND_GENERAL_MAX_CONCURRENCY', inboundGeneral],
@@ -135,12 +138,17 @@ function validateRequiredConfig() {
     ['PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT', privateInboundPerUser],
     ['FOREGROUND_GLOBAL_MAX_CONCURRENCY', foregroundGlobal],
     ['FOREGROUND_ADMIN_RESERVED_SLOTS', foregroundAdminReserved],
-    ['FOREGROUND_PER_USER_MAX_INFLIGHT', foregroundPerUser]
+    ['FOREGROUND_PER_USER_MAX_INFLIGHT', foregroundPerUser],
+    ['MESSAGE_INGRESS_ASYNC_MAX_ACTIVE', messageIngressAsyncMaxActive],
+    ['MESSAGE_INGRESS_ASYNC_MAX_QUEUE_LENGTH', messageIngressAsyncMaxQueueLength],
+    ['MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS', messageIngressAsyncShutdownDrainMs]
   ];
 
   for (const [key, value] of inboundValues) {
     const min = key === 'PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY' || key === 'PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY'
       || key === 'PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY'
+      || key === 'MESSAGE_INGRESS_ASYNC_MAX_QUEUE_LENGTH'
+      || key === 'MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS'
       ? 0
       : 1;
     if (!Number.isInteger(value) || value < min) {
