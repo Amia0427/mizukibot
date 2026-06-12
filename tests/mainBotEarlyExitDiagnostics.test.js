@@ -9,6 +9,9 @@ module.exports = (() => {
   assert.ok(script.includes("process.on('uncaughtException'"), 'main bot should log uncaught exceptions before exit');
   assert.ok(script.includes("process.on('unhandledRejection'"), 'main bot should log unhandled rejections before exit');
   assert.ok(script.includes("console.error(`[fatal] ${kind}`"), 'fatal diagnostics should include a clear marker');
+  assert.ok(script.includes('configureNodeProcessReports()'), 'main bot should configure Node diagnostic reports for native exits');
+  assert.ok(script.includes("process.on('beforeExit'"), 'main bot should log when the event loop is about to empty unexpectedly');
+  assert.ok(script.includes("process.on('SIGBREAK'"), 'main bot should handle Windows console break shutdowns explicitly');
   assert.ok(script.includes('preserveSingleInstanceLockOnExit = true'), 'fatal exits should preserve the lock for daemon early-exit diagnosis');
   assert.ok(script.includes("recordExpectedShutdown('remote_restart_scheduled'"), 'remote restarts should be exempt from crash backoff');
   assert.ok(script.includes("recordExpectedShutdown(reason, { exitCode })"), 'signal shutdowns should be exempt from crash backoff');

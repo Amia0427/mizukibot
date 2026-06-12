@@ -18,6 +18,13 @@ module.exports = (() => {
   assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_COOLDOWN_MS'"), 'daemon early-exit cooldown should be configurable');
   assert.ok(script.includes('main bot exited repeatedly soon after startup; backoff active'), 'daemon should stop immediate restart loops after repeated early exits');
   assert.ok(script.includes('bot-main-expected-shutdown.json'), 'daemon should exempt expected main bot shutdowns from early-exit backoff');
+  assert.ok(script.includes('function Get-MainHttpReverseIngressState'), 'daemon should inspect HTTP reverse ingress listener state');
+  assert.ok(script.includes("Join-Path $logDir 'bot-main-port-recovery-state.json'"), 'daemon should persist HTTP reverse port recovery attempts');
+  assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_HTTP_REVERSE_PORT_RECOVERY_COOLDOWN_MS'"), 'HTTP reverse recovery bypass should be rate limited');
+  assert.ok(
+    script.includes('main bot early-exit backoff bypassed for HTTP reverse port outage'),
+    'daemon should bypass early-exit backoff once when NapCat HTTP reverse port is down'
+  );
   assert.ok(script.includes('$StartedProcess.Refresh()'), 'daemon should observe whether the newly started bot exits before lock handoff');
   assert.ok(script.includes("Reason = 'process_exited_before_lock'"), 'daemon should report early process exit during lock handoff');
   assert.ok(script.includes('main bot lock acquired after daemon start'), 'daemon should log successful lock handoff timing');
