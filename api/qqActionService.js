@@ -9,6 +9,7 @@ const {
   isActionClientConnected,
   isNapCatOfflineError
 } = require('./napcatActionClient');
+const { recordNapCatDegradation } = require('../utils/napcatHealthDiagnostics');
 const { AUTO_PUBLISH, DRAFT_ONLY, runQzoneAgent } = require('./qzoneAgentService');
 const { getScheduledTaskStore } = require('../utils/scheduledTaskStore');
 const {
@@ -577,12 +578,19 @@ async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) 
   }
 
   if (!isActionClientConnected(actionClient)) {
+    const connectionState = getActionClientConnectionState(actionClient);
+    recordNapCatDegradation('thinking-emoji', {
+      module: 'thinking-emoji',
+      reason: 'napcat_offline',
+      messageId: normalizedMessageId,
+      connectionState
+    });
     return {
       success: false,
       reason: 'napcat_offline',
       retryable: true,
       skipped: true,
-      connectionState: getActionClientConnectionState(actionClient),
+      connectionState,
       appliedEmojiIds: [],
       failures: []
     };
@@ -607,12 +615,21 @@ async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) 
 
   if (failures.length > 0) {
     const offline = failures.some((item) => item.offline === true);
+    const connectionState = offline ? getActionClientConnectionState(actionClient) : undefined;
+    if (offline) {
+      recordNapCatDegradation('thinking-emoji', {
+        module: 'thinking-emoji',
+        reason: 'napcat_offline',
+        messageId: normalizedMessageId,
+        connectionState
+      });
+    }
     return {
       success: false,
       reason: offline ? 'napcat_offline' : (failures[0]?.error || 'set_msg_emoji_like failed'),
       retryable: offline,
       skipped: offline,
-      connectionState: offline ? getActionClientConnectionState(actionClient) : undefined,
+      connectionState,
       appliedEmojiIds: normalizedEmojiIds.filter((emojiId) => !failures.some((item) => item.emojiId === emojiId)),
       failures
     };

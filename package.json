@@ -26,6 +26,7 @@
     "diag:main-reply-token-budget": "node scripts/diagnose-main-reply-token-budget.js",
     "diag:main-reply-truncation": "node scripts/diagnose-main-reply.js --truncation",
     "diag:runtime": "node scripts/diagnose-runtime-status.js",
+    "diag:napcat-health": "node scripts/diagnose-napcat-health.js",
     "diag:runtime-hotspots": "node scripts/diagnose-runtime-hotspots.js",
     "diag:runtime-exceptions": "node scripts/diagnose-runtime-exceptions.js",
     "diag:main-bot-restarts": "node scripts/diagnose-main-bot-restarts.js",

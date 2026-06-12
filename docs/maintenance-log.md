@@ -13,6 +13,13 @@
 ### 原因
 防止误报的机械故障污染上下文，历史拒绝记录不影响新prompt效果。
 
+## 运行维护 2026-06-12 20:16
+
+- 新增 NapCat 健康观测：运行时记录 WebSocket online/offline、最近恢复时间、离线持续时长和离线原因到 `data/napcat-health-state.json`。
+- 新增降级事件聚合：`thinking-emoji` 与 `continuous-message reply/forward expand` 因 `napcat_offline` 跳过时追加 `data/napcat-health-events.ndjson`。
+- 新增只读入口：`npm run diag:napcat-health -- --text` 直接输出当前离线状态、离线多久、最近降级动作和恢复时间。
+- 小目标已完成：下次 NapCat 断连不用再从 `bot-runtime.err.log` 手工串查。
+
 ## 运行维护 2026-06-12 13:36
 
 - 复查 `data/bot-daemon.log`：06:55、07:04、07:08 +08:00 三次都是主 bot 锁 PID 已死后被 daemon 重拉；锁均能快速接管，说明不是启动锁等待问题。
