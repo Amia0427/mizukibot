@@ -27,6 +27,7 @@ const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
 const { cleanupStaleDataTmpFiles, DEFAULT_MAX_AGE_MS } = require('./utils/dataTmpCleanup');
 const { startNapCatHttpReverseServer } = require('./core/napcatHttpReverseServer');
 const { createMessageIngressDispatcher } = require('./core/messageIngressDispatcher');
+const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
@@ -349,6 +350,9 @@ function connectNapCat() {
   ws.on('open', () => {
     reconnectAttempts = 0;
     napcatActionClient.handleConnect();
+    recordNapCatConnectionState('online', napcatActionClient.getConnectionState(), {
+      mode: 'websocket'
+    });
     console.log('✅ 瑞希上线啦！已连接到 NapCat');
 
     if (config.TICK_ENGINE_ENABLED && !tickStarted) {
@@ -377,6 +381,10 @@ function connectNapCat() {
       console.warn('[NapCat ws close]', { code, reason });
     }
     napcatActionClient.handleDisconnect('NapCat websocket closed');
+    recordNapCatConnectionState('offline', napcatActionClient.getConnectionState(), {
+      mode: 'websocket',
+      reason: reason || 'NapCat websocket closed'
+    });
     if (!shuttingDown) scheduleReconnect();
   });
 
@@ -417,6 +425,11 @@ if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
         console.error('[HTTP reverse message error]', e);
       }
     }
+  });
+
+  recordNapCatConnectionState('online', napcatActionClient.getConnectionState(), {
+    mode: 'http_reverse',
+    reason: 'HTTP reverse mode started'
   });
 
   if (config.TICK_ENGINE_ENABLED && !tickStarted) {

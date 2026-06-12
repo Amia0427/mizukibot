@@ -8,6 +8,7 @@ const {
   isActionClientConnected,
   isNapCatOfflineError
 } = require('../../api/napcatActionClient');
+const { recordNapCatDegradation } = require('../../utils/napcatHealthDiagnostics');
 const { ensureCachedImageRef } = require('../../utils/imageInputCache');
 const { upsertImageMemory } = require('../../utils/imageMemoryIndex');
 const { enqueueImageVisualSummarySafe } = require('../continuousMessage/imageVisualSummary');
@@ -49,11 +50,23 @@ function canUseNapCatActionClient(options = {}) {
   return isActionClientConnected(actionClient);
 }
 
-function buildNapCatDegradedState(options = {}) {
+function buildNapCatDegradedState(options = {}, details = {}) {
+  const connectionState = getActionClientConnectionState(options.actionClient);
+  if (details.action) {
+    recordNapCatDegradation(details.action, {
+      module: 'continuous-message',
+      reason: 'napcat_offline',
+      messageId: details.messageId,
+      groupId: options.groupId,
+      userId: options.userId,
+      routePolicyKey: options.routePolicyKey,
+      connectionState
+    });
+  }
   return {
     reason: 'napcat_offline',
     retryable: true,
-    connectionState: getActionClientConnectionState(options.actionClient)
+    connectionState
   };
 }
 
@@ -377,7 +390,10 @@ async function enrichEntryFromReply(entry, options = {}) {
   const replyMessageId = normalizeText(entry.replyMessageId);
   if (!replyMessageId) return entry;
   if (!canUseNapCatActionClient(options)) {
-    entry.replyExpansionDegraded = buildNapCatDegradedState(options);
+    entry.replyExpansionDegraded = buildNapCatDegradedState(options, {
+      action: 'continuous-message reply expand',
+      messageId: replyMessageId
+    });
     console.warn('[continuous-message] reply expand skipped', {
       replyMessageId,
       reason: 'napcat_offline'
@@ -429,7 +445,10 @@ async function enrichEntryFromReply(entry, options = {}) {
     });
   } catch (error) {
     if (isNapCatOfflineError(error)) {
-      entry.replyExpansionDegraded = buildNapCatDegradedState(options);
+      entry.replyExpansionDegraded = buildNapCatDegradedState(options, {
+        action: 'continuous-message reply expand',
+        messageId: replyMessageId
+      });
       console.warn('[continuous-message] reply expand skipped', {
         replyMessageId,
         reason: 'napcat_offline'
@@ -449,7 +468,10 @@ async function enrichEntryFromForward(entry, options = {}) {
   const ids = Array.isArray(entry.forwardIds) ? entry.forwardIds.filter(Boolean) : [];
   if (!ids.length) return entry;
   if (!canUseNapCatActionClient(options)) {
-    entry.forwardExpansionDegraded = buildNapCatDegradedState(options);
+    entry.forwardExpansionDegraded = buildNapCatDegradedState(options, {
+      action: 'continuous-message forward expand',
+      messageId: ids.join(',')
+    });
     console.warn('[continuous-message] forward expand skipped', {
       forwardIds: ids,
       reason: 'napcat_offline'
@@ -479,7 +501,10 @@ async function enrichEntryFromForward(entry, options = {}) {
       });
     } catch (error) {
       if (isNapCatOfflineError(error)) {
-        entry.forwardExpansionDegraded = buildNapCatDegradedState(options);
+        entry.forwardExpansionDegraded = buildNapCatDegradedState(options, {
+          action: 'continuous-message forward expand',
+          messageId: forwardId
+        });
         console.warn('[continuous-message] forward expand skipped', {
           forwardId,
           reason: 'napcat_offline'

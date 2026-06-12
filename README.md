@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 20:16 +08:00**：新增 NapCat 只读健康诊断入口。运行时会把 WebSocket online/offline、离线持续时长、最近 `thinking-emoji` 与 `continuous-message reply/forward expand` 降级动作写入 `data/napcat-health-state.json` / `data/napcat-health-events.ndjson`；`npm run diag:napcat-health -- --text` 可直接看当前是否离线、离线多久、最近降级动作和恢复时间。小目标完成：下次 NapCat 断连不用再从 `bot-runtime.err.log` 手工串查。
+
 **2026-06-12 20:11 +08:00**：新增只读主 bot 早退诊断入口 `npm run diag:main-bot-restarts`。一次汇总 `data/bot-main-restart-state.json`、daemon 明确归档的最新 `bot-runtime.out/err.*.log` tail、`.mizukibot.lock` PID/进程状态、`bot-main-expected-shutdown.json` 和最近 daemon 重拉/锁接管/退避日志；支持 `-- --json`、`-- --tail-lines=N`。小目标完成：下次出现 06:55/07:04/07:08 类短时间连续退出时，可一条命令看到证据。
 
 **2026-06-12 19:50 +08:00**：消息入口改为默认全链路异步接收。NapCat WebSocket / HTTP reverse 回调现在只做解析、日志、action response 分流和 `messageIngressDispatcher` 入队；主回复路由、模型请求、工具调用和持久化继续由原 `handleIncomingMessage` 在后台 drain 中执行，关闭时按 `MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS` 等待队列收尾。新增 `MESSAGE_INGRESS_ASYNC_*` 配置和入口调度测试。小目标完成：NapCat 入站回调不再等待完整主回复链路。
@@ -240,6 +242,7 @@ npm run diag:main-reply-truncation
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:main-reply-token-budget -- --limit 20
 npm run diag:runtime
+npm run diag:napcat-health -- --text
 npm run diag:runtime-hotspots
 npm run diag:runtime-exceptions
 npm run diag:main-bot-restarts
@@ -530,6 +533,7 @@ Prompt 和人格：
 消息没有进来：
 
 - 确认 NapCat / OneBot WebSocket 已启动。
+- 先跑 `npm run diag:napcat-health -- --text` 看是否离线、离线持续时长、最近 NapCat 降级动作和恢复时间。
 - 检查 `NAPCAT_WS_URL`。
 - 检查 `.mizukibot.lock` 是否由仍在运行的进程持有。
 - 看 `index.js` WebSocket open / close 日志。
