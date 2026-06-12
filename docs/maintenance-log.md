@@ -13,12 +13,27 @@
 ### 原因
 防止误报的机械故障污染上下文，历史拒绝记录不影响新prompt效果。
 
+## 运行维护 2026-06-12 20:28
+
+- 现场症状：NapCat HTTP 上报报 `connect ECONNREFUSED 127.0.0.1:3002`，本机 3002 无监听。
+- 直接原因：主 bot PID 已死亡但 `.mizukibot.lock` 仍在；daemon 识别为连续短命退出后进入早退冷却，没有立刻恢复 HTTP reverse listener。
+- 最小修复：HTTP reverse 启用时 daemon 检查 `NAPCAT_HTTP_REVERSE_PORT` listener；端口空且处于早退冷却时允许一次 10 分钟节流恢复，并记录 `data/bot-main-port-recovery-state.json`。
+- 证据补强：主进程增加 `beforeExit/exit/SIGBREAK/SIGHUP` 日志和 `data/node-reports` Node diagnostic report。
+- 小目标已完成：3002 端口空窗不会被早退冷却长期放大。
+
 ## 运行维护 2026-06-12 20:16
 
 - 新增 NapCat 健康观测：运行时记录 WebSocket online/offline、最近恢复时间、离线持续时长和离线原因到 `data/napcat-health-state.json`。
 - 新增降级事件聚合：`thinking-emoji` 与 `continuous-message reply/forward expand` 因 `napcat_offline` 跳过时追加 `data/napcat-health-events.ndjson`。
 - 新增只读入口：`npm run diag:napcat-health -- --text` 直接输出当前离线状态、离线多久、最近降级动作和恢复时间。
 - 小目标已完成：下次 NapCat 断连不用再从 `bot-runtime.err.log` 手工串查。
+
+## 运行维护 2026-06-12 20:11
+
+- 新增只读诊断入口：`npm run diag:main-bot-restarts`。
+- 聚合证据：`bot-main-restart-state.json`、`.mizukibot.lock`、`bot-main-expected-shutdown.json`、`bot-daemon.log` 最近重拉/退避事件、daemon 归档的 runtime stdout/stderr tail。
+- 支持 `-- --json` 供后续脚本采集；默认不写入任何运行状态，不调整 daemon 重启/退避策略。
+- 小目标已完成：主 bot 短时间连续早退时，一条命令可汇总关键证据。
 
 ## 运行维护 2026-06-12 13:36
 
@@ -27,13 +42,6 @@
 - 根因诊断缺口：旧 `bot-runtime.out.log` / `bot-runtime.err.log` 被下一次重拉前清空，导致短命主进程退出现场不可恢复。
 - 最小加固：daemon 启动前归档旧 runtime 日志，主 bot 15 分钟内连续 2 次硬退出后退避 15 分钟，`index.js` 写入启动/fatal/expected-shutdown 诊断。
 - 小目标已完成：主 bot 硬退出时不再短时间无证据连续重启。
-
-## 运行维护 2026-06-12 20:11
-
-- 新增只读诊断入口：`npm run diag:main-bot-restarts`。
-- 聚合证据：`bot-main-restart-state.json`、`.mizukibot.lock`、`bot-main-expected-shutdown.json`、`bot-daemon.log` 最近重拉/退避事件、daemon 归档的 runtime stdout/stderr tail。
-- 支持 `-- --json` 供后续脚本采集；默认不写入任何运行状态，不调整 daemon 重启/退避策略。
-- 小目标已完成：主 bot 短时间连续早退时，一条命令可汇总关键证据。
 
 ## 运行维护 2026-06-12 12:55
 

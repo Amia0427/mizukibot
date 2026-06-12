@@ -18,6 +18,7 @@ $mainStderrLogFile = Join-Path $logDir 'bot-runtime.err.log'
 $workerStdoutLogFile = Join-Path $logDir 'post-reply-worker.out.log'
 $workerStderrLogFile = Join-Path $logDir 'post-reply-worker.err.log'
 $mainRestartStateFile = Join-Path $logDir 'bot-main-restart-state.json'
+$mainPortRecoveryStateFile = Join-Path $logDir 'bot-main-port-recovery-state.json'
 $workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
 
 function Get-PositiveInt64Env {
@@ -73,6 +74,90 @@ function Test-PostReplyWorkerIdleRecycleEnabled {
 
 function Test-ExternalPostReplyWorkerResidentExpected {
   return ((Test-ExternalPostReplyWorkerEnabled) -and (-not (Test-PostReplyWorkerIdleRecycleEnabled)))
+}
+
+function Test-DaemonTcpPortListening {
+  param([Parameter(Mandatory = $true)][Int64]$Port)
+
+  if ($Port -le 0 -or $Port -gt 65535) {
+    return $false
+  }
+
+  try {
+    $connections = @(Get-NetTCPConnection -LocalPort ([int]$Port) -State Listen -ErrorAction SilentlyContinue)
+    return $connections.Count -gt 0
+  } catch {
+    try {
+      $pattern = "LISTENING\s+\d+$"
+      $rows = @(netstat -ano -p tcp | Where-Object {
+        ($_ -match "[:.]$Port\s+") -and ($_ -match $pattern)
+      })
+      return $rows.Count -gt 0
+    } catch {
+      return $false
+    }
+  }
+}
+
+function Get-MainHttpReverseIngressState {
+  $enabled = Get-BoolEnv -Name 'NAPCAT_HTTP_REVERSE_ENABLED' -DefaultValue $false
+  $port = Get-PositiveInt64Env -Name 'NAPCAT_HTTP_REVERSE_PORT' -DefaultValue 3002
+  $listening = if ($enabled) { Test-DaemonTcpPortListening -Port $port } else { $false }
+  return [pscustomobject]@{
+    Enabled = $enabled
+    Port = $port
+    Listening = $listening
+    Outage = ($enabled -and (-not $listening))
+  }
+}
+
+function Test-RecentMainHttpReversePortRecovery {
+  param(
+    [Parameter(Mandatory = $true)][Int64]$Port
+  )
+
+  $cooldownMs = Get-PositiveInt64Env -Name 'BOT_DAEMON_HTTP_REVERSE_PORT_RECOVERY_COOLDOWN_MS' -DefaultValue ([Int64]600000)
+  if ($cooldownMs -le 0) {
+    return $false
+  }
+
+  $state = Read-JsonFileSafe -Path $mainPortRecoveryStateFile
+  if ($null -eq $state) {
+    return $false
+  }
+
+  $statePort = 0
+  [void][Int64]::TryParse([string]$state.port, [ref]$statePort)
+  if ($statePort -ne $Port) {
+    return $false
+  }
+
+  $lastAttemptAt = [datetime]::MinValue
+  if (-not [datetime]::TryParse([string]$state.lastAttemptAt, [ref]$lastAttemptAt)) {
+    return $false
+  }
+
+  return (((Get-Date).ToUniversalTime() - $lastAttemptAt.ToUniversalTime()).TotalMilliseconds -lt $cooldownMs)
+}
+
+function Record-MainHttpReversePortRecovery {
+  param(
+    [Parameter(Mandatory = $true)][Int64]$Port,
+    [int]$PreviousPid = 0,
+    [int]$EarlyExitCount = 0,
+    [string]$CooldownUntil = ''
+  )
+
+  $state = [pscustomobject]@{
+    schemaVersion = 'main_http_reverse_port_recovery_v1'
+    lastAttemptAt = (Get-Date).ToUniversalTime().ToString('o')
+    port = $Port
+    previousPid = $PreviousPid
+    earlyExitCount = $EarlyExitCount
+    cooldownUntil = $CooldownUntil
+    reason = 'http_reverse_port_outage'
+  }
+  [void](Write-JsonFileSafe -Path $mainPortRecoveryStateFile -Value $state)
 }
 
 function Rotate-DaemonLogIfNeeded {
@@ -947,6 +1032,7 @@ try {
 
   Write-DaemonLog -Message "using node: $nodeExe"
   $mainBotStartedByDaemon = $false
+  $httpReverseIngressState = Get-MainHttpReverseIngressState
   if (Test-LockOwnedByRunningNode -LockPath $lockFile) {
     $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
     Write-DaemonLog -Message "bot already running, skip duplicate start. $lockDiag"
@@ -958,7 +1044,12 @@ try {
       Write-DaemonLog -Message "lock present but not owned by active main bot. $lockDiag"
       $earlyExitState = Update-MainBotEarlyExitState -LockPath $lockFile -OwnerPid $previousMainPid
       if ($earlyExitState.Blocked) {
-        throw "main bot exited repeatedly soon after startup; backoff active (reason=$($earlyExitState.Reason), count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil), $lockDiag)"
+        if ($httpReverseIngressState.Outage -and (-not (Test-RecentMainHttpReversePortRecovery -Port $httpReverseIngressState.Port))) {
+          Record-MainHttpReversePortRecovery -Port $httpReverseIngressState.Port -PreviousPid $previousMainPid -EarlyExitCount $earlyExitState.Count -CooldownUntil $earlyExitState.CooldownUntil
+          Write-DaemonLog -Message "main bot early-exit backoff bypassed for HTTP reverse port outage. port=$($httpReverseIngressState.Port), previous_pid=$previousMainPid, count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil)"
+        } else {
+          throw "main bot exited repeatedly soon after startup; backoff active (reason=$($earlyExitState.Reason), count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil), http_reverse_enabled=$($httpReverseIngressState.Enabled), http_reverse_port=$($httpReverseIngressState.Port), http_reverse_listening=$($httpReverseIngressState.Listening), $lockDiag)"
+        }
       }
       if ($earlyExitState.Reason -ne 'disabled' -and $earlyExitState.Reason -ne 'no_owner_pid') {
         Write-DaemonLog -Message "main bot early-exit state updated. reason=$($earlyExitState.Reason), previous_pid=$previousMainPid, count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil)"

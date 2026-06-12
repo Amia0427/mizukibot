@@ -32,8 +32,37 @@ const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
 const EXPECTED_SHUTDOWN_FILE = path.join(config.DATA_DIR, 'bot-main-expected-shutdown.json');
+const NODE_REPORT_DIR = path.join(config.DATA_DIR, 'node-reports');
 let cleanupSingleInstanceLock = null;
 let preserveSingleInstanceLockOnExit = false;
+let messageIngressDispatcher = null;
+
+function configureNodeProcessReports() {
+  try {
+    fs.mkdirSync(NODE_REPORT_DIR, { recursive: true });
+    if (process.report && typeof process.report === 'object') {
+      process.report.directory = NODE_REPORT_DIR;
+      process.report.reportOnFatalError = true;
+      process.report.reportOnSignal = false;
+      process.report.reportOnUncaughtException = false;
+    }
+  } catch (_) {}
+}
+
+function writeNodeReportBestEffort(reason = 'runtime') {
+  try {
+    if (!process.report || typeof process.report.writeReport !== 'function') return '';
+    fs.mkdirSync(NODE_REPORT_DIR, { recursive: true });
+    const safeReason = String(reason || 'runtime').replace(/[^a-z0-9_.-]+/gi, '_').slice(0, 64) || 'runtime';
+    const filePath = path.join(NODE_REPORT_DIR, `main-${process.pid}-${Date.now()}-${safeReason}.json`);
+    process.report.writeReport(filePath);
+    return filePath;
+  } catch (_) {
+    return '';
+  }
+}
+
+configureNodeProcessReports();
 
 function writeJsonFileBestEffort(filePath, value) {
   try {
@@ -58,10 +87,12 @@ function recordExpectedShutdown(reason, extra = {}) {
 
 function logFatalStartupError(kind, error) {
   const message = error && (error.stack || error.message) ? (error.stack || error.message) : String(error);
+  const reportPath = writeNodeReportBestEffort(kind);
   console.error(`[fatal] ${kind}`, {
     pid: process.pid,
     uptimeMs: Math.round(process.uptime() * 1000),
-    message
+    message,
+    reportPath
   });
 }
 
@@ -75,6 +106,23 @@ process.on('unhandledRejection', (error) => {
   preserveSingleInstanceLockOnExit = true;
   logFatalStartupError('unhandledRejection', error);
   process.exit(1);
+});
+
+process.on('beforeExit', (code) => {
+  console.warn('[process] beforeExit', {
+    pid: process.pid,
+    code,
+    uptimeMs: Math.round(process.uptime() * 1000),
+    messageIngress: messageIngressDispatcher?.getSnapshot?.()
+  });
+});
+
+process.on('exit', (code) => {
+  console.warn('[process] exit', {
+    pid: process.pid,
+    code,
+    uptimeMs: Math.round(process.uptime() * 1000)
+  });
 });
 
 function isProcessAlive(pid) {
@@ -283,7 +331,7 @@ const { handleIncomingMessage } = createMessageHandler({
   sendWithRetry,
   actionClient: napcatActionClient
 });
-const messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
+messageIngressDispatcher = config.MESSAGE_INGRESS_ASYNC_ENABLED
   ? createMessageIngressDispatcher({
     handleMessage: handleIncomingMessage,
     maxActive: config.MESSAGE_INGRESS_ASYNC_MAX_ACTIVE,
@@ -577,4 +625,10 @@ process.on('SIGINT', () => {
 });
 process.on('SIGTERM', () => {
   void shutdownMainProcess('SIGTERM', 143);
+});
+process.on('SIGBREAK', () => {
+  void shutdownMainProcess('SIGBREAK', 131);
+});
+process.on('SIGHUP', () => {
+  void shutdownMainProcess('SIGHUP', 129);
 });
