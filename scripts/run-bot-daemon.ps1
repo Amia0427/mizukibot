@@ -17,6 +17,7 @@ $mainStdoutLogFile = Join-Path $logDir 'bot-runtime.out.log'
 $mainStderrLogFile = Join-Path $logDir 'bot-runtime.err.log'
 $workerStdoutLogFile = Join-Path $logDir 'post-reply-worker.out.log'
 $workerStderrLogFile = Join-Path $logDir 'post-reply-worker.err.log'
+$mainRestartStateFile = Join-Path $logDir 'bot-main-restart-state.json'
 $workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
 
 function Get-PositiveInt64Env {
@@ -150,11 +151,41 @@ function New-EmptyDaemonLogFile {
   }
 }
 
+function Archive-DaemonRedirectLogIfNeeded {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  if (-not (Test-Path $Path)) {
+    return ''
+  }
+
+  try {
+    $current = Get-Item -LiteralPath $Path -ErrorAction Stop
+    if ($current.Length -le 0) {
+      return ''
+    }
+
+    $archivePath = Get-DaemonFallbackLogPath -Path $Path
+    Copy-Item -LiteralPath $Path -Destination $archivePath -Force
+    return $archivePath
+  } catch {
+    Write-DaemonLog -Message "failed to archive runtime redirect log before truncate. path=$Path error=$($_.Exception.Message)"
+    return ''
+  }
+}
+
 function Resolve-DaemonWritableLogPath {
   param(
     [Parameter(Mandatory = $true)]
     [string]$Path
   )
+
+  $archivePath = Archive-DaemonRedirectLogIfNeeded -Path $Path
+  if (-not [string]::IsNullOrWhiteSpace($archivePath)) {
+    Write-DaemonLog -Message "archived runtime redirect log before restart. source=$Path archive=$archivePath"
+  }
 
   if (New-EmptyDaemonLogFile -Path $Path) {
     return $Path
@@ -327,6 +358,195 @@ function Read-PidFileText {
     return [string]$raw
   } catch {
     return ''
+  }
+}
+
+function Read-JsonFileSafe {
+  param([Parameter(Mandatory = $true)][string]$Path)
+
+  try {
+    if (-not (Test-Path $Path)) { return $null }
+    $raw = Get-Content -LiteralPath $Path -Raw -Encoding utf8 -ErrorAction Stop
+    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+    return $raw | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    return $null
+  }
+}
+
+function Write-JsonFileSafe {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)]$Value
+  )
+
+  try {
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path $dir)) {
+      New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    $json = $Value | ConvertTo-Json -Depth 8
+    [System.IO.File]::WriteAllText($Path, $json + "`r`n", [System.Text.Encoding]::UTF8)
+    return $true
+  } catch {
+    Write-DaemonLog -Message "failed to write json state. path=$Path error=$($_.Exception.Message)"
+    return $false
+  }
+}
+
+function Read-PositivePidFromFile {
+  param([Parameter(Mandatory = $true)][string]$FilePath)
+
+  $pidText = (Read-PidFileText -FilePath $FilePath).Trim()
+  $pidNum = 0
+  if ([int]::TryParse($pidText, [ref]$pidNum) -and $pidNum -gt 0) {
+    return $pidNum
+  }
+  return 0
+}
+
+function Test-ExpectedMainBotShutdownRecent {
+  param([int]$OwnerPid = 0)
+
+  $markerPath = Join-Path $logDir 'bot-main-expected-shutdown.json'
+  $marker = Read-JsonFileSafe -Path $markerPath
+  if ($null -eq $marker) {
+    return $false
+  }
+
+  $expiresAt = [datetime]::MinValue
+  if (-not [datetime]::TryParse([string]$marker.expiresAt, [ref]$expiresAt)) {
+    return $false
+  }
+  if ($expiresAt.ToUniversalTime() -lt (Get-Date).ToUniversalTime()) {
+    return $false
+  }
+
+  $markerPid = 0
+  [void][int]::TryParse([string]$marker.pid, [ref]$markerPid)
+  if ($OwnerPid -gt 0 -and $markerPid -gt 0 -and $markerPid -ne $OwnerPid) {
+    return $false
+  }
+
+  return $true
+}
+
+function Get-MainBotEarlyExitPolicy {
+  return [pscustomobject]@{
+    WindowMs = Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_WINDOW_MS' -DefaultValue ([Int64]900000)
+    MaxRestarts = Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_MAX_RESTARTS' -DefaultValue ([Int64]2)
+    CooldownMs = Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_COOLDOWN_MS' -DefaultValue ([Int64]900000)
+  }
+}
+
+function Get-MainBotLockAgeMs {
+  param([Parameter(Mandatory = $true)][string]$LockPath)
+
+  try {
+    if (-not (Test-Path $LockPath)) {
+      return [Int64]::MaxValue
+    }
+    $lockInfo = Get-Item -LiteralPath $LockPath -ErrorAction Stop
+    return [Int64]([Math]::Max(0, ((Get-Date) - $lockInfo.LastWriteTime).TotalMilliseconds))
+  } catch {
+    return [Int64]::MaxValue
+  }
+}
+
+function Update-MainBotEarlyExitState {
+  param(
+    [Parameter(Mandatory = $true)][string]$LockPath,
+    [int]$OwnerPid = 0
+  )
+
+  $policy = Get-MainBotEarlyExitPolicy
+  if ($policy.MaxRestarts -le 0 -or $policy.WindowMs -le 0 -or $policy.CooldownMs -le 0) {
+    return [pscustomobject]@{ Blocked = $false; Reason = 'disabled'; Count = 0; CooldownUntil = '' }
+  }
+
+  if ($OwnerPid -le 0) {
+    return [pscustomobject]@{ Blocked = $false; Reason = 'no_owner_pid'; Count = 0; CooldownUntil = '' }
+  }
+
+  if (Test-ExpectedMainBotShutdownRecent -OwnerPid $OwnerPid) {
+    Write-DaemonLog -Message "main bot previous exit marked expected; skip early-exit backoff. pid=$OwnerPid"
+    $state = [pscustomobject]@{
+      firstExitAt = ''
+      lastExitAt = (Get-Date).ToUniversalTime().ToString('o')
+      count = 0
+      cooldownUntil = ''
+      lastPid = $OwnerPid
+      lastReason = 'expected_shutdown'
+    }
+    [void](Write-JsonFileSafe -Path $mainRestartStateFile -Value $state)
+    return [pscustomobject]@{ Blocked = $false; Reason = 'expected_shutdown'; Count = 0; CooldownUntil = '' }
+  }
+
+  $lockAgeMs = Get-MainBotLockAgeMs -LockPath $LockPath
+  if ($lockAgeMs -gt $policy.WindowMs) {
+    Write-DaemonLog -Message "main bot stale lock is outside early-exit window; reset backoff. pid=$OwnerPid lock_age_ms=$lockAgeMs window_ms=$($policy.WindowMs)"
+    $state = [pscustomobject]@{
+      firstExitAt = ''
+      lastExitAt = (Get-Date).ToUniversalTime().ToString('o')
+      count = 0
+      cooldownUntil = ''
+      lastPid = $OwnerPid
+      lastReason = 'outside_window'
+    }
+    [void](Write-JsonFileSafe -Path $mainRestartStateFile -Value $state)
+    return [pscustomobject]@{ Blocked = $false; Reason = 'outside_window'; Count = 0; CooldownUntil = '' }
+  }
+
+  $now = (Get-Date).ToUniversalTime()
+  $state = Read-JsonFileSafe -Path $mainRestartStateFile
+  $firstExitAt = [datetime]::MinValue
+  $cooldownUntil = [datetime]::MinValue
+  if ($null -ne $state) {
+    [void][datetime]::TryParse([string]$state.firstExitAt, [ref]$firstExitAt)
+    [void][datetime]::TryParse([string]$state.cooldownUntil, [ref]$cooldownUntil)
+  }
+
+  if ($cooldownUntil -gt $now) {
+    $activeCount = 0
+    [void][int]::TryParse([string]$state.count, [ref]$activeCount)
+    return [pscustomobject]@{
+      Blocked = $true
+      Reason = 'cooldown_active'
+      Count = $activeCount
+      CooldownUntil = $cooldownUntil.ToString('o')
+    }
+  }
+
+  $count = 1
+  if ($firstExitAt -ne [datetime]::MinValue -and (($now - $firstExitAt).TotalMilliseconds -le $policy.WindowMs)) {
+    $priorCount = 0
+    [void][int]::TryParse([string]$state.count, [ref]$priorCount)
+    $count = $priorCount + 1
+  } else {
+    $firstExitAt = $now
+  }
+
+  $blocked = $count -ge $policy.MaxRestarts
+  $newCooldownUntil = if ($blocked) { $now.AddMilliseconds($policy.CooldownMs) } else { [datetime]::MinValue }
+  $newState = [pscustomobject]@{
+    firstExitAt = $firstExitAt.ToString('o')
+    lastExitAt = $now.ToString('o')
+    count = $count
+    cooldownUntil = if ($blocked) { $newCooldownUntil.ToString('o') } else { '' }
+    lastPid = $OwnerPid
+    lastReason = 'hard_exit_while_lock_owned'
+    lockAgeMs = $lockAgeMs
+    windowMs = $policy.WindowMs
+    maxRestarts = $policy.MaxRestarts
+    cooldownMs = $policy.CooldownMs
+  }
+  [void](Write-JsonFileSafe -Path $mainRestartStateFile -Value $newState)
+
+  return [pscustomobject]@{
+    Blocked = $blocked
+    Reason = if ($blocked) { 'threshold_reached' } else { 'counted' }
+    Count = $count
+    CooldownUntil = if ($blocked) { $newCooldownUntil.ToString('o') } else { '' }
   }
 }
 
@@ -616,19 +836,6 @@ function Get-WorkerRuntimeState {
   }
 }
 
-function Read-JsonFileSafe {
-  param([Parameter(Mandatory = $true)][string]$Path)
-
-  try {
-    if (-not (Test-Path $Path)) { return $null }
-    $raw = Get-Content -LiteralPath $Path -Raw -Encoding utf8 -ErrorAction Stop
-    if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
-    return $raw | ConvertFrom-Json -ErrorAction Stop
-  } catch {
-    return $null
-  }
-}
-
 function Test-PostReplyJobDue {
   param(
     [Parameter(Mandatory = $true)]$Job,
@@ -744,9 +951,18 @@ try {
     $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
     Write-DaemonLog -Message "bot already running, skip duplicate start. $lockDiag"
   } else {
+    $previousMainPid = 0
     if (Test-Path $lockFile) {
+      $previousMainPid = Read-PositivePidFromFile -FilePath $lockFile
       $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
       Write-DaemonLog -Message "lock present but not owned by active main bot. $lockDiag"
+      $earlyExitState = Update-MainBotEarlyExitState -LockPath $lockFile -OwnerPid $previousMainPid
+      if ($earlyExitState.Blocked) {
+        throw "main bot exited repeatedly soon after startup; backoff active (reason=$($earlyExitState.Reason), count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil), $lockDiag)"
+      }
+      if ($earlyExitState.Reason -ne 'disabled' -and $earlyExitState.Reason -ne 'no_owner_pid') {
+        Write-DaemonLog -Message "main bot early-exit state updated. reason=$($earlyExitState.Reason), previous_pid=$previousMainPid, count=$($earlyExitState.Count), cooldown_until=$($earlyExitState.CooldownUntil)"
+      }
     }
     $mainProc = Start-NodeDaemonProcess -NodeExe $nodeExe -ArgumentList @('index.js') -StdoutLog $mainStdoutLogFile -StderrLog $mainStderrLogFile
     Write-DaemonLog -Message "started main bot pid=$($mainProc.Id), stdout=$mainStdoutLogFile, stderr=$mainStderrLogFile"

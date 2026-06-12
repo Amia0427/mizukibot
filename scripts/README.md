@@ -11,7 +11,7 @@
 ## Runtime
 
 - `post-reply-worker.js`：post-reply worker 入口
-- `run-bot-daemon.ps1`：Windows 守护启动脚本；更新 2026-06-11 18:59 +08:00，daemon 本轮成功拉起主 bot 且外置 post-reply worker 启用时会补启 worker，补启前仍扫描现有 PID/进程避免重复；更新 2026-06-11 13:35 +08:00，主 bot 启动后轮询等待 `.mizukibot.lock` 接管，默认 `BOT_DAEMON_LOCK_WAIT_MS=30000`，避免固定 2 秒窗口误报启动失败
+- `run-bot-daemon.ps1`：Windows 守护启动脚本；更新 2026-06-12 13:36 +08:00，主 bot 重拉前归档旧 runtime stdout/stderr，并对 15 分钟内连续 2 次硬退出做 15 分钟退避；更新 2026-06-11 18:59 +08:00，daemon 本轮成功拉起主 bot 且外置 post-reply worker 启用时会补启 worker，补启前仍扫描现有 PID/进程避免重复；更新 2026-06-11 13:35 +08:00，主 bot 启动后轮询等待 `.mizukibot.lock` 接管，默认 `BOT_DAEMON_LOCK_WAIT_MS=30000`，避免固定 2 秒窗口误报启动失败
 - `restart-bot-periodic.ps1`：Windows 定时重启脚本；更新 2026-06-10 23:51 +08:00，计划任务默认每天 04:00 运行；更新 2026-06-08 13:36 +08:00，直接解析 `node.exe` 启动 `index.js`，避免计划任务 `Start-Process npm` 命中 shim 报 `%1 不是有效的 Win32 应用程序`
 - `restart-windows-daemon.ps1`：Windows 守护重启
 - `status-windows-daemon.ps1`：Windows 守护状态

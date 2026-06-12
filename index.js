@@ -29,6 +29,51 @@ const { startNapCatHttpReverseServer } = require('./core/napcatHttpReverseServer
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
+const EXPECTED_SHUTDOWN_FILE = path.join(config.DATA_DIR, 'bot-main-expected-shutdown.json');
+let cleanupSingleInstanceLock = null;
+let preserveSingleInstanceLockOnExit = false;
+
+function writeJsonFileBestEffort(filePath, value) {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n', 'utf8');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function recordExpectedShutdown(reason, extra = {}) {
+  const now = new Date();
+  writeJsonFileBestEffort(EXPECTED_SHUTDOWN_FILE, {
+    pid: process.pid,
+    reason: String(reason || 'shutdown'),
+    recordedAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + 2 * 60 * 1000).toISOString(),
+    ...extra
+  });
+}
+
+function logFatalStartupError(kind, error) {
+  const message = error && (error.stack || error.message) ? (error.stack || error.message) : String(error);
+  console.error(`[fatal] ${kind}`, {
+    pid: process.pid,
+    uptimeMs: Math.round(process.uptime() * 1000),
+    message
+  });
+}
+
+process.on('uncaughtException', (error) => {
+  preserveSingleInstanceLockOnExit = true;
+  logFatalStartupError('uncaughtException', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (error) => {
+  preserveSingleInstanceLockOnExit = true;
+  logFatalStartupError('unhandledRejection', error);
+  process.exit(1);
+});
 
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -122,6 +167,7 @@ function acquireSingleInstanceLock() {
 
   const cleanup = () => {
     try {
+      if (preserveSingleInstanceLockOnExit) return;
       if (!fs.existsSync(LOCK_FILE)) return;
       const ownerPid = Number.parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
       if (ownerPid === process.pid) {
@@ -134,7 +180,7 @@ function acquireSingleInstanceLock() {
   return cleanup;
 }
 
-const cleanupSingleInstanceLock = acquireSingleInstanceLock();
+cleanupSingleInstanceLock = acquireSingleInstanceLock();
 try {
   const tmpCleanupEnabled = !['0', 'false', 'no', 'off'].includes(
     String(process.env.DATA_TMP_CLEANUP_ENABLED || '').toLowerCase().trim()
@@ -372,12 +418,18 @@ if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
 } else {
   connectNapCat();
 }
+console.log('[startup] main bot initialized', {
+  pid: process.pid,
+  mode: config.NAPCAT_HTTP_REVERSE_ENABLED ? 'http_reverse' : 'websocket',
+  lockFile: LOCK_FILE
+});
 
 async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   if (shutdownInProgress) return;
   shutdownInProgress = true;
   shuttingDown = true;
   const reason = String(signal || 'shutdown').trim() || 'shutdown';
+  recordExpectedShutdown(reason, { exitCode });
   console.log('[shutdown] begin', { reason, pid: process.pid });
 
   if (reconnectTimer) {
@@ -448,6 +500,7 @@ function drainForScheduledRestart(meta = {}) {
   if (shuttingDown) return;
   shuttingDown = true;
   const delayMs = Math.max(0, Number(meta?.delayMs || 0) || 0);
+  recordExpectedShutdown('remote_restart_scheduled', { delayMs });
   console.log('[restart] drain old instance before external restart', {
     pid: process.pid,
     delayMs
