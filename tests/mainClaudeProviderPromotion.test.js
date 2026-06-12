@@ -59,7 +59,7 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestHeaders || {}, 'Authorization'));
 
     clearProjectCache();
-    process.env.API_PROVIDER = '';
+    process.env.API_PROVIDER = 'openai_compatible';
     const { buildMainModelRequest: buildChatMainModelRequest } = require('../api/runtimeV2/model/shared');
     const chatRequest = buildChatMainModelRequest(null, {
       messages: [{ role: 'user', content: 'hello' }],

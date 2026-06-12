@@ -54,6 +54,34 @@ function shouldPreferResponsesProtocol(provider = '', url = '', requestBody = {}
   return isResponsesUrl(responsesUrl) && requestBodyLooksLikeChatCompletion(requestBody);
 }
 
+function mergeHeaderListValues(...values) {
+  const merged = [];
+  const seen = new Set();
+  for (const value of values) {
+    for (const part of String(value || '').split(',')) {
+      const normalized = normalizeText(part);
+      if (!normalized) continue;
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(normalized);
+    }
+  }
+  return merged.join(',');
+}
+
+function mergeAnthropicRequestHeaders(baseHeaders = null, overrideHeaders = null) {
+  const merged = {
+    ...(baseHeaders || {}),
+    ...(overrideHeaders || {})
+  };
+  const baseBeta = (baseHeaders || {})['anthropic-beta'] || (baseHeaders || {})['Anthropic-Beta'];
+  const overrideBeta = (overrideHeaders || {})['anthropic-beta'] || (overrideHeaders || {})['Anthropic-Beta'];
+  const beta = mergeHeaderListValues(baseBeta, overrideBeta);
+  if (beta) merged['anthropic-beta'] = beta;
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
 async function prepareRequest(url, body = {}) {
   const explicitProvider = normalizeText(body?.__provider || body?.__apiProvider);
   const provider = explicitProvider
@@ -136,10 +164,10 @@ async function prepareRequest(url, body = {}) {
     provider,
     requestUrl: ensureAnthropicMessagesUrl(url),
     requestBody,
-    requestHeaders: normalizeProviderRequestHeaders(provider, {
-      ...(anthropicRequestHeaders || {}),
-      ...(internalRequestHeaders || {})
-    })
+    requestHeaders: normalizeProviderRequestHeaders(provider, mergeAnthropicRequestHeaders(
+      anthropicRequestHeaders,
+      internalRequestHeaders
+    ))
   };
 }
 

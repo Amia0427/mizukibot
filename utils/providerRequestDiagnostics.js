@@ -54,6 +54,14 @@ function normalizeText(value = '') {
   return String(value || '').trim();
 }
 
+function isEndpointScopedAnthropicMessagesUrl(apiBaseUrl = '') {
+  try {
+    return new URL(String(apiBaseUrl || '').trim()).hostname.toLowerCase() === 'a-ocnfniawgw.cn-shanghai.fcapp.run';
+  } catch (_) {
+    return false;
+  }
+}
+
 function maskSecret(value = '') {
   const text = normalizeText(value);
   if (!text) return '';
@@ -571,12 +579,23 @@ function normalizeScenarioList(value) {
 }
 
 function buildConfigBackedScenarioConfig(role = 'main') {
+  if (role !== 'admin') {
+    const base = buildRequestedProviderConfig({});
+    return {
+      ...base,
+      requestedProvider: getApiProvider(base.apiBaseUrl, base.model, {
+        provider: isEndpointScopedAnthropicMessagesUrl(base.apiBaseUrl) ? 'anthropic' : config.API_PROVIDER,
+        preferUnifiedResponses: true
+      })
+    };
+  }
+
   if (role === 'admin') {
     const adminId = normalizeText((config.ADMIN_USER_IDS || [])[0] || '__provider_diag_admin__');
     const resolved = resolveRoleAwareMainModelConfig(adminId, null, {});
     return {
       requestedProvider: getApiProvider(resolved.apiBaseUrl, resolved.model, {
-        provider: resolved.provider,
+        provider: isEndpointScopedAnthropicMessagesUrl(resolved.apiBaseUrl) ? 'anthropic' : resolved.provider,
         preferUnifiedResponses: true
       }),
       model: resolved.model,

@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 20:32 +08:00**：修复 fcapp Claude 主回复端点协议选择。仅当主回复 host 为 `a-ocnfniawgw.cn-shanghai.fcapp.run` 时，出站层强制走 Anthropic `/v1/messages` 并合并 `context-1m-2025-08-07` beta；其它端点不默认改走 `/v1/messages`。真实请求确认 `claude-haiku-4-5-20251001` 在该链路返回 200，本地运行配置切到该模型。小目标完成：fcapp 端点不再误走 `/v1/chat/completions`。
+
 **2026-06-12 20:28 +08:00**：修复 HTTP 反向模式重启后 `127.0.0.1:3002` 空窗。复盘 NapCat `ECONNREFUSED 127.0.0.1:3002`：主 bot 已硬退出，daemon 又因连续早退进入冷却，导致 NapCat 上报端口无人监听。现 daemon 在 HTTP reverse 启用时会检查 `NAPCAT_HTTP_REVERSE_PORT` listener，端口空且本轮处于早退冷却时允许一次受节流恢复，并写入 `data/bot-main-port-recovery-state.json`；主进程增加 `beforeExit/exit/SIGBREAK/SIGHUP` 和 Node diagnostic report 证据。小目标完成：3002 端口空窗不会被早退冷却长期放大。
 
 **2026-06-12 20:16 +08:00**：新增 NapCat 只读健康诊断入口。运行时会把 WebSocket online/offline、离线持续时长、最近 `thinking-emoji` 与 `continuous-message reply/forward expand` 降级动作写入 `data/napcat-health-state.json` / `data/napcat-health-events.ndjson`；`npm run diag:napcat-health -- --text` 可直接看当前是否离线、离线多久、最近降级动作和恢复时间。小目标完成：下次 NapCat 断连不用再从 `bot-runtime.err.log` 手工串查。

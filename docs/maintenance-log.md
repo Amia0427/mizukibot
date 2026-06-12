@@ -13,6 +13,14 @@
 ### 原因
 防止误报的机械故障污染上下文，历史拒绝记录不影响新prompt效果。
 
+## 运行维护 2026-06-12 20:32
+
+- 修复 fcapp Claude 主回复端点协议选择：仅 `a-ocnfniawgw.cn-shanghai.fcapp.run` host 被强制切到 Anthropic `/v1/messages`。
+- 该端点出站 header 自动合并 `context-1m-2025-08-07`，并保留现有 prompt caching beta。
+- 其它主回复端点继续按显式 `API_PROVIDER` / URL 推断，不默认改走 `/v1/messages`。
+- 真实请求确认 `claude-opus-4-6` 已下线；`claude-haiku-4-5-20251001` 在该链路返回 200，本地运行配置切到该模型。
+- 小目标已完成：fcapp 端点不再误走 `/v1/chat/completions`。
+
 ## 运行维护 2026-06-12 20:28
 
 - 现场症状：NapCat HTTP 上报报 `connect ECONNREFUSED 127.0.0.1:3002`，本机 3002 无监听。

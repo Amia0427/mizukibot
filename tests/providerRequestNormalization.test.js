@@ -29,6 +29,7 @@ module.exports = (async () => {
     process.env.API_PROVIDER = 'anthropic';
     process.env.AI_MODEL = 'claude-3-5-sonnet-latest';
     process.env.MODEL_HTTP_USER_AGENT = browserUA;
+    process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
     process.env.OPENAI_PROMPT_CACHE_ENABLED = 'true';
     process.env.OPENAI_PROMPT_CACHE_RETENTION = '24h';
     process.env.GEMINI_SYSTEM_PROMPT_PATH = path.join(__dirname, 'fixtures', 'gemini-system-prompt.txt');
@@ -236,6 +237,27 @@ module.exports = (async () => {
     assert.strictEqual(explicitSummaryOpenAI.provider, 'openai_compatible');
     assert.strictEqual(explicitSummaryOpenAI.url, 'https://summary.example/v1/chat/completions');
     assert.strictEqual(explicitSummaryOpenAI.body.__requestHeaders.Authorization, 'Bearer summary-key');
+
+    const scopedFcappAnthropic = buildMainModelRequest({
+      model: 'claude-opus-4-6',
+      apiBaseUrl: 'https://a-ocnfniawgw.cn-shanghai.fcapp.run/v1/chat/completions',
+      apiKey: 'fcapp-key',
+      provider: 'openai_compatible'
+    }, {
+      messages: [{ role: 'user', content: 'fcapp endpoint scoped' }],
+      stream: false,
+      defaultMaxTokens: 200
+    });
+    assert.strictEqual(scopedFcappAnthropic.provider, 'anthropic');
+    assert.strictEqual(scopedFcappAnthropic.url, 'https://a-ocnfniawgw.cn-shanghai.fcapp.run/v1/messages');
+    assert.strictEqual(scopedFcappAnthropic.body.__requestHeaders['x-api-key'], 'fcapp-key');
+    assert.ok(!Object.prototype.hasOwnProperty.call(scopedFcappAnthropic.body.__requestHeaders, 'Authorization'));
+    assert.ok(scopedFcappAnthropic.body.__requestHeaders['anthropic-beta'].includes('context-1m-2025-08-07'));
+    const preparedScopedFcapp = await httpClient.prepareRequest(scopedFcappAnthropic.url, scopedFcappAnthropic.body);
+    assert.strictEqual(preparedScopedFcapp.provider, 'anthropic');
+    assert.strictEqual(preparedScopedFcapp.requestUrl, 'https://a-ocnfniawgw.cn-shanghai.fcapp.run/v1/messages');
+    assert.ok(preparedScopedFcapp.requestHeaders['anthropic-beta'].includes('context-1m-2025-08-07'));
+    assert.ok(preparedScopedFcapp.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
 
     const bareOriginOpenAI = buildMainModelRequest({
       model: 'claude-sonnet-4-6',
