@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 20:11 +08:00**：新增只读主 bot 早退诊断入口 `npm run diag:main-bot-restarts`。一次汇总 `data/bot-main-restart-state.json`、daemon 明确归档的最新 `bot-runtime.out/err.*.log` tail、`.mizukibot.lock` PID/进程状态、`bot-main-expected-shutdown.json` 和最近 daemon 重拉/锁接管/退避日志；支持 `-- --json`、`-- --tail-lines=N`。小目标完成：下次出现 06:55/07:04/07:08 类短时间连续退出时，可一条命令看到证据。
+
 **2026-06-12 19:50 +08:00**：消息入口改为默认全链路异步接收。NapCat WebSocket / HTTP reverse 回调现在只做解析、日志、action response 分流和 `messageIngressDispatcher` 入队；主回复路由、模型请求、工具调用和持久化继续由原 `handleIncomingMessage` 在后台 drain 中执行，关闭时按 `MESSAGE_INGRESS_ASYNC_SHUTDOWN_DRAIN_MS` 等待队列收尾。新增 `MESSAGE_INGRESS_ASYNC_*` 配置和入口调度测试。小目标完成：NapCat 入站回调不再等待完整主回复链路。
 
 **2026-06-12 13:36 +08:00**：加固 Windows daemon 主 bot 短命退出诊断。复盘 `data/bot-daemon.log` 在 06:55、07:04、07:08 +08:00 连续重拉，确认不是 post-reply worker 空窗，也没有 `/restart` 触发；daemon 看到的是 `.mizukibot.lock` 中的主 bot PID 已死亡，且旧 `bot-runtime.out/err.log` 被下一次启动重定向清空。现 daemon 启动前会归档旧 runtime 日志，并对 15 分钟窗口内连续 2 次主 bot 硬退出启用 15 分钟退避；`index.js` 增加 fatal/startup/expected-shutdown 诊断，正常 SIGTERM/远程重启不计入退避。小目标完成：主 bot 不再短时间无证据连续重启。
@@ -240,6 +242,7 @@ npm run diag:main-reply-token-budget -- --limit 20
 npm run diag:runtime
 npm run diag:runtime-hotspots
 npm run diag:runtime-exceptions
+npm run diag:main-bot-restarts
 npm run diag:low-resource
 npm run diag:provider-request -- --provider openai_compatible
 node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
