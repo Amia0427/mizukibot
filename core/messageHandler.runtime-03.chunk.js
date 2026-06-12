@@ -254,6 +254,9 @@
     );
     const freshnessGuard = buildFreshnessGuard(continuousMeta);
     const rawText = effectiveMsg.raw_message || '';
+    const slashCommandTextForConcurrency = stripLeadingCqControlSegments(rawText, effectiveBotQQ);
+    const adminFastCommandForConcurrency = isAdminUser(senderId)
+      && /^\s*\/check(?:\s|$)/i.test(String(slashCommandTextForConcurrency || '').trim());
     const inboundSessionKey = rawInboundFreshnessSessionKey;
     const isPrivateInbound = isPrivateChatType(chatType);
     const concurrencyScope = isPrivateInbound ? 'private' : 'default';
@@ -269,7 +272,8 @@
       groupId,
       chatType,
       concurrencyScope,
-      privilegedPrivateChat
+      privilegedPrivateChat,
+      ignoreSessionLimit: adminFastCommandForConcurrency
     });
     const inboundSnapshot = selectedInboundConcurrency.getSnapshot();
     appendTraceTiming('message_ingress_lock_acquired', {
@@ -281,6 +285,8 @@
       concurrencyLane,
       concurrencyScope,
       privilegedPrivateChat,
+      ignoreSessionLimit: adminFastCommandForConcurrency,
+      ignoreSessionLimitReason: adminFastCommandForConcurrency ? 'admin_fast_check' : '',
       queueWaitMs: Math.max(0, Date.now() - queueWaitStartedAt),
       inbound_wait_ms: Number(inboundLock?.waitMs || 0) || 0,
       inbound_lane: String(inboundLock?.lane || concurrencyLane).trim() || concurrencyLane,
