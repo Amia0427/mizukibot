@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-12 12:42 +08:00**：修复模型自检并发请求的网关误路由。`MODEL_TLS_IMPERSONATION_CONNECTION_REUSE_ENABLED=false` 默认关闭 CycleTLS 连接复用，避免不同模型网关在 HTTP/2 连接复用下触发 `421 Misdirected Request`；CycleTLS 返回 421 时会自动回落 axios 重试一次。`token.memoh.net` 当前仍返回 `403`，按上游账号 TLS router 客户端匹配限制保留原状。小目标完成：模型自检不再被 421 批量打断。
+
 **2026-06-12 07:34 +08:00**：完成 MizukiBot 可复用架构提炼，输出到 `E:\qq-bot-0.1\doc\mizukibot0`。新增总索引和 40 个可并行开发主题文档，覆盖路由契约、Runtime V2、prompt manifest、记忆治理、post-reply worker、诊断体系、NapCat 健康态、部署运维和 Rust 迁移拆解。小目标完成：其他 agent/QQ 聊天机器人可按主题并行学习和迁移。
 
 **2026-06-12 07:32 +08:00**：长期记忆诊断入口收敛为默认只读。`diag:memory memos` 在 `MEMOS_MCP_ENABLED=false` 或 `MEMOS_REMOTE_RECALL_ENABLED=false` 时不再做 MCP discovery，直接返回 disabled 摘要，实测从超时降为 7ms；`diag:memory profile-journal-db` 默认不再触发 Profile Journal DB auto-clean / benchmark，只输出健康状态，需显式 `--clean` / `--benchmark` 才执行写入清洗或测速。复查 `storage-overlap` 当前 `unexpectedVectorRows=0`、`missingVectorRows=0`、`recommendedAction=none`。小目标完成：长期记忆维护诊断不再因关闭的远端层卡住，也不会在默认巡检中隐式改库。
