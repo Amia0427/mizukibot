@@ -4,6 +4,10 @@
 
 ## 近期更新
 
+**2026-06-13 01:53 +08:00**：新增主回复采样退化输出守卫，不改变任何模型配置。主回复最终边界会检测重复句段、n-gram 循环、低字符多样性、填充语循环和异常标点循环；非流式命中后用同模型同配置追加一次修复指令重试，流式回复先裁掉重复尾巴，严重退化再走同配置非流式修复；最终校验层补充漏网裁剪和 `main_reply_degeneration_detected/main_reply_degeneration_repair` 事件。小目标完成：成功返回但陷入循环/复读的主回复不再直接发送或入库。
+
+**2026-06-13 01:53 +08:00**：完成 Gemini 采样退化真实样本诊断。基于 `scripts/export-gemini-user-dialogues.js` 导出最近 48 小时 198 条 Gemini 对话，定位最可能根因是 `prompts/GEMINI.txt` 作为 manifest 条件系统根提示过度叙事化，以及 `chat/default` 二段 direct reply 在无明确召回意图时仍带 `retrieved_memory_lite/daily_journal`。现 Gemini 专属提示词收敛为短消息适配层，普通聊天阻断 ambient memory 强块；显式“昨天/记得/之前”召回仍保留证据注入。小目标完成：最近 Gemini 口吻塌缩不再被系统风格块和旧记忆块叠加放大。
+
 **2026-06-12 23:08 +08:00**：修复长期记忆对主观关系问题的误召回。复盘私聊 `messageId=699530001`“你最喜欢我的哪一点”：路由误判为 `lookup/notebook-answer`，召回注入 2026-05-27 无关成人内容 journal segment 和多个背景级 Q/A，虽最终回复未完全跑偏但 prompt 已被污染。现“你最喜欢我的哪一点”这类当前主观看法不触发长期记忆；明确“记得/之前/回忆”时仍召回。`retrieved_memory_lite` 自动注入改为需要强证据或明确召回意图，heuristic 也只在 `forceMemoryContext` 时默认带 Retrieved/Daily Journal。小目标完成：普通主观情感提问不再被长期记忆噪声带偏。
 
 **2026-06-12 23:03 +08:00**：修复管理员 `/check` 被同会话慢请求堵住。复盘 22:48:55 +08:00 的 `messageId=2039086334`：消息已进入 NapCat 与 `message_ingress`，但 22:47:22 的同管理员图片摘要仍占用 `qq-group:1092700300:user:1960901788` 会话入站锁，`/check` 在 22:49:08 进入 admin 队列后 30s 内没拿到锁，最终 `queued request timed out after 30000ms`。现 `/check` 这类管理员快命令可绕过同会话 per-user 入站限制，并在 trace/log 写入 `ignoreSessionLimitReason=admin_fast_check`。小目标完成：模型自检指令不再被上一条同用户长回复吞掉。

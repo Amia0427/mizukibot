@@ -1,3 +1,11 @@
+## 运行维护 2026-06-13 01:53
+
+- 基于 `scripts/export-gemini-user-dialogues.js` 导出最近 48 小时 Gemini 对话：198 条 conversation、263 次成功 Gemini 调用、43 条有主回复预览。
+- 根因 1：`prompts/GEMINI.txt` 已通过 manifest 条件块注入 OpenAI-compatible Gemini 主回复，旧“从容/细腻/张力呼吸”写作锚点放大固定口吻；已收敛为短消息适配层。
+- 根因 2：`chat/default` 二段 direct reply 在无明确召回意图时仍可带 `retrieved_memory_lite/daily_journal`，如 `req_0deca2e5ec3feacd`；已新增普通聊天 ambient memory block gate。
+- 回归覆盖：`tests/geminiSamplingDegradationPromptGate.test.js` 验证普通短句不带旧记忆，显式“昨天/记得”召回仍保留证据。
+- 小目标已完成：最近 Gemini 口吻塌缩不再被系统风格块和旧记忆块叠加放大。
+
 ## 清理记录 2026-06-08 13:22
 
 ### model-calls.ndjson
@@ -12,6 +20,14 @@
 
 ### 原因
 防止误报的机械故障污染上下文，历史拒绝记录不影响新prompt效果。
+
+## 运行维护 2026-06-13 01:53
+
+- 现场问题：主回复模型偶发成功返回但正文出现采样退化，表现为句段复读、局部 n-gram 循环、填充语循环或异常标点循环。
+- 最小修复：新增 `mainReplyDegenerationGuard`，在非流式主回复最终边界检测退化后同模型同配置修复重试一次；流式主回复先裁掉重复尾巴，严重退化再走同配置修复；最终校验层补充漏网裁剪。
+- 观测事件：新增 `main_reply_degeneration_detected` 与 `main_reply_degeneration_repair`，记录 score、reasons、metrics、repairAttempted/ok。
+- 验证：`node tests/mainReplyDegenerationGuard.test.js`、`node tests/mainReplyDegenerationRuntime.test.js`、相关文件 `node -c` 语法检查。
+- 小目标已完成：成功返回但陷入循环/复读的主回复不再直接发送或入库。
 
 ## 运行维护 2026-06-12 23:03
 

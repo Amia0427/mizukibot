@@ -11,6 +11,10 @@ const {
   getAdminPrivateMainReplyStreamTimeoutReply,
   isAdminPrivateMainReplyStreamFirstTokenTimeout
 } = require('../../../utils/adminPrivateMainReplyStreamTimeout');
+const {
+  analyzeMainReplyDegeneration,
+  buildMainReplyDegenerationRepairInstruction
+} = require('../../../utils/mainReplyDegenerationGuard');
 
 function createRouteAfterDirectReply() {
   return function routeAfterDirectReply(state) {
@@ -102,6 +106,7 @@ function createDirectReplyNode(deps = {}) {
         if (!trimmed) return false;
         if (isPureToolCallMarkup(trimmed)) return false;
         if (isUnsafeUserFacingReply(trimmed)) return false;
+        if (analyzeMainReplyDegeneration(trimmed).degenerated) return false;
         return classifyReplyFailure(trimmed).type === 'none';
       });
   const classifyDirectReplyError = typeof deps.classifyDirectReplyError === 'function'
@@ -658,6 +663,69 @@ function createDirectReplyNode(deps = {}) {
       if (isStableDirectReplyText(retriedReply)) {
         reply = retriedReply;
         displayReply = retriedReply;
+      } else {
+        reply = getControlledFailureReply('generic_model_failure');
+        displayReply = reply;
+      }
+    }
+
+    const degenerationAnalysis = analyzeMainReplyDegeneration(reply);
+    if (degenerationAnalysis.degenerated) {
+      directLoopEvents = directLoopEvents.concat([
+        createEvent('main_reply_degeneration_detected', {
+          node: 'direct_reply',
+          stage: 'final_reply',
+          score: degenerationAnalysis.score,
+          reasons: degenerationAnalysis.reasons,
+          metrics: degenerationAnalysis.metrics,
+          repairAttempted: true
+        })
+      ]);
+      let repairedReply = '';
+      let repairedDisplayReply = '';
+      try {
+        const retryResult = await requestReplyImpl(
+          messagesToSend.concat([{
+            role: 'system',
+            content: buildMainReplyDegenerationRepairInstruction(degenerationAnalysis)
+          }]),
+          {
+            ...directContext,
+            triggerBranch: 'direct_reply.degeneration_final_retry',
+            disableTools: true,
+            allowedTools: []
+          }
+        );
+        repairedReply = String(
+          retryResult?.persistedText
+          || retryResult?.finalReply
+          || retryResult?.visibleText
+          || retryResult
+          || ''
+        ).trim();
+        repairedDisplayReply = String(
+          retryResult?.visibleText
+          || retryResult?.finalReply
+          || retryResult?.persistedText
+          || retryResult
+          || ''
+        ).trim();
+      } catch (_) {}
+
+      const repairAnalysis = analyzeMainReplyDegeneration(repairedReply);
+      const repairOk = isStableDirectReplyText(repairedReply) && !repairAnalysis.degenerated;
+      directLoopEvents = directLoopEvents.concat([
+        createEvent('main_reply_degeneration_repair', {
+          node: 'direct_reply',
+          stage: 'final_reply',
+          ok: repairOk,
+          score: repairAnalysis.score,
+          reasons: repairAnalysis.reasons
+        })
+      ]);
+      if (repairOk) {
+        reply = repairedReply;
+        displayReply = repairedDisplayReply || repairedReply;
       } else {
         reply = getControlledFailureReply('generic_model_failure');
         displayReply = reply;
