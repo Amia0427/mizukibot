@@ -2,6 +2,10 @@ const {
   applyGroupDirectStyleGuard,
   createGroupDirectStyleGuardEvent
 } = require('../guards/groupDirectReplyStyleGuard');
+const {
+  analyzeMainReplyDegeneration,
+  trimMainReplyDegeneratedTail
+} = require('../../../utils/mainReplyDegenerationGuard');
 
 function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
@@ -29,8 +33,14 @@ function createFinalValidateNode(deps = {}) {
     const rawDisplayReply = String(state.output?.displayReply || rawFinalReply || '').trim();
     const protectedReply = protectFinalOutput(rawFinalReply);
     const protectedDisplayReply = protectFinalOutput(rawDisplayReply);
-    const guardedReply = applyGroupDirectStyleGuard(protectedReply.text, state.request);
-    const guardedDisplayReply = applyGroupDirectStyleGuard(protectedDisplayReply.text, state.request);
+    const rawDegeneration = analyzeMainReplyDegeneration(protectedReply.text);
+    const rawDisplayDegeneration = analyzeMainReplyDegeneration(protectedDisplayReply.text);
+    const protectedReplyText = trimMainReplyDegeneratedTail(protectedReply.text);
+    const protectedDisplayReplyText = trimMainReplyDegeneratedTail(protectedDisplayReply.text);
+    const degeneration = analyzeMainReplyDegeneration(protectedReplyText);
+    const displayDegeneration = analyzeMainReplyDegeneration(protectedDisplayReplyText);
+    const guardedReply = applyGroupDirectStyleGuard(protectedReplyText, state.request);
+    const guardedDisplayReply = applyGroupDirectStyleGuard(protectedDisplayReplyText, state.request);
     const finalReply = String(guardedReply.text || '').trim();
     const displayReply = String(guardedDisplayReply.text || '').trim() || finalReply;
     const failure = finalReply && isReplyFailure(finalReply, { emptyIsFailure: true })
@@ -51,6 +61,32 @@ function createFinalValidateNode(deps = {}) {
           ? protectedDisplayReply.matches
           : (Array.isArray(protectedReply.matches) ? protectedReply.matches : [])
       }),
+      ...(rawDegeneration.degenerated || rawDisplayDegeneration.degenerated || degeneration.degenerated || displayDegeneration.degenerated ? [
+        createEvent('main_reply_degeneration_detected', {
+          node: 'final_validate',
+          stage: 'final_validate',
+          score: Math.max(
+            Number(rawDegeneration.score || 0),
+            Number(rawDisplayDegeneration.score || 0),
+            Number(degeneration.score || 0),
+            Number(displayDegeneration.score || 0)
+          ),
+          reasons: Array.from(new Set(
+            normalizeArray(rawDegeneration.reasons)
+              .concat(normalizeArray(rawDisplayDegeneration.reasons))
+              .concat(normalizeArray(degeneration.reasons))
+              .concat(normalizeArray(displayDegeneration.reasons))
+          )),
+          metrics: rawDegeneration.degenerated
+            ? rawDegeneration.metrics
+            : (rawDisplayDegeneration.degenerated
+              ? rawDisplayDegeneration.metrics
+              : (degeneration.degenerated ? degeneration.metrics : displayDegeneration.metrics)),
+          repairAttempted: false,
+          tailTrimmed: protectedReplyText !== String(protectedReply.text || '').trim()
+            || protectedDisplayReplyText !== String(protectedDisplayReply.text || '').trim()
+        })
+      ] : []),
       createEvent('final_output', {
         text: finalReply,
         failureType: failure?.type || ''

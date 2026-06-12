@@ -18,6 +18,11 @@ const {
   normalizeMessageContent,
   trimTextByTokenBudget
 } = require('../../../utils/contextBudget');
+const {
+  analyzeMainReplyDegeneration,
+  buildMainReplyDegenerationRepairInstruction,
+  trimMainReplyDegeneratedTail
+} = require('../../../utils/mainReplyDegenerationGuard');
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
@@ -131,6 +136,76 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     return firstTokenTimeout;
   }
 
+  async function repairDegeneratedStreamReply(messagesToSend, state, finalReply, stage = 'streaming_final') {
+    const request = normalizeObject(state.request, {});
+    const trimmedReply = trimMainReplyDegeneratedTail(finalReply);
+    const rawAnalysis = analyzeMainReplyDegeneration(finalReply);
+    const analysis = analyzeMainReplyDegeneration(trimmedReply || finalReply);
+    if (!analysis.degenerated) {
+      if (rawAnalysis.degenerated || trimmedReply !== String(finalReply || '').trim()) {
+        emitRuntimeEvent(state, 'main_reply_degeneration_detected', {
+          node: 'direct_reply',
+          stage,
+          score: rawAnalysis.score,
+          reasons: rawAnalysis.reasons,
+          metrics: rawAnalysis.metrics,
+          repairAttempted: false,
+          tailTrimmed: trimmedReply !== String(finalReply || '').trim()
+        });
+      }
+      return {
+        text: trimmedReply || String(finalReply || '').trim(),
+        repaired: false,
+        repairFailed: false,
+        analysis
+      };
+    }
+
+    emitRuntimeEvent(state, 'main_reply_degeneration_detected', {
+      node: 'direct_reply',
+      stage,
+      score: analysis.score,
+      reasons: analysis.reasons,
+      metrics: analysis.metrics,
+      repairAttempted: true
+    });
+
+    let repaired = '';
+    try {
+      const retryResult = await requestReplyImpl(
+        normalizeArray(messagesToSend).concat([{
+          role: 'system',
+          content: buildMainReplyDegenerationRepairInstruction(analysis)
+        }]),
+        {
+          ...request,
+          dispatchBranch: 'direct_reply',
+          triggerBranch: `direct_reply.${stage}_degeneration_retry`,
+          disableTools: true,
+          allowedTools: []
+        }
+      );
+      repaired = sanitizeUserFacingText(extractReplyText(retryResult, 'persisted')).trim();
+    } catch (_) {}
+
+    const repairAnalysis = analyzeMainReplyDegeneration(repaired);
+    const repairOk = Boolean(repaired) && !repairAnalysis.degenerated && !isUnsafeUserFacingReply(repaired);
+    emitRuntimeEvent(state, 'main_reply_degeneration_repair', {
+      node: 'direct_reply',
+      stage,
+      ok: repairOk,
+      score: repairAnalysis.score,
+      reasons: repairAnalysis.reasons
+    });
+
+    return {
+      text: repairOk ? repaired : EMPTY_STREAM_FALLBACK_REPLY,
+      repaired: repairOk,
+      repairFailed: !repairOk,
+      analysis: repairOk ? repairAnalysis : analysis
+    };
+  }
+
   async function streamDirectReply(messagesToSend, state) {
     const request = normalizeObject(state.request, {});
     const shouldGuardStreamBeforeSend = isGroupDirectChatRequest(request)
@@ -221,6 +296,8 @@ function createStreamingCoordinatorHelpers(deps = {}) {
           finalReply = originalReply;
         }
       }
+      const repairedFinal = await repairDegeneratedStreamReply(messagesToSend, state, finalReply, 'streaming_final');
+      finalReply = repairedFinal.text;
       const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
       const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
       if (isUnsafeUserFacingReply(safeFinalReply)) {
@@ -248,6 +325,8 @@ function createStreamingCoordinatorHelpers(deps = {}) {
             humanizerTimedOut,
             humanizerFailed,
             humanizerFailureReason,
+            degenerationRepaired: repairedFinal.repaired,
+            degenerationRepairFailed: repairedFinal.repairFailed,
             unsafeBlocked: true,
             fallbackToNonStream: false,
             mode: 'direct'
@@ -273,6 +352,8 @@ function createStreamingCoordinatorHelpers(deps = {}) {
           humanizerTimedOut,
           humanizerFailed,
           humanizerFailureReason,
+          degenerationRepaired: repairedFinal.repaired,
+          degenerationRepairFailed: repairedFinal.repairFailed,
           fallbackToNonStream: false,
           mode: 'direct'
         }
@@ -367,6 +448,8 @@ function createStreamingCoordinatorHelpers(deps = {}) {
             finalReply = originalPartialReply;
           }
         }
+        const repairedFinal = await repairDegeneratedStreamReply(messagesToSend, state, finalReply, 'streaming_partial');
+        finalReply = repairedFinal.text;
         const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
         const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
         if (isUnsafeUserFacingReply(safeFinalReply)) {
@@ -394,6 +477,8 @@ function createStreamingCoordinatorHelpers(deps = {}) {
               humanizerTimedOut,
               humanizerFailed,
               humanizerFailureReason,
+              degenerationRepaired: repairedFinal.repaired,
+              degenerationRepairFailed: repairedFinal.repairFailed,
               unsafeBlocked: true,
               fallbackToNonStream: false,
               mode: 'direct'
@@ -419,6 +504,8 @@ function createStreamingCoordinatorHelpers(deps = {}) {
             humanizerTimedOut,
             humanizerFailed,
             humanizerFailureReason,
+            degenerationRepaired: repairedFinal.repaired,
+            degenerationRepairFailed: repairedFinal.repairFailed,
             fallbackToNonStream: false,
             mode: 'direct'
           }
