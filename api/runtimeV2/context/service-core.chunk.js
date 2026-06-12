@@ -873,6 +873,23 @@ function shouldRuntimeAddRetrievedMemoryBlock(question = '', options = {}, dynam
   return strongTraceEvidence;
 }
 
+function shouldBlockAmbientMemoryForPlainChat(question = '', options = {}, dynamicPromptPlan = {}) {
+  if (shouldForceMemoryContextForQuestion(question, options)) return false;
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const routePolicyKey = normalizeText(options?.routePolicyKey || routeMeta.routePolicyKey).toLowerCase();
+  const topRouteType = normalizeText(options?.topRouteType || routeMeta.topRouteType).toLowerCase();
+  const plannerProvided = dynamicPromptPlan?.plannerProvided === true
+    || normalizeText(dynamicPromptPlan?.source || dynamicPromptPlan?._source).toLowerCase() === 'planner';
+  const planAsksMemory = planIncludesBlock(dynamicPromptPlan, 'retrieved_memory_lite')
+    || planIncludesBlock(dynamicPromptPlan, 'daily_journal')
+    || planIncludesBlock(dynamicPromptPlan, 'memory_recall_policy');
+  return Boolean(
+    routePolicyKey === 'chat/default'
+    && (topRouteType === 'direct_chat' || !topRouteType)
+    && (!plannerProvided || !planAsksMemory)
+  );
+}
+
 function resolveMemoryPromptBudgetMs(options = {}, question = '') {
   const currentConfig = getConfig();
   const base = Math.max(0, Number(options?.latencyDecision?.memoryBudgetMs || currentConfig.MEMORY_RETRIEVAL_SOFT_BUDGET_MS || 300) || 0);

@@ -743,6 +743,14 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   if (hasLocalOpenVikingDuplicate && !finalBlockedIds.includes('openviking_recall')) {
     finalBlockedIds.push('openviking_recall');
   }
+  if (shouldBlockAmbientMemoryForPlainChat(question, {
+    ...options,
+    routeMeta
+  }, finalDynamicPromptPlan)) {
+    for (const blockId of ['retrieved_memory_lite', 'daily_journal', 'memory_recall_policy']) {
+      if (!finalBlockedIds.includes(blockId)) finalBlockedIds.push(blockId);
+    }
+  }
   const selectedBlocks = filterBlocksByPlan(combinedBlocks, finalDynamicPromptPlan, {
     requiredIds,
     runtimeAddedIds,
