@@ -42,6 +42,46 @@ function getMainReplyDefaultMaxTokens() {
   return Math.max(64, Number(config.MAIN_REPLY_DEFAULT_MAX_TOKENS || 8192) || 8192);
 }
 
+const ENDPOINT_SCOPED_ANTHROPIC_MESSAGES = Object.freeze({
+  'a-ocnfniawgw.cn-shanghai.fcapp.run': {
+    anthropicBeta: 'context-1m-2025-08-07'
+  }
+});
+
+function mergeAnthropicBetaHeaderValues(baseValue = '', requiredValues = []) {
+  const merged = [];
+  const seen = new Set();
+  const append = (value = '') => {
+    for (const part of String(value || '').split(',')) {
+      const normalized = String(part || '').trim();
+      if (!normalized) continue;
+      const key = normalized.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(normalized);
+    }
+  };
+
+  append(baseValue);
+  for (const value of requiredValues) append(value);
+  return merged.join(',');
+}
+
+function getUrlHost(apiBaseUrl = '') {
+  const raw = String(apiBaseUrl || '').trim();
+  if (!raw) return '';
+  try {
+    return new URL(raw).hostname.toLowerCase();
+  } catch (_) {
+    return '';
+  }
+}
+
+function getEndpointScopedAnthropicMessagesConfig(apiBaseUrl = '') {
+  const host = getUrlHost(apiBaseUrl);
+  return host ? ENDPOINT_SCOPED_ANTHROPIC_MESSAGES[host] || null : null;
+}
+
 function ensureChatCompletionsUrl(url) {
   const normalized = String(url || '').replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(normalized)) return normalized;
@@ -95,6 +135,7 @@ function ensureOpenAIMainUrl(apiBaseUrl = '', options = {}) {
 }
 
 function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
+  if (getEndpointScopedAnthropicMessagesConfig(apiBaseUrl)) return 'anthropic';
   if (options && typeof options === 'object' && String(options.provider || '').trim()) {
     return normalizeApiProvider(options.provider);
   }
@@ -105,6 +146,7 @@ function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
 }
 
 function ensureMainModelUrl(apiBaseUrl = '', options = {}) {
+  if (getEndpointScopedAnthropicMessagesConfig(apiBaseUrl)) return ensureAnthropicMessagesUrl(apiBaseUrl);
   if (isAnthropicProvider(options.provider)) return ensureAnthropicMessagesUrl(apiBaseUrl);
   if (isGeminiNativeProvider(options.provider)) {
     return normalizeGeminiNativeApiBaseUrl(apiBaseUrl, options.model, { stream: options.stream === true });
@@ -473,6 +515,14 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
     if (apiKey) body.__requestHeaders.Authorization = `Bearer ${apiKey}`;
   } else if (isAnthropicProvider(options.provider)) {
     if (apiKey) body.__requestHeaders['x-api-key'] = apiKey;
+    const endpointAnthropicConfig = getEndpointScopedAnthropicMessagesConfig(getApiBaseUrl(resolvedConfig));
+    const endpointBeta = endpointAnthropicConfig?.anthropicBeta;
+    if (endpointBeta) {
+      body.__requestHeaders['anthropic-beta'] = mergeAnthropicBetaHeaderValues(
+        body.__requestHeaders['anthropic-beta'] || config.ANTHROPIC_BETA,
+        [endpointBeta]
+      );
+    }
   } else if (isGeminiNativeProvider(options.provider)) {
     if (apiKey) body.__requestHeaders['x-goog-api-key'] = apiKey;
   }
