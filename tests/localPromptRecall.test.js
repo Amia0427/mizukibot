@@ -233,13 +233,21 @@ module.exports = (async () => {
         NORMAL_FAST_REPLY_RECENT_TURNS: 12,
         NORMAL_FAST_REPLY_CONTEXT_MAX_CHARS: 8000,
         NORMAL_FAST_REPLY_SUMMARY_MAX_CHARS: 1500,
-        NORMAL_FAST_REPLY_MAX_TOKENS: 1024
+        NORMAL_FAST_REPLY_MAX_TOKENS: 1024,
+        NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE: 2,
+        NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST: 100,
+        NORMAL_FAST_REPLY_PERSONA_MODULE_TEXT_MAX_CHARS: 700,
+        NORMAL_FAST_REPLY_WORLDBOOK_ENABLED: true
       },
       chatHistory: {},
       getRecentSessionContextSummaries: () => []
     });
-    assert.ok(!fast.messages[0].content.includes('persona_module'), 'normal fast reply should not load persona modules');
-    assert.ok(!fast.messages[0].content.includes('轻量关心'), 'normal fast reply should not inject local prompt recall blocks');
+    assert.ok(fast.messages[0].content.includes('persona_module_care_light'), 'normal fast reply should load short local persona modules');
+    assert.ok(fast.messages[0].content.includes('轻量关心'), 'normal fast reply should inject selected short module text');
+    assert.ok(fast.personaModules.length > 0 && fast.personaModules.length <= 2, 'normal fast reply should cap short modules at 2');
+    assert.ok(fast.personaModules.every((id) => !String(id).startsWith('wb_mizuki_')), 'normal fast reply should keep short persona modules separate from worldbook modules');
+    assert.deepStrictEqual(fast.worldbookModules, [], 'normal fast reply should not load worldbook modules for non-worldbook questions');
+    assert.ok(fast.personaModuleTokenCost <= 200, 'normal fast reply should keep module token cost light');
 
     console.log('localPromptRecall.test.js passed');
   } finally {

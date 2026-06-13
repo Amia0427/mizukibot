@@ -19,7 +19,14 @@ module.exports = (async () => {
     NORMAL_FAST_REPLY_RECENT_TURNS: 12,
     NORMAL_FAST_REPLY_CONTEXT_MAX_CHARS: 8000,
     NORMAL_FAST_REPLY_SUMMARY_MAX_CHARS: 1500,
-    NORMAL_FAST_REPLY_MAX_TOKENS: 1024
+    NORMAL_FAST_REPLY_MAX_TOKENS: 1024,
+    NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE: 2,
+    NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST: 100,
+    NORMAL_FAST_REPLY_PERSONA_MODULE_TEXT_MAX_CHARS: 700,
+    NORMAL_FAST_REPLY_WORLDBOOK_ENABLED: true,
+    NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE: 1,
+    NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST: 180,
+    NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS: 900
   };
 
   const routeMeta = { groupId: 'g1', chatType: 'group', userId: 'u1' };
@@ -54,6 +61,53 @@ module.exports = (async () => {
   assert.ok(built.messages[0].content.includes('同一用户的私聊/群聊记忆和上下文可以作为背景连续性使用'), '群快速回复应共享同用户背景');
   assert.ok(built.messages[0].content.includes('不得泄露来源、复述私聊细节'), '群快速回复应保留隐私边界');
   assert.ok(built.messages[0].content.includes('优先锚定最近一条 assistant 历史回复'), '用户反馈上一条回复时应锚定最近 assistant');
+
+  const personaBuilt = buildNormalFastReplyMessages({
+    userId: 'u_persona',
+    routeMeta: { chatType: 'private', userId: 'u_persona' },
+    text: '真冬刚才那样说，我有点不知道怎么接',
+    sessionKey: 'direct:u_persona'
+  }, {
+    config: runtimeConfig,
+    chatHistory: {},
+    getRecentSessionContextSummaries: () => []
+  });
+  assert.ok(personaBuilt.messages[0].content.includes('[FastPersonaModules]'), '快速回复应注入短 persona modules');
+  assert.ok(personaBuilt.messages[0].content.includes('persona_module_mafuyu_branch'), '真冬语境应命中真冬短模块');
+  assert.ok(personaBuilt.personaModules.length > 0, '快速回复应记录已注入模块');
+  assert.ok(personaBuilt.personaModules.length <= 2, '快速回复最多注入两个短模块');
+  assert.ok(personaBuilt.personaModules.every((id) => !String(id).startsWith('wb_mizuki_')), '快速回复不注入 worldbook 长模块');
+  assert.ok(personaBuilt.personaModuleTokenCost <= 200, '快速回复短模块 tokenCost 总量应保持轻量');
+  assert.deepStrictEqual(personaBuilt.worldbookModules, [], '普通短模块场景不应误注入 worldbook');
+
+  const worldbookBuilt = buildNormalFastReplyMessages({
+    userId: 'u_worldbook_fast',
+    routeMeta: { chatType: 'private', userId: 'u_worldbook_fast' },
+    text: '瑞希未来两个都不放弃是什么意思',
+    sessionKey: 'direct:u_worldbook_fast'
+  }, {
+    config: runtimeConfig,
+    chatHistory: {},
+    getRecentSessionContextSummaries: () => []
+  });
+  assert.ok(worldbookBuilt.messages[0].content.includes('[FastWorldbook]'), '快速回复应为世界书问题注入轻量 worldbook');
+  assert.ok(worldbookBuilt.messages[0].content.includes('persona_module_wb_mizuki_future_two_tracks'), '快速回复应命中未来双轨世界书');
+  assert.ok(worldbookBuilt.messages[0].content.includes('服饰专门学校'), '快速回复应从 SQL worldbook body 注入内容');
+  assert.deepStrictEqual(worldbookBuilt.worldbookModules, ['wb_mizuki_future_two_tracks']);
+  assert.ok(worldbookBuilt.worldbookTokenCost <= 180, '快速回复 worldbook tokenCost 应保持轻量');
+
+  const casualBuilt = buildNormalFastReplyMessages({
+    userId: 'u_casual_fast',
+    routeMeta: { chatType: 'private', userId: 'u_casual_fast' },
+    text: '随便聊聊',
+    sessionKey: 'direct:u_casual_fast'
+  }, {
+    config: runtimeConfig,
+    chatHistory: {},
+    getRecentSessionContextSummaries: () => []
+  });
+  assert.ok(!casualBuilt.messages[0].content.includes('[FastWorldbook]'), '普通闲聊不应注入 fast worldbook');
+  assert.deepStrictEqual(casualBuilt.worldbookModules, []);
 
   const forwardContextBuilt = buildNormalFastReplyMessages({
     userId: 'u_forward',
