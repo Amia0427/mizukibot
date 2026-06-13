@@ -357,6 +357,7 @@ async function buildPersonaModuleCandidatesAsync(context = {}) {
   const phase = inferPhase(context);
   const ruleCandidates = buildPersonaModuleCandidates(context);
   const query = normalizeText(context.question || context.routePrompt || '');
+  const worldbookSessionReadOnly = context.worldbookSessionReadOnly === true || context.readOnly === true;
   let localRecall = { ok: false, modules: [] };
   if (config.LOCAL_PROMPT_RECALL_ENABLED !== false && context.disableLocalPromptRecall !== true) {
     try {
@@ -417,22 +418,25 @@ async function buildPersonaModuleCandidatesAsync(context = {}) {
     ...context,
     sessionKey: context.sessionKey || context.sessionId || context.routeMeta?.sessionKey || context.routeMeta?.session_key
   };
-  const activationResult = worldbookEnabled
+  const activationResult = worldbookEnabled && !worldbookSessionReadOnly
     ? activateWorldbookSessionCandidates(worldbookSearch.results, sessionContext, {
       now: context.worldbookSessionNow,
       random: context.worldbookSessionRandom
     })
-    : { activated: [], skipped: [] };
-  const activatedWorldbookResults = decorateActivatedWorldbookCandidates(worldbookSearch.results, activationResult);
+    : { activated: [], skipped: worldbookEnabled && worldbookSessionReadOnly ? [{ reason: 'read_only_diagnostic' }] : [] };
+  const activatedWorldbookResults = worldbookSessionReadOnly
+    ? normalizeArray(worldbookSearch.results)
+    : decorateActivatedWorldbookCandidates(worldbookSearch.results, activationResult);
   const activeSessionWorldbook = getActiveWorldbookSessionCandidates(catalog, sessionContext, {
     now: context.worldbookSessionNow,
-    consume: context.worldbookSessionConsume !== false
+    consume: !worldbookSessionReadOnly && context.worldbookSessionConsume !== false
   });
   const effectiveWorldbookResults = activatedWorldbookResults.concat(
     activeSessionWorldbook.filter((item) => !activatedWorldbookResults.some((hit) => normalizeText(hit.moduleId || hit.id) === normalizeText(item.moduleId || item.id)))
   );
   worldbookSearch.sessionState = {
     enabled: config.PERSONA_WORLDBOOK_SESSION_STATE_ENABLED !== false,
+    readOnly: worldbookSessionReadOnly,
     activated: activationResult.activated,
     skipped: activationResult.skipped,
     active: activeSessionWorldbook.map((item) => ({

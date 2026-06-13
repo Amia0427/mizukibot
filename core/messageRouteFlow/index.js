@@ -22,6 +22,9 @@ const {
   parseMainReplyDiagnosticInput
 } = require('../../utils/mainReplyDiagnostics');
 const {
+  buildMainReplyPromptAssemblyDiagnostic
+} = require('../../utils/mainReplyPromptAssemblyDiagnostics');
+const {
   parseProviderDiagnosticArgs,
   runProviderRequestDiagnostics
 } = require('../../utils/providerRequestDiagnostics');
@@ -839,7 +842,7 @@ function createMessageRouteFlow(deps = {}) {
     } else if (cmd === 'main_stream') {
       adminReply = handleMainStreamAdminCommand(route?.meta?.command, groupId, senderId);
     } else if (cmd === 'help') {
-      adminReply = '可用命令: /check, /群总结 [条数], /create <prompt>, /debug runtime|hotspots|replydiag|replycache|replytrunc|provider, /status, /reload, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
+      adminReply = '可用命令: /check, /群总结 [条数], /create <prompt>, /debug runtime|hotspots|replydiag|replyprompt|replycache|replytrunc|provider, /status, /reload, /memoryops diagnose|backfill|recall, /learn recent [limit], /learn search <query>, /learn patterns [limit], /learn rules [limit], /learn guide <pattern_key>, /learn style, /learn social, /learn graph <userId>, /group_public on|off|status, /main_stream on|off|status, /meme ..., /qzone_post {...}, /schedule_create {...}, /schedule_list [all], /schedule_cancel <jobId>, /schedule_delete <jobId>';
     } else if (cmd === 'check') {
       adminReply = formatModelSelfCheckReport(await runModelSelfCheck({
         adminUserId: senderId,
@@ -871,6 +874,21 @@ function createMessageRouteFlow(deps = {}) {
           groupId: parsed.groupId || groupId,
           chatType: parsed.chatType || normalizedChatType,
           plannerMode: parsed.plannerMode || 'rule'
+        });
+        adminReply = JSON.stringify(report, null, 2);
+      } else if (subcmd === 'replyprompt' || subcmd === 'prompt-assembly' || subcmd === 'system-prompt') {
+        const payload = args.slice(1).join(' ').trim();
+        const parsed = parseMainReplyDiagnosticInput(payload || rawText || '');
+        const requestId = String(parsed.requestId || parsed.request_id || '').trim()
+          || (/^req_[A-Za-z0-9_-]+$/.test(payload) ? payload : '');
+        const report = await buildMainReplyPromptAssemblyDiagnostic({
+          ...parsed,
+          ...(requestId ? { requestId } : {}),
+          rawText: parsed.rawText || parsed.text || parsed.requestText || payload || rawText,
+          requestText: parsed.requestText || parsed.cleanText || parsed.text || payload || rawText,
+          userId: parsed.userId || senderId,
+          groupId: parsed.groupId || groupId,
+          chatType: parsed.chatType || normalizedChatType
         });
         adminReply = JSON.stringify(report, null, 2);
       } else if (subcmd === 'provider' || subcmd === 'provider-request' || subcmd === 'providerdiag') {

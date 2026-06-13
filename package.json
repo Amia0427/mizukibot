@@ -19,6 +19,7 @@
     "diag:continuity": "node scripts/diagnose-continuity-state.js",
     "diag:main-reply": "node scripts/diagnose-main-reply.js",
     "diag:main-reply-prompt": "node scripts/diagnose-main-reply-prompt.js",
+    "diag:main-reply-prompt-assembly": "node scripts/diagnose-main-reply-prompt-assembly.js",
     "diag:worldbook": "node scripts/diagnose-worldbook.js",
     "diag:provider-request": "node scripts/diagnose-provider-request.js",
     "diag:main-reply-lag": "node scripts/diagnose-main-reply-lag.js",

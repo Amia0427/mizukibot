@@ -6,6 +6,8 @@
 
 **2026-06-13 21:24 +08:00**：完成最近几次机器人回复速度阻滞点复盘。新增 `docs/recent-reply-speed-blockers-2026-06-13.md`，按 `request-trace/inbound_timing/model-calls` 拆出 `req_731c6e812174d9c5`、`req_42badc948f719477` 等近样本：主要阻滞为 RuntimeV2 入口前本地空档、主模型上游、planner 工具链和连续消息预处理；成功样本实际 NapCat 发送多为 234ms-1.4s，不是主瓶颈。验收：`npm run diag:main-reply-lag`、`npm run diag:runtime`、`npm run diag:main-reply-prompt -- --limit 10 --json` 和只读日志聚合均已执行。小目标完成：最近机器人回复慢点有可复查证据。
 
+**2026-06-13 21:25 +08:00**：新增只读主回复 system prompt 组装诊断入口。`npm run diag:main-reply-prompt-assembly` 支持 `--request-id req_xxx` 从 `model-calls/request-trace/memory-recall-observability` 汇总已记录证据，也支持 `--text "..."` 按当前本地代码重建 prompt snapshot；输出 stable blocks、dynamic blocks、assistant-only blocks、persona modules、SQL worldbook 命中、planner 是否提供、runtime 本地补入和每个 block 的来源文件/来源策略。管理员可用 `/debug replyprompt`、`/debug prompt-assembly` 或 `/debug system-prompt`。验收：`node tests/mainReplyPromptAssemblyDiagnostics.test.js`、`node tests/mainReplyDiagnosticsAdminCommand.test.js`、`npm run diag:main-reply-prompt-assembly -- --text "服饰专门学校和N25两个都不放弃" --worldbook-semantic-limit=0`、`node -e "require('./api/runtimeV2/context/service')"` 均通过，实测 planner `source=heuristic` 且 worldbook session `readOnly=true` 时，`persona_module_wb_mizuki_future_two_tracks` 仍以 `persona_worldbook_sql_primary_read` 进入主回复动态块。小目标完成：planner 关闭/超时时本地 SQL worldbook 和 persona modules 如何进入最终主回复 prompt 有可复跑只读入口。
+
 **2026-06-13 21:05 +08:00**：补齐 `prompts/defaut.txt` 注入边界回归。`tests/adminStableSystemPrompt.test.js` 覆盖普通用户主回复实际注入、管理员私聊/群聊不注入、空 `defaut.txt` 跳过，以及 `root_system_prompt -> normal_user_default_prompt -> security_contract -> core_baseline_patch -> main_persona_system` 稳定块顺序；`tests/passiveAwarenessReplySystemPrompt.test.js` 覆盖普通用户被动群感知回复注入、管理员 sender 不注入和空文件跳过。修复稳定 prompt cache audience 维度，避免普通用户 stable block 被管理员群聊复用。验收：`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/promptCompiler.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`npm run check:prompts`、`node -e "require('./api/runtimeV2/context/service')"`、`node -e "require('./core/passiveGroupAwareness')"` 均通过。补充：`tests/runtimeV2SessionPromptCacheStability.test.js` / `tests/runtimeV2PromptOptimization.test.js` 本机超时未作为验收依据；`tests/promptGoldenSnapshots.test.js` 在 worldbook no-planner 既有分支断言失败，未改动相关逻辑。小目标完成：普通用户 defaut 注入边界有可复跑回归，且不覆盖现有 prompt 内容改动。
 
 **2026-06-13 20:00 +08:00**：planner 超时收敛到 15 秒并降级普通对话。`PLANNER_REQUEST_TIMEOUT_MS` 默认值和本地 `.env` 均改为 `15000`，配置解析会把更大的值封顶到 15 秒；远程 planner 模型请求失败或超时后强制返回 `chat_only/fast_reply`，不再用规则 fallback 继续生成工具计划，RuntimeV2 会走普通 `direct_reply` 主对话链路。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。小目标完成：planner 15 秒无响应自动断开并降级到普通对话链路。
@@ -292,6 +294,8 @@ npm run diag:main-reply-lag
 npm run diag:request-trace-preflight -- --request-id req_e528e222050c22fb,req_693c816e6c8be621
 npm run diag:main-reply-truncation
 npm run diag:main-reply-prompt -- --limit 20
+npm run diag:main-reply-prompt-assembly -- --text "服饰专门学校和N25两个都不放弃"
+npm run diag:main-reply-prompt-assembly -- --request-id req_xxx
 npm run diag:main-reply-token-budget -- --limit 20
 npm run diag:runtime
 npm run diag:napcat-health -- --text

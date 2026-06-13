@@ -136,6 +136,12 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       groupId: routeMeta.groupId || routeMeta.group_id || '',
       isAdmin: options.isAdmin === true || routeMeta.isAdmin === true,
       maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
+      worldbookLimit: options.worldbookLimit,
+      worldbookLexicalLimit: options.worldbookLexicalLimit,
+      worldbookSemanticLimit: options.worldbookSemanticLimit,
+      worldbookEmbeddingHotPath: options.worldbookEmbeddingHotPath,
+      worldbookSessionReadOnly: options.worldbookSessionReadOnly === true || options.readOnly === true,
+      worldbookSessionConsume: options.worldbookSessionConsume,
       mainReplyPromptMode
     }))
     : [];
@@ -164,6 +170,12 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         groupId: routeMeta.groupId || routeMeta.group_id || '',
         isAdmin: options.isAdmin === true || routeMeta.isAdmin === true,
         maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
+        worldbookLimit: options.worldbookLimit,
+        worldbookLexicalLimit: options.worldbookLexicalLimit,
+        worldbookSemanticLimit: options.worldbookSemanticLimit,
+        worldbookEmbeddingHotPath: options.worldbookEmbeddingHotPath,
+        worldbookSessionReadOnly: options.worldbookSessionReadOnly === true || options.readOnly === true,
+        worldbookSessionConsume: options.worldbookSessionConsume,
         personaModuleCandidates,
         mainReplyPromptMode
       }
