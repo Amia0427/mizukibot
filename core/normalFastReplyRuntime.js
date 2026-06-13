@@ -3,8 +3,20 @@ const { requestNonStreamingReply } = require('../api/runtimeV2/model/service');
 const { getRecentSessionContextSummaries } = require('../utils/sessionContextSummaryStore');
 const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { buildChatLivenessDisciplinePrompt } = require('../utils/chatLivenessContext');
+const {
+  buildPersonaModuleCandidates,
+  loadPersonaModuleText,
+  selectPersonaModules
+} = require('../utils/personaModules');
 const { isUnsafeUserFacingReply } = require('../utils/userFacingReplyGuards');
 const { classifyReplyFailure, isReplyFailure } = require('../utils/replyFailure');
+
+const NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE = 2;
+const NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST = 100;
+const NORMAL_FAST_REPLY_PERSONA_MODULE_TEXT_MAX_CHARS = 700;
+const NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE = 1;
+const NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST = 180;
+const NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS = 900;
 
 function clampNumber(value, fallback, min = 0) {
   const n = Number(value);
@@ -37,6 +49,13 @@ function trimTextToChars(text = '', maxChars = 0) {
   const limit = clampNumber(maxChars, 0, 0);
   if (!normalized || limit <= 0) return '';
   return normalized.length > limit ? normalized.slice(-limit) : normalized;
+}
+
+function trimPromptTextToChars(text = '', maxChars = 0) {
+  const normalized = normalizeText(text);
+  const limit = clampNumber(maxChars, 0, 0);
+  if (!normalized || limit <= 0) return '';
+  return normalized.length > limit ? normalized.slice(0, limit) : normalized;
 }
 
 function buildDirectedContextPrompt(routeMeta = {}) {
@@ -119,6 +138,168 @@ function buildSummaryText(sessionKey = '', deps = {}, runtimeConfig = config) {
   return trimTextToChars(latest?.summary || latest?.text || '', summaryMaxChars);
 }
 
+function isShortFastReplyPersonaModule(item = {}, maxTokenCost = NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST) {
+  const id = normalizeText(item.id);
+  if (!id || id === 'core_baseline' || id.startsWith('wb_mizuki_')) return false;
+  const tokenCost = Number(item.tokenCost || 0) || 0;
+  return tokenCost > 0 && tokenCost <= maxTokenCost;
+}
+
+function isFastReplyWorldbookModule(item = {}, maxTokenCost = NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST) {
+  const id = normalizeText(item.id);
+  if (!id.startsWith('wb_mizuki_')) return false;
+  const tokenCost = Number(item.tokenCost || 0) || 0;
+  return tokenCost > 0 && tokenCost <= maxTokenCost;
+}
+
+function buildNormalFastReplyPersonaModules(context = {}, deps = {}) {
+  if (context.disablePersonaModules === true || deps.disablePersonaModules === true) {
+    return { modules: [], prompt: '', candidateCount: 0, personaModuleChars: 0, personaModuleTokenCost: 0 };
+  }
+  const runtimeConfig = deps.config || config;
+  const maxActive = Math.min(
+    NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE,
+    clampNumber(runtimeConfig.NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE, NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE, 0)
+  );
+  if (maxActive <= 0) {
+    return { modules: [], prompt: '', candidateCount: 0, personaModuleChars: 0, personaModuleTokenCost: 0 };
+  }
+  const maxTokenCost = clampNumber(
+    runtimeConfig.NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST,
+    NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST,
+    1
+  );
+  const maxTextChars = clampNumber(
+    runtimeConfig.NORMAL_FAST_REPLY_PERSONA_MODULE_TEXT_MAX_CHARS,
+    NORMAL_FAST_REPLY_PERSONA_MODULE_TEXT_MAX_CHARS,
+    100
+  );
+  try {
+    const candidates = buildPersonaModuleCandidates({
+      ...context,
+      mainReplyPromptMode: 'balanced',
+      promptMode: 'balanced',
+      maxPersonaModuleCandidates: context.maxPersonaModuleCandidates || 8
+    }).filter((item) => isShortFastReplyPersonaModule(item, maxTokenCost));
+    if (!candidates.length) {
+      return { modules: [], prompt: '', candidateCount: 0, personaModuleChars: 0, personaModuleTokenCost: 0 };
+    }
+    const decision = selectPersonaModules({}, {
+      ...context,
+      mainReplyPromptMode: 'balanced',
+      promptMode: 'balanced',
+      personaModuleCandidates: candidates,
+      maxActiveModules: maxActive
+    });
+    const selected = decision.selected
+      .filter((item) => isShortFastReplyPersonaModule(item, maxTokenCost))
+      .slice(0, maxActive);
+    const modules = [];
+    for (const item of selected) {
+      const text = trimPromptTextToChars(loadPersonaModuleText(item.id), maxTextChars);
+      if (!text) continue;
+      modules.push({
+        id: item.id,
+        tokenCost: Number(item.tokenCost || 0) || 0,
+        text,
+        chars: text.length
+      });
+    }
+    if (!modules.length) {
+      return { modules: [], prompt: '', candidateCount: candidates.length, personaModuleChars: 0, personaModuleTokenCost: 0 };
+    }
+    const prompt = [
+      '[FastPersonaModules]',
+      '以下短 persona modules 只作为本轮语气/姿态参考；不要复述模块名。',
+      ...modules.flatMap((item) => [`persona_module_${item.id}:`, item.text])
+    ].join('\n');
+    return {
+      modules,
+      prompt,
+      candidateCount: candidates.length,
+      personaModuleChars: modules.reduce((sum, item) => sum + item.chars, 0),
+      personaModuleTokenCost: modules.reduce((sum, item) => sum + item.tokenCost, 0)
+    };
+  } catch (_) {
+    return { modules: [], prompt: '', candidateCount: 0, personaModuleChars: 0, personaModuleTokenCost: 0 };
+  }
+}
+
+function buildNormalFastReplyWorldbookModules(context = {}, deps = {}) {
+  if (context.disableWorldbook === true || deps.disableWorldbook === true) {
+    return { modules: [], prompt: '', candidateCount: 0, worldbookChars: 0, worldbookTokenCost: 0 };
+  }
+  const runtimeConfig = deps.config || config;
+  if (runtimeConfig.NORMAL_FAST_REPLY_WORLDBOOK_ENABLED === false) {
+    return { modules: [], prompt: '', candidateCount: 0, worldbookChars: 0, worldbookTokenCost: 0 };
+  }
+  const maxActive = Math.min(
+    NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE,
+    clampNumber(runtimeConfig.NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE, NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE, 0)
+  );
+  if (maxActive <= 0) {
+    return { modules: [], prompt: '', candidateCount: 0, worldbookChars: 0, worldbookTokenCost: 0 };
+  }
+  const maxTokenCost = clampNumber(
+    runtimeConfig.NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST,
+    NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST,
+    1
+  );
+  const maxTextChars = clampNumber(
+    runtimeConfig.NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS,
+    NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS,
+    100
+  );
+  const buildCandidates = typeof deps.buildPersonaModuleCandidates === 'function'
+    ? deps.buildPersonaModuleCandidates
+    : buildPersonaModuleCandidates;
+  const loadModuleText = typeof deps.loadPersonaModuleText === 'function'
+    ? deps.loadPersonaModuleText
+    : loadPersonaModuleText;
+  try {
+    const candidates = buildCandidates({
+      ...context,
+      mainReplyPromptMode: 'balanced',
+      promptMode: 'balanced',
+      disableLocalPromptRecall: true,
+      worldbookLimit: Math.max(maxActive, Number(context.worldbookLimit || 0) || maxActive),
+      maxPersonaModuleCandidates: context.maxPersonaModuleCandidates || 8
+    }).filter((item) => isFastReplyWorldbookModule(item, maxTokenCost));
+    if (!candidates.length) {
+      return { modules: [], prompt: '', candidateCount: 0, worldbookChars: 0, worldbookTokenCost: 0 };
+    }
+    const selected = candidates.slice(0, maxActive);
+    const modules = [];
+    for (const item of selected) {
+      const text = trimPromptTextToChars(loadModuleText(item.id), maxTextChars);
+      if (!text) continue;
+      modules.push({
+        id: item.id,
+        tokenCost: Number(item.tokenCost || 0) || 0,
+        text,
+        chars: text.length
+      });
+    }
+    if (!modules.length) {
+      return { modules: [], prompt: '', candidateCount: candidates.length, worldbookChars: 0, worldbookTokenCost: 0 };
+    }
+    const prompt = [
+      '[FastWorldbook]',
+      '以下世界书只补本轮设定、剧情节点或角色关系事实；不要复述模块名，不要扩写成长期记忆。',
+      ...modules.flatMap((item) => [`persona_module_${item.id}:`, item.text])
+    ].join('\n');
+    return {
+      modules,
+      prompt,
+      candidateCount: candidates.length,
+      worldbookChars: modules.reduce((sum, item) => sum + item.chars, 0),
+      worldbookTokenCost: modules.reduce((sum, item) => sum + item.tokenCost, 0)
+    };
+  } catch (_) {
+    return { modules: [], prompt: '', candidateCount: 0, worldbookChars: 0, worldbookTokenCost: 0 };
+  }
+}
+
 function buildNormalFastReplyMessages(input = {}, deps = {}) {
   const runtimeConfig = deps.config || config;
   const userId = normalizeText(input.userId || input.senderId || input.routeMeta?.userId || input.routeMeta?.user_id);
@@ -156,13 +337,40 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
     }
   });
   const directedPrompt = buildDirectedContextPrompt(routeMeta);
+  const fastPersonaModules = buildNormalFastReplyPersonaModules({
+    question: userText,
+    routePrompt: userText,
+    routeMeta,
+    directedContext: routeMeta.directedContext,
+    chatType: normalizeText(routeMeta.chatType || routeMeta.chat_type),
+    userId,
+    senderId: normalizeText(input.senderId || routeMeta.senderId || routeMeta.sender_id),
+    groupId: normalizeText(input.groupId || routeMeta.groupId || routeMeta.group_id),
+    sessionKey,
+    continuitySignals: trimmedSummary || recentMessages.length > 0
+      ? { hasCarryOverTopic: true }
+      : {}
+  }, deps);
+  const fastWorldbookModules = buildNormalFastReplyWorldbookModules({
+    question: userText,
+    routePrompt: userText,
+    routeMeta,
+    directedContext: routeMeta.directedContext,
+    chatType: normalizeText(routeMeta.chatType || routeMeta.chat_type),
+    userId,
+    senderId: normalizeText(input.senderId || routeMeta.senderId || routeMeta.sender_id),
+    groupId: normalizeText(input.groupId || routeMeta.groupId || routeMeta.group_id),
+    sessionKey
+  }, deps);
   const systemParts = [
     '你是 Mizuki。当前走普通用户快速回复链路。',
     '只根据用户本轮消息和下方轻量上下文自然回复；不要声称查了记忆、网页或工具。',
     '如果用户本轮是在评价、纠正或吐槽“你刚才/后面几段/上一条回复”，优先锚定最近一条 assistant 历史回复来接话。',
     '回答保持简洁、直接、像日常聊天；信息不足时先说明不确定。',
     directedPrompt,
-    livenessPrompt
+    livenessPrompt,
+    fastPersonaModules.prompt,
+    fastWorldbookModules.prompt
   ];
   if (trimmedSummary) {
     systemParts.push(`[最近会话摘要]\n${trimmedSummary}`);
@@ -178,7 +386,15 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
     summaryChars: trimmedSummary.length,
     recentMessageCount: recentMessages.length,
     recentChars: recentMessages.reduce((sum, item) => sum + item.content.length, 0),
-    contextMaxChars
+    contextMaxChars,
+    personaModules: fastPersonaModules.modules.map((item) => item.id),
+    personaModuleChars: fastPersonaModules.personaModuleChars,
+    personaModuleTokenCost: fastPersonaModules.personaModuleTokenCost,
+    personaModuleCandidateCount: fastPersonaModules.candidateCount,
+    worldbookModules: fastWorldbookModules.modules.map((item) => item.id),
+    worldbookChars: fastWorldbookModules.worldbookChars,
+    worldbookTokenCost: fastWorldbookModules.worldbookTokenCost,
+    worldbookCandidateCount: fastWorldbookModules.candidateCount
   };
 }
 
@@ -234,6 +450,8 @@ async function runNormalFastReply(input = {}, deps = {}) {
 module.exports = {
   buildDirectedContextPrompt,
   buildNormalFastReplyMessages,
+  buildNormalFastReplyPersonaModules,
+  buildNormalFastReplyWorldbookModules,
   runNormalFastReply,
   trimRecentMessagesByChars
 };

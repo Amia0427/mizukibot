@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-12 12:55 +08:00
+更新时间：2026-06-13 19:57 +08:00
 
 ## 维护约定
 
@@ -10,6 +10,8 @@
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
 - 2026-06-12 12:55 +08:00：本地 `PLAN_*` 与 `PASSIVE_AWARENESS_*` 已切到 `catiecli.sukaka.top/v1` + `gcli-gemini-3-flash-preview-nothinking`，用于替换原 `token.memoh.net` 403 的 planner / 被动感知决策链路；密钥只保留 `.env`，不写入文档。
+- 2026-06-13 19:57 +08:00：普通用户快速回复新增 SQL worldbook 预算配置，默认 `NORMAL_FAST_REPLY_WORLDBOOK_ENABLED=true`、`NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE=1`、`NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST=180`、`NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS=900`。快速链路只在 worldbook gate 命中时注入 `[FastWorldbook]`，仍不调用远程 planner 或主动态 prompt；验收：`node tests/normalFastReplyConfig.test.js` 通过。
+- 2026-06-13 19:53 +08:00：普通用户快速回复新增短 persona module 预算配置，默认 `NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE=2`、`NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST=100`、`NORMAL_FAST_REPLY_PERSONA_MODULE_TEXT_MAX_CHARS=700`。快速链路仍不加载主动态 prompt，只允许最多两个非 worldbook 短模块进入 `[FastPersonaModules]`；验收：`node --unhandled-rejections=strict tests/normalFastReplyConfig.test.js` 通过。
 - 2026-06-12 12:42 +08:00：模型自检 `http_421` 根因是 CycleTLS/HTTP2 连接复用在并发跨网关请求中触发 misdirected request；新增 `MODEL_TLS_IMPERSONATION_CONNECTION_REUSE_ENABLED=false` 默认关闭连接复用，并在 CycleTLS 返回 421 时自动回落 axios。`token.memoh.net` 返回的 `403` 是账号 TLS router 客户端匹配限制，需切到可用网关或调整上游账号规则。
 - 2026-06-11 17:06 +08:00：主回复模型新增浏览器 TLS/JA3 指纹伪装配置：`MODEL_TLS_IMPERSONATION_ENABLED=true` 启用 CycleTLS 传输，默认 Chrome-like JA3 与 Chrome HTTP/2 fingerprint；`MODEL_TLS_IMPERSONATION_STREAM_ENABLED=true` 覆盖流式主回复；`MODEL_TLS_IMPERSONATION_FALLBACK_ENABLED=true` 保留 axios 回落，避免 CycleTLS 异常时中断主回复。
 - 2026-06-11 13:52 +08:00：管理员私聊流式主回复 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 默认值改为 `150000`。只限制 `userRole=admin + chatType=private` 的 `v2_streaming_reply` 上游首字等待；超时会 abort 当前流式请求并直接发明确兜底，不触发 admin shared fallback 或非流式二次慢请求。普通用户仍由 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 控制，管理员群聊不受影响。
