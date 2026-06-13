@@ -1,5 +1,7 @@
 # Repo Cleanup Notes
 
+更新 2026-06-13 15:40 +08:00：完成仓库组成轻量审计和低风险结构整理。根目录两个无运行引用的提示词资料已移入 `docs/reference/roleplay-prompts/`，并新增 `docs/repository-structure.md` 明确代码、运行数据、参考资料和 artifacts 的边界；`.gitignore` 新增本地 Gemini 诊断导出和未来 prompt `.bak` 草稿规则。未删除文件。当前工作区已有并行改动准备把 `prompts/defaut.txt` 作为 `normal_user_default_prompt` 接入，不能按垃圾文件处理；若要修正拼写，应另起小改同步 manifest 和测试。候选但需用户确认后再删：`prompts/GEMINI.txt.bak`、`.playwright-mcp/*.jpg`、历史污染治理输出和忽略目录中的本地大备份。
+
 更新 2026-05-23 10:30 +08:00：小模块版本切换已落地到目录入口。备份包：`artifacts/backups/large-facades-small-module-cutover-2026-05-23-0917+0800.zip`；sha256：`33dd4e90a280f763aae3aae89f9c9826e0664b206d96a8826626dd7e2f907380`。归档内 33 个旧大文件齐全，`.sha256` 校验通过；manifest 内 33 个旧 `.js` 入口已删除；33 个新 `index.js` 语法检查和 require smoke 通过；运行代码、脚本、测试、README、CLAUDE 中未发现旧 `.js` facade 直连路径。聚焦验证已通过：`npm run check:agent:static`、`npm run check:prompts`、`node tests/memoryWritePipeline.test.js`、`node tests/memoryWritePipelineQualityGate.test.js`、`node tests/routerMemoryTools.test.js`、`node tests/mainReplyContextPreviewRoute.test.js`、`node tests/createAgentExecutor.test.js`、`node tests/runtimeHostCotSource.test.js`、`node tests/httpClientReasoningEffort.test.js`。全量验证 `NODE_OPTIONS=--max-old-space-size=8192 npm test` 已通过；`npm start` 在现有活跃实例 PID 11240 下被单实例锁正常拦截，启动日志未出现旧大文件路径。
 
 更新 2026-05-23 09:02 +08:00：README 已明确历史维护记录统一写入 `docs/repo-cleanup.md`，README 只保留入口级更新时间戳。
