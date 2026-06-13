@@ -48,7 +48,8 @@
     "win:daemon:install": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-daemon.ps1",
     "win:daemon:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-daemon.ps1",
     "win:daemon:status": "powershell -ExecutionPolicy Bypass -File scripts/status-windows-daemon.ps1",
-    "win:mgmt:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows-management-plane.ps1"
+    "win:mgmt:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows-management-plane.ps1",
+    "diag:gemini-style-signals": "node scripts/diagnose-gemini-recent-style-signals.js"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.2",

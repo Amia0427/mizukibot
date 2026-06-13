@@ -1,3 +1,10 @@
+## 运行维护 2026-06-13 15:27
+
+- 新增只读 Gemini 最近风格信号诊断入口：`npm run diag:gemini-style-signals`。
+- 诊断读取 `data/gemini-recent-style-signals.json`，按最近窗口汇总起手、尾音、固定短语的命中次数和最近命中时间，并标出会进入 `gemini_recent_style_guard` prompt 的信号。
+- 验证：`node scripts/run-tests.js geminiRecentStyleSignalDiagnostics.test.js` 通过；`npm run diag:gemini-style-signals -- --text` 在当前本机返回 `missing records=0 recent=0 guard=no`，确认数据文件缺失时只读输出且不创建运行数据。
+- 小目标已完成：Gemini 最近风格 guard 的当前信号状态可直接复查，不再需要手工打开 JSON 判断。
+
 ## 运行维护 2026-06-13 09:03
 
 - 完成 Gemini 真实问题优化 4/5：新增 `utils/geminiRecentStyleGuard.js`，只保存普通 Gemini 回复的起手、尾音、固定短语派生信号，不保存完整回复原文。

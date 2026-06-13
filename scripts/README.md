@@ -33,6 +33,7 @@
 - `diagnose-persona-modules.js`
 - `diagnose-napcat-health.js`：更新 2026-06-12 20:16 +08:00，只读汇总 `napcat-health-state.json` / `napcat-health-events.ndjson`，输出 NapCat 是否离线、离线持续时长、最近 thinking-emoji / continuous-message expand 降级动作和恢复时间；可用 `npm run diag:napcat-health -- --text`
 - `diagnose-runtime-exceptions.js`：更新 2026-06-08 13:32 +08:00，最小运行时异常汇总入口；聚合 `model-calls.ndjson`、memory recall observability 和 runtime 日志里的 `main-model-fallback:admin_shared` / `memoryReranker` 超时回退信号
+- `diagnose-gemini-recent-style-signals.js`：更新 2026-06-13 15:27 +08:00，只读汇总 `data/gemini-recent-style-signals.json` 的最近 Gemini 起手、尾音、固定短语命中次数和最近命中时间，并标出 `gemini_recent_style_guard` 会纳入的信号；验收当前缺失数据文件时输出 `missing records=0 recent=0 guard=no`
 - `diagnose-runtime-hotspots.js`：运行时资源热点诊断，汇总 RSS/heap/event loop delay、timer/interval、post-reply worker 和高频模块
 - `diagnose-runtime-status.js`：运行时状态诊断，汇总主进程、post-reply worker、后台任务和锁
 - `analyze-foreground-concurrency.js`

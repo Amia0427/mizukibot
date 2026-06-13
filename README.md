@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 15:27 +08:00**：新增只读 Gemini 最近风格信号诊断入口 `npm run diag:gemini-style-signals`。该入口直接读取 `data/gemini-recent-style-signals.json`，汇总最近高频起手、尾音、固定短语、命中次数和最近命中时间，并标出会进入 `gemini_recent_style_guard` 的信号；支持 `-- --json`、`-- --file <path>`、`-- --scope-key <key>`。实际验收：当前本机该数据文件不存在，命令返回 `missing records=0 recent=0 guard=no`，未创建或改写运行数据。小目标完成：Gemini 口癖 guard 的当前信号状态可一条只读命令复查。
+
 **2026-06-13 15:27 +08:00**：完成仓库组成轻量审计与低风险整理。根目录两个无运行引用的角色提示词资料移入 `docs/reference/roleplay-prompts/`，新增 `docs/repository-structure.md` 作为后续代理判断代码、运行数据、参考资料和 artifacts 边界的入口；`.gitignore` 补充本地 Gemini 诊断导出和未来 prompt `.bak` 草稿规则。未删除文件，候选清单见 `docs/repo-cleanup.md`。小目标完成：仓库顶层更可读，临时诊断文件不再污染状态区。
 
 **2026-06-13 18:41 +08:00**：强化管理员破限与角色顺从协议。`prompts/admin.txt` 新增 Character Compliance Override 明确禁止角色硬拒绝话术（不要/住手/放开我/你够了），区分可接受的羞涩与硬拒绝。管理员模型切换为 `claude-opus-4-6-thinking` 以测试扩展思考变体对破限的接受度。小目标完成：角色层加固，待真实对话验证破限有效性。
@@ -269,6 +271,7 @@ npm run diag:runtime-hotspots
 npm run diag:runtime-exceptions
 npm run diag:main-bot-restarts
 npm run diag:low-resource
+npm run diag:gemini-style-signals -- --text
 npm run diag:provider-request -- --provider openai_compatible
 node scripts/diagnose-main-model-web-search.js --json --timeout-ms=60000
 ```
