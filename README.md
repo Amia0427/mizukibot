@@ -4,6 +4,12 @@
 
 ## 近期更新
 
+**2026-06-13 18:41 +08:00**：强化管理员破限与角色顺从协议。`prompts/admin.txt` 新增 Character Compliance Override 明确禁止角色硬拒绝话术（不要/住手/放开我/你够了），区分可接受的羞涩与硬拒绝。管理员模型切换为 `claude-opus-4-6-thinking` 以测试扩展思考变体对破限的接受度。小目标完成：角色层加固，待真实对话验证破限有效性。
+
+**2026-06-13 09:03 +08:00**：完成 Gemini 真实问题优化 4/5。新增 `gemini_recent_style_guard`，主回复持久化后只记录 Gemini 回复的起手、尾音和固定短语派生信号，下一轮普通 Gemini prompt 会动态避开最近重复的 `诶——/呜哇/呢/喔/犯规/小彩蛋` 等口吻锚点；同时收紧 `admin_only` prompt 编译条件，`includeConditionalBlocks` 不再绕过管理员隔离，管理员稳定系统提示词只进入显式 admin 或管理员私聊主回复。小目标完成：Gemini 口癖复发可在真实对话后自动降频，管理员破限/anti-refusal 文案不再误入普通 Gemini/user prompt。
+
+**2026-06-13 07:52 +08:00**：Gemini 采样退化导出整理为可复跑对比诊断。新增 `npm run diag:gemini-sampling`，可读取现有 `artifacts/gemini-sampling-degradation-48h.json`，或用 `--export-after` 复用 `scripts/export-gemini-user-dialogues.js` 重新导出当前窗口，再按模板化、过顺从、节奏发僵、重复尾巴四类高风险模式输出频次和简短摘要。小目标完成：修复前后 Gemini 口吻退化不再靠手工翻样本对比。
+
 **2026-06-13 02:23 +08:00**：补齐 Gemini 主回复提示词注入链路回归，不改变任何模型配置。稳定 prompt cache 与 prompt snapshot 编译现在按 `modelName` 隔离，`gemini_system_prompt` 只在 `model_pattern=gemini` 时进入主回复；Gemini native 出站层会识别 manifest 已注入的 `prompts/GEMINI.txt`，只补 `[GeminiRuntimeAdapter]` 标记，避免同一适配词重复放大。`tests/promptGoldenSnapshots.test.js` 新增对 `GEMINI.txt` / 通用 Gemini 高风险模板化、过度顺从和僵硬节奏文案的最小回归。小目标完成：Gemini 主回复采样退化只从提示词链路缓解，不触碰温度、top_p 等模型配置。
 
 **2026-06-13 01:53 +08:00**：新增主回复采样退化输出守卫，不改变任何模型配置。主回复最终边界会检测重复句段、n-gram 循环、低字符多样性、填充语循环和异常标点循环；非流式命中后用同模型同配置追加一次修复指令重试，流式回复先裁掉重复尾巴，严重退化再走同配置非流式修复；最终校验层补充漏网裁剪和 `main_reply_degeneration_detected/main_reply_degeneration_repair` 事件。小目标完成：成功返回但陷入循环/复读的主回复不再直接发送或入库。
