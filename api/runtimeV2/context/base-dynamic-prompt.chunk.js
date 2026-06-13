@@ -200,6 +200,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       stage: customStage,
       policyKey: String(options?.routePolicyKey || '').trim() || customStage,
       isAdmin: adminPromptContext,
+      userId,
+      adminUserIds: config.ADMIN_USER_IDS,
       modelName
     });
     return {
@@ -716,6 +718,8 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
     budgetTokens: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens),
     isAdmin: adminPromptContext,
+    userId,
+    adminUserIds: config.ADMIN_USER_IDS,
     modelName
   });
   let dynamicPrompt = serializePromptBlocks(snapshotBlocks);

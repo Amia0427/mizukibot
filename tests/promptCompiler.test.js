@@ -78,5 +78,50 @@ const { buildPromptSnapshot } = require('../utils/promptCompiler');
     }
   ], { stage: 'main', isAdmin: true });
   assert.deepStrictEqual(adminRoleSnapshot.assembledBlocks.map((item) => item.id), ['admin_only', 'public']);
+
+  const normalUserSnapshot = buildPromptSnapshot([
+    {
+      id: 'normal_user_only',
+      content: 'normal user output rules',
+      priority: -950,
+      appliesWhen: { normal_user_only: true }
+    },
+    {
+      id: 'public',
+      content: 'public prompt',
+      priority: -900
+    }
+  ], { stage: 'main', userId: 'normal_1', adminUserIds: ['admin_1'] });
+  assert.deepStrictEqual(normalUserSnapshot.assembledBlocks.map((item) => item.id), ['normal_user_only', 'public']);
+
+  const adminUserSnapshot = buildPromptSnapshot([
+    {
+      id: 'normal_user_only',
+      content: 'normal user output rules',
+      priority: -950,
+      appliesWhen: { normal_user_only: true }
+    },
+    {
+      id: 'public',
+      content: 'public prompt',
+      priority: -900
+    }
+  ], { stage: 'main', userId: 'admin_1', adminUserIds: ['admin_1'] });
+  assert.deepStrictEqual(adminUserSnapshot.assembledBlocks.map((item) => item.id), ['public']);
+
+  const adminIdWithoutExplicitAdminSnapshot = buildPromptSnapshot([
+    {
+      id: 'admin_only',
+      content: 'admin stable prompt',
+      priority: -1100,
+      appliesWhen: { admin_only: true }
+    },
+    {
+      id: 'public',
+      content: 'public prompt',
+      priority: -1000
+    }
+  ], { stage: 'main', userId: 'admin_1', adminUserIds: ['admin_1'] });
+  assert.deepStrictEqual(adminIdWithoutExplicitAdminSnapshot.assembledBlocks.map((item) => item.id), ['public']);
   console.log('promptCompiler.test.js passed');
 })();

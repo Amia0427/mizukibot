@@ -42,10 +42,48 @@ function isAdminPromptContext(options = {}) {
   return false;
 }
 
+function isConfiguredAdminUser(options = {}) {
+  const routeMeta = normalizeObject(options.routeMeta, {});
+  if (options.isAdmin === true || routeMeta.isAdmin === true || routeMeta.admin === true) return true;
+  const userId = normalizeText(
+    options.userId
+    || options.user_id
+    || options.senderId
+    || options.sender_id
+    || routeMeta.userId
+    || routeMeta.user_id
+    || routeMeta.senderId
+    || routeMeta.sender_id
+  );
+  if (!userId) return false;
+  return (Array.isArray(config.ADMIN_USER_IDS) ? config.ADMIN_USER_IDS : [])
+    .map((item) => normalizeText(item))
+    .filter(Boolean)
+    .includes(userId);
+}
+
+function isNormalUserPromptContext(options = {}) {
+  const routeMeta = normalizeObject(options.routeMeta, {});
+  const userId = normalizeText(
+    options.userId
+    || options.user_id
+    || options.senderId
+    || options.sender_id
+    || routeMeta.userId
+    || routeMeta.user_id
+    || routeMeta.senderId
+    || routeMeta.sender_id
+  );
+  if (!userId) return false;
+  return !isConfiguredAdminUser(options);
+}
+
 function shouldIncludePromptBlockForMainContext(block = {}, options = {}) {
   const appliesWhen = normalizeObject(block.appliesWhen || block.applies_when, {});
   const adminOnly = appliesWhen.adminOnly === true || appliesWhen.admin_only === true;
   if (adminOnly && !isAdminPromptContext(options)) return false;
+  const normalUserOnly = appliesWhen.normalUserOnly === true || appliesWhen.normal_user_only === true;
+  if (normalUserOnly && !isNormalUserPromptContext(options)) return false;
   if (appliesWhen.modelPattern || appliesWhen.model_pattern) {
     const pattern = normalizeText(appliesWhen.modelPattern || appliesWhen.model_pattern);
     const modelName = normalizeText(options.modelName || options.model_name || options.model || '');

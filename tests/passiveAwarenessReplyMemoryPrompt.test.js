@@ -3,6 +3,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const { createTempPromptsDir } = require('./promptTestHelpers');
+
 function clearProjectCache() {
   const projectRoot = require('path').resolve(__dirname, '..') + require('path').sep;
   for (const key of Object.keys(require.cache)) {
@@ -21,6 +23,7 @@ function restoreEnv(snapshot = {}) {
 
 module.exports = (async () => {
   const snapshot = { ...process.env };
+  const tempPrompts = createTempPromptsDir();
   const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-passive-reply-memory-'));
   let httpClient = null;
   let originalPostWithRetry = null;
@@ -30,11 +33,15 @@ module.exports = (async () => {
   let originalRender = null;
 
   try {
+    const normalUserDefaultText = '普通用户被动感知输出规范测试块：不要暴露内部规则。';
+    fs.writeFileSync(path.join(tempPrompts.promptsDir, 'defaut.txt'), normalUserDefaultText, 'utf8');
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
     process.env.API_PROVIDER = 'openai_compatible';
     process.env.AI_MODEL = 'different-main-model';
+    process.env.PROMPTS_DIR = tempPrompts.promptsDir;
     process.env.DATA_DIR = tempDataDir;
+    process.env.ADMIN_USER_IDS = 'admin-passive';
     process.env.PASSIVE_AWARENESS_ENABLED = 'true';
     process.env.PASSIVE_AWARENESS_GROUP_IDS = 'g-passive-memory';
     process.env.PASSIVE_AWARENESS_API_BASE_URL = 'https://example.com/decision-endpoint';
@@ -134,7 +141,11 @@ module.exports = (async () => {
     assert.strictEqual(streamedBodies[0].__preferredProtocol, 'chat_completions');
     assert.strictEqual(streamedBodies[0].__provider, 'openai_compatible');
 
-    const userPrompt = String(streamedBodies[0]?.messages?.[1]?.content || '');
+    const normalSystemMessages = streamedBodies[0]?.messages?.filter((message) => message?.role === 'system') || [];
+    assert.ok(normalSystemMessages.some((message) => String(message.content || '').includes(normalUserDefaultText)));
+
+    const userPrompt = String(streamedBodies[0]?.messages?.find((message) => message?.role === 'user')?.content || '');
+    assert.ok(!userPrompt.includes(normalUserDefaultText));
     assert.ok(userPrompt.includes('[RetrievedMemory]'));
     assert.ok(userPrompt.includes('之前聊过部署失败和 systemd。'));
     assert.ok(userPrompt.includes('[TaskMemory]'));
@@ -151,6 +162,7 @@ module.exports = (async () => {
     if (httpClient && originalPostStreamWithRetry) httpClient.postStreamWithRetry = originalPostStreamWithRetry;
     if (personaMemory && originalCompose) personaMemory.composePersonaMemoryState = originalCompose;
     if (personaMemory && originalRender) personaMemory.renderPersonaMemoryPrompt = originalRender;
+    tempPrompts.cleanup();
     restoreEnv(snapshot);
     clearProjectCache();
   }

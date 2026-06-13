@@ -838,6 +838,8 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       stage: 'main',
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
       isAdmin: adminPromptContext,
+      userId,
+      adminUserIds: currentConfig.ADMIN_USER_IDS,
       modelName
     }
   );
