@@ -19,6 +19,8 @@ module.exports = (async () => {
   let toolCalled = false;
   let aiCalled = false;
   const aiReplyOptionsSeen = [];
+  const injectedActionClient = { marker: 'injected-action-client' };
+  const thinkingEmojiOptionsSeen = [];
 
   const coordinator = createMessageDispatchCoordinator({
     config: {
@@ -47,7 +49,10 @@ module.exports = (async () => {
     generateGenericQzoneDraft: async () => ({ ok: false }),
     normalizeGeneratedQzoneContent: (text) => text,
     publishQzoneForContext: async () => ({ ok: true }),
-    markThinkingEmojiBeforeLlm: async () => true,
+    markThinkingEmojiBeforeLlm: async (options = {}) => {
+      thinkingEmojiOptionsSeen.push(options);
+      return true;
+    },
     askToolTaskLocally: async () => { toolCalled = true; return 'tool reply'; },
     createStreamingDispatcher: () => ({ onDelta() {}, async finish() {} }),
     composeDirectRoutePrompt: (parts = {}) => Object.entries(parts)
@@ -59,7 +64,8 @@ module.exports = (async () => {
       aiReplyOptionsSeen.push({ ...(replyOptions || {}) });
       return 'ai reply';
     },
-    sendWithRetry: async () => true
+    sendWithRetry: async () => true,
+    actionClient: injectedActionClient
   });
 
   const background = await coordinator.dispatchByRoutePlan({
@@ -85,6 +91,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(tool.reply, 'tool reply');
   assert.strictEqual(toolCalled, true);
+  assert.strictEqual(thinkingEmojiOptionsSeen.at(-1).actionClient, injectedActionClient);
 
   const chat = await coordinator.dispatchByRoutePlan({
     route: {
@@ -106,6 +113,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(chat.reply, 'ai reply');
   assert.strictEqual(aiCalled, true);
+  assert.strictEqual(thinkingEmojiOptionsSeen.at(-1).actionClient, injectedActionClient);
   assert.ok(chat.replyOptions.modelConfig);
   assert.strictEqual(typeof chat.replyOptions.modelConfig.model, 'string');
   assert.strictEqual(chat.replyOptions.disableStream, true, 'vision fallback should stay non-streaming');

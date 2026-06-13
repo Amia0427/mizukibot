@@ -150,6 +150,23 @@ module.exports = (async () => {
   assert.strictEqual(groupCase.replyOptionsSeen.length, 1);
   assert.strictEqual(groupCase.replyOptionsSeen[0].disableStream, false, 'group direct replies should stream by default');
 
+  const injectedActionClient = { marker: 'route-flow-action-client' };
+  const thinkingEmojiOptionsSeen = [];
+  const actionClientCase = createBaseDeps({
+    actionClient: injectedActionClient,
+    markThinkingEmojiBeforeLlm: async (options = {}) => {
+      thinkingEmojiOptionsSeen.push(options);
+      return true;
+    }
+  });
+  const actionClientEnvelope = await actionClientCase.routeFlow.dispatchByRoutePlan({
+    ...buildRouteDecision('group'),
+    sourceMessageId: 'm_action_client'
+  });
+  assert.strictEqual(actionClientEnvelope.replyText, 'ai reply');
+  assert.strictEqual(thinkingEmojiOptionsSeen.length, 1);
+  assert.strictEqual(thinkingEmojiOptionsSeen[0].actionClient, injectedActionClient, 'thinking emoji should use the injected action client');
+
   fs.writeFileSync(process.env.GROUP_MAIN_MODEL_STREAM_POLICY_FILE, JSON.stringify({
     version: 1,
     groups: {

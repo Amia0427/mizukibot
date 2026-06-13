@@ -31,7 +31,8 @@ function createMessageDispatchCoordinator(deps = {}) {
     askToolTaskLocally,
     createStreamingDispatcher,
     composeDirectRoutePrompt,
-    askAIDispatch
+    askAIDispatch,
+    actionClient = null
   } = deps;
 
   function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = '') {
@@ -198,7 +199,8 @@ function createMessageDispatchCoordinator(deps = {}) {
           await markThinkingEmojiBeforeLlm({
             messageId: sourceMessageId,
             routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-            routeMeta: route.meta || {}
+            routeMeta: route.meta || {},
+            actionClient
           });
           reply = await askToolTaskLocally(cleanText, userInfo, senderId, null, imageUrl, toolTaskOptions);
         }
@@ -267,7 +269,8 @@ function createMessageDispatchCoordinator(deps = {}) {
         await markThinkingEmojiBeforeLlm({
           messageId: sourceMessageId,
           routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-          routeMeta: route.meta || {}
+          routeMeta: route.meta || {},
+          actionClient
         });
         reply = await askAIDispatch(cleanText, userInfo, senderId, null, imageUrl, replyOptions);
         console.log('[dispatch] chat route completed', buildRoutePlanLogPayload(routeExecutionPlan, {

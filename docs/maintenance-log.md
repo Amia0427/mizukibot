@@ -1,3 +1,12 @@
+## 运行维护 2026-06-13 22:57
+
+- 现场症状：thinking emoji 不能成功发送；`data/napcat-health-events.ndjson` 里最近降级均为 `reason=napcat_offline`，但只读健康诊断显示 NapCat 总体已恢复 online。
+- 根因：当前本机启用 `NAPCAT_HTTP_REVERSE_ENABLED=true`，主入口使用 HTTP action client；`markThinkingEmojiBeforeLlm` 没有把注入 client 传给 `setMessageEmojiLike`，导致它回退到未绑定 WebSocket singleton，连接快照为 `readyStateName=none` 并被离线快跳过。
+- 最小修复：thinking emoji preflight 显式使用 `globalNapCatActionClient` / route flow 注入的 `actionClient`；`messageRouteFlow` 与 `messageDispatchCoordinator` 均透传该 client 到 `markThinkingEmojiBeforeLlm`。
+- 验证：`node tests/messageDispatchCoordinator.test.js`、`node tests/messageRouteFlowGroupStreaming.test.js`、`node tests/qqActionService.test.js`、`node tests/messageHandlerPrivateTypingPoke.test.js`、`node -e "require('./core/messageHandler')"` 通过。
+- 补充：`node -c core/messageHandler.runtime-02.chunk.js` 不作为验收，该文件是 chunk 拼装片段，不是独立 CommonJS 文件。
+- 小目标已完成：HTTP reverse 模式下 thinking emoji 不再误走未绑定 WebSocket client，恢复到实际 NapCat action client 发送链路。
+
 ## 运行维护 2026-06-13 21:05
 
 - 围绕 `prompts/defaut.txt` 补最小回归：普通用户主回复和普通用户被动群感知回复会注入 `normal_user_default_prompt`；管理员私聊、管理员群聊和管理员 sender 的被动回复不注入；空 `defaut.txt` 不导出、不注入。
