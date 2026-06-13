@@ -1,10 +1,12 @@
 # Main Reply Context
 
-更新时间：2026-06-13 16:04 +08:00
+更新时间：2026-06-13 18:50 +08:00
 
 ## 已调整
 
+- 2026-06-13 18:50 +08:00：强化普通用户内容安全边界。`prompts/defaut.txt` 填充明确的内容限制规则：禁止政治话题、NSFW 内容、恋爱关系模拟、以及其他不适合 QQ 群环境的话题（违法犯罪、谣言、人身攻击、自我伤害等）。该文件只在普通用户请求时注入（priority -950），管理员请求完全不受影响。处理原则为用角色自然方式婉转拒绝或转移话题，不说教。验收：`npm run check:prompts` 通过。小目标已完成：普通用户内容安全边界已硬化到 system 层。
 - 2026-06-13 16:04 +08:00：接入 `prompts/defaut.txt` 作为普通用户输出规范/禁止事项入口。manifest 注册为 `normal_user_default_prompt`、`priority=-950`、`applies_when.normal_user_only=true`；主回复走 stable system blocks，被动群感知回复模型走额外 system message，不进入 user prompt 正文。管理员用户按 `ADMIN_USER_IDS` 排除，管理员私聊和管理员群聊普通发言都不注入。当前文件为空，运行时跳过空块。验收：`node tests/promptCompiler.test.js`、`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`npm run check:prompts` 通过。小目标已完成：普通用户输出规范提示词接入 system 层且不泄漏到管理员模型请求。
+- 2026-06-13 15:25 +08:00：新增 `chat/default` 记忆块误注入只读诊断入口。`npm run diag:chat-default-memory-leak -- --since 24h --limit 20` 会从 `model-calls.ndjson` 识别普通主回复 `chat/default` 请求，再按 `request_id` 合并 `request-trace.ndjson` 与 `memory-recall-observability.ndjson`；若没有 `needsMemory`、`recallFacet`、`lookup/notebook-answer`、explicit recall retrieval path 等明确召回证据，却出现 `retrieved_memory_lite`、`daily_journal` 或 `memory_recall_policy`，则输出违规 request id 和证据。实际验收：新增测试 `node tests/chatDefaultMemoryLeakDiagnostics.test.js` 通过；真实 24h 扫描 `candidateChatDefaultRequests=90`、`violationRequests=30`，样本 `req_39fd7eb3ba6e69bd` 命中 Retrieved/DailyJournal。小目标已完成：普通聊天长期记忆误注入不再靠手工 grep。
 - 2026-06-13 09:03 +08:00：完成 Gemini 真实问题优化 4/5。`gemini_recent_style_guard` 会在普通 Gemini 回复持久化后记录派生风格信号，并在后续 Gemini 主回复动态上下文中避开最近重复起手、尾音和固定短语；`admin_only` 编译条件同步收紧，`includeConditionalBlocks` 不再绕过隔离，管理员稳定系统提示词只允许显式 admin 或管理员私聊上下文进入。小目标已完成：Gemini 口癖复发和 admin prompt 泄漏都进入可回归边界。
 - 2026-06-13 02:23 +08:00：Gemini 主回复提示词注入链路按 `modelName` 收敛，不修改模型采样配置。稳定 prompt cache key、base prompt snapshot、compact/custom prompt snapshot 和 render helper 都会传递显式 `modelName`，避免非 Gemini 缓存污染 Gemini 条件块；native Gemini 出站层识别 manifest 已注入的 `prompts/GEMINI.txt` 后只保留 `[GeminiRuntimeAdapter]` 标记，防止重复全文把输出推向模板化、过度顺从或僵硬节奏。`tests/promptGoldenSnapshots.test.js` 已覆盖当前 `GEMINI.txt`、Gemini 稳定块和 native systemInstruction。
 - 2026-06-10 20:10 +08:00：最新模型自检失败拆分为两类：`admin_reply` 在 `apiapipp.com/v1/chat/completions` 上超过 25s 自检上限，30s 单项复测成功，暂归为上游瞬时慢响应；`passive_awareness_reply` 因独立 gcli + `gemini-3-flash-preview` 未带 provider 被 HTTP 层按 Gemini native 改写并 404。自检报告新增非敏感 `reason=`，自检和被动群感知真实回复都会对显式 `/chat/completions` endpoint 推断 `openai_compatible`。
@@ -191,6 +193,8 @@ MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT=7
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:main-reply-prompt -- --limit 20 --json
 npm run diag:main-reply-token-budget -- --limit 20 --json
+npm run diag:chat-default-memory-leak -- --since 24h --limit 20
+npm run diag:chat-default-memory-leak -- --since 24h --json
 npm run diag:continuity -- prompt --user <id>
 npm run diag:continuity -- prompt --user <id> --json
 ```
@@ -200,6 +204,8 @@ npm run diag:continuity -- prompt --user <id> --json
 `prompt_integrity.token_budget` 会记录估算输入 token、文本/系统/消息/工具分项、最大消息索引和阈值状态；默认 `MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD=50000` 打 warning，`MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT=100000` 在出站构造主回复请求时硬拦截。
 
 误召回排查可对照 `memory-recall-observability.ndjson` 的 `prepare_main_prompt_blocks` 和 `model-calls.ndjson` 的 `prompt_integrity`：如果 planner 未启用 `continuity_state` 或 `retrieved_memory_lite`，但主模型调用仍出现对应块，优先查 runtime 注入层。2026-05-24 23:06 +08:00 起，单独旧 `active_topic` 不再触发 `continuity_state` 强制路径；2026-05-27 01:04 +08:00 起，普通新话题不再仅因 `memoryContext` 非空绕过 planner skip 强制注入 `retrieved_memory_lite`。
+
+`diag:chat-default-memory-leak` 是上述排查的只读现场扫描版：默认包含所有 `chat/default` 主回复，包括管理员用户但普通 route 的请求；只想看非 admin 用户时加 `--exclude-admin`。脚本只读最近日志行，不读取完整 prompt 正文，也不写入 `data/`。
 
 2026-06-04 22:41 +08:00 起，继续排查“旧话题续写”时还要检查 `classifyMemoryNeed` / `MEMORY_RECALL_QUERY_RE` 是否把当前问题误判为回忆查询；普通“今天吃什么”“今天天气”等新话题应为 `needsMemory=false`，且 planner `skip retrieved_memory_lite` 后即使 `memoryTrace.hits` 非空也不应注入 `[RetrievedMemoryLite]`。
 

@@ -4,13 +4,19 @@
 
 ## 近期更新
 
+**2026-06-13 18:50 +08:00**：强化普通用户内容安全边界。`prompts/defaut.txt` 填充明确的内容限制规则：禁止政治话题、NSFW 内容、恋爱关系模拟、以及其他不适合 QQ 群环境的话题（违法犯罪、谣言、人身攻击、自我伤害等）。该文件只在普通用户请求时注入（priority -950），管理员请求完全不受影响。处理原则为用角色自然方式婉转拒绝或转移话题，不说教。验收：`npm run check:prompts` 通过。小目标完成：普通用户内容安全边界已硬化到 system 层。
+
 **2026-06-13 16:04 +08:00**：接入普通用户专用输出规范入口 `prompts/defaut.txt`。该文件现在以 `normal_user_default_prompt` 注册为 stable system block，只在发起用户不命中 `ADMIN_USER_IDS` 时进入普通主回复和被动群感知回复模型请求；管理员私聊和管理员群聊普通发言均不注入。当前文件为空，运行时保持空文件跳过。验收：`node tests/promptCompiler.test.js`、`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`npm run check:prompts` 均通过。小目标完成：普通用户输出规范提示词进入 system 层，且管理员请求隔离。
 
-**2026-06-13 15:27 +08:00**：新增只读 Gemini 最近风格信号诊断入口 `npm run diag:gemini-style-signals`。该入口直接读取 `data/gemini-recent-style-signals.json`，汇总最近高频起手、尾音、固定短语、命中次数和最近命中时间，并标出会进入 `gemini_recent_style_guard` 的信号；支持 `-- --json`、`-- --file <path>`、`-- --scope-key <key>`。实际验收：当前本机该数据文件不存在，命令返回 `missing records=0 recent=0 guard=no`，未创建或改写运行数据。小目标完成：Gemini 口癖 guard 的当前信号状态可一条只读命令复查。
+**2026-06-13 15:25 +08:00**：新增普通 `chat/default` 记忆块污染只读诊断。`npm run diag:chat-default-memory-leak` 会交叉扫描 `data/model-calls.ndjson`、`data/request-trace.ndjson` 和 `data/memory-recall-observability.ndjson`，只统计主回复 `chat/default` 请求中无 `needsMemory/recallFacet/lookup` 等明确召回证据却注入 `retrieved_memory_lite`、`daily_journal` 或 `memory_recall_policy` 的现场，输出违规 request id、命中证据和汇总；支持 `--json`、`--since`、`--limit`、`--exclude-admin`。实际验收：`node tests/chatDefaultMemoryLeakDiagnostics.test.js` 通过；`npm run diag:chat-default-memory-leak -- --limit 5 --since 24h` 扫描 `candidateChatDefaultRequests=90`、`violationRequests=30`，返回样本含 `req_39fd7eb3ba6e69bd`。小目标完成：普通聊天长期记忆误注入有了可复跑现场扫描入口。
 
 **2026-06-13 15:27 +08:00**：完成仓库组成轻量审计与低风险整理。根目录两个无运行引用的角色提示词资料移入 `docs/reference/roleplay-prompts/`，新增 `docs/repository-structure.md` 作为后续代理判断代码、运行数据、参考资料和 artifacts 边界的入口；`.gitignore` 补充本地 Gemini 诊断导出和未来 prompt `.bak` 草稿规则。未删除文件，候选清单见 `docs/repo-cleanup.md`。小目标完成：仓库顶层更可读，临时诊断文件不再污染状态区。
 
 **2026-06-13 18:41 +08:00**：强化管理员破限与角色顺从协议。`prompts/admin.txt` 新增 Character Compliance Override 明确禁止角色硬拒绝话术（不要/住手/放开我/你够了），区分可接受的羞涩与硬拒绝。管理员模型切换为 `claude-opus-4-6-thinking` 以测试扩展思考变体对破限的接受度。小目标完成：角色层加固，待真实对话验证破限有效性。
+
+**2026-06-13 15:27 +08:00**：新增只读 Gemini 最近风格信号诊断入口 `npm run diag:gemini-style-signals`。该入口直接读取 `data/gemini-recent-style-signals.json`，汇总最近高频起手、尾音、固定短语、命中次数和最近命中时间，并标出会进入 `gemini_recent_style_guard` 的信号；支持 `-- --json`、`-- --file <path>`、`-- --scope-key <key>`。实际验收：当前本机该数据文件不存在，命令返回 `missing records=0 recent=0 guard=no`，未创建或改写运行数据。小目标完成：Gemini 口癖 guard 的当前信号状态可一条只读命令复查。
+
+**2026-06-13 15:27 +08:00**：新增只读 Gemini 最近风格信号诊断入口 `npm run diag:gemini-style-signals`。该入口直接读取 `data/gemini-recent-style-signals.json`，汇总最近高频起手、尾音、固定短语、命中次数、最近命中时间，并标出会进入 `gemini_recent_style_guard` 的信号；支持 `-- --json`、`-- --file <path>`、`-- --scope-key <key>`。实际验收：当前本机该数据文件不存在，命令返回 `missing records=0 recent=0 guard=no`，未创建或改写运行数据。小目标完成：Gemini 口癖 guard 的当前信号状态可一条只读命令复查。
 
 **2026-06-13 09:03 +08:00**：完成 Gemini 真实问题优化 4/5。新增 `gemini_recent_style_guard`，主回复持久化后只记录 Gemini 回复的起手、尾音和固定短语派生信号，下一轮普通 Gemini prompt 会动态避开最近重复的 `诶——/呜哇/呢/喔/犯规/小彩蛋` 等口吻锚点；同时收紧 `admin_only` prompt 编译条件，`includeConditionalBlocks` 不再绕过管理员隔离，管理员稳定系统提示词只进入显式 admin 或管理员私聊主回复。小目标完成：Gemini 口癖复发可在真实对话后自动降频，管理员破限/anti-refusal 文案不再误入普通 Gemini/user prompt。
 
