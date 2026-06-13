@@ -1,5 +1,7 @@
 # Runtime Latency Diagnosis
 
+更新 2026-06-13 22:20 +08:00：继续定位最近回复速度诊断中的第 1 和第 3 项，详见 `docs/recent-reply-speed-blockers-2026-06-13.md`。结论修正：`req_731c6e812174d9c5` 的 66.9s 不是 RuntimeV2 入口前空档，而是 `prepare` 节点内 `buildDynamicPromptImpl` 动态 prompt 构建阻塞；request trace 的 `runtime_v2_node_start` 是节点结束后批量落盘造成的误读。`req_42badc948f719477` 的第二轮 planner 不是 graph planner 重建，而是 `dispatch -> runCapabilityPreflight -> maybeRunGlobalToolRuntime -> planRequestV2` 再次远程规划，且同样先 `/v1/responses` 405 再 `/v1/chat/completions`，第二轮 chat completions 耗 56.7s。验收：只读复核 LangGraph 原始事件、`request-trace.ndjson`、`memory-recall-observability.ndjson` 和 `model-calls.ndjson`。小目标完成：1 和 3 的具体凝滞原因已定位到代码入口。
+
 更新 2026-06-13 21:24 +08:00：复盘最近几次机器人回复，详见 `docs/recent-reply-speed-blockers-2026-06-13.md`。结论：最近慢点主要来自 RuntimeV2 入口前本地空档、主模型上游、planner 工具链和连续消息预处理；成功样本的实际 NapCat 发送多为 234ms-1.4s，不是主瓶颈。验收：`npm run diag:main-reply-lag`、`npm run diag:runtime`、`npm run diag:main-reply-prompt -- --limit 10 --json` 和只读 request trace 聚合均已执行。小目标完成：最近机器人回复速度阻滞点已有可复查证据。
 
 更新 2026-06-13 20:00 +08:00：planner 远程模型请求超时上限从历史 60s 收敛为 15s。`PLANNER_REQUEST_TIMEOUT_MS` 默认值和本地 `.env` 均为 `15000`，配置解析会把更大值封顶到 15 秒；远程 planner 模型请求失败或超时后强制返回 `chat_only/fast_reply`，RuntimeV2 降级普通 `direct_reply` 主对话链路，不再让规则 fallback 继续生成工具计划。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。
