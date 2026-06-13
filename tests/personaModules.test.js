@@ -540,6 +540,7 @@ const {
   assert.ok(slotSelection.selectionReason.skipped.some((item) => item.id === 'care_light' || item.id === 'deep_pain'));
 
   console.log('personaModules.test.js passed');
+  process.exit(0);
 })().catch((error) => {
   console.error(error);
   process.exit(1);

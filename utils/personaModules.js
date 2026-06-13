@@ -164,6 +164,20 @@ function buildPersonaModuleCandidates(context = {}) {
   const catalog = loadPersonaModuleCatalog();
   const worldbookEnabled = shouldUseWorldbookSearch(context);
   const candidateIds = addCatalogTriggeredCandidateIds(new Set(pickCandidateIds(context)), catalog, context);
+  const sqlWorldbookById = new Map();
+  if (worldbookEnabled && isPrimaryReadEnabled()) {
+    try {
+      const sqlHits = searchWorldbookEntries(normalizeText(context.question || context.routePrompt || ''), {
+        limit: context.worldbookLimit || config.PERSONA_WORLDBOOK_SELECTED_MAX || 4
+      });
+      for (const hit of normalizeArray(sqlHits.results)) {
+        const moduleId = normalizeText(hit?.moduleId || hit?.id);
+        if (!moduleId) continue;
+        candidateIds.add(moduleId);
+        sqlWorldbookById.set(moduleId, hit);
+      }
+    } catch (_) {}
+  }
   let localRecallModules = [];
   if (config.LOCAL_PROMPT_RECALL_ENABLED !== false && context.disableLocalPromptRecall !== true) {
     try {
@@ -188,15 +202,20 @@ function buildPersonaModuleCandidates(context = {}) {
     .filter((item) => item.phase === 'all' || item.phase === phase)
     .map((item) => {
       const local = localById.get(item.id);
-      if (!local) return item;
+      const sqlHit = sqlWorldbookById.get(item.id);
+      if (!local && !sqlHit) return item;
       return {
         ...item,
-        localPromptRecall: local.localPromptRecall,
-        worldbookScore: local.worldbookScore || item.worldbookScore,
-        worldbookMatchMode: local.worldbookMatchMode || item.worldbookMatchMode
+        localPromptRecall: local?.localPromptRecall,
+        worldbookScore: Number(sqlHit?.score || local?.worldbookScore || item.worldbookScore || 0) || undefined,
+        worldbookMatchMode: normalizeText(sqlHit?.matchMode || local?.worldbookMatchMode || item.worldbookMatchMode),
+        worldbookReason: normalizeText(sqlHit?.reason || item.worldbookReason)
       };
     })
     .sort((a, b) => {
+      const aWorldbookScore = Number(a.worldbookScore || 0) || 0;
+      const bWorldbookScore = Number(b.worldbookScore || 0) || 0;
+      if (bWorldbookScore !== aWorldbookScore) return bWorldbookScore - aWorldbookScore;
       const aScore = Number(a.localPromptRecall?.score || 0) || 0;
       const bScore = Number(b.localPromptRecall?.score || 0) || 0;
       if (bScore !== aScore) return bScore - aScore;
@@ -536,9 +555,9 @@ function selectPersonaModules(decision = {}, context = {}) {
       context.chatType === 'group' ? 'scene_group_insert' : '',
       context.chatType === 'private' ? 'scene_private_chat' : '',
       ...sceneIds,
-      ...emotionIds,
       ...stickyWorldbookIds,
       ...scoredWorldbookIds,
+      ...emotionIds,
       ...fallbackIds.filter((id) => !String(id || '').startsWith('wb_mizuki_'))
     ].filter(Boolean)))
     : fallbackIds;

@@ -45,6 +45,12 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     continuitySignals: options?.continuitySignals,
     personaPhase: routeMeta.personaPhase || '',
     chatType: getRouteMetaGroupId(routeMeta) ? 'group' : String(routeMeta.chatType || routeMeta.chat_type || options.chatType || options.chat_type || 'private').trim(),
+    sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+    userId,
+    senderId: routeMeta.senderId || routeMeta.sender_id || userId,
+    groupId: routeMeta.groupId || routeMeta.group_id || '',
+    isAdmin: options.isAdmin === true || routeMeta.isAdmin === true,
+    worldbookLimit: options.worldbookLimit,
     maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
     mainReplyPromptMode
   };
@@ -810,6 +816,17 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     for (const blockId of ['retrieved_memory_lite', 'daily_journal', 'memory_recall_policy']) {
       if (!finalBlockedIds.includes(blockId)) finalBlockedIds.push(blockId);
     }
+  }
+  const selectedPersonaRuntimeIds = Array.from(new Set(
+    normalizeArray(effectiveOptionalLayer?.promptSegments?.activatedPersonaModules)
+      .concat(normalizeArray(sessionCandidateLayer?.promptSegments?.activatedPersonaModules))
+      .concat(normalizeArray(promptMaterials?.personaModuleDecision?.selected).map((item) => item?.id))
+      .map((item) => normalizeText(item))
+      .filter(Boolean)
+      .map((id) => `persona_module:${id}`)
+  ));
+  for (const id of selectedPersonaRuntimeIds) {
+    if (!runtimeAddedIds.includes(id)) runtimeAddedIds.push(id);
   }
   const selectedBlocks = filterBlocksByPlan(combinedBlocks, finalDynamicPromptPlan, {
     requiredIds,
