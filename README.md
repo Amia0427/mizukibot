@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 23:48 +08:00**：修复重启脚本拉不起主 bot。`restart-bot.cmd` / daemon 外层报 `main bot did not acquire lock after daemon start`，实际 stderr 为 `ReferenceError: markSafetyRestrictionEmojiAfterReply is not defined`；安全限制 emoji helper 位于 `createMessageHandler` 内部，却被顶层导出表引用，导致 `src/message/handler.js` 加载即退出。现移除该内部 helper 的顶层导出，保留发送成功后的内部 emoji 标记调用。验收：`node -e "require('./core/messageHandler'); require('./src/message/handler'); console.log('message handler load ok')"`、`node tests/messageModuleFacade.test.js`、`node tests/safetyRestrictionDetection.test.js` 均通过；实际 `cmd /c restart-bot.cmd restart` 返回 0，status 显示 main bot PID=44008、post-reply worker PID=40040 均 Running，`npm run diag:main-bot-restarts -- --text` 为 ok。小目标完成：重启脚本不再因 message handler 导出作用域错误拉不起主 bot。
+
 **2026-06-13 20:30 +08:00**：新增安全限制 emoji 标记（emoji 39）。当模型触发 `prompts/defaut.txt` 的安全限制时，会在回复末尾输出 `/%` 标记，系统检测后自动给用户消息贴上 emoji 39。工作流程：模型输出 `/%` → `sanitizeUserFacingText` 检测并移除 → 传递 `hasSafetyRestriction` 标志 → 发送成功后调用 `markSafetyRestrictionEmojiAfterReply` → 贴 emoji 39。配置项 `QQ_SAFETY_RESTRICTION_EMOJI_IDS=[39]`，类似 thinking emoji 机制。验收：`node tests/safetyRestrictionDetection.test.js` 通过。小目标完成：安全限制触发可视化，替代原 `/%` 文本标记。
 
 **2026-06-13 20:15 +08:00**：打磨普通用户内容边界。`prompts/defaut.txt` 删除 "/%"结尾标记、删除括号内的教学性解释（"然后转到别的话题"等）、简化处理原则从4条合并为2条、措辞更口语化。整体更简洁、更自然、更符合角色表达。验收：`npm run check:prompts` 通过。小目标完成：内容边界文案优化。
