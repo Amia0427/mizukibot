@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 23:03 +08:00**：thinking emoji 默认编号改为 `355`。`QQ_THINKING_EMOJI_IDS` 默认值从 `[212]` 调整为 `[355]`；本机检查未发现 `.env*` 覆盖该键，因此默认配置会直接生效，后续仍可用环境变量覆盖。验收：`node -e "const config=require('./config'); console.log(config.QQ_THINKING_EMOJI_IDS.join(','))"` 输出 `355`，`node tests/qqActionService.test.js` 通过。小目标完成：thinking emoji 默认发送目标切到 355。
+
 **2026-06-13 20:15 +08:00**：打磨普通用户内容边界。`prompts/defaut.txt` 删除 "/%"结尾标记、删除括号内的教学性解释（"然后转到别的话题"等）、简化处理原则从4条合并为2条、措辞更口语化。整体更简洁、更自然、更符合角色表达。验收：`npm run check:prompts` 通过。小目标完成：内容边界文案优化。
 
 **2026-06-13 20:10 +08:00**：放宽普通用户内容限制，只保留核心边界。`prompts/defaut.txt` 调整为：政治话题（严格限制）、性别隐私（保护秘密）、极端话题（适度避开）。移除 NSFW 和恋爱关系的过度限制，标题改为"话题边界"，语气从"严格禁止"改为"需要注意"，给予角色更自然的表达空间。验收：`npm run check:prompts` 通过。小目标完成：内容安全与角色自然表达平衡。
