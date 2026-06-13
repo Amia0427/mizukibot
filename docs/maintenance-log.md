@@ -1,3 +1,12 @@
+## 运行维护 2026-06-13 21:05
+
+- 围绕 `prompts/defaut.txt` 补最小回归：普通用户主回复和普通用户被动群感知回复会注入 `normal_user_default_prompt`；管理员私聊、管理员群聊和管理员 sender 的被动回复不注入；空 `defaut.txt` 不导出、不注入。
+- 主回复测试确认 stable block 顺序保持 `root_system_prompt -> normal_user_default_prompt -> security_contract -> core_baseline_patch -> main_persona_system`，避免当前提示词边界文字调整打乱已有 stable 层顺序。
+- 修复稳定 prompt cache audience 维度：区分 `normal_user`、`admin_private`、`configured_admin_non_private` 和 `anonymous`，避免普通用户 stable cache 被管理员群聊复用。
+- 验证：`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/promptCompiler.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`npm run check:prompts`、`node -e "require('./api/runtimeV2/context/service')"`、`node -e "require('./core/passiveGroupAwareness')"` 通过。
+- 未作为验收：`tests/runtimeV2SessionPromptCacheStability.test.js`、`tests/runtimeV2PromptOptimization.test.js` 本机超时；`tests/promptGoldenSnapshots.test.js` 在 worldbook no-planner 既有分支失败，未纳入本次 defaut 边界修改。
+- 小目标已完成：`defaut.txt` 普通用户注入边界和管理员隔离有可复跑回归，且未覆盖当前未提交的 prompt 文本改动。
+
 ## 运行维护 2026-06-13 15:27
 
 - 新增只读 Gemini 最近风格信号诊断入口：`npm run diag:gemini-style-signals`。

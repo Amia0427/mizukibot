@@ -26,6 +26,23 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   ].join('|'));
   const systemPromptFingerprint = buildStableSystemPromptFingerprint(currentConfig);
   const promptModeFingerprint = hashText(mainReplyPromptMode);
+  const normalizedPromptUserId = normalizeText(
+    userId
+    || options?.userId
+    || options?.user_id
+    || routeMeta.userId
+    || routeMeta.user_id
+    || routeMeta.senderId
+    || routeMeta.sender_id
+  );
+  const configuredAdminUserIds = normalizeArray(currentConfig.ADMIN_USER_IDS)
+    .map((item) => normalizeText(item))
+    .filter(Boolean);
+  const stablePromptAudience = adminPromptContext
+    ? 'admin_private'
+    : (normalizedPromptUserId && configuredAdminUserIds.includes(normalizedPromptUserId)
+      ? 'configured_admin_non_private'
+      : (normalizedPromptUserId ? 'normal_user' : 'anonymous'));
   const sharedShortTermContext = buildSharedShortTermContextMessages(userId, userInfo, {
     chatHistory: options.chatHistory,
     shortTermMemory: options.shortTermMemory,
@@ -157,6 +174,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     systemPromptFingerprint,
     modelName,
     adminPromptContext,
+    stablePromptAudience,
     sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
     sessionCacheFingerprint
   });

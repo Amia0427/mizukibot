@@ -78,6 +78,8 @@ function prunePromptLayerCache(cache = new Map(), now = Date.now()) {
 
 function buildPromptCacheKeys(userId = '', routeMeta = {}, options = {}) {
   const normalizedRouteMeta = routeMeta && typeof routeMeta === 'object' ? routeMeta : {};
+  const stablePromptAudience = normalizeText(options.stablePromptAudience || options.stable_prompt_audience)
+    || (options.adminPromptContext === true ? 'admin' : 'user');
   const stableKey = hashText([
     normalizeText(options.routePolicyKey),
     normalizeText(options.topRouteType),
@@ -87,7 +89,7 @@ function buildPromptCacheKeys(userId = '', routeMeta = {}, options = {}) {
     normalizeText(options.promptManifestFingerprint),
     normalizeText(options.systemPromptFingerprint),
     normalizeText(options.modelName || options.model_name || options.model),
-    options.adminPromptContext === true ? 'admin' : 'user'
+    stablePromptAudience
   ].join('|'));
   const sessionKey = hashText([
     normalizeText(userId),
