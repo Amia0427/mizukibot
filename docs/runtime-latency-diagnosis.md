@@ -1,5 +1,7 @@
 # Runtime Latency Diagnosis
 
+更新 2026-06-13 20:00 +08:00：planner 远程模型请求超时上限从历史 60s 收敛为 15s。`PLANNER_REQUEST_TIMEOUT_MS` 默认值和本地 `.env` 均为 `15000`，配置解析会把更大值封顶到 15 秒；远程 planner 模型请求失败或超时后强制返回 `chat_only/fast_reply`，RuntimeV2 降级普通 `direct_reply` 主对话链路，不再让规则 fallback 继续生成工具计划。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。
+
 更新 2026-06-11 19:10 +08:00：复盘今天 `data/model-calls.ndjson` 的管理员图片总结 `request_id=req_493000182e712ed3`。链路为 `direct_chat/image_summary/summary`、`source=direct_reply`、`stream=false`、`model=claude-opus-4-6`、`main_fallback_scope=admin_shared`，耗时约 51.8s；`prompt_integrity.token_budget` 显示输入约 51,434 tokens，最大消息是最后一条 user 约 46,067 tokens。根因：图片轻上下文只裁 system/history，vision caption worker 成功后仍把完整 `VisionCaptionJSON` 作为纯文本 user payload 交给主模型，并且 `directReply` 会优先复用 `preparedMainConversationContext`。修复：worker 主链问题改为紧凑“视觉证据摘要”；vision 路由在 `directReply` 强制重建 `vision_lite`，不复用 full prepared context；`vision_lite` 对无 image_url 的 worker 文本也按 `VISION_ROUTE_USER_TEXT_MAX_TOKENS` 裁剪。新增 `tests/imageSummaryVisionLiteBudget.test.js` 验证旧大 payload 不再发给主模型、估算输入低于 20k hard cap。小目标完成：管理员图片总结主链输入预算和首响延迟已加硬控。
 
 更新 2026-06-10 20:37 +08:00：复盘 `transform/vision-summary` 最近失败，真实错误集中在 `gcli.ggchan.dev` 图片模型非流式直回：`timeout of 18000ms exceeded`、`socket hang up`、`read ECONNRESET`、TLS 建连断开；失败请求估算输入曾达 20k-88k tokens，最大 user message 来自图片路由携带 recent history / quote raw。修复：`IMAGE_MODEL_RETRIES` 默认/上限改为 3；transport/no-response 类错误首次 retry 使用 80-120ms 快速重试；图片直回上下文启用 `vision_lite`，跳过 memory context segments、summary、recent history、assistant-only 和 tool evidence，当前图片用户文本按 `VISION_ROUTE_USER_TEXT_MAX_TOKENS=6000` 截断，图片模型请求 hard cap 默认 20k。
@@ -42,9 +44,9 @@
 
 ## 修复
 
-- 新增 `PLANNER_REQUEST_TIMEOUT_MS`，默认 60000ms。
+- 新增 `PLANNER_REQUEST_TIMEOUT_MS`，历史默认 60000ms；2026-06-13 起当前默认和上限均为 15000ms。
 - planner HTTP 请求调用 `postWithRetry` 前写入内部字段 `__timeoutMs`，由 HTTP 层作为本次请求超时使用；请求整形层会在真正发给模型服务前移除内部字段。
-- 本地 `.env` 已设置 `PLANNER_REQUEST_TIMEOUT_MS=60000`。
+- 本地 `.env` 已设置 `PLANNER_REQUEST_TIMEOUT_MS=15000`。
 
 ## 后续
 

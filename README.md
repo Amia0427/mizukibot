@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 20:00 +08:00**：planner 超时收敛到 15 秒并降级普通对话。`PLANNER_REQUEST_TIMEOUT_MS` 默认值和本地 `.env` 均改为 `15000`，配置解析会把更大的值封顶到 15 秒；远程 planner 模型请求失败或超时后强制返回 `chat_only/fast_reply`，不再用规则 fallback 继续生成工具计划，RuntimeV2 会走普通 `direct_reply` 主对话链路。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。小目标完成：planner 15 秒无响应自动断开并降级到普通对话链路。
+
 **2026-06-13 20:10 +08:00**：放宽普通用户内容限制，只保留核心边界。`prompts/defaut.txt` 调整为：政治话题（严格限制）、性别隐私（保护秘密）、极端话题（适度避开）。移除 NSFW 和恋爱关系的过度限制，标题改为"话题边界"，语气从"严格禁止"改为"需要注意"，给予角色更自然的表达空间。验收：`npm run check:prompts` 通过。小目标完成：内容安全与角色自然表达平衡。
 
 **2026-06-13 20:05 +08:00**：为普通用户新增性别隐私防护。`prompts/defaut.txt` 增加"性别相关话题"处理规则：当用户追问生理性别、身体特征、性别认同等隐私话题时，用瑞希的语言风格自然岔开（"诶，突然问这个干嘛~"、"唔...这种事就不要在意啦"、"比起这个，你看这个..."），持续追问时用不耐烦但不生气的语气应对。符合瑞希人设中对性别秘密的保护态度。验收：`npm run check:prompts` 通过。小目标完成：性别隐私防护接入 system 层，只对普通用户生效。
@@ -375,7 +377,7 @@ Planner refinement：
 ```env
 PLAN_MODEL=gcli-gemini-3-flash-preview-nothinking
 PLANNER_MAX_MODEL_CALLS=1
-PLANNER_REQUEST_TIMEOUT_MS=60000
+PLANNER_REQUEST_TIMEOUT_MS=15000
 PLANNER_SEMANTIC_REFINE_ENABLED=false
 PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD=0.72
 PLANNER_ALLOW_MAIN_MODEL_FALLBACK=false
