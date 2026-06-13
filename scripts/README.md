@@ -27,6 +27,7 @@
 - `diagnose-main-reply.js`：统一主回复诊断，输出 route/model/fallback、memory freshness、群聊回复守卫、direct/tool/background 分支；更新 2026-06-06 12:44 +08:00：`--truncation` 汇总最近主回复截断候选，区分 `MAX_TOKENS`、上游断流、无 terminal event 和本地发送层失败
 - `diagnose-request-trace-preflight.js`：更新 2026-06-09 09:22 +08:00，按 requestId 拆分 `request-trace.ndjson` 的入站等待、planner、prepare、route、routeDoneToUpstream、pre-model 事件（thinking emoji / ask_ai_dispatch）和主模型耗时；可用 `npm run diag:request-trace-preflight -- --request-id req_290ea2184adf174b`
 - `diagnose-main-reply-token-budget.js`：更新 2026-06-08 21:05 +08:00，聚合最近主回复输入 token、分布区间和最大消息索引；默认扫尾部 5000 行避开 embedding 噪声，可用 `npm run diag:main-reply-token-budget -- --limit 20 --json`
+- `diagnose-chat-default-memory-leak.js`：更新 2026-06-13 15:25 +08:00，只读交叉扫描 `model-calls.ndjson`、`request-trace.ndjson` 和 `memory-recall-observability.ndjson`，输出普通 `chat/default` 主回复里无明确召回证据却注入 `retrieved_memory_lite/daily_journal/memory_recall_policy` 的 request id、命中证据和汇总；实际验收 `npm run diag:chat-default-memory-leak -- --limit 5 --since 24h` 得到 `candidateChatDefaultRequests=90`、`violationRequests=30`
 - `diagnose-memory-ops.js`：记忆诊断入口，支持 `diagnose/backfill/recall/audit`；更新 2026-05-19 21:45 +08:00：`audit` 会运行抽样记忆质量审查，只报告不改库
 - 更新 2026-05-23 11:25 +08:00：`diagnose-memory-ops.js recall --gate` 会把 lifecycle leakage、category mismatch、recent recall miss 纳入门禁指标。
 - `diagnose-persona-memory-state.js`
