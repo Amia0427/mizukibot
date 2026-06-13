@@ -281,12 +281,35 @@ function attachPlannerModelAttemptMeta(decision = {}, attemptMeta = {}) {
   return next;
 }
 
+function buildPlannerModelUnavailableDecision(route = {}, options = {}, reason = 'planner_model_unavailable') {
+  const unavailableDecision = {
+    mode: 'chat_only',
+    taskShape: 'fast_reply',
+    allowedToolNames: [],
+    steps: [],
+    dynamicPromptPlan: options.dynamicPromptPlan,
+    plannerMeta: {
+      protocolVersion: PLANNER_PROTOCOL_VERSION,
+      decisionVersion: PLANNER_DECISION_VERSION,
+      reason,
+      plannerModel: getPlannerModel(),
+      fallbackUsed: true,
+      decisionSource: 'planner_timeout_chat_fallback'
+    }
+  };
+  return normalizePlannerDecisionV2(unavailableDecision, route, {
+    ...options,
+    fallbackUsed: true,
+    forceChatOnly: true
+  });
+}
+
 async function callPlannerModelAttemptV2(route = {}, options = {}) {
   const apiBaseUrl = getPlannerApiBaseUrlV2();
   const apiKey = getPlannerApiKeyV2();
   if (!apiBaseUrl || !apiKey) return null;
   const { requestBody } = buildPlannerModelRequestBody(route, options);
-  requestBody.__timeoutMs = Number(config.PLANNER_REQUEST_TIMEOUT_MS || 60000);
+  requestBody.__timeoutMs = Number(config.PLANNER_REQUEST_TIMEOUT_MS || 15000);
   const response = await postWithRetry(
     ensureChatCompletionsUrlLocal(apiBaseUrl),
     requestBody,
@@ -557,6 +580,8 @@ async function planRequestV2(input = {}) {
     } catch (_) {}
   }
 
+  let plannerModelFailed = false;
+  let plannerModelFailureReason = '';
   try {
     const plannerModelResult = await callPlannerModelWithSemanticRefinement(route, options, requestLatencyMeta);
     const plannerOutput = plannerModelResult?.output || null;
@@ -577,14 +602,22 @@ async function planRequestV2(input = {}) {
         options
       );
     }
-  } catch (_) {}
+  } catch (error) {
+    plannerModelFailed = true;
+    plannerModelFailureReason = normalizeText(error?.message || error) || 'planner_model_unavailable';
+  }
 
   const normalizeStartedAt = nowMs();
-  const normalized = normalizePlannerDecisionV2(null, route, {
-    ...options,
-    fallbackUsed: true,
-    latencyMeta: requestLatencyMeta
-  });
+  const normalized = plannerModelFailed
+    ? buildPlannerModelUnavailableDecision(route, {
+      ...options,
+      latencyMeta: requestLatencyMeta
+    }, plannerModelFailureReason)
+    : normalizePlannerDecisionV2(null, route, {
+      ...options,
+      fallbackUsed: true,
+      latencyMeta: requestLatencyMeta
+    });
   addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
   return attachExternalRecallToPlannerDecision(
     attachPlannerLatencyMeta(normalized, requestLatencyMeta),

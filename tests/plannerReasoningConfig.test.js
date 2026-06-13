@@ -33,7 +33,7 @@ const defaults = buildPlannerRuntimeConfig({
 });
 
 assert.strictEqual(defaults.PLAN_REASONING_EFFORT, 'off');
-assert.strictEqual(defaults.PLANNER_REQUEST_TIMEOUT_MS, 60000);
+assert.strictEqual(defaults.PLANNER_REQUEST_TIMEOUT_MS, 15000);
 
 const legacyOverride = buildPlannerRuntimeConfig({
   pick: createEnvPicker({ PLANNER_REASONING_EFFORT: 'low' }),
@@ -60,7 +60,7 @@ const timeoutOverride = buildPlannerRuntimeConfig({
   pickBool
 });
 
-assert.strictEqual(timeoutOverride.PLANNER_REQUEST_TIMEOUT_MS, 45000);
+assert.strictEqual(timeoutOverride.PLANNER_REQUEST_TIMEOUT_MS, 15000);
 
 const timeoutMinimum = buildPlannerRuntimeConfig({
   pick: createEnvPicker(),

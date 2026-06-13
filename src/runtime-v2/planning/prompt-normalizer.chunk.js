@@ -378,6 +378,9 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
     Array.isArray(rawDecision?.allowedToolNames) ? rawDecision.allowedToolNames : fallback.allowedToolNames
   ).filter((toolName) => toolCatalogByName.has(toolName));
   let normalizedAllowedToolNames = requestedAllowedNames.length > 0 ? requestedAllowedNames : fallback.allowedToolNames;
+  if (options.forceChatOnly === true) {
+    normalizedAllowedToolNames = [];
+  }
   let toolGateReason = 'not_companion_mode';
   if (isCompanionPlannerMode(options)) {
     const candidateToolNames = normalizedAllowedToolNames.length > 0
@@ -396,6 +399,9 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   let taskShape = TASK_SHAPES.includes(normalizeText(rawDecision?.taskShape))
     ? normalizeText(rawDecision.taskShape)
     : fallback.taskShape;
+  if (options.forceChatOnly === true) {
+    taskShape = 'fast_reply';
+  }
   const rawSteps = normalizeArray(rawDecision?.steps);
   const acceptRawSteps = rawSteps.length > 0
     && rawSteps.every((step) => {
@@ -428,6 +434,7 @@ function normalizePlannerDecisionV2(rawDecision = {}, route = {}, options = {}) 
   let normalizedByRule = false;
   let normalizationReason = '';
   const maybeApplyCanonicalNormalization = () => {
+    if (options.forceChatOnly === true) return false;
     if (canonicalPreferredTools.length === 0) return;
     const currentSet = new Set(normalizedAllowedToolNames);
     const canonicalSet = new Set(canonicalPreferredTools);
