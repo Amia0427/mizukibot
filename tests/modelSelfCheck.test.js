@@ -29,6 +29,7 @@ module.exports = (async () => {
       ADMIN_API_BASE_URL: 'https://admin.example/v1/chat/completions',
       ADMIN_API_KEY: 'admin-key',
       ADMIN_AI_MODEL: 'admin-model',
+      DIRECT_CHAT_PLANNER_ENABLED: 'true',
       PLAN_API_BASE_URL: 'https://plan.example/v1',
       PLAN_API_KEY: 'plan-key',
       PLAN_MODEL: 'plan-model',
@@ -157,6 +158,14 @@ module.exports = (async () => {
     const mirroredMainSelfCheck = require('../utils/modelSelfCheck');
     const mirroredSpecs = mirroredMainSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
     assert.strictEqual(mirroredSpecs.find((item) => item.type === 'passive_awareness_reply').body.__provider, 'openai_compatible');
+
+    process.env.DIRECT_CHAT_PLANNER_ENABLED = 'false';
+    clearProjectCache();
+    const plannerDisabledSelfCheck = require('../utils/modelSelfCheck');
+    const plannerDisabledSpecs = plannerDisabledSelfCheck.buildSelfCheckSpecs({ adminUserId: 'admin_1', normalUserId: 'user_1' });
+    assert.strictEqual(plannerDisabledSpecs.find((item) => item.type === 'plan').url, '');
+    assert.strictEqual(plannerDisabledSpecs.find((item) => item.type === 'plan').body, null);
+    process.env.DIRECT_CHAT_PLANNER_ENABLED = 'true';
 
     process.env.API_BASE_URL = 'https://main.example/v1/chat/completions';
     process.env.API_PROVIDER = 'openai_compatible';

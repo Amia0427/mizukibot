@@ -25,6 +25,7 @@ module.exports = (async () => {
       PLAN_API_BASE_URL: 'https://planner.example.test/v1',
       PLAN_API_KEY: 'planner-key',
       PLAN_MODEL: 'planner-model',
+      DIRECT_CHAT_PLANNER_ENABLED: 'true',
       PLANNER_REQUEST_TIMEOUT_MS: '15000',
       PLANNER_MAX_MODEL_CALLS: '2',
       PLANNER_SEMANTIC_REFINE_ENABLED: 'true',
@@ -66,6 +67,7 @@ module.exports = (async () => {
       allowedTools: ['web_search'],
       config: {
         MEMOS_MCP_ENABLED: false,
+        DIRECT_CHAT_PLANNER_ENABLED: true,
         PLANNER_MAX_MODEL_CALLS: 2,
         PLANNER_SEMANTIC_REFINE_ENABLED: true
       }
@@ -88,6 +90,65 @@ module.exports = (async () => {
     restoreEnv(snapshot);
     Object.assign(process.env, {
       BOT_TOOL_MODE: 'full',
+      DIRECT_CHAT_PLANNER_ENABLED: 'false',
+      PLAN_API_BASE_URL: 'https://planner.example.test/v1',
+      PLAN_API_KEY: 'planner-key',
+      PLAN_MODEL: 'planner-model',
+      PLANNER_REQUEST_TIMEOUT_MS: '15000',
+      PLANNER_MAX_MODEL_CALLS: '2',
+      PLANNER_SEMANTIC_REFINE_ENABLED: 'true',
+      PLANNER_SUBAGENT_ENABLED: '0',
+      MEMOS_MCP_ENABLED: 'false'
+    });
+    clearProjectCache();
+
+    const disabledHttpClient = require('../src/model/http');
+    const disabledCalls = [];
+    disabledHttpClient.postWithRetry = async (url, body, retries, apiKey) => {
+      disabledCalls.push({ url, body, retries, apiKey });
+      throw new Error('planner disabled should not call upstream');
+    };
+
+    const { planRequestV2: planRequestV2Disabled } = require('../api/runtimeV2/planning/service');
+    const disabledDecision = await planRequestV2Disabled({
+      question: '帮我规划一个复杂项目方案，包含阶段、风险和依赖',
+      cleanText: '帮我规划一个复杂项目方案，包含阶段、风险和依赖',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        chatMode: 'chat',
+        toolIntent: 'maybe_tools',
+        responseIntent: 'answer'
+      },
+      route: {
+        question: '帮我规划一个复杂项目方案，包含阶段、风险和依赖',
+        cleanText: '帮我规划一个复杂项目方案，包含阶段、风险和依赖',
+        topRouteType: 'direct_chat',
+        meta: {
+          chatMode: 'chat',
+          toolIntent: 'maybe_tools',
+          responseIntent: 'answer'
+        },
+        intent: {},
+        facets: {}
+      },
+      allowedTools: ['web_search'],
+      config: {
+        MEMOS_MCP_ENABLED: false,
+        DIRECT_CHAT_PLANNER_ENABLED: false,
+        PLANNER_MAX_MODEL_CALLS: 2,
+        PLANNER_SEMANTIC_REFINE_ENABLED: true
+      }
+    });
+
+    assert.strictEqual(disabledCalls.length, 0);
+    assert.strictEqual(disabledDecision.plannerMeta.fallbackUsed, false);
+    assert.strictEqual(disabledDecision.plannerMeta.decisionSource, 'rule_planner_disabled');
+    assert.strictEqual(disabledDecision.plannerMeta.plannerModel, 'planner-model');
+
+    restoreEnv(snapshot);
+    Object.assign(process.env, {
+      BOT_TOOL_MODE: 'full',
+      DIRECT_CHAT_PLANNER_ENABLED: 'true',
       API_BASE_URL: 'https://main.example.test/v1',
       API_KEY: 'main-key',
       AI_MODEL: 'main-model',
@@ -157,6 +218,7 @@ module.exports = (async () => {
       allowedTools: [],
       config: {
         MEMOS_MCP_ENABLED: false,
+        DIRECT_CHAT_PLANNER_ENABLED: true,
         PLANNER_MAX_MODEL_CALLS: 2,
         PLANNER_SEMANTIC_REFINE_ENABLED: true,
         PLANNER_ALLOW_MAIN_MODEL_FALLBACK: false

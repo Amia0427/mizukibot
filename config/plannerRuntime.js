@@ -1,5 +1,6 @@
 function buildPlannerRuntimeConfig({ pick, pickNum, pickBool }) {
   return {
+    DIRECT_CHAT_PLANNER_ENABLED: pickBool('DIRECT_CHAT_PLANNER_ENABLED', false),
     PLAN_API_BASE_URL: pick('PLAN_API_BASE_URL', pick('PLANNER_API_BASE_URL', pick('PLAN_API_BASEURI', pick('PLANNER_API_BASEURI', '')))),
     PLAN_API_KEY: pick('PLAN_API_KEY', pick('PLANNER_API_KEY', pick('PLAN_APIKEY', pick('PLANNER_APIKEY', '')))),
     PLAN_MODEL: pick('PLAN_MODEL', pick('PLANNER_MODEL', 'gpt-5.4-mini')),

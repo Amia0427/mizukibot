@@ -130,6 +130,15 @@ function isPlannerSemanticRefineEnabled(options = {}) {
   return config.PLANNER_SEMANTIC_REFINE_ENABLED !== false;
 }
 
+function isDirectChatPlannerEnabled(options = {}) {
+  const optionConfig = normalizeObject(options.config, {});
+  if (options.directChatPlannerEnabled === false || options.plannerEnabled === false) return false;
+  if (options.directChatPlannerEnabled === true || options.plannerEnabled === true) return true;
+  if (optionConfig.DIRECT_CHAT_PLANNER_ENABLED === false) return false;
+  if (optionConfig.DIRECT_CHAT_PLANNER_ENABLED === true) return true;
+  return config.DIRECT_CHAT_PLANNER_ENABLED === true;
+}
+
 function getPlannerSemanticConfidenceThreshold(options = {}) {
   const optionConfig = normalizeObject(options.config, {});
   const value = Number(
@@ -514,6 +523,8 @@ async function planRequestV2(input = {}) {
     personaMemoryState: normalizeObject(input.personaMemoryState, normalizeObject(route?.meta?.personaMemoryState, {})),
     userInfo: normalizeObject(input.userInfo, normalizeObject(route?.meta?.userInfo, {})),
     config: normalizeObject(input.config, {}),
+    directChatPlannerEnabled: input.directChatPlannerEnabled,
+    plannerEnabled: input.plannerEnabled,
     worldbookPlannerCandidateLimit: input.worldbookPlannerCandidateLimit,
     requestTrace: input.requestTrace || route?.meta?.requestTrace || null,
     question: route.question,
@@ -548,6 +559,26 @@ async function planRequestV2(input = {}) {
     });
     const normalizeStartedAt = nowMs();
     const normalized = normalizePlannerDecisionV2(preflightDecision, route, {
+      ...options,
+      fallbackUsed: false,
+      latencyMeta: requestLatencyMeta
+    });
+    addPlannerLatency(requestLatencyMeta, 'planner_normalize_ms', normalizeStartedAt);
+    return attachExternalRecallToPlannerDecision(
+      attachPlannerLatencyMeta(normalized, requestLatencyMeta),
+      options
+    );
+  }
+
+  if (!isDirectChatPlannerEnabled(options)) {
+    const disabledDecision = buildRuleBasedPlannerDecision(route, {
+      ...options,
+      fallbackUsed: false,
+      decisionSource: 'rule_planner_disabled',
+      latencyMeta: requestLatencyMeta
+    });
+    const normalizeStartedAt = nowMs();
+    const normalized = normalizePlannerDecisionV2(disabledDecision, route, {
       ...options,
       fallbackUsed: false,
       latencyMeta: requestLatencyMeta

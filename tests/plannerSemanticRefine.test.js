@@ -40,6 +40,7 @@ module.exports = (async () => {
       PLAN_API_BASE_URL: 'https://planner.example.test/v1',
       PLAN_API_KEY: 'planner-key',
       PLAN_MODEL: 'planner-model',
+      DIRECT_CHAT_PLANNER_ENABLED: 'true',
       PLANNER_MAX_MODEL_CALLS: '2',
       PLANNER_SEMANTIC_REFINE_ENABLED: 'true',
       PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD: '0.72',
@@ -145,6 +146,7 @@ module.exports = (async () => {
       allowedTools: ['web_search', 'web_fetch'],
       config: {
         MEMOS_MCP_ENABLED: false,
+        DIRECT_CHAT_PLANNER_ENABLED: true,
         PLANNER_MAX_MODEL_CALLS: 2,
         PLANNER_SEMANTIC_REFINE_ENABLED: true,
         PLANNER_SEMANTIC_CONFIDENCE_THRESHOLD: 0.72

@@ -5,6 +5,7 @@ const {
   getApiKey,
   getModelName
 } = require('../../api/runtimeV2/model/shared');
+const config = require('../../config');
 const { resolveUserScopedMainModelConfig } = require('../mainModelConfigResolver');
 const {
   getEmbeddingApiBaseUrl,
@@ -128,13 +129,21 @@ function buildSelfCheckSpecs(options = {}) {
   const passiveReplyProvider = getPassiveAwarenessReplyApiProvider();
 
   return [
-    {
-      type: 'plan',
-      model: planModel,
-      url: ensureChatCompletionsUrl(getPlannerApiBaseUrl()),
-      apiKey: getPlannerApiKey(),
-      body: buildChatBody(planModel, 'plan', timeoutMs)
-    },
+    config.DIRECT_CHAT_PLANNER_ENABLED === true
+      ? {
+          type: 'plan',
+          model: planModel,
+          url: ensureChatCompletionsUrl(getPlannerApiBaseUrl()),
+          apiKey: getPlannerApiKey(),
+          body: buildChatBody(planModel, 'plan', timeoutMs)
+        }
+      : {
+          type: 'plan',
+          model: planModel,
+          url: '',
+          apiKey: '',
+          body: null
+        },
     isEmbeddingConfigured()
       ? {
           type: 'embedding',
