@@ -647,6 +647,30 @@
         "include_in_system_prompt": false
       },
       {
+        "id": "persona_module_embodied_emotion",
+        "path": "persona_modules/embodied_emotion.txt",
+        "required": false,
+        "kind": "persona_module",
+        "stage": "main",
+        "authority": "persona_module",
+        "priority": 615,
+        "budget_tokens": 350,
+        "conflict_tags": [],
+        "include_in_system_prompt": false
+      },
+      {
+        "id": "persona_module_dialogue_fragments",
+        "path": "persona_modules/dialogue_fragments.txt",
+        "required": false,
+        "kind": "persona_module",
+        "stage": "main",
+        "authority": "persona_module",
+        "priority": 616,
+        "budget_tokens": 320,
+        "conflict_tags": [],
+        "include_in_system_prompt": false
+      },
+      {
         "id": "runtime_tool_guidance",
         "path": "runtime/tool-guidance.txt",
         "required": false,
