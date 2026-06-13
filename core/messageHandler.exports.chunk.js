@@ -16,6 +16,5 @@ module.exports = {
   resolveVisualInputFromContinuousMetaCore,
   getNaturalSplitIndex,
   shouldSendScheduledGreeting,
-  shouldUseToolRoute,
-  markSafetyRestrictionEmojiAfterReply
+  shouldUseToolRoute
 };
