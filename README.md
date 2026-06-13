@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 21:05 +08:00**：补齐 `prompts/defaut.txt` 注入边界回归。`tests/adminStableSystemPrompt.test.js` 覆盖普通用户主回复实际注入、管理员私聊/群聊不注入、空 `defaut.txt` 跳过，以及 `root_system_prompt -> normal_user_default_prompt -> security_contract -> core_baseline_patch -> main_persona_system` 稳定块顺序；`tests/passiveAwarenessReplySystemPrompt.test.js` 覆盖普通用户被动群感知回复注入、管理员 sender 不注入和空文件跳过。修复稳定 prompt cache audience 维度，避免普通用户 stable block 被管理员群聊复用。验收：`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/promptCompiler.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`npm run check:prompts`、`node -e "require('./api/runtimeV2/context/service')"`、`node -e "require('./core/passiveGroupAwareness')"` 均通过。补充：`tests/runtimeV2SessionPromptCacheStability.test.js` / `tests/runtimeV2PromptOptimization.test.js` 本机超时未作为验收依据；`tests/promptGoldenSnapshots.test.js` 在 worldbook no-planner 既有分支断言失败，未改动相关逻辑。小目标完成：普通用户 defaut 注入边界有可复跑回归，且不覆盖现有 prompt 内容改动。
+
 **2026-06-13 20:00 +08:00**：planner 超时收敛到 15 秒并降级普通对话。`PLANNER_REQUEST_TIMEOUT_MS` 默认值和本地 `.env` 均改为 `15000`，配置解析会把更大的值封顶到 15 秒；远程 planner 模型请求失败或超时后强制返回 `chat_only/fast_reply`，不再用规则 fallback 继续生成工具计划，RuntimeV2 会走普通 `direct_reply` 主对话链路。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。小目标完成：planner 15 秒无响应自动断开并降级到普通对话链路。
 
 **2026-06-13 20:10 +08:00**：放宽普通用户内容限制，只保留核心边界。`prompts/defaut.txt` 调整为：政治话题（严格限制）、性别隐私（保护秘密）、极端话题（适度避开）。移除 NSFW 和恋爱关系的过度限制，标题改为"话题边界"，语气从"严格禁止"改为"需要注意"，给予角色更自然的表达空间。验收：`npm run check:prompts` 通过。小目标完成：内容安全与角色自然表达平衡。
