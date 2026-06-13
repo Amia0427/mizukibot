@@ -24,6 +24,9 @@ const { buildReplyStylePolicy } = require('../../../utils/memory');
 const { getRecentResearchBriefs } = require('../../../utils/sessionResearchCache');
 const { buildDynamicFewShotPrompt } = require('../../../utils/fewShotPrompts');
 const {
+  recallFewShotExamples
+} = require('../../../utils/localPromptRecall');
+const {
   filterAllowedToolsForMemoryCliTurn,
   buildMemoryCliFollowupInstruction
 } = require('../../../utils/memoryCliTurnPolicy');

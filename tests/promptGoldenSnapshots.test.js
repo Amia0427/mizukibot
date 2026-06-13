@@ -13,6 +13,10 @@ const {
   buildReviewStageSystemPrompt
 } = require('../utils/stagePromptContracts');
 const { buildPromptSnapshot } = require('../utils/promptCompiler');
+const {
+  ensureWorldbookSqlImported,
+  loadPersonaModuleCatalog
+} = require('../utils/personaModules');
 
 function countOccurrences(text = '', needle = '') {
   if (!needle) return 0;
@@ -43,6 +47,7 @@ function assertGeminiPromptDoesNotPushSamplingDegeneration(text = '') {
 }
 
 module.exports = (async () => {
+  ensureWorldbookSqlImported(loadPersonaModuleCatalog(), { force: true });
   const main = await buildDynamicPrompt(
     { level: 'friend', points: 12 },
     'u_prompt_golden',
@@ -649,6 +654,27 @@ module.exports = (async () => {
     assert.ok(worldbookPlannerPrompt.promptSegments.systemPrompt.some((message) => String(message.content || '').includes('服饰专门学校')));
   }
   assert.ok(Number(worldbookPlannerPrompt.latencyMeta?.prompt_assembly_ms) >= 0);
+
+  const worldbookNoPlannerPrompt = await buildDynamicPrompt(
+    { level: 'friend', points: 18 },
+    'u_prompt_worldbook_no_planner_future_two_tracks',
+    '瑞希未来两个都不放弃是什么意思',
+    null,
+    {
+      routePolicyKey: 'chat/worldbook_future_two_tracks',
+      topRouteType: 'direct_chat',
+      sessionKey: 'worldbook_future_two_tracks_no_planner_prompt_test',
+      routeMeta: {},
+      worldbookEmbeddingHotPath: false,
+      worldbookSemanticLimit: 0
+    }
+  );
+
+  if (!worldbookNoPlannerPrompt.latencyMeta?.optionalBudgetExceeded) {
+    assert.ok(worldbookNoPlannerPrompt.promptSnapshot.activatedPersonaModules.includes('wb_mizuki_future_two_tracks'));
+    assert.ok(worldbookNoPlannerPrompt.promptSnapshot.assembledBlocks.some((item) => item.meta?.moduleId === 'wb_mizuki_future_two_tracks'));
+    assert.ok(worldbookNoPlannerPrompt.promptSegments.systemPrompt.some((message) => String(message.content || '').includes('两个都想继续')));
+  }
 
   const geminiPromptFile = path.join(__dirname, '..', 'prompts', 'GEMINI.txt');
   const previousGeminiSystemPromptPath = process.env.GEMINI_SYSTEM_PROMPT_PATH;

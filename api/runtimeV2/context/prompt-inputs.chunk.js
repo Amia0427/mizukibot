@@ -162,8 +162,22 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     forceDynamicFewShot: options.forceDynamicFewShot === true || routeMeta.forceDynamicFewShot === true,
     dynamicFewShotEnabled: options.dynamicFewShotEnabled === true || routeMeta.dynamicFewShotEnabled === true
   };
+  let localFewShotRecall = { ok: false, examples: [] };
+  if (shouldBuildDynamicFewShot(dynamicFewShotContext)) {
+    try {
+      localFewShotRecall = await recallFewShotExamples(dynamicFewShotContext, {
+        limit: Math.max(1, Number(dynamicFewShotContext.maxExamples || 2) || 2)
+      });
+    } catch (error) {
+      localFewShotRecall = { ok: false, reason: 'local_prompt_recall_failed', error: String(error?.message || error), examples: [] };
+    }
+  }
   const dynamicFewShotPrompt = shouldBuildDynamicFewShot(dynamicFewShotContext)
-    ? buildDynamicFewShotPrompt(dynamicFewShotContext)
+    ? buildDynamicFewShotPrompt({
+      ...dynamicFewShotContext,
+      localPromptRecallExamples: localFewShotRecall.examples,
+      localPromptRecall: localFewShotRecall
+    })
     : '';
   return {
     userInfo,
@@ -190,6 +204,7 @@ async function collectPromptInputs(userInfo, userId, question, customPrompt = nu
     dynamicPromptPlan,
     summaryText,
     dynamicFewShotPrompt,
+    localFewShotRecall,
     candidatePruning: personaModuleCandidates.candidatePruning || {}
   };
 }

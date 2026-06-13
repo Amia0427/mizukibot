@@ -5,6 +5,10 @@ const {
   normalizeText,
   clampText
 } = require('../memory-v3/helpers');
+const {
+  isPrimaryReadEnabled,
+  listActiveEntries
+} = require('../worldbookDb');
 
 const DEFAULT_DOC_MAX_CHARS = 1200;
 const WORLD_BOOK_PREFIX = 'persona_worldbook/';
@@ -88,7 +92,38 @@ function buildWorldbookSearchText(item = {}) {
   ].filter(Boolean).join('\n'), DEFAULT_DOC_MAX_CHARS);
 }
 
-function buildWorldbookDocuments(catalog = { modules: [] }) {
+function shouldReadWorldbookFromSql(options = {}) {
+  if (options.sqlPrimaryRead === false || options.useSqlPrimaryRead === false) return false;
+  return isPrimaryReadEnabled();
+}
+
+function buildSqlWorldbookDocuments(catalog = { modules: [] }) {
+  const catalogIds = new Set(getWorldbookModules(catalog).map((item) => item.id).filter(Boolean));
+  return listActiveEntries()
+    .filter((entry) => catalogIds.size === 0 || catalogIds.has(entry.moduleId || entry.id))
+    .map((entry) => ({
+      ...entry,
+      id: entry.moduleId || entry.id,
+      moduleId: entry.moduleId || entry.id,
+      path: entry.path || entry.sourcePath,
+      text: clampText(entry.text || [
+        entry.moduleId || entry.id,
+        entry.purpose,
+        normalizeArray(entry.triggerHints).join(' '),
+        path.basename(normalizeText(entry.sourcePath || entry.path)),
+        entry.body
+      ].filter(Boolean).join('\n'), DEFAULT_DOC_MAX_CHARS),
+      filePath: entry.filePath || (entry.sourcePath ? path.join(config.PROMPTS_DIR, ...entry.sourcePath.split('/')) : ''),
+      fileMtimeMs: Number(entry.updatedAt || entry.fileMtimeMs || 0) || 0,
+      fileSize: Number(entry.fileSize || Buffer.byteLength(entry.body || '', 'utf8')) || 0
+    }))
+    .filter((entry) => entry.moduleId && entry.text);
+}
+
+function buildWorldbookDocuments(catalog = { modules: [] }, options = {}) {
+  if (shouldReadWorldbookFromSql(options)) {
+    return buildSqlWorldbookDocuments(catalog);
+  }
   return getWorldbookModules(catalog)
     .map((item) => {
       const filePath = getModuleFilePath(item);
@@ -109,6 +144,8 @@ module.exports = {
   DEFAULT_DOC_MAX_CHARS,
   WORLD_BOOK_PREFIX,
   buildWorldbookDocuments,
+  buildSqlWorldbookDocuments,
   getWorldbookModules,
-  isWorldbookModule
+  isWorldbookModule,
+  shouldReadWorldbookFromSql
 };

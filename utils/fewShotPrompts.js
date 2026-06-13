@@ -1,6 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
+const {
+  recallFewShotExamplesSync
+} = require('./localPromptRecall');
 
 const FEW_SHOT_INDEX_PATH = path.join(config.PROMPTS_DIR, 'persona', '05_examples.index.json');
 const FEW_SHOT_EXAMPLES_PATH = path.join(config.PROMPTS_DIR, 'persona', '05_examples.txt');
@@ -36,6 +39,10 @@ function normalizeStringList(value = []) {
   return Array.isArray(value)
     ? value.map((item) => normalizeText(item).toLowerCase()).filter(Boolean)
     : [];
+}
+
+function normalizeArray(value = []) {
+  return Array.isArray(value) ? value : [];
 }
 
 function compileRegexList(value = []) {
@@ -276,6 +283,20 @@ function selectDynamicFewShotExamples(context = {}) {
   const index = loadFewShotIndex();
   const maxExamples = resolveFewShotMaxExamples(context, index);
   if (maxExamples <= 0) return [];
+
+  const providedLocalExamples = normalizeArray(context.localPromptRecallExamples)
+    .filter((example) => normalizeText(example?.user) && normalizeText(example?.assistant))
+    .slice(0, maxExamples);
+  if (providedLocalExamples.length > 0) return providedLocalExamples;
+
+  if (config.LOCAL_PROMPT_RECALL_ENABLED !== false && context.disableLocalPromptRecall !== true) {
+    try {
+      const localRecall = recallFewShotExamplesSync(context, { limit: maxExamples });
+      if (localRecall.ok && normalizeArray(localRecall.examples).length > 0) {
+        return localRecall.examples.slice(0, maxExamples);
+      }
+    } catch (_) {}
+  }
 
   const preferredExampleIds = normalizeStringList(context.preferredExampleIds);
   const activeWorldbookIds = normalizeStringList(context.activeWorldbookIds);

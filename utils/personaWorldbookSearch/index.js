@@ -23,6 +23,9 @@ const {
   withSoftTimeout
 } = require('./rerank');
 const {
+  searchWorldbookEntries
+} = require('../worldbookDb');
+const {
   searchLanceDbWithHelper,
   shouldUseLanceDbHelper
 } = require('../lancedbMemoryStore/helperClient');
@@ -89,7 +92,23 @@ function searchPersonaWorldbookLexical(catalog = { modules: [] }, query = '', op
     : Number(config.PERSONA_WORLDBOOK_LEXICAL_LIMIT || 24);
   const limit = Math.max(0, Math.floor(Number.isFinite(rawLimit) ? rawLimit : 24));
   if (limit <= 0) return [];
-  const docs = buildWorldbookDocuments(catalog);
+  if (config.PERSONA_WORLDBOOK_DB_PRIMARY_READ !== false && options.sqlPrimaryRead !== false) {
+    const sqlResult = searchWorldbookEntries(query, {
+      limit,
+      slotLimit: options.slotLimit,
+      enforceConflicts: options.enforceConflicts
+    });
+    const results = normalizeArray(sqlResult.results)
+      .map((doc) => normalizeCandidate(doc, Number(doc.score || 0) || 0, doc.matchMode || 'sqlite_fts', doc.reason || 'SQLite worldbook match'))
+      .filter((item) => item.score > 0.01)
+      .sort((a, b) => Number(b.score || 0) - Number(a.score || 0) || Number(a.priority || 0) - Number(b.priority || 0))
+      .slice(0, limit);
+    results.diagnostics = sqlResult.diagnostics || {};
+    return results;
+  }
+  const docs = buildWorldbookDocuments(catalog, {
+    sqlPrimaryRead: options.sqlPrimaryRead
+  });
   return docs
     .map((doc) => normalizeCandidate(doc, lexicalScore(query, doc), 'lexical', 'lexical worldbook match'))
     .filter((item) => item.score > 0.01)
@@ -158,7 +177,9 @@ async function searchPersonaWorldbookSemantic(catalog = { modules: [] }, query =
     diagnostics.fallbackReason = 'query_embedding_failed';
     return { results: [], diagnostics };
   }
-  const docsByModuleId = new Map(buildWorldbookDocuments(catalog).map((doc) => [doc.moduleId, doc]));
+  const docsByModuleId = new Map(buildWorldbookDocuments(catalog, {
+    sqlPrimaryRead: options.sqlPrimaryRead
+  }).map((doc) => [doc.moduleId, doc]));
   if (diagnostics.lancedb.enabled) {
     const cachedDisable = getWorldbookLanceDbDisableState(queryEmbedding, options);
     if (cachedDisable?.lancedbDisabledReason === 'dimension_mismatch') {
@@ -254,6 +275,13 @@ async function searchPersonaWorldbook(catalog = { modules: [] }, input = {}) {
   const diagnostics = {
     enabled: config.PERSONA_WORLDBOOK_SEARCH_ENABLED !== false,
     lexicalCandidates: 0,
+    sql: {
+      source: 'sqlite',
+      primaryRead: config.PERSONA_WORLDBOOK_DB_PRIMARY_READ !== false,
+      ftsAvailable: false,
+      ftsCandidates: 0,
+      lexicalCandidates: 0
+    },
     selected: 0,
     embedding: {
       enabled: false,
@@ -281,10 +309,15 @@ async function searchPersonaWorldbook(catalog = { modules: [] }, input = {}) {
 
   const lexicalStartedAt = nowMs();
   const lexical = searchPersonaWorldbookLexical(catalog, query, {
-    limit: input.lexicalLimit
+    limit: input.lexicalLimit,
+    sqlPrimaryRead: input.sqlPrimaryRead
   });
   diagnostics.latency.worldbook_lexical_ms = elapsedMs(lexicalStartedAt);
   diagnostics.lexicalCandidates = lexical.length;
+  diagnostics.sql = {
+    ...diagnostics.sql,
+    ...(lexical.diagnostics || {})
+  };
 
   const semanticStartedAt = nowMs();
   const semanticResult = await withSoftTimeout(

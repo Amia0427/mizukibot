@@ -618,6 +618,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     hasMemoryCliInstruction: shouldExposeMemoryCli({ ...options, customPrompt }),
     mainReplyPromptMode
   });
+  const selectedPersonaModuleIds = personaModuleDecision.selected
+    .map((item) => normalizeText(item?.id))
+    .filter(Boolean);
   const useHeuristicBasePlan = dynamicPromptPlan.plannerProvided !== true;
   const effectiveBaseDynamicPromptPlan = {
     ...cloneDynamicPromptPlan(useHeuristicBasePlan ? defaultDynamicPromptPlan : dynamicPromptPlan),
@@ -627,9 +630,11 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
         ? normalizeArray(defaultDynamicPromptPlan.enabledBlockIds)
         : normalizeArray(dynamicPromptPlan.enabledBlockIds)
     )),
-    personaModules: normalizeArray(dynamicPromptPlan.personaModules).length > 0
-      ? dynamicPromptPlan.personaModules
-      : defaultDynamicPromptPlan.personaModules,
+    personaModules: selectedPersonaModuleIds.length > 0
+      ? selectedPersonaModuleIds
+      : (normalizeArray(dynamicPromptPlan.personaModules).length > 0
+        ? dynamicPromptPlan.personaModules
+        : defaultDynamicPromptPlan.personaModules),
     rationaleByBlock: {
       ...(useHeuristicBasePlan ? (defaultDynamicPromptPlan.rationaleByBlock || {}) : {}),
       ...(dynamicPromptPlan.rationaleByBlock || {})
