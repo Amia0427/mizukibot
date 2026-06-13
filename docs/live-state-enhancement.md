@@ -3,7 +3,7 @@
 ## 文档版本
 - 创建时间：2026-06-13
 - 版本：v1.0
-- 状态：待开发
+- 状态：已完成（2026-06-14 00:42 +08:00）
 
 ## 一、项目目标
 
@@ -14,6 +14,15 @@
 2. 只补充动态状态，不覆盖现有设定
 3. 失败时不阻断主流程
 4. Token 预算控制在 800 以内
+
+### 2026-06-14 00:42 +08:00 实际落地记录
+
+- 执行前查重结论：现有 `roleplay_runtime_context`、`chat_liveness_discipline`、`relationship_state`、`daily_journal` 已覆盖部分活人感、关系距离和近期上下文，但没有独立 `live_state_dynamic` 运行时动态块，也没有当前活动 + 关系边界 + 最近摘要 + 反 AI 规则的确定性 800 token 封顶组合。
+- 已实现：`utils/liveState/*`、`api/runtimeV2/nodes/enhanceLiveState.js`、`prompts/runtime/live_state_rules.txt`、Runtime V2 拓扑 `prepare -> enhance_live_state -> route`、主动态 prompt/compact fallback/`chat/default` 快路径注入 `live_state_dynamic`。
+- 架构适配：本仓库当前是 CommonJS 与 chunked Runtime V2 prompt 架构，未新增草案中的 ESM `api/runtimeV2/context/liveStateEnhancer.js`；实际公共入口为 `utils/liveState/index.js`，prompt block 创建在 `api/runtimeV2/context/service-core.chunk.js`。
+- 数据适配：当前 `utils/memory-v3` 没有通用 `queryProjection` 导出；实现支持测试/未来注入的 `memoryV3.queryProjection('relationship')`，不存在时回退 legacy relationship/profile affinity。Daily Journal 优先 `queryRecent`，再回退 `collectRecentEntrySidecars` / `getRecentDailySummaries`。
+- 提示词文件适配：未新增 `anti_generic_ai.txt`；反 AI 核心规则在 `utils/liveState/antiAIRules.js` 内固定，manifest 只注册 `live_state_rules.txt` 作为未来配置化资源。
+- 验收结果：生活状态探针 `tokens=465 durationMs=16 has=true relationship=stranger`；轻量注入探针确认 `live_state_dynamic` 被选中，该块 token=63。相关测试与静态检查见本文“开发完成记录”。
 
 ---
 
@@ -1635,11 +1644,22 @@ export function getCurrentActivity() {
 **开发完成后，请在此处记录完成日期和实际遇到的问题**：
 
 ---
-完成日期：_____________
+完成日期：2026-06-14 00:42 +08:00
 
 遇到的问题及解决方案：
-1. 
-2. 
-3. 
+1. 重复功能检查：`roleplay_runtime_context`、`chat_liveness_discipline`、`relationship_state`、`daily_journal` 已覆盖部分活人感/关系/近况，但没有独立 `live_state_dynamic` 块。解决：只补最小缺口，不改 persona 文件，不替换既有记忆块。
+2. Memory V3 草案接口差异：当前仓库没有通用 `queryProjection` 导出。解决：支持可注入 `memoryV3.queryProjection('relationship')`，否则回退 legacy relationship/profile affinity；若投影显式为空则使用陌生人默认边界。
+3. Runtime V2 架构差异：主回复 prompt 在 `prepare` 内构建，若只在 `enhance_live_state` 节点生成会错过 prompt 注入。解决：`prepare` 先软超时构建 live state 并传入 prompt，`enhance_live_state` 节点负责确认/补建图状态。
+4. Token 裁剪：超 800 token 时优先保留 `【重要：真人反应约束】` 与 `【与这个用户的关系】`，再保留活动/最近摘要/场景规则。回归断言已覆盖核心规则和关系边界不会被裁没。
+
+验收结果：
+- `node scripts/run-tests.js liveState.test.js liveStatePromptIntegration.test.js prepareLiveStateInjection.test.js langgraphV2.test.js` 通过。
+- `npm run check:prompts`、`npm run check:agent:static` 通过。
+- `node scripts/run-tests.js promptGoldenSnapshots.test.js` 通过。
+- `node scripts/run-tests.js promptCompiler.test.js mainReplyPromptAssemblyDiagnostics.test.js mainReplyTokenBudgetCaps.test.js` 通过。
+- `node scripts/run-tests.js runtimeV2MainReplyMemoryOrder.test.js runtimeV2PromptTimeoutMemoryFallback.test.js` 通过。
+- 生活状态性能探针：`tokens=465 durationMs=16 has=true relationship=stranger`。
+- Prompt 注入探针：`live_state_dynamic` 被选中，该块 token=63。
+- 未作为验收：`npm test` 本机 5 分钟超时；完整 `buildDynamicPrompt` 探针 60s 超时；`runtimeV2PromptOptimization.test.js` 单测 120s/180s 超时。
 
 ---

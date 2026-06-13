@@ -24,6 +24,9 @@
         }
       }));
     }
+    if (liveStateContextText) {
+      compactPromptBlocks.push(createLiveStatePromptBlock(liveStateContextText));
+    }
     const compactSelectedBlocks = filterBlocksByPlan(compactPromptBlocks, effectiveBaseDynamicPromptPlan, {
       requiredIds: [],
       runtimeAddedIds: baseRuntimeAddedIds,

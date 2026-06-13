@@ -156,6 +156,9 @@ function createPrepareNode(deps = {}) {
     ? deps.saveAndEmit
     : ((state) => state);
   const config = deps.config || {};
+  const buildLiveStateForState = typeof deps.buildLiveStateForState === 'function'
+    ? deps.buildLiveStateForState
+    : require('../../../utils/liveState').buildLiveStateForState;
   const chatHistory = deps.chatHistory;
   const shortTermMemory = deps.shortTermMemory;
   const runtimeOptions = normalizeObject(deps.runtimeOptions, {});
@@ -764,10 +767,25 @@ function createPrepareNode(deps = {}) {
   }
 
   function buildLightDirectFastPromptArtifacts(state = {}, request = {}, fastPath = 'plain_private_chat') {
+    const liveStateContext = String(request.liveStateContext || '').trim();
+    const dynamicContextBlocks = [];
+    appendUniquePromptBlock(dynamicContextBlocks, createFallbackPromptBlock(
+      'live_state_dynamic',
+      'Live State Dynamic',
+      liveStateContext,
+      {
+        priority: 500,
+        authority: 'runtime_dynamic',
+        kind: 'runtime_context',
+        source: 'live_state',
+        budgetTokens: 800,
+        meta: { blockId: 'live_state_dynamic' }
+      }
+    ));
     return buildGuardedPromptArtifacts({
       dynamicPrompt: String(state.memory?.dynamicPrompt || ''),
       stableSystemBlocks: normalizeArray(state.memory?.stableSystemBlocks),
-      dynamicContextBlocks: [],
+      dynamicContextBlocks,
       assistantOnlyContextBlocks: [],
       affinity: state.memory?.affinity || null,
       memoryContext: null,
@@ -942,9 +960,40 @@ function createPrepareNode(deps = {}) {
       routePolicyKey: request.routePolicyKey,
       topRouteType: request.topRouteType
     });
+    const liveStateBuild = String(request.customPrompt || '').trim()
+      ? { skipped: true, reason: 'custom_prompt', context: '' }
+      : await withSoftTimeout(
+          () => buildLiveStateForState({
+            ...state,
+            request: {
+              ...request,
+              allowedTools: executionAllowedTools
+            },
+            execution: {
+              ...state.execution,
+              memoryCliTurn: executionMemoryCliTurn
+            }
+          }),
+          180,
+          { skipped: true, reason: 'soft_timeout', context: '' }
+        );
+    const liveStateContext = String(liveStateBuild?.context || '').trim();
+    const requestForPromptBuild = liveStateContext
+      ? {
+          ...request,
+          allowedTools: executionAllowedTools,
+          liveStateContext,
+          liveStateMeta: {
+            relationship: liveStateBuild.relationship?.level || 'stranger',
+            tokens: Number(liveStateBuild.tokens || 0) || 0,
+            durationMs: Number(liveStateBuild.durationMs || 0) || 0,
+            truncated: Boolean(liveStateBuild.truncated)
+          }
+        }
+      : request;
 
     const promptBuildResult = lightDirectFastPath
-      ? buildLightDirectFastPromptArtifacts(state, request, prepareFastPath)
+      ? buildLightDirectFastPromptArtifacts(state, requestForPromptBuild, prepareFastPath)
       : await withSoftTimeout(
           () => buildDynamicPromptImpl(
             request.userInfo,
@@ -952,6 +1001,8 @@ function createPrepareNode(deps = {}) {
             requestQuestionText,
             request.customPrompt,
             {
+              request: requestForPromptBuild,
+              liveStateContext,
               routePrompt: request.routePrompt,
               routePolicyKey: request.routePolicyKey,
               topRouteType: request.topRouteType,
@@ -1043,7 +1094,11 @@ function createPrepareNode(deps = {}) {
       request: {
         ...normalizeObject(restoredState.request, {}),
         ...state.request,
-        allowedTools: executionAllowedTools
+        allowedTools: executionAllowedTools,
+        ...(liveStateContext ? {
+          liveStateContext,
+          liveStateMeta: requestForPromptBuild.liveStateMeta
+        } : {})
       },
       memory: {
         ...normalizeObject(restoredState.memory, state.memory),
@@ -1080,7 +1135,11 @@ function createPrepareNode(deps = {}) {
       request: {
         ...normalizeObject(restoredState.request, {}),
         ...state.request,
-        allowedTools: executionAllowedTools
+        allowedTools: executionAllowedTools,
+        ...(liveStateContext ? {
+          liveStateContext,
+          liveStateMeta: requestForPromptBuild.liveStateMeta
+        } : {})
       },
       thread: {
         ...normalizeObject(restoredState.thread, state.thread),
@@ -1123,6 +1182,9 @@ function createPrepareNode(deps = {}) {
             : null,
           hasSufficientEvidence: continuityBuilt.hasSufficientEvidence
         },
+        liveStateContext,
+        liveStateInjected: Boolean(liveStateContext),
+        liveStateMeta: requestForPromptBuild.liveStateMeta || null,
         preparedMainConversationContext: preparedMainConversationContext || null,
         mainConversationMessages: normalizeArray(preparedMainConversationContext?.messages),
         assistantOnlyContextMessagesPrepared: normalizeArray(preparedMainConversationContext?.assistantOnlyContextMessages),
@@ -1195,6 +1257,15 @@ function createPrepareNode(deps = {}) {
         node: 'prepare',
         hasText: Boolean(String(continuityBuilt.text || '').trim()),
         sourceFlags: normalizeArray(continuityBuilt.payload?.source_flags)
+      }),
+      createEvent('live_state_prepared', {
+        node: 'prepare',
+        skipped: Boolean(liveStateBuild?.skipped),
+        reason: String(liveStateBuild?.reason || '').trim(),
+        hasContext: Boolean(liveStateContext),
+        relationship: liveStateBuild?.relationship?.level || '',
+        tokens: Number(liveStateBuild?.tokens || 0) || 0,
+        durationMs: Number(liveStateBuild?.durationMs || 0) || 0
       }),
       createEvent('effectiveAllowedTools', {
         node: 'prepare',

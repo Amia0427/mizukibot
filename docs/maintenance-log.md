@@ -1,3 +1,14 @@
+## 运行维护 2026-06-14 00:42
+
+- 小目标：按 `docs/live-state-enhancement.md` 落地动态生活状态系统，执行前先确认是否已有重复功能。
+- 查重结论：已有 `roleplay_runtime_context`、`chat_liveness_discipline`、`relationship_state`、`daily_journal` 能提供部分活人感、关系距离和近况材料，但没有独立 `live_state_dynamic` 运行时动态块，也没有 800 token 硬封顶和反 AI/关系边界/当前活动的确定性组合。
+- 最小实现：新增 `utils/liveState/*`、`api/runtimeV2/nodes/enhanceLiveState.js` 和 `prompts/runtime/live_state_rules.txt`；Runtime V2 拓扑改为 `prepare -> enhance_live_state -> route`；由于主回复 prompt 在 `prepare` 内构建，`prepare` 会先软超时构建 live state 并传入动态 prompt，`enhance_live_state` 节点负责确认/补建且不重复查询。
+- 兼容说明：当前仓库为 CommonJS/chunked prompt 架构，未新增文档草案中的 ESM `api/runtimeV2/context/liveStateEnhancer.js`；Memory V3 当前没有通用 `queryProjection` 导出，先使用可注入 `memoryV3.queryProjection`，不存在时回退 legacy relationship/Profile Journal/Daily Journal 读法。
+- 验证：`node scripts/run-tests.js liveState.test.js liveStatePromptIntegration.test.js prepareLiveStateInjection.test.js langgraphV2.test.js`、`npm run check:prompts`、`npm run check:agent:static`、`node scripts/run-tests.js promptGoldenSnapshots.test.js`、`node scripts/run-tests.js promptCompiler.test.js mainReplyPromptAssemblyDiagnostics.test.js mainReplyTokenBudgetCaps.test.js`、`node scripts/run-tests.js runtimeV2MainReplyMemoryOrder.test.js runtimeV2PromptTimeoutMemoryFallback.test.js` 通过。
+- 性能/注入验收：生活状态探针输出 `tokens=465 durationMs=16 has=true relationship=stranger`；轻量注入探针确认 `live_state_dynamic` 被选中，该块 token=63。
+- 未作为验收：`npm test` 本机 5 分钟超时；完整 `buildDynamicPrompt` 探针 60s 超时；`runtimeV2PromptOptimization.test.js` 单测 120s/180s 超时，未发现断言失败但不标记通过。
+- 小目标已完成：动态生活状态进入普通主回复和 `chat/default` 快路径，失败不阻断主流程，未修改 persona 文件。
+
 ## 运行维护 2026-06-13 23:03
 
 - 小目标：把 QQ thinking emoji 默认编号切换到 `355`。

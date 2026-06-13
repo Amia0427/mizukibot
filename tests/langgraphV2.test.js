@@ -8,6 +8,7 @@ const {
 module.exports = (() => {
   assert.deepStrictEqual(LANGGRAPH_V2_TOPOLOGY.nodes, [
     'prepare',
+    'enhance_live_state',
     'route',
     'direct_reply',
     'planner',
@@ -21,7 +22,8 @@ module.exports = (() => {
   ]);
   assert.strictEqual(LANGGRAPH_V2_TOPOLOGY.entryPoint, 'prepare');
   assert.deepStrictEqual(LANGGRAPH_V2_TOPOLOGY.edges, [
-    { from: 'prepare', to: 'route' },
+    { from: 'prepare', to: 'enhance_live_state' },
+    { from: 'enhance_live_state', to: 'route' },
     { from: 'planner', to: 'dispatch' },
     { from: 'dispatch', to: 'validate' },
     { from: 'humanize', to: 'final_validate' },
