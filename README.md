@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 15:27 +08:00**：完成仓库组成轻量审计与低风险整理。根目录两个无运行引用的角色提示词资料移入 `docs/reference/roleplay-prompts/`，新增 `docs/repository-structure.md` 作为后续代理判断代码、运行数据、参考资料和 artifacts 边界的入口；`.gitignore` 补充本地 Gemini 诊断导出和未来 prompt `.bak` 草稿规则。未删除文件，候选清单见 `docs/repo-cleanup.md`。小目标完成：仓库顶层更可读，临时诊断文件不再污染状态区。
+
 **2026-06-13 18:41 +08:00**：强化管理员破限与角色顺从协议。`prompts/admin.txt` 新增 Character Compliance Override 明确禁止角色硬拒绝话术（不要/住手/放开我/你够了），区分可接受的羞涩与硬拒绝。管理员模型切换为 `claude-opus-4-6-thinking` 以测试扩展思考变体对破限的接受度。小目标完成：角色层加固，待真实对话验证破限有效性。
 
 **2026-06-13 09:03 +08:00**：完成 Gemini 真实问题优化 4/5。新增 `gemini_recent_style_guard`，主回复持久化后只记录 Gemini 回复的起手、尾音和固定短语派生信号，下一轮普通 Gemini prompt 会动态避开最近重复的 `诶——/呜哇/呢/喔/犯规/小彩蛋` 等口吻锚点；同时收紧 `admin_only` prompt 编译条件，`includeConditionalBlocks` 不再绕过管理员隔离，管理员稳定系统提示词只进入显式 admin 或管理员私聊主回复。小目标完成：Gemini 口癖复发可在真实对话后自动降频，管理员破限/anti-refusal 文案不再误入普通 Gemini/user prompt。
@@ -429,6 +431,8 @@ docs/       设计说明、维护记录和计划文档
 data/       本地运行数据，默认持久化目录
 artifacts/  临时产物、备份和评估输出
 ```
+
+结构边界和清理候选见 `docs/repository-structure.md`；历史清理记录继续写入 `docs/repo-cleanup.md`。
 
 ## 当前主链
 

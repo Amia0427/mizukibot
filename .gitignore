@@ -30,6 +30,8 @@ artifacts/tmp/
 artifacts/logs/
 artifacts/lancedb-gate-shadow.json
 artifacts/memory-recall-eval/*.tmp
+artifacts/gemini-sampling-degradation-*.json
+prompts/*.bak
 
 # Local Windows ops artifacts
 windows-mgmt.conf
