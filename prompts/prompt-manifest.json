@@ -748,6 +748,18 @@
         "include_in_system_prompt": false
       },
       {
+        "id": "live_state_rules",
+        "path": "runtime/live_state_rules.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "priority": 500,
+        "authority": "runtime_template",
+        "budget_tokens": 200,
+        "stage": "main",
+        "include_in_system_prompt": false,
+        "applies_when": "always"
+      },
+      {
         "id": "runtime_review_system",
         "path": "runtime/review-system.txt",
         "required": false,

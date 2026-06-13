@@ -61,6 +61,9 @@ const {
   buildGeminiRecentStyleGuardPrompt
 } = require('../../../utils/geminiRecentStyleGuard');
 const {
+  buildLiveStateForState
+} = require('../../../utils/liveState');
+const {
   formatDateInTz,
   formatTimeInTz,
   formatWeekdayInTz,
@@ -414,6 +417,35 @@ function buildMemoryRecallPolicyPromptSnippet(memoryContext = {}) {
     ].filter(Boolean).join('|')}`);
   }
   return lines.join('\n');
+}
+
+function resolveLiveStateContextFromOptions(options = {}) {
+  const request = normalizeObject(options.request, {});
+  const routeMeta = normalizeObject(options.routeMeta, {});
+  return normalizeText(
+    options.liveStateContext
+    || request.liveStateContext
+    || routeMeta.liveStateContext
+    || routeMeta.live_state_context
+  );
+}
+
+function createLiveStatePromptBlock(liveStateContext = '') {
+  const text = normalizeText(liveStateContext);
+  if (!text) return null;
+  return createPromptBlock('live_state_dynamic', 'Live State Dynamic', text, {
+    stage: 'main',
+    priority: 500,
+    authority: 'runtime_dynamic',
+    kind: 'runtime_context',
+    source: 'live_state',
+    lane: 'dynamic_context',
+    budgetTokens: 800,
+    meta: {
+      optional: true,
+      blockId: 'live_state_dynamic'
+    }
+  });
 }
 
 function formatShortTermMessageLine(message = {}) {

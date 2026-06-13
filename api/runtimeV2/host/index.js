@@ -73,6 +73,9 @@ const {
   createPrepareNode
 } = require('../nodes/prepare');
 const {
+  createEnhanceLiveStateNode
+} = require('../nodes/enhanceLiveState');
+const {
   createPersistNode
 } = require('../nodes/persist');
 const {
@@ -1266,6 +1269,11 @@ function createRuntime(options = {}) {
     runtimeOptions
   });
 
+  const enhanceLiveStateNodeImpl = createEnhanceLiveStateNode({
+    createEvent,
+    saveAndEmit
+  });
+
   const routeAfterDirectReplyImpl = createRouteAfterDirectReply();
 
   const directReplyNodeImpl = createDirectReplyNode({
@@ -1378,6 +1386,7 @@ function createRuntime(options = {}) {
     end: END,
     nodes: {
       prepare: prepareNodeImpl,
+      enhance_live_state: enhanceLiveStateNodeImpl,
       route: routeNode,
       direct_reply: directReplyNodeImpl,
       planner: plannerNode,

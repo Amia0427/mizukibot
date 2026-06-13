@@ -36,6 +36,15 @@ const MAIN_REPLY_DYNAMIC_BLOCKS = Object.freeze([
     avoidWhen: 'Skip only outside main roleplay replies.'
   },
   {
+    blockId: 'live_state_dynamic',
+    label: 'Live State Dynamic',
+    lane: 'dynamic_context',
+    category: 'roleplay_context',
+    defaultPolicy: 'must_use_when_available',
+    useWhen: 'Use when runtime provides the live-state context so current activity, relationship boundary, recent context, and anti-AI constraints can shape this turn.',
+    avoidWhen: 'Skip only when no live-state context was built or the route explicitly skips live-state enhancement.'
+  },
+  {
     blockId: 'affinity_level',
     label: 'Affinity Level',
     lane: 'dynamic_context',
@@ -253,6 +262,12 @@ const DYNAMIC_CONTEXT_BLOCK_SPEC_OVERRIDES = Object.freeze({
     emptyPolicy: 'reject_optional_empty',
     mustUseWhen: 'main roleplay reply needs silent pre-reply roleplay quality checks',
     budget: { configKey: '', hardCapTokens: 420 }
+  },
+  live_state_dynamic: {
+    criticality: 'critical',
+    emptyPolicy: 'reject_optional_empty',
+    mustUseWhen: 'runtime live-state context is available for this turn',
+    budget: { configKey: '', hardCapTokens: 800 }
   },
   affinity_level: {
     criticality: 'optional',

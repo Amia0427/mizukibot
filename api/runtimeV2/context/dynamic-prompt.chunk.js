@@ -319,6 +319,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     options
   });
   const roleplayInnerProtocolText = buildRoleplayInnerProtocolPromptSnippet();
+  const liveStateContextText = resolveLiveStateContextFromOptions(options);
 
   if (roleplayRuntimeContextText) {
     extraBlocks.push(createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {
@@ -360,6 +361,10 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
         optional: true
       }
     }));
+  }
+
+  if (liveStateContextText) {
+    extraBlocks.push(createLiveStatePromptBlock(liveStateContextText));
   }
 
   if (shouldInjectContextStatsInstruction) {
@@ -646,6 +651,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     hasRoleplayRuntimeContext: Boolean(roleplayRuntimeContextText),
     hasChatLivenessDiscipline: Boolean(chatLivenessDisciplineText),
     hasRoleplayInnerProtocol: Boolean(roleplayInnerProtocolText),
+    hasLiveStateDynamic: Boolean(liveStateContextText),
     hasAffinityState: true,
     hasShortTermContinuity: combinedDynamicBlocks.some((item) => item?.id === 'short_term_continuity'),
     hasMemoryRecallPolicy: combinedDynamicBlocks.some((item) => item?.id === 'memory_recall_policy' || normalizeText(item?.meta?.blockId) === 'memory_recall_policy')
@@ -671,6 +677,9 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const plannerProvidedDynamicPlan = dynamicPromptPlan.plannerProvided === true;
   const shouldUseHeuristicDynamicPlan = !plannerProvidedDynamicPlan;
   const runtimeAddedIds = ['roleplay_runtime_context', 'chat_liveness_discipline', 'roleplay_inner_protocol'];
+  if (liveStateContextText) {
+    runtimeAddedIds.push('live_state_dynamic');
+  }
   if (geminiRecentStyleGuardText) {
     runtimeAddedIds.push('gemini_recent_style_guard');
   }

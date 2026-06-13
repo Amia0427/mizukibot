@@ -4,6 +4,7 @@ const LANGGRAPH_V2_TOPOLOGY = Object.freeze({
   entryPoint: 'prepare',
   nodes: Object.freeze([
     'prepare',
+    'enhance_live_state',
     'route',
     'direct_reply',
     'planner',
@@ -16,7 +17,8 @@ const LANGGRAPH_V2_TOPOLOGY = Object.freeze({
     'persist'
   ]),
   edges: Object.freeze([
-    Object.freeze({ from: 'prepare', to: 'route' }),
+    Object.freeze({ from: 'prepare', to: 'enhance_live_state' }),
+    Object.freeze({ from: 'enhance_live_state', to: 'route' }),
     Object.freeze({ from: 'planner', to: 'dispatch' }),
     Object.freeze({ from: 'dispatch', to: 'validate' }),
     Object.freeze({ from: 'humanize', to: 'final_validate' }),
