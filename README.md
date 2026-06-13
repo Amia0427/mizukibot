@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 19:20 +08:00**：接入日月西改编角色扮演优化模块。新增 `persona_modules/embodied_emotion.txt`（情感具身化对照表：紧张→后背僵硬，心动→耳朵发烫）和 `persona_modules/dialogue_fragments.txt`（对话破碎感：打断、犹豫、改口）；`persona/02_style.txt` 补充陈词滥调黑名单（禁用"心跳如鼓"/"时间仿佛静止"等老套表达）。改编自【日月西】Gemini预设第三人称小说叙事框架，转换为第一人称角色扮演约束。参考文件见 `prompts/reference/riyuexi-adapted-first-person.txt` 和使用指南。验收：`npm run check:prompts` 通过。小目标完成：情感表达具身化、对话更真实破碎、拒绝陈词滥调。
+
 **2026-06-13 18:50 +08:00**：强化普通用户内容安全边界。`prompts/defaut.txt` 填充明确的内容限制规则：禁止政治话题、NSFW 内容、恋爱关系模拟、以及其他不适合 QQ 群环境的话题（违法犯罪、谣言、人身攻击、自我伤害等）。该文件只在普通用户请求时注入（priority -950），管理员请求完全不受影响。处理原则为用角色自然方式婉转拒绝或转移话题，不说教。验收：`npm run check:prompts` 通过。小目标完成：普通用户内容安全边界已硬化到 system 层。
 
 **2026-06-13 16:04 +08:00**：接入普通用户专用输出规范入口 `prompts/defaut.txt`。该文件现在以 `normal_user_default_prompt` 注册为 stable system block，只在发起用户不命中 `ADMIN_USER_IDS` 时进入普通主回复和被动群感知回复模型请求；管理员私聊和管理员群聊普通发言均不注入。当前文件为空，运行时保持空文件跳过。验收：`node tests/promptCompiler.test.js`、`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`npm run check:prompts` 均通过。小目标完成：普通用户输出规范提示词进入 system 层，且管理员请求隔离。
