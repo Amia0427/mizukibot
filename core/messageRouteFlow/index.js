@@ -171,7 +171,8 @@ function createMessageRouteFlow(deps = {}) {
     buildSubagentContextSummary,
     normalGroupMainReplyRateLimiter,
     sendGroupPoke,
-    generateGroupSummary = generateGroupSummaryDefault
+    generateGroupSummary = generateGroupSummaryDefault,
+    actionClient = null
   } = deps;
   const {
     hasAdminAccess
@@ -534,7 +535,8 @@ function createMessageRouteFlow(deps = {}) {
           await markThinkingEmojiBeforeLlm?.({
             messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
             routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-            routeMeta: route.meta || {}
+            routeMeta: route.meta || {},
+            actionClient
           });
           reply = await askToolTaskLocally(cleanText, userInfo, senderId, null, imageUrl, toolTaskOptions);
         }
@@ -672,7 +674,8 @@ function createMessageRouteFlow(deps = {}) {
           : await markThinkingEmojiBeforeLlm?.({
               messageId: String(inboundContext?.messageMeta?.messageId || input.sourceMessageId || '').trim(),
               routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
-              routeMeta: route.meta || {}
+              routeMeta: route.meta || {},
+              actionClient
             });
         inboundContext?.onEvent?.({
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,

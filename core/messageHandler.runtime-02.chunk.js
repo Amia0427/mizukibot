@@ -41,7 +41,8 @@
   async function markThinkingEmojiBeforeLlm({
     messageId,
     routePolicyKey = '',
-    routeMeta = {}
+    routeMeta = {},
+    actionClient = globalNapCatActionClient
   } = {}) {
     const normalizedMessageId = String(messageId || '').trim();
     if (!normalizedMessageId) return false;
@@ -49,7 +50,10 @@
     const emojiIds = Array.isArray(config.QQ_THINKING_EMOJI_IDS) ? config.QQ_THINKING_EMOJI_IDS : [];
     if (!emojiIds.length) return false;
 
-    const result = await setMessageEmojiLike(normalizedMessageId, emojiIds, { set: true }).catch((error) => ({
+    const result = await setMessageEmojiLike(normalizedMessageId, emojiIds, {
+      set: true,
+      actionClient
+    }).catch((error) => ({
       success: false,
       reason: error?.message || String(error || 'unknown error'),
       failures: []
@@ -201,7 +205,8 @@
     sendWithRetry,
     markThinkingEmojiBeforeLlm,
     buildSubagentContextSummary,
-    normalGroupMainReplyRateLimiter
+    normalGroupMainReplyRateLimiter,
+    actionClient: globalNapCatActionClient
   });
 
   async function sendGroupReplyFallback({ groupId, senderId, replyText, atSender = true, retries = 2, waitMs = 500 }) {
