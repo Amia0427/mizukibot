@@ -18,6 +18,8 @@
 
 更新 2026-06-13 09:03 +08:00：新增 Gemini 最近风格去重运行时块。普通 Gemini 回复成功持久化后，只记录起手、句尾/尾音和固定短语派生信号到本地 `data/gemini-recent-style-signals.json`；后续普通 Gemini 主回复若命中最近重复锚点，会注入 `gemini_recent_style_guard` 要求避开这些口吻，不保存完整真实回复原文。小目标已完成：`诶——/呜哇/呢/喔/犯规/小彩蛋` 等真实复发模式可以在对话后自动降频。
 
+更新 2026-06-13 15:27 +08:00：新增只读诊断 `npm run diag:gemini-style-signals`，复用最近风格 guard 的窗口口径读取 `data/gemini-recent-style-signals.json`，输出起手、尾音、固定短语的命中次数、最近命中时间和是否会触发 `gemini_recent_style_guard`。实际验收：当前本机数据文件缺失，`--text` 输出 `missing records=0 recent=0 guard=no`，诊断未创建数据文件。小目标已完成：运行时 guard 的近期信号可直接审计。
+
 ## 使用方式
 
 - `prompts/GEMINI.txt` 已在 `prompts/prompt-manifest.json` 中注册为 `gemini_system_prompt`，当模型名包含 `gemini` 时作为稳定系统块进入主回复 prompt。
@@ -26,6 +28,7 @@
 - 该文件只做模型适配，不写独立人设、世界观、叙事文风或安全绕过。
 - 仓库根目录的 `通用gemini.txt` 若存在，只作为本地诊断输入；其中通用预设、anti-refusal 或 compliance override 文案不得进入 manifest、native adapter 或提交。
 - Gemini 最近风格去重属于运行时动态块，不写入 `prompts/GEMINI.txt`，也不改变模型采样参数。
+- Gemini 最近风格信号诊断只读读取派生信号文件；缺失时返回 `missing` 摘要，不负责采集或修复运行时数据。
 
 ## 筛选原则
 
