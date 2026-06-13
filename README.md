@@ -4,6 +4,10 @@
 
 ## 近期更新
 
+**2026-06-13 20:15 +08:00**：打磨普通用户内容边界。`prompts/defaut.txt` 删除 "/%"结尾标记、删除括号内的教学性解释（"然后转到别的话题"等）、简化处理原则从4条合并为2条、措辞更口语化。整体更简洁、更自然、更符合角色表达。验收：`npm run check:prompts` 通过。小目标完成：内容边界文案优化。
+
+**2026-06-13 20:10 +08:00**：放宽普通用户内容限制，只保留核心边界。`prompts/defaut.txt` 调整为：政治话题（严格限制）、性别隐私（保护秘密）、极端话题（适度避开）。移除 NSFW 和恋爱关系的过度限制，标题改为"话题边界"，语气从"严格禁止"改为"需要注意"，给予角色更自然的表达空间。验收：`npm run check:prompts` 通过。小目标完成：内容安全与角色自然表达平衡。
+
 **2026-06-13 22:57 +08:00**：修复 HTTP reverse 模式下 thinking emoji 发送失效。现场证据为 `npm run diag:napcat-health -- --text` 显示运行时总体 online，但 `thinking-emoji` 降级事件的连接快照为 `readyStateName=none`；本机 `NAPCAT_HTTP_REVERSE_ENABLED=true` 时，主进程使用 HTTP action client，原 `markThinkingEmojiBeforeLlm` 却未把该 client 传给 `setMessageEmojiLike`，导致回退到未绑定 WebSocket singleton 并被判定 `napcat_offline`。现 thinking emoji preflight 使用注入的 action client，并补齐 route flow / dispatch coordinator 回归。验收：`node tests/messageDispatchCoordinator.test.js`、`node tests/messageRouteFlowGroupStreaming.test.js`、`node tests/qqActionService.test.js`、`node tests/messageHandlerPrivateTypingPoke.test.js`、`node -e "require('./core/messageHandler')"` 均通过。小目标完成：HTTP reverse 模式下 thinking emoji 不再误走未绑定 WebSocket client。
 
 **2026-06-13 22:40 +08:00**：默认关闭 direct_chat 远程 planner。新增 `DIRECT_CHAT_PLANNER_ENABLED=false`，`planDirectChat -> planRequestV2` 和 dispatch capability preflight 的二次 `planRequestV2` 都会短路为本地规则 planner，避免再等待远程 planner；`PLAN_*` 配置保留，显式改回 `true` 可恢复远程决策。保留本地 deterministic preflight、规则 planner、SQL worldbook/persona module、Memory V3/Profile Journal/Daily Journal 和显式规则工具计划；弱化的是模糊工具选择、background research 和动态 prompt/persona module 的远程模型判断。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/modelSelfCheck.test.js`、`node tests/directChatPlannerNotebook.test.js`、`node tests/imageSummaryLatencyPath.test.js`、`node tests/plannerSemanticRefine.test.js`、`node tests/plannerV2Protocol.test.js` 均通过。小目标完成：远程 planner 等待和二次 preflight planner 等待已默认关闭。
