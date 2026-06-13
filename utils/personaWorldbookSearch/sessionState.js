@@ -1,4 +1,10 @@
 const config = require('../../config');
+const {
+  clearSessionActivations,
+  getActiveSessionEntries,
+  isPrimaryReadEnabled,
+  recordActivation
+} = require('../worldbookDb');
 
 const TEMPLATE_DEFAULTS = Object.freeze({
   resident: {
@@ -201,6 +207,21 @@ function activateWorldbookSessionCandidates(candidates = [], context = {}, optio
       source: normalizeText(raw.matchMode || raw.worldbookMatchMode || raw.reason || 'worldbook_hit')
     };
     store.set(moduleId, entry);
+    if (isPrimaryReadEnabled()) {
+      recordActivation({
+        sessionKey,
+        moduleId,
+        activatedAt: entry.activatedAt,
+        expiresAt: entry.expiresAt,
+        remainingTurns: entry.remainingTurns,
+        activationMode: meta.activationMode,
+        template: meta.template,
+        source: entry.source,
+        linkedExamples: meta.exampleIds,
+        scope: meta.scope,
+        status: 'active'
+      }, { now });
+    }
     activated.push({ moduleId, activationState: buildStateSnapshot(entry, now), linkedExamples: meta.exampleIds });
   }
 
@@ -231,6 +252,17 @@ function decorateActivatedWorldbookCandidates(candidates = [], activationResult 
 function getActiveWorldbookSessionCandidates(catalog = { modules: [] }, context = {}, options = {}) {
   const sessionKey = getSessionKey(context);
   if (!sessionKey) return [];
+  if (isPrimaryReadEnabled()) {
+    const sqlResults = getActiveSessionEntries(sessionKey, {
+      now: options.now,
+      consume: options.consume !== false
+    });
+    return sqlResults.filter((item) => isScopeAllowed({
+      scope: item.scope,
+      activationMode: item.activationState?.activationMode,
+      template: item.activationState?.template
+    }, context));
+  }
   const store = stateBySession.get(sessionKey);
   if (!store || store.size === 0) return [];
   const now = Number(options.now || Date.now());
@@ -275,6 +307,14 @@ function getActiveWorldbookSessionCandidates(catalog = { modules: [] }, context 
 function getWorldbookSessionState(sessionKey = '') {
   const key = normalizeText(sessionKey);
   if (!key) return [];
+  if (isPrimaryReadEnabled()) {
+    const sqlResults = getActiveSessionEntries(key, { consume: false });
+    return sqlResults.map((item) => ({
+      moduleId: item.moduleId,
+      activationState: item.activationState,
+      linkedExamples: normalizeArray(item.linkedExamples || item.exampleIds)
+    }));
+  }
   const store = stateBySession.get(key);
   if (!store) return [];
   const now = Date.now();
@@ -289,6 +329,7 @@ function getWorldbookSessionState(sessionKey = '') {
 
 function clearWorldbookSessionState(sessionKey = '') {
   const key = normalizeText(sessionKey);
+  if (isPrimaryReadEnabled()) clearSessionActivations(key);
   if (!key) {
     stateBySession.clear();
     return;

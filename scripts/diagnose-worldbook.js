@@ -12,6 +12,9 @@ const {
 const {
   getWorldbookSessionState
 } = require('../utils/personaWorldbookSearch/sessionState');
+const {
+  getDiagnostics: getWorldbookDbDiagnostics
+} = require('../utils/worldbookDb');
 
 function normalizeText(value, fallback = '') {
   const text = String(value || '').trim();
@@ -92,16 +95,51 @@ async function diagnoseWorldbook(options = {}) {
   };
   const dynamicFewShotAllowed = shouldBuildDynamicFewShot(fewShotContext);
   const examples = dynamicFewShotAllowed ? selectDynamicFewShotExamples(fewShotContext) : [];
+  const worldbookSearch = candidates.personaWorldbookSearch || {};
+  const selectedWorldbookBlocks = selection.selected
+    .filter((item) => normalizeText(item.id).startsWith('wb_mizuki_'))
+    .map((item) => ({
+      id: `persona_module:${item.id}`,
+      moduleId: item.id,
+      slot: item.slot,
+      source: item.path
+    }));
   return {
     schemaVersion: 'worldbook_diagnostic_v1',
     question,
     sessionKey: context.sessionKey,
-    worldbookSearch: candidates.personaWorldbookSearch || {},
+    db: getWorldbookDbDiagnostics({ benchmark: false }),
+    worldbookSearch,
+    sqlHits: {
+      dbFile: worldbookSearch.sql?.dbFile || '',
+      primaryRead: worldbookSearch.sql?.primaryRead === true,
+      count: Number(worldbookSearch.sql?.ftsCandidates || 0) + Number(worldbookSearch.sql?.lexicalCandidates || 0),
+      candidates: Number(worldbookSearch.sql?.lexicalCandidates || 0),
+      selected: Number(worldbookSearch.selected || 0)
+    },
+    ftsHits: {
+      available: worldbookSearch.sql?.ftsAvailable === true,
+      count: Number(worldbookSearch.sql?.ftsCandidates || 0),
+      reason: normalizeText(worldbookSearch.sql?.ftsReason)
+    },
+    semanticHits: {
+      enabled: worldbookSearch.embedding?.enabled === true,
+      count: Number(worldbookSearch.embedding?.semanticCandidates || 0),
+      hotPathUsed: worldbookSearch.embedding?.hotPathUsed === true,
+      fallbackReason: normalizeText(worldbookSearch.embedding?.fallbackReason)
+    },
+    sessionHits: {
+      count: Number(worldbookSearch.sessionState?.active?.length || 0),
+      activated: normalizeArray(worldbookSearch.sessionState?.activated).map((item) => item.moduleId).filter(Boolean),
+      active: normalizeArray(worldbookSearch.sessionState?.active).map((item) => item.moduleId).filter(Boolean)
+    },
+    finalInjectedBlocks: selectedWorldbookBlocks,
     candidates: normalizeArray(candidates)
       .filter((item) => normalizeText(item.id).startsWith('wb_mizuki_'))
       .map((item) => ({
         id: item.id,
-        score: Number(item.worldbookScore || item.candidateScore || 0) || 0,
+        score: Number(item.worldbookScore || 0) || 0,
+        candidateScore: Number(item.candidateScore || 0) || 0,
         matchMode: normalizeText(item.worldbookMatchMode || item.matchMode),
         reason: normalizeText(item.worldbookReason || item.reason),
         slot: item.slot,
@@ -156,7 +194,9 @@ async function run(options = parseArgs()) {
 }
 
 if (require.main === module) {
-  run().catch((error) => {
+  run().then(() => {
+    process.exit(process.exitCode || 0);
+  }).catch((error) => {
     console.error(error);
     process.exit(1);
   });

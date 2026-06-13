@@ -4,7 +4,9 @@ const {
   buildPersonaModuleCandidatesAsync,
   buildPersonaModuleCandidates,
   diagnosePersonaModules,
+  ensureWorldbookSqlImported,
   getPersonaModuleCatalogSummary,
+  loadPersonaModuleCatalog,
   prunePersonaModuleCandidates,
   selectPersonaModules
 } = require('../utils/personaModules');
@@ -16,6 +18,7 @@ const {
 } = require('../utils/personaWorldbookSearch/sessionState');
 
 (async () => {
+  ensureWorldbookSqlImported(loadPersonaModuleCatalog(), { force: true });
   const catalog = getPersonaModuleCatalogSummary();
   assert.ok(catalog.some((item) => item.moduleId === 'daily_energy'));
   assert.ok(catalog.some((item) => item.moduleId === 'deep_pain'));
@@ -361,6 +364,7 @@ const {
     semanticLimit: 2,
     limit: 2,
     hotPath: true,
+    sqlPrimaryRead: false,
     shouldUseRemoteEmbedding: () => true,
     queryEmbedding: [1, 0],
     embeddingIndex: {
@@ -389,6 +393,7 @@ const {
     semanticLimit: 2,
     limit: 2,
     hotPath: true,
+    sqlPrimaryRead: false,
     shouldUseRemoteEmbedding: () => true,
     queryEmbedding: [1, 0],
     embeddingIndex: {
@@ -427,6 +432,7 @@ const {
     semanticLimit: 2,
     limit: 2,
     hotPath: true,
+    sqlPrimaryRead: false,
     shouldUseRemoteEmbedding: () => true,
     queryEmbedding: [1, 0],
     embeddingIndex: {
@@ -458,6 +464,7 @@ const {
   const rerankedWorldbook = await searchPersonaWorldbook(fakeCatalog, {
     query: '冲突',
     lexicalLimit: 2,
+    sqlPrimaryRead: false,
     semanticLimit: 0,
     limit: 2,
     rerankCandidates: async (_query, candidates) => candidates.slice().reverse().map((item, index) => ({
@@ -484,6 +491,7 @@ const {
   const forcedReranked = await searchPersonaWorldbook(rerankCatalog, {
     query: '好意关系说不出口',
     lexicalLimit: 4,
+    sqlPrimaryRead: false,
     semanticLimit: 0,
     limit: 4,
     rerankTimeoutMs: 2000,
@@ -499,6 +507,7 @@ const {
   const timeoutWorldbook = await searchPersonaWorldbook(rerankCatalog, {
     query: '好意关系说不出口',
     lexicalLimit: 4,
+    sqlPrimaryRead: false,
     semanticLimit: 0,
     limit: 4,
     rerankTimeoutMs: 2000,

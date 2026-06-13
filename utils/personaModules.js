@@ -6,6 +6,13 @@ const {
   searchPersonaWorldbookLexical
 } = require('./personaWorldbookSearch');
 const {
+  getDiagnostics: getWorldbookDbDiagnostics,
+  getWorldbookEntry,
+  importWorldbookFromCatalog,
+  isPrimaryReadEnabled,
+  searchWorldbookEntries
+} = require('./worldbookDb');
+const {
   activateWorldbookSessionCandidates,
   decorateActivatedWorldbookCandidates,
   getActiveWorldbookSessionCandidates,
@@ -13,6 +20,10 @@ const {
   normalizeWorldbookRuntimeMeta
 } = require('./personaWorldbookSearch/sessionState');
 const { createPersonaModuleRulePicker } = require('./personaModules/rules');
+const {
+  recallPersonaModules,
+  recallPersonaModulesSync
+} = require('./localPromptRecall');
 const {
   getDefaultPersonaModuleLimit,
   isBalancedOrMinimalPromptMode,
@@ -130,6 +141,16 @@ function addCatalogTriggeredCandidateIds(candidateIds, catalog = { modules: [] }
   const routePrompt = lower(context.routePrompt || '');
   const combined = `${question}\n${routePrompt}`;
   if (!question) return candidateIds;
+  if (isPrimaryReadEnabled()) {
+    const sqlHits = searchWorldbookEntries(combined, {
+      limit: config.PERSONA_WORLDBOOK_PLANNER_CANDIDATE_LIMIT || config.PERSONA_WORLDBOOK_SELECTED_MAX || 4
+    });
+    for (const item of normalizeArray(sqlHits.results)) {
+      const moduleId = normalizeText(item?.moduleId || item?.id);
+      if (moduleId) candidateIds.add(moduleId);
+    }
+    return candidateIds;
+  }
   for (const item of normalizeArray(catalog.modules)) {
     if (!normalizeText(item?.id).startsWith('wb_mizuki_')) continue;
     if (normalizeArray(item?.triggerHints).some((hint) => triggerHintMatches(hint, combined))) {
@@ -143,16 +164,59 @@ function buildPersonaModuleCandidates(context = {}) {
   const catalog = loadPersonaModuleCatalog();
   const worldbookEnabled = shouldUseWorldbookSearch(context);
   const candidateIds = addCatalogTriggeredCandidateIds(new Set(pickCandidateIds(context)), catalog, context);
+  let localRecallModules = [];
+  if (config.LOCAL_PROMPT_RECALL_ENABLED !== false && context.disableLocalPromptRecall !== true) {
+    try {
+      const localRecall = recallPersonaModulesSync(context, {
+        limit: context.maxPersonaModuleCandidates || config.PERSONA_MODULE_CANDIDATE_MAX || 16
+      });
+      if (localRecall.ok) localRecallModules = normalizeArray(localRecall.modules);
+      for (const item of localRecallModules) {
+        if (normalizeText(item?.id)) candidateIds.add(item.id);
+      }
+    } catch (_) {}
+  }
   if (!worldbookEnabled) {
     for (const id of Array.from(candidateIds)) {
       if (normalizeText(id).startsWith('wb_mizuki_')) candidateIds.delete(id);
     }
   }
+  const localById = new Map(localRecallModules.map((item) => [normalizeText(item?.id), item]).filter(([id]) => Boolean(id)));
   const phase = inferPhase(context);
   return catalog.modules
     .filter((item) => candidateIds.has(item.id))
     .filter((item) => item.phase === 'all' || item.phase === phase)
-    .sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+    .map((item) => {
+      const local = localById.get(item.id);
+      if (!local) return item;
+      return {
+        ...item,
+        localPromptRecall: local.localPromptRecall,
+        worldbookScore: local.worldbookScore || item.worldbookScore,
+        worldbookMatchMode: local.worldbookMatchMode || item.worldbookMatchMode
+      };
+    })
+    .sort((a, b) => {
+      const aScore = Number(a.localPromptRecall?.score || 0) || 0;
+      const bScore = Number(b.localPromptRecall?.score || 0) || 0;
+      if (bScore !== aScore) return bScore - aScore;
+      return a.priority - b.priority || a.id.localeCompare(b.id);
+    });
+}
+
+let worldbookSqlImportAttempted = false;
+
+function ensureWorldbookSqlImported(catalog = null, options = {}) {
+  if (!isPrimaryReadEnabled()) return { ok: false, skipped: true, reason: 'sql_primary_read_disabled' };
+  const diagnostics = getWorldbookDbDiagnostics({ benchmark: false });
+  if (options.force !== true && diagnostics.ok && Number(diagnostics.activeEntries || 0) > 0) {
+    return { ok: true, skipped: true, reason: 'already_imported', activeEntries: diagnostics.activeEntries };
+  }
+  if (worldbookSqlImportAttempted && options.force !== true) {
+    return { ok: diagnostics.ok === true, skipped: true, reason: 'import_already_attempted' };
+  }
+  worldbookSqlImportAttempted = true;
+  return importWorldbookFromCatalog(catalog || loadPersonaModuleCatalog(), { apply: true });
 }
 
 function mergeCandidateIdsWithWorldbookSearch(ruleCandidates = [], worldbookResults = []) {
@@ -174,9 +238,10 @@ function sortCandidatesWithWorldbookScores(candidates = [], worldbookResults = [
     .map((item) => {
       const hit = scoreById.get(item.id);
       if (!hit) return item;
+      const hitScore = Number(hit.score || hit.worldbookScore || 0) || 0;
       return {
         ...item,
-        worldbookScore: Number(hit.score || 0) || 0,
+        worldbookScore: hitScore > 0 ? hitScore : (hit.activationState ? 0.82 : 0),
         worldbookMatchMode: normalizeText(hit.matchMode),
         worldbookReason: normalizeText(hit.reason),
         activationState: hit.activationState,
@@ -198,6 +263,7 @@ function scorePersonaCandidate(item = {}, context = {}) {
   const combined = `${question}\n${routePrompt}`.replace(/\s+/g, '');
   const priority = Math.max(0, Number(item.priority || 100) || 100);
   let score = Math.max(0, 120 - priority);
+  if (Number(item.localPromptRecall?.score || 0) > 0) score += Number(item.localPromptRecall.score || 0) * 1.5;
   if (Number(item.worldbookScore || 0) > 0) score += 120 + (Number(item.worldbookScore || 0) * 100);
   if (normalizeText(item.worldbookMatchMode)) score += 20;
   for (const hint of normalizeArray(item.triggerHints)) {
@@ -221,6 +287,7 @@ function prunePersonaModuleCandidates(candidates = [], context = {}, options = {
   );
   for (const item of normalized) {
     if (Number(item.worldbookScore || 0) > 0) alwaysKeep.add(item.id);
+    if (item.activationState && normalizeText(item.id).startsWith('wb_mizuki_')) alwaysKeep.add(item.id);
     if (item.id === 'scene_group_insert' && context.chatType === 'group') alwaysKeep.add(item.id);
     if (item.id === 'scene_private_chat' && context.chatType === 'private') alwaysKeep.add(item.id);
   }
@@ -271,6 +338,18 @@ async function buildPersonaModuleCandidatesAsync(context = {}) {
   const phase = inferPhase(context);
   const ruleCandidates = buildPersonaModuleCandidates(context);
   const query = normalizeText(context.question || context.routePrompt || '');
+  let localRecall = { ok: false, modules: [] };
+  if (config.LOCAL_PROMPT_RECALL_ENABLED !== false && context.disableLocalPromptRecall !== true) {
+    try {
+      localRecall = await recallPersonaModules(context, {
+        limit: context.maxPersonaModuleCandidates || config.PERSONA_MODULE_CANDIDATE_MAX || 16,
+        requestEmbedding: context.requestEmbedding,
+        queryEmbedding: context.localPromptRecallQueryEmbedding
+      });
+    } catch (error) {
+      localRecall = { ok: false, reason: 'local_prompt_recall_failed', error: String(error?.message || error), modules: [] };
+    }
+  }
   const worldbookEnabled = shouldUseWorldbookSearch(context);
   const worldbookSearch = worldbookEnabled
     ? await searchPersonaWorldbook(catalog, {
@@ -343,12 +422,40 @@ async function buildPersonaModuleCandidatesAsync(context = {}) {
       linkedExamples: normalizeArray(item.linkedExamples || item.exampleIds)
     }))
   };
+  const localModules = normalizeArray(localRecall.modules)
+    .filter((item) => worldbookEnabled || !normalizeText(item?.id).startsWith('wb_mizuki_'));
   const candidateIds = mergeCandidateIdsWithWorldbookSearch(ruleCandidates, effectiveWorldbookResults);
+  for (const item of localModules) {
+    if (normalizeText(item?.id)) candidateIds.add(item.id);
+  }
+  const localById = new Map(localModules.map((item) => [normalizeText(item?.id), item]).filter(([id]) => Boolean(id)));
   const candidates = catalog.modules
     .filter((item) => candidateIds.has(item.id))
-    .filter((item) => item.phase === 'all' || item.phase === phase);
+    .filter((item) => item.phase === 'all' || item.phase === phase)
+    .map((item) => {
+      const local = localById.get(item.id);
+      if (!local) return item;
+      return {
+        ...item,
+        localPromptRecall: local.localPromptRecall,
+        worldbookScore: local.worldbookScore || item.worldbookScore,
+        worldbookMatchMode: local.worldbookMatchMode || item.worldbookMatchMode
+      };
+    });
   const sorted = sortCandidatesWithWorldbookScores(candidates, effectiveWorldbookResults);
+  sorted.sort((a, b) => {
+    const aScore = Number(a.localPromptRecall?.score || 0) || 0;
+    const bScore = Number(b.localPromptRecall?.score || 0) || 0;
+    if (bScore !== aScore) return bScore - aScore;
+    return 0;
+  });
   sorted.personaWorldbookSearch = worldbookSearch.diagnostics;
+  sorted.localPromptRecall = {
+    ok: localRecall.ok === true,
+    reason: normalizeText(localRecall.reason),
+    usedEmbedding: localRecall.usedEmbedding === true,
+    selected: localModules.map((item) => item.id)
+  };
   const pruned = prunePersonaModuleCandidates(sorted, context, {
     maxCandidates: context.maxPersonaModuleCandidates
   });
@@ -356,6 +463,7 @@ async function buildPersonaModuleCandidatesAsync(context = {}) {
     ...(worldbookSearch.diagnostics || {}),
     sessionState: worldbookSearch.sessionState
   };
+  pruned.localPromptRecall = sorted.localPromptRecall;
   return pruned;
 }
 
@@ -408,11 +516,19 @@ function selectPersonaModules(decision = {}, context = {}) {
     normalizeText(id).startsWith('wb_mizuki_')
     && candidates.some((item) => item.id === id && item.activationState)
   ));
+  const candidateById = new Map(candidates.map((item) => [normalizeText(item.id), item]).filter(([id]) => Boolean(id)));
   const scoredWorldbookIds = fallbackIds.filter((id) => (
     normalizeText(id).startsWith('wb_mizuki_')
     && !stickyWorldbookIds.includes(id)
     && candidates.some((item) => item.id === id && Number(item.worldbookScore || 0) > 0)
-  ));
+  )).sort((a, b) => {
+    const aItem = candidateById.get(a) || {};
+    const bItem = candidateById.get(b) || {};
+    const aScore = Number(aItem.worldbookScore || aItem.candidateScore || 0) || 0;
+    const bScore = Number(bItem.worldbookScore || bItem.candidateScore || 0) || 0;
+    if (bScore !== aScore) return bScore - aScore;
+    return Number(aItem.priority || 100) - Number(bItem.priority || 100) || a.localeCompare(b);
+  });
   const sceneIds = fallbackIds.filter((id) => id === 'scene_private_chat' || id === 'scene_group_insert');
   const emotionIds = fallbackIds.filter((id) => isEmotionPersonaModule(id));
   const conservativeFallbackIds = conservativePromptMode
@@ -519,6 +635,11 @@ function loadPersonaModuleText(moduleId = '') {
   const catalog = loadPersonaModuleCatalog();
   const target = catalog.modules.find((item) => item.id === normalizeText(moduleId));
   if (!target) return '';
+  if (isPrimaryReadEnabled() && normalizeText(target.id).startsWith('wb_mizuki_')) {
+    const entry = getWorldbookEntry(target.id);
+    if (entry && normalizeText(entry.body)) return normalizeText(entry.body);
+    return '';
+  }
   const filePath = path.join(config.PROMPTS_DIR, ...String(target.path).split('/'));
   return normalizeText(safeReadText(filePath, ''));
 }
@@ -530,6 +651,7 @@ module.exports = {
   buildPlannerPersonaModuleCatalog,
   diagnosePersonaModules,
   getPersonaModuleCatalogSummary,
+  ensureWorldbookSqlImported,
   loadPersonaModuleCatalog,
   loadPersonaModuleText,
   prunePersonaModuleCandidates,
