@@ -1439,9 +1439,16 @@ function createRuntime(options = {}) {
     options.streamFallbackToNonStream = Boolean(out?.output?.stream?.fallbackToNonStream);
     options.persistedReplyText = String(out?.output?.persistedReplyText || out?.output?.finalReply || out?.output?.draftReply || '').trim();
     options.displayReplyText = String(out?.output?.displayReply || '').trim();
-    const finalReply = sanitizeUserFacingText(out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '', {
-      preserveThink: requestOptions?.cotDisplayOnce === true
-    }).trim();
+
+    const rawReply = out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '';
+    const sanitized = sanitizeUserFacingText(rawReply, {
+      preserveThink: requestOptions?.cotDisplayOnce === true,
+      returnMeta: true
+    });
+
+    const finalReply = (typeof sanitized === 'object' ? sanitized.text : sanitized).trim();
+    options.hasSafetyRestriction = typeof sanitized === 'object' && sanitized.hasSafetyRestriction === true;
+
     return finalReply || '刚才网络有点不稳，你再发一次我接着回。';
   }
 
