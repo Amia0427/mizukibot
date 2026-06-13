@@ -724,6 +724,7 @@ function createMessageRouteFlow(deps = {}) {
       replySegments: [],
       usedStreamingSend,
       replyOptions: finalReplyOptions,
+      hasSafetyRestriction: finalReplyOptions?.hasSafetyRestriction === true,
       freshness
     }, route, routeExecutionPlan, chatType, groupId));
   }

@@ -91,7 +91,14 @@ function stripInternalReasoningLeakText(text = '') {
 function sanitizeUserFacingText(text = '', options = {}) {
   const preserveThink = options && typeof options === 'object' && options.preserveThink === true;
   let next = String(text || '').replace(/\u200b/g, '');
-  if (preserveThink) return next;
+
+  // \u68c0\u6d4b\u5b89\u5168\u9650\u5236\u6807\u8bb0
+  const hasSafetyRestriction = /\/%\s*$/.test(next);
+  if (hasSafetyRestriction) {
+    next = next.replace(/\/%\s*$/, '').trimEnd();
+  }
+
+  if (preserveThink) return { text: next, hasSafetyRestriction };
   let previous = null;
 
   while (next !== previous) {
@@ -104,6 +111,11 @@ function sanitizeUserFacingText(text = '', options = {}) {
   next = stripTrailingThinkFragment(next, options);
   next = stripInternalReasoningLeakText(next);
   next = stripNarrativeLeadIn(next);
+
+  // \u8fd4\u56de\u5bf9\u8c61\u5f62\u5f0f\uff0c\u5411\u540e\u517c\u5bb9\u5b57\u7b26\u4e32\u7528\u6cd5
+  if (options && options.returnMeta) {
+    return { text: next, hasSafetyRestriction };
+  }
   return next;
 }
 

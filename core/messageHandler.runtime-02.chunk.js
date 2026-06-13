@@ -82,6 +82,50 @@
     return true;
   }
 
+  async function markSafetyRestrictionEmojiAfterReply({
+    messageId,
+    routePolicyKey = '',
+    routeMeta = {},
+    actionClient = globalNapCatActionClient
+  } = {}) {
+    const normalizedMessageId = String(messageId || '').trim();
+    if (!normalizedMessageId) return false;
+
+    const emojiIds = Array.isArray(config.QQ_SAFETY_RESTRICTION_EMOJI_IDS) ? config.QQ_SAFETY_RESTRICTION_EMOJI_IDS : [];
+    if (!emojiIds.length) return false;
+
+    const result = await setMessageEmojiLike(normalizedMessageId, emojiIds, {
+      set: true,
+      actionClient
+    }).catch((error) => ({
+      success: false,
+      reason: error?.message || String(error || 'unknown error'),
+      failures: []
+    }));
+
+    if (!result?.success) {
+      const reason = result?.reason || 'unknown error';
+      if (result?.skipped && reason === 'napcat_offline') {
+        console.warn('[safety-restriction-emoji] skipped', {
+          messageId: normalizedMessageId,
+          routePolicyKey: String(routePolicyKey || '').trim(),
+          groupId: String(routeMeta?.groupId || routeMeta?.group_id || '').trim(),
+          reason
+        });
+        return false;
+      }
+      console.warn('[safety-restriction-emoji] failed', {
+        messageId: normalizedMessageId,
+        routePolicyKey: String(routePolicyKey || '').trim(),
+        groupId: String(routeMeta?.groupId || routeMeta?.group_id || '').trim(),
+        reason
+      });
+      return false;
+    }
+
+    return true;
+  }
+
   async function askToolTaskLocally(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
     const mutableOptions = options && typeof options === 'object' ? options : {};
     const formattingPreferences = getFormattingPreferences(question);
