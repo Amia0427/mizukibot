@@ -68,6 +68,11 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     groupId: routeMeta.groupId || routeMeta.group_id || '',
     isAdmin: options.isAdmin === true || routeMeta.isAdmin === true,
     worldbookLimit: options.worldbookLimit,
+    worldbookLexicalLimit: options.worldbookLexicalLimit,
+    worldbookSemanticLimit: options.worldbookSemanticLimit,
+    worldbookEmbeddingHotPath: options.worldbookEmbeddingHotPath,
+    worldbookSessionReadOnly: options.worldbookSessionReadOnly === true || options.readOnly === true,
+    worldbookSessionConsume: options.worldbookSessionConsume,
     maxPersonaModuleCandidates: options.maxPersonaModuleCandidates,
     mainReplyPromptMode
   };

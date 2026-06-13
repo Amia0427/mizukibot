@@ -33,6 +33,8 @@ module.exports = (async () => {
     process.env.COMPANION_TOOL_MODE_ENABLED = 'false';
     process.env.MEMORY_EMBEDDING_ENABLED = '0';
     process.env.MEMORY_RERANK_ENABLED = '0';
+    process.env.PERSONA_WORLDBOOK_EMBEDDING_ENABLED = 'false';
+    process.env.PERSONA_WORLDBOOK_RERANK_ENABLED = 'false';
 
     clearProjectCache();
     const httpClient = require('../api/httpClient');
@@ -214,6 +216,32 @@ module.exports = (async () => {
     assert.strictEqual(providerReport.scenarios[0].finalProvider, 'gemini_native');
     assert.strictEqual(providerReport.scenarios[0].auth.header, 'x-goog-api-key');
 
+    const promptAssemblyResult = await routeFlow.dispatchAdminRoute({
+      route: {
+        topRouteType: 'admin',
+        meta: {
+          admin: true,
+          command: {
+            cmd: 'debug',
+            args: ['replyprompt', '{"requestText":"服饰专门学校和N25两个都不放弃","userId":"u_diag","chatType":"private","sessionKey":"admin-replyprompt-test"}'],
+            raw: '/debug replyprompt {"requestText":"服饰专门学校和N25两个都不放弃","userId":"u_diag","chatType":"private","sessionKey":"admin-replyprompt-test"}'
+          }
+        }
+      },
+      groupId: 'g_diag',
+      senderId: 'admin_1',
+      rawText: '/debug replyprompt {"requestText":"服饰专门学校和N25两个都不放弃","userId":"u_diag","chatType":"private","sessionKey":"admin-replyprompt-test"}',
+      userInfo: null,
+      chatType: 'group'
+    });
+
+    assert.strictEqual(promptAssemblyResult.handled, true);
+    assert.strictEqual(sent.length, 7);
+    const promptAssemblyReport = JSON.parse(sent[6].replyText);
+    assert.strictEqual(promptAssemblyReport.schemaVersion, 'main_reply_prompt_assembly_diagnostic_v1');
+    assert.strictEqual(promptAssemblyReport.mode, 'test_input');
+    assert.ok(Object.prototype.hasOwnProperty.call(promptAssemblyReport, 'promptAssembly'));
+
     const checkResult = await routeFlow.dispatchAdminRoute({
       route: {
         topRouteType: 'admin',
@@ -234,12 +262,12 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(checkResult.handled, true);
-    assert.strictEqual(sent.length, 7);
-    assert.ok(sent[6].replyText.includes('模型自检:'));
-    assert.ok(sent[6].replyText.includes('plan |'));
-    assert.ok(sent[6].replyText.includes('main_reply |'));
-    assert.ok(!sent[6].replyText.includes('https://'));
-    assert.ok(!sent[6].replyText.includes('diag-key'));
+    assert.strictEqual(sent.length, 8);
+    assert.ok(sent[7].replyText.includes('模型自检:'));
+    assert.ok(sent[7].replyText.includes('plan |'));
+    assert.ok(sent[7].replyText.includes('main_reply |'));
+    assert.ok(!sent[7].replyText.includes('https://'));
+    assert.ok(!sent[7].replyText.includes('diag-key'));
 
     const deniedCheckResult = await routeFlow.dispatchAdminRoute({
       route: {
@@ -261,8 +289,8 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(deniedCheckResult.handled, true);
-    assert.strictEqual(sent.length, 8);
-    assert.strictEqual(sent[7].replyText, '这个按钮现在只给管理员按哦。');
+    assert.strictEqual(sent.length, 9);
+    assert.strictEqual(sent[8].replyText, '这个按钮现在只给管理员按哦。');
 
     const helpResult = await routeFlow.dispatchAdminRoute({
       route: {
@@ -284,8 +312,9 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(helpResult.handled, true);
-    assert.strictEqual(sent.length, 9);
-    assert.ok(sent[8].replyText.includes('/check'));
+    assert.strictEqual(sent.length, 10);
+    assert.ok(sent[9].replyText.includes('/check'));
+    assert.ok(sent[9].replyText.includes('replyprompt'));
 
     console.log('mainReplyDiagnosticsAdminCommand.test.js passed');
   } finally {

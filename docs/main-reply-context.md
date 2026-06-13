@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-13 19:57 +08:00
+更新时间：2026-06-13 21:25 +08:00
 
 ## 已调整
 
+- 2026-06-13 21:25 +08:00：新增主回复 prompt assembly 只读诊断。`npm run diag:main-reply-prompt-assembly -- --request-id req_xxx` 会按 request id 汇总模型调用、request trace 和 `prepare_main_prompt_blocks` 观测证据；`npm run diag:main-reply-prompt-assembly -- --text "..."` 会用当前本地 runtime 重建 prompt snapshot，列出 stable/dynamic/assistant-only blocks、persona modules、persona worldbook 命中、planner `provided/source`、runtime 本地补入，以及每个 block 的 `sourceFile/sourcePolicy`。管理员 `/debug replyprompt|prompt-assembly|system-prompt` 复用同一入口。验收：`node tests/mainReplyPromptAssemblyDiagnostics.test.js`、`node tests/mainReplyDiagnosticsAdminCommand.test.js`、`npm run diag:main-reply-prompt-assembly -- --text "服饰专门学校和N25两个都不放弃" --worldbook-semantic-limit=0`、`node -e "require('./api/runtimeV2/context/service')"` 通过；实测 planner 未提供、`source=heuristic` 且 worldbook session `readOnly=true` 时，`wb_mizuki_future_two_tracks` 仍由 SQL worldbook 主读命中并作为 `persona_module_*` 动态块进入主回复。小目标已完成：planner 关闭/超时时本地 SQL worldbook 和 persona modules 的注入路径可直接验收。
 - 2026-06-13 19:57 +08:00：`normal_fast_reply` 新增 SQL worldbook 轻量召回。快速链路仍不加载主回复完整动态 prompt，也不调用远程 planner；当本轮文本通过 worldbook gate 时，复用 SQL-backed persona module 候选，筛选 `wb_mizuki_*` 后注入独立 `[FastWorldbook]`，默认最多 1 个、`tokenCost<=180`、正文最多 900 字符。普通“随便聊聊”等闲聊仍不注入 worldbook。新增 `NORMAL_FAST_REPLY_WORLDBOOK_ENABLED`、`NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE`、`NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST`、`NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS` 约束预算。验收：`node tests/normalFastReplyRuntime.test.js` 覆盖“瑞希未来两个都不放弃是什么意思”命中 `wb_mizuki_future_two_tracks` 且普通闲聊不命中；`node tests/localPromptRecall.test.js`、`node tests/normalFastReplyConfig.test.js`、`node tests/normalFastReplyGate.test.js` 通过。小目标已完成：普通快速回复可用本地 SQL 世界书补设定。
 - 2026-06-13 19:53 +08:00：`normal_fast_reply` 改为可加载最多 2 个短 persona modules。快速链路复用本地候选/SQL recall 生成模块候选，但只允许非 `wb_mizuki_*`、非 `core_baseline`、`tokenCost<=100` 的模块进入 `[FastPersonaModules]`，并用 `NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE`、`NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST`、`NORMAL_FAST_REPLY_PERSONA_MODULE_TEXT_MAX_CHARS` 约束预算；不加载主回复完整动态 prompt。该条当时不注入 worldbook，2026-06-13 19:57 后 worldbook 改由独立 `[FastWorldbook]` 预算块处理。验收：`node --unhandled-rejections=strict tests/normalFastReplyRuntime.test.js`、`node --unhandled-rejections=strict tests/localPromptRecall.test.js`、`node --unhandled-rejections=strict tests/normalFastReplyConfig.test.js` 通过。小目标已完成：普通快速回复可带短 persona 姿态补丁。
 - 2026-06-13 17:59 +08:00：本地 SQLite prompt recall 接入主回复动态 prompt。新增 `data/local_prompt_recall.sqlite` 重建入口 `node scripts/rebuild-local-prompt-recall-db.js`，从 `persona/05_examples.index.json` 和 `persona_modules/module-catalog.json`/`.txt` 建立 FTS、触发词和可选 embedding JSON；主回复在 dynamic few-shot 和 persona module selection 前优先本地召回，空库、embedding 不可用或召回为空时回退旧 JSON 规则。选中的本地模块会回填到 `dynamicPromptPlan.personaModules`，因此仍经 `persona_module_<id>` block 注入。该条记录当时说明 `normal_fast_reply` 不加载 persona modules，2026-06-13 19:53 后快速链路只加载最多两个短模块。验收：`node --unhandled-rejections=strict tests/localPromptRecall.test.js` 通过并覆盖无远程 planner 时 `persona_module_care_light` 进入最终 dynamic block；`npm run diag:main-reply -- --prompt-blocks "真冬刚才那样说，我有点不知道怎么接"` 输出 `plannerChosenPersonaModules=["mafuyu_branch","phase2_growth"]`；`node scripts/rebuild-local-prompt-recall-db.js --status` 返回 `example=17,module=183`；`npm run check:prompts` 通过。`npm test` 本机 244s 超时未返回断言失败。小目标已完成：planner 关闭/缺席时，persona module 和示例仍可由本地 SQL 召回进入主动态 prompt。
@@ -196,6 +197,8 @@ MAIN_REPLY_CONTEXT_NORMAL_SUMMARY_LOAD_COUNT=7
 ```bash
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:main-reply-prompt -- --limit 20 --json
+npm run diag:main-reply-prompt-assembly -- --text "服饰专门学校和N25两个都不放弃"
+npm run diag:main-reply-prompt-assembly -- --request-id req_xxx
 npm run diag:main-reply-token-budget -- --limit 20 --json
 npm run diag:chat-default-memory-leak -- --since 24h --limit 20
 npm run diag:chat-default-memory-leak -- --since 24h --json
