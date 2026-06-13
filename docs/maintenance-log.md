@@ -1,3 +1,11 @@
+## 运行维护 2026-06-13 23:03
+
+- 小目标：把 QQ thinking emoji 默认编号切换到 `355`。
+- 最小修复：`config/index.js` 中 `QQ_THINKING_EMOJI_IDS` 默认值从 `[212]` 改为 `[355]`，仍保留环境变量覆盖能力。
+- 检查：未发现 `.env*` 中存在 `QQ_THINKING_EMOJI_IDS=` 覆盖项。
+- 验证：`node -e "const config=require('./config'); console.log(config.QQ_THINKING_EMOJI_IDS.join(','))"` 输出 `355`；`node tests/qqActionService.test.js` 通过。
+- 小目标已完成：thinking emoji 默认发送目标已切到 355。
+
 ## 运行维护 2026-06-13 22:57
 
 - 现场症状：thinking emoji 不能成功发送；`data/napcat-health-events.ndjson` 里最近降级均为 `reason=napcat_offline`，但只读健康诊断显示 NapCat 总体已恢复 online。
