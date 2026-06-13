@@ -191,7 +191,7 @@ function createPromptRuntime({ promptsDir, personaDir, promptManifestPath, safeR
     const rootSnapshot = buildPromptSnapshot(rootBlocks, {
       stage: 'main',
       policyKey: 'config/system_prompt/root',
-      includeConditionalBlocks: true
+      isAdmin: true
     });
     const publicRootSnapshot = buildPromptSnapshot(rootBlocks, {
       stage: 'main',

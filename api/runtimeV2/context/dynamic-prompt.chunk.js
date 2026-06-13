@@ -4,6 +4,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const reviewMode = String(options?.reviewMode || '').trim().toLowerCase();
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  const modelName = String(options?.modelName || options?.model_name || options?.model || currentConfig.AI_MODEL || '').trim();
   const adminPromptContext = resolveMainReplyAdminPromptContext({
     userId,
     routeMeta,
@@ -148,7 +149,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     promptModeFingerprint,
     promptManifestFingerprint: systemPromptFingerprint,
     systemPromptFingerprint,
-    modelName: options.modelName || options.model_name || options.model,
+    modelName,
     adminPromptContext,
     sharedShortTermSignature: sharedShortTermContext.sharedShortTermSignature,
     sessionCacheFingerprint
@@ -163,6 +164,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     const customBuilt = await withSoftTimeout(
       () => renderPromptLayers(promptMaterials, {
         ...options,
+        modelName,
         isAdmin: adminPromptContext,
         sharedShortTermContext
       }),
@@ -212,6 +214,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const essentialRenderStartedAt = Date.now();
   const stableLayer = stableCacheHit || await renderPromptLayers(promptMaterials, {
     ...options,
+    modelName,
     isAdmin: adminPromptContext,
     sharedShortTermContext,
     includeOptionalContextBlocks: false,
@@ -222,6 +225,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   });
   const sessionCandidateLayer = await renderPromptLayers(promptMaterials, {
     ...options,
+    modelName,
     isAdmin: adminPromptContext,
     sharedShortTermContext,
     cachedStableSystemBlocks: stableLayer.stableSystemBlocks,
@@ -355,6 +359,32 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     }));
   }
 
+  const geminiRecentStyleGuardText = buildGeminiRecentStyleGuardPrompt({
+    modelName,
+    userId,
+    groupId: routeMeta.groupId || routeMeta.group_id || '',
+    sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+    routePolicyKey,
+    topRouteType,
+    routeMeta,
+    reviewMode,
+    isAdmin: adminPromptContext,
+    config: currentConfig
+  });
+  if (geminiRecentStyleGuardText) {
+    extraBlocks.push(createPromptBlock('gemini_recent_style_guard', 'Gemini Recent Style Guard', geminiRecentStyleGuardText, {
+      stage: 'main',
+      priority: 151,
+      authority: 'runtime_style_policy',
+      kind: 'style_policy',
+      source: 'runtime',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true
+      }
+    }));
+  }
+
   const optionalBuildStartedAt = Date.now();
   const optionalBuildEnabled = currentConfig.PROMPT_OPTIONAL_BUILD_ENABLED !== false;
   const optionalBudgetMs = Math.max(0, Number(currentConfig.PROMPT_OPTIONAL_BUILD_BUDGET_MS || 0) || 0);
@@ -367,6 +397,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     optionalLayer = await withSoftTimeout(
       () => renderPromptLayers(promptMaterials, {
         ...options,
+        modelName,
         isAdmin: adminPromptContext,
         sharedShortTermContext,
         cachedStableSystemBlocks: stableLayer.stableSystemBlocks,
@@ -611,6 +642,9 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   const plannerProvidedDynamicPlan = dynamicPromptPlan.plannerProvided === true;
   const shouldUseHeuristicDynamicPlan = !plannerProvidedDynamicPlan;
   const runtimeAddedIds = ['roleplay_runtime_context', 'chat_liveness_discipline', 'roleplay_inner_protocol'];
+  if (geminiRecentStyleGuardText) {
+    runtimeAddedIds.push('gemini_recent_style_guard');
+  }
   if (isGroupDirectChatRoute({ topRouteType, routeMeta })) {
     runtimeAddedIds.push('group_direct_chat_style_guard', 'persona_module:scene_group_insert');
   }
@@ -668,6 +702,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     'roleplay_inner_protocol',
     'directed_context',
     'group_direct_chat_style_guard',
+    'gemini_recent_style_guard',
     'context_stats_instruction'
   ]);
   const alreadyCombinedSingletonIds = new Set(
@@ -803,6 +838,6 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
       stage: 'main',
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
       isAdmin: adminPromptContext,
-      modelName: options.modelName || options.model_name || options.model
+      modelName
     }
   );

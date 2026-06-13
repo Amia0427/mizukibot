@@ -31,6 +31,7 @@
     "diag:runtime-exceptions": "node scripts/diagnose-runtime-exceptions.js",
     "diag:main-bot-restarts": "node scripts/diagnose-main-bot-restarts.js",
     "diag:low-resource": "node scripts/diagnose-low-resource.js",
+    "diag:gemini-sampling": "node scripts/diagnose-gemini-sampling-degradation.js",
     "export:gemini-dialogues": "node scripts/export-gemini-user-dialogues.js",
     "memory:v3:migrate": "node scripts/migrate-memory-v3.js",
     "memory:v3:import-file": "node scripts/import-memory-file.js",

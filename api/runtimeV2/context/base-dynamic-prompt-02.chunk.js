@@ -11,6 +11,19 @@
         })
       ]
     );
+    if (geminiRecentStyleGuardText) {
+      compactPromptBlocks.push(createPromptBlock('gemini_recent_style_guard', 'Gemini Recent Style Guard', geminiRecentStyleGuardText, {
+        stage: 'main',
+        priority: 151,
+        authority: 'runtime_style_policy',
+        kind: 'style_policy',
+        source: 'runtime',
+        lane: 'dynamic_context',
+        meta: {
+          optional: true
+        }
+      }));
+    }
     const compactSelectedBlocks = filterBlocksByPlan(compactPromptBlocks, effectiveBaseDynamicPromptPlan, {
       requiredIds: [],
       runtimeAddedIds: baseRuntimeAddedIds,
@@ -23,7 +36,7 @@
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main_compact',
       budgetTokens: promptBudget,
       isAdmin: adminPromptContext,
-      modelName: options.modelName || options.model_name || options.model
+      modelName
     });
     dynamicPrompt = serializePromptBlocks(compactSelectedBlocks);
   }

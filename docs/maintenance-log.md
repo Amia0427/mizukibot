@@ -1,3 +1,20 @@
+## 运行维护 2026-06-13 09:03
+
+- 完成 Gemini 真实问题优化 4/5：新增 `utils/geminiRecentStyleGuard.js`，只保存普通 Gemini 回复的起手、尾音、固定短语派生信号，不保存完整回复原文。
+- 主回复动态 prompt 和 base 兜底 prompt 新增 `gemini_recent_style_guard`，有最近重复信号时强制进入 `dynamic_context`，提示本轮避开高频口吻锚点并保持短句。
+- `api/runtimeV2/nodes/persist.js` 在成功持久化普通 Gemini 回复后记录风格信号；管理员、review、系统发起和非 Gemini 模型不记录、不注入。
+- 管理员隔离收紧：`includeConditionalBlocks` 不再绕过 `admin_only`，主回复 admin 稳定系统提示词只允许显式 admin 或管理员私聊上下文进入，管理员群聊普通发言不带 admin-only 稳定 prompt。
+- 回归覆盖：`tests/geminiRecentStyleGuard.test.js`、`tests/promptCompiler.test.js`、`tests/adminStableSystemPrompt.test.js`。
+- 小目标已完成：Gemini 重复口癖能在真实回复后自动降频，管理员破限/anti-refusal 文案不再误进普通 Gemini/user prompt。
+
+## 运行维护 2026-06-13 07:52
+
+- 新增 Gemini 采样退化可复跑对比诊断：`npm run diag:gemini-sampling`。
+- 复用现有 `scripts/export-gemini-user-dialogues.js` 的导出结构；诊断脚本支持 `--file` 单样本、`--before/--after` 固定文件对比、`--export-after` 现采当前窗口。
+- 统计口径：只对有 `assistant_reply_preview` 的 records 计入模板化、过顺从、节奏发僵、重复尾巴四类频次；缺失预览单独列出。
+- 回归覆盖：`tests/geminiSamplingDegradationDiagnostic.test.js`。
+- 小目标已完成：Gemini 口吻退化修复前后可以用同一命令复查，不再靠手工样本翻阅。
+
 ## 运行维护 2026-06-13 01:53
 
 - 基于 `scripts/export-gemini-user-dialogues.js` 导出最近 48 小时 Gemini 对话：198 条 conversation、263 次成功 Gemini 调用、43 条有主回复预览。

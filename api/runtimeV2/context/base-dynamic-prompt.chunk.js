@@ -20,6 +20,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     : normalizeDynamicPromptPlan(options);
   const routePolicyKey = String(options?.routePolicyKey || '').trim().toLowerCase();
   const topRouteType = String(options?.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+  const modelName = String(options?.modelName || options?.model_name || options?.model || config.AI_MODEL || '').trim();
   const chatSurface = resolveChatSurface({
     routeMeta,
     topRouteType,
@@ -199,7 +200,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       stage: customStage,
       policyKey: String(options?.routePolicyKey || '').trim() || customStage,
       isAdmin: adminPromptContext,
-      modelName: options.modelName || options.model_name || options.model
+      modelName
     });
     return {
       dynamicPrompt: customSnapshot.renderedSystemMessages.map((message) => String(message.content || '').trim()).filter(Boolean).join('\n\n'),
@@ -228,7 +229,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       userId,
       routeMeta,
       isAdmin: adminPromptContext,
-      modelName: options.modelName || options.model_name || options.model
+      modelName
     }).filter(Boolean);
   promptBlocks.push(...stablePromptBlocks);
   const roleplayRuntimeContextText = buildRoleplayRuntimeContextPromptSnippet({
@@ -293,6 +294,31 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       optional: true
     }
   }));
+  const geminiRecentStyleGuardText = buildGeminiRecentStyleGuardPrompt({
+    modelName,
+    userId,
+    groupId: routeMeta.groupId || routeMeta.group_id || '',
+    sessionKey: options.sessionKey || routeMeta.sessionKey || routeMeta.session_key || '',
+    routePolicyKey,
+    topRouteType,
+    routeMeta,
+    reviewMode: options.reviewMode,
+    isAdmin: adminPromptContext,
+    config
+  });
+  if (geminiRecentStyleGuardText) {
+    promptBlocks.push(createPromptBlock('gemini_recent_style_guard', 'Gemini Recent Style Guard', geminiRecentStyleGuardText, {
+      stage: 'main',
+      priority: 151,
+      authority: 'runtime_style_policy',
+      kind: 'style_policy',
+      source: 'runtime',
+      lane: 'dynamic_context',
+      meta: {
+        optional: true
+      }
+    }));
+  }
   promptBlocks.push(
     ...personaMemoryPrompt.systemMessages
       .map((message, index) => createPromptBlock(
@@ -623,6 +649,9 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     slot: item.slot
   })));
   const baseRuntimeAddedIds = ['roleplay_runtime_context', 'chat_liveness_discipline', 'roleplay_inner_protocol'];
+  if (geminiRecentStyleGuardText) {
+    baseRuntimeAddedIds.push('gemini_recent_style_guard');
+  }
   if (isBalancedOrMinimalPromptMode(mainReplyPromptMode) && includeOptionalContextBlocks && shortTermContinuityText) {
     baseRuntimeAddedIds.push('short_term_continuity');
   }
@@ -687,7 +716,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
     policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main',
     budgetTokens: Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens),
     isAdmin: adminPromptContext,
-    modelName: options.modelName || options.model_name || options.model
+    modelName
   });
   let dynamicPrompt = serializePromptBlocks(snapshotBlocks);
   const promptBudget = Math.max(1200, affinity.contextWindowTokens - affinity.shortTermMemoryTokens);
@@ -697,7 +726,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       userId,
       routeMeta,
       isAdmin: adminPromptContext,
-      modelName: options.modelName || options.model_name || options.model
+      modelName
     }).concat(
       [
         createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {

@@ -55,6 +55,9 @@ const {
   resolveChatSurface
 } = require('../../../utils/chatLivenessContext');
 const {
+  buildGeminiRecentStyleGuardPrompt
+} = require('../../../utils/geminiRecentStyleGuard');
+const {
   formatDateInTz,
   formatTimeInTz,
   formatWeekdayInTz,
@@ -88,10 +91,19 @@ function resolveMainReplyAdminPromptContext(input = {}) {
   );
   if (!userId) return false;
   const currentConfig = normalizeObject(input.config, getConfig());
-  return normalizeArray(currentConfig.ADMIN_USER_IDS)
+  const isAdminUser = normalizeArray(currentConfig.ADMIN_USER_IDS)
     .map((item) => normalizeText(item))
     .filter(Boolean)
     .includes(userId);
+  if (!isAdminUser) return false;
+  const chatType = normalizeText(
+    input.chatType
+    || options.chatType
+    || options.chat_type
+    || routeMeta.chatType
+    || routeMeta.chat_type
+  ).toLowerCase();
+  return chatType === 'private' || chatType === 'direct';
 }
 
 function buildStableSystemPromptFingerprint(runtimeConfig = config) {
