@@ -26,6 +26,17 @@
         "priority": -1000
       },
       {
+        "id": "normal_user_default_prompt",
+        "path": "defaut.txt",
+        "required": false,
+        "kind": "system_root",
+        "authority": "system_root",
+        "priority": -950,
+        "applies_when": {
+          "normal_user_only": true
+        }
+      },
+      {
         "id": "gemini_system_prompt",
         "path": "GEMINI.txt",
         "required": false,

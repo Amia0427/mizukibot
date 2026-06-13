@@ -259,6 +259,7 @@ function createPrepareNode(deps = {}) {
   function buildDefaultStableSystemBlocks(request = {}) {
     return normalizePromptBlocks(buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT,
+      systemPromptBlocks: config.SYSTEM_PROMPT_BLOCKS,
       userId: request.userId,
       routeMeta: request.routeMeta,
       isAdmin: isAdminPromptRequest(request)
@@ -588,7 +589,9 @@ function createPrepareNode(deps = {}) {
       ? buildPromptSnapshot(allBlocks, {
         stage: 'main',
         policyKey: String(request.routePolicyKey || '').trim() || 'direct_chat/main',
-        isAdmin: isAdminPromptRequest(request)
+        isAdmin: isAdminPromptRequest(request),
+        userId: request.userId,
+        adminUserIds: config.ADMIN_USER_IDS
       })
       : null;
     const promptSnapshot = {

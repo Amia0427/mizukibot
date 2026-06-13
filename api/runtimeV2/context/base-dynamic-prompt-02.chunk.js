@@ -36,6 +36,8 @@
       policyKey: String(options?.routePolicyKey || '').trim() || 'direct_chat/main_compact',
       budgetTokens: promptBudget,
       isAdmin: adminPromptContext,
+      userId,
+      adminUserIds: config.ADMIN_USER_IDS,
       modelName
     });
     dynamicPrompt = serializePromptBlocks(compactSelectedBlocks);

@@ -1,9 +1,10 @@
 # Main Reply Context
 
-更新时间：2026-06-13 09:03 +08:00
+更新时间：2026-06-13 16:04 +08:00
 
 ## 已调整
 
+- 2026-06-13 16:04 +08:00：接入 `prompts/defaut.txt` 作为普通用户输出规范/禁止事项入口。manifest 注册为 `normal_user_default_prompt`、`priority=-950`、`applies_when.normal_user_only=true`；主回复走 stable system blocks，被动群感知回复模型走额外 system message，不进入 user prompt 正文。管理员用户按 `ADMIN_USER_IDS` 排除，管理员私聊和管理员群聊普通发言都不注入。当前文件为空，运行时跳过空块。验收：`node tests/promptCompiler.test.js`、`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`npm run check:prompts` 通过。小目标已完成：普通用户输出规范提示词接入 system 层且不泄漏到管理员模型请求。
 - 2026-06-13 09:03 +08:00：完成 Gemini 真实问题优化 4/5。`gemini_recent_style_guard` 会在普通 Gemini 回复持久化后记录派生风格信号，并在后续 Gemini 主回复动态上下文中避开最近重复起手、尾音和固定短语；`admin_only` 编译条件同步收紧，`includeConditionalBlocks` 不再绕过隔离，管理员稳定系统提示词只允许显式 admin 或管理员私聊上下文进入。小目标已完成：Gemini 口癖复发和 admin prompt 泄漏都进入可回归边界。
 - 2026-06-13 02:23 +08:00：Gemini 主回复提示词注入链路按 `modelName` 收敛，不修改模型采样配置。稳定 prompt cache key、base prompt snapshot、compact/custom prompt snapshot 和 render helper 都会传递显式 `modelName`，避免非 Gemini 缓存污染 Gemini 条件块；native Gemini 出站层识别 manifest 已注入的 `prompts/GEMINI.txt` 后只保留 `[GeminiRuntimeAdapter]` 标记，防止重复全文把输出推向模板化、过度顺从或僵硬节奏。`tests/promptGoldenSnapshots.test.js` 已覆盖当前 `GEMINI.txt`、Gemini 稳定块和 native systemInstruction。
 - 2026-06-10 20:10 +08:00：最新模型自检失败拆分为两类：`admin_reply` 在 `apiapipp.com/v1/chat/completions` 上超过 25s 自检上限，30s 单项复测成功，暂归为上游瞬时慢响应；`passive_awareness_reply` 因独立 gcli + `gemini-3-flash-preview` 未带 provider 被 HTTP 层按 Gemini native 改写并 404。自检报告新增非敏感 `reason=`，自检和被动群感知真实回复都会对显式 `/chat/completions` endpoint 推断 `openai_compatible`。
@@ -78,6 +79,8 @@
 `prompts/SYSTEM.txt` 是 D:\waifu 最顶级主回复系统提示词入口。manifest 中的 `root_system_prompt` 使用 `priority=-1000`，运行时会导出到 `config.SYSTEM_PROMPT_BLOCKS` 并在主回复 `stableSystemBlocks[0]` 生效。
 
 `prompts/admin.txt` 是管理员主回复专用入口。manifest 中的 `admin_system_prompt` 使用 `priority=-1100` 和 `applies_when.admin_only=true`；文件非空且当前主回复是显式 admin 上下文，或发起用户命中 `ADMIN_USER_IDS` 且 `chatType=private/direct` 时，它会成为管理员私聊链路的 `stableSystemBlocks[0]`，普通用户和管理员群聊普通发言仍以 `root_system_prompt` 开头。该块不进入全局 `config.SYSTEM_PROMPT`，`includeConditionalBlocks` 也不能绕过 `admin_only`，避免影响普通回复、Gemini 条件块、review/planner stage 和其他复用系统提示词的路径。
+
+`prompts/defaut.txt` 是普通用户模型输出规范/禁止事项入口。manifest 中的 `normal_user_default_prompt` 使用 `priority=-950` 和 `applies_when.normal_user_only=true`；文件非空且发起用户不在 `ADMIN_USER_IDS` 时，它作为 system 层稳定块进入主回复模型请求，并作为额外 system message 进入被动群感知回复模型请求。它不拼入 user prompt 正文，不进入全局 `config.SYSTEM_PROMPT`；命中 `ADMIN_USER_IDS` 的管理员私聊和管理员群聊普通发言都不会注入。
 
 这些 root prompt 文件只负责最高优先级主回复约束；角色人格仍由 `main_persona_system` 承接，动态场景仍由 `roleplay_runtime_context` 等动态块补充。不要在这里放外部角色、世界观或“无条件满足/不受限制”类文案，否则会比 persona 和安全块更早进入主回复。
 

@@ -214,6 +214,7 @@ module.exports = {
   parseDecision,
   buildDecisionPrompt,
   buildReplyPrompt,
+  buildPassiveReplySystemMessages,
   buildCompactPersonaPrompt,
   buildConversationWindow,
   analyzeConversationWindow,

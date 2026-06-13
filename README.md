@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 16:04 +08:00**：接入普通用户专用输出规范入口 `prompts/defaut.txt`。该文件现在以 `normal_user_default_prompt` 注册为 stable system block，只在发起用户不命中 `ADMIN_USER_IDS` 时进入普通主回复和被动群感知回复模型请求；管理员私聊和管理员群聊普通发言均不注入。当前文件为空，运行时保持空文件跳过。验收：`node tests/promptCompiler.test.js`、`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`npm run check:prompts` 均通过。小目标完成：普通用户输出规范提示词进入 system 层，且管理员请求隔离。
+
 **2026-06-13 15:27 +08:00**：新增只读 Gemini 最近风格信号诊断入口 `npm run diag:gemini-style-signals`。该入口直接读取 `data/gemini-recent-style-signals.json`，汇总最近高频起手、尾音、固定短语、命中次数和最近命中时间，并标出会进入 `gemini_recent_style_guard` 的信号；支持 `-- --json`、`-- --file <path>`、`-- --scope-key <key>`。实际验收：当前本机该数据文件不存在，命令返回 `missing records=0 recent=0 guard=no`，未创建或改写运行数据。小目标完成：Gemini 口癖 guard 的当前信号状态可一条只读命令复查。
 
 **2026-06-13 15:27 +08:00**：完成仓库组成轻量审计与低风险整理。根目录两个无运行引用的角色提示词资料移入 `docs/reference/roleplay-prompts/`，新增 `docs/repository-structure.md` 作为后续代理判断代码、运行数据、参考资料和 artifacts 边界的入口；`.gitignore` 补充本地 Gemini 诊断导出和未来 prompt `.bak` 草稿规则。未删除文件，候选清单见 `docs/repo-cleanup.md`。小目标完成：仓库顶层更可读，临时诊断文件不再污染状态区。

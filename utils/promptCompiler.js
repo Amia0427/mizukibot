@@ -56,6 +56,52 @@ function shouldIncludeBlockForStage(block = {}, stage = 'main') {
   return blockStage === normalizeStage(stage, 'main');
 }
 
+function resolvePromptUserId(env = {}) {
+  const routeMeta = normalizeObject(env.routeMeta || env.route_meta, {});
+  return normalizeText(
+    env.userId
+    || env.user_id
+    || env.senderId
+    || env.sender_id
+    || routeMeta.userId
+    || routeMeta.user_id
+    || routeMeta.senderId
+    || routeMeta.sender_id
+  );
+}
+
+function normalizeAdminUserIds(env = {}) {
+  const value = env.adminUserIds || env.admin_user_ids || env.ADMIN_USER_IDS;
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeText(item)).filter(Boolean);
+  }
+  return String(value || '')
+    .split(',')
+    .map((item) => normalizeText(item))
+    .filter(Boolean);
+}
+
+function isExplicitAdminPromptEnv(env = {}) {
+  if (env.isAdmin === true || env.admin === true) return true;
+  return normalizeText(env.userRole).toLowerCase() === 'admin';
+}
+
+function isConfiguredAdminPromptUser(env = {}) {
+  if (isExplicitAdminPromptEnv(env)) return true;
+  const userId = resolvePromptUserId(env);
+  if (!userId) return false;
+  return normalizeAdminUserIds(env).includes(userId);
+}
+
+function isNormalUserPromptEnv(env = {}) {
+  if (env.isNormalUser === true || normalizeText(env.userRole).toLowerCase() === 'normal') {
+    return !isConfiguredAdminPromptUser(env);
+  }
+  const userId = resolvePromptUserId(env);
+  if (!userId || isConfiguredAdminPromptUser(env)) return false;
+  return normalizeAdminUserIds(env).length > 0;
+}
+
 function checkAppliesWhen(block = {}, env = {}) {
   const appliesWhen = normalizeObject(block.appliesWhen, {});
   const stage = normalizeStage(env.stage, 'main');
@@ -64,12 +110,11 @@ function checkAppliesWhen(block = {}, env = {}) {
     if (allowedStages.length > 0 && !allowedStages.includes(stage)) return false;
   }
   const adminOnly = appliesWhen.adminOnly === true || appliesWhen.admin_only === true;
-  if (
-    adminOnly
-    && env.isAdmin !== true
-    && env.admin !== true
-    && normalizeText(env.userRole).toLowerCase() !== 'admin'
-  ) {
+  if (adminOnly && !isExplicitAdminPromptEnv(env)) {
+    return false;
+  }
+  const normalUserOnly = appliesWhen.normalUserOnly === true || appliesWhen.normal_user_only === true;
+  if (normalUserOnly && !isNormalUserPromptEnv(env)) {
     return false;
   }
   if (appliesWhen.modelPattern || appliesWhen.model_pattern) {
