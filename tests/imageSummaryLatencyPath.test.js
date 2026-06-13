@@ -148,6 +148,33 @@ module.exports = (async () => {
   assert.strictEqual(fallbackModelConfig.timeoutMs, 18000);
   assert.strictEqual(fallbackModelConfig.retries, 3);
 
+  const workerSuccessModelConfig = resolveVisionFallbackModelConfig({
+    ...imageSummaryRoute,
+    imageUrl: null,
+    meta: {
+      ...imageSummaryRoute.meta,
+      visualContext: {
+        worker: {
+          succeeded: true,
+          imageCount: 1
+        }
+      }
+    }
+  }, null, 'u_image_summary', buildImageModelConfig);
+  assert.ok(workerSuccessModelConfig, 'image_summary should keep image model config after worker success clears imageUrl');
+  assert.strictEqual(workerSuccessModelConfig.promptTokenHardLimit, 20000);
+  assert.strictEqual(workerSuccessModelConfig.timeoutMs, 18000);
+
+  const noWorkerModelConfig = resolveVisionFallbackModelConfig({
+    ...imageSummaryRoute,
+    imageUrl: null,
+    meta: {
+      ...imageSummaryRoute.meta
+    }
+  }, null, 'u_image_summary', buildImageModelConfig);
+  assert.ok(noWorkerModelConfig, 'image_summary should use image model budget even without visualContext metadata');
+  assert.strictEqual(noWorkerModelConfig.promptTokenHardLimit, 20000);
+
   const imageModelConfig = buildImageModelConfig(null, 'u_image_summary', { routeMeta: imageSummaryRoute.meta });
   assert.strictEqual(imageModelConfig.timeoutMs, 18000);
   assert.strictEqual(imageModelConfig.retries, 3);

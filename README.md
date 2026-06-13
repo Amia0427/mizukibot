@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 23:10 +08:00**：修复图片总结主回复 payload 再次膨胀。现场样本 `transform/vision-summary` 仍出现 23k-166k estimated input、最大 user message 159k、主 HTTP 约 62s；原因是 vision worker 成功清空 `imageUrl` 后未继续套图片模型预算，且数组型 text+image payload 绕过 `vision_lite` 裁剪。现 `image_summary/image_qa` 无论 worker 是否成功都使用图片模型预算/18s 超时，数组型视觉消息会重建紧凑 text part 并保留 image_url。验收：`node tests/imageSummaryLatencyPath.test.js`、`node tests/messageDispatchCoordinator.test.js`、`node tests/runtimeStreamingCoordinator.test.js`、`node tests/imageSummaryVisionLiteBudget.test.js`、`node tests/runtimeV2VisionMessageContent.test.js` 均通过。小目标完成：第 2 个凝滞点的主链图片 payload 已加硬控。
+
 **2026-06-13 23:03 +08:00**：thinking emoji 默认编号改为 `355`。`QQ_THINKING_EMOJI_IDS` 默认值从 `[212]` 调整为 `[355]`；本机检查未发现 `.env*` 覆盖该键，因此默认配置会直接生效，后续仍可用环境变量覆盖。验收：`node -e "const config=require('./config'); console.log(config.QQ_THINKING_EMOJI_IDS.join(','))"` 输出 `355`，`node tests/qqActionService.test.js` 通过。小目标完成：thinking emoji 默认发送目标切到 355。
 
 **2026-06-13 20:15 +08:00**：打磨普通用户内容边界。`prompts/defaut.txt` 删除 "/%"结尾标记、删除括号内的教学性解释（"然后转到别的话题"等）、简化处理原则从4条合并为2条、措辞更口语化。整体更简洁、更自然、更符合角色表达。验收：`npm run check:prompts` 通过。小目标完成：内容边界文案优化。

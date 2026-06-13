@@ -576,26 +576,42 @@ function createStreamingCoordinatorHelpers(deps = {}) {
   }
 
   function buildVisionLiteUserMessageContent(request = {}, messageContent = '') {
-    if (Array.isArray(messageContent)) return messageContent;
     const routeMeta = normalizeObject(request.routeMeta, {});
     const visualContext = normalizeObject(request.visualContext || routeMeta.visualContext, {});
     const imageCount = Math.max(
       1,
       normalizeArray(request.imageUrls || routeMeta.imageUrls).length,
       Number(visualContext?.worker?.imageCount || 0) || 0,
-      normalizeArray(visualContext?.images).length
+      normalizeArray(visualContext?.images).length,
+      Array.isArray(messageContent)
+        ? messageContent.filter((part) => part && typeof part === 'object' && String(part.type || '').trim() === 'image_url').length
+        : 0
     );
+    const imageParts = Array.isArray(messageContent)
+      ? messageContent.filter((part) => part && typeof part === 'object' && String(part.type || '').trim() === 'image_url')
+      : [];
+    const textContent = Array.isArray(messageContent)
+      ? messageContent
+          .map((part) => {
+            if (typeof part === 'string') return part;
+            if (part && typeof part.text === 'string') return part.text;
+            if (part && typeof part.content === 'string') return part.content;
+            return '';
+          })
+          .filter((text) => String(text || '').trim())
+          .join('\n\n')
+      : messageContent;
     if (typeof buildVisionLiteTextContent === 'function') {
       return [{
         type: 'text',
-        text: buildVisionLiteTextContent(messageContent, imageCount)
-      }];
+        text: buildVisionLiteTextContent(textContent, imageCount)
+      }].concat(imageParts);
     }
     const budget = Math.max(256, Number(config?.VISION_ROUTE_USER_TEXT_MAX_TOKENS || 6000) || 6000);
     return [{
       type: 'text',
-      text: trimTextByTokenBudget(normalizeMessageContent(messageContent), budget, 'tail')
-    }];
+      text: trimTextByTokenBudget(normalizeMessageContent(textContent), budget, 'tail')
+    }].concat(imageParts);
   }
 
   function buildDirectReplyMessages(state, messageContent, systemMessages = []) {

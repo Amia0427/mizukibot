@@ -114,7 +114,11 @@ async function resolveStableVisualUrl(url = '', refMap = null) {
 }
 
 function resolveLegacyVisionFallbackModelConfig(imageUrl = null, userId = '', routeMeta = {}) {
-  if (!String(imageUrl || '').trim()) return null;
+  const chatMode = String(routeMeta?.chatMode || routeMeta?.chat_mode || '').trim().toLowerCase();
+  const hasVisionInput = Boolean(String(imageUrl || '').trim())
+    || chatMode === 'image_qa'
+    || chatMode === 'image_summary';
+  if (!hasVisionInput) return null;
   return buildImageModelConfig(null, userId, { routeMeta });
 }
 

@@ -1,7 +1,7 @@
   async function askAIDispatch(question, userInfo, userId, customPrompt = null, imageUrl = null, options = {}) {
     const mutableOptions = options && typeof options === 'object' ? options : {};
     mutableOptions.routePrompt = String(mutableOptions.routePrompt || '').trim() || null;
-    if (!mutableOptions.modelConfig && imageUrl) {
+    if (!mutableOptions.modelConfig) {
       const fallbackModelConfig = resolveLegacyVisionFallbackModelConfig(imageUrl, userId, mutableOptions.routeMeta || {});
       if (fallbackModelConfig) mutableOptions.modelConfig = fallbackModelConfig;
     }
@@ -90,7 +90,7 @@
     const plannerExecutionPlan = mutableOptions.plannerExecutionPlan && typeof mutableOptions.plannerExecutionPlan === 'object'
       ? mutableOptions.plannerExecutionPlan
       : null;
-    if (!mutableOptions.modelConfig && imageUrl) {
+    if (!mutableOptions.modelConfig) {
       const fallbackModelConfig = resolveLegacyVisionFallbackModelConfig(imageUrl, userId, mutableOptions.routeMeta || {});
       if (fallbackModelConfig) mutableOptions.modelConfig = fallbackModelConfig;
     }
