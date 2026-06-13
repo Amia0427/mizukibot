@@ -119,6 +119,38 @@ module.exports = (async () => {
   assert.strictEqual(chat.replyOptions.disableStream, true, 'vision fallback should stay non-streaming');
   assert.strictEqual(chat.replyOptions.deferPersist, true, 'direct chat replies should defer persist until send succeeds');
 
+  const workerSuccessImageSummary = await coordinator.dispatchByRoutePlan({
+    route: {
+      meta: {
+        chatMode: 'image_summary',
+        visualContext: {
+          worker: {
+            succeeded: true,
+            imageCount: 1
+          }
+        }
+      }
+    },
+    routeExecutionPlan: {
+      executor: 'direct',
+      allowTools: false,
+      allowStream: false,
+      topRouteType: 'direct_chat',
+      routeDebugKey: 'direct_chat/image_summary/summary',
+      policyKey: 'transform/vision-summary',
+      allowedTools: []
+    },
+    cleanText: 'worker evidence summary',
+    imageUrl: null,
+    userInfo: {},
+    senderId: 'u1',
+    groupId: 'g1'
+  });
+  assert.strictEqual(workerSuccessImageSummary.reply, 'ai reply');
+  assert.ok(workerSuccessImageSummary.replyOptions.modelConfig, 'worker-success image_summary should still use image model config');
+  assert.strictEqual(workerSuccessImageSummary.replyOptions.modelConfig.promptTokenHardLimit, 20000);
+  assert.strictEqual(workerSuccessImageSummary.replyOptions.modelConfig.timeoutMs, 18000);
+
   const unavailableToolChat = await coordinator.dispatchByRoutePlan({
     route: { meta: {} },
     routeExecutionPlan: {

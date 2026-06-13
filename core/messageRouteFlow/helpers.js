@@ -113,10 +113,6 @@ function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = 
     || chatMode === 'image_qa'
     || chatMode === 'image_summary';
   if (!hasVisionInput) return null;
-  const visualContext = route?.meta?.visualContext && typeof route.meta.visualContext === 'object'
-    ? route.meta.visualContext
-    : null;
-  if (!visualContext || visualContext?.worker?.succeeded === true) return null;
   if (typeof buildImageModelConfig !== 'function') return null;
   return buildImageModelConfig(null, userId, { routeMeta: route?.meta || {} });
 }

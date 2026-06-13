@@ -9,6 +9,7 @@ const {
   buildAdminPrivateMainReplyStreamTimeoutReply,
   createAdminPrivateMainReplyStreamFirstTokenTimeoutError
 } = require('../utils/adminPrivateMainReplyStreamTimeout');
+const { trimTextByTokenBudget } = require('../utils/contextBudget');
 
 module.exports = (async () => {
   const deltas = [];
@@ -380,6 +381,75 @@ module.exports = (async () => {
   assert.ok(!visionText.includes('raw quote should drop'));
   assert.ok(!visionText.includes('RetrievedMemory'));
   assert.ok(!visionText.includes('assistant-only should drop'));
+
+  let arrayVisionCanonicalInput = null;
+  const arrayVisionHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildVisionLiteTextContent: (text, imageCount) => [
+      `用户原文：${trimTextByTokenBudget(text, 512, 'tail')}`,
+      `图片数量：${imageCount}`,
+      '用户图片意图：analyze_image'
+    ].join('\n'),
+    buildV2CanonicalSegments: (_state, input) => {
+      arrayVisionCanonicalInput = input;
+      return {
+        segments: {},
+        compactionPlan: {
+          compactedSegments: [
+            { name: 'current_user_turn', messages: input.userTurnMessages || [] }
+          ]
+        }
+      };
+    },
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: []
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async () => 'streamed answer',
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
+    isHumanizerEnabledImpl: () => false,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    config: {
+      AI_MAX_TOKENS: 3500,
+      IMAGE_MODEL_INPUT_TOKEN_HARD_LIMIT: 20000,
+      VISION_ROUTE_SYSTEM_CONTEXT_MAX_TOKENS: 10000
+    },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const oversizedArrayText = `BEGIN_OVERSIZED_ARRAY_TEXT ${'细节'.repeat(8000)}\n真正的问题：总结这张图`;
+  const arrayVisionReplyMessages = arrayVisionHelpers.buildDirectReplyMessages({
+    request: {
+      routePolicyKey: 'transform/vision-summary',
+      routeMeta: { chatMode: 'image_summary' },
+      userId: 'u1',
+      imageUrl: 'https://example.com/a.png',
+      modelConfig: { maxTokens: 512 }
+    },
+    thread: {},
+    memory: {}
+  }, [
+    { type: 'text', text: oversizedArrayText },
+    { type: 'image_url', image_url: { url: 'https://example.com/a.png' } }
+  ], [{ role: 'system', content: 'stable system prompt' }]);
+  const arrayVisionUserContent = arrayVisionReplyMessages.messages[0].content;
+  assert.ok(Array.isArray(arrayVisionUserContent), 'vision_lite should keep multi-part content shape');
+  assert.strictEqual(arrayVisionCanonicalInput.disableMemoryContextSegments, true);
+  assert.strictEqual(arrayVisionUserContent.filter((part) => part.type === 'image_url').length, 1);
+  const arrayVisionUserText = String(arrayVisionUserContent.find((part) => part.type === 'text')?.text || '');
+  assert.ok(arrayVisionUserText.includes('真正的问题：总结这张图'));
+  assert.ok(!arrayVisionUserText.includes('BEGIN_OVERSIZED_ARRAY_TEXT'), 'array-shaped vision text should be trimmed instead of returned unchanged');
+  assert.ok(arrayVisionUserText.length < oversizedArrayText.length / 4, 'array-shaped vision text should be compacted before model dispatch');
 
   const humanizerDeltas = [];
   const humanizerHelpers = createStreamingCoordinatorHelpers({
