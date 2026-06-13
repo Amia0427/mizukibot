@@ -1,5 +1,7 @@
 # Runtime Latency Diagnosis
 
+更新 2026-06-13 21:24 +08:00：复盘最近几次机器人回复，详见 `docs/recent-reply-speed-blockers-2026-06-13.md`。结论：最近慢点主要来自 RuntimeV2 入口前本地空档、主模型上游、planner 工具链和连续消息预处理；成功样本的实际 NapCat 发送多为 234ms-1.4s，不是主瓶颈。验收：`npm run diag:main-reply-lag`、`npm run diag:runtime`、`npm run diag:main-reply-prompt -- --limit 10 --json` 和只读 request trace 聚合均已执行。小目标完成：最近机器人回复速度阻滞点已有可复查证据。
+
 更新 2026-06-13 20:00 +08:00：planner 远程模型请求超时上限从历史 60s 收敛为 15s。`PLANNER_REQUEST_TIMEOUT_MS` 默认值和本地 `.env` 均为 `15000`，配置解析会把更大值封顶到 15 秒；远程 planner 模型请求失败或超时后强制返回 `chat_only/fast_reply`，RuntimeV2 降级普通 `direct_reply` 主对话链路，不再让规则 fallback 继续生成工具计划。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。
 
 更新 2026-06-11 19:10 +08:00：复盘今天 `data/model-calls.ndjson` 的管理员图片总结 `request_id=req_493000182e712ed3`。链路为 `direct_chat/image_summary/summary`、`source=direct_reply`、`stream=false`、`model=claude-opus-4-6`、`main_fallback_scope=admin_shared`，耗时约 51.8s；`prompt_integrity.token_budget` 显示输入约 51,434 tokens，最大消息是最后一条 user 约 46,067 tokens。根因：图片轻上下文只裁 system/history，vision caption worker 成功后仍把完整 `VisionCaptionJSON` 作为纯文本 user payload 交给主模型，并且 `directReply` 会优先复用 `preparedMainConversationContext`。修复：worker 主链问题改为紧凑“视觉证据摘要”；vision 路由在 `directReply` 强制重建 `vision_lite`，不复用 full prepared context；`vision_lite` 对无 image_url 的 worker 文本也按 `VISION_ROUTE_USER_TEXT_MAX_TOKENS` 裁剪。新增 `tests/imageSummaryVisionLiteBudget.test.js` 验证旧大 payload 不再发给主模型、估算输入低于 20k hard cap。小目标完成：管理员图片总结主链输入预算和首响延迟已加硬控。
