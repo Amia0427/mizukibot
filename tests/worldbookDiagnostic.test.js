@@ -34,6 +34,7 @@ const {
   clearWorldbookSessionState('diag-worldbook-test');
 
   console.log('worldbookDiagnostic.test.js passed');
+  process.exit(0);
 })().catch((error) => {
   console.error(error);
   process.exit(1);
