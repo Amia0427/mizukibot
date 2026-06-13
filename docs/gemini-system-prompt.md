@@ -16,6 +16,8 @@
 
 更新 2026-06-13 02:23 +08:00：补齐注入链路回归，不改变温度、top_p、top_k 或其它模型配置。稳定 prompt cache、`buildPromptSnapshot` 和 Gemini native `systemInstruction` 组装都按 `modelName` 识别 Gemini 条件块；native provider 发现 manifest 已经带入 `prompts/GEMINI.txt` 时只追加 `[GeminiRuntimeAdapter]` 标记，不重复粘贴全文。`tests/promptGoldenSnapshots.test.js` 会同时检查当前 `GEMINI.txt`、Gemini 稳定块和 native systemInstruction 不包含高风险通用 Gemini 预设里的模板化、过度顺从或僵硬节奏文案。小目标已完成：采样退化缓解限定在提示词注入链路。
 
+更新 2026-06-13 09:03 +08:00：新增 Gemini 最近风格去重运行时块。普通 Gemini 回复成功持久化后，只记录起手、句尾/尾音和固定短语派生信号到本地 `data/gemini-recent-style-signals.json`；后续普通 Gemini 主回复若命中最近重复锚点，会注入 `gemini_recent_style_guard` 要求避开这些口吻，不保存完整真实回复原文。小目标已完成：`诶——/呜哇/呢/喔/犯规/小彩蛋` 等真实复发模式可以在对话后自动降频。
+
 ## 使用方式
 
 - `prompts/GEMINI.txt` 已在 `prompts/prompt-manifest.json` 中注册为 `gemini_system_prompt`，当模型名包含 `gemini` 时作为稳定系统块进入主回复 prompt。
@@ -23,6 +25,7 @@
 - `GEMINI_NATIVE_SYSTEM_PROMPT_ENABLED=false` 可关闭自动注入；`GEMINI_SYSTEM_PROMPT_PATH` 可指向替代文件。
 - 该文件只做模型适配，不写独立人设、世界观、叙事文风或安全绕过。
 - 仓库根目录的 `通用gemini.txt` 若存在，只作为本地诊断输入；其中通用预设、anti-refusal 或 compliance override 文案不得进入 manifest、native adapter 或提交。
+- Gemini 最近风格去重属于运行时动态块，不写入 `prompts/GEMINI.txt`，也不改变模型采样参数。
 
 ## 筛选原则
 

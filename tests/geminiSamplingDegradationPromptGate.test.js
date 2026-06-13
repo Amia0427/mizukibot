@@ -1,8 +1,16 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const { buildDynamicPrompt } = require('../api/runtimeV2/context/service');
+const { recordGeminiRecentStyleSignal } = require('../utils/geminiRecentStyleGuard');
 
 module.exports = (async () => {
+  const previousStyleStorePath = process.env.GEMINI_RECENT_STYLE_STORE_PATH;
+  const tempStyleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-style-gate-'));
+  process.env.GEMINI_RECENT_STYLE_STORE_PATH = path.join(tempStyleDir, 'signals.json');
+  try {
   const ambient = await buildDynamicPrompt(
     { level: 'friend', points: 10 },
     'u_gemini_sampling_ambient',
@@ -83,4 +91,52 @@ module.exports = (async () => {
   const recallIds = recall.promptSnapshot.assembledBlocks.map((item) => item.id);
   assert.ok(recallIds.includes('retrieved_memory_lite'));
   assert.ok(recallIds.includes('daily_journal'));
+
+  recordGeminiRecentStyleSignal({
+    assistantText: '诶——这个秘密小彩蛋有点犯规喔',
+    modelName: 'gemini-3-flash-preview',
+    userId: 'u_gemini_style_gate',
+    groupId: 'g_style_gate',
+    routePolicyKey: 'chat/default',
+    topRouteType: 'direct_chat',
+    routeMeta: { chatType: 'group', groupId: 'g_style_gate' }
+  });
+  const guarded = await buildDynamicPrompt(
+    { level: 'friend', points: 10 },
+    'u_gemini_style_gate',
+    '继续',
+    null,
+    {
+      modelName: 'gemini-3-flash-preview',
+      routePolicyKey: 'chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: { chatType: 'group', groupId: 'g_style_gate' }
+    }
+  );
+  assert.ok(guarded.promptSnapshot.dynamicBlockIds.includes('gemini_recent_style_guard'));
+  assert.ok(guarded.dynamicPrompt.includes('[GeminiRecentStyleGuard]'));
+  assert.ok(guarded.dynamicPrompt.includes('秘密小彩蛋'));
+
+  const adminGuarded = await buildDynamicPrompt(
+    { level: 'friend', points: 10 },
+    'admin_style_gate',
+    '继续',
+    null,
+    {
+      modelName: 'gemini-3-flash-preview',
+      routePolicyKey: 'direct_chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: { chatType: 'private' },
+      isAdmin: true
+    }
+  );
+  assert.ok(!adminGuarded.promptSnapshot.dynamicBlockIds.includes('gemini_recent_style_guard'));
+  assert.ok(!adminGuarded.dynamicPrompt.includes('[GeminiRecentStyleGuard]'));
+  } finally {
+    if (previousStyleStorePath === undefined) delete process.env.GEMINI_RECENT_STYLE_STORE_PATH;
+    else process.env.GEMINI_RECENT_STYLE_STORE_PATH = previousStyleStorePath;
+    try {
+      fs.rmSync(tempStyleDir, { recursive: true, force: true });
+    } catch (_) {}
+  }
 })();

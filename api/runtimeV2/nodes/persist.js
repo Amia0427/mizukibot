@@ -6,6 +6,9 @@ const {
   isPostReplyRecapText
 } = require('../../../utils/postReplyWorker/recapPolicy');
 const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
+const {
+  recordGeminiRecentStyleSignal
+} = require('../../../utils/geminiRecentStyleGuard');
 
 function createPersistNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
@@ -388,6 +391,22 @@ function createPersistNode(deps = {}) {
     console.log('[memory-write] persist decision', persistDecisionPayload);
 
     if (shouldPersistChatArtifacts) {
+      try {
+        recordGeminiRecentStyleSignal({
+          assistantText: finalReply,
+          modelName: request.modelConfig?.model || request.modelName || request.model_name || config.AI_MODEL,
+          userId: request.userId,
+          groupId: routeGroupId,
+          sessionKey: request.sessionKey,
+          routePolicyKey: request.routePolicyKey || request.routeMeta?.routePolicyKey || request.routeMeta?.route_policy_key || '',
+          topRouteType: request.topRouteType || request.routeMeta?.topRouteType || request.routeMeta?.top_route_type || '',
+          routeMeta: request.routeMeta,
+          reviewMode: request.reviewMode,
+          isAdmin: request.isAdmin === true || request.adminPromptContext === true,
+          systemInitiated: request.systemInitiated === true,
+          config
+        });
+      } catch (_) {}
       try {
         ingestOpenVikingTurnAsync({
           userId: request.userId,

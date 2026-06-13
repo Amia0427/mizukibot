@@ -49,6 +49,21 @@ const { buildPromptSnapshot } = require('../utils/promptCompiler');
   ], { stage: 'main' });
   assert.deepStrictEqual(normalRoleSnapshot.assembledBlocks.map((item) => item.id), ['public']);
 
+  const includeConditionalSnapshot = buildPromptSnapshot([
+    {
+      id: 'admin_only',
+      content: 'admin stable prompt',
+      priority: -1100,
+      appliesWhen: { admin_only: true }
+    },
+    {
+      id: 'public',
+      content: 'public prompt',
+      priority: -1000
+    }
+  ], { stage: 'main', includeConditionalBlocks: true });
+  assert.deepStrictEqual(includeConditionalSnapshot.assembledBlocks.map((item) => item.id), ['public']);
+
   const adminRoleSnapshot = buildPromptSnapshot([
     {
       id: 'admin_only',

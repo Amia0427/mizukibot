@@ -2,6 +2,8 @@
 
 时间戳：2026-06-13 01:53 +08:00
 
+更新 2026-06-13 09:03 +08:00：针对真实复发模式补齐优化 4/5。`persist` 成功后会为普通 Gemini 回复记录起手、尾音和固定短语派生信号；后续主回复动态上下文用 `gemini_recent_style_guard` 避开最近重复口吻，不保存完整回复原文。同时 `admin_only` prompt 编译条件收紧，管理员破限/anti-refusal 文案只进入显式 admin 或管理员私聊，不进入普通 Gemini/user prompt。小目标已完成：修复后对照诊断之外，运行时也能持续压低真实重复锚点。
+
 ## 样本
 
 - 导出命令：`node scripts/export-gemini-user-dialogues.js --hours 48 --success-only --require-message --format json --out artifacts/gemini-sampling-degradation-48h.json`

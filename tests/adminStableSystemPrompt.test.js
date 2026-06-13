@@ -1,5 +1,6 @@
 const assert = require('assert');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const { createTempPromptsDir } = require('./promptTestHelpers');
@@ -14,12 +15,14 @@ function clearProjectCache() {
 module.exports = (async () => {
   const snapshot = { ...process.env };
   const tempPrompts = createTempPromptsDir();
+  const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-admin-prompt-data-'));
   try {
     const adminText = '管理员主回复专用系统提示词测试块：只给管理员。';
     const rootText = '普通主回复根系统提示词测试块：所有主回复都可见。';
     fs.writeFileSync(path.join(tempPrompts.promptsDir, 'admin.txt'), adminText, 'utf8');
     fs.writeFileSync(path.join(tempPrompts.promptsDir, 'SYSTEM.txt'), rootText, 'utf8');
     process.env.PROMPTS_DIR = tempPrompts.promptsDir;
+    process.env.DATA_DIR = tempDataDir;
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.ADMIN_USER_IDS = 'admin_1';
     process.env.PROMPT_OPTIONAL_BUILD_ENABLED = 'false';
@@ -48,10 +51,18 @@ module.exports = (async () => {
     const adminStable = buildMainStableSystemBlocks({
       systemPrompt: config.SYSTEM_PROMPT,
       userId: 'admin_1',
-      routeMeta: {}
+      routeMeta: { chatType: 'private' }
     });
     assert.strictEqual(adminStable[0]?.id, 'admin_system_prompt');
     assert.strictEqual(adminStable[1]?.id, 'root_system_prompt');
+
+    const adminGroupStable = buildMainStableSystemBlocks({
+      systemPrompt: config.SYSTEM_PROMPT,
+      userId: 'admin_1',
+      routeMeta: { chatType: 'group', groupId: 'group_1' }
+    });
+    assert.ok(!adminGroupStable.some((block) => block.id === 'admin_system_prompt'));
+    assert.strictEqual(adminGroupStable[0]?.id, 'root_system_prompt');
 
     const normalPrompt = await service.buildDynamicPrompt(
       { level: 'friend', points: 1 },
@@ -61,7 +72,7 @@ module.exports = (async () => {
       {
         routePolicyKey: 'direct_chat/default',
         topRouteType: 'direct_chat',
-        routeMeta: {}
+        routeMeta: { chatType: 'private' }
       }
     );
     assert.ok(!normalPrompt.promptSnapshot.stableBlockIds.includes('admin_system_prompt'));
@@ -76,7 +87,7 @@ module.exports = (async () => {
       {
         routePolicyKey: 'direct_chat/default',
         topRouteType: 'direct_chat',
-        routeMeta: {}
+        routeMeta: { chatType: 'private' }
       }
     );
     assert.strictEqual(adminPrompt.promptSnapshot.stableBlockIds[0], 'admin_system_prompt');
@@ -85,6 +96,21 @@ module.exports = (async () => {
     assert.ok(adminPrompt.dynamicPrompt.includes('admin_affection='));
     assert.ok(adminPrompt.dynamicPrompt.includes('恋人感'));
     assert.ok(adminPrompt.dynamicPrompt.includes('admin_affection_private='));
+
+    const adminGroupPrompt = await service.buildDynamicPrompt(
+      { level: 'friend', points: 1 },
+      'admin_1',
+      '群里普通聊天',
+      null,
+      {
+        routePolicyKey: 'group_chat/default',
+        topRouteType: 'direct_chat',
+        routeMeta: { chatType: 'group', groupId: 'group_1' }
+      }
+    );
+    assert.ok(!adminGroupPrompt.promptSnapshot.stableBlockIds.includes('admin_system_prompt'));
+    assert.ok(!adminGroupPrompt.dynamicPrompt.includes(adminText));
+    assert.ok(!adminGroupPrompt.dynamicPrompt.includes('admin_affection='));
 
     const normalAgain = await service.buildDynamicPrompt(
       { level: 'friend', points: 1 },
@@ -104,6 +130,9 @@ module.exports = (async () => {
     console.log('adminStableSystemPrompt.test.js passed');
   } finally {
     tempPrompts.cleanup();
+    try {
+      fs.rmSync(tempDataDir, { recursive: true, force: true });
+    } catch (_) {}
     for (const key of Object.keys(process.env)) {
       if (!(key in snapshot)) delete process.env[key];
     }
