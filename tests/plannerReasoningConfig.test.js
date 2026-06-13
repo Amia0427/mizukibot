@@ -33,6 +33,7 @@ const defaults = buildPlannerRuntimeConfig({
 });
 
 assert.strictEqual(defaults.PLAN_REASONING_EFFORT, 'off');
+assert.strictEqual(defaults.DIRECT_CHAT_PLANNER_ENABLED, false);
 assert.strictEqual(defaults.PLANNER_REQUEST_TIMEOUT_MS, 15000);
 
 const legacyOverride = buildPlannerRuntimeConfig({

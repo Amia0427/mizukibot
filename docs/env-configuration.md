@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-13 20:00 +08:00
+更新时间：2026-06-13 22:40 +08:00
 
 ## 维护约定
 
@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
+- 2026-06-13 22:40 +08:00：新增 `DIRECT_CHAT_PLANNER_ENABLED=false` 并作为默认值，关闭 direct_chat 远程 planner 模型/subagent 调用；`PLAN_*` endpoint/key 保留用于显式恢复，但运行时 `planDirectChat` 和 dispatch capability preflight 进入 `planRequestV2` 后会短路为本地规则决策 `decisionSource=rule_planner_disabled`。关闭后仍保留本地 deterministic preflight、规则 planner、SQL worldbook/persona module、本地 Memory V3/Profile Journal/Daily Journal 召回和显式安全工具计划；减少的是远程 planner 对模糊工具选择、背景 research 请求、动态 prompt block/persona module 的模型级判断。模型自检在关闭态也不再拨测 `plan`。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/modelSelfCheck.test.js`、`node tests/directChatPlannerNotebook.test.js`、`node tests/imageSummaryLatencyPath.test.js`、`node tests/plannerSemanticRefine.test.js`、`node tests/plannerV2Protocol.test.js` 通过。
 - 2026-06-13 20:00 +08:00：planner 单次远程模型请求超时上限收敛为 `PLANNER_REQUEST_TIMEOUT_MS=15000`；配置层会把更大值封顶到 15 秒，本地 `.env` 已同步为 15000。远程 planner 超时/失败后降级为 `chat_only/fast_reply`，不再继续工具计划；验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。
 - 2026-06-12 12:55 +08:00：本地 `PLAN_*` 与 `PASSIVE_AWARENESS_*` 已切到 `catiecli.sukaka.top/v1` + `gcli-gemini-3-flash-preview-nothinking`，用于替换原 `token.memoh.net` 403 的 planner / 被动感知决策链路；密钥只保留 `.env`，不写入文档。
 - 2026-06-13 19:57 +08:00：普通用户快速回复新增 SQL worldbook 预算配置，默认 `NORMAL_FAST_REPLY_WORLDBOOK_ENABLED=true`、`NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE=1`、`NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST=180`、`NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS=900`。快速链路只在 worldbook gate 命中时注入 `[FastWorldbook]`，仍不调用远程 planner 或主动态 prompt；验收：`node tests/normalFastReplyConfig.test.js` 通过。

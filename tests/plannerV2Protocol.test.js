@@ -5,6 +5,7 @@ const oldPlanApiBaseUrl = process.env.PLAN_API_BASE_URL;
 const oldPlanApiKey = process.env.PLAN_API_KEY;
 const oldPlanModel = process.env.PLAN_MODEL;
 const oldPlanReasoningEffort = process.env.PLAN_REASONING_EFFORT;
+const oldDirectChatPlannerEnabled = process.env.DIRECT_CHAT_PLANNER_ENABLED;
 const oldMemosMcpEnabled = process.env.MEMOS_MCP_ENABLED;
 const oldMemoryCliChatEnabled = process.env.MEMORY_CLI_CHAT_ENABLED;
 const oldPlannerAllowMainModelFallback = process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK;
@@ -15,6 +16,7 @@ process.env.PLAN_API_BASE_URL = 'https://planner.example.test/v1';
 process.env.PLAN_API_KEY = 'planner-test-key';
 process.env.PLAN_MODEL = 'planner-test-model';
 process.env.PLAN_REASONING_EFFORT = 'high';
+process.env.DIRECT_CHAT_PLANNER_ENABLED = 'true';
 process.env.MEMOS_MCP_ENABLED = 'false';
 process.env.MEMORY_CLI_CHAT_ENABLED = 'true';
 process.env.PLANNER_ALLOW_MAIN_MODEL_FALLBACK = 'false';
@@ -1165,7 +1167,9 @@ module.exports = (async () => {
       responseIntent: 'answer',
       allowedTools: []
     },
-    intent: {},
+    intent: {
+      needsPlanning: true
+    },
     facets: {}
   }, {
     userId: 'u_rich',
@@ -1220,6 +1224,7 @@ module.exports = (async () => {
       toolIntent: 'none',
       responseIntent: 'answer',
       allowedTools: [],
+      needsPlanning: true,
       memoryContext: {
         memoryForPrompt: 'route meta memory'
       },
@@ -1240,7 +1245,9 @@ module.exports = (async () => {
         level: 'friend'
       }
     },
-    intent: {},
+    intent: {
+      needsPlanning: true
+    },
     facets: {}
   }, {
     userId: 'u_route_meta',
@@ -1289,6 +1296,8 @@ module.exports = (async () => {
   else process.env.PLAN_MODEL = oldPlanModel;
   if (oldPlanReasoningEffort === undefined) delete process.env.PLAN_REASONING_EFFORT;
   else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
+  if (oldDirectChatPlannerEnabled === undefined) delete process.env.DIRECT_CHAT_PLANNER_ENABLED;
+  else process.env.DIRECT_CHAT_PLANNER_ENABLED = oldDirectChatPlannerEnabled;
   if (oldMemosMcpEnabled === undefined) delete process.env.MEMOS_MCP_ENABLED;
   else process.env.MEMOS_MCP_ENABLED = oldMemosMcpEnabled;
   if (oldMemoryCliChatEnabled === undefined) delete process.env.MEMORY_CLI_CHAT_ENABLED;
@@ -1312,6 +1321,8 @@ module.exports = (async () => {
   else process.env.PLAN_MODEL = oldPlanModel;
   if (oldPlanReasoningEffort === undefined) delete process.env.PLAN_REASONING_EFFORT;
   else process.env.PLAN_REASONING_EFFORT = oldPlanReasoningEffort;
+  if (oldDirectChatPlannerEnabled === undefined) delete process.env.DIRECT_CHAT_PLANNER_ENABLED;
+  else process.env.DIRECT_CHAT_PLANNER_ENABLED = oldDirectChatPlannerEnabled;
   if (oldMemosMcpEnabled === undefined) delete process.env.MEMOS_MCP_ENABLED;
   else process.env.MEMOS_MCP_ENABLED = oldMemosMcpEnabled;
   if (oldMemoryCliChatEnabled === undefined) delete process.env.MEMORY_CLI_CHAT_ENABLED;
