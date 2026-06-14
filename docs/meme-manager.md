@@ -1,5 +1,7 @@
 # Meme Manager
 
+更新 2026-06-15 07:29 +08:00：完成 `自然输出表情包by小梨7651232717192372859.docx` 低 token 接入方案。结论是不导入全文、不导入内嵌图片、不开启表情 follow-up，只把“读情绪而非像素报告、不要显式说表情/贴纸/发图、低信息确认不过度发挥、哭/笑哭/爆炸按情绪夸张理解、表情不抢主回复”蒸馏进 `prompts/runtime/image-chat-pragmatics.txt` 的图片/表情包路径。验收：`node tests/runtimeV2VisionMessageContent.test.js`、`npm run check:prompts`、`node --check tests/runtimeV2VisionMessageContent.test.js` 通过。小目标完成：自然表情输出素材已低 token 接入，仅影响视觉消息提示词。
+
 更新 2026-05-24 22:05 +08:00：表情包自动 follow-up 已关闭。`MEME_MANAGER_FOLLOWUP_ENABLED=false` 时 `maybeSendMemeFollowup` 会在 selector LLM 前直接返回 `followup-disabled`，不会选择素材，也不会向 NapCat 发送图片；图库、标注和 `/meme` 管理命令保留。
 
 更新 2026-05-24 19:40 +08:00：对 `C:\Users\Administrator\Downloads\yichuantiku` 的 11 张表情包完成视觉理解标注，并写入当前本地运行时图库。
