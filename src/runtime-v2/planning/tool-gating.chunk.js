@@ -434,6 +434,29 @@ function normalizeOpenAIPromptCacheRetention(value = '') {
   return normalized === 'in_memory' || normalized === '24h' ? normalized : '';
 }
 
+function normalizePlannerApiMode(value = '') {
+  const normalized = normalizeText(value).toLowerCase().replace(/[-\s]+/g, '_');
+  if (normalized === 'responses' || normalized === 'response') return 'responses';
+  return 'chat_completions';
+}
+
+function getPlannerApiMode(overrides = null) {
+  const currentConfig = getConfig();
+  const overridden = overrides && typeof overrides === 'object'
+    ? (overrides.plannerApiMode ?? overrides.apiMode ?? overrides.api_mode)
+    : undefined;
+  if (overridden !== undefined && overridden !== null && overridden !== '') {
+    return normalizePlannerApiMode(overridden);
+  }
+  return normalizePlannerApiMode(
+    currentConfig.PLANNER_API_MODE
+    || currentConfig.PLAN_API_MODE
+    || process.env.PLANNER_API_MODE
+    || process.env.PLAN_API_MODE
+    || 'chat_completions'
+  );
+}
+
 function buildPlannerStablePromptFingerprint(toolCatalog = []) {
   const tools = normalizeArray(toolCatalog)
     .map((item) => ({
@@ -517,6 +540,7 @@ function buildPlannerModelRequestBody(route = {}, options = {}) {
     }
   };
   if (getApiProvider(ensureChatCompletionsUrlLocal(apiBaseUrl), model) === 'openai_compatible') {
+    requestBody.__preferredProtocol = getPlannerApiMode(options);
     const effort = getPlannerReasoningEffort(options);
     if (effort) requestBody.reasoning_effort = effort;
     requestBody = applyPlannerOpenAIPromptCacheOptions(requestBody, route, toolCatalog);
@@ -537,6 +561,7 @@ module.exports = {
   choosePreferredToolSubset,
   collectAvailableToolSummary,
   ensureChatCompletionsUrlLocal,
+  getPlannerApiMode,
   getPlannerApiBaseUrlV2,
   getPlannerApiKeyV2,
   getPlannerModel,

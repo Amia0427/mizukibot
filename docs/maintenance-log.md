@@ -1,3 +1,12 @@
+## 运行维护 2026-06-14 14:59
+
+- 小目标：给不支持 `/v1/responses` 的 OpenAI-compatible planner host 做最小能力绕过，避免先 405 再回退 `/v1/chat/completions`。
+- 根因：planner 已把 `PLAN_API_BASE_URL` 规范到 `/v1/chat/completions`，但通用 HTTP 层在 OpenAI-compatible 请求且没有内部协议偏好时会优先改写为 `/v1/responses`，失败后再由降级器回退 chat completions。
+- 最小修复：新增 `PLANNER_API_MODE`/`PLAN_API_MODE`，默认 `chat_completions`；planner 请求体复用现有 `__preferredProtocol=chat_completions`，只影响 planner 远程模型请求，不改主回复 provider 自动降级策略。需要强制 Responses 的 planner 可显式设 `PLANNER_API_MODE=responses`。
+- 验证：`node tests/plannerNoRetry.test.js`、`node -e "require('./config'); require('./src/runtime-v2/planning/tool-gating.chunk'); require('./src/model/http'); console.log('planner/provider modules load ok')"` 通过。新增测试经真实 `postWithRetry -> prepareRequest -> axios.post` 路径，mock 记录唯一发送 URL 为 `http://127.0.0.1:41593/v1/chat/completions`，未出现 `/v1/responses`。
+- 405 往返结论：本次验收在本地 mock planner host 上已实际消除 `/v1/responses` 前置请求，因此该场景不会再产生“先 405 再回退”的往返；未对真实外部 OpenAI-compatible host 发起在线请求。
+- 小目标已完成：planner OpenAI-compatible 默认协议固定到 chat completions，避免不支持 Responses 的 planner host 被通用 HTTP 层预先改写。
+
 ## 运行维护 2026-06-14 10:42
 
 - 小目标：恢复普通用户安全限制 emoji 标记到真实主回复链路。
