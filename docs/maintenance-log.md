@@ -1,3 +1,11 @@
+## 运行维护 2026-06-14 15:03
+
+- 小目标：让 `normal_fast_reply` 快回复链路也能触发安全限制 emoji 标记。
+- 根因：`normal_fast_reply` 在 message handler 中提前短路发送，不走 Runtime V2 `replyEnvelope`；快回复 prompt 也没有复用普通用户 `defaut.txt` stable block，模型不一定会输出 `/%`；即使返回了 `hasSafetyRestriction` 或字符串 `/%`，快回复 runtime 也未继续透传。
+- 最小修复：快回复 system prompt 复用主回复 `normal_user_default_prompt` stable block，从而注入普通用户边界规则；`runNormalFastReply()` 清洗 `/%` 并保留 `hasSafetyRestriction`；快回复发送成功后调用 `markSafetyRestrictionEmojiAfterReply()`。
+- 验证：`node tests/normalFastReplyRuntime.test.js`、`node tests/normalFastReplyHandlerSource.test.js`、`node tests/safetyRestrictionDetection.test.js`、`node tests/messageRouteFlowGroupStreaming.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。
+- 小目标已完成：`normal_fast_reply` 命中普通用户安全边界时会移除内部 `/%` 并给原消息贴安全限制 emoji。
+
 ## 运行维护 2026-06-14 14:59
 
 - 小目标：给不支持 `/v1/responses` 的 OpenAI-compatible planner host 做最小能力绕过，避免先 405 再回退 `/v1/chat/completions`。

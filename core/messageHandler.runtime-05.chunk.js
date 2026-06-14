@@ -208,6 +208,28 @@
               fastGroupId
             );
             const persistedFastReplyText = String(normalFastReplyResult?.persistedReplyText || fastReplyText).trim() || fastReplyText;
+            if (normalFastReplyResult?.hasSafetyRestriction === true) {
+              const sourceMessageId = String(effectiveMsg.message_id || msg.message_id || '').trim();
+              if (sourceMessageId) {
+                markSafetyRestrictionEmojiAfterReply({
+                  messageId: sourceMessageId,
+                  routePolicyKey: 'chat/default',
+                  routeMeta: {
+                    ...(route.meta || {}),
+                    groupId: String(fastGroupId || '').trim(),
+                    userId: String(senderId || '').trim(),
+                    chatType,
+                    replyPath: 'normal_fast_reply'
+                  },
+                  actionClient: globalNapCatActionClient
+                }).catch((error) => {
+                  console.warn('[safety-restriction-emoji] mark failed', {
+                    messageId: sourceMessageId,
+                    error: error?.message || String(error || '')
+                  });
+                });
+              }
+            }
             appendShortTermHistory(
               senderId,
               persistUserText || normalFastDecision.text,
