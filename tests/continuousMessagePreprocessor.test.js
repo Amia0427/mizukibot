@@ -14,6 +14,7 @@ fs.writeFileSync(process.env.MEMORY_SCOPE_INDEX_FILE, JSON.stringify({ version: 
 const {
   cheapParseMessageEntry,
   createContinuousMessagePreprocessor,
+  isCommandBypass,
   resolveContinuousEntryDetails
 } = require('../core/continuousMessagePreprocessor');
 
@@ -256,6 +257,88 @@ async function testSentenceStableTailFlushesWithoutExtraWait() {
   assert.strictEqual(result.meta.semanticScore, null);
 }
 
+async function testAdminCheckBypassesContinuousHold() {
+  assert.strictEqual(
+    isCommandBypass({ raw_message: '[CQ:at,qq=bot_test] /check' }, {
+      effectiveBotQQ: 'bot_test',
+      isAdminUser: true
+    }),
+    true,
+    'admin /check should be recognized before continuous aggregation'
+  );
+  assert.strictEqual(
+    isCommandBypass({ raw_message: '[CQ:at,qq=bot_test] /check' }, {
+      effectiveBotQQ: 'bot_test',
+      isAdminUser: false
+    }),
+    false,
+    'non-admin /check should not use the admin diagnostic fast path'
+  );
+  assert.strictEqual(
+    isCommandBypass({ raw_message: '[CQ:at,qq=bot_test] /unknown' }, {
+      effectiveBotQQ: 'bot_test',
+      isAdminUser: true
+    }),
+    false,
+    'unknown admin slash text should not bypass aggregation'
+  );
+
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 300,
+    atBotDebounceMs: 300,
+    privateDebounceMs: 300,
+    maxHoldMs: 1000,
+    ensureCachedImageRef: async () => ({ ok: false })
+  });
+
+  const pendingImage = makeMessage({
+    messageId: 'admin-fast-img',
+    userId: 'admin_1',
+    groupId: 'group_1',
+    messageType: 'group',
+    message: [{ type: 'image', data: { url: 'https://example.com/admin-fast.png' } }],
+    rawMessage: '[CQ:image,url=https://example.com/admin-fast.png]'
+  });
+  const checkMsg = makeMessage({
+    messageId: 'admin-fast-check',
+    userId: 'admin_1',
+    groupId: 'group_1',
+    messageType: 'group',
+    time: 1710000020,
+    message: [
+      { type: 'at', data: { qq: 'bot_test' } },
+      { type: 'text', data: { text: ' /check' } }
+    ],
+    rawMessage: '[CQ:at,qq=bot_test] /check'
+  });
+
+  const firstPromise = preprocessor.handleMessage(pendingImage, {
+    effectiveBotQQ: 'bot_test',
+    isAdminUser: true,
+    freshnessSessionKey: 'qq-group:group_1:user:admin_1',
+    freshnessVersion: 1
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const checkResult = await preprocessor.handleMessage(checkMsg, {
+    effectiveBotQQ: 'bot_test',
+    isAdminUser: true,
+    freshnessSessionKey: 'qq-group:group_1:user:admin_1',
+    freshnessVersion: 2
+  });
+
+  assert.strictEqual(checkResult.mode, 'ready');
+  assert.strictEqual(checkResult.meta.flushReason, 'command_bypass');
+  assert.deepStrictEqual(checkResult.meta.sourceMessageIds, ['admin-fast-check']);
+  assert.strictEqual(checkResult.effectiveMsg, checkMsg);
+
+  const imageResult = await firstPromise;
+  assert.strictEqual(imageResult.mode, 'ready');
+  assert.strictEqual(imageResult.meta.flushReason, 'command_bypass');
+  assert.deepStrictEqual(imageResult.meta.sourceMessageIds, ['admin-fast-img']);
+}
+
 async function testReplyExpansionSkipsOfflineAndRecovers() {
   const calls = [];
   const actionClient = {
@@ -328,6 +411,7 @@ async function testReplyExpansionSkipsOfflineAndRecovers() {
   await testMergedFlushKeepsLatestFreshnessToken();
   await testSentenceWindowWaitsForContinuation();
   await testSentenceStableTailFlushesWithoutExtraWait();
+  await testAdminCheckBypassesContinuousHold();
   await testReplyExpansionSkipsOfflineAndRecovers();
   console.log('continuousMessagePreprocessor.test.js passed');
 })().catch((error) => {
