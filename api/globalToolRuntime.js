@@ -194,6 +194,37 @@ function stripGlobalToolsFromAllowedTools(allowedTools = []) {
   return normalizeToolNames(allowedTools).filter((toolName) => !GLOBAL_TOOL_NAME_SET.has(toolName));
 }
 
+function buildRoutePlannerPreflightDecision(executionPlan = null, context = {}) {
+  if (!executionPlan || typeof executionPlan !== 'object' || Array.isArray(executionPlan)) return null;
+  if (!Array.isArray(executionPlan.steps)) return null;
+  const validation = normalizeObject(context.routePlannerValidation, null);
+  if (validation && validation.ok === false) return null;
+  const allowedGlobalTools = normalizeToolNames(context.allowedGlobalTools);
+  const steps = normalizeArray(executionPlan.steps)
+    .map((step, index) => {
+      const normalized = normalizeObject(step, {});
+      const toolName = String(normalized.tool || normalized.action || normalized.toolName || '').trim();
+      return {
+        id: String(normalized.id || normalized.step || `route_planner_step_${index + 1}`).trim(),
+        tool: toolName,
+        args: normalizeObject(normalized.args ?? normalized.inputs, {}),
+        purpose: String(normalized.purpose || normalized.successCriteria || normalized.instruction || '').trim()
+      };
+    })
+    .filter((step) => GLOBAL_TOOL_NAME_SET.has(step.tool))
+    .filter((step) => allowedGlobalTools.includes(step.tool));
+
+  return {
+    mode: steps.length > 0 ? 'tool_plan' : 'chat_only',
+    steps,
+    allowedToolNames: allowedGlobalTools,
+    plannerMeta: {
+      decisionSource: 'route_planner_execution_plan',
+      reason: 'dispatch preflight reused the route planner executionPlan'
+    }
+  };
+}
+
 function formatArgsSummary(toolName, args = {}) {
   const normalizedArgs = normalizeObject(args, {});
   if (toolName === 'memory_cli') {
@@ -680,7 +711,6 @@ function buildGlobalToolEvidenceMessage(results = [], context = {}) {
 }
 
 async function maybeRunGlobalToolRuntime(question = '', context = {}) {
-  const planningService = require('./runtimeV2/planning/service');
   const policy = normalizeObject(context.policy, {});
   const allowedGlobalTools = normalizeToolNames(policy.allowedGlobalTools || context.allowedGlobalTools);
   const runtimeContext = {
@@ -712,47 +742,58 @@ async function maybeRunGlobalToolRuntime(question = '', context = {}) {
   }
 
   let planned = null;
+  planned = buildRoutePlannerPreflightDecision(runtimeContext.routePlannerExecutionPlan, runtimeContext);
+  if (planned) {
+    logGlobalTools('route planner executionPlan reused', runtimeContext, {
+      toolCount: normalizeArray(planned.steps).length,
+      durationMs: 0
+    });
+  }
+
   try {
-    planned = await planningService.planRequestV2({
-      question,
-      cleanText: question,
-      topRouteType: runtimeContext.topRouteType || 'direct_chat',
-      routeMeta: runtimeContext.routeMeta || {},
-      route: {
+    if (!planned) {
+      const planningService = require('./runtimeV2/planning/service');
+      planned = await planningService.planRequestV2({
         question,
         cleanText: question,
         topRouteType: runtimeContext.topRouteType || 'direct_chat',
-        meta: runtimeContext.routeMeta || {},
-        intent: {
-          executionMode: 'staged',
-          needsMemory: /(?:记得|记不记得|之前|回忆|日志|记录|remember|recall|log|history)/i.test(String(question || ''))
+        routeMeta: runtimeContext.routeMeta || {},
+        route: {
+          question,
+          cleanText: question,
+          topRouteType: runtimeContext.topRouteType || 'direct_chat',
+          meta: runtimeContext.routeMeta || {},
+          intent: {
+            executionMode: 'staged',
+            needsMemory: /(?:记得|记不记得|之前|回忆|日志|记录|remember|recall|log|history)/i.test(String(question || ''))
+          },
+          facets: {
+            sourceScope: /(?:官网|官方|文档|来源|网页|official|docs?|documentation|source|page|article|latest|最新|news)/i.test(String(question || ''))
+              ? 'web'
+              : '',
+            freshness: /(?:latest|最新|news|新闻)/i.test(String(question || '')) ? 'latest' : '',
+            domain: /(?:时间|几点|日期|time|date)/i.test(String(question || '')) ? 'time' : ''
+          }
         },
-        facets: {
-          sourceScope: /(?:官网|官方|文档|来源|网页|official|docs?|documentation|source|page|article|latest|最新|news)/i.test(String(question || ''))
-            ? 'web'
-            : '',
-          freshness: /(?:latest|最新|news|新闻)/i.test(String(question || '')) ? 'latest' : '',
-          domain: /(?:时间|几点|日期|time|date)/i.test(String(question || '')) ? 'time' : ''
+        allowedTools: allowedGlobalTools,
+        toolCatalog: planningService.collectAvailableToolSummary({
+          question,
+          cleanText: question,
+          meta: runtimeContext.routeMeta || {},
+          facets: {},
+          intent: {}
+        }, {
+          userId: runtimeContext.userId,
+          allowedTools: allowedGlobalTools
+        }).toolCatalog,
+        contextSummary: runtimeContext.routePrompt || '',
+        contextEvidence: true,
+        constraints: {
+          preflightOnly: true,
+          allowBackground: false
         }
-      },
-      allowedTools: allowedGlobalTools,
-      toolCatalog: planningService.collectAvailableToolSummary({
-        question,
-        cleanText: question,
-        meta: runtimeContext.routeMeta || {},
-        facets: {},
-        intent: {}
-      }, {
-        userId: runtimeContext.userId,
-        allowedTools: allowedGlobalTools
-      }).toolCatalog,
-      contextSummary: runtimeContext.routePrompt || '',
-      contextEvidence: true,
-      constraints: {
-        preflightOnly: true,
-        allowBackground: false
-      }
-    });
+      });
+    }
   } catch (error) {
     logGlobalTools('skipped', runtimeContext, { reason: 'planner-failed', error: error?.message || String(error) });
     return {
