@@ -286,3 +286,11 @@
 - 完成当前项目优秀架构提炼，输出到 `E:\qq-bot-0.1\doc\mizukibot0`。
 - 新增总索引和 40 个可并行开发主题文档，覆盖 route contract、Runtime V2、tool policy、prompt manifest、记忆治理、post-reply worker、request trace、诊断命令、NapCat health、部署运维和 Rust 迁移。
 - 小目标已完成：其他 agent/QQ 聊天机器人可按主题并行学习和迁移。
+
+## 运行维护 2026-06-14 21:54
+
+- 只读复核今天仍存在的回复速度凝滞点：`request_complete` 当天完成样本 60 个，其中 47 个超过 60s。
+- 入口侧确认 `continuous_preprocess_done` 仍是固定等待源，ready 样本 p50=15.0s、p95=69.9s、max=101.2s；同期 `queueWaitMs` p95=280ms，说明多数不是入站锁。
+- 模型侧确认 `v2_streaming_reply` p95=97.3s、`direct_reply` p95=85.7s、流式 `final_reply_send_done` p95=160.4s；非流式发送 p50=324ms，QQ 发送本身不是主要瓶颈。
+- 验收：`npm run diag:main-reply-lag -- --since=24h --no-provider-diagnostic --json`、`npm run diag:runtime -- --json`、只读聚合 `data/request-trace.ndjson` / `data/inbound_timing.jsonl` / `data/model-calls.ndjson`。
+- 小目标已完成：今天仍存在的慢点已定位为“连续消息聚合前置等待 + 上游模型/流式生成长耗时”，并写入 `docs/recent-reply-speed-blockers-2026-06-13.md`。
