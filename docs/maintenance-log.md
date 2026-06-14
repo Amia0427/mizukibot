@@ -1,3 +1,11 @@
+## 运行维护 2026-06-14 19:47
+
+- 小目标：修正 `diag:main-reply-lag` 的发送耗时统计，避免把流式生成完成耗时误报为 QQ 发送慢。
+- 口径复核：`reply_send_success/reply_send_failure.durationMs` 来自 `sendSystemGroupReply/sendSystemPrivateReply` 调用，是真正 QQ/NapCat 发送耗时；流式路径的 `final_reply_send_done.durationMs` 从 `formalDispatchStartedAt` 到流式完成，包含模型生成完成等待。
+- 最小修复：`send` 仅聚合 `reply_send_success/reply_send_failure.durationMs`；新增 `generation` 聚合带 `stream=true` 或 `streamCompleted=true` 的 `final_reply_send_done.durationMs`；文本输出标明各自来源。
+- 验证：`node --check utils/mainReplyLagDiagnostics.js`、`node --check tests/mainReplyLagDiagnostics.test.js`、`node tests/mainReplyLagDiagnostics.test.js`、`npm run diag:main-reply-lag -- --no-provider-diagnostic` 通过。测试样本 `reply_send_success=42ms`、流式 `final_reply_send_done=98000ms` 显示为 `send p95=42ms`、`generation p95=98000ms`。
+- 小目标已完成：发送耗时和流式生成完成耗时已分开显示。
+
 ## 运行维护 2026-06-14 19:33
 
 - 小目标：让管理员 `/check` 这类管理诊断快命令绕过连续消息预处理/聚合，尽量直达 admin route。
