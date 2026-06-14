@@ -3,6 +3,8 @@ const assert = require('assert');
 const {
   buildMainReplyLagDiagnostic,
   buildMainReplyLagDiagnosticText,
+  isGenerationEvent,
+  isSendEvent,
   parseWindowMs
 } = require('../utils/mainReplyLagDiagnostics');
 const {
@@ -116,6 +118,7 @@ module.exports = (async () => {
   assert.strictEqual(report.metrics.planner.p95Ms, 62000);
   assert.strictEqual(report.metrics.mainModel.count, 2);
   assert.strictEqual(report.metrics.mainModel.p95Ms, 47000);
+  assert.strictEqual(report.metrics.generation.count, 0);
   assert.strictEqual(report.metrics.send.count, 1);
   assert.strictEqual(report.metrics.send.p95Ms, 42);
   assert.strictEqual(report.metrics.postReplyWorker.rssMaxMb, 512);
@@ -127,7 +130,50 @@ module.exports = (async () => {
   assert.ok(text.includes('main-reply-lag: bottleneck=planner'));
   assert.ok(text.includes('planner: p50=60000ms p95=62000ms'));
   assert.ok(text.includes('main-model: p50=45000ms p95=47000ms'));
+  assert.ok(text.includes('generation: p50=0ms p95=0ms max=0ms samples=0 source=final_reply_send_done(stream)'));
+  assert.ok(text.includes('send: p50=42ms p95=42ms max=42ms samples=1 source=reply_send_success/failure'));
   assert.ok(text.includes('post-reply-rss: pressure=ok rssMax=512MB threshold=768MB'));
+
+  const splitSendAndGenerationReport = await buildMainReplyLagDiagnostic({
+    now: () => now,
+    windowMs: 30 * 60 * 1000,
+    perfEvents: [
+      {
+        recordedAt: '2026-05-30T09:55:00.000Z',
+        type: 'reply_send_success',
+        stage: 'reply_send_success',
+        durationMs: 42
+      },
+      {
+        recordedAt: '2026-05-30T09:56:00.000Z',
+        stage: 'final_reply_send_done',
+        stream: true,
+        streamCompleted: true,
+        durationMs: 98000
+      }
+    ],
+    modelCallRows,
+    status,
+    hotspots,
+    lowResource,
+    config: {
+      POST_REPLY_WORKER_RSS_RECYCLE_MB: 768
+    }
+  });
+  assert.strictEqual(isSendEvent({ stage: 'reply_send_success', durationMs: 42 }), true);
+  assert.strictEqual(isSendEvent({ stage: 'final_reply_send_done', stream: true, durationMs: 98000 }), false);
+  assert.strictEqual(isGenerationEvent({ stage: 'final_reply_send_done', stream: true, durationMs: 98000 }), true);
+  assert.strictEqual(isGenerationEvent({ stage: 'final_reply_send_done', durationMs: 42 }), false);
+  assert.strictEqual(splitSendAndGenerationReport.metrics.send.count, 1);
+  assert.strictEqual(splitSendAndGenerationReport.metrics.send.p95Ms, 42);
+  assert.strictEqual(splitSendAndGenerationReport.summary.sendP95Ms, 42);
+  assert.strictEqual(splitSendAndGenerationReport.metrics.generation.count, 1);
+  assert.strictEqual(splitSendAndGenerationReport.metrics.generation.p95Ms, 98000);
+  assert.strictEqual(splitSendAndGenerationReport.summary.generationP95Ms, 98000);
+  assert.strictEqual(splitSendAndGenerationReport.summary.mostLikelyBottleneck.code, 'generation');
+  const splitText = buildMainReplyLagDiagnosticText(splitSendAndGenerationReport);
+  assert.ok(splitText.includes('generation: p50=98000ms p95=98000ms max=98000ms samples=1 source=final_reply_send_done(stream)'));
+  assert.ok(splitText.includes('send: p50=42ms p95=42ms max=42ms samples=1 source=reply_send_success/failure'));
 
   const pressureReport = await buildMainReplyLagDiagnostic({
     now: () => now,
@@ -196,7 +242,8 @@ module.exports = (async () => {
   });
   assert.strictEqual(traceFallbackReport.inputs.traceEvents, 2);
   assert.strictEqual(traceFallbackReport.metrics.planner.p95Ms, 1200);
-  assert.strictEqual(traceFallbackReport.metrics.send.p95Ms, 35);
+  assert.strictEqual(traceFallbackReport.metrics.generation.p95Ms, 0);
+  assert.strictEqual(traceFallbackReport.metrics.send.p95Ms, 0);
 
   const degradedReport = await buildMainReplyLagDiagnostic({
     now: () => now,

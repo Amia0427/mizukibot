@@ -2,7 +2,7 @@
 
 时间：2026-06-13 21:24 +08:00
 
-更新：2026-06-14 19:33 +08:00
+更新：2026-06-14 19:47 +08:00
 
 ## 结论
 
@@ -12,7 +12,7 @@
 2. 主模型上游仍是常见大头。`req_739db72c1e350e6a` 的 `claude-opus-4-6-thinking` 流式 HTTP trace 约 139.7s，`model-calls` 记录 83.2s；`req_9b046d1f40507f8e` 的 Gemini 主回复约 65.1s。
 3. 原第 3 点的具体凝滞是两套 planner 串行：路由层 `planDirectChat` 先跑一次远程 planner；工具执行进入 `api/runtimeV2/nodes/dispatch.js` 后，`runCapabilityPreflight` 又调用 `api/globalToolRuntime.js -> planningService.planRequestV2` 跑第二次 planner。两次都先打 `/v1/responses` 405，再降级 `/v1/chat/completions`；`req_42badc948f719477` 第二次 chat completions 本身耗 56.7s。
 4. 连续消息预处理固定持有常见为 12-13s；个别命令样本更长，`req_c70940dbe4a09036` 进入 admin route 前已约 57.9s。
-5. 实际 NapCat 发送在成功样本中通常不是瓶颈：非流式 `reply_send_success` 约 234ms-1.4s，`req_42badc948f719477` 为 907ms。现有 `diag:main-reply-lag` 把流式 `final_reply_send_done.durationMs` 也归到 send，容易把完整流式生成时长误读为 QQ 发送慢。
+5. 实际 NapCat 发送在成功样本中通常不是瓶颈：非流式 `reply_send_success` 约 234ms-1.4s，`req_42badc948f719477` 为 907ms。`diag:main-reply-lag` 已在 2026-06-14 19:47 +08:00 修正口径：`send` 只显示 `reply_send_success/reply_send_failure.durationMs`，流式 `final_reply_send_done.durationMs` 进入独立 `generation`。
 
 ## 近样本
 
@@ -51,6 +51,7 @@
 - 2026-06-13 22:20 +08:00 复核：读取 LangGraph 原始事件、request trace、`memory-recall-observability.ndjson` 与 `model-calls.ndjson`，确认第 1 点真实卡在 `prepare -> buildDynamicPromptImpl`，第 3 点真实卡在 `dispatch -> runCapabilityPreflight -> maybeRunGlobalToolRuntime -> planRequestV2` 的第二轮 planner。
 - 2026-06-14 15:10 +08:00 更新：已给 `buildDynamicPromptImpl(...)` 补 `promptAssemblyStageTimings`，现 `diag:main-reply-prompt-assembly` 可直接输出 `collectPromptInputs`、`renderPromptLayers.*`、persona/worldbook、`profile_journal_db`、`daily_journal`、`short_term_continuity` 子阶段。验收：`node -e "require('./api/runtimeV2/context/service')"`、`node tests/mainReplyPromptAssemblyDiagnostics.test.js`、`node tests/memoryRecallObservability.test.js`、`npm run diag:main-reply-prompt-assembly -- --text "服饰专门学校和N25两个都不放弃" --worldbook-semantic-limit=0` 通过；`node tests/runtimeV2PromptOptimization.test.js` 本机 64s 超时未作为验收。
 - 2026-06-14 19:33 +08:00 更新：已修复 `/check` 类管理员快命令绕过连续消息预处理。`req_c70940dbe4a09036` 复核确认 57.9s 卡在 `continuous_preprocess_done.flushReason=debounce` 之前，而不是入站锁或 admin route；现仅管理员 `/check` 诊断快命令会在预处理层 `command_bypass` 直达，非管理员 `/check`、未知 slash 和普通消息不绕过。验收：`node tests/continuousMessagePreprocessor.test.js`、`node tests/messageHandlerAdminCheckConcurrency.test.js`、`node tests/routerChineseKeywords.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。
+- 2026-06-14 19:47 +08:00 更新：`diag:main-reply-lag` 已区分 send 与 generation。验收：`node --check utils/mainReplyLagDiagnostics.js`、`node --check tests/mainReplyLagDiagnostics.test.js`、`node tests/mainReplyLagDiagnostics.test.js`、`npm run diag:main-reply-lag -- --no-provider-diagnostic` 通过；测试样本 `reply_send_success=42ms`、流式 `final_reply_send_done=98000ms` 显示为 `send p95=42ms`、`generation p95=98000ms`。最终 30m 实测输出 `main-model p95=3173ms samples=1`、`generation: p50=0ms p95=0ms max=0ms samples=0 source=final_reply_send_done(stream)`、`send: p50=0ms p95=0ms max=0ms samples=0 source=reply_send_success/failure`，瓶颈为 `main_model`。
 
 ## 下一步高价值点
 
@@ -58,6 +59,6 @@
 2. 已完成：dispatch capability preflight 若 route planner 已提供单权威 `executionPlan`，优先复用该结果或只做本地 policy check，避免第二轮远程 planner。
 3. 已完成：planner 对 OpenAI-compatible host 若已知不支持 `/v1/responses`，直接走 `/v1/chat/completions`，避免每次 405 往返。
 4. 已完成：`/check` 类管理员快命令绕过连续消息 12s-60s 聚合，当前保护条件限定为管理员 `/check` 诊断快命令。
-5. `diag:main-reply-lag` 区分 `reply_send_success.durationMs` 与流式 `final_reply_send_done.durationMs`，避免把模型生成耗时误报为发送慢。
+5. 已完成：`diag:main-reply-lag` 区分 `reply_send_success.durationMs` 与流式 `final_reply_send_done.durationMs`，避免把模型生成耗时误报为发送慢。
 
 小目标已完成：最近几次机器人回复的主要阻滞点已按真实 request trace 和 LangGraph 原始事件拆分，并保留可复跑验收命令。

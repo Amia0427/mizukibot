@@ -114,10 +114,17 @@ function isSendEvent(row = {}) {
   const stage = normalizeText(row.stage).toLowerCase();
   return type.includes('reply_send_success')
     || type.includes('reply_send_failure')
-    || type.includes('final_reply_send_done')
     || stage.includes('reply_send_success')
-    || stage.includes('reply_send_failure')
+    || stage.includes('reply_send_failure');
+}
+
+function isGenerationEvent(row = {}) {
+  const type = eventType(row);
+  const stage = normalizeText(row.stage).toLowerCase();
+  const isFinalReplyDone = type.includes('final_reply_send_done')
     || stage.includes('final_reply_send_done');
+  if (!isFinalReplyDone) return false;
+  return row.stream === true || row.streamCompleted === true;
 }
 
 function isMainReplyModelCall(row = {}) {
@@ -230,6 +237,14 @@ function summarizeSend(perfEvents = []) {
   };
 }
 
+function summarizeGeneration(perfEvents = []) {
+  const rows = perfEvents.filter(isGenerationEvent);
+  return {
+    ...summarizeDurations(rows, (row) => resolveDurationMs(row, ['generationDurationMs', 'durationMs', 'duration_ms'])),
+    missing: rows.length === 0
+  };
+}
+
 function summarizeMainModel(modelRows = []) {
   const rows = modelRows.filter(isMainReplyModelCall);
   const summary = summarizeDurations(rows, (row) => resolveDurationMs(row, [
@@ -301,6 +316,12 @@ function scoreBottleneck(report = {}) {
       label: '主模型耗时',
       score: nonNegativeNumber(metrics.mainModel?.p95Ms || metrics.mainModel?.maxMs, 0),
       evidence: `mainModel p95=${metrics.mainModel?.p95Ms || 0}ms max=${metrics.mainModel?.maxMs || 0}ms`
+    },
+    {
+      code: 'generation',
+      label: '流式生成完成耗时',
+      score: nonNegativeNumber(metrics.generation?.p95Ms || metrics.generation?.maxMs, 0),
+      evidence: `generation p95=${metrics.generation?.p95Ms || 0}ms max=${metrics.generation?.maxMs || 0}ms`
     },
     {
       code: 'send',
@@ -417,6 +438,7 @@ async function buildMainReplyLagDiagnostic(options = {}) {
   const metrics = {
     planner: summarizePlanner(latencyEvents),
     mainModel: summarizeMainModel(modelRows),
+    generation: summarizeGeneration(latencyEvents),
     send: summarizeSend(latencyEvents),
     postReplyWorker: summarizePostReplyPressure({
       hotspots,
@@ -436,6 +458,7 @@ async function buildMainReplyLagDiagnostic(options = {}) {
     summary: {
       plannerP95Ms: metrics.planner.p95Ms,
       mainModelP95Ms: metrics.mainModel.p95Ms,
+      generationP95Ms: metrics.generation.p95Ms,
       sendP95Ms: metrics.send.p95Ms,
       postReplyWorkerRssMaxMb: metrics.postReplyWorker.rssMaxMb,
       postReplyWorkerPressure: metrics.postReplyWorker.pressure,
@@ -477,7 +500,8 @@ function buildMainReplyLagDiagnosticText(report = {}) {
     `main-reply-lag: bottleneck=${summary.mostLikelyBottleneck?.code || 'unknown'} (${summary.mostLikelyBottleneck?.label || 'unknown'}) window=${Math.round(nonNegativeNumber(report.window?.windowMs, 0) / 60000)}m`,
     `planner: p50=${metrics.planner?.p50Ms || 0}ms p95=${metrics.planner?.p95Ms || 0}ms max=${metrics.planner?.maxMs || 0}ms samples=${metrics.planner?.count || 0}`,
     `main-model: p50=${metrics.mainModel?.p50Ms || 0}ms p95=${metrics.mainModel?.p95Ms || 0}ms max=${metrics.mainModel?.maxMs || 0}ms samples=${metrics.mainModel?.count || 0} provider=${metrics.mainModel?.latest?.provider || ''} model=${metrics.mainModel?.latest?.model || ''}`,
-    `send: p50=${metrics.send?.p50Ms || 0}ms p95=${metrics.send?.p95Ms || 0}ms max=${metrics.send?.maxMs || 0}ms samples=${metrics.send?.count || 0}`,
+    `generation: p50=${metrics.generation?.p50Ms || 0}ms p95=${metrics.generation?.p95Ms || 0}ms max=${metrics.generation?.maxMs || 0}ms samples=${metrics.generation?.count || 0} source=final_reply_send_done(stream)`,
+    `send: p50=${metrics.send?.p50Ms || 0}ms p95=${metrics.send?.p95Ms || 0}ms max=${metrics.send?.maxMs || 0}ms samples=${metrics.send?.count || 0} source=reply_send_success/failure`,
     `post-reply-rss: pressure=${metrics.postReplyWorker?.pressure || 'unknown'} rssMax=${metrics.postReplyWorker?.rssMaxMb || 0}MB threshold=${metrics.postReplyWorker?.recycleThresholdMb || 0}MB activeMax=${metrics.postReplyWorker?.activeMax || 0} queue=queued:${queue.queued || 0} processing:${queue.processing || 0} failed:${queue.failed || 0}`,
     `evidence: ${summary.mostLikelyBottleneck?.evidence || ''}`
   ];
@@ -500,12 +524,14 @@ module.exports = {
   buildMainReplyLagDiagnosticText,
   filterRowsByWindow,
   isMainReplyModelCall,
+  isGenerationEvent,
   isPlannerEvent,
   isSendEvent,
   parseWindowMs,
   resolveEventMs,
   scoreBottleneck,
   summarizeDurations,
+  summarizeGeneration,
   summarizeMainModel,
   summarizePlanner,
   summarizeSend
