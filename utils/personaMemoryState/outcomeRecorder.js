@@ -1,12 +1,13 @@
 const config = require('../../config');
 const { resolveShortTermSessionKey } = require('../shortTermMemory');
-const { sanitizeUntrustedContent, shouldBlockMemoryLearning } = require('../promptSecurity');
+const { sanitizeUntrustedContent } = require('../promptSecurity');
 const {
   DEFAULT_SURFACE,
   computeTopicFingerprint,
   normalizeArray,
   normalizeObject,
   normalizeText,
+  parsePersonaPreference,
   uniqueStrings
 } = require('./helpers');
 
@@ -116,6 +117,38 @@ function detectExplicitPersonaFeedback(text = '') {
   return { isFeedback: false, polarity: '', text: normalized };
 }
 
+function looksLikeStructuredProfileState(text = '') {
+  const normalized = normalizeText(text, 320);
+  if (!normalized) return false;
+  const schemaLabels = normalized.match(/\b(?:relationship|bot_persona|style)_[a-z_]+\s*[:=]/gi) || [];
+  const sourceLabels = normalized.match(/\b(?:warmth|playfulness|tease|initiative|jargon|verbosity|guardedness|replyPosture)Source\s*=/g) || [];
+  if (sourceLabels.length > 0) return true;
+  if (schemaLabels.length >= 2) return true;
+  if (/用户修正[:：]/.test(normalized) && schemaLabels.length > 0) return true;
+  if (/\b(?:runtime_inference|surface_policy|short_term_state|relationship_memory|persona_memory)\b/i.test(normalized)) {
+    return true;
+  }
+  return false;
+}
+
+function isProfileReadbackReplyStyle(value = '', sourceProfileText = '') {
+  const normalized = normalizeText(value, 160);
+  const source = normalizeText(sourceProfileText, 320);
+  if (!normalized || !source) return false;
+  const parsed = normalizeText(parsePersonaPreference(source, 'relationship_reply_style'), 160);
+  if (parsed && parsed === normalized) return true;
+  return source.includes(normalized);
+}
+
+function shouldWriteRuntimeRelationshipReplyStyle(value = '', sourceProfileText = '') {
+  const normalized = normalizeText(value, 160);
+  if (!normalized) return false;
+  if (normalized.length > 80) return false;
+  if (looksLikeStructuredProfileState(normalized)) return false;
+  if (isProfileReadbackReplyStyle(normalized, sourceProfileText)) return false;
+  return true;
+}
+
 function buildBotPersonaSlots(state = {}, payload = {}) {
   const expression = flattenExpressionState(state.expressionState);
   const personaText = normalizeText(state.evidence?.memoryContext?.persona?.botBasePersona || '', 320);
@@ -123,6 +156,7 @@ function buildBotPersonaSlots(state = {}, payload = {}) {
   const push = (fieldKey, value, confidence = 0.78, sourceKind = 'runtime') => {
     const normalized = normalizeText(value, 140);
     if (!normalized) return;
+    if (sourceKind !== 'explicit_feedback' && looksLikeStructuredProfileState(normalized)) return;
     out.push({ fieldKey, value: normalized, confidence, sourceKind });
   };
 
@@ -150,14 +184,16 @@ function buildRelationshipStyleSlots(state = {}, payload = {}) {
   const push = (fieldKey, value, confidence = 0.8, sourceKind = 'runtime') => {
     const normalized = normalizeText(value, 160);
     if (!normalized) return;
+    if (sourceKind !== 'explicit_feedback' && looksLikeStructuredProfileState(normalized)) return;
     out.push({ fieldKey, value: normalized, confidence, sourceKind });
   };
 
-  if (relationshipText) push('relationship_reply_style', relationshipText.replace(/relationship_[a-z_]+:\s*/gi, ''), 0.84);
   if (relationship.attitude) push('relationship_tone', relationship.attitude, 0.8);
   if (relationship.distanceMode) push('relationship_distance', relationship.distanceMode, 0.82);
   if (relationship.salutationStyle || relationship.salutationPolicy) push('relationship_salutation', relationship.salutationStyle || relationship.salutationPolicy, 0.8);
-  if (relationship.replyStylePolicy) push('relationship_reply_style', relationship.replyStylePolicy, 0.82);
+  if (shouldWriteRuntimeRelationshipReplyStyle(relationship.replyStylePolicy, relationshipText)) {
+    push('relationship_reply_style', relationship.replyStylePolicy, 0.82);
+  }
   if (expression.initiative) push('relationship_engagement', `互动积极度=${expression.initiative}`, 0.76);
   if (expression.guardedness) push('relationship_boundaries', `关系边界=${expression.guardedness}`, 0.76);
 
@@ -191,15 +227,6 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
   const sessionId = normalizeText(routeMeta.sessionId || routeMeta.session_id || request.sessionId);
   const routePolicyKey = normalizeText(request.routePolicyKey || normalizedPayload.routePolicyKey);
   const topRouteType = normalizeText(request.topRouteType || normalizedPayload.topRouteType);
-  const flattenedExpression = flattenExpressionState(expression);
-  const expressionFingerprint = Object.entries(flattenedExpression)
-    .map(([key, value]) => `${key}=${normalizeText(value, 32)}`)
-    .filter(Boolean)
-    .join(', ');
-  const expressionGate = shouldBlockMemoryLearning(expressionFingerprint, 'style_pattern', {
-    routePolicyKey,
-    topRouteType
-  });
   const checkpointPayload = deriveSessionCheckpointPayload(state, normalizedPayload);
 
   await appendMemoryEvent({
@@ -259,33 +286,6 @@ async function recordPersonaMemoryOutcome(surface = '', payload = {}) {
     return true;
   };
 
-  if (expressionFingerprint && !expressionGate.blocked) {
-    await appendVersionedMemoryUpdate({
-      type: 'memory_confirmed',
-      userId,
-      sessionKey,
-      groupId,
-      channelId,
-      sessionId,
-      routePolicyKey,
-      topRouteType,
-      scopeType: 'personal',
-      source: sourceName,
-      sourceKind: 'runtime',
-      status: 'active',
-      memoryKind: 'style',
-      semanticSlot: 'style_pattern',
-      text: `style: ${sanitizeUntrustedContent(expressionFingerprint, 'memory')}`,
-      payload: {
-        fieldKey: 'style_pattern',
-        type: 'fact'
-      },
-      confidence: 0.7,
-      importance: 0.6,
-      evidenceCount: 1
-    });
-  }
-
   const personaSlotsUpdated = [];
   for (const slot of botPersonaSlots) {
     const wrote = await writePersonaSlot('bot_persona', slot.fieldKey, slot.value, {
@@ -332,5 +332,6 @@ module.exports = {
   deriveSessionCheckpointPayload,
   detectExplicitPersonaFeedback,
   flattenExpressionState,
+  looksLikeStructuredProfileState,
   recordPersonaMemoryOutcome
 };

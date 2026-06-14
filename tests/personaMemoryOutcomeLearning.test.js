@@ -78,6 +78,11 @@ module.exports = (async () => {
   assert.ok(recorded.some((event) => event.type === 'session_checkpoint'));
   assert.ok(recorded.some((event) => event.memoryKind === 'bot_persona'));
   assert.ok(recorded.some((event) => event.memoryKind === 'relationship_style'));
+  assert.ok(!recorded.some((event) => event.semanticSlot === 'style_pattern' && /runtime_inference|Source=|warmth=/.test(String(event.text || ''))));
+  assert.ok(!recorded.some((event) => (
+    event.semanticSlot === 'relationship_reply_style'
+    && /用户修正|relationship_[a-z_]+:|bot_persona_[a-z_]+:/.test(String(event.text || ''))
+  )));
   const checkpoint = recorded.find((event) => event.type === 'session_checkpoint');
   assert.ok(checkpoint?.payload?.expressionState?.replyPosture === 'focused');
   assert.ok(Array.isArray(checkpoint?.payload?.moduleState?.activePersonaModules));

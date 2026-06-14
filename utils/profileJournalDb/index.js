@@ -290,6 +290,7 @@ function normalizeProfileFactInput(input = {}, options = {}) {
   );
   const confidence = Math.max(0, Math.min(1, Number(input.confidence ?? input.payload?.confidence ?? 0) || 0));
   const quality = input.profileQuality || input.payload?.profileQuality || assessProfileWriteQuality(type, rawText, confidence, {
+    fieldKey,
     sourceKind,
     now: options.now
   });
@@ -445,6 +446,18 @@ function buildProfileQualityRejectReason(row = {}) {
   if (quality && quality.ok === false) return `profile_quality_${reasons[0] || 'not_ok'}`;
   if (reasons.some((reason) => ['temporary_language', 'generic_text', 'label_only', 'too_short', 'correction_command'].includes(reason))) {
     return `profile_quality_${reasons[0]}`;
+  }
+  const derivedQuality = assessProfileWriteQuality(
+    row.type || row.memoryKind || row.field_key || row.fieldKey,
+    row.value || row.text || '',
+    row.confidence,
+    {
+      fieldKey: row.field_key || row.fieldKey,
+      sourceKind: row.source_kind || row.sourceKind
+    }
+  );
+  if (Array.isArray(derivedQuality.reasons) && derivedQuality.reasons.includes('structured_state_snapshot')) {
+    return 'profile_quality_structured_state_snapshot';
   }
   return '';
 }

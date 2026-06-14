@@ -303,3 +303,10 @@
 - 模型侧确认 `v2_streaming_reply` p95=97.3s、`direct_reply` p95=85.7s、流式 `final_reply_send_done` p95=160.4s；非流式发送 p50=324ms，QQ 发送本身不是主要瓶颈。
 - 验收：`npm run diag:main-reply-lag -- --since=24h --no-provider-diagnostic --json`、`npm run diag:runtime -- --json`、只读聚合 `data/request-trace.ndjson` / `data/inbound_timing.jsonl` / `data/model-calls.ndjson`。
 - 小目标已完成：今天仍存在的慢点已定位为“连续消息聚合前置等待 + 上游模型/流式生成长耗时”，并写入 `docs/recent-reply-speed-blockers-2026-06-13.md`。
+
+## 运行维护 2026-06-15 07:42
+
+- 定位 `1960901788` 的 profile 污染：`personaMemoryState/outcomeRecorder` 将已召回的 `persona.relationshipStyle/userAdaptationPersona` 重新写入 `relationship_reply_style`，同时把 runtime expression fingerprint 写成 `style_pattern`，导致 Profile Journal/Memory V3 反复产生 superseded/suppressed 记录。
+- 最小修复：停止 runtime expression snapshot 的长期 style 写入；`relationship_reply_style` 不接受 profile readback；post-reply enrich gate 和 Profile Journal quality gate 统一拒绝 `runtime_inference/*Source`、跨字段 `relationship_*:`、`bot_persona_*` 夹带其他字段标签、`用户修正：relationship_*` 等结构化状态快照。
+- 实际验收：目标测试 `personaMemoryOutcomeLearning`、`postReplyEnrichQualityGate`、`profileJournalDb`、`memoryV3ProfileLifecycle` 通过；关闭 rerank/embedding 后复跑 `memoryV3StyleFacet`、`memoryV3RelationshipFacet` 通过；`data/memory-recall-observability.ndjson` 中 `1960901788` 有 1649 条观测、436 条含污染痕迹，最新慢样本 `req_b2b30fbc8e3e1e8b` 含 21 个 superseded/suppressed 污染项；真实 `data/profile_journal.sqlite` 最终 active 污染样本为 0，漏网样本 `m3v_2279c5300660ed60` 已为 rejected。
+- 小目标已完成：post-reply/profile maintenance 不再把结构化字段或自身输出回灌为长期 profile。

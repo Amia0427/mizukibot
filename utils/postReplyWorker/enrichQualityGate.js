@@ -38,6 +38,20 @@ function hasSensitiveText(text = '') {
   return /(api[_-]?key|token|password|secret|身份证|手机号|住址|隐私|doxx)/i.test(normalizeText(text));
 }
 
+function isStructuredStateSnapshot(fieldKey = '', text = '') {
+  const key = normalizeText(fieldKey).toLowerCase();
+  const value = normalizeText(text);
+  if (!value) return false;
+  if (!['style_pattern', 'style_avoid'].includes(key) && !key.startsWith('relationship_')) return false;
+  const schemaLabels = value.match(/\b(?:relationship|bot_persona|style)_[a-z_]+\s*[:=]/gi) || [];
+  const sourceLabels = value.match(/\b(?:warmth|playfulness|tease|initiative|jargon|verbosity|guardedness|replyPosture)Source\s*=/g) || [];
+  if (sourceLabels.length > 0) return true;
+  if (schemaLabels.length >= 2) return true;
+  if (/用户修正[:：]/.test(value) && schemaLabels.length > 0) return true;
+  const sourceTokens = value.match(/\b(?:runtime_inference|surface_policy|short_term_state|relationship_memory|persona_memory|continuity_state)\b/gi) || [];
+  return sourceTokens.length >= 2;
+}
+
 function buildGateResult(candidate = {}, allow = false, reason = '') {
   return {
     allow: Boolean(allow),
@@ -73,6 +87,7 @@ function createEnrichQualityGate(context = {}) {
     if (candidate.requiresGroup === true && !groupId) return buildGateResult(candidate, false, 'missing_group_scope');
     if (candidate.requiresUser === true && !userId) return buildGateResult(candidate, false, 'missing_user_scope');
     if (hasSensitiveText(text)) return buildGateResult(candidate, false, 'sensitive_text');
+    if (isStructuredStateSnapshot(fieldKey, text)) return buildGateResult(candidate, false, 'structured_state_snapshot');
     const dedupeKey = `${fieldKey}|${groupId || userId || 'global'}|${canonicalText(fieldKey, text)}`;
     if (seen.has(dedupeKey)) return buildGateResult(candidate, false, 'duplicate_text');
     if (maxWrites > 0 && acceptedWrites >= maxWrites) return buildGateResult(candidate, false, 'max_writes_exceeded');
@@ -97,5 +112,6 @@ function createEnrichQualityGate(context = {}) {
 module.exports = {
   canonicalText,
   createEnrichQualityGate,
-  defaultMinConfidence
+  defaultMinConfidence,
+  isStructuredStateSnapshot
 };
