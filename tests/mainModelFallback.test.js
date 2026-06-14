@@ -60,6 +60,7 @@ try {
   const {
     ADMIN_SHARED_FALLBACK_SCOPE,
     getMainModelFallbackStatus,
+    isImmediateFallbackFailure,
     recordMainModelFailure,
     recordMainModelSuccess,
     resolveForcedFallbackMainModelConfig,
@@ -69,6 +70,10 @@ try {
 
   resetMainModelFallbackState();
   resetMainModelFallbackState({ scope: ADMIN_SHARED_FALLBACK_SCOPE });
+
+  assert.strictEqual(isImmediateFallbackFailure(buildError(401, 'unauthorized')), true);
+  assert.strictEqual(isImmediateFallbackFailure(buildError(403, 'forbidden')), true);
+  assert.strictEqual(isImmediateFallbackFailure(buildError(500, 'server error')), false);
 
   let status = getMainModelFallbackStatus();
   assert.strictEqual(status.scope, 'default');
@@ -142,6 +147,14 @@ try {
   status = getMainModelFallbackStatus({ now: baseTime + 31 });
   assert.strictEqual(status.active, false);
   assert.strictEqual(status.consecutiveFailures, 2);
+
+  resetMainModelFallbackState();
+  status = recordMainModelFailure(buildError(401, 'primary unauthorized'), { now: baseTime + 40 });
+  assert.strictEqual(status.active, true);
+  assert.strictEqual(status.activated, true);
+  assert.strictEqual(status.immediateFallback, true);
+  assert.strictEqual(status.consecutiveFailures, 1);
+  assert.strictEqual(status.lastFailureStatus, 401);
 
   status = getMainModelFallbackStatus({ scope: ADMIN_SHARED_FALLBACK_SCOPE, now: baseTime + 1800000 + 31 });
   assert.strictEqual(status.active, false);

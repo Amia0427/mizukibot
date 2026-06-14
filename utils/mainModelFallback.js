@@ -199,6 +199,11 @@ function isMainModelAvailabilityError(error, options = null) {
   return Boolean(error);
 }
 
+function isImmediateFallbackFailure(error) {
+  const status = Number(error?.response?.status || 0);
+  return status === 401 || status === 403;
+}
+
 function buildPrimaryConfig(baseConfig = null) {
   const base = baseConfig && typeof baseConfig === 'object' ? { ...baseConfig } : {};
   return {
@@ -304,8 +309,11 @@ function recordMainModelFailure(error, options = null) {
   state.lastFailureStatus = Number(error?.response?.status || 0);
   state.lastError = safeErrorText(error);
 
+  const immediateFallback = isImmediateFallbackFailure(error);
+  const activationThreshold = immediateFallback ? 1 : getFailureThreshold(normalized.scope);
+
   let activated = false;
-  if (!isFallbackActive({ scope: normalized.scope, now }) && state.consecutiveFailures >= getFailureThreshold(normalized.scope)) {
+  if (!isFallbackActive({ scope: normalized.scope, now }) && state.consecutiveFailures >= activationThreshold) {
     const cooldownMs = getCooldownMs(normalized.scope);
     state.fallbackUntil = cooldownMs > 0 ? (now + cooldownMs) : PERMANENT_FALLBACK_UNTIL;
     state.lastActivatedAt = now;
@@ -313,7 +321,8 @@ function recordMainModelFailure(error, options = null) {
     console.warn(`[main-model-fallback:${normalized.scope}] activated backup model after repeated request failures`, {
       scope: normalized.scope,
       fallbackModel: getFallbackModelName(normalized.scope),
-      failureThreshold: getFailureThreshold(normalized.scope),
+      failureThreshold: activationThreshold,
+      immediateFallback,
       cooldownMs
     });
   }
@@ -321,7 +330,8 @@ function recordMainModelFailure(error, options = null) {
   return {
     ...getMainModelFallbackStatus({ scope: normalized.scope, now }),
     counted: true,
-    activated
+    activated,
+    immediateFallback
   };
 }
 
@@ -346,6 +356,7 @@ module.exports = {
   ADMIN_SHARED_FALLBACK_SCOPE,
   DEFAULT_FALLBACK_SCOPE,
   isFallbackActive,
+  isImmediateFallbackFailure,
   isMainModelAvailabilityError,
   resolveMainModelConfig,
   resolveForcedFallbackMainModelConfig,

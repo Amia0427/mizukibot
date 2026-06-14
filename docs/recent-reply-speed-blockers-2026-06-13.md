@@ -2,7 +2,7 @@
 
 时间：2026-06-13 21:24 +08:00
 
-更新：2026-06-14 22:42 +08:00
+更新：2026-06-15 07:08 +08:00
 
 ## 结论
 
@@ -74,6 +74,41 @@
 - `node -e "require('./core/messageHandler'); console.log('message handler load ok')"`：完整拼装 handler 加载通过。
 - `node -e "const config=require('./config'); const status=require('./src/model/http/model-post.chunk').getModelHttpTransportStatus(); console.log(JSON.stringify({configStream:config.MODEL_TLS_IMPERSONATION_STREAM_ENABLED,statusStream:status.tlsImpersonationStreamEnabled,tls:status.tlsImpersonationEnabled}))"`：输出 `configStream=false/statusStream=false/tls=true`。
 - `npm run diag:main-reply-lag -- --since=24h --no-provider-diagnostic`：24h 窗口仍显示 `bottleneck=generation`，`generation p95=160361ms`、`main-model p95=86236ms`，`send samples=0`；说明历史窗口里瓶颈仍是生成/流式完成，不是 QQ 发送。
+
+## 2026-06-15 主回复慢样本串联
+
+时间：2026-06-15 07:08 +08:00
+
+样本：`req_b49d983a2be6d2f9`，本地完成时间 2026-06-15 01:59:32 +08:00，路由 `chat/default`，总耗时 167.2s，`stream=true`。
+
+| 阶段 | 实际耗时 | 证据 |
+| --- | ---: | --- |
+| 消息进入 | 0ms | `message_ingress` at `2026-06-14T17:56:45.080Z` |
+| 连续消息预处理/入锁前 | 12.0s | `message_ingress_lock_acquired.elapsedSinceRequestStartMs=12013`，`queueWaitMs=0` |
+| 路由 | 0ms | `router_done.durationMs=0` |
+| 快回复模型尝试 | 42.1s | `normal_fast_reply` 调 `gcli.ggchan.dev/gemini-3-flash-preview`，401 |
+| planner | 6ms | `planner_done.durationMs=6` |
+| prompt 装配 | 0ms | `prepare_main_prompt_blocks.prompt.stageTimings.totalDurationMs=0`；观测块 `short_term_continuity=3993 tokens`、`main_persona_system=3567 tokens`，最终模型输入约 11.2k tokens |
+| 正式流式主模型 | 44.9s | `v2_streaming_reply` 同 `gcli.ggchan.dev/gemini-3-flash-preview`，401 |
+| 流式失败后非流式主模型 | 42.1s | `direct_reply` 同 `gcli.ggchan.dev/gemini-3-flash-preview`，401 |
+| fallback 模型重试 | 22.5s | `superapi.buzz/gpt-5.5` 三次 502：2.8s、15.2s、4.4s |
+| QQ 发送 | 无独立慢耗时 | 该流式失败样本没有 `reply_send_success/failure`；`final_reply_send_done.durationMs=113012` 是生成/dispatch wall time，不是 QQ send |
+
+结论：这条样本当前仍拖慢的段不是消息进入、prompt 装配或 QQ 发送，而是主模型端点鉴权失败后被重复等待。相同失效主端点 401 在同一请求内被快回复、正式流式、非流式兜底各打一次，累计约 129.1s；随后 fallback 端点 502 又增加 22.5s。
+
+最小修复：
+
+- `utils/mainModelFallback.js` 将 401/403 归为确定不可用错误，第一次即激活 fallback，不再等待默认 3 次失败阈值。
+- 500/502/503/504 等可恢复上游错误仍按原阈值累计，避免一次普通波动就切走主模型。
+
+### 2026-06-15 07:08 验收
+
+- `node tests/mainModelFallback.test.js`：通过，新增断言确认 401/403 `immediateFallback=true` 且一次激活；500 仍不立即激活。
+- `node --check utils/mainModelFallback.js`：通过。
+- `node --check tests/mainModelFallback.test.js`：通过。
+- 只读复核 `data/request-trace.ndjson`、`data/inbound_timing.jsonl`、`data/model-calls.ndjson`、`data/memory-recall-observability.ndjson`：上述阶段耗时均来自真实日志。
+
+小目标已完成：今天这条主回复慢样本已按消息进入、预处理、prompt 装配、模型生成、QQ 发送串联；本次最小修复已减少鉴权类失效主端点在同一窗口内的重复等待。
 
 ## 近样本
 
