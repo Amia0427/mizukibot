@@ -264,7 +264,12 @@ function createStreamingDispatcher({
     sentSegments: 0,
     hasSentAny: false,
     lastSendAt: 0,
-    sendQueue: Promise.resolve()
+    sendQueue: Promise.resolve(),
+    sendStartedAt: 0,
+    sendFinishedAt: 0,
+    totalSendDurationMs: 0,
+    totalGapWaitMs: 0,
+    failedChunks: 0
   };
 
   async function sendChunk(chunk) {
@@ -288,7 +293,9 @@ function createStreamingDispatcher({
         : getStreamSendGapMs(effectiveConfig);
       const elapsed = now - state.lastSendAt;
       if (state.lastSendAt > 0 && elapsed < minGap) {
-        await new Promise((resolve) => setTimeout(resolve, minGap - elapsed));
+        const gapWaitMs = minGap - elapsed;
+        state.totalGapWaitMs += gapWaitMs;
+        await new Promise((resolve) => setTimeout(resolve, gapWaitMs));
       }
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
@@ -304,9 +311,12 @@ function createStreamingDispatcher({
               message: `${state.hasSentAny ? '' : `[CQ:at,qq=${senderId}] `}${text}`
             }
           };
+      const startedAt = Date.now();
+      if (!state.sendStartedAt) state.sendStartedAt = startedAt;
       const sent = await sendWithRetry(payload, 1, 300);
 
       if (!sent) {
+        state.failedChunks += 1;
         console.error(isPrivate ? '[stream] send_private_msg failed' : '[stream] send_group_msg failed', {
           chatType: isPrivate ? 'private' : 'group',
           groupId,
@@ -318,6 +328,8 @@ function createStreamingDispatcher({
 
       state.hasSentAny = true;
       state.lastSendAt = Date.now();
+      state.sendFinishedAt = state.lastSendAt;
+      state.totalSendDurationMs += Math.max(0, state.lastSendAt - startedAt);
       return true;
     };
 
@@ -382,6 +394,19 @@ function createStreamingDispatcher({
         state.sentLength = state.fullText.length;
         state.sentSegments = Math.max(1, state.sentSegments);
       }
+    },
+    getStats() {
+      const wallMs = state.sendStartedAt && state.sendFinishedAt
+        ? Math.max(0, state.sendFinishedAt - state.sendStartedAt)
+        : 0;
+      return {
+        sentSegments: state.sentSegments,
+        hasSentAny: state.hasSentAny,
+        failedChunks: state.failedChunks,
+        totalSendDurationMs: Math.max(0, state.totalSendDurationMs),
+        totalGapWaitMs: Math.max(0, state.totalGapWaitMs),
+        wallMs
+      };
     }
   };
 }

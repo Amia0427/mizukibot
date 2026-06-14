@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-14 14:59 +08:00
+更新时间：2026-06-14 22:42 +08:00
 
 ## 维护约定
 
@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
+- 2026-06-14 22:42 +08:00：`MODEL_TLS_IMPERSONATION_STREAM_ENABLED` 默认值改为 `false`，流式主回复默认回 axios；`MODEL_TLS_IMPERSONATION_ENABLED=true` 仍保留非流式 CycleTLS TLS/JA3 指纹伪装。原因是当天 `v2_streaming_reply` 的 CycleTLS 流式请求约 92.4s 与连续消息定时器延迟恢复重合，先默认避开流式 CycleTLS 事件循环阻塞风险。验收：`node tests/modelHttpCycleTlsFallback.test.js`、配置探针输出 `configStream=false/statusStream=false/tls=true`。
 - 2026-06-14 14:59 +08:00：新增 `PLANNER_API_MODE`（同义 `PLAN_API_MODE`），默认 `chat_completions`。planner 远程模型请求会在请求体写入现有内部字段 `__preferredProtocol=chat_completions`，避免 OpenAI-compatible host 被通用 HTTP 层先改写到 `/v1/responses` 再 405 回退；如 planner host 明确支持 Responses，可设 `PLANNER_API_MODE=responses`。验收：`node tests/plannerNoRetry.test.js` 通过，mock host 记录唯一发送 URL 为 `/v1/chat/completions` 且未出现 `/v1/responses`；未对真实外部 host 发请求。
 - 2026-06-13 22:40 +08:00：新增 `DIRECT_CHAT_PLANNER_ENABLED=false` 并作为默认值，关闭 direct_chat 远程 planner 模型/subagent 调用；`PLAN_*` endpoint/key 保留用于显式恢复，但运行时 `planDirectChat` 和 dispatch capability preflight 进入 `planRequestV2` 后会短路为本地规则决策 `decisionSource=rule_planner_disabled`。关闭后仍保留本地 deterministic preflight、规则 planner、SQL worldbook/persona module、本地 Memory V3/Profile Journal/Daily Journal 召回和显式安全工具计划；减少的是远程 planner 对模糊工具选择、背景 research 请求、动态 prompt block/persona module 的模型级判断。模型自检在关闭态也不再拨测 `plan`。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/modelSelfCheck.test.js`、`node tests/directChatPlannerNotebook.test.js`、`node tests/imageSummaryLatencyPath.test.js`、`node tests/plannerSemanticRefine.test.js`、`node tests/plannerV2Protocol.test.js` 通过。
 - 2026-06-13 20:00 +08:00：planner 单次远程模型请求超时上限收敛为 `PLANNER_REQUEST_TIMEOUT_MS=15000`；配置层会把更大值封顶到 15 秒，本地 `.env` 已同步为 15000。远程 planner 超时/失败后降级为 `chat_only/fast_reply`，不再继续工具计划；验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。
@@ -16,7 +17,7 @@
 - 2026-06-13 19:57 +08:00：普通用户快速回复新增 SQL worldbook 预算配置，默认 `NORMAL_FAST_REPLY_WORLDBOOK_ENABLED=true`、`NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE=1`、`NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST=180`、`NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS=900`。快速链路只在 worldbook gate 命中时注入 `[FastWorldbook]`，仍不调用远程 planner 或主动态 prompt；验收：`node tests/normalFastReplyConfig.test.js` 通过。
 - 2026-06-13 19:53 +08:00：普通用户快速回复新增短 persona module 预算配置，默认 `NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE=2`、`NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST=100`、`NORMAL_FAST_REPLY_PERSONA_MODULE_TEXT_MAX_CHARS=700`。快速链路仍不加载主动态 prompt，只允许最多两个非 worldbook 短模块进入 `[FastPersonaModules]`；验收：`node --unhandled-rejections=strict tests/normalFastReplyConfig.test.js` 通过。
 - 2026-06-12 12:42 +08:00：模型自检 `http_421` 根因是 CycleTLS/HTTP2 连接复用在并发跨网关请求中触发 misdirected request；新增 `MODEL_TLS_IMPERSONATION_CONNECTION_REUSE_ENABLED=false` 默认关闭连接复用，并在 CycleTLS 返回 421 时自动回落 axios。`token.memoh.net` 返回的 `403` 是账号 TLS router 客户端匹配限制，需切到可用网关或调整上游账号规则。
-- 2026-06-11 17:06 +08:00：主回复模型新增浏览器 TLS/JA3 指纹伪装配置：`MODEL_TLS_IMPERSONATION_ENABLED=true` 启用 CycleTLS 传输，默认 Chrome-like JA3 与 Chrome HTTP/2 fingerprint；`MODEL_TLS_IMPERSONATION_STREAM_ENABLED=true` 覆盖流式主回复；`MODEL_TLS_IMPERSONATION_FALLBACK_ENABLED=true` 保留 axios 回落，避免 CycleTLS 异常时中断主回复。
+- 2026-06-11 17:06 +08:00：主回复模型新增浏览器 TLS/JA3 指纹伪装配置：`MODEL_TLS_IMPERSONATION_ENABLED=true` 启用 CycleTLS 传输，默认 Chrome-like JA3 与 Chrome HTTP/2 fingerprint；当时 `MODEL_TLS_IMPERSONATION_STREAM_ENABLED=true` 覆盖流式主回复，2026-06-14 起流式默认关闭；`MODEL_TLS_IMPERSONATION_FALLBACK_ENABLED=true` 保留 axios 回落，避免 CycleTLS 异常时中断主回复。
 - 2026-06-11 13:52 +08:00：管理员私聊流式主回复 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 默认值改为 `150000`。只限制 `userRole=admin + chatType=private` 的 `v2_streaming_reply` 上游首字等待；超时会 abort 当前流式请求并直接发明确兜底，不触发 admin shared fallback 或非流式二次慢请求。普通用户仍由 `NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 控制，管理员群聊不受影响。
 - 2026-06-10 20:10 +08:00：模型自检与被动群感知真实回复现在会把显式 `/chat/completions` 或 `/responses` 的独立回复 endpoint 推断为 `openai_compatible`，避免 `PASSIVE_AWARENESS_REPLY_MODEL=gemini-*` 在 gcli 这类 OpenAI-compatible 网关上被误改写为 Gemini native；如确实使用 Gemini native，继续显式配置 `PASSIVE_AWARENESS_REPLY_API_PROVIDER=gemini_native`。
 - 2026-06-09 08:35 +08:00：LanceDB vector index 默认使用 `MEMORY_LANCEDB_VECTOR_INDEX_TYPE=ivf_pq`、`MEMORY_LANCEDB_VECTOR_INDEX_NUM_BITS=8`、`MEMORY_LANCEDB_VECTOR_INDEX_NUM_SUB_VECTORS=64`；这是索引量化，不改变原始 Float32 向量列。本地超过 256 行的 memory bucket 表已重建 `IVF_PQ` 8bit 索引。

@@ -306,7 +306,10 @@ function normalizeMessageForDownstream(baseMsg = {}, merged = {}, effectiveBotQQ
           || (Array.isArray(merged.forwardIds) && merged.forwardIds.length ? 'pending' : 'skipped'),
         card: normalizeText(merged.expansionState?.card)
           || (Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length ? 'pending' : 'skipped')
-      }
+      },
+      timing: merged.timing && typeof merged.timing === 'object'
+        ? { ...merged.timing }
+        : null
     }
   };
 }
@@ -769,15 +772,58 @@ function createContinuousMessagePreprocessor(options = {}) {
     const session = sessions.get(sessionKey);
     if (!session) return;
     clearTimer(session);
-    const elapsedMs = Math.max(0, Date.now() - Number(session.startedAt || Date.now()));
+    const now = Date.now();
+    const elapsedMs = Math.max(0, now - Number(session.startedAt || now));
     const remainingHoldMs = Math.max(0, maxHoldMs - elapsedMs);
-    const nextDelayMs = Math.min(getSessionDebounceMs(session), remainingHoldMs || getSessionDebounceMs(session));
+    const debounceForSession = getSessionDebounceMs(session);
+    const nextDelayMs = elapsedMs >= maxHoldMs
+      ? 0
+      : Math.min(debounceForSession, remainingHoldMs);
+    const scheduledAt = Date.now();
+    session.lastSchedule = {
+      scheduledAt,
+      delayMs: nextDelayMs,
+      elapsedMs,
+      remainingHoldMs,
+      debounceMs: debounceForSession,
+      maxHoldMs
+    };
     session.timer = setTimeout(() => {
       const current = sessions.get(sessionKey);
       if (!current) return;
-      current.flushReason = remainingHoldMs <= getSessionDebounceMs(session) ? 'max_hold' : 'debounce';
+      const firedAt = Date.now();
+      const currentElapsedMs = Math.max(0, firedAt - Number(current.startedAt || firedAt));
+      const scheduled = current.lastSchedule || {};
+      const scheduledDelayMs = Number(scheduled.delayMs || 0) || 0;
+      const actualDelayMs = Math.max(0, firedAt - Number(scheduled.scheduledAt || scheduledAt));
+      current.lastTimerFiredAt = firedAt;
+      current.lastTimerActualDelayMs = actualDelayMs;
+      current.lastTimerOverdueMs = Math.max(0, actualDelayMs - scheduledDelayMs);
+      current.flushReason = currentElapsedMs >= maxHoldMs || nextDelayMs === remainingHoldMs
+        ? 'max_hold'
+        : 'debounce';
       current.flushResolve();
     }, nextDelayMs);
+  }
+
+  function buildTimingMeta(session = {}, preprocessStartedAt = Date.now(), waitEndedAt = Date.now(), resolveStartedAt = waitEndedAt, doneAt = Date.now()) {
+    const schedule = session.lastSchedule && typeof session.lastSchedule === 'object'
+      ? session.lastSchedule
+      : {};
+    return {
+      totalMs: Math.max(0, doneAt - preprocessStartedAt),
+      waitMs: Math.max(0, waitEndedAt - preprocessStartedAt),
+      resolveDetailsMs: Math.max(0, doneAt - resolveStartedAt),
+      sessionAgeMs: Math.max(0, doneAt - Number(session.startedAt || preprocessStartedAt)),
+      entryCount: Array.isArray(session.entries) ? session.entries.length : 0,
+      scheduleDelayMs: Math.max(0, Number(schedule.delayMs || 0) || 0),
+      scheduleElapsedMs: Math.max(0, Number(schedule.elapsedMs || 0) || 0),
+      scheduleRemainingHoldMs: Math.max(0, Number(schedule.remainingHoldMs || 0) || 0),
+      scheduleDebounceMs: Math.max(0, Number(schedule.debounceMs || 0) || 0),
+      scheduleMaxHoldMs: Math.max(0, Number(schedule.maxHoldMs || maxHoldMs) || maxHoldMs),
+      timerActualDelayMs: Math.max(0, Number(session.lastTimerActualDelayMs || 0) || 0),
+      timerOverdueMs: Math.max(0, Number(session.lastTimerOverdueMs || 0) || 0)
+    };
   }
 
   function flushSession(sessionKey, reason = 'manual') {
@@ -788,6 +834,7 @@ function createContinuousMessagePreprocessor(options = {}) {
   }
 
   async function handleMessage(msg = {}, context = {}) {
+    const preprocessStartedAt = Date.now();
     if (!enabled) {
       return {
         mode: 'ready',
@@ -836,6 +883,7 @@ function createContinuousMessagePreprocessor(options = {}) {
     }
 
     if (bypass) {
+      const resolveStartedAt = Date.now();
       await resolveContinuousEntryDetails(entry, {
         ...sharedResolveOptions,
         effectiveBotQQ,
@@ -843,6 +891,7 @@ function createContinuousMessagePreprocessor(options = {}) {
         resolveForward: Array.isArray(entry.forwardIds) && entry.forwardIds.length > 0,
         resolveCards: Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length > 0
       });
+      const doneAt = Date.now();
       return {
         mode: 'ready',
         effectiveMsg: msg,
@@ -866,7 +915,15 @@ function createContinuousMessagePreprocessor(options = {}) {
             ? { ...entry.forwardImageRefMap }
             : {},
           qqCardUrls: Array.isArray(entry.qqCardUrls) ? entry.qqCardUrls.slice() : [],
-          expansionState: { ...(entry.expansionState || {}) }
+          expansionState: { ...(entry.expansionState || {}) },
+          timing: {
+            totalMs: Math.max(0, doneAt - preprocessStartedAt),
+            waitMs: 0,
+            resolveDetailsMs: Math.max(0, doneAt - resolveStartedAt),
+            sessionAgeMs: Math.max(0, doneAt - preprocessStartedAt),
+            entryCount: 1,
+            scheduleMaxHoldMs: maxHoldMs
+          }
         }
       };
     }
@@ -945,6 +1002,7 @@ function createContinuousMessagePreprocessor(options = {}) {
     });
 
     await flushPromise;
+    const firstWaitEndedAt = Date.now();
     const session = sessions.get(sessionKey);
     if (!session) {
       return {
@@ -981,6 +1039,7 @@ function createContinuousMessagePreprocessor(options = {}) {
           });
           const resumed = sessions.get(sessionKey);
           if (resumed) {
+            const resumedWaitEndedAt = Date.now();
             sessions.delete(sessionKey);
             clearTimer(resumed);
             const resumedMerged = buildMergedMessagePayload(resumed.entries, { sessionKey });
@@ -989,6 +1048,7 @@ function createContinuousMessagePreprocessor(options = {}) {
             resumedMerged.flushVersion = resumed.activityVersion;
             resumedMerged.semanticScore = null;
             resumedMerged.semanticDecision = 'max_hold_fallback';
+            const resolveStartedAt = Date.now();
             await resolveContinuousEntryDetails(resumedMerged, {
               ...sharedResolveOptions,
               effectiveBotQQ,
@@ -998,6 +1058,8 @@ function createContinuousMessagePreprocessor(options = {}) {
               resolveForward: Array.isArray(resumedMerged.forwardIds) && resumedMerged.forwardIds.length > 0,
               resolveCards: Array.isArray(resumedMerged.qqCardUrls) && resumedMerged.qqCardUrls.length > 0
             });
+            const doneAt = Date.now();
+            resumedMerged.timing = buildTimingMeta(resumed, preprocessStartedAt, resumedWaitEndedAt, resolveStartedAt, doneAt);
             const resumedEffectiveMsg = normalizeMessageForDownstream(resumed.msg, resumedMerged, effectiveBotQQ);
             resumedEffectiveMsg.__continuousMessageMeta.flushVersion = resumedMerged.flushVersion;
             resumedEffectiveMsg.__continuousMessageMeta.semanticScore = resumedMerged.semanticScore;
@@ -1013,6 +1075,7 @@ function createContinuousMessagePreprocessor(options = {}) {
     }
     sessions.delete(sessionKey);
     clearTimer(session);
+    const resolveStartedAt = Date.now();
     await resolveContinuousEntryDetails(merged, {
       ...sharedResolveOptions,
       effectiveBotQQ,
@@ -1022,6 +1085,8 @@ function createContinuousMessagePreprocessor(options = {}) {
       resolveForward: Array.isArray(merged.forwardIds) && merged.forwardIds.length > 0,
       resolveCards: Array.isArray(merged.qqCardUrls) && merged.qqCardUrls.length > 0
     });
+    const doneAt = Date.now();
+    merged.timing = buildTimingMeta(session, preprocessStartedAt, firstWaitEndedAt, resolveStartedAt, doneAt);
     const effectiveMsg = normalizeMessageForDownstream(session.msg, merged, effectiveBotQQ);
     effectiveMsg.__continuousMessageMeta.flushVersion = merged.flushVersion;
     effectiveMsg.__continuousMessageMeta.semanticScore = merged.semanticScore;

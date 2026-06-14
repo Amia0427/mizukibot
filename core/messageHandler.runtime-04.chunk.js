@@ -362,6 +362,9 @@
           'ask_ai_dispatch_done',
           'thinking_emoji_done',
           'thinking_emoji_skipped',
+          'reply_stream_chunk_start',
+          'reply_stream_chunk_success',
+          'reply_stream_chunk_failure',
           'normal_group_main_reply_rate_limited'
         ].includes(normalizedEventType)
       );
@@ -381,6 +384,9 @@
           durationMs: Number.isFinite(Number(normalizedEvent.durationMs))
             ? Math.max(0, Math.floor(Number(normalizedEvent.durationMs)))
             : null,
+          channel: String(normalizedEvent.channel || '').trim(),
+          chunkIndex: Number(normalizedEvent.chunkIndex || 0) || 0,
+          chunkLength: Number(normalizedEvent.chunkLength || 0) || 0,
           applied: normalizedEvent.applied === true,
           rawMessageTimestampMs,
           elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),

@@ -240,7 +240,7 @@ function summarizeSend(perfEvents = []) {
 function summarizeGeneration(perfEvents = []) {
   const rows = perfEvents.filter(isGenerationEvent);
   return {
-    ...summarizeDurations(rows, (row) => resolveDurationMs(row, ['generationDurationMs', 'durationMs', 'duration_ms'])),
+    ...summarizeDurations(rows, (row) => resolveDurationMs(row, ['generationDurationMs', 'dispatchDurationMs', 'durationMs', 'duration_ms'])),
     missing: rows.length === 0
   };
 }
@@ -500,7 +500,7 @@ function buildMainReplyLagDiagnosticText(report = {}) {
     `main-reply-lag: bottleneck=${summary.mostLikelyBottleneck?.code || 'unknown'} (${summary.mostLikelyBottleneck?.label || 'unknown'}) window=${Math.round(nonNegativeNumber(report.window?.windowMs, 0) / 60000)}m`,
     `planner: p50=${metrics.planner?.p50Ms || 0}ms p95=${metrics.planner?.p95Ms || 0}ms max=${metrics.planner?.maxMs || 0}ms samples=${metrics.planner?.count || 0}`,
     `main-model: p50=${metrics.mainModel?.p50Ms || 0}ms p95=${metrics.mainModel?.p95Ms || 0}ms max=${metrics.mainModel?.maxMs || 0}ms samples=${metrics.mainModel?.count || 0} provider=${metrics.mainModel?.latest?.provider || ''} model=${metrics.mainModel?.latest?.model || ''}`,
-    `generation: p50=${metrics.generation?.p50Ms || 0}ms p95=${metrics.generation?.p95Ms || 0}ms max=${metrics.generation?.maxMs || 0}ms samples=${metrics.generation?.count || 0} source=final_reply_send_done(stream)`,
+    `generation: p50=${metrics.generation?.p50Ms || 0}ms p95=${metrics.generation?.p95Ms || 0}ms max=${metrics.generation?.maxMs || 0}ms samples=${metrics.generation?.count || 0} source=final_reply_send_done(stream).generationDurationMs`,
     `send: p50=${metrics.send?.p50Ms || 0}ms p95=${metrics.send?.p95Ms || 0}ms max=${metrics.send?.maxMs || 0}ms samples=${metrics.send?.count || 0} source=reply_send_success/failure`,
     `post-reply-rss: pressure=${metrics.postReplyWorker?.pressure || 'unknown'} rssMax=${metrics.postReplyWorker?.rssMaxMb || 0}MB threshold=${metrics.postReplyWorker?.recycleThresholdMb || 0}MB activeMax=${metrics.postReplyWorker?.activeMax || 0} queue=queued:${queue.queued || 0} processing:${queue.processing || 0} failed:${queue.failed || 0}`,
     `evidence: ${summary.mostLikelyBottleneck?.evidence || ''}`

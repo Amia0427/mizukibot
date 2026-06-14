@@ -130,7 +130,7 @@ module.exports = (async () => {
   assert.ok(text.includes('main-reply-lag: bottleneck=planner'));
   assert.ok(text.includes('planner: p50=60000ms p95=62000ms'));
   assert.ok(text.includes('main-model: p50=45000ms p95=47000ms'));
-  assert.ok(text.includes('generation: p50=0ms p95=0ms max=0ms samples=0 source=final_reply_send_done(stream)'));
+  assert.ok(text.includes('generation: p50=0ms p95=0ms max=0ms samples=0 source=final_reply_send_done(stream).generationDurationMs'));
   assert.ok(text.includes('send: p50=42ms p95=42ms max=42ms samples=1 source=reply_send_success/failure'));
   assert.ok(text.includes('post-reply-rss: pressure=ok rssMax=512MB threshold=768MB'));
 
@@ -149,7 +149,8 @@ module.exports = (async () => {
         stage: 'final_reply_send_done',
         stream: true,
         streamCompleted: true,
-        durationMs: 98000
+        durationMs: 120,
+        generationDurationMs: 98000
       }
     ],
     modelCallRows,
@@ -162,7 +163,7 @@ module.exports = (async () => {
   });
   assert.strictEqual(isSendEvent({ stage: 'reply_send_success', durationMs: 42 }), true);
   assert.strictEqual(isSendEvent({ stage: 'final_reply_send_done', stream: true, durationMs: 98000 }), false);
-  assert.strictEqual(isGenerationEvent({ stage: 'final_reply_send_done', stream: true, durationMs: 98000 }), true);
+  assert.strictEqual(isGenerationEvent({ stage: 'final_reply_send_done', stream: true, durationMs: 120, generationDurationMs: 98000 }), true);
   assert.strictEqual(isGenerationEvent({ stage: 'final_reply_send_done', durationMs: 42 }), false);
   assert.strictEqual(splitSendAndGenerationReport.metrics.send.count, 1);
   assert.strictEqual(splitSendAndGenerationReport.metrics.send.p95Ms, 42);
@@ -172,7 +173,7 @@ module.exports = (async () => {
   assert.strictEqual(splitSendAndGenerationReport.summary.generationP95Ms, 98000);
   assert.strictEqual(splitSendAndGenerationReport.summary.mostLikelyBottleneck.code, 'generation');
   const splitText = buildMainReplyLagDiagnosticText(splitSendAndGenerationReport);
-  assert.ok(splitText.includes('generation: p50=98000ms p95=98000ms max=98000ms samples=1 source=final_reply_send_done(stream)'));
+  assert.ok(splitText.includes('generation: p50=98000ms p95=98000ms max=98000ms samples=1 source=final_reply_send_done(stream).generationDurationMs'));
   assert.ok(splitText.includes('send: p50=42ms p95=42ms max=42ms samples=1 source=reply_send_success/failure'));
 
   const pressureReport = await buildMainReplyLagDiagnostic({

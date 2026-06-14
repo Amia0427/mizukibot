@@ -255,6 +255,47 @@ async function testSentenceStableTailFlushesWithoutExtraWait() {
   assert.strictEqual(result.mode, 'ready');
   assert.strictEqual(result.meta.semanticDecision, 'complete');
   assert.strictEqual(result.meta.semanticScore, null);
+  assert.ok(result.meta.timing.totalMs >= result.meta.timing.waitMs);
+  assert.ok(result.meta.timing.scheduleDebounceMs >= 30);
+  assert.ok(result.meta.timing.entryCount >= 1);
+}
+
+async function testExpiredMaxHoldFlushesWithoutExtraDebounce() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 1000,
+    atBotDebounceMs: 1000,
+    privateDebounceMs: 1000,
+    maxHoldMs: 120,
+    sentenceWindowMs: 40
+  });
+
+  const firstMsg = makeMessage({
+    messageId: 'maxhold-a',
+    message: [{ type: 'text', data: { text: '第一句还没说完' } }],
+    rawMessage: '第一句还没说完'
+  });
+  const secondMsg = makeMessage({
+    messageId: 'maxhold-b',
+    time: 1710000021,
+    message: [{ type: 'text', data: { text: '第二句补充' } }],
+    rawMessage: '第二句补充'
+  });
+
+  const firstPromise = preprocessor.handleMessage(firstMsg, {});
+  const blockUntil = Date.now() + 350;
+  while (Date.now() < blockUntil) {}
+  const secondStartedAt = Date.now();
+  const second = await preprocessor.handleMessage(secondMsg, {});
+  assert.strictEqual(second.mode, 'deferred');
+
+  const first = await firstPromise;
+  assert.strictEqual(first.mode, 'ready');
+  assert.strictEqual(first.meta.flushReason, 'max_hold');
+  assert.deepStrictEqual(first.meta.sourceMessageIds, ['maxhold-a', 'maxhold-b']);
+  assert.ok(Date.now() - secondStartedAt < 70, 'expired max-hold should not wait another debounce window');
+  assert.ok(first.meta.timing.scheduleDelayMs <= 5, 'expired max-hold should schedule an immediate flush');
+  assert.ok(first.meta.timing.sessionAgeMs >= 300);
 }
 
 async function testAdminCheckBypassesContinuousHold() {
@@ -411,6 +452,7 @@ async function testReplyExpansionSkipsOfflineAndRecovers() {
   await testMergedFlushKeepsLatestFreshnessToken();
   await testSentenceWindowWaitsForContinuation();
   await testSentenceStableTailFlushesWithoutExtraWait();
+  await testExpiredMaxHoldFlushesWithoutExtraDebounce();
   await testAdminCheckBypassesContinuousHold();
   await testReplyExpansionSkipsOfflineAndRecovers();
   console.log('continuousMessagePreprocessor.test.js passed');

@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-14 22:42 +08:00**：重点排查今天慢点 1/2 后落地最小修复。第 1 点新增连续消息预处理 `timing` 证据，修复 max-hold 已过期时仍再等一轮 debounce 的问题；第 2 点确认 `req_7d10035daeec3292` 的 `v2_streaming_reply` 通过 CycleTLS 持有流式 HTTP 约 92.4s，期间多条连续消息定时器到 `http_client_success` 后才恢复，现默认 `MODEL_TLS_IMPERSONATION_STREAM_ENABLED=false`，流式主回复回 axios，非流式 CycleTLS 继续保留。验收：`node scripts/run-tests.js continuousMessagePreprocessor.test.js messageReplyRuntimeFreshness.test.js messageRouteFlowGroupStreaming.test.js mainReplyLagDiagnostics.test.js modelHttpCycleTlsFallback.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"`、`npm run diag:main-reply-lag -- --since=24h --no-provider-diagnostic` 通过。小目标完成：今天的 1/2 慢点已有可复跑证据和默认避让策略。
+
 **2026-06-14 21:54 +08:00**：复核今天仍存在的主回复凝滞点。2026-06-14 当天 60 个完成请求中 47 个超过 60s；前置 `continuous_preprocess_done` 仍是固定等待源，p50=15.0s、p95=69.9s、max=101.2s，且 `message_ingress_lock_acquired.queueWaitMs` p95 仅 280ms，说明多数不是入站锁排队。主模型/生成仍是最大头：`v2_streaming_reply` p95=97.3s、`direct_reply` p95=85.7s、流式 `final_reply_send_done` p95=160.4s；非流式实际发送 p50=324ms。验收：`npm run diag:main-reply-lag -- --since=24h --no-provider-diagnostic --json`、`npm run diag:runtime -- --json` 和只读聚合 `data/request-trace.ndjson` / `data/inbound_timing.jsonl` / `data/model-calls.ndjson`。详见 `docs/recent-reply-speed-blockers-2026-06-13.md`。小目标完成：今天仍存在的慢点已定位为“连续消息聚合前置等待 + 上游模型/流式生成长耗时”，不是 QQ 发送本身。
 
 **2026-06-14 19:47 +08:00**：修正 `diag:main-reply-lag` 的发送耗时口径。`send` 现在只聚合 `reply_send_success/reply_send_failure.durationMs`，`final_reply_send_done.durationMs` 仅在 `stream=true/streamCompleted=true` 时进入独立 `generation` 指标，避免把流式模型生成完成时长误报为 QQ 发送慢。验收：`node --check utils/mainReplyLagDiagnostics.js`、`node --check tests/mainReplyLagDiagnostics.test.js`、`node tests/mainReplyLagDiagnostics.test.js`、`npm run diag:main-reply-lag -- --no-provider-diagnostic` 通过；最终 30m 实测输出 `main-model p95=3173ms samples=1`、`generation: p50=0ms p95=0ms max=0ms samples=0 source=final_reply_send_done(stream)`、`send: p50=0ms p95=0ms max=0ms samples=0 source=reply_send_success/failure`，瓶颈为 `main_model`。小目标完成：发送耗时和流式生成完成耗时已分开显示。
@@ -138,7 +140,7 @@
 
 **2026-06-11 18:59 +08:00**：修复 Windows daemon 拉起主 bot 后 post-reply worker 长时间缺席。今天 `data/bot-daemon.log` 反复出现 `post-reply worker not running, queue idle; skip idle restart.` 的直接原因是 worker 空闲 RSS 回收退出后，daemon 在无 queued/可恢复 processing job 时不补启；主 bot 被 daemon 重新拉起的路径也沿用同一队列门禁。现 `run-bot-daemon.ps1` 会在本轮成功拉起主 bot 且 `POST_REPLY_WORKER_ENABLED=true`、非 inline 时补启一次外置 worker，补启前仍先扫描 PID/进程避免重复。小目标完成：主 bot 守护自愈后 worker 启动自愈已恢复。
 
-**2026-06-11 17:06 +08:00**：主回复模型 HTTP 传输新增浏览器 TLS/JA3 指纹伪装。`MODEL_TLS_IMPERSONATION_ENABLED=true` 后模型 POST 通过 CycleTLS 发送，默认 Chrome-like JA3 + Chrome HTTP/2 fingerprint，流式主回复同样启用；`MODEL_TLS_IMPERSONATION_FALLBACK_ENABLED=true` 时传输异常自动回落原 axios，避免主回复中断。小目标完成：主回复模型 TLS 不再只暴露 Node/OpenSSL 默认指纹。
+**2026-06-11 17:06 +08:00**：主回复模型 HTTP 传输新增浏览器 TLS/JA3 指纹伪装。`MODEL_TLS_IMPERSONATION_ENABLED=true` 后模型 POST 通过 CycleTLS 发送，默认 Chrome-like JA3 + Chrome HTTP/2 fingerprint；该版本曾让流式主回复同样启用，2026-06-14 起流式默认关闭；`MODEL_TLS_IMPERSONATION_FALLBACK_ENABLED=true` 时传输异常自动回落原 axios，避免主回复中断。小目标完成：主回复模型 TLS 不再只暴露 Node/OpenSSL 默认指纹。
 
 **2026-06-11 17:20 +08:00**：新增模型条件提示词注入。Prompt manifest 支持 `applies_when.model_pattern`，模型名包含匹配字符串时自动注入对应提示词。`GEMINI.txt` 配置为仅在使用 Gemini 模型（如 `gemini-3-flash-preview`）时注入，优先级 -900（在 SYSTEM.txt 之后）。适用于模型特定的风格约束、输出规范和角色适配。
 

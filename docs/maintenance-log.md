@@ -1,3 +1,11 @@
+## 运行维护 2026-06-14 22:42
+
+- 小目标：重点排查今天慢点 1 和 2，区分连续消息等待、流式生成耗时和真实 QQ 发送耗时。
+- 证据：`req_7d10035daeec3292` 的 `v2_streaming_reply` 使用 `transport=cycletls` 持有流式 HTTP 约 92.4s；同一时间窗多条连续消息预处理到 `http_client_success` 后才恢复，存在事件循环/定时器恢复被流式 CycleTLS 放大的风险。
+- 最小修复：连续消息 max-hold 过期后立即 flush，并记录 wait/resolve/timer overdue/schedule timing；流式发送记录 `getStats()`，`final_reply_send_done.durationMs` 改为真实流式发送 wall time，生成耗时写入 `generationDurationMs`；默认 `MODEL_TLS_IMPERSONATION_STREAM_ENABLED=false`，流式主回复回 axios，非流式 CycleTLS 保留。
+- 验证：`node scripts/run-tests.js continuousMessagePreprocessor.test.js messageReplyRuntimeFreshness.test.js messageRouteFlowGroupStreaming.test.js mainReplyLagDiagnostics.test.js modelHttpCycleTlsFallback.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"`、`npm run diag:main-reply-lag -- --since=24h --no-provider-diagnostic` 通过；配置探针输出 `configStream=false/statusStream=false/tls=true`。
+- 小目标已完成：今天 1/2 凝滞点已有可复跑证据、诊断字段和默认避让策略。
+
 ## 运行维护 2026-06-14 19:47
 
 - 小目标：修正 `diag:main-reply-lag` 的发送耗时统计，避免把流式生成完成耗时误报为 QQ 发送慢。

@@ -119,7 +119,13 @@
         sent: true,
         stream: true,
         streamCompleted: replyOptions?.streamCompleted === true,
-        durationMs: Math.max(0, Date.now() - formalDispatchStartedAt),
+        durationMs: Number(replyOptions?.streamSendStats?.wallMs || 0) || 0,
+        generationDurationMs: Math.max(0, Date.now() - formalDispatchStartedAt),
+        streamFinishDurationMs: Number(replyOptions?.streamSendStats?.finishDurationMs || 0) || 0,
+        streamSendDurationMs: Number(replyOptions?.streamSendStats?.totalSendDurationMs || 0) || 0,
+        streamGapWaitMs: Number(replyOptions?.streamSendStats?.totalGapWaitMs || 0) || 0,
+        streamSentSegments: Number(replyOptions?.streamSendStats?.sentSegments || 0) || 0,
+        streamFailedChunks: Number(replyOptions?.streamSendStats?.failedChunks || 0) || 0,
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       maybeRunDeferredPersist(replyEnvelope);

@@ -2,7 +2,7 @@
 
 时间：2026-06-13 21:24 +08:00
 
-更新：2026-06-14 21:54 +08:00
+更新：2026-06-14 22:42 +08:00
 
 ## 结论
 
@@ -55,6 +55,25 @@
 - `npm run diag:runtime -- --json`：主进程 PID 19040、post-reply worker PID 15308 均在线；运行时仍有 `post_reply_failed_jobs`、`langgraph_v2_checkpoint_stale`、`langgraph_v2_event_file_invalid` 警告。
 - 只读聚合 `data/request-trace.ndjson`、`data/inbound_timing.jsonl`、`data/model-calls.ndjson`：确认当天入口等待、模型耗时、发送耗时和 stale 丢弃样本均来自真实日志。
 - 代码复核 `core/messageHandler.runtime-03.chunk.js` 与 `core/continuousMessagePreprocessor/index.js`：`message_ingress_lock_acquired` 写在 `continuousMessagePreprocessor.handleMessage()` 返回之后，因此 `lock_acquired.elapsedSinceRequestStartMs` 里的 12s/15s/100s 主要是锁前预处理，不应误解为入站锁等待。
+
+## 2026-06-14 重点排查 1/2 深挖
+
+时间：2026-06-14 22:42 +08:00
+
+结论：今天的 1/2 不是两个完全独立问题。`req_7d10035daeec3292` 在 `2026-06-14T10:44:15.383Z -> 10:45:46.790Z` 之间由 `v2_streaming_reply` 通过 `transport=cycletls` 持有流式 HTTP，`durationMs=92412`；同一窗口内 `964903589`、`964026353` 等连续消息预处理直到 `http_client_success` 后才陆续记录 `continuous_preprocess_done`，`elapsedSinceHandlerStartMs` 约 100s。最可能的本地凝滞形态是流式 CycleTLS 处理期间拖延事件循环/定时器恢复，放大了连续消息等待和流式生成完成时间。
+
+最小修复：
+
+- 连续消息预处理：max-hold 已过期时下一次 flush delay 改为 `0`，不再额外等一轮 debounce；`continuous_preprocess_done` 新增 `continuousWaitMs`、`continuousResolveMs`、`continuousTimerOverdueMs`、`continuousScheduleDelayMs` 等字段，后续可直接区分“策略等待”和“定时器被拖延”。
+- 流式生成：`final_reply_send_done.durationMs` 改为真实流式发送 wall time，另写 `generationDurationMs`、`streamSendDurationMs`、`streamGapWaitMs`、`streamSentSegments`、`streamFailedChunks`，`diag:main-reply-lag` 优先使用 `generationDurationMs`。
+- 传输配置：`MODEL_TLS_IMPERSONATION_STREAM_ENABLED=false` 作为默认值；非流式 `MODEL_TLS_IMPERSONATION_ENABLED=true` 不变，避免一次性撤掉所有 TLS/JA3 伪装。
+
+### 2026-06-14 22:42 验收
+
+- `node scripts/run-tests.js continuousMessagePreprocessor.test.js messageReplyRuntimeFreshness.test.js messageRouteFlowGroupStreaming.test.js mainReplyLagDiagnostics.test.js modelHttpCycleTlsFallback.test.js`：全部通过。
+- `node -e "require('./core/messageHandler'); console.log('message handler load ok')"`：完整拼装 handler 加载通过。
+- `node -e "const config=require('./config'); const status=require('./src/model/http/model-post.chunk').getModelHttpTransportStatus(); console.log(JSON.stringify({configStream:config.MODEL_TLS_IMPERSONATION_STREAM_ENABLED,statusStream:status.tlsImpersonationStreamEnabled,tls:status.tlsImpersonationEnabled}))"`：输出 `configStream=false/statusStream=false/tls=true`。
+- `npm run diag:main-reply-lag -- --since=24h --no-provider-diagnostic`：24h 窗口仍显示 `bottleneck=generation`，`generation p95=160361ms`、`main-model p95=86236ms`，`send samples=0`；说明历史窗口里瓶颈仍是生成/流式完成，不是 QQ 发送。
 
 ## 近样本
 
