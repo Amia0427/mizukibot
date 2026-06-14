@@ -91,6 +91,53 @@ module.exports = (async () => {
   });
   assert.strictEqual(objectStreamed.finalReply, 'persisted object reply');
 
+  const safetyStreamHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text, options = {}) => {
+      const raw = String(text || '');
+      const hasSafetyRestriction = /\/%\s*$/.test(raw);
+      const cleaned = hasSafetyRestriction ? raw.replace(/\/%\s*$/, '').trimEnd() : raw;
+      return options.returnMeta ? { text: cleaned, hasSafetyRestriction } : cleaned;
+    },
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => ({
+      segments: {},
+      compactionPlan: {
+        compactedSegments: [{ name: 'user', messages: input.userTurnMessages || [] }]
+      }
+    }),
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: []
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async () => ({
+      visibleText: '换个话题吧',
+      persistedText: '换个话题吧/%',
+      hasSafetyRestriction: true
+    }),
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
+    isHumanizerEnabledImpl: () => false,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    config: { AI_MAX_TOKENS: 3500 },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const safetyStreamed = await safetyStreamHelpers.streamDirectReply([{ role: 'user', content: 'hi' }], {
+    request: { routePolicyKey: 'direct_chat/default', modelConfig: {}, onDelta(text) { deltas.push(text); } },
+    memory: {},
+    output: {}
+  });
+  assert.strictEqual(safetyStreamed.finalReply, '换个话题吧');
+  assert.strictEqual(safetyStreamed.hasSafetyRestriction, true);
+
   const normalUserTimeoutDeltas = [];
   const normalUserTimeoutEvents = [];
   let normalUserTimeoutFallbackCalls = 0;

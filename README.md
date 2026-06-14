@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-14 10:42 +08:00**：修复普通用户安全限制 emoji 标记链路。根因是 `prompts/defaut.txt` 后续边界文案移除了 `/%` 触发要求，同时 Runtime V2 在清洗后没有保留 `hasSafetyRestriction`，`buildReplyEnvelope()` 也未透传该字段，导致发送层 `markSafetyRestrictionEmojiAfterReply` 永远拿不到 true；公开群流式分支也缺少发送后标记调用。现恢复普通用户边界触发时的内部 `/%` 标记要求，模型清洗、direct reply、streaming、host、reply envelope 全链路透传 `hasSafetyRestriction`，非流式/流式发送成功后都会给原消息贴安全限制 emoji。验收：`node tests/safetyRestrictionDetection.test.js`、`node tests/runtimeV2DirectReplyFailureTelemetry.test.js`、`node tests/runtimeStreamingCoordinator.test.js`、`node tests/runtimeHostCotSource.test.js`、`node tests/messageRouteFlowGroupStreaming.test.js`、`npm run check:prompts`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 均通过；`buildReplyTextVariants('换个话题吧/%','')` 实测返回 `hasSafetyRestriction=true`。小目标完成：安全限制 emoji 标记恢复到真实主回复链路。
+
 **2026-06-13 20:40 +08:00**：新增情感边界限制。`prompts/defaut.txt` 新增"情感边界"规则，明确普通用户关系定位为朋友/密友，不存在恋爱关系。表白/告白处理策略：温和明确型第一次（「诶...我把你当朋友的...」「唔...我们是朋友啦...」），简短带过型重复时（「说了是朋友啦...」然后转移话题）。禁止恋人专属称呼（❌"亲爱的"、"宝贝"、"老公/老婆"），区分朋友关心和恋人暧昧。验收：`npm run check:prompts` 通过。小目标完成：情感边界接入 system 层，限制恋爱关系。
 
 **2026-06-13 20:35 +08:00**：新增性骚扰防护与多样化回避策略。`prompts/defaut.txt` 新增"性暗示和性骚扰"处理规则，明确不配合软色情、性暗示、性骚扰类话题。提供多样化回避策略：装没听懂型（「嗯？你在说什么...」）、轻松拒绝型（「这、这什么话题啊...」）、话题跳转型（「诶对了，刚才那个...」）、短促回应型（「嗯。」「哦。」「...」持续骚扰时冷淡）。区分单纯开玩笑和真正骚扰，强调回避策略多样化避免套路化。验收：`npm run check:prompts` 通过。小目标完成：性骚扰防护接入 system 层，提供自然回避策略。

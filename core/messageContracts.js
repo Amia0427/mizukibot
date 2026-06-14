@@ -126,6 +126,7 @@ function buildReplyEnvelope(input = {}) {
     postActions: Array.isArray(source.postActions) ? [...source.postActions] : [],
     usedStreamingSend: Boolean(source.usedStreamingSend),
     replyOptions: source.replyOptions || null,
+    hasSafetyRestriction: source.hasSafetyRestriction === true,
     finalErrorCode: String(source.finalErrorCode || ''),
     rateLimit: source.rateLimit && typeof source.rateLimit === 'object'
       ? { ...source.rateLimit }

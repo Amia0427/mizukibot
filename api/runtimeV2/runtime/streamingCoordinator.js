@@ -97,6 +97,19 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     return event;
   }
 
+  function readSanitizedMeta(value) {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return {
+        text: String(value.text || '').trim(),
+        hasSafetyRestriction: value.hasSafetyRestriction === true
+      };
+    }
+    return {
+      text: String(value || '').trim(),
+      hasSafetyRestriction: false
+    };
+  }
+
   async function emitWholeReplyAsSingleStream(state, finalReply) {
     const request = normalizeObject(state.request, {});
     const guard = applyGroupDirectStyleGuard(finalReply, request);
@@ -240,7 +253,11 @@ function createStreamingCoordinatorHelpers(deps = {}) {
 
     try {
       const streamedReply = await requestStreamingReplyImpl(messagesToSend, upstreamStreamOptions, request.modelConfig);
-      const originalReply = sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted')).trim();
+      const originalMeta = readSanitizedMeta(sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted'), {
+        returnMeta: true
+      }));
+      const originalReply = originalMeta.text;
+      let hasSafetyRestriction = streamedReply?.hasSafetyRestriction === true || originalMeta.hasSafetyRestriction === true;
       if (isUnsafeUserFacingReply(originalReply)) {
         emitRuntimeEvent(state, 'unsafe_reply_blocked', {
           node: 'direct_reply',
@@ -299,7 +316,9 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       const repairedFinal = await repairDegeneratedStreamReply(messagesToSend, state, finalReply, 'streaming_final');
       finalReply = repairedFinal.text;
       const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
-      const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
+      const safeFinalMeta = readSanitizedMeta(sanitizeUserFacingText(guardedFinalReply, { returnMeta: true }));
+      hasSafetyRestriction = Boolean(hasSafetyRestriction || safeFinalMeta.hasSafetyRestriction);
+      const safeFinalReply = safeFinalMeta.text || EMPTY_STREAM_FALLBACK_REPLY;
       if (isUnsafeUserFacingReply(safeFinalReply)) {
         emitRuntimeEvent(state, 'unsafe_reply_blocked', {
           node: 'direct_reply',
@@ -343,6 +362,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       }
       return {
         finalReply: safeFinalReply,
+        hasSafetyRestriction,
         humanizerTimedOut,
         humanizerFailed,
         humanizerFailureReason,
@@ -420,7 +440,11 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         };
       }
       if (String(error?.partialText || '').trim()) {
-        const originalPartialReply = sanitizeUserFacingText(error.partialText).trim();
+        const originalPartialMeta = readSanitizedMeta(sanitizeUserFacingText(error.partialText, {
+          returnMeta: true
+        }));
+        const originalPartialReply = originalPartialMeta.text;
+        let hasSafetyRestriction = error?.hasSafetyRestriction === true || originalPartialMeta.hasSafetyRestriction === true;
         let finalReply = originalPartialReply;
         let humanizerTimedOut = false;
         let humanizerFailed = false;
@@ -451,7 +475,9 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         const repairedFinal = await repairDegeneratedStreamReply(messagesToSend, state, finalReply, 'streaming_partial');
         finalReply = repairedFinal.text;
         const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
-        const safeFinalReply = sanitizeUserFacingText(guardedFinalReply).trim() || EMPTY_STREAM_FALLBACK_REPLY;
+        const safeFinalMeta = readSanitizedMeta(sanitizeUserFacingText(guardedFinalReply, { returnMeta: true }));
+        hasSafetyRestriction = Boolean(hasSafetyRestriction || safeFinalMeta.hasSafetyRestriction);
+        const safeFinalReply = safeFinalMeta.text || EMPTY_STREAM_FALLBACK_REPLY;
         if (isUnsafeUserFacingReply(safeFinalReply)) {
           emitRuntimeEvent(state, 'unsafe_reply_blocked', {
             node: 'direct_reply',
@@ -495,6 +521,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         }
         return {
           finalReply: safeFinalReply,
+          hasSafetyRestriction,
           humanizerTimedOut,
           humanizerFailed,
           humanizerFailureReason,
