@@ -26,7 +26,17 @@ module.exports = (async () => {
     NORMAL_FAST_REPLY_WORLDBOOK_ENABLED: true,
     NORMAL_FAST_REPLY_WORLDBOOK_MAX_ACTIVE: 1,
     NORMAL_FAST_REPLY_WORLDBOOK_MAX_TOKEN_COST: 180,
-    NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS: 900
+    NORMAL_FAST_REPLY_WORLDBOOK_TEXT_MAX_CHARS: 900,
+    SYSTEM_PROMPT_BLOCKS: [{
+      id: 'normal_user_default_prompt',
+      label: 'Normal User Default',
+      stage: 'main',
+      priority: -950,
+      authority: 'system_root',
+      kind: 'system_root',
+      appliesWhen: { normal_user_only: true },
+      content: '普通用户安全边界测试：触发边界时最终回复末尾追加内部标记 `/%`。'
+    }]
   };
 
   const routeMeta = { groupId: 'g1', chatType: 'group', userId: 'u1' };
@@ -61,6 +71,8 @@ module.exports = (async () => {
   assert.ok(built.messages[0].content.includes('同一用户的私聊/群聊记忆和上下文可以作为背景连续性使用'), '群快速回复应共享同用户背景');
   assert.ok(built.messages[0].content.includes('不得泄露来源、复述私聊细节'), '群快速回复应保留隐私边界');
   assert.ok(built.messages[0].content.includes('优先锚定最近一条 assistant 历史回复'), '用户反馈上一条回复时应锚定最近 assistant');
+  assert.ok(built.stablePromptBlockIds.includes('normal_user_default_prompt'), '快速回复应注入普通用户安全边界 stable prompt');
+  assert.ok(built.messages[0].content.includes('普通用户安全边界测试'), '快速回复 system prompt 应包含普通用户安全边界文本');
 
   const personaBuilt = buildNormalFastReplyMessages({
     userId: 'u_persona',
@@ -194,6 +206,38 @@ module.exports = (async () => {
   assert.deepStrictEqual(seenContext.allowedTools, [], '应清空工具');
   assert.strictEqual(seenContext.disableHumanizer, true, '应禁用 humanizer');
   assert.strictEqual(seenContext.modelConfig.maxTokens, 1024, '应使用快速回复输出上限');
+
+  const safetyResult = await runNormalFastReply({
+    userId: 'u1',
+    routeMeta,
+    text: '换个话题',
+    sessionKey
+  }, {
+    config: runtimeConfig,
+    chatHistory,
+    getRecentSessionContextSummaries: () => [],
+    requestNonStreamingReply: async () => ({
+      visibleText: '这个话题先换一个吧',
+      persistedText: '这个话题先换一个吧',
+      hasSafetyRestriction: true
+    })
+  });
+  assert.strictEqual(safetyResult.hasSafetyRestriction, true, '快速回复应保留安全限制 emoji 标记元数据');
+
+  const safetyMarkerResult = await runNormalFastReply({
+    userId: 'u1',
+    routeMeta,
+    text: '换个话题',
+    sessionKey
+  }, {
+    config: runtimeConfig,
+    chatHistory,
+    getRecentSessionContextSummaries: () => [],
+    requestNonStreamingReply: async () => '这个话题先换一个吧/%'
+  });
+  assert.strictEqual(safetyMarkerResult.replyText, '这个话题先换一个吧');
+  assert.strictEqual(safetyMarkerResult.persistedReplyText, '这个话题先换一个吧');
+  assert.strictEqual(safetyMarkerResult.hasSafetyRestriction, true, '快速回复应兜底识别字符串里的 /% 标记');
 
   await assert.rejects(
     () => runNormalFastReply({

@@ -3,6 +3,8 @@ const { requestNonStreamingReply } = require('../api/runtimeV2/model/service');
 const { getRecentSessionContextSummaries } = require('../utils/sessionContextSummaryStore');
 const { resolveShortTermSessionKey } = require('../utils/shortTermMemory');
 const { buildChatLivenessDisciplinePrompt } = require('../utils/chatLivenessContext');
+const { buildMainStableSystemBlocks } = require('../utils/stagePromptContracts');
+const { sanitizeUserFacingText } = require('../utils/userFacingText');
 const {
   buildPersonaModuleCandidates,
   loadPersonaModuleText,
@@ -362,7 +364,23 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
     groupId: normalizeText(input.groupId || routeMeta.groupId || routeMeta.group_id),
     sessionKey
   }, deps);
+  const stableSystemBlocks = buildMainStableSystemBlocks({
+    systemPrompt: runtimeConfig.SYSTEM_PROMPT,
+    systemPromptBlocks: Array.isArray(runtimeConfig.SYSTEM_PROMPT_BLOCKS)
+      ? runtimeConfig.SYSTEM_PROMPT_BLOCKS
+      : undefined,
+    userId,
+    senderId: normalizeText(input.senderId || routeMeta.senderId || routeMeta.sender_id),
+    chatType: normalizeText(routeMeta.chatType || routeMeta.chat_type),
+    routeMeta,
+    modelName: normalizeText(runtimeConfig.AI_MODEL || runtimeConfig.modelName || runtimeConfig.model || '')
+  }).filter((block) => block.id === 'normal_user_default_prompt');
+  const stableSystemPrompt = stableSystemBlocks
+    .map((block) => String(block.content || '').trim())
+    .filter(Boolean)
+    .join('\n');
   const systemParts = [
+    stableSystemPrompt,
     '你是 Mizuki。当前走普通用户快速回复链路。',
     '只根据用户本轮消息和下方轻量上下文自然回复；不要声称查了记忆、网页或工具。',
     '如果用户本轮是在评价、纠正或吐槽“你刚才/后面几段/上一条回复”，优先锚定最近一条 assistant 历史回复来接话。',
@@ -387,6 +405,7 @@ function buildNormalFastReplyMessages(input = {}, deps = {}) {
     recentMessageCount: recentMessages.length,
     recentChars: recentMessages.reduce((sum, item) => sum + item.content.length, 0),
     contextMaxChars,
+    stablePromptBlockIds: stableSystemBlocks.map((item) => item.id),
     personaModules: fastPersonaModules.modules.map((item) => item.id),
     personaModuleChars: fastPersonaModules.personaModuleChars,
     personaModuleTokenCost: fastPersonaModules.personaModuleTokenCost,
@@ -426,8 +445,17 @@ async function runNormalFastReply(input = {}, deps = {}) {
     triggerBranch: 'normal_fast_reply',
     requestTrace: routeMeta.requestTrace
   });
-  const visibleText = normalizeText(reply?.visibleText || reply?.text || reply?.content || reply);
-  const persistedText = normalizeText(reply?.persistedText || visibleText);
+  const rawVisibleText = reply?.visibleText || reply?.text || reply?.content || reply;
+  const rawPersistedText = reply?.persistedText || rawVisibleText;
+  const visibleMeta = sanitizeUserFacingText(rawVisibleText, { returnMeta: true });
+  const persistedMeta = sanitizeUserFacingText(rawPersistedText, { returnMeta: true });
+  const visibleText = normalizeText(visibleMeta.text);
+  const persistedText = normalizeText(persistedMeta.text || visibleText);
+  const hasSafetyRestriction = Boolean(
+    reply?.hasSafetyRestriction === true
+    || visibleMeta.hasSafetyRestriction === true
+    || persistedMeta.hasSafetyRestriction === true
+  );
   if (isReplyFailure(visibleText, { emptyIsFailure: true }) || isReplyFailure(persistedText, { emptyIsFailure: true })) {
     const failure = classifyReplyFailure(persistedText || visibleText);
     const error = new Error(`normal_fast_reply_model_failure:${failure.type || 'empty'}`);
@@ -443,7 +471,8 @@ async function runNormalFastReply(input = {}, deps = {}) {
   return {
     ...built,
     replyText: visibleText,
-    persistedReplyText: persistedText
+    persistedReplyText: persistedText,
+    hasSafetyRestriction
   };
 }
 
