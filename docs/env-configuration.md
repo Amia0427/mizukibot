@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-13 22:40 +08:00
+更新时间：2026-06-14 14:59 +08:00
 
 ## 维护约定
 
@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
+- 2026-06-14 14:59 +08:00：新增 `PLANNER_API_MODE`（同义 `PLAN_API_MODE`），默认 `chat_completions`。planner 远程模型请求会在请求体写入现有内部字段 `__preferredProtocol=chat_completions`，避免 OpenAI-compatible host 被通用 HTTP 层先改写到 `/v1/responses` 再 405 回退；如 planner host 明确支持 Responses，可设 `PLANNER_API_MODE=responses`。验收：`node tests/plannerNoRetry.test.js` 通过，mock host 记录唯一发送 URL 为 `/v1/chat/completions` 且未出现 `/v1/responses`；未对真实外部 host 发请求。
 - 2026-06-13 22:40 +08:00：新增 `DIRECT_CHAT_PLANNER_ENABLED=false` 并作为默认值，关闭 direct_chat 远程 planner 模型/subagent 调用；`PLAN_*` endpoint/key 保留用于显式恢复，但运行时 `planDirectChat` 和 dispatch capability preflight 进入 `planRequestV2` 后会短路为本地规则决策 `decisionSource=rule_planner_disabled`。关闭后仍保留本地 deterministic preflight、规则 planner、SQL worldbook/persona module、本地 Memory V3/Profile Journal/Daily Journal 召回和显式安全工具计划；减少的是远程 planner 对模糊工具选择、背景 research 请求、动态 prompt block/persona module 的模型级判断。模型自检在关闭态也不再拨测 `plan`。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/modelSelfCheck.test.js`、`node tests/directChatPlannerNotebook.test.js`、`node tests/imageSummaryLatencyPath.test.js`、`node tests/plannerSemanticRefine.test.js`、`node tests/plannerV2Protocol.test.js` 通过。
 - 2026-06-13 20:00 +08:00：planner 单次远程模型请求超时上限收敛为 `PLANNER_REQUEST_TIMEOUT_MS=15000`；配置层会把更大值封顶到 15 秒，本地 `.env` 已同步为 15000。远程 planner 超时/失败后降级为 `chat_only/fast_reply`，不再继续工具计划；验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。
 - 2026-06-12 12:55 +08:00：本地 `PLAN_*` 与 `PASSIVE_AWARENESS_*` 已切到 `catiecli.sukaka.top/v1` + `gcli-gemini-3-flash-preview-nothinking`，用于替换原 `token.memoh.net` 403 的 planner / 被动感知决策链路；密钥只保留 `.env`，不写入文档。

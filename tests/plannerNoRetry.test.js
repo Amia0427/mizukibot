@@ -19,6 +19,8 @@ function restoreEnv(snapshot = {}) {
 
 module.exports = (async () => {
   const snapshot = { ...process.env };
+  let axios = null;
+  let originalPost = null;
   try {
     Object.assign(process.env, {
       BOT_TOOL_MODE: 'full',
@@ -227,8 +229,114 @@ module.exports = (async () => {
     assert.strictEqual(blockedFallbackCalls, 0);
     assert.strictEqual(blockedDecision.plannerMeta.fallbackUsed, true);
 
+    restoreEnv(snapshot);
+    Object.assign(process.env, {
+      BOT_TOOL_MODE: 'full',
+      DIRECT_CHAT_PLANNER_ENABLED: 'true',
+      PLAN_API_BASE_URL: 'http://127.0.0.1:41593/v1',
+      PLAN_API_KEY: 'planner-key',
+      PLAN_MODEL: 'planner-model',
+      PLANNER_API_MODE: 'chat_completions',
+      PLANNER_REQUEST_TIMEOUT_MS: '15000',
+      PLANNER_SUBAGENT_ENABLED: '0',
+      MEMOS_MCP_ENABLED: 'false',
+      MODEL_ENDPOINT_ALLOW_LOCAL_HTTP: 'true',
+      MODEL_TLS_IMPERSONATION_ENABLED: 'false',
+      OPENAI_PROMPT_CACHE_ENABLED: 'false'
+    });
+    clearProjectCache();
+
+    const {
+      buildPlannerModelRequestBody,
+      getPlannerApiMode
+    } = require('../src/runtime-v2/planning/tool-gating.chunk');
+    const builtPlannerRequest = buildPlannerModelRequestBody({
+      question: '协议偏好探针',
+      cleanText: '协议偏好探针',
+      topRouteType: 'direct_chat',
+      meta: {
+        chatMode: 'chat',
+        toolIntent: 'maybe_tools',
+        responseIntent: 'answer'
+      }
+    }, {
+      allowedTools: ['web_search'],
+      config: {
+        MEMOS_MCP_ENABLED: false,
+        DIRECT_CHAT_PLANNER_ENABLED: true
+      }
+    }).requestBody;
+    assert.strictEqual(getPlannerApiMode(), 'chat_completions');
+    assert.strictEqual(builtPlannerRequest.__preferredProtocol, 'chat_completions');
+
+    axios = require('axios');
+    originalPost = axios.post;
+    const plannerPostUrls = [];
+    axios.post = async (url, body) => {
+      plannerPostUrls.push(url);
+      assert.strictEqual(body.model, 'planner-model');
+      assert.ok(Array.isArray(body.messages));
+      assert.ok(!Object.prototype.hasOwnProperty.call(body, 'input'));
+      return {
+        status: 200,
+        data: {
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: JSON.stringify({
+                  mode: 'chat_only',
+                  taskShape: 'fast_reply',
+                  allowedToolNames: [],
+                  steps: [],
+                  plannerMeta: {
+                    reason: 'test planner response'
+                  }
+                })
+              }
+            }
+          ]
+        }
+      };
+    };
+
+    const { planRequestV2: planRequestV2ChatOnlyProtocol } = require('../api/runtimeV2/planning/service');
+    const protocolDecision = await planRequestV2ChatOnlyProtocol({
+      question: '帮我规划一个小任务',
+      cleanText: '帮我规划一个小任务',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        chatMode: 'chat',
+        toolIntent: 'maybe_tools',
+        responseIntent: 'answer'
+      },
+      route: {
+        question: '帮我规划一个小任务',
+        cleanText: '帮我规划一个小任务',
+        topRouteType: 'direct_chat',
+        meta: {
+          chatMode: 'chat',
+          toolIntent: 'maybe_tools',
+          responseIntent: 'answer'
+        },
+        intent: {},
+        facets: {}
+      },
+      allowedTools: ['web_search'],
+      config: {
+        MEMOS_MCP_ENABLED: false,
+        DIRECT_CHAT_PLANNER_ENABLED: true
+      }
+    });
+
+    assert.strictEqual(protocolDecision.mode, 'chat_only');
+    assert.strictEqual(plannerPostUrls.length, 1);
+    assert.deepStrictEqual(plannerPostUrls, ['http://127.0.0.1:41593/v1/chat/completions']);
+    assert.ok(!plannerPostUrls.some((url) => /\/responses(?:\/)?$/i.test(url)));
+
     console.log('plannerNoRetry.test.js passed');
   } finally {
+    if (axios && originalPost) axios.post = originalPost;
     restoreEnv(snapshot);
     clearProjectCache();
   }

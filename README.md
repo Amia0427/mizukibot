@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-14 14:59 +08:00**：planner OpenAI-compatible 默认协议固定为 `chat_completions`。根因是 planner 虽已把 `PLAN_API_BASE_URL` 规范到 `/v1/chat/completions`，但通用 HTTP 层在缺少内部协议偏好时仍会优先改写为 `/v1/responses`，不支持 Responses 的 host 会先 405 再回退。现新增 `PLANNER_API_MODE`/`PLAN_API_MODE`，默认 `chat_completions`，planner 请求体复用 `__preferredProtocol=chat_completions`；显式设 `PLANNER_API_MODE=responses` 可恢复 Responses。验收：`node tests/plannerNoRetry.test.js` 和 planner/provider 模块加载检查通过；新增测试经真实 HTTP 准备路径记录唯一发送 URL 为 `/v1/chat/completions`，未出现 `/v1/responses`。结论：本地 mock 验收已实际消除该场景的 405 往返，未对真实外部 host 在线请求。小目标完成：不支持 `/v1/responses` 的 planner host 不再被默认先打 Responses。
+
 **2026-06-14 10:42 +08:00**：修复普通用户安全限制 emoji 标记链路。根因是 `prompts/defaut.txt` 后续边界文案移除了 `/%` 触发要求，同时 Runtime V2 在清洗后没有保留 `hasSafetyRestriction`，`buildReplyEnvelope()` 也未透传该字段，导致发送层 `markSafetyRestrictionEmojiAfterReply` 永远拿不到 true；公开群流式分支也缺少发送后标记调用。现恢复普通用户边界触发时的内部 `/%` 标记要求，模型清洗、direct reply、streaming、host、reply envelope 全链路透传 `hasSafetyRestriction`，非流式/流式发送成功后都会给原消息贴安全限制 emoji。验收：`node tests/safetyRestrictionDetection.test.js`、`node tests/runtimeV2DirectReplyFailureTelemetry.test.js`、`node tests/runtimeStreamingCoordinator.test.js`、`node tests/runtimeHostCotSource.test.js`、`node tests/messageRouteFlowGroupStreaming.test.js`、`npm run check:prompts`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 均通过；`buildReplyTextVariants('换个话题吧/%','')` 实测返回 `hasSafetyRestriction=true`。小目标完成：安全限制 emoji 标记恢复到真实主回复链路。
 
 **2026-06-13 20:40 +08:00**：新增情感边界限制。`prompts/defaut.txt` 新增"情感边界"规则，明确普通用户关系定位为朋友/密友，不存在恋爱关系。表白/告白处理策略：温和明确型第一次（「诶...我把你当朋友的...」「唔...我们是朋友啦...」），简短带过型重复时（「说了是朋友啦...」然后转移话题）。禁止恋人专属称呼（❌"亲爱的"、"宝贝"、"老公/老婆"），区分朋友关心和恋人暧昧。验收：`npm run check:prompts` 通过。小目标完成：情感边界接入 system 层，限制恋爱关系。
@@ -419,6 +421,7 @@ Planner refinement：
 
 ```env
 PLAN_MODEL=gcli-gemini-3-flash-preview-nothinking
+PLANNER_API_MODE=chat_completions
 PLANNER_MAX_MODEL_CALLS=1
 PLANNER_REQUEST_TIMEOUT_MS=15000
 PLANNER_SEMANTIC_REFINE_ENABLED=false
