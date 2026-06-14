@@ -2,8 +2,8 @@ const { estimateTokens, trimTextByTokenBudget } = require('../contextBudget');
 const { formatDateInTz, formatTimeInTz, formatWeekdayInTz, getTimezone } = require('../time');
 const { getAntiAIRules } = require('./antiAIRules');
 const { getCurrentActivity } = require('./currentActivity');
-const { getRelationshipBoundary } = require('./relationshipBoundary');
-const { getRecentContextSummary } = require('./recentContext');
+const { getRelationshipBoundaryWithSource } = require('./relationshipBoundary');
+const { getRecentContextSummaryWithSource } = require('./recentContext');
 
 const LIVE_STATE_TOKEN_LIMIT = 800;
 
@@ -170,10 +170,10 @@ async function buildLiveStateForState(state = {}, options = {}) {
     };
   }
   const startedAt = Date.now();
-  const [relationship, activity, recentContext, antiAIRules] = await Promise.all([
-    getRelationshipBoundary(input.userId, options),
+  const [relationshipResult, activity, recentContextResult, antiAIRules] = await Promise.all([
+    getRelationshipBoundaryWithSource(input.userId, options),
     Promise.resolve(getCurrentActivity(options)),
-    getRecentContextSummary(input.userId, 5, options),
+    getRecentContextSummaryWithSource(input.userId, 5, options),
     Promise.resolve(getAntiAIRules({
       route: input.route,
       hasTools: input.allowedTools.length > 0,
@@ -181,6 +181,8 @@ async function buildLiveStateForState(state = {}, options = {}) {
       recentTurnCount: input.recentTurnCount
     }))
   ]);
+  const relationship = normalizeObject(relationshipResult.boundary);
+  const recentContext = recentContextResult.summary;
 
   const rawContext = buildLiveStateContext({
     relationship,
@@ -191,15 +193,38 @@ async function buildLiveStateForState(state = {}, options = {}) {
     timezone: options.timezone
   });
   const context = fitLiveStateTokenBudget(rawContext);
+  const rawTokens = estimateTokens(rawContext);
+  const finalTokens = estimateTokens(context);
   return {
     context,
+    rawContext,
     relationship,
     activity,
     recentContext,
     antiAIRules,
-    tokens: estimateTokens(context),
+    sourceDiagnostics: {
+      relationshipBoundary: normalizeObject(relationshipResult.source),
+      currentActivity: {
+        sourceFile: 'utils/liveState/currentActivity.js',
+        sourcePolicy: 'getCurrentActivity',
+        dataSource: 'timezone_clock_bucket',
+        found: Boolean(activity.activity),
+        readOnly: true
+      },
+      recentContext: normalizeObject(recentContextResult.source),
+      antiAIRules: {
+        sourceFile: 'utils/liveState/antiAIRules.js',
+        sourcePolicy: 'getAntiAIRules',
+        dataSource: 'deterministic_route_and_turn_heuristics',
+        found: Boolean(antiAIRules.core),
+        readOnly: true
+      }
+    },
+    rawTokens,
+    tokens: finalTokens,
     durationMs: Math.max(0, Date.now() - startedAt),
-    truncated: context !== rawContext
+    truncated: context !== rawContext,
+    tokenLimit: LIVE_STATE_TOKEN_LIMIT
   };
 }
 

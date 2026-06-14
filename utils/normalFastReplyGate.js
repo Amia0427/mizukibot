@@ -78,6 +78,58 @@ function matchesBlockedIntent(text = '') {
   return { blocked: false, reason: '' };
 }
 
+const FAST_REPLY_CHECKS = Object.freeze([
+  { key: 'enabled', reason: 'disabled', label: 'NORMAL_FAST_REPLY_ENABLED=true', exitFlag: 'permission' },
+  { key: 'has_user_id', reason: 'missing_user_id', label: 'user id present', exitFlag: 'permission' },
+  { key: 'normal_user', reason: 'admin_user', label: 'not admin user', exitFlag: 'permission' },
+  { key: 'direct_chat_route', reason: 'not_direct_chat', label: 'top route is direct_chat', exitFlag: 'route' },
+  { key: 'direct_executor', reason: 'non_direct_executor', label: 'executor is direct', exitFlag: 'route' },
+  { key: 'route_available', reason: 'route_unavailable', label: 'route execution is available', exitFlag: 'route' },
+  { key: 'tools_not_allowed', reason: 'tools_allowed', label: 'route does not allow tools', exitFlag: 'tools' },
+  { key: 'no_tools_present', reason: 'tools_present', label: 'no planner/tool allowlist present', exitFlag: 'tools' },
+  { key: 'no_image_input', reason: 'image_present', label: 'no image or visual input', exitFlag: 'image' },
+  { key: 'no_route_action_or_safety', reason: 'route_action_or_safety', label: 'no action/safety route metadata', exitFlag: 'permission' },
+  { key: 'no_memory_cli_turn', reason: 'memory_cli_turn', label: 'no memory_cli turn state', exitFlag: 'continuity' },
+  { key: 'text_present', reason: 'empty_text', label: 'text is not empty', exitFlag: 'continuity' },
+  { key: 'not_slash_command', reason: 'slash_command', label: 'not a slash command', exitFlag: 'permission' },
+  { key: 'not_admin_like_command', reason: 'admin_like_command', label: 'not admin-like command text', exitFlag: 'permission' },
+  { key: 'no_memory_recall_request', reason: 'memory_recall_like', label: 'no memory/continuity recall request', exitFlag: 'continuity' },
+  { key: 'no_search_or_freshness_request', reason: 'search_or_freshness_like', label: 'no search/freshness request', exitFlag: 'tools' },
+  { key: 'not_complex_task', reason: 'complex_task_like', label: 'not a complex/planning task', exitFlag: 'continuity' }
+]);
+
+function findCheckByReason(reason = '') {
+  const normalized = normalizeText(reason);
+  return FAST_REPLY_CHECKS.find((item) => item.reason === normalized) || null;
+}
+
+function buildFastReplyExitFlags(failedChecks = []) {
+  const flags = {
+    tools: false,
+    image: false,
+    permission: false,
+    continuity: false,
+    route: false
+  };
+  for (const check of failedChecks || []) {
+    const key = normalizeText(check?.exitFlag);
+    if (Object.prototype.hasOwnProperty.call(flags, key)) flags[key] = true;
+  }
+  return flags;
+}
+
+function buildCheck(key = '', ok = false, extra = {}) {
+  const def = FAST_REPLY_CHECKS.find((item) => item.key === key) || {};
+  return {
+    key,
+    ok: ok === true,
+    label: def.label || key,
+    reason: ok === true ? '' : (extra.reason || def.reason || key),
+    exitFlag: def.exitFlag || '',
+    ...extra
+  };
+}
+
 function resolveAdminChecker(runtimeConfig = {}, options = {}) {
   if (typeof options.isAdminUser === 'function') return options.isAdminUser;
   if (typeof runtimeConfig.isAdminUser === 'function') return runtimeConfig.isAdminUser;
@@ -85,43 +137,71 @@ function resolveAdminChecker(runtimeConfig = {}, options = {}) {
   return (userId) => adminUserIds.has(normalizeText(userId));
 }
 
-function buildNormalFastReplyDecision(input = {}, runtimeConfig = {}, options = {}) {
-  if (runtimeConfig.NORMAL_FAST_REPLY_ENABLED !== true) {
-    return { eligible: false, reason: 'disabled' };
-  }
+function explainNormalFastReplyDecision(input = {}, runtimeConfig = {}, options = {}) {
+  const checks = [];
+  const enabled = runtimeConfig.NORMAL_FAST_REPLY_ENABLED === true;
+  checks.push(buildCheck('enabled', enabled));
+
   const userId = normalizeText(input.userId || input.senderId || input.route?.meta?.userId || input.route?.meta?.user_id);
-  if (!userId) return { eligible: false, reason: 'missing_user_id' };
+  checks.push(buildCheck('has_user_id', Boolean(userId)));
+
   const isAdminUser = resolveAdminChecker(runtimeConfig, options);
-  if (isAdminUser(userId)) return { eligible: false, reason: 'admin_user' };
+  checks.push(buildCheck('normal_user', Boolean(userId) && !isAdminUser(userId)));
 
   const route = input.route || {};
   const routeExecutionPlan = getRouteExecutionPlan(input);
   const topRouteType = normalizeText(routeExecutionPlan.topRouteType || route.topRouteType || route.meta?.topRouteType || 'direct_chat');
-  if (topRouteType !== 'direct_chat') return { eligible: false, reason: 'not_direct_chat' };
+  checks.push(buildCheck('direct_chat_route', topRouteType === 'direct_chat', { actual: topRouteType || 'unknown' }));
 
   const executor = normalizeText(routeExecutionPlan.executor || 'direct');
-  if (executor && executor !== 'direct') return { eligible: false, reason: 'non_direct_executor' };
-  if (normalizeText(routeExecutionPlan.unavailableReason)) return { eligible: false, reason: 'route_unavailable' };
-  if (routeExecutionPlan.allowTools === true) return { eligible: false, reason: 'tools_allowed' };
-  if (hasAllowedTools(input)) return { eligible: false, reason: 'tools_present' };
-  if (hasImageInput(input)) return { eligible: false, reason: 'image_present' };
+  checks.push(buildCheck('direct_executor', !executor || executor === 'direct', { actual: executor || 'direct' }));
+  const unavailableReason = normalizeText(routeExecutionPlan.unavailableReason);
+  checks.push(buildCheck('route_available', !unavailableReason, { actual: unavailableReason }));
+  checks.push(buildCheck('tools_not_allowed', routeExecutionPlan.allowTools !== true));
+  checks.push(buildCheck('no_tools_present', !hasAllowedTools(input)));
+  checks.push(buildCheck('no_image_input', !hasImageInput(input)));
 
   const routeMeta = route.meta && typeof route.meta === 'object' ? route.meta : {};
-  if (routeMeta.command || routeMeta.qqActionKey || routeMeta.safetyBoundary === true) {
-    return { eligible: false, reason: 'route_action_or_safety' };
-  }
-  if (routeMeta.memoryCliTurn && Object.keys(routeMeta.memoryCliTurn || {}).length > 0) {
-    return { eligible: false, reason: 'memory_cli_turn' };
-  }
+  checks.push(buildCheck('no_route_action_or_safety', !(routeMeta.command || routeMeta.qqActionKey || routeMeta.safetyBoundary === true)));
+  checks.push(buildCheck('no_memory_cli_turn', !(routeMeta.memoryCliTurn && Object.keys(routeMeta.memoryCliTurn || {}).length > 0)));
+
   const text = getRouteText(input);
   const blocked = matchesBlockedIntent(text);
-  if (blocked.blocked) return { eligible: false, reason: blocked.reason };
+  const blockedReason = normalizeText(blocked.reason);
+  if (blocked.blocked) {
+    const blockedCheck = findCheckByReason(blockedReason);
+    if (blockedCheck) checks.push(buildCheck(blockedCheck.key, false, { reason: blockedReason }));
+  } else {
+    checks.push(buildCheck('text_present', true));
+    checks.push(buildCheck('not_slash_command', true));
+    checks.push(buildCheck('not_admin_like_command', true));
+    checks.push(buildCheck('no_memory_recall_request', true));
+    checks.push(buildCheck('no_search_or_freshness_request', true));
+    checks.push(buildCheck('not_complex_task', true));
+  }
 
+  const firstFailed = checks.find((check) => check.ok !== true) || null;
+  const failedChecks = checks.filter((check) => check.ok !== true);
+  const eligible = !firstFailed;
   return {
-    eligible: true,
-    reason: 'eligible',
+    eligible,
+    reason: eligible ? 'eligible' : firstFailed.reason,
     userId,
-    text
+    text,
+    checks,
+    matchedConditions: checks.filter((check) => check.ok === true),
+    missedConditions: failedChecks,
+    exitFlags: buildFastReplyExitFlags(failedChecks)
+  };
+}
+
+function buildNormalFastReplyDecision(input = {}, runtimeConfig = {}, options = {}) {
+  const explanation = explainNormalFastReplyDecision(input, runtimeConfig, options);
+  return {
+    eligible: explanation.eligible,
+    reason: explanation.reason,
+    userId: explanation.userId,
+    text: explanation.text
   };
 }
 
@@ -131,6 +211,8 @@ function isNormalFastReplyEligible(input = {}, runtimeConfig = {}, options = {})
 
 module.exports = {
   buildNormalFastReplyDecision,
+  explainNormalFastReplyDecision,
+  FAST_REPLY_CHECKS,
   isNormalFastReplyEligible,
   matchesBlockedIntent
 };

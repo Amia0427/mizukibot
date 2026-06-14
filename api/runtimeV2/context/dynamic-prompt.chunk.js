@@ -320,6 +320,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   });
   const roleplayInnerProtocolText = buildRoleplayInnerProtocolPromptSnippet();
   const liveStateContextText = resolveLiveStateContextFromOptions(options);
+  const liveStateMeta = resolveLiveStateMetaFromOptions(options);
 
   if (roleplayRuntimeContextText) {
     extraBlocks.push(createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {
@@ -364,7 +365,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   }
 
   if (liveStateContextText) {
-    extraBlocks.push(createLiveStatePromptBlock(liveStateContextText));
+    extraBlocks.push(createLiveStatePromptBlock(liveStateContextText, liveStateMeta));
   }
 
   if (shouldInjectContextStatsInstruction) {

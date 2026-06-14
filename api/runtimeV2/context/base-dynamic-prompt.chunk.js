@@ -276,6 +276,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
   });
   const roleplayInnerProtocolText = buildRoleplayInnerProtocolPromptSnippet();
   const liveStateContextText = resolveLiveStateContextFromOptions(options);
+  const liveStateMeta = resolveLiveStateMetaFromOptions(options);
   promptBlocks.push(createPromptBlock('roleplay_runtime_context', 'Roleplay Runtime Context', roleplayRuntimeContextText, {
     stage: 'main',
     priority: 205,
@@ -309,7 +310,7 @@ async function buildBaseDynamicPrompt(userInfo, userId, question, customPrompt =
       optional: true
     }
   }));
-  promptBlocks.push(createLiveStatePromptBlock(liveStateContextText));
+  promptBlocks.push(createLiveStatePromptBlock(liveStateContextText, liveStateMeta));
   const geminiRecentStyleGuardText = buildGeminiRecentStyleGuardPrompt({
     modelName,
     userId,

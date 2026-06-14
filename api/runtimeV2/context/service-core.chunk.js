@@ -430,7 +430,19 @@ function resolveLiveStateContextFromOptions(options = {}) {
   );
 }
 
-function createLiveStatePromptBlock(liveStateContext = '') {
+function resolveLiveStateMetaFromOptions(options = {}) {
+  const request = normalizeObject(options.request, {});
+  const routeMeta = normalizeObject(options.routeMeta, {});
+  return normalizeObject(
+    options.liveStateMeta
+    || request.liveStateMeta
+    || routeMeta.liveStateMeta
+    || routeMeta.live_state_meta,
+    {}
+  );
+}
+
+function createLiveStatePromptBlock(liveStateContext = '', liveStateMeta = {}) {
   const text = normalizeText(liveStateContext);
   if (!text) return null;
   return createPromptBlock('live_state_dynamic', 'Live State Dynamic', text, {
@@ -443,7 +455,8 @@ function createLiveStatePromptBlock(liveStateContext = '') {
     budgetTokens: 800,
     meta: {
       optional: true,
-      blockId: 'live_state_dynamic'
+      blockId: 'live_state_dynamic',
+      liveState: normalizeObject(liveStateMeta, {})
     }
   });
 }

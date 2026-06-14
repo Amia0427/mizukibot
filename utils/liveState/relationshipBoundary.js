@@ -131,17 +131,71 @@ function readLegacyRelationship(userId) {
 }
 
 async function getRelationshipBoundary(userId, options = {}) {
+  const result = await getRelationshipBoundaryWithSource(userId, options);
+  return result.boundary;
+}
+
+async function getRelationshipBoundaryWithSource(userId, options = {}) {
   const uid = normalizeText(userId);
-  if (!uid) return getDefaultBoundary();
+  const baseSource = {
+    sourceFile: 'utils/liveState/relationshipBoundary.js',
+    sourcePolicy: 'getRelationshipBoundary',
+    readOnly: true
+  };
+  if (!uid) {
+    return {
+      boundary: getDefaultBoundary(),
+      source: {
+        ...baseSource,
+        dataSource: 'default_boundary_no_user_id',
+        found: false
+      }
+    };
+  }
   try {
     const queried = await Promise.race([
       queryRelationshipProjection(uid, options),
       timeout(options.timeoutMs || 100, null)
     ]);
-    if (queried === null) return getDefaultBoundary();
-    const relation = queried || readLegacyRelationship(uid);
-    if (!relation || Object.keys(relation).length === 0) return getDefaultBoundary();
-    return buildBoundary(relation, options);
+    if (queried === null) {
+      return {
+        boundary: getDefaultBoundary(),
+        source: {
+          ...baseSource,
+          dataSource: 'memory_v3_relationship_projection_empty_or_timeout',
+          found: false
+        }
+      };
+    }
+    if (queried) {
+      return {
+        boundary: buildBoundary(queried, options),
+        source: {
+          ...baseSource,
+          dataSource: 'memory_v3_relationship_projection',
+          found: true
+        }
+      };
+    }
+    const relation = readLegacyRelationship(uid);
+    if (!relation || Object.keys(relation).length === 0) {
+      return {
+        boundary: getDefaultBoundary(),
+        source: {
+          ...baseSource,
+          dataSource: 'default_boundary_no_relationship_data',
+          found: false
+        }
+      };
+    }
+    return {
+      boundary: buildBoundary(relation, options),
+      source: {
+        ...baseSource,
+        dataSource: 'legacy_relationship_memory',
+        found: true
+      }
+    };
   } catch (error) {
     if (options.logger && typeof options.logger.warn === 'function') {
       options.logger.warn('Relationship query failed, using default', {
@@ -149,7 +203,15 @@ async function getRelationshipBoundary(userId, options = {}) {
         error: error?.message || String(error)
       });
     }
-    return getDefaultBoundary();
+    return {
+      boundary: getDefaultBoundary(),
+      source: {
+        ...baseSource,
+        dataSource: 'default_boundary_relationship_error',
+        found: false,
+        error: error?.message || String(error)
+      }
+    };
   }
 }
 
@@ -157,5 +219,6 @@ module.exports = {
   BOUNDARY_TEMPLATES,
   buildBoundary,
   getDefaultBoundary,
-  getRelationshipBoundary
+  getRelationshipBoundary,
+  getRelationshipBoundaryWithSource
 };

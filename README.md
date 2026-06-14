@@ -4,6 +4,10 @@
 
 ## 近期更新
 
+**2026-06-14 10:04 +08:00**：新增 `live_state_dynamic` 只读诊断入口 `npm run diag:live-state-dynamic`，并扩展 `diag:main-reply-prompt-assembly` 的 `liveStateDynamic` 小节。支持 `--request-id req_xxx` 从已记录的 model-calls/request-trace/prompt observation 判断是否命中，也支持 `--text "..."` 按当前本地 runtime 重建；输出关系边界、当前活动、最近摘要、反 AI 规则各自来源，裁剪前后长度/token、最终 token 估算和 prompt block 顺序位置。验收：`node tests/mainReplyPromptAssemblyDiagnostics.test.js`、`node tests/liveState.test.js`、`node tests/liveStatePromptIntegration.test.js`、`node tests/prepareLiveStateInjection.test.js`、`npm run diag:live-state-dynamic -- --text "服饰专门学校和N25两个都不放弃" --worldbook-semantic-limit=0` 均通过。小目标完成：某次请求里的 `live_state_dynamic` 如何生成并注入已有可复跑只读解释入口。
+
+**2026-06-14 09:58 +08:00**：新增只读路由决策诊断入口 `npm run diag:route-decision`。支持 `--request-id req_xxx` 从 `data/request-trace.ndjson` 解释某次请求最终走 `normal_fast_reply`、普通 `direct_reply`、planner/tool route 或降级直回；也支持 `--text "..."` 按当前本地规则预测测试输入。输出 route、fast reply 命中/未命中条件、是否因工具/图片/权限/连续性退出 fast reply、最终 runtime 节点和耗时摘要。验收：`node tests/routeDecisionDiagnostics.test.js`、`node tests/normalFastReplyGate.test.js`、`node tests/routeExecutionPlannerMissing.test.js`、`node tests/plannerNoRetry.test.js`、`npm run diag:route-decision -- --text "今晚吃什么好" --user-id normal_1 --fast-reply-enabled=true`、`npm run diag:route-decision -- --text "搜索一下今天新闻" --user-id normal_1 --fast-reply-enabled=true`、`npm run diag:route-decision -- --text "看看这张图" --user-id normal_1 --image-url https://example.com/a.png --fast-reply-enabled=true`、`npm run diag:route-decision -- --request-id req_197c52fc1a63585d --limit 1` 均通过。小目标完成：请求为什么走 fast reply / direct reply / planner / 降级已有可复跑只读解释入口。
+
 **2026-06-14 00:42 +08:00**：完成生活状态增强最小落地。执行前已查重：现有 `roleplay_runtime_context`、`chat_liveness_discipline`、`relationship_state`、`daily_journal` 只覆盖部分活人感/关系/近况信息，缺少独立、确定性、800 token 封顶的 `live_state_dynamic` 块。现新增 `utils/liveState/*`、`enhance_live_state` 节点和 Runtime V2 prompt 注入，普通 `chat/default` 快路径也会带入生活状态；Memory V3 `queryProjection` 不存在时兼容 legacy relationship/Daily Journal 读法，失败不阻断主流程。验收：`node scripts/run-tests.js liveState.test.js liveStatePromptIntegration.test.js prepareLiveStateInjection.test.js langgraphV2.test.js`、`npm run check:prompts`、`npm run check:agent:static`、`node scripts/run-tests.js promptGoldenSnapshots.test.js`、`node scripts/run-tests.js promptCompiler.test.js mainReplyPromptAssemblyDiagnostics.test.js mainReplyTokenBudgetCaps.test.js`、`node scripts/run-tests.js runtimeV2MainReplyMemoryOrder.test.js runtimeV2PromptTimeoutMemoryFallback.test.js` 通过；性能探针 `tokens=465 durationMs=16`，轻量注入探针确认 `live_state_dynamic` 被选中且块 token=63。未作为验收：`npm test`、完整 `buildDynamicPrompt` 探针与 `runtimeV2PromptOptimization.test.js` 本机超时。小目标完成：动态生活状态进入主回复链路，且不修改 persona 文件。
 
 **2026-06-13 23:48 +08:00**：修复重启脚本拉不起主 bot。`restart-bot.cmd` / daemon 外层报 `main bot did not acquire lock after daemon start`，实际 stderr 为 `ReferenceError: markSafetyRestrictionEmojiAfterReply is not defined`；安全限制 emoji helper 位于 `createMessageHandler` 内部，却被顶层导出表引用，导致 `src/message/handler.js` 加载即退出。现移除该内部 helper 的顶层导出，保留发送成功后的内部 emoji 标记调用。验收：`node -e "require('./core/messageHandler'); require('./src/message/handler'); console.log('message handler load ok')"`、`node tests/messageModuleFacade.test.js`、`node tests/safetyRestrictionDetection.test.js` 均通过；实际 `cmd /c restart-bot.cmd restart` 返回 0，status 显示 main bot PID=44008、post-reply worker PID=40040 均 Running，`npm run diag:main-bot-restarts -- --text` 为 ok。小目标完成：重启脚本不再因 message handler 导出作用域错误拉不起主 bot。
@@ -314,10 +318,13 @@ npm run diag:continuity -- prompt --user <id>
 npm run diag:main-reply
 npm run diag:main-reply-lag
 npm run diag:request-trace-preflight -- --request-id req_e528e222050c22fb,req_693c816e6c8be621
+npm run diag:route-decision -- --request-id req_xxx
+npm run diag:route-decision -- --text "今晚吃什么好" --user-id normal_1
 npm run diag:main-reply-truncation
 npm run diag:main-reply-prompt -- --limit 20
 npm run diag:main-reply-prompt-assembly -- --text "服饰专门学校和N25两个都不放弃"
 npm run diag:main-reply-prompt-assembly -- --request-id req_xxx
+npm run diag:live-state-dynamic -- --text "服饰专门学校和N25两个都不放弃"
 npm run diag:main-reply-token-budget -- --limit 20
 npm run diag:runtime
 npm run diag:napcat-health -- --text
