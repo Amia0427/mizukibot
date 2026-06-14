@@ -123,6 +123,27 @@
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       maybeRunDeferredPersist(replyEnvelope);
+      if (replyEnvelope?.hasSafetyRestriction === true) {
+        const sourceMessageId = String(effectiveMsg.message_id || msg.message_id || '').trim();
+        if (sourceMessageId) {
+          markSafetyRestrictionEmojiAfterReply({
+            messageId: sourceMessageId,
+            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+            routeMeta: {
+              ...(route.meta || {}),
+              groupId: String(groupId || '').trim(),
+              userId: String(senderId || '').trim(),
+              chatType
+            },
+            actionClient: globalNapCatActionClient
+          }).catch((error) => {
+            console.warn('[safety-restriction-emoji] mark failed', {
+              messageId: sourceMessageId,
+              error: error?.message || String(error || '')
+            });
+          });
+        }
+      }
       if (!isPrivateChatType(chatType)) {
         await sideEffects.runDirectReplyFollowup({
           groupId,

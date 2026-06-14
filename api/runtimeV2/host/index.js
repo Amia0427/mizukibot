@@ -1456,7 +1456,10 @@ function createRuntime(options = {}) {
     });
 
     const finalReply = (typeof sanitized === 'object' ? sanitized.text : sanitized).trim();
-    options.hasSafetyRestriction = typeof sanitized === 'object' && sanitized.hasSafetyRestriction === true;
+    options.hasSafetyRestriction = Boolean(
+      out?.output?.hasSafetyRestriction === true
+      || (typeof sanitized === 'object' && sanitized.hasSafetyRestriction === true)
+    );
 
     return finalReply || '刚才网络有点不稳，你再发一次我接着回。';
   }

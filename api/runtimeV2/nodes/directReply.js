@@ -146,7 +146,8 @@ function createDirectReplyNode(deps = {}) {
     ? deps.buildReplyTextVariants
     : ((text = '') => ({
       visibleText: String(text || '').trim(),
-      persistedText: String(text || '').trim()
+      persistedText: String(text || '').trim(),
+      hasSafetyRestriction: false
     }));
 
   function extractAssistantContentText(content) {
@@ -177,6 +178,22 @@ function createDirectReplyNode(deps = {}) {
       || chatMode === 'image_summary'
       || chatMode === 'image_qa'
     );
+  }
+
+  function normalizeReplyResult(result = '') {
+    if (result && typeof result === 'object' && !Array.isArray(result)) {
+      return {
+        reply: String(result.persistedText || result.finalReply || result.visibleText || '').trim(),
+        displayReply: String(result.visibleText || result.finalReply || result.persistedText || '').trim(),
+        hasSafetyRestriction: result.hasSafetyRestriction === true
+      };
+    }
+    const text = String(result || '').trim();
+    return {
+      reply: text,
+      displayReply: text,
+      hasSafetyRestriction: false
+    };
   }
 
   return async function directReplyNode(state) {
@@ -254,6 +271,7 @@ function createDirectReplyNode(deps = {}) {
         };
     let reply = '';
     let displayReply = '';
+    let hasSafetyRestriction = false;
     let nextStream = ensureOutputStream(state.output, request.imageUrl ? 'none' : 'direct');
     let nextMemoryCliTurn = createMemoryCliTurnState(state.execution?.memoryCliTurn);
     let nextAllowedTools = directEffectiveAllowedTools;
@@ -358,6 +376,7 @@ function createDirectReplyNode(deps = {}) {
           const variants = buildReplyTextVariants(assistantText);
           reply = String(variants.persistedText || assistantText || '').trim();
           displayReply = String(variants.visibleText || reply || '').trim();
+          hasSafetyRestriction = Boolean(hasSafetyRestriction || variants.hasSafetyRestriction === true);
           firstAssistantReused = true;
           directLoopEvents.push(createEvent('first_assistant_reused', {
             node: 'direct_reply',
@@ -396,8 +415,10 @@ function createDirectReplyNode(deps = {}) {
               allowedTools: []
             }
           );
-          reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
-          displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
+          const normalizedReply = normalizeReplyResult(replyResult);
+          reply = normalizedReply.reply;
+          displayReply = normalizedReply.displayReply;
+          hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
         } else if (request.streaming) {
           const streamed = await streamDirectReply(messagesToSend, {
             ...state,
@@ -409,6 +430,7 @@ function createDirectReplyNode(deps = {}) {
           });
           reply = streamed.persistedText || streamed.finalReply || '';
           displayReply = streamed.visibleText || streamed.finalReply || '';
+          hasSafetyRestriction = Boolean(hasSafetyRestriction || streamed.hasSafetyRestriction === true);
           nextStream = streamed.stream;
           humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
         } else {
@@ -421,8 +443,10 @@ function createDirectReplyNode(deps = {}) {
               allowedTools: []
             }
           );
-          reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
-          displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
+          const normalizedReply = normalizeReplyResult(replyResult);
+          reply = normalizedReply.reply;
+          displayReply = normalizedReply.displayReply;
+          hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
         }
       } catch (error) {
         const failureType = classifyDirectReplyError(error);
@@ -487,8 +511,10 @@ function createDirectReplyNode(deps = {}) {
             allowedTools: []
           }
         );
-        reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
-        displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
+        const normalizedReply = normalizeReplyResult(replyResult);
+        reply = normalizedReply.reply;
+        displayReply = normalizedReply.displayReply;
+        hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
       } catch (error) {
         const failureType = classifyDirectReplyError(error);
         directLoopEvents = directLoopEvents.concat([
@@ -521,6 +547,7 @@ function createDirectReplyNode(deps = {}) {
         });
         reply = streamed.persistedText || streamed.finalReply || '';
         displayReply = streamed.visibleText || streamed.finalReply || '';
+        hasSafetyRestriction = Boolean(hasSafetyRestriction || streamed.hasSafetyRestriction === true);
         nextStream = streamed.stream;
         humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
       } catch (error) {
@@ -578,8 +605,10 @@ function createDirectReplyNode(deps = {}) {
                 allowedTools: []
               }
             );
-            reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
-            displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
+            const normalizedReply = normalizeReplyResult(replyResult);
+            reply = normalizedReply.reply;
+            displayReply = normalizedReply.displayReply;
+            hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
           } catch (fallbackError) {
             const failureType = classifyDirectReplyError(fallbackError);
             directLoopEvents = directLoopEvents.concat([
@@ -607,8 +636,10 @@ function createDirectReplyNode(deps = {}) {
             allowedTools: []
           }
         );
-        reply = String(replyResult?.persistedText || replyResult?.finalReply || replyResult || '').trim();
-        displayReply = String(replyResult?.visibleText || replyResult?.finalReply || replyResult || '').trim();
+        const normalizedReply = normalizeReplyResult(replyResult);
+        reply = normalizedReply.reply;
+        displayReply = normalizedReply.displayReply;
+        hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
       } catch (error) {
         const failureType = classifyDirectReplyError(error);
         directLoopEvents = directLoopEvents.concat([
@@ -658,6 +689,7 @@ function createDirectReplyNode(deps = {}) {
           || retryResult
           || ''
         ).trim();
+        hasSafetyRestriction = Boolean(hasSafetyRestriction || retryResult?.hasSafetyRestriction === true);
       } catch (_) {}
 
       if (isStableDirectReplyText(retriedReply)) {
@@ -710,6 +742,7 @@ function createDirectReplyNode(deps = {}) {
           || retryResult
           || ''
         ).trim();
+        hasSafetyRestriction = Boolean(hasSafetyRestriction || retryResult?.hasSafetyRestriction === true);
       } catch (_) {}
 
       const repairAnalysis = analyzeMainReplyDegeneration(repairedReply);
@@ -761,6 +794,7 @@ function createDirectReplyNode(deps = {}) {
           || retryResult
           || ''
         ).trim();
+        hasSafetyRestriction = Boolean(hasSafetyRestriction || retryResult?.hasSafetyRestriction === true);
       } catch (_) {}
 
       if (isStableDirectReplyText(retriedReply)) {
@@ -872,6 +906,7 @@ function createDirectReplyNode(deps = {}) {
           finalReply: String(reply || ''),
           displayReply: String(displayReply || reply || ''),
           persistedReplyText: String(reply || ''),
+          hasSafetyRestriction,
           failure,
           stream: nextStream
         },

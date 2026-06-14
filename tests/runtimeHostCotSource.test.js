@@ -15,8 +15,13 @@ module.exports = (() => {
     'host should expose displayReplyText to upper layers'
   );
   assert.ok(
-    source.includes("sanitizeUserFacingText(out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '', {"),
+    source.includes("const rawReply = out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '';")
+      && source.includes('const sanitized = sanitizeUserFacingText(rawReply, {'),
     'host should prefer displayReply when returning the user-visible text'
+  );
+  assert.ok(
+    source.includes('out?.output?.hasSafetyRestriction === true'),
+    'host should preserve runtime safety restriction metadata'
   );
 
   console.log('runtimeHostCotSource.test.js passed');

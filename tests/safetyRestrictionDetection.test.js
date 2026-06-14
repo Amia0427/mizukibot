@@ -1,4 +1,5 @@
 const assert = require('assert');
+const { buildReplyEnvelope } = require('../core/messageContracts');
 const { sanitizeUserFacingText } = require('../utils/userFacingText');
 
 console.log('Testing safety restriction detection...\n');
@@ -44,5 +45,15 @@ console.log('Output:', result4);
 assert.strictEqual(typeof result4, 'string', 'Should return string without returnMeta');
 assert.strictEqual(result4, '普通文本', 'Should return clean text');
 console.log('✅ Test 4 passed\n');
+
+// Test 5: reply envelope 需要透传标记，发送层才能贴 emoji
+const envelope = buildReplyEnvelope({
+  replyText: '这个话题我们换一个吧',
+  hasSafetyRestriction: true
+});
+console.log('Test 5 - Reply envelope metadata:');
+console.log('Output:', envelope);
+assert.strictEqual(envelope.hasSafetyRestriction, true, 'Reply envelope should preserve safety restriction metadata');
+console.log('✅ Test 5 passed\n');
 
 console.log('All tests passed! ✅');

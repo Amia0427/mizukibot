@@ -159,13 +159,22 @@ function finalizeStreamingReplyText(rawReply, fallbackText) {
 
 function buildReplyTextVariants(rawReply, fallbackText, options = {}) {
   const normalizedRaw = normalizeTextContent(rawReply);
-  const visibleText = sanitizeUserFacingText(normalizedRaw, {
-    preserveThink: options.preserveThink === true
-  }).trim() || String(fallbackText || '').trim();
-  const persistedText = sanitizeUserFacingText(normalizedRaw).trim() || String(fallbackText || '').trim();
+  const visibleSanitized = sanitizeUserFacingText(normalizedRaw, {
+    preserveThink: options.preserveThink === true,
+    returnMeta: true
+  });
+  const persistedSanitized = sanitizeUserFacingText(normalizedRaw, {
+    returnMeta: true
+  });
+  const visibleText = String(visibleSanitized?.text || '').trim() || String(fallbackText || '').trim();
+  const persistedText = String(persistedSanitized?.text || '').trim() || String(fallbackText || '').trim();
   return {
     visibleText,
-    persistedText
+    persistedText,
+    hasSafetyRestriction: Boolean(
+      visibleSanitized?.hasSafetyRestriction
+      || persistedSanitized?.hasSafetyRestriction
+    )
   };
 }
 
@@ -274,19 +283,22 @@ async function finalizeReplyText(rawReply, fallbackText, options = {}) {
   if (isReplyFailure(base, { emptyIsFailure: true })) {
     return {
       visibleText: options.preserveThink === true ? variants.visibleText : base,
-      persistedText: base
+      persistedText: base,
+      hasSafetyRestriction: variants.hasSafetyRestriction === true
     };
   }
   if (typeof options.shouldBypassHumanizerForPolicy === 'function' && options.shouldBypassHumanizerForPolicy(options?.routePolicyKey)) {
     return {
       visibleText: options.preserveThink === true ? variants.visibleText : base,
-      persistedText: base
+      persistedText: base,
+      hasSafetyRestriction: variants.hasSafetyRestriction === true
     };
   }
   if (options.disableHumanizer) {
     return {
       visibleText: options.preserveThink === true ? variants.visibleText : base,
-      persistedText: base
+      persistedText: base,
+      hasSafetyRestriction: variants.hasSafetyRestriction === true
     };
   }
   const humanized = await runHumanizerAgent(base, {
@@ -308,7 +320,8 @@ async function finalizeReplyText(rawReply, fallbackText, options = {}) {
   const persistedText = String(humanized || '').trim() || base;
   return {
     visibleText: options.preserveThink === true ? variants.visibleText : persistedText,
-    persistedText
+    persistedText,
+    hasSafetyRestriction: variants.hasSafetyRestriction === true
   };
 }
 

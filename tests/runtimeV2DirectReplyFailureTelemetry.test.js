@@ -450,6 +450,145 @@ module.exports = (async () => {
   });
   assert.strictEqual(objectContentResult.output.finalReply, '对象内容也应该被正确复用。');
 
+  const safetyRestrictionNode = createDirectReplyNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    shouldBypassHumanizerForPolicy() {
+      return false;
+    },
+    computeEffectiveAllowedTools() {
+      return [];
+    },
+    getToolPlannerExecutionPlan() {
+      return null;
+    },
+    isPlannerSingleAuthorityEnabled() {
+      return false;
+    },
+    getRouteToolPlanner() {
+      return null;
+    },
+    buildVisionMessageContent(text) {
+      return text;
+    },
+    stripMemoryCliInstruction(text) {
+      return String(text || '');
+    },
+    getMainConversationSystemMessages() {
+      return [];
+    },
+    buildDirectReplyMessages(_state, messageContent) {
+      return {
+        messages: [{ role: 'user', content: String(messageContent || '') }]
+      };
+    },
+    buildLiveMainConversationSnapshot() {
+      return null;
+    },
+    ensureOutputStream(output = {}, mode = 'direct') {
+      return {
+        ...(output.stream || {}),
+        mode,
+        hadOutput: false,
+        completed: false,
+        fallbackToNonStream: false
+      };
+    },
+    createMemoryCliTurnState(value) {
+      return value || {};
+    },
+    cloneDirectToolLoopState(value) {
+      return { ...(value || {}) };
+    },
+    normalizeMessageForToolLoop(message) {
+      return message;
+    },
+    async requestAssistantMessageImpl() {
+      throw new Error('tool probe should not run without allowed tools');
+    },
+    compileDirectChatToolCallsToPlan(toolCalls, plan) {
+      return { ...(plan || {}), steps: toolCalls };
+    },
+    saveAndEmit(state) {
+      return state;
+    },
+    mirrorStreamingFlags() {
+      return {};
+    },
+    isPureToolCallMarkup() {
+      return false;
+    },
+    async streamDirectReply() {
+      throw new Error('non-stream safety marker test should not stream');
+    },
+    async requestReplyImpl() {
+      return {
+        persistedText: '这个话题我们先换一个吧',
+        visibleText: '这个话题我们先换一个吧',
+        hasSafetyRestriction: true
+      };
+    },
+    classifyDirectReplyError() {
+      return 'generic_model_failure';
+    },
+    summarizeDirectReplyError(error) {
+      return String(error?.message || error || '');
+    },
+    async attemptDirectMemoryRecovery() {
+      return null;
+    },
+    getControlledFailureReply() {
+      return 'controlled failure';
+    },
+    updateMemoryCliTurnStateAfterError(state = {}) {
+      return state;
+    },
+    classifyReplyFailure() {
+      return { type: 'none' };
+    }
+  });
+
+  const safetyRestrictionResult = await safetyRestrictionNode({
+    request: {
+      question: '隐私问题',
+      routePolicyKey: 'chat/default',
+      routeMeta: {},
+      topRouteType: 'direct_chat',
+      customPrompt: '',
+      allowTools: false,
+      allowedTools: [],
+      modelConfig: {},
+      imageUrl: '',
+      streaming: false,
+      reviewMode: ''
+    },
+    execution: {
+      mode: 'chat',
+      memoryCliTurn: null,
+      latencyBreakdown: {}
+    },
+    memory: {
+      dynamicPrompt: '',
+      affinity: null
+    },
+    output: {
+      stream: {}
+    },
+    plan: {}
+  });
+  assert.strictEqual(safetyRestrictionResult.output.finalReply, '这个话题我们先换一个吧');
+  assert.strictEqual(safetyRestrictionResult.output.hasSafetyRestriction, true);
+
   const directReplyNode = createDirectReplyNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;

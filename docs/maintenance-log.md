@@ -1,3 +1,11 @@
+## 运行维护 2026-06-14 10:42
+
+- 小目标：恢复普通用户安全限制 emoji 标记到真实主回复链路。
+- 根因：`prompts/defaut.txt` 后续边界文案移除了 `/%` 触发要求；Runtime V2 清洗 `/%` 后没有保留 `hasSafetyRestriction`；`buildReplyEnvelope()` 未透传该字段；公开群流式发送分支也没有发送后标记调用。
+- 最小修复：恢复普通用户边界触发时末尾追加内部 `/%` 的 prompt 规则；`buildReplyTextVariants`、`directReply`、`streamingCoordinator`、`host`、`buildReplyEnvelope` 全链路透传 `hasSafetyRestriction`；非流式/流式发送成功后均调用 `markSafetyRestrictionEmojiAfterReply`。
+- 验证：`node tests/safetyRestrictionDetection.test.js`、`node tests/runtimeV2DirectReplyFailureTelemetry.test.js`、`node tests/runtimeStreamingCoordinator.test.js`、`node tests/runtimeHostCotSource.test.js`、`node tests/messageRouteFlowGroupStreaming.test.js`、`npm run check:prompts`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过；`buildReplyTextVariants('换个话题吧/%','')` 返回 `hasSafetyRestriction=true`。
+- 小目标已完成：安全限制 emoji 标记不再停留在清洗函数单测，已贯通到发送后置动作所需的 envelope 字段。
+
 ## 运行维护 2026-06-14 10:04
 
 - 小目标：补一个只读入口，回答某次请求里的 `live_state_dynamic` 如何生成和注入。
