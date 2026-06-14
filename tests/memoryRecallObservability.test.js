@@ -156,7 +156,24 @@ function clearProjectCache() {
         { id: 'short_term_continuity', tokens: 88 },
         { id: 'retrieved_memory_lite', tokens: 12 }
       ],
-      trimDecisions: []
+      trimDecisions: [],
+      promptAssemblyStageTimings: {
+        schemaVersion: 'prompt_assembly_stage_timing_v1',
+        readOnly: true,
+        totalDurationMs: 42,
+        promptCollectMs: 17,
+        promptRenderMs: 25,
+        stages: [
+          { name: 'collectPromptInputs', category: 'collect', durationMs: 17, status: 'ok', readOnly: true },
+          { name: 'renderPromptLayers.session', category: 'render', durationMs: 10, status: 'ok', readOnly: true }
+        ],
+        byName: {
+          collectPromptInputs: { count: 1, durationMs: 17, maxDurationMs: 17, status: 'ok', category: 'collect' }
+        },
+        hotspots: [
+          { name: 'collectPromptInputs', durationMs: 17, category: 'collect', status: 'ok' }
+        ]
+      }
     },
     memoryContext: { memoryForPrompt: '完整内容不应进入测试断言。' },
     memosRecall: dedupedRecall,
@@ -221,6 +238,9 @@ function clearProjectCache() {
   assert.strictEqual(prompt.prompt.shortTermContinuity.contextProfile, 'memory_recall');
   assert.strictEqual(prompt.prompt.shortTermContinuity.selectedImportantRawTurnCount, 2);
   assert.ok(prompt.prompt.shortTermContinuity.trimReasons.includes('message_limit_importance_selection'));
+  assert.strictEqual(prompt.prompt.stageTimings.schemaVersion, 'prompt_assembly_stage_timing_v1');
+  assert.strictEqual(prompt.prompt.stageTimings.readOnly, true);
+  assert.strictEqual(prompt.prompt.stageTimings.byName.collectPromptInputs.durationMs, 17);
   assert.strictEqual(prompt.planner.memosRecallDecision.decision, 'skip');
   assert.strictEqual(prompt.drop.dropped, false);
   assert.strictEqual(dropped.stage, 'memos_recall_dropped_before_prompt');

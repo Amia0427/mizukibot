@@ -1234,6 +1234,7 @@ function createPrepareNode(deps = {}) {
             prompt_build_optional_ms: Number(latencyMeta?.optionalDurationMs || 0) || 0,
             prompt_collect_ms: Number(latencyMeta?.promptCollectMs || 0) || 0,
             prompt_render_ms: Number(latencyMeta?.promptRenderMs || 0) || 0,
+            prompt_stage_timings: latencyMeta?.promptAssemblyStageTimings || latencyMeta?.stageTimings || null,
             fast_path: prepareFastPath,
             mcp_warm_wait_ms: 0
           }

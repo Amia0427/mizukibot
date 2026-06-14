@@ -2,7 +2,7 @@
 
 时间：2026-06-13 21:24 +08:00
 
-更新：2026-06-13 22:20 +08:00
+更新：2026-06-14 15:10 +08:00
 
 ## 结论
 
@@ -49,10 +49,11 @@
 - `npm run diag:main-reply-prompt -- --limit 10 --json`：确认最近主回复输入多在 6k-17k tokens，个别 vision summary 曾达 165k tokens 并触发 hard block。
 - 只读聚合 `data/request-trace.ndjson`、`data/inbound_timing.jsonl`、`data/model-calls.ndjson`：上表 request id、阶段耗时和发送耗时均来自当前日志。
 - 2026-06-13 22:20 +08:00 复核：读取 LangGraph 原始事件、request trace、`memory-recall-observability.ndjson` 与 `model-calls.ndjson`，确认第 1 点真实卡在 `prepare -> buildDynamicPromptImpl`，第 3 点真实卡在 `dispatch -> runCapabilityPreflight -> maybeRunGlobalToolRuntime -> planRequestV2` 的第二轮 planner。
+- 2026-06-14 15:10 +08:00 更新：已给 `buildDynamicPromptImpl(...)` 补 `promptAssemblyStageTimings`，现 `diag:main-reply-prompt-assembly` 可直接输出 `collectPromptInputs`、`renderPromptLayers.*`、persona/worldbook、`profile_journal_db`、`daily_journal`、`short_term_continuity` 子阶段。验收：`node -e "require('./api/runtimeV2/context/service')"`、`node tests/mainReplyPromptAssemblyDiagnostics.test.js`、`node tests/memoryRecallObservability.test.js`、`npm run diag:main-reply-prompt-assembly -- --text "服饰专门学校和N25两个都不放弃" --worldbook-semantic-limit=0` 通过；`node tests/runtimeV2PromptOptimization.test.js` 本机 64s 超时未作为验收。
 
 ## 下一步高价值点
 
-1. 给 `buildDynamicPromptImpl` 内的 `collectPromptInputs`、`renderPromptLayers`、persona module/worldbook、profile_journal_db、short_term_continuity 组装加子阶段 trace；第 1 点已不需要优先加 `graph_invoke_start` 来解释本样本。
+1. 已完成：给 `buildDynamicPromptImpl` 内的 `collectPromptInputs`、`renderPromptLayers`、persona module/worldbook、profile_journal_db、daily_journal、short_term_continuity 组装加子阶段 trace；第 1 点现在可继续用 `diag:main-reply-prompt-assembly` 下钻。
 2. dispatch capability preflight 若 route planner 已提供单权威 `executionPlan`，优先复用该结果或只做本地 policy check，避免第二轮远程 planner。
 3. planner 对 OpenAI-compatible host 若已知不支持 `/v1/responses`，直接走 `/v1/chat/completions`，避免每次 405 往返。
 4. `/check` 类管理员快命令绕过连续消息 12s-60s 聚合，当前只绕过了同 session inflight 限制。

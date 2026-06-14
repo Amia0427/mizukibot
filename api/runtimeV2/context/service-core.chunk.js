@@ -631,6 +631,217 @@ function normalizeText(value, fallback = '') {
   return text || fallback;
 }
 
+function sanitizePromptTimingMeta(meta = {}) {
+  const normalized = normalizeObject(meta, {});
+  const out = {};
+  for (const [key, value] of Object.entries(normalized)) {
+    if (value === undefined || typeof value === 'function') continue;
+    if (Array.isArray(value)) {
+      out[key] = value.map((item) => normalizeText(item)).filter(Boolean).slice(0, 12);
+    } else if (value && typeof value === 'object') {
+      out[key] = sanitizePromptTimingMeta(value);
+    } else if (typeof value === 'number') {
+      out[key] = Number.isFinite(value) ? value : 0;
+    } else if (typeof value === 'boolean') {
+      out[key] = value;
+    } else {
+      out[key] = normalizeText(value);
+    }
+  }
+  return out;
+}
+
+function normalizePromptTimingEntry(entry = {}, now = Date.now()) {
+  const normalized = normalizeObject(entry, {});
+  const name = normalizeText(normalized.name);
+  if (!name) return null;
+  const startedAtMs = Number.isFinite(Number(normalized.startedAtMs)) ? Number(normalized.startedAtMs) : now;
+  const endedAtMs = Number.isFinite(Number(normalized.endedAtMs)) ? Number(normalized.endedAtMs) : now;
+  const durationMs = Number.isFinite(Number(normalized.durationMs))
+    ? Math.max(0, Number(normalized.durationMs))
+    : Math.max(0, endedAtMs - startedAtMs);
+  return {
+    name,
+    category: normalizeText(normalized.category, 'prompt_assembly'),
+    durationMs,
+    status: normalizeText(normalized.status, normalized.ended === false ? 'running' : 'ok'),
+    readOnly: normalized.readOnly !== false,
+    source: normalizeText(normalized.source),
+    startedAt: normalizeText(normalized.startedAt),
+    endedAt: normalizeText(normalized.endedAt),
+    ...(Array.isArray(normalized.includes) && normalized.includes.length > 0 ? { includes: normalized.includes.map((item) => normalizeText(item)).filter(Boolean) } : {}),
+    ...(normalized.summary && typeof normalized.summary === 'object' ? { summary: sanitizePromptTimingMeta(normalized.summary) } : {}),
+    ...(normalizeText(normalized.error) ? { error: normalizeText(normalized.error).slice(0, 240) } : {})
+  };
+}
+
+function summarizePromptAssemblyTiming(entries = [], options = {}) {
+  const now = Date.now();
+  const stages = normalizeArray(entries)
+    .map((entry) => normalizePromptTimingEntry(entry, now))
+    .filter(Boolean);
+  const byName = {};
+  for (const stage of stages) {
+    if (!byName[stage.name]) {
+      byName[stage.name] = {
+        count: 0,
+        durationMs: 0,
+        maxDurationMs: 0,
+        status: stage.status,
+        category: stage.category,
+        source: stage.source
+      };
+    }
+    byName[stage.name].count += 1;
+    byName[stage.name].durationMs += stage.durationMs;
+    byName[stage.name].maxDurationMs = Math.max(byName[stage.name].maxDurationMs, stage.durationMs);
+    if (stage.status !== 'ok') byName[stage.name].status = stage.status;
+  }
+  for (const item of Object.values(byName)) {
+    item.durationMs = Math.max(0, Math.round(item.durationMs));
+    item.maxDurationMs = Math.max(0, Math.round(item.maxDurationMs));
+  }
+  return {
+    schemaVersion: 'prompt_assembly_stage_timing_v1',
+    readOnly: true,
+    totalDurationMs: Math.max(0, Number(options.totalDurationMs || 0) || 0),
+    promptCollectMs: Math.max(0, Number(options.promptCollectMs || 0) || 0),
+    promptRenderMs: Math.max(0, Number(options.promptRenderMs || 0) || 0),
+    stages,
+    byName,
+    hotspots: stages
+      .slice()
+      .sort((a, b) => b.durationMs - a.durationMs)
+      .slice(0, 8)
+      .map((item) => ({
+        name: item.name,
+        durationMs: item.durationMs,
+        category: item.category,
+        source: item.source,
+        status: item.status
+      }))
+  };
+}
+
+function createPromptAssemblyTimingCollector(existing = null) {
+  if (existing && existing.__promptAssemblyTimingCollector === true) return existing;
+  const entries = Array.isArray(existing?.entries) ? existing.entries : [];
+  const start = (name = '', meta = {}) => {
+    const startedAtMs = Date.now();
+    const entry = {
+      name: normalizeText(name, 'unknown'),
+      ...sanitizePromptTimingMeta(meta),
+      startedAtMs,
+      startedAt: new Date(startedAtMs).toISOString(),
+      durationMs: 0,
+      status: 'running',
+      ended: false,
+      readOnly: meta?.readOnly !== false
+    };
+    entries.push(entry);
+    return {
+      entry,
+      end(extra = {}) {
+        if (entry.ended === true) return entry;
+        const endedAtMs = Date.now();
+        const cleanExtra = sanitizePromptTimingMeta(extra);
+        Object.assign(entry, cleanExtra);
+        entry.endedAtMs = endedAtMs;
+        entry.endedAt = new Date(endedAtMs).toISOString();
+        entry.durationMs = Math.max(0, endedAtMs - startedAtMs);
+        entry.status = normalizeText(cleanExtra.status, entry.status === 'running' ? 'ok' : entry.status);
+        entry.ended = true;
+        return entry;
+      }
+    };
+  };
+  const collector = {
+    __promptAssemblyTimingCollector: true,
+    entries,
+    start,
+    record(name = '', meta = {}) {
+      const timer = start(name, meta);
+      const entry = timer.end({ status: normalizeText(meta.status, 'ok') });
+      if (Number.isFinite(Number(meta.durationMs))) {
+        entry.durationMs = Math.max(0, Number(meta.durationMs));
+      }
+      return entry;
+    },
+    has(name = '') {
+      const target = normalizeText(name);
+      return Boolean(target && entries.some((entry) => normalizeText(entry.name) === target));
+    },
+    find(name = '') {
+      const target = normalizeText(name);
+      return entries.find((entry) => normalizeText(entry.name) === target) || null;
+    },
+    measureSync(name = '', fn, meta = {}) {
+      const timer = start(name, meta);
+      try {
+        const value = typeof fn === 'function' ? fn() : fn;
+        timer.end({ status: 'ok' });
+        return value;
+      } catch (error) {
+        timer.end({ status: 'error', error: error?.message || String(error || '') });
+        throw error;
+      }
+    },
+    async measureAsync(name = '', fn, meta = {}) {
+      const timer = start(name, meta);
+      try {
+        const value = await (typeof fn === 'function' ? fn() : fn);
+        timer.end({ status: 'ok' });
+        return value;
+      } catch (error) {
+        timer.end({ status: 'error', error: error?.message || String(error || '') });
+        throw error;
+      }
+    },
+    snapshot(options = {}) {
+      return summarizePromptAssemblyTiming(entries, options);
+    }
+  };
+  return collector;
+}
+
+function recordMemoryContextTimingDetails(timing, memoryContext = {}) {
+  if (!timing || typeof timing.record !== 'function') return;
+  const context = normalizeObject(memoryContext, {});
+  const dailyBundle = normalizeObject(context.dailyJournalBundle, {});
+  const dailySource = normalizeText(dailyBundle.source, 'daily_journal_files');
+  if (!timing.has('daily_journal')) {
+    timing.record('daily_journal', {
+      category: 'memory_context',
+      source: 'utils/dailyJournal.getDailyJournalRetrievalBundle',
+      status: 'observed',
+      readOnly: true,
+      summary: {
+        source: dailySource,
+        items: normalizeArray(dailyBundle.items).length,
+        promptChars: normalizeText(context.promptDailyJournalText || context.dailyJournalText).length
+      }
+    });
+  }
+  const dailyStage = timing.find('daily_journal');
+  const stableProfileSource = normalizeText(context.stableProfile?.source || context.stableProfileSource);
+  const usedProfileJournalDb = dailySource === 'profile_journal_db' || stableProfileSource === 'profile_journal_db';
+  if (!timing.has('profile_journal_db')) {
+    timing.record('profile_journal_db', {
+      category: 'memory_context',
+      source: 'utils/profileJournalDb',
+      status: usedProfileJournalDb ? 'observed' : 'not_used',
+      durationMs: usedProfileJournalDb && Number.isFinite(Number(dailyStage?.durationMs)) ? Number(dailyStage.durationMs) : 0,
+      readOnly: true,
+      summary: {
+        dailyJournalSource: dailySource,
+        stableProfileSource,
+        promptDailyJournalChars: normalizeText(context.promptDailyJournalText || context.dailyJournalText).length,
+        promptProfileChars: normalizeText(context.promptLongTermProfileText || context.longTermProfileText || context.profileText).length
+      }
+    });
+  }
+}
+
 function getMemosPlannerRecallRuntime() {
   return require('../../../utils/memosPlannerRecall');
 }

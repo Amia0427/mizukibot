@@ -467,6 +467,50 @@ function summarizeLiveStateDynamicPrompt(promptSnapshot = {}) {
   };
 }
 
+function sanitizePromptAssemblyStageTiming(input = {}) {
+  const stage = normalizeObject(input, {});
+  const name = normalizeText(stage.name);
+  if (!name) return null;
+  return {
+    name,
+    category: normalizeText(stage.category, 'prompt_assembly'),
+    durationMs: Math.max(0, Number(stage.durationMs || 0) || 0),
+    status: normalizeText(stage.status, 'ok'),
+    readOnly: stage.readOnly !== false,
+    source: normalizeText(stage.source),
+    ...(Array.isArray(stage.includes) && stage.includes.length > 0
+      ? { includes: normalizeArray(stage.includes).map((item) => normalizeText(item)).filter(Boolean).slice(0, 12) }
+      : {}),
+    ...(stage.summary && typeof stage.summary === 'object' ? { summary: stage.summary } : {}),
+    ...(normalizeText(stage.error) ? { error: truncatePreview(stage.error, 160) } : {})
+  };
+}
+
+function summarizePromptAssemblyStageTimings(promptSnapshot = {}) {
+  const timings = normalizeObject(promptSnapshot?.promptAssemblyStageTimings || promptSnapshot?.stageTimings, {});
+  const stages = normalizeArray(timings.stages)
+    .map((item) => sanitizePromptAssemblyStageTiming(item))
+    .filter(Boolean);
+  return {
+    schemaVersion: normalizeText(timings.schemaVersion, 'prompt_assembly_stage_timing_v1'),
+    readOnly: timings.readOnly !== false,
+    totalDurationMs: Math.max(0, Number(timings.totalDurationMs || 0) || 0),
+    promptCollectMs: Math.max(0, Number(timings.promptCollectMs || 0) || 0),
+    promptRenderMs: Math.max(0, Number(timings.promptRenderMs || 0) || 0),
+    stages,
+    byName: normalizeObject(timings.byName, {}),
+    hotspots: normalizeArray(timings.hotspots)
+      .map((item) => ({
+        name: normalizeText(item?.name),
+        durationMs: Math.max(0, Number(item?.durationMs || 0) || 0),
+        category: normalizeText(item?.category),
+        source: normalizeText(item?.source),
+        status: normalizeText(item?.status, 'ok')
+      }))
+      .filter((item) => item.name)
+  };
+}
+
 function findPlannerDecisionForBlock(plan = {}, blockId = '') {
   const target = normalizeText(blockId);
   if (!target) return null;
@@ -528,7 +572,8 @@ function recordMainPromptBlockObservation(input = {}) {
       tokenUsageByBlock: summarizeTokenUsage(promptSnapshot),
       trimDecisions: summarizeTrimDecisions(promptSnapshot),
       shortTermContinuity: summarizeShortTermContinuityPrompt(promptSnapshot),
-      liveStateDynamic: summarizeLiveStateDynamicPrompt(promptSnapshot)
+      liveStateDynamic: summarizeLiveStateDynamicPrompt(promptSnapshot),
+      stageTimings: summarizePromptAssemblyStageTimings(promptSnapshot)
     },
     planner: {
       dynamicPromptPlanSource: normalizeText(dynamicPromptPlan.source || dynamicPromptPlan._source),
@@ -583,6 +628,7 @@ module.exports = {
   resolveObservabilityLogFile,
   stableHash,
   summarizeLiveStateDynamicPrompt,
+  summarizePromptAssemblyStageTimings,
   summarizeMemosRecall,
   summarizeOpenVikingRecall,
   summarizeRecallItems,

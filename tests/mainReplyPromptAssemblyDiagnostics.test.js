@@ -135,6 +135,32 @@ function observation(requestId) {
           nextBlockId: 'persona_module_wb_mizuki_future_two_tracks',
           orderSource: 'promptSnapshot.assembledBlocks'
         }
+      },
+      stageTimings: {
+        schemaVersion: 'prompt_assembly_stage_timing_v1',
+        readOnly: true,
+        totalDurationMs: 123,
+        promptCollectMs: 45,
+        promptRenderMs: 78,
+        stages: [
+          { name: 'collectPromptInputs', category: 'collect', durationMs: 45, status: 'ok', readOnly: true, source: '' },
+          { name: 'persona_worldbook', category: 'collect', durationMs: 12, status: 'ok', readOnly: true, source: 'utils/personaModules.buildPersonaModuleCandidatesAsync' },
+          { name: 'profile_journal_db', category: 'memory_context', durationMs: 8, status: 'observed', readOnly: true, source: 'utils/profileJournalDb' },
+          { name: 'daily_journal', category: 'memory_context', durationMs: 8, status: 'ok', readOnly: true, source: 'utils/dailyJournal.getDailyJournalRetrievalBundle' },
+          { name: 'short_term_continuity', category: 'collect', durationMs: 3, status: 'ok', readOnly: true, source: 'utils/shortTermMemory.buildSharedShortTermContextMessages' },
+          { name: 'renderPromptLayers.session', category: 'render', durationMs: 22, status: 'ok', readOnly: true, source: 'renderPromptLayers' }
+        ],
+        byName: {
+          collectPromptInputs: { count: 1, durationMs: 45, maxDurationMs: 45, status: 'ok', category: 'collect', source: '' },
+          persona_worldbook: { count: 1, durationMs: 12, maxDurationMs: 12, status: 'ok', category: 'collect', source: 'utils/personaModules.buildPersonaModuleCandidatesAsync' },
+          profile_journal_db: { count: 1, durationMs: 8, maxDurationMs: 8, status: 'observed', category: 'memory_context', source: 'utils/profileJournalDb' },
+          daily_journal: { count: 1, durationMs: 8, maxDurationMs: 8, status: 'ok', category: 'memory_context', source: 'utils/dailyJournal.getDailyJournalRetrievalBundle' },
+          short_term_continuity: { count: 1, durationMs: 3, maxDurationMs: 3, status: 'ok', category: 'collect', source: 'utils/shortTermMemory.buildSharedShortTermContextMessages' },
+          'renderPromptLayers.session': { count: 1, durationMs: 22, maxDurationMs: 22, status: 'ok', category: 'render', source: 'renderPromptLayers' }
+        },
+        hotspots: [
+          { name: 'collectPromptInputs', durationMs: 45, category: 'collect', source: '', status: 'ok' }
+        ]
       }
     },
     planner: {
@@ -194,6 +220,31 @@ function observation(requestId) {
   assert.ok(rebuilt.liveStateDynamic.promptPosition.position > 0);
   assert.strictEqual(rebuilt.liveStateDynamic.promptBlock.priority, 500);
   assert.ok(rebuilt.liveStateDynamic.selection.runtimeAdded);
+  assert.strictEqual(rebuilt.promptAssemblyStageTimings.schemaVersion, 'prompt_assembly_stage_timing_v1');
+  assert.strictEqual(rebuilt.promptAssemblyStageTimings.readOnly, true);
+  assert.ok(Number(rebuilt.promptAssemblyStageTimings.promptCollectMs) >= 0);
+  assert.ok(Number(rebuilt.promptAssemblyStageTimings.promptRenderMs) >= 0);
+  for (const name of [
+    'buildDynamicPromptImpl',
+    'collectPromptInputs',
+    'memory_context',
+    'persona_worldbook',
+    'profile_journal_db',
+    'short_term_continuity',
+    'daily_journal',
+    'renderPromptLayers.stable',
+    'renderPromptLayers.session',
+    'renderPromptLayers.optional'
+  ]) {
+    assert.ok(
+      rebuilt.promptAssemblyStageTimings.stages.some((item) => item.name === name),
+      `rebuilt timing must include ${name}`
+    );
+  }
+  assert.ok(
+    rebuilt.promptAssemblyStageTimings.stages.every((item) => item.readOnly === true),
+    'prompt assembly timings must stay read-only diagnostics'
+  );
   assert.ok(
     rebuilt.runtimeLocalInjection.selectedWithoutPlanner.some((item) => item.moduleId === 'wb_mizuki_future_two_tracks'),
     'worldbook module must still be selected locally when planner is not provided'
@@ -256,6 +307,14 @@ function observation(requestId) {
   assert.strictEqual(requestIdReport.liveStateDynamic.finalTokenEstimate, 66);
   assert.strictEqual(requestIdReport.liveStateDynamic.promptPosition.position, 5);
   assert.strictEqual(requestIdReport.liveStateDynamic.traceEvent.stage, 'live_state_prepared');
+  assert.strictEqual(requestIdReport.observed.promptObservation.prompt.stageTimings.schemaVersion, 'prompt_assembly_stage_timing_v1');
+  assert.strictEqual(requestIdReport.promptAssemblyStageTimings.readOnly, true);
+  for (const name of ['collectPromptInputs', 'persona_worldbook', 'profile_journal_db', 'daily_journal', 'short_term_continuity', 'renderPromptLayers.session']) {
+    assert.ok(
+      requestIdReport.promptAssemblyStageTimings.stages.some((item) => item.name === name),
+      `request-id timing must include ${name}`
+    );
+  }
 
   clearWorldbookSessionState('diag-prompt-assembly-test');
   console.log('mainReplyPromptAssemblyDiagnostics.test.js passed');

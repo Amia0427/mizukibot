@@ -22,7 +22,8 @@ const { flushRequestTraceEventsSync } = require('./requestTrace');
 const {
   flushMemoryRecallObservabilitySync,
   stableHash,
-  summarizeLiveStateDynamicPrompt
+  summarizeLiveStateDynamicPrompt,
+  summarizePromptAssemblyStageTimings
 } = require('./memoryRecallObservability');
 
 const SCHEMA_VERSION = 'main_reply_prompt_assembly_diagnostic_v1';
@@ -856,6 +857,12 @@ async function buildFromTestInput(rawInput = {}, options = {}) {
     personaWorldbook: summarizeWorldbook(snapshot, catalogById),
     runtimeLocalInjection: summarizeRuntimeLocalInjection(snapshot),
     liveStateDynamic: buildLiveStateDynamicReportFromSnapshot(snapshot, liveStateBuild, { mode: 'test_input' }),
+    promptAssemblyStageTimings: summarizePromptAssemblyStageTimings({
+      promptAssemblyStageTimings: result.latencyMeta?.promptAssemblyStageTimings
+        || result.latencyMeta?.stageTimings
+        || snapshot.promptAssemblyStageTimings
+        || snapshot.stageTimings
+    }),
     budgetReport: normalizeObject(snapshot.budgetReport, null),
     cacheMeta: normalizeObject(result.cacheMeta, {}),
     freshness: normalizeObject(result.freshness, {}),
@@ -906,7 +913,8 @@ function summarizeObservation(row = {}) {
       assembledBlockCount: Math.max(0, Number(prompt.assembledBlockCount || prompt.assembled_block_count || 0) || 0),
       tokenUsageByBlock: normalizeArray(prompt.tokenUsageByBlock),
       trimDecisions: normalizeArray(prompt.trimDecisions),
-      liveStateDynamic: normalizeObject(prompt.liveStateDynamic, null)
+      liveStateDynamic: normalizeObject(prompt.liveStateDynamic, null),
+      stageTimings: normalizeObject(prompt.stageTimings || prompt.promptAssemblyStageTimings, null)
     },
     planner: {
       source: normalizeText(planner.dynamicPromptPlanSource || planner.source || planner._source),
@@ -1046,7 +1054,8 @@ function buildFromRequestId(requestId = '', options = {}) {
     },
     runtimeLocalInjection: observedRuntimeLocalInjection
     ,
-    liveStateDynamic
+    liveStateDynamic,
+    promptAssemblyStageTimings: normalizeObject(observation?.prompt?.stageTimings || observation?.prompt?.promptAssemblyStageTimings, {})
   };
 }
 

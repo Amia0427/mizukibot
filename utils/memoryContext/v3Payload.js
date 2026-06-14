@@ -128,18 +128,30 @@ async function buildMemoryContextV3Payload(deps = {}) {
   const journalIntent = classifyJournalRecallIntent(question, baseOptions);
   const activeRawBundle = baseOptions.includeActiveRaw
     || journalIntent.includeActiveRaw
-    ? getDailyJournalRetrievalBundle(userId, {
-      lookbackDays: baseOptions.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
-      timestamp: resolveDailyJournalTimestamp(question, baseOptions),
-      yearMonth: baseOptions.dailyJournalYearMonth,
-      maxFourDayFiles: baseOptions.dailyJournalMaxFourDayFiles,
-      maxMonthlyFiles: baseOptions.dailyJournalMaxMonthlyFiles,
-      sessionKey: baseOptions.sessionKey,
-      question,
-      topic: question,
-      includeActiveRaw: true,
-      activeRawMaxEntries: baseOptions.activeRawMaxEntries || 8
-    })
+    ? (() => {
+        const readBundle = () => getDailyJournalRetrievalBundle(userId, {
+          lookbackDays: baseOptions.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
+          timestamp: resolveDailyJournalTimestamp(question, baseOptions),
+          yearMonth: baseOptions.dailyJournalYearMonth,
+          maxFourDayFiles: baseOptions.dailyJournalMaxFourDayFiles,
+          maxMonthlyFiles: baseOptions.dailyJournalMaxMonthlyFiles,
+          sessionKey: baseOptions.sessionKey,
+          question,
+          topic: question,
+          includeActiveRaw: true,
+          activeRawMaxEntries: baseOptions.activeRawMaxEntries || 8
+        });
+        const timing = baseOptions.__promptAssemblyTiming;
+        if (timing && typeof timing.measureSync === 'function') {
+          return timing.measureSync('daily_journal', readBundle, {
+            category: 'memory_context',
+            source: 'utils/dailyJournal.getDailyJournalRetrievalBundle',
+            readOnly: true,
+            includes: ['profile_journal_db', 'daily_journal']
+          });
+        }
+        return readBundle();
+      })()
     : null;
   const selectedJournalEvidence = selectJournalPromptEvidence({
     bundle: activeRawBundle || { text: '', items: [], byLayer: { activeRaw: [], daily: [], fourDay: [], monthly: [] } },
