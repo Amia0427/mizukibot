@@ -32,6 +32,11 @@ module.exports = (async () => {
   assert.ok(content[0].text.includes('简短解释'));
   assert.ok(content[0].text.includes('认真分析'));
   assert.ok(content[0].text.includes('只回 1-2 句'));
+  assert.ok(content[0].text.includes('读情绪，不按像素报告动作'));
+  assert.ok(content[0].text.includes('不要说“表情/贴纸/我发图/我给你发”'));
+  assert.ok(content[0].text.includes('[OK]/[收到]这类低信息确认只轻轻接住或不扩写'));
+  assert.ok(content[0].text.includes('[哭]/[笑哭]/[爆炸]按委屈、好笑、崩溃等情绪夸张理解'));
+  assert.ok(content[0].text.includes('表情只做氛围，不抢主回复'));
   assert.ok(content[0].text.includes('不确定梗或来源时可以说“我感觉你是在表达……'));
   assert.ok(content[0].text.includes('认真看图并回答问题，不要硬接梗'));
   assert.ok(!content[0].text.includes('VisionCaptionJSON'));
@@ -55,11 +60,13 @@ module.exports = (async () => {
   assert.ok(textFor('识别一下文字').includes('用户图片意图：analyze_image'));
 
   config.VISION_ROUTE_USER_TEXT_MAX_TOKENS = 64;
-  const longQuestion = `BEGIN_QUOTE ${'很长的引用内容'.repeat(120)}\n真正的问题：总结这张图`;
+  const repeatedContext = '很长的引用内容';
+  const longQuestion = `BEGIN_QUOTE ${repeatedContext.repeat(120)}\n真正的问题：总结这张图`;
   const truncated = textFor(longQuestion);
   assert.ok(truncated.includes('真正的问题：总结这张图'), 'vision prompt should keep the tail user instruction');
   assert.ok(!truncated.includes('BEGIN_QUOTE'), 'vision prompt should trim oversized quoted/raw text');
-  assert.ok(truncated.length < longQuestion.length, 'vision prompt should be shorter than the raw oversized question');
+  const remainingRepeatedContextCount = (truncated.match(new RegExp(repeatedContext, 'g')) || []).length;
+  assert.ok(remainingRepeatedContextCount < 120, 'vision prompt should trim repeated oversized context');
 
   console.log('runtimeV2VisionMessageContent.test.js passed');
 })().catch((error) => {
