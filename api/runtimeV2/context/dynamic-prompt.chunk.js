@@ -1,4 +1,10 @@
 async function buildDynamicPrompt(userInfo, userId, question, customPrompt = null, options = {}) {
+  const promptAssemblyTiming = createPromptAssemblyTimingCollector(options.__promptAssemblyTiming);
+  const buildStage = promptAssemblyTiming.start('buildDynamicPromptImpl', {
+    category: 'prompt_assembly',
+    source: 'api/runtimeV2/context/dynamic-prompt.chunk.js',
+    readOnly: true
+  });
   const currentConfig = getConfig();
   const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
   const reviewMode = String(options?.reviewMode || '').trim().toLowerCase();
@@ -43,7 +49,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     : (normalizedPromptUserId && configuredAdminUserIds.includes(normalizedPromptUserId)
       ? 'configured_admin_non_private'
       : (normalizedPromptUserId ? 'normal_user' : 'anonymous'));
-  const sharedShortTermContext = buildSharedShortTermContextMessages(userId, userInfo, {
+  const sharedShortTermContext = promptAssemblyTiming.measureSync('short_term_continuity', () => buildSharedShortTermContextMessages(userId, userInfo, {
     chatHistory: options.chatHistory,
     shortTermMemory: options.shortTermMemory,
     routeMeta,
@@ -51,6 +57,10 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     routePolicyKey,
     topRouteType,
     question
+  }), {
+    category: 'collect',
+    source: 'utils/shortTermMemory.buildSharedShortTermContextMessages',
+    readOnly: true
   });
   let fallbackPersonaModuleCandidates = null;
   let fallbackPersonaModuleDecision = null;
@@ -161,11 +171,13 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     () => collectPromptInputs(userInfo, userId, question, customPrompt, {
       ...options,
       isAdmin: adminPromptContext,
-      sharedShortTermContext
+      sharedShortTermContext,
+      __promptAssemblyTiming: promptAssemblyTiming
     }),
     memoryPromptBudgetMs,
     buildFallbackPromptMaterials
   );
+  recordMemoryContextTimingDetails(promptAssemblyTiming, promptMaterials?.memoryContext || fallbackMemoryContext);
   const promptCollectMs = Math.max(0, Date.now() - collectStartedAt);
   const sessionCacheFingerprint = buildSessionCacheFingerprint(userInfo, {
     ...promptMaterials,
@@ -191,11 +203,15 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   if (String(customPrompt || '').trim()) {
     const customRenderStartedAt = Date.now();
     const customBuilt = await withSoftTimeout(
-      () => renderPromptLayers(promptMaterials, {
+      () => promptAssemblyTiming.measureAsync('renderPromptLayers.custom', () => renderPromptLayers(promptMaterials, {
         ...options,
         modelName,
         isAdmin: adminPromptContext,
         sharedShortTermContext
+      }), {
+        category: 'render',
+        source: 'renderPromptLayers',
+        readOnly: true
       }),
       memoryPromptBudgetMs,
       () => ({
@@ -213,6 +229,12 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     );
     const promptRenderMs = Math.max(0, Date.now() - customRenderStartedAt);
     const essentialDurationMs = Math.max(0, Date.now() - essentialStartedAt);
+    buildStage.end({ status: 'ok' });
+    const promptAssemblyStageTimings = promptAssemblyTiming.snapshot({
+      totalDurationMs: essentialDurationMs,
+      promptCollectMs,
+      promptRenderMs
+    });
     return {
       ...customBuilt,
       freshness: {
@@ -235,13 +257,15 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
         optionalBudgetExceeded: false,
         promptCollectMs,
         promptRenderMs,
-        prompt_assembly_ms: promptRenderMs
+        prompt_assembly_ms: promptRenderMs,
+        promptAssemblyStageTimings,
+        stageTimings: promptAssemblyStageTimings
       }
     };
   }
 
   const essentialRenderStartedAt = Date.now();
-  const stableLayer = stableCacheHit || await renderPromptLayers(promptMaterials, {
+  const stableLayer = stableCacheHit || await promptAssemblyTiming.measureAsync('renderPromptLayers.stable', () => renderPromptLayers(promptMaterials, {
     ...options,
     modelName,
     isAdmin: adminPromptContext,
@@ -251,8 +275,20 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     includeDynamicFewShotBlock: false,
     resolvePersonaModules: false,
     mainReplyPromptMode
+  }), {
+    category: 'render',
+    source: 'renderPromptLayers',
+    readOnly: true
   });
-  const sessionCandidateLayer = await renderPromptLayers(promptMaterials, {
+  if (stableCacheHit) {
+    promptAssemblyTiming.record('renderPromptLayers.stable', {
+      category: 'render',
+      source: 'promptLayerCache.stable',
+      status: 'cache_hit',
+      readOnly: true
+    });
+  }
+  const sessionCandidateLayer = await promptAssemblyTiming.measureAsync('renderPromptLayers.session', () => renderPromptLayers(promptMaterials, {
     ...options,
     modelName,
     isAdmin: adminPromptContext,
@@ -263,6 +299,10 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
     includeDynamicFewShotBlock: false,
     resolvePersonaModules: false,
     mainReplyPromptMode
+  }), {
+    category: 'render',
+    source: 'renderPromptLayers',
+    readOnly: true
   });
   const freshlyRenderedSessionStableBlocks = extractSessionStablePromptBlocks(sessionCandidateLayer.dynamicContextBlocks);
   const sessionReusedBlocks = normalizeArray(sessionCacheHit?.dynamicContextBlocks).length > 0
@@ -430,7 +470,7 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
   let optionalLayer = null;
   if (!optionalBudgetExceeded) {
     optionalLayer = await withSoftTimeout(
-      () => renderPromptLayers(promptMaterials, {
+      () => promptAssemblyTiming.measureAsync('renderPromptLayers.optional', () => renderPromptLayers(promptMaterials, {
         ...options,
         modelName,
         isAdmin: adminPromptContext,
@@ -449,10 +489,26 @@ async function buildDynamicPrompt(userInfo, userId, question, customPrompt = nul
         }),
         resolvePersonaModules: true,
         mainReplyPromptMode
+      }), {
+        category: 'render',
+        source: 'renderPromptLayers',
+        readOnly: true,
+        includes: ['persona_worldbook', 'persona_modules', 'dynamic_few_shot']
       }),
       Math.max(0, optionalBudgetMs - essentialDurationMs),
       null
     );
+  } else {
+    promptAssemblyTiming.record('renderPromptLayers.optional', {
+      category: 'render',
+      source: 'optional_build_budget',
+      status: 'skipped_budget',
+      readOnly: true,
+      summary: {
+        optionalBuildEnabled,
+        optionalBudgetExceeded
+      }
+    });
   }
   const effectiveOptionalLayer = optionalLayer && typeof optionalLayer === 'object' ? optionalLayer : null;
 

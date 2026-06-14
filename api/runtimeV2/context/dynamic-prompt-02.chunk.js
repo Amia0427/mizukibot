@@ -108,6 +108,14 @@
 
   const optionalDurationMs = Math.max(0, Date.now() - optionalBuildStartedAt);
   const promptRenderMs = essentialRenderMs + optionalDurationMs;
+  buildStage.end({ status: 'ok' });
+  const promptAssemblyStageTimings = promptAssemblyTiming.snapshot({
+    totalDurationMs: Math.max(0, Date.now() - essentialStartedAt),
+    promptCollectMs,
+    promptRenderMs
+  });
+  enrichedSnapshot.promptAssemblyStageTimings = promptAssemblyStageTimings;
+  enrichedSnapshot.stageTimings = promptAssemblyStageTimings;
   return {
     dynamicPrompt: serializePromptBlocks([
       ...laneSplit.stableSystemBlocks,
@@ -135,7 +143,9 @@
       optionalBudgetExceeded,
       promptCollectMs,
       promptRenderMs,
-      prompt_assembly_ms: promptRenderMs
+      prompt_assembly_ms: promptRenderMs,
+      promptAssemblyStageTimings,
+      stageTimings: promptAssemblyStageTimings
     },
     dynamicFewShotPrompt: effectiveCombinedAssistantOnlyBlocks.some((item) => item?.id === 'dynamic_few_shot')
       ? (effectiveOptionalLayer?.dynamicFewShotPrompt || sessionCandidateLayer.dynamicFewShotPrompt || promptMaterials.dynamicFewShotPrompt || '')

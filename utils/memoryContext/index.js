@@ -115,6 +115,18 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
   const factText = getUserMemories(userId);
   const journalIntent = classifyJournalRecallIntent(question, options);
   const dailyJournalTimestamp = resolveDailyJournalTimestamp(question, options);
+  const readDailyJournalBundle = () => getDailyJournalRetrievalBundle(userId, {
+    lookbackDays: options.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
+    timestamp: dailyJournalTimestamp,
+    yearMonth: options.dailyJournalYearMonth,
+    maxFourDayFiles: options.dailyJournalMaxFourDayFiles,
+    maxMonthlyFiles: options.dailyJournalMaxMonthlyFiles,
+    sessionKey: options.sessionKey,
+    question,
+    topic: question,
+    includeActiveRaw: options.includeActiveRaw || recapQuery || journalIntent.includeActiveRaw,
+    activeRawMaxEntries: options.activeRawMaxEntries || 8
+  });
   const dailyJournalBundle = memoizeValue(
     options,
     buildMemoKey('journal-bundle', userId, question || '', {
@@ -122,18 +134,18 @@ function buildContextPayload(userId, question = '', options = {}, unifiedHits = 
       dailyJournalTimestamp,
       includeActiveRaw: options.includeActiveRaw || recapQuery || journalIntent.includeActiveRaw
     }),
-    () => getDailyJournalRetrievalBundle(userId, {
-      lookbackDays: options.dailyLookbackDays || config.DAILY_JOURNAL_LOOKBACK_DAYS,
-      timestamp: dailyJournalTimestamp,
-      yearMonth: options.dailyJournalYearMonth,
-      maxFourDayFiles: options.dailyJournalMaxFourDayFiles,
-      maxMonthlyFiles: options.dailyJournalMaxMonthlyFiles,
-      sessionKey: options.sessionKey,
-      question,
-      topic: question,
-      includeActiveRaw: options.includeActiveRaw || recapQuery || journalIntent.includeActiveRaw,
-      activeRawMaxEntries: options.activeRawMaxEntries || 8
-    })
+    () => {
+      const timing = options.__promptAssemblyTiming;
+      if (timing && typeof timing.measureSync === 'function') {
+        return timing.measureSync('daily_journal', readDailyJournalBundle, {
+          category: 'memory_context',
+          source: 'utils/dailyJournal.getDailyJournalRetrievalBundle',
+          readOnly: true,
+          includes: ['profile_journal_db', 'daily_journal']
+        });
+      }
+      return readDailyJournalBundle();
+    }
   );
   const ragEnabled = options.ragEnabled ?? config.MEMORY_RAG_ENABLED;
   const {
