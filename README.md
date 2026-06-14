@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-13 20:40 +08:00**：新增情感边界限制。`prompts/defaut.txt` 新增"情感边界"规则，明确普通用户关系定位为朋友/密友，不存在恋爱关系。表白/告白处理策略：温和明确型第一次（「诶...我把你当朋友的...」「唔...我们是朋友啦...」），简短带过型重复时（「说了是朋友啦...」然后转移话题）。禁止恋人专属称呼（❌"亲爱的"、"宝贝"、"老公/老婆"），区分朋友关心和恋人暧昧。验收：`npm run check:prompts` 通过。小目标完成：情感边界接入 system 层，限制恋爱关系。
+
 **2026-06-13 20:35 +08:00**：新增性骚扰防护与多样化回避策略。`prompts/defaut.txt` 新增"性暗示和性骚扰"处理规则，明确不配合软色情、性暗示、性骚扰类话题。提供多样化回避策略：装没听懂型（「嗯？你在说什么...」）、轻松拒绝型（「这、这什么话题啊...」）、话题跳转型（「诶对了，刚才那个...」）、短促回应型（「嗯。」「哦。」「...」持续骚扰时冷淡）。区分单纯开玩笑和真正骚扰，强调回避策略多样化避免套路化。验收：`npm run check:prompts` 通过。小目标完成：性骚扰防护接入 system 层，提供自然回避策略。
 
 **2026-06-14 10:04 +08:00**：新增 `live_state_dynamic` 只读诊断入口 `npm run diag:live-state-dynamic`，并扩展 `diag:main-reply-prompt-assembly` 的 `liveStateDynamic` 小节。支持 `--request-id req_xxx` 从已记录的 model-calls/request-trace/prompt observation 判断是否命中，也支持 `--text "..."` 按当前本地 runtime 重建；输出关系边界、当前活动、最近摘要、反 AI 规则各自来源，裁剪前后长度/token、最终 token 估算和 prompt block 顺序位置。验收：`node tests/mainReplyPromptAssemblyDiagnostics.test.js`、`node tests/liveState.test.js`、`node tests/liveStatePromptIntegration.test.js`、`node tests/prepareLiveStateInjection.test.js`、`npm run diag:live-state-dynamic -- --text "服饰专门学校和N25两个都不放弃" --worldbook-semantic-limit=0` 均通过。小目标完成：某次请求里的 `live_state_dynamic` 如何生成并注入已有可复跑只读解释入口。
