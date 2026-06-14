@@ -2,7 +2,7 @@
 
 时间：2026-06-13 21:24 +08:00
 
-更新：2026-06-14 19:47 +08:00
+更新：2026-06-14 21:54 +08:00
 
 ## 结论
 
@@ -13,6 +13,48 @@
 3. 原第 3 点的具体凝滞是两套 planner 串行：路由层 `planDirectChat` 先跑一次远程 planner；工具执行进入 `api/runtimeV2/nodes/dispatch.js` 后，`runCapabilityPreflight` 又调用 `api/globalToolRuntime.js -> planningService.planRequestV2` 跑第二次 planner。两次都先打 `/v1/responses` 405，再降级 `/v1/chat/completions`；`req_42badc948f719477` 第二次 chat completions 本身耗 56.7s。
 4. 连续消息预处理固定持有常见为 12-13s；个别命令样本更长，`req_c70940dbe4a09036` 进入 admin route 前已约 57.9s。
 5. 实际 NapCat 发送在成功样本中通常不是瓶颈：非流式 `reply_send_success` 约 234ms-1.4s，`req_42badc948f719477` 为 907ms。`diag:main-reply-lag` 已在 2026-06-14 19:47 +08:00 修正口径：`send` 只显示 `reply_send_success/reply_send_failure.durationMs`，流式 `final_reply_send_done.durationMs` 进入独立 `generation`。
+
+## 2026-06-14 当天复核
+
+时间：2026-06-14 21:54 +08:00
+
+当天仍存在两个确定凝滞点：
+
+1. 连续消息预处理仍在普通聊天热路径前固定持有。`continuous_preprocess_done` 当天 ready 样本 109 个，p50=15.0s、p95=69.9s、max=101.2s；`sentence_window` p50=14.6s，`debounce` p50=15.0s，`max_hold` p50=25.6s。同期 `message_ingress_lock_acquired.queueWaitMs` p50=1ms、p95=280ms，`inbound_wait_ms` p50=0ms、p95=279ms，所以今天多数入口凝滞不是入站锁，而是在锁前的连续消息聚合/句子窗口。
+2. 主模型/生成仍是最大耗时。当天 `request_complete` 60 个，47 个超过 60s，p50=78.4s、p95=194.5s、max=213.3s。`v2_streaming_reply` p95=97.3s，`direct_reply` p95=85.7s，流式 `final_reply_send_done` p95=160.4s；`normal_fast_reply` p95=15.5s 且失败样本 5 个，失败后会回落完整主回复。非流式实际发送 p50=324ms、p95=2.3s；成功样本显示 QQ 发送不是主要瓶颈。
+
+### 当天慢样本
+
+| request id | 本地完成时间 | 路由 | 总耗时 | 主要阻滞 |
+| --- | --- | --- | ---: | --- |
+| `req_b9da4aa1cdbaa18b` | 2026-06-14 18:47:40 | `chat/default` | 213.3s | `continuous_preprocess_done`/入锁前 100.2s；`normal_fast_reply` 11.3s 后失败；正式流式主模型 `gemini-3-flash-preview` 94.3s；最终流式完成 101.8s |
+| `req_9b3592e2fc6010ba` | 2026-06-14 18:53:13 | `chat/default` | 210.2s | 前置等待约 83.6s + 少量锁等待 2.3s；正式流式链路完成后因 freshness 变旧丢弃，`stale_reply_discarded` |
+| `req_459de318c0731f76` | 2026-06-14 18:56:34 | `transform/vision-summary` | 209.9s | 图片总结输入约 28.7k tokens；`claude-opus-4-6-thinking` 首次 87.2s 后 HTTP 408，第二次 18.7s 成功；非流式发送不是瓶颈 |
+| `req_197c52fc1a63585d` | 2026-06-14 09:09:47 | `chat/default` | 172.5s | 前置连续消息等待 12.0s；`claude-opus-4-6-thinking` 流式主模型 97.3s；流式完成 160.4s |
+| `req_c4df0e300ffa3107` | 2026-06-14 20:32:57 | `transform/vision-summary` | 148.5s | `continuous_preprocess_done.flushReason=max_hold` 25.8s；图片总结输入约 36.8k tokens；`claude-opus-4-6-thinking` 首次 85.7s 后 HTTP 408，第二次 31.7s 成功；发送 201ms |
+| `req_a40f1dad7e0be975` | 2026-06-14 19:06:55 | `transform/vision-summary` | 145.0s | `continuous_preprocess_done.flushReason=sentence_window` 13.7s；图片总结输入约 49.2k tokens；`gemini-3-flash-preview` 约 60s HTTP 408 后重试/成功；发送 255ms |
+| `req_4b7f65357b234ece` | 2026-06-14 18:59:51 | `lookup/notebook-answer` | 143.7s | 入锁前 23.0s，其中锁等待 9.7s；工具链 runtime dispatch 120.3s；draft reply 模型 21.5s；发送 334ms |
+| `req_72071ddb1d327d6f` | 2026-06-14 21:37:01 | `chat/default` | 97.1s | `continuous_preprocess_done.flushReason=debounce` 12.2s；正式流式主模型 10.5s，但完整 dispatch/final stream 完成 84.6s；persist 唤醒 worker 1.9s |
+
+### 当天聚合指标
+
+| 指标 | 样本 | p50 | p95 | max | 结论 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `request_complete.durationMs` | 60 | 78.4s | 194.5s | 213.3s | 当天慢回复仍普遍存在 |
+| `continuous_preprocess_done.elapsedSinceHandlerStartMs` | 109 | 15.0s | 69.9s | 101.2s | 锁前连续消息聚合仍是固定凝滞源 |
+| `message_ingress_lock_acquired.queueWaitMs` | 108 | 1ms | 280ms | 11.2s | 多数慢点不是入站锁 |
+| `v2_streaming_reply.duration_ms` | 15 | 43.4s | 97.3s | 97.3s | 流式主模型仍慢 |
+| `direct_reply.duration_ms` | 23 | 42.5s | 85.7s | 87.2s | 图片/管理员非流式主模型仍慢 |
+| `draft_reply.duration_ms` | 22 | 8.8s | 42.7s | 43.2s | 工具后草稿回复仍可放大总耗时 |
+| `normal_fast_reply.duration_ms` | 16 | 7.6s | 15.5s | 15.5s | 快回复自身不够快且失败会叠加完整链路 |
+| 非流式 `final_reply_send_done.durationMs` | 35 | 324ms | 2.3s | 81.9s | 常规发送不是瓶颈；81.9s 样本需按流式/异常语义单独复核 |
+
+### 2026-06-14 21:54 验收
+
+- `npm run diag:main-reply-lag -- --since=24h --no-provider-diagnostic --json`：24h 窗口显示 `generation p95=160361ms`、`mainModel p95=86236ms`、`send` 缺少常规样本，瓶颈判定为流式生成完成耗时。
+- `npm run diag:runtime -- --json`：主进程 PID 19040、post-reply worker PID 15308 均在线；运行时仍有 `post_reply_failed_jobs`、`langgraph_v2_checkpoint_stale`、`langgraph_v2_event_file_invalid` 警告。
+- 只读聚合 `data/request-trace.ndjson`、`data/inbound_timing.jsonl`、`data/model-calls.ndjson`：确认当天入口等待、模型耗时、发送耗时和 stale 丢弃样本均来自真实日志。
+- 代码复核 `core/messageHandler.runtime-03.chunk.js` 与 `core/continuousMessagePreprocessor/index.js`：`message_ingress_lock_acquired` 写在 `continuousMessagePreprocessor.handleMessage()` 返回之后，因此 `lock_acquired.elapsedSinceRequestStartMs` 里的 12s/15s/100s 主要是锁前预处理，不应误解为入站锁等待。
 
 ## 近样本
 
