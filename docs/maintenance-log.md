@@ -1,3 +1,11 @@
+## 运行维护 2026-06-14 10:04
+
+- 小目标：补一个只读入口，回答某次请求里的 `live_state_dynamic` 如何生成和注入。
+- 最小实现：新增 `npm run diag:live-state-dynamic`，复用 `diag:main-reply-prompt-assembly` / prompt snapshot 诊断链路；`--request-id` 读取已记录证据，`--text` 按当前本地 runtime 重建。`live_state_dynamic` prompt block 只追加诊断 meta，不改变 prompt 文本。
+- 输出范围：是否命中、关系边界/当前活动/最近摘要/反 AI 规则来源、裁剪前后 chars/tokens、最终 token 估算、prompt block 顺序位置、runtime must-use 选择证据。
+- 验证：`node tests/mainReplyPromptAssemblyDiagnostics.test.js`、`node tests/liveState.test.js`、`node tests/liveStatePromptIntegration.test.js`、`node tests/prepareLiveStateInjection.test.js`、`npm run diag:live-state-dynamic -- --text "服饰专门学校和N25两个都不放弃" --worldbook-semantic-limit=0` 通过。
+- 小目标已完成：`live_state_dynamic` 的生成、裁剪和注入顺序已有可复跑只读诊断。
+
 ## 运行维护 2026-06-14 00:42
 
 - 小目标：按 `docs/live-state-enhancement.md` 落地动态生活状态系统，执行前先确认是否已有重复功能。

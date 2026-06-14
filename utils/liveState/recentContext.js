@@ -43,17 +43,49 @@ async function queryRecentEntries(userId, limit, deps = {}) {
 }
 
 async function getRecentContextSummary(userId, limit = 5, options = {}) {
+  const result = await getRecentContextSummaryWithSource(userId, limit, options);
+  return result.summary;
+}
+
+async function getRecentContextSummaryWithSource(userId, limit = 5, options = {}) {
+  const baseSource = {
+    sourceFile: 'utils/liveState/recentContext.js',
+    sourcePolicy: 'getRecentContextSummary',
+    readOnly: true,
+    limit: Math.max(1, Number(limit || 5) || 5)
+  };
   try {
     const entries = await Promise.race([
       queryRecentEntries(userId, limit, options),
       new Promise((resolve) => setTimeout(() => resolve([]), Math.max(1, Number(options.timeoutMs || 100) || 100)))
     ]);
-    const summaries = (Array.isArray(entries) ? entries : [])
+    const normalizedEntries = Array.isArray(entries) ? entries : [];
+    const summaries = normalizedEntries
       .map(pickSummary)
       .filter(Boolean)
       .slice(0, 3);
-    if (summaries.length === 0) return null;
-    return cleanText(summaries.join('；'), 300);
+    if (summaries.length === 0) {
+      return {
+        summary: null,
+        source: {
+          ...baseSource,
+          dataSource: 'daily_journal_recent_entries',
+          found: false,
+          entriesRead: normalizedEntries.length,
+          summariesUsed: 0
+        }
+      };
+    }
+    return {
+      summary: cleanText(summaries.join('；'), 300),
+      source: {
+        ...baseSource,
+        dataSource: 'daily_journal_recent_entries',
+        found: true,
+        entriesRead: normalizedEntries.length,
+        summariesUsed: summaries.length
+      }
+    };
   } catch (error) {
     if (options.logger && typeof options.logger.warn === 'function') {
       options.logger.warn('Recent context query failed, using empty context', {
@@ -61,11 +93,20 @@ async function getRecentContextSummary(userId, limit = 5, options = {}) {
         error: error?.message || String(error)
       });
     }
-    return null;
+    return {
+      summary: null,
+      source: {
+        ...baseSource,
+        dataSource: 'daily_journal_recent_entries_error',
+        found: false,
+        error: error?.message || String(error)
+      }
+    };
   }
 }
 
 module.exports = {
   cleanText,
-  getRecentContextSummary
+  getRecentContextSummary,
+  getRecentContextSummaryWithSource
 };

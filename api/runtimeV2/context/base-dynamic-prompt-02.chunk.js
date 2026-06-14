@@ -25,7 +25,7 @@
       }));
     }
     if (liveStateContextText) {
-      compactPromptBlocks.push(createLiveStatePromptBlock(liveStateContextText));
+      compactPromptBlocks.push(createLiveStatePromptBlock(liveStateContextText, liveStateMeta));
     }
     const compactSelectedBlocks = filterBlocksByPlan(compactPromptBlocks, effectiveBaseDynamicPromptPlan, {
       requiredIds: [],

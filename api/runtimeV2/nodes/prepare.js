@@ -779,7 +779,10 @@ function createPrepareNode(deps = {}) {
         kind: 'runtime_context',
         source: 'live_state',
         budgetTokens: 800,
-        meta: { blockId: 'live_state_dynamic' }
+        meta: {
+          blockId: 'live_state_dynamic',
+          liveState: normalizeObject(request.liveStateMeta, {})
+        }
       }
     ));
     return buildGuardedPromptArtifacts({
@@ -985,9 +988,14 @@ function createPrepareNode(deps = {}) {
           liveStateContext,
           liveStateMeta: {
             relationship: liveStateBuild.relationship?.level || 'stranger',
+            rawTokens: Number(liveStateBuild.rawTokens || 0) || 0,
             tokens: Number(liveStateBuild.tokens || 0) || 0,
+            tokenLimit: Number(liveStateBuild.tokenLimit || 0) || 0,
+            rawChars: String(liveStateBuild.rawContext || '').length,
+            finalChars: liveStateContext.length,
             durationMs: Number(liveStateBuild.durationMs || 0) || 0,
-            truncated: Boolean(liveStateBuild.truncated)
+            truncated: Boolean(liveStateBuild.truncated),
+            sourceDiagnostics: normalizeObject(liveStateBuild.sourceDiagnostics, {})
           }
         }
       : request;

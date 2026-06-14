@@ -64,13 +64,78 @@ function observation(requestId) {
     topRouteType: 'direct_chat',
     prompt: {
       stableBlockIds: ['root_system_prompt', 'security_contract', 'main_persona_system'],
-      dynamicBlockIds: ['roleplay_runtime_context', 'persona_module_wb_mizuki_future_two_tracks'],
+      dynamicBlockIds: ['roleplay_runtime_context', 'live_state_dynamic', 'persona_module_wb_mizuki_future_two_tracks'],
       assistantOnlyBlockIds: ['dynamic_few_shot'],
       assembledBlockCount: 6,
       tokenUsageByBlock: [
         { id: 'root_system_prompt', tokens: 12 },
+        { id: 'live_state_dynamic', tokens: 66 },
         { id: 'persona_module_wb_mizuki_future_two_tracks', tokens: 80 }
-      ]
+      ],
+      liveStateDynamic: {
+        hit: true,
+        block: {
+          id: 'live_state_dynamic',
+          label: 'Live State Dynamic',
+          lane: 'dynamic_context',
+          priority: 500,
+          source: 'live_state',
+          budgetTokens: 800
+        },
+        sourceDiagnostics: {
+          relationshipBoundary: {
+            sourceFile: 'utils/liveState/relationshipBoundary.js',
+            sourcePolicy: 'getRelationshipBoundary',
+            dataSource: 'memory_v3_relationship_projection',
+            found: true,
+            readOnly: true
+          },
+          currentActivity: {
+            sourceFile: 'utils/liveState/currentActivity.js',
+            sourcePolicy: 'getCurrentActivity',
+            dataSource: 'timezone_clock_bucket',
+            found: true,
+            readOnly: true
+          },
+          recentContext: {
+            sourceFile: 'utils/liveState/recentContext.js',
+            sourcePolicy: 'getRecentContextSummary',
+            dataSource: 'daily_journal_recent_entries',
+            found: true,
+            readOnly: true,
+            entriesRead: 1,
+            summariesUsed: 1
+          },
+          antiAIRules: {
+            sourceFile: 'utils/liveState/antiAIRules.js',
+            sourcePolicy: 'getAntiAIRules',
+            dataSource: 'deterministic_route_and_turn_heuristics',
+            found: true,
+            readOnly: true
+          }
+        },
+        lengths: {
+          beforeTrimChars: 360,
+          afterTrimChars: 300,
+          beforeTrimTokens: 120,
+          afterTrimTokens: 66,
+          tokenLimit: 800,
+          truncated: true
+        },
+        finalTokenEstimate: 66,
+        promptPosition: {
+          index: 4,
+          position: 5,
+          totalBlocks: 6,
+          lane: 'dynamic_context',
+          laneIndex: 1,
+          lanePosition: 2,
+          laneTotal: 3,
+          previousBlockId: 'roleplay_inner_protocol',
+          nextBlockId: 'persona_module_wb_mizuki_future_two_tracks',
+          orderSource: 'promptSnapshot.assembledBlocks'
+        }
+      }
     },
     planner: {
       dynamicPromptPlanSource: 'heuristic',
@@ -90,6 +155,18 @@ function observation(requestId) {
     sessionKey: 'diag-prompt-assembly-test',
     routePolicyKey: 'chat/default',
     topRouteType: 'direct_chat',
+    now: '2026-06-14T02:00:00+08:00',
+    timezone: 'Asia/Shanghai',
+    memoryV3: {
+      async queryProjection() {
+        return [{ relationType: 'friend', closeness: 55, intimacy: 30, tags: ['diag_friend'] }];
+      }
+    },
+    dailyJournal: {
+      async queryRecent() {
+        return [{ summary: '最近聊过服饰专门学校和N25的两条路' }];
+      }
+    },
     worldbookSemanticLimit: 0,
     worldbookEmbeddingHotPath: false
   });
@@ -107,6 +184,16 @@ function observation(requestId) {
   assert.deepStrictEqual(getWorldbookSessionState('diag-prompt-assembly-test'), []);
   assert.strictEqual(rebuilt.planner.provided, false);
   assert.strictEqual(rebuilt.planner.source, 'heuristic');
+  assert.strictEqual(rebuilt.liveStateDynamic.hit, true);
+  assert.strictEqual(rebuilt.liveStateDynamic.sources.relationshipBoundary.dataSource, 'memory_v3_relationship_projection');
+  assert.strictEqual(rebuilt.liveStateDynamic.sources.currentActivity.dataSource, 'timezone_clock_bucket');
+  assert.strictEqual(rebuilt.liveStateDynamic.sources.recentContext.dataSource, 'daily_journal_recent_entries');
+  assert.strictEqual(rebuilt.liveStateDynamic.sources.antiAIRules.dataSource, 'deterministic_route_and_turn_heuristics');
+  assert.ok(rebuilt.liveStateDynamic.lengths.beforeTrimTokens >= rebuilt.liveStateDynamic.lengths.afterTrimTokens);
+  assert.ok(rebuilt.liveStateDynamic.finalTokenEstimate > 0);
+  assert.ok(rebuilt.liveStateDynamic.promptPosition.position > 0);
+  assert.strictEqual(rebuilt.liveStateDynamic.promptBlock.priority, 500);
+  assert.ok(rebuilt.liveStateDynamic.selection.runtimeAdded);
   assert.ok(
     rebuilt.runtimeLocalInjection.selectedWithoutPlanner.some((item) => item.moduleId === 'wb_mizuki_future_two_tracks'),
     'worldbook module must still be selected locally when planner is not provided'
@@ -124,6 +211,19 @@ function observation(requestId) {
         stage: 'planner_timeout',
         routePolicyKey: 'chat/default',
         topRouteType: 'direct_chat'
+      },
+      {
+        requestId: 'req_prompt_diag',
+        recordedAt: '2026-06-13T12:00:00.700Z',
+        phaseSeq: 2,
+        tracePhase: 'runtime_v2_live_state_prepared',
+        stage: 'live_state_prepared',
+        routePolicyKey: 'chat/default',
+        topRouteType: 'direct_chat',
+        relationship: 'friend',
+        tokens: 66,
+        durationMs: 4,
+        hasContext: true
       }
     ],
     observationRows: [observation('req_prompt_diag')]
@@ -133,6 +233,7 @@ function observation(requestId) {
   assert.strictEqual(requestIdReport.exactPromptRebuilt, false);
   assert.strictEqual(requestIdReport.summary.foundModelCall, true);
   assert.strictEqual(requestIdReport.summary.foundPromptObservation, true);
+  assert.strictEqual(requestIdReport.summary.liveStateDynamicHit, true);
   assert.strictEqual(requestIdReport.planner.source, 'heuristic');
   assert.ok(requestIdReport.planner.traceSignals.includes('planner_timeout'));
   assert.ok(requestIdReport.observed.blockIds.dynamic.includes('persona_module_wb_mizuki_future_two_tracks'));
@@ -148,6 +249,13 @@ function observation(requestId) {
     ))
   );
   assert.ok(requestIdReport.observed.modelCall.promptIntegrity.inferredBlockIds.includes('retrieved_memory_lite'));
+  assert.strictEqual(requestIdReport.liveStateDynamic.hit, true);
+  assert.strictEqual(requestIdReport.liveStateDynamic.sources.relationshipBoundary.dataSource, 'memory_v3_relationship_projection');
+  assert.strictEqual(requestIdReport.liveStateDynamic.lengths.beforeTrimTokens, 120);
+  assert.strictEqual(requestIdReport.liveStateDynamic.lengths.afterTrimTokens, 66);
+  assert.strictEqual(requestIdReport.liveStateDynamic.finalTokenEstimate, 66);
+  assert.strictEqual(requestIdReport.liveStateDynamic.promptPosition.position, 5);
+  assert.strictEqual(requestIdReport.liveStateDynamic.traceEvent.stage, 'live_state_prepared');
 
   clearWorldbookSessionState('diag-prompt-assembly-test');
   console.log('mainReplyPromptAssemblyDiagnostics.test.js passed');

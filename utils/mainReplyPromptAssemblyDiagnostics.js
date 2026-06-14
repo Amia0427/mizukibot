@@ -3,6 +3,8 @@ const path = require('path');
 
 const config = require('../config');
 const { buildDynamicPrompt } = require('../api/runtimeV2/context/service');
+const { estimateTokens } = require('./contextBudget');
+const { buildLiveStateForState, LIVE_STATE_TOKEN_LIMIT } = require('./liveState');
 const {
   normalizeArray,
   normalizeDiagnosticContext,
@@ -17,7 +19,11 @@ const {
 } = require('./worldbookDb');
 const { loadPersonaModuleCatalog } = require('./personaModules');
 const { flushRequestTraceEventsSync } = require('./requestTrace');
-const { flushMemoryRecallObservabilitySync } = require('./memoryRecallObservability');
+const {
+  flushMemoryRecallObservabilitySync,
+  stableHash,
+  summarizeLiveStateDynamicPrompt
+} = require('./memoryRecallObservability');
 
 const SCHEMA_VERSION = 'main_reply_prompt_assembly_diagnostic_v1';
 const MAIN_REPLY_MODEL_CALL_SOURCES = new Set(['v2_assistant_message', 'v2_streaming_reply']);
@@ -207,6 +213,7 @@ function summarizeObservedBlockSource(blockId = '', lane = '', catalogById = nul
     roleplay_runtime_context: ['runtime', 'runtime_roleplay_context'],
     chat_liveness_discipline: ['runtime', 'runtime_liveness_policy'],
     roleplay_inner_protocol: ['runtime', 'runtime_inner_protocol'],
+    live_state_dynamic: ['utils/liveState', 'live_state_runtime'],
     group_direct_chat_style_guard: ['runtime', 'runtime_group_direct_style_guard'],
     directed_context: ['runtime', 'runtime_directed_context'],
     context_stats_instruction: ['runtime', 'runtime_tool_policy'],
@@ -346,6 +353,252 @@ function summarizeBlocks(snapshot = {}, catalogById = null) {
   };
 }
 
+function sourceStatus(source = {}) {
+  const normalized = normalizeObject(source, {});
+  return {
+    sourceFile: normalizeText(normalized.sourceFile),
+    sourcePolicy: normalizeText(normalized.sourcePolicy),
+    dataSource: normalizeText(normalized.dataSource),
+    found: normalized.found === true,
+    readOnly: normalized.readOnly === true,
+    sourceConfidence: normalizeText(normalized.sourceConfidence),
+    ...(Number.isFinite(Number(normalized.limit)) ? { limit: Number(normalized.limit) } : {}),
+    ...(Number.isFinite(Number(normalized.entriesRead)) ? { entriesRead: Number(normalized.entriesRead) } : {}),
+    ...(Number.isFinite(Number(normalized.summariesUsed)) ? { summariesUsed: Number(normalized.summariesUsed) } : {}),
+    ...(normalizeText(normalized.error) ? { error: normalizeText(normalized.error) } : {})
+  };
+}
+
+function defaultLiveStateSourceDiagnostics() {
+  return {
+    relationshipBoundary: {
+      sourceFile: 'utils/liveState/relationshipBoundary.js',
+      sourcePolicy: 'getRelationshipBoundary',
+      dataSource: 'memory_v3_relationship_projection_then_legacy_relationship_then_default',
+      found: false,
+      readOnly: true,
+      sourceConfidence: 'current_code_inference'
+    },
+    currentActivity: {
+      sourceFile: 'utils/liveState/currentActivity.js',
+      sourcePolicy: 'getCurrentActivity',
+      dataSource: 'timezone_clock_bucket',
+      found: false,
+      readOnly: true,
+      sourceConfidence: 'current_code_inference'
+    },
+    recentContext: {
+      sourceFile: 'utils/liveState/recentContext.js',
+      sourcePolicy: 'getRecentContextSummary',
+      dataSource: 'daily_journal_recent_entries',
+      found: false,
+      readOnly: true,
+      sourceConfidence: 'current_code_inference'
+    },
+    antiAIRules: {
+      sourceFile: 'utils/liveState/antiAIRules.js',
+      sourcePolicy: 'getAntiAIRules',
+      dataSource: 'deterministic_route_and_turn_heuristics',
+      found: false,
+      readOnly: true,
+      sourceConfidence: 'current_code_inference'
+    }
+  };
+}
+
+function summarizeLiveStateSources(sourceDiagnostics = {}) {
+  const sources = {
+    ...defaultLiveStateSourceDiagnostics(),
+    ...normalizeObject(sourceDiagnostics, {})
+  };
+  return {
+    relationshipBoundary: sourceStatus({ ...defaultLiveStateSourceDiagnostics().relationshipBoundary, ...normalizeObject(sources.relationshipBoundary, {}) }),
+    currentActivity: sourceStatus({ ...defaultLiveStateSourceDiagnostics().currentActivity, ...normalizeObject(sources.currentActivity, {}) }),
+    recentContext: sourceStatus({ ...defaultLiveStateSourceDiagnostics().recentContext, ...normalizeObject(sources.recentContext, {}) }),
+    antiAIRules: sourceStatus({ ...defaultLiveStateSourceDiagnostics().antiAIRules, ...normalizeObject(sources.antiAIRules, {}) })
+  };
+}
+
+function summarizeLiveStateComponentLengths(liveState = {}) {
+  const state = normalizeObject(liveState, {});
+  const antiAIRules = normalizeObject(state.antiAIRules, {});
+  return {
+    relationshipBoundary: {
+      chars: normalizeText(state.relationship?.boundary).length,
+      tokens: estimateTokens(state.relationship?.boundary)
+    },
+    currentActivity: {
+      chars: normalizeText([
+        state.activity?.activity,
+        state.activity?.mood,
+        state.activity?.constraints
+      ].filter(Boolean).join('\n')).length,
+      tokens: estimateTokens([
+        state.activity?.activity,
+        state.activity?.mood,
+        state.activity?.constraints
+      ].filter(Boolean).join('\n'))
+    },
+    recentContext: {
+      chars: normalizeText(state.recentContext).length,
+      tokens: estimateTokens(state.recentContext)
+    },
+    antiAIRules: {
+      chars: normalizeText([antiAIRules.core, ...normalizeArray(antiAIRules.scenario)].join('\n')).length,
+      tokens: estimateTokens([antiAIRules.core, ...normalizeArray(antiAIRules.scenario)].join('\n')),
+      scenarioRules: normalizeArray(antiAIRules.scenario).length
+    }
+  };
+}
+
+function summarizeLiveStateSelection(snapshot = {}) {
+  const trace = normalizeArray(snapshot.selectionTrace)
+    .find((item) => normalizeText(item.id || item.blockId) === 'live_state_dynamic');
+  const runtimeAdded = normalizeArray(snapshot.runtimeAddedBlocks)
+    .find((item) => normalizeText(item.id || item.blockId) === 'live_state_dynamic');
+  const runtimeRejected = normalizeArray(snapshot.runtimeRejectedBlocks)
+    .find((item) => normalizeText(item.id || item.blockId) === 'live_state_dynamic');
+  return {
+    selected: trace?.selected === true || normalizeArray(snapshot.dynamicBlockIds).map((item) => normalizeText(item)).includes('live_state_dynamic'),
+    reason: normalizeText(trace?.reason),
+    decision: normalizeText(trace?.decision),
+    runtimeAdded: trace?.runtimeAdded === true || Boolean(runtimeAdded),
+    includedByPlanner: trace?.includedByPlanner === true,
+    skippedByPlanner: trace?.skippedByPlanner === true,
+    overBlockBudget: trace?.overBlockBudget === true,
+    rejectedReason: normalizeText(runtimeRejected?.reason),
+    trace: trace || null,
+    runtimeAddedBlock: runtimeAdded || null,
+    runtimeRejectedBlock: runtimeRejected || null
+  };
+}
+
+function buildLiveStateDynamicReportFromSnapshot(snapshot = {}, liveStateBuild = null, options = {}) {
+  const promptSummary = summarizeLiveStateDynamicPrompt(snapshot);
+  const block = normalizeArray(snapshot.assembledBlocks)
+    .find((item) => normalizeText(item?.id) === 'live_state_dynamic' || normalizeText(item?.meta?.blockId) === 'live_state_dynamic');
+  const meta = normalizeObject(block?.meta?.liveState, {});
+  const sourceDiagnostics = normalizeObject(
+    liveStateBuild?.sourceDiagnostics
+    || meta.sourceDiagnostics,
+    {}
+  );
+  const rawTokens = Number.isFinite(Number(liveStateBuild?.rawTokens))
+    ? Number(liveStateBuild.rawTokens)
+    : (Number.isFinite(Number(meta.rawTokens)) ? Number(meta.rawTokens) : null);
+  const finalTokens = Number.isFinite(Number(promptSummary.finalTokenEstimate))
+    ? Number(promptSummary.finalTokenEstimate)
+    : (Number.isFinite(Number(liveStateBuild?.tokens)) ? Number(liveStateBuild.tokens) : null);
+  const rawChars = Number.isFinite(Number(liveStateBuild?.rawContext?.length))
+    ? liveStateBuild.rawContext.length
+    : (Number.isFinite(Number(meta.rawChars)) ? Number(meta.rawChars) : null);
+  const finalChars = block ? normalizeText(block.content).length : (Number.isFinite(Number(meta.finalChars)) ? Number(meta.finalChars) : null);
+  return {
+    schemaVersion: 'live_state_dynamic_diagnostic_v1',
+    mode: options.mode || '',
+    hit: Boolean(block),
+    generation: {
+      node: 'prepare',
+      builder: 'utils/liveState.buildLiveStateForState',
+      promptBlockFactory: 'api/runtimeV2/context/service-core.chunk.js#createLiveStatePromptBlock',
+      routeSkip: liveStateBuild?.skipped === true ? normalizeText(liveStateBuild.reason) : '',
+      sourceConfidence: liveStateBuild ? 'rebuilt_current_code' : (Object.keys(meta).length > 0 ? 'stored_prompt_block_meta' : 'current_code_inference')
+    },
+    sources: summarizeLiveStateSources(sourceDiagnostics),
+    componentLengths: liveStateBuild ? summarizeLiveStateComponentLengths(liveStateBuild) : null,
+    lengths: {
+      beforeTrimChars: rawChars,
+      afterTrimChars: finalChars,
+      beforeTrimTokens: rawTokens,
+      afterTrimTokens: finalTokens,
+      tokenLimit: Number.isFinite(Number(liveStateBuild?.tokenLimit || meta.tokenLimit || LIVE_STATE_TOKEN_LIMIT))
+        ? Number(liveStateBuild?.tokenLimit || meta.tokenLimit || LIVE_STATE_TOKEN_LIMIT)
+        : LIVE_STATE_TOKEN_LIMIT,
+      truncated: liveStateBuild ? liveStateBuild.truncated === true : meta.truncated === true
+    },
+    finalTokenEstimate: finalTokens,
+    promptPosition: promptSummary.promptPosition,
+    promptBlock: promptSummary.block,
+    selection: summarizeLiveStateSelection(snapshot),
+    blockOrderRule: 'promptCompiler sorts assembled blocks by priority ascending, then id; live_state_dynamic priority is 500 in dynamic_context lane.',
+    contentHash: block ? stableHash(block.content) : ''
+  };
+}
+
+function summarizeObservedLiveStateFromRequest(observation = {}, modelCall = {}, traceRows = [], sourceIndex = {}) {
+  const prompt = normalizeObject(observation?.prompt, {});
+  const stored = normalizeObject(prompt.liveStateDynamic, {});
+  const dynamicIds = uniqueTexts(prompt.dynamicBlockIds || prompt.dynamic_block_ids);
+  const tokenUsage = normalizeArray(prompt.tokenUsageByBlock)
+    .find((item) => normalizeText(item?.id || item?.blockId) === 'live_state_dynamic');
+  const dynamicBlocks = normalizeArray(sourceIndex.dynamicBlocks);
+  const dynamicIndex = dynamicIds.indexOf('live_state_dynamic');
+  const traceEvent = normalizeArray(traceRows)
+    .find((row) => normalizeText(row.stage) === 'live_state_prepared' || normalizeText(row.tracePhase).includes('live_state'));
+  const modelTokens = normalizeObject(
+    normalizeObject(modelCall.prompt_integrity || modelCall.promptIntegrity, {}).token_budget
+    || normalizeObject(modelCall.prompt_integrity || modelCall.promptIntegrity, {}).tokenBudget,
+    {}
+  );
+  const hit = stored.hit === true || dynamicIds.includes('live_state_dynamic');
+  return {
+    schemaVersion: 'live_state_dynamic_diagnostic_v1',
+    mode: 'request_id',
+    hit,
+    exactPromptRebuilt: false,
+    evidence: {
+      foundPromptObservation: Boolean(observation),
+      foundModelCall: Boolean(modelCall),
+      foundTraceLiveStateEvent: Boolean(traceEvent),
+      sourceConfidence: stored.hit === true ? 'stored_observation' : (hit ? 'stored_block_id' : 'no_stored_hit')
+    },
+    generation: {
+      node: 'prepare',
+      builder: 'utils/liveState.buildLiveStateForState',
+      promptBlockFactory: 'api/runtimeV2/context/service-core.chunk.js#createLiveStatePromptBlock',
+      sourceConfidence: 'current_code_inference'
+    },
+    sources: summarizeLiveStateSources(stored.sourceDiagnostics),
+    lengths: {
+      beforeTrimChars: stored.lengths?.beforeTrimChars ?? null,
+      afterTrimChars: stored.lengths?.afterTrimChars ?? null,
+      beforeTrimTokens: stored.lengths?.beforeTrimTokens ?? null,
+      afterTrimTokens: stored.lengths?.afterTrimTokens ?? (Number.isFinite(Number(tokenUsage?.tokens)) ? Number(tokenUsage.tokens) : null),
+      tokenLimit: stored.lengths?.tokenLimit ?? LIVE_STATE_TOKEN_LIMIT,
+      truncated: stored.lengths?.truncated === true
+    },
+    finalTokenEstimate: stored.finalTokenEstimate ?? (Number.isFinite(Number(tokenUsage?.tokens)) ? Number(tokenUsage.tokens) : null),
+    finalRequestTokenEstimate: Number.isFinite(Number(modelTokens.estimated_input_tokens || modelTokens.estimatedInputTokens))
+      ? Number(modelTokens.estimated_input_tokens || modelTokens.estimatedInputTokens)
+      : null,
+    promptPosition: stored.promptPosition || {
+      index: dynamicIndex >= 0 ? dynamicIndex : null,
+      position: dynamicIndex >= 0 ? dynamicIndex + 1 : null,
+      totalBlocks: dynamicIds.length,
+      lane: 'dynamic_context',
+      orderSource: 'observation.prompt.dynamicBlockIds'
+    },
+    promptBlock: stored.block || dynamicBlocks.find((item) => normalizeText(item.id) === 'live_state_dynamic') || null,
+    selection: {
+      selected: hit,
+      reason: stored.hit === true ? 'stored_observation_liveStateDynamic' : (hit ? 'observed_dynamic_block_id' : 'not_observed'),
+      runtimeAdded: hit,
+      includedByPlanner: false
+    },
+    traceEvent: traceEvent ? {
+      recordedAt: rowTimestamp(traceEvent),
+      phaseSeq: Math.max(0, Number(traceEvent.phaseSeq || traceEvent.phase_seq || 0) || 0),
+      tracePhase: normalizeText(traceEvent.tracePhase),
+      stage: normalizeText(traceEvent.stage),
+      relationship: normalizeText(traceEvent.relationship),
+      tokens: Number.isFinite(Number(traceEvent.tokens)) ? Number(traceEvent.tokens) : null,
+      durationMs: Number.isFinite(Number(traceEvent.durationMs)) ? Number(traceEvent.durationMs) : null,
+      hasContext: traceEvent.hasContext === true
+    } : null,
+    blockOrderRule: 'Request-id mode reports stored observations. Full assembled order is available only when the prompt snapshot was recorded; otherwise dynamicBlockIds order is used.'
+  };
+}
+
 function summarizePlanner(snapshot = {}, traceRows = [], observation = {}) {
   const plan = normalizeObject(snapshot.dynamicPromptPlan || snapshot.plannerDynamicContextPlan || observation.planner, {});
   const source = normalizeText(plan.source || plan._source || observation.planner?.dynamicPromptPlanSource);
@@ -458,6 +711,43 @@ function summarizeRuntimeLocalInjection(snapshot = {}) {
   };
 }
 
+function normalizeDateOption(value = null) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  const text = normalizeText(value);
+  if (!text) return null;
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+async function buildDiagnosticLiveState(input = {}, context = {}, routeMeta = {}, options = {}) {
+  if (String(input.customPrompt || options.customPrompt || '').trim()) {
+    return { skipped: true, reason: 'custom_prompt', context: '' };
+  }
+  const now = normalizeDateOption(input.now || input.currentTime || options.now || options.currentTime);
+  const allowedTools = normalizeArray(input.allowedTools || routeMeta.allowedTools || options.allowedTools);
+  return buildLiveStateForState({
+    request: {
+      userId: context.userId || normalizeText(input.userId, 'diagnose_user'),
+      question: context.requestText,
+      runtimeQuestionText: context.requestText,
+      routePolicyKey: normalizeText(input.routePolicyKey, 'chat/default'),
+      topRouteType: normalizeText(input.topRouteType, 'direct_chat'),
+      routeMeta,
+      allowedTools
+    },
+    messages: context.requestText ? [{ role: 'user', content: context.requestText }] : [],
+    memory: normalizeObject(input.memory, {})
+  }, {
+    ...options,
+    memoryV3: input.memoryV3 || options.memoryV3,
+    dailyJournal: input.dailyJournal || options.dailyJournal,
+    timeoutMs: input.liveStateTimeoutMs || options.liveStateTimeoutMs || input.timeoutMs || options.timeoutMs,
+    ...(now ? { now } : {}),
+    timezone: normalizeText(input.timezone || options.timezone),
+    readOnly: true
+  });
+}
+
 async function buildFromTestInput(rawInput = {}, options = {}) {
   const input = parseMainReplyDiagnosticInput(rawInput);
   const context = normalizeDiagnosticContext(input);
@@ -468,6 +758,21 @@ async function buildFromTestInput(rawInput = {}, options = {}) {
     groupId: context.groupId || routeMeta.groupId || routeMeta.group_id,
     chatType: context.chatType || routeMeta.chatType || routeMeta.chat_type
   };
+  const liveStateBuild = await buildDiagnosticLiveState(input, context, effectiveRouteMeta, options);
+  const liveStateContext = normalizeText(input.liveStateContext || options.liveStateContext || liveStateBuild.context);
+  const liveStateMeta = liveStateContext
+    ? {
+        relationship: liveStateBuild.relationship?.level || 'stranger',
+        rawTokens: Number(liveStateBuild.rawTokens || 0) || 0,
+        tokens: Number(liveStateBuild.tokens || estimateTokens(liveStateContext)) || 0,
+        tokenLimit: Number(liveStateBuild.tokenLimit || LIVE_STATE_TOKEN_LIMIT) || LIVE_STATE_TOKEN_LIMIT,
+        rawChars: String(liveStateBuild.rawContext || liveStateContext).length,
+        finalChars: liveStateContext.length,
+        durationMs: Number(liveStateBuild.durationMs || 0) || 0,
+        truncated: Boolean(liveStateBuild.truncated),
+        sourceDiagnostics: normalizeObject(liveStateBuild.sourceDiagnostics, {})
+      }
+    : {};
   const explicitDynamicPromptPlan = input.dynamicPromptPlan && typeof input.dynamicPromptPlan === 'object' && !Array.isArray(input.dynamicPromptPlan)
     && Object.keys(input.dynamicPromptPlan).length > 0
     ? input.dynamicPromptPlan
@@ -477,6 +782,14 @@ async function buildFromTestInput(rawInput = {}, options = {}) {
     topRouteType: normalizeText(input.topRouteType, 'direct_chat'),
     sessionKey: normalizeText(input.sessionKey, 'diagnose-main-reply-prompt-assembly'),
     routeMeta: effectiveRouteMeta,
+    liveStateContext,
+    liveStateMeta,
+    request: {
+      userId: context.userId || normalizeText(input.userId, 'diagnose_user'),
+      routeMeta: effectiveRouteMeta,
+      liveStateContext,
+      liveStateMeta
+    },
     continuitySignals: normalizeObject(input.continuitySignals, {}),
     memoryContext: normalizeObject(input.memoryContext, { segments: {} }),
     mainReplyPromptMode: normalizeText(input.mainReplyPromptMode || input.promptMode),
@@ -542,6 +855,7 @@ async function buildFromTestInput(rawInput = {}, options = {}) {
     personaModules: summarizePersona(snapshot, catalogById),
     personaWorldbook: summarizeWorldbook(snapshot, catalogById),
     runtimeLocalInjection: summarizeRuntimeLocalInjection(snapshot),
+    liveStateDynamic: buildLiveStateDynamicReportFromSnapshot(snapshot, liveStateBuild, { mode: 'test_input' }),
     budgetReport: normalizeObject(snapshot.budgetReport, null),
     cacheMeta: normalizeObject(result.cacheMeta, {}),
     freshness: normalizeObject(result.freshness, {}),
@@ -591,7 +905,8 @@ function summarizeObservation(row = {}) {
       assistantOnlyBlockIds: uniqueTexts(prompt.assistantOnlyBlockIds || prompt.assistant_only_block_ids),
       assembledBlockCount: Math.max(0, Number(prompt.assembledBlockCount || prompt.assembled_block_count || 0) || 0),
       tokenUsageByBlock: normalizeArray(prompt.tokenUsageByBlock),
-      trimDecisions: normalizeArray(prompt.trimDecisions)
+      trimDecisions: normalizeArray(prompt.trimDecisions),
+      liveStateDynamic: normalizeObject(prompt.liveStateDynamic, null)
     },
     planner: {
       source: normalizeText(planner.dynamicPromptPlanSource || planner.source || planner._source),
@@ -665,6 +980,12 @@ function buildFromRequestId(requestId = '', options = {}) {
       })),
     evidenceNote: 'Request-id mode reports stored block observations only. When planner.provided=false, observed persona_module blocks indicate local runtime/persona selection entered the final prompt despite planner bypass/fallback.'
   };
+  const liveStateDynamic = summarizeObservedLiveStateFromRequest(
+    observation || {},
+    modelCall || {},
+    traceRows,
+    observedSourceIndex
+  );
   return {
     schemaVersion: SCHEMA_VERSION,
     checkedAt: new Date().toISOString(),
@@ -675,6 +996,7 @@ function buildFromRequestId(requestId = '', options = {}) {
     summary: {
       foundModelCall: Boolean(modelCall),
       foundPromptObservation: Boolean(observation),
+      liveStateDynamicHit: liveStateDynamic.hit,
       traceEvents: traceRows.length,
       plannerProvided: planner.provided,
       plannerSource: planner.source,
@@ -723,6 +1045,8 @@ function buildFromRequestId(requestId = '', options = {}) {
       requestIdModeNote: 'Request-id mode reports stored evidence only; run test-input mode to rebuild current assembled block source details.'
     },
     runtimeLocalInjection: observedRuntimeLocalInjection
+    ,
+    liveStateDynamic
   };
 }
 

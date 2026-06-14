@@ -410,6 +410,63 @@ function summarizeShortTermContinuityPrompt(promptSnapshot = {}) {
   };
 }
 
+function promptBlockPosition(promptSnapshot = {}, blockId = '') {
+  const target = normalizeText(blockId);
+  const blocks = normalizeArray(normalizeObject(promptSnapshot, {}).assembledBlocks);
+  const index = blocks.findIndex((block) => normalizeText(block?.id) === target || normalizeText(block?.meta?.blockId) === target);
+  if (index < 0) return null;
+  const block = blocks[index] || {};
+  const lane = normalizeText(block.lane, 'dynamic_context');
+  const laneBlocks = blocks.filter((item) => normalizeText(item?.lane, 'dynamic_context') === lane);
+  const laneIndex = laneBlocks.findIndex((item) => normalizeText(item?.id) === target || normalizeText(item?.meta?.blockId) === target);
+  return {
+    index,
+    position: index + 1,
+    totalBlocks: blocks.length,
+    lane,
+    laneIndex,
+    lanePosition: laneIndex >= 0 ? laneIndex + 1 : null,
+    laneTotal: laneBlocks.length,
+    previousBlockId: index > 0 ? normalizeText(blocks[index - 1]?.id) : '',
+    nextBlockId: index < blocks.length - 1 ? normalizeText(blocks[index + 1]?.id) : '',
+    orderSource: 'promptSnapshot.assembledBlocks'
+  };
+}
+
+function summarizeLiveStateDynamicPrompt(promptSnapshot = {}) {
+  const block = findBlockById(promptSnapshot, 'live_state_dynamic');
+  const meta = normalizeObject(block?.meta?.liveState, {});
+  const tokenUsage = tokenUsageForBlock(promptSnapshot, 'live_state_dynamic');
+  return {
+    hit: Boolean(block),
+    block: block
+      ? {
+          id: normalizeText(block.id),
+          label: normalizeText(block.label),
+          lane: normalizeText(block.lane),
+          priority: Number.isFinite(Number(block.priority)) ? Number(block.priority) : null,
+          authority: normalizeText(block.authority),
+          kind: normalizeText(block.kind),
+          source: normalizeText(block.source),
+          budgetTokens: Number.isFinite(Number(block.budgetTokens)) ? Math.max(0, Number(block.budgetTokens)) : null
+        }
+      : null,
+    sourceDiagnostics: normalizeObject(meta.sourceDiagnostics, {}),
+    lengths: {
+      beforeTrimChars: Number.isFinite(Number(meta.rawChars)) ? Math.max(0, Number(meta.rawChars)) : null,
+      afterTrimChars: block ? normalizeText(block.content).length : null,
+      beforeTrimTokens: Number.isFinite(Number(meta.rawTokens)) ? Math.max(0, Number(meta.rawTokens)) : null,
+      afterTrimTokens: tokenUsage || (Number.isFinite(Number(meta.tokens)) ? Math.max(0, Number(meta.tokens)) : null),
+      tokenLimit: Number.isFinite(Number(meta.tokenLimit || block?.budgetTokens)) ? Math.max(0, Number(meta.tokenLimit || block?.budgetTokens)) : null,
+      truncated: meta.truncated === true
+    },
+    finalTokenEstimate: tokenUsage || (Number.isFinite(Number(meta.tokens)) ? Math.max(0, Number(meta.tokens)) : null),
+    relationship: normalizeText(meta.relationship),
+    durationMs: Number.isFinite(Number(meta.durationMs)) ? Math.max(0, Number(meta.durationMs)) : null,
+    promptPosition: promptBlockPosition(promptSnapshot, 'live_state_dynamic')
+  };
+}
+
 function findPlannerDecisionForBlock(plan = {}, blockId = '') {
   const target = normalizeText(blockId);
   if (!target) return null;
@@ -470,7 +527,8 @@ function recordMainPromptBlockObservation(input = {}) {
       hasContinuityState: allBlockIds.includes('continuity_state') || allBlockIds.includes('session_continuity'),
       tokenUsageByBlock: summarizeTokenUsage(promptSnapshot),
       trimDecisions: summarizeTrimDecisions(promptSnapshot),
-      shortTermContinuity: summarizeShortTermContinuityPrompt(promptSnapshot)
+      shortTermContinuity: summarizeShortTermContinuityPrompt(promptSnapshot),
+      liveStateDynamic: summarizeLiveStateDynamicPrompt(promptSnapshot)
     },
     planner: {
       dynamicPromptPlanSource: normalizeText(dynamicPromptPlan.source || dynamicPromptPlan._source),
@@ -524,6 +582,7 @@ module.exports = {
   recordMemosPlannerRecallObservation,
   resolveObservabilityLogFile,
   stableHash,
+  summarizeLiveStateDynamicPrompt,
   summarizeMemosRecall,
   summarizeOpenVikingRecall,
   summarizeRecallItems,
