@@ -201,6 +201,7 @@
     const preprocessed = await continuousMessagePreprocessor.handleMessage(msg, {
       actionClient: globalNapCatActionClient,
       effectiveBotQQ,
+      isAdminUser: isAdminUser(senderId),
       freshnessSessionKey: rawInboundFreshnessSessionKey,
       freshnessVersion: rawInboundFreshnessVersion
     });

@@ -1,4 +1,5 @@
 const config = require('../../config');
+const { parseAdminCommand } = require('../router/adminCommands');
 const {
   getMessageByIdCached,
   getForwardMessagesByIdCached
@@ -645,6 +646,14 @@ async function resolveContinuousEntryDetails(entry = {}, options = {}) {
   return entry;
 }
 
+const FAST_ADMIN_DIAGNOSTIC_COMMANDS = new Set(['check']);
+
+function isFastAdminDiagnosticCommand(cleanText = '', options = {}) {
+  if (options.isAdminUser !== true) return false;
+  const command = parseAdminCommand(cleanText);
+  return command && FAST_ADMIN_DIAGNOSTIC_COMMANDS.has(String(command.cmd || '').trim().toLowerCase());
+}
+
 function isCommandBypass(msg = {}, options = {}) {
   const rawText = String(msg?.raw_message || '');
   const botQQ = normalizeText(options.effectiveBotQQ);
@@ -655,6 +664,7 @@ function isCommandBypass(msg = {}, options = {}) {
     .trim();
 
   if (!clean) return false;
+  if (isFastAdminDiagnosticCommand(clean, options)) return true;
   if (/^\s*\/(?:meme|dailyshare|life)(?:\s|$)/i.test(clean)) return true;
   if (/^(任务状态|取消任务|结束任务|任务补充|任务继续)\b/i.test(clean)) return true;
   return false;
@@ -812,7 +822,10 @@ function createContinuousMessagePreprocessor(options = {}) {
     });
     entry.freshnessSessionKey = freshnessSessionKey;
     entry.freshnessVersion = freshnessVersion;
-    const bypass = isCommandBypass(msg, { effectiveBotQQ });
+    const bypass = isCommandBypass(msg, {
+      effectiveBotQQ,
+      isAdminUser: context.isAdminUser === true
+    });
 
     if (bypass && sessions.has(sessionKey)) {
       console.log('[continuous-message] command bypass flush', {
@@ -1047,6 +1060,7 @@ module.exports = {
   extractUrlsFromRawJsonSegments,
   identifyCardPlatform,
   isCommandBypass,
+  isFastAdminDiagnosticCommand,
   normalizeMessageForDownstream,
   parseMessageEntry,
   resolveContinuousEntryDetails,

@@ -1,3 +1,11 @@
+## 运行维护 2026-06-14 19:33
+
+- 小目标：让管理员 `/check` 这类管理诊断快命令绕过连续消息预处理/聚合，尽量直达 admin route。
+- 真实链路：`req_c70940dbe4a09036` 在 `handle_incoming_start -> continuous_preprocess_done` 已耗 57.9s，`continuous_preprocess_done.flushReason=debounce`；之后 `message_ingress_lock_acquired.queueWaitMs=0`、`inbound_wait_ms=0`，router 0ms 命中 `admin/check`。结论：旧修复只绕过 per-user 入站锁，当前卡点在更前面的连续消息聚合。
+- 最小修复：`continuousMessagePreprocessor` 复用 `parseAdminCommand()` 做前置识别，只在 `context.isAdminUser=true` 且命令属于管理诊断快命令白名单（当前 `/check`）时走 `command_bypass`；message handler 把当前 sender 的管理员判断传入预处理。非管理员 `/check`、未知 slash 和普通消息不绕过。
+- 验证：`node --check core/continuousMessagePreprocessor/index.js`、`node --check tests/continuousMessagePreprocessor.test.js`、`node --check tests/messageHandlerAdminCheckConcurrency.test.js`、`node tests/continuousMessagePreprocessor.test.js`、`node tests/messageHandlerAdminCheckConcurrency.test.js`、`node tests/routerChineseKeywords.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。`core/messageHandler.runtime-03.chunk.js` 是 chunk 拼装片段，单独 `node --check` 不适用，已用完整 handler 加载验收。
+- 小目标已完成：管理员 `/check` 不再先等 12s-60s 连续性/聚合阶段，普通消息聚合保护条件保持不变。
+
 ## 运行维护 2026-06-14 15:08
 
 - 小目标：修掉 dispatch capability preflight 在已有 route `executionPlan` 时的第二轮远程 planner。
