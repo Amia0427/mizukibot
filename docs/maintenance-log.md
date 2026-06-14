@@ -5,6 +5,7 @@
 - 最小修复：连续消息 max-hold 过期后立即 flush，并记录 wait/resolve/timer overdue/schedule timing；流式发送记录 `getStats()`，`final_reply_send_done.durationMs` 改为真实流式发送 wall time，生成耗时写入 `generationDurationMs`；默认 `MODEL_TLS_IMPERSONATION_STREAM_ENABLED=false`，流式主回复回 axios，非流式 CycleTLS 保留。
 - 验证：`node scripts/run-tests.js continuousMessagePreprocessor.test.js messageReplyRuntimeFreshness.test.js messageRouteFlowGroupStreaming.test.js mainReplyLagDiagnostics.test.js modelHttpCycleTlsFallback.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"`、`npm run diag:main-reply-lag -- --since=24h --no-provider-diagnostic` 通过；配置探针输出 `configStream=false/statusStream=false/tls=true`。
 - 小目标已完成：今天 1/2 凝滞点已有可复跑证据、诊断字段和默认避让策略。
+- 提交后记录 2026-06-14 23:02 +08:00：已提交 `af1cf0c`（`fix: isolate streaming reply latency blockers`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-14 19:47
 
