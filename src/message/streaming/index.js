@@ -53,7 +53,12 @@ function createStreamingDispatcher({
     sentSegments: 0,
     hasSentAny: false,
     lastSendAt: 0,
-    sendQueue: Promise.resolve()
+    sendQueue: Promise.resolve(),
+    sendStartedAt: 0,
+    sendFinishedAt: 0,
+    totalSendDurationMs: 0,
+    totalGapWaitMs: 0,
+    failedChunks: 0
   };
 
   function emitStreamingTelemetry(type = '', payload = {}) {
@@ -91,7 +96,9 @@ function createStreamingDispatcher({
         : getStreamSendGapMs(effectiveConfig);
       const elapsed = now - state.lastSendAt;
       if (state.lastSendAt > 0 && elapsed < minGap) {
-        await new Promise((r) => setTimeout(r, minGap - elapsed));
+        const gapWaitMs = minGap - elapsed;
+        state.totalGapWaitMs += gapWaitMs;
+        await new Promise((r) => setTimeout(r, gapWaitMs));
       }
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
@@ -108,6 +115,7 @@ function createStreamingDispatcher({
             }
           };
       const startedAt = Date.now();
+      if (!state.sendStartedAt) state.sendStartedAt = startedAt;
       emitStreamingTelemetry('reply_stream_chunk_start', {
         node: 'reply_stream_send',
         channel: isPrivate ? 'private' : 'group',
@@ -120,6 +128,7 @@ function createStreamingDispatcher({
       const sent = await sendWithRetry(payload, 1, 300);
 
       if (!sent) {
+        state.failedChunks += 1;
         emitStreamingTelemetry('reply_stream_chunk_failure', {
           node: 'reply_stream_send',
           channel: isPrivate ? 'private' : 'group',
@@ -151,6 +160,8 @@ function createStreamingDispatcher({
       });
       state.hasSentAny = true;
       state.lastSendAt = Date.now();
+      state.sendFinishedAt = state.lastSendAt;
+      state.totalSendDurationMs += Math.max(0, state.lastSendAt - startedAt);
       return true;
     };
 
@@ -215,6 +226,19 @@ function createStreamingDispatcher({
         state.sentLength = state.fullText.length;
         state.sentSegments = Math.max(1, state.sentSegments);
       }
+    },
+    getStats() {
+      const wallMs = state.sendStartedAt && state.sendFinishedAt
+        ? Math.max(0, state.sendFinishedAt - state.sendStartedAt)
+        : 0;
+      return {
+        sentSegments: state.sentSegments,
+        hasSentAny: state.hasSentAny,
+        failedChunks: state.failedChunks,
+        totalSendDurationMs: Math.max(0, state.totalSendDurationMs),
+        totalGapWaitMs: Math.max(0, state.totalGapWaitMs),
+        wallMs
+      };
     }
   };
 }

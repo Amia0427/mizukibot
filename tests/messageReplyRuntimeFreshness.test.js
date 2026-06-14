@@ -91,7 +91,12 @@ module.exports = (async () => {
   });
   await groupDispatcher.onDelta('', mediumGroupReply);
   await groupDispatcher.finish(mediumGroupReply);
+  const groupStreamStats = groupDispatcher.getStats();
   assert.strictEqual(groupStreamPayloads.length, 2);
+  assert.strictEqual(groupStreamStats.sentSegments, 2);
+  assert.strictEqual(groupStreamStats.hasSentAny, true);
+  assert.ok(groupStreamStats.totalSendDurationMs >= 0);
+  assert.ok(groupStreamStats.wallMs >= 0);
   assert.strictEqual(groupStreamPayloads[0].action, 'send_group_msg');
   assert.strictEqual(groupStreamPayloads[0].params.message, '[CQ:at,qq=user_stream] 我感觉先别急着背完整番种表，那个很容易越背越乱。');
   assert.strictEqual(groupStreamPayloads[1].params.message, '先把役、振听和立直这三个坑搞懂，再去雀魂低段打一局，遇到无役就看系统提示；这比一上来背全表舒服很多。');
@@ -137,6 +142,7 @@ module.exports = (async () => {
   });
   await srcDispatcher.onDelta('', mediumGroupReply);
   await srcDispatcher.finish(mediumGroupReply);
+  assert.strictEqual(srcDispatcher.getStats().sentSegments, 2);
   assert.deepStrictEqual(srcGroupPayloads.map((payload) => payload.params.message), [
     '[CQ:at,qq=src_user_stream] 我感觉先别急着背完整番种表，那个很容易越背越乱。',
     '先把役、振听和立直这三个坑搞懂，再去雀魂低段打一局，遇到无役就看系统提示；这比一上来背全表舒服很多。'

@@ -14,7 +14,7 @@ function isEnabled() {
 }
 
 function isStreamEnabled() {
-  return isEnabled() && config.MODEL_TLS_IMPERSONATION_STREAM_ENABLED !== false;
+  return isEnabled() && config.MODEL_TLS_IMPERSONATION_STREAM_ENABLED === true;
 }
 
 function shouldFallbackToAxios() {

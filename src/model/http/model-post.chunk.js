@@ -55,7 +55,7 @@ async function postModelHttp(url, body, axiosOptions = {}) {
 function getModelHttpTransportStatus() {
   return {
     tlsImpersonationEnabled: config.MODEL_TLS_IMPERSONATION_ENABLED === true,
-    tlsImpersonationStreamEnabled: config.MODEL_TLS_IMPERSONATION_STREAM_ENABLED !== false,
+    tlsImpersonationStreamEnabled: config.MODEL_TLS_IMPERSONATION_STREAM_ENABLED === true,
     tlsImpersonationFallbackEnabled: config.MODEL_TLS_IMPERSONATION_FALLBACK_ENABLED !== false,
     tlsImpersonationClient: String(config.MODEL_TLS_IMPERSONATION_CLIENT || '').trim() || 'chrome'
   };

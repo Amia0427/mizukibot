@@ -692,7 +692,15 @@ function createMessageRouteFlow(deps = {}) {
         persistedReplyText = String(replyOptions?.persistedReplyText || reply || '').trim();
         if (replyOptions.streamCompleted && replyOptions.streamHadOutput) {
           usedStreamingSend = true;
+          const streamFinishStartedAt = Date.now();
           await streamingDispatcher.finish(reply);
+          const streamStats = typeof streamingDispatcher.getStats === 'function'
+            ? streamingDispatcher.getStats()
+            : {};
+          replyOptions.streamSendStats = {
+            ...(streamStats && typeof streamStats === 'object' ? streamStats : {}),
+            finishDurationMs: Math.max(0, Date.now() - streamFinishStartedAt)
+          };
         }
       }
     } catch (dispatchErr) {
