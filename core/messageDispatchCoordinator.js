@@ -192,13 +192,42 @@ function createMessageDispatchCoordinator(deps = {}) {
             ? `已生成 QQ 空间草稿，未发布。\n\n内容：\n${draftResult.content}`
             : `这次没能生成可发布的 QQ 空间草稿。\n\n原因：${draftResult?.reason || draftResult?.text || '未知错误'}`;
         } else {
-          await markThinkingEmojiBeforeLlm({
+          const toolThinkingEmojiStartedAt = Date.now();
+          const toolThinkingEmojiApplied = await markThinkingEmojiBeforeLlm({
             messageId: sourceMessageId,
             routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
             routeMeta: route.meta || {},
             actionClient
           });
+          inboundContext?.onEvent?.({
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            ts: Date.now(),
+            type: 'thinking_emoji_done',
+            node: 'pre_model',
+            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+            topRouteType: String(routeExecutionPlan?.topRouteType || '').trim(),
+            applied: Boolean(toolThinkingEmojiApplied),
+            durationMs: Math.max(0, Date.now() - toolThinkingEmojiStartedAt)
+          });
+          const toolTaskStartedAt = Date.now();
+          inboundContext?.onEvent?.({
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            ts: Date.now(),
+            type: 'tool_task_local_start',
+            node: 'pre_model',
+            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+            topRouteType: String(routeExecutionPlan?.topRouteType || '').trim()
+          });
           reply = await askToolTaskLocally(cleanText, userInfo, senderId, null, imageUrl, toolTaskOptions);
+          inboundContext?.onEvent?.({
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            ts: Date.now(),
+            type: 'tool_task_local_done',
+            node: 'pre_model',
+            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+            topRouteType: String(routeExecutionPlan?.topRouteType || '').trim(),
+            durationMs: Math.max(0, Date.now() - toolTaskStartedAt)
+          });
         }
         console.log('[dispatch] tool route completed', buildRoutePlanLogPayload(routeExecutionPlan, {
           groupId,

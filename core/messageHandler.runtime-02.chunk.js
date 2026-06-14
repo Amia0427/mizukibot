@@ -52,7 +52,8 @@
 
     const result = await setMessageEmojiLike(normalizedMessageId, emojiIds, {
       set: true,
-      actionClient
+      actionClient,
+      timeoutMs: config.QQ_THINKING_EMOJI_TIMEOUT_MS
     }).catch((error) => ({
       success: false,
       reason: error?.message || String(error || 'unknown error'),

@@ -143,6 +143,15 @@ function duration(event = null) {
   return Number.isFinite(n) ? n : null;
 }
 
+function isMainReplyHttpSource(source = '') {
+  return new Set([
+    'v2_streaming_reply',
+    'direct_reply',
+    'draft_reply',
+    'normal_fast_reply'
+  ]).has(normalizeText(source));
+}
+
 function deltaBetween(left = null, right = null) {
   const leftMs = eventMs(left || {});
   const rightMs = eventMs(right || {});
@@ -171,11 +180,14 @@ function summarizePreModelEvents(events = []) {
   }) || null;
   const askAiStart = events.find((event) => normalizeText(event.tracePhase || event.stage) === 'ask_ai_dispatch_start') || null;
   const askAiDone = events.find((event) => normalizeText(event.tracePhase || event.stage) === 'ask_ai_dispatch_done') || null;
+  const toolTaskStart = events.find((event) => normalizeText(event.tracePhase || event.stage) === 'tool_task_local_start') || null;
+  const toolTaskDone = events.find((event) => normalizeText(event.tracePhase || event.stage) === 'tool_task_local_done') || null;
   return {
     thinkingEmojiStage: normalizeText(thinkingEmoji?.tracePhase || thinkingEmoji?.stage),
     thinkingEmojiReason: normalizeText(thinkingEmoji?.reason),
     thinkingEmojiDurationMs: duration(thinkingEmoji),
-    askAiDispatchMs: duration(askAiDone) ?? deltaBetween(askAiStart, askAiDone)
+    askAiDispatchMs: duration(askAiDone) ?? deltaBetween(askAiStart, askAiDone),
+    toolTaskLocalMs: duration(toolTaskDone) ?? deltaBetween(toolTaskStart, toolTaskDone)
   };
 }
 
@@ -211,9 +223,10 @@ function summarizeRequest(events = [], options = {}) {
     return phase === 'thinking_emoji_done' || phase === 'thinking_emoji_skipped';
   });
   const askAiStart = firstBy(sorted, (event) => normalizeText(event.tracePhase || event.stage) === 'ask_ai_dispatch_start');
-  const preModelDone = askAiStart || thinkingEmoji || routeNodeDone || prepareDone;
-  const upstreamStart = firstBy(sorted, (event) => normalizeText(event.tracePhase) === 'http_client_start' && normalizeText(event.source) === 'v2_streaming_reply');
-  const upstreamSuccess = firstBy(sorted, (event) => normalizeText(event.tracePhase) === 'http_client_success' && normalizeText(event.source) === 'v2_streaming_reply');
+  const toolTaskStart = firstBy(sorted, (event) => normalizeText(event.tracePhase || event.stage) === 'tool_task_local_start');
+  const preModelDone = askAiStart || toolTaskStart || thinkingEmoji || routeNodeDone || prepareDone;
+  const upstreamStart = firstBy(sorted, (event) => normalizeText(event.tracePhase) === 'http_client_start' && isMainReplyHttpSource(event.source));
+  const upstreamSuccess = firstBy(sorted, (event) => normalizeText(event.tracePhase) === 'http_client_success' && isMainReplyHttpSource(event.source));
   const requestComplete = firstEvent(sorted.slice().reverse(), ['request_complete']);
   const finalSend = firstEvent(sorted.slice().reverse(), ['final_reply_send_done']);
   const segments = {
@@ -222,6 +235,8 @@ function summarizeRequest(events = [], options = {}) {
     routeEntryToRouterStartMs: deltaBetween(routeEntry, routerStart),
     plannerMs: duration(plannerDone) ?? deltaBetween(plannerStart, plannerDone),
     dispatchToPrepareMs: deltaBetween(dispatchSelected || dispatchStart, prepareStart),
+    thinkingEmojiToToolTaskMs: deltaBetween(thinkingEmoji, toolTaskStart),
+    toolTaskStartToPrepareMs: deltaBetween(toolTaskStart, prepareStart),
     prepareMs: deltaBetween(prepareStart, prepareDone),
     routeNodeMs: deltaBetween(routeNodeStart, routeNodeDone),
     prepareAndRouteToUpstreamMs: deltaBetween(prepareStart, upstreamStart),
@@ -307,6 +322,7 @@ function buildRequestTracePreflightDiagnostic(options = {}) {
 }
 
 function formatMs(value) {
+  if (value === null || value === undefined || value === '') return 'n/a';
   const n = Number(value);
   return Number.isFinite(n) ? `${Math.round(n)}ms` : 'n/a';
 }
@@ -339,6 +355,9 @@ function formatRequestTracePreflightDiagnostic(report = {}) {
       `emojiMs=${formatMs(request.preModel?.thinkingEmojiDurationMs)}`,
       `emojiReason=${request.preModel?.thinkingEmojiReason || 'none'}`,
       `askAiDispatch=${formatMs(request.preModel?.askAiDispatchMs)}`,
+      `toolTaskLocal=${formatMs(request.preModel?.toolTaskLocalMs)}`,
+      `emojiToToolTask=${formatMs(request.segments.thinkingEmojiToToolTaskMs)}`,
+      `toolStartToPrepare=${formatMs(request.segments.toolTaskStartToPrepareMs)}`,
       `lastPreModelToUpstream=${formatMs(request.segments.preModelToUpstreamMs)}`
     ].join(' '));
     lines.push([

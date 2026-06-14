@@ -266,8 +266,16 @@ module.exports = (async () => {
   assert.strictEqual(cotCase.replyOptionsSeen[0].cotDisplayOnce, true, 'cot reply should propagate the one-shot display flag');
 
   const toolCase = createBaseDeps();
+  const toolEvents = [];
   const toolEnvelope = await toolCase.routeFlow.dispatchByRoutePlan({
     ...buildRouteDecision('group'),
+    inboundContext: {
+      chatType: 'group',
+      messageMeta: { messageId: 'm_tool' },
+      onEvent(event) {
+        toolEvents.push(event);
+      }
+    },
     executionPlan: {
       executor: 'direct',
       allowTools: true,
@@ -280,6 +288,9 @@ module.exports = (async () => {
   assert.strictEqual(toolEnvelope.replyText, 'tool reply');
   assert.strictEqual(toolCase.toolOptionsSeen.length, 1);
   assert.strictEqual(toolCase.toolOptionsSeen[0].deferPersist, false, 'tool routes must persist inline because no outer deferred persist callback sees their graph checkpoint');
+  assert.ok(toolEvents.some((event) => event.type === 'thinking_emoji_done'), 'tool route should trace thinking emoji pre-model wait');
+  assert.ok(toolEvents.some((event) => event.type === 'tool_task_local_start'), 'tool route should trace local graph start');
+  assert.ok(toolEvents.some((event) => event.type === 'tool_task_local_done'), 'tool route should trace local graph completion');
 
   const backgroundCallsSeen = [];
   const backgroundCase = createBaseDeps({
