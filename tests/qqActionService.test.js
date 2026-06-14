@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const assert = require('assert');
+const axios = require('axios');
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-qqaction-'));
 process.env.DATA_DIR = tempRoot;
@@ -15,6 +16,7 @@ const {
   sendGroupImageMessage,
   setMessageEmojiLike
 } = require('../api/qqActionService');
+const { createNapCatHttpActionClient } = require('../api/napcatHttpActionClient');
 const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
 
 (async () => {
@@ -110,6 +112,40 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
   assert.strictEqual(emojiResult.reason, 'napcat_offline');
   assert.strictEqual(emojiResult.skipped, true);
   assert.strictEqual(emojiCalls.length, 0, 'offline thinking emoji should not call NapCat');
+
+  const timedEmojiCalls = [];
+  const timedEmojiResult = await setMessageEmojiLike('m2', [355], {
+    timeoutMs: 2345,
+    actionClient: {
+      isConnected: () => true,
+      async callAction(action, params, options) {
+        timedEmojiCalls.push({ action, params, options });
+      }
+    }
+  });
+  assert.strictEqual(timedEmojiResult.success, true);
+  assert.strictEqual(timedEmojiCalls.length, 1);
+  assert.strictEqual(timedEmojiCalls[0].action, 'set_msg_emoji_like');
+  assert.strictEqual(timedEmojiCalls[0].options.timeoutMs, 2345);
+
+  const originalAxiosPost = axios.post;
+  const httpActionCalls = [];
+  try {
+    axios.post = async (url, body, options) => {
+      httpActionCalls.push({ url, body, options });
+      return { data: { status: 'ok', retcode: 0, data: { ok: true } } };
+    };
+    const httpActionClient = createNapCatHttpActionClient();
+    await httpActionClient.callAction('set_msg_emoji_like', {
+      message_id: 'm3',
+      emoji_id: 355,
+      set: true
+    }, { timeoutMs: 2345 });
+  } finally {
+    axios.post = originalAxiosPost;
+  }
+  assert.strictEqual(httpActionCalls.length, 1);
+  assert.strictEqual(httpActionCalls[0].options.timeout, 2345);
 
   console.log('qqActionService.test.js passed');
 })().catch((error) => {

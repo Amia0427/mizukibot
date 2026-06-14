@@ -21,6 +21,7 @@ module.exports = (async () => {
   const aiReplyOptionsSeen = [];
   const injectedActionClient = { marker: 'injected-action-client' };
   const thinkingEmojiOptionsSeen = [];
+  const coordinatorEvents = [];
 
   const coordinator = createMessageDispatchCoordinator({
     config: {
@@ -87,11 +88,19 @@ module.exports = (async () => {
     imageUrl: null,
     userInfo: {},
     senderId: 'u1',
-    groupId: 'g1'
+    groupId: 'g1',
+    inboundContext: {
+      onEvent(event) {
+        coordinatorEvents.push(event);
+      }
+    }
   });
   assert.strictEqual(tool.reply, 'tool reply');
   assert.strictEqual(toolCalled, true);
   assert.strictEqual(thinkingEmojiOptionsSeen.at(-1).actionClient, injectedActionClient);
+  assert.ok(coordinatorEvents.some((event) => event.type === 'thinking_emoji_done'));
+  assert.ok(coordinatorEvents.some((event) => event.type === 'tool_task_local_start'));
+  assert.ok(coordinatorEvents.some((event) => event.type === 'tool_task_local_done'));
 
   const chat = await coordinator.dispatchByRoutePlan({
     route: {

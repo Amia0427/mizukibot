@@ -127,6 +127,76 @@ module.exports = (() => {
   assert.ok(formatRequestTracePreflightDiagnostic(report).includes('dominant=planner:16000ms'));
   assert.ok(formatRequestTracePreflightDiagnostic(report).includes('routeDoneToUpstream=480ms'));
   assert.ok(formatRequestTracePreflightDiagnostic(report).includes('thinkingEmoji=thinking_emoji_skipped'));
+  assert.ok(formatRequestTracePreflightDiagnostic(report).includes('toolStartToPrepare=n/a'));
+
+  const toolRequestId = 'req_diag_tool_plan';
+  const toolRows = [
+    ev(toolRequestId, 1, 'message_ingress', 0, {
+      stage: 'handle_incoming_start',
+      messageId: 'm2',
+      userId: 'u2',
+      chatType: 'private'
+    }),
+    ev(toolRequestId, 2, 'runtime_dispatch_start', 10, { stage: 'formal_route_dispatch_start' }),
+    ev(toolRequestId, 3, 'dispatch_branch_selected', 20, {
+      stage: 'dispatch_branch_selected',
+      source: 'route_dispatch',
+      routePolicyKey: 'lookup/notebook-answer',
+      dispatchBranch: 'tool_plan',
+      allowTools: true
+    }),
+    ev(toolRequestId, 4, 'thinking_emoji_done', 3020, {
+      stage: 'thinking_emoji_done',
+      node: 'pre_model',
+      durationMs: 3000
+    }),
+    ev(toolRequestId, 5, 'tool_task_local_start', 3025, {
+      stage: 'tool_task_local_start',
+      node: 'pre_model'
+    }),
+    ev(toolRequestId, 6, 'runtime_v2_node_start', 3030, {
+      stage: 'node_start',
+      node: 'prepare'
+    }),
+    ev(toolRequestId, 7, 'runtime_v2_node_complete', 3035, {
+      stage: 'node_complete',
+      node: 'prepare'
+    }),
+    ev(toolRequestId, 8, 'http_client_start', 3500, {
+      stage: 'http_client_start',
+      source: 'draft_reply'
+    }),
+    ev(toolRequestId, 9, 'http_client_success', 25500, {
+      stage: 'http_client_success',
+      source: 'draft_reply',
+      durationMs: 22000
+    }),
+    ev(toolRequestId, 10, 'tool_task_local_done', 26025, {
+      stage: 'tool_task_local_done',
+      node: 'pre_model',
+      durationMs: 23000
+    }),
+    ev(toolRequestId, 11, 'request_complete', 26200, {
+      stage: 'request_complete',
+      durationMs: 26200,
+      routePolicyKey: 'lookup/notebook-answer'
+    })
+  ];
+  const toolReport = buildRequestTracePreflightDiagnostic({
+    rows: toolRows,
+    requestIds: [toolRequestId],
+    slowMs: 1000
+  });
+  const toolRequest = toolReport.requests[0];
+  assert.strictEqual(toolRequest.segments.dispatchToPrepareMs, 3010);
+  assert.strictEqual(toolRequest.segments.thinkingEmojiToToolTaskMs, 5);
+  assert.strictEqual(toolRequest.segments.toolTaskStartToPrepareMs, 5);
+  assert.strictEqual(toolRequest.preModel.thinkingEmojiDurationMs, 3000);
+  assert.strictEqual(toolRequest.preModel.toolTaskLocalMs, 23000);
+  assert.strictEqual(toolRequest.segments.upstreamMs, 22000);
+  assert.ok(formatRequestTracePreflightDiagnostic(toolReport).includes('toolTaskLocal=23000ms'));
+  assert.ok(formatRequestTracePreflightDiagnostic(toolReport).includes('toolStartToPrepare=5ms'));
+  assert.ok(formatRequestTracePreflightDiagnostic(toolReport).includes('mainModel=22000ms'));
 
   const parsed = parseArgs(['node', 'script', '--request-id', 'a,b', '--window=2h', '--slow-ms=2500', '--json']);
   assert.deepStrictEqual(parsed.requestIds, ['a', 'b']);

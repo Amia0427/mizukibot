@@ -362,6 +362,8 @@
           'ask_ai_dispatch_done',
           'thinking_emoji_done',
           'thinking_emoji_skipped',
+          'tool_task_local_start',
+          'tool_task_local_done',
           'reply_stream_chunk_start',
           'reply_stream_chunk_success',
           'reply_stream_chunk_failure',

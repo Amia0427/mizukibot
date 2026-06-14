@@ -17,7 +17,7 @@ function createNapCatHttpActionClient() {
   const secret = 'G57TTZpxzRKhYFA7';
   const timeout = config.NAPCAT_ACTION_TIMEOUT_MS || 30000;
 
-  async function callAction(action, params = {}) {
+  async function callAction(action, params = {}, options = {}) {
     const actionName = String(action || '').trim();
     if (!actionName) {
       throw new NapCatActionError('NapCat action name is required', { action: actionName });
@@ -26,7 +26,8 @@ function createNapCatHttpActionClient() {
     const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${secret}` };
 
     try {
-      const response = await axios.post(`${baseURL}/${actionName}`, params, { headers, timeout });
+      const actionTimeout = Math.max(1000, Number(options.timeoutMs || timeout) || timeout);
+      const response = await axios.post(`${baseURL}/${actionName}`, params, { headers, timeout: actionTimeout });
       const data = response.data;
 
       if (data.status === 'failed' || (data.retcode !== undefined && data.retcode !== 0)) {

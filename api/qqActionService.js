@@ -568,6 +568,9 @@ async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) 
   const normalizedMessageId = normalizeMessageId(messageId);
   const normalizedEmojiIds = normalizeEmojiIdList(emojiIds);
   const set = options.set !== false;
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs))
+    ? Math.max(1000, Math.floor(Number(options.timeoutMs)))
+    : 0;
 
   if (!normalizedMessageId) {
     return { success: false, reason: 'message_id is required', appliedEmojiIds: [] };
@@ -603,7 +606,7 @@ async function setMessageEmojiLike(messageId = '', emojiIds = [], options = {}) 
         message_id: normalizedMessageId,
         emoji_id: emojiId,
         set
-      });
+      }, timeoutMs > 0 ? { timeoutMs } : {});
     } catch (error) {
       failures.push({
         emojiId,
