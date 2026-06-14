@@ -4,6 +4,7 @@ const { createDispatchNode } = require('../api/runtimeV2/nodes/dispatch');
 
 module.exports = (async () => {
   let preflightCalls = 0;
+  let lastPreflightContext = null;
   const runtimeEvents = [];
   const dispatchNode = createDispatchNode({
     normalizeObject(value, fallback = {}) {
@@ -69,8 +70,9 @@ module.exports = (async () => {
         attempt: 1
       }));
     },
-    async runCapabilityPreflight() {
+    async runCapabilityPreflight(_question, context = {}) {
       preflightCalls += 1;
+      lastPreflightContext = context;
       return {
         skipped: false,
         results: [],
@@ -139,9 +141,30 @@ module.exports = (async () => {
       question: '需要查资料',
       allowedTools: ['web_search'],
       allowTools: true,
-      routeMeta: {}
+      routeMeta: {
+        toolPlanner: {
+          executionPlan: {
+            mode: 'tool_plan',
+            steps: [
+              {
+                id: 'route_step_1',
+                action: 'web_search',
+                args: { query: 'hello' },
+                purpose: 'search'
+              }
+            ]
+          }
+        }
+      }
     },
     plan: {
+      planner: {
+        toolPlannerSingleAuthority: true,
+        validation: {
+          ok: true,
+          status: 'validated'
+        }
+      },
       steps: [
         {
           id: 'planner_step_2',
@@ -168,6 +191,22 @@ module.exports = (async () => {
   });
 
   assert.strictEqual(preflightCalls, 1, 'non chat_fast dispatch should still run preflight');
+  assert.deepStrictEqual(
+    lastPreflightContext.routePlannerExecutionPlan,
+    {
+      mode: 'tool_plan',
+      steps: [
+        {
+          id: 'route_step_1',
+          action: 'web_search',
+          args: { query: 'hello' },
+          purpose: 'search'
+        }
+      ]
+    },
+    'dispatch preflight should reuse route planner executionPlan context'
+  );
+  assert.strictEqual(lastPreflightContext.routePlannerValidation.ok, true);
   assert.strictEqual(runtimeEvents[0].type, 'node_start', 'dispatch node_start should be emitted before preflight waits');
   assert.strictEqual(runtimeEvents[1].type, 'dispatch_preflight_start');
   assert.strictEqual(runtimeEvents[2].type, 'dispatch_preflight_complete');

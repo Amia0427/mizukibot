@@ -82,6 +82,52 @@ function createDispatchNode(deps = {}) {
     : normalizeExecutionEnvelope;
   const config = deps.config || {};
 
+  const resolveReusableRoutePlannerContext = (request = {}, state = {}) => {
+    const plannerState = normalizeObject(state.plan?.planner, {});
+    if (plannerState.toolPlannerSingleAuthority !== true && plannerState.directChatPlannerSingleAuthority !== true) {
+      return {
+        routePlannerExecutionPlan: null,
+        routePlannerValidation: null
+      };
+    }
+
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const toolPlanner = normalizeObject(routeMeta.toolPlanner, null);
+    const directChatPlanner = normalizeObject(routeMeta.directChatPlanner, null);
+    const planner = toolPlanner?.executionPlan && typeof toolPlanner.executionPlan === 'object'
+      ? toolPlanner
+      : (directChatPlanner?.executionPlan && typeof directChatPlanner.executionPlan === 'object'
+        ? directChatPlanner
+        : (toolPlanner || directChatPlanner || null));
+    const routePlannerExecutionPlan = request.plannerExecutionPlan && typeof request.plannerExecutionPlan === 'object' && !Array.isArray(request.plannerExecutionPlan)
+      ? request.plannerExecutionPlan
+      : (planner?.executionPlan && typeof planner.executionPlan === 'object' && !Array.isArray(planner.executionPlan)
+        ? planner.executionPlan
+        : null);
+    const routePlannerValidation = normalizeObject(
+      plannerState.validation || routeMeta.plannerValidation || planner?.validation,
+      null
+    );
+
+    if (!routePlannerExecutionPlan || !Array.isArray(routePlannerExecutionPlan.steps)) {
+      return {
+        routePlannerExecutionPlan: null,
+        routePlannerValidation
+      };
+    }
+    if (routePlannerValidation && routePlannerValidation.ok === false) {
+      return {
+        routePlannerExecutionPlan: null,
+        routePlannerValidation
+      };
+    }
+
+    return {
+      routePlannerExecutionPlan,
+      routePlannerValidation
+    };
+  };
+
   return async function dispatchNode(state) {
     const request = normalizeObject(state.request, {});
     const dispatchStartedAt = Date.now();
@@ -210,6 +256,7 @@ function createDispatchNode(deps = {}) {
       }));
       appendRuntimeEvents(state, preflightEvents);
     }
+    const reusableRoutePlannerContext = resolveReusableRoutePlannerContext(request, state);
     const preflight = mustRunPreflight
       ? await runCapabilityPreflight(request.question || '', {
         question: String(request.question || '').trim(),
@@ -220,6 +267,7 @@ function createDispatchNode(deps = {}) {
         routeMeta: request.routeMeta,
         reviewMode: request.reviewMode,
         allowedGlobalTools: selectedStepToolNames,
+        ...reusableRoutePlannerContext,
         memoryCliTurn: state.execution?.memoryCliTurn,
         policy: {
           allowGlobalTools: Boolean(request.allowTools),

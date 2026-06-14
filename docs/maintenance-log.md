@@ -1,3 +1,11 @@
+## 运行维护 2026-06-14 15:08
+
+- 小目标：修掉 dispatch capability preflight 在已有 route `executionPlan` 时的第二轮远程 planner。
+- 链路复核：route flow 会把 `routeMeta.toolPlanner/directChatPlanner.executionPlan` 传入 RuntimeV2；`buildInitialPlanSlice` 已验证该 plan 并生成 `plan.steps`；现有慢点来自 dispatch preflight 再走 `api/globalToolRuntime.js -> planningService.planRequestV2`。
+- 最小修复：dispatch 只在 `plan.planner` 标记 single-authority 且 validation 未失败时透传 route planner `executionPlan`；global preflight 优先复用该 plan，仅做本地 allowed tool/policy 过滤和 `enforceToolPolicy`，没有可复用 plan 时保留旧 planner 路径。
+- 验证：`node --check api/globalToolRuntime.js`、`node --check api/runtimeV2/nodes/dispatch.js`、`node --check tests/globalToolRuntimeRoutePlanPreflight.test.js`、`node --check tests/dispatchChatFastPreflight.test.js`、`node tests/dispatchChatFastPreflight.test.js`、`node tests/globalToolRuntimeRoutePlanPreflight.test.js` 通过；新增 global runtime 测试中 planner service 被打桩为抛错，实际 `plannerCalls=0`，且只执行 allowed 的 `web_search`。
+- 小目标已完成：已有可用 route `executionPlan` 时，dispatch preflight 不再发起第二轮远程 `planRequestV2`。
+
 ## 运行维护 2026-06-14 15:03
 
 - 小目标：让 `normal_fast_reply` 快回复链路也能触发安全限制 emoji 标记。
