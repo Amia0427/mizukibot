@@ -46,6 +46,9 @@ const CORRECTION_RE = /(不是|不对|错了|改了|改成|纠正|别记|不要�
 const TEMPORARY_RE = /(今天|刚刚|刚才|这次|这把|这局|今晚|昨天|临时|暂时|一会儿|等下|最近|当前|正在|准备|打算)/i;
 const CORRECTION_FROM_TO_RE = /(?:不是|不对|错了|纠正一下|更正一下|改成|应该是)\s*[“"']?([^，。；;,.!?！？]{1,80})[”"']?\s*(?:，|,|。|;|；|\s)*(?:是|而是|应该是|改成|换成)\s*[“"']?([^，。；;,.!?！？]{1,120})/i;
 const CORRECTION_FORGET_RE = /(?:别记|不要记|别再记|忘掉|删掉)\s*[“"']?([^，。；;,.!?！？]{1,120})/i;
+const STRUCTURED_STATE_SOURCE_RE = /\b(?:runtime_inference|surface_policy|short_term_state|relationship_memory|persona_memory|continuity_state)\b/i;
+const STRUCTURED_STATE_FIELD_RE = /\b(?:relationship|bot_persona|style)_[a-z_]+\s*[:=]/gi;
+const STRUCTURED_STATE_EXPR_SOURCE_RE = /\b(?:warmth|playfulness|tease|initiative|jargon|verbosity|guardedness|replyPosture)Source\s*=/g;
 
 function nowMs(options = {}) {
   return Math.max(0, Number(options.now || options.nowTs || Date.now()) || Date.now());
@@ -78,6 +81,23 @@ function isProfileField(input = {}) {
     || SHORT_LIVED_FIELDS.has(fieldKey)
     || ['like', 'dislike', 'identity', 'personality', 'hobby', 'goal', 'boundary', 'summary', 'impression'].includes(memoryKind)
     || fieldKey === 'goal';
+}
+
+function isStructuredProfileStateText(value = '', options = {}) {
+  const text = normalizeText(value);
+  if (!text) return false;
+  const fieldKey = normalizeFieldKey(options);
+  const schemaLabels = text.match(STRUCTURED_STATE_FIELD_RE) || [];
+  const sourceLabels = text.match(STRUCTURED_STATE_EXPR_SOURCE_RE) || [];
+  if (sourceLabels.length > 0) return true;
+  if (schemaLabels.length >= 2) return true;
+  if (schemaLabels.length === 1 && (fieldKey.startsWith('relationship_') || fieldKey.startsWith('bot_persona_'))) {
+    const label = normalizeText(schemaLabels[0]).replace(/\s*[:=]\s*$/, '').toLowerCase();
+    if (label && label !== fieldKey) return true;
+  }
+  if (/用户修正[:：]/.test(text) && schemaLabels.length > 0) return true;
+  if (STRUCTURED_STATE_SOURCE_RE.test(text) && (schemaLabels.length > 0 || /[a-zA-Z]+=\w+/.test(text))) return true;
+  return false;
 }
 
 function resolveProfileTtlMs(input = {}, options = {}) {
@@ -131,6 +151,7 @@ function textQualityReasons(type = '', value = '', options = {}) {
   if (text.length > Math.max(40, configNumber('MEMORY_PROFILE_MAX_TEXT_CHARS', 220))) reasons.push('too_long');
   if (GENERIC_TEXT_RE.test(text)) reasons.push('generic_text');
   if (/^(用户|我|他|她|ta)?(喜欢|不喜欢|讨厌|爱好|目标|身份|性格)[:：]?$/.test(text)) reasons.push('label_only');
+  if (isStructuredProfileStateText(text, options)) reasons.push('structured_state_snapshot');
   const pollution = classifyRecallPollution(text, { allowBenignContext: true });
   if (pollution.polluted) reasons.push('memory_pollution', ...pollution.reasons);
   const normalizedType = normalizeText(type).toLowerCase();
@@ -329,12 +350,19 @@ function lifecycleHiddenReason(input = {}, options = {}) {
 function applyProfileLifecycle(node = {}, options = {}) {
   if (!node || typeof node !== 'object') return node;
   if (!isProfileField(node)) return node;
-  const quality = node.profileQuality && typeof node.profileQuality === 'object'
+  const assessedQuality = assessProfileWriteQuality(node.type || node.memoryKind || node.fieldKey, node.text, node.confidence, {
+    ...options,
+    fieldKey: node.fieldKey || node.semanticSlot,
+    sourceKind: node.sourceKind || node.source
+  });
+  const existingQuality = node.profileQuality && typeof node.profileQuality === 'object'
     ? node.profileQuality
-    : assessProfileWriteQuality(node.type || node.memoryKind || node.fieldKey, node.text, node.confidence, {
-      ...options,
-      sourceKind: node.sourceKind || node.source
-    });
+    : null;
+  const quality = existingQuality?.ok === false
+    ? existingQuality
+    : assessedQuality.ok === false && assessedQuality.reasons.includes('structured_state_snapshot')
+      ? assessedQuality
+      : existingQuality || assessedQuality;
   const expiresAt = computeExpiresAt(node, options);
   const freshnessScore = computeFreshnessScore({ ...node, expiresAt }, options);
   const lifecycleStatus = deriveLifecycleStatus({
@@ -571,6 +599,7 @@ module.exports = {
   findProfileCleanupCandidates,
   formatPromptProfileSurface,
   isProfileField,
+  isStructuredProfileStateText,
   lifecycleHiddenReason,
   lifecycleScoreAdjustment,
   normalizeFieldKey,

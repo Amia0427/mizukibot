@@ -33,6 +33,12 @@ module.exports = (() => {
     confidence: 0.2,
     requiresUser: true
   }).reason, 'low_confidence');
+  assert.strictEqual(gate.assess({
+    fieldKey: 'style_pattern',
+    text: 'style: warmth=high, warmthSource=runtime_inference, playfulness=mid, guardedness=close relationship_reply_style:',
+    confidence: 0.9,
+    requiresUser: true
+  }).reason, 'structured_state_snapshot');
 
   const noEvidenceGate = createEnrichQualityGate({ userId: 'u1', groupId: 'g1' });
   assert.strictEqual(noEvidenceGate.assess({

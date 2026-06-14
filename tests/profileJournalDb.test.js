@@ -168,6 +168,88 @@ module.exports = (async () => {
   assert.ok(rejectedPlaceholders.some((item) => item.id === 'placeholder-repeat'));
   assert.ok(rejectedPlaceholders.some((item) => item.id === 'placeholder-field'));
 
+  upsertProfileFact({
+    id: 'structured-state-style',
+    userId: 'u_db',
+    type: 'style',
+    fieldKey: 'style_pattern',
+    value: 'style: warmth=high, warmthSource=runtime_inference, playfulness=mid, guardedness=close relationship_reply_style:',
+    status: 'active',
+    sourceKind: 'runtime',
+    confidence: 0.9,
+    createdAt: now + 5500,
+    updatedAt: now + 5500
+  }, { now: now + 5500 });
+  upsertProfileFact({
+    id: 'structured-state-relationship',
+    userId: 'u_db',
+    type: 'relationship',
+    fieldKey: 'relationship_reply_style',
+    value: '用户修正：relationship_distance: close relationship_reply_style: 用户修正：relationship_distance: clos',
+    status: 'active',
+    sourceKind: 'runtime',
+    confidence: 0.9,
+    createdAt: now + 5501,
+    updatedAt: now + 5501
+  }, { now: now + 5501 });
+  const rejectedStructuredState = listProfileFacts({ userId: 'u_db', status: 'rejected', force: true, limit: 120 }).facts;
+  assert.ok(rejectedStructuredState.some((item) => item.id === 'structured-state-style'));
+  assert.ok(rejectedStructuredState.some((item) => item.id === 'structured-state-relationship'));
+
+  getDb().prepare(`
+    INSERT INTO profile_facts (
+      id, user_id, type, field_key, value, conflict_key, status, confidence, source_kind,
+      evidence_count, created_at, updated_at, expires_at, superseded_by, correction_of, quality_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'structured-state-legacy-ok',
+    'u_db',
+    'relationship',
+    'relationship_distance',
+    'close relationship_reply_style: 用户修正：relationship_distance: clos',
+    'u_db|personal|relationship_distance|legacy-ok',
+    'active',
+    0.9,
+    'runtime',
+    2,
+    now + 5600,
+    now + 5600,
+    0,
+    '',
+    '',
+    JSON.stringify({ ok: true, reasons: [] })
+  );
+  cleanProfileFacts({ userId: 'u_db', now: now + 5601 });
+  assert.ok(listProfileFacts({ userId: 'u_db', status: 'rejected', autoClean: false, limit: 140 }).facts.some((item) => item.id === 'structured-state-legacy-ok'));
+
+  upsertProfileFact({
+    id: 'cross-field-label-relationship',
+    userId: 'u_db',
+    type: 'relationship',
+    fieldKey: 'relationship_boundaries',
+    value: '关系边界=close relationship_reply_style:',
+    status: 'active',
+    sourceKind: 'runtime',
+    confidence: 0.9,
+    createdAt: now + 5700,
+    updatedAt: now + 5700
+  }, { now: now + 5700 });
+  assert.ok(listProfileFacts({ userId: 'u_db', status: 'rejected', force: true, limit: 160 }).facts.some((item) => item.id === 'cross-field-label-relationship'));
+
+  upsertProfileFact({
+    id: 'cross-field-label-persona',
+    userId: 'u_db',
+    type: 'bot_persona_guardedness',
+    fieldKey: 'bot_persona_guardedness',
+    value: '边界感=close relationship_reply_style:',
+    status: 'active',
+    sourceKind: 'runtime',
+    confidence: 0.9,
+    createdAt: now + 5701,
+    updatedAt: now + 5701
+  }, { now: now + 5701 });
+  assert.ok(listProfileFacts({ userId: 'u_db', status: 'rejected', force: true, limit: 170 }).facts.some((item) => item.id === 'cross-field-label-persona'));
+
   profileProjectionFromDb('u_db', { now: now + 6000 });
   getDb().prepare(`
     INSERT INTO profile_facts (
