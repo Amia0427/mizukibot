@@ -35,6 +35,41 @@ module.exports = (async () => {
   await delay(90);
   assert.strictEqual(calls, 2);
   assert.strictEqual(maxActive, 1);
+
+  let releaseFirst = null;
+  let raceActive = 0;
+  let raceMaxActive = 0;
+  let raceCalls = 0;
+  const raceQueue = new ResearchTaskQueue({
+    config: {
+      RESEARCH_SUBAGENT_ENABLED: true,
+      RESEARCH_SUBAGENT_MAX_CONCURRENCY: 1,
+      RESEARCH_SUBAGENT_TIMEOUT_MS: 1000
+    },
+    runner: async (task) => {
+      raceCalls += 1;
+      raceActive += 1;
+      raceMaxActive = Math.max(raceMaxActive, raceActive);
+      if (task.query === 'first') {
+        raceQueue.drain();
+        await new Promise((resolve) => { releaseFirst = resolve; });
+      }
+      await delay(5);
+      raceActive -= 1;
+      return { id: task.id, status: 'completed' };
+    }
+  });
+  raceQueue.enqueue({ sessionKey: 'race', userId: 'u1', query: 'first' });
+  raceQueue.enqueue({ sessionKey: 'race', userId: 'u1', query: 'second' });
+  raceQueue.drain();
+  raceQueue.drain();
+  await delay(20);
+  assert.strictEqual(raceCalls, 1, 'repeated drain while active should not start the queued task early');
+  releaseFirst();
+  await delay(40);
+  assert.strictEqual(raceCalls, 2);
+  assert.strictEqual(raceMaxActive, 1, 'single-flight drain should preserve max concurrency');
+
   console.log('researchTaskQueue.test.js passed');
 })().catch((error) => {
   console.error(error);
