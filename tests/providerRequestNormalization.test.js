@@ -84,6 +84,28 @@ module.exports = (async () => {
     assert.strictEqual(sentAnthropicOptions.headers['Sec-Fetch-Mode'], 'cors');
     axios.post = originalPost;
 
+    const thirdPartyMessagesEndpoint = buildMainModelRequest({
+      model: 'claude-3-5-sonnet-latest',
+      apiBaseUrl: 'https://third-party.example/v1/messages',
+      apiKey: 'third-party-key',
+      provider: 'openai_compatible'
+    }, {
+      messages: [{ role: 'user', content: 'third-party messages' }],
+      stream: false,
+      defaultMaxTokens: 200
+    });
+    assert.strictEqual(thirdPartyMessagesEndpoint.provider, 'anthropic');
+    assert.strictEqual(thirdPartyMessagesEndpoint.protocol, 'anthropic_messages');
+    assert.strictEqual(thirdPartyMessagesEndpoint.url, 'https://third-party.example/v1/messages');
+    assert.strictEqual(thirdPartyMessagesEndpoint.body.__requestHeaders['x-api-key'], 'third-party-key');
+    assert.ok(!Object.prototype.hasOwnProperty.call(thirdPartyMessagesEndpoint.body.__requestHeaders, 'Authorization'));
+    const preparedThirdPartyMessages = await httpClient.prepareRequest(
+      thirdPartyMessagesEndpoint.url,
+      thirdPartyMessagesEndpoint.body
+    );
+    assert.strictEqual(preparedThirdPartyMessages.provider, 'anthropic');
+    assert.strictEqual(preparedThirdPartyMessages.requestUrl, 'https://third-party.example/v1/messages');
+
     const preparedGeminiNative = await httpClient.prepareRequest(
       'https://generativelanguage.googleapis.com/v1beta',
       {

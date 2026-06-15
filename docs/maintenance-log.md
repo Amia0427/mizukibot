@@ -1,3 +1,11 @@
+## 运行维护 2026-06-15 11:56
+
+- 小目标：让第三方主回复网关在显式配置 `/v1/messages` 时直接使用 Messages 协议，同时保留默认补全 `/v1/chat/completions` 的行为。
+- 根因：`resolveMainProvider()` 先读取 `API_PROVIDER` / override provider，再看 URL 后缀；第三方配置常把 provider 写成 `openai_compatible` 或其它占位值，导致 `/v1/messages` 被 `ensureChatCompletionsUrl()` 改写为 `/v1/chat/completions`。
+- 最小修复：主回复 provider 解析改为 endpoint 优先，URL 以 `/messages` 结尾时直接判为 `anthropic_messages`；裸域名、`/v1`、`/v1/chat/completions` 仍按 OpenAI-compatible 默认补全或保留。
+- 验证：`node tests/providerRequestNormalization.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/providerRequestDiagnostics.test.js` 通过；新增回归覆盖 `provider=openai_compatible + https://third-party.example/v1/messages`，构造和 prepare 后 URL 均保持 `/v1/messages`，header 使用 `x-api-key` 而非 `Authorization`。
+- 小目标已完成：第三方 `/v1/messages` 网关不再被自动改写到 `/v1/chat/completions`。
+
 ## 运行维护 2026-06-15 11:18
 
 - 小目标：执行 DEBUG_PLAN C-001/C-002/C-003，建立提交前密钥防护，并清掉 axios/request/form-data critical 供应链风险。
