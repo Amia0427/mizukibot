@@ -5,6 +5,7 @@
 - 最小修复：在根 `package.json` 加 `overrides.uuid=11.1.1`，让 `@azure/msal-node` 和 `yggdrasil` 统一落到安全 `uuid`，不升级 `mineflayer` 主链、不改 Minecraft 连接代码。
 - 验证：`npm audit --omit=dev --json` 变为 0 vulnerabilities；`npm ls uuid @azure/msal-node yggdrasil minecraft-protocol prismarine-auth mineflayer --all` 显示 `uuid@11.1.1` deduped/overridden；`node --check api/minecraftAgent.js`、`node --unhandled-rejections=strict tests/minecraftAgentListenerCleanup.test.js`、`node -e "require('mineflayer'); require('mineflayer-pathfinder'); require('minecraft-protocol'); require('prismarine-auth'); const y=require('yggdrasil'); const msal=require('@azure/msal-node'); const u=require('uuid'); console.log('minecraft dependency load ok', typeof u.v4, typeof y, typeof msal.PublicClientApplication);"`、`npm run check:agent:static` 通过。
 - 小目标已完成：mineflayer auth 链 moderate 清零，未做真实 Minecraft 服务器在线登录联调。
+- 提交后记录 2026-06-15 19:33 +08:00：已提交 `db45d8e`（`fix: clear mineflayer auth audit`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-15 12:05
 
