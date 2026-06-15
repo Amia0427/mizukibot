@@ -69,6 +69,11 @@ function buildChatOk(text = 'ok') {
   };
 }
 
+function disableTlsImpersonationForTest() {
+  process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
+  process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
+}
+
 module.exports = (async () => {
   const snapshot = { ...process.env };
   let axios = null;
@@ -87,6 +92,7 @@ module.exports = (async () => {
     process.env.AI_TOP_K = '33.9';
     process.env.AI_TOP_A = '0.42';
     process.env.AI_REPETITION_PENALTY = '1.13';
+    disableTlsImpersonationForTest();
 
     process.env.ADMIN_USER_IDS = 'admin-1';
     process.env.ADMIN_API_BASE_URL = 'https://example.com/admin/v1/chat/completions';
@@ -141,6 +147,25 @@ module.exports = (async () => {
     assert.strictEqual(sent[0].body.top_a, 0.42);
     assert.strictEqual(sent[0].body.repetition_penalty, 1.13);
 
+    sent.length = 0;
+    await requestAssistantMessage([{ role: 'user', content: 'hi' }], {
+      userId: 'user-1',
+      source: 'normal_fast_reply',
+      modelConfig: {
+        maxTokens: 1024,
+        reasoningEffort: 'off',
+        topA: NaN,
+        topK: NaN,
+        repetitionPenalty: NaN
+      }
+    });
+    assert.strictEqual(sent[0].body.model, 'main-model');
+    assert.strictEqual(sent[0].body.max_tokens, 1024);
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'reasoning_effort'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'top_a'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'top_k'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(sent[0].body, 'repetition_penalty'));
+
     restoreEnv(snapshot);
     clearProjectCache();
     process.env.API_KEY = 'main-key';
@@ -149,6 +174,7 @@ module.exports = (async () => {
     process.env.AI_MODEL = 'main-model';
     process.env.AI_RETRIES = '0';
     process.env.AI_MAX_TOKENS = 'not-a-number';
+    disableTlsImpersonationForTest();
     axios = require('axios');
     axios.post = async (url, body, options = {}) => {
       if (isEmbeddingRequest(url, body)) return buildEmbeddingResponse();
@@ -178,6 +204,7 @@ module.exports = (async () => {
     process.env.AI_TOP_K = '33.9';
     process.env.AI_TOP_A = '0.42';
     process.env.AI_REPETITION_PENALTY = '1.13';
+    disableTlsImpersonationForTest();
 
     process.env.ADMIN_USER_IDS = 'admin-1';
     process.env.ADMIN_API_BASE_URL = 'https://example.com/admin/v1/chat/completions';
