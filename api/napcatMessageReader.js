@@ -4,13 +4,19 @@ const {
   isActionClientConnected,
   isNapCatOfflineError
 } = require('./napcatActionClient');
-const MESSAGE_CACHE_TTL_MS = 120 * 1000;
-const FORWARD_CACHE_TTL_MS = 300 * 1000;
-const GROUP_HISTORY_CACHE_TTL_MS = 30 * 1000;
-const NEGATIVE_CACHE_TTL_MS = 15 * 1000;
-const MESSAGE_CACHE_LIMIT = 1000;
-const FORWARD_CACHE_LIMIT = 200;
-const GROUP_HISTORY_CACHE_LIMIT = 100;
+function readPositiveIntEnv(name, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
+  const value = Number(process.env[name]);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+const MESSAGE_CACHE_TTL_MS = readPositiveIntEnv('NAPCAT_MESSAGE_CACHE_TTL_MS', 120 * 1000, 1, 60 * 60 * 1000);
+const FORWARD_CACHE_TTL_MS = readPositiveIntEnv('NAPCAT_FORWARD_CACHE_TTL_MS', 300 * 1000, 1, 60 * 60 * 1000);
+const GROUP_HISTORY_CACHE_TTL_MS = readPositiveIntEnv('NAPCAT_GROUP_HISTORY_CACHE_TTL_MS', 30 * 1000, 1, 60 * 60 * 1000);
+const NEGATIVE_CACHE_TTL_MS = readPositiveIntEnv('NAPCAT_NEGATIVE_CACHE_TTL_MS', 15 * 1000, 1, 60 * 60 * 1000);
+const MESSAGE_CACHE_LIMIT = readPositiveIntEnv('NAPCAT_MESSAGE_CACHE_MAX_SIZE', 1000, 1, 100000);
+const FORWARD_CACHE_LIMIT = readPositiveIntEnv('NAPCAT_FORWARD_CACHE_MAX_SIZE', 200, 1, 100000);
+const GROUP_HISTORY_CACHE_LIMIT = readPositiveIntEnv('NAPCAT_GROUP_HISTORY_CACHE_MAX_SIZE', 100, 1, 100000);
 const messageCache = new Map();
 const forwardCache = new Map();
 const groupHistoryCache = new Map();
@@ -58,6 +64,12 @@ function normalizeHistoryCount(value, fallback = 200) {
 }
 
 function pruneCache(cache, maxSize) {
+  const now = Date.now();
+  for (const [cacheKey, entry] of cache.entries()) {
+    if (Number(entry?.expiresAt || 0) <= now && !entry?.inFlight) {
+      cache.delete(cacheKey);
+    }
+  }
   while (cache.size > maxSize) {
     const oldestKey = cache.keys().next().value;
     if (oldestKey === undefined) break;
@@ -192,8 +204,25 @@ async function getGroupMessageHistoryCached(groupId = '', options = {}) {
   });
 }
 
+function __getNapcatMessageReaderCacheDiagnostics() {
+  return {
+    message: { size: messageCache.size, ttlMs: MESSAGE_CACHE_TTL_MS, maxSize: MESSAGE_CACHE_LIMIT },
+    forward: { size: forwardCache.size, ttlMs: FORWARD_CACHE_TTL_MS, maxSize: FORWARD_CACHE_LIMIT },
+    groupHistory: { size: groupHistoryCache.size, ttlMs: GROUP_HISTORY_CACHE_TTL_MS, maxSize: GROUP_HISTORY_CACHE_LIMIT },
+    negativeTtlMs: NEGATIVE_CACHE_TTL_MS
+  };
+}
+
+function __resetNapcatMessageReaderCaches() {
+  messageCache.clear();
+  forwardCache.clear();
+  groupHistoryCache.clear();
+}
+
 module.exports = {
   NapCatUnavailableError,
+  __getNapcatMessageReaderCacheDiagnostics,
+  __resetNapcatMessageReaderCaches,
   getMessageById,
   getForwardMessagesById,
   getGroupMessageHistory,

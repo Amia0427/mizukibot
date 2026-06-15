@@ -887,6 +887,37 @@ function getMemosRecallCacheTtlMs(options = {}) {
   );
 }
 
+function getMemosRecallCacheMaxSize(options = {}) {
+  const currentConfig = {
+    ...getConfig(),
+    ...normalizeObject(options.config, {})
+  };
+  return clampNumber(
+    options.cacheMaxSize ?? currentConfig.MEMOS_RECALL_CACHE_MAX_SIZE ?? process.env.MEMOS_RECALL_CACHE_MAX_SIZE,
+    1,
+    100000,
+    500
+  );
+}
+
+function pruneMemosRecallCache(options = {}) {
+  const ttlMs = getMemosRecallCacheTtlMs(options);
+  const maxSize = getMemosRecallCacheMaxSize(options);
+  const now = Date.now();
+  if (ttlMs > 0) {
+    for (const [cacheKey, cached] of memosRecallRuntimeState.cache.entries()) {
+      if (now - Number(cached?.storedAt || 0) > ttlMs) {
+        memosRecallRuntimeState.cache.delete(cacheKey);
+      }
+    }
+  }
+  while (memosRecallRuntimeState.cache.size > maxSize) {
+    const oldestKey = memosRecallRuntimeState.cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    memosRecallRuntimeState.cache.delete(oldestKey);
+  }
+}
+
 function getMemosCircuitOptions(options = {}) {
   const currentConfig = {
     ...getConfig(),
@@ -928,6 +959,7 @@ function buildMemosRecallCacheKey(input = {}) {
 
 function getCachedMemosRecall(cacheKey = '', ttlMs = 0) {
   if (!cacheKey || ttlMs <= 0) return null;
+  pruneMemosRecallCache({ cacheTtlMs: ttlMs });
   const cached = memosRecallRuntimeState.cache.get(cacheKey);
   if (!cached) {
     memosRecallRuntimeState.stats.cacheMisses += 1;
@@ -953,13 +985,14 @@ function getCachedMemosRecall(cacheKey = '', ttlMs = 0) {
   };
 }
 
-function storeCachedMemosRecall(cacheKey = '', value = {}, ttlMs = 0) {
+function storeCachedMemosRecall(cacheKey = '', value = {}, ttlMs = 0, options = {}) {
   if (!cacheKey || ttlMs <= 0) return;
   memosRecallRuntimeState.cache.set(cacheKey, {
     storedAt: Date.now(),
     value
   });
   memosRecallRuntimeState.stats.cacheStores += 1;
+  pruneMemosRecallCache({ ...options, cacheTtlMs: ttlMs });
 }
 
 function getCircuitKey(serverName = '', recallSource = '') {
@@ -1019,6 +1052,7 @@ function getMemosRecallRuntimeDiagnostics(options = {}) {
     cache: {
       size: memosRecallRuntimeState.cache.size,
       ttlMs: getMemosRecallCacheTtlMs({ ...options, config: currentConfig }),
+      maxSize: getMemosRecallCacheMaxSize({ ...options, config: currentConfig }),
       hits: memosRecallRuntimeState.stats.cacheHits,
       misses: memosRecallRuntimeState.stats.cacheMisses,
       stores: memosRecallRuntimeState.stats.cacheStores
@@ -1408,7 +1442,7 @@ async function recallForPlanner(query = '', options = {}) {
     if (recallSource === 'search_memory') {
       resultRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
       recordMemosCircuitSuccess(serverName, recallSource);
-      if (resultRecall.used || resultRecall.rejectedReason) storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+      if (resultRecall.used || resultRecall.rejectedReason) storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs, { ...options, config: currentConfig });
       return attachBoundaryDiagnostics(resultRecall);
     }
     if (recallSource === 'auto') {
@@ -1416,20 +1450,20 @@ async function recallForPlanner(query = '', options = {}) {
       if (kbPartition.ids.length > 0) {
         resultRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
         recordMemosCircuitSuccess(serverName, recallSource);
-        storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+        storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs, { ...options, config: currentConfig });
         return attachBoundaryDiagnostics(resultRecall);
       }
       if (discovery.kbToolName && kbArgs.file_ids.length > 0) {
         const kbRecall = await callKnowledgeBaseRecall(normalizedQuery, recallOptions);
         if (kbRecall.used || currentConfig.MEMOS_KB_FALLBACK_SEARCH_ENABLED !== true) {
           recordMemosCircuitSuccess(serverName, recallSource);
-          storeCachedMemosRecall(cacheKey, kbRecall, cacheTtlMs);
+          storeCachedMemosRecall(cacheKey, kbRecall, cacheTtlMs, { ...options, config: currentConfig });
           return attachBoundaryDiagnostics(kbRecall);
         }
       }
       resultRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
       recordMemosCircuitSuccess(serverName, recallSource);
-      storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+      storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs, { ...options, config: currentConfig });
       return attachBoundaryDiagnostics(resultRecall);
     }
     if (kbPartition.ids.length > 0) {
@@ -1444,7 +1478,7 @@ async function recallForPlanner(query = '', options = {}) {
         }
       };
       recordMemosCircuitSuccess(serverName, recallSource);
-      storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+      storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs, { ...options, config: currentConfig });
       return attachBoundaryDiagnostics(resultRecall);
     }
     const kbRecall = await callKnowledgeBaseRecall(normalizedQuery, recallOptions);
@@ -1454,7 +1488,7 @@ async function recallForPlanner(query = '', options = {}) {
       || !discovery.searchToolName
     ) {
       recordMemosCircuitSuccess(serverName, recallSource);
-      storeCachedMemosRecall(cacheKey, kbRecall, cacheTtlMs);
+      storeCachedMemosRecall(cacheKey, kbRecall, cacheTtlMs, { ...options, config: currentConfig });
       return attachBoundaryDiagnostics(kbRecall);
     }
     const searchRecall = await callSearchMemoryRecall(normalizedQuery, recallOptions);
@@ -1467,7 +1501,7 @@ async function recallForPlanner(query = '', options = {}) {
       }
     };
     recordMemosCircuitSuccess(serverName, recallSource);
-    storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs);
+    storeCachedMemosRecall(cacheKey, resultRecall, cacheTtlMs, { ...options, config: currentConfig });
     return attachBoundaryDiagnostics(resultRecall);
   } catch (error) {
     const circuit = recordMemosCircuitFailure(
