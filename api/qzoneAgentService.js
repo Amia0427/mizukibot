@@ -438,7 +438,7 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
     }
   } finally {
     if (typeof helpers.cleanupLocalImage === 'function') {
-      helpers.cleanupLocalImage(localImagePath);
+      await Promise.resolve(helpers.cleanupLocalImage(localImagePath));
     }
   }
 

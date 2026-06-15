@@ -1,7 +1,11 @@
 ﻿const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+
+const execFileAsync = promisify(execFile);
+const fsp = fs.promises;
 
 process.env.MIZUKIBOT_RUNTIME_ROLE = process.env.MIZUKIBOT_RUNTIME_ROLE || 'main';
 
@@ -135,28 +139,33 @@ function isProcessAlive(pid) {
   }
 }
 
-function getProcessCommandLine(pid) {
+async function getProcessCommandLine(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return '';
 
   try {
     if (process.platform === 'win32') {
       const script = `$p = Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}" -ErrorAction SilentlyContinue; if ($p) { [string]$p.CommandLine }`;
-      return String(execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', script], {
         encoding: 'utf8',
         timeout: 2000,
         windowsHide: true
-      }) || '').trim();
+      });
+      return String(stdout || '').trim();
     }
 
     const procCmdline = `/proc/${pid}/cmdline`;
-    if (fs.existsSync(procCmdline)) {
-      return fs.readFileSync(procCmdline, 'utf8').replace(/\0/g, ' ').trim();
+    try {
+      const cmdline = await fsp.readFile(procCmdline, 'utf8');
+      return cmdline.replace(/\0/g, ' ').trim();
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
     }
 
-    return String(execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+    const { stdout } = await execFileAsync('ps', ['-p', String(pid), '-o', 'command='], {
       encoding: 'utf8',
       timeout: 2000
-    }) || '').trim();
+    });
+    return String(stdout || '').trim();
   } catch (_) {
     return '';
   }
@@ -168,39 +177,56 @@ function commandLineLooksLikeMainBot(commandLine) {
   return /\bnode(?:\.exe)?\b/i.test(value) && /(^|[\\/\s"'])index\.js(["'\s]|$)/i.test(value);
 }
 
-function isMainBotProcess(pid) {
+async function isMainBotProcess(pid) {
   if (!isProcessAlive(pid)) return false;
-  const commandLine = getProcessCommandLine(pid);
+  const commandLine = await getProcessCommandLine(pid);
   if (!commandLine) return true;
   return commandLineLooksLikeMainBot(commandLine);
 }
 
-function acquireSingleInstanceLock() {
-  const writeLock = () => {
-    fs.writeFileSync(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
+async function readLockOwnerPid() {
+  try {
+    const content = await fsp.readFile(LOCK_FILE, 'utf8');
+    return Number.parseInt(String(content || '').trim(), 10);
+  } catch (_) {
+    return NaN;
+  }
+}
+
+function cleanupSingleInstanceLockSync() {
+  try {
+    if (preserveSingleInstanceLockOnExit) return;
+    if (!fs.existsSync(LOCK_FILE)) return;
+    const ownerPid = Number.parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
+    if (ownerPid === process.pid) {
+      fs.writeFileSync(LOCK_FILE, '', { encoding: 'utf8', flag: 'w' });
+    }
+  } catch (_) {}
+}
+
+async function acquireSingleInstanceLock() {
+  const writeLock = async () => {
+    await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
   };
 
-  const replaceStaleLock = () => {
-    fs.writeFileSync(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'w' });
+  const replaceStaleLock = async () => {
+    await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'w' });
   };
 
   try {
-    writeLock();
+    await writeLock();
   } catch (err) {
     if (!err || err.code !== 'EEXIST') throw err;
 
-    let existingPid = NaN;
-    try {
-      existingPid = Number.parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
-    } catch (_) {}
+    const existingPid = await readLockOwnerPid();
 
-    if (isMainBotProcess(existingPid)) {
+    if (await isMainBotProcess(existingPid)) {
       console.error('[Startup] MizukiBot is already running (PID=' + existingPid + ').');
       process.exit(1);
     }
 
     if (isProcessAlive(existingPid)) {
-      const commandLine = getProcessCommandLine(existingPid);
+      const commandLine = await getProcessCommandLine(existingPid);
       console.warn('[Startup] Replacing stale lock owned by non-bot process:', {
         pid: existingPid,
         commandLine: commandLine.slice(0, 240)
@@ -208,62 +234,44 @@ function acquireSingleInstanceLock() {
     }
 
     try {
-      replaceStaleLock();
+      await replaceStaleLock();
     } catch (replaceErr) {
       console.error('[Startup] Failed to replace stale lock file:', replaceErr?.message || replaceErr);
       process.exit(1);
     }
   }
 
-  const cleanup = () => {
-    try {
-      if (preserveSingleInstanceLockOnExit) return;
-      if (!fs.existsSync(LOCK_FILE)) return;
-      const ownerPid = Number.parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
-      if (ownerPid === process.pid) {
-        fs.writeFileSync(LOCK_FILE, '', { encoding: 'utf8', flag: 'w' });
-      }
-    } catch (_) {}
-  };
-
-  process.on('exit', cleanup);
-  return cleanup;
+  process.on('exit', cleanupSingleInstanceLockSync);
+  return cleanupSingleInstanceLockSync;
 }
 
-cleanupSingleInstanceLock = acquireSingleInstanceLock();
-try {
-  const tmpCleanupEnabled = !['0', 'false', 'no', 'off'].includes(
-    String(process.env.DATA_TMP_CLEANUP_ENABLED || '').toLowerCase().trim()
-  );
-  if (tmpCleanupEnabled) {
-    const configuredMaxAgeMs = Number(process.env.DATA_TMP_CLEANUP_MAX_AGE_MS);
-    const summary = cleanupStaleDataTmpFiles({
-      dataDir: config.DATA_DIR,
-      maxAgeMs: Number.isFinite(configuredMaxAgeMs) ? configuredMaxAgeMs : DEFAULT_MAX_AGE_MS,
-      excludeDirs: [path.join(config.DATA_DIR, 'inbound_image_cache')]
-    });
-    if (summary.deletedFiles > 0 || summary.failedFiles > 0) {
-      console.log('[Startup] stale tmp cleanup', {
-        deletedFiles: summary.deletedFiles,
-        deletedMB: Math.round((summary.deletedBytes / 1024 / 1024) * 10) / 10,
-        skippedFreshFiles: summary.skippedFreshFiles,
-        failedFiles: summary.failedFiles
+async function cleanupStaleTmpFilesOnStartup() {
+  try {
+    const tmpCleanupEnabled = !['0', 'false', 'no', 'off'].includes(
+      String(process.env.DATA_TMP_CLEANUP_ENABLED || '').toLowerCase().trim()
+    );
+    if (tmpCleanupEnabled) {
+      const configuredMaxAgeMs = Number(process.env.DATA_TMP_CLEANUP_MAX_AGE_MS);
+      const summary = cleanupStaleDataTmpFiles({
+        dataDir: config.DATA_DIR,
+        maxAgeMs: Number.isFinite(configuredMaxAgeMs) ? configuredMaxAgeMs : DEFAULT_MAX_AGE_MS,
+        excludeDirs: [path.join(config.DATA_DIR, 'inbound_image_cache')]
       });
+      if (summary.deletedFiles > 0 || summary.failedFiles > 0) {
+        console.log('[Startup] stale tmp cleanup', {
+          deletedFiles: summary.deletedFiles,
+          deletedMB: Math.round((summary.deletedBytes / 1024 / 1024) * 10) / 10,
+          skippedFreshFiles: summary.skippedFreshFiles,
+          failedFiles: summary.failedFiles
+        });
+      }
     }
+  } catch (error) {
+    console.warn('[Startup] stale tmp cleanup failed:', error?.message || error);
   }
-} catch (error) {
-  console.warn('[Startup] stale tmp cleanup failed:', error?.message || error);
 }
-const webServer = startServer();
-initializeMemeManager();
-if (config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START) {
-  const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
-  enqueueMissingEmbeddings(null, {
-    schedule: true,
-    delayMs: 15000,
-    continueDelayMs: 60000
-  });
-}
+let webServer = null;
+let resourceSnapshotLoop = null;
 
 let ws = null;
 let shuttingDown = false;
@@ -373,14 +381,17 @@ const schedulerRuntime = getSchedulerRuntime({
     return true;
   }
 });
-const resourceSnapshotLoop = startResourceSnapshotLoop(() => ({
-  component: 'main_process',
-  wsReadyState: ws ? ws.readyState : -1,
-  reconnectAttempts,
-  schedulerStarted,
-  tickStarted,
-  postReplyInline: Boolean(postReplyWorkerRuntime)
-}));
+function startResourceSnapshots() {
+  if (resourceSnapshotLoop) return;
+  resourceSnapshotLoop = startResourceSnapshotLoop(() => ({
+    component: 'main_process',
+    wsReadyState: ws ? ws.readyState : -1,
+    reconnectAttempts,
+    schedulerStarted,
+    tickStarted,
+    postReplyInline: Boolean(postReplyWorkerRuntime)
+  }));
+}
 
 function connectNapCat() {
   if (shuttingDown) return;
@@ -456,51 +467,48 @@ function connectNapCat() {
 
 let httpReverseServer = null;
 
-if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
-  httpReverseServer = startNapCatHttpReverseServer({
-    handleMessage: async (msg) => {
-      if (shuttingDown) return;
-      try {
-        appendNapcatPacketToLog(msg);
-        if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
-          void napcatLogFollower.handleLivePacket(msg).catch((error) => {
-            console.error('[NapCat follower live packet error]', error?.message || error);
-          });
+function startNapCatTransport() {
+  if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
+    httpReverseServer = startNapCatHttpReverseServer({
+      handleMessage: async (msg) => {
+        if (shuttingDown) return;
+        try {
+          appendNapcatPacketToLog(msg);
+          if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
+            void napcatLogFollower.handleLivePacket(msg).catch((error) => {
+              console.error('[NapCat follower live packet error]', error?.message || error);
+            });
+          }
+          if (napcatActionClient.handleMessage(msg)) return;
+          await acceptIncomingMessage(msg, 'napcat_http_reverse');
+        } catch (e) {
+          console.error('[HTTP reverse message error]', e);
         }
-        if (napcatActionClient.handleMessage(msg)) return;
-        await acceptIncomingMessage(msg, 'napcat_http_reverse');
-      } catch (e) {
-        console.error('[HTTP reverse message error]', e);
       }
+    });
+
+    recordNapCatConnectionState('online', napcatActionClient.getConnectionState(), {
+      mode: 'http_reverse',
+      reason: 'HTTP reverse mode started'
+    });
+
+    if (config.TICK_ENGINE_ENABLED && !tickStarted) {
+      tickRuntime = startTickEngine(null, askAIByGraph, napcatActionClient);
+      tickStarted = true;
     }
-  });
-
-  recordNapCatConnectionState('online', napcatActionClient.getConnectionState(), {
-    mode: 'http_reverse',
-    reason: 'HTTP reverse mode started'
-  });
-
-  if (config.TICK_ENGINE_ENABLED && !tickStarted) {
-    tickRuntime = startTickEngine(null, askAIByGraph, napcatActionClient);
-    tickStarted = true;
+    if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
+      schedulerRuntime.start();
+      schedulerStarted = true;
+    }
+    if (postReplyWorkerRuntime) {
+      postReplyWorkerRuntime.start();
+    }
+    napcatLogFollower.start();
+    console.log('✅ HTTP 反向连接模式启动，等待 NapCat POST 消息');
+  } else {
+    connectNapCat();
   }
-  if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
-    schedulerRuntime.start();
-    schedulerStarted = true;
-  }
-  if (postReplyWorkerRuntime) {
-    postReplyWorkerRuntime.start();
-  }
-  napcatLogFollower.start();
-  console.log('✅ HTTP 反向连接模式启动，等待 NapCat POST 消息');
-} else {
-  connectNapCat();
 }
-console.log('[startup] main bot initialized', {
-  pid: process.pid,
-  mode: config.NAPCAT_HTTP_REVERSE_ENABLED ? 'http_reverse' : 'websocket',
-  lockFile: LOCK_FILE
-});
 
 async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   if (shutdownInProgress) return;
@@ -631,4 +639,32 @@ process.on('SIGBREAK', () => {
 });
 process.on('SIGHUP', () => {
   void shutdownMainProcess('SIGHUP', 129);
+});
+
+async function startMainProcess() {
+  cleanupSingleInstanceLock = await acquireSingleInstanceLock();
+  await cleanupStaleTmpFilesOnStartup();
+  webServer = startServer();
+  initializeMemeManager();
+  if (config.MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START) {
+    const { enqueueMissingEmbeddings } = require('./utils/memory-v3/embeddingIndex');
+    enqueueMissingEmbeddings(null, {
+      schedule: true,
+      delayMs: 15000,
+      continueDelayMs: 60000
+    });
+  }
+  startResourceSnapshots();
+  startNapCatTransport();
+  console.log('[startup] main bot initialized', {
+    pid: process.pid,
+    mode: config.NAPCAT_HTTP_REVERSE_ENABLED ? 'http_reverse' : 'websocket',
+    lockFile: LOCK_FILE
+  });
+}
+
+startMainProcess().catch((error) => {
+  preserveSingleInstanceLockOnExit = true;
+  logFatalStartupError('startup', error);
+  process.exit(1);
 });

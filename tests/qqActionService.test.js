@@ -13,6 +13,7 @@ process.env.API_KEY = process.env.API_KEY || 'test-key';
 const {
   buildBotDiaryImagePrompt,
   createScheduledCommand,
+  downloadImageToLocal,
   isNightDiaryWindow,
   publishQzoneForContext,
   sanitizeDiaryImageText,
@@ -39,6 +40,23 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
   assert.ok(Array.isArray(actionCalls[0].params.message));
   assert.strictEqual(actionCalls[0].params.message[0].type, 'image');
   assert.ok(String(actionCalls[0].params.message[0].data.file || '').startsWith('base64://'));
+
+  const downloaded = await downloadImageToLocal(
+    `data:image/png;base64,${Buffer.from('downloaded-image').toString('base64')}`,
+    { tmpDir: tempRoot }
+  );
+  assert.strictEqual(downloaded.ok, true);
+  const fileImageResult = await sendGroupImageMessage('g-file-img', { file: downloaded.path }, {
+    actionClient: {
+      async callAction(action, params) {
+        actionCalls.push({ action, params });
+        return { ok: true };
+      }
+    }
+  });
+  assert.strictEqual(fileImageResult.success, true);
+  assert.ok(String(actionCalls[1].params.message[0].data.file || '').includes(Buffer.from('downloaded-image').toString('base64')));
+
   assert.strictEqual(isNightDiaryWindow({ hour: 23 }), true);
   assert.strictEqual(sanitizeDiaryImageText('今晚 23:59 看 http://example.com 群号123456'), '今晚 看');
   assert.ok(buildBotDiaryImagePrompt('今天写日记', { weekday: 'Friday', timeBucket: 'night' }).includes('open diary'));
