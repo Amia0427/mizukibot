@@ -1,0 +1,7 @@
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --verbose
+else
+  echo "[secrets] gitleaks CLI not found; running repository staged secret fallback"
+fi
+
+node scripts/check-staged-secrets.js

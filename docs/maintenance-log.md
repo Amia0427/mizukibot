@@ -1,3 +1,11 @@
+## 运行维护 2026-06-15 11:18
+
+- 小目标：执行 DEBUG_PLAN C-001/C-002/C-003，建立提交前密钥防护，并清掉 axios/request/form-data critical 供应链风险。
+- 最小修复：`.gitignore` 扩展 `.env*`、`secrets/`、`*.key`、`*.pem` 并保留 `.env.example` / `.env.skills.example`；新增 Husky `pre-commit`，优先调用系统 `gitleaks protect --staged --verbose`，没有 gitleaks CLI 时运行 `npm run check:secrets` staged 兜底扫描；`axios` 升到 `^1.18.0`，`node-telegram-bot-api` 升到 `^1.1.0`，`mineflayer` 升到 `^4.37.1`，并执行非 breaking `npm audit fix`；Telegram 包升级为 ESM-only 后，`core/tgBot.js` 改为动态 `import()`。
+- 验证：虚拟 staged `sk-*` 假密钥被 `scripts/check-staged-secrets.js` 阻断，空 staged 扫描通过；历史 `sk-*` 模式只读检查无命中；`git check-ignore -v .env .env.local .env.production secrets/token.txt private.key private.pem` 均命中；`npm ls axios node-telegram-bot-api mineflayer request form-data --all` 不再出现 `request` 或旧 `axios@0.21.4`；`node -e "require('./core/tgBot'); require('./api/minecraftAgent'); console.log('tg/minecraft modules load ok')"`、`node -e "(async()=>{ const { loadTelegramBotClass } = require('./core/tgBot'); const C = await loadTelegramBotClass(); console.log(typeof C); })()"`、`node --unhandled-rejections=strict tests/tgBotExceptionHandling.test.js`、`node --unhandled-rejections=strict tests/minecraftAgentListenerCleanup.test.js`、`node tests/qqActionService.test.js`、`npm audit --omit=dev --audit-level=critical` 通过。
+- 剩余风险：`npm audit --omit=dev` 仍有 14 个非 critical 漏洞，主要需要 LangChain v1 breaking 迁移；未连真实 Telegram/Minecraft 外部服务做在线验收。
+- 小目标已完成：本轮 critical 供应链漏洞清零，提交前密钥扫描和敏感路径 ignore 防线可复跑验收。
+
 ## 运行维护 2026-06-15 10:53
 
 - 小目标：覆盖 DEBUG_PLAN M-002/M-003/M-004，补缓存 TTL/大小限制、模型响应 JSON 解析护栏和后台任务 ack race outcome。
@@ -13,6 +21,14 @@
 - 验证：`node --check core/tgBot.js`、`node --check api/minecraftAgent.js`、`node --check tests/tgBotExceptionHandling.test.js`、`node --check tests/minecraftAgentListenerCleanup.test.js`、`node --unhandled-rejections=strict tests/tgBotExceptionHandling.test.js`、`node --unhandled-rejections=strict tests/minecraftAgentListenerCleanup.test.js` 通过。
 - 未覆盖风险：未连真实 Telegram 网络/API 限流，也未对真实 Minecraft 服务器做 10 次重连内存 profiling；当前覆盖为单元级异常与 EventEmitter listener 计数验收。
 - 小目标已完成：Telegram 消息处理错误不再逃出事件回调，Minecraft reset 会释放旧 bot 核心监听器。
+
+## 运行维护 2026-06-15 10:44
+
+- 小目标：覆盖 DEBUG_PLAN C-004/M-005，修复 tickEngine 主动触达发送失败状态不一致和 stop 后 timer 继续推进 tick 的竞态。
+- 最小修复：`sendTouchMessage` 将 WebSocket 发送、系统群发送记录和 persona 成功 outcome 放入同一 try/catch；任一失败时记录 `touch_failed`，返回 `{ sent:false, reason }`，不更新用户 tick state、initiative sent/cycle 成功状态。`startTickEngine` 在 timer 回调进入 runner 前检查 stopped，并给 proactive tick cycle 各阶段增加停止守卫。
+- 验证：`node tests/tickEngineSendFailure.test.js`、`node tests/tickEngineStopGuard.test.js`、`node tests/tickEngineAdaptive.test.js`、`node tests/proactiveGreetingFallbackState.test.js` 均通过。
+- 剩余风险：未跑 48 小时稳定性测试；本次只覆盖 WebSocket 抛错、状态记录抛错、persona 成功 outcome 抛错和 stop/timer 竞态的单元级路径。
+- 小目标已完成：主动触达发送失败不再写成功状态，scheduler stop 后不再继续推进 proactive tick。
 
 ## 运行维护 2026-06-14 22:42
 

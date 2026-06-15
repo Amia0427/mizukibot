@@ -41,6 +41,7 @@
     "memory:v3:migrate": "node scripts/migrate-memory-v3.js",
     "memory:v3:import-file": "node scripts/import-memory-file.js",
     "check:prompts": "node scripts/check-prompts.js",
+    "check:secrets": "node scripts/check-staged-secrets.js",
     "linux:install": "bash scripts/install-linux.sh",
     "linux:check": "bash scripts/check-linux.sh",
     "linux:start": "bash scripts/mizukibot.sh start",
@@ -53,7 +54,8 @@
     "win:daemon:install": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-daemon.ps1",
     "win:daemon:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-daemon.ps1",
     "win:daemon:status": "powershell -ExecutionPolicy Bypass -File scripts/status-windows-daemon.ps1",
-    "win:mgmt:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows-management-plane.ps1"
+    "win:mgmt:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows-management-plane.ps1",
+    "prepare": "husky"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.2",
@@ -61,7 +63,7 @@
     "@langchain/core": "^0.3.30",
     "@langchain/langgraph": "^0.2.40",
     "@langchain/openai": "^0.4.5",
-    "axios": "^1.7.9",
+    "axios": "^1.18.0",
     "better-sqlite3": "^12.10.0",
     "cheerio": "^1.0.0",
     "cycletls": "^2.0.5",
@@ -70,16 +72,17 @@
     "express": "^4.21.2",
     "https-proxy-agent": "^7.0.5",
     "lunar-javascript": "^1.7.7",
-    "mineflayer": "^4.35.0",
+    "mineflayer": "^4.37.1",
     "mineflayer-pathfinder": "^2.4.5",
-    "node-telegram-bot-api": "^0.67.0",
+    "node-telegram-bot-api": "^1.1.0",
     "sharp": "^0.33.5",
     "vec3": "^0.1.10",
     "ws": "^8.19.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "cross-env": "^7.0.3"
+    "cross-env": "^7.0.3",
+    "husky": "^9.1.7"
   },
   "engines": {
     "node": ">=18.0.0"

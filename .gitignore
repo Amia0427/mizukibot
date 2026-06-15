@@ -1,6 +1,10 @@
 ﻿# Local environment files
-.env
-.env.local
+.env*
+!.env.example
+!.env.skills.example
+secrets/
+*.key
+*.pem
 
 # Dependencies
 node_modules/
