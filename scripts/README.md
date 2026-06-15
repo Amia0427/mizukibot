@@ -11,7 +11,7 @@
 ## Runtime
 
 - `post-reply-worker.js`：post-reply worker 入口
-- `run-bot-daemon.ps1`：Windows 守护启动脚本；更新 2026-06-12 13:36 +08:00，主 bot 重拉前归档旧 runtime stdout/stderr，并对 15 分钟内连续 2 次硬退出做 15 分钟退避；更新 2026-06-11 18:59 +08:00，daemon 本轮成功拉起主 bot 且外置 post-reply worker 启用时会补启 worker，补启前仍扫描现有 PID/进程避免重复；更新 2026-06-11 13:35 +08:00，主 bot 启动后轮询等待 `.mizukibot.lock` 接管，默认 `BOT_DAEMON_LOCK_WAIT_MS=30000`，避免固定 2 秒窗口误报启动失败
+- `run-bot-daemon.ps1`：Windows 守护启动脚本；更新 2026-06-15 23:28 +08:00，stale lock 时追加 `data/bot-main-exit-observations.jsonl`，并用 `bot-main-runtime-state.json` 的同 pid heartbeat lifetime 判断短命退出窗口，避免 daemon 检查晚到导致误归类；更新 2026-06-12 13:36 +08:00，主 bot 重拉前归档旧 runtime stdout/stderr，并对 15 分钟内连续 2 次硬退出做 15 分钟退避；更新 2026-06-11 18:59 +08:00，daemon 本轮成功拉起主 bot 且外置 post-reply worker 启用时会补启 worker，补启前仍扫描现有 PID/进程避免重复；更新 2026-06-11 13:35 +08:00，主 bot 启动后轮询等待 `.mizukibot.lock` 接管，默认 `BOT_DAEMON_LOCK_WAIT_MS=30000`，避免固定 2 秒窗口误报启动失败
 - `restart-bot-periodic.ps1`：Windows 定时重启脚本；更新 2026-06-10 23:51 +08:00，计划任务默认每天 04:00 运行；更新 2026-06-08 13:36 +08:00，直接解析 `node.exe` 启动 `index.js`，避免计划任务 `Start-Process npm` 命中 shim 报 `%1 不是有效的 Win32 应用程序`
 - `restart-windows-daemon.ps1`：Windows 守护重启
 - `status-windows-daemon.ps1`：Windows 守护状态
@@ -40,6 +40,7 @@
 - `diagnose-gemini-recent-style-signals.js`：更新 2026-06-13 15:27 +08:00，只读汇总 `data/gemini-recent-style-signals.json` 的最近 Gemini 起手、尾音、固定短语命中次数和最近命中时间，并标出 `gemini_recent_style_guard` 会纳入的信号；验收当前缺失数据文件时输出 `missing records=0 recent=0 guard=no`
 - `diagnose-runtime-hotspots.js`：运行时资源热点诊断，汇总 RSS/heap/event loop delay、timer/interval、post-reply worker 和高频模块
 - `diagnose-runtime-status.js`：运行时状态诊断，汇总主进程、post-reply worker、后台任务和锁
+- `diagnose-main-bot-restarts.js`：更新 2026-06-15 23:28 +08:00，读取 `bot-main-exit-observations.jsonl` / daemon stale-lock evidence，能把 counted hard exit 和 silent stale-lock 从 `ok` 升为 `warning`；验收命令 `node scripts/diagnose-main-bot-restarts.js --text --tail-lines=20 --max-archive-logs=3 --max-daemon-events=20`
 - `analyze-foreground-concurrency.js`
 
 ## Setup / Install

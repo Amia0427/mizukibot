@@ -36,10 +36,14 @@ const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
 const EXPECTED_SHUTDOWN_FILE = path.join(config.DATA_DIR, 'bot-main-expected-shutdown.json');
+const RUNTIME_STATE_FILE = path.join(config.DATA_DIR, 'bot-main-runtime-state.json');
+const EXIT_OBSERVATIONS_FILE = path.join(config.DATA_DIR, 'bot-main-exit-observations.jsonl');
 const NODE_REPORT_DIR = path.join(config.DATA_DIR, 'node-reports');
 let cleanupSingleInstanceLock = null;
 let preserveSingleInstanceLockOnExit = false;
 let messageIngressDispatcher = null;
+let mainRuntimeHeartbeatTimer = null;
+const mainRuntimeStartedAt = new Date();
 
 function configureNodeProcessReports() {
   try {
@@ -78,6 +82,81 @@ function writeJsonFileBestEffort(filePath, value) {
   }
 }
 
+function appendJsonLineBestEffort(filePath, value) {
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.appendFileSync(filePath, JSON.stringify(value) + '\n', 'utf8');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function isMainRuntimeHeartbeatEnabled() {
+  const raw = String(process.env.BOT_MAIN_HEARTBEAT_ENABLED || 'true').trim().toLowerCase();
+  return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
+function getMainRuntimeHeartbeatIntervalMs() {
+  const parsed = Math.floor(Number(process.env.BOT_MAIN_HEARTBEAT_INTERVAL_MS || 30000));
+  if (!Number.isFinite(parsed) || parsed <= 0) return 30000;
+  return Math.min(300000, Math.max(5000, parsed));
+}
+
+function buildMainRuntimeState(stage = 'heartbeat', extra = {}) {
+  const now = new Date();
+  return {
+    schemaVersion: 'main_bot_runtime_state_v1',
+    role: 'main',
+    pid: process.pid,
+    startedAt: mainRuntimeStartedAt.toISOString(),
+    heartbeatAt: now.toISOString(),
+    stage: String(stage || 'heartbeat'),
+    uptimeMs: Math.round(process.uptime() * 1000),
+    lockFile: LOCK_FILE,
+    ...extra
+  };
+}
+
+function recordMainRuntimeState(stage = 'heartbeat', extra = {}) {
+  return writeJsonFileBestEffort(RUNTIME_STATE_FILE, buildMainRuntimeState(stage, extra));
+}
+
+function appendMainExitObservation(event = 'exit', extra = {}) {
+  const message = typeof extra.message === 'string' ? extra.message.slice(0, 4000) : extra.message;
+  return appendJsonLineBestEffort(EXIT_OBSERVATIONS_FILE, {
+    schemaVersion: 'main_bot_exit_observation_v1',
+    source: 'main_process',
+    event: String(event || 'exit'),
+    observedAt: new Date().toISOString(),
+    pid: process.pid,
+    startedAt: mainRuntimeStartedAt.toISOString(),
+    uptimeMs: Math.round(process.uptime() * 1000),
+    ...extra,
+    ...(message ? { message } : {})
+  });
+}
+
+function startMainRuntimeHeartbeat(stage = 'started') {
+  if (!isMainRuntimeHeartbeatEnabled()) return;
+  recordMainRuntimeState(stage);
+  if (mainRuntimeHeartbeatTimer) return;
+  mainRuntimeHeartbeatTimer = setInterval(() => {
+    recordMainRuntimeState('heartbeat');
+  }, getMainRuntimeHeartbeatIntervalMs());
+  if (typeof mainRuntimeHeartbeatTimer.unref === 'function') {
+    mainRuntimeHeartbeatTimer.unref();
+  }
+}
+
+function stopMainRuntimeHeartbeat(stage = 'stopped', extra = {}) {
+  if (mainRuntimeHeartbeatTimer) {
+    clearInterval(mainRuntimeHeartbeatTimer);
+    mainRuntimeHeartbeatTimer = null;
+  }
+  recordMainRuntimeState(stage, extra);
+}
+
 function recordExpectedShutdown(reason, extra = {}) {
   const now = new Date();
   writeJsonFileBestEffort(EXPECTED_SHUTDOWN_FILE, {
@@ -92,6 +171,15 @@ function recordExpectedShutdown(reason, extra = {}) {
 function logFatalStartupError(kind, error) {
   const message = error && (error.stack || error.message) ? (error.stack || error.message) : String(error);
   const reportPath = writeNodeReportBestEffort(kind);
+  appendMainExitObservation(kind, {
+    level: 'fatal',
+    message,
+    reportPath
+  });
+  recordMainRuntimeState(kind, {
+    level: 'fatal',
+    reportPath
+  });
   console.error(`[fatal] ${kind}`, {
     pid: process.pid,
     uptimeMs: Math.round(process.uptime() * 1000),
@@ -113,6 +201,11 @@ process.on('unhandledRejection', (error) => {
 });
 
 process.on('beforeExit', (code) => {
+  appendMainExitObservation('beforeExit', {
+    code,
+    messageIngress: messageIngressDispatcher?.getSnapshot?.()
+  });
+  recordMainRuntimeState('beforeExit', { code });
   console.warn('[process] beforeExit', {
     pid: process.pid,
     code,
@@ -122,6 +215,8 @@ process.on('beforeExit', (code) => {
 });
 
 process.on('exit', (code) => {
+  appendMainExitObservation('exit', { code });
+  recordMainRuntimeState('exit', { code });
   console.warn('[process] exit', {
     pid: process.pid,
     code,
@@ -586,6 +681,7 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   }
 
   cleanupSingleInstanceLock();
+  stopMainRuntimeHeartbeat('shutdown_complete', { reason, exitCode });
   console.log('[shutdown] complete', { reason, pid: process.pid });
   process.exit(exitCode);
 }
@@ -643,6 +739,7 @@ process.on('SIGHUP', () => {
 
 async function startMainProcess() {
   cleanupSingleInstanceLock = await acquireSingleInstanceLock();
+  startMainRuntimeHeartbeat('lock_acquired');
   await cleanupStaleTmpFilesOnStartup();
   webServer = startServer();
   initializeMemeManager();
@@ -656,6 +753,9 @@ async function startMainProcess() {
   }
   startResourceSnapshots();
   startNapCatTransport();
+  recordMainRuntimeState('initialized', {
+    mode: config.NAPCAT_HTTP_REVERSE_ENABLED ? 'http_reverse' : 'websocket'
+  });
   console.log('[startup] main bot initialized', {
     pid: process.pid,
     mode: config.NAPCAT_HTTP_REVERSE_ENABLED ? 'http_reverse' : 'websocket',

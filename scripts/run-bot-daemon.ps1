@@ -18,6 +18,8 @@ $mainStderrLogFile = Join-Path $logDir 'bot-runtime.err.log'
 $workerStdoutLogFile = Join-Path $logDir 'post-reply-worker.out.log'
 $workerStderrLogFile = Join-Path $logDir 'post-reply-worker.err.log'
 $mainRestartStateFile = Join-Path $logDir 'bot-main-restart-state.json'
+$mainRuntimeStateFile = Join-Path $logDir 'bot-main-runtime-state.json'
+$mainExitObservationsFile = Join-Path $logDir 'bot-main-exit-observations.jsonl'
 $mainPortRecoveryStateFile = Join-Path $logDir 'bot-main-port-recovery-state.json'
 $workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
 
@@ -479,6 +481,36 @@ function Write-JsonFileSafe {
   }
 }
 
+function Append-JsonLineSafe {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)]$Value
+  )
+
+  try {
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path $dir)) {
+      New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    $json = $Value | ConvertTo-Json -Depth 10 -Compress
+    [System.IO.File]::AppendAllText($Path, $json + "`r`n", [System.Text.Encoding]::UTF8)
+    return $true
+  } catch {
+    Write-DaemonLog -Message "failed to append json observation. path=$Path error=$($_.Exception.Message)"
+    return $false
+  }
+}
+
+function Parse-DateTimeOrMin {
+  param([string]$Value = '')
+
+  $parsed = [datetime]::MinValue
+  if (-not [string]::IsNullOrWhiteSpace($Value)) {
+    [void][datetime]::TryParse($Value, [ref]$parsed)
+  }
+  return $parsed
+}
+
 function Read-PositivePidFromFile {
   param([Parameter(Mandatory = $true)][string]$FilePath)
 
@@ -488,6 +520,106 @@ function Read-PositivePidFromFile {
     return $pidNum
   }
   return 0
+}
+
+function Get-MainRuntimeStateForPid {
+  param([int]$OwnerPid = 0)
+
+  if ($OwnerPid -le 0) {
+    return $null
+  }
+
+  $state = Read-JsonFileSafe -Path $mainRuntimeStateFile
+  if ($null -eq $state) {
+    return $null
+  }
+
+  $statePid = 0
+  [void][int]::TryParse([string]$state.pid, [ref]$statePid)
+  if ($statePid -ne $OwnerPid) {
+    return $null
+  }
+
+  return $state
+}
+
+function Get-MainBotExitEvidence {
+  param(
+    [Parameter(Mandatory = $true)][string]$LockPath,
+    [int]$OwnerPid = 0
+  )
+
+  $lockAgeMs = Get-MainBotLockAgeMs -LockPath $LockPath
+  $runtimeState = Get-MainRuntimeStateForPid -OwnerPid $OwnerPid
+  $heartbeatAt = [datetime]::MinValue
+  $startedAt = [datetime]::MinValue
+  if ($null -ne $runtimeState) {
+    $heartbeatAt = Parse-DateTimeOrMin -Value ([string]$runtimeState.heartbeatAt)
+    $startedAt = Parse-DateTimeOrMin -Value ([string]$runtimeState.startedAt)
+  }
+
+  $heartbeatAgeMs = [Int64]::MaxValue
+  if ($heartbeatAt -ne [datetime]::MinValue) {
+    $heartbeatAgeMs = [Int64]([Math]::Max(0, ((Get-Date).ToUniversalTime() - $heartbeatAt.ToUniversalTime()).TotalMilliseconds))
+  }
+
+  $startedAgeMs = [Int64]::MaxValue
+  if ($startedAt -ne [datetime]::MinValue) {
+    $startedAgeMs = [Int64]([Math]::Max(0, ((Get-Date).ToUniversalTime() - $startedAt.ToUniversalTime()).TotalMilliseconds))
+  }
+
+  $runtimeMs = $lockAgeMs
+  $ageSource = 'lock_mtime'
+  if ($heartbeatAt -ne [datetime]::MinValue -and $startedAt -ne [datetime]::MinValue) {
+    $runtimeMs = [Int64]([Math]::Max(0, ($heartbeatAt.ToUniversalTime() - $startedAt.ToUniversalTime()).TotalMilliseconds))
+    $ageSource = 'runtime_heartbeat_lifetime'
+  }
+
+  return [pscustomobject]@{
+    OwnerPid = $OwnerPid
+    LockAgeMs = $lockAgeMs
+    HeartbeatAgeMs = $heartbeatAgeMs
+    StartedAgeMs = $startedAgeMs
+    RuntimeMs = $runtimeMs
+    EffectiveAgeMs = $runtimeMs
+    AgeSource = $ageSource
+    HeartbeatAt = if ($heartbeatAt -ne [datetime]::MinValue) { $heartbeatAt.ToUniversalTime().ToString('o') } else { '' }
+    StartedAt = if ($startedAt -ne [datetime]::MinValue) { $startedAt.ToUniversalTime().ToString('o') } else { '' }
+    RuntimeStateStage = if ($null -ne $runtimeState) { [string]$runtimeState.stage } else { '' }
+    RuntimeStatePath = $mainRuntimeStateFile
+  }
+}
+
+function Record-MainBotExitObservation {
+  param(
+    [int]$OwnerPid = 0,
+    [string]$Reason = '',
+    [string]$LockDiagnostics = '',
+    $Evidence = $null,
+    $EarlyExitState = $null
+  )
+
+  $payload = [pscustomobject]@{
+    schemaVersion = 'main_bot_exit_observation_v1'
+    source = 'windows_daemon'
+    event = 'daemon_stale_lock'
+    observedAt = (Get-Date).ToUniversalTime().ToString('o')
+    pid = $OwnerPid
+    reason = $Reason
+    lockDiagnostics = $LockDiagnostics
+    lockAgeMs = if ($null -ne $Evidence) { $Evidence.LockAgeMs } else { 0 }
+    heartbeatAgeMs = if ($null -ne $Evidence) { $Evidence.HeartbeatAgeMs } else { 0 }
+    runtimeMs = if ($null -ne $Evidence) { $Evidence.RuntimeMs } else { 0 }
+    effectiveAgeMs = if ($null -ne $Evidence) { $Evidence.EffectiveAgeMs } else { 0 }
+    ageSource = if ($null -ne $Evidence) { $Evidence.AgeSource } else { '' }
+    heartbeatAt = if ($null -ne $Evidence) { $Evidence.HeartbeatAt } else { '' }
+    startedAt = if ($null -ne $Evidence) { $Evidence.StartedAt } else { '' }
+    runtimeStateStage = if ($null -ne $Evidence) { $Evidence.RuntimeStateStage } else { '' }
+    earlyExitReason = if ($null -ne $EarlyExitState) { $EarlyExitState.Reason } else { '' }
+    earlyExitCount = if ($null -ne $EarlyExitState) { $EarlyExitState.Count } else { 0 }
+    cooldownUntil = if ($null -ne $EarlyExitState) { $EarlyExitState.CooldownUntil } else { '' }
+  }
+  [void](Append-JsonLineSafe -Path $mainExitObservationsFile -Value $payload)
 }
 
 function Test-ExpectedMainBotShutdownRecent {
@@ -567,9 +699,11 @@ function Update-MainBotEarlyExitState {
     return [pscustomobject]@{ Blocked = $false; Reason = 'expected_shutdown'; Count = 0; CooldownUntil = '' }
   }
 
-  $lockAgeMs = Get-MainBotLockAgeMs -LockPath $LockPath
-  if ($lockAgeMs -gt $policy.WindowMs) {
-    Write-DaemonLog -Message "main bot stale lock is outside early-exit window; reset backoff. pid=$OwnerPid lock_age_ms=$lockAgeMs window_ms=$($policy.WindowMs)"
+  $exitEvidence = Get-MainBotExitEvidence -LockPath $LockPath -OwnerPid $OwnerPid
+  $lockAgeMs = $exitEvidence.LockAgeMs
+  $effectiveRuntimeMs = $exitEvidence.EffectiveAgeMs
+  if ($effectiveRuntimeMs -gt $policy.WindowMs) {
+    Write-DaemonLog -Message "main bot stale lock is outside early-exit window; reset backoff. pid=$OwnerPid lock_age_ms=$lockAgeMs effective_runtime_ms=$effectiveRuntimeMs age_source=$($exitEvidence.AgeSource) heartbeat_at=$($exitEvidence.HeartbeatAt) started_at=$($exitEvidence.StartedAt) window_ms=$($policy.WindowMs)"
     $state = [pscustomobject]@{
       firstExitAt = ''
       lastExitAt = (Get-Date).ToUniversalTime().ToString('o')
@@ -577,9 +711,14 @@ function Update-MainBotEarlyExitState {
       cooldownUntil = ''
       lastPid = $OwnerPid
       lastReason = 'outside_window'
+      lockAgeMs = $lockAgeMs
+      effectiveRuntimeMs = $effectiveRuntimeMs
+      runtimeAgeSource = $exitEvidence.AgeSource
+      heartbeatAt = $exitEvidence.HeartbeatAt
+      startedAt = $exitEvidence.StartedAt
     }
     [void](Write-JsonFileSafe -Path $mainRestartStateFile -Value $state)
-    return [pscustomobject]@{ Blocked = $false; Reason = 'outside_window'; Count = 0; CooldownUntil = '' }
+    return [pscustomobject]@{ Blocked = $false; Reason = 'outside_window'; Count = 0; CooldownUntil = ''; Evidence = $exitEvidence }
   }
 
   $now = (Get-Date).ToUniversalTime()
@@ -621,6 +760,10 @@ function Update-MainBotEarlyExitState {
     lastPid = $OwnerPid
     lastReason = 'hard_exit_while_lock_owned'
     lockAgeMs = $lockAgeMs
+    effectiveRuntimeMs = $effectiveRuntimeMs
+    runtimeAgeSource = $exitEvidence.AgeSource
+    heartbeatAt = $exitEvidence.HeartbeatAt
+    startedAt = $exitEvidence.StartedAt
     windowMs = $policy.WindowMs
     maxRestarts = $policy.MaxRestarts
     cooldownMs = $policy.CooldownMs
@@ -632,6 +775,7 @@ function Update-MainBotEarlyExitState {
     Reason = if ($blocked) { 'threshold_reached' } else { 'counted' }
     Count = $count
     CooldownUntil = if ($blocked) { $newCooldownUntil.ToString('o') } else { '' }
+    Evidence = $exitEvidence
   }
 }
 
@@ -1043,6 +1187,7 @@ try {
       $lockDiag = Get-LockProcessDiagnostics -LockPath $lockFile
       Write-DaemonLog -Message "lock present but not owned by active main bot. $lockDiag"
       $earlyExitState = Update-MainBotEarlyExitState -LockPath $lockFile -OwnerPid $previousMainPid
+      Record-MainBotExitObservation -OwnerPid $previousMainPid -Reason 'lock_present_not_owned' -LockDiagnostics $lockDiag -Evidence $earlyExitState.Evidence -EarlyExitState $earlyExitState
       if ($earlyExitState.Blocked) {
         if ($httpReverseIngressState.Outage -and (-not (Test-RecentMainHttpReversePortRecovery -Port $httpReverseIngressState.Port))) {
           Record-MainHttpReversePortRecovery -Port $httpReverseIngressState.Port -PreviousPid $previousMainPid -EarlyExitCount $earlyExitState.Count -CooldownUntil $earlyExitState.CooldownUntil

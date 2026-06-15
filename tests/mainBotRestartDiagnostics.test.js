@@ -28,6 +28,10 @@ module.exports = (() => {
       lastPid: 49136,
       lastReason: 'hard_exit_while_lock_owned',
       lockAgeMs: 131408,
+      effectiveRuntimeMs: 120000,
+      runtimeAgeSource: 'runtime_heartbeat_lifetime',
+      startedAt: '2026-06-12T11:54:00.000Z',
+      heartbeatAt: '2026-06-12T11:56:00.000Z',
       windowMs: 900000,
       maxRestarts: 2,
       cooldownMs: 900000
@@ -48,6 +52,24 @@ module.exports = (() => {
         '[2026-06-12 06:55:03] main bot lock acquired after daemon start. started_pid=50001, elapsed_ms=1000, lock pid=50001 name=node',
         '[2026-06-12 07:08:00] daemon task error: main bot exited repeatedly soon after startup; backoff active (reason=threshold_reached, count=2, cooldown_until=2026-06-12T12:21:57.877Z, lock pid=49136 not running)'
       ].join('\n')
+    );
+    writeText(
+      path.join(dataDir, 'bot-main-exit-observations.jsonl'),
+      JSON.stringify({
+        schemaVersion: 'main_bot_exit_observation_v1',
+        source: 'windows_daemon',
+        event: 'daemon_stale_lock',
+        observedAt: '2026-06-12T12:06:57.877Z',
+        pid: 49136,
+        reason: 'lock_present_not_owned',
+        earlyExitReason: 'threshold_reached',
+        earlyExitCount: 2,
+        runtimeMs: 120000,
+        ageSource: 'runtime_heartbeat_lifetime',
+        heartbeatAt: '2026-06-12T11:56:00.000Z',
+        startedAt: '2026-06-12T11:54:00.000Z',
+        lockDiagnostics: 'lock pid=49136 not running'
+      }) + '\n'
     );
     writeText(
       path.join(dataDir, 'bot-runtime.out.20260612-065501-001.log'),
@@ -93,8 +115,14 @@ module.exports = (() => {
     assert.ok(report.runtimeLogs.archived.stderr[0].tail.some((line) => line.includes('crash evidence')));
     assert.ok(report.daemon.events.some((event) => event.type === 'early_exit_backoff_active'));
     assert.ok(report.daemon.events.some((event) => event.type === 'runtime_log_archived'));
+    assert.strictEqual(report.restartState.effectiveRuntimeMs, 120000);
+    assert.strictEqual(report.restartState.runtimeAgeSource, 'runtime_heartbeat_lifetime');
+    assert.strictEqual(report.exitObservations.rows.length, 1);
+    assert.strictEqual(report.exitObservations.rows[0].runtimeMs, 120000);
     assert.ok(report.signals.some((signal) => signal.code === 'main_bot_restart_cooldown_active'));
     assert.ok(report.signals.some((signal) => signal.code === 'main_bot_lock_stale'));
+    assert.ok(report.signals.some((signal) => signal.code === 'main_bot_hard_exit_counted_by_daemon'));
+    assert.ok(report.signals.some((signal) => signal.code === 'main_bot_hard_exit_observation_recorded'));
     assert.strictEqual(
       classifyDaemonMessage('main bot early-exit state updated. reason=counted, previous_pid=1, count=1'),
       'early_exit_state_updated'
@@ -103,6 +131,9 @@ module.exports = (() => {
     const text = buildMainBotRestartText(report);
     assert.ok(text.includes('main-bot-restarts: warning'));
     assert.ok(text.includes('state: count=2'));
+    assert.ok(text.includes('runtime-evidence: started=2026-06-12T11:54:00.000Z heartbeat=2026-06-12T11:56:00.000Z effectiveRuntime=2m source=runtime_heartbeat_lifetime'));
+    assert.ok(text.includes('exit-observations:'));
+    assert.ok(text.includes('early=threshold_reached'));
     assert.ok(text.includes('archived-stderr:'));
     assert.ok(text.includes('crash evidence'));
 

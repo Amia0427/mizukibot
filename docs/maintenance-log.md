@@ -1,3 +1,12 @@
+## 运行维护 2026-06-15 23:28
+
+- 小目标：复盘主 bot 在 2026-06-15 20:08 和 20:10 +08:00 两次退出后被 daemon 重拉，确认是否仍有 silent exit 或诊断误判，并做最小修复。
+- 实际链路：20:08 daemon 发现 `.mizukibot.lock` 旧 pid=24400 已不运行，因锁龄 1241377ms 超过 15 分钟按 outside_window 清空早退计数，归档 `bot-runtime.out.20260615-200845-569.log` 后拉起 pid=32440；20:10 daemon 又发现 pid=32440 已不运行，计入 `reason=counted,count=1`，归档 `bot-runtime.out.20260615-201026-413.log` 后拉起 pid=34356。
+- 复盘结论：两份归档 stdout 末尾都是正常消息处理 release，stderr 为空，且没有 `[process] exit` / fatal / Node report；daemon 重拉判断本身成立，不是重复启动误判。未覆盖点是 silent hard exit 只能从锁残留推断，且旧 `npm run diag:main-bot-restarts -- --text` 会因当前 restart-state 被后续 outside_window 覆盖而报 `ok (0 signals)`。
+- 最小修复：主进程新增 `data/bot-main-runtime-state.json` 心跳和 `data/bot-main-exit-observations.jsonl` 同步退出观测；Windows daemon 检测 stale lock 时追加 daemon observation，并优先用同 pid 的 `heartbeatAt - startedAt` 估算真实运行寿命，避免 daemon 检查晚到时把短命退出误归为 outside_window；主 bot 重启诊断读取 observations 并把 daemon counted/stale-lock 证据升为 warning。
+- 验证：`node scripts/run-tests.js mainBotEarlyExitDiagnostics.test.js windowsDaemonScript.test.js mainBotRestartDiagnostics.test.js`、`node --check index.js`、`node --check utils/mainBotRestartDiagnostics.js`、PowerShell 解析 `scripts/run-bot-daemon.ps1` 通过；实际 `node scripts/diagnose-main-bot-restarts.js --text` 默认口径输出 `warning`，扩展口径包含 `main_bot_hard_exit_counted_by_daemon`；`data/bot-main-runtime-state.json` 已刷新当前主进程 pid=38172，HTTP reverse `POST http://127.0.0.1:3002/` 返回 204。
+- 小目标已完成：20:08/20:10 重拉链路已复盘，daemon 判断有效；silent exit 证据和诊断误判缺口已补，下一轮同类退出会留下 heartbeat/observation 证据。
+
 ## 运行维护 2026-06-15 19:29
 
 - 小目标：清掉 `npm audit --omit=dev --json` 剩余的 6 个 moderate，不破坏 Minecraft 功能。

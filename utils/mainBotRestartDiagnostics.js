@@ -14,6 +14,7 @@ const SCHEMA_VERSION = 'main_bot_restart_diagnostic_v1';
 const DEFAULT_MAX_ARCHIVE_LOGS = 2;
 const DEFAULT_TAIL_LINES = 30;
 const DEFAULT_DAEMON_EVENTS = 16;
+const DEFAULT_EXIT_OBSERVATIONS = 12;
 const DEFAULT_LOG_TAIL_BYTES = 512 * 1024;
 
 function normalizeText(value = '') {
@@ -84,6 +85,28 @@ function safeReadJson(filePath = '', fallback = null) {
   } catch (_) {
     return fallback;
   }
+}
+
+function readRecentJsonLines(filePath = '', options = {}) {
+  const target = normalizePath(filePath);
+  const maxLines = Math.max(1, Math.floor(normalizeNumber(options.maxLines, DEFAULT_EXIT_OBSERVATIONS)));
+  const maxBytes = Math.max(4096, Math.floor(normalizeNumber(options.maxBytes, DEFAULT_LOG_TAIL_BYTES)));
+  const raw = readTailText(target, maxBytes);
+  if (!normalizeText(raw)) return [];
+  return String(raw || '')
+    .split(/\r?\n/)
+    .map((line) => normalizeText(line))
+    .filter(Boolean)
+    .slice(-Math.max(maxLines * 4, maxLines))
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch (_) {
+        return null;
+      }
+    })
+    .filter((row) => row && typeof row === 'object')
+    .slice(-maxLines);
 }
 
 function safeReadDir(dirPath = '') {
@@ -200,11 +223,62 @@ function normalizeRestartState(rawState = null, statePath = '', now = Date.now()
     lastPid: normalizePid(state.lastPid),
     lastReason: normalizeText(state.lastReason),
     lockAgeMs: Math.max(0, Math.floor(normalizeNumber(state.lockAgeMs, 0))),
+    effectiveRuntimeMs: Math.max(0, Math.floor(normalizeNumber(state.effectiveRuntimeMs ?? state.effectiveExitAgeMs, 0))),
+    runtimeAgeSource: normalizeText(state.runtimeAgeSource || state.exitAgeSource),
+    heartbeatAt: normalizeText(state.heartbeatAt),
+    startedAt: normalizeText(state.startedAt),
     windowMs: Math.max(0, Math.floor(normalizeNumber(state.windowMs, 0))),
     maxRestarts: Math.max(0, Math.floor(normalizeNumber(state.maxRestarts, 0))),
     cooldownMs: Math.max(0, Math.floor(normalizeNumber(state.cooldownMs, 0))),
     mtime: isoFromMs(stat.mtimeMs),
     size: stat.size
+  };
+}
+
+function normalizeExitObservation(row = {}) {
+  const observedAt = normalizeText(row.observedAt || row.at || row.timestamp);
+  return {
+    schemaVersion: normalizeText(row.schemaVersion),
+    source: normalizeText(row.source),
+    event: normalizeText(row.event || row.type),
+    observedAt,
+    observedAtMs: parseTimeMs(observedAt),
+    pid: normalizePid(row.pid || row.ownerPid),
+    reason: normalizeText(row.reason),
+    earlyExitReason: normalizeText(row.earlyExitReason),
+    earlyExitCount: Math.max(0, Math.floor(normalizeNumber(row.earlyExitCount, 0))),
+    cooldownUntil: normalizeText(row.cooldownUntil),
+    lockAgeMs: Math.max(0, Math.floor(normalizeNumber(row.lockAgeMs, 0))),
+    heartbeatAgeMs: Math.max(0, Math.floor(normalizeNumber(row.heartbeatAgeMs, 0))),
+    runtimeMs: Math.max(0, Math.floor(normalizeNumber(row.runtimeMs || row.effectiveRuntimeMs || row.effectiveAgeMs, 0))),
+    ageSource: normalizeText(row.ageSource || row.runtimeAgeSource),
+    heartbeatAt: normalizeText(row.heartbeatAt),
+    startedAt: normalizeText(row.startedAt),
+    runtimeStateStage: normalizeText(row.runtimeStateStage || row.stage),
+    lockDiagnostics: normalizeText(row.lockDiagnostics).slice(0, 500),
+    message: normalizeText(row.message).slice(0, 500),
+    reportPath: normalizeText(row.reportPath)
+  };
+}
+
+function buildExitObservations(dataDir = '', options = {}) {
+  const filePath = normalizePath(options.exitObservationsFile || path.join(dataDir, 'bot-main-exit-observations.jsonl'));
+  const stat = safeStat(filePath);
+  const maxLines = Math.max(1, Math.floor(normalizeNumber(options.maxExitObservations, DEFAULT_EXIT_OBSERVATIONS)));
+  const rows = readRecentJsonLines(filePath, {
+    maxLines,
+    maxBytes: Math.max(4096, Math.floor(normalizeNumber(options.exitObservationsTailBytes, DEFAULT_LOG_TAIL_BYTES)))
+  }).map(normalizeExitObservation)
+    .filter((row) => row.event || row.source || row.pid)
+    .sort((a, b) => b.observedAtMs - a.observedAtMs);
+
+  return {
+    path: filePath,
+    exists: stat.exists,
+    size: stat.size,
+    latestAt: rows[0]?.observedAt || '',
+    latestPid: rows[0]?.pid || 0,
+    rows
   };
 }
 
@@ -371,6 +445,24 @@ function parseDaemonEvents(dataDir = '', options = {}) {
   };
 }
 
+function daemonEventShowsHardExit(event = {}) {
+  const message = normalizeText(event.message);
+  return event.type === 'early_exit_state_updated'
+    && /reason=(counted|threshold_reached)/i.test(message);
+}
+
+function daemonEventShowsSilentStaleLock(event = {}) {
+  const message = normalizeText(event.message);
+  return event.type === 'stale_lock_detected'
+    && /\block pid=\d+/i.test(message)
+    && /(not running|start_matches_lock=False|name=(?!node\b))/i.test(message);
+}
+
+function observationShowsHardExit(row = {}) {
+  return row.event === 'daemon_stale_lock'
+    && (row.earlyExitReason === 'counted' || row.earlyExitReason === 'threshold_reached');
+}
+
 function addSignal(signals, level, code, message, extra = {}) {
   signals.push({
     level,
@@ -394,6 +486,7 @@ function buildMainBotRestartDiagnostic(options = {}) {
     processes
   });
   const daemon = parseDaemonEvents(dataDir, options);
+  const exitObservations = buildExitObservations(dataDir, options);
   const preferredArchivePaths = Array.isArray(daemon.archivePaths) ? daemon.archivePaths : [];
   const runtimeArchives = listRuntimeArchives(dataDir, {
     ...options,
@@ -427,6 +520,32 @@ function buildMainBotRestartDiagnostic(options = {}) {
   if (!daemon.latestMainBotStartAt) {
     addSignal(signals, 'info', 'main_bot_daemon_restart_missing', 'no recent daemon main-bot start event was found in bot-daemon.log');
   }
+  const hardExitDaemonEvent = daemon.events.find(daemonEventShowsHardExit);
+  if (hardExitDaemonEvent) {
+    addSignal(signals, 'warning', 'main_bot_hard_exit_counted_by_daemon', 'daemon counted a recent main-bot exit while the lock was still owned', {
+      pid: hardExitDaemonEvent.pid,
+      at: hardExitDaemonEvent.at,
+      event: hardExitDaemonEvent.message
+    });
+  }
+  const staleLockDaemonEvent = daemon.events.find(daemonEventShowsSilentStaleLock);
+  if (staleLockDaemonEvent && !hardExitDaemonEvent) {
+    addSignal(signals, 'warning', 'main_bot_stale_lock_observed_by_daemon', 'daemon observed a dead or mismatched main-bot lock owner', {
+      pid: staleLockDaemonEvent.pid,
+      at: staleLockDaemonEvent.at,
+      event: staleLockDaemonEvent.message
+    });
+  }
+  const hardExitObservation = exitObservations.rows.find(observationShowsHardExit);
+  if (hardExitObservation) {
+    addSignal(signals, 'warning', 'main_bot_hard_exit_observation_recorded', 'exit observations contain a daemon-confirmed hard exit', {
+      pid: hardExitObservation.pid,
+      observedAt: hardExitObservation.observedAt,
+      runtimeMs: hardExitObservation.runtimeMs,
+      ageSource: hardExitObservation.ageSource,
+      earlyExitReason: hardExitObservation.earlyExitReason
+    });
+  }
 
   const overallStatus = signals.some((signal) => signal.level === 'warning')
     ? 'warning'
@@ -458,11 +577,13 @@ function buildMainBotRestartDiagnostic(options = {}) {
       projectRoot,
       dataDir,
       restartStateFile: statePath,
-      daemonLogFile: daemon.path
+      daemonLogFile: daemon.path,
+      exitObservationsFile: exitObservations.path
     },
     restartState,
     lock,
     expectedShutdown,
+    exitObservations,
     daemon,
     runtimeLogs: {
       active: activeRuntimeLogs,
@@ -502,10 +623,12 @@ function buildMainBotRestartText(report = {}) {
   const lock = report.lock || {};
   const expected = report.expectedShutdown || {};
   const daemon = report.daemon || {};
+  const exitObservations = report.exitObservations || {};
   const archived = report.runtimeLogs?.archived || {};
   const lines = [
     `main-bot-restarts: ${summary.overallStatus || 'unknown'} (${summary.signalCount || 0} signals)`,
     `state: count=${restartState.count || 0} lastExit=${restartState.lastExitAt || '-'} reason=${restartState.lastReason || '-'} cooldownActive=${restartState.cooldownActive ? 'yes' : 'no'} cooldownUntil=${restartState.cooldownUntil || '-'}`,
+    `runtime-evidence: started=${restartState.startedAt || '-'} heartbeat=${restartState.heartbeatAt || '-'} effectiveRuntime=${restartState.effectiveRuntimeMs ? formatMs(restartState.effectiveRuntimeMs) : '-'} source=${restartState.runtimeAgeSource || '-'}`,
     `policy: window=${restartState.windowMs ? formatMs(restartState.windowMs) : '-'} maxRestarts=${restartState.maxRestarts || 0} cooldown=${restartState.cooldownMs ? formatMs(restartState.cooldownMs) : '-'}`,
     `lock: ${lock.status || 'unknown'} pid=${lock.pid || 0} alive=${lock.processAlive ? 'yes' : 'no'} age=${lock.ageMs ? formatMs(lock.ageMs) : '-'} path=${lock.path || '-'}`,
     `expected-shutdown: exists=${expected.exists ? 'yes' : 'no'} active=${expected.active ? 'yes' : 'no'} pid=${expected.pid || 0} reason=${expected.reason || '-'}`,
@@ -520,6 +643,28 @@ function buildMainBotRestartText(report = {}) {
     lines.push('daemon-events:');
     for (const event of daemon.events) {
       lines.push(`- ${event.at || '-'} ${event.type}${event.pid ? ` pid=${event.pid}` : ''}: ${event.message}`);
+    }
+  }
+
+  if (Array.isArray(exitObservations.rows) && exitObservations.rows.length > 0) {
+    lines.push('exit-observations:');
+    for (const row of exitObservations.rows) {
+      const parts = [
+        row.observedAt || '-',
+        row.source || 'unknown',
+        row.event || 'event',
+        row.pid ? `pid=${row.pid}` : '',
+        row.earlyExitReason ? `early=${row.earlyExitReason}` : '',
+        row.runtimeMs ? `runtime=${formatMs(row.runtimeMs)}` : '',
+        row.ageSource ? `source=${row.ageSource}` : '',
+        row.reason ? `reason=${row.reason}` : ''
+      ].filter(Boolean);
+      lines.push(`- ${parts.join(' ')}`);
+      if (row.lockDiagnostics) {
+        lines.push(`  ${row.lockDiagnostics}`);
+      } else if (row.message) {
+        lines.push(`  ${row.message}`);
+      }
     }
   }
 
@@ -541,6 +686,7 @@ module.exports = {
   buildMainBotRestartDiagnostic,
   buildMainBotRestartText,
   classifyDaemonMessage,
+  buildExitObservations,
   listRuntimeArchives,
   parseDaemonEvents,
   parseDaemonTimestamp
