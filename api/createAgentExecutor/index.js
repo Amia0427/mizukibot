@@ -314,9 +314,23 @@ async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, dep
         const finish = (error = null) => {
           if (settled) return;
           settled = true;
+          if (error && typeof responseStream.destroy === 'function' && !responseStream.destroyed) {
+            try {
+              responseStream.destroy();
+            } catch (_) {}
+          }
           cleanup();
           if (error) reject(error);
           else resolve();
+        };
+
+        const failStreamProcessing = (error, fallbackMessage = 'generation stream processing failed') => {
+          const normalizedError = error instanceof Error ? error : new Error(String(error || fallbackMessage));
+          if (!String(normalizedError.message || '').trim()) {
+            normalizedError.message = fallbackMessage;
+          }
+          normalizedError.requestUrl = normalizedError.requestUrl || requestUrl;
+          finish(normalizedError);
         };
 
         const consumeEvents = (events = []) => {
@@ -347,10 +361,14 @@ async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, dep
         };
 
         const handleData = (chunk) => {
-          rawChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk || ''), 'utf8'));
-          const parsed = extractSSEEvents(parserState, chunk);
-          parserState.buffer = parsed.state.buffer;
-          consumeEvents(parsed.events || []);
+          try {
+            rawChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk || ''), 'utf8'));
+            const parsed = extractSSEEvents(parserState, chunk);
+            parserState.buffer = parsed.state.buffer;
+            consumeEvents(parsed.events || []);
+          } catch (error) {
+            failStreamProcessing(error);
+          }
         };
 
         const finalizeTail = () => {
@@ -359,14 +377,22 @@ async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, dep
         };
 
         const handleEnd = () => {
-          finalizeTail();
-          finish();
+          try {
+            finalizeTail();
+            finish();
+          } catch (error) {
+            failStreamProcessing(error);
+          }
         };
 
         const handleClose = () => {
           if (settled) return;
-          finalizeTail();
-          finish();
+          try {
+            finalizeTail();
+            finish();
+          } catch (error) {
+            failStreamProcessing(error);
+          }
         };
 
         const handleError = (error) => {
@@ -401,7 +427,14 @@ async function requestImageGenerationStream(prompt = '', runtimeConfig = {}, dep
         }
       }
 
-      const rawText = Buffer.concat(rawChunks).toString('utf8').trim();
+      let rawText = '';
+      try {
+        rawText = Buffer.concat(rawChunks).toString('utf8').trim();
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error(String(error || 'generation stream raw buffer processing failed'));
+        normalized.requestUrl = normalized.requestUrl || requestUrl;
+        throw normalized;
+      }
       if (!sawSseEvents && rawText) {
         const rawPayload = parseJsonTextSafe(rawText);
         if (rawPayload) {
@@ -593,9 +626,23 @@ async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeC
         const finish = (error = null) => {
           if (settled) return;
           settled = true;
+          if (error && typeof responseStream.destroy === 'function' && !responseStream.destroyed) {
+            try {
+              responseStream.destroy();
+            } catch (_) {}
+          }
           cleanup();
           if (error) reject(error);
           else resolve();
+        };
+
+        const failStreamProcessing = (error, fallbackMessage = 'chat completions stream processing failed') => {
+          const normalizedError = error instanceof Error ? error : new Error(String(error || fallbackMessage));
+          if (!String(normalizedError.message || '').trim()) {
+            normalizedError.message = fallbackMessage;
+          }
+          normalizedError.requestUrl = normalizedError.requestUrl || requestUrl;
+          finish(normalizedError);
         };
 
         const consumeEvents = (events = []) => {
@@ -624,10 +671,14 @@ async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeC
         };
 
         const handleData = (chunk) => {
-          rawChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk || ''), 'utf8'));
-          const parsed = extractSSEEvents(parserState, chunk);
-          parserState.buffer = parsed.state.buffer;
-          consumeEvents(parsed.events || []);
+          try {
+            rawChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk || ''), 'utf8'));
+            const parsed = extractSSEEvents(parserState, chunk);
+            parserState.buffer = parsed.state.buffer;
+            consumeEvents(parsed.events || []);
+          } catch (error) {
+            failStreamProcessing(error);
+          }
         };
 
         const finalizeTail = () => {
@@ -636,14 +687,22 @@ async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeC
         };
 
         const handleEnd = () => {
-          finalizeTail();
-          finish();
+          try {
+            finalizeTail();
+            finish();
+          } catch (error) {
+            failStreamProcessing(error);
+          }
         };
 
         const handleClose = () => {
           if (settled) return;
-          finalizeTail();
-          finish();
+          try {
+            finalizeTail();
+            finish();
+          } catch (error) {
+            failStreamProcessing(error);
+          }
         };
 
         const handleError = (error) => {
@@ -678,7 +737,14 @@ async function requestChatCompletionsImageGenerationStream(prompt = '', runtimeC
         }
       }
 
-      const rawText = Buffer.concat(rawChunks).toString('utf8').trim();
+      let rawText = '';
+      try {
+        rawText = Buffer.concat(rawChunks).toString('utf8').trim();
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error(String(error || 'chat completions stream raw buffer processing failed'));
+        normalized.requestUrl = normalized.requestUrl || requestUrl;
+        throw normalized;
+      }
       if (!sawSseEvents && rawText) {
         if (looksLikeHtmlDocument(rawText)) {
           lastError = new Error(`chat completions endpoint returned html response_preview=${summarizePayloadShape(rawText)}`);

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const axios = require('axios');
 const config = require('../config');
 const { getNapCatActionClient } = require('./napcatActionClient');
+const fsp = fs.promises;
 
 const NIGHT_IMAGE_MIN_HOUR = 20;
 const NIGHT_IMAGE_MAX_HOUR = 5;
@@ -32,10 +33,10 @@ function getImageGenerationModule() {
   return require('./imageGeneration');
 }
 
-function ensureDirSync(dirPath = '') {
+async function ensureDir(dirPath = '') {
   const fullPath = path.resolve(String(dirPath || '').trim());
   if (!fullPath) return '';
-  fs.mkdirSync(fullPath, { recursive: true });
+  await fsp.mkdir(fullPath, { recursive: true });
   return fullPath;
 }
 
@@ -193,7 +194,7 @@ async function downloadImageToLocal(imageUrl = '', options = {}) {
     1024,
     Number(options.maxBytes || config.BOT_DIARY_QZONE_IMAGE_MAX_BYTES || 8 * 1024 * 1024)
   );
-  const targetDir = ensureDirSync(options.tmpDir || config.QZONE_UPLOAD_TMP_DIR);
+  const targetDir = await ensureDir(options.tmpDir || config.QZONE_UPLOAD_TMP_DIR);
   const extension = (() => {
     const dataUrlMatch = url.match(/^data:(image\/[a-z0-9.+-]+);base64,/i);
     if (dataUrlMatch) {
@@ -233,7 +234,7 @@ async function downloadImageToLocal(imageUrl = '', options = {}) {
           reason: 'downloaded image too large'
         };
       }
-      fs.writeFileSync(targetPath, buffer);
+      await fsp.writeFile(targetPath, buffer);
       return {
         ok: true,
         path: targetPath
@@ -265,7 +266,7 @@ async function downloadImageToLocal(imageUrl = '', options = {}) {
         reason: 'downloaded image too large'
       };
     }
-    fs.writeFileSync(targetPath, buffer);
+    await fsp.writeFile(targetPath, buffer);
     return {
       ok: true,
       path: targetPath
@@ -280,12 +281,25 @@ async function downloadImageToLocal(imageUrl = '', options = {}) {
   }
 }
 
-function cleanupLocalImage(filePath = '') {
+async function cleanupLocalImage(filePath = '') {
   const target = normalizeText(filePath);
   if (!target) return;
   try {
-    if (fs.existsSync(target)) fs.unlinkSync(target);
+    await fsp.unlink(target);
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') {
+      return;
+    }
+  }
+}
+
+async function readImageFileAsBase64(filePath = '') {
+  const target = path.resolve(String(filePath || '').trim());
+  if (!target) return '';
+  try {
+    return (await fsp.readFile(target)).toString('base64');
   } catch (_) {}
+  return '';
 }
 
 async function tryGenerateBotDiaryQzoneImage(content = '', meta = {}, options = {}) {
@@ -383,10 +397,7 @@ async function sendGroupImageMessage(groupId = '', imageInput = null, options = 
         .replace(/^data:image\/[a-z0-9.+-]+;base64,/i, '')
         .replace(/\s+/g, '');
     } else if (typeof imageInput.file === 'string') {
-      const filePath = path.resolve(String(imageInput.file || '').trim());
-      if (filePath && fs.existsSync(filePath)) {
-        base64Body = fs.readFileSync(filePath).toString('base64');
-      }
+      base64Body = await readImageFileAsBase64(imageInput.file);
     }
   }
 

@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Readable } = require('stream');
+const { PassThrough, Readable } = require('stream');
 
 function clearProjectCache() {
   const projectRoot = path.resolve(__dirname, '..') + path.sep;
@@ -18,6 +18,14 @@ function restoreEnv(snapshot = {}) {
   for (const [key, value] of Object.entries(snapshot)) {
     process.env[key] = value;
   }
+}
+
+function withTimeout(promise, label = 'operation', timeoutMs = 200) {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 module.exports = (async () => {
@@ -377,6 +385,45 @@ module.exports = (async () => {
       requestUrl: 'https://mynav.website/v1/images/generations',
       streamMode: false
     });
+
+    await assert.rejects(
+      withTimeout(requestImageGenerationStream('malformed stream fox', runtimeConfig, {
+        httpClient: {
+          async post() {
+            return {
+              data: Readable.from(['data: {"type":\n\n'])
+            };
+          }
+        }
+      }), 'malformed image SSE'),
+      /generation stream missing image data/
+    );
+
+    let destroyedOnProcessingError = false;
+    await assert.rejects(
+      withTimeout(requestImageGenerationStream('throwing stream fox', runtimeConfig, {
+        httpClient: {
+          async post() {
+            const stream = new PassThrough({ objectMode: true });
+            const originalDestroy = stream.destroy.bind(stream);
+            stream.destroy = (...args) => {
+              destroyedOnProcessingError = true;
+              return originalDestroy(...args);
+            };
+            process.nextTick(() => {
+              stream.write({
+                toString() {
+                  throw new Error('chunk stringify failed');
+                }
+              });
+            });
+            return { data: stream };
+          }
+        }
+      }), 'throwing image stream'),
+      /chunk stringify failed/
+    );
+    assert.strictEqual(destroyedOnProcessingError, true);
 
     const chatProtocolConfig = resolveConfig({
       protocol: 'chat_completions',
