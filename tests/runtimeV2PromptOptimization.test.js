@@ -19,6 +19,14 @@ module.exports = (async () => {
     fs.writeFileSync(rootSystemPromptPath, '主回复根系统提示词测试块：stable blocks 第一位。', 'utf8');
     process.env.PROMPTS_DIR = tempPrompts.promptsDir;
     process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.MEMORY_EMBEDDING_ENABLED = 'false';
+    process.env.MEMORY_EMBEDDING_MODEL = '';
+    process.env.MEMORY_HYBRID_RECALL_ENABLED = 'false';
+    process.env.MEMORY_LANCEDB_READ_ENABLED = 'false';
+    process.env.MEMORY_RERANK_ENABLED = 'false';
+    process.env.PERSONA_WORLDBOOK_EMBEDDING_ENABLED = 'false';
+    process.env.PERSONA_WORLDBOOK_RERANK_ENABLED = 'false';
+    process.env.PERSONA_WORLDBOOK_SEMANTIC_LIMIT = '0';
     process.env.PROMPT_OPTIONAL_BUILD_ENABLED = 'true';
     process.env.PROMPT_OPTIONAL_BUILD_BUDGET_MS = '1';
     clearProjectCache();

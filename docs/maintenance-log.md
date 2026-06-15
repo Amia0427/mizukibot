@@ -1,3 +1,12 @@
+## 运行维护 2026-06-15 12:05
+
+- 小目标：收口 DEBUG_PLAN 当前剩余目标 C-006、C-007、H-001、H-005、H-006、M-001，并把 LangChain v1 迁移后的运行边界、验证结果和剩余风险写入文档。
+- 已完成：`api/qqActionService.js` 保持旧入口兼容，图片/日记配图迁入 `api/qqActionService.imageDiary.js`；`index.js` 单实例锁/旧 PID 探测和图片热路径同步 I/O 改为 async；`requestImageGenerationStream` 与图像流 SSE 处理捕获 data/end/close/error 内异常并 reject；`api/napcatMessageReader.js`、`utils/memosPlannerRecall.js`、`core/continuousMessagePreprocessor/index.js` 增加 TTL 和最大容量；`core/researchTaskQueue.js`、`core/foregroundConcurrency.js`、`utils/backgroundTaskRuntime.js` 加 single-flight/重入保护；LangChain 升至 v1，`package.json` 和 README 运行边界同步为 Node.js `>=20.0.0`。
+- 验证：`npm ls @langchain/core @langchain/anthropic @langchain/openai @langchain/langgraph zod zod-to-json-schema --all` 通过；`node -e "require('./api/runtimeV2/host'); require('./api/runtimeV2/state'); require('./api/toolAdapter'); require('./api/legacy/agentGraphV1Runtime'); console.log('langchain runtime modules load ok')"` 通过；`node scripts/run-tests.js langgraphV2.test.js langgraphRuntimeVersion.test.js langgraphStoreSanitize.test.js langgraphCheckpointSnapshot.test.js` 通过；`node scripts/run-tests.js runtimeHostCotSource.test.js runtimeV2DirectReplyFailureTelemetry.test.js runtimeStreamingCoordinator.test.js dispatchRuntimeBinding.test.js dispatchRuntimeBindingParallel.test.js runtimeV2MainReplyMemoryOrder.test.js runtimeV2PromptTimeoutMemoryFallback.test.js runtimeV2SessionPromptCacheStability.test.js runtimeV2PromptOptimization.test.js` 通过；`npm run check:agent:static`、`npm run check:prompts` 通过；`npm audit --omit=dev --json` 为 6 个 moderate、0 high、0 critical。
+- 新暴露并处理：两个 Runtime V2 prompt 测试在断言通过后会因继承本地 embedding/worldbook/rerank 远程配置留下活跃 socket，现测试内显式隔离相关环境变量，`ERR-20260615-001` 标记 resolved。
+- 剩余风险：未跑 24/48 小时长稳、clinic.js 事件循环延迟、图片吞吐压测、真实 Telegram/Minecraft/NapCat 外部联调；`npm audit --omit=dev` 剩余 6 个 moderate 均来自 mineflayer auth 链（`@azure/msal-node`、`minecraft-protocol`、`mineflayer`、`prismarine-auth`、`uuid`、`yggdrasil`）。
+- 小目标已完成：本轮 DEBUG_PLAN 指定目标已有可复跑本地验收，剩余项均记录为外部压测/依赖链风险，不阻塞当前提交。
+
 ## 运行维护 2026-06-15 11:56
 
 - 小目标：让第三方主回复网关在显式配置 `/v1/messages` 时直接使用 Messages 协议，同时保留默认补全 `/v1/chat/completions` 的行为。
