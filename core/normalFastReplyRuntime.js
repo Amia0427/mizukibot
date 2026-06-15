@@ -39,7 +39,7 @@ function normalizeHistoryMessage(item = {}) {
   const normalizedRole = role === 'assistant' || role === 'bot' ? 'assistant' : (role === 'user' || role === 'human' ? 'user' : '');
   const content = getMessageContent(item);
   if (!normalizedRole || !content) return null;
-  if (normalizedRole === 'assistant' && isUnsafeUserFacingReply(content)) return null;
+  if (normalizedRole === 'assistant' && (isUnsafeUserFacingReply(content) || isReplyFailure(content))) return null;
   return {
     role: normalizedRole,
     content
@@ -137,7 +137,8 @@ function buildSummaryText(sessionKey = '', deps = {}, runtimeConfig = config) {
     ? deps.getRecentSessionContextSummaries
     : getRecentSessionContextSummaries;
   const latest = loadSummaries(sessionKey, { limit: 1 })[0];
-  return trimTextToChars(latest?.summary || latest?.text || '', summaryMaxChars);
+  const summary = trimTextToChars(latest?.summary || latest?.text || '', summaryMaxChars);
+  return isReplyFailure(summary) ? '' : summary;
 }
 
 function isShortFastReplyPersonaModule(item = {}, maxTokenCost = NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST) {
@@ -438,7 +439,11 @@ async function runNormalFastReply(input = {}, deps = {}) {
     allowedTools: [],
     disableHumanizer: true,
     modelConfig: {
-      maxTokens
+      maxTokens,
+      reasoningEffort: 'off',
+      topK: NaN,
+      topA: NaN,
+      repetitionPenalty: NaN
     },
     source: 'normal_fast_reply',
     dispatchBranch: 'normal_fast_reply',

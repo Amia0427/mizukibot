@@ -48,6 +48,10 @@ module.exports = (async () => {
     role: 'assistant',
     content: '我是 Claude，由 Anthropic 开发。我不能扮演角色。'
   });
+  chatHistory[sessionKey].push({
+    role: 'assistant',
+    content: '刚刚那句没组织稳。你再发一次，我继续接。'
+  });
 
   const built = buildNormalFastReplyMessages({
     userId: 'u1',
@@ -65,6 +69,7 @@ module.exports = (async () => {
   assert.strictEqual(historyMessages[0].content, 'user-4');
   assert.strictEqual(historyMessages[23].content, 'assistant-15');
   assert.strictEqual(historyMessages.some((item) => item.content.includes('Claude')), false);
+  assert.strictEqual(historyMessages.some((item) => item.content.includes('没组织稳')), false);
   assert.ok(built.messages[0].content.includes('最近会话摘要'), '应注入 1 条最近会话摘要');
   assert.ok(built.messages[0].content.includes('[ChatLivenessDiscipline]'), '应注入快速回复活人感纪律');
   assert.ok(built.messages[0].content.includes('surface=group_direct_chat'), '群快速回复应识别群聊 surface');
@@ -206,6 +211,10 @@ module.exports = (async () => {
   assert.deepStrictEqual(seenContext.allowedTools, [], '应清空工具');
   assert.strictEqual(seenContext.disableHumanizer, true, '应禁用 humanizer');
   assert.strictEqual(seenContext.modelConfig.maxTokens, 1024, '应使用快速回复输出上限');
+  assert.strictEqual(seenContext.modelConfig.reasoningEffort, 'off', '快速回复应关闭 reasoning，避免非流式只产出推理/空正文');
+  assert.ok(Number.isNaN(seenContext.modelConfig.topA), '快速回复不应继承主回复 top_a 扩展采样');
+  assert.ok(Number.isNaN(seenContext.modelConfig.topK), '快速回复不应继承主回复 top_k 扩展采样');
+  assert.ok(Number.isNaN(seenContext.modelConfig.repetitionPenalty), '快速回复不应继承主回复 repetition_penalty 扩展采样');
 
   const safetyResult = await runNormalFastReply({
     userId: 'u1',
