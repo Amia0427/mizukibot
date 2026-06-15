@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-15 19:35 +08:00**：同步 `.claude/audit-workflow.js` 与当前仓库真实基线。审计工作流已改为增量复审口径，默认基线为 `3827eb0`、Node.js `>=20.0.0`、LangChain/LangGraph v1、`npm audit --omit=dev --json` 0 vulnerabilities，并内置 C-001~C-007、H-001~H-006、M-001~M-005 已完成项，后续运行不会把这些历史完成项重新写成新问题。验收：工作流包装进 async 函数后语法解析通过、`npm audit --omit=dev --json`、依赖版本复核通过。小目标完成：审计工作流可继续使用，且按 DEBUG_PLAN/README 当前状态做增量复审。
+
 **2026-06-15 19:29 +08:00**：清掉 `npm audit --omit=dev --json` 剩余 6 个 moderate。定位确认 6 项均来自 `mineflayer -> minecraft-protocol -> prismarine-auth/yggdrasil -> uuid` 认证链，实际 Minecraft 入口仍只在 `api/minecraftAgent.js` 懒加载 `mineflayer`，默认 `MC_AUTH=offline` 不触发在线认证；最小修复为添加 `overrides.uuid=11.1.1`，让 `@azure/msal-node` 和 `yggdrasil` 复用安全 `uuid`，不降级 `mineflayer`、不改 Minecraft 功能代码。验收：`npm audit --omit=dev --json` 为 0 vulnerabilities；`npm ls uuid @azure/msal-node yggdrasil minecraft-protocol prismarine-auth mineflayer --all` 显示原 mineflayer 链保留且 `uuid@11.1.1` deduped/overridden；`node --check api/minecraftAgent.js`、`node --unhandled-rejections=strict tests/minecraftAgentListenerCleanup.test.js`、Minecraft 相关依赖加载探针、`npm run check:agent:static` 均通过。提交：`db45d8e`。小目标完成：mineflayer auth 链 moderate 已清零，未覆盖真实 Minecraft 服务器在线登录联调。
 
 **2026-06-15 12:05 +08:00**：完成 DEBUG_PLAN C-006/C-007/H-001/H-005/H-006/M-001 收口。`qqActionService` 已做图片/日记职责兼容拆分；目标热路径同步 I/O 改为 async；图像生成流异常会 reject 并尽量销毁流；三处缓存增加 TTL/容量裁剪；三处队列/会话竞态加 single-flight/重入保护；LangChain 升至 v1，运行边界同步为 Node.js `>=20.0.0`。验收：LangGraph/Runtime V2 目标批次、`npm run check:agent:static`、`npm run check:prompts`、`npm ls @langchain/core @langchain/anthropic @langchain/openai @langchain/langgraph zod zod-to-json-schema --all` 通过；`npm audit --omit=dev --json` 降为 6 个 moderate、0 high、0 critical，剩余为 mineflayer auth 链。提交：`e1b174b`。小目标完成：本轮 DEBUG_PLAN 指定目标已有代码、测试和文档验收；剩余为外部长稳/压测和 mineflayer auth 链依赖风险。
@@ -712,6 +714,6 @@ Prompt 改了但没生效：
 - `scripts/README.md`：脚本说明。
 - `deploy/README.md`：部署说明。
 - `deploy/linux/README_LINUX.md`：Linux 部署细节。
-## 深度代码库审计完成 (2026-06-15 10:23)
+## 深度代码库审计历史基线 (2026-06-15 10:23)
 
-完成 5 阶段串行审计，生成 `DEBUG_PLAN.md` 结构化计划书。发现 7 个 Critical、6 个 High、9 个 Medium/Low 问题，测试覆盖率 69.4%。
+原始 5 阶段串行审计生成 `DEBUG_PLAN.md` 结构化计划书；当前完成状态以本文件顶部 2026-06-15 19:35 +08:00 记录和 `DEBUG_PLAN.md` 顶部基线为准。
