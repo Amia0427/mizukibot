@@ -17,6 +17,8 @@ try {
   process.env.COMPANION_TOOL_MODE_ENABLED = 'true';
   process.env.COMPANION_ALLOWED_TOOLS = '';
   process.env.ADMIN_USER_IDS = 'admin_1';
+  process.env.FILTERED_TOOL_SCHEMA_CACHE_MAX_ENTRIES = '2';
+  process.env.FILTERED_TOOL_SCHEMA_CACHE_TTL_MS = '1000';
   clearProjectCache();
   const service = require('../api/runtimeV2/model/service');
 
@@ -83,6 +85,24 @@ try {
     ['qzone_draft'],
     'admin private chat must keep qzone_draft visible to the main model'
   );
+
+  service.clearFilteredToolSchemaCache();
+  service._test.setCachedFilteredToolSchemas('cache-a', [{ type: 'function', function: { name: 'a' } }]);
+  service._test.setCachedFilteredToolSchemas('cache-b', [{ type: 'function', function: { name: 'b' } }]);
+  service._test.setCachedFilteredToolSchemas('cache-c', [{ type: 'function', function: { name: 'c' } }]);
+  assert.strictEqual(service.getFilteredToolSchemaCacheStats().size, 2, 'tool schema cache should prune to max entries');
+  assert.strictEqual(service._test.getCachedFilteredToolSchemas('cache-a'), null, 'oldest tool schema cache entry should be evicted');
+
+  const cachedC = service._test.getCachedFilteredToolSchemas('cache-c');
+  cachedC[0].function.name = 'mutated';
+  assert.strictEqual(
+    service._test.getCachedFilteredToolSchemas('cache-c')[0].function.name,
+    'c',
+    'cached tool schemas must be cloned on read'
+  );
+
+  service._test.setCachedFilteredToolSchemas('expired', [{ type: 'function', function: { name: 'expired' } }], Date.now() - 5000);
+  assert.strictEqual(service._test.getCachedFilteredToolSchemas('expired'), null, 'expired tool schema cache entry should be removed on read');
 
   console.log('modelServiceToolSchemaCache.test.js passed');
 } catch (error) {

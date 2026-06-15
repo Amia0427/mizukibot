@@ -8,6 +8,9 @@ const {
   normalizeEmbeddingVector
 } = require('./memoryEmbeddingClient');
 
+const DEFAULT_QUERY_CACHE_MAX_ENTRIES = 500;
+const DEFAULT_QUERY_CACHE_TTL_MS = 5 * 60 * 1000;
+
 const queryCache = new Map();
 
 function sanitizeText(value) {
@@ -99,19 +102,62 @@ function semanticScoreDoc(queryEmbedding = null, doc = {}) {
   return Math.max(0, cosineArray(queryVector, docVector));
 }
 
+function getQueryEmbeddingCacheTtlMs() {
+  return Math.max(1000, Number(config.MEMORY_EMBEDDING_CACHE_TTL_MS) || DEFAULT_QUERY_CACHE_TTL_MS);
+}
+
+function getQueryEmbeddingCacheMaxEntries() {
+  return Math.max(1, Math.floor(Number(
+    config.MEMORY_QUERY_EMBEDDING_CACHE_MAX
+    || config.MEMORY_EMBEDDING_CACHE_MAX_ENTRIES
+    || process.env.MEMORY_QUERY_EMBEDDING_CACHE_MAX
+    || process.env.MEMORY_EMBEDDING_CACHE_MAX_ENTRIES
+    || DEFAULT_QUERY_CACHE_MAX_ENTRIES
+  ) || DEFAULT_QUERY_CACHE_MAX_ENTRIES));
+}
+
+function pruneQueryEmbeddingCache(maxEntries = getQueryEmbeddingCacheMaxEntries()) {
+  while (queryCache.size > maxEntries) {
+    const oldestKey = queryCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    queryCache.delete(oldestKey);
+  }
+}
+
+function getCachedQueryEmbedding(key = '', now = Date.now()) {
+  if (!key) return null;
+  const cached = queryCache.get(key);
+  if (!cached || !Array.isArray(cached.vector) || cached.expiresAt <= now) {
+    if (cached) queryCache.delete(key);
+    return null;
+  }
+  queryCache.delete(key);
+  queryCache.set(key, cached);
+  return cached.vector;
+}
+
+function setCachedQueryEmbedding(key = '', vector = null, ttlMs = getQueryEmbeddingCacheTtlMs(), now = Date.now()) {
+  const normalized = normalizeEmbeddingVector(vector);
+  if (!key || !normalized) return;
+  queryCache.set(key, {
+    vector: normalized,
+    expiresAt: now + Math.max(1000, Number(ttlMs) || DEFAULT_QUERY_CACHE_TTL_MS)
+  });
+  pruneQueryEmbeddingCache();
+}
+
 async function embedQueryText(query = '', options = {}) {
   const text = sanitizeText(query);
   if (!text) return null;
   if (Array.isArray(options.queryEmbedding)) return normalizeEmbeddingVector(options.queryEmbedding);
 
-  const ttl = Math.max(1000, Number(config.MEMORY_EMBEDDING_CACHE_TTL_MS) || (5 * 60 * 1000));
   const model = sanitizeText(options.model || getEmbeddingModel());
   const key = `${model}:${hashText(text)}`;
-  const cached = queryCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.vector;
+  const cached = getCachedQueryEmbedding(key);
+  if (cached) return cached;
 
   const vector = await embedText(text, options);
-  if (vector) queryCache.set(key, { vector, expiresAt: Date.now() + ttl });
+  if (vector) setCachedQueryEmbedding(key, vector, getQueryEmbeddingCacheTtlMs());
   return vector || null;
 }
 
@@ -139,6 +185,14 @@ function clearQueryEmbeddingCache() {
   queryCache.clear();
 }
 
+function getQueryEmbeddingCacheStats() {
+  return {
+    size: queryCache.size,
+    maxEntries: getQueryEmbeddingCacheMaxEntries(),
+    ttlMs: getQueryEmbeddingCacheTtlMs()
+  };
+}
+
 module.exports = {
   buildEmbeddingText,
   getEmbeddingMeta,
@@ -147,5 +201,14 @@ module.exports = {
   semanticScoreDoc,
   embedQueryText,
   embedMemoryItems,
-  clearQueryEmbeddingCache
+  clearQueryEmbeddingCache,
+  getQueryEmbeddingCacheStats,
+  _test: {
+    getCachedQueryEmbedding,
+    getQueryEmbeddingCacheMaxEntries,
+    getQueryEmbeddingCacheTtlMs,
+    pruneQueryEmbeddingCache,
+    queryCache,
+    setCachedQueryEmbedding
+  }
 };

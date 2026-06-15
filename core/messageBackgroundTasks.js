@@ -115,12 +115,25 @@ function createMessageBackgroundTaskCoordinator(deps = {}) {
       return '????????????????????????????????????';
     };
 
-    const replyPromise = executionHandle.promise.then(finalizeSuccess).catch(finalizeFailure);
+    const toFailureOutcome = (error) => ({
+      done: true,
+      status: 'failed',
+      reply: finalizeFailure(error),
+      error
+    });
+    const replyPromise = executionHandle.promise.then(
+      (rawReply) => ({
+        done: true,
+        status: 'completed',
+        reply: finalizeSuccess(rawReply)
+      }),
+      toFailureOutcome
+    ).catch(toFailureOutcome);
 
     const ackDelayMs = getBackgroundTaskAckDelayMs(config);
     const ackRace = await Promise.race([
-      replyPromise.then((reply) => ({ done: true, reply })),
-      new Promise((resolve) => setTimeout(() => resolve({ done: false }), ackDelayMs))
+      replyPromise,
+      new Promise((resolve) => setTimeout(() => resolve({ done: false, status: 'timeout', timeout: true }), ackDelayMs))
     ]);
 
     if (ackRace.done) {
@@ -173,7 +186,9 @@ function createMessageBackgroundTaskCoordinator(deps = {}) {
       backgroundTaskRuntime.markAckSent(task.id, true);
     }
 
-    replyPromise.then(async (finalReply) => {
+    replyPromise.then(async (outcome) => {
+      if (outcome?.status === 'failed') return;
+      const finalReply = outcome?.reply;
       if (!String(finalReply || '').trim()) return;
       if (!backgroundTaskRuntime.canEmitFollowup(task.id)) return;
 
