@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-15 11:56 +08:00**：修正主回复第三方模型端点协议选择。显式配置 `API_BASE_URL` / `ADMIN_API_BASE_URL` 到 `/v1/messages` 时，现在 URL 协议优先于 `API_PROVIDER`，即使 provider 写成第三方/OpenAI-compatible 也会直接走 Anthropic Messages；裸域名或 `/v1` 仍默认补 `/v1/chat/completions`，`/v1/chat/completions` 继续保持 OpenAI-compatible。验收：`node tests/providerRequestNormalization.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/providerRequestDiagnostics.test.js` 均通过。小目标完成：第三方 `/v1/messages` 网关不再被自动改写到 `/v1/chat/completions`。
+
 **2026-06-15 11:18 +08:00**：完成 DEBUG_PLAN C-001/C-002/C-003 供应链与密钥提交防护。`.gitignore` 覆盖 `.env*`、`secrets/`、`*.key`、`*.pem` 并保留示例 env；新增 Husky `pre-commit`，优先运行系统 `gitleaks protect --staged --verbose`，缺失时运行 `npm run check:secrets` staged 兜底扫描；`axios` 升至 `1.18.0`，`node-telegram-bot-api` 升至 `1.1.0`，`mineflayer` 升至 `4.37.1`，并执行非 breaking `npm audit fix`。验收：虚拟 staged `sk-*` 假密钥被阻断，空 staged 扫描通过；`npm ls axios node-telegram-bot-api mineflayer request form-data --all` 不再出现 `request` 或旧 `axios@0.21.4`；`npm audit --omit=dev --audit-level=critical` 通过；Telegram ESM-only 升级已用动态 `import()` 兼容。剩余：`npm audit --omit=dev` 仍有 14 个非 critical 漏洞，主要需要 LangChain v1 breaking 迁移。提交：`505b71a`。小目标完成：本轮 critical 供应链漏洞清零并建立提交前密钥防线。
 
 **2026-06-15 10:53 +08:00**：完成 DEBUG_PLAN M-002/M-003/M-004 小范围稳定性修复。`utils/memorySemanticIndex.js` 的 query embedding 缓存和 `api/runtimeV2/model/service.js` 的 filtered tool schema 缓存增加 TTL、访问刷新和最大条数裁剪；`api/parser.js` 新增受大小/深度保护的 JSON 解析入口，并用于模型响应/SSE/tool args 解析，`summarizeMalformedResponse` 对超限 JSON 只记录 guard 原因；`core/messageBackgroundTasks.js` 的 ack race 统一返回 `completed/failed/timeout` outcome，后台超时后不把失败提示当成功 follow-up 发送。验收：`node --check utils/memorySemanticIndex.js`、`node --check api/runtimeV2/model/service.js`、`node --check api/parser.js`、`node --check core/messageBackgroundTasks.js`、`node scripts/run-tests.js memorySemanticIndexCache.test.js modelServiceToolSchemaCache.test.js modelServiceCot.test.js parserModelResponseFormats.test.js messageBackgroundTasks.test.js` 均通过。未覆盖：未引入 `lru-cache` 新依赖，采用项目既有 Map TTL/prune 风格；未做长时间 OOM/内存曲线压测。小目标完成：M-002/M-003/M-004 已有可复跑单元验收。
@@ -515,7 +517,7 @@ MEMORY_V3_SESSION_RECENT_MESSAGES=128
 
 不建议直接切 `MAIN_REPLY_PROMPT_MODE=legacy` 作为常态方案；它会重新带入 ordinary chat 中已收敛掉的 few-shot、style/social/self-improvement/worldbook 噪声，输入 token 会增加，但记忆命中精度不一定提高。
 
-主回复协议：显式 `API_PROVIDER=anthropic` 或 URL 以 `/messages` 结尾时走 Claude Messages；`/v1/chat/completions` 和 `/v1/responses` 默认保持 OpenAI-compatible。`ADMIN_API_PROVIDER`、`AI_FALLBACK_PROVIDER`、`ADMIN_AI_FALLBACK_PROVIDER` 可覆盖推断，避免 Claude 模型名被错误强制切到 `/messages`。
+主回复协议：URL 明确以 `/messages` 结尾时优先走 Claude/Anthropic Messages，即使 `API_PROVIDER` / `ADMIN_API_PROVIDER` 写成第三方或 `openai_compatible` 也不再改写；显式 `API_PROVIDER=anthropic` 也走 Messages。裸域名或 `/v1` 默认补 `/v1/chat/completions`，`/v1/chat/completions` 和 `/v1/responses` 默认保持 OpenAI-compatible。`ADMIN_API_PROVIDER`、`AI_FALLBACK_PROVIDER`、`ADMIN_AI_FALLBACK_PROVIDER` 仍可用于非 `/messages` 端点覆盖推断。
 
 配置入口优先看 `config/index.js` 和 `config/*Runtime.js`。MemOS 细节见 `docs/memos-mcp-planner-recall.md`，主回复上下文见 `docs/main-reply-context.md`。
 

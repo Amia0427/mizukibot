@@ -136,12 +136,12 @@ function ensureOpenAIMainUrl(apiBaseUrl = '', options = {}) {
 
 function resolveMainProvider(apiBaseUrl = '', model = '', options = {}) {
   if (getEndpointScopedAnthropicMessagesConfig(apiBaseUrl)) return 'anthropic';
+  const normalizedUrl = String(apiBaseUrl || '').trim();
+  if (/\/messages(?:\/)?$/i.test(normalizedUrl)) return 'anthropic';
   if (options && typeof options === 'object' && String(options.provider || '').trim()) {
     return normalizeApiProvider(options.provider);
   }
   if (isGeminiModelName(model)) return 'gemini_native';
-  const normalizedUrl = String(apiBaseUrl || '').trim();
-  if (/\/messages(?:\/)?$/i.test(normalizedUrl)) return 'anthropic';
   return 'openai_compatible';
 }
 
