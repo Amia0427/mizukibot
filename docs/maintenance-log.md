@@ -5,6 +5,7 @@
 - 最小修复：主回复 provider 解析改为 endpoint 优先，URL 以 `/messages` 结尾时直接判为 `anthropic_messages`；裸域名、`/v1`、`/v1/chat/completions` 仍按 OpenAI-compatible 默认补全或保留。
 - 验证：`node tests/providerRequestNormalization.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/providerRequestDiagnostics.test.js` 通过；新增回归覆盖 `provider=openai_compatible + https://third-party.example/v1/messages`，构造和 prepare 后 URL 均保持 `/v1/messages`，header 使用 `x-api-key` 而非 `Authorization`。
 - 小目标已完成：第三方 `/v1/messages` 网关不再被自动改写到 `/v1/chat/completions`。
+- 提交后记录 2026-06-15 12:02 +08:00：已提交 `9669bcd`（`fix: honor messages endpoint protocol`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-15 11:18
 
