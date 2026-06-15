@@ -12,11 +12,17 @@ module.exports = (() => {
   assert.ok(script.includes('function Archive-DaemonRedirectLogIfNeeded'), 'daemon should archive runtime logs before redirect truncates them');
   assert.ok(script.includes('archived runtime redirect log before restart'), 'daemon should log archived runtime stdout/stderr paths');
   assert.ok(script.includes("Join-Path $logDir 'bot-main-restart-state.json'"), 'daemon should persist main bot restart backoff state');
+  assert.ok(script.includes("Join-Path $logDir 'bot-main-runtime-state.json'"), 'daemon should read main bot runtime heartbeat state');
+  assert.ok(script.includes("Join-Path $logDir 'bot-main-exit-observations.jsonl'"), 'daemon should append structured main bot exit observations');
   assert.ok(script.includes('function Update-MainBotEarlyExitState'), 'daemon should track repeated short-lived main bot exits');
+  assert.ok(script.includes('function Get-MainBotExitEvidence'), 'daemon should derive exit evidence from lock and heartbeat state');
+  assert.ok(script.includes('runtime_heartbeat_lifetime'), 'daemon should use heartbeat lifetime to classify short-lived exits');
+  assert.ok(script.includes('function Record-MainBotExitObservation'), 'daemon should persist stale-lock observations for later diagnosis');
   assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_WINDOW_MS'"), 'daemon early-exit window should be configurable');
   assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_MAX_RESTARTS'"), 'daemon early-exit threshold should be configurable');
   assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_MAIN_EARLY_EXIT_COOLDOWN_MS'"), 'daemon early-exit cooldown should be configurable');
   assert.ok(script.includes('main bot exited repeatedly soon after startup; backoff active'), 'daemon should stop immediate restart loops after repeated early exits');
+  assert.ok(script.includes('effective_runtime_ms='), 'daemon should log effective runtime evidence for outside-window decisions');
   assert.ok(script.includes('bot-main-expected-shutdown.json'), 'daemon should exempt expected main bot shutdowns from early-exit backoff');
   assert.ok(script.includes('function Get-MainHttpReverseIngressState'), 'daemon should inspect HTTP reverse ingress listener state');
   assert.ok(script.includes("Join-Path $logDir 'bot-main-port-recovery-state.json'"), 'daemon should persist HTTP reverse port recovery attempts');
