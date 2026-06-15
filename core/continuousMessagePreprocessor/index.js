@@ -117,6 +117,12 @@ function clampDebounceMs(value, fallback = 2000) {
   return Math.max(300, Math.min(60000, Math.floor(n)));
 }
 
+function clampCacheNumber(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
 function cloneReplyContext(replyContext = null) {
   if (!replyContext || typeof replyContext !== 'object') return null;
   return {
@@ -731,6 +737,18 @@ function createContinuousMessagePreprocessor(options = {}) {
     1200
   );
   const sentenceMinChars = Math.max(1, Number(options.sentenceMinChars ?? config.CONTINUOUS_MESSAGE_SENTENCE_MIN_CHARS) || 6);
+  const sessionCacheTtlMs = clampCacheNumber(
+    options.sessionCacheTtlMs ?? config.CONTINUOUS_MESSAGE_SESSION_CACHE_TTL_MS ?? process.env.CONTINUOUS_MESSAGE_SESSION_CACHE_TTL_MS,
+    Math.max(maxHoldMs * 2, 60 * 1000),
+    300,
+    60 * 60 * 1000
+  );
+  const sessionCacheMaxSize = clampCacheNumber(
+    options.sessionCacheMaxSize ?? config.CONTINUOUS_MESSAGE_SESSION_CACHE_MAX_SIZE ?? process.env.CONTINUOUS_MESSAGE_SESSION_CACHE_MAX_SIZE,
+    1000,
+    1,
+    100000
+  );
   const sharedResolveOptions = {
     actionClient: options.actionClient,
     ensureCachedImageRef: typeof options.ensureCachedImageRef === 'function' ? options.ensureCachedImageRef : undefined,
@@ -760,6 +778,43 @@ function createContinuousMessagePreprocessor(options = {}) {
     }
   }
 
+  function dropSession(sessionKey = '', reason = 'cache_pruned') {
+    const session = sessions.get(sessionKey);
+    if (!session) {
+      sessionActivityVersion.delete(sessionKey);
+      return;
+    }
+    session.flushReason = reason;
+    clearTimer(session);
+    sessions.delete(sessionKey);
+    sessionActivityVersion.delete(sessionKey);
+    if (typeof session.flushResolve === 'function') {
+      session.flushResolve();
+    }
+  }
+
+  function pruneSessions(now = Date.now()) {
+    for (const [key, session] of sessions.entries()) {
+      if (Number(session.expiresAt || 0) <= now) {
+        dropSession(key, 'cache_ttl');
+      }
+    }
+    while (sessions.size > sessionCacheMaxSize) {
+      const oldestKey = sessions.keys().next().value;
+      if (oldestKey === undefined) break;
+      dropSession(oldestKey, 'cache_max_size');
+    }
+    for (const key of sessionActivityVersion.keys()) {
+      if (sessionActivityVersion.size <= sessionCacheMaxSize) break;
+      if (!sessions.has(key)) sessionActivityVersion.delete(key);
+    }
+  }
+
+  function touchSession(session = {}, now = Date.now()) {
+    session.expiresAt = now + sessionCacheTtlMs;
+    return session;
+  }
+
   function getSessionDebounceMs(session = {}) {
     const baseDebounceMs = String(session.messageType || '').trim().toLowerCase() === 'private'
       ? privateDebounceMs
@@ -769,8 +824,10 @@ function createContinuousMessagePreprocessor(options = {}) {
   }
 
   function scheduleFlush(sessionKey) {
+    pruneSessions();
     const session = sessions.get(sessionKey);
     if (!session) return;
+    touchSession(session);
     clearTimer(session);
     const now = Date.now();
     const elapsedMs = Math.max(0, now - Number(session.startedAt || now));
@@ -835,6 +892,7 @@ function createContinuousMessagePreprocessor(options = {}) {
 
   async function handleMessage(msg = {}, context = {}) {
     const preprocessStartedAt = Date.now();
+    pruneSessions(preprocessStartedAt);
     if (!enabled) {
       return {
         mode: 'ready',
@@ -930,6 +988,7 @@ function createContinuousMessagePreprocessor(options = {}) {
 
     if (sessions.has(sessionKey)) {
       const session = sessions.get(sessionKey);
+      touchSession(session);
       session.entries.push(entry);
       session.mentionedBot = session.mentionedBot || entry.mentionedBot;
       session.activityVersion = freshnessVersion;
@@ -992,7 +1051,8 @@ function createContinuousMessagePreprocessor(options = {}) {
       freshnessSessionKey
     };
     refreshSessionFollowupState(nextSession);
-    sessions.set(sessionKey, nextSession);
+    sessions.set(sessionKey, touchSession(nextSession));
+    pruneSessions();
     scheduleFlush(sessionKey);
     console.log('[continuous-message] session start', {
       sessionKey,
@@ -1105,6 +1165,13 @@ function createContinuousMessagePreprocessor(options = {}) {
   }
 
   return {
+    __getCacheDiagnostics: () => ({
+      sessionsSize: sessions.size,
+      sessionActivityVersionSize: sessionActivityVersion.size,
+      ttlMs: sessionCacheTtlMs,
+      maxSize: sessionCacheMaxSize
+    }),
+    __pruneSessionsForTest: pruneSessions,
     getSessionDebounceMs,
     handleMessage,
     flushSession,
