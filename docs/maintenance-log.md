@@ -6,6 +6,7 @@
 - 新暴露并处理：两个 Runtime V2 prompt 测试在断言通过后会因继承本地 embedding/worldbook/rerank 远程配置留下活跃 socket，现测试内显式隔离相关环境变量，`ERR-20260615-001` 标记 resolved。
 - 剩余风险：未跑 24/48 小时长稳、clinic.js 事件循环延迟、图片吞吐压测、真实 Telegram/Minecraft/NapCat 外部联调；`npm audit --omit=dev` 剩余 6 个 moderate 均来自 mineflayer auth 链（`@azure/msal-node`、`minecraft-protocol`、`mineflayer`、`prismarine-auth`、`uuid`、`yggdrasil`）。
 - 小目标已完成：本轮 DEBUG_PLAN 指定目标已有可复跑本地验收，剩余项均记录为外部压测/依赖链风险，不阻塞当前提交。
+- 提交后记录 2026-06-15 12:11 +08:00：已提交 `e1b174b`（`fix: complete langchain debug plan migration`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-15 11:56
 
