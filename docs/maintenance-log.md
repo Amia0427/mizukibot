@@ -1,3 +1,13 @@
+## 方案评估 2026-06-16 01:13
+
+- 小目标：评估“嵌入 V8/QuickJS 或 nodejs-mobile-react-native，把本项目打包成安卓 APK”的可行性，并先修改方案，不改项目代码。
+- 结论：原样打包当前服务端项目为 APK 可行性低；首版目标应改为“手机前端本地对话 APK”，React Native 做 UI，`nodejs-mobile-react-native` 只运行裁剪后的对话后台，NapCat/OneBot/QQ 机器人框架先全部剥离。
+- 证据：当前项目声明 Node.js `>=20.0.0`，但 `npm view nodejs-mobile-react-native ...` 核验最新为 `18.20.4`；当前依赖核验包含 `@lancedb/lancedb`、`better-sqlite3`、`sharp`、`cycletls`、`express`、`ws`、`@langchain/langgraph`，这些会显著放大 Android native/ABI/后台运行风险。
+- 方案修正：QuickJS/V8 不作为第一版，因二者是 JS 引擎嵌入或宿主重写路线，不提供现成 Node/npm/native addon 兼容层；第一版只做 local_chat -> assistant_reply 的单人手机对话契约。
+- 文档：新增 `docs/superpowers/plans/2026-06-16-android-apk-feasibility.md`，包含保留/禁用范围、路线对比、分阶段任务和验收标准。
+- 验证：只读执行 `npm ls @lancedb/lancedb better-sqlite3 sharp cycletls express ws @langchain/langgraph @langchain/core axios --depth=0`、`npm view nodejs-mobile-react-native version time engines peerDependencies dependencies --json`；核对 nodejs-mobile React Native、QuickJS、V8 embedding、Android 16 KB page size 官方文档；`git diff --stat` 确认只有文档变更。
+- 小目标已完成：APK 方向已从“完整打包当前 bot”改为“裁剪手机本地对话 SKU”，后续实现必须先冻结移动契约并证明不加载 NapCat/OneBot。
+
 ## 运行维护 2026-06-15 23:28
 
 - 小目标：复盘主 bot 在 2026-06-15 20:08 和 20:10 +08:00 两次退出后被 daemon 重拉，确认是否仍有 silent exit 或诊断误判，并做最小修复。
