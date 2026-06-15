@@ -30,6 +30,7 @@ const {
 } = require('../mcp/staticReplacements');
 
 const sessionPool = new Map();
+const sessionCreatePromisePool = new Map();
 const initializePromisePool = new Map();
 const discoveryFailureCooldowns = new Map();
 let idleCleanupTimer = null;
@@ -63,6 +64,7 @@ function closeSessionEntry(entry = null, reason = 'closed') {
   if (!entry) return false;
   const serverName = entry.serverName;
   if (serverName) sessionPool.delete(serverName);
+  if (serverName) sessionCreatePromisePool.delete(serverName);
   if (serverName) initializePromisePool.delete(serverName);
   entry.exited = true;
   entry.initialized = false;
@@ -71,6 +73,11 @@ function closeSessionEntry(entry = null, reason = 'closed') {
   for (const pending of pendingErrors) {
     pending.reject(normalizeMcpError(new Error(`mcp session ${reason}: ${serverName}`), 'MCP_SESSION_CLOSED'));
   }
+  try {
+    entry.process?.stdout?.removeAllListeners?.();
+    entry.process?.stderr?.removeAllListeners?.();
+    entry.process?.removeAllListeners?.();
+  } catch (_) {}
   try {
     entry.process?.kill();
   } catch (_) {}
@@ -299,13 +306,16 @@ function consumeStdoutBuffer(entry) {
   }
 }
 
-function ensureSessionEntry(serverConfig = {}) {
-  const existing = sessionPool.get(serverConfig.serverName);
+function getReusableSessionEntry(serverName = '') {
+  const existing = sessionPool.get(serverName);
   if (existing && existing.process && !existing.process.killed && !existing.exited) {
     scheduleIdleMcpCleanup();
     return touchSessionEntry(existing);
   }
+  return null;
+}
 
+function createSessionEntry(serverConfig = {}) {
   const spawnConfig = buildSpawnConfig(serverConfig);
   let child = null;
   try {
@@ -384,6 +394,39 @@ function ensureSessionEntry(serverConfig = {}) {
   sessionPool.set(serverConfig.serverName, entry);
   scheduleIdleMcpCleanup();
   return touchSessionEntry(entry);
+}
+
+function ensureSessionEntry(serverConfig = {}) {
+  const serverName = String(serverConfig.serverName || '').trim();
+  const existing = getReusableSessionEntry(serverName);
+  if (existing) return Promise.resolve(existing);
+
+  const pendingCreate = sessionCreatePromisePool.get(serverName);
+  if (pendingCreate) return pendingCreate;
+
+  let resolveCreate = null;
+  let rejectCreate = null;
+  const createPromise = new Promise((resolve, reject) => {
+    resolveCreate = resolve;
+    rejectCreate = reject;
+  });
+  sessionCreatePromisePool.set(serverName, createPromise);
+  createPromise.finally(() => {
+    if (sessionCreatePromisePool.get(serverName) === createPromise) {
+      sessionCreatePromisePool.delete(serverName);
+    }
+  }).catch(() => {});
+
+  try {
+    resolveCreate(getReusableSessionEntry(serverName) || createSessionEntry({
+      ...serverConfig,
+      serverName
+    }));
+  } catch (error) {
+    rejectCreate(normalizeSpawnFailure(error, serverName));
+  }
+
+  return createPromise;
 }
 
 function sendJsonRpc(entry, method, params = {}, options = {}) {
@@ -485,7 +528,7 @@ async function initializeServer(entry) {
             env: activeEntry.env,
             configPath: activeEntry.configPath
           };
-          activeEntry = ensureSessionEntry({
+          activeEntry = await ensureSessionEntry({
             ...serverConfig,
             protocolMode: nextProtocolMode
           });
@@ -534,7 +577,7 @@ function normalizeMcpToolDescriptor(serverName = '', rawTool = {}) {
 
 async function discoverServerTools(serverConfig = {}, options = {}) {
   maybeThrowDiscoveryFailureCooldown(serverConfig?.serverName, 'discover');
-  const entry = await initializeServer(ensureSessionEntry(serverConfig));
+  const entry = await initializeServer(await ensureSessionEntry(serverConfig));
 
   const ttlMs = Math.max(1, Number(options.ttlMs || DEFAULT_MCP_DISCOVERY_TTL_MS) || DEFAULT_MCP_DISCOVERY_TTL_MS);
   const now = Date.now();
@@ -781,7 +824,7 @@ async function callMcpTool(serverName = '', toolName = '', args = {}, context = 
   });
 
   try {
-    const entry = await initializeServer(ensureSessionEntry(serverConfig));
+    const entry = await initializeServer(await ensureSessionEntry(serverConfig));
     const result = await sendJsonRpc(entry, 'tools/call', {
       name: descriptor.toolName,
       arguments: safeArgs
@@ -904,6 +947,7 @@ function clearMcpRuntimeCaches() {
     tools: [],
     byName: new Map()
   };
+  sessionCreatePromisePool.clear();
   initializePromisePool.clear();
   discoveryFailureCooldowns.clear();
   warmRegistryPromise = null;
@@ -911,10 +955,8 @@ function clearMcpRuntimeCaches() {
     clearTimeout(idleCleanupTimer);
     idleCleanupTimer = null;
   }
-  for (const entry of sessionPool.values()) {
-    try {
-      entry.process?.kill();
-    } catch (_) {}
+  for (const entry of Array.from(sessionPool.values())) {
+    closeSessionEntry(entry, 'cache_clear');
   }
   sessionPool.clear();
 }
