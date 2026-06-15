@@ -4,7 +4,7 @@
 
 ## 近期更新
 
-**2026-06-15 12:05 +08:00**：完成 DEBUG_PLAN C-006/C-007/H-001/H-005/H-006/M-001 收口。`qqActionService` 已做图片/日记职责兼容拆分；目标热路径同步 I/O 改为 async；图像生成流异常会 reject 并尽量销毁流；三处缓存增加 TTL/容量裁剪；三处队列/会话竞态加 single-flight/重入保护；LangChain 升至 v1，运行边界同步为 Node.js `>=20.0.0`。验收：LangGraph/Runtime V2 目标批次、`npm run check:agent:static`、`npm run check:prompts`、`npm ls @langchain/core @langchain/anthropic @langchain/openai @langchain/langgraph zod zod-to-json-schema --all` 通过；`npm audit --omit=dev --json` 降为 6 个 moderate、0 high、0 critical，剩余为 mineflayer auth 链。小目标完成：本轮 DEBUG_PLAN 指定目标已有代码、测试和文档验收；剩余为外部长稳/压测和 mineflayer auth 链依赖风险。
+**2026-06-15 12:05 +08:00**：完成 DEBUG_PLAN C-006/C-007/H-001/H-005/H-006/M-001 收口。`qqActionService` 已做图片/日记职责兼容拆分；目标热路径同步 I/O 改为 async；图像生成流异常会 reject 并尽量销毁流；三处缓存增加 TTL/容量裁剪；三处队列/会话竞态加 single-flight/重入保护；LangChain 升至 v1，运行边界同步为 Node.js `>=20.0.0`。验收：LangGraph/Runtime V2 目标批次、`npm run check:agent:static`、`npm run check:prompts`、`npm ls @langchain/core @langchain/anthropic @langchain/openai @langchain/langgraph zod zod-to-json-schema --all` 通过；`npm audit --omit=dev --json` 降为 6 个 moderate、0 high、0 critical，剩余为 mineflayer auth 链。提交：`e1b174b`。小目标完成：本轮 DEBUG_PLAN 指定目标已有代码、测试和文档验收；剩余为外部长稳/压测和 mineflayer auth 链依赖风险。
 
 **2026-06-15 11:56 +08:00**：修正主回复第三方模型端点协议选择。显式配置 `API_BASE_URL` / `ADMIN_API_BASE_URL` 到 `/v1/messages` 时，现在 URL 协议优先于 `API_PROVIDER`，即使 provider 写成第三方/OpenAI-compatible 也会直接走 Anthropic Messages；裸域名或 `/v1` 仍默认补 `/v1/chat/completions`，`/v1/chat/completions` 继续保持 OpenAI-compatible。验收：`node tests/providerRequestNormalization.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/providerRequestDiagnostics.test.js` 均通过。小目标完成：第三方 `/v1/messages` 网关不再被自动改写到 `/v1/chat/completions`。
 
