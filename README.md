@@ -698,3 +698,6 @@ Prompt 改了但没生效：
 - `scripts/README.md`：脚本说明。
 - `deploy/README.md`：部署说明。
 - `deploy/linux/README_LINUX.md`：Linux 部署细节。
+## 深度代码库审计完成 (2026-06-15 10:23)
+
+完成 5 阶段串行审计，生成 `DEBUG_PLAN.md` 结构化计划书。发现 7 个 Critical、6 个 High、9 个 Medium/Low 问题，测试覆盖率 69.4%。
