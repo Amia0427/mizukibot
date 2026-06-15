@@ -293,6 +293,52 @@ function buildTouchSignature(reason = '', primaryContext = '') {
   return crypto.createHash('sha1').update(payload).digest('hex').slice(0, 16);
 }
 
+function getErrorReason(error, fallback = 'touch-send-failed') {
+  return String(error?.message || error || fallback).trim() || fallback;
+}
+
+function sendTouchWebSocketMessage(ws, payload) {
+  if (!ws || typeof ws.send !== 'function') {
+    throw new Error('websocket send unavailable');
+  }
+  if (typeof ws.readyState === 'number' && ws.readyState !== 1) {
+    throw new Error(`websocket not open:${ws.readyState}`);
+  }
+  ws.send(JSON.stringify(payload));
+}
+
+async function recordTouchFailureOutcome({
+  error,
+  userId,
+  groupId,
+  candidateReason,
+  source,
+  promptPayload = {},
+  text = ''
+} = {}) {
+  const reason = getErrorReason(error);
+  try {
+    await recordPersonaMemoryOutcome('touch_failed', {
+      userId,
+      groupId,
+      reason,
+      source,
+      candidateReason,
+      activeTopic: promptPayload.primaryContext || candidateReason,
+      recentReplyFrame: text,
+      request: {
+        userId,
+        question: candidateReason || reason,
+        routeMeta: { groupId },
+        routePolicyKey: 'proactive/default',
+        topRouteType: 'proactive'
+      }
+    });
+  } catch (recordError) {
+    console.error('[tick] proactive touch failure record failed:', getErrorReason(recordError, 'record-failure-outcome-failed'));
+  }
+}
+
 async function buildReasonAwarePrompt({
   touchReason = '',
   primaryContext = '',
@@ -648,99 +694,127 @@ async function sendTouchMessage({
     }
 
     const prefix = effectiveAtSender ? `[CQ:at,qq=${userId}] ` : '';
-    ws.send(JSON.stringify({
-      action: 'send_group_msg',
-      params: {
-        group_id: groupId,
-        message: `${prefix}${text}`
-      }
-    }));
-    recordSystemGroupSend({
-      groupId,
-      senderId: effectiveAtSender ? userId : '',
-      text,
-      senderName: '瑞希',
-      updatePresence: true,
-      updateBotPresence: true,
-      now,
-      source,
-      routePolicyKey: 'proactive/default'
-    });
-    await recordPersonaMemoryOutcome('proactive_touch', {
-      state: proactivePersonaMemoryState,
-      userId,
-      groupId,
-      request: {
+    try {
+      sendTouchWebSocketMessage(ws, {
+        action: 'send_group_msg',
+        params: {
+          group_id: groupId,
+          message: `${prefix}${text}`
+        }
+      });
+      recordSystemGroupSend({
+        groupId,
+        senderId: effectiveAtSender ? userId : '',
+        text,
+        senderName: '瑞希',
+        updatePresence: true,
+        updateBotPresence: true,
+        now,
+        source,
+        routePolicyKey: 'proactive/default'
+      });
+      await recordPersonaMemoryOutcome('proactive_touch', {
+        state: proactivePersonaMemoryState,
         userId,
-        question: candidateReason || '',
-        routeMeta: { groupId },
-        routePolicyKey: 'proactive/default',
-        topRouteType: 'proactive'
-      },
-      activeTopic: promptPayload.primaryContext || candidateReason,
-      recentReplyFrame: text,
-      recentMessages: [{ role: 'assistant', content: text }]
-    }).catch(() => {});
-    markInitiativeSent(groupId, {
-      source,
-      reason: candidateReason,
-      cycleKey: String(policy.cycleKey || '').trim()
-    }, now);
-    if (policy.cycleKey) {
-      setLastCycleKey(groupId, policy.cycleKey, now);
-    }
-
-    userState.day = today;
-    userState.proactive_count = Number(userState.proactive_count || 0) + 1;
-    userState.last_proactive_at = now;
-    userState.last_proactive_reason = candidateReason;
-
-    if (promptPayload.windowKey) {
-      userState.touched_windows = {
-        ...(userState.touched_windows || {}),
-        [formatWindowBucket(today, promptPayload.windowKey)]: now
-      };
-    }
-    if (promptPayload.signature) {
-      userState.last_touch_signature = promptPayload.signature;
-      userState.last_touch_signature_at = now;
-    }
-    if (promptPayload.touchReason) {
-      userState.last_reason_at = {
-        ...(userState.last_reason_at || {}),
-        [promptPayload.touchReason]: now
-      };
-      if (promptPayload.touchReason === 'light_care_ping') {
-        userState.last_light_care_at = now;
+        groupId,
+        request: {
+          userId,
+          question: candidateReason || '',
+          routeMeta: { groupId },
+          routePolicyKey: 'proactive/default',
+          topRouteType: 'proactive'
+        },
+        activeTopic: promptPayload.primaryContext || candidateReason,
+        recentReplyFrame: text,
+        recentMessages: [{ role: 'assistant', content: text }]
+      });
+      markInitiativeSent(groupId, {
+        source,
+        reason: candidateReason,
+        cycleKey: String(policy.cycleKey || '').trim()
+      }, now);
+      if (policy.cycleKey) {
+        setLastCycleKey(groupId, policy.cycleKey, now);
       }
-    }
-    if (promptPayload.fallbackGreetingType === 'morning') {
-      userState.last_morning_fallback_day = today;
-      data.last_morning = today;
-    }
-    if (promptPayload.fallbackGreetingType === 'night') {
-      userState.last_night_fallback_day = today;
-      data.last_night = today;
-    }
 
-    console.log('[initiative] sent', {
-      initiative_source: source,
-      initiative_candidate_reason: candidateReason,
-      initiative_policy_reason: policy.reason,
-      initiative_decision_called: decisionModelCalled,
-      initiative_decision_result: String(decision.reason || '').trim(),
-      initiative_reply_called: replyModelCalled,
-      initiative_skip_due_to_lock_or_gap: false
-    });
-    return {
-      sent: true,
-      text,
-      reason: 'sent',
-      initiativePolicyReason: policy.reason,
-      decisionModelCalled,
-      replyModelCalled,
-      decisionReason: String(decision.reason || '').trim()
-    };
+      userState.day = today;
+      userState.proactive_count = Number(userState.proactive_count || 0) + 1;
+      userState.last_proactive_at = now;
+      userState.last_proactive_reason = candidateReason;
+
+      if (promptPayload.windowKey) {
+        userState.touched_windows = {
+          ...(userState.touched_windows || {}),
+          [formatWindowBucket(today, promptPayload.windowKey)]: now
+        };
+      }
+      if (promptPayload.signature) {
+        userState.last_touch_signature = promptPayload.signature;
+        userState.last_touch_signature_at = now;
+      }
+      if (promptPayload.touchReason) {
+        userState.last_reason_at = {
+          ...(userState.last_reason_at || {}),
+          [promptPayload.touchReason]: now
+        };
+        if (promptPayload.touchReason === 'light_care_ping') {
+          userState.last_light_care_at = now;
+        }
+      }
+      if (promptPayload.fallbackGreetingType === 'morning') {
+        userState.last_morning_fallback_day = today;
+        data.last_morning = today;
+      }
+      if (promptPayload.fallbackGreetingType === 'night') {
+        userState.last_night_fallback_day = today;
+        data.last_night = today;
+      }
+
+      console.log('[initiative] sent', {
+        initiative_source: source,
+        initiative_candidate_reason: candidateReason,
+        initiative_policy_reason: policy.reason,
+        initiative_decision_called: decisionModelCalled,
+        initiative_decision_result: String(decision.reason || '').trim(),
+        initiative_reply_called: replyModelCalled,
+        initiative_skip_due_to_lock_or_gap: false
+      });
+      return {
+        sent: true,
+        text,
+        reason: 'sent',
+        initiativePolicyReason: policy.reason,
+        decisionModelCalled,
+        replyModelCalled,
+        decisionReason: String(decision.reason || '').trim()
+      };
+    } catch (error) {
+      const reason = getErrorReason(error);
+      console.error('[tick] proactive touch send/status failed:', {
+        groupId,
+        userId,
+        source,
+        reason
+      });
+      await recordTouchFailureOutcome({
+        error,
+        userId,
+        groupId,
+        candidateReason,
+        source,
+        promptPayload,
+        text
+      });
+      return {
+        sent: false,
+        text: '',
+        reason,
+        initiativePolicyReason: policy.reason,
+        decisionModelCalled,
+        replyModelCalled,
+        decisionReason: String(decision.reason || '').trim()
+      };
+    }
   } finally {
     releaseInitiativeLock({
       groupId,
@@ -866,18 +940,23 @@ async function runGreetingFallbacks(ws, askAIByGraph, state, date = new Date()) 
   return sentAny;
 }
 
-async function runTickCycle(ws, askAIByGraph, state, date = new Date(), actionClient = null) {
+async function runTickCycle(ws, askAIByGraph, state, date = new Date(), actionClient = null, shouldContinue = () => true) {
+  if (!shouldContinue()) return false;
   if (shouldRunDailySummaryNow(date)) {
     await runDailyJournalSummaries();
   }
 
+  if (!shouldContinue()) return false;
   await runRandomWindowTouches(ws, askAIByGraph, state, date);
+  if (!shouldContinue()) return false;
   await runGreetingFallbacks(ws, askAIByGraph, state, date);
+  if (!shouldContinue()) return false;
   await getDailyShareEngine().runDailyShareCycle({
     sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs, actionClient),
     askAIByGraph,
     date
   });
+  return true;
 }
 
 async function runDailyShareTick(ws, askAIByGraph, date = new Date(), actionClient = null) {
@@ -908,7 +987,7 @@ function startTickEngine(ws, askAIByGraph, actionClient = null) {
   async function runOnce() {
     if (stopped) return;
     try {
-      await runTickCycle(ws, askAIByGraph, state, new Date(), actionClient);
+      await runTickCycle(ws, askAIByGraph, state, new Date(), actionClient, () => !stopped);
     } catch (error) {
       console.error('[tick] execution failed:', error?.message || error);
     } finally {
@@ -946,6 +1025,7 @@ function startTickEngine(ws, askAIByGraph, actionClient = null) {
     }
     timers[slot] = setTimeout(() => {
       timers[slot] = null;
+      if (stopped) return;
       void runner();
     }, Math.max(0, Number(delayMs) || 0));
     if (typeof timers[slot].unref === 'function') timers[slot].unref();

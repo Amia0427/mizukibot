@@ -1,7 +1,11 @@
 // core/tgBot.js
-const TelegramBot = require('node-telegram-bot-api');
 const config = require('../config');
 const { askAIByGraph } = require('../api/agentGraph');
+
+async function loadTelegramBotClass() {
+  const mod = await import('node-telegram-bot-api');
+  return mod.default || mod.TelegramBot || mod;
+}
 
 function isAllowed(chatId) {
   const allow = config.TG_ALLOWED_CHAT_IDS || [];
@@ -112,6 +116,7 @@ async function startTgBot() {
     return null;
   }
 
+  const TelegramBot = await loadTelegramBotClass();
   const bot = new TelegramBot(config.TG_BOT_TOKEN, { polling: true });
 
   bot.on('message', async (msg) => {
@@ -126,4 +131,4 @@ async function startTgBot() {
   return bot;
 }
 
-module.exports = { startTgBot, handleTelegramMessage };
+module.exports = { startTgBot, handleTelegramMessage, loadTelegramBotClass };

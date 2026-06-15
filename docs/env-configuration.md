@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-14 22:42 +08:00
+更新时间：2026-06-15 11:18 +08:00
 
 ## 维护约定
 
@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
+- 2026-06-15 11:18 +08:00：`.gitignore` 已覆盖 `.env*`、`secrets/`、`*.key`、`*.pem`，仅保留 `.env.example` / `.env.skills.example` 可入库；Husky `pre-commit` 会优先运行系统 `gitleaks protect --staged --verbose`，缺少 gitleaks CLI 时运行 `npm run check:secrets` staged 兜底扫描。验收：虚拟 staged `sk-*` 假密钥被阻断，空 staged 扫描通过；`git check-ignore -v .env .env.local .env.production secrets/token.txt private.key private.pem` 均命中。
 - 2026-06-14 22:42 +08:00：`MODEL_TLS_IMPERSONATION_STREAM_ENABLED` 默认值改为 `false`，流式主回复默认回 axios；`MODEL_TLS_IMPERSONATION_ENABLED=true` 仍保留非流式 CycleTLS TLS/JA3 指纹伪装。原因是当天 `v2_streaming_reply` 的 CycleTLS 流式请求约 92.4s 与连续消息定时器延迟恢复重合，先默认避开流式 CycleTLS 事件循环阻塞风险。验收：`node tests/modelHttpCycleTlsFallback.test.js`、配置探针输出 `configStream=false/statusStream=false/tls=true`。
 - 2026-06-14 14:59 +08:00：新增 `PLANNER_API_MODE`（同义 `PLAN_API_MODE`），默认 `chat_completions`。planner 远程模型请求会在请求体写入现有内部字段 `__preferredProtocol=chat_completions`，避免 OpenAI-compatible host 被通用 HTTP 层先改写到 `/v1/responses` 再 405 回退；如 planner host 明确支持 Responses，可设 `PLANNER_API_MODE=responses`。验收：`node tests/plannerNoRetry.test.js` 通过，mock host 记录唯一发送 URL 为 `/v1/chat/completions` 且未出现 `/v1/responses`；未对真实外部 host 发请求。
 - 2026-06-13 22:40 +08:00：新增 `DIRECT_CHAT_PLANNER_ENABLED=false` 并作为默认值，关闭 direct_chat 远程 planner 模型/subagent 调用；`PLAN_*` endpoint/key 保留用于显式恢复，但运行时 `planDirectChat` 和 dispatch capability preflight 进入 `planRequestV2` 后会短路为本地规则决策 `decisionSource=rule_planner_disabled`。关闭后仍保留本地 deterministic preflight、规则 planner、SQL worldbook/persona module、本地 Memory V3/Profile Journal/Daily Journal 召回和显式安全工具计划；减少的是远程 planner 对模糊工具选择、背景 research 请求、动态 prompt block/persona module 的模型级判断。模型自检在关闭态也不再拨测 `plan`。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/modelSelfCheck.test.js`、`node tests/directChatPlannerNotebook.test.js`、`node tests/imageSummaryLatencyPath.test.js`、`node tests/plannerSemanticRefine.test.js`、`node tests/plannerV2Protocol.test.js` 通过。
