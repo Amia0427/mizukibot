@@ -11,8 +11,11 @@ process.env.ADMIN_USER_IDS = 'u-admin';
 process.env.API_KEY = process.env.API_KEY || 'test-key';
 
 const {
+  buildBotDiaryImagePrompt,
   createScheduledCommand,
+  isNightDiaryWindow,
   publishQzoneForContext,
+  sanitizeDiaryImageText,
   sendGroupImageMessage,
   setMessageEmojiLike
 } = require('../api/qqActionService');
@@ -36,6 +39,9 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
   assert.ok(Array.isArray(actionCalls[0].params.message));
   assert.strictEqual(actionCalls[0].params.message[0].type, 'image');
   assert.ok(String(actionCalls[0].params.message[0].data.file || '').startsWith('base64://'));
+  assert.strictEqual(isNightDiaryWindow({ hour: 23 }), true);
+  assert.strictEqual(sanitizeDiaryImageText('今晚 23:59 看 http://example.com 群号123456'), '今晚 看');
+  assert.ok(buildBotDiaryImagePrompt('今天写日记', { weekday: 'Friday', timeBucket: 'night' }).includes('open diary'));
 
   const draftResult = await publishQzoneForContext('我把消息框关掉之后，房间突然安静得有点认真。', {
     userId: 'u-admin',
