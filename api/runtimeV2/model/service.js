@@ -1,6 +1,6 @@
 const config = require('../../../config');
 const { postWithRetry, postStreamWithRetry } = require('../../httpClient');
-const { extractMessageContent, extractSSEEvents, flushSSEState } = require('../../parser');
+const { extractMessageContent, extractSSEEvents, flushSSEState, parseJsonWithSafety } = require('../../parser');
 const { recordModelCallParseFailure } = require('../../../utils/modelCallTracker');
 const { getToolSchemaByName } = require('../../toolRegistry');
 const { normalizeToolNames } = require('../../../utils/localToolAccess');
@@ -53,6 +53,9 @@ const {
 // const resolvedConfig = resolveUserScopedMainModelConfig(userId, modelConfig, options);
 // const bypassFallback = shouldBypassMainModelFallback(userId, options);
 const MODEL_RESPONSE_MALFORMED_REPLY = '刚才模型返回格式不稳定，我没拿到可用正文。你再发一次，我继续。';
+const FILTERED_TOOL_SCHEMA_CACHE_TTL_MS = 60 * 60 * 1000;
+const FILTERED_TOOL_SCHEMA_CACHE_MAX_ENTRIES = 100;
+const MALFORMED_RESPONSE_LOG_PREVIEW_CHARS = 240;
 
 function listObjectKeys(value, limit = 12) {
   if (!value || typeof value !== 'object') return [];
@@ -63,11 +66,15 @@ function summarizeMalformedResponse(response = null) {
   const data = response?.data;
   let parsed = data;
   let stringJsonParsed = false;
+  let jsonParseGuard = '';
   if (typeof data === 'string') {
-    try {
-      parsed = JSON.parse(data);
+    const parseResult = parseJsonWithSafety(data);
+    if (parseResult.ok) {
+      parsed = parseResult.value;
       stringJsonParsed = true;
-    } catch (_) {}
+    } else {
+      jsonParseGuard = parseResult.reason || 'parse_error';
+    }
   }
   const firstChoice = Array.isArray(parsed?.choices) ? parsed.choices[0] : null;
   const firstCandidate = Array.isArray(parsed?.candidates) ? parsed.candidates[0] : null;
@@ -79,6 +86,7 @@ function summarizeMalformedResponse(response = null) {
     response_data_type: Array.isArray(data) ? 'array' : typeof data,
     parsed_type: Array.isArray(parsed) ? 'array' : typeof parsed,
     string_json_parsed: stringJsonParsed,
+    string_json_parse_guard: jsonParseGuard,
     status_code: Number(response?.status || 0) || null,
     top_level_keys: listObjectKeys(parsed),
     choices_count: Array.isArray(parsed?.choices) ? parsed.choices.length : null,
@@ -95,6 +103,13 @@ function summarizeMalformedResponse(response = null) {
     error_keys: listObjectKeys(parsed?.error),
     error_message_preview: String(parsed?.error?.message || parsed?.message || '').slice(0, 240)
   };
+}
+
+function previewMalformedResponseData(data) {
+  const text = typeof data === 'string'
+    ? data
+    : (data && typeof data === 'object' ? `[${Array.isArray(data) ? 'array' : 'object'}]` : String(data || ''));
+  return String(text || '').slice(0, MALFORMED_RESPONSE_LOG_PREVIEW_CHARS);
 }
 
 function getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig = null) {
@@ -131,6 +146,69 @@ function getAllowedToolNames(context = {}) {
 
 const filteredToolSchemaCache = new Map();
 
+function getFilteredToolSchemaCacheTtlMs() {
+  return Math.max(1000, Number(
+    config.FILTERED_TOOL_SCHEMA_CACHE_TTL_MS
+    || process.env.FILTERED_TOOL_SCHEMA_CACHE_TTL_MS
+  ) || FILTERED_TOOL_SCHEMA_CACHE_TTL_MS);
+}
+
+function getFilteredToolSchemaCacheMaxEntries() {
+  return Math.max(1, Math.floor(Number(
+    config.FILTERED_TOOL_SCHEMA_CACHE_MAX_ENTRIES
+    || process.env.FILTERED_TOOL_SCHEMA_CACHE_MAX_ENTRIES
+  ) || FILTERED_TOOL_SCHEMA_CACHE_MAX_ENTRIES));
+}
+
+function cloneToolSchema(schema = null) {
+  if (!schema || typeof schema !== 'object') return schema;
+  return {
+    ...schema,
+    function: schema.function ? { ...schema.function } : schema.function
+  };
+}
+
+function pruneFilteredToolSchemaCache(maxEntries = getFilteredToolSchemaCacheMaxEntries()) {
+  while (filteredToolSchemaCache.size > maxEntries) {
+    const oldestKey = filteredToolSchemaCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    filteredToolSchemaCache.delete(oldestKey);
+  }
+}
+
+function getCachedFilteredToolSchemas(cacheKey = '', now = Date.now()) {
+  if (!cacheKey) return null;
+  const cached = filteredToolSchemaCache.get(cacheKey);
+  if (!cached || cached.expiresAt <= now || !Array.isArray(cached.schemas)) {
+    if (cached) filteredToolSchemaCache.delete(cacheKey);
+    return null;
+  }
+  filteredToolSchemaCache.delete(cacheKey);
+  filteredToolSchemaCache.set(cacheKey, cached);
+  return cached.schemas.map(cloneToolSchema);
+}
+
+function setCachedFilteredToolSchemas(cacheKey = '', schemas = [], now = Date.now()) {
+  if (!cacheKey) return;
+  filteredToolSchemaCache.set(cacheKey, {
+    schemas: (Array.isArray(schemas) ? schemas : []).map(cloneToolSchema),
+    expiresAt: now + getFilteredToolSchemaCacheTtlMs()
+  });
+  pruneFilteredToolSchemaCache();
+}
+
+function clearFilteredToolSchemaCache() {
+  filteredToolSchemaCache.clear();
+}
+
+function getFilteredToolSchemaCacheStats() {
+  return {
+    size: filteredToolSchemaCache.size,
+    maxEntries: getFilteredToolSchemaCacheMaxEntries(),
+    ttlMs: getFilteredToolSchemaCacheTtlMs()
+  };
+}
+
 function getFilteredToolSchemas(context = {}) {
   const allowedNames = getAllowedToolNames(context);
   if (context.disableTools || allowedNames.length === 0) return [];
@@ -138,18 +216,13 @@ function getFilteredToolSchemas(context = {}) {
     allowedTools: allowedNames,
     disableTools: Boolean(context.disableTools)
   });
-  const cached = filteredToolSchemaCache.get(cacheKey);
-  if (cached) {
-    return cached.map((schema) => ({ ...schema, function: schema.function ? { ...schema.function } : schema.function }));
-  }
+  const cached = getCachedFilteredToolSchemas(cacheKey);
+  if (cached) return cached;
   const filtered = allowedNames
     .map((toolName) => getToolSchemaByName(toolName))
     .filter(Boolean);
-  filteredToolSchemaCache.set(cacheKey, filtered.map((schema) => ({
-    ...schema,
-    function: schema.function ? { ...schema.function } : schema.function
-  })));
-  return filtered.map((schema) => ({ ...schema, function: schema.function ? { ...schema.function } : schema.function }));
+  setCachedFilteredToolSchemas(cacheKey, filtered);
+  return filtered.map(cloneToolSchema);
 }
 
 function finalizeStreamingReplyText(rawReply, fallbackText) {
@@ -400,7 +473,7 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
     statusCode: Number(response?.status || 0) || null,
     parseDiagnostic
   });
-  console.error('AI response malformed(raw assistant):', String(response?.data).slice(0, 500));
+  console.error('AI response malformed(raw assistant):', previewMalformedResponseData(response?.data));
   return {
     role: 'assistant',
     content: MODEL_RESPONSE_MALFORMED_REPLY
@@ -633,10 +706,21 @@ module.exports = {
   finalizeStreamingReplyText,
   finalizeStreamingReplyWithHumanizer,
   getAllowedToolNames,
+  clearFilteredToolSchemaCache,
+  getFilteredToolSchemaCacheStats,
   getFilteredToolSchemas,
   requestAssistantMessage,
   requestNonStreamingReply,
   requestStreamingReply,
   shouldUseStreamingReply,
-  withMainModelFallback
+  withMainModelFallback,
+  _test: {
+    filteredToolSchemaCache,
+    getCachedFilteredToolSchemas,
+    getFilteredToolSchemaCacheMaxEntries,
+    getFilteredToolSchemaCacheTtlMs,
+    pruneFilteredToolSchemaCache,
+    setCachedFilteredToolSchemas,
+    summarizeMalformedResponse
+  }
 };

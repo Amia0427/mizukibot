@@ -1,6 +1,6 @@
 const assert = require('assert');
 
-const { extractFinishReason, extractMessageContent, extractSSEEvents } = require('../api/parser');
+const { extractFinishReason, extractMessageContent, extractSSEEvents, parseJsonWithSafety } = require('../api/parser');
 const { normalizeTextContent } = require('../api/runtimeV2/model/shared');
 
 module.exports = (() => {
@@ -184,6 +184,14 @@ module.exports = (() => {
   );
   assert.strictEqual(geminiFinish.events[0].delta, '没说完');
   assert.strictEqual(geminiFinish.events[0].finishReason, 'MAX_TOKENS');
+
+  const tooDeep = parseJsonWithSafety('{"a":{"b":{"c":{"d":1}}}}', { maxDepth: 3 });
+  assert.strictEqual(tooDeep.ok, false);
+  assert.strictEqual(tooDeep.reason, 'depth_limit');
+
+  const oversized = parseJsonWithSafety(`{"a":"${'x'.repeat(2048)}"}`, { maxChars: 1024 });
+  assert.strictEqual(oversized.ok, false);
+  assert.strictEqual(oversized.reason, 'size_limit');
 
   console.log('parserModelResponseFormats.test.js passed');
 })()

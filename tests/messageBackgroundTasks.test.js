@@ -129,6 +129,29 @@ module.exports = (async () => {
   assert.strictEqual(immediate.reply, 'done now');
   assert.strictEqual(handleOptionsSeen[0].deferPersist, false, 'background execution handle must force inline persist');
 
+  const failedBeforeAck = await coordinator.runBackgroundToolTask({
+    route: { meta: {} },
+    routeExecutionPlan: {
+      executor: 'background_direct',
+      topRouteType: 'direct_chat',
+      allowTools: true
+    },
+    cleanText: 'task fail fast',
+    imageUrl: null,
+    userInfo: {},
+    senderId: 'u1',
+    groupId: 'g1',
+    toolTaskOptions: {},
+    executionHandleFactory: async () => ({
+      promise: Promise.reject(new Error('boom before ack')),
+      cancel() {}
+    })
+  });
+  assert.strictEqual(failedBeforeAck.backgroundHandled, false);
+  assert.ok(failedBeforeAck.reply, 'fast failure should return the failure reply inline');
+  const failedTask = Array.from(taskStore.values()).find((task) => task.originalText === 'task fail fast');
+  assert.strictEqual(failedTask.status, 'failed');
+
   const delayed = await coordinator.runBackgroundToolTask({
     route: { meta: {} },
     routeExecutionPlan: {
@@ -152,6 +175,33 @@ module.exports = (async () => {
 
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.ok(sentReplies.some((entry) => String(entry.replyText || '').includes('done later')));
+
+  const sentCountBeforeDelayedFailure = sentReplies.length;
+  const delayedFailure = await coordinator.runBackgroundToolTask({
+    route: { meta: {} },
+    routeExecutionPlan: {
+      executor: 'background_direct',
+      topRouteType: 'direct_chat',
+      allowTools: true
+    },
+    cleanText: 'task fail later',
+    imageUrl: null,
+    userInfo: {},
+    senderId: 'u1',
+    groupId: 'g1',
+    toolTaskOptions: {},
+    executionHandleFactory: async () => ({
+      promise: new Promise((resolve, reject) => setTimeout(() => reject(new Error('boom after ack')), 40)),
+      cancel() {}
+    })
+  });
+  assert.strictEqual(delayedFailure.backgroundHandled, true);
+  assert.ok(sentReplies.some((entry) => String(entry.replyText || '').includes('后台跑')));
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const delayedFailedTask = Array.from(taskStore.values()).find((task) => task.originalText === 'task fail later');
+  assert.strictEqual(delayedFailedTask.status, 'failed');
+  assert.strictEqual(sentReplies.length, sentCountBeforeDelayedFailure + 1, 'delayed failure should only send the ack');
 
   console.log('messageBackgroundTasks.test.js passed');
 })().catch((error) => {

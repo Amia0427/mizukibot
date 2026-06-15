@@ -1,3 +1,11 @@
+## 运行维护 2026-06-15 10:53
+
+- 小目标：覆盖 DEBUG_PLAN M-002/M-003/M-004，补缓存 TTL/大小限制、模型响应 JSON 解析护栏和后台任务 ack race outcome。
+- 最小修复：`utils/memorySemanticIndex.js` query embedding cache 增加 TTL 读取、访问刷新和最大条数裁剪；`api/runtimeV2/model/service.js` filtered tool schema cache 增加 TTL/max、克隆读写和 malformed 日志预览收敛；`api/parser.js` 新增 `parseJsonWithSafety`，按大小和嵌套深度拒绝超限 JSON，并接入 SSE、模型响应、工具参数解析；`core/messageBackgroundTasks.js` 将 `replyPromise` race 统一为 `completed/failed/timeout` outcome，ack 后失败只更新任务状态，不作为成功 follow-up 发送。
+- 验证：`node --check utils/memorySemanticIndex.js`、`node --check api/runtimeV2/model/service.js`、`node --check api/parser.js`、`node --check core/messageBackgroundTasks.js`、`node scripts/run-tests.js memorySemanticIndexCache.test.js modelServiceToolSchemaCache.test.js modelServiceCot.test.js parserModelResponseFormats.test.js messageBackgroundTasks.test.js` 均通过。
+- 剩余风险：未新增 `lru-cache` 依赖，按项目现有 `Map + expiresAt + prune` 风格实现；未跑生产长时间内存曲线/OOM 压测，也未覆盖所有调用方的大 payload 组合。
+- 小目标已完成：M-002/M-003/M-004 的稳定性修复已有可复跑单元验收。
+
 ## 运行维护 2026-06-15 10:45
 
 - 小目标：执行 DEBUG_PLAN H-002/H-004，补 Telegram handler 异常隔离与 Minecraft 重连监听器清理。

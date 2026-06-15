@@ -3,6 +3,104 @@
 const { StringDecoder } = require('string_decoder');
 
 const SSE_UTF8_DECODER = Symbol('sseUtf8Decoder');
+const SAFE_JSON_PARSE_DEFAULT_MAX_CHARS = 100 * 1024;
+const SAFE_JSON_PARSE_DEFAULT_MAX_DEPTH = 12;
+
+function resolvePositiveInteger(value, fallback, min = 1) {
+  const n = Number(value);
+  const base = Number.isFinite(n) ? n : Number(fallback);
+  if (!Number.isFinite(base)) return min;
+  return Math.max(min, Math.floor(base));
+}
+
+function getSafeJsonParseMaxChars(options = {}) {
+  return resolvePositiveInteger(
+    options.maxChars ?? options.maxSize ?? process.env.MODEL_RESPONSE_JSON_PARSE_MAX_CHARS,
+    SAFE_JSON_PARSE_DEFAULT_MAX_CHARS,
+    1024
+  );
+}
+
+function getSafeJsonParseMaxDepth(options = {}) {
+  return resolvePositiveInteger(
+    options.maxDepth ?? process.env.MODEL_RESPONSE_JSON_PARSE_MAX_DEPTH,
+    SAFE_JSON_PARSE_DEFAULT_MAX_DEPTH,
+    1
+  );
+}
+
+function measureJsonNestingDepth(text = '', maxDepth = SAFE_JSON_PARSE_DEFAULT_MAX_DEPTH) {
+  const raw = String(text || '');
+  let depth = 0;
+  let maxSeen = 0;
+  let inString = false;
+  let escaping = false;
+
+  for (const char of raw) {
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (char === '\\') {
+        escaping = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{' || char === '[') {
+      depth += 1;
+      maxSeen = Math.max(maxSeen, depth);
+      if (maxSeen > maxDepth) {
+        return { depth: maxSeen, exceeds: true };
+      }
+      continue;
+    }
+    if (char === '}' || char === ']') {
+      depth = Math.max(0, depth - 1);
+    }
+  }
+
+  return { depth: maxSeen, exceeds: false };
+}
+
+function parseJsonWithSafety(text, options = {}) {
+  if (typeof text !== 'string') {
+    return { ok: false, reason: 'not_string', value: null, length: 0, depth: 0 };
+  }
+  const raw = String(text || '');
+  const maxChars = getSafeJsonParseMaxChars(options);
+  if (raw.length > maxChars) {
+    return { ok: false, reason: 'size_limit', value: null, length: raw.length, maxChars, depth: 0 };
+  }
+
+  const maxDepth = getSafeJsonParseMaxDepth(options);
+  const measured = measureJsonNestingDepth(raw, maxDepth);
+  if (measured.exceeds) {
+    return { ok: false, reason: 'depth_limit', value: null, length: raw.length, maxDepth, depth: measured.depth };
+  }
+
+  try {
+    return {
+      ok: true,
+      reason: '',
+      value: JSON.parse(raw),
+      length: raw.length,
+      depth: measured.depth
+    };
+  } catch (error) {
+    return { ok: false, reason: 'parse_error', value: null, error, length: raw.length, depth: measured.depth };
+  }
+}
+
+function looksLikeJsonPayload(text = '') {
+  const trimmed = String(text || '').trimStart();
+  return trimmed.startsWith('{') || trimmed.startsWith('[');
+}
 
 function normalizeSSEState(state) {
   const nextState = state && typeof state === 'object' ? state : {};
@@ -227,10 +325,8 @@ function parseSSEToText(raw) {
     if (!line.startsWith('data:')) continue;
     const payload = line.slice(5).trim();
     if (!payload || payload === '[DONE]') continue;
-    try {
-      const obj = JSON.parse(payload);
-      text += extractDeltaText(obj);
-    } catch (_) {}
+    const parsed = parseJsonWithSafety(payload);
+    if (parsed.ok) text += extractDeltaText(parsed.value);
   }
   return text || null;
 }
@@ -400,16 +496,17 @@ function extractSSEEvents(state, chunk) {
       continue;
     }
 
-    try {
-      const obj = JSON.parse(payload);
+    const parsed = parseJsonWithSafety(payload);
+    if (parsed.ok) {
+      const obj = parsed.value;
       const delta = extractDeltaText(obj);
       const reasoning = extractReasoningText(obj);
       const usage = extractUsageFromSSEObject(obj);
       const finishReason = extractFinishReason(obj);
       if (reasoning) latestReasoning = reasoning;
       events.push({ done: false, delta, reasoning, usage, finishReason, json: obj, raw: payload });
-    } catch (_) {
-      // Ignore non-JSON heartbeat or provider-specific control lines.
+    } else {
+      // Ignore non-JSON heartbeat, provider-specific control lines, or oversized payloads.
     }
   }
 
@@ -433,17 +530,17 @@ function flushSSEState(state) {
   const payload = dataLines.join('\n');
   if (payload === '[DONE]') return [{ done: true, delta: '', raw: payload }];
 
-  try {
-    const obj = JSON.parse(payload);
+  const parsed = parseJsonWithSafety(payload);
+  if (parsed.ok) {
+    const obj = parsed.value;
     const delta = extractDeltaText(obj);
     const reasoning = extractReasoningText(obj);
     const usage = extractUsageFromSSEObject(obj);
     const finishReason = extractFinishReason(obj);
     if (reasoning) latestReasoning = reasoning;
     return [{ done: false, delta, reasoning, usage, finishReason, json: obj, raw: payload }];
-  } catch (_) {
-    return [];
   }
+  return [];
 }
 
 function extractDeltaText(obj) {
@@ -531,13 +628,15 @@ function extractJsonSafely(text) {
     .replace(/```$/i, '')
     .trim();
 
-  try { return JSON.parse(raw); } catch (_) {}
+  const fullParsed = parseJsonWithSafety(raw);
+  if (fullParsed.ok) return fullParsed.value;
 
   const s = raw.indexOf('{');
   const e = raw.lastIndexOf('}');
   if (s >= 0 && e > s) {
     const sub = raw.slice(s, e + 1);
-    try { return JSON.parse(sub); } catch (_) {}
+    const partialParsed = parseJsonWithSafety(sub);
+    if (partialParsed.ok) return partialParsed.value;
   }
 
   return null;
@@ -546,11 +645,14 @@ function extractJsonSafely(text) {
 function extractMessageContent(resp) {
   let data = resp?.data;
   if (typeof data === 'string') {
-    try { data = JSON.parse(data); } catch (_) {
+    const parsed = parseJsonWithSafety(data);
+    if (parsed.ok) {
+      data = parsed.value;
+    } else {
       const sseText = parseSSEToText(data);
       if (sseText) return { role: 'assistant', content: sseText };
       const text = String(data || '').trim();
-      return text ? { role: 'assistant', content: text } : null;
+      return text && !looksLikeJsonPayload(text) ? { role: 'assistant', content: text } : null;
     }
   }
 
@@ -606,12 +708,14 @@ function extractMessageContent(resp) {
 }
 
 function safeParseArgs(argsStr) {
-  try { return JSON.parse(argsStr || '{}'); } catch (_) { return {}; }
+  const parsed = parseJsonWithSafety(argsStr || '{}');
+  return parsed.ok && parsed.value && typeof parsed.value === 'object' ? parsed.value : {};
 }
 
 module.exports = {
   extractMessageContent,
   safeParseArgs,
+  parseJsonWithSafety,
   extractJsonSafely,
   parseSSEToText,
   extractSSEEvents,
