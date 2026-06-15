@@ -24,6 +24,8 @@ class ResearchTaskQueue {
     this.tasksByKey = new Map();
     this.pending = [];
     this.activeCount = 0;
+    this.isDraining = false;
+    this.needsDrain = false;
   }
 
   isEnabled() {
@@ -70,10 +72,22 @@ class ResearchTaskQueue {
   }
 
   drain() {
-    while (this.activeCount < this.getMaxConcurrency() && this.pending.length > 0) {
-      const record = this.pending.shift();
-      if (!record || record.status !== 'queued') continue;
-      this.runRecord(record);
+    if (this.isDraining) {
+      this.needsDrain = true;
+      return;
+    }
+    this.isDraining = true;
+    try {
+      do {
+        this.needsDrain = false;
+        while (this.activeCount < this.getMaxConcurrency() && this.pending.length > 0) {
+          const record = this.pending.shift();
+          if (!record || record.status !== 'queued') continue;
+          this.runRecord(record);
+        }
+      } while (this.needsDrain);
+    } finally {
+      this.isDraining = false;
     }
   }
 
@@ -118,6 +132,8 @@ class ResearchTaskQueue {
     this.tasksByKey.clear();
     this.pending = [];
     this.activeCount = 0;
+    this.isDraining = false;
+    this.needsDrain = false;
   }
 }
 

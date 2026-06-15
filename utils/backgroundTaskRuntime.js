@@ -25,6 +25,9 @@ function createBackgroundTaskRuntime(options = {}) {
   const tasksById = new Map();
   const sessionsByKey = new Map();
   const controllerRegistry = createControllerRegistry();
+  let isExpiringSessions = false;
+  let needsExpireSessions = false;
+  const cancellingControllerTaskIds = new Set();
 
   function taskPath(taskId) {
     return path.join(storeDir, `${String(taskId || '').trim()}.json`);
@@ -128,7 +131,15 @@ function createBackgroundTaskRuntime(options = {}) {
   }
 
   function cancelAttachedController(taskId = '', reason = 'cancelled') {
-    return controllerRegistry.cancel(taskId, reason);
+    const key = normalizeText(taskId);
+    if (!key) return false;
+    if (cancellingControllerTaskIds.has(key)) return false;
+    cancellingControllerTaskIds.add(key);
+    try {
+      return controllerRegistry.cancel(key, reason);
+    } finally {
+      cancellingControllerTaskIds.delete(key);
+    }
   }
 
   function shouldContinue(taskId = '') {
@@ -440,18 +451,36 @@ function createBackgroundTaskRuntime(options = {}) {
   }
 
   function expireSessions() {
+    if (isExpiringSessions) {
+      needsExpireSessions = true;
+      return;
+    }
+    isExpiringSessions = true;
     const nowTs = Date.now();
-    for (const [sessionKey, session] of sessionsByKey.entries()) {
-      const expiresAt = Date.parse(String(session.expires_at || ''));
-      if (Number.isFinite(expiresAt) && expiresAt <= nowTs) {
-        if (session.active_task_id) {
-          requestCancel(session.active_task_id, {
-            error: 'expired',
-            reason: 'expired'
+    try {
+      do {
+        needsExpireSessions = false;
+        const expired = Array.from(sessionsByKey.entries())
+          .filter(([, session]) => {
+            const expiresAt = Date.parse(String(session.expires_at || ''));
+            return Number.isFinite(expiresAt) && expiresAt <= nowTs;
           });
+        for (const [sessionKey, session] of expired) {
+          const current = sessionsByKey.get(sessionKey);
+          if (!current || current !== session) continue;
+          if (session.active_task_id) {
+            requestCancel(session.active_task_id, {
+              error: 'expired',
+              reason: 'expired'
+            });
+          }
+          if (sessionsByKey.get(sessionKey) === session) {
+            removeSession(sessionKey);
+          }
         }
-        removeSession(sessionKey);
-      }
+      } while (needsExpireSessions);
+    } finally {
+      isExpiringSessions = false;
     }
   }
 

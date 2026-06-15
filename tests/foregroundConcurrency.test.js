@@ -88,6 +88,32 @@ module.exports = (async () => {
   const sameUserSecondLock = await sameUserSecond;
   sameUserSecondLock.release();
 
+  const raceController = createForegroundConcurrencyController({
+    globalLimit: 2,
+    adminReservedSlots: 0,
+    perUserLimit: 1
+  });
+  const raceFirst = await raceController.acquire({ userId: 'race_1', sessionKey: 'race_1', lane: 'general', messageId: 'r1' });
+  const raceSecond = await raceController.acquire({ userId: 'race_2', sessionKey: 'race_2', lane: 'general', messageId: 'r2' });
+  const raceQueuedA = raceController.acquire({ userId: 'race_3', sessionKey: 'race_3', lane: 'general', messageId: 'r3' });
+  const raceQueuedB = raceController.acquire({ userId: 'race_4', sessionKey: 'race_4', lane: 'general', messageId: 'r4' });
+  const resolvedDuringRelease = [];
+  raceQueuedA.then((lock) => {
+    resolvedDuringRelease.push(lock.requestId);
+    raceSecond.release();
+  });
+  raceQueuedB.then((lock) => {
+    resolvedDuringRelease.push(lock.requestId);
+  });
+  raceFirst.release();
+  const raceLockA = await raceQueuedA;
+  const raceLockB = await raceQueuedB;
+  assert.strictEqual(raceController.getSnapshot().totalActive, 2, 'nested release during drain should fill available slots once');
+  assert.strictEqual(resolvedDuringRelease.length, 2);
+  raceLockA.release();
+  raceLockB.release();
+  assert.strictEqual(raceController.getSnapshot().totalActive, 0);
+
   console.log('foregroundConcurrency.test.js passed');
 })().catch((error) => {
   console.error(error);

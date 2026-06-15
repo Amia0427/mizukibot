@@ -41,6 +41,8 @@ function createForegroundConcurrencyController(options = {}) {
     general: '',
     admin: ''
   };
+  let isDraining = false;
+  let needsDrain = false;
 
   function getActiveForSession(sessionKey = '') {
     return Math.max(0, Number(activeBySession.get(String(sessionKey || '').trim()) || 0) || 0);
@@ -180,17 +182,29 @@ function createForegroundConcurrencyController(options = {}) {
   }
 
   function drainQueues() {
-    let progressed = true;
-    while (progressed) {
-      progressed = false;
-      for (const lane of ['admin', 'general']) {
-        if (!hasLaneCapacity(lane)) continue;
-        const next = takeNextEligible(lane);
-        if (!next) continue;
-        progressed = true;
-        next.resolve(reserveSlot(next));
-        if (getTotalActive() >= globalLimit) return;
-      }
+    if (isDraining) {
+      needsDrain = true;
+      return;
+    }
+    isDraining = true;
+    try {
+      do {
+        needsDrain = false;
+        let progressed = true;
+        while (progressed) {
+          progressed = false;
+          for (const lane of ['admin', 'general']) {
+            if (!hasLaneCapacity(lane)) continue;
+            const next = takeNextEligible(lane);
+            if (!next) continue;
+            progressed = true;
+            next.resolve(reserveSlot(next));
+            if (getTotalActive() >= globalLimit) return;
+          }
+        }
+      } while (needsDrain);
+    } finally {
+      isDraining = false;
     }
   }
 
