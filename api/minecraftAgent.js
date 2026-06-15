@@ -58,7 +58,17 @@ function safeClearControls() {
   }
 }
 
+function cleanupRuntimeBotListeners(activeBot) {
+  if (!activeBot || typeof activeBot.removeAllListeners !== 'function') return;
+  for (const eventName of ['kicked', 'error', 'end', 'chat']) {
+    try {
+      activeBot.removeAllListeners(eventName);
+    } catch (_) {}
+  }
+}
+
 function resetRuntimeState() {
+  cleanupRuntimeBotListeners(bot);
   bot = null;
   pathfinderApi = null;
   goalsApi = null;

@@ -1,3 +1,11 @@
+## 运行维护 2026-06-15 10:45
+
+- 小目标：执行 DEBUG_PLAN H-002/H-004，补 Telegram handler 异常隔离与 Minecraft 重连监听器清理。
+- 最小修复：`core/tgBot.js` 抽出 `handleTelegramMessage`，`sendChatAction`、AI 处理、正常回复发送、错误提示发送均独立 catch 并记录上下文；`api/minecraftAgent.js` 在 `resetRuntimeState` 里清理旧 bot 的 `kicked/error/end/chat` 监听器后再置空运行时状态。
+- 验证：`node --check core/tgBot.js`、`node --check api/minecraftAgent.js`、`node --check tests/tgBotExceptionHandling.test.js`、`node --check tests/minecraftAgentListenerCleanup.test.js`、`node --unhandled-rejections=strict tests/tgBotExceptionHandling.test.js`、`node --unhandled-rejections=strict tests/minecraftAgentListenerCleanup.test.js` 通过。
+- 未覆盖风险：未连真实 Telegram 网络/API 限流，也未对真实 Minecraft 服务器做 10 次重连内存 profiling；当前覆盖为单元级异常与 EventEmitter listener 计数验收。
+- 小目标已完成：Telegram 消息处理错误不再逃出事件回调，Minecraft reset 会释放旧 bot 核心监听器。
+
 ## 运行维护 2026-06-14 22:42
 
 - 小目标：重点排查今天慢点 1 和 2，区分连续消息等待、流式生成耗时和真实 QQ 发送耗时。
