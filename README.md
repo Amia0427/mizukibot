@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-15 19:50 +08:00**：复盘 `[OneBot] [Http Client] 新消息事件HTTP上报返回快速操作失败 Error: connect ECONNREFUSED 127.0.0.1:3002`。现场确认报错时 `Get-NetTCPConnection -LocalPort 3002` 无监听，`data/bot-daemon.log` 显示主 bot 已因连续短命退出进入早退冷却，直到 19:48:03 daemon 才重新拉起主 bot。随后已验收 `127.0.0.1:3002` 重新监听且 `POST /` 返回 `204`。结论：这次不是 OneBot 协议本身坏了，而是 HTTP reverse 入口当时没人接；先查主 bot/daemon，再查 3002 端口。小目标完成：`ECONNREFUSED 127.0.0.1:3002` 的现场排查路径已补齐。
+
 **2026-06-15 19:35 +08:00**：同步 `.claude/audit-workflow.js` 与当前仓库真实基线。审计工作流已改为增量复审口径，默认基线为 `3827eb0`、Node.js `>=20.0.0`、LangChain/LangGraph v1、`npm audit --omit=dev --json` 0 vulnerabilities，并内置 C-001~C-007、H-001~H-006、M-001~M-005 已完成项，后续运行不会把这些历史完成项重新写成新问题。验收：工作流包装进 async 函数后语法解析通过、`npm audit --omit=dev --json`、依赖版本复核通过。小目标完成：审计工作流可继续使用，且按 DEBUG_PLAN/README 当前状态做增量复审。
 
 **2026-06-15 19:29 +08:00**：清掉 `npm audit --omit=dev --json` 剩余 6 个 moderate。定位确认 6 项均来自 `mineflayer -> minecraft-protocol -> prismarine-auth/yggdrasil -> uuid` 认证链，实际 Minecraft 入口仍只在 `api/minecraftAgent.js` 懒加载 `mineflayer`，默认 `MC_AUTH=offline` 不触发在线认证；最小修复为添加 `overrides.uuid=11.1.1`，让 `@azure/msal-node` 和 `yggdrasil` 复用安全 `uuid`，不降级 `mineflayer`、不改 Minecraft 功能代码。验收：`npm audit --omit=dev --json` 为 0 vulnerabilities；`npm ls uuid @azure/msal-node yggdrasil minecraft-protocol prismarine-auth mineflayer --all` 显示原 mineflayer 链保留且 `uuid@11.1.1` deduped/overridden；`node --check api/minecraftAgent.js`、`node --unhandled-rejections=strict tests/minecraftAgentListenerCleanup.test.js`、Minecraft 相关依赖加载探针、`npm run check:agent:static` 均通过。提交：`db45d8e`。小目标完成：mineflayer auth 链 moderate 已清零，未覆盖真实 Minecraft 服务器在线登录联调。
