@@ -1,3 +1,12 @@
+## 运行维护 2026-06-17 01:18
+
+- 小目标：参考 CC-API Anthropic SDK 文档，全面修复本项目第三方 API 端点请求 Claude 时的 Anthropic Messages 请求体严重问题。
+- 根因：项目是自建 HTTP POST，不是 Anthropic SDK；SDK 裸 `baseURL=https://cc-coding.cn` 会自动拼 `/v1/messages`，但本项目显式 `provider=anthropic` 的裸域名此前不会补路径。另一个严重问题是 extended thinking 为降级恢复写入的 `__originalMaxTokens` 会作为普通字段泄漏给上游。
+- 最小修复：`provider=anthropic` 的裸域名补为 `/v1/messages`，OpenAI-compatible 裸域名仍补 `/v1/chat/completions`；Anthropic thinking 的原始可见 `max_tokens` 改用不可枚举 Symbol 保存，降级重试仍能恢复但不会进入 payload；`claude-opus-4-6` / `claude-opus-4-6-thinking` / `claude-mythos-preview` 改用 `thinking.type=adaptive`，旧 Claude 模型继续用 `enabled + budget_tokens`。
+- 复核项：System Prompt 仍映射到顶层 `system`；Prompt Caching 仍限制 4 个断点并发送 `anthropic-beta: prompt-caching-2024-07-31`；异步主链 `postStreamWithRetry()` / `Promise.race` 未发现漏 await，本轮未做重构。
+- 验证：`node --check` 覆盖请求塑形、provider 归一和目标测试；`MODEL_TLS_IMPERSONATION_ENABLED=false MODEL_TLS_IMPERSONATION_STREAM_ENABLED=false node scripts/run-tests.js tests/providerRequestNormalization.test.js tests/httpClientAnthropicPromptCache.test.js tests/anthropicAssistantContextOrdering.test.js tests/plannerV2Protocol.test.js tests/mainModelGenerationParams.test.js tests/httpClientReasoningEffort.test.js` 通过；`npm run diag:provider-request -- --admin --json` 显示 admin Anthropic 请求体 keys 不含 `__originalMaxTokens`、cache 断点为 4；当前 admin 构造探针显示 `thinking={"type":"adaptive"}`。
+- 小目标已完成：第三方默认 OpenAI-compatible 请求 Claude 的路径保持不变，显式 Anthropic Messages 链路与 SDK 文档语义对齐，且不再向上游泄漏内部字段。
+
 ## 运行维护 2026-06-17 01:05
 
 - 小目标：确认 2026-06-16 21:02、21:10、21:41、21:51 和 2026-06-17 00:46 +08:00 反复 `expected_shutdown` 后 daemon 重拉的触发者，并收掉误触发链路。

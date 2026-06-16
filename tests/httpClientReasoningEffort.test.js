@@ -16,6 +16,8 @@ module.exports = (async () => {
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.MODEL_TOP_P_ENABLED = 'true';
+    process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
+    process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
     process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     clearProjectCache();
     axios = require('axios');
@@ -71,6 +73,22 @@ module.exports = (async () => {
       type: 'enabled',
       budget_tokens: 1024
     });
+    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPrepared.requestBody, '__originalMaxTokens'));
+    assert.ok(!Object.keys(anthropicPrepared.requestBody).includes('__originalMaxTokens'));
+
+    const anthropicAdaptivePrepared = await httpClient.prepareRequest('https://api.anthropic.com/v1/messages', {
+      model: 'claude-opus-4-6-thinking',
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 900,
+      reasoning_effort: 'high',
+      stream: false
+    });
+    assert.strictEqual(anthropicAdaptivePrepared.provider, 'anthropic');
+    assert.deepStrictEqual(anthropicAdaptivePrepared.requestBody.thinking, {
+      type: 'adaptive'
+    });
+    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicAdaptivePrepared.requestBody.thinking, 'budget_tokens'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicAdaptivePrepared.requestBody, '__originalMaxTokens'));
 
     let attemptCount = 0;
     let firstAttemptBody = null;
@@ -267,8 +285,10 @@ module.exports = (async () => {
       type: 'enabled',
       budget_tokens: 2100
     });
+    assert.ok(!Object.prototype.hasOwnProperty.call(firstAttemptBody, '__originalMaxTokens'));
     assert.strictEqual(secondAttemptBody.max_tokens, 3500);
     assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, 'thinking'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(secondAttemptBody, '__originalMaxTokens'));
   } finally {
     if (axios && originalPost) axios.post = originalPost;
     process.env = snapshot;

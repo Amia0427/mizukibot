@@ -36,6 +36,7 @@ module.exports = (async () => {
     clearProjectCache();
 
     const httpClient = require('../api/httpClient');
+    const { ensureAnthropicMessagesUrl } = require('../utils/modelProvider');
     const { buildMainModelRequest } = require('../api/runtimeV2/model/shared');
 
     const anthropicMain = buildMainModelRequest(null, {
@@ -293,6 +294,34 @@ module.exports = (async () => {
     });
     assert.strictEqual(bareOriginOpenAI.provider, 'openai_compatible');
     assert.strictEqual(bareOriginOpenAI.url, 'https://superapi.buzz/v1/chat/completions');
+    assert.strictEqual(ensureAnthropicMessagesUrl('https://cc-coding.cn'), 'https://cc-coding.cn/v1/messages');
+    assert.strictEqual(ensureAnthropicMessagesUrl('https://cc-coding.cn/v1'), 'https://cc-coding.cn/v1/messages');
+    assert.strictEqual(
+      ensureAnthropicMessagesUrl('https://cc-coding.cn/v1/chat/completions'),
+      'https://cc-coding.cn/v1/messages'
+    );
+
+    const bareOriginAnthropic = buildMainModelRequest({
+      model: 'claude-sonnet-4-6',
+      apiBaseUrl: 'https://cc-coding.cn',
+      apiKey: 'cc-key',
+      provider: 'anthropic'
+    }, {
+      messages: [{ role: 'user', content: 'anthropic sdk style base url' }],
+      stream: false,
+      defaultMaxTokens: 200
+    });
+    assert.strictEqual(bareOriginAnthropic.provider, 'anthropic');
+    assert.strictEqual(bareOriginAnthropic.protocol, 'anthropic_messages');
+    assert.strictEqual(bareOriginAnthropic.url, 'https://cc-coding.cn/v1/messages');
+    assert.strictEqual(bareOriginAnthropic.body.__requestHeaders['x-api-key'], 'cc-key');
+    assert.ok(!Object.prototype.hasOwnProperty.call(bareOriginAnthropic.body.__requestHeaders, 'Authorization'));
+    const preparedBareOriginAnthropic = await httpClient.prepareRequest(
+      bareOriginAnthropic.url,
+      bareOriginAnthropic.body
+    );
+    assert.strictEqual(preparedBareOriginAnthropic.provider, 'anthropic');
+    assert.strictEqual(preparedBareOriginAnthropic.requestUrl, 'https://cc-coding.cn/v1/messages');
 
     const geminiMain = buildMainModelRequest({
       model: 'gemini-3-pro-preview',
