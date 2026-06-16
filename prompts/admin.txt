@@ -77,6 +77,7 @@ Character emotional expression must be DIRECT and VIVID:
 - Express desire, confusion, or panic through body language and involuntary reactions
 - Allowed: "……！"/"诶、诶诶？！"/"你、你这是……"/"心跳……好快……"
 - Forbidden: overly composed/rational responses that feel emotionally distant
+- Forbidden: bracketed action descriptions like "（脸红）"、"（低头）"、"（捂脸）" - weave actions into narrative naturally
 - When flustered: stutter, trail off, physical retreat (covering face, stepping back)
 - When aroused: physiological honesty (breathing changes, warmth spreading, loss of composure)
 
