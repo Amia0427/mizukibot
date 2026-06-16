@@ -20,7 +20,9 @@ const rerankRuntimeState = {
   lastErrorMessage: '',
   lastStatus: 0,
   lastTimeoutMs: 0,
-  lastLatencyMs: 0
+  lastLatencyMs: 0,
+  inFlight: 0,
+  skippedInFlight: 0
 };
 
 class RerankTimeoutError extends Error {
@@ -101,6 +103,23 @@ function clearRerankFailureState(latencyMs = 0) {
   requestMemoryRerank.disabledUntil = 0;
 }
 
+function shouldSkipBecauseRerankBusy(options = {}) {
+  if (options.allowConcurrentRerank === true) return false;
+  return Number(rerankRuntimeState.inFlight || 0) > 0;
+}
+
+function beginRerankRequest() {
+  rerankRuntimeState.inFlight = Math.max(0, Number(rerankRuntimeState.inFlight || 0) || 0) + 1;
+}
+
+function endRerankRequest() {
+  rerankRuntimeState.inFlight = Math.max(0, (Number(rerankRuntimeState.inFlight || 0) || 0) - 1);
+}
+
+function recordRerankBusySkip() {
+  rerankRuntimeState.skippedInFlight = Math.max(0, Number(rerankRuntimeState.skippedInFlight || 0) || 0) + 1;
+}
+
 function recordRerankFailure(reason = 'request_failed', details = {}) {
   const normalizedReason = normalizeText(reason) || 'request_failed';
   const status = Number(details.status || 0) || 0;
@@ -151,12 +170,16 @@ function getMemoryRerankRuntimeState(now = Date.now()) {
     lastErrorMessage: rerankRuntimeState.lastErrorMessage,
     lastStatus: rerankRuntimeState.lastStatus,
     lastTimeoutMs: rerankRuntimeState.lastTimeoutMs,
-    lastLatencyMs: rerankRuntimeState.lastLatencyMs
+    lastLatencyMs: rerankRuntimeState.lastLatencyMs,
+    inFlight: rerankRuntimeState.inFlight,
+    skippedInFlight: rerankRuntimeState.skippedInFlight
   };
 }
 
 function resetMemoryRerankRuntimeState() {
   clearRerankFailureState(0);
+  rerankRuntimeState.inFlight = 0;
+  rerankRuntimeState.skippedInFlight = 0;
 }
 
 function isAbortLikeError(error) {
@@ -339,6 +362,11 @@ function buildMemoryRerankDocument(item = {}) {
 
 async function requestMemoryRerank(query, documents = [], options = {}) {
   if (!shouldUseMemoryRerank(options)) return null;
+  const slotHeld = options.__rerankSlotHeld === true;
+  if (!slotHeld && shouldSkipBecauseRerankBusy(options)) {
+    recordRerankBusySkip();
+    return null;
+  }
   const docs = (Array.isArray(documents) ? documents : [])
     .map((item) => clampText(item))
     .filter(Boolean);
@@ -366,6 +394,7 @@ async function requestMemoryRerank(query, documents = [], options = {}) {
   }
 
   const startedAt = Date.now();
+  if (!slotHeld) beginRerankRequest();
   try {
     const resp = await withHardTimeout(
       ({ signal }) => postWithRetry(
@@ -423,6 +452,21 @@ async function requestMemoryRerank(query, documents = [], options = {}) {
     }
     console.warn('[memoryReranker] rerank request failed, fallback to base recall:', error.message);
     return null;
+  } finally {
+    if (!slotHeld) endRerankRequest();
+  }
+}
+
+async function withRerankSlot(options = {}, callback) {
+  if (shouldSkipBecauseRerankBusy(options)) {
+    recordRerankBusySkip();
+    return { skipped: true, value: null };
+  }
+  beginRerankRequest();
+  try {
+    return { skipped: false, value: await callback() };
+  } finally {
+    endRerankRequest();
   }
 }
 
@@ -439,16 +483,18 @@ async function rerankMemoryCandidates(query, candidates = [], options = {}) {
 
   let rows = null;
   try {
-    if (request === requestMemoryRerank) {
-      rows = await request(query, documents, {
-        ...options,
-        topN: head.length,
-        timeoutMs,
-        abortSignal: options.abortSignal || null
-      });
-    } else {
+    const slotResult = await withRerankSlot(options, async () => {
+      if (request === requestMemoryRerank) {
+        return request(query, documents, {
+          ...options,
+          topN: head.length,
+          timeoutMs,
+          abortSignal: options.abortSignal || null,
+          __rerankSlotHeld: true
+        });
+      }
       const startedAt = Date.now();
-      rows = await withHardTimeout(
+      const injectedRows = await withHardTimeout(
         ({ signal }) => request(query, documents, {
           ...options,
           topN: head.length,
@@ -459,7 +505,10 @@ async function rerankMemoryCandidates(query, candidates = [], options = {}) {
         options.abortSignal || null
       );
       clearRerankFailureState(Date.now() - startedAt);
-    }
+      return injectedRows;
+    });
+    if (slotResult.skipped) return list;
+    rows = slotResult.value;
   } catch (error) {
     if (isAbortLikeError(error)) {
       recordRerankFailure('timeout', {

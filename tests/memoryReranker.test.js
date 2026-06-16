@@ -89,5 +89,29 @@ module.exports = (async () => {
   assert.deepStrictEqual(skippedDuringCooldown.map((item) => item.id), candidates.map((item) => item.id));
   assert.strictEqual(cooldownRequestCount, 1);
 
+  resetMemoryRerankRuntimeState();
+  let firstRerankRelease = null;
+  let inFlightRequestCount = 0;
+  const firstInFlight = rerankMemoryCandidates('memory reranker', candidates, {
+    requestRerank: async () => {
+      inFlightRequestCount += 1;
+      await new Promise((resolve) => { firstRerankRelease = resolve; });
+      return [{ index: 1, score: 1 }];
+    }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const busyFallback = await rerankMemoryCandidates('memory reranker', candidates, {
+    requestRerank: async () => {
+      inFlightRequestCount += 1;
+      return [{ index: 1, score: 1 }];
+    }
+  });
+  assert.deepStrictEqual(busyFallback.map((item) => item.id), candidates.map((item) => item.id));
+  assert.strictEqual(inFlightRequestCount, 1);
+  assert.strictEqual(getMemoryRerankRuntimeState().skippedInFlight, 1);
+  firstRerankRelease();
+  await firstInFlight;
+  assert.strictEqual(getMemoryRerankRuntimeState().inFlight, 0);
+
   console.log('memoryReranker.test.js passed');
 })();
