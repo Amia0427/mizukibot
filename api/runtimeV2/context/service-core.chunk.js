@@ -101,15 +101,8 @@ function resolveMainReplyAdminPromptContext(input = {}) {
     .map((item) => normalizeText(item))
     .filter(Boolean)
     .includes(userId);
-  if (!isAdminUser) return false;
-  const chatType = normalizeText(
-    input.chatType
-    || options.chatType
-    || options.chat_type
-    || routeMeta.chatType
-    || routeMeta.chat_type
-  ).toLowerCase();
-  return chatType === 'private' || chatType === 'direct';
+  // Admin users always get admin prompt context, regardless of chat type
+  return isAdminUser;
 }
 
 function buildStableSystemPromptFingerprint(runtimeConfig = config) {
