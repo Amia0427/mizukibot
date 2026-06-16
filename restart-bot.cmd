@@ -77,6 +77,7 @@ foreach ($requiredPath in @($commonPath, $runnerPath)) {
 
 $mainPidFile = Join-Path $repoRoot '.mizukibot.lock'
 $workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
+$expectedShutdownFile = Join-Path (Join-Path $repoRoot 'data') 'bot-main-expected-shutdown.json'
 
 function Read-FirstLine {
   param([Parameter(Mandatory = $true)][string]$Path)
@@ -118,6 +119,25 @@ function Read-JsonFileSafe {
     return $raw | ConvertFrom-Json -ErrorAction Stop
   } catch {
     return $null
+  }
+}
+
+function Write-JsonFileSafe {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)]$Value
+  )
+
+  try {
+    $dir = Split-Path -Parent $Path
+    if ($dir -and -not (Test-Path $dir)) {
+      New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    $json = $Value | ConvertTo-Json -Depth 8
+    [System.IO.File]::WriteAllText($Path, $json + "`r`n", [System.Text.Encoding]::UTF8)
+    return $true
+  } catch {
+    return $false
   }
 }
 
@@ -223,6 +243,67 @@ function Get-ProcessCommandLineSafe {
   }
 }
 
+function Test-ProcessLooksLikeMainBot {
+  param([Parameter(Mandatory = $true)]$Process)
+
+  $commandLine = [string]$Process.CommandLine
+  if ([string]::IsNullOrWhiteSpace($commandLine)) {
+    return $false
+  }
+
+  $normalizedRoot = ([string]$repoRoot).TrimEnd('\')
+  $repoIndexPattern = [regex]::Escape($normalizedRoot) + '[\\/]index\.js(["''\s]|$)'
+  $bareIndexArg = $commandLine -match '(^|["''\s])index\.js(["''\s]|$)'
+  $repoIndexArg = ($commandLine -match $repoIndexPattern)
+
+  return ($bareIndexArg -or $repoIndexArg)
+}
+
+function Get-RunningMainBotProcesses {
+  try {
+    return @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+      $_.Name -eq 'node.exe' -and (Test-ProcessLooksLikeMainBot -Process $_)
+    } | Sort-Object ProcessId)
+  } catch {
+    return @()
+  }
+}
+
+function Repair-MainPidFileFromProcess {
+  param([Parameter(Mandatory = $true)]$MainProcess)
+
+  $pidNum = [int]$MainProcess.ProcessId
+  if ($pidNum -le 0) {
+    return $false
+  }
+
+  try {
+    Set-Content -Path $mainPidFile -Value $pidNum -Encoding utf8
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Get-MainBotStatusFromProcessScan {
+  param([Parameter(Mandatory = $true)][string]$Name)
+
+  $mainProcesses = @(Get-RunningMainBotProcesses)
+  if ($mainProcesses.Count -le 0) {
+    return $null
+  }
+
+  $mainProcess = $mainProcesses[0]
+  $pidNum = [int]$mainProcess.ProcessId
+  $repaired = Repair-MainPidFileFromProcess -MainProcess $mainProcess
+  $detail = if ($repaired) { 'ok; pid file repaired from process scan' } else { 'ok; pid file repair failed' }
+  if ($mainProcesses.Count -gt 1) {
+    $detail = "$detail; duplicate main processes=$($mainProcesses.Count)"
+  }
+
+  return [pscustomobject]@{ Name = $Name; PidFile = $mainPidFile; Pid = $pidNum; Running = $true; Match = $true; Process = 'node'; Detail = $detail }
+}
+
 function Get-PidFileProcessStatus {
   param(
     [Parameter(Mandatory = $true)][string]$Name,
@@ -236,14 +317,26 @@ function Get-PidFileProcessStatus {
   $pidValid = [int]::TryParse($pidText, [ref]$pidNum)
 
   if (-not $exists) {
+    if ($ExpectedCommandPattern -eq 'index\.js') {
+      $scanned = Get-MainBotStatusFromProcessScan -Name $Name
+      if ($null -ne $scanned) { return $scanned }
+    }
     return [pscustomobject]@{ Name = $Name; PidFile = $PidFile; Pid = ''; Running = $false; Match = $false; Process = ''; Detail = 'pid file missing' }
   }
   if (-not $pidValid -or $pidNum -le 0) {
+    if ($ExpectedCommandPattern -eq 'index\.js') {
+      $scanned = Get-MainBotStatusFromProcessScan -Name $Name
+      if ($null -ne $scanned) { return $scanned }
+    }
     return [pscustomobject]@{ Name = $Name; PidFile = $PidFile; Pid = $pidText; Running = $false; Match = $false; Process = ''; Detail = 'pid file invalid' }
   }
 
   $process = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
   if ($null -eq $process) {
+    if ($ExpectedCommandPattern -eq 'index\.js') {
+      $scanned = Get-MainBotStatusFromProcessScan -Name $Name
+      if ($null -ne $scanned) { return $scanned }
+    }
     return [pscustomobject]@{ Name = $Name; PidFile = $PidFile; Pid = $pidNum; Running = $false; Match = $false; Process = ''; Detail = 'process not found' }
   }
 
@@ -256,6 +349,10 @@ function Get-PidFileProcessStatus {
   }
 
   $detail = if ($matches) { 'ok' } elseif (-not $isNode) { 'pid is not node' } else { 'command line mismatch' }
+  if (-not $matches -and $ExpectedCommandPattern -eq 'index\.js') {
+    $scanned = Get-MainBotStatusFromProcessScan -Name $Name
+    if ($null -ne $scanned) { return $scanned }
+  }
   return [pscustomobject]@{ Name = $Name; PidFile = $PidFile; Pid = $pidNum; Running = $true; Match = $matches; Process = $processName; Detail = $detail }
 }
 
@@ -436,19 +533,70 @@ function Stop-PidList {
   return @($stopped)
 }
 
+function Record-ExpectedMainBotShutdownForRestart {
+  param([int]$OwnerPid = 0)
+
+  if ($OwnerPid -le 0) {
+    return $false
+  }
+
+  $now = (Get-Date).ToUniversalTime()
+  $marker = [pscustomobject]@{
+    pid = $OwnerPid
+    reason = 'manual_restart_script'
+    recordedAt = $now.ToString('o')
+    expiresAt = $now.AddMinutes(5).ToString('o')
+    source = 'restart-bot.cmd'
+  }
+
+  return (Write-JsonFileSafe -Path $expectedShutdownFile -Value $marker)
+}
+
 function Stop-BotForRestart {
   $actions = New-Object System.Collections.ArrayList
   $targetPids = @()
+  $mainPid = 0
 
   foreach ($file in @($mainPidFile, $workerPidFile)) {
     $pidText = Read-FirstLine -Path $file
     $pidNum = 0
     if ([int]::TryParse($pidText, [ref]$pidNum) -and $pidNum -gt 0) {
       $targetPids += $pidNum
+      if ($file -eq $mainPidFile) {
+        $mainPid = $pidNum
+      }
+    }
+  }
+
+  $mainProcesses = @(Get-RunningMainBotProcesses)
+  if ($mainProcesses.Count -gt 0) {
+    foreach ($mainProcess in $mainProcesses) {
+      $targetPids += [int]$mainProcess.ProcessId
+    }
+
+    $mainPidProcess = Get-Process -Id $mainPid -ErrorAction SilentlyContinue
+    $mainPidCommandLine = if ($mainPidProcess) { Get-ProcessCommandLineSafe -ProcessId $mainPid } else { '' }
+    $mainPidValid = ($mainPidProcess -and $mainPidProcess.ProcessName -ieq 'node' -and ($mainPidCommandLine -match 'index\.js'))
+    if (-not $mainPidValid) {
+      $mainPid = [int]$mainProcesses[0].ProcessId
+      if (Repair-MainPidFileFromProcess -MainProcess $mainProcesses[0]) {
+        [void]$actions.Add("main pid file repaired before restart: $mainPid")
+      } else {
+        [void]$actions.Add("main pid file repair failed before restart: $mainPid")
+      }
     }
   }
 
   $targetPids = @($targetPids | Sort-Object -Unique)
+  if ($mainPid -gt 0) {
+    if (Record-ExpectedMainBotShutdownForRestart -OwnerPid $mainPid) {
+      [void]$actions.Add("expected shutdown marker written for main pid: $mainPid")
+    } else {
+      [void]$actions.Add("expected shutdown marker write failed for main pid: $mainPid")
+    }
+  } else {
+    [void]$actions.Add('expected shutdown marker skipped: main pid missing')
+  }
   $childPids = @(Get-TreeChildPids -RootPids $targetPids)
   $stoppedChildren = @(Stop-PidList -Pids $childPids -Stage 'child')
   $stoppedRoots = @(Stop-PidList -Pids $targetPids -Stage 'root')

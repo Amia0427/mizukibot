@@ -1,3 +1,12 @@
+## 运行维护 2026-06-16 21:11
+
+- 小目标：治本修复 `restart-bot.cmd` 手动重启不稳定，要求脚本稳定成功且最终状态可验收。
+- 根因：`restart-bot.cmd` 直接 `Stop-Process -Force` 停主 bot，却没有提前写 `data/bot-main-expected-shutdown.json`；daemon 随后看到旧 lock PID 死亡，会把人工重启计入 early-exit 崩溃退避。现场还出现失败副本把 `.mizukibot.lock` 覆盖成已退出 PID，导致 status/下一轮守护误判。
+- 最小修复：重启脚本在停止主进程前写 `manual_restart_script` expected-shutdown marker；status/restart 均可扫描真实 `node index.js` 主进程并修复 stale `.mizukibot.lock`，再继续停止/启动/健康检查。
+- 验证：`node tests\restartBotScript.test.js`、PowerShell payload parse 通过；实际执行 `cmd /c restart-bot.cmd restart` 返回 0；`cmd /c restart-bot.cmd status` 显示 main bot PID=38672、post-reply worker PID=19392 Running；`.mizukibot.lock` 内容为 `38672`；`Get-NetTCPConnection -LocalPort 3002` 显示 owner=38672；`POST http://127.0.0.1:3002/` 返回 204；`data/bot-main-restart-state.json` 为 `count=0,lastReason=expected_shutdown`。
+- 小目标已完成：手动重启不再被 daemon early-exit 退避和 stale lock 污染卡住，最终运行态可由脚本、lock、端口和 HTTP 204 共同验收。
+- 提交后记录 2026-06-16 21:11 +08:00：已提交 `2fc9501`（`fix: stabilize windows restart script`）；该小目标完成记录已按并行开发约定追加。
+
 ## 运行维护 2026-06-16 08:23
 
 - 小目标：把主 bot 退出重拉修复补成一次可复用的真实运行验收，确认 2026-06-15 23:19 到 2026-06-16 03:49 +08:00 稳定窗口是否覆盖昨晚修复目标。
