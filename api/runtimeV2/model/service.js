@@ -112,6 +112,13 @@ function previewMalformedResponseData(data) {
   return String(text || '').slice(0, MALFORMED_RESPONSE_LOG_PREVIEW_CHARS);
 }
 
+function hasAssistantUsableContent(message = null) {
+  if (!message || typeof message !== 'object') return false;
+  const content = normalizeTextContent(message.content).trim();
+  if (content) return true;
+  return Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+}
+
 function getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig = null) {
   if (String(resolvedConfig?.__mainModelUserRole || '').trim().toLowerCase() === 'admin') return 0;
   return Math.max(0, Math.floor(Number(config.NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS) || 0));
@@ -466,12 +473,15 @@ async function requestAssistantMessage(messagesToSend, context = {}) {
   });
 
   const message = extractMessageContent(response);
-  if (message) return message;
+  if (hasAssistantUsableContent(message)) return message;
 
   const parseDiagnostic = summarizeMalformedResponse(response);
   recordModelCallParseFailure(response?.__modelCallId, {
     statusCode: Number(response?.status || 0) || null,
-    parseDiagnostic
+    parseDiagnostic,
+    error: message
+      ? 'assistant message parsed without usable text or tool calls'
+      : 'model response parsed without usable assistant content'
   });
   console.error('AI response malformed(raw assistant):', previewMalformedResponseData(response?.data));
   return {

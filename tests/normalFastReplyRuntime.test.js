@@ -264,7 +264,7 @@ module.exports = (async () => {
       })
     }),
     (error) => error?.code === 'NORMAL_FAST_REPLY_MODEL_FAILURE'
-      && error?.failureType === 'generic_model_failure',
+      && error?.failureType === 'response_parse_empty',
     '快速回复不应直接发送模型格式异常兜底，应抛错交给正式链路'
   );
 
