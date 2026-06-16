@@ -13,7 +13,7 @@ function resolveRestartCommand(platform = process.platform) {
     const restartScript = path.join(repoRoot, 'restart-bot.cmd');
     return {
       command: process.env.ComSpec || 'cmd.exe',
-      args: ['/d', '/c', `call "${restartScript}"`],
+      args: ['/d', '/c', `call "${restartScript}" restart`],
       cwd: repoRoot,
       script: restartScript,
       windowsVerbatimArguments: true

@@ -1,3 +1,11 @@
+## 运行维护 2026-06-17 01:05
+
+- 小目标：确认 2026-06-16 21:02、21:10、21:41、21:51 和 2026-06-17 00:46 +08:00 反复 `expected_shutdown` 后 daemon 重拉的触发者，并收掉误触发链路。
+- 现场结论：持续让 daemon 认定 `expected_shutdown` 的 marker 来自 `restart-bot.cmd`。当前 `data/bot-main-expected-shutdown.json` 为 `source=restart-bot.cmd`、`reason=manual_restart_script`、`pid=12100`、`recordedAt=2026-06-16T16:46:43.8233393Z`；`data/bot-daemon.log` 在目标时间点均记录旧 lock PID 已死后 `main bot previous exit marked expected`。归档 stdout 还显示重复/非 daemon 副本干扰：`npm start` 横幅、`MizukiBot is already running`，以及 21:02 的 `EADDRINUSE 127.0.0.1:3005`。
+- 最小修复：`restart-bot.cmd` 无参数默认改成只读 status，不再默认执行 restart；`utils/remoteRestart.js` 在 Windows 上显式调用 `restart-bot.cmd restart`，保留 `/restart` 管理命令的真实重启能力；`restart-bot.cmd` 写 expected-shutdown marker 前新增 live main bot PID 校验，stale lock 不再被写成正常退出。
+- 验证：`node tests\restartBotScript.test.js`、`node tests\remoteRestart.test.js`、PowerShell payload parse、`node --check utils\remoteRestart.js` 通过；实际执行 `cmd /c restart-bot.cmd` 只输出 `status only; start skipped`，执行前后 `data/bot-main-expected-shutdown.json` 仍为 2026-06-17 00:46:43 +08:00、`data/bot-daemon.log` 仍为 00:46:48、`.mizukibot.lock=15416` 且 PID 15416 仍是 `"C:\Program Files\nodejs\node.exe" index.js`。
+- 小目标已完成：误触发无参 `restart-bot.cmd` 不再写 expected-shutdown marker 或触发 daemon 重拉；显式 restart 路径仍保留，并通过测试约束。
+
 ## 运行维护 2026-06-16 21:11
 
 - 小目标：治本修复 `restart-bot.cmd` 手动重启不稳定，要求脚本稳定成功且最终状态可验收。
