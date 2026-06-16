@@ -82,6 +82,7 @@ module.exports = (async () => {
   try {
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://example.com/main/v1/chat/completions';
+    process.env.API_PROVIDER = 'openai_compatible';
     process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     process.env.AI_MODEL = 'main-model';
     process.env.AI_TEMPERATURE = '0.7';
@@ -96,6 +97,7 @@ module.exports = (async () => {
 
     process.env.ADMIN_USER_IDS = 'admin-1';
     process.env.ADMIN_API_BASE_URL = 'https://example.com/admin/v1/chat/completions';
+    process.env.ADMIN_API_PROVIDER = 'openai_compatible';
     process.env.ADMIN_API_KEY = 'admin-key';
     process.env.ADMIN_AI_MODEL = 'admin-model';
     process.env.ADMIN_AI_TEMPERATURE = '0.91';
@@ -170,6 +172,7 @@ module.exports = (async () => {
     clearProjectCache();
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://example.com/main/v1/chat/completions';
+    process.env.API_PROVIDER = 'openai_compatible';
     process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     process.env.AI_MODEL = 'main-model';
     process.env.AI_RETRIES = '0';
@@ -194,6 +197,7 @@ module.exports = (async () => {
     restoreEnv(snapshot);
     process.env.API_KEY = 'main-key';
     process.env.API_BASE_URL = 'https://example.com/main/v1/chat/completions';
+    process.env.API_PROVIDER = 'openai_compatible';
     process.env.OPENAI_MAIN_API_MODE = 'chat_completions';
     process.env.AI_MODEL = 'main-model';
     process.env.AI_TEMPERATURE = '0.7';
@@ -208,6 +212,7 @@ module.exports = (async () => {
 
     process.env.ADMIN_USER_IDS = 'admin-1';
     process.env.ADMIN_API_BASE_URL = 'https://example.com/admin/v1/chat/completions';
+    process.env.ADMIN_API_PROVIDER = 'openai_compatible';
     process.env.ADMIN_API_KEY = 'admin-key';
     process.env.ADMIN_AI_MODEL = 'admin-model';
     process.env.ADMIN_AI_TEMPERATURE = '0.91';

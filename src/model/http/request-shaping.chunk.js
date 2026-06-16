@@ -75,6 +75,47 @@ function getAnthropicThinkingBudget(maxTokens, effort) {
   );
 }
 
+const ANTHROPIC_ORIGINAL_MAX_TOKENS = Symbol('anthropicOriginalMaxTokens');
+
+function setAnthropicOriginalMaxTokens(requestBody = {}, originalMaxTokens = 0) {
+  const n = Number(originalMaxTokens);
+  if (!requestBody || typeof requestBody !== 'object' || !Number.isFinite(n) || n <= 0) {
+    return requestBody;
+  }
+
+  Object.defineProperty(requestBody, ANTHROPIC_ORIGINAL_MAX_TOKENS, {
+    value: Math.floor(n),
+    enumerable: false,
+    configurable: true
+  });
+  return requestBody;
+}
+
+function getAnthropicOriginalMaxTokens(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object') return 0;
+  const internalValue = Number(requestBody[ANTHROPIC_ORIGINAL_MAX_TOKENS]);
+  if (Number.isFinite(internalValue) && internalValue > 0) return internalValue;
+  const legacyValue = Number(requestBody.__originalMaxTokens);
+  return Number.isFinite(legacyValue) && legacyValue > 0 ? legacyValue : 0;
+}
+
+function modelUsesAnthropicAdaptiveThinking(model = '') {
+  const normalized = normalizeText(model).toLowerCase().replace(/^models\//i, '');
+  if (!normalized) return false;
+  return /^claude-opus-4-6(?:[-_:]|$)/i.test(normalized)
+    || /^claude-mythos-preview(?:[-_:]|$)/i.test(normalized);
+}
+
+function buildAnthropicThinkingConfig(model = '', thinkingBudget = 0) {
+  if (modelUsesAnthropicAdaptiveThinking(model)) {
+    return { type: 'adaptive' };
+  }
+  return {
+    type: 'enabled',
+    budget_tokens: thinkingBudget
+  };
+}
+
 function requestUsesReasoning(requestBody = {}) {
   if (!requestBody || typeof requestBody !== 'object') return false;
   return Boolean(requestBody.reasoning_effort || requestBody.reasoning || requestBody.thinking);
@@ -83,7 +124,7 @@ function requestUsesReasoning(requestBody = {}) {
 function stripReasoningFields(requestBody = {}) {
   if (!requestBody || typeof requestBody !== 'object') return requestBody;
   const nextBody = { ...requestBody };
-  const originalMaxTokens = Number(requestBody.__originalMaxTokens);
+  const originalMaxTokens = getAnthropicOriginalMaxTokens(requestBody);
   delete nextBody.reasoning_effort;
   delete nextBody.reasoning;
   delete nextBody.thinking;
@@ -617,20 +658,24 @@ async function buildAnthropicRequestBody(body = {}) {
 
   const reasoningEffort = normalizeReasoningEffort(inputBody.reasoning_effort);
   const thinkingBudget = getAnthropicThinkingBudget(Math.max(visibleMaxTokens, 1200), reasoningEffort);
+  let originalMaxTokens = 0;
   if (thinkingBudget > 0) {
     requestBody.max_tokens = Math.max(visibleMaxTokens + thinkingBudget, 1200);
-    requestBody.thinking = {
-      type: 'enabled',
-      budget_tokens: thinkingBudget
-    };
-    requestBody.__originalMaxTokens = visibleMaxTokens;
+    requestBody.thinking = buildAnthropicThinkingConfig(requestBody.model, thinkingBudget);
+    originalMaxTokens = visibleMaxTokens;
   }
 
-  return applyAutoAnthropicPromptCaching(requestBody);
+  const finalRequestBody = applyAutoAnthropicPromptCaching(requestBody);
+  if (originalMaxTokens > 0) {
+    setAnthropicOriginalMaxTokens(finalRequestBody, originalMaxTokens);
+  }
+  return finalRequestBody;
 }
 
 module.exports = {
+  ANTHROPIC_ORIGINAL_MAX_TOKENS,
   buildAnthropicRequestBody,
+  buildAnthropicThinkingConfig,
   buildRequestCacheTrace,
   countCacheControlBlocks,
   emitHttpDowngradeTrace,
@@ -649,6 +694,7 @@ module.exports = {
   mapMessagesToAnthropic,
   mapToolChoiceToAnthropic,
   mapToolSchemaToAnthropic,
+  modelUsesAnthropicAdaptiveThinking,
   normalizeReasoningEffort,
   requestUsesExtendedSampling,
   requestUsesReasoning,

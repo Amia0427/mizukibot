@@ -177,6 +177,7 @@ function ensureAnthropicMessagesUrl(url) {
     return normalized.replace(/\/responses$/i, '/messages');
   }
   if (/\/v1$/i.test(normalized)) return `${normalized}/messages`;
+  if (/^https?:\/\/[^/]+$/i.test(normalized)) return `${normalized}/v1/messages`;
   return normalized;
 }
 
