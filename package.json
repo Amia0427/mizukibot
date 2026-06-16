@@ -34,6 +34,7 @@
     "diag:runtime-hotspots": "node scripts/diagnose-runtime-hotspots.js",
     "diag:runtime-exceptions": "node scripts/diagnose-runtime-exceptions.js",
     "diag:main-bot-restarts": "node scripts/diagnose-main-bot-restarts.js",
+    "verify:main-bot-stability-window": "node scripts/verify-main-bot-stability-window.js",
     "diag:low-resource": "node scripts/diagnose-low-resource.js",
     "diag:gemini-sampling": "node scripts/diagnose-gemini-sampling-degradation.js",
     "diag:gemini-style-signals": "node scripts/diagnose-gemini-recent-style-signals.js",

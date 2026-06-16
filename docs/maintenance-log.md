@@ -1,3 +1,12 @@
+## 运行维护 2026-06-16 08:23
+
+- 小目标：把主 bot 退出重拉修复补成一次可复用的真实运行验收，确认 2026-06-15 23:19 到 2026-06-16 03:49 +08:00 稳定窗口是否覆盖昨晚修复目标。
+- 现场结论：该稳定窗口已覆盖修复目标。`data/bot-daemon.log` 显示 23:19:28 因 pid=29940 stale lock 且 outside_window 清零后拉起 pid=38172，23:19:29 锁交接成功；23:49、00:22、01:49、03:49 四次 daemon 均确认同一 pid=38172 `bot already running`。
+- 状态证据：窗口内无 `reason=counted`、`reason=threshold_reached`、early-exit backoff、`main bot did not acquire lock after daemon start` 或 `daemon task error`；`data/bot-main-restart-state.json` 当前 `count=0` 且 `cooldownUntil` 为空；`data/bot-main-runtime-state.json` 心跳时间已晚于窗口结束，说明 heartbeat 监控持续写入。
+- 最小补强：新增只读回归入口 `npm run verify:main-bot-stability-window`，默认校验该真实窗口，也支持 `--start`、`--end`、`--expected-pid` 和 `--json` 复用到后续稳定窗口。
+- 验证：`node scripts/run-tests.js mainBotStabilityWindow.test.js`、`npm run verify:main-bot-stability-window -- --json`、`node scripts/verify-main-bot-stability-window.js` 通过；真实窗口报告 `status=pass`、`observedPids=[38172]`、`mainBotStarts=1`、`lockHandoffs=1`、`alreadyRunningChecks=4`、`blockingEvents=0`。
+- 小目标已完成：23:19–03:49 稳定窗口已由真实 daemon/lock/heartbeat/restart-state 证据验收，并固化为可复跑脚本。
+
 ## 方案评估 2026-06-16 01:13
 
 - 小目标：评估“嵌入 V8/QuickJS 或 nodejs-mobile-react-native，把本项目打包成安卓 APK”的可行性，并先修改方案，不改项目代码。
