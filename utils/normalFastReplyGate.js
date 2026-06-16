@@ -72,9 +72,6 @@ function matchesBlockedIntent(text = '') {
   if (/(搜索|搜一下|查一下|查查|查询|最新|今天新闻|新闻|官网|链接|网址|web|search|google|bing|news|latest|current|price|weather|天气|汇率|股价|价格)/i.test(t)) {
     return { blocked: true, reason: 'search_or_freshness_like' };
   }
-  if (/(发送自|我\s*是\s*你的\s*管理员|我是管理员|管理员\s*回复|userid\s*\d+|user\s*id\s*\d+)/i.test(t)) {
-    return { blocked: true, reason: 'admin_like_command' };
-  }
   if (/(计划|方案|总结|摘要|归纳|整理|改写|润色|翻译|部署|执行|创建|生成图|画图|发消息|定时|提醒|发布|群总结|做个|写代码|改代码|commit|pull request|pr\b|review\b|测试一下|跑测试)/i.test(t)) {
     return { blocked: true, reason: 'complex_task_like' };
   }
