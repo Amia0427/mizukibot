@@ -50,7 +50,10 @@ const { loadMemoryEvents } = require('../utils/memory-v3/events');
 const { loadMemoryNodes } = require('../utils/memory-v3/storage');
 const { prepareRequest } = require('../api/httpClient');
 const {
+  estimateVisualSummaryRequestTokens,
+  fitVisualSummaryImagePayloadToBudget,
   buildShortTimestamp,
+  generateImageVisualSummary,
   normalizeVisualSummaryImagePayload,
   summarizeImageIntoLongTermMemory
 } = require('../utils/imageVisualSummaryMemory');
@@ -74,6 +77,81 @@ module.exports = (async () => {
   assert.strictEqual(normalizedTallImage.mediaType, 'image/jpeg');
   assert.ok(normalizedTallMetadata.width <= 1024);
   assert.ok(normalizedTallMetadata.height <= 1024);
+
+  const noisyPixels = Buffer.alloc(1600 * 1600 * 3);
+  let seed = 0x5eed1234;
+  for (let i = 0; i < noisyPixels.length; i += 1) {
+    seed ^= seed << 13;
+    seed ^= seed >>> 17;
+    seed ^= seed << 5;
+    noisyPixels[i] = seed & 0xff;
+  }
+  const largeVisualInput = await sharp(noisyPixels, {
+    raw: {
+      width: 1600,
+      height: 1600,
+      channels: 3
+    }
+  }).png().toBuffer();
+  const rawVisualTokens = estimateVisualSummaryRequestTokens({
+    mediaType: 'image/png',
+    byteLength: largeVisualInput.length,
+    data: largeVisualInput.toString('base64')
+  }, {
+    userText: '用户随图文本'.repeat(500),
+    imageSource: 'current'
+  });
+  assert.ok(rawVisualTokens >= config.IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_HARD_LIMIT, 'test fixture should start over visual summary memory input budget');
+  const fittedVisualInput = await fitVisualSummaryImagePayloadToBudget({
+    mediaType: 'image/png',
+    byteLength: largeVisualInput.length,
+    data: largeVisualInput.toString('base64')
+  }, {
+    userText: '用户随图文本'.repeat(500),
+    imageSource: 'current'
+  });
+  const fittedTokens = estimateVisualSummaryRequestTokens(fittedVisualInput, {
+    userText: '用户随图文本'.repeat(500),
+    imageSource: 'current'
+  });
+  assert.ok(fittedTokens < config.IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_HARD_LIMIT, 'visual summary memory request should fit image input budget');
+  assert.strictEqual(fittedVisualInput.mediaType, 'image/jpeg');
+  assert.ok(fittedVisualInput.budgetFit, 'oversized visual summary image should record budget fit metadata');
+
+  writeCachedImage('singleflight_img', 'https://example.com/singleflight.png');
+  let releaseSingleflight = null;
+  let singleflightCalls = 0;
+  const singleflightPromise = new Promise((resolve) => { releaseSingleflight = resolve; });
+  const singleflightDeps = {
+    postWithRetry: async () => {
+      singleflightCalls += 1;
+      await singleflightPromise;
+      return {
+        data: {
+          choices: [{
+            message: {
+              content: '同一张图片的并发视觉摘要只应请求一次模型。'
+            }
+          }]
+        }
+      };
+    }
+  };
+  const firstSingleflight = generateImageVisualSummary('cached-image://singleflight_img', {
+    userId: 'u_img',
+    now: new Date('2026-05-20T01:22:00+08:00')
+  }, singleflightDeps);
+  while (singleflightCalls < 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  const secondSingleflight = generateImageVisualSummary('cached-image://singleflight_img', {
+    userId: 'u_img',
+    now: new Date('2026-05-20T01:22:00+08:00')
+  }, singleflightDeps);
+  releaseSingleflight();
+  const [singleflightA, singleflightB] = await Promise.all([firstSingleflight, secondSingleflight]);
+  assert.strictEqual(singleflightCalls, 1, 'same cache key visual summary should single-flight concurrent model calls');
+  assert.strictEqual(singleflightA.summary, singleflightB.summary);
 
   const calls = [];
   const result = await summarizeImageIntoLongTermMemory('cached-image://score_img', {
