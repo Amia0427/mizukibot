@@ -130,6 +130,12 @@ function getAdminPrivateStreamFirstTokenTimeoutMs(resolvedConfig = null, context
   return Math.max(0, Math.floor(Number(config.ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS) || 0));
 }
 
+function getAdminPrivateStreamTotalTimeoutMs(resolvedConfig = null, context = {}) {
+  if (String(resolvedConfig?.__mainModelUserRole || '').trim().toLowerCase() !== 'admin') return 0;
+  if (!isAdminPrivateChatContext(context, config)) return 0;
+  return Math.max(0, Math.floor(Number(config.ADMIN_PRIVATE_MAIN_REPLY_STREAM_TOTAL_TIMEOUT_MS) || 0));
+}
+
 function getAllowedToolNames(context = {}) {
   if (!Array.isArray(context.allowedTools)) return [];
   const runtimeConfig = context.runtimeConfig || context.config || config;
@@ -547,10 +553,15 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
       const requestStreamOnce = async (messages) => {
         const normalUserFirstTokenTimeoutMs = getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig);
         const adminPrivateFirstTokenTimeoutMs = getAdminPrivateStreamFirstTokenTimeoutMs(resolvedConfig, options);
+        const adminPrivateTotalTimeoutMs = getAdminPrivateStreamTotalTimeoutMs(resolvedConfig, options);
         const firstTokenTimeoutMs = normalUserFirstTokenTimeoutMs || adminPrivateFirstTokenTimeoutMs;
         const firstTokenTimeoutType = normalUserFirstTokenTimeoutMs > 0 ? 'normal_user' : (adminPrivateFirstTokenTimeoutMs > 0 ? 'admin_private' : '');
         const useFirstTokenTimeout = firstTokenTimeoutMs > 0 && !firstVisibleOutputSeen;
-        const abortController = useFirstTokenTimeout && typeof AbortController !== 'undefined'
+        const useTotalTimeout = adminPrivateTotalTimeoutMs > 0;
+        const requestTimeoutMs = useTotalTimeout
+          ? adminPrivateTotalTimeoutMs
+          : 0;
+        const abortController = (useFirstTokenTimeout || useTotalTimeout) && typeof AbortController !== 'undefined'
           ? new AbortController()
           : null;
         const callTrace = logResolvedModelCall(options, resolvedConfig, 'v2_streaming_reply');
@@ -563,9 +574,11 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
           topRouteType: options?.topRouteType,
           allowedTools: options?.allowedTools
         });
-        const requestBody = abortController
-          ? { ...request.body, __abortSignal: abortController.signal }
-          : request.body;
+        const requestBody = {
+          ...request.body,
+          ...(abortController ? { __abortSignal: abortController.signal } : {}),
+          ...(requestTimeoutMs > 0 ? { __timeoutMs: requestTimeoutMs } : {})
+        };
         const streamPromise = postStreamWithRetry(
           request.url,
           requestBody,
@@ -582,27 +595,54 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
           getRetries(1, resolvedConfig),
           getApiKey(resolvedConfig)
         );
-        if (!useFirstTokenTimeout) {
+        if (!useFirstTokenTimeout && !useTotalTimeout) {
           await streamPromise;
           return;
         }
 
         let timeoutError = null;
+        let firstTokenTimer = null;
+        let totalTimer = null;
         const timeoutPromise = new Promise((_, reject) => {
-          const timer = setTimeout(() => {
-            if (firstVisibleOutputSeen) return;
-            timeoutError = firstTokenTimeoutType === 'admin_private'
-              ? createAdminPrivateMainReplyStreamFirstTokenTimeoutError(firstTokenTimeoutMs)
-              : createNormalUserMainReplyStreamFirstTokenTimeoutError(firstTokenTimeoutMs);
+          const rejectWithTimeout = (error) => {
+            timeoutError = error;
             if (abortController && !abortController.signal.aborted) {
               try { abortController.abort(timeoutError); } catch (_) {}
             }
             reject(timeoutError);
-          }, firstTokenTimeoutMs);
+          };
+          if (useFirstTokenTimeout) {
+            firstTokenTimer = setTimeout(() => {
+              if (firstVisibleOutputSeen) return;
+              rejectWithTimeout(firstTokenTimeoutType === 'admin_private'
+                ? createAdminPrivateMainReplyStreamFirstTokenTimeoutError(firstTokenTimeoutMs)
+                : createNormalUserMainReplyStreamFirstTokenTimeoutError(firstTokenTimeoutMs));
+            }, firstTokenTimeoutMs);
+          }
+          if (useTotalTimeout) {
+            totalTimer = setTimeout(() => {
+              rejectWithTimeout(createAdminPrivateMainReplyStreamFirstTokenTimeoutError(adminPrivateTotalTimeoutMs, {
+                timeoutKind: 'total'
+              }));
+            }, adminPrivateTotalTimeoutMs);
+          }
           cancelActiveFirstTokenTimer = () => {
-            clearTimeout(timer);
+            if (firstTokenTimer) {
+              clearTimeout(firstTokenTimer);
+              firstTokenTimer = null;
+            }
           };
         });
+        const cancelAllTimers = () => {
+          if (typeof cancelActiveFirstTokenTimer === 'function') {
+            cancelActiveFirstTokenTimer();
+            cancelActiveFirstTokenTimer = null;
+          }
+          if (totalTimer) {
+            clearTimeout(totalTimer);
+            totalTimer = null;
+          }
+        };
 
         try {
           await Promise.race([streamPromise, timeoutPromise]);
@@ -610,10 +650,7 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
           if (timeoutError) throw timeoutError;
           throw error;
         } finally {
-          if (typeof cancelActiveFirstTokenTimer === 'function') {
-            cancelActiveFirstTokenTimer();
-            cancelActiveFirstTokenTimer = null;
-          }
+          cancelAllTimers();
         }
       };
 

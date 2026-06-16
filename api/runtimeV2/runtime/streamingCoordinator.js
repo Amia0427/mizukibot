@@ -417,6 +417,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
           node: 'direct_reply',
           stage: 'streaming_upstream',
           fallbackSource: 'admin_private_stream_first_token_timeout',
+          timeoutKind: String(error?.adminPrivateStreamTimeoutKind || 'first_token').trim() || 'first_token',
           timeoutMs: Number(error?.timeoutMs || 0) || 0
         });
         if (typeof request.onDelta === 'function') {
