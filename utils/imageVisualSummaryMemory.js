@@ -12,10 +12,19 @@ const {
 } = require('./memory-v3/materializer');
 const { formatDateInTz, getDatePartsInTz } = require('./time');
 const { cleanImageMemorySummary } = require('./imageMemorySummarySanitizer');
+const {
+  summarizePromptTokenBudget
+} = require('./modelCallTracker/requestSummary');
+const {
+  trimTextByTokenBudget
+} = require('./contextBudget');
 
 const VISUAL_SUMMARY_IMAGE_MAX_EDGE = 1024;
 const VISUAL_SUMMARY_REQUEST_SHAPE = 'chat_completions_image_url_data_url';
+const VISUAL_SUMMARY_DOWNSAMPLE_EDGES = Object.freeze([1024, 768, 640, 512, 384, 320, 256]);
+const VISUAL_SUMMARY_JPEG_QUALITIES = Object.freeze([82, 74, 66, 58, 50, 42]);
 const routeCooldowns = new Map();
+const visualSummaryGenerationInflight = new Map();
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -149,7 +158,11 @@ function extractResponseText(response = {}) {
 }
 
 function buildVisualSummaryPrompt(context = {}) {
-  const userText = normalizeText(context.userText);
+  const userText = trimTextByTokenBudget(
+    normalizeText(context.userText),
+    Math.max(64, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_USER_TEXT_MAX_TOKENS || 320) || 320),
+    'tail'
+  );
   const imageSource = normalizeText(context.imageSource || context.label);
   return [
     '你是长期记忆的图片视觉摘要模型。',
@@ -179,6 +192,30 @@ function buildRequestContent(imagePayload = {}, context = {}) {
       }
     }
   ];
+}
+
+function buildVisualSummaryRequestBody(imagePayload = {}, context = {}) {
+  const hardLimit = Math.max(2048, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_HARD_LIMIT || 20000) || 20000);
+  const warnThreshold = Math.max(1024, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_WARN_THRESHOLD || 18000) || 18000);
+  return {
+    model: getMemoryModelName(),
+    temperature: 0.1,
+    max_tokens: Math.max(80, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_MAX_TOKENS || 180) || 180),
+    stream: false,
+    messages: [
+      {
+        role: 'user',
+        content: buildRequestContent(imagePayload, context)
+      }
+    ],
+    __preferredProtocol: 'chat_completions',
+    __promptTokenWarningThreshold: Math.min(warnThreshold, hardLimit),
+    __promptTokenHardLimit: hardLimit
+  };
+}
+
+function estimateVisualSummaryRequestTokens(imagePayload = {}, context = {}) {
+  return summarizePromptTokenBudget(buildVisualSummaryRequestBody(imagePayload, context)).estimated_input_tokens;
 }
 
 async function normalizeVisualSummaryImagePayload(imagePayload = {}) {
@@ -228,6 +265,70 @@ async function normalizeVisualSummaryImagePayload(imagePayload = {}) {
   }
 }
 
+async function fitVisualSummaryImagePayloadToBudget(imagePayload = {}, context = {}) {
+  const hardLimit = Math.max(2048, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_HARD_LIMIT || 20000) || 20000);
+  if (!String(imagePayload?.data || '').trim()) return imagePayload;
+  if (estimateVisualSummaryRequestTokens(imagePayload, context) < hardLimit) return imagePayload;
+
+  let inputBuffer = null;
+  try {
+    inputBuffer = Buffer.from(String(imagePayload.data || '').trim(), 'base64');
+  } catch (_) {
+    return imagePayload;
+  }
+  if (!inputBuffer || !inputBuffer.length) return imagePayload;
+
+  let sharp = null;
+  try {
+    sharp = require('sharp');
+  } catch (error) {
+    if (config.ENABLE_DEBUG_LOG) {
+      console.warn('[image-visual-summary] sharp is unavailable for input budget fit:', error?.message || error);
+    }
+    return imagePayload;
+  }
+
+  let bestPayload = imagePayload;
+  let bestTokens = estimateVisualSummaryRequestTokens(imagePayload, context);
+  for (const edge of VISUAL_SUMMARY_DOWNSAMPLE_EDGES) {
+    for (const quality of VISUAL_SUMMARY_JPEG_QUALITIES) {
+      try {
+        const outputBuffer = await sharp(inputBuffer, { animated: false, limitInputPixels: 50000000 })
+          .rotate()
+          .resize({
+            width: edge,
+            height: edge,
+            fit: 'inside',
+            withoutEnlargement: true
+          })
+          .flatten({ background: { r: 255, g: 255, b: 255 } })
+          .jpeg({ quality, mozjpeg: true })
+          .toBuffer();
+        const candidate = {
+          ...imagePayload,
+          data: outputBuffer.toString('base64'),
+          mediaType: 'image/jpeg',
+          originalMediaType: imagePayload.originalMediaType || imagePayload.mediaType,
+          originalByteLength: imagePayload.originalByteLength || imagePayload.byteLength || inputBuffer.length,
+          budgetFit: {
+            maxEdge: edge,
+            jpegQuality: quality,
+            byteLength: outputBuffer.length
+          }
+        };
+        const tokens = estimateVisualSummaryRequestTokens(candidate, context);
+        if (tokens < bestTokens) {
+          bestPayload = candidate;
+          bestTokens = tokens;
+        }
+        if (tokens < hardLimit) return candidate;
+      } catch (_) {}
+    }
+  }
+
+  return bestPayload;
+}
+
 function shouldSkipExistingSummary(cacheKey = '', options = {}) {
   if (options.force === true) return false;
   const record = loadImageMemoryIndex().images[cacheKey] || null;
@@ -247,6 +348,12 @@ function getActiveImageCooldown(cacheKey = '', options = {}) {
 
 function buildRouteCooldownKey(apiBaseUrl = '', model = '') {
   return `${normalizeText(apiBaseUrl).toLowerCase()}|${normalizeText(model).toLowerCase()}`;
+}
+
+function buildVisualSummaryInflightKey(cacheKey = '', apiBaseUrl = '', model = '') {
+  const normalizedCacheKey = normalizeId(cacheKey);
+  if (!normalizedCacheKey) return '';
+  return `${normalizedCacheKey}|${buildRouteCooldownKey(apiBaseUrl, model)}`;
 }
 
 function getActiveRouteCooldown(apiBaseUrl = '', model = '', options = {}) {
@@ -371,102 +478,114 @@ async function generateImageVisualSummary(imageRef = '', context = {}, deps = {}
     return { ok: false, skipped: true, reason: 'visual_summary_route_cooldown', summary: '', cacheKey, model, cooldownUntil: routeCooldown.nextRetryAt };
   }
 
-  const postWithRetry = typeof deps.postWithRetry === 'function'
-    ? deps.postWithRetry
-    : defaultPostWithRetry;
-  const timestampText = buildShortTimestamp(context.now instanceof Date ? context.now : new Date());
-  const requestImagePayload = await normalizeVisualSummaryImagePayload(imagePayload);
-  const validation = validateVisualSummaryImagePayload(requestImagePayload);
-  if (!validation.ok) {
-    const state = recordVisualSummaryFailure(cacheKey, {
-      ...context,
-      imageRef,
-      sourceUrl: imagePayload.sourceUrl,
-      mediaType: requestImagePayload.mediaType,
-      model,
-      apiBaseUrl,
-      reason: validation.reason,
-      errorClass: 'payload_precheck',
-      transient: false
-    });
-    return { ok: false, skipped: true, reason: validation.reason, summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
-  }
-
-  let response = null;
-  try {
-    response = await postWithRetry(
-      apiBaseUrl,
-      {
+  const runModelRequest = async () => {
+    const postWithRetry = typeof deps.postWithRetry === 'function'
+      ? deps.postWithRetry
+      : defaultPostWithRetry;
+    const timestampText = buildShortTimestamp(context.now instanceof Date ? context.now : new Date());
+    const normalizedImagePayload = await normalizeVisualSummaryImagePayload(imagePayload);
+    const requestImagePayload = await fitVisualSummaryImagePayloadToBudget(normalizedImagePayload, context);
+    const validation = validateVisualSummaryImagePayload(requestImagePayload);
+    if (!validation.ok) {
+      const state = recordVisualSummaryFailure(cacheKey, {
+        ...context,
+        imageRef,
+        sourceUrl: imagePayload.sourceUrl,
+        mediaType: requestImagePayload.mediaType,
         model,
-        temperature: 0.1,
-        max_tokens: Math.max(80, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_MAX_TOKENS || 180) || 180),
-        stream: false,
-        messages: [
-          {
-            role: 'user',
-            content: buildRequestContent(requestImagePayload, context)
-          }
-        ],
-        __preferredProtocol: 'chat_completions',
-        __timeoutMs: Math.max(1000, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS || 25000) || 25000),
-        __trace: {
-          source: 'image_visual_summary_memory',
-          phase: 'visual_summary',
-          purpose: 'image_long_term_memory',
-          routePolicyKey: 'memory/image-visual-summary',
-          routeDebugKey: 'memory/image-visual-summary',
-          topRouteType: 'vision',
-          userId: normalizeText(context.userId)
-        }
-      },
-      Math.max(0, Math.min(1, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_RETRIES || 0) || 0)),
-      getMemoryApiKey()
-    );
-  } catch (error) {
-    const classified = classifyVisualSummaryError(error);
-    const state = recordVisualSummaryFailure(cacheKey, {
-      ...context,
-      imageRef,
-      sourceUrl: imagePayload.sourceUrl,
-      mediaType: requestImagePayload.mediaType,
-      model,
-      apiBaseUrl,
-      classified
-    });
-    activateRouteCooldown(apiBaseUrl, model, classified, context);
-    if (config.ENABLE_DEBUG_LOG) {
-      const until = state?.nextRetryAt ? new Date(state.nextRetryAt).toISOString() : '';
-      console.warn(`[image-visual-summary] failed: ${classified.reason}${until ? `; cooldown until ${until}` : ''}`);
+        apiBaseUrl,
+        reason: validation.reason,
+        errorClass: 'payload_precheck',
+        transient: false
+      });
+      return { ok: false, skipped: true, reason: validation.reason, summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
     }
-    return { ok: false, skipped: false, reason: classified.reason, summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
+
+    let response = null;
+    try {
+      response = await postWithRetry(
+        apiBaseUrl,
+        {
+          ...buildVisualSummaryRequestBody(requestImagePayload, context),
+          model,
+          __preferredProtocol: 'chat_completions',
+          __timeoutMs: Math.max(1000, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS || 25000) || 25000),
+          __trace: {
+            source: 'image_visual_summary_memory',
+            phase: 'visual_summary',
+            purpose: 'image_long_term_memory',
+            routePolicyKey: 'memory/image-visual-summary',
+            routeDebugKey: 'memory/image-visual-summary',
+            topRouteType: 'vision',
+            userId: normalizeText(context.userId)
+          }
+        },
+        Math.max(0, Math.min(1, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_RETRIES || 0) || 0)),
+        getMemoryApiKey()
+      );
+    } catch (error) {
+      const classified = classifyVisualSummaryError(error);
+      const state = recordVisualSummaryFailure(cacheKey, {
+        ...context,
+        imageRef,
+        sourceUrl: imagePayload.sourceUrl,
+        mediaType: requestImagePayload.mediaType,
+        model,
+        apiBaseUrl,
+        classified
+      });
+      activateRouteCooldown(apiBaseUrl, model, classified, context);
+      if (config.ENABLE_DEBUG_LOG) {
+        const until = state?.nextRetryAt ? new Date(state.nextRetryAt).toISOString() : '';
+        console.warn(`[image-visual-summary] failed: ${classified.reason}${until ? `; cooldown until ${until}` : ''}`);
+      }
+      return { ok: false, skipped: false, reason: classified.reason, summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
+    }
+
+    const summary = formatSummaryWithTimestamp(cleanImageMemorySummary(extractResponseText(response)).summary, timestampText);
+    if (!summary) {
+      const state = recordVisualSummaryFailure(cacheKey, {
+        ...context,
+        imageRef,
+        sourceUrl: imagePayload.sourceUrl,
+        mediaType: requestImagePayload.mediaType,
+        model,
+        apiBaseUrl,
+        reason: 'empty_summary',
+        errorClass: 'empty_summary',
+        transient: true
+      });
+      return { ok: false, skipped: false, reason: 'empty_summary', summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
+    }
+    return {
+      ok: true,
+      skipped: false,
+      reason: '',
+      cacheKey,
+      summary,
+      model,
+      timestampText,
+      mediaType: requestImagePayload.mediaType,
+      sourceUrl: imagePayload.sourceUrl
+    };
+  };
+
+  const inflightKey = buildVisualSummaryInflightKey(cacheKey, apiBaseUrl, model);
+  if (context.force !== true && inflightKey) {
+    const existing = visualSummaryGenerationInflight.get(inflightKey);
+    if (existing) return existing;
+    const promise = runModelRequest();
+    visualSummaryGenerationInflight.set(inflightKey, promise);
+    try {
+      return await promise;
+    } finally {
+      if (visualSummaryGenerationInflight.get(inflightKey) === promise) {
+        visualSummaryGenerationInflight.delete(inflightKey);
+      }
+    }
   }
 
-  const summary = formatSummaryWithTimestamp(cleanImageMemorySummary(extractResponseText(response)).summary, timestampText);
-  if (!summary) {
-    const state = recordVisualSummaryFailure(cacheKey, {
-      ...context,
-      imageRef,
-      sourceUrl: imagePayload.sourceUrl,
-      mediaType: requestImagePayload.mediaType,
-      model,
-      apiBaseUrl,
-      reason: 'empty_summary',
-      errorClass: 'empty_summary',
-      transient: true
-    });
-    return { ok: false, skipped: false, reason: 'empty_summary', summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
-  }
-  return {
-    ok: true,
-    skipped: false,
-    reason: '',
-    cacheKey,
-    summary,
-    model,
-    timestampText,
-    mediaType: requestImagePayload.mediaType,
-    sourceUrl: imagePayload.sourceUrl
-  };
+  return runModelRequest();
 }
 
 function buildImageMemoryEvent(summaryResult = {}, context = {}) {
@@ -598,9 +717,12 @@ function enqueueImageVisualSummary(imageRef = '', context = {}, deps = {}) {
 module.exports = {
   buildImageMemoryEvent,
   buildRequestContent,
+  buildVisualSummaryRequestBody,
   buildShortTimestamp,
   enqueueImageVisualSummary,
+  estimateVisualSummaryRequestTokens,
   formatSummaryWithTimestamp,
+  fitVisualSummaryImagePayloadToBudget,
   generateImageVisualSummary,
   normalizeVisualSummaryImagePayload,
   summarizeImageIntoLongTermMemory

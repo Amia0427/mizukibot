@@ -1,6 +1,8 @@
 # Memory Quality Governance
 
-更新时间：2026-06-12 07:32 +08:00
+更新时间：2026-06-17 01:13 +08:00
+
+更新 2026-06-17 01:13 +08:00：`image_visual_summary_memory` 输入预算和同图单飞治理。复查 `data/model-calls.ndjson`，`2026-06-16T16:00:18.473Z/16:00:20.111Z` 两条 `Qwen/Qwen3.6-27B` 图片长期记忆视觉摘要调用同属 `cacheKey=7b082813e5b212df0fcbdefb00e66d2af8ff8e9c`，估算输入为 `51594/51603` tokens；对应 `data/image_memory_index.json` 为 `userText="[图片]"`、`ocrText=""`，不是超长原文、OCR 或引用文本污染，而是图片 data URL/base64 本体进入模型 message，同时同图入库观察并发导致摘要落盘前双打。现 `utils/imageVisualSummaryMemory.js` 在专用链路内裁剪随图文本、按 `IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_*` 对图片 payload 下采样/降质兜底，并按 `cacheKey|endpoint|model` 单飞复用同一请求。验收：真实样本 154,328 bytes 原图从 `51603` tokens 压到 `18868` tokens，低于 hard limit `20000`；`node tests\imageVisualSummaryMemory.test.js` 覆盖超预算图片压缩和同图并发单飞。小目标完成：图片长期记忆视觉摘要不再因 base64 图片本体或同图并发重复打 50k+ 输入。
 
 更新 2026-06-16 10:29 +08:00：`memoryWritePipeline` review 连续 `http_408` 增加进程级冷却旁路。复查 `data/model-calls.ndjson`，最近 561 条 `memory_write_review` 中 560 条都是 `Qwen/Qwen3.6-27B` / `api.siliconflow.cn` 的 `http_408`，最近一次失败停在 `2026-06-16T00:53:43.541Z`，说明 review 阶段不是偶发慢，而是同一审核模型端点持续拖慢写入。现 `utils/memoryWritePipeline/review.js` 在连续超时达到阈值后进入短冷却，冷却期内直接按 `write_review_timeout_downgraded` 旁路成 candidate，不再重复打同一审核模型；不会切换到其他模型备用。验收：`node --check utils\\memoryWritePipeline\\review.js`、`node --check config\\index.js`、`node tests\\memoryWritePipeline.test.js` 通过；`getMemoryWriteReviewRuntimeState()` 在超时后进入 cooldown，冷却期内新增候选不再继续发 review 请求。小目标完成：review 超时现在能稳定旁路，不再反复打 `Qwen/Qwen3.6-27B`。
 
