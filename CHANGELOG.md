@@ -1,5 +1,10 @@
 # 更新记录
 
+## 2026-06-17
+
+### 模型与 Provider
+- **02:19** 确认普通主回复持续请求 `superapi.buzz` 的原因：`su8` 401 触发默认主模型 fallback，且本地 `AI_FALLBACK_COOLDOWN_MS=0` 让当前主 bot 进程永久停留在 fallback；`superapi` 已临时禁用时会返回 `Invalid token`。本地已关闭普通/管理员 fallback 和弃用的 Minecraft 独立 LLM，并重启主 bot 清空进程内 fallback 状态。验收：新主 bot PID=5380，`diag:provider-request -- --scenario main_reply --json` 显示主回复回到 `gcli.ggchan.dev / gemini-3-flash-preview`。
+
 ## 2026-06-11
 
 ### 模型与 Provider
