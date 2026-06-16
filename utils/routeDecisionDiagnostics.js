@@ -256,8 +256,8 @@ function summarizeFastReplyFromEvents(events = []) {
   const sendDone = firstBy(events, (event) => eventStage(event) === 'normal_fast_reply_send_done');
   const succeeded = Boolean(sendDone && sendDone.sent === true && !failed && !stale && !rateLimited);
   const reason = normalizeText(skipped?.reason)
-    || normalizeText(failed?.finalErrorCode)
     || normalizeText(failed?.error)
+    || normalizeText(failed?.finalErrorCode)
     || normalizeText(rateLimited?.finalErrorCode)
     || normalizeText(stale?.stage)
     || (succeeded ? 'sent' : (attempted ? 'attempted' : 'not_attempted'));

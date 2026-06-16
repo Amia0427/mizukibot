@@ -60,6 +60,18 @@ function trimPromptTextToChars(text = '', maxChars = 0) {
   return normalized.length > limit ? normalized.slice(0, limit) : normalized;
 }
 
+function classifyNormalFastReplyFailure(visibleText = '', persistedText = '') {
+  const text = normalizeText(persistedText || visibleText);
+  if (/模型返回格式不稳定|没拿到可用正文/i.test(text)) {
+    return { type: 'response_parse_empty', text };
+  }
+  const failure = classifyReplyFailure(text);
+  return {
+    ...failure,
+    type: failure.type || 'empty'
+  };
+}
+
 function buildDirectedContextPrompt(routeMeta = {}) {
   const directedContext = routeMeta?.directedContext && typeof routeMeta.directedContext === 'object'
     ? routeMeta.directedContext
@@ -462,7 +474,7 @@ async function runNormalFastReply(input = {}, deps = {}) {
     || persistedMeta.hasSafetyRestriction === true
   );
   if (isReplyFailure(visibleText, { emptyIsFailure: true }) || isReplyFailure(persistedText, { emptyIsFailure: true })) {
-    const failure = classifyReplyFailure(persistedText || visibleText);
+    const failure = classifyNormalFastReplyFailure(visibleText, persistedText);
     const error = new Error(`normal_fast_reply_model_failure:${failure.type || 'empty'}`);
     error.code = 'NORMAL_FAST_REPLY_MODEL_FAILURE';
     error.failureType = failure.type || 'empty';
@@ -486,6 +498,7 @@ module.exports = {
   buildNormalFastReplyMessages,
   buildNormalFastReplyPersonaModules,
   buildNormalFastReplyWorldbookModules,
+  classifyNormalFastReplyFailure,
   runNormalFastReply,
   trimRecentMessagesByChars
 };

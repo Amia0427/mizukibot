@@ -106,6 +106,99 @@ module.exports = (async () => {
     assert.strictEqual(parseFailure.parse_stage, 'extract_message_content');
     assert.deepStrictEqual(parseFailure.parse_diagnostic.top_level_keys, ['unexpected']);
 
+    mockModelResponse = {
+      data: {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: '   '
+            }
+          }
+        ]
+      }
+    };
+    const emptyAssistantCallId = startModelCall({
+      source: 'unit_test',
+      request: { model: 'test-model', messages: [{ role: 'user', content: 'hello empty' }] }
+    });
+    Object.defineProperty(mockModelResponse, '__modelCallId', {
+      value: emptyAssistantCallId,
+      enumerable: false,
+      configurable: true
+    });
+    const emptyAssistant = await requestAssistantMessage([
+      { role: 'user', content: 'hello empty' }
+    ], {
+      modelConfig: {
+        model: 'test-model',
+        apiBaseUrl: 'https://example.com/v1/chat/completions',
+        apiKey: 'test-key',
+        retries: 0
+      }
+    });
+    assert.strictEqual(emptyAssistant.role, 'assistant');
+    assert.ok(String(emptyAssistant.content).includes('模型返回格式不稳定'));
+    flushModelCallLogsSync();
+    const emptyRows = fs.readFileSync(path.join(tempDir, 'model-calls.ndjson'), 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const emptyFailure = emptyRows.find((row) => row.id === emptyAssistantCallId && row.status === 'parse_failed');
+    assert.ok(emptyFailure, 'assistant empty content should append a parse_failed diagnostic row');
+    assert.strictEqual(emptyFailure.final_error_code, 'response_parse_empty');
+
+    mockModelResponse = {
+      data: {
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: '   ',
+              tool_calls: [
+                {
+                  id: 'call_lookup',
+                  type: 'function',
+                  function: {
+                    name: 'lookup',
+                    arguments: '{}'
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    };
+    const toolCallOnlyCallId = startModelCall({
+      source: 'unit_test',
+      request: { model: 'test-model', messages: [{ role: 'user', content: 'hello tool' }] }
+    });
+    Object.defineProperty(mockModelResponse, '__modelCallId', {
+      value: toolCallOnlyCallId,
+      enumerable: false,
+      configurable: true
+    });
+    const toolCallOnlyAssistant = await requestAssistantMessage([
+      { role: 'user', content: 'hello tool' }
+    ], {
+      modelConfig: {
+        model: 'test-model',
+        apiBaseUrl: 'https://example.com/v1/chat/completions',
+        apiKey: 'test-key',
+        retries: 0
+      }
+    });
+    assert.strictEqual(toolCallOnlyAssistant.role, 'assistant');
+    assert.strictEqual(toolCallOnlyAssistant.tool_calls[0].function.name, 'lookup');
+    flushModelCallLogsSync();
+    const toolCallRows = fs.readFileSync(path.join(tempDir, 'model-calls.ndjson'), 'utf8')
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const toolCallParseFailure = toolCallRows.find((row) => row.id === toolCallOnlyCallId && row.status === 'parse_failed');
+    assert.ok(!toolCallParseFailure, 'assistant tool_calls without text should remain usable');
+
     const oversizedJson = JSON.stringify({ unexpected: 'x'.repeat(110 * 1024) });
     mockModelResponse = { data: oversizedJson, status: 200 };
     const oversizedCallId = startModelCall({
