@@ -21,6 +21,9 @@ const {
   summarizePromptTokenBudget
 } = require('../../../utils/modelCallTracker/requestSummary');
 const {
+  trimTextByTokenBudget
+} = require('../../../utils/contextBudget');
+const {
   appendRequestTraceEvent,
   extractErrorCode,
   nextTracePhase
@@ -421,6 +424,154 @@ function buildOpenAIPromptCacheKey(protocol, resolvedConfig = null, options = {}
   return `mizukibot:main:${protocol}:${hash}`;
 }
 
+function normalizeRouteSignal(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isVisionSummaryModelRequest(options = {}) {
+  const trace = options?.trace && typeof options.trace === 'object' ? options.trace : {};
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const routePolicyKey = normalizeRouteSignal(
+    options.routePolicyKey
+    || trace.routePolicyKey
+    || trace.route_policy_key
+    || routeMeta.routePolicyKey
+    || routeMeta.route_policy_key
+  );
+  const routeDebugKey = normalizeRouteSignal(
+    options.routeDebugKey
+    || trace.routeDebugKey
+    || trace.route_debug_key
+    || routeMeta.routeDebugKey
+    || routeMeta.route_debug_key
+  );
+  const chatMode = normalizeRouteSignal(routeMeta.chatMode || routeMeta.chat_mode);
+  return routePolicyKey === 'transform/vision-summary'
+    || routeDebugKey === 'direct_chat/image_summary/summary'
+    || chatMode === 'image_summary';
+}
+
+function applyVisionSummaryPromptBudget(resolvedConfig = null, options = {}) {
+  if (!isVisionSummaryModelRequest(options)) return resolvedConfig;
+  const base = resolvedConfig && typeof resolvedConfig === 'object' ? { ...resolvedConfig } : {};
+  const imageWarn = Math.max(1024, Number(config.IMAGE_MODEL_INPUT_TOKEN_WARN_THRESHOLD || 18000) || 18000);
+  const imageHard = Math.max(2048, Number(config.IMAGE_MODEL_INPUT_TOKEN_HARD_LIMIT || 20000) || 20000);
+  const existingWarn = Number(base.promptTokenWarningThreshold);
+  const existingHard = Number(base.promptTokenHardLimit);
+  base.promptTokenWarningThreshold = Math.min(
+    Number.isFinite(existingWarn) && existingWarn > 0 ? existingWarn : imageWarn,
+    imageWarn
+  );
+  base.promptTokenHardLimit = Math.min(
+    Number.isFinite(existingHard) && existingHard > 0 ? existingHard : imageHard,
+    imageHard
+  );
+  if (!Number.isFinite(Number(base.timeoutMs)) || Number(base.timeoutMs) <= 0) {
+    base.timeoutMs = Math.max(1000, Number(config.IMAGE_MODEL_TIMEOUT_MS || 18000) || 18000);
+  }
+  return base;
+}
+
+function collectImageParts(content) {
+  if (!Array.isArray(content)) return [];
+  return content.filter((part) => part && typeof part === 'object' && normalizeRouteSignal(part.type) === 'image_url');
+}
+
+function countVisionImages(routeMeta = {}, imageParts = []) {
+  const visualContext = routeMeta?.visualContext && typeof routeMeta.visualContext === 'object'
+    ? routeMeta.visualContext
+    : {};
+  return Math.max(
+    1,
+    imageParts.length,
+    Array.isArray(routeMeta.imageUrls) ? routeMeta.imageUrls.length : 0,
+    Number(visualContext?.worker?.imageCount || 0) || 0,
+    Array.isArray(visualContext?.images) ? visualContext.images.length : 0
+  );
+}
+
+function shouldDropVisionSummarySystemMessage(message = {}) {
+  const text = flattenTextForCacheFingerprint(message?.content);
+  if (!text) return true;
+  return /\[(?:RecentRawTurns|RetrievedMemoryLite|RetrievedMemory|DailyJournal|TaskMemory|GroupMemory|StyleSignals|ShortTermContinuity|MemOSRecall|OpenVikingRecall|LongTermProfile|Impression|Summary|ContinuityState|GlobalToolEvidence)\]|引用消息|quoted message|reply_quote|quoteAnchored|quote raw|raw quote/i
+    .test(text);
+}
+
+function trimVisionSummarySystemMessages(messages = [], systemBudget = 10000) {
+  const out = [];
+  let used = 0;
+  for (const message of messages) {
+    if (!message || typeof message !== 'object') continue;
+    if (shouldDropVisionSummarySystemMessage(message)) continue;
+    const text = flattenTextForCacheFingerprint(message.content);
+    const cost = summarizePromptTokenBudget({ messages: [{ ...message, content: text }] }).estimated_input_tokens;
+    if (used + cost <= systemBudget) {
+      out.push(message);
+      used += cost;
+      continue;
+    }
+    const remaining = Math.max(0, systemBudget - used - 8);
+    if (remaining >= 64) {
+      out.push({
+        ...message,
+        content: trimTextByTokenBudget(text, remaining, 'head')
+      });
+    }
+    break;
+  }
+  return out;
+}
+
+function buildVisionSummaryCompactUserContent(message = {}, options = {}) {
+  const routeMeta = options?.routeMeta && typeof options.routeMeta === 'object' ? options.routeMeta : {};
+  const imageParts = collectImageParts(message.content);
+  const imageCount = countVisionImages(routeMeta, imageParts);
+  const userBudget = Math.max(256, Number(config.VISION_ROUTE_USER_TEXT_MAX_TOKENS || 6000) || 6000);
+  const rawText = flattenTextForCacheFingerprint(message.content);
+  const compactText = trimTextByTokenBudget(rawText, userBudget, 'tail') || '用户只发送了图片或视觉证据摘要。';
+  return [{
+    type: 'text',
+    text: [
+      `用户原文：${compactText}`,
+      `图片数量：${imageCount}`,
+      '用户图片意图：analyze_image',
+      '约束：这是图片总结/图片问答降载后的输入，只依据用户文本、可见 OCR 和视觉证据摘要回答。'
+    ].join('\n\n')
+  }].concat(imageParts);
+}
+
+function compactVisionSummaryMessages(messages = [], options = {}) {
+  const list = Array.isArray(messages) ? messages : [];
+  const systemBudget = Math.max(512, Number(config.VISION_ROUTE_SYSTEM_CONTEXT_MAX_TOKENS || 10000) || 10000);
+  const systemMessages = trimVisionSummarySystemMessages(
+    list.filter((message) => ['system', 'developer'].includes(normalizeRouteSignal(message?.role))),
+    systemBudget
+  );
+  const lastUserMessage = [...list].reverse().find((message) => normalizeRouteSignal(message?.role) === 'user');
+  if (!lastUserMessage) return systemMessages;
+  return systemMessages.concat([{
+    ...lastUserMessage,
+    role: 'user',
+    content: buildVisionSummaryCompactUserContent(lastUserMessage, options)
+  }]);
+}
+
+function maybeCompactVisionSummaryBody(body = {}, options = {}) {
+  if (!isVisionSummaryModelRequest(options)) return body;
+  const budget = summarizePromptTokenBudget(body);
+  if (!budget.over_warning_threshold) return body;
+  const compacted = {
+    ...body,
+    messages: compactVisionSummaryMessages(body.messages, options)
+  };
+  const compactedBudget = summarizePromptTokenBudget(compacted);
+  if (!compactedBudget.over_hard_limit) return compacted;
+  return {
+    ...compacted,
+    messages: compactVisionSummaryMessages(compacted.messages, options)
+  };
+}
+
 function applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig = null, options = {}) {
   if (!body || typeof body !== 'object') return body;
   if (config.OPENAI_PROMPT_CACHE_ENABLED === false) return body;
@@ -437,31 +588,32 @@ function applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig = null, op
 }
 
 function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
+  const effectiveConfig = applyVisionSummaryPromptBudget(resolvedConfig, options);
   const protocol = String(options.protocol || 'chat_completions').trim() || 'chat_completions';
   const baseTools = withAnthropicWebSearchTool(options.tools, protocol, options);
   const promptTokenWarningThreshold = resolvePromptTokenThreshold(
-    resolvedConfig,
+    effectiveConfig,
     'promptTokenWarningThreshold',
     config.MAIN_REPLY_INPUT_TOKEN_WARN_THRESHOLD
   );
   const promptTokenHardLimit = resolvePromptTokenThreshold(
-    resolvedConfig,
+    effectiveConfig,
     'promptTokenHardLimit',
     config.MAIN_REPLY_INPUT_TOKEN_HARD_LIMIT
   );
   const body = {
-    model: getModelName(resolvedConfig),
-    temperature: getTemperature(resolvedConfig),
+    model: getModelName(effectiveConfig),
+    temperature: getTemperature(effectiveConfig),
     messages: Array.isArray(options.messages) ? options.messages : [],
-    max_tokens: getMaxTokens(options.defaultMaxTokens || getMainReplyDefaultMaxTokens(), resolvedConfig),
-    reasoning_effort: getReasoningEffort(resolvedConfig),
+    max_tokens: getMaxTokens(options.defaultMaxTokens || getMainReplyDefaultMaxTokens(), effectiveConfig),
+    reasoning_effort: getReasoningEffort(effectiveConfig),
     stream: Boolean(options.stream)
   };
 
-  const topA = getTopA(resolvedConfig);
+  const topA = getTopA(effectiveConfig);
   if (topA !== undefined) body.top_a = topA;
 
-  const repetitionPenalty = getRepetitionPenalty(resolvedConfig);
+  const repetitionPenalty = getRepetitionPenalty(effectiveConfig);
   if (repetitionPenalty !== undefined) body.repetition_penalty = repetitionPenalty;
 
   const tools = baseTools;
@@ -476,8 +628,8 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   if (options.trace && typeof options.trace === 'object') {
     body.__trace = options.trace;
   }
-  if (resolvedConfig && typeof resolvedConfig === 'object' && Number.isFinite(Number(resolvedConfig.timeoutMs))) {
-    body.__timeoutMs = Math.max(1000, Math.floor(Number(resolvedConfig.timeoutMs)));
+  if (effectiveConfig && typeof effectiveConfig === 'object' && Number.isFinite(Number(effectiveConfig.timeoutMs))) {
+    body.__timeoutMs = Math.max(1000, Math.floor(Number(effectiveConfig.timeoutMs)));
   }
 
   body.__promptTokenWarningThreshold = promptTokenWarningThreshold;
@@ -487,7 +639,8 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
     body.__provider = normalizeApiProvider(options.provider);
   }
 
-  const finalPromptBudget = summarizePromptTokenBudget(body);
+  const budgetedBody = maybeCompactVisionSummaryBody(body, options);
+  const finalPromptBudget = summarizePromptTokenBudget(budgetedBody);
   if (finalPromptBudget.over_hard_limit) {
     const error = new Error(
       `[main-reply-token-budget] estimated input ${finalPromptBudget.estimated_input_tokens} tokens exceeds hard limit ${finalPromptBudget.hard_limit_tokens}`
@@ -501,33 +654,33 @@ function buildGenerationRequestBody(resolvedConfig = null, options = {}) {
   }
 
   const userAgent = String(config.MODEL_HTTP_USER_AGENT || config.MAIN_REPLY_USER_AGENT || config.CODEX_USER_AGENT || '').trim();
-  const apiKey = getApiKey(resolvedConfig);
+  const apiKey = getApiKey(effectiveConfig);
   const browserHeaders = buildBrowserLikeRequestHeaders({
     userAgent,
     acceptLanguage: config.MODEL_HTTP_ACCEPT_LANGUAGE || config.HTTP_ACCEPT_LANGUAGE,
-    apiBaseUrl: getApiBaseUrl(resolvedConfig),
+    apiBaseUrl: getApiBaseUrl(effectiveConfig),
     origin: config.MODEL_HTTP_ORIGIN,
     referer: config.MODEL_HTTP_REFERER,
     secFetchSite: config.MODEL_HTTP_SEC_FETCH_SITE
   });
-  body.__requestHeaders = { ...browserHeaders };
+  budgetedBody.__requestHeaders = { ...browserHeaders };
   if (isOpenAICompatibleProvider(options.provider)) {
-    if (apiKey) body.__requestHeaders.Authorization = `Bearer ${apiKey}`;
+    if (apiKey) budgetedBody.__requestHeaders.Authorization = `Bearer ${apiKey}`;
   } else if (isAnthropicProvider(options.provider)) {
-    if (apiKey) body.__requestHeaders['x-api-key'] = apiKey;
-    const endpointAnthropicConfig = getEndpointScopedAnthropicMessagesConfig(getApiBaseUrl(resolvedConfig));
+    if (apiKey) budgetedBody.__requestHeaders['x-api-key'] = apiKey;
+    const endpointAnthropicConfig = getEndpointScopedAnthropicMessagesConfig(getApiBaseUrl(effectiveConfig));
     const endpointBeta = endpointAnthropicConfig?.anthropicBeta;
     if (endpointBeta) {
-      body.__requestHeaders['anthropic-beta'] = mergeAnthropicBetaHeaderValues(
-        body.__requestHeaders['anthropic-beta'] || config.ANTHROPIC_BETA,
+      budgetedBody.__requestHeaders['anthropic-beta'] = mergeAnthropicBetaHeaderValues(
+        budgetedBody.__requestHeaders['anthropic-beta'] || config.ANTHROPIC_BETA,
         [endpointBeta]
       );
     }
   } else if (isGeminiNativeProvider(options.provider)) {
-    if (apiKey) body.__requestHeaders['x-goog-api-key'] = apiKey;
+    if (apiKey) budgetedBody.__requestHeaders['x-goog-api-key'] = apiKey;
   }
 
-  return applyOpenAIPromptCacheOptions(body, protocol, resolvedConfig, options);
+  return applyOpenAIPromptCacheOptions(budgetedBody, protocol, effectiveConfig, options);
 }
 
 function buildMainModelRequest(resolvedConfig = null, options = {}) {

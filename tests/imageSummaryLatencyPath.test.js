@@ -25,6 +25,7 @@ const { resolveRouteExecution } = require('../core/routeExecution');
 const { resolveVisionFallbackModelConfig } = require('../core/messageRouteFlow/helpers');
 const { buildImageModelConfig } = require('../utils/imageModelConfigResolver');
 const { buildMainModelRequest } = require('../api/runtimeV2/model/shared');
+const { summarizeRequest } = require('../utils/modelCallTracker/requestSummary');
 
 module.exports = (async () => {
   let plannerCalled = false;
@@ -198,6 +199,56 @@ module.exports = (async () => {
   assert.strictEqual(request.body.stream, false);
   assert.strictEqual(request.body.__timeoutMs, 18000);
   assert.strictEqual(request.body.__promptTokenHardLimit, 20000);
+
+  const oversizedText = [
+    '用户原始文本：总结这张图',
+    `引用原文：${'很长的引用和OCR内容'.repeat(14000)}`,
+    '真正的问题：总结这张图'
+  ].join('\n');
+  const guardedRequest = buildMainModelRequest({
+    model: 'gemini-3-flash-preview',
+    apiBaseUrl: 'https://gcli.ggchan.dev/v1/chat/completions',
+    apiKey: 'gateway-key',
+    provider: 'openai_compatible',
+    promptTokenWarningThreshold: 50000,
+    promptTokenHardLimit: 100000,
+    maxTokens: 8192
+  }, {
+    messages: [
+      { role: 'system', content: 'stable system prompt' },
+      { role: 'system', content: '[Summary]\nold raw context should be dropped' },
+      { role: 'user', content: oversizedText }
+    ],
+    stream: false,
+    defaultMaxTokens: 8192,
+    trace: {
+      source: 'direct_reply',
+      routePolicyKey: 'transform/vision-summary',
+      routeDebugKey: 'direct_chat/image_summary/summary',
+      topRouteType: 'direct_chat',
+      dispatchBranch: 'direct_reply',
+      triggerBranch: 'direct_reply.non_stream'
+    },
+    routeMeta: {
+      chatMode: 'image_summary',
+      visualContext: {
+        worker: {
+          succeeded: true,
+          imageCount: 1
+        }
+      }
+    },
+    topRouteType: 'direct_chat',
+    allowedTools: []
+  });
+  const guardedBudget = summarizeRequest(guardedRequest.body).prompt_integrity.token_budget;
+  const guardedSerialized = JSON.stringify(guardedRequest.body.messages);
+  assert.strictEqual(guardedRequest.body.__promptTokenWarningThreshold, 18000);
+  assert.strictEqual(guardedRequest.body.__promptTokenHardLimit, 20000);
+  assert.ok(guardedBudget.estimated_input_tokens < 20000, 'vision summary guard should compact oversized main-model input below hard cap');
+  assert.ok(guardedBudget.largest_messages[0].tokens < 10000, 'largest user message should be trimmed before dispatch');
+  assert.ok(guardedSerialized.includes('真正的问题：总结这张图'));
+  assert.ok(!guardedSerialized.includes('old raw context should be dropped'));
 
   console.log('imageSummaryLatencyPath.test.js passed');
 })().catch((error) => {
