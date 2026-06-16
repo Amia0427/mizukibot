@@ -2,14 +2,15 @@
 setlocal
 cd /d "%~dp0"
 set "MIZUKI_RESTART_BOT_ROOT=%~dp0"
-set "MIZUKI_RESTART_DEFAULT="
-if "%~1"=="" set "MIZUKI_RESTART_DEFAULT=1"
+set "MIZUKI_RESTART_DEFAULT_STATUS="
+if "%~1"=="" set "MIZUKI_RESTART_DEFAULT_STATUS=1"
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$script = Get-Content -LiteralPath '%~f0' -Raw; $marker = '# POWERSHELL_PAYLOAD'; $idx = $script.LastIndexOf($marker); if ($idx -lt 0) { throw 'Missing PowerShell payload.' }; $payload = $script.Substring($idx + $marker.Length).TrimStart(); $block = [scriptblock]::Create($payload); & $block @args" %*
 set "RESTART_EXIT=%ERRORLEVEL%"
 if not "%RESTART_EXIT%"=="0" exit /b %RESTART_EXIT%
 
 set "SKIP_LOG_WINDOW="
+if defined MIZUKI_RESTART_DEFAULT_STATUS set "SKIP_LOG_WINDOW=1"
 for %%A in (%*) do (
   if /i "%%~A"=="-StatusOnly" set "SKIP_LOG_WINDOW=1"
   if /i "%%~A"=="/StatusOnly" set "SKIP_LOG_WINDOW=1"
@@ -34,8 +35,8 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction Sile
   $PSNativeCommandUseErrorActionPreference = $false
 }
 
-if ($env:MIZUKI_RESTART_DEFAULT -eq '1') {
-  $Restart = $true
+if ($env:MIZUKI_RESTART_DEFAULT_STATUS -eq '1') {
+  $StatusOnly = $true
 }
 
 if ([string]::IsNullOrWhiteSpace($TaskName)) {
@@ -283,6 +284,26 @@ function Repair-MainPidFileFromProcess {
   } catch {
     return $false
   }
+}
+
+function Test-PidIsRunningMainBot {
+  param([Parameter(Mandatory = $true)][int]$ProcessId)
+
+  if ($ProcessId -le 0) {
+    return $false
+  }
+
+  $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+  if ($null -eq $process -or $process.ProcessName -ine 'node') {
+    return $false
+  }
+
+  $commandLine = Get-ProcessCommandLineSafe -ProcessId $ProcessId
+  if ([string]::IsNullOrWhiteSpace($commandLine)) {
+    return $true
+  }
+
+  return ($commandLine -match '(^|["''\s])index\.js(["''\s]|$)')
 }
 
 function Get-MainBotStatusFromProcessScan {
@@ -588,14 +609,14 @@ function Stop-BotForRestart {
   }
 
   $targetPids = @($targetPids | Sort-Object -Unique)
-  if ($mainPid -gt 0) {
+  if ($mainPid -gt 0 -and (Test-PidIsRunningMainBot -ProcessId $mainPid)) {
     if (Record-ExpectedMainBotShutdownForRestart -OwnerPid $mainPid) {
       [void]$actions.Add("expected shutdown marker written for main pid: $mainPid")
     } else {
       [void]$actions.Add("expected shutdown marker write failed for main pid: $mainPid")
     }
   } else {
-    [void]$actions.Add('expected shutdown marker skipped: main pid missing')
+    [void]$actions.Add('expected shutdown marker skipped: live main bot pid missing')
   }
   $childPids = @(Get-TreeChildPids -RootPids $targetPids)
   $stoppedChildren = @(Stop-PidList -Pids $childPids -Stage 'child')

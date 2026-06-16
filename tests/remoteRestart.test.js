@@ -19,6 +19,7 @@ module.exports = (async () => {
   assert.strictEqual(path.basename(winSpec.script).toLowerCase(), 'restart-bot.cmd');
   assert.deepStrictEqual(winSpec.args.slice(0, 2), ['/d', '/c']);
   assert.ok(winSpec.args[2].includes('restart-bot.cmd'));
+  assert.ok(/\brestart\b/i.test(winSpec.args[2]), 'remote restart should pass an explicit restart command');
   assert.strictEqual(winSpec.windowsVerbatimArguments, true);
 
   const spawned = [];
