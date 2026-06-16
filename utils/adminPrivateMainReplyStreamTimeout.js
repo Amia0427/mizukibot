@@ -9,20 +9,30 @@ function formatTimeoutSeconds(timeoutMs = 0) {
   return `${seconds} 秒`;
 }
 
-function buildAdminPrivateMainReplyStreamTimeoutReply(timeoutMs = 0) {
+function normalizeTimeoutKind(value = '') {
+  return String(value || '').trim().toLowerCase() === 'total' ? 'total' : 'first_token';
+}
+
+function buildAdminPrivateMainReplyStreamTimeoutReply(timeoutMs = 0, options = {}) {
   const secondsText = formatTimeoutSeconds(timeoutMs);
+  if (normalizeTimeoutKind(options.timeoutKind) === 'total') {
+    if (!secondsText) return '管理员主回复上游总等待超时，我先断开这次慢请求。你再发一次我重新接。';
+    return `管理员主回复上游总等待 ${secondsText} 已超时，我先断开这次慢请求。你再发一次我重新接。`;
+  }
   if (!secondsText) return ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REPLY;
   return `管理员主回复上游 ${secondsText} 还没出首字，我先断开这次慢请求。你再发一次我重新接。`;
 }
 
-function createAdminPrivateMainReplyStreamFirstTokenTimeoutError(timeoutMs = 0) {
+function createAdminPrivateMainReplyStreamFirstTokenTimeoutError(timeoutMs = 0, options = {}) {
   const normalizedTimeoutMs = Math.max(0, Math.floor(Number(timeoutMs) || 0));
-  const error = new Error(`Admin private main reply stream first token timeout after ${normalizedTimeoutMs}ms`);
+  const timeoutKind = normalizeTimeoutKind(options.timeoutKind);
+  const error = new Error(`Admin private main reply stream ${timeoutKind} timeout after ${normalizedTimeoutMs}ms`);
   error.code = ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_CODE;
   error.reason = ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_REASON;
   error.adminPrivateStreamFirstTokenTimeout = true;
+  error.adminPrivateStreamTimeoutKind = timeoutKind;
   error.bypassMainModelFallback = true;
-  error.userFacingReply = buildAdminPrivateMainReplyStreamTimeoutReply(normalizedTimeoutMs);
+  error.userFacingReply = buildAdminPrivateMainReplyStreamTimeoutReply(normalizedTimeoutMs, { timeoutKind });
   error.streamHadOutput = false;
   error.timeoutMs = normalizedTimeoutMs;
   return error;

@@ -87,6 +87,9 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
   const abortSignal = body && typeof body === 'object' && body.__abortSignal
     ? body.__abortSignal
     : null;
+  const requestedTimeoutMs = body && typeof body === 'object'
+    ? Number(body.__timeoutMs)
+    : NaN;
   if (abortSignal && typeof abortSignal.addEventListener === 'function') {
     abortSignal.addEventListener('abort', () => {
       handlers.__abort_requested = true;
@@ -110,7 +113,13 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
     const attemptStartedAt = Date.now();
 
     try {
-      const timeoutMs = getRetryTimeoutMs(getStreamTimeoutMs(), i, 30000, 300000);
+      const timeoutBase = Number.isFinite(requestedTimeoutMs)
+        ? Math.max(1000, Math.floor(requestedTimeoutMs))
+        : getStreamTimeoutMs();
+      const timeoutCap = Number.isFinite(requestedTimeoutMs)
+        ? timeoutBase
+        : 300000;
+      const timeoutMs = getRetryTimeoutMs(timeoutBase, i, 30000, timeoutCap);
       prepared = await prepareRequest(url, body);
       pinnedLookup = buildPinnedLookup(await validatePreparedEndpoint(prepared.requestUrl));
       const routeDiagnostics = buildModelRouteDiagnostics({

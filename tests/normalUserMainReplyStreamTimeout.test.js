@@ -153,6 +153,52 @@ module.exports = (async () => {
   assert.strictEqual(adminPrivateTimeoutSignalSeen, true, 'admin private stream should receive an abort signal');
   assert.strictEqual(adminPrivateTimeoutAbortSeen, true, 'admin private stream should be aborted on first visible token timeout');
 
+  let adminPrivateTotalTimeoutCallCount = 0;
+  let adminPrivateTotalTimeoutMs = 0;
+  let adminPrivateTotalTimeoutAbortSeen = false;
+  await withPatchedStreamingService({
+    ADMIN_AI_FALLBACK_ENABLED: 'true',
+    ADMIN_AI_FALLBACK_MODEL: 'admin-fallback-model',
+    ADMIN_AI_FALLBACK_API_BASE_URL: 'https://admin-fallback.example/v1/chat/completions',
+    ADMIN_AI_FALLBACK_API_KEY: 'admin-fallback-key',
+    ADMIN_AI_FALLBACK_FAILURE_THRESHOLD: '1',
+    ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS: '0',
+    ADMIN_PRIVATE_MAIN_REPLY_STREAM_TOTAL_TIMEOUT_MS: '25'
+  }, async (_url, body) => {
+    adminPrivateTotalTimeoutCallCount += 1;
+    adminPrivateTotalTimeoutMs = Number(body && body.__timeoutMs);
+    return new Promise((resolve, reject) => {
+      const signal = body && body.__abortSignal;
+      assert.ok(signal, 'admin private total timeout should pass an abort signal through request preparation');
+      signal.addEventListener('abort', () => {
+        adminPrivateTotalTimeoutAbortSeen = true;
+        reject(signal.reason || new Error('aborted'));
+      }, { once: true });
+    });
+  }, async (service) => {
+    await assert.rejects(
+      () => withDeadline(service.requestStreamingReply([{ role: 'user', content: 'hi' }], {
+        userId: 'admin_1',
+        routeMeta: { chatType: 'private', userId: 'admin_1' },
+        onDelta() {
+          throw new Error('admin private total timeout test should not emit upstream text');
+        }
+      }), 500),
+      (error) => {
+        assert.strictEqual(error.code, ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_CODE);
+        assert.strictEqual(error.adminPrivateStreamTimeoutKind, 'total');
+        assert.strictEqual(error.adminPrivateStreamFirstTokenTimeout, true);
+        assert.strictEqual(error.bypassMainModelFallback, true);
+        assert.strictEqual(error.timeoutMs, 25);
+        assert.ok(String(error.userFacingReply || '').includes('总等待'));
+        return true;
+      }
+    );
+  });
+  assert.strictEqual(adminPrivateTotalTimeoutCallCount, 1, 'admin private total timeout must bypass admin shared fallback retry');
+  assert.strictEqual(adminPrivateTotalTimeoutMs, 25, 'admin private total timeout should cap stream HTTP timeout');
+  assert.strictEqual(adminPrivateTotalTimeoutAbortSeen, true, 'admin private stream should be aborted on total timeout');
+
   let visibleAbortSeen = false;
   await withPatchedStreamingService({
     NORMAL_USER_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS: '15'
