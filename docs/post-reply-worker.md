@@ -2,6 +2,8 @@
 
 更新时间：2026-06-12 07:10 +08:00
 
+更新 2026-06-16 10:29 +08:00：补记 `memoryWritePipeline` review 旁路。`data/model-calls.ndjson` 最近 561 条 review 调用里 560 条命中 `Qwen/Qwen3.6-27B` / `api.siliconflow.cn` 的 `http_408`，说明写入审核是同一慢端点反复拖住，而不是 worker 队列本身反压。现 review 连续超时会进入本进程冷却，冷却期内直接按 `write_review_timeout_downgraded` 落 candidate，不会再继续打同一审核模型；没有切换到其他备用模型。验收：`node tests\memoryWritePipeline.test.js` 通过，`getMemoryWriteReviewRuntimeState()` 可见 cooldown 状态。小目标完成：post-reply 写入链路不再被 review 慢端点重复卡住。
+
 更新 2026-06-12 07:10 +08:00：复查 `data/bot-daemon.log` 中 2026-06-11 21:11:58 daemon 已明确拉起外置 worker，但 21:49、23:49、2026-06-12 01:49、06:22 仍反复 `post-reply worker not running, queue idle; skip idle restart.`。直接原因不是 18:59 那次主 bot 启动补启漏掉，而是 worker 随后在 `data/post-reply-worker.err.log` 记录 `idle RSS recycle requested { rssMb: 574.2, thresholdMb: 512, idleMs: 66427 }` 后主动退出；daemon 的队列门禁在空闲窗口不会补回，形成长期缺席。现新增 `POST_REPLY_WORKER_IDLE_RECYCLE_ENABLED`，默认 `false`，即使配置了 `POST_REPLY_WORKER_RSS_RECYCLE_MB` 也不会让外置 worker 空闲自退；常驻模式下 daemon 发现 worker 缺席会补启，即使队列暂空也不再跳过。只有显式启用该开关时才恢复 RSS idle recycle，低资源诊断也只有在该开关为 true 时才把 missing worker 视为正常回收。小目标完成：外置 post-reply worker 启用后默认稳定常驻，不再因空闲 RSS 回收留下长时间空窗。
 
 更新 2026-06-12 07:09 +08:00：复查 `2026-06-11T19:40:00Z` 到 `20:20:00Z` 的 `memoryWritePipeline/memory_write_review` 失败，剩余漏口不是 worker 队列阻塞，而是 `Request failed with status code 0` 只写成普通 `write_review_failed`，缺少 provider unavailable 降级标记。现 status 0/断连/无响应会按 `write_review_unavailable_downgraded` 落 candidate，并写入 `unavailable=true`、`degraded=true`、`failurePolicy=unavailable_candidate`；408/timeout 继续按 timeout 降级。小目标完成：post-reply 学习链路能区分“审核不可用已降级”和真正审核拒绝。

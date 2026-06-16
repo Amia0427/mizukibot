@@ -30,11 +30,78 @@ function normalizeReviewTimeoutMs(value) {
   return Math.max(500, Number(value || config.MEMORY_WRITE_REVIEW_TIMEOUT_MS || 2500) || 2500);
 }
 
+function resolvePositiveMs(value, fallback = 0, min = 0) {
+  const n = Number(value);
+  const base = Number.isFinite(n) ? n : Number(fallback);
+  if (!Number.isFinite(base)) return Math.max(0, min);
+  return Math.max(min, Math.floor(base));
+}
+
+function resolveReviewTimeoutFailureThreshold() {
+  return Math.max(1, Math.floor(Number(config.MEMORY_WRITE_REVIEW_TIMEOUT_FAILURE_THRESHOLD || 2) || 2));
+}
+
+function resolveReviewTimeoutCooldownMs() {
+  return resolvePositiveMs(config.MEMORY_WRITE_REVIEW_TIMEOUT_COOLDOWN_MS, 60 * 1000, 0);
+}
+
 function createReviewTimeoutError(timeoutMs) {
   const error = new Error(`memory_write_review_timeout after ${timeoutMs}ms`);
   error.code = 'MEMORY_WRITE_REVIEW_TIMEOUT';
   error.reviewTimedOut = true;
   return error;
+}
+
+const writeReviewRuntimeState = {
+  disabledUntil: 0,
+  disabledReason: '',
+  timeoutStreak: 0,
+  lastErrorAt: 0,
+  lastErrorMessage: '',
+  skippedCooldown: 0
+};
+
+function isWriteReviewTemporarilyDisabled(now = Date.now()) {
+  return Number(writeReviewRuntimeState.disabledUntil || 0) > now;
+}
+
+function recordWriteReviewTimeoutFailure(error = null) {
+  const threshold = resolveReviewTimeoutFailureThreshold();
+  const cooldownMs = resolveReviewTimeoutCooldownMs();
+  writeReviewRuntimeState.timeoutStreak += 1;
+  writeReviewRuntimeState.lastErrorAt = Date.now();
+  writeReviewRuntimeState.lastErrorMessage = String(error?.message || error || '').slice(0, 240);
+  if (cooldownMs > 0 && writeReviewRuntimeState.timeoutStreak >= threshold) {
+    writeReviewRuntimeState.disabledUntil = Date.now() + cooldownMs;
+    writeReviewRuntimeState.disabledReason = 'timeout';
+  }
+}
+
+function clearWriteReviewTimeoutFailures() {
+  writeReviewRuntimeState.disabledUntil = 0;
+  writeReviewRuntimeState.disabledReason = '';
+  writeReviewRuntimeState.timeoutStreak = 0;
+  writeReviewRuntimeState.lastErrorAt = 0;
+  writeReviewRuntimeState.lastErrorMessage = '';
+}
+
+function getMemoryWriteReviewRuntimeState(now = Date.now()) {
+  const disabledUntil = Number(writeReviewRuntimeState.disabledUntil || 0) || 0;
+  return {
+    disabled: disabledUntil > now,
+    disabledUntil,
+    disabledForMs: Math.max(0, disabledUntil - now),
+    disabledReason: writeReviewRuntimeState.disabledReason || '',
+    timeoutStreak: writeReviewRuntimeState.timeoutStreak,
+    lastErrorAt: writeReviewRuntimeState.lastErrorAt,
+    lastErrorMessage: writeReviewRuntimeState.lastErrorMessage,
+    skippedCooldown: writeReviewRuntimeState.skippedCooldown
+  };
+}
+
+function resetMemoryWriteReviewRuntimeState() {
+  clearWriteReviewTimeoutFailures();
+  writeReviewRuntimeState.skippedCooldown = 0;
 }
 
 function isWriteReviewTimeoutError(error = null) {
@@ -251,6 +318,7 @@ function createWriteReviewHelpers(deps = {}) {
     if (!parsed || typeof parsed !== 'object') {
       throw new Error('memory_write_review_invalid_json');
     }
+    clearWriteReviewTimeoutFailures();
     return {
       ...normalizeReviewDecision(parsed, risk),
       model
@@ -272,6 +340,8 @@ function createWriteReviewHelpers(deps = {}) {
       timedOut: Boolean(extra.timedOut),
       unavailable: Boolean(extra.unavailable),
       degraded: Boolean(extra.degraded),
+      cooldown: Boolean(extra.cooldown),
+      cooldownUntil: Math.max(0, Number(extra.cooldownUntil || 0) || 0),
       failurePolicy: normalizeText(extra.failurePolicy || ''),
       error: normalizeText(extra.error || '')
     };
@@ -338,6 +408,8 @@ function createWriteReviewHelpers(deps = {}) {
     const failureReason = timedOut
       ? 'write_review_timeout_downgraded'
       : (unavailable ? 'write_review_unavailable_downgraded' : 'write_review_failed');
+    const cooldownUntil = Math.max(0, Number(options.reviewCooldownUntil || 0) || 0);
+    const cooldown = Boolean(options.reviewCooldown || (cooldownUntil && cooldownUntil > Date.now()));
     const review = {
       decision: failOpen ? 'accept' : (risk.severe || failClosed ? 'reject' : 'candidate'),
       reason: failureReason,
@@ -360,6 +432,8 @@ function createWriteReviewHelpers(deps = {}) {
         timedOut,
         unavailable,
         degraded: Boolean(shouldDegrade && !risk.severe && !failClosed),
+        cooldown,
+        cooldownUntil,
         failurePolicy,
         error: error?.message || String(error || '')
       })
@@ -413,10 +487,23 @@ function createWriteReviewHelpers(deps = {}) {
         risk
       };
     }
+    if (isWriteReviewTemporarilyDisabled()) {
+      writeReviewRuntimeState.skippedCooldown += 1;
+      const error = createReviewTimeoutError(normalizeReviewTimeoutMs(context.timeoutMs));
+      error.message = 'memory_write_review_timeout_cooldown';
+      return applyWriteReviewFailure(candidate, error, risk, {
+        ...context,
+        reviewFailurePolicy: context.reviewFailurePolicy || 'fail_candidate',
+        reviewCooldown: true,
+        reviewCooldownUntil: writeReviewRuntimeState.disabledUntil
+      });
+    }
     try {
       const review = await requestWriteReview(candidate, risk, context);
       return applyWriteReviewDecision(candidate, review, risk);
     } catch (error) {
+      if (isWriteReviewTimeoutError(error)) recordWriteReviewTimeoutFailure(error);
+      else writeReviewRuntimeState.timeoutStreak = 0;
       return applyWriteReviewFailure(candidate, error, risk, context);
     }
   }
@@ -429,5 +516,7 @@ function createWriteReviewHelpers(deps = {}) {
 }
 
 module.exports = {
-  createWriteReviewHelpers
+  createWriteReviewHelpers,
+  getMemoryWriteReviewRuntimeState,
+  resetMemoryWriteReviewRuntimeState
 };

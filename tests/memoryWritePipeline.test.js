@@ -12,6 +12,8 @@ process.env.MEMORY_EXTRACT_MIN_CONFIDENCE = '0.72';
 process.env.MEMORY_WRITE_REVIEW_ENABLED = 'true';
 process.env.MEMORY_WRITE_REVIEW_MODE = 'risk';
 process.env.MEMORY_WRITE_REVIEW_TIMEOUT_MS = '500';
+process.env.MEMORY_WRITE_REVIEW_TIMEOUT_FAILURE_THRESHOLD = '2';
+process.env.MEMORY_WRITE_REVIEW_TIMEOUT_COOLDOWN_MS = '5000';
 process.env.MEMORY_WRITE_REVIEW_FAIL_OPEN = 'true';
 process.env.MEMORY_WRITE_REVIEW_FAILURE_POLICY = '';
 process.env.MEMORY_WRITE_RECALL_VERIFY_ENABLED = 'true';
@@ -114,6 +116,10 @@ httpClient.postWithRetry = async (url, body) => {
 };
 
 const { addMemoryItemsBatch, addMemoryItemsBatchWithVectorBackfill, getMemoryItems } = require('../utils/vectorMemory');
+const {
+  getMemoryWriteReviewRuntimeState,
+  resetMemoryWriteReviewRuntimeState
+} = require('../utils/memoryWritePipeline/review');
 
 const firstIds = addMemoryItemsBatch([{
   userId: 'u_pipeline',
@@ -295,11 +301,32 @@ module.exports = (async () => {
   assert.strictEqual(timeoutItem.meta.writeReview.reason, 'write_review_timeout_downgraded');
   assert.strictEqual(timeoutItem.meta.writeReview.timedOut, true);
   assert.strictEqual(timeoutItem.meta.writeReview.degraded, true);
+  assert.strictEqual(getMemoryWriteReviewRuntimeState().disabled, true, 'consecutive review timeouts should open cooldown');
   const timeoutReviewCall = reviewCalls.find((call) => JSON.stringify(call.body).includes('review timeout should downgrade without blocking'));
   assert.ok(timeoutReviewCall, 'timeout case should call review model once');
   assert.strictEqual(timeoutReviewCall.url, 'https://memory-review.example/v1/chat/completions');
   assert.strictEqual(timeoutReviewCall.body.__preferredProtocol, 'chat_completions');
 
+  const callsBeforeCooldownBypass = reviewCalls.length;
+  const cooldownBypassed = await addMemoryItemsBatchWithVectorBackfill([{
+    userId: 'u_pipeline_review_timeout_cooldown',
+    type: 'like',
+    text: 'likes risky review nickname during timeout cooldown',
+    source: 'test',
+    sourceKind: 'extractor',
+    confidence: 0.9,
+    status: 'active'
+  }], { materialize: false, disableWriteRerank: true });
+  assert.strictEqual(cooldownBypassed.ids.length, 1, 'review cooldown should downgrade and persist candidate');
+  assert.strictEqual(reviewCalls.length, callsBeforeCooldownBypass, 'review cooldown should not call review model again');
+  const cooldownItem = getMemoryItems('u_pipeline_review_timeout_cooldown')[0];
+  assert.strictEqual(cooldownItem.status, 'candidate');
+  assert.strictEqual(cooldownItem.meta.writeReview.reason, 'write_review_timeout_downgraded');
+  assert.strictEqual(cooldownItem.meta.writeReview.cooldown, true);
+  assert.ok(cooldownItem.meta.writeReview.cooldownUntil > Date.now());
+  assert.strictEqual(getMemoryWriteReviewRuntimeState().skippedCooldown, 1);
+
+  resetMemoryWriteReviewRuntimeState();
   const unavailableDegraded = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_review_unavailable',
     type: 'like',
@@ -317,6 +344,7 @@ module.exports = (async () => {
   assert.strictEqual(unavailableItem.meta.writeReview.degraded, true);
   assert.strictEqual(unavailableItem.meta.writeReview.failurePolicy, 'unavailable_candidate');
 
+  resetMemoryWriteReviewRuntimeState();
   const afterTimeout = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_after_timeout',
     type: 'like',
@@ -326,7 +354,7 @@ module.exports = (async () => {
     confidence: 0.9,
     status: 'active'
   }], { materialize: false, disableWriteRerank: true });
-  assert.strictEqual(afterTimeout.ids.length, 1, 'subsequent review should still run after timeout downgrade');
+  assert.strictEqual(afterTimeout.ids.length, 1, 'subsequent review should run again after cooldown state is reset');
 
   const explicitActive = await addMemoryItemsBatchWithVectorBackfill([{
     userId: 'u_pipeline_explicit',
