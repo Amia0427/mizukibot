@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-17 02:19 +08:00**：定位普通主回复持续请求 `superapi.buzz`。根因是 `su8` 401 激活默认主模型 fallback，且 `AI_FALLBACK_COOLDOWN_MS=0` 让当前主 bot 进程永久停留在 fallback；`superapi` 已临时禁用时会返回 `Invalid token`。本地已关闭普通/管理员 fallback 和弃用的 Minecraft 独立 LLM，并重启主 bot 清空进程内状态。验收：新主 bot PID=5380；`npm run diag:provider-request -- --scenario main_reply --json` 显示主回复回到 `gcli.ggchan.dev / gemini-3-flash-preview`。小目标完成：主回复不再因本进程 fallback 状态继续打已禁用的 `superapi`。
+
 **2026-06-17 01:43 +08:00**：按管理员直聊实际等待需求，将 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS` 与 `ADMIN_PRIVATE_MAIN_REPLY_STREAM_TOTAL_TIMEOUT_MS` 默认值从 45s 调整为 75s；仍只作用于 admin + private direct reply，超时后继续 abort 上游并受控降级，不触发 admin shared fallback 或非流式二次慢请求。验收：`node --check config\index.js`、`node tests\runtimeLatencyConfig.test.js`、`node tests\directReplyAdminPrivateStreamTimeout.test.js`、`node tests\runtimeStreamingCoordinator.test.js` 通过；配置探针确认两个默认值均为 75000ms。小目标完成：管理员私聊主回复等待窗口已改为 75 秒。
 
 **2026-06-17 01:18 +08:00**：修复第三方 Anthropic Messages 请求体兼容问题。按 CC-API Anthropic SDK 文档复核后确认：SDK 的裸 `baseURL=https://cc-coding.cn` 会由 SDK 拼 `/v1/messages`，本项目是自建 HTTP 层，显式 `provider=anthropic` 的裸域名现在也补成 `/v1/messages`；默认第三方 OpenAI-compatible 端点仍补 `/v1/chat/completions`，可继续用 OpenAI 协议请求 Claude 模型。修复 Anthropic extended thinking 内部 `__originalMaxTokens` 泄漏，Claude Opus 4.6 / 4.6-thinking 改用 `thinking.type=adaptive`；系统提示仍映射到顶层 `system`，prompt caching 仍保持 4 个断点与 `prompt-caching-2024-07-31`。验收：模型请求体定向测试通过，`diag:provider-request -- --admin --json` 中 admin Anthropic 请求体不再含 `__originalMaxTokens`，当前 admin 构造为 `thinking.type=adaptive`。
