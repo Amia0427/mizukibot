@@ -207,7 +207,7 @@ module.exports = (async () => {
   const adminPrivateTimeoutDeltas = [];
   const adminPrivateTimeoutEvents = [];
   let adminPrivateTimeoutFallbackCalls = 0;
-  const adminPrivateTimeoutReply = buildAdminPrivateMainReplyStreamTimeoutReply(45000);
+  const adminPrivateTimeoutReply = buildAdminPrivateMainReplyStreamTimeoutReply(75000);
   const adminPrivateTimeoutHelpers = createStreamingCoordinatorHelpers({
     sanitizeUserFacingText: (text) => String(text || ''),
     isChatLikeRoute: () => true,
@@ -226,7 +226,7 @@ module.exports = (async () => {
     resolveShortTermSessionKey: () => 'session',
     resolveMainConversationModelName: () => 'gpt-5.4',
     requestStreamingReplyImpl: async () => {
-      throw createAdminPrivateMainReplyStreamFirstTokenTimeoutError(45000);
+      throw createAdminPrivateMainReplyStreamFirstTokenTimeoutError(75000);
     },
     finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
     isHumanizerEnabledImpl: () => false,

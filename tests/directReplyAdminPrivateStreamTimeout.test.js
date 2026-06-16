@@ -9,7 +9,7 @@ const {
 module.exports = (async () => {
   let nonStreamFallbackCalls = 0;
   const events = [];
-  const timeoutReply = buildAdminPrivateMainReplyStreamTimeoutReply(45000);
+  const timeoutReply = buildAdminPrivateMainReplyStreamTimeoutReply(75000);
 
   const directReplyNode = createDirectReplyNode({
     normalizeObject(value, fallback = {}) {
@@ -82,7 +82,7 @@ module.exports = (async () => {
       return false;
     },
     async streamDirectReply() {
-      throw createAdminPrivateMainReplyStreamFirstTokenTimeoutError(45000);
+      throw createAdminPrivateMainReplyStreamFirstTokenTimeoutError(75000);
     },
     async requestReplyImpl() {
       nonStreamFallbackCalls += 1;

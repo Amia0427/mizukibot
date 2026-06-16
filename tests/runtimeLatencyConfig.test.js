@@ -34,8 +34,8 @@ module.exports = (() => {
 
     const { config, host } = reloadModules();
 
-    assert.strictEqual(config.ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS, 45000);
-    assert.strictEqual(config.ADMIN_PRIVATE_MAIN_REPLY_STREAM_TOTAL_TIMEOUT_MS, 45000);
+    assert.strictEqual(config.ADMIN_PRIVATE_MAIN_REPLY_STREAM_FIRST_TOKEN_TIMEOUT_MS, 75000);
+    assert.strictEqual(config.ADMIN_PRIVATE_MAIN_REPLY_STREAM_TOTAL_TIMEOUT_MS, 75000);
     assert.strictEqual(config.PLANNER_SINGLE_AUTHORITY_ENABLED, true);
     assert.strictEqual(config.PREPARE_SOFT_BUDGET_MS, 601);
     assert.strictEqual(config.MEMORY_RETRIEVAL_SOFT_BUDGET_MS, 301);
