@@ -71,7 +71,7 @@ module.exports = (async () => {
     requestStreamingReplyImpl: async () => ({
       visibleText: 'visible with reasoning',
       persistedText: 'persisted with reasoning',
-      reasoningText: 'explicit streamed reasoning that can become a small visible thought note'
+      reasoningText: '先确认对方是在认真问，再用轻一点的方式回过去。'
     }),
     finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
     isHumanizerEnabledImpl: () => false,
@@ -91,11 +91,8 @@ module.exports = (async () => {
     output: {}
   });
   assert.strictEqual(reasoningStreamed.finalReply, 'persisted with reasoning');
-  assert.strictEqual(reasoningStreamed.reasoningText, 'explicit streamed reasoning that can become a small visible thought note');
-  assert.ok(
-    String(reasoningStreamed.reasoningForwardText || '').includes('visible thought note'),
-    'streaming coordinator should generate persona forward text from raw reasoning'
-  );
+  assert.strictEqual(reasoningStreamed.reasoningText, '先确认对方是在认真问，再用轻一点的方式回过去。');
+  assert.strictEqual(reasoningStreamed.reasoningForwardText, '先确认对方是在认真问，再用轻一点的方式回过去。');
 
   const objectReplyHelpers = createStreamingCoordinatorHelpers({
     sanitizeUserFacingText: (text) => String(text || ''),
