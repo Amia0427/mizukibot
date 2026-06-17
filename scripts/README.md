@@ -3,6 +3,7 @@
 ## Daily Use
 
 - `run-tests.js`：测试入口；更新 2026-05-24 02:16 +08:00，逐测试文件子进程隔离执行，避免全局 stub/env/模块缓存和后台异步任务跨测试污染
+- `pre-release-smoke.js`：发布前最小冒烟入口；更新 2026-06-17 20:04 +08:00，支持 `npm run smoke:pre-release -- --root D:\mizuki_release`，串联 expected-shutdown 未确认重启保护、主模型 fallback 重启恢复、普通群纯文本短 debounce 与群/入站并发回归
 - `check-agent.js`：LangGraph / agent 自检
 - `check-prompts.js`：prompt 资源检查
 - `console.js`：本地控制台入口
