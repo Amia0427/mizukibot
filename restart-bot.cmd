@@ -11,6 +11,20 @@ if not "%RESTART_EXIT%"=="0" exit /b %RESTART_EXIT%
 
 set "SKIP_LOG_WINDOW="
 if defined MIZUKI_RESTART_DEFAULT_STATUS set "SKIP_LOG_WINDOW=1"
+if /i "%~1"=="restart" (
+  set "SKIP_LOG_WINDOW=1"
+  if /i "%~2"=="confirm" set "SKIP_LOG_WINDOW="
+  if /i "%~2"=="confirmed" set "SKIP_LOG_WINDOW="
+  if /i "%~2"=="--confirm" set "SKIP_LOG_WINDOW="
+  if /i "%~2"=="/confirm" set "SKIP_LOG_WINDOW="
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="1" set "SKIP_LOG_WINDOW="
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="true" set "SKIP_LOG_WINDOW="
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="yes" set "SKIP_LOG_WINDOW="
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="y" set "SKIP_LOG_WINDOW="
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="on" set "SKIP_LOG_WINDOW="
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="confirm" set "SKIP_LOG_WINDOW="
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="confirmed" set "SKIP_LOG_WINDOW="
+)
 for %%A in (%*) do (
   if /i "%%~A"=="-StatusOnly" set "SKIP_LOG_WINDOW=1"
   if /i "%%~A"=="/StatusOnly" set "SKIP_LOG_WINDOW=1"
@@ -25,7 +39,10 @@ exit /b 0
 param(
   [AllowEmptyString()]
   [string]$TaskName = 'MizukiBotDaemon',
+  [AllowEmptyString()]
+  [string]$Confirm = '',
   [switch]$Restart,
+  [switch]$ConfirmRestart,
   [switch]$StatusOnly,
   [switch]$SkipInstall
 )
@@ -58,6 +75,15 @@ if (-not [string]::IsNullOrWhiteSpace($positionalCommand)) {
     }
     '^(?i:start)$' {
       $TaskName = 'MizukiBotDaemon'
+      break
+    }
+  }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($Confirm)) {
+  switch -Regex ($Confirm.Trim()) {
+    '^(?i:confirm|confirmed|--confirm|/confirm)$' {
+      $ConfirmRestart = $true
       break
     }
   }
@@ -140,6 +166,28 @@ function Write-JsonFileSafe {
   } catch {
     return $false
   }
+}
+
+function Get-RestartMarkerTextEnv {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [string]$DefaultValue = ''
+  )
+
+  $raw = [Environment]::GetEnvironmentVariable($Name, 'Process')
+  if ([string]::IsNullOrWhiteSpace($raw)) { return $DefaultValue }
+  return $raw.Trim()
+}
+
+function Test-RestartConfirmed {
+  if ($ConfirmRestart) { return $true }
+
+  $raw = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_CONFIRM'
+  switch ($raw.ToLowerInvariant()) {
+    { $_ -in @('1', 'true', 'yes', 'y', 'on', 'confirm', 'confirmed') } { return $true }
+  }
+
+  return $false
 }
 
 function Test-PostReplyJobDue {
@@ -562,12 +610,20 @@ function Record-ExpectedMainBotShutdownForRestart {
   }
 
   $now = (Get-Date).ToUniversalTime()
+  $markerReason = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REASON' -DefaultValue 'manual_restart_script'
+  $markerSource = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_SOURCE' -DefaultValue 'restart-bot.cmd'
   $marker = [pscustomobject]@{
     pid = $OwnerPid
-    reason = 'manual_restart_script'
+    reason = $markerReason
     recordedAt = $now.ToString('o')
     expiresAt = $now.AddMinutes(5).ToString('o')
-    source = 'restart-bot.cmd'
+    source = $markerSource
+    script = 'restart-bot.cmd'
+    requestedBy = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REQUESTED_BY'
+    requestId = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REQUEST_ID'
+    messageId = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_MESSAGE_ID'
+    groupId = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_GROUP_ID'
+    command = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_COMMAND'
   }
 
   return (Write-JsonFileSafe -Path $expectedShutdownFile -Value $marker)
@@ -728,13 +784,20 @@ foreach ($action in Ensure-DaemonConfigured -TaskName $TaskName) {
 
 if ($Restart) {
   [void]$actions.Add('restart requested')
-  foreach ($action in Stop-BotForRestart) {
-    [void]$actions.Add($action)
+  if (-not (Test-RestartConfirmed)) {
+    [void]$actions.Add('restart skipped: explicit confirmation required (use "restart confirm")')
+    $null = Write-DaemonReport -TaskName $TaskName -Actions @($actions)
+    exit 0
+  } else {
+    [void]$actions.Add('restart confirmation accepted')
+    foreach ($action in Stop-BotForRestart) {
+      [void]$actions.Add($action)
+    }
+    foreach ($action in Start-BotIfNeeded -TaskName $TaskName) {
+      [void]$actions.Add($action)
+    }
+    Start-Sleep -Seconds 4
   }
-  foreach ($action in Start-BotIfNeeded -TaskName $TaskName) {
-    [void]$actions.Add($action)
-  }
-  Start-Sleep -Seconds 4
 } else {
   $runtimeBefore = Get-BotRuntimeStatus
   if ($runtimeBefore.Healthy) {

@@ -20,6 +20,8 @@ module.exports = (() => {
   assert.ok(script.includes("process.on('SIGBREAK'"), 'main bot should handle Windows console break shutdowns explicitly');
   assert.ok(script.includes('preserveSingleInstanceLockOnExit = true'), 'fatal exits should preserve the lock for daemon early-exit diagnosis');
   assert.ok(script.includes("recordExpectedShutdown('remote_restart_scheduled'"), 'remote restarts should be exempt from crash backoff');
+  assert.ok(script.includes("source: String(meta?.source || 'remote_restart')"), 'remote restart markers should preserve source metadata');
+  assert.ok(script.includes("requestId: String(meta?.requestId || '')"), 'remote restart markers should preserve request metadata');
   assert.ok(script.includes("recordExpectedShutdown(reason, { exitCode })"), 'signal shutdowns should be exempt from crash backoff');
   assert.ok(script.includes('[startup] main bot initialized'), 'main bot should log when early startup completes');
 

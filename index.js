@@ -690,10 +690,23 @@ function drainForScheduledRestart(meta = {}) {
   if (shuttingDown) return;
   shuttingDown = true;
   const delayMs = Math.max(0, Number(meta?.delayMs || 0) || 0);
-  recordExpectedShutdown('remote_restart_scheduled', { delayMs });
+  recordExpectedShutdown('remote_restart_scheduled', {
+    delayMs,
+    source: String(meta?.source || 'remote_restart').trim() || 'remote_restart',
+    requestedBy: String(meta?.userId || '').trim(),
+    requestId: String(meta?.requestId || '').trim(),
+    messageId: String(meta?.messageId || '').trim(),
+    groupId: String(meta?.groupId || '').trim(),
+    command: String(meta?.command || '').trim()
+  });
   console.log('[restart] drain old instance before external restart', {
     pid: process.pid,
-    delayMs
+    delayMs,
+    source: String(meta?.source || '').trim(),
+    requestedBy: String(meta?.userId || '').trim(),
+    requestId: String(meta?.requestId || '').trim(),
+    messageId: String(meta?.messageId || '').trim(),
+    groupId: String(meta?.groupId || '').trim()
   });
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);

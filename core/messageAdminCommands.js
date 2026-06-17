@@ -165,9 +165,16 @@ function createMessageAdminCoordinator(deps = {}) {
 
   async function handleRestartAdminCommand({ rawText = '', userId = '' } = {}) {
     const text = normalizeText(rawText);
-    if (!/^\/restart$/i.test(text)) return null;
+    if (!/^\/restart(?:\s|$)/i.test(text)) return null;
     if (!isAdminUser(userId)) {
       return { handled: true, replyText: '这个按钮现在只给管理员按哦。' };
+    }
+    if (!/^\/restart\s+(?:confirm|确认)$/i.test(text)) {
+      return {
+        handled: true,
+        restartRequested: false,
+        replyText: '重启需要明确确认：/restart confirm'
+      };
     }
     return {
       handled: true,

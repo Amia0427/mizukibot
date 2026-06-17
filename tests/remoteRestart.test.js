@@ -19,7 +19,7 @@ module.exports = (async () => {
   assert.strictEqual(path.basename(winSpec.script).toLowerCase(), 'restart-bot.cmd');
   assert.deepStrictEqual(winSpec.args.slice(0, 2), ['/d', '/c']);
   assert.ok(winSpec.args[2].includes('restart-bot.cmd'));
-  assert.ok(/\brestart\b/i.test(winSpec.args[2]), 'remote restart should pass an explicit restart command');
+  assert.ok(/\brestart\s+confirm\b/i.test(winSpec.args[2]), 'remote restart should pass an explicit confirmed restart command');
   assert.strictEqual(winSpec.windowsVerbatimArguments, true);
 
   const spawned = [];
@@ -59,6 +59,9 @@ module.exports = (async () => {
   assert.deepStrictEqual(spawned[0].args, winSpec.args);
   assert.strictEqual(spawned[0].options.detached, true);
   assert.strictEqual(spawned[0].options.stdio, 'ignore');
+  assert.strictEqual(spawned[0].options.env.MIZUKI_RESTART_CONFIRM, '1');
+  assert.strictEqual(spawned[0].options.env.MIZUKI_RESTART_SOURCE, 'remote_restart');
+  assert.strictEqual(spawned[0].options.env.MIZUKI_RESTART_REASON, 'remote_restart_scheduled');
   assert.strictEqual(spawned[0].options.windowsVerbatimArguments, true);
   assert.strictEqual(spawned[0].unrefCalled, true);
 

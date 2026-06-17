@@ -199,10 +199,17 @@ function buildExpectedShutdownMarker(dataDir = '', now = Date.now()) {
   return {
     path: markerPath,
     exists: stat.exists,
-    active: expiresAtMs > now,
+    active: expiresAtMs > now && !normalizeText(parsed?.consumedAt),
     pid: normalizePid(parsed?.pid),
     reason: normalizeText(parsed?.reason),
+    source: normalizeText(parsed?.source),
     expiresAt: normalizeText(parsed?.expiresAt),
+    recordedAt: normalizeText(parsed?.recordedAt),
+    consumedAt: normalizeText(parsed?.consumedAt),
+    consumedBy: normalizeText(parsed?.consumedBy),
+    requestId: normalizeText(parsed?.requestId),
+    messageId: normalizeText(parsed?.messageId),
+    groupId: normalizeText(parsed?.groupId),
     mtime: isoFromMs(stat.mtimeMs),
     size: stat.size
   };
@@ -631,7 +638,7 @@ function buildMainBotRestartText(report = {}) {
     `runtime-evidence: started=${restartState.startedAt || '-'} heartbeat=${restartState.heartbeatAt || '-'} effectiveRuntime=${restartState.effectiveRuntimeMs ? formatMs(restartState.effectiveRuntimeMs) : '-'} source=${restartState.runtimeAgeSource || '-'}`,
     `policy: window=${restartState.windowMs ? formatMs(restartState.windowMs) : '-'} maxRestarts=${restartState.maxRestarts || 0} cooldown=${restartState.cooldownMs ? formatMs(restartState.cooldownMs) : '-'}`,
     `lock: ${lock.status || 'unknown'} pid=${lock.pid || 0} alive=${lock.processAlive ? 'yes' : 'no'} age=${lock.ageMs ? formatMs(lock.ageMs) : '-'} path=${lock.path || '-'}`,
-    `expected-shutdown: exists=${expected.exists ? 'yes' : 'no'} active=${expected.active ? 'yes' : 'no'} pid=${expected.pid || 0} reason=${expected.reason || '-'}`,
+    `expected-shutdown: exists=${expected.exists ? 'yes' : 'no'} active=${expected.active ? 'yes' : 'no'} consumed=${expected.consumedAt ? 'yes' : 'no'} pid=${expected.pid || 0} reason=${expected.reason || '-'} source=${expected.source || '-'} recorded=${expected.recordedAt || '-'} consumedAt=${expected.consumedAt || '-'} request=${expected.requestId || '-'} message=${expected.messageId || '-'} group=${expected.groupId || '-'}`,
     `daemon: latestStart=${daemon.latestMainBotStartAt || '-'} pid=${daemon.latestMainBotStartPid || 0} latestLockHandoff=${daemon.latestLockHandoffAt || '-'}`
   ];
 

@@ -23,8 +23,28 @@ module.exports = (() => {
     'restart script should repair stale main pid files from a real running process'
   );
   assert.ok(
-    script.includes("reason = 'manual_restart_script'"),
-    'restart marker should identify manual restart as the reason'
+    script.includes("Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REASON' -DefaultValue 'manual_restart_script'"),
+    'restart marker should default manual restart as the reason'
+  );
+  assert.ok(
+    script.includes('function Test-RestartConfirmed'),
+    'restart script should require an explicit confirmation before stopping processes'
+  );
+  assert.ok(
+    script.includes('restart skipped: explicit confirmation required'),
+    'bare restart should not write markers or stop processes'
+  );
+  assert.ok(
+    script.includes('if /i "%~1"=="restart"') && script.includes('if /i "%MIZUKI_RESTART_CONFIRM%"=="confirm"'),
+    'only confirmed restart should open the outer watch-log window'
+  );
+  assert.ok(
+    script.includes('MIZUKI_RESTART_CONFIRM'),
+    'remote restart should be able to pass confirmation through the environment'
+  );
+  assert.ok(
+    script.includes('MIZUKI_RESTART_SOURCE'),
+    'restart marker should preserve the trigger source for audit'
   );
   assert.ok(
     script.includes('MIZUKI_RESTART_DEFAULT_STATUS'),
@@ -37,6 +57,10 @@ module.exports = (() => {
   assert.ok(
     script.includes('Test-PidIsRunningMainBot -ProcessId $mainPid'),
     'restart marker should not be written for stale lock pids'
+  );
+  assert.ok(
+    script.indexOf('Test-RestartConfirmed') < script.indexOf('Stop-BotForRestart'),
+    'restart confirmation should be checked before stop/start logic'
   );
   assert.ok(
     script.indexOf('Record-ExpectedMainBotShutdownForRestart -OwnerPid $mainPid') < script.indexOf('Stop-PidList -Pids $childPids'),

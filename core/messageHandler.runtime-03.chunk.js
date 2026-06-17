@@ -516,7 +516,7 @@
       return;
     }
 
-    if (/^\s*\/restart\s*$/i.test(String(slashCommandText || '').trim())) {
+    if (/^\s*\/restart(?:\s|$)/i.test(String(slashCommandText || '').trim())) {
       const restartResult = await handleRestartAdminCommand({
         rawText: slashCommandText,
         groupId,
@@ -535,7 +535,18 @@
         });
       }
       if (restartResult?.restartRequested) {
-        triggerRemoteRestart({ delayMs: 800 });
+        triggerRemoteRestart({
+          delayMs: 800,
+          meta: {
+            source: 'admin_chat_command',
+            reason: 'remote_restart_scheduled',
+            userId: String(senderId || '').trim(),
+            groupId: String(groupId || '').trim(),
+            messageId: String(effectiveMsg.message_id || msg.message_id || '').trim(),
+            requestId: String(inboundRequestId || '').trim(),
+            command: String(slashCommandText || '').trim()
+          }
+        });
       }
       logMemoryWriteSkip('special_command', { command: 'restart' });
       return;
