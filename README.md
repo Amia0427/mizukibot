@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-17 20:05 +08:00**：检查并开启 QQ 空间发送运行开关。现场状态：main bot、post-reply worker 已运行；开启前 `QZONE_AUTO_PUBLISH_ENABLED=false`、`SCHEDULER_RUNTIME_ENABLED=false`，NapCat 可取到 `qzone.qq.com` 凭据且含 skey。已在 `.env` 开启 `QZONE_AUTO_PUBLISH_ENABLED=true` 和 `SCHEDULER_RUNTIME_ENABLED=true`，并重启到 main bot PID `30364`、worker PID `31184`。未开启 `DAILY_SHARE_ENABLED`/`TICK_ENGINE_ENABLED`，因为该全局开关会连带恢复两个已启用群的 daily share，不属于本次“QQ 空间发送”最小范围。验收：`restart-bot.cmd status`、配置脱敏探针、NapCat 凭据探针和 runtime heartbeat 均通过。小目标完成：预约/自动发布型 QQ 空间发送已允许真实提交，并保留群自动分享边界。
+
 **2026-06-17 19:52 +08:00**：改进 QQ 空间发送的真实感。借鉴 `D:\echo` 朋友圈生成里的“生活碎片”规则，Qzone 生成现在更偏短句、动作、小物件、吐槽和临时情绪，降低公告/小作文/鸡汤总结倾向；自动发布前新增可配置拟人化停顿 `QZONE_HUMANIZE_PUBLISH_DELAY_*`，并给 Qzone 文本/图片 HTTP 请求补常见浏览器头。验收：语法检查、`node tests\qzoneClient.test.js`、`node tests\qzoneAgentService.test.js`、`node tests\qzoneGenerationPhase2.test.js`、`node tests\qzoneDiaryServicePhase2.test.js`、`node tests\qqActionService.test.js` 通过。小目标完成：mizukibot 的 QQ 空间发送从“生成后立刻机械提交”收口为更像真人发说说的内容和发送节奏。
 
 **2026-06-17 19:31 +08:00**：刷新发行版 `.env.example`。旧模板只覆盖 NapCat、异步入口、planner 和 TLS 少量开关，已跟当前配置入口脱节；现按“可启动必需 + 常用高价值开关”重写为分组模板，覆盖主/管理员模型、NapCat HTTP reverse secret、Web 面板、并发队列、连续消息、planner/tools、图片/记忆、MemOS/OpenViking、被动感知、post-reply、可选集成和诊断守护。所有密钥/Token/真实端点均保持空值或 `placeholder`，并同步到 `D:\mizuki_release\.env.example`。验收：源模板与发行模板重复键检查均为 255 个唯一键，敏感模式扫描无命中。小目标完成：发行版环境变量模板不再明显过时，且不携带真实 `.env` 数据。
