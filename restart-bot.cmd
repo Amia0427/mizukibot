@@ -748,23 +748,59 @@ function Write-DaemonReport {
   ) | Format-Table -Wrap -AutoSize | Out-Host
 
   Write-Host ''
-  Write-Host '=== Matching Node Processes ==='
-  $repoPattern = [regex]::Escape([string]$repoRoot)
+  Write-Host '=== Bot Node Processes ==='
   $processListAvailable = $true
   try {
-    $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
-      $_.Name -eq 'node.exe' -and ($_.CommandLine -match "$repoPattern|index\.js|post-reply-worker\.js")
-    } | Select-Object ProcessId, ParentProcessId, CommandLine)
+    $allNodeProcesses = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+      $_.Name -eq 'node.exe'
+    })
   } catch {
     $processListAvailable = $false
     Write-Host ("unavailable: " + $_.Exception.Message)
-    $processes = @()
+    $allNodeProcesses = @()
   }
 
-  if ($processes.Count -gt 0) {
-    $processes | Format-Table -Wrap -AutoSize | Out-Host
-  } elseif ($processListAvailable) {
-    Write-Host '(none)'
+  $botPidRoles = @{}
+  foreach ($entry in @(
+    [pscustomobject]@{ Pid = $runtimeStatus.Main.Pid; Role = 'main bot' },
+    [pscustomobject]@{ Pid = $runtimeStatus.Worker.Pid; Role = 'post-reply worker' }
+  )) {
+    $pidNum = 0
+    if ([int]::TryParse([string]$entry.Pid, [ref]$pidNum) -and $pidNum -gt 0) {
+      $botPidRoles[$pidNum] = [string]$entry.Role
+    }
+  }
+
+  if ($processListAvailable) {
+    $botProcesses = @($allNodeProcesses | Where-Object {
+      $botPidRoles.ContainsKey([int]$_.ProcessId)
+    } | Select-Object @{Name = 'Role'; Expression = { $botPidRoles[[int]$_.ProcessId] } }, ProcessId, ParentProcessId, CommandLine)
+
+    if ($botProcesses.Count -gt 0) {
+      $botProcesses | Format-Table -Wrap -AutoSize | Out-Host
+    } else {
+      Write-Host '(none)'
+    }
+
+    Write-Host ''
+    Write-Host '=== Other Related Node Processes (diagnostic only) ==='
+    $repoPattern = [regex]::Escape(([string]$repoRoot).TrimEnd('\'))
+    $testPattern = '(^|["''\s])scripts[\\/]run-tests\.js(["''\s]|$)|[\\/]tests[\\/][^"''\s]+\.test\.js(["''\s]|$)|(^|["''\s])tests[\\/][^"''\s]+\.test\.js(["''\s]|$)'
+    $otherProcesses = @($allNodeProcesses | Where-Object {
+      $commandLine = [string]$_.CommandLine
+      (-not $botPidRoles.ContainsKey([int]$_.ProcessId)) -and (
+        ($commandLine -match $repoPattern) -or
+        ($commandLine -match $testPattern) -or
+        (Test-ProcessLooksLikeMainBot -Process $_) -or
+        ($commandLine -match '(^|["''\s])scripts[\\/]post-reply-worker\.js(["''\s]|$)')
+      )
+    } | Select-Object ProcessId, ParentProcessId, CommandLine)
+
+    if ($otherProcesses.Count -gt 0) {
+      $otherProcesses | Format-Table -Wrap -AutoSize | Out-Host
+    } else {
+      Write-Host '(none)'
+    }
   }
 
   return $runtimeStatus.Healthy
@@ -773,7 +809,7 @@ function Write-DaemonReport {
 $actions = New-Object System.Collections.ArrayList
 
 if ($StatusOnly) {
-  [void]$actions.Add('status only; start skipped')
+  [void]$actions.Add('status only; start skipped (restart requires "restart confirm")')
   $null = Write-DaemonReport -TaskName $TaskName -Actions @($actions)
   exit 0
 }
@@ -785,7 +821,7 @@ foreach ($action in Ensure-DaemonConfigured -TaskName $TaskName) {
 if ($Restart) {
   [void]$actions.Add('restart requested')
   if (-not (Test-RestartConfirmed)) {
-    [void]$actions.Add('restart skipped: explicit confirmation required (use "restart confirm")')
+    [void]$actions.Add('restart skipped: explicit confirmation required (run "restart-bot.cmd restart confirm" or set MIZUKI_RESTART_CONFIRM=1)')
     $null = Write-DaemonReport -TaskName $TaskName -Actions @($actions)
     exit 0
   } else {

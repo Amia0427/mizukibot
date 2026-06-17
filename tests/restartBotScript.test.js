@@ -35,6 +35,22 @@ module.exports = (() => {
     'bare restart should not write markers or stop processes'
   );
   assert.ok(
+    script.includes('restart-bot.cmd restart confirm'),
+    'bare restart output should show the exact confirmed restart command'
+  );
+  assert.ok(
+    script.includes('status only; start skipped (restart requires "restart confirm")'),
+    'status-only output should make clear that it did not restart the bot'
+  );
+  assert.ok(
+    script.includes('=== Bot Node Processes ===') && script.includes('=== Other Related Node Processes (diagnostic only) ==='),
+    'status output should separate real bot processes from diagnostic node processes'
+  );
+  assert.ok(
+    script.includes('$botPidRoles') && script.includes('diagnostic only'),
+    'diagnostic node process listing should be keyed from the runtime bot pid roles'
+  );
+  assert.ok(
     script.includes('if /i "%~1"=="restart"') && script.includes('if /i "%MIZUKI_RESTART_CONFIRM%"=="confirm"'),
     'only confirmed restart should open the outer watch-log window'
   );
