@@ -1,3 +1,11 @@
+## 运行维护 2026-06-17 13:28
+
+- 小目标：处理 `restart-bot.cmd restart confirm` 看起来仍是失败状态的问题，确认真实停启链路和命令输出是否一致。
+- 现场结论：确认重启链路本身成功；第一次复现从 main bot `14572` / worker `25864` 切到 `43180` / `36056`，daemon 日志记录 expected shutdown、拉起和 lock 接管均成功，3002 端口也由新 main bot 监听。真正问题是外层 cmd 成功路径没有在当前窗口回显最终状态，用户只看到命令结束，像是失败。
+- 最小修复：确认重启参数或 `MIZUKI_RESTART_CONFIRM` 生效时设置 `MIZUKI_RESTART_PRINT_POST_STATUS=1`；PowerShell payload 成功返回后，外层 cmd 自动 `call "%~f0" status`，打印最终 main bot / worker PID 与健康状态，并保留 status 非 0 时向外返回失败。
+- 验证：`node tests\restartBotScript.test.js` 通过；PowerShell payload parse 通过；实际 `cmd /c restart-bot.cmd restart confirm` 输出 stopped PID、daemon actions、`[restart] confirmed restart completed; final status:` 和最终状态；当前 `.mizukibot.lock=39404`、worker pid `1644`，`127.0.0.1:3002` 监听 owner 为 `39404`。
+- 小目标已完成：确认重启现在既真实生效，也会在当前控制台给出可验收结果。
+
 ## 运行维护 2026-06-17 13:18
 
 - 小目标：排查 `restart-bot.cmd` 看起来有问题的原因，避免误把安全跳过或残留测试进程当成重启失败。

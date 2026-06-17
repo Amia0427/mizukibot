@@ -4,10 +4,32 @@ cd /d "%~dp0"
 set "MIZUKI_RESTART_BOT_ROOT=%~dp0"
 set "MIZUKI_RESTART_DEFAULT_STATUS="
 if "%~1"=="" set "MIZUKI_RESTART_DEFAULT_STATUS=1"
+set "MIZUKI_RESTART_PRINT_POST_STATUS="
+if /i "%~1"=="restart" (
+  if /i "%~2"=="confirm" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%~2"=="confirmed" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%~2"=="--confirm" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%~2"=="/confirm" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="1" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="true" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="yes" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="y" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="on" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="confirm" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+  if /i "%MIZUKI_RESTART_CONFIRM%"=="confirmed" set "MIZUKI_RESTART_PRINT_POST_STATUS=1"
+)
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$script = Get-Content -LiteralPath '%~f0' -Raw; $marker = '# POWERSHELL_PAYLOAD'; $idx = $script.LastIndexOf($marker); if ($idx -lt 0) { throw 'Missing PowerShell payload.' }; $payload = $script.Substring($idx + $marker.Length).TrimStart(); $block = [scriptblock]::Create($payload); & $block @args" %*
 set "RESTART_EXIT=%ERRORLEVEL%"
 if not "%RESTART_EXIT%"=="0" exit /b %RESTART_EXIT%
+
+if /i "%~1"=="restart" if /i "%MIZUKI_RESTART_PRINT_POST_STATUS%"=="1" (
+  echo.
+  echo [restart] confirmed restart completed; final status:
+  call "%~f0" status
+  set "POST_STATUS_EXIT=%ERRORLEVEL%"
+  if not "%POST_STATUS_EXIT%"=="0" exit /b %POST_STATUS_EXIT%
+)
 
 set "SKIP_LOG_WINDOW="
 if defined MIZUKI_RESTART_DEFAULT_STATUS set "SKIP_LOG_WINDOW=1"

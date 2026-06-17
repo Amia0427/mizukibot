@@ -59,6 +59,14 @@ module.exports = (() => {
     'remote restart should be able to pass confirmation through the environment'
   );
   assert.ok(
+    script.includes('MIZUKI_RESTART_PRINT_POST_STATUS'),
+    'confirmed restart should print a final status report in the current console'
+  );
+  assert.ok(
+    script.includes('[restart] confirmed restart completed; final status:') && script.includes('call "%~f0" status'),
+    'confirmed restart should not look silent after the daemon has been triggered'
+  );
+  assert.ok(
     script.includes('MIZUKI_RESTART_SOURCE'),
     'restart marker should preserve the trigger source for audit'
   );
