@@ -507,3 +507,11 @@
 - 脱敏处理：发行副本内 `api/napcatHttpActionClient.js` 的硬编码 NapCat HTTP action secret 改为从 `NAPCAT_HTTP_ACTION_SECRET` / `config.NAPCAT_HTTP_ACTION_SECRET` 读取占位；源项目运行文件未改动。
 - 验收：目标目录为空后写入；执行发行副本文件计数、排除路径检查、敏感模式扫描、`npm run check:secrets` 和 `git status --short`。
 - 小目标已完成：可发行源码副本已落到 `D:\mizuki_release`，不携带本机敏感数据和运行态数据。
+
+## 运行维护 2026-06-17 19:31
+
+- 刷新 `.env.example` 并同步到 `D:\mizuki_release\.env.example`。
+- 根因：旧模板只覆盖 NapCat、异步入口、planner 和 TLS 少量开关，缺少当前常用的主/管理员模型、NapCat HTTP action secret、Web 面板、并发、连续消息、图片/记忆、post-reply、可选集成等配置。
+- 范围控制：只写示例模板，未读取或复制真实 `.env` 的值；密钥、Token 和真实端点均保持空值或 `placeholder`。
+- 验收：源模板与发行模板重复键检查均为 255 个唯一键；敏感模式扫描无命中。
+- 小目标已完成：发行版环境变量模板已更新到当前项目主要运行面，且不携带敏感数据。
