@@ -1,3 +1,13 @@
+## 运行维护 2026-06-17 13:04
+
+- 小目标：确认 QQ reasoning 没有发送，是上游没有返回 thinking，还是本地配置/运行链路问题。
+- 现场结论：当前运行主 bot `pid=14572`，`startedAt=2026-06-16T20:00:05.046Z`，即 `2026-06-17 04:00:05 +08:00`；reasoning 合并转发提交为 `89cc85d`，提交时间 `2026-06-17 11:55:52 +08:00`。因此线上进程尚未加载合并转发代码，这是“没有发送”的确定本地原因。
+- 配置结论：最近主回复模型调用 `req_f0277160ffa05b83 / model_call_1781672118882_110` 使用 `cc-coding.cn / claude-opus-4-6-thinking / provider=anthropic / stream=true`；`npm run diag:provider-request -- --admin --json` 显示 admin Anthropic Messages 请求体 keys 含 `thinking`，本地配置不是未开启 thinking。
+- 日志边界：`data/model-calls.ndjson` 只记录 usage/finish_reason，不记录原始 SSE 响应体；旧日志无法证明上游是否实际发了 thinking delta，只能证明请求体已请求 thinking、且当前发送链路未加载新代码。
+- 最小修复：补齐 parser 对 Anthropic 标准流式 `content_block_delta.delta.type="thinking_delta"` / `delta.thinking` 的识别；此前只覆盖 OpenAI-compatible `reasoning_content/reasoning` 和部分 `content_block.thinking`，若上游按标准 Anthropic SSE 返回 thinking delta，重启后也可能读不到。
+- 验证：`node scripts\run-tests.js tests\parserModelResponseFormats.test.js tests\modelServiceReasoning.test.js tests\runtimeStreamingCoordinator.test.js` 通过；`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。
+- 小目标已完成：未发送的确定原因是主 bot 未重启加载 `89cc85d`；同时已补上标准 Anthropic thinking delta 解析，下一步需要重启主 bot 后再用新请求验证是否收到并转发。
+
 ## 运行维护 2026-06-17 11:52
 
 - 小目标：去除 `/cot` 特殊指令，并让 QQ 群聊/私聊在正常正文发送成功后，额外用合并转发完整发送 provider 显式返回的 reasoning。
