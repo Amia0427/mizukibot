@@ -714,9 +714,21 @@ function refreshSessionFollowupState(session = {}) {
   return nextState;
 }
 
+function hasLongAggregationAnchor(entry = {}) {
+  return Boolean(
+    (Array.isArray(entry.imageUrls) && entry.imageUrls.length > 0)
+    || (Array.isArray(entry.forwardIds) && entry.forwardIds.length > 0)
+    || (Array.isArray(entry.qqCardUrls) && entry.qqCardUrls.length > 0)
+  );
+}
+
 function createContinuousMessagePreprocessor(options = {}) {
   const debounceMs = clampDebounceMs(
     options.debounceMs ?? config.CONTINUOUS_MESSAGE_DEBOUNCE_MS,
+    2000
+  );
+  const groupPlainTextDebounceMs = clampDebounceMs(
+    options.groupPlainTextDebounceMs ?? config.CONTINUOUS_MESSAGE_GROUP_PLAIN_TEXT_DEBOUNCE_MS,
     2000
   );
   const atBotDebounceMs = clampDebounceMs(
@@ -816,9 +828,13 @@ function createContinuousMessagePreprocessor(options = {}) {
   }
 
   function getSessionDebounceMs(session = {}) {
-    const baseDebounceMs = String(session.messageType || '').trim().toLowerCase() === 'private'
+    const messageType = String(session.messageType || '').trim().toLowerCase();
+    const plainGroupText = messageType === 'group'
+      && session.mentionedBot !== true
+      && session.hasLongAggregationAnchor !== true;
+    const baseDebounceMs = messageType === 'private'
       ? privateDebounceMs
-      : (session.mentionedBot === true ? atBotDebounceMs : debounceMs);
+      : (session.mentionedBot === true ? atBotDebounceMs : (plainGroupText ? Math.min(debounceMs, groupPlainTextDebounceMs) : debounceMs));
     if (session.awaitingFollowup === true) return maxHoldMs;
     return baseDebounceMs;
   }
@@ -991,6 +1007,7 @@ function createContinuousMessagePreprocessor(options = {}) {
       touchSession(session);
       session.entries.push(entry);
       session.mentionedBot = session.mentionedBot || entry.mentionedBot;
+      session.hasLongAggregationAnchor = session.hasLongAggregationAnchor || hasLongAggregationAnchor(entry);
       session.activityVersion = freshnessVersion;
       session.freshnessSessionKey = freshnessSessionKey || session.freshnessSessionKey || '';
       refreshSessionFollowupState(session);
@@ -1045,6 +1062,7 @@ function createContinuousMessagePreprocessor(options = {}) {
       flushReason: 'debounce',
       startedAt: Date.now(),
       mentionedBot: entry.mentionedBot === true,
+      hasLongAggregationAnchor: hasLongAggregationAnchor(entry),
       messageType: normalizeText(msg?.message_type).toLowerCase(),
       awaitingFollowup: false,
       activityVersion: freshnessVersion,

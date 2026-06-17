@@ -119,6 +119,89 @@ async function testPlainTextStillFlushesOnBaseDebounce() {
   assert.deepStrictEqual(second.meta.sourceMessageIds, ['text-b']);
 }
 
+async function testRegularGroupPlainTextUsesShortDebounceCap() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 300,
+    groupPlainTextDebounceMs: 300,
+    atBotDebounceMs: 500,
+    privateDebounceMs: 450,
+    maxHoldMs: 600,
+    sentenceWindowMs: 300
+  });
+
+  assert.strictEqual(
+    preprocessor.getSessionDebounceMs({
+      messageType: 'group',
+      mentionedBot: false,
+      hasLongAggregationAnchor: false
+    }),
+    300,
+    'regular group plain text should not inherit the long aggregation debounce'
+  );
+  assert.strictEqual(
+    preprocessor.getSessionDebounceMs({
+      messageType: 'group',
+      mentionedBot: false,
+      hasLongAggregationAnchor: true
+    }),
+    300,
+    'group messages with image/forward/card anchors should keep the aggregation debounce'
+  );
+  assert.strictEqual(
+    preprocessor.getSessionDebounceMs({
+      messageType: 'group',
+      mentionedBot: true,
+      hasLongAggregationAnchor: false
+    }),
+    500,
+    '@bot group messages should keep the at-bot debounce'
+  );
+  assert.strictEqual(
+    preprocessor.getSessionDebounceMs({
+      messageType: 'private',
+      mentionedBot: false,
+      hasLongAggregationAnchor: false
+    }),
+    450,
+    'private chat should keep the private debounce'
+  );
+
+  const msg = makeMessage({
+    messageId: 'group-plain-question',
+    userId: 'group-user-1',
+    groupId: 'group-1',
+    messageType: 'group',
+    message: [{ type: 'text', data: { text: '这一句已经说完。' } }],
+    rawMessage: '这一句已经说完。'
+  });
+
+  const startedAt = Date.now();
+  const result = await preprocessor.handleMessage(msg, {});
+  const elapsed = Date.now() - startedAt;
+  assert.strictEqual(result.mode, 'ready');
+  assert.strictEqual(result.meta.flushReason, 'debounce');
+  assert.ok(elapsed < 450, `plain group text should flush near the short debounce cap, got ${elapsed}ms`);
+  assert.ok(result.meta.timing.scheduleDebounceMs <= 300);
+
+  const replyMsg = makeMessage({
+    messageId: 'group-reply-short',
+    userId: 'group-user-1',
+    groupId: 'group-1',
+    messageType: 'group',
+    message: [
+      { type: 'reply', data: { id: 'quoted-1' } },
+      { type: 'text', data: { text: ' 对。' } }
+    ],
+    rawMessage: '[CQ:reply,id=quoted-1]对。'
+  });
+  const replyStartedAt = Date.now();
+  const replyResult = await preprocessor.handleMessage(replyMsg, {});
+  const replyElapsed = Date.now() - replyStartedAt;
+  assert.strictEqual(replyResult.mode, 'ready');
+  assert.ok(replyElapsed < 450, `plain reply text should also use the short cap, got ${replyElapsed}ms`);
+}
+
 async function testImageRefsPreferCachedHandles() {
   const preprocessor = createContinuousMessagePreprocessor({
     enabled: true,
@@ -448,6 +531,7 @@ async function testReplyExpansionSkipsOfflineAndRecovers() {
 (async () => {
   await testImageThenTextMergesIntoOneTurn();
   await testPlainTextStillFlushesOnBaseDebounce();
+  await testRegularGroupPlainTextUsesShortDebounceCap();
   await testImageRefsPreferCachedHandles();
   await testMergedFlushKeepsLatestFreshnessToken();
   await testSentenceWindowWaitsForContinuation();

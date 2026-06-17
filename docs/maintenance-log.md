@@ -429,3 +429,12 @@
 - 最小修复：停止 runtime expression snapshot 的长期 style 写入；`relationship_reply_style` 不接受 profile readback；post-reply enrich gate 和 Profile Journal quality gate 统一拒绝 `runtime_inference/*Source`、跨字段 `relationship_*:`、`bot_persona_*` 夹带其他字段标签、`用户修正：relationship_*` 等结构化状态快照。
 - 实际验收：目标测试 `personaMemoryOutcomeLearning`、`postReplyEnrichQualityGate`、`profileJournalDb`、`memoryV3ProfileLifecycle` 通过；关闭 rerank/embedding 后复跑 `memoryV3StyleFacet`、`memoryV3RelationshipFacet` 通过；`data/memory-recall-observability.ndjson` 中 `1960901788` 有 1649 条观测、436 条含污染痕迹，最新慢样本 `req_b2b30fbc8e3e1e8b` 含 21 个 superseded/suppressed 污染项；真实 `data/profile_journal.sqlite` 最终 active 污染样本为 0，漏网样本 `m3v_2279c5300660ed60` 已为 rejected。
 - 小目标已完成：post-reply/profile maintenance 不再把结构化字段或自身输出回灌为长期 profile。
+
+## 运行维护 2026-06-17 08:57
+
+- 复查 `data/request-trace.ndjson` 中文件实际命中的 `recordedAt=2026-06-16T18:39:20Z/18:39:39Z/18:39:59Z/18:43:05Z/18:45:18Z` 五条群消息；严格按 `2026-06-16 18:39 +08:00` 对应的 `10:39Z` 未命中同组记录。
+- 结论：`message_ingress_lock_acquired.elapsedSinceRequestStartMs=15012-25767ms` 不是 `general` lane 排队；5 条 `queueWaitMs=0-1ms`、`inbound_wait_ms=0`，锁释放在 `finally`，入锁后 `activeGeneral=1/activeTotal=1`。
+- 根因：连续消息预处理在入站锁之前运行，当前 `.env` 为 `CONTINUOUS_MESSAGE_DEBOUNCE_MS=15000`、`CONTINUOUS_MESSAGE_MAX_HOLD_MS=25000`，普通群纯文本和普通引用文本也继承长聚合窗口。
+- 最小修复：新增 `CONTINUOUS_MESSAGE_GROUP_PLAIN_TEXT_DEBOUNCE_MS=2000` 默认上限；普通群、非 @bot、无图片/转发/卡片锚点时走短等待，图片/转发/卡片、@bot 和私聊仍保留原聚合策略。
+- 验收：目标 trace 聚合确认 5 条 `queueWaitMs=[1,1,0,1,0]`、`inboundWaitMs=[0,0,0,0,0]`；当前 `.env` 探针输出 `regular=2000, anchored=15000, atBot=12000, private=12000`；`node --check core\continuousMessagePreprocessor\index.js`、`node --check config\index.js`、`node tests\continuousMessagePreprocessor.test.js`、`node tests\continuousMessagePreprocessorDebounce.test.js`、`node tests\messageHandlerGroupConcurrency.test.js`、`node tests\messageHandlerInboundConcurrency.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。
+- 小目标已完成：普通群聊不会再因为锁前连续消息长窗口被固定放大到 15s+ 后才进入入站锁。
