@@ -28,18 +28,8 @@ function isAdminPromptContext(options = {}) {
     .filter(Boolean)
     .includes(userId);
 
-  // Admin prompts should only apply in private chat
-  if (isAdmin) {
-    const chatType = normalizeText(
-      options.chatType
-      || routeMeta.chatType
-      || routeMeta.chat_type
-    );
-    // Only return true if it's private chat or direct message
-    return chatType === 'private' || chatType === 'direct';
-  }
-
-  return false;
+  // Admin users always get admin prompt context, regardless of chat type
+  return isAdmin;
 }
 
 function isConfiguredAdminUser(options = {}) {

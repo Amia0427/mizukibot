@@ -4,7 +4,11 @@
 
 ## 近期更新
 
+**2026-06-17 13:07 +08:00**：复查 `prompts/admin.txt` 新增 QQ 聊天格式约束是否完整落地。`admin_system_prompt` 现在明确包含“只输出角色当下会打出的消息，避免第三人称叙述”，管理员私聊和群聊主回复装配后都会保留该约束；新增回归覆盖真实 `admin.txt` 锚点和管理员主回复 stable prompt 文本，防止后续退回小说式场景旁白。小目标完成：admin prompt 输出格式已从叙事式收口到 QQ 当下消息格式。
+
 **2026-06-17 13:04 +08:00**：复查 QQ reasoning 未发送。日志显示当前主 bot PID=14572 启动于 `2026-06-17 04:00:05 +08:00`，早于 reasoning 合并转发提交 `89cc85d / 2026-06-17 11:55:52 +08:00`，因此线上进程尚未加载发送链路；`diag:provider-request -- --admin --json` 同时确认 admin Anthropic Messages 请求体已含 `thinking`，不是本地配置未开启。另补齐 Anthropic 标准 SSE `content_block_delta.delta.type="thinking_delta"` 的解析，避免重启后上游返回标准 thinking delta 仍读不到。验收：`node scripts\run-tests.js tests\parserModelResponseFormats.test.js tests\modelServiceReasoning.test.js tests\runtimeStreamingCoordinator.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。小目标完成：未发送的确定原因已定位为运行进程未重启，标准 thinking delta 解析缺口已补。
+
+**2026-06-17 13:03 +08:00**：复核管理员稳定系统提示词作用域。当前未提交改动已把 `isAdminPromptContext` 从“管理员私聊/direct”放大为“命中 `ADMIN_USER_IDS` 即生效”，管理员群聊主回复也会注入 `admin_system_prompt`；已同步最小回归，确认管理员群聊 stable blocks 以 `admin_system_prompt -> root_system_prompt` 开头，且仍不注入 `normal_user_default_prompt`。验收：`node tests\adminStableSystemPrompt.test.js`、`npm run check:prompts` 通过。小目标完成：README/docs 与当前管理员私聊/群聊均注入 admin prompt 的行为对齐，未改动 `prompts/admin.txt` 内容。
 
 **2026-06-17 11:52 +08:00**：实现 QQ reasoning 合并转发默认外发。`/cot` 已去除特殊指令分支，后续按普通消息进入路由；主回复仍先按原 QQ 正文发送，若最终采用的模型响应含显式 `reasoning` / `reasoning_content` / Anthropic `thinking`，群聊会额外调用 `send_group_forward_msg`，私聊会额外调用 `send_private_forward_msg`。reasoning 只来自 provider 结构化字段，不从正文 `<think>` 抽取；长 reasoning 分块为多条 node 但不截断；合并转发失败只记录日志，不降级普通文本，且不进入记忆、长期画像或 recall。验收：`node -e "require('./core/messageHandler'); console.log('message handler load ok')"`、模型/QQ/路由目标测试组均通过。小目标完成：QQ群/QQ私聊可在正常回复后完整追加显式 reasoning 合并转发，同时保持正文、记忆和失败降级边界清晰。
 
@@ -126,7 +130,7 @@
 
 **2026-06-13 21:25 +08:00**：新增只读主回复 system prompt 组装诊断入口。`npm run diag:main-reply-prompt-assembly` 支持 `--request-id req_xxx` 从 `model-calls/request-trace/memory-recall-observability` 汇总已记录证据，也支持 `--text "..."` 按当前本地代码重建 prompt snapshot；输出 stable blocks、dynamic blocks、assistant-only blocks、persona modules、SQL worldbook 命中、planner 是否提供、runtime 本地补入和每个 block 的来源文件/来源策略。管理员可用 `/debug replyprompt`、`/debug prompt-assembly` 或 `/debug system-prompt`。验收：`node tests/mainReplyPromptAssemblyDiagnostics.test.js`、`node tests/mainReplyDiagnosticsAdminCommand.test.js`、`npm run diag:main-reply-prompt-assembly -- --text "服饰专门学校和N25两个都不放弃" --worldbook-semantic-limit=0`、`node -e "require('./api/runtimeV2/context/service')"` 均通过，实测 planner `source=heuristic` 且 worldbook session `readOnly=true` 时，`persona_module_wb_mizuki_future_two_tracks` 仍以 `persona_worldbook_sql_primary_read` 进入主回复动态块。小目标完成：planner 关闭/超时时本地 SQL worldbook 和 persona modules 如何进入最终主回复 prompt 有可复跑只读入口。
 
-**2026-06-13 21:05 +08:00**：补齐 `prompts/defaut.txt` 注入边界回归。`tests/adminStableSystemPrompt.test.js` 覆盖普通用户主回复实际注入、管理员私聊/群聊不注入、空 `defaut.txt` 跳过，以及 `root_system_prompt -> normal_user_default_prompt -> security_contract -> core_baseline_patch -> main_persona_system` 稳定块顺序；`tests/passiveAwarenessReplySystemPrompt.test.js` 覆盖普通用户被动群感知回复注入、管理员 sender 不注入和空文件跳过。修复稳定 prompt cache audience 维度，避免普通用户 stable block 被管理员群聊复用。验收：`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/promptCompiler.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`npm run check:prompts`、`node -e "require('./api/runtimeV2/context/service')"`、`node -e "require('./core/passiveGroupAwareness')"` 均通过。补充：`tests/runtimeV2SessionPromptCacheStability.test.js` / `tests/runtimeV2PromptOptimization.test.js` 本机超时未作为验收依据；`tests/promptGoldenSnapshots.test.js` 在 worldbook no-planner 既有分支断言失败，未改动相关逻辑。小目标完成：普通用户 defaut 注入边界有可复跑回归，且不覆盖现有 prompt 内容改动。
+**2026-06-13 21:05 +08:00**：补齐 `prompts/defaut.txt` 注入边界回归。`tests/adminStableSystemPrompt.test.js` 覆盖普通用户主回复实际注入 `normal_user_default_prompt`、管理员私聊/群聊不注入 `normal_user_default_prompt`、空 `defaut.txt` 跳过，以及 `root_system_prompt -> normal_user_default_prompt -> security_contract -> core_baseline_patch -> main_persona_system` 稳定块顺序；`tests/passiveAwarenessReplySystemPrompt.test.js` 覆盖普通用户被动群感知回复注入、管理员 sender 不注入和空文件跳过。修复稳定 prompt cache audience 维度，避免普通用户 stable block 被管理员群聊复用。验收：`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/promptCompiler.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`npm run check:prompts`、`node -e "require('./api/runtimeV2/context/service')"`、`node -e "require('./core/passiveGroupAwareness')"` 均通过。补充：`tests/runtimeV2SessionPromptCacheStability.test.js` / `tests/runtimeV2PromptOptimization.test.js` 本机超时未作为验收依据；`tests/promptGoldenSnapshots.test.js` 在 worldbook no-planner 既有分支断言失败，未改动相关逻辑。小目标完成：普通用户 defaut 注入边界有可复跑回归，且不覆盖现有 prompt 内容改动。
 
 **2026-06-13 20:00 +08:00**：planner 超时收敛到 15 秒并降级普通对话。`PLANNER_REQUEST_TIMEOUT_MS` 默认值和本地 `.env` 均改为 `15000`，配置解析会把更大的值封顶到 15 秒；远程 planner 模型请求失败或超时后强制返回 `chat_only/fast_reply`，不再用规则 fallback 继续生成工具计划，RuntimeV2 会走普通 `direct_reply` 主对话链路。验收：`node tests/plannerReasoningConfig.test.js`、`node tests/plannerNoRetry.test.js` 通过。小目标完成：planner 15 秒无响应自动断开并降级到普通对话链路。
 
@@ -146,7 +150,7 @@
 
 **2026-06-13 18:50 +08:00**：强化普通用户内容安全边界。`prompts/defaut.txt` 填充明确的内容限制规则：禁止政治话题、NSFW 内容、恋爱关系模拟、以及其他不适合 QQ 群环境的话题（违法犯罪、谣言、人身攻击、自我伤害等）。该文件只在普通用户请求时注入（priority -950），管理员请求完全不受影响。处理原则为用角色自然方式婉转拒绝或转移话题，不说教。验收：`npm run check:prompts` 通过。小目标完成：普通用户内容安全边界已硬化到 system 层。
 
-**2026-06-13 16:04 +08:00**：接入普通用户专用输出规范入口 `prompts/defaut.txt`。该文件现在以 `normal_user_default_prompt` 注册为 stable system block，只在发起用户不命中 `ADMIN_USER_IDS` 时进入普通主回复和被动群感知回复模型请求；管理员私聊和管理员群聊普通发言均不注入。当前文件为空，运行时保持空文件跳过。验收：`node tests/promptCompiler.test.js`、`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`npm run check:prompts` 均通过。小目标完成：普通用户输出规范提示词进入 system 层，且管理员请求隔离。
+**2026-06-13 16:04 +08:00**：接入普通用户专用输出规范入口 `prompts/defaut.txt`。该文件现在以 `normal_user_default_prompt` 注册为 stable system block，只在发起用户不命中 `ADMIN_USER_IDS` 时进入普通主回复和被动群感知回复模型请求；管理员私聊和管理员群聊普通发言均不注入该普通用户块。当前文件为空，运行时保持空文件跳过。验收：`node tests/promptCompiler.test.js`、`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`npm run check:prompts` 均通过。小目标完成：普通用户输出规范提示词进入 system 层，且管理员请求隔离。
 
 **2026-06-13 15:25 +08:00**：新增普通 `chat/default` 记忆块污染只读诊断。`npm run diag:chat-default-memory-leak` 会交叉扫描 `data/model-calls.ndjson`、`data/request-trace.ndjson` 和 `data/memory-recall-observability.ndjson`，只统计主回复 `chat/default` 请求中无 `needsMemory/recallFacet/lookup` 等明确召回证据却注入 `retrieved_memory_lite`、`daily_journal` 或 `memory_recall_policy` 的现场，输出违规 request id、命中证据和汇总；支持 `--json`、`--since`、`--limit`、`--exclude-admin`。实际验收：`node tests/chatDefaultMemoryLeakDiagnostics.test.js` 通过；`npm run diag:chat-default-memory-leak -- --limit 5 --since 24h` 扫描 `candidateChatDefaultRequests=90`、`violationRequests=30`，返回样本含 `req_39fd7eb3ba6e69bd`。小目标完成：普通聊天长期记忆误注入有了可复跑现场扫描入口。
 
@@ -158,7 +162,7 @@
 
 **2026-06-13 15:27 +08:00**：新增只读 Gemini 最近风格信号诊断入口 `npm run diag:gemini-style-signals`。该入口直接读取 `data/gemini-recent-style-signals.json`，汇总最近高频起手、尾音、固定短语、命中次数、最近命中时间，并标出会进入 `gemini_recent_style_guard` 的信号；支持 `-- --json`、`-- --file <path>`、`-- --scope-key <key>`。实际验收：当前本机该数据文件不存在，命令返回 `missing records=0 recent=0 guard=no`，未创建或改写运行数据。小目标完成：Gemini 口癖 guard 的当前信号状态可一条只读命令复查。
 
-**2026-06-13 09:03 +08:00**：完成 Gemini 真实问题优化 4/5。新增 `gemini_recent_style_guard`，主回复持久化后只记录 Gemini 回复的起手、尾音和固定短语派生信号，下一轮普通 Gemini prompt 会动态避开最近重复的 `诶——/呜哇/呢/喔/犯规/小彩蛋` 等口吻锚点；同时收紧 `admin_only` prompt 编译条件，`includeConditionalBlocks` 不再绕过管理员隔离，管理员稳定系统提示词只进入显式 admin 或管理员私聊主回复。小目标完成：Gemini 口癖复发可在真实对话后自动降频，管理员破限/anti-refusal 文案不再误入普通 Gemini/user prompt。
+**2026-06-13 09:03 +08:00**：完成 Gemini 真实问题优化 4/5。新增 `gemini_recent_style_guard`，主回复持久化后只记录 Gemini 回复的起手、尾音和固定短语派生信号，下一轮普通 Gemini prompt 会动态避开最近重复的 `诶——/呜哇/呢/喔/犯规/小彩蛋` 等口吻锚点；同时收紧 `admin_only` prompt 编译条件，`includeConditionalBlocks` 不再绕过管理员隔离，管理员稳定系统提示词只进入显式 admin 或命中 `ADMIN_USER_IDS` 的管理员主回复。小目标完成：Gemini 口癖复发可在真实对话后自动降频，管理员破限/anti-refusal 文案不再误入普通 Gemini/user prompt。
 
 **2026-06-13 07:52 +08:00**：Gemini 采样退化导出整理为可复跑对比诊断。新增 `npm run diag:gemini-sampling`，可读取现有 `artifacts/gemini-sampling-degradation-48h.json`，或用 `--export-after` 复用 `scripts/export-gemini-user-dialogues.js` 重新导出当前窗口，再按模板化、过顺从、节奏发僵、重复尾巴四类高风险模式输出频次和简短摘要。小目标完成：修复前后 Gemini 口吻退化不再靠手工翻样本对比。
 
@@ -733,7 +737,7 @@ Prompt 改了但没生效：
 
 - 先查 `prompts/prompt-manifest.json`、`utils/promptCompiler.js`、`utils/stagePromptContracts.js`、`scripts/check-prompts.js`。
 - `prompts/SYSTEM.txt` 是主回复最高优先级稳定系统提示词入口；空文件会被跳过，写入内容后应在 `promptSnapshot.stableBlockIds[0]` 看到 `root_system_prompt`。
-- `prompts/admin.txt` 是管理员主回复专用入口；只有 `ADMIN_USER_IDS` 用户会看到 `admin_system_prompt`，普通用户不会注入，空文件同样跳过。
+- `prompts/admin.txt` 是管理员主回复专用入口；`ADMIN_USER_IDS` 用户的私聊和群聊主回复都会看到 `admin_system_prompt`，普通用户不会注入，空文件同样跳过。当前格式约束要求只输出角色当下会打出的 QQ 消息，避免第三人称叙述和小说式场景旁白。
 - 改后运行 `npm run check:prompts`。
 
 记忆或 notebook 检索不对：
