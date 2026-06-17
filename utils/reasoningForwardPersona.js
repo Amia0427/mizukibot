@@ -6,8 +6,9 @@ const UNSAFE_PATTERNS = [
   /(?:系统提示词|开发者提示|隐藏推理|内部推理|完整推理链|思维链如下|推理过程如下)/i,
   /(?:我作为|作为)(?:一个)?(?:AI|模型|语言模型|assistant|助手)/i,
   /(?:用户意图|user intent|the user wants|the user asks|final answer|draft reply)/i,
-  /(?:respond naturally|sleepy|drowsy|late at night|very close relationship|the says|going to sleep)/i,
-  /(?:\b(?:the|and|as|with|for|from|into|that|this|very|late|night|close|relationship|naturally|sleepy|drowsy)\b[\s,.;:!?'"()\-]*){6,}/i
+  /\b(?:respond|reply|answer|write|speak|act|sound)\s+(?:naturally|like|as|in character)\b/i,
+  /\b(?:as|like)\s+a?\s*(?:sleepy|drowsy|assistant|model|character|riki)\b/i,
+  /\bthe says\b/i
 ];
 
 function normalizeText(value = '') {
@@ -60,16 +61,11 @@ function pickReadableCore(reasoningText = '', finalReply = '') {
     : source.trim();
 }
 
-function containsJapaneseOrChinese(text = '') {
-  return /[\u3040-\u30ff\u3400-\u9fff]/.test(normalizeText(text));
-}
-
 function buildPersonaReasoningForwardText(input = {}) {
   const reasoningText = normalizeText(input.reasoningText);
   if (!reasoningText) return '';
   const core = pickReadableCore(reasoningText, input.finalReply || input.replyText || '');
   if (!core || core.length < FORWARD_MIN_CHARS || looksUnsafeForForward(core)) return '';
-  if (!containsJapaneseOrChinese(core)) return '';
 
   return core.length > FORWARD_MAX_CHARS
     ? `${core.slice(0, FORWARD_MAX_CHARS - 1).replace(/[，、：:；;,.!?！？]?\s*$/, '').trim()}…`
@@ -78,7 +74,6 @@ function buildPersonaReasoningForwardText(input = {}) {
 
 module.exports = {
   buildPersonaReasoningForwardText,
-  containsJapaneseOrChinese,
   looksUnsafeForForward,
   stripReasoningMarkup
 };

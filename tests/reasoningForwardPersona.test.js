@@ -17,6 +17,17 @@ module.exports = (() => {
     'clean visible Chinese notes should be forwarded without a fixed prefix'
   );
 
+  const englishNote = 'A little sleepy, but that line still lands softly. Keep it quiet and warm.';
+  assert.strictEqual(
+    buildPersonaReasoningForwardText({
+      reasoningText: englishNote,
+      userText: '喜欢你 睡觉吗',
+      finalReply: '嗯……我也喜欢你。该睡了。'
+    }),
+    englishNote,
+    'clean visible English notes should also be forwarded without a fixed prefix'
+  );
+
   const leakedDirectorNote = 'The says "喜欢你" (I like you) and "睡觉吗" (going to sleep? ). It\'s late at night (23:02), and we have a very close relationship. respond naturally as a sleepy Riki who\'s touched but also drowsy.';
   assert.strictEqual(
     buildPersonaReasoningForwardText({
