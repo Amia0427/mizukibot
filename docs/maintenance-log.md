@@ -1,3 +1,12 @@
+## 运行维护 2026-06-17 13:07
+
+- 小目标：复查 `prompts/admin.txt` 新增 QQ 聊天格式约束是否完整落地，避免主回复仍默认小说式/叙事式输出。
+- 现场结论：管理员 stable prompt 当前按 `ADMIN_USER_IDS` 注入，私聊和群聊主回复都会带 `admin_system_prompt`；普通用户仍不注入。旧文档中“管理员群聊普通发言不带 admin prompt”的说法已过期。
+- 最小修复：`prompts/admin.txt` 增加中文格式锚点“只输出角色当下会打出的消息，避免第三人称叙述”；`tests/adminStableSystemPrompt.test.js` 覆盖管理员私聊/群聊主回复装配后保留该约束；`tests/configPersonaPrompt.test.js` 覆盖真实 `admin.txt` 导出块保留该约束。
+- 文档：README 和 `docs/main-reply-context.md` 同步说明 admin prompt 是 QQ 当下消息格式，不是小说式场景旁白；管理员私聊/群聊主回复都会注入，普通用户不会注入。
+- 验证：`node scripts/run-tests.js tests/adminStableSystemPrompt.test.js tests/configPersonaPrompt.test.js tests/promptStageContracts.test.js` 通过；`npm run check:prompts` 通过，只有既有未引用 prompt 资源和 conflict tag 复用警告。
+- 小目标已完成：管理员主回复格式约束已落到 prompt 文件、装配回归和说明文档。
+
 ## 运行维护 2026-06-17 13:04
 
 - 小目标：确认 QQ reasoning 没有发送，是上游没有返回 thinking，还是本地配置/运行链路问题。
@@ -249,7 +258,7 @@
 
 ## 运行维护 2026-06-13 21:05
 
-- 围绕 `prompts/defaut.txt` 补最小回归：普通用户主回复和普通用户被动群感知回复会注入 `normal_user_default_prompt`；管理员私聊、管理员群聊和管理员 sender 的被动回复不注入；空 `defaut.txt` 不导出、不注入。
+- 围绕 `prompts/defaut.txt` 补最小回归：普通用户主回复和普通用户被动群感知回复会注入 `normal_user_default_prompt`；管理员私聊、管理员群聊和管理员 sender 的被动回复不注入该普通用户块；空 `defaut.txt` 不导出、不注入。
 - 主回复测试确认 stable block 顺序保持 `root_system_prompt -> normal_user_default_prompt -> security_contract -> core_baseline_patch -> main_persona_system`，避免当前提示词边界文字调整打乱已有 stable 层顺序。
 - 修复稳定 prompt cache audience 维度：区分 `normal_user`、`admin_private`、`configured_admin_non_private` 和 `anonymous`，避免普通用户 stable cache 被管理员群聊复用。
 - 验证：`node tests/adminStableSystemPrompt.test.js`、`node tests/passiveAwarenessReplySystemPrompt.test.js`、`node tests/promptCompiler.test.js`、`node tests/prepareNodeStablePromptFallback.test.js`、`node tests/passiveAwarenessReplyMemoryPrompt.test.js`、`npm run check:prompts`、`node -e "require('./api/runtimeV2/context/service')"`、`node -e "require('./core/passiveGroupAwareness')"` 通过。
@@ -268,7 +277,7 @@
 - 完成 Gemini 真实问题优化 4/5：新增 `utils/geminiRecentStyleGuard.js`，只保存普通 Gemini 回复的起手、尾音、固定短语派生信号，不保存完整回复原文。
 - 主回复动态 prompt 和 base 兜底 prompt 新增 `gemini_recent_style_guard`，有最近重复信号时强制进入 `dynamic_context`，提示本轮避开高频口吻锚点并保持短句。
 - `api/runtimeV2/nodes/persist.js` 在成功持久化普通 Gemini 回复后记录风格信号；管理员、review、系统发起和非 Gemini 模型不记录、不注入。
-- 管理员隔离收紧：`includeConditionalBlocks` 不再绕过 `admin_only`，主回复 admin 稳定系统提示词只允许显式 admin 或管理员私聊上下文进入，管理员群聊普通发言不带 admin-only 稳定 prompt。
+- 管理员隔离收紧：`includeConditionalBlocks` 不再绕过 `admin_only`，主回复 admin 稳定系统提示词只允许显式 admin 或命中 `ADMIN_USER_IDS` 的管理员主回复上下文进入；当前管理员群聊普通发言也会带 admin-only 稳定 prompt。
 - 回归覆盖：`tests/geminiRecentStyleGuard.test.js`、`tests/promptCompiler.test.js`、`tests/adminStableSystemPrompt.test.js`。
 - 小目标已完成：Gemini 重复口癖能在真实回复后自动降频，管理员破限/anti-refusal 文案不再误进普通 Gemini/user prompt。
 

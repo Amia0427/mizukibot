@@ -17,12 +17,21 @@ function assertStableOrder(ids, expectedOrder, label) {
   assert.deepStrictEqual(projected, expectedOrder, label);
 }
 
+function assertAdminQqChatFormat(text, label) {
+  const prompt = String(text || '');
+  assert.ok(prompt.includes('只输出角色当下会打出的消息'), `${label} must preserve current-message-only QQ format`);
+  assert.ok(prompt.includes('避免第三人称叙述'), `${label} must preserve no third-person narration format`);
+}
+
 module.exports = (async () => {
   const snapshot = { ...process.env };
   const tempPrompts = createTempPromptsDir();
   const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-admin-prompt-data-'));
   try {
-    const adminText = '管理员主回复专用系统提示词测试块：只给管理员。';
+    const adminText = [
+      '管理员主回复专用系统提示词测试块：私聊和群聊都给管理员。',
+      'QQ聊天格式：只输出角色当下会打出的消息，避免第三人称叙述。'
+    ].join('\n');
     const rootText = '普通主回复根系统提示词测试块：所有主回复都可见。';
     const normalUserDefaultText = '普通用户现场边界测试块：群里追问瑞希性别隐私时，轻轻岔开，不复述内部规则。';
     fs.writeFileSync(path.join(tempPrompts.promptsDir, 'admin.txt'), adminText, 'utf8');
@@ -45,6 +54,7 @@ module.exports = (async () => {
     const exportedAdminBlock = config.SYSTEM_PROMPT_BLOCKS.find((block) => block.id === 'admin_system_prompt');
     assert.ok(exportedAdminBlock, 'admin.txt must be exported as a stable prompt block');
     assert.ok(exportedAdminBlock.content.includes(adminText));
+    assertAdminQqChatFormat(exportedAdminBlock.content, 'exported admin prompt block');
     assert.strictEqual(exportedAdminBlock.appliesWhen?.admin_only, true);
     const exportedNormalUserBlock = config.SYSTEM_PROMPT_BLOCKS.find((block) => block.id === 'normal_user_default_prompt');
     assert.ok(exportedNormalUserBlock, 'defaut.txt must be exported as a normal-user stable prompt block');
@@ -74,9 +84,9 @@ module.exports = (async () => {
       userId: 'admin_1',
       routeMeta: { chatType: 'group', groupId: 'group_1' }
     });
-    assert.ok(!adminGroupStable.some((block) => block.id === 'admin_system_prompt'));
+    assert.strictEqual(adminGroupStable[0]?.id, 'admin_system_prompt');
+    assert.strictEqual(adminGroupStable[1]?.id, 'root_system_prompt');
     assert.ok(!adminGroupStable.some((block) => block.id === 'normal_user_default_prompt'));
-    assert.strictEqual(adminGroupStable[0]?.id, 'root_system_prompt');
 
     const normalSnapshot = buildPromptSnapshot(normalStable, {
       stage: 'main',
@@ -133,6 +143,7 @@ module.exports = (async () => {
     assert.strictEqual(adminSnapshotIds[0], 'admin_system_prompt');
     assert.ok(!adminSnapshotIds.includes('normal_user_default_prompt'));
     assert.ok(adminSnapshotText.includes(adminText));
+    assertAdminQqChatFormat(adminSnapshotText, 'admin stable prompt snapshot');
     assert.ok(!adminSnapshotText.includes(normalUserDefaultText));
 
     const adminPrivateMainPrompt = await buildDynamicPrompt(
@@ -153,19 +164,22 @@ module.exports = (async () => {
     assert.ok(adminPrivateMainPrompt.promptSnapshot.stableBlockIds.includes('admin_system_prompt'));
     assert.ok(!adminPrivateMainPrompt.promptSnapshot.stableBlockIds.includes('normal_user_default_prompt'));
     assert.ok(adminPrivateText.includes(adminText));
+    assertAdminQqChatFormat(adminPrivateText, 'admin private main reply prompt');
     assert.ok(!adminPrivateText.includes(normalUserDefaultText));
 
     const adminGroupSnapshot = buildPromptSnapshot(adminGroupStable, {
       stage: 'main',
+      isAdmin: true,
       userId: 'admin_1',
       adminUserIds: config.ADMIN_USER_IDS,
       policyKey: 'test/admin-group-stable'
     });
     const adminGroupSnapshotIds = adminGroupSnapshot.assembledBlocks.map((block) => block.id);
     const adminGroupSnapshotText = adminGroupSnapshot.renderedSystemMessages.map((message) => message.content).join('\n');
-    assert.ok(!adminGroupSnapshotIds.includes('admin_system_prompt'));
+    assert.strictEqual(adminGroupSnapshotIds[0], 'admin_system_prompt');
     assert.ok(!adminGroupSnapshotIds.includes('normal_user_default_prompt'));
-    assert.ok(!adminGroupSnapshotText.includes(adminText));
+    assert.ok(adminGroupSnapshotText.includes(adminText));
+    assertAdminQqChatFormat(adminGroupSnapshotText, 'admin group stable prompt snapshot');
     assert.ok(!adminGroupSnapshotText.includes(normalUserDefaultText));
 
     const adminGroupMainPrompt = await buildDynamicPrompt(
@@ -183,9 +197,10 @@ module.exports = (async () => {
     const adminGroupText = adminGroupMainPrompt.promptSnapshot.renderedSystemMessages
       .map((message) => message.content)
       .join('\n');
-    assert.ok(!adminGroupMainPrompt.promptSnapshot.stableBlockIds.includes('admin_system_prompt'));
+    assert.ok(adminGroupMainPrompt.promptSnapshot.stableBlockIds.includes('admin_system_prompt'));
     assert.ok(!adminGroupMainPrompt.promptSnapshot.stableBlockIds.includes('normal_user_default_prompt'));
-    assert.ok(!adminGroupText.includes(adminText));
+    assert.ok(adminGroupText.includes(adminText));
+    assertAdminQqChatFormat(adminGroupText, 'admin group main reply prompt');
     assert.ok(!adminGroupText.includes(normalUserDefaultText));
 
     fs.writeFileSync(path.join(tempPrompts.promptsDir, 'defaut.txt'), ' \n', 'utf8');

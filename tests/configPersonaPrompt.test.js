@@ -78,6 +78,8 @@ function estimatePromptTokens(value) {
     assert.ok(rootBlock.content.includes('主回复根系统提示词测试块：最高优先级。'));
     assert.ok(adminBlock, 'admin_system_prompt block must be exported when admin.txt is non-empty');
     assert.strictEqual(adminBlock.authority, 'system_root');
+    assert.ok(adminBlock.content.includes('只输出角色当下会打出的消息'), 'admin.txt must keep QQ current-message-only output format');
+    assert.ok(adminBlock.content.includes('避免第三人称叙述'), 'admin.txt must keep no third-person narration output format');
     assert.ok(personaBlock, 'main_persona_system block must be exported');
     const tempRootSystemText = fs.readFileSync(path.join(config.PROMPTS_DIR, 'SYSTEM.txt'), 'utf8').trim();
     assert.ok(tempRootSystemText, 'SYSTEM.txt must not be empty');
