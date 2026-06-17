@@ -499,3 +499,11 @@
 - 最小修复：新增 `CONTINUOUS_MESSAGE_GROUP_PLAIN_TEXT_DEBOUNCE_MS=2000` 默认上限；普通群、非 @bot、无图片/转发/卡片锚点时走短等待，图片/转发/卡片、@bot 和私聊仍保留原聚合策略。
 - 验收：目标 trace 聚合确认 5 条 `queueWaitMs=[1,1,0,1,0]`、`inboundWaitMs=[0,0,0,0,0]`；当前 `.env` 探针输出 `regular=2000, anchored=15000, atBot=12000, private=12000`；`node --check core\continuousMessagePreprocessor\index.js`、`node --check config\index.js`、`node tests\continuousMessagePreprocessor.test.js`、`node tests\continuousMessagePreprocessorDebounce.test.js`、`node tests\messageHandlerGroupConcurrency.test.js`、`node tests\messageHandlerInboundConcurrency.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。
 - 小目标已完成：普通群聊不会再因为锁前连续消息长窗口被固定放大到 15s+ 后才进入入站锁。
+
+## 运行维护 2026-06-17 19:24
+
+- 生成本地可发行源码副本：`D:\mizuki_release`。
+- 发行范围：以 Git 跟踪源码为基准，保留运行/构建源码、脚本、测试、文档、示例配置和锁文件；排除 `.git`、`.claude`、`.playwright-mcp`、`artifacts`、`data`、`node_modules`、`.env`、运行 `.pid/.lock`、`deploy/runtime` 和 `*.bak`。
+- 脱敏处理：发行副本内 `api/napcatHttpActionClient.js` 的硬编码 NapCat HTTP action secret 改为从 `NAPCAT_HTTP_ACTION_SECRET` / `config.NAPCAT_HTTP_ACTION_SECRET` 读取占位；源项目运行文件未改动。
+- 验收：目标目录为空后写入；执行发行副本文件计数、排除路径检查、敏感模式扫描、`npm run check:secrets` 和 `git status --short`。
+- 小目标已完成：可发行源码副本已落到 `D:\mizuki_release`，不携带本机敏感数据和运行态数据。
