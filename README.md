@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-17 22:49 +08:00**：继续验证 `gcli.ggchan.dev` 是否支持透出 reasoning 字段。结论：站点本身支持，`gemini-2.5-pro-maxthinking` 真实请求会返回 `choices[].message.reasoning_content`；但当前普通主回复模型 `gemini-3-flash-preview` 和 `gemini-2.5-pro-nothinking` 都只返回 `content/role`，无可转发 reasoning。`/v1/models` 可列出 thinking/nothinking 模型，`/v1/responses` 当前 404。小目标完成：不会显示思维链的根因收敛为当前普通主回复模型不透出 reasoning，不是 gcli 全站不支持，也不是本地解析缺字段。
+
 **2026-06-17 22:36 +08:00**：修复 `restart-bot.cmd restart confirm` 对 post-reply worker 的健康误判。根因是脚本最终健康检查只认 `.mizukibot-postreply-worker.pid`，重启窗口里 worker 进程已启动但 pid 文件尚未稳定落盘时会误报 `bot/worker not healthy after start attempt`。现 worker 健康检查会扫描真实 `node scripts/post-reply-worker.js` 并回写 pid 文件。验收：`node tests\restartBotScript.test.js`、PowerShell payload parse、`cmd /c restart-bot.cmd status` 通过。小目标完成：重启脚本不再因 worker pid 文件短暂缺失误判失败。
 
 **2026-06-17 22:26 +08:00**：完成普通用户模型推理链路真实请求诊断。普通主回复当前走 `gcli.ggchan.dev / gemini-3-flash-preview / openai_compatible`，请求体会携带 `reasoning_effort=medium`；真实逻辑题 `medium` 与 `off` 对照均 200 且答出 `B`，但上游响应没有显式 `reasoning/reasoning_content` 字段，因此 QQ reasoning 没有可转发来源。结论：普通主回复不是本地没开思考，也没有证据说明模型完全无推理能力；`normal_fast_reply` 另有代码显式 `reasoningEffort: off`，这是快速链路设计边界。详见 `docs/normal-user-reasoning-request-diagnosis-2026-06-17.md`。
