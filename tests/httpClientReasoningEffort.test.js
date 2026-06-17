@@ -64,6 +64,9 @@ module.exports = (async () => {
       messages: [{ role: 'user', content: 'hi' }],
       max_tokens: 900,
       reasoning_effort: 'high',
+      temperature: 0.7,
+      top_p: 0.9,
+      top_k: 40,
       stream: false
     });
     assert.strictEqual(anthropicPrepared.provider, 'anthropic');
@@ -73,8 +76,38 @@ module.exports = (async () => {
       type: 'enabled',
       budget_tokens: 1024
     });
+    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPrepared.requestBody, 'temperature'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPrepared.requestBody, 'top_p'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPrepared.requestBody, 'top_k'));
     assert.ok(!Object.prototype.hasOwnProperty.call(anthropicPrepared.requestBody, '__originalMaxTokens'));
     assert.ok(!Object.keys(anthropicPrepared.requestBody).includes('__originalMaxTokens'));
+
+    const anthropicThinkingToolChoicePrepared = await httpClient.prepareRequest('https://api.anthropic.com/v1/messages', {
+      model: 'claude-sonnet-4-5',
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 900,
+      reasoning_effort: 'high',
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'lookup_memory',
+            description: 'lookup',
+            parameters: { type: 'object', properties: {} }
+          }
+        }
+      ],
+      tool_choice: {
+        type: 'function',
+        function: { name: 'lookup_memory' }
+      },
+      stream: false
+    });
+    assert.deepStrictEqual(anthropicThinkingToolChoicePrepared.requestBody.thinking, {
+      type: 'enabled',
+      budget_tokens: 1024
+    });
+    assert.deepStrictEqual(anthropicThinkingToolChoicePrepared.requestBody.tool_choice, { type: 'auto' });
 
     const anthropicAdaptivePrepared = await httpClient.prepareRequest('https://api.anthropic.com/v1/messages', {
       model: 'claude-opus-4-6-thinking',
@@ -85,10 +118,27 @@ module.exports = (async () => {
     });
     assert.strictEqual(anthropicAdaptivePrepared.provider, 'anthropic');
     assert.deepStrictEqual(anthropicAdaptivePrepared.requestBody.thinking, {
+      type: 'enabled',
+      budget_tokens: 1024
+    });
+    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicAdaptivePrepared.requestBody, '__originalMaxTokens'));
+
+    process.env.ANTHROPIC_ADAPTIVE_THINKING_ENABLED = 'true';
+    clearProjectCache();
+    const httpClientWithAdaptiveThinking = require('../api/httpClient');
+    const explicitAdaptivePrepared = await httpClientWithAdaptiveThinking.prepareRequest('https://api.anthropic.com/v1/messages', {
+      model: 'claude-opus-4-6-thinking',
+      messages: [{ role: 'user', content: 'hi' }],
+      max_tokens: 900,
+      reasoning_effort: 'high',
+      stream: false
+    });
+    assert.deepStrictEqual(explicitAdaptivePrepared.requestBody.thinking, {
       type: 'adaptive'
     });
-    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicAdaptivePrepared.requestBody.thinking, 'budget_tokens'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(anthropicAdaptivePrepared.requestBody, '__originalMaxTokens'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(explicitAdaptivePrepared.requestBody.thinking, 'budget_tokens'));
+    delete process.env.ANTHROPIC_ADAPTIVE_THINKING_ENABLED;
+    clearProjectCache();
 
     let attemptCount = 0;
     let firstAttemptBody = null;

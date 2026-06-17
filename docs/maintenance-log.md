@@ -1,3 +1,11 @@
+## 运行维护 2026-06-17 10:04
+
+- 小目标：修复用户指出的 Anthropic Prompt Caching “只写不读”问题，确保第三方 `/v1/messages` 请求不把动态尾部反复写成新缓存。
+- 现场结论：`data/model-calls.ndjson` 中 `cc-coding.cn / claude-opus-4-6-thinking` 多次连续出现 `cache_creation_input_tokens=7049` 且 `cache_read_input_tokens=0`；命中样本的 `estimated_system_tokens` 为 6618，后续只写样本变为 7124/7779/8770，说明缓存前缀不稳定。上一轮 `thinking.type=adaptive` 也增加了第三方网关不读缓存的兼容风险。
+- 最小修复：Anthropic 原生请求不再发送顶层 `cache_control`，自动缓存只在明确稳定 system 文本上打块级断点；动态-only system / messages 不再写缓存；`ANTHROPIC_ADAPTIVE_THINKING_ENABLED=false` 默认关闭 adaptive thinking，`claude-opus-4-6-thinking` 默认回到 `enabled + budget_tokens`；thinking 开启时移除 `temperature/top_p/top_k`；thinking + tools 时强制工具选择规范为 `tool_choice: { type: "auto" }`。
+- 验证：`node scripts/run-tests.js tests/httpClientAnthropicPromptCache.test.js tests/httpClientReasoningEffort.test.js` 通过；完整相关集 `providerRequestNormalization/httpClientAnthropicPromptCache/anthropicAssistantContextOrdering/plannerV2Protocol/mainModelGenerationParams/httpClientReasoningEffort/openAIMainPromptCacheDualProtocol` 通过；`npm run diag:provider-request -- --admin --json` 显示 admin Anthropic 请求体 keys 不含顶层 `cache_control` / `temperature` / `top_p` / `top_k`，thinking 为 `enabled + budget_tokens`，Prompt Caching 断点只剩稳定块。
+- 小目标已完成：缓存断点回到稳定前缀，避免每轮动态内容只创建不读取。
+
 ## 运行维护 2026-06-17 09:18
 
 - 小目标：继续确认 2026-06-17 00:46、02:19 +08:00 为什么仍出现 `expected_shutdown` 后 daemon 重拉，并安全收掉夜间误重启链路。

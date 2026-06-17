@@ -1,4 +1,5 @@
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -31,6 +32,13 @@ function countRequestCacheControl(body = {}) {
     + countCacheControl(body.messages);
 }
 
+function hashObject(value) {
+  return crypto
+    .createHash('sha256')
+    .update(JSON.stringify(value))
+    .digest('hex');
+}
+
 module.exports = (async () => {
   const snapshot = { ...process.env };
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-anthropic-prompt-cache-'));
@@ -41,11 +49,14 @@ module.exports = (async () => {
     process.env.DATA_DIR = tempDir;
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.ANTHROPIC_BETA = 'tools-2024-04-04';
+    process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
+    process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
     clearProjectCache();
     axios = require('axios');
     originalPost = axios.post;
 
     const httpClient = require('../api/httpClient');
+    const config = require('../config');
     const {
       listRecentModelCalls,
       flushModelCallLogsSync,
@@ -126,8 +137,8 @@ module.exports = (async () => {
     assert.ok(!prepared.requestBody.system);
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'input'));
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'prompt_cache_key'));
-    assert.ok(countRequestCacheControl(prepared.requestBody) <= 4);
-    assert.strictEqual(prepared.requestHeaders['anthropic-beta'], 'tools-2024-04-04,prompt-caching-2024-07-31');
+    assert.strictEqual(countRequestCacheControl(prepared.requestBody), 0);
+    assert.strictEqual(prepared.requestHeaders?.['anthropic-beta'], undefined);
 
     const preparedDynamicOnly = await httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
@@ -150,10 +161,10 @@ module.exports = (async () => {
     assert.ok(!preparedDynamicOnly.requestBody.system || Array.isArray(preparedDynamicOnly.requestBody.system));
     assert.ok(preparedDynamicOnly.requestBody.messages.every((item) => (
       contentParts(item).length === 0
-      || contentParts(item).every((block) => block.cache_control?.type === 'ephemeral' || !('cache_control' in block))
+      || contentParts(item).every((block) => !('cache_control' in block))
     )));
-    assert.strictEqual(preparedDynamicOnly.requestBody.cache_control?.type, 'ephemeral');
-    assert.strictEqual(preparedDynamicOnly.requestHeaders['anthropic-beta'], 'tools-2024-04-04,prompt-caching-2024-07-31');
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedDynamicOnly.requestBody, 'cache_control'));
+    assert.strictEqual(preparedDynamicOnly.requestHeaders?.['anthropic-beta'], undefined);
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedDynamicOnly.requestBody, 'prompt_cache_key'));
 
     const preparedStableSystem = await httpClient.prepareRequest('https://example.com/v1/messages', {
@@ -193,9 +204,78 @@ module.exports = (async () => {
     });
     assert.ok(preparedStableSystem.requestBody.system.some((block) => block.cache_control?.type === 'ephemeral'));
     assert.ok(preparedStableSystem.requestBody.tools.some((tool) => tool.cache_control?.type === 'ephemeral'));
-    assert.strictEqual(preparedStableSystem.requestBody.cache_control?.type, 'ephemeral');
+    assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody, 'cache_control'));
     assert.ok(countRequestCacheControl(preparedStableSystem.requestBody) <= 4);
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody, 'prompt_cache_key'));
+
+    const buildStableWithDynamic = (dynamicText) => httpClient.prepareRequest('https://example.com/v1/messages', {
+      model: 'claude-3-5-sonnet-latest',
+      messages: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'text',
+              text: 'stable root',
+              cache_control: { type: 'ephemeral', ttl: '5m' }
+            }
+          ]
+        },
+        {
+          role: 'system',
+          content: `[Affinity]\n${dynamicText}`
+        },
+        {
+          role: 'user',
+          content: dynamicText
+        }
+      ],
+      stream: false
+    });
+    const stableWithDynamicA = await buildStableWithDynamic('turn A');
+    const stableWithDynamicB = await buildStableWithDynamic('turn B');
+    const cachedSystemA = stableWithDynamicA.requestBody.system.filter((block) => block.cache_control?.type === 'ephemeral');
+    const cachedSystemB = stableWithDynamicB.requestBody.system.filter((block) => block.cache_control?.type === 'ephemeral');
+    assert.deepStrictEqual(cachedSystemA.map(hashObject), cachedSystemB.map(hashObject));
+    assert.strictEqual(cachedSystemA.length, 1);
+    assert.ok(stableWithDynamicA.requestBody.messages.every((message) => (
+      contentParts(message).every((block) => !('cache_control' in block))
+    )));
+    assert.ok(!Object.prototype.hasOwnProperty.call(stableWithDynamicA.requestBody, 'cache_control'));
+
+    const stableSystemText = String(
+      (Array.isArray(config.SYSTEM_PROMPT_BLOCKS)
+        ? config.SYSTEM_PROMPT_BLOCKS.find((block) => String(block?.content || '').trim())?.content
+        : '')
+      || config.SYSTEM_PROMPT
+      || ''
+    ).trim();
+    assert.ok(stableSystemText);
+    const rootStablePrepared = await httpClient.prepareRequest('https://example.com/v1/messages', {
+      model: 'claude-3-5-sonnet-latest',
+      messages: [
+        {
+          role: 'system',
+          content: stableSystemText
+        },
+        {
+          role: 'system',
+          content: '[CurrentConversation]\nvolatile'
+        },
+        {
+          role: 'user',
+          content: 'latest turn'
+        }
+      ],
+      stream: false
+    });
+    assert.ok(rootStablePrepared.requestBody.system.some((block) => (
+      String(block.text || '') === stableSystemText
+      && block.cache_control?.type === 'ephemeral'
+    )));
+    assert.ok(rootStablePrepared.requestBody.messages.every((message) => (
+      contentParts(message).every((block) => !('cache_control' in block))
+    )));
 
     const preparedTooManyBreakpoints = await httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
@@ -342,15 +422,10 @@ module.exports = (async () => {
     assert.strictEqual(loggedCall.usage.cache_creation_input_tokens, 2);
 
     attemptCount = 0;
-    const automaticDowngradeBodies = [];
+    const topLevelStrippedBodies = [];
     axios.post = async (_url, body, options = {}) => {
-      automaticDowngradeBodies.push({ body, headers: options.headers });
+      topLevelStrippedBodies.push({ body, headers: options.headers });
       attemptCount += 1;
-      if (attemptCount === 1) {
-        const error = new Error('top-level cache_control unsupported');
-        error.response = { status: 400, data: { error: { message: 'Unknown field cache_control' } } };
-        throw error;
-      }
       return {
         data: {
           type: 'message',
@@ -371,13 +446,13 @@ module.exports = (async () => {
         },
         { role: 'user', content: 'hello' }
       ],
+      cache_control: true,
       stream: false
     }, 0, 'test-key');
-    assert.strictEqual(attemptCount, 2);
-    assert.strictEqual(automaticDowngradeBodies[0].body.cache_control?.type, 'ephemeral');
-    assert.ok(!Object.prototype.hasOwnProperty.call(automaticDowngradeBodies[1].body, 'cache_control'));
-    assert.ok(automaticDowngradeBodies[1].body.system.some((block) => block.cache_control?.type === 'ephemeral'));
-    assert.ok(automaticDowngradeBodies[1].headers['anthropic-beta'].includes('prompt-caching-2024-07-31'));
+    assert.strictEqual(attemptCount, 1);
+    assert.ok(!Object.prototype.hasOwnProperty.call(topLevelStrippedBodies[0].body, 'cache_control'));
+    assert.ok(topLevelStrippedBodies[0].body.system.some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(topLevelStrippedBodies[0].headers['anthropic-beta'].includes('prompt-caching-2024-07-31'));
 
     attemptCount = 0;
     axios.post = async (_url, body, options = {}) => {
