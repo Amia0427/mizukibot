@@ -524,3 +524,12 @@
 - 范围控制：未改 QQ 空间登录、cookie/gtk、权限路由、NapCat 连接、自动发布开关默认安全策略。
 - 验收：`node --check api\qzoneAgentService.js; node --check api\qzoneDiaryService\index.js; node --check core\qzoneGenerationPhase2.js; node --check api\qzoneClient.js; node --check config\index.js; node --check tests\qzoneClient.test.js`、`node tests\qzoneClient.test.js`、`node tests\qzoneAgentService.test.js`、`node tests\qzoneGenerationPhase2.test.js`、`node tests\qzoneDiaryServicePhase2.test.js`、`node tests\qqActionService.test.js` 通过。
 - 小目标已完成：QQ 空间内容和自动发布节奏更接近真人发说说，同时保留原有安全/权限边界。
+
+## 运行维护 2026-06-17 20:05
+
+- 检查并开启 QQ 空间发送运行开关。
+- 现场结论：main bot 和 post-reply worker 已运行；开启前 `QZONE_AUTO_PUBLISH_ENABLED=false`、`SCHEDULER_RUNTIME_ENABLED=false`，`QZONE_COOKIE`/`QZONE_UIN` 未手动配置，但 NapCat HTTP action 可取到 `qzone.qq.com` 凭据且含 skey。
+- 最小修复：通过 `node scripts/set-env.js QZONE_AUTO_PUBLISH_ENABLED true SCHEDULER_RUNTIME_ENABLED true` 写入 `.env`，再执行 `restart-bot.cmd restart confirm` 让配置生效。
+- 范围控制：未开启 `DAILY_SHARE_ENABLED`/`TICK_ENGINE_ENABLED`；原因是 daily share 总开关会连带恢复 `1083095371`、`1092700300` 两个已启用群的自动分享，本次只开启 QQ 空间自动发布/预约发送边界。
+- 验收：`restart-bot.cmd status` 显示 main bot PID `30364`、post-reply worker PID `31184` 正常运行且无诊断残留 Node 进程；配置探针显示 `QZONE_AUTO_PUBLISH_ENABLED=true`、`SCHEDULER_RUNTIME_ENABLED=true`；NapCat 凭据探针显示登录信息可用、QZone credentials 可用且含 skey；`data\bot-main-runtime-state.json` 有新 heartbeat。
+- 小目标已完成：预约/自动发布型 QQ 空间发送已允许真实提交，同时没有放大到群 daily share 自动发言。
