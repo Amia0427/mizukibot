@@ -1,3 +1,11 @@
+## 运行维护 2026-06-17 13:18
+
+- 小目标：排查 `restart-bot.cmd` 看起来有问题的原因，避免误把安全跳过或残留测试进程当成重启失败。
+- 现场结论：当前主 bot `pid=14572`、post-reply worker `pid=25864` 正常运行；裸 `restart` 因缺少确认会按设计跳过，不会停启；状态页还把残留 `messageHandlerCotSource.test.js` 测试 Node 进程混进了原 `Matching Node Processes`。
+- 最小修复：保留 `restart confirm` 才真实重启的安全语义；未确认 `restart` 输出精确下一步 `restart-bot.cmd restart confirm` / `MIZUKI_RESTART_CONFIRM=1`；状态输出拆成 `Bot Node Processes` 和 `Other Related Node Processes (diagnostic only)`，真实 bot 只按运行态 PID 列出。
+- 验证：`node tests\restartBotScript.test.js` 通过；`restart-bot.cmd` PowerShell payload parse 通过；实际 `cmd /c restart-bot.cmd status` 显示 main bot/worker 单独列出，残留测试进程只在 diagnostic only；实际 `cmd /c restart-bot.cmd restart` 仅提示确认要求，`.mizukibot.lock` 仍为 `14572`。
+- 小目标已完成：重启脚本不再把“安全未确认”和“无关 Node 进程”伪装成脚本故障。
+
 ## 运行维护 2026-06-17 13:07
 
 - 小目标：复查 `prompts/admin.txt` 新增 QQ 聊天格式约束是否完整落地，避免主回复仍默认小说式/叙事式输出。
