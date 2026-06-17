@@ -6,6 +6,7 @@ module.exports = (() => {
   const preprocessor = createContinuousMessagePreprocessor({
     enabled: true,
     debounceMs: 15000,
+    groupPlainTextDebounceMs: 2000,
     atBotDebounceMs: 12000,
     privateDebounceMs: 12000,
     maxHoldMs: 25000
@@ -31,8 +32,14 @@ module.exports = (() => {
 
   assert.strictEqual(
     preprocessor.getSessionDebounceMs({ messageType: 'group', mentionedBot: false }),
+    2000,
+    'regular group plain text debounce should be capped separately from aggregation anchors'
+  );
+
+  assert.strictEqual(
+    preprocessor.getSessionDebounceMs({ messageType: 'group', mentionedBot: false, hasLongAggregationAnchor: true }),
     15000,
-    'regular group debounce should remain unchanged'
+    'regular group image/forward/card debounce should keep the aggregation window'
   );
 
   console.log('continuousMessagePreprocessorDebounce.test.js passed');
