@@ -20,7 +20,8 @@ module.exports = (() => {
   assert.ok(prompt.includes('不要输出完整推理链'), 'prompt should forbid full chain-of-thought');
   assert.ok(prompt.includes('模型自述'), 'prompt should forbid model self-description');
   assert.ok(prompt.includes('短暂想法'), 'prompt should anchor the visible short inner-note style');
-  assert.ok(prompt.includes('优先使用中文'), 'prompt should prefer Chinese visible notes');
+  assert.ok(prompt.includes('中文或英文都可以'), 'prompt should allow clean Chinese or English visible notes');
+  assert.ok(prompt.includes('导演提示'), 'prompt should reject director-style analysis');
   assert.ok(prompt.includes('不要添加固定开场白'), 'prompt should forbid fixed filler prefixes');
   assert.ok(prompt.includes('不要复述主回复'), 'prompt should avoid duplicating the final reply');
 
