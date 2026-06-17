@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-17 19:31 +08:00**：刷新发行版 `.env.example`。旧模板只覆盖 NapCat、异步入口、planner 和 TLS 少量开关，已跟当前配置入口脱节；现按“可启动必需 + 常用高价值开关”重写为分组模板，覆盖主/管理员模型、NapCat HTTP reverse secret、Web 面板、并发队列、连续消息、planner/tools、图片/记忆、MemOS/OpenViking、被动感知、post-reply、可选集成和诊断守护。所有密钥/Token/真实端点均保持空值或 `placeholder`，并同步到 `D:\mizuki_release\.env.example`。验收：源模板与发行模板重复键检查均为 255 个唯一键，敏感模式扫描无命中。小目标完成：发行版环境变量模板不再明显过时，且不携带真实 `.env` 数据。
+
 **2026-06-17 19:24 +08:00**：生成本地可发行源码副本到 `D:\mizuki_release`。发行清单以 Git 跟踪源码为基准，排除 `.git`、`.claude`、`.playwright-mcp`、`artifacts`、`data`、`node_modules`、`.env`、运行 `.pid/.lock`、`deploy/runtime` WireGuard 私钥配置和 prompt 备份；保留 `.env.example` / `.env.skills.example` / `deploy/network/*.example`。发行副本内已将 `api/napcatHttpActionClient.js` 的硬编码 NapCat HTTP action secret 改为环境变量读取占位，源项目运行文件未改动。验收：目标目录文件数、排除目录缺失检查、敏感模式扫描、`npm run check:secrets` 和 `git status --short` 均已执行。小目标完成：`D:\mizuki_release` 可作为不携带本机敏感数据的发行源码副本。
 
 **2026-06-17 13:28 +08:00**：修复 `restart-bot.cmd restart confirm` 成功但当前窗口静默、容易被误判为失败的问题。现场复现：第一次确认重启实际把 main bot 从 `14572` 换到 `43180`、worker 从 `25864` 换到 `36056`，但命令无输出；现确认重启成功后会在当前控制台追加最终 status，显示停止的旧 PID、daemon 触发结果、新 main bot / worker PID 和健康状态。验收：`node tests\restartBotScript.test.js`、PowerShell payload parse 通过；实际 `cmd /c restart-bot.cmd restart confirm` 输出最终状态并把 main bot 切到 `39404`、worker 切到 `1644`；`127.0.0.1:3002` 监听 owner 为 `39404`。小目标完成：确认重启不再是“静默成功看起来失败”。
