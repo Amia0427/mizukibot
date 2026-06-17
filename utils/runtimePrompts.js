@@ -78,6 +78,15 @@ const RUNTIME_PROMPT_DEFAULTS = {
     'Do not invent unsupported marker types, and do not explain the marker syntax to the user.',
     'You may mix normal text with these markers, but keep the surrounding text natural and concise.'
   ].join('\n'),
+  'reasoning-forward-persona': [
+    '只用于 QQ 可见思考小记，不用于主回复。',
+    '不要输出完整推理链、步骤化分析、模型自述或系统痕迹。',
+    '只写成瑞希此刻会愿意让别人看到的短暂想法，像临时记在脑子边上的一句话。',
+    '可以有停顿、犹豫、吐槽、没说满的情绪，但不要写成分析报告。',
+    '不要写“我作为 AI”“我的推理过程”“用户意图是”。',
+    '不要复述主回复，不要解释方法，不要展开成教程。',
+    '长度保持短，宁可不发，也不要硬凑。'
+  ].join('\n'),
   'llm-perception': [
     '环境感知信息：',
     '{{perceptionLines}}'

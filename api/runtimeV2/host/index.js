@@ -1450,6 +1450,7 @@ function createRuntime(options = {}) {
     options.persistedReplyText = String(out?.output?.persistedReplyText || out?.output?.finalReply || out?.output?.draftReply || '').trim();
     options.displayReplyText = String(out?.output?.displayReply || '').trim();
     options.reasoningText = String(out?.output?.reasoningText || '').trim();
+    options.reasoningForwardText = String(out?.output?.reasoningForwardText || '').trim();
 
     const rawReply = out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '';
     const sanitized = sanitizeUserFacingText(rawReply, {

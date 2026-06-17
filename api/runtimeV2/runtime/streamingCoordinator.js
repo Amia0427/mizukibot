@@ -23,6 +23,9 @@ const {
   buildMainReplyDegenerationRepairInstruction,
   trimMainReplyDegeneratedTail
 } = require('../../../utils/mainReplyDegenerationGuard');
+const {
+  buildPersonaReasoningForwardText
+} = require('../../../utils/reasoningForwardPersona');
 
 function normalizeObject(value, fallback = {}) {
   return value && typeof value === 'object' ? value : fallback;
@@ -365,9 +368,15 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       if (shouldEmitFinalOnce && typeof request.onDelta === 'function' && safeFinalReply) {
         request.onDelta(safeFinalReply, safeFinalReply);
       }
+      const reasoningForwardText = buildPersonaReasoningForwardText({
+        reasoningText,
+        userText: request.question,
+        finalReply: safeFinalReply
+      });
       return {
         finalReply: safeFinalReply,
         reasoningText,
+        reasoningForwardText,
         hasSafetyRestriction,
         humanizerTimedOut,
         humanizerFailed,

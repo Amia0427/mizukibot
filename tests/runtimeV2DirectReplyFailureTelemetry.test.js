@@ -672,7 +672,7 @@ module.exports = (async () => {
         finalReply: 'streamed final',
         persistedText: 'streamed final',
         visibleText: 'streamed final',
-        reasoningText: 'streamed reasoning',
+        reasoningText: 'streamed reasoning that has enough natural detail for a visible note',
         stream: { hadOutput: true, completed: true, fallbackToNonStream: false, mode: 'direct' }
       };
     },
@@ -732,7 +732,11 @@ module.exports = (async () => {
     plan: {}
   });
   assert.strictEqual(reasoningResult.output.finalReply, 'streamed final');
-  assert.strictEqual(reasoningResult.output.reasoningText, 'streamed reasoning');
+  assert.strictEqual(reasoningResult.output.reasoningText, 'streamed reasoning that has enough natural detail for a visible note');
+  assert.ok(
+    String(reasoningResult.output.reasoningForwardText || '').includes('visible note'),
+    'direct reply output should carry persona reasoning forward text'
+  );
 
   const directReplyNode = createDirectReplyNode({
     normalizeObject(value, fallback = {}) {

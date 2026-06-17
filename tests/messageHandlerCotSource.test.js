@@ -154,6 +154,7 @@ module.exports = (async () => {
       replyOptionsSeen.push({ ...(replyOptions || {}) });
       replyOptions.persistedReplyText = 'clean persisted reply';
       replyOptions.reasoningText = 'explicit reasoning';
+      replyOptions.reasoningForwardText = '瑞希风格的外发思考小记';
       return '<think>hidden chain</think>display reply';
     },
     askToolTaskLocally: async () => 'tool reply',
@@ -242,6 +243,7 @@ module.exports = (async () => {
   assert.strictEqual(envelope.replyText, 'display reply');
   assert.strictEqual(envelope.persistedReplyText, 'clean persisted reply');
   assert.strictEqual(envelope.reasoningText, 'explicit reasoning');
+  assert.strictEqual(envelope.reasoningForwardText, '瑞希风格的外发思考小记');
   assert.strictEqual(replyOptionsSeen[0].cotDisplayOnce, undefined);
   assert.strictEqual(replyOptionsSeen[0].disableHumanizer, undefined);
   assert.strictEqual(replyOptionsSeen[0].disableStream, false);

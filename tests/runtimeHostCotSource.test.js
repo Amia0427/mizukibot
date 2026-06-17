@@ -19,6 +19,10 @@ module.exports = (() => {
     'host should expose reasoningText to upper layers'
   );
   assert.ok(
+    source.includes("options.reasoningForwardText = String(out?.output?.reasoningForwardText || '').trim();"),
+    'host should expose reasoningForwardText to upper layers'
+  );
+  assert.ok(
     source.includes("const rawReply = out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '';")
       && source.includes('const sanitized = sanitizeUserFacingText(rawReply, {'),
     'host should prefer displayReply when returning the user-visible text'
