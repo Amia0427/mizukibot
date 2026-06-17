@@ -315,6 +315,17 @@ async function acquireSingleInstanceLock() {
 
     const existingPid = await readLockOwnerPid();
 
+    if (existingPid === process.pid) {
+      try {
+        await replaceStaleLock();
+      } catch (replaceErr) {
+        console.error('[Startup] Failed to replace self-owned lock file:', replaceErr?.message || replaceErr);
+        process.exit(1);
+      }
+      process.on('exit', cleanupSingleInstanceLockSync);
+      return cleanupSingleInstanceLockSync;
+    }
+
     if (await isMainBotProcess(existingPid)) {
       console.error('[Startup] MizukiBot is already running (PID=' + existingPid + ').');
       process.exit(1);
