@@ -400,6 +400,7 @@ function createMessageRouteFlow(deps = {}) {
     let finalReplyOptions = null;
     let persistedReplyText = '';
     let reasoningText = '';
+    let reasoningForwardText = '';
     const normalizeEnvelopeReplyText = (rawReply) => {
       const rawText = String(rawReply || '');
       if (!rawText.trim() || typeof normalizeUserFacingReply !== 'function') return rawText;
@@ -736,6 +737,7 @@ function createMessageRouteFlow(deps = {}) {
         reply = await askAIDispatch(cleanText, userInfo, senderId, null, imageUrl, replyOptions);
         persistedReplyText = String(replyOptions?.persistedReplyText || reply || '').trim();
         reasoningText = String(replyOptions?.reasoningText || '').trim();
+        reasoningForwardText = String(replyOptions?.reasoningForwardText || '').trim();
         if (replyOptions.streamCompleted && replyOptions.streamHadOutput) {
           usedStreamingSend = true;
           const streamFinishStartedAt = Date.now();
@@ -771,6 +773,7 @@ function createMessageRouteFlow(deps = {}) {
       replyText: visibleReplyText,
       persistedReplyText: persistedReplyText || reply,
       reasoningText,
+      reasoningForwardText,
       allowStream: Boolean(routeExecutionPlan?.allowStream),
       atSender: true,
       routeContext: routeDecision,

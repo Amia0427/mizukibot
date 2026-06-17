@@ -118,6 +118,7 @@ function buildReplyEnvelope(input = {}) {
     replyText: String(source.replyText || ''),
     persistedReplyText: String(source.persistedReplyText || source.replyText || ''),
     reasoningText: String(source.reasoningText || ''),
+    reasoningForwardText: String(source.reasoningForwardText || ''),
     replySegments: Array.isArray(source.replySegments) ? [...source.replySegments] : [],
     routeContext: source.routeContext || null,
     sendStrategy: source.sendStrategy || null,

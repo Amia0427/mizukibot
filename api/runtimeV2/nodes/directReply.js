@@ -15,6 +15,9 @@ const {
   analyzeMainReplyDegeneration,
   buildMainReplyDegenerationRepairInstruction
 } = require('../../../utils/mainReplyDegenerationGuard');
+const {
+  buildPersonaReasoningForwardText
+} = require('../../../utils/reasoningForwardPersona');
 
 function createRouteAfterDirectReply() {
   return function routeAfterDirectReply(state) {
@@ -186,6 +189,7 @@ function createDirectReplyNode(deps = {}) {
         reply: String(result.persistedText || result.finalReply || result.visibleText || '').trim(),
         displayReply: String(result.visibleText || result.finalReply || result.persistedText || '').trim(),
         reasoningText: String(result.reasoningText || '').trim(),
+        reasoningForwardText: String(result.reasoningForwardText || '').trim(),
         hasSafetyRestriction: result.hasSafetyRestriction === true
       };
     }
@@ -194,6 +198,7 @@ function createDirectReplyNode(deps = {}) {
       reply: text,
       displayReply: text,
       reasoningText: '',
+      reasoningForwardText: '',
       hasSafetyRestriction: false
     };
   }
@@ -274,6 +279,7 @@ function createDirectReplyNode(deps = {}) {
     let reply = '';
     let displayReply = '';
     let reasoningText = '';
+    let reasoningForwardText = '';
     let hasSafetyRestriction = false;
     let nextStream = ensureOutputStream(state.output, request.imageUrl ? 'none' : 'direct');
     let nextMemoryCliTurn = createMemoryCliTurnState(state.execution?.memoryCliTurn);
@@ -380,6 +386,11 @@ function createDirectReplyNode(deps = {}) {
           reply = String(variants.persistedText || assistantText || '').trim();
           displayReply = String(variants.visibleText || reply || '').trim();
           reasoningText = String(firstAssistantMessage?.reasoningText || '').trim();
+          reasoningForwardText = buildPersonaReasoningForwardText({
+            reasoningText,
+            userText: request.question,
+            finalReply: displayReply || reply
+          });
           hasSafetyRestriction = Boolean(hasSafetyRestriction || variants.hasSafetyRestriction === true);
           firstAssistantReused = true;
           directLoopEvents.push(createEvent('first_assistant_reused', {
@@ -423,6 +434,11 @@ function createDirectReplyNode(deps = {}) {
           reply = normalizedReply.reply;
           displayReply = normalizedReply.displayReply;
           reasoningText = normalizedReply.reasoningText;
+          reasoningForwardText = normalizedReply.reasoningForwardText || buildPersonaReasoningForwardText({
+            reasoningText,
+            userText: request.question,
+            finalReply: displayReply || reply
+          });
           hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
         } else if (request.streaming) {
           const streamed = await streamDirectReply(messagesToSend, {
@@ -436,6 +452,11 @@ function createDirectReplyNode(deps = {}) {
           reply = streamed.persistedText || streamed.finalReply || '';
           displayReply = streamed.visibleText || streamed.finalReply || '';
           reasoningText = String(streamed.reasoningText || '').trim();
+          reasoningForwardText = String(streamed.reasoningForwardText || '').trim() || buildPersonaReasoningForwardText({
+            reasoningText,
+            userText: request.question,
+            finalReply: displayReply || reply
+          });
           hasSafetyRestriction = Boolean(hasSafetyRestriction || streamed.hasSafetyRestriction === true);
           nextStream = streamed.stream;
           humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
@@ -453,6 +474,11 @@ function createDirectReplyNode(deps = {}) {
           reply = normalizedReply.reply;
           displayReply = normalizedReply.displayReply;
           reasoningText = normalizedReply.reasoningText;
+          reasoningForwardText = normalizedReply.reasoningForwardText || buildPersonaReasoningForwardText({
+            reasoningText,
+            userText: request.question,
+            finalReply: displayReply || reply
+          });
           hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
         }
       } catch (error) {
@@ -471,6 +497,7 @@ function createDirectReplyNode(deps = {}) {
           reply = String(recovered.reply || '');
           displayReply = String(recovered.reply || '');
           reasoningText = '';
+          reasoningForwardText = '';
           nextMemoryCliTurn = createMemoryCliTurnState(recovered.memoryCliTurn);
           nextAllowedTools = normalizeArray(recovered.effectiveAllowedTools);
           directLoopEvents = normalizeArray(recovered.events);
@@ -479,6 +506,7 @@ function createDirectReplyNode(deps = {}) {
           reply = getControlledFailureReply(failureType);
           displayReply = reply;
           reasoningText = '';
+          reasoningForwardText = '';
           nextMemoryCliTurn = createMemoryCliTurnState(
             updateMemoryCliTurnStateAfterError(nextMemoryCliTurn, failureType === 'tool_loop_limit' ? 'tool_loop_limit' : 'tool_error')
           );
@@ -524,6 +552,11 @@ function createDirectReplyNode(deps = {}) {
         reply = normalizedReply.reply;
         displayReply = normalizedReply.displayReply;
         reasoningText = normalizedReply.reasoningText;
+        reasoningForwardText = normalizedReply.reasoningForwardText || buildPersonaReasoningForwardText({
+          reasoningText,
+          userText: request.question,
+          finalReply: displayReply || reply
+        });
         hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
       } catch (error) {
         const failureType = classifyDirectReplyError(error);
@@ -539,6 +572,7 @@ function createDirectReplyNode(deps = {}) {
         reply = getControlledFailureReply(failureType);
         displayReply = reply;
         reasoningText = '';
+        reasoningForwardText = '';
       }
       directLoopEvents = [
         createEvent('direct_chat_execution_mode', {
@@ -559,6 +593,11 @@ function createDirectReplyNode(deps = {}) {
         reply = streamed.persistedText || streamed.finalReply || '';
         displayReply = streamed.visibleText || streamed.finalReply || '';
         reasoningText = String(streamed.reasoningText || '').trim();
+        reasoningForwardText = String(streamed.reasoningForwardText || '').trim() || buildPersonaReasoningForwardText({
+          reasoningText,
+          userText: request.question,
+          finalReply: displayReply || reply
+        });
         hasSafetyRestriction = Boolean(hasSafetyRestriction || streamed.hasSafetyRestriction === true);
         nextStream = streamed.stream;
         humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
@@ -571,6 +610,7 @@ function createDirectReplyNode(deps = {}) {
           reply = timeoutReply;
           displayReply = timeoutReply;
           reasoningText = '';
+          reasoningForwardText = '';
           nextStream = {
             ...ensureOutputStream(state.output, 'direct'),
             ...mirrorStreamingFlags(state.output, timeoutReply),
@@ -592,6 +632,7 @@ function createDirectReplyNode(deps = {}) {
           reply = timeoutReply;
           displayReply = timeoutReply;
           reasoningText = '';
+          reasoningForwardText = '';
           nextStream = {
             ...ensureOutputStream(state.output, 'direct'),
             ...mirrorStreamingFlags(state.output, timeoutReply),
@@ -624,6 +665,11 @@ function createDirectReplyNode(deps = {}) {
             reply = normalizedReply.reply;
             displayReply = normalizedReply.displayReply;
             reasoningText = normalizedReply.reasoningText;
+            reasoningForwardText = normalizedReply.reasoningForwardText || buildPersonaReasoningForwardText({
+              reasoningText,
+              userText: request.question,
+              finalReply: displayReply || reply
+            });
             hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
           } catch (fallbackError) {
             const failureType = classifyDirectReplyError(fallbackError);
@@ -639,6 +685,7 @@ function createDirectReplyNode(deps = {}) {
             reply = getControlledFailureReply(failureType);
             displayReply = reply;
             reasoningText = '';
+            reasoningForwardText = '';
           }
         }
       }
@@ -657,6 +704,11 @@ function createDirectReplyNode(deps = {}) {
         reply = normalizedReply.reply;
         displayReply = normalizedReply.displayReply;
         reasoningText = normalizedReply.reasoningText;
+        reasoningForwardText = normalizedReply.reasoningForwardText || buildPersonaReasoningForwardText({
+          reasoningText,
+          userText: request.question,
+          finalReply: displayReply || reply
+        });
         hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
       } catch (error) {
         const failureType = classifyDirectReplyError(error);
@@ -672,6 +724,7 @@ function createDirectReplyNode(deps = {}) {
         reply = getControlledFailureReply(failureType);
         displayReply = reply;
         reasoningText = '';
+        reasoningForwardText = '';
       }
     }
 
@@ -717,10 +770,16 @@ function createDirectReplyNode(deps = {}) {
         reply = retriedReply;
         displayReply = retriedReply;
         reasoningText = retriedReasoningText;
+        reasoningForwardText = buildPersonaReasoningForwardText({
+          reasoningText,
+          userText: request.question,
+          finalReply: displayReply || reply
+        });
       } else {
         reply = getControlledFailureReply('generic_model_failure');
         displayReply = reply;
         reasoningText = '';
+        reasoningForwardText = '';
       }
     }
 
@@ -785,10 +844,16 @@ function createDirectReplyNode(deps = {}) {
         reply = repairedReply;
         displayReply = repairedDisplayReply || repairedReply;
         reasoningText = repairedReasoningText;
+        reasoningForwardText = buildPersonaReasoningForwardText({
+          reasoningText,
+          userText: request.question,
+          finalReply: displayReply || reply
+        });
       } else {
         reply = getControlledFailureReply('generic_model_failure');
         displayReply = reply;
         reasoningText = '';
+        reasoningForwardText = '';
       }
     }
 
@@ -830,6 +895,11 @@ function createDirectReplyNode(deps = {}) {
         reply = retriedReply;
         displayReply = retriedReply;
         reasoningText = retriedReasoningText;
+        reasoningForwardText = buildPersonaReasoningForwardText({
+          reasoningText,
+          userText: request.question,
+          finalReply: displayReply || reply
+        });
         directLoopEvents = directLoopEvents.concat([
           createEvent('tool_loop_forced_answer', {
             node: 'direct_reply',
@@ -850,6 +920,7 @@ function createDirectReplyNode(deps = {}) {
         reply = getControlledFailureReply('tool_error');
         displayReply = reply;
         reasoningText = '';
+        reasoningForwardText = '';
         directLoopEvents = directLoopEvents.concat([
           createEvent('tool_loop_forced_answer', {
             node: 'direct_reply',
@@ -940,6 +1011,7 @@ function createDirectReplyNode(deps = {}) {
           displayReply: String(displayReply || reply || ''),
           persistedReplyText: String(reply || ''),
           reasoningText: String(reasoningText || ''),
+          reasoningForwardText: String(reasoningForwardText || ''),
           hasSafetyRestriction,
           failure,
           stream: nextStream

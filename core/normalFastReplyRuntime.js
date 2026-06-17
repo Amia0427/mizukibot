@@ -12,6 +12,9 @@ const {
 } = require('../utils/personaModules');
 const { isUnsafeUserFacingReply } = require('../utils/userFacingReplyGuards');
 const { classifyReplyFailure, isReplyFailure } = require('../utils/replyFailure');
+const {
+  buildPersonaReasoningForwardText
+} = require('../utils/reasoningForwardPersona');
 
 const NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_ACTIVE = 2;
 const NORMAL_FAST_REPLY_PERSONA_MODULE_MAX_TOKEN_COST = 100;
@@ -490,6 +493,11 @@ async function runNormalFastReply(input = {}, deps = {}) {
     replyText: visibleText,
     persistedReplyText: persistedText,
     reasoningText: String(reply?.reasoningText || '').trim(),
+    reasoningForwardText: buildPersonaReasoningForwardText({
+      reasoningText: String(reply?.reasoningText || '').trim(),
+      userText: input.text || input.cleanText || input.requestText || input.route?.cleanText || input.route?.question,
+      finalReply: visibleText
+    }),
     hasSafetyRestriction
   };
 }

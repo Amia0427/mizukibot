@@ -734,6 +734,13 @@
         "include_in_system_prompt": false
       },
       {
+        "id": "runtime_reasoning_forward_persona",
+        "path": "runtime/reasoning-forward-persona.txt",
+        "required": false,
+        "kind": "runtime_template",
+        "include_in_system_prompt": false
+      },
+      {
         "id": "runtime_image_chat_pragmatics",
         "path": "runtime/image-chat-pragmatics.txt",
         "required": false,

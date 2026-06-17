@@ -30,6 +30,7 @@ function createBaseDeps(overrides = {}) {
       replyOptionsSeen.push({ ...replyOptions });
       replyOptions.persistedReplyText = 'ai reply';
       replyOptions.reasoningText = 'explicit reasoning';
+      replyOptions.reasoningForwardText = '瑞希风格的外发思考小记';
       return 'ai reply';
     },
     askToolTaskLocally: async (_cleanText, _userInfo, _senderId, _customPrompt, _imageUrl, options) => {
@@ -262,6 +263,7 @@ module.exports = (async () => {
   assert.strictEqual(reasoningEnvelope.replyText, 'ai reply');
   assert.strictEqual(reasoningEnvelope.persistedReplyText, 'ai reply');
   assert.strictEqual(reasoningEnvelope.reasoningText, 'explicit reasoning');
+  assert.strictEqual(reasoningEnvelope.reasoningForwardText, '瑞希风格的外发思考小记');
   assert.strictEqual(reasoningCase.replyOptionsSeen[0].disableStream, false, 'private direct replies should keep streaming enabled');
   assert.strictEqual(reasoningCase.replyOptionsSeen[0].disableHumanizer, undefined, '/cot removal should not disable humanizer');
   assert.strictEqual(reasoningCase.replyOptionsSeen[0].cotDisplayOnce, undefined, '/cot removal should not propagate one-shot flags');

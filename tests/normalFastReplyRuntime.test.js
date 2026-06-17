@@ -207,6 +207,10 @@ module.exports = (async () => {
 
   assert.strictEqual(result.replyText, '快速回复');
   assert.strictEqual(result.reasoningText, 'fast explicit reasoning');
+  assert.ok(
+    String(result.reasoningForwardText || '').includes('刚才那一下'),
+    '快速回复应生成可外发的角色化摘要'
+  );
   assert.ok(Array.isArray(seenMessages));
   assert.strictEqual(seenContext.disableTools, true, '应禁用工具');
   assert.deepStrictEqual(seenContext.allowedTools, [], '应清空工具');

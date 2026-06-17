@@ -542,3 +542,12 @@
 - 范围控制：未开启 `DAILY_SHARE_ENABLED`/`TICK_ENGINE_ENABLED`；原因是 daily share 总开关会连带恢复 `1083095371`、`1092700300` 两个已启用群的自动分享，本次只开启 QQ 空间自动发布/预约发送边界。
 - 验收：`restart-bot.cmd status` 显示 main bot PID `30364`、post-reply worker PID `31184` 正常运行且无诊断残留 Node 进程；配置探针显示 `QZONE_AUTO_PUBLISH_ENABLED=true`、`SCHEDULER_RUNTIME_ENABLED=true`；NapCat 凭据探针显示登录信息可用、QZone credentials 可用且含 skey；`data\bot-main-runtime-state.json` 有新 heartbeat。
 - 小目标已完成：预约/自动发布型 QQ 空间发送已允许真实提交，同时没有放大到群 daily share 自动发言。
+
+## 运行维护 2026-06-17 22:51
+
+- 实现 QQ reasoning 角色化外发小记。
+- 根因：今天新增的 QQ reasoning 合并转发直接使用 provider raw `reasoningText`，目标却是“发出来也不违和”的可见短想法；直接外发 raw 容易像分析报告、模型自述或完整思维链。
+- 最小修复：新增本地 `reasoningForwardText` 生成和清洗层，Runtime V2/route envelope/handler 全链路带出；QQ 合并转发只读取 `reasoningForwardText`，没有角色化摘要时跳过，不回退 raw `reasoningText`。
+- 范围控制：未增加第二次模型调用；未从正文 `<think>` 抽取；raw `reasoningText` 仍只作为内部字段保留；记忆、画像、recall、post-reply 持久化边界未改。
+- 验收：`node scripts\run-tests.js tests\parserModelResponseFormats.test.js tests\modelServiceReasoning.test.js tests\qqActionServiceReasoningForward.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\messageHandlerReasoningForwardSource.test.js`、`node scripts\run-tests.js tests\qqActionServiceReasoningForward.test.js tests\messageHandlerReasoningForwardSource.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\messageRouteFlowGroupStreaming.test.js tests\normalFastReplyRuntime.test.js tests\runtimeHostCotSource.test.js tests\messageHandlerCotSource.test.js tests\reasoningForwardPersonaPrompt.test.js`、`npm run check:prompts`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。
+- 小目标已完成：QQ reasoning 外发内容从 provider 原始推理改为可见、安全、短的瑞希风格思考小记。
