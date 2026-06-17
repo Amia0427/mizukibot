@@ -65,6 +65,11 @@
 - 长期记忆 / RAG / LanceDB / MemOS
 - 视觉理解 / 画图 / 空间分享
 
+## QQ 空间发送拟人化
+
+- `QZONE_HUMANIZE_PUBLISH_DELAY_ENABLED`：自动发布前是否模拟“看完草稿再点发送”的短暂停顿，默认 `true`。
+- `QZONE_HUMANIZE_PUBLISH_DELAY_MIN_MS` / `QZONE_HUMANIZE_PUBLISH_DELAY_MAX_MS`：停顿范围，默认 `8000` 到 `35000` 毫秒；单测或本地快速验收可设为 `0` 或关闭开关。
+
 ## 校验命令
 
 ```bash

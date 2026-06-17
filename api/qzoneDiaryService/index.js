@@ -2,6 +2,8 @@ const config = require('../../config');
 const { getGroupPresence, getRecentMessages } = require('../../utils/groupAwarenessState');
 const {
   MAX_RETRIES,
+  buildVariationConstraintPrompt,
+  buildVariationProfilePrompt,
   describeGenericAutodraftRandomness,
   getModelConfigForQzoneAttempt,
   recordQzoneGenerationHistory,
@@ -309,6 +311,7 @@ async function buildBotDiaryPrompt({ hint = '', signals = {}, strict = false, me
     '这不是代写用户日记，而是 bot 自己的日记。',
     '必须使用第一人称“我”。',
     '长度固定在 80 到 180 字之间，2 到 5 句自然短句。',
+    '整体要像 QQ 空间/朋友圈里临时发出的生活碎片：可以有停顿、吐槽、动作和没说满的情绪，不要写成小作文、公告或精修文案。',
     '内容重心必须放在我自己的感受、观察、别扭、轻微阴阳怪气和嘴硬式关怀。',
     '允许轻轻提到群里的人或群聊氛围，但只能泛化提及，不得出现可识别的个人信息。',
     '对他人的提及最多 1 到 2 个短分句，总占比不要超过约 30%。',
@@ -358,6 +361,7 @@ async function buildBotDiaryPromptFromPlan({ hint = '', signals = {}, strict = f
     '这不是代写用户日记，而是 bot 自己的日记。',
     '必须使用第一人称“我”。',
     '长度固定在 80 到 180 字之间，2 到 5 句自然短句。',
+    '整体要像 QQ 空间/朋友圈里临时发出的生活碎片：可以有停顿、吐槽、动作和没说满的情绪，不要写成小作文、公告或精修文案。',
     '内容重心必须放在我自己的感受、观察、别扭、轻微阴阳怪气和嘴硬式关怀。',
     '允许轻轻提到群里的人或群聊氛围，但只能泛化提及，不得出现可识别的个人信息。',
     '对他人的提及最多 1 到 2 个短分句，总占比不要超过约 30%。',
@@ -735,17 +739,19 @@ function buildGenericAutodraftPrompt(requestText = '', options = {}) {
     fingerprint: '',
     sceneAnchors: [],
     emotionalArc: '',
-    targetLength: '80-180',
+    targetLength: '24-120',
     theme: null,
     microTheme: null,
     bannedRepeats: { openings: [], planFingerprints: [] }
   };
   const randomness = describeGenericAutodraftRandomness(requestText);
   return [
-    '你现在只负责代写一条可以直接发布到 QQ 空间的中文正文。',
-    '必须使用第一人称，语气自然，像今天写的日记或状态。',
+    '你现在只负责代写一条可以直接发布到 QQ 空间的中文动态正文。',
+    '必须使用第一人称，语气自然，像今天临时发的一条朋友圈/说说。',
     '优先根据用户原话推断主题、心情、长度和风格。',
-    '默认写成 80 到 180 字。',
+    '默认写成 24 到 120 字；除非用户明确要求长文，否则宁可短一点。',
+    '写法要像生活碎片：短句、吐槽、随手记录、临时情绪都可以；不要写成公告、小作文、鸡汤总结或营销文案。',
+    '优先放一个具体小动作或小物件，比如消息框、杯子、灯、窗帘、耳机、屏幕、出门前的小停顿。',
     '不要解释，不要提问，不要使用标题、项目符号、引号、标签或前缀。',
     '不要提到自己是 AI。',
     randomness.useFullVariation
@@ -775,7 +781,7 @@ async function generateGenericQzoneDraft(input = {}, options = {}) {
       recentHistory,
       recentFailures,
       allowImage: false,
-      targetLength: '80-180'
+      targetLength: '24-120'
     });
     const candidates = [];
     for (let candidateIndex = 0; candidateIndex < Math.max(1, CANDIDATE_COUNT); candidateIndex += 1) {

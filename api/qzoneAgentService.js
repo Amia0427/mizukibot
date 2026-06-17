@@ -20,6 +20,12 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function sleep(ms = 0) {
+  const delay = Math.max(0, Math.floor(Number(ms) || 0));
+  if (!delay) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, delay));
+}
+
 function normalizePublishPolicy(value = '') {
   const policy = normalizeText(value).toLowerCase();
   return policy === AUTO_PUBLISH ? AUTO_PUBLISH : DRAFT_ONLY;
@@ -193,6 +199,59 @@ function buildImageMetaDefaults() {
     imagePublishMode: 'text_only',
     imageFallbackStage: '',
     imageProviderUsed: ''
+  };
+}
+
+function clampDelayMs(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return Math.max(0, Math.floor(Number(fallback) || 0));
+  return Math.max(0, Math.floor(n));
+}
+
+function resolveQzonePublishDelayMs(content = '', meta = {}, options = {}) {
+  const enabled = options.humanizePublishDelayEnabled !== undefined
+    ? Boolean(options.humanizePublishDelayEnabled)
+    : Boolean(config.QZONE_HUMANIZE_PUBLISH_DELAY_ENABLED);
+  if (!enabled) return 0;
+
+  const minMs = clampDelayMs(
+    options.humanizePublishDelayMinMs !== undefined
+      ? options.humanizePublishDelayMinMs
+      : config.QZONE_HUMANIZE_PUBLISH_DELAY_MIN_MS,
+    0
+  );
+  const maxMs = clampDelayMs(
+    options.humanizePublishDelayMaxMs !== undefined
+      ? options.humanizePublishDelayMaxMs
+      : config.QZONE_HUMANIZE_PUBLISH_DELAY_MAX_MS,
+    minMs
+  );
+  const lower = Math.min(minMs, maxMs);
+  const upper = Math.max(minMs, maxMs);
+  if (upper <= 0) return 0;
+
+  const chars = Array.from(String(content || '').trim()).length;
+  const readMs = Math.min(9000, Math.max(0, chars * 35));
+  const seed = normalizeText(meta.planFingerprint || meta.tropeFingerprint || meta.topicKey || content, 120);
+  let hash = 2166136261;
+  for (const char of seed) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const jitterRange = Math.max(0, upper - lower);
+  const jitter = jitterRange > 0 ? ((hash >>> 0) % (jitterRange + 1)) : 0;
+  return Math.min(upper, lower + jitter + readMs);
+}
+
+async function prepareHumanizedQzonePublish(content = '', meta = {}, options = {}) {
+  const delayMs = resolveQzonePublishDelayMs(content, meta, options);
+  if (delayMs > 0) {
+    const wait = typeof options.sleep === 'function' ? options.sleep : sleep;
+    await wait(delayMs);
+  }
+  return {
+    humanizedDelayApplied: delayMs > 0,
+    humanizedDelayMs: delayMs
   };
 }
 
@@ -391,6 +450,8 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
     publishImageMeta = prepared.imageMeta;
   }
 
+  const humanizeMeta = await prepareHumanizedQzonePublish(content, meta, options);
+
   try {
     if (localImagePath) {
       const imagePublish = await publishQzoneImages({
@@ -412,7 +473,10 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
           groupId: groupContext.groupId,
           content,
           meta,
-          imageMeta: publishImageMeta,
+          imageMeta: {
+            ...publishImageMeta,
+            ...humanizeMeta
+          },
           failureReasons: [imagePublish.reason || 'QZone image publish failed'],
           options
         });
@@ -427,7 +491,8 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
           source: imagePublish.source || '',
           meta: {
             ...meta,
-            ...publishImageMeta
+            ...publishImageMeta,
+            ...humanizeMeta
           }
         };
       }
@@ -450,7 +515,10 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
       groupId: groupContext.groupId,
       content,
       meta,
-      imageMeta: publishImageMeta,
+      imageMeta: {
+        ...publishImageMeta,
+        ...humanizeMeta
+      },
       failureReasons: [publishResult.reason || 'QZone publish failed'],
       options
     });
@@ -465,7 +533,8 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
       source: publishResult.source || '',
       meta: {
         ...meta,
-        ...publishImageMeta
+        ...publishImageMeta,
+        ...humanizeMeta
       }
     };
   }
@@ -476,7 +545,10 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
     type,
     content,
     meta,
-    imageMeta: publishImageMeta,
+    imageMeta: {
+      ...publishImageMeta,
+      ...humanizeMeta
+    },
     options,
     now: options.now || Date.now()
   });
@@ -487,7 +559,10 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
     groupId: groupContext.groupId,
     content,
     meta,
-    imageMeta: publishImageMeta,
+    imageMeta: {
+      ...publishImageMeta,
+      ...humanizeMeta
+    },
     options
   });
 
@@ -502,7 +577,8 @@ async function runQzoneAgent(input = {}, context = {}, options = {}) {
     source: publishResult.source || '',
     meta: {
       ...meta,
-      ...publishImageMeta
+      ...publishImageMeta,
+      ...humanizeMeta
     }
   };
 }
@@ -513,5 +589,7 @@ module.exports = {
   normalizeAgentMode,
   normalizePublishPolicy,
   normalizeQzoneAgentInput,
+  prepareHumanizedQzonePublish,
+  resolveQzonePublishDelayMs,
   runQzoneAgent
 };

@@ -241,7 +241,11 @@ async function submitQzonePublish(payload, session = {}, options = {}) {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         Cookie: session.cookie,
+        Accept: '*/*',
+        'Accept-Language': String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim(),
+        'Cache-Control': 'no-cache',
         Origin: 'https://user.qzone.qq.com',
+        Pragma: 'no-cache',
         Referer: `https://user.qzone.qq.com/${session.uin}/infocenter`,
         'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT || '').trim() || config.CODEX_USER_AGENT
       }
@@ -380,7 +384,11 @@ async function uploadQzoneImage(imagePath, options = {}) {
         proxy: false,
         headers: {
           Cookie: session.cookie,
+          Accept: '*/*',
+          'Accept-Language': String(config.HTTP_ACCEPT_LANGUAGE || 'zh-CN,zh;q=0.9,en;q=0.8').trim(),
+          'Cache-Control': 'no-cache',
           Origin: 'https://ctc.qzs.qq.com',
+          Pragma: 'no-cache',
           Referer: 'https://ctc.qzs.qq.com/qzone/client/photo/swf/SimpleLocalFileUploader/Main.swf?refer=shuoshuo',
           'User-Agent': String(config.HTTP_USER_AGENT || config.CODEX_USER_AGENT || '').trim() || config.CODEX_USER_AGENT
         }

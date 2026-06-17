@@ -42,6 +42,20 @@ const SOCIAL_MASK_VALUES = Object.freeze(['pretend_fine', 'lowkey_showoff', 'cas
 const FRESHNESS_MODE_VALUES = Object.freeze(['mundane_twist', 'anti_template', 'overshare_fakeout', 'mini_scene_cut']);
 const VOICE_EDGE_VALUES = Object.freeze(['mild', 'sly', 'sharpish']);
 const CANDIDATE_VARIANT_TYPES = Object.freeze(['safe_realistic', 'edge_variant', 'image_variant']);
+const MOMENT_FRAGMENT_CUES = Object.freeze(['刚刚', '刚才', '差点', '其实', '本来', '又', '结果', '算了', '懒得', '顺手']);
+const MOMENT_DAILY_OBJECT_CUES = Object.freeze(['消息', '输入框', '通知', '屏幕', '镜子', '出门', '耳机', '杯子', '窗帘', '鞋', '衣服', '灯', '桌', '门口', '雨', '风', '外套']);
+const MOMENT_POLISHED_TONE_PATTERNS = Object.freeze([
+  /分享一下/,
+  /顺手说一句/,
+  /我最近想说/,
+  /突然想到/,
+  /今天也是/,
+  /生活教会我/,
+  /愿我们/,
+  /希望大家/,
+  /记录一下/,
+  /总结一下/
+]);
 const SCENE_LIBRARY = Object.freeze({
   room_corner: { label: '房间角落', safeHints: ['桌边', '床边', '门口那一角'], imageHints: ['room corner', 'interior corner'] },
   window_night: { label: '夜窗', safeHints: ['窗边', '夜色', '远处灯光'], imageHints: ['window', 'night city glow'] },
@@ -532,7 +546,8 @@ function buildPlanPrompt(plan = {}, context = {}) {
       ...(Array.isArray(microTheme.safeHints) ? microTheme.safeHints : [])
     ].join(' / ') || 'none'}`,
     `banned_openings: ${(plan.bannedRepeats?.openings || []).join(' / ') || 'none'}`,
-    `banned_plan_fingerprints: ${(plan.bannedRepeats?.planFingerprints || []).join(' / ') || 'none'}`
+    `banned_plan_fingerprints: ${(plan.bannedRepeats?.planFingerprints || []).join(' / ') || 'none'}`,
+    'moment_texture: 像朋友圈/QQ空间碎片，优先短句、动作、吐槽、临时情绪；不要公告、小作文、价值总结或精修文案。'
   ].join('\n');
 }
 
@@ -543,9 +558,11 @@ function buildCandidatePrompt(basePrompt = '', plan = {}, extra = '') {
 function scoreCircleNaturalness(text = '', plan = {}) {
   const body = String(text || '');
   let score = 0.2;
-  if (/(刚刚|其实|差点|本来|刚才|又|还是|结果)/.test(body)) score += 0.18;
-  if (/(消息|输入框|通知|屏幕|镜子|出门|耳机|杯子|窗帘|鞋|衣服)/.test(body)) score += 0.16;
-  if (/(我最近想说|分享一下|突然觉得|今天也是|有时候就是)/.test(body)) score -= 0.18;
+  if (MOMENT_FRAGMENT_CUES.some((cue) => body.includes(cue))) score += 0.18;
+  if (MOMENT_DAILY_OBJECT_CUES.some((cue) => body.includes(cue))) score += 0.16;
+  if (MOMENT_POLISHED_TONE_PATTERNS.some((pattern) => pattern.test(body))) score -= 0.2;
+  if (body.length <= 120 && /[。！？!?]/.test(body)) score += 0.08;
+  if (body.length > 180) score -= 0.18;
   if (/(像是|仿佛|似乎)/.test(body) && body.length < 70) score -= 0.08;
   if (plan?.variationProfile?.socialMask === 'pretend_fine' && /(没事|算了|装作|假装)/.test(body)) score += 0.12;
   if (plan?.variationProfile?.spark === 'tiny_embarrassment' && /(有点丢人|有点好笑|差点|没存|删掉)/.test(body)) score += 0.12;
@@ -597,7 +614,7 @@ function scoreCandidate(text = '', input = {}) {
   const visibleLength = String(text || '').replace(/\s+/g, '').length;
   const hasScene = (input.plan?.sceneAnchors || []).some((anchor) => String(text || '').includes(String(anchor || '').slice(0, 2)));
   const firstPerson = /(^|[，。！？\s])(我|我今天|我刚|我还|我又|我在|我想|我的)/.test(String(text || ''));
-  const templateHits = /(分享一下|顺手说一句|我最近想说|突然想到|今天也是)/.test(String(text || '')) ? 1 : 0;
+  const templateHits = MOMENT_POLISHED_TONE_PATTERNS.some((pattern) => pattern.test(String(text || ''))) ? 1 : 0;
   const circleNaturalnessScore = scoreCircleNaturalness(text, input.plan || {});
   const edgeTensionScore = scoreEdgeTension(text, input.plan || {});
   const noveltyScore = scoreNovelty(text, input);
