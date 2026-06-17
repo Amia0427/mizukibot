@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-17 22:26 +08:00**：完成普通用户模型推理链路真实请求诊断。普通主回复当前走 `gcli.ggchan.dev / gemini-3-flash-preview / openai_compatible`，请求体会携带 `reasoning_effort=medium`；真实逻辑题 `medium` 与 `off` 对照均 200 且答出 `B`，但上游响应没有显式 `reasoning/reasoning_content` 字段，因此 QQ reasoning 没有可转发来源。结论：普通主回复不是本地没开思考，也没有证据说明模型完全无推理能力；`normal_fast_reply` 另有代码显式 `reasoningEffort: off`，这是快速链路设计边界。详见 `docs/normal-user-reasoning-request-diagnosis-2026-06-17.md`。
+
 **2026-06-17 20:20 +08:00**：新增管理员缓存读写对照验收脚本 `npm run verify:admin-cache-read`。脚本会对同一管理员连续发两次真实主模型请求，记录脱敏请求体差异、缓存断点/缓存 key、响应 usage 缓存读写信号、`model-calls` 和 `request-trace` 关键日志，并把结论归为上游不支持、请求体不符合缓存条件或本地读取链路漏吃结果。实际验收：两次请求均 200，最终请求体差异 0，Anthropic cache breakpoint=1 且 beta 已送出，但上游响应没有 usage/cache 字段；结论为 `upstream_cache_signal_unobservable`。详见 `docs/admin-cache-read-verification.md`。
 
 **2026-06-17 20:05 +08:00**：检查并开启 QQ 空间发送运行开关。现场状态：main bot、post-reply worker 已运行；开启前 `QZONE_AUTO_PUBLISH_ENABLED=false`、`SCHEDULER_RUNTIME_ENABLED=false`，NapCat 可取到 `qzone.qq.com` 凭据且含 skey。已在 `.env` 开启 `QZONE_AUTO_PUBLISH_ENABLED=true` 和 `SCHEDULER_RUNTIME_ENABLED=true`，并重启到 main bot PID `30364`、worker PID `31184`。未开启 `DAILY_SHARE_ENABLED`/`TICK_ENGINE_ENABLED`，因为该全局开关会连带恢复两个已启用群的 daily share，不属于本次“QQ 空间发送”最小范围。验收：`restart-bot.cmd status`、配置脱敏探针、NapCat 凭据探针和 runtime heartbeat 均通过。小目标完成：预约/自动发布型 QQ 空间发送已允许真实提交，并保留群自动分享边界。
