@@ -599,6 +599,7 @@ function Record-MainBotExitObservation {
     $EarlyExitState = $null
   )
 
+  $expectedMarker = if ($null -ne $EarlyExitState) { $EarlyExitState.ExpectedShutdownMarker } else { $null }
   $payload = [pscustomobject]@{
     schemaVersion = 'main_bot_exit_observation_v1'
     source = 'windows_daemon'
@@ -618,6 +619,13 @@ function Record-MainBotExitObservation {
     earlyExitReason = if ($null -ne $EarlyExitState) { $EarlyExitState.Reason } else { '' }
     earlyExitCount = if ($null -ne $EarlyExitState) { $EarlyExitState.Count } else { 0 }
     cooldownUntil = if ($null -ne $EarlyExitState) { $EarlyExitState.CooldownUntil } else { '' }
+    expectedShutdownReason = if ($null -ne $expectedMarker) { [string]$expectedMarker.reason } else { '' }
+    expectedShutdownSource = if ($null -ne $expectedMarker) { [string]$expectedMarker.source } else { '' }
+    expectedShutdownRecordedAt = if ($null -ne $expectedMarker) { [string]$expectedMarker.recordedAt } else { '' }
+    expectedShutdownExpiresAt = if ($null -ne $expectedMarker) { [string]$expectedMarker.expiresAt } else { '' }
+    expectedShutdownRequestId = if ($null -ne $expectedMarker) { [string]$expectedMarker.requestId } else { '' }
+    expectedShutdownMessageId = if ($null -ne $expectedMarker) { [string]$expectedMarker.messageId } else { '' }
+    expectedShutdownGroupId = if ($null -ne $expectedMarker) { [string]$expectedMarker.groupId } else { '' }
   }
   [void](Append-JsonLineSafe -Path $mainExitObservationsFile -Value $payload)
 }
@@ -628,24 +636,38 @@ function Test-ExpectedMainBotShutdownRecent {
   $markerPath = Join-Path $logDir 'bot-main-expected-shutdown.json'
   $marker = Read-JsonFileSafe -Path $markerPath
   if ($null -eq $marker) {
-    return $false
+    return [pscustomobject]@{ Matched = $false; Marker = $null; Reason = 'missing' }
+  }
+
+  if (-not [string]::IsNullOrWhiteSpace([string]$marker.consumedAt)) {
+    return [pscustomobject]@{ Matched = $false; Marker = $marker; Reason = 'already_consumed' }
   }
 
   $expiresAt = [datetime]::MinValue
   if (-not [datetime]::TryParse([string]$marker.expiresAt, [ref]$expiresAt)) {
-    return $false
+    return [pscustomobject]@{ Matched = $false; Marker = $marker; Reason = 'invalid_expires_at' }
   }
   if ($expiresAt.ToUniversalTime() -lt (Get-Date).ToUniversalTime()) {
-    return $false
+    return [pscustomobject]@{ Matched = $false; Marker = $marker; Reason = 'expired' }
   }
 
   $markerPid = 0
   [void][int]::TryParse([string]$marker.pid, [ref]$markerPid)
-  if ($OwnerPid -gt 0 -and $markerPid -gt 0 -and $markerPid -ne $OwnerPid) {
-    return $false
+  if ($OwnerPid -le 0 -or $markerPid -le 0 -or $markerPid -ne $OwnerPid) {
+    return [pscustomobject]@{ Matched = $false; Marker = $marker; Reason = 'pid_mismatch' }
   }
 
-  return $true
+  $consumedMarker = [ordered]@{}
+  foreach ($property in @($marker.PSObject.Properties)) {
+    $consumedMarker[$property.Name] = $property.Value
+  }
+  $consumedMarker['consumedAt'] = (Get-Date).ToUniversalTime().ToString('o')
+  $consumedMarker['consumedBy'] = 'windows_daemon'
+  $consumedMarker['consumedByPid'] = $PID
+  $consumedMarker['consumedOwnerPid'] = $OwnerPid
+  [void](Write-JsonFileSafe -Path $markerPath -Value ([pscustomobject]$consumedMarker))
+
+  return [pscustomobject]@{ Matched = $true; Marker = $marker; Reason = 'matched' }
 }
 
 function Get-MainBotEarlyExitPolicy {
@@ -685,8 +707,10 @@ function Update-MainBotEarlyExitState {
     return [pscustomobject]@{ Blocked = $false; Reason = 'no_owner_pid'; Count = 0; CooldownUntil = '' }
   }
 
-  if (Test-ExpectedMainBotShutdownRecent -OwnerPid $OwnerPid) {
-    Write-DaemonLog -Message "main bot previous exit marked expected; skip early-exit backoff. pid=$OwnerPid"
+  $expectedShutdown = Test-ExpectedMainBotShutdownRecent -OwnerPid $OwnerPid
+  if ($expectedShutdown.Matched) {
+    $marker = $expectedShutdown.Marker
+    Write-DaemonLog -Message "main bot previous exit marked expected; skip early-exit backoff. pid=$OwnerPid marker_reason=$([string]$marker.reason) marker_source=$([string]$marker.source) marker_recorded_at=$([string]$marker.recordedAt) marker_request_id=$([string]$marker.requestId) marker_message_id=$([string]$marker.messageId) marker_group_id=$([string]$marker.groupId)"
     $state = [pscustomobject]@{
       firstExitAt = ''
       lastExitAt = (Get-Date).ToUniversalTime().ToString('o')
@@ -694,9 +718,15 @@ function Update-MainBotEarlyExitState {
       cooldownUntil = ''
       lastPid = $OwnerPid
       lastReason = 'expected_shutdown'
+      expectedShutdownReason = [string]$marker.reason
+      expectedShutdownSource = [string]$marker.source
+      expectedShutdownRecordedAt = [string]$marker.recordedAt
+      expectedShutdownRequestId = [string]$marker.requestId
+      expectedShutdownMessageId = [string]$marker.messageId
+      expectedShutdownGroupId = [string]$marker.groupId
     }
     [void](Write-JsonFileSafe -Path $mainRestartStateFile -Value $state)
-    return [pscustomobject]@{ Blocked = $false; Reason = 'expected_shutdown'; Count = 0; CooldownUntil = '' }
+    return [pscustomobject]@{ Blocked = $false; Reason = 'expected_shutdown'; Count = 0; CooldownUntil = ''; ExpectedShutdownMarker = $marker }
   }
 
   $exitEvidence = Get-MainBotExitEvidence -LockPath $LockPath -OwnerPid $OwnerPid

@@ -24,6 +24,10 @@ module.exports = (() => {
   assert.ok(script.includes('main bot exited repeatedly soon after startup; backoff active'), 'daemon should stop immediate restart loops after repeated early exits');
   assert.ok(script.includes('effective_runtime_ms='), 'daemon should log effective runtime evidence for outside-window decisions');
   assert.ok(script.includes('bot-main-expected-shutdown.json'), 'daemon should exempt expected main bot shutdowns from early-exit backoff');
+  assert.ok(script.includes('consumedAt'), 'daemon should mark expected-shutdown markers as consumed');
+  assert.ok(script.includes('already_consumed'), 'daemon should not reuse an already consumed expected-shutdown marker');
+  assert.ok(script.includes('marker_reason='), 'daemon logs should include expected-shutdown marker source details');
+  assert.ok(script.includes('expectedShutdownSource'), 'daemon exit observations should preserve expected-shutdown marker source');
   assert.ok(script.includes('function Get-MainHttpReverseIngressState'), 'daemon should inspect HTTP reverse ingress listener state');
   assert.ok(script.includes("Join-Path $logDir 'bot-main-port-recovery-state.json'"), 'daemon should persist HTTP reverse port recovery attempts');
   assert.ok(script.includes("Get-PositiveInt64Env -Name 'BOT_DAEMON_HTTP_REVERSE_PORT_RECOVERY_COOLDOWN_MS'"), 'HTTP reverse recovery bypass should be rate limited');

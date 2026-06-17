@@ -39,7 +39,13 @@ module.exports = (() => {
     writeJson(path.join(dataDir, 'bot-main-expected-shutdown.json'), {
       pid: 111,
       reason: 'remote_restart_scheduled',
-      expiresAt: '2026-06-12T12:00:00.000Z'
+      source: 'admin_chat_command',
+      recordedAt: '2026-06-12T11:59:00.000Z',
+      expiresAt: '2026-06-12T12:20:00.000Z',
+      consumedAt: '2026-06-12T12:01:00.000Z',
+      requestId: 'req_restart',
+      messageId: 'msg_restart',
+      groupId: 'group_restart'
     });
     writeText(
       path.join(dataDir, 'bot-daemon.log'),
@@ -110,6 +116,8 @@ module.exports = (() => {
     assert.strictEqual(report.summary.lockStatus, 'stale');
     assert.strictEqual(report.lock.pid, 49136);
     assert.strictEqual(report.expectedShutdown.active, false);
+    assert.strictEqual(report.expectedShutdown.source, 'admin_chat_command');
+    assert.strictEqual(report.expectedShutdown.consumedAt, '2026-06-12T12:01:00.000Z');
     assert.strictEqual(report.runtimeLogs.archived.stdout.length, 1);
     assert.strictEqual(report.runtimeLogs.archived.stderr.length, 1);
     assert.ok(report.runtimeLogs.archived.stderr[0].tail.some((line) => line.includes('crash evidence')));
@@ -131,6 +139,7 @@ module.exports = (() => {
     const text = buildMainBotRestartText(report);
     assert.ok(text.includes('main-bot-restarts: warning'));
     assert.ok(text.includes('state: count=2'));
+    assert.ok(text.includes('expected-shutdown: exists=yes active=no consumed=yes pid=111 reason=remote_restart_scheduled source=admin_chat_command'));
     assert.ok(text.includes('runtime-evidence: started=2026-06-12T11:54:00.000Z heartbeat=2026-06-12T11:56:00.000Z effectiveRuntime=2m source=runtime_heartbeat_lifetime'));
     assert.ok(text.includes('exit-observations:'));
     assert.ok(text.includes('early=threshold_reached'));

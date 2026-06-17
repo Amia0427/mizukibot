@@ -13,7 +13,7 @@ function resolveRestartCommand(platform = process.platform) {
     const restartScript = path.join(repoRoot, 'restart-bot.cmd');
     return {
       command: process.env.ComSpec || 'cmd.exe',
-      args: ['/d', '/c', `call "${restartScript}" restart`],
+      args: ['/d', '/c', `call "${restartScript}" restart confirm`],
       cwd: repoRoot,
       script: restartScript,
       windowsVerbatimArguments: true
@@ -32,8 +32,9 @@ function triggerRemoteRestart(options = {}) {
   }
 
   restartScheduled = true;
+  const meta = options.meta && typeof options.meta === 'object' ? options.meta : {};
   try {
-    process.emit('mizuki:restartScheduled', { delayMs: options.delayMs ?? 800 });
+    process.emit('mizuki:restartScheduled', { delayMs: options.delayMs ?? 800, ...meta });
   } catch (_) {}
   const spawn = options.spawn || defaultSpawn;
   const platform = options.platform || process.platform;
@@ -45,7 +46,18 @@ function triggerRemoteRestart(options = {}) {
       cwd: commandSpec.cwd,
       detached: true,
       stdio: 'ignore',
-      windowsHide: true
+      windowsHide: true,
+      env: {
+        ...process.env,
+        MIZUKI_RESTART_CONFIRM: '1',
+        MIZUKI_RESTART_SOURCE: String(meta.source || 'remote_restart').trim() || 'remote_restart',
+        MIZUKI_RESTART_REASON: String(meta.reason || 'remote_restart_scheduled').trim() || 'remote_restart_scheduled',
+        MIZUKI_RESTART_REQUESTED_BY: String(meta.userId || '').trim(),
+        MIZUKI_RESTART_REQUEST_ID: String(meta.requestId || '').trim(),
+        MIZUKI_RESTART_MESSAGE_ID: String(meta.messageId || '').trim(),
+        MIZUKI_RESTART_GROUP_ID: String(meta.groupId || '').trim(),
+        MIZUKI_RESTART_COMMAND: String(meta.command || '').trim()
+      }
     };
     if (commandSpec.windowsVerbatimArguments) {
       spawnOptions.windowsVerbatimArguments = true;

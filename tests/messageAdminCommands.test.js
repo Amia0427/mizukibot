@@ -1,4 +1,6 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 
 const { createMessageAdminCoordinator } = require('../core/messageAdminCommands');
 
@@ -29,6 +31,10 @@ const coordinator = createMessageAdminCoordinator({
 });
 
 module.exports = (async () => {
+  const runtimeChunk = fs.readFileSync(path.join(__dirname, '..', 'core', 'messageHandler.runtime-03.chunk.js'), 'utf8');
+  assert.ok(runtimeChunk.includes('/^\\s*\\/restart(?:\\s|$)/i'), 'message runtime should route /restart confirm to the restart coordinator');
+  assert.ok(runtimeChunk.includes("source: 'admin_chat_command'"), 'restart requests should preserve chat command source metadata');
+
   const summary = await coordinator.handleSessionSummaryCommand({
     rawText: '/sr',
     senderId: 'u1',
@@ -62,8 +68,16 @@ module.exports = (async () => {
 
   assert.strictEqual(coordinator.handleHapiAdminCommand, undefined);
 
-  const restart = await coordinator.handleRestartAdminCommand({
+  const restartNeedsConfirm = await coordinator.handleRestartAdminCommand({
     rawText: '/restart',
+    userId: 'admin_1'
+  });
+  assert.strictEqual(restartNeedsConfirm.handled, true);
+  assert.strictEqual(restartNeedsConfirm.restartRequested, false);
+  assert.ok(String(restartNeedsConfirm.replyText).includes('/restart confirm'));
+
+  const restart = await coordinator.handleRestartAdminCommand({
+    rawText: '/restart confirm',
     userId: 'admin_1'
   });
   assert.strictEqual(restart.handled, true);
@@ -82,7 +96,8 @@ module.exports = (async () => {
     rawText: '/restart now',
     userId: 'admin_1'
   });
-  assert.strictEqual(restartWithTail, null);
+  assert.strictEqual(restartWithTail.handled, true);
+  assert.strictEqual(restartWithTail.restartRequested, false);
 
   console.log('messageAdminCommands.test.js passed');
 })().catch((error) => {
