@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-17 19:24 +08:00**：生成本地可发行源码副本到 `D:\mizuki_release`。发行清单以 Git 跟踪源码为基准，排除 `.git`、`.claude`、`.playwright-mcp`、`artifacts`、`data`、`node_modules`、`.env`、运行 `.pid/.lock`、`deploy/runtime` WireGuard 私钥配置和 prompt 备份；保留 `.env.example` / `.env.skills.example` / `deploy/network/*.example`。发行副本内已将 `api/napcatHttpActionClient.js` 的硬编码 NapCat HTTP action secret 改为环境变量读取占位，源项目运行文件未改动。验收：目标目录文件数、排除目录缺失检查、敏感模式扫描、`npm run check:secrets` 和 `git status --short` 均已执行。小目标完成：`D:\mizuki_release` 可作为不携带本机敏感数据的发行源码副本。
+
 **2026-06-17 13:28 +08:00**：修复 `restart-bot.cmd restart confirm` 成功但当前窗口静默、容易被误判为失败的问题。现场复现：第一次确认重启实际把 main bot 从 `14572` 换到 `43180`、worker 从 `25864` 换到 `36056`，但命令无输出；现确认重启成功后会在当前控制台追加最终 status，显示停止的旧 PID、daemon 触发结果、新 main bot / worker PID 和健康状态。验收：`node tests\restartBotScript.test.js`、PowerShell payload parse 通过；实际 `cmd /c restart-bot.cmd restart confirm` 输出最终状态并把 main bot 切到 `39404`、worker 切到 `1644`；`127.0.0.1:3002` 监听 owner 为 `39404`。小目标完成：确认重启不再是“静默成功看起来失败”。
 
 **2026-06-17 13:18 +08:00**：修复 `restart-bot.cmd` 容易被误判为“没有重启/状态异常”的输出问题。裸 `restart` 仍保持安全策略，不带确认不会停启；现在输出会直接提示 `restart-bot.cmd restart confirm` 或 `MIZUKI_RESTART_CONFIRM=1`。状态页把真实 bot 进程拆成 `Bot Node Processes`，只列 `.mizukibot.lock` / worker pid 对应的 main bot 与 post-reply worker；仓库内残留测试进程会进入 `Other Related Node Processes (diagnostic only)`，避免被看成业务进程。验收：`node tests\restartBotScript.test.js`、PowerShell payload parse、实际 `cmd /c restart-bot.cmd status` 和未确认 `cmd /c restart-bot.cmd restart` 通过，主 bot PID 仍为 14572。小目标完成：重启脚本的安全跳过和残留 Node 诊断已可读可区分。
