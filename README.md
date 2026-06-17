@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-17 23:02 +08:00**：修复 `restart-bot.cmd restart confirm` 完成后自动弹出日志窗口的问题。根因是脚本尾部仍会 `start "" powershell -NoExit -File scripts\watch-bot-daemon-log.ps1`，确认重启成功后又开一个独立窗口。现重启脚本只在当前控制台输出最终 status，不再自动打开日志窗口；需要看日志时手动运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\watch-bot-daemon-log.ps1`。验收：`node tests\restartBotScript.test.js`、PowerShell payload parse、`cmd /c restart-bot.cmd status` 通过。小目标完成：重启脚本不再主动弹窗。
+
 **2026-06-17 22:51 +08:00**：QQ reasoning 合并转发改为角色化可见思考小记。主回复仍只发送正常正文，provider raw `reasoningText` 继续作为内部字段保留；QQ 合并转发只读取 `reasoningForwardText`，由本地规则清洗/压缩成瑞希风格短想法，若像完整推理链、模型自述、分析报告或系统痕迹则跳过，不回退 raw reasoning。验收：`node scripts\run-tests.js tests\parserModelResponseFormats.test.js tests\modelServiceReasoning.test.js tests\qqActionServiceReasoningForward.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\messageHandlerReasoningForwardSource.test.js`、`npm run check:prompts`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。小目标完成：QQ 外发不再直接泄露 provider 原始 reasoning，而是只发送安全可见摘要。
 
 **2026-06-17 22:49 +08:00**：继续验证 `gcli.ggchan.dev` 是否支持透出 reasoning 字段。结论：站点本身支持，`gemini-2.5-pro-maxthinking` 真实请求会返回 `choices[].message.reasoning_content`；但当前普通主回复模型 `gemini-3-flash-preview` 和 `gemini-2.5-pro-nothinking` 都只返回 `content/role`，无可转发 reasoning。`/v1/models` 可列出 thinking/nothinking 模型，`/v1/responses` 当前 404。小目标完成：不会显示思维链的根因收敛为当前普通主回复模型不透出 reasoning，不是 gcli 全站不支持，也不是本地解析缺字段。
