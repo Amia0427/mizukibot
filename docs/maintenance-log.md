@@ -1,3 +1,12 @@
+## 运行维护 2026-06-17 20:04
+
+- 小目标：围绕 `D:\mizuki_release` 的可发行版准备，补一组可复跑的最小发布前冒烟验收，不重新设计 daemon 或主回复链路。
+- 最小实现：新增 `scripts/pre-release-smoke.js` 和 `npm run smoke:pre-release`；脚本串联现有 `restartBotScript/windowsDaemonScript/mainModelFallback/continuousMessagePreprocessorDebounce/messageHandlerGroupConcurrency/messageHandlerInboundConcurrency`，并新增 `mainModelFallbackRestartRecovery.test.js` 覆盖 fallback 内存态不会跨进程重启残留。
+- 安全边界：expected_shutdown 冒烟执行的是未确认 restart payload，要求只输出确认要求、不写 `bot-main-expected-shutdown.json`、不改 daemon log；后续改为临时沙盒执行 payload，避免状态页在真实发行目录修复 `.mizukibot.lock`。
+- 验证：`node --check scripts\pre-release-smoke.js`、`node --check tests\mainModelFallbackRestartRecovery.test.js`、目标测试集合通过；`npm run smoke:pre-release -- --root D:\waifu` 通过；`npm run smoke:pre-release -- --root D:\mizuki_release` 通过，配置探针输出 `regular=2000, anchored=15000, atBot=12000, private=12000, fallbackCooldownMs=600000`。
+- 发行目录后置复核：沙盒化复跑后 `lockBefore=30364 / lockAfter=30364 / dataCountBefore=0 / dataCountAfter=0`，说明脚本本身不再新增发行目录运行态文件。首次非沙盒验收曾生成 `D:\mizuki_release\.mizukibot.lock` 和空 `D:\mizuki_release\data`，按删除需确认规则暂未移除。
+- 小目标已完成：`D:\mizuki_release` 具备发布前最小冒烟门禁，三类重点风险已有一条命令复验。
+
 ## 运行维护 2026-06-17 13:28
 
 - 小目标：处理 `restart-bot.cmd restart confirm` 看起来仍是失败状态的问题，确认真实停启链路和命令输出是否一致。

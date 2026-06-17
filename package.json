@@ -10,6 +10,7 @@
     "start:post-reply-worker": "node scripts/post-reply-worker.js",
     "lint": "node scripts/lint.js",
     "test": "node scripts/run-tests.js",
+    "smoke:pre-release": "node scripts/pre-release-smoke.js",
     "console": "node scripts/console.js",
     "check:agent": "node scripts/check-agent.js",
     "check:agent:static": "cross-env CHECK_RUN=0 node scripts/check-agent.js",
