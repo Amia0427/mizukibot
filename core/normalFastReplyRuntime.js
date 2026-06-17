@@ -489,6 +489,7 @@ async function runNormalFastReply(input = {}, deps = {}) {
     ...built,
     replyText: visibleText,
     persistedReplyText: persistedText,
+    reasoningText: String(reply?.reasoningText || '').trim(),
     hasSafetyRestriction
   };
 }

@@ -104,20 +104,9 @@ module.exports = (async () => {
       rawText: '/cot'
     }));
 
-    assert.strictEqual(sentMessages.length, 1, '/cot should send an acknowledgement');
-    assert.ok(
-      String(sentMessages[0]?.params?.message || '').includes('一次性思维链显示'),
-      '/cot acknowledgement should explain one-shot cot display'
-    );
-
-    await handleIncomingMessage(buildGroupMessage({
-      userId: 'user_1',
-      groupId: 'group_1',
-      messageId: 'cot_2',
-      rawText: '下一条正常消息'
-    }));
-
-    assert.strictEqual(routeCalls.length, 1, 'the next normal message should continue into normal routing');
+    assert.strictEqual(sentMessages.length, 0, '/cot should not send a one-shot acknowledgement anymore');
+    assert.strictEqual(routeCalls.length, 1, '/cot should enter normal routing as ordinary text');
+    assert.ok(String(routeCalls[0] || '').includes('/cot'));
 
     console.log('messageHandlerCotCommand.test.js passed');
   } finally {

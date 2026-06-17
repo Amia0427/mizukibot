@@ -201,11 +201,12 @@ module.exports = (async () => {
     requestNonStreamingReply: async (messages, context) => {
       seenMessages = messages;
       seenContext = context;
-      return { visibleText: '快速回复', persistedText: '快速回复' };
+      return { visibleText: '快速回复', persistedText: '快速回复', reasoningText: 'fast explicit reasoning' };
     }
   });
 
   assert.strictEqual(result.replyText, '快速回复');
+  assert.strictEqual(result.reasoningText, 'fast explicit reasoning');
   assert.ok(Array.isArray(seenMessages));
   assert.strictEqual(seenContext.disableTools, true, '应禁用工具');
   assert.deepStrictEqual(seenContext.allowedTools, [], '应清空工具');

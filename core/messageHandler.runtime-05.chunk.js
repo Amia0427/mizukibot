@@ -18,9 +18,7 @@
       directedContext,
       directedContextSummary: routerContextSummary,
       effectiveIntentText: runtimeQuestionText,
-      quotePriority: directedContext?.quotePriority || null,
-      cotDisplayOnce: Boolean(cotArmedState),
-      cotArmedAt: Number(cotArmedState?.armedAt || 0) || 0
+      quotePriority: directedContext?.quotePriority || null
     };
     if (visualContext) {
       route.meta.visualContext = visualContext;
@@ -208,6 +206,14 @@
               fastGroupId
             );
             const persistedFastReplyText = String(normalFastReplyResult?.persistedReplyText || fastReplyText).trim() || fastReplyText;
+            await maybeSendReasoningForward({
+              reasoningText: String(normalFastReplyResult?.reasoningText || '').trim()
+            }, {
+              chatType,
+              groupId: fastGroupId,
+              userId: senderId,
+              senderId
+            });
             if (normalFastReplyResult?.hasSafetyRestriction === true) {
               const sourceMessageId = String(effectiveMsg.message_id || msg.message_id || '').trim();
               if (sourceMessageId) {

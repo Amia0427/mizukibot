@@ -28,7 +28,8 @@ function createBaseDeps(overrides = {}) {
     planDirectChat: async () => null,
     askAIDispatch: async (_cleanText, _userInfo, _senderId, _customPrompt, _imageUrl, replyOptions) => {
       replyOptionsSeen.push({ ...replyOptions });
-      replyOptions.persistedReplyText = replyOptions.cotDisplayOnce ? 'clean reply' : 'ai reply';
+      replyOptions.persistedReplyText = 'ai reply';
+      replyOptions.reasoningText = 'explicit reasoning';
       return 'ai reply';
     },
     askToolTaskLocally: async (_cleanText, _userInfo, _senderId, _customPrompt, _imageUrl, options) => {
@@ -249,21 +250,21 @@ module.exports = (async () => {
   assert.strictEqual(unavailableToolCase.replyOptionsSeen.length, 1, 'unavailable generic tool route should fall back to main direct reply');
   assert.ok(!String(unavailableToolCase.replyOptionsSeen[0].routePrompt || '').includes('tool'));
 
-  const cotCase = createBaseDeps();
-  const cotEnvelope = await cotCase.routeFlow.dispatchByRoutePlan({
+  const reasoningCase = createBaseDeps();
+  const reasoningEnvelope = await reasoningCase.routeFlow.dispatchByRoutePlan({
     ...buildRouteDecision('private'),
     route: {
       meta: {
-        chatType: 'private',
-        cotDisplayOnce: true
+        chatType: 'private'
       }
     }
   });
-  assert.strictEqual(cotEnvelope.replyText, 'ai reply');
-  assert.strictEqual(cotEnvelope.persistedReplyText, 'clean reply');
-  assert.strictEqual(cotCase.replyOptionsSeen[0].disableStream, true, 'cot reply should force non-streaming');
-  assert.strictEqual(cotCase.replyOptionsSeen[0].disableHumanizer, true, 'cot reply should disable humanizer');
-  assert.strictEqual(cotCase.replyOptionsSeen[0].cotDisplayOnce, true, 'cot reply should propagate the one-shot display flag');
+  assert.strictEqual(reasoningEnvelope.replyText, 'ai reply');
+  assert.strictEqual(reasoningEnvelope.persistedReplyText, 'ai reply');
+  assert.strictEqual(reasoningEnvelope.reasoningText, 'explicit reasoning');
+  assert.strictEqual(reasoningCase.replyOptionsSeen[0].disableStream, false, 'private direct replies should keep streaming enabled');
+  assert.strictEqual(reasoningCase.replyOptionsSeen[0].disableHumanizer, undefined, '/cot removal should not disable humanizer');
+  assert.strictEqual(reasoningCase.replyOptionsSeen[0].cotDisplayOnce, undefined, '/cot removal should not propagate one-shot flags');
 
   const toolCase = createBaseDeps();
   const toolEvents = [];

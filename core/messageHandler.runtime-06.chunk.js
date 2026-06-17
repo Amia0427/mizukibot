@@ -12,7 +12,7 @@
         groupId,
         userId: senderId,
         senderId,
-        replyText: replyEnvelope?.replyText || reply,
+        replyText: reply,
         atSender: !isPrivateChatType(chatType) && replyEnvelope?.atSender !== false,
         retries: 2,
         waitMs: 500,
@@ -49,6 +49,12 @@
           groupId: isPrivateChatType(chatType) ? '' : groupId,
           senderId,
           replyText: persistedReplyText || reply
+        });
+        await maybeSendReasoningForward(replyEnvelope, {
+          chatType,
+          groupId: isPrivateChatType(chatType) ? '' : groupId,
+          userId: senderId,
+          senderId
         });
 
         // 如果触发了安全限制，标记 emoji
@@ -129,6 +135,12 @@
         ...buildRoutePlanLogPayload(routeExecutionPlan, {}, route)
       });
       maybeRunDeferredPersist(replyEnvelope);
+      await maybeSendReasoningForward(replyEnvelope, {
+        chatType,
+        groupId: isPrivateChatType(chatType) ? '' : groupId,
+        userId: senderId,
+        senderId
+      });
       if (replyEnvelope?.hasSafetyRestriction === true) {
         const sourceMessageId = String(effectiveMsg.message_id || msg.message_id || '').trim();
         if (sourceMessageId) {

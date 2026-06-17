@@ -253,6 +253,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
 
     try {
       const streamedReply = await requestStreamingReplyImpl(messagesToSend, upstreamStreamOptions, request.modelConfig);
+      const upstreamReasoningText = String(streamedReply?.reasoningText || '').trim();
       const originalMeta = readSanitizedMeta(sanitizeUserFacingText(extractReplyText(streamedReply, 'persisted'), {
         returnMeta: true
       }));
@@ -287,6 +288,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
         };
       }
       let finalReply = originalReply;
+      let reasoningText = upstreamReasoningText;
       let humanizerTimedOut = false;
       let humanizerFailed = false;
       let humanizerFailureReason = '';
@@ -315,6 +317,9 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       }
       const repairedFinal = await repairDegeneratedStreamReply(messagesToSend, state, finalReply, 'streaming_final');
       finalReply = repairedFinal.text;
+      if (repairedFinal.repaired || repairedFinal.repairFailed) {
+        reasoningText = '';
+      }
       const guardedFinalReply = applyGroupDirectStyleGuard(finalReply, request).text;
       const safeFinalMeta = readSanitizedMeta(sanitizeUserFacingText(guardedFinalReply, { returnMeta: true }));
       hasSafetyRestriction = Boolean(hasSafetyRestriction || safeFinalMeta.hasSafetyRestriction);
@@ -362,6 +367,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
       }
       return {
         finalReply: safeFinalReply,
+        reasoningText,
         hasSafetyRestriction,
         humanizerTimedOut,
         humanizerFailed,

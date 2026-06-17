@@ -465,7 +465,8 @@ function createRuntime(options = {}) {
 
     const normalized = {
       role: String(message?.role || 'assistant').trim() || 'assistant',
-      content: message?.content
+      content: message?.content,
+      reasoningText: String(message?.reasoningText || '').trim()
     };
     const toolCalls = normalizeArray(message?.tool_calls)
       .concat(parseToolCallsFromMarkup(message?.content))
@@ -1448,10 +1449,10 @@ function createRuntime(options = {}) {
     options.streamFallbackToNonStream = Boolean(out?.output?.stream?.fallbackToNonStream);
     options.persistedReplyText = String(out?.output?.persistedReplyText || out?.output?.finalReply || out?.output?.draftReply || '').trim();
     options.displayReplyText = String(out?.output?.displayReply || '').trim();
+    options.reasoningText = String(out?.output?.reasoningText || '').trim();
 
     const rawReply = out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '';
     const sanitized = sanitizeUserFacingText(rawReply, {
-      preserveThink: requestOptions?.cotDisplayOnce === true,
       returnMeta: true
     });
 

@@ -51,6 +51,48 @@ module.exports = (async () => {
   });
   assert.strictEqual(streamed.finalReply, 'streamed answer');
 
+  const reasoningHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => ({
+      segments: {},
+      compactionPlan: {
+        compactedSegments: [{ name: 'user', messages: input.userTurnMessages || [] }]
+      }
+    }),
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: []
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async () => ({
+      visibleText: 'visible with reasoning',
+      persistedText: 'persisted with reasoning',
+      reasoningText: 'explicit streamed reasoning'
+    }),
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
+    isHumanizerEnabledImpl: () => false,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    config: { AI_MAX_TOKENS: 3500 },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  const reasoningStreamed = await reasoningHelpers.streamDirectReply([{ role: 'user', content: 'hi' }], {
+    request: { routePolicyKey: 'direct_chat/default', modelConfig: {}, onDelta(text) { deltas.push(text); } },
+    memory: {},
+    output: {}
+  });
+  assert.strictEqual(reasoningStreamed.finalReply, 'persisted with reasoning');
+  assert.strictEqual(reasoningStreamed.reasoningText, 'explicit streamed reasoning');
+
   const objectReplyHelpers = createStreamingCoordinatorHelpers({
     sanitizeUserFacingText: (text) => String(text || ''),
     isChatLikeRoute: () => true,

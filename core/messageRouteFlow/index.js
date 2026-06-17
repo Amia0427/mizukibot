@@ -395,11 +395,31 @@ function createMessageRouteFlow(deps = {}) {
         ...payload
       }));
     };
-    const cotDisplayOnce = route?.meta?.cotDisplayOnce === true;
     let reply = '';
     let usedStreamingSend = false;
     let finalReplyOptions = null;
     let persistedReplyText = '';
+    let reasoningText = '';
+    const normalizeEnvelopeReplyText = (rawReply) => {
+      const rawText = String(rawReply || '');
+      if (!rawText.trim() || typeof normalizeUserFacingReply !== 'function') return rawText;
+      try {
+        return normalizeUserFacingReply(rawText, {
+          policyKey: getEffectivePolicyKey(routeExecutionPlan),
+          routeDebugKey: routeExecutionPlan?.routeDebugKey,
+          topRouteType: routeExecutionPlan?.topRouteType,
+          allowTools: routeExecutionPlan?.allowTools,
+          requestText: cleanText
+        });
+      } catch (error) {
+        console.warn('[dispatch] normalize envelope reply failed', {
+          routeDebugKey: routeExecutionPlan?.routeDebugKey,
+          policyKey: routeExecutionPlan?.policyKey,
+          error: error?.message || String(error || '')
+        });
+        return rawText;
+      }
+    };
 
     const promptBundle = buildRoutePromptBundle({
       route,
@@ -620,8 +640,6 @@ function createMessageRouteFlow(deps = {}) {
           requestTrace: cloneTraceForMeta(requestTrace),
           disableStream: disableStreamForReply || routeExecutionPlan.allowStream !== true,
           deferPersist: String(routeExecutionPlan?.topRouteType || '').trim().toLowerCase() === 'direct_chat',
-          cotDisplayOnce,
-          disableHumanizer: cotDisplayOnce,
           threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
         };
         const fallbackModelConfig = resolveVisionFallbackModelConfig(route, imageUrl, senderId);
@@ -634,9 +652,6 @@ function createMessageRouteFlow(deps = {}) {
           isQqGroup: chatType === 'group',
           isDirectMainModelReply: true
         })) {
-          replyOptions.disableStream = true;
-        }
-        if (cotDisplayOnce) {
           replyOptions.disableStream = true;
         }
         finalReplyOptions = replyOptions;
@@ -720,6 +735,7 @@ function createMessageRouteFlow(deps = {}) {
         });
         reply = await askAIDispatch(cleanText, userInfo, senderId, null, imageUrl, replyOptions);
         persistedReplyText = String(replyOptions?.persistedReplyText || reply || '').trim();
+        reasoningText = String(replyOptions?.reasoningText || '').trim();
         if (replyOptions.streamCompleted && replyOptions.streamHadOutput) {
           usedStreamingSend = true;
           const streamFinishStartedAt = Date.now();
@@ -750,9 +766,11 @@ function createMessageRouteFlow(deps = {}) {
       }
     }
 
+    const visibleReplyText = normalizeEnvelopeReplyText(reply);
     return buildReplyEnvelope(applyGroupDirectGuardToReplyEnvelopeInput({
-      replyText: reply,
+      replyText: visibleReplyText,
       persistedReplyText: persistedReplyText || reply,
+      reasoningText,
       allowStream: Boolean(routeExecutionPlan?.allowStream),
       atSender: true,
       routeContext: routeDecision,

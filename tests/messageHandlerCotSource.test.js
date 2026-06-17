@@ -62,7 +62,7 @@ function buildDirectRoute(rawText = '') {
       freshness: 'unknown'
     },
     meta: {
-      reason: 'cot-behavior-test',
+      reason: 'cot-removed-test',
       chatMode: 'text_chat',
       toolIntent: 'no_tools',
       responseIntent: 'answer'
@@ -72,7 +72,7 @@ function buildDirectRoute(rawText = '') {
 
 module.exports = (async () => {
   const snapshot = { ...process.env };
-  const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-cot-behavior-'));
+  const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-cot-removed-'));
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
@@ -86,15 +86,28 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_MODEL = ' ';
     process.env.DIRECT_CHAT_PLANNER_ENABLED = 'false';
     process.env.MEME_MANAGER_ENABLED = 'false';
+    process.env.NORMAL_FAST_REPLY_ENABLED = 'false';
 
     clearProjectCache();
 
+    const flowModule = require('../core/messageRouteFlow');
+    const originalCreateMessageRouteFlow = flowModule.createMessageRouteFlow;
+    const routeMetaSeen = [];
+    flowModule.createMessageRouteFlow = (deps) => {
+      const flow = originalCreateMessageRouteFlow(deps);
+      flow.dispatchFormalRoute = async (input) => {
+        routeMetaSeen.push({ ...(input?.route?.meta || {}) });
+        return {
+          replyText: '<think>hidden chain</think>display reply',
+          persistedReplyText: 'display reply'
+        };
+      };
+      return flow;
+    };
+
     const config = require('../config');
     const { createMessageHandler } = require('../core/messageHandler');
-
     const sentMessages = [];
-    const routeMetaSeen = [];
-
     const { handleIncomingMessage } = createMessageHandler({
       config,
       sendWithRetry: async (payload) => {
@@ -106,65 +119,22 @@ module.exports = (async () => {
     });
 
     await handleIncomingMessage(buildGroupMessage({
-      messageId: 'cot_ack',
+      messageId: 'cot_plain',
       rawText: '/cot'
     }));
 
-    assert.strictEqual(sentMessages.length, 1, '/cot should only acknowledge the one-shot command');
+    assert.strictEqual(routeMetaSeen.length, 1, '/cot should reach formal route as ordinary text');
+    assert.strictEqual(routeMetaSeen[0].cotDisplayOnce, undefined);
     assert.ok(
-      String(sentMessages[0]?.params?.message || '').includes('一次性思维链显示'),
-      '/cot acknowledgement should describe one-shot cot display'
+      !sentMessages.some((payload) => String(payload?.params?.message || '').includes('一次性思维链显示')),
+      '/cot should not send one-shot cot acknowledgement'
+    );
+    assert.ok(
+      sentMessages.some((payload) => String(payload?.params?.message || '').includes('display reply'))
+        && !sentMessages.some((payload) => String(payload?.params?.message || '').includes('<think>')),
+      'normal QQ reply should still send sanitized visible text'
     );
 
-    clearProjectCache();
-    const flowModule = require('../core/messageRouteFlow');
-    const originalCreateMessageRouteFlow = flowModule.createMessageRouteFlow;
-    flowModule.createMessageRouteFlow = (deps) => {
-      const flow = originalCreateMessageRouteFlow(deps);
-      flow.dispatchFormalRoute = async (input) => {
-        routeMetaSeen.push({ ...(input?.route?.meta || {}) });
-        return {
-          replyText: '<think>visible chain</think>display reply',
-          persistedReplyText: 'display reply'
-        };
-      };
-      return flow;
-    };
-
-    delete require.cache[require.resolve('../core/messageHandler')];
-    const patchedConfig = require('../config');
-    const { createMessageHandler: createPatchedMessageHandler } = require('../core/messageHandler');
-    const patchedSentMessages = [];
-    const { handleIncomingMessage: patchedHandleIncomingMessage } = createPatchedMessageHandler({
-      config: patchedConfig,
-      sendWithRetry: async (payload) => {
-        patchedSentMessages.push(payload);
-        return true;
-      },
-      detectIntentHybridOverride: async ({ rawText }) => buildDirectRoute(rawText),
-      generateSessionContextSummaryOverride: async () => ''
-    });
-
-    await patchedHandleIncomingMessage(buildGroupMessage({
-      messageId: 'cot_ack_2',
-      rawText: '/cot'
-    }));
-    await patchedHandleIncomingMessage(buildGroupMessage({
-      messageId: 'cot_first_2',
-      rawText: '第一条正常消息'
-    }));
-    await patchedHandleIncomingMessage(buildGroupMessage({
-      messageId: 'cot_second_2',
-      rawText: '第二条正常消息'
-    }));
-
-    assert.strictEqual(routeMetaSeen.length, 2, 'two normal messages should reach formal dispatch');
-    assert.strictEqual(routeMetaSeen[0].cotDisplayOnce, true, 'first normal message after /cot should display cot once');
-    assert.strictEqual(routeMetaSeen[1].cotDisplayOnce, false, 'cot display flag should be consumed after one normal turn');
-    assert.ok(
-      patchedSentMessages.some((payload) => String(payload?.params?.message || '').includes('<think>visible chain</think>display reply')),
-      'visible reply should keep the cot display text'
-    );
     flowModule.createMessageRouteFlow = originalCreateMessageRouteFlow;
   } finally {
     restoreEnv(snapshot);
@@ -183,7 +153,8 @@ module.exports = (async () => {
     askAIDispatch: async (_cleanText, _userInfo, _senderId, _customPrompt, _imageUrl, replyOptions) => {
       replyOptionsSeen.push({ ...(replyOptions || {}) });
       replyOptions.persistedReplyText = 'clean persisted reply';
-      return '<think>visible chain</think>display reply';
+      replyOptions.reasoningText = 'explicit reasoning';
+      return '<think>hidden chain</think>display reply';
     },
     askToolTaskLocally: async () => 'tool reply',
     runBackgroundToolTask: async () => ({ backgroundHandled: false, reply: 'background reply' }),
@@ -229,7 +200,7 @@ module.exports = (async () => {
     buildSafetyBoundaryRoutePrompt: () => null,
     buildLlmPerception: () => ({ text: 'perception' }),
     createStreamingDispatcher: () => ({ onDelta() {}, async finish() {} }),
-    normalizeUserFacingReply: (text) => text,
+    normalizeUserFacingReply: (text) => String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim(),
     getEffectivePolicyKey: () => 'direct_chat/default',
     maybeCaptureUnavailableFeatureRequest: () => {},
     shouldAutoDraftQzonePostRequest: () => false,
@@ -268,10 +239,12 @@ module.exports = (async () => {
     }
   });
 
-  assert.strictEqual(envelope.replyText, '<think>visible chain</think>display reply');
+  assert.strictEqual(envelope.replyText, 'display reply');
   assert.strictEqual(envelope.persistedReplyText, 'clean persisted reply');
-  assert.strictEqual(replyOptionsSeen[0].cotDisplayOnce, true);
-  assert.strictEqual(replyOptionsSeen[0].disableHumanizer, true);
+  assert.strictEqual(envelope.reasoningText, 'explicit reasoning');
+  assert.strictEqual(replyOptionsSeen[0].cotDisplayOnce, undefined);
+  assert.strictEqual(replyOptionsSeen[0].disableHumanizer, undefined);
+  assert.strictEqual(replyOptionsSeen[0].disableStream, false);
 
   console.log('messageHandlerCotSource.test.js passed');
 })().catch((error) => {

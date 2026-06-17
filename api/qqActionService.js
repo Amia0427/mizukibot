@@ -25,6 +25,7 @@ const {
 } = require('./qqActionService.imageDiary');
 
 const ADMIN_USER_IDS = new Set((config.ADMIN_USER_IDS || []).map((item) => String(item || '').trim()).filter(Boolean));
+const REASONING_FORWARD_NODE_MAX_CHARS = 3500;
 
 function isAdminUser(userId = '') {
   return ADMIN_USER_IDS.has(String(userId || '').trim());
@@ -141,6 +142,97 @@ async function sendPrivateMessage(userId = '', message = '', options = {}) {
     success: true,
     reason: 'private message sent'
   };
+}
+
+function splitTextIntoFixedChunks(text = '', maxChars = REASONING_FORWARD_NODE_MAX_CHARS) {
+  const raw = String(text || '');
+  const limit = Math.max(500, Math.floor(Number(maxChars) || REASONING_FORWARD_NODE_MAX_CHARS));
+  if (!raw) return [];
+  const chunks = [];
+  for (let index = 0; index < raw.length; index += limit) {
+    chunks.push(raw.slice(index, index + limit));
+  }
+  return chunks;
+}
+
+function buildReasoningForwardNodes(reasoningText = '', options = {}) {
+  const text = String(reasoningText || '').trim();
+  if (!text) return [];
+  const name = normalizeText(options.name || options.botName || '瑞希') || '瑞希';
+  const uin = normalizeText(options.uin || options.botUin || config.BOT_QQ || '0') || '0';
+  return splitTextIntoFixedChunks(text, options.maxNodeChars).map((content) => ({
+    type: 'node',
+    data: {
+      name,
+      uin,
+      content
+    }
+  }));
+}
+
+async function sendGroupForwardMessage(groupId = '', messages = [], options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const targetGroupId = normalizeText(groupId);
+  const forwardMessages = Array.isArray(messages) ? messages.filter(Boolean) : [];
+  if (!targetGroupId) throw new Error('groupId is required');
+  if (!forwardMessages.length) throw new Error('forward messages are required');
+  await actionClient.callAction('send_group_forward_msg', {
+    group_id: targetGroupId,
+    messages: forwardMessages
+  });
+  return {
+    success: true,
+    reason: 'group forward message sent'
+  };
+}
+
+async function sendPrivateForwardMessage(userId = '', messages = [], options = {}) {
+  const actionClient = options.actionClient || getNapCatActionClient();
+  const targetUserId = normalizeText(userId);
+  const forwardMessages = Array.isArray(messages) ? messages.filter(Boolean) : [];
+  if (!targetUserId) throw new Error('userId is required');
+  if (!forwardMessages.length) throw new Error('forward messages are required');
+  await actionClient.callAction('send_private_forward_msg', {
+    user_id: targetUserId,
+    messages: forwardMessages
+  });
+  return {
+    success: true,
+    reason: 'private forward message sent'
+  };
+}
+
+async function sendReasoningForwardMessage(input = {}, options = {}) {
+  const chatType = normalizeText(input.chatType || input.chat_type).toLowerCase() === 'private' ? 'private' : 'group';
+  const reasoningText = String(input.reasoningText || '').trim();
+  if (!reasoningText) return { success: false, skipped: true, reason: 'empty_reasoning' };
+  const messages = buildReasoningForwardNodes(reasoningText, {
+    botName: input.botName || options.botName,
+    botUin: input.botUin || options.botUin,
+    maxNodeChars: input.maxNodeChars || options.maxNodeChars
+  });
+  if (!messages.length) return { success: false, skipped: true, reason: 'empty_nodes' };
+  try {
+    if (chatType === 'private') {
+      await sendPrivateForwardMessage(input.userId || input.user_id, messages, options);
+    } else {
+      await sendGroupForwardMessage(input.groupId || input.group_id, messages, options);
+    }
+    return { success: true, reason: 'reasoning forward sent', nodeCount: messages.length };
+  } catch (error) {
+    console.warn('[reasoning-forward] send failed', {
+      chatType,
+      groupId: normalizeText(input.groupId || input.group_id),
+      userId: normalizeText(input.userId || input.user_id),
+      nodeCount: messages.length,
+      error: error?.message || String(error || '')
+    });
+    return {
+      success: false,
+      reason: error?.message || String(error || 'reasoning forward failed'),
+      nodeCount: messages.length
+    };
+  }
 }
 
 async function sendPrivatePoke(userId = '', options = {}) {
@@ -445,9 +537,13 @@ module.exports = {
   sendGroupImageMessage,
   sendGroupPoke,
   scheduleGroupMessage,
+  buildReasoningForwardNodes,
   sendGroupMessage,
+  sendGroupForwardMessage,
   sendPrivatePoke,
   sendPrivateMessage,
+  sendPrivateForwardMessage,
+  sendReasoningForwardMessage,
   setMessageEmojiLike,
   shouldAttemptBotDiaryImage,
   tryGenerateBotDiaryQzoneImage

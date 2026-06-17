@@ -264,6 +264,10 @@ function buildReplyTextVariants(rawReply, fallbackText, options = {}) {
   };
 }
 
+function normalizeReasoningText(value = '') {
+  return String(value || '').trim();
+}
+
 function buildModelCallTrace(context = {}, source = 'v2_model') {
   const requestTrace = normalizeRequestTrace(context?.requestTrace)
     || normalizeRequestTrace(context?.routeMeta?.requestTrace);
@@ -510,12 +514,16 @@ async function requestNonStreamingReply(messagesToSend, context = {}) {
       disableHumanizer: true
     }
   );
-  return reply;
+  return {
+    ...reply,
+    reasoningText: normalizeReasoningText(responseMessage?.reasoningText)
+  };
 }
 
 async function requestStreamingReply(messagesToSend, options = {}, modelConfig = null) {
   const parserState = { buffer: '' };
   let collected = '';
+  let reasoningCollected = '';
   let lastVisibleText = '';
   let firstVisibleOutputSeen = false;
   let cancelActiveFirstTokenTimer = null;
@@ -551,6 +559,10 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
   try {
     await withMainModelFallback(async (resolvedConfig) => {
       const requestStreamOnce = async (messages) => {
+        if (!String(collected || '').trim()) {
+          parserState.buffer = '';
+          reasoningCollected = '';
+        }
         const normalUserFirstTokenTimeoutMs = getNormalUserStreamFirstTokenTimeoutMs(resolvedConfig);
         const adminPrivateFirstTokenTimeoutMs = getAdminPrivateStreamFirstTokenTimeoutMs(resolvedConfig, options);
         const adminPrivateTotalTimeoutMs = getAdminPrivateStreamTotalTimeoutMs(resolvedConfig, options);
@@ -587,8 +599,13 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
               const parsed = extractSSEEvents(parserState, chunk);
               parserState.buffer = parsed.state.buffer;
               for (const event of parsed.events) {
-                if (!event || event.done || !event.delta) continue;
-                emitVisibleDelta(event.delta);
+                if (!event || event.done) continue;
+                if (event.reasoning) {
+                  reasoningCollected += event.reasoning;
+                }
+                if (event.delta) {
+                  emitVisibleDelta(event.delta);
+                }
               }
             }
           },
@@ -699,11 +716,19 @@ async function requestStreamingReply(messagesToSend, options = {}, modelConfig =
 
   const tailEvents = flushSSEState(parserState);
   for (const event of tailEvents) {
-    if (!event || event.done || !event.delta) continue;
-    emitVisibleDelta(event.delta);
+    if (!event || event.done) continue;
+    if (event.reasoning) {
+      reasoningCollected += event.reasoning;
+    }
+    if (event.delta) {
+      emitVisibleDelta(event.delta);
+    }
   }
 
-  return buildReplyTextVariants(collected, '', options);
+  return {
+    ...buildReplyTextVariants(collected, '', options),
+    reasoningText: normalizeReasoningText(reasoningCollected)
+  };
 }
 
 function finalizeStreamingReplyWithHumanizer(rawReply, fallbackText, options = {}) {
@@ -752,6 +777,7 @@ module.exports = {
   finalizeReplyText,
   finalizeStreamingReplyText,
   finalizeStreamingReplyWithHumanizer,
+  normalizeReasoningText,
   getAllowedToolNames,
   clearFilteredToolSchemaCache,
   getFilteredToolSchemaCacheStats,

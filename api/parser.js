@@ -155,6 +155,18 @@ function textFromAnthropicContent(content) {
     .join('');
 }
 
+function reasoningFromAnthropicContent(content) {
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((block) => {
+      if (!block || typeof block !== 'object') return '';
+      if (block.type === 'thinking' && typeof block.thinking === 'string') return block.thinking;
+      if (block.type === 'thinking_delta' && typeof block.thinking === 'string') return block.thinking;
+      return '';
+    })
+    .join('');
+}
+
 function textFromOutputContent(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -608,7 +620,10 @@ function extractReasoningText(obj) {
   return String(
     obj.reasoning ||
     obj.reasoning_content ||
+    obj.thinking ||
     obj?.delta?.thinking ||
+    obj?.delta?.reasoning ||
+    obj?.delta?.reasoning_content ||
     obj?.content_block?.thinking ||
     choice?.delta?.reasoning ||
     choice?.delta?.reasoning_content ||
@@ -659,12 +674,17 @@ function extractMessageContent(resp) {
   // Anthropic non-stream response format.
   if (data && data.type === 'message' && data.role === 'assistant') {
     const toolCalls = toolCallsFromAnthropicContent(data.content);
+    const reasoningText = extractReasoningText(data) || reasoningFromAnthropicContent(data.content);
     const msg = {
       role: 'assistant',
       content: textFromAnthropicContent(data.content)
     };
     if (toolCalls.length > 0) {
       msg.tool_calls = toolCalls;
+    }
+    if (reasoningText) {
+      msg.reasoningText = reasoningText;
+      latestReasoning = reasoningText;
     }
     return msg;
   }
@@ -674,12 +694,16 @@ function extractMessageContent(resp) {
 
   const msg = data?.choices?.[0]?.message;
   if (msg) {
-    latestReasoning = msg.reasoning_content || msg.reasoning || '';
+    const reasoningText = extractReasoningText({ choices: [{ message: msg }] });
+    latestReasoning = reasoningText || '';
     const normalized = { ...msg };
     if (Array.isArray(normalized.content)) {
       normalized.content = textFromContentArray(normalized.content);
     } else if (normalized.content && typeof normalized.content === 'object') {
       normalized.content = extractTextFromObject(normalized.content);
+    }
+    if (reasoningText) {
+      normalized.reasoningText = reasoningText;
     }
     return normalized;
   }
@@ -723,5 +747,6 @@ module.exports = {
   flushSSEState,
   extractUsageFromSSEObject,
   mergeUsageObjects,
+  extractReasoningText,
   getLatestReasoning: () => latestReasoning
 };

@@ -15,9 +15,17 @@ module.exports = (() => {
     'host should expose displayReplyText to upper layers'
   );
   assert.ok(
+    source.includes("options.reasoningText = String(out?.output?.reasoningText || '').trim();"),
+    'host should expose reasoningText to upper layers'
+  );
+  assert.ok(
     source.includes("const rawReply = out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '';")
       && source.includes('const sanitized = sanitizeUserFacingText(rawReply, {'),
     'host should prefer displayReply when returning the user-visible text'
+  );
+  assert.ok(
+    !source.includes('preserveThink: requestOptions?.cotDisplayOnce === true'),
+    'host should no longer preserve think blocks for /cot'
   );
   assert.ok(
     source.includes('out?.output?.hasSafetyRestriction === true'),

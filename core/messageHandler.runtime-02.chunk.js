@@ -331,6 +331,19 @@
   };
   // source-compat anchor: return replyRuntime.sendGroupReply({
 
+  async function maybeSendReasoningForward(replyEnvelope = {}, context = {}) {
+    const reasoningText = String(replyEnvelope?.reasoningText || '').trim();
+    if (!reasoningText) return false;
+    return Boolean((await sendReasoningForwardMessage({
+      chatType: context.chatType,
+      groupId: context.groupId,
+      userId: context.userId || context.senderId,
+      reasoningText
+    }, {
+      actionClient: globalNapCatActionClient
+    }))?.success);
+  }
+
   async function maybeHandlePrivateTypingNotice(noticeResult = null) {
     if (!noticeResult || noticeResult.type !== 'input_status') return false;
     if (!config.PRIVATE_TYPING_POKE_ENABLED) return true;
