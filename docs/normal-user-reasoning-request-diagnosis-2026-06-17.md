@@ -1,6 +1,6 @@
 # 普通用户模型推理链路真实请求诊断
 
-时间戳：2026-06-17 22:26 +08:00
+时间戳：2026-06-17 22:49 +08:00
 
 ## 小目标
 
@@ -42,12 +42,20 @@ node scripts/diagnose-provider-request.js --scenario main_reply
 | medium | `reasoning_effort=medium` | 200 | 3558ms | `B` | 无 | prompt 39 / completion 1 / total 160 |
 | off | 无 `reasoning_effort` | 200 | 4093ms | `B` | 无 | prompt 39 / completion 1 / total 159 |
 
+3. 继续验证 `gcli.ggchan.dev` 是否支持透出 reasoning 字段。
+
+- `GET /v1/models` 可正常返回模型列表，列表里能看到 `gemini-2.5-pro-maxthinking`、`gemini-2.5-pro-nothinking`、`agy-claude-opus-4-6-thinking` 等带思考语义的模型名。
+- `gemini-2.5-pro-maxthinking` 真实请求会返回 `choices[].message.reasoning_content`。
+- `gemini-2.5-pro-nothinking` 和当前普通主回复模型 `gemini-3-flash-preview` 真实请求都不返回 reasoning 字段。
+- `/v1/responses` 当前未找到可用端点，`404`。
+
 ## 结论
 
 - 不是“普通主回复本地没开思考”：普通主回复请求体确实携带 `reasoning_effort=medium`。
 - 不是“模型完全无思考能力”：真实逻辑题返回正确答案 `B`。
-- 当前 gcli Gemini OpenAI-compatible 响应没有返回显式 `reasoning` / `reasoning_content` 字段，所以 QQ reasoning 转发没有可转发来源。
-- `reasoning_effort=medium` 与关闭推理在这条短题上没有明显可观察差异；只能说明该上游不暴露推理字段，或该模型/网关对该参数的效果不可观测，不能证明模型没有内部推理。
+- gcli.ggchan.dev 本身支持透出 reasoning：`gemini-2.5-pro-maxthinking` 会返回 `reasoning_content`。
+- 当前普通主回复模型 `gemini-3-flash-preview` 不返回显式 `reasoning` / `reasoning_content` 字段，所以 QQ reasoning 转发没有可转发来源。
+- `reasoning_effort=medium` 与关闭推理在这条短题上没有明显可观察差异；这说明当前模型/网关组合对该参数不透出 reasoning，不等于模型内部没有推理。
 - 如果问题发生在 `normal_fast_reply`，那条链路确实被代码主动关闭 reasoning，用于低延迟快速回复；它和普通主回复不是同一参数策略。
 
 ## 验收结果
@@ -55,5 +63,9 @@ node scripts/diagnose-provider-request.js --scenario main_reply
 - `node scripts/diagnose-provider-request.js --scenario main_reply`：通过，请求体包含 `reasoning_effort`。
 - `medium` 真实请求：HTTP 200，正文 `B`，无显式 reasoning 字段。
 - `off` 对照请求：HTTP 200，正文 `B`，无显式 reasoning 字段。
+- `gemini-2.5-pro-maxthinking`：HTTP 200，正文 `OK`，返回 `choices[].message.reasoning_content`。
+- `gemini-2.5-pro-nothinking` / `gemini-3-flash-preview`：HTTP 200，正文 `OK`，无显式 reasoning 字段。
+- `GET /v1/models`：HTTP 200，可列出思考/非思考模型名。
+- `/v1/responses`：HTTP 404，当前不可用。
 
 小目标完成：普通主回复本地推理参数链路已验证有效；未发现本地代码把主回复思考模式关掉。普通快速回复关闭 reasoning 属于现有设计边界。
