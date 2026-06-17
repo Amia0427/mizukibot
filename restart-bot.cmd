@@ -340,6 +340,32 @@ function Get-RunningMainBotProcesses {
   }
 }
 
+function Test-ProcessLooksLikePostReplyWorker {
+  param([Parameter(Mandatory = $true)]$Process)
+
+  $commandLine = [string]$Process.CommandLine
+  if ([string]::IsNullOrWhiteSpace($commandLine)) {
+    return $false
+  }
+
+  $normalizedRoot = ([string]$repoRoot).TrimEnd('\')
+  return ($commandLine -match 'post-reply-worker\.js') -and (
+    $commandLine -like "*$normalizedRoot*" -or
+    $commandLine -match '(^|[\\/\s])scripts[\\/]post-reply-worker\.js(\s|$)' -or
+    $commandLine -match '(^|[\\/\s])post-reply-worker\.js(\s|$)'
+  )
+}
+
+function Get-RunningPostReplyWorkerProcesses {
+  try {
+    return @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+      $_.Name -eq 'node.exe' -and (Test-ProcessLooksLikePostReplyWorker -Process $_)
+    } | Sort-Object ProcessId)
+  } catch {
+    return @()
+  }
+}
+
 function Repair-MainPidFileFromProcess {
   param([Parameter(Mandatory = $true)]$MainProcess)
 
@@ -350,6 +376,22 @@ function Repair-MainPidFileFromProcess {
 
   try {
     Set-Content -Path $mainPidFile -Value $pidNum -Encoding utf8
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Repair-WorkerPidFileFromProcess {
+  param([Parameter(Mandatory = $true)]$WorkerProcess)
+
+  $pidNum = [int]$WorkerProcess.ProcessId
+  if ($pidNum -le 0) {
+    return $false
+  }
+
+  try {
+    Set-Content -Path $workerPidFile -Value $pidNum -Encoding utf8
     return $true
   } catch {
     return $false
@@ -395,6 +437,38 @@ function Get-MainBotStatusFromProcessScan {
   return [pscustomobject]@{ Name = $Name; PidFile = $mainPidFile; Pid = $pidNum; Running = $true; Match = $true; Process = 'node'; Detail = $detail }
 }
 
+function Get-WorkerStatusFromProcessScan {
+  param([Parameter(Mandatory = $true)][string]$Name)
+
+  $workerProcesses = @(Get-RunningPostReplyWorkerProcesses)
+  if ($workerProcesses.Count -le 0) {
+    return $null
+  }
+
+  $workerProcess = $workerProcesses[0]
+  $pidNum = [int]$workerProcess.ProcessId
+  $repaired = Repair-WorkerPidFileFromProcess -WorkerProcess $workerProcess
+  $detail = if ($repaired) { 'ok; pid file repaired from process scan' } else { 'ok; pid file repair failed' }
+  if ($workerProcesses.Count -gt 1) {
+    $detail = "$detail; duplicate worker processes=$($workerProcesses.Count)"
+  }
+
+  return [pscustomobject]@{ Name = $Name; PidFile = $workerPidFile; Pid = $pidNum; Running = $true; Match = $true; Process = 'node'; Detail = $detail }
+}
+
+function Get-ProcessStatusFromProcessScan {
+  param(
+    [Parameter(Mandatory = $true)][string]$Name,
+    [Parameter(Mandatory = $true)][string]$ExpectedCommandPattern
+  )
+
+  switch ($ExpectedCommandPattern) {
+    'index\.js' { return Get-MainBotStatusFromProcessScan -Name $Name }
+    'post-reply-worker\.js' { return Get-WorkerStatusFromProcessScan -Name $Name }
+    default { return $null }
+  }
+}
+
 function Get-PidFileProcessStatus {
   param(
     [Parameter(Mandatory = $true)][string]$Name,
@@ -408,26 +482,20 @@ function Get-PidFileProcessStatus {
   $pidValid = [int]::TryParse($pidText, [ref]$pidNum)
 
   if (-not $exists) {
-    if ($ExpectedCommandPattern -eq 'index\.js') {
-      $scanned = Get-MainBotStatusFromProcessScan -Name $Name
-      if ($null -ne $scanned) { return $scanned }
-    }
+    $scanned = Get-ProcessStatusFromProcessScan -Name $Name -ExpectedCommandPattern $ExpectedCommandPattern
+    if ($null -ne $scanned) { return $scanned }
     return [pscustomobject]@{ Name = $Name; PidFile = $PidFile; Pid = ''; Running = $false; Match = $false; Process = ''; Detail = 'pid file missing' }
   }
   if (-not $pidValid -or $pidNum -le 0) {
-    if ($ExpectedCommandPattern -eq 'index\.js') {
-      $scanned = Get-MainBotStatusFromProcessScan -Name $Name
-      if ($null -ne $scanned) { return $scanned }
-    }
+    $scanned = Get-ProcessStatusFromProcessScan -Name $Name -ExpectedCommandPattern $ExpectedCommandPattern
+    if ($null -ne $scanned) { return $scanned }
     return [pscustomobject]@{ Name = $Name; PidFile = $PidFile; Pid = $pidText; Running = $false; Match = $false; Process = ''; Detail = 'pid file invalid' }
   }
 
   $process = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
   if ($null -eq $process) {
-    if ($ExpectedCommandPattern -eq 'index\.js') {
-      $scanned = Get-MainBotStatusFromProcessScan -Name $Name
-      if ($null -ne $scanned) { return $scanned }
-    }
+    $scanned = Get-ProcessStatusFromProcessScan -Name $Name -ExpectedCommandPattern $ExpectedCommandPattern
+    if ($null -ne $scanned) { return $scanned }
     return [pscustomobject]@{ Name = $Name; PidFile = $PidFile; Pid = $pidNum; Running = $false; Match = $false; Process = ''; Detail = 'process not found' }
   }
 
@@ -440,8 +508,8 @@ function Get-PidFileProcessStatus {
   }
 
   $detail = if ($matches) { 'ok' } elseif (-not $isNode) { 'pid is not node' } else { 'command line mismatch' }
-  if (-not $matches -and $ExpectedCommandPattern -eq 'index\.js') {
-    $scanned = Get-MainBotStatusFromProcessScan -Name $Name
+  if (-not $matches) {
+    $scanned = Get-ProcessStatusFromProcessScan -Name $Name -ExpectedCommandPattern $ExpectedCommandPattern
     if ($null -ne $scanned) { return $scanned }
   }
   return [pscustomobject]@{ Name = $Name; PidFile = $PidFile; Pid = $pidNum; Running = $true; Match = $matches; Process = $processName; Detail = $detail }
