@@ -3,44 +3,35 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = (() => {
-  const scriptPath = path.join(__dirname, '..', 'restart-bot.cmd');
-  const script = fs.readFileSync(scriptPath, 'utf8');
+  const wrapperPath = path.join(__dirname, '..', 'restart-bot.cmd');
+  const powershellPath = path.join(__dirname, '..', 'scripts', 'restart-bot.ps1');
+  const wrapper = fs.readFileSync(wrapperPath, 'utf8');
+  const script = fs.readFileSync(powershellPath, 'utf8');
+
+  assert.ok(
+    wrapper.includes('scripts\\restart-bot.ps1') && wrapper.includes('%*'),
+    'cmd wrapper should forward all arguments to scripts/restart-bot.ps1'
+  );
+  assert.ok(
+    !wrapper.includes('POWERSHELL_PAYLOAD'),
+    'cmd wrapper should not use the old self-reading embedded payload'
+  );
 
   assert.ok(
     script.includes("bot-main-expected-shutdown.json"),
     'restart script should write the expected-shutdown marker consumed by the daemon'
   );
   assert.ok(
+    script.includes('restart-bot.log') && script.includes('Exit-RestartScript'),
+    'restart script should write a small stage log and exit explicitly'
+  );
+  assert.ok(
     script.includes('function Record-ExpectedMainBotShutdownForRestart'),
     'restart script should mark manual restarts before stopping the main bot'
   );
   assert.ok(
-    script.includes('function Get-RunningMainBotProcesses'),
-    'restart script should scan real main bot processes when the pid file is stale'
-  );
-  assert.ok(
-    script.includes('function Repair-MainPidFileFromProcess'),
-    'restart script should repair stale main pid files from a real running process'
-  );
-  assert.ok(
-    script.includes('function Get-RunningPostReplyWorkerProcesses'),
-    'restart script should scan real post-reply worker processes when the worker pid file is stale'
-  );
-  assert.ok(
-    script.includes('function Repair-WorkerPidFileFromProcess'),
-    'restart script should repair stale worker pid files from a real running process'
-  );
-  assert.ok(
-    script.includes('post-reply-worker\\.js') && script.includes('Get-WorkerStatusFromProcessScan'),
-    'restart health checks should accept a live post-reply worker found by process scan'
-  );
-  assert.ok(
-    script.includes("Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REASON' -DefaultValue 'manual_restart_script'"),
-    'restart marker should default manual restart as the reason'
-  );
-  assert.ok(
     script.includes('function Test-RestartConfirmed'),
-    'restart script should require an explicit confirmation before stopping processes'
+    'restart script should require explicit confirmation before stopping processes'
   );
   assert.ok(
     script.includes('restart skipped: explicit confirmation required'),
@@ -52,7 +43,70 @@ module.exports = (() => {
   );
   assert.ok(
     script.includes('status only; start skipped (restart requires "restart confirm")'),
-    'status-only output should make clear that it did not restart the bot'
+    'running restart-bot.cmd without arguments should default to status only'
+  );
+  assert.ok(
+    script.includes('function Get-RunningMainBotProcesses') &&
+      script.includes('function Repair-MainPidFileFromProcess') &&
+      script.includes('Get-MainBotStatusFromProcessScan'),
+    'restart script should scan and repair stale main bot pid state'
+  );
+  assert.ok(
+    script.includes('function Get-RunningPostReplyWorkerProcesses') &&
+      script.includes('function Repair-WorkerPidFileFromProcess') &&
+      script.includes('Get-WorkerStatusFromProcessScan') &&
+      script.includes('post-reply-worker\\.js'),
+    'restart script should scan and repair stale post-reply worker pid state'
+  );
+  assert.ok(
+    script.includes('function Test-PidIsRunningMainBot') &&
+      script.includes('Test-PidIsRunningMainBot -ProcessId $mainPid'),
+    'restart marker should only be written for a live main bot pid'
+  );
+  assert.ok(
+    script.includes('function Test-PidIsRunningPostReplyWorker') &&
+      script.includes('Test-PidIsRunningPostReplyWorker -ProcessId $workerPidFromFile') &&
+      script.includes('worker pid file ignored before restart'),
+    'restart should not stop a stale worker pid that no longer matches the worker command line'
+  );
+  assert.ok(
+    script.includes('main pid file ignored before restart') &&
+      script.includes('is not a live main bot'),
+    'restart should not stop a stale main pid that no longer matches the main bot command line'
+  );
+  assert.ok(
+    script.includes("Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REASON' -DefaultValue 'manual_restart_script'") &&
+      script.includes('MIZUKI_RESTART_SOURCE'),
+    'restart marker should preserve the default reason and trigger source'
+  );
+  assert.ok(
+    script.includes('function Start-BotRuntimeDirectly') &&
+      script.includes("Start-NodeRestartProcess -NodeExe $nodeExe -ArgumentList @('index.js')") &&
+      script.includes("Start-NodeRestartProcess -NodeExe $nodeExe -ArgumentList @('scripts/post-reply-worker.js')"),
+    'confirmed restart should start the main bot and worker directly'
+  );
+  assert.ok(
+    script.includes('function Start-NodeRestartProcess') &&
+      script.includes('-WindowStyle Hidden') &&
+      script.includes('-RedirectStandardOutput') &&
+      script.includes('-RedirectStandardError'),
+    'direct restart should launch hidden node processes with redirected logs'
+  );
+  assert.ok(
+    script.includes('function Wait-BotHealthy') &&
+      script.includes('bot/worker not healthy after synchronous restart'),
+    'confirmed restart should wait for final runtime health'
+  );
+  assert.ok(
+    script.includes('Write-RestartLog -Message') &&
+      script.includes('direct start using node=') &&
+      script.includes('health wait done'),
+    'restart script should log restart stage transitions for debugging'
+  );
+  assert.ok(
+    script.includes('function Wait-PidsGone') &&
+      script.includes('stopped process wait'),
+    'restart should wait briefly for killed processes to disappear'
   );
   assert.ok(
     script.includes('=== Bot Node Processes ===') && script.includes('=== Other Related Node Processes (diagnostic only) ==='),
@@ -63,43 +117,23 @@ module.exports = (() => {
     'diagnostic node process listing should be keyed from the runtime bot pid roles'
   );
   assert.ok(
-    script.includes('if /i "%~1"=="restart"') && script.includes('if /i "%MIZUKI_RESTART_CONFIRM%"=="confirm"'),
-    'confirmed restart detection should remain available for final status output'
-  );
-  assert.ok(
     script.includes('MIZUKI_RESTART_CONFIRM'),
     'remote restart should be able to pass confirmation through the environment'
   );
   assert.ok(
-    script.includes('MIZUKI_RESTART_PRINT_POST_STATUS'),
-    'confirmed restart should print a final status report in the current console'
+    !script.includes('Start-DaemonScheduledTaskNow'),
+    'restart path should not depend on asynchronous scheduled-task triggering'
   );
   assert.ok(
-    script.includes('[restart] confirmed restart completed; final status:') && script.includes('call "%~f0" status'),
-    'confirmed restart should not look silent after the daemon has been triggered'
+    !script.includes('& $powerShellExe') && !script.includes('-File $runnerPath'),
+    'restart path should not wait on a nested PowerShell daemon runner'
   );
   assert.ok(
     !script.includes('watch-bot-daemon-log.ps1') && !script.includes('-NoExit') && !script.includes('start "" powershell'),
     'restart script should not auto-open a separate log window'
   );
   assert.ok(
-    script.includes('MIZUKI_RESTART_SOURCE'),
-    'restart marker should preserve the trigger source for audit'
-  );
-  assert.ok(
-    script.includes('MIZUKI_RESTART_DEFAULT_STATUS'),
-    'running restart-bot.cmd without arguments should default to status only'
-  );
-  assert.ok(
-    script.includes('function Test-PidIsRunningMainBot'),
-    'restart script should verify a live main bot pid before writing the expected-shutdown marker'
-  );
-  assert.ok(
-    script.includes('Test-PidIsRunningMainBot -ProcessId $mainPid'),
-    'restart marker should not be written for stale lock pids'
-  );
-  assert.ok(
-    script.indexOf('Test-RestartConfirmed') < script.indexOf('Stop-BotForRestart'),
+    script.indexOf('Test-RestartConfirmed -CliArgs $commandArgs') < script.indexOf('foreach ($action in Stop-BotForRestart)'),
     'restart confirmation should be checked before stop/start logic'
   );
   assert.ok(
@@ -107,12 +141,9 @@ module.exports = (() => {
     'restart script should write the marker before killing the process tree'
   );
   assert.ok(
-    script.indexOf('$mainProcesses = @(Get-RunningMainBotProcesses)') < script.indexOf('Record-ExpectedMainBotShutdownForRestart -OwnerPid $mainPid'),
+    script.indexOf('$mainProcesses = @(Get-RunningMainBotProcesses -Processes $processes)') <
+      script.indexOf('Record-ExpectedMainBotShutdownForRestart -OwnerPid $mainPid'),
     'restart script should repair stale pid state before writing the expected-shutdown marker'
-  );
-  assert.ok(
-    script.indexOf('Test-PidIsRunningMainBot -ProcessId $mainPid') < script.indexOf('Record-ExpectedMainBotShutdownForRestart -OwnerPid $mainPid'),
-    'restart script should verify a live owner before writing the expected-shutdown marker'
   );
 
   console.log('restartBotScript.test.js passed');

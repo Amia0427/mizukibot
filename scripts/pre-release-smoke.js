@@ -150,36 +150,26 @@ function runCommand(name, command, args, options = {}) {
 async function runExpectedShutdownGuard(root) {
   const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-expected-shutdown-smoke-'));
   const restartScript = copySmokeFile(root, sandboxRoot, 'restart-bot.cmd');
+  copySmokeFile(root, sandboxRoot, 'scripts/restart-bot.ps1');
   copySmokeFile(root, sandboxRoot, 'scripts/windows-daemon-common.ps1');
   copySmokeFile(root, sandboxRoot, 'scripts/run-bot-daemon.ps1');
 
   const markerPath = path.join(sandboxRoot, 'data', 'bot-main-expected-shutdown.json');
   const daemonLogPath = path.join(sandboxRoot, 'data', 'bot-daemon.log');
+  const restartLogPath = path.join(sandboxRoot, 'data', 'restart-bot.log');
   const markerBefore = readFileOrNull(markerPath);
   const daemonLogBefore = readFileOrNull(daemonLogPath);
-  const powershell = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
-  const command = [
-    "$ErrorActionPreference = 'Stop'",
-    "$script = Get-Content -LiteralPath $env:MIZUKI_SMOKE_RESTART_SCRIPT -Raw",
-    "$marker = '# POWERSHELL_PAYLOAD'",
-    '$idx = $script.LastIndexOf($marker)',
-    "if ($idx -lt 0) { throw 'Missing PowerShell payload.' }",
-    '$payload = $script.Substring($idx + $marker.Length).TrimStart()',
-    '$block = [scriptblock]::Create($payload)',
-    "& $block -TaskName 'MizukiPreReleaseSmoke' -Restart -SkipInstall"
-  ].join('; ');
+  const restartLogBefore = readFileOrNull(restartLogPath);
+  const command = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : 'cmd.exe';
+  const commandArgs = ['/d', '/c', `call "${restartScript}" restart`];
 
   const result = await runCommand(
-    'expected_shutdown guard via sandboxed unconfirmed restart payload',
-    powershell,
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command],
+    'expected_shutdown guard via sandboxed unconfirmed restart script',
+    command,
+    commandArgs,
     {
       cwd: sandboxRoot,
-      env: {
-        ...process.env,
-        MIZUKI_RESTART_BOT_ROOT: sandboxRoot.endsWith(path.sep) ? sandboxRoot : sandboxRoot + path.sep,
-        MIZUKI_SMOKE_RESTART_SCRIPT: restartScript
-      },
+      env: process.env,
       timeoutMs: 60000
     }
   );
@@ -196,8 +186,12 @@ async function runExpectedShutdownGuard(root) {
   if (daemonLogBefore !== daemonLogAfter) {
     throw new Error('Unconfirmed restart changed bot-daemon.log.');
   }
+  const restartLogAfter = readFileOrNull(restartLogPath);
+  if (restartLogBefore === restartLogAfter) {
+    throw new Error('Unconfirmed restart did not record restart-bot.log guard evidence.');
+  }
 
-  console.log('[pre-release-smoke] expected_shutdown guard ok: marker/log unchanged');
+  console.log('[pre-release-smoke] expected_shutdown guard ok: marker/daemon log unchanged');
 }
 
 async function runTargetedTests(root) {
