@@ -201,16 +201,13 @@ module.exports = (async () => {
     requestNonStreamingReply: async (messages, context) => {
       seenMessages = messages;
       seenContext = context;
-      return { visibleText: '快速回复', persistedText: '快速回复', reasoningText: 'fast explicit reasoning' };
+      return { visibleText: '快速回复', persistedText: '快速回复', reasoningText: '稍微停了一下，先用轻一点的语气接住这句话。' };
     }
   });
 
   assert.strictEqual(result.replyText, '快速回复');
-  assert.strictEqual(result.reasoningText, 'fast explicit reasoning');
-  assert.ok(
-    String(result.reasoningForwardText || '').includes('刚才那一下'),
-    '快速回复应生成可外发的角色化摘要'
-  );
+  assert.strictEqual(result.reasoningText, '稍微停了一下，先用轻一点的语气接住这句话。');
+  assert.strictEqual(result.reasoningForwardText, '稍微停了一下，先用轻一点的语气接住这句话。');
   assert.ok(Array.isArray(seenMessages));
   assert.strictEqual(seenContext.disableTools, true, '应禁用工具');
   assert.deepStrictEqual(seenContext.allowedTools, [], '应清空工具');

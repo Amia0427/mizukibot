@@ -5,7 +5,9 @@ const UNSAFE_PATTERNS = [
   /\b(?:reasoning_content|chain[-\s]*of[-\s]*thought|internal_check)\b/i,
   /(?:系统提示词|开发者提示|隐藏推理|内部推理|完整推理链|思维链如下|推理过程如下)/i,
   /(?:我作为|作为)(?:一个)?(?:AI|模型|语言模型|assistant|助手)/i,
-  /(?:用户意图|user intent|the user wants|the user asks|final answer|draft reply)/i
+  /(?:用户意图|user intent|the user wants|the user asks|final answer|draft reply)/i,
+  /(?:respond naturally|sleepy|drowsy|late at night|very close relationship|the says|going to sleep)/i,
+  /(?:\b(?:the|and|as|with|for|from|into|that|this|very|late|night|close|relationship|naturally|sleepy|drowsy)\b[\s,.;:!?'"()\-]*){6,}/i
 ];
 
 function normalizeText(value = '') {
@@ -35,7 +37,7 @@ function looksUnsafeForForward(text = '') {
 
 function splitReadableSentences(text = '') {
   return normalizeText(text)
-    .split(/(?<=[。！？!?…])|\n+/)
+    .split(/(?<=[。！？!?])|\n+/)
     .map((item) => item.replace(/\s+/g, ' ').trim())
     .filter(Boolean);
 }
@@ -58,24 +60,25 @@ function pickReadableCore(reasoningText = '', finalReply = '') {
     : source.trim();
 }
 
+function containsJapaneseOrChinese(text = '') {
+  return /[\u3040-\u30ff\u3400-\u9fff]/.test(normalizeText(text));
+}
+
 function buildPersonaReasoningForwardText(input = {}) {
   const reasoningText = normalizeText(input.reasoningText);
   if (!reasoningText) return '';
   const core = pickReadableCore(reasoningText, input.finalReply || input.replyText || '');
   if (!core || core.length < FORWARD_MIN_CHARS || looksUnsafeForForward(core)) return '';
+  if (!containsJapaneseOrChinese(core)) return '';
 
-  const userText = normalizeText(input.userText || input.question || '');
-  const isQuestionLike = /[?？]|怎么|为什么|咋|吗|呢/.test(userText);
-  const prefix = isQuestionLike ? '嗯……我刚才脑子里其实绕了一下：' : '刚才那一下，我心里大概是这样转的：';
-  const text = `${prefix}${core}`;
-  if (looksUnsafeForForward(text)) return '';
-  return text.length > FORWARD_MAX_CHARS
-    ? `${text.slice(0, FORWARD_MAX_CHARS - 1).replace(/[，、：:；;,.!?！？]?\s*$/, '').trim()}…`
-    : text;
+  return core.length > FORWARD_MAX_CHARS
+    ? `${core.slice(0, FORWARD_MAX_CHARS - 1).replace(/[，、：:；;,.!?！？]?\s*$/, '').trim()}…`
+    : core;
 }
 
 module.exports = {
   buildPersonaReasoningForwardText,
+  containsJapaneseOrChinese,
   looksUnsafeForForward,
   stripReasoningMarkup
 };

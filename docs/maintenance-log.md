@@ -6,6 +6,7 @@
 - 验证：`node --check scripts\pre-release-smoke.js`、`node --check tests\mainModelFallbackRestartRecovery.test.js`、目标测试集合通过；`npm run smoke:pre-release -- --root D:\waifu` 通过；`npm run smoke:pre-release -- --root D:\mizuki_release` 通过，配置探针输出 `regular=2000, anchored=15000, atBot=12000, private=12000, fallbackCooldownMs=600000`。
 - 发行目录后置复核：沙盒化复跑后 `lockBefore=30364 / lockAfter=30364 / dataCountBefore=0 / dataCountAfter=0`，说明脚本本身不再新增发行目录运行态文件。首次非沙盒验收曾生成 `D:\mizuki_release\.mizukibot.lock` 和空 `D:\mizuki_release\data`，按删除需确认规则暂未移除。
 - 小目标已完成：`D:\mizuki_release` 具备发布前最小冒烟门禁，三类重点风险已有一条命令复验。
+- 提交后记录 2026-06-17 20:04 +08:00：已提交 `996a37a`（`test: add pre-release smoke checks`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-17 13:28
 
@@ -551,3 +552,4 @@
 - 范围控制：未增加第二次模型调用；未从正文 `<think>` 抽取；raw `reasoningText` 仍只作为内部字段保留；记忆、画像、recall、post-reply 持久化边界未改。
 - 验收：`node scripts\run-tests.js tests\parserModelResponseFormats.test.js tests\modelServiceReasoning.test.js tests\qqActionServiceReasoningForward.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\messageHandlerReasoningForwardSource.test.js`、`node scripts\run-tests.js tests\qqActionServiceReasoningForward.test.js tests\messageHandlerReasoningForwardSource.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\messageRouteFlowGroupStreaming.test.js tests\normalFastReplyRuntime.test.js tests\runtimeHostCotSource.test.js tests\messageHandlerCotSource.test.js tests\reasoningForwardPersonaPrompt.test.js`、`npm run check:prompts`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。
 - 小目标已完成：QQ reasoning 外发内容从 provider 原始推理改为可见、安全、短的瑞希风格思考小记。
+- 提交后记录 2026-06-17 23:15 +08:00：已将固定兜底前缀移除，QQ reasoning 外发只接受清理后的自然短想法；英文导演提示样例 `The says "喜欢你"...respond naturally...` 已验证返回空，不再被模板包装外发。验收：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js` 通过。小目标已完成：不再有固定兜底句，也不再用它套原始推理。

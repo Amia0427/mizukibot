@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-17 23:15 +08:00**：收紧 QQ reasoning 可见小记外发规则。移除 `reasoningForwardText` 的固定兜底开场白，不再把 raw reasoning 包装成“嗯……我刚才脑子里其实绕了一下”之类模板；清理后若是中文/日文自然短想法则原样外发，若是英文导演提示、模型工作语或分析痕迹则跳过。提示词补充“优先中文、瑞希口吻、不要固定开场白”，但最终以本地闸门保证。验收：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js` 通过；真实样例 `The says "喜欢你"...respond naturally...` 生成空外发文本。小目标完成：QQ 外发不再出现固定兜底句，也不再把英文导演提示套壳发出。
+
 **2026-06-17 23:02 +08:00**：修复 `restart-bot.cmd restart confirm` 完成后自动弹出日志窗口的问题。根因是脚本尾部仍会 `start "" powershell -NoExit -File scripts\watch-bot-daemon-log.ps1`，确认重启成功后又开一个独立窗口。现重启脚本只在当前控制台输出最终 status，不再自动打开日志窗口；需要看日志时手动运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\watch-bot-daemon-log.ps1`。验收：`node tests\restartBotScript.test.js`、PowerShell payload parse、`cmd /c restart-bot.cmd status` 通过。小目标完成：重启脚本不再主动弹窗。
 
 **2026-06-17 22:51 +08:00**：QQ reasoning 合并转发改为角色化可见思考小记。主回复仍只发送正常正文，provider raw `reasoningText` 继续作为内部字段保留；QQ 合并转发只读取 `reasoningForwardText`，由本地规则清洗/压缩成瑞希风格短想法，若像完整推理链、模型自述、分析报告或系统痕迹则跳过，不回退 raw reasoning。验收：`node scripts\run-tests.js tests\parserModelResponseFormats.test.js tests\modelServiceReasoning.test.js tests\qqActionServiceReasoningForward.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\messageHandlerReasoningForwardSource.test.js`、`npm run check:prompts`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。小目标完成：QQ 外发不再直接泄露 provider 原始 reasoning，而是只发送安全可见摘要。
