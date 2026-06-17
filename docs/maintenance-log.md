@@ -5,6 +5,7 @@
 - 最小修复：`restart-bot.cmd` 改成 5 行 wrapper，真实逻辑移到 `scripts\restart-bot.ps1`；确认重启直接隐藏启动 `node index.js` 和 `scripts/post-reply-worker.js`，等待真实健康并写 `data\restart-bot.log`；保留未确认 restart 只提示、不写 marker、不停进程；`index.js` 对 self-owned lock 先替换再继续启动；停止进程前只接受仍匹配 main/worker 命令行的 pid 文件，避免 stale pid 复用误杀。
 - 验证：`node tests\restartBotScript.test.js`、`node tests\mainBotSingleInstanceLock.test.js`、`node tests\remoteRestart.test.js`、`node --check index.js`、`node --check scripts\pre-release-smoke.js`、`scripts\restart-bot.ps1` AST parse、`node scripts\pre-release-smoke.js --root D:\waifu --skip-restart-payload`、`cmd /c restart-bot.cmd restart`、`cmd /c restart-bot.cmd restart confirm`、`cmd /c restart-bot.cmd status` 均通过；最终 main bot PID=47996、post-reply worker PID=13608 Running。
 - 小目标已完成：重启入口已收口到同步直启路径，不再依赖计划任务触发或嵌套 PowerShell 等待，失败时可从 `data\restart-bot.log` 看到阶段证据。
+- 提交后记录 2026-06-18 00:56 +08:00：已提交 `e58862a`（`fix: rewrite windows restart script`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-17 20:04
 
