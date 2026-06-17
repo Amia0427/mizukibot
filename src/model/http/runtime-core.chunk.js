@@ -117,6 +117,9 @@ const ANTHROPIC_DYNAMIC_SYSTEM_MARKERS = [
 const ANTHROPIC_STABLE_SYSTEM_TEXTS = new Set(
   [
     String(config.SYSTEM_PROMPT || '').trim(),
+    ...(Array.isArray(config.SYSTEM_PROMPT_BLOCKS)
+      ? config.SYSTEM_PROMPT_BLOCKS.map((block) => String(block?.content || '').trim())
+      : []),
     String(HUMANIZER_SYSTEM_PROMPT || '').trim(),
     String(require('../../../utils/promptSecurity').buildSecuritySystemPrompt?.() || '').trim(),
     String(require('../../../utils/personaModules').loadPersonaModuleText?.('core_baseline') || '').trim()
@@ -247,7 +250,7 @@ function findAnthropicAutoCacheSystemBlockIndex(systemBlocks = []) {
     if (isAnthropicStableSystemText(items[index]?.text)) return index;
   }
 
-  return items.length - 1;
+  return -1;
 }
 
 function messageContentHasAnthropicCacheControl(message) {
@@ -370,40 +373,8 @@ function normalizeAnthropicCacheBreakpointSlots(requestBody = {}) {
     });
   }
 
-  const topLevelCacheControl = extractAnthropicCacheControl(requestBody);
   const strippedBody = stripCacheControlFields(nextBody);
-  if (!topLevelCacheControl || slotsUsed >= ANTHROPIC_MAX_CACHE_BREAKPOINTS) return strippedBody;
-  return applyAnthropicCacheControl(strippedBody, topLevelCacheControl);
-}
-
-function getLastCacheableBlockCacheControl(requestBody = {}) {
-  const messages = Array.isArray(requestBody.messages) ? requestBody.messages : [];
-  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
-    const content = Array.isArray(messages[messageIndex]?.content) ? messages[messageIndex].content : [];
-    for (let blockIndex = content.length - 1; blockIndex >= 0; blockIndex -= 1) {
-      const block = content[blockIndex];
-      if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
-      if (block.type === 'text' && !normalizeText(block.text)) continue;
-      return extractAnthropicCacheControl(block);
-    }
-  }
-
-  const systemBlocks = normalizeAnthropicSystemBlocks(requestBody.system);
-  for (let index = systemBlocks.length - 1; index >= 0; index -= 1) {
-    const block = systemBlocks[index];
-    if (!block || typeof block !== 'object' || Array.isArray(block)) continue;
-    if (block.type === 'text' && !normalizeText(block.text)) continue;
-    return extractAnthropicCacheControl(block);
-  }
-
-  const tools = Array.isArray(requestBody.tools) ? requestBody.tools : [];
-  for (let index = tools.length - 1; index >= 0; index -= 1) {
-    if (tools[index] && typeof tools[index] === 'object' && !Array.isArray(tools[index])) {
-      return extractAnthropicCacheControl(tools[index]);
-    }
-  }
-
-  return null;
+  return strippedBody;
 }
 
 function applyAutoAnthropicPromptCaching(requestBody = {}) {
@@ -441,13 +412,19 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
   const systemBlocks = normalizeAnthropicSystemBlocks(nextBody.system);
   let hasSystemCacheControl = systemBlocks.some((block) => blockHasAnthropicCacheControl(block));
   if (systemBlocks.length > 0 && !systemBlocks.some((block) => blockHasAnthropicCacheControl(block))) {
-    nextBody.system = applyAnthropicCacheControlToBlockIndex(
+    const systemCacheIndex = findAnthropicAutoCacheSystemBlockIndex(systemBlocks);
+    const nextSystemBlocks = applyAnthropicCacheControlToBlockIndex(
       systemBlocks,
-      findAnthropicAutoCacheSystemBlockIndex(systemBlocks),
+      systemCacheIndex,
       defaultCacheControl
     );
-    hasSystemCacheControl = true;
-    mutated = true;
+    hasSystemCacheControl = nextSystemBlocks.some((block) => blockHasAnthropicCacheControl(block));
+    if (hasSystemCacheControl) {
+      nextBody.system = nextSystemBlocks;
+      mutated = true;
+    } else if (anthropicSystemUsesArray(nextBody.system)) {
+      nextBody.system = systemBlocks;
+    }
   } else if (anthropicSystemUsesArray(nextBody.system)) {
     nextBody.system = systemBlocks;
   }
@@ -464,27 +441,6 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
             }
           : message
       ));
-      mutated = true;
-    }
-  }
-
-  const existingTopLevelCacheControl = extractAnthropicCacheControl(nextBody);
-  if (!existingTopLevelCacheControl) {
-    const explicitBreakpointCount = (
-      (Array.isArray(nextBody.tools) ? nextBody.tools : []).filter((tool) => extractAnthropicCacheControl(tool)).length
-      + normalizeAnthropicSystemBlocks(nextBody.system).filter((block) => extractAnthropicCacheControl(block)).length
-      + (Array.isArray(nextBody.messages) ? nextBody.messages : []).reduce((sum, message) => {
-        const content = Array.isArray(message?.content) ? message.content : [];
-        return sum + content.filter((block) => extractAnthropicCacheControl(block)).length;
-      }, 0)
-    );
-    const lastBlockCacheControl = getLastCacheableBlockCacheControl(nextBody);
-    const lastBlockUsesDifferentTtl = Boolean(
-      lastBlockCacheControl
-      && normalizeText(lastBlockCacheControl.ttl || defaultCacheControl.ttl) !== normalizeText(defaultCacheControl.ttl)
-    );
-    if (explicitBreakpointCount < ANTHROPIC_MAX_CACHE_BREAKPOINTS && !lastBlockUsesDifferentTtl) {
-      nextBody.cache_control = defaultCacheControl;
       mutated = true;
     }
   }

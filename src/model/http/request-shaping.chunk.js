@@ -100,6 +100,9 @@ function getAnthropicOriginalMaxTokens(requestBody = {}) {
 }
 
 function modelUsesAnthropicAdaptiveThinking(model = '') {
+  const rawEnabled = normalizeText(process.env.ANTHROPIC_ADAPTIVE_THINKING_ENABLED || config.ANTHROPIC_ADAPTIVE_THINKING_ENABLED).toLowerCase();
+  if (!['1', 'true', 'yes', 'on'].includes(rawEnabled)) return false;
+
   const normalized = normalizeText(model).toLowerCase().replace(/^models\//i, '');
   if (!normalized) return false;
   return /^claude-opus-4-6(?:[-_:]|$)/i.test(normalized)
@@ -470,6 +473,20 @@ function mapToolChoiceToAnthropic(toolChoice) {
   return null;
 }
 
+function normalizeAnthropicToolChoiceForThinking(requestBody = {}) {
+  if (!requestBody || typeof requestBody !== 'object' || !requestBody.thinking || !requestBody.tool_choice) {
+    return requestBody;
+  }
+
+  const toolChoiceType = normalizeText(requestBody.tool_choice.type || requestBody.tool_choice).toLowerCase();
+  if (toolChoiceType === 'auto' || toolChoiceType === 'none') return requestBody;
+
+  return {
+    ...requestBody,
+    tool_choice: { type: 'auto' }
+  };
+}
+
 function isAnthropicServerTool(tool) {
   return String(tool?.type || '').trim() === 'web_search_20250305';
 }
@@ -662,10 +679,13 @@ async function buildAnthropicRequestBody(body = {}) {
   if (thinkingBudget > 0) {
     requestBody.max_tokens = Math.max(visibleMaxTokens + thinkingBudget, 1200);
     requestBody.thinking = buildAnthropicThinkingConfig(requestBody.model, thinkingBudget);
+    delete requestBody.temperature;
+    delete requestBody.top_p;
+    delete requestBody.top_k;
     originalMaxTokens = visibleMaxTokens;
   }
 
-  const finalRequestBody = applyAutoAnthropicPromptCaching(requestBody);
+  const finalRequestBody = applyAutoAnthropicPromptCaching(normalizeAnthropicToolChoiceForThinking(requestBody));
   if (originalMaxTokens > 0) {
     setAnthropicOriginalMaxTokens(finalRequestBody, originalMaxTokens);
   }
@@ -695,6 +715,7 @@ module.exports = {
   mapToolChoiceToAnthropic,
   mapToolSchemaToAnthropic,
   modelUsesAnthropicAdaptiveThinking,
+  normalizeAnthropicToolChoiceForThinking,
   normalizeReasoningEffort,
   requestUsesExtendedSampling,
   requestUsesReasoning,
