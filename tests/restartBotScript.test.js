@@ -23,6 +23,18 @@ module.exports = (() => {
     'restart script should repair stale main pid files from a real running process'
   );
   assert.ok(
+    script.includes('function Get-RunningPostReplyWorkerProcesses'),
+    'restart script should scan real post-reply worker processes when the worker pid file is stale'
+  );
+  assert.ok(
+    script.includes('function Repair-WorkerPidFileFromProcess'),
+    'restart script should repair stale worker pid files from a real running process'
+  );
+  assert.ok(
+    script.includes('post-reply-worker\\.js') && script.includes('Get-WorkerStatusFromProcessScan'),
+    'restart health checks should accept a live post-reply worker found by process scan'
+  );
+  assert.ok(
     script.includes("Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REASON' -DefaultValue 'manual_restart_script'"),
     'restart marker should default manual restart as the reason'
   );
