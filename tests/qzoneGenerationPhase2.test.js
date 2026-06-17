@@ -64,6 +64,7 @@ assert.ok(plan.variationProfile.freshnessMode);
 assert.ok(plan.variationProfile.voiceEdge);
 assert.ok(plan.tropeFingerprint);
 assert.ok(plan.theme && plan.theme.key);
+assert.ok(require('../core/qzoneGenerationPhase2').buildPlanPrompt(plan).includes('moment_texture'));
 
 const candidates = [
   {
@@ -91,6 +92,28 @@ assert.ok(picked.selected);
 assert.ok(picked.selected.text.includes('窗'));
 assert.ok(typeof picked.selected.circleNaturalnessScore === 'number');
 assert.ok(typeof picked.selected.tropeCollisionScore === 'number');
+
+const polishedPicked = pickBestCandidate([
+  {
+    plan,
+    variantType: CANDIDATE_VARIANT_TYPES[0],
+    text: '分享一下我最近想说的心情，生活教会我每一天都要认真面对。',
+    rejected: false,
+    rejectionReason: ''
+  },
+  {
+    plan,
+    variantType: CANDIDATE_VARIANT_TYPES[0],
+    text: '刚刚把杯子放回桌边，结果灯一暗，我又懒得解释自己为什么突然不说话了。',
+    rejected: false,
+    rejectionReason: ''
+  }
+], {
+  source: 'bot_diary',
+  recentHistory: require('../core/qzoneGenerationState').getRecentQzoneHistory(),
+  plan
+});
+assert.ok(polishedPicked.selected.text.includes('刚刚'));
 
 const consistency = evaluateImageConsistency({
   text: '我把窗帘拉开一点以后，灯光刚好落在杯口上。',

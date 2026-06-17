@@ -9,8 +9,12 @@ process.env.QZONE_GENERATION_HISTORY_FILE = path.join(tempRoot, 'qzone_generatio
 process.env.QZONE_GENERATION_LOG_FILE = path.join(tempRoot, 'qzone_generation_log.json');
 process.env.QZONE_VISUAL_HISTORY_FILE = path.join(tempRoot, 'qzone_visual_history.json');
 process.env.API_KEY = process.env.API_KEY || 'test-key';
+process.env.MEMORY_V3_ENABLED = 'false';
+process.env.MEMORY_CLI_ENABLED = 'false';
+process.env.PROFILE_JOURNAL_DB_ENABLED = 'false';
+process.env.PERSONA_WORLDBOOK_SEARCH_ENABLED = 'false';
 
-const { generateBotDiaryDraft, generateGenericQzoneDraft } = require('../api/qzoneDiaryService');
+const { buildGenericAutodraftPrompt, generateBotDiaryDraft, generateGenericQzoneDraft } = require('../api/qzoneDiaryService');
 const { loadQzoneGenerationLog } = require('../core/qzoneGenerationPhase2');
 
 (async () => {
@@ -49,6 +53,11 @@ const { loadQzoneGenerationLog } = require('../core/qzoneGenerationPhase2');
   assert.ok(botDiary.meta.spark || botDiary.meta.plan?.variationProfile?.spark);
   assert.ok(botDiary.meta.tropeFingerprint);
   assert.ok(botDiary.meta.variantType);
+
+  const genericPrompt = buildGenericAutodraftPrompt('写一条偏冷一点的空间说说');
+  assert.ok(genericPrompt.includes('朋友圈/说说'));
+  assert.ok(genericPrompt.includes('生活碎片'));
+  assert.ok(genericPrompt.includes('24 到 120 字'));
 
   const genericDraft = await generateGenericQzoneDraft({
     requestText: '写一条偏冷一点的空间说说',

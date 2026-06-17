@@ -515,3 +515,12 @@
 - 范围控制：只写示例模板，未读取或复制真实 `.env` 的值；密钥、Token 和真实端点均保持空值或 `placeholder`。
 - 验收：源模板与发行模板重复键检查均为 255 个唯一键；敏感模式扫描无命中。
 - 小目标已完成：发行版环境变量模板已更新到当前项目主要运行面，且不携带敏感数据。
+
+## 运行维护 2026-06-17 19:52
+
+- 改进 mizukibot QQ 空间发送真实感。
+- 根因：当前 Qzone 链路能生成和发布，但 generic/autodraft 更像“日记正文/文案”，自动发布也是生成后直接提交，缺少朋友圈/说说常见的短句、临时动作和发送前停顿。
+- 最小修复：借鉴 `D:\echo` 朋友圈规则，把 Qzone 计划/提示词/候选评分收口为“生活碎片、短句、动作、小物件、吐槽、临时情绪”；新增 `QZONE_HUMANIZE_PUBLISH_DELAY_ENABLED`、`QZONE_HUMANIZE_PUBLISH_DELAY_MIN_MS`、`QZONE_HUMANIZE_PUBLISH_DELAY_MAX_MS`，自动发布前按内容和计划指纹做确定性短暂停顿；Qzone 文本发布和图片上传请求补 `Accept`、`Accept-Language`、`Cache-Control`、`Pragma` 常见浏览器头。
+- 范围控制：未改 QQ 空间登录、cookie/gtk、权限路由、NapCat 连接、自动发布开关默认安全策略。
+- 验收：`node --check api\qzoneAgentService.js; node --check api\qzoneDiaryService\index.js; node --check core\qzoneGenerationPhase2.js; node --check api\qzoneClient.js; node --check config\index.js; node --check tests\qzoneClient.test.js`、`node tests\qzoneClient.test.js`、`node tests\qzoneAgentService.test.js`、`node tests\qzoneGenerationPhase2.test.js`、`node tests\qzoneDiaryServicePhase2.test.js`、`node tests\qqActionService.test.js` 通过。
+- 小目标已完成：QQ 空间内容和自动发布节奏更接近真人发说说，同时保留原有安全/权限边界。
