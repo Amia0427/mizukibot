@@ -211,6 +211,14 @@ module.exports = (() => {
   assert.strictEqual(reasoningStream.events[0].delta, '');
   assert.strictEqual(reasoningStream.events[1].delta, '正文');
 
+  const anthropicThinkingStream = extractSSEEvents(
+    { buffer: '' },
+    'data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"anthropic r1"}}\n\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"正文"}}\n\n'
+  );
+  assert.strictEqual(anthropicThinkingStream.events[0].reasoning, 'anthropic r1');
+  assert.strictEqual(anthropicThinkingStream.events[0].delta, '');
+  assert.strictEqual(anthropicThinkingStream.events[1].delta, '正文');
+
   const openAiFinish = extractSSEEvents(
     { buffer: '' },
     'data: {"choices":[{"delta":{},"finish_reason":"length"}]}\n\n'

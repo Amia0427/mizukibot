@@ -624,9 +624,12 @@ function extractReasoningText(obj) {
     obj?.delta?.thinking ||
     obj?.delta?.reasoning ||
     obj?.delta?.reasoning_content ||
+    (obj?.delta?.type === 'thinking_delta' ? obj?.delta?.thinking : '') ||
     obj?.content_block?.thinking ||
+    (obj?.content_block?.type === 'thinking' ? obj?.content_block?.thinking : '') ||
     choice?.delta?.reasoning ||
     choice?.delta?.reasoning_content ||
+    (choice?.delta?.type === 'thinking_delta' ? choice?.delta?.thinking : '') ||
     choice?.message?.reasoning ||
     choice?.message?.reasoning_content ||
     ''
