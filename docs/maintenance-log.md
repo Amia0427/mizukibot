@@ -5,6 +5,7 @@
 - 最小修复：管理员 `/restart` 改为必须 `/restart confirm` 或 `/restart 确认`；远程重启显式调用 `restart-bot.cmd restart confirm` 并传 source/request/message/group/command 元数据；`restart-bot.cmd restart` 未确认时不写 marker、不停进程、外层也不打开 watch-log 窗口；daemon 只消费未过期、未 consumed、PID 严格匹配的 marker，命中后写回 `consumedAt/consumedBy*`，诊断展示 source/recorded/consumed/request。
 - 验证：`node tests\messageAdminCommands.test.js`、`node tests\remoteRestart.test.js`、`node tests\restartBotScript.test.js`、`node tests\windowsDaemonScript.test.js`、`node tests\mainBotEarlyExitDiagnostics.test.js`、`node tests\mainBotRestartDiagnostics.test.js` 通过；`node --check` 覆盖 `utils\remoteRestart.js`、`utils\mainBotRestartDiagnostics.js`、`core\messageAdminCommands.js`、`index.js`；`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过；`scripts\run-bot-daemon.ps1` 和 `restart-bot.cmd` payload PowerShell parse 通过；实际 `cmd /c restart-bot.cmd restart` 返回 0、输出确认要求，marker hash 不变、`data/bot-daemon.log` 长度不变、`.mizukibot.lock=14572` 且仍是 `"C:\Program Files\nodejs\node.exe" index.js`。
 - 小目标已完成：夜间误重启链路已收口到显式确认、来源审计和 marker 一次性消费；未执行真实 `restart confirm`，避免无必要重启当前主 bot。
+- 提交后记录 2026-06-17 09:18 +08:00：已提交 `35c225a`（`fix: harden windows expected shutdown restarts`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-17 01:18
 
