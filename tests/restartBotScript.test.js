@@ -64,7 +64,7 @@ module.exports = (() => {
   );
   assert.ok(
     script.includes('if /i "%~1"=="restart"') && script.includes('if /i "%MIZUKI_RESTART_CONFIRM%"=="confirm"'),
-    'only confirmed restart should open the outer watch-log window'
+    'confirmed restart detection should remain available for final status output'
   );
   assert.ok(
     script.includes('MIZUKI_RESTART_CONFIRM'),
@@ -77,6 +77,10 @@ module.exports = (() => {
   assert.ok(
     script.includes('[restart] confirmed restart completed; final status:') && script.includes('call "%~f0" status'),
     'confirmed restart should not look silent after the daemon has been triggered'
+  );
+  assert.ok(
+    !script.includes('watch-bot-daemon-log.ps1') && !script.includes('-NoExit') && !script.includes('start "" powershell'),
+    'restart script should not auto-open a separate log window'
   );
   assert.ok(
     script.includes('MIZUKI_RESTART_SOURCE'),

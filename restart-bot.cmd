@@ -31,30 +31,6 @@ if /i "%~1"=="restart" if /i "%MIZUKI_RESTART_PRINT_POST_STATUS%"=="1" (
   if not "%POST_STATUS_EXIT%"=="0" exit /b %POST_STATUS_EXIT%
 )
 
-set "SKIP_LOG_WINDOW="
-if defined MIZUKI_RESTART_DEFAULT_STATUS set "SKIP_LOG_WINDOW=1"
-if /i "%~1"=="restart" (
-  set "SKIP_LOG_WINDOW=1"
-  if /i "%~2"=="confirm" set "SKIP_LOG_WINDOW="
-  if /i "%~2"=="confirmed" set "SKIP_LOG_WINDOW="
-  if /i "%~2"=="--confirm" set "SKIP_LOG_WINDOW="
-  if /i "%~2"=="/confirm" set "SKIP_LOG_WINDOW="
-  if /i "%MIZUKI_RESTART_CONFIRM%"=="1" set "SKIP_LOG_WINDOW="
-  if /i "%MIZUKI_RESTART_CONFIRM%"=="true" set "SKIP_LOG_WINDOW="
-  if /i "%MIZUKI_RESTART_CONFIRM%"=="yes" set "SKIP_LOG_WINDOW="
-  if /i "%MIZUKI_RESTART_CONFIRM%"=="y" set "SKIP_LOG_WINDOW="
-  if /i "%MIZUKI_RESTART_CONFIRM%"=="on" set "SKIP_LOG_WINDOW="
-  if /i "%MIZUKI_RESTART_CONFIRM%"=="confirm" set "SKIP_LOG_WINDOW="
-  if /i "%MIZUKI_RESTART_CONFIRM%"=="confirmed" set "SKIP_LOG_WINDOW="
-)
-for %%A in (%*) do (
-  if /i "%%~A"=="-StatusOnly" set "SKIP_LOG_WINDOW=1"
-  if /i "%%~A"=="/StatusOnly" set "SKIP_LOG_WINDOW=1"
-  if /i "%%~A"=="status" set "SKIP_LOG_WINDOW=1"
-)
-if defined SKIP_LOG_WINDOW exit /b 0
-
-start "" powershell -NoProfile -ExecutionPolicy Bypass -NoExit -File "%~dp0scripts\watch-bot-daemon-log.ps1"
 exit /b 0
 
 # POWERSHELL_PAYLOAD
