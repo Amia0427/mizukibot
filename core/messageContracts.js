@@ -117,6 +117,7 @@ function buildReplyEnvelope(input = {}) {
   return {
     replyText: String(source.replyText || ''),
     persistedReplyText: String(source.persistedReplyText || source.replyText || ''),
+    reasoningText: String(source.reasoningText || ''),
     replySegments: Array.isArray(source.replySegments) ? [...source.replySegments] : [],
     routeContext: source.routeContext || null,
     sendStrategy: source.sendStrategy || null,

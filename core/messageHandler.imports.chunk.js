@@ -133,14 +133,10 @@ const {
   publishQzoneForContext,
   scheduleGroupMessage,
   sendGroupPoke,
+  sendReasoningForwardMessage,
   sendPrivatePoke,
   setMessageEmojiLike
 } = require('../api/qqActionService');
-const {
-  armCotOnce,
-  consumeCotOnce,
-  getCotOnceTtlMs
-} = require('../utils/cotOnceRuntime');
 function getVisionCaptionWorkerModule() {
   return require('./visionCaptionWorker');
 }

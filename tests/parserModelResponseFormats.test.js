@@ -101,6 +101,38 @@ module.exports = (() => {
     role: 'assistant',
     content: 'object content text'
   });
+
+  const openAiReasoningMessage = extractMessageContent({
+    data: {
+      choices: [
+        {
+          message: {
+            role: 'assistant',
+            content: 'visible answer',
+            reasoning_content: 'explicit reasoning'
+          }
+        }
+      ]
+    }
+  });
+  assert.strictEqual(openAiReasoningMessage.content, 'visible answer');
+  assert.strictEqual(openAiReasoningMessage.reasoningText, 'explicit reasoning');
+
+  const anthropicThinkingMessage = extractMessageContent({
+    data: {
+      type: 'message',
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'anthropic thinking' },
+        { type: 'text', text: 'anthropic visible' }
+      ]
+    }
+  });
+  assert.deepStrictEqual(anthropicThinkingMessage, {
+    role: 'assistant',
+    content: 'anthropic visible',
+    reasoningText: 'anthropic thinking'
+  });
   const geminiText = extractMessageContent({
     data: {
       candidates: [
@@ -170,6 +202,14 @@ module.exports = (() => {
   assert.strictEqual(geminiStream.events[0].usage.completion_tokens, 2);
   assert.strictEqual(geminiStream.events[0].usage.total_tokens, 9);
   assert.strictEqual(geminiStream.events[0].usage.cache_read_input_tokens, 3);
+
+  const reasoningStream = extractSSEEvents(
+    { buffer: '' },
+    'data: {"choices":[{"delta":{"reasoning_content":"r1"}}]}\n\ndata: {"choices":[{"delta":{"content":"正文"}}]}\n\n'
+  );
+  assert.strictEqual(reasoningStream.events[0].reasoning, 'r1');
+  assert.strictEqual(reasoningStream.events[0].delta, '');
+  assert.strictEqual(reasoningStream.events[1].delta, '正文');
 
   const openAiFinish = extractSSEEvents(
     { buffer: '' },

@@ -1,3 +1,12 @@
+## 运行维护 2026-06-17 11:52
+
+- 小目标：去除 `/cot` 特殊指令，并让 QQ 群聊/私聊在正常正文发送成功后，额外用合并转发完整发送 provider 显式返回的 reasoning。
+- 最小修复：解析层提取 OpenAI-compatible `reasoning/reasoning_content`、Anthropic non-stream `content[].type=thinking` 和 SSE reasoning 增量；Runtime V2 只把最终采用候选的 `reasoningText` 往上传，unsafe/repair/fallback/工具 probe 候选不会外发；reply envelope 增加 `reasoningText`，最终发送层在正文成功后调用 QQ 合并转发。
+- QQ 行为：群聊使用 `send_group_forward_msg`，私聊使用 `send_private_forward_msg`；node 结构为 `{ type: "node", data: { name, uin, content } }`；长 reasoning 按固定字符分块但不截断；合并转发失败只 `console.warn`，不降级普通文本。
+- 边界：不再因 `/cot` 设置 `preserveThink`、禁用 humanizer 或强制非流式；旧正文 `<think>` 仍只走用户可见文本清理，不作为 reasoning 来源；`recordBotReply`、记忆持久化、画像和 recall 仍只使用正文/持久化正文，不接触 `reasoningText`。
+- 验证：`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过；`node scripts\run-tests.js tests\parserModelResponseFormats.test.js tests\modelServiceReasoning.test.js tests\qqActionServiceReasoningForward.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js` 通过；`node scripts\run-tests.js tests\messageHandlerCotCommand.test.js tests\messageHandlerCotSource.test.js tests\messageRouteFlowGroupStreaming.test.js tests\runtimeHostCotSource.test.js tests\messageHandlerReasoningForwardSource.test.js tests\normalFastReplyRuntime.test.js` 通过。
+- 小目标已完成：QQ群/QQ私聊的显式 reasoning 合并转发已接入默认回复链路，并保留失败不刷屏、不入记忆、不从 `<think>` 构造推理的边界。
+
 ## 运行维护 2026-06-17 10:04
 
 - 小目标：修复用户指出的 Anthropic Prompt Caching “只写不读”问题，确保第三方 `/v1/messages` 请求不把动态尾部反复写成新缓存。

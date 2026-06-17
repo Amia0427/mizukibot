@@ -589,6 +589,151 @@ module.exports = (async () => {
   assert.strictEqual(safetyRestrictionResult.output.finalReply, '这个话题我们先换一个吧');
   assert.strictEqual(safetyRestrictionResult.output.hasSafetyRestriction, true);
 
+  const reasoningNode = createDirectReplyNode({
+    normalizeObject(value, fallback = {}) {
+      return value && typeof value === 'object' ? value : fallback;
+    },
+    normalizeArray(value) {
+      return Array.isArray(value) ? value : [];
+    },
+    createEvent(type, payload = {}) {
+      return { type, ...payload };
+    },
+    isReviewMode() {
+      return false;
+    },
+    shouldBypassHumanizerForPolicy() {
+      return false;
+    },
+    computeEffectiveAllowedTools() {
+      return [];
+    },
+    getToolPlannerExecutionPlan() {
+      return null;
+    },
+    isPlannerSingleAuthorityEnabled() {
+      return false;
+    },
+    getRouteToolPlanner() {
+      return null;
+    },
+    buildVisionMessageContent(text) {
+      return text;
+    },
+    stripMemoryCliInstruction(text) {
+      return String(text || '');
+    },
+    getMainConversationSystemMessages() {
+      return [];
+    },
+    buildDirectReplyMessages(_state, messageContent) {
+      return {
+        messages: [{ role: 'user', content: String(messageContent || '') }]
+      };
+    },
+    buildLiveMainConversationSnapshot() {
+      return null;
+    },
+    ensureOutputStream(output = {}, mode = 'direct') {
+      return {
+        ...(output.stream || {}),
+        mode,
+        hadOutput: false,
+        completed: false,
+        fallbackToNonStream: false
+      };
+    },
+    createMemoryCliTurnState(value) {
+      return value || {};
+    },
+    cloneDirectToolLoopState(value) {
+      return { ...(value || {}) };
+    },
+    normalizeMessageForToolLoop(message) {
+      return message;
+    },
+    async requestAssistantMessageImpl() {
+      throw new Error('tool probe should not run');
+    },
+    compileDirectChatToolCallsToPlan(toolCalls, plan) {
+      return { ...(plan || {}), steps: toolCalls };
+    },
+    saveAndEmit(state) {
+      return state;
+    },
+    mirrorStreamingFlags() {
+      return {};
+    },
+    isPureToolCallMarkup() {
+      return false;
+    },
+    async streamDirectReply() {
+      return {
+        finalReply: 'streamed final',
+        persistedText: 'streamed final',
+        visibleText: 'streamed final',
+        reasoningText: 'streamed reasoning',
+        stream: { hadOutput: true, completed: true, fallbackToNonStream: false, mode: 'direct' }
+      };
+    },
+    async requestReplyImpl() {
+      return {
+        persistedText: 'non-stream final',
+        visibleText: 'non-stream final',
+        reasoningText: 'non-stream reasoning'
+      };
+    },
+    classifyDirectReplyError() {
+      return 'generic_model_failure';
+    },
+    summarizeDirectReplyError(error) {
+      return String(error?.message || error || '');
+    },
+    async attemptDirectMemoryRecovery() {
+      return null;
+    },
+    getControlledFailureReply() {
+      return 'controlled failure';
+    },
+    updateMemoryCliTurnStateAfterError(state = {}) {
+      return state;
+    },
+    classifyReplyFailure() {
+      return { type: 'none' };
+    }
+  });
+
+  const reasoningResult = await reasoningNode({
+    request: {
+      question: 'reasoning',
+      routePolicyKey: 'chat/default',
+      routeMeta: {},
+      topRouteType: 'direct_chat',
+      customPrompt: '',
+      allowTools: false,
+      allowedTools: [],
+      modelConfig: {},
+      imageUrl: '',
+      streaming: true,
+      reviewMode: ''
+    },
+    execution: {
+      mode: 'chat',
+      memoryCliTurn: null,
+      latencyBreakdown: {}
+    },
+    memory: {
+      dynamicPrompt: '',
+      affinity: null
+    },
+    output: {
+      stream: {}
+    },
+    plan: {}
+  });
+  assert.strictEqual(reasoningResult.output.finalReply, 'streamed final');
+  assert.strictEqual(reasoningResult.output.reasoningText, 'streamed reasoning');
+
   const directReplyNode = createDirectReplyNode({
     normalizeObject(value, fallback = {}) {
       return value && typeof value === 'object' ? value : fallback;

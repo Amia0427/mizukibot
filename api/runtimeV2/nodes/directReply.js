@@ -185,6 +185,7 @@ function createDirectReplyNode(deps = {}) {
       return {
         reply: String(result.persistedText || result.finalReply || result.visibleText || '').trim(),
         displayReply: String(result.visibleText || result.finalReply || result.persistedText || '').trim(),
+        reasoningText: String(result.reasoningText || '').trim(),
         hasSafetyRestriction: result.hasSafetyRestriction === true
       };
     }
@@ -192,6 +193,7 @@ function createDirectReplyNode(deps = {}) {
     return {
       reply: text,
       displayReply: text,
+      reasoningText: '',
       hasSafetyRestriction: false
     };
   }
@@ -235,7 +237,7 @@ function createDirectReplyNode(deps = {}) {
       allowedTools: normalizeArray(request.allowedTools),
       source: 'direct_reply',
       dispatchBranch: 'direct_reply',
-      preserveThink: request.cotDisplayOnce === true
+      preserveThink: false
     };
     const baseSystemMessages = getMainConversationSystemMessages(state, {
       isReviewRoute,
@@ -271,6 +273,7 @@ function createDirectReplyNode(deps = {}) {
         };
     let reply = '';
     let displayReply = '';
+    let reasoningText = '';
     let hasSafetyRestriction = false;
     let nextStream = ensureOutputStream(state.output, request.imageUrl ? 'none' : 'direct');
     let nextMemoryCliTurn = createMemoryCliTurnState(state.execution?.memoryCliTurn);
@@ -376,6 +379,7 @@ function createDirectReplyNode(deps = {}) {
           const variants = buildReplyTextVariants(assistantText);
           reply = String(variants.persistedText || assistantText || '').trim();
           displayReply = String(variants.visibleText || reply || '').trim();
+          reasoningText = String(firstAssistantMessage?.reasoningText || '').trim();
           hasSafetyRestriction = Boolean(hasSafetyRestriction || variants.hasSafetyRestriction === true);
           firstAssistantReused = true;
           directLoopEvents.push(createEvent('first_assistant_reused', {
@@ -418,6 +422,7 @@ function createDirectReplyNode(deps = {}) {
           const normalizedReply = normalizeReplyResult(replyResult);
           reply = normalizedReply.reply;
           displayReply = normalizedReply.displayReply;
+          reasoningText = normalizedReply.reasoningText;
           hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
         } else if (request.streaming) {
           const streamed = await streamDirectReply(messagesToSend, {
@@ -430,6 +435,7 @@ function createDirectReplyNode(deps = {}) {
           });
           reply = streamed.persistedText || streamed.finalReply || '';
           displayReply = streamed.visibleText || streamed.finalReply || '';
+          reasoningText = String(streamed.reasoningText || '').trim();
           hasSafetyRestriction = Boolean(hasSafetyRestriction || streamed.hasSafetyRestriction === true);
           nextStream = streamed.stream;
           humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
@@ -446,6 +452,7 @@ function createDirectReplyNode(deps = {}) {
           const normalizedReply = normalizeReplyResult(replyResult);
           reply = normalizedReply.reply;
           displayReply = normalizedReply.displayReply;
+          reasoningText = normalizedReply.reasoningText;
           hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
         }
       } catch (error) {
@@ -463,6 +470,7 @@ function createDirectReplyNode(deps = {}) {
         if (recovered) {
           reply = String(recovered.reply || '');
           displayReply = String(recovered.reply || '');
+          reasoningText = '';
           nextMemoryCliTurn = createMemoryCliTurnState(recovered.memoryCliTurn);
           nextAllowedTools = normalizeArray(recovered.effectiveAllowedTools);
           directLoopEvents = normalizeArray(recovered.events);
@@ -470,6 +478,7 @@ function createDirectReplyNode(deps = {}) {
         } else {
           reply = getControlledFailureReply(failureType);
           displayReply = reply;
+          reasoningText = '';
           nextMemoryCliTurn = createMemoryCliTurnState(
             updateMemoryCliTurnStateAfterError(nextMemoryCliTurn, failureType === 'tool_loop_limit' ? 'tool_loop_limit' : 'tool_error')
           );
@@ -514,6 +523,7 @@ function createDirectReplyNode(deps = {}) {
         const normalizedReply = normalizeReplyResult(replyResult);
         reply = normalizedReply.reply;
         displayReply = normalizedReply.displayReply;
+        reasoningText = normalizedReply.reasoningText;
         hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
       } catch (error) {
         const failureType = classifyDirectReplyError(error);
@@ -528,6 +538,7 @@ function createDirectReplyNode(deps = {}) {
         ]);
         reply = getControlledFailureReply(failureType);
         displayReply = reply;
+        reasoningText = '';
       }
       directLoopEvents = [
         createEvent('direct_chat_execution_mode', {
@@ -547,6 +558,7 @@ function createDirectReplyNode(deps = {}) {
         });
         reply = streamed.persistedText || streamed.finalReply || '';
         displayReply = streamed.visibleText || streamed.finalReply || '';
+        reasoningText = String(streamed.reasoningText || '').trim();
         hasSafetyRestriction = Boolean(hasSafetyRestriction || streamed.hasSafetyRestriction === true);
         nextStream = streamed.stream;
         humanizerTimedOut = Boolean(humanizerTimedOut || streamed.humanizerTimedOut);
@@ -558,6 +570,7 @@ function createDirectReplyNode(deps = {}) {
           const timeoutReply = getNormalUserMainReplyStreamTimeoutReply(error);
           reply = timeoutReply;
           displayReply = timeoutReply;
+          reasoningText = '';
           nextStream = {
             ...ensureOutputStream(state.output, 'direct'),
             ...mirrorStreamingFlags(state.output, timeoutReply),
@@ -578,6 +591,7 @@ function createDirectReplyNode(deps = {}) {
           const timeoutReply = getAdminPrivateMainReplyStreamTimeoutReply(error);
           reply = timeoutReply;
           displayReply = timeoutReply;
+          reasoningText = '';
           nextStream = {
             ...ensureOutputStream(state.output, 'direct'),
             ...mirrorStreamingFlags(state.output, timeoutReply),
@@ -609,6 +623,7 @@ function createDirectReplyNode(deps = {}) {
             const normalizedReply = normalizeReplyResult(replyResult);
             reply = normalizedReply.reply;
             displayReply = normalizedReply.displayReply;
+            reasoningText = normalizedReply.reasoningText;
             hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
           } catch (fallbackError) {
             const failureType = classifyDirectReplyError(fallbackError);
@@ -623,6 +638,7 @@ function createDirectReplyNode(deps = {}) {
             ]);
             reply = getControlledFailureReply(failureType);
             displayReply = reply;
+            reasoningText = '';
           }
         }
       }
@@ -640,6 +656,7 @@ function createDirectReplyNode(deps = {}) {
         const normalizedReply = normalizeReplyResult(replyResult);
         reply = normalizedReply.reply;
         displayReply = normalizedReply.displayReply;
+        reasoningText = normalizedReply.reasoningText;
         hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedReply.hasSafetyRestriction);
       } catch (error) {
         const failureType = classifyDirectReplyError(error);
@@ -654,6 +671,7 @@ function createDirectReplyNode(deps = {}) {
         ]);
         reply = getControlledFailureReply(failureType);
         displayReply = reply;
+        reasoningText = '';
       }
     }
 
@@ -670,6 +688,7 @@ function createDirectReplyNode(deps = {}) {
         })
       ]);
       let retriedReply = '';
+      let retriedReasoningText = '';
       try {
         const retryResult = await requestReplyImpl(
           messagesToSend.concat([{
@@ -690,15 +709,18 @@ function createDirectReplyNode(deps = {}) {
           || retryResult
           || ''
         ).trim();
+        retriedReasoningText = String(retryResult?.reasoningText || '').trim();
         hasSafetyRestriction = Boolean(hasSafetyRestriction || retryResult?.hasSafetyRestriction === true);
       } catch (_) {}
 
       if (isStableDirectReplyText(retriedReply)) {
         reply = retriedReply;
         displayReply = retriedReply;
+        reasoningText = retriedReasoningText;
       } else {
         reply = getControlledFailureReply('generic_model_failure');
         displayReply = reply;
+        reasoningText = '';
       }
     }
 
@@ -716,6 +738,7 @@ function createDirectReplyNode(deps = {}) {
       ]);
       let repairedReply = '';
       let repairedDisplayReply = '';
+      let repairedReasoningText = '';
       try {
         const retryResult = await requestReplyImpl(
           messagesToSend.concat([{
@@ -743,6 +766,7 @@ function createDirectReplyNode(deps = {}) {
           || retryResult
           || ''
         ).trim();
+        repairedReasoningText = String(retryResult?.reasoningText || '').trim();
         hasSafetyRestriction = Boolean(hasSafetyRestriction || retryResult?.hasSafetyRestriction === true);
       } catch (_) {}
 
@@ -760,9 +784,11 @@ function createDirectReplyNode(deps = {}) {
       if (repairOk) {
         reply = repairedReply;
         displayReply = repairedDisplayReply || repairedReply;
+        reasoningText = repairedReasoningText;
       } else {
         reply = getControlledFailureReply('generic_model_failure');
         displayReply = reply;
+        reasoningText = '';
       }
     }
 
@@ -775,6 +801,7 @@ function createDirectReplyNode(deps = {}) {
         })
       ]);
       let retriedReply = '';
+      let retriedReasoningText = '';
       try {
         const retryResult = await requestReplyImpl(
           messagesToSend.concat([{
@@ -795,11 +822,14 @@ function createDirectReplyNode(deps = {}) {
           || retryResult
           || ''
         ).trim();
+        retriedReasoningText = String(retryResult?.reasoningText || '').trim();
         hasSafetyRestriction = Boolean(hasSafetyRestriction || retryResult?.hasSafetyRestriction === true);
       } catch (_) {}
 
       if (isStableDirectReplyText(retriedReply)) {
         reply = retriedReply;
+        displayReply = retriedReply;
+        reasoningText = retriedReasoningText;
         directLoopEvents = directLoopEvents.concat([
           createEvent('tool_loop_forced_answer', {
             node: 'direct_reply',
@@ -818,6 +848,8 @@ function createDirectReplyNode(deps = {}) {
           ]);
         }
         reply = getControlledFailureReply('tool_error');
+        displayReply = reply;
+        reasoningText = '';
         directLoopEvents = directLoopEvents.concat([
           createEvent('tool_loop_forced_answer', {
             node: 'direct_reply',
@@ -907,6 +939,7 @@ function createDirectReplyNode(deps = {}) {
           finalReply: String(reply || ''),
           displayReply: String(displayReply || reply || ''),
           persistedReplyText: String(reply || ''),
+          reasoningText: String(reasoningText || ''),
           hasSafetyRestriction,
           failure,
           stream: nextStream

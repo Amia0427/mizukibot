@@ -33,29 +33,6 @@
       return;
     }
 
-    if (/^\s*\/cot(?:\s|$)/i.test(String(slashCommandText || '').trim())) {
-      const armed = armCotOnce({
-        chatType,
-        groupId: isPrivateChatType(chatType) ? '' : groupId,
-        userId: senderId
-      });
-      const ttlSeconds = Math.max(1, Math.ceil(getCotOnceTtlMs() / 1000));
-      await sendGroupReply({
-        chatType,
-        groupId,
-        userId: senderId,
-        senderId,
-        replyText: armed
-          ? `已开启一次性思维链显示。请在 ${ttlSeconds} 秒内发送下一条正常对话消息；仅该次回复生效。`
-          : '一次性思维链显示刚刚没开起来。等一下再试试。',
-        atSender: true,
-        retries: 1,
-        waitMs: 300
-      });
-      logMemoryWriteSkip('special_command', { command: 'cot' });
-      return;
-    }
-
     if (!effectiveBotQQ) {
       console.warn('[message] skip because bot qq is unresolved');
       return;
@@ -471,12 +448,6 @@
       return;
     }
 
-    const cotArmedState = consumeCotOnce({
-      chatType,
-      groupId: isPrivateChatType(chatType) ? '' : groupId,
-      userId: senderId
-    });
-
     console.log('[message] accepted inbound', {
       messageId: effectiveMsg.message_id,
       groupId,
@@ -489,8 +460,7 @@
       acceptedBy: isPrivateChatType(chatType)
         ? 'private_direct'
         : (mentioned ? 'at_bot' : 'reply_to_bot_recent'),
-      reply_to_bot_last_reply_at: lastBotReplyAt || 0,
-      cotDisplayOnce: Boolean(cotArmedState)
+      reply_to_bot_last_reply_at: lastBotReplyAt || 0
     });
 
     const cleanMentionText = String(rawText || '')
