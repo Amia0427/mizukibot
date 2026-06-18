@@ -49,6 +49,7 @@ module.exports = (async () => {
     process.env.DATA_DIR = tempDir;
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.ANTHROPIC_BETA = 'tools-2024-04-04';
+    process.env.MODEL_ENDPOINT_ALLOW_LOCAL_HTTP = 'true';
     process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
     process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
     clearProjectCache();
@@ -357,7 +358,7 @@ module.exports = (async () => {
     };
 
     resetModelCallTracker();
-    await httpClient.postWithRetry('https://example.com/v1/messages', {
+    await httpClient.postWithRetry('http://127.0.0.1/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
       messages: [
         {
@@ -437,7 +438,7 @@ module.exports = (async () => {
       };
     };
 
-    await httpClient.postWithRetry('https://example.com/v1/messages', {
+    await httpClient.postWithRetry('http://127.0.0.1/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
       messages: [
         {
@@ -482,7 +483,7 @@ module.exports = (async () => {
 
     let streamed = '';
     resetModelCallTracker();
-    await httpClient.postStreamWithRetry('https://example.com/v1/messages', {
+    await httpClient.postStreamWithRetry('http://127.0.0.1/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
       messages: [
         {

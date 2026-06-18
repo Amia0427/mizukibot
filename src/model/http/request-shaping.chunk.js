@@ -606,10 +606,12 @@ async function mapMessagesToAnthropic(messages) {
         ? applyAnthropicCacheControlToLastBlock(blocks, messageCacheControl)
         : stripAnthropicCacheControlFromBlocks(blocks);
 
-      out.push({
-        role: 'assistant',
-        content: blocks.length ? blocks : [{ type: 'text', text: '' }]
-      });
+      if (blocks.length > 0) {
+        out.push({
+          role: 'assistant',
+          content: blocks
+        });
+      }
       continue;
     }
 
@@ -617,10 +619,12 @@ async function mapMessagesToAnthropic(messages) {
       await toAnthropicContentBlocks(item?.content),
       messageCacheControl
     );
-    out.push({
-      role: 'user',
-      content: userBlocks.length ? userBlocks : [{ type: 'text', text: '' }]
-    });
+    if (userBlocks.length > 0) {
+      out.push({
+        role: 'user',
+        content: userBlocks
+      });
+    }
   }
 
   return {
