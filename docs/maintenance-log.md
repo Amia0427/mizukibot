@@ -1,3 +1,11 @@
+## 运行维护 2026-06-18 08:25
+
+- 小目标：用提示词规范主回复模型的内部思考模式，让 thinking/reasoning 更贴近瑞希角色沉浸，而不改变最终正文不外显思维链的边界。
+- 最小修复：更新 `prompts/runtime/roleplay-inner-protocol.txt`，明确内部 `<think>` / thinking / `reasoning_content` 应以瑞希第一人称括号内心独白表达，例如“（心想：……）”或“(内心OS：……)”；同时聚焦剧情走向分析和回复内容规划。
+- 同步边界：`utils/runtimePrompts.js` 的 fallback 同步加入同一规则；最终用户可见回复仍不得输出 `<think>`、完整思维链、内部草稿或本块内容。
+- 验证：`node scripts\run-tests.js tests\promptGoldenSnapshots.test.js tests\runtimePromptCache.test.js`、`npm run check:prompts` 通过。
+- 小目标已完成：bot 的内部思考风格已被提示词规范为角色第一人称沉浸式内心独白，同时保留正文外显安全边界。
+
 ## 运行维护 2026-06-18 08:35
 
 - 小目标：让普通用户模型每日限额模式能直接通过 `.env` 开关启停，不需要改代码。
