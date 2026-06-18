@@ -6,6 +6,7 @@
 - 范围控制：未新增本地黑名单拦截；未改 QQ 外发发送链路；仅加强模型 thinking 的提示词规范。
 - 验证：`node scripts\run-tests.js tests\promptGoldenSnapshots.test.js tests\runtimePromptCache.test.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js`、`npm run check:prompts` 通过。
 - 小目标已完成：思考风格约束前移到提示词层，要求模型必须按瑞希第一人称中文情绪内心思考。
+- 提交后记录 2026-06-18 18:14 +08:00：已提交 `prompt: force roleplay thinking style`；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-18 17:42
 
