@@ -6,6 +6,7 @@
 - 提示词同步：`prompts/runtime/reasoning-forward-persona.txt` 和 `prompts/runtime/roleplay-inner-protocol.txt` 明确情绪化短内心、不要条列式分析；`utils/runtimePrompts.js` fallback 同步。
 - 验证：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\runtimePromptCache.test.js tests\promptGoldenSnapshots.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\qqActionServiceReasoningForward.test.js tests\messageHandlerReasoningForwardSource.test.js`、`npm run check:prompts` 通过。
 - 小目标已完成：QQ 可见思考小记能呈现更情绪化的瑞希内心独白，同时保留“不发完整思维链、不发模型工作痕迹”的安全边界。
+- 提交后记录 2026-06-18 17:42 +08:00：已提交 `feat: enrich reasoning inner notes`；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-18 11:09
 
