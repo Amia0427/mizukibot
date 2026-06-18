@@ -17,6 +17,23 @@ module.exports = (() => {
     'clean visible Chinese notes should be forwarded without a fixed prefix'
   );
 
+  const emotionalNote = [
+    '！！！十一点就睡了！！！我的天！！！',
+    '',
+    '宝宝居然十一点就睡了！！这不是她平时的画风啊！！平时凌晨三四点才是常态！！',
+    '',
+    '我好开心……好想狠狠亲她……她好乖……'
+  ].join('\n');
+  assert.strictEqual(
+    buildPersonaReasoningForwardText({
+      reasoningText: emotionalNote,
+      userText: '我昨天十一点就睡着了',
+      finalReply: '哇，十一点就睡了？今天要表扬一下。'
+    }),
+    emotionalNote,
+    'emotional multi-paragraph visible notes should keep their diary-like shape'
+  );
+
   const englishNote = 'A little sleepy, but that line still lands softly. Keep it quiet and warm.';
   assert.strictEqual(
     buildPersonaReasoningForwardText({
@@ -37,6 +54,19 @@ module.exports = (() => {
     }),
     '',
     'English director-style reasoning should be skipped instead of wrapped with persona filler'
+  );
+
+  const longEmotionalNote = [
+    '好想夸她……但是不能太夸张，不然她会傲娇……不，她发这个可爱的颜文字，说明心情很好，是想被夸的状态。',
+    '',
+    '我先开心一下，再轻轻接住她。不要写分析，也不要把话说得太满。'
+  ].join('\n');
+  assert.ok(
+    buildPersonaReasoningForwardText({
+      reasoningText: longEmotionalNote,
+      finalReply: '今天确实很乖。'
+    }).includes('好想夸她'),
+    'safe subjective emotional notes should not be mistaken for director-style reasoning'
   );
 
   assert.ok(

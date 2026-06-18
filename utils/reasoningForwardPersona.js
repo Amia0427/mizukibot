@@ -1,5 +1,6 @@
 const FORWARD_MIN_CHARS = 20;
-const FORWARD_MAX_CHARS = 300;
+const FORWARD_MAX_CHARS = 520;
+const FORWARD_MAX_PARAGRAPHS = 3;
 
 const UNSAFE_PATTERNS = [
   /\b(?:reasoning_content|chain[-\s]*of[-\s]*thought|internal_check)\b/i,
@@ -24,8 +25,24 @@ function stripReasoningMarkup(text = '') {
     .replace(/\b(?:maybe|wait|what if|let(?:'|’)s see|i need to|i should)\b/gi, ' ')
     .replace(/\b(?:user|assistant|model|AI|final answer|draft reply)\b/gi, ' ')
     .replace(/[ \t]+/g, ' ')
-    .replace(/\n{2,}/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+function normalizeForwardParagraphs(text = '') {
+  return normalizeText(text)
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, FORWARD_MAX_PARAGRAPHS)
+    .join('\n\n');
+}
+
+function trimForwardCore(text = '', maxChars = FORWARD_MAX_CHARS) {
+  const normalized = normalizeForwardParagraphs(text);
+  const limit = Math.max(FORWARD_MIN_CHARS, Math.floor(Number(maxChars) || FORWARD_MAX_CHARS));
+  if (!normalized || normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit - 1).replace(/[，、：:；;,.!?！？。]?\s*$/, '').trim()}…`;
 }
 
 function looksUnsafeForForward(text = '') {
@@ -44,10 +61,11 @@ function splitReadableSentences(text = '') {
 }
 
 function pickReadableCore(reasoningText = '', finalReply = '') {
-  const cleaned = stripReasoningMarkup(reasoningText);
+  const cleaned = normalizeForwardParagraphs(stripReasoningMarkup(reasoningText));
   if (!cleaned || looksUnsafeForForward(cleaned)) return '';
   const finalCompact = normalizeText(finalReply).replace(/\s+/g, '');
-  const sentences = splitReadableSentences(cleaned)
+  const allSentences = splitReadableSentences(cleaned);
+  const sentences = allSentences
     .filter((sentence) => {
       const compact = sentence.replace(/\s+/g, '');
       if (!compact) return false;
@@ -55,10 +73,10 @@ function pickReadableCore(reasoningText = '', finalReply = '') {
       if (finalCompact && compact.length >= 12 && finalCompact.includes(compact.slice(0, 24))) return false;
       return true;
     });
-  const source = sentences.length ? sentences.join(' ') : cleaned.replace(/\s+/g, ' ');
-  return source.length > FORWARD_MAX_CHARS
-    ? source.slice(0, FORWARD_MAX_CHARS).replace(/[，、：:；;,.!?！？]?\s*$/, '').trim()
-    : source.trim();
+  const source = sentences.length === allSentences.length
+    ? cleaned
+    : sentences.join(' ');
+  return trimForwardCore(source);
 }
 
 function buildPersonaReasoningForwardText(input = {}) {
@@ -67,9 +85,7 @@ function buildPersonaReasoningForwardText(input = {}) {
   const core = pickReadableCore(reasoningText, input.finalReply || input.replyText || '');
   if (!core || core.length < FORWARD_MIN_CHARS || looksUnsafeForForward(core)) return '';
 
-  return core.length > FORWARD_MAX_CHARS
-    ? `${core.slice(0, FORWARD_MAX_CHARS - 1).replace(/[，、：:；;,.!?！？]?\s*$/, '').trim()}…`
-    : core;
+  return trimForwardCore(core);
 }
 
 module.exports = {

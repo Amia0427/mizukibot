@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-18 17:42 +08:00**：将 QQ reasoning 可见小记和主回复内部思考提示收口为更情绪化的瑞希内心独白风格。`reasoningForwardText` 现在允许最多 3 段、520 字的主观情绪小记，保留惊讶、心软、停顿和重复感叹；同时继续过滤完整推理链、模型工作语和英文导演提示。验收：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\runtimePromptCache.test.js tests\promptGoldenSnapshots.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\qqActionServiceReasoningForward.test.js tests\messageHandlerReasoningForwardSource.test.js`、`npm run check:prompts` 通过。小目标完成：思考展示更接近情绪丰富的短内心，不暴露真实完整思维链。
+
 **2026-06-18 11:09 +08:00**：修复 Anthropic Messages 请求里可能出现空 `text` content block 导致 `status_code=400, text content blocks must be non-empty` 的本地构造问题。`toAnthropicContentBlocks` 现在会过滤空文本块，`mapMessagesToAnthropic` 会跳过空用户/助手历史，仅在整轮无输入时保留 `(empty input)` 兜底；验收：本地探针复现修复前空块、目标测试和语法检查通过。小目标完成：本地不会再主动向 Anthropic 发送空文本块。
 
 **2026-06-18 11:41 +08:00**：修复 `restart-bot.cmd` 双击不重启的问题。根因是此前为了避免误触发，把无参数入口改成 status-only；但 Windows 桌面脚本的双击就是无参数运行。现 `restart-bot.cmd` 无参数默认执行 `restart confirm`，显式 `restart-bot.cmd status` 仍保持只读状态检查。验收：目标测试与 PowerShell AST parse 通过；实际 `cmd /c restart-bot.cmd` 把旧 main/worker `45064/34416` 和旧 launcher `42712/40092` 全部停掉，最终 main bot PID=34660、worker PID=47100 Running。
