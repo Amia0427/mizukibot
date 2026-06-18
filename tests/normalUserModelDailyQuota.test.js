@@ -10,10 +10,38 @@ function clearProjectCache() {
   }
 }
 
+function restoreEnv(snapshot = {}) {
+  for (const key of Object.keys(process.env)) {
+    if (!(key in snapshot)) delete process.env[key];
+  }
+  for (const [key, value] of Object.entries(snapshot)) {
+    process.env[key] = value;
+  }
+}
+
 module.exports = (async () => {
+  const envSnapshot = { ...process.env };
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-normal-user-quota-'));
+  const envStateFile = path.join(tempDir, 'quota-env-disabled.json');
   const stateFile = path.join(tempDir, 'quota.json');
   let now = new Date('2026-06-18T01:00:00+08:00');
+
+  process.env.NORMAL_USER_MODEL_DAILY_LIMIT_ENABLED = 'false';
+  process.env.NORMAL_USER_MODEL_DAILY_LIMIT = '1';
+  process.env.NORMAL_USER_MODEL_DAILY_LIMIT_STATE_FILE = envStateFile;
+  process.env.TIMEZONE = 'Asia/Shanghai';
+  clearProjectCache();
+  const envQuota = require('../utils/normalUserModelDailyQuota');
+  const envStatus = envQuota.getStatus();
+  assert.strictEqual(envStatus.enabled, false);
+  assert.strictEqual(envStatus.limit, 1);
+  const envAllowed = await envQuota.assertCanCall({ userRole: 'user', userId: 'env_user' });
+  const envRecorded = await envQuota.recordSuccess({ userRole: 'user', userId: 'env_user' });
+  assert.strictEqual(envAllowed.reason, 'disabled');
+  assert.strictEqual(envRecorded.reason, 'disabled');
+  assert.strictEqual(fs.existsSync(envStateFile), false);
+
+  restoreEnv(envSnapshot);
   clearProjectCache();
   const quota = require('../utils/normalUserModelDailyQuota');
   const options = {
