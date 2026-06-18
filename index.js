@@ -34,7 +34,9 @@ const { createMessageIngressDispatcher } = require('./core/messageIngressDispatc
 const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
-const LOCK_FILE = path.join(__dirname, '.mizukibot.lock');
+const LOCK_FILE = process.env.MIZUKIBOT_INDEX_TEST_MODE === '1' && process.env.MIZUKIBOT_LOCK_FILE
+  ? process.env.MIZUKIBOT_LOCK_FILE
+  : path.join(__dirname, '.mizukibot.lock');
 const EXPECTED_SHUTDOWN_FILE = path.join(config.DATA_DIR, 'bot-main-expected-shutdown.json');
 const RUNTIME_STATE_FILE = path.join(config.DATA_DIR, 'bot-main-runtime-state.json');
 const EXIT_OBSERVATIONS_FILE = path.join(config.DATA_DIR, 'bot-main-exit-observations.jsonl');
@@ -787,8 +789,22 @@ async function startMainProcess() {
   });
 }
 
-startMainProcess().catch((error) => {
-  preserveSingleInstanceLockOnExit = true;
-  logFatalStartupError('startup', error);
-  process.exit(1);
-});
+if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
+  module.exports = {
+    __test: {
+      acquireSingleInstanceLock,
+      commandLineLooksLikeMainBot,
+      cleanupSingleInstanceLockSync,
+      getProcessCommandLine,
+      isMainBotProcess,
+      isProcessAlive,
+      readLockOwnerPid
+    }
+  };
+} else {
+  startMainProcess().catch((error) => {
+    preserveSingleInstanceLockOnExit = true;
+    logFatalStartupError('startup', error);
+    process.exit(1);
+  });
+}

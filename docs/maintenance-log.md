@@ -1,10 +1,12 @@
-## 运行维护 2026-06-18 08:25
+## 运行维护 2026-06-18 09:43
 
-- 小目标：用提示词规范主回复模型的内部思考模式，让 thinking/reasoning 更贴近瑞希角色沉浸，而不改变最终正文不外显思维链的边界。
-- 最小修复：更新 `prompts/runtime/roleplay-inner-protocol.txt`，明确内部 `<think>` / thinking / `reasoning_content` 应以瑞希第一人称括号内心独白表达，例如“（心想：……）”或“(内心OS：……)”；同时聚焦剧情走向分析和回复内容规划。
-- 同步边界：`utils/runtimePrompts.js` 的 fallback 同步加入同一规则；最终用户可见回复仍不得输出 `<think>`、完整思维链、内部草稿或本块内容。
-- 验证：`node scripts\run-tests.js tests\promptGoldenSnapshots.test.js tests\runtimePromptCache.test.js`、`npm run check:prompts` 通过。
-- 小目标已完成：bot 的内部思考风格已被提示词规范为角色第一人称沉浸式内心独白，同时保留正文外显安全边界。
+- 小目标：处理用户反馈“重启脚本依然不成功”，复查本地确认重启成功之外的远程触发路径。
+- 根因：08:21 为了避免停止当前 `cmd/powershell` 调用链，`Stop-BotForRestart` 保护了所有祖先 PID；远程 `/restart` 从 main bot 内触发时，旧 main bot 可能也是调用链祖先，导致待停止的 main bot 被一起保护，出现假成功。
+- 最小修复：`scripts\restart-bot.ps1` 计算 `$protectedPids` 时排除本轮 `$targetPids`，即只保护 shell 调用链，不保护明确要停的 main/worker。
+- 验证：`node scripts\run-tests.js tests\restartBotScript.test.js tests\remoteRestart.test.js`、`node --check tests\restartBotScript.test.js`、PowerShell AST parse 通过；实际 `cmd /c restart-bot.cmd restart confirm` 输出 `restart roots: 33664, 37772`、`protected caller pids: 40296, 26648, ...`，目标 PID 未被保护且已停止；最终 main bot PID=47328、worker PID=8100 Running。
+- 补充验收：`node scripts\run-tests.js tests\restartBotScript.test.js tests\remoteRestart.test.js tests\mainBotSingleInstanceLock.test.js`、`node scripts\pre-release-smoke.js --root D:\waifu --skip-restart-payload` 通过。
+- 小目标已完成：远程重启调用链保护不再挡住待重启的旧 bot 进程。
+- 提交后记录 2026-06-18 09:43 +08:00：已提交 `fix: preserve remote restart target stops`；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-18 08:35
 
@@ -14,6 +16,14 @@
 - 验证：`tests\normalUserModelDailyQuota.test.js` 增加真实 `process.env.NORMAL_USER_MODEL_DAILY_LIMIT_ENABLED=false` 场景，确认普通用户请求不拦截、不记录状态文件。
 - 命令：`node --check tests\normalUserModelDailyQuota.test.js`、`node scripts\run-tests.js tests\normalUserModelDailyQuota.test.js`。
 - 小目标已完成：普通用户模型每日限额模式可通过 env 启停。
+
+## 运行维护 2026-06-18 08:25
+
+- 小目标：用提示词规范主回复模型的内部思考模式，让 thinking/reasoning 更贴近瑞希角色沉浸，而不改变最终正文不外显思维链的边界。
+- 最小修复：更新 `prompts/runtime/roleplay-inner-protocol.txt`，明确内部 `<think>` / thinking / `reasoning_content` 应以瑞希第一人称括号内心独白表达，例如“（心想：……）”或“(内心OS：……)”；同时聚焦剧情走向分析和回复内容规划。
+- 同步边界：`utils/runtimePrompts.js` 的 fallback 同步加入同一规则；最终用户可见回复仍不得输出 `<think>`、完整思维链、内部草稿或本块内容。
+- 验证：`node scripts\run-tests.js tests\promptGoldenSnapshots.test.js tests\runtimePromptCache.test.js`、`npm run check:prompts` 通过。
+- 小目标已完成：bot 的内部思考风格已被提示词规范为角色第一人称沉浸式内心独白，同时保留正文外显安全边界。
 
 ## 运行维护 2026-06-18 08:21
 
@@ -32,6 +42,16 @@
 - 边界：仅 `trace.userRole=user` 且存在 `trace.userId` 时生效；管理员、空角色、无用户上下文后台任务不计入；失败、超时、429、流错误不扣。
 - 验证：`node --check utils\normalUserModelDailyQuota.js`、`node --check src\model\http\post-retry.chunk.js`、`node --check src\model\http\stream-retry.chunk.js`、`node scripts\run-tests.js tests\normalUserModelDailyQuota.test.js tests\normalUserModelDailyQuotaHttp.test.js tests\requestTrace.test.js tests\runtimeStreamingCoordinator.test.js`。
 - 小目标已完成：普通用户每日模型成功调用次数已全局受限，并且重启不会清空当天用量。
+
+## 运行维护 2026-06-18 01:26
+
+- 小目标：把“脚本拆分 + self-owned lock 修复”收口成最小可提交状态，重点确认并行改动边界和可复跑验收。
+- 现场边界：当前未提交区里 `restart-bot.cmd`、`scripts\restart-bot.ps1`、`tests\restartBotScript.test.js` 没有额外代码差异；保留无关脏文件 `.claude/settings.local.json`、`.learnings/ERRORS.md` 和 `artifacts/docx-meme-review/`，不纳入本目标。
+- 最小修复：`index.js` 只加 `MIZUKIBOT_INDEX_TEST_MODE=1` 下的测试导出和测试模式锁文件覆写；`tests\mainBotSingleInstanceLock.test.js` 改为临时锁文件 + 临时 `node index.js` 进程的行为测试，不再靠字符串断言。
+- 验证：`node scripts\run-tests.js tests\restartBotScript.test.js tests\mainBotSingleInstanceLock.test.js tests\remoteRestart.test.js`、`node --check index.js`、`node --check tests\mainBotSingleInstanceLock.test.js`、`node --check scripts\pre-release-smoke.js`、`scripts\restart-bot.ps1` AST parse、`node scripts\pre-release-smoke.js --root D:\waifu --skip-restart-payload`、`cmd /c restart-bot.cmd status`、`cmd /c restart-bot.cmd restart`、两次 `cmd /c restart-bot.cmd restart confirm` 后 status 复核均通过。
+- 结果：最终 main bot PID=31136、post-reply worker PID=32480 Running，`.mizukibot.lock=31136`、worker pid 文件为 `32480`，`127.0.0.1:3002` 监听 owner=31136。
+- 剩余风险：`restart confirm` 两次返回 0 且完成 PID 切换，但命令捕获 stdout 为空；成功路径目前仍可由 `data\restart-bot.log` 与 `restart-bot.cmd status` 验收，控制台回显建议后续单独收口。
+- 小目标已完成：重启脚本拆分和 self-owned lock 修复已有行为测试、真实重启验收和文档记录。
 
 ## 运行维护 2026-06-18 00:56
 
