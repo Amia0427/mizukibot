@@ -1,3 +1,12 @@
+## 运行维护 2026-06-18 08:35
+
+- 小目标：让普通用户模型每日限额模式能直接通过 `.env` 开关启停，不需要改代码。
+- 现状确认：运行时已读取 `NORMAL_USER_MODEL_DAILY_LIMIT_ENABLED`；本轮补足关闭开关的显式验收和配置说明。
+- 最小修复：`.env.example` 在 `NORMAL_USER_MODEL_DAILY_LIMIT_ENABLED=true` 前增加关闭说明；本地 `.env` 已补齐 `NORMAL_USER_MODEL_DAILY_LIMIT_ENABLED=true`，可改为 `false` 关闭。
+- 验证：`tests\normalUserModelDailyQuota.test.js` 增加真实 `process.env.NORMAL_USER_MODEL_DAILY_LIMIT_ENABLED=false` 场景，确认普通用户请求不拦截、不记录状态文件。
+- 命令：`node --check tests\normalUserModelDailyQuota.test.js`、`node scripts\run-tests.js tests\normalUserModelDailyQuota.test.js`。
+- 小目标已完成：普通用户模型每日限额模式可通过 env 启停。
+
 ## 运行维护 2026-06-18 08:21
 
 - 小目标：专门收口 `restart confirm` 已成功但当前控制台/调用方捕获 stdout 为空的问题，不重做整条重启链路。

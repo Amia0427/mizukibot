@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-18 08:35 +08:00**：明确普通用户模型每日限额可通过 `.env` 开关控制。`NORMAL_USER_MODEL_DAILY_LIMIT_ENABLED=false` 会关闭普通用户每日模型调用限制，`true` 则启用；本地 `.env` 已补齐该开关，`.env.example` 增加关闭说明，并补测真实环境变量关闭时不拦截、不落盘。验收：`node --check tests\normalUserModelDailyQuota.test.js`、`node scripts\run-tests.js tests\normalUserModelDailyQuota.test.js` 通过。小目标完成：无需改代码即可在 env 中启停限额模式。
+
 **2026-06-18 08:21 +08:00**：收口 `restart-bot.cmd restart confirm` 成功但调用方捕获 stdout 为空的问题。根因是确认重启路径用 `Start-Process -RedirectStandardOutput/-RedirectStandardError` 启动长期 Node，子进程继承/持有了调用方捕获管道，导致重启已完成但父调用方等不到 stdout EOF；现 `scripts\restart-bot.ps1` 通过 WMI 隐藏启动 `cmd.exe /c node ... 1>>日志 2>>日志`，隔离长期 Node 的调用方 stdout 句柄，并在停止旧进程树时保护当前 `cmd/powershell` 调用链。验收：`node scripts\run-tests.js tests\restartBotScript.test.js tests\remoteRestart.test.js tests\mainBotSingleInstanceLock.test.js`、`node --check scripts\pre-release-smoke.js`、`node --check tests\restartBotScript.test.js`、`node --check index.js`、`scripts\restart-bot.ps1` AST parse、`node scripts\pre-release-smoke.js --root D:\waifu --skip-restart-payload`、实际 `cmd /c restart-bot.cmd restart confirm` 返回 0 且 stdout 捕获 1935 字节；最终 main bot PID=41324、worker PID=2960 Running。小目标完成：确认重启成功输出可被当前控制台/调用方捕获。
 
 **2026-06-18 07:51 +08:00**：新增普通用户模型每日全局限额。普通用户 `userRole=user` 且有 `userId` 的模型 HTTP 请求会按 `TIMEZONE` 自然日统计，默认每天最多 25 次成功调用；管理员和无用户上下文后台任务不计入，状态落盘到 `data\normal-user-model-daily-quota.json`，失败/超时/流错误不扣。验收：`node --check utils\normalUserModelDailyQuota.js`、`node --check src\model\http\post-retry.chunk.js`、`node --check src\model\http\stream-retry.chunk.js`、`node scripts\run-tests.js tests\normalUserModelDailyQuota.test.js tests\normalUserModelDailyQuotaHttp.test.js tests\requestTrace.test.js tests\runtimeStreamingCoordinator.test.js`。小目标完成：普通用户模型成功调用有每日全局上限，重启不能绕过。
