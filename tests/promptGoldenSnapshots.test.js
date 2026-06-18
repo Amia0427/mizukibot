@@ -141,6 +141,18 @@ module.exports = (async () => {
   assert.ok(innerProtocolText.includes('允许的真人特征') || innerProtocolText.includes('human_breaks'));
   assert.ok(innerProtocolText.includes('禁止的 AI 痕迹') || innerProtocolText.includes('final_compression'));
   assert.ok(
+    innerProtocolText.includes('（心想：……）') || innerProtocolText.includes('(内心OS：……)'),
+    'roleplay inner protocol should require parenthesized character inner monologue for internal thinking'
+  );
+  assert.ok(
+    innerProtocolText.includes('我心想') && innerProtocolText.includes('我觉得') && innerProtocolText.includes('我暗自'),
+    'roleplay inner protocol should anchor first-person character thinking phrases'
+  );
+  assert.ok(
+    innerProtocolText.includes('剧情走向分析') && innerProtocolText.includes('回复内容规划'),
+    'roleplay inner protocol should focus internal thinking on plot and reply planning'
+  );
+  assert.ok(
     innerProtocolText.includes('只输出瑞希此刻会说的话')
     || innerProtocolText.includes('Only output the final user-facing text.')
   );

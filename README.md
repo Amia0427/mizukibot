@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-18 08:25 +08:00**：规范主回复内部思考模式为角色沉浸式。`roleplay_inner_protocol` 现在要求模型若产生内部 `<think>` / thinking / `reasoning_content`，用瑞希第一人称括号内心独白表达，例如“（心想：……）”或“(内心OS：……)”，并聚焦剧情走向分析和回复内容规划；最终用户可见回复仍不得输出 `<think>`、完整思维链、内部草稿或本块内容。验收：`node scripts\run-tests.js tests\promptGoldenSnapshots.test.js tests\runtimePromptCache.test.js`、`npm run check:prompts` 通过。小目标完成：bot 的内部思考风格被提示词规范为沉浸式角色内心，同时不改变正文外显边界。
+
 **2026-06-18 08:35 +08:00**：明确普通用户模型每日限额可通过 `.env` 开关控制。`NORMAL_USER_MODEL_DAILY_LIMIT_ENABLED=false` 会关闭普通用户每日模型调用限制，`true` 则启用；本地 `.env` 已补齐该开关，`.env.example` 增加关闭说明，并补测真实环境变量关闭时不拦截、不落盘。验收：`node --check tests\normalUserModelDailyQuota.test.js`、`node scripts\run-tests.js tests\normalUserModelDailyQuota.test.js` 通过。小目标完成：无需改代码即可在 env 中启停限额模式。
 
 **2026-06-18 08:21 +08:00**：收口 `restart-bot.cmd restart confirm` 成功但调用方捕获 stdout 为空的问题。根因是确认重启路径用 `Start-Process -RedirectStandardOutput/-RedirectStandardError` 启动长期 Node，子进程继承/持有了调用方捕获管道，导致重启已完成但父调用方等不到 stdout EOF；现 `scripts\restart-bot.ps1` 通过 WMI 隐藏启动 `cmd.exe /c node ... 1>>日志 2>>日志`，隔离长期 Node 的调用方 stdout 句柄，并在停止旧进程树时保护当前 `cmd/powershell` 调用链。验收：`node scripts\run-tests.js tests\restartBotScript.test.js tests\remoteRestart.test.js tests\mainBotSingleInstanceLock.test.js`、`node --check scripts\pre-release-smoke.js`、`node --check tests\restartBotScript.test.js`、`node --check index.js`、`scripts\restart-bot.ps1` AST parse、`node scripts\pre-release-smoke.js --root D:\waifu --skip-restart-payload`、实际 `cmd /c restart-bot.cmd restart confirm` 返回 0 且 stdout 捕获 1935 字节；最终 main bot PID=41324、worker PID=2960 Running。小目标完成：确认重启成功输出可被当前控制台/调用方捕获。
