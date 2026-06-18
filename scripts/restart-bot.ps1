@@ -856,7 +856,7 @@ function Stop-BotForRestart {
   }
 
   $childPids = @(Get-TreeChildPids -RootPids $targetPids)
-  $protectedPids = @(Get-CurrentProcessAncestorPids)
+  $protectedPids = @(Get-CurrentProcessAncestorPids | Where-Object { $targetPids -notcontains [int]$_ })
   $stoppedChildren = @(Stop-PidList -Pids $childPids -Stage 'child' -ProtectedPids $protectedPids)
   $stoppedRoots = @(Stop-PidList -Pids $targetPids -Stage 'root' -ProtectedPids $protectedPids)
   $allStopped = @($stoppedChildren + $stoppedRoots | Sort-Object -Unique)

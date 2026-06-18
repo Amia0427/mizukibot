@@ -120,9 +120,10 @@ module.exports = (() => {
   assert.ok(
     script.includes('function Get-CurrentProcessAncestorPids') &&
       script.includes('protected caller pids') &&
+      script.includes('Where-Object { $targetPids -notcontains [int]$_ }') &&
       script.includes('Stop-PidList -Pids $childPids -Stage') &&
       script.includes('-ProtectedPids $protectedPids'),
-    'restart should not stop the cmd/powershell caller chain while killing the bot process tree'
+    'restart should protect the cmd/powershell caller chain without protecting the target bot process tree'
   );
   assert.ok(
     script.includes('=== Bot Node Processes ===') && script.includes('=== Other Related Node Processes (diagnostic only) ==='),
