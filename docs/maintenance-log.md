@@ -1,3 +1,12 @@
+## 运行维护 2026-06-18 17:42
+
+- 小目标：让当前项目的“思考展示”接近截图里那种情绪丰富、像小记一样的内心独白，但不暴露真实完整思维链。
+- 根本边界：不把 provider raw reasoning 原样外发；仍只发送本地清洗后的 `reasoningForwardText`，模型工作语、完整推理链、导演提示继续跳过。
+- 最小修复：`utils/reasoningForwardPersona.js` 将可见小记从单句短想法放宽为最多 3 段、520 字，保留段落形状、惊讶/心软/停顿/重复感叹等主观情绪流。
+- 提示词同步：`prompts/runtime/reasoning-forward-persona.txt` 和 `prompts/runtime/roleplay-inner-protocol.txt` 明确情绪化短内心、不要条列式分析；`utils/runtimePrompts.js` fallback 同步。
+- 验证：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\runtimePromptCache.test.js tests\promptGoldenSnapshots.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\qqActionServiceReasoningForward.test.js tests\messageHandlerReasoningForwardSource.test.js`、`npm run check:prompts` 通过。
+- 小目标已完成：QQ 可见思考小记能呈现更情绪化的瑞希内心独白，同时保留“不发完整思维链、不发模型工作痕迹”的安全边界。
+
 ## 运行维护 2026-06-18 11:09
 
 - 小目标：排查 `status_code=400, messages: text content blocks must be non-empty` 是否为本地代码问题。

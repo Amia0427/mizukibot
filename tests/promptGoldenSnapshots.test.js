@@ -153,6 +153,14 @@ module.exports = (async () => {
     'roleplay inner protocol should focus internal thinking on plot and reply planning'
   );
   assert.ok(
+    innerProtocolText.includes('情绪流') || innerProtocolText.includes('emotional flow'),
+    'roleplay inner protocol should keep internal thinking emotionally vivid'
+  );
+  assert.ok(
+    innerProtocolText.includes('不要写成条列式分析') || innerProtocolText.includes('numbered analysis'),
+    'roleplay inner protocol should avoid analytical step formatting'
+  );
+  assert.ok(
     innerProtocolText.includes('只输出瑞希此刻会说的话')
     || innerProtocolText.includes('Only output the final user-facing text.')
   );
