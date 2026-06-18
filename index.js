@@ -24,7 +24,7 @@ const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
 const { getNapCatActionClient } = require('./api/napcatActionClient');
 const { createNapCatHttpActionClient } = require('./api/napcatHttpActionClient');
 const { getSchedulerRuntime } = require('./core/schedulerRuntime');
-const { sendGroupMessage } = require('./api/qqActionService');
+const { sendGroupMessage, sendPrivateMessage } = require('./api/qqActionService');
 const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime');
 const { appendNapcatPacketToLog, createNapcatLogFollower } = require('./core/napcatLogFollower');
 const { startResourceSnapshotLoop } = require('./utils/perfRuntime');
@@ -32,6 +32,7 @@ const { cleanupStaleDataTmpFiles, DEFAULT_MAX_AGE_MS } = require('./utils/dataTm
 const { startNapCatHttpReverseServer } = require('./core/napcatHttpReverseServer');
 const { createMessageIngressDispatcher } = require('./core/messageIngressDispatcher');
 const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics');
+const { maybeSendRestartResultFeedback } = require('./utils/restartResultFeedback');
 
 // Avoid starting multiple bot instances that compete for one OneBot websocket.
 const LOCK_FILE = process.env.MIZUKIBOT_INDEX_TEST_MODE === '1' && process.env.MIZUKIBOT_LOCK_FILE
@@ -618,6 +619,22 @@ function startNapCatTransport() {
   }
 }
 
+function scheduleRestartResultFeedback(attempt = 1) {
+  setTimeout(() => {
+    void maybeSendRestartResultFeedback({
+      actionClient: napcatActionClient,
+      sendGroupMessage,
+      sendPrivateMessage
+    }).then((result) => {
+      if (result?.reason === 'send_failed' && attempt < 5) {
+        scheduleRestartResultFeedback(attempt + 1);
+      }
+    }).catch((error) => {
+      console.warn('[restart] feedback failed', error?.message || error);
+    });
+  }, 4000).unref?.();
+}
+
 async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   if (shutdownInProgress) return;
   shutdownInProgress = true;
@@ -779,6 +796,7 @@ async function startMainProcess() {
   }
   startResourceSnapshots();
   startNapCatTransport();
+  scheduleRestartResultFeedback();
   recordMainRuntimeState('initialized', {
     mode: config.NAPCAT_HTTP_REVERSE_ENABLED ? 'http_reverse' : 'websocket'
   });

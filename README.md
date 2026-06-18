@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-18 10:40 +08:00**：收口重启脚本仍“杀不掉旧进程/锁文件、远程没有成功反馈”的问题。`scripts\restart-bot.ps1` 现在会把旧 main/worker 的 WMI `cmd.exe` launcher 也作为已验证旧实例清理，并把最终健康状态写入 `data\restart-bot-result.json`；新启动的 `index.js` 会在 NapCat 可用后消费该结果，给 `/restart confirm` 触发者补发成功/失败反馈。验收：目标测试、PowerShell AST parse、实际 `cmd /c restart-bot.cmd restart confirm` 通过；旧 main/worker `1552/36952` 和旧 launcher `45596/37672` 均退出，最终 main bot PID=45064、worker PID=34416 Running。
+
 **2026-06-18 09:43 +08:00**：修复远程触发重启时可能“保护旧 main bot 导致假成功”的问题。上一轮只验证了本地 `cmd /c restart-bot.cmd restart confirm`，但远程 `/restart` 从 main bot 内触发时，`cmd/powershell` 调用链的祖先可能包含旧 main bot；若保护祖先 PID 时不排除本轮目标 PID，脚本会保护旧 main bot，造成报告成功但旧进程没被杀。现 `scripts\restart-bot.ps1` 的 protected caller pids 会从保护列表排除 `$targetPids`，只保护调用方 shell 链，不保护待停的 main/worker。验收：`node scripts\run-tests.js tests\restartBotScript.test.js tests\remoteRestart.test.js`、PowerShell AST parse、`cmd /c restart-bot.cmd restart confirm` 实际输出 `restart roots: 33664, 37772`、`protected caller pids` 不含这两个目标 PID，成功切到 main bot PID=47328、worker PID=8100；`node scripts\pre-release-smoke.js --root D:\waifu --skip-restart-payload` 通过。小目标完成：远程重启调用链保护不再把待重启的旧 bot 一起保护。
 
 **2026-06-18 08:35 +08:00**：明确普通用户模型每日限额可通过 `.env` 开关控制。`NORMAL_USER_MODEL_DAILY_LIMIT_ENABLED=false` 会关闭普通用户每日模型调用限制，`true` 则启用；本地 `.env` 已补齐该开关，`.env.example` 增加关闭说明，并补测真实环境变量关闭时不拦截、不落盘。验收：`node --check tests\normalUserModelDailyQuota.test.js`、`node scripts\run-tests.js tests\normalUserModelDailyQuota.test.js` 通过。小目标完成：无需改代码即可在 env 中启停限额模式。
