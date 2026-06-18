@@ -7,6 +7,16 @@
 - 小目标已完成：Anthropic Messages 请求体不会再由本地适配层主动生成空 `text` content block。
 - 提交后记录 2026-06-18 11:09 +08:00：已提交 `fix: drop empty anthropic text blocks`；该小目标完成记录已按并行开发约定追加。
 
+## 运行维护 2026-06-18 11:41
+
+- 小目标：治本修复用户反馈“重启脚本双击不会成功，依然是旧进程”。
+- 根因：`restart-bot.cmd` 无参数入口被改成 status-only；Windows 双击 `.cmd` 正是无参数运行，所以用户双击只看状态，不会杀旧进程或更新锁。
+- 最小修复：wrapper 层无参数直接调用 `scripts\restart-bot.ps1 restart confirm`；显式参数仍原样透传，因此 `restart-bot.cmd status` 继续只读。
+- 验证：`node scripts\run-tests.js tests\restartBotScript.test.js tests\restartResultFeedback.test.js tests\remoteRestart.test.js tests\mainBotSingleInstanceLock.test.js`、PowerShell AST parse、显式 `cmd /c restart-bot.cmd status` 通过。
+- 实测结果：实际 `cmd /c restart-bot.cmd` 返回 0；旧 main/worker `45064/34416` 和旧 launcher `42712/40092` 均退出；锁文件更新为 main bot `34660`、post-reply worker `47100`；最终 status 显示两者 Running。
+- 小目标已完成：双击/无参数入口现在会执行真实确认重启，状态检查改为显式 `status`。
+- 提交后记录 2026-06-18 11:41 +08:00：已提交 `fix: make restart wrapper double-click restart`；该小目标完成记录已按并行开发约定追加。
+
 ## 运行维护 2026-06-18 10:40
 
 - 小目标：处理用户反馈“重启脚本还是有问题，杀不掉锁文件和旧进程，而且没有重启成功反馈”。

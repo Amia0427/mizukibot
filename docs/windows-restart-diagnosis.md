@@ -1,5 +1,7 @@
 # Windows 重启脚本诊断
 
+更新 2026-06-18 11:41 +08:00：修复双击 `restart-bot.cmd` 不重启。此前为了防误触把无参数入口改成 status-only，但双击 `.cmd` 正是无参数运行，导致用户双击后旧 main/worker 仍然存在。现 wrapper 层无参数直接转成 `restart confirm`，显式 `restart-bot.cmd status` 仍只读。验收：`cmd /c restart-bot.cmd` 真实执行重启，旧 main/worker `45064/34416` 和旧 launcher `42712/40092` 均退出，锁更新为 main bot `34660`、worker `47100`，status 显示 Running。
+
 更新 2026-06-18 10:40 +08:00：继续修复“旧进程/锁文件清不掉、远程没有成功反馈”。本轮确认本地 `restart confirm` 已能停 main/worker 并更新锁，但 WMI 启动的外层 `cmd.exe` launcher 也需要按已验证旧实例清理，否则使用者会看到旧相关进程残留；远程 `/restart` 又是 detached + `stdio: ignore`，旧 bot 被杀后无法同步把最终健康结果回给触发者。现 `Stop-BotForRestart` 会识别 main/worker 的当前仓库 `cmd.exe /c node ...` launcher，停止 root node 后再清理 launcher；确认重启最终写 `data\restart-bot-result.json`，新 main bot 启动后消费该结果并向触发群/用户反馈。验收：旧 main/worker `1552/36952` 和旧 launcher `45596/37672` 均退出，锁更新为 main bot `45064`、worker `34416`，status 显示 Running，目标测试与 PowerShell AST parse 通过。剩余风险：远程 QQ 成功反馈依赖新进程启动后 NapCat action 可用，已做短重试但若 NapCat 离线仍只能从 result/log/status 验证。
 
 更新 2026-06-18 09:43 +08:00：修复远程重启调用链保护误伤。08:21 的 stdout 修复把长期 Node 改成 WMI/cmd 启动，同时保护当前 `cmd/powershell` 调用链；但远程 `/restart` 由 main bot 触发时，旧 main bot 可能位于调用链祖先中，保护祖先会把待停止的 main bot 一起保护。现 `$protectedPids = Get-CurrentProcessAncestorPids | Where-Object { $targetPids -notcontains [int]$_ }`，明确从保护列表排除本轮待停 main/worker。验收：本地确认重启输出中 `restart roots: 33664, 37772`，`protected caller pids` 不含目标 PID，随后状态为 main bot PID=47328、post-reply worker PID=8100 Running；目标测试、PowerShell AST parse 和 pre-release smoke 通过。
