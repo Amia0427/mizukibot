@@ -11,8 +11,10 @@ module.exports = (() => {
   const index = fs.readFileSync(indexPath, 'utf8');
 
   assert.ok(
-    wrapper.includes('scripts\\restart-bot.ps1') && wrapper.includes('%*'),
-    'cmd wrapper should forward all arguments to scripts/restart-bot.ps1'
+    wrapper.includes('scripts\\restart-bot.ps1') &&
+      wrapper.includes('restart confirm') &&
+      wrapper.includes('%*'),
+    'cmd wrapper should restart by default while forwarding explicit arguments to scripts/restart-bot.ps1'
   );
   assert.ok(
     !wrapper.includes('POWERSHELL_PAYLOAD'),
@@ -45,7 +47,7 @@ module.exports = (() => {
   );
   assert.ok(
     script.includes('status only; start skipped (restart requires "restart confirm")'),
-    'running restart-bot.cmd without arguments should default to status only'
+    'explicit status command should remain read-only'
   );
   assert.ok(
     script.includes('function Get-RunningMainBotProcesses') &&
