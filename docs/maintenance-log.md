@@ -1,3 +1,12 @@
+## 运行维护 2026-06-18 08:21
+
+- 小目标：专门收口 `restart confirm` 已成功但当前控制台/调用方捕获 stdout 为空的问题，不重做整条重启链路。
+- 根因：确认重启路径用 `Start-Process -RedirectStandardOutput/-RedirectStandardError` 启动长期 Node；重启本身在 2-3 秒内完成并写入 `data\restart-bot.log`，但长期 Node 继承/持有调用方捕获管道，调用方等不到 stdout EOF，表现为超时或 stdout 空。
+- 最小修复：`scripts\restart-bot.ps1` 的长期 Node 启动改为 WMI 隐藏启动 `cmd.exe /c node ... 1>>运行日志 2>>错误日志`，让 Node 只持有运行日志文件句柄；停止旧进程树时保护当前 `cmd/powershell` 调用链，避免远程/嵌套调用自断输出。
+- 验证：`node scripts\run-tests.js tests\restartBotScript.test.js tests\remoteRestart.test.js tests\mainBotSingleInstanceLock.test.js`、`node --check scripts\pre-release-smoke.js`、`node --check tests\restartBotScript.test.js`、`node --check index.js`、`scripts\restart-bot.ps1` AST parse、`node scripts\pre-release-smoke.js --root D:\waifu --skip-restart-payload`、`cmd /c restart-bot.cmd restart`、实际 `cmd /c restart-bot.cmd restart confirm`。
+- 结果：`restart confirm` 返回 0，stdout 捕获 1935 字节、stderr 0；main bot `46880 -> 41324`、post-reply worker `40672 -> 2960`；最终 `cmd /c restart-bot.cmd status` 显示两者 Running，`Other Related Node Processes` 为 none。
+- 小目标已完成：确认重启成功输出可被当前控制台/调用方捕获。
+
 ## 运行维护 2026-06-18 07:51
 
 - 小目标：给普通用户模型请求加每日全局成功调用上限，默认 25 次，管理员不受影响。

@@ -230,6 +230,12 @@ function Resolve-RestartWritableLogPath {
   return $fallbackPath
 }
 
+function ConvertTo-CmdQuotedArgument {
+  param([Parameter(Mandatory = $true)][string]$Value)
+
+  return '"' + ($Value -replace '"', '\"') + '"'
+}
+
 function Start-NodeRestartProcess {
   param(
     [Parameter(Mandatory = $true)][string]$NodeExe,
@@ -240,14 +246,21 @@ function Start-NodeRestartProcess {
 
   $resolvedStdoutLog = Resolve-RestartWritableLogPath -Path $StdoutLog
   $resolvedStderrLog = Resolve-RestartWritableLogPath -Path $StderrLog
-  return Start-Process `
-    -FilePath $NodeExe `
-    -ArgumentList $ArgumentList `
-    -WorkingDirectory $repoRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $resolvedStdoutLog `
-    -RedirectStandardError $resolvedStderrLog `
-    -PassThru
+
+  $commandParts = @((ConvertTo-CmdQuotedArgument -Value $NodeExe))
+  foreach ($argument in $ArgumentList) {
+    $commandParts += (ConvertTo-CmdQuotedArgument -Value $argument)
+  }
+  $innerCommand = ($commandParts -join ' ') + ' 1>>' + (ConvertTo-CmdQuotedArgument -Value $resolvedStdoutLog) + ' 2>>' + (ConvertTo-CmdQuotedArgument -Value $resolvedStderrLog)
+  $commandLine = 'cmd.exe /d /s /c "' + $innerCommand + '"'
+  $startup = ([wmiclass]'Win32_ProcessStartup').CreateInstance()
+  $startup.ShowWindow = 0
+  $result = ([wmiclass]'Win32_Process').Create($commandLine, [string]$repoRoot, $startup)
+  if ([int]$result.ReturnValue -ne 0) {
+    throw "failed to start node process through WMI. code=$($result.ReturnValue)"
+  }
+
+  return [int]$result.ProcessId
 }
 
 function Test-RestartConfirmed {
@@ -696,14 +709,41 @@ function Get-TreeChildPids {
   }
 }
 
+function Get-CurrentProcessAncestorPids {
+  try {
+    $processes = @{}
+    Get-CimInstance Win32_Process -ErrorAction Stop | ForEach-Object {
+      $processes[[int]$_.ProcessId] = $_
+    }
+
+    $ancestors = New-Object System.Collections.ArrayList
+    $currentPid = [int]$PID
+    while ($processes.ContainsKey($currentPid)) {
+      $parentPid = [int]$processes[$currentPid].ParentProcessId
+      if ($parentPid -le 0 -or $ancestors.Contains($parentPid)) { break }
+      [void]$ancestors.Add($parentPid)
+      $currentPid = $parentPid
+    }
+    return @($ancestors)
+  } catch {
+    return @()
+  }
+}
+
 function Stop-PidList {
   param(
     [int[]]$Pids,
-    [string]$Stage
+    [string]$Stage,
+    [int[]]$ProtectedPids = @()
   )
 
   $stopped = New-Object System.Collections.ArrayList
-  foreach ($pidNum in @($Pids | Where-Object { $_ -gt 0 -and $_ -ne $PID } | Select-Object -Unique)) {
+  $protected = @{}
+  foreach ($protectedPid in @($ProtectedPids + @([int]$PID) | Where-Object { $_ -gt 0 } | Select-Object -Unique)) {
+    $protected[[int]$protectedPid] = $true
+  }
+
+  foreach ($pidNum in @($Pids | Where-Object { $_ -gt 0 -and (-not $protected.ContainsKey([int]$_)) } | Select-Object -Unique)) {
     try {
       Stop-Process -Id $pidNum -Force -ErrorAction Stop
       [void]$stopped.Add($pidNum)
@@ -816,12 +856,14 @@ function Stop-BotForRestart {
   }
 
   $childPids = @(Get-TreeChildPids -RootPids $targetPids)
-  $stoppedChildren = @(Stop-PidList -Pids $childPids -Stage 'child')
-  $stoppedRoots = @(Stop-PidList -Pids $targetPids -Stage 'root')
+  $protectedPids = @(Get-CurrentProcessAncestorPids)
+  $stoppedChildren = @(Stop-PidList -Pids $childPids -Stage 'child' -ProtectedPids $protectedPids)
+  $stoppedRoots = @(Stop-PidList -Pids $targetPids -Stage 'root' -ProtectedPids $protectedPids)
   $allStopped = @($stoppedChildren + $stoppedRoots | Sort-Object -Unique)
   $gone = Wait-PidsGone -Pids $allStopped -TimeoutSeconds 10
 
   [void]$actions.Add("restart roots: $(if ($targetPids.Count) { $targetPids -join ', ' } else { '(none)' })")
+  [void]$actions.Add("protected caller pids: $(if ($protectedPids.Count) { $protectedPids -join ', ' } else { '(none)' })")
   [void]$actions.Add("stopped children: $(if ($stoppedChildren.Count) { $stoppedChildren -join ', ' } else { '(none)' })")
   [void]$actions.Add("stopped roots: $(if ($stoppedRoots.Count) { $stoppedRoots -join ', ' } else { '(none)' })")
   [void]$actions.Add("stopped process wait: $(if ($gone) { 'complete' } else { 'timeout' })")
@@ -838,9 +880,9 @@ function Start-BotRuntimeDirectly {
 
   $statusBefore = Get-BotRuntimeStatus
   if (-not ($statusBefore.Main.Running -and $statusBefore.Main.Match)) {
-    $mainProc = Start-NodeRestartProcess -NodeExe $nodeExe -ArgumentList @('index.js') -StdoutLog $mainStdoutLogFile -StderrLog $mainStderrLogFile
-    [void]$actions.Add("started main bot directly pid=$($mainProc.Id)")
-    Write-RestartLog -Message "started main bot directly pid=$($mainProc.Id)"
+    $mainLauncherPid = Start-NodeRestartProcess -NodeExe $nodeExe -ArgumentList @('index.js') -StdoutLog $mainStdoutLogFile -StderrLog $mainStderrLogFile
+    [void]$actions.Add("started main bot launcher pid=$mainLauncherPid")
+    Write-RestartLog -Message "started main bot launcher pid=$mainLauncherPid"
   } else {
     [void]$actions.Add("main bot already running pid=$($statusBefore.Main.Pid)")
   }
@@ -848,10 +890,9 @@ function Start-BotRuntimeDirectly {
   Start-Sleep -Milliseconds 800
   $statusAfterMain = Get-BotRuntimeStatus
   if (-not ($statusAfterMain.Worker.Running -and $statusAfterMain.Worker.Match) -and (-not $statusAfterMain.WorkerIdleAllowed)) {
-    $workerProc = Start-NodeRestartProcess -NodeExe $nodeExe -ArgumentList @('scripts/post-reply-worker.js') -StdoutLog $workerStdoutLogFile -StderrLog $workerStderrLogFile
-    Set-Content -LiteralPath $workerPidFile -Value $workerProc.Id -Encoding utf8
-    [void]$actions.Add("started post-reply worker directly pid=$($workerProc.Id)")
-    Write-RestartLog -Message "started post-reply worker directly pid=$($workerProc.Id)"
+    $workerLauncherPid = Start-NodeRestartProcess -NodeExe $nodeExe -ArgumentList @('scripts/post-reply-worker.js') -StdoutLog $workerStdoutLogFile -StderrLog $workerStderrLogFile
+    [void]$actions.Add("started post-reply worker launcher pid=$workerLauncherPid")
+    Write-RestartLog -Message "started post-reply worker launcher pid=$workerLauncherPid"
   } elseif ($statusAfterMain.WorkerIdleAllowed) {
     [void]$actions.Add('post-reply worker not started; queue idle')
   } else {
