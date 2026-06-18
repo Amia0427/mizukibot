@@ -1,3 +1,12 @@
+## 运行维护 2026-06-18 11:09
+
+- 小目标：排查 `status_code=400, messages: text content blocks must be non-empty` 是否为本地代码问题。
+- 现场结论：本地可稳定复现，`mapMessagesToAnthropic([{ role: 'user', content: '' }])` 会生成 `{ type: 'text', text: '' }`，符合上游报错条件。
+- 最小修复：`toAnthropicContentBlocks` 过滤空字符串和空 `text` part；`mapMessagesToAnthropic` 对空用户/助手历史不再生成空文本兜底，仅在整轮没有可发送消息时保留 `(empty input)`。
+- 验证：修复前本地探针复现空块；修复后 `node scripts\run-tests.js tests\anthropicAssistantContextOrdering.test.js tests\httpClientAnthropicPromptCache.test.js`、`node --check src\model\http\images.chunk.js`、`node --check src\model\http\request-shaping.chunk.js` 通过。
+- 小目标已完成：Anthropic Messages 请求体不会再由本地适配层主动生成空 `text` content block。
+- 提交后记录 2026-06-18 11:09 +08:00：已提交 `fix: drop empty anthropic text blocks`；该小目标完成记录已按并行开发约定追加。
+
 ## 运行维护 2026-06-18 10:40
 
 - 小目标：处理用户反馈“重启脚本还是有问题，杀不掉锁文件和旧进程，而且没有重启成功反馈”。

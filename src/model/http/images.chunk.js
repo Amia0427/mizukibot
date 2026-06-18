@@ -514,21 +514,22 @@ async function resolveAnthropicImageBlock(part = {}) {
 
 async function toAnthropicContentBlocks(content) {
   if (typeof content === 'string') {
-    return [{ type: 'text', text: String(content) }];
+    const text = String(content);
+    return text.trim() ? [{ type: 'text', text }] : [];
   }
 
   if (Array.isArray(content)) {
     const blocks = [];
     for (const part of content) {
       if (typeof part === 'string') {
-        blocks.push({ type: 'text', text: part });
+        if (part.trim()) blocks.push({ type: 'text', text: part });
         continue;
       }
 
       const partType = String(part?.type || '').toLowerCase();
       if (partType === 'text') {
         const text = String(part?.text || '');
-        if (text) {
+        if (text.trim()) {
           blocks.push(applyAnthropicCacheControl(
             { type: 'text', text },
             extractAnthropicCacheControl(part)
@@ -550,20 +551,24 @@ async function toAnthropicContentBlocks(content) {
       }
 
       if (typeof part?.text === 'string') {
-        blocks.push(applyAnthropicCacheControl(
-          { type: 'text', text: part.text },
-          extractAnthropicCacheControl(part)
-        ));
+        if (part.text.trim()) {
+          blocks.push(applyAnthropicCacheControl(
+            { type: 'text', text: part.text },
+            extractAnthropicCacheControl(part)
+          ));
+        }
       }
     }
     return blocks;
   }
 
   if (content && typeof content === 'object' && typeof content.text === 'string') {
-    return [applyAnthropicCacheControl(
-      { type: 'text', text: content.text },
-      extractAnthropicCacheControl(content)
-    )];
+    return content.text.trim()
+      ? [applyAnthropicCacheControl(
+          { type: 'text', text: content.text },
+          extractAnthropicCacheControl(content)
+        )]
+      : [];
   }
 
   const fallback = String(content || '');
