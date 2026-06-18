@@ -1,3 +1,12 @@
+## 运行维护 2026-06-18 07:51
+
+- 小目标：给普通用户模型请求加每日全局成功调用上限，默认 25 次，管理员不受影响。
+- 实现：新增 `utils\normalUserModelDailyQuota.js`，按 `TIMEZONE` 自然日和 `NORMAL_USER_MODEL_DAILY_LIMIT_STATE_FILE` 落盘计数；用状态文件旁 lock 目录保护跨进程读写。
+- 接入：`postWithRetry` 在真实 provider HTTP 前检查配额、成功 HTTP 后扣减；`postStreamWithRetry` 在真实 provider HTTP 前检查配额，只有流正常结束后扣减。
+- 边界：仅 `trace.userRole=user` 且存在 `trace.userId` 时生效；管理员、空角色、无用户上下文后台任务不计入；失败、超时、429、流错误不扣。
+- 验证：`node --check utils\normalUserModelDailyQuota.js`、`node --check src\model\http\post-retry.chunk.js`、`node --check src\model\http\stream-retry.chunk.js`、`node scripts\run-tests.js tests\normalUserModelDailyQuota.test.js tests\normalUserModelDailyQuotaHttp.test.js tests\requestTrace.test.js tests\runtimeStreamingCoordinator.test.js`。
+- 小目标已完成：普通用户每日模型成功调用次数已全局受限，并且重启不会清空当天用量。
+
 ## 运行维护 2026-06-18 00:56
 
 - 小目标：直接重写 `D:\waifu\restart-bot.cmd`，降低手动/远程重启失败率，避免窗口弹出、命令卡住、bot 已死无响应时无法可靠恢复。

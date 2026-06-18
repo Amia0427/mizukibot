@@ -148,6 +148,10 @@ function normalizeUserFacingReply(text, routeContext = {}, runtimeConfig = {}) {
     return '模型额度好像见底了。先换个模型或者补一下额度，我再继续。';
   }
 
+  if (failure.type === 'normal_user_model_daily_limit') {
+    return '今天普通用户的模型调用次数已经用完了，明天会自动恢复。';
+  }
+
   if (failure.type === 'generic_model_failure') {
     return '刚刚那句没组织稳。你再发一次，我继续接。';
   }

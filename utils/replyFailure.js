@@ -14,6 +14,16 @@ function classifyReplyFailure(text = '') {
   const lower = compact.toLowerCase();
 
   if (
+    /normal_user_model_daily_limit_exceeded/i.test(compact)
+    || /普通用户模型调用次数.*用完|今日普通用户模型调用次数/i.test(compact)
+  ) {
+    return {
+      type: 'normal_user_model_daily_limit',
+      text: compact
+    };
+  }
+
+  if (
     /insufficient[_\s-]?user[_\s-]?quota/i.test(compact)
     || /insufficient[_\s-]?quota/i.test(compact)
     || /insufficient\s+balance/i.test(compact)

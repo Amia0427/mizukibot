@@ -73,6 +73,23 @@ const {
   stripOpenAIPromptCacheRetentionFromRequest
 } = require('./openai-compatible.chunk');
 const { postWithRetry } = require('./post-retry.chunk');
+const {
+  assertCanCall,
+  recordSuccess
+} = require('../../../utils/normalUserModelDailyQuota');
+
+async function postQuotaCheckedModelHttp(trace, url, requestBody, axiosOptions) {
+  await assertCanCall(trace);
+  return postModelHttp(url, requestBody, axiosOptions);
+}
+
+async function recordQuotaSuccess(trace) {
+  try {
+    await recordSuccess(trace);
+  } catch (error) {
+    console.error('[normal-user-model-quota] record stream success failed:', error?.message || error);
+  }
+}
 
 /**
  * Streaming POST request with retry support.
@@ -175,19 +192,21 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
       });
       let resp;
       try {
-        resp = await postModelHttp(
+        resp = await postQuotaCheckedModelHttp(
+          trace,
           prepared.requestUrl,
           prepared.requestBody,
           getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
         );
-        } catch (error) {
+      } catch (error) {
         if (requestUsesReasoning(prepared?.requestBody) && isReasoningSchemaError(error)) {
           emitHttpDowngradeTrace(trace, prepared, body, 'strip_reasoning_fields', error, {
             attempt: i + 1,
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           const strippedRequestBody = stripReasoningFields(prepared.requestBody);
-          resp = await postModelHttp(
+          resp = await postQuotaCheckedModelHttp(
+            trace,
             prepared.requestUrl,
             strippedRequestBody,
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -230,7 +249,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           const strippedRequestBody = stripExtendedSamplingFields(prepared.requestBody);
-          resp = await postModelHttp(
+          resp = await postQuotaCheckedModelHttp(
+            trace,
             prepared.requestUrl,
             strippedRequestBody,
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -246,7 +266,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           const strippedRequestBody = stripTemperatureField(prepared.requestBody);
-          resp = await postModelHttp(
+          resp = await postQuotaCheckedModelHttp(
+            trace,
             prepared.requestUrl,
             strippedRequestBody,
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -266,7 +287,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
           const strippedRequestBody = stripTopPRequestField(prepared.requestBody);
-          resp = await postModelHttp(
+          resp = await postQuotaCheckedModelHttp(
+            trace,
             prepared.requestUrl,
             strippedRequestBody,
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -287,7 +309,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           });
           const strippedRequestBody = stripOpenAIPromptCacheRetentionFromRequest(prepared.requestBody);
           try {
-            resp = await postModelHttp(
+            resp = await postQuotaCheckedModelHttp(
+              trace,
               prepared.requestUrl,
               strippedRequestBody,
               getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -307,7 +330,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
                 durationMs: Math.max(0, Date.now() - attemptStartedAt)
               });
               const strippedCacheRequestBody = stripOpenAICompatiblePromptCaching(strippedRequestBody);
-              resp = await postModelHttp(
+              resp = await postQuotaCheckedModelHttp(
+                trace,
                 prepared.requestUrl,
                 strippedCacheRequestBody,
                 getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -330,7 +354,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             attempt: i + 1,
             durationMs: Math.max(0, Date.now() - attemptStartedAt)
           });
-          resp = await postModelHttp(
+          resp = await postQuotaCheckedModelHttp(
+            trace,
             prepared.requestUrl,
             stripOpenAICompatiblePromptCaching(prepared.requestBody),
             getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, prepared.requestHeaders, abortSignal, pinnedLookup)
@@ -351,7 +376,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           });
           const automaticDowngrade = stripAnthropicAutomaticPromptCaching(prepared.requestBody, prepared.requestHeaders);
           try {
-            resp = await postModelHttp(
+            resp = await postQuotaCheckedModelHttp(
+              trace,
               prepared.requestUrl,
               automaticDowngrade.requestBody,
               getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, automaticDowngrade.requestHeaders, abortSignal, pinnedLookup)
@@ -366,7 +392,8 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
               throw automaticDowngradeError;
             }
             const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
-            resp = await postModelHttp(
+            resp = await postQuotaCheckedModelHttp(
+              trace,
               prepared.requestUrl,
               downgraded.requestBody,
               getStreamAxiosOptions(prepared.provider, specificKey, timeoutMs, downgraded.requestHeaders, abortSignal, pinnedLookup)
@@ -405,7 +432,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           stream.removeListener('error', handleError);
         };
 
-        const finish = (err = null) => {
+        const finish = async (err = null) => {
           if (settled) return;
           settled = true;
           cleanup();
@@ -435,6 +462,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
             request: prepared?.requestBody,
             requestHeaders: prepared?.requestHeaders
           });
+          await recordQuotaSuccess(trace);
           emitHttpSuccessTrace(trace, prepared, body, {
             attempt: i + 1,
             statusCode: Number(resp?.status || 0) || null,
