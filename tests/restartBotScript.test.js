@@ -87,10 +87,19 @@ module.exports = (() => {
   );
   assert.ok(
     script.includes('function Start-NodeRestartProcess') &&
-      script.includes('-WindowStyle Hidden') &&
-      script.includes('-RedirectStandardOutput') &&
-      script.includes('-RedirectStandardError'),
-    'direct restart should launch hidden node processes with redirected logs'
+      script.includes("([wmiclass]'Win32_Process').Create") &&
+      script.includes('Win32_ProcessStartup') &&
+      script.includes('1>>') &&
+      script.includes('2>>'),
+    'direct restart should launch node through WMI with file redirection detached from the caller stdout pipe'
+  );
+  assert.ok(
+    script.includes('$mainLauncherPid = Start-NodeRestartProcess') &&
+      script.includes('started main bot launcher pid=$mainLauncherPid') &&
+      script.includes('$workerLauncherPid = Start-NodeRestartProcess') &&
+      script.includes('started post-reply worker launcher pid=$workerLauncherPid') &&
+      !script.includes('Set-Content -LiteralPath $workerPidFile -Value $workerLauncherPid'),
+    'restart actions should report launcher pids without overwriting runtime pid files with cmd launcher pids'
   );
   assert.ok(
     script.includes('function Wait-BotHealthy') &&
@@ -107,6 +116,13 @@ module.exports = (() => {
     script.includes('function Wait-PidsGone') &&
       script.includes('stopped process wait'),
     'restart should wait briefly for killed processes to disappear'
+  );
+  assert.ok(
+    script.includes('function Get-CurrentProcessAncestorPids') &&
+      script.includes('protected caller pids') &&
+      script.includes('Stop-PidList -Pids $childPids -Stage') &&
+      script.includes('-ProtectedPids $protectedPids'),
+    'restart should not stop the cmd/powershell caller chain while killing the bot process tree'
   );
   assert.ok(
     script.includes('=== Bot Node Processes ===') && script.includes('=== Other Related Node Processes (diagnostic only) ==='),
