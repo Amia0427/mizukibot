@@ -37,6 +37,8 @@ module.exports = (async () => {
   try {
     process.env.DATA_DIR = tempDir;
     process.env.API_KEY = 'test-key';
+    process.env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
+    process.env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
     clearProjectCache();
 
     const {

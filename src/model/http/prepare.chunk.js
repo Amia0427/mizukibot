@@ -383,6 +383,7 @@ function buildPinnedLookup(safeEndpoint = null) {
 }
 
 function shouldRetry(err) {
+  if (err?.retryable === false) return false;
   const code = String(err?.code || '').toUpperCase();
   if (['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'ENETRESET', 'ENETUNREACH'].includes(code)) return true;
   const status = Number(err?.response?.status);
