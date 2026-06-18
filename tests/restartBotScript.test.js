@@ -5,8 +5,10 @@ const path = require('path');
 module.exports = (() => {
   const wrapperPath = path.join(__dirname, '..', 'restart-bot.cmd');
   const powershellPath = path.join(__dirname, '..', 'scripts', 'restart-bot.ps1');
+  const indexPath = path.join(__dirname, '..', 'index.js');
   const wrapper = fs.readFileSync(wrapperPath, 'utf8');
   const script = fs.readFileSync(powershellPath, 'utf8');
+  const index = fs.readFileSync(indexPath, 'utf8');
 
   assert.ok(
     wrapper.includes('scripts\\restart-bot.ps1') && wrapper.includes('%*'),
@@ -113,14 +115,28 @@ module.exports = (() => {
     'restart script should log restart stage transitions for debugging'
   );
   assert.ok(
+    script.includes('restart-bot-result.json') &&
+      script.includes('function Write-RestartResult') &&
+      script.includes('restart_bot_result_v1') &&
+      script.includes('Write-RestartResult -Status $resultStatus') &&
+      script.includes("Write-RestartResult -Status 'failed'"),
+    'restart script should persist final restart success/failure for remote feedback'
+  );
+  assert.ok(
     script.includes('function Wait-PidsGone') &&
       script.includes('stopped process wait'),
     'restart should wait briefly for killed processes to disappear'
   );
   assert.ok(
+    script.includes('function Get-RestartLauncherPids') &&
+      script.includes('function Test-ProcessLooksLikeRestartLauncher') &&
+      script.includes('restart launchers:'),
+    'restart should stop verified cmd launchers for the old bot process tree'
+  );
+  assert.ok(
     script.includes('function Get-CurrentProcessAncestorPids') &&
       script.includes('protected caller pids') &&
-      script.includes('Where-Object { $targetPids -notcontains [int]$_ }') &&
+      script.includes('Where-Object { $stopRootPids -notcontains [int]$_ }') &&
       script.includes('Stop-PidList -Pids $childPids -Stage') &&
       script.includes('-ProtectedPids $protectedPids'),
     'restart should protect the cmd/powershell caller chain without protecting the target bot process tree'
@@ -161,6 +177,13 @@ module.exports = (() => {
     script.indexOf('$mainProcesses = @(Get-RunningMainBotProcesses -Processes $processes)') <
       script.indexOf('Record-ExpectedMainBotShutdownForRestart -OwnerPid $mainPid'),
     'restart script should repair stale pid state before writing the expected-shutdown marker'
+  );
+  assert.ok(
+    index.includes("require('./utils/restartResultFeedback')") &&
+      index.includes('function scheduleRestartResultFeedback') &&
+      index.includes('maybeSendRestartResultFeedback') &&
+      index.includes('sendPrivateMessage'),
+    'new main bot process should consume restart result feedback after startup'
   );
 
   console.log('restartBotScript.test.js passed');

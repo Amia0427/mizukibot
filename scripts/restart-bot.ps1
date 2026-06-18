@@ -13,6 +13,7 @@ $workerPidFile = Join-Path $repoRoot '.mizukibot-postreply-worker.pid'
 $dataDir = Join-Path $repoRoot 'data'
 $expectedShutdownFile = Join-Path $dataDir 'bot-main-expected-shutdown.json'
 $restartLogFile = Join-Path $dataDir 'restart-bot.log'
+$restartResultFile = Join-Path $dataDir 'restart-bot-result.json'
 $mainStdoutLogFile = Join-Path $dataDir 'bot-runtime.out.log'
 $mainStderrLogFile = Join-Path $dataDir 'bot-runtime.err.log'
 $workerStdoutLogFile = Join-Path $dataDir 'post-reply-worker.out.log'
@@ -709,6 +710,50 @@ function Get-TreeChildPids {
   }
 }
 
+function Test-ProcessLooksLikeRestartLauncher {
+  param(
+    [Parameter(Mandatory = $true)]$Process,
+    [Parameter(Mandatory = $true)][string]$ChildCommandPattern
+  )
+
+  $commandLine = [string]$Process.CommandLine
+  if ([string]::IsNullOrWhiteSpace($commandLine)) { return $false }
+  if ([string]$Process.Name -ine 'cmd.exe') { return $false }
+  if ($commandLine -notmatch $ChildCommandPattern) { return $false }
+
+  $normalizedRoot = ([string]$repoRoot).TrimEnd('\')
+  return ($commandLine -like "*$normalizedRoot*")
+}
+
+function Get-RestartLauncherPids {
+  param(
+    [Parameter(Mandatory = $true)][object[]]$Processes,
+    [Parameter(Mandatory = $true)][object[]]$MainProcesses,
+    [Parameter(Mandatory = $true)][object[]]$WorkerProcesses
+  )
+
+  $processByPid = @{}
+  foreach ($process in $Processes) {
+    $processByPid[[int]$process.ProcessId] = $process
+  }
+
+  $launcherPids = New-Object System.Collections.ArrayList
+  foreach ($entry in @($MainProcesses)) {
+    $parentPid = [int]$entry.ParentProcessId
+    if ($processByPid.ContainsKey($parentPid) -and (Test-ProcessLooksLikeRestartLauncher -Process $processByPid[$parentPid] -ChildCommandPattern '(^|["''\s])index\.js(["''\s]|$)')) {
+      [void]$launcherPids.Add($parentPid)
+    }
+  }
+  foreach ($entry in @($WorkerProcesses)) {
+    $parentPid = [int]$entry.ParentProcessId
+    if ($processByPid.ContainsKey($parentPid) -and (Test-ProcessLooksLikeRestartLauncher -Process $processByPid[$parentPid] -ChildCommandPattern 'post-reply-worker\.js')) {
+      [void]$launcherPids.Add($parentPid)
+    }
+  }
+
+  return @($launcherPids | Where-Object { $_ -gt 0 } | Sort-Object -Unique)
+}
+
 function Get-CurrentProcessAncestorPids {
   try {
     $processes = @{}
@@ -745,11 +790,22 @@ function Stop-PidList {
 
   foreach ($pidNum in @($Pids | Where-Object { $_ -gt 0 -and (-not $protected.ContainsKey([int]$_)) } | Select-Object -Unique)) {
     try {
+      $process = Get-Process -Id $pidNum -ErrorAction SilentlyContinue
+      if ($null -eq $process) {
+        Write-Host "[restart] $Stage PID $pidNum already stopped"
+        continue
+      }
       Stop-Process -Id $pidNum -Force -ErrorAction Stop
       [void]$stopped.Add($pidNum)
       Write-Host "[restart] stopped $Stage PID $pidNum"
     } catch {
-      Write-Warning "Failed to stop $Stage PID ${pidNum}: $($_.Exception.Message)"
+      $errorMessage = $_.Exception.Message
+      $errorId = [string]$_.FullyQualifiedErrorId
+      if ($errorId -match 'NoProcessFound' -or $errorMessage -match 'Cannot find a process') {
+        Write-Host "[restart] $Stage PID $pidNum already stopped"
+      } else {
+        Write-Warning "Failed to stop $Stage PID ${pidNum}: $errorMessage"
+      }
     }
   }
   return @($stopped)
@@ -796,11 +852,50 @@ function Record-ExpectedMainBotShutdownForRestart {
   return (Write-JsonFileSafe -Path $expectedShutdownFile -Value $marker)
 }
 
+function Write-RestartResult {
+  param(
+    [Parameter(Mandatory = $true)][string]$Status,
+    [bool]$Healthy = $false,
+    [string]$Message = '',
+    [string[]]$Actions = @()
+  )
+
+  $runtimeStatus = Get-BotRuntimeStatus
+  $now = (Get-Date).ToUniversalTime()
+  $result = [pscustomobject]@{
+    schemaVersion = 'restart_bot_result_v1'
+    status = $Status
+    healthy = $Healthy
+    recordedAt = $now.ToString('o')
+    source = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_SOURCE' -DefaultValue 'restart-bot.cmd'
+    reason = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REASON' -DefaultValue 'manual_restart_script'
+    requestedBy = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REQUESTED_BY'
+    requestId = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_REQUEST_ID'
+    messageId = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_MESSAGE_ID'
+    groupId = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_GROUP_ID'
+    command = Get-RestartMarkerTextEnv -Name 'MIZUKI_RESTART_COMMAND'
+    mainPid = $runtimeStatus.Main.Pid
+    mainDetail = $runtimeStatus.Main.Detail
+    workerPid = $runtimeStatus.Worker.Pid
+    workerDetail = $runtimeStatus.Worker.Detail
+    message = $Message
+    actions = @($Actions)
+  }
+
+  return (Write-JsonFileSafe -Path $restartResultFile -Value $result)
+}
+
 function Stop-BotForRestart {
   $actions = New-Object System.Collections.ArrayList
   $targetPids = @()
   $mainPid = 0
-  $processes = Get-NodeProcessSnapshot
+  try {
+    $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+  } catch {
+    $allProcesses = @()
+    [void]$actions.Add("process snapshot unavailable before restart: $($_.Exception.Message)")
+  }
+  $processes = @($allProcesses | Where-Object { $_.Name -eq 'node.exe' })
 
   $mainPidText = Read-FirstLine -Path $mainPidFile
   $mainPidFromFile = 0
@@ -844,7 +939,9 @@ function Stop-BotForRestart {
     $targetPids += [int]$workerProcess.ProcessId
   }
 
+  $launcherPids = @(Get-RestartLauncherPids -Processes $allProcesses -MainProcesses $mainProcesses -WorkerProcesses $workerProcesses)
   $targetPids = @($targetPids | Sort-Object -Unique)
+  $stopRootPids = @($targetPids + $launcherPids | Sort-Object -Unique)
   if ($mainPid -gt 0 -and (Test-PidIsRunningMainBot -ProcessId $mainPid)) {
     if (Record-ExpectedMainBotShutdownForRestart -OwnerPid $mainPid) {
       [void]$actions.Add("expected shutdown marker written for main pid: $mainPid")
@@ -856,16 +953,19 @@ function Stop-BotForRestart {
   }
 
   $childPids = @(Get-TreeChildPids -RootPids $targetPids)
-  $protectedPids = @(Get-CurrentProcessAncestorPids | Where-Object { $targetPids -notcontains [int]$_ })
+  $protectedPids = @(Get-CurrentProcessAncestorPids | Where-Object { $stopRootPids -notcontains [int]$_ })
   $stoppedChildren = @(Stop-PidList -Pids $childPids -Stage 'child' -ProtectedPids $protectedPids)
   $stoppedRoots = @(Stop-PidList -Pids $targetPids -Stage 'root' -ProtectedPids $protectedPids)
-  $allStopped = @($stoppedChildren + $stoppedRoots | Sort-Object -Unique)
+  $stoppedLaunchers = @(Stop-PidList -Pids $launcherPids -Stage 'launcher' -ProtectedPids $protectedPids)
+  $allStopped = @($stoppedChildren + $stoppedRoots + $stoppedLaunchers | Sort-Object -Unique)
   $gone = Wait-PidsGone -Pids $allStopped -TimeoutSeconds 10
 
   [void]$actions.Add("restart roots: $(if ($targetPids.Count) { $targetPids -join ', ' } else { '(none)' })")
+  [void]$actions.Add("restart launchers: $(if ($launcherPids.Count) { $launcherPids -join ', ' } else { '(none)' })")
   [void]$actions.Add("protected caller pids: $(if ($protectedPids.Count) { $protectedPids -join ', ' } else { '(none)' })")
   [void]$actions.Add("stopped children: $(if ($stoppedChildren.Count) { $stoppedChildren -join ', ' } else { '(none)' })")
   [void]$actions.Add("stopped roots: $(if ($stoppedRoots.Count) { $stoppedRoots -join ', ' } else { '(none)' })")
+  [void]$actions.Add("stopped launchers: $(if ($stoppedLaunchers.Count) { $stoppedLaunchers -join ', ' } else { '(none)' })")
   [void]$actions.Add("stopped process wait: $(if ($gone) { 'complete' } else { 'timeout' })")
 
   return @($actions)
@@ -1051,18 +1151,28 @@ switch ($command) {
     }
 
     [void]$actions.Add('restart confirmation accepted')
-    Write-RestartLog -Message 'stop begin'
-    foreach ($action in Stop-BotForRestart) { [void]$actions.Add($action) }
-    Write-RestartLog -Message 'stop done'
-    foreach ($action in Start-BotRuntimeDirectly) { [void]$actions.Add($action) }
-    Write-RestartLog -Message 'health wait begin'
-    $waitResult = Wait-BotHealthy -TimeoutSeconds 60 -PollMilliseconds 1000
-    [void]$actions.Add("health wait: healthy=$($waitResult.Healthy), elapsed_ms=$($waitResult.ElapsedMs)")
-    Write-RestartLog -Message "health wait done healthy=$($waitResult.Healthy) elapsed_ms=$($waitResult.ElapsedMs)"
-    $healthy = Write-DaemonReport -TaskName $taskName -Actions @($actions)
-    Write-RestartLog -Message "report done healthy=$healthy"
-    if (-not $healthy) { throw 'bot/worker not healthy after synchronous restart' }
-    Exit-RestartScript -Code 0
+    try {
+      Write-RestartLog -Message 'stop begin'
+      foreach ($action in Stop-BotForRestart) { [void]$actions.Add($action) }
+      Write-RestartLog -Message 'stop done'
+      foreach ($action in Start-BotRuntimeDirectly) { [void]$actions.Add($action) }
+      Write-RestartLog -Message 'health wait begin'
+      $waitResult = Wait-BotHealthy -TimeoutSeconds 60 -PollMilliseconds 1000
+      [void]$actions.Add("health wait: healthy=$($waitResult.Healthy), elapsed_ms=$($waitResult.ElapsedMs)")
+      Write-RestartLog -Message "health wait done healthy=$($waitResult.Healthy) elapsed_ms=$($waitResult.ElapsedMs)"
+      $healthy = Write-DaemonReport -TaskName $taskName -Actions @($actions)
+      Write-RestartLog -Message "report done healthy=$healthy"
+      $resultStatus = if ($healthy) { 'success' } else { 'failed' }
+      $resultMessage = if ($healthy) { 'restart completed' } else { 'bot/worker not healthy after synchronous restart' }
+      [void](Write-RestartResult -Status $resultStatus -Healthy $healthy -Message $resultMessage -Actions @($actions))
+      if (-not $healthy) { throw 'bot/worker not healthy after synchronous restart' }
+      Exit-RestartScript -Code 0
+    } catch {
+      $failureMessage = $_.Exception.Message
+      Write-RestartLog -Message "restart failed: $failureMessage"
+      [void](Write-RestartResult -Status 'failed' -Healthy $false -Message $failureMessage -Actions @($actions))
+      throw
+    }
   }
   'start' {
     [void]$actions.Add('start requested')

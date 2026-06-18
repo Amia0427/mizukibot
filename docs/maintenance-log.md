@@ -1,3 +1,14 @@
+## 运行维护 2026-06-18 10:40
+
+- 小目标：处理用户反馈“重启脚本还是有问题，杀不掉锁文件和旧进程，而且没有重启成功反馈”。
+- 现场结论：本地确认重启已能停 main/worker 并更新 `.mizukibot.lock`，但旧 WMI `cmd.exe` launcher 也属于用户可见的旧相关进程；远程 `/restart` 使用 detached spawn + `stdio: ignore`，旧 bot 被杀后不能同步拿到最终健康结果。
+- 最小修复：`scripts\restart-bot.ps1` 识别并清理当前仓库 main/worker 的旧 launcher，停止时把“已自然退出”当正常状态；确认重启最终写 `data\restart-bot-result.json`。新增 `utils\restartResultFeedback.js`，新 main bot 在启动后消费 result，并向 `/restart confirm` 触发群/用户发送成功或失败反馈。
+- 验证：`node scripts\run-tests.js tests\restartBotScript.test.js tests\restartResultFeedback.test.js tests\remoteRestart.test.js tests\mainBotSingleInstanceLock.test.js`、`node --check index.js`、`node --check utils\restartResultFeedback.js`、`scripts\restart-bot.ps1` AST parse 通过；实际 `cmd /c restart-bot.cmd restart confirm` 返回 0。
+- 实测结果：旧 main/worker `1552/36952` 和旧 launcher `45596/37672` 均已退出；锁文件更新为 main bot `45064`、post-reply worker `34416`；`data\restart-bot-result.json` 为 `status=success, healthy=true`；最终 status 显示两者 Running 且无其他相关 Node 进程。
+- 剩余风险：远程 QQ 成功反馈依赖新 main bot 启动后 NapCat action 可用；已做短重试，若 NapCat 离线仍需用 `data\restart-bot-result.json`、`data\restart-bot.log` 和 `restart-bot.cmd status` 验收。
+- 小目标已完成：确认重启会清掉旧 node/launcher、更新锁文件，并留下可被新进程反馈的最终结果。
+- 提交后记录 2026-06-18 10:40 +08:00：已提交 `fix: harden restart cleanup feedback`；该小目标完成记录已按并行开发约定追加。
+
 ## 运行维护 2026-06-18 09:43
 
 - 小目标：处理用户反馈“重启脚本依然不成功”，复查本地确认重启成功之外的远程触发路径。
