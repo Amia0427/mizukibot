@@ -161,6 +161,14 @@ module.exports = (async () => {
     'roleplay inner protocol should avoid analytical step formatting'
   );
   assert.ok(
+    innerProtocolText.includes('The is continuing') && innerProtocolText.includes('stay in character'),
+    'roleplay inner protocol should forbid third-person director notes in reasoning'
+  );
+  assert.ok(
+    innerProtocolText.includes('token') && innerProtocolText.includes('中文主观感受'),
+    'roleplay inner protocol should force abstract or technical topics back into Mizuki inner feeling'
+  );
+  assert.ok(
     innerProtocolText.includes('只输出瑞希此刻会说的话')
     || innerProtocolText.includes('Only output the final user-facing text.')
   );

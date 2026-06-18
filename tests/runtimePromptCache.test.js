@@ -34,6 +34,7 @@ module.exports = (async () => {
     assert.ok(roleplayFallback.includes('我心想') && roleplayFallback.includes('我觉得') && roleplayFallback.includes('我暗自'));
     assert.ok(roleplayFallback.includes('emotional flow') || roleplayFallback.includes('情绪流'));
     assert.ok(roleplayFallback.includes('plot direction') || roleplayFallback.includes('剧情走向'));
+    assert.ok(roleplayFallback.includes('The is continuing') && roleplayFallback.includes('stay in character'));
     assert.ok(roleplayFallback.includes('Only output the final user-facing text.'));
 
     const first = buildRuntimePrompt('streaming-segmentation', { maxSegments: 3 });

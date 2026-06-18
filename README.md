@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-18 18:14 +08:00**：按反馈将“英文导演提示式 thinking”从拦截思路改为提示词源头约束。`roleplay_inner_protocol` 现在明确要求即使用户聊 token、模型、宗教梗或技术梗，内部 thinking/reasoning_content 也必须先写成瑞希第一人称中文主观感受，并禁止 “The user is...”“They are asking...”“The is continuing...”“stay in character” 这类第三人称导演提示。验收：`node scripts\run-tests.js tests\promptGoldenSnapshots.test.js tests\runtimePromptCache.test.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js`、`npm run check:prompts` 通过。小目标完成：思考风格约束前移到模型提示词，不扩大本地拦截黑名单。
+
 **2026-06-18 17:42 +08:00**：将 QQ reasoning 可见小记和主回复内部思考提示收口为更情绪化的瑞希内心独白风格。`reasoningForwardText` 现在允许最多 3 段、520 字的主观情绪小记，保留惊讶、心软、停顿和重复感叹；同时继续过滤完整推理链、模型工作语和英文导演提示。验收：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\runtimePromptCache.test.js tests\promptGoldenSnapshots.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\qqActionServiceReasoningForward.test.js tests\messageHandlerReasoningForwardSource.test.js`、`npm run check:prompts` 通过。小目标完成：思考展示更接近情绪丰富的短内心，不暴露真实完整思维链。
 
 **2026-06-18 11:09 +08:00**：修复 Anthropic Messages 请求里可能出现空 `text` content block 导致 `status_code=400, text content blocks must be non-empty` 的本地构造问题。`toAnthropicContentBlocks` 现在会过滤空文本块，`mapMessagesToAnthropic` 会跳过空用户/助手历史，仅在整轮无输入时保留 `(empty input)` 兜底；验收：本地探针复现修复前空块、目标测试和语法检查通过。小目标完成：本地不会再主动向 Anthropic 发送空文本块。

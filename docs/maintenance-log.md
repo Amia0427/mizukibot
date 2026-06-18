@@ -1,3 +1,12 @@
+## 运行维护 2026-06-18 18:14
+
+- 小目标：按反馈不继续扩大本地拦截规则，而是通过提示词强制模型从源头按瑞希内心规范产出 thinking/reasoning_content。
+- 用户反馈样例：`The is continuing the theme... They're asking... stay in character...` 仍是英文第三人称导演提示，不符合目标思考风格。
+- 最小修复：`prompts/runtime/roleplay-inner-protocol.txt` 明确要求 token/模型/宗教梗/技术梗等抽象话题也先写成瑞希中文主观感受，并禁止 “The user is...”“They are asking...”“The is continuing...”“stay in character” 这类导演提示；`utils/runtimePrompts.js` fallback 同步。
+- 范围控制：未新增本地黑名单拦截；未改 QQ 外发发送链路；仅加强模型 thinking 的提示词规范。
+- 验证：`node scripts\run-tests.js tests\promptGoldenSnapshots.test.js tests\runtimePromptCache.test.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js`、`npm run check:prompts` 通过。
+- 小目标已完成：思考风格约束前移到提示词层，要求模型必须按瑞希第一人称中文情绪内心思考。
+
 ## 运行维护 2026-06-18 17:42
 
 - 小目标：让当前项目的“思考展示”接近截图里那种情绪丰富、像小记一样的内心独白，但不暴露真实完整思维链。
