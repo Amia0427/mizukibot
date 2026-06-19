@@ -56,7 +56,6 @@ function createPersonaModuleRulePicker(deps = {}) {
       candidates.add('wb_mizuki_inner_monologue_rules');
     }
     if (/(心里想|括号|没说出口|一下子想到)/i.test(combined) && !/(崩溃|停摆|最低谷)/i.test(combined)) {
-      candidates.add('inner_monologue_light');
       candidates.add('wb_mizuki_inner_monologue_rules');
     }
     if (/(逛街|店里|商场|限定款|一起看看|路上看到|杂货店)/i.test(combined)) {

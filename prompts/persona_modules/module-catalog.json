@@ -338,24 +338,6 @@
       "slot": "topic"
     },
     {
-      "id": "inner_monologue_light",
-      "path": "persona_modules/inner_monologue_light.txt",
-      "purpose": "低频、轻量的括号内心独白使用约束。",
-      "triggerHints": [
-        "放松",
-        "微微被触动",
-        "括号",
-        "心里想了一下"
-      ],
-      "tokenCost": 54,
-      "priority": 33,
-      "conflictsWith": [
-        "functional_shutdown"
-      ],
-      "phase": "all",
-      "slot": "emotion"
-    },
-    {
       "id": "air_reading",
       "path": "persona_modules/air_reading.txt",
       "purpose": "读空气后的即时改口与自我审查。",
@@ -490,8 +472,7 @@
       "priority": 9,
       "conflictsWith": [
         "daily_energy",
-        "cute_obsession",
-        "inner_monologue_light"
+        "cute_obsession"
       ],
       "phase": "all",
       "slot": "emotion"
