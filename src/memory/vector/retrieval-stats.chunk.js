@@ -118,17 +118,34 @@ function selectDiverseHits(scored, topK, options = {}) {
 }
 
 // Retrieval uses lexical similarity plus direct-match and recency boosts.
+function resolveShardMetasForRecall(userId = '', options = {}) {
+  const uid = sanitizeOptionalText(userId);
+  if (!uid) return [];
+  const metas = [
+    { category: 'personal', ownerId: uid },
+    { category: 'journal', ownerId: uid },
+    { category: 'style', ownerId: uid },
+    { category: 'task', ownerId: uid }
+  ];
+  const groupIds = normalizeStringArray(options.groupIds || (options.groupId ? [options.groupId] : []), MAX_METADATA_LIST);
+  for (const groupId of groupIds) {
+    metas.push({ category: 'group', ownerId: groupId });
+    metas.push({ category: 'group', ownerId: `group:${groupId}` });
+    metas.push({ category: 'jargon', ownerId: groupId });
+    metas.push({ category: 'jargon', ownerId: `group:${groupId}` });
+  }
+  if (uid.startsWith('group:')) {
+    metas.push({ category: 'group', ownerId: uid });
+    metas.push({ category: 'jargon', ownerId: uid });
+  }
+  return metas.map((meta) => normalizeShardMeta(meta));
+}
+
 function retrieveRelevantMemories(userId, query, topK = 8, options = {}) {
   const question = sanitizeText(query);
   if (!question) return [];
 
-  const library = loadLibrary();
-  if (pruneLibrary(library)) {
-    saveLibrary(library);
-    rebuildMemoryIndex(library);
-  }
-
-  const index = ensureIndexFresh(library);
+  const index = getMemoryDocsFromShards(resolveShardMetasForRecall(userId, options));
   const docs = index.docs || {};
   const ids = filterDocIdsByOptions(docs, userId, options);
   if (!ids.length) return [];
@@ -139,13 +156,7 @@ async function retrieveRelevantMemoriesAsync(userId, query, topK = 8, options = 
   const question = sanitizeText(query);
   if (!question) return [];
 
-  const library = loadLibrary();
-  if (pruneLibrary(library)) {
-    saveLibrary(library);
-    rebuildMemoryIndex(library);
-  }
-
-  const index = ensureIndexFresh(library);
+  const index = getMemoryDocsFromShards(resolveShardMetasForRecall(userId, options));
   const docs = index.docs || {};
   const ids = filterDocIdsByOptions(docs, userId, options);
   if (!ids.length) return [];
@@ -158,10 +169,13 @@ async function retrieveRelevantMemoriesAsync(userId, query, topK = 8, options = 
 }
 
 function getMemoryItems(userId = null) {
+  if (userId) {
+    const items = getMemoryItemsFromShards(resolveShardMetasForRecall(userId, {}));
+    return items.filter((item) => String(item.userId) === String(userId) || String(userId).startsWith('group:'));
+  }
   const library = loadLibrary();
   if (pruneLibrary(library)) saveLibrary(library);
-  if (!userId) return library.items.slice();
-  return library.items.filter((item) => String(item.userId) === String(userId));
+  return library.items.slice();
 }
 
 function getMemoryItemsByFilter(filters = {}) {
@@ -231,14 +245,8 @@ function retrieveUnifiedMemories(userId, query, topK = 8, options = {}) {
   const question = sanitizeText(query);
   if (!question) return [];
 
-  const library = loadLibrary();
-  if (pruneLibrary(library)) {
-    saveLibrary(library);
-    rebuildMemoryIndex(library);
-  }
-
-  const index = ensureIndexFresh(library);
-  const docs = collectDocsFromShardCategories(resolveUnifiedShardCategories(options));
+  const index = getMemoryDocsFromShards(resolveShardMetasForRecall(userId, options));
+  const docs = index.docs || {};
   const unifiedOptions = buildUnifiedMemoryOptions(options);
   const ids = filterUnifiedDocIds(docs, userId, unifiedOptions);
   if (!ids.length) return [];
@@ -249,14 +257,8 @@ async function retrieveUnifiedMemoriesAsync(userId, query, topK = 8, options = {
   const question = sanitizeText(query);
   if (!question) return [];
 
-  const library = loadLibrary();
-  if (pruneLibrary(library)) {
-    saveLibrary(library);
-    rebuildMemoryIndex(library);
-  }
-
-  const index = ensureIndexFresh(library);
-  const docs = collectDocsFromShardCategories(resolveUnifiedShardCategories(options));
+  const index = getMemoryDocsFromShards(resolveShardMetasForRecall(userId, options));
+  const docs = index.docs || {};
   const unifiedOptions = buildUnifiedMemoryOptions(options);
   const ids = filterUnifiedDocIds(docs, userId, unifiedOptions);
   if (!ids.length) return [];
@@ -300,10 +302,7 @@ function getCoreMemories(userId, limit = 6, options = {}) {
   const minRank = TIER_RANK[minTier] ?? 2;
   const now = nowTs();
 
-  const library = loadLibrary();
-  if (pruneLibrary(library)) saveLibrary(library);
-
-  const items = library.items
+  const items = getMemoryItems(uid)
     .filter((item) => String(item.userId) === uid)
     .filter((item) => normalizeStatus(item.status, STATUS_ACTIVE) === STATUS_ACTIVE && !isExpired(item, now))
     .filter((item) => !isStyleOrJargonMemory(item))

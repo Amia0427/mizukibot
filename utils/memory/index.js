@@ -3,9 +3,7 @@ const path = require('path');
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const config = require('../../config');
 const {
-  flushScheduledProjectionSave,
-  loadProjection,
-  scheduleProjectionSave
+  flushScheduledProjectionSave
 } = require('../memoryProjection');
 const {
   LEGACY_MEMORY_LIMITS,
@@ -32,18 +30,102 @@ const {
   ensureDir,
   safeReadJson
 } = require('./persistence');
+const { BoundedCache } = require('../boundedCache');
+const {
+  createSessionBackedStore,
+  getSessionContext,
+  appendSessionTurn,
+  updateSessionState,
+  listStoredSessionKeys,
+  listUserSessionKeys: listShortTermUserSessionKeys
+} = require('../shortTermSessionStore');
 
 // Automatically create data directory for first run compatibility.
 const dataDir = path.join(PROJECT_ROOT, 'data');
 ensureDir(dataDir);
 
-let favorites = safeReadJson(config.DATA_FILE, {});
-let memories = safeReadJson(config.MEMORY_FILE, {});
-const chatHistory = {};
-const shortTermMemory = {};
+const favoriteCache = new BoundedCache({
+  maxEntries: Math.max(8, Number(config.EPHEMERAL_CACHE_MAX_SESSIONS || 256) || 256),
+  ttlMs: Math.max(0, Number(config.EPHEMERAL_CACHE_TTL_MS || 10 * 60 * 1000) || 0)
+});
+const memoryCache = new BoundedCache({
+  maxEntries: Math.max(8, Number(config.EPHEMERAL_CACHE_MAX_SESSIONS || 256) || 256),
+  ttlMs: Math.max(0, Number(config.EPHEMERAL_CACHE_TTL_MS || 10 * 60 * 1000) || 0)
+});
+const dirtyFavorites = new Set();
+const dirtyMemories = new Set();
+const chatHistory = createSessionBackedStore('history');
+const shortTermMemory = createSessionBackedStore('state');
+
+function loadLegacyMap(filePath) {
+  return safeReadJson(filePath, {});
+}
+
+function readLegacyEntry(filePath, cache, userId, fallbackFactory) {
+  const key = String(userId || '').trim();
+  if (!key) return fallbackFactory();
+  return cache.getOrCompute(key, () => {
+    const store = loadLegacyMap(filePath);
+    const current = store && typeof store === 'object' ? store[key] : null;
+    return current && typeof current === 'object' ? current : fallbackFactory();
+  });
+}
+
+function writeDirtyLegacyEntries(filePath, cache, dirtyKeys, sanitizer = null) {
+  if (!dirtyKeys.size) return;
+  const store = materializeLegacyMap(filePath, cache, dirtyKeys, sanitizer);
+  dirtyKeys.clear();
+  require('./persistence').atomicWriteJson(filePath, store);
+}
+
+function materializeLegacyMap(filePath, cache, dirtyKeys, sanitizer = null) {
+  const store = loadLegacyMap(filePath);
+  for (const key of Array.from(dirtyKeys)) {
+    const value = cache.get(key);
+    if (!key || value === undefined) continue;
+    store[key] = typeof sanitizer === 'function' ? sanitizer(value) : value;
+  }
+  return store;
+}
+
+function createLegacyUserProxy(filePath, cache, fallbackFactory, dirtyKeys) {
+  return new Proxy({}, {
+    get(_target, prop) {
+      if (typeof prop === 'symbol') return undefined;
+      const key = String(prop || '').trim();
+      if (!key) return undefined;
+      return readLegacyEntry(filePath, cache, key, fallbackFactory);
+    },
+    set(_target, prop, value) {
+      const key = String(prop || '').trim();
+      if (!key) return true;
+      cache.set(key, value && typeof value === 'object' ? value : fallbackFactory());
+      dirtyKeys.add(key);
+      return true;
+    },
+    deleteProperty(_target, prop) {
+      const key = String(prop || '').trim();
+      if (key) cache.delete(key);
+      return true;
+    },
+    ownKeys() {
+      return Object.keys(loadLegacyMap(filePath));
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      const key = String(prop || '').trim();
+      if (!key) return undefined;
+      const store = loadLegacyMap(filePath);
+      if (!Object.prototype.hasOwnProperty.call(store, key)) return undefined;
+      return { enumerable: true, configurable: true };
+    }
+  });
+}
+
+const favorites = createLegacyUserProxy(config.DATA_FILE, favoriteCache, defaultFavorite, dirtyFavorites);
+const memories = createLegacyUserProxy(config.MEMORY_FILE, memoryCache, defaultMemory, dirtyMemories);
 
 function pruneChatHistoryStore(store = chatHistory) {
-  const sessions = Object.keys(store || {});
+  const sessions = store === chatHistory ? listStoredSessionKeys() : Object.keys(store || {});
   const maxSessions = Math.max(1, Number(config.CHAT_HISTORY_MAX_SESSIONS || 500) || 500);
   const maxMessages = Math.max(1, Number(config.CHAT_HISTORY_MAX_MESSAGES_PER_SESSION || 80) || 80);
 
@@ -77,12 +159,12 @@ function syncRelationStage(userId, relationship) {
 }
 
 function sanitizeAllLegacyMemories() {
+  const current = loadLegacyMap(config.MEMORY_FILE);
   const next = {};
-  for (const [userId, entry] of Object.entries(memories || {})) {
+  for (const [userId, entry] of Object.entries(current || {})) {
     next[userId] = sanitizeLegacyMemoryEntry(entry);
   }
-  memories = next;
-  return memories;
+  return next;
 }
 
 const {
@@ -92,8 +174,8 @@ const {
 } = createMemoryFlushScheduler({
   config,
   flushScheduledProjectionSave,
-  getFavorites: () => favorites,
-  getMemories: () => memories,
+  getFavorites: () => materializeLegacyMap(config.DATA_FILE, favoriteCache, dirtyFavorites),
+  getMemories: () => materializeLegacyMap(config.MEMORY_FILE, memoryCache, dirtyMemories, sanitizeLegacyMemoryEntry),
   sanitizeAllLegacyMemories
 });
 
@@ -111,77 +193,65 @@ if (!process[MEMORY_PROCESS_HOOK_KEY]) {
 function ensureUserFavorite(userId) {
   const key = resolveAffinityKey(userId);
   if (!key) return defaultFavorite();
-  const projection = loadProjection();
-  const projectedFavorite = projection.favorites && projection.favorites[key]
-    ? projection.favorites[key]
-    : null;
-
-  favorites[key] = {
+  const current = readLegacyEntry(config.DATA_FILE, favoriteCache, key, defaultFavorite);
+  const next = {
     ...defaultFavorite(),
-    ...(projectedFavorite || {}),
-    ...(favorites[key] || {})
+    ...(current || {})
   };
-  favorites[key].points = Number(favorites[key].points || 0) || 0;
-  favorites[key].level = computeLevelFromPoints(favorites[key].points);
-  favorites[key].relationship = normalizeRelationship(
-    favorites[key].relationship,
-    favorites[key].relationship || favorites[key].level || '陌生人'
+  next.points = Number(next.points || 0) || 0;
+  next.level = computeLevelFromPoints(next.points);
+  next.relationship = normalizeRelationship(
+    next.relationship,
+    next.relationship || next.level || '陌生人'
   );
-  favorites[key].attitude = normalizeAttitude(favorites[key].attitude, '中立、保持距离');
-  favorites[key].trust_score = clampNumber(favorites[key].trust_score, -100, 100, 0);
-  favorites[key].last_affinity_reason = clampText(favorites[key].last_affinity_reason, LEGACY_MEMORY_LIMITS.affinityReasonLength);
-  favorites[key].last_affinity_source = clampText(favorites[key].last_affinity_source, 32);
-  favorites[key].last_affinity_update_at = Math.max(0, Number(favorites[key].last_affinity_update_at || 0) || 0);
-  favorites[key].scope = 'global';
-  enforceAdminAffinityState(key, favorites[key]);
-  return favorites[key];
+  next.attitude = normalizeAttitude(next.attitude, '中立、保持距离');
+  next.trust_score = clampNumber(next.trust_score, -100, 100, 0);
+  next.last_affinity_reason = clampText(next.last_affinity_reason, LEGACY_MEMORY_LIMITS.affinityReasonLength);
+  next.last_affinity_source = clampText(next.last_affinity_source, 32);
+  next.last_affinity_update_at = Math.max(0, Number(next.last_affinity_update_at || 0) || 0);
+  next.scope = 'global';
+  enforceAdminAffinityState(key, next);
+  favoriteCache.set(key, next);
+  dirtyFavorites.add(key);
+  return next;
 }
 
 /**
  * Ensure memory entry shape for a user.
  */
 function ensureUserMemory(userId) {
-  const projection = loadProjection();
-  const projectedMemory = projection.users && projection.users[userId]
-    ? sanitizeLegacyMemoryEntry(projection.users[userId])
-    : null;
-
-  if (projectedMemory) {
-    memories[userId] = projectedMemory;
-  } else if (!memories[userId]) {
-    memories[userId] = defaultMemory();
-  } else {
-    memories[userId] = sanitizeLegacyMemoryEntry(memories[userId]);
-  }
+  const current = readLegacyEntry(config.MEMORY_FILE, memoryCache, userId, defaultMemory);
+  const next = sanitizeLegacyMemoryEntry(current || defaultMemory());
   if (isAdminAffinityUser(userId)) {
-    memories[userId].profile.relation_stage = ADMIN_PROTECTED_AFFINITY.relationship;
+    next.profile.relation_stage = ADMIN_PROTECTED_AFFINITY.relationship;
   }
-  return memories[userId];
+  memoryCache.set(String(userId || '').trim(), next);
+  dirtyMemories.add(String(userId || '').trim());
+  return next;
 }
-
-/**
- * Normalize all existing data on startup.
- */
-function normalizeAll() {
-  for (const uid of Object.keys(favorites)) ensureUserFavorite(uid);
-  for (const uid of Object.keys(memories)) ensureUserMemory(uid);
-}
-normalizeAll();
 
 /**
  * Persist favorites to disk.
  */
 function saveData() {
-  scheduleProjectionSave();
-  scheduleDataFlush();
+  try {
+    writeDirtyLegacyEntries(config.DATA_FILE, favoriteCache, dirtyFavorites);
+  } catch (error) {
+    console.error('[memory] failed to save favorite entry:', error?.message || error);
+    scheduleDataFlush();
+  }
 }
 
 /**
  * Persist memories to disk.
  */
 function saveMemories() {
-  scheduleProjectionSave();
-  scheduleMemoryFlush();
+  try {
+    writeDirtyLegacyEntries(config.MEMORY_FILE, memoryCache, dirtyMemories, sanitizeLegacyMemoryEntry);
+  } catch (error) {
+    console.error('[memory] failed to save memory entry:', error?.message || error);
+    scheduleMemoryFlush();
+  }
 }
 
 /**
@@ -330,10 +400,13 @@ function clearGroupBindingsByGroupId(groupId) {
   if (!gid) return 0;
 
   let changed = 0;
-  for (const user of Object.values(favorites)) {
+  const allFavorites = loadLegacyMap(config.DATA_FILE);
+  for (const [userId, user] of Object.entries(allFavorites || {})) {
     if (!user || String(user.group_id || '') !== gid) continue;
     user.group_id = '';
     user.last_group_seen_at = 0;
+    favoriteCache.set(userId, user);
+    dirtyFavorites.add(userId);
     changed += 1;
   }
 
@@ -459,6 +532,10 @@ module.exports = {
   memories,
   chatHistory,
   shortTermMemory,
+  getSessionContext,
+  appendSessionTurn,
+  updateSessionState,
+  listUserSessionKeys: listShortTermUserSessionKeys,
   pruneChatHistoryStore,
   saveData,
   saveMemories,

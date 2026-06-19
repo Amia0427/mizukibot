@@ -2,6 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { getJsonStore } = require('./storeRegistry');
+const { BoundedCache } = require('./boundedCache');
+const SESSION_SUMMARY_DIR = path.join(config.DATA_DIR, 'session_context_summaries');
+const sessionSummaryCache = new BoundedCache({
+  maxEntries: Math.max(8, Number(config.EPHEMERAL_CACHE_MAX_SESSIONS || 256) || 256),
+  ttlMs: Math.max(0, Number(config.EPHEMERAL_CACHE_TTL_MS || 10 * 60 * 1000) || 0)
+});
 function clampList(values = [], limit = 4, itemMaxChars = 120) {
   const out = [];
   const seen = new Set();
@@ -50,6 +56,23 @@ function atomicWriteJson(targetFile, obj) {
   getJsonStore(targetFile, {
     fallback: () => ({ sessions: {} })
   }).replace(obj, { flushNow: true });
+}
+
+function encodeSessionFileName(sessionKey = '') {
+  return `${encodeURIComponent(String(sessionKey || '').trim() || 'default')}.json`;
+}
+
+function decodeSessionFileName(fileName = '') {
+  const raw = String(fileName || '').replace(/\.json$/i, '');
+  try {
+    return decodeURIComponent(raw);
+  } catch (_) {
+    return raw;
+  }
+}
+
+function getSessionSummaryFile(sessionKey = '') {
+  return path.join(SESSION_SUMMARY_DIR, encodeSessionFileName(sessionKey));
 }
 
 function clampText(value, maxChars) {
@@ -142,17 +165,53 @@ function normalizeStoreShape(input = {}) {
   return { sessions: normalizedSessions };
 }
 
-let store = normalizeStoreShape(safeReadJson(config.SESSION_CONTEXT_SUMMARY_FILE, { sessions: {} }));
+function normalizeSessionItems(sessionKey = '', items = []) {
+  const key = String(sessionKey || '').trim();
+  return (Array.isArray(items) ? items : [])
+    .map((item) => normalizeSummaryItem({ ...item, sessionKey: item?.sessionKey || key }))
+    .filter((item) => item.sessionKey && item.userId && item.summary)
+    .slice(-Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_MAX_ITEMS_PER_SESSION) || 1));
+}
 
-function persistStore() {
-  atomicWriteJson(config.SESSION_CONTEXT_SUMMARY_FILE, store);
+function loadLegacySessionItems(sessionKey = '') {
+  const key = String(sessionKey || '').trim();
+  if (!key) return [];
+  const legacy = normalizeStoreShape(safeReadJson(config.SESSION_CONTEXT_SUMMARY_FILE, { sessions: {} }));
+  return normalizeSessionItems(key, legacy.sessions?.[key] || []);
+}
+
+function readSessionItems(sessionKey = '') {
+  const key = String(sessionKey || '').trim();
+  if (!key) return [];
+  return sessionSummaryCache.getOrCompute(key, () => {
+    const file = getSessionSummaryFile(key);
+    let payload = safeReadJson(file, null);
+    if (!payload) {
+      const migrated = loadLegacySessionItems(key);
+      payload = { sessionKey: key, items: migrated };
+      if (migrated.length > 0) atomicWriteJson(file, payload);
+    }
+    return normalizeSessionItems(key, payload?.items || []);
+  });
+}
+
+function writeSessionItems(sessionKey = '', items = []) {
+  const key = String(sessionKey || '').trim();
+  if (!key) return [];
+  const normalized = normalizeSessionItems(key, items);
+  sessionSummaryCache.set(key, normalized);
+  atomicWriteJson(getSessionSummaryFile(key), {
+    sessionKey: key,
+    items: normalized
+  });
+  return normalized;
 }
 
 function getSessionSummaryCooldownStatus(sessionKey = '', now = Date.now()) {
   const key = String(sessionKey || '').trim();
   if (!key) return { limited: false, remainingMs: 0 };
 
-  const items = Array.isArray(store.sessions[key]) ? store.sessions[key] : [];
+  const items = readSessionItems(key);
   const latest = items.length > 0 ? normalizeSummaryItem(items[items.length - 1]) : null;
   if (!latest?.createdAt) return { limited: false, remainingMs: 0 };
 
@@ -193,9 +252,7 @@ function saveSessionContextSummary(item = {}, options = {}) {
     };
   }
 
-  const currentItems = Array.isArray(store.sessions[normalized.sessionKey])
-    ? store.sessions[normalized.sessionKey].map((entry) => normalizeSummaryItem(entry))
-    : [];
+  const currentItems = readSessionItems(normalized.sessionKey);
   const latest = currentItems.length > 0 ? currentItems[currentItems.length - 1] : null;
 
   if (String(latest?.summary || '').trim() === normalized.summary) {
@@ -209,10 +266,9 @@ function saveSessionContextSummary(item = {}, options = {}) {
   }
 
   currentItems.push(normalized);
-  store.sessions[normalized.sessionKey] = currentItems.slice(
+  writeSessionItems(normalized.sessionKey, currentItems.slice(
     -Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_MAX_ITEMS_PER_SESSION) || 1)
-  );
-  persistStore();
+  ));
 
   return {
     saved: true,
@@ -227,7 +283,7 @@ function getRecentSessionContextSummaries(sessionKey = '', options = {}) {
   const key = String(sessionKey || '').trim();
   if (!key) return [];
   const limit = Math.max(1, Number(options.limit || config.SESSION_CONTEXT_SUMMARY_LOAD_COUNT) || 1);
-  const items = Array.isArray(store.sessions[key]) ? store.sessions[key] : [];
+  const items = readSessionItems(key);
   return items
     .slice(-limit)
     .map((item) => normalizeSummaryItem(item))
@@ -236,12 +292,24 @@ function getRecentSessionContextSummaries(sessionKey = '', options = {}) {
 }
 
 function reloadSessionContextSummaryStore() {
-  store = normalizeStoreShape(safeReadJson(config.SESSION_CONTEXT_SUMMARY_FILE, { sessions: {} }));
-  return store;
+  sessionSummaryCache.clear();
+  return getSessionContextSummaryStoreSnapshot();
 }
 
 function getSessionContextSummaryStoreSnapshot() {
-  return JSON.parse(JSON.stringify(store));
+  const sessions = {};
+  if (fs.existsSync(SESSION_SUMMARY_DIR)) {
+    for (const fileName of fs.readdirSync(SESSION_SUMMARY_DIR)) {
+      if (!/\.json$/i.test(fileName)) continue;
+      const key = decodeSessionFileName(fileName);
+      sessions[key] = readSessionItems(key);
+    }
+  }
+  const legacy = normalizeStoreShape(safeReadJson(config.SESSION_CONTEXT_SUMMARY_FILE, { sessions: {} }));
+  for (const [key, items] of Object.entries(legacy.sessions || {})) {
+    if (!sessions[key]) sessions[key] = normalizeSessionItems(key, items);
+  }
+  return JSON.parse(JSON.stringify({ sessions }));
 }
 
 module.exports = {

@@ -287,6 +287,21 @@ function listAllShardEntries() {
   return Array.from(memoryShardState.shards.values());
 }
 
+function listManifestShardMetas() {
+  const manifest = getManifestStore().read();
+  const shardEntries = manifest && manifest.shards && typeof manifest.shards === 'object'
+    ? Object.values(manifest.shards)
+    : [];
+  return shardEntries.map((entry) => normalizeShardMeta(entry)).filter((entry) => entry.shardKey);
+}
+
+function hydrateAllShardEntries() {
+  ensureShardStateHydrated();
+  for (const shardEntry of listManifestShardMetas()) {
+    ensureShardEntry(shardEntry);
+  }
+}
+
 function saveLibrary(library) {
   ensureShardStateHydrated();
   const nextGroups = new Map();
@@ -339,7 +354,7 @@ function migrateLegacyLibrary() {
 }
 
 function loadLibrary() {
-  ensureShardStateHydrated();
+  hydrateAllShardEntries();
   if (!memoryShardState.aggregateDirty && memoryShardState.aggregateLibrary) {
     return {
       version: LIBRARY_VERSION,
@@ -473,6 +488,7 @@ function updateManifestForShard(entry = null) {
 }
 
 function syncCompatSnapshots() {
+  hydrateAllShardEntries();
   const aggregateLibrary = {
     version: LIBRARY_VERSION,
     items: listAllShardEntries().flatMap((entry) => Array.isArray(entry.items.items) ? entry.items.items : [])
@@ -564,16 +580,7 @@ function ensureShardStateHydrated() {
   shardStateHydrated = true;
   const manifestStore = getManifestStore();
   const manifest = manifestStore.read();
-  const shardEntries = manifest && manifest.shards && typeof manifest.shards === 'object'
-    ? Object.values(manifest.shards)
-    : [];
-  for (const shardEntry of shardEntries) {
-    ensureShardEntry(shardEntry);
-  }
-  if (memoryShardState.shards.size > 0) {
-    syncCompatSnapshots();
-    return;
-  }
+  if (manifest?.shards && Object.keys(manifest.shards).length > 0) return;
   const current = safeReadJson(ITEMS_FILE, null);
   if (current && Array.isArray(current.items) && current.items.length > 0) {
     migrateLibraryItemsToShards(current.items);
@@ -598,7 +605,7 @@ function ensureShardStateHydrated() {
 }
 
 function loadIndex() {
-  ensureShardStateHydrated();
+  hydrateAllShardEntries();
   if (!memoryShardState.aggregateDirty && memoryShardState.aggregateIndex) {
     return {
       ...memoryShardState.aggregateIndex,
@@ -611,6 +618,46 @@ function loadIndex() {
     ...memoryShardState.aggregateIndex,
     df: { ...(memoryShardState.aggregateIndex?.df || {}) },
     docs: { ...(memoryShardState.aggregateIndex?.docs || {}) }
+  };
+}
+
+function getShardEntriesForMetas(metas = []) {
+  ensureShardStateHydrated();
+  const seen = new Set();
+  const entries = [];
+  for (const meta of Array.isArray(metas) ? metas : []) {
+    const normalized = normalizeShardMeta(meta);
+    if (!normalized.shardKey || seen.has(normalized.shardKey)) continue;
+    seen.add(normalized.shardKey);
+    entries.push(ensureShardEntry(normalized));
+  }
+  return entries;
+}
+
+function getMemoryItemsFromShards(metas = []) {
+  return getShardEntriesForMetas(metas)
+    .flatMap((entry) => Array.isArray(entry.items.items) ? entry.items.items : []);
+}
+
+function getMemoryDocsFromShards(metas = []) {
+  const docs = {};
+  const df = {};
+  let totalDocs = 0;
+  for (const entry of getShardEntriesForMetas(metas)) {
+    const index = entry.index || defaultShardIndexPayload(entry.meta);
+    Object.assign(docs, index.docs || {});
+    for (const [token, count] of Object.entries(index.df || {})) {
+      df[token] = (df[token] || 0) + Number(count || 0);
+    }
+    totalDocs += Number(index.totalDocs || Object.keys(index.docs || {}).length || 0);
+  }
+  return {
+    version: INDEX_VERSION,
+    librarySize: Object.keys(docs).length,
+    updatedAt: nowTs(),
+    df,
+    docs,
+    totalDocs
   };
 }
 

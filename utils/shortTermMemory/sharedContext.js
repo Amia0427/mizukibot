@@ -27,6 +27,9 @@ const {
   resolveShortTermContextProfile
 } = require('./contextProfile');
 const { isUnsafeUserFacingReply } = require('../userFacingReplyGuards');
+const {
+  listUserSessionKeys: listStoredUserSessionKeys
+} = require('../shortTermSessionStore');
 
 const shortTermScopeLogCache = new Map();
 
@@ -35,6 +38,9 @@ function listUserSessionKeys(userId, chatHistory = {}, shortTermMemory = {}) {
   if (!uid) return [];
 
   const sessionKeys = new Set();
+  for (const key of listStoredUserSessionKeys(uid)) {
+    sessionKeys.add(key);
+  }
   for (const key of Object.keys(chatHistory || {})) {
     const sessionKey = String(key || '').trim();
     if (
