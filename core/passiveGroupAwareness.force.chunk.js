@@ -2,6 +2,7 @@ async function forcePassiveGroupInterjection({
   msg,
   inboundContext,
   sendGroupReply,
+  sendWithRetry,
   reason = 'forced-interjection',
   forceAtSender = null
 } = {}) {
@@ -79,6 +80,7 @@ async function forcePassiveGroupInterjection({
 
   let replyText = '';
   let passivePersonaMemoryState = null;
+  let hasSafetyRestriction = false;
   try {
     const replyResult = await invokeReplyModel({
       groupId,
@@ -109,7 +111,9 @@ async function forcePassiveGroupInterjection({
       directedContext,
       now
     });
-    replyText = trimReplyText(replyResult?.replyText || '', 80);
+    const normalizedReply = normalizePassiveReplyText(replyResult?.replyText || '', 80);
+    replyText = normalizedReply.replyText;
+    hasSafetyRestriction = normalizedReply.hasSafetyRestriction;
     passivePersonaMemoryState = replyResult?.personaMemoryState || null;
   } catch (error) {
     return {
@@ -150,6 +154,13 @@ async function forcePassiveGroupInterjection({
       replyType,
       localAnalysis
     };
+  }
+
+  if (hasSafetyRestriction) {
+    await markPassiveSafetyRestrictionEmoji({
+      messageId: effectiveMsg.message_id,
+      sendWithRetry
+    }).catch(() => false);
   }
 
   const botSenderId = String(config.BOT_QQ || 'bot').trim() || 'bot';
@@ -196,6 +207,7 @@ async function forcePassiveGroupInterjection({
     handled: true,
     reason,
     replyText,
+    hasSafetyRestriction,
     addressee,
     replyType,
     localAnalysis,

@@ -231,6 +231,7 @@ function createNapcatLogFollower({
     const result = await forcePassiveGroupInterjection({
       msg: packet,
       inboundContext,
+      sendWithRetry,
       sendGroupReply,
       reason: 'napcat-log-follower',
       forceAtSender: Boolean(config.FOLLOWER_AT_SENDER)
