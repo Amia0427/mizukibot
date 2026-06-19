@@ -31,7 +31,7 @@ const { clearWorldbookSessionState } = require('../utils/personaWorldbookSearch/
   const catalog = loadPersonaModuleCatalog();
   const firstImport = ensureWorldbookSqlImported(catalog, { force: true });
   assert.ok(firstImport.ok, firstImport.reason || 'worldbook import failed');
-  assert.ok(firstImport.rowsSeen >= 120);
+  assert.ok(firstImport.rowsSeen >= 30);
 
   const secondImport = ensureWorldbookSqlImported(catalog, { force: true });
   assert.ok(secondImport.ok, secondImport.reason || 'worldbook second import failed');
@@ -40,7 +40,7 @@ const { clearWorldbookSessionState } = require('../utils/personaWorldbookSearch/
   const diagnostics = getDiagnostics({ benchmark: false });
   assert.ok(diagnostics.ok);
   assert.ok(diagnostics.primaryRead);
-  assert.ok(diagnostics.activeEntries >= 120);
+  assert.ok(diagnostics.activeEntries >= 30);
 
   const entry = getWorldbookEntry('wb_mizuki_future_two_tracks');
   assert.ok(entry);

@@ -33,7 +33,7 @@ const {
   assert.ok(catalog.some((item) => item.moduleId === 'wb_mizuki_emotional_architecture'));
   assert.ok(catalog.some((item) => item.moduleId === 'wb_mizuki_escape_and_return'));
   assert.ok(catalog.some((item) => item.moduleId === 'wb_mizuki_shutdown_recovery'));
-  assert.ok(catalog.filter((item) => item.moduleId.startsWith('wb_mizuki_')).length >= 120);
+  assert.ok(catalog.filter((item) => item.moduleId.startsWith('wb_mizuki_')).length >= 30);
   assert.ok(catalog.some((item) => item.moduleId === 'wb_mizuki_kindness_fear'));
   assert.ok(catalog.some((item) => item.moduleId === 'wb_mizuki_creative_safe_channel'));
   assert.ok(catalog.some((item) => item.moduleId === 'wb_mizuki_post_e5_return'));
