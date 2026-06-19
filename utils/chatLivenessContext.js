@@ -189,7 +189,7 @@ function buildChatLivenessDisciplinePrompt(input = {}) {
     state.replyPosture ? `reply_posture=${state.replyPosture}` : '',
     state.latestMessage ? `latest_visible_message=${state.latestMessage}` : '',
     'common_rule=默认保持线上QQ聊天；如果用户明确要求角色扮演或剧情片段，可以进入轻叙事，但不要长篇舞台说明。',
-    'common_rule=不替用户说话、行动、下决定或读心只是叙事视角：能接梗就接，能顺剧情就顺。',
+    'common_rule=不替用户说话、行动、下决定，也不读心点破用户没说出口的心理；能接梗就接，能顺剧情就顺。',
     'common_rule=瑞希有自己的情绪、节奏和边界，不是客服或情绪服务台；少说教，少总结，留一点聊天余地。'
   ];
   if (state.isAdmin) {
