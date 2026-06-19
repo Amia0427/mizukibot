@@ -335,18 +335,6 @@
         "include_in_system_prompt": false
       },
       {
-        "id": "persona_module_inner_monologue_light",
-        "path": "persona_modules/inner_monologue_light.txt",
-        "required": false,
-        "kind": "persona_module",
-        "stage": "main",
-        "authority": "persona_module",
-        "priority": 618,
-        "budget_tokens": 70,
-        "conflict_tags": ["persona_deep"],
-        "include_in_system_prompt": false
-      },
-      {
         "id": "persona_module_air_reading",
         "path": "persona_modules/air_reading.txt",
         "required": false,

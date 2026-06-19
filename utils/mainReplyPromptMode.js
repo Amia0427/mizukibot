@@ -12,8 +12,7 @@ const EMOTION_MODULE_IDS = new Set([
   'touched_pause',
   'embarrassed_cover',
   'observer_warmth',
-  'escape_philosophy',
-  'inner_monologue_light'
+  'escape_philosophy'
 ]);
 
 function normalizeText(value, fallback = '') {
