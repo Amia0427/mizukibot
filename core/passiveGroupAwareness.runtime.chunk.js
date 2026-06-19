@@ -283,6 +283,7 @@ async function handlePassiveGroupAwareness({
     : '';
   let passivePersonaMemoryState = null;
   let replyModelCalled = false;
+  let hasSafetyRestriction = false;
   if (!replyText) {
     const shouldCallReplyModel = canCallReplyModel();
     try {
@@ -309,14 +310,21 @@ async function handlePassiveGroupAwareness({
           directedContext,
           now
         });
-        replyText = trimReplyText(replyResult?.replyText || '', 80);
+        const normalizedReply = normalizePassiveReplyText(replyResult?.replyText || '', 80);
+        replyText = normalizedReply.replyText;
+        hasSafetyRestriction = normalizedReply.hasSafetyRestriction;
         passivePersonaMemoryState = replyResult?.personaMemoryState || null;
       }
     } catch (e) {
       console.error('[group-awareness] reply model call failed:', e.message);
-      replyText = cheapGate.level === 'strong_candidate'
-        ? buildLocalReplyFallback({ addressee, replyType })
-        : '';
+      const normalizedFallback = normalizePassiveReplyText(
+        cheapGate.level === 'strong_candidate'
+          ? buildLocalReplyFallback({ addressee, replyType })
+          : '',
+        80
+      );
+      replyText = normalizedFallback.replyText;
+      hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedFallback.hasSafetyRestriction);
       if (!replyText) {
         return {
           handled: false,
@@ -342,9 +350,14 @@ async function handlePassiveGroupAwareness({
   }
 
   if (!replyText) {
-    replyText = cheapGate.level === 'strong_candidate'
-      ? buildLocalReplyFallback({ addressee, replyType })
-      : '';
+    const normalizedFallback = normalizePassiveReplyText(
+      cheapGate.level === 'strong_candidate'
+        ? buildLocalReplyFallback({ addressee, replyType })
+        : '',
+      80
+    );
+    replyText = normalizedFallback.replyText;
+    hasSafetyRestriction = Boolean(hasSafetyRestriction || normalizedFallback.hasSafetyRestriction);
     if (!replyText) {
       return {
         handled: false,
@@ -430,6 +443,13 @@ async function handlePassiveGroupAwareness({
     };
   }
 
+  if (hasSafetyRestriction) {
+    await markPassiveSafetyRestrictionEmoji({
+      messageId: msg.message_id,
+      sendWithRetry
+    }).catch(() => false);
+  }
+
   await maybeSendMemeFollowup({
     surface: 'passive',
     groupId,
@@ -499,6 +519,7 @@ async function handlePassiveGroupAwareness({
     presenceReason,
     presence: buildPresenceSnapshot(applied),
     replyText,
+    hasSafetyRestriction,
     ...gateResult,
     decisionModelCalled,
     decisionReason,

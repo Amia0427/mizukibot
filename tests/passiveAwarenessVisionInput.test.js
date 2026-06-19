@@ -66,6 +66,7 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_MAX_REPLIES_PER_HOUR = '20';
     process.env.PASSIVE_AWARENESS_VISION_INPUT_ENABLED = 'true';
     process.env.PASSIVE_AWARENESS_VISION_MAX_IMAGES = '2';
+    process.env.QQ_SAFETY_RESTRICTION_EMOJI_IDS = '39';
     process.env.VISION_CAPTION_WORKER_ENABLED = 'false';
     process.env.BOT_QQ = 'bot-test';
 
@@ -93,8 +94,11 @@ module.exports = (async () => {
     };
     httpClient.postStreamWithRetry = async (_url, body, handlers = {}) => {
       streamedBodies.push(body);
+      const replyText = JSON.stringify(body || {}).includes('cached-image://passive-force-image')
+        ? 'force ok/%'
+        : 'vision ok';
       if (typeof handlers.onData === 'function') {
-        handlers.onData(Buffer.from('data: {"choices":[{"delta":{"content":"vision ok"}}]}\n\n'));
+        handlers.onData(Buffer.from(`data: {"choices":[{"delta":{"content":"${replyText}"}}]}\n\n`));
         handlers.onData(Buffer.from('data: [DONE]\n\n'));
       }
       return true;
@@ -153,6 +157,7 @@ module.exports = (async () => {
     assertVisualRequest(streamedBodies[0], 'cached-image://passive-test-image');
 
     const replyCountBeforeForce = streamedBodies.length;
+    const forceActionCalls = [];
     const forced = await passiveAwareness.forcePassiveGroupInterjection({
       msg: {
         group_id: 'g-passive-vision-force',
@@ -172,12 +177,26 @@ module.exports = (async () => {
         cleanText: 'bot look at this image?',
         imageUrl: 'cached-image://passive-force-image'
       },
-      sendGroupReply: async () => true
+      sendGroupReply: async () => true,
+      sendWithRetry: async (payload) => {
+        forceActionCalls.push(payload);
+        return true;
+      }
     });
 
     assert.strictEqual(forced.handled, true);
+    assert.strictEqual(forced.replyText, 'force ok');
+    assert.strictEqual(forced.hasSafetyRestriction, true);
     assert.strictEqual(streamedBodies.length, replyCountBeforeForce + 1);
     assertVisualRequest(streamedBodies[replyCountBeforeForce], 'cached-image://passive-force-image');
+    assert.deepStrictEqual(forceActionCalls.filter((item) => item.action === 'set_msg_emoji_like'), [{
+      action: 'set_msg_emoji_like',
+      params: {
+        message_id: `msg-force-${now}`,
+        emoji_id: 39,
+        set: true
+      }
+    }]);
 
     console.log('passiveAwarenessVisionInput.test.js passed');
   } finally {

@@ -52,6 +52,7 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'gemini-3-flash-preview';
     process.env.PASSIVE_AWARENESS_REPLY_TEMPERATURE = '1';
     process.env.PASSIVE_AWARENESS_REPLY_TOP_P = '';
+    process.env.QQ_SAFETY_RESTRICTION_EMOJI_IDS = '39';
     process.env.BOT_QQ = 'bot-test';
 
     clearProjectCache();
@@ -76,7 +77,7 @@ module.exports = (async () => {
     httpClient.postStreamWithRetry = async (_url, body, handlers = {}) => {
       streamedBodies.push(body);
       if (typeof handlers.onData === 'function') {
-        handlers.onData(Buffer.from('data: {"choices":[{"delta":{"content":"我来接一句"}}]}\n\n'));
+        handlers.onData(Buffer.from('data: {"choices":[{"delta":{"content":"我来接一句/%"}}]}\n\n'));
         handlers.onData(Buffer.from('data: [DONE]\n\n'));
       }
       return true;
@@ -111,6 +112,8 @@ module.exports = (async () => {
 
     const passiveAwareness = require('../core/passiveGroupAwareness');
     const now = Date.now();
+    const sentReplies = [];
+    const actionCalls = [];
     const result = await passiveAwareness.handlePassiveGroupAwareness({
       msg: {
         group_id: 'g-passive-memory',
@@ -129,12 +132,29 @@ module.exports = (async () => {
         rawText: '瑞希你还记得上次部署那个坑吗',
         cleanText: '瑞希你还记得上次部署那个坑吗'
       },
-      sendGroupReply: async () => true,
-      sendWithRetry: async () => true
+      sendGroupReply: async (payload) => {
+        sentReplies.push(payload);
+        return true;
+      },
+      sendWithRetry: async (payload) => {
+        actionCalls.push(payload);
+        return true;
+      }
     });
 
     assert.strictEqual(result.handled, true);
     assert.strictEqual(result.replyText, '我来接一句');
+    assert.strictEqual(result.hasSafetyRestriction, true);
+    assert.strictEqual(sentReplies[0].replyText, '我来接一句');
+    assert.ok(!sentReplies[0].replyText.includes('/%'));
+    assert.deepStrictEqual(actionCalls.filter((item) => item.action === 'set_msg_emoji_like'), [{
+      action: 'set_msg_emoji_like',
+      params: {
+        message_id: `msg-${now}`,
+        emoji_id: 39,
+        set: true
+      }
+    }]);
     assert.strictEqual(streamedBodies.length, 1);
     assert.strictEqual(streamedBodies[0].temperature, 1);
     assert.ok(!Object.prototype.hasOwnProperty.call(streamedBodies[0], 'top_p'));

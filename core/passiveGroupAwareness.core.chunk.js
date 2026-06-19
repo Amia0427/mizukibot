@@ -33,6 +33,7 @@ const { buildChatLivenessDisciplinePrompt } = require('../utils/chatLivenessCont
 const { buildDirectedContextPromptSnippet } = require('../api/graphPrompting');
 const { buildLlmPerception } = require('./llmPerception');
 const { appendUtf8Chunk } = require('../utils/utf8Stream');
+const { sanitizeUserFacingText } = require('../utils/userFacingText');
 const { StringDecoder } = require('string_decoder');
 
 function normalizeText(value) {
@@ -122,6 +123,42 @@ function trimReplyText(value, maxChars = 80) {
   const normalized = normalizeText(value);
   if (!normalized) return '';
   return Array.from(normalized).slice(0, Math.max(1, Number(maxChars) || 80)).join('');
+}
+
+function normalizePassiveReplyText(value, maxChars = 80) {
+  const sanitized = sanitizeUserFacingText(trimReplyText(value, maxChars), { returnMeta: true });
+  return {
+    replyText: trimReplyText(sanitized.text, maxChars),
+    hasSafetyRestriction: sanitized.hasSafetyRestriction === true
+  };
+}
+
+async function markPassiveSafetyRestrictionEmoji({
+  messageId,
+  sendWithRetry
+} = {}) {
+  const normalizedMessageId = String(messageId || '').trim();
+  const send = typeof sendWithRetry === 'function' ? sendWithRetry : null;
+  const emojiIds = Array.isArray(config.QQ_SAFETY_RESTRICTION_EMOJI_IDS)
+    ? config.QQ_SAFETY_RESTRICTION_EMOJI_IDS
+    : [];
+  if (!normalizedMessageId || !send || !emojiIds.length) return false;
+
+  let sentAny = false;
+  for (const emojiId of emojiIds) {
+    const id = Number(emojiId);
+    if (!Number.isInteger(id)) continue;
+    const ok = await send({
+      action: 'set_msg_emoji_like',
+      params: {
+        message_id: /^\d+$/.test(normalizedMessageId) ? Number(normalizedMessageId) : normalizedMessageId,
+        emoji_id: id,
+        set: true
+      }
+    }, 1, 300);
+    sentAny = sentAny || Boolean(ok);
+  }
+  return sentAny;
 }
 
 function isPresenceAckReply(replyType = '', addressee = '') {

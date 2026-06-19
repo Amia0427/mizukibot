@@ -1,3 +1,12 @@
+## 运行维护 2026-06-19 08:06
+
+- 小目标：复查 `prompts/defaut.txt` 未提交安全边界改动，并确认普通用户主回复、`normal_fast_reply`、被动群感知三条实际注入链路不会再次丢失安全防护。
+- 现场结论：`defaut.txt` 本身是强化普通用户边界和 `/%` 标记要求；普通主回复与 fast reply 已覆盖 stable prompt 注入和安全 emoji 元数据。最可能断点在被动群感知：回复模型已注入 `defaut.txt`，但返回 `/%` 后只做 `trimReplyText`，没有清洗标记、保留 `hasSafetyRestriction` 或发送后贴安全 emoji；日志 follower 强制被动插话也没有透传 `sendWithRetry`。
+- 最小修复：被动群感知回复统一复用 `sanitizeUserFacingText` 清洗 `/%`，返回 `hasSafetyRestriction`，普通被动回复和强制插话发送成功后通过 `set_msg_emoji_like` 给原消息贴安全 emoji；日志 follower 透传 `sendWithRetry`。
+- 验证：`node --check core\passiveGroupAwareness.core.chunk.js`、`node --check core\passiveGroupAwareness.runtime.chunk.js`、`node --check core\passiveGroupAwareness.force.chunk.js`、`node --check core\napcatLogFollower.js`、`node scripts\run-tests.js tests\adminStableSystemPrompt.test.js tests\normalFastReplyRuntime.test.js tests\normalFastReplyHandlerSource.test.js tests\safetyRestrictionDetection.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\runtimeStreamingCoordinator.test.js tests\messageRouteFlowGroupStreaming.test.js tests\passiveAwarenessReplySystemPrompt.test.js tests\passiveAwarenessReplyMemoryPrompt.test.js tests\passiveAwarenessVisionInput.test.js`、`npm run check:prompts` 通过。
+- 小目标已完成：普通主回复、fast reply、被动群感知均有可复跑测试覆盖 `defaut.txt` 注入、`/%` 清洗和安全 emoji 标记链路。
+- 提交后记录 2026-06-19 08:06 +08:00：已提交 `fix: preserve passive safety restrictions`；该小目标完成记录已按并行开发约定追加。
+
 ## 运行维护 2026-06-18 18:14
 
 - 小目标：按反馈不继续扩大本地拦截规则，而是通过提示词强制模型从源头按瑞希内心规范产出 thinking/reasoning_content。
