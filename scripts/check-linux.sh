@@ -34,16 +34,16 @@ fi
 
 echo "[linux-check] API_KEY configured"
 
-NAPCAT_VAL="$(grep -E '^NAPCAT_WS_URL=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- || true)"
+NAPCAT_VAL="$(grep -E '^NAPCAT_HTTP_API_BASE_URL=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- || true)"
 if [[ -z "${NAPCAT_VAL// }" ]]; then
-  echo "[linux-check] WARN: NAPCAT_WS_URL not set, fallback from config will be used"
+  echo "[linux-check] WARN: NAPCAT_HTTP_API_BASE_URL not set, fallback from config will be used"
 else
-  echo "[linux-check] NAPCAT_WS_URL=$NAPCAT_VAL"
+  echo "[linux-check] NAPCAT_HTTP_API_BASE_URL=$NAPCAT_VAL"
 fi
 
-NAPCAT_TOKEN_VAL="$(grep -E '^NAPCAT_WS_TOKEN=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- || true)"
+NAPCAT_TOKEN_VAL="$(grep -E '^NAPCAT_HTTP_ACTION_SECRET=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- || true)"
 if [[ -n "${NAPCAT_TOKEN_VAL// }" ]]; then
-  echo "[linux-check] NAPCAT_WS_TOKEN is configured"
+  echo "[linux-check] NAPCAT_HTTP_ACTION_SECRET is configured"
 fi
 
 cd "$ROOT_DIR"

@@ -89,7 +89,7 @@ module.exports = (async () => {
     };
 
     const { startTickEngine } = require('../core/tickEngine');
-    const runtime = startTickEngine({ send() {} }, async () => 'ok');
+    const runtime = startTickEngine(async () => 'ok', { callAction: async () => null });
     assert.ok(scheduled.length >= 1, 'proactive timer should be scheduled');
 
     const proactiveTimer = scheduled[0];

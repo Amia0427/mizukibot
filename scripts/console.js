@@ -27,7 +27,8 @@ async function main() {
 
   console.log('\n[config] key fields');
   console.log('TIMEZONE      =', config.TIMEZONE);
-  console.log('NAPCAT_WS_URL =', config.NAPCAT_WS_URL);
+  console.log('NAPCAT_HTTP_API_BASE_URL =', config.NAPCAT_HTTP_API_BASE_URL);
+  console.log('NAPCAT_HTTP_REVERSE_PORT =', config.NAPCAT_HTTP_REVERSE_PORT);
   console.log('BOT_QQ        =', config.BOT_QQ);
   console.log('WEB_PORT      =', config.WEB_PORT);
   console.log('WEB_BIND_HOST =', config.WEB_BIND_HOST);

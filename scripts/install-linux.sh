@@ -58,7 +58,7 @@ cd "$ROOT_DIR"
 if [[ ! -f "$ROOT_DIR/.env" ]]; then
   cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
   echo "[linux-install] .env created from .env.example"
-  echo "[linux-install] Please edit .env and set API_KEY / NAPCAT_WS_URL / WEB_TOKEN before start"
+  echo "[linux-install] Please edit .env and set API_KEY / NAPCAT_HTTP_API_BASE_URL / WEB_TOKEN before start"
 fi
 
 if [[ -f "$ROOT_DIR/package-lock.json" ]]; then
@@ -75,6 +75,6 @@ chmod +x "$ROOT_DIR/scripts/setup-systemd.sh" || true
 
 echo "[linux-install] done"
 echo "[linux-install] next steps:"
-echo "  1) edit .env (API_KEY / NAPCAT_WS_URL / WEB_TOKEN)"
+echo "  1) edit .env (API_KEY / NAPCAT_HTTP_API_BASE_URL / WEB_TOKEN)"
 echo "  2) npm run linux:check"
 echo "  3) npm run linux:start"

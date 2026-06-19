@@ -35,7 +35,7 @@ function applyTickEnv(tempDir) {
   process.env.INITIATIVE_DECISION_MODEL = '';
 }
 
-async function runScenario({ wsSend, recordSystemGroupSend, recordPersonaMemoryOutcome }) {
+async function runScenario({ callAction, recordSystemGroupSend, recordPersonaMemoryOutcome }) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-tick-send-failure-'));
   try {
     applyTickEnv(tempDir);
@@ -47,6 +47,7 @@ async function runScenario({ wsSend, recordSystemGroupSend, recordPersonaMemoryO
       group_id: 'g-send-failure',
       last_seen_at: Date.now() - (5 * 60 * 60 * 1000)
     };
+    memory.saveData();
 
     const personaMemory = require('../utils/personaMemoryState');
     const recordedOutcomes = [];
@@ -66,7 +67,12 @@ async function runScenario({ wsSend, recordSystemGroupSend, recordPersonaMemoryO
 
     const { runGreetingFallbacks } = require('../core/tickEngine');
     const state = {};
-    const sent = await runGreetingFallbacks({ send: wsSend }, async () => {
+    const actionClient = {
+      async callAction(action, params) {
+        return callAction(action, params);
+      }
+    };
+    const sent = await runGreetingFallbacks(actionClient, async () => {
       throw new Error('reply model should not be called for fallback greeting');
     }, state, new Date('2026-04-17T11:45:00+08:00'));
 
@@ -85,21 +91,21 @@ module.exports = (async () => {
   console.error = () => {};
 
   try {
-    const wsFailure = await runScenario({
-      wsSend() {
-        throw new Error('ws closed');
+    const actionFailure = await runScenario({
+      callAction() {
+        throw new Error('action client unavailable');
       }
     });
 
-    assert.strictEqual(wsFailure.sent, false);
-    assert.deepStrictEqual(wsFailure.state, {});
-    assert.strictEqual(wsFailure.systemRecords.length, 0);
-    assert.strictEqual(wsFailure.recordedOutcomes.length, 1);
-    assert.strictEqual(wsFailure.recordedOutcomes[0].surface, 'touch_failed');
-    assert.match(wsFailure.recordedOutcomes[0].payload.reason, /ws closed/);
+    assert.strictEqual(actionFailure.sent, false);
+    assert.deepStrictEqual(actionFailure.state, {});
+    assert.strictEqual(actionFailure.systemRecords.length, 0);
+    assert.strictEqual(actionFailure.recordedOutcomes.length, 1);
+    assert.strictEqual(actionFailure.recordedOutcomes[0].surface, 'touch_failed');
+    assert.match(actionFailure.recordedOutcomes[0].payload.reason, /action client unavailable/);
 
     const recordFailure = await runScenario({
-      wsSend() {},
+      callAction() {},
       recordSystemGroupSend() {
         throw new Error('state write failed');
       }
@@ -113,7 +119,7 @@ module.exports = (async () => {
     assert.match(recordFailure.recordedOutcomes[0].payload.reason, /state write failed/);
 
     const memoryRecordFailure = await runScenario({
-      wsSend() {},
+      callAction() {},
       recordPersonaMemoryOutcome(surface) {
         if (surface === 'proactive_touch') {
           throw new Error('memory outcome failed');

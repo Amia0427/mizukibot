@@ -46,6 +46,7 @@ module.exports = (async () => {
       group_id: 'g-fallback',
       last_seen_at: Date.now() - (5 * 60 * 60 * 1000)
     };
+    memory.saveData();
 
     const personaMemory = require('../utils/personaMemoryState');
     const originalRecord = personaMemory.recordPersonaMemoryOutcome;
@@ -57,22 +58,23 @@ module.exports = (async () => {
 
     const { runGreetingFallbacks } = require('../core/tickEngine');
 
-    const sentPackets = [];
-    const ws = {
-      send(payload) {
-        sentPackets.push(JSON.parse(payload));
+    const actionCalls = [];
+    const actionClient = {
+      async callAction(action, params) {
+        actionCalls.push({ action, params });
       }
     };
 
     const state = {};
     const testDate = new Date('2026-04-17T11:45:00+08:00');
-    const sent = await runGreetingFallbacks(ws, async () => {
+    const sent = await runGreetingFallbacks(actionClient, async () => {
       throw new Error('should not call reply model in fallback branch');
     }, state, testDate);
 
     assert.strictEqual(sent, true);
-    assert.strictEqual(sentPackets.length, 1);
-    assert.ok(String(sentPackets[0].params.message || '').includes('早呀，今天也慢慢来。'));
+    assert.strictEqual(actionCalls.length, 1);
+    assert.strictEqual(actionCalls[0].action, 'send_group_msg');
+    assert.ok(String(actionCalls[0].params.message || '').includes('早呀，今天也慢慢来。'));
     assert.strictEqual(recordedPayloads.length, 1);
     assert.strictEqual(recordedPayloads[0].surface, 'proactive_touch');
     assert.strictEqual(recordedPayloads[0].payload.state, null);

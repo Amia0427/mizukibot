@@ -188,7 +188,7 @@ function rebuildStateFromEvents(events = [], now = Date.now(), previousState = {
 
       state.connection = {
         ...state.connection,
-        mode: normalizeText(event.mode) || state.connection.mode || 'websocket',
+        mode: normalizeText(event.mode) || state.connection.mode || 'http_reverse',
         connected,
         status: connected ? 'online' : 'offline',
         readyStateName: normalizeText(snapshot.readyStateName) || state.connection.readyStateName,
@@ -216,7 +216,7 @@ function rebuildStateFromEvents(events = [], now = Date.now(), previousState = {
       const snapshot = event.connectionState && typeof event.connectionState === 'object'
         ? event.connectionState
         : {};
-      if (snapshot.connected === false && state.connection.connected !== true) {
+      if (snapshot.connected === false) {
         const offlineSince = normalizeNumber(state.connection.offlineSince, 0)
           || normalizeNumber(snapshot.lastDisconnectedAt, 0)
           || ts;
@@ -303,7 +303,7 @@ function recordNapCatConnectionState(status = '', connectionState = {}, options 
   return recordNapCatHealthEvent({
     type: 'connection',
     status: normalizedStatus,
-    mode: options.mode || 'websocket',
+    mode: options.mode || 'http_reverse',
     reason: options.reason,
     source: options.source,
     connectionState

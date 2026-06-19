@@ -1,5 +1,4 @@
-﻿const WebSocket = require('ws');
-const fs = require('fs');
+﻿const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
@@ -22,7 +21,6 @@ const { shutdown: shutdownMinecraftAgent } = require('./api/minecraftAgent');
 const { shutdownCycleTLS } = require('./api/httpClient');
 const { clearMcpRuntimeCaches } = require('./api/mcpRuntime');
 const { getNapCatActionClient } = require('./api/napcatActionClient');
-const { createNapCatHttpActionClient } = require('./api/napcatHttpActionClient');
 const { getSchedulerRuntime } = require('./core/schedulerRuntime');
 const { sendGroupMessage, sendPrivateMessage } = require('./api/qqActionService');
 const { createPostReplyWorkerRuntime } = require('./utils/postReplyWorkerRuntime');
@@ -34,7 +32,7 @@ const { createMessageIngressDispatcher } = require('./core/messageIngressDispatc
 const { recordNapCatConnectionState } = require('./utils/napcatHealthDiagnostics');
 const { maybeSendRestartResultFeedback } = require('./utils/restartResultFeedback');
 
-// Avoid starting multiple bot instances that compete for one OneBot websocket.
+// Avoid starting multiple bot instances that compete for one OneBot connection.
 const LOCK_FILE = process.env.MIZUKIBOT_INDEX_TEST_MODE === '1' && process.env.MIZUKIBOT_LOCK_FILE
   ? process.env.MIZUKIBOT_LOCK_FILE
   : path.join(__dirname, '.mizukibot.lock');
@@ -382,65 +380,30 @@ async function cleanupStaleTmpFilesOnStartup() {
 let webServer = null;
 let resourceSnapshotLoop = null;
 
-let ws = null;
 let shuttingDown = false;
 let shutdownInProgress = false;
 let tickStarted = false;
 let tickRuntime = null;
-let reconnectTimer = null;
-let reconnectAttempts = 0;
 let schedulerStarted = false;
-const napcatActionClient = config.NAPCAT_HTTP_REVERSE_ENABLED
-  ? createNapCatHttpActionClient()
-  : getNapCatActionClient();
+const napcatActionClient = getNapCatActionClient();
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
 
 function askAIByGraph(...args) {
   return require('./api/agentGraph').askAIByGraph(...args);
 }
 
-function scheduleReconnect() {
-  if (shuttingDown) return;
-  if (reconnectTimer) return;
-  const delay = Math.min(30000, 1500 * Math.max(1, reconnectAttempts));
-  reconnectAttempts += 1;
-  console.log(`[NapCat] disconnected, retry in ${delay}ms...`);
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectNapCat();
-  }, delay);
-}
-
-function safeSend(payload) {
-  if (shuttingDown) return false;
-  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-  ws.send(JSON.stringify(payload));
-  return true;
-}
-
 async function sendWithRetry(payload, retries = 1, waitMs = 500) {
-  if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
-    const maxRetry = Math.max(0, Number(retries) || 0);
-    for (let i = 0; i <= maxRetry; i++) {
-      try {
-        await napcatActionClient.callAction(payload.action, payload.params);
-        return true;
-      } catch (error) {
-        console.error(`[HTTP action] ${payload.action} failed (attempt ${i+1}/${maxRetry+1}):`, error.message);
-        if (i < maxRetry) await new Promise(r => setTimeout(r, waitMs));
-      }
+  const maxRetry = Math.max(0, Number(retries) || 0);
+  for (let i = 0; i <= maxRetry; i++) {
+    try {
+      await napcatActionClient.callAction(payload.action, payload.params);
+      return true;
+    } catch (error) {
+      console.error(`[HTTP action] ${payload.action} failed (attempt ${i + 1}/${maxRetry + 1}):`, error.message);
+      if (i < maxRetry) await new Promise((r) => setTimeout(r, waitMs));
     }
-    return false;
-  } else {
-    const maxRetry = Math.max(0, Number(retries) || 0);
-    for (let i = 0; i <= maxRetry; i++) {
-      if (safeSend(payload)) return true;
-      if (i < maxRetry) {
-        await new Promise((r) => setTimeout(r, waitMs));
-      }
-    }
-    return false;
   }
+  return false;
 }
 
 const { handleIncomingMessage } = createMessageHandler({
@@ -494,129 +457,51 @@ function startResourceSnapshots() {
   if (resourceSnapshotLoop) return;
   resourceSnapshotLoop = startResourceSnapshotLoop(() => ({
     component: 'main_process',
-    wsReadyState: ws ? ws.readyState : -1,
-    reconnectAttempts,
     schedulerStarted,
     tickStarted,
     postReplyInline: Boolean(postReplyWorkerRuntime)
   }));
 }
 
-function connectNapCat() {
-  if (shuttingDown) return;
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-
-  const headers = {};
-  const wsToken = String(config.NAPCAT_WS_TOKEN || '').trim();
-  if (wsToken) {
-    headers.Authorization = `Bearer ${wsToken}`;
-  }
-
-  ws = new WebSocket(config.NAPCAT_WS_URL, { headers });
-  napcatActionClient.setWebSocket(ws);
-
-  ws.on('open', () => {
-    reconnectAttempts = 0;
-    napcatActionClient.handleConnect();
-    recordNapCatConnectionState('online', napcatActionClient.getConnectionState(), {
-      mode: 'websocket'
-    });
-    console.log('✅ 瑞希上线啦！已连接到 NapCat');
-
-    if (config.TICK_ENGINE_ENABLED && !tickStarted) {
-      tickRuntime = startTickEngine(ws, askAIByGraph, napcatActionClient);
-      tickStarted = true;
-    }
-
-    if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
-      schedulerRuntime.start();
-      schedulerStarted = true;
-    }
-
-    if (postReplyWorkerRuntime) {
-      postReplyWorkerRuntime.start();
-    }
-    napcatLogFollower.start();
-  });
-
-  ws.on('error', (err) => {
-    console.error('[NapCat ws error]', err?.message || err);
-  });
-
-  ws.on('close', (code, reasonBuffer) => {
-    const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString() : String(reasonBuffer || '');
-    if (code || reason) {
-      console.warn('[NapCat ws close]', { code, reason });
-    }
-    napcatActionClient.handleDisconnect('NapCat websocket closed');
-    recordNapCatConnectionState('offline', napcatActionClient.getConnectionState(), {
-      mode: 'websocket',
-      reason: reason || 'NapCat websocket closed'
-    });
-    if (!shuttingDown) scheduleReconnect();
-  });
-
-  ws.on('message', async (data) => {
-    if (shuttingDown) return;
-    try {
-      const msg = JSON.parse(data);
-      appendNapcatPacketToLog(msg);
-      if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
-        void napcatLogFollower.handleLivePacket(msg).catch((error) => {
-          console.error('[NapCat follower live packet error]', error?.message || error);
-        });
-      }
-      if (napcatActionClient.handleMessage(msg)) return;
-      await acceptIncomingMessage(msg, 'napcat_ws');
-    } catch (e) {
-      console.error('[消息处理异常]', e);
-    }
-  });
-}
-
 let httpReverseServer = null;
 
 function startNapCatTransport() {
-  if (config.NAPCAT_HTTP_REVERSE_ENABLED) {
-    httpReverseServer = startNapCatHttpReverseServer({
-      handleMessage: async (msg) => {
-        if (shuttingDown) return;
-        try {
-          appendNapcatPacketToLog(msg);
-          if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
-            void napcatLogFollower.handleLivePacket(msg).catch((error) => {
-              console.error('[NapCat follower live packet error]', error?.message || error);
-            });
-          }
-          if (napcatActionClient.handleMessage(msg)) return;
-          await acceptIncomingMessage(msg, 'napcat_http_reverse');
-        } catch (e) {
-          console.error('[HTTP reverse message error]', e);
+  httpReverseServer = startNapCatHttpReverseServer({
+    handleMessage: async (msg) => {
+      if (shuttingDown) return;
+      try {
+        appendNapcatPacketToLog(msg);
+        if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
+          void napcatLogFollower.handleLivePacket(msg).catch((error) => {
+            console.error('[NapCat follower live packet error]', error?.message || error);
+          });
         }
+        if (napcatActionClient.handleMessage(msg)) return;
+        await acceptIncomingMessage(msg, 'napcat_http_reverse');
+      } catch (e) {
+        console.error('[HTTP reverse message error]', e);
       }
-    });
+    }
+  });
 
-    recordNapCatConnectionState('online', napcatActionClient.getConnectionState(), {
-      mode: 'http_reverse',
-      reason: 'HTTP reverse mode started'
-    });
+  recordNapCatConnectionState('online', napcatActionClient.getConnectionState(), {
+    mode: 'http_reverse',
+    reason: 'HTTP reverse mode started'
+  });
 
-    if (config.TICK_ENGINE_ENABLED && !tickStarted) {
-      tickRuntime = startTickEngine(null, askAIByGraph, napcatActionClient);
-      tickStarted = true;
-    }
-    if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
-      schedulerRuntime.start();
-      schedulerStarted = true;
-    }
-    if (postReplyWorkerRuntime) {
-      postReplyWorkerRuntime.start();
-    }
-    napcatLogFollower.start();
-    console.log('✅ HTTP 反向连接模式启动，等待 NapCat POST 消息');
-  } else {
-    connectNapCat();
+  if (config.TICK_ENGINE_ENABLED && !tickStarted) {
+    tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
+    tickStarted = true;
   }
+  if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
+    schedulerRuntime.start();
+    schedulerStarted = true;
+  }
+  if (postReplyWorkerRuntime) {
+    postReplyWorkerRuntime.start();
+  }
+  napcatLogFollower.start();
+  console.log('✅ HTTP 反向连接模式启动，等待 NapCat POST 消息');
 }
 
 function scheduleRestartResultFeedback(attempt = 1) {
@@ -643,28 +528,8 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   recordExpectedShutdown(reason, { exitCode });
   console.log('[shutdown] begin', { reason, pid: process.pid });
 
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-
-  try {
-    if (ws) {
-      ws.removeAllListeners('message');
-      ws.removeAllListeners('open');
-      ws.removeAllListeners('error');
-      ws.removeAllListeners('close');
-      try { ws.close(1001, 'mizuki shutdown'); } catch (_) {}
-      try { ws.terminate(); } catch (_) {}
-      ws = null;
-    }
-  } catch (error) {
-    console.error('[shutdown] websocket cleanup failed:', error?.message || error);
-  }
-
   try {
     napcatActionClient.handleDisconnect('MizukiBot shutdown');
-    napcatActionClient.setWebSocket(null);
   } catch (_) {}
 
   try { schedulerRuntime.stop(); } catch (error) {
@@ -738,10 +603,6 @@ function drainForScheduledRestart(meta = {}) {
     messageId: String(meta?.messageId || '').trim(),
     groupId: String(meta?.groupId || '').trim()
   });
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
   try { schedulerRuntime.stop(); } catch (_) {}
   try { tickRuntime?.stop?.(); } catch (_) {}
   try { napcatLogFollower.stop(); } catch (_) {}
@@ -749,19 +610,7 @@ function drainForScheduledRestart(meta = {}) {
   try { messageIngressDispatcher?.stop?.({ drain: false }); } catch (_) {}
   try { resourceSnapshotLoop.stop(); } catch (_) {}
   try {
-    if (ws) {
-      ws.removeAllListeners('message');
-      ws.removeAllListeners('open');
-      ws.removeAllListeners('error');
-      ws.removeAllListeners('close');
-      try { ws.close(1001, 'mizuki restart draining'); } catch (_) {}
-      try { ws.terminate(); } catch (_) {}
-      ws = null;
-    }
-  } catch (_) {}
-  try {
     napcatActionClient.handleDisconnect('MizukiBot restart draining');
-    napcatActionClient.setWebSocket(null);
   } catch (_) {}
 }
 
@@ -798,11 +647,11 @@ async function startMainProcess() {
   startNapCatTransport();
   scheduleRestartResultFeedback();
   recordMainRuntimeState('initialized', {
-    mode: config.NAPCAT_HTTP_REVERSE_ENABLED ? 'http_reverse' : 'websocket'
+    mode: 'http_reverse'
   });
   console.log('[startup] main bot initialized', {
     pid: process.pid,
-    mode: config.NAPCAT_HTTP_REVERSE_ENABLED ? 'http_reverse' : 'websocket',
+    mode: 'http_reverse',
     lockFile: LOCK_FILE
   });
 }

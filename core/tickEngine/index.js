@@ -188,30 +188,15 @@ async function invokeInitiativeDecisionModel(input = {}) {
   return parseInitiativeDecision(String(msg?.content || ''), fallbackStyle, fallbackAtSender);
 }
 
-async function sendTickPayloadWithRetry(ws, payload, retries = 1, waitMs = 500, actionClient = null) {
-  if (actionClient && typeof actionClient.callAction === 'function') {
-    const maxRetry = Math.max(0, Number(retries) || 0);
-    for (let i = 0; i <= maxRetry; i += 1) {
-      try {
-        await actionClient.callAction(payload.action, payload.params);
-        return true;
-      } catch (error) {
-        if (i < maxRetry) await new Promise((resolve) => setTimeout(resolve, waitMs));
-      }
-    }
-    return false;
-  }
-
+async function sendTickPayloadWithRetry(payload, retries = 1, waitMs = 500, actionClient = null) {
+  if (!actionClient || typeof actionClient.callAction !== 'function') return false;
   const maxRetry = Math.max(0, Number(retries) || 0);
   for (let i = 0; i <= maxRetry; i += 1) {
-    if (ws && typeof ws.send === 'function') {
-      try {
-        ws.send(JSON.stringify(payload));
-        return true;
-      } catch (_) {}
-    }
-    if (i < maxRetry) {
-      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    try {
+      await actionClient.callAction(payload.action, payload.params);
+      return true;
+    } catch (_) {
+      if (i < maxRetry) await new Promise((resolve) => setTimeout(resolve, waitMs));
     }
   }
   return false;
@@ -295,16 +280,6 @@ function buildTouchSignature(reason = '', primaryContext = '') {
 
 function getErrorReason(error, fallback = 'touch-send-failed') {
   return String(error?.message || error || fallback).trim() || fallback;
-}
-
-function sendTouchWebSocketMessage(ws, payload) {
-  if (!ws || typeof ws.send !== 'function') {
-    throw new Error('websocket send unavailable');
-  }
-  if (typeof ws.readyState === 'number' && ws.readyState !== 1) {
-    throw new Error(`websocket not open:${ws.readyState}`);
-  }
-  ws.send(JSON.stringify(payload));
 }
 
 async function recordTouchFailureOutcome({
@@ -518,7 +493,7 @@ function selectTouchCandidate(userId, data, state, today, now = Date.now()) {
 }
 
 async function sendTouchMessage({
-  ws,
+  actionClient,
   askAIByGraph,
   userId,
   data,
@@ -695,12 +670,12 @@ async function sendTouchMessage({
 
     const prefix = effectiveAtSender ? `[CQ:at,qq=${userId}] ` : '';
     try {
-      sendTouchWebSocketMessage(ws, {
-        action: 'send_group_msg',
-        params: {
-          group_id: groupId,
-          message: `${prefix}${text}`
-        }
+      if (!actionClient || typeof actionClient.callAction !== 'function') {
+        throw new Error('napcat action client unavailable');
+      }
+      await actionClient.callAction('send_group_msg', {
+        group_id: groupId,
+        message: `${prefix}${text}`
       });
       recordSystemGroupSend({
         groupId,
@@ -824,7 +799,7 @@ async function sendTouchMessage({
   }
 }
 
-async function runRandomWindowTouches(ws, askAIByGraph, state, date = new Date()) {
+async function runRandomWindowTouches(actionClient, askAIByGraph, state, date = new Date()) {
   const today = formatDateInTz(date, config.TIMEZONE);
   const currentWindow = getWindowByCurrentTime(date, config.TIMEZONE);
   if (!currentWindow) return false;
@@ -843,7 +818,7 @@ async function runRandomWindowTouches(ws, askAIByGraph, state, date = new Date()
     if (!candidate) continue;
 
     const result = await sendTouchMessage({
-      ws,
+      actionClient,
       askAIByGraph,
       userId,
       data,
@@ -871,7 +846,7 @@ async function runRandomWindowTouches(ws, askAIByGraph, state, date = new Date()
   return touchedAny;
 }
 
-async function runGreetingFallbacks(ws, askAIByGraph, state, date = new Date()) {
+async function runGreetingFallbacks(actionClient, askAIByGraph, state, date = new Date()) {
   if (!config.PROACTIVE_GREETING_FALLBACK_ENABLED) return false;
 
   const today = formatDateInTz(date, config.TIMEZONE);
@@ -885,7 +860,7 @@ async function runGreetingFallbacks(ws, askAIByGraph, state, date = new Date()) 
 
     if (morningReady && shouldSendScheduledGreeting(data, 'morning', today, config, userState)) {
       const result = await sendTouchMessage({
-        ws,
+        actionClient,
         askAIByGraph,
         userId,
         data,
@@ -912,7 +887,7 @@ async function runGreetingFallbacks(ws, askAIByGraph, state, date = new Date()) 
 
     if (nightReady && shouldSendScheduledGreeting(data, 'night', today, config, userState)) {
       const result = await sendTouchMessage({
-        ws,
+        actionClient,
         askAIByGraph,
         userId,
         data,
@@ -940,42 +915,42 @@ async function runGreetingFallbacks(ws, askAIByGraph, state, date = new Date()) 
   return sentAny;
 }
 
-async function runTickCycle(ws, askAIByGraph, state, date = new Date(), actionClient = null, shouldContinue = () => true) {
+async function runTickCycle(actionClient, askAIByGraph, state, date = new Date(), shouldContinue = () => true) {
   if (!shouldContinue()) return false;
   if (shouldRunDailySummaryNow(date)) {
     await runDailyJournalSummaries();
   }
 
   if (!shouldContinue()) return false;
-  await runRandomWindowTouches(ws, askAIByGraph, state, date);
+  await runRandomWindowTouches(actionClient, askAIByGraph, state, date);
   if (!shouldContinue()) return false;
-  await runGreetingFallbacks(ws, askAIByGraph, state, date);
+  await runGreetingFallbacks(actionClient, askAIByGraph, state, date);
   if (!shouldContinue()) return false;
   await getDailyShareEngine().runDailyShareCycle({
-    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs, actionClient),
+    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(payload, retries, waitMs, actionClient),
     askAIByGraph,
     date
   });
   return true;
 }
 
-async function runDailyShareTick(ws, askAIByGraph, date = new Date(), actionClient = null) {
+async function runDailyShareTick(actionClient, askAIByGraph, date = new Date()) {
   await getDailyShareEngine().runDailyShareCycle({
-    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs, actionClient),
+    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(payload, retries, waitMs, actionClient),
     askAIByGraph,
     date
   });
 }
 
-async function runLifeSchedulerTick(ws, askAIByGraph, date = new Date(), actionClient = null) {
+async function runLifeSchedulerTick(actionClient, askAIByGraph, date = new Date()) {
   await getLifeSchedulerEngine().runLifeCycle({
-    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(ws, payload, retries, waitMs, actionClient),
+    sendWithRetry: (payload, retries = 1, waitMs = 500) => sendTickPayloadWithRetry(payload, retries, waitMs, actionClient),
     askAIByGraph,
     date
   });
 }
 
-function startTickEngine(ws, askAIByGraph, actionClient = null) {
+function startTickEngine(askAIByGraph, actionClient = null) {
   const state = loadTickState();
   let stopped = false;
   const timers = {
@@ -987,7 +962,7 @@ function startTickEngine(ws, askAIByGraph, actionClient = null) {
   async function runOnce() {
     if (stopped) return;
     try {
-      await runTickCycle(ws, askAIByGraph, state, new Date(), actionClient, () => !stopped);
+      await runTickCycle(actionClient, askAIByGraph, state, new Date(), () => !stopped);
     } catch (error) {
       console.error('[tick] execution failed:', error?.message || error);
     } finally {
@@ -998,7 +973,7 @@ function startTickEngine(ws, askAIByGraph, actionClient = null) {
   async function runDailyShareOnce() {
     if (stopped) return;
     try {
-      await runDailyShareTick(ws, askAIByGraph, new Date(), actionClient);
+      await runDailyShareTick(actionClient, askAIByGraph, new Date());
     } catch (error) {
       console.error('[tick] daily share execution failed:', error?.message || error);
     } finally {
@@ -1009,7 +984,7 @@ function startTickEngine(ws, askAIByGraph, actionClient = null) {
   async function runLifeSchedulerOnce() {
     if (stopped) return;
     try {
-      await runLifeSchedulerTick(ws, askAIByGraph, new Date(), actionClient);
+      await runLifeSchedulerTick(actionClient, askAIByGraph, new Date());
     } catch (error) {
       console.error('[tick] life scheduler execution failed:', error?.message || error);
     } finally {

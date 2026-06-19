@@ -1,3 +1,30 @@
+## 运行维护 2026-06-20 07:16
+
+- 小目标：检查私聊 `input_status` / 戳一戳链路，从消息进入、`core/messageHandler` 到 NapCat action 发送，确认当前最可能断点并补最小验收。
+- 现场结论：实码链路为 HTTP reverse notice -> `shouldHandleNotice(input_status)` -> `maybeHandlePrivateTypingNotice` -> `sendPrivatePoke` -> 注入的 `actionClient.callAction('friend_poke', { user_id })`；最可能断点不在生产分流，而在回归测试的失败分支被同一用户冷却吞掉，未实际触发 action client 发送失败。
+- 最小修复：`tests/messageHandlerPrivateTypingPoke.test.js` 增加 action 尝试计数；保留冷却抑制断言，并在失败用例前关闭冷却，确保失败场景确实穿过 `friend_poke` 调用且不冒泡。
+- 验证：`node --check tests\messageHandlerPrivateTypingPoke.test.js`、`node --check api\napcatHttpActionClient.js`、`node --check api\napcatActionClient.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"`、`node scripts\run-tests.js tests\messageHandlerPrivateTypingPoke.test.js tests\qqActionServicePrivatePoke.test.js tests\napcatActionClientConnectionState.test.js` 通过。
+- 范围控制：未恢复旧 WebSocket action client；未改私聊触发策略和冷却生产逻辑；未推送远端。
+- 小目标已完成：私聊输入状态触发、消息处理、`friend_poke` action 发送及失败不崩溃均有可复跑验收。
+
+## 运行维护 2026-06-20 07:15
+
+- 小目标：检查 NapCat HTTP action client 的连接状态、离线判定和健康诊断链路，补上最关键的闭环缺口。
+- 现场结论：HTTP client 固定 `connected=true`，请求端点无响应时错误也不带 `offline/retryable`；即使上层记录了离线降级，健康诊断还会被旧 online state 卡住，无法从降级快照翻到 offline。
+- 最小修复：HTTP action client 维护 `http/http_offline` 状态，有响应即恢复 online，无响应/超时标记 offline 并抛出 `NAPCAT_OFFLINE`；健康诊断信任降级事件中的 `connectionState.connected=false` 快照。
+- 验证：`node --check api\napcatHttpActionClient.js`、`node --check utils\napcatHealthDiagnostics.js`、`node --check tests\napcatActionClientConnectionState.test.js`、`node --check tests\napcatHealthDiagnostics.test.js`、`node scripts\run-tests.js tests\napcatActionClientConnectionState.test.js tests\napcatHealthDiagnostics.test.js` 通过；`npm run diag:napcat-health -- --text` 可正常输出，当前运行态为 `napcat-health: online offline=no`。
+- 范围控制：未改 tick engine 等并行改动；未恢复旧 WebSocket action client；未推送远端。
+- 小目标已完成：HTTP reverse 模式下 NapCat HTTP action 离线会被 action client、`isNapCatOfflineError` 和 `diag:napcat-health` 串起来。
+
+## 运行维护 2026-06-20 07:11
+
+- 小目标：收口 tick engine 从 WebSocket 发送切到 NapCat action client 后的未提交改动，确认主动触达、fallback greeting、daily share / life scheduler sendWithRetry 和 stop guard 不再依赖旧 ws 参数。
+- 现场结论：核心改动方向正确，剩余缺口在测试夹具。`proactiveGreetingFallbackState` 仍按旧 WebSocket 参数调用；同时磁盘优先 memory 改造后，测试直接写 `memory.favorites[...]` 但未落盘，`Object.entries(favorites)` 读不到测试用户。
+- 最小修复：tick engine 发送路径统一使用 `actionClient.callAction`，移除旧 WebSocket 发送 helper；相关 tick 测试改为 action client 调用，fallback 夹具写入 favorites 后调用 `saveData()`，避免漏测发送路径。
+- 验收：`node --check core\tickEngine\index.js`、`node --check tests\tickEngineSendFailure.test.js`、`node --check tests\proactiveGreetingFallbackState.test.js`、`node scripts\run-tests.js tests\tickEngineAdaptive.test.js tests\tickEngineSendFailure.test.js tests\tickEngineStopGuard.test.js tests\proactiveGreetingFallbackState.test.js` 通过。
+- 范围控制：未改工作区中其他并行改动；未恢复 WebSocket 发送兼容分支；未推送远端。
+- 小目标已完成：tick engine 主动发送链路和回归测试已按 action client 收口，并保留失败不写成功状态、stop 后不继续推进 tick 的验收结果。
+
 ## 运行维护 2026-06-19 08:06
 
 - 小目标：复查 `prompts/defaut.txt` 未提交安全边界改动，并确认普通用户主回复、`normal_fast_reply`、被动群感知三条实际注入链路不会再次丢失安全防护。
