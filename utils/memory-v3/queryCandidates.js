@@ -4,11 +4,11 @@ const {
   uniqueBy
 } = require('./helpers');
 const {
-  loadSessionProjection,
-  loadProfileProjection,
-  loadScopeProjection,
-  loadEpisodeProjection,
-  loadMemoryNodes
+  loadSessionProjectionForUser,
+  loadProfileProjectionForUser,
+  loadScopeProjectionForUser,
+  loadEpisodeProjectionForUser,
+  loadMemoryNodesForUser
 } = require('./storage');
 const {
   buildDailyJournalDocsForUser
@@ -27,7 +27,7 @@ const {
 
 function resolveAllowedGroupIds(userId = '', options = {}) {
   const explicit = Array.isArray(options.groupIds) ? options.groupIds : [];
-  const scope = loadScopeProjection();
+  const scope = loadScopeProjectionForUser(userId);
   const groups = Array.isArray(scope.users?.[String(userId || '').trim()]?.groups)
     ? scope.users[String(userId || '').trim()].groups.map((item) => normalizeText(item)).filter(Boolean)
     : [];
@@ -50,9 +50,9 @@ function collectCandidates(userId, options = {}) {
   const includeJargon = shouldCollectSourceForQuery('jargon', facet, requestedSource);
   const includeJournal = shouldCollectSourceForQuery('journal', facet, requestedSource);
   const includeStyle = shouldCollectSourceForQuery('style', facet, requestedSource);
-  const sessionProjection = includeRecent ? loadSessionProjection() : { sessions: {} };
-  const profileProjection = includeProfile ? loadProfileProjection() : { users: {} };
-  const episodeProjection = includeJournal ? loadEpisodeProjection() : { users: {} };
+  const sessionProjection = includeRecent ? loadSessionProjectionForUser(userId, options) : { sessions: {} };
+  const profileProjection = includeProfile ? loadProfileProjectionForUser(userId) : { users: {} };
+  const episodeProjection = includeJournal ? loadEpisodeProjectionForUser(userId) : { users: {} };
   const allowedGroupIds = includeGroup || includeJargon
     ? resolveAllowedGroupIds(userId, options)
     : [];
@@ -102,7 +102,10 @@ function collectCandidates(userId, options = {}) {
   }
 
   if (includePersonal || includeTask || includeGroup || includeJargon || includeStyle) {
-    for (const node of filterResolvedMemoryConflicts(loadMemoryNodes())) {
+    for (const node of filterResolvedMemoryConflicts(loadMemoryNodesForUser(userId, {
+      groupIds: allowedGroupIds,
+      limit: Math.max(100, Number(options.nodeScanLimit || 2000) || 2000)
+    }))) {
       if (isMemoryNotRecallable(node)) continue;
       const nodeUserId = normalizeText(node?.userId);
       const scopeType = normalizeText(node?.scopeType).toLowerCase();

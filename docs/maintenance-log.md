@@ -677,3 +677,11 @@
 - 小目标已完成：QQ reasoning 外发内容从 provider 原始推理改为可见、安全、短的瑞希风格思考小记。
 - 提交后记录 2026-06-17 23:15 +08:00：已将固定兜底前缀移除，QQ reasoning 外发只接受清理后的自然短想法；英文导演提示样例 `The says "喜欢你"...respond naturally...` 已验证返回空，不再被模板包装外发。验收：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js` 通过。小目标已完成：不再有固定兜底句，也不再用它套原始推理。
 - 提交后记录 2026-06-17 23:29 +08:00：已放开自然短想法的语言限制，中英文都可外发；同时保留对英文导演提示/模型工作语的跳过闸门。验收：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js`、`npm run check:prompts` 通过；英文自然样例可外发，真实泄露样例 `The says "喜欢你"...respond naturally...` 仍返回空。小目标已完成：英文可发，但英文导演提示不发。
+
+## 运行维护 2026-06-19 08:16
+
+- 完成记忆系统磁盘优先改造，目标是避免主进程启动和主回复/召回路径常驻全量记忆对象。
+- 最小修复：短期上下文迁到 `data/short_term_sessions/<session>.json`，session summary 迁到 `data/session_context_summaries/<session>.json` 并对旧总文件按 session 懒迁移；legacy `favorites/memories` 改为按用户惰性读写；Memory V3 移除 `readCache`，nodes 查询改为按用户/群组分块扫描；向量召回只读取目标用户/群组 shard，普通写入不再重建全量兼容快照。
+- 范围控制：未删除旧 JSON/兼容快照文件；`loadLibrary/loadIndex/getMemoryItems()` 无 userId 的全量模式仍保留给迁移、审计和诊断显式调用；未重启当前正在运行的主 bot，因此未把线上进程 RSS 当作最终验收。
+- 验收：`node --check` 覆盖改动文件；`node tests\diskFirstMemoryStores.test.js`、`node tests\memoryChatHistoryLimit.test.js`、`node tests\shortTermContinuityKernel.test.js`、`node tests\memoryProjection.test.js`、`node tests\lancedbMemoryStore.test.js`、`node tests\memoryWritePipeline.test.js`、`node tests\profileJournalDb.test.js`、`node tests\memoryContinuityStressRegression.test.js` 通过；`shortTermMemoryWindowConfig` 和 `memoryV3Query` 使用 `process.exit` 包装通过；模块加载 RSS 探针输出 `delta=37838848`。
+- 小目标已完成：主回复和在线记忆召回路径不再把长期记忆、短期上下文、Memory V3 nodes/projection、向量全量 library/index 聚合成进程级常驻对象。

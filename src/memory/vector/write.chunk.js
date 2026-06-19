@@ -133,7 +133,7 @@ function persistNormalizedMemoryItemsDirect(normalizedItems = []) {
   }
 
   if (touchedShardKeys.size > 0) {
-    syncCompatSnapshots();
+    markAggregateDirty();
   }
   return ids;
 }
