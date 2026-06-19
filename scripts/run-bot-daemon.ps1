@@ -102,14 +102,13 @@ function Test-DaemonTcpPortListening {
 }
 
 function Get-MainHttpReverseIngressState {
-  $enabled = Get-BoolEnv -Name 'NAPCAT_HTTP_REVERSE_ENABLED' -DefaultValue $false
   $port = Get-PositiveInt64Env -Name 'NAPCAT_HTTP_REVERSE_PORT' -DefaultValue 3002
-  $listening = if ($enabled) { Test-DaemonTcpPortListening -Port $port } else { $false }
+  $listening = Test-DaemonTcpPortListening -Port $port
   return [pscustomobject]@{
-    Enabled = $enabled
+    Enabled = $true
     Port = $port
     Listening = $listening
-    Outage = ($enabled -and (-not $listening))
+    Outage = (-not $listening)
   }
 }
 

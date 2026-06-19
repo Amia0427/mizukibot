@@ -99,6 +99,35 @@ const {
   assert.strictEqual(report.summary.lastRecoveredAt, '2026-06-12T10:00:30.000Z');
   assert.strictEqual(report.summary.recentDegradationCount, 2);
 
+  recordNapCatDegradation('thinking-emoji', {
+    module: 'thinking-emoji',
+    reason: 'napcat_offline',
+    messageId: 'm3',
+    connectionState: {
+      connected: false,
+      readyStateName: 'http_offline',
+      lastDisconnectedAt: base + 40000,
+      lastDisconnectReason: 'connect ECONNREFUSED 127.0.0.1:3000',
+      disconnectCount: 2,
+      offlineMs: 0
+    }
+  }, {
+    now: () => base + 40000,
+    mode: 'http_reverse'
+  });
+
+  report = buildNapCatHealthDiagnostic({
+    now: () => base + 43000,
+    maxEvents: 10
+  });
+
+  assert.strictEqual(report.summary.status, 'offline');
+  assert.strictEqual(report.summary.offline, true);
+  assert.strictEqual(report.summary.offlineMs, 3000);
+  assert.strictEqual(report.summary.lastDisconnectedAt, '2026-06-12T10:00:40.000Z');
+  assert.strictEqual(report.summary.lastDisconnectReason, 'connect ECONNREFUSED 127.0.0.1:3000');
+  assert.strictEqual(report.connection.readyStateName, 'http_offline');
+
   console.log('napcatHealthDiagnostics.test.js passed');
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));

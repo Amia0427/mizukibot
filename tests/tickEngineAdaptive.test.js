@@ -35,7 +35,7 @@ module.exports = (async () => {
     const state = tickEngine.loadTickState();
     assert.deepStrictEqual(state, {}, 'tick state should load from empty hot-store fallback');
 
-    runtime = tickEngine.startTickEngine({ readyState: 1, send() {} }, async () => 'ok');
+    runtime = tickEngine.startTickEngine(async () => 'ok', { callAction: async () => null });
     await new Promise((resolve) => setTimeout(resolve, 30));
 
     console.log('tickEngineAdaptive.test.js passed');

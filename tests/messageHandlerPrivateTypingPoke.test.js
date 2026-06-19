@@ -19,23 +19,6 @@ function restoreEnv(snapshot = {}) {
   }
 }
 
-function createWsRecorder() {
-  const sent = [];
-  let onSend = null;
-  return {
-    sent,
-    readyState: 1,
-    setOnSend(handler) {
-      onSend = typeof handler === 'function' ? handler : null;
-    },
-    send(payload) {
-      const parsed = JSON.parse(payload);
-      sent.push(parsed);
-      if (onSend) onSend(parsed);
-    }
-  };
-}
-
 function buildTypingNotice({ userId = '1960901788', eventType = 1, statusText = '对方正在输入...' } = {}) {
   return {
     post_type: 'notice',
@@ -70,50 +53,59 @@ module.exports = (async () => {
     clearProjectCache();
 
     const config = require('../config');
-    const { getNapCatActionClient } = require('../api/napcatActionClient');
     const { createMessageHandler } = require('../core/messageHandler');
 
-    const ws = createWsRecorder();
-    const actionClient = getNapCatActionClient();
-    actionClient.setWebSocket(ws);
-    ws.setOnSend((packet) => {
-      actionClient.handleMessage({
-        status: 'ok',
-        retcode: 0,
-        echo: packet.echo,
-        data: null
-      });
-    });
+    const attempts = [];
+    const sent = [];
+    let failNextSend = false;
+    const actionClient = {
+      async callAction(action, params) {
+        attempts.push({ action, params });
+        if (failNextSend) throw new Error('mock transport failure');
+        sent.push({ action, params });
+        return null;
+      },
+      getConnectionState: () => ({ connected: true, readyStateName: 'http' }),
+      handleConnect() {},
+      handleMessage: () => false,
+      handleDisconnect() {},
+      isConnected: () => true
+    };
 
     const { handleIncomingMessage } = createMessageHandler({
       config,
-      sendWithRetry: async () => true
+      sendWithRetry: async () => true,
+      actionClient
     });
 
     await handleIncomingMessage(buildTypingNotice());
-    assert.strictEqual(ws.sent.length, 1);
-    assert.strictEqual(ws.sent[0].action, 'friend_poke');
-    assert.deepStrictEqual(ws.sent[0].params, { user_id: '1960901788' });
+    assert.strictEqual(sent.length, 1);
+    assert.strictEqual(attempts.length, 1);
+    assert.strictEqual(sent[0].action, 'friend_poke');
+    assert.deepStrictEqual(sent[0].params, { user_id: '1960901788' });
 
     await handleIncomingMessage(buildTypingNotice());
-    assert.strictEqual(ws.sent.length, 1, 'cooldown should suppress duplicate poke');
+    assert.strictEqual(sent.length, 1, 'cooldown should suppress duplicate poke');
+    assert.strictEqual(attempts.length, 1, 'cooldown should suppress duplicate poke action');
 
     await handleIncomingMessage(buildTypingNotice({ userId: 'not_allowed_user' }));
-    assert.strictEqual(ws.sent.length, 1, 'non-allowlisted private user should not be poked');
+    assert.strictEqual(sent.length, 1, 'non-allowlisted private user should not be poked');
 
     await handleIncomingMessage({
       ...buildTypingNotice(),
       group_id: 'g1'
     });
-    assert.strictEqual(ws.sent.length, 1, 'group typing notice should be ignored');
+    assert.strictEqual(sent.length, 1, 'group typing notice should be ignored');
 
     await handleIncomingMessage(buildTypingNotice({ eventType: 2, statusText: '停止输入' }));
-    assert.strictEqual(ws.sent.length, 1, 'non-typing status should be ignored');
+    assert.strictEqual(sent.length, 1, 'non-typing status should be ignored');
 
-    ws.setOnSend(() => {
-      throw new Error('mock transport failure');
-    });
+    config.PRIVATE_TYPING_POKE_COOLDOWN_MS = 0;
+    failNextSend = true;
+    const attemptsBeforeFailure = attempts.length;
     await handleIncomingMessage(buildTypingNotice({ userId: '1960901788', eventType: 1, statusText: '对方正在输入...' }));
+    assert.strictEqual(attempts.length, attemptsBeforeFailure + 1, 'failure case should still attempt poke action');
+    assert.strictEqual(sent.length, 1, 'failed poke should not be recorded as sent');
     assert.ok(true, 'poke failure should not crash the handler');
 
     console.log('messageHandlerPrivateTypingPoke.test.js passed');

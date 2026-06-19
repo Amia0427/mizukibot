@@ -97,12 +97,11 @@ module.exports = {
   LOW_RESOURCE_SKIP_LOCAL_EMBEDDING_INDEX_SCORING: pickBool('LOW_RESOURCE_SKIP_LOCAL_EMBEDDING_INDEX_SCORING', lowResourceLiteBudget),
   MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START: pickBool('MAIN_PROCESS_EMBEDDING_BACKFILL_ON_START', false),
   TIMEZONE: pick('TIMEZONE', 'Asia/Shanghai'),
-  NAPCAT_WS_URL: pick('NAPCAT_WS_URL', 'ws://127.0.0.1:3001'),
-  // OneBot / NapCat server token for websocket authentication.
-  NAPCAT_WS_TOKEN: pick('NAPCAT_WS_TOKEN', ''),
   NAPCAT_ACTION_TIMEOUT_MS: pickNum('NAPCAT_ACTION_TIMEOUT_MS', 15000),
-  // HTTP reverse connection mode (NapCat posts to bot)
-  NAPCAT_HTTP_REVERSE_ENABLED: pickBool('NAPCAT_HTTP_REVERSE_ENABLED', false),
+  // NapCat OneBot HTTP action endpoint (bot posts actions to NapCat)
+  NAPCAT_HTTP_API_BASE_URL: pick('NAPCAT_HTTP_API_BASE_URL', 'http://127.0.0.1:3000'),
+  NAPCAT_HTTP_ACTION_SECRET: pick('NAPCAT_HTTP_ACTION_SECRET', ''),
+  // HTTP reverse ingress port (NapCat posts events to bot)
   NAPCAT_HTTP_REVERSE_PORT: pickNum('NAPCAT_HTTP_REVERSE_PORT', 3002),
   FOLLOWER_RULE_ENABLED: pickBool('FOLLOWER_RULE_ENABLED', false),
   FOLLOWER_LOG_MONITOR_ENABLED: pickBool('FOLLOWER_LOG_MONITOR_ENABLED', false),

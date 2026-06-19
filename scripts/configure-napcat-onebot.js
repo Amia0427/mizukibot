@@ -62,25 +62,38 @@ const configCandidates = [
   path.join(localAppData, 'NapCat', 'config')
 ].filter(Boolean);
 
+const HTTP_ACTION_PORT = Number(process.env.NAPCAT_HTTP_API_PORT || 3000);
+const HTTP_REVERSE_PORT = Number(process.env.NAPCAT_HTTP_REVERSE_PORT || 3002);
+const HTTP_ACTION_SECRET = String(process.env.NAPCAT_HTTP_ACTION_SECRET || '').trim();
+
 const defaultOnebotConfig = {
   network: {
-    httpServers: [],
-    httpSseServers: [],
-    httpClients: [],
-    websocketServers: [
+    httpServers: [
       {
-        name: 'WsServer',
+        name: 'HttpServer',
         enable: true,
         host: '127.0.0.1',
-        port: 3001,
+        port: HTTP_ACTION_PORT,
+        enableCors: true,
+        enableWebsocket: false,
         messagePostFormat: 'array',
-        reportSelfMessage: false,
-        token: '',
-        enableForcePushEvent: true,
-        debug: false,
-        heartInterval: 30000
+        token: HTTP_ACTION_SECRET,
+        debug: false
       }
     ],
+    httpSseServers: [],
+    httpClients: [
+      {
+        name: 'HttpClient',
+        enable: true,
+        url: `http://127.0.0.1:${HTTP_REVERSE_PORT}`,
+        messagePostFormat: 'array',
+        reportSelfMessage: false,
+        token: HTTP_ACTION_SECRET,
+        debug: false
+      }
+    ],
+    websocketServers: [],
     websocketClients: [],
     plugins: []
   },
@@ -115,44 +128,76 @@ function patchOnebotConfig(obj) {
   if (!Array.isArray(next.network.websocketClients)) next.network.websocketClients = [];
   if (!Array.isArray(next.network.plugins)) next.network.plugins = [];
 
-  let found = false;
-  next.network.websocketServers = next.network.websocketServers.map((s) => {
+  // HTTP action server (bot posts OneBot actions here).
+  let httpServerFound = false;
+  next.network.httpServers = next.network.httpServers.map((s) => {
     const item = s && typeof s === 'object' ? s : {};
-    const host = String(item.host || '').trim();
-    const port = Number(item.port);
-    if (host === '127.0.0.1' && port === 3001) {
-      found = true;
+    if (String(item.host || '').trim() === '127.0.0.1' && Number(item.port) === HTTP_ACTION_PORT) {
+      httpServerFound = true;
       return {
-        name: item.name || 'WsServer',
+        name: item.name || 'HttpServer',
         enable: true,
         host: '127.0.0.1',
-        port: 3001,
+        port: HTTP_ACTION_PORT,
+        enableCors: item.enableCors !== false,
+        enableWebsocket: false,
         messagePostFormat: item.messagePostFormat || 'array',
-        reportSelfMessage: Boolean(item.reportSelfMessage),
-        // Easy local mode: avoid token mismatch disconnect loops.
-        token: '',
-        enableForcePushEvent: item.enableForcePushEvent !== false,
-        debug: Boolean(item.debug),
-        heartInterval: Number(item.heartInterval) || 30000
+        token: HTTP_ACTION_SECRET,
+        debug: Boolean(item.debug)
       };
     }
     return item;
   });
-
-  if (!found) {
-    next.network.websocketServers.unshift({
-      name: 'WsServer',
+  if (!httpServerFound) {
+    next.network.httpServers.unshift({
+      name: 'HttpServer',
       enable: true,
       host: '127.0.0.1',
-      port: 3001,
+      port: HTTP_ACTION_PORT,
+      enableCors: true,
+      enableWebsocket: false,
       messagePostFormat: 'array',
-      reportSelfMessage: false,
-      token: '',
-      enableForcePushEvent: true,
-      debug: false,
-      heartInterval: 30000
+      token: HTTP_ACTION_SECRET,
+      debug: false
     });
   }
+
+  // HTTP client (NapCat posts events to the bot reverse ingress).
+  const reverseUrl = `http://127.0.0.1:${HTTP_REVERSE_PORT}`;
+  let httpClientFound = false;
+  next.network.httpClients = next.network.httpClients.map((c) => {
+    const item = c && typeof c === 'object' ? c : {};
+    if (String(item.url || '').trim() === reverseUrl) {
+      httpClientFound = true;
+      return {
+        name: item.name || 'HttpClient',
+        enable: true,
+        url: reverseUrl,
+        messagePostFormat: item.messagePostFormat || 'array',
+        reportSelfMessage: Boolean(item.reportSelfMessage),
+        token: HTTP_ACTION_SECRET,
+        debug: Boolean(item.debug)
+      };
+    }
+    return item;
+  });
+  if (!httpClientFound) {
+    next.network.httpClients.unshift({
+      name: 'HttpClient',
+      enable: true,
+      url: reverseUrl,
+      messagePostFormat: 'array',
+      reportSelfMessage: false,
+      token: HTTP_ACTION_SECRET,
+      debug: false
+    });
+  }
+
+  // Disable any legacy websocket servers to avoid competing transports.
+  next.network.websocketServers = next.network.websocketServers.map((s) => {
+    const item = s && typeof s === 'object' ? s : {};
+    return { ...item, enable: false };
+  });
 
   if (typeof next.musicSignUrl !== 'string') next.musicSignUrl = '';
   if (typeof next.enableLocalFile2Url !== 'boolean') next.enableLocalFile2Url = false;
@@ -161,28 +206,36 @@ function patchOnebotConfig(obj) {
   return next;
 }
 
+function upsertEnvLine(lines, key, value) {
+  const re = new RegExp(`^\\s*${key}\\s*=`);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (re.test(lines[i])) {
+      lines[i] = `${key}=${value}`;
+      return true;
+    }
+  }
+  lines.push(`${key}=${value}`);
+  return false;
+}
+
 function updateDotEnv() {
   const envPath = path.join(projectRoot, '.env');
-  const targetLine = 'NAPCAT_WS_URL=ws://127.0.0.1:3001';
+  const desired = {
+    NAPCAT_HTTP_API_BASE_URL: `http://127.0.0.1:${HTTP_ACTION_PORT}`,
+    NAPCAT_HTTP_REVERSE_PORT: String(HTTP_REVERSE_PORT),
+    NAPCAT_HTTP_ACTION_SECRET: HTTP_ACTION_SECRET
+  };
 
   if (!fs.existsSync(envPath)) {
-    fs.writeFileSync(envPath, `${targetLine}\n`, 'utf8');
+    const body = Object.entries(desired).map(([k, v]) => `${k}=${v}`).join('\n');
+    fs.writeFileSync(envPath, `${body}\n`, 'utf8');
     return { created: true, updated: true };
   }
 
-  const raw = fs.readFileSync(envPath, 'utf8');
-  const lines = raw.split(/\r?\n/);
-  let found = false;
-
-  for (let i = 0; i < lines.length; i += 1) {
-    if (/^\s*NAPCAT_WS_URL\s*=/.test(lines[i])) {
-      lines[i] = targetLine;
-      found = true;
-      break;
-    }
+  const lines = fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
+  for (const [key, value] of Object.entries(desired)) {
+    upsertEnvLine(lines, key, value);
   }
-
-  if (!found) lines.push(targetLine);
   fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
   return { created: false, updated: true };
 }
@@ -257,7 +310,8 @@ function main() {
   for (const f of touched.slice(0, 30)) console.log(' -', f);
   if (touched.length > 30) console.log(` - ... (${touched.length - 30} more)`);
   console.log('.env updated:', envRes.updated ? 'yes' : 'no');
-  console.log('Expected OneBot WS endpoint: ws://127.0.0.1:3001 (token empty)');
+  console.log(`Expected OneBot HTTP action endpoint: http://127.0.0.1:${HTTP_ACTION_PORT}`);
+  console.log(`Expected OneBot HTTP event ingress: http://127.0.0.1:${HTTP_REVERSE_PORT}`);
 }
 
 main();
