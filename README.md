@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-20 11:35 +08:00**：强化普通用户 NSFW 与性骚扰边界，但拒绝话术改为瑞希人格化诱导转向。`prompts/defaut.txt` 现在明确覆盖软色情、露骨身体/性行为描写、性化评价、性骚扰、擦边绕法和持续纠缠；触发后仍追加 `/%`，但要求用瑞希式尴尬、嫌弃或岔开感挡住话题，不输出系统公告式硬拒绝。验收：`npm run check:prompts` 通过。小目标完成：普通用户安全边界更强，同时保留角色自然表达。
+
 **2026-06-20 07:16 +08:00**：收口私聊 `input_status` / 戳一戳链路验收。消息进入后会由 `shouldHandleNotice(input_status)` 进入 `maybeHandlePrivateTypingNotice`，最终通过注入的 NapCat action client 发送 `friend_poke`；本轮补掉测试失败分支被冷却吞掉的缺口，确保发送失败场景真实触发 action 且不崩溃。验收：目标语法检查、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"`、`node scripts\run-tests.js tests\messageHandlerPrivateTypingPoke.test.js tests\qqActionServicePrivatePoke.test.js tests\napcatActionClientConnectionState.test.js` 通过。小目标完成：私聊输入状态触发、`friend_poke` action 发送和失败容错均有回归覆盖。
 
 **2026-06-20 07:15 +08:00**：收口 NapCat HTTP action client 的离线状态链路。HTTP action 端点无响应/超时时会把 client 标记为 `http_offline`，错误携带 `NAPCAT_OFFLINE`、`offline/retryable` 和连接快照；有 HTTP 响应或后续成功请求会恢复 online。健康诊断现在会信任离线降级事件里的连接快照，不再被旧 online state 卡住。验收：目标语法检查、`node scripts\run-tests.js tests\napcatActionClientConnectionState.test.js tests\napcatHealthDiagnostics.test.js`、`npm run diag:napcat-health -- --text` 通过，当前诊断为 `online offline=no`。小目标完成：HTTP reverse 模式下 NapCat 离线可被 action client、离线判定和 `diag:napcat-health` 闭环识别。
