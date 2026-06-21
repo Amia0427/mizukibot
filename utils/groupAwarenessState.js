@@ -20,6 +20,16 @@ const GROUP_PRESENCE_ACTIONS = new Set([
   'exit'
 ]);
 
+const GROUP_AWARENESS_MESSAGE_TEXT_MAX_CHARS = 800;
+
+function limitGroupAwarenessMessageText(value) {
+  const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  const chars = Array.from(normalized);
+  if (chars.length <= GROUP_AWARENESS_MESSAGE_TEXT_MAX_CHARS) return normalized;
+  return chars.slice(0, GROUP_AWARENESS_MESSAGE_TEXT_MAX_CHARS).join('');
+}
+
 function safeReadJson(filePath, fallback) {
   try {
     if (!fs.existsSync(filePath)) return fallback;
@@ -104,7 +114,7 @@ function normalizeGroupMessage(entry = {}) {
     sender_id: String(raw.sender_id || ''),
     sender_name: String(raw.sender_name || ''),
     message_id: String(raw.message_id || raw.id || '').trim(),
-    text: String(raw.text || '').trim(),
+    text: limitGroupAwarenessMessageText(raw.text),
     timestamp: Number(raw.timestamp || Date.now())
   };
   if (!message.text) return message;
