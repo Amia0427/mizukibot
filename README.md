@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-21 23:38 +08:00**：按 Anthropic prompt caching 友好方式收口管理员系统提示词顺序。`prompts/admin.txt` 对应的 `admin_system_prompt` 仍保持为管理员 system messages 第一块，只新增一小时 `cache_control` 标记，不后移到普通稳定块之后。验收：`node tests\conversationContextClaudeCacheMarkers.test.js`、`node tests\adminStableSystemPrompt.test.js`、`node tests\providerRequestNormalization.test.js` 通过。
+
 **2026-06-21 22:49 +08:00**：收口被动群感知 prompt/token 膨胀。根因是 `group_passive_should_reply` / `group_passive_reply_generation` 把当前文本、引用/转发上下文和最近消息多处装入 user prompt，且多模态诊断把 `data:image` 当文本估 token；现被动入口、引用/转发片段和 group awareness 状态单条文本都有硬上限，model-call 摘要把图片按占位符估算。验收：新增预算保护测试和 model-call 图片诊断测试通过。
 
 **2026-06-21 22:37 +08:00**：彻查 Anthropic 主回复仍无一小时缓存读取。现场根因有两层：当前线上 `node index.js` 进程 `pid=2544` 启动于 16:40，早于 17:24 的上一轮缓存修复提交，未重启时真实 trace 仍会继续显示旧代码的 `anthropicPromptCacheTtl="5m"`；同时第三方 Anthropic 网关需要的 `X-Enable-1h-cache: 1` 之前未在白名单中，最终请求会被归一化层丢弃。现默认 `ttl:"1h"` 的 Anthropic 请求会同时发送 `extended-cache-ttl-2025-04-11` 和 `X-Enable-1h-cache: 1`，诊断日志记录该 header，显式 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时不会误发。验收：本地 `prepareRequest` 探针确认 `1h`/`5m` 分支正确，相关 provider/cache 目标测试通过。

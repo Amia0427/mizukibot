@@ -1,9 +1,10 @@
 # 管理员缓存读写对照验收
 
-更新时间：2026-06-21 22:37 +08:00
+更新时间：2026-06-21 23:38 +08:00
 
 ## 2026-06-21 更新
 
+- 23:38：只调整管理员用户提示词缓存标记，不改变管理员 system message 顺序；`admin_system_prompt` 仍在顶部，同时作为 stable block 写入一小时 `cache_control`。验收：`node tests\conversationContextClaudeCacheMarkers.test.js`、`node tests\adminStableSystemPrompt.test.js`、`node tests\providerRequestNormalization.test.js` 通过。
 - 22:37：补齐第三方 Anthropic 网关需要的 `X-Enable-1h-cache: 1`，并把该 header 加入 trace/model-calls 诊断。现场确认旧主进程 `pid=2544` 启动于 16:40，早于 17:24 的缓存修复提交，因此未重启时仍会继续记录旧的 `anthropicPromptCacheTtl="5m"`。
 - 17:15：修复主回复稳定 system 块仍硬编码 `ttl: "5m"`，真实 trace 因此不会进入一小时缓存的问题；默认 `1h` 现在会自动携带 `extended-cache-ttl-2025-04-11`，日志记录 `anthropic_prompt_cache_ttl`。
 - 默认稳定缓存块 TTL 改为 `1h`，与主回复 Anthropic prompt caching 默认值一致。
