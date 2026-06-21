@@ -1,6 +1,12 @@
 # 管理员缓存读写对照验收
 
-更新时间：2026-06-17 20:20 +08:00
+更新时间：2026-06-21 16:21 +08:00
+
+## 2026-06-21 更新
+
+- 默认稳定缓存块 TTL 改为 `1h`，与主回复 Anthropic prompt caching 默认值一致。
+- 若目标 Anthropic 兼容网关拒绝一小时缓存，可临时设置 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 后再运行脚本。
+- 本轮验收以 `node scripts/run-tests.js tests/providerRequestNormalization.test.js tests/httpClientAnthropicPromptCache.test.js` 确认请求体 TTL 与兼容回退。
 
 ## 目标
 

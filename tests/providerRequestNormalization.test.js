@@ -66,6 +66,7 @@ module.exports = (async () => {
     assert.ok(Array.isArray(preparedAnthropic.requestBody.messages));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestBody, 'prompt_cache_key'));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestBody, 'prompt_cache_retention'));
+    assert.strictEqual(preparedAnthropic.requestBody.messages[0].content[0].cache_control?.ttl, '1h');
     assert.strictEqual(preparedAnthropic.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
     assert.strictEqual(preparedAnthropic.requestHeaders['User-Agent'], browserUA);
     assert.strictEqual(preparedAnthropic.requestHeaders['sec-ch-ua-platform'], '"Windows"');
@@ -180,6 +181,23 @@ module.exports = (async () => {
     ).headers;
     assert.strictEqual(geminiAxiosHeaders['sec-ch-ua-mobile'], '?0');
     assert.strictEqual(preparedGeminiNative.requestHeaders['x-goog-api-key'], 'gemini-key');
+
+    {
+      process.env.ANTHROPIC_PROMPT_CACHE_TTL = '5m';
+      clearProjectCache();
+      const httpClientWithShortAnthropicCache = require('../api/httpClient');
+      const preparedShortAnthropicCache = await httpClientWithShortAnthropicCache.prepareRequest(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model: 'claude-3-5-sonnet-latest',
+          messages: [{ role: 'user', content: 'short cache ttl override' }],
+          stream: false
+        }
+      );
+      assert.strictEqual(preparedShortAnthropicCache.requestBody.messages[0].content[0].cache_control?.ttl, '5m');
+      delete process.env.ANTHROPIC_PROMPT_CACHE_TTL;
+      clearProjectCache();
+    }
 
     const preparedGeminiNativeStream = await httpClient.prepareRequest(
       'https://generativelanguage.googleapis.com/v1beta',

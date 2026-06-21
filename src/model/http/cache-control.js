@@ -8,7 +8,7 @@ function normalizeText(value) {
 }
 
 function pickAnthropicPromptCacheTtl() {
-  const ttl = normalizeText(process.env.ANTHROPIC_PROMPT_CACHE_TTL || '5m').toLowerCase();
+  const ttl = normalizeText(process.env.ANTHROPIC_PROMPT_CACHE_TTL || '1h').toLowerCase();
   return ttl === '1h' ? '1h' : '5m';
 }
 

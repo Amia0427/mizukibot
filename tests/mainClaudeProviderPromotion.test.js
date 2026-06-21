@@ -52,6 +52,7 @@ module.exports = (async () => {
     assert.strictEqual(prepared.requestUrl, 'https://superapi.buzz/v1/messages');
     assert.ok(Array.isArray(prepared.requestBody.messages));
     assert.ok(prepared.requestBody.system.some((item) => String(item.text || '').includes('stable persona')));
+    assert.strictEqual(prepared.requestBody.messages[0].content[0].cache_control?.ttl, '1h');
     assert.ok(!Array.isArray(prepared.requestBody.tools));
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'tool_choice'));
     assert.strictEqual(prepared.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
