@@ -36,6 +36,7 @@ const {
   applyAnthropicCacheControl,
   applyAnthropicCacheControlToLastBlock,
   blockHasAnthropicCacheControl,
+  cacheControlUsesAnthropicOneHourTtl,
   extractAnthropicCacheControl,
   isAnthropicPromptCacheEnabled,
   mergeAnthropicBetaHeader,
@@ -452,10 +453,15 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
 function buildAnthropicRequestHeaders(requestBody = {}) {
   if (!anthropicRequestUsesPromptCaching(requestBody)) return null;
 
+  const betaFlags = ['prompt-caching-2024-07-31'];
+  if (cacheControlUsesAnthropicOneHourTtl(requestBody)) {
+    betaFlags.push('extended-cache-ttl-2025-04-11');
+  }
+
   return {
     'anthropic-beta': mergeAnthropicBetaHeader(
       config.ANTHROPIC_BETA,
-      ['prompt-caching-2024-07-31']
+      betaFlags
     )
   };
 }
@@ -464,7 +470,12 @@ function stripPromptCachingBetaHeaderValue(headerValue = '') {
   return String(headerValue || '')
     .split(',')
     .map((part) => normalizeText(part))
-    .filter((part) => part && part.toLowerCase() !== 'prompt-caching-2024-07-31')
+    .filter((part) => {
+      const normalized = part.toLowerCase();
+      return part
+        && normalized !== 'prompt-caching-2024-07-31'
+        && normalized !== 'extended-cache-ttl-2025-04-11';
+    })
     .join(',');
 }
 

@@ -211,6 +211,14 @@
 - 验证：`node scripts\run-tests.js tests\parserModelResponseFormats.test.js tests\modelServiceReasoning.test.js tests\runtimeStreamingCoordinator.test.js` 通过；`node -e "require('./core/messageHandler'); console.log('message handler load ok')"` 通过。
 - 小目标已完成：未发送的确定原因是主 bot 未重启加载 `89cc85d`；同时已补上标准 Anthropic thinking delta 解析，下一步需要重启主 bot 后再用新请求验证是否收到并转发。
 
+## 运行维护 2026-06-21 17:15
+
+- 小目标：定位并修复 Anthropic 主回复“一小时缓存设置后仍完全读不到缓存”的真实原因。
+- 现场结论：`data/request-trace.ndjson` 中当前运行进程仍记录 `anthropicPromptCacheTtl="5m"`，`data/model-calls.ndjson` 的真实 usage 也只出现 `cache_creation.ephemeral_5m_input_tokens=7167`；根因是 `api/runtimeV2/runtime/conversationContext.js` 对稳定 system 块硬编码 `{ ttl: "5m" }`，覆盖了上一轮统一默认值。超过 5 分钟后自然只能重新写缓存，表现为 `cache_read_input_tokens=0`。
+- 最小修复：主回复稳定 system 缓存块改为复用统一 `normalizeAnthropicCacheControl(true)`；Anthropic `ttl: "1h"` 请求自动追加 `extended-cache-ttl-2025-04-11` beta，显式 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时不追加；模型调用缓存诊断新增 `anthropic_prompt_cache_ttl` 和 `anthropic_extended_cache_ttl_beta_enabled`。
+- 验证：本地构造探针确认主回复稳定块为 `ttl:"1h"` 且 header 包含 `prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11`；显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时 header 仅为 `prompt-caching-2024-07-31`。
+- 小目标已完成：主回复稳定前缀不再被硬编码 5 分钟 TTL 降级，一小时缓存参数和诊断观测已贯穿实际请求链路。
+
 ## 运行维护 2026-06-17 11:52
 
 - 小目标：去除 `/cot` 特殊指令，并让 QQ 群聊/私聊在正常正文发送成功后，额外用合并转发完整发送 provider 显式返回的 reasoning。

@@ -239,11 +239,8 @@ function buildRequestCacheTrace(requestBody = {}, requestHeaders = {}) {
 
   const findTtl = (value) => {
     if (Array.isArray(value)) {
-      for (const item of value) {
-        const ttl = findTtl(item);
-        if (ttl) return ttl;
-      }
-      return '';
+      const values = value.map((item) => findTtl(item)).filter(Boolean);
+      return values.includes('1h') ? '1h' : values[0] || '';
     }
     if (!value || typeof value !== 'object') return '';
     if (normalizeText(value.type).toLowerCase() === 'ephemeral') {
@@ -252,9 +249,22 @@ function buildRequestCacheTrace(requestBody = {}, requestHeaders = {}) {
     if (value.cache_control && typeof value.cache_control === 'object') {
       return normalizeText(value.cache_control.ttl);
     }
-    return findTtl(value.content) || findTtl(value.function);
+    const values = [
+      findTtl(value.content),
+      findTtl(value.function),
+      findTtl(value.system),
+      findTtl(value.messages),
+      findTtl(value.tools)
+    ].filter(Boolean);
+    return values.includes('1h') ? '1h' : values[0] || '';
   };
-  promptCaching.anthropicPromptCacheTtl = findTtl(body.cache_control) || findTtl(body.system) || findTtl(body.messages) || findTtl(body.tools);
+  const ttlValues = [
+    findTtl(body.cache_control),
+    findTtl(body.system),
+    findTtl(body.messages),
+    findTtl(body.tools)
+  ].filter(Boolean);
+  promptCaching.anthropicPromptCacheTtl = ttlValues.includes('1h') ? '1h' : ttlValues[0] || '';
   return promptCaching;
 }
 

@@ -208,6 +208,16 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody, 'cache_control'));
     assert.ok(countRequestCacheControl(preparedStableSystem.requestBody) <= 4);
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody, 'prompt_cache_key'));
+    assert.ok(preparedStableSystem.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
+    assert.ok(preparedStableSystem.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
+
+    const { summarizePromptCaching } = require('../utils/modelCallTracker/promptCaching');
+    const promptCacheSummary = summarizePromptCaching(
+      preparedStableSystem.requestBody,
+      preparedStableSystem.requestHeaders
+    );
+    assert.strictEqual(promptCacheSummary.anthropic_prompt_cache_ttl, '1h');
+    assert.strictEqual(promptCacheSummary.anthropic_extended_cache_ttl_beta_enabled, true);
 
     const buildStableWithDynamic = (dynamicText) => httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
@@ -277,6 +287,14 @@ module.exports = (async () => {
     assert.ok(rootStablePrepared.requestBody.messages.every((message) => (
       contentParts(message).every((block) => !('cache_control' in block))
     )));
+    assert.ok(rootStablePrepared.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
+    assert.ok(rootStablePrepared.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
+    const rootPromptCacheSummary = summarizePromptCaching(
+      rootStablePrepared.requestBody,
+      rootStablePrepared.requestHeaders
+    );
+    assert.strictEqual(rootPromptCacheSummary.anthropic_prompt_cache_ttl, '1h');
+    assert.strictEqual(rootPromptCacheSummary.anthropic_extended_cache_ttl_beta_enabled, true);
 
     const preparedTooManyBreakpoints = await httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',

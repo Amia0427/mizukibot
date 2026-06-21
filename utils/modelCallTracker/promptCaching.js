@@ -31,6 +31,38 @@ function countCacheControlBlocks(value) {
   return total;
 }
 
+function findCacheControlTtl(value) {
+  if (Array.isArray(value)) {
+    const values = value.map((item) => findCacheControlTtl(item)).filter(Boolean);
+    return values.includes('1h') ? '1h' : values[0] || '';
+  }
+  if (!value || typeof value !== 'object') return '';
+  if (String(value.type || '').trim().toLowerCase() === 'ephemeral') {
+    return normalizeText(value.ttl);
+  }
+  if (value.cache_control && typeof value.cache_control === 'object') {
+    return normalizeText(value.cache_control.ttl);
+  }
+  const values = [
+    findCacheControlTtl(value.content),
+    findCacheControlTtl(value.function),
+    findCacheControlTtl(value.system),
+    findCacheControlTtl(value.messages),
+    findCacheControlTtl(value.tools)
+  ].filter(Boolean);
+  return values.includes('1h') ? '1h' : values[0] || '';
+}
+
+function summarizeAnthropicPromptCacheTtl(request = {}) {
+  const values = [
+    findCacheControlTtl(request.cache_control),
+    findCacheControlTtl(request.system),
+    findCacheControlTtl(request.messages),
+    findCacheControlTtl(request.tools)
+  ].filter(Boolean);
+  return values.includes('1h') ? '1h' : values[0] || '';
+}
+
 function summarizePromptCaching(request = {}, requestHeaders = {}) {
   const headers = requestHeaders && typeof requestHeaders === 'object' ? requestHeaders : {};
   const anthropicBeta = String(headers['anthropic-beta'] || headers['Anthropic-Beta'] || '').trim();
@@ -55,6 +87,8 @@ function summarizePromptCaching(request = {}, requestHeaders = {}) {
     ),
     anthropic_beta: anthropicBeta || null,
     prompt_caching_beta_enabled: anthropicBetaFlags.includes('prompt-caching-2024-07-31'),
+    anthropic_extended_cache_ttl_beta_enabled: anthropicBetaFlags.includes('extended-cache-ttl-2025-04-11'),
+    anthropic_prompt_cache_ttl: summarizeAnthropicPromptCacheTtl(request),
     request_cache_breakpoints: requestCacheBreakpoints,
     system_cache_breakpoints: systemCacheBreakpoints,
     message_cache_breakpoints: messageCacheBreakpoints,
