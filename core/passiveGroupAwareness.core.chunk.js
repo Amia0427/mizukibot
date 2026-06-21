@@ -94,6 +94,16 @@ function collectPassiveVisualInputs(inboundContext = {}, fallbackImageUrl = null
   return out;
 }
 
+function hasPassiveVisualInput(visualInputs = []) {
+  return (Array.isArray(visualInputs) ? visualInputs : [])
+    .some((item) => Boolean(normalizeVisualUrl(item?.url)));
+}
+
+function shouldProbePassiveVisualCue({ hasVisualInput, addressee, gate } = {}) {
+  if (!hasVisualInput || gate?.shouldSkip) return false;
+  return ['group_open_question', 'group_bot_topic', 'unclear'].includes(String(addressee || '').trim());
+}
+
 function buildPassiveModelUserContent(prompt = '', visualInputs = []) {
   const text = String(prompt || '').trim();
   const images = Array.isArray(visualInputs) ? visualInputs : [];
@@ -351,10 +361,18 @@ function getQuotePriority(directedContext = null) {
     : null;
 }
 
-function getEffectivePassiveText(inboundContext = null, rawText = '', directedContext = null) {
+function stripPassiveCqControls(value = '') {
+  return normalizeText(String(value || '').replace(/\[CQ:[^\]]+\]/g, ' '));
+}
+
+function getEffectivePassiveText(inboundContext = null, rawText = '', directedContext = null, visualInputs = []) {
   const anchored = String(getQuotePriority(directedContext)?.quoteAnchoredText || '').trim();
   if (anchored) return limitPassivePromptText(anchored);
-  return limitPassivePromptText(inboundContext?.cleanText || rawText.replace(/\[CQ:[^\]]+\]/g, ' '));
+  const cleanText = stripPassiveCqControls(inboundContext?.cleanText || '');
+  if (cleanText) return limitPassivePromptText(cleanText);
+  const fallbackText = stripPassiveCqControls(rawText);
+  if (fallbackText) return limitPassivePromptText(fallbackText);
+  return hasPassiveVisualInput(visualInputs) ? '[图片]' : '';
 }
 
 function mapDirectedSceneToAddressee(scene = '', text = '', analysis = null, directedContext = null) {

@@ -48,6 +48,7 @@ function appendPassiveAwarenessDecision({ inboundContext = {}, passiveResult = {
       decisionReason: String(passiveResult?.decisionReason || '').trim(),
       decisionModelCalled: Boolean(passiveResult?.decisionModelCalled),
       replyModelCalled: Boolean(passiveResult?.replyModelCalled),
+      visualCueProbe: Boolean(passiveResult?.visualCueProbe),
       presenceState: String(passiveResult?.presenceState || '').trim(),
       presenceAction: String(passiveResult?.presenceAction || '').trim(),
       presenceReason: String(passiveResult?.presenceReason || '').trim(),

@@ -17,9 +17,9 @@ async function forcePassiveGroupInterjection({
       || effectiveMsg.__directedContext
       || null
   );
-  const text = getEffectivePassiveText(context, rawText, directedContext);
   const imageUrl = String(context.imageUrl || '').trim() || null;
   const visualInputs = collectPassiveVisualInputs(context, imageUrl);
+  const text = getEffectivePassiveText(context, rawText, directedContext, visualInputs);
   const now = Number(effectiveMsg?.__continuousMessageMeta?.firstTimestamp || Date.now());
   const sessionKey = getSessionKeyForPresence(groupId, senderId);
 

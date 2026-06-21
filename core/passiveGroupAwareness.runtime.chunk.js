@@ -14,9 +14,10 @@ async function handlePassiveGroupAwareness({
       || msg?.__directedContext
       || null
   );
-  const text = getEffectivePassiveText(inboundContext, rawText, directedContext);
   const imageUrl = String(inboundContext?.imageUrl || '').trim() || null;
   const visualInputs = collectPassiveVisualInputs(inboundContext, imageUrl);
+  const hasVisualInput = hasPassiveVisualInput(visualInputs);
+  const text = getEffectivePassiveText(inboundContext, rawText, directedContext, visualInputs);
   const now = Number(msg?.__continuousMessageMeta?.firstTimestamp || Date.now());
   const botSenderId = String(config.BOT_QQ || 'bot').trim() || 'bot';
   const sessionKey = getSessionKeyForPresence(groupId, senderId);
@@ -69,6 +70,11 @@ async function handlePassiveGroupAwareness({
     gate,
     directedContext
   });
+  const visualCueProbe = shouldProbePassiveVisualCue({
+    hasVisualInput,
+    addressee,
+    gate: gateWithSocialContext
+  });
   const score = scoreMessageTrigger(text, recentMessages);
   const initialGroupPresence = getGroupPresence(groupId);
   const initialSessionPresence = getShortTermPresence(sessionKey, shortTermMemory, {});
@@ -96,7 +102,8 @@ async function handlePassiveGroupAwareness({
     recentMessages,
     botSenderId,
     now,
-    cfg
+    cfg,
+    visualCueProbe
   });
   const presenceAction = normalizePresenceAction(presenceDecision.action, 'no_reply');
   const presenceState = normalizePresenceState(presenceDecision.state, groupPresence.state);
@@ -112,6 +119,7 @@ async function handlePassiveGroupAwareness({
     decisionReason: '',
     decisionModelCalled: false,
     replyModelCalled: false,
+    visualCueProbe,
     decision: {
       shouldReply: shouldCheckReplyIntervals(presenceAction),
       confidence: shouldCheckReplyIntervals(presenceAction) ? 1 : 0,
@@ -200,7 +208,8 @@ async function handlePassiveGroupAwareness({
     addressee,
     text,
     recentMessages,
-    directedContext
+    directedContext,
+    visualCueProbe
   });
   const gateResult = {
     ...baseResult,
