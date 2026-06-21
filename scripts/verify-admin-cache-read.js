@@ -143,7 +143,7 @@ function buildStableSystemMessages(options = {}) {
     messages.push({
       role: 'system',
       content: diagnosticStableText,
-      cache_control: { type: 'ephemeral', ttl: '5m' }
+      cache_control: { type: 'ephemeral', ttl: '1h' }
     });
   }
 
@@ -151,7 +151,7 @@ function buildStableSystemMessages(options = {}) {
     messages.push({
       role: 'system',
       content: 'MizukiBot admin cache verification stable system prompt.',
-      cache_control: options.forceStableCacheBlock ? { type: 'ephemeral', ttl: '5m' } : undefined
+      cache_control: options.forceStableCacheBlock ? { type: 'ephemeral', ttl: '1h' } : undefined
     });
   }
 
