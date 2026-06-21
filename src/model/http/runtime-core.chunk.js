@@ -454,16 +454,17 @@ function buildAnthropicRequestHeaders(requestBody = {}) {
   if (!anthropicRequestUsesPromptCaching(requestBody)) return null;
 
   const betaFlags = ['prompt-caching-2024-07-31'];
+  const headers = {};
   if (cacheControlUsesAnthropicOneHourTtl(requestBody)) {
     betaFlags.push('extended-cache-ttl-2025-04-11');
+    headers['X-Enable-1h-cache'] = '1';
   }
 
-  return {
-    'anthropic-beta': mergeAnthropicBetaHeader(
-      config.ANTHROPIC_BETA,
-      betaFlags
-    )
-  };
+  headers['anthropic-beta'] = mergeAnthropicBetaHeader(
+    config.ANTHROPIC_BETA,
+    betaFlags
+  );
+  return headers;
 }
 
 function stripPromptCachingBetaHeaderValue(headerValue = '') {
@@ -491,6 +492,24 @@ function stripPromptCachingBetaHeader(requestHeaders = null) {
     if (strippedHeader) nextHeaders[headerKey] = strippedHeader;
     else delete nextHeaders[headerKey];
   }
+  delete nextHeaders['X-Enable-1h-cache'];
+  delete nextHeaders['x-enable-1h-cache'];
+  return Object.keys(nextHeaders).length > 0 ? nextHeaders : null;
+}
+
+function rebuildAnthropicPromptCachingHeaders(requestBody = {}, requestHeaders = null) {
+  const baseHeaders = stripPromptCachingBetaHeader(requestHeaders) || {};
+  const promptCachingHeaders = buildAnthropicRequestHeaders(requestBody) || {};
+  const nextHeaders = {
+    ...baseHeaders,
+    ...promptCachingHeaders
+  };
+  const beta = mergeAnthropicBetaHeader(
+    baseHeaders['anthropic-beta'] || baseHeaders['Anthropic-Beta'],
+    String(promptCachingHeaders['anthropic-beta'] || promptCachingHeaders['Anthropic-Beta'] || '').split(',')
+  );
+  delete nextHeaders['Anthropic-Beta'];
+  if (beta) nextHeaders['anthropic-beta'] = beta;
   return Object.keys(nextHeaders).length > 0 ? nextHeaders : null;
 }
 
@@ -506,7 +525,7 @@ function stripAnthropicAutomaticPromptCaching(requestBody = {}, requestHeaders =
   return {
     requestBody: nextBody,
     requestHeaders: anthropicRequestUsesPromptCaching(nextBody)
-      ? (requestHeaders && typeof requestHeaders === 'object' ? { ...requestHeaders } : requestHeaders)
+      ? rebuildAnthropicPromptCachingHeaders(nextBody, requestHeaders)
       : stripPromptCachingBetaHeader(requestHeaders)
   };
 }

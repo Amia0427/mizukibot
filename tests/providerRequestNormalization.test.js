@@ -69,6 +69,7 @@ module.exports = (async () => {
     assert.strictEqual(preparedAnthropic.requestBody.messages[0].content[0].cache_control?.ttl, '1h');
     assert.ok(preparedAnthropic.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
     assert.ok(preparedAnthropic.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
+    assert.strictEqual(preparedAnthropic.requestHeaders['X-Enable-1h-cache'], '1');
     assert.strictEqual(preparedAnthropic.requestHeaders['User-Agent'], browserUA);
     assert.strictEqual(preparedAnthropic.requestHeaders['sec-ch-ua-platform'], '"Windows"');
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedAnthropic.requestHeaders || {}, 'Authorization'));
@@ -197,6 +198,7 @@ module.exports = (async () => {
       );
       assert.strictEqual(preparedShortAnthropicCache.requestBody.messages[0].content[0].cache_control?.ttl, '5m');
       assert.strictEqual(preparedShortAnthropicCache.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
+      assert.ok(!Object.prototype.hasOwnProperty.call(preparedShortAnthropicCache.requestHeaders, 'X-Enable-1h-cache'));
       delete process.env.ANTHROPIC_PROMPT_CACHE_TTL;
       clearProjectCache();
     }

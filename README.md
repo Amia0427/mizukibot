@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-21 22:37 +08:00**：彻查 Anthropic 主回复仍无一小时缓存读取。现场根因有两层：当前线上 `node index.js` 进程 `pid=2544` 启动于 16:40，早于 17:24 的上一轮缓存修复提交，未重启时真实 trace 仍会继续显示旧代码的 `anthropicPromptCacheTtl="5m"`；同时第三方 Anthropic 网关需要的 `X-Enable-1h-cache: 1` 之前未在白名单中，最终请求会被归一化层丢弃。现默认 `ttl:"1h"` 的 Anthropic 请求会同时发送 `extended-cache-ttl-2025-04-11` 和 `X-Enable-1h-cache: 1`，诊断日志记录该 header，显式 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时不会误发。验收：本地 `prepareRequest` 探针确认 `1h`/`5m` 分支正确，相关 provider/cache 目标测试通过。
+
 **2026-06-21 17:15 +08:00**：修复 Anthropic 一小时缓存仍按 5 分钟写入的问题。根因是主回复稳定 system 块在 `conversationContext` 中仍硬编码 `ttl: "5m"`，真实 trace 因此显示 `anthropicPromptCacheTtl="5m"`；现统一复用 `ANTHROPIC_PROMPT_CACHE_TTL`，默认 `1h` 时请求头自动带 `extended-cache-ttl-2025-04-11`，缓存诊断日志也会记录实际 TTL。验收：本地构造探针确认主回复稳定块为 `1h` 且 beta 包含 `prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11`；相关缓存/provider 测试和 secrets 检查通过。
 
 **2026-06-21 16:21 +08:00**：修复主回复 Anthropic 缓存 TTL 不符合一小时缓存目标的问题。官方文档确认 1 小时缓存要在 `cache_control` 中写 `ttl: "1h"`；现默认 `ANTHROPIC_PROMPT_CACHE_TTL=1h`，自动块级缓存和管理员缓存读写验收脚本都会发一小时缓存参数，仍可通过 env 显式回退 `5m`。验收：目标 provider/cache 测试通过。小目标完成：主回复 Anthropic Messages 请求已默认适配一小时 prompt caching。

@@ -210,6 +210,7 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody, 'prompt_cache_key'));
     assert.ok(preparedStableSystem.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
     assert.ok(preparedStableSystem.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
+    assert.strictEqual(preparedStableSystem.requestHeaders['X-Enable-1h-cache'], '1');
 
     const { summarizePromptCaching } = require('../utils/modelCallTracker/promptCaching');
     const promptCacheSummary = summarizePromptCaching(
@@ -218,6 +219,7 @@ module.exports = (async () => {
     );
     assert.strictEqual(promptCacheSummary.anthropic_prompt_cache_ttl, '1h');
     assert.strictEqual(promptCacheSummary.anthropic_extended_cache_ttl_beta_enabled, true);
+    assert.strictEqual(promptCacheSummary.anthropic_one_hour_cache_header_enabled, true);
 
     const buildStableWithDynamic = (dynamicText) => httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
@@ -289,12 +291,14 @@ module.exports = (async () => {
     )));
     assert.ok(rootStablePrepared.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
     assert.ok(rootStablePrepared.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
+    assert.strictEqual(rootStablePrepared.requestHeaders['X-Enable-1h-cache'], '1');
     const rootPromptCacheSummary = summarizePromptCaching(
       rootStablePrepared.requestBody,
       rootStablePrepared.requestHeaders
     );
     assert.strictEqual(rootPromptCacheSummary.anthropic_prompt_cache_ttl, '1h');
     assert.strictEqual(rootPromptCacheSummary.anthropic_extended_cache_ttl_beta_enabled, true);
+    assert.strictEqual(rootPromptCacheSummary.anthropic_one_hour_cache_header_enabled, true);
 
     const preparedTooManyBreakpoints = await httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
@@ -472,6 +476,57 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(topLevelStrippedBodies[0].body, 'cache_control'));
     assert.ok(topLevelStrippedBodies[0].body.system.some((block) => block.cache_control?.type === 'ephemeral'));
     assert.ok(topLevelStrippedBodies[0].headers['anthropic-beta'].includes('prompt-caching-2024-07-31'));
+
+    attemptCount = 0;
+    const downgradedAttempts = [];
+    axios.post = async (_url, body, options = {}) => {
+      downgradedAttempts.push({ body, headers: options.headers });
+      attemptCount += 1;
+      if (attemptCount <= 2) {
+        const error = new Error('unknown field cache_control');
+        error.response = {
+          status: 400,
+          data: { error: { message: 'unknown field cache_control' } }
+        };
+        throw error;
+      }
+      return {
+        data: {
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-3-5-sonnet-latest',
+          content: [{ type: 'text', text: 'ok' }],
+          usage: { input_tokens: 20, output_tokens: 4 }
+        }
+      };
+    };
+
+    await httpClient.postWithRetry('http://127.0.0.1/v1/messages', {
+      model: 'claude-3-5-sonnet-latest',
+      messages: [
+        {
+          role: 'system',
+          content: [
+            {
+              type: 'text',
+              text: 'stable persona',
+              cache_control: true
+            }
+          ]
+        },
+        { role: 'user', content: 'hello' }
+      ],
+      cache_control: true,
+      stream: false
+    }, 0, 'test-key');
+    assert.strictEqual(attemptCount, 3);
+    assert.strictEqual(downgradedAttempts[0].headers['X-Enable-1h-cache'], '1');
+    assert.ok(downgradedAttempts[0].headers['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
+    assert.strictEqual(downgradedAttempts[1].headers['X-Enable-1h-cache'], '1');
+    assert.ok(downgradedAttempts[1].headers['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(downgradedAttempts[2].body.system[0], 'cache_control'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(downgradedAttempts[2].headers, 'X-Enable-1h-cache'));
+    assert.strictEqual(downgradedAttempts[2].headers['anthropic-beta'], 'tools-2024-04-04');
 
     attemptCount = 0;
     axios.post = async (_url, body, options = {}) => {
