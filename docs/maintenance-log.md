@@ -6,6 +6,7 @@
 - 验证：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\runtimePromptCache.test.js tests\promptGoldenSnapshots.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\qqActionServiceReasoningForward.test.js tests\messageHandlerReasoningForwardSource.test.js`、`npm run check:prompts` 通过。
 - 范围控制：未改 QQ 发送链路、NapCat action、主回复模型配置、humanizer 或 raw reasoning 存储边界；未推送远端。
 - 小目标已完成：QQ reasoning 可见小记和主回复内部 thinking 约束统一到瑞希中文情绪内心。
+- 提交后记录 2026-06-21 12:21 +08:00：已提交 `fix: align reasoning forward voice`；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-20 11:35
 
