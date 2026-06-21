@@ -40,8 +40,9 @@ function countHumanMessagesSince(messages = [], timestamp = 0, botSenderId = '')
   }, 0);
 }
 
-function shouldAllowClosedReset({ groupPresence, addressee, now, cfg }) {
+function shouldAllowClosedReset({ groupPresence, addressee, now, cfg, visualCueProbe = false }) {
   if (hasStrongBotCue(addressee)) return true;
+  if (visualCueProbe === true) return true;
   if (String(groupPresence?.state || '') !== 'closed') return true;
   const closedAt = Number(groupPresence?.closed_at || 0) || 0;
   if (!closedAt) return true;
@@ -140,7 +141,8 @@ function decidePresenceAction({
   recentMessages,
   botSenderId,
   now,
-  cfg
+  cfg,
+  visualCueProbe = false
 }) {
   const groupState = normalizePresenceState(groupPresence?.state, 'observing');
   const sessionState = normalizePresenceState(sessionPresence?.state, 'observing');
@@ -162,7 +164,7 @@ function decidePresenceAction({
     return { action: 'no_reply', state: groupState, reason: gate.reason || 'local-gate-skip' };
   }
 
-  if (!shouldAllowClosedReset({ groupPresence, addressee, now, cfg })) {
+  if (!shouldAllowClosedReset({ groupPresence, addressee, now, cfg, visualCueProbe })) {
     return { action: 'no_reply', state: groupState, reason: 'closed-without-cue' };
   }
 
@@ -181,7 +183,11 @@ function decidePresenceAction({
     return { action: 'follow_up', state: 'interjecting', reason: `session-follow-up:${addressee}` };
   }
 
-  if (groupState === 'cooling' && !strongCue) {
+  if (visualCueProbe === true) {
+    return { action: 'reply', state: 'interjecting', reason: 'visual-cue-probe' };
+  }
+
+  if (groupState === 'cooling' && !strongCue && visualCueProbe !== true) {
     const turns = Math.max(
       Number(groupPresence?.human_turns_since_bot_reply || 0),
       Number(sessionPresence?.humanTurnsSinceBotReply || 0)
@@ -192,7 +198,7 @@ function decidePresenceAction({
     return { action: 'no_reply', state: 'cooling', reason: 'cooling-no-cue' };
   }
 
-  if (groupState === 'closed' && !strongCue) {
+  if (groupState === 'closed' && !strongCue && visualCueProbe !== true) {
     return { action: 'no_reply', state: 'closed', reason: 'closed-no-cue' };
   }
 

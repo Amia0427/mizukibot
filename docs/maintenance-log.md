@@ -1,3 +1,12 @@
+## 运行维护 2026-06-22 01:13
+
+- 小目标：检查 `data/passive-awareness-decisions.jsonl` 中 `groupId=597801651` 在 2026-06-21 15:27、15:36 附近的图片被动感知样本，定位 `closed-no-cue: group_open_question` / `cooling-no-cue` 没形成有效 cue 的断点。
+- 现场结论：入口已选中图片并写入 `vision_input_selected`，但 `VISION_CAPTION_WORKER_ENABLED=false` 后没有视觉文本摘要；被动感知文本仍带 `[CQ:image,url=...?...]` 时，URL 查询串里的 `?` 把图片-only 误分成 `group_open_question`，随后 closed/cooling 状态机在调用决策模型前返回，日志表现为 `decisionModelCalled=false`。
+- 最小修复：被动感知入口剥离 CQ 控制段，图片-only 保留 `[图片]` 占位；带图片且未被社交锁拦住的 `group_open_question/group_bot_topic/unclear` 在 closed/cooling 下进入一次 `visual-cue-probe`，由带 `image_url` 的决策模型判断是否开口；决策日志新增 `visualCueProbe`。
+- 验证：`node --check core\passiveGroupAwareness.core.chunk.js`、`node --check core\passiveGroupAwareness.presence.chunk.js`、`node --check core\passiveGroupAwareness.model.chunk.js`、`node --check core\passiveGroupAwareness.runtime.chunk.js`、`node --check core\passiveGroupAwareness.force.chunk.js`、`node --check core\messagePassiveFlow.js`、`node --check tests\passiveAwarenessVisualCueProbe.test.js`、`node scripts\run-tests.js passiveAwarenessVisualCueProbe.test.js passiveAwarenessVisionInput.test.js passiveAwarenessAmbientTrigger.test.js` 通过。
+- 范围控制：未调整被动感知阈值、模型配置、视觉 worker 开关、回复生成模型或发送链路；未推送远端。
+- 小目标已完成：群聊图片开场不会再因 closed/cooling 状态在视觉 cue 判定前被直接漏掉。
+
 ## 运行维护 2026-06-21 22:49
 
 - 小目标：检查 `passive_awareness` 决策与回复提示词装配链路，结合 `data/model-calls.ndjson` 最新 `group_passive_should_reply` / `group_passive_reply_generation` 样本，定位 3 万以上输入 token 和 `finish_reason=length`。

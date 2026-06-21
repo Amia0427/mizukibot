@@ -16,7 +16,7 @@ function buildLocalReplyFallback({ addressee, replyType }) {
   return '';
 }
 
-function cheapRuleGate({ gate, gateWithSocialContext, score, addressee, text, recentMessages, directedContext }) {
+function cheapRuleGate({ gate, gateWithSocialContext, score, addressee, text, recentMessages, directedContext, visualCueProbe = false }) {
   const hasDirectedBot = ['reply_to_bot', 'address_bot'].includes(normalizeText(directedContext?.scene));
   const hasReplyAnchor = ['reply_to_bot', 'reply_to_user'].includes(normalizeText(directedContext?.scene))
     && getQuotePriority(directedContext)?.enabled === true;
@@ -56,6 +56,13 @@ function cheapRuleGate({ gate, gateWithSocialContext, score, addressee, text, re
       level: 'strong_candidate',
       reason: 'strong-bot-cue',
       strongCue: true
+    };
+  }
+  if (visualCueProbe === true) {
+    return {
+      level: 'candidate',
+      reason: 'visual-cue-probe',
+      strongCue: false
     };
   }
   if (!continuity && score < cheapGateMinScore) {
