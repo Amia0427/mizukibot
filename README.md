@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-21 12:21 +08:00**：收口 QQ reasoning 可见小记和主回复内部 thinking 的口吻不一致。根因是 `reasoningForwardText` 仍允许英文自然短想法直接外发，和 `roleplay-inner-protocol` 要求的“瑞希第一人称中文主观感受”不统一；现外发小记必须以简体中文为主体，英文分析/导演提示/模型工作语直接跳过，同时把内部协议里偏导演台的“剧情走向分析/回复内容规划”改成心软、别扭、惊讶、距离感和下一句如何轻轻接住。验收：目标 reasoning/prompt/runtime 链路测试和 `npm run check:prompts` 通过。小目标完成：QQ 可见思考更稳定地贴近瑞希中文情绪内心，不再混入分析腔或英文频道。
+
 **2026-06-20 11:35 +08:00**：强化普通用户 NSFW 与性骚扰边界，但拒绝话术改为瑞希人格化诱导转向。`prompts/defaut.txt` 现在明确覆盖软色情、露骨身体/性行为描写、性化评价、性骚扰、擦边绕法和持续纠缠；触发后仍追加 `/%`，但要求用瑞希式尴尬、嫌弃或岔开感挡住话题，不输出系统公告式硬拒绝。验收：`npm run check:prompts` 通过。小目标完成：普通用户安全边界更强，同时保留角色自然表达。
 
 **2026-06-20 07:16 +08:00**：收口私聊 `input_status` / 戳一戳链路验收。消息进入后会由 `shouldHandleNotice(input_status)` 进入 `maybeHandlePrivateTypingNotice`，最终通过注入的 NapCat action client 发送 `friend_poke`；本轮补掉测试失败分支被冷却吞掉的缺口，确保发送失败场景真实触发 action 且不崩溃。验收：目标语法检查、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"`、`node scripts\run-tests.js tests\messageHandlerPrivateTypingPoke.test.js tests\qqActionServicePrivatePoke.test.js tests\napcatActionClientConnectionState.test.js` 通过。小目标完成：私聊输入状态触发、`friend_poke` action 发送和失败容错均有回归覆盖。
