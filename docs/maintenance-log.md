@@ -6,6 +6,7 @@
 - 验证：`node --check core\passiveGroupAwareness.core.chunk.js`、`node --check core\passiveGroupAwareness.presence.chunk.js`、`node --check core\passiveGroupAwareness.model.chunk.js`、`node --check core\passiveGroupAwareness.runtime.chunk.js`、`node --check core\passiveGroupAwareness.force.chunk.js`、`node --check core\messagePassiveFlow.js`、`node --check tests\passiveAwarenessVisualCueProbe.test.js`、`node scripts\run-tests.js passiveAwarenessVisualCueProbe.test.js passiveAwarenessVisionInput.test.js passiveAwarenessAmbientTrigger.test.js` 通过。
 - 范围控制：未调整被动感知阈值、模型配置、视觉 worker 开关、回复生成模型或发送链路；未推送远端。
 - 小目标已完成：群聊图片开场不会再因 closed/cooling 状态在视觉 cue 判定前被直接漏掉。
+- 提交后记录 2026-06-22 01:13 +08:00：已提交 `fix: probe passive visual cues`；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-21 22:49
 
