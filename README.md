@@ -805,6 +805,7 @@ Prompt 改了但没生效：
 - 先查 `prompts/prompt-manifest.json`、`utils/promptCompiler.js`、`utils/stagePromptContracts.js`、`scripts/check-prompts.js`。
 - `prompts/SYSTEM.txt` 是主回复最高优先级稳定系统提示词入口；空文件会被跳过，写入内容后应在 `promptSnapshot.stableBlockIds[0]` 看到 `root_system_prompt`。
 - `prompts/admin.txt` 是管理员主回复专用入口；`ADMIN_USER_IDS` 用户的私聊和群聊主回复都会看到 `admin_system_prompt`，普通用户不会注入，空文件同样跳过。当前格式约束要求只输出角色当下会打出的 QQ 消息，避免第三人称叙述和小说式场景旁白。
+- 2026-06-21 12:29 +08:00：`prompts/persona_worldbook` 命中但主回复没注入时，先看 `api/runtimeV2/nodes/prepare.js` 是否走了 `plain_private_chat`/`notebook_chat_only` 快路径；worldbook 查询应回到完整 `buildDynamicPrompt` 装配链路。
 - 改后运行 `npm run check:prompts`。
 
 记忆或 notebook 检索不对：
