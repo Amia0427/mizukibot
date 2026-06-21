@@ -179,6 +179,22 @@ function toolHasAnthropicCacheControl(tool) {
   );
 }
 
+function cacheControlUsesAnthropicOneHourTtl(value) {
+  if (Array.isArray(value)) {
+    return value.some((item) => cacheControlUsesAnthropicOneHourTtl(item));
+  }
+  if (!value || typeof value !== 'object') return false;
+
+  const cacheControl = extractAnthropicCacheControl(value);
+  if (cacheControl?.ttl === '1h') return true;
+
+  return cacheControlUsesAnthropicOneHourTtl(value.content)
+    || cacheControlUsesAnthropicOneHourTtl(value.function)
+    || cacheControlUsesAnthropicOneHourTtl(value.system)
+    || cacheControlUsesAnthropicOneHourTtl(value.messages)
+    || cacheControlUsesAnthropicOneHourTtl(value.tools);
+}
+
 function mergeAnthropicBetaHeader(baseValue = '', requiredValues = []) {
   const merged = [];
   const seen = new Set();
@@ -221,6 +237,7 @@ module.exports = {
   applyAnthropicCacheControl,
   applyAnthropicCacheControlToLastBlock,
   blockHasAnthropicCacheControl,
+  cacheControlUsesAnthropicOneHourTtl,
   extractAnthropicCacheControl,
   isAnthropicPromptCacheEnabled,
   mergeAnthropicBetaHeader,

@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-21 17:15 +08:00**：修复 Anthropic 一小时缓存仍按 5 分钟写入的问题。根因是主回复稳定 system 块在 `conversationContext` 中仍硬编码 `ttl: "5m"`，真实 trace 因此显示 `anthropicPromptCacheTtl="5m"`；现统一复用 `ANTHROPIC_PROMPT_CACHE_TTL`，默认 `1h` 时请求头自动带 `extended-cache-ttl-2025-04-11`，缓存诊断日志也会记录实际 TTL。验收：本地构造探针确认主回复稳定块为 `1h` 且 beta 包含 `prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11`；相关缓存/provider 测试和 secrets 检查通过。
+
 **2026-06-21 16:21 +08:00**：修复主回复 Anthropic 缓存 TTL 不符合一小时缓存目标的问题。官方文档确认 1 小时缓存要在 `cache_control` 中写 `ttl: "1h"`；现默认 `ANTHROPIC_PROMPT_CACHE_TTL=1h`，自动块级缓存和管理员缓存读写验收脚本都会发一小时缓存参数，仍可通过 env 显式回退 `5m`。验收：目标 provider/cache 测试通过。小目标完成：主回复 Anthropic Messages 请求已默认适配一小时 prompt caching。
 
 **2026-06-21 12:21 +08:00**：收口 QQ reasoning 可见小记和主回复内部 thinking 的口吻不一致。根因是 `reasoningForwardText` 仍允许英文自然短想法直接外发，和 `roleplay-inner-protocol` 要求的“瑞希第一人称中文主观感受”不统一；现外发小记必须以简体中文为主体，英文分析/导演提示/模型工作语直接跳过，同时把内部协议里偏导演台的“剧情走向分析/回复内容规划”改成心软、别扭、惊讶、距离感和下一句如何轻轻接住。验收：目标 reasoning/prompt/runtime 链路测试和 `npm run check:prompts` 通过。小目标完成：QQ 可见思考更稳定地贴近瑞希中文情绪内心，不再混入分析腔或英文频道。

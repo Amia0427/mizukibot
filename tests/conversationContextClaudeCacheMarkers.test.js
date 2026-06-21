@@ -51,7 +51,7 @@ module.exports = (() => {
   const continuityMessage = systemMessages.find((item) => String(item.content || '').includes('[ContinuityState]'));
   const currentConversationMessage = systemMessages.find((item) => String(item.content || '').includes('[CurrentConversation]'));
 
-  assert.deepStrictEqual(stableSystem.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
+  assert.deepStrictEqual(stableSystem.content[0].cache_control, { type: 'ephemeral', ttl: '1h' });
   assert.strictEqual(typeof affinityMessage.content, 'string');
   assert.strictEqual(typeof relationshipMessage.content, 'string');
   assert.strictEqual(typeof continuityMessage.content, 'string');

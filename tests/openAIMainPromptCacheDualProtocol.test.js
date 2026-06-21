@@ -83,7 +83,8 @@ module.exports = (async () => {
     assert.ok(preparedMain.requestBody.tools.some((tool) => tool.name === 'lookup_memory' && tool.cache_control?.ttl === '1h'));
     assert.ok(!preparedMain.requestBody.tools.some((tool) => tool.type === 'web_search_20250305'));
     assert.deepStrictEqual(preparedMain.requestBody.tool_choice, { type: 'auto' });
-    assert.strictEqual(preparedMain.requestHeaders['anthropic-beta'], 'prompt-caching-2024-07-31');
+    assert.ok(preparedMain.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
+    assert.ok(preparedMain.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestBody, 'prompt_cache_key'));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestBody, 'input'));
 

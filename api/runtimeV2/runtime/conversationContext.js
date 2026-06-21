@@ -25,11 +25,13 @@ function dynamicPromptHasContextMarker(text = '') {
   return /\[(?:RetrievedMemoryLite|RetrievedMemory|DailyJournal|TaskMemory|GroupMemory|StyleSignals|ShortTermContinuity|MemOSRecall|LongTermProfile|Impression|Summary|ContinuityState)\]/i.test(String(text || ''));
 }
 
+function buildAnthropicCompatibleCacheControl() {
+  const { normalizeAnthropicCacheControl } = require('../../../src/model/http/cache-control');
+  return Object.freeze(normalizeAnthropicCacheControl(true));
+}
+
 function createConversationContextHelpers(deps = {}) {
-  const OPENAI_COMPATIBLE_CACHE_CONTROL = Object.freeze({
-    type: 'ephemeral',
-    ttl: '5m'
-  });
+  const ANTHROPIC_COMPATIBLE_CACHE_CONTROL = buildAnthropicCompatibleCacheControl();
   const {
     config,
     normalizeToolNames,
@@ -159,7 +161,7 @@ function createConversationContextHelpers(deps = {}) {
           content: String(item.content || '').trim()
         };
         return shouldCacheStableSystemBlock(item)
-          ? attachCacheControlToMessage(base, OPENAI_COMPATIBLE_CACHE_CONTROL)
+          ? attachCacheControlToMessage(base, ANTHROPIC_COMPATIBLE_CACHE_CONTROL)
           : base;
       })
       .filter((item) => hasMessageContent(item));
