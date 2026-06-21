@@ -123,6 +123,7 @@ module.exports = (async () => {
     assert.strictEqual(anthropicDirect.cache.openaiPromptCacheKey, '');
     assert.strictEqual(anthropicDirect.cache.openaiPromptCacheRetention, '');
     assert.ok(anthropicDirect.cache.anthropicCacheBreakpoints > 0);
+    assert.strictEqual(anthropicDirect.cache.anthropicOneHourCacheHeader, '1');
     assert.ok(findRemoved(anthropicDirect.strippedFields, 'prompt_cache_key') > 0);
     assert.ok(findRemoved(anthropicDirect.strippedFields, 'prompt_cache_retention') > 0);
     assert.deepStrictEqual(anthropicDirect.anomalies, []);

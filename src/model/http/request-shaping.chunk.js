@@ -229,7 +229,8 @@ function buildRequestCacheTrace(requestBody = {}, requestHeaders = {}) {
     openaiPromptCacheRetention: normalizeText(body.prompt_cache_retention),
     anthropicCacheBreakpoints: 0,
     anthropicPromptCacheTtl: '',
-    anthropicBeta: normalizeText((requestHeaders || {})['anthropic-beta'] || (requestHeaders || {})['Anthropic-Beta'])
+    anthropicBeta: normalizeText((requestHeaders || {})['anthropic-beta'] || (requestHeaders || {})['Anthropic-Beta']),
+    anthropicOneHourCacheHeader: normalizeText((requestHeaders || {})['X-Enable-1h-cache'] || (requestHeaders || {})['x-enable-1h-cache'])
   };
 
   promptCaching.anthropicCacheBreakpoints += countCacheControlBlocks(body.cache_control);

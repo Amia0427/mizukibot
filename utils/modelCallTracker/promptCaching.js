@@ -66,6 +66,7 @@ function summarizeAnthropicPromptCacheTtl(request = {}) {
 function summarizePromptCaching(request = {}, requestHeaders = {}) {
   const headers = requestHeaders && typeof requestHeaders === 'object' ? requestHeaders : {};
   const anthropicBeta = String(headers['anthropic-beta'] || headers['Anthropic-Beta'] || '').trim();
+  const anthropicOneHourCacheHeader = normalizeText(headers['X-Enable-1h-cache'] || headers['x-enable-1h-cache']);
   const systemBlocks = Array.isArray(request.system) ? request.system : [];
   const messages = Array.isArray(request.messages) ? request.messages : [];
   const tools = Array.isArray(request.tools) ? request.tools : [];
@@ -88,6 +89,7 @@ function summarizePromptCaching(request = {}, requestHeaders = {}) {
     anthropic_beta: anthropicBeta || null,
     prompt_caching_beta_enabled: anthropicBetaFlags.includes('prompt-caching-2024-07-31'),
     anthropic_extended_cache_ttl_beta_enabled: anthropicBetaFlags.includes('extended-cache-ttl-2025-04-11'),
+    anthropic_one_hour_cache_header_enabled: anthropicOneHourCacheHeader === '1',
     anthropic_prompt_cache_ttl: summarizeAnthropicPromptCacheTtl(request),
     request_cache_breakpoints: requestCacheBreakpoints,
     system_cache_breakpoints: systemCacheBreakpoints,

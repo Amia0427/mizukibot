@@ -105,6 +105,7 @@ const PROVIDER_HEADER_ALLOWLISTS = {
   ]),
   anthropic: new Map([
     ['x-api-key', 'x-api-key'],
+    ['x-enable-1h-cache', 'X-Enable-1h-cache'],
     ['anthropic-version', 'anthropic-version'],
     ['anthropic-beta', 'anthropic-beta'],
     ['content-type', 'Content-Type'],

@@ -219,6 +219,14 @@
 - 验证：本地构造探针确认主回复稳定块为 `ttl:"1h"` 且 header 包含 `prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11`；显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时 header 仅为 `prompt-caching-2024-07-31`。
 - 小目标已完成：主回复稳定前缀不再被硬编码 5 分钟 TTL 降级，一小时缓存参数和诊断观测已贯穿实际请求链路。
 
+## 运行维护 2026-06-21 22:37
+
+- 小目标：彻查 Anthropic 主回复仍完全没有缓存读取和一小时缓存，并按网关要求补 `X-Enable-1h-cache: 1`。
+- 现场结论：官方 Anthropic 1 小时缓存的必要请求体参数是 `cache_control: { type: "ephemeral", ttl: "1h" }`；第三方网关还要求 `X-Enable-1h-cache: 1`。本地真实运行进程 `node index.js pid=2544` 启动于 2026-06-21 16:40:46 +08:00，早于 17:24 的上一轮修复提交，因此 `data/request-trace.ndjson` 最近仍由旧进程记录 `anthropicPromptCacheTtl="5m"`。同时新增 header 原先不在 Anthropic provider header 白名单内，即使构造出来也会被 `normalizeProviderRequestHeaders` 丢弃。
+- 最小修复：`buildAnthropicRequestHeaders` 在请求体实际存在 `ttl:"1h"` 缓存断点时发送 `X-Enable-1h-cache: 1`；Anthropic provider 白名单允许该 header；缓存降级/完整剥离时同步重建或移除 prompt-cache 相关 header；request trace 和 model-calls 诊断记录一小时缓存 header 是否存在。
+- 验证：`node --check` 覆盖 `runtime-core.chunk.js`、`request-shaping.chunk.js`、`promptCaching.js`、`modelProvider.js`；`node scripts\run-tests.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\httpClientAnthropicPromptCache.test.js tests\mainReplyCacheStatsDiagnostics.test.js tests\providerRequestDiagnostics.test.js` 通过；本地 `prepareRequest` 探针确认默认分支输出 `ttl=1h`、`anthropic-beta=prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11`、`X-Enable-1h-cache=1`，显式 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时不发该 header。
+- 小目标已完成：一小时缓存请求体、beta、第三方网关 header 和诊断观测已对齐；旧进程需重启后才能在真实 trace 中看到新字段。
+
 ## 运行维护 2026-06-17 11:52
 
 - 小目标：去除 `/cot` 特殊指令，并让 QQ 群聊/私聊在正常正文发送成功后，额外用合并转发完整发送 provider 显式返回的 reasoning。
