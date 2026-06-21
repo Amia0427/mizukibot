@@ -145,6 +145,7 @@ function createConversationContextHelpers(deps = {}) {
     const blockId = String(block?.id || '').trim();
     if (!blockId) return false;
     return [
+      'admin_system_prompt',
       'root_system_prompt',
       'main_persona_system',
       'security_contract',

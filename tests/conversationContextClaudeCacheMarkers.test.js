@@ -91,6 +91,23 @@ module.exports = (() => {
     'planner-selected continuity_state should still be included'
   );
 
+  const adminState = {
+    request: {},
+    memory: {
+      stableSystemBlocks: [
+        { id: 'admin_system_prompt', content: 'admin stable top' },
+        { id: 'root_system_prompt', content: 'root stable' },
+        { id: 'main_persona_system', content: 'persona stable' }
+      ],
+      dynamicContextBlocks: [],
+      assistantOnlyContextBlocks: []
+    }
+  };
+  const adminMessages = helpers.getMainConversationSystemMessages(adminState);
+  assert.strictEqual(adminMessages[0].content[0].text, 'admin stable top');
+  assert.deepStrictEqual(adminMessages[0].content[0].cache_control, { type: 'ephemeral', ttl: '1h' });
+  assert.strictEqual(adminMessages[1].content[0].text, 'root stable');
+
   const assistantOnly = helpers.buildAssistantOnlyContextMessages(state);
   const fewShot = assistantOnly.find((item) => item.content === 'few-shot example');
   const hint = assistantOnly.find((item) => item.content === 'plain hint');
