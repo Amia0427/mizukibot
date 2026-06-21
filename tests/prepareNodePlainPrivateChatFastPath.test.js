@@ -118,6 +118,9 @@ function createDeps(overrides = {}) {
     saveAndEmit(state) {
       return state;
     },
+    buildLiveStateForState() {
+      return { skipped: true, reason: 'test', context: '' };
+    },
     config: {
       SYSTEM_PROMPT: 'Test persona stays present.',
       SHORT_TERM_PENDING_SNAPSHOT_ENABLED: true
@@ -199,6 +202,45 @@ module.exports = (async () => {
   assert.strictEqual(notebookChatOnlyResult.execution.latencyBreakdown.prepare.fast_path, 'notebook_chat_only');
   assert.ok(notebookChatOnlyResult.events.some((event) => event.type === 'latency_profile' && event.fastPath === 'notebook_chat_only'));
   assert.ok(notebookChatOnlyResult.events.some((event) => event.type === 'continuity_probe_skipped' && event.reason === 'notebook_chat_only'));
+
+  let worldbookDynamicPromptCalled = false;
+  const worldbookPrepareNode = createPrepareNode(createDeps({
+    restoreShortTermBridgeAfterRestartIfNeeded() {
+      return { restored: false };
+    },
+    rehydrateShortTermMemoryAfterRestartIfNeeded() {},
+    compressShortTermHistoryIfNeeded: async () => ({ compressed: false }),
+    persistShortTermBridgeSnapshot() {},
+    maybeRunAutoContinuityProbe: async () => ({
+      skipped: true,
+      reason: 'disabled',
+      events: [],
+      probeResult: null,
+      probeMeta: null
+    }),
+    buildDynamicPromptImpl: async () => {
+      worldbookDynamicPromptCalled = true;
+      return {
+        dynamicPrompt: '',
+        stableSystemBlocks: [],
+        dynamicContextBlocks: [],
+        assistantOnlyContextBlocks: [],
+        affinity: null,
+        memoryContext: null,
+        personaMemoryState: null,
+        promptSnapshot: null,
+        promptSegments: null,
+        latencyMeta: {}
+      };
+    }
+  }));
+  const worldbookResult = await worldbookPrepareNode(createState({
+    question: '瑞希未来两个都不放弃是什么意思',
+    runtimeQuestionText: '瑞希未来两个都不放弃是什么意思',
+    persistUserText: '瑞希未来两个都不放弃是什么意思'
+  }));
+  assert.strictEqual(worldbookDynamicPromptCalled, true, 'worldbook private chat must keep the full prompt path');
+  assert.strictEqual(worldbookResult.execution.latencyBreakdown.prepare.fast_path, '');
 
   let dynamicPromptCalled = false;
   const memoryRecallPrepareNode = createPrepareNode(createDeps({

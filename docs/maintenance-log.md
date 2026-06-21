@@ -730,3 +730,11 @@
 - 范围控制：未删除旧 JSON/兼容快照文件；`loadLibrary/loadIndex/getMemoryItems()` 无 userId 的全量模式仍保留给迁移、审计和诊断显式调用；未重启当前正在运行的主 bot，因此未把线上进程 RSS 当作最终验收。
 - 验收：`node --check` 覆盖改动文件；`node tests\diskFirstMemoryStores.test.js`、`node tests\memoryChatHistoryLimit.test.js`、`node tests\shortTermContinuityKernel.test.js`、`node tests\memoryProjection.test.js`、`node tests\lancedbMemoryStore.test.js`、`node tests\memoryWritePipeline.test.js`、`node tests\profileJournalDb.test.js`、`node tests\memoryContinuityStressRegression.test.js` 通过；`shortTermMemoryWindowConfig` 和 `memoryV3Query` 使用 `process.exit` 包装通过；模块加载 RSS 探针输出 `delta=37838848`。
 - 小目标已完成：主回复和在线记忆召回路径不再把长期记忆、短期上下文、Memory V3 nodes/projection、向量全量 library/index 聚合成进程级常驻对象。
+
+## 运行维护 2026-06-21 12:29
+
+- 检查 `prompts/persona_worldbook` 文件发现、SQLite 候选、persona module 选择、动态提示词装配到主回复 system prompt 的注入链路。
+- 根因：planner 关闭后由 `buildPersonaModuleCandidatesAsync -> selectPersonaModules -> heuristic dynamicPromptPlan` 接管 worldbook 注入，但 Runtime V2 `prepare` 的 `plain_private_chat` 轻量快路径会在无工具普通私聊中绕过完整 `buildDynamicPrompt` 链路。
+- 最小修复：worldbook 查询命中时退出 `prepare` 轻量快路径，回到完整主回复 prompt 装配；普通私聊快路径和 normal fast reply 入口保持原有轻量策略。
+- 验收：`node scripts/run-tests.js prepareNodePlainPrivateChatFastPath.test.js promptGoldenSnapshots.test.js normalFastReplyRuntime.test.js worldbookDiagnostic.test.js` 通过；`node scripts/diagnose-worldbook.js --question "瑞希未来两个都不放弃是什么意思" --session codex-worldbook-check --json` 显示最终注入 `persona_module:wb_mizuki_future_two_tracks`。
+- 小目标已完成：planner 关闭时世界书问题不会再被 prepare 轻量快路径吞掉。

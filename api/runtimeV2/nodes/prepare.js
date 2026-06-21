@@ -4,6 +4,7 @@ const {
   recordMainPromptBlockObservation
 } = require('../../../utils/memoryRecallObservability');
 const { classifyMemoryNeed } = require('../../../utils/recallHeuristics');
+const { shouldUseWorldbookSearch } = require('../../../utils/mainReplyPromptMode');
 
 function createPrepareNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
@@ -152,6 +153,9 @@ function createPrepareNode(deps = {}) {
   const withSoftTimeout = typeof deps.withSoftTimeout === 'function'
     ? deps.withSoftTimeout
     : (async (task) => task());
+  const shouldUseWorldbookSearchImpl = typeof deps.shouldUseWorldbookSearch === 'function'
+    ? deps.shouldUseWorldbookSearch
+    : shouldUseWorldbookSearch;
   const saveAndEmit = typeof deps.saveAndEmit === 'function'
     ? deps.saveAndEmit
     : ((state) => state);
@@ -760,7 +764,33 @@ function createPrepareNode(deps = {}) {
     );
   }
 
+  function shouldUseWorldbookFullPromptPath(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const routePolicyKey = String(request.routePolicyKey || routeMeta.routePolicyKey || '').trim().toLowerCase();
+    const routeDebugKey = String(request.routeDebugKey || routeMeta.routeDebugKey || '').trim().toLowerCase();
+    return shouldUseWorldbookSearchImpl({
+      question: String(
+        request.runtimeQuestionText
+        || request.persistUserText
+        || request.question
+        || routeMeta.cleanText
+        || routeMeta.userText
+        || ''
+      ).trim(),
+      routePrompt: [
+        request.routePrompt,
+        routePolicyKey,
+        routeDebugKey
+      ].filter(Boolean).join('\n'),
+      routeMeta,
+      mainReplyPromptMode: request.mainReplyPromptMode || routeMeta.mainReplyPromptMode,
+      promptMode: request.promptMode || routeMeta.promptMode,
+      forceWorldbook: request.forceWorldbook === true || routeMeta.forceWorldbook === true
+    });
+  }
+
   function resolvePrepareFastPath(request = {}) {
+    if (shouldUseWorldbookFullPromptPath(request)) return '';
     if (isPlainChatPrepareFastPath(request)) return 'plain_private_chat';
     if (isNotebookChatOnlyPrepareFastPath(request)) return 'notebook_chat_only';
     return '';
