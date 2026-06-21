@@ -12,8 +12,8 @@ function flattenContentText(content) {
   if (typeof content.text === 'string') return content.text;
   if (typeof content.content === 'string') return content.content;
   if (Array.isArray(content.content)) return flattenContentText(content.content);
-  if (content.type === 'image_url') {
-    return String(content?.image_url?.url || content?.url || '');
+  if (['image_url', 'input_image', 'image'].includes(String(content.type || ''))) {
+    return '[image]';
   }
   return '';
 }

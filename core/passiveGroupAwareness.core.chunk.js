@@ -40,6 +40,18 @@ function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+const PASSIVE_PROMPT_TEXT_MAX_CHARS = 800;
+const PASSIVE_CONTEXT_MESSAGE_MAX_CHARS = 240;
+
+function limitPassivePromptText(value, maxChars = PASSIVE_PROMPT_TEXT_MAX_CHARS) {
+  const normalized = normalizeText(value);
+  if (!normalized) return '';
+  const limit = Math.max(1, Number(maxChars) || PASSIVE_PROMPT_TEXT_MAX_CHARS);
+  const chars = Array.from(normalized);
+  if (chars.length <= limit) return normalized;
+  return chars.slice(0, limit).join('');
+}
+
 function normalizeVisualUrl(value = '') {
   return String(value || '').trim();
 }
@@ -310,7 +322,27 @@ function containsBotPresenceCue(text = '') {
 
 function normalizeDirectedContext(input = null) {
   if (!input || typeof input !== 'object') return null;
-  return input;
+  const context = { ...input };
+  if (context.quote && typeof context.quote === 'object') {
+    context.quote = {
+      ...context.quote,
+      text: limitPassivePromptText(context.quote.text, PASSIVE_CONTEXT_MESSAGE_MAX_CHARS)
+    };
+  }
+  if (context.forwardContext && typeof context.forwardContext === 'object') {
+    context.forwardContext = {
+      ...context.forwardContext,
+      summaryText: limitPassivePromptText(context.forwardContext.summaryText, PASSIVE_PROMPT_TEXT_MAX_CHARS)
+    };
+  }
+  if (context.quotePriority && typeof context.quotePriority === 'object') {
+    context.quotePriority = {
+      ...context.quotePriority,
+      reason: limitPassivePromptText(context.quotePriority.reason, 160),
+      quoteAnchoredText: limitPassivePromptText(context.quotePriority.quoteAnchoredText)
+    };
+  }
+  return context;
 }
 
 function getQuotePriority(directedContext = null) {
@@ -321,8 +353,8 @@ function getQuotePriority(directedContext = null) {
 
 function getEffectivePassiveText(inboundContext = null, rawText = '', directedContext = null) {
   const anchored = String(getQuotePriority(directedContext)?.quoteAnchoredText || '').trim();
-  if (anchored) return normalizeText(anchored);
-  return normalizeText(inboundContext?.cleanText || rawText.replace(/\[CQ:[^\]]+\]/g, ' '));
+  if (anchored) return limitPassivePromptText(anchored);
+  return limitPassivePromptText(inboundContext?.cleanText || rawText.replace(/\[CQ:[^\]]+\]/g, ' '));
 }
 
 function mapDirectedSceneToAddressee(scene = '', text = '', analysis = null, directedContext = null) {
@@ -383,7 +415,7 @@ function buildConversationWindow({ recentMessages, now = Date.now() }) {
     .map((item) => ({
       sender_id: String(item?.sender_id || ''),
       sender_name: String(item?.sender_name || ''),
-      text: normalizeText(item?.text),
+      text: limitPassivePromptText(item?.text, PASSIVE_CONTEXT_MESSAGE_MAX_CHARS),
       timestamp: Number(item?.timestamp || now)
     }));
 

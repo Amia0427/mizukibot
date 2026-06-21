@@ -1,3 +1,12 @@
+## 运行维护 2026-06-21 22:49
+
+- 小目标：检查 `passive_awareness` 决策与回复提示词装配链路，结合 `data/model-calls.ndjson` 最新 `group_passive_should_reply` / `group_passive_reply_generation` 样本，定位 3 万以上输入 token 和 `finish_reason=length`。
+- 现场结论：最新异常样本的 `largest_messages` 几乎都集中在 `role=user`；36k 输入样本中最大 user 约 35k token 且 `finish_reason=length`，后续 121k、101 万、119 万样本最大 user 基本等于总输入。代码链路里当前文本、引用锚点、转发摘要和 recent context 会多次进入 `[CurrentMessage]`、`[RecentContext]`、perception、persona/liveness；同时 model-call 诊断把多模态 `image_url.url`，包括 `data:image` base64，按普通文本估 token，放大了百万级诊断读数。
+- 最小修复：`core/passiveGroupAwareness.core.chunk.js` 对被动入口文本、引用/转发上下文和分析窗口单条消息做硬裁剪；`utils/groupAwarenessState.js` 对 recent message 落盘文本做单条上限，避免长文本常驻；`utils/modelCallTracker/requestSummary.js` 对图片 content part 只计 `[image]` 占位，避免 base64 诊断污染。
+- 验证：`node --check core\passiveGroupAwareness.core.chunk.js`、`node --check utils\groupAwarenessState.js`、`node --check utils\modelCallTracker\requestSummary.js`、`node --check tests\passiveAwarenessPromptBudgetGuard.test.js`、`node --check tests\modelCallPromptIntegrity.test.js`、`node scripts\run-tests.js tests\passiveAwarenessPromptBudgetGuard.test.js tests\modelCallPromptIntegrity.test.js tests\groupAwarenessPollutionGuard.test.js tests\passiveAwarenessVisionInput.test.js` 通过。
+- 范围控制：未改被动感知提示词大结构、模型选择、回复上限或发送链路；未推送远端。
+- 小目标已完成：被动群感知的文本入口、上下文状态和图片诊断都有可复跑预算保护，避免 token 再次无上限膨胀。
+
 ## 运行维护 2026-06-21 12:21
 
 - 小目标：检查 `reasoningForwardText`、`prompts/runtime/roleplay-inner-protocol.txt`、主回复内部 thinking 约束和 QQ reasoning 外发链路，收口“情感丰富”效果仍不统一的问题。

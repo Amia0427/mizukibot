@@ -41,6 +41,23 @@ module.exports = (() => {
   assert.strictEqual(largeSummary.prompt_integrity.token_budget.over_hard_limit, true);
   assert.strictEqual(largeSummary.prompt_integrity.token_budget.largest_messages[0].role, 'user');
 
+  const imageSummary = summarizeRequest({
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: '看这张图' },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${'x'.repeat(404000)}` } }
+        ]
+      }
+    ],
+    __promptTokenWarningThreshold: 50000,
+    __promptTokenHardLimit: 100000
+  });
+  assert.strictEqual(imageSummary.prompt_integrity.token_budget.over_warning_threshold, false);
+  assert.strictEqual(imageSummary.prompt_integrity.token_budget.over_hard_limit, false);
+  assert.ok(imageSummary.prompt_integrity.token_budget.estimated_input_tokens < 1000);
+
   const markers = summarizePromptMarkerCounts(request.messages.map((item) => item.content).join('\n'));
   assert.strictEqual(markers.retrieved_memory, 1);
   assert.strictEqual(markers.daily_journal, 1);
