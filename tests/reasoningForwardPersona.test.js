@@ -41,8 +41,19 @@ module.exports = (() => {
       userText: '喜欢你 睡觉吗',
       finalReply: '嗯……我也喜欢你。该睡了。'
     }),
-    englishNote,
-    'clean visible English notes should also be forwarded without a fixed prefix'
+    '',
+    'English notes should be skipped so QQ visible reasoning stays in Mizuki Chinese voice'
+  );
+
+  const mixedTokenNote = 'token 这个词看着好硬……但她是在认真问，我先别把话讲得像教程。';
+  assert.strictEqual(
+    buildPersonaReasoningForwardText({
+      reasoningText: mixedTokenNote,
+      userText: 'token 是什么',
+      finalReply: 'token 就像模型读字时用的小块啦。'
+    }),
+    mixedTokenNote,
+    'technical words may remain when the visible note is still Chinese subjective Mizuki voice'
   );
 
   const leakedDirectorNote = 'The says "喜欢你" (I like you) and "睡觉吗" (going to sleep? ). It\'s late at night (23:02), and we have a very close relationship. respond naturally as a sleepy Riki who\'s touched but also drowsy.';

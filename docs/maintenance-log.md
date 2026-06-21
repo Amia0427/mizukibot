@@ -1,3 +1,12 @@
+## 运行维护 2026-06-21 12:21
+
+- 小目标：检查 `reasoningForwardText`、`prompts/runtime/roleplay-inner-protocol.txt`、主回复内部 thinking 约束和 QQ reasoning 外发链路，收口“情感丰富”效果仍不统一的问题。
+- 现场结论：QQ 外发链路本身只读取 `reasoningForwardText`，没有回退 raw `reasoningText`；真正不一致点是 reasoning forward prompt / 测试仍允许英文自然短想法外发，而主回复内部协议已经要求瑞希第一人称中文主观感受，导致可见小记可能切到英文频道或轻微分析腔。
+- 最小修复：`reasoningForwardText` 增加中文主体闸门，英文分析、导演提示、模型工作语继续跳过；`reasoning-forward-persona`、`roleplay-inner-protocol` 和 runtime fallback 同步改口径，移除“剧情走向分析/回复内容规划”这类导演台锚点，改为心软、别扭、惊讶、距离感和下一句如何轻轻接住。
+- 验证：`node scripts\run-tests.js tests\reasoningForwardPersona.test.js tests\reasoningForwardPersonaPrompt.test.js tests\runtimePromptCache.test.js tests\promptGoldenSnapshots.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\runtimeStreamingCoordinator.test.js tests\runtimeV2DirectReplyFailureTelemetry.test.js tests\qqActionServiceReasoningForward.test.js tests\messageHandlerReasoningForwardSource.test.js`、`npm run check:prompts` 通过。
+- 范围控制：未改 QQ 发送链路、NapCat action、主回复模型配置、humanizer 或 raw reasoning 存储边界；未推送远端。
+- 小目标已完成：QQ reasoning 可见小记和主回复内部 thinking 约束统一到瑞希中文情绪内心。
+
 ## 运行维护 2026-06-20 11:35
 
 - 小目标：增强 `prompts/defaut.txt` 对普通用户 NSFW、性暗示和性骚扰话题的防护，同时避免拒绝话术过度生硬。

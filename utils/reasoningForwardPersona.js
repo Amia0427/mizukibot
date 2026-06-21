@@ -12,6 +12,28 @@ const UNSAFE_PATTERNS = [
   /\bthe says\b/i
 ];
 
+function countCjkChars(text = '') {
+  return (String(text || '').match(/[\u3400-\u9fff]/g) || []).length;
+}
+
+function countLatinLetters(text = '') {
+  return (String(text || '').match(/[A-Za-z]/g) || []).length;
+}
+
+function isChineseForwardNote(text = '') {
+  const cjkChars = countCjkChars(text);
+  if (cjkChars < 4) return false;
+  return cjkChars >= 12 || cjkChars >= countLatinLetters(text);
+}
+
+function hasUnsafeForwardPattern(text = '') {
+  const compact = normalizeText(text);
+  if (!compact) return true;
+  if (UNSAFE_PATTERNS.some((pattern) => pattern.test(compact))) return true;
+  if (/[{}[\]]/.test(compact) && /"(?:choices|message|usage|delta|content)"/i.test(compact)) return true;
+  return false;
+}
+
 function normalizeText(value = '') {
   return String(value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 }
@@ -48,9 +70,8 @@ function trimForwardCore(text = '', maxChars = FORWARD_MAX_CHARS) {
 function looksUnsafeForForward(text = '') {
   const compact = normalizeText(text);
   if (!compact) return true;
-  if (UNSAFE_PATTERNS.some((pattern) => pattern.test(compact))) return true;
-  if (/[{}[\]]/.test(compact) && /"(?:choices|message|usage|delta|content)"/i.test(compact)) return true;
-  return false;
+  if (!isChineseForwardNote(compact)) return true;
+  return hasUnsafeForwardPattern(compact);
 }
 
 function splitReadableSentences(text = '') {
@@ -69,7 +90,7 @@ function pickReadableCore(reasoningText = '', finalReply = '') {
     .filter((sentence) => {
       const compact = sentence.replace(/\s+/g, '');
       if (!compact) return false;
-      if (looksUnsafeForForward(sentence)) return false;
+      if (hasUnsafeForwardPattern(sentence)) return false;
       if (finalCompact && compact.length >= 12 && finalCompact.includes(compact.slice(0, 24))) return false;
       return true;
     });

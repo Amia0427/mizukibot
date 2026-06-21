@@ -22,7 +22,8 @@ module.exports = (() => {
   assert.ok(prompt.includes('情绪化短内心'), 'prompt should anchor the visible emotional inner-note style');
   assert.ok(prompt.includes('1-3 个短段落'), 'prompt should allow compact diary-like paragraphs');
   assert.ok(prompt.includes('主观情绪流'), 'prompt should prefer subjective emotional flow over analysis');
-  assert.ok(prompt.includes('中文或英文都可以'), 'prompt should allow clean Chinese or English visible notes');
+  assert.ok(prompt.includes('简体中文为主体'), 'prompt should keep visible notes in Chinese Mizuki voice');
+  assert.ok(prompt.includes('英文分析'), 'prompt should skip English analytical notes');
   assert.ok(prompt.includes('导演提示'), 'prompt should reject director-style analysis');
   assert.ok(prompt.includes('不要添加固定开场白'), 'prompt should forbid fixed filler prefixes');
   assert.ok(prompt.includes('不要复述主回复'), 'prompt should avoid duplicating the final reply');
