@@ -145,7 +145,8 @@ data/       本地运行数据，默认不提交
 - `docs/main-reply-context.md`：主回复上下文设计。
 - `docs/post-reply-worker.md`：回复后学习 worker 说明。
 - `docs/ai-agent-job-application.md`：面向 AI 开发工程师岗位的项目说明和面试讲法。
+- `docs/project-development-history.md`：基于 Git 历史整理的项目开发过程。
 - `scripts/README.md`：脚本说明。
 - `deploy/README.md`：部署说明。
 
-更新时间：2026-06-22 18:45 +08:00
+更新时间：2026-06-22 18:55 +08:00
