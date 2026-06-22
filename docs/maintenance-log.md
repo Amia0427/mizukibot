@@ -246,6 +246,13 @@
 - 验证：`node --check` 覆盖 `runtime-core.chunk.js`、`request-shaping.chunk.js`、`promptCaching.js`、`modelProvider.js`；`node scripts\run-tests.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\httpClientAnthropicPromptCache.test.js tests\mainReplyCacheStatsDiagnostics.test.js tests\providerRequestDiagnostics.test.js` 通过；本地 `prepareRequest` 探针确认默认分支输出 `ttl=1h`、`anthropic-beta=prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11`、`X-Enable-1h-cache=1`，显式 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时不发该 header。
 - 小目标已完成：一小时缓存请求体、beta、第三方网关 header 和诊断观测已对齐；旧进程需重启后才能在真实 trace 中看到新字段。
 
+## 运行维护 2026-06-22 08:05
+
+- 小目标：按要求把 Anthropic prompt cache 默认 TTL 改成 5 分钟。
+- 最小修复：`pickAnthropicPromptCacheTtl()` 默认值从 `1h` 改为 `5m`，`.env.example` 同步为 `ANTHROPIC_PROMPT_CACHE_TTL=5m`。一小时兼容能力保留，只有显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时才会发送 `extended-cache-ttl-2025-04-11` 和 `X-Enable-1h-cache: 1`。
+- 验证：目标 provider/cache 测试和本地 `prepareRequest` 探针确认默认分支为 `ttl=5m` 且不带一小时 header，显式 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 分支仍带一小时 header。
+- 小目标已完成：主回复 Anthropic 缓存默认回到五分钟，不删除显式一小时兼容开关。
+
 ## 运行维护 2026-06-17 11:52
 
 - 小目标：去除 `/cot` 特殊指令，并让 QQ 群聊/私聊在正常正文发送成功后，额外用合并转发完整发送 provider 显式返回的 reasoning。

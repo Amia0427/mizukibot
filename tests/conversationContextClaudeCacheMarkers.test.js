@@ -51,7 +51,7 @@ module.exports = (() => {
   const continuityMessage = systemMessages.find((item) => String(item.content || '').includes('[ContinuityState]'));
   const currentConversationMessage = systemMessages.find((item) => String(item.content || '').includes('[CurrentConversation]'));
 
-  assert.deepStrictEqual(stableSystem.content[0].cache_control, { type: 'ephemeral', ttl: '1h' });
+  assert.deepStrictEqual(stableSystem.content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
   assert.strictEqual(typeof affinityMessage.content, 'string');
   assert.strictEqual(typeof relationshipMessage.content, 'string');
   assert.strictEqual(typeof continuityMessage.content, 'string');
@@ -105,7 +105,7 @@ module.exports = (() => {
   };
   const adminMessages = helpers.getMainConversationSystemMessages(adminState);
   assert.strictEqual(adminMessages[0].content[0].text, 'admin stable top');
-  assert.deepStrictEqual(adminMessages[0].content[0].cache_control, { type: 'ephemeral', ttl: '1h' });
+  assert.deepStrictEqual(adminMessages[0].content[0].cache_control, { type: 'ephemeral', ttl: '5m' });
   assert.strictEqual(adminMessages[1].content[0].text, 'root stable');
 
   const assistantOnly = helpers.buildAssistantOnlyContextMessages(state);

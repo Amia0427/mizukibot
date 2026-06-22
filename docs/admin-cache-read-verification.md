@@ -1,6 +1,10 @@
 # 管理员缓存读写对照验收
 
-更新时间：2026-06-21 23:38 +08:00
+更新时间：2026-06-22 08:05 +08:00
+
+## 2026-06-22 更新
+
+- 08:05：Anthropic prompt cache 默认 TTL 改回 `5m`。管理员稳定 system 缓存块仍会打 `cache_control`，但默认 TTL 为 5 分钟；如确实需要一小时缓存，显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 后才会发送 `extended-cache-ttl-2025-04-11` 与 `X-Enable-1h-cache=1`。
 
 ## 2026-06-21 更新
 
@@ -39,7 +43,7 @@ npm run verify:admin-cache-read -- --dry-run --json
 - 最终请求体差异为 `0`。
 - 最终请求体 keys：`max_tokens/messages/model/stream/system/temperature`。
 - 估算输入：`4826` tokens。
-- 缓存条件：Anthropic cache breakpoint=`1`，默认一小时缓存会发送 `anthropic-beta=prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11` 和 `X-Enable-1h-cache=1`。
+- 缓存条件：Anthropic cache breakpoint=`1`，默认 5 分钟缓存只发送 `anthropic-beta=prompt-caching-2024-07-31`；显式 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 才会追加 `extended-cache-ttl-2025-04-11` 和 `X-Enable-1h-cache=1`。
 - 响应与本地 `model-calls` 都没有 usage/cache 字段：`usage_read=0`、`usage_write=0`、`modelCallUsage=null`。
 
 结论：`upstream_cache_signal_unobservable`。本轮不能证明“只写不读”，只能归因为上游不提供可观测缓存读写信号或该端点不支持上报。

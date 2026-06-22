@@ -55,16 +55,16 @@ module.exports = (async () => {
     assert.strictEqual(prepared.requestUrl, 'https://superapi.buzz/v1/messages');
     assert.ok(Array.isArray(prepared.requestBody.messages));
     assert.ok(prepared.requestBody.system.some((item) => String(item.text || '').includes('stable persona')));
-    assert.ok(prepared.requestBody.system.some((item) => item.cache_control?.ttl === '1h'));
+    assert.ok(prepared.requestBody.system.some((item) => item.cache_control?.ttl === '5m'));
     assert.ok(prepared.requestBody.messages.every((message) => (
       !Array.isArray(message.content)
-      || message.content.every((block) => !block.cache_control || block.cache_control.ttl === '1h')
+      || message.content.every((block) => !block.cache_control || block.cache_control.ttl === '5m')
     )));
     assert.ok(!Array.isArray(prepared.requestBody.tools));
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'tool_choice'));
     assert.ok(prepared.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
-    assert.ok(prepared.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
-    assert.strictEqual(prepared.requestHeaders['X-Enable-1h-cache'], '1');
+    assert.ok(!prepared.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestHeaders, 'X-Enable-1h-cache'));
     assert.strictEqual(prepared.requestHeaders['User-Agent'], browserUA);
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestHeaders || {}, 'Authorization'));
 
