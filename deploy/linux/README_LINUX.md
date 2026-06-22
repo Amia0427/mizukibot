@@ -96,11 +96,7 @@ systemctl stop mizukibot
 
 ## 9. Web 面板访问
 - 默认仅本机访问：`WEB_BIND_HOST=127.0.0.1`
-- 当前更安全的默认管理方案不是直接公网开放，而是 `WireGuard + SSH 跳板`
-  - 见 `deploy/windows/WINDOWS_PUBLIC_INBOUND_SAFE.md`
-  - 服务器脚本：`npm run linux:wireguard:setup`
-  - Windows 管理脚本：`npm run win:mgmt:setup`
-- 若需公网访问，建议 Nginx 反代 + HTTPS
+- 若需公网访问，建议 Nginx 反代 + HTTPS，并设置强 `WEB_TOKEN`
 - 已启用最小鉴权（`WEB_TOKEN`）
   - 支持 `Authorization: Bearer <token>`
   - 支持 `x-web-token: <token>`

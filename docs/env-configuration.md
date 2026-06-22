@@ -9,6 +9,7 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
+- 2026-06-22 18:45 +08:00：安全审计发现历史提交中存在与本项目无关的网络隧道运行配置；已删除相关配置、脚本和部署文档入口，并将本地 Claude 设置、Playwright 抓图、临时目录和导出压缩包加入忽略。验收：`npm run diag:security` 通过；`npm audit --omit=dev` 通过；当前树和 Git 历史路径扫描均不再命中对应专属文件。
 - 2026-06-22 10:35 +08:00：第三方 Anthropic 兼容网关把 `X-Enable-1h-cache: 1` 当作 prompt cache 启用头；5 分钟缓存也需要该头才能读缓存。当前规则：只要 Anthropic 请求存在 `cache_control` 断点就发送 `X-Enable-1h-cache: 1`；只有显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时才追加 `extended-cache-ttl-2025-04-11`。
 - 2026-06-22 08:05 +08:00：Anthropic prompt cache 默认 TTL 改回 `5m`，`.env.example` 同步为 `ANTHROPIC_PROMPT_CACHE_TTL=5m`。默认请求不发送 `extended-cache-ttl-2025-04-11`；10:35 复查后确认 5m 读取仍需保留 `X-Enable-1h-cache: 1`。
 - 2026-06-21 22:37 +08:00：第三方 Anthropic 兼容网关的一小时缓存除 `cache_control.ttl="1h"` 外，还需要最终请求头保留 `X-Enable-1h-cache: 1`；该 header 已加入 Anthropic provider 白名单。现场旧进程 `pid=2544` 启动早于上一轮修复提交，未重启会继续按旧代码发 `5m`。

@@ -8,15 +8,10 @@
 
 ## Windows
 
-- `deploy/windows/WINDOWS_PUBLIC_INBOUND_SAFE.md`
-
-## Network
-
-- `deploy/network/WIREGUARD_SERVER.conf.example`
-- `deploy/network/WIREGUARD_WINDOWS_CLIENT.conf.example`
+- Windows 本地运行见根目录 `restart-bot.cmd` 和 `scripts/README.md`
 
 ## Runtime
 
-- `deploy/runtime/99-mizuki-wg-forward.conf`
-- `deploy/runtime/wg1.conf`
-- `deploy/runtime/windows-full.conf`
+- 本项目不保留无关网络隧道运行配置或管理脚本。
+
+更新 2026-06-22 18:45 +08:00：已删除本项目内无关网络隧道配置、脚本和部署文档入口，并清理对应历史路径。验收：当前树和历史路径扫描均不再命中该类专属文件。
