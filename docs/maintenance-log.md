@@ -804,3 +804,11 @@
 - 最小修复：最终 Anthropic 请求先清理旧断点，再只保留最后一个可缓存工具、最后一个稳定 system 前缀断点，并给倒数第 2 条非空历史消息打断点；最新消息不自动缓存，默认 TTL 仍为 `5m`，有断点时仍发送 `X-Enable-1h-cache: 1`。
 - 验收：`node --check src\model\http\runtime-core.chunk.js`、`node scripts\run-tests.js tests\httpClientAnthropicPromptCache.test.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\providerRequestDiagnostics.test.js tests\conversationContextClaudeCacheMarkers.test.js` 通过。
 - 小目标已完成：Anthropic 主回复缓存断点按“system 前缀 + 倒数第 2 条历史消息”稳定落位，避免最新消息和过多 system 断点导致只写不读。
+
+## 运行维护 2026-06-22 12:32
+
+- 复查 Anthropic 主回复缓存仍只写不读，重点检查是否有动态提示词影响缓存前缀。
+- 结论：稳定 system 文本 hash 本身稳定；只写不读来自最终请求同时保留 system 和历史 messages 断点，目标兼容网关疑似按最后 `cache_control` 断点建缓存，而历史 messages 前缀会随对话窗口滚动变化。
+- 最小修复：有稳定 system 缓存断点时，最终 Anthropic 请求清理 messages 上的 `cache_control`；没有 system 断点时才按速查文档缓存倒数第 2 条非空历史消息。默认 TTL 仍为 `5m`，有断点时仍发送 `X-Enable-1h-cache: 1`。
+- 验收：`node --check src\model\http\runtime-core.chunk.js`、`node scripts\run-tests.js tests\httpClientAnthropicPromptCache.test.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\providerRequestDiagnostics.test.js tests\conversationContextClaudeCacheMarkers.test.js` 通过；`node scripts\verify-admin-cache-read.js --dry-run --json --max-tokens=16 --timeout-ms=45000` 显示 `anthropicCacheBreakpoints=1`、`anthropicPromptCacheTtl=5m`、`anthropicOneHourCacheHeader=1`；真实双请求请求体 hash 一致，model-calls 记录 `system_cache_breakpoints=1`、`message_cache_breakpoints=0`。
+- 小目标已完成：主回复稳定 system 存在时不再让动态历史消息断点破坏 Anthropic 缓存读取。

@@ -328,10 +328,33 @@ module.exports = (async () => {
       && contentParts(message).some((block) => String(block.text || '').includes('latest user turn'))
     ));
     assert.strictEqual(cachedSystemBreakpoints.length, 1);
-    assert.ok(contentParts(previousAssistantTurn).some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(contentParts(previousAssistantTurn).every((block) => !('cache_control' in block)));
     assert.ok(contentParts(latestUserTurn).every((block) => !('cache_control' in block)));
     assert.ok(countRequestCacheControl(preparedSystemAndHistoryBreakpoints.requestBody) <= 4);
     assert.strictEqual(preparedSystemAndHistoryBreakpoints.requestHeaders['X-Enable-1h-cache'], '1');
+
+    const preparedMessageOnlyBreakpoint = await httpClient.prepareRequest('https://example.com/v1/messages', {
+      model: 'claude-3-5-sonnet-latest',
+      messages: [
+        { role: 'user', content: 'previous user turn for message cache' },
+        { role: 'assistant', content: 'previous assistant turn for message cache' },
+        { role: 'user', content: 'latest user turn for message cache' }
+      ],
+      stream: false
+    });
+    const messageOnlyPreviousAssistantTurn = preparedMessageOnlyBreakpoint.requestBody.messages.find((message) => (
+      message.role === 'assistant'
+      && contentParts(message).some((block) => String(block.text || '').includes('previous assistant turn for message cache'))
+    ));
+    const messageOnlyLatestUserTurn = preparedMessageOnlyBreakpoint.requestBody.messages.find((message) => (
+      message.role === 'user'
+      && contentParts(message).some((block) => String(block.text || '').includes('latest user turn for message cache'))
+    ));
+    assert.ok(contentParts(messageOnlyPreviousAssistantTurn).some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(contentParts(messageOnlyLatestUserTurn).every((block) => !('cache_control' in block)));
+    assert.ok(!preparedMessageOnlyBreakpoint.requestBody.system);
+    assert.strictEqual(countRequestCacheControl(preparedMessageOnlyBreakpoint.requestBody), 1);
+    assert.strictEqual(preparedMessageOnlyBreakpoint.requestHeaders['X-Enable-1h-cache'], '1');
 
     const preparedTooManyBreakpoints = await httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
@@ -384,7 +407,7 @@ module.exports = (async () => {
       message.role === 'user'
       && contentParts(message).some((block) => String(block.text || '').includes('current user context'))
     ));
-    assert.ok(contentParts(cachedHistoricalUser).some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(contentParts(cachedHistoricalUser).every((block) => !('cache_control' in block)));
     assert.ok(contentParts(uncachedCurrentUser).every((block) => !('cache_control' in block)));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedTooManyBreakpoints.requestBody, 'cache_control'));
 
