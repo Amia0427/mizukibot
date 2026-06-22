@@ -6,6 +6,7 @@
 - 验证：`node scripts\run-tests.js tests\restartBotScript.test.js`、PowerShell AST parse、`cmd /c restart-bot.cmd status` 和实际 `cmd /c restart-bot.cmd restart confirm` 通过；旧 worker `20668` 被停止，最终 main bot `54672`、post-reply worker `14432` Running，`data\restart-bot-result.json` 为 `status=success, healthy=true`。
 - 范围控制：未改重启确认语义、进程匹配规则、worker 常驻策略或远程反馈链路；未推送远端。
 - 小目标已完成：主 bot 已退出、worker 仍在时，确认重启不再卡在 PowerShell 空数组参数绑定。
+- 提交后记录 2026-06-22 13:18 +08:00：已提交 `858001e`（`fix: allow restart without main process`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-22 01:13
 
