@@ -31,6 +31,17 @@ module.exports = (() => {
   );
 
   assert.strictEqual(
+    preprocessor.getSessionDebounceMs({
+      messageType: 'group',
+      mentionedBot: true,
+      hasLongAggregationAnchor: true,
+      awaitingFollowup: true
+    }),
+    12000,
+    '@bot image message should not be promoted to the max-hold follow-up window'
+  );
+
+  assert.strictEqual(
     preprocessor.getSessionDebounceMs({ messageType: 'group', mentionedBot: false }),
     2000,
     'regular group plain text debounce should be capped separately from aggregation anchors'
@@ -40,6 +51,33 @@ module.exports = (() => {
     preprocessor.getSessionDebounceMs({ messageType: 'group', mentionedBot: false, hasLongAggregationAnchor: true }),
     15000,
     'regular group image/forward/card debounce should keep the aggregation window'
+  );
+
+  assert.strictEqual(
+    preprocessor.getSessionDebounceMs({
+      messageType: 'group',
+      mentionedBot: false,
+      hasLongAggregationAnchor: true,
+      awaitingFollowup: true,
+      entries: [{ imageUrls: ['https://example.com/a.png'], text: '[图片]' }]
+    }),
+    15000,
+    'regular group single image should use the aggregation debounce instead of max-hold'
+  );
+
+  assert.strictEqual(
+    preprocessor.getSessionDebounceMs({
+      messageType: 'group',
+      mentionedBot: false,
+      hasLongAggregationAnchor: true,
+      awaitingFollowup: true,
+      entries: [
+        { imageUrls: ['https://example.com/a.png'], text: '[图片]' },
+        { text: '' }
+      ]
+    }),
+    25000,
+    'regular group multi-entry image follow-up wait can still use max-hold as the merge ceiling'
   );
 
   console.log('continuousMessagePreprocessorDebounce.test.js passed');

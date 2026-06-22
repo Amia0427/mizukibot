@@ -137,6 +137,18 @@ function uniqueStrings(items = []) {
   return output;
 }
 
+function normalizeImageSummaryText(value = '') {
+  const decoded = normalizeText(decodeCqValue(value));
+  if (!decoded) return '';
+  const unwrapped = decoded
+    .replace(/^[\s[\]【】（）()]+/g, '')
+    .replace(/[\s[\]【】（）()]+$/g, '')
+    .trim();
+  const text = unwrapped || decoded;
+  if (!text || /^(?:图片|表情|动画表情|image)$/i.test(text)) return '';
+  return text;
+}
+
 function decodeCqValue(value = '') {
   return String(value || '')
     .replace(/&#44;/g, ',')
@@ -287,7 +299,7 @@ function extractTextAndImagesFromMessage(message = []) {
       const url = normalizeText(data.url || data.file || '');
       if (url) {
         imageUrls.push(url);
-        textParts.push('[图片]');
+        textParts.push(normalizeImageSummaryText(data.summary) || '[图片]');
       }
       continue;
     }
@@ -346,7 +358,7 @@ function collectMessageContent(message = [], options = {}) {
       const url = normalizeText(data.url || data.file || '');
       if (url) {
         imageUrls.push(url);
-        textParts.push('[图片]');
+        textParts.push(normalizeImageSummaryText(data.summary) || '[图片]');
       }
     }
   }

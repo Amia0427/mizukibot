@@ -780,3 +780,11 @@
 - 最小修复：worldbook 查询命中时退出 `prepare` 轻量快路径，回到完整主回复 prompt 装配；普通私聊快路径和 normal fast reply 入口保持原有轻量策略。
 - 验收：`node scripts/run-tests.js prepareNodePlainPrivateChatFastPath.test.js promptGoldenSnapshots.test.js normalFastReplyRuntime.test.js worldbookDiagnostic.test.js` 通过；`node scripts/diagnose-worldbook.js --question "瑞希未来两个都不放弃是什么意思" --session codex-worldbook-check --json` 显示最终注入 `persona_module:wb_mizuki_future_two_tracks`。
 - 小目标已完成：planner 关闭时世界书问题不会再被 prepare 轻量快路径吞掉。
+
+## 运行维护 2026-06-22 09:34
+
+- 检查普通群聊未显式 @bot 的单张图片连续消息预处理链路，目标样本为 `messageId=983286449` / `req_4702d42d419f084f`。
+- 结论：`request-trace.ndjson` 显示入站锁等待为 0，但 `inbound_timing.jsonl` 的 `continuous_preprocess_done` 已在锁前消耗 `25007ms`，`continuousScheduleDebounceMs=25000`、`continuousEntryCount=1`；原始 NapCat 事件是 `summary=[动画表情]` 的单图，解析成 `[图片]` 后被判为 `awaitingFollowup=true`。
+- 最小修复：普通群首条单图/动画表情仍走图片聚合 debounce，不再直接提升到 `max_hold`；同一 session 已追加多条消息时继续允许 max-hold 作为合并上限。
+- 验收：`node tests\continuousMessagePreprocessorDebounce.test.js`、`node tests\continuousMessagePreprocessor.test.js`、相关 `node --check` 通过；配置探针输出 `regular=2000, singleImage=15000, multiImage=25000`；`npm run diag:request-trace-preflight -- --request-id req_4702d42d419f084f --limit 1` 复核断点在锁前连续消息窗口。
+- 小目标已完成：群聊单张图片/动画表情不会再因首条 `awaitingFollowup` 直接命中 25s max-hold。
