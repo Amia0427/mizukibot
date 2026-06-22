@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-22 08:05 +08:00**：按要求把 Anthropic prompt cache 默认 TTL 改回 5 分钟。`ANTHROPIC_PROMPT_CACHE_TTL` 默认值现在是 `5m`，默认 Anthropic 请求只发送 `prompt-caching-2024-07-31`，不会携带 `extended-cache-ttl-2025-04-11` 或 `X-Enable-1h-cache: 1`；只有显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时才启用一小时缓存兼容头。验收：目标 provider/cache 测试和本地构造探针确认默认 5m、显式 1h 两个分支。
+
 **2026-06-22 01:13 +08:00**：修复被动群感知图片开场漏判。`groupId=597801651` 在 2026-06-21 15:27/15:36 附近的图片样本已选中 cached image，但视觉 worker 关闭后被 `closed-no-cue: group_open_question` 提前挡住，`decisionModelCalled=false`；同时 CQ 图片 URL 的 `?` 会污染本地问题识别。现被动感知会剥离 CQ 控制段，保留 `[图片]` 占位，并让 closed/cooling 下的图片候选进入一次带 `image_url` 的决策模型探测，模型拒绝时仍不回复；`passive-awareness-decisions.jsonl` 新增 `visualCueProbe` 诊断字段。验收：`node scripts\run-tests.js passiveAwarenessVisualCueProbe.test.js passiveAwarenessVisionInput.test.js passiveAwarenessAmbientTrigger.test.js` 通过。小目标完成：群聊图片开场不再在视觉 cue 判定前被状态机漏挡。
 
 **2026-06-21 23:38 +08:00**：按 Anthropic prompt caching 友好方式收口管理员系统提示词顺序。`prompts/admin.txt` 对应的 `admin_system_prompt` 仍保持为管理员 system messages 第一块，只新增一小时 `cache_control` 标记，不后移到普通稳定块之后。验收：`node tests\conversationContextClaudeCacheMarkers.test.js`、`node tests\adminStableSystemPrompt.test.js`、`node tests\providerRequestNormalization.test.js` 通过。
