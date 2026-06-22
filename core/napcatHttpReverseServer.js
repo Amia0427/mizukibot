@@ -31,7 +31,7 @@ function createNapCatHttpReverseServer(options = {}) {
 function startNapCatHttpReverseServer(options = {}) {
   const app = createNapCatHttpReverseServer(options);
   const port = config.NAPCAT_HTTP_REVERSE_PORT;
-  const host = '127.0.0.1';
+  const host = config.NAPCAT_HTTP_REVERSE_BIND_HOST || '127.0.0.1';
 
   const server = app.listen(port, host, () => {
     console.log(`[NapCat HTTP Reverse] listening on http://${host}:${port}`);

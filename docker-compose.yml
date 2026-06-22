@@ -1,0 +1,44 @@
+services:
+  mizukibot:
+    build: .
+    image: mizukibot:local
+    container_name: mizukibot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /app/data
+      WEB_BIND_HOST: 0.0.0.0
+      NAPCAT_HTTP_REVERSE_BIND_HOST: 0.0.0.0
+      POST_REPLY_WORKER_ENABLED: "true"
+      POST_REPLY_WORKER_INLINE: "false"
+      POST_REPLY_WORKER_SUPERVISOR_ENABLED: "false"
+    ports:
+      - "${NAPCAT_HTTP_REVERSE_PORT:-3002}:${NAPCAT_HTTP_REVERSE_PORT:-3002}"
+      - "${WEB_PORT:-3005}:${WEB_PORT:-3005}"
+    volumes:
+      - mizukibot-data:/app/data
+      - mizukibot-logs:/app/logs
+
+  post-reply-worker:
+    image: mizukibot:local
+    container_name: mizukibot-post-reply-worker
+    restart: unless-stopped
+    depends_on:
+      - mizukibot
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /app/data
+      POST_REPLY_WORKER_ENABLED: "true"
+      POST_REPLY_WORKER_INLINE: "false"
+      POST_REPLY_WORKER_SUPERVISOR_ENABLED: "false"
+      MIZUKIBOT_RUNTIME_ROLE: post_reply_worker
+    command: ["npm", "run", "start:post-reply-worker"]
+    volumes:
+      - mizukibot-data:/app/data
+      - mizukibot-logs:/app/logs
+
+volumes:
+  mizukibot-data:
+  mizukibot-logs:

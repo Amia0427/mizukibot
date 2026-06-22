@@ -60,6 +60,9 @@ function ensurePostReplyWorkerRunning(options = {}) {
   if (config.POST_REPLY_WORKER_INLINE === true) {
     return { started: false, skipped: true, reason: 'inline' };
   }
+  if (config.POST_REPLY_WORKER_SUPERVISOR_ENABLED !== true) {
+    return { started: false, skipped: true, reason: 'supervisor_disabled' };
+  }
 
   const projectRoot = path.resolve(options.projectRoot || PROJECT_ROOT);
   const pidFile = path.resolve(options.pidFile || path.join(projectRoot, '.mizukibot-postreply-worker.pid'));

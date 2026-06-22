@@ -1,3 +1,11 @@
+## 运行维护 2026-06-23 00:00
+
+- 小目标：把 `master` 分支最小容器化，支持 Docker/Compose 本地部署，并保证主 bot 与 post-reply worker 在容器中分进程运行。
+- 最小修复：新增 `Dockerfile`、`.dockerignore`、`docker-compose.yml` 和 `deploy/docker/README.md`；`NAPCAT_HTTP_REVERSE_BIND_HOST` 支持容器内监听 `0.0.0.0`；新增 `POST_REPLY_WORKER_SUPERVISOR_ENABLED`，让 compose 中主进程不再自拉外置 worker，由独立 worker 服务消费共享 `data` volume。
+- 验证：目标单测、Node 语法检查、Compose YAML 解析、Dockerfile 文本检查和 `git diff --check` 通过；当前本机缺少 Docker CLI，`docker compose config` 和镜像构建未能在本机执行。
+- 范围控制：未容器化 NapCat，未改模型/路由/记忆业务逻辑，未推送远端。
+- 小目标已完成：`master` 已具备可构建、可启动、可挂载持久数据的 Docker 部署入口。
+
 ## 运行维护 2026-06-22 20:43
 
 - 小目标：修正公开 `master`，避免无关展示材料、代理本地痕迹和备份文件被推送到 GitHub。

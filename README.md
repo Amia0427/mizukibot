@@ -103,6 +103,16 @@ npm run linux:status
 npm run linux:logs
 ```
 
+### Docker 运维
+
+```bash
+docker compose up -d --build
+docker compose logs -f mizukibot
+docker compose logs -f post-reply-worker
+```
+
+Docker 部署说明见 [`deploy/docker/README.md`](deploy/docker/README.md)。
+
 ## 目录结构
 
 ```text
@@ -145,4 +155,4 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-06-22 20:43 +08:00
+更新时间：2026-06-23 00:00 +08:00

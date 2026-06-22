@@ -80,6 +80,23 @@ module.exports = (() => {
     assert.strictEqual(skipped.started, false);
     assert.strictEqual(skipped.reason, 'already_running');
 
+    process.env.POST_REPLY_WORKER_SUPERVISOR_ENABLED = 'false';
+    clearProjectCache();
+    assert.strictEqual(require('../config').POST_REPLY_WORKER_SUPERVISOR_ENABLED, false);
+    const { ensurePostReplyWorkerRunning: ensureSupervisorDisabled } = require('../utils/postReplyWorkerSupervisor');
+    const supervisorDisabled = ensureSupervisorDisabled({
+      projectRoot: tempDir,
+      pidFile,
+      listProcesses: () => [],
+      isProcessAlive: () => false,
+      spawn() {
+        throw new Error('disabled supervisor should not spawn');
+      }
+    });
+    assert.strictEqual(supervisorDisabled.started, false);
+    assert.strictEqual(supervisorDisabled.reason, 'supervisor_disabled');
+
+    process.env.POST_REPLY_WORKER_SUPERVISOR_ENABLED = 'true';
     process.env.POST_REPLY_WORKER_ENABLED = 'false';
     clearProjectCache();
     const { ensurePostReplyWorkerRunning: ensureDisabled } = require('../utils/postReplyWorkerSupervisor');

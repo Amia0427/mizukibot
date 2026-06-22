@@ -1,0 +1,25 @@
+.git
+.claude
+.playwright-mcp
+.learnings
+.remote-hermes
+node_modules
+data
+logs
+tmp
+artifacts
+ops/windows
+NapCat.Shell (2)
+.env
+.env.*
+!.env.example
+!.env.skills.example
+*.log
+*.pid
+*.lock
+*.bak
+*.bak-*
+*.bak_codex_*
+*_migration_backup_*
+memory-backup-*.tar.gz
+npm-debug.log*
