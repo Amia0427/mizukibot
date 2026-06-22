@@ -1,3 +1,11 @@
+## 运行维护 2026-06-22 18:45
+
+- 小目标：基于当前 MizukiBot 项目，整理一份面向 AI 开发工程师岗位的项目应聘材料，并在 README 增加岗位匹配入口。
+- 最小修复：新增 `docs/ai-agent-job-application.md`，按岗位要求映射 Agent workflow、Prompt、API、RAG、LangGraph、真实项目经验和可迁移边界；README 只补充岗位语境说明和文档入口。
+- 验证：复核文档未把未落地的 Amazon SP-API / Dify 等写成已完成经验；`README.md` 保持项目入口定位；`git diff --check -- README.md docs/ai-agent-job-application.md docs/maintenance-log.md` 通过。
+- 范围控制：未改运行代码、prompt、配置、脚本或部署文件；未处理工作区已有其他未提交改动。
+- 小目标已完成：项目已有一份可投递/面试复用的岗位说明文档，README 也补上与岗位要求相关的项目特色。
+
 ## 运行维护 2026-06-22 18:37
 
 - 小目标：把过长的 `README.md` 改成“项目介绍 + 项目经历”为主的项目入口。
