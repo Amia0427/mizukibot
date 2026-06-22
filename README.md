@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-22 13:18 +08:00**：修复 Windows 重启脚本在“主 bot 已退出、post-reply worker 仍在”状态下直接报错的问题。根因是 `Get-RestartLauncherPids` 把 main/worker 进程列表声明成强制参数，PowerShell 会拒绝绑定空数组；现 launcher 扫描接受空列表并返回空 launcher 集合。验收：目标测试、PowerShell AST parse、`restart-bot.cmd status` 和实际 `restart-bot.cmd restart confirm` 通过；旧 worker `20668` 被停止，最终 main bot `54672` 与 worker `14432` 均为 Running。
+
 **2026-06-22 12:32 +08:00**：修复 Anthropic 缓存仍只写不读的动态断点问题。根因是上一轮同时保留稳定 system 和历史 messages 断点，目标兼容网关按最后缓存断点建前缀时会落到随对话窗口变化的历史消息，导致每轮重新写缓存；现有稳定 system 断点时会清理 messages 上的 `cache_control`，只有没有 system 断点时才按速查文档缓存倒数第 2 条消息。验收：目标测试通过，真实双请求预检确认最终请求 `system_cache_breakpoints=1`、`message_cache_breakpoints=0`、`ttl=5m`、`X-Enable-1h-cache=1`。
 
 **2026-06-22 12:13 +08:00**：按 prompt caching 速查文档优化 Anthropic 断点分配。最终 Anthropic 请求现在会先清理旧 `cache_control`，只保留最后一个可缓存工具、最后一个稳定 system 前缀断点，并给倒数第 2 条非空历史消息打断点；最新消息不再自动缓存，避免每轮 cache bust。验收：`node --check src\model\http\runtime-core.chunk.js`、`node scripts\run-tests.js tests\httpClientAnthropicPromptCache.test.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\providerRequestDiagnostics.test.js tests\conversationContextClaudeCacheMarkers.test.js` 通过。

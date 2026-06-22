@@ -727,9 +727,9 @@ function Test-ProcessLooksLikeRestartLauncher {
 
 function Get-RestartLauncherPids {
   param(
-    [Parameter(Mandatory = $true)][object[]]$Processes,
-    [Parameter(Mandatory = $true)][object[]]$MainProcesses,
-    [Parameter(Mandatory = $true)][object[]]$WorkerProcesses
+    [object[]]$Processes = @(),
+    [object[]]$MainProcesses = @(),
+    [object[]]$WorkerProcesses = @()
   )
 
   $processByPid = @{}
