@@ -835,7 +835,10 @@ function createContinuousMessagePreprocessor(options = {}) {
     const baseDebounceMs = messageType === 'private'
       ? privateDebounceMs
       : (session.mentionedBot === true ? atBotDebounceMs : (plainGroupText ? Math.min(debounceMs, groupPlainTextDebounceMs) : debounceMs));
-    if (session.awaitingFollowup === true) return maxHoldMs;
+    const entryCount = Array.isArray(session.entries) ? session.entries.length : 0;
+    if (session.awaitingFollowup === true && session.mentionedBot !== true && (messageType !== 'group' || entryCount > 1)) {
+      return maxHoldMs;
+    }
     return baseDebounceMs;
   }
 

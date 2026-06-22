@@ -202,6 +202,128 @@ async function testRegularGroupPlainTextUsesShortDebounceCap() {
   assert.ok(replyElapsed < 450, `plain reply text should also use the short cap, got ${replyElapsed}ms`);
 }
 
+async function testAtBotSingleImageDoesNotWaitForMaxHold() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 650,
+    groupPlainTextDebounceMs: 300,
+    atBotDebounceMs: 320,
+    privateDebounceMs: 650,
+    maxHoldMs: 900,
+    ensureCachedImageRef: async () => ({ ok: false })
+  });
+
+  const msg = makeMessage({
+    messageId: 'at-bot-image',
+    userId: 'group-user-2',
+    groupId: 'group-2',
+    messageType: 'group',
+    message: [
+      { type: 'at', data: { qq: 'bot_test' } },
+      { type: 'image', data: { url: 'https://example.com/at-bot.png' } }
+    ],
+    rawMessage: '[CQ:at,qq=bot_test][CQ:image,url=https://example.com/at-bot.png]'
+  });
+
+  const startedAt = Date.now();
+  const result = await preprocessor.handleMessage(msg, { effectiveBotQQ: 'bot_test' });
+  const elapsed = Date.now() - startedAt;
+
+  assert.strictEqual(result.mode, 'ready');
+  assert.strictEqual(result.meta.flushReason, 'debounce');
+  assert.ok(elapsed < 600, `@bot single image should use at-bot debounce instead of max-hold, got ${elapsed}ms`);
+  assert.strictEqual(result.meta.timing.scheduleDebounceMs, 320);
+  assert.strictEqual(result.meta.timing.scheduleMaxHoldMs, 900);
+  assert.strictEqual(result.meta.mentionedBot, true);
+  assert.deepStrictEqual(result.meta.sourceMessageIds, ['at-bot-image']);
+  assert.strictEqual(result.meta.selectedImageUrl, 'https://example.com/at-bot.png');
+}
+
+async function testRegularGroupSingleImageUsesAggregationDebounce() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 320,
+    groupPlainTextDebounceMs: 120,
+    atBotDebounceMs: 300,
+    privateDebounceMs: 300,
+    maxHoldMs: 900,
+    ensureCachedImageRef: async () => ({ ok: false })
+  });
+
+  const msg = makeMessage({
+    messageId: 'regular-group-single-image',
+    userId: 'group-user-4',
+    groupId: 'group-4',
+    messageType: 'group',
+    message: [
+      {
+        type: 'image',
+        data: {
+          summary: '[动画表情]',
+          url: 'https://example.com/sticker.gif'
+        }
+      }
+    ],
+    rawMessage: '[CQ:image,summary=&#91;动画表情&#93;,url=https://example.com/sticker.gif]'
+  });
+
+  const startedAt = Date.now();
+  const result = await preprocessor.handleMessage(msg, {});
+  const elapsed = Date.now() - startedAt;
+
+  assert.strictEqual(result.mode, 'ready');
+  assert.strictEqual(result.meta.flushReason, 'debounce');
+  assert.ok(elapsed < 650, `regular group single image should use aggregation debounce instead of max-hold, got ${elapsed}ms`);
+  assert.strictEqual(result.meta.timing.scheduleDebounceMs, 320);
+  assert.strictEqual(result.meta.timing.scheduleDelayMs, 320);
+  assert.strictEqual(result.meta.timing.scheduleMaxHoldMs, 900);
+  assert.strictEqual(result.meta.timing.entryCount, 1);
+  assert.strictEqual(result.meta.mentionedBot, false);
+  assert.deepStrictEqual(result.meta.sourceMessageIds, ['regular-group-single-image']);
+  assert.strictEqual(result.meta.selectedImageUrl, 'https://example.com/sticker.gif');
+}
+
+async function testImageSummaryCountsAsFollowupText() {
+  const preprocessor = createContinuousMessagePreprocessor({
+    enabled: true,
+    debounceMs: 320,
+    groupPlainTextDebounceMs: 300,
+    atBotDebounceMs: 320,
+    privateDebounceMs: 320,
+    maxHoldMs: 900,
+    ensureCachedImageRef: async () => ({ ok: false })
+  });
+
+  const msg = makeMessage({
+    messageId: 'image-summary',
+    userId: 'group-user-3',
+    groupId: 'group-3',
+    messageType: 'group',
+    message: [
+      {
+        type: 'image',
+        data: {
+          summary: '[啊这]',
+          url: 'https://example.com/summary.png'
+        }
+      }
+    ],
+    rawMessage: '[CQ:image,summary=&#91;啊这&#93;,url=https://example.com/summary.png]'
+  });
+
+  const startedAt = Date.now();
+  const result = await preprocessor.handleMessage(msg, {});
+  const elapsed = Date.now() - startedAt;
+
+  assert.strictEqual(result.mode, 'ready');
+  assert.strictEqual(result.meta.flushReason, 'debounce');
+  assert.ok(elapsed < 650, `image summary should avoid max-hold follow-up wait, got ${elapsed}ms`);
+  assert.strictEqual(result.meta.timing.scheduleDebounceMs, 320);
+  assert.strictEqual(result.meta.timing.scheduleMaxHoldMs, 900);
+  assert.ok(String(result.effectiveMsg.raw_message || '').includes('啊这'));
+  assert.deepStrictEqual(result.meta.sourceMessageIds, ['image-summary']);
+}
+
 async function testImageRefsPreferCachedHandles() {
   const preprocessor = createContinuousMessagePreprocessor({
     enabled: true,
@@ -532,6 +654,9 @@ async function testReplyExpansionSkipsOfflineAndRecovers() {
   await testImageThenTextMergesIntoOneTurn();
   await testPlainTextStillFlushesOnBaseDebounce();
   await testRegularGroupPlainTextUsesShortDebounceCap();
+  await testAtBotSingleImageDoesNotWaitForMaxHold();
+  await testRegularGroupSingleImageUsesAggregationDebounce();
+  await testImageSummaryCountsAsFollowupText();
   await testImageRefsPreferCachedHandles();
   await testMergedFlushKeepsLatestFreshnessToken();
   await testSentenceWindowWaitsForContinuation();
