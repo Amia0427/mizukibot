@@ -1,3 +1,12 @@
+## 运行维护 2026-06-22 20:00
+
+- 小目标：把 `docs/ai-agent-job-application.md` 和 `docs/project-development-history.md` 做成可投递、可面试展示的静态 HTML 网页。
+- 最小修复：新增 `scripts/build-doc-showcase.js`，从两份 Markdown 生成 `docs/showcase/index.html`、岗位说明页、项目开发历史页、`showcase.css` 和 `showcase.js`；展示页包含首页卡片、文章 hero、桌面/移动目录、阅读进度、代码/表格样式、时间线样式、返回顶部和打印样式。
+- 审美复核：按用户要求调用本机 Claude Code CLI 负责前端审美复核；只让其输出建议，不允许写文件。最终落实首屏层级、目录进度、移动端目录、代码块语言标签、timeline、focus-visible、返回顶部显隐和打印细节。
+- 验证：`node scripts\build-doc-showcase.js`、`node --check scripts\build-doc-showcase.js` 通过；临时启动 `python -m http.server 8765 --bind 127.0.0.1` 后用内置浏览器检查三页 HTTP 200、标题和核心内容存在、控制台无 error/warn；滚动到 1311px 时阅读进度为 `12%`、目录高亮、返回顶部可见、8 组 timeline 生效；响应式检查无横向溢出，移动端目录显示且桌面侧栏隐藏。
+- 范围控制：未改 bot 运行代码、prompt、配置或部署链路；未处理工作区已有 `.gitignore`、历史隐私清理记录等其他并行改动。
+- 小目标已完成：两份项目文档已有静态展示网页，可从 `docs/showcase/index.html` 本地打开。
+
 ## 运行维护 2026-06-22 18:55
 
 - 小目标：根据当前分支 Git 历史，整理一份独立的项目开发历史文档，详细讲述 MizukiBot 的开发过程。
@@ -846,3 +855,11 @@
 - 最小修复：有稳定 system 缓存断点时，最终 Anthropic 请求清理 messages 上的 `cache_control`；没有 system 断点时才按速查文档缓存倒数第 2 条非空历史消息。默认 TTL 仍为 `5m`，有断点时仍发送 `X-Enable-1h-cache: 1`。
 - 验收：`node --check src\model\http\runtime-core.chunk.js`、`node scripts\run-tests.js tests\httpClientAnthropicPromptCache.test.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\providerRequestDiagnostics.test.js tests\conversationContextClaudeCacheMarkers.test.js` 通过；`node scripts\verify-admin-cache-read.js --dry-run --json --max-tokens=16 --timeout-ms=45000` 显示 `anthropicCacheBreakpoints=1`、`anthropicPromptCacheTtl=5m`、`anthropicOneHourCacheHeader=1`；真实双请求请求体 hash 一致，model-calls 记录 `system_cache_breakpoints=1`、`message_cache_breakpoints=0`。
 - 小目标已完成：主回复稳定 system 存在时不再让动态历史消息断点破坏 Anthropic 缓存读取。
+
+## 运行维护 2026-06-22 19:57
+
+- 清理 Git 历史中的本地隐私和运行数据。
+- 范围：从所有本地分支历史移除 `.claude/`、`.playwright-mcp/`、`data/`、`artifacts/memory-recall-eval/`、`artifacts/post-reply-eval/`、`artifacts/backups/`、`artifacts/tmp-*.json` 和 `prompts/persona/*.zip`。
+- 最小修复：改写本地历史并清理可达旧对象；`.gitignore` 增加上述本地数据/生成数据规则，保留磁盘上的未跟踪本地文件，不再纳入版本库。
+- 验收：`git log --all --name-only --pretty=format:`、`git rev-list --all --objects` 和 `git ls-files` 对目标路径均无命中；`npm run diag:security` 通过。
+- 小目标已完成：历史提交不再携带上述本地截图、运行数据、评估样本、备份包和代理本地配置。
