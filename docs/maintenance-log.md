@@ -1,3 +1,12 @@
+## 运行维护 2026-06-22 13:18
+
+- 小目标：排查 `restart-bot.cmd restart confirm` 直接报错，修复主 bot 缺席但 worker 仍在时无法进入重启流程的问题。
+- 现场结论：`data\restart-bot.log` 连续记录 `无法将参数绑定到参数“MainProcesses”，因为该参数为空数组。`；此时 status 显示 main bot PID 文件指向的进程已不存在，post-reply worker 仍 Running。空 main 列表是合法现场，不应被参数绑定层拦截。
+- 最小修复：`Get-RestartLauncherPids` 的 `Processes/MainProcesses/WorkerProcesses` 改为可空数组默认值，launcher 扫描在没有 main/worker 进程时返回空集合，让后续停止、直启和健康检查继续执行。
+- 验证：`node scripts\run-tests.js tests\restartBotScript.test.js`、PowerShell AST parse、`cmd /c restart-bot.cmd status` 和实际 `cmd /c restart-bot.cmd restart confirm` 通过；旧 worker `20668` 被停止，最终 main bot `54672`、post-reply worker `14432` Running，`data\restart-bot-result.json` 为 `status=success, healthy=true`。
+- 范围控制：未改重启确认语义、进程匹配规则、worker 常驻策略或远程反馈链路；未推送远端。
+- 小目标已完成：主 bot 已退出、worker 仍在时，确认重启不再卡在 PowerShell 空数组参数绑定。
+
 ## 运行维护 2026-06-22 01:13
 
 - 小目标：检查 `data/passive-awareness-decisions.jsonl` 中 `groupId=597801651` 在 2026-06-21 15:27、15:36 附近的图片被动感知样本，定位 `closed-no-cue: group_open_question` / `cooling-no-cue` 没形成有效 cue 的断点。

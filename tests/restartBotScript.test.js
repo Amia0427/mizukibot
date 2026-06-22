@@ -136,6 +136,12 @@ module.exports = (() => {
     'restart should stop verified cmd launchers for the old bot process tree'
   );
   assert.ok(
+    script.includes('[object[]]$MainProcesses = @()') &&
+      script.includes('[object[]]$WorkerProcesses = @()') &&
+      !script.includes('[Parameter(Mandatory = $true)][object[]]$MainProcesses'),
+    'restart launcher scan should accept empty main/worker process lists'
+  );
+  assert.ok(
     script.includes('function Get-CurrentProcessAncestorPids') &&
       script.includes('protected caller pids') &&
       script.includes('Where-Object { $stopRootPids -notcontains [int]$_ }') &&
