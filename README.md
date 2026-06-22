@@ -4,9 +4,11 @@
 
 ## 近期更新
 
+**2026-06-22 10:35 +08:00**：修复 Anthropic 5 分钟 prompt cache 只写不读。真实双请求探针确认同一 `ttl:"5m"` 请求体在带 `X-Enable-1h-cache: 1` 时第二次读到缓存；现只要 Anthropic 请求存在 `cache_control` 断点就保留该网关启用头，`extended-cache-ttl-2025-04-11` 仍只在 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时发送。验收：目标 provider/cache 测试通过，修复后真实 5m 双请求第二次 `cache_read_input_tokens=8830`。
+
 **2026-06-22 09:34 +08:00**：修复普通群聊未 @bot 单张图片/动画表情被连续消息预处理固定拖到 `max_hold=25000ms` 的问题。`messageId=983286449` 样本断点在入站锁前的 `awaitingFollowup` 调度，现首条单图走图片聚合 debounce，已有追加消息时仍保留 max-hold 合并上限；目标测试和 `request-trace-preflight` 诊断通过。
 
-**2026-06-22 08:05 +08:00**：按要求把 Anthropic prompt cache 默认 TTL 改回 5 分钟。`ANTHROPIC_PROMPT_CACHE_TTL` 默认值现在是 `5m`，默认 Anthropic 请求只发送 `prompt-caching-2024-07-31`，不会携带 `extended-cache-ttl-2025-04-11` 或 `X-Enable-1h-cache: 1`；只有显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时才启用一小时缓存兼容头。验收：目标 provider/cache 测试和本地构造探针确认默认 5m、显式 1h 两个分支。
+**2026-06-22 08:05 +08:00**：按要求把 Anthropic prompt cache 默认 TTL 改回 5 分钟。`ANTHROPIC_PROMPT_CACHE_TTL` 默认值现在是 `5m`，默认 Anthropic 请求不会携带 `extended-cache-ttl-2025-04-11`；一小时 TTL 仍需显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h`。10:35 复查发现第三方网关 5m 读取也需要 `X-Enable-1h-cache: 1`，该头已改为有缓存断点即发送。验收：目标 provider/cache 测试和真实 5m 双请求探针确认。
 
 **2026-06-22 01:13 +08:00**：修复被动群感知图片开场漏判。`groupId=597801651` 在 2026-06-21 15:27/15:36 附近的图片样本已选中 cached image，但视觉 worker 关闭后被 `closed-no-cue: group_open_question` 提前挡住，`decisionModelCalled=false`；同时 CQ 图片 URL 的 `?` 会污染本地问题识别。现被动感知会剥离 CQ 控制段，保留 `[图片]` 占位，并让 closed/cooling 下的图片候选进入一次带 `image_url` 的决策模型探测，模型拒绝时仍不回复；`passive-awareness-decisions.jsonl` 新增 `visualCueProbe` 诊断字段。验收：`node scripts\run-tests.js passiveAwarenessVisualCueProbe.test.js passiveAwarenessVisionInput.test.js passiveAwarenessAmbientTrigger.test.js` 通过。小目标完成：群聊图片开场不再在视觉 cue 判定前被状态机漏挡。
 

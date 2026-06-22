@@ -243,15 +243,23 @@
 - 小目标：彻查 Anthropic 主回复仍完全没有缓存读取和一小时缓存，并按网关要求补 `X-Enable-1h-cache: 1`。
 - 现场结论：官方 Anthropic 1 小时缓存的必要请求体参数是 `cache_control: { type: "ephemeral", ttl: "1h" }`；第三方网关还要求 `X-Enable-1h-cache: 1`。本地真实运行进程 `node index.js pid=2544` 启动于 2026-06-21 16:40:46 +08:00，早于 17:24 的上一轮修复提交，因此 `data/request-trace.ndjson` 最近仍由旧进程记录 `anthropicPromptCacheTtl="5m"`。同时新增 header 原先不在 Anthropic provider header 白名单内，即使构造出来也会被 `normalizeProviderRequestHeaders` 丢弃。
 - 最小修复：`buildAnthropicRequestHeaders` 在请求体实际存在 `ttl:"1h"` 缓存断点时发送 `X-Enable-1h-cache: 1`；Anthropic provider 白名单允许该 header；缓存降级/完整剥离时同步重建或移除 prompt-cache 相关 header；request trace 和 model-calls 诊断记录一小时缓存 header 是否存在。
-- 验证：`node --check` 覆盖 `runtime-core.chunk.js`、`request-shaping.chunk.js`、`promptCaching.js`、`modelProvider.js`；`node scripts\run-tests.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\httpClientAnthropicPromptCache.test.js tests\mainReplyCacheStatsDiagnostics.test.js tests\providerRequestDiagnostics.test.js` 通过；本地 `prepareRequest` 探针确认默认分支输出 `ttl=1h`、`anthropic-beta=prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11`、`X-Enable-1h-cache=1`，显式 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时不发该 header。
+- 验证：`node --check` 覆盖 `runtime-core.chunk.js`、`request-shaping.chunk.js`、`promptCaching.js`、`modelProvider.js`；`node scripts\run-tests.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\httpClientAnthropicPromptCache.test.js tests\mainReplyCacheStatsDiagnostics.test.js tests\providerRequestDiagnostics.test.js` 通过；当时本地 `prepareRequest` 探针确认默认分支输出 `ttl=1h`、`anthropic-beta=prompt-caching-2024-07-31,extended-cache-ttl-2025-04-11`、`X-Enable-1h-cache=1`，显式 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时不发该 header；2026-06-22 10:35 复查后已改为 5m 也发送该网关启用头。
 - 小目标已完成：一小时缓存请求体、beta、第三方网关 header 和诊断观测已对齐；旧进程需重启后才能在真实 trace 中看到新字段。
 
 ## 运行维护 2026-06-22 08:05
 
 - 小目标：按要求把 Anthropic prompt cache 默认 TTL 改成 5 分钟。
-- 最小修复：`pickAnthropicPromptCacheTtl()` 默认值从 `1h` 改为 `5m`，`.env.example` 同步为 `ANTHROPIC_PROMPT_CACHE_TTL=5m`。一小时兼容能力保留，只有显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时才会发送 `extended-cache-ttl-2025-04-11` 和 `X-Enable-1h-cache: 1`。
-- 验证：目标 provider/cache 测试和本地 `prepareRequest` 探针确认默认分支为 `ttl=5m` 且不带一小时 header，显式 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 分支仍带一小时 header。
+- 最小修复：`pickAnthropicPromptCacheTtl()` 默认值从 `1h` 改为 `5m`，`.env.example` 同步为 `ANTHROPIC_PROMPT_CACHE_TTL=5m`。一小时兼容能力保留，只有显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时才会发送 `extended-cache-ttl-2025-04-11`。
+- 验证：目标 provider/cache 测试和本地 `prepareRequest` 探针确认默认分支为 `ttl=5m`，显式 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 分支仍带 extended beta。
 - 小目标已完成：主回复 Anthropic 缓存默认回到五分钟，不删除显式一小时兼容开关。
+
+## 运行维护 2026-06-22 10:35
+
+- 小目标：彻查 5 分钟 Anthropic prompt cache 又只写不读。
+- 现场结论：真实主回复日志显示同一分钟内连续请求都是 `ttl:"5m"`、`cache_creation.ephemeral_5m_input_tokens=5440`、`cache_read_input_tokens=0`。本地无硬编码预检确认两次 5m 请求体一致；进一步用超过 Opus 4.6 最小缓存前缀的稳定块做真实 streaming 双请求，只有在补 `X-Enable-1h-cache: 1` 时第二次读到缓存。因此该第三方网关把 `X-Enable-1h-cache` 实际作为 prompt cache 启用头，而不是仅一小时 TTL 开关。
+- 最小修复：`buildAnthropicRequestHeaders()` 改为只要存在 Anthropic `cache_control` 断点就发送 `X-Enable-1h-cache: 1`；`extended-cache-ttl-2025-04-11` 仍只在请求体实际存在 `ttl:"1h"` 时发送。`verify-admin-cache-read` 的强制稳定缓存块改为复用当前 `ANTHROPIC_PROMPT_CACHE_TTL`，不再硬编码 `1h`。
+- 验证：修复后真实 5m 双请求探针 `bodyHash=0105545f9c9c910e`，第一次 `cache_creation_input_tokens=8830`，第二次 `cache_read_input_tokens=8830`；目标 provider/cache 测试通过。
+- 小目标已完成：主回复 Anthropic 默认 5 分钟缓存保留读取所需网关启用头，同时不误开一小时 TTL beta。
 
 ## 运行维护 2026-06-17 11:52
 

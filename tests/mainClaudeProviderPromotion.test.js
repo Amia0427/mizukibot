@@ -64,7 +64,7 @@ module.exports = (async () => {
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestBody, 'tool_choice'));
     assert.ok(prepared.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
     assert.ok(!prepared.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestHeaders, 'X-Enable-1h-cache'));
+    assert.strictEqual(prepared.requestHeaders['X-Enable-1h-cache'], '1');
     assert.strictEqual(prepared.requestHeaders['User-Agent'], browserUA);
     assert.ok(!Object.prototype.hasOwnProperty.call(prepared.requestHeaders || {}, 'Authorization'));
 

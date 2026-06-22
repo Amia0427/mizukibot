@@ -85,7 +85,7 @@ module.exports = (async () => {
     assert.deepStrictEqual(preparedMain.requestBody.tool_choice, { type: 'auto' });
     assert.ok(preparedMain.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
     assert.ok(!preparedMain.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
-    assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestHeaders, 'X-Enable-1h-cache'));
+    assert.strictEqual(preparedMain.requestHeaders['X-Enable-1h-cache'], '1');
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestBody, 'prompt_cache_key'));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedMain.requestBody, 'input'));
 
