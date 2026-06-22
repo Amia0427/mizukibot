@@ -5,6 +5,9 @@
 secrets/
 *.key
 *.pem
+*.p12
+*.pfx
+*.ovpn
 
 # Dependencies
 node_modules/
@@ -14,6 +17,9 @@ __pycache__/
 data/
 !.gitkeep
 NapCat.Shell (2)/
+.claude/settings.local.json
+.playwright-mcp/
+tmp/
 
 # Logs
 *.log
@@ -32,16 +38,13 @@ _tmp_*.tar.gz
 *.before.json
 artifacts/tmp/
 artifacts/logs/
+artifacts/docx-meme-review/
 artifacts/lancedb-gate-shadow.json
 artifacts/memory-recall-eval/*.tmp
 artifacts/gemini-sampling-degradation-*.json
 prompts/*.bak
+prompts/*.zip
 
 # Local Windows ops artifacts
-windows-mgmt.conf
-wireguard-amd64-*.msi
-toggle_ipv4_via_*.cmd
-turn_off_ipv4_via_*.cmd
-turn_on_ipv4_via_*.cmd
 ops/windows/
 memory-backup-*.tar.gz

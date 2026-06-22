@@ -53,11 +53,9 @@
     "linux:status": "bash scripts/mizukibot.sh status",
     "linux:logs": "bash scripts/mizukibot.sh logs",
     "linux:systemd": "bash scripts/setup-systemd.sh",
-    "linux:wireguard:setup": "bash scripts/setup-wireguard-jump-host.sh",
     "win:daemon:install": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-daemon.ps1",
     "win:daemon:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-daemon.ps1",
     "win:daemon:status": "powershell -ExecutionPolicy Bypass -File scripts/status-windows-daemon.ps1",
-    "win:mgmt:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-windows-management-plane.ps1",
     "prepare": "husky"
   },
   "dependencies": {

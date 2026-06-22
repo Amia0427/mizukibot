@@ -52,11 +52,9 @@
 - `bootstrap-debian12.sh`
 - `check-linux.sh`
 - `setup-systemd.sh`
-- `setup-wireguard-jump-host.sh`
 - `install-windows-daemon.ps1`
 - `install-periodic-restart.ps1`
 - `uninstall-windows-daemon.ps1`
-- `setup-windows-management-plane.ps1`
 - `install-skill-deps.ps1`
 
 ## Migration / Maintenance
@@ -81,8 +79,6 @@
 - `set-env.js`
 - `set-apikey.js`
 - `one-click-start.ps1`
-- `toggle-ipv4-exit-gateway.ps1`
-- `toggle-ipv4-via-98.142.241.73.ps1`
 - `windows-daemon-common.ps1`
 
 约定：
