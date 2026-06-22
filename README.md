@@ -147,7 +147,8 @@ data/       本地运行数据，默认不提交
 - `docs/post-reply-worker.md`：回复后学习 worker 说明。
 - `docs/ai-agent-job-application.md`：面向 AI 开发工程师岗位的项目说明和面试讲法。
 - `docs/project-development-history.md`：基于 Git 历史整理的项目开发过程。
+- `docs/showcase/index.html`：面向投递和面试展示的静态 HTML 文档入口。
 - `scripts/README.md`：脚本说明。
 - `deploy/README.md`：部署说明。
 
-更新时间：2026-06-22 19:57 +08:00
+更新时间：2026-06-22 20:00 +08:00
