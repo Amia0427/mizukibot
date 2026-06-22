@@ -19,6 +19,8 @@ data/
 NapCat.Shell (2)/
 .claude/
 .playwright-mcp/
+.learnings/
+.remote-hermes/
 tmp/
 
 # Logs
@@ -36,6 +38,14 @@ _tmp_*.tar.gz
 *.bak_codex_*
 *.bak-*
 *.before.json
+CLAUDE.md
+DEBUG_PLAN.md
+docs/showcase/
+docs/ai-agent-job-application.md
+scripts/build-doc-showcase.js
+scripts/backup-prompt-persona-modules.js
+artifacts/
+!artifacts/.gitkeep
 artifacts/tmp/
 artifacts/logs/
 artifacts/backups/
