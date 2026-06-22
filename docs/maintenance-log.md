@@ -1,11 +1,10 @@
-## 运行维护 2026-06-22 20:00
+## 运行维护 2026-06-22 20:43
 
-- 小目标：把 `docs/ai-agent-job-application.md` 和 `docs/project-development-history.md` 做成可投递、可面试展示的静态 HTML 网页。
-- 最小修复：新增 `scripts/build-doc-showcase.js`，从两份 Markdown 生成 `docs/showcase/index.html`、岗位说明页、项目开发历史页、`showcase.css` 和 `showcase.js`；展示页包含首页卡片、文章 hero、桌面/移动目录、阅读进度、代码/表格样式、时间线样式、返回顶部和打印样式。
-- 审美复核：按用户要求调用本机 Claude Code CLI 负责前端审美复核；只让其输出建议，不允许写文件。最终落实首屏层级、目录进度、移动端目录、代码块语言标签、timeline、focus-visible、返回顶部显隐和打印细节。
-- 验证：`node scripts\build-doc-showcase.js`、`node --check scripts\build-doc-showcase.js` 通过；临时启动 `python -m http.server 8765 --bind 127.0.0.1` 后用内置浏览器检查三页 HTTP 200、标题和核心内容存在、控制台无 error/warn；滚动到 1311px 时阅读进度为 `12%`、目录高亮、返回顶部可见、8 组 timeline 生效；响应式检查无横向溢出，移动端目录显示且桌面侧栏隐藏。
-- 范围控制：未改 bot 运行代码、prompt、配置或部署链路；未处理工作区已有 `.gitignore`、历史隐私清理记录等其他并行改动。
-- 小目标已完成：两份项目文档已有静态展示网页，可从 `docs/showcase/index.html` 本地打开。
+- 小目标：修正公开 `master`，避免无关展示材料、代理本地痕迹和备份文件被推送到 GitHub。
+- 最小修复：从 `master` 历史移除公开无关目录、代理本地记录、展示材料、调试计划和备份脚本；README 删除无关文档入口。
+- 验证：`git ls-files` 和 `git log master --name-only` 对清理清单检查均无匹配；推送后校验远端 `master` 与本地 `master` 哈希一致。
+- 范围控制：未改 bot 运行代码、prompt、配置或部署链路；本地展示页改动已暂存保留在 stash。
+- 小目标已完成：公开分支只保留项目本体和维护文档。
 
 ## 运行维护 2026-06-22 18:55
 
@@ -13,15 +12,7 @@
 - 最小修复：新增 `docs/project-development-history.md`，按 2026-04 原型、2026-05 架构/记忆治理、2026-06 真实运行稳定性等阶段梳理关键决策、代表性提交、技术主线和验收习惯；README 增加文档入口。
 - 验证：`git rev-list --count HEAD` 复核当前历史约 608 次提交，按月份统计 2026-04 约 62 次、2026-05 约 159 次、2026-06 约 387 次；`git diff --check -- README.md docs/project-development-history.md docs/maintenance-log.md` 通过。
 - 范围控制：未改运行代码、prompt、配置、脚本或部署文件；未处理工作区已有其他未提交/已暂存改动。
-- 小目标已完成：项目已有一份可用于作品集和面试讲述的开发历史文档。
-
-## 运行维护 2026-06-22 18:45
-
-- 小目标：基于当前 MizukiBot 项目，整理一份面向 AI 开发工程师岗位的项目应聘材料，并在 README 增加岗位匹配入口。
-- 最小修复：新增 `docs/ai-agent-job-application.md`，按岗位要求映射 Agent workflow、Prompt、API、RAG、LangGraph、真实项目经验和可迁移边界；README 只补充岗位语境说明和文档入口。
-- 验证：复核文档未把未落地的 Amazon SP-API / Dify 等写成已完成经验；`README.md` 保持项目入口定位；`git diff --check -- README.md docs/ai-agent-job-application.md docs/maintenance-log.md` 通过。
-- 范围控制：未改运行代码、prompt、配置、脚本或部署文件；未处理工作区已有其他未提交改动。
-- 小目标已完成：项目已有一份可投递/面试复用的岗位说明文档，README 也补上与岗位要求相关的项目特色。
+- 小目标已完成：项目已有一份用于复盘工程演进的开发历史文档。
 
 ## 运行维护 2026-06-22 18:37
 
