@@ -383,6 +383,7 @@ function normalizeAnthropicCacheBreakpointSlots(requestBody = {}) {
   };
 
   const nextBody = { ...requestBody };
+  let hasSystemCacheBreakpoint = false;
 
   if (Array.isArray(nextBody.tools)) {
     const toolCacheIndex = findLastAnthropicCacheControlIndex(nextBody.tools, extractAnthropicToolCacheControl);
@@ -401,14 +402,18 @@ function normalizeAnthropicCacheBreakpointSlots(requestBody = {}) {
     nextBody.system = systemBlocks.map((block, index) => {
       const cacheControl = extractAnthropicCacheControl(block);
       const stripped = stripCacheControlFields(block);
-      return index === systemCacheIndex && cacheControl && keepNextExplicit()
-        ? applyAnthropicCacheControl(stripped, cacheControl)
-        : stripped;
+      if (index === systemCacheIndex && cacheControl && keepNextExplicit()) {
+        hasSystemCacheBreakpoint = true;
+        return applyAnthropicCacheControl(stripped, cacheControl);
+      }
+      return stripped;
     });
   }
 
   if (Array.isArray(nextBody.messages)) {
-    const messageCacheIndex = findAnthropicAutoCacheMessageIndex(nextBody.messages);
+    const messageCacheIndex = hasSystemCacheBreakpoint
+      ? -1
+      : findAnthropicAutoCacheMessageIndex(nextBody.messages);
     nextBody.messages = nextBody.messages.map((message, index) => {
       const cacheControl = extractAnthropicMessageBreakpointCacheControl(message);
       const stripped = stripAnthropicMessageCacheControl(message);
@@ -474,8 +479,10 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
     nextBody.system = systemBlocks;
   }
 
+  const systemHasCacheBreakpoint = normalizeAnthropicSystemBlocks(nextBody.system)
+    .some((block) => blockHasAnthropicCacheControl(block));
   const messages = Array.isArray(nextBody.messages) ? nextBody.messages : [];
-  const messageIndex = findAnthropicAutoCacheMessageIndex(messages);
+  const messageIndex = systemHasCacheBreakpoint ? -1 : findAnthropicAutoCacheMessageIndex(messages);
   if (messageIndex >= 0 && !messageContentHasAnthropicCacheControl(messages[messageIndex])) {
     nextBody.messages = messages.map((message, index) => (
       index === messageIndex
