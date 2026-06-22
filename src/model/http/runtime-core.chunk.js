@@ -454,10 +454,11 @@ function buildAnthropicRequestHeaders(requestBody = {}) {
   if (!anthropicRequestUsesPromptCaching(requestBody)) return null;
 
   const betaFlags = ['prompt-caching-2024-07-31'];
-  const headers = {};
+  const headers = {
+    'X-Enable-1h-cache': '1'
+  };
   if (cacheControlUsesAnthropicOneHourTtl(requestBody)) {
     betaFlags.push('extended-cache-ttl-2025-04-11');
-    headers['X-Enable-1h-cache'] = '1';
   }
 
   headers['anthropic-beta'] = mergeAnthropicBetaHeader(

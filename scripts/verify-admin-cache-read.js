@@ -14,6 +14,9 @@ const {
   buildRequestCacheTrace
 } = require('../src/model/http/request-shaping.chunk');
 const {
+  normalizeAnthropicCacheControl
+} = require('../src/model/http/cache-control');
+const {
   flushModelCallLogsSync,
   listRecentModelCalls
 } = require('../utils/modelCallTracker');
@@ -143,7 +146,7 @@ function buildStableSystemMessages(options = {}) {
     messages.push({
       role: 'system',
       content: diagnosticStableText,
-      cache_control: { type: 'ephemeral', ttl: '1h' }
+      cache_control: normalizeAnthropicCacheControl(true)
     });
   }
 
@@ -151,7 +154,7 @@ function buildStableSystemMessages(options = {}) {
     messages.push({
       role: 'system',
       content: 'MizukiBot admin cache verification stable system prompt.',
-      cache_control: options.forceStableCacheBlock ? { type: 'ephemeral', ttl: '1h' } : undefined
+      cache_control: options.forceStableCacheBlock ? normalizeAnthropicCacheControl(true) : undefined
     });
   }
 

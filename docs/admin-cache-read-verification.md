@@ -1,10 +1,12 @@
 # 管理员缓存读写对照验收
 
-更新时间：2026-06-22 08:05 +08:00
+更新时间：2026-06-22 10:35 +08:00
 
 ## 2026-06-22 更新
 
-- 08:05：Anthropic prompt cache 默认 TTL 改回 `5m`。管理员稳定 system 缓存块仍会打 `cache_control`，但默认 TTL 为 5 分钟；如确实需要一小时缓存，显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 后才会发送 `extended-cache-ttl-2025-04-11` 与 `X-Enable-1h-cache=1`。
+- 10:35：真实 5 分钟缓存探针确认同一请求体加 `X-Enable-1h-cache: 1` 后第二次能读到缓存；修复后新代码真实双请求第二次 `cache_read_input_tokens=8830`。该头在目标第三方网关上是 prompt cache 启用头，不只是一小时缓存开关；现有缓存断点即发送该头，`extended-cache-ttl-2025-04-11` 仍只随 `ttl:"1h"` 发送。
+- 10:35：验收脚本的强制稳定缓存块不再硬编码 `ttl:"1h"`，改为复用 `ANTHROPIC_PROMPT_CACHE_TTL` 当前值。
+- 08:05：Anthropic prompt cache 默认 TTL 改回 `5m`。管理员稳定 system 缓存块仍会打 `cache_control`，但默认 TTL 为 5 分钟；如确实需要一小时缓存，显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 后才会发送 `extended-cache-ttl-2025-04-11`。
 
 ## 2026-06-21 更新
 
@@ -43,7 +45,7 @@ npm run verify:admin-cache-read -- --dry-run --json
 - 最终请求体差异为 `0`。
 - 最终请求体 keys：`max_tokens/messages/model/stream/system/temperature`。
 - 估算输入：`4826` tokens。
-- 缓存条件：Anthropic cache breakpoint=`1`，默认 5 分钟缓存只发送 `anthropic-beta=prompt-caching-2024-07-31`；显式 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 才会追加 `extended-cache-ttl-2025-04-11` 和 `X-Enable-1h-cache=1`。
+- 缓存条件：Anthropic cache breakpoint=`1`，默认 5 分钟缓存发送 `anthropic-beta=prompt-caching-2024-07-31` 和 `X-Enable-1h-cache=1`；显式 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 才会追加 `extended-cache-ttl-2025-04-11`。
 - 响应与本地 `model-calls` 都没有 usage/cache 字段：`usage_read=0`、`usage_write=0`、`modelCallUsage=null`。
 
 结论：`upstream_cache_signal_unobservable`。本轮不能证明“只写不读”，只能归因为上游不提供可观测缓存读写信号或该端点不支持上报。

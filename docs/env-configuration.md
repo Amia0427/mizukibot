@@ -1,6 +1,6 @@
 # Env Configuration
 
-更新时间：2026-06-22 08:05 +08:00
+更新时间：2026-06-22 10:35 +08:00
 
 ## 维护约定
 
@@ -9,8 +9,9 @@
 - 同功能变量放在同一分区，新增变量优先追加到对应分区，避免混入无关配置。
 - 目前本地 `.env` 有 324 个变量，324 个唯一变量；不要再用同名重复项表达历史调优，实际值必须只保留一处。
 - 当前 fallback 解析器遇到同名变量会保留首个非空环境值；新增或调整配置后用 `node -e "const config=require('./config'); console.log(config.KEY)"` 复查实际生效值。
-- 2026-06-22 08:05 +08:00：Anthropic prompt cache 默认 TTL 改回 `5m`，`.env.example` 同步为 `ANTHROPIC_PROMPT_CACHE_TTL=5m`。默认请求只带 `prompt-caching-2024-07-31`；只有显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时，才会发送 `extended-cache-ttl-2025-04-11` 和 `X-Enable-1h-cache: 1`。
-- 2026-06-21 22:37 +08:00：第三方 Anthropic 兼容网关的一小时缓存除 `cache_control.ttl="1h"` 外，还需要最终请求头保留 `X-Enable-1h-cache: 1`；该 header 已加入 Anthropic provider 白名单，并只在请求体实际存在 `ttl:"1h"` 缓存断点时发送。现场旧进程 `pid=2544` 启动早于上一轮修复提交，未重启会继续按旧代码发 `5m`。验收：本地构造探针确认默认分支发 `ttl=1h`、`extended-cache-ttl-2025-04-11` 和 `X-Enable-1h-cache=1`，显式 `ANTHROPIC_PROMPT_CACHE_TTL=5m` 时不发该 header。
+- 2026-06-22 10:35 +08:00：第三方 Anthropic 兼容网关把 `X-Enable-1h-cache: 1` 当作 prompt cache 启用头；5 分钟缓存也需要该头才能读缓存。当前规则：只要 Anthropic 请求存在 `cache_control` 断点就发送 `X-Enable-1h-cache: 1`；只有显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时才追加 `extended-cache-ttl-2025-04-11`。
+- 2026-06-22 08:05 +08:00：Anthropic prompt cache 默认 TTL 改回 `5m`，`.env.example` 同步为 `ANTHROPIC_PROMPT_CACHE_TTL=5m`。默认请求不发送 `extended-cache-ttl-2025-04-11`；10:35 复查后确认 5m 读取仍需保留 `X-Enable-1h-cache: 1`。
+- 2026-06-21 22:37 +08:00：第三方 Anthropic 兼容网关的一小时缓存除 `cache_control.ttl="1h"` 外，还需要最终请求头保留 `X-Enable-1h-cache: 1`；该 header 已加入 Anthropic provider 白名单。现场旧进程 `pid=2544` 启动早于上一轮修复提交，未重启会继续按旧代码发 `5m`。
 - 2026-06-21 17:15 +08:00：修复主回复稳定 system 块仍硬编码 `ttl: "5m"` 的问题；默认 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 现在会贯穿 `conversationContext`、Anthropic 请求塑形和日志诊断。`ttl: "1h"` 请求头会自动追加 `extended-cache-ttl-2025-04-11`，显式设回 `5m` 时不追加该 beta。验收：本地构造探针确认 `1h`/`5m` 两种 header 分支正确；相关缓存/provider 测试和 secrets 检查通过。
 - 2026-06-21 16:21 +08:00：Anthropic 主回复 prompt caching 默认 TTL 改为 `ANTHROPIC_PROMPT_CACHE_TTL=1h`，实际写入块级 `cache_control: { type: "ephemeral", ttl: "1h" }`；如兼容网关不支持 1 小时缓存，可显式设回 `5m`。验收：官方 Markdown 文档确认 1 小时缓存使用 `ttl: "1h"`，目标 provider/cache 测试通过。
 - 2026-06-15 11:56 +08:00：主回复 endpoint 协议改为 URL 明确优先。`API_BASE_URL` / `ADMIN_API_BASE_URL` / 主回复 override 以 `/v1/messages` 或 `/messages` 结尾时直接走 Anthropic Messages，即使 `API_PROVIDER` 写成第三方或 `openai_compatible` 也不再自动改成 `/v1/chat/completions`；裸域名或 `/v1` 仍默认补 `/v1/chat/completions`。验收：`node tests/providerRequestNormalization.test.js`、`node tests/plannerNoRetry.test.js`、`node tests/providerRequestDiagnostics.test.js` 通过。
