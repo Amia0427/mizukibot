@@ -1,9 +1,10 @@
 # 管理员缓存读写对照验收
 
-更新时间：2026-06-22 10:35 +08:00
+更新时间：2026-06-22 12:13 +08:00
 
 ## 2026-06-22 更新
 
+- 12:13：按速查文档收口 Anthropic `cache_control` 断点：最终请求先清掉旧断点，再保留最后一个可缓存工具、最后一个稳定 system 前缀和倒数第 2 条非空历史消息；最新消息不自动缓存。根因是多个 stable system block 预标记会占满 4 个断点，导致历史消息断点被挤掉，真实请求每轮只写不读。验收：目标 Anthropic/provider/cache 测试通过。
 - 10:35：真实 5 分钟缓存探针确认同一请求体加 `X-Enable-1h-cache: 1` 后第二次能读到缓存；修复后新代码真实双请求第二次 `cache_read_input_tokens=8830`。该头在目标第三方网关上是 prompt cache 启用头，不只是一小时缓存开关；现有缓存断点即发送该头，`extended-cache-ttl-2025-04-11` 仍只随 `ttl:"1h"` 发送。
 - 10:35：验收脚本的强制稳定缓存块不再硬编码 `ttl:"1h"`，改为复用 `ANTHROPIC_PROMPT_CACHE_TTL` 当前值。
 - 08:05：Anthropic prompt cache 默认 TTL 改回 `5m`。管理员稳定 system 缓存块仍会打 `cache_control`，但默认 TTL 为 5 分钟；如确实需要一小时缓存，显式设置 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 后才会发送 `extended-cache-ttl-2025-04-11`。

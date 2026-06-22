@@ -300,6 +300,39 @@ module.exports = (async () => {
     assert.strictEqual(rootPromptCacheSummary.anthropic_extended_cache_ttl_beta_enabled, false);
     assert.strictEqual(rootPromptCacheSummary.anthropic_one_hour_cache_header_enabled, true);
 
+    const preparedSystemAndHistoryBreakpoints = await httpClient.prepareRequest('https://example.com/v1/messages', {
+      model: 'claude-3-5-sonnet-latest',
+      messages: [
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'stable persona A', cache_control: true }]
+        },
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'stable persona B', cache_control: true }]
+        },
+        { role: 'user', content: 'previous user turn' },
+        { role: 'assistant', content: 'previous assistant turn' },
+        { role: 'user', content: 'latest user turn' }
+      ],
+      stream: false
+    });
+    const cachedSystemBreakpoints = preparedSystemAndHistoryBreakpoints.requestBody.system
+      .filter((block) => block.cache_control?.type === 'ephemeral');
+    const previousAssistantTurn = preparedSystemAndHistoryBreakpoints.requestBody.messages.find((message) => (
+      message.role === 'assistant'
+      && contentParts(message).some((block) => String(block.text || '').includes('previous assistant turn'))
+    ));
+    const latestUserTurn = preparedSystemAndHistoryBreakpoints.requestBody.messages.find((message) => (
+      message.role === 'user'
+      && contentParts(message).some((block) => String(block.text || '').includes('latest user turn'))
+    ));
+    assert.strictEqual(cachedSystemBreakpoints.length, 1);
+    assert.ok(contentParts(previousAssistantTurn).some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(contentParts(latestUserTurn).every((block) => !('cache_control' in block)));
+    assert.ok(countRequestCacheControl(preparedSystemAndHistoryBreakpoints.requestBody) <= 4);
+    assert.strictEqual(preparedSystemAndHistoryBreakpoints.requestHeaders['X-Enable-1h-cache'], '1');
+
     const preparedTooManyBreakpoints = await httpClient.prepareRequest('https://example.com/v1/messages', {
       model: 'claude-3-5-sonnet-latest',
       messages: [
@@ -339,6 +372,20 @@ module.exports = (async () => {
     });
     assert.ok(countRequestCacheControl(preparedTooManyBreakpoints.requestBody) <= 4);
     assert.ok(preparedTooManyBreakpoints.requestBody.tools.some((tool) => tool.name === 'lookup_memory' && tool.cache_control?.type === 'ephemeral'));
+    assert.strictEqual(
+      preparedTooManyBreakpoints.requestBody.system.filter((block) => block.cache_control?.type === 'ephemeral').length,
+      1
+    );
+    const cachedHistoricalUser = preparedTooManyBreakpoints.requestBody.messages.find((message) => (
+      message.role === 'user'
+      && contentParts(message).some((block) => String(block.text || '').includes('historical user context'))
+    ));
+    const uncachedCurrentUser = preparedTooManyBreakpoints.requestBody.messages.find((message) => (
+      message.role === 'user'
+      && contentParts(message).some((block) => String(block.text || '').includes('current user context'))
+    ));
+    assert.ok(contentParts(cachedHistoricalUser).some((block) => block.cache_control?.type === 'ephemeral'));
+    assert.ok(contentParts(uncachedCurrentUser).every((block) => !('cache_control' in block)));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedTooManyBreakpoints.requestBody, 'cache_control'));
 
     let attemptCount = 0;

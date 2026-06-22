@@ -4,6 +4,8 @@
 
 ## 近期更新
 
+**2026-06-22 12:13 +08:00**：按 prompt caching 速查文档优化 Anthropic 断点分配。最终 Anthropic 请求现在会先清理旧 `cache_control`，只保留最后一个可缓存工具、最后一个稳定 system 前缀断点，并给倒数第 2 条非空历史消息打断点；最新消息不再自动缓存，避免每轮 cache bust。验收：`node --check src\model\http\runtime-core.chunk.js`、`node scripts\run-tests.js tests\httpClientAnthropicPromptCache.test.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\providerRequestDiagnostics.test.js tests\conversationContextClaudeCacheMarkers.test.js` 通过。
+
 **2026-06-22 10:35 +08:00**：修复 Anthropic 5 分钟 prompt cache 只写不读。真实双请求探针确认同一 `ttl:"5m"` 请求体在带 `X-Enable-1h-cache: 1` 时第二次读到缓存；现只要 Anthropic 请求存在 `cache_control` 断点就保留该网关启用头，`extended-cache-ttl-2025-04-11` 仍只在 `ANTHROPIC_PROMPT_CACHE_TTL=1h` 时发送。验收：目标 provider/cache 测试通过，修复后真实 5m 双请求第二次 `cache_read_input_tokens=8830`。
 
 **2026-06-22 09:34 +08:00**：修复普通群聊未 @bot 单张图片/动画表情被连续消息预处理固定拖到 `max_hold=25000ms` 的问题。`messageId=983286449` 样本断点在入站锁前的 `awaitingFollowup` 调度，现首条单图走图片聚合 debounce，已有追加消息时仍保留 max-hold 合并上限；目标测试和 `request-trace-preflight` 诊断通过。

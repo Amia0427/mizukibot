@@ -796,3 +796,11 @@
 - 最小修复：普通群首条单图/动画表情仍走图片聚合 debounce，不再直接提升到 `max_hold`；同一 session 已追加多条消息时继续允许 max-hold 作为合并上限。
 - 验收：`node tests\continuousMessagePreprocessorDebounce.test.js`、`node tests\continuousMessagePreprocessor.test.js`、相关 `node --check` 通过；配置探针输出 `regular=2000, singleImage=15000, multiImage=25000`；`npm run diag:request-trace-preflight -- --request-id req_4702d42d419f084f --limit 1` 复核断点在锁前连续消息窗口。
 - 小目标已完成：群聊单张图片/动画表情不会再因首条 `awaitingFollowup` 直接命中 25s max-hold。
+
+## 运行维护 2026-06-22 12:13
+
+- 根据 `prompt-caching-cheatsheet7651798101800031944.pdf` 优化 Anthropic prompt cache 断点，目标是让主回复真实读取缓存。
+- 根因：上游 `conversationContext` 可能预先给多个 stable system block 打 `cache_control`，最终归一化按 `tools -> system -> messages` 保留时会让 system 断点占满 4 个名额，倒数第 2 条历史消息断点被挤掉；同时单条最新 user 消息也会被旧自动逻辑缓存，下一轮必然 bust。
+- 最小修复：最终 Anthropic 请求先清理旧断点，再只保留最后一个可缓存工具、最后一个稳定 system 前缀断点，并给倒数第 2 条非空历史消息打断点；最新消息不自动缓存，默认 TTL 仍为 `5m`，有断点时仍发送 `X-Enable-1h-cache: 1`。
+- 验收：`node --check src\model\http\runtime-core.chunk.js`、`node scripts\run-tests.js tests\httpClientAnthropicPromptCache.test.js tests\providerRequestNormalization.test.js tests\mainClaudeProviderPromotion.test.js tests\openAIMainPromptCacheDualProtocol.test.js tests\providerRequestDiagnostics.test.js tests\conversationContextClaudeCacheMarkers.test.js` 通过。
+- 小目标已完成：Anthropic 主回复缓存断点按“system 前缀 + 倒数第 2 条历史消息”稳定落位，避免最新消息和过多 system 断点导致只写不读。

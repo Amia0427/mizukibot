@@ -296,15 +296,9 @@ function findAnthropicAutoCacheMessageIndex(messages = []) {
   const nonEmptyIndexes = items
     .map((message, index) => (messageHasAnthropicContent(message) ? index : -1))
     .filter((index) => index >= 0);
-  if (nonEmptyIndexes.length === 0) return -1;
+  if (nonEmptyIndexes.length < 2) return -1;
 
-  const lastNonEmptyIndex = nonEmptyIndexes[nonEmptyIndexes.length - 1];
-  const lastMessage = items[lastNonEmptyIndex] || {};
-  const historicalIndexes = (
-    normalizeText(lastMessage.role).toLowerCase() === 'user' && nonEmptyIndexes.length > 1
-      ? nonEmptyIndexes.slice(0, -1)
-      : nonEmptyIndexes
-  );
+  const historicalIndexes = nonEmptyIndexes.slice(0, -1);
 
   for (let index = historicalIndexes.length - 1; index >= 0; index -= 1) {
     const candidateIndex = historicalIndexes[index];
@@ -317,13 +311,65 @@ function findAnthropicAutoCacheMessageIndex(messages = []) {
 
 const ANTHROPIC_MAX_CACHE_BREAKPOINTS = 4;
 
-function normalizeCachedTarget(target, keepCacheControl) {
-  if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
-  const cacheControl = extractAnthropicCacheControl(target);
-  const stripped = stripCacheControlFields(target);
-  return cacheControl && keepCacheControl
-    ? applyAnthropicCacheControl(stripped, cacheControl)
-    : stripped;
+function extractAnthropicToolCacheControl(tool = {}) {
+  return extractAnthropicCacheControl(tool) || extractAnthropicCacheControl(tool?.function);
+}
+
+function stripAnthropicToolCacheControl(tool = {}) {
+  if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool;
+  const stripped = stripCacheControlFields(tool);
+  if (stripped.function && typeof stripped.function === 'object' && !Array.isArray(stripped.function)) {
+    return {
+      ...stripped,
+      function: stripCacheControlFields(stripped.function)
+    };
+  }
+  return stripped;
+}
+
+function extractAnthropicMessageBreakpointCacheControl(message = {}) {
+  const topLevel = extractAnthropicCacheControl(message);
+  if (topLevel) return topLevel;
+
+  if (Array.isArray(message?.content)) {
+    for (let index = message.content.length - 1; index >= 0; index -= 1) {
+      const cacheControl = extractAnthropicCacheControl(message.content[index]);
+      if (cacheControl) return cacheControl;
+    }
+    return null;
+  }
+
+  return extractAnthropicCacheControl(message?.content);
+}
+
+function stripAnthropicMessageCacheControl(message = {}) {
+  if (!message || typeof message !== 'object' || Array.isArray(message)) return message;
+  const stripped = stripCacheControlFields(message);
+  if (Array.isArray(stripped.content)) {
+    return {
+      ...stripped,
+      content: stripped.content.map((block) => (
+        block && typeof block === 'object' && !Array.isArray(block)
+          ? stripCacheControlFields(block)
+          : block
+      ))
+    };
+  }
+  if (stripped.content && typeof stripped.content === 'object') {
+    return {
+      ...stripped,
+      content: stripCacheControlFields(stripped.content)
+    };
+  }
+  return stripped;
+}
+
+function findLastAnthropicCacheControlIndex(items = [], extractor = extractAnthropicCacheControl) {
+  const list = Array.isArray(items) ? items : [];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    if (extractor(list[index])) return index;
+  }
+  return -1;
 }
 
 function normalizeAnthropicCacheBreakpointSlots(requestBody = {}) {
@@ -339,37 +385,37 @@ function normalizeAnthropicCacheBreakpointSlots(requestBody = {}) {
   const nextBody = { ...requestBody };
 
   if (Array.isArray(nextBody.tools)) {
-    nextBody.tools = nextBody.tools.map((tool) => (
-      extractAnthropicCacheControl(tool)
-        ? normalizeCachedTarget(tool, keepNextExplicit())
-        : tool
-    ));
+    const toolCacheIndex = findLastAnthropicCacheControlIndex(nextBody.tools, extractAnthropicToolCacheControl);
+    nextBody.tools = nextBody.tools.map((tool, index) => {
+      const cacheControl = extractAnthropicToolCacheControl(tool);
+      const stripped = stripAnthropicToolCacheControl(tool);
+      return index === toolCacheIndex && cacheControl && keepNextExplicit()
+        ? applyAnthropicCacheControl(stripped, cacheControl)
+        : stripped;
+    });
   }
 
   const systemBlocks = normalizeAnthropicSystemBlocks(nextBody.system);
   if (systemBlocks.length > 0) {
-    nextBody.system = systemBlocks.map((block) => (
-      extractAnthropicCacheControl(block)
-        ? normalizeCachedTarget(block, keepNextExplicit())
-        : block
-    ));
+    const systemCacheIndex = findLastAnthropicCacheControlIndex(systemBlocks);
+    nextBody.system = systemBlocks.map((block, index) => {
+      const cacheControl = extractAnthropicCacheControl(block);
+      const stripped = stripCacheControlFields(block);
+      return index === systemCacheIndex && cacheControl && keepNextExplicit()
+        ? applyAnthropicCacheControl(stripped, cacheControl)
+        : stripped;
+    });
   }
 
   if (Array.isArray(nextBody.messages)) {
-    nextBody.messages = nextBody.messages.map((message) => {
-      if (!message || typeof message !== 'object' || Array.isArray(message)) return message;
-      if (!Array.isArray(message.content)) {
-        return extractAnthropicCacheControl(message)
-          ? normalizeCachedTarget(message, keepNextExplicit())
-          : message;
-      }
+    const messageCacheIndex = findAnthropicAutoCacheMessageIndex(nextBody.messages);
+    nextBody.messages = nextBody.messages.map((message, index) => {
+      const cacheControl = extractAnthropicMessageBreakpointCacheControl(message);
+      const stripped = stripAnthropicMessageCacheControl(message);
+      if (index !== messageCacheIndex || !cacheControl || !keepNextExplicit()) return stripped;
       return {
-        ...stripCacheControlFields(message),
-        content: message.content.map((block) => (
-          extractAnthropicCacheControl(block)
-            ? normalizeCachedTarget(block, keepNextExplicit())
-            : block
-        ))
+        ...stripped,
+        content: applyAnthropicCacheControlToLastBlock(stripped.content, cacheControl)
       };
     });
   }
@@ -411,7 +457,6 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
   }
 
   const systemBlocks = normalizeAnthropicSystemBlocks(nextBody.system);
-  let hasSystemCacheControl = systemBlocks.some((block) => blockHasAnthropicCacheControl(block));
   if (systemBlocks.length > 0 && !systemBlocks.some((block) => blockHasAnthropicCacheControl(block))) {
     const systemCacheIndex = findAnthropicAutoCacheSystemBlockIndex(systemBlocks);
     const nextSystemBlocks = applyAnthropicCacheControlToBlockIndex(
@@ -419,8 +464,7 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
       systemCacheIndex,
       defaultCacheControl
     );
-    hasSystemCacheControl = nextSystemBlocks.some((block) => blockHasAnthropicCacheControl(block));
-    if (hasSystemCacheControl) {
+    if (nextSystemBlocks.some((block) => blockHasAnthropicCacheControl(block))) {
       nextBody.system = nextSystemBlocks;
       mutated = true;
     } else if (anthropicSystemUsesArray(nextBody.system)) {
@@ -431,19 +475,17 @@ function applyAutoAnthropicPromptCaching(requestBody = {}) {
   }
 
   const messages = Array.isArray(nextBody.messages) ? nextBody.messages : [];
-  if (!hasSystemCacheControl && !messages.some((message) => messageContentHasAnthropicCacheControl(message))) {
-    const messageIndex = findAnthropicAutoCacheMessageIndex(messages);
-    if (messageIndex >= 0) {
-      nextBody.messages = messages.map((message, index) => (
-        index === messageIndex
-          ? {
-              ...message,
-              content: applyAnthropicCacheControlToLastBlock(message.content, defaultCacheControl)
-            }
-          : message
-      ));
-      mutated = true;
-    }
+  const messageIndex = findAnthropicAutoCacheMessageIndex(messages);
+  if (messageIndex >= 0 && !messageContentHasAnthropicCacheControl(messages[messageIndex])) {
+    nextBody.messages = messages.map((message, index) => (
+      index === messageIndex
+        ? {
+            ...message,
+            content: applyAnthropicCacheControlToLastBlock(message.content, defaultCacheControl)
+          }
+        : message
+    ));
+    mutated = true;
   }
 
   const normalized = normalizeAnthropicCacheBreakpointSlots(nextBody);
