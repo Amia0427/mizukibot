@@ -43,6 +43,7 @@
     "lint": "node scripts/lint.js",
     "test": "node scripts/run-tests.js",
     "smoke:pre-release": "node scripts/pre-release-smoke.js",
+    "publish:check": "node scripts/verify-npm-publish.js",
     "console": "node scripts/console.js",
     "check:agent": "node scripts/check-agent.js",
     "check:agent:static": "cross-env CHECK_RUN=0 node scripts/check-agent.js",
@@ -88,7 +89,8 @@
     "win:daemon:install": "powershell -ExecutionPolicy Bypass -File scripts/install-windows-daemon.ps1",
     "win:daemon:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-windows-daemon.ps1",
     "win:daemon:status": "powershell -ExecutionPolicy Bypass -File scripts/status-windows-daemon.ps1",
-    "prepare": "husky"
+    "prepare": "husky",
+    "prepublishOnly": "npm run publish:check"
   },
   "dependencies": {
     "@lancedb/lancedb": "^0.27.2",

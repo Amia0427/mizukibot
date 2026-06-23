@@ -1,3 +1,11 @@
+## 运行维护 2026-06-23 12:38
+
+- 小目标：把 npm 发布链路收口到登录后可直接安全发布，发布命令本身必须先跑白名单和敏感内容硬校验。
+- 最小修复：新增 `scripts/verify-npm-publish.js`，基于 `npm pack --dry-run --json --ignore-scripts` 的真实包清单检查 `package.json` 白名单、禁发路径、私有 prompt、本地配置、测试/数据目录和常见密钥模式；`package.json` 增加 `npm run publish:check` 与 `prepublishOnly`，让 `npm publish` 自动先跑门禁。
+- 验证：`node --check scripts\verify-npm-publish.js` 通过；`npm run publish:check` 通过，包内 `entryCount=961`、`unpackedSize=7651276`；`npm publish --dry-run --access public --json` 触发 `prepublishOnly` 并通过；`npm whoami` 返回 `ENEEDAUTH`，本机仍未登录 npm。
+- 范围控制：未写入 npm token，未真实发布，未推送远端；未改业务运行代码、prompt 内容或包名版本。
+- 小目标已完成：登录 npm 后可执行 `npm publish --access public`，发布前会被 `prepublishOnly` 自动硬校验。
+
 ## 运行维护 2026-06-23 08:00
 
 - 小目标：取消 `prompts/persona/` 和 `prompts/admin.txt` 的 Git 跟踪，避免后续推送到远端，同时保留本地文件。
