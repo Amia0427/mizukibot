@@ -1,3 +1,12 @@
+## 运行维护 2026-06-24 01:31
+
+- 小目标：排查 2026-06-24 00:47:59 附近管理员主模型三次调用是否由本地代码重试造成，并避免慢成功 HTTP 408 被重复请求放大。
+- 根因：同一主回复/图片总结请求在上游返回 HTTP 408 后，本地 `postWithRetry` 仍按可重试错误继续请求；该类 408 实际可能只是网关超时，服务端仍在生成并最终成功。
+- 最小修复：`shouldRetry` 接收 trace，只在主回复、流式主回复、图片总结上下文中禁止 HTTP 408 自动重试；普通网络错误、5xx、409/425/429、Cloudflare 403 和非主回复 408 仍沿用原有重试策略。
+- 验证：`node tests\mainReplyHttp408RetryPolicy.test.js`、`node tests\httpClientTransportRetryDelay.test.js`、`node tests\imageSummaryLatencyPath.test.js`、`node tests\httpClientAnthropicPromptCache.test.js`、`node tests\httpClientReasoningEffort.test.js`、`node tests\normalUserMainReplyStreamTimeout.test.js`、`node --check src\model\http\prepare.chunk.js`、`node --check src\model\http\post-retry.chunk.js`、`node --check src\model\http\stream-retry.chunk.js` 通过；提交前复跑新增测试和 `git diff --check`。
+- 范围控制：未关闭主模型的 5xx/网络错误重试，未调整普通轻量任务和非主回复 408 策略，未改 provider 超时时间。
+- 小目标已完成：管理员主模型慢成功 408 不再被本地自动重试制造重复调用。
+
 ## 运行维护 2026-06-23 23:36
 
 - 小目标：降低 QQ 群聊敏感词出口拦截的日常误伤，保留高风险内容兜底。
