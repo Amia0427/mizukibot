@@ -14,8 +14,10 @@ node_modules/
 __pycache__/
 
 # Runtime data / generated assets
-data/
-!.gitkeep
+data/*
+!data/.gitkeep
+!data/sensitive-words/
+!data/sensitive-words/**
 NapCat.Shell (2)/
 .claude/
 .playwright-mcp/

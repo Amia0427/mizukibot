@@ -1,3 +1,11 @@
+## 运行维护 2026-06-23 13:18
+
+- 小目标：只对当前项目的群聊回复出口加入敏感词库识别和拦截，避免影响私聊、定时群消息和其他系统群发。
+- 最小修复：引入 `konsheng/Sensitive-lexicon` release `1.2` 本地快照并记录来源；新增群聊回复敏感词配置和 guard；普通群聊回复、`core` 流式发送、`src/message/streaming` 流式发送命中后统一替换为固定提示，并只记录命中数量。
+- 风险收口：上游全量词库含 `测试`、`关键词` 等泛词，本次默认只启用高风险分类文件，完整快照仍保留但不默认参与匹配；vendor 单字词默认过滤，项目 `extraWords` 仍可显式补充。
+- 验证：`node --check utils\groupReplySensitiveGuard.js`、`node --check core\messageReplyRuntime.js`、`node --check src\message\streaming\index.js`、`node tests\groupReplySensitiveGuard.test.js`、`node tests\messageReplyRuntimeFreshness.test.js`、`node scripts\run-tests.js tests\groupReplySensitiveGuard.test.js tests\messageReplyRuntimeFreshness.test.js tests\messageReplyRuntimeControl.test.js tests\messageRouteFlowGroupStreaming.test.js` 通过；真实词库探针确认普通群聊样例不被拦截。`npm test` 分别在 120s 和 600s 超时未完成，已清理本次测试残留进程。
+- 小目标已完成：群聊主回复出口已有本地敏感词库拦截，私聊和系统群发边界未扩大。
+
 ## 运行维护 2026-06-23 12:38
 
 - 小目标：把 npm 发布链路收口到登录后可直接安全发布，发布命令本身必须先跑白名单和敏感内容硬校验。

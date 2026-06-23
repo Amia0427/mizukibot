@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "replacementText": "这句我先不发了，换个说法吧。",
+  "vendorFiles": [
+    "COVID-19词库.txt",
+    "反动词库.txt",
+    "政治类型.txt",
+    "暴恐词库.txt",
+    "涉枪涉爆.txt",
+    "色情类型.txt",
+    "色情词库.txt",
+    "补充词库.txt",
+    "贪腐词库.txt"
+  ],
+  "extraWords": [],
+  "allowWords": []
+}
