@@ -1,5 +1,9 @@
 # Deploy Index
 
+## 新手指南
+
+- `deploy/beginner-guide.md`
+
 ## Linux
 
 - `deploy/linux/LINUX_DEPLOY_FULL.md`
@@ -21,3 +25,5 @@
 更新 2026-06-23 00:00 +08:00：新增 Dockerfile、Compose 和 Docker 部署文档，支持主 bot 与 post-reply worker 容器化运行。验收：目标单测、Node 语法检查、Compose YAML 解析和 Dockerfile 文本检查通过；当前本机缺少 Docker CLI，镜像构建需在安装 Docker 的环境复跑。
 
 更新 2026-06-23 09:05 +08:00：新增私有 prompt 部署说明，记录 `prompts/persona/` 和 `prompts/admin.txt` 的本地创建要求、运行时引用关系和验收命令。
+
+更新 2026-06-23 09:17 +08:00：新增面向初学者的部署指南，按本地检查、`.env`、私有 prompt、NapCat、启动和排障顺序组织。
