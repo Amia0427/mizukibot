@@ -6,6 +6,14 @@
 - 范围控制：未改 prompt 内容、运行代码或配置；未处理工作区已有 `prompts/reference/...` 删除状态；历史重写前已创建本地备份 bundle。
 - 小目标已完成：persona 与 admin prompt 后续不会作为已跟踪文件被推送，历史提交中也不再包含这些路径。
 
+## 运行维护 2026-06-23 08:58
+
+- 小目标：准备从 `master` 发布 npm 包，同时避免密钥、运行数据、本地 MCP 配置和无关维护材料进入包。
+- 最小修复：`package.json` 移除 `private` 并增加 `files` 发布白名单，公开 prompt 改为显式文件/目录清单；新增 `docs/npm-publish.md`；README 增加 npm 发布边界入口。
+- 验证：`npm view mizukibot name version --json` 返回 404；`npm whoami` 返回 `ENEEDAUTH`；`npm pack --dry-run --json` 通过且包内 `entryCount=956`；`npm publish --dry-run --json` 通过；禁发路径扫描 0 命中；包内文件敏感模式扫描 0 命中；`npm run check:secrets` 和 `git diff --check` 通过。
+- 范围控制：未写入 npm token，未真实发布，未推送远端；本地 `skills/`、测试、运行数据、维护流水账、`CHANGELOG.md`、`prompts/persona/` 和 `prompts/admin.txt` 不进入 npm 包。
+- 小目标状态：发布准备已收口，实际 npm 发布等待登录环境。
+
 ## 运行维护 2026-06-23 00:00
 
 - 小目标：把 `master` 分支最小容器化，支持 Docker/Compose 本地部署，并保证主 bot 与 post-reply worker 在容器中分进程运行。
