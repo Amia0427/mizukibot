@@ -6,6 +6,7 @@
 - 验证：`node tests\mainReplyHttp408RetryPolicy.test.js`、`node tests\httpClientTransportRetryDelay.test.js`、`node tests\imageSummaryLatencyPath.test.js`、`node tests\httpClientAnthropicPromptCache.test.js`、`node tests\httpClientReasoningEffort.test.js`、`node tests\normalUserMainReplyStreamTimeout.test.js`、`node --check src\model\http\prepare.chunk.js`、`node --check src\model\http\post-retry.chunk.js`、`node --check src\model\http\stream-retry.chunk.js` 通过；提交前复跑新增测试和 `git diff --check`。
 - 范围控制：未关闭主模型的 5xx/网络错误重试，未调整普通轻量任务和非主回复 408 策略，未改 provider 超时时间。
 - 小目标已完成：管理员主模型慢成功 408 不再被本地自动重试制造重复调用。
+- 提交后记录 2026-06-24 01:41 +08:00：已提交 `b96bfb5`（`fix: avoid retrying main reply 408 responses`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-23 23:36
 
