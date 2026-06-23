@@ -1,3 +1,11 @@
+## 运行维护 2026-06-23 08:00
+
+- 小目标：取消 `prompts/persona/` 和 `prompts/admin.txt` 的 Git 跟踪，避免后续推送到远端，同时保留本地文件。
+- 最小修复：`.gitignore` 增加本地 prompt 规则；从索引移除 persona 模块和 admin prompt。
+- 验证：`git ls-files prompts/persona prompts/admin.txt` 无输出；本地 `prompts/persona` 和 `prompts/admin.txt` 仍存在；`git diff --check` 通过。
+- 范围控制：未改 prompt 内容、运行代码、配置或远端仓库；未处理工作区已有 `prompts/reference/...` 删除状态。
+- 小目标已完成：persona 与 admin prompt 后续不会作为已跟踪文件被推送。
+
 ## 运行维护 2026-06-23 00:00
 
 - 小目标：把 `master` 分支最小容器化，支持 Docker/Compose 本地部署，并保证主 bot 与 post-reply worker 在容器中分进程运行。

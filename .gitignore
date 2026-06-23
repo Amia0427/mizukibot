@@ -58,6 +58,8 @@ artifacts/memory-recall-eval/*.tmp
 artifacts/gemini-sampling-degradation-*.json
 prompts/*.bak
 prompts/*.zip
+prompts/admin.txt
+prompts/persona/
 prompts/persona/*.zip
 
 # Local Windows ops artifacts
