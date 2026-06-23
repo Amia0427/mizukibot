@@ -630,8 +630,25 @@ function materializeMemoryViews(options = {}) {
   }
 }
 
+async function materializeMemoryViewsAsync(options = {}) {
+  try {
+    const { runWorkerTask } = require('../workerThreads');
+    return await runWorkerTask('memory_v3_materialize', options, {
+      timeoutMs: config.BOT_WORKER_THREADS_TASK_TIMEOUT_MS
+    });
+  } catch (error) {
+    appendPerfEvent({
+      category: 'worker_threads',
+      type: 'memory_v3_materialize_fallback',
+      reason: error?.code || error?.message || 'worker_task_failed'
+    });
+    return materializeMemoryViews(options);
+  }
+}
+
 module.exports = {
   materializeMemoryViews,
+  materializeMemoryViewsAsync,
   createNodeFromEvent,
   buildLanceDbSyncPlan,
   dedupeMaterializeEvents

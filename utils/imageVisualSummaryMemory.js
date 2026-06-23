@@ -8,7 +8,7 @@ const {
   upsertImageMemory
 } = require('./imageMemoryIndex');
 const {
-  materializeMemoryViews
+  materializeMemoryViewsAsync
 } = require('./memory-v3/materializer');
 const { formatDateInTz, getDatePartsInTz } = require('./time');
 const { cleanImageMemorySummary } = require('./imageMemorySummarySanitizer');
@@ -25,6 +25,8 @@ const VISUAL_SUMMARY_DOWNSAMPLE_EDGES = Object.freeze([1024, 768, 640, 512, 384,
 const VISUAL_SUMMARY_JPEG_QUALITIES = Object.freeze([82, 74, 66, 58, 50, 42]);
 const routeCooldowns = new Map();
 const visualSummaryGenerationInflight = new Map();
+const visualSummaryQueue = [];
+let visualSummaryActive = 0;
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -671,12 +673,16 @@ async function summarizeImageIntoLongTermMemory(imageRef = '', context = {}, dep
         mediaType: generated.mediaType
       }));
       event = versioned.event || null;
-      materializeMemoryViews({
+      void materializeMemoryViewsAsync({
         mode: 'incremental',
         userId: context.userId,
         groupId: context.groupId,
         sessionKey: context.sessionKey,
         scheduleEmbeddingBackfill: true
+      }).catch((error) => {
+        if (config.ENABLE_DEBUG_LOG) {
+          console.warn('[image-visual-summary] async materialize failed:', error?.message || error);
+        }
       });
     }
 
@@ -702,7 +708,7 @@ function enqueueImageVisualSummary(imageRef = '', context = {}, deps = {}) {
   if (config.IMAGE_MEMORY_VISUAL_SUMMARY_ENABLED === false && context.force !== true) {
     return { queued: false, reason: 'disabled' };
   }
-  const promise = summarizeImageIntoLongTermMemory(imageRef, context, deps);
+  const promise = enqueueVisualSummaryTask(() => summarizeImageIntoLongTermMemory(imageRef, context, deps));
   if (context.awaitSummary === true) {
     return { queued: true, promise };
   }
@@ -714,7 +720,41 @@ function enqueueImageVisualSummary(imageRef = '', context = {}, deps = {}) {
   return { queued: true };
 }
 
+function getVisualSummaryConcurrency() {
+  return Math.max(1, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_CONCURRENCY) || 2);
+}
+
+function drainVisualSummaryQueue() {
+  while (visualSummaryActive < getVisualSummaryConcurrency() && visualSummaryQueue.length > 0) {
+    const item = visualSummaryQueue.shift();
+    visualSummaryActive += 1;
+    Promise.resolve()
+      .then(item.run)
+      .then(item.resolve, item.reject)
+      .finally(() => {
+        visualSummaryActive = Math.max(0, visualSummaryActive - 1);
+        drainVisualSummaryQueue();
+      });
+  }
+}
+
+function enqueueVisualSummaryTask(run) {
+  return new Promise((resolve, reject) => {
+    visualSummaryQueue.push({ run, resolve, reject });
+    drainVisualSummaryQueue();
+  });
+}
+
+function getVisualSummaryQueueSnapshot() {
+  return {
+    active: visualSummaryActive,
+    queued: visualSummaryQueue.length,
+    concurrency: getVisualSummaryConcurrency()
+  };
+}
+
 module.exports = {
+  __enqueueVisualSummaryTaskForTests: enqueueVisualSummaryTask,
   buildImageMemoryEvent,
   buildRequestContent,
   buildVisualSummaryRequestBody,
@@ -724,6 +764,7 @@ module.exports = {
   formatSummaryWithTimestamp,
   fitVisualSummaryImagePayloadToBudget,
   generateImageVisualSummary,
+  getVisualSummaryQueueSnapshot,
   normalizeVisualSummaryImagePayload,
   summarizeImageIntoLongTermMemory
 };

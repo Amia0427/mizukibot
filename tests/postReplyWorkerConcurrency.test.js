@@ -47,6 +47,13 @@ module.exports = (async () => {
     queue.enqueue({ jobId: 'job_u1_b', userId: 'user_a', question: 'qb', finalReply: 'rb' });
     queue.enqueue({ jobId: 'job_u2_a', userId: 'user_b', question: 'qc', finalReply: 'rc' });
 
+    const defaultRuntime = createPostReplyWorkerRuntime({
+      queue,
+      pollMs: 1000,
+      processJob: async () => {}
+    });
+    assert.strictEqual(defaultRuntime.concurrency, 2, 'default runtime should use configured worker concurrency');
+
     const runtime = createPostReplyWorkerRuntime({
       queue,
       concurrency: 2,

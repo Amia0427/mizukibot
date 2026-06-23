@@ -11,6 +11,7 @@ const {
   buildCurrentResourceSnapshot,
   buildResourceSeries,
   extractPostReplyWorkerActive,
+  summarizeWorkerThreads,
   summarizeRuntimeCounts
 } = require('./runtimeHotspots/resources');
 const { filterWindow, readRecentJsonLines, safeStat } = require('./runtimeHotspots/sampleFiles');
@@ -43,6 +44,7 @@ function buildRuntimeHotspotsDiagnostic(options = {}) {
   const runtimeStatus = options.runtimeStatus || buildRuntimeStatusDiagnostic(options);
   const resourceSeries = resourceSamples.concat(currentSnapshot ? [currentSnapshot] : []);
   const resources = buildResourceSeries(resourceSeries, currentSnapshot);
+  const workerThreads = summarizeWorkerThreads(resourceSamples, currentSnapshot);
   const modules = buildModuleSummary(perfEvents);
   const postReplyWorkerActive = extractPostReplyWorkerActive(perfEvents, resourceSamples);
   const runtime = summarizeRuntimeCounts(runtimeStatus, postReplyWorkerActive);
@@ -104,6 +106,7 @@ function buildRuntimeHotspotsDiagnostic(options = {}) {
         mainMax: processes.main.rssMb.max,
         postReplyMax: processes.postReplyWorker.rssMb.max
       },
+      workerThreads,
       topModules: modules.topModules.slice(0, 5),
       signals: signals.map((signal) => signal.code)
     },
@@ -121,6 +124,7 @@ function buildRuntimeHotspotsDiagnostic(options = {}) {
       }
     },
     resources,
+    workerThreads,
     processes,
     runtime,
     modules,

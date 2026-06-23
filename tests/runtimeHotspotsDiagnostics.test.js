@@ -58,6 +58,16 @@ module.exports = (() => {
       eventLoopMaxMs: 80,
       activeTimers: 60,
       activeIntervals: 12,
+      workerThreads: {
+        enabled: true,
+        maxWorkers: 2,
+        maxQueueLength: 100,
+        active: 1,
+        queued: 3,
+        completed: 8,
+        failed: 1,
+        timeout: 1
+      },
       pressureLevel: 'pressured',
       pressureReasons: ['rss:160MB', 'heap:110MB']
     });
@@ -118,8 +128,18 @@ module.exports = (() => {
         heapUsed: 105 * 1024 * 1024,
         eventLoopMeanMs: 20,
         eventLoopMaxMs: 55,
-      activeTimers: 55,
-      activeIntervals: 11,
+        activeTimers: 55,
+        activeIntervals: 11,
+        workerThreads: {
+          enabled: true,
+          maxWorkers: 2,
+          maxQueueLength: 100,
+          active: 2,
+          queued: 1,
+          completed: 10,
+          failed: 1,
+          timeout: 1
+        },
         pressureLevel: 'pressured',
         pressureReasons: ['event_loop:55ms']
       },
@@ -144,6 +164,9 @@ module.exports = (() => {
     assert.strictEqual(report.summary.memoryBackfill.rssMb.total, 240);
     assert.strictEqual(report.summary.localMcpChildren.processCount, 1);
     assert.strictEqual(report.summary.localMcpChildren.rssMb.total, 45);
+    assert.strictEqual(report.summary.workerThreads.active.max, 2);
+    assert.strictEqual(report.summary.workerThreads.queued.max, 3);
+    assert.strictEqual(report.summary.workerThreads.timeout, 1);
     assert.strictEqual(report.summary.subagents, undefined);
     assert.strictEqual(report.processes.subagents, undefined);
     assert.ok(report.summary.topModules.some((item) => item.key === 'planner' && item.count === 3));
@@ -170,8 +193,5 @@ module.exports = (() => {
   } finally {
     restoreEnv(snapshot);
     clearProjectCache();
-    try {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch (_) {}
   }
 })();

@@ -54,6 +54,41 @@ function buildResourceSeries(samples = [], currentSnapshot = {}) {
   };
 }
 
+function summarizeWorkerThreads(resourceSamples = [], currentSnapshot = {}) {
+  const rows = resourceSamples.concat(currentSnapshot ? [currentSnapshot] : [])
+    .map((row) => row?.workerThreads)
+    .filter((item) => item && typeof item === 'object');
+  if (rows.length === 0) {
+    return {
+      enabled: false,
+      active: { latest: 0, max: 0 },
+      queued: { latest: 0, max: 0 },
+      completed: 0,
+      failed: 0,
+      timeout: 0,
+      samples: 0
+    };
+  }
+  const latest = rows[rows.length - 1];
+  return {
+    enabled: latest.enabled === true,
+    maxWorkers: normalizeNumber(latest.maxWorkers, 0),
+    maxQueueLength: normalizeNumber(latest.maxQueueLength, 0),
+    active: {
+      latest: normalizeNumber(latest.active, 0),
+      max: Math.max(...rows.map((row) => normalizeNumber(row.active, 0)))
+    },
+    queued: {
+      latest: normalizeNumber(latest.queued, 0),
+      max: Math.max(...rows.map((row) => normalizeNumber(row.queued, 0)))
+    },
+    completed: normalizeNumber(latest.completed, 0),
+    failed: normalizeNumber(latest.failed, 0),
+    timeout: normalizeNumber(latest.timeout, 0),
+    samples: rows.length
+  };
+}
+
 function extractPostReplyWorkerActive(perfEvents = [], resourceSamples = []) {
   const fromPerf = perfEvents
     .map((row) => normalizeNumber(row.post_reply_worker_active ?? row.postReplyActiveCount ?? row.activeCount, NaN))
@@ -89,5 +124,6 @@ module.exports = {
   buildCurrentResourceSnapshot,
   buildResourceSeries,
   extractPostReplyWorkerActive,
+  summarizeWorkerThreads,
   summarizeRuntimeCounts
 };

@@ -49,9 +49,9 @@ function consumePostReplyDirtyScopes() {
 }
 
 function schedulePostReplyMaterialize(options = {}) {
-  const { materializeMemoryViews } = getMemoryV3Module();
+  const { materializeMemoryViewsAsync } = getMemoryV3Module();
   if (options.force === true) {
-    return Promise.resolve(materializeMemoryViews({
+    return Promise.resolve(materializeMemoryViewsAsync({
       ...options,
       force: true,
       source: options.source || 'post_reply_force'
@@ -77,7 +77,7 @@ function schedulePostReplyMaterialize(options = {}) {
     materializeDebounceState.timer = null;
     materializeDebounceState.pendingCount = 0;
     materializeDebounceState.promise = Promise.resolve()
-      .then(() => materializeMemoryViews({
+      .then(() => materializeMemoryViewsAsync({
         source: 'post_reply_debounced',
         pendingCount,
         mode: 'incremental',
@@ -102,14 +102,14 @@ function schedulePostReplyMaterialize(options = {}) {
 }
 
 async function flushPostReplyMaterialize(options = {}) {
-  const { materializeMemoryViews } = getMemoryV3Module();
+  const { materializeMemoryViewsAsync } = getMemoryV3Module();
   if (materializeDebounceState.timer) {
     clearTimeout(materializeDebounceState.timer);
     materializeDebounceState.timer = null;
     const pendingCount = materializeDebounceState.pendingCount;
     const dirtyScopes = consumePostReplyDirtyScopes();
     materializeDebounceState.pendingCount = 0;
-    materializeDebounceState.promise = Promise.resolve(materializeMemoryViews({
+    materializeDebounceState.promise = Promise.resolve(materializeMemoryViewsAsync({
       source: options.source || 'post_reply_flush',
       pendingCount,
       force: options.force === true,
