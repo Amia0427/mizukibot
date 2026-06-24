@@ -1,3 +1,10 @@
+## 运行维护 2026-06-24 11:32
+
+- 小目标：降低日记 segment 摘要混合多个话题后被向量召回带出无关内容的风险。
+- 最小修复：`DAILY_JOURNAL_SEGMENT_MAX_ENTRIES` 默认值从 10 降到 6；仍保留环境变量覆盖能力，未改日记原文写入、摘要 prompt、向量化文本截断或召回排序逻辑。
+- 验证：默认值探针 `node -e "delete process.env.DAILY_JOURNAL_SEGMENT_MAX_ENTRIES; console.log(require('./config').DAILY_JOURNAL_SEGMENT_MAX_ENTRIES)"` 输出 `6`；`node tests\dailyJournalSegments.test.js` 通过；`git diff --check` 通过，仅提示既有 CRLF 转换 warning。
+- 小目标已完成：日记 segment 默认批量已收窄，减少单个向量摘要跨话题的概率。
+
 ## 运行维护 2026-06-24 10:28
 
 - 小目标：定位群 `1092700300`、发送者 `Amia🎀` 连续出现的 `group-awareness decision model returned non-json output`。
