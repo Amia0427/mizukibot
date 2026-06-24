@@ -60,6 +60,7 @@
     "verify:admin-cache-read": "node scripts/verify-admin-cache-read.js",
     "diag:main-reply-lag": "node scripts/diagnose-main-reply-lag.js",
     "diag:request-trace-preflight": "node scripts/diagnose-request-trace-preflight.js",
+    "diag:main-model-retry-duplicates": "node scripts/diagnose-main-model-retry-duplicates.js",
     "diag:route-decision": "node scripts/diagnose-route-decision.js",
     "diag:main-reply-token-budget": "node scripts/diagnose-main-reply-token-budget.js",
     "diag:chat-default-memory-leak": "node scripts/diagnose-chat-default-memory-leak.js",
