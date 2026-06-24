@@ -138,6 +138,30 @@ function normalizeObservation(input = {}) {
   return Object.fromEntries(Object.entries(observation).filter(([, value]) => value !== '' && value !== 0));
 }
 
+function normalizeDiagnosticObject(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const output = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value === null || value === undefined || value === '' || value === 0) continue;
+    if (Array.isArray(value)) continue;
+    if (typeof value === 'object') {
+      const nested = normalizeDiagnosticObject(value);
+      if (nested) output[key] = nested;
+      continue;
+    }
+    if (typeof value === 'number') {
+      if (Number.isFinite(value)) output[key] = value;
+      continue;
+    }
+    if (typeof value === 'boolean') {
+      output[key] = value;
+      continue;
+    }
+    output[key] = normalizeText(value).slice(0, 800);
+  }
+  return Object.keys(output).length > 0 ? output : null;
+}
+
 function normalizeVisualSummaryState(input = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
   const state = {
@@ -152,6 +176,10 @@ function normalizeVisualSummaryState(input = {}) {
     apiBaseUrl: normalizeText(input.apiBaseUrl).slice(0, 240),
     requestShape: normalizeText(input.requestShape).slice(0, 80)
   };
+  const requestDiagnostic = normalizeDiagnosticObject(input.requestDiagnostic);
+  if (requestDiagnostic) state.requestDiagnostic = requestDiagnostic;
+  const errorDiagnostic = normalizeDiagnosticObject(input.errorDiagnostic);
+  if (errorDiagnostic) state.errorDiagnostic = errorDiagnostic;
   const compact = Object.fromEntries(Object.entries(state).filter(([, value]) => value !== '' && value !== 0));
   return Object.keys(compact).length > 0 ? compact : null;
 }

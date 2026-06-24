@@ -17,6 +17,10 @@ function createResourceSnapshotHelpers(deps = {}) {
       eventLoopMeanMs: Number(loopMonitor.mean || 0) / 1e6,
       eventLoopMaxMs: Number(loopMonitor.max || 0) / 1e6
     });
+    let workerThreads = null;
+    try {
+      workerThreads = require('../workerThreads').getWorkerTaskPoolSnapshot();
+    } catch (_) {}
     const snapshot = {
       recordedAt: new Date().toISOString(),
       processId: process.pid,
@@ -35,6 +39,7 @@ function createResourceSnapshotHelpers(deps = {}) {
       activeTimeouts: timers.timeouts,
       activeIntervals: timers.intervals,
       timers,
+      workerThreads,
       ...extra
     };
     loopMonitor.reset();

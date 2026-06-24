@@ -1,6 +1,6 @@
 function shouldUseLocalDecisionFallback({ decision, addressee, score }) {
   const reason = String(decision?.reason || '');
-  if (!['invalid-json', 'missing-awareness-model-config'].includes(reason) && !reason.startsWith('decision-call-failed:')) return false;
+  if (!['empty-output', 'invalid-json', 'missing-awareness-model-config'].includes(reason) && !reason.startsWith('decision-call-failed:')) return false;
   if (!['bot_presence_check', 'bot_direct'].includes(String(addressee || ''))) return false;
   return Number(score || 0) >= Math.max(60, Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60));
 }
@@ -254,7 +254,17 @@ async function invokeDecisionModel({
   const msg = extractMessageContent(resp);
   const rawDecisionText = String(msg?.content || '');
   const parsed = parseDecision(rawDecisionText);
-  if (parsed.reason === 'invalid-json') {
+  if (parsed.reason === 'empty-output') {
+    const choice = resp?.data?.choices?.[0] || {};
+    console.warn('[group-awareness] decision model returned empty output', {
+      groupId: String(groupId || ''),
+      senderName: normalizeText(senderName || ''),
+      addressee: String(addressee || ''),
+      score: Number(score || 0),
+      finishReason: String(choice.finish_reason || choice.finishReason || resp?.data?.finish_reason || resp?.data?.status || ''),
+      hasReasoning: Boolean(msg?.reasoningText || choice?.message?.reasoning || choice?.message?.reasoning_content)
+    });
+  } else if (parsed.reason === 'invalid-json') {
     console.warn('[group-awareness] decision model returned non-json output', {
       groupId: String(groupId || ''),
       senderName: normalizeText(senderName || ''),

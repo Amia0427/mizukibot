@@ -1,5 +1,10 @@
 # 更新记录
 
+## 2026-06-24
+
+### 测试与回归
+- **15:53** 定位 `tests/memoryV3PreferenceFacet.test.js` 与 `tests/memoryV3Query.test.js` 直接运行卡住的根因：测试会继承 `.env` 里的 `MEMORY_RERANK_ENABLED=true`，进入 `memoryReranker -> postWithRetry -> CycleTLS` 路径，留下本地 `::1:9119` Socket 句柄。最小修复只落在测试侧：新增 `tests/memoryV3TestHarness.js`，对这两个本地型 Memory V3 测试关闭 rerank/embedding/LanceDB/CycleTLS，并在成功路径增加非 stdio 句柄断言。验收：`node tests\\memoryV3PreferenceFacet.test.js`、`node tests\\memoryV3Query.test.js`、`node scripts\\run-tests.js tests\\memoryV3PreferenceFacet.test.js tests\\memoryV3Query.test.js` 通过。
+
 ## 2026-06-17
 
 ### 模型与 Provider

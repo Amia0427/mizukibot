@@ -8,7 +8,7 @@ const {
   upsertImageMemory
 } = require('./imageMemoryIndex');
 const {
-  materializeMemoryViews
+  materializeMemoryViewsAsync
 } = require('./memory-v3/materializer');
 const { formatDateInTz, getDatePartsInTz } = require('./time');
 const { cleanImageMemorySummary } = require('./imageMemorySummarySanitizer');
@@ -25,6 +25,8 @@ const VISUAL_SUMMARY_DOWNSAMPLE_EDGES = Object.freeze([1024, 768, 640, 512, 384,
 const VISUAL_SUMMARY_JPEG_QUALITIES = Object.freeze([82, 74, 66, 58, 50, 42]);
 const routeCooldowns = new Map();
 const visualSummaryGenerationInflight = new Map();
+const visualSummaryQueue = [];
+let visualSummaryActive = 0;
 
 function normalizeText(value = '') {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -155,6 +157,94 @@ function extractResponseText(response = {}) {
     return normalizeText(raw.output_text || raw.text || raw.content);
   }
   return '';
+}
+
+function sanitizeDiagnosticText(value = '', maxChars = 800) {
+  const raw = typeof value === 'string' ? value : JSON.stringify(value || {});
+  const sanitized = normalizeText(raw)
+    .replace(/data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+/ig, 'data:image/<redacted>;base64,<redacted>')
+    .replace(/Bearer\s+[a-z0-9._~+/=-]+/ig, 'Bearer <redacted>');
+  const limit = Math.max(80, Number(maxChars || 800) || 800);
+  return sanitized.length > limit ? sanitized.slice(0, limit).trim() : sanitized;
+}
+
+function pickDiagnosticHeaders(headers = {}) {
+  if (!headers || typeof headers !== 'object') return {};
+  const picked = {};
+  const normalizedHeaders = {};
+  for (const [key, value] of Object.entries(headers)) {
+    normalizedHeaders[String(key || '').toLowerCase()] = value;
+  }
+  for (const key of ['content-type', 'x-request-id', 'x-ratelimit-reset', 'retry-after', 'cf-ray']) {
+    const text = normalizeText(normalizedHeaders[key]);
+    if (text) picked[key] = text.slice(0, 160);
+  }
+  return picked;
+}
+
+function inferVisualSummaryFailureSource(error = null, responseText = '') {
+  const status = Number(error?.response?.status || error?.status || 0);
+  const text = normalizeText(responseText || error?.message || error).toLowerCase();
+  if (status === 413) return 'upstream_payload_limit';
+  if (status === 415) return 'request_body_media_type';
+  if (/model[^.]{0,80}(?:does not support|not support|unsupported)[^.]{0,80}(?:image|vision|modalit)|(?:image|vision|modalit)[^.]{0,80}(?:not enabled|not available)/i.test(text)) {
+    return 'upstream_model_constraint';
+  }
+  if (/quota|rate limit|capacity|policy|moderation|content filter|permission|not enabled|forbidden/i.test(text)) {
+    return 'upstream_constraint';
+  }
+  if (/image_url|data url|base64|media type|mime|messages?\[|content\[|invalid image|unsupported image|image input/i.test(text)) {
+    return 'request_body';
+  }
+  if (/temperature|max_tokens|max_completion_tokens|top_p|stream|parameter|schema|unknown field|unsupported parameter|extra inputs|additional properties/i.test(text)) {
+    return 'model_parameters';
+  }
+  return status ? `http_${status}_unknown` : 'unknown';
+}
+
+function buildVisualSummaryErrorDiagnostic(error = null) {
+  const responseData = error?.response?.data;
+  const responseBody = sanitizeDiagnosticText(responseData, 800);
+  const message = sanitizeDiagnosticText(
+    responseData?.error?.message
+      || responseData?.message
+      || error?.message
+      || error,
+    400
+  );
+  return {
+    status: Number(error?.response?.status || error?.status || 0) || null,
+    code: normalizeText(responseData?.error?.code || responseData?.code || error?.code).slice(0, 120),
+    message,
+    responseBody,
+    responseHeaders: pickDiagnosticHeaders(error?.response?.headers),
+    failureSource: inferVisualSummaryFailureSource(error, `${message} ${responseBody}`)
+  };
+}
+
+function buildVisualSummaryRequestDiagnostic(imagePayload = {}, context = {}, requestBody = {}, validation = {}) {
+  const imagePart = Array.isArray(requestBody?.messages?.[0]?.content)
+    ? requestBody.messages[0].content.find((part) => part?.type === 'image_url')
+    : null;
+  return {
+    requestShape: VISUAL_SUMMARY_REQUEST_SHAPE,
+    preferredProtocol: 'chat_completions',
+    model: normalizeText(requestBody.model),
+    maxTokens: Math.max(0, Number(requestBody.max_tokens || 0) || 0),
+    temperature: Number.isFinite(Number(requestBody.temperature)) ? Number(requestBody.temperature) : null,
+    stream: requestBody.stream === true,
+    estimatedInputTokens: estimateVisualSummaryRequestTokens(imagePayload, context),
+    image: {
+      mediaType: normalizeText(imagePayload.mediaType || 'image/jpeg') || 'image/jpeg',
+      byteLength: Math.max(0, Number(validation.byteLength || imagePayload.byteLength || imagePayload.originalByteLength || 0) || 0),
+      originalMediaType: normalizeText(imagePayload.originalMediaType),
+      originalByteLength: Math.max(0, Number(imagePayload.originalByteLength || 0) || 0),
+      dataUrl: Boolean(normalizeText(imagePart?.image_url?.url).startsWith('data:image/')),
+      detail: normalizeText(imagePart?.image_url?.detail)
+    },
+    budgetFit: imagePayload.budgetFit || null,
+    userTextChars: normalizeText(context.userText).length
+  };
 }
 
 function buildVisualSummaryPrompt(context = {}) {
@@ -409,6 +499,12 @@ function recordVisualSummaryFailure(cacheKey = '', input = {}) {
     apiBaseUrl: normalizeText(input.apiBaseUrl).slice(0, 240),
     requestShape: VISUAL_SUMMARY_REQUEST_SHAPE
   };
+  if (input.requestDiagnostic && typeof input.requestDiagnostic === 'object') {
+    state.requestDiagnostic = input.requestDiagnostic;
+  }
+  if (input.errorDiagnostic && typeof input.errorDiagnostic === 'object') {
+    state.errorDiagnostic = input.errorDiagnostic;
+  }
   index.images[normalizedCacheKey] = {
     ...(existing || {}),
     cacheKey: normalizedCacheKey,
@@ -502,29 +598,37 @@ async function generateImageVisualSummary(imageRef = '', context = {}, deps = {}
     }
 
     let response = null;
+    const requestBody = {
+      ...buildVisualSummaryRequestBody(requestImagePayload, context),
+      model,
+      __preferredProtocol: 'chat_completions',
+      __timeoutMs: Math.max(1000, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS || 25000) || 25000),
+      __trace: {
+        source: 'image_visual_summary_memory',
+        phase: 'visual_summary',
+        purpose: 'image_long_term_memory',
+        routePolicyKey: 'memory/image-visual-summary',
+        routeDebugKey: 'memory/image-visual-summary',
+        topRouteType: 'vision',
+        userId: normalizeText(context.userId)
+      }
+    };
     try {
       response = await postWithRetry(
         apiBaseUrl,
-        {
-          ...buildVisualSummaryRequestBody(requestImagePayload, context),
-          model,
-          __preferredProtocol: 'chat_completions',
-          __timeoutMs: Math.max(1000, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_TIMEOUT_MS || 25000) || 25000),
-          __trace: {
-            source: 'image_visual_summary_memory',
-            phase: 'visual_summary',
-            purpose: 'image_long_term_memory',
-            routePolicyKey: 'memory/image-visual-summary',
-            routeDebugKey: 'memory/image-visual-summary',
-            topRouteType: 'vision',
-            userId: normalizeText(context.userId)
-          }
-        },
+        requestBody,
         Math.max(0, Math.min(1, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_RETRIES || 0) || 0)),
         getMemoryApiKey()
       );
     } catch (error) {
       const classified = classifyVisualSummaryError(error);
+      const requestDiagnostic = buildVisualSummaryRequestDiagnostic(
+        requestImagePayload,
+        context,
+        requestBody,
+        validation
+      );
+      const errorDiagnostic = buildVisualSummaryErrorDiagnostic(error);
       const state = recordVisualSummaryFailure(cacheKey, {
         ...context,
         imageRef,
@@ -532,12 +636,15 @@ async function generateImageVisualSummary(imageRef = '', context = {}, deps = {}
         mediaType: requestImagePayload.mediaType,
         model,
         apiBaseUrl,
-        classified
+        classified,
+        requestDiagnostic,
+        errorDiagnostic
       });
       activateRouteCooldown(apiBaseUrl, model, classified, context);
       if (config.ENABLE_DEBUG_LOG) {
         const until = state?.nextRetryAt ? new Date(state.nextRetryAt).toISOString() : '';
-        console.warn(`[image-visual-summary] failed: ${classified.reason}${until ? `; cooldown until ${until}` : ''}`);
+        const failureSource = normalizeText(errorDiagnostic.failureSource);
+        console.warn(`[image-visual-summary] failed: ${classified.reason}${failureSource ? `; source=${failureSource}` : ''}${until ? `; cooldown until ${until}` : ''}`);
       }
       return { ok: false, skipped: false, reason: classified.reason, summary: '', cacheKey, model, cooldownUntil: state?.nextRetryAt || 0 };
     }
@@ -671,12 +778,16 @@ async function summarizeImageIntoLongTermMemory(imageRef = '', context = {}, dep
         mediaType: generated.mediaType
       }));
       event = versioned.event || null;
-      materializeMemoryViews({
+      void materializeMemoryViewsAsync({
         mode: 'incremental',
         userId: context.userId,
         groupId: context.groupId,
         sessionKey: context.sessionKey,
         scheduleEmbeddingBackfill: true
+      }).catch((error) => {
+        if (config.ENABLE_DEBUG_LOG) {
+          console.warn('[image-visual-summary] async materialize failed:', error?.message || error);
+        }
       });
     }
 
@@ -702,7 +813,7 @@ function enqueueImageVisualSummary(imageRef = '', context = {}, deps = {}) {
   if (config.IMAGE_MEMORY_VISUAL_SUMMARY_ENABLED === false && context.force !== true) {
     return { queued: false, reason: 'disabled' };
   }
-  const promise = summarizeImageIntoLongTermMemory(imageRef, context, deps);
+  const promise = enqueueVisualSummaryTask(() => summarizeImageIntoLongTermMemory(imageRef, context, deps));
   if (context.awaitSummary === true) {
     return { queued: true, promise };
   }
@@ -714,7 +825,41 @@ function enqueueImageVisualSummary(imageRef = '', context = {}, deps = {}) {
   return { queued: true };
 }
 
+function getVisualSummaryConcurrency() {
+  return Math.max(1, Number(config.IMAGE_MEMORY_VISUAL_SUMMARY_CONCURRENCY) || 2);
+}
+
+function drainVisualSummaryQueue() {
+  while (visualSummaryActive < getVisualSummaryConcurrency() && visualSummaryQueue.length > 0) {
+    const item = visualSummaryQueue.shift();
+    visualSummaryActive += 1;
+    Promise.resolve()
+      .then(item.run)
+      .then(item.resolve, item.reject)
+      .finally(() => {
+        visualSummaryActive = Math.max(0, visualSummaryActive - 1);
+        drainVisualSummaryQueue();
+      });
+  }
+}
+
+function enqueueVisualSummaryTask(run) {
+  return new Promise((resolve, reject) => {
+    visualSummaryQueue.push({ run, resolve, reject });
+    drainVisualSummaryQueue();
+  });
+}
+
+function getVisualSummaryQueueSnapshot() {
+  return {
+    active: visualSummaryActive,
+    queued: visualSummaryQueue.length,
+    concurrency: getVisualSummaryConcurrency()
+  };
+}
+
 module.exports = {
+  __enqueueVisualSummaryTaskForTests: enqueueVisualSummaryTask,
   buildImageMemoryEvent,
   buildRequestContent,
   buildVisualSummaryRequestBody,
@@ -724,6 +869,7 @@ module.exports = {
   formatSummaryWithTimestamp,
   fitVisualSummaryImagePayloadToBudget,
   generateImageVisualSummary,
+  getVisualSummaryQueueSnapshot,
   normalizeVisualSummaryImagePayload,
   summarizeImageIntoLongTermMemory
 };

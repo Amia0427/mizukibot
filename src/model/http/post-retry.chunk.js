@@ -88,6 +88,8 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
     ? body.__abortSignal
     : null;
 
+  const isRetryableError = (error) => shouldRetry(error, trace);
+
   for (let i = 0; i <= maxRetry; i++) {
     let callId = '';
     let prepared = null;
@@ -196,7 +198,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         statusCode: extractHttpStatus(e) || null,
         finalErrorCode: extractErrorCode(e),
         error: normalizeText(e?.message || e).slice(0, 400),
-        retryable: i < maxRetry && shouldRetry(e),
+        retryable: i < maxRetry && isRetryableError(e),
         durationMs: Math.max(0, Date.now() - attemptStartedAt),
         fallbackActive: trace.mainFallbackActive === true
       });
@@ -226,7 +228,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         } catch (fallbackError) {
           emitHttpFailureTrace(trace, { ...prepared, requestUrl: fallbackUrl, requestBody: fallbackBody }, body, fallbackError, {
             attempt: i + 1,
-            retryable: i < maxRetry && shouldRetry(fallbackError),
+            retryable: i < maxRetry && isRetryableError(fallbackError),
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
             downgraded: true,
             downgradeReason: 'fallback_chat_completions_protocol'
@@ -281,7 +283,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         } catch (retryWithoutReasoningError) {
           emitHttpFailureTrace(trace, { ...prepared, requestBody: stripReasoningFields(prepared.requestBody) }, body, retryWithoutReasoningError, {
             attempt: i + 1,
-            retryable: i < maxRetry && shouldRetry(retryWithoutReasoningError),
+            retryable: i < maxRetry && isRetryableError(retryWithoutReasoningError),
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
             downgraded: true,
             downgradeReason: 'strip_reasoning_fields'
@@ -295,7 +297,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             });
           }
           lastErr = retryWithoutReasoningError;
-          if (i >= maxRetry || !shouldRetry(retryWithoutReasoningError)) break;
+          if (i >= maxRetry || !isRetryableError(retryWithoutReasoningError)) break;
           const delayMs = getRetryDelayMs(retryWithoutReasoningError, i);
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
@@ -339,7 +341,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         } catch (retryWithoutSamplingError) {
           emitHttpFailureTrace(trace, { ...prepared, requestBody: stripExtendedSamplingFields(prepared.requestBody) }, body, retryWithoutSamplingError, {
             attempt: i + 1,
-            retryable: i < maxRetry && shouldRetry(retryWithoutSamplingError),
+            retryable: i < maxRetry && isRetryableError(retryWithoutSamplingError),
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
             downgraded: true,
             downgradeReason: 'strip_extended_sampling_fields'
@@ -353,7 +355,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             });
           }
           lastErr = retryWithoutSamplingError;
-          if (i >= maxRetry || !shouldRetry(retryWithoutSamplingError)) break;
+          if (i >= maxRetry || !isRetryableError(retryWithoutSamplingError)) break;
           const delayMs = getRetryDelayMs(retryWithoutSamplingError, i);
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
@@ -397,7 +399,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         } catch (retryWithoutTemperatureError) {
           emitHttpFailureTrace(trace, { ...prepared, requestBody: stripTemperatureField(prepared.requestBody) }, body, retryWithoutTemperatureError, {
             attempt: i + 1,
-            retryable: i < maxRetry && shouldRetry(retryWithoutTemperatureError),
+            retryable: i < maxRetry && isRetryableError(retryWithoutTemperatureError),
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
             downgraded: true,
             downgradeReason: 'strip_temperature_field'
@@ -411,7 +413,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             });
           }
           lastErr = retryWithoutTemperatureError;
-          if (i >= maxRetry || !shouldRetry(retryWithoutTemperatureError)) break;
+          if (i >= maxRetry || !isRetryableError(retryWithoutTemperatureError)) break;
           const delayMs = getRetryDelayMs(retryWithoutTemperatureError, i);
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
@@ -460,7 +462,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         } catch (retryWithoutTopPError) {
           emitHttpFailureTrace(trace, { ...prepared, requestBody: stripTopPRequestField(prepared.requestBody) }, body, retryWithoutTopPError, {
             attempt: i + 1,
-            retryable: i < maxRetry && shouldRetry(retryWithoutTopPError),
+            retryable: i < maxRetry && isRetryableError(retryWithoutTopPError),
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
             downgraded: true,
             downgradeReason: 'strip_top_p_field'
@@ -474,7 +476,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             });
           }
           lastErr = retryWithoutTopPError;
-          if (i >= maxRetry || !shouldRetry(retryWithoutTopPError)) break;
+          if (i >= maxRetry || !isRetryableError(retryWithoutTopPError)) break;
           const delayMs = getRetryDelayMs(retryWithoutTopPError, i);
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
@@ -562,7 +564,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             } catch (retryWithoutCacheError) {
               emitHttpFailureTrace(trace, { ...prepared, requestBody: stripOpenAICompatiblePromptCaching(strippedRetentionRequestBody) }, body, retryWithoutCacheError, {
                 attempt: i + 1,
-                retryable: i < maxRetry && shouldRetry(retryWithoutCacheError),
+                retryable: i < maxRetry && isRetryableError(retryWithoutCacheError),
                 durationMs: Math.max(0, Date.now() - attemptStartedAt),
                 downgraded: true,
                 downgradeReason: 'strip_openai_prompt_cache'
@@ -576,7 +578,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
                 });
               }
               lastErr = retryWithoutCacheError;
-              if (i >= maxRetry || !shouldRetry(retryWithoutCacheError)) break;
+              if (i >= maxRetry || !isRetryableError(retryWithoutCacheError)) break;
               const delayMs = getRetryDelayMs(retryWithoutCacheError, i);
               await new Promise((r) => setTimeout(r, delayMs));
               continue;
@@ -585,7 +587,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           if (callId) {
             emitHttpFailureTrace(trace, { ...prepared, requestBody: strippedRetentionRequestBody }, body, retryWithoutRetentionError, {
               attempt: i + 1,
-              retryable: i < maxRetry && shouldRetry(retryWithoutRetentionError),
+              retryable: i < maxRetry && isRetryableError(retryWithoutRetentionError),
               durationMs: Math.max(0, Date.now() - attemptStartedAt),
               downgraded: true,
               downgradeReason: 'strip_openai_prompt_cache_retention'
@@ -598,7 +600,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             });
           }
           lastErr = retryWithoutRetentionError;
-          if (i >= maxRetry || !shouldRetry(retryWithoutRetentionError)) break;
+          if (i >= maxRetry || !isRetryableError(retryWithoutRetentionError)) break;
           const delayMs = getRetryDelayMs(retryWithoutRetentionError, i);
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
@@ -647,7 +649,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         } catch (retryWithoutCacheError) {
           emitHttpFailureTrace(trace, { ...prepared, requestBody: stripOpenAICompatiblePromptCaching(prepared.requestBody) }, body, retryWithoutCacheError, {
             attempt: i + 1,
-            retryable: i < maxRetry && shouldRetry(retryWithoutCacheError),
+            retryable: i < maxRetry && isRetryableError(retryWithoutCacheError),
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
             downgraded: true,
             downgradeReason: 'strip_openai_prompt_cache'
@@ -661,7 +663,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             });
           }
           lastErr = retryWithoutCacheError;
-          if (i >= maxRetry || !shouldRetry(retryWithoutCacheError)) break;
+          if (i >= maxRetry || !isRetryableError(retryWithoutCacheError)) break;
           const delayMs = getRetryDelayMs(retryWithoutCacheError, i);
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
@@ -742,7 +744,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
           const downgraded = stripAnthropicPromptCaching(prepared.requestBody, prepared.requestHeaders);
           emitHttpFailureTrace(trace, { ...prepared, requestBody: downgraded.requestBody, requestHeaders: downgraded.requestHeaders }, body, retryWithoutCacheError, {
             attempt: i + 1,
-            retryable: i < maxRetry && shouldRetry(retryWithoutCacheError),
+            retryable: i < maxRetry && isRetryableError(retryWithoutCacheError),
             durationMs: Math.max(0, Date.now() - attemptStartedAt),
             downgraded: true,
             downgradeReason: 'strip_anthropic_prompt_cache'
@@ -756,7 +758,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
             });
           }
           lastErr = retryWithoutCacheError;
-          if (i >= maxRetry || !shouldRetry(retryWithoutCacheError)) break;
+          if (i >= maxRetry || !isRetryableError(retryWithoutCacheError)) break;
           const delayMs = getRetryDelayMs(retryWithoutCacheError, i);
           await new Promise((r) => setTimeout(r, delayMs));
           continue;
@@ -771,7 +773,7 @@ async function postWithRetry(url, body, retries = 1, specificKey = null) {
         });
       }
       lastErr = e;
-      if (i >= maxRetry || !shouldRetry(e)) break;
+      if (i >= maxRetry || !isRetryableError(e)) break;
 
       const delayMs = getRetryDelayMs(e, i);
       await new Promise((r) => setTimeout(r, delayMs));

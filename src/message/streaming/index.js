@@ -5,6 +5,7 @@ const {
   getGroupChatStreamSendGapMs,
   getStreamingSplitIndex
 } = require('../../../core/streamingSegmentation');
+const { getGroupReplySensitiveGuard } = require('../../../utils/groupReplySensitiveGuard');
 
 function getReplyChunkChars(config = {}) {
   const n = Number(config.AI_REPLY_CHUNK_CHARS);
@@ -102,16 +103,38 @@ function createStreamingDispatcher({
       }
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
+      let sendText = text;
+      if (!isPrivate) {
+        const guard = getGroupReplySensitiveGuard();
+        const check = guard.check(text);
+        if (check.blocked) {
+          sendText = guard.replacementText;
+          console.warn('[reply-sensitive-guard] group reply blocked', {
+            groupId: String(groupId || '').trim(),
+            senderId: String(senderId || '').trim(),
+            matchedCount: check.matchedWords.length
+          });
+          emitStreamingTelemetry('group_reply_sensitive_blocked', {
+            node: 'reply_sensitive_guard',
+            channel: 'group',
+            groupId: String(groupId || '').trim(),
+            senderId: String(senderId || '').trim(),
+            matchedCount: check.matchedWords.length,
+            source: 'stream_chunk'
+          });
+        }
+      }
+
       const payload = isPrivate
         ? {
             action: 'send_private_msg',
-            params: { user_id: userId, message: text }
+            params: { user_id: userId, message: sendText }
           }
         : {
             action: 'send_group_msg',
             params: {
               group_id: groupId,
-              message: `${state.hasSentAny ? '' : `[CQ:at,qq=${senderId}] `}${text}`
+              message: `${state.hasSentAny ? '' : `[CQ:at,qq=${senderId}] `}${sendText}`
             }
           };
       const startedAt = Date.now();

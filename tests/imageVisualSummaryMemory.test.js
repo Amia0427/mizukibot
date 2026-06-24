@@ -48,6 +48,7 @@ const config = require('../config');
 const { loadImageMemoryIndex } = require('../utils/imageMemoryIndex');
 const { loadMemoryEvents } = require('../utils/memory-v3/events');
 const { loadMemoryNodes } = require('../utils/memory-v3/storage');
+const { materializeMemoryViews } = require('../utils/memory-v3/materializer');
 const { prepareRequest } = require('../api/httpClient');
 const {
   estimateVisualSummaryRequestTokens,
@@ -93,30 +94,19 @@ module.exports = (async () => {
       channels: 3
     }
   }).png().toBuffer();
-  const rawVisualTokens = estimateVisualSummaryRequestTokens({
+  const largeImagePayload = {
     mediaType: 'image/png',
     byteLength: largeVisualInput.length,
     data: largeVisualInput.toString('base64')
-  }, {
+  };
+  const largeImageContext = {
     userText: '用户随图文本'.repeat(500),
     imageSource: 'current'
-  });
-  assert.ok(rawVisualTokens >= config.IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_HARD_LIMIT, 'test fixture should start over visual summary memory input budget');
-  const fittedVisualInput = await fitVisualSummaryImagePayloadToBudget({
-    mediaType: 'image/png',
-    byteLength: largeVisualInput.length,
-    data: largeVisualInput.toString('base64')
-  }, {
-    userText: '用户随图文本'.repeat(500),
-    imageSource: 'current'
-  });
-  const fittedTokens = estimateVisualSummaryRequestTokens(fittedVisualInput, {
-    userText: '用户随图文本'.repeat(500),
-    imageSource: 'current'
-  });
-  assert.ok(fittedTokens < config.IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_HARD_LIMIT, 'visual summary memory request should fit image input budget');
-  assert.strictEqual(fittedVisualInput.mediaType, 'image/jpeg');
-  assert.ok(fittedVisualInput.budgetFit, 'oversized visual summary image should record budget fit metadata');
+  };
+  const rawVisualTokens = estimateVisualSummaryRequestTokens(largeImagePayload, largeImageContext);
+  assert.ok(rawVisualTokens < config.IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_HARD_LIMIT, 'image data URL should be summarized as an image placeholder for token budget');
+  const fittedVisualInput = await fitVisualSummaryImagePayloadToBudget(largeImagePayload, largeImageContext);
+  assert.strictEqual(fittedVisualInput, largeImagePayload, 'image should not be recompressed when token budget already fits');
 
   writeCachedImage('singleflight_img', 'https://example.com/singleflight.png');
   let releaseSingleflight = null;
@@ -232,6 +222,7 @@ module.exports = (async () => {
     && event.text.includes('987654')
   )));
 
+  materializeMemoryViews({ force: true, scheduleEmbeddingBackfill: false });
   const nodes = loadMemoryNodes();
   assert.ok(nodes.some((node) => (
     node.memoryKind === 'image'
@@ -281,7 +272,19 @@ module.exports = (async () => {
     postWithRetry: async () => {
       failureCalls += 1;
       const error = new Error('Request failed with status code 400');
-      error.response = { status: 400 };
+      error.response = {
+        status: 400,
+        headers: {
+          'content-type': 'application/json',
+          'x-request-id': 'req_visual_400'
+        },
+        data: {
+          error: {
+            message: 'Unsupported parameter: temperature',
+            code: 'unsupported_parameter'
+          }
+        }
+      };
       throw error;
     }
   });
@@ -292,6 +295,16 @@ module.exports = (async () => {
   const failureState = loadImageMemoryIndex().images.failure_img.visualSummaryState;
   assert.strictEqual(failureState.reason, 'http_400');
   assert.strictEqual(failureState.requestShape, 'chat_completions_image_url_data_url');
+  assert.strictEqual(failureState.errorDiagnostic.status, 400);
+  assert.strictEqual(failureState.errorDiagnostic.code, 'unsupported_parameter');
+  assert.strictEqual(failureState.errorDiagnostic.failureSource, 'model_parameters');
+  assert.strictEqual(failureState.errorDiagnostic.responseHeaders['x-request-id'], 'req_visual_400');
+  assert.ok(failureState.errorDiagnostic.responseBody.includes('Unsupported parameter'));
+  assert.strictEqual(failureState.requestDiagnostic.requestShape, 'chat_completions_image_url_data_url');
+  assert.strictEqual(failureState.requestDiagnostic.preferredProtocol, 'chat_completions');
+  assert.strictEqual(failureState.requestDiagnostic.image.mediaType, 'image/jpeg');
+  assert.strictEqual(failureState.requestDiagnostic.image.dataUrl, true);
+  assert.ok(failureState.requestDiagnostic.estimatedInputTokens > 0);
   assert.ok(Number(failureState.nextRetryAt) > Date.parse('2026-05-20T01:25:00+08:00'));
 
   const cooledFailure = await summarizeImageIntoLongTermMemory('cached-image://failure_img', {

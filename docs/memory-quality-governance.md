@@ -1,6 +1,10 @@
 # Memory Quality Governance
 
-更新时间：2026-06-17 01:13 +08:00
+更新时间：2026-06-24 10:25 +08:00
+
+更新 2026-06-24 10:25 +08:00：图片视觉摘要 `http_400` 冷却诊断补齐。复查今天日志，失败样本为 `2026-06-24 02:00:50 +08:00` 的 `image_visual_summary_memory`，endpoint/model 为 `https://opencode.ai/zen/v1/chat/completions` / `mimo-v2.5-free`；失败图 `b4b8c23b79aeb94f036f081c3077967e2cb7f6bf` 是 94KB JPEG、估算输入约 161 tokens，同链路同批存在成功样本，现有状态只落 `http_400`，看不到上游错误体或实际请求形状。现 `visualSummaryState` 在 HTTP 失败时保存脱敏 `errorDiagnostic` 和 `requestDiagnostic`，并让 `imageMemoryIndex` 保存边界保留这些字段；下次可直接区分请求体、模型参数或上游约束。验收：`node tests\imageVisualSummaryMemory.test.js`、`node tests\imageMemoryIndex.test.js`、`node --check utils\imageVisualSummaryMemory.js`、`node --check utils\imageMemoryIndex.js`、`git diff --check` 通过。小目标完成：下次图片视觉摘要 400 进入 cooldown 时，不再只有 `http_400` 黑盒。
+
+更新 2026-06-24 10:21 +08:00：`memoryReranker` 近期超时回退闭环。复查今天 `data/bot-runtime.err.log` 真实样本，连续出现 `rerank request timed out after 800ms` 与自适应后的 `1200ms (2/2)` 冷却；再按 `data/model-calls.ndjson` 统计 6/23-6/24 的 71 条 `memory_rerank` 调用，底层全部成功，p50/p95/p99 为 `481/732/996ms`，只有 2 条超过 800ms、0 条超过 1200ms。结论：本轮瓶颈是本地 `MEMORY_RERANK_TIMEOUT_MS=800` 预算贴近尾延迟，不是调用链阻塞，也不是 worldbook 无门禁重复触发；已有单进程 in-flight 保护继续保留。现 `utils/memoryReranker.js` 对非显式 timeout 增加 `MEMORY_RERANK_TIMEOUT_FLOOR_MS=1500` 有效下限，避免运行环境的 800ms 配置继续误伤热路径；显式短 timeout 仍用于测试和特殊调用。验收：`node tests\memoryReranker.test.js` 覆盖默认预算下限、显式短 timeout 和连续超时冷却。小目标完成：rerank 热路径不再因 800ms 尾延迟频繁回退到 base recall。
 
 更新 2026-06-17 01:13 +08:00：`image_visual_summary_memory` 输入预算和同图单飞治理。复查 `data/model-calls.ndjson`，`2026-06-16T16:00:18.473Z/16:00:20.111Z` 两条 `Qwen/Qwen3.6-27B` 图片长期记忆视觉摘要调用同属 `cacheKey=7b082813e5b212df0fcbdefb00e66d2af8ff8e9c`，估算输入为 `51594/51603` tokens；对应 `data/image_memory_index.json` 为 `userText="[图片]"`、`ocrText=""`，不是超长原文、OCR 或引用文本污染，而是图片 data URL/base64 本体进入模型 message，同时同图入库观察并发导致摘要落盘前双打。现 `utils/imageVisualSummaryMemory.js` 在专用链路内裁剪随图文本、按 `IMAGE_MEMORY_VISUAL_SUMMARY_INPUT_TOKEN_*` 对图片 payload 下采样/降质兜底，并按 `cacheKey|endpoint|model` 单飞复用同一请求。验收：真实样本 154,328 bytes 原图从 `51603` tokens 压到 `18868` tokens，低于 hard limit `20000`；`node tests\imageVisualSummaryMemory.test.js` 覆盖超预算图片压缩和同图并发单飞。小目标完成：图片长期记忆视觉摘要不再因 base64 图片本体或同图并发重复打 50k+ 输入。
 

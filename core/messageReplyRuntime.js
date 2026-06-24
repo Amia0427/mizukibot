@@ -23,6 +23,7 @@ const {
   getGroupChatStreamSendGapMs,
   getStreamingSplitIndex
 } = require('./streamingSegmentation');
+const { getGroupReplySensitiveGuard } = require('../utils/groupReplySensitiveGuard');
 
 function createReplyTelemetryEvent(type = '', payload = {}) {
   return {
@@ -250,6 +251,42 @@ function getStreamMaxSegments(runtimeConfig = {}) {
   return Math.max(1, Math.min(6, Math.floor(n)));
 }
 
+function emitSensitiveGuardEvent(telemetry = null, payload = {}) {
+  if (!telemetry || typeof telemetry.onEvent !== 'function') return;
+  try {
+    telemetry.onEvent(createReplyTelemetryEvent('group_reply_sensitive_blocked', {
+      node: 'reply_sensitive_guard',
+      channel: 'group',
+      ...payload
+    }));
+  } catch (_) {}
+}
+
+function applyGroupReplySensitiveGuard(text = '', context = {}) {
+  const guard = getGroupReplySensitiveGuard();
+  const check = guard.check(extractReplyTextValue(text));
+  if (!check.blocked) return { text, blocked: false, matchedCount: 0 };
+
+  const matchedCount = check.matchedWords.length;
+  console.warn('[reply-sensitive-guard] group reply blocked', {
+    groupId: String(context.groupId || '').trim(),
+    senderId: String(context.senderId || '').trim(),
+    matchedCount
+  });
+  emitSensitiveGuardEvent(context.telemetry, {
+    groupId: String(context.groupId || '').trim(),
+    senderId: String(context.senderId || '').trim(),
+    matchedCount,
+    source: String(context.source || '').trim()
+  });
+
+  return {
+    text: guard.replacementText,
+    blocked: true,
+    matchedCount
+  };
+}
+
 function createStreamingDispatcher({
   runtimeConfig = {},
   config = runtimeConfig,
@@ -258,7 +295,8 @@ function createStreamingDispatcher({
   groupId,
   userId,
   senderId,
-  shouldSend = null
+  shouldSend = null,
+  telemetry = null
 }) {
   const effectiveConfig = runtimeConfig && Object.keys(runtimeConfig).length ? runtimeConfig : (config || {});
   const maxSegments = getStreamMaxSegments(effectiveConfig);
@@ -303,16 +341,26 @@ function createStreamingDispatcher({
       }
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
+      const guarded = isPrivate
+        ? { text, blocked: false }
+        : applyGroupReplySensitiveGuard(text, {
+            groupId,
+            senderId,
+            telemetry,
+            source: 'stream_chunk'
+          });
+      const sendText = guarded.text;
+
       const payload = isPrivate
         ? {
             action: 'send_private_msg',
-            params: { user_id: userId, message: text }
+            params: { user_id: userId, message: sendText }
           }
         : {
             action: 'send_group_msg',
             params: {
               group_id: groupId,
-              message: `${state.hasSentAny ? '' : `[CQ:at,qq=${senderId}] `}${text}`
+              message: `${state.hasSentAny ? '' : `[CQ:at,qq=${senderId}] `}${sendText}`
             }
           };
       const startedAt = Date.now();
@@ -460,11 +508,17 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       replyLength: String(replyText || '').trim().length
     });
 
+    const guardedReply = applyGroupReplySensitiveGuard(replyText, {
+      groupId,
+      senderId,
+      telemetry,
+      source: 'send_group_reply'
+    });
     const sent = await sendSystemGroupReply({
       sendWithRetry,
       groupId,
       senderId,
-      replyText,
+      replyText: guardedReply.text,
       atSender,
       retries,
       waitMs,

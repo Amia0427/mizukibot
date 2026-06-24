@@ -253,7 +253,16 @@ function parseDecisionFromLooseText(text = '') {
 }
 
 function parseDecision(rawText = '') {
-  const obj = extractJsonSafely(String(rawText || '').trim());
+  const text = String(rawText || '').trim();
+  if (!text) {
+    return {
+      shouldReply: false,
+      confidence: 0,
+      reason: 'empty-output'
+    };
+  }
+
+  const obj = extractJsonSafely(text);
   if (obj && typeof obj === 'object') {
     const shouldReply = parseBooleanLike(obj.should_reply);
     if (shouldReply !== null) {
@@ -265,7 +274,7 @@ function parseDecision(rawText = '') {
     }
   }
 
-  const loose = parseDecisionFromLooseText(rawText);
+  const loose = parseDecisionFromLooseText(text);
   if (loose) return loose;
 
   return {

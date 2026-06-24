@@ -57,6 +57,9 @@ const {
   fuseRankedCandidateGroups,
   scoreLocalCandidatePool
 } = require('./queryScoring');
+const {
+  collapseJournalLongTermSemanticDuplicates
+} = require('./semanticDedup');
 const { detectRecentRecallIntent } = require('./recentRecallPolicy');
 const { getEmbeddingRuntimeState } = require('../memoryEmbeddingClient');
 const { getMemoryRerankRuntimeState } = require('../memoryReranker');
@@ -327,8 +330,14 @@ async function queryMemory(input = {}) {
   timing.rerankMs = getNowMs() - stageStartedAt;
   const rerankAfterRuntime = getMemoryRerankRuntimeState();
   const reranked = appendRerankTail(rerankedHead, rerankTail);
+  const semanticDedup = collapseJournalLongTermSemanticDuplicates(reranked, {
+    facet,
+    enabled: input.journalLongTermSemanticDedupeEnabled ?? config.MEMORY_JOURNAL_LONG_TERM_DEDUPE_ENABLED,
+    threshold: input.journalLongTermSemanticDedupeThreshold ?? config.MEMORY_JOURNAL_LONG_TERM_DEDUPE_THRESHOLD,
+    maxPairs: input.journalLongTermSemanticDedupeMaxPairs ?? config.MEMORY_JOURNAL_LONG_TERM_DEDUPE_MAX_PAIRS
+  });
   stageStartedAt = getNowMs();
-  const selected = diversify(ensureTargetJournalCandidates(reranked, candidates, journalTargetDays), topK, {
+  const selected = diversify(ensureTargetJournalCandidates(semanticDedup.items, candidates, journalTargetDays), topK, {
     ...input,
     facet
   });
@@ -448,6 +457,7 @@ async function queryMemory(input = {}) {
         rankFusion,
         retrievalPlan,
         rerank: rerankDiagnostics,
+        semanticDedup: semanticDedup.diagnostics,
         selected: selected.map((item) => ({
           id: item.id,
           source: item.source,

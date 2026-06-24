@@ -382,14 +382,29 @@ function buildPinnedLookup(safeEndpoint = null) {
   };
 }
 
-function shouldRetry(err) {
+function isMainReplyTrace(trace = {}) {
+  const source = String(trace?.source || '').trim();
+  const routePolicyKey = String(trace?.routePolicyKey || trace?.route_policy_key || '').trim();
+  const routeDebugKey = String(trace?.routeDebugKey || trace?.route_debug_key || '').trim();
+  const triggerBranch = String(trace?.triggerBranch || trace?.trigger_branch || '').trim();
+  return source === 'direct_reply'
+    || source === 'draft_reply'
+    || source === 'v2_streaming_reply'
+    || source === 'v2_assistant_message'
+    || routePolicyKey === 'transform/vision-summary'
+    || routeDebugKey === 'direct_chat/image_summary/summary'
+    || triggerBranch.startsWith('direct_reply.');
+}
+
+function shouldRetry(err, trace = null) {
   if (err?.retryable === false) return false;
-  const code = String(err?.code || '').toUpperCase();
-  if (['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'ENETRESET', 'ENETUNREACH'].includes(code)) return true;
   const status = Number(err?.response?.status);
   if (isCloudflare403(err)) return true;
-  if (status === 408 || status === 409 || status === 425 || status === 429) return true;
+  if (status === 408) return !isMainReplyTrace(trace);
+  if (status === 409 || status === 425 || status === 429) return true;
   if (status >= 500) return true;
+  const code = String(err?.code || '').toUpperCase();
+  if (['ECONNABORTED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'EPIPE', 'ENETRESET', 'ENETUNREACH'].includes(code)) return true;
   // Network errors usually have no response object.
   if (!err?.response) return true;
   return false;
@@ -412,9 +427,9 @@ function isRetryableTransportError(err) {
     .test(String(err?.message || ''));
 }
 
-function shouldRetryStreamRequest(err, handlers = {}) {
+function shouldRetryStreamRequest(err, handlers = {}, trace = null) {
   if (handlers && handlers.__abort_requested) return false;
-  if (!shouldRetry(err)) return false;
+  if (!shouldRetry(err, trace)) return false;
   if (handlers && handlers.__stream_started) return false;
   return true;
 }
@@ -431,6 +446,7 @@ module.exports = {
   getStreamAxiosOptions,
   getStreamTimeoutMs,
   buildPinnedLookup,
+  isMainReplyTrace,
   isCloudflare403,
   isRetryableTransportError,
   parseRetryAfterMs,

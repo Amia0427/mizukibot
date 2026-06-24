@@ -439,7 +439,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
           if (err) {
             emitHttpFailureTrace(trace, prepared, body, err, {
               attempt: i + 1,
-              retryable: i < maxRetry && shouldRetryStreamRequest(err, handlers),
+              retryable: i < maxRetry && shouldRetryStreamRequest(err, handlers, trace),
               durationMs: Math.max(0, Date.now() - attemptStartedAt)
             });
             if (err && typeof err === 'object') streamFailureTraceEmitted.add(err);
@@ -527,7 +527,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
       if (!e || typeof e !== 'object' || !streamFailureTraceEmitted.has(e)) {
         emitHttpFailureTrace(trace, prepared, body, e, {
           attempt: i + 1,
-          retryable: i < maxRetry && shouldRetryStreamRequest(e, handlers),
+          retryable: i < maxRetry && shouldRetryStreamRequest(e, handlers, trace),
           durationMs: Math.max(0, Date.now() - attemptStartedAt)
         });
       }
@@ -544,7 +544,7 @@ async function postStreamWithRetry(url, body, handlers = {}, retries = 1, specif
         try { stream.destroy(); } catch (_) {}
       }
       if (fallbackProtocolFailed) break;
-      if (i >= maxRetry || !shouldRetryStreamRequest(e, handlers)) break;
+      if (i >= maxRetry || !shouldRetryStreamRequest(e, handlers, trace)) break;
 
       const delayMs = getRetryDelayMs(e, i);
       await new Promise((r) => setTimeout(r, delayMs));

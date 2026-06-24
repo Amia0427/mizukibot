@@ -39,6 +39,8 @@ module.exports = (async () => {
     process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'reply-model';
     process.env.PASSIVE_AWARENESS_STRONG_CUE_FORCE_REPLY = 'true';
     process.env.PASSIVE_AWARENESS_CHEAP_GATE_MIN_SCORE = '1';
+    process.env.MEME_MANAGER_FOLLOWUP_ENABLED = 'false';
+    process.env.MEMORY_V3_ENABLED = 'false';
     process.env.BOT_QQ = 'bot-test';
 
     clearProjectCache();

@@ -38,6 +38,8 @@ module.exports = (async () => {
     process.env.POST_REPLY_ENRICH_PRESSURE_PAUSE_ENABLED = 'true';
     process.env.POST_REPLY_CORE_MINIMAL_UNDER_PRESSURE = 'true';
     process.env.POST_REPLY_WORKER_ENABLED = 'true';
+    process.env.POST_REPLY_WORKER_CONCURRENCY = '2';
+    process.env.POST_REPLY_WORKER_PRESSURE_MAX_CONCURRENCY = '1';
     clearProjectCache();
 
     const memoryExtraction = require('../api/memoryExtraction');
@@ -145,7 +147,7 @@ module.exports = (async () => {
     const runtime = createPostReplyWorkerRuntime({
       queue,
       pollMs: 1000,
-      concurrency: 1,
+      concurrency: 2,
       processJob: async (job) => {
         processed.push(job);
         return { ok: true, job };
@@ -163,6 +165,7 @@ module.exports = (async () => {
     assert.strictEqual(processed[0].postReplyPressureMode, 'minimal');
     assert.strictEqual(queue.listJobs(['queued']).some((job) => job.jobId === 'enrich_pressure_job'), true, 'enrich should remain queued under pressure');
     assert.strictEqual(runtime.getStats().pressureBackoff.active, true);
+    assert.strictEqual(processed.length, 1, 'pressure mode should limit effective worker concurrency');
 
     memoryExtraction.learnSomethingNew = originalLearnSomethingNew;
     dailyJournal.appendDailyJournalEntry = originalAppendDailyJournalEntry;

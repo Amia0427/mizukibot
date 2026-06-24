@@ -1,5 +1,5 @@
 const { appendMemoryEvent, normalizeMemoryEvent, loadMemoryEvents } = require('./events');
-const { materializeMemoryViews } = require('./materializer');
+const { materializeMemoryViews, materializeMemoryViewsAsync } = require('./materializer');
 const { queryMemory } = require('./query');
 const { assembleMemoryPacket } = require('./packet');
 const { restoreSessionState } = require('./session');
@@ -52,6 +52,7 @@ module.exports = {
   normalizeMemoryEvent,
   loadMemoryEvents,
   materializeMemoryViews,
+  materializeMemoryViewsAsync,
   queryMemory,
   assembleMemoryPacket,
   restoreSessionState,

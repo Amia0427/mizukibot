@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "replacementText": "这句我先不发了，换个说法吧。",
+  "vendorFiles": [
+    "反动词库.txt",
+    "政治类型.txt",
+    "暴恐词库.txt",
+    "涉枪涉爆.txt",
+    "色情类型.txt",
+    "色情词库.txt"
+  ],
+  "extraWords": [],
+  "allowWords": [
+    "北京",
+    "疫情",
+    "按摩",
+    "白痴",
+    "罢工"
+  ]
+}

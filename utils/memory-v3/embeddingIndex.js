@@ -32,6 +32,9 @@ const backfillState = {
   running: false,
   timer: null
 };
+let requestEmbeddingImpl = requestEmbedding;
+let shouldUseRemoteEmbeddingImpl = shouldUseRemoteEmbedding;
+let collectEmbeddingBackfillNodesImpl = null;
 
 const { classifyEmbeddingPriority } = createEmbeddingPriority({
   isJournalEmbeddingDoc
@@ -147,6 +150,25 @@ function resolveBackfillLimit(options = {}) {
   const batchSize = Math.max(1, Math.floor(Number(options.batchSize || config.MEMORY_EMBEDDING_BACKFILL_BATCH_SIZE || 32) || 32));
   const maxPerRun = Math.max(1, Math.floor(Number(options.maxPerRun || config.MEMORY_EMBEDDING_BACKFILL_MAX_PER_RUN || 128) || 128));
   return Math.min(batchSize, maxPerRun);
+}
+
+function resolveBackfillConcurrency(options = {}) {
+  const explicit = Math.floor(Number(options.concurrency || 0) || 0);
+  if (explicit > 0) return explicit;
+  return Math.max(1, Math.floor(Number(config.MEMORY_EMBEDDING_BACKFILL_CONCURRENCY || 2) || 2));
+}
+
+async function runWithConcurrency(items = [], concurrency = 1, worker = async () => {}) {
+  const limit = Math.max(1, Math.floor(Number(concurrency || 1) || 1));
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const current = items[cursor];
+      cursor += 1;
+      await worker(current);
+    }
+  });
+  await Promise.all(runners);
 }
 
 function buildEmbeddingBackfillPlan(options = {}) {
@@ -269,7 +291,7 @@ function buildEmbeddingBackfillPlan(options = {}) {
 }
 
 function scheduleEmbeddingBackfill(options = {}) {
-  if (!isEmbeddingIndexEnabled() || !shouldUseRemoteEmbedding()) return false;
+  if (!isEmbeddingIndexEnabled() || !shouldUseRemoteEmbeddingImpl()) return false;
   if (backfillState.timer || backfillState.running) return false;
   const delayMs = Math.max(0, Number(options.delayMs ?? 250) || 0);
   backfillState.timer = setTimeout(() => {
@@ -294,7 +316,7 @@ function enqueueMissingEmbeddings(nodes = [], options = {}) {
 }
 
 async function backfillMissingEmbeddings(options = {}) {
-  if (!isEmbeddingIndexEnabled() || !shouldUseRemoteEmbedding()) {
+  if (!isEmbeddingIndexEnabled() || !shouldUseRemoteEmbeddingImpl()) {
     return { ok: false, skipped: true, reason: 'embedding_disabled' };
   }
   if (backfillState.running) {
@@ -306,7 +328,10 @@ async function backfillMissingEmbeddings(options = {}) {
   try {
     const now = Date.now();
     const source = normalizeBackfillSource(options.source);
-    const selectedNodes = filterEmbeddingBackfillNodes(collectEmbeddingBackfillNodes(), source);
+    const selectedNodes = filterEmbeddingBackfillNodes(
+      collectEmbeddingBackfillNodesImpl ? collectEmbeddingBackfillNodesImpl() : collectEmbeddingBackfillNodes(),
+      source
+    );
     const planBefore = buildEmbeddingBackfillPlan({
       ...options,
       source
@@ -348,7 +373,7 @@ async function backfillMissingEmbeddings(options = {}) {
 
     let embedded = 0;
     let failed = 0;
-    for (const item of pending) {
+    await runWithConcurrency(pending, resolveBackfillConcurrency(options), async (item) => {
       const nodeEntry = nodeMap.get(item.row.key);
       if (!nodeEntry) {
         rows[item.index] = {
@@ -356,9 +381,9 @@ async function backfillMissingEmbeddings(options = {}) {
           status: 'stale',
           error: 'node_not_found'
         };
-        continue;
+        return;
       }
-      const vector = await requestEmbedding(nodeEntry.identity.text);
+      const vector = await requestEmbeddingImpl(nodeEntry.identity.text);
       if (Array.isArray(vector) && vector.length > 0) {
         rows[item.index] = {
           ...item.row,
@@ -370,7 +395,7 @@ async function backfillMissingEmbeddings(options = {}) {
           error: ''
         };
         embedded += 1;
-        continue;
+        return;
       }
       const failCount = Math.max(0, Number(item.row.failCount || 0) || 0) + 1;
       const failure = getLastEmbeddingFailure();
@@ -384,7 +409,7 @@ async function backfillMissingEmbeddings(options = {}) {
         lastErrorMessage: failure.message || ''
       };
       failed += 1;
-    }
+    });
 
     writeEmbeddingRows(rows);
     const scopedRows = rows.filter((row) => nodeMap.has(row.key));
@@ -435,6 +460,16 @@ function calcEmbeddingSimilarity(queryEmbedding, candidate = {}, index = loadEmb
 }
 
 module.exports = {
+  __setEmbeddingBackfillDepsForTests(deps = {}) {
+    if (typeof deps.requestEmbedding === 'function') requestEmbeddingImpl = deps.requestEmbedding;
+    if (typeof deps.shouldUseRemoteEmbedding === 'function') shouldUseRemoteEmbeddingImpl = deps.shouldUseRemoteEmbedding;
+    if (typeof deps.collectEmbeddingBackfillNodes === 'function') collectEmbeddingBackfillNodesImpl = deps.collectEmbeddingBackfillNodes;
+  },
+  __resetEmbeddingBackfillDepsForTests() {
+    requestEmbeddingImpl = requestEmbedding;
+    shouldUseRemoteEmbeddingImpl = shouldUseRemoteEmbedding;
+    collectEmbeddingBackfillNodesImpl = null;
+  },
   buildEmbeddingText,
   buildEmbeddingIdentity,
   buildEmbeddingCacheReconcilePlan,

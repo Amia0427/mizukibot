@@ -161,9 +161,13 @@ function createPostReplyWorkerRuntime(options = {}) {
     const hasActiveRateLimit = Array.from(phaseRateLimitState.values())
       .map((item) => normalizeObject(item, {}))
       .some((item) => Math.max(0, Number(item.cooldownUntil || 0) || 0) > now);
-    return hasActiveRateLimit
-      ? Math.min(concurrency, rateLimitMaxConcurrency)
+    const pressureLimit = pressureBackoffState.active
+      ? Math.max(1, Number(config.POST_REPLY_WORKER_PRESSURE_MAX_CONCURRENCY) || 1)
       : concurrency;
+    const baseConcurrency = Math.min(concurrency, pressureLimit);
+    return hasActiveRateLimit
+      ? Math.min(baseConcurrency, rateLimitMaxConcurrency)
+      : baseConcurrency;
   }
 
   function applyRateLimitBackoff(job = {}, errorText = '') {

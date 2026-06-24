@@ -1,18 +1,11 @@
 const fs = require('fs');
-const os = require('os');
-const path = require('path');
 const assert = require('assert');
+const {
+  assertNoUnexpectedHandles,
+  createMemoryV3TempEnv
+} = require('./memoryV3TestHarness');
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-memory-v3-query-'));
-process.env.DATA_DIR = tempRoot;
-process.env.MEMORY_V3_DIR = path.join(tempRoot, 'memory-v3');
-process.env.MEMORY_V3_EVENTS_DIR = path.join(process.env.MEMORY_V3_DIR, 'events');
-process.env.MEMORY_V3_PROJECTIONS_DIR = path.join(process.env.MEMORY_V3_DIR, 'projections');
-process.env.MEMORY_V3_ENABLED = 'true';
-process.env.MEMORY_HYBRID_RECALL_ENABLED = 'false';
-process.env.MEMORY_EMBEDDING_MODEL = '';
-
-fs.mkdirSync(tempRoot, { recursive: true });
+createMemoryV3TempEnv('mizuki-memory-v3-query-');
 
 const { appendMemoryEvent } = require('../utils/memory-v3/events');
 const { materializeMemoryViews } = require('../utils/memory-v3/materializer');
@@ -104,6 +97,7 @@ module.exports = (async () => {
   );
   const secondNodes = loadMemoryNodes();
   assert.ok(secondNodes.some((item) => item.id === 'node_cache_probe'), 'expected projection read cache to refresh when file changes');
+  await assertNoUnexpectedHandles({ waitMs: 50 });
   console.log('memoryV3Query.test.js passed');
 })().catch((error) => {
   console.error(error);

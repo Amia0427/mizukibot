@@ -1,3 +1,79 @@
+## 运行维护 2026-06-24 18:01
+
+- 小目标：给当前项目补一个最小可用的 Memory V3 RAG explain/diagnostic 入口，能按真实 `userId + query` 直接复盘主回复记忆召回各阶段结果。
+- 最小修复：新增 `utils/memory-v3/ragExplainDiagnostic.js`，薄封装现有 `buildMemoryContextAsync`、`queryMemory`、候选收集与 diagnosis 数据，统一输出 `candidateSources`、`journalSegmentHits`、`longTermProfileHits`、`rankFusion`、`rerank`、`journalVsLongTermDedup`、`finalResults`；新增 `scripts/diagnose-memory-rag-explain.js` 和 `package.json` 脚本 `diag:memory-rag-explain`，支持 `--user-id`、`--query`、`--session-key`、`--group-id`、`--facet`、`--source`、`--top-k`、`--stage-limit`、`--max-chars`、`--data-dir`；补齐 trace-only stable profile 预览字段，避免 explain 样本空白。
+- 验证：`node tests\memoryV3RagExplainDiagnostic.test.js`、`node tests\memoryV3RagExplainDedupStage.test.js` 通过；`git diff --check` 通过，仅有既有 CRLF warning。
+- 范围控制：未重做观测平台、未改主回复召回策略、未扩展线上接口，只复用现有 Memory V3 / diagnosis 数据做本地脚本入口和最小回归。
+- 小目标已完成：主回复记忆召回 explain/diagnostic 已可本地直接跑通，并能看到 journal/profile 命中、rerank、去重与最终 retained。
+- 提交后记录 2026-06-24 18:04 +08:00：已完成本地提交（`feat: add memory rag explain diagnostic`）；该小目标完成记录已按并行开发约定追加。
+
+## 运行维护 2026-06-24 12:08
+
+- 小目标：在 Memory V3 查询阶段折叠 journal segment 与 personal/profile 的高相似重复召回，避免同一事实同时占用最终结果。
+- 最小修复：新增 `utils/memory-v3/semanticDedup.js`，只比较 journal vs personal/profile 且要求两边 ready embedding 模型与更新时间一致，并通过 `textHash/canonicalKey/nodeId` 兼容现有 backfill 与查询候选形态；默认阈值 `MEMORY_JOURNAL_LONG_TERM_DEDUPE_THRESHOLD=0.9`，最多比较 128 对；`queryMemory()` 在 rerank 后、diversify 前折叠，保留 `ensureTargetJournalCandidates()` 兜底和 `diagnostics.recall.semanticDedup`。
+- 验证：`node tests\memoryV3JournalLongTermSemanticDedup.test.js`、`node tests\dailyJournalSegmentSemanticRecall.test.js` 通过；`node tests\memoryV3PreferenceFacet.test.js` 和 `node tests\memoryV3Query.test.js` 直接命令存在既有未退出句柄超时，使用 `node -e "require('./tests/...').then(()=>process.exit(0))"` 包装后断言通过；`git diff --check` 通过，仅有既有 CRLF warning。
+- 范围控制：未改 `memoryConflictResolver`、未删除或归档日记向量、未改写入/materialize/embedding backfill；`duplicateEvidence` 只作为诊断保留，不额外注入 prompt。
+- 小目标已完成：查询时 journal-vs-long-term 语义去重已落地，持久化数据不受影响。
+
+## 运行维护 2026-06-24 12:01
+
+- 小目标：日记 segment 从固定批量摘要改为按 session/topic 聚类后分别摘要和向量化，减少无关主题混入召回。
+- 最小修复：`dailyJournal/segments` 在摘要前按 `sourceSessionId/sessionKey + activeTopic` 等确定性字段聚类，保留旧 journal entry 格式；同一 batch 先全部生成 summary，成功后再多条写入 segment 并一次性推进 offset；segment docs 写入 `clusterKey` 到 text/tags/openPayload。
+- 验证：`node tests\dailyJournalSegments.test.js`、`node tests\dailyJournalSegmentSemanticRecall.test.js`、`node tests\memoryV3EmbeddingIndex.test.js`、`node tests\memoryCliJournalHybridRerank.test.js`、`node tests\dailyJournalSegmentClusterRecall.test.js` 通过；`git diff --check` 通过，仅有既有 CRLF warning。
+- 范围控制：未改 RAG 主召回链路、数据库 schema、LLM/embedding 聚类、旧 segment 文件或普通长期记忆写入逻辑。
+- 小目标已完成：同 batch 的不同 session/topic 会生成独立 journal segment 和独立 Memory V3 segment 文档。
+- 提交后记录 2026-06-24 12:10 +08:00：已提交 `d2c9931`（`feat: cluster daily journal segments`）；该小目标完成记录已按并行开发约定追加。
+
+## 运行维护 2026-06-24 11:32
+
+- 小目标：降低日记 segment 摘要混合多个话题后被向量召回带出无关内容的风险。
+- 最小修复：`DAILY_JOURNAL_SEGMENT_MAX_ENTRIES` 默认值从 10 降到 6；仍保留环境变量覆盖能力，未改日记原文写入、摘要 prompt、向量化文本截断或召回排序逻辑。
+- 验证：默认值探针 `node -e "delete process.env.DAILY_JOURNAL_SEGMENT_MAX_ENTRIES; console.log(require('./config').DAILY_JOURNAL_SEGMENT_MAX_ENTRIES)"` 输出 `6`；`node tests\dailyJournalSegments.test.js` 通过；`git diff --check` 通过，仅提示既有 CRLF 转换 warning。
+- 小目标已完成：日记 segment 默认批量已收窄，减少单个向量摘要跨话题的概率。
+
+## 运行维护 2026-06-24 10:28
+
+- 小目标：定位群 `1092700300`、发送者 `Amia🎀` 连续出现的 `group-awareness decision model returned non-json output`。
+- 根因：决策链路当时使用 `opencode.ai + mimo-v2.5-free`；现场调用和最小 JSON 探针均显示 HTTP 200 但 `finish_reason=length`、`message.content=""`、内容停在 `reasoning` 字段，导致本地解析得到空正文。不是业务提示词过长，也不是响应解析漏字段。
+- 最小修复：空正文决策结果独立归类为 `empty-output`，日志改为 `decision model returned empty output` 并记录 `finishReason/hasReasoning`；强 cue 本地兜底继续允许 `empty-output` 通过；本地 `.env` 的决策模型切回已验证可返回 JSON 的 `catiecli + gcli-gemini-3-flash-preview-nothinking`。
+- 验证：最小 JSON 探针当前决策模型返回可解析 `should_reply=false`；`node tests\passiveAwarenessDecisionEmptyOutput.test.js`、`node tests\passiveAwarenessStrongCueForceReply.test.js`、`node tests\messageCopyMojibake.test.js` 和相关 `node --check` 通过。
+- 范围控制：未改被动回复模型、回复冷却、群感知强 cue 策略或解析器对 reasoning 字段的安全边界。
+- 小目标已完成：该问题归因为模型选择导致的空正文，已完成最小代码诊断与本地配置修复。
+- 提交后记录 2026-06-24 10:31 +08:00：已提交 `8d6a311`（`fix: classify passive decision empty output`）；该小目标完成记录已按并行开发约定追加。
+
+## 运行维护 2026-06-24 01:31
+
+- 小目标：排查 2026-06-24 00:47:59 附近管理员主模型三次调用是否由本地代码重试造成，并避免慢成功 HTTP 408 被重复请求放大。
+- 根因：同一主回复/图片总结请求在上游返回 HTTP 408 后，本地 `postWithRetry` 仍按可重试错误继续请求；该类 408 实际可能只是网关超时，服务端仍在生成并最终成功。
+- 最小修复：`shouldRetry` 接收 trace，只在主回复、流式主回复、图片总结上下文中禁止 HTTP 408 自动重试；普通网络错误、5xx、409/425/429、Cloudflare 403 和非主回复 408 仍沿用原有重试策略。
+- 验证：`node tests\mainReplyHttp408RetryPolicy.test.js`、`node tests\httpClientTransportRetryDelay.test.js`、`node tests\imageSummaryLatencyPath.test.js`、`node tests\httpClientAnthropicPromptCache.test.js`、`node tests\httpClientReasoningEffort.test.js`、`node tests\normalUserMainReplyStreamTimeout.test.js`、`node --check src\model\http\prepare.chunk.js`、`node --check src\model\http\post-retry.chunk.js`、`node --check src\model\http\stream-retry.chunk.js` 通过；提交前复跑新增测试和 `git diff --check`。
+- 范围控制：未关闭主模型的 5xx/网络错误重试，未调整普通轻量任务和非主回复 408 策略，未改 provider 超时时间。
+- 小目标已完成：管理员主模型慢成功 408 不再被本地自动重试制造重复调用。
+- 提交后记录 2026-06-24 01:41 +08:00：已提交 `b96bfb5`（`fix: avoid retrying main reply 408 responses`）；该小目标完成记录已按并行开发约定追加。
+
+## 运行维护 2026-06-23 23:36
+
+- 小目标：降低 QQ 群聊敏感词出口拦截的日常误伤，保留高风险内容兜底。
+- 最小修复：`config/group-reply-sensitive-words.json` 默认移除 `COVID-19词库.txt`、`补充词库.txt`、`贪腐词库.txt`；保留反动、政治、暴恐、涉枪涉爆、色情分类；新增 `allowWords` 放行 `北京`、`疫情`、`按摩`、`白痴`、`罢工` 这些 QQ 日常高频误伤词。
+- 验证：真实配置探针显示词量从 3186 降至 2007，`疫情/北京/按摩/白痴/罢工` 样例不再拦截，`炸药/出售手枪/色情服务` 仍会拦截；目标敏感词 guard 测试通过。
+- 小目标已完成：群聊出口拦截从宽泛词库收口到高风险兜底，私聊和系统群发边界未改。
+
+## 运行维护 2026-06-23 13:18
+
+- 小目标：只对当前项目的群聊回复出口加入敏感词库识别和拦截，避免影响私聊、定时群消息和其他系统群发。
+- 最小修复：引入 `konsheng/Sensitive-lexicon` release `1.2` 本地快照并记录来源；新增群聊回复敏感词配置和 guard；普通群聊回复、`core` 流式发送、`src/message/streaming` 流式发送命中后统一替换为固定提示，并只记录命中数量。
+- 风险收口：上游全量词库含 `测试`、`关键词` 等泛词，本次默认只启用高风险分类文件，完整快照仍保留但不默认参与匹配；vendor 单字词默认过滤，项目 `extraWords` 仍可显式补充。
+- 验证：`node --check utils\groupReplySensitiveGuard.js`、`node --check core\messageReplyRuntime.js`、`node --check src\message\streaming\index.js`、`node tests\groupReplySensitiveGuard.test.js`、`node tests\messageReplyRuntimeFreshness.test.js`、`node scripts\run-tests.js tests\groupReplySensitiveGuard.test.js tests\messageReplyRuntimeFreshness.test.js tests\messageReplyRuntimeControl.test.js tests\messageRouteFlowGroupStreaming.test.js` 通过；真实词库探针确认普通群聊样例不被拦截。`npm test` 分别在 120s 和 600s 超时未完成，已清理本次测试残留进程。
+- 小目标已完成：群聊主回复出口已有本地敏感词库拦截，私聊和系统群发边界未扩大。
+
+## 运行维护 2026-06-23 12:38
+
+- 小目标：把 npm 发布链路收口到登录后可直接安全发布，发布命令本身必须先跑白名单和敏感内容硬校验。
+- 最小修复：新增 `scripts/verify-npm-publish.js`，基于 `npm pack --dry-run --json --ignore-scripts` 的真实包清单检查 `package.json` 白名单、禁发路径、私有 prompt、本地配置、测试/数据目录和常见密钥模式；`package.json` 增加 `npm run publish:check` 与 `prepublishOnly`，让 `npm publish` 自动先跑门禁。
+- 验证：`node --check scripts\verify-npm-publish.js` 通过；`npm run publish:check` 通过，包内 `entryCount=961`、`unpackedSize=7651276`；`npm publish --dry-run --access public --json` 触发 `prepublishOnly` 并通过；`npm whoami` 返回 `ENEEDAUTH`，本机仍未登录 npm。
+- 范围控制：未写入 npm token，未真实发布，未推送远端；未改业务运行代码、prompt 内容或包名版本。
+- 小目标已完成：登录 npm 后可执行 `npm publish --access public`，发布前会被 `prepublishOnly` 自动硬校验。
+
 ## 运行维护 2026-06-23 08:00
 
 - 小目标：取消 `prompts/persona/` 和 `prompts/admin.txt` 的 Git 跟踪，避免后续推送到远端，同时保留本地文件。
@@ -838,6 +914,14 @@
 - 范围控制：未删除旧 JSON/兼容快照文件；`loadLibrary/loadIndex/getMemoryItems()` 无 userId 的全量模式仍保留给迁移、审计和诊断显式调用；未重启当前正在运行的主 bot，因此未把线上进程 RSS 当作最终验收。
 - 验收：`node --check` 覆盖改动文件；`node tests\diskFirstMemoryStores.test.js`、`node tests\memoryChatHistoryLimit.test.js`、`node tests\shortTermContinuityKernel.test.js`、`node tests\memoryProjection.test.js`、`node tests\lancedbMemoryStore.test.js`、`node tests\memoryWritePipeline.test.js`、`node tests\profileJournalDb.test.js`、`node tests\memoryContinuityStressRegression.test.js` 通过；`shortTermMemoryWindowConfig` 和 `memoryV3Query` 使用 `process.exit` 包装通过；模块加载 RSS 探针输出 `delta=37838848`。
 - 小目标已完成：主回复和在线记忆召回路径不再把长期记忆、短期上下文、Memory V3 nodes/projection、向量全量 library/index 聚合成进程级常驻对象。
+
+## 运行维护 2026-06-24 15:53
+
+- 排查 `tests/memoryV3PreferenceFacet.test.js` 和 `tests/memoryV3Query.test.js` 直接运行后进程不退出的问题，只允许收窄到这两个 Memory V3 测试自身。
+- 根因：测试继承本地 `.env` 后默认启用 `MEMORY_RERANK_ENABLED=true`，`queryMemory` 成功路径会进入 `memoryReranker -> postWithRetry -> CycleTLS`，CycleTLS 本地桥接默认占用 `::1:9119`，因此测试主体已结束但仍残留非 stdio Socket 句柄；关掉 rerank 后句柄消失，问题不在 Memory V3 materializer、事件存储或测试 runner。
+- 最小修复：新增 `tests/memoryV3TestHarness.js`，只给这两个本地型 Memory V3 测试显式关闭 rerank、embedding、LanceDB 和 CycleTLS 相关环境开关，并在成功路径增加非 stdio 句柄断言，防止以后再悄悄把远端传输路径带回单测。
+- 验收：`node tests\memoryV3PreferenceFacet.test.js`、`node tests\memoryV3Query.test.js`、`node scripts\run-tests.js tests\memoryV3PreferenceFacet.test.js tests\memoryV3Query.test.js` 全部通过，且不再需要 `process.exit(0)` 包装。
+- 小目标已完成：这两个 Memory V3 定向测试直接运行可自然退出，未改动生产 Memory V3 查询逻辑。
 
 ## 运行维护 2026-06-21 12:29
 
