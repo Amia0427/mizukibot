@@ -1,3 +1,11 @@
+## 运行维护 2026-06-24 12:08
+
+- 小目标：在 Memory V3 查询阶段折叠 journal segment 与 personal/profile 的高相似重复召回，避免同一事实同时占用最终结果。
+- 最小修复：新增 `utils/memory-v3/semanticDedup.js`，只比较 journal vs personal/profile 且要求两边 ready embedding 模型与更新时间一致，并通过 `textHash/canonicalKey/nodeId` 兼容现有 backfill 与查询候选形态；默认阈值 `MEMORY_JOURNAL_LONG_TERM_DEDUPE_THRESHOLD=0.9`，最多比较 128 对；`queryMemory()` 在 rerank 后、diversify 前折叠，保留 `ensureTargetJournalCandidates()` 兜底和 `diagnostics.recall.semanticDedup`。
+- 验证：`node tests\memoryV3JournalLongTermSemanticDedup.test.js`、`node tests\dailyJournalSegmentSemanticRecall.test.js` 通过；`node tests\memoryV3PreferenceFacet.test.js` 和 `node tests\memoryV3Query.test.js` 直接命令存在既有未退出句柄超时，使用 `node -e "require('./tests/...').then(()=>process.exit(0))"` 包装后断言通过；`git diff --check` 通过，仅有既有 CRLF warning。
+- 范围控制：未改 `memoryConflictResolver`、未删除或归档日记向量、未改写入/materialize/embedding backfill；`duplicateEvidence` 只作为诊断保留，不额外注入 prompt。
+- 小目标已完成：查询时 journal-vs-long-term 语义去重已落地，持久化数据不受影响。
+
 ## 运行维护 2026-06-24 12:01
 
 - 小目标：日记 segment 从固定批量摘要改为按 session/topic 聚类后分别摘要和向量化，减少无关主题混入召回。
