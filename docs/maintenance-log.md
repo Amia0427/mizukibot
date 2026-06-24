@@ -5,6 +5,7 @@
 - 验证：`node tests\dailyJournalSegments.test.js`、`node tests\dailyJournalSegmentSemanticRecall.test.js`、`node tests\memoryV3EmbeddingIndex.test.js`、`node tests\memoryCliJournalHybridRerank.test.js`、`node tests\dailyJournalSegmentClusterRecall.test.js` 通过；`git diff --check` 通过，仅有既有 CRLF warning。
 - 范围控制：未改 RAG 主召回链路、数据库 schema、LLM/embedding 聚类、旧 segment 文件或普通长期记忆写入逻辑。
 - 小目标已完成：同 batch 的不同 session/topic 会生成独立 journal segment 和独立 Memory V3 segment 文档。
+- 提交后记录 2026-06-24 12:10 +08:00：已提交 `d2c9931`（`feat: cluster daily journal segments`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-24 11:32
 
