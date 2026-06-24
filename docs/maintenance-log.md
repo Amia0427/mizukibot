@@ -1,3 +1,12 @@
+## 运行维护 2026-06-24 10:28
+
+- 小目标：定位群 `1092700300`、发送者 `Amia🎀` 连续出现的 `group-awareness decision model returned non-json output`。
+- 根因：决策链路当时使用 `opencode.ai + mimo-v2.5-free`；现场调用和最小 JSON 探针均显示 HTTP 200 但 `finish_reason=length`、`message.content=""`、内容停在 `reasoning` 字段，导致本地解析得到空正文。不是业务提示词过长，也不是响应解析漏字段。
+- 最小修复：空正文决策结果独立归类为 `empty-output`，日志改为 `decision model returned empty output` 并记录 `finishReason/hasReasoning`；强 cue 本地兜底继续允许 `empty-output` 通过；本地 `.env` 的决策模型切回已验证可返回 JSON 的 `catiecli + gcli-gemini-3-flash-preview-nothinking`。
+- 验证：最小 JSON 探针当前决策模型返回可解析 `should_reply=false`；`node tests\passiveAwarenessDecisionEmptyOutput.test.js`、`node tests\passiveAwarenessStrongCueForceReply.test.js`、`node tests\messageCopyMojibake.test.js` 和相关 `node --check` 通过。
+- 范围控制：未改被动回复模型、回复冷却、群感知强 cue 策略或解析器对 reasoning 字段的安全边界。
+- 小目标已完成：该问题归因为模型选择导致的空正文，已完成最小代码诊断与本地配置修复。
+
 ## 运行维护 2026-06-24 01:31
 
 - 小目标：排查 2026-06-24 00:47:59 附近管理员主模型三次调用是否由本地代码重试造成，并避免慢成功 HTTP 408 被重复请求放大。

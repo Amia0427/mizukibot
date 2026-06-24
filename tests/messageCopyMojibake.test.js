@@ -7,6 +7,7 @@ const { buildToolGuidancePrompt } = require('../core/messagePromptComposer');
 
 const exitDecision = parseDecision('{"should_reply":false,"confidence":0.9,"reason":"先这样，晚安"}');
 assert.strictEqual(exitDecision.shouldReply, false);
+assert.strictEqual(parseDecision('').reason, 'empty-output');
 
 const prompt = buildToolGuidancePrompt({
   meta: {

@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 
 function clearProjectCache() {
-  const projectRoot = require('path').resolve(__dirname, '..') + require('path').sep;
+  const projectRoot = path.resolve(__dirname, '..') + path.sep;
   for (const key of Object.keys(require.cache)) {
     if (key.startsWith(projectRoot)) delete require.cache[key];
   }
@@ -21,7 +21,7 @@ function restoreEnv(snapshot = {}) {
 
 module.exports = (async () => {
   const snapshot = { ...process.env };
-  const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-passive-force-'));
+  const tempDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-passive-empty-decision-'));
   let httpClient = null;
   let originalPostWithRetry = null;
   let originalPostStreamWithRetry = null;
@@ -30,15 +30,15 @@ module.exports = (async () => {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
     process.env.DATA_DIR = tempDataDir;
     process.env.PASSIVE_AWARENESS_ENABLED = 'true';
-    process.env.PASSIVE_AWARENESS_GROUP_IDS = 'g-force';
+    process.env.PASSIVE_AWARENESS_GROUP_IDS = 'g-empty-decision';
     process.env.PASSIVE_AWARENESS_API_BASE_URL = 'https://example.com/decision';
     process.env.PASSIVE_AWARENESS_API_KEY = 'decision-key';
     process.env.PASSIVE_AWARENESS_MODEL = 'decision-model';
     process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://example.com/reply';
     process.env.PASSIVE_AWARENESS_REPLY_API_KEY = 'reply-key';
     process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'reply-model';
-    process.env.PASSIVE_AWARENESS_STRONG_CUE_FORCE_REPLY = 'true';
-    process.env.PASSIVE_AWARENESS_CHEAP_GATE_MIN_SCORE = '1';
+    process.env.PASSIVE_AWARENESS_STRONG_CUE_BYPASS_ON_DECISION_FAILURE = 'true';
+    process.env.PASSIVE_AWARENESS_STRONG_CUE_FORCE_REPLY = 'false';
     process.env.MEME_MANAGER_FOLLOWUP_ENABLED = 'false';
     process.env.MEMORY_V3_ENABLED = 'false';
     process.env.BOT_QQ = 'bot-test';
@@ -52,8 +52,11 @@ module.exports = (async () => {
       data: {
         choices: [
           {
+            finish_reason: 'length',
             message: {
-              content: '{"should_reply":false,"confidence":0.2,"reason":"too casual"}'
+              role: 'assistant',
+              content: '',
+              reasoning: '{"should_reply":true,"confidence":1,"reason":"hidden"}'
             }
           }
         ]
@@ -61,7 +64,7 @@ module.exports = (async () => {
     });
     httpClient.postStreamWithRetry = async (_url, _body, handlers = {}) => {
       if (typeof handlers.onData === 'function') {
-        handlers.onData(Buffer.from('data: {"choices":[{"delta":{"content":"我听到了"}}]}\n\n'));
+        handlers.onData(Buffer.from('data: {"choices":[{"delta":{"content":"我看到了"}}]}\n\n'));
         handlers.onData(Buffer.from('data: [DONE]\n\n'));
       }
       return true;
@@ -70,10 +73,10 @@ module.exports = (async () => {
     const passiveAwareness = require('../core/passiveGroupAwareness');
     const result = await passiveAwareness.handlePassiveGroupAwareness({
       msg: {
-        group_id: 'g-force',
-        user_id: 'u-force',
+        group_id: 'g-empty-decision',
+        user_id: 'u-empty-decision',
         raw_message: 'bot好像又出问题了',
-        message_id: 'm-force',
+        message_id: 'm-empty-decision',
         sender: { nickname: '测试用户' },
         __continuousMessageMeta: { firstTimestamp: Date.now() }
       },
@@ -86,10 +89,11 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(result.handled, true);
-    assert.strictEqual(result.decision.shouldReply, false);
-    assert.strictEqual(result.replyText, '我听到了');
+    assert.strictEqual(result.decisionReason, 'empty-output');
+    assert.strictEqual(result.decision.reason, 'empty-output');
+    assert.strictEqual(result.replyText, '我看到了');
 
-    console.log('passiveAwarenessStrongCueForceReply.test.js passed');
+    console.log('passiveAwarenessDecisionEmptyOutput.test.js passed');
   } finally {
     if (httpClient && originalPostWithRetry) httpClient.postWithRetry = originalPostWithRetry;
     if (httpClient && originalPostStreamWithRetry) httpClient.postStreamWithRetry = originalPostStreamWithRetry;
