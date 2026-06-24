@@ -132,6 +132,33 @@ function createDailyJournalSegments(deps = {}) {
     return state.users[uid][day];
   }
 
+  function mergeEntrySidecars(entries = [], sidecars = []) {
+    const journalEntries = Array.isArray(entries) ? entries : [];
+    const safeSidecars = (Array.isArray(sidecars) ? sidecars : [])
+      .filter((item) => item?.journalWriteSkipped !== true && item?.unsafe !== true);
+    const alignedSidecars = safeSidecars.length >= journalEntries.length
+      ? safeSidecars.slice(-journalEntries.length)
+      : Array.from({ length: journalEntries.length - safeSidecars.length }, () => null).concat(safeSidecars);
+
+    return journalEntries.map((entry, index) => {
+      const sidecar = alignedSidecars[index] && typeof alignedSidecars[index] === 'object'
+        ? alignedSidecars[index]
+        : {};
+      return {
+        ...entry,
+        ts: String(entry?.ts || sidecar.ts || '').trim(),
+        sessionKey: String(entry?.sessionKey || sidecar.sessionKey || '').trim(),
+        sourceSessionId: normalizeText(entry?.sourceSessionId || sidecar.sourceSessionId || sidecar.source_session_id),
+        routePolicyKey: String(entry?.routePolicyKey || sidecar.routePolicyKey || '').trim(),
+        groupId: String(entry?.groupId || sidecar.groupId || '').trim(),
+        continuitySnapshot: entry?.continuitySnapshot && typeof entry.continuitySnapshot === 'object'
+          ? entry.continuitySnapshot
+          : (sidecar.continuitySnapshot && typeof sidecar.continuitySnapshot === 'object' ? sidecar.continuitySnapshot : {}),
+        sidecar
+      };
+    });
+  }
+
   function readUnsegmentedEntries(userId, day, state) {
     const journalText = safeReadText(getJournalFilePath(userId, day), '');
     const entries = filterInjectableJournalEntries(parseJournalEntries(journalText));
@@ -139,6 +166,21 @@ function createDailyJournalSegments(deps = {}) {
     if (!segmentState) return [];
     const offset = Math.max(0, Number(segmentState.journal_offset) || 0);
     return entries.slice(offset);
+  }
+
+  function readEntriesWithSidecars(userId, day) {
+    return mergeEntrySidecars(
+      filterInjectableJournalEntries(parseJournalEntries(safeReadText(getJournalFilePath(userId, day), ''))),
+      readEntrySidecar(userId, day)
+    );
+  }
+
+  function mergeBatchEntrySidecars(userId, day, state, batch = []) {
+    const segmentState = getSegmentState(state, userId, day);
+    if (!segmentState) return Array.isArray(batch) ? batch : [];
+    const offset = Math.max(0, Number(segmentState.journal_offset) || 0);
+    const merged = readEntriesWithSidecars(userId, day).slice(offset, offset + batch.length);
+    return merged.length === batch.length ? merged : batch;
   }
 
   function consumeEntriesForSegmentation(entries = []) {
@@ -159,6 +201,73 @@ function createDailyJournalSegments(deps = {}) {
     return out;
   }
 
+  function getEntryContinuitySnapshot(entry = {}) {
+    if (entry.continuitySnapshot && typeof entry.continuitySnapshot === 'object') {
+      return entry.continuitySnapshot;
+    }
+    if (entry.sidecar?.continuitySnapshot && typeof entry.sidecar.continuitySnapshot === 'object') {
+      return entry.sidecar.continuitySnapshot;
+    }
+    return {};
+  }
+
+  function buildJournalEntryClusterKey(entry = {}) {
+    const snapshot = getEntryContinuitySnapshot(entry);
+    const session = normalizeText(entry.sourceSessionId || entry.sessionKey || entry.sidecar?.sourceSessionId || entry.sidecar?.source_session_id || entry.sidecar?.sessionKey);
+    const topic = normalizeText(snapshot.activeTopic || snapshot.active_topic);
+    const route = normalizeText(entry.routePolicyKey || entry.sidecar?.routePolicyKey);
+    const group = normalizeText(entry.groupId || entry.sidecar?.groupId);
+
+    if (session && topic) return `session:${session}|topic:${topic}`;
+    if (session) return `session:${session}`;
+    if (topic) return `topic:${topic}`;
+    if (route) return `route:${route}`;
+    if (group) return `group:${group}`;
+    return 'default';
+  }
+
+  function clusterJournalEntries(entries = [], options = {}) {
+    const input = Array.isArray(entries) ? entries : [];
+    if (config.DAILY_JOURNAL_SEGMENT_CLUSTER_ENABLED === false) {
+      return input.length ? [{ key: 'legacy-batch', entries: input }] : [];
+    }
+
+    const maxClusters = Math.max(1, Number(options.maxClusters || config.DAILY_JOURNAL_SEGMENT_MAX_CLUSTERS_PER_RUN) || 3);
+    const minClusterEntries = Math.max(1, Number(options.minClusterEntries || config.DAILY_JOURNAL_SEGMENT_MIN_CLUSTER_ENTRIES) || 2);
+    const buckets = new Map();
+
+    for (const entry of input) {
+      const key = buildJournalEntryClusterKey(entry);
+      const firstTs = Date.parse(String(entry.ts || '')) || Date.now();
+      const bucket = buckets.get(key) || { key, entries: [], firstTs };
+      bucket.entries.push(entry);
+      bucket.firstTs = Math.min(bucket.firstTs, firstTs);
+      buckets.set(key, bucket);
+    }
+
+    const clusters = Array.from(buckets.values()).sort((a, b) => a.firstTs - b.firstTs);
+    const strong = clusters.filter((item) => item.entries.length >= minClusterEntries);
+    const small = clusters.filter((item) => item.entries.length < minClusterEntries);
+    const selected = strong.slice(0, maxClusters);
+    const overflow = strong.slice(maxClusters);
+    const rest = overflow.concat(small);
+
+    if (rest.length && selected.length < maxClusters) {
+      selected.push({
+        key: 'mixed-small',
+        entries: rest.flatMap((item) => item.entries),
+        firstTs: Math.min(...rest.map((item) => item.firstTs))
+      });
+    } else if (rest.length && selected.length > 0) {
+      const tail = selected[selected.length - 1];
+      tail.key = 'mixed-rest';
+      tail.entries = tail.entries.concat(rest.flatMap((item) => item.entries));
+      tail.firstTs = Math.min(tail.firstTs, ...rest.map((item) => item.firstTs));
+    }
+
+    return selected.filter((item) => item.entries.length > 0);
+  }
+
   function trimActiveJournalWindow(userId, day, state) {
     const filePath = getJournalFilePath(userId, day);
     const entries = filterInjectableJournalEntries(parseJournalEntries(safeReadText(filePath, '')));
@@ -177,7 +286,7 @@ function createDailyJournalSegments(deps = {}) {
     if (!uid || !day || entries.length === 0) return '';
 
     if (typeof options.segmentSummarizer === 'function') {
-      return String(await options.segmentSummarizer({ userId: uid, day, entries })).trim();
+      return String(await options.segmentSummarizer({ userId: uid, day, entries, clusterKey: options.clusterKey || '' })).trim();
     }
 
     const maxTokens = Math.max(180, Math.min(600, Math.floor(Number(config.DAILY_JOURNAL_SEGMENT_SUMMARY_MAX_TOKENS) || 320)));
@@ -204,7 +313,12 @@ function createDailyJournalSegments(deps = {}) {
           },
           {
             role: 'user',
-            content: `Day: ${day}\n\nSegment entries:\n${sourceText}`
+            content: [
+              `Day: ${day}`,
+              options.clusterKey ? `Cluster: ${options.clusterKey}` : '',
+              '',
+              `Segment entries:\n${sourceText}`
+            ].filter(Boolean).join('\n')
           }
         ],
         max_tokens: maxTokens,
@@ -226,37 +340,54 @@ function createDailyJournalSegments(deps = {}) {
     const batch = consumeEntriesForSegmentation(pendingEntries);
     if (batch.length === 0) return false;
 
-    const summary = await summarizeJournalSegment(userId, day, batch, options);
-    if (!summary) return false;
+    const clusteredBatch = mergeBatchEntrySidecars(userId, day, state, batch);
+    const segmentWrites = [];
+    for (const cluster of clusterJournalEntries(clusteredBatch, options)) {
+      const summary = await summarizeJournalSegment(userId, day, cluster.entries, {
+        ...options,
+        clusterKey: cluster.key
+      });
+      if (!summary) return false;
+      segmentWrites.push({
+        key: cluster.key,
+        entries: cluster.entries,
+        summary
+      });
+    }
+    if (segmentWrites.length === 0) return false;
 
-    const segmentIndex = Math.max(0, Number(segmentState.segment_count) || 0);
-    appendJsonLine(getSegmentsFilePath(userId, day), {
-      index: segmentIndex,
-      created_at: new Date().toISOString(),
-      entry_count: batch.length,
-      summary
-    }, {
-      flushNow: true
-    });
-    await syncEpisodeMemory(userId, summary, {
-      source: 'daily_journal_summary',
-      rollupLevel: 'segment',
-      episodeDay: day,
-      startDay: day,
-      endDay: day,
-      yearMonth: getYearMonthFromDay(day),
-      part: segmentIndex,
-      sourceFile: getSegmentsFilePath(userId, day),
-      textKind: 'journal_segment',
-      sourceCompleteness: 'segment',
-      maxChars: config.DAILY_JOURNAL_SEGMENT_MAX_BYTES,
-      scheduleEmbeddingBackfill: false,
-      refreshReason: 'journal_segment_generated'
-    });
+    for (const write of segmentWrites) {
+      const segmentIndex = Math.max(0, Number(segmentState.segment_count) || 0);
+      appendJsonLine(getSegmentsFilePath(userId, day), {
+        index: segmentIndex,
+        created_at: new Date().toISOString(),
+        entry_count: write.entries.length,
+        cluster_key: write.key,
+        summary: write.summary
+      }, {
+        flushNow: true
+      });
+      await syncEpisodeMemory(userId, write.summary, {
+        source: 'daily_journal_summary',
+        rollupLevel: 'segment',
+        episodeDay: day,
+        startDay: day,
+        endDay: day,
+        yearMonth: getYearMonthFromDay(day),
+        part: segmentIndex,
+        sourceFile: getSegmentsFilePath(userId, day),
+        textKind: 'journal_segment',
+        sourceCompleteness: 'segment',
+        maxChars: config.DAILY_JOURNAL_SEGMENT_MAX_BYTES,
+        scheduleEmbeddingBackfill: false,
+        refreshReason: 'journal_segment_generated',
+        clusterKey: write.key
+      });
+      segmentState.segment_count = segmentIndex + 1;
+    }
     scheduleDailyJournalEmbeddingBackfill(userId, { days: [day] });
 
     segmentState.journal_offset = Math.max(0, Number(segmentState.journal_offset) || 0) + batch.length;
-    segmentState.segment_count = Math.max(0, Number(segmentState.segment_count) || 0) + 1;
     segmentState.last_segment_at = Date.now();
     trimActiveJournalWindow(userId, day, state);
     return true;
@@ -310,13 +441,15 @@ function createDailyJournalSegments(deps = {}) {
         day,
         text: String(item.summary || '').trim(),
         entryCount: Number(item.entry_count || 0) || 0,
-        index: Number(item.index || 0) || 0
+        index: Number(item.index || 0) || 0,
+        clusterKey: String(item.cluster_key || item.clusterKey || '').trim()
       }))
       .filter((item) => item.text);
   }
 
   return {
     buildEntrySidecarRecord,
+    clusterJournalEntriesForTest: clusterJournalEntries,
     collectRecentEntrySidecars,
     maybeSegmentJournal,
     maybeSegmentJournalByThreshold,

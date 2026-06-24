@@ -163,6 +163,7 @@ function buildDailyJournalSegmentDocs(uid, day) {
       const topics = Array.isArray(segment.topics)
         ? segment.topics.map(normalizeText).filter(Boolean)
         : [];
+      const clusterKey = normalizeText(segment.clusterKey || segment.cluster_key);
       return {
         id: `journal-segment:${uid}:${day}:${index}`,
         source: 'journal',
@@ -179,6 +180,7 @@ function buildDailyJournalSegmentDocs(uid, day) {
           `date: ${day}`,
           `title: ${segmentTitle}`,
           `segment: ${index}`,
+          clusterKey ? `cluster: ${clusterKey}` : '',
           topics.length ? `topics: ${topics.join(', ')}` : '',
           text
         ].filter(Boolean).join('\n'),
@@ -200,7 +202,7 @@ function buildDailyJournalSegmentDocs(uid, day) {
         sessionKeys: [],
         topics,
         category: 'journal',
-        tags: ['journal', 'segment', day].concat(topics).filter(Boolean),
+        tags: ['journal', 'segment', day, clusterKey].concat(topics).filter(Boolean),
         intent: 'episode_recall',
         privacyLevel: 'private',
         openPayload: {
@@ -211,7 +213,8 @@ function buildDailyJournalSegmentDocs(uid, day) {
           updatedAt,
           episodeDay: day,
           segmentIndex: index,
-          entryCount: Math.max(0, Number(segment.entryCount || 0) || 0)
+          entryCount: Math.max(0, Number(segment.entryCount || 0) || 0),
+          clusterKey
         }
       };
     })

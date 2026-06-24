@@ -46,9 +46,59 @@ module.exports = (async () => {
     process.env.DAILY_JOURNAL_SEGMENT_MIN_PENDING_ENTRIES = '10';
     process.env.DAILY_JOURNAL_SEGMENT_MAX_ENTRIES = '10';
     process.env.DAILY_JOURNAL_SEGMENT_MAX_PENDING_AGE_MS = '999999999';
+    process.env.DAILY_JOURNAL_SEGMENT_CLUSTER_ENABLED = 'true';
+    process.env.DAILY_JOURNAL_SEGMENT_MAX_CLUSTERS_PER_RUN = '3';
+    process.env.DAILY_JOURNAL_SEGMENT_MIN_CLUSTER_ENTRIES = '2';
     clearProjectCache();
 
     const dailyJournal = require('../utils/dailyJournal');
+    const config = require('../config');
+    assert.strictEqual(typeof config.DAILY_JOURNAL_SEGMENT_CLUSTER_ENABLED, 'boolean');
+    assert.ok(Number(config.DAILY_JOURNAL_SEGMENT_MAX_CLUSTERS_PER_RUN) >= 1);
+    assert.ok(Number(config.DAILY_JOURNAL_SEGMENT_MIN_CLUSTER_ENTRIES) >= 1);
+
+    const clusterHelpers = createDailyJournalSegments({
+      config: {
+        DAILY_JOURNAL_SEGMENT_CLUSTER_ENABLED: true,
+        DAILY_JOURNAL_SEGMENT_MAX_CLUSTERS_PER_RUN: 3,
+        DAILY_JOURNAL_SEGMENT_MIN_CLUSTER_ENTRIES: 2
+      }
+    });
+    const clusters = clusterHelpers.clusterJournalEntriesForTest([
+      {
+        ts: '2026-04-18T10:00:00.000Z',
+        sessionKey: 's1',
+        continuitySnapshot: { activeTopic: '部署' }
+      },
+      {
+        ts: '2026-04-18T10:01:00.000Z',
+        sessionKey: 's1',
+        continuitySnapshot: { activeTopic: '部署' }
+      },
+      {
+        ts: '2026-04-18T10:02:00.000Z',
+        sessionKey: 's2',
+        continuitySnapshot: { activeTopic: '晚饭' }
+      }
+    ]);
+    assert.strictEqual(clusters.length, 2);
+    assert.strictEqual(clusters[0].entries.length, 2);
+    assert.strictEqual(clusters[1].entries.length, 1);
+    const cappedClusters = clusterHelpers.clusterJournalEntriesForTest([
+      { ts: '2026-04-18T10:00:00.000Z', sessionKey: 's1' },
+      { ts: '2026-04-18T10:01:00.000Z', sessionKey: 's1' },
+      { ts: '2026-04-18T10:02:00.000Z', sessionKey: 's2' },
+      { ts: '2026-04-18T10:03:00.000Z', sessionKey: 's2' },
+      { ts: '2026-04-18T10:04:00.000Z', sessionKey: 's3' },
+      { ts: '2026-04-18T10:05:00.000Z', sessionKey: 's3' }
+    ], { maxClusters: 2, minClusterEntries: 2 });
+    assert.strictEqual(cappedClusters.length, 2);
+    assert.strictEqual(
+      cappedClusters.reduce((sum, cluster) => sum + cluster.entries.length, 0),
+      6,
+      'cluster cap should not drop consumed entries'
+    );
+
     const calls = [];
     const originalMaybeSegmentJournalByThreshold = dailyJournal.maybeSegmentJournalByThreshold;
     dailyJournal.maybeSegmentJournalByThreshold = async (...args) => {
@@ -82,6 +132,38 @@ module.exports = (async () => {
       loadEmbeddingIndex().byNodeId.has('journal-segment:u1:2026-04-18:0'),
       'segment generation should enqueue journal segment embeddings'
     );
+
+    for (let i = 0; i < 5; i += 1) {
+      await dailyJournal.appendDailyJournalEntry('u_cluster', `部署问题 ${i}`, `继续看 systemd 日志 ${i}`, {}, {
+        date: new Date(`2026-04-18T11:0${i}:00.000Z`),
+        segmentNow: false,
+        sessionKey: 'deploy-session',
+        continuitySnapshot: { activeTopic: '部署' }
+      });
+    }
+    for (let i = 0; i < 5; i += 1) {
+      await dailyJournal.appendDailyJournalEntry('u_cluster', `晚饭 ${i}`, `想吃清淡一点 ${i}`, {}, {
+        date: new Date(`2026-04-18T12:0${i}:00.000Z`),
+        segmentNow: false,
+        sessionKey: 'dinner-session',
+        continuitySnapshot: { activeTopic: '晚饭' }
+      });
+    }
+    const summaries = [];
+    const receivedClusterKeys = [];
+    const clusterTriggered = await originalMaybeSegmentJournalByThreshold('u_cluster', '2026-04-18', {
+      segmentSummarizer: async ({ entries, clusterKey }) => {
+        summaries.push(entries.length);
+        receivedClusterKeys.push(clusterKey);
+        return `summary ${clusterKey} entries=${entries.length}`;
+      }
+    });
+    assert.strictEqual(clusterTriggered, true, 'clustered journal should segment when threshold is reached');
+    const clusteredSegments = dailyJournal.readSegmentSummaries('u_cluster', '2026-04-18');
+    assert.strictEqual(clusteredSegments.length, 2, 'two topic clusters should produce two segment summaries');
+    assert.deepStrictEqual(summaries.sort((a, b) => a - b), [5, 5]);
+    assert.ok(receivedClusterKeys.every((key) => String(key || '').includes('session:')));
+    assert.ok(clusteredSegments.every((segment) => segment.clusterKey));
 
     const summaryEvent = await dailyJournal._test.syncEpisodeMemory('u1', 'daily summary text', {
       source: 'daily_journal_summary',
