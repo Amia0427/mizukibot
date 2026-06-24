@@ -25,6 +25,8 @@ const rerankRuntimeState = {
   skippedInFlight: 0
 };
 
+const DEFAULT_RERANK_TIMEOUT_FLOOR_MS = 1500;
+
 class RerankTimeoutError extends Error {
   constructor(timeoutMs) {
     super(`rerank request timed out after ${timeoutMs}ms`);
@@ -65,8 +67,11 @@ function resolveRerankTimeoutMs(options = {}) {
   const raw = options.timeoutMs ?? options.rerankTimeoutMs ?? config.MEMORY_RERANK_TIMEOUT_MS ?? 8000;
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0) return 0;
-  const baseTimeoutMs = Math.max(100, Math.floor(n));
   const hasExplicitTimeout = options.timeoutMs !== undefined || options.rerankTimeoutMs !== undefined;
+  const configuredTimeoutFloorMs = hasExplicitTimeout
+    ? 100
+    : Math.max(100, Math.floor(Number(config.MEMORY_RERANK_TIMEOUT_FLOOR_MS || DEFAULT_RERANK_TIMEOUT_FLOOR_MS) || DEFAULT_RERANK_TIMEOUT_FLOOR_MS));
+  const baseTimeoutMs = Math.max(configuredTimeoutFloorMs, Math.floor(n));
   if (hasExplicitTimeout || options.disableAdaptiveTimeout === true) return baseTimeoutMs;
   const timeoutStreak = Math.max(0, Math.floor(Number(rerankRuntimeState.timeoutStreak || 0) || 0));
   if (timeoutStreak <= 0) return baseTimeoutMs;

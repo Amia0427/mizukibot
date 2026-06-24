@@ -5,6 +5,8 @@ process.env.MEMORY_RERANK_MODEL = 'test-reranker';
 process.env.MEMORY_RERANK_API_BASE_URL = 'https://rerank.example/v1/rerank';
 process.env.MEMORY_RERANK_API_KEY = 'test-key';
 process.env.MEMORY_RERANK_SCORE_WEIGHT = '0.8';
+process.env.MEMORY_RERANK_TIMEOUT_MS = '800';
+process.env.MEMORY_RERANK_TIMEOUT_FLOOR_MS = '1500';
 process.env.MEMORY_RERANK_TIMEOUT_FAILURE_THRESHOLD = '2';
 process.env.MEMORY_RERANK_TIMEOUT_COOLDOWN_MS = '5000';
 
@@ -13,10 +15,13 @@ const {
   extractRerankResults,
   getMemoryRerankRuntimeState,
   resetMemoryRerankRuntimeState,
+  resolveRerankTimeoutMs,
   rerankMemoryCandidates
 } = require('../utils/memoryReranker');
 
 assert.strictEqual(getRerankApiBaseUrl(), 'https://rerank.example/v1/rerank');
+assert.strictEqual(resolveRerankTimeoutMs(), 1500);
+assert.strictEqual(resolveRerankTimeoutMs({ timeoutMs: 120 }), 120);
 assert.deepStrictEqual(
   extractRerankResults({
     data: {

@@ -32,6 +32,7 @@ function loadConfigWithEnv(env = {}) {
     'MEMORY_RERANK_MAX_CANDIDATES',
     'MEMORY_RERANK_CANDIDATE_LIMIT',
     'MEMORY_RERANK_TIMEOUT_MS',
+    'MEMORY_RERANK_TIMEOUT_FLOOR_MS',
     'MEMORY_RERANK_MAX_DOC_CHARS',
     'PERSONA_WORLDBOOK_EMBEDDING_ENABLED',
     'PERSONA_WORLDBOOK_EMBEDDING_BACKFILL_MAX_PER_RUN',
@@ -128,6 +129,7 @@ assert.strictEqual(mainLiteBudgetConfig.MEMORY_LANCEDB_TIMEOUT_MS, 350);
 assert.strictEqual(mainLiteBudgetConfig.MEMORY_RERANK_MAX_CANDIDATES, 12);
 assert.strictEqual(mainLiteBudgetConfig.MEMORY_RERANK_CANDIDATE_LIMIT, 8);
 assert.strictEqual(mainLiteBudgetConfig.MEMORY_RERANK_TIMEOUT_MS, 800);
+assert.strictEqual(mainLiteBudgetConfig.MEMORY_RERANK_TIMEOUT_FLOOR_MS, 1500);
 assert.strictEqual(mainLiteBudgetConfig.MEMORY_RERANK_MAX_DOC_CHARS, 420);
 assert.strictEqual(mainLiteBudgetConfig.PERSONA_WORLDBOOK_EMBEDDING_BACKFILL_MAX_PER_RUN, 6);
 assert.strictEqual(mainLiteBudgetConfig.PERSONA_WORLDBOOK_LEXICAL_LIMIT, 8);
@@ -195,6 +197,7 @@ assert.strictEqual(workerConfig.MEMORY_CLI_RERANK_ENABLED, true);
 assert.strictEqual(workerConfig.MEMORY_RERANK_MAX_CANDIDATES, 40);
 assert.strictEqual(workerConfig.MEMORY_RERANK_CANDIDATE_LIMIT, 32);
 assert.strictEqual(workerConfig.MEMORY_RERANK_TIMEOUT_MS, 2000);
+assert.strictEqual(workerConfig.MEMORY_RERANK_TIMEOUT_FLOOR_MS, 1500);
 assert.strictEqual(workerConfig.PERSONA_WORLDBOOK_EMBEDDING_ENABLED, true);
 assert.strictEqual(workerConfig.PERSONA_WORLDBOOK_SEMANTIC_LIMIT, 24);
 assert.strictEqual(workerConfig.PERSONA_WORLDBOOK_RERANK_ENABLED, true);
