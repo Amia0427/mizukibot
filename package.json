@@ -64,6 +64,7 @@
     "diag:route-decision": "node scripts/diagnose-route-decision.js",
     "diag:main-reply-token-budget": "node scripts/diagnose-main-reply-token-budget.js",
     "diag:chat-default-memory-leak": "node scripts/diagnose-chat-default-memory-leak.js",
+    "diag:memory-rag-explain": "node scripts/diagnose-memory-rag-explain.js",
     "diag:main-reply-truncation": "node scripts/diagnose-main-reply.js --truncation",
     "diag:runtime": "node scripts/diagnose-runtime-status.js",
     "diag:napcat-health": "node scripts/diagnose-napcat-health.js",

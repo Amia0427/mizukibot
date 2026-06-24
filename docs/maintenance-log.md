@@ -1,3 +1,12 @@
+## 运行维护 2026-06-24 18:01
+
+- 小目标：给当前项目补一个最小可用的 Memory V3 RAG explain/diagnostic 入口，能按真实 `userId + query` 直接复盘主回复记忆召回各阶段结果。
+- 最小修复：新增 `utils/memory-v3/ragExplainDiagnostic.js`，薄封装现有 `buildMemoryContextAsync`、`queryMemory`、候选收集与 diagnosis 数据，统一输出 `candidateSources`、`journalSegmentHits`、`longTermProfileHits`、`rankFusion`、`rerank`、`journalVsLongTermDedup`、`finalResults`；新增 `scripts/diagnose-memory-rag-explain.js` 和 `package.json` 脚本 `diag:memory-rag-explain`，支持 `--user-id`、`--query`、`--session-key`、`--group-id`、`--facet`、`--source`、`--top-k`、`--stage-limit`、`--max-chars`、`--data-dir`；补齐 trace-only stable profile 预览字段，避免 explain 样本空白。
+- 验证：`node tests\memoryV3RagExplainDiagnostic.test.js`、`node tests\memoryV3RagExplainDedupStage.test.js` 通过；`git diff --check` 通过，仅有既有 CRLF warning。
+- 范围控制：未重做观测平台、未改主回复召回策略、未扩展线上接口，只复用现有 Memory V3 / diagnosis 数据做本地脚本入口和最小回归。
+- 小目标已完成：主回复记忆召回 explain/diagnostic 已可本地直接跑通，并能看到 journal/profile 命中、rerank、去重与最终 retained。
+- 提交后记录 2026-06-24 18:04 +08:00：已完成本地提交（`feat: add memory rag explain diagnostic`）；该小目标完成记录已按并行开发约定追加。
+
 ## 运行维护 2026-06-24 12:08
 
 - 小目标：在 Memory V3 查询阶段折叠 journal segment 与 personal/profile 的高相似重复召回，避免同一事实同时占用最终结果。
