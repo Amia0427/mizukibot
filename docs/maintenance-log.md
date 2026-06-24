@@ -906,6 +906,14 @@
 - 验收：`node --check` 覆盖改动文件；`node tests\diskFirstMemoryStores.test.js`、`node tests\memoryChatHistoryLimit.test.js`、`node tests\shortTermContinuityKernel.test.js`、`node tests\memoryProjection.test.js`、`node tests\lancedbMemoryStore.test.js`、`node tests\memoryWritePipeline.test.js`、`node tests\profileJournalDb.test.js`、`node tests\memoryContinuityStressRegression.test.js` 通过；`shortTermMemoryWindowConfig` 和 `memoryV3Query` 使用 `process.exit` 包装通过；模块加载 RSS 探针输出 `delta=37838848`。
 - 小目标已完成：主回复和在线记忆召回路径不再把长期记忆、短期上下文、Memory V3 nodes/projection、向量全量 library/index 聚合成进程级常驻对象。
 
+## 运行维护 2026-06-24 15:53
+
+- 排查 `tests/memoryV3PreferenceFacet.test.js` 和 `tests/memoryV3Query.test.js` 直接运行后进程不退出的问题，只允许收窄到这两个 Memory V3 测试自身。
+- 根因：测试继承本地 `.env` 后默认启用 `MEMORY_RERANK_ENABLED=true`，`queryMemory` 成功路径会进入 `memoryReranker -> postWithRetry -> CycleTLS`，CycleTLS 本地桥接默认占用 `::1:9119`，因此测试主体已结束但仍残留非 stdio Socket 句柄；关掉 rerank 后句柄消失，问题不在 Memory V3 materializer、事件存储或测试 runner。
+- 最小修复：新增 `tests/memoryV3TestHarness.js`，只给这两个本地型 Memory V3 测试显式关闭 rerank、embedding、LanceDB 和 CycleTLS 相关环境开关，并在成功路径增加非 stdio 句柄断言，防止以后再悄悄把远端传输路径带回单测。
+- 验收：`node tests\memoryV3PreferenceFacet.test.js`、`node tests\memoryV3Query.test.js`、`node scripts\run-tests.js tests\memoryV3PreferenceFacet.test.js tests\memoryV3Query.test.js` 全部通过，且不再需要 `process.exit(0)` 包装。
+- 小目标已完成：这两个 Memory V3 定向测试直接运行可自然退出，未改动生产 Memory V3 查询逻辑。
+
 ## 运行维护 2026-06-21 12:29
 
 - 检查 `prompts/persona_worldbook` 文件发现、SQLite 候选、persona module 选择、动态提示词装配到主回复 system prompt 的注入链路。

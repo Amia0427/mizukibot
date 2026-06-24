@@ -178,7 +178,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-06-24 12:08 +08:00
+更新时间：2026-06-24 15:53 +08:00
+维护记录：2026-06-24 15:53 +08:00，已定位 `tests/memoryV3PreferenceFacet.test.js` 和 `tests/memoryV3Query.test.js` 直接运行卡住的根因是默认 `MEMORY_RERANK_ENABLED=true` 会让本地型 Memory V3 测试误走 CycleTLS rerank 传输并留下 `::1:9119` 句柄；现仅对这两个测试关闭 rerank/embedding/LanceDB/CycleTLS 路径并新增非 stdio 句柄断言，直接运行可自然退出。小目标已完成：这两个 Memory V3 定向测试不再依赖 `process.exit(0)` 包装收尾。
 维护记录：2026-06-24 12:08 +08:00，Memory V3 查询阶段新增 journal-vs-long-term 语义去重，重复候选只在本次召回结果中折叠并保留 duplicateEvidence 诊断。
 维护记录：2026-06-24 12:01 +08:00，日记 segment 已按 session/topic 聚类后分别摘要和向量化，避免同一向量文档混入无关主题。
 维护记录：2026-06-24 11:32 +08:00，日记 segment 默认批量从 10 条降到 6 条，降低混合话题摘要带来的无关召回风险。
