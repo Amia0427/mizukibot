@@ -6,6 +6,7 @@
 - 验证：最小 JSON 探针当前决策模型返回可解析 `should_reply=false`；`node tests\passiveAwarenessDecisionEmptyOutput.test.js`、`node tests\passiveAwarenessStrongCueForceReply.test.js`、`node tests\messageCopyMojibake.test.js` 和相关 `node --check` 通过。
 - 范围控制：未改被动回复模型、回复冷却、群感知强 cue 策略或解析器对 reasoning 字段的安全边界。
 - 小目标已完成：该问题归因为模型选择导致的空正文，已完成最小代码诊断与本地配置修复。
+- 提交后记录 2026-06-24 10:31 +08:00：已提交 `8d6a311`（`fix: classify passive decision empty output`）；该小目标完成记录已按并行开发约定追加。
 
 ## 运行维护 2026-06-24 01:31
 
