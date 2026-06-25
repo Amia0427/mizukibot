@@ -25,6 +25,21 @@ function dynamicPromptHasContextMarker(text = '') {
   return /\[(?:RetrievedMemoryLite|RetrievedMemory|DailyJournal|TaskMemory|GroupMemory|StyleSignals|ShortTermContinuity|MemOSRecall|LongTermProfile|Impression|Summary|ContinuityState)\]/i.test(String(text || ''));
 }
 
+const CANONICAL_CONTEXT_DYNAMIC_BLOCK_SEGMENTS = Object.freeze({
+  retrieved_memory_lite: ['retrievedMemory', 'taskMemory', 'groupMemory', 'styleSignals'],
+  retrieved_memory_compact: ['retrievedMemory', 'taskMemory', 'groupMemory', 'styleSignals'],
+  daily_journal: ['dailyJournal'],
+  daily_journal_compact: ['dailyJournal'],
+  task_memory: ['taskMemory'],
+  group_memory: ['groupMemory'],
+  style_signals: ['styleSignals']
+});
+
+const SHORT_TERM_CONTEXT_DYNAMIC_BLOCK_IDS = new Set([
+  'short_term_continuity',
+  'short_term_continuity_compact'
+]);
+
 function buildAnthropicCompatibleCacheControl() {
   const { normalizeAnthropicCacheControl } = require('../../../src/model/http/cache-control');
   return Object.freeze(normalizeAnthropicCacheControl(true));
@@ -178,6 +193,49 @@ function createConversationContextHelpers(deps = {}) {
       .filter((item) => hasMessageContent(item));
   }
 
+  function normalizeBlockId(value = '') {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function getPromptBlockIds(block = {}) {
+    return Array.from(new Set([
+      block.id,
+      block.blockId,
+      block.meta?.blockId
+    ].map(normalizeBlockId).filter(Boolean)));
+  }
+
+  function isChatLikeMainConversationRequest(request = {}) {
+    const routeMeta = normalizeObject(request.routeMeta, {});
+    const routePolicyKey = String(request.routePolicyKey || '').trim().toLowerCase();
+    const topRouteType = String(request.topRouteType || routeMeta.topRouteType || '').trim().toLowerCase();
+    if (request.systemInitiated || String(request.customPrompt || '').trim() || String(request.reviewMode || '').trim()) return false;
+    if (!topRouteType && !routePolicyKey) return true;
+    return topRouteType === 'direct_chat' || routePolicyKey.startsWith('direct_chat/');
+  }
+
+  function hasCanonicalContextSegment(memoryContext = {}, segmentKeys = []) {
+    const segments = normalizeObject(memoryContext.segments, {});
+    return normalizeArray(segmentKeys).some((key) => (
+      normalizeArray(segments[key]).some((message) => hasMessageContent(message))
+    ));
+  }
+
+  function shouldSendDynamicBlockAsSystemMessage(block = {}, state = {}) {
+    const blockIds = getPromptBlockIds(block);
+    if (blockIds.length === 0) return true;
+    if (
+      isChatLikeMainConversationRequest(state.request)
+      && blockIds.some((id) => SHORT_TERM_CONTEXT_DYNAMIC_BLOCK_IDS.has(id))
+    ) {
+      return false;
+    }
+    const memoryContext = normalizeObject(state.memory?.context, {});
+    return !blockIds.some((id) => (
+      hasCanonicalContextSegment(memoryContext, CANONICAL_CONTEXT_DYNAMIC_BLOCK_SEGMENTS[id])
+    ));
+  }
+
   function buildAssistantOnlyContextMessages(state) {
     return normalizeArray(state.memory?.assistantOnlyContextBlocks)
       .filter((item) => item && typeof item === 'object')
@@ -212,11 +270,14 @@ function createConversationContextHelpers(deps = {}) {
       || normalizeArray(continuityPayload.continuity_probe_digest).length > 0
     );
     const stableBlockMessages = mapStableSystemBlocksToMessages(stableSystemBlocks);
-    const dynamicBlockMessages = mapDynamicContextBlocksToMessages(dynamicContextBlocks)
+    const dynamicBlockMessages = mapDynamicContextBlocksToMessages(
+      dynamicContextBlocks.filter((block) => shouldSendDynamicBlockAsSystemMessage(block, state))
+    )
       .filter((message) => hasMessageContent(message));
     const fallbackDynamicMessages = (
       dynamicPrompt
-      && (!stableBlockMessages.length || (dynamicBlockMessages.length === 0 && dynamicPromptHasContextMarker(dynamicPrompt)))
+      && dynamicContextBlocks.length === 0
+      && (!stableBlockMessages.length || dynamicPromptHasContextMarker(dynamicPrompt))
     )
       ? [{ role: 'system', content: dynamicPrompt }]
       : [];

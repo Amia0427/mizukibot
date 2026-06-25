@@ -10,6 +10,7 @@ services:
       DATA_DIR: /app/data
       WEB_BIND_HOST: 0.0.0.0
       NAPCAT_HTTP_REVERSE_BIND_HOST: 0.0.0.0
+      GROUP_REPLY_SENSITIVE_VENDOR_DIR: /app/assets/sensitive-words/vendor/sensitive-lexicon/Vocabulary
       POST_REPLY_WORKER_ENABLED: "true"
       POST_REPLY_WORKER_INLINE: "false"
       POST_REPLY_WORKER_SUPERVISOR_ENABLED: "false"
@@ -19,6 +20,8 @@ services:
     volumes:
       - mizukibot-data:/app/data
       - mizukibot-logs:/app/logs
+      - ./prompts/persona:/app/prompts/persona:ro
+      - ./prompts/admin.txt:/app/prompts/admin.txt:ro
 
   post-reply-worker:
     image: mizukibot:local
@@ -30,6 +33,7 @@ services:
       - .env
     environment:
       DATA_DIR: /app/data
+      GROUP_REPLY_SENSITIVE_VENDOR_DIR: /app/assets/sensitive-words/vendor/sensitive-lexicon/Vocabulary
       POST_REPLY_WORKER_ENABLED: "true"
       POST_REPLY_WORKER_INLINE: "false"
       POST_REPLY_WORKER_SUPERVISOR_ENABLED: "false"
@@ -38,6 +42,8 @@ services:
     volumes:
       - mizukibot-data:/app/data
       - mizukibot-logs:/app/logs
+      - ./prompts/persona:/app/prompts/persona:ro
+      - ./prompts/admin.txt:/app/prompts/admin.txt:ro
 
 volumes:
   mizukibot-data:

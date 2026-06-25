@@ -1,3 +1,54 @@
+## 运行维护 2026-06-26 02:30
+
+- 小目标：再次检查仓库和容器镜像是否泄露隐私数据或密钥文件，并单独补一份给初学者看的容器化部署文档。
+- 复查结果：`npm run check:secrets` 通过；`git grep` 未命中私钥、常见 API token、GitHub token、AWS access key 或 JWT 形态的真实凭据；已跟踪的敏感相关路径仅有公开模板 `.env.example`、`.env.skills.example`、占位符型 `.mcp.json` 和公开敏感词库 `data/sensitive-words/**`。
+- 忽略边界：`git check-ignore -v` 确认 `.env`、`.env.local`、`prompts/admin.txt`、`prompts/persona/`、`artifacts/`、`data/runtime.json` 和 `secrets/*.pem` 会被忽略；本地未跟踪的 `.env`、运行数据和备份位于忽略列表，不进入 Git。
+- 镜像验收：在既有 `mizukibot:local` 内检查 `/app/.env`、`/app/.mcp.json`、`/app/prompts/admin.txt`、`/app/prompts/persona`、`/app/data/request-trace.ndjson`、`/app/data/daily_journal`、`/app/artifacts`、`/app/secrets` 均为 absent；镜像内敏感文件扫描只发现公开模板 `/app/.env.example` 和 `/app/.env.skills.example`。
+- 文档更新：新增 `deploy/docker-beginner-guide.md`，按 Docker 安装、`.env`、私有 prompt、Compose 启动、自检、NapCat 配置、常见问题和隐私边界组织；README 增加入口。
+- 范围控制：未改 `Dockerfile`、`docker-compose.yml` 或业务代码；未删除本地敏感文件；未推送远端。
+- 小目标已完成：本轮隐私/密钥复查和初学者容器化部署文档已落地。
+
+## 运行维护 2026-06-26 01:52
+
+- 小目标：基于现有 `Dockerfile` 和 `docker-compose.yml` 复核 Docker/Compose 链路是否能在本地最小启动并完成基础自检，优先定位启动断点和环境缺口。
+- 根因：本机 WSL Arch 里 `wg-quick@wg0.service` 处于 enabled，启动后用 `0.0.0.0/0` 策略路由接管外网；`codex-wsl-public-host-nft.service` 的入站策略默认 drop，又没有放行 Docker bridge 到 WSL DNS 代理 `10.255.255.254:53`，导致默认 bridge 容器 DNS 失败。Docker daemon 也未常驻，且 Docker Hub / npm 官方源访问慢，分别阻塞基础镜像和 `npm ci`。
+- 最小修复：WSL 侧禁用但不删除 `wg-quick@wg0.service`，Docker daemon 配置国内 DNS `223.5.5.5` / `119.29.29.29` 和 DaoCloud mirror，并在 `codex-wsl-public-host-nft` 源规则中放行 `docker0 -> 10.255.255.254:53`；仓库内只给 Dockerfile 的依赖安装阶段新增可覆盖的 `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com` 默认值，未改 Compose 运行拓扑。
+- 实际验收：WSL 宿主访问 `https://docker.m.daocloud.io/v2/` 返回 401、`http://deb.debian.org/debian/` 返回 200；默认 Docker bridge 容器可解析 DaoCloud/Debian 并完成 `apt-get update`；`docker-compose build --progress plain mizukibot` 成功生成 `mizukibot:local`，日志显示 `npm ci --registry="https://registry.npmmirror.com"`；使用临时 `.env` 端口 `49105/49106` 执行 `docker-compose up -d` 后两个服务均为 Up，`/api/security-status` 返回 200 且 `ok=true`，NapCat HTTP reverse 空 JSON POST 返回 204，容器内 `node --check index.js`、`core/napcatHttpReverseServer.js`、`scripts/post-reply-worker.js` 通过，最后已 `docker-compose down` 清理临时容器和网络。
+- 范围控制：未改业务逻辑、默认 Compose 端口、volume、私有 prompt 挂载或 NapCat 部署方式；未删除 WSL WireGuard 配置或密钥；未推送远端。
+- 小目标已完成：本地 Docker/Compose 最小构建、启动和基础自检已真实跑通；本次断点和环境修复已记录。
+
+## 运行维护 2026-06-25 23:45
+
+- 小目标：复核刚完成的 Docker/Compose 容器化链路，确认本地是否能按现有 `Dockerfile` 和 `docker-compose.yml` 最小启动并完成基础自检。
+- 结论：真实容器构建尚未在本机完成；最先阻塞点不是项目文件，而是本地 Docker 环境和外部镜像源。Windows 侧 `docker` 不在 PATH、无 Compose 插件且 daemon 未运行；WSL Arch 侧可启动 Docker daemon 且 `docker-compose config` 通过，但 `docker-compose build mizukibot` 在拉取 `node:20-bookworm-slim` 元数据时超时，直接 `docker pull node:20-bookworm-slim` 复核同样超时。
+- 已验收：WSL 临时最小 `.env` 下 `docker-compose config` 解析出 `mizukibot` / `post-reply-worker` 两个服务、共享 volume、私有 prompt 只读挂载和 `0.0.0.0` 监听；Dockerfile 白名单源路径均存在，且精确静态检查确认无 `COPY . .`、真实 `.env`、`prompts/admin.txt` 或 `prompts/persona` 复制；`node --check index.js core/napcatHttpReverseServer.js web/server/index.js scripts/post-reply-worker.js utils/postReplyWorkerSupervisor.js`、`npm run check:secrets`、`better-sqlite3/sharp/@lancedb/lancedb` 原生依赖加载通过。
+- 等价启动自检：按 Dockerfile 运行白名单复制到临时运行根、不复制根目录锁文件和真实 `.env`，使用空闲端口启动主进程 6 秒存活；`/api/security-status` 带 Bearer token 返回 200，NapCat HTTP reverse 空对象 POST 返回 204，`bot-main-runtime-state.json` 写出 heartbeat。默认 3002/3005 在本机被当前宿主 bot 占用，属于本地并行运行端口冲突。
+- 范围控制：未改 `Dockerfile`、`docker-compose.yml` 或业务代码；本轮只补充 README 与维护日志的真实验收记录。真实 `docker compose up -d --build` 仍需在能访问 Docker Hub 或已有 `node:20-bookworm-slim` 缓存、且 3002/3005 未被占用的 Docker 环境中复跑。
+
+## 运行维护 2026-06-25 23:19
+
+- 小目标：给既有 `diag:memory-rag-explain` 补一个更顺手的本地入口，让真实 `userId + query` 少打参数也能直接复盘 Memory RAG explain。
+- 最小修复：`scripts/console.js` 新增 `rag` / `memory-rag-explain` 子命令，并把 `npm run console -- rag <userId> "<query>"` 规范化为既有 `diagnose-memory-rag-explain.js` 参数；保留原 `npm run console` 配置检查行为。
+- 验证：`node scripts/run-tests.js consoleMemoryRagExplainEntry.test.js`、`node scripts/run-tests.js memoryV3RagExplainDiagnostic.test.js memoryV3RagExplainDedupStage.test.js`、`node --check scripts/console.js`、`node --check tests/consoleMemoryRagExplainEntry.test.js`、隔离空数据目录 smoke（关闭 embedding/rerank 后执行 `npm run console -- rag u_rag_explain "昨天聊的清真寿司点单和味淋替代方案是什么" --facet journal --top-k 1 --stage-limit 1 --data-dir tmp\memory-rag-explain-console-smoke`）和 `git diff --check` 通过。
+- 范围控制：未重做 RAG explain、未改 Memory V3 召回/去重/rerank 逻辑、未扩展线上接口。
+- 小目标已完成：真实 `userId + query` 的本地 Memory RAG explain 已可通过 console 快捷入口运行。
+- 提交后记录 2026-06-25 23:40 +08:00：已完成本地提交（`feat: add console memory rag explain entry`）；该小目标完成记录已按并行开发约定追加。
+
+## 运行维护 2026-06-25 13:00
+
+- 小目标：以 `amia/dev` 最新提交 `dea7fe3` 为基线收口 Docker 容器化，避免镜像构建上下文和镜像层包含密钥、隐私数据或本地私有 prompt。
+- 最小修复：`.dockerignore` 增加 `.mcp.json`、`secrets/`、密钥扩展名、`prompts/persona/` 和 `prompts/admin.txt` 等排除项；`Dockerfile` 从 `COPY . .` 改为显式复制运行白名单，并把公开敏感词库放到 `/app/assets`；`docker-compose.yml` 只读挂载私有 prompt，并把敏感词库路径指向镜像资产。
+- 验证：确认 `HEAD` 与 `origin/amia/dev` 均为 `dea7fe3`；Docker CLI 29.6.0 已安装但当前机器无 Docker daemon；Docker Compose 独立安装因网络 `InternetOpenUrl() failed` 未完成；`docker-compose.yml` 可被 `js-yaml` 解析且包含主服务/worker/只读私有 prompt 挂载；Dockerfile 静态检查确认无 `COPY . .`、真实 `.env`、`prompts/admin.txt` 或 `prompts/persona` 复制；`.dockerignore` 关键规则检查确认禁发路径被排除、公开敏感词库和运行源码被放行；Docker 相关文件敏感模式扫描 0 命中；`node --check index.js scripts/post-reply-worker.js utils/groupReplySensitiveGuard.js`、`npm run check:secrets`、`git diff --check` 通过。
+- 范围控制：未改 bot 业务逻辑、prompt 内容、模型配置、NapCat 部署方式或运行数据；未推送远端；未处理已跟踪的 `.mcp.json` 历史/索引，只确保 Docker 构建不包含它。
+
+## 运行维护 2026-06-25 13:45
+
+- 小目标：定位 `npm test` 全量跑仍会超时或挂住的具体测试路径，避免泛泛清理测试基础设施。
+- 根因：`scripts/run-tests.js` 子进程会加载项目 `.env`；当本机 `.env` 启用 `MODEL_TLS_IMPERSONATION_ENABLED` / `MEMORY_CLI_RERANK_ENABLED` 时，本地型 Memory/CLI/HTTP 单测会误走 CycleTLS 或 rerank 传输，断言结束后留下 `::1:9119` Socket，表现为 `*.test.js passed` 但进程不退出。另一个独立挂点是 `tests/nativeStocksAdvanced.test.js` 真实访问 CoinGecko/Yahoo/AlphaVantage，网络慢时会留下 TCP 等待并超过 30s。
+- 最小修复：测试 runner 给子进程默认关闭 `MODEL_TLS_IMPERSONATION_ENABLED`、`MODEL_TLS_IMPERSONATION_STREAM_ENABLED`、`MEMORY_CLI_RERANK_ENABLED`，文件内显式设置仍可覆盖；新增 `tests/runTestsDefaultEnv.test.js` 和 fixture 验证默认隔离；`nativeStocksAdvanced` 改为 stub `axios.get`，保留 native stock hot/rumor/analyze 真实解析与组合逻辑。
+- 验收：未按用户要求跑全量；先逐文件探针复现 33 个超时，其中代表样本 `dailyJournalAllUsersAvailability` 断言后残留 `Socket ::1:9119`；修复后 `node scripts/run-tests.js` 跑原 33 个超时文件全部通过，用时约 130s；新增 runner 回归和股票测试通过；早先由 CycleTLS 泄漏导致的 `diagnoseMainModelWebSearch`、两个 HTTP client、`mainReplyRouteModelDiagnostics` 也恢复通过；剩余 6 个旧断言失败未纳入本次范围。
+- 小目标已完成：`npm test` 超时/挂住根因已定位到测试环境外部传输泄漏和股票单测外网依赖，并完成最小修复与回归。
+
 ## 运行维护 2026-06-24 18:01
 
 - 小目标：给当前项目补一个最小可用的 Memory V3 RAG explain/diagnostic 入口，能按真实 `userId + query` 直接复盘主回复记忆召回各阶段结果。
