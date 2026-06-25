@@ -1,3 +1,13 @@
+## 运行维护 2026-06-26 02:30
+
+- 小目标：再次检查仓库和容器镜像是否泄露隐私数据或密钥文件，并单独补一份给初学者看的容器化部署文档。
+- 复查结果：`npm run check:secrets` 通过；`git grep` 未命中私钥、常见 API token、GitHub token、AWS access key 或 JWT 形态的真实凭据；已跟踪的敏感相关路径仅有公开模板 `.env.example`、`.env.skills.example`、占位符型 `.mcp.json` 和公开敏感词库 `data/sensitive-words/**`。
+- 忽略边界：`git check-ignore -v` 确认 `.env`、`.env.local`、`prompts/admin.txt`、`prompts/persona/`、`artifacts/`、`data/runtime.json` 和 `secrets/*.pem` 会被忽略；本地未跟踪的 `.env`、运行数据和备份位于忽略列表，不进入 Git。
+- 镜像验收：在既有 `mizukibot:local` 内检查 `/app/.env`、`/app/.mcp.json`、`/app/prompts/admin.txt`、`/app/prompts/persona`、`/app/data/request-trace.ndjson`、`/app/data/daily_journal`、`/app/artifacts`、`/app/secrets` 均为 absent；镜像内敏感文件扫描只发现公开模板 `/app/.env.example` 和 `/app/.env.skills.example`。
+- 文档更新：新增 `deploy/docker-beginner-guide.md`，按 Docker 安装、`.env`、私有 prompt、Compose 启动、自检、NapCat 配置、常见问题和隐私边界组织；README 增加入口。
+- 范围控制：未改 `Dockerfile`、`docker-compose.yml` 或业务代码；未删除本地敏感文件；未推送远端。
+- 小目标已完成：本轮隐私/密钥复查和初学者容器化部署文档已落地。
+
 ## 运行维护 2026-06-26 01:52
 
 - 小目标：基于现有 `Dockerfile` 和 `docker-compose.yml` 复核 Docker/Compose 链路是否能在本地最小启动并完成基础自检，优先定位启动断点和环境缺口。

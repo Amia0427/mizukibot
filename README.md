@@ -135,11 +135,13 @@ docker compose logs -f mizukibot
 docker compose logs -f post-reply-worker
 ```
 
-Docker 部署说明见 [`deploy/docker/README.md`](deploy/docker/README.md)。
+Docker 部署说明见 [`deploy/docker/README.md`](deploy/docker/README.md)；第一次用容器部署先看 [`deploy/docker-beginner-guide.md`](deploy/docker-beginner-guide.md)。
 
 更新 2026-06-25 13:00 +08:00：`amia/dev` 的 Docker 构建只复制运行白名单；真实 `.env`、运行数据、密钥文件、本地 MCP 配置和私有 prompt 不进入镜像，私有 prompt 由 Compose 运行时只读挂载。
 
 更新 2026-06-26 01:52 +08:00：本地 WSL/Docker 链路已用国内镜像源完成真实 smoke：DaoCloud 拉取基础镜像，Dockerfile 依赖安装默认走 `registry.npmmirror.com`，临时端口 `49105/49106` 下 `docker-compose build`、`docker-compose up -d`、Web security status 200、NapCat reverse 204 和容器内 Node 语法检查均通过。
+
+更新 2026-06-26 02:30 +08:00：复查 Git、忽略规则和 `mizukibot:local` 镜像，未发现真实 `.env`、密钥文件、本地 MCP 配置、私有 prompt 或运行数据进入仓库/镜像；新增初学者容器化部署文档。
 
 ### NPM 发布
 
@@ -186,6 +188,7 @@ data/       本地运行数据，默认不提交
 - [`docs/project-development-history.md`](docs/project-development-history.md) — 基于 Git 历史整理的开发过程
 - [`docs/npm-publish.md`](docs/npm-publish.md) — npm 发布边界和检查命令
 - [`deploy/beginner-guide.md`](deploy/beginner-guide.md) — 面向初学者的部署指南
+- [`deploy/docker-beginner-guide.md`](deploy/docker-beginner-guide.md) — 面向初学者的容器化部署指南
 - [`scripts/README.md`](scripts/README.md) — 脚本说明
 - [`deploy/README.md`](deploy/README.md) — 部署说明
 
