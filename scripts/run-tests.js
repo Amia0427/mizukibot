@@ -223,8 +223,17 @@ const testFiles = [
 ];
 
 function applyDefaultTestEnv(env = process.env) {
-  if (env.RESOURCE_PRESSURE_ENABLED === undefined) {
+  if (env.RESOURCE_PRESSURE_ENABLED === undefined || env.RESOURCE_PRESSURE_ENABLED === '') {
     env.RESOURCE_PRESSURE_ENABLED = 'false';
+  }
+  if (env.MODEL_TLS_IMPERSONATION_ENABLED === undefined || env.MODEL_TLS_IMPERSONATION_ENABLED === '') {
+    env.MODEL_TLS_IMPERSONATION_ENABLED = 'false';
+  }
+  if (env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED === undefined || env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED === '') {
+    env.MODEL_TLS_IMPERSONATION_STREAM_ENABLED = 'false';
+  }
+  if (env.MEMORY_CLI_RERANK_ENABLED === undefined || env.MEMORY_CLI_RERANK_ENABLED === '') {
+    env.MEMORY_CLI_RERANK_ENABLED = 'false';
   }
   return env;
 }

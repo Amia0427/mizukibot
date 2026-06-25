@@ -5,6 +5,14 @@
 - 验证：确认 `HEAD` 与 `origin/amia/dev` 均为 `dea7fe3`；Docker CLI 29.6.0 已安装但当前机器无 Docker daemon；Docker Compose 独立安装因网络 `InternetOpenUrl() failed` 未完成；`docker-compose.yml` 可被 `js-yaml` 解析且包含主服务/worker/只读私有 prompt 挂载；Dockerfile 静态检查确认无 `COPY . .`、真实 `.env`、`prompts/admin.txt` 或 `prompts/persona` 复制；`.dockerignore` 关键规则检查确认禁发路径被排除、公开敏感词库和运行源码被放行；Docker 相关文件敏感模式扫描 0 命中；`node --check index.js scripts/post-reply-worker.js utils/groupReplySensitiveGuard.js`、`npm run check:secrets`、`git diff --check` 通过。
 - 范围控制：未改 bot 业务逻辑、prompt 内容、模型配置、NapCat 部署方式或运行数据；未推送远端；未处理已跟踪的 `.mcp.json` 历史/索引，只确保 Docker 构建不包含它。
 
+## 运行维护 2026-06-25 13:45
+
+- 小目标：定位 `npm test` 全量跑仍会超时或挂住的具体测试路径，避免泛泛清理测试基础设施。
+- 根因：`scripts/run-tests.js` 子进程会加载项目 `.env`；当本机 `.env` 启用 `MODEL_TLS_IMPERSONATION_ENABLED` / `MEMORY_CLI_RERANK_ENABLED` 时，本地型 Memory/CLI/HTTP 单测会误走 CycleTLS 或 rerank 传输，断言结束后留下 `::1:9119` Socket，表现为 `*.test.js passed` 但进程不退出。另一个独立挂点是 `tests/nativeStocksAdvanced.test.js` 真实访问 CoinGecko/Yahoo/AlphaVantage，网络慢时会留下 TCP 等待并超过 30s。
+- 最小修复：测试 runner 给子进程默认关闭 `MODEL_TLS_IMPERSONATION_ENABLED`、`MODEL_TLS_IMPERSONATION_STREAM_ENABLED`、`MEMORY_CLI_RERANK_ENABLED`，文件内显式设置仍可覆盖；新增 `tests/runTestsDefaultEnv.test.js` 和 fixture 验证默认隔离；`nativeStocksAdvanced` 改为 stub `axios.get`，保留 native stock hot/rumor/analyze 真实解析与组合逻辑。
+- 验收：未按用户要求跑全量；先逐文件探针复现 33 个超时，其中代表样本 `dailyJournalAllUsersAvailability` 断言后残留 `Socket ::1:9119`；修复后 `node scripts/run-tests.js` 跑原 33 个超时文件全部通过，用时约 130s；新增 runner 回归和股票测试通过；早先由 CycleTLS 泄漏导致的 `diagnoseMainModelWebSearch`、两个 HTTP client、`mainReplyRouteModelDiagnostics` 也恢复通过；剩余 6 个旧断言失败未纳入本次范围。
+- 小目标已完成：`npm test` 超时/挂住根因已定位到测试环境外部传输泄漏和股票单测外网依赖，并完成最小修复与回归。
+
 ## 运行维护 2026-06-24 18:01
 
 - 小目标：给当前项目补一个最小可用的 Memory V3 RAG explain/diagnostic 入口，能按真实 `userId + query` 直接复盘主回复记忆召回各阶段结果。
