@@ -1,3 +1,11 @@
+## 运行维护 2026-06-25 23:45
+
+- 小目标：复核刚完成的 Docker/Compose 容器化链路，确认本地是否能按现有 `Dockerfile` 和 `docker-compose.yml` 最小启动并完成基础自检。
+- 结论：真实容器构建尚未在本机完成；最先阻塞点不是项目文件，而是本地 Docker 环境和外部镜像源。Windows 侧 `docker` 不在 PATH、无 Compose 插件且 daemon 未运行；WSL Arch 侧可启动 Docker daemon 且 `docker-compose config` 通过，但 `docker-compose build mizukibot` 在拉取 `node:20-bookworm-slim` 元数据时超时，直接 `docker pull node:20-bookworm-slim` 复核同样超时。
+- 已验收：WSL 临时最小 `.env` 下 `docker-compose config` 解析出 `mizukibot` / `post-reply-worker` 两个服务、共享 volume、私有 prompt 只读挂载和 `0.0.0.0` 监听；Dockerfile 白名单源路径均存在，且精确静态检查确认无 `COPY . .`、真实 `.env`、`prompts/admin.txt` 或 `prompts/persona` 复制；`node --check index.js core/napcatHttpReverseServer.js web/server/index.js scripts/post-reply-worker.js utils/postReplyWorkerSupervisor.js`、`npm run check:secrets`、`better-sqlite3/sharp/@lancedb/lancedb` 原生依赖加载通过。
+- 等价启动自检：按 Dockerfile 运行白名单复制到临时运行根、不复制根目录锁文件和真实 `.env`，使用空闲端口启动主进程 6 秒存活；`/api/security-status` 带 Bearer token 返回 200，NapCat HTTP reverse 空对象 POST 返回 204，`bot-main-runtime-state.json` 写出 heartbeat。默认 3002/3005 在本机被当前宿主 bot 占用，属于本地并行运行端口冲突。
+- 范围控制：未改 `Dockerfile`、`docker-compose.yml` 或业务代码；本轮只补充 README 与维护日志的真实验收记录。真实 `docker compose up -d --build` 仍需在能访问 Docker Hub 或已有 `node:20-bookworm-slim` 缓存、且 3002/3005 未被占用的 Docker 环境中复跑。
+
 ## 运行维护 2026-06-25 23:19
 
 - 小目标：给既有 `diag:memory-rag-explain` 补一个更顺手的本地入口，让真实 `userId + query` 少打参数也能直接复盘 Memory RAG explain。

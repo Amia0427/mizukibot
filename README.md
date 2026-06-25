@@ -189,7 +189,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-06-25 23:19 +08:00
+更新时间：2026-06-25 23:45 +08:00
+维护记录：2026-06-25 23:45 +08:00，Docker/Compose 链路已做本地复核：`docker-compose config` 在 WSL 临时最小 `.env` 下通过，白名单文件集和私有 prompt 只读挂载检查通过，主进程按 Dockerfile 等价文件集可启动并通过 Web/NapCat reverse 基础探针；真实镜像构建被 `node:20-bookworm-slim` 从 Docker Hub 拉取元数据超时阻塞，且本机默认 3002/3005 正被当前宿主 bot 占用。小目标完成状态：已定位当前最可能启动断点和环境缺口，真实 `docker compose up -d --build` 需在镜像源可达且端口空闲环境复跑。
 维护记录：2026-06-25 23:19 +08:00，`scripts/console.js` 已接入 `rag` / `memory-rag-explain` 快捷子命令，委托既有 `diag:memory-rag-explain`，可用 `npm run console -- rag <userId> "<query>"` 直接对真实用户问题跑 Memory RAG explain；最小入口回归、既有 RAG explain 回归、语法检查、隔离空数据目录 smoke 和 diff 检查均通过。小目标已完成：本地真实 `userId + query` explain 入口更顺手。
 维护记录：2026-06-25 13:45 +08:00，已定位并修复 `npm test` 挂住的测试环境外部传输泄漏：runner 子进程默认关闭 CycleTLS 和 Memory CLI rerank，股票高级单测改为 stub 外网行情源；原超时集合小分片验收通过，未跑全量。
 维护记录：2026-06-24 18:01 +08:00，已新增 `diag:memory-rag-explain` 最小本地诊断脚本，复用现有 Memory V3 / diagnosis 链路，直接按真实 `userId + query` 输出候选来源、journal segment 命中、long-term/profile 命中、rerank、journal-vs-long-term 去重和最终保留结果；并补齐两条最小回归覆盖真实链路与去重诊断。小目标已完成：主回复记忆召回 explain/diagnostic 已可本地直接验收。
