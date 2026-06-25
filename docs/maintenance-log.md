@@ -1,3 +1,12 @@
+## 运行维护 2026-06-25 23:19
+
+- 小目标：给既有 `diag:memory-rag-explain` 补一个更顺手的本地入口，让真实 `userId + query` 少打参数也能直接复盘 Memory RAG explain。
+- 最小修复：`scripts/console.js` 新增 `rag` / `memory-rag-explain` 子命令，并把 `npm run console -- rag <userId> "<query>"` 规范化为既有 `diagnose-memory-rag-explain.js` 参数；保留原 `npm run console` 配置检查行为。
+- 验证：`node scripts/run-tests.js consoleMemoryRagExplainEntry.test.js`、`node scripts/run-tests.js memoryV3RagExplainDiagnostic.test.js memoryV3RagExplainDedupStage.test.js`、`node --check scripts/console.js`、`node --check tests/consoleMemoryRagExplainEntry.test.js`、隔离空数据目录 smoke（关闭 embedding/rerank 后执行 `npm run console -- rag u_rag_explain "昨天聊的清真寿司点单和味淋替代方案是什么" --facet journal --top-k 1 --stage-limit 1 --data-dir tmp\memory-rag-explain-console-smoke`）和 `git diff --check` 通过。
+- 范围控制：未重做 RAG explain、未改 Memory V3 召回/去重/rerank 逻辑、未扩展线上接口。
+- 小目标已完成：真实 `userId + query` 的本地 Memory RAG explain 已可通过 console 快捷入口运行。
+- 提交后记录 2026-06-25 23:40 +08:00：已完成本地提交（`feat: add console memory rag explain entry`）；该小目标完成记录已按并行开发约定追加。
+
 ## 运行维护 2026-06-25 13:00
 
 - 小目标：以 `amia/dev` 最新提交 `dea7fe3` 为基线收口 Docker 容器化，避免镜像构建上下文和镜像层包含密钥、隐私数据或本地私有 prompt。
