@@ -390,6 +390,58 @@ module.exports = (async () => {
   assert.ok(assistantOnlyIndex < lastUserIndex);
   assert.ok(String(replyMessages.messages[assistantOnlyIndex].content || '').startsWith('[Context for assistant only]'));
 
+  let recentDedupeCanonicalInput = null;
+  const recentDedupeHelpers = createStreamingCoordinatorHelpers({
+    sanitizeUserFacingText: (text) => String(text || ''),
+    isChatLikeRoute: () => true,
+    buildVisionMessageContent: (text) => text,
+    buildV2CanonicalSegments: (_state, input) => {
+      recentDedupeCanonicalInput = input;
+      return {
+        segments: {},
+        compactionPlan: {
+          compactedSegments: [
+            { name: 'recent_history', messages: input.recentHistoryMessages || [] },
+            { name: 'current_user_turn', messages: input.userTurnMessages || [] }
+          ]
+        }
+      };
+    },
+    buildShortTermContextMessages: () => ({
+      sessionSummaryMessages: [],
+      summaryMessage: null,
+      recentHistory: [
+        { role: 'assistant', content: '上一条回复' },
+        { role: 'user', content: 'hello' },
+        { role: 'user', content: '别的历史问题' }
+      ]
+    }),
+    resolveShortTermSessionKey: () => 'session',
+    resolveMainConversationModelName: () => 'gpt-5.4',
+    requestStreamingReplyImpl: async () => 'streamed answer',
+    finalizeStreamingReplyWithHumanizerImpl: async (text) => text,
+    isHumanizerEnabledImpl: () => false,
+    shouldBypassHumanizerForPolicy: () => false,
+    ensureOutputStream: () => ({ hadOutput: false, completed: false, fallbackToNonStream: false, mode: 'none' }),
+    mirrorStreamingFlags: (_output, text) => ({ hadOutput: Boolean(text) }),
+    requestReplyImpl: async () => 'fallback answer',
+    markStreamCompleted: () => ({ completed: true }),
+    resolveToolLoopReply: async () => ({ text: 'resolved', source: 'fallback' }),
+    config: { AI_MAX_TOKENS: 3500 },
+    chatHistory: {},
+    shortTermMemory: {}
+  });
+  recentDedupeHelpers.buildDirectReplyMessages({
+    request: { question: 'hello', userId: 'u1', routeMeta: {} },
+    thread: {},
+    memory: {}
+  }, 'hello', [{ role: 'system', content: 'sys' }]);
+  assert.deepStrictEqual(recentDedupeCanonicalInput.userTurnMessages, [{ role: 'user', content: 'hello' }]);
+  assert.deepStrictEqual(recentDedupeCanonicalInput.recentHistoryMessages, [
+    { role: 'assistant', content: '上一条回复' },
+    { role: 'user', content: '别的历史问题' }
+  ]);
+
   let visionCanonicalInput = null;
   const visionLiteHelpers = createStreamingCoordinatorHelpers({
     sanitizeUserFacingText: (text) => String(text || ''),

@@ -657,6 +657,25 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     }].concat(imageParts);
   }
 
+  function normalizeComparableMessageContent(content = '') {
+    return normalizeMessageContent(content).replace(/\s+/g, ' ').trim();
+  }
+
+  function removeCurrentUserTurnFromRecentHistory(recentHistory = [], userTurnMessages = []) {
+    const currentUserTexts = new Set(
+      normalizeArray(userTurnMessages)
+        .filter((message) => String(message?.role || '').trim().toLowerCase() === 'user')
+        .map((message) => normalizeComparableMessageContent(message.content))
+        .filter(Boolean)
+    );
+    if (currentUserTexts.size === 0) return normalizeArray(recentHistory);
+    return normalizeArray(recentHistory).filter((message) => {
+      if (String(message?.role || '').trim().toLowerCase() !== 'user') return true;
+      const text = normalizeComparableMessageContent(message.content);
+      return !text || !currentUserTexts.has(text);
+    });
+  }
+
   function buildDirectReplyMessages(state, messageContent, systemMessages = []) {
     const request = normalizeObject(state.request, {});
     const baseMessages = normalizeArray(systemMessages)
@@ -773,7 +792,7 @@ function createStreamingCoordinatorHelpers(deps = {}) {
     const affinity = normalizeObject(state.memory, {}).affinity;
     const sessionSummaryMessages = normalizeArray(recentContext.sessionSummaryMessages);
     const summaryMessages = recentContext.summaryMessage ? [recentContext.summaryMessage] : [];
-    const recentHistory = normalizeArray(recentContext.recentHistory);
+    const recentHistory = removeCurrentUserTurnFromRecentHistory(recentContext.recentHistory, userTurnMessages);
     const canonical = buildV2CanonicalSegments(state, {
       systemPromptMessages: pureSystemMessages,
       routePromptMessages: [],
