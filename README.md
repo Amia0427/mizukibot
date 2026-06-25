@@ -130,6 +130,8 @@ docker compose logs -f post-reply-worker
 
 Docker 部署说明见 [`deploy/docker/README.md`](deploy/docker/README.md)。
 
+更新 2026-06-25 13:00 +08:00：`amia/dev` 的 Docker 构建只复制运行白名单；真实 `.env`、运行数据、密钥文件、本地 MCP 配置和私有 prompt 不进入镜像，私有 prompt 由 Compose 运行时只读挂载。
+
 ### NPM 发布
 
 发布包使用 `package.json` 的 `files` 白名单，不包含真实 `.env`、运行数据、测试、MCP 本地配置、本地私有 prompt 或本地 `skills/` 目录。发布前检查见 [`docs/npm-publish.md`](docs/npm-publish.md)。

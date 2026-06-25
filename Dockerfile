@@ -26,7 +26,16 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY api ./api
+COPY config ./config
+COPY core ./core
+COPY data/sensitive-words ./assets/sensitive-words
+COPY prompts ./prompts
+COPY scripts ./scripts
+COPY src ./src
+COPY utils ./utils
+COPY web ./web
+COPY index.js package.json package-lock.json .env.example .env.skills.example ./
 
 RUN mkdir -p /app/data /app/logs
 

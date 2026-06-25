@@ -1,3 +1,10 @@
+## 运行维护 2026-06-25 13:00
+
+- 小目标：以 `amia/dev` 最新提交 `dea7fe3` 为基线收口 Docker 容器化，避免镜像构建上下文和镜像层包含密钥、隐私数据或本地私有 prompt。
+- 最小修复：`.dockerignore` 增加 `.mcp.json`、`secrets/`、密钥扩展名、`prompts/persona/` 和 `prompts/admin.txt` 等排除项；`Dockerfile` 从 `COPY . .` 改为显式复制运行白名单，并把公开敏感词库放到 `/app/assets`；`docker-compose.yml` 只读挂载私有 prompt，并把敏感词库路径指向镜像资产。
+- 验证：确认 `HEAD` 与 `origin/amia/dev` 均为 `dea7fe3`；Docker CLI 29.6.0 已安装但当前机器无 Docker daemon；Docker Compose 独立安装因网络 `InternetOpenUrl() failed` 未完成；`docker-compose.yml` 可被 `js-yaml` 解析且包含主服务/worker/只读私有 prompt 挂载；Dockerfile 静态检查确认无 `COPY . .`、真实 `.env`、`prompts/admin.txt` 或 `prompts/persona` 复制；`.dockerignore` 关键规则检查确认禁发路径被排除、公开敏感词库和运行源码被放行；Docker 相关文件敏感模式扫描 0 命中；`node --check index.js scripts/post-reply-worker.js utils/groupReplySensitiveGuard.js`、`npm run check:secrets`、`git diff --check` 通过。
+- 范围控制：未改 bot 业务逻辑、prompt 内容、模型配置、NapCat 部署方式或运行数据；未推送远端；未处理已跟踪的 `.mcp.json` 历史/索引，只确保 Docker 构建不包含它。
+
 ## 运行维护 2026-06-24 18:01
 
 - 小目标：给当前项目补一个最小可用的 Memory V3 RAG explain/diagnostic 入口，能按真实 `userId + query` 直接复盘主回复记忆召回各阶段结果。
