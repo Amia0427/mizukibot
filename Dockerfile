@@ -3,6 +3,7 @@ FROM node:20-bookworm-slim AS deps
 WORKDIR /app
 
 ENV HUSKY=0
+ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
@@ -10,7 +11,8 @@ RUN apt-get update \
 
 COPY package.json package-lock.json ./
 RUN npm ci \
-  && npm prune --omit=dev
+  --registry="$NPM_CONFIG_REGISTRY" \
+  && npm prune --omit=dev --registry="$NPM_CONFIG_REGISTRY"
 
 FROM node:20-bookworm-slim AS runtime
 

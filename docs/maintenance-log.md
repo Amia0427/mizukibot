@@ -1,3 +1,12 @@
+## 运行维护 2026-06-26 01:52
+
+- 小目标：基于现有 `Dockerfile` 和 `docker-compose.yml` 复核 Docker/Compose 链路是否能在本地最小启动并完成基础自检，优先定位启动断点和环境缺口。
+- 根因：本机 WSL Arch 里 `wg-quick@wg0.service` 处于 enabled，启动后用 `0.0.0.0/0` 策略路由接管外网；`codex-wsl-public-host-nft.service` 的入站策略默认 drop，又没有放行 Docker bridge 到 WSL DNS 代理 `10.255.255.254:53`，导致默认 bridge 容器 DNS 失败。Docker daemon 也未常驻，且 Docker Hub / npm 官方源访问慢，分别阻塞基础镜像和 `npm ci`。
+- 最小修复：WSL 侧禁用但不删除 `wg-quick@wg0.service`，Docker daemon 配置国内 DNS `223.5.5.5` / `119.29.29.29` 和 DaoCloud mirror，并在 `codex-wsl-public-host-nft` 源规则中放行 `docker0 -> 10.255.255.254:53`；仓库内只给 Dockerfile 的依赖安装阶段新增可覆盖的 `NPM_CONFIG_REGISTRY=https://registry.npmmirror.com` 默认值，未改 Compose 运行拓扑。
+- 实际验收：WSL 宿主访问 `https://docker.m.daocloud.io/v2/` 返回 401、`http://deb.debian.org/debian/` 返回 200；默认 Docker bridge 容器可解析 DaoCloud/Debian 并完成 `apt-get update`；`docker-compose build --progress plain mizukibot` 成功生成 `mizukibot:local`，日志显示 `npm ci --registry="https://registry.npmmirror.com"`；使用临时 `.env` 端口 `49105/49106` 执行 `docker-compose up -d` 后两个服务均为 Up，`/api/security-status` 返回 200 且 `ok=true`，NapCat HTTP reverse 空 JSON POST 返回 204，容器内 `node --check index.js`、`core/napcatHttpReverseServer.js`、`scripts/post-reply-worker.js` 通过，最后已 `docker-compose down` 清理临时容器和网络。
+- 范围控制：未改业务逻辑、默认 Compose 端口、volume、私有 prompt 挂载或 NapCat 部署方式；未删除 WSL WireGuard 配置或密钥；未推送远端。
+- 小目标已完成：本地 Docker/Compose 最小构建、启动和基础自检已真实跑通；本次断点和环境修复已记录。
+
 ## 运行维护 2026-06-25 23:45
 
 - 小目标：复核刚完成的 Docker/Compose 容器化链路，确认本地是否能按现有 `Dockerfile` 和 `docker-compose.yml` 最小启动并完成基础自检。
