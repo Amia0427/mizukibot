@@ -80,11 +80,9 @@ function detectExplicitBadFaithRequest(text = '') {
 function detectSafetyBoundaryCaution(text = '') {
   const t = String(text || '').trim();
   if (!t) return false;
-  // QQ聊天机器人场景下大幅放宽safety boundary检测，只保留最核心的拦截
   if (hasSafetyExemptContext(t) || hasRoleplayFictionContext(t)) return false;
   if (detectExplicitHarmfulRequest(t).matched || detectExplicitBadFaithRequest(t).matched) return false;
-  // 降低误判率：只在明确的实际攻击指令时触发，日常对话不触发
-  return false; // 暂时禁用safety boundary caution，避免过度拦截
+  return matchesAnyPattern(t, SAFETY_BOUNDARY_PATTERNS);
 }
 
 function shouldIgnoreUnsafeOrBadFaithRequest(text = '') {

@@ -196,7 +196,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-06-26 01:52 +08:00
+更新时间：2026-06-26 10:38 +08:00
+维护记录：2026-06-26 10:38 +08:00，`npm test` 已从“分片通过、未跑全量”收口到“本地完整全量通过”：本轮只修全量执行暴露的真实失败点，完整命令自然结束、退出码 0、用时约 292.5s，日志见 `D:\waifu\tmp\npm-test-full-20260626-103103.log`。
 维护记录：2026-06-26 01:52 +08:00，Docker/Compose 链路已在 WSL 本地真实跑通：已处理历史 `wg0` 全流量路由、Docker bridge DNS 和官方源访问慢的问题；`docker-compose build --progress plain mizukibot` 成功生成 `mizukibot:local`，临时 `.env` 端口 `49105/49106` 下两个服务启动为 Up，`/api/security-status` 返回 200 且 `ok=true`，NapCat HTTP reverse 空 JSON POST 返回 204，容器内 `node --check` 三项通过，最后已 `docker-compose down` 清理。
 维护记录：2026-06-25 23:45 +08:00，Docker/Compose 链路已做本地复核：`docker-compose config` 在 WSL 临时最小 `.env` 下通过，白名单文件集和私有 prompt 只读挂载检查通过，主进程按 Dockerfile 等价文件集可启动并通过 Web/NapCat reverse 基础探针；真实镜像构建被 `node:20-bookworm-slim` 从 Docker Hub 拉取元数据超时阻塞，且本机默认 3002/3005 正被当前宿主 bot 占用。小目标完成状态：已定位当前最可能启动断点和环境缺口，真实 `docker compose up -d --build` 需在镜像源可达且端口空闲环境复跑。
 维护记录：2026-06-25 23:19 +08:00，`scripts/console.js` 已接入 `rag` / `memory-rag-explain` 快捷子命令，委托既有 `diag:memory-rag-explain`，可用 `npm run console -- rag <userId> "<query>"` 直接对真实用户问题跑 Memory RAG explain；最小入口回归、既有 RAG explain 回归、语法检查、隔离空数据目录 smoke 和 diff 检查均通过。小目标已完成：本地真实 `userId + query` explain 入口更顺手。

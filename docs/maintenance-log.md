@@ -1,3 +1,12 @@
+## 运行维护 2026-06-26 10:38
+
+- 小目标：基于刚修复的 `npm test` 挂住问题，直接跑本地完整测试，只处理这轮全量执行新暴露的真实失败或挂住点，确认是否已从“分片通过”收口到“全量通过”。
+- 根因：全量执行暴露了四类真实缺口：本地私有 `prompts/admin.txt` 缺少管理员 QQ 当前消息格式锚点；`sanitizeUserFacingText(..., { preserveThink: true })` 破坏旧字符串返回契约；路由 safety boundary 被临时禁用；SQL worldbook primary read 在临时测试库为空时没有回退文件 catalog；主入口保留 HTTP reverse 入站但丢了 WebSocket 入站异步队列契约。
+- 最小修复：本机私有 `prompts/admin.txt` 补稳定锚点但仍被 `.gitignore` 忽略不入库；`preserveThink` 默认恢复字符串返回，仅 `returnMeta` 返回元信息；恢复 `SAFETY_BOUNDARY_PATTERNS` 命中；worldbook SQL 空结果回退 catalog 文件；主入口恢复可选 `NAPCAT_WS_URL` WebSocket 入站并与 HTTP reverse 一样投递 `messageIngressDispatcher`，同时保持默认 HTTP action client 路径。
+- 验收：`node --check index.js core\router\safety.js utils\personaWorldbookSearch\documents.js utils\userFacingText.js config\index.js` 通过；定向回归 `node scripts\run-tests.js tests\localRouterFallback.test.js tests\routerSafetyGuards.test.js tests\memoryRecallAutoGoldEval.test.js tests\memoryV3BackfillScript.test.js tests\messageIngressAsyncEntrypointSource.test.js tests\napcatActionClientConnectionState.test.js tests\napcatHttpReverseServer.test.js tests\mainBotEarlyExitDiagnostics.test.js` 通过；完整 `npm test` 自然结束，退出码 0，用时约 292.5s，日志 `D:\waifu\tmp\npm-test-full-20260626-103103.log`，输出 `[test] all tests passed`。
+- 范围控制：未重做测试框架，未删除文件，未推送远端；只修全量执行暴露的失败点和对应运行时契约。
+- 小目标已完成：本仓库测试状态已从“分片通过、未跑全量”收口到“本地完整 `npm test` 全量通过”。
+
 ## 运行维护 2026-06-26 02:30
 
 - 小目标：再次检查仓库和容器镜像是否泄露隐私数据或密钥文件，并单独补一份给初学者看的容器化部署文档。

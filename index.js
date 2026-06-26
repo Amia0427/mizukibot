@@ -2,6 +2,7 @@
 const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+const WebSocket = require('ws');
 
 const execFileAsync = promisify(execFile);
 const fsp = fs.promises;
@@ -379,6 +380,9 @@ async function cleanupStaleTmpFilesOnStartup() {
 }
 let webServer = null;
 let resourceSnapshotLoop = null;
+let ws = null;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
 
 let shuttingDown = false;
 let shutdownInProgress = false;
@@ -459,36 +463,25 @@ function startResourceSnapshots() {
     component: 'main_process',
     schedulerStarted,
     tickStarted,
-    postReplyInline: Boolean(postReplyWorkerRuntime)
+    postReplyInline: Boolean(postReplyWorkerRuntime),
+    wsReadyState: ws ? ws.readyState : -1,
+    reconnectAttempts
   }));
 }
 
 let httpReverseServer = null;
 
-function startNapCatTransport() {
-  httpReverseServer = startNapCatHttpReverseServer({
-    handleMessage: async (msg) => {
-      if (shuttingDown) return;
-      try {
-        appendNapcatPacketToLog(msg);
-        if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
-          void napcatLogFollower.handleLivePacket(msg).catch((error) => {
-            console.error('[NapCat follower live packet error]', error?.message || error);
-          });
-        }
-        if (napcatActionClient.handleMessage(msg)) return;
-        await acceptIncomingMessage(msg, 'napcat_http_reverse');
-      } catch (e) {
-        console.error('[HTTP reverse message error]', e);
-      }
-    }
-  });
+function prepareNapCatEventPacket(msg) {
+  appendNapcatPacketToLog(msg);
+  if (config.FOLLOWER_DIRECT_DISPATCH_ENABLED) {
+    void napcatLogFollower.handleLivePacket(msg).catch((error) => {
+      console.error('[NapCat follower live packet error]', error?.message || error);
+    });
+  }
+  return napcatActionClient.handleMessage(msg);
+}
 
-  recordNapCatConnectionState('online', napcatActionClient.getConnectionState(), {
-    mode: 'http_reverse',
-    reason: 'HTTP reverse mode started'
-  });
-
+function startConnectedRuntimes() {
   if (config.TICK_ENGINE_ENABLED && !tickStarted) {
     tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
     tickStarted = true;
@@ -501,6 +494,135 @@ function startNapCatTransport() {
     postReplyWorkerRuntime.start();
   }
   napcatLogFollower.start();
+}
+
+function scheduleReconnect() {
+  if (shuttingDown || reconnectTimer) return;
+  const delay = Math.min(30000, 1500 * Math.max(1, reconnectAttempts));
+  reconnectAttempts += 1;
+  console.log(`[NapCat ws] disconnected, retry in ${delay}ms...`);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectNapCat();
+  }, delay);
+  reconnectTimer.unref?.();
+}
+
+function connectNapCat() {
+  if (shuttingDown) return;
+  const wsUrl = String(config.NAPCAT_WS_URL || '').trim();
+  if (!wsUrl) return;
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+  const headers = {};
+  const wsToken = String(config.NAPCAT_WS_TOKEN || '').trim();
+  if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
+
+  ws = new WebSocket(wsUrl, { headers });
+  napcatActionClient.setWebSocket(ws);
+
+  ws.on('open', () => {
+    reconnectAttempts = 0;
+    recordNapCatConnectionState('online', getWebSocketConnectionState(), {
+      mode: 'websocket',
+      reason: 'NapCat websocket connected'
+    });
+    startConnectedRuntimes();
+    console.log('✅ NapCat WebSocket 已连接');
+  });
+
+  ws.on('close', (code, reason) => {
+    const closeReason = reason ? reason.toString() : '';
+    console.warn('[NapCat ws close]', { code, reason: closeReason });
+    recordNapCatConnectionState('offline', getWebSocketConnectionState({ closed: true, reason: closeReason || `close:${code}` }), {
+      mode: 'websocket',
+      reason: closeReason || `close:${code}`
+    });
+    if (!shuttingDown) scheduleReconnect();
+  });
+
+  ws.on('error', (error) => {
+    console.error('[NapCat ws error]', error?.message || error);
+  });
+
+  ws.on('message', async (data) => {
+    if (shuttingDown) return;
+    try {
+      const msg = JSON.parse(data);
+      if (prepareNapCatEventPacket(msg)) return;
+      await acceptIncomingMessage(msg, 'napcat_ws');
+    } catch (e) {
+      console.error('[NapCat ws message error]', e);
+    }
+  });
+}
+
+function getWebSocketConnectionState(extra = {}) {
+  const now = Date.now();
+  const readyState = extra.closed ? WebSocket.CLOSED : (ws ? ws.readyState : WebSocket.CLOSED);
+  const connected = readyState === WebSocket.OPEN;
+  const readyStateNames = {
+    [WebSocket.CONNECTING]: 'connecting',
+    [WebSocket.OPEN]: 'open',
+    [WebSocket.CLOSING]: 'closing',
+    [WebSocket.CLOSED]: 'closed'
+  };
+  return {
+    connected,
+    readyState,
+    readyStateName: readyStateNames[readyState] || 'unknown',
+    pendingCount: null,
+    connectedSince: connected ? now : 0,
+    lastConnectedAt: connected ? now : 0,
+    lastDisconnectedAt: connected ? 0 : now,
+    lastDisconnectReason: connected ? '' : String(extra.reason || ''),
+    disconnectCount: connected ? 0 : 1,
+    offlineMs: 0
+  };
+}
+
+function closeNapCatWebSocket() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (!ws) return;
+  const current = ws;
+  ws = null;
+  try {
+    current.removeAllListeners();
+    if (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING) {
+      current.close();
+    } else {
+      current.terminate?.();
+    }
+  } catch (error) {
+    console.error('[NapCat ws cleanup failed]', error?.message || error);
+  } finally {
+    napcatActionClient.setWebSocket(null);
+  }
+}
+
+function startNapCatTransport() {
+  httpReverseServer = startNapCatHttpReverseServer({
+    handleMessage: async (msg) => {
+      if (shuttingDown) return;
+      try {
+        if (prepareNapCatEventPacket(msg)) return;
+        await acceptIncomingMessage(msg, 'napcat_http_reverse');
+      } catch (e) {
+        console.error('[HTTP reverse message error]', e);
+      }
+    }
+  });
+
+  recordNapCatConnectionState('online', napcatActionClient.getConnectionState(), {
+    mode: 'http_reverse',
+    reason: 'HTTP reverse mode started'
+  });
+
+  startConnectedRuntimes();
+  connectNapCat();
   console.log('✅ HTTP 反向连接模式启动，等待 NapCat POST 消息');
 }
 
@@ -530,7 +652,9 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
 
   try {
     napcatActionClient.handleDisconnect('MizukiBot shutdown');
+    napcatActionClient.setWebSocket(null);
   } catch (_) {}
+  closeNapCatWebSocket();
 
   try { schedulerRuntime.stop(); } catch (error) {
     console.error('[shutdown] scheduler stop failed:', error?.message || error);
@@ -611,7 +735,9 @@ function drainForScheduledRestart(meta = {}) {
   try { resourceSnapshotLoop.stop(); } catch (_) {}
   try {
     napcatActionClient.handleDisconnect('MizukiBot restart draining');
+    napcatActionClient.setWebSocket(null);
   } catch (_) {}
+  closeNapCatWebSocket();
 }
 
 process.on('mizuki:restartScheduled', drainForScheduledRestart);

@@ -122,7 +122,8 @@ function buildSqlWorldbookDocuments(catalog = { modules: [] }) {
 
 function buildWorldbookDocuments(catalog = { modules: [] }, options = {}) {
   if (shouldReadWorldbookFromSql(options)) {
-    return buildSqlWorldbookDocuments(catalog);
+    const sqlDocuments = buildSqlWorldbookDocuments(catalog);
+    if (sqlDocuments.length > 0) return sqlDocuments;
   }
   return getWorldbookModules(catalog)
     .map((item) => {

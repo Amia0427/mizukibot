@@ -101,6 +101,8 @@ module.exports = {
   // NapCat OneBot HTTP action endpoint (bot posts actions to NapCat)
   NAPCAT_HTTP_API_BASE_URL: pick('NAPCAT_HTTP_API_BASE_URL', 'http://127.0.0.1:3000'),
   NAPCAT_HTTP_ACTION_SECRET: pick('NAPCAT_HTTP_ACTION_SECRET', ''),
+  NAPCAT_WS_URL: pick('NAPCAT_WS_URL', ''),
+  NAPCAT_WS_TOKEN: pick('NAPCAT_WS_TOKEN', ''),
   // HTTP reverse ingress port (NapCat posts events to bot)
   NAPCAT_HTTP_REVERSE_PORT: pickNum('NAPCAT_HTTP_REVERSE_PORT', 3002),
   NAPCAT_HTTP_REVERSE_BIND_HOST: pick('NAPCAT_HTTP_REVERSE_BIND_HOST', '127.0.0.1'),
