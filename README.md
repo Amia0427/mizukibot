@@ -41,6 +41,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 更新 2026-06-27 00:08 +08:00：新增 NapCat WebSocket 入站最小 smoke，使用本地假 WS 服务验证 `NAPCAT_WS_URL` 收到 OneBot 消息后会以 `source=napcat_ws` 投递到 `messageIngressDispatcher`，与 HTTP reverse 入站共用同一投递收口。验收结果：`node scripts\run-tests.js tests\napcatWsIngressSmoke.test.js tests\napcatHttpReverseServer.test.js tests\messageIngressDispatcher.test.js tests\messageIngressAsyncEntrypointSource.test.js` 通过；相关 `node --check` 通过。
 
+更新 2026-06-27 00:26 +08:00：复跑 NapCat WebSocket 入站 smoke，并补强静态入口断言，确认共用收口仍调用 `acceptIncomingMessage(msg, source)` 后进入 `messageIngressDispatcher`；同一组 run-tests 和 `node --check` 均通过。
+
 ## 技术栈
 
 | 层 | 选型 |
@@ -218,3 +220,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-06-23 08:58 +08:00，已为 npm 发布增加白名单、dry-run 验收和敏感内容扫描记录，真实发布等待 npm 登录。
 维护记录：2026-06-23 09:17 +08:00，已新增面向初学者的部署指南，覆盖 `.env`、私有 prompt、NapCat、启动和排障。
 维护记录：2026-06-23 12:38 +08:00，已为 npm 发布增加 `prepublishOnly` 硬门禁，登录后可执行 `npm publish --access public`。
+维护记录：2026-06-27 00:26 +08:00，已复跑 NapCat WebSocket 入站 smoke，并补强 `messageIngressAsyncEntrypointSource` 对共用收口投递 dispatcher 的静态断言；定向 run-tests 与相关 `node --check` 通过。

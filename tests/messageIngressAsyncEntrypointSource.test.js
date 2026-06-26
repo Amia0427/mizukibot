@@ -21,6 +21,10 @@ module.exports = (() => {
     /await\s+acceptNapCatIncomingMessage\(msg,\s*'napcat_http_reverse'\)/.test(source),
     'http reverse ingress should route through the shared NapCat ingress acceptor'
   );
+  assert.ok(
+    /await\s+acceptIncomingMessage\(msg,\s*source\)/.test(source),
+    'shared NapCat ingress acceptor should enqueue through the async ingress acceptor'
+  );
 
   console.log('messageIngressAsyncEntrypointSource.test.js passed');
 })();
