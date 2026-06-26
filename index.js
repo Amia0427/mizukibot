@@ -431,6 +431,12 @@ async function acceptIncomingMessage(msg, source = '') {
   await handleIncomingMessage(msg);
   return true;
 }
+
+async function acceptNapCatIncomingMessage(msg, source = '') {
+  if (prepareNapCatEventPacket(msg)) return false;
+  await acceptIncomingMessage(msg, source);
+  return true;
+}
 const napcatLogFollower = createNapcatLogFollower({
   sendWithRetry,
   sendGroupReply: async ({
@@ -549,8 +555,7 @@ function connectNapCat() {
     if (shuttingDown) return;
     try {
       const msg = JSON.parse(data);
-      if (prepareNapCatEventPacket(msg)) return;
-      await acceptIncomingMessage(msg, 'napcat_ws');
+      await acceptNapCatIncomingMessage(msg, 'napcat_ws');
     } catch (e) {
       console.error('[NapCat ws message error]', e);
     }
@@ -608,8 +613,7 @@ function startNapCatTransport() {
     handleMessage: async (msg) => {
       if (shuttingDown) return;
       try {
-        if (prepareNapCatEventPacket(msg)) return;
-        await acceptIncomingMessage(msg, 'napcat_http_reverse');
+        await acceptNapCatIncomingMessage(msg, 'napcat_http_reverse');
       } catch (e) {
         console.error('[HTTP reverse message error]', e);
       }
@@ -788,10 +792,15 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
       acquireSingleInstanceLock,
       commandLineLooksLikeMainBot,
       cleanupSingleInstanceLockSync,
+      connectNapCat,
       getProcessCommandLine,
       isMainBotProcess,
       isProcessAlive,
-      readLockOwnerPid
+      readLockOwnerPid,
+      setMessageIngressDispatcherForTest(dispatcher) {
+        messageIngressDispatcher = dispatcher;
+      },
+      stopNapCatWebSocketForTest: closeNapCatWebSocket
     }
   };
 } else {

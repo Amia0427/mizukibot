@@ -14,12 +14,12 @@ module.exports = (() => {
     'main entrypoint should enqueue inbound messages instead of running the full handler inline'
   );
   assert.ok(
-    /await\s+acceptIncomingMessage\(msg,\s*'napcat_ws'\)/.test(source),
-    'websocket ingress should route through the async ingress acceptor'
+    /await\s+acceptNapCatIncomingMessage\(msg,\s*'napcat_ws'\)/.test(source),
+    'websocket ingress should route through the shared NapCat ingress acceptor'
   );
   assert.ok(
-    /await\s+acceptIncomingMessage\(msg,\s*'napcat_http_reverse'\)/.test(source),
-    'http reverse ingress should route through the async ingress acceptor'
+    /await\s+acceptNapCatIncomingMessage\(msg,\s*'napcat_http_reverse'\)/.test(source),
+    'http reverse ingress should route through the shared NapCat ingress acceptor'
   );
 
   console.log('messageIngressAsyncEntrypointSource.test.js passed');

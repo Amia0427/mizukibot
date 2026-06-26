@@ -39,6 +39,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 更新 2026-06-26 22:13 +08:00：`SHORT_TERM_MEMORY_MAX_TOKENS` 和 `ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS` 从 `120000` 收敛到 `9200`，让普通主回复与管理员主回复短期历史压缩阈值从约 `84000` tokens 降到约 `6440` tokens，避免长会话继续堆到 2 万级输入。验收结果：`node -e "const config=require('./config'); const {getShortTermCompressionSettings}=require('./utils/shortTermMemory'); console.log(JSON.stringify({shortTermMemoryMaxTokens:config.SHORT_TERM_MEMORY_MAX_TOKENS,adminShortTermMemoryMaxTokens:config.ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS,normalTriggerTokens:getShortTermCompressionSettings({}, {userId:'normal-user'}).triggerTokens,adminTriggerTokens:getShortTermCompressionSettings({}, {userId:'1960901788'}).triggerTokens}))"` 输出 `{"shortTermMemoryMaxTokens":9200,"adminShortTermMemoryMaxTokens":9200,"normalTriggerTokens":6440,"adminTriggerTokens":6440}`。小目标完成：普通用户与管理员短期历史压缩阈值已按 9200 配置生效。
 
+更新 2026-06-27 00:08 +08:00：新增 NapCat WebSocket 入站最小 smoke，使用本地假 WS 服务验证 `NAPCAT_WS_URL` 收到 OneBot 消息后会以 `source=napcat_ws` 投递到 `messageIngressDispatcher`，与 HTTP reverse 入站共用同一投递收口。验收结果：`node scripts\run-tests.js tests\napcatWsIngressSmoke.test.js tests\napcatHttpReverseServer.test.js tests\messageIngressDispatcher.test.js tests\messageIngressAsyncEntrypointSource.test.js` 通过；相关 `node --check` 通过。
+
 ## 技术栈
 
 | 层 | 选型 |
@@ -104,6 +106,7 @@ npm run start:post-reply-worker   # 单独跑后台学习 worker
 npm test
 npm run lint
 npm run check:prompts
+node scripts/run-tests.js tests/napcatWsIngressSmoke.test.js
 
 # 诊断
 npm run diag:napcat-health -- --text

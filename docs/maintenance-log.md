@@ -1,3 +1,11 @@
+## 运行维护 2026-06-27 00:08
+
+- 小目标：基于刚恢复的 `NAPCAT_WS_URL` WebSocket 入站链路，补一个可复跑的本地 smoke，确认它会像 HTTP reverse 一样投递到 `messageIngressDispatcher`。
+- 最小修复：`index.js` 将 NapCat 事件包处理和入站投递收口到 `acceptNapCatIncomingMessage`，WebSocket 与 HTTP reverse 都调用同一入口；新增 `tests/napcatWsIngressSmoke.test.js`，用本地假 WebSocket 服务模拟 NapCat 发消息，断言 dispatcher 收到 `source=napcat_ws` 和原始 `message_id`。
+- 范围控制：未重做 NapCat 接入；未恢复旧 WebSocket action client；未改 HTTP action client、消息处理主流程或生产配置默认值；未推送远端。
+- 验收：`node scripts\run-tests.js tests\napcatWsIngressSmoke.test.js tests\napcatHttpReverseServer.test.js tests\messageIngressDispatcher.test.js tests\messageIngressAsyncEntrypointSource.test.js` 通过；`node --check index.js; node --check tests\napcatWsIngressSmoke.test.js; node --check tests\messageIngressAsyncEntrypointSource.test.js` 通过；单独复跑 `node scripts\run-tests.js tests\napcatWsIngressSmoke.test.js` 通过。
+- 小目标已完成：`NAPCAT_WS_URL` WebSocket 入站现在有本地 smoke 保护，能够验证消息进入 `messageIngressDispatcher`。
+
 ## 运行维护 2026-06-26 10:38
 
 - 小目标：基于刚修复的 `npm test` 挂住问题，直接跑本地完整测试，只处理这轮全量执行新暴露的真实失败或挂住点，确认是否已从“分片通过”收口到“全量通过”。
