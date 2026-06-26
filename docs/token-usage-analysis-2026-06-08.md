@@ -8,6 +8,8 @@
 **平均输入tokens**: 10,000-12,000  
 **最高可达**: 34,000+ (包含图像时)
 
+**2026-06-26 22:13 +08:00 更新**: `SHORT_TERM_MEMORY_MAX_TOKENS` 和 `ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS` 已从 `120000` 调整为 `9200`，普通主回复与管理员主回复短期历史压缩触发阈值约为 `6440` tokens。验收命令：`node -e "const config=require('./config'); const {getShortTermCompressionSettings}=require('./utils/shortTermMemory'); console.log(JSON.stringify({shortTermMemoryMaxTokens:config.SHORT_TERM_MEMORY_MAX_TOKENS,adminShortTermMemoryMaxTokens:config.ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS,normalTriggerTokens:getShortTermCompressionSettings({}, {userId:'normal-user'}).triggerTokens,adminTriggerTokens:getShortTermCompressionSettings({}, {userId:'1960901788'}).triggerTokens}))"`；验收结果：`{"shortTermMemoryMaxTokens":9200,"adminShortTermMemoryMaxTokens":9200,"normalTriggerTokens":6440,"adminTriggerTokens":6440}`。
+
 ## 已落地修复（2026-06-08 21:05 +08:00）
 
 1. `memoryForPrompt` 加总预算：新增 `MAIN_PROMPT_MEMORY_CONTEXT_MAX_TOKENS=2500`，legacy 和 Memory V3 两条 `memoryContext` 输出都会在最终注入前裁剪。

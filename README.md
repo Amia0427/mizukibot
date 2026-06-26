@@ -37,6 +37,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 更新 2026-06-25 23:19 +08:00：`scripts/console.js` 新增 `rag` / `memory-rag-explain` 子命令，复用既有 `diag:memory-rag-explain` 实现，可用 `npm run console -- rag <userId> "<query>"` 更快按真实用户和问题跑 Memory RAG explain。验收结果：`node scripts/run-tests.js consoleMemoryRagExplainEntry.test.js`、`node scripts/run-tests.js memoryV3RagExplainDiagnostic.test.js memoryV3RagExplainDedupStage.test.js`、`node --check scripts/console.js`、`node --check tests/consoleMemoryRagExplainEntry.test.js`、`git diff --check` 通过；隔离空数据目录 smoke 在关闭 embedding/rerank 后也可输出 `memory_v3_rag_explain_diagnostic_v1`。小目标完成：真实 `userId + query` 的本地 explain 入口已收口到 console 快捷命令。
 
+更新 2026-06-26 22:13 +08:00：`SHORT_TERM_MEMORY_MAX_TOKENS` 和 `ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS` 从 `120000` 收敛到 `9200`，让普通主回复与管理员主回复短期历史压缩阈值从约 `84000` tokens 降到约 `6440` tokens，避免长会话继续堆到 2 万级输入。验收结果：`node -e "const config=require('./config'); const {getShortTermCompressionSettings}=require('./utils/shortTermMemory'); console.log(JSON.stringify({shortTermMemoryMaxTokens:config.SHORT_TERM_MEMORY_MAX_TOKENS,adminShortTermMemoryMaxTokens:config.ADMIN_SHORT_TERM_MEMORY_MAX_TOKENS,normalTriggerTokens:getShortTermCompressionSettings({}, {userId:'normal-user'}).triggerTokens,adminTriggerTokens:getShortTermCompressionSettings({}, {userId:'1960901788'}).triggerTokens}))"` 输出 `{"shortTermMemoryMaxTokens":9200,"adminShortTermMemoryMaxTokens":9200,"normalTriggerTokens":6440,"adminTriggerTokens":6440}`。小目标完成：普通用户与管理员短期历史压缩阈值已按 9200 配置生效。
+
 ## 技术栈
 
 | 层 | 选型 |
