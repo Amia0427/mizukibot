@@ -294,8 +294,9 @@ function Get-ProcessCommandLineSafe {
 }
 
 function Test-ProcessLooksLikeMainBot {
-  param([Parameter(Mandatory = $true)]$Process)
+  param($Process)
 
+  if ($null -eq $Process) { return $false }
   $commandLine = [string]$Process.CommandLine
   if ([string]::IsNullOrWhiteSpace($commandLine)) { return $false }
 
@@ -307,8 +308,9 @@ function Test-ProcessLooksLikeMainBot {
 }
 
 function Test-ProcessLooksLikePostReplyWorker {
-  param([Parameter(Mandatory = $true)]$Process)
+  param($Process)
 
+  if ($null -eq $Process) { return $false }
   $commandLine = [string]$Process.CommandLine
   if ([string]::IsNullOrWhiteSpace($commandLine)) { return $false }
 
@@ -712,10 +714,11 @@ function Get-TreeChildPids {
 
 function Test-ProcessLooksLikeRestartLauncher {
   param(
-    [Parameter(Mandatory = $true)]$Process,
+    $Process,
     [Parameter(Mandatory = $true)][string]$ChildCommandPattern
   )
 
+  if ($null -eq $Process) { return $false }
   $commandLine = [string]$Process.CommandLine
   if ([string]::IsNullOrWhiteSpace($commandLine)) { return $false }
   if ([string]$Process.Name -ine 'cmd.exe') { return $false }

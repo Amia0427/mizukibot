@@ -112,6 +112,8 @@ npm run console -- rag <userId> "<query>"
 
 ### Windows 本地运维
 
+更新 2026-06-26 09:56 +08:00：修复确认重启在 stale pid + 空进程列表下的 PowerShell `Process` 参数绑定错误；验收结果见 `docs/windows-restart-diagnosis.md`。
+
 ```bash
 restart-bot.cmd status
 restart-bot.cmd restart confirm

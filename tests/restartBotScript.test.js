@@ -138,7 +138,9 @@ module.exports = (() => {
   assert.ok(
     script.includes('[object[]]$MainProcesses = @()') &&
       script.includes('[object[]]$WorkerProcesses = @()') &&
-      !script.includes('[Parameter(Mandatory = $true)][object[]]$MainProcesses'),
+      !script.includes('[Parameter(Mandatory = $true)][object[]]$MainProcesses') &&
+      !script.includes('[Parameter(Mandatory = $true)]$Process') &&
+      (script.match(/if \(\$null -eq \$Process\) \{ return \$false \}/g) || []).length >= 3,
     'restart launcher scan should accept empty main/worker process lists'
   );
   assert.ok(

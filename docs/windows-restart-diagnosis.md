@@ -1,5 +1,7 @@
 # Windows 重启脚本诊断
 
+更新 2026-06-26 09:56 +08:00：修复 `restart-bot.cmd restart confirm` 在旧 pid 文件存在但主 bot/worker 进程都已退出时直接报 `无法将参数绑定到参数“Process”，因为该参数是空值。`。根因是进程识别 helper 仍把 `$Process` 声明为强制参数，空快照/空管道下调用会在进入判断前被 PowerShell 参数绑定拦截；现空进程对象统一返回“不匹配”，让脚本继续走启动恢复流程。验收：`node tests\restartBotScript.test.js`、`scripts\restart-bot.ps1` AST parse、`cmd /c restart-bot.cmd restart confirm` 和 `cmd /c restart-bot.cmd status` 通过，最终 main bot PID=5608、post-reply worker PID=21452 Running。小目标完成：确认重启遇到 stale pid + 空进程列表时不再被 PowerShell 强制参数绑定挡住。
+
 更新 2026-06-22 13:18 +08:00：修复“主 bot 已退出但 worker 还在时，`restart-bot.cmd restart confirm` 直接报错”。现场 `data\restart-bot.log` 记录 `无法将参数绑定到参数“MainProcesses”，因为该参数为空数组。`；根因是 launcher 清理函数把 main/worker 进程列表设为强制参数，而主进程缺席本来就是重启脚本要修复的合法状态。现 `Get-RestartLauncherPids` 接受空列表，空 main 列表时继续停止/启动流程。验收：目标测试、PowerShell AST parse、`restart-bot.cmd status` 和实际确认重启通过；旧 worker `20668` 被停止，最终 main bot `54672` 与 post-reply worker `14432` 均 Running。
 
 更新 2026-06-18 11:41 +08:00：修复双击 `restart-bot.cmd` 不重启。此前为了防误触把无参数入口改成 status-only，但双击 `.cmd` 正是无参数运行，导致用户双击后旧 main/worker 仍然存在。现 wrapper 层无参数直接转成 `restart confirm`，显式 `restart-bot.cmd status` 仍只读。验收：`cmd /c restart-bot.cmd` 真实执行重启，旧 main/worker `45064/34416` 和旧 launcher `42712/40092` 均退出，锁更新为 main bot `34660`、worker `47100`，status 显示 Running。
