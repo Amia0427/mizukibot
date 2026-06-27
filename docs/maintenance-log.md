@@ -1,3 +1,11 @@
+## 运行维护 2026-06-27 22:10
+
+- 小目标：把已恢复并验证过的 NapCat HTTP reverse 与 `NAPCAT_WS_URL` WebSocket 两条入站链路，收口成一个最小本地自检入口。
+- 最小修复：新增 `npm run smoke:napcat-ingress`，只串联现有 `tests/napcatWsIngressSmoke.test.js`、`tests/napcatHttpReverseServer.test.js`、`tests/messageIngressDispatcher.test.js` 和 `tests/messageIngressAsyncEntrypointSource.test.js`，不重做 NapCat 接入。
+- 范围控制：未改 `index.js`、HTTP reverse server、WebSocket 连接逻辑、消息处理主流程或生产配置；未推送远端。
+- 验收：`npm run smoke:napcat-ingress` 通过；`node --check index.js; node --check tests\napcatWsIngressSmoke.test.js; node --check tests\napcatHttpReverseServer.test.js; node --check tests\messageIngressDispatcher.test.js; node --check tests\messageIngressAsyncEntrypointSource.test.js` 通过；`git diff --check` 通过。
+- 小目标已完成：NapCat HTTP reverse 与 `NAPCAT_WS_URL` WebSocket 入站现在有统一的本地 smoke 入口，继续验证二者投递到 `messageIngressDispatcher`。
+
 ## 运行维护 2026-06-27 11:05
 
 - 小目标：检查 `SHORT_TERM_MEMORY_MAX_TOKENS=9200` 生效后的真实主回复输入 token，确认是否还会冲到 2 万以上。

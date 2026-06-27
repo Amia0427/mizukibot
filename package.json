@@ -42,6 +42,7 @@
     "start:post-reply-worker": "node scripts/post-reply-worker.js",
     "lint": "node scripts/lint.js",
     "test": "node scripts/run-tests.js",
+    "smoke:napcat-ingress": "node scripts/run-tests.js tests/napcatWsIngressSmoke.test.js tests/napcatHttpReverseServer.test.js tests/messageIngressDispatcher.test.js tests/messageIngressAsyncEntrypointSource.test.js",
     "smoke:pre-release": "node scripts/pre-release-smoke.js",
     "publish:check": "node scripts/verify-npm-publish.js",
     "console": "node scripts/console.js",
