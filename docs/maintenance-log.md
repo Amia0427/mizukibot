@@ -1,3 +1,10 @@
+## 运行维护 2026-06-27 11:05
+
+- 小目标：检查 `SHORT_TERM_MEMORY_MAX_TOKENS=9200` 生效后的真实主回复输入 token，确认是否还会冲到 2 万以上。
+- 验收：先跑 `npm run diag:main-reply-token-budget -- --scan=20000 --limit=200 --json`，未过滤时间时仍可看到旧窗口最大 `24353`；再以配置记录时间 `2026-06-26 22:13 +08:00` 为边界，交叉读取 `data/model-calls.ndjson` 和 `data/request-trace.ndjson`，只统计主回复且排除图片类调用，得到修复后主回复样本 `19` 条、token 样本 `19` 条、平均 `10493`、最大 `17876`、`>20k=0`。最大样本 `req_fadc387a060058e5` 为 `lookup/notebook-answer` 工具后续回复，request trace 已完成且 `sent=true`；最新样本 `req_e249a020c5b84e63` 为 `13466`。
+- 结论：修复后真实样本没有 2 万以上主回复输入；本轮未改代码，未做昨天的原因排查，也未扩大到记忆/提示词链路重构。
+- 小目标已完成：短期历史阈值调整后的运行日志已验收，主回复输入已从 2 万级峰值收口。
+
 ## 运行维护 2026-06-27 00:08
 
 - 小目标：基于刚恢复的 `NAPCAT_WS_URL` WebSocket 入站链路，补一个可复跑的本地 smoke，确认它会像 HTTP reverse 一样投递到 `messageIngressDispatcher`。

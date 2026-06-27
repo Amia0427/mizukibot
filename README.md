@@ -43,6 +43,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 更新 2026-06-27 00:26 +08:00：复跑 NapCat WebSocket 入站 smoke，并补强静态入口断言，确认共用收口仍调用 `acceptIncomingMessage(msg, source)` 后进入 `messageIngressDispatcher`；同一组 run-tests 和 `node --check` 均通过。
 
+更新 2026-06-27 11:05 +08:00：复查 `SHORT_TERM_MEMORY_MAX_TOKENS=9200` 生效后的真实运行日志。未过滤时间的 `diag:main-reply-token-budget` 仍能看到修复前旧峰值 `24353`；按 `2026-06-26 22:13 +08:00` 后交叉扫描 `data/model-calls.ndjson` 与 `data/request-trace.ndjson`，主回复样本 `19` 条、最大输入 `17876`、`>20k=0`，最新样本 `req_e249a020c5b84e63` 为 `13466`。小目标完成：修复后窗口没有 2 万以上主回复输入，本轮无需改代码。
+
 ## 技术栈
 
 | 层 | 选型 |
