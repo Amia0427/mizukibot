@@ -47,6 +47,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 更新 2026-06-27 22:10 +08:00：新增最小本地入口 `npm run smoke:napcat-ingress`，只复用既有 NapCat WebSocket smoke、HTTP reverse server 回归、`messageIngressDispatcher` 回归和入口静态断言，统一验证 `NAPCAT_WS_URL` 与 HTTP reverse 入站都会投递到 `messageIngressDispatcher`。验收结果：`npm run smoke:napcat-ingress`、相关 `node --check` 和 `git diff --check` 通过。
 
+更新 2026-06-27 22:20 +08:00：新增 `npm run verify:main-reply-token-budget`，把 `SHORT_TERM_MEMORY_MAX_TOKENS=9200` 生效后的主回复输入收口条件固化为本地 smoke：默认读取 `data/model-calls.ndjson` 与 `data/request-trace.ndjson`，统计 `2026-06-26T22:13:00+08:00` 后非图片主回复样本，阈值 `20000`，失败时列出超阈值 requestId。验收结果：`node scripts\run-tests.js mainReplyTokenRegressionCheck.test.js` 通过；`npm run verify:main-reply-token-budget -- --limit=5` 通过，真实样本 `36` 条、最大 `17876`、超阈值 `0`。小目标完成：主回复输入 token 回归检查已可复跑。
+
 ## 技术栈
 
 | 层 | 选型 |

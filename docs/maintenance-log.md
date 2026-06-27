@@ -1,3 +1,11 @@
+## 运行维护 2026-06-27 22:20
+
+- 小目标：把 `SHORT_TERM_MEMORY_MAX_TOKENS=9200` 生效后“修复后窗口没有 2 万以上主回复输入”的收口条件固化成可复跑本地回归检查。
+- 最小修复：新增 `npm run verify:main-reply-token-budget`，默认交叉读取 `data/model-calls.ndjson` 和 `data/request-trace.ndjson`，只统计 `2026-06-26T22:13:00+08:00` 后带 `requestId` 的主回复模型调用、默认排除图片/vision 路线，阈值为 `20000`；失败时直接列出超阈值 requestId、tokens、route、trigger、发送/完成状态。
+- 验收：`node scripts\run-tests.js mainReplyTokenRegressionCheck.test.js` 通过；`npm run verify:main-reply-token-budget -- --limit=5` 通过，真实日志样本 `36` 条、最大输入 `17876`、超阈值 `0`，最大样本 `req_fadc387a060058e5` 已在 request trace 中 `completed=true` 且 `sent=true`。
+- 范围控制：未重做昨天的原因排查，未改主回复拼装、短期记忆压缩或模型调用链路。
+- 小目标已完成：主回复输入 token 收口条件已有本地 smoke 保护，可直接复跑并定位超阈值样本。
+
 ## 运行维护 2026-06-27 22:10
 
 - 小目标：把已恢复并验证过的 NapCat HTTP reverse 与 `NAPCAT_WS_URL` WebSocket 两条入站链路，收口成一个最小本地自检入口。
