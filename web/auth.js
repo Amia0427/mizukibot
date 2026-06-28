@@ -2,9 +2,10 @@ const config = require('../config');
 
 function getClientIp(req) {
   const socketIp = String(req.socket?.remoteAddress || '').trim().replace(/^::ffff:/, '');
-  if (socketIp) return socketIp;
   const raw = String(req.headers['x-forwarded-for'] || '');
-  return raw.split(',')[0].trim().replace(/^::ffff:/, '');
+  const forwardedIp = raw.split(',')[0].trim().replace(/^::ffff:/, '');
+  if (socketIp && isLocalIp(socketIp) && forwardedIp) return forwardedIp;
+  return socketIp || forwardedIp;
 }
 
 function isLocalIp(ip) {

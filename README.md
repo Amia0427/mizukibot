@@ -209,7 +209,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-06-26 10:38 +08:00
+更新时间：2026-06-28 10:20 +08:00
+维护记录：2026-06-28 10:20 +08:00，已按审阅优先级完成安全与诊断收口：Web 无 token 本地模式会识别本机反代转发的远程 `X-Forwarded-For`，MCP 配置不再使用 `@latest`，`npm run lint` 改为跳过独立 chunk 并验证组合入口，post-reply worker 诊断不再把 Windows `cmd.exe` 包装进程算成重复 worker。验收结果：相关定向测试、`npm run lint`、`npm run diag:security -- --json`、`npm run diag:runtime -- --json` 均已复跑；运行数据中仍有 failed post-reply jobs 和 stale LangGraph checkpoints，因涉及 `data/` 清理，本轮未擅自删除。
 维护记录：2026-06-26 10:38 +08:00，`npm test` 已从“分片通过、未跑全量”收口到“本地完整全量通过”：本轮只修全量执行暴露的真实失败点，完整命令自然结束、退出码 0、用时约 292.5s，日志见 `D:\waifu\tmp\npm-test-full-20260626-103103.log`。
 维护记录：2026-06-26 01:52 +08:00，Docker/Compose 链路已在 WSL 本地真实跑通：已处理历史 `wg0` 全流量路由、Docker bridge DNS 和官方源访问慢的问题；`docker-compose build --progress plain mizukibot` 成功生成 `mizukibot:local`，临时 `.env` 端口 `49105/49106` 下两个服务启动为 Up，`/api/security-status` 返回 200 且 `ok=true`，NapCat HTTP reverse 空 JSON POST 返回 204，容器内 `node --check` 三项通过，最后已 `docker-compose down` 清理。
 维护记录：2026-06-25 23:45 +08:00，Docker/Compose 链路已做本地复核：`docker-compose config` 在 WSL 临时最小 `.env` 下通过，白名单文件集和私有 prompt 只读挂载检查通过，主进程按 Dockerfile 等价文件集可启动并通过 Web/NapCat reverse 基础探针；真实镜像构建被 `node:20-bookworm-slim` 从 Docker Hub 拉取元数据超时阻塞，且本机默认 3002/3005 正被当前宿主 bot 占用。小目标完成状态：已定位当前最可能启动断点和环境缺口，真实 `docker compose up -d --build` 需在镜像源可达且端口空闲环境复跑。

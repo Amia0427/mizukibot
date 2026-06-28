@@ -33,7 +33,7 @@
       "protocolMode": "line",
       "args": [
         "-y",
-        "@memtensor/memos-api-mcp@latest"
+        "@memtensor/memos-api-mcp@1.1.2"
       ],
       "env": {
         "MEMOS_API_KEY": "${MEMOS_API_KEY}",

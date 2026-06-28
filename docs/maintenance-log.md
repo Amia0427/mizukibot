@@ -1054,3 +1054,11 @@
 - 最小修复：改写本地历史并清理可达旧对象；`.gitignore` 增加上述本地数据/生成数据规则，保留磁盘上的未跟踪本地文件，不再纳入版本库。
 - 验收：`git log --all --name-only --pretty=format:`、`git rev-list --all --objects` 和 `git ls-files` 对目标路径均无命中；`npm run diag:security` 通过。
 - 小目标已完成：历史提交不再携带上述本地截图、运行数据、评估样本、备份包和代理本地配置。
+
+## 运行维护 2026-06-28 10:20
+
+- 按仓库审阅优先级修复安全与诊断问题。
+- 最小修复：Web 无 token 本地模式在 socket 为本机且存在 `X-Forwarded-For` 时按转发首地址判断客户端，避免本机反代暴露管理页时误放行远程请求；`.mcp.json` 将 `@memtensor/memos-api-mcp@latest` 锁定为 `1.1.2` 并新增配置回归；`scripts/lint.js` 将 chunk 片段交给组合入口校验，恢复 `npm run lint`；运行态诊断只把 Node 进程计为 post-reply worker，避免 Windows `cmd.exe` 包装进程造成重复 worker 误报。
+- 范围控制：未删除或归档 `data/` 下 21 个 failed post-reply jobs、20 个 stale LangGraph checkpoints 和 1 个 invalid event file；这些属于运行数据清理，删除前需要单独确认。未做大文件拆分，只完成本轮直接服务安全和验收可信度的最小改动。
+- 验收：`node scripts\run-tests.js tests\webAuthSecurity.test.js`、`node scripts\run-tests.js tests\mcpConfigSecurity.test.js`、`npm run lint`、`node scripts\run-tests.js tests\lintChunkEntrypoints.test.js`、`node scripts\run-tests.js tests\runtimeStatusDiagnostics.test.js tests\runtimeHotspotsDiagnostics.test.js`、`npm run diag:security -- --json`、`npm run diag:runtime -- --json` 通过；真实 runtime 诊断中 `post_reply_worker_duplicate` 已消失，post-reply worker `processCount=1`。
+- 小目标已完成：Web 管理入口、MCP 供应链、lint 验收和 worker 诊断误报已按顺序收口，且没有覆盖并行开发改动或擅自清理运行数据。

@@ -32,6 +32,19 @@ await withConfig({ WEB_TOKEN: 'secret-token', WEB_BIND_HOST: '127.0.0.1' }, asyn
 await withConfig({ WEB_TOKEN: '', WEB_BIND_HOST: '127.0.0.1', WEB_LOCAL_ONLY_WITHOUT_TOKEN: true }, async () => {
   assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '127.0.0.1' }), { host: '127.0.0.1', port: 3005 }), true);
   assert.strictEqual(__test.checkWebAuth(makeReq({ method: 'GET', remoteAddress: '203.0.113.10' }), { host: '127.0.0.1', port: 3005 }), false);
+  assert.strictEqual(__test.checkWebAuth(makeReq({
+    method: 'GET',
+    remoteAddress: '127.0.0.1',
+    headers: { 'x-forwarded-for': '203.0.113.10' }
+  }), { host: '127.0.0.1', port: 3005 }), false);
+  assert.strictEqual(__test.checkWebAuth(makeReq({
+    method: 'POST',
+    remoteAddress: '127.0.0.1',
+    headers: {
+      origin: 'http://127.0.0.1:3005',
+      'x-forwarded-for': '203.0.113.10'
+    }
+  }), { host: '127.0.0.1', port: 3005 }), false);
 });
 
 await withConfig({ WEB_TOKEN: '', WEB_BIND_HOST: '0.0.0.0', WEB_LOCAL_ONLY_WITHOUT_TOKEN: true }, async () => {
