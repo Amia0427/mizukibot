@@ -228,3 +228,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-06-23 09:17 +08:00，已新增面向初学者的部署指南，覆盖 `.env`、私有 prompt、NapCat、启动和排障。
 维护记录：2026-06-23 12:38 +08:00，已为 npm 发布增加 `prepublishOnly` 硬门禁，登录后可执行 `npm publish --access public`。
 维护记录：2026-06-27 00:26 +08:00，已复跑 NapCat WebSocket 入站 smoke，并补强 `messageIngressAsyncEntrypointSource` 对共用收口投递 dispatcher 的静态断言；定向 run-tests 与相关 `node --check` 通过。
+维护记录：2026-07-05 09:06 +08:00，已定位并隔离 `langgraph_v2_event_file_invalid` 的全 NUL 坏事件文件，诊断 JSON 现在会列出 `invalidEventFiles` 明细；`npm run diag:runtime -- --json` 复跑后该告警消失，剩余仅为既有 failed post-reply jobs 和 stale LangGraph checkpoints。

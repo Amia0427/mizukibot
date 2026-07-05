@@ -150,6 +150,10 @@ function buildLangGraphV2StoreSummary({
       .slice()
       .sort((a, b) => a.ageMs - b.ageMs)
       .slice(0, 10),
+    invalidEventFiles: eventSummaries
+      .filter((file) => !file.valid)
+      .sort((a, b) => b.ageMs - a.ageMs)
+      .slice(0, 20),
     invalidCheckpointCount: checkpointFiles.filter((file) => !(file.valid && !Array.isArray(file.data))).length,
     invalidEventFileCount: eventFiles.filter((file) => !Array.isArray(file.data)).length
   };

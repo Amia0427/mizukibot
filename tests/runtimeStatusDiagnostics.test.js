@@ -173,6 +173,7 @@ module.exports = (() => {
     assert.strictEqual(report.components.langGraphV2Store.countsByCheckpointStatus.completed, 1);
     assert.strictEqual(report.components.langGraphV2Store.staleRunningCheckpoints[0].threadId, 'thread_stale');
     assert.strictEqual(report.components.langGraphV2Store.latestEventFiles[0].eventCount, 2);
+    assert.deepStrictEqual(report.components.langGraphV2Store.invalidEventFiles, []);
     assert.strictEqual(report.components.subagents, undefined);
     assert.ok(Array.isArray(report.components.lockFiles));
     assert.ok(report.components.lockFiles.some((item) => item.name === 'memoryMaterializeLock'));
@@ -183,6 +184,20 @@ module.exports = (() => {
     assert.ok(signalCodes.includes('memory_materialize_lock_stale'));
     assert.ok(signalCodes.includes('langgraph_v2_checkpoint_stale'));
     assert.ok(!signalCodes.includes('post_reply_due_queued_without_worker'));
+
+    writeJson(path.join(langGraphEventDir, 'thread_invalid.json'), {
+      type: 'legacy_event_object'
+    });
+    const invalidEventReport = buildRuntimeStatusDiagnostic({
+      projectRoot: tempDir,
+      now: () => now,
+      listProcesses: () => processes,
+      isProcessAlive: (pid) => alive.has(Number(pid)),
+      langGraphV2CheckpointStaleMs: 30 * 60 * 1000
+    });
+    assert.strictEqual(invalidEventReport.components.langGraphV2Store.invalidEventFileCount, 1);
+    assert.strictEqual(invalidEventReport.components.langGraphV2Store.invalidEventFiles[0].file, 'thread_invalid.json');
+    assert.ok(invalidEventReport.signals.some((item) => item.code === 'langgraph_v2_event_file_invalid'));
 
     assert.doesNotThrow(() => JSON.parse(JSON.stringify(report)));
 

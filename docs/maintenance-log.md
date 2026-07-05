@@ -1062,3 +1062,11 @@
 - 范围控制：未删除或归档 `data/` 下 21 个 failed post-reply jobs、20 个 stale LangGraph checkpoints 和 1 个 invalid event file；这些属于运行数据清理，删除前需要单独确认。未做大文件拆分，只完成本轮直接服务安全和验收可信度的最小改动。
 - 验收：`node scripts\run-tests.js tests\webAuthSecurity.test.js`、`node scripts\run-tests.js tests\mcpConfigSecurity.test.js`、`npm run lint`、`node scripts\run-tests.js tests\lintChunkEntrypoints.test.js`、`node scripts\run-tests.js tests\runtimeStatusDiagnostics.test.js tests\runtimeHotspotsDiagnostics.test.js`、`npm run diag:security -- --json`、`npm run diag:runtime -- --json` 通过；真实 runtime 诊断中 `post_reply_worker_duplicate` 已消失，post-reply worker `processCount=1`。
 - 小目标已完成：Web 管理入口、MCP 供应链、lint 验收和 worker 诊断误报已按顺序收口，且没有覆盖并行开发改动或擅自清理运行数据。
+
+## 运行维护 2026-07-05 09:06
+
+- 定位 `langgraph_v2_event_file_invalid` 对应文件：`data\langgraph_v2_events\3298446599_qq-group_597801651_user_3298446599_1233140219_image.json`，大小 3099 字节，内容为全 NUL，非半截 JSON。
+- 结论：当前写入链路只通过 `core\messageTelemetry.js -> utils\langgraphV2Store.js` 追加事件数组，且 `atomicWriteJson` 先写临时文件再 rename；诊断要求事件文件为数组，与现行格式一致，不是诊断对历史格式过严。本次按历史坏运行数据处理。
+- 最小修复：诊断报告新增 `components.langGraphV2Store.invalidEventFiles`，以后同类坏文件会直接列出；当前坏文件未删除，已隔离到 `data\langgraph_v2_events_quarantine\3298446599_qq-group_597801651_user_3298446599_1233140219_image.invalid-20260705T0900.json`。
+- 验收：`node --check utils\runtimeStatusDiagnostics\stores.js`、`node scripts\run-tests.js tests\runtimeStatusDiagnostics.test.js`、`npm run diag:runtime -- --json` 通过；真实诊断中 `langgraph_v2_event_file_invalid` 已消失，`invalidEventFileCount=0`、`invalidEventFiles=[]`，剩余告警仅为既有 `post_reply_failed_jobs` 和 `langgraph_v2_checkpoint_stale`。
+- 小目标已完成：后续运行诊断和排障不再被该坏事件文件干扰，且同类问题可在诊断 JSON 中直接定位文件。
