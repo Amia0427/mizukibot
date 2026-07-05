@@ -1,3 +1,10 @@
+## 运行维护 2026-07-05 09:28
+
+- 小目标：把群聊出口敏感词库审查收窄到只拦截政治敏感，降低日常聊天误伤。
+- 最小修复：`config/group-reply-sensitive-words.json` 默认只加载 `反动词库.txt` 和 `政治类型.txt`；移除色情、枪爆、暴恐分类的默认加载。路由层通用危险操作拒绝规则未改，避免把账号盗取、攻击步骤等非词库边界一并放开。
+- 验收：`node tests\groupReplySensitiveGuard.test.js`、`node tests\messageReplyRuntimeFreshness.test.js`、`node --check utils\groupReplySensitiveGuard.js` 通过；默认配置探针显示词量降为政治相关词库集合，非政治样例不再拦截，政治相关样例仍拦截。
+- 小目标已完成：群聊出口敏感词库默认审查范围已收窄到政治相关分类。
+
 ## 运行维护 2026-06-27 22:20
 
 - 小目标：把 `SHORT_TERM_MEMORY_MAX_TOKENS=9200` 生效后“修复后窗口没有 2 万以上主回复输入”的收口条件固化成可复跑本地回归检查。

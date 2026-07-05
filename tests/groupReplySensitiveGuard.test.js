@@ -5,6 +5,7 @@ const path = require('path');
 
 const {
   createGroupReplySensitiveGuard,
+  loadGuardConfig,
   loadVendorWords
 } = require('../utils/groupReplySensitiveGuard');
 
@@ -13,6 +14,9 @@ function writeJson(filePath, value) {
 }
 
 module.exports = (() => {
+  const defaultConfig = loadGuardConfig();
+  assert.deepStrictEqual(defaultConfig.vendorFiles, ['反动词库.txt', '政治类型.txt']);
+
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-sensitive-guard-'));
   const vendorDir = path.join(tempDir, 'vendor');
   fs.mkdirSync(vendorDir, { recursive: true });
