@@ -124,6 +124,7 @@ function createMessageDispatchCoordinator(deps = {}) {
           triggerBranch: routeExecutionPlan.executor === 'background_direct' ? 'background_direct.final_send' : 'tool_plan.final_send',
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
+          imageUrl,
           imageUrls,
           deferPersist: false,
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
@@ -266,6 +267,7 @@ function createMessageDispatchCoordinator(deps = {}) {
           disableTools: !routeExecutionPlan.allowTools,
           allowTools: routeExecutionPlan.allowTools,
           allowedTools: routeExecutionPlan.allowedTools,
+          imageUrl,
           imageUrls,
           routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
             groupId,

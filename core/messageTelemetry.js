@@ -120,6 +120,20 @@ function createMessageTelemetryCoordinator(deps = {}) {
     runPersistInBackgroundFromCheckpoint
   } = deps;
 
+  function resolveReplyImageUrl(replyOptions = {}, routeMeta = {}) {
+    const explicitImageUrl = String(
+      replyOptions.imageUrl
+      || routeMeta.imageUrl
+      || routeMeta.image_url
+      || ''
+    ).trim();
+    if (explicitImageUrl) return explicitImageUrl;
+    const imageUrls = Array.isArray(replyOptions.imageUrls)
+      ? replyOptions.imageUrls
+      : (Array.isArray(routeMeta.imageUrls) ? routeMeta.imageUrls : []);
+    return String(imageUrls[0] || '').trim();
+  }
+
   function maybeRunDeferredPersist(replyEnvelope = {}) {
     const replyOptions = replyEnvelope?.replyOptions && typeof replyEnvelope.replyOptions === 'object'
       ? replyEnvelope.replyOptions
@@ -131,6 +145,7 @@ function createMessageTelemetryCoordinator(deps = {}) {
     const requestTrace = normalizeRequestTrace(routeMeta.requestTrace);
     const userId = String(routeMeta.userId || routeMeta.user_id || '').trim();
     const sessionKey = resolveShortTermSessionKey(userId, routeMeta);
+    const imageUrl = resolveReplyImageUrl(replyOptions, routeMeta);
     const explicitThreadId = String(
       replyOptions?.threadId
       || routeMeta.threadId
@@ -143,7 +158,7 @@ function createMessageTelemetryCoordinator(deps = {}) {
       reviewMode: '',
       routeMeta,
       sessionKey,
-      imageUrl: null,
+      imageUrl,
       options: {
         routeMeta
       }
@@ -157,7 +172,10 @@ function createMessageTelemetryCoordinator(deps = {}) {
         chatType: String(routeMeta.chatType || '').trim(),
         routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
         topRouteType: String(replyOptions?.topRouteType || '').trim(),
-        routeMeta
+        routeMeta: {
+          ...routeMeta,
+          threadId
+        }
       });
       const eventPayload = {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,

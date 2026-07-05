@@ -209,7 +209,7 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-05 09:11 +08:00
+更新时间：2026-07-05 09:14 +08:00
 维护记录：2026-06-28 10:20 +08:00，已按审阅优先级完成安全与诊断收口：Web 无 token 本地模式会识别本机反代转发的远程 `X-Forwarded-For`，MCP 配置不再使用 `@latest`，`npm run lint` 改为跳过独立 chunk 并验证组合入口，post-reply worker 诊断不再把 Windows `cmd.exe` 包装进程算成重复 worker。验收结果：相关定向测试、`npm run lint`、`npm run diag:security -- --json`、`npm run diag:runtime -- --json` 均已复跑；运行数据中仍有 failed post-reply jobs 和 stale LangGraph checkpoints，因涉及 `data/` 清理，本轮未擅自删除。
 维护记录：2026-06-26 10:38 +08:00，`npm test` 已从“分片通过、未跑全量”收口到“本地完整全量通过”：本轮只修全量执行暴露的真实失败点，完整命令自然结束、退出码 0、用时约 292.5s，日志见 `D:\waifu\tmp\npm-test-full-20260626-103103.log`。
 维护记录：2026-06-26 01:52 +08:00，Docker/Compose 链路已在 WSL 本地真实跑通：已处理历史 `wg0` 全流量路由、Docker bridge DNS 和官方源访问慢的问题；`docker-compose build --progress plain mizukibot` 成功生成 `mizukibot:local`，临时 `.env` 端口 `49105/49106` 下两个服务启动为 Up，`/api/security-status` 返回 200 且 `ok=true`，NapCat HTTP reverse 空 JSON POST 返回 204，容器内 `node --check` 三项通过，最后已 `docker-compose down` 清理。
@@ -230,3 +230,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-06-27 00:26 +08:00，已复跑 NapCat WebSocket 入站 smoke，并补强 `messageIngressAsyncEntrypointSource` 对共用收口投递 dispatcher 的静态断言；定向 run-tests 与相关 `node --check` 通过。
 维护记录：2026-07-05 09:06 +08:00，已定位并隔离 `langgraph_v2_event_file_invalid` 的全 NUL 坏事件文件，诊断 JSON 现在会列出 `invalidEventFiles` 明细；`npm run diag:runtime -- --json` 复跑后该告警消失，剩余仅为既有 failed post-reply jobs 和 stale LangGraph checkpoints。
 维护记录：2026-07-05 09:11 +08:00，已将 `data/post_reply_jobs/failed` 中 21 个历史 failed post-reply jobs 按错误原因分型后归档到 `data/post_reply_jobs/archive/failed-post-reply-jobs/failed-history-20260705-post-reply`：14 个 enrich HTTP 400 判为永久失败，6 个 429/503/timeout 属可重试错误但因 5 月历史任务不重新入队，1 个 stale-processing 恢复标记归档忽略。验收结果：归档脚本 dry-run/apply 均命中 21 件，`node scripts\run-tests.js tests\postReplyFailedArchive.test.js tests\postReplyFailureRequeue.test.js tests\postReplyQueueRepair.test.js` 通过，`npm run diag:runtime -- --json` 显示 post-reply 队列 `queued=0/processing=0/failed=0` 且 `post_reply_failed_jobs` 告警消失；未处理其他 `data/`。
+维护记录：2026-07-05 09:14 +08:00，已修复图片 direct reply deferred persist 丢失 `_image` threadId 的收尾问题：后台持久化重算 threadId 时纳入 `imageUrl/imageUrls[0]`，并把实际 threadId 写回后台事件。验收结果：`node tests\messageTelemetry.test.js` 在临时 store 中确认 `transform_vision-summary_image` checkpoint 从 running 收尾为 `completed/persist`，相关定向测试、`npm run lint` 和 `npm run diag:runtime -- --json` 已复跑；真实诊断剩余 20 个 stale checkpoint 均按历史遗留处理，未删除运行数据。
