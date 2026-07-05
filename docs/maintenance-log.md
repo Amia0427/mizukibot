@@ -1094,3 +1094,11 @@
 - 最小修复：后台持久化优先沿用实际 threadId，重算时纳入 `imageUrl/imageUrls[0]`，并把 direct reply 的 `imageUrl` 透传到发送后的 `replyOptions`；历史 checkpoint 未删除。
 - 验收：`node tests\messageTelemetry.test.js` 在临时 store 中将 `u2_qq-group_g2_user_u2_transform_vision-summary_image` 从 stale running 更新为 `completed/persist`；`node tests\messageDispatchCoordinator.test.js`、`node tests\messageRouteFlowGroupStreaming.test.js`、`npm run lint` 通过；`npm run diag:runtime -- --json` 仍显示 20 个历史 stale checkpoint，未新增当前验收样本。
 - 小目标已完成：新图片 deferred persist 不再因为 threadId 丢失图片后缀而留下 stale running checkpoint。
+
+## 运行维护 2026-07-05 20:12
+
+- 目标：把图片理解 direct reply 超时从默认 18 秒提升到 75 秒，并重启本地 bot。
+- 根因：`transform/vision-summary` 会通过图片模型配置写入 `__timeoutMs`，覆盖全局 `REQUEST_TIMEOUT_MS`；当前 `.env` 未显式配置 `IMAGE_MODEL_TIMEOUT_MS`，运行时使用默认 18000ms。
+- 最小修复：在 `.env` 中新增 `IMAGE_MODEL_TIMEOUT_MS=75000`，不改模型路由和回复逻辑。
+- 验收：本地配置加载探针确认 `IMAGE_MODEL_TIMEOUT_MS=75000`；重启脚本完成后检查 bot 主进程和 post-reply worker 状态。
+- 小目标已完成：图片总结请求不会再按默认 18 秒过早触发“刚刚那句没组织稳”兜底。
