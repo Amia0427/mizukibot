@@ -1070,3 +1070,20 @@
 - 最小修复：诊断报告新增 `components.langGraphV2Store.invalidEventFiles`，以后同类坏文件会直接列出；当前坏文件未删除，已隔离到 `data\langgraph_v2_events_quarantine\3298446599_qq-group_597801651_user_3298446599_1233140219_image.invalid-20260705T0900.json`。
 - 验收：`node --check utils\runtimeStatusDiagnostics\stores.js`、`node scripts\run-tests.js tests\runtimeStatusDiagnostics.test.js`、`npm run diag:runtime -- --json` 通过；真实诊断中 `langgraph_v2_event_file_invalid` 已消失，`invalidEventFileCount=0`、`invalidEventFiles=[]`，剩余告警仅为既有 `post_reply_failed_jobs` 和 `langgraph_v2_checkpoint_stale`。
 - 小目标已完成：后续运行诊断和排障不再被该坏事件文件干扰，且同类问题可在诊断 JSON 中直接定位文件。
+
+## 运行维护 2026-07-05 09:11
+
+- 目标：只处理 `data/post_reply_jobs/failed` 中 21 个历史 failed post-reply jobs，不清理其他 `data/`。
+- 分型：6 个 429/503/timeout 属瞬时上游错误，队列语义上可安全重试；14 个 enrich 阶段 HTTP 400 属永久失败；1 个 `worker-recovered-stale-processing-job` 是 stale processing 恢复标记，应归档忽略。
+- 处理决策：6 个可重试件均为 2026-05-05 至 2026-05-12 的历史回复后学习任务，当前不重新入队，避免迟到写入旧上下文；21 个 JSON 失败件统一归档到 `data\post_reply_jobs\archive\failed-post-reply-jobs\failed-history-20260705-post-reply`，并保留 `manifest.json`。
+- 最小修复：新增 `scripts\archive-post-reply-failed-jobs.js`，默认 dry-run，必须显式 `--apply`，没有 `--all` 或指定 job id 时不会移动失败件；归档后重建 post-reply 队列索引。
+- 验收：真实 dry-run/apply 均命中 21 件，`failed` 目录只剩 2 个 `.old` 修复备份；`node --check scripts\archive-post-reply-failed-jobs.js`、`node --check tests\postReplyFailedArchive.test.js`、`node scripts\run-tests.js tests\postReplyFailedArchive.test.js tests\postReplyFailureRequeue.test.js tests\postReplyQueueRepair.test.js` 通过；`npm run diag:runtime -- --json` 显示 post-reply 队列 `queued=0/processing=0/failed=0`、`failedByErrorClass={}`，`post_reply_failed_jobs` 告警已消失，剩余告警仅为既有 `langgraph_v2_checkpoint_stale`。
+- 小目标已完成：历史 post-reply failed jobs 不再让运行态诊断长期告警，且没有删除或清理其他运行数据。
+
+## 运行维护 2026-07-05 09:14
+
+- 目标：定位并修复 `transform_vision-summary_image` 新请求仍留下 stale running checkpoint 的当前漏收尾路径。
+- 根因：前台 `deferPersist` 结束在 `direct_reply`，发送成功后后台持久化重算 threadId 时丢了图片维度，事件写到 `...transform_vision-summary`，原 checkpoint `...transform_vision-summary_image` 仍停在 `running/direct_reply`。
+- 最小修复：后台持久化优先沿用实际 threadId，重算时纳入 `imageUrl/imageUrls[0]`，并把 direct reply 的 `imageUrl` 透传到发送后的 `replyOptions`；历史 checkpoint 未删除。
+- 验收：`node tests\messageTelemetry.test.js` 在临时 store 中将 `u2_qq-group_g2_user_u2_transform_vision-summary_image` 从 stale running 更新为 `completed/persist`；`node tests\messageDispatchCoordinator.test.js`、`node tests\messageRouteFlowGroupStreaming.test.js`、`npm run lint` 通过；`npm run diag:runtime -- --json` 仍显示 20 个历史 stale checkpoint，未新增当前验收样本。
+- 小目标已完成：新图片 deferred persist 不再因为 threadId 丢失图片后缀而留下 stale running checkpoint。
