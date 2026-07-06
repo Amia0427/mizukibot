@@ -6,6 +6,14 @@
 - 验收：`node --check core\normalFastReplyRuntime.js api\runtimeV2\model\service.js utils\modelCallTracker\usage.js tests\normalFastReplyRuntime.test.js tests\modelCallTrackerStringResponse.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\modelCallTrackerStringResponse.test.js tests\modelServiceCot.test.js tests\mainModelGenerationParams.test.js`、`git diff --check` 通过。
 - 小目标已完成：快回复空消息已定位为 search 模型非流式 length 空正文风险，默认快回复不再继承 search 变体。
 
+## 运行维护 2026-07-06 18:17
+
+- 小目标：关闭 `normal_fast_reply` 功能，避免普通快速回复链路继续参与运行。
+- 结论：代码默认值和 `.env.example` 已是 `NORMAL_FAST_REPLY_ENABLED=false`；当前实际启用来自本机 `.env` 中显式 `NORMAL_FAST_REPLY_ENABLED=true`。
+- 最小修复：只将本机 `.env` 的 `NORMAL_FAST_REPLY_ENABLED` 改为 `false`，保留代码路径和显式开关能力。
+- 验收：配置加载探针返回 `false`；`node tests\normalFastReplyConfig.test.js`、`node tests\normalFastReplyGate.test.js` 通过。
+- 小目标已完成：当前本地运行配置不会再进入 `normal_fast_reply`。
+
 ## 运行维护 2026-07-06 15:15
 
 - 小目标：在不关闭敏感词库的前提下，降低群聊出口检查对角色扮演文本的误伤。
