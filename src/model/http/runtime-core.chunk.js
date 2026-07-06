@@ -384,21 +384,21 @@ function normalizeAnthropicCacheBreakpointSlots(requestBody = {}) {
 
   const nextBody = { ...requestBody };
   let hasSystemCacheBreakpoint = false;
+  const systemBlocks = normalizeAnthropicSystemBlocks(nextBody.system);
+  const systemCacheIndex = findLastAnthropicCacheControlIndex(systemBlocks);
 
   if (Array.isArray(nextBody.tools)) {
     const toolCacheIndex = findLastAnthropicCacheControlIndex(nextBody.tools, extractAnthropicToolCacheControl);
     nextBody.tools = nextBody.tools.map((tool, index) => {
       const cacheControl = extractAnthropicToolCacheControl(tool);
       const stripped = stripAnthropicToolCacheControl(tool);
-      return index === toolCacheIndex && cacheControl && keepNextExplicit()
+      return systemCacheIndex < 0 && index === toolCacheIndex && cacheControl && keepNextExplicit()
         ? applyAnthropicCacheControl(stripped, cacheControl)
         : stripped;
     });
   }
 
-  const systemBlocks = normalizeAnthropicSystemBlocks(nextBody.system);
   if (systemBlocks.length > 0) {
-    const systemCacheIndex = findLastAnthropicCacheControlIndex(systemBlocks);
     nextBody.system = systemBlocks.map((block, index) => {
       const cacheControl = extractAnthropicCacheControl(block);
       const stripped = stripCacheControlFields(block);

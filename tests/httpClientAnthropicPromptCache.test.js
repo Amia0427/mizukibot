@@ -204,9 +204,9 @@ module.exports = (async () => {
       stream: false
     });
     assert.ok(preparedStableSystem.requestBody.system.some((block) => block.cache_control?.type === 'ephemeral'));
-    assert.ok(preparedStableSystem.requestBody.tools.some((tool) => tool.cache_control?.type === 'ephemeral'));
+    assert.ok(preparedStableSystem.requestBody.tools.every((tool) => !tool.cache_control));
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody, 'cache_control'));
-    assert.ok(countRequestCacheControl(preparedStableSystem.requestBody) <= 4);
+    assert.strictEqual(countRequestCacheControl(preparedStableSystem.requestBody), 1);
     assert.ok(!Object.prototype.hasOwnProperty.call(preparedStableSystem.requestBody, 'prompt_cache_key'));
     assert.ok(preparedStableSystem.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
     assert.ok(!preparedStableSystem.requestHeaders['anthropic-beta'].includes('extended-cache-ttl-2025-04-11'));
@@ -394,7 +394,7 @@ module.exports = (async () => {
       stream: false
     });
     assert.ok(countRequestCacheControl(preparedTooManyBreakpoints.requestBody) <= 4);
-    assert.ok(preparedTooManyBreakpoints.requestBody.tools.some((tool) => tool.name === 'lookup_memory' && tool.cache_control?.type === 'ephemeral'));
+    assert.ok(preparedTooManyBreakpoints.requestBody.tools.every((tool) => !tool.cache_control));
     assert.strictEqual(
       preparedTooManyBreakpoints.requestBody.system.filter((block) => block.cache_control?.type === 'ephemeral').length,
       1

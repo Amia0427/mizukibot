@@ -1102,3 +1102,11 @@
 - 最小修复：在 `.env` 中新增 `IMAGE_MODEL_TIMEOUT_MS=75000`，不改模型路由和回复逻辑。
 - 验收：本地配置加载探针确认 `IMAGE_MODEL_TIMEOUT_MS=75000`；重启脚本完成后检查 bot 主进程和 post-reply worker 状态。
 - 小目标已完成：图片总结请求不会再按默认 18 秒过早触发“刚刚那句没组织稳”兜底。
+
+## 运行维护 2026-07-06 14:58
+
+- 目标：不改 `ANTHROPIC_PROMPT_CACHE_TTL=5m`，只收敛 Anthropic prompt cache 断点结构。
+- 根因：稳定 system 已有断点时，工具自动断点会让最终请求变成 tool + system 多断点；第三方 Anthropic 网关曾出现按最后断点写缓存的表现，多断点会降低稳定前缀复用确定性。
+- 最小修复：`normalizeAnthropicCacheBreakpointSlots` 在存在 system 缓存断点时剥离 tools/messages 上的 `cache_control`，无 system 断点时仍允许工具或历史消息作为兜底断点。
+- 验收：`node tests\httpClientAnthropicPromptCache.test.js`、`node tests\openAIMainPromptCacheDualProtocol.test.js`、`node tests\providerRequestNormalization.test.js`、`node tests\providerRequestDiagnostics.test.js` 通过；`node scripts\diagnose-provider-request.js --scenario admin_reply` 显示 `anthropicCacheBreakpoints=1`、`anthropicPromptCacheTtl=5m`。
+- 小目标已完成：Anthropic 主回复缓存断点优先稳定 system 前缀，且未改成一小时缓存。

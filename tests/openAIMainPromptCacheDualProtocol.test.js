@@ -79,8 +79,7 @@ module.exports = (async () => {
     assert.strictEqual(preparedMain.requestUrl, 'https://example.com/v1/messages');
     assert.ok(Array.isArray(preparedMain.requestBody.system));
     assert.ok(preparedMain.requestBody.system.some((block) => block.cache_control?.type === 'ephemeral'));
-    assert.ok(preparedMain.requestBody.tools.some((tool) => tool.name === 'lookup_memory' && tool.cache_control?.type === 'ephemeral'));
-    assert.ok(preparedMain.requestBody.tools.some((tool) => tool.name === 'lookup_memory' && tool.cache_control?.ttl === '5m'));
+    assert.ok(preparedMain.requestBody.tools.every((tool) => !tool.cache_control));
     assert.ok(!preparedMain.requestBody.tools.some((tool) => tool.type === 'web_search_20250305'));
     assert.deepStrictEqual(preparedMain.requestBody.tool_choice, { type: 'auto' });
     assert.ok(preparedMain.requestHeaders['anthropic-beta'].includes('prompt-caching-2024-07-31'));
