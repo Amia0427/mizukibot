@@ -6,6 +6,14 @@
 - 验收：`node --check core\normalFastReplyRuntime.js api\runtimeV2\model\service.js utils\modelCallTracker\usage.js tests\normalFastReplyRuntime.test.js tests\modelCallTrackerStringResponse.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\modelCallTrackerStringResponse.test.js tests\modelServiceCot.test.js tests\mainModelGenerationParams.test.js`、`git diff --check` 通过。
 - 小目标已完成：快回复空消息已定位为 search 模型非流式 length 空正文风险，默认快回复不再继承 search 变体。
 
+## 运行维护 2026-07-06 15:15
+
+- 小目标：在不关闭敏感词库的前提下，降低群聊出口检查对角色扮演文本的误伤。
+- 根因：词库 guard 是静态子串匹配，只要回复里出现已加载政治词就会整句替换，不区分虚构台词、角色扮演或现实语境。
+- 最小修复：`config/group-reply-sensitive-words.json` 继续保持 `enabled=true`，新增默认 `politicalContextRequired=true`；`utils\groupReplySensitiveGuard.js` 只有在词库命中且文本具备明确现实政治语境时才拦截，角色扮演/虚构语境命中词库不替换。路由层对明确现实滥用的拒绝规则未改。
+- 验收：默认配置确认词库启用；角色扮演样例不拦截，现实政治样例仍拦截；群聊发送路径回归通过。
+- 小目标已完成：敏感词库未关闭，角色扮演回复不再因单个政治词子串默认被替换。
+
 ## 运行维护 2026-07-05 09:28
 
 - 小目标：把群聊出口敏感词库审查收窄到只拦截政治敏感，降低日常聊天误伤。

@@ -15,7 +15,18 @@ function writeJson(filePath, value) {
 
 module.exports = (() => {
   const defaultConfig = loadGuardConfig();
+  assert.strictEqual(defaultConfig.enabled, true);
+  assert.strictEqual(defaultConfig.politicalContextRequired, true);
   assert.deepStrictEqual(defaultConfig.vendorFiles, ['反动词库.txt', '政治类型.txt']);
+
+  const defaultGuard = createGroupReplySensitiveGuard();
+  const defaultPoliticalWords = loadVendorWords(undefined, defaultConfig.vendorFiles);
+  assert.ok(defaultPoliticalWords.length > 0);
+  assert.strictEqual(defaultGuard.enabled, true);
+  assert.strictEqual(defaultGuard.politicalContextRequired, true);
+  assert.strictEqual(defaultGuard.check('角色扮演里这个王国叫华国，今晚只是聊剧情设定。').blocked, false);
+  assert.strictEqual(defaultGuard.check('现实政治里讨论中国人权议题').blocked, true);
+  assert.strictEqual(defaultGuard.check('华国').blocked, false);
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-sensitive-guard-'));
   const vendorDir = path.join(tempDir, 'vendor');
@@ -26,6 +37,7 @@ module.exports = (() => {
   const configPath = path.join(tempDir, 'config.json');
   writeJson(configPath, {
     enabled: true,
+    politicalContextRequired: false,
     replacementText: '替代回复',
     vendorFiles: ['words.txt'],
     extraWords: ['extra-block', '显式单字'],

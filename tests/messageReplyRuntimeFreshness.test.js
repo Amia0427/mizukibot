@@ -10,6 +10,7 @@ fs.mkdirSync(sensitiveVendorDir, { recursive: true });
 fs.writeFileSync(path.join(sensitiveVendorDir, 'words.txt'), 'runtime-block\nstream-block\nsrc-stream-block\n', 'utf8');
 fs.writeFileSync(sensitiveConfigPath, JSON.stringify({
   enabled: true,
+  politicalContextRequired: false,
   replacementText: '敏感回复已拦截',
   extraWords: [],
   allowWords: []
