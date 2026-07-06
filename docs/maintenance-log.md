@@ -1110,3 +1110,12 @@
 - 最小修复：`normalizeAnthropicCacheBreakpointSlots` 在存在 system 缓存断点时剥离 tools/messages 上的 `cache_control`，无 system 断点时仍允许工具或历史消息作为兜底断点。
 - 验收：`node tests\httpClientAnthropicPromptCache.test.js`、`node tests\openAIMainPromptCacheDualProtocol.test.js`、`node tests\providerRequestNormalization.test.js`、`node tests\providerRequestDiagnostics.test.js` 通过；`node scripts\diagnose-provider-request.js --scenario admin_reply` 显示 `anthropicCacheBreakpoints=1`、`anthropicPromptCacheTtl=5m`。
 - 小目标已完成：Anthropic 主回复缓存断点优先稳定 system 前缀，且未改成一小时缓存。
+
+## 运行维护 2026-07-06 15:05
+
+- 目标：定位并修复 `memoryReranker` 今天仍触发 `rerank request timed out after 700ms, fallback to base recall` 的链路。
+- 结论：`data/bot-runtime.err.log` 只有一条 700ms timeout；`data/model-calls.ndjson` 今天 32 条 `memoryReranker` 全部成功，p50/p95/max 为 `426/549/611ms`，无超过 700ms 成功尾部，排除并发挤压和网关整体尾延迟。
+- 根因：persona worldbook rerank 读取 `PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS=700` 后以 `timeoutMs` 传给共享 reranker；共享 reranker 会把 `timeoutMs` 视为显式调用参数，因此绕过了 `MEMORY_RERANK_TIMEOUT_FLOOR_MS=1500`。
+- 最小修复：新增 `resolvePersonaWorldbookRerankTimeoutMs()`，配置型 worldbook timeout 低于共享 floor 时抬到 floor；调用方显式传入 `rerankTimeoutMs` 时仍保持原值，避免破坏测试/特殊调用。
+- 验收：`node --check utils\personaWorldbookSearch\rerank.js`、`node tests\personaModules.test.js`、`node tests\memoryReranker.test.js` 通过；日志统计脚本确认今天 `memoryReranker` p95/max 为 `549/611ms`。
+- 小目标已完成：worldbook rerank 不再因配置型 700ms 绕过 timeout floor。

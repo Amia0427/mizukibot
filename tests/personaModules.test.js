@@ -14,10 +14,16 @@ const {
   searchPersonaWorldbook
 } = require('../utils/personaWorldbookSearch');
 const {
+  resolvePersonaWorldbookRerankTimeoutMs
+} = require('../utils/personaWorldbookSearch/rerank');
+const {
   clearWorldbookSessionState
 } = require('../utils/personaWorldbookSearch/sessionState');
 
 (async () => {
+  assert.strictEqual(resolvePersonaWorldbookRerankTimeoutMs(), 1500);
+  assert.strictEqual(resolvePersonaWorldbookRerankTimeoutMs({ rerankTimeoutMs: 2000 }), 2000);
+
   ensureWorldbookSqlImported(loadPersonaModuleCatalog(), { force: true });
   const catalog = getPersonaModuleCatalogSummary();
   assert.ok(catalog.some((item) => item.moduleId === 'daily_energy'));
