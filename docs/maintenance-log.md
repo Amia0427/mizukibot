@@ -14,6 +14,14 @@
 - 验收：默认配置确认词库启用；角色扮演样例不拦截，现实政治样例仍拦截；群聊发送路径回归通过。
 - 小目标已完成：敏感词库未关闭，角色扮演回复不再因单个政治词子串默认被替换。
 
+## 运行维护 2026-07-06 15:10
+
+- 小目标：避免群聊普通消息被 `normal_fast_reply` 误判后主动回复。
+- 根因：fast reply 只校验 `direct_chat`、普通用户、无工具、无图片和非复杂任务，缺少群聊 bot 指向约束；普通群消息一旦被路由判成 `direct_chat` 就会绕过被动群感知发送回复。
+- 最小修复：`utils\normalFastReplyGate.js` 增加群聊 bot 指向检查；私聊保持原逻辑，群聊仅允许 `address_bot`、`reply_to_bot` 或 addressee.kind 为 `bot` 的消息命中 fast path。
+- 验收：`node tests\normalFastReplyGate.test.js`、`node tests\normalFastReplyHandlerSource.test.js`、`node tests\messageHandlerNormalFastReplyRateLimit.test.js` 通过。
+- 小目标已完成：普通群聊消息不会再因 fast reply 误判导致 bot 错误回复。
+
 ## 运行维护 2026-07-05 09:28
 
 - 小目标：把群聊出口敏感词库审查收窄到只拦截政治敏感，降低日常聊天误伤。

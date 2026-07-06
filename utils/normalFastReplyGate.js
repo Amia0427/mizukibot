@@ -59,6 +59,34 @@ function getRouteText(input = {}) {
   );
 }
 
+function isGroupChat(input = {}) {
+  const route = input.route || {};
+  const routeMeta = route.meta && typeof route.meta === 'object' ? route.meta : {};
+  const executionPlan = getRouteExecutionPlan(input);
+  const chatType = normalizeText(input.chatType || routeMeta.chatType || executionPlan.chatType).toLowerCase();
+  if (chatType === 'private') return false;
+  if (chatType === 'group') return true;
+  return Boolean(normalizeText(input.groupId || input.group_id || routeMeta.groupId || routeMeta.group_id || executionPlan.groupId || executionPlan.group_id));
+}
+
+function getDirectedContext(input = {}) {
+  if (input.directedContext && typeof input.directedContext === 'object') return input.directedContext;
+  const routeMeta = input.route?.meta && typeof input.route.meta === 'object' ? input.route.meta : {};
+  if (routeMeta.directedContext && typeof routeMeta.directedContext === 'object') return routeMeta.directedContext;
+  return null;
+}
+
+function hasGroupBotDirectedContext(input = {}) {
+  if (!isGroupChat(input)) return true;
+  const directedContext = getDirectedContext(input);
+  const scene = normalizeText(directedContext?.scene).toLowerCase();
+  if (scene === 'reply_to_bot' || scene === 'address_bot') return true;
+  const addressee = directedContext?.addressee && typeof directedContext.addressee === 'object'
+    ? directedContext.addressee
+    : {};
+  return normalizeText(addressee.kind).toLowerCase() === 'bot';
+}
+
 function matchesBlockedIntent(text = '') {
   const t = normalizeText(text);
   if (!t) return { blocked: true, reason: 'empty_text' };
@@ -82,6 +110,7 @@ const FAST_REPLY_CHECKS = Object.freeze([
   { key: 'enabled', reason: 'disabled', label: 'NORMAL_FAST_REPLY_ENABLED=true', exitFlag: 'permission' },
   { key: 'has_user_id', reason: 'missing_user_id', label: 'user id present', exitFlag: 'permission' },
   { key: 'normal_user', reason: 'admin_user', label: 'not admin user', exitFlag: 'permission' },
+  { key: 'group_bot_directed', reason: 'group_not_directed_to_bot', label: 'group message is directed to bot', exitFlag: 'permission' },
   { key: 'direct_chat_route', reason: 'not_direct_chat', label: 'top route is direct_chat', exitFlag: 'route' },
   { key: 'direct_executor', reason: 'non_direct_executor', label: 'executor is direct', exitFlag: 'route' },
   { key: 'route_available', reason: 'route_unavailable', label: 'route execution is available', exitFlag: 'route' },
@@ -147,6 +176,9 @@ function explainNormalFastReplyDecision(input = {}, runtimeConfig = {}, options 
 
   const isAdminUser = resolveAdminChecker(runtimeConfig, options);
   checks.push(buildCheck('normal_user', Boolean(userId) && !isAdminUser(userId)));
+  checks.push(buildCheck('group_bot_directed', hasGroupBotDirectedContext(input), {
+    actual: normalizeText(getDirectedContext(input)?.scene || (isGroupChat(input) ? 'missing' : 'private'))
+  }));
 
   const route = input.route || {};
   const routeExecutionPlan = getRouteExecutionPlan(input);
