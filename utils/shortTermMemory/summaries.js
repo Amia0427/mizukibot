@@ -37,12 +37,13 @@ function createShortTermSummaryHelpers(deps = {}) {
       .slice(-positiveInt(limit, 2, 2));
   }
 
-  function buildStructuredSummaryText(shortTermState, summaryTokens) {
+  function buildStructuredSummaryText(shortTermState, summaryTokens, options = {}) {
     const state = normalizeShortTermState(shortTermState);
     const interaction = normalizeInteractionState(state.interaction);
     const expression = normalizeExpressionState(state.expression);
     const moduleState = normalizeModuleState(state.moduleState);
     const scene = normalizeSceneState(state.scene);
+    const includeRecentTurns = options.includeRecentTurns !== false;
     const sections = [];
 
     if (interaction.carryOverUserTurn || state.carryOverUserTurn) {
@@ -75,13 +76,15 @@ function createShortTermSummaryHelpers(deps = {}) {
     if (userConstraints.length > 0) {
       sections.push(`[UserConstraints] ${userConstraints.join(' | ')}`);
     }
-    const recentTurns = limitedRecentTurns(
-      interaction.recentTurns,
-      config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS || 8,
-      Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_CHARS || 160) || 160)
-    );
-    if (recentTurns.length > 0) {
-      sections.push(`[RecentTurns] ${recentTurns.map((item) => `${item.role}: ${item.content}`).join(' | ')}`);
+    if (includeRecentTurns) {
+      const recentTurns = limitedRecentTurns(
+        interaction.recentTurns,
+        config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_ITEMS || 8,
+        Math.max(1, Number(config.SESSION_CONTEXT_SUMMARY_RECENT_TURNS_MAX_CHARS || 160) || 160)
+      );
+      if (recentTurns.length > 0) {
+        sections.push(`[RecentTurns] ${recentTurns.map((item) => `${item.role}: ${item.content}`).join(' | ')}`);
+      }
     }
     if (state.recentToolResults.length > 0) {
       sections.push(`[RecentToolResults] ${state.recentToolResults.join(' | ')}`);

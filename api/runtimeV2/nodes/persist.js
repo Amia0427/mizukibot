@@ -53,6 +53,9 @@ function createPersistNode(deps = {}) {
   const appendShortTermHistory = typeof deps.appendShortTermHistory === 'function'
     ? deps.appendShortTermHistory
     : () => {};
+  const withSessionContextBatch = typeof deps.withSessionContextBatch === 'function'
+    ? deps.withSessionContextBatch
+    : ((sessionKey, task) => (typeof task === 'function' ? task() : undefined));
   const persistShortTermBridgeSnapshot = typeof deps.persistShortTermBridgeSnapshot === 'function'
     ? deps.persistShortTermBridgeSnapshot
     : () => {};
@@ -123,6 +126,52 @@ function createPersistNode(deps = {}) {
 
   function normalizeText(value) {
     return String(value || '').trim();
+  }
+
+  function estimateTextTokens(value = '') {
+    const text = String(value || '');
+    if (!text) return 0;
+    let cjkChars = 0;
+    for (const ch of text) {
+      const code = ch.codePointAt(0);
+      if (code >= 0x3400 && code <= 0x9fff) cjkChars += 1;
+    }
+    return cjkChars + Math.ceil(Math.max(0, text.length - cjkChars) / 4);
+  }
+
+  function estimateMessagesTokens(messages = []) {
+    return normalizeArray(messages).reduce((sum, message) => (
+      sum + estimateTextTokens(message?.content || message?.text || '')
+    ), 0);
+  }
+
+  function nonNegativeNumber(value, fallback) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, number) : fallback;
+  }
+
+  function shouldGenerateSessionSummaryAfterReply(input = {}) {
+    const request = normalizeObject(input.request, {});
+    const history = normalizeArray(input.history);
+    const stateSlice = normalizeObject(input.stateSlice, {});
+    if (input.compressed === true) return true;
+    if (String(stateSlice.summarySource || '').trim().toLowerCase() === 'restart_recall') return true;
+    if (normalizeArray(stateSlice.openLoops).length > 0 || normalizeArray(stateSlice.assistantCommitments).length > 0) return true;
+
+    const minHistoryMessages = nonNegativeNumber(config.SHORT_TERM_SESSION_SUMMARY_MIN_HISTORY_MESSAGES, 8);
+    if (history.length >= minHistoryMessages) return true;
+
+    const minHistoryTokens = nonNegativeNumber(config.SHORT_TERM_SESSION_SUMMARY_MIN_HISTORY_TOKENS, 900);
+    if (estimateMessagesTokens(history) >= minHistoryTokens) return true;
+
+    const recentTurnsTrigger = nonNegativeNumber(config.SHORT_TERM_SESSION_SUMMARY_RECENT_TURNS_TRIGGER, 24);
+    const recentTurns = normalizeArray(stateSlice.interaction?.recentTurns);
+    if (recentTurns.length >= recentTurnsTrigger) return true;
+
+    const routePolicyKey = String(request.routePolicyKey || request.routeMeta?.routePolicyKey || '').trim().toLowerCase();
+    const topRouteType = String(request.topRouteType || request.routeMeta?.topRouteType || '').trim().toLowerCase();
+    if (/^(plan|act|tool|research|code|deploy|admin)\//i.test(routePolicyKey)) return true;
+    return ['plan', 'act', 'tool', 'research', 'subagent', 'admin_task'].includes(topRouteType);
   }
 
   function buildCoreAggregateKey({ userId, sessionKey, groupId }) {
@@ -451,25 +500,29 @@ function createPersistNode(deps = {}) {
           materializeMemoryViews();
         }
       }
-      appendShortTermHistory(request.userId, userContent, finalReply, request.userInfo, {
-        chatHistory,
-        shortTermMemory,
-        routeMeta: request.routeMeta,
-        sessionKey: request.sessionKey
-      });
-
-      if (typeof summarizeShortTermChunk === 'function') {
-        await compressShortTermHistoryIfNeeded(request.userId, request.userInfo, {
+      let shortTermCompressed = false;
+      await withSessionContextBatch(request.sessionKey, async () => {
+        appendShortTermHistory(request.userId, userContent, finalReply, request.userInfo, {
           chatHistory,
           shortTermMemory,
           routeMeta: request.routeMeta,
-          sessionKey: request.sessionKey,
-          summarizeChunk: (payload = {}) => summarizeShortTermChunk({
-            ...payload,
-            request
-          })
+          sessionKey: request.sessionKey
         });
-      }
+
+        if (typeof summarizeShortTermChunk === 'function') {
+          const compressionResult = await compressShortTermHistoryIfNeeded(request.userId, request.userInfo, {
+            chatHistory,
+            shortTermMemory,
+            routeMeta: request.routeMeta,
+            sessionKey: request.sessionKey,
+            summarizeChunk: (payload = {}) => summarizeShortTermChunk({
+              ...payload,
+              request
+            })
+          });
+          shortTermCompressed = Boolean(compressionResult?.compressed);
+        }
+      });
 
       if (shouldPersistBridge) {
         if (config.MEMORY_V3_ENABLED) {
@@ -520,7 +573,17 @@ function createPersistNode(deps = {}) {
       }
 
       if (shouldPersistBridge && !fastCommitMode) {
-        const summaryCooldown = getSessionSummaryCooldownStatus(request.sessionKey, now);
+        const historySlice = Array.isArray(chatHistory?.[request.sessionKey]) ? chatHistory[request.sessionKey] : [];
+        const stateSlice = shortTermMemory?.[request.sessionKey] || {};
+        const shouldGenerateSessionSummary = shouldGenerateSessionSummaryAfterReply({
+          request,
+          history: historySlice,
+          stateSlice,
+          compressed: shortTermCompressed
+        });
+        const summaryCooldown = shouldGenerateSessionSummary
+          ? getSessionSummaryCooldownStatus(request.sessionKey, now)
+          : { limited: true, remainingMs: 0 };
         if (!summaryCooldown.limited) {
           try {
             const summaryResult = await generateSessionContextSummary({

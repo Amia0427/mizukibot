@@ -112,6 +112,7 @@ const {
   resolveShortTermScope,
   buildStructuredCompressionPrompt
 } = require('../../../utils/shortTermMemory');
+const { withSessionContextBatch } = require('../../../utils/shortTermSessionStore');
 const {
   estimateMessagesTokens,
   trimMessagesByTokenBudget
@@ -1181,6 +1182,7 @@ function createRuntime(options = {}) {
     saveSessionContextSummary,
     generateSessionContextSummary,
     appendShortTermHistory,
+    withSessionContextBatch,
     persistShortTermBridgeSnapshot,
     recordPersonaMemoryOutcome,
     appendMemoryEvent,

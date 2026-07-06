@@ -1144,6 +1144,14 @@
 - 验收：`node --check utils\personaWorldbookSearch\rerank.js`、`node tests\personaModules.test.js`、`node tests\memoryReranker.test.js` 通过；日志统计脚本确认今天 `memoryReranker` p95/max 为 `549/611ms`。
 - 小目标已完成：worldbook rerank 不再因配置型 700ms 绕过 timeout floor。
 
+## 运行维护 2026-07-06 15:44
+
+- 目标：按五项优化收敛短期记忆和主回复上下文膨胀问题。
+- 结论：当前短期记忆写盘由 session proxy 多次同步触发，普通短聊也可能每轮生成 session summary，跨 session 合并默认不设 sibling 上限，summary 与 raw recent turns 存在重复，且缺少不泄露正文的上下文诊断入口。
+- 最小修复：新增短期 session 写盘批处理并接入 Runtime V2 persist host；回复后 session summary 增加压缩、restart recall、open loop、历史长度/token 和长任务路由门禁；跨 session sibling 默认最多 3 个且优先读元信息排序；shared summary 默认不再包含 `[RecentTurns]`；新增 `diag:short-term-context` 只输出 session key、profile、计数和 token 估算。
+- 验收：`node --check` 覆盖短期 session store、shared context、persist node、Runtime host 和诊断脚本；短期记忆、persist、主回复上下文与 prompt cache 相关定向测试通过；`npm run diag:short-term-context -- --user 1960901788 --json` smoke 通过且不输出聊天正文。
+- 小目标已完成：短期记忆仍可跨最近上下文续聊，但默认写盘次数、摘要调用次数、sibling 合并范围和上下文重复量都已收敛。
+
 ## 运行维护 2026-07-06 15:37
 
 - 目标：检查 `diag:runtime -- --json` 中用户 `1960901788` 从 `2026-06-23` 到 `2026-07-06` 连续缺 `journal summary` 的原因。

@@ -8,6 +8,7 @@ const CACHE = new BoundedCache({
   maxEntries: Math.max(8, Number(config.EPHEMERAL_CACHE_MAX_SESSIONS || 128) || 128),
   ttlMs: Math.max(0, Number(config.EPHEMERAL_CACHE_TTL_MS || 5 * 60 * 1000) || 0)
 });
+const WRITE_BATCHES = new Map();
 
 const ARRAY_MUTATORS = new Set([
   'copyWithin',
@@ -100,15 +101,75 @@ function serializeContext(context = {}) {
   };
 }
 
-function persistContext(sessionKey = '') {
+function persistContext(sessionKey = '', options = {}) {
   const key = normalizeSessionKey(sessionKey);
   if (!key) return false;
+  const batch = WRITE_BATCHES.get(key);
+  if (batch && batch.depth > 0 && options.force !== true) {
+    batch.dirty = true;
+    return true;
+  }
   const context = CACHE.get(key);
   if (!context) return false;
   const next = serializeContext(context);
   context.updatedAt = next.updatedAt;
   atomicWriteJson(fileForSession(key), next);
   return true;
+}
+
+function beginSessionContextBatch(sessionKey = '') {
+  const key = normalizeSessionKey(sessionKey);
+  if (!key) return '';
+  const current = WRITE_BATCHES.get(key) || { depth: 0, dirty: false };
+  current.depth += 1;
+  WRITE_BATCHES.set(key, current);
+  return key;
+}
+
+function flushSessionContext(sessionKey = '') {
+  const key = normalizeSessionKey(sessionKey);
+  if (!key) return false;
+  const batch = WRITE_BATCHES.get(key);
+  if (batch && batch.depth > 0) {
+    batch.dirty = true;
+    return false;
+  }
+  return persistContext(key, { force: true });
+}
+
+function endSessionContextBatch(sessionKey = '') {
+  const key = normalizeSessionKey(sessionKey);
+  if (!key) return false;
+  const batch = WRITE_BATCHES.get(key);
+  if (!batch) return false;
+  batch.depth = Math.max(0, Number(batch.depth || 0) - 1);
+  if (batch.depth > 0) {
+    WRITE_BATCHES.set(key, batch);
+    return false;
+  }
+  WRITE_BATCHES.delete(key);
+  return batch.dirty ? persistContext(key, { force: true }) : false;
+}
+
+function withSessionContextBatch(sessionKey = '', task) {
+  const key = beginSessionContextBatch(sessionKey);
+  if (!key) {
+    return typeof task === 'function' ? task() : undefined;
+  }
+
+  try {
+    const result = typeof task === 'function' ? task() : undefined;
+    if (result && typeof result.then === 'function') {
+      return result.finally(() => {
+        endSessionContextBatch(key);
+      });
+    }
+    endSessionContextBatch(key);
+    return result;
+  } catch (error) {
+    endSessionContextBatch(key);
+    throw error;
+  }
 }
 
 function createTrackedValue(sessionKey, value, seen = new WeakMap()) {
@@ -269,6 +330,49 @@ function listUserSessionKeys(userId = '', options = {}) {
   return keys.sort((a, b) => a.localeCompare(b));
 }
 
+function getSessionContextMetadata(sessionKey = '') {
+  const key = normalizeSessionKey(sessionKey);
+  if (!key) {
+    return {
+      sessionKey: '',
+      exists: false,
+      updatedAt: 0,
+      sizeBytes: 0
+    };
+  }
+
+  const cached = CACHE.get(key);
+  if (cached) {
+    return {
+      sessionKey: key,
+      exists: true,
+      updatedAt: Math.max(0, Number(cached.updatedAt || 0) || 0),
+      sizeBytes: 0,
+      cached: true
+    };
+  }
+
+  const filePath = fileForSession(key);
+  try {
+    const stat = fs.statSync(filePath);
+    return {
+      sessionKey: key,
+      exists: true,
+      updatedAt: Math.max(0, Number(stat.mtimeMs || 0) || 0),
+      sizeBytes: Math.max(0, Number(stat.size || 0) || 0),
+      cached: false
+    };
+  } catch (_) {
+    return {
+      sessionKey: key,
+      exists: false,
+      updatedAt: 0,
+      sizeBytes: 0,
+      cached: false
+    };
+  }
+}
+
 function evictSessionContext(sessionKey = '') {
   return CACHE.delete(normalizeSessionKey(sessionKey));
 }
@@ -315,9 +419,13 @@ function createSessionBackedStore(kind) {
 
 module.exports = {
   appendSessionTurn,
+  beginSessionContextBatch,
   createSessionBackedStore,
+  endSessionContextBatch,
   evictSessionContext,
+  flushSessionContext,
   getSessionContext,
+  getSessionContextMetadata,
   getSessionHistory,
   getSessionState,
   listStoredSessionKeys,
@@ -325,5 +433,6 @@ module.exports = {
   saveSessionContext,
   setSessionHistory,
   setSessionState,
-  updateSessionState
+  updateSessionState,
+  withSessionContextBatch
 };
