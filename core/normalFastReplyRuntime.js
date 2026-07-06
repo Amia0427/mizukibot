@@ -63,6 +63,26 @@ function trimPromptTextToChars(text = '', maxChars = 0) {
   return normalized.length > limit ? normalized.slice(0, limit) : normalized;
 }
 
+function normalizeInheritedFastReplyModel(model = '') {
+  const normalized = normalizeText(model);
+  const withoutSearchSuffix = normalized.replace(/[-_]search$/i, '');
+  return withoutSearchSuffix || normalized;
+}
+
+function resolveNormalFastReplyModelConfig(runtimeConfig = config) {
+  const modelConfig = {};
+  const model = normalizeText(runtimeConfig.NORMAL_FAST_REPLY_MODEL)
+    || normalizeInheritedFastReplyModel(runtimeConfig.AI_MODEL || runtimeConfig.modelName || runtimeConfig.model);
+  const apiBaseUrl = normalizeText(runtimeConfig.NORMAL_FAST_REPLY_API_BASE_URL);
+  const provider = normalizeText(runtimeConfig.NORMAL_FAST_REPLY_API_PROVIDER);
+  const apiKey = normalizeText(runtimeConfig.NORMAL_FAST_REPLY_API_KEY);
+  if (model) modelConfig.model = model;
+  if (apiBaseUrl) modelConfig.apiBaseUrl = apiBaseUrl;
+  if (provider) modelConfig.provider = provider;
+  if (apiKey) modelConfig.apiKey = apiKey;
+  return modelConfig;
+}
+
 function classifyNormalFastReplyFailure(visibleText = '', persistedText = '') {
   const text = normalizeText(persistedText || visibleText);
   if (/模型返回格式不稳定|没拿到可用正文/i.test(text)) {
@@ -454,6 +474,7 @@ async function runNormalFastReply(input = {}, deps = {}) {
     allowedTools: [],
     disableHumanizer: true,
     modelConfig: {
+      ...resolveNormalFastReplyModelConfig(runtimeConfig),
       maxTokens,
       reasoningEffort: 'off',
       topK: NaN,
@@ -508,6 +529,7 @@ module.exports = {
   buildNormalFastReplyPersonaModules,
   buildNormalFastReplyWorldbookModules,
   classifyNormalFastReplyFailure,
+  resolveNormalFastReplyModelConfig,
   runNormalFastReply,
   trimRecentMessagesByChars
 };

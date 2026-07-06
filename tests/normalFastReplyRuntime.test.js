@@ -2,6 +2,7 @@ const assert = require('assert');
 
 const {
   buildNormalFastReplyMessages,
+  resolveNormalFastReplyModelConfig,
   runNormalFastReply
 } = require('../core/normalFastReplyRuntime');
 
@@ -16,6 +17,7 @@ function buildHistory(count) {
 
 module.exports = (async () => {
   const runtimeConfig = {
+    AI_MODEL: 'gemini-3-flash-preview-search',
     NORMAL_FAST_REPLY_RECENT_TURNS: 12,
     NORMAL_FAST_REPLY_CONTEXT_MAX_CHARS: 8000,
     NORMAL_FAST_REPLY_SUMMARY_MAX_CHARS: 1500,
@@ -208,10 +210,27 @@ module.exports = (async () => {
   assert.strictEqual(result.replyText, '快速回复');
   assert.strictEqual(result.reasoningText, '稍微停了一下，先用轻一点的语气接住这句话。');
   assert.strictEqual(result.reasoningForwardText, '稍微停了一下，先用轻一点的语气接住这句话。');
+  assert.deepStrictEqual(
+    resolveNormalFastReplyModelConfig({
+      AI_MODEL: 'gemini-3-flash-preview-search',
+      NORMAL_FAST_REPLY_MODEL: 'fast-model',
+      NORMAL_FAST_REPLY_API_BASE_URL: 'https://fast.example/v1/chat/completions',
+      NORMAL_FAST_REPLY_API_PROVIDER: 'openai_compatible',
+      NORMAL_FAST_REPLY_API_KEY: 'fast-key'
+    }),
+    {
+      model: 'fast-model',
+      apiBaseUrl: 'https://fast.example/v1/chat/completions',
+      provider: 'openai_compatible',
+      apiKey: 'fast-key'
+    },
+    '快速回复显式模型配置应优先于主模型继承'
+  );
   assert.ok(Array.isArray(seenMessages));
   assert.strictEqual(seenContext.disableTools, true, '应禁用工具');
   assert.deepStrictEqual(seenContext.allowedTools, [], '应清空工具');
   assert.strictEqual(seenContext.disableHumanizer, true, '应禁用 humanizer');
+  assert.strictEqual(seenContext.modelConfig.model, 'gemini-3-flash-preview', '快速回复不应默认继承 search 变体');
   assert.strictEqual(seenContext.modelConfig.maxTokens, 1024, '应使用快速回复输出上限');
   assert.strictEqual(seenContext.modelConfig.reasoningEffort, 'off', '快速回复应关闭 reasoning，避免非流式只产出推理/空正文');
   assert.ok(Number.isNaN(seenContext.modelConfig.topA), '快速回复不应继承主回复 top_a 扩展采样');

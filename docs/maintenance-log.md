@@ -1,3 +1,11 @@
+## 运行维护 2026-07-06 15:10
+
+- 小目标：定位普通群聊 `normal_fast_reply` 的 `response_parse_empty`，重点复核 `req_f1759e115a4b8739` 和同日 `gcli.ggchan.dev / gemini-3-flash-preview-search` 样本。
+- 根因：不是网关结构不兼容；解析诊断已识别 OpenAI-compatible `choices[0].message`。也不是快回复 prompt 过长；异常样本输入估算只有 `1987/2847/2865` tokens。失败集中为非流式快回复继承主模型 `gemini-3-flash-preview-search` 后返回 HTTP 200、`finish_reason=length`、正文为空，本地正确抛错回落正式主回复。
+- 最小修复：`normal_fast_reply` 支持独立 `NORMAL_FAST_REPLY_*` 模型/端点配置；未显式配置模型时，若继承主模型名以 `-search/_search` 结尾，快回复默认改用非 search 变体。`model-calls` 记录层补齐 JSON 字符串响应的 `usage/finish_reason` 提取，后续同类样本会直接在成功行看到 `length`。
+- 验收：`node --check core\normalFastReplyRuntime.js api\runtimeV2\model\service.js utils\modelCallTracker\usage.js tests\normalFastReplyRuntime.test.js tests\modelCallTrackerStringResponse.test.js`、`node scripts\run-tests.js tests\normalFastReplyRuntime.test.js tests\modelCallTrackerStringResponse.test.js tests\modelServiceCot.test.js tests\mainModelGenerationParams.test.js`、`git diff --check` 通过。
+- 小目标已完成：快回复空消息已定位为 search 模型非流式 length 空正文风险，默认快回复不再继承 search 变体。
+
 ## 运行维护 2026-07-05 09:28
 
 - 小目标：把群聊出口敏感词库审查收窄到只拦截政治敏感，降低日常聊天误伤。
