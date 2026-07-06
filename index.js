@@ -15,6 +15,7 @@ config.validateRequiredConfig();
 
 const { startServer } = require('./web/server');
 const { startTickEngine } = require('./core/tickEngine');
+const { startDailyJournalSummaryScheduler } = require('./core/dailyJournalSummaryScheduler');
 const { createMessageHandler } = require('./core/messageHandler');
 const { initializeMemeManager } = require('./core/memeManager');
 const { clearRuntimeSlotsForCurrentProcess } = require('./api/createAgentExecutor');
@@ -388,6 +389,8 @@ let shuttingDown = false;
 let shutdownInProgress = false;
 let tickStarted = false;
 let tickRuntime = null;
+let dailyJournalSummaryStarted = false;
+let dailyJournalSummaryRuntime = null;
 let schedulerStarted = false;
 const napcatActionClient = getNapCatActionClient();
 const postReplyWorkerRuntime = config.POST_REPLY_WORKER_INLINE ? createPostReplyWorkerRuntime({ forceStart: true }) : null;
@@ -491,6 +494,10 @@ function startConnectedRuntimes() {
   if (config.TICK_ENGINE_ENABLED && !tickStarted) {
     tickRuntime = startTickEngine(askAIByGraph, napcatActionClient);
     tickStarted = true;
+  }
+  if (!config.TICK_ENGINE_ENABLED && !dailyJournalSummaryStarted) {
+    dailyJournalSummaryRuntime = startDailyJournalSummaryScheduler();
+    dailyJournalSummaryStarted = true;
   }
   if (config.SCHEDULER_RUNTIME_ENABLED && !schedulerStarted) {
     schedulerRuntime.start();
@@ -666,6 +673,9 @@ async function shutdownMainProcess(signal = 'SIGTERM', exitCode = 0) {
   try { tickRuntime?.stop?.(); } catch (error) {
     console.error('[shutdown] tick stop failed:', error?.message || error);
   }
+  try { dailyJournalSummaryRuntime?.stop?.(); } catch (error) {
+    console.error('[shutdown] daily journal summary stop failed:', error?.message || error);
+  }
   try { napcatLogFollower.stop(); } catch (error) {
     console.error('[shutdown] follower stop failed:', error?.message || error);
   }
@@ -733,6 +743,7 @@ function drainForScheduledRestart(meta = {}) {
   });
   try { schedulerRuntime.stop(); } catch (_) {}
   try { tickRuntime?.stop?.(); } catch (_) {}
+  try { dailyJournalSummaryRuntime?.stop?.(); } catch (_) {}
   try { napcatLogFollower.stop(); } catch (_) {}
   try { postReplyWorkerRuntime?.stop?.(); } catch (_) {}
   try { messageIngressDispatcher?.stop?.({ drain: false }); } catch (_) {}

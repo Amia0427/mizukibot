@@ -1143,3 +1143,12 @@
 - 最小修复：新增 `resolvePersonaWorldbookRerankTimeoutMs()`，配置型 worldbook timeout 低于共享 floor 时抬到 floor；调用方显式传入 `rerankTimeoutMs` 时仍保持原值，避免破坏测试/特殊调用。
 - 验收：`node --check utils\personaWorldbookSearch\rerank.js`、`node tests\personaModules.test.js`、`node tests\memoryReranker.test.js` 通过；日志统计脚本确认今天 `memoryReranker` p95/max 为 `549/611ms`。
 - 小目标已完成：worldbook rerank 不再因配置型 700ms 绕过 timeout floor。
+
+## 运行维护 2026-07-06 15:37
+
+- 目标：检查 `diag:runtime -- --json` 中用户 `1960901788` 从 `2026-06-23` 到 `2026-07-06` 连续缺 `journal summary` 的原因。
+- 结论：原始 daily journal 仍在写，post-reply 队列 `queued=0/processing=0/failed=0`，不是 enrich 卡住；segment 汇总有历史产物但不完整，也不是本轮运行态漏收尾。根因是 `TICK_ENGINE_ENABLED=false` 时 daily summary runner 只挂在 tick engine 上，独立运行态不会调度 daily summary。
+- 最小修复：新增 tick 关闭时的独立 daily journal summary scheduler，复用原 summary 写入链路；诊断报告补充 `summaryScheduler` 和已到期日，当前日不再算缺失；新增 dry-run 优先的 `scripts\backfill-daily-journal-summaries.js` 用于安全补历史日。
+- 补跑结果：已补齐 `1960901788` 的 `2026-06-23` 至 `2026-07-04` summary，`2026-07-05` 由新调度生成；`2026-07-06` 是当前日，按安全策略等 `2026-07-07 00:10 +08:00` 后汇总。
+- 验收：`node scripts\backfill-daily-journal-summaries.js --user-id 1960901788 --from 2026-06-23 --to 2026-07-05` 显示 13 天全部 `skipped_existing`；`npm run diag:runtime -- --json` 显示 `summaryDueDay=2026-07-05`、`tickEngineEnabled=false`、`standaloneEnabled=true`，且 `1960901788` 缺口不再包含 `2026-06-23` 至 `2026-07-05`。
+- 小目标已完成：daily journal summary 在 tick engine 关闭时仍会独立调度，目标用户指定窗口已补齐且当前日不会被误报为缺口。

@@ -44,6 +44,8 @@ module.exports = (() => {
     process.env.POST_REPLY_WORKER_ENABLED = 'true';
     process.env.POST_REPLY_WORKER_INLINE = 'false';
     process.env.POST_REPLY_WORKER_STALE_PROCESSING_MS = '300000';
+    process.env.TICK_ENGINE_ENABLED = 'false';
+    process.env.DAILY_JOURNAL_SUMMARY_SCHEDULER_ENABLED = 'true';
     process.env.MEMORY_V3_MATERIALIZE_LOCK_FILE = memoryLockFile;
     process.env.MEMORY_V3_MATERIALIZE_LOCK_STALE_MS = '600000';
     process.env.API_KEY = process.env.API_KEY || 'test-key';
@@ -157,6 +159,9 @@ module.exports = (() => {
     assert.strictEqual(report.summary.langGraphV2.staleRunningCheckpoints, 1);
     assert.ok(report.summary.langGraphV2.checkpointBytes > 0);
     assert.ok(report.summary.langGraphV2.eventBytes > 0);
+    assert.strictEqual(report.summary.journalHealth.summaryScheduler.tickEngineEnabled, false);
+    assert.strictEqual(report.summary.journalHealth.summaryScheduler.standaloneEnabled, true);
+    assert.strictEqual(report.summary.journalHealth.summaryScheduler.summaryDueDay, '2026-05-02');
 
     assert.strictEqual(report.components.mainProcess.lockFile.pid, 111);
     assert.strictEqual(report.components.postReplyWorker.pidFile.pid, 222);

@@ -406,7 +406,8 @@ function buildUserSnapshot(userId) {
 const {
   runDailyJournalSummaries,
   shouldRunDailySummaryNow,
-  summarizeJournalForDay
+  summarizeJournalForDay,
+  writeDailyJournalSummary
 } = createDailyJournalSummaryRunner({
   appendPerfEvent,
   atomicWriteText,
@@ -450,6 +451,7 @@ module.exports = {
   maintainDailyJournalRollups,
   runDailyJournalSummaries,
   shouldRunDailySummaryNow,
+  writeDailyJournalSummary,
   listUserJournalDays,
   listUserSummaryDays,
   listFourDayRollups,

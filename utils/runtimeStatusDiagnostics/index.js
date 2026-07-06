@@ -127,7 +127,10 @@ function buildRuntimeStatusDiagnostic(options = {}) {
   const journalHealth = (() => {
     try {
       const { buildJournalHealthSummary } = require('../memory-v3/journalDiagnostics');
-      return buildJournalHealthSummary({ limit: Math.max(1, normalizeNumber(options.journalLimit, 5)) });
+      return buildJournalHealthSummary({
+        limit: Math.max(1, normalizeNumber(options.journalLimit, 5)),
+        now: new Date(now)
+      });
     } catch (error) {
       return {
         ok: false,
@@ -249,7 +252,10 @@ function buildRuntimeStatusDiagnostic(options = {}) {
         checkpointBytes: langGraphV2Store.totalCheckpointBytes,
         eventBytes: langGraphV2Store.totalEventBytes
       },
-      journalHealth: journalHealth.totals || {}
+      journalHealth: {
+        ...(journalHealth.totals || {}),
+        summaryScheduler: journalHealth.summaryScheduler || {}
+      }
     },
     components: {
       projectRoot,
