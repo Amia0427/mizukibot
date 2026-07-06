@@ -1,3 +1,11 @@
+## 运行维护 2026-07-06 20:10
+
+- 小目标：修复关闭 `normal_fast_reply` 后，群聊仍异常主动发送回复的问题。
+- 根因：异常外发不再来自 `normal_fast_reply`。主回复入口仍把 `reply_to_bot_recent` 当作 `directBotAnchor`，导致 bot 刚回复后的普通群消息绕过被动感知进入正式 `direct_reply`；被动群感知同时把裸 `bot/机器人` 话题误升为 `bot_direct/strong-bot-cue`，在本机 ambient 和 strong force 配置开启时会继续主动发言。
+- 最小修复：群聊正式主回复入口只接受私聊或明确 @ bot，不再用 `reply_to_bot_recent` 放行；裸 `bot/机器人/AI` 只算话题，不再直接成为 bot 点名，只有 @、引用回复 bot、`瑞希你...` / `bot 你...` 等明确地址才进入强点名；被动 follow-up 也只允许强点名续接，`group_bot_topic` 不再走 ambient 直接回复。
+- 验收：`node scripts\run-tests.js tests\messageHandlerDirectAnchorSource.test.js tests\messageDirectedBotCue.test.js tests\passiveAwarenessBotTopicGuard.test.js tests\passiveAwarenessStrongCueForceReply.test.js tests\passiveAwarenessVisionInput.test.js tests\passiveAwarenessVisualCueProbe.test.js tests\normalFastReplyGate.test.js tests\messageDirectedForwardContext.test.js` 通过；`node -e "require('./core/messageHandler'); require('./core/passiveGroupAwareness'); console.log('core load ok')"` 通过；`restart-bot.cmd restart confirm` 后主 bot PID=8756、post-reply worker PID=4436，状态 ok。
+- 小目标已完成：普通群聊消息不会再因近期 bot 回复或裸 bot 话题被误判为 bot 直接点名而主动外发。
+
 ## 运行维护 2026-07-06 15:10
 
 - 小目标：定位普通群聊 `normal_fast_reply` 的 `response_parse_empty`，重点复核 `req_f1759e115a4b8739` 和同日 `gcli.ggchan.dev / gemini-3-flash-preview-search` 样本。

@@ -330,6 +330,13 @@ function containsBotPresenceCue(text = '') {
   return /(在吗|还在|在线|窥屏|潜水|怎么不说话|没反应|坏掉|坏了|死机|看到没|看到了吗|出来)/i.test(t);
 }
 
+function hasExplicitBotAddress(text = '') {
+  const t = normalizeText(text);
+  if (!t) return false;
+  return /^(?:瑞希|毛毛)[,，:：!！?？\s]*(?:你|出来|在吗|还在|说话|看看|帮|能|可以|要不要|耍|玩吗|来|救|解释|怎么看|继续|细说|评价|聊)/i.test(t)
+    || /^(?:bot|机器人)[,，:：!！?？\s]*(?:你|you|can|please|help|look|see|出来|在吗|还在|说话|不说话|看看|帮|能|可以|要不要|来|救|解释|怎么看|继续|细说|没反应|坏了|坏掉)/i.test(t);
+}
+
 function normalizeDirectedContext(input = null) {
   if (!input || typeof input !== 'object') return null;
   const context = { ...input };
@@ -399,9 +406,7 @@ function mapDirectedSceneToAddressee(scene = '', text = '', analysis = null, dir
 }
 
 function startsWithBotCue(text = '') {
-  const t = normalizeText(text);
-  if (!t) return false;
-  return /^(瑞希|bot|机器人)[,，:：!！?？\s]*/i.test(t);
+  return hasExplicitBotAddress(text);
 }
 
 function scoreMessageTrigger(text = '', recentMessages = []) {
@@ -518,10 +523,10 @@ function detectPassiveAddressee({ text, analysis, directedContext }) {
   if (directedAddressee) return directedAddressee;
   const mentionsBot = containsBotTopic(t);
   const hasPresenceCue = containsBotPresenceCue(t);
-  const directBotCue = startsWithBotCue(t) || (mentionsBot && /(你|出来|别装死|是不是|还在|又坏|坏掉|坏了|没反应|说话)/i.test(t));
+  const directBotCue = hasExplicitBotAddress(t);
   const groupOpenQuestion = containsQuestionSignal(t) && /(?:大家|你们|谁|有人|哪位|有无|有没有|懂|知道|会不会|能不能)/i.test(t);
 
-  if (hasPresenceCue && (mentionsBot || analysis?.recentBotTopicMentions > 0 || analysis?.recentPresenceCueMentions > 0)) {
+  if (hasPresenceCue && directBotCue) {
     return 'bot_presence_check';
   }
   if (mentionsBot && directBotCue) {

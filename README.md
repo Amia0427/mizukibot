@@ -17,6 +17,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-07-06 20:10 +08:00：关闭 `normal_fast_reply` 后仍异常主动外发的根因已定位为两条链路：群聊主回复入口把 `reply_to_bot_recent` 当正式点名放行，以及被动群感知把裸 `bot/机器人` 话题升为 `bot_direct/strong-bot-cue`。现群聊正式主回复只接受私聊或明确 @ bot，裸 bot 话题只进入话题观察；被动 follow-up 仅允许明确强点名续接。验收结果：新增主回复入口、bot cue、被动话题 guard 回归及相关旧测试通过，已重启本地 bot。小目标完成：普通群聊消息不会再因近期 bot 回复或裸 bot 话题误判而主动外发。
+
 更新 2026-07-06 15:10 +08:00：定位普通群聊 `normal_fast_reply` 的 `response_parse_empty`：`req_f1759e115a4b8739` 及同日同类样本均为 `gcli.ggchan.dev / gemini-3-flash-preview-search` 非流式 HTTP 200 后 `finish_reason=length` 且无可用正文；不是网关结构兼容问题，也不是 prompt 超长。现快回复可用 `NORMAL_FAST_REPLY_*` 独立配置，未配置时会把继承主模型的 `-search/_search` 后缀降为非 search 变体；同时 `model-calls` 对 JSON 字符串响应补记 `usage/finish_reason`。验收结果：定向快回复模型选择、字符串响应记录和 COT/参数回归通过。小目标完成：普通快回复默认不再继承 search 变体导致空正文。
 
 更新 2026-06-23 09:42 +08:00：主 bot 仍保持 OneBot 单入口单实例；本地 CPU/同步文件型后台重活通过受控 `worker_threads` 池处理，默认 `BOT_WORKER_THREADS_MAX=2`。后台学习 worker 默认并发提升到 `POST_REPLY_WORKER_CONCURRENCY=2`，资源压力态会按 `POST_REPLY_WORKER_PRESSURE_MAX_CONCURRENCY=1` 回落；embedding backfill 与图片视觉摘要默认并发为 2。验收结果：7 个定向并发/线程池测试均通过；`npm run diag:runtime -- --json` 返回 warning，但主进程 `processCount=1` 且 post-reply 队列 `queued=0/processing=0`；`npm run diag:main-reply-lag -- --json --no-provider-diagnostic --window=24h` 仍判定瓶颈为 `main_model`，hotspots 已输出 `workerThreads.enabled=true/maxWorkers=2/active=0/queued=0`。小目标完成：默认受控多线程与后台并发扩容已落地。

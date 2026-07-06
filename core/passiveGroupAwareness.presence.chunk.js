@@ -24,10 +24,6 @@ function hasStrongBotCue(addressee) {
   return ['bot_presence_check', 'bot_direct'].includes(String(addressee || ''));
 }
 
-function hasBotTopicCue(addressee) {
-  return ['bot_presence_check', 'bot_direct', 'group_bot_topic'].includes(String(addressee || ''));
-}
-
 function countHumanMessagesSince(messages = [], timestamp = 0, botSenderId = '') {
   const afterTs = Number(timestamp || 0) || 0;
   const botId = String(botSenderId || '').trim();
@@ -148,7 +144,6 @@ function decidePresenceAction({
   const sessionState = normalizePresenceState(sessionPresence?.state, 'observing');
   const scoreMin = Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60);
   const strongCue = hasStrongBotCue(addressee);
-  const topicCue = hasBotTopicCue(addressee);
   const ambientEnabled = config.PASSIVE_AWARENESS_AMBIENT_TRIGGER_ENABLED === true;
   const ambientMinScore = Number(config.PASSIVE_AWARENESS_AMBIENT_MIN_SCORE || 12);
   const ambientMinLength = Math.max(1, Number(config.PASSIVE_AWARENESS_AMBIENT_MIN_LENGTH || 8));
@@ -177,7 +172,7 @@ function decidePresenceAction({
   const followUpAllowed = withinFollowUpWindow
     && ['interjecting', 'waiting'].includes(sessionState)
     && Number(sessionPresence?.humanTurnsSinceBotReply || 0) <= 2
-    && topicCue;
+    && strongCue;
 
   if (followUpAllowed) {
     return { action: 'follow_up', state: 'interjecting', reason: `session-follow-up:${addressee}` };
@@ -209,6 +204,7 @@ function decidePresenceAction({
     ambientEnabled
     && normalizedText.length >= ambientMinLength
     && !isNoiseText(normalizedText)
+    && normalizedAddressee !== 'group_bot_topic'
     && (normalizedAddressee !== 'unclear' || ambientAllowUnclear)
     && (normalizedAddressee !== 'human_to_human' || ambientAllowHumanChat)
     && Number(score || 0) >= ambientMinScore

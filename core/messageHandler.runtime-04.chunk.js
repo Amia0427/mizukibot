@@ -153,7 +153,7 @@
       && replyToBotRecentWindowMs > 0
       && (Date.now() - lastBotReplyAt) <= replyToBotRecentWindowMs
     );
-    const directBotAnchor = Boolean(isPrivateChatType(chatType) || mentioned || replyToBotIsRecent);
+    const directBotAnchor = Boolean(isPrivateChatType(chatType) || mentioned);
     const effectiveIntentText = String(
       directedContext?.quotePriority?.quoteAnchoredText
       || effectiveCleanText
@@ -459,7 +459,7 @@
       rawPreview: String(rawText || '').slice(0, 120),
       acceptedBy: isPrivateChatType(chatType)
         ? 'private_direct'
-        : (mentioned ? 'at_bot' : 'reply_to_bot_recent'),
+        : 'at_bot',
       reply_to_bot_last_reply_at: lastBotReplyAt || 0
     });
 
