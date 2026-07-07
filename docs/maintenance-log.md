@@ -1,3 +1,12 @@
+## 运行维护 2026-07-07 10:29
+
+- 小目标：检查今天新出现的 `memoryReranker` 1500ms timeout，直接定位新超时来源，不复用昨天 worldbook 700ms 结论。
+- 根因：本地日 2026-07-07（+08）窗口里 `data/model-calls.ndjson` 只有 5 条 `memory_rerank`，全部成功；`memory_v3` 4 条耗时 `405/450/539/1009ms`，`memory_write` 1 条 `484ms`。`data/bot-runtime.err.log` 的 1500ms warning 落在 03:32 附近主回复 `chat/default -> runtime_v2_memoryCliTurn -> memory_v3` 召回链路；不是 persona worldbook 路径，也不是新的 provider 调用路径。
+- 结论：这不是单次底层 API 1500ms 尾延迟样本，底层 API 最大只有 1009ms；更像外层 `memoryReranker` 硬预算把 `postWithRetry` 前后本地准备、endpoint 校验、埋点/配额收尾一起计入后贴到 1500ms floor。
+- 最小修复：共享 `MEMORY_RERANK_TIMEOUT_FLOOR_MS` 默认从 1500ms 提到 2000ms，`.env.example` 和低资源配置断言同步；显式短 timeout 仍保持原样，worldbook 配置型 timeout 继续吃共享 floor。
+- 验收：`node --check utils\memoryReranker.js`、`node --check utils\personaWorldbookSearch\rerank.js`、`node tests\memoryReranker.test.js`、`node tests\lowResourceConfig.test.js`、`node tests\personaModules.test.js`、`git diff --check` 通过；配置探针输出 `{"configFloor":2000,"configTimeout":800,"resolvedDefault":2000,"explicit120":120,"worldbookDefault":2000,"worldbookExplicit":1200}`。
+- 小目标已完成：主回复 Memory V3 rerank 不再贴着 1500ms 外层预算运行，显式短 timeout 行为未扩大。
+
 ## 运行维护 2026-07-07 10:24
 
 - 小目标：补一个统一的群聊主动外发总开关和状态探针，一处关闭 tickEngine、dailyShare、lifeScheduler 这类主动群发，不影响明确 @bot 的正常主回复。

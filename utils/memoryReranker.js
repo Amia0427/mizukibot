@@ -25,7 +25,7 @@ const rerankRuntimeState = {
   skippedInFlight: 0
 };
 
-const DEFAULT_RERANK_TIMEOUT_FLOOR_MS = 1500;
+const DEFAULT_RERANK_TIMEOUT_FLOOR_MS = 2000;
 
 class RerankTimeoutError extends Error {
   constructor(timeoutMs) {

@@ -26,7 +26,7 @@ function resolvePersonaWorldbookRerankTimeoutMs(options = {}) {
     : (config.PERSONA_WORLDBOOK_RERANK_TIMEOUT_MS || config.MEMORY_RERANK_TIMEOUT_MS || 2000);
   const timeoutMs = Math.max(0, Math.floor(Number(raw) || 0));
   if (hasExplicitTimeout || timeoutMs <= 0) return timeoutMs;
-  const floorMs = Math.max(100, Math.floor(Number(config.MEMORY_RERANK_TIMEOUT_FLOOR_MS || 1500) || 1500));
+  const floorMs = Math.max(100, Math.floor(Number(config.MEMORY_RERANK_TIMEOUT_FLOOR_MS || 2000) || 2000));
   return Math.max(timeoutMs, floorMs);
 }
 

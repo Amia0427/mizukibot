@@ -21,7 +21,7 @@ const {
 } = require('../utils/personaWorldbookSearch/sessionState');
 
 (async () => {
-  assert.strictEqual(resolvePersonaWorldbookRerankTimeoutMs(), 1500);
+  assert.strictEqual(resolvePersonaWorldbookRerankTimeoutMs(), 2000);
   assert.strictEqual(resolvePersonaWorldbookRerankTimeoutMs({ rerankTimeoutMs: 2000 }), 2000);
 
   ensureWorldbookSqlImported(loadPersonaModuleCatalog(), { force: true });
