@@ -57,6 +57,7 @@ const {
   recordSystemGroupSend,
   sendGroupReply
 } = require('./systemGroupReply');
+const { shouldAllowProactiveGroupOutbound } = require('./proactiveGroupOutboundControl');
 const { getRecentMessages } = require('../utils/groupAwarenessState');
 const {
   buildConversationWindow,

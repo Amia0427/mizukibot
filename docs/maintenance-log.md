@@ -1,3 +1,11 @@
+## 运行维护 2026-07-07 10:24
+
+- 小目标：补一个统一的群聊主动外发总开关和状态探针，一处关闭 tickEngine、dailyShare、lifeScheduler 这类主动群发，不影响明确 @bot 的正常主回复。
+- 现有入口确认：`TICK_ENGINE_ENABLED` 默认关闭；主动群发落点分别是 `core/tickEngine/index.js` 的主动触达/兜底问候、`core/dailyShareEngine.*` 的群 daily share、`core/lifeSchedulerEngine.js` 的 life 广播；明确 @bot 主回复仍走消息路由和主回复发送链路。
+- 最小修复：新增 `PROACTIVE_GROUP_OUTBOUND_ENABLED`，默认 `true` 保持当前行为；设为 `false` 时跳过 tick touch / fallback greeting / daily share 群发送 / life scheduler 群广播，返回 `proactive-group-outbound-disabled`，QZone 发布和明确 @bot 主回复不受影响；`npm run diag:runtime -- --json` 输出 `summary.proactiveGroupOutbound` 和 `components.proactiveGroupOutbound`。
+- 验收：`node scripts\run-tests.js tests\proactiveGroupOutboundControl.test.js tests\proactiveGroupOutboundEntrypoints.test.js tests\runtimeStatusDiagnostics.test.js` 通过；配置探针确认默认 `PROACTIVE_GROUP_OUTBOUND_ENABLED=true`，状态探针列出受影响来源 `tick_touch/fallback_greeting/daily_share/life_scheduler`。
+- 小目标已完成：主动群发可由一个 env 总闸关闭，明确 @bot 主回复链路未接入该总闸。
+
 ## 运行维护 2026-07-07 10:15
 
 - 小目标：检查当前未提交的 `prompts/defaut.txt` 删减会影响哪些真实发送链路，并补最小回归避免普通用户边界块后续被绕过。

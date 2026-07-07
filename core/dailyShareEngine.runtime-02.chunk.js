@@ -129,6 +129,18 @@
   }
 
   async function runGroupShareCycle({ sendWithRetry, askAIByGraph, today, date, now }) {
+    const outboundGate = shouldAllowProactiveGroupOutbound({
+      source: 'daily_share',
+      runtimeConfig: config
+    });
+    if (!outboundGate.allowed) {
+      logDailyShare({
+        reason: outboundGate.reason,
+        event: 'group outbound disabled'
+      });
+      return { ran: false, skipped: true, reason: outboundGate.reason };
+    }
+
     const { targets, state } = ensureCaches(today);
 
     for (const [groupId] of Object.entries(targets || {})) {
@@ -168,7 +180,7 @@
         if (!type) continue;
 
         try {
-          await sendShare({
+          const result = await sendShare({
             sendWithRetry,
             askAIByGraph,
             groupId,
@@ -180,6 +192,7 @@
             now,
             surface: 'group'
           });
+          if (result && result.sent === false) continue;
         } catch (error) {
           const currentState = ensureStateEntry(state, groupId, today);
           const failure = classifyDailyShareGenerationFailure(error);
@@ -212,6 +225,7 @@
         }
       }
     }
+    return { ran: true, skipped: false, reason: '' };
   }
 
   async function runQzoneShareCycle({ sendWithRetry, askAIByGraph, today, date, now }) {
@@ -297,10 +311,10 @@
 
     const today = getToday(date);
     const now = date.getTime();
-    await runGroupShareCycle({ sendWithRetry, askAIByGraph, today, date, now });
+    const groupOutbound = await runGroupShareCycle({ sendWithRetry, askAIByGraph, today, date, now });
     await runQzoneShareCycle({ sendWithRetry, askAIByGraph, today, date, now });
     flush();
-    return { ran: true };
+    return { ran: true, groupOutbound };
   }
 
   async function handleAdminCommand({
@@ -388,6 +402,20 @@
       }
 
       try {
+        if (!isQzoneCommand) {
+          const outboundGate = shouldAllowProactiveGroupOutbound({
+            source: 'daily_share',
+            groupId,
+            runtimeConfig: config
+          });
+          if (!outboundGate.allowed) {
+            return {
+              handled: true,
+              replyText: `未发送：${outboundGate.reason}`
+            };
+          }
+        }
+
         await sendShare({
           sendWithRetry,
           askAIByGraph,

@@ -25,6 +25,7 @@ const {
 } = require('../../utils/dailyJournal');
 const { getRecentMessages } = require('../../utils/groupAwarenessState');
 const { recordSystemGroupSend } = require('../systemGroupReply');
+const { shouldAllowProactiveGroupOutbound } = require('../proactiveGroupOutboundControl');
 const {
   acquireInitiativeLock,
   evaluateInitiativePolicy,
@@ -506,6 +507,28 @@ async function sendTouchMessage({
 }) {
   const groupId = String(data?.group_id || '').trim();
   const candidateReason = String(promptPayload.touchReason || promptPayload.fallbackGreetingType || '').trim();
+  const outboundGate = shouldAllowProactiveGroupOutbound({
+    source,
+    groupId,
+    runtimeConfig: config
+  });
+  if (!outboundGate.allowed) {
+    console.log('[proactive-outbound] skip', {
+      source,
+      groupId,
+      userId,
+      reason: outboundGate.reason
+    });
+    return {
+      sent: false,
+      text: '',
+      reason: outboundGate.reason,
+      initiativePolicyReason: outboundGate.reason,
+      decisionModelCalled: false,
+      replyModelCalled: false,
+      decisionReason: ''
+    };
+  }
   const policy = evaluateInitiativePolicy({
     source,
     groupId,
@@ -1070,6 +1093,7 @@ module.exports = {
   selectTouchCandidate,
   shouldSendScheduledGreeting,
   shouldTriggerFallbackGreeting,
+  sendTouchMessage,
   runGreetingFallbacks,
   runDailyShareTick,
   runLifeSchedulerTick,

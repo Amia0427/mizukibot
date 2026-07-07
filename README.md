@@ -17,6 +17,10 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-07-07 10:29 +08:00：定位今天新出现的 `memoryReranker` 1500ms timeout 来源：本地 7/7 窗口 `data/model-calls.ndjson` 只有 5 条 `memory_rerank`，均为成功，`memory_v3` 4 条最大 1009ms、`memory_write` 1 条 484ms；`data/bot-runtime.err.log` 的 1500ms warning 对应主回复 `chat/default -> runtime_v2_memoryCliTurn -> memory_v3` 召回外层硬预算，不是昨天的 persona worldbook 700ms 路径，也不是新 provider 调用链。现共享 rerank 默认 floor 从 1500ms 收敛到 2000ms，显式短 timeout 保持不变。验收结果：`node tests\memoryReranker.test.js`、`node tests\lowResourceConfig.test.js`、`node tests\personaModules.test.js`、`git diff --check` 通过；配置探针显示 `resolvedDefault=2000`、`explicit120=120`。小目标完成：主回复 Memory V3 rerank 不再贴着 1500ms 外层预算运行。
+
+更新 2026-07-07 10:24 +08:00：新增群聊主动外发总开关 `PROACTIVE_GROUP_OUTBOUND_ENABLED`，默认 `true`，用于统一控制 tick touch / fallback greeting / daily share 群发送 / life scheduler 群广播；设为 `false` 时这些主动群发会跳过并在诊断中显示 `proactive-group-outbound-disabled`，明确 @bot 的主回复不受影响。验收结果：新增总闸、主动入口和运行态诊断回归通过；`npm run diag:runtime -- --json` 可查看 `summary.proactiveGroupOutbound` 当前状态。
+
 更新 2026-07-07 10:15 +08:00：复查当前 `prompts/defaut.txt` 未提交删减的真实发送影响面：该块仍进入普通用户主回复 stable system、被动群感知回复 system message 和仍可能启用的 `normal_fast_reply` system prompt；管理员链路、被动决策模型和 user prompt 正文不注入。验收结果：新增发送链路回归、既有主回复/被动/快回复回归、`npm run check:prompts` 和 `git diff --check` 通过。小目标完成：未恢复旧 prompt 文案，但当前普通用户边界块不会在三类真实回复入口里被绕过。
 
 更新 2026-07-06 20:10 +08:00：关闭 `normal_fast_reply` 后仍异常主动外发的根因已定位为两条链路：群聊主回复入口把 `reply_to_bot_recent` 当正式点名放行，以及被动群感知把裸 `bot/机器人` 话题升为 `bot_direct/strong-bot-cue`。现群聊正式主回复只接受私聊或明确 @ bot，裸 bot 话题只进入话题观察；被动 follow-up 仅允许明确强点名续接。验收结果：新增主回复入口、bot cue、被动话题 guard 回归及相关旧测试通过，已重启本地 bot。小目标完成：普通群聊消息不会再因近期 bot 回复或裸 bot 话题误判而主动外发。

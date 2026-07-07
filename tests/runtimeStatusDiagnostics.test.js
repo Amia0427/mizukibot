@@ -45,6 +45,7 @@ module.exports = (() => {
     process.env.POST_REPLY_WORKER_INLINE = 'false';
     process.env.POST_REPLY_WORKER_STALE_PROCESSING_MS = '300000';
     process.env.TICK_ENGINE_ENABLED = 'false';
+    process.env.PROACTIVE_GROUP_OUTBOUND_ENABLED = 'false';
     process.env.DAILY_JOURNAL_SUMMARY_SCHEDULER_ENABLED = 'true';
     process.env.MEMORY_V3_MATERIALIZE_LOCK_FILE = memoryLockFile;
     process.env.MEMORY_V3_MATERIALIZE_LOCK_STALE_MS = '600000';
@@ -162,6 +163,10 @@ module.exports = (() => {
     assert.strictEqual(report.summary.journalHealth.summaryScheduler.tickEngineEnabled, false);
     assert.strictEqual(report.summary.journalHealth.summaryScheduler.standaloneEnabled, true);
     assert.strictEqual(report.summary.journalHealth.summaryScheduler.summaryDueDay, '2026-05-02');
+    assert.strictEqual(report.summary.proactiveGroupOutbound.enabled, false);
+    assert.strictEqual(report.summary.proactiveGroupOutbound.envKey, 'PROACTIVE_GROUP_OUTBOUND_ENABLED');
+    assert.ok(report.summary.proactiveGroupOutbound.affectedSources.includes('daily_share'));
+    assert.strictEqual(report.components.proactiveGroupOutbound.disabledReason, 'proactive-group-outbound-disabled');
 
     assert.strictEqual(report.components.mainProcess.lockFile.pid, 111);
     assert.strictEqual(report.components.postReplyWorker.pidFile.pid, 222);
@@ -281,6 +286,11 @@ module.exports = (() => {
 
     console.log('runtimeStatusDiagnostics.test.js passed');
   } finally {
+    for (const listener of process.listeners('exit')) {
+      if (listener && listener.name === 'flushAllSync') {
+        process.removeListener('exit', listener);
+      }
+    }
     restoreEnv(snapshot);
     clearProjectCache();
     try {

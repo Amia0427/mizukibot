@@ -10,6 +10,7 @@ const {
 } = require('../utils/time');
 const { getRecentMessages } = require('../utils/groupAwarenessState');
 const { sendGroupReply, recordSystemGroupSend } = require('./systemGroupReply');
+const { shouldAllowProactiveGroupOutbound } = require('./proactiveGroupOutboundControl');
 const {
   acquireInitiativeLock,
   evaluateInitiativePolicy,
@@ -424,6 +425,12 @@ async function generateDay(askAIByGraph, date = new Date(), options = {}) {
 
   async function maybeBroadcastToday({ sendWithRetry, askAIByGraph, date = new Date(), scope = 'pending' }) {
     if (!config.LIFE_SCHEDULER_ENABLED) return { sentCount: 0, reason: 'disabled' };
+    const outboundGate = shouldAllowProactiveGroupOutbound({
+      source: 'life_scheduler',
+      runtimeConfig: config
+    });
+    if (!outboundGate.allowed) return { sentCount: 0, reason: outboundGate.reason };
+
     const dayKey = formatDateInTz(date, config.TIMEZONE);
     let entry = getLifeDay(state, dayKey);
     if (!entry || String(entry.status || '').trim() !== 'ok') {
@@ -618,6 +625,14 @@ async function generateDay(askAIByGraph, date = new Date(), options = {}) {
 
     if (sub === 'broadcast') {
       const mode = String(parts[1] || 'current').trim().toLowerCase();
+      const outboundGate = shouldAllowProactiveGroupOutbound({
+        source: 'life_scheduler',
+        groupId,
+        runtimeConfig: config
+      });
+      if (!outboundGate.allowed) {
+        return { handled: true, replyText: `未发送：${outboundGate.reason}` };
+      }
       if (mode === 'current') {
         if (!String(groupId || '').trim()) return { handled: true, replyText: '这个要在群里才接得住啦。' };
         const currentEntry = getLifeDay(state, dayKey);
