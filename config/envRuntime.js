@@ -117,8 +117,8 @@ function validateRequiredConfig() {
   const inboundGeneral = pickNum('INBOUND_GENERAL_MAX_CONCURRENCY', 2);
   const inboundAdmin = pickNum('INBOUND_ADMIN_MAX_CONCURRENCY', 1);
   const inboundPerUser = pickNum('INBOUND_PER_USER_MAX_INFLIGHT', 1);
-  const privateInboundGlobal = pickNum('PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY', 1);
-  const privateInboundGeneral = pickNum('PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY', 0);
+  const privateInboundGlobal = pickNum('PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY', 3);
+  const privateInboundGeneral = pickNum('PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY', 3);
   const privateInboundAdmin = pickNum('PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY', 1);
   const privateInboundPerUser = pickNum('PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT', 1);
   const foregroundGlobal = pickNum('FOREGROUND_GLOBAL_MAX_CONCURRENCY', 10);

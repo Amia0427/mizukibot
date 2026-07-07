@@ -18,6 +18,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 ## 并发与后台线程
 
 更新 2026-07-07 10:33 +08:00：群聊出口敏感词 guard 不再把“角色扮演/设定”等虚构语境当作政治敏感命中的豁免；强政治词仍直接拦，词库命中且出现现实政治语境时仍拦，普通架空设定短词不拦。验收结果：角色扮演设定叠加现实政治样例仍会拦截，普通架空设定样例不拦截。
+
+更新 2026-07-07 10:22 +08:00：私聊并发默认收口为多用户并行、同用户串行：`PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY=3`、`PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY=3`、`PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT=1`；当前本地 `.env` 也按该策略调整。发送成功后的后台持久化现在按 `sessionKey` 串行，避免同一私聊下一轮读到上一轮尚未落盘的短期记忆。小目标完成：私聊多用户并发不再靠放开同用户并发实现。
 更新 2026-07-07 10:29 +08:00：定位今天新出现的 `memoryReranker` 1500ms timeout 来源：本地 7/7 窗口 `data/model-calls.ndjson` 只有 5 条 `memory_rerank`，均为成功，`memory_v3` 4 条最大 1009ms、`memory_write` 1 条 484ms；`data/bot-runtime.err.log` 的 1500ms warning 对应主回复 `chat/default -> runtime_v2_memoryCliTurn -> memory_v3` 召回外层硬预算，不是昨天的 persona worldbook 700ms 路径，也不是新 provider 调用链。现共享 rerank 默认 floor 从 1500ms 收敛到 2000ms，显式短 timeout 保持不变。验收结果：`node tests\memoryReranker.test.js`、`node tests\lowResourceConfig.test.js`、`node tests\personaModules.test.js`、`git diff --check` 通过；配置探针显示 `resolvedDefault=2000`、`explicit120=120`。小目标完成：主回复 Memory V3 rerank 不再贴着 1500ms 外层预算运行。
 
 更新 2026-07-07 10:28 +08:00：已核对并归档历史 LangGraph V2 stale checkpoint 残留；诊断原先只展示 20 条样本，真实审计为 25 个，均已到 `direct_reply` 的 `final_output/node_complete` 终态且 30 分钟内无活跃写入。验收结果：25 个 checkpoint 已移动到 `data/langgraph_v2_checkpoints_archive/stale-history-20260707-langgraph-v2` 并保留 manifest/原事件文件，`npm run diag:runtime -- --json` 返回 `overallStatus=ok`、`signals=[]`、`activeCheckpoints=0`、`staleRunningCheckpoints=0`。

@@ -23,6 +23,9 @@ const logFile = path.join(tempDir, 'timing.jsonl');
 appendInboundTimingLog(logFile, true, { stage: 'start', messageId: 'm1' });
 const events = [];
 const persistedThreadIds = [];
+let serialActive = 0;
+let serialPeak = 0;
+const serialOrder = [];
 const checkpointStore = createCheckpointStore({
   checkpointDir: path.join(tempDir, 'langgraph_v2_checkpoints'),
   eventDir: path.join(tempDir, 'langgraph_v2_events')
@@ -61,6 +64,15 @@ const coordinator = createMessageTelemetryCoordinator({
   }),
   runPersistInBackgroundFromCheckpoint: async (threadId) => {
     persistedThreadIds.push(threadId);
+    if (String(threadId || '').startsWith('serial_')) {
+      serialActive += 1;
+      serialPeak = Math.max(serialPeak, serialActive);
+      serialOrder.push(`start:${threadId}`);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      serialOrder.push(`end:${threadId}`);
+      serialActive = Math.max(0, serialActive - 1);
+      return true;
+    }
     const checkpoint = checkpointStore.loadCheckpoint(threadId);
     if (checkpoint) {
       checkpointStore.saveCheckpoint(threadId, {
@@ -86,6 +98,21 @@ coordinator.maybeRunDeferredPersist({
   }
 });
 
+for (const threadId of ['serial_1', 'serial_2']) {
+  coordinator.maybeRunDeferredPersist({
+    replyOptions: {
+      deferPersist: true,
+      threadId,
+      routePolicyKey: 'direct_chat/default',
+      topRouteType: 'direct_chat',
+      routeMeta: {
+        userId: 'u_serial',
+        chatType: 'private'
+      }
+    }
+  });
+}
+
 coordinator.maybeRunDeferredPersist({
   replyOptions: {
     deferPersist: true,
@@ -110,6 +137,13 @@ module.exports = new Promise((resolve, reject) => {
         event.type === 'persist_background_success'
         && event.threadId === expectedImageThreadId
       )));
+      assert.strictEqual(serialPeak, 1, 'same-session background persist should run serially');
+      assert.deepStrictEqual(serialOrder, [
+        'start:serial_1',
+        'end:serial_1',
+        'start:serial_2',
+        'end:serial_2'
+      ]);
       console.log('messageTelemetry.test.js passed');
       resolve();
     } catch (error) {

@@ -119,6 +119,26 @@ function createMessageTelemetryCoordinator(deps = {}) {
     buildReplyTelemetry,
     runPersistInBackgroundFromCheckpoint
   } = deps;
+  const persistQueueBySessionKey = new Map();
+
+  function enqueueSessionPersist(sessionKey = '', task) {
+    const key = String(sessionKey || '').trim();
+    if (!key) {
+      void task();
+      return;
+    }
+
+    const previous = persistQueueBySessionKey.get(key) || Promise.resolve();
+    const next = previous.catch(() => {}).then(task, task);
+    persistQueueBySessionKey.set(key, next);
+    next
+      .finally(() => {
+        if (persistQueueBySessionKey.get(key) === next) {
+          persistQueueBySessionKey.delete(key);
+        }
+      })
+      .catch(() => {});
+  }
 
   function resolveReplyImageUrl(replyOptions = {}, routeMeta = {}) {
     const explicitImageUrl = String(
@@ -202,23 +222,28 @@ function createMessageTelemetryCoordinator(deps = {}) {
     };
 
     setTimeout(() => {
-      emitPersistBackgroundEvent('persist_background_start');
-      console.log('[persist-background] start', {
-        threadId,
-        routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
-        topRouteType: String(replyOptions?.topRouteType || '').trim()
-      });
-      const startedAt = Date.now();
-      runPersistInBackgroundFromCheckpoint(threadId).catch((error) => {
-        emitPersistBackgroundEvent('persist_background_failure', {
-          durationMs: Math.max(0, Date.now() - startedAt),
-          error: error?.message || String(error || '')
-        });
-        console.error('[persist-background] failed', {
+      enqueueSessionPersist(sessionKey || threadId, async () => {
+        emitPersistBackgroundEvent('persist_background_start');
+        console.log('[persist-background] start', {
           threadId,
-          error: error?.message || String(error || '')
+          routePolicyKey: String(replyOptions?.routePolicyKey || '').trim(),
+          topRouteType: String(replyOptions?.topRouteType || '').trim()
         });
-      }).then((result) => {
+        const startedAt = Date.now();
+        let result = null;
+        try {
+          result = await runPersistInBackgroundFromCheckpoint(threadId);
+        } catch (error) {
+          emitPersistBackgroundEvent('persist_background_failure', {
+            durationMs: Math.max(0, Date.now() - startedAt),
+            error: error?.message || String(error || '')
+          });
+          console.error('[persist-background] failed', {
+            threadId,
+            error: error?.message || String(error || '')
+          });
+        }
+
         if (result) {
           emitPersistBackgroundEvent('persist_background_success', {
             durationMs: Math.max(0, Date.now() - startedAt)

@@ -17,6 +17,18 @@ module.exports = (() => {
 
   try {
     process.env.API_KEY = process.env.API_KEY || 'test-key';
+    process.env.PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY = 'not-a-number';
+    process.env.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY = 'not-a-number';
+    process.env.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY = 'not-a-number';
+    process.env.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT = 'not-a-number';
+
+    let config = reloadConfig();
+
+    assert.strictEqual(config.PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY, 3);
+    assert.strictEqual(config.PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY, 3);
+    assert.strictEqual(config.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY, 1);
+    assert.strictEqual(config.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT, 1);
+
     process.env.INBOUND_GLOBAL_MAX_CONCURRENCY = '20';
     process.env.INBOUND_GENERAL_MAX_CONCURRENCY = '20';
     process.env.INBOUND_ADMIN_MAX_CONCURRENCY = '20';
@@ -26,7 +38,7 @@ module.exports = (() => {
     process.env.PRIVATE_INBOUND_ADMIN_MAX_CONCURRENCY = '15';
     process.env.PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT = '3';
 
-    const config = reloadConfig();
+    config = reloadConfig();
 
     assert.strictEqual(config.INBOUND_GLOBAL_MAX_CONCURRENCY, 20);
     assert.strictEqual(config.INBOUND_GENERAL_MAX_CONCURRENCY, 20);
