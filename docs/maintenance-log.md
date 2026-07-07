@@ -5,6 +5,14 @@
 - 验收：`systemctl list-unit-files` 不再显示 AstrBot/SillyTavern，相关进程为空，关键路径均为 `gone`；`free -h` 显示可用内存约 2.2GiB、swap 2.0GiB 可用，`df -hT /` 显示根分区使用率 56%，`journalctl --disk-usage` 为 160M。
 - 小目标已完成：服务器释放磁盘和内存压力，未改动 1Panel、Docker、MySQL、Echo LLM、Sub2API、SullyOS 等其他业务服务。
 
+## 运行维护 2026-07-07 11:10
+
+- 小目标：给所有最终外发消息补最小必要来源诊断，能看出 `source`、`routePolicyKey` 和 `triggerReason`。
+- 最小修复：新增 `core\outboundMessageDiagnostics.js`，复用现有 perf/request trace/log 通道；`systemGroupReply`、`qqActionService`、主回复/流式发送、被动群感知、tickEngine、dailyShare、lifeScheduler、schedulerRuntime 在最终发送点传入统一外发元数据。
+- 定向修复：普通私聊 `/create` 未在 create 白名单时不再误走群戳，改为私聊白名单拒绝回复并带 `admin/create` 外发诊断；`bot + 出问题/坏了/没反应` 这类被动群感知强线索归入 presence check，保留空决策降级验收路径。
+- 验收：`node tests\outboundMessageDiagnostics.test.js`、`node tests\messageHandlerCreateCommand.test.js`、`node tests\passiveAwarenessDecisionEmptyOutput.test.js`、`node tests\passiveAwarenessBotTopicGuard.test.js` 通过。
+- 小目标已完成：主回复、被动群感知、tickEngine、dailyShare、lifeScheduler 和定时群消息最终外发均可在诊断或日志中看到来源、路由策略和触发原因。
+
 ## 运行维护 2026-07-07 10:50
 
 - 小目标：仅对普通用户私聊启用敏感词库出口拦截，管理员用户私聊不做敏感词库拦截。

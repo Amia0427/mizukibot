@@ -25,6 +25,10 @@ const {
 } = require('./streamingSegmentation');
 const config = require('../config');
 const { getGroupReplySensitiveGuard } = require('../utils/groupReplySensitiveGuard');
+const {
+  buildOutboundMessageMeta,
+  recordOutboundMessageEvent
+} = require('./outboundMessageDiagnostics');
 const { isAdminUserId } = require('../utils/privilegedPrivateChat');
 
 function createReplyTelemetryEvent(type = '', payload = {}) {
@@ -314,7 +318,13 @@ function createStreamingDispatcher({
   userId,
   senderId,
   shouldSend = null,
-  telemetry = null
+  telemetry = null,
+  source = '',
+  routePolicyKey = '',
+  triggerReason = '',
+  topRouteType = '',
+  routeMeta = null,
+  requestTrace = null
 }) {
   const effectiveConfig = runtimeConfig && Object.keys(runtimeConfig).length ? runtimeConfig : (config || {});
   const maxSegments = getStreamMaxSegments(effectiveConfig);
@@ -390,7 +400,34 @@ function createStreamingDispatcher({
           };
       const startedAt = Date.now();
       if (!state.sendStartedAt) state.sendStartedAt = startedAt;
+      const outboundMeta = buildOutboundMessageMeta({
+        source,
+        routePolicyKey,
+        triggerReason,
+        topRouteType,
+        routeMeta,
+        requestTrace,
+        telemetry
+      }, {
+        source: 'main_reply_stream',
+        triggerReason: 'stream_chunk'
+      });
+      const outboundPayload = {
+        channel: isPrivate ? 'private' : 'group',
+        action: payload.action,
+        groupId: String(groupId || '').trim(),
+        userId: String(userId || '').trim(),
+        senderId: String(senderId || '').trim(),
+        chunkIndex: state.sentSegments + 1,
+        chunkCount: 0,
+        messageLength: String(sendText || '').length
+      };
+      recordOutboundMessageEvent('send_start', outboundMeta, outboundPayload);
       const sent = await sendWithRetry(payload, 1, 300);
+      recordOutboundMessageEvent(sent ? 'send_success' : 'send_failure', outboundMeta, {
+        ...outboundPayload,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      });
 
       if (!sent) {
         state.failedChunks += 1;
@@ -505,6 +542,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     retries = 2,
     waitMs = 500,
     telemetry = null,
+    source = '',
+    routePolicyKey = '',
+    triggerReason = '',
+    topRouteType = '',
+    routeMeta = null,
+    requestTrace = null,
     shouldSend = null
   }) {
     if (typeof shouldSend === 'function' && shouldSend() === false) return false;
@@ -548,7 +591,13 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       atSender,
       retries,
       waitMs,
-      runtimeConfig
+      runtimeConfig,
+      source: source || telemetry?.source,
+      routePolicyKey: routePolicyKey || telemetry?.routePolicyKey,
+      triggerReason: triggerReason || telemetry?.triggerReason,
+      topRouteType: topRouteType || telemetry?.topRouteType,
+      routeMeta: routeMeta || telemetry?.routeMeta,
+      requestTrace: requestTrace || telemetry?.requestTrace || telemetry?.routeMeta?.requestTrace
     });
 
     emitReplyTelemetry(telemetry, sent ? 'reply_send_success' : 'reply_send_failure', {
@@ -586,6 +635,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     retries = 2,
     waitMs = 500,
     telemetry = null,
+    source = '',
+    routePolicyKey = '',
+    triggerReason = '',
+    topRouteType = '',
+    routeMeta = null,
+    requestTrace = null,
     shouldSend = null
   }) {
     if (typeof shouldSend === 'function' && shouldSend() === false) return false;
@@ -623,7 +678,13 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       replyText: guardedReply.text,
       retries,
       waitMs,
-      runtimeConfig
+      runtimeConfig,
+      source: source || telemetry?.source,
+      routePolicyKey: routePolicyKey || telemetry?.routePolicyKey,
+      triggerReason: triggerReason || telemetry?.triggerReason,
+      topRouteType: topRouteType || telemetry?.topRouteType,
+      routeMeta: routeMeta || telemetry?.routeMeta,
+      requestTrace: requestTrace || telemetry?.requestTrace || telemetry?.routeMeta?.requestTrace
     });
 
     emitReplyTelemetry(telemetry, sent ? 'reply_send_success' : 'reply_send_failure', {
@@ -662,6 +723,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     retries = 2,
     waitMs = 500,
     telemetry = null,
+    source = '',
+    routePolicyKey = '',
+    triggerReason = '',
+    topRouteType = '',
+    routeMeta = null,
+    requestTrace = null,
     shouldSend = null
   }) {
     if (String(chatType || '').trim() === 'private') {
@@ -671,6 +738,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
         retries,
         waitMs,
         telemetry,
+        source,
+        routePolicyKey,
+        triggerReason,
+        topRouteType,
+        routeMeta,
+        requestTrace,
         shouldSend
       });
     }
@@ -682,6 +755,12 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       retries,
       waitMs,
       telemetry,
+      source,
+      routePolicyKey,
+      triggerReason,
+      topRouteType,
+      routeMeta,
+      requestTrace,
       shouldSend
     });
   }
@@ -691,7 +770,9 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
     groupId,
     senderId,
     replyText,
-    senderName = 'Mizuki'
+    senderName = 'Mizuki',
+    source = '',
+    routePolicyKey = ''
   }) {
     if (String(chatType || '').trim() === 'private') return;
     recordSystemGroupSend({
@@ -701,7 +782,9 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       senderName,
       updatePresence: true,
       updateBotPresence: true,
-      now: Date.now()
+      now: Date.now(),
+      source,
+      routePolicyKey
     });
   }
 

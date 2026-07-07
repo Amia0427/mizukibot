@@ -32,7 +32,17 @@ function createSchedulerRuntime(options = {}) {
   async function executeTask(task = {}) {
     const commandType = String(task.commandType || '').trim();
     if (commandType === 'group_message') {
-      const ok = await sendGroupMessage(task.groupId, task.payload?.message || '');
+      const ok = await sendGroupMessage(task.groupId, task.payload?.message || '', {
+        source: 'scheduler_runtime',
+        routePolicyKey: 'scheduled/group-message',
+        triggerReason: 'scheduled_task_due',
+        topRouteType: 'proactive',
+        routeMeta: {
+          groupId: String(task.groupId || '').trim(),
+          taskId: String(task.id || '').trim(),
+          commandType
+        }
+      });
       return {
         success: ok,
         reason: ok ? '群消息已发送' : '群消息发送失败'

@@ -327,7 +327,7 @@ function containsQuestionSignal(text = '') {
 function containsBotPresenceCue(text = '') {
   const t = normalizeText(text);
   if (!t) return false;
-  return /(在吗|还在|在线|窥屏|潜水|怎么不说话|没反应|坏掉|坏了|死机|看到没|看到了吗|出来)/i.test(t);
+  return /(在吗|还在|在线|窥屏|潜水|怎么不说话|没反应|出问题|坏掉|坏了|死机|看到没|看到了吗|出来)/i.test(t);
 }
 
 function hasExplicitBotAddress(text = '') {
@@ -527,6 +527,9 @@ function detectPassiveAddressee({ text, analysis, directedContext }) {
   const groupOpenQuestion = containsQuestionSignal(t) && /(?:大家|你们|谁|有人|哪位|有无|有没有|懂|知道|会不会|能不能)/i.test(t);
 
   if (hasPresenceCue && directBotCue) {
+    return 'bot_presence_check';
+  }
+  if (mentionsBot && hasPresenceCue) {
     return 'bot_presence_check';
   }
   if (mentionsBot && directBotCue) {

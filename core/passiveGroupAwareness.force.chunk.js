@@ -143,7 +143,18 @@ async function forcePassiveGroupInterjection({
       ? forceAtSender
       : Boolean(config.PASSIVE_AWARENESS_AT_SENDER),
     retries: 1,
-    waitMs: 300
+    waitMs: 300,
+    source: 'passive_group_awareness',
+    routePolicyKey: 'passive-awareness/reply',
+    triggerReason: reason,
+    topRouteType: 'chat',
+    routeMeta: {
+      groupId,
+      userId: senderId,
+      directedContext,
+      presenceAction: 'reply',
+      presenceReason: reason
+    }
   });
 
   if (!sent) {

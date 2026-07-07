@@ -315,8 +315,22 @@
     atSender = true,
     retries = 2,
     waitMs = 500,
-    telemetry = null
+    telemetry = null,
+    source = '',
+    routePolicyKey = '',
+    triggerReason = '',
+    topRouteType = '',
+    routeMeta = null,
+    requestTrace = null,
+    shouldSend = null
   }) {
+    const effectiveRoutePolicyKey = String(
+      routePolicyKey
+      || routeMeta?.routePolicyKey
+      || telemetry?.routePolicyKey
+      || telemetry?.routeMeta?.routePolicyKey
+      || ''
+    ).trim();
     return sendReply({
       chatType,
       groupId,
@@ -326,7 +340,14 @@
       atSender,
       retries,
       waitMs,
-      telemetry
+      telemetry,
+      source: String(source || '').trim() || (effectiveRoutePolicyKey ? 'main_reply' : 'message_handler'),
+      routePolicyKey: effectiveRoutePolicyKey,
+      triggerReason: String(triggerReason || routeMeta?.triggerReason || routeMeta?.triggerBranch || telemetry?.triggerReason || telemetry?.routeMeta?.triggerBranch || telemetry?.routeMeta?.replyPath || '').trim(),
+      topRouteType: String(topRouteType || routeMeta?.topRouteType || telemetry?.topRouteType || '').trim(),
+      routeMeta,
+      requestTrace,
+      shouldSend
     });
   };
   // source-compat anchor: return replyRuntime.sendGroupReply({

@@ -6,6 +6,10 @@ const {
   getGroupChatStreamSendGapMs,
   getStreamingSplitIndex
 } = require('../../../core/streamingSegmentation');
+const {
+  buildOutboundMessageMeta,
+  recordOutboundMessageEvent
+} = require('../../../core/outboundMessageDiagnostics');
 const { getGroupReplySensitiveGuard } = require('../../../utils/groupReplySensitiveGuard');
 const { isAdminUserId } = require('../../../utils/privilegedPrivateChat');
 
@@ -44,7 +48,13 @@ function createStreamingDispatcher({
   userId,
   senderId,
   shouldSend = null,
-  telemetry = null
+  telemetry = null,
+  source = '',
+  routePolicyKey = '',
+  triggerReason = '',
+  topRouteType = '',
+  routeMeta = null,
+  requestTrace = null
 } = {}) {
   const effectiveConfig = runtimeConfig && typeof runtimeConfig === 'object'
     ? runtimeConfig
@@ -146,6 +156,29 @@ function createStreamingDispatcher({
           };
       const startedAt = Date.now();
       if (!state.sendStartedAt) state.sendStartedAt = startedAt;
+      const outboundMeta = buildOutboundMessageMeta({
+        source,
+        routePolicyKey,
+        triggerReason,
+        topRouteType,
+        routeMeta,
+        requestTrace,
+        telemetry
+      }, {
+        source: 'main_reply_stream',
+        triggerReason: 'stream_chunk'
+      });
+      const outboundPayload = {
+        channel: isPrivate ? 'private' : 'group',
+        action: payload.action,
+        groupId: String(groupId || '').trim(),
+        userId: String(userId || '').trim(),
+        senderId: String(senderId || '').trim(),
+        chunkIndex,
+        chunkCount: 0,
+        messageLength: String(sendText || '').length
+      };
+      recordOutboundMessageEvent('send_start', outboundMeta, outboundPayload);
       emitStreamingTelemetry('reply_stream_chunk_start', {
         node: 'reply_stream_send',
         channel: isPrivate ? 'private' : 'group',
@@ -156,6 +189,10 @@ function createStreamingDispatcher({
         chunkLength: text.length
       });
       const sent = await sendWithRetry(payload, 1, 300);
+      recordOutboundMessageEvent(sent ? 'send_success' : 'send_failure', outboundMeta, {
+        ...outboundPayload,
+        durationMs: Math.max(0, Date.now() - startedAt)
+      });
 
       if (!sent) {
         state.failedChunks += 1;

@@ -459,9 +459,10 @@ const napcatLogFollower = createNapcatLogFollower({
 });
 
 const schedulerRuntime = getSchedulerRuntime({
-  sendGroupMessage: async (groupId, message) => {
+  sendGroupMessage: async (groupId, message, meta = {}) => {
     await sendGroupMessage(groupId, message, {
-      actionClient: napcatActionClient
+      actionClient: napcatActionClient,
+      ...meta
     });
     return true;
   }

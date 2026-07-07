@@ -437,7 +437,19 @@ async function handlePassiveGroupAwareness({
     replyText,
     atSender: Boolean(config.PASSIVE_AWARENESS_AT_SENDER),
     retries: 1,
-    waitMs: 300
+    waitMs: 300,
+    source: 'passive_group_awareness',
+    routePolicyKey: 'passive-awareness/reply',
+    triggerReason: presenceReason || decisionReason || cheapGate.reason || 'passive_reply',
+    topRouteType: 'chat',
+    routeMeta: {
+      groupId,
+      userId: senderId,
+      directedContext,
+      presenceAction,
+      presenceReason,
+      decisionReason
+    }
   });
 
   if (!sent) {

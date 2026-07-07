@@ -35,7 +35,18 @@
           replyText: generated.text,
           atSender: false,
           retries: 1,
-          waitMs: 300
+          waitMs: 300,
+          source: 'daily_share',
+          routePolicyKey: 'proactive/daily-share',
+          triggerReason: manual ? 'manual-send' : 'auto-send',
+          topRouteType: 'proactive',
+          routeMeta: {
+            groupId,
+            windowKey,
+            shareType: type,
+            manual,
+            topicKey: payload.topicKey || ''
+          }
         });
         if (!sent) throw new Error('daily-share-send-failed');
 

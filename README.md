@@ -19,6 +19,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 更新 2026-07-07 11:29 +08:00：已完成远端服务器资源清理，卸载 AstrBot 与 SillyTavern，并将 `/www/swap` 从 6M 重建为 2G；systemd journal 限制为 200M，清理 APT 缓存、旧 snap 修订和语言工具缓存。验收结果：`astrbot`/`sillytavern` 服务与进程均不存在，`/` 使用率降至 56%，可用内存约 2.2GiB，swap 可用 2.0GiB。小目标已完成：释放磁盘和内存压力，且未改动其他业务服务。
 
+更新 2026-07-07 11:10 +08:00：新增统一外发来源诊断，主回复/流式回复、被动群感知、tickEngine、dailyShare、lifeScheduler 和 schedulerRuntime 最终发消息时会在 outbound perf 事件或现有日志里带出 `source`、`routePolicyKey`、`triggerReason`。验收结果：`node tests\outboundMessageDiagnostics.test.js`、`node tests\messageHandlerCreateCommand.test.js`、`node tests\passiveAwarenessDecisionEmptyOutput.test.js`、`node tests\passiveAwarenessBotTopicGuard.test.js` 通过。
+
 更新 2026-07-07 10:50 +08:00：普通用户私聊回复出口也会经过敏感词库拦截，管理员用户私聊不走该词库拦截；群聊出口保持原逻辑。验收结果：普通私聊非流式/流式命中测试词均替换为固定提示，管理员私聊同样文本原样发送。
 
 更新 2026-07-07 10:49 +08:00：普通用户 `prompts/defaut.txt` 注入范围收敛为只在群聊主回复相关入口生效：普通私聊主回复不注入，被动群感知回复不注入，普通群聊主回复和仍可能启用的群聊 `normal_fast_reply` 继续注入；stable prompt 缓存键加入聊天 surface，避免同一用户私聊/群聊串用缓存。验收结果：发送链路回归、主回复 stable prompt、被动回复 prompt、快回复和 prepare fallback 定向测试通过。

@@ -65,6 +65,47 @@
 
       const createAgentExecutor = getCreateAgentExecutorModule();
       if (!createAgentExecutor.isCreateAgentUserAllowed(senderId)) {
+        if (isPrivateChatType(chatType)) {
+          const sendStartedAt = Date.now();
+          appendTraceTiming('final_reply_send_start', {
+            stage: 'final_reply_send_start',
+            ...buildTraceBase(),
+            routePolicyKey: 'admin/create',
+            topRouteType: 'admin',
+            replyPath: 'create_private_blocked'
+          });
+          const sent = await sendGroupReply({
+            chatType,
+            groupId,
+            userId: senderId,
+            senderId,
+            replyText: PRIVATE_CHAT_WHITELIST_REPLY,
+            atSender: false,
+            retries: 1,
+            waitMs: 300,
+            source: 'message_handler',
+            routePolicyKey: 'admin/create',
+            triggerReason: 'create_private_blocked',
+            topRouteType: 'admin'
+          });
+          appendTraceTiming('final_reply_send_done', {
+            stage: 'final_reply_send_done',
+            ...buildTraceBase(),
+            routePolicyKey: 'admin/create',
+            topRouteType: 'admin',
+            replyPath: 'create_private_blocked',
+            sent: Boolean(sent),
+            durationMs: Math.max(0, Date.now() - sendStartedAt),
+            finalErrorCode: 'private_chat_disabled'
+          });
+          appendRequestCompleteTrace({
+            routePolicyKey: 'admin/create',
+            topRouteType: 'admin',
+            finalErrorCode: 'private_chat_disabled',
+            sent: Boolean(sent)
+          });
+          return;
+        }
         try {
           await sendGroupPoke(groupId, senderId, {
             actionClient: {

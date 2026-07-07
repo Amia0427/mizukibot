@@ -60,7 +60,9 @@ function createReplyTelemetryBridge(runtimeConfig = {}) {
     chatType = 'group',
     routePolicyKey = '',
     topRouteType = '',
-    routeMeta = null
+    routeMeta = null,
+    source = '',
+    triggerReason = ''
   } = {}) {
     const explicitThreadId = String(
       routeMeta?.threadId
@@ -98,6 +100,9 @@ function createReplyTelemetryBridge(runtimeConfig = {}) {
       threadId,
       routePolicyKey: String(routePolicyKey || '').trim(),
       topRouteType: String(topRouteType || '').trim(),
+      source: String(source || normalizedRouteMeta.source || normalizedRouteMeta.dispatchBranch || 'main_reply').trim(),
+      triggerReason: String(triggerReason || normalizedRouteMeta.triggerReason || normalizedRouteMeta.triggerBranch || normalizedRouteMeta.replyPath || normalizedRouteMeta.routeReason || normalizedRouteMeta.reason || 'final_reply').trim(),
+      routeMeta: normalizedRouteMeta,
       onEvent(event = {}) {
         if (!threadId) return;
         const normalized = event && typeof event === 'object' ? event : {};

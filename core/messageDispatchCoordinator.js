@@ -245,7 +245,16 @@ function createMessageDispatchCoordinator(deps = {}) {
           senderId,
           shouldSend: freshness && typeof freshness.shouldSend === 'function'
             ? freshness.shouldSend
-            : null
+            : null,
+          source: 'main_reply',
+          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+          triggerReason: 'direct_reply.final_send',
+          topRouteType: routeExecutionPlan.topRouteType,
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+            groupId,
+            messageId: String(sourceMessageId || '').trim(),
+            threadId: String(inboundContext?.threadId || inboundContext?.messageMeta?.threadId || '').trim()
+          })
         });
         const streamOptions = {
           onDelta: streamingDispatcher.onDelta,

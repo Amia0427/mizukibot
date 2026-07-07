@@ -604,8 +604,23 @@ function createMessageRouteFlow(deps = {}) {
             ? freshness.shouldSend
             : null,
           telemetry: {
-            onEvent: typeof inboundContext?.onEvent === 'function' ? inboundContext.onEvent : null
-          }
+            onEvent: typeof inboundContext?.onEvent === 'function' ? inboundContext.onEvent : null,
+            source: 'main_reply',
+            routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+            topRouteType: routeExecutionPlan.topRouteType,
+            triggerReason: 'direct_reply.final_send'
+          },
+          source: 'main_reply',
+          routePolicyKey: getEffectivePolicyKey(routeExecutionPlan),
+          triggerReason: 'direct_reply.final_send',
+          topRouteType: routeExecutionPlan.topRouteType,
+          routeMeta: buildRouteMetaEnvelope(route, routeExecutionPlan, route?.meta?.toolPlanner || route?.meta?.directChatPlanner || null, {
+            groupId,
+            chatType,
+            dispatchBranch: 'direct_reply',
+            requestTrace: cloneTraceForMeta(requestTrace)
+          }),
+          requestTrace: cloneTraceForMeta(requestTrace)
         });
         const replyOptions = {
           onEvent: typeof inboundContext?.onEvent === 'function' ? inboundContext.onEvent : null,

@@ -487,7 +487,16 @@ async function generateDay(askAIByGraph, date = new Date(), options = {}) {
           atSender: false,
           retries: 1,
           waitMs: 300,
-          runtimeConfig: config
+          runtimeConfig: config,
+          source: 'life_scheduler',
+          routePolicyKey: 'proactive/life-broadcast',
+          triggerReason: 'life_scheduler',
+          topRouteType: 'proactive',
+          routeMeta: {
+            groupId,
+            generatedDate: dayKey,
+            broadcastScope: scope
+          }
         });
       } finally {
         releaseInitiativeLock({
@@ -647,7 +656,16 @@ async function generateDay(askAIByGraph, date = new Date(), options = {}) {
           atSender: false,
           retries: 1,
           waitMs: 300,
-          runtimeConfig: config
+          runtimeConfig: config,
+          source: 'life_scheduler',
+          routePolicyKey: 'proactive/life-broadcast',
+          triggerReason: 'manual_broadcast_current',
+          topRouteType: 'proactive',
+          routeMeta: {
+            groupId,
+            generatedDate: dayKey,
+            broadcastScope: 'current'
+          }
         });
         if (!sent) return { handled: true, replyText: '当前群补发失败。' };
         recordSystemGroupSend({
@@ -657,7 +675,9 @@ async function generateDay(askAIByGraph, date = new Date(), options = {}) {
           senderName: '鐟炲笇',
           updatePresence: true,
           updateBotPresence: true,
-          now: Date.now()
+          now: Date.now(),
+          source: 'life_scheduler',
+          routePolicyKey: 'proactive/life-broadcast'
         });
         markLifeBroadcastResult(state, dayKey, groupId, {
           status: 'sent',
