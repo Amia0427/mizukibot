@@ -1,3 +1,11 @@
+## 运行维护 2026-07-07 10:15
+
+- 小目标：检查当前未提交的 `prompts/defaut.txt` 删减会影响哪些真实发送链路，并补最小回归避免普通用户边界块后续被绕过。
+- 影响面：当前 `defaut.txt` 非空时仍会作为 `normal_user_default_prompt` 注入普通用户主回复 stable system blocks、被动群感知回复模型的额外 system message，以及仍可能启用的 `normal_fast_reply` system prompt。管理员私聊/群聊不注入；全局 `config.SYSTEM_PROMPT`、被动群感知决策模型和 user prompt 正文不注入。
+- 最小修复：新增 `tests\normalUserDefaultPromptSendSurfaces.test.js`，直接用当前 `prompts/defaut.txt` fixture 验证普通主回复、被动群感知回复和普通 fast reply 三个真实发送前组装入口均带当前普通用户边界块，并验证管理员隔离与 fast reply 的 `/%` 清洗元数据。
+- 验收：`node scripts\run-tests.js tests\normalUserDefaultPromptSendSurfaces.test.js tests\adminStableSystemPrompt.test.js tests\passiveAwarenessReplySystemPrompt.test.js tests\normalFastReplyRuntime.test.js`、`npm run check:prompts`、`git diff --check`、`node --check tests\normalUserDefaultPromptSendSurfaces.test.js` 通过。
+- 小目标已完成：未恢复 `defaut.txt` 旧边界文案，但当前普通用户边界块的主回复、被动群感知和 fast reply 注入链路已可复跑验收。
+
 ## 运行维护 2026-07-06 20:10
 
 - 小目标：修复关闭 `normal_fast_reply` 后，群聊仍异常主动发送回复的问题。
