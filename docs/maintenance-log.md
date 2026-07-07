@@ -1,3 +1,10 @@
+## 运行维护 2026-07-07 11:29
+
+- 小目标：降低远端服务器内存和磁盘压力，并按确认卸载 AstrBot、SillyTavern。
+- 最小修复：停止并禁用 `astrbot.service`、`sillytavern.service`，删除 `/root/.local/share/uv/tools/astrbot`、`/root/.local/bin/astrbot`、`/root/data`、`/opt/SillyTavern` 及对应 systemd unit；`/www/swap` 从 6M 重建为 2G，journal 上限写入 200M，清理 APT 缓存、旧 snap 修订和语言工具缓存。
+- 验收：`systemctl list-unit-files` 不再显示 AstrBot/SillyTavern，相关进程为空，关键路径均为 `gone`；`free -h` 显示可用内存约 2.2GiB、swap 2.0GiB 可用，`df -hT /` 显示根分区使用率 56%，`journalctl --disk-usage` 为 160M。
+- 小目标已完成：服务器释放磁盘和内存压力，未改动 1Panel、Docker、MySQL、Echo LLM、Sub2API、SullyOS 等其他业务服务。
+
 ## 运行维护 2026-07-07 10:50
 
 - 小目标：仅对普通用户私聊启用敏感词库出口拦截，管理员用户私聊不做敏感词库拦截。
