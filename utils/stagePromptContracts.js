@@ -54,6 +54,8 @@ function isConfiguredAdminUser(options = {}) {
 
 function isNormalUserPromptContext(options = {}) {
   const routeMeta = normalizeObject(options.routeMeta, {});
+  const chatType = normalizeText(options.chatType || options.chat_type || routeMeta.chatType || routeMeta.chat_type);
+  if (chatType !== 'group') return false;
   const userId = normalizeText(
     options.userId
     || options.user_id

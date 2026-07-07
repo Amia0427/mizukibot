@@ -1,3 +1,11 @@
+## 运行维护 2026-07-07 10:49
+
+- 小目标：按新策略收敛普通用户 `prompts/defaut.txt` 的生效面：不进普通私聊，不进被动群感知后回复，只在群聊主回复相关入口生效。
+- 最小修复：`normal_user_default_prompt` 的主回复注入条件从“普通用户”收紧为“普通用户 + group chat”；被动群感知回复模型不再追加该 system message；普通群聊 fast reply 仍通过主 stable block 复用该边界，普通私聊 fast reply 不注入。
+- 兼容修复：stable prompt 缓存键加入聊天 surface，避免同一用户先私聊后群聊时复用私聊 stable layer，导致群聊主回复漏掉 `defaut.txt`。
+- 验收：`node scripts\run-tests.js tests\normalUserDefaultPromptSendSurfaces.test.js tests\adminStableSystemPrompt.test.js tests\passiveAwarenessReplySystemPrompt.test.js tests\passiveAwarenessReplyMemoryPrompt.test.js tests\normalFastReplyRuntime.test.js tests\prepareNodeStablePromptFallback.test.js`、`npm run check:prompts`、相关 `node --check` 和 `git diff --check` 通过。
+- 小目标已完成：普通用户 `defaut.txt` 只覆盖群聊主回复/群聊 fast reply，不再进入普通私聊或被动群感知回复模型。
+
 ## 运行维护 2026-07-07 10:33
 
 - 小目标：收紧群聊出口敏感词 guard，避免用户用“角色扮演/设定”字样绕过政治敏感词库。

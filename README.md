@@ -17,6 +17,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-07-07 10:49 +08:00：普通用户 `prompts/defaut.txt` 注入范围收敛为只在群聊主回复相关入口生效：普通私聊主回复不注入，被动群感知回复不注入，普通群聊主回复和仍可能启用的群聊 `normal_fast_reply` 继续注入；stable prompt 缓存键加入聊天 surface，避免同一用户私聊/群聊串用缓存。验收结果：发送链路回归、主回复 stable prompt、被动回复 prompt、快回复和 prepare fallback 定向测试通过。
+
 更新 2026-07-07 10:33 +08:00：群聊出口敏感词 guard 不再把“角色扮演/设定”等虚构语境当作政治敏感命中的豁免；强政治词仍直接拦，词库命中且出现现实政治语境时仍拦，普通架空设定短词不拦。验收结果：角色扮演设定叠加现实政治样例仍会拦截，普通架空设定样例不拦截。
 
 更新 2026-07-07 10:22 +08:00：私聊并发默认收口为多用户并行、同用户串行：`PRIVATE_INBOUND_GLOBAL_MAX_CONCURRENCY=3`、`PRIVATE_INBOUND_GENERAL_MAX_CONCURRENCY=3`、`PRIVATE_INBOUND_PER_USER_MAX_INFLIGHT=1`；当前本地 `.env` 也按该策略调整。发送成功后的后台持久化现在按 `sessionKey` 串行，避免同一私聊下一轮读到上一轮尚未落盘的短期记忆。小目标完成：私聊多用户并发不再靠放开同用户并发实现。

@@ -140,7 +140,7 @@ function createState() {
       question: '你是谁',
       runtimeQuestionText: '你是谁',
       persistUserText: '你是谁',
-      routeMeta: {},
+      routeMeta: { chatType: 'group', groupId: 'g_prepare_stable_fallback' },
       sessionKey: 's_prepare_stable_fallback',
       allowTools: true,
       routePolicyKey: 'direct_chat/default',

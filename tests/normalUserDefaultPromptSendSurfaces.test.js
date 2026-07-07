@@ -51,10 +51,10 @@ module.exports = (async () => {
     const { buildNormalFastReplyMessages, runNormalFastReply } = require('../core/normalFastReplyRuntime');
     const config = require('../config');
 
-    const mainPrompt = await buildDynamicPrompt(
+    const privateMainPrompt = await buildDynamicPrompt(
       { level: 'stranger', points: 0 },
       'normal-default-surface',
-      '瑞希，群里有人一直追问隐私时你怎么接？',
+      '瑞希，私聊里有人一直追问隐私时你怎么接？',
       null,
       {
         routePolicyKey: 'chat/default',
@@ -63,11 +63,29 @@ module.exports = (async () => {
         memoryContext: {}
       }
     );
-    const mainText = mainPrompt.promptSnapshot.renderedSystemMessages
+    const privateMainText = privateMainPrompt.promptSnapshot.renderedSystemMessages
       .map((message) => String(message.content || ''))
       .join('\n');
-    assert.ok(mainPrompt.promptSnapshot.stableBlockIds.includes('normal_user_default_prompt'));
-    assertContainsCurrentDefaultPrompt(mainText, defaultPrompt, 'normal main reply prompt');
+    assert.ok(!privateMainPrompt.promptSnapshot.stableBlockIds.includes('normal_user_default_prompt'));
+    assert.ok(!privateMainText.includes(defaultPrompt));
+
+    const groupMainPrompt = await buildDynamicPrompt(
+      { level: 'stranger', points: 0 },
+      'normal-default-surface',
+      '瑞希，群里有人一直追问隐私时你怎么接？',
+      null,
+      {
+        routePolicyKey: 'chat/default',
+        topRouteType: 'direct_chat',
+        routeMeta: { chatType: 'group', groupId: 'g-default-surface', userId: 'normal-default-surface' },
+        memoryContext: {}
+      }
+    );
+    const groupMainText = groupMainPrompt.promptSnapshot.renderedSystemMessages
+      .map((message) => String(message.content || ''))
+      .join('\n');
+    assert.ok(groupMainPrompt.promptSnapshot.stableBlockIds.includes('normal_user_default_prompt'));
+    assertContainsCurrentDefaultPrompt(groupMainText, defaultPrompt, 'normal group main reply prompt');
 
     const adminPrompt = await buildDynamicPrompt(
       { level: 'admin', points: 999 },
@@ -88,12 +106,8 @@ module.exports = (async () => {
     assert.ok(!adminText.includes(defaultPrompt));
 
     const passiveMessages = passiveAwareness.buildPassiveReplySystemMessages('normal-default-surface');
-    assert.deepStrictEqual(passiveMessages.map((message) => message.role), ['system', 'system']);
-    assertContainsCurrentDefaultPrompt(
-      passiveMessages.map((message) => message.content).join('\n'),
-      defaultPrompt,
-      'passive awareness reply system messages'
-    );
+    assert.deepStrictEqual(passiveMessages.map((message) => message.role), ['system']);
+    assert.ok(!passiveMessages.map((message) => message.content).join('\n').includes(defaultPrompt));
 
     const passiveAdminMessages = passiveAwareness.buildPassiveReplySystemMessages('admin-default-surface');
     assert.deepStrictEqual(passiveAdminMessages.map((message) => message.role), ['system']);
@@ -111,6 +125,19 @@ module.exports = (async () => {
     });
     assert.ok(fastBuilt.stablePromptBlockIds.includes('normal_user_default_prompt'));
     assertContainsCurrentDefaultPrompt(fastBuilt.messages[0].content, defaultPrompt, 'normal fast reply prompt');
+
+    const privateFastBuilt = buildNormalFastReplyMessages({
+      userId: 'normal-default-surface',
+      routeMeta: { chatType: 'private', userId: 'normal-default-surface' },
+      text: '那就换个话题',
+      sessionKey: 'direct:normal-default-surface'
+    }, {
+      config,
+      chatHistory: {},
+      getRecentSessionContextSummaries: () => []
+    });
+    assert.ok(!privateFastBuilt.stablePromptBlockIds.includes('normal_user_default_prompt'));
+    assert.ok(!privateFastBuilt.messages[0].content.includes(defaultPrompt));
 
     const fastResult = await runNormalFastReply({
       userId: 'normal-default-surface',

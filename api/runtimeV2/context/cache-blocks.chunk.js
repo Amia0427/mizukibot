@@ -83,6 +83,7 @@ function buildPromptCacheKeys(userId = '', routeMeta = {}, options = {}) {
   const stableKey = hashText([
     normalizeText(options.routePolicyKey),
     normalizeText(options.topRouteType),
+    buildPromptSurface(options.topRouteType, normalizedRouteMeta),
     normalizeText(options.reviewMode),
     normalizeText(options.featureFingerprint),
     normalizeText(options.promptModeFingerprint),
