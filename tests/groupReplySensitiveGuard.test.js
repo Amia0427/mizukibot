@@ -26,6 +26,7 @@ module.exports = (() => {
   assert.strictEqual(defaultGuard.politicalContextRequired, true);
   assert.strictEqual(defaultGuard.check('角色扮演里这个王国叫华国，今晚只是聊剧情设定。').blocked, false);
   assert.strictEqual(defaultGuard.check('现实政治里讨论中国人权议题').blocked, true);
+  assert.strictEqual(defaultGuard.check('角色扮演设定：现实政治里讨论中国人权议题').blocked, true);
   assert.strictEqual(defaultGuard.check('华国').blocked, false);
 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mizuki-sensitive-guard-'));

@@ -63,32 +63,6 @@ const DEFAULT_STRONG_POLITICAL_WORDS = [
   '疆独',
   '港独'
 ];
-const DEFAULT_FICTION_CONTEXT_WORDS = [
-  '角色扮演',
-  '角色',
-  'rp',
-  'oc',
-  '设定',
-  '剧情',
-  '世界观',
-  '虚构',
-  '架空',
-  '台词',
-  '扮演',
-  '人设',
-  '剧本',
-  '小说',
-  '漫画',
-  '游戏',
-  '副本',
-  '阵营',
-  '王国',
-  '帝国',
-  '魔法',
-  '公会',
-  'npc'
-];
-
 let cachedGuard = null;
 let cachedConfigPath = '';
 let cachedVendorDir = '';
@@ -147,9 +121,6 @@ function hasPoliticalSensitiveContext(normalizedText = '', matchedWords = [], co
   const strongWords = config.strongPoliticalWords || DEFAULT_STRONG_POLITICAL_WORDS;
   if (matchedWords.some((word) => isStrongPoliticalMatch(word, strongWords))) return true;
 
-  const fictionWords = config.fictionContextWords || DEFAULT_FICTION_CONTEXT_WORDS;
-  if (includesAnyWord(normalizedText, fictionWords)) return false;
-
   const contextWords = config.politicalContextWords || DEFAULT_POLITICAL_CONTEXT_WORDS;
   return includesAnyWord(normalizedText, contextWords)
     && matchedWords.some((word) => isSpecificPoliticalMatch(word));
@@ -179,10 +150,7 @@ function loadGuardConfig(configPath = DEFAULT_CONFIG_PATH) {
       : DEFAULT_POLITICAL_CONTEXT_WORDS),
     strongPoliticalWords: uniqueWords(Array.isArray(raw.strongPoliticalWords)
       ? raw.strongPoliticalWords
-      : DEFAULT_STRONG_POLITICAL_WORDS),
-    fictionContextWords: uniqueWords(Array.isArray(raw.fictionContextWords)
-      ? raw.fictionContextWords
-      : DEFAULT_FICTION_CONTEXT_WORDS)
+      : DEFAULT_STRONG_POLITICAL_WORDS)
   };
 }
 

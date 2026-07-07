@@ -12,11 +12,12 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 - **分层记忆**：短期上下文、会话摘要、用户画像、Memory V3、LanceDB 向量召回、本地知识库协同。
 - **工具调用**：本地命令、诊断、知识检索、图片处理、日程、自定义 skill。
 - **后台学习**：post-reply worker 在回复后异步抽取记忆、维护画像、写日记，不卡主回复。
-- **群聊回复拦截**：群聊主回复发送前使用本地政治敏感词库快照，并要求命中现实政治语境后才替换，降低角色扮演台词误伤；不影响私聊和系统群发任务。
+- **群聊回复拦截**：群聊主回复发送前使用本地政治敏感词库快照，并要求命中现实政治语境后才替换；角色扮演标记不作为豁免，不影响私聊和系统群发任务。
 - **运维诊断**：重启、健康检查、请求 trace、token 预算、NapCat 状态、记忆质量、运行热点一应俱全。
 
 ## 并发与后台线程
 
+更新 2026-07-07 10:33 +08:00：群聊出口敏感词 guard 不再把“角色扮演/设定”等虚构语境当作政治敏感命中的豁免；强政治词仍直接拦，词库命中且出现现实政治语境时仍拦，普通架空设定短词不拦。验收结果：角色扮演设定叠加现实政治样例仍会拦截，普通架空设定样例不拦截。
 更新 2026-07-07 10:29 +08:00：定位今天新出现的 `memoryReranker` 1500ms timeout 来源：本地 7/7 窗口 `data/model-calls.ndjson` 只有 5 条 `memory_rerank`，均为成功，`memory_v3` 4 条最大 1009ms、`memory_write` 1 条 484ms；`data/bot-runtime.err.log` 的 1500ms warning 对应主回复 `chat/default -> runtime_v2_memoryCliTurn -> memory_v3` 召回外层硬预算，不是昨天的 persona worldbook 700ms 路径，也不是新 provider 调用链。现共享 rerank 默认 floor 从 1500ms 收敛到 2000ms，显式短 timeout 保持不变。验收结果：`node tests\memoryReranker.test.js`、`node tests\lowResourceConfig.test.js`、`node tests\personaModules.test.js`、`git diff --check` 通过；配置探针显示 `resolvedDefault=2000`、`explicit120=120`。小目标完成：主回复 Memory V3 rerank 不再贴着 1500ms 外层预算运行。
 
 更新 2026-07-07 10:24 +08:00：新增群聊主动外发总开关 `PROACTIVE_GROUP_OUTBOUND_ENABLED`，默认 `true`，用于统一控制 tick touch / fallback greeting / daily share 群发送 / life scheduler 群广播；设为 `false` 时这些主动群发会跳过并在诊断中显示 `proactive-group-outbound-disabled`，明确 @bot 的主回复不受影响。验收结果：新增总闸、主动入口和运行态诊断回归通过；`npm run diag:runtime -- --json` 可查看 `summary.proactiveGroupOutbound` 当前状态。

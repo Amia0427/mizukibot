@@ -1,3 +1,11 @@
+## 运行维护 2026-07-07 10:33
+
+- 小目标：收紧群聊出口敏感词 guard，避免用户用“角色扮演/设定”字样绕过政治敏感词库。
+- 根因：上一版把 RP/虚构语境作为全局降误伤条件，会让非强政治词在同时出现 RP 标记时不拦，存在提示词式绕过空间。
+- 最小修复：`utils\groupReplySensitiveGuard.js` 删除 RP/虚构语境豁免；默认逻辑收口为强政治词直接拦，或词库命中且文本出现现实政治语境时拦。普通架空设定短词仍不拦。
+- 验收：`node tests\groupReplySensitiveGuard.test.js`、`node --check utils\groupReplySensitiveGuard.js` 通过；新增“角色扮演设定 + 现实政治 + 中国人权”样例仍会拦截。
+- 小目标已完成：角色扮演标记不能抵消现实政治敏感语境。
+
 ## 运行维护 2026-07-07 10:29
 
 - 小目标：检查今天新出现的 `memoryReranker` 1500ms timeout，直接定位新超时来源，不复用昨天 worldbook 700ms 结论。
