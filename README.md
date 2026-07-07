@@ -17,6 +17,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-07-07 17:53 +08:00：定位 `queued request timed out after 30000ms` 为 `default/general` lane 同 session 入站锁前排队：`req_0f82466d6ad433cd` 拿到 `qq-group:1092700300:user:1626492260` 锁后在非 @bot 图片消息的 `visual-cue-probe` 被动群感知链路内运行约 66.3s，后续 `req_a9fd34e2f1c9f29b` 只到 `message_ingress` 未拿锁。修复为给视觉探针单独 3000ms/0 retry 短预算，普通被动决策预算不变；验收结果：被动视觉探针、被动回复、入站并发回归和 `git diff --check` 通过。小目标完成：私聊完全开放状态下，群聊非 @bot 视觉探针不再长时间占住主入站锁。
+
 更新 2026-07-07 11:29 +08:00：已完成远端服务器资源清理，卸载 AstrBot 与 SillyTavern，并将 `/www/swap` 从 6M 重建为 2G；systemd journal 限制为 200M，清理 APT 缓存、旧 snap 修订和语言工具缓存。验收结果：`astrbot`/`sillytavern` 服务与进程均不存在，`/` 使用率降至 56%，可用内存约 2.2GiB，swap 可用 2.0GiB。小目标已完成：释放磁盘和内存压力，且未改动其他业务服务。
 
 更新 2026-07-07 11:10 +08:00：新增统一外发来源诊断，主回复/流式回复、被动群感知、tickEngine、dailyShare、lifeScheduler 和 schedulerRuntime 最终发消息时会在 outbound perf 事件或现有日志里带出 `source`、`routePolicyKey`、`triggerReason`。验收结果：`node tests\outboundMessageDiagnostics.test.js`、`node tests\messageHandlerCreateCommand.test.js`、`node tests\passiveAwarenessDecisionEmptyOutput.test.js`、`node tests\passiveAwarenessBotTopicGuard.test.js` 通过。

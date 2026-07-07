@@ -1,3 +1,11 @@
+## 运行维护 2026-07-07 17:53
+
+- 小目标：检查今天新出现的 `queued request timed out after 30000ms`，定位卡在拿锁前的 lane/链路，并在私聊完全开放运行态下做最小修复。
+- 根因：`data\bot-runtime.err.log` 的失败来自 `[inbound-concurrency] queued request timed out after 30000ms`；`request-trace` 显示 `req_0f82466d6ad433cd` 是 `group/1092700300/user 1626492260` 的 `default/general` lane，已拿到 `qq-group:1092700300:user:1626492260` 同 session 入站锁，后续 `req_a9fd34e2f1c9f29b` 只有 `message_ingress`、没有 `message_ingress_lock_acquired`。`bot-runtime.out.log` 同窗口显示前者是非 @bot 图片消息，走 `visual-cue-probe` 被动群感知并在锁内运行约 66.3s，后者排队 30s 后超时。
+- 最小修复：不放开同用户并发；新增 `PASSIVE_AWARENESS_VISUAL_CUE_PROBE_TIMEOUT_MS=3000` 和 `PASSIVE_AWARENESS_VISUAL_CUE_PROBE_RETRIES=0`，仅让非 @bot 视觉探针走短预算，普通被动决策仍使用 `PASSIVE_AWARENESS_TIMEOUT_MS` / `PASSIVE_AWARENESS_RETRIES`。
+- 验收：`node tests\passiveAwarenessVisualCueProbe.test.js` 验证视觉探针请求为 `__timeoutMs=3000/retries=0`；`node tests\passiveAwarenessDecisionEmptyOutput.test.js`、`node tests\passiveAwarenessStrongCueForceReply.test.js`、`node tests\passiveAwarenessVisionInput.test.js`、`node tests\concurrencyBackpressure.test.js`、`node tests\messageHandlerInboundConcurrency.test.js`、`node --check core\passiveGroupAwareness.model.chunk.js`、`node --check core\passiveGroupAwareness.runtime.chunk.js`、`node --check config\index.js`、`git diff --check` 通过；配置探针显示私聊完全开放 `PRIVATE_CHAT_TEST_USER_IDS=["*"]`，默认入站 `global/general/admin/perUser=5/4/2/1`，私聊入站 `3/3/3/1`，视觉探针短预算 `3000ms/0`。
+- 小目标已完成：`default/general` 同 session 非 @bot 视觉探针不再用 15s * 多次重试长占主入站锁，私聊完全开放状态下不再由该链路把后续消息卡死在拿锁前。
+
 ## 运行维护 2026-07-07 11:29
 
 - 小目标：降低远端服务器内存和磁盘压力，并按确认卸载 AstrBot、SillyTavern。

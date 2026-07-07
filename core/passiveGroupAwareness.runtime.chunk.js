@@ -256,6 +256,7 @@ async function handlePassiveGroupAwareness({
         presenceSnapshot
       },
       directedContext,
+      visualCueProbe,
       now
     });
   } catch (error) {
