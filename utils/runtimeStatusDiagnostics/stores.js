@@ -124,10 +124,9 @@ function buildLangGraphV2StoreSummary({
       countsByType: countByValue(events, (event) => event?.type)
     };
   });
-  const staleRunningCheckpoints = checkpoints
+  const allStaleRunningCheckpoints = checkpoints
     .filter((item) => item.stale)
-    .sort((a, b) => b.ageMs - a.ageMs)
-    .slice(0, 20);
+    .sort((a, b) => b.ageMs - a.ageMs);
   return {
     checkpointDir: normalizedCheckpointDir,
     eventDir: normalizedEventDir,
@@ -139,9 +138,9 @@ function buildLangGraphV2StoreSummary({
     totalEventBytes: sumStoreBytes(eventFiles),
     countsByCheckpointStatus: countByValue(checkpoints, (item) => item.status),
     activeCheckpointCount: checkpoints.filter((item) => item.active).length,
-    staleRunningCheckpointCount: staleRunningCheckpoints.length,
+    staleRunningCheckpointCount: allStaleRunningCheckpoints.length,
     staleCheckpointMs,
-    staleRunningCheckpoints,
+    staleRunningCheckpoints: allStaleRunningCheckpoints.slice(0, 20),
     latestCheckpoints: checkpoints
       .slice()
       .sort((a, b) => a.ageMs - b.ageMs)
