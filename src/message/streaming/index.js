@@ -1,4 +1,5 @@
 const { sanitizeUserFacingText } = require('../../../utils/userFacingText');
+const defaultConfig = require('../../../config');
 const {
   findExplicitSegmentBreakIndex,
   findNaturalSplitIndex,
@@ -6,6 +7,7 @@ const {
   getStreamingSplitIndex
 } = require('../../../core/streamingSegmentation');
 const { getGroupReplySensitiveGuard } = require('../../../utils/groupReplySensitiveGuard');
+const { isAdminUserId } = require('../../../utils/privilegedPrivateChat');
 
 function getReplyChunkChars(config = {}) {
   const n = Number(config.AI_REPLY_CHUNK_CHARS);
@@ -104,20 +106,25 @@ function createStreamingDispatcher({
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
       let sendText = text;
-      if (!isPrivate) {
+      const adminConfig = effectiveConfig && Object.keys(effectiveConfig).length ? effectiveConfig : defaultConfig;
+      const shouldGuard = !isPrivate || !isAdminUserId(userId, adminConfig);
+      if (shouldGuard) {
         const guard = getGroupReplySensitiveGuard();
         const check = guard.check(text);
         if (check.blocked) {
           sendText = guard.replacementText;
-          console.warn('[reply-sensitive-guard] group reply blocked', {
+          console.warn('[reply-sensitive-guard] reply blocked', {
+            channel: isPrivate ? 'private' : 'group',
             groupId: String(groupId || '').trim(),
+            userId: String(userId || '').trim(),
             senderId: String(senderId || '').trim(),
             matchedCount: check.matchedWords.length
           });
           emitStreamingTelemetry('group_reply_sensitive_blocked', {
             node: 'reply_sensitive_guard',
-            channel: 'group',
+            channel: isPrivate ? 'private' : 'group',
             groupId: String(groupId || '').trim(),
+            userId: String(userId || '').trim(),
             senderId: String(senderId || '').trim(),
             matchedCount: check.matchedWords.length,
             source: 'stream_chunk'

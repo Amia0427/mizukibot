@@ -23,7 +23,9 @@ const {
   getGroupChatStreamSendGapMs,
   getStreamingSplitIndex
 } = require('./streamingSegmentation');
+const config = require('../config');
 const { getGroupReplySensitiveGuard } = require('../utils/groupReplySensitiveGuard');
+const { isAdminUserId } = require('../utils/privilegedPrivateChat');
 
 function createReplyTelemetryEvent(type = '', payload = {}) {
   return {
@@ -262,19 +264,35 @@ function emitSensitiveGuardEvent(telemetry = null, payload = {}) {
   } catch (_) {}
 }
 
-function applyGroupReplySensitiveGuard(text = '', context = {}) {
+function shouldApplyReplySensitiveGuard(context = {}, runtimeConfig = {}) {
+  const channel = String(context.channel || '').trim().toLowerCase();
+  if (channel === 'group') return true;
+  if (channel !== 'private') return false;
+  const effectiveConfig = runtimeConfig && Object.keys(runtimeConfig).length ? runtimeConfig : config;
+  return !isAdminUserId(context.userId || context.senderId, effectiveConfig);
+}
+
+function applyReplySensitiveGuard(text = '', context = {}, runtimeConfig = {}) {
+  if (!shouldApplyReplySensitiveGuard(context, runtimeConfig)) {
+    return { text, blocked: false, matchedCount: 0 };
+  }
   const guard = getGroupReplySensitiveGuard();
   const check = guard.check(extractReplyTextValue(text));
   if (!check.blocked) return { text, blocked: false, matchedCount: 0 };
 
   const matchedCount = check.matchedWords.length;
-  console.warn('[reply-sensitive-guard] group reply blocked', {
+  const channel = String(context.channel || '').trim().toLowerCase() || 'group';
+  console.warn('[reply-sensitive-guard] reply blocked', {
+    channel,
     groupId: String(context.groupId || '').trim(),
+    userId: String(context.userId || '').trim(),
     senderId: String(context.senderId || '').trim(),
     matchedCount
   });
   emitSensitiveGuardEvent(context.telemetry, {
+    channel,
     groupId: String(context.groupId || '').trim(),
+    userId: String(context.userId || '').trim(),
     senderId: String(context.senderId || '').trim(),
     matchedCount,
     source: String(context.source || '').trim()
@@ -342,13 +360,20 @@ function createStreamingDispatcher({
       if (typeof shouldSend === 'function' && shouldSend() === false) return false;
 
       const guarded = isPrivate
-        ? { text, blocked: false }
-        : applyGroupReplySensitiveGuard(text, {
+        ? applyReplySensitiveGuard(text, {
+            channel: 'private',
+            userId,
+            senderId,
+            telemetry,
+            source: 'stream_chunk'
+          }, effectiveConfig)
+        : applyReplySensitiveGuard(text, {
+            channel: 'group',
             groupId,
             senderId,
             telemetry,
             source: 'stream_chunk'
-          });
+          }, effectiveConfig);
       const sendText = guarded.text;
 
       const payload = isPrivate
@@ -508,12 +533,13 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       replyLength: String(replyText || '').trim().length
     });
 
-    const guardedReply = applyGroupReplySensitiveGuard(replyText, {
+    const guardedReply = applyReplySensitiveGuard(replyText, {
+      channel: 'group',
       groupId,
       senderId,
       telemetry,
       source: 'send_group_reply'
-    });
+    }, runtimeConfig);
     const sent = await sendSystemGroupReply({
       sendWithRetry,
       groupId,
@@ -585,10 +611,16 @@ function createMessageReplyRuntime({ sendWithRetry, runtimeConfig = {}, inboundT
       replyLength: String(replyText || '').trim().length
     });
 
+    const guardedReply = applyReplySensitiveGuard(replyText, {
+      channel: 'private',
+      userId,
+      telemetry,
+      source: 'send_private_reply'
+    }, runtimeConfig);
     const sent = await sendSystemPrivateReply({
       sendWithRetry,
       userId,
-      replyText,
+      replyText: guardedReply.text,
       retries,
       waitMs,
       runtimeConfig

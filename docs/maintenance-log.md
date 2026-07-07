@@ -1,3 +1,10 @@
+## 运行维护 2026-07-07 10:50
+
+- 小目标：仅对普通用户私聊启用敏感词库出口拦截，管理员用户私聊不做敏感词库拦截。
+- 最小修复：`core\messageReplyRuntime.js` 的出口 guard 从仅群聊改为按 channel/user 判定；群聊继续拦截，普通私聊拦截，管理员私聊通过 `ADMIN_USER_IDS` 豁免。`src\message\streaming\index.js` 同步覆盖独立流式发送实现。
+- 验收：`node tests\messageReplyRuntimeFreshness.test.js`、`node --check core\messageReplyRuntime.js`、`node --check src\message\streaming\index.js` 通过；普通私聊非流式/流式命中测试词会替换，管理员私聊同文本原样发送。
+- 小目标已完成：普通用户私聊保留敏感词库兜底，管理员私聊不受该词库拦截。
+
 ## 运行维护 2026-07-07 10:49
 
 - 小目标：按新策略收敛普通用户 `prompts/defaut.txt` 的生效面：不进普通私聊，不进被动群感知后回复，只在群聊主回复相关入口生效。
