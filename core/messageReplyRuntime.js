@@ -25,11 +25,11 @@ const {
 } = require('./streamingSegmentation');
 const config = require('../config');
 const { getGroupReplySensitiveGuard } = require('../utils/groupReplySensitiveGuard');
+const { isAdminUserId } = require('../utils/privilegedPrivateChat');
 const {
   buildOutboundMessageMeta,
   recordOutboundMessageEvent
 } = require('./outboundMessageDiagnostics');
-const { isAdminUserId } = require('../utils/privilegedPrivateChat');
 
 function createReplyTelemetryEvent(type = '', payload = {}) {
   return {
@@ -262,7 +262,6 @@ function emitSensitiveGuardEvent(telemetry = null, payload = {}) {
   try {
     telemetry.onEvent(createReplyTelemetryEvent('group_reply_sensitive_blocked', {
       node: 'reply_sensitive_guard',
-      channel: 'group',
       ...payload
     }));
   } catch (_) {}

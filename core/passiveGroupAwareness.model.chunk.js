@@ -138,10 +138,33 @@ function resolvePassiveAwarenessReplyProvider({ useMainReplyModel, baseUrl, mode
   return '';
 }
 
-function buildPassiveReplySystemMessages() {
-  return [
+function isAdminUserId(userId = '') {
+  const normalizedUserId = normalizeText(userId);
+  if (!normalizedUserId) return false;
+  return (Array.isArray(config.ADMIN_USER_IDS) ? config.ADMIN_USER_IDS : [])
+    .map((item) => normalizeText(item))
+    .filter(Boolean)
+    .includes(normalizedUserId);
+}
+
+function buildPassiveReplySystemMessages(senderId = '') {
+  const messages = [
     { role: 'system', content: 'You generate a final passive QQ group reply. Output only the reply text.' }
   ];
+  const normalizedSenderId = normalizeText(senderId);
+  if (!normalizedSenderId || isAdminUserId(normalizedSenderId)) return messages;
+  const normalUserBlocks = (Array.isArray(config.SYSTEM_PROMPT_BLOCKS) ? config.SYSTEM_PROMPT_BLOCKS : [])
+    .filter((block) => {
+      const appliesWhen = block?.appliesWhen && typeof block.appliesWhen === 'object' ? block.appliesWhen : {};
+      const content = String(block?.content || '').trim();
+      return (appliesWhen.normalUserOnly === true || appliesWhen.normal_user_only === true)
+        && content;
+    })
+    .sort((a, b) => Number(a?.priority || 0) - Number(b?.priority || 0));
+  for (const block of normalUserBlocks) {
+    messages.push({ role: 'system', content: String(block.content || '').trim() });
+  }
+  return messages;
 }
 
 function resolveDecisionModelBudget(visualCueProbe = false) {

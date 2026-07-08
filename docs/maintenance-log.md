@@ -60,6 +60,7 @@
 - 最小修复：新增 `scripts\archive-langgraph-v2-stale-checkpoints.js`，默认 dry-run，必须显式 `--apply`；只归档超过阈值、已到 direct reply 终态且有 final output/finalReply 的 running checkpoint，并把诊断 stale 总数从样本上限中拆出来。实际将 25 个历史 checkpoint 移到 `data\langgraph_v2_checkpoints_archive\stale-history-20260707-langgraph-v2`，保留原事件文件和 `manifest.json`。
 - 验收：`node scripts\run-tests.js tests\langGraphV2StaleCheckpointArchive.test.js tests\runtimeStatusDiagnostics.test.js` 通过；真实 dry-run/apply 均命中 25 件且 `unsafeThreadIds=[]`；manifest 显示 `selectedCount=25/moved=25`，事件文件无缺失，源 checkpoint 目录无残留；`npm run diag:runtime -- --json` 显示 `overallStatus=ok`、`signals=[]`、`activeCheckpoints=0`、`staleRunningCheckpoints=0`。
 - 小目标已完成：历史 LangGraph V2 stale running checkpoint 已隔离，不再影响运行态诊断，未删除事件日志或真实活跃会话数据。
+
 ## 运行维护 2026-07-07 10:24
 
 - 小目标：补一个统一的群聊主动外发总开关和状态探针，一处关闭 tickEngine、dailyShare、lifeScheduler 这类主动群发，不影响明确 @bot 的正常主回复。
