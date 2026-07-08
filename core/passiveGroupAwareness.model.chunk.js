@@ -1,8 +1,14 @@
-function shouldUseLocalDecisionFallback({ decision, addressee, score }) {
+function shouldUseLocalDecisionFallback({ decision, addressee, score, visualCueProbe = false, cheapGateLevel = '' }) {
   const reason = String(decision?.reason || '');
   if (!['empty-output', 'invalid-json', 'missing-awareness-model-config'].includes(reason) && !reason.startsWith('decision-call-failed:')) return false;
-  if (!['bot_presence_check', 'bot_direct'].includes(String(addressee || ''))) return false;
-  return Number(score || 0) >= Math.max(60, Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60));
+  const normalizedAddressee = String(addressee || '');
+  if (['bot_presence_check', 'bot_direct'].includes(normalizedAddressee)) {
+    return String(cheapGateLevel || '') === 'strong_candidate'
+      && Number(score || 0) >= Math.max(60, Number(config.PASSIVE_AWARENESS_MIN_TRIGGER_SCORE || 60));
+  }
+  return visualCueProbe === true
+    && String(cheapGateLevel || '') === 'candidate'
+    && ['group_bot_topic', 'group_open_question'].includes(normalizedAddressee);
 }
 
 function shouldForceStrongCueReply({ decision, addressee, score }) {

@@ -17,6 +17,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-07-08 13:44 +08:00：定位今天 `data/passive-awareness-decisions.jsonl` 中群 `1092700300`/`597801651` 的图片 `visual-cue-probe` 静默不回复：真实 decision 路由为 `passive-awareness/decision -> catiecli.sukaka.top -> gcli-gemini-3-flash-preview-nothinking`，视觉探针按昨天修复走 3000ms/0 retry，408 被 catch 后只生成 `shouldReply=false`，旧兜底又只覆盖 `bot_direct/bot_presence_check`。最小修复为仅在 `visual-cue-probe` 且本地 addressee 为 `group_bot_topic/group_open_question` 时允许 decision 失败后进入回复模型，不放开纯 `unclear` 图片。验收结果：新增视觉探针 408 兜底回归、原视觉探针、强 cue、bot topic guard、语法检查和 `git diff --check` 通过。小目标完成：图片类 bot 话题/开放问题在 decision 上游 408 抖动时不再被直接静默误杀。
+
 更新 2026-07-07 17:53 +08:00：定位 `queued request timed out after 30000ms` 为 `default/general` lane 同 session 入站锁前排队：`req_0f82466d6ad433cd` 拿到 `qq-group:1092700300:user:1626492260` 锁后在非 @bot 图片消息的 `visual-cue-probe` 被动群感知链路内运行约 66.3s，后续 `req_a9fd34e2f1c9f29b` 只到 `message_ingress` 未拿锁。修复为给视觉探针单独 3000ms/0 retry 短预算，普通被动决策预算不变；验收结果：被动视觉探针、被动回复、入站并发回归和 `git diff --check` 通过。小目标完成：私聊完全开放状态下，群聊非 @bot 视觉探针不再长时间占住主入站锁。
 
 更新 2026-07-07 11:29 +08:00：已完成远端服务器资源清理，卸载 AstrBot 与 SillyTavern，并将 `/www/swap` 从 6M 重建为 2G；systemd journal 限制为 200M，清理 APT 缓存、旧 snap 修订和语言工具缓存。验收结果：`astrbot`/`sillytavern` 服务与进程均不存在，`/` 使用率降至 56%，可用内存约 2.2GiB，swap 可用 2.0GiB。小目标已完成：释放磁盘和内存压力，且未改动其他业务服务。

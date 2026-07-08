@@ -267,9 +267,14 @@ async function handlePassiveGroupAwareness({
     };
   }
 
-  const allowDecisionFallback = cheapGate.level === 'strong_candidate'
-    && config.PASSIVE_AWARENESS_STRONG_CUE_BYPASS_ON_DECISION_FAILURE
-    && shouldUseLocalDecisionFallback({ decision, addressee, score });
+  const allowDecisionFallback = config.PASSIVE_AWARENESS_STRONG_CUE_BYPASS_ON_DECISION_FAILURE
+    && shouldUseLocalDecisionFallback({
+      decision,
+      addressee,
+      score,
+      visualCueProbe,
+      cheapGateLevel: cheapGate.level
+    });
   const forceStrongCueReply = cheapGate.level === 'strong_candidate'
     && shouldForceStrongCueReply({ decision, addressee, score });
   const decisionReason = normalizeText(decision.reason || '');

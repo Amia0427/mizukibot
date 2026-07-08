@@ -1,3 +1,11 @@
+## 运行维护 2026-07-08 13:44
+
+- 小目标：检查今天新出现的 `visual-cue-probe` / `decision-call-failed:Request failed with status code 408`，定位群 `1092700300` 与 `597801651` 图片消息为什么被直接判成不回复，并做最小修复。
+- 根因：`data\passive-awareness-decisions.jsonl` 中 2026-07-08 的图片样本已进入 `visual-cue-probe`，但 `data\model-calls.ndjson` 显示真实 decision 调用是 `route_policy_key=passive-awareness/decision`、`top_route_type=lookup`、`host=catiecli.sukaka.top`、`model=gcli-gemini-3-flash-preview-nothinking`、`attempts=1`、`duration_ms≈3000` 后 408；昨天的短预算修复让视觉探针不再长占锁，但失败被 catch 为 `shouldReply=false`，旧本地兜底只覆盖 `bot_direct/bot_presence_check`，所以 `group_open_question/group_bot_topic` 图片候选被静默误杀。
+- 最小修复：不增加视觉探针重试、不放开所有图片；仅当 decision 失败且当前 cheap gate 是 `visual-cue-probe`、本地 addressee 为 `group_bot_topic` 或 `group_open_question` 时，允许继续进入被动回复模型。纯 `unclear` 图片仍由 decision 成功结果决定，避免无依据插话。
+- 验收：`node --check core\passiveGroupAwareness.model.chunk.js`、`node --check core\passiveGroupAwareness.runtime.chunk.js`、`node --check tests\passiveAwarenessVisualCueProbeFallback.test.js`、`node tests\passiveAwarenessVisualCueProbeFallback.test.js`、`node tests\passiveAwarenessVisualCueProbe.test.js`、`node tests\passiveAwarenessStrongCueForceReply.test.js`、`node tests\passiveAwarenessBotTopicGuard.test.js`、`git diff --check` 通过。
+- 小目标已完成：图片类 bot 话题或开放问题在 decision 上游 408 抖动时不再被直接静默判成不回复，同时不扩大到普通纯图闲聊。
+
 ## 运行维护 2026-07-07 17:53
 
 - 小目标：检查今天新出现的 `queued request timed out after 30000ms`，定位卡在拿锁前的 lane/链路，并在私聊完全开放运行态下做最小修复。
