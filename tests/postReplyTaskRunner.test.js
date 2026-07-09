@@ -23,6 +23,8 @@ module.exports = (async () => {
   ]);
   assert.strictEqual(TASK_DEFINITIONS.vectorMaintenance.failurePolicy, 'nonfatal');
   assert.deepStrictEqual(TASK_DEFINITIONS.materialize.dependsOn, ['memoryEvent']);
+  assert.strictEqual(TASK_DEFINITIONS.selfImprovement.upstreamFailurePolicy, 'degrade');
+  assert.strictEqual(TASK_DEFINITIONS.enrich.upstreamFailurePolicy, 'degrade');
 
   const persisted = [];
   const runner = createPostReplyTaskRunner({
@@ -90,6 +92,40 @@ module.exports = (async () => {
   assert.strictEqual(fatalRunner.getJob().completedTasks.memoryLearning, false);
   assert.strictEqual(fatalRunner.getJob().taskStates.memoryLearning.status, 'failed');
   assert.ok(persisted.length >= 2, 'runner should persist task transitions when queue is available');
+
+  const retryable495Runner = createPostReplyTaskRunner({
+    job: {
+      jobId: 'retryable_495_job',
+      phase: 'core',
+      attempt: 0,
+      completedTasks: {},
+      taskStates: {}
+    }
+  });
+  await assert.rejects(
+    () => retryable495Runner.runTask('selfImprovement', async () => {
+      throw new Error('Request failed with status code 495');
+    }),
+    /495/
+  );
+  assert.strictEqual(retryable495Runner.getJob().taskStates.selfImprovement.status, 'failed');
+
+  const final495Runner = createPostReplyTaskRunner({
+    job: {
+      jobId: 'final_495_job',
+      phase: 'core',
+      attempt: 1,
+      completedTasks: {},
+      taskStates: {}
+    }
+  });
+  await final495Runner.runTask('selfImprovement', async () => {
+    throw new Error('Request failed with status code 495');
+  });
+  const final495Job = final495Runner.getJob();
+  assert.strictEqual(final495Job.completedTasks.selfImprovement, true);
+  assert.strictEqual(final495Job.taskStates.selfImprovement.status, 'skipped');
+  assert.strictEqual(final495Job.taskStates.selfImprovement.lastError, 'upstream_495_degraded');
 
   console.log('postReplyTaskRunner.test.js passed');
 })();

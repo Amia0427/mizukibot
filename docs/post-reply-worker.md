@@ -1,6 +1,8 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-06-12 07:10 +08:00
+更新时间：2026-07-09 09:01 +08:00
+
+更新 2026-07-09 09:01 +08:00：上游 `Request failed with status code 495` 现在在 post-reply worker 中归类为 transient；core 的 `memoryLearning/selfImprovement` 和 enrich 的 `runEnrichPhase` 会先按相位重试，最后一次仍为 495 时降级为 `skipped/upstream_495_degraded` 并继续收尾，不再把队列任务留在 failed。现场两个 2026-07-08 failed job 已修复为 done，验收结果：`node scripts\run-tests.js tests\postReplyFailureRequeue.test.js tests\postReplyTaskRunner.test.js tests\postReplyWorkerRuntime.test.js` 通过，`npm run diag:runtime -- --json` 显示 post-reply 队列 `queued=0/processing=0/failed=0`。
 
 更新 2026-06-23 09:42 +08:00：后台学习扩容为中等机器默认档，`POST_REPLY_WORKER_CONCURRENCY=2`，压力态由 `POST_REPLY_WORKER_PRESSURE_MAX_CONCURRENCY=1` 回落；Memory V3 物化优先进入受控 `worker_threads` 池，失败或禁用时回退同步路径。embedding backfill 和图片视觉摘要默认并发为 2。验收结果：`node tests/workerThreadPool.test.js`、`node tests/memoryV3MaterializeWorker.test.js`、`node tests/postReplyWorkerConcurrency.test.js`、`node tests/postReplyPressurePolicy.test.js`、`node tests/memoryV3EmbeddingBackfillConcurrency.test.js`、`node tests/imageVisualSummaryConcurrency.test.js`、`node tests/runtimeHotspotsDiagnostics.test.js` 均通过；`diag:main-reply-lag` 仍把 24h 主要瓶颈判为 `main_model`，避免把主模型 30s 级延迟误报成线程池问题。
 

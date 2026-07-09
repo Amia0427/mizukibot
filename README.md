@@ -250,6 +250,7 @@ data/       本地运行数据，默认不提交
 ---
 
 更新时间：2026-07-09 09:02 +08:00
+维护记录：2026-07-09 09:01 +08:00，已修复 post-reply worker 对上游 495 的收尾路径：495 归类为 transient，模型型后台任务在相位最后一次重试仍失败时降级为 `skipped/upstream_495_degraded` 并继续收尾。验收结果：两个 2026-07-08 failed post-reply job 已转为 done；定向 post-reply 测试通过，`npm run diag:runtime -- --json` 显示 post-reply 队列 `queued=0/processing=0/failed=0`。小目标已完成。
 维护记录：2026-07-09 09:02 +08:00，已完成运行期写盘降频：NapCat 原始包日志默认关闭且显式开关可控，Memory V3 事件写入改为批量缓冲；残留 embedding tmp 复查时已不存在，未执行删除。验收结果：相关语法检查与 `node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。
 维护记录：2026-07-06 15:15 +08:00，群聊出口敏感词库保持启用，并新增默认政治语境门槛；单独命中词库不再直接替换，明确现实政治语境仍会拦截。验收结果：角色扮演样例不拦截，现实政治样例仍拦截，群聊发送路径回归通过。
 维护记录：2026-07-05 09:28 +08:00，已将群聊出口敏感词库默认范围收窄到政治相关分类，仅加载 `反动词库.txt` 和 `政治类型.txt`；色情、枪爆、暴恐不再作为默认群聊出口词库拦截来源。验收结果：默认配置探针确认词量降到政治相关词库集合，非政治样例不再拦截，政治相关样例仍拦截；相关敏感词 guard 回归通过。

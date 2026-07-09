@@ -2,6 +2,12 @@ const {
   getTaskDefinition
 } = require('./taskRegistry');
 const {
+  getPhaseMaxAttempts
+} = require('../postReplyJobQueue/jobShape');
+const {
+  isDegradablePostReplyUpstreamError
+} = require('./errorClassifier');
+const {
   isTaskCompleted,
   markTaskCompleted,
   markTaskFailed,
@@ -92,6 +98,40 @@ function createPostReplyTaskRunner(options = {}) {
     return currentJob;
   }
 
+  function shouldDegradeTaskFailure(taskDefinition = {}, error = '') {
+    if (taskDefinition.upstreamFailurePolicy !== 'degrade') return false;
+    if (!isDegradablePostReplyUpstreamError(error)) return false;
+    const maxAttempts = getPhaseMaxAttempts(currentJob.phase);
+    const currentAttempt = Math.max(0, Number(currentJob.attempt || 0) || 0) + 1;
+    return currentAttempt >= maxAttempts;
+  }
+
+  function degradeTask(taskRun = {}, error = '') {
+    const reason = 'upstream_495_degraded';
+    logStepFailed(taskRun.step, error);
+    trace('step_degraded', {
+      step: taskRun.step,
+      taskKey: taskRun.taskKey,
+      reason,
+      error: error?.message || error
+    });
+    currentJob = completeTask(taskRun, {
+      status: 'skipped',
+      lastError: reason,
+      result: {
+        degraded: true,
+        reason
+      }
+    });
+    trace('step_done', {
+      step: taskRun.step,
+      degraded: true,
+      reason
+    });
+    heartbeatAndCheckCancel(taskRun.step);
+    return currentJob;
+  }
+
   async function runTask(taskKey = '', handler, taskOptions = {}) {
     const definition = getTaskDefinition(taskKey);
     const step = normalizeText(taskOptions.step || definition.step || taskKey);
@@ -123,6 +163,9 @@ function createPostReplyTaskRunner(options = {}) {
       return currentJob;
     } catch (error) {
       const nonFatal = taskOptions.nonFatal === true || definition.failurePolicy === 'nonfatal';
+      if (!nonFatal && shouldDegradeTaskFailure(definition, error)) {
+        return degradeTask(taskRun, error);
+      }
       if (nonFatal) {
         logStepFailed(step, error);
         trace('step_failed', { step, error: error?.message || error });

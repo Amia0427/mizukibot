@@ -4,6 +4,12 @@ function normalizeErrorText(jobOrError = {}) {
   return String(jobOrError?.lastError || jobOrError?.error || jobOrError?.message || '');
 }
 
+function isUpstreamHttp495PostReplyError(jobOrError = {}) {
+  const error = normalizeErrorText(jobOrError).toLowerCase();
+  return /(?:status code|http status|http[_\s-]?status|http[_\s-]?)\s*495\b/.test(error)
+    || /\bhttp_495\b/.test(error);
+}
+
 function classifyPostReplyJobError(jobOrError = {}) {
   const directClass = String(jobOrError?.errorClass || jobOrError?.code || '').trim();
   if (directClass === 'canceled' || directClass === 'POST_REPLY_JOB_CANCELED') return 'canceled';
@@ -15,6 +21,7 @@ function classifyPostReplyJobError(jobOrError = {}) {
   if (/(401|403|404|forbidden|unauthorized|not found|model not supported|unsupported model)/.test(error)) {
     return 'terminal';
   }
+  if (isUpstreamHttp495PostReplyError(jobOrError)) return 'transient';
   if (/(429|rate limit|too many requests|408|425|500|502|503|504|timeout|timed out|temporarily unavailable|econnreset|etimedout|network)/.test(error)) {
     return 'transient';
   }
@@ -41,11 +48,17 @@ function isRequeueSafePostReplyError(jobOrError = {}) {
   return isTransientPostReplyError(jobOrError);
 }
 
+function isDegradablePostReplyUpstreamError(jobOrError = {}) {
+  return isUpstreamHttp495PostReplyError(jobOrError);
+}
+
 module.exports = {
   classifyPostReplyJobError,
+  isDegradablePostReplyUpstreamError,
   isPostReplyErrorClass,
   isRequeueSafePostReplyError,
   isTerminalPostReplyError,
   isTransientPostReplyError,
+  isUpstreamHttp495PostReplyError,
   normalizeErrorText
 };
