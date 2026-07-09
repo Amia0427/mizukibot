@@ -1263,3 +1263,12 @@
 - 补跑结果：已补齐 `1960901788` 的 `2026-06-23` 至 `2026-07-04` summary，`2026-07-05` 由新调度生成；`2026-07-06` 是当前日，按安全策略等 `2026-07-07 00:10 +08:00` 后汇总。
 - 验收：`node scripts\backfill-daily-journal-summaries.js --user-id 1960901788 --from 2026-06-23 --to 2026-07-05` 显示 13 天全部 `skipped_existing`；`npm run diag:runtime -- --json` 显示 `summaryDueDay=2026-07-05`、`tickEngineEnabled=false`、`standaloneEnabled=true`，且 `1960901788` 缺口不再包含 `2026-06-23` 至 `2026-07-05`。
 - 小目标已完成：daily journal summary 在 tick engine 关闭时仍会独立调度，目标用户指定窗口已补齐且当前日不会被误报为缺口。
+
+## 运行维护 2026-07-09 09:02
+
+- 目标：降低运行期对磁盘寿命不友好的高频写盘风险，不改消息主链路行为。
+- 结论：空闲态未发现持续高频落盘；风险主要来自高消息流量下每条 OneBot message 同步写 `napcat-message-events.jsonl`，以及每个 Memory V3 事件立即 flush。
+- 最小修复：新增 `FOLLOWER_PACKET_LOG_ENABLED`，NapCat 原始包日志默认关闭，仅在 follower 监控或显式开关开启时写入；Memory V3 事件复用 JSONL writer 批量缓冲，读取/列事件文件前刷当前进程待写队列，保持同进程读写一致。
+- 范围控制：未改 post-reply 队列、LangGraph 事件格式和 SQLite WAL；这些属于更大结构性优化。原先发现的 `embedding_cache.jsonl.*.tmp` 复查时已不存在，未执行删除。
+- 验收：`node --check core\napcatLogFollower.js`、`node --check utils\memory-v3\events.js`、`node --check tests\napcatPacketLogConfig.test.js`、`node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。`tests\napcatLogFollower.test.js` 与 `tests\memoryCliV3.test.js` 直接运行会留下外部 DNS 句柄，本轮未作为验收依据。
+- 小目标已完成：默认运行不再持续记录 NapCat 原始包，Memory V3 事件写入不再每条同步刷盘，同时保留必要诊断开关和同进程读取一致性。

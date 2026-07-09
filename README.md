@@ -17,6 +17,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-07-09 09:02 +08:00：已收敛运行期写盘风险：NapCat 原始包日志默认关闭，仅在 follower 监控或 `FOLLOWER_PACKET_LOG_ENABLED=true` 时写入；Memory V3 事件从每条同步刷盘改为批量缓冲，同进程读取前会刷待写队列。验收结果：语法检查和 `node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。小目标已完成。
+
 更新 2026-07-08 13:44 +08:00：定位今天 `data/passive-awareness-decisions.jsonl` 中群 `1092700300`/`597801651` 的图片 `visual-cue-probe` 静默不回复：真实 decision 路由为 `passive-awareness/decision -> catiecli.sukaka.top -> gcli-gemini-3-flash-preview-nothinking`，视觉探针按昨天修复走 3000ms/0 retry，408 被 catch 后只生成 `shouldReply=false`，旧兜底又只覆盖 `bot_direct/bot_presence_check`。最小修复为仅在 `visual-cue-probe` 且本地 addressee 为 `group_bot_topic/group_open_question` 时允许 decision 失败后进入回复模型，不放开纯 `unclear` 图片。验收结果：新增视觉探针 408 兜底回归、原视觉探针、强 cue、bot topic guard、语法检查和 `git diff --check` 通过。小目标完成：图片类 bot 话题/开放问题在 decision 上游 408 抖动时不再被直接静默误杀。
 
 更新 2026-07-07 17:53 +08:00：定位 `queued request timed out after 30000ms` 为 `default/general` lane 同 session 入站锁前排队：`req_0f82466d6ad433cd` 拿到 `qq-group:1092700300:user:1626492260` 锁后在非 @bot 图片消息的 `visual-cue-probe` 被动群感知链路内运行约 66.3s，后续 `req_a9fd34e2f1c9f29b` 只到 `message_ingress` 未拿锁。修复为给视觉探针单独 3000ms/0 retry 短预算，普通被动决策预算不变；验收结果：被动视觉探针、被动回复、入站并发回归和 `git diff --check` 通过。小目标完成：私聊完全开放状态下，群聊非 @bot 视觉探针不再长时间占住主入站锁。
@@ -247,7 +249,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-06 15:15 +08:00
+更新时间：2026-07-09 09:02 +08:00
+维护记录：2026-07-09 09:02 +08:00，已完成运行期写盘降频：NapCat 原始包日志默认关闭且显式开关可控，Memory V3 事件写入改为批量缓冲；残留 embedding tmp 复查时已不存在，未执行删除。验收结果：相关语法检查与 `node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。
 维护记录：2026-07-06 15:15 +08:00，群聊出口敏感词库保持启用，并新增默认政治语境门槛；单独命中词库不再直接替换，明确现实政治语境仍会拦截。验收结果：角色扮演样例不拦截，现实政治样例仍拦截，群聊发送路径回归通过。
 维护记录：2026-07-05 09:28 +08:00，已将群聊出口敏感词库默认范围收窄到政治相关分类，仅加载 `反动词库.txt` 和 `政治类型.txt`；色情、枪爆、暴恐不再作为默认群聊出口词库拦截来源。验收结果：默认配置探针确认词量降到政治相关词库集合，非政治样例不再拦截，政治相关样例仍拦截；相关敏感词 guard 回归通过。
 维护记录：2026-07-05 20:12 +08:00，已将图片理解 direct reply 超时显式设为 `IMAGE_MODEL_TIMEOUT_MS=75000`，避免图片总结请求继续按默认 18 秒过早失败。验收结果：本地配置加载探针确认图片模型超时为 75000ms；bot 已重启并完成运行状态检查。

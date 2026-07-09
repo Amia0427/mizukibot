@@ -127,6 +127,12 @@ function createLineReader(onLine) {
 }
 
 function appendNapcatPacketToLog(packet = {}, options = {}) {
+  if (options.enabled === false) return;
+  const enabled = options.enabled === true
+    || config.FOLLOWER_PACKET_LOG_ENABLED === true
+    || config.FOLLOWER_LOG_MONITOR_ENABLED === true;
+  if (!enabled) return;
+
   const targetPath = String(options.logPath || config.FOLLOWER_NAPCAT_LOG_PATH || '').trim();
   if (!targetPath) return;
 
@@ -141,7 +147,7 @@ function appendNapcatPacketToLog(packet = {}, options = {}) {
       });
     }
     packetLogWriter.append(normalized);
-    packetLogWriter.flushSync();
+    if (options.flushNow === true) packetLogWriter.flushSync();
   } catch (_) {}
 }
 

@@ -24,6 +24,7 @@ const EVENT_TYPES = new Set([
   'episode_rollup_generated',
   'migration_bootstrap'
 ]);
+const eventWriters = new Map();
 
 function nowTs() {
   return Date.now();
@@ -40,6 +41,20 @@ function toDayKey(ts = nowTs()) {
 function eventFileForTs(ts = nowTs()) {
   ensureDir(config.MEMORY_V3_EVENTS_DIR);
   return path.join(config.MEMORY_V3_EVENTS_DIR, `${toDayKey(ts)}.ndjson`);
+}
+
+function getMemoryEventWriter(filePath) {
+  const key = String(filePath || '');
+  if (!eventWriters.has(key)) eventWriters.set(key, getJsonLineWriter(key));
+  return eventWriters.get(key);
+}
+
+function flushPendingMemoryEventWrites() {
+  for (const writer of eventWriters.values()) {
+    try {
+      writer.flushSync();
+    } catch (_) {}
+  }
 }
 
 function buildEventId(event = {}) {
@@ -119,7 +134,7 @@ function syncProfileJournalDbEvent(event = {}) {
   }
 }
 
-async function appendMemoryEvent(event = {}) {
+async function appendMemoryEvent(event = {}, options = {}) {
   const correction = detectProfileCorrection(event?.text || '');
   const shouldRewriteCorrection = correction.isCorrection
     && correction.correctedTo
@@ -154,7 +169,7 @@ async function appendMemoryEvent(event = {}) {
       }
       : event);
   const filePath = eventFileForTs(normalized.ts);
-  const writer = getJsonLineWriter(filePath);
+  const writer = getMemoryEventWriter(filePath);
   const correctionEvents = correction.isCorrection
     ? buildProfileCorrectionEvents(loadMemoryEvents(), normalized, {
       now: normalized.ts,
@@ -170,18 +185,19 @@ async function appendMemoryEvent(event = {}) {
         ts: Math.max(0, Number(correctionEvent.ts || normalized.ts - 1) || normalized.ts - 1)
       })
     });
-    const correctionWriter = getJsonLineWriter(eventFileForTs(normalizedCorrection.ts));
+    const correctionWriter = getMemoryEventWriter(eventFileForTs(normalizedCorrection.ts));
     correctionWriter.append(normalizedCorrection);
-    correctionWriter.flushSync();
+    if (options.flushNow === true) correctionWriter.flushSync();
     syncProfileJournalDbEvent(normalizedCorrection);
   }
   writer.append(normalized);
-  writer.flushSync();
+  if (options.flushNow === true) writer.flushSync();
   syncProfileJournalDbEvent(normalized);
   return normalized;
 }
 
 function listMemoryEventFiles() {
+  flushPendingMemoryEventWrites();
   ensureDir(config.MEMORY_V3_EVENTS_DIR);
   const fs = require('fs');
   return fs.readdirSync(config.MEMORY_V3_EVENTS_DIR)
