@@ -1,6 +1,8 @@
 const { buildToolEvidenceBundle } = require('../contracts');
 const { isUnsafeUserFacingReply } = require('../../../utils/userFacingReplyGuards');
 
+const DRAFT_REPLY_MODEL_FAILURE_TEXT = '刚刚处理到一半卡住了。等一下再丢给我试试。';
+
 function createDraftReplyNode(deps = {}) {
   const normalizeObject = typeof deps.normalizeObject === 'function'
     ? deps.normalizeObject
@@ -89,6 +91,10 @@ function createDraftReplyNode(deps = {}) {
       return { ok: false, text, reason: 'unsafe_user_facing_reply' };
     }
     return { ok: true, text, reason: '' };
+  }
+
+  function summarizeDraftReplyError(error = null) {
+    return String(error?.message || error || 'unknown').slice(0, 160);
   }
 
   return async function draftReplyNode(state) {
@@ -305,15 +311,23 @@ function createDraftReplyNode(deps = {}) {
           }));
         }
         synthesisModelCalls += 1;
-        draftReply = await synthesizeImpl(
-          request.question || '',
-          synthesisDynamicPrompt,
-          finalPlan,
-          finalExecLogs,
-          state.plan?.verification || null,
-          request.modelConfig,
-          continuityStateMessage ? { systemMessages: [continuityStateMessage] } : null
-        );
+        try {
+          draftReply = await synthesizeImpl(
+            request.question || '',
+            synthesisDynamicPrompt,
+            finalPlan,
+            finalExecLogs,
+            state.plan?.verification || null,
+            request.modelConfig,
+            continuityStateMessage ? { systemMessages: [continuityStateMessage] } : null
+          );
+        } catch (error) {
+          draftReply = DRAFT_REPLY_MODEL_FAILURE_TEXT;
+          events.push(createEvent('draft_reply_fallback', {
+            node: 'draft_reply',
+            reason: `synthesis_error:${summarizeDraftReplyError(error)}`
+          }));
+        }
       }
     }
     const nextEvents = events.concat([

@@ -1,3 +1,11 @@
+## 运行维护 2026-07-09 09:11
+
+- 小目标：检查 `npm run diag:runtime -- --json` 中的 `langgraph_v2_checkpoint_stale`，定位 `1606790092_direct_1606790092_lookup_notebook-answer` 为什么在 2026-07-08 停在 `validate` 后没有收口。
+- 根因：同名 checkpoint 显示工具步骤已完成、`execution.status=validated`，事件文件最后一个图节点是 `validate`；request trace 随后进入 `draft_reply.followup_after_tools`，主模型请求 151843ms 后 401，外层发送了短兜底回复，但 `draftReplyNode` 的 synthesis 失败路径未落 `draft_reply/final_validate/persist`，checkpoint 因此保持 `running/validate`。
+- 最小修复：只在 `draftReplyNode` 的 synthesis 调用外补失败收口，生成已被现有 failure classifier 识别的短兜底草稿并记录 `draft_reply_fallback` 事件，让后续 humanize、final_validate、persist 把 checkpoint 写成终态。
+- 验收：`npm run test -- tests/draftReplyToolEvidence.test.js` 通过；临时 checkpoint/event 目录完整图调用模拟 notebook-answer 工具完成后模型 401，最终 checkpoint 为 `failed/persist`，事件包含 `draft_reply_fallback` 和 `persist_complete`；目标历史 checkpoint 已补 `checkpoint_reconciled` 事件并标为 `failed/draft_reply`，`npm run diag:runtime -- --json` 复跑显示 `activeCheckpoints=0`、`staleRunningCheckpoints=0`，`langgraph_v2_checkpoint_stale` 消失。
+- 小目标已完成：新的 notebook-answer 工具后合成失败不会再把 LangGraph V2 checkpoint 留在 stale running 状态。
+
 ## 运行维护 2026-07-08 13:44
 
 - 小目标：检查今天新出现的 `visual-cue-probe` / `decision-call-failed:Request failed with status code 408`，定位群 `1092700300` 与 `597801651` 图片消息为什么被直接判成不回复，并做最小修复。

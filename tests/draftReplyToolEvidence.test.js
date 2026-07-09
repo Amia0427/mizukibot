@@ -191,6 +191,27 @@ module.exports = (async () => {
   assert.strictEqual(fallback.execution.latencyBreakdown.model.draft_reply_synthesis_calls, 1);
   assert.strictEqual(fallback.execution.latencyBreakdown.model.total_model_calls, 2);
 
+  const failedModelNode = createNode({
+    async requestAssistantMessageImpl() {
+      throw new Error('Request failed with status code 401');
+    },
+    async synthesizeImpl() {
+      throw new Error('Request failed with status code 401');
+    }
+  });
+
+  const recovered = await failedModelNode(createBaseState());
+
+  assert.strictEqual(recovered.output.draftReply, '刚刚处理到一半卡住了。等一下再丢给我试试。');
+  assert.ok(recovered.events.some((item) => (
+    item.type === 'draft_reply_fallback'
+    && String(item.reason || '').startsWith('synthesis_error:')
+  )));
+  assert.strictEqual(recovered.execution.currentNode, 'draft_reply');
+  assert.strictEqual(recovered.execution.latencyBreakdown.model.draft_reply_followup_calls, 1);
+  assert.strictEqual(recovered.execution.latencyBreakdown.model.draft_reply_synthesis_calls, 1);
+  assert.strictEqual(recovered.execution.latencyBreakdown.model.total_model_calls, 2);
+
   console.log('draftReplyToolEvidence.test.js passed');
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));
