@@ -40,6 +40,13 @@
         "MEMOS_USER_ID": "${MEMOS_USER_ID}",
         "MEMOS_CHANNEL": "MODELSCOPE"
       }
+    },
+    "my-coffee": {
+      "type": "streamablehttp",
+      "url": "https://gwmcp.lkcoffee.com/order/user/mcp",
+      "headers": {
+        "Authorization": "Bearer ${LUCKIN_MCP_GLOBAL_TOKEN}"
+      }
     }
   }
 }

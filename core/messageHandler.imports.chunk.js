@@ -137,6 +137,7 @@ const {
   sendPrivatePoke,
   setMessageEmojiLike
 } = require('../api/qqActionService');
+const { createLuckinCommandService } = require('../src/features/luckin/service');
 function getVisionCaptionWorkerModule() {
   return require('./visionCaptionWorker');
 }

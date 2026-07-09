@@ -339,3 +339,28 @@ function createMessageHandler({
   });
   const dispatchByRoutePlan = (...args) => dispatchCoordinator.dispatchByRoutePlan(...args);
   let routeFlow = null;
+  let luckinCommandService = null;
+  function getLuckinCommandService() {
+    if (!luckinCommandService) {
+      luckinCommandService = createLuckinCommandService({
+        config,
+        sendReply: (...args) => sendGroupReply(...args),
+        sendMiniAppCard: async (input = {}) => {
+          const chatType = String(input.chatType || '').trim().toLowerCase() === 'private' ? 'private' : 'group';
+          const message = String(input.cardPayload || '').trim();
+          if (!message) return false;
+          const payload = chatType === 'private'
+            ? {
+                action: 'send_private_msg',
+                params: { user_id: input.userId, message }
+              }
+            : {
+                action: 'send_group_msg',
+                params: { group_id: input.groupId, message }
+              };
+          return sendWithRetry(payload, 1, 300);
+        }
+      });
+    }
+    return luckinCommandService;
+  }

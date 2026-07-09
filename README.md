@@ -11,6 +11,7 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 - **角色一致性**：prompt manifest、persona worldbook、运行时协议和回复清洗共同维持瑞希的语气和边界。
 - **分层记忆**：短期上下文、会话摘要、用户画像、Memory V3、LanceDB 向量召回、本地知识库协同。
 - **工具调用**：本地命令、诊断、知识检索、图片处理、日程、自定义 skill。
+- **瑞希瑞幸**：独立 `瑞希瑞幸` 命令接入瑞幸官方 MCP/skill，群聊做菜单、推荐、预览，私聊处理个人 Token、订单和支付二维码。
 - **后台学习**：post-reply worker 在回复后异步抽取记忆、维护画像、写日记，不卡主回复。
 - **回复出口拦截**：群聊和普通用户私聊发送前使用本地政治敏感词库快照，并要求命中现实政治语境后才替换；管理员私聊豁免，角色扮演标记不作为豁免。
 - **运维诊断**：重启、健康检查、请求 trace、token 预算、NapCat 状态、记忆质量、运行热点一应俱全。
@@ -169,6 +170,18 @@ npm run diag:memory -- audit --limit 5
 npm run console -- rag <userId> "<query>"
 ```
 
+### 瑞希瑞幸
+
+`瑞希瑞幸` 是独立命令入口，不会因普通聊天提到瑞幸或咖啡触发。配置 `LUCKIN_MCP_GLOBAL_TOKEN` 后可在群里预览门店商品；创建订单、查单、取消订单需要用户在私聊临时提供个人 Token。
+
+```env
+LUCKIN_MCP_GLOBAL_TOKEN=
+LUCKIN_MCP_ENDPOINT=https://gwmcp.lkcoffee.com/order/user/mcp
+LUCKIN_MINIAPP_CARD_PAYLOAD=
+```
+
+详细边界见 [`docs/luckin-command.md`](docs/luckin-command.md)。
+
 ### Windows 本地运维
 
 更新 2026-06-26 09:56 +08:00：修复确认重启在 stale pid + 空进程列表下的 PowerShell `Process` 参数绑定错误；验收结果见 `docs/windows-restart-diagnosis.md`。
@@ -246,6 +259,7 @@ data/       本地运行数据，默认不提交
 - [`docs/repository-structure.md`](docs/repository-structure.md) — 目录边界和清理规则
 - [`docs/main-reply-context.md`](docs/main-reply-context.md) — 主回复上下文设计
 - [`docs/post-reply-worker.md`](docs/post-reply-worker.md) — 回复后学习 worker 说明
+- [`docs/luckin-command.md`](docs/luckin-command.md) — 瑞希瑞幸命令、Token 策略和验收命令
 - [`docs/project-development-history.md`](docs/project-development-history.md) — 基于 Git 历史整理的开发过程
 - [`docs/npm-publish.md`](docs/npm-publish.md) — npm 发布边界和检查命令
 - [`deploy/beginner-guide.md`](deploy/beginner-guide.md) — 面向初学者的部署指南
@@ -255,7 +269,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-09 17:45 +08:00
+更新时间：2026-07-09 19:09 +08:00
+维护记录：2026-07-09 19:09 +08:00，新增独立 `瑞希瑞幸` 命令：仅命令前缀触发，群聊菜单/推荐/预览，私聊使用临时个人 Token 创建订单、查单、取消订单并只展示支付二维码链接；接入官方 `my-coffee` skill 和瑞幸 streamable HTTP MCP 配置。验收结果：瑞希瑞幸定向测试、消息入口回归、MCP lazy discovery 回归、`.mcp.json` 解析、message handler 加载和 `git diff --check` 均通过。小目标已完成。
 维护记录：2026-07-09 17:45 +08:00，新增 `npm run smoke:runtime-hotfixes` 最小本地 smoke，固定今天 5 个运行时热修复的目标回归清单。验收结果：脚本清单回归先红后绿，`npm run smoke:runtime-hotfixes` 通过。
 维护记录：2026-07-09 09:18 +08:00，已修复 post-reply worker 记忆写入/向量巡检内存常驻增长；写入管线只读候选 scope shard，LanceDB plan 不再默认加载全量 embedding cache，watchdog summary 后清理 embedding 缓存。验收结果：三项定向测试通过，隔离内存探针显示 heap 未再进入数百 MB 常驻。
 维护记录：2026-07-09 09:01 +08:00，已修复 post-reply worker 对上游 495 的收尾路径：495 归类为 transient，模型型后台任务在相位最后一次重试仍失败时降级为 `skipped/upstream_495_degraded` 并继续收尾。验收结果：两个 2026-07-08 failed post-reply job 已转为 done；定向 post-reply 测试通过，`npm run diag:runtime -- --json` 显示 post-reply 队列 `queued=0/processing=0/failed=0`。小目标已完成。

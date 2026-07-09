@@ -25,6 +25,21 @@
     );
     const rawInboundFreshnessVersion = nextSessionFreshnessVersion(rawInboundFreshnessSessionKey);
     const rawMessageText = String(msg?.raw_message || '').trim();
+    const luckinHandled = await getLuckinCommandService().handleIncomingMessage(msg, {
+      chatType,
+      groupId,
+      senderId,
+      botQQ: resolveEffectiveBotQQ(msg, config)
+    });
+    if (luckinHandled) {
+      appendRequestCompleteTrace({
+        routePolicyKey: 'act/luckin-command',
+        topRouteType: 'direct_chat',
+        replyPath: 'luckin_command',
+        sent: true
+      });
+      return;
+    }
     const createCommandText = stripLeadingCqControlSegments(rawMessageText, resolveEffectiveBotQQ(msg, config));
     if (/^\s*\/create(?:\s|$)/i.test(createCommandText)) {
       if (isPrivateChatType(chatType) && !privilegedPrivateChat) {

@@ -1,3 +1,11 @@
+## 运行维护 2026-07-09 19:09
+
+- 小目标：把“瑞希瑞幸”做成相对独立的 QQ 命令功能，只在明确 `瑞希瑞幸` 命令触发，不影响普通聊天、Qzone、定时任务和 MCP lazy discovery。
+- 最小修复：新增 `src/features/luckin/` 专用命令解析、内存会话、位置解析、瑞幸 streamable HTTP MCP 客户端和命令服务；消息入口在主聊天模型前短路处理；安装官方 `skills/my-coffee`，并在 `.mcp.json`、`.env.example`、`.env.skills.example` 增加配置。
+- 安全边界：全局 Token 只允许门店/商品/预览类工具；个人 Token 只在私聊当前命令中使用，不落盘；群聊疑似 Token 会提示撤回；下单前用个人 Token 重新预览，价格上涨则停止创建订单；只展示 `payOrderQrCodeUrl`。
+- 验收：`node scripts/run-tests.js tests/luckinCommand.test.js tests/luckinMcpClient.test.js tests/luckinService.test.js tests/luckinMessageHandler.test.js tests/routerChineseKeywords.test.js tests/messageHandlerAdminCheckConcurrency.test.js tests/mcpLazyDiscovery.test.js`、`node -e "require('./core/messageHandler'); console.log('message handler load ok')"`、`.mcp.json` 解析、`git diff --check` 均通过；`skills/my-coffee` 校验为有效 instruction-only skill，仅有无 scripts/assets/references/agents 目录和 LICENSE 文件类型提示。
+- 小目标已完成：瑞希瑞幸命令链路、MCP/skill 配置、隐私边界和文档入口已落地。
+
 ## 运行维护 2026-07-09 17:45
 
 - 小目标：把当前分支今天新增的 5 个运行时热修复并入一个最小必要本地 smoke，避免后续回退时只靠零散单测发现。
