@@ -17,6 +17,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-07-09 17:48 +08:00：修复主回复 prepare 软超时 fallback 在非召回 `chat/default/direct_chat` 下构造 ambient memory context 并注入 `retrieved_memory_lite/daily_journal` 的问题；非召回普通主回复不再构造 fallback memory context，显式召回保持原记忆 fallback。验收结果：`node scripts/run-tests.js tests/runtimeV2PromptTimeoutMemoryFallback.test.js tests/chatDefaultMemoryLeakDiagnostics.test.js tests/geminiSamplingDegradationPromptGate.test.js` 通过；真实 24h 诊断仍显示修复前日志中 `candidateChatDefaultRequests=49`、`violationRequests=15`。小目标已完成。
+
 更新 2026-07-09 17:45 +08:00：新增最小本地运行时热修复 smoke：`npm run smoke:runtime-hotfixes`。该入口只串今天 5 个运行时热修复的高价值回归，覆盖被动视觉探针 decision 408 兜底、post-reply 495 最终降级收尾、notebook-answer 工具后草稿失败 checkpoint 收口、NapCat 原始包日志/Memory V3 事件写盘降频，以及 post-reply worker 记忆写入和向量巡检不再常驻全量索引。验收结果：新增脚本清单回归先红后绿；`npm run smoke:runtime-hotfixes` 本地通过。小目标已完成。
 
 更新 2026-07-09 09:18 +08:00：修复 post-reply worker 记忆写入和向量巡检的内存常驻增长：写入去重/冲突检查改为按候选实际 shard 冷读，不再触发全量 `memory_items/memory_index` 聚合缓存；Memory V3 LanceDB dry-run plan 不再默认加载全量 embedding cache，watchdog 每轮 summary 后会清理 embedding index 缓存。验收结果：`node tests\memoryWritePipeline.test.js`、`node tests\memoryV3RecallVerificationFilter.test.js`、`node tests\postReplyVectorWatchdog.test.js` 通过；真实数据隔离探针显示写入校验后 `heapUsed≈11.3MB`，LanceDB plan 不加载 embedding cache 时 `heapUsed≈11.5MB`。小目标已完成。
