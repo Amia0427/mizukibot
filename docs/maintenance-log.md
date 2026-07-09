@@ -1,3 +1,11 @@
+## 运行维护 2026-07-09 09:18
+
+- 小目标：修复 post-reply worker 长时间运行后由记忆写入和向量维护导致的 Node heap/RSS 常驻增长。
+- 根因：写入管线去重/冲突检查会无参读取全量 `getMemoryItems()`，触发 `memory_items/memory_index` 聚合缓存长期驻留；Memory V3 LanceDB dry-run plan 和 vector watchdog summary 会把 `embedding_cache.jsonl` 全量索引加载到模块缓存。
+- 最小修复：写入管线改为按候选实际 shard scoped 冷读，保留同进程已加载 shard 的重复检测；`buildLanceDbSyncPlan` 不再默认加载全量 embedding index，支持调用方注入 rows；watchdog 每轮 sync summary 后清理 embedding index 缓存。
+- 验收：`node tests\memoryWritePipeline.test.js`、`node tests\memoryV3RecallVerificationFilter.test.js`、`node tests\postReplyVectorWatchdog.test.js`、相关 `node --check` 通过；真实数据隔离探针显示写入校验后 `heapUsed≈11.3MB`，LanceDB plan 未加载 embedding cache 时 `heapUsed≈11.5MB`。
+- 小目标已完成：post-reply worker 不再在写入热路径和 vector watchdog dry-run plan 中长期持有全量记忆/embedding 索引。
+
 ## 运行维护 2026-07-09 09:11
 
 - 小目标：检查 `npm run diag:runtime -- --json` 中的 `langgraph_v2_checkpoint_stale`，定位 `1606790092_direct_1606790092_lookup_notebook-answer` 为什么在 2026-07-08 停在 `validate` 后没有收口。

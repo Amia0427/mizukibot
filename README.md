@@ -17,6 +17,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-07-09 09:18 +08:00：修复 post-reply worker 记忆写入和向量巡检的内存常驻增长：写入去重/冲突检查改为按候选实际 shard 冷读，不再触发全量 `memory_items/memory_index` 聚合缓存；Memory V3 LanceDB dry-run plan 不再默认加载全量 embedding cache，watchdog 每轮 summary 后会清理 embedding index 缓存。验收结果：`node tests\memoryWritePipeline.test.js`、`node tests\memoryV3RecallVerificationFilter.test.js`、`node tests\postReplyVectorWatchdog.test.js` 通过；真实数据隔离探针显示写入校验后 `heapUsed≈11.3MB`，LanceDB plan 不加载 embedding cache 时 `heapUsed≈11.5MB`。小目标已完成。
+
 更新 2026-07-09 09:02 +08:00：已收敛运行期写盘风险：NapCat 原始包日志默认关闭，仅在 follower 监控或 `FOLLOWER_PACKET_LOG_ENABLED=true` 时写入；Memory V3 事件从每条同步刷盘改为批量缓冲，同进程读取前会刷待写队列。验收结果：语法检查和 `node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。小目标已完成。
 
 更新 2026-07-08 13:44 +08:00：定位今天 `data/passive-awareness-decisions.jsonl` 中群 `1092700300`/`597801651` 的图片 `visual-cue-probe` 静默不回复：真实 decision 路由为 `passive-awareness/decision -> catiecli.sukaka.top -> gcli-gemini-3-flash-preview-nothinking`，视觉探针按昨天修复走 3000ms/0 retry，408 被 catch 后只生成 `shouldReply=false`，旧兜底又只覆盖 `bot_direct/bot_presence_check`。最小修复为仅在 `visual-cue-probe` 且本地 addressee 为 `group_bot_topic/group_open_question` 时允许 decision 失败后进入回复模型，不放开纯 `unclear` 图片。验收结果：新增视觉探针 408 兜底回归、原视觉探针、强 cue、bot topic guard、语法检查和 `git diff --check` 通过。小目标完成：图片类 bot 话题/开放问题在 decision 上游 408 抖动时不再被直接静默误杀。
@@ -249,7 +251,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-09 09:02 +08:00
+更新时间：2026-07-09 09:18 +08:00
+维护记录：2026-07-09 09:18 +08:00，已修复 post-reply worker 记忆写入/向量巡检内存常驻增长；写入管线只读候选 scope shard，LanceDB plan 不再默认加载全量 embedding cache，watchdog summary 后清理 embedding 缓存。验收结果：三项定向测试通过，隔离内存探针显示 heap 未再进入数百 MB 常驻。
 维护记录：2026-07-09 09:01 +08:00，已修复 post-reply worker 对上游 495 的收尾路径：495 归类为 transient，模型型后台任务在相位最后一次重试仍失败时降级为 `skipped/upstream_495_degraded` 并继续收尾。验收结果：两个 2026-07-08 failed post-reply job 已转为 done；定向 post-reply 测试通过，`npm run diag:runtime -- --json` 显示 post-reply 队列 `queued=0/processing=0/failed=0`。小目标已完成。
 维护记录：2026-07-09 09:02 +08:00，已完成运行期写盘降频：NapCat 原始包日志默认关闭且显式开关可控，Memory V3 事件写入改为批量缓冲；残留 embedding tmp 复查时已不存在，未执行删除。验收结果：相关语法检查与 `node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。
 维护记录：2026-07-06 15:15 +08:00，群聊出口敏感词库保持启用，并新增默认政治语境门槛；单独命中词库不再直接替换，明确现实政治语境仍会拦截。验收结果：角色扮演样例不拦截，现实政治样例仍拦截，群聊发送路径回归通过。

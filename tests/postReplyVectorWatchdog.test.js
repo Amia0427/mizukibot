@@ -79,6 +79,34 @@ module.exports = (async () => {
 
     assert.strictEqual(isPostReplyVectorWatchdogEnabled(), true);
     assert.strictEqual(getPendingRows(syncSummary({ pendingRows: 3 }), 'memory'), 3);
+    let clearedEmbeddingCache = 0;
+    const embeddingIndexPath = require.resolve('../utils/memory-v3/embeddingIndex');
+    const syncScriptPath = require.resolve('../scripts/sync-lancedb-memory-index');
+    require.cache[embeddingIndexPath] = {
+      id: embeddingIndexPath,
+      filename: embeddingIndexPath,
+      loaded: true,
+      exports: {
+        clearEmbeddingIndexCache() {
+          clearedEmbeddingCache += 1;
+        }
+      }
+    };
+    require.cache[syncScriptPath] = {
+      id: syncScriptPath,
+      filename: syncScriptPath,
+      loaded: true,
+      exports: {
+        buildSyncSummary: async () => syncSummary()
+      }
+    };
+    const defaultSummaryResult = await runPostReplyVectorWatchdog({
+      force: true
+    }, {
+      diagnoseProjectionFreshness: async () => ({ projectionStale: false })
+    });
+    assert.strictEqual(defaultSummaryResult.skipped, true);
+    assert.ok(clearedEmbeddingCache >= 1, 'watchdog should clear embedding cache after default sync summary');
 
     const calls = [];
     let freshnessIndex = 0;

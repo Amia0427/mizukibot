@@ -639,6 +639,26 @@ function getMemoryItemsFromShards(metas = []) {
     .flatMap((entry) => Array.isArray(entry.items.items) ? entry.items.items : []);
 }
 
+function readMemoryItemsFromShards(metas = []) {
+  ensureShardStateHydrated();
+  const seen = new Set();
+  const items = [];
+  for (const meta of Array.isArray(metas) ? metas : []) {
+    const normalized = normalizeShardMeta(meta);
+    if (!normalized.shardKey || seen.has(normalized.shardKey)) continue;
+    seen.add(normalized.shardKey);
+    const loaded = memoryShardState.shards.get(normalized.shardKey);
+    if (loaded && Array.isArray(loaded.items?.items)) {
+      items.push(...loaded.items.items);
+      continue;
+    }
+    const payload = safeReadJson(normalized.itemsFile, null);
+    if (!Array.isArray(payload?.items)) continue;
+    items.push(...payload.items.map((item) => normalizeMemoryItem(item)).filter(Boolean));
+  }
+  return items;
+}
+
 function getMemoryDocsFromShards(metas = []) {
   const docs = {};
   const df = {};

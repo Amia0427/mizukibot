@@ -1,6 +1,8 @@
 # Post-Reply Worker Runbook
 
-更新时间：2026-07-09 09:01 +08:00
+更新时间：2026-07-09 09:18 +08:00
+
+更新 2026-07-09 09:18 +08:00：修复 worker 长跑后 RSS/heap 被记忆全量缓存顶高的问题。`memoryWritePipeline` 的重复/冲突检查现在按候选实际 shard 冷读，不再无参触发 `getMemoryItems()` 全量聚合；Memory V3 的 `buildLanceDbSyncPlan` 不再默认加载 `embedding_cache.jsonl` 全量索引，post-reply vector watchdog 每次 sync summary 后会清理 embedding index 缓存。验收：`node tests\memoryWritePipeline.test.js`、`node tests\memoryV3RecallVerificationFilter.test.js`、`node tests\postReplyVectorWatchdog.test.js` 通过；真实数据隔离探针中写入校验后 `heapUsed≈11.3MB`，LanceDB plan 后 `heapUsed≈11.5MB`。
 
 更新 2026-07-09 09:01 +08:00：上游 `Request failed with status code 495` 现在在 post-reply worker 中归类为 transient；core 的 `memoryLearning/selfImprovement` 和 enrich 的 `runEnrichPhase` 会先按相位重试，最后一次仍为 495 时降级为 `skipped/upstream_495_degraded` 并继续收尾，不再把队列任务留在 failed。现场两个 2026-07-08 failed job 已修复为 done，验收结果：`node scripts\run-tests.js tests\postReplyFailureRequeue.test.js tests\postReplyTaskRunner.test.js tests\postReplyWorkerRuntime.test.js` 通过，`npm run diag:runtime -- --json` 显示 post-reply 队列 `queued=0/processing=0/failed=0`。
 
