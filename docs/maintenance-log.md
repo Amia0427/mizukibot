@@ -1,3 +1,11 @@
+## 运行维护 2026-07-09 17:45
+
+- 小目标：把当前分支今天新增的 5 个运行时热修复并入一个最小必要本地 smoke，避免后续回退时只靠零散单测发现。
+- 覆盖范围：被动视觉探针 decision 408 兜底、post-reply 上游 495 最终降级收尾、notebook-answer 工具后草稿失败 checkpoint 收口、NapCat 原始包日志与 Memory V3 事件写盘降频、post-reply worker 记忆写入和 vector watchdog 不再常驻全量索引。
+- 最小修复：新增 `smoke:runtime-hotfixes` npm 脚本，复用既有目标回归文件；新增 `tests/runtimeHotfixSmokeScript.test.js` 固定清单，防止 smoke 被扩成全量或漏掉本轮高风险回归。
+- 验收：新增脚本清单回归先因脚本缺失失败，再补脚本后通过；`npm run smoke:runtime-hotfixes` 本地通过。
+- 小目标已完成：今天 5 个运行时热修复已有一个可复跑的最小本地 smoke，未改运行时代码。
+
 ## 运行维护 2026-07-09 09:18
 
 - 小目标：修复 post-reply worker 长时间运行后由记忆写入和向量维护导致的 Node heap/RSS 常驻增长。

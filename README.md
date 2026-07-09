@@ -17,6 +17,8 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 
 ## 并发与后台线程
 
+更新 2026-07-09 17:45 +08:00：新增最小本地运行时热修复 smoke：`npm run smoke:runtime-hotfixes`。该入口只串今天 5 个运行时热修复的高价值回归，覆盖被动视觉探针 decision 408 兜底、post-reply 495 最终降级收尾、notebook-answer 工具后草稿失败 checkpoint 收口、NapCat 原始包日志/Memory V3 事件写盘降频，以及 post-reply worker 记忆写入和向量巡检不再常驻全量索引。验收结果：新增脚本清单回归先红后绿；`npm run smoke:runtime-hotfixes` 本地通过。小目标已完成。
+
 更新 2026-07-09 09:18 +08:00：修复 post-reply worker 记忆写入和向量巡检的内存常驻增长：写入去重/冲突检查改为按候选实际 shard 冷读，不再触发全量 `memory_items/memory_index` 聚合缓存；Memory V3 LanceDB dry-run plan 不再默认加载全量 embedding cache，watchdog 每轮 summary 后会清理 embedding index 缓存。验收结果：`node tests\memoryWritePipeline.test.js`、`node tests\memoryV3RecallVerificationFilter.test.js`、`node tests\postReplyVectorWatchdog.test.js` 通过；真实数据隔离探针显示写入校验后 `heapUsed≈11.3MB`，LanceDB plan 不加载 embedding cache 时 `heapUsed≈11.5MB`。小目标已完成。
 
 更新 2026-07-09 09:02 +08:00：已收敛运行期写盘风险：NapCat 原始包日志默认关闭，仅在 follower 监控或 `FOLLOWER_PACKET_LOG_ENABLED=true` 时写入；Memory V3 事件从每条同步刷盘改为批量缓冲，同进程读取前会刷待写队列。验收结果：语法检查和 `node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。小目标已完成。
@@ -251,7 +253,8 @@ data/       本地运行数据，默认不提交
 
 ---
 
-更新时间：2026-07-09 09:18 +08:00
+更新时间：2026-07-09 17:45 +08:00
+维护记录：2026-07-09 17:45 +08:00，新增 `npm run smoke:runtime-hotfixes` 最小本地 smoke，固定今天 5 个运行时热修复的目标回归清单。验收结果：脚本清单回归先红后绿，`npm run smoke:runtime-hotfixes` 通过。
 维护记录：2026-07-09 09:18 +08:00，已修复 post-reply worker 记忆写入/向量巡检内存常驻增长；写入管线只读候选 scope shard，LanceDB plan 不再默认加载全量 embedding cache，watchdog summary 后清理 embedding 缓存。验收结果：三项定向测试通过，隔离内存探针显示 heap 未再进入数百 MB 常驻。
 维护记录：2026-07-09 09:01 +08:00，已修复 post-reply worker 对上游 495 的收尾路径：495 归类为 transient，模型型后台任务在相位最后一次重试仍失败时降级为 `skipped/upstream_495_degraded` 并继续收尾。验收结果：两个 2026-07-08 failed post-reply job 已转为 done；定向 post-reply 测试通过，`npm run diag:runtime -- --json` 显示 post-reply 队列 `queued=0/processing=0/failed=0`。小目标已完成。
 维护记录：2026-07-09 09:02 +08:00，已完成运行期写盘降频：NapCat 原始包日志默认关闭且显式开关可控，Memory V3 事件写入改为批量缓冲；残留 embedding tmp 复查时已不存在，未执行删除。验收结果：相关语法检查与 `node scripts\run-tests.js tests\napcatPacketLogConfig.test.js tests\memoryV3EventsDailyFiles.test.js` 通过。
