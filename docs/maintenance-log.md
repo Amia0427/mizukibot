@@ -1434,3 +1434,4 @@
 - 边界：正文仍先发送，reasoning 转发失败仍不影响正文；记忆、画像、recall 和 post-reply 持久化仍不读取 reasoning；现有清洗模块未删除，因删除文件需要单独确认。
 - 验收：`node scripts/run-tests.js tests/messageHandlerReasoningForwardSource.test.js tests/qqActionServiceReasoningForward.test.js tests/messageHandlerCotSource.test.js tests/messageRouteFlowGroupStreaming.test.js tests/runtimeStreamingCoordinator.test.js tests/runtimeV2DirectReplyFailureTelemetry.test.js tests/modelServiceReasoning.test.js tests/parserModelResponseFormats.test.js tests/normalFastReplyRuntime.test.js`、`npm run lint`、`node -e "require('./core/messageHandler')"` 和 `git diff --check` 通过。
 - 小目标已完成：QQ 群聊和私聊在主回复后直接转发 provider 原始 reasoning，不再转发角色化清洗结果。
+- 提交后记录：功能提交 `a8f7b3e` 已完成，本轮未推送远端，也未纳入其他并行代理的工作区改动。
