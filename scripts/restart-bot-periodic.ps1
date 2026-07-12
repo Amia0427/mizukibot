@@ -163,13 +163,24 @@ try {
   }
   Write-Log "Using node: $nodeExe"
 
-  if ($ValidateOnly) {
-    Write-Log "Validation only; restart not executed"
-    Write-Log "=== Periodic restart validation completed ==="
-    exit 0
+  $lockFile = Join-Path $ProjectRoot ".mizukibot.lock"
+  $startArguments = @("index.js")
+  $restartPlan = [ordered]@{
+    execute = -not [bool]$ValidateOnly
+    nodeExecutable = $nodeExe
+    arguments = $startArguments
+    workingDirectory = $ProjectRoot
+    lockPath = $lockFile
+    logPath = $LogFile
   }
 
-  $lockFile = Join-Path $ProjectRoot ".mizukibot.lock"
+  if ($ValidateOnly) {
+    Write-Log "Validation only; restart not executed"
+    Write-Output ($restartPlan | ConvertTo-Json -Depth 3 -Compress)
+    Write-Log "=== Periodic restart validation completed ==="
+    return
+  }
+
   if (Test-Path $lockFile) {
     $currentPidText = (Read-PidFileText -FilePath $lockFile).Trim()
     $currentPid = 0
@@ -208,7 +219,7 @@ try {
   Write-Log "Starting Bot..."
   Push-Location $ProjectRoot
   try {
-    $startProcess = Start-Process -FilePath $nodeExe -ArgumentList @("index.js") -WorkingDirectory $ProjectRoot -WindowStyle Hidden -PassThru
+    $startProcess = Start-Process -FilePath $restartPlan.nodeExecutable -ArgumentList $restartPlan.arguments -WorkingDirectory $restartPlan.workingDirectory -WindowStyle Hidden -PassThru
     Write-Log "Bot started with PID: $($startProcess.Id)"
     Start-Sleep -Seconds 3
     if (-not (Test-LockOwnedByRunningMainBot -LockPath $lockFile)) {

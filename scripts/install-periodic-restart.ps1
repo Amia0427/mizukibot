@@ -3,7 +3,8 @@
 
 param(
   [string]$TaskName = 'MizukiBotPeriodicRestart',
-  [string]$DailyTime = '04:00'
+  [string]$DailyTime = '04:00',
+  [switch]$ValidateOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,22 +17,7 @@ Write-Host "  Task name: $TaskName"
 Write-Host "  Schedule: Daily at $DailyTime"
 Write-Host "  Script: $RestartScript"
 
-# 检查管理员权限
-$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $isAdmin) {
-  Write-Warning "This script requires Administrator privileges."
-  Write-Host "Please run PowerShell as Administrator and try again."
-  exit 1
-}
-
 try {
-  # 删除已存在的任务
-  $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-  if ($existingTask) {
-    Write-Host "Removing existing task..."
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-  }
-
   # 计算首次运行时间（当天已过则顺延到明天）
   $dailyTimeMatch = [regex]::Match($DailyTime, '^(?<hour>\d{1,2}):(?<minute>\d{2})$')
   if (-not $dailyTimeMatch.Success) {
@@ -98,6 +84,34 @@ try {
   </Principals>
 </Task>
 "@
+
+  $taskPlan = [ordered]@{
+    execute = -not [bool]$ValidateOnly
+    taskName = $TaskName
+    dailyTime = $dailyTimeLabel
+    firstRun = $startTime
+    restartScript = $RestartScript
+    workingDirectory = $ProjectRoot
+    taskXml = $taskXml
+  }
+
+  if ($ValidateOnly) {
+    Write-Output ($taskPlan | ConvertTo-Json -Depth 4 -Compress)
+    return
+  }
+
+  $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  if (-not $isAdmin) {
+    Write-Warning "This script requires Administrator privileges."
+    Write-Host "Please run PowerShell as Administrator and try again."
+    exit 1
+  }
+
+  $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+  if ($existingTask) {
+    Write-Host "Removing existing task..."
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+  }
 
   # 保存XML到临时文件
   $tempXml = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "mizuki-periodic-restart.xml")
