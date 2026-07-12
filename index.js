@@ -298,56 +298,71 @@ function cleanupSingleInstanceLockSync() {
     if (!fs.existsSync(LOCK_FILE)) return;
     const ownerPid = Number.parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
     if (ownerPid === process.pid) {
-      fs.writeFileSync(LOCK_FILE, '', { encoding: 'utf8', flag: 'w' });
+      fs.unlinkSync(LOCK_FILE);
     }
   } catch (_) {}
 }
 
 async function acquireSingleInstanceLock() {
-  const writeLock = async () => {
-    await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
-  };
-
-  const replaceStaleLock = async () => {
-    await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'w' });
+  const acquireGuardDir = `${LOCK_FILE}.acquire`;
+  const acquireGuard = async () => {
+    while (true) {
+      try {
+        await fsp.mkdir(acquireGuardDir);
+        return async () => {
+          await fsp.rm(acquireGuardDir, { recursive: true, force: true });
+        };
+      } catch (error) {
+        if (!error || error.code !== 'EEXIST') throw error;
+        try {
+          const stat = await fsp.stat(acquireGuardDir);
+          if (Date.now() - stat.mtimeMs > 30_000) {
+            await fsp.rm(acquireGuardDir, { recursive: true, force: true });
+            continue;
+          }
+        } catch (statError) {
+          if (statError?.code === 'ENOENT') continue;
+          throw statError;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
   };
 
   try {
-    await writeLock();
-  } catch (err) {
-    if (!err || err.code !== 'EEXIST') throw err;
+    await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
+  } catch (error) {
+    if (!error || error.code !== 'EEXIST') throw error;
 
-    const existingPid = await readLockOwnerPid();
-
-    if (existingPid === process.pid) {
-      try {
-        await replaceStaleLock();
-      } catch (replaceErr) {
-        console.error('[Startup] Failed to replace self-owned lock file:', replaceErr?.message || replaceErr);
-        process.exit(1);
-      }
-      process.on('exit', cleanupSingleInstanceLockSync);
-      return cleanupSingleInstanceLockSync;
-    }
-
-    if (await isMainBotProcess(existingPid)) {
-      console.error('[Startup] MizukiBot is already running (PID=' + existingPid + ').');
-      process.exit(1);
-    }
-
-    if (isProcessAlive(existingPid)) {
-      const commandLine = await getProcessCommandLine(existingPid);
-      console.warn('[Startup] Replacing stale lock owned by non-bot process:', {
-        pid: existingPid,
-        commandLine: commandLine.slice(0, 240)
-      });
-    }
-
+    const releaseGuard = await acquireGuard();
     try {
-      await replaceStaleLock();
-    } catch (replaceErr) {
-      console.error('[Startup] Failed to replace stale lock file:', replaceErr?.message || replaceErr);
-      process.exit(1);
+      await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
+    } catch (guardedError) {
+      if (!guardedError || guardedError.code !== 'EEXIST') throw guardedError;
+
+      const existingPid = await readLockOwnerPid();
+      if (existingPid !== process.pid) {
+        if (await isMainBotProcess(existingPid)) {
+          console.error('[Startup] MizukiBot is already running (PID=' + existingPid + ').');
+          await releaseGuard();
+          process.exit(1);
+        }
+
+        if (isProcessAlive(existingPid)) {
+          const commandLine = await getProcessCommandLine(existingPid);
+          console.warn('[Startup] Replacing stale lock owned by non-bot process:', {
+            pid: existingPid,
+            commandLine: commandLine.slice(0, 240)
+          });
+        }
+
+        await fsp.unlink(LOCK_FILE).catch((unlinkError) => {
+          if (unlinkError?.code !== 'ENOENT') throw unlinkError;
+        });
+        await fsp.writeFile(LOCK_FILE, String(process.pid) + '\n', { encoding: 'utf8', flag: 'wx' });
+      }
+    } finally {
+      await releaseGuard();
     }
   }
 

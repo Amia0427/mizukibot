@@ -302,3 +302,4 @@ data/       本地运行数据，默认不提交
 维护记录：2026-07-07 10:28 +08:00，已核对 `langgraph_v2_checkpoint_stale`：诊断旧列表最多展示 20 条，真实历史残留为 25 个 stale running checkpoint，均已有 final output/finalReply 且无近期活跃写入。已归档到 `data/langgraph_v2_checkpoints_archive/stale-history-20260707-langgraph-v2` 并保留事件文件；`npm run diag:runtime -- --json` 复跑为 `overallStatus=ok`、`signals=[]`。
 维护记录：2026-07-06 15:44 +08:00，已完成短期记忆上下文五项优化：session 写盘批处理、回复后 session summary 门禁、跨 session 合并上限、summary/raw turns 去重和无正文诊断脚本；新增阈值配置写入 `.env.example`。验收结果：定向语法检查、短期记忆/主回复上下文回归和 `diag:short-term-context` smoke 通过。小目标完成：短期记忆仍保留最近上下文，但默认不再把普通短聊每轮摘要化或无限合并 sibling session。
 维护记录：2026-07-12 12:20 +08:00，已移除 JSON 热存储对 SIGINT/SIGTERM 的进程退出控制，由主入口完成运行时关闭后统一同步落盘；新增信号所有权回归测试，相关 4 项定向测试通过。
+维护记录：2026-07-12 12:25 +08:00，主进程陈旧锁替换已增加原子获取门闩，退出时直接删除自有锁；双进程竞争连续 20 轮均仅一个实例成功启动。
