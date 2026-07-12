@@ -60,6 +60,7 @@ const {
 const {
   NORMAL_GROUP_MAIN_REPLY_RPM_LIMITED_CODE
 } = require('../../utils/normalGroupMainReplyRateLimiter');
+const { buildDirectChatPlannerOptions } = require('../directChatPlannerContext');
 
 function resolveVisionFallbackModelConfig(route = {}, imageUrl = null, userId = '') {
   return resolveVisionFallbackModelConfigBase(route, imageUrl, userId, buildImageModelConfig);
@@ -290,24 +291,12 @@ function createMessageRouteFlow(deps = {}) {
     route.cleanText = supplementedText;
     route.rawText = supplementedText;
     if (route?.topRouteType === 'direct_chat') {
-      const plannerDecision = await planDirectChat(route, {
-        userId: senderId,
-        allowedTools: route?.meta?.allowedTools,
-        contextSummary: plannerContextSummary,
+      const plannerDecision = await planDirectChat(route, buildDirectChatPlannerOptions({
+        route,
         directedContext: route?.meta?.directedContext || null,
-        continuitySignals: route?.meta?.continuitySignals || {},
-        memoryContext: route?.meta?.memoryContext || {},
-        availableContextSignals: route?.meta?.availableContextSignals || {},
-        personaModuleCatalog: route?.meta?.personaModuleCatalog || [],
-        dynamicPromptBlockCatalog: route?.meta?.dynamicPromptBlockCatalog || [],
-        dynamicPromptGuide: route?.meta?.dynamicPromptGuide || '',
-        dynamicFewShotPrompt: route?.meta?.dynamicFewShotPrompt || '',
-        mainReplyPromptMode: route?.meta?.mainReplyPromptMode || '',
-        memoryCliTurn: route?.meta?.memoryCliTurn || {},
-        schedulerInjection: route?.meta?.schedulerInjection || route?.meta?.lifeSchedulerInjection || '',
-        sharedShortTermContext: route?.meta?.sharedShortTermContext || {},
-        personaMemoryState: route?.meta?.personaMemoryState || {}
-      });
+        userId: senderId,
+        contextSummary: plannerContextSummary
+      }));
       route.meta = {
         ...(route.meta || {}),
         toolPlanner: plannerDecision,

@@ -1,40 +1,43 @@
 const assert = require('assert');
-const fs = require('fs');
-const path = require('path');
+const { applyRuntimeReplyOutput } = require('../api/runtimeV2/host');
 
 module.exports = (() => {
-  const filePath = path.join(__dirname, '..', 'api', 'runtimeV2', 'host', 'index.js');
-  const source = fs.readFileSync(filePath, 'utf8');
+  const options = {};
+  const reply = applyRuntimeReplyOutput({
+    output: {
+      stream: {
+        hadOutput: true,
+        completed: true,
+        fallbackToNonStream: false
+      },
+      persistedReplyText: ' persisted reply ',
+      displayReply: '<think>hidden</think> visible reply ',
+      finalReply: 'final reply',
+      draftReply: 'draft reply',
+      reasoningText: ' explicit reasoning ',
+      reasoningForwardText: ' outward reasoning ',
+      hasSafetyRestriction: true
+    }
+  }, options);
 
-  assert.ok(
-    source.includes("options.persistedReplyText = String(out?.output?.persistedReplyText || out?.output?.finalReply || out?.output?.draftReply || '').trim();"),
-    'host should expose persistedReplyText to upper layers'
-  );
-  assert.ok(
-    source.includes("options.displayReplyText = String(out?.output?.displayReply || '').trim();"),
-    'host should expose displayReplyText to upper layers'
-  );
-  assert.ok(
-    source.includes("options.reasoningText = String(out?.output?.reasoningText || '').trim();"),
-    'host should expose reasoningText to upper layers'
-  );
-  assert.ok(
-    source.includes("options.reasoningForwardText = String(out?.output?.reasoningForwardText || '').trim();"),
-    'host should expose reasoningForwardText to upper layers'
-  );
-  assert.ok(
-    source.includes("const rawReply = out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '';")
-      && source.includes('const sanitized = sanitizeUserFacingText(rawReply, {'),
-    'host should prefer displayReply when returning the user-visible text'
-  );
-  assert.ok(
-    !source.includes('preserveThink: requestOptions?.cotDisplayOnce === true'),
-    'host should no longer preserve think blocks for /cot'
-  );
-  assert.ok(
-    source.includes('out?.output?.hasSafetyRestriction === true'),
-    'host should preserve runtime safety restriction metadata'
-  );
+  assert.strictEqual(reply, 'visible reply');
+  assert.strictEqual(options.persistedReplyText, 'persisted reply');
+  assert.strictEqual(options.displayReplyText, '<think>hidden</think> visible reply');
+  assert.strictEqual(options.reasoningText, 'explicit reasoning');
+  assert.strictEqual(options.reasoningForwardText, 'outward reasoning');
+  assert.strictEqual(options.streamHadOutput, true);
+  assert.strictEqual(options.streamCompleted, true);
+  assert.strictEqual(options.streamFallbackToNonStream, false);
+  assert.strictEqual(options.hasSafetyRestriction, true);
+
+  const sanitizedSafetyOptions = {};
+  const sanitizedSafetyReply = applyRuntimeReplyOutput({
+    output: {
+      finalReply: 'restricted /%'
+    }
+  }, sanitizedSafetyOptions);
+  assert.strictEqual(sanitizedSafetyReply, 'restricted');
+  assert.strictEqual(sanitizedSafetyOptions.hasSafetyRestriction, true);
 
   console.log('runtimeHostCotSource.test.js passed');
 })();

@@ -92,6 +92,7 @@ const {
   shouldSendScheduledGreeting: proactiveShouldSendScheduledGreeting
 } = require('./proactiveGreetingFlow');
 const { planDirectChat } = require('./directChatPlanner');
+const { buildDirectChatPlannerOptions } = require('./directChatPlannerContext');
 const {
   PRIVATE_CHAT_WHITELIST_REPLY,
   PRIVATE_GROUP_ONLY_REPLY,

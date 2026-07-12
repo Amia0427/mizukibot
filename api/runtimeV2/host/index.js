@@ -207,6 +207,27 @@ function buildV2CanonicalSegments(state, input = {}) {
   });
 }
 
+function applyRuntimeReplyOutput(out = {}, options = {}, sanitize = sanitizeUserFacingText) {
+  const output = normalizeObject(out.output, {});
+  const stream = normalizeObject(output.stream, {});
+  options.streamHadOutput = Boolean(stream.hadOutput);
+  options.streamCompleted = Boolean(stream.completed);
+  options.streamFallbackToNonStream = Boolean(stream.fallbackToNonStream);
+  options.persistedReplyText = String(output.persistedReplyText || output.finalReply || output.draftReply || '').trim();
+  options.displayReplyText = String(output.displayReply || '').trim();
+  options.reasoningText = String(output.reasoningText || '').trim();
+  options.reasoningForwardText = String(output.reasoningForwardText || '').trim();
+
+  const rawReply = output.displayReply || output.finalReply || output.draftReply || '';
+  const sanitized = sanitize(rawReply, { returnMeta: true });
+  const finalReply = String(typeof sanitized === 'object' ? sanitized.text : sanitized).trim();
+  options.hasSafetyRestriction = Boolean(
+    output.hasSafetyRestriction === true
+    || (typeof sanitized === 'object' && sanitized.hasSafetyRestriction === true)
+  );
+  return finalReply || '刚才网络有点不稳，你再发一次我接着回。';
+}
+
 function createRuntime(options = {}) {
   const store = createCheckpointStore(options.storeOptions || {});
   const runtimeOptions = normalizeObject(options, {});
@@ -1446,26 +1467,7 @@ function createRuntime(options = {}) {
       }
     };
     const out = await app.invoke(init);
-    options.streamHadOutput = Boolean(out?.output?.stream?.hadOutput);
-    options.streamCompleted = Boolean(out?.output?.stream?.completed);
-    options.streamFallbackToNonStream = Boolean(out?.output?.stream?.fallbackToNonStream);
-    options.persistedReplyText = String(out?.output?.persistedReplyText || out?.output?.finalReply || out?.output?.draftReply || '').trim();
-    options.displayReplyText = String(out?.output?.displayReply || '').trim();
-    options.reasoningText = String(out?.output?.reasoningText || '').trim();
-    options.reasoningForwardText = String(out?.output?.reasoningForwardText || '').trim();
-
-    const rawReply = out?.output?.displayReply || out?.output?.finalReply || out?.output?.draftReply || '';
-    const sanitized = sanitizeUserFacingText(rawReply, {
-      returnMeta: true
-    });
-
-    const finalReply = (typeof sanitized === 'object' ? sanitized.text : sanitized).trim();
-    options.hasSafetyRestriction = Boolean(
-      out?.output?.hasSafetyRestriction === true
-      || (typeof sanitized === 'object' && sanitized.hasSafetyRestriction === true)
-    );
-
-    return finalReply || '刚才网络有点不稳，你再发一次我接着回。';
+    return applyRuntimeReplyOutput(out, options);
   }
 
   async function runPersistInBackgroundFromCheckpoint(threadId = '') {
@@ -1520,6 +1522,7 @@ async function askAIByGraphV2(question, userInfo, userId, customPrompt = null, i
 }
 
 module.exports = {
+  applyRuntimeReplyOutput,
   askAIByGraphV2,
   createRuntime,
   createInitialState,

@@ -448,8 +448,8 @@ async function acceptIncomingMessage(msg, source = '') {
   return true;
 }
 
-async function acceptNapCatIncomingMessage(msg, source = '') {
-  if (prepareNapCatEventPacket(msg)) return false;
+async function acceptNapCatIncomingMessage(msg, source = '', preparePacket = prepareNapCatEventPacket) {
+  if (preparePacket(msg)) return false;
   await acceptIncomingMessage(msg, source);
   return true;
 }
@@ -817,6 +817,8 @@ if (process.env.MIZUKIBOT_INDEX_TEST_MODE === '1') {
   module.exports = {
     __test: {
       acquireSingleInstanceLock,
+      acceptIncomingMessage,
+      acceptNapCatIncomingMessage,
       commandLineLooksLikeMainBot,
       cleanupSingleInstanceLockSync,
       connectNapCat,

@@ -329,26 +329,15 @@
           elapsedSinceHandlerStartMs: Math.max(0, Date.now() - handlerStartedAt),
           lagFromMessageMs: rawMessageTimestampMs > 0 ? Math.max(0, Date.now() - rawMessageTimestampMs) : null
         });
-        plannerDecision = await planDirectChat(route, {
-          userId: senderId,
-          allowedTools: route?.meta?.allowedTools,
-          contextSummary: plannerContextSummary,
+        plannerDecision = await planDirectChat(route, buildDirectChatPlannerOptions({
+          route,
+          inboundContext,
           directedContext,
-          continuitySignals: route?.meta?.continuitySignals || inboundContext?.continuitySignals || {},
-          memoryContext: inboundContext?.memoryContext || route?.meta?.memoryContext || {},
-          availableContextSignals: route?.meta?.availableContextSignals || inboundContext?.availableContextSignals || {},
-          personaModuleCatalog: route?.meta?.personaModuleCatalog || [],
-          dynamicPromptBlockCatalog: route?.meta?.dynamicPromptBlockCatalog || [],
-          dynamicPromptGuide: route?.meta?.dynamicPromptGuide || '',
-          dynamicFewShotPrompt: inboundContext?.dynamicFewShotPrompt || route?.meta?.dynamicFewShotPrompt || '',
-          mainReplyPromptMode: inboundContext?.mainReplyPromptMode || route?.meta?.mainReplyPromptMode || '',
-          memoryCliTurn: inboundContext?.memoryCliTurn || route?.meta?.memoryCliTurn || {},
-          schedulerInjection: inboundContext?.schedulerInjection || route?.meta?.schedulerInjection || route?.meta?.lifeSchedulerInjection || '',
-          sharedShortTermContext: inboundContext?.sharedShortTermContext || route?.meta?.sharedShortTermContext || {},
-          personaMemoryState: inboundContext?.personaMemoryState || route?.meta?.personaMemoryState || {},
-          userInfo: inboundContext?.userInfo || {},
-          requestTrace: cloneTraceForMeta(requestTrace)
-        });
+          userId: senderId,
+          contextSummary: plannerContextSummary,
+          requestTrace: cloneTraceForMeta(requestTrace),
+          includeRuntimeMetadata: true
+        }));
       } catch (error) {
         appendTraceTiming('planner_failed', {
           stage: 'direct_chat_planner_failed',
