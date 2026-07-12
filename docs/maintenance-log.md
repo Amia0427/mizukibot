@@ -1467,3 +1467,10 @@
 - Windows daemon：新增归档维护脚本，只匹配daemon/runtime/worker时间戳归档，当前重定向文件不会匹配；文件占用或拒绝删除时保留并告警。Compose stdout/stderr使用local driver并限制10MiB×5。
 - 验收：12组定向运维测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev`、`git diff --check`通过；全量`npm test` 339.7秒自然退出且退出码0。
 - 未完成证据：WSL Docker daemon存在旧容器rw-layer snapshot缺失，build约6分钟无产物后已停止且未清理旧容器；真实UID、命名卷、只读根、资源限制、SIGTERM和health门控未验收。跨进程不同target的目录总配额也不是事务级硬上限，因此目标17、19保持部分完成。
+
+## 运行维护 2026-07-12 21:25 +08:00
+
+- 小目标已完成：恢复本机 NapCat HTTP reverse 与 MizukiBot 主进程连接。
+- 根因：`NAPCAT_HTTP_REVERSE_SECRET` 安全必填项已上线，但本机 `.env` 没有同步 `D:\napcat\config\onebot11_3326471600.json` 中现有 HTTP Client token，主进程在 `startNapCatTransport` 阶段退出。
+- 修复：通过仓库现有 `scripts/configure-napcat-onebot.js` 同步 NapCat HTTP Server/Client token 到 `.env`，随后执行 `restart-bot.cmd restart confirm`；业务代码未改动。
+- 验收：主进程 PID 10040 持续运行；NapCat `get_status` 返回 `online=true`、`good=true`；3000/3002 端口分别由 NapCat/Bot 监听；反向入口正确 token 通过鉴权并对无效载荷返回 400；`npm run smoke:napcat-ingress` 全部通过。

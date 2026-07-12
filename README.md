@@ -4,6 +4,12 @@
 
 MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演、消息路由、分层记忆、工具调用、后台学习和运行诊断拼成一套可长期跑的本地机器人。一条消息进来，它先判断该不该回、怎么回（直接聊 / 调工具 / 后台处理 / 拒绝），回复后再把有价值的信息沉淀进记忆。
 
+## 运行维护 2026-07-12 21:25 +08:00
+
+- 小目标：恢复 NapCat HTTP reverse 与 Bot 连接。
+- 根因与修复：安全加固后 `NAPCAT_HTTP_REVERSE_SECRET` 变为必填，但本机 `.env` 未同步 NapCat 已配置的 HTTP Server/Client token，导致主进程启动即退出；已使用现有配置脚本同步两端 token 并重启 Bot，未修改业务代码。
+- 验收：主进程持续运行，NapCat `get_status` 返回 online/good，`127.0.0.1:3000` 与 `127.0.0.1:3002` 均监听，反向入口鉴权有效，`npm run smoke:napcat-ingress` 全部通过；小目标已完成。
+
 ## 运行维护 2026-07-12 20:17 +08:00
 
 - 小目标：强化 provider reasoning 的瑞希第一人称沉浸思考要求。
