@@ -1581,3 +1581,10 @@
 - 行为门禁：测试通过全局命令 trap 证明 ValidateOnly 不调用 Stop/Start/Get-CimInstance、Get/Unregister-ScheduledTask、schtasks 或 Remove-Item，并拦截 Add-Content 避免测试日志落盘；同时验证默认04:00、每日 CalendarTrigger、入口脚本、工作目录、无 Repetition 及非法24:00失败。
 - 验收：独立只读审查 Approve；周期重启行为测试、tracked-only PowerShell AST 语法门禁、lint、typecheck、prompt、secrets、production audit 和 diff check 全部通过；并发4全量94.2秒通过。
 - 路线图状态：目标23继续部分完成，周期重启源码字符串断言已清除；剩余 `restartBotScript`、`windowsDaemonScript` 与日志保留调用点等守卫待行为化。
+
+## 运行维护 2026-07-13 05:32 +08:00
+
+- 实现提交 `9e11252`：`logRetentionCallsites.test.js` 不再读取 8 个源文件文本，改为通过 CommonJS 依赖探针执行 perf/resource、入站 timing、NapCat、daily share、Memory V3、daily journal 与 self-improvement 的公开写入行为，直接验证 writer 的 `retentionManaged` 元数据。
+- 生产修复：真实 `/dailyshare status` 行为暴露 `MAX_AUTO_SENDS_PER_WINDOW` 未定义，状态命令会抛 `ReferenceError`；现改用既有 `getMaxAutoSendsPerWindow(target)`，并分别断言群组上限 `/1`、QZone 上限 `/2`。
+- 副作用控制：writer、状态存储与配置均在测试内注入并于 finally 恢复；最终复审实测 `data/request-trace.ndjson` 在测试前后长度和修改时间完全不变，无测试日志或状态文件写盘。
+- 验收：独立只读审查 Approve；7 项邻接测试、lint、typecheck、prompt、secrets、production audit、diff check 全部通过；并发4全量96.4秒通过。目标23继续部分完成，日志保留调用点守卫已行为化，restart/daemon 大型策略守卫仍待拆分。
