@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const { isUnsafeHttpUrl } = require('./networkSafety');
 
@@ -135,6 +136,316 @@ function inspectNapCatReverseAuth(config = {}) {
   };
 }
 
+function isLoopbackHost(host = '') {
+  return ['127.0.0.1', 'localhost', '::1'].includes(normalizeText(host).toLowerCase());
+}
+
+function inspectIngressExposure(config = {}, options = {}) {
+  const findings = [];
+  const webHost = normalizeText(config.WEB_BIND_HOST || '127.0.0.1') || '127.0.0.1';
+  const napCatHost = normalizeText(config.NAPCAT_HTTP_REVERSE_BIND_HOST || '127.0.0.1') || '127.0.0.1';
+  const napCatEnabled = config.NAPCAT_HTTP_REVERSE_ENABLED !== false;
+
+  const webBoundary = options.webHostExposure || 'unknown';
+  const napCatBoundary = options.napCatHostExposure || 'unknown';
+  const webExternallyReachable = !isLoopbackHost(webHost) && webBoundary !== 'loopback';
+  const napCatExternallyReachable = !isLoopbackHost(napCatHost) && napCatBoundary !== 'loopback';
+
+  if (webExternallyReachable && !isConfigured(config.WEB_TOKEN)) {
+    findings.push(makeFinding(
+      'web-public-bind-without-auth',
+      'error',
+      'Web console is publicly bound without authentication',
+      `WEB_BIND_HOST is ${webHost} and WEB_TOKEN is missing.`,
+      'Bind the console to loopback or configure a strong WEB_TOKEN behind HTTPS.'
+    ));
+  } else if (webExternallyReachable) {
+    findings.push(makeFinding(
+      'web-public-bind',
+      'warn',
+      'Web console listens beyond loopback',
+      `WEB_BIND_HOST is ${webHost}; token authentication alone does not provide transport encryption.`,
+      'Restrict the bind address or place the console behind an authenticated HTTPS reverse proxy.'
+    ));
+  }
+
+  if (napCatEnabled && napCatExternallyReachable && !isConfigured(config.NAPCAT_HTTP_REVERSE_SECRET)) {
+    findings.push(makeFinding(
+      'napcat-public-bind-without-auth',
+      'error',
+      'NapCat HTTP reverse ingress is publicly bound without authentication',
+      `NAPCAT_HTTP_REVERSE_BIND_HOST is ${napCatHost} and the reverse secret is missing.`,
+      'Bind the ingress to loopback or configure signed authentication before exposing it.'
+    ));
+  } else if (napCatEnabled && napCatExternallyReachable) {
+    findings.push(makeFinding(
+      'napcat-public-bind',
+      config.NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER === false ? 'warn' : 'error',
+      'NapCat HTTP reverse ingress listens beyond loopback',
+      config.NAPCAT_HTTP_REVERSE_ALLOW_LEGACY_BEARER === false
+        ? `NAPCAT_HTTP_REVERSE_BIND_HOST is ${napCatHost} with signed-only authentication.`
+        : `NAPCAT_HTTP_REVERSE_BIND_HOST is ${napCatHost} while replayable compatibility authentication is enabled.`,
+      'Restrict the listener to a trusted network; require signed-only requests for non-loopback traffic.'
+    ));
+  }
+
+  if (findings.length === 0) {
+    findings.push(makeFinding('ingress-exposure-ok', 'ok', 'Ingress listeners are locally scoped', 'Web and enabled NapCat listeners bind to loopback.'));
+  }
+  return { status: summarizeLevel(findings), webBindHost: webHost, napCatBindHost: napCatHost, webHostExposure: webBoundary, napCatHostExposure: napCatBoundary, findings };
+}
+
+function inspectLogRetention(config = {}) {
+  const raw = config.LOG_ROTATE_MAX_FILES ?? process.env.LOG_ROTATE_MAX_FILES;
+  const maxFiles = raw === undefined || raw === null || raw === '' ? 0 : Number(raw);
+  const unlimited = !Number.isFinite(maxFiles) || maxFiles <= 0;
+  const findings = unlimited
+    ? [makeFinding(
+      'log-retention-unbounded',
+      'warn',
+      'Rotated log retention is unbounded',
+      'LOG_ROTATE_MAX_FILES is missing, zero, or invalid, so rotated archives can grow without a file-count limit.',
+      'Set LOG_ROTATE_MAX_FILES to a positive value and monitor the data volume.'
+    )]
+    : [makeFinding('log-retention-bounded', 'ok', 'Rotated log retention is bounded', `At most ${Math.floor(maxFiles)} rotated files are retained per log.`)];
+  return { status: summarizeLevel(findings), maxFiles: unlimited ? 'unbounded' : Math.floor(maxFiles), findings };
+}
+
+function readWindowsAcl(targetPath) {
+  if (process.platform !== 'win32') return { supported: false, reason: 'windows-only' };
+  try {
+    const escapedPath = targetPath.replace(/'/g, "''");
+    const script = [
+      "$ErrorActionPreference = 'Stop'",
+      `$acl = Get-Acl -LiteralPath '${escapedPath}'`,
+      '$rules = foreach ($rule in $acl.Access) {',
+      '  $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value',
+      '  [pscustomobject]@{ sid=$sid; type=$rule.AccessControlType.ToString(); rights=[int64]$rule.FileSystemRights; inherited=$rule.IsInherited; inheritanceFlags=$rule.InheritanceFlags.ToString(); propagationFlags=$rule.PropagationFlags.ToString() }',
+      '}',
+      '$rules | ConvertTo-Json -Compress'
+    ].join('; ');
+    let output = '';
+    let lastError = null;
+    for (const executable of ['pwsh.exe', 'powershell.exe']) {
+      try {
+        output = execFileSync(executable, ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError) throw lastError;
+    const parsed = output.trim() ? JSON.parse(output) : [];
+    return { supported: true, rules: Array.isArray(parsed) ? parsed : [parsed] };
+  } catch (error) {
+    return { supported: false, reason: error?.code || 'get-acl-failed' };
+  }
+}
+
+const BROAD_WINDOWS_SIDS = new Set(['S-1-1-0', 'S-1-5-11', 'S-1-5-32-545']);
+const READ_RIGHTS_MASK = 1 | 8 | 32 | 128;
+const WRITE_RIGHTS_MASK = 2 | 4 | 16 | 64 | 256 | 65536 | 262144 | 524288;
+
+function effectiveBroadRights(rules = [], includeChildren = false) {
+  const rightsBySidAndScope = new Map();
+  for (const rule of rules) {
+    const sid = normalizeText(rule?.sid).toUpperCase();
+    if (!BROAD_WINDOWS_SIDS.has(sid)) continue;
+    const inheritOnly = /InheritOnly/i.test(normalizeText(rule.propagationFlags));
+    const inheritedToChildren = /ContainerInherit|ObjectInherit/i.test(normalizeText(rule.inheritanceFlags));
+    const scopes = [];
+    if (!inheritOnly) scopes.push('current');
+    if (includeChildren && inheritedToChildren) scopes.push('children');
+    for (const scope of scopes) {
+      const key = `${sid}:${scope}`;
+      const current = rightsBySidAndScope.get(key) || { allow: 0, deny: 0 };
+      const rights = Number(rule.rights) || 0;
+      if (normalizeText(rule.type).toLowerCase() === 'deny') current.deny |= rights;
+      else current.allow |= rights;
+      rightsBySidAndScope.set(key, current);
+    }
+  }
+  let read = false;
+  let write = false;
+  for (const value of rightsBySidAndScope.values()) {
+    const effective = value.allow & ~value.deny;
+    read ||= Boolean(effective & READ_RIGHTS_MASK);
+    write ||= Boolean(effective & WRITE_RIGHTS_MASK);
+  }
+  return { read, write };
+}
+
+function inspectSensitivePathAcls(rootDir = PROJECT_ROOT, aclReader = readWindowsAcl) {
+  const findings = [];
+  const paths = [
+    { name: '.env', target: path.join(rootDir, '.env') },
+    { name: 'data', target: path.join(rootDir, 'data') }
+  ];
+  for (const item of paths) {
+    if (!fs.existsSync(item.target)) continue;
+    const acl = aclReader(item.target);
+    if (!acl?.supported) {
+      findings.push(makeFinding(
+        `acl-${item.name === '.env' ? 'dotenv' : item.name}-unchecked`,
+        'warn',
+        `${item.name} ACL could not be verified`,
+        `The current platform or ACL reader could not inspect ${item.name}.`,
+        'Verify that only the service account, SYSTEM, and Administrators can access this path.'
+      ));
+      continue;
+    }
+    const access = effectiveBroadRights(acl.rules, item.name === 'data');
+    if (access.write) {
+      findings.push(makeFinding(
+        `acl-${item.name === '.env' ? 'dotenv' : item.name}-broad-write`,
+        'error',
+        `${item.name} is writable by a broad Windows principal`,
+        `${item.name} grants effective write access to Everyone, Authenticated Users, or Users.`,
+        'Remove inherited broad access and grant only the service account, SYSTEM, and Administrators.'
+      ));
+    } else if (access.read) {
+      findings.push(makeFinding(
+        `acl-${item.name === '.env' ? 'dotenv' : item.name}-broad-read`,
+        'error',
+        `${item.name} is readable by a broad Windows principal`,
+        `${item.name} grants effective read access to Everyone, Authenticated Users, or Users.`,
+        'Restrict sensitive path access to the service account, SYSTEM, and Administrators.'
+      ));
+    }
+  }
+  if (findings.length === 0) findings.push(makeFinding('sensitive-path-acl-ok', 'ok', 'Sensitive path ACLs are restricted', 'No broad Windows principal was found on existing sensitive paths.'));
+  return { status: summarizeLevel(findings), findings };
+}
+
+function finalDockerUser(dockerfile = '') {
+  let user = 'root';
+  for (const rawLine of dockerfile.split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+#.*$/, '').trim();
+    if (/^FROM\s+/i.test(line)) user = 'root';
+    const match = line.match(/^USER\s+([^\s]+)/i);
+    if (match) user = match[1];
+  }
+  return user;
+}
+
+function parseComposeServices(compose = '') {
+  const lines = compose.split(/\r?\n/);
+  const servicesIndex = lines.findIndex((line) => /^services:\s*(?:#.*)?$/.test(line));
+  if (servicesIndex < 0) return null;
+  const services = {};
+  let current = null;
+  let listKey = null;
+  let currentPort = null;
+  for (const line of lines.slice(servicesIndex + 1)) {
+    if (/^\S/.test(line) && line.trim() && !line.trim().startsWith('#')) break;
+    const serviceMatch = line.match(/^  ([A-Za-z0-9_.-]+):\s*(?:#.*)?$/);
+    if (serviceMatch) {
+      current = { name: serviceMatch[1], readOnly: false, capDropAll: false, noNewPrivileges: false, user: '', ports: [], uncertainPorts: false };
+      services[current.name] = current;
+      listKey = null;
+      currentPort = null;
+      continue;
+    }
+    if (!current) continue;
+    const property = line.match(/^    ([A-Za-z0-9_-]+):\s*(.*?)\s*(?:#.*)?$/);
+    if (property) {
+      listKey = property[1];
+      currentPort = null;
+      const value = property[2].replace(/["']/g, '');
+      if (listKey === 'read_only') current.readOnly = value === 'true';
+      if (listKey === 'cap_drop' && /\bALL\b/i.test(value)) current.capDropAll = true;
+      if (listKey === 'user') current.user = value;
+      continue;
+    }
+    const listItem = line.match(/^      -\s*["']?(.*?)["']?\s*(?:#.*)?$/);
+    if (listItem) {
+      const value = listItem[1];
+      if (listKey === 'cap_drop' && /^ALL$/i.test(value)) current.capDropAll = true;
+      if (listKey === 'security_opt' && /^no-new-privileges\s*:\s*true$/i.test(value)) current.noNewPrivileges = true;
+      if (listKey === 'ports') {
+        const target = value.match(/^target:\s*(.+)$/i);
+        currentPort = target ? { target: target[1] } : null;
+        current.ports.push(currentPort || value);
+      }
+      continue;
+    }
+    const portProperty = line.match(/^        (target|published|host_ip):\s*["']?(.*?)["']?\s*(?:#.*)?$/i);
+    if (listKey === 'ports' && currentPort && portProperty) currentPort[portProperty[1].toLowerCase()] = portProperty[2];
+  }
+  return Object.values(services);
+}
+
+function isPublicPortMapping(mapping = '') {
+  if (mapping && typeof mapping === 'object') {
+    const values = [mapping.target, mapping.published, mapping.host_ip].map(normalizeText);
+    if (values.some((value) => /\$\{|\$[A-Za-z_]/.test(value))) return null;
+    if (!mapping.published) return null;
+    return mapping.host_ip ? !isLoopbackHost(mapping.host_ip) : true;
+  }
+  const value = normalizeText(mapping);
+  if (!value) return null;
+  const explicitHost = value.match(/^(\[[^\]]+\]|[^:]+):/);
+  if (explicitHost && !/^\d+$/.test(explicitHost[1])) {
+    const host = explicitHost[1].replace(/^\[|\]$/g, '');
+    if (host === '0.0.0.0' || host === '::') return true;
+    if (!/\$/.test(host)) return false;
+  }
+  if (/\$\{|\$[A-Za-z_]/.test(value)) return null;
+  if (value.startsWith('target:')) return null;
+  const parts = value.split(':');
+  if (parts.length === 2) return true;
+  if (parts.length >= 3) return !isLoopbackHost(parts.slice(0, -2).join(':').replace(/^\[|\]$/g, ''));
+  return false;
+}
+
+function composePortExposure(compose = '', containerPort) {
+  const services = parseComposeServices(compose);
+  if (!services) return 'unknown';
+  let found = false;
+  let unknown = false;
+  for (const service of services) {
+    for (const mapping of service.ports) {
+      const target = typeof mapping === 'object' ? mapping.target : mapping;
+      if (!String(target).includes(String(containerPort))) continue;
+      found = true;
+      const publicBind = isPublicPortMapping(mapping);
+      if (publicBind === null) unknown = true;
+      else if (publicBind) return 'public';
+    }
+  }
+  if (unknown || !found) return 'unknown';
+  return 'loopback';
+}
+
+function inspectContainerBaseline(rootDir = PROJECT_ROOT, readText = (file) => fs.readFileSync(file, 'utf8')) {
+  const findings = [];
+  let dockerfile = '';
+  let compose = '';
+  try { dockerfile = readText(path.join(rootDir, 'Dockerfile')); } catch (_) {}
+  try { compose = readText(path.join(rootDir, 'docker-compose.yml')); } catch (_) {}
+
+  const runtimeUser = finalDockerUser(dockerfile);
+  if (!runtimeUser || /^(?:root|0)(?::|$)/i.test(runtimeUser)) findings.push(makeFinding('docker-root-user', 'error', 'Final container stage runs as root', `The final Dockerfile stage has effective USER ${runtimeUser || 'root'}.`, 'Run the production image as a dedicated unprivileged user.'));
+  const services = parseComposeServices(compose);
+  if (!services || services.length === 0) {
+    findings.push(makeFinding('compose-baseline-unparsed', 'warn', 'Compose security baseline could not be parsed', 'No conventional services block was found.', 'Verify each service security baseline manually.'));
+  } else {
+    for (const service of services) {
+      if (!service.readOnly) findings.push(makeFinding(`compose-${service.name}-rootfs-writable`, 'warn', `${service.name} root filesystem is writable`, 'read_only: true is not configured for this service.', 'Use a read-only root filesystem and explicit writable volumes or tmpfs mounts.'));
+      if (!service.capDropAll) findings.push(makeFinding(`compose-${service.name}-capabilities-not-dropped`, 'warn', `${service.name} does not drop all capabilities`, 'cap_drop: ALL is not configured for this service.', 'Drop all capabilities and add back only those proven necessary.'));
+      if (!service.noNewPrivileges) findings.push(makeFinding(`compose-${service.name}-new-privileges-allowed`, 'warn', `${service.name} does not enforce no-new-privileges`, 'security_opt lacks no-new-privileges:true for this service.', 'Set no-new-privileges:true for this service.'));
+      if (/^(?:root|0)(?::|$)/i.test(service.user)) findings.push(makeFinding(`compose-${service.name}-root-user`, 'error', `${service.name} overrides the image user with root`, `The service user is ${service.user}.`, 'Remove the root user override or use a dedicated numeric UID/GID.'));
+      const portStates = service.ports.map(isPublicPortMapping);
+      const publicPorts = portStates.filter((state) => state === true);
+      if (publicPorts.length > 0) findings.push(makeFinding(`compose-${service.name}-public-port-bind`, 'error', `${service.name} publishes ports on all interfaces`, `${publicPorts.length} host port mapping(s) omit a loopback or specific host address.`, 'Bind management and ingress ports to 127.0.0.1 or a specifically controlled interface.'));
+      if (portStates.some((state) => state === null)) findings.push(makeFinding(`compose-${service.name}-port-bind-unresolved`, 'warn', `${service.name} port binding could not be resolved`, 'A variable or long-syntax port mapping prevents reliable host exposure analysis.', 'Resolve the effective Compose configuration and verify host_ip is loopback or a controlled address.'));
+    }
+  }
+  if (findings.length === 0) findings.push(makeFinding('container-baseline-ok', 'ok', 'Container security baseline is present', 'Non-root, read-only, capability, privilege, and port-binding checks passed.'));
+  return { status: summarizeLevel(findings), findings };
+}
+
 function inspectApiBaseUrls(config = {}) {
   const items = [];
   const findings = [];
@@ -221,7 +532,19 @@ function collectSecurityDiagnostics(config = require('../config'), options = {})
   const napCatReverseAuth = inspectNapCatReverseAuth(config);
   const apiBaseUrls = inspectApiBaseUrls(config);
   const sourceSecrets = inspectSourceSecrets(options.rootDir || PROJECT_ROOT);
-  const sections = { tokenPosture, napCatReverseAuth, apiBaseUrls, sourceSecrets };
+  const deploymentContext = normalizeText(options.deploymentContext || config.MIZUKIBOT_DEPLOYMENT_CONTEXT || process.env.MIZUKIBOT_DEPLOYMENT_CONTEXT).toLowerCase();
+  let composeText = '';
+  if (deploymentContext === 'compose') {
+    try { composeText = (options.readText || ((file) => fs.readFileSync(file, 'utf8')))(path.join(options.rootDir || PROJECT_ROOT, 'docker-compose.yml')); } catch (_) {}
+  }
+  const ingressExposure = inspectIngressExposure(config, {
+    webHostExposure: deploymentContext === 'compose' ? composePortExposure(composeText, config.WEB_PORT || 3005) : 'direct',
+    napCatHostExposure: deploymentContext === 'compose' ? composePortExposure(composeText, config.NAPCAT_HTTP_REVERSE_PORT || 3002) : 'direct'
+  });
+  const logRetention = inspectLogRetention(config);
+  const sensitivePathAcls = inspectSensitivePathAcls(options.rootDir || PROJECT_ROOT, options.aclReader || readWindowsAcl);
+  const containerBaseline = inspectContainerBaseline(options.rootDir || PROJECT_ROOT, options.readText);
+  const sections = { tokenPosture, napCatReverseAuth, ingressExposure, apiBaseUrls, logRetention, sensitivePathAcls, containerBaseline, sourceSecrets };
   const findings = Object.values(sections).flatMap((section) => section.findings || []);
   return {
     status: summarizeLevel(findings),
@@ -254,7 +577,11 @@ module.exports = {
   collectSecurityDiagnostics,
   formatSecurityWarning,
   inspectApiBaseUrls,
+  inspectContainerBaseline,
+  inspectIngressExposure,
+  inspectLogRetention,
   inspectNapCatReverseAuth,
+  inspectSensitivePathAcls,
   inspectSourceSecrets,
   inspectTokenPosture,
   logStartupSecurityWarnings,

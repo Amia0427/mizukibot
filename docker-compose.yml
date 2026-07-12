@@ -8,6 +8,7 @@ services:
       - .env
     environment:
       DATA_DIR: /app/data
+      MIZUKIBOT_DEPLOYMENT_CONTEXT: compose
       WEB_BIND_HOST: 0.0.0.0
       NAPCAT_HTTP_REVERSE_BIND_HOST: 0.0.0.0
       GROUP_REPLY_SENSITIVE_VENDOR_DIR: /app/assets/sensitive-words/vendor/sensitive-lexicon/Vocabulary
@@ -40,6 +41,7 @@ services:
       - .env
     environment:
       DATA_DIR: /app/data
+      MIZUKIBOT_DEPLOYMENT_CONTEXT: compose
       GROUP_REPLY_SENSITIVE_VENDOR_DIR: /app/assets/sensitive-words/vendor/sensitive-lexicon/Vocabulary
       POST_REPLY_WORKER_ENABLED: "true"
       POST_REPLY_WORKER_INLINE: "false"
