@@ -1411,3 +1411,11 @@
 - 安全诊断：NapCat 缺少 secret 或其他 error 状态现在返回非零退出码；兼容模式保持 warning，避免把弱模式误报为安全完成。
 - 验收：7 组定向安全测试通过；`npm run lint`、`npm run check:prompts`、`npm audit --omit=dev` 通过；全量 `npm test` 在 326.9 秒后自然退出且退出码为 0；`git diff --check` 通过。
 - 未完成：当前本机启用了 NapCat HTTP reverse 但缺少 `NAPCAT_HTTP_REVERSE_SECRET`，需由部署方配置真实 secret；目标 1 的 signed-only 收口及目标 28 的 ACL、监听地址、日志容量、容器基线诊断继续保留在路线图中。
+
+## 运行维护 2026-07-12 18:32 +08:00
+
+- 小目标已完成：提交 `39b5428` 将 Web 控制台从长期静态 token 认证迁移到短期、可撤销的服务端会话；`WEB_TOKEN` 只用于常量时间登录校验，旧 Bearer、`x-web-token`、query token 和 localStorage 凭据路径已移除。
+- 边界加固：登录失败使用有界限流；所有非安全方法执行精确同源 CSRF 校验；只有 loopback 直连受信代理且显式配置 hop 时才采信 XFF/XFP；会话 cookie 为 HttpOnly/SameSite=Strict，并按可信 HTTPS 决定 Secure。
+- 安全头：所有页面、401、健康检查和 API 均通过集中中间件设置逐响应 nonce CSP、frame-ancestors、nosniff、Referrer Policy 与 no-store；HSTS 仅在可信 HTTPS 链路启用。
+- 验收：6 组 Web 定向测试、`npm run lint`、`npm run check:prompts`、`npm run check:secrets`、`npm audit --omit=dev` 和 `git diff --check` 通过；全量 `npm test` 326.7 秒自然退出且退出码为 0；应用内浏览器完成登录、主控制台渲染和注销，未发现页面控制台错误。
+- 路线图状态：目标 15、16 已完成；目标 4、20、28 等第一阶段剩余项继续执行。

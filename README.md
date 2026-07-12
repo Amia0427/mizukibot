@@ -23,6 +23,12 @@ MizukiBot 基于 Node.js、LangGraph 和 NapCat，把"晓山瑞希"角色扮演�
 - 验收：运行代码 `rg` 零引用、`npm run lint`、`npm run check:agent:static`、28 个 LangGraph/native skills/tool/runtime 相关测试、关键模块 require smoke、`npm ls`、`npm pack --dry-run` 和 `git diff --check` 均通过；全量 482 个测试在 10 分钟命令上限内未结束，未记为通过。
 - 小目标已完成：P0 死代码和独占依赖已移除，V2 LangGraph、native skills 与 npm 发布清单保持可用。
 
+## 运行维护 2026-07-12 18:32 +08:00
+
+- Web 控制台不再把 `WEB_TOKEN` 长期保存在浏览器或作为 Bearer/header/query 凭据使用；令牌仅用于登录，成功后改用短期、可撤销的 `HttpOnly; SameSite=Strict` 会话。
+- 写请求增加严格同源 CSRF 校验，登录失败有限流；CSP 使用逐响应 nonce，并集中设置 frame、MIME、Referrer Policy 和受信 HTTPS 下的 HSTS。
+- 验收：真实浏览器完成登录、控制台渲染和注销，控制台无 CSP 错误；6 组 Web 测试、729 文件 lint、提示词检查、密钥扫描、依赖审计和 326.7 秒全量测试全部通过。实现提交：`39b5428`。
+
 ## 并发与后台线程
 
 更新 2026-07-09 17:48 +08:00：修复主回复 prepare 软超时 fallback 在非召回 `chat/default/direct_chat` 下构造 ambient memory context 并注入 `retrieved_memory_lite/daily_journal` 的问题；非召回普通主回复不再构造 fallback memory context，显式召回保持原记忆 fallback。验收结果：`node scripts/run-tests.js tests/runtimeV2PromptTimeoutMemoryFallback.test.js tests/chatDefaultMemoryLeakDiagnostics.test.js tests/geminiSamplingDegradationPromptGate.test.js` 通过；真实 24h 诊断仍显示修复前日志中 `candidateChatDefaultRequests=49`、`violationRequests=15`。小目标已完成。

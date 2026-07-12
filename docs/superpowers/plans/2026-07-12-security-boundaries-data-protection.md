@@ -102,31 +102,31 @@ git commit -m "fix: secure remote image and summarize fetches"
 - Test: `tests/webAuthSecurity.test.js`
 - Create: `tests/webSessionSecurity.test.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 覆盖 timing-safe token 校验、登录失败限流、成功登录返回 `HttpOnly; SameSite=Strict` cookie、会话过期、撤销、重启失效和非登录 API 不接受 query/localStorage token。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `node scripts/run-tests.js tests/webAuthSecurity.test.js tests/webSessionSecurity.test.js`
 
 Expected: FAIL，当前实现没有服务端会话且管理页仍读取 `localStorage.WEB_TOKEN`。
 
-- [ ] **Step 3: 实现最小会话管理器**
+- [x] **Step 3: 实现最小会话管理器**
 
 `sessionManager` 只负责创建、校验、撤销和过期清理随机不透明 session id；`WEB_TOKEN` 只用于登录时的 timing-safe 比较，不写入 cookie、HTML 或日志。
 
-- [ ] **Step 4: 修改管理页登录流**
+- [x] **Step 4: 修改管理页登录流**
 
 增加 `/api/session` 登录和删除端点，内嵌脚本只发送凭据一次并依赖 cookie；删除 `localStorage.getItem('WEB_TOKEN')` 和 query token 传播。
 
-- [ ] **Step 5: 运行测试并确认通过**
+- [x] **Step 5: 运行测试并确认通过**
 
 Run: `node scripts/run-tests.js tests/webAuthSecurity.test.js tests/webSessionSecurity.test.js tests/webHealthRoute.test.js`
 
 Expected: PASS；`/healthz` 保持无敏感信息，其他管理 API 必须有有效会话。
 
-- [ ] **Step 6: 提交实现**
+- [x] **Step 6: 提交实现**
 
 ```bash
 git add web/sessionManager.js web/auth.js web/server/index.js config/index.js .env.example tests/webAuthSecurity.test.js tests/webSessionSecurity.test.js
@@ -140,27 +140,27 @@ git commit -m "fix: use short lived web sessions"
 - Modify: `web/server/index.js`
 - Create: `tests/webSecurityHeaders.test.js`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 验证所有管理页和 API 响应包含 CSP、`frame-ancestors 'none'`、`X-Content-Type-Options: nosniff`、Referrer Policy；HTTPS 请求包含 HSTS，HTTP localhost 不错误宣称 HSTS。
 
-- [ ] **Step 2: 运行测试并确认失败**
+- [x] **Step 2: 运行测试并确认失败**
 
 Run: `node scripts/run-tests.js tests/webSecurityHeaders.test.js`
 
 Expected: FAIL，当前没有集中安全头中间件。
 
-- [ ] **Step 3: 实现单一中间件**
+- [x] **Step 3: 实现单一中间件**
 
 安全头策略集中在 `web/securityHeaders.js`，由 `web/server/index.js` 在路由前安装；CSP 必须与当前内嵌脚本实际加载方式一致，不使用宽泛 `*`。
 
-- [ ] **Step 4: 运行测试并确认通过**
+- [x] **Step 4: 运行测试并确认通过**
 
 Run: `node scripts/run-tests.js tests/webSecurityHeaders.test.js tests/webAuthSecurity.test.js tests/webHealthRoute.test.js`
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交实现**
+- [x] **Step 5: 提交实现**
 
 ```bash
 git add web/securityHeaders.js web/server/index.js tests/webSecurityHeaders.test.js

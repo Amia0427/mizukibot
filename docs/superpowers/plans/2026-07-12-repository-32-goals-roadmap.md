@@ -35,8 +35,8 @@
 - [ ] **12. 拆分高扇出编排器** — 未完成。Runtime host、router、prepare 仍分别约 1447、1325、1313 行。
 - [ ] **13. 按领域拆分配置并集中校验环境变量** — 未完成。`config/index.js` 约 1258 行，生产域仍有约 186 处 `process.env` 读取。
 - [ ] **14. 统一正常停机与远程重启** — 部分完成。JSON 热存储已移交信号所有权，仍需统一 server、worker、数据库和远程重启的 lifecycle coordinator。
-- [ ] **15. 重构 Web 控制台认证** — 未完成。仍使用静态 token 普通字符串比较，前端仍从 `localStorage` 读取长期 token。
-- [ ] **16. 增加 Web 安全响应头** — 未完成。尚无集中 CSP、HSTS、`frame-ancestors`、nosniff 和 Referrer Policy 门禁。
+- [x] **15. 重构 Web 控制台认证** — 已完成。提交 `39b5428` 将 `WEB_TOKEN` 收口为常量时间登录校验，使用短期可撤销 HttpOnly 会话、登录限流、严格同源 CSRF 和受控代理链；旧 Bearer/header/query/localStorage 认证已移除。
+- [x] **16. 增加 Web 安全响应头** — 已完成。提交 `39b5428` 集中设置逐响应 nonce CSP、`frame-ancestors 'none'`、nosniff、Referrer Policy、Cache-Control，并仅在可信 HTTPS 链路发送 HSTS/Secure cookie。
 - [ ] **17. 容器最小权限运行** — 部分完成。已切换非 root 并收缩端口，仍缺只读根文件系统、能力收缩、`no-new-privileges`、资源限制和真实容器验收。
 - [x] **18. 收缩 Compose 网络暴露面** — 已完成默认 loopback 绑定；跨主机部署仍需受控代理和鉴权说明。
 - [ ] **19. 日志脱敏、保留和容量限制** — 未完成。`LOG_ROTATE_MAX_FILES` 默认仍为 0，缺少统一 TTL、目录配额和磁盘水位告警。
