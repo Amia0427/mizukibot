@@ -7,7 +7,7 @@ const {
   createExecutablePlan,
   validateExecutablePlanTools
 } = require('../core/executablePlan');
-const { sanitizePlan } = require('../api/legacy/aiHost');
+const { sanitizePlan } = require('../src/runtime-v2/planning');
 
 const profilePlan = buildExecutablePlanFromPolicy('lookup/weather-live', { goal: 'check weather' });
 assert.strictEqual(profilePlan.policyKey, 'lookup/weather-live');
@@ -65,9 +65,9 @@ const sanitized = sanitizePlan({
     { id: 2, action: 'reply', args: {}, purpose: 'fallback' }
   ]
 }, 'safe');
+assert.strictEqual(sanitized.goal, 'safe');
 assert.strictEqual(sanitized.need_tools, false);
-assert.strictEqual(sanitized.executablePlan.source, 'legacy_planner');
-assert.strictEqual(sanitized.executablePlan.steps.length, 1);
-assert.strictEqual(sanitized.executablePlan.steps[0].action, 'reply');
+assert.strictEqual(sanitized.steps.length, 1);
+assert.strictEqual(sanitized.steps[0].action, 'reply');
 
 console.log('executablePlan.test.js passed');
