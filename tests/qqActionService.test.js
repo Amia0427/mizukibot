@@ -75,6 +75,7 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
   assert.strictEqual(draftResult.ok, true);
   assert.strictEqual(draftResult.published, false);
 
+  const publishDelays = [];
   const result = await publishQzoneForContext('我把消息框关掉之后，房间突然安静得有点认真。', {
     userId: 'u-admin',
     routeMeta: {
@@ -90,6 +91,9 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
     structure: 'murmur_close',
     ending: 'cold_turn',
     qzoneAutoPublishEnabled: true,
+    sleep: async (delayMs) => {
+      publishDelays.push(delayMs);
+    },
     publishQzonePost: async (content) => {
       assert.ok(String(content).includes('我'));
       return { success: true, reason: 'ok', source: 'test' };
@@ -98,6 +102,9 @@ const { getRecentQzoneHistory } = require('../core/qzoneGenerationState');
 
   assert.strictEqual(result.ok, true);
   assert.strictEqual(result.published, true);
+  assert.strictEqual(publishDelays.length, 1);
+  assert.strictEqual(publishDelays[0], result.meta.humanizedDelayMs);
+  assert.ok(publishDelays[0] >= 8000);
   const history = getRecentQzoneHistory();
   assert.ok(history.some((item) => item.source === 'manual_qzone_post'));
   assert.ok(history.some((item) => item.lens === 'scene'));

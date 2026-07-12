@@ -154,7 +154,8 @@ function appendNapcatPacketToLog(packet = {}, options = {}) {
 
 function createNapcatLogFollower({
   sendWithRetry,
-  sendGroupReply
+  sendGroupReply,
+  handlePassiveInterjection = forcePassiveGroupInterjection
 } = {}) {
   const state = {
     started: false,
@@ -235,7 +236,7 @@ function createNapcatLogFollower({
       isAtBot: false,
       botQQ: effectiveBotQQ
     });
-    const result = await forcePassiveGroupInterjection({
+    const result = await handlePassiveInterjection({
       msg: packet,
       inboundContext,
       sendWithRetry,

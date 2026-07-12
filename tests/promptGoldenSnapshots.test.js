@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const { buildDynamicPrompt } = require('../api/runtimeV2/context/service');
+const { buildDynamicPrompt: buildDynamicPromptImpl } = require('../api/runtimeV2/context/service');
 const {
   buildGeminiNativeRequestBody,
   clearGeminiNativePromptCache
@@ -17,6 +17,30 @@ const {
   ensureWorldbookSqlImported,
   loadPersonaModuleCatalog
 } = require('../utils/personaModules');
+
+const staticPersonaModuleCandidates = loadPersonaModuleCatalog().modules;
+
+function buildDynamicPrompt(userInfo, userId, question, customPrompt = null, options = {}) {
+  const useLivePromptMaterials = options.useLivePromptMaterials === true;
+  const promptOptions = { ...options };
+  delete promptOptions.useLivePromptMaterials;
+  if (useLivePromptMaterials) {
+    return buildDynamicPromptImpl(userInfo, userId, question, customPrompt, promptOptions);
+  }
+  return buildDynamicPromptImpl(userInfo, userId, question, customPrompt, {
+    memoryContext: {},
+    personaMemoryState: {},
+    openVikingRecall: {},
+    memosRecall: {},
+    sharedShortTermContext: {
+      recentHistory: [],
+      shortTermSummary: '',
+      sharedShortTermSignature: ''
+    },
+    personaModuleCandidates: staticPersonaModuleCandidates,
+    ...promptOptions
+  });
+}
 
 function countOccurrences(text = '', needle = '') {
   if (!needle) return 0;
@@ -699,6 +723,7 @@ module.exports = (async () => {
       routePolicyKey: 'chat/worldbook_future_two_tracks',
       topRouteType: 'direct_chat',
       sessionKey: 'worldbook_future_two_tracks_no_planner_prompt_test',
+      useLivePromptMaterials: true,
       routeMeta: {},
       worldbookEmbeddingHotPath: false,
       worldbookSemanticLimit: 0

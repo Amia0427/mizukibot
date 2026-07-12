@@ -31,19 +31,8 @@ module.exports = (async () => {
     process.env.FOLLOWER_RULE_ENABLED = 'true';
     process.env.FOLLOWER_LOG_MONITOR_ENABLED = 'true';
     process.env.FOLLOWER_NAPCAT_LOG_PATH = logPath;
-    process.env.PASSIVE_AWARENESS_REPLY_API_BASE_URL = 'https://example.com/v1';
-    process.env.PASSIVE_AWARENESS_REPLY_API_KEY = 'reply-test-key';
-    process.env.PASSIVE_AWARENESS_REPLY_MODEL = 'reply-test-model';
 
     clearProjectCache();
-
-    const httpClient = require('../api/httpClient');
-    httpClient.postStreamWithRetry = async (_url, _payload, handlers) => {
-      if (handlers && typeof handlers.onData === 'function') {
-        handlers.onData('data: {"choices":[{"delta":{"content":"模型插话"}}]}\n\n');
-        handlers.onData('data: [DONE]\n\n');
-      }
-    };
 
     const {
       appendNapcatPacketToLog,
@@ -51,10 +40,23 @@ module.exports = (async () => {
     } = require('../core/napcatLogFollower');
 
     const sentReplies = [];
+    const passiveCalls = [];
     const follower = createNapcatLogFollower({
       sendGroupReply: async (payload) => {
         sentReplies.push(payload);
         return true;
+      },
+      handlePassiveInterjection: async (payload) => {
+        passiveCalls.push(payload);
+        await payload.sendGroupReply({
+          groupId: payload.msg.group_id,
+          senderId: payload.msg.user_id,
+          replyText: '模型插话'
+        });
+        return {
+          handled: true,
+          replyText: '模型插话'
+        };
       }
     });
 
@@ -73,6 +75,8 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(sentReplies.length, 1, 'admin non-at-bot group message should trigger follower reply');
+    assert.strictEqual(passiveCalls.length, 1);
+    assert.strictEqual(passiveCalls[0].reason, 'napcat-log-follower');
     assert.strictEqual(sentReplies[0].groupId, 'g1');
     assert.strictEqual(sentReplies[0].senderId, '10001');
 
@@ -91,6 +95,7 @@ module.exports = (async () => {
     });
 
     assert.strictEqual(sentReplies.length, 2, 'live packet should trigger the same follower path');
+    assert.strictEqual(passiveCalls.length, 2);
 
     await follower.handlePacketFromLog({
       post_type: 'message',
@@ -120,9 +125,7 @@ module.exports = (async () => {
         card: '管理员甲',
         nickname: '管理员甲'
       }
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    }, { flushNow: true });
 
     const lines = fs.readFileSync(logPath, 'utf8').trim().split(/\r?\n/);
     assert.strictEqual(lines.length, 1, 'message log appender should write one json line');

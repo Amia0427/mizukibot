@@ -75,15 +75,27 @@ function trimTextByTokenBudget(text, tokenBudget, strategy = 'tail') {
   if (!input || budget <= 0) return '';
   if (estimateTokens(input) <= budget) return input;
 
+  let low = 1;
+  let high = Math.ceil(input.length / 32);
   if (strategy === 'head') {
-    let end = input.length;
-    while (end > 0 && estimateTokens(input.slice(0, end)) > budget) end -= 32;
-    return input.slice(0, Math.max(end, 0)).trim();
+    while (low < high) {
+      const steps = Math.floor((low + high) / 2);
+      const end = Math.max(0, input.length - (steps * 32));
+      if (estimateTokens(input.slice(0, end)) <= budget) high = steps;
+      else low = steps + 1;
+    }
+    const end = Math.max(0, input.length - (low * 32));
+    return input.slice(0, end).trim();
   }
 
-  let start = 0;
-  while (start < input.length && estimateTokens(input.slice(start)) > budget) start += 32;
-  return input.slice(Math.min(start, input.length)).trim();
+  while (low < high) {
+    const steps = Math.floor((low + high) / 2);
+    const start = Math.min(input.length, steps * 32);
+    if (estimateTokens(input.slice(start)) <= budget) high = steps;
+    else low = steps + 1;
+  }
+  const start = Math.min(input.length, low * 32);
+  return input.slice(start).trim();
 }
 
 function trimMessagesByTokenBudget(messages = [], tokenBudget = 0) {

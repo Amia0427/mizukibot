@@ -9,10 +9,10 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value : (value ? [value] : []);
 }
 
-async function fetchYahooQuote(symbol = '') {
+async function fetchYahooQuote(symbol = '', request = axios.get) {
   const normalized = normalizeText(symbol);
   if (!normalized) return null;
-  const response = await axios.get('https://query1.finance.yahoo.com/v7/finance/quote', {
+  const response = await request('https://query1.finance.yahoo.com/v7/finance/quote', {
     params: { symbols: normalized },
     timeout: 15000,
     proxy: false,
@@ -30,10 +30,10 @@ function toStooqSymbol(symbol = '') {
   return `${normalized}.us`;
 }
 
-async function fetchStooqQuote(symbol = '') {
+async function fetchStooqQuote(symbol = '', request = axios.get) {
   const stooqSymbol = toStooqSymbol(symbol);
   if (!stooqSymbol) return null;
-  const response = await axios.get('https://stooq.com/q/l/', {
+  const response = await request('https://stooq.com/q/l/', {
     params: {
       s: stooqSymbol,
       i: 'd'
@@ -60,11 +60,11 @@ async function fetchStooqQuote(symbol = '') {
   };
 }
 
-async function fetchAlphaVantageQuote(symbol = '') {
+async function fetchAlphaVantageQuote(symbol = '', request = axios.get) {
   const normalized = normalizeText(symbol).toUpperCase();
   if (!normalized) return null;
   const apiKey = normalizeText(process.env.ALPHAVANTAGE_API_KEY || 'demo') || 'demo';
-  const response = await axios.get('https://www.alphavantage.co/query', {
+  const response = await request('https://www.alphavantage.co/query', {
     params: {
       function: 'GLOBAL_QUOTE',
       symbol: normalized,
@@ -100,7 +100,7 @@ function formatQuoteRow(quote = {}) {
   ].filter(Boolean).join(' | ');
 }
 
-async function queryQuotes({ codes = [], code = '', tickers = [], ticker = '' } = {}) {
+async function queryQuotes({ codes = [], code = '', tickers = [], ticker = '' } = {}, options = {}) {
   const raw = normalizeArray(codes).concat(normalizeArray(tickers)).concat([code, ticker]);
   const symbols = raw
     .flatMap((item) => String(item || '').split(/[,\s]+/))
@@ -110,16 +110,17 @@ async function queryQuotes({ codes = [], code = '', tickers = [], ticker = '' } 
   if (symbols.length === 0) return 'Missing code or codes.';
 
   const rows = [];
+  const request = options.request || axios.get;
   for (const symbol of symbols) {
     try {
       let quote = null;
       try {
-        quote = await fetchYahooQuote(symbol);
+        quote = await fetchYahooQuote(symbol, request);
       } catch (_) {
-        quote = await fetchStooqQuote(symbol);
+        quote = await fetchStooqQuote(symbol, request);
       }
       if (!quote) {
-        quote = await fetchAlphaVantageQuote(symbol);
+        quote = await fetchAlphaVantageQuote(symbol, request);
       }
       if (!quote) {
         rows.push(`${symbol} | unavailable`);
